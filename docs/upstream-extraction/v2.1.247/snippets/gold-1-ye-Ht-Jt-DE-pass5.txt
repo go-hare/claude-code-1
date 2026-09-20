@@ -1,0 +1,48 @@
+# gold-1-ye-Ht-Jt-DE-pass5 247
+
+## Ja-validateStorageKey @208170486
+len=115 sha=bd2f297477639c04
+expected a key object");let n=hn(e);if(n!==void 0)return n;let r=Dn(e);if(r===void 0)return s("key",`${e.namespace}
+
+## Ja-neighbors @208170486
+"\\"))return!1;if((e.kind==="key"?hn(e.key):Gn(e.scope))!==void 0)return!1;if(!n.startsWith(".")&&!n.includes("..")&&!n.includes(" ")&&!n.toLowerCase().includes(".aside"))return!0;let t=e.kind==="key"?Dn(e.key):Ie(e.scope);if(t===void 0)return!1;for(let[,o]of t){let i=Array.isArray(o)?o.at(-1):o;if(i!==void 0&&!T(i))return!1}return!0}function Ja(e){if(typeof e!=="object"||e===null)return s("key","expected a key object");let n=hn(e);if(n!==void 0)return n;let r=Dn(e);if(r===vo
+
+## Ja-as-qcd @208212142
+ as icd,Ha as jcd,Ua as kcd,Nr as lcd,Ya as mcd,Mr as ncd,Va as ocd,Ba as pcd,Ja as qcd,on as rcd,ln as scd,dn as tcd,Br as ucd,fn as vcd,mn as wcd,ye as xcd,Zr as ycd,Wa as zcd,qa as Acd,Rn as Bcd,X as Ccd,z as Dcd,be as Ecd,at as Fcd,We as Gcd,ot as Hcd,Ee as Icd,Kn as Jcd,fe a
+
+## kb-xSa-import-start @-1
+MISS
+
+## kb-xSa-from-clause
+MISS ,CFs as ZYa,RFs as _Ya,q0 as $Ya,kRt as aZa,xFs as bZa,KHe as cZa,Sh as dZa,p1r as eZa,jMe as fZa,D7n as gZa,$7n as hZa,ryr as iZa,jqe as jZa,Zpe as kZa,pWe as lZa,ld as mZa,z1t as
+
+## _448-table-xSakb @137431544
+NRaRItORawndPRadVtQRakndRRaHQeSRavbTRavndURatQsVRaWRaxrXRanQsYRaptZRaTnd_RaWj$RasQsaSaiQsbSaaQscSaEnddSaUGeeSazwefSaUfgSabLhSaL0eiSaKYtjSaaTekSaTmlSaPytmSanSaoSauQspSatooqSaAndrSasSaxndtSauSavSa$oowSaxSakbySazIzSaASaDQsBSaHooCSaQkDSaJIESaDndFSa$ndGSaisHSa$QsISaMCtJSaLQsKSaaWrLSad
+
+## zI-219409445 @219409445
+len=142 sha=648a3902edd3d2be
+function zI(e){if(e.type!=="user")return!1;let t=e.message.content;if(typeof t==="string")return!1;return t.some((n)=>n.type==="tool_result")}
+
+## kb-then-zI @219402110
+Meta:!0}));return!0}function kb(e,t=[],n,r){let o=n!==void 0&&t7(n),s=nre(),i=n!==void 0&&o&&Q9e(n),
+
+## _158-token-unique #3 @192216521
+Dyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjr|||B:/~BUN/root/_159.jsB:/~BUN/root/_205.js
+
+## _158-token-unique #9 @237069274
+ocs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"|||";import{Rs as ct}from"B:/~BUN/root/_159
+
+## _158-token-unique #12 @253077007
+BUN/root/_154.js.B:/~BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.|||.B:/~BUN/root/_158.js.B:/~BUN/root/_160.
+
+## _158-token-unique #13 @253077028
+BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.B:/~BUN/root/_158.js.|||.B:/~BUN/root/_160.js.B:/~BUN/root/_160.
+
+## Yne-import-module-use @232030386
+as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/~BUN/root/_163.js";import{Ht as n2e,wt as o2e}from"B:/~BUN/root/_165.js";import{Jt as VEe}from"B:/~BUN/root/_166.js";import{tu as fP}from"B:/~BUN/root/_175.js";import{wu as nne}from"B:/~BUN/root/_178.js";import{Au as qAe,Bu as VAe,xu as jAe,yu as $Ae,zu as WAe}from"B:/~BUN/root/_179.js";import{Du as Zu,Eu as PV}from"B:/~BUN/root/_181.js";import{Ku as sxe,Lu as Gat}from"B:/~BUN/root/_182.js";import{lv as ev,mv as xBe}from"B:/~BUN/root/_184.js";import{ov as bv}from"B:/~BUN/root/_186.js";import{qv as $$e,sv as Sqe,tv as OAe,uv as vB,vv as BAe,wv as UAe,xv as HAe}from"B:/~BUN/root/_187.js";import{yv as bO}from"B:/~BUN/root/_188.js";import{Av as wB,Bv as yxe,Cv as K1}from"B:/~BUN/root/_189.js";import{Ev as si,Gv as LAe,Hv as NAe}from"B:/~BUN/root/_190.js";import{Nv as Dd,Ov as IPe}from"B:/~BUN/root/_192.js";import{Sv as MX,Tv as IX,Uv as Ate,Vv as Ete}from"B:/~BUN/root/_194.js";import{Wv as su,Xv as MK,_v as ni}from"B:/~BUN/root/_195.js";import{$v as kee,aw as nwt}from"B:/~BUN/root/_196.js";import{fw as NUe,gw as rCt,hw as vV,jw as ZJe}from"B:/~BUN/root/_198.js";import{kw as Mg,lw as _9,pw as Mw,xw as bLe}from"B:/~BUN/root/_199.js";import{Dw as p_}from"B:/~BUN/root/_202.js";import{Ew as FAe}from"B:/~BUN/root/_203.js";import{Gw as Mqe}from"B:/~BUN/root/_204.js";import{Iw as Eoe,Jw as P$e,Kw as A$e,Lw as E$e,Mw as vE,Nw as M$e,Ow as I$e,Uw as j$e,Ww as F$e}from"B:/~BUN/root/_205.js";import{$w as Ywe,_w as EN,ax as _Q,bx as CQ}from"B:/~BUN/root/_208.js";import{cx as TY}from"B:/~BUN/root/_209.js";import{ex as Vl,fx as Eq}from"B:/~BUN/root/_210.js";import{gx as ld,hx as zq}from"B:/~BUN/root/_211.js";import{wx as F_e}from"B:/~BUN/root/_217.js";import{yx as lae}from"B:/~BUN/root/_218.js";import{Bx as $Ve}from"B:/~BUN/root/_219.js";import{Ex as LUe,Fx as nCt}from"B:/~BUN/root/_221.js";import{jz as oce}from"B:/~BUN/root/_231.js";import{yz as Kw,zz as Cje}from"B:/~BUN/root/_236.js";import{Az as Ig,Bz as P9,Cz as so,Dz as hi}from"B:/~BUN/root/_237.js";import{Ez as pd}from"B:/~BUN/root/_238.js";import{Fz as N9}from"B:/~BUN/root/_239.js";import{Hz as C8e,Iz as pIt,Lz as Vse,Mz as fIt,Nz as a0e,Oz as tft}from"B:/~BUN/root/_240.js";import{cA as ZD,dA as Jxe}from"B:/~BUN/root/_242.js";import{lA as gbe,mA as net}from"B:/~BUN/root/_243.js";import{nA as qW,oA as P7e}from"B:/~BUN/root/_244.js";import{AA as v8e,BA as zs,pA as Vf,qA as Pte,tA as lr,uA as Mh,vA as Ad,wA as Ym,xA a
+
+## jr-Yo-Jt @237083451
+.reason),null;let K=Jt()??void 0;return e(Mt,{abortSignal:n,messages:c,initialDescription:d,onDone:l,backgroundTasks:b,mode:x.kind,readFileState:p,surveyFeedbackSource:K})}function ut(l,n,c){return Yo(l,n.abortController

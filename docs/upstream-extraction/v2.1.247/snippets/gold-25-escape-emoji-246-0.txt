@@ -1,0 +1,3 @@
+# 246 emoji @202396032
+
+r ". ......." and this file sets both; the "........" value was ignored. Use only ".....T1.." and ".#...e.." are the same setting; keep only "....28t.setPluginBase.........8.clearPluginBase......uR.keepEmojiJoiners....5qd.keepNewlinesC.......Cannot destructure property 'protocol' from null or undefined value.....<...(unprintable plugin name)........@..[^\x20-\x5b\x5d-\x7e]...\....iJ.m.a.s.k.C.l.

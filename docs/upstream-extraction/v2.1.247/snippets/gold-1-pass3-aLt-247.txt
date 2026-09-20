@@ -1,0 +1,3 @@
+# 247 aLt @216529629 sha=fa067907ed777bba
+
+function aLt(){return Ffs()!=="off"&&Ufs()}

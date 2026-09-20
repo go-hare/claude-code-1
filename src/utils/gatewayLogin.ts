@@ -9,6 +9,8 @@
  * - wki ≈ extractOAuthDeviceError
  * - pl_/fl_/Tki ≈ metadata / device / token zod shapes
  * - cl_ = urn:ietf:params:oauth:grant-type:device_code
+ * - jr = claude_code (device-authorization surface)
+ * - be/pr = getClaudeCodeUserAgent (`claude-code/<version>`)
  * - GGh = fedstart host allowlist (skip private-network check)
  * - gOc/Smc/o2r/i2r live in gatewayEnv.ts (TLS pin + enterpriseGateway)
  */
@@ -17,6 +19,7 @@ import { isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { z } from 'zod'
 import { logForDebugging } from './debug.js'
+import { getClaudeCodeUserAgent } from './userAgent.js'
 import {
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
   isGatewayHttpLoopbackHost,
@@ -29,6 +32,43 @@ import { getProxyUrl, shouldBypassProxy } from './proxy.js'
 /** densable cl_ */
 export const GATEWAY_DEVICE_CODE_GRANT =
   'urn:ietf:params:oauth:grant-type:device_code'
+
+/** densable jr — RFC 8628 device-authorization `surface` extension. */
+export const GATEWAY_LOGIN_SURFACE = 'claude_code'
+
+/**
+ * densable be() / pr() — User-Agent on gateway metadata, device, token,
+ * and refresh requests. Official: `claude-code/<version>`.
+ */
+export function getGatewayLoginUserAgent(): string {
+  return getClaudeCodeUserAgent()
+}
+
+/**
+ * densable Qe/J device-auth POST body:
+ * `new URLSearchParams({surface:jr}).toString()`.
+ */
+export function gatewayDeviceAuthorizationBody(): string {
+  return new URLSearchParams({
+    surface: GATEWAY_LOGIN_SURFACE,
+  }).toString()
+}
+
+/** densable metadata GET headers: `{User-Agent: be()}`. */
+export function gatewayLoginMetadataHeaders(): Record<string, string> {
+  return { 'User-Agent': getGatewayLoginUserAgent() }
+}
+
+/**
+ * densable device / token / refresh POST headers:
+ * `{Content-Type, User-Agent: be()/pr()}`.
+ */
+export function gatewayLoginFormHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': getGatewayLoginUserAgent(),
+  }
+}
 
 /**
  * densable GGh — FedRAMP hosts allowed on public addresses without

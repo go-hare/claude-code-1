@@ -1,0 +1,29 @@
+# HP/pendingUsage pass5 — increment caller enclose + unique strings + 246 leftover
+"qe(s.pluginInfo.repository)" 247=1[225476838] 246=1[224535666]
+  247@225476838 ocable!==!1)Je(t.session,s.name,t.storageV5);if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repository);if(!t.deferSlashToEngine?.(s))De({commandName:s.name,agentId:t.agentId,isNonInt
+"qe(p.pluginInfo.repository)" 247=1[225484253] 246=0[]
+  247@225484253 State,credentials:t.credentials}),Je(t.session,p.name,t.storageV5),p.pluginInfo)qe(p.pluginInfo.repository),lt(p.pluginInfo.repository,"command",it(p,p.pluginInfo.pluginManifest.name));if
+"if(s.type===\"prompt\"&&s.pluginInfo)qe(" 247=1[225476803] 246=1[224535631]
+  247@225476803 :d}}if(s.type==="prompt"&&s.userInvocable!==!1)Je(t.session,s.name,t.storageV5);if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repository);if(!t.deferSlashToEngine?.(s))De({commandName:s.name,ag
+"tt(i),Ze({storageV5:i,credentials:m})" 247=1[222202257] 246=0[]
+  247@222202257 e(m),Re(i),d()&&m!==void 0){if(await D(m),Le())await De(m)}if(await ye(i),Me(i),tt(i),Ze({storageV5:i,credentials:m}),s("init_after_graceful_shutdown"),Promise.all([import("B:/~BUN/root/chunk-4az5k
+"pluginInfo.repository" 247=8[213655767,213657660,213657763,213657819,216046461,216047020,216056716,216057578] 246=8[212288875,212290768,212290871,212290927,214667337,214667896,214677590,214678452]
+  247@213655767 c3(e){if(e.source!=="plugin"||!e.pluginInfo?.repository)return!1;return dy(ho(e.pluginInfo.repository).marketplace)}function lko(e,t,n){if(e.isBuiltin)return"default-enable";if(t?.h
+  247@213657660 eturn e.type==="prompt"&&e.loadedFrom==="plugin"&&e.pluginInfo!==void 0&&!Nln(e.pluginInfo.repository)}function Jvi(e){let t=new Map;for(let n of e){if(!dko(n))continue;let r=t.get(
+  247@213657763 function Jvi(e){let t=new Map;for(let n of e){if(!dko(n))continue;let r=t.get(n.pluginInfo.repository);if(r)r.push(n.name);else t.set(n.pluginInfo.repository,[n.name])}return t}func
+  247@213657819 )continue;let r=t.get(n.pluginInfo.repository);if(r)r.push(n.name);else t.set(n.pluginInfo.repository,[n.name])}return t}function pko(e,t){if(e===null)return{};let n=e.get(t)??[];re
+  247@216046461 pth??0,h=g>0?"nested-skill":"claude-proactive",y=r.agentId;if(e.pluginInfo)B_(e.pluginInfo.repository,"skill",Dit(e,e.pluginInfo.pluginManifest.name));D("tengu_skill_tool_invocation
+  247@216047020 gin_name:d?e.pluginInfo.pluginManifest.name:"third-party",plugin_repository:d?e.pluginInfo.repository:"third-party"}}),Mit(t,e,h);let b={agentId:c,parentAgentId:r.agentId,depth:Jc(r
+  247@216056716 f);if(!u){if(bir(n.session,a,n.storageV5),f?.type==="prompt"&&f.pluginInfo)dm(f.pluginInfo.repository)}if(f?.type==="prompt"&&Qir(f,t||"",n)==="fork"&&!u)try{return await fis(f,a,t,
+  247@216057578 f?.type==="prompt"?f.source:void 0;if(f?.type==="prompt"&&f.pluginInfo&&!u)B_(f.pluginInfo.repository,"skill",Dit(f,f.pluginInfo.pluginManifest.name));D("tengu_skill_tool_invocation
+"function TP(){return" 247=0[] 246=1[212280557]
+"TP().pendingUsage" 247=0[] 246=1[212281493]
+"function Asn(e){let{pendingUsage:t}=TP()" 247=0[] 246=1[212281518]
+CALL@225476838 encloseStart=225475733
+  function cn(e,o,t,a,l,i,f,g,h,C,v,j,R,x,H,K,z){let s=ho(e,t.options.commands),r= ... end=225485749 len=10016
+CALL@225484253 encloseStart=225475733
+  function cn(e,o,t,a,l,i,f,g,h,C,v,j,R,x,H,K,z){let s=ho(e,t.options.commands),r= ... end=225485749 len=10016
+CALL@222202257 encloseStart=222200933
+  function di(t={}){let r=Date.now();c("info","init_started"),s("init_function_sta ... end=222200949 len=16
+246 TP@212280557 end=212280596 function TP(){return _sn.of(hn().host)}
+246 Asn@212281518 function Asn(e){let{pendingUsage:t}=TP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}

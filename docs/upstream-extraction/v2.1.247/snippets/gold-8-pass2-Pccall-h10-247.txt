@@ -1,0 +1,3 @@
+# off=209987099 hit=10
+
+.e],denyWithinAllow:t}}function _D(e){let t=e.filesystem;if(t?.disabled)return{grantRead:[],grantWrite:[],denyRead:[],denyWrite:[]};let n=kd,r=n([...new Set([...t?.denyRead??[],...Pc(e.credentials)])],{mode:"deny"}),s=n(t?.denyWrite??[],{mode:"deny"});return{grantRead:n(t?.allowRead??[],{mode:"grant"}),grantWrite:n(t?.allowWrite??[],{mode:"grant"}),denyRead:r,denyWrite:s}}function Fb(e){return{dis

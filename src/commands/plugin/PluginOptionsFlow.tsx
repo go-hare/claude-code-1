@@ -10,6 +10,7 @@
 import * as React from 'react';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { errorMessage } from '../../utils/errors.js';
+import { re } from '../../utils/plugins/escapeSafeText.js';
 import { loadMcpServerUserConfig, saveMcpServerUserConfig } from '../../utils/plugins/mcpbHandler.js';
 import { getUnconfiguredChannels, type UnconfiguredChannel } from '../../utils/plugins/mcpPluginIntegration.js';
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
@@ -72,7 +73,7 @@ export function PluginOptionsFlow({ plugin, pluginId, onDone }: Props): React.Re
     if (Object.keys(unconfigured).length > 0) {
       result.push({
         key: 'top-level',
-        title: `Configure ${plugin.name}`,
+        title: `Configure ${re(plugin.name)}`,
         subtitle: 'Plugin options',
         schema: unconfigured,
         load: () => loadPluginOptions(pluginId),
@@ -85,8 +86,8 @@ export function PluginOptionsFlow({ plugin, pluginId, onDone }: Props): React.Re
     for (const channel of channels) {
       result.push({
         key: `channel:${channel.server}`,
-        title: `Configure ${channel.displayName}`,
-        subtitle: `Plugin: ${plugin.name}`,
+        title: `Configure ${re(channel.displayName)}`,
+        subtitle: `Plugin: ${re(plugin.name)}`,
         schema: channel.configSchema,
         load: () => loadMcpServerUserConfig(pluginId, channel.server) ?? undefined,
         save: values => saveMcpServerUserConfig(pluginId, channel.server, values, channel.configSchema),

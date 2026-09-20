@@ -1,0 +1,29 @@
+# #19 Yjo port lock (247 dest publish/move)
+# Official function BODY is contract. No skip-rm / version==="unknown" gate.
+
+## Locked helpers
+
+| name | body / import | local |
+| ---- | ------------- | ----- |
+| BOe | `function BOe(e){return\`${e}${Upt}${jIo(4).toString("hex")}\`}` Upt=".tmp~" jIo=randomBytes | stagePluginCachePath |
+| kg | `function kg(e){let t=De(e);return t==="ENOENT"\|\|t==="ENOTDIR"}` | isAbsentPathError |
+| Kjo | `function Kjo(e){let t=De(e);return t==="EXDEV"\|\|t!==void 0&&RNn.has(t)}` | isPluginCacheAsideRenameFallback |
+| RNn | Ved=mt=`new Set(["EPERM","EBUSY","EACCES"])` from _819 | RENAME_TRANSIENT_CODES |
+| $jo | `lutimes as $jo` from fs/promises | lutimes |
+| cl | Et as Zed = renameWithRetry | renameWithRetry |
+| cZ | `rm as cZ` | rm |
+| De | getErrnoCode | getErrnoCode |
+
+Kjo is EXDEV || EPERM || EBUSY || EACCES. NOT CQ EEXIST.
+
+## Yjo body (247)
+
+```
+async function Yjo(e,t,n,r,o){if(Ne()&&r!==void 0&&o!==void 0)if(await Rx(t,ra()))await UNn(e);else{await LNn(r,o.from);let u=await r.moveScope(o.from,o.to,{replace:!0});if(u.ok)return;let d=Wjo(u.error);if(d!==void 0){if(d.remove)await qjo(d.aside,t);else _(`A publish that stood left the replaced plugin version set aside at ${d.aside}; its folder was found changed, so it is left in place`,{level:"debug"});return}if(!NNn(u.error))throw FNn(u.error,t);_(`The storage interface could not publish into ${t} (${tr(u.error)}); moving the staged plugin with today's file calls instead`,{level:"debug"})}let s=(u="before move",d)=>SUe(t,n.pluginId,n.version,"cache",u,d);if(n.strictCache){let u=await _2(t);if(u==="refused")await s("before move",u)}if(await vt().mkdir(cme(t)),n.strictCache)await s();let i;if(!n.strictCache||await wUe(t,n.pluginId,n.version)==="recurse"){let u=BOe(t);try{await cl(t,u),i=u;let d=new Date;await $jo(u,d,d).catch(()=>{})}catch(d){if(Kjo(d))_(`The occupant of ${t} cannot be renamed aside (${De(d)}); removing it in place instead`,{level:"debug"}),await cZ(t,{recursive:!0,force:!0});else if(!kg(d))throw d}}let a=e.endsWith(dwt)?e:e+dwt,l=t.startsWith(a),c=e;try{if(l){let u=pwt(cme(e),`.claude-plugin-temp-${Date.now()}-${Djo(4).toString("hex")}`);await cl(e,u),await vt().mkdir(cme(t)),c=u}if(n.strictCache)await s("during move");await cl(c,t)}catch(u){if(i!==void 0)await cl(i,t).catch(()=>{});throw u}if(i!==void 0)await cZ(i,{recursive:!0,force:!0}).catch(()=>{})}
+```
+
+Fjo always `await Yjo(h.path,E,{pluginId:e,version:v,strictCache:x},u,R)`.
+Local cacheAndRegisterPlugin always `movePluginCacheDest` when path!==dest.
+
+Invent-ban: no skip-rm / keep-cache / version==="unknown" gate.
+V5 prefix not wired at this call site (r/o omitted → official skip).

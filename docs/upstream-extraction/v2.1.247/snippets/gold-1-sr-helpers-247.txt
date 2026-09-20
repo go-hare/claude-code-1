@@ -1,0 +1,29 @@
+### sr-helpers-before off=236994310
+ind:"cron",id:s.id,cron:s.cron,human:$e(s.cron),prompt:s.prompt})),...y.map((s,a)=>({kind:"stophook",id:`stophook-${a}`,condition:s.prompt}))];async function B(s){if(s.kind==="cron"){try{await Se([s.id]),o(`Loop ${s.id} deleted`,{display:"system"})}catch(E){o(`Failed to delete loop ${s.id}: ${E}`,{display:"system"})}return}let a=ot(p);o(a===null?"Stop hook not found":"Stop hook cleared",{display:"system"})}async function O(s){if(s.kind==="cron"){let E=oo(s.interval);if(!E){o(`Invalid interval: ${s.interval}`,{display:"system"});return}let T=await We(E,s.prompt,!0,!1);o(`Loop ${T} created (${$e(E)})`,{display:"system"});return}let a=tt(s.condition,p,"loops_dialog");o(a??"Stop hook set",{display:"system"})}return e(Re,{loops:v,onDelete:(s)=>void B(s),onCreate:(s)=>void O(s),onCancel:()=>o("",{display:"skip"})})};export{zo as call};\u000a\u0000// @bun @bytecode\u000a// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.\u000a// By using Claude Code, you agree that all code acceptance or rejection decisions you make,\u000a// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,\u000a// and may be used to improve Anthropic's products, including training models.\u000a// You are responsible for reviewing any code suggestions before use.\u000a\u000a// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.\u000a\u000a// Version: 2.1.247\u000aimport{Ss as Qe}from"B:/~BUN/root/_160.js";import{Gw as jt,Hw as Ht}from"B:/~BUN/root/_204.js";import{ex as Vt,fx as Bn}from"B:/~BUN/root/_210.js";import{PB as qt,QB as Fn}from"B:/~BUN/root/_253.js";import{fD as Yt,gD as Mn}from"B:/~BUN/root/_280.js";import{ND as ze,OD as En}from"B:/~BUN/root/_284.js";import{hE as Ut,oE as Sn}from"B:/~BUN/root/_286.js";import{SE as Gt,TE as Rn}from"B:/~BUN/root/_294.js";import{JBa as nt,RBa as It,TBa as Ot,UBa as Kt,aCa as Nt,bCa as Pt,eCa as _n,sCa as $t,tCa as Tn}from"B:/~BUN/root/_448.js";import{x9a as v,y9a as pn}from"B:/~BUN/root/_484.js";import{B9a as Lt,C9a as vn}from"B:/~BUN/root/_485.js";import{H9a as Je,I9a as xn}from"B:/~BUN/root/_487.js";import{d_a as _,e_a as kn}from"B:/~BUN/root/_488.js";import{Aab as Xe,Bab as bn,gbb as wn,mab as a,pab as s,xab as Bt,yab as yn}from"B:/~BUN/root/_490.js";import{hdb as At,idb as Cn}from"B:/~BUN/root/_498.js";import{kdb as Mt,ldb as hn}from"B:/~BUN/root/_499.js";import{odb as Y,pdb as Ct}from"B:/~BUN/root/_500.js";import{qdb as K,rdb as t,sdb as i,tdb as xt}from"B:/~BUN/root/_501.js";import{fFb as k,iFb as St,nFb as Et,pFb as U,qFb as C,tFb as gn}from"B:/~BUN/root/_571.js";import{kGb as p,lGb as be,mGb as Dn}from"B:/~BUN/root/_578.js";import{F0c as mn,o0c as Ft,u0c as Rt}from"B:/~BUN/root/_749.js";import{Hgd as Tt,Jgd as dn}from"B:/~BUN/root/_827.js";import{syd as Ve,xyd as fn}from"B:/~BUN/root/_843.js";import{Ezd as He,eAd as un}from"B:/~BUN/root/_845.js";import{iAd as je,oAd as cn}from"B:/~BUN/root/_846.js";import{GBd as Ye}from"B:/~BUN/root/_850.js";pn();gn();Cn();bn();yn();wn();dn();fn();cn();_n();mn();Sn();un();Dn();Tn();hn();Fn();xn();vn();Mn();Bn();kn();Rn();En();xt();Ct();var he=["bug","idea","missing_capability"],Ze={bug:"bug",idea:"idea",missing_capability:"missing capability"},qe=[void 0,...Ot],Ge=[void 0,...Kt];function vt(u){return u===void 0?"(none)":u.replace(/_/g," ")}function Dt(u){return["type","title","area","failure_mode","task_category","details",...u.transcriptAvailable?["transcript"]:[],"send"]}var Ue=500;function sr({messages:u,onDone:g,abortSignal:y,onWriteNew:h}){let[f,b]=C(null),[
+
+### write-new-row off=-1
+MISS
+
+### list-section off=-1
+MISS
+
+### field-editor off=-1
+MISS
+
+### focus-tick off=-1
+MISS
+
+### enum-value off=-1
+MISS
+
+### onWriteNew-call off=236994357
+," ")}function Dt(u){return["type","title","area","failure_mode","task_category","details",...u.transcriptAvailable?["transcript"]:[],"send"]}var Ue=500;function sr({messages:u,onDone:g,abortSignal:y,onWriteNew:h}){let[f,b]=C(null),[x,j]=C(0),[m,F]=C("list"),[n,A]=C(null),[N,L]=C(!1),[ke,xe]=C(0),[c,M]=C(null),[Ce,P]=C(null),ve=U(-1/0),[rt,R]=C(null),[it,Xt]=C(null),De=At().columns-6,w=Bt(),ee=U(0
+
+### Co-gate off=225095455
+)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Cla
+
+### Co-def off=207164864
+devin[\\/]/.test(E)}function Co(){if(process.env.CURSOR_TRACE_ID)return"cursor";let o=process.env.VSCODE_GIT_ASKPASS_MAIN?.toLowerCase()??"";if(o.includes("cursor"))return"cursor";if(so(o))return"windsurf";if(o.includes(
+
+### transcriptAvailable-assign off=216525604
+gger),age_days:Ha(Math.round((n.getTime()-g)/86400000))});continue}l.push({...m,transcriptAvailable:o?!1:await Nfs(m,t)})}if(l.sort((p,f)=>f.created_at.localeCo

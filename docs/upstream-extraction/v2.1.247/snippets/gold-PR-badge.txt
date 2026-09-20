@@ -1,0 +1,8 @@
+# 247 offset=197106044 needle="reviewState"
+
+...R...total_api_duration_ms...4..total_lines_added...7.total_lines_removed...L.cost...3I..context_window...S...exceeds_200k_tokens.	...H./.fast_mode...rate_limits...e.reviewState...T...review_state...*..worktreeName...6v..worktreeBranch..._..branch...O.original_cwd...F..originalBranch...M.original_branch...f.refreshInterval...=i..getTime.
+...getSeconds...Y..linux...	...v	.operation...
+...operations...{...) .S.a.n.d.b.o.x. .b.l.o.c.k.e.d. ...E. total...+...&  .s.h.o.w.i.n.g. .l.a.s.t. ...7.. of ...isSandboxingEnabled...q~E.expandedView...:.isBriefOnly...OX5.forceRedraw.A...i.Cannot destructure property 'screen' from null or undefined value...Global...R...app:toggleTodos...^.>.app:toggleTranscript...T.;.app:toggleBrief...[.^.app:toggleTerminal..
+...1.app:redraw...L.screen...onToggleTranscript...x.showAllInTranscript...messageCountN...R9.Cannot destructure property 'showAllInTranscript' from null or undefined value...T..ctrl+o...j3..transcript:toggleShowAll
+...R..Transcript...	.&.ctrl+e..B...F.Cannot destructure property 'columns' from null or undefined value...r.*.open in ...5	..open in editor...w.f. scroll . v to ...I.. . ? for shortcuts...p{.Showing detailed transcript...dialog waiting..
+...\e.. to toggle...J.7.? for shortcuts...(...n/N to navigate...v to ...O. to ...collapse...%...show all...0+..truncate-end...-...center...j.100%...].z.virtualScroll...%}.searchBadge...:t..suppressShowAll...<.arrowUp.	...1.arrowDown...jg.wrap...flexGrow...

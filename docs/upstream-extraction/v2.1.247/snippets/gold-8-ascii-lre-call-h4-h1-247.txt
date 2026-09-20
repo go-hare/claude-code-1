@@ -1,0 +1,3 @@
+# offset=218288566 ver=247 hit=2/6 ratio=1.000 needle="await lre("
+
+t.additionalContext)yield{additionalContexts:[await lre(nt.additionalContext,`${r}-${ue}`,"additionalContext",{storageV5:b})]};if(nt.systemMessage)yield{message:Qn({type:"hook_system_message",content:await lre(nt.systemMessage,`${r}-${ue}`,"systemMessage",{storageV5:b}),hookName:y,toolUseID:r,hookEvent:h})}}let Q=Date.now()-W;H4()?.observe("hook_duration_ms",Q),D("tengu_repl_hook_finished",{hookName:y,numCommands:R.length,numSuccess:R.length-ne,numBlocking:ne,numNonBlockingError:0,numCancelled:0,totalDurationMs:Q});return}let x=dA()&&Pl(),A=x||B0()?le(NFs(R)):"[]",L=LFs(h,o);if(!d)xl("hook_execution_start",{hook_event:h,hook_name:L,num_hooks:String(R.length),managed_only:String(Ske()),hook_s

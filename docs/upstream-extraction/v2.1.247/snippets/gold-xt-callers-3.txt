@@ -1,0 +1,3 @@
+# 247 offset=231489433 needle="o(xt,{ #3"
+
+tion S9(ap,oPe){return ap.kind==="panel"?ap.node:o(ol,{displayName:ap.displayName,inkColor:ap.inkColor,content:ap.content,summary:ap.summary},oPe)}function w9(dw,tPe){return dw.kind==="panel"?dw.node:o(xt,{displayName:dw.displayName,count:dw.count,fallbackLabel:"teammate"},tPe)}function N9(rPe){return{kind:"read",path:rPe.path}}function U9(sPe){return sPe.name}function E9(nPe){return nPe.trim()!==""}function v9(iPe){return iPe.trim()!==""}function Th(Q_e){let w=R(267),{attachment:g,addMargin:ow,verbose:mo,isTranscriptMode:mt,hasMetadataHeader:i9,messageId:jj}=Q_e,Wj=i9===void 0?!1:i9,tw=bt(mo,mt);if(gs()&&g.type==="teammate_mailbox"){const _=g.messages;let rw,N,D,ee;if(w[0]!==g.messages||w[1

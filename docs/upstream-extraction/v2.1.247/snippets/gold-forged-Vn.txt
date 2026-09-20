@@ -1,0 +1,1 @@
+function Vn(){let e=j();if(e===void 0)return process.env;let n=Re();if(b()!=="windows")return{...e,...n};let t=new Set(Object.keys(n).map((r)=>r.toUpperCase()));return{...$n(e,(r,i)=>!t.has(i.toUpperCase())),...n}}

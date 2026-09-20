@@ -1,0 +1,5 @@
+# mismatch@15
+---247---
+async function gza(e,t,n,r){let o=await U$(n);if(!o[e])throw Error(`Marketplace '${e}' not found`);let s=o[e],i=Ok(s.installLocation),a=r0n(e)?` To stop using its plugins: claude plugin disable <plugin>@${e}`:" To stop using its plugins, disable each one in /plugin.";if(i&&t===void 0)throw Error(`Marketplace '${e}' is registered from the read-only seed directory (${i}) and will be re-registered on next startup.$
+---246---
+async function CLa(e,t,n,r){let o=await g$(n);if(!o[e])throw Error(`Marketplace '${e}' not found`);let s=o[e],i=_k(s.installLocation),a=fDn(e)?` To stop using its plugins: claude plugin disable <plugin>@${e}`:" To stop using its plugins, disable each one in /plugin.";if(i&&t===void 0)throw Error(`Marketplace '${e}' is registered from the read-only seed directory (${i}) and will be re-registered on next startup.$

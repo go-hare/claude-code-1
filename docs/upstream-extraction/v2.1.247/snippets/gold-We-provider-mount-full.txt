@@ -1,0 +1,34 @@
+# official 2.1.247 Provider mount bodies. Invent-ban.
+
+## Us @223180338 = AppRoot = Rz  (THE mount)
+
+function Us(Lc){let oe=O(29),{session:Rn,storageV5:hr,messageQueue:Sr,initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybindings:Os,children:yr}=Lc,Mn=Os===void 0?!0:Os,Hs;if(oe[0]!==hr)Hs=Tr(hr),oe[0]=hr,oe[1]=Hs;else Hs=oe[1];let Dn=Hs,br;if(oe[2]!==yr||oe[3]!==Mn)br=Mn?n(qe,{children:yr}):yr,oe[2]=yr,oe[3]=Mn,oe[4]=br;else br=oe[4];let vr;if(oe[5]!==br)vr=n(Pr,{children:n(ke,{children:n(we,{children:br})})}),oe[5]=br,oe[6]=vr;else vr=oe[6];let kr;if(oe[7]!==Tn||oe[8]!==xn||oe[9]!==_n||oe[10]!==An||oe[11]!==vr||oe[12]!==Pn)kr=n(nt,{initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,children:vr}),oe[7]=Tn,oe[8]=xn,oe[9]=_n,oe[10]=An,oe[11]=vr,oe[12]=Pn,oe[13]=kr;else kr=oe[13];let wr;if(oe[14]!==Rn||oe[15]!==kr)wr=n(Er,{session:Rn,children:kr}),oe[14]=Rn,oe[15]=kr,oe[16]=wr;else wr=oe[16];let Rr;if(oe[17]!==Cn||oe[18]!==wr)Rr=n(Le,{store:Cn,children:wr}),oe[17]=Cn,oe[18]=wr,oe[19]=Rr;else Rr=oe[19];let Fs;if(oe[20]!==En||oe[21]!==Rr)Fs=n(Fe,{getFpsMetrics:En,children:Rr}),oe[20]=En,oe[21]=Rr,oe[22]=Fs;else Fs=oe[22];let xr=Fs,Is;if(oe[23]!==Sr||oe[24]!==xr)Is=Sr===void 0?xr:n(Cr,{queue:Sr,children:xr}),oe[23]=Sr,oe[24]=xr,oe[25]=Is;else Is=oe[25];let _r=Is;if(hr===void 0){return _r}let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=oe[28];return Ls}
+
+export{…,Us as Rz,$s as Sz};
+barrel: export{a as AppRoot};
+
+Tr = Y7b = ce: function ce(e){return{storageV5:e,credentials:X(e)}}
+Ar = jdb = z Provider
+ge = kdb = We  (used by Le/nt INSIDE the tree after Us mounts)
+
+## H0 @211364564  ink wrap (secondary)
+
+function H0(e,o){let i=Qu(z0,null,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}
+function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}
+async function m8(e,o,i){let l=i?.storageV5!==void 0?L0(i.storageV5):void 0;if(o!==void 0&&"write"in o)return Iy(H0(e,l),o);return Iy(H0(e,l),{...kR(),...o})}
+async function h8(e,o){let i=await Fx({...kR(),...e}),l=o?.storageV5!==void 0?L0(o.storageV5):void 0;return{...i,render:(s)=>i.render(H0(s,l))}}
+export{…,m8 as ebb,h8 as fbb,n3 as gbb};
+L0 = Y7b = ce; LR = jdb = z
+
+## Pe @222167794  REPL → AppRoot (main parent)
+
+function Xe(...r){return Pe(...r)}
+async function Pe(r,t,a,V){let{AppRoot:Y}=await import("B:/~BUN/root/chunk-qzgjaf91.js"),{REPL:z}=await import("B:/~BUN/root/chunk-axvamdkm.js");function J(s){…return i(z,{...s,engine:p,onCommandsChange:Z,onQueryParamsChange:ee})}let{session:m,storageV5:o,credentials:f,fleetNudgeStore:K=new T({storageV5:o})}=t,X=C(o);await D({onHealthy:()=>_(o),storageV5:o});try{await V(r,i(Y,{session:m,storageV5:o,messageQueue:X,initialState:t.initialState,onChangeAppState:(s)=>O(s,m,o,f),fleetNudgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,keybindings:!1,children:i(J,{...a})},"repl"),m,o,f)}catch(s){throw await W().catch(()=>!1),s}}
+export{C as ca,Xe as da,Pe as ea};
+
+## 246 leftover (same components, ubb not jdb)
+
+function zs(Jc){… storageV5:vo … Is=Co(vo) … if(vo===void 0){return Po} Ws=s(Eo,{...Fn,children:Po}) …}
+function F0(e,o){let i=Qu(L0,null,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}
+export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb};
+Eo = ubb = z; LR = ubb = z; Co ≡ ce.

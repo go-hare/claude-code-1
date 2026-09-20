@@ -507,13 +507,22 @@ export function registerCliHostCommands(
     .command('remove <name>')
     .alias('rm')
     .description(describe(['plugin', 'marketplace', 'remove']))
+    .option(
+      '--scope <scope>',
+      'Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.',
+    )
     .addOption(coworkOption())
-    .action(async (name: string, commandOptions: { cowork?: boolean }) => {
-      const { marketplaceRemoveHandler } = await import(
-        '../cli/handlers/plugins.js'
-      )
-      await marketplaceRemoveHandler(name, commandOptions)
-    })
+    .action(
+      async (
+        name: string,
+        commandOptions: { cowork?: boolean; scope?: string },
+      ) => {
+        const { marketplaceRemoveHandler } = await import(
+          '../cli/handlers/plugins.js'
+        )
+        await marketplaceRemoveHandler(name, commandOptions)
+      },
+    )
 
   marketplaceCmd
     .command('update [name]')
@@ -661,7 +670,7 @@ export function registerCliHostCommands(
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
         import('../cli/handlers/util.js'),
-        import('@anthropic/ink'),
+        import('../utils/inkRoot.js'),
       ])
       const root = await createRoot(getBaseRenderOptions(false))
       await setupTokenHandler(root)
@@ -876,7 +885,7 @@ export function registerCliHostCommands(
     .action(async () => {
       const [{ doctorHandler }, { createRoot }] = await Promise.all([
         import('../cli/handlers/util.js'),
-        import('@anthropic/ink'),
+        import('../utils/inkRoot.js'),
       ])
       const root = await createRoot(getBaseRenderOptions(false))
       await doctorHandler(root)

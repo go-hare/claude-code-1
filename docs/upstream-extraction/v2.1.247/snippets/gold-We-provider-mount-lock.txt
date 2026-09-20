@@ -1,0 +1,125 @@
+# We Provider mount — official 2.1.247 LOCKED. Invent-ban.
+# Unique via jdb import + in-module jsx + Us props. We()≢lastPinned.
+
+## Verdict
+
+LOCKED mount caller = function Us @223180338
+  export Us as Rz from bun _240.js @223181953
+  public name export{a as AppRoot} @233942217 (barrel; a = Rz = Us)
+  bun file _240.js = AppRoot / provider stack (AppStateProvider, Mailbox, keybindings, session, stats, FPS)
+
+Us RENDERS z/jdb with {storageV5, credentials, children} via SPREAD of ce():
+  Dn = Tr(hr)     Tr = Y7b = ce = sessionServicesFor
+  if (hr === void 0) return children-tree   // no Provider; We() sees frozen {}
+  else n(Ar, {...Dn, children: _r})         // Ar = jdb = z
+
+storageV5 source: Us PROPS (Lc.storageV5). NOT We(). NOT getPinnedStorageV5. NOT CLI pin k().
+credentials source: ce(storageV5) / Y7b / Tr. NOT We(). NOT pinCredentialsStore.
+
+Secondary same-Provider mount (ink render helper, not the REPL tree):
+  function H0(e,o) @211364564 in bun _490.js
+  Qu(LR,{...o,children:i}) when o defined
+  callers: m8 as ebb, h8 as fbb
+  l = options.storageV5!==void 0 ? L0(storageV5) : void 0
+  L0 = Y7b = ce
+  H0 is NOT exported (only m8/h8/n3).
+
+## Uniqueness (needle families)
+
+1. jdb as / as jdb / from _499.js
+   jdb as count=2 UNIQUE: LR @210988511 (_490.js), Ar @223160546 (_240.js)
+   as jdb count=1 @210899810 export{z as jdb,b as kdb,k as ldb,w as mdb,B as ndb}
+   kdb as count=63 — all are We()/useContext READERS (We, Ue, ge, …), not mounts
+   ldb as count=65 — module init k=u(()=>{…e=r(c)}), not a component
+
+2. in-module ident of jdb aliases (collision-safe)
+   LR ident in _490.js: import + ONE jsx  Qu(LR,{...o,children:i}) @211364646
+   Ar ident in _240.js: import + ONE jsx  n(Ar,{...Dn,children:_r}) @223181690
+   t(LR,{ = 0; LR,{storageV5 = 0; Ar,{storageV5 = 0
+   t(Ar,{ count=1 @231623049 reviewProgress — inJdbMod=false (different Ar)
+
+3. storageV5 + credentials + children in one window
+   triple construct count=0  (no literal {storageV5:…,credentials:…,children:…})
+   only destructure is Provider BODY z @210899416
+   mounts pass ce() result via {...Dn} / {...o}
+
+4. as LR / as Ar collision-ban
+   jdb as LR count=1; jdb as Ar count=1
+   Ar as xRc = Jr getSecureStorage @208364026 — NOT this Provider
+   as LR has 9 other hits (exports / fs.rm / other modules) — not jdb
+
+5. Us / AppRoot
+   storageV5:hr,messageQueue count=1 @223180379
+   Tr(hr) count=1 @223180598
+   n(Ar,{...Dn,children:_r}) count=1
+   Us as Rz count=1; export{a as AppRoot} count=1
+   AppStateProvider can not be nested — same module (nt inside Us tree)
+
+## Main REPL parent (fills Us props)
+
+async function Pe(r,t,a,V) @222167794 len=1354
+  alias Xe(...r){return Pe(...r)} @222167760
+  export{C as ca, Xe as da, Pe as ea}
+  dynamic import AppRoot (chunk-qzgjaf91.js = _240.js barrel) + REPL (chunk-axvamdkm.js)
+  {session:m,storageV5:o,credentials:f,fleetNudgeStore:K=new T({storageV5:o})}=t
+  i(Y,{session:m,storageV5:o,messageQueue:X,…,keybindings:!1,children:i(J,{...a})},"repl")
+  t is the launch context (session + storageV5 + credentials). Not We(). Not lastPinned.
+
+Other AppRoot/Us parents that pass storageV5 (same Us, not extra jdb jsx):
+  sa @223295275 resume  {storageV5:s,credentials:c}=t; x(To,{…,storageV5:s,…},"resume")
+  Lr @223187848 mcp-approval  storageV5:e  (plugin-server UI)
+  Kc agents-list @223847292  storageV5:t?.storageV5
+  _ @231944275 transcript/export  storageV5:p from options
+  Ms @233865569 cli_mcp_add_from_desktop  storageV5:e
+
+Parents that omit storageV5 (Us skips Provider): teleport-progress, standalone errors,
+  doctor/backups, settings-accept, file-error dialog.
+
+## jdb import sites (complete)
+
+  @210988511  jdb as LR, ldb as $w, mdb as ed, ndb as jE   bun _490.js  ink/render
+  @223160546  jdb as Ar, kdb as ge, ldb as dt           bun _240.js  AppRoot/Us
+No other jdb imports. Neither site is a dead import: each has exactly one jsx.
+
+kdb/ldb sites are readers/init — documented in gold-We-provider-mount-pass1-scan.txt (68 _499 imports).
+
+## 246 vs 247
+
+LEFTOVER, not new in 247.
+  246 function z(j){…} @209590533 IDENTICAL body; export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb}
+  246 function zs(Jc) @221281977 ≡ Us (storageV5:vo, Co(vo), s(Eo,{...Fn,children:Po}), Eo=ubb)
+  246 function F0(e,o) @210054279 ≡ H0 (Qu(LR,{...o,children:i}), LR=ubb)
+  246 jdb as hits are a DIFFERENT _495.js export (not this Provider).
+  Export hash 246 ubb → 247 jdb (module-graph renumber only).
+
+## We() ≢ lastPinned  (restated)
+
+Official We = b = kdb = function b(){return i(e)} React useContext @210899679
+Official Provider z fills that context.
+Local getPinnedStorageV5() reads module lastPinned from pinStorageV5.
+Official SEA has zero strings getPinnedStorageV5 / getPinnedCredentials / pinCredentialsStore.
+CLI pin k({storageV5:p,credentials:m(p)}) @206275077 is composePolicyLimitsClient — NOT this Provider.
+Do not claim getPinnedStorageV5 ≡ We().
+
+## Offsets
+
+Us           @223180338  end=223181771  len=1433
+Us export    @223181953  Us as Rz
+AppRoot name @233942217  export{a as AppRoot}
+H0           @211364564  end=211364670  len=106
+m8           @211364735  export m8 as ebb
+h8           @211364893  export h8 as fbb
+Pe           @222167794  end=222169148  len=1354
+Xe           @222167760
+z Provider   @210899390  (body; a(e.Provider) is NOT a caller)
+jdb export   @210899810
+Y7b/ce       @210986813  import Y7b as Tr @223161300 / as L0 @210990148
+246 zs       @221281977
+246 F0       @210054279
+246 z        @209590533
+
+## Local facts (do not implement)
+
+Local has no React Provider for storageV5; REPL/UI call getPinnedStorageV5() directly.
+Official REPL j_e reads Ue()=kdb=We AFTER Pe mounts AppRoot/Us.
+Official Zg reads We() the same way (plugin UI under some AppRoot parent).

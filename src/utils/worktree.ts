@@ -1907,10 +1907,8 @@ function isWorktreeUncForeignToCwd(path: string, cwd: string): boolean {
   return host === null || host !== worktreeUncHost(cwd)
 }
 
-/**
- * densable $o / MXe. Official `J`/`N` stubs are false/null, so only ae arms run.
- */
-function isWorktreePathNetworkRelativeToCwd(
+/** densable `ko` / WZ `Ji` — UNC/NT pointer vs cwd. `J`/`N` stubs skip. */
+export function isWorktreePathNetworkRelativeToCwd(
   path: string,
   cwd: string,
 ): boolean {

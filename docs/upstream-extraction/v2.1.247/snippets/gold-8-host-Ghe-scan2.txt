@@ -1,0 +1,132 @@
+# peel-8-host-Ghe pass2 247=253204128 246=250948768
+
+## class Zt / host factory
+ZT "class Zt{" count=3 hits=206985409,211912208,227672146
+  @206985409 class Zt{backgroundHousekeeping;launchOptions;settingsSource;extensionsConfig;modelStringsCache;diagnostics;telemetryHandles;credentialSlots;mcpProcessWiring;requestLatches;accountCreditLatches;proactivity;constructor(e)
+  @211912208 class Zt{}zs._CodeOrName=Zt;zs.IDENTIFIER=/^[a-z$_][a-z$_0-9]*$/i;class je extends Zt{constructor(e){super();if(!zs.IDENTIFIER.test(e))throw Error("CodeGen: name must be a valid identifier");this.str=e}toString(){return 
+  @227672146 class Zt{rl;height=0;extraLinesUnderPrompt=0;cursorPos;constructor(e){this.rl=e,this.rl=e,this.cursorPos=e.getCursorPos()}write(e){this.rl.output.unmute(),this.rl.output.write(e),this.rl.output.mute()}render(e,t=""){let 
+ZT "class Zt {" count=0 hits=
+ZT "function Zt(" count=15 hits=68280981,206662539,207800476,207981469,208260770,208281029,208649122,209553816,210375224,210485614,210801647,210908367,211070284,211398683,211830711
+  @68280981 function Zt(e,t){return t?parseInt(e,8):parseFloat(e.replace(/_/g,""))}function dt(e){return typeof BigInt!="function"?null:BigInt(e.replace(/_/g,""))}x.readRadixNumber=function(e){var t=this.pos;this.pos+=2;var i=this.r
+  @206662539 function Zt(){return Tn(_c)}function jt(e){return En(xc,e)}function vc(e,t){return Nn(gc,e,t)}function zu(e,t){let r={type:"object",get shape(){return g.assignProp(this,"shape",{...e}),this.shape},...g.normalizeParams(t)
+  @207800476 function Zt(e){let t=Z(e);if(de(t))return fe(t);try{if(y().statSync(t).isDirectory())return t}catch{}return fe(t)}function Xt(e){return/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(e)}function Vt(e){let t=j();if(e===t)return"~";if(e
+  @207981469 function Zt(e){let t={};for(let n of e)t={...t,...Te[n].shape()};return t}function qt(e){let t={};for(let n of e)t={...t,...Te[n].permissionsShape?.()};return t}function Jt(e){let t=[];for(let n of e)t.push(...Te[n].perm
+  @208260770 function Zt(){return I().get("branch",Ao)}function Jt(){return I().get("head",To)}function Ze(){return I().get("remoteUrl",Oo)}function Qt(){return I().get("defaultBranch",Go)}function er(){return I().getDefaultBranchIfK
+  @208281029 function Zt(e={}){let t=new Set([...Xt,"GITHUB_TOKEN","GH_TOKEN"]);for(let n of[...Object.keys(process.env),...Object.keys(e)])if(Ki(n))t.add(n);return[...t]}var Ui,Xt,Qt,Bi,Gi,ji;var qt=v(()=>{Ui=["ANTHROPIC_API_KEY","C
+  @208649122 function Zt(){return nL.of(C().host)}function QJ(){return Zt().currentSession}function ZJ(e){Zt().setCurrentSession(e)}function e8(){return Zt().getResumeHintWorktreeName()}function t8(){Zt().clearResumeHintWorktreeName(
+  @209553816 function Zt(t){if(typeof t==="function")return t;if(typeof t==="string")return(s)=>t===s;if(t instanceof RegExp)return(s)=>t.test(s);if(typeof t==="object"&&t!==null)return(s)=>{if(t.path===s)return!0;if(t.recursive){let
+  @210375224 function Zt(e){let t;try{t=Wr(e)}catch{return Te().denyLiteralSymlinkCandidates.push(e),e}let n;try{return n=Vt(e),Te().symlinkedDenyScrubPaths.push({literal:e,resolved:n,hopDirectories:bu(e,n),danglingBaseline:!1}),n}ca
+  @210485614 function Zt(e){W().repoCheckouts.onMetadataChanged=e;for(let[,t]of X())await he(t);me(()=>void st())}async function st(){let e=X();if(e.size===0)return;let t={};for(let[i,s]of e){let r=await pe(s);if(r!==void 0)t[i]=r}le
+  @210801647 function Zt(e,t){let i=ot(e);if(!i)return null;let r=i;if(j()==="wsl"&&Se.test(r))r=await new _e(fe.WSL_DISTRO_NAME).toLocalPath(r);let n;try{if(rt(r))n=await C().readFileBytes(r);else{let l=await at();if(l&&r===tt(l))n=
+  @210908367 function Zt(t,e){if(!t)return Ct;let o={id:yt(t),...e},n=Object.entries(o).map(([r,i])=>`${r}=${i}`).join(":");return f(a.HYPERLINK,n,t)}function yt(t){let e=0;for(let o=0;o<t.length;o++)e=(e<<5)-e+t.charCodeAt(o)|0;retu
+  @211070284 function Zt(t,n,r,a){if(Bn(r,n))return r;if(ua.current!==null)return t=Hr(t,r,a),Bn(t,n)||(Mt=!0),t;if((di&42)===0||(di&1073741824)!==0&&(Me&261930)===0)return Mt=!0,t.memoizedState=r;return t=Mv(),be.lanes|=t,Qi|=t,n}fu
+  @211398683 function Zt(Xn){let D=te(43),{title:ge,titleEnd:ye,subtitle:ie,children:Ze,onCancel:et,color:At,hideInputGuide:be,hideBorder:Pt,inputGuide:P,isCancelActive:Ht}=Xn,F=At===void 0?"permission":At,W=Ht===void 0?!0:Ht,Tt=k(nu
+  @211830711 function Zt(n,e){if(n.includes("://"))return-1;let t=n.search(Kt);if(t>0)return t;let r=n.search(Gt);if(r>=0)return r;let s=e?n.search(Vt):-1;if(s>=0)return s;let o=n.search(zt);return o>0?o:-1}function h(n,e){if(Wt.test
+ZT "Zt=class" count=3 hits=206334442,226826581,228006812
+  @206334442 Zt=class Zt extends x{create(e,t){let{betas:r,...s}=e;return this._client.post("/v1/dreams?beta=true",{body:s,...t,headers:l([{"anthropic-beta":[...r??[],"dreaming-2026-04-21"].toString()},t?.headers])})}retrieve(e,t={},
+  @226826581 Zt=class Zt extends u.classBuilder().ep(_).m(function(e,t,r,n){return[ji.getEndpointPlugin(r,e.getEndpointParameterInstructions())]}).s("AmazonBedrockFrontendService","InvokeModelWithResponseStream",{eventStream:{output:
+  @228006812 Zt=class Zt extends r.classBuilder().ep(i).m(function(o,n,e,a){return[fl.getEndpointPlugin(e,o.getEndpointParameterInstructions())]}).s("AmazonBedrockControlPlaneService","DeleteMarketplaceModelEndpoint",{}).n("BedrockCl
+ZT "new Zt({backgroundHousekeeping" count=1 hits=206986144
+  @206986144 new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,credentialSlots:new Vt,mcpProcessWiring:new Jt,
+classes before Xi: class Jt{ | class zt{ | class $t{ | class Xt{ | class Yt{ | class Zt{
+
+## Li( call sites (session ctor vs collide)
+Li({host: count=1
+  @206986764 );try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.
+Li({ count=7
+  @206986764 Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}functi
+  @221645869 Li({daemonVersion:d.version,daemonOrigin:d.origin,daemonTarget:d.launchTarget,cl
+  @227667964 Li({active:e,pageSize:t,total:r}){let n=Math.floor(t/2);if(r<=t||e<n)return e;if
+  @227668439 Li({active:t,total:e.length,pageSize:n});return o.current.position=u,o.current.l
+  @230819663 Li({attached:e,beforeSettings:t,ownEnv:n}){if(t===void 0)return{...e};return Obj
+  @230821154 Li({attached:h,beforeSettings:to(),ownEnv:Fi(D)}),m=Vr({memory:t.servicerFor(e),
+  @230822798 Li({attached:D,beforeSettings:to(),ownEnv:Fi(h)});return No({memory:h,now:Date.n
+
+## TurnController session bind
+TC "_requireHost()" count=20 hits=232275570,232275816,232276413,232276739,232282319,232286102,232287216,232287890,232292353,232293433,232417677,232418710,232419673,232420140,232421795,232422708,232424187,232428587,232428897,232430874
+  @232275570 s._snapshot=o,this._changed.emit()}bindHost(e){this._host=e}_requireHost(){if(this._host===null)throw Error("SessionController: used before its screen bound a host");return this._host}_buildIdleToolUseContext(){ret
+  @232275816 t(this.transcript.getSnapshot(),[],new AbortController,this._requireHost().mainLoopModel)}setHaikuTitle=(e)=>{this._publish({haikuTitle:e})};bumpConversationId=()=>{this._publish({conversationId:nde()})};applyConve
+  @232276413 =>t.getSnapshot().length,storage:o,runCompact:()=>void this._requireHost().onSubmit("/compact",{setCursorOffset:()=>{},clearBuffer:()=>{},resetHistory:()=>{}})})}resume=async(e,t,o)=>{let{session:n,store:r,_setAppS
+  @232276739 draft:h}=this,{mainLoopModel:S,combinedInitialTools:k}=this._requireHost(),_=this.transcript.replace,C=performance.now();try{zme(n.host);let w={...t,messages:gme(t.messages)},b=hme(w.messages);{let G=(bx(),Nr(Sx)).
+  @232282319 ,scope:a,messageQueue:l}=this,{combinedInitialTools:u}=this._requireHost();if(e&&e.length>0){if(a.reseatIsolationLatch(Eme()??jW(e,u)),this.restoreReadFileState(e,t.project.originalCwd),OW({abortController:new Abor
+  @232286102 handoff or a later consume");return}}let{canUseTool:u}=this._requireHost();for(let c of t)Xde({taskId:c.taskId,workflowRunId:c.workflowRunId,scriptPath:c.scriptPath,scriptSha256:c.scriptSha256,argsJson:c.argsJson,s
+TC "_requireHost(){" count=2 hits=232275570,232418710
+  @232275570 s._snapshot=o,this._changed.emit()}bindHost(e){this._host=e}_requireHost(){if(this._host===null)throw Error("SessionController: used before its screen bound a host");return this._host}_buildIdleToolUseContext(){retu
+  @232418710 ==null)return;try{Yhe(this.isMainLoopBusy)}catch(e){Pe(e)}};_requireHost(){if(this._host===null)throw Error("TurnController: used before its screen bound a host");return this._host}readPendingQueryParams=()=>{let e=
+TC "bindHost(e){" count=4 hits=232204173,232256224,232275545,232416799
+  @232204173 =()=>this.#o;#c(e){this.#o={...this.#o,...e},this.#a.emit()}bindHost(e){this.#t=e}#s(){if(this.#t===null)throw Error("BackgroundGesture: used before its screen bound a host");return this.#t}get pending(){return t
+  @232256224 =()=>this.#o;get activeRemote(){return this.#o.activeRemote}bindHost(e){this.#t=e}#i(){if(this.#t===null)throw Error("RemoteTransport: used before its screen bound a host");return this.#t}setActiveRemote(e){let t
+  @232275545 gentDefinition)return;this._snapshot=o,this._changed.emit()}bindHost(e){this._host=e}_requireHost(){if(this._host===null)throw Error("SessionController: used before its screen bound a host");return this._host}_bu
+  @232416799 isExternalLoading(){return this._snapshot.isExternalLoading}bindHost(e){let t=this._host===null;if(this._host=e,t)this._mount(e);if(e.mainLoopModel!==this._engineModel)this._engineModel=e.mainLoopModel,this._engi
+TC "this._host=e" count=3 hits=232275557,232416838,238427917
+  @232275557 on)return;this._snapshot=o,this._changed.emit()}bindHost(e){this._host=e}_requireHost(){if(this._host===null)throw Error("SessionController: used before its screen bound a host");return this._host}_buildIdleToolU
+  @232416838 ot.isExternalLoading}bindHost(e){let t=this._host===null;if(this._host=e,t)this._mount(e);if(e.mainLoopModel!==this._engineModel)this._engineModel=e.mainLoopModel,this._engine.setModel(e.mainLoopModel)}_mount(e){
+  @238427917 nTemporality.CUMULATIVE,metricProducers:e.metricProducers});this._host=e.host||process.env.OTEL_EXPORTER_PROMETHEUS_HOST||y.DEFAULT_OPTIONS.host,this._port=e.port||Number(process.env.OTEL_EXPORTER_PROMETHEUS_PORT
+TC "session:e,theme:t" count=3 hits=232420055,232420369,232420584
+  @232420055 is._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this.
+  @232420369 d 0?c:{...c,spinnerTip:void 0,spinnerTipLabel:void 0});Vhe({session:e,theme:t,readFileState:o.readFileState,bashTools:this._bashTools,bashHosts:this._bashHosts,toolsUsed:this._toolsUsed,storageV5:di()?s:void 0,credent
+  @232420584 ntials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{
+TC "pickNewSpinnerTip(){" count=1 hits=232419970
+  @232419970 his.markQueryComplete(Date.now()),this.pickNewSpinnerTip()};pickNewSpinnerTip(){if(this._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credential
+TC "wbe(t.session.host" count=1 hits=232419364
+  @232419364 rdUserActivity(),OR(!0);let t=this._host;if(e===1&&t!==null)wbe(t.session.host,t.storageV5)}catch(t){Pe(t)}}markQueryComplete(e){let t=e!==this._snapshot.lastQueryCompletionTime;if(this._publish({lastQueryCompletionTim
+TC "session:uk()" count=0 hits=
+TC "session:Tm()" count=0 hits=
+TC "session:n()" count=0 hits=
+TC "{session:uk()" count=0 hits=
+TC "session:k," count=2 hits=224864211,232436878
+  @224864211 !e?.skipTaskRegistration)q=er({remoteTaskType:"ultrareview",session:k,command:W,context:r,isRemoteReview:!0,applyFixesOnComplete:e?.applyFixesOnComplete,reviewInstructions:t.mode==="branch"?t.instructions:void 
+  @232436878 }}};async _runImpl(e,t,o,n,r,s,a,l,u,c,m,d,g,h){let{scope:S,session:k,titleDisabled:_,sessionTitle:C,aiSessionTitle:w,agentTitle:b,commands:v,setHaikuTitle:A,storageV5:N,setAppState:P,spinnerStore:O,store:F,add
+TC "session:k}" count=0 hits=
+TC "host.session" count=0 hits=
+TC "e.session=uk" count=0 hits=
+TC "session:uk()." count=0 hits=
+SP "session:uk()" count=0
+SP "session:Tm()" count=0
+SP ",session:e," count=4
+  @230465607 d_worker_disabled",{reason:Q.reason});let ye=Q.start?mN({configHome:Q.configHome,session:e,repoRoot:os(),storageV5:l.storageV5,workerDirSync:M}):void 0,J=rv();if(M!==void 0)J.register(cN(M));if(ye!==void 0)J.register(uN(ye.handle));let Re=c
+  @230592972 e a string");continue}let g=f;try{await wp(g,{taskRegistry:Wn(i,l),setAppState:l,session:e,getAppState:i,source:"user",storageV5:d.storageV5}),pe(n,{})}catch(F){Y(n,ce(F))}}else if(n.request.subtype==="background_tasks")try{let f=Wn(i,l),g=
+  @230600336 rrupt_sweep_throw")}},onStopTask:(te)=>wp(te,{taskRegistry:Wn(i,l),setAppState:l,session:e,getAppState:i,source:"user",storageV5:d.storageV5}),onSetModel(te){let be=te==null||te.trim().toLowerCase()==="default",re=be?dr():te,ue=!be&&!Dn(re)
+  @230605288 ontinue;else if(n.type==="session_notice"){try{h_(n,{getAppState:i,setAppState:l,session:e,sessionHooks:Kn,isRemoteTransport:()=>t.isRemoteTransport(),ingressTail:CD,storageV5:d.storageV5,credentials:d.credentials})}catch(je){ae(je)}continu
+SP "session:n()," count=0
+SP "get session(){return" count=0
+SP "session:k" count=3
+  @224864211 eturn null}let q;if(!e?.skipTaskRegistration)q=er({remoteTaskType:"ultrareview",session:k,command:W,context:r,isRemoteReview:!0,applyFixesOnComplete:e?.applyFixesOnComplete,reviewInstructions:t.mode==="branch"?t.instructions:void 0,postRevi
+  @231620674 .join(" \xB7 ")}return _o(i.stage,i.bugsFound,a,r)}function kc(Xy){let H=A(56),{session:ke,onDone:oo,onBack:Jy,onKill:no}=Xy,ot=ke.status==="completed",$o=ke.status==="running"||ke.status==="pending",[Zy,Ql]=be(!1),Yl=Z(ke.startTime,$o,1000
+  @232436878 to_restore_cancel")}}}};async _runImpl(e,t,o,n,r,s,a,l,u,c,m,d,g,h){let{scope:S,session:k,titleDisabled:_,sessionTitle:C,aiSessionTitle:w,agentTitle:b,commands:v,setHaikuTitle:A,storageV5:N,setAppState:P,spinnerStore:O,store:F,addNotificati
+
+## 1MB / 1 MiB unique 247
+"1MB" 246=6 247=7
+  UNIQ247 @175527614 a1f1be4a04C00000186ioov0ec165a1f1be4a04C00000280nofDoegD0ec165a1f1be4a04C00000301MBFroCFKoHF0ec165a1f1be4a04C00000347DdKWoeKOfKgogKGohK0ec165a1f1be4a04C00000485aoB
+  UNIQ247 @206845561 hen the tree is clean) and applies the standard caps (5s git timeout, 50 files, 1MB/file).")),Uo=s(()=>t({diff:t({stats:t({filesCount:o().int(),linesAdded:o().int(
+  UNIQ247 @212598702 mermaid"> block':"")+(J?" \u2014 includes the inline syntax-highlight runtime (~1MB), added because the page contains fenced code":""));let we=!1,Be=0,je,pe=[];if(
+"1 MiB" 246=1 247=3
+  UNIQ247 @205219998 nounce: request nested too deep...+...).invalid_announce: request larger than 1 MiB...'.invalid_announce: ..8...o.9.invalid_announce: host.epoch is required on
+  UNIQ247 @217316562 ")return`db batch write failed (${vBt(e)}): the batch body exceeds the server's 1 MiB request limit \u2014 nothing was written; split it into smaller write_db calls`
+  UNIQ247 @235239554 ep");if(p(i).length>W)return r("invalid","invalid_announce: request larger than 1 MiB");let o=_().safeParse(i);if(!o.success){let l=o.error.issues[0];return r("inval
+hook-block-slice win: e(0,oFs)}break}catch{}}if(f.code===2){let y=`Stop hook blocking error from command "${s}":`,b="Stop hook feedback";if(l!==void 0)y=l;if(h!==void 0)b=h;else if(c!==void 0)b=c;k3({summary:b,body:`${y} ${g||m}`,priority:"next",stopHookActive:!0})}}),p=t
+
+## 246 tip content threw twin
+246 tip content threw count=2
+  @195763168 G,..tengu_auto_mode_env_onboarding_accept...$..."..tengu_auto_mode_env_onboarding_later&...tengu_auto_mode_env_onboarding_dismiss...;.sessions...?]..tip content threw...#?@.failedTipIds...?H.spinnerTipsOverride...getM
+  @230265684 length===0)return;return bye(t)}async function _ye(e,t){try{return await e.content(t)}catch(o){return BV.of(t.session.host).failedTipIds.add(e.id),De(Ys(Un(o),"tip content threw")),""}}var NV=2;class Cye{fired=new Set;fire(e,t){if(e<=0)retu
+
+246 ctor name twins:
+  "function Xi(){return new " count=1 hits=205057780
+    function Xi(){return new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,creden
+  "host:Xi()" count=1 hits=205058425
+    host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Am(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?
+  "k=es()" count=3 hits=205092484,217607276,217787956
+    k=es();ss=new _e(()=>b());ls=new _e(()=>b());us=new te(()=>b())}); export{qe as zid,tn as Aid,Bd as Bid,ae as Cid,_d as Did,Ud as Eid,le as Fid,de as Gid,rn as Hid,Gd as Iid,sn as Jid,Jd as Kid,Ge as 
+  "function es(){let e=\"\";if(typeof process<\"u\"" count=1 hits=205058269
+    function es(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof Zi==="function"){let t=Ad();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd
+  "function Li(e){return Ri({kind:\"root\",host:e.host" count=1 hits=205041388
+    function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}function Ri(e,t){let o=D(t.originalCwd),r=D(t.projectRoot),s=D(t.cwd),a=b(),l=e.kind==="fork"?e.root.observers
+Vhe({session:e,theme:t count=1
+HS "session:uk()" 247=0 246=0
+HS "session: Tm()" 247=0 246=0
+HS "session:n()" 247=0 246=0
+HS ".session=uk()" 247=0 246=0
+HS ".session=n()" 247=0 246=0
+HS ".session=k" 247=0 246=0
+HS "session:e.host" 247=0 246=0

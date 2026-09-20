@@ -26,6 +26,9 @@ SSH Remote 提供两种方式在远程 Linux 主机上运行 Claude Code：
 │     │                                              │
 │     └── 4. SSH -R 反向隧道 + 启动远端 CLI            │
 │            ssh -R <remote>:<local> <host> \         │
+│                # Unix 分支：                        │
+│                ANTHROPIC_UNIX_SOCKET=<远端 sock> \  │
+│                # Windows 分支：                     │
 │                ANTHROPIC_BASE_URL=... \             │
 │                ANTHROPIC_AUTH_NONCE=... \            │
 │                claude --output-format stream-json      │
@@ -189,12 +192,35 @@ claude ssh my-server --dangerously-skip-permissions
 claude ssh my-server --continue
 claude ssh my-server --resume <session-uuid>
 
-# 选择模型
+# 选择模型（含主模型不可用时的备用模型）
 claude ssh my-server --model claude-sonnet-4-6-20250514
+claude ssh my-server --fallback-model claude-haiku-4-5-20251001
 
 # 本地测试模式（不连接远端，测试 auth proxy 管道）
 claude ssh localhost --local
 ```
+
+### 会被转发到远端的 flag
+
+`claude ssh` 的 agent loop **整个跑在远端**（本地进程只做渲染和权限弹窗，见
+`useSSHSession`），所以只有下表里的 flag 会被摘出来拼进远端命令行。**不在表里的
+flag 会留在本地 `process.argv`，配置的是本地 UI 外壳** —— 对纯推理类 flag 而言即
+无声失效。
+
+| Flag | 作用位置 |
+|------|----------|
+| `-c` / `--continue`、`-r` / `--resume [uuid]` | 远端会话历史（存在远端 `~/.claude/projects/<cwd>/`） |
+| `--model`、`--fallback-model` | 远端发起 API 调用时用的模型 |
+| `--permission-mode`、`--dangerously-skip-permissions` | 远端工具执行的权限 |
+| `--cwd`（或位置参数） | 远端工作目录 |
+| `--remote-bin` | 远端二进制（跳过探测/部署） |
+
+新增转发项要同时满足三条：配置的是远端 loop、值与机器无关（不是本地路径）、且
+最多带一个值 —— `extractFlag` 只消费单个值，所以 `--betas`、`--allowed-tools`、
+`--add-dir`、`--mcp-config` 这类变参 flag 目前无法转发。`--settings <file>` /
+`--plugin-dir <path>` 除路径会解析到错误主机外，本身还合法地配置本地 UI（主题、
+快捷键、状态栏），所以不该直接搬走。判定条件写在 `src/main.tsx` 的
+`extractFlag` 上方，回归测试见 `src/ssh/__tests__/sshFlagForwarding.test.ts`。
 
 ### 方式二：直接 SSH 运行
 
@@ -351,7 +377,31 @@ src/ssh/
 - **AuthProxy** 在本地监听（Unix socket 或 TCP），接收远端 CLI 的 API 请求
 - 通过 SSH `-R` 反向端口转发隧道到远端
 - AuthProxy 注入本地真实凭据（API key 或 OAuth token），转发到 `api.anthropic.com`
-- `ANTHROPIC_AUTH_NONCE` header 防止未授权访问（nonce 通过环境变量传递给远端 CLI，远端 CLI 在每个 API 请求中携带此 header）
+- **Unix 分支**：远端靠 `ANTHROPIC_UNIX_SOCKET` 找到隧道。这个名字是**硬约束** ——
+  远端 API 客户端（`getFetchOptions` 的 `forAnthropicAPI` 分支）只认它，上游也用
+  同一个名字。换成别的名字远端既没有隧道也没有 `ANTHROPIC_BASE_URL` 覆盖，会直连
+  `api.anthropic.com`，且只在非 Windows 上无声失效。回归测试见
+  `src/ssh/__tests__/sshAuthSocketEnv.test.ts`
+- **Windows 分支**：无 Unix socket，改为覆盖 `ANTHROPIC_BASE_URL` 指向本地回环端口，
+  并用 `ANTHROPIC_AUTH_NONCE` header 防止未授权访问（远端 CLI 在每个 API 请求中带上
+  `x-auth-nonce`）
+
+### 与上游的对齐状态（已核对 2.1.247 二进制）
+
+**命令行表面已对齐，不要"修"。** 上游发货的 `claude ssh` 产出的是带 `.host` 的调用
+描述对象（`hasSSH: Boolean(i?.host)`，见远端后端互斥校验），跟我们的 `_pendingSSH.host`
+同形。我们的 `claude ssh <host> [dir]` 就是上游的实际行为。
+
+`settings.sshConfigs` 的 schema 描述里提到 `claude ssh <config> [dir]`，容易让人以为
+上游的位置参数是命名配置。**但那是尚未落地的设计描述**：`sshConfigs` / `sshHost` /
+`startDirectory` 在整个 253MB 二进制里各只出现 2 次（字符串表 + zod schema），**没有
+任何消费方**，也搜不到 `ssh` 子命令的 commander 注册。我们这边同样是 schema-only
+（`src/utils/settings/types.ts` 声明 + `config.test.ts` 一条校验测试，无消费方），
+六个字段的名称、可选性、describe 文案与上游逐字一致 —— 即这一条也已经 1:1。
+
+以后若上游真的接上 `<config>` 解析，再同步；在那之前把 `<host>` 改成 `<config>` 是
+对着一段注释重写一个能用的功能。证据存档见
+`docs/upstream-extraction/v2.1.247/snippets/gold-ssh-surface.txt`。
 
 ### waitForInit vs 存活检查
 

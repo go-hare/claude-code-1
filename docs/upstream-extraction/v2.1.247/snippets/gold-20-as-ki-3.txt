@@ -1,0 +1,3 @@
+# pos=222878646
+
+etplaces.delete(n),{outcome:"refreshed"}}catch(s){return ce(`Failed to refresh marketplace '${n}' before scoped install; using cached data: ${le(s)}`,{level:"warn"}),{outcome:"refresh-failed",errorMessage:Te(le(s))}}}Ws();js();si();ii();ri();qs();ci();li();Ms();Js();Ns();Zs();Un();Bs();Fs();ai();ei();Xs();Hs();Tn();Ls();As();ui();var Ie=Os(Ks(),1);import{dirname as Pi,join as jn,resolve as Xn,sep as ki}from"path";nn();di();gi();fi();Qn();bi();Gs();Ts();Ys();Vs();mi();ti();Us();yi();Qs();qn();ni();hi();pi();Kn();xs();zs();nn();oi();zn();function Si(n,e){let t={install:"installed",update:"update

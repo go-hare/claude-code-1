@@ -18,10 +18,12 @@ import {
   getEnabledSettingSources,
   type SettingSource,
 } from './settings/constants.js'
+import { getMdmSettings } from './settings/mdm/settings.js'
 import {
   getInitialSettings,
   getPolicySettingsOrigin,
   getSettingsForSource,
+  loadManagedFileSettings,
 } from './settings/settings.js'
 import type { SettingsJson } from './settings/types.js'
 
@@ -195,4 +197,60 @@ export function resolveInteractiveForceLoginMethod(
     forceLoginMethod === 'gateway' || forceLoginGatewayUrl !== undefined
 
   return { forceLoginMethod, forceLoginGatewayUrl, gatewayForced }
+}
+
+/**
+ * densable 2.1.247 Q$ — managed settings force Claude apps gateway sign-in.
+ *
+ * Official:
+ *   if (!Io(Un())) return false
+ *   e = H("policySettings")
+ *   if (e?.forceLoginMethod === "gateway") return true
+ *   return e?.forceLoginGatewayUrl !== void 0 && e?.forceLoginMethod === void 0
+ */
+export function isManagedSettingsGatewaySignIn(): boolean {
+  if (!isAdminManagedPolicyOrigin(getPolicySettingsOrigin())) {
+    return false
+  }
+  const policy = getSettingsForSource('policySettings')
+  if (policy?.forceLoginMethod === 'gateway') {
+    return true
+  }
+  return (
+    policy?.forceLoginGatewayUrl !== undefined &&
+    policy?.forceLoginMethod === undefined
+  )
+}
+
+/**
+ * densable 2.1.247 Hs — admin policy load errors (MDM + managed file/drop-ins).
+ * Official: V(p()).errors + M().errors + X().errors. Not hkcu (`Re`).
+ */
+function getAdminPolicyLoadErrors() {
+  return [...getMdmSettings().errors, ...loadManagedFileSettings().errors]
+}
+
+/**
+ * densable 2.1.247 `ri` — drop `severity === "warning"`.
+ */
+export function filterNonWarningPolicyLoadErrors<
+  T extends { severity?: string },
+>(errors: readonly T[]): T[] {
+  return errors.filter(e => e.severity !== 'warning')
+}
+
+/**
+ * densable 2.1.247 Z$ → Cs → ri(Hs).
+ */
+export function hasNonWarningAdminPolicyLoadErrors(): boolean {
+  return filterNonWarningPolicyLoadErrors(getAdminPolicyLoadErrors()).length > 0
+}
+
+/**
+ * densable 2.1.247 Onboarding `l = Ae()||Ie()` = `Q$()||Z$()`.
+ */
+export function shouldSkipOnboardingPreflight(): boolean {
+  return (
+    isManagedSettingsGatewaySignIn() || hasNonWarningAdminPolicyLoadErrors()
+  )
 }

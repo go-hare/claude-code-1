@@ -133,3 +133,17 @@ export function parseCrossSessionOpenAttrs(text: string): {
     ...(fromName !== undefined ? { fromName } : {}),
   }
 }
+
+/** densable 2.1.247 xt label — count===1 ? "Message" : `${n} messages` */
+export function formatPeerCollapseLabel(count = 1): string {
+  return count === 1 ? 'Message' : `${count} messages`
+}
+
+/**
+ * densable 2.1.247 xt preview via ly(body). ly() body was not locked —
+ * one-line only (first line), no invented char cap.
+ */
+export function previewPeerMessageBody(body: string): string {
+  const nl = body.indexOf('\n')
+  return (nl === -1 ? body : body.slice(0, nl)).trim()
+}

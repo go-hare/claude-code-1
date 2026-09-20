@@ -1,0 +1,113 @@
+# tip-pluginId peel official-247 size=253204128
+STR "if(!r.pluginId)continue" count=1 hits=232387758
+  @232387758 let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if
+STR "Ohe(r.pluginId)" count=1 hits=232387837
+  @232387837 n=[];for(let r of o){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&
+STR "Nhe(r.id)" count=1 hits=232387825
+  @232387825 )return;let n=[];for(let r of o){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertised
+STR "FV.of(e.session.host)" count=1 hits=232387620
+  @232387620 n fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(
+STR "pZe.of(uk().host)" count=1 hits=232387535
+  @232387535 unts",{changes_max:ke(o),changes_outcome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.
+STR "function fZe(){return pZe.of" count=1 hits=232387513
+  @232387513 e_legacy_plugin_tip_counts",{changes_max:ke(o),changes_outcome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let
+STR "async function Qhe(e){if(MV().spinnerTipsEnabled" count=1 hits=232387553
+  @232387553 :ke(o),changes_outcome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length
+STR "pluginId:`${l.name}@${s}`" count=1 hits=222270561
+  @222270561 ).join("-"),O=s===w?`marketplace-plugin:${l.name}`:`marketplace-plugin:${l.name}@${s}`;o.push({id:O,pluginId:`${l.name}@${s}`,advertisedCommand:"plugin",priority:1,providerAgnostic:!0,cooldownSessions:3,content:async(p)=>{let c=a("suggestion",p.
+STR "o.push({id:O,pluginId:" count=1 hits=222270548
+  @222270548 +p.slice(1):p).join("-"),O=s===w?`marketplace-plugin:${l.name}`:`marketplace-plugin:${l.name}@${s}`;o.push({id:O,pluginId:`${l.name}@${s}`,advertisedCommand:"plugin",priority:1,providerAgnostic:!0,cooldownSessions:3,content:async(p)=>{let c=a
+STR "Math.max(s,a)>=EV" count=1 hits=232387872
+  @232387872 )continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.advertisedCommand))conti
+STR "fZe().fire(a,s)" count=1 hits=232387856
+  @232387856 ){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.advert
+STR "getMarketplacePluginTips(e.storageV5)" count=2 hits=222293892,232387672
+  @222293892 t),s=n.filter((c)=>b(c.id)>=c.cooldownSessions);if(o>0&&Wt())return s;let r=[...Zt,...Mo,...await t.getMarketplacePluginTips(e.storageV5)],d=Pe()!=="firstParty"||!Ie(),l=r.filter((c)=>!t.failedTipIds.has(c.id)),m=d?l.filter((c)=>c.providerAgnostic):l,f=awai
+  @232387672 e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=Nhe(
+COLLIDE "function Ohe(" count=2 hits=215503306,242361411
+  @215503306 function Ohe(e){let{activeAgents:t,allowedAgentTypes:n}=e.options.agentDefinitions;return{depth:Jc(e.agentContext),allowedAgentTypes:n,activeAgents:t}}function 
+  @242361411 function Ohe(e,t){--e[t]||delete e[t]}function Db(e,t,r,i){var n=""+t,a=""+r;if(!e&&n>a){var s=n;n=a,a=s}return n+Nhe+a+Nhe+(yi(i)?zJe:i)}function GJe(e,t,r,i){
+COLLIDE "async function Ohe(" count=0 hits=
+COLLIDE "function Nhe(" count=1 hits=215518861
+  @215518861 function Nhe(e,t){let r=`This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of t
+COLLIDE "async function Nhe(" count=0 hits=
+COLLIDE "var FV=" count=0 hits=
+COLLIDE "FV=new" count=0 hits=
+COLLIDE " as FV" count=8 hits=209173454,212804175,219712695,220208641,227820805,231273443,232025904,232065682
+  @209173454  as FVb,X as GVb,Y as HVb,O as IVb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, y
+  @212804175  as FV,c1a as QQn,d1a as e7n,e1a as Iqe,f1a as Vxt,g1a as t7n,h1a as n7n,i1a as r7n,j1a as lye,k1a as Lxt,l1a as o7n,n1a as Jes}from"B:/~BUN/root/_453.js";impor
+  @219712695  as FVa,e5t as GVa,tao as HVa,bti as IVa,nao as JVa,Sti as KVa,rao as LVa,t5t as MVa,h7e as NVa,oao as OVa,sao as PVa,iao as QVa,wti as RVa,kti as SVa,vti as TV
+  @220208641  as FV,At as GV,Br as HV,Le as IV,Rn as JV,$n as KV,Cn as LV,An as MV,nr as NV,Fn as OV,Mn as PV,or as QV,Tn as RV,On as SV,In as TV,cr as UV,Un as VV,Ln as WV,
+  @227820805  as FVc}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acce
+  @231273443  as FV,Aqa as Nx,B0 as Vb,B5 as G$,BBa as Rf,Bia as PF,Bja as Kw,Bqa as ik,C0 as Ft,C4 as eV,C5 as K3,C8 as on,CBa as k0,CMa as x8,Cia as KF,Cqa as Ux,D0 as Ds,
+  @232025904  as FV,Ud as jhe,Vd as $he,Wd as Whe,Xd as $Pe,Zd as sMe}from"B:/~BUN/root/_35.js";import{de as WB,ee as PEe,je as lMe,ke as uMe,oe as dMe,pe as mMe,qe as pMe}f
+  @232065682  as FVe,zgd as XDt}from"B:/~BUN/root/_826.js";import{Hgd as U,Jgd as It}from"B:/~BUN/root/_827.js";import{Pgd as el,Vgd as Xb}from"B:/~BUN/root/_828.js";import{
+COLLIDE "FV as " count=2 hits=208894692,220233615
+  @208894692 FV as Fbc,NV as Gbc,LV as Hbc,UV as Ibc,BV as Jbc,jh as Kbc,zi as Lbc,qh as Mbc,HV as Nbc,KV as Obc,GV as Pbc,$V as Qbc,VV as Rbc,Ir as Sbc,qx as Tbc,De as Ubc,
+  @220233615 FV as zt,IV as Yr,NV as Wt,OV as Ht,RV as qt,YV as Xr,vV as at,wV as sr}from"B:/~BUN/root/_434.js";import{ZV as _e,_V as ge,aW as Zr}from"B:/~BUN/root/_435.js";
+COLLIDE "function We(" count=30 hits=206904476,207047234,207291662,207425134,207469608,207530497,207548996,207610369,207768479,208174842,208231046,208370019,208571301,209126845,209471801,210515001,210562492,210599730,210715111,210782559,210809192,211046162,211629406,211775572,211815544,212102059,212327745,212376637,212414181,212433250
+  @206904476 function We(t){if(!T(t))return!1;var e=it(t);return e==Fe||e==Me||e==ze||e==Ue}var ze="[object AsyncFunction]",Fe="[object Function]",Me="[object GeneratorFunct
+  @207047234 function We(e,t,n){using r=m`JSON.stringify(${e})`;return JSON.stringify(e,t,n)}function ai(e){return JSON.stringify(e)+` `}function ui(e){return JSON.stringify
+  @207291662 function We(e){let n=M(e);if(!n||n.hopChain===void 0)return e;return H(n.from,n.fromName,n.body,n.fromSession,void 0,n.fromMode)}function ke(e,n,r){if(e.body===
+  @207425134 function We(e){return typeof e==="string"&&e!==""}Je.isAttributeKey=We;function Xe(e){if(e==null)return!0;if(Array.isArray(e))return go(e);return Ze(typeof e)}J
+  @207469608 function We(e){return function(u){return m(B(S(u).replace(ze,"")),e,"")}}var Pe="['\u2019]",ze,J;var Y=o(()=>{_();I();G();ze=RegExp(Pe,"g");J=We});var Ze,i;var 
+  @207530497 function We(e){if(c())return e.procStart!==void 0?void 0:e.procStartFt;return e.procStart}function He(e){return c()?{procStart:void 0,procStartFt:e}:{procStart:
+  @207548996 function We(e,t){let a=F().aliases,r=Object.hasOwn(a,e)?a[e]:void 0;if(!r)return;let c=r.per_provider;return(c&&Object.hasOwn(c,t)?c[t]:void 0)??r.default}var o
+  @207610369 function We(e,t){return function(){return e.apply(t,arguments)}}var Wt=()=>{};function Ge(e){return e!==null&&!Ue(e)&&e.constructor!==null&&!Ue(e.constructor)&&
+  @207768479 function We(e,n){let i=`"${n}":`,t=0;while(t<e.length){let a=e.indexOf(` `,t),r=a<0?e.slice(t):e.slice(t,a);if(t=a<0?e.length:a+1,r.includes(i))try{let o=JSON.p
+  @208174842 function We(e){return at(e)&&!Cn(e)}function V(e,n){if(typeof n!=="string")return;if(Ln(n))return s(e,tt);if(Pn(n))return s(e,nt);if(Cn(n))return s(e,rt);return
+COLLIDE "var pZe=" count=1 hits=232387485
+  @232387485 var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(
+COLLIDE "pZe=new" count=1 hits=232387489
+  @232387489 pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe(
+COLLIDE " as pZe" count=0 hits=
+COLLIDE "pZe as " count=0 hits=
+COLLIDE "function uk(" count=3 hits=207009835,219999779,249613676
+  @207009835 function uk(e){n().host.launchOptions.replaceDisableSlashCommands(e)}function ck(){return n().host.launchOptions.disableSlashCommands()}function pk(e){n().host.
+  @219999779 function uk(e,r,n){let t=await e.realpath(r);return t.ok?m(cr(t.value,ct(r,n))):t}async function wc(e,r,n,t){let i=async(b,h,E)=>{let R=await e.realpath(b);if(!
+  @249613676 function uk(a,b,c,d,e,f,g){if(c){if(b.flags&256)return b.flags&=-257,d=vf(Error(m(422))),Hd(a,b,g,d);if(null!==b.memoizedState)return b.child=a.child,b.flags|=1
+COLLIDE "function uk()" count=0 hits=
+COLLIDE "var uk=" count=0 hits=
+COLLIDE " as uk" count=14 hits=207079173,208401496,208899451,209920014,211778636,212810404,212824403,212838729,219690849,223676086,230311339,230715517,231274411,232067387
+  @207079173  as ukd,rt as vkd,wi as wkd,An as xkd,Ai as ykd,vi as zkd,Oi as Akd,oe as Bkd,F as Ckd,Di as Dkd,_i as Ekd,Ri as Fkd,Li as Gkd,Pi as Hkd,ot as Ikd,Ti as Jkd,de 
+  @208401496  as uk,a2c as hf,b4c as Rd,d2c as cb,i3c as YC,m4c as qC,y3c as nU,z3c as DT,z4c as Wi}from"B:/~BUN/root/_752.js";import{B4c as kv,M4c as AN}from"B:/~BUN/root/_
+  @208899451  as ukc,OX as vkc,rN as wkc,Sl as xkc,uv as ykc,yp as zkc,cN as Akc,dN as Bkc,fN as Ckc,pN as Dkc,gN as Ekc,hN as Fkc,lv as Gkc,cv as Hkc,dv as Ikc,bp as Jkc,_N
+  @209920014  as uk}from"child_process";function Ir(e){if(typeof globalThis.Bun<"u")return globalThis.Bun.which(e);let t=uk("which",[e],{encoding:"utf8",stdio:["ignore","pip
+  @211778636  as ukb,_e as vkb,Mt as wkb,D as xkb,et as ykb,Ht as zkb,Bt as Akb,Vt as Bkb,ot as Ckb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Com
+  @212810404  as uke,ljb as YKr,mjb as uAn,njb as aqe,ojb as lqe,pjb as RLe}from"B:/~BUN/root/_513.js";import{qjb as qRn,rjb as fLe,sjb as gmr,tjb as GRn}from"B:/~BUN/root/_
+  @212824403  as uk,wRb as D2,xMb as dHe,xNb as tT,xOb as a$,xPb as k8n,xQb as fmn,xRb as Mh,yMb as Vrr,yNb as Pz,yOb as xb,yQb as mmn,yRb as Og,zNb as RKe,zPb as oZ,zQb as 
+  @212838729  as ukr,ezc as p0t}from"B:/~BUN/root/_681.js";import{Bzc as vye,Czc as zJe,Dzc as gO,fzc as Gtr,gzc as GI,hzc as rW,izc as UJe,jzc as fGe,kzc as Ktr,lzc as lMr,
+  @219690849  as uka,gEt as vka,$ge as wka,hEt as xka,Lil as yka,AVn as zka,PVn as Aka,yEt as Bka,uL as Cka,Nil as Dka,Fil as Eka,q2 as Fka,WJ as Gka,Uil as Hka,zf as Ika,bE
+  @223676086  as uk}from"B:/~BUN/root/_542.js";import{Kpb as Bp,kqb as dk}from"B:/~BUN/root/_543.js";import{Jtb as wy,Ntb as oC}from"B:/~BUN/root/_552.js";import{Hvb as xs,M
+COLLIDE "uk as " count=2 hits=207025510,238440389
+  @207025510 uk as sud,ck as tud,pk as uud,gk as vud,fk as wud,hk as xud,mk as yud,Sk as zud,vk as Aud,bk as Bud,yk as Cud,Ck as Dud,kk as Eud,xk as Fud,Ak as Gud,Pk as Hud,
+  @238440389 uk as f,vk as g,wk as h}from"B:/~BUN/root/_100.js";import"B:/~BUN/root/_101.js";import"B:/~BUN/root/_102.js";import"B:/~BUN/root/_461.js";import"B:/~BUN/root/_4
+COLLIDE "uk().host" count=3 hits=232247411,232264073,232387542
+  @232247411 uk().host)}function Uue(){Bue().acquire()}function Hue(){Bue().release()}Dx();tIt();bt();GW();At();kI();bt();cf();Ks();function jue(){let e=ln(),t=ln(),o=ln(),n
+  @232264073 uk().host),n=[];for(let r of e){if(r.type!=="regex")continue;let{pattern:s,url:a,label:l}=r;if(typeof s!=="string"||typeof a!=="string"||l!==void 0&&typeof l!==
+  @232387542 uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.sto
+COLLIDE "pluginId:" count=30 hits=213689639,213690052,213692392,213879842,213892048,214075868,214132002,214133060,214145667,214503683,214609882,214610258,214610926,214615794,214620629,214622206,214625153,214625464,214625610,214625872,214628158,214691614,214698855,214698894,214700960,214701602,214701728,215942732,216329198,216962181
+  @213689639 pluginId:l}){let c=n.asyncTimeout||15000;_(`Hooks: Registering async hook ${e} (${r}) with timeout ${c}ms`);let u=IPe(),d=PPe({hookId:t,hookName:r,hookEvent:o,g
+  @213690052 pluginId:l,command:s,responseAttachmentSent:!1,shellCommand:i,stopProgressInterval:d})}async function Qit(e,t,n){e.stopProgressInterval();let r=e.shellCommand?.
+  @213692392 pluginId:i.pluginId,stdout:a,stderr:l,exitCode:d}}})),s=!1;for(let i of o){if(i.status!=="fulfilled"){_(`Hooks: checkForAsyncHookResponses callback rejected: ${
+  @213879842 pluginId:e.id,name:e.name,description:e.description??"",version:e.version??null,updatedAt:e.updated_at??null,...typeof e.marketplace_name==="string"&&e.marketpl
+  @213892048 pluginId:I().min(1).max(256),pluginName:I().min(1).max(256),description:I().max(1024),skills:Me(pe({name:I().max(256),description:I().max(1024).optional()})).ma
+  @214075868 pluginId:o,overriddenBy:a})}return r}var oSn=w(()=>{Zue();vle();Wc();Co()});function vOe(){return[...vy()].reverse()}function lSn(){return vOe().map((e)=>({sour
+  @214132002 pluginId:n}=e,r;try{r=o$(t)+uDe}catch{return}try{let o=await _ft(r).catch(()=>null);if(o!==null&&!o.isFile())if(o.isDirectory())await Sde({dir:r,trashRoot:l9(),
+  @214133060 pluginId:e.id,name:e.directory||e.name||e.id,description:e.description,version:e.version||null,updatedAt:null,requestedVersion:e.version||void 0}}function xkn(e
+  @214145667 pluginId:I(),name:I(),description:I().catch(""),version:I().nullable().catch(null),updatedAt:I().nullable().catch(null),requestedVersion:I().optional().catch(vo
+  @214503683 pluginId:e.source})}return t}function PUo(e,t){let n=(o)=>t?.has(o.source)===!0,r=(o)=>pR(o.source);return[...e.filter(n),...e.filter((o)=>!n(o)&&r(o)),...e.fil
+DUMP Qhe @232387553 len=502
+DUMP fZe @232387513 len=40
+DUMP setter @222270548
+NEIGH function Ohe( none in Qhe±16k
+NEIGH function Nhe( none in Qhe±16k
+NEIGH var FV= none in Qhe±16k
+NEIGH FV=new none in Qhe±16k
+NEIGH var pZe= @abs=232387485 var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=a
+NEIGH pZe=new @abs=232387489 pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await
+NEIGH function uk( none in Qhe±16k
+NEIGH function uk() none in Qhe±16k
+NEIGH var uk= none in Qhe±16k
+NEIGH var EV= @abs=232387223 var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true":"false",n=e>=EV&&t<EV?"true":"false",r=`${o}|${n}`;if(this.fired.has(r))return;this.fired.add(r),U("tengu
+NEIGH EV= @abs=232387227 EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true":"false",n=e>=EV&&t<EV?"true":"false",r=`${o}|${n}`;if(this.fired.has(r))return;this.fired.add(r),U("tengu_dea

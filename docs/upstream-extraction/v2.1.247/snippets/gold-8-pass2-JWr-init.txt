@@ -1,0 +1,43 @@
+# #8 pass2 — complete JWr / BBr constant initializers (extracted, not invented)
+
+## 247 persist default (JWr)
+
+chain: `var zs=1e4` → `export { zs as Yvb }` → `import { Yvb as JWr }` → `lre(..., {threshold:r=JWr})`
+
+complete family line @212668226:
+```
+var We=50000,Ns=500000,Ds=4,Bs=400000,Us=200000,Hs=50,zs=1e4,Ws=1e4
+```
+
+Yvb is ONLY this re-export. No `Yvb=` / `var Yvb` / `export{Yvb` assignment exists.
+
+## 246 persist default (BBr)
+
+chain: `var Bs=1e4` → `export { Bs as lHb }` → `import { lHb as BBr }` → `Rne(..., {threshold:r=BBr})`
+
+complete family line @211303800:
+```
+var ze=50000,Ls=500000,Ms=4,Is=400000,Ns=200000,Ds=50,Bs=1e4
+```
+
+lHb is ONLY this re-export. No `lHb=` assignment exists.
+
+## Same number
+
+Persist threshold default is `1e4` in both SEAs. Not a 247-only body.
+
+## 247 extra binding (not persist)
+
+247 adds `Ws=1e4` → `export { Ws as Zvb }` → `import { Zvb as Mue }`.
+`threshold:r=Ws` / `threshold:r=Zvb` / `threshold:r=Mue` are 0/0.
+Mue is the default of `function Pc(e,t=Mue)` (tool-error middle-truncate).
+That is the 247 reshape of 246 `ED` (`if(n.length<=1e4)` + `r=5000`). Same `1e4`.
+Not hook attach. Not background-agent attach (no VD/Pc/ED within 600 of those strings).
+
+gold-8-pass2-family-line-247.txt
+gold-8-pass2-family-line-246.txt
+gold-8-pass2-export-zs-Yvb-247.txt
+gold-8-pass2-export-Bs-lHb-246.txt
+gold-8-pass2g-ED-complete-246.txt
+gold-8-pass2-Pc-complete-247.txt
+gold-8-pass2g-VD-complete-247.txt

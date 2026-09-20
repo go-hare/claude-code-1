@@ -1,0 +1,3 @@
+# ver=247 name=RDt async=false start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8 needle="(exit code"
+
+function RDt(e,t,n,r,o){let s=r!==void 0?` (exit ${r})`:"";if(e==="monitor")switch(n){case"completed":return o===0?`Monitor "${t}" ended without producing output${s}`:`Monitor "${t}" stream ended`;case"failed":return`Monitor "${t}" script failed${s}`;case"killed":return`Monitor "${t}" stopped`}switch(n){case"completed":return`${nj}"${t}" completed${r!==void 0?` (exit code ${r})`:""}`;case"failed":return`${nj}"${t}" failed${r!==void 0?` with exit code ${r}`:""}`;case"killed":return`${nj}"${t}" was stopped`}}

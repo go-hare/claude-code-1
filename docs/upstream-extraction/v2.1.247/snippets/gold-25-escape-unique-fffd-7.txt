@@ -1,0 +1,4 @@
+# offset=210546529 tag=fffd
+
+]]}},[s,a,p]=await Promise.all([o([]),i(["var","GIT_CONFIG_GLOBAL"]),i(["var","GIT_CONFIG_SYSTEM"])]);if(s===null)return r;let w=await be(n.workTree,{GIT_DIR:n.gitDir,GIT_COMMON_DIR:n.commonDir},n.workTree);if(w===null)return r;let l=[...s.keys.map(({origin:m})=>cr(m,n.workTree)),...gn([a,p].flatMap(({code:m,stdout:E})=>m===0?E.split(`
+`):[]),n.workTree,null,pe(Be(n)))],u=l.find((m)=>m?.includes("\uFFFD"));if(u!==void 0&&u!==null)return{kind:"included",file:u};let f=await De(w,l);if(f!==void 0)return f===null?r:{kind:"included",file:f};let c=await ar(s.targets,(m)=>o(["--file",m]),(m)=>De(w,m));if(c===null)return r;if("tooMany"in c)return{kind:"many_includes"};if("contributes"in c)return{kind:"included",file:c.contributes};let g=[...s.keys,...c.keys],h=(m)=>y(g.flatMap(({key:E})=>{let N=m.exec(E)?.[1];return N===void 0?[]:[N]})),S=h(/^filter\.(.*)\.(?:clean|smudge|process|required)$/s),C

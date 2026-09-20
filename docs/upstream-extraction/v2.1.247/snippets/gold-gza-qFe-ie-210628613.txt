@@ -1,0 +1,2 @@
+# ie@210628613
+function ie(e){return S(e.origin)||e.isMeta!==!0&&re(e.origin)}

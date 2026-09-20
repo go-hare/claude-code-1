@@ -1,0 +1,3 @@
+# off=227668004 needle="Math.floor(t/2)"
+
+.length){for(let g of a(h))if(l[p++]=g,p>=o)break;h++}p=D-1,h=i-1;while(p>=0&&h>=0){for(let g of a(h).reverse())if(l[p--]=g,p<0)break;h--}return l.filter((g)=>typeof g==="string")}var Ni=S(()=>{Yt()});function Li({active:e,pageSize:t,total:r}){let n=Math.floor(t/2);if(r<=t||e<n)return e;if(e>=r-n)return e+t-r;return n}function zi({active:e,lastActive:t,total:r,pageSize:n,pointer:i}){if(r<=n)return e;if(t<e&&e-t<n)return Math.min(Math.floor(n/2),i+e-t);return i}var $i=()=>{};function jr({items:e,active:t,renderItem:r,pageSize:n,loop:i=!0}){let o=Ce({position:0,lastActive:0}),u=i?zi({active:t,lastActive:o.current.lastActive,total:e.length,pageS

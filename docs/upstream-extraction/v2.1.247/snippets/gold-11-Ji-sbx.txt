@@ -1,0 +1,3 @@
+# offset=210376923
+
+ RZ(e){try{return Vt(e)}catch{return null}}function uN(e){let t=[];for(let n=e;;n=$e(n))try{let r=Vt(n);return t.length===0?{path:r,exists:!0}:{path:ht(r,...t),exists:!1}}catch(r){let s=pn(r);if(s!=="ENOENT"&&s!=="ENOTDIR"||$e(n)===n)return null;t.unshift(Da(n))}}function Xs(e){let t=[],n=e;for(;;){if(Ji(n,jn())||Qi(n,jn()))break;try{n=Vt(n);break}catch{let r=$e(n);if(r===n)break;t.push(Da(n)),n=r}}return t.length===0?n:ht(n,...t.reverse())}function fv(e,t){let{osLinkedRootRealpaths:n}=hN();retu

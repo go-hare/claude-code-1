@@ -1,0 +1,104 @@
+# wB/Is persist lock — official 2.1.247 peel ONLY. Invent-ban. No implement.
+# peel: _peel-wB-Is.mjs  scan: gold-wB-Is-scan.txt
+
+## VERIFY gold-forged-ee-h-body.txt
+
+YES — window @208310000-208321450 contains FULL
+  async function Is(e,t,n,r,i){...return lr(e),{error:u}}
+Same bytes as unique peel. Mixed with Rs/ii/ar/ur/export. Isolated here.
+
+## LOCKED offsets (official-247 claude.exe size=253204128)
+
+Rs   UNIQUE @208311609  function Rs(e,t,n,r){return ii(e,()=>t,n,r)}
+ii   UNIQUE @208311653  gold-gza-wB-ii.txt
+oi.run UNIQUE @208311816  oi.run(i,()=>Is(e,t,i,n,r))
+si   UNIQUE @208311844  function si(){return oi.drain()}
+Is   UNIQUE @208311876 end=208314097 len=2221
+     gold-wB-Is-body.txt
+J    UNIQUE @208306382 end=208306413  function J(e){return le(e,p())}
+     export J as oGc UNIQUE @208321331
+     gold-wB-Is-J.txt
+     other function J(e){ @208326222 is AFTER this module — not this J
+ke   UNIQUE @208308006  function ke(e,t){return e==="userSettings"&&Yo(t)===Fr.default}
+     gold-wB-Is-ke.txt
+ar   UNIQUE @208314097  gold-wB-Is-ar.txt
+oi=Pr() UNIQUE @208320642  gold-wB-Is-oi.txt
+
+## Call chain (already locked gold-gza-wB-ii.txt)
+
+gza: await wB(source, updaterFn, void 0, storageV5)
+wB = ii  (cHc)
+Rs(e,t,n,r) = ii(e,()=>t,n,r)     // value → constant transform
+ii(e,t,n,r):
+  if policySettings|flagSettings → {error:null}
+  let i=J(e); if(!i) → {error:null}
+  return oi.run(i,()=>Is(e,t,i,n,r))
+    // Is(source, updater, path, options, storageV5)
+    // ii 3rd n = options (gza passes void 0)
+    // ii 4th r = storageV5 (gza 4th)
+
+## J path — confirm only LOCKED
+
+function J(e){return le(e,p())}
+ii uses that path as oi.run key AND Is 3rd.
+le(e,p()) body NOT peeled (not requested).
+
+## oi.run queue — confirm only LOCKED / UNKNOWN
+
+LOCKED: ii always queues Is via oi.run(path, thunk). si=oi.drain(). oi=Pr() same-module init.
+UNKNOWN: Pr factory body (function Pr( count=20). Do not invent queue impl.
+
+## Is arity — how 4th / 5th used
+
+Is(e,t,n,r,i)
+  e = source
+  t = updater (transform)
+  n = path from J(e)
+  r = 4th options — ONLY r?.legacyRevocation==="skip" (localSettings legacy ur)
+  i = 5th storageV5 handle
+
+gate: let o=A()&&i!==void 0&&ke(e,n)
+  ke LOCKED: userSettings AND Yo(path)===Fr.default
+  A() UNKNOWN (function A(){ count=15)
+
+WRITE:
+  if(o) await i.write(q.userSettings(), P, {publishDiscipline:"followAtomic"})
+        throw ee("settings storageV5 write failed: ...")
+        then l=ks(n,P)
+  else  await st(n,P,{encoding:"utf-8",allowSymlink:...,checkParentDir:...,stagingDir:...})
+
+AFTER filesystem write (not o):
+  if(A()&&i!==void 0&&!o) l=await ar(i,n)
+  ar: if J("userSettings") missing or === written path or !ke → return
+      else ir(e,y(),n)   // ir body NOT peeled
+
+null transform S===null (no canonical write):
+  if localSettings && !legacySkip: ur(t); if changed && A()&&i: l=await ar(i,n)
+
+## FULL Is body (unique @208311876)
+
+async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c={[Symbol.dispose]:()=>l?.()};try{let f=pt(e,p(),{includeLegacyLocalSettings:!1});if(!f){let d=null;try{d=(await it(n)).content}catch(m){if(!se(m))throw m}if(d!==null){let m=T(d,!1);if(m===null)return g(`updateSettingsForSource: invalid JSON in settings file at ${n}`,{level:"error"}),{error:Error(`Invalid JSON syntax in settings file at ${n}`)};if(m&&typeof m==="object"){let H=te(m);lt(H,n),f=H,g(`Using raw settings from ${n} due to validation failure`)}}}let S=t(f??null);if(S===null){if(e==="localSettings"&&!a){let d=await ur(t);if(d.error)return{error:d.error};if(d.changed){if(A()&&i!==void 0)l=await ar(i,n);try{ie()}catch(m){N(m)}lr(e)}}return{error:null}}await R().mkdir(ne(n));let _=at(f||{},S,(d,m,H,ce)=>{if(m===void 0&&ce&&typeof H==="string"){delete ce[H];return}if(Array.isArray(m))return m;if(H==="extraKnownMarketplaces"&&E(d)&&E(m))return zr(d,m);return});Le(n);let P=F(_,null,2)+`
+`;if(o){let d=await i.write(q.userSettings(),P,{publishDiscipline:"followAtomic"});if(!d.ok)throw new ee(`settings storageV5 write failed: ${d.error.code}${"failureClass"in d.error?` (${d.error.failureClass})`:""}`,"settings storageV5 write failed")}else{let d=tt(ne(n));await st(n,P,{encoding:"utf-8",allowSymlink:e==="userSettings"||d,checkParentDir:(e==="projectSettings"||e==="localSettings")&&!d,stagingDir:re(ne(n),ot)})}if(B(),o)l=ks(n,P);if(e==="localSettings"&&!a){let d=await ur(t);if(d.error&&d.phase!==void 0&&!ai(S))g(`localSettings: legacy settings.local.json could not be evaluated (${d.phase} failure) but this write contains no removals — canonical write succeeded, ignoring: ${d.error.message}`,{level:"warn"});else u=d.error}if(e==="localSettings")Rt(ve("localSettings"),et()).then((d)=>{if(!d.written)return;if(d.effective)x("gitignore_global_rule");else if(d.reason==="already_tracked")O("gitignore_global_rule",d.reason);else I("gitignore_global_rule",d.reason??"write_ineffective")})}catch(f){let S=Error(`Failed to read raw settings from ${n}: ${f}`);return g(S.message,{level:"error"}),{error:S}}if(A()&&i!==void 0&&!o)l=await ar(i,n);try{ie()}catch(f){N(f)}return lr(e),{error:u}}
+
+## Local arity / contract gap (facts, no implement)
+
+src/utils/settings/settings.ts updateSettingsForSource(source, settings, _storageV5?)
+  arity 3; 3rd named _storageV5; `void _storageV5`
+  sync `{error}`; no Promise; no oi.run
+  value-merge: mergeWith(existing, settings, delete-undefined + array-replace)
+  no transform slot (official ii 2nd / Is t())
+  no options / legacyRevocation slot (official Rs/ii 3rd / Is 4th)
+  always writeFileSyncAndFlush_DEPRECATED(filePath) — never i.write
+
+Official:
+  Rs 4-arity (source, value, options?, storageV5?)
+  ii 4-arity (source, transform, options?, storageV5?)
+  Is 5-arity (source, transform, path, options?, storageV5?)
+gza calls ii with 3rd void 0, 4th storageV5.
+Local 3rd occupies the storage name but is discarded; cannot take options+storage together; cannot take updater.
+
+## UNKNOWN (do not invent)
+
+A() body (15 hits)
+Pr() body that constructs oi (20 function Pr)
+le / p / Yo / Fr / ir / ks / q.userSettings / pt / it / at / zr bodies

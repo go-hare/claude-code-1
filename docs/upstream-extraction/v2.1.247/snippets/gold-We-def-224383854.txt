@@ -1,0 +1,2 @@
+# needle=function We(){return pos=224383854 end=224383880 len=26
+function We(){return we()}

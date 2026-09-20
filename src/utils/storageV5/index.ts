@@ -22,6 +22,7 @@ import {
   type CreateLocalFsBackendOptions,
   type StorageV5,
 } from './createLocalFsBackend.js'
+import { registerPluginUsageStorageV5 } from '../plugins/pluginUsagePending.js'
 import {
   isHoverRestOn,
   pinHoverRest,
@@ -199,6 +200,7 @@ export function pinStorageV5(
     }
   }
   lastPinned = result
+  registerPluginUsageStorageV5(result)
   return result
 }
 

@@ -1,0 +1,3 @@
+# offset=217980805 ver=246 hit=1/1 needle="hook success: ${"
+
+o(o)}case"hook_success":if(e.hookEvent!=="SessionStart"&&e.hookEvent!=="UserPromptSubmit"&&e.hookEvent!=="UserPromptExpansion")return[];if(e.content==="")return[];return[dt({content:El(`${e.hookName} hook success: ${e.content}`),isMeta:!0})];case"context_efficiency":return[];case"deferred_tools_delta":{let r=Kc(e.addedLines),o=Kc(e.addedNames),s=Kc(e.removedNames),i=[];if(r.length>0&&o.length>0)i.push(`The following deferred tools are now available via ${Ya}. Their schemas are NOT loaded \u2014 calling them directly will fail with InputValidationError. Use ${Ya} with query "select:<name>[,<nam

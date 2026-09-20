@@ -1,0 +1,51 @@
+# ho classification helpers — unique lock (official-247)
+# cluster ho@207874075  _716.js
+# collision-ban: function yo(/bo(/os(/ns( each 25 global hits; LOCK by unique body (count=1) + _716 export
+
+## ho stub line (context, already in gold-dig-jS-ho-body)
+# @207874075
+# let l=os(Z(s)?s.source:void 0)?vo:yo(s)?void 0:bo(n.error.issues)??ns(n.error.issues);
+# return [{name:r,source:{source:"unsupported",...l&&{error:l}},strict:!0}]
+# local hoistMarketplacePlugins drops ...l&&{error:l} — always {source:"unsupported"}
+
+## 1) yo(entry) LOCKED @207874765 end=207874921 export yo as jQc @207915890
+function yo(e){if(!e||typeof e!=="object")return!1;let t=e.source;if(!t||typeof t!=="object")return!1;let s=t.source;return typeof s==="string"&&!fo.has(s)}
+
+## 2) bo(zod issues) LOCKED @207874921 end=207875225  NOT exported
+function bo(e){let t=e.find((o)=>o.path.length===1&&o.path[0]==="source");if(!t||t.code!=="invalid_union")return;let s=t.errors.find((o)=>!o.some((n)=>n.path.length===0||n.code==="invalid_value"&&n.path[0]==="source"));if(!s||s.length===0)return;return ns(s.map((o)=>({...o,path:["source",...o.path]})))}
+
+## 3) os(source) LOCKED @207875596 end=207875669 export os as mQc @207915920
+function os(e){return typeof e==="string"&&xo.test(e)&&!e.includes("..")}
+# xo LOCKED @207910796 xo=/^[A-Za-z0-9][-A-Za-z0-9._]*$/
+# PROVED === local isBareMarketplacePluginSource (marketplacePluginRoot.ts)
+# NOT RelativePath. RelativePath is j=p(()=>i().startsWith("./")) in Ao init.
+# ho uses os(source) as "bare name" → vo error, not as ./relative predicate.
+
+## 4) vo LOCKED @207876619 (module-local; not exported)
+vo='Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names.'
+
+## 5) fo LOCKED @207910685 (module-local; not exported)
+fo=new Set(["npm","url","github","git-subdir","archive","command","unsupported"])
+
+## 6) stringify caps
+### Ft(key) LOCKED @207875225 end=207875268 export Ft as kQc @207915900
+function Ft(e){return _o.test(e)?e:"<key>"}
+# _o LOCKED @207910767 _o=/^[A-Za-z0-9_$.-]{1,40}$/
+
+### ns(issues) LOCKED @207875268 end=207875596 export ns as lQc @207915910
+function ns(e){let t=e.slice(0,So).map((o)=>{let n=o.path.map(String).map((a)=>Ft(a)).join("."),r=o.code==="unrecognized_keys"?`Unrecognized ${o.keys.length===1?"field":"fields"}: ${o.keys.map(Ft).join(", ")}`:$t(o.message,ko);return n?`${n}: ${r}`:r}),s=e.length-t.length;return s>0?`${t.join(", ")} (+${s} more)`:t.join(", ")}
+
+### So LOCKED @207876604  So=3
+### ko LOCKED @207876609  ko=160
+
+### $t LOCKED via bind (not a _716 function)
+# _716 import AQc as $t @207835172
+# _717 export d as AQc @207828236
+# d LOCKED @207827979 end=207828048
+function d(r,n=160){let t=l(r);return t.length>n?`${e(t,n)}\u2026`:t}
+# l LOCKED @207827924 function l(r){return s(r).replace(/ {2,}/g," ").trim()}
+# e = Gzd from _845 (u as Gzd @206472402). Body not uniquely extracted this peel → not invented.
+
+## _716 export slice @207915890
+yo as jQc, Ft as kQc, ns as lQc, os as mQc, wo as nQc, Po as oQc, Mo as pQc
+# bo / vo / fo / So / ko / $t not in this export

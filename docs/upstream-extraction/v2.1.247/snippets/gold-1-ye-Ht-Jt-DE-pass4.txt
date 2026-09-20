@@ -1,0 +1,195 @@
+# gold-1-ye-Ht-Jt-DE-pass4 247
+
+## _812.js hits=780
+- #0 @97750321 4C00000816KIedyred0ec165a1f1be4a04C00000851hFBdpathmbasenamecdirnamel5cxm5ckn5cEB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_850.js....................
+- #1 @100436899 B:/~BUN/root/_806.jsB:/~BUN/root/_808.jsB:/~BUN/root/_809.jsB:/~BUN/root/_810.jsB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_816.jsB:/~BUN/root/_819.js
+- #2 @100967727 B:/~BUN/root/_591.jsB:/~BUN/root/_679.jsB:/~BUN/root/_705.jsB:/~BUN/root/_759.jsB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_816.jsB:/~BUN/root/_820.jsB:/~BUN/root/_829.js
+- #3 @101105113 B:/~BUN/root/_755.jsB:/~BUN/root/_756.jsB:/~BUN/root/_794.jsB:/~BUN/root/_800.jsB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_817.jsB:/~BUN/root/_833.js
+- #4 @106553705 000834oQjd0ec165a1f1be4a04C00000839elmdsqmd0ec165a1f1be4a04C00000851aFBdTEbkUEbmB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_833.jsB:/~BUN/root/_838.jsB:/~BUN/root/_850.js
+- #5 @109576535 k$cynl$cGtm$cHtn$cjto$cWtp$c$tq$cYtr$czts$cHet$cXtu$cqtv$cLnB:/~BUN/root/_810.jsB:/~BUN/root/_812.jsB:/~BUN/root/_813.jsB:/~BUN/root/_814.jsB:/~BUN/root/_819.jsB:/~BUN/root/_828.js
+- #6 @109948309 B:/~BUN/root/_753.jsB:/~BUN/root/_800.jsB:/~BUN/root/_802.jsB:/~BUN/root/_805.jsB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_816.jsB:/~BUN/root/_819.jsB:/~BUN/root/_822.js
+- #7 @110084303 000851yFBdpathSbasenamegdirnameVisAbsolutekjoinvrelativelsepGlbIHlbOIlbDJlbAKlbxB:/~BUN/root/_812.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_842.jsB:/~BUN/root/_850.js
+- #8 @137439250 B:/~BUN/root/_807.jsB:/~BUN/root/_808.jsB:/~BUN/root/_809.jsB:/~BUN/root/_810.jsB:/~BUN/root/_812.jsB:/~BUN/root/_813.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_816.js
+- #9 @137465372 B:/~BUN/root/_808.jsB:/~BUN/root/_809.jsB:/~BUN/root/_810.jsB:/~BUN/root/_811.jsB:/~BUN/root/_812.jsB:/~BUN/root/_813.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_816.js
+- #10 @137480053 B:/~BUN/root/_808.jsB:/~BUN/root/_809.jsB:/~BUN/root/_810.jsB:/~BUN/root/_811.jsB:/~BUN/root/_812.jsB:/~BUN/root/_813.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_816.js
+- #11 @139239772 B:/~BUN/root/_804.jsB:/~BUN/root/_805.jsB:/~BUN/root/_806.jsB:/~BUN/root/_810.jsB:/~BUN/root/_812.jsB:/~BUN/root/_813.jsB:/~BUN/root/_814.jsB:/~BUN/root/_815.jsB:/~BUN/root/_819.js
+
+## qcd as hits=11
+- #0 @208213312 ttps://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{pdd as S,qcd as g}from"B:/~BUN/root/_812.js";import{Edd as l,Ndd as j,xdd as r,zdd as p}from"B:/~BUN/root
+- #1 @209048193 /~BUN/root/_705.js";import{t5c as y,u5c as be}from"B:/~BUN/root/_759.js";import{pdd as Re,qcd as le}from"B:/~BUN/root/_812.js";import{Edd as ae,Ndd as Me}from"B:/~BUN/root/_814.js";impor
+- #2 @209078621 /~BUN/root/_794.js";import{i_c as H,j_c as Dt}from"B:/~BUN/root/_800.js";import{pdd as tn,qcd as We}from"B:/~BUN/root/_812.js";import{Add as j,Bdd as Ke,Edd as Ye,Ndd as en,xdd as C}from
+- #3 @211781322 ttps://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{pdd as T,qcd as f}from"B:/~BUN/root/_812.js";import{Edd as c,Ndd as b,xdd as m,ydd as a}from"B:/~BUN/root
+- #4 @212850971 n,Pbd as aNn,Rcd as L6t,Wbd as lNn,mbd as EYn,nbd as Vge,pbd as EXo,pdd as n_e,qbd as OOr,qcd as DE,ybd as gAs}from"B:/~BUN/root/_812.js";import{qdd as DOr,rdd as y3e,sdd as $Or}from"B:/
+- #5 @219857278 ,nbd as u,ncd as Ir,ndd as Di,ocd as vr,odd as $e,pbd as Ae,pcd as Rl,pdd as Ie,qbd as de,qcd as z,rbd as Br,rcd as Xs,sbd as y,scd as Js,tbd as Mn,tcd as Zs,ubd as eu,ucd as Fl,vbd as k
+- #6 @221689419 ~BUN/root/_806.js";import{ebd as Io,fbd as Ac}from"B:/~BUN/root/_809.js";import{pdd as bl,qcd as fo}from"B:/~BUN/root/_812.js";import{Edd as it,Ndd as Qt,xdd as _n}from"B:/~BUN/root/_814
+- #7 @222022054 /~BUN/root/_795.js";import{C9c as Le,H9c as C}from"B:/~BUN/root/_797.js";import{pdd as Je,qcd as G}from"B:/~BUN/root/_812.js";import{Edd as fe,Ndd as Ge,xdd as v}from"B:/~BUN/root/_814.j
+- #8 @226354972 de.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ecd as f,pdd as P,qcd as p}from"B:/~BUN/root/_812.js";import{Edd as d,Ndd as l}from"B:/~BUN/root/_814.js";import{I
+- #9 @228404969 .js";import"B:/~BUN/root/_807.js";import"B:/~BUN/root/_808.js";import{Rcd as qt,pdd as Pr,qcd as Ge}from"B:/~BUN/root/_812.js";import"B:/~BUN/root/_813.js";import{Edd as W,Ndd as Kt,xdd 
+- #10 @235557823 /root/_809.js";import"B:/~BUN/root/_810.js";import"B:/~BUN/root/_811.js";import{pdd as ko,qcd as sr}from"B:/~BUN/root/_812.js";import"B:/~BUN/root/_813.js";import{Edd as Un,Ndd as _o,xdd
+
+## export{qcd hits=0
+
+##  as qcd} hits=0
+
+##  as qcd, hits=1
+- #0 @208212142  as hcd,Ga as icd,Ha as jcd,Ua as kcd,Nr as lcd,Ya as mcd,Mr as ncd,Va as ocd,Ba as pcd,Ja as qcd,on as rcd,ln as scd,dn as tcd,Br as ucd,fn as vcd,mn as wcd,ye as xcd,Zr as ycd,Wa as zcd,
+
+## function z(e) hits=17
+- #0 @207246559 DE_CODE_CHILD_SESSION&&b()&&!c()))return!1;return!n().isChildSessionMarkerAmbientInTmux()}function z(e){n().setAmbientMarkerProbe(e??_)}function I(e){let t=null;return()=>{if(t===null)try{t=e()
+- #1 @207322661 e,qxd as d,rxd as G}from"B:/~BUN/root/_841.js";import{FBd as a}from"B:/~BUN/root/_850.js";function z(e){var t=e.length;while(t--&&_.test(e.charAt(t)));return t}var _,l;var x=a(()=>{_=/\s/;l=z})
+- #2 @207774644 :"none"}function C(e){return e!==null&&typeof e==="object"&&"code"in e&&e.code==="ENOENT"}function z(e){return{skipScopeStats:!0,skipKeyStats:!0,...e!==void 0&&{cursor:e}}}function ke(e){let n=
+- #3 @208174544 on X(e){return Array.isArray(e)&&typeof e[0]==="string"&&E(e[0]).some((n)=>z(n)!==void 0)}function z(e){if(!e.endsWith(K))return;let n=e.slice(0,-K.length);return Rn(n)?n:void 0}function Pn(e){
+- #4 @208369489 on we(e){if(!b()||!e.startsWith(m))return!1;let t=e.slice(m.length);return C(t)&&z(t)===t}function z(e){if(typeof e!=="string"||e.length>H)return a;let t;try{t=new URL(e)}catch{return a}if(t.pr
+- #5 @209132002 eturn e.some((t)=>(t.kind==="grouping"||_(t.path)==="grouping")&&t.visibility!=="public")}function z(e){return _(e.path)==="silo"&&e.kind!=="grouping"&&e.kind!=="grouping_root"}function fr(e){r
+- #6 @209258212 f,...c])}else o=a(e,"list",o.startIndex,r.endIndex,[o,i,r])}else{m(e.L,t);break}}return o}function z(e){while(!0){let o=T(e.L);if(I(e.L,"cmd").type!=="NEWLINE"){m(e.L,o);break}}}function ve(e){
+- #7 @212386637 bject"&&t!==null&&"text"in t&&typeof t.text==="string")return t.text;return""}).join(" ")}function z(e){return E(e).toLowerCase().includes("re-authenticated")}var f,ze=async(e,t,o,n,l)=>{let{ar
+- #8 @221931776 }catch(r){n(`removeDaemonStatus: ${m(r)}`)}return}try{await s().delete(c())}catch{}}async function z(e){let r;if(a()&&e!==void 0){let i;try{i=await e.readText([l()])}catch{return null}if(!i.ok)
+- #9 @223442231 ${i}`),{code:"XDG_MIME_FAILED"})}c(`Registered ${o}:// protocol handler at ${m()}`)}async function z(e){for(let t of[["add",g,"/ve","/d",`URL:${w}`,"/f"],["add",g,"/v","URL Protocol","/d","","/
+- #10 @223589873 on())return!1;e.clearSelection()}},{context:"Scroll",isActive:t})}N();B();R();E();A();O();function z(e){let t=S(),o=p(e),r=o===1?"char":"chars",n;switch(t){case"native":n=`copied ${o} ${r} to c
+- #11 @226297267 ait Y(I(e,"HEAD"))).isDirectory()}catch(t){let n=C(t);return n!=="ENOENT"&&n!=="ENOTDIR"}}function z(e){let t=e==="WORKING_LANDED_OUTSIDE"?Error("write landed outside the sync tree"):Error("des
+
+## function Ua( hits=15
+- #0 @206502766  place";var Fa=()=>{};var Da="skipped; its last next() run's result stands";var Ba=()=>{};function Ua(e,t,r){let n=!1,s=()=>{n=!0};e.then(s,s),setTimeout(()=>{if(n||he(t))return;let c=tt(t.nam
+- #1 @208169130 nction tn(e){let n=e?.[0];return typeof n==="string"&&E(n).includes(ze)?"refuse":"follow"}function Ua(e,n,r){return Or(e,n,r)?"refuse":Kr(n)}function Or(e,n,r){switch(n.namespace){case"memory"
+- #2 @210370987 0})}function Ki(e,t){return _Z(e,nh(t))}function Fne(){return null}function SZ(){return{}}function Ua(){return Te().tenguSandboxGbConfig()}function Mne(){let e=Te();if(e.tenguSandboxGbConfig.c
+- #3 @219966051  K(e,{kind:"updated",key:r,version:d.value.version,value:t}),m({version:d.value.version})}function Ua(e){return e==="atomic"||e==="followDefault"||e==="refuseDefault"||e==="rewriteDefault"}asy
+- #4 @223302138 ation_bypass_permissions_write_failed"),!1}}Pe();ce();ft();Ce();pe();Un();Ht();ye();async function Ua(e){if(Ee()!=="firstParty")return!0;if(!Fa())return!0;let t=Z("userSettings")?.model;if(t!=
+- #5 @225674554 ts.clearBackToTableContext(),e._insertElement(t,E.HTML),e.insertionMode=i.IN_COLUMN_GROUP}function Ua(e,t){e.openElements.clearBackToTableContext(),e._insertFakeElement(c.COLGROUP,u.COLGROUP),
+- #6 @226178086 r d=wr.join("");if(wr.length=0,ma.test(d))rt=!0,S(Gt,d),rt=!1;else Ie(d);h=Pe,h(n,i,o,x)}}function Ua(n,i,o,x){function d(){if(!u.inTableScope("caption"))return!1;return u.generateImpliedEndTa
+- #7 @228169602  images to join")}else if(l.defined(r))throw Error(`Invalid input options ${r}`);return i}function Ua(e,r,t){if(Array.isArray(this.options.input.buffer))if(l.buffer(e)){if(this.options.input.b
+- #8 @228503711 rt:r,abortController:i}=hs(t,{isSingleUserTurn:typeof e==="string"});return Ss(s,r,e,i),s}function Ua(e,t){let{queryInstance:s,transport:r,abortController:i,processEnv:n}=hs({...t},{isSingleUs
+- #9 @231177462  as Ba,writeFile as Za}from"fs/promises";import{dirname as $n,join as Sn}from"path";async function Ua(t,o){if(t==="user")return Ne();let n=Si(o);if(n===null)return Sn(o,".claude","workflows");
+- #10 @233665320 r();Vd();Hd();ba();Xd();Qe();we();Kd();$r();Yd();Qt();Si();Ae();$e();Wd();Je();qd();async function Ua(e,t){if(e.includes(I.sep)||e.includes("/"))return{kind:"path",root:e};let n=Xr(e);if(!n&&e
+- #11 @235351965 ===null)return null;let s=new Set(o.map((a)=>a.path));return i.every((a)=>!s.has(a.path))}function Ua(e){return[...new Map(e.map((t)=>[t.path,t])).values()]}async function Ya(e,t,n){if(n===t.h
+
+## expected a key object hits=2
+- #0 @204435408 path separator, NUL or set-aside shape$...,.U. keys are values, not record streams......U.expected a key object.......<o.. is not a storage namespace.......~.expected a non-empty array of segments, non
+- #1 @208170486 &&!T(i))return!1}return!0}function Ja(e){if(typeof e!=="object"||e===null)return s("key","expected a key object");let n=hn(e);if(n!==void 0)return n;let r=Dn(e);if(r===void 0)return s("key",`${e.namesp
+
+## is not a storage namespace hits=2
+- #0 @204435441 shape$...,.U. keys are values, not record streams......U.expected a key object.......<o.. is not a storage namespace.......~.expected a non-empty array of segments, none empty or made only of dots and space
+- #1 @208170602 t n=hn(e);if(n!==void 0)return n;let r=Dn(e);if(r===void 0)return s("key",`${e.namespace} is not a storage namespace`);return sn("key",r)}function sn(e,n){for(let[r,t,o]of n){let i=`${e}.${r}`;if(t===void 0
+
+## key-object-win @204435408
+ator, NUL or set-aside shape$...,.U. keys are values, not record streams......U.expected a key object.......<o.. is not a storage namespace.......~.expected a non-empty array of segments, none empty or made only of dots and spaces, with no path separator, NUL or set-aside shape..
+....K..key.digest..=.....V.must be a SHA-256 digest: 64 lowercase hexadecimal characters...........key.kind	...1...key.stamp...%.......a recovery copy key carries its stamp......p...key.sessionId...
+
+## key-object-lastFn @-1
+MISS
+
+## export from _448 kb hits=1
+- #0 @219710851 Sa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd as FSa,is a
+
+## _448.js token hits=736
+- #0 @137458992 salunlockAgentWorktreevalidateWorktreeSlugworktreeBranchNameB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.jsB:/~BUN/root/_451.js
+- #1 @139507670 KV$nLVCnMVAnNVnrOVFnPVMnQVorRVTnSVOnTVInUVcrVVUnWVLnXVNnYVhrB:/~BUN/root/_448.jsB:/~BUN/root/_503.jsB:/~BUN/root/_671.jsB:/~BUN/root/_675.js
+- #2 @140378771 B:/~BUN/root/_433.jsB:/~BUN/root/_434.jsB:/~BUN/root/_435.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.jsB:/~BUN/root/_451.js
+- #3 @141476414 0561dcbzbquczb0ec165a1f1be4a04C00000851dDBdBlFBdAwYbBwHbCwKuB:/~BUN/root/_448.jsB:/~BUN/root/_561.jsB:/~BUN/root/_850.js.......g..`...W.....
+- #4 @141544298 B:/~BUN/root/_201.jsB:/~BUN/root/_221.jsB:/~BUN/root/_292.jsB:/~BUN/root/_448.jsB:/~BUN/root/_490.jsB:/~BUN/root/_544.jsB:/~BUN/root/_552.js
+- #5 @141763366 B:/~BUN/root/_183.jsB:/~BUN/root/_199.jsB:/~BUN/root/_313.jsB:/~BUN/root/_448.jsB:/~BUN/root/_475.jsB:/~BUN/root/_481.jsB:/~BUN/root/_484.js
+- #6 @141839806 wPioxProyPcozPloAPfoBPmoCPpoDPRoEPbtFPgoGPhoHPAoIP_oJPwtKPStB:/~BUN/root/_448.jsB:/~BUN/root/_539.jsB:/~BUN/root/_584.jsB:/~BUN/root/_675.js
+- #7 @141870205 B:/~BUN/root/_342.jsB:/~BUN/root/_343.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_508.jsB:/~BUN/root/_521.jsB:/~BUN/root/_525.js
+
+## xSa in table hits=1
+- #0 @137431544 zwefSaUfgSabLhSaL0eiSaKYtjSaaTekSaTmlSaPytmSanSaoSauQspSatooqSaAndrSasSaxndtSauSavSa$oowSaxSakbySazIzSaASaDQsBSaHooCSaQkDSaJIESaDndFSa$ndGSaisHSa$QsISaMCtJSaLQsKSaaWrLSadGtMSaIlNSaLndOS
+
+## kbxSa hits=0
+
+## array-filter-sidechain hits=1
+- #0 @222031499 type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e.uuid),t.push(e.type==="user"?{type:"user
+
+## for of messages ye hits=1
+- #0 @222031390 ull)continue;if(e.type==="system"&&e.subtype==="compact_boundary"){o=t.length;continue}if(e.type!=="user"&&e.type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.h
+
+## zI as ySa hits=1
+- #0 @219710861 pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd as FSa,is as GSa,$Qs 
+
+## function zI( hits=4
+- #0 @208567320 DEL!==void 0&&c.ANTHROPIC_DEFAULT_OPUS_MODEL!==c.CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT}}function zI(){if(c.ANTHROPIC_SMALL_FAST_MODEL!==void 0)return!0;let e=A(),t=e==="firstParty"&&(Be()||W
+- #1 @219409445 e.length,firstToolUseIdx:n}),e;return[...e.filter((a,l)=>!t(l)),...e.filter((a,l)=>t(l))]}function zI(e){if(e.type!=="user")return!1;let t=e.message.content;if(typeof t==="string")return!1;ret
+- #2 @229843904 antFieldMeta","__antSubFieldMeta","__antVariantMeta"])if(i[o]!==void 0)n[o]=i[o];return r}function zI(e){return fa.z.object({k:e}).safeParse({}).success}function pa(e,t=0){var r;let i="  ".rep
+- #3 @242361656 r,i){var n=""+t,a=""+r;if(!e&&n>a){var s=n;n=a,a=s}var l={v:n,w:a};return i&&(l.name=i),l}function zI(e,t){return Db(e,t.v,t.w,t.name)}var zJe,Vp,Nhe,ui,t3=z(()=>{"use strict";ci();zJe="\0",Vp
+
+## zI= hits=2
+- #0 @207220011 SOCKET:()=>ZI,CLAUDE_CODE_MESSAGING_TOKEN:()=>zI});var ZI,zI;var bt=r(()=>{D();ZI=t.str(),zI=t.str()});var dt={};c(dt,{udsInboxShape:()=>jI});var jI;var mt=r(()=>{bt();jI={...v}});fun
+- #1 @249786685 ot available to this view."};return t.publish(e)}}var HI="appifact-doc",FI="appifact-app",zI="appifact-style",qZ=["appifact","emulator","shim"].join("-"),YZ="appifact-capabilities",XZ
+
+## Yne( hits=6
+- #0 @210428198  script to a file and run that file instead, or split the command up.");return e}function Yne(e,t){if(e!==16)return;let n=bb(t);if(n?.code!=="mapped_drive_cwd")return;return La("sandbo
+- #1 @217977544 {let o=IOs(e),{base:s,nativeExt:i}=TWt(o);if(s==="git"){let c=MOs(o);if(c==="grep")return Yne(t,n,r);if(c==="diff")return AOs(t,n,r)}let a=n.trim()!==""||r.trim()!=="";return((i==="exe
+- #2 @233001065 ,...qE&&{appearance_id:oo(qE)},...VE&&{survey_type:ke(VE)}}),zd&&$p==="/feedback"&&qE&&VE)Yne({appearanceId:qE,response:zd,surveyType:VE,setAt:Date.now()});if($p)Gne?.($p)},KE[2]=qE,KE
+- #3 @242218204 (()=>{"use strict";Wt();Kt();jt();Ht();o(Une,"taggedWaveEdgedRectangle")});async function Yne(e,t){let{labelStyles:r,nodeStyles:i}=ct(t);t.labelStyle=r;let{shapeSvg:n,bbox:a}=await At(
+- #4 @250339246 ,t){(0,qne.useEffect)(()=>{if(t)return WF[e]++,Kne(),()=>{WF[e]--,Kne()}},[e,t])}function Yne(e){ske("progress",e)}var qF='<defs><marker id="dc-arrow-head" orient="auto" markerWidth="5
+- #5 @250527444 .useRef)(null),tt=(0,ye.useCallback)(()=>ir(e.current),[e]),[er,Tn]=(0,ye.useState)(null);Yne(er!=null);let[Ho,Wn]=(0,ye.useState)(null),[Yt,Ut]=(0,ye.useState)(!1),[gr,Ei]=(0,ye.useSt
+
+## Yne= hits=1
+- #0 @217977928 oid 0}),Yne,AOs,POs,xOs,OOs,DOs,$Os,LOs,NOs,GUr,FOs,UOs,BOs,jOs;var JUr=w(()=>{BC();vWt();Yne=Wwe("No matches found"),AOs=Wwe("Files differ"),POs=new Map([["grep",Yne],["rg",Yne],["egr
+
+## Os-as-Yne-use @232030386
+$,ns as FQe,os as LQe,ps as NQe,qs as r$}from"B:/~BUN/root/_151.js";import{rs as OQe,ts as BQe,us as ex,ws as l$}from"B:/~BUN/root/_152.js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/~BUN/root/_163.js";import{Ht as n2e,wt as o2e}from"B:/~BUN/root/_165.js";import{Jt as VEe}from"B:/~BUN/root/_166.js";import{tu as fP}from"B:/~BUN/root/_175.js";import{wu as nne}from"B:/~BUN/root/_178.js";import{Au as qAe,Bu as VAe,xu as jAe,yu as $Ae,zu as WAe}from"B:/~BUN/root/_179.js";import{
+
+## function Os(){let s=Ce() hits=1
+- #0 @222032646 ctSummary===!0),c=n===-1?s.length:n;return[...i,...s.slice(0,c),...t,...s.slice(c)]}async function Os(){let s=Ce();if(!s)return null;try{await Fe();let{content:a,bytesRead:u,bytesTotal:i}=await w(s,vs),t=
+
+## Os-feedback-222032646 @222032646
+len=240 sha=4dc432dceefd7093
+function Os(){let s=Ce();if(!s)return null;try{await Fe();let{content:a,bytesRead:u,bytesTotal:i}=await w(s,vs),t=a;if(u<i)t=t.slice(t.indexOf(`
+`)+1),t=`[debug log truncated to last ${u} of ${i} bytes]
+${t}`;return k(t)}catch{return null}}
+
+## Os-feedback-neighbors @222032646
+push(o);else t.push(o);if(t.length===0)return[...i,...s];let n=s.findLastIndex((o)=>o.type==="user"&&o.isCompactSummary===!0),c=n===-1?s.length:n;return[...i,...s.slice(0,c),...t,...s.slice(c)]}async function Os(){let s=Ce();if(!s)return null;try{await Fe();let{content:a,bytesRea
+
+## export{Os,Ps hits=0
+
+## export{Ps,Qs hits=0
+
+## export{Qs,Os hits=0
+
+## export{Os as Os hits=0
+
+## ,Ps,Qs, hits=0
+
+## Ps,Qs,Os hits=0
+
+## Qs,Os,Ps hits=0
+
+## surveyFeedbackSource: hits=9
+- #0 @222032996 essages:s,description:a,surface:u,scope:i="session",backgroundTasks:t={},transcripts:n={},surveyFeedbackSource:c,excludeThirdPartyTranscripts:o,storageV5:p}){let[r,f]=await Promise.all([Te({messages:s,
+- #1 @222038121 ages:s,description:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,signal:c,surveyFeedbackSource:o,storageV5:p,credentials:r}){let{payload:f,thirdPartyDroppedCount:d}=await Ue({messages:s
+- #2 @222038297 t:d}=await Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:o,excludeThirdPartyTranscripts:!0,storageV5:p}),e=f.latestAssistantMessageId,m=await D(f,c
+- #3 @222040704  Ot({messages:s,description:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,storageV5:o}){let p;try{let{payload:r}=await Ue({messages:s,description:a,surface:u,scop
+- #4 @222040851 d:r}=await Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,excludeThirdPartyTranscripts:!1,storageV5:o}),f=xe(r);p=E(f,se,te)}catch(r){return R(r),
+- #5 @237072767 ssages:n,initialDescription:c,onDone:d,backgroundTasks:b={},mode:p="post",readFileState:x,surveyFeedbackSource:K}){let{storageV5:J,credentials:A}=ue(),[m,h]=u("userInput"),[Q,X]=u(0),[S,Y]=u(c??""),[w,
+- #6 @237073310 wait rt({messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,surveyFeedbackSource:K,storageV5:J});if(W.success)ee(W.bundleId),ie(W.zipPath),h("done");else U(`Couldn't save 
+- #7 @237073608 messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,signal:l,surveyFeedbackSource:K,storageV5:J,credentials:A}),le?Promise.resolve(null):At(S,l,A)]);if(Wt(ke),i.success)ee(
+- #8 @237083578 :n,messages:c,initialDescription:d,onDone:l,backgroundTasks:b,mode:x.kind,readFileState:p,surveyFeedbackSource:K})}function ut(l,n,c){return Yo(l,n.abortController.signal,n.messages,c,{...n.taskRegistr
+
+## tengu_survey hits=0
+
+## feedback_survey hits=61
+- #0 @197161649 .handleFollowupResolve.......vS7.thanksFromFollowup.......o..submittingShare.....(...good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_conf
+- #1 @197161677 .vS7.thanksFromFollowup.......o..submittingShare.....(...good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_config&...=...tengu_bad_survey_t
+- #2 @197161704 ...o..submittingShare.....(...good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_config&...=...tengu_bad_survey_transcript_ask_config..'....
+- #3 @197161734 good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_config&...=...tengu_bad_survey_transcript_ask_config..'....]..tengu_fine_survey_transcrip
+- #4 @197164976 reen......<.{.hidesPrompt......s..tengu_post_compact_survey_event.....p.f.appeared.....g0.feedback_survey......UD.post_compact
+....E..event_type.........appearance_id...........survey_type.	...4
+- #5 @197165381 onTokens.......".hasActivePrompt.....f*..chain........j .ratedInStore"....-..tengu_plugin_feedback_survey_event.......C..trigger_type	...nd..lastShown...........features....M75.subject.#...L...te
+- #6 @197165497 ..C..trigger_type	...nd..lastShown...........features....M75.subject.#...L...tengu_plugin_feedback_survey_config......?..Sending feedback.....f,.followup_prompt.....S.k.onRequestFeedback......._.
+- #7 @197294450 B.......Cannot destructure property 'success' from null or undefined value........k.tengu_feedback_survey_event......X9.transcript_share_yes.....:.last_assistant_message_id...........^[ \t]*\d{1
+- #8 @199050048 mit feedback because custom data retention settings are enabled.........X.zdr_org.......R.feedback_survey_followup....Hl..survey_followup......$..tengu_bug_report_submitted..........tengu_bug_rep
+- #9 @203814043 s-surface last-shown time the host can't read. Survey responses are proxied back as tengu_feedback_survey_event log_event notifications............lastSurveyShownTime.........@.i.n.t.e.r.n.a.l. .
+- #10 @203820168 unt info.....3.N.hooks_applied...%.......permission_mode_from_default_fallback........`..feedback_survey_config........g.remote_control_auto_enable..!.......remote_control_auto_on_by_default....
+- #11 @205165265 ed mid-flight....xw..getDynamicMcpState......`...setDynamicMcpState.......I..tengu_vscode_feedback_survey........notification_channel_error..k...
+ 6.is the current working directory, which is alr
+
+## getFeedbackSurvey hits=0

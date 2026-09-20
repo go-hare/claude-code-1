@@ -1,0 +1,2 @@
+# function ne(){ NOT UNIQUE — _584 Kr / qa unlocked
+function Kr(){let e=qa();return["/dev/stdout","/dev/stderr","/dev/null","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",Ft.join(e,".npm/_logs"),Ft.join(e,".claude/debug")]}

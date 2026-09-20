@@ -1,0 +1,3 @@
+# 247 _g( @209985568
+
+ Set((t??[]).map(Ld))],s=[];for(let m of e.envVars??[])if(m.mode==="deny")s.push(m.name);let{setEnvVars:i,degradeToUnsetNames:a}=Eg(e.envVars??[],r,Rs);s.push(...a),Ag(e.envVars??[],e.awsPairs,r,i,Dc);let l=e.files??[],{binds:d,degradeToDenyPaths:f}=_g(l,r,Rs,kc);return{denyReadPaths:[...new Set([...n,...f])],unsetEnvVars:[...new Set(s)],setEnvVars:i,maskedFileBinds:d,maskedFileStoreDir:kc.dirPath}}function Pc(e){let t=e?.files??[];return[...new Set(t.filter((n)=>n.mode==="deny").map((n)=>n.path))]}function Ub(e,t){return[...new Set([...e,...t.denyReadPaths])]}function bD(){if(!V||V.filesystem

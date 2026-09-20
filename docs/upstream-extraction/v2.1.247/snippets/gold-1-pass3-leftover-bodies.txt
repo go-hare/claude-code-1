@@ -1,0 +1,106 @@
+# gold-1-pass3-leftover-bodies
+
+CONTRACT: these are leftover-wired 246=247 bodies that LOCAL still lacks.
+NOT a 247 HAVE license. Do not invent SendFeedback tool, /feedback
+draft-review UI, or feedbackDrafts setting from this inventory.
+
+Collision-ban: do NOT bind src/components/Feedback.tsx, src/commands/feedback,
+or tengu_feedback / tengu_feedback_survey_* analytics (old manual report).
+
+## 1. tool name (247 var xgr / 246 var Dpr)
+# 247 @216531362 var xgr="SendFeedback"; | 246 @215149777 var Dpr="SendFeedback";
+
+var xgr="SendFeedback";
+var Dpr="SendFeedback";
+
+## 2. tool object (includes name/call/isEnabled; leftover-wired, rename-only)
+# 247 hint@216537033 len=3927 sha=73e155e70a9c1170 head=ly if genuinely unclear.")})),qfs=ae(()=>pe({success:Qe(),message:I()})),$gr=Gt(
+# 246 hint@215155448 len=3927 sha=1ffe78113932d91c
+# normEq=false normSha=4944224cbd41f98d
+
+{name:xgr,maxResultSizeChars:1000,searchHint:"draft product or model-behavior feedback report queue",async description(){let{description:e}=j_e();return typeof e==="string"&&e!==""?e:Mgr},async prompt(){let{prompt:e}=j_e();return typeof e==="string"&&e!==""?e:Ogr},get inputSchema(){return Wfs()},get outputSchema(){return qfs()},isReadOnly(){return!1},isConcurrencySafe(){return!0},isEnabled(){return aLt()},async checkPermissions(e,t){return{behavior:"allow",updatedInput:e}},async call(e,t){if(!aLt())return{data:{success:!1,message:"SendFeedback is not enabled in this session."}};if(!Rgr()){let k=LKe();return D("tengu_feedback_draft_call_capped",{cap:Ha(k)}),{data:{success:!1,message:`SendFeedback has reached its limit of ${k} calls per session. Do not call it again this session; drafts already queued are unaffected and the user can review them with /feedback.`}}}let n=qe(),{getTranscriptPathForSession:r}=await import("B:/~BUN/root/chunk-1fjh16vg.js"),o=WKe(),s=t.messages??[],i=[];for(let k of s)if(k.type==="assistant"&&k.requestId)i.push(k.requestId);let a=o?[...i,o]:i,l=Cn(a),c=l.slice(-Bfs),u=i.length===0?new Set(s.flatMap((k)=>k.type==="assistant"&&!k.isVirtual&&k.message.model!==ub?[k.message.id]:[])).size:0,d=Math.max(l.length,u+(o?1:0)),p=Le(t).mode,f=Kk({permissionMode:p,mainLoopModel:Od(t),exceeds200kTokens:p==="plan"&&iV(s)}),m=Bee(f,gc(t)),g=ZQ(t),h=_gr({type:e.type,title:e.title,details:e.details,area:e.area,failureMode:e.failure_mode,taskCategory:e.task_category,trigger:"model_judgment",requestIds:c,sessionId:n,cwd:ze(),model:f,cliVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.247",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-26T05:55:19Z",GIT_SHA:"89c726188daf6407b6b57bf67d312f2958e5b9f2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION,os:`${V.platform} x64`,effort:jfs(m),thinkingType:g.type,thinkingBudget:g.type==="enabled"?g.budgetTokens:void 0,messageCount:s.length,assistantTurnCount:d,subagentCount:Hfs(t),transcriptFile:r(n)}),y=await bgr(h,new Date,t.storageV5);if(!y.success)return J("feedback_drafts",y.reason),{data:{success:!1,message:y.reason==="too_large"?"Draft too large. Shorten the details and try once more.":"Could not write the feedback draft to disk."}};let b=Qt(y.evicted,(k)=>k.source_session_id===n);if(b>0)Agr(b);let S=Cgr({draftId:h.draft_id,title:h.title,type:h.type,detailsPreview:(()=>{let k=h.details.split(`
+`),T=k.slice(0,lLt).join(`
+`),v=Uee(T,Egr);return v!==T||k.slice(lLt).some((C)=>C.trim()!=="")?`${v}\u2026`:v})()});return D("tengu_feedback_draft_created",{type:X(h.type),trigger:X(h.trigger),presentation:X(S),request_id_count:Ha(h.request_ids.length),evicted_count:Ha(y.evicted.length),failure_mode:An(h.failure_mode),task_category:An(h.task_category),effort:zfs(m),thinking_type:An(h.thinking_type),thinking_budget:h.thinking_budget!==void 0?Ha(h.thinking_budget):void 0,message_count:h.message_count!==void 0?Ha(h.message_count):void 0,assistant_turn_count:h.assistant_turn_count!==void 0?Ha(h.assistant_turn_count):void 0,subagent_count:h.subagent_count!==void 0?Ha(h.subagent_count):void 0}),ce("feedback_drafts"),Bp({type:"system",subtype:"feedback_draft_queued",draft_id:h.draft_id,draft_type:h.type,title:h.title,details_preview:Uee(h.details,200)}),{data:{success:!0,message:`Feedback draft queued locally (max ${FKe} kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it.`}}},mapToolResultToToolResultBlockParam(e,t){return{type:"tool_result",tool_use_id:t,content:e.message,is_error:!e.success}},renderToolUseMessage(e){return typeof e.title==="string"?jKe(e.title):""}}
+
+## 3. async call() leftover-wired (MACRO stamp VERSION/BUILD_TIME/GIT_SHA/chunk id differ)
+# 247 assign@216531362 rel=6115 len=3253 sha=0a104dcd7311f521
+# 246 assign@215149777 rel=6115 len=3253 sha=9aa3f17a9e6c2682
+# normEq=false normSha=ff09909b19eaee12/cd1d9a1bc716350f
+
+async call(e,t){if(!aLt())return{data:{success:!1,message:"SendFeedback is not enabled in this session."}};if(!Rgr()){let k=LKe();return D("tengu_feedback_draft_call_capped",{cap:Ha(k)}),{data:{success:!1,message:`SendFeedback has reached its limit of ${k} calls per session. Do not call it again this session; drafts already queued are unaffected and the user can review them with /feedback.`}}}let n=qe(),{getTranscriptPathForSession:r}=await import("B:/~BUN/root/chunk-1fjh16vg.js"),o=WKe(),s=t.messages??[],i=[];for(let k of s)if(k.type==="assistant"&&k.requestId)i.push(k.requestId);let a=o?[...i,o]:i,l=Cn(a),c=l.slice(-Bfs),u=i.length===0?new Set(s.flatMap((k)=>k.type==="assistant"&&!k.isVirtual&&k.message.model!==ub?[k.message.id]:[])).size:0,d=Math.max(l.length,u+(o?1:0)),p=Le(t).mode,f=Kk({permissionMode:p,mainLoopModel:Od(t),exceeds200kTokens:p==="plan"&&iV(s)}),m=Bee(f,gc(t)),g=ZQ(t),h=_gr({type:e.type,title:e.title,details:e.details,area:e.area,failureMode:e.failure_mode,taskCategory:e.task_category,trigger:"model_judgment",requestIds:c,sessionId:n,cwd:ze(),model:f,cliVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.247",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-26T05:55:19Z",GIT_SHA:"89c726188daf6407b6b57bf67d312f2958e5b9f2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION,os:`${V.platform} x64`,effort:jfs(m),thinkingType:g.type,thinkingBudget:g.type==="enabled"?g.budgetTokens:void 0,messageCount:s.length,assistantTurnCount:d,subagentCount:Hfs(t),transcriptFile:r(n)}),y=await bgr(h,new Date,t.storageV5);if(!y.success)return J("feedback_drafts",y.reason),{data:{success:!1,message:y.reason==="too_large"?"Draft too large. Shorten the details and try once more.":"Could not write the feedback draft to disk."}};let b=Qt(y.evicted,(k)=>k.source_session_id===n);if(b>0)Agr(b);let S=Cgr({draftId:h.draft_id,title:h.title,type:h.type,detailsPreview:(()=>{let k=h.details.split(`
+`),T=k.slice(0,lLt).join(`
+`),v=Uee(T,Egr);return v!==T||k.slice(lLt).some((C)=>C.trim()!=="")?`${v}\u2026`:v})()});return D("tengu_feedback_draft_created",{type:X(h.type),trigger:X(h.trigger),presentation:X(S),request_id_count:Ha(h.request_ids.length),evicted_count:Ha(y.evicted.length),failure_mode:An(h.failure_mode),task_category:An(h.task_category),effort:zfs(m),thinking_type:An(h.thinking_type),thinking_budget:h.thinking_budget!==void 0?Ha(h.thinking_budget):void 0,message_count:h.message_count!==void 0?Ha(h.message_count):void 0,assistant_turn_count:h.assistant_turn_count!==void 0?Ha(h.assistant_turn_count):void 0,subagent_count:h.subagent_count!==void 0?Ha(h.subagent_count):void 0}),ce("feedback_drafts"),Bp({type:"system",subtype:"feedback_draft_queued",draft_id:h.draft_id,draft_type:h.type,title:h.title,details_preview:Uee(h.details,200)}),{data:{success:!0,message:`Feedback draft queued locally (max ${FKe} kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it.`}}}
+
+## 4. aLt() isEnabled wrapper (246 gDt) NORM-SAME leftover
+# 247 aLt @216529629 sha=fa067907ed777bba | 246 gDt @215148044 sha=eac99442b752f08d normEq=true
+
+function aLt(){return Ffs()!=="off"&&Ufs()}
+
+## 5. Ufs() session gate (246 gls) NORM-SAME leftover
+# 247 Ufs @216529291 sha=d18191a530989b34 | 246 gls @215147706 sha=4ea6bd4d8d20a9f1 normEq=true
+
+function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}
+
+## 6. Ffs() get feedbackDrafts default notify (246 mls) NORM-SAME leftover
+# 247 Ffs @216529234 sha=6568f645721a8873 | 246 mls @215147649 sha=21529a45036a3584 normEq=true
+
+function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}
+
+## 7. IE() getAllBaseTools slot (246 mE) leftover-wired unconditional $gr/Upr; no feature()
+# 247 IE @217921796 sha=d38d916672ce2b45 len=714
+# 246 mE @216470006 sha=9a176d3dadc21457 len=713
+# normEq=true normSha=253745c642660929/253745c642660929
+
+function IE(){let e=YMs();return[OVe,Rfr,...xs()?[ts]:[],...[bb,VS].filter((t)=>!pse().has(t.name)),iz,Zc,Bd,fd,ZR,...Xmr,Fh,Hfr,Ffr,Dfr,KVe,J7,$gr,oee,g2e,...[],KMs,...e?[e]:[],XMs,...XFr?[XFr]:[],...Sb()?[tyr,ayr,pyr,yyr]:[],...VFr?[VFr]:[],...KFr?[KFr]:[],...JMs(),...YFr?[YFr]:[],...rhr()?[fLt]:[],...rUr()?[Ahr,Ghr]:[],lWt(),ZMs(),...eUr?[eUr]:[],...tUr?[tUr]:[],yKe,...PH?[PH]:[],...qne?[qne]:[],...zMs,...Eyr()?HMs:[],bfr,...BFr?[BFr]:[],...jFr?[jFr]:[],...zFr?[zFr]:[],Bdr,Fdr,...HFr?[HFr]:[],...WMs,...WFr?[WFr]:[],_pr,qMs,GMs,VMs,...qFr?[qFr]:[],...GFr?[GFr]:[],...cWt()?[cWt()]:[],...JFr?[JFr]:[],...QFr?[QFr()]:[],...[],ih,Bh,fv,...V.CLAUDE_CODE_ENABLE_REFRESH_MCP_TOOLS?[yLt]:[],...Ng()?[jWe]:[],kLt]}
+
+## 8. ee() fitFeedbackPayloadToBudget BYTE-IDENTICAL leftover (local lacks)
+# 247/246 sha=07fbddf252d9314e rawEq=true @247=232014080 @246=229883753
+
+function ee(e){let s=P(e);if(s<=F)return{payload:e,trim:null};using m=v`fitFeedbackPayloadToBudget(${s})`;let a=s-(F-De),t=e.transcript.map((b)=>Me(b)+1),p=t.reduce((b,T)=>b+T,0),_=e.rawTranscriptJsonl===void 0?0:G(e.rawTranscriptJsonl),y=a<=p?p-a:Math.max(0,p-Math.max(0,a-_)),{start:d,keptBytes:u,oversized:c}=z(t,y),l=e.transcript.slice(d),D=c.size===0?l:l.filter((b,T)=>!c.has(d+T)),k=a-(p-u),o=e.rawTranscriptJsonl,i=o===void 0?"absent":"untouched";if(k>0&&o!==void 0){let b=_-k;if(b<=0)o=void 0,i="omitted";else{let T=o.split(`
+`),Te=T.map((U)=>G(U+`
+`)),{start:V,oversized:Y}=z(Te,b),N=T.slice(V),X=(Y.size===0?N:N.filter((U,we)=>!Y.has(V+we))).join(`
+`);if(X==="")o=void 0,i="omitted";else o=X,i="reduced"}}let A={keptMessageCount:D.length,totalMessageCount:e.transcript.length,oversizedMessageCount:c.size,rawTail:i,rawTailKeptBytes:o===void 0?0:Buffer.byteLength(o)},f=Fe(A);if(f===null)return{payload:e,trim:null};let{rawTranscriptJsonl:C,...M}=e,h={...M,message_count:D.length,description:`${e.description}
+${f}`,transcript:D,...o!==void 0&&{rawTranscriptJsonl:o}},r=P(h);if(r>F)g(`fitFeedbackPayloadToBudget: still ${r} bytes after trim (budget ${F})`,{level:"error"});return{payload:h,trim:A}}
+
+## 9. Oe() parseDraftTranscriptMessages BYTE-IDENTICAL leftover (local lacks)
+# 247/246 sha=90e2c265307d953c rawEq=true @247=232016944 @246=229886617
+
+function Oe(e){let s=[];using m=v`parseDraftTranscriptMessages(${e.length})`;for(let a of e.split(`
+`)){if(!a)continue;let t;try{t=te(a)}catch{continue}if(typeof t!=="object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.message,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResult:t.toolUseResult},...t.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:t.uuid,timestamp:t.timestamp,message:t.message,requestId:t.requestId})}return s}
+
+## 10. Le() Drafted-by-Claude bylines BYTE-IDENTICAL leftover (local lacks)
+# 247/246 sha=e2e71de212b4451e rawEq=true @247=232015801 @246=229885474
+
+function Le(e,s="panel"){let m=J(e.request_ids),a=le(e.area),t=fe(e.failure_mode),p=pe(e.task_category),_=ge(e.effort),y=me(e.thinking_type),d=B(e.thinking_budget),u=B(e.message_count),c=B(e.assistant_turn_count),l=B(e.subagent_count);return[`[${e.type}] ${ue(e.title)}`,"",ce(e.details),"","---",s==="card_send_as_is"?"Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review.":"Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending.",`trigger: ${e.trigger}`,...a!==void 0?[`area: ${a}`]:[],...t!==void 0?[`failure_mode: ${t}`]:[],...p!==void 0?[`task_category: ${p}`]:[],`draft_id: ${e.draft_id}`,`drafted_at: ${e.created_at}`,`source_session_id: ${e.source_session_id}`,`model: ${de(e.model)}`,`cli_version: ${O(e.cli_version,ne)}`,`os: ${O(e.os,oe)}`,..._!==void 0?[`effort: ${_}`]:[],...y!==void 0?[`thinking: ${y}${d!==void 0?` (budget ${d})`:""}`]:[],...c!==void 0?[`turns: ${c} assistant${u!==void 0?` / ${u} messages`:""}${l!==void 0&&l>0?`, ${l} ${se(l,"subagent")}`:""}`]:[],...m.length>0?[`request_ids: ${m.join(", ")}`]:[]].join(`
+`)}
+
+## 11. ot() draft submit BYTE-IDENTICAL leftover (local lacks)
+# 247/246 sha=1eb5077f676f7c29 rawEq=true @247=232017716 @246=229887389 len=2747
+
+async function ot({draft:e,includeTranscript:s,currentSessionMessages:m,surface:a="cli",via:t="panel",signal:p,storageV5:_,credentials:y}){let d=e.source_session_id===j(),u=[],c;if(s&&e.transcript_ref){let f=await _e(e);if(d){if(u=ye(m),f!==null)try{let{content:C,bytesRead:M,bytesTotal:h}=await E(f,q),r=C;if(M<h)r=r.slice(r.indexOf(`
+`)+1);if(x(r))g("rawTranscriptJsonl withheld from feedback draft submit: contains_3p_transcript_markers");else c=r}catch{}}else if(f!==null)try{let{content:C,bytesRead:M,bytesTotal:h}=await E(f,q),r=C;if(M<h)r=r.slice(r.indexOf(`
+`)+1);if(!be(r,e))g("draft transcript withheld from feedback submit: identity_not_corroborated");else{if(u=Oe(r),ke(u))u=[],g("draft transcript withheld from feedback submit: contains_3p_transcript_markers");if(x(r))g("rawTranscriptJsonl withheld from feedback draft submit: contains_3p_transcript_markers");else c=r}}catch{}}let l=J(e.request_ids).at(-1)??null,D={latestAssistantMessageId:l,latestAssistantAPIMessageId:null,lastInterruptedAssistantAPIMessageId:null,message_count:u.length,datetime:new Date().toISOString(),description:Le(e,t),surface:a,platform:re.platform,gitRepo:!1,commitSha:null,version:e.cli_version,transcript:u,...c&&{rawTranscriptJsonl:c}},{payload:k,trim:o}=ee(D),i=await he(k,p,y);if(i.success){try{await H(e.draft_id,_)}catch(f){g(`feedbackDrafts: post-submit draft delete failed: ${f instanceof Error?f.name:"unknown"}`,{level:"error"}),R("tengu_feedback_draft_delete_failed",{phase:n("post_submit")})}if(d)W();if(t!=="card_send_as_is")K(e.draft_id);return R("tengu_feedback_draft_submitted",{type:w(e.type),trigger:w(e.trigger),failure_mode:I(e.failure_mode),task_category:I(e.task_category),transcript_included:k.transcript.length>0||k.rawTranscriptJsonl?n("true"):n("false"),transcript_trimmed:o!==null?n("true"):n("false"),transcript_requested:s?n("true"):n("false"),transcript_available:e.transcriptAvailable?n("true"):n("false"),from_this_session:d?n("true"):n("false"),feedback_id:L(i.feedbackId),last_request_id:L(l)}),ie("feedback_draft_submit"),{success:!0,feedbackId:i.feedbackId}}if(ae("feedback_draft_submit",i.failureReason??"network_error",{from_this_session:d?n("true"):n("false")}),i.isZdrOrg)return{success:!1,error:"Feedback collection is not available for organizations with custom data retention policies."};if(i.failureReason==="auth_error")return{success:!1,error:"Couldn't send feedback: not signed in. Run /login, then retry."};if(i.payloadTooLarge)return{success:!1,error:xe,payloadTooLarge:!0};return{success:!1,error:`Couldn't send feedback${i.statusCode?` (server returned ${i.statusCode})`:i.failureReason==="timeout"?" (request timed out)":" (couldn't reach the service)"}. The draft is still queued. Try again later.`}}
+
+## 12. Ps() /feedback disabled gates BYTE-IDENTICAL leftover (local lacks this exact body)
+# 247/246 sha=8f61c2d9f132bd21 rawEq=true @247=222029808 @246=220142243
+
+function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable"};if(X())return{kind:"disabled",reason:"/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable"};if(!ee("allow_product_feedback"))return{kind:"disabled",reason:"/feedback has been disabled by your organization's policy"};let s=Q();if(s!=="firstParty")return{kind:"bundle",cause:"provider",label:Ms[s]};if(Oe().error)return{kind:"bundle",cause:"no_creds",label:"no Anthropic credentials"};return{kind:"post"}}
+
+## 13. feedbackDrafts schema describe string BYTE-IDENTICAL leftover (local lacks setting)
+# 247 @208027739 246 @206426815 rawEq=true sha=d3745e09f9803503
+
+feedbackDrafts:m(["notify","quiet","off"]).optional().describe('Model-drafted feedback (the SendFeedback tool). "notify" (default) shows a one-line notice when a draft is queued; "quiet" shows only the footer counter; "off" disables the tool entirely so drafts are never queued.'),spinnerTipsEnabled:a().optional().describe("Whether to show tips in the spinner
+
+## 14. leftover /feedback command object (246=247 NORM-SAME; OLD dialog, not draft-review)
+# 247 @218629970 246 @217166500 normEq=true normSha=848cfae3b2c48bdf
+# Collision-ban: this is the official leftover command stub, NOT a license to invent draft-review UI.
+
+>!1,isHidden:!0,name:"stub"}});var zHs,KGt;var DKr=w(()=>{zHs={type:"local-jsx",name:"feedback",description:"Send feedback to Anthropic or report a bug",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},KGt=zHs});var HHs,YGt;var $Kr=w(()=>{HHs={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentH
+
+## NOT leftover-as-invent (collision-ban)
+- src/components/Feedback.tsx + src/commands/feedback — older manual /feedback dialog already local
+- tengu_feedback / tengu_feedback_survey_* — survey analytics already local; not SendFeedback
+- official name:"feedback" command stub ("Send feedback to Anthropic or report a bug") is 246 leftover, not draft-review
+- ut() tengu_feedback_draft_discarded / sr() queue UI — leftover 246=247 but draft-review UI; invent-ban
+- Ls/Ds settings schema wrapper size-change is #2 spinnerTips, not SendFeedback
+- call()/tool-object NORM-DIFF is minify rename + MACRO VERSION/BUILD_TIME/GIT_SHA/chunk stamp, not a new function

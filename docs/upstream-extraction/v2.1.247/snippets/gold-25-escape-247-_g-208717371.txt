@@ -1,0 +1,3 @@
+# 247 function _g start=208717371 len=44 sha=117cb81fc92f9423
+
+function _g(e,t){return tc(e,t)?.data??null}

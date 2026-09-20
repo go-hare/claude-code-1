@@ -1,0 +1,8 @@
+# off=200296445 needle="characters truncated"
+
+etInterfaces.......!.-.EVENT_NAMES.....K...agent.spawn .....c..: denied by a hook (........: model 	...Z.E.(inherit).......*... by a hook (resolves to ....(<0.resolveModel.... mR.subagentType
+....MU.settleEach..B.......Cannot destructure property 'chained' from null or undefined value..?.......Cannot destructure property 'runs' from null or undefined value.......W.chained.....;...originalText....J...toolEndsTurn........toolResultText........ .asked for confirmation for......4/..
+
+... [.......%. characters truncated] ...
+
+........Command failed with no output........... failed due to the following ...........bareFork?.......Cannot destructure property 'deny' from null or undefined value.....;.K.permissionBehavior......|...hookPermissionDecisionReasonD...,.Y.Cannot destructure property 'hookInput' from null or undefined value	.....I.hookInput...........runSettingsHooks.....ra.managedPass.......'.[\p{White_Space}\p{Pd}_]+...........savedFilesNote.......|.reportCutNote...?.......Cannot de

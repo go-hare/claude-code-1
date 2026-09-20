@@ -81,7 +81,8 @@ import {
 } from '../bootstrap/state.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
-import { getPinnedStorageV5 } from '../utils/storageV5/index.js';
+import { useSessionServices } from '../context/sessionServices.js';
+import { getReplDiffHost } from '../utils/sessionHost.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { truncateToWidth } from '../utils/format.js';
@@ -543,12 +544,13 @@ import { useFeedbackSurvey } from 'src/components/FeedbackSurvey/useFeedbackSurv
 import { useMemorySurvey } from 'src/components/FeedbackSurvey/useMemorySurvey.js';
 import { usePostCompactSurvey } from 'src/components/FeedbackSurvey/usePostCompactSurvey.js';
 import { FeedbackSurvey } from 'src/components/FeedbackSurvey/FeedbackSurvey.js';
+import { FeedbackDraftNotice } from 'src/components/FeedbackDraftNotice.js';
 import { useInstallMessages } from 'src/hooks/notifs/useInstallMessages.js';
 import { useAwaySummary } from 'src/hooks/useAwaySummary.js';
 import { useChromeExtensionNotification } from 'src/hooks/useChromeExtensionNotification.js';
 import { useOfficialMarketplaceNotification } from 'src/hooks/useOfficialMarketplaceNotification.js';
 import { usePromptsFromClaudeInChrome } from 'src/hooks/usePromptsFromClaudeInChrome.js';
-import { getTipToShowOnSpinner, recordShownTip } from 'src/services/tips/tipScheduler.js';
+import { evaluateTipContent, getTipToShowOnSpinner, recordShownTip } from 'src/services/tips/tipScheduler.js';
 import type { Theme } from 'src/utils/theme.js';
 import {
   checkAndDisableAutoModeIfNeeded,
@@ -950,6 +952,8 @@ export type Props = {
   appendSystemPrompt?: string;
   /** Official --append-subagent-system-prompt for Task-tool subagents. */
   appendSubagentSystemPrompt?: string;
+  /** densable 2.1.247 #7 `fallbackModel:g` — --fallback-model for subagents. */
+  fallbackModel?: string;
   // Optional callback invoked before query execution
   // Called after user message is added to conversation but before API call
   // Return false to prevent query execution
@@ -1077,6 +1081,7 @@ export function REPL({
   systemPrompt: customSystemPrompt,
   appendSystemPrompt,
   appendSubagentSystemPrompt,
+  fallbackModel,
   onBeforeQuery,
   onTurnComplete,
   disabled = false,
@@ -1093,6 +1098,7 @@ export function REPL({
   onCommandsChange,
   onQueryParamsChange,
 }: Props): React.ReactNode {
+  const { storageV5 } = useSessionServices();
   const isRemoteSession = !!remoteSessionConfig;
 
   // densable Jul/LHr Host engine: P??S8o + unmount close when self-owned.
@@ -1267,6 +1273,7 @@ export function REPL({
   // call entirely in external builds, so this is safe despite looking conditional.
   // These fields contain excluded strings that must not appear in external builds.
   const spinnerTip = useAppState(s => s.spinnerTip);
+  const spinnerTipLabel = useAppState(s => s.spinnerTipLabel);
   const showExpandedTodos = useAppState(s => s.expandedView) === 'tasks';
   const pendingWorkerRequest = useAppState(s => s.pendingWorkerRequest);
   const pendingSandboxRequest = useAppState(s => s.pendingSandboxRequest);
@@ -2977,27 +2984,32 @@ export function REPL({
       bashHosts.current.add(host);
     }
     bashToolsProcessedIdx.current = messagesRef.current.length;
-    void getTipToShowOnSpinner({
+    const tipContext = {
       theme,
       readFileState: readFileState.current,
       bashTools: bashTools.current,
       bashHosts: bashHosts.current,
-    }).then(async tip => {
-      if (tip) {
-        const content = await tip.content({ theme });
-        setAppState(prev => ({
-          ...prev,
-          spinnerTip: content,
-        }));
-        recordShownTip(tip);
-      } else {
+      session: { host: getReplDiffHost() },
+      storageV5,
+    };
+    void getTipToShowOnSpinner(tipContext).then(async tip => {
+      // densable Ghe: `let m=c?await Ghe(c,{session:e,theme:t,...}):""; if(!m){u();return}`
+      const content = tip ? await evaluateTipContent(tip, tipContext) : '';
+      if (!content) {
         setAppState(prev => {
           if (prev.spinnerTip === undefined) return prev;
-          return { ...prev, spinnerTip: undefined };
+          return { ...prev, spinnerTip: undefined, spinnerTipLabel: undefined };
         });
+        return;
       }
+      setAppState(prev => ({
+        ...prev,
+        spinnerTip: content,
+        spinnerTipLabel: tip?.label,
+      }));
+      if (tip) recordShownTip(tip);
     });
-  }, [setAppState, theme]);
+  }, [setAppState, storageV5, theme]);
 
   // Resets UI loading state. Does NOT call onTurnComplete - that should be
   // called explicitly only when a query turn actually completes.
@@ -4336,6 +4348,7 @@ export function REPL({
           debug,
           verbose: s.verbose,
           mainLoopModel,
+          fallbackModel,
           thinkingConfig: s.thinkingEnabled !== false ? thinkingConfig : { type: 'disabled' },
           // Merge fresh from store rather than closing over useMergedClients'
           // memoized output. initialMcpClients is a prop (session-constant).
@@ -4482,8 +4495,8 @@ export function REPL({
         contentReplacementState: contentReplacementStateRef.current,
         // densable doo / Bgp — REPL DialogStore requestDialog host
         requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
-        // densable PBr a?.storageV5 ?? m — pinned createLocalFsBackend handle.
-        storageV5: getPinnedStorageV5(),
+        // densable PBr / We() — session services Provider, not lastPinned.
+        storageV5,
       };
     },
     [
@@ -4497,6 +4510,7 @@ export function REPL({
       theme,
       allowedAgentTypes,
       store,
+      storageV5,
       setAppState,
       setSessionToolPermissionContext,
       reverify,
@@ -4510,6 +4524,7 @@ export function REPL({
       requestDialog,
       appendSystemPrompt,
       appendSubagentSystemPrompt,
+      fallbackModel,
       setConversationId,
       strictMcpConfig,
     ],
@@ -7928,6 +7943,7 @@ export function REPL({
                   <SpinnerWithVerb
                     mode={streamMode}
                     spinnerTip={spinnerTip}
+                    spinnerTipLabel={spinnerTipLabel}
                     responseLengthRef={responseLengthRef}
                     apiMetricsRef={apiMetricsRef}
                     compactProgressActiveRef={compactProgressActiveRef}
@@ -8386,7 +8402,18 @@ export function REPL({
                           />
                         )}
                         {showIssueFlagBanner && <IssueFlagBanner />}
-                        {}
+                        <FeedbackDraftNotice
+                          isLoading={isLoading}
+                          surveyActive={
+                            postCompactSurvey.state !== 'closed' ||
+                            memorySurvey.state !== 'closed' ||
+                            feedbackSurvey.state !== 'closed' ||
+                            frustrationDetection.state !== 'closed'
+                          }
+                          inputValue={inputValue}
+                          setInputValue={setInputValue}
+                          onOpenFeedback={handleSurveyRequestFeedback}
+                        />
                         <PromptInput
                           debug={debug}
                           ideSelection={ideSelection}
@@ -8951,7 +8978,7 @@ export function REPL({
                           context.options.mcpClients,
                         );
                         const systemPrompt = buildEffectiveSystemPrompt({
-                          mainThreadAgentDefinition: undefined,
+                          mainThreadAgentDefinition,
                           toolUseContext: context,
                           customSystemPrompt: context.options.customSystemPrompt,
                           defaultSystemPrompt: defaultSysPrompt,

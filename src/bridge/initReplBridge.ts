@@ -112,6 +112,7 @@ import { logBridgeSkip } from './debugUtils.js'
 import { checkEnvLessBridgeMinVersion } from './envLessBridgeConfig.js'
 import { getPollIntervalConfig } from './pollConfig.js'
 import type { BridgeState, ReplBridgeHandle } from './replBridge.js'
+import { createOnGetWorkspaceDiff } from './createOnGetWorkspaceDiff.js'
 import { initBridgeCore } from './replBridge.js'
 import { setCseShimGate, toCompatSessionId } from './sessionIdCompat.js'
 import type { BridgeWorkerType } from './types.js'
@@ -210,6 +211,19 @@ export type InitBridgeOptions = {
    * `Xn` → `{uncertaintyOnly:true}` or `undefined`.
    */
   onHistoryBackfillSuppressed?: (info?: { uncertaintyOnly?: true }) => void
+  /**
+   * densable 2.1.247 `host` — `ns().host`. Falsy omits onGetWorkspaceDiff
+   * (the /remote-control 246 gap).
+   */
+  host?: object
+  /**
+   * densable 2.1.247 `getToolPermissionContext`.
+   */
+  getToolPermissionContext?: () => import('../Tool.js').ToolPermissionContext
+  /**
+   * densable 2.1.247 `workspaceDiffComputeBudget`.
+   */
+  workspaceDiffComputeBudget?: import('./workspaceDiffBudget.js').WorkspaceDiffComputeBudget
 }
 
 export type LocalBridgeSessionHolder = {
@@ -318,7 +332,15 @@ export async function initReplBridge(
     expectedAccount,
     suppressHistoryBackfill = false,
     onHistoryBackfillSuppressed,
+    host,
+    getToolPermissionContext,
+    workspaceDiffComputeBudget,
   } = options ?? {}
+  const onGetWorkspaceDiff = createOnGetWorkspaceDiff(
+    host,
+    getToolPermissionContext,
+    workspaceDiffComputeBudget,
+  )
 
   // densable initReplBridge: consume CLAUDE_BRIDGE_REATTACH_* once at entry
   // (W/q/j/B/V + OWNER_ACCT/ORG/NO_BACKFILL) so left-arrow child reattach
@@ -1321,6 +1343,7 @@ export async function initReplBridge(
         onSetPermissionMode,
         onSetMcpPermissionModeOverride,
         onRenameSession,
+        onGetWorkspaceDiff,
         onStateChange,
         outboundOnly,
         tags,
@@ -1468,6 +1491,7 @@ export async function initReplBridge(
       onSetPermissionMode,
       onSetMcpPermissionModeOverride,
       onRenameSession,
+      onGetWorkspaceDiff,
       onStateChange,
       perpetual,
       // densable classic Qt: B / He pass-through for left-arrow rit
@@ -1500,3 +1524,8 @@ function deriveTitle(raw: string): string | undefined {
     ? flat.slice(0, TITLE_MAX_LEN - 1) + '\u2026'
     : flat
 }
+
+export {
+  HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
+  REPL_WORKSPACE_DIFF_COMPUTE_BUDGET,
+} from './workspaceDiffBudget.js'

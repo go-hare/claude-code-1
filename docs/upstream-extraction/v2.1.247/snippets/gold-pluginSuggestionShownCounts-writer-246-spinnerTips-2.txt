@@ -1,0 +1,25 @@
+# 246 spinnerTipsEnabled @220801564
+um 1)
+- \`respectGitignore\`: Whether to respect .gitignore (default: true)
+- \`spinnerTipsEnabled\`: Show tips in spinner
+- \`spinnerVerbs\`: Customize spinner verbs (\`{ "mode": "append" | "replace", "verbs": [...] }\`)
+- \`spinnerTipsOverride\`: Override spinner tips (\`{ "excludeDefault": true, "tips": ["Custom tip"] }\`)
+- \`syntaxHighlightingDisabled\`: Disable diff highlighting
+`,Xr=`## Hooks Configuration
+
+Hooks run commands at specific points in Claude Code's lifecycle.
+
+### Hook Structure
+\`\`\`json
+{
+  "hooks": {
+    "EVENT_NAME": [
+      {
+        "matcher": "ToolName|OtherTool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "your-command-here",
+            "timeout": 60,
+            "statusMessage": "Running..."
+      

@@ -1,0 +1,36 @@
+# yln lock — official 2.1.247 peel ONLY. Invent-ban.
+
+Start (already locked, not re-derived):
+  dPe@213653071 unique pluginUsage (CSS function dPe is a different hit)
+    function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{...pluginUsage...},t)}
+
+| name | verdict | offset | end | len | bind | gold |
+|------|---------|--------|-----|-----|------|------|
+| yln | LOCKED | 213648410 | 213648511 | 101 | unique function yln( count=1 + unique yln(n),ki( count=1 + pendingUsage+HP() count=1 | gold-yln-yln-full.txt |
+
+## Aliases
+
+yln same-module as dPe (213648410 vs 213653071). yln as / as yln count=0. not in export map.
+dPe export dPe as baa @219684806. import baa as Ft @222874809.
+239 Select yln (0-arg stray-click) is not present as function yln( in official-247.
+
+## Body (complete, brace-balanced)
+
+function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}
+
+## What the body writes
+
+Deletes matching keys from HP().pendingUsage (in-memory Map). does not touch persisted pluginUsage (that is ki in dPe).
+
+## Local 1:1 (names only)
+
+dPe / yln  →  wipePluginUsage in marketplaceManager.ts
+  wipePluginUsage ← dPe
+  no local yln / pendingUsage
+
+## Local gap (arity/path facts only)
+
+wipePluginUsage(pluginIds, storageV5?) 2-arg
+  official dPe(e,t) 2-arg then yln(Set) 1-arg
+  missing: yln(pendingUsage) call before ki/saveGlobalConfig
+  src/ has no pendingUsage symbol

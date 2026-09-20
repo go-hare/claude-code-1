@@ -1,0 +1,3 @@
+# off=214163616 needle="Math.floor(t/2)"
+
+:[dt({content:Gge(l,{suppressFollowUpQuestions:!0,transcriptPath:c,replStateCleared:u}),isCompactSummary:!0,isVisibleInTranscriptOnly:!0})]}}function q6n(e,t,n){let r=0,o=0;for(let s=t-1;s>=0;s--)if(r+=e[s],o++,r>=n)break;if(o>=t-1)return Math.max(1,Math.floor(t/2));return o}function m3o(e,t,n){if(e===void 0)return{mode:"gap_unparseable",step:1};return{mode:"gap_guided",step:q6n(t,n,e)}}async function YHe(e,t,n){let r=qge(e),o=r.length;if(o<2)return b("Reactive compact: fewer than 2 groups, nothing to compact",{level:"info"}),{ok:!1,reason:"too_few_groups",attempts:0,totalGroups:o};let s=t.toolUseContext.abortController.signal,i=1,a=0,l=void 

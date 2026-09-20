@@ -1,0 +1,2 @@
+# needle=function TB( pos=248864378 end=248864401 len=23
+function TB(){return!1}

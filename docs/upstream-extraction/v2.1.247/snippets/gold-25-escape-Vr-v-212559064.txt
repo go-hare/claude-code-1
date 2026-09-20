@@ -1,0 +1,3 @@
+# @212559064
+
+wait Wr(l);let a=await Vr(l),u=(b)=>b===a||b.startsWith(a+ye.sep),m=async(b)=>{let h=ye.resolve(l,b);if(!h.startsWith(l+ye.sep))return null;for(let v=ye.dirname(h);;v=ye.dirname(v))try{return u(await Vr(v))?h:null}catch(k){if(!Ut(k)||v===l)throw k}},f=async(b)=>{try{return u(await Vr(ye.dirname(b)))}catch(h){if(Ut(h))return"absent";throw h}},c=[];for(let b of n.removeFiles??[])try{let h=await m(b);if(h===null)continue;let v=await f(h);if(v===!1)continue;if(v==="absent"){c.push(b);continue}await 

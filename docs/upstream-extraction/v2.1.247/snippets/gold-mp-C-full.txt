@@ -1,0 +1,2 @@
+# E.every(C) @207942094 — path segment safe
+function C(e){return!(typeof e!=="string"||e.length===0||b(e)||e.includes("/")||e.includes("\\")||e.includes(f)||K(e))}

@@ -1,0 +1,3 @@
+# 246-after-Zt n=3 function jm start=209123372 end=209123717 len=345 sha=00f4773b474a6985
+
+function jm(e,t){let n=be();if(n!=="linux"&&n!=="wsl")return!0;let r=t.get(e);if(r!==void 0)return r;let s=dt(e),i=s===e,a=!0;try{eZ(e,Yn.W_OK)}catch(l){switch(Fn(l)){case"EROFS":a=!1;break;case"ENOENT":a=i||jm(s,t);break;case"EACCES":case"EPERM":try{a=ps(e).uid===process.getuid?.()}catch{a=!i&&jm(s,t)}break;default:break}}return t.set(e,a),a}

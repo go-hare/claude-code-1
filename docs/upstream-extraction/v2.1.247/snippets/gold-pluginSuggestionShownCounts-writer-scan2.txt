@@ -1,0 +1,207 @@
+
+======== PASS2 SEA 247 size=253204128
+STR "export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}" count=1 hits=222247976
+  @222247976 ionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acceptance o
+STR "vL as " count=2 hits=208900419,232036826
+  @208900419 yL as emc,bL as fmc,EL as gmc,hC as hmc,SL as imc,vL as jmc,CL as kmc,kL as lmc,TL as mmc,wL as nmc,xL as omc,OL as pmc,PL as qmc,DL as rmc,IL as smc,ML as tmc,FL as umc,SC as vmc,HL as wmc,CC as xmc,KL as ymc,AC as 
+  @232036826 "B:/~BUN/root/_359.js";import{tL as Lhe,uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as tot,RM as CK,UM a
+STR " as vL" count=11 hits=208089266,210436122,212817873,212833080,212835448,212856894,218126453,219706731,222248000,231368819,232066983
+  @208089266  as qLc,Gi as rLc,Yi as sLc,Zi as tLc,qi as uLc,Vt as vLc,Ji as wLc,Xi as xLc,Qi as yLc,ea as zLc,ta as ALc,na as BLc,oa as CLc,sa as DLc,Gt as ELc,Oe as FLc,ia as GLc,Yo as HLc,aa as ILc,la as JLc,da as KLc,ca as LL
+  @210436122 as qLb,yZ as rLb,Lm as sLb,_Z as tLb,Ki as uLb,Fne as vLb,Ua as wLb,Mne as xLb,oh as yLb,$ne as zLb,Bne as ALb,Zm as BLb,Vne as CLb,iN as DLb,vZ as ELb,Wne as FLb,fN as GLb,pN as HLb,Pa as ILb,Gne as JLb,WZ as KLb,jZ
+  @212817873 FLr,PCb as qg,Pyb as dXn,Pzb as ULr,QAb as YCs,Qyb as vL,Qzb as nXe,Ryb as X5n,Rzb as yHt,SAb as iNr,SBb as KIr,Syb as xm,Szb as BLr,TAb as CIs,TBb as W$r,Tzb as _Ht,UAb as r_,UBb as gNr,Uyb as CZ,Uzb as Y3e,VAb as $
+  @212833080 s cf,Ioc as X2,Ipc as VG,Iqc as Apn,Irc as FRt,Itc as vLo,Iuc as QXr,Jbc as Soo,Jcc as bWt,Jdc as Fl,Jfc as Oc,Jgc as G0e,Jhc as wm,Jkc as Q2,Jlc as rY,Jnc as Aw,Jpc as G0r,Jqc as _lt,Jtc as TLo,Kbc as c7,Kdc as Eb,K
+  @212835448 h1t,bmc as YTe,bnc as n4r,brc as gv,bsc as Hbr,buc as vLe,bvc as lXr,cdc as Z3,cec as s6,cgc as cXt,cic as dye,ckc as KZr,clc as KTr,cmc as oio,cnc as Pb,crc as aoe,csc as eKn,cuc as Ic,cvc as z6r,cwc as qrr,ddc as T
+  @212856894  MRr,mvd as Qw,npd as M7,nsd as iye,nvd as DJe,nwd as vLt,osd as ORr,ovd as bw,owd as iqr,pod as Nwn,pqd as J_r,prd as MUn,pwd as Z9n,qod as CMo,qvd as $Je,qwd as yHr,rod as pl,rqd as DBe,rrd as OUn,rsd as zWr,rtd as
+  @218126453 e.file.base64}}}return t}var Ojr=()=>{};import{sep as vLs}from"path";function Djr(e){let t=`${CW()}${vLs}`,n=".output";if(e.startsWith(t)&&e.endsWith(".output")){let r=e.slice(t.length,-7);if(r.length>0&&r.length<=20
+  @219706731 La,B0s as rLa,v1t as sLa,K0s as tLa,X0s as uLa,Z0s as vLa,str as wLa,Q0s as xLa,itr as yLa,atr as zLa,wIt as ALa,qHr as BLa,O0e as CLa,$fu as DLa,Lfu as ELa,Nfu as FLa,wrr as GLa,zIn as HLa,HIn as ILa,Ffu as JLa,mMt 
+  @222248000 }},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you
+  @231368819 1;return FY(e)}var Jk=k(()=>{r0()});import{homedir as vL}from"os";import{isAbsolute as WY,sep as HY}from"path";function je(Lde){let e_=R(9),{filePath:bd,children:Dde}=Lde,Zk=oo(xd),Fl=Dde??bd;if(tT(bd)||typeof Fl==="
+STR "h as vL" count=1 hits=222247999
+  @222247999 r}},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you
+STR "xL as " count=4 hits=208900469,219695197,230648497,235957240
+  @208900469 vL as jmc,CL as kmc,kL as lmc,TL as mmc,wL as nmc,xL as omc,OL as pmc,PL as qmc,DL as rmc,IL as smc,ML as tmc,FL as umc,SC as vmc,HL as wmc,CC as xmc,KL as ymc,AC as zmc,GL as Amc,$L as Bmc,zL as Cmc,Gp as Dmc,z8 as 
+  @219695197 as Mra,GAt as Nra,Fh as Ora,ZAt as Pra,f1e as Qra,xL as Rra,TEl as Sra,EEl as Tra,m1e as Ura,HQ as Vra,TV as Wra,g1e as Xra,QAt as Yra,m9n as Zra,S9n as _ra,uJo as $ra,ePt as asa,RCl as bsa,k9n as csa,ACl as dsa,IL a
+  @230648497 articipant,UL as installCommandLifecycleForwarder,xL as installCommandLifecycleForwarderUnlessRemote,nN as isGateToolUseCall,qL as isLastMessageCandidate,sD as isRestartedWorkerEpoch,XL as isWindowDivergentWrite,TL a
+  @235957240  as yl,DK as Ua}from"B:/~BUN/root/_353.js";import{xL as Eg,yL as Mg,zL as cS}from"B:/~BUN/root/_360.js";import{QM as Af,RM as Of,UM as Lf,XM as GS}from"B:/~BUN/root/_370.js";import{$da as lo,A1 as Ed,Aaa as jl,Aea as
+STR "yL as " count=2 hits=208900369,235957249
+  @208900369 mL as $lc,hL as amc,_L as bmc,Ks as cmc,ni as dmc,yL as emc,bL as fmc,EL as gmc,hC as hmc,SL as imc,vL as jmc,CL as kmc,kL as lmc,TL as mmc,wL as nmc,xL as omc,OL as pmc,PL as qmc,DL as rmc,IL as smc,ML as tmc,FL as 
+  @235957249  as Ua}from"B:/~BUN/root/_353.js";import{xL as Eg,yL as Mg,zL as cS}from"B:/~BUN/root/_360.js";import{QM as Af,RM as Of,UM as Lf,XM as GS}from"B:/~BUN/root/_370.js";import{$da as lo,A1 as Ed,Aaa as jl,Aea as Zr,B1 as
+STR "tL as " count=4 hits=208900059,222248664,231953982,232036806
+  @208900059 wn as wlc,XN as xlc,GJ as ylc,$J as zlc,VJ as Alc,tL as Blc,zJ as Clc,WJ as Dlc,jJ as Elc,Wv as Flc,QJ as Glc,ZJ as Hlc,e8 as Ilc,t8 as Jlc,Np as Klc,n8 as Llc,r8 as Mlc,o8 as Nlc,i8 as Olc,s8 as Plc,a8 as Qlc,qv as 
+  @222248664 legal-and-compliance.  // Version: 2.1.247 import{tL as P,uL as Q,wL as q,zL as te}from"B:/~BUN/root/_360.js";import{Phb as y,Zhb as ee,eib as x,jib as re}from"B:/~BUN/root/_509.js";import{Htc as J,Lxc as Z,Yjc as _,
+  @231953982  as Co,zF as xt}from"B:/~BUN/root/_300.js";import{tL as Eo,wL as Mo,zL as yt}from"B:/~BUN/root/_360.js";import{g2 as ue,h2 as ae,j2 as te,l2 as pt}from"B:/~BUN/root/_448.js";import{Y2a as $e,Z2a as he,_2a as qe,d3a a
+  @232036806 s cwe,sL as urt}from"B:/~BUN/root/_359.js";import{tL as Lhe,uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM 
+STR "kwc as u" count=2 hits=222247150,222943485
+  @222247150 -compliance.  // Version: 2.1.247 import{Lxc as S,kwc as u,owc as s}from"B:/~BUN/root/_675.js";import{FBd as g}from"B:/~BUN/root/_850.js";function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===
+  @222943485 -compliance.  // Version: 2.1.247 import{Lxc as b,kwc as u,owc as p}from"B:/~BUN/root/_675.js";import{x5c as o,z5c as P}from"B:/~BUN/root/_760.js";import{Gid as d,yid as c}from"B:/~BUN/root/_829.js";import{eld as l,kld
+STR "owc as s" count=4 hits=210746586,222247159,231141965,231221943
+  @210746586 om"B:/~BUN/root/_674.js";import{Lxc as v,lwc as _,owc as s}from"B:/~BUN/root/_675.js";import{cIc as l,hIc as E}from"B:/~BUN/root/_709.js";import{DNc as w,yNc as S}from"B:/~BUN/root/_713.js";import{Afd as f,Bfd as g,Cfd
+  @222247159 ce.  // Version: 2.1.247 import{Lxc as S,kwc as u,owc as s}from"B:/~BUN/root/_675.js";import{FBd as g}from"B:/~BUN/root/_850.js";function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return 
+  @231141965 hjc as Oe,hoc as Be,koc as re,ojc as _t,ooc as Ct,owc as se}from"B:/~BUN/root/_675.js";import{BHc as yt,NGc as Ae,bHc as te}from"B:/~BUN/root/_705.js";import{Kfd as ht}from"B:/~BUN/root/_824.js";import{fgd as Ie}from"B
+  @231221943 ersion: 2.1.247 import{Awc as _,Lxc as P,kwc as l,owc as s,zwc as O}from"B:/~BUN/root/_675.js";import{H3c as D,z4c as M}from"B:/~BUN/root/_752.js";import{ofd as g,pfd as T}from"B:/~BUN/root/_820.js";import{Afd as p,Ifd
+STR "Lxc as S,kwc as u,owc as s" count=1 hits=222247141
+  @222247141 legal-and-compliance.  // Version: 2.1.247 import{Lxc as S,kwc as u,owc as s}from"B:/~BUN/root/_675.js";import{FBd as g}from"B:/~BUN/root/_850.js";function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return 
+STR "function p(n,i){let t=s().numStartups;u((o)=>{" count=1 hits=222247238
+  @222247238 75.js";import{FBd as g}from"B:/~BUN/root/_850.js";function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return o;let e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+
+STR "function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts" count=1 hits=222247723
+  @222247723 n s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}
+STR "pluginSuggestionShownCount" count=2 hits=199438564,222247533
+  @199438564 /_360.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K.
+  @222247533 etimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]
+STR "SuggestionShownCounts" count=2 hits=199438570,222247539
+  @199438570 js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K..
+  @222247539 hownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]?
+STR "pluginSuggestionShown" count=2 hits=199438564,222247533
+  @199438564 /_360.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count
+  @222247533 etimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts
+STR "recordPluginSuggestion" count=0 hits=
+STR "Ohe(" count=8 hits=215503315,215621413,217937911,217953403,232387837,242361420,242366815,242366837
+  @215503315 ata.agentType===Kc}var m1e=w(()=>{_g()});function Ohe(e){let{activeAgents:t,allowedAgentTypes:n}=e.options.agentDefinitions;return{depth:Jc(e.agentContext),allowedAgentTypes:n,activeAgents:t}}function vV(e,t,{depth
+  @215621413 d,MD(this.toolUseContext),Le(this.toolUseContext),Ohe(this.toolUseContext),e.input);dxt(e.name,e.id,this.toolUseContext,t.requestId),this.tools.push({id:e.id,block:e,assistantMessage:t,status:"completed",isConcurre
+  @217937911 let S=pxt(s,r.options.tools,r.agentId,MD(r),Le(r),Ohe(r),e.input);dxt(s,e.id,r,l),yield{message:pt({content:[{type:"tool_result",content:`<tool_use_error>Error: No such tool available: ${s}${S}</tool_use_error>`,is
+  @217953403 pe==="hook")W+=p9n(e.name,T,r.options.tools,Le(r),Ohe(r));let ne=[{type:"tool_result",content:W,is_error:!0,tool_use_id:t}],oe=z.behavior==="ask"?z.contentBlocks:void 0;if(oe?.length)ne.push(...oe);let Q;if(oe?.len
+  @232387837 failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.advertisedComman
+  @242361420 ;});function Ihe(e,t){e[t]?e[t]++:e[t]=1}function Ohe(e,t){--e[t]||delete e[t]}function Db(e,t,r,i){var n=""+t,a=""+r;if(!e&&n>a){var s=n;n=a,a=s}return n+Nhe+a+Nhe+(yi(i)?zJe:i)}function GJe(e,t,r,i){var n=""+t,a=
+  @242366815 lete this._edgeLabels[n],delete this._edgeObjs[n],Ohe(this._preds[r],t),Ohe(this._sucs[t],r),delete this._in[r][n],delete this._out[t][n],this._edgeCount--),this}inEdges(t,r){var i=this._in[t];if(i){var n=co(i);ret
+  @242366837 n],delete this._edgeObjs[n],Ohe(this._preds[r],t),Ohe(this._sucs[t],r),delete this._in[r][n],delete this._out[t][n],this._edgeCount--),this}inEdges(t,r){var i=this._in[t];if(i){var n=co(i);return r?ts(n,function(a)
+STR "VJ(" count=13 hits=12343910,208645955,215161425,215163225,215164021,215165190,215305939,232879493,241963177,241963225,249462206,249465115,249468112
+  @12343910 H...[_^A^].L..wJ(.H...n.'.L..hJ(.H..H...\.'.L..VJ(.H..H...J.'...UAVVWSH..`H.l$`H...H..H..H.M...{.L.u.H.].H.E.H.E.H.}.H.u.L...(.L.E.L..H...{.1...f..D..H..H9.toH9...A.<..H..t...D..A...A...
+  @208645955 ch{}return}try{await Fp(e)}catch{}}async function VJ(e,t,n){let r=wn(),o;if(F()&&t!==void 0){let d=await ZN(t);if(d===void 0)return{kind:"unusable"};o=d}else try{o=await Kv(r)}catch(d){return Mt(d)?{kind:"no-key"}
+  @215161425 });return r===0&&n.trim()==="true"}async function VJ(e,t,n){try{let r=Ni()?.accessToken;if(!r)return _("checkGithubAppInstalled: No access token found, assuming app not installed"),{appInstalled:!1,defaultBranch:n
+  @215163225 sient:!0}}}async function nKn(e,t,n){return(await VJ(e,t,n)).appInstalled}async function L6o(){try{let e=Ni()?.accessToken;if(!e)return _("checkGithubTokenSynced: No access token found"),!1;let t=await X2();if(!t)
+  @215164021 ${Y(e)}`),!1}}async function Dal(e,t){let n=await VJ(e,t);if(n.appInstalled)return{hasAccess:!0,method:"github-app"};if(we("tengu_cobalt_lantern",!1)&&await L6o())return{hasAccess:!0,method:"token-sync"};return{ha
+  @215165190 git_remote"});else if(!c&&hm(i.host)){let d=await VJ(i.owner,i.name);if(!d.appInstalled)o.push({type:"github_app_not_installed",transient:d.transient})}if(o.length===0)ce("bg_remote_eligibility_check");else J("bg_
+  @215305939 _skip_preflight";else if(hm(P.host)){let tt=await VJ(P.owner,P.name,n);x=tt.appInstalled,A=tt.defaultBranch,L=tt.transient,F=x?"github_preflight_ok":"github_preflight_failed"}else x=!0,F="ghes_optimistic";else if(
+  @232879493 ve(gu(uH(ki.remoteOldContent))):ki.skipLocalRead||VJ(ki.notebook_path)||dw(ki.notebook_path)?Promise.resolve(gu(null)):tv().stat(ki.notebook_path).then((n_t)=>!n_t.isFile()?gu(null):n_t.size>OS?{notebook:null,tooL
+  @241963177 ,this._y1=t},"point")};o(Aw,"default")});function VJ(e){this._context=e}function _w(e){return new VJ(e)}var WJ=z(()=>{"use strict";mx();o(VJ,"BasisOpen");VJ.prototype={areaStart:o(function(){this._line=0},"areaSta
+  @241963225 n VJ(e){this._context=e}function _w(e){return new VJ(e)}var WJ=z(()=>{"use strict";mx();o(VJ,"BasisOpen");VJ.prototype={areaStart:o(function(){this._line=0},"areaStart"),areaEnd:o(function(){this._line=NaN},"areaE
+
+======== PASS2 SEA 246 size=250948768
+STR "export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}" count=1 hits=220366213
+  @220366213 ionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acceptance o
+STR "VJ as " count=3 hits=218216356,221963035,229907762
+  @218216356 s ooa,Ocl as poa,MEt as qoa,OEt as roa,mge as soa,VJ as toa,Dcl as uoa,SYo as voa,$cl as woa,DKn as xoa,o4n as yoa,i4n as zoa,kYo as Aoa,vYo as Boa,Lcl as Coa,eL as Doa,ZJ as Eoa,uHe as Foa,Ful as Goa,Uul as Hoa,Bul 
+  @221963035 ,C,o)),it("[PERF:bg-remount-start]"),Z()}} export{VJ as rg,Ay as sg,WJ as tg}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that 
+  @229907762 "B:/~BUN/root/_344.js";import{TJ as mye,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~BUN/root/_352.js";imp
+STR " as VJ" count=5 hits=206487099,211295045,218229015,220366237,230244354
+  @206487099  as QJc,de as RJc,Si as SJc,wi as TJc,Ei as UJc,vi as VJc,ki as WJc,xi as XJc,Ci as YJc,Vo as ZJc,_i as _Jc,Pi as $Jc,Ai as aKc,zi as bKc,Ri as cKc,Oi as dKc,Ti as eKc,Mi as fKc,Ii as gKc,Di as hKc,Ni as iKc,Li as jK
+  @211295045 Ke as QJb,W as RJb,Ge as SJb,Ye as TJb,Ze as UJb,Y as VJb,oe as WJb,cn as XJb,gn as YJb,mn as ZJb,pn as _Jb,hn as $Jb,Ce as aKb,Rn as bKb,Le as cKb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic'
+  @218229015 Ja,QPs as RJa,exs as SJa,PUr as TJa,oxs as UJa,qRt as VJa,GRt as WJa,cxs as XJa,tnu as YJa,nnu as ZJa,pxs as _Ja,ehe as $Ja,OWe as aKa,VRt as bKa,KRt as cKa,bxs as dKa,eHt as eKa,Rxs as fKa,Pxs as gKa,xxs as hKa,uQn 
+  @220366237 }},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you
+  @230244354 ();gi();zl();qfe();vn();M0();$Je();import{basename as VJe}from"path";sr();Ke();Lc();Mt();bo();jJe();_d();uo();vt();sf();WJe();tq();ed();Ar();Y$();Pt();cR();IR();lc();iye();P0();Xh();lo();Ns();So();MI();Yi();yx();ju()
+STR "h as VJ" count=1 hits=220366236
+  @220366236 r}},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you
+STR "UJ as " count=3 hits=220366909,220386038,229907752
+  @220366909 d-compliance.  // Version: 2.1.246 import{TJ as P,UJ as Q,WJ as q,ZJ as te}from"B:/~BUN/root/_345.js";import{Bib as re,fib as y,pib as ee,wib as x}from"B:/~BUN/root/_508.js";import{Lvc as Z,Qrc as J,Vhc as _,Whc as j
+  @220386038  as Ot,SJ as mo}from"B:/~BUN/root/_344.js";import{UJ as C,WJ as I,ZJ as po}from"B:/~BUN/root/_345.js";import{mK as X,oK as fo}from"B:/~BUN/root/_349.js";import{WL as Rt,XL as lo}from"B:/~BUN/root/_364.js";import{EO a
+  @229907752 s Ynt}from"B:/~BUN/root/_344.js";import{TJ as mye,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~BUN/root/_3
+STR "TJ as " count=5 hits=207172965,218214138,220366901,229786262,229907742
+  @207172965 vJ as Vjc,CJ as Wjc,AJ as Xjc,kJ as Yjc,wp as Zjc,TJ as _jc,wJ as $jc,RJ as akc,OJ as bkc,xJ as ckc,PJ as dkc,Bv as ekc,HN as fkc,nC as gkc,rC as hkc,oC as ikc,iC as jkc,sC as kkc,Pp as lkc,aC as mkc,At as nkc,$N as 
+  @218214138 as Aka,Enl as Bka,Cnl as Cka,tge as Dka,W$ as Eka,TJ as Fka,cze as Gka,pze as Hka,ETt as Ika,VGn as Jka,JGn as Kka,QGn as Lka,jTt as Mka,w2n as Nka,Grl as Oka,DVo as Pka,Vrl as Qka,A2n as Rka,Trl as Ska,Erl as Tka,u2
+  @220366901 legal-and-compliance.  // Version: 2.1.246 import{TJ as P,UJ as Q,WJ as q,ZJ as te}from"B:/~BUN/root/_345.js";import{Bib as re,fib as y,pib as ee,wib as x}from"B:/~BUN/root/_508.js";import{Lvc as Z,Qrc as J,Vhc as _,
+  @229786262  as Co,CE as xt}from"B:/~BUN/root/_292.js";import{TJ as Eo,WJ as Mo,ZJ as yt}from"B:/~BUN/root/_345.js";import{F1 as ue,G1 as ae,I1 as te,K1 as pt}from"B:/~BUN/root/_440.js";import{B1a as zo,u1a as $e,v1a as ge,w1a a
+  @229907742 s Mwe,SJ as Ynt}from"B:/~BUN/root/_344.js";import{TJ as mye,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~B
+STR "YJ as " count=1 hits=234068423
+  @234068423  as $a}from"B:/~BUN/root/_341.js";import{XJ as pg,YJ as mg,ZJ as Ix}from"B:/~BUN/root/_345.js";import{fK as co,gK as sn,hK as Vd,iK as jd,kK as Dh,lK as rw}from"B:/~BUN/root/_348.js";import{mK as sh,nK as ch,oK as Nv
+STR "XJ as " count=1 hits=234068414
+  @234068414  as sl,sJ as $a}from"B:/~BUN/root/_341.js";import{XJ as pg,YJ as mg,ZJ as Ix}from"B:/~BUN/root/_345.js";import{fK as co,gK as sn,hK as Vd,iK as jd,kK as Dh,lK as rw}from"B:/~BUN/root/_348.js";import{mK as sh,nK as ch
+STR "function h(n){return s().pluginSuggestionShownCounts?.[n]??0}" count=1 hits=220365745
+  @220365745 on a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}functi
+STR "r.pluginId" count=5 hits=216821509,216821579,216821591,230266272,230266351
+  @216821509 rn!0;return!1}function JBr(e){let t=e.filter((r)=>r.pluginId);if(t.length===0)return;let n={};for(let r of t){let o=PXe(r.pluginId)?r.pluginId:"third-party";n[o]=(n[o]||0)+1}return n}function sMs(e){if(!PXe(e))return!1;l
+  @216821579 gth===0)return;let n={};for(let r of t){let o=PXe(r.pluginId)?r.pluginId:"third-party";n[o]=(n[o]||0)+1}return n}function sMs(e){if(!PXe(e))return!1;let t=e.lastIndexOf("@"),n=e.slice(0,t);return(we("tengu_amber_lattice"
+  @216821591 rn;let n={};for(let r of t){let o=PXe(r.pluginId)?r.pluginId:"third-party";n[o]=(n[o]||0)+1}return n}function sMs(e){if(!PXe(e))return!1;let t=e.lastIndexOf("@"),n=e.slice(0,t);return(we("tengu_amber_lattice",{}).plugins
+  @230266272 (o.length===0)return;let n=[];for(let r of o){if(!r.pluginId)continue;if(t.failedTipIds.has(r.id))continue;let s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)co
+  @230266351 edTipIds.has(r.id))continue;let s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await hye(r.advertisedCommand))continu
+STR "Math.max(s,a)>=" count=1 hits=230266382
+  @230266382  s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await hye(r.advertisedCommand))continue;if(await yye(r,e))n.push(r)}return
+STR "pluginId);if(" count=4 hits=212765559,213240235,216821511,230266353
+  @212765559 continue;let M=g.plugins.find((N)=>N.pluginId===q.pluginId);if(M)E.add(q.pluginId),_.push({item:M,prev:q})}let R=k.filter((B)=>!E.has(B.pluginId)),P=wbn(T),x=(B)=>Ldt(B,P);if(await Promise.all(n.pendingTrashRemovals.splice(
+  @213240235 for(let n of e.rootManifestDeps??[]){let r=cg(n,e.pluginId);if(e.closureSet.has(r)||e.alreadyEnabled.has(r)&&!e.forceInclude.has(r))continue;let o=ho(r).marketplace;if(o!==e.rootMarketplace&&!(o&&e.allowedCrossMarketplaces.
+  @216821511 !0;return!1}function JBr(e){let t=e.filter((r)=>r.pluginId);if(t.length===0)return;let n={};for(let r of t){let o=PXe(r.pluginId)?r.pluginId:"third-party";n[o]=(n[o]||0)+1}return n}function sMs(e){if(!PXe(e))return!1;let t=
+  @230266353 TipIds.has(r.id))continue;let s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await hye(r.advertisedCommand))continue;if(
+STR "spinnerTipsEnabled" count=10 hits=195489432,206427096,220801564,220869241,224021358,224021411,224021448,226700261,230265469,230266069
+  @195489432 ..fastMode...b.alwaysThinkingEnabled...J.w.spinnerTipsEnabled...I..prefersReducedMotion...7.promptSuggestionEnabled...]0|.awaySummaryEnabled...T.precomputeCompactionEnabled...e.2.switchModelsOnFlag...
+  @206427096 s the tool entirely so drafts are never queued.'),spinnerTipsEnabled:a().optional().describe("Whether to show tips in the spinner"),spinnerVerbs:f({mode:m(["append","replace"]),verbs:u(r())}).optional().describe('Customize spinn
+  @220801564 Whether to respect .gitignore (default: true) - \`spinnerTipsEnabled\`: Show tips in spinner - \`spinnerVerbs\`: Customize spinner verbs (\`{ "mode": "append" | "replace", "verbs": [...] }\`) - \`spinnerTipsOverride\`: Override 
+  @220869241 "effortLevel","fastMode","alwaysThinkingEnabled","spinnerTipsEnabled","prefersReducedMotion","promptSuggestionEnabled","awaySummaryEnabled","precomputeCompactionEnabled","switchModelsOnFlag","autoUpdatesChannel","viewMode","synt
+  @224021358 d:e})}}]:[],{id:"tips",label:"Show tips",value:r?.spinnerTipsEnabled??!0,type:"boolean",onChange(e){P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feed
+  @224021411 nnerTipsEnabled??!0,type:"boolean",onChange(e){P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Claude-drafted feedback",value:r?.
+  @224021448 Change(e){P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Claude-drafted feedback",value:r?.feedbackDrafts??"notify",options:["no
+  @226700261 ",!1),ae=I&&dr(),F=y((x)=>x.narration),jt=!1,ce=j.spinnerTipsEnabled!==!1,Ae=ce&&re>1800000,at=ce&&re>30000&&!ur().btwUseCount,X=jt?H:pr(j.spinnerTipsOverride)?H:Ae&&!rt?"Use /clear to start fresh when switching topics and free 
+  @230265469 ity??0)}),t[0]?.tip}async function kye(e){if(LV().spinnerTipsEnabled===!1)return;let t=await Sye(e);if(t.length===0)return;return bye(t)}async function _ye(e,t){try{return await e.content(t)}catch(o){return BV.of(t.session.host)
+  @230266069 n rZe.of(Tk().host)}async function wye(e){if(LV().spinnerTipsEnabled===!1)return;let t=BV.of(e.session.host);if(gye(P_().spinnerTipsOverride))return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let 
+STR "tips_spinner_show" count=2 hits=195616364,230266644
+  @195616364 ..%6..spinner...tips_startup_show...tips_spinner_show...T...marketplace-plugin:."...t9.marketplace-plugin:org-marketplace...tengu_tip_shown...tipIdLength...cooldownSessions...=q2.mainLoopB
+  @230266644 mye(e.id,o),Qe(t==="startup"?"tips_startup_show":"tips_spinner_show");let n=e.id.startsWith("marketplace-plugin:")&&e.id.includes("@")?"marketplace-plugin:org-marketplace":e.id;q("tengu_tip_shown",{tipIdLength:n,cooldownSession
+STR "tengu_tip_shown" count=2 hits=195616464,230266774
+  @195616464 ...t9.marketplace-plugin:org-marketplace...tengu_tip_shown...tipIdLength...cooldownSessions...=q2.mainLoopBusy...`%..commandName...K"f.tengu_jiggly_mochi..H...L.o.Cannot destructure property 'mainLoopMo
+  @230266774 "@")?"marketplace-plugin:org-marketplace":e.id;q("tengu_tip_shown",{tipIdLength:n,cooldownSessions:e.cooldownSessions,surface:we(t)})}dW();uf();xo();zb();_e();jx();function Tye(e){Os.mainLoopBusy.setState((t)=>t.busy===e?t:{b
+STR "tengu_dead_probe_legacy_plugin_tip_counts" count=2 hits=195750180,230265884
+  @195750180 ..()..banners_sliced...'.!.model_scope.)...&...tengu_dead_probe_legacy_plugin_tip_counts...(.changes_max...ho..changes_outcome.	...v...flushedAt...acknowledged...W.dispatching..."R[.moduleHandlersFor...onTimingChange...
+  @230265884 ;if(this.fired.has(r))return;this.fired.add(r),q("tengu_dead_probe_legacy_plugin_tip_counts",{changes_max:we(o),changes_outcome:we(n)})}}var rZe=new wa(()=>new Cye);function iZe(){return rZe.of(Tk().host)}async function wye(e){if(LV().spinnerTipsEnabl
+DUMP 247 _360 i=222247238 exp=222247976
+DUMP 246 _345 i=220365475 exp=220366213
+DUMP Qhe@232387553 mL@232388055
+246 spinnerTipsEnabled count=10
+  spinner @195489432 ...b.alwaysThinkingEnabled...J.w.spinnerTipsEnabled...I..prefersReducedMotion...7.promptSuggestionEnabled...]0|.awaySummaryEnabled...T.precomputeCompactionEnabled...e.2.switchModelsOnFlag...autoUpdatesChannel..
+  spinner @206427096  entirely so drafts are never queued.'),spinnerTipsEnabled:a().optional().describe("Whether to show tips in the spinner"),spinnerVerbs:f({mode:m(["append","replace"]),verbs:u(r())}).optional().describe('Customize spinner verbs. mode: "appen
+  spinner @220801564  respect .gitignore (default: true) - \`spinnerTipsEnabled\`: Show tips in spinner - \`spinnerVerbs\`: Customize spinner verbs (\`{ "mode": "append" | "replace", "verbs": [...] }\`) - \`spinnerTipsOverride\`: Override spinner tips (\`{ "exc
+  spinner @220869241 el","fastMode","alwaysThinkingEnabled","spinnerTipsEnabled","prefersReducedMotion","promptSuggestionEnabled","awaySummaryEnabled","precomputeCompactionEnabled","switchModelsOnFlag","autoUpdatesChannel","viewMode","syntaxHighlightingDisabled
+  spinner @224021358 ],{id:"tips",label:"Show tips",value:r?.spinnerTipsEnabled??!0,type:"boolean",onChange(e){P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Cla
+  spinner @224021411 abled??!0,type:"boolean",onChange(e){P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Claude-drafted feedback",value:r?.feedbackDrafts??"notif
+  spinner @224021448 P({spinnerTipsEnabled:e}),g((o)=>({...o,spinnerTipsEnabled:e})),d("tengu_tips_setting_changed",{enabled:e})}},...Co()?[{id:"feedbackDrafts",label:"Claude-drafted feedback",value:r?.feedbackDrafts??"notify",options:["notify","quiet","off"],t
+  spinner @226700261 &&dr(),F=y((x)=>x.narration),jt=!1,ce=j.spinnerTipsEnabled!==!1,Ae=ce&&re>1800000,at=ce&&re>30000&&!ur().btwUseCount,X=jt?H:pr(j.spinnerTipsOverride)?H:Ae&&!rt?"Use /clear to start fresh when switching topics and free up context":at&&!rt?"U
+  spinner @230265469 t[0]?.tip}async function kye(e){if(LV().spinnerTipsEnabled===!1)return;let t=await Sye(e);if(t.length===0)return;return bye(t)}async function _ye(e,t){try{return await e.content(t)}catch(o){return BV.of(t.session.host).failedTipIds.add(e.id
+  spinner @230266069 k().host)}async function wye(e){if(LV().spinnerTipsEnabled===!1)return;let t=BV.of(e.session.host);if(gye(P_().spinnerTipsOverride))return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){i
+DUMP 247 default @208747476
+DUMP 246 default @207023141
+KI "kwc as " count=8 hits=208945149,210818884,210844192,212391835,212784396,212836522,220182294,220234118
+  @208945149 dmc as vt,fec as We,gec as Rt,hjc as Pe,kwc as H,mhc as A,ojc as xt,otc as bt,owc as _,ptc as g,soc as ln,thc as ee,uhc as je,xgc as mt,zgc as Et}from"B:/~BUN/root/_675.js";import{
+  @210818884 ,hic as Xo,icc as b,ihc as Ue,kcc as Vo,kwc as pn,lgc as Re,mhc as T,orc as A,owc as I,pfc as ke,pgc as Yn,ptc as C,qgc as B,rfc as Yo,rhc as x,ric as no,sfc as Le,sgc as G,tgc as 
+  @210844192 s q,Erc as k,Lxc as K,Yjc as p,Zjc as J,kwc as x,orc as D,owc as c,zrc as s}from"B:/~BUN/root/_675.js";import{G0c as P,G1c as V,Y0c as l,b1c as A,n1c as g}from"B:/~BUN/root/_750.js
+  @212391835 e,Qqc as S,Roc as ke,Tcc as H,Ucc as Re,kwc as W,owc as Q,yjc as P}from"B:/~BUN/root/_675.js";import{HCc as A,WCc as Pe}from"B:/~BUN/root/_696.js";import{BHc as Ae,vGc as J}from"B:
+  @212784396 m"B:/~BUN/root/_646.js";import{Lxc as M,kwc as w,owc as k}from"B:/~BUN/root/_675.js";import{x5c as u,y5c as l,z5c as E}from"B:/~BUN/root/_760.js";import{Afd as r,Bfd as s,Cfd as f,
+  @212836522 c as oNt,knc as vS,krc as rIe,kuc as Eg,kwc as ki,lcc as XUn,ldc as A2,lec as cEt,lhc as r2t,lic as t7,lkc as D7,llc as Cbe,lmc as Pqe,lnc as FIe,lpc as mOn,lrc as qp,mcc as ZUe,md
+KI " as kwc" count=1 hits=208905882
+  @208905882 s gwc,ire as hwc,sre as iwc,$T as jwc,Le as kwc,are as lwc,ure as mwc,lre as nwc,k as owc,XT as pwc,OH as qwc,PH as rwc,cre as swc,dre as twc,JT as uwc,fre as vwc,vi as wwc,pre as 
+KI "function ki(" count=8 hits=206603300,207049191,207436902,208276853,208828664,211069301,223164948,226184312
+  @206603300 turn e;return t.reduce((r,o)=>r?.[o],e)}function ki(e){let t=Object.keys(e),r=t.map((o)=>e[o]);return Promise.all(r).then((o)=>{let n={};for(let i=0;i<t.length;i++)n[t[i]]=o[i];ret
+  @207049191 rn e?.anchor!==void 0?[e.anchor]:void 0}function ki(e){return re(e)||U(e)||B(oe,e)!==void 0}async function xi(e){return re(e)||U(e)||await En(oe,e)!==void 0}function B(e,t,n){retur
+  @207436902 n)if(t)e[S]=r;else delete e[S];return o}function ki(e){return pr.call(e)}});var Or=i(function(Rr){Object.defineProperty(Rr,"__esModule",{value:!0});Rr.merge=void 0;var Er=Tr(),$i=2
+  @208276853 Error $_; exit 1 }; exit $LASTEXITCODE`}function ki(e){return Me([`${e}\\Modules`,`${ye}\\PowerShell\\Modules`,`${ye}\\WindowsPowerShell\\Modules`,`${$e}\\Modules`]).join(";")}func
+  @208828664 1}}function pa(){return eG.of(C().host)}function ki(){pa().invalidateAll()}var eG,$se;var hR=y(()=>{B();Fe();im();eG=new L(()=>new mR);$se={get(e){return pa().get(e)},stamp(){retur
+  @211069301 events;r===null?n.events=[t]:r.push(t)}}function ki(t){var n=nt().memoizedState;return Fr({ref:n,nextImpl:t}),function(){if((Re&2)!==0)throw Error(l(440));return n.impl.apply(void 
+KI "saveGlobalConfig" count=8 hits=150210219,150211844,150211860,150211883,199607765,199607820,203662256,203662488
+  @150210219 ting_saveCurrentProjectConfigForTesting_saveGlobalConfigForTesting_setFileWatchFallbackForTesting_setFreshnessBackendForTesting_setFreshnessWatcherStartedForTesting_setGlobalConfig
+  @150211844 onfigsaveCurrentProjectConfigSyncForExitsaveGlobalConfigsaveGlobalConfigDurablysaveGlobalConfigSyncForExitseedInstallIDssetClientDataCacheKeyGettersetClientDataReadGatesetClientDat
+  @150211860 ProjectConfigSyncForExitsaveGlobalConfigsaveGlobalConfigDurablysaveGlobalConfigSyncForExitseedInstallIDssetClientDataCacheKeyGettersetClientDataReadGatesetClientDataStaleMatchGette
+  @150211883 tsaveGlobalConfigsaveGlobalConfigDurablysaveGlobalConfigSyncForExitseedInstallIDssetClientDataCacheKeyGettersetClientDataReadGatesetClientDataStaleMatchGettersetClientDataStrictRea
+  @199607765 oreK...E..Cannot destructure property 'saveGlobalConfig' from null or undefined value...'...saveGlobalConfig...Q...denied_by_entitlement...X...y..' is restricted by your organ
+  @199607820 g' from null or undefined value...'...saveGlobalConfig...Q...denied_by_entitlement...X...y..' is restricted by your organization's settings. Run /model to choose a different mo
+246 VJ as count=3
+  VJ-import @218216356 t as roa,mge as soa,VJ as toa,Dcl as uoa,SYo as voa,$cl as woa,DKn as xoa,o4n as yoa,i4n as zoa,kYo as Aoa,vYo as Boa,Lcl as Coa,eL as Doa,ZJ as Eoa,uHe as Foa,Ful as Goa,Uul as Hoa,Bul as Ioa,A4n as 
+  VJ-import @221963035 art]"),Z()}} export{VJ as rg,Ay as sg,WJ as tg}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code accep
+  VJ-import @229907762 TJ as mye,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~BUN/root/_352.js";import{CK as GKe,
+246 VJ( count=12 hits=12343910,213990983,213991059,213991206,215205051,215210619,221957485,239879481,239879529,247340862,247343771,247346768
+  VJ( @12343910 	L...S..H...[_^A^].L..wJ(.H...n.'.L..hJ(.H..H...\.'.L..VJ(.H..H...J.'...UAVVWSH..`H.l$`H...H..H..H.M...{.L.u.H.].H.E.H.E.H.}.H.u.L...(.L.E.L..H...{.1...f..D..H..H9.toH9...A.<..H..t...D..A...A.
+  VJ( @213990983 son;return e.nextEagerLoadReason="session_start",t}function VJ(e){let t=GJ(e);t.files.clear(),t.autoMemIndexEntry=void 0}function Dcl(){VJ(hn())}function DEt(e){GJ(e).pinnedHeaderScans.clear()}function SYo(e,t="session_s
+  VJ( @213991059 );t.files.clear(),t.autoMemIndexEntry=void 0}function Dcl(){VJ(hn())}function DEt(e){GJ(e).pinnedHeaderScans.clear()}function SYo(e,t="session_start"){let n=GJ(e);n.nextEagerLoadReason=t,n.shouldFireHook=!0,VJ(e)}functio
+  VJ( @213991206 t"){let n=GJ(e);n.nextEagerLoadReason=t,n.shouldFireHook=!0,VJ(e)}function r4n(e="session_start"){SYo(hn(),e)}function $Et(e){return GJ(e).injectedPinnedPaths}function $cl(e){let t=tYo();return e.filter((n)=>!GKn(n.path)
+  VJ( @215205051 t(n.worktreePath,We()),l_e(n,Be()?t.storageV5:void 0),qVe(),VJ(t.session),Jx.cache.clear?.(),KVe(t.storageV5),s_e(),cb()?.refreshGitBranch?.(),L(e.path?"tengu_worktree_entered_existing":"tengu_worktree_created",{mid_sess
+  VJ( @215210619 ait Yfr(i);else Kfr()}}return l_e(null,Be()?i:void 0),qVe(),VJ(e),Jx.cache.clear?.(),KVe(i),s_e(),cb()?.refreshGitBranch?.(),{restoredCwd:a,originalCwdMissing:l,fellBackToWorktree:u}}function $Dt(e,t){if(!t.originalCwdMi
+  VJ( @221957485 used:Pe,awayLoop:E,storageV5:p,onOpen:os})]})}Ve();function VJ(e,t,o){$r(e,o).seedJobs(t)}function Ay(e,t,o){if(e)return Vy();let n=Uy(process.stdout,null).rows;if(n!==process.stdout.rows)return"";return t&&!o?Hy(n):""}a
+  VJ( @239879481 0=this._y1,this._y1=t},"point")};o(Aw,"default")});function VJ(e){this._context=e}function _w(e){return new VJ(e)}var WJ=z(()=>{"use strict";mx();o(VJ,"BasisOpen");VJ.prototype={areaStart:o(function(){this._line=0},"area
+  VJ( @239879529 });function VJ(e){this._context=e}function _w(e){return new VJ(e)}var WJ=z(()=>{"use strict";mx();o(VJ,"BasisOpen");VJ.prototype={areaStart:o(function(){this._line=0},"areaStart"),areaEnd:o(function(){this._line=NaN},"ar
+  VJ( @247340862 ){this.dyn_tree=e,this.max_code=0,this.stat_desc=t}function VJ(e){return e<256?c0[e]:c0[256+(e>>>7)]}function d0(e,t){e.pending_buf[e.pending++]=t&255,e.pending_buf[e.pending++]=t>>>8&255}function zs(e,t,n){e.bi_valid>YI
+  VJ( @247343771 o],ku(e,a+f0+1,t),s=JI[a],s!==0&&(o-=r5[a],zs(e,o,s)),r--,a=VJ(r),ku(e,a,n),s=HR[a],s!==0&&(r-=BR[a],zs(e,r,s)));while(i<e.last_lit);ku(e,n5,t)}function QI(e,t){var n=t.dyn_tree,r=t.stat_desc.static_tree,o=t.stat_desc.ha
+  VJ( @247346768 :(e.matches++,t--,e.dyn_ltree[(u0[n]+f0+1)*2]++,e.dyn_dtree[VJ(t)*2]++),e.last_lit===e.lit_bufsize-1}Ev._tr_init=gxe;Ev._tr_stored_block=qJ;Ev._tr_flush_block=vxe;Ev._tr_tally=yxe;Ev._tr_align=bxe});var o5=Tr((NJe,XJ)=>{
+247 Ohe( count=8 hits=215503315,215621413,217937911,217953403,232387837,242361420,242366815,242366837
+  Ohe( @215503315 ata.agentType===Kc}var m1e=w(()=>{_g()});function Ohe(e){let{activeAgents:t,allowedAgentTypes:n}=e.options.agentDefinitions;return{depth:Jc(e.agentContext),allowedAgentTypes:n,activeAgents:t
+  Ohe( @215621413 d,MD(this.toolUseContext),Le(this.toolUseContext),Ohe(this.toolUseContext),e.input);dxt(e.name,e.id,this.toolUseContext,t.requestId),this.tools.push({id:e.id,block:e,assistantMessage:t,statu
+  Ohe( @217937911 let S=pxt(s,r.options.tools,r.agentId,MD(r),Le(r),Ohe(r),e.input);dxt(s,e.id,r,l),yield{message:pt({content:[{type:"tool_result",content:`<tool_use_error>Error: No such tool available: ${s}$
+  Ohe( @217953403 pe==="hook")W+=p9n(e.name,T,r.options.tools,Le(r),Ohe(r));let ne=[{type:"tool_result",content:W,is_error:!0,tool_use_id:t}],oe=z.behavior==="ask"?z.contentBlocks:void 0;if(oe?.length)ne.push
+  Ohe( @232387837 failedTipIds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!awai
+  Ohe( @242361420 ;});function Ihe(e,t){e[t]?e[t]++:e[t]=1}function Ohe(e,t){--e[t]||delete e[t]}function Db(e,t,r,i){var n=""+t,a=""+r;if(!e&&n>a){var s=n;n=a,a=s}return n+Nhe+a+Nhe+(yi(i)?zJe:i)}function GJ
+  Ohe( @242366815 lete this._edgeLabels[n],delete this._edgeObjs[n],Ohe(this._preds[r],t),Ohe(this._sucs[t],r),delete this._in[r][n],delete this._out[t][n],this._edgeCount--),this}inEdges(t,r){var i=this._in[
+  Ohe( @242366837 n],delete this._edgeObjs[n],Ohe(this._preds[r],t),Ohe(this._sucs[t],r),delete this._in[r][n],delete this._out[t][n],this._edgeCount--),this}inEdges(t,r){var i=this._in[t];if(i){var n=co(i);r

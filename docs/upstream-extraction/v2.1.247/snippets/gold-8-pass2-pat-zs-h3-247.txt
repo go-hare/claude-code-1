@@ -1,0 +1,3 @@
+# off=208064960 pat=",zs="
+
+y one of path/script must be configured",As='"script" and "interpreter" must be configured together',zs="script must be ASCII-only on Windows (PowerShell decodes stdin with the console OEM code page); spell non-ASCII characters as escapes, e.g. [char]0x00E9",Wn=(e)=>s({message:"script must be a string"}).min(1,{message:"script must not be empty"}).

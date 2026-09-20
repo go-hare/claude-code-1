@@ -1,0 +1,3 @@
+# 247 _g( @214185843
+
+stions about pages you have already read. Answer them from the content already in your context; only re-fetch when asked to, when you need a page you have not read yet, or when the content may have changed.`}var uG;var Nft=w(()=>{op();Y_();py();Zu();_g();uG={agentType:Kc,whenToUse:`Use this to fetch and read web pages / URLs when you do not have a direct ${Ho} tool of your own (if you do, just call it). Put the full URL(s) in the prompt along with the question or task itself \u2014 a summary is a task, so ask it for the summary, not for the page's contents to summarize yourself; its report is 

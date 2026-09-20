@@ -1,0 +1,3 @@
+# offset=222293933 hit=1/1 needle="Pe()!==\"firstParty\""
+
+ession.host),{tips:n,trustedCount:o}=await Gt(e.session.host),s=n.filter((c)=>b(c.id)>=c.cooldownSessions);if(o>0&&Wt())return s;let r=[...Zt,...Mo,...await t.getMarketplacePluginTips(e.storageV5)],d=Pe()!=="firstParty"||!Ie(),l=r.filter((c)=>!t.failedTipIds.has(c.id)),m=d?l.filter((c)=>c.providerAgnostic):l,f=await Promise.all(m.map((c)=>c.advertisedCommand===void 0?!0:Lo(c.advertisedCommand))),A=m.filter((c,L)=>f[L]),O=await Promise.all(A.map((c)=>Do(c,e)));return[...A.filter((c,L)=>O[L]).filter((c)=>b(c.id)>=c.cooldownSessions).filter((c)=>c.maxLifetimeShows===void 0||C(c.id)<c.maxLifetimeS

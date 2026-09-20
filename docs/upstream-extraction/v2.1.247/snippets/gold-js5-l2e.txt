@@ -1,0 +1,3 @@
+# offset=215962779 needle="class l2e"
+
+35},"claude-opus-4-8":{t1:10,t2:15},...!1},yor={key:"handoff",defaults:ess};l2e=class l2e extends ye{errorKind;constructor(e,t){super(`Agent terminated early due to an API error: ${e}`,"Agent terminated early due to an API error");this.errorKind=t;this.name="AgentApiErrorTerminationError"}};nss=new Set(["rate_limit","overloaded","server_error"]);oss=new Set([gn])});function Yye(){if(!oi())return!1;if(V.CLAUDE_CODE_REMOTE)return!1;if(!X$())return!1;if(!km().hasUsedRemoteSession||!es().hasRemoteEnvironment)return!1;return we("tengu_neapolitan",!1)}function LMt(){return zB()||zs(ze())!==null}async function Ror(){let e=ze(),t=await Z_(e);if(t==="HEAD")return;if(await c2e(t,e)

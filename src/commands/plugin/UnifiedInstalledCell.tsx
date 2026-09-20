@@ -2,6 +2,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { Box, color, Text, useTheme } from '@anthropic/ink';
 import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
+import { re, Vr } from '../../utils/plugins/escapeSafeText.js';
 import { plural } from '../../utils/stringUtils.js';
 import type { UnifiedInstalledItem } from './unifiedTypes.js';
 
@@ -36,12 +37,12 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
     return (
       <Box>
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
-        <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+        <Text color={isSelected ? 'suggestion' : undefined}>{Vr(item.plugin)}</Text>
         <Text dimColor={!isSelected}>
           {' '}
           <Text backgroundColor="userMessageBackground">Plugin</Text>
         </Text>
-        <Text dimColor> · {item.marketplace}</Text>
+        <Text dimColor> · {re(item.marketplace)}</Text>
         <Text dimColor={!isSelected}> · {statusIcon} </Text>
         <Text dimColor={!isSelected}>{statusText}</Text>
       </Box>
@@ -54,12 +55,12 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
     return (
       <Box>
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
-        <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+        <Text color={isSelected ? 'suggestion' : undefined}>{Vr({ name: item.name })}</Text>
         <Text dimColor={!isSelected}>
           {' '}
           <Text backgroundColor="userMessageBackground">Plugin</Text>
         </Text>
-        <Text dimColor> · {item.marketplace}</Text>
+        <Text dimColor> · {re(item.marketplace)}</Text>
         <Text dimColor={!isSelected}> · {statusIcon} </Text>
         <Text dimColor={!isSelected}>removed</Text>
       </Box>
@@ -73,12 +74,12 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
     return (
       <Box>
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
-        <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+        <Text color={isSelected ? 'suggestion' : undefined}>{Vr({ name: item.name })}</Text>
         <Text dimColor={!isSelected}>
           {' '}
           <Text backgroundColor="userMessageBackground">Plugin</Text>
         </Text>
-        <Text dimColor> · {item.marketplace}</Text>
+        <Text dimColor> · {re(item.marketplace)}</Text>
         <Text dimColor={!isSelected}> · {statusIcon} </Text>
         <Text dimColor={!isSelected}>{statusText}</Text>
       </Box>

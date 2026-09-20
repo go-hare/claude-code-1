@@ -104,6 +104,7 @@ import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanMod
 import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
 import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTool.js'
+import { SendFeedbackTool } from '@claude-code/builtin-tools/tools/SendFeedbackTool/SendFeedbackTool.js'
 const GoalTool = feature('GOAL')
   ? require('@claude-code/builtin-tools/tools/GoalTool/GoalTool.js').GoalTool
   : null
@@ -262,6 +263,8 @@ export function getAllBaseTools(): Tools {
     LocalMemoryRecallTool,
     VaultHttpFetchTool,
     ConfigTool,
+    // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
+    SendFeedbackTool,
     ...(GoalTool ? [GoalTool] : []),
     ProposeGoalTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),

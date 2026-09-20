@@ -45,7 +45,11 @@ export function getEffectiveContextWindowSize(model: string): number {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../../utils/autoCompactWindow.js') as typeof import('../../utils/autoCompactWindow.js')
     const resolved = resolveAutoCompactWindow(model)
-    if (resolved.source === 'env' || resolved.source === 'settings') {
+    if (
+      resolved.source === 'env' ||
+      resolved.source === 'settings' ||
+      resolved.source === 'model-default'
+    ) {
       contextWindow = Math.min(contextWindow, resolved.window)
     }
   } catch {
@@ -93,14 +97,10 @@ export const MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 const TOOL_RESULT_GROWTH_ESTIMATE = 15_000
 
 /**
- * Context-aware autocompact buffer. Larger context windows need more
- * headroom because a single turn can produce proportionally more tokens
- * (longer model outputs + larger tool results).
+ * densable 2.1.247 xWe — always `e-13000` (f3n). Local 50k/30k tiers were
+ * not in official; they made 1M sessions compact near 930k instead of 967k.
  */
-export function getAutocompactBufferTokens(model: string): number {
-  const effectiveWindow = getEffectiveContextWindowSize(model)
-  if (effectiveWindow >= 800_000) return 50_000
-  if (effectiveWindow >= 400_000) return 30_000
+export function getAutocompactBufferTokens(_model: string): number {
   return AUTOCOMPACT_BUFFER_TOKENS
 }
 

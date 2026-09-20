@@ -1,0 +1,112 @@
+# #8 hook-mb-ptl — PASS 2 verdict
+# SEA 247 C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+# SEA 246 C:/Users/Administrator/AppData/Local/Temp/official-246/package/claude.exe bytes=250948768
+# first pass: gold-8-unknown-proof.txt (lre≡Rne; stderr full; no MAX_HOOK_OUTPUT)
+# this pass: gold-8-pass2-*.txt
+
+STATUS: UNKNOWN
+BODY: none unique for hook/bg-agent conversation-attach cap
+PROD: no edits
+TESTS: none
+
+## 1. JWr / BBr numeric default (locked)
+
+Extracted complete initializers — do not invent 1MB/2MB/10k as a 247 contract.
+
+247 @212668226:
+  var We=50000,Ns=500000,Ds=4,Bs=400000,Us=200000,Hs=50,zs=1e4,Ws=1e4
+  export { zs as Yvb, Ws as Zvb, ... }
+  import { Yvb as JWr } from "B:/~BUN/root/_559.js"
+  lre threshold default = JWr = zs = 1e4
+
+246 @211303800:
+  var ze=50000,Ls=500000,Ms=4,Is=400000,Ns=200000,Ds=50,Bs=1e4
+  export { Bs as lHb, ... }
+  import { lHb as BBr } from "B:/~BUN/root/_574.js"
+  Rne threshold default = BBr = Bs = 1e4
+
+Yvb= / var Yvb / const Yvb / export{Yvb = 0/0 (re-export only).
+lHb= / var lHb / const lHb / export{lHb = 0/0 (re-export only).
+
+Persist default is the SAME `1e4` in both SEAs. Same → document, not a 247 body.
+See gold-8-pass2-JWr-init.txt.
+
+247 extra `Ws=1e4` is NOT the persist default. It is imported as Mue and used
+only as `function Pc(e,t=Mue)` default (below). threshold:r=Ws/Zvb/Mue = 0.
+
+## 2. Background-agent error path (not hook)
+
+No 247-only cap before conversation attach.
+
+- VD( / Pc( / ED( / "characters truncated" within 600 of
+  "background agent" / "Background agent" / "task_notification" /
+  "agent_progress" / "agentError" / "agent_error" = 0 and 0.
+- "agent error:" windows are "Sync agent error:" (remote-bridge), 246=247.
+- megabyte 5=5; output was lost 3=3 (#16 disk writer, HAVE — do not touch).
+- Unique "background agent" windows are resume/artifact/kill copy, not a cap.
+
+246 already middle-truncates *tool/command* errors in ED:
+  if(n.length<=1e4) return n; let r=5000; ... [${i} characters truncated]
+247 refactors that to VD → Pc(n) with default Mue=1e4 and slack dPo=1024.
+Same 1e4 purpose. Local src/utils/toolErrors.ts is the 246 ED shape already
+(10000 + 5000 + characters truncated). Not hook attach. Not bg-agent attach.
+
+Pc(Ur(...)) extra 247 sites are Dynamic workflow notification text, not
+hook/bg-agent conversation attach.
+
+## 3. tengu_hook_output_persisted / persist-to-disk
+
+247 persist wrapper is 246-identical (minifier names only):
+
+247 lre @218251306:
+  async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){
+    if(e.length<=r)return e;
+    let s=await VP(e,`hook-${t}-${n}`,Cv(),o);
+    ... tengu_hook_output_persisted ... slice(0,r) + persist-to-disk failed
+  }
+
+246 Rne @216793606: same body (AP/dy/PP/L/Z/nF vs VP/Cv/KP/D/X/TF).
+
+Call kinds still stdout / additionalContext / systemMessage / initialUserMessage.
+MISS both: ,"stderr",{storageV5 ; blockingError:await lre/Rne ; lre(he.stderr.
+
+4-arg persist callee VP(e,t,n,r) @213663198 ≡ AP(e,t,n,r) @212296306
+(tool-result persist-to-disk). Not a conversation cap.
+
+LOCAL: src/ has ZERO tengu_hook_output_persisted / persist-to-disk failed /
+Hook ${n} truncated. Porting lre is a 246 leftover, NOT a 247 HAVE.
+Do not port.
+
+## 4. Hook error attach still full text (both)
+
+247: Ce.blockingError={blockingError:`[...]: ${he.stderr||"No stderr output"}`}
+246: Te.blockingError={blockingError:`[...]: ${ye.stderr||"No stderr output"}`}
+hook_blocking_error interpolates ${e.blockingError.blockingError} with no slice.
+hook_success / hook_additional_context still interpolate full content.
+
+## 5. Local (do not change)
+
+- MAX_HOOK_OUTPUT_LENGTH=10000 + applyTruncation + "output truncated - exceeded"
+  still 0/0 in both SEAs. First-pass lock: DO NOT change it.
+- toolErrors.ts already matches 246 ED (not a 247 gap).
+- diskOutput.ts / hlo=16777216 is #16 HAVE. DO NOT TOUCH.
+
+## Verdict
+
+No unique 247 function that caps hook or background-agent *error text*
+before conversation attach. Persist helper and persist default `1e4` are
+246 leftovers. 247 Pc/Mue/Ws=1e4 is a toolErrors helper reshape of 246 ED,
+not this bullet's attach path.
+
+INVENT-BAN: no port, no 1MB/2MB/10k as 247 contract, no 10k change,
+no diskOutput.ts, no hook*ptl tests.
+
+## Gold
+
+first pass: gold-8-unknown-proof.txt, gold-8-lre-complete-247.txt,
+  gold-8-Rne-complete-246.txt, gold-8-block-attach-*.txt
+pass2: gold-8-pass2-verdict.txt, gold-8-pass2-JWr-init.txt,
+  gold-8-pass2-family-line-*.txt, gold-8-pass2-lre-complete-247.txt,
+  gold-8-pass2-Rne-complete-246.txt, gold-8-pass2g-ED-complete-246.txt,
+  gold-8-pass2g-VD-complete-247.txt, gold-8-pass2-Pc-complete-247.txt,
+  gold-8-pass2-block-attach-*.txt, gold-8-pass2-counts.txt

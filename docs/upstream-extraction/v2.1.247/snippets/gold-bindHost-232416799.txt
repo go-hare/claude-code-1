@@ -1,0 +1,2 @@
+# bindHost(e){ @232416799 end=232416980 len=181
+bindHost(e){let t=this._host===null;if(this._host=e,t)this._mount(e);if(e.mainLoopModel!==this._engineModel)this._engineModel=e.mainLoopModel,this._engine.setModel(e.mainLoopModel)}

@@ -1,0 +1,3 @@
+# offset=221877602 hit=1/2 needle="if(!this.pty)"
+
+e(this.killOutcome));return}if(this.pty)try{this.pty.kill(e)}catch{}else if(this.record.pid&&!this.pidRecycled())try{process.kill(-this.record.pid,e)}catch{try{process.kill(this.record.pid,e)}catch{}}if(!this.pty)this.settle(this.killOutcome)}stop(){if(this.phase.kind==="retiring"&&this.phase.reason==="reap")this.settle(this.killOutcome);else if(this.phase.kind==="retiring"&&this.phase.reason==="grace")this.settle("done");else if(this.phase.kind!

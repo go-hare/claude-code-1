@@ -1,0 +1,12 @@
+# offset=67461253 needle="EMFILE"
+
+     }
+      if (hasSocketsToEagerlyLoad)
+        for (let item of this.stdio)
+          item?.ref?.();
+    } catch (ex) {
+      let exCode = ex != null && typeof ex === "object" && Object.hasOwn(ex, "code") ? ex.code : @undefined;
+      if (exCode === "EACCES" || exCode === "EAGAIN" || exCode === "EMFILE" || exCode === "ENFILE" || exCode === "ENOENT") {
+        if (this.#handle = null, ex.syscall = "spawn " + this.spawnfile, ex.spawnargs = @Array.prototype.slice.@call(this.spawnargs, 1), process.nextTick(() => {
+          this.emit("error", ex), this.emit("close", ex.errno ?? -1);
+        }),

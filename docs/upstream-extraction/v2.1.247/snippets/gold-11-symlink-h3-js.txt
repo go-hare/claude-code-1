@@ -1,0 +1,65 @@
+# ver=247 offset=67052028 hit=4/292 js=true needle="isSymbolicLink()"
+
+tem = this.#queue.pop();
+      for (let i = 0;i < item.patterns.length; i++)
+        this.#addSubpatterns(item.path, item.patterns[i]);
+      for (let [path, patterns] of this.#subpatterns)
+        this.#queue.push({ __proto__: null, path, patterns });
+      this.#subpatterns.clear();
+    }
+    return @Array.from(this.#results, this.#withFileTypes ? statForFileTypes.bind(null, this.#cache, this.#root) : @undefined);
+  }
+  #isDirectorySync(path, stat, pattern) {
+    if (stat?.isDirectory())
+      return !0;
+    if (!stat?.isSymbolicLink())
+      return !1;
+    if (this.#followSymlinks)
+      return !!this.#cache.followStatSync(path)?.isDirectory();
+    return pattern.hasSeenSymlinks;
+  }
+  async#isDirectory(path, stat, pattern) {
+    if (stat?.isDirectory())
+      return !0;
+    if (!stat?.isSymbolicLink())
+      return !1;
+    if (this.#followSymlinks)
+      return !!(await this.#cache.followStat(path))?.isDirectory();
+    return pattern.hasSeenSymlinks;
+  }
+  #nextRealpathsSync(path, isDirectory, pattern) {
+    if (!this.#followSymlinks || !isDirectory)
+      return pattern.realpaths;
+    let real = this.#cache.realpathSync(path);
+    if (real === null)
+      return pattern.realpaths;
+    let realpaths = cloneSet(pattern.realpaths);
+    return realpaths.add(real), realpaths;
+  }
+  async#nextRealpaths(path, isDirectory, pattern) {
+    if (!this.#followSymlinks || !isDirectory)
+      return pattern.realpaths;
+    let real = await this.#cache.realpath(path);
+    if (real === null)
+      return pattern.realpaths;
+    let realpaths = cloneSet(pattern.realpaths);
+    return realpaths.add(real), realpaths;
+  }
+  async#isCyclic(path, isDirectory, pattern) {
+    if (!this.#followSymlinks || !isDirectory)
+      return !1;
+    let real = await this.#cache.realpath(path);
+    return real !== null && pattern.realpaths.has(real);
+  }
+  #isCyclicSync(path, isDirectory, pattern) {
+    if (!this.#followSymlinks || !isDirectory)
+      return !1;
+    let real = this.#cache.realpathSync(path);
+    return real !== null && pattern.realpaths.has(real);
+  }
+  #addSubpattern(path, pattern) {
+    if (this.#isExcluded(path))
+      return;
+    let fullpath = resolve(this.#root, path);
+    if (this.#isExcluded(`${fullpath}/`) && this.#cache.statSync(fullpath).isDirectory())
+      return;

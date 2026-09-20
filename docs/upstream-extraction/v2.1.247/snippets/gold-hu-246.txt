@@ -1,0 +1,5 @@
+# 246 offset=220774401 needle="function hu(){return"
+
+ser Request
+
+${e}`;return[{type:"text",text:n}]}})}ae();F();I();m();var cr=null;function hu(){return Lt.replace("This template builds a static page from data in the conversation. If the user wants behavior static HTML cannot provide on its own \u2014 the page reading","This template publishes an editor whose editing and saving are already wired. If the user wants behavior beyond that \u2014 the page reading").replace(", a document edited in place \u2014 it saves new versions 

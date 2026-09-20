@@ -1,0 +1,11 @@
+# ver=247 offset=200420760 needle="isAdopted"
+
+o.a.c.h. .a.n.d. .p.o.s.t. .a. .s.t.a.t.u.s. .s.a.y.i.n.g. .h.o.w. .m.u.c.h. .l.o.n.g.e.r. .y.o.u. .e.x.p.e.c.t. .t.h.e. .w.o.r.k. .t.o. .t.a.k.e.;. .i.f. .t.h.e. .w.o.r.k. .i.s. .o.n. .t.r.a.c.k.,. .k.e.e.p. .g.o.i.n.g. ..  .n.o. .u.p.d.a.t.e. .n.e.e.d.e.d... .I.f. .n.o. .r.e.s.p.o.n.s.e. .i.s. .n.e.e.d.e.d.,. .i.g.n.o.r.e. .t.h.i.s. .c.h.e.c.k.-.i.n...
+........^..coordinator_worker_checkin.......v .tick_failed.....u...updateTranscript....5..getTranscript.......M...applyOffsetsAndEvict....3...incrementWebSearchCalls.........getWebSearchCalls...........getConcurrentSubagents..........end_time.....Q\.total_paused_ms.....j...is_backgrounded.....'...owned_by_subagent...........spawn_depth.....6...skip_transcript.....IJ..last_tool_name......L*..workflow_progress...
+....b..
+[killed]
+..	...T.:.isAdopted...........tengu_concurrent_shore..H.....n.Cannot destructure property 'userInitiated' from null or undefined value....i..userStopCount.......`\~.latestInputTokens.........%.cumulativeOutputTokens......Hh..seenToolUseIds..........agentIdleWindowTimers...........monitor:	...p...workflow:.......G4..bash:...B.......Cannot destructure property 'claimed' from null or undefined value..*....>R.[enqueueAgentNotification] skipped taskId=.....9... taskPresent=...........already-notified........task-not-in-registry........stopped at its .....>...-turn limit (partial result; .......	l.. to task-id to continue)........failed: ........was stopped by Claude.......C1..was stopped by user.........was stopped.	...uW..
+<result>...	...E...</result>........F..
+<usage><subagent_tokens>........^..</subagent_tokens><tool_uses>.......~>..</tool_uses><duration_ms>...........</duration_ms></usage>......7...
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>..........maxTurnsReached.....w...skipStampIfRunning.......[..keepaliveReason.
+.......

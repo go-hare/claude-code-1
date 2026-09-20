@@ -1,0 +1,2 @@
+# needle=function dPe( pos=241867890 end=241867958 len=68
+function dPe(e){return function(){return hPe.call(this.children,e)}}

@@ -1,0 +1,7 @@
+# firstDiff=153
+
+---246---
+async function ID(ID,ID,ID,ID){if(ID.ID)ID(!0);ID.ID(),ID("tengu_plugin_list_command",{});let ID=await ID(ID),{ID:ID,ID:ID}=await ID("B:/~BUN/root/chunk-swaxm70k.js"),ID=ID(),ID=Object.ID(ID.ID);await ID();let{ID:ID,ID:ID,ID:ID,ID:ID}=await ID(ID,ID),ID=[...ID,...ID],ID=new ID(ID.map((ID)=>[ID.ID,ID])),ID={ID:ID,ID:ID,ID:ID},ID=[{ID:"Session-only plugins (--plugin-dir / --plugin-url):",ID:()=>"session",ID:"session",ID:"session",ID:(ID)=>ID.ID,ID:!1,...ID(ID,ID)},{ID:`Synced from claude.ai (${re(Dn())})${Cn()?"":" \u2014 sync is off in this shell; 
+
+---247---
+async function ID(ID,ID,ID,ID){if(ID.ID)ID(!0);ID.ID(),ID("tengu_plugin_list_command",{});let ID=await ID(ID),{ID:ID,ID:ID}=await ID("B:/~BUN/root/chunk-54gg8254.js"),ID=ID(),ID=Object.ID(ID.ID);await ID();let{ID:ID,ID:ID,ID:ID,ID:ID}=await ID(ID,ID),ID=[...ID,...ID],ID=new ID(ID.map((ID)=>[ID.ID,ID])),ID={ID:ID,ID:ID,ID:ID},ID=[{ID:"Session-only plugins (--plugin-dir / --plugin-url):",ID:()=>"session",ID:"session",ID:"session",ID:(ID)=>ID.ID,ID:!1,...ID(ID,ID)},{ID:`Synced from claude.ai (${re(Dn())})${Cn()?"":" \u2014 sync is off in this shell; 

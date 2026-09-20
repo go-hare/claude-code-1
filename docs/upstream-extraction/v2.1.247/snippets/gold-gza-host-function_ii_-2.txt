@@ -1,0 +1,2 @@
+# needle=function ii( pos=209868071
+function ii(e){return yt.create(Pn.UNIVERSAL,cr.SEQUENCE,!0,e)}

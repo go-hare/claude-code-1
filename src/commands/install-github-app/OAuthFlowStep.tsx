@@ -7,9 +7,19 @@ import { KeyboardShortcutHint } from '@anthropic/ink';
 import { Spinner } from '../../components/Spinner.js';
 import TextInput from '../../components/TextInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, setClipboard, Box, Link, Text } from '@anthropic/ink';
+import {
+  type ClipboardPath,
+  type KeyboardEvent,
+  getClipboardPath,
+  probeLinuxClipboardTool,
+  setClipboard,
+  Box,
+  Link,
+  Text,
+} from '@anthropic/ink';
 import { OAuthService } from '../../services/oauth/index.js';
 import { saveOAuthTokensIfNeeded } from '../../utils/auth.js';
+import { isHeadlessBrowserEnvironment } from '../../utils/browser.js';
 import { logError } from '../../utils/log.js';
 
 interface OAuthFlowStepProps {
@@ -35,10 +45,12 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
   const [pastedCode, setPastedCode] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
   const [showPastePrompt, setShowPastePrompt] = useState(false);
-  const [urlCopied, setUrlCopied] = useState(false);
+  // densable 247 #17 — ClipboardPath, not a boolean. null until `c`.
+  const [copyPath, setCopyPath] = useState<ClipboardPath | null>(null);
+  const [copyDebounced, setCopyDebounced] = useState(false);
   const timersRef = useRef<Set<NodeJS.Timeout>>(new Set());
-  // Separate ref so startOAuth's timer clear doesn't cancel the urlCopied reset
-  const urlCopiedTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  // Separate ref so startOAuth's timer clear doesn't cancel the native-copy reset
+  const copyResetTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const terminalSize = useTerminalSize();
   const textInputColumns = Math.max(50, terminalSize.columns - PASTE_HERE_MSG.length - 4);
@@ -59,6 +71,11 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
   }
 
   async function handleSubmitCode(value: string, url: string) {
+    if (!value.trim()) {
+      setPastedCode('');
+      setCursorOffset(0);
+      return;
+    }
     try {
       // Expecting format "authorizationCode#state" from the authorization callback URL
       const [authorizationCode, state] = value.split('#');
@@ -109,9 +126,21 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
     try {
       const result = await oauthService.startOAuthFlow(
         async url => {
+          if (copyResetTimerRef.current !== undefined) {
+            clearTimeout(copyResetTimerRef.current);
+            copyResetTimerRef.current = undefined;
+          }
+          setCopyPath(null);
+          setCopyDebounced(false);
+          setShowPastePrompt(false);
           setOAuthStatus({ state: 'waiting_for_login', url });
-          const timer = setTimeout(setShowPastePrompt, 3000, true);
-          timersRef.current.add(timer);
+          // densable 247 #17: headless (SSH / no TTY / linux no display) → immediate URL
+          if (isHeadlessBrowserEnvironment()) {
+            setShowPastePrompt(true);
+          } else {
+            const timer = setTimeout(() => setShowPastePrompt(true), 3000);
+            timersRef.current.add(timer);
+          }
         },
         {
           loginWithClaudeAi: true, // Always use Claude AI for subscription tokens
@@ -182,16 +211,28 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
   }, [oauthStatus]);
 
   useEffect(() => {
-    if (pastedCode === 'c' && oauthStatus.state === 'waiting_for_login' && showPastePrompt && !urlCopied) {
-      void setClipboard(oauthStatus.url).then(raw => {
-        if (raw) process.stdout.write(raw);
-        setUrlCopied(true);
-        clearTimeout(urlCopiedTimerRef.current);
-        urlCopiedTimerRef.current = setTimeout(setUrlCopied, 2000, false);
-      });
-      setPastedCode('');
+    if (oauthStatus.state === 'waiting_for_login' && showPastePrompt) {
+      void probeLinuxClipboardTool();
     }
-  }, [pastedCode, oauthStatus, showPastePrompt, urlCopied]);
+  }, [oauthStatus, showPastePrompt]);
+
+  useEffect(() => {
+    if (/^c+$/.test(pastedCode) && oauthStatus.state === 'waiting_for_login' && showPastePrompt) {
+      setPastedCode('');
+      if (!copyDebounced) {
+        setCopyDebounced(true);
+        setTimeout(() => setCopyDebounced(false), 2000);
+        const path = getClipboardPath();
+        void setClipboard(oauthStatus.url).then(raw => {
+          if (raw) process.stdout.write(raw);
+          setCopyPath(path);
+          if (path === 'native') {
+            copyResetTimerRef.current = setTimeout(() => setCopyPath(null), 2000);
+          }
+        });
+      }
+    }
+  }, [pastedCode, oauthStatus, showPastePrompt, copyDebounced]);
 
   // Cleanup OAuth service and timers when component unmounts
   useEffect(() => {
@@ -201,7 +242,7 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
       // Clear all timers
       timers.forEach(timer => clearTimeout(timer));
       timers.clear();
-      clearTimeout(urlCopiedTimerRef.current);
+      clearTimeout(copyResetTimerRef.current);
     };
   }, [oauthService]);
 
@@ -301,17 +342,23 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
       {/* Show URL when paste prompt is visible */}
       {oauthStatus.state === 'waiting_for_login' && showPastePrompt && (
         <Box flexDirection="column" key="urlToCopy" gap={1} paddingBottom={1}>
-          <Box paddingX={1}>
-            <Text dimColor>Browser didn&apos;t open? Use the url below to sign in </Text>
-            {urlCopied ? (
-              <Text color="success">(Copied!)</Text>
-            ) : (
-              <Text dimColor>
-                <KeyboardShortcutHint shortcut="c" action="copy" parens />
-              </Text>
+          <Box flexDirection="column" paddingX={1}>
+            <Box>
+              <Text dimColor>Browser didn&apos;t open? Use the url below to sign in </Text>
+              {copyPath === 'native' ? (
+                <Text color="success">(Copied!)</Text>
+              ) : copyPath === null ? (
+                <Text dimColor>
+                  <KeyboardShortcutHint shortcut="c" action="copy" parens />
+                </Text>
+              ) : null}
+            </Box>
+            {copyPath === 'tmux-buffer' && (
+              <Text dimColor>(Copied to tmux buffer · select the URL manually if paste fails)</Text>
             )}
+            {copyPath === 'osc52' && <Text dimColor>(Sent via OSC 52 · select the URL manually if paste fails)</Text>}
           </Box>
-          <Link url={oauthStatus.url}>
+          <Link url={oauthStatus.url} assumeSupport>
             <Text dimColor>{oauthStatus.url}</Text>
           </Link>
         </Box>

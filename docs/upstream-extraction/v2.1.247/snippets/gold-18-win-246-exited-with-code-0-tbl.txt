@@ -1,0 +1,27 @@
+# ver=246 offset=82256599 kind=tbl run=34 needle="exited with code"
+
+s,j),j.exports);var z=import.meta.require;var O=K(()=>{var G=process._eval,H=process.env.NODE_REPL_EXTERNAL_MODULE;if(H)z(z("path").resolve(H));else{let j=z("repl")[Symbol.for("bun.repl.createInternalRepl")];if(console.log(`Welcome to Bun v${globalThis.Bun.version} (Node.js-compatible REPL, node:repl ${process.version}).
+Type ".help" for more information.`),j(process.env,(A,k)=>{if(A)throw A;k.on("exit",()=>{if(k.historyManager?.isFlushing){k.once("flushHistory",()=>process.exit());return}process.exit()})}),G!==void 0)L(G)}function L(E){let j=z("module"),A;try{A=process.cwd()}catch{A=z("path").dirname(process.execPath)}let k="[eval]",D=new j(k);D.filename=z("path").join(A,k),D.paths=j._nodeModulePaths(A);let C=globalThis,F=C.module;C.module=D,C.exports=D.exports,C.__dirname=".",C.__filename=k,C.require=j.createRequire(D.filename);try{z("vm").runInThisContext(E,{filename:k,displayErrors:!0})}catch(J){try{process.setUncaughtExceptionCaptureCallback(null)}catch{}console.error(J),process.exit(1)}finally{if(F!==void 0)C.module=F}}});export default O();
+.error: Failed to run .. due to error ...&.[0m.[31merror.[0m: Failed to run .[1m...[0m due to error .[1m...[0m...bun-node-aadadbbbe\node.exe...error: Failed to run ".
+" due to:
+...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to:
+...Failed to run script "<b>{}<r>"Unexpected state: process is running.error: ".." exited with signal ...[0m.[31merror.[0m: ".[1m...[0m" exited with signal .[1m...[0m..test"<b>{}<r>" exited with code {}.note: a package.json script ".." was not found...[34mnote.[0m.[2m:.[0m a package.json script ".." was not found...error: Failed to run ".." due to exit code ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to exit code .[1m...[0m...error: Failed to run ".." due to signal ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to signal .[1m...[0m...error: Failed to run ".	" due to ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to .[0m.[31m...[0m..Missing script to execute. Pass --interactive to start the Node.js-compatible REPL.NODEnpm_node_execpathnpm_execpath\node_modules\.bin9unexpected error from createFakeTemporaryNodeExecutable: ...
+::endgroup::
+...[0m
+::endgroup::
+...*...<r><b>bun test <r><d>v1.4.1 (aadadbbbe)<r>... .
+x PARALLEL.. .[1;2m... PARALLEL.[0m.Etc/UTCTZ.Test filter .. had no matches...Test filter .[1m...[0m had no matches...Test filter .. had no matches in --cwd=...Test filter .[1m...[0m had no matches in --cwd=...--changed: no changed files, nothing to run
+.[0m.[2m--changed:.[0m no changed files, nothing to run
+.--changed: . changed file.!, but no test files are affected
+...[0m.[2m--changed:.[0m . changed file.!, but no test files are affected
+..--changed: . changed file.
+, running ../.
+ test file..
+...[0m.[2m--changed:.[0m . changed file.
+, running ../.
+ test file..
+.--changed: unable to determine affected tests.--shard=../.
+: running ../.
+ test file..
+...[0m.[2m--shard=../..:.[0m running ../.
+ test file..

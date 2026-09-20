@@ -102,16 +102,28 @@ export function processSkillFiles(
 }
 
 /**
+ * densable X5T — bare subcommands recognized by wRc / matchSubcommand.
+ * Lives here (not in claudeApiContent) so skill markdown stays lazy.
+ */
+export const CLAUDE_API_SUBCOMMANDS = [
+  'migrate',
+  'managed-agents-onboard',
+  'prompt-audit',
+  'upgrade',
+  'cost-optimize',
+] as const
+
+export type ClaudeApiSubcommand =
+  | (typeof CLAUDE_API_SUBCOMMANDS)[number]
+  | 'none'
+
+/**
  * densable gPl / wRc — first bare word of args if it is a known subcommand.
+ * Default list is X5T (`CLAUDE_API_SUBCOMMANDS`).
  */
 export function matchSubcommand(
   args: string,
-  subcommands: readonly string[] = [
-    'migrate',
-    'managed-agents-onboard',
-    'prompt-audit',
-    'upgrade',
-  ],
+  subcommands: readonly string[] = CLAUDE_API_SUBCOMMANDS,
 ): string {
   const first = args.trim().toLowerCase().split(/\s+/)[0] ?? ''
   return subcommands.find(s => s === first) ?? 'none'

@@ -1,0 +1,22 @@
+# import/alias ke
+
+DIFF 246=31 247=41 "{ke}"
+same 246=0 247=0 "{ke,"
+same 246=2 247=2 ",ke}"
+DIFF 246=49 247=57 "ke as "
+DIFF 246=163 247=167 " as ke"
+same 246=0 247=0 "ke=_g"
+same 246=0 247=0 "ke=__p"
+same 246=0 247=0 "ke=a0"
+same 246=0 247=0 "ke=sanitize"
+UI "No plugins installed. Use `/plugin install`" hits=2 197938108,236144192
+UI "No plugins installed. Use `/plugin" hits=2 197938108,236144192
+UI "Couldn't refresh marketplace" hits=2 197941920,235999859
+UI "Showing available marketplaces" hits=2 197942034,236000411
+DIFF 246=8 247=10 "function _g("
+same 246=0 247=0 "function __p("
+same 246=0 247=0 "function aJ0("
+DIFF 246=3 247=1 "function Wwe("
+same 246=0 247=0 "function GPi("
+same 246=0 247=0 "_g(e)!==e"
+DIFF 246=7 247=5 "function ke(e){return"

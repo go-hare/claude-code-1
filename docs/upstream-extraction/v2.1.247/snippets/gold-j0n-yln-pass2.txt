@@ -1,0 +1,91 @@
+# j0n/yln pass2 aliases + unique bind
+N "XX(\"installed\",Fs())" count=1 hits=214573456
+  @214573456 tion TB(e){return!Ne()||e===void 0?null:XX("installed",Fs())}function L0n(){return 438&~process.umask()}async function N0n(e,t){let n=TB(t);
+N "function TB(e){return!Ne()||e===void 0?null:XX(\"installed\",Fs())}" count=1 hits=214573412
+  @214573412 rsion:2,plugins:{}};return XSt.add(n),n}function TB(e){return!Ne()||e===void 0?null:XX("installed",Fs())}function L0n(){return 438&~process.umask()}async function N0n(e,t){let n=TB(t);i
+N "Failed to load installed plugins from disk" count=3 hits=200361976,214574933,214577741
+  @200361976 Id' from null or undefined value,...>.y.Failed to load installed plugins from disk: ...load-from-disk..B...YZE.Cannot destructure property 'newPath' from nul
+  @214574933 Bo(o,n),F0n);if(r.loadError!==void 0)_(`Failed to load installed plugins from disk: ${Y(r.loadError)}`,{level:"error"}),f2("load-from-disk",r.loadError,!0);if(r.w
+  @214577741 n q0n(n)}}function q0n(e){let t=Y(e);_(`Failed to load installed plugins from disk: ${t}`,{level:"error"}),f2("load-from-disk",e,!0);let n={version:2,plugins:{}};
+N "Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface" count=1 hits=214575089
+  @214575089 if(r.written!==void 0)qSt(r.written),_(`Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface`);return r.result}async function z0n(e,t,n,r){for(let o=1;;o++){l
+N "function IR(){try{let e=GSt()" count=1 hits=214577454
+  @214577454 pshot??=sZ(),e.installedPluginsSnapshot}function IR(){try{let e=GSt();return e?VSt(e):{version:2,plugins:{}}}catch(e){return q0n(e)}}async function y
+N "let r=IR()" count=1 hits=214576408
+  @214576408 &t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}async function H0n(e,t,n,r){let 
+N "function GSt(){" count=1 hits=214571162
+  @214571162 up legacy cache: ${o}`,{level:"warn"})}}function GSt(){let e=vt(),t=sme(),n;try{n=e.readFileSync(t,{encoding:"utf-8"})}catch(r){if(Et(r
+N "async function N0n(e,t)" count=1 hits=214573520
+  @214573520 ction L0n(){return 438&~process.umask()}async function N0n(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null){let s=await t.write(n,le(e,null,2),{
+N "Failed to save installed_plugins.json to" count=2 hits=201644408,214573954
+  @201644408 ...c. installed plugins to ..)...+t.Failed to save installed_plugins.json to ...<...r~~.installed plugins registry update settled without an outcomeD...C3.
+  @214573954 led plugins to ${o}`)}catch(s){throw _(`Failed to save installed_plugins.json to ${o}: ${Y(s)}`,{level:"error"}),f2("save",s,!1),s}}function F0n(e){let t=tr(e);
+N "installed plugins through the storage interface" count=3 hits=201644321,214573713,214575136
+  @201644321  interface (...	..Saved ..0...b. installed plugins through the storage interface...c. installed plugins to ..)...+t.Failed to save installed_plugins.json to
+  @214573713 `Saved ${Object.keys(e.plugins).length} installed plugins through the storage interface`);return}let r=vt(),o=sme();try{r.mkdirSync(Fs());let s=le(e,null,2);u2(o,s),Xn
+  @214575136 {Object.keys(r.written.plugins).length} installed plugins through the storage interface`);return r.result}async function z0n(e,t,n,r){for(let o=1;;o++){let s=await e.u
+N "function yln(e){let{pendingUsage:t}=HP()" count=1 hits=213648410
+  @213648410  uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var z
+N "yln(n),ki(" count=1 hits=213653132
+  @213653132  n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{let s=Object.keys(r.pluginUsage??{}).filter((a)=>n.has(a.toLowerCase()));i
+N "pendingUsage" count=11 hits=200123472,200264005,213647177,213647420,213647531,213647588,213648260,213648306,213648339,213648390,213648430
+  @200123472 .../.".expansionByRootCanonical...pendingUsage...exitFlushesInFlight...OA).flushStorageV5...Tb.flushers...?.exit
+  @200264005 it.G...n.K.Cannot destructure property 'pendingUsage' from null or undefined value...*..attributionMcpTool...agent:builtin
+  @213647177 r sln=w(()=>{Ls();Co();n3()});class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}class lln{
+  @213647420 on uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Dat
+  @213647531 ction dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUse
+  @213647588 e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,
+N "function XX(" count=1 hits=241875397
+  @241875397 ._names=YX(e.getAttribute("class")||"")}function XX(e,t){for(var r=N8(e),i=-1,n=t.length;++i<n;)r.add(t[i])}function KX(e,t){for(var
+N "async function XX(" count=0 hits=
+N "XX as " count=2 hits=227363560,235290805
+  @227363560  eu,OX as ae,UX as Ga,VX as Rs,WX as ml,XX as So,aY as $r,bY as Pn,dY as Vs,eY as Qs,iY as Ar,jY as Cr,kY as ja,nY as vo}from"
+  @235290805  Ht,QX as An,RX as Gr,SX as lt,TX as qt,XX as Ar,YX as $e,ZX as Oe,_X as er,aY as $o,bY as _e,cY as en,iY as Vo,jY as qo,lY as
+N " as XX" count=8 hits=209177359,211867929,212808162,212821794,212857131,219714068,226282162,232034727
+  @209177359 Xb,x as TXb,E as UXb,F as VXb,k as WXb,O as XXb,u as YXb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's
+  @211867929  as TXc,No as UXc,it as VXc,Dt as WXc,Vt as XXc,rt as YXc,Ft as ZXc,T as _Xc,k as $Xc,Ht as aYc,q as bYc,ct as cYc,$t as dYc,l
+  @212808162 s SFn,Kfb as W$,Leb as fZ,Lfb as DFn,Meb as XX,Mfb as c0n,Neb as WFe,Nfb as Lce,Oeb as J8,Ofb as LOt,Peb as dNn,Pfb as Dde,Qeb
+  @212821794 YXn,oKb as i9n,oLb as s2n,pKb as a9n,qKb as XXn,qLb as L2,rKb as R5,sKb as yOs,tKb as bge,uKb as IGn,vKb as SGn}from"B:/~BUN/r
+  @212857131  WLn,std as eOn,tmd as Hx,tqd as vme,ttd as XXr,tud as W0,tvd as phr,umd as jo,uqd as AUn,uvd as Bfe,uwd as MF,vmd as fyt,vod 
+  @219714068 s TXa,YP as UXa,fy as VXa,pEi as WXa,fEi as XXa,mEi as YXa,gEi as ZXa,hEi as _Xa,fcn as $Xa,EEi as aYa,CEi as bYa,Ecn as cYa,$
+N "function Fs(" count=12 hits=206933944,207849153,208074697,208239482,208316911,210608116,212720619,222031018,222095467,222757061,223006248,226014865
+  @206933944 r Rn=i(()=>{j();Is=x.Uint8Array,Je=Is});function Fs(e){var t=-1,o=Array(e.size);return e.forEach(function(r,s){o[++t]=[s,r]}),o}var 
+  @207849153 -1)a.refIndex=o.idx;t.matches.push(a)})}function Fs(e,t){t.score=e.score}function Bs(e,t,{includeMatches:s=h.includeMatches,includeS
+  @208074697 nd:O([h,r??null,d??null]),scriptSize:c}}function Fs(e){return{bytes:Buffer.byteLength(e,"utf8"),lines:qn(e,` `)+(e.endsWith(` `)?0:1
+  @208239482 ==1)return r[0]??null;return null}async function Fs(){let e=new Set(["origin"]),t=await Yn();if(t&&qn.test(t))e.add(t);return[...e].
+  @208316911 d 0)t.push({source:n,value:r})}return t}function Fs(){return!!(h("userSettings")?.skipDangerousModePermissionPrompt||h("localSetting
+  @210608116 ries:i,sortedEntries:o?t:[...i].sort()}}function Fs(e){return Si(e).files}var yi,hi,bi="refs/claude/",ki=255,Ei,Ls,Oi,Ni;var Ii=T(()
+N "function sme(){return vB(Fs(),\"installed_plugins.json\")}" count=1 hits=214568775
+  @214568775 0n,dirname as FBo,join as vB}from"path";function sme(){return vB(Fs(),"installed_plugins.json")}function UBo(){return vB(Fs(),"installed_plugins_v2.json")}function mHa(){let e=
+N "export{" count=12 hits=82467142,83090689,83202777,206249451,206251605,206253675,206254945,206257486,206258343,206259398,206280984,206282450
+  @82467142 catch(_){o(_)}if(r)throw t};return n()};export{ve as $$typeof,ye as __EARLY_RETURN_SENTINEL,de as __MEMO_CACHE_SENTINEL,Oe as _
+  @83090689 ror: unexpected export default stmt dataexport{export {}from} from export * as export* as export*fromexport * from from  await 
+  @83202777 td frame(./. ?u..$.var console_default=;export{ as };...s.M&(./.`...B. L..#0Ic..=..b;..Z..uJq.a/..8...a00P%...d...].
+  @206249451 ce other flags before it.";return null} export{r as D7c}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's C
+  @206251605 turn i[t]==="daemon"?i.slice(t+1):null} export{f as E7c,c as F7c,d as G7c,u as H7c}; .// @bun @bytecode // Claude Code is a Bet
+  @206253675 eturn_sentinel"),C=import.meta.require; export{u as ABd,v as BBd,w as CBd,x as DBd,y as EBd,z as FBd,A as GBd,B as HBd,C as IBd
+ANCHOR TB@214573412 end=214573477 len=65
+ANCHOR j0n@214574841 end=214575202 len=361
+ANCHOR N0n@214573520 end=214574046 len=526
+ANCHOR IR@214577454 end=214577547 len=93
+ANCHOR ame@214576324 end=214576466 len=142
+ANCHOR yln@213648410 end=213648511 len=101
+ANCHOR dPe@213653071 end=213653329 len=258
+EXPORT after installed-cluster@214590000: 
+EXPORT after yln-cluster@213660000: 
+IMPORT ame-mod-imports count=6
+  @214564628 import{createHash as MBo}from"crypto";import{readFile as OBo}from"fs/promises";import{isAbsolute as k0n,join as b0n,relative as v0n,resolve as JFe,sep as FSt}from"path";import{pathToFileURL as DBo}fro
+  @214564666 import{readFile as OBo}from"fs/promises";import{isAbsolute as k0n,join as b0n,relative as v0n,resolve as JFe,sep as FSt}from"path";import{pathToFileURL as DBo}from"url";function S0n(e){return e.toLowe
+  @214564707 import{isAbsolute as k0n,join as b0n,relative as v0n,resolve as JFe,sep as FSt}from"path";import{pathToFileURL as DBo}from"url";function S0n(e){return e.toLowerCase().substring(0,12)}async function j$
+  @214564797 import{pathToFileURL as DBo}from"url";function S0n(e){return e.toLowerCase().substring(0,12)}async function j$(e,t,n,r,o,s,i){if(typeof t==="object"&&t.source==="command"){if(!i){if(o)return _(`Using 
+  @214568682 import{constants as NBo}from"os";import{basename as R0n,dirname as FBo,join as vB}from"path";function sme(){return vB(Fs(),"installed_plugins.json")}function UBo(){return vB(Fs(),"installed_plugins_v2
+  @214568715 import{basename as R0n,dirname as FBo,join as vB}from"path";function sme(){return vB(Fs(),"installed_plugins.json")}function UBo(){return vB(Fs(),"installed_plugins_v2.json")}function mHa(){let e=Xn()
+IMPORT dPe-mod-imports count=0
+XX defs 241875397
+  XX@241875397 len=68 function XX(e,t){for(var r=N8(e),i=-1,n=t.length;++i<n;)r.add(t[i])}
+IR@210278398 len=136 function IR(u){let o=AR(u);if(o.success===!0)return o;return{success:!0,value:null,remainder:u,failedExpectations:o.fail
+IR@211124189 len=37 function IR(){for(;Te!==null;)Hv(Te)}
+IR@214577454 len=93 function IR(){try{let e=GSt();return e?VSt(e):{version:2,plugins:{}}}catch(e){return q0n(e)}}
+IR@227085422 len=104 function IR(e){let{skuArr:t,index:r,skuName:n,skuVersion:o}=e;if(r>=t.length)return;t[r]=[n,o].join(by)}
+IR@241908095 len=347 function IR(e){var t=this._name,r=this._id;typeof e!="function"&&(e=Uh(e));for(var i=this._groups,n=i.length,a=new Array
+IR@249803910 len=144 function IR(e){let t=Object.keys(e.files).sort();return t.includes("Main.dc.html")?"Main.dc.html":t.find(n=>n.endsWith("

@@ -1,0 +1,78 @@
+# ver=247 offset=66644058 hit=1/292 js=true needle="isSymbolicLink()"
+
+est, opts);
+}
+function checkParentDir(destStat, src, dest, opts) {
+  let destParent = dirname(dest);
+  if (!existsSync(destParent))
+    mkdirSync(destParent, { recursive: !0 });
+  return getStats(destStat, src, dest, opts);
+}
+function getStats(destStat, src, dest, opts) {
+  let srcStat = (opts.dereference ? statSync : lstatSync)(src);
+  if (srcStat.isDirectory() && opts.recursive)
+    return onDir(srcStat, destStat, src, dest, opts);
+  else if (srcStat.isDirectory())
+    throw fsEisdirError({
+      message: `${src} is a directory (not copied)`,
+      path: src,
+      syscall: "cp",
+      errno: EISDIR,
+      code: "EISDIR"
+    });
+  else if (srcStat.isFile() || srcStat.isCharacterDevice() || srcStat.isBlockDevice())
+    return onFile(srcStat, destStat, src, dest, opts);
+  else if (srcStat.isSymbolicLink())
+    return onLink(destStat, src, dest, opts);
+  else if (srcStat.isSocket())
+    throw fsCpSocketError({
+      message: `cannot copy a socket file: ${dest}`,
+      path: dest,
+      syscall: "cp",
+      errno: EINVAL,
+      code: "EINVAL"
+    });
+  else if (srcStat.isFIFO())
+    throw fsCpFifoPipeError({
+      message: `cannot copy a FIFO pipe: ${dest}`,
+      path: dest,
+      syscall: "cp",
+      errno: EINVAL,
+      code: "EINVAL"
+    });
+  throw fsCpUnknownError({
+    message: `cannot copy an unknown file type: ${dest}`,
+    path: dest,
+    syscall: "cp",
+    errno: EINVAL,
+    code: "EINVAL"
+  });
+}
+function onFile(srcStat, destStat, src, dest, opts) {
+  if (!destStat)
+    return copyFile(srcStat, src, dest, opts);
+  return mayCopyFile(srcStat, src, dest, opts);
+}
+function mayCopyFile(srcStat, src, dest, opts) {
+  if (opts.force)
+    return unlinkSync(dest), copyFile(srcStat, src, dest, opts);
+  else if (opts.errorOnExist)
+    throw fsCpEExistError({
+      message: `${dest} already exists`,
+      path: dest,
+      syscall: "cp",
+      errno: EEXIST,
+      code: "EEXIST"
+    });
+}
+function copyFile(srcStat, src, dest, opts) {
+  if (copyFileSync(src, dest, opts.mode), opts.preserveTimestamps)
+    handleTimestamps(srcStat.mode, src, dest);
+  return setDestMode(dest, srcStat.mode);
+}
+function handleTimestamps(srcMode, src, dest) {
+  if (fileIsNotWritable(srcMode))
+    makeFileWritable(dest, srcMode);
+  return setDestTimestamps(src, dest);
+}
+function fileIsN

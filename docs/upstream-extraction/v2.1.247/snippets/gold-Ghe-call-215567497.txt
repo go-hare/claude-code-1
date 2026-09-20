@@ -1,0 +1,4 @@
+# =Ghe( @215567497
+blocked-by-hook",text:"compaction blocked by PreCompact hook",priority:"immediate",color:"warning"});throw new OL(`${JQ}: ${e.blockedBy}`)}function yV(e){return[e.boundaryMarker,...e.summaryMessages,...e.messagesToKeep,...e.attachments,...e.hookResults]}function RPt(e){return[e.boundaryMarker,...e.summaryMessages,...e.attachments,...e.hookResults]}function DAt(e,t,n,r=n){let o=n.map((i)=>i.uuid),s=Ghe([...n],r).map((i)=>i.uuid);if(o.length===0)return e;return{...e,compactMetadata:{...e.compactMetadata,...s.length>0&&{preservedSegment:{headUuid:s[0],anchorUuid:t,tailUuid:s.at(-1)}},preservedMessages:{anchorUuid:t,uuids:s,allUuids:o}}}}function O8n(e,t){if(!t)return e||void 0;if(!e)return t;return`${e}
+
+${t}`}async function U1e(e,t,n,r,o){let{customInstructions:s}=o??{},{isAutoCompact:i=!1,recompactionInfo:a,stripNonEssential:l=!1,spinnerHintText:c,onNotification:u,onResponseLength:d}=o??{

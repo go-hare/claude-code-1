@@ -1,0 +1,3 @@
+# offset=210370182
+
+function Js(e){let t=e.match(/^([^(]+)\(([^)]+)\)$/);if(!t)return{toolName:e};let n=t[1],r=t[2];if(!n||!r)return{toolName:e};return{toolName:n,ruleContent:r}}

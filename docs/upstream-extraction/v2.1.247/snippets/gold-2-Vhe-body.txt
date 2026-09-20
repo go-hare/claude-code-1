@@ -1,0 +1,3 @@
+# offset=232386953 hit=1/1 needle="async function Vhe("
+
+n.sessions-o.sessions;return(n.tip.priority??0)-(o.tip.priority??0)}),t[0]?.tip}async function Vhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=await Whe(e);if(t.length===0)return;return qhe(t)}async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true":"false",n=e>=EV&&t<EV?"true":"false",r=`${o}|${n}`;if(t

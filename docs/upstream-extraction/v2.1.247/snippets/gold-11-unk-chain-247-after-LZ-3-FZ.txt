@@ -1,0 +1,3 @@
+# 247-after-LZ n=3 function FZ start=210415777 end=210415810 len=33 sha=5d39333811ba0017
+
+function FZ(){yN(Re.getConfig())}

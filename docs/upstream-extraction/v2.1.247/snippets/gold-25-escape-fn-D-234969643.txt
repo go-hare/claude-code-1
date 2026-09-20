@@ -1,0 +1,3 @@
+# 247 function D start=234969643 len=216 sha=842703f0f37f065e dist=1166296
+
+async function D(e,{humanReadableOutput:r=!0,signal:o}={}){if(de.platform!=="darwin")throw Error("macOS only");let n=r?[]:["-ss"],t={};if(o)t.signal=o;let{stdout:s}=await he("osascript",["-e",e,n],t);return s.trim()}

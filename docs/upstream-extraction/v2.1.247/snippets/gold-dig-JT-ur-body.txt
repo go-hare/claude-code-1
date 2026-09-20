@@ -1,0 +1,3 @@
+# offset=209389044
+
+e){return/^\w[\w.@-]*$/.test(e)}function ur(e,t,n){if(!Bm(t))return null;return`claude ${e} ${t}${n?` ${n}`:""}`}var $l=()=>{};function Fl(e){return Ho().safeParse(e).data}function V_(e){if(e.type==="path-not-found")return e.plugin===void 0&&e.errno!==void 0;if(e.type==="plugin-not-installed")return e.seedHasOtherVersion===!0||e.registryReadFailed===!0;if(e.type==="generic-error")return e.orphan!==!0;if(e.type==="marketplace-l

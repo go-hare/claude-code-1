@@ -1,0 +1,2 @@
+# needle=function IR( pos=211124189 end=211124226 len=37
+function IR(){for(;Te!==null;)Hv(Te)}

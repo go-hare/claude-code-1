@@ -1,0 +1,1 @@
+function Ir(e){let n=R(e,"PATH")??"",t=xn.get(n);if(t!==void 0)return t;let r=$e("git",n);if(r!==null)xn.set(n,r);return r}

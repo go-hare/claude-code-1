@@ -125,4 +125,40 @@ describe('source wiring densable Coh', () => {
     expect(src).toContain('/v1/oauth/hello')
     expect(src).toContain('Checking connectivity...')
   })
+
+  test('densable ft: failure exits instead of parking on the error screen', async () => {
+    const src = await Bun.file(
+      new URL('../preflightChecks.tsx', import.meta.url),
+    ).text()
+    expect(src).toContain('process.exit(1)')
+    expect(src).toContain('setTimeout(exitAfterPreflightFailure, 100)')
+    // An env-gated exit would leave the default path wedged — the error screen
+    // renders no key handler, so there is nothing for the user to press.
+    expect(src).not.toContain('CLAUDE_CODE_STRICT_PREFLIGHT')
+  })
+
+  test('third-party providers never reach the Anthropic preflight gate', async () => {
+    // The unconditional exit above means a misdetected 3P user cannot start at
+    // all, so the gate must keep routing them past Anthropic auth. Precedence
+    // itself is covered behaviourally in thirdPartyProviderConfigured.test.ts.
+    const auth = await Bun.file(new URL('../auth.ts', import.meta.url)).text()
+    expect(auth).toContain('const is3P = isThirdPartyProviderConfigured({')
+    const helper = auth.slice(
+      auth.indexOf('export function isThirdPartyProviderConfigured('),
+      auth.indexOf('export function isAnthropicAuthEnabled('),
+    )
+    for (const marker of [
+      "settings.modelType === 'openai'",
+      "settings.modelType === 'gemini'",
+      "settings.modelType === 'grok'",
+      'isUseOpenAIEnvEnabled(env)',
+      'isUseGeminiEnvEnabled(env)',
+      'isUseGrokEnvEnabled(env)',
+      'env.OPENAI_BASE_URL',
+      'env.GEMINI_BASE_URL',
+      'env.GROK_BASE_URL',
+    ]) {
+      expect(helper).toContain(marker)
+    }
+  })
 })

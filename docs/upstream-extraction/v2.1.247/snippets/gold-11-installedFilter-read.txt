@@ -1,0 +1,3 @@
+# offset=203110040 hit=1/8 needle="installedFilterRequestEnforcesAllowlist"
+
+sts.....9.%.initializationPromise...........initializedWithTlsTerminate.'...`ss.installedFilterRequestEnforcesAllowlist.(.....S.installsSinceInitializeStartedAllEnforce......&.builtConfigEnforcesAllowlist.....2..settingsSubscriptionCleanup.....i. .sandboxDisabledThisSession......

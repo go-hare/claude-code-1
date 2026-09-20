@@ -1,0 +1,2 @@
+# Rz as Se use@223188091 fn@223187848 end=223188299 len=451
+function Lr(r,c,t,e){let{pendingServers:o,pluginServerNames:l}=t??await Te(e);if(o.length===0)return{persistFailed:!1};let p;p=await Ie(o.map((a)=>v(a,l.has(a))),e);try{return await new Promise((a)=>{let i=(f)=>void a(f),[n,...d]=o;r.render(s(Se,{session:c,storageV5:e,children:n!==void 0&&d.length===0?s(ee,{serverName:n,isPluginServer:l.has(n),onDone:i}):s(ce,{serverNames:o,pluginServerNames:l,onDone:i})},"mcp-approval"))})}finally{await Le(p,e)}}

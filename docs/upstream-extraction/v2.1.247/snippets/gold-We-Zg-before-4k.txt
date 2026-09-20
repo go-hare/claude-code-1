@@ -1,0 +1,22 @@
+# Zg@236022714 before 4k
+inue}let f=m.slice(h[0].length).trim();i.push({file:s,query:g.data.query,shouldTrigger:g.data.should_trigger,...f&&{notes:f}})}if(i.length>0&&i.length<lu)l.push(`Only ${i.length} eval ${i.length===1?"query":"queries"} found; the spec recommends at least ${lu} for meaningful coverage.`);return{queries:i,warnings:l}}async function SS(e){try{let i=await Vg(uo.join(e,"SKILL.md"),"utf8"),l=su(i).match(uu);if(!l)return"";let r=cu(l[1]??"");if(r&&typeof r==="object"&&"description"in r&&typeof r.description==="string")return r.description}catch{}return""}async function pu(e,i,l){let r=e==="~"||e.startsWith("~/")?uo.join(kS(),e.slice(1)):e,s=uo.resolve(r),u=uo.basename(s),m=await SS(s),h=uo.join(s,"evals"),{queries:p,warnings:g}=await xS(h),f=[];for(let y of p){if(i.aborted)break;try{let d=await l({skillName:u,description:m,query:y,signal:i});if(d===null){f.push({query:y,modelWouldTrigger:null,reason:"Model evaluation not yet wired up \u2014 tracks the plugin evaluation framework.",verdict:"skipped"});continue}f.push({query:y,modelWouldTrigger:d.wouldTrigger,reason:d.reason,verdict:d.wouldTrigger===y.shouldTrigger?"pass":"fail"})}catch(d){Le(`plugin eval: trigger test for ${y.file} threw: ${ce(d)}`,{level:"error"}),f.push({query:y,modelWouldTrigger:null,reason:ce(d),verdict:"fail"})}}return{pluginName:u,pluginPath:s,evalsPath:h,queries:p,warnings:g,triggerResults:f,passCount:tt(f,(y)=>y.verdict==="pass"),failCount:tt(f,(y)=>y.verdict==="fail"),skippedCount:tt(f,(y)=>y.verdict==="skipped")}}function mu(e){let i=[];i.push(`Evaluating ${e.pluginName} (${e.evalsPath})`),i.push("");for(let l of e.warnings)i.push(`! ${l}`);if(e.warnings.length>0)i.push("");if(e.queries.length===0)return i.push("No eval queries to run."),i.join(`
+`);i.push("Level 1 \u2014 trigger tests:");for(let l of e.triggerResults){let r=l.verdict.toUpperCase().padEnd(7),s=l.query.shouldTrigger?"trigger":"skip";if(l.verdict==="skipped")i.push(`  [${r}] ${l.query.file} \u2014 expected ${s}`);else{let u=l.modelWouldTrigger?"trigger":"skip";if(i.push(`  [${r}] ${l.query.file} \u2014 expected ${s}, got ${u}`),l.verdict==="fail")i.push(`            ${l.reason}`)}}if(i.push(""),e.skippedCount===e.triggerResults.length)i.push("All trigger tests skipped \u2014 model evaluation not yet wired up.");else i.push(`${e.passCount}/${e.passCount+e.failCount} trigger tests passed${e.skippedCount>0?` (${e.skippedCount} skipped)`:""}.`);return i.push(""),i.push("Level 2 \u2014 interplay tests: not yet implemented. Tracks the plugin evaluation framework."),i.join(`
+`)}ke();Re();function fu(CM){let jg=V(6),{onComplete:Yr,target:Xr}=CM,vS;if(jg[0]===D)vS=new AbortController,jg[0]=vS;else vS=jg[0];let PM=xe(vS),wS,CS;if(jg[1]!==Yr||jg[2]!==Xr)wS=()=>{let PS=PM.current;let Hg=async function Hg(){if(!Xr){Yr(`Usage: /plugin eval [path]
+
+Run trigger evaluations for a skill against the queries in its evals/ folder.
+
+Examples:
+  /plugin eval ./my-skill
+  /plugin eval ~/.claude/skills/pdf-tools
+
+Each evals/*.md file needs frontmatter with \`query\` (string)
+and \`should_trigger\` (boolean). The spec recommends at least five.
+
+Or from the command line:
+  claude plugin eval [path]`);return};try{let Jr=await pu(Xr,PS.signal,du);process.exitCode=Jr.failCount>0?1:0;let TM=Jr.queries.length===0?"":Jr.failCount>0?`
+
+${k.cross} Evaluation failed`:Jr.skippedCount===Jr.queries.length?`
+
+${k.info} Eval queries validated; trigger tests pending model integration`:`
+
+${k.tick} Evaluation passed`;Yr(mu(Jr)+TM)}catch(gu){let TS=gu;process.exitCode=2,Le(`Plugin eval failed for ${Xr}: ${ce(TS)}`,{level:"error"}),Yr(`${k.cross} ${ce(TS)}`)}};return Hg(),()=>PS.abort()},CS=[Yr,Xr],jg[1]=Yr,jg[2]=Xr,jg[3]=wS,jg[4]=CS;else wS=jg[3],CS=jg[4];F(wS,CS);let gu;if(jg[5]===D)gu=t(a,{flexDirection:"column",children:t(n,{children:"Running evaluation\u2026"})}),jg[5]=gu;else gu=jg[5];return gu}sn();Pn();bo();Uc();bt();gr();mn();Tu();Ln();Vo();Yg();hi();Iu();Dt();_n();so();Pu();pn();kr();Hr();Uo();Va();Cu();Ja();On();on();ke();Re();function Zg({setViewState:e,error:i,setError:l,setResult:r,exitState:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(

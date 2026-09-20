@@ -1,0 +1,61 @@
+# gold-25-escape-cli-D "D(" count=20
+
+--- @233782387 ---
+turn ie(`${n} refused: ${e.message}`),E(D(e.message));ie(`Failed to ${n}: ${W(e)}`,{level:"error"}),E(D(`${l.cross} Fail
+
+--- @233782449 ---
+ed to ${n}: ${W(e)}`,{level:"error"}),E(D(`${l.cross} Failed to ${n}: ${W(e)}`))}function Ve(e){let n=[];if(e.errors.len
+
+--- @233796558 ---
+ise:Gr}=Vr,sn=q(Gr),De;if(Rt[0]!==sn)De=D(sn),Rt[0]=sn,Rt[1]=De;else De=Rt[1];let Tt;if(Rt[2]!==De)Tt=m(G,{children:ue(k
+
+--- @233798457 ---
+.prune,t.yes,r);await A(e,m(k,{children:D(t.prune?o:`${l.tick} ${o}`)})),await V("cli_plugin_uninstall"),await X(0)}asyn
+
+--- @233798726 ---
+n,yes:n.yes},t);await A(e,m(k,{children:D(a)})),await V("cli_plugin_prune"),await X(0)}async function Dr(e,n,t,r){if(t.c
+
+--- @233799077 ---
+n)}await A(e,ue(k,{children:[l.tick," ",D(o.message)]})),await se("tengu_plugin_enabled_cli",{...Mn(o.pluginId||n,Ke()),
+
+--- @233799726 ---
+await at(n,o,r)}await A(e,m(k,{children:D(a)})),await V("cli_plugin_disable"),await X(0)}async function Lr(e,n,t){if(n.c
+
+--- @233800824 ---
+load one from disk.`;if(t.json)return E(D(p));let y=await e();await A(y,m(k,{children:D(p)})),process.exit(1)}let I=En(_
+
+--- @233800870 ---
+let y=await e();await A(y,m(k,{children:D(p)})),process.exit(1)}let I=En(_.source)??Je,M=t.models?.length?t.models:[yn()
+
+--- @233801197 ---
+${_.name}": ${W(p)}`;if(t.json)return E(D(y));let j=await e();await A(j,m(k,{children:D(y)})),process.exit(1)}let{tokens
+
+--- @233801243 ---
+let j=await e();await A(j,m(k,{children:D(y)})),process.exit(1)}let{tokens:Z,inventory:g}=R;if(t.json){O("cli_plugin_det
+
+--- @233819065 ---
+${g.message}`,{level:"warn"});else M(g);D("agents_cross_session_inbox",`${s.getUdsStartFailureCause()??"bind_failed"}_la
+
+--- @233819164 ---
+()??"bind_failed"}_late`);return}if(!i){D("agents_cross_session_inbox",`${s.getUdsStartFailureCause()??"bind_failed"}_la
+
+--- @233821745 ---
+se H("agents_cross_session_inbox")}else D("agents_cross_session_inbox",d.getUdsStartFailureCause()??"bind_failed");let c
+
+--- @233836532 ---
+DISABLED","IDENTITY_CHANGED"]);function D(e){let r=f("url"in e.config&&typeof e.config.url==="string"&&(e.config.scope==
+
+--- @233837831 ---
+ption.`,success:!1};case"failed":{let n=D(e.client);return{message:n?`Failed to reconnect to ${r}: ${t(n)}`:`Failed to r
+
+--- @233852410 ---
+r();gr();ur();ce();ae();function vr(xo){D(`Failed to read existing MCP configs for Desktop import: ${w(xo)}`,{level:"err
+
+--- @233858836 ---
+ Z().clearMcpClientConfig(e,o)}catch(u){D(`mcp remove: secure-storage cleanup for "${e}" failed: ${w(u)}`,{level:"warn"}
+
+--- @233864434 ---
+=_e(r.scope);let t=_t(n,!1);if(t===null)D("mcp add-json: user-provided JSON was empty, invalid, or null",{level:"error"}
+
+--- @233868055 ---
+t:f,gatingErrors:Ft().length}}}catch(l){D(`mcp reset-project-choices: post-reset disclosure scan failed: ${w(l)}`,{level

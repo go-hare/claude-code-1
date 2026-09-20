@@ -1,0 +1,3 @@
+# 247 _g( @216948877
+
+er"&&n.size>0){let o=r.toolUseResult,s=r.message.content;if(typeof o!=="object"||o===null||!("agentId"in o)||o.agentId!==t||!Array.isArray(s))continue;if(s.some((i)=>i.type==="tool_result"&&n.has(i.tool_use_id)))return!0}return!1}var Gvr=w(()=>{ti();_g()});import{promises as RNt}from"fs";function ONt(e){return e instanceof Error&&INt in e&&e[INt]===!0}function zUc(e){return $Nt(e,"notification")}function HUc(e){return $Nt(e,"inline")}function DNt(e){return $Nt(e,"reply")}async function $Nt(e,t){let{agentId:n}=e,{resumesInFlight:r}=So();if(r.has(n))throw new qbe(`Agent ${n} is already running o

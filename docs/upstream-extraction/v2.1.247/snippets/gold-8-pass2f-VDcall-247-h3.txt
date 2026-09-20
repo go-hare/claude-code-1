@@ -1,0 +1,3 @@
+# off=214024840 hit=3
+
+t(e.queryTracking?.chainId),queryDepth:e.queryTracking?.depth,...i&&{mcpServerType:X(i)},...s&&{requestId:yt(s)}}),yield{type:"message",message:{message:Qn({type:"hook_error_during_execution",content:VD(g),hookName:`PreToolUse:${t.name}`,toolUseID:r,hookEvent:"PreToolUse"})}},u){yield{type:"hookPermissionResult",hookPermissionResult:u};return}else{if(c)yield{type:"defer",hookNa

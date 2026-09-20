@@ -1,0 +1,141 @@
+
+======== SEA 247 size=253204128 expect=253204128 match=true
+STR "pluginSuggestionShownCounts" count=2 hits=199438564,222247533
+  HIT0 @199438564 kind=DOT_OR_SMAP
+     ...q..is_overage...file:///B:/%7EBUN/root/_360.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.Cannot destruct
+  HIT1 @222247533 kind=READER_OPTIONAL
+    :(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){i
+UTF16LE "pluginSuggestionShownCounts" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "pluginSuggestionShownCounts??" count=0 hits=
+SHAPE "pluginSuggestionShownCounts[" count=0 hits=
+SHAPE "pluginSuggestionShownCounts=" count=0 hits=
+SHAPE "['pluginSuggestionShownCounts']" count=0 hits=
+SHAPE "[\"pluginSuggestionShownCounts\"]" count=0 hits=
+SHAPE "[`pluginSuggestionShownCounts`]" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:{" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:{}" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:n" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:e" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:t" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:r" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:o" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:i" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:a" count=0 hits=
+SHAPE ",pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "{pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "... ,pluginSuggestionShownCounts" count=0 hits=
+SHAPE "pluginSuggestionShownCounts" count=2 hits=199438564,222247533
+  @199438564 le:///B:/%7EBUN/root/_360.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-.
+  @222247533 n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDisco
+SHAPE "pluginSuggestionDiscoverShownCounts" count=4 hits=199438600,222247679,222247778,222247913
+  @199438600 I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.Cannot destructure 
+  @222247679 .[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return 
+  @222247778 Counts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},
+  @222247913 >0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude Code is a Beta pro
+SHAPE "pluginSuggestionDiscoverShownCounts:" count=1 hits=222247913
+  @222247913 >0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude Code is a Beta prod
+SHAPE "pluginSuggestionDiscoverShownCounts??" count=1 hits=222247778
+  @222247778 Counts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)
+SHAPE "tipLifetimeShownCounts:" count=1 hits=222247401
+  @222247401 t e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n
+SHAPE "tipLifetimeShownCounts??" count=1 hits=222247337
+  @222247337 Startups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return o;let e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.
+SHAPE "tipLifetimeShownCounts:{}" count=0 hits=
+SHAPE "tipsHistory:{}" count=1 hits=208747476
+  @208747476 iffTool:"auto",customApiKeyResponses:{approved:[],rejected:[]},env:{},tipsHistory:{},memoryUsageCount:0,promptQueueUseCount:0,btwUseCount:0,todoFeatureEnabled:!0,showExpandedTodos:!1,briefTranscript:!1,messageIdleNotifThresh
+NEI "function h(n){return s().pluginSuggestionShownCounts?.[n]??0}" count=1 hits=222247508
+  @222247508 function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}funct
+NEI "function a(n){return s().tipLifetimeShownCounts?.[n]??0}" count=1 hits=222247452
+  @222247452 function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){
+NEI "tL as Lhe" count=1 hits=232036806
+  @232036806 tL as Lhe,uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as 
+NEI "vL as Ohe" count=1 hits=232036826
+  @232036826 vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as tot,RM as CK,UM as w
+NEI "uL as Nhe" count=1 hits=232036816
+  @232036816 uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as tot,RM as 
+NEI "function mL(e,t=\"spinner\",o){Lhe(e.id" count=1 hits=232388055
+  @232388055 function mL(e,t="spinner",o){Lhe(e.id,o),We(t==="startup"?"tips_startup_show":"tips_spinner_show");let n=e.id.startsWith("marketplace-plugin:")&&e.id.includes("@")?"marketplace-plugin:org-marketpla
+NEI "async function Qhe(e){if(MV().spinnerTipsEnabled" count=1 hits=232387553
+  @232387553 async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(
+NEI "Lhe(e.id" count=1 hits=232388084
+  @232388084 Lhe(e.id,o),We(t==="startup"?"tips_startup_show":"tips_spinner_show");let n=e.id.startsWith("marketplace-plugin:")&&e.id.includes("@")?"marketplace-plugin:org-marketpla
+NEI "Ohe(r.pluginId)" count=1 hits=232387837
+  @232387837 Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.advertisedCommand))continue
+NEI "Nhe(r.id)" count=1 hits=232387825
+  @232387825 Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.advertise
+COLLIDE "function Ohe(e){" count=1 hits=215503306
+  @215503306 function Ohe(e){let{activeAgents:t,allowedAgentTypes:n}=e.options.agentDefinitions;return{depth:Jc(e.agentContext),allowedAgentTypes:n,activeAgents:t}}function 
+COLLIDE "function Ohe(e,t){" count=1 hits=242361411
+  @242361411 function Ohe(e,t){--e[t]||delete e[t]}function Db(e,t,r,i){var n=""+t,a=""+r;if(!e&&n>a){var s=n;n=a,a=s}return n+Nhe+a+Nhe+(yi(i)?zJe:i)}function GJe(e,t,r,i){
+COLLIDE "function Nhe(e){" count=0 hits=
+COLLIDE "function Nhe(e,t){" count=1 hits=215518861
+  @215518861 function Nhe(e,t){let r=`This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of t
+COLLIDE "var Ohe=" count=0 hits=
+COLLIDE "Ohe=e=>" count=0 hits=
+COLLIDE "var Nhe=" count=0 hits=
+COLLIDE "Nhe=e=>" count=0 hits=
+SCHEMA tipLifetimeShownCounts:{} count=0
+SCHEMA tipsHistory:{} count=1
+  tipsHistory:{} @208747476 hasKey=false
+
+======== SEA 246 size=250948768 expect=250948768 match=true
+STR "pluginSuggestionShownCounts" count=2 hits=197886548,220365770
+  HIT0 @197886548 kind=DOT_OR_SMAP
+     ...q..is_overage...U.file:///B:/%7EBUN/root/_345.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...M.file:///B:/%7EBUN/root/_346.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.Cannot destruct
+  HIT1 @220365770 kind=READER_OPTIONAL
+    :(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){i
+UTF16LE "pluginSuggestionShownCounts" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "pluginSuggestionShownCounts??" count=0 hits=
+SHAPE "pluginSuggestionShownCounts[" count=0 hits=
+SHAPE "pluginSuggestionShownCounts=" count=0 hits=
+SHAPE "['pluginSuggestionShownCounts']" count=0 hits=
+SHAPE "[\"pluginSuggestionShownCounts\"]" count=0 hits=
+SHAPE "[`pluginSuggestionShownCounts`]" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:{" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:{}" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:n" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:e" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:t" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:r" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:o" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:i" count=0 hits=
+SHAPE "pluginSuggestionShownCounts:a" count=0 hits=
+SHAPE ",pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "{pluginSuggestionShownCounts:" count=0 hits=
+SHAPE "... ,pluginSuggestionShownCounts" count=0 hits=
+SHAPE "pluginSuggestionShownCounts" count=2 hits=197886548,220365770
+  @197886548 le:///B:/%7EBUN/root/_345.js...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...M.file:///B:/%7EBUN/root/_346.js...W..[\uD800-\uDBFF]$...request_count......]-.
+  @220365770 n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDisco
+SHAPE "pluginSuggestionDiscoverShownCounts" count=4 hits=197886584,220365916,220366015,220366150
+  @197886584 I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...M.file:///B:/%7EBUN/root/_346.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.Cannot destructure 
+  @220365916 .[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return 
+  @220366015 Counts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},
+  @220366150 >0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude Code is a Beta pro
+SHAPE "pluginSuggestionDiscoverShownCounts:" count=1 hits=220366150
+  @220366150 >0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude Code is a Beta prod
+SHAPE "pluginSuggestionDiscoverShownCounts??" count=1 hits=220366015
+  @220366015 Counts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)
+SHAPE "tipLifetimeShownCounts:" count=1 hits=220365638
+  @220365638 t e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n
+SHAPE "tipLifetimeShownCounts??" count=1 hits=220365574
+  @220365574 Startups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return o;let e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.
+SHAPE "tipLifetimeShownCounts:{}" count=0 hits=
+SHAPE "tipsHistory:{}" count=1 hits=207023141
+  @207023141 iffTool:"auto",customApiKeyResponses:{approved:[],rejected:[]},env:{},tipsHistory:{},memoryUsageCount:0,promptQueueUseCount:0,btwUseCount:0,todoFeatureEnabled:!0,showExpandedTodos:!1,briefTranscript:!1,messageIdleNotifThresh
+NEI "function h(n){return s().pluginSuggestionShownCounts?.[n]??0}" count=1 hits=220365745
+  @220365745 function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}funct
+NEI "function a(n){return s().tipLifetimeShownCounts?.[n]??0}" count=1 hits=220365689
+  @220365689 function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){
+NEI "tL as Lhe" count=0 hits=
+NEI "vL as Ohe" count=0 hits=
+NEI "uL as Nhe" count=0 hits=
+NEI "function mL(e,t=\"spinner\",o){Lhe(e.id" count=0 hits=
+NEI "async function Qhe(e){if(MV().spinnerTipsEnabled" count=0 hits=
+NEI "Lhe(e.id" count=0 hits=
+NEI "Ohe(r.pluginId)" count=0 hits=
+NEI "Nhe(r.id)" count=0 hits=
+SCHEMA tipLifetimeShownCounts:{} count=0
+SCHEMA tipsHistory:{} count=1
+  tipsHistory:{} @207023141 hasKey=false

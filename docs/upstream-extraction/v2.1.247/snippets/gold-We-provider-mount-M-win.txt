@@ -1,0 +1,11 @@
+# M jsx storageV5:p @231944437
+function _(n,e,r,d,{columns:m,verbose:s=!1,chunkSize:t=40,onProgress:K,storageV5:p}={}){let f=U(e),w={...C(),verbose:s,...f&&{mainLoopModel:f}},j=P(r),B=(o)=>T(a(M,{session:n,storageV5:p,initialState:w,keybindings:!1,children:S(F,{children:[o[0]===0&&a(k,{latchAnnouncementSlot:!1}),a(x,{children:a(A,{source:{kind:"static",messages:e,conversationId:"export",renderRange:o},tools:j,commands:[],screen:"prompt"})})]})}),{columns:m,storageV5:p}),g=t;for(let o of e)g+=Y(o);for(let o=0;o<g;o+=t){let l=await B([o,o+t]);if(c(l).trim()==="")break;await d(l),K?.(o+t)}}async function se(n,e,r,{columns:d,storageV5:m}){let s=[];return await _(n,e,r,(t)=>void s.push(c(t)),{columns:d,storageV5:m}),s.join("")}
+export{se as Zk};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights res

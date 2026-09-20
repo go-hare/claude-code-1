@@ -1,0 +1,3 @@
+# offset=210418508 hit=1/3 needle="if(Vm("
+
+lledFilterRequestEnforcesAllowlist),ro(r)}function WZ(e){let t=ht(e,".git");try{if(Vm(t,e))return null;let r=lv(t,{encoding:"utf8"}).match(/^gitdir:\s*(.+)$/m);

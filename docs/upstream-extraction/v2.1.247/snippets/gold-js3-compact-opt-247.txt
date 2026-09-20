@@ -1,0 +1,15 @@
+# offset=224728688 ver=247 needle="customSystemPrompt:t.options.customSystemPrompt"
+
+odel:A,isBuiltInAgent:!0,startTime:Q,agentType:o.agentType,isAsync:!0,agentDepth:y,source:o.source},T={agentId:r,parentAgentId:e.agentId,depth:y,parentSessionId:h(),agentType:"subagent",subagentName:o.agentType,displayName:s,isAsync:!0,isBackgroundAgent:!0,isBuiltIn:!0,invocationKind:"spawn",invocationEmitted:!1,...D(e.agentContext)},J=i.takeConcurrencySlot();return w(T,()=>K({taskId:f.agentId,abortController:C,makeStream:(c,a)=>W({onQueryProgress:a,onModelRestricted:H(o.agentType,e.appendSystemMessage),agentDefinition:o,promptMessages:[...l??[],V({content:[{type:"text",text:U(t)}]})],toolUseContext:e,canUseTool:p,isAsync:!0,querySource:B(o.agentType,!0),forkOrigin:g,spawnedBySkill:e.options.spawnedBySkill??e.options.activeSkill,spawnedByForkedSkill:e.options.spawnedByForkedSkill,model:void 0,override:{systemPrompt:n,agentId:S(f.agentId),agentContext:T,abortController:C,replHydration:G},availableTools:e.options.tools,forkContextMessages:e.messages,useExactTools:!0,onCacheSafeParams:c,description:u,name:s}),metadata:Y,description:u,toolUseContext:e,taskRegistry:i,agentIdForCleanup:r,enableSummarization:!0,getWorktreeResult:async()=>({}),onRunSettled:J})),_("subagent_launch"),{agentId:r,name:s}}async function Ce(t){let e=t.getAppState(),p=e.agent?e.agentDefinitions.activeAgents.find((n)=>n.agentType===e.agent):void 0,l=Array.from(k(t).additionalWorkingDirectories.keys()),g=await q(t.options.tools,t.options.mainLoopModel,l);return j({mainThreadAgentDefinition:p,toolUseContext:t,customSystemPrompt:t.options.customSystemPrompt,defaultSystemPrompt:g,appendSystemPrompt:t.options.appendSystemPrompt,skillsPersistencePrompt:N(t.options.tools)})}function Te(t){return t.trim().split(/\s+/).slice(0,3).join("-").toLowerCase().replace(/[^a-z0-9-]/g,"").replace(/-+/g,"-").replace(/^-|-$/g,"").slice(0,24)||"fork"}var Ie=X(()=>{ee();be();ue();ie();oe();de();Z();se();me();te();Pe();ye();ce();ge();fe();ne();re();x();le();pe();Ae();ke();ae();Se()});
+export{Je as kK,Te as lK,Ie as mK};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{kK as n,mK as p}from"B:/~BUN/root/_349.js";import{F9 as a,U9 as f,f6 as e,h6 as d}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";import"B:/~BUN/root/_450.js";import"B:/~BUN/root/_451.js";import"B:/~BUN/root/_452.js";import"B:/~BUN/root/_453.js";import"B:/~BUN/root/_454.js";import"B:/~BUN/root/_455.js";import"B:/~BUN/root/_456.js";import"B:/~BUN/root/_457.js";import"B

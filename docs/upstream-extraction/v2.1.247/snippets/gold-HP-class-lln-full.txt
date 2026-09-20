@@ -1,0 +1,3 @@
+# LOCKED class lln @213647259 end=213647306 len=47
+# unique class lln{ count=1. module singleton r3=new lln (flushers).
+class lln{flushers=null;exitFlushRegistered=!1}

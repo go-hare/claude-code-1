@@ -1,0 +1,36 @@
+# ie/Be/Rt/Ot around re
+
+247 MISS ie hits=81
+247 Be @207954430 len=70 dist=939 sha=30d7fb9a61262731 hits=56
+247 Rt @207954220 len=28 dist=729 sha=fc584749b3e14747 hits=34
+247 Ot @207954500 len=85 dist=1009 sha=f42cd378d5fc526e hits=46
+247 re @207953491 len=54 dist=0 sha=5ab05e69064c964c hits=91
+247 Io @207953545 len=50 dist=54 sha=5765d463345c29a5 hits=23
+247 se @207953648 len=82 dist=157 sha=1d832219204bee55 hits=73
+247 Ve @207953730 len=138 dist=239 sha=c67783f5dfe84f82 hits=59
+247 Wr @207953868 len=331 dist=377 sha=1cb3a3858bd769eb hits=27
+247 MISS zt hits=37
+247 Rt @207954220 len=28 dist=729 sha=fc584749b3e14747 hits=34
+247 Vr @207954248 len=182 dist=757 sha=5917d5817f022355 hits=27
+247 MISS Fr hits=33
+247 MISS Mt hits=51
+247 MISS Pt hits=45
+246 MISS ie hits=76
+246 Be @206353506 len=70 dist=939 sha=30d7fb9a61262731 hits=55
+246 Rt @206353296 len=28 dist=729 sha=fc584749b3e14747 hits=36
+246 Ot @206353576 len=85 dist=1009 sha=f42cd378d5fc526e hits=47
+246 re @206352567 len=54 dist=0 sha=5ab05e69064c964c hits=93
+246 Io @206352621 len=50 dist=54 sha=5765d463345c29a5 hits=22
+246 se @206352724 len=82 dist=157 sha=1d832219204bee55 hits=79
+246 Ve @206352806 len=138 dist=239 sha=c67783f5dfe84f82 hits=50
+246 MISS Wr hits=27
+246 MISS zt hits=39
+246 Rt @206353296 len=28 dist=729 sha=fc584749b3e14747 hits=36
+246 MISS Vr hits=29
+246 Fr @206353324 len=182 dist=757 sha=1f1346e2286f0b58 hits=33
+246 MISS Mt hits=51
+246 MISS Pt hits=49
+same 246=2 247=2 "(unprintable plugin name)"
+DIFF 246=4 247=5 "keepEmojiJoiners"
+DIFF 246=3 247=4 "keepNewlines"
+same 246=2 247=2 "unprintable plugin"

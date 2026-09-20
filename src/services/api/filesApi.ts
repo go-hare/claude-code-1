@@ -379,7 +379,7 @@ export async function uploadFile(
   filePath: string,
   relativePath: string,
   config: FilesApiConfig,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; content?: Buffer },
 ): Promise<UploadResult> {
   const baseUrl = config.baseUrl || getDefaultApiBaseUrl()
   const url = `${baseUrl}/v1/files`
@@ -392,10 +392,11 @@ export async function uploadFile(
 
   logDebug(`Uploading file ${filePath} as ${relativePath}`)
 
-  // Read file content first (outside retry loop since it's not a network operation)
+  // Read file content first (outside retry loop since it's not a network operation).
+  // densable TCt `w4n` `content` — E4n already read the bundle when `i`.
   let content: Buffer
   try {
-    content = await fs.readFile(filePath)
+    content = opts?.content ?? (await fs.readFile(filePath))
   } catch (error) {
     logEvent('tengu_file_upload_failed', {
       error_type:

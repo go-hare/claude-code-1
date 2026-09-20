@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   applyHostCredsEnvDiff,
+  getConfiguredHostAuthEnvVarName,
   getHostAuthEnvVarName,
   getHostAuthRefreshTimeoutMs,
   HOST_AUTH_REFRESH_TIMEOUT_MS_DEFAULT,
@@ -113,6 +114,48 @@ describe('host auth 401 recovery (official lfa / ASr)', () => {
     expect(getHostAuthEnvVarName()).toBe(
       process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR || 'ANTHROPIC_AUTH_TOKEN',
     )
+  })
+
+  test('getConfiguredHostAuthEnvVarName matches official AE (undefined when denied)', () => {
+    const prev = process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = 'ANTHROPIC_UNIX_SOCKET'
+    expect(getConfiguredHostAuthEnvVarName()).toBeUndefined()
+    process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = 'DESKTOP_HOST_TOKEN'
+    expect(getConfiguredHostAuthEnvVarName()).toBe('DESKTOP_HOST_TOKEN')
+    if (prev === undefined) delete process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    else process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = prev
+  })
+
+  test('honors a host-supplied name that is not a control variable', () => {
+    const prev = process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = 'DESKTOP_HOST_TOKEN'
+    expect(getHostAuthEnvVarName()).toBe('DESKTOP_HOST_TOKEN')
+    if (prev === undefined) delete process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    else process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = prev
+  })
+
+  test('refuses a name that would overwrite a provider control variable', () => {
+    // official AE — OE plus D_. Recovery writes process.env[name], so naming
+    // the socket here would replace its path with a token string, and naming a
+    // CLAUDE_CODE_USE_* var would flip provider selection.
+    const prev = process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    for (const denied of [
+      'ANTHROPIC_UNIX_SOCKET',
+      'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+      'CLAUDE_CODE_HOST_AUTH_ENV_VAR',
+      'CLAUDE_CODE_USE_BEDROCK',
+      'CLAUDE_CODE_USE_GATEWAY',
+      'ANTHROPIC_VERTEX_PROJECT_ID',
+      'CLOUD_ML_REGION',
+      // case-folded: env lookup ignores case on Windows, so an exact-match
+      // guard would be bypassed by typing the name in lower case
+      'anthropic_unix_socket',
+    ]) {
+      process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = denied
+      expect(getHostAuthEnvVarName()).toBe('ANTHROPIC_AUTH_TOKEN')
+    }
+    if (prev === undefined) delete process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+    else process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR = prev
   })
 
   test('tryHostAuth401Recovery unavailable without callback', async () => {

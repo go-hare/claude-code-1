@@ -1,0 +1,2 @@
+# gold-forged-Pn-Ct.txt official-247 SEA @210539240-210539400
+Te}from"path";function Pn(){return _n()===void 0&&Pe()!==void 0?[...Se,"flagSettings"]:Se}function Ct(){let e=Pn();return Q.filter((n)=>!e.includes(n))}function

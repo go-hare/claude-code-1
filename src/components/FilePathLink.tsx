@@ -1,7 +1,7 @@
 import React, { createContext, useContext } from 'react';
 import { isAbsolute, win32 } from 'path';
-import { pathToFileURL } from 'url';
 import { Link, Text, stringWidth } from '@anthropic/ink';
+import { toSafeFileUrl } from '../utils/markdownFileUrl.js';
 import { getPlatform } from '../utils/platform.js';
 import { truncatePathMiddle } from '../utils/truncate.js';
 
@@ -45,11 +45,7 @@ export function FilePathLink({ filePath, children }: Props): React.ReactNode {
   const label = clampPathLabel(children ?? filePath, width);
   let url: string | null = null;
   if (isLinkableAbsolutePath(filePath)) {
-    try {
-      url = pathToFileURL(filePath).href;
-    } catch {
-      url = null;
-    }
+    url = toSafeFileUrl(filePath);
   }
   if (url === null) {
     return <Text>{label}</Text>;

@@ -1,0 +1,30 @@
+# 246 vs 247 for #29 helpers
+
+d(a) / FE:
+  246: 0 hits of `function d(a){try{let r=e(a),o=e(u(r))`
+  247: 1 hit — NEW wrapper (HAVE-vs-local gap even if helpers existed)
+
+byd / R:
+  246: SAME body (`\\?\UNC\` / `\\?\C:` strip)
+
+Fxd / P:
+  246: same UNC `^[\\/]{2}` || v(NT ??) family in path module
+
+Txd / Zo:
+  246: 0 hits of `function Zo(t){return P(t)||J(t)}` — NEW
+  J(t){return!1}: same 246+247 (win32 bu stub)
+
+Dtb / a:
+  246: ` as Dtb` exists on a different module (plan/workshop itb namespace)
+  247: NEW `function a(e){return!1}` in _552 hyperlink module
+
+Etb / j:
+  246: 0 hits of `function j(e){let r=e.slice(7)` — NEW
+
+Zzd:
+  246: 0 hits of ` as Zzd` — NEW export name
+  247: P=/[\x00-\x1F\x7F-\x9F]/
+
+markdown pt `E?pt(e.href)`:
+  246: 0
+  247: 1

@@ -1,0 +1,6 @@
+# TXo / cYn — official-247 SEA @215272670
+# TCt: if(O.code!==0)return f?.aborted?m():TXo(O.stderr,a)
+# yCt=300; Bc first line; $l then bp
+
+function TXo(e,t){let n=cYn(e);return D("tengu_ccr_bundle_upload",{...t,outcome:de("seed_ref_held")}),J("teleport_git_bundle_upload","seed_ref_held"),{success:!1,...n}}
+function cYn(e){return _(`[gitBundle] could not update a temporary seed ref: ${e.slice(0,200)}`),{error:`Could not write the temporary ref this upload uses under .git/refs/seed (${bp($l(Bc(e.trim())),yCt)}). If another git process is running here, let it finish; otherwise remove any stale refs/seed entries or .lock files in the git directory, then retry.`,failReason:"git_error"}}

@@ -1,0 +1,3 @@
+# ver=247 name=H async=true start=212234403 end=212234529 len=126 sha=4d9436e8076efb15 needle="exited with code ${"
+
+async function H(t){let{code:r}=await L("pbcopy",[],{input:t,useCwd:!1});if(r!==0)throw Error(`pbcopy exited with code ${r}`)}

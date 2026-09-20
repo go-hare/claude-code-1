@@ -1,0 +1,2 @@
+# pos=208884721
+ auth login`}}function fm(){if(Gd())return"gateway";let e=Se()?.forceLoginMethod;return e==="gateway"?void 0:e}function Q$(){if(!Io(Un()))return!1;let e=H("policySettings");if(e?.forceLoginMethod==="gateway")return!0;return e?.forceLoginGatewayUrl!==void 0&&e?.forceLoginMethod===void 0}function Z$(){return Bt().length>0}function pm(){return H("policySettings")===null&&_m().length>0||Bt().length>0&&!fr()}function e1(e){if(c.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST){if(fm()!==void 0)fe("auth_force_login_org","managed_by_

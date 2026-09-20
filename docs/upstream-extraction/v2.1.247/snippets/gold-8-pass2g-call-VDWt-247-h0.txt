@@ -1,0 +1,3 @@
+# off=217966043
+
+.message);else try{let Wt=Fe;if(e.restoreTransientForRemap)try{Wt=e.restoreTransientForRemap(ne.data,Fe)}catch(Re){me(Re),Wt=Fe}let vn=e.mapToolResultToToolResultBlockParam(Wt,t);if(vn===void 0)Ht("mapper returned undefined");else je=vn}catch(Wt){Ht(VD(Wt))}}await Lt(Fe,je)}if(e.name===Tn&&ne.data&&typeof ne.data==="object"){let je=NUr(ne.data);if(je!==void 0)k.push({message:Qn({type:"read_truncation_notice",banner:je,toolUseID:t})})}if(lUr(e.nam

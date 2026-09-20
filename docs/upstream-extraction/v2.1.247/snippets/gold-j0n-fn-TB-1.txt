@@ -1,0 +1,2 @@
+# needle=function TB( pos=214573412 end=214573477 len=65
+function TB(e){return!Ne()||e===void 0?null:XX("installed",Fs())}

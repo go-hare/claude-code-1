@@ -1,0 +1,6 @@
+# 247-only name=Vu start=220383466 len=896 sha=3eb593056a525bd0 needle="exited with code ${"
+
+function Vu({exitCode:e,exitSignal:t,stderrTail:n}){let r=e!==null||t!==null,a=`The session process ${e===null?"failed to start":`exited with code ${e}`}. You can try again by sending a new message or starting a new session.`;if(n.trim().length>0){let f=n.length>ks?`\u2026${n.slice(-ks)}`:n;a+=`
+
+Last output before exit:
+${f}`}let o={type:"assistant",uuid:Wn(),message:{role:"assistant",model:Ys,content:[{type:"text",text:a}],stop_reason:"stop_sequence",usage:{input_tokens:0,output_tokens:0}},parent_tool_use_id:null,isApiErrorMessage:!0},u={type:"result",uuid:Wn(),subtype:"error_during_execution",is_error:!0,duration_ms:0,duration_api_ms:0,num_turns:0,total_cost_usd:0,errors:[a],runner_exit:r?{phase:"run",exit_code:e,signal:t}:{phase:"setup"},modelUsage:{},permission_denials:[],usage:{input_tokens:0,output_tokens:0,cache_creation_input_tokens:0,cache_read_input_tokens:0}};return[o,u]}

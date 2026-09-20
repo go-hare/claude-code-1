@@ -1,0 +1,3 @@
+# 247 pluginSuggestion #7 @222247778
+coverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()});
+ex

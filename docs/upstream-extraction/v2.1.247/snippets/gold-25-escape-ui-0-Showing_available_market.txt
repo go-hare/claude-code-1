@@ -1,0 +1,22 @@
+# 247 @197942034
+
+onnected to ..........Got new credentials, but ...Z....... rejected them on reconnect. Try re-authenticating, or restart Claude Code if it persists...(.......Reconnection failed after authentication)...=-^.Got new credentials, but reconnecting to ...&...OP.. failed. Restart Claude Code to retry.......(...snapshotServerTokens....=...wasAuthenticated....,
+ .revokeReplacedServerTokens..........AuthenticationCancelledError....a$..tengu_mcp_auth_config_clear......E..Authentication cleared for .....w.a.revokeServerTokens.......'..tengu_claudeai_mcp_reconnect....8m..hasHeadersHelper....cx..Failed to load components...2...S...Built-in plugins cannot be updated or uninstalled...N.......This plugin is managed by your organization. Contact your admin to disable it.......G.
+.entry_helper_unshown........entry_helper_changed....].[.entry_archive_url_changed.......Gh..Uninstalled.....&... . required by .
+.......Failed to ..	....X.. plugin: .......t...reverseDependents........lt.failureCode.
+.......up_to_date..D.....z.Configuration saved. Run /reload-plugins for changes to take effect.....aZe.No configuration changes........sk..No MCPB file found..
+....l..Configured......3...Installed and configured+....Z\., but its saved options could not be read (......I?. but failed to save config: 	.......Checking ........... .f.o.r. .n.e.w. .p.l.u.g.i.n.s.& ......)...refresh-failed.......;R.Couldn't refresh marketplace "......_...). ..  .s.h.o.w.i.n.g. .t.h.e. .c.a.c.h.e.d. .c.a.t.a.l.o.g.....!.....E.. Showing available marketplaces.........9..Couldn't load marketplace ".......L.Plugin 'J....._.' is already installed globally. Use '/plugin' to manage existing plugins........9z." is already installed.........marketplace ".......2!_.any marketplace.)....z1.. The marketplace couldn't be refreshed (...+.......), so its cached catalog may be out of date.....X.#." not found in .......8.Failed to load marketplaces.....o~..errorMessage....9.T.Failed to load marketplace:  .......Failed to fetch install counts: ........Failed to load plugins..&.....g.Failed to compute plugin suggestions: ........... Showing available plugins.	...h...refreshed........w..plugin_install_catalog_refresh..$...:...Post-refresh reload of marketplace '
+..._...' failed: .......M.reload_failed.......1P..not_found_after_refresh.A....T..' is already installed. Use '/plugin' to manage existing plugins.........[.." not found in any marketplace.......s..configuredMarketplaceCount......].0.failedMarketplaceCount..p.....&.Usage: /plugin eval [path]
+
+Run trigger evaluations for a skill against the queries in its evals/ folder.
+
+Examples:
+  /plugin eval ./my-skill
+  /plugin eval ~/.claude/skills/pdf-tools
+
+Each evals/*.md file needs frontmatter with `query` (string)
+and `should_trigger` (boolean). The spec recommends at least five.
+
+Or from the command line:
+  claude plugin eval [path]....=... Evaluation failed..@...Q.>. Eval queries validated; trigger tests pending model integration....V_@. Evaluation passed......^YM.Plugin eval failed for .........Marketplace not found: .........claude-plugin-directory.......f.Failed to load description..........alwaysAskRules..........mcpPermissionModeOverrides.......	..Failed to write settings: ..
+...b.:. Disabled ..>....... in .claude/settings.local.json. Run /reload-plugins to apply........... from .claude/settings.json.......	. . data preserved...%....%_.Failed to read raw marketplace.json: ........I^.enabledCount*.....z.Failed to check plugin update availability....

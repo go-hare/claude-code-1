@@ -1,0 +1,4 @@
+# offset=207532230 ver=247 hit=5/212 ratio=1.000 needle="stdout.trim()"
+
+tionDate).ToUnixTimeMilliseconds()`],{timeout:1000}),o=Number(r.stdout?.trim());return r.code===0&&Number.isFinite(o)?o:null}let t=await l("ps",["-o","lstart=","-p",String(e)],{timeout:1000,env:{...process.env,LC_ALL:"C",TZ:"UTC"}});if(t.code!==0||!t.stdout?.trim())return null;let n=Date.parse(`${t.stdout.trim()} UTC`);return Number.isFinite(n)?n:null}catch{return null}}var re=2147483647,ie=16,g,ce,le=60000,fe=5000,A=250;var de=S(()=>{J();Z();T();j();te();X();x();ee();z();Q();_();g=new W;ce=new E(()=>new H)});
+export{y as zBc,T as ABc,Ae as BBc,ne as CBc,Ne as DBc,v as EBc,Ee as FBc,$e as GBc,ke as HBc,Le as IBc,Ue as JBc,Oe as KBc,oe as LBc,Re as MBc,D as NBc,se as OBc,ue as PBc,Me as QBc,ve as RBc,g as SBc,ce as TBc,De as UBc,Ge as VBc,We as WBc,He as XBc,m as YBc,Ke as ZBc,Be as _Bc,de 

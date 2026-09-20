@@ -1,0 +1,119 @@
+# gold-1-ye-Ht-Jt-DE-pass3 247
+
+## kb-as-xSa from {"clause":"from\"B:/~BUN/root/_448.js\"","at":219716749}
+
+## kb-as-xSa-from-win @219716749
+s T,p0a as U,q0a as V,yZa as b,zZa as c}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";import"B:/~BUN/root/_450
+
+## Lfs-module-header @212803853
+al-and-compliance.
+
+// Version: 2.1.247
+import{M0a as rUr,N0a as jMs}from"B:/~BUN/root/_449.js";import{O0a as Jl,Q0a as _A}from"B:/~BUN/root/_450.js";import{R0a as c0,S0a as r_r,U0a as uM,V0a as dM,W0a as e_,X0a as Hg,Y0a as l0}from"B:/~BUN/root/_451.js";import{Z0a as c4e,_0a as Xyr}from"B:/~BUN/root/_452.js";import{$0a as NV,a1a as JQn,b1a as FV,c1a as QQn,d1a as e7n,e1a as Iqe,f1a as Vxt,g1a as t7n,h1a as n7n,i1a as r7n,j1a as lye,k1a as Lxt,l1a as o7n,n1a as Jes}from"B:/~BUN/root/_453.js";import{A1a as aVr,C1a as Jpe,p1a as w$,w1a as cio}from"B:/~BUN/root/_454.js";import{F1a as KYn,J1a as AXo}from"B:/~BUN/root/_455.js";import{K1a as Xje,L1a as l2n}from"B:/~BUN/root/_456.js";import{N1a as wd,O1a as XGr,P1a as JBn,Q1a as wkt,R1a as QBn,S1a as ejn,T1a as tjn,U1a as Y3t,V1a as njn,W1a as rjn,X1a as ojn,Z1a as bet}from"B:/~BUN/root/_457.js";import{$1a as BQ,_1a as rw}from"B:/~BUN/root/_458.js";import{a2a as N6t,b2a as F6t,c2a as D7s,d2a as R7n,f2a as Lts,g2a as N9e,h2a as noe,i2a as KJe,j2a as dWr,k2a as D9e,l2a as LHe,m2a as l6n,n2a as y3,o2a as jp,p2a as sP,q2a as Pcn}from"B:/~BUN/root/_459.js";import{r2a as sF,s2a as MC,t2a as xs,u2a as q1t,v2a as jc}from"B:/~BUN/root/_460.js";import{w2a as QWr,z2a as XNs}from"B:/~BUN/root/_461.js";import{I2a as PLt,K2a as byr,L2a as Syr,M2a as jms}from"B:/~BUN/root/_463.js";import{O2a as sio,P2a as $7s,R2a as fIn,T2a as dge,U2a as gyt,c3a as Ije,d3a as yqn}from"B:/~BUN/root/_464.js";import{A3a as eYn,B3a as tYn,M3a as Y3o,N3a as etr,O3a as ttr,P3a as ntr,Q3a as lns,o3a as rCt,r3a as z5o,z3a as Q4n}from"B:/~BUN/root/_465.js";import{W3a as PXo}from"B:/~BUN/root/_466.js";import{Y3a as $9,Z3a as E1r,_3a as cht}from"B:/~BUN/root/_467.js";import{$3a as QJe,a4a as UQr,e4a as Iar,j4a as Mar,l4a as Nis}from"B:/~BUN/root/_468.js";import{r4a as DHr,t4a as u0s}from"B:/~BUN/root/_470.js";import{u4a as JL,v4a as m_t,w4a as r2e,x4a as I8}from"B:/~BUN/root/_471.js";import{A4a as mUs,C4a as XTt,D4a as q2n,E4a as yYo,H4a as jur,I4a as zur,J4a as Bcs,z4a as e8e}from"B:/~BUN/root/_472.js";import{K4a as udr,L4a as ddr,O4a as V_,R4a as C_e,S4a as pdr,U4a as IHr,V4a as kVe,W4a as sor,a5a as wT}from"B:/~BUN/root/_473.js";import{K5a as Y_s,b5a as koo,f5a as Mq,g5a as voo,h5a as r6t,i5a as lct,j5a as _vr,l5a as wbs,w5a as Ckr}from"B:/~BUN/root/_474.js";import{A6a as zd,E6a as Ixt,G6a as Gxt,K6a as u7,O5a as m7,P5a as YQn,Q5a as cye,Q6a as Tqe,R5a as uye,S5a as zV,S6a as ZQn,U5a as Yxt,V5a as XQn,V6a as jxt,W5a as Zes,W6a as Sqe,Y6a as xQn,_5a as Bur,a7a as ev,b7a as
+
+## Poe-module-header @212803853
+al-and-compliance.
+
+// Version: 2.1.247
+import{M0a as rUr,N0a as jMs}from"B:/~BUN/root/_449.js";import{O0a as Jl,Q0a as _A}from"B:/~BUN/root/_450.js";import{R0a as c0,S0a as r_r,U0a as uM,V0a as dM,W0a as e_,X0a as Hg,Y0a as l0}from"B:/~BUN/root/_451.js";import{Z0a as c4e,_0a as Xyr}from"B:/~BUN/root/_452.js";import{$0a as NV,a1a as JQn,b1a as FV,c1a as QQn,d1a as e7n,e1a as Iqe,f1a as Vxt,g1a as t7n,h1a as n7n,i1a as r7n,j1a as lye,k1a as Lxt,l1a as o7n,n1a as Jes}from"B:/~BUN/root/_453.js";import{A1a as aVr,C1a as Jpe,p1a as w$,w1a as cio}from"B:/~BUN/root/_454.js";import{F1a as KYn,J1a as AXo}from"B:/~BUN/root/_455.js";import{K1a as Xje,L1a as l2n}from"B:/~BUN/root/_456.js";import{N1a as wd,O1a as XGr,P1a as JBn,Q1a as wkt,R1a as QBn,S1a as ejn,T1a as tjn,U1a as Y3t,V1a as njn,W1a as rjn,X1a as ojn,Z1a as bet}from"B:/~BUN/root/_457.js";import{$1a as BQ,_1a as rw}from"B:/~BUN/root/_458.js";import{a2a as N6t,b2a as F6t,c2a as D7s,d2a as R7n,f2a as Lts,g2a as N9e,h2a as noe,i2a as KJe,j2a as dWr,k2a as D9e,l2a as LHe,m2a as l6n,n2a as y3,o2a as jp,p2a as sP,q2a as Pcn}from"B:/~BUN/root/_459.js";import{r2a as sF,s2a as MC,t2a as xs,u2a as q1t,v2a as jc}from"B:/~BUN/root/_460.js";import{w2a as QWr,z2a as XNs}from"B:/~BUN/root/_461.js";import{I2a as PLt,K2a as byr,L2a as Syr,M2a as jms}from"B:/~BUN/root/_463.js";import{O2a as sio,P2a as $7s,R2a as fIn,T2a as dge,U2a as gyt,c3a as Ije,d3a as yqn}from"B:/~BUN/root/_464.js";import{A3a as eYn,B3a as tYn,M3a as Y3o,N3a as etr,O3a as ttr,P3a as ntr,Q3a as lns,o3a as rCt,r3a as z5o,z3a as Q4n}from"B:/~BUN/root/_465.js";import{W3a as PXo}from"B:/~BUN/root/_466.js";import{Y3a as $9,Z3a as E1r,_3a as cht}from"B:/~BUN/root/_467.js";import{$3a as QJe,a4a as UQr,e4a as Iar,j4a as Mar,l4a as Nis}from"B:/~BUN/root/_468.js";import{r4a as DHr,t4a as u0s}from"B:/~BUN/root/_470.js";import{u4a as JL,v4a as m_t,w4a as r2e,x4a as I8}from"B:/~BUN/root/_471.js";import{A4a as mUs,C4a as XTt,D4a as q2n,E4a as yYo,H4a as jur,I4a as zur,J4a as Bcs,z4a as e8e}from"B:/~BUN/root/_472.js";import{K4a as udr,L4a as ddr,O4a as V_,R4a as C_e,S4a as pdr,U4a as IHr,V4a as kVe,W4a as sor,a5a as wT}from"B:/~BUN/root/_473.js";import{K5a as Y_s,b5a as koo,f5a as Mq,g5a as voo,h5a as r6t,i5a as lct,j5a as _vr,l5a as wbs,w5a as Ckr}from"B:/~BUN/root/_474.js";import{A6a as zd,E6a as Ixt,G6a as Gxt,K6a as u7,O5a as m7,P5a as YQn,Q5a as cye,Q6a as Tqe,R5a as uye,S5a as zV,S6a as ZQn,U5a as Yxt,V5a as XQn,V6a as jxt,W5a as Zes,W6a as Sqe,Y6a as xQn,_5a as Bur,a7a as ev,b7a as
+
+## _158-table-names @192216521
+e4a04C00000825IoKfd0ec165a1f1be4a04C00000826Hfgd0ec165a1f1be4a04C00000830FoGidLtyid0ec165a1f1be4a04C00000834jeKkdvoPkdEteldPthkdRokldSopkd0ec165a1f1be4a04C00000845dtAzdwtDyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.js
+
+## root/_158.js after names hits=14
+- #0 @180205102 B:/~BUN/root/_141.jsB:/~BUN/root/_148.jsB:/~BUN/root/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_165.jsB:/~BUN/root/_166.jsB:/~BUN/root/_175.jsB:/~BUN/root/_178.js
+- #1 @180379522 B:/~BUN/root/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.jsB:/~BUN/root/_166.jsB:/~BUN/root/_167.js
+- #2 @182527185 B:/~BUN/root/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.jsB:/~BUN/root/_166.jsB:/~BUN/root/_167.js
+- #3 @192216521 kldSopkd0ec165a1f1be4a04C00000845dtAzdwtDyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.jsB:/~BUN/root/_253.jsB:/~BUN/root/_280.jsB:/~BUN/root/_281.js
+- #4 @192234517 ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851callcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.jsB:/~BUN/root/_199.jsB:/~BUN/root/_200.js
+- #5 @192661833 5a1f1be4a04C000008480ec165a1f1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851callnB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.jsB:/~BUN/root/_199.jsB:/~BUN/root/_200.js
+- #6 @232030401 us as ex,ws as l$}from"B:/~BUN/root/_152.js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/~BUN/root/_163.js";import{Ht as n2e,wt as o2e}from
+- #7 @233177695 ort"B:/~BUN/root/_152.js";import"B:/~BUN/root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/_164.js";import"B:/~BUN/root/_165.js";im
+- #8 @233914797 ort"B:/~BUN/root/_152.js";import"B:/~BUN/root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/_164.js";import"B:/~BUN/root/_165.js";im
+- #9 @237069274 outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw as ot,Vw as nt,Xw as rt}from"B:/~BUN/root/_205.js";impor
+- #10 @237085215 com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ls as a,Ms as b,Ns as c}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_193.js";import"B:/~BUN/root/_198.js";im
+- #11 @237238426 s://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ms as o}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_193.js";import"B:/~BUN/root/_198.js";im
+- #12 @253077007 N/root/_139.js.B:/~BUN/root/_139.js.B:/~BUN/root/_154.js.B:/~BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.B:/~BUN/root/_158.js.B:/~BUN/root/_158.js.B:/~BUN/root/_160.js.B:/~BUN/root/_160.js.B:/~BUN/root/_175.js.B:/~BUN/root/_175.js.B:/~BUN/root/_
+- #13 @253077028 N/root/_139.js.B:/~BUN/root/_154.js.B:/~BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.B:/~BUN/root/_158.js.B:/~BUN/root/_158.js.B:/~BUN/root/_160.js.B:/~BUN/root/_160.js.B:/~BUN/root/_175.js.B:/~BUN/root/_175.js.B:/~BUN/root/_178.js.B:/~BUN/root/_
+
+## PsQs glue hits=2
+- #0 @73962554 .q.q.q.q.q.q.q.q.q.q...=.=P..P...P.4.P.H.3r>rDrSrTr">.r.r<.*..r.r.r.rCsDsLsMsOsPsQsRsSsTsUs`tatbtctdtetftgthtjtktmtntptqtrtstttutvtwtxt.>.>R...R...R...R...R...R...
+- #1 @86329746 9s......:s..;s..>sAs..Es......Fs......Hs......Ls................Ns..Os..........PsQsYs................Zs....[sbs..ds......fs..gshsks....ls......ms......ns....ps....
+
+## export Ps Qs Os glue hits=0
+
+## _158 export map Os hits=1
+- #0 @232030386 /~BUN/root/_152.js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{r
+
+## geGBd hits=2
+- #0 @165387124 0000834Celdyekld0ec165a1f1be4a04C00000840Nebxdfexod0ec165a1f1be4a04C00000851JFBdgeGBdLhSeMhxoNhQeB:/~BUN/root/_211.jsB:/~BUN/root/_240.jsB:/~BUN/root/_257.jsB:/~BUN/
+- #1 @192216504 4C00000845dtAzdwtDyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/
+
+## as Ht,Qs as Jt already hits=1
+- #0 @237069251 tps://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw
+
+## live-filter-shape hits=1
+- #0 @222031440 dary"){o=t.length;continue}if(e.type!=="user"&&e.type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e.uuid),t.p
+
+## live-filter-t hits=1
+- #0 @232017191 object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:
+
+## for(let a of e) hits=19
+- #0 @209911298 byKey.clear()}get dirPath(){return this.dir}}function _g(e,t,n,r){let s=[],i=[];for(let a of e){if(a.mode!=="mask")continue;let l=bt(a.path),d;try{if(qn.statSync(l).isDirector
+- #1 @209913918 rt{randomUUID as ck}from"crypto";function Eg(e,t,n,r=process.env){let s={},i=[];for(let a of e){if(a.mode!=="mask")continue;let l=r[a.name];if(l===void 0)continue;let d=a.inje
+- #2 @214057131 l}async function K4i(e){let t=new Map,n=[],r=null;if(e.length===0||Ns()||aOe()){for(let a of e)t.set(a,null);return{statuses:t,rateLimit:r,unbatched:[]}}let o=[];for(let a of 
+- #3 @214057213 r(let a of e)t.set(a,null);return{statuses:t,rateLimit:r,unbatched:[]}}let o=[];for(let a of e){let l=Qdt(a);if(l)o.push(l);else if(/\/pull\/\d+/.test(a))n.push(a)}o.sort((a,l
+- #4 @216456666 string()}).nullable().optional()}))});function pps(e,t,n){let r=[],o="",s=0,i=0;for(let a of e){if(a.type==="server_tool_use"){if(s++,o.trim().length>0)r.push(o.trim());o="";c
+- #5 @217467704 ))}}function YAs(e,t){let n=new Set;for(let r=0;r<64;r++){let o=NDr(t,n),s=null;for(let a of e){for(let l of Vi(a))if(s=Id(l,o,"edit","ask"),s!==null)break;if(s!==null)break}i
+- #6 @218161542 delta")continue;for(let l of a.attachment.addedEntries)r.add(l)}let o,s=new Set;for(let a of e){if(!Lp(a)||!a.droppedTools?.length)continue;let l=new Set;for(let c of a.droppe
+- #7 @218431640 _tools","reassemble_threw",{tool_name:fr(a.name),isMcp:!1})}}let s=new Set,i=[];for(let a of e){if(a.type==="tool_use"){let l=Ake(a.id);if(l!==void 0&&o.has(l)){if(!s.has(l))s
+- #8 @219873450 &g>=0&&{nextSeq:g}}}function rp(e,r,n,t){let i=[],o=n??Number.POSITIVE_INFINITY;for(let a of e){if(r!==void 0&&i.length>=r)break;let s=t===void 0?a.length:Math.min(a.length,t)
+- #9 @224394013 action failed: ${ve(o).message}`,{level:"error"}),null}}function Jt(e){let t=[];for(let a of e)for(let i of a.user_message_timestamps){let u=new Date(i).getTime();if(!Number.i
+
+## session messages ye-ish hits=0
+
+## isSidechain===!0||!t.message)continue;s.push hits=1
+- #0 @232017250 sistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.messag
+
+## export{kb as hits=0
+
+## export{kb} hits=0
+
+## ,kb as xSa hits=1
+- #0 @219710850  pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd a
+
+## qcd as DE hits=1
+- #0 @212850971 Nn,Rcd as L6t,Wbd as lNn,mbd as EYn,nbd as Vge,pbd as EXo,pdd as n_e,qbd as OOr,qcd as DE,ybd as gAs}from"B:/~BUN/root/_812.js";import{qdd as DOr,rdd as y3e,sdd as $Or}f
+
+## Vzd as DE hits=1
+- #0 @232067976 zd as eS,Ezd as eo,Gzd as Qr,Kzd as Tce,Ozd as sC,Pzd as Js,Qzd as Wu,Rzd as pA,Vzd as DE,Zzd as vRe,eAd as Vo}from"B:/~BUN/root/_845.js";import{fAd as mt,gAd as ke,hAd 
+
+## function qcd( hits=0
+
+## function Vzd( hits=0
+
+## qcd= hits=0
+
+## function describeStorageKey hits=0
+
+## must be the recording stamp hits=4
+- #0 @204422052 ....must be an append entry.....u.7.readThrough......d.SourceChanged...,...!y..must be the recording stamp (decimal digits)8.......must be the session-log stem <sessionId8>[-<title-slug>
+- #1 @204434248 age-v2..........cloud-snapshots.....M{!.archive-sync........folder-sync.H...c.a.must be the recording stamp: 1 to 16 decimal digits (epoch milliseconds)U........meta is reserved for the l
+- #2 @208205365 ,Sn="backups",Zr="cloud-snapshots",Wa="archive-sync",qa="folder-sync",In,Qr,et="must be the recording stamp: 1 to 16 decimal digits (epoch milliseconds)",K=".cast",kn,jn,nt,be=".dir-sync.
+- #3 @219860680 ding"),projectKey:e,sessionId:e.refine(Nn),stamp:F.string().refine(nd,{message:"must be the recording stamp (decimal digits)"})}),F.strictObject({namespace:F.literal("sessionLog"),project
+
+## names a .jsonl stream hits=2
+- #0 @204434424 d for the list metadata key, under every spelling that opens its file...<.......names a .jsonl stream, which only a transcript key addresses#...WD..must be debug, telemetry or apiDu
+- #1 @208205594 eserved for the list metadata key, under every spelling that opens its file",O="names a .jsonl stream, which only a transcript key addresses",_n="must be debug, telemetry or apiDump

@@ -1,0 +1,4 @@
+# offset=222270587 hit=1/20 needle="advertisedCommand:"
+
+me}`:`marketplace-plugin:${l.name}@${s}`;o.push({id:O,pluginId:`${l.name}@${s}`,advertisedCommand:"plugin",priority:1,providerAgnostic:!0,cooldownSessions:3,content:async(p)=>{let c=a("suggestion",p.theme);return`Working with ${A}? Install the ${l.name} plugin:
+${c(`/plugin insta

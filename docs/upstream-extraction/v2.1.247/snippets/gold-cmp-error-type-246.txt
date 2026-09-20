@@ -1,0 +1,61 @@
+# 246 needle="error type" hits=3
+
+===== HIT 0 offset=200186431 =====
+discover_response...eligibility_reason...s.enterprise_managed..S...D.excludeStalePluginClients: marking stale (declared under a previous workspace root).2...excludeStalePluginClients: marking stale (removed)..>...y2..excludeStalePluginClients: marking stale (config hash changed)...workspaceKey
+...>...stagingDir...duplicateOfScope!...wU.Suppressing claude.ai connector "......;.Invalid name ...D...R... Names can only contain letters, numbers, hyphens, and underscores...L..Cannot add MCP server "...g..": this name is reserved...h...k...Cannot add MCP server: enterprise MCP configuration is active and has exclusive control over MCP servers...?...Invalid configuration: .!...?.Invalid configuration: <redacted>...4...": server is explicitly blocked by enterprise policyH...A.Cannot add MCP server: server is explicitly blocked by enterprise policy#...Q.Q.": not allowed by enterprise policy.7...:.0.Cannot add MCP server: not allowed by enterprise policy...@1.. already exists in .mcp.json&...MCP server already exists in .mcp.json...O.P. already exists in user config..(...E.MCP server already exists in user config...Xj. already exists in local config.)...0...MCP server already exists in local config...'...c.Cannot add MCP server to scope: dynamic.*...y.Cannot add MCP server to scope: enterprise..(...Cannot add MCP server to scope: claudeai...`.T.mcp_config_add...D...mcp_config_write_failed...[Y..Failed to write to .mcp.json: .. ...p.Cannot add MCP server to scope: ..." in .mcp.json...mcp_config_remove...!...U.Failed to remove from .mcp.json: ...o$I." in user scope...w..." in local scope%...Fc..Cannot remove MCP server from scope: ...G...(.q..mcp.json is malformed (not valid JSON, or mcpServers is not an object)...MCP config file not found...mcpAutoDiscovered...%..deviceBridge...2.Plugin MCP loading error - ...l#o.Plugin not available for MCP: ...s". - error type: ...Plugin MCP server error - ...~...mcp-server-suppressed-duplicate...pendingProjectServers...K..rejectedProjectServers...d_..purpose...E_.pluginLoadResult...&...includePendingProjectServers...S..includeRejectedProjectServers...'.args[...h...D...M.i.s.s.i.n.g. .".m.c.p.S.e.r.v.e.r.s.". ..  .f.o.u.n.d. .".s.e.r.v.e.r.s.". .i.n.s.t.e.a.d... .C.l.a.u.d.e. .C.o.d.e. .r.e.a.d.s. .M.C.P. .s.e.r.v.e.r.s. .f.r.o.m. .t.h.e. .".m.c.p.S.e.r.v.e.r.s.". .k.e.y...6...l/[.Rename the top-level "servers" key to "mcpServers" in ...your MCP config...m.^In
+
+===== HIT 1 offset=214473674 =====
+ors:o}}case"user":{let r=Go().mcpServers;if(!r)return{servers:ub(),errors:[]};let{config:o,errors:s}=rxt({configObject:{mcpServers:r},expandVars:t,scope:"user"});return{servers:J1e(o?.mcpServers,e),errors:s}}case"local":{let r=mh().mcpServers;if(!r)return{servers:ub(),errors:[]};let{config:o,errors:s}=rxt({configObject:{mcpServers:r},expandVars:t,scope:"local"});return{servers:J1e(o?.mcpServers,e,mn()),errors:s}}case"enterprise":{let r=X1e(),{config:o,errors:s}=oxt({filePath:r,expandVars:t,scope:"enterprise"});if(!o){let i=s.filter((a)=>!a.message.startsWith("MCP config file not found"));if(i.length>0)return b(`Enterprise MCP config errors for ${r}: ${ae(i.map((a)=>a.message))}`,{level:"error"}),{servers:ub(),errors:i};return{servers:ub(),errors:[]}}return{servers:J1e(o.mcpServers,e),errors:s}}}}function Z1e(e){let{servers:t}=$he("enterprise");if(Jm("mcp"))return t[e]??null;let{servers:n}=$he("user"),{servers:r}=$he("project"),{servers:o}=$he("local");if(t[e])return t[e];if(o[e])return o[e];if(r[e]&&ZPt(e)==="approved")return r[e];if(n[e])return n[e];return null}async function nxt(e={},t={}){if(_a("mcpAutoDiscovered"))return{servers:ub(),pendingProjectServers:new Set,rejectedProjectServers:new Set,errors:[],warnings:[]};let n=t.purpose==="deviceBridge"?u7n:$he,{servers:r}=n("enterprise");if(Nhe()){let P=ub();for(let[x,A]of Object.entries(r)){if(!EV(x,A))continue;P[x]=A}return{servers:P,pendingProjectServers:new Set,rejectedProjectServers:new Set,errors:[],warnings:[]}}let o=Jm("mcp"),s={servers:ub()},{servers:i}=o?s:n("user"),{servers:a}=o?s:n("project"),{servers:l}=o?s:n("local"),c=ub(),u=t.pluginLoadResult??await wf(t.storageV5,t.credentials),d=[],p=[];if(u.errors.length>0)for(let P of u.errors)if(P.type==="mcp-config-invalid"||P.type==="mcpb-download-failed"||P.type==="mcpb-extract-failed"||P.type==="mcpb-invalid-manifest"){let x=`Plugin MCP loading error - ${P.type}: ${vT(P)}`;b(x,{level:"error"})}else{let x=P.type;b(`Plugin not available for MCP: ${P.source} - error type: ${x}`)}let f=new Set,m=new Set,g=t.purpose==="deviceBridge"?$Qn:t.includePendingProjectServers||t.includeRejectedProjectServers?XPt:ZPt,h=t.purpose==="deviceBridge"?jD():null,y=await Promise.all(u.enabled.map(async(P)=>{let x=await bQn(P,d,t.storageV5);if(x&&t.purpose==="deviceBridge"&&h?.has(P.source))return ll(x,(O)=>({...O,scope:"managed"}));if(!x||!Ihe(P))return x;let A=q_(x,(O,U)=>{let F=g(U);if(F==="approved")return!0;if(F==="pending"&&t.includePendingProjectServers)return f.add(U),!0;if(F==="rejected"&&t.includeRejectedProjectServers)return m.add(U),!0;return!1});return t.pu
+
+===== HIT 2 offset=249400473 =====
+g = client.messages.create(...)
+except anthropic.NotFoundError as e:          # 404 - e.g. bad model ID
+    ...
+except anthropic.RateLimitError as e:         # 429 - back off and retry
+    ...
+except anthropic.APIStatusError as e:         # any other non-2xx HTTP response
+    print(e.status_code, e.message)
+except anthropic.APIConnectionError as e:     # network failure before a response
+    ...
+```
+
+The same chain shape applies in every SDK: TypeScript `instanceof Anthropic.NotFoundError` -> `RateLimitError` -> `APIConnectionError` -> `APIError` (check `APIConnectionError` before `APIError` - in the TypeScript SDK it's a subclass of `APIError`, unlike Python where it's a sibling); Ruby `rescue Anthropic::Errors::NotFoundError` -> `...::RateLimitError` -> `...::APIStatusError`; Java `catch (NotFoundException) ... catch (RateLimitException) ... catch (AnthropicServiceException)`; C# `catch (AnthropicNotFoundException) ... catch (AnthropicRateLimitException) ... catch (AnthropicApiException)`; PHP `catch (NotFoundException) ... catch (RateLimitException) ... catch (APIStatusException)`.
+
+### Go - `errors.As` then branch on status
+
+The Go SDK returns a single `*anthropic.Error` for all non-2xx responses. Unwrap it with `errors.As`, then branch on `StatusCode`:
+
+```go
+_, err := client.Messages.New(ctx, params)
+if err != nil {
+    var apierr *anthropic.Error
+    if errors.As(err, &apierr) {
+        switch apierr.StatusCode {
+        case 404:
+            // bad model ID / resource
+        case 429:
+            // back off and retry
+        default:
+            // other API error - apierr.StatusCode, apierr.RequestID
+        }
+    } else {
+        // transport-level error (*url.Error wrapping *net.OpError, etc.)
+    }
+}
+```
+
+### Error `.type` Field
+
+All `APIStatusError` subclasses now expose a `.type` property (Python: `.type`, TypeScript: `.type`, Java: `.errorType()`, Go: `.Type()`, Ruby: `.type`, PHP: `.type`) that returns the API error type string (e.g., `"invalid_request_error"`, `"authentication_error"`, `"rate_limit_error"`, `"overloaded_error"`). Use this for programmatic error classification when you need finer granularity than the HTTP status code - for example, distinguishing `"billing_error"` from `"permission_error"` (both map to 403).
+
+```python
+except anthropic.APIStatusError as e:
+    if e.type == "rate_limit_error":
+        # handle rate limiting
+    elif e.type == "overloaded_error":
+        # handle overload
+```
+.# Live Documentation Sources
+
+This file contains WebFetch URLs for fetching curre
+

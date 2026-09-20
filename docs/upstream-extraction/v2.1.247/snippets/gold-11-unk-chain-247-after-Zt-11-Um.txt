@@ -1,0 +1,3 @@
+# 247-after-Zt n=11 function Um start=210378136 end=210378177 len=41 sha=d60092a9337bd32a
+
+function Um(e){return ee(e,".claude",ka)}

@@ -1,0 +1,3 @@
+# 247 nl @204012508
+
+r ". ......." and this file sets both; the "........" value was ignored. Use only ".....T1.." and ".#...e.." are the same setting; keep only "....28t.setPluginBase.........8.clearPluginBase.....5qd.keepNewlinesC.......Cannot destructure property 'protocol' from null or undefined value.....<...(unprintable plugin name)........@..[^\x20-\x5b\x5d-\x7e]...\....iJ.m.a.s.k.C.l.a.i.m.s. .m.u.s.t. .n.a.

@@ -1,0 +1,6 @@
+# function oe(){ hits=16 win(21052-21056)=0 NOT UNIQUE
+# import: wZb as oe from _615.js @210530797
+# target function w(){return S(_.of(f().host))} unique @209040413 (function w(){ hits=28 shared tempfile)
+function N(){let e=l.CLAUDE_CODE_TMPDIR;if(e)return e;return T()}
+function w(){return S(_.of(f().host))}
+function S(e){let t=d(N(),"claude");if(t!==e.ensured){if(typeof process.getuid==="function")s(t,{recursive:!0,mode:448}),c(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}

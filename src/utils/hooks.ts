@@ -65,6 +65,7 @@ import {
 } from './telemetry/sessionTracing.js'
 import { startSessionActivity, stopSessionActivity } from './sessionActivity.js'
 import { resolveHookCwd } from './hooks/resolveHookCwd.js'
+import { persistHookOutput } from './hooks/persistHookOutput.js'
 import {
   hookJSONOutputSchema,
   promptRequestSchema,
@@ -3069,7 +3070,11 @@ async function* executeHooks({
             hookName,
             toolUseID,
             hookEvent,
-            content: result.stdout.trim(),
+            content: await persistHookOutput(
+              result.stdout.trim(),
+              hookId,
+              'stdout',
+            ),
             stdout: result.stdout,
             stderr: result.stderr,
             exitCode: result.status,
@@ -3177,6 +3182,7 @@ async function* executeHooks({
   }
 
   let permissionBehavior: PermissionResult['behavior'] | 'defer' | undefined
+  let resultIndex = 0
 
   // Run all hooks in parallel and wait for all to complete
   for await (const result of all(hookPromises)) {
@@ -3204,12 +3210,20 @@ async function* executeHooks({
       yield { message: result.message }
     }
 
+    // Counts every result, not just the ones that carry output, so the
+    // persist basename stays unique across hooks running in parallel.
+    resultIndex++
+
     // Yield system message separately if present
     if (result.systemMessage) {
       yield {
         message: createAttachmentMessage({
           type: 'hook_system_message',
-          content: result.systemMessage,
+          content: await persistHookOutput(
+            result.systemMessage,
+            `${toolUseID}-${resultIndex}`,
+            'systemMessage',
+          ),
           hookName,
           toolUseID,
           hookEvent,
@@ -3223,7 +3237,13 @@ async function* executeHooks({
         `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) provided additionalContext (${result.additionalContext.length} chars)`,
       )
       yield {
-        additionalContexts: [result.additionalContext],
+        additionalContexts: [
+          await persistHookOutput(
+            result.additionalContext,
+            `${toolUseID}-${resultIndex}`,
+            'additionalContext',
+          ),
+        ],
       }
     }
 
@@ -3239,7 +3259,11 @@ async function* executeHooks({
         `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) provided initialUserMessage (${result.initialUserMessage.length} chars)`,
       )
       yield {
-        initialUserMessage: result.initialUserMessage,
+        initialUserMessage: await persistHookOutput(
+          result.initialUserMessage,
+          `${toolUseID}-${resultIndex}`,
+          'initialUserMessage',
+        ),
       }
     }
 

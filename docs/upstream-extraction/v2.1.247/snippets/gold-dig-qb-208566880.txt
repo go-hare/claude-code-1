@@ -1,0 +1,3 @@
+# offset=208566880
+
+se()&&(!!c.ANTHROPIC_UNIX_SOCKET||Be())}function qb(){if(Wn())return!1;if(Yb())return jb();return!0}function Xb(){if(Wn())return!1;if(Yb())return jb();return!0}var Jb=y(()=>{Me();Qe();_s();Ft();oe()});function gE(){return sE()??{sonnet:c.ANTHROPIC_DEFAULT_SONNET_MODEL!==void 0&&c.ANTHROPIC_DEFAULT_SONNET_MODEL!==c.CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT,opus:c.ANTHROPIC_DEFAULT_OPUS_MODEL!==void 0&&c.ANTHROPIC_DEFAULT_OPUS_MODEL!==c.CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT}}function zI(){if(c.ANTHROPIC_SMALL_FAST_MODEL!==void 0)return!0;let e=A(),t=e==="firstParty"&&(Be()||Wf())||dn(e);return c.ANTHROPIC_DEFAULT_HAIKU_MODEL!==void 

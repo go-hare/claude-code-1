@@ -1,0 +1,8 @@
+# LOCKED dm @213647488 end=213647665 len=177
+# name collision function dm( count=12 — bind via unique pendingUsage.set(e,{count:1,lastUsedAt:t}) count=1
+# unique string function dm(e){let t=Date.now(),n=HP() count=1
+# unique r.count++,r.lastUsedAt=t count=1 in this cluster (other r.count++ are throttle/drop/cost)
+# export: dm as Y$ @219684757 (same map as uvi as Z$, xvi as $$, xln as aaa, dPe as baa)
+# import: Y$ as qe from _448.js @225459219 count=1
+# same-module dm( call count=0 besides the def
+function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}

@@ -24,15 +24,16 @@ import {
   closeSync,
   lstatSync,
   openSync,
+  readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
 } from 'fs'
-import { readFile } from 'fs/promises'
 import { memoize } from 'lodash-es'
 import { isIP } from 'node:net'
 import { homedir } from 'os'
-import { dirname, isAbsolute, join, posix, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, join, posix, resolve } from 'path'
 import { URL as NodeURL } from 'node:url'
 import {
   getAdditionalDirectoriesForClaudeMd,
@@ -40,8 +41,14 @@ import {
   getOriginalCwd,
 } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
+import { getErrnoCode } from '../errors.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { expandPath } from '../path.js'
+import { isWorktreePathNetworkRelativeToCwd } from '../worktree.js'
+import {
+  gitAdminHopUnsafe,
+  gitdirPointerHopUnsafe,
+} from '../git/gitdirHopWalk.js'
 import { getPlatform, type Platform } from '../platform.js'
 import {
   getCommandProducerScanRoots,
@@ -84,6 +91,24 @@ import {
   isSourceGrantsGated,
 } from '../permissions/projectGrantsGate.js'
 import { ripgrepCommand } from '../ripgrep.js'
+import {
+  applySandboxRuntimeConfig,
+  clearSymlinkedDenyLists,
+  failSandboxInitializeAllowlist,
+  finishSandboxInitializeAllowlist,
+  markInstallsSinceInitializeStarted,
+  promoteDenyLiteralSymlinkTargets,
+  recordSymlinkedDenyPath,
+  recordWrapWriteRoots,
+  rememberBuiltConfigAllowlist,
+  resetSymlinkedDenyScrubState,
+  scrubSymlinkedDenyPaths,
+  setSandboxInitializationPromise,
+} from './symlinkedDenyScrub.js'
+import {
+  ensureAtomicWriteStagingDirs,
+  ensureBridgeSpawnRootDirForWrap,
+} from './wrapPreflight.js'
 
 // ============================================================================
 // Credential Protection Constants (from official sandbox.credentials)
@@ -773,19 +798,25 @@ export function convertToSandboxRuntimeConfig(
 
   // Always deny writes to settings.json files to prevent sandbox escape
   // This blocks settings in the original working directory (where Claude Code started)
+  // densable Pa: t.symlinkedDenyScrubPaths.length=0 then C.map(Zt)
+  clearSymlinkedDenyLists()
   const settingsPaths = SETTING_SOURCES.map(source =>
     getSettingsFilePathForSource(source),
   ).filter((p): p is string => p !== undefined)
-  denyWrite.push(...settingsPaths)
-  denyWrite.push(getManagedSettingsDropInDir())
+  denyWrite.push(...settingsPaths.map(recordSymlinkedDenyPath))
+  denyWrite.push(recordSymlinkedDenyPath(getManagedSettingsDropInDir()))
 
   // Also block settings files in the current working directory if it differs from original
   // This handles the case where the user has cd'd to a different directory
   const cwd = getCwdState()
   const originalCwd = getOriginalCwd()
   if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'settings.json'))
-    denyWrite.push(resolve(cwd, '.claude', 'settings.local.json'))
+    denyWrite.push(
+      recordSymlinkedDenyPath(resolve(cwd, '.claude', 'settings.json')),
+    )
+    denyWrite.push(
+      recordSymlinkedDenyPath(resolve(cwd, '.claude', 'settings.local.json')),
+    )
   }
 
   // Block writes to .claude/skills in both original and current working directories.
@@ -1017,10 +1048,8 @@ export function convertToSandboxRuntimeConfig(
   denyRead.push(...DENY_READ_SOCKET_PATHS)
   denyRead.push(...DENY_READ_ENV_GLOBS)
 
-  // If we detected a git worktree during initialize(), the main repo path is
-  // cached in worktreeMainRepoPath. Git operations in a worktree need write
-  // access to the main repo's .git directory for index.lock etc.
-  // This is resolved once at init time (worktree status doesn't change mid-session).
+  // densable WZ returns the main `.git` dir (not the repo root). Worktree
+  // git ops need write access there for index.lock etc.
   if (worktreeMainRepoPath && worktreeMainRepoPath !== cwd) {
     allowWrite.push(worktreeMainRepoPath)
   }
@@ -1179,7 +1208,8 @@ export function convertToSandboxRuntimeConfig(
     }
   }
 
-  return {
+  // densable Pa: `Nu=!1`; WeakMap.set(Ya, Nu) then return Ya
+  const config = {
     network,
     filesystem: {
       denyRead,
@@ -1195,6 +1225,8 @@ export function convertToSandboxRuntimeConfig(
       settings.sandbox?.enableWeakerNetworkIsolation,
     ripgrep: ripgrepConfig,
   }
+  rememberBuiltConfigAllowlist(config, false)
+  return config
 }
 
 /**
@@ -1365,32 +1397,60 @@ function scrubBareGitRepoFiles(): void {
 }
 
 /**
- * Detect if cwd is a git worktree and resolve the main repo path.
- * Called once during initialize() and cached for the session.
- * In a worktree, .git is a file (not a directory) containing "gitdir: ...".
- * If .git is a directory, readFile throws EISDIR and we return null.
+ * densable `Dr` arm of WZ `Vm`/`ne`.
  */
-async function detectWorktreeMainRepoPath(cwd: string): Promise<string | null> {
+function worktreeGitAdminKindUnsafe(path: string): boolean {
+  try {
+    const st = lstatSync(path)
+    if (st.isSymbolicLink()) return true
+    return !st.isFile() && !st.isDirectory()
+  } catch (err) {
+    const code = getErrnoCode(err)
+    return code !== 'ENOENT' && code !== 'ENOTDIR'
+  }
+}
+
+/**
+ * densable WZ — worktree cwd → main `.git` directory (not repo root).
+ * `Vm` = `ne` (`!ae` hop-walk + `Dr`). `Ji` = `ko`. `Qi` = `xe`.
+ */
+export function detectWorktreeMainRepoPath(cwd: string): string | null {
   const gitPath = join(cwd, '.git')
   try {
-    const gitContent = await readFile(gitPath, { encoding: 'utf8' })
-    const gitdirMatch = gitContent.match(/^gitdir:\s*(.+)$/m)
-    if (!gitdirMatch?.[1]) {
+    if (gitAdminHopUnsafe(gitPath, cwd)) return null
+    if (worktreeGitAdminKindUnsafe(gitPath)) return null
+    const gitdirMatch = readFileSync(gitPath, { encoding: 'utf8' }).match(
+      /^gitdir:\s*(.+)$/m,
+    )
+    if (!gitdirMatch?.[1]) return null
+    const pointer = gitdirMatch[1].trim()
+    if (isWorktreePathNetworkRelativeToCwd(pointer, cwd)) return null
+    if (gitdirPointerHopUnsafe(pointer, cwd)) return null
+    const worktreeGitDir = resolve(cwd, pointer)
+    const worktreesDir = dirname(worktreeGitDir)
+    if (basename(worktreesDir) !== 'worktrees') return null
+    const mainGitDir = dirname(worktreesDir)
+    if (!basename(mainGitDir).endsWith('.git')) return null
+    const worktreeGitdirFile = join(worktreeGitDir, 'gitdir')
+    if (gitAdminHopUnsafe(worktreeGitdirFile, worktreeGitDir)) return null
+    if (worktreeGitAdminKindUnsafe(worktreeGitdirFile)) return null
+    const worktreeGitPointer = readFileSync(worktreeGitdirFile, {
+      encoding: 'utf8',
+    }).trim()
+    if (isWorktreePathNetworkRelativeToCwd(worktreeGitPointer, cwd)) {
       return null
     }
-    // gitdir may be relative (rare, but git accepts it) — resolve against cwd
-    const gitdir = resolve(cwd, gitdirMatch[1].trim())
-    // gitdir format: /path/to/main/repo/.git/worktrees/worktree-name
-    // Match the /.git/worktrees/ segment specifically — indexOf('.git') alone
-    // would false-match paths like /home/user/.github-projects/...
-    const marker = `${sep}.git${sep}worktrees${sep}`
-    const markerIndex = gitdir.lastIndexOf(marker)
-    if (markerIndex > 0) {
-      return gitdir.substring(0, markerIndex)
+    if (gitdirPointerHopUnsafe(worktreeGitPointer, worktreeGitDir, cwd)) {
+      return null
     }
-    return null
+    if (
+      realpathSync(resolve(worktreeGitDir, worktreeGitPointer)) !==
+      join(realpathSync(cwd), '.git')
+    ) {
+      return null
+    }
+    return mainGitDir
   } catch {
-    // Not in a worktree, .git is a directory (EISDIR), or can't read .git file
     return null
   }
 }
@@ -1849,6 +1909,16 @@ async function wrapWithSandbox(
     } else {
       throw new Error('Sandbox failed to initialize. ')
     }
+    // densable wrap: await fN(), pN(), VZ(), FZ()
+    await ensureBridgeSpawnRootDirForWrap()
+    ensureAtomicWriteStagingDirs()
+    promoteDenyLiteralSymlinkTargets({
+      getConfig: () => BaseSandboxManager.getConfig?.(),
+      updateConfig: cfg => {
+        BaseSandboxManager.updateConfig(cfg)
+      },
+    })
+    recordWrapWriteRoots(BaseSandboxManager.getConfig?.())
   }
 
   // densable Bou / sandbox-runtime@0.0.70: package wrapWithSandbox itself
@@ -1904,14 +1974,21 @@ async function initialize(
 
   // Create the initialization promise synchronously (before any await) to prevent
   // race conditions where wrapWithSandbox() is called before the promise is assigned.
+  // densable Te().initializationPromise is set before Pa/initialize so ro() &&= n.
+  const initToken = {}
+  setSandboxInitializationPromise(initToken)
   initializationPromise = (async () => {
     try {
-      // Resolve worktree main repo path once before building config.
-      // Worktree status doesn't change mid-session, so this is cached for all
-      // subsequent refreshConfig() calls (which must be synchronous to avoid
-      // race conditions where pending requests slip through with stale config).
+      markInstallsSinceInitializeStarted()
+      // Resolve worktree main `.git` once (densable WZ). Cached for refreshConfig().
       if (worktreeMainRepoPath === undefined) {
-        worktreeMainRepoPath = await detectWorktreeMainRepoPath(getCwdState())
+        worktreeMainRepoPath = detectWorktreeMainRepoPath(getCwdState())
+      }
+
+      // densable windows init: pN(), await fN() before Re.initialize
+      if (getPlatform() === 'windows') {
+        ensureAtomicWriteStagingDirs()
+        await ensureBridgeSpawnRootDirForWrap()
       }
 
       const settings = getSettings_DEPRECATED()
@@ -1919,14 +1996,21 @@ async function initialize(
 
       // Log monitor is automatically enabled for macOS
       await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
+      finishSandboxInitializeAllowlist(runtimeConfig)
+      // densable FZ — record wrap write roots after init (yN)
+      recordWrapWriteRoots(runtimeConfig)
 
       // Subscribe to settings changes to update sandbox config dynamically
       // densable: also cDs.subscribe(() => bHo()) — command-producer deny bag
       // changes (zvt/qvt) must refresh sandbox config so write deny tracks producers.
       const unsubSettings = settingsChangeDetector.subscribe(() => {
         const settings = getSettings_DEPRECATED()
-        const newConfig = convertToSandboxRuntimeConfig(settings)
-        BaseSandboxManager.updateConfig(newConfig)
+        applySandboxRuntimeConfig(
+          convertToSandboxRuntimeConfig(settings),
+          cfg => {
+            BaseSandboxManager.updateConfig(cfg)
+          },
+        )
         logForDebugging('Sandbox configuration updated from settings change')
       })
       const unsubCommandProducers = subscribeCommandProducerDirsChanged(() => {
@@ -1940,6 +2024,8 @@ async function initialize(
     } catch (error) {
       // Clear the promise on error so initialization can be retried
       initializationPromise = undefined
+      setSandboxInitializationPromise(undefined)
+      failSandboxInitializeAllowlist()
 
       // Log error but don't throw - let sandboxing fail gracefully
       logForDebugging(`Failed to initialize sandbox: ${errorMessage(error)}`)
@@ -1955,9 +2041,12 @@ async function initialize(
  */
 function refreshConfig(): void {
   if (!isSandboxingEnabled()) return
-  const settings = getSettings_DEPRECATED()
-  const newConfig = convertToSandboxRuntimeConfig(settings)
-  BaseSandboxManager.updateConfig(newConfig)
+  applySandboxRuntimeConfig(
+    convertToSandboxRuntimeConfig(getSettings_DEPRECATED()),
+    cfg => {
+      BaseSandboxManager.updateConfig(cfg)
+    },
+  )
 }
 
 /**
@@ -1969,6 +2058,7 @@ async function reset(): Promise<void> {
   settingsSubscriptionCleanup = undefined
   worktreeMainRepoPath = undefined
   bareGitRepoScrubPaths.length = 0
+  resetSymlinkedDenyScrubState()
   // densable mSb drops whole CFd (sessionAllowedHosts with it)
   sessionAllowedHosts.clear()
 
@@ -2213,6 +2303,14 @@ export const SandboxManager: ISandboxManager = {
   cleanupAfterCommand: (): void => {
     BaseSandboxManager.cleanupAfterCommand()
     scrubBareGitRepoFiles()
+    // densable LZ — spare settings.json symlink hops outside write roots
+    scrubSymlinkedDenyPaths({
+      getConfig: () => BaseSandboxManager.getConfig?.(),
+      updateConfig: cfg => {
+        BaseSandboxManager.updateConfig(cfg)
+        recordWrapWriteRoots(cfg)
+      },
+    })
   },
 }
 

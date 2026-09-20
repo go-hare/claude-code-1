@@ -1,0 +1,49 @@
+# offset=82346474 idx=0/24 needle="porcelain"
+
+ist.._id_integrity_nodeVersion26.3.0_npmVersion10.8.3integrityshasumreadmereadmeFilename.http://../../-/..failed to print normalized package.json: {}failed to open workspace directorylegacyweb.Basic ...Bearer ...application/json	...Bun/1.4.1...D...	...win32...(..D...E.D... ci/.. .. .. workspaces/...versionsbun publish v...[0m.[1mbun publish .[0m.[2mv...[0m.. (dry-run).
+ + ..@...
+.[32m +.[0m ..@...DIRECTORY_PUBLISH=true sets script_envfailed to find shell executable to run publish scriptfailed to find shell executable to run postpublish scriptmissing `name` string in package.jsonmissing `version` string in package.jsonunable to restrict access to unscoped packageattempted to publish a private packagefailed to find package.json in tarball '{}'failed to parse tarball package.jsonmissing package.json, nothing to publishfailed to initialize bun install: {}sha256:.bun-canary-timestamp-...bun outdated v...[0m.[1mbun outdated .[0m.[2mv...[0m..missing package.json, nothing outdatedmissing lockfile, nothing outdatedFound 0 untrusted dependencies with scripts.
+
+This means all packages with scripts are in "trustedDependencies" or none of your dependencies have scripts.
+
+For more information, visit https://bun.com/docs/install/lifecycle#trusteddependencies
+Found .[1m0.[0m untrusted dependencies with scripts.
+
+This means all packages with scripts are in "trustedDependencies" or none of your dependencies have scripts.
+
+For more information, visit .[35mhttps://bun.com/docs/install/lifecycle#trusteddependencies.[0m
+.bun pm untrusted v..
+
+.".[0m.[1mbun pm untrusted .[0m.[2mv...[0m
+
+.These dependencies had their lifecycle scripts blocked during install.
+
+If you trust them and wish to run their scripts, use `bun pm trust`.
+These dependencies had their lifecycle scripts blocked during install.
+
+If you trust them and wish to run their scripts, use .[2m`.[0m.[34mbun pm trust.[0m.[2m`.[0m.
+...D...Git working directory not clean.--porcelainFailed to spawn git processFailed to spawn git process: {}git must be installed to use `bun pm version --git-tag-version`...0...0.0...-0...-...0...0-0...0-...0...0.0-0...0.0-...0...-...-...-...1.%s.v..Git tag failedGit tag failed unexpectedlyGit tag failed: {}Git commit failedGit commit failed unexpectedlyGit commit failed: {}Git add failed with exit code {}Git add failed unexpectedlyGit add failed: {}describe--tags--abbrev=0No git tags foundGit error: {}Git command failed unexpectedlygit must be installed to use `bun pm version from-git`Current version "{}" is not a valid semverInvalid version argument: "{}"znote: Valid options: patch, minor, major, prepatch, preminor, premajor, prerelease, from-git, or a specific semver version...[34mnote.[0m.[2m:.[0m Valid options: patch, minor, major, prepatch, preminor, premajor, prerelease, from-git, or a specific semver version..preversion0.0.0Version not changedFailed to save package.json: {}Failed to write package.json: {}postversion.v..
+.Failed to parse package.json: root must be an objectFailed to parse package.json: {}Failed to read package.json: {}1.0.0.bun pm version v... .[0m.[1mbun pm version.[0m .[2mv...[0m...Current package version: v...Current package version: .[32mv...[0m...
+Increment:
+  patch      .. ... ..
+  minor      ... ... ...
+  major      ... ... ...
+  prerelease ... ... ...
+..
+.[1mIncrement.[0m:
+  .[36mpatch.[0m      .[2m.. ... ...[0m
+  .[36mminor.[0m      .[2m... ... ...[0m
+  .[36mmajor.[0m      .[2m... ... ...[0m
+  .[36mprerelease.[0m .[2m... ... ...[0m
+.  prepatch   .. ... ..
+  preminor   ... ... ...
+  premajor   ... ... ...
+..  .[36mprepatch.[0m   .[2m.. ... ...[0m
+  .[36mpreminor.[0m   .[2m... ... ...[0m
+  .[36mpremajor.[0m   .[2m... ... ...[0m
+.beta.S.  from-git   Use version from latest git tag
+  1.2.3      Set specific version
+
+Options:
+  --no-git-tag-version Skip git operations
+  --allow-same-version P

@@ -1,0 +1,10 @@
+# ver=247 offset=216241787 needle="skipAttachments:!0"
+
+oid 0)return;return V.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS||Yls}function Jls(e){let t=e.trimEnd().split(`
+`).pop()??"";return Zls.some((n)=>n.test(t))}function Wcr(e,t,n,r,o){if(n==="monitor")return()=>{};let s=ji(e),i=0,a=Date.now(),l=!1,c=setInterval(()=>{qls(s).then((u)=>{if(u.size>i){i=u.size,a=Date.now();return}if(Date.now()-a<Vls)return;Fw(s,Kls).then(({content:d})=>{if(l)return;if(!Jls(d)){a=Date.now();return}l=!0,clearInterval(c);let p=`${nj}"${t}" appears to be waiting for interactive input`;ua({value:ql({taskId:e,toolUseId:r,outputFile:s,summary:Ur(p),trailing:`
+Last output:
+${d.trimEnd()}
+
+The command is likely blocked on an interactive prompt. Stop this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`}),mode:"task-notification",skipAttachments:!0,priority:"next",agentId:o??Tr()}),ce("task_local_shell_stall_detected")},()=>{})},()=>{})},Gls);return c.unref(),()=>{l=!0,clearInterval(c)}}function RDt(e,t,n,r,o){let s=r!==void 0?` (exit ${r})`:"";if(e==="monitor")switch(n){case"completed":return o===0?`Monitor "${t}" ended without producing output${s}`:`Monitor "${t}" stream ended`;case"failed":return`Monitor "${t}" script failed${s}`;case"killed":return`Monitor "${t}" stopped`}switch(n){case"completed":return`${nj}"${t}" completed${r!==void 0?` (exit code ${r})`:""}`;case"failed":return`${nj}"${t}" failed${r!==void 0?` with exit code ${r}`:""}`;case"killed":return`${nj}"${t}" was stopped`}}function ADt(e,t,n,r,o,s,i="bash",a,l){let{claimed:c,task:u}=dT(e,o);if(!c)return;if(!u?.isAdopted)RW(e,`
+[${n==="killed"?"killed":`exited with code ${r??"unknown"}`}]
+`);if(n==="completed")ce("task_local_shell");else if(n==="failed")J("task_local_shell","task_local_shell_failed");let d=RDt(i,t,n,r,l),p=ji(e);if(ua({value:ql({taskId:e,toolUseId:s,outputFile:p,status:n,summary:Ur(d)}),mode:"task-notification",skipAttachments:!0,priority:"next",agentId:a??Tr(),taskId:e}),a!==void 0)pa(e,n==="killed"?"stopped":n,{toolUseId:s,

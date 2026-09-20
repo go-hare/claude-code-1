@@ -395,7 +395,7 @@ function storageWatchKeyId(key: Record<string, unknown>): string {
 
 function announceHost(
   host: DigestHost | undefined,
-): StorageAnnounceHost | undefined {
+): StorageAnnounceHost<DigestStorageRoots> | undefined {
   if (host?.bus === undefined || host.instanceId === undefined) return
   return {
     bus: host.bus,

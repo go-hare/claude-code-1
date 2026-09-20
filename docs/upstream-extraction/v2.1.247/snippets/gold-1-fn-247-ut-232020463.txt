@@ -1,0 +1,3 @@
+# ver=247 name=ut async=true start=232020463 end=232020669 len=206 sha=bcdea15d40cf6f62 needle="tengu_feedback_draft_discarded"
+
+async function ut(e,s,m){let a=await H(e.draft_id,m);if(K(e.draft_id),!a)return;if(e.source_session_id===j())W();R("tengu_feedback_draft_discarded",{type:w(e.type),trigger:w(e.trigger),discarded_via:w(s)})}

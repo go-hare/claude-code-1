@@ -1,0 +1,3 @@
+# @236115850
+
+save configuration: ${Q}`),_("plugin-details")}}return t(ki,{title:`Configure ${lh(gi.manifest.display_name)??gi.manifest.name}`,subtitle:`Plugin: ${He(I.plugin)}`,configSchema:gi.configSchema,initialValues:gi.existingConfig,onSav

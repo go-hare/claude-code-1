@@ -59,7 +59,7 @@ function stubApp(onClickAt?: App['props']['onClickAt']) {
     onHoverAt: () => {},
     onSelectionDrag: () => {},
     onMultiClick: () => {},
-    onSelectionStart: (col, row) => {
+    onSelectionStart: (col: number, row: number) => {
       startSelection(selection, col, row)
     },
     onClickAt:

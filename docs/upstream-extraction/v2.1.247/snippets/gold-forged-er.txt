@@ -1,0 +1,1 @@
+async function er(e,t){if(t.includes("\uFFFD")||await Y(e,t)!=="clear")return!0;try{return!(await ue(V(e,t))).isDirectory()}catch(i){let n=F(i);return n!=="ENOENT"&&n!=="ENOTDIR"}}

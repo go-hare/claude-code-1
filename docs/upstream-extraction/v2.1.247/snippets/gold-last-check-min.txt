@@ -1,0 +1,7 @@
+# 247 offset=67736966 needle="60000"
+
+ this.headersTimeout = headersTimeout;
+  else
+    this.headersTimeout = MathMin(60000, this.requestTimeout);
+  if (this.requestTimeout > 0 && this.headersTimeout > 0 && this.headersTimeout > this.requestTimeout)
+    throw @makeErrorWithCode(149, "headersTimeout", "<= requestTimeo

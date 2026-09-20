@@ -1,0 +1,3 @@
+# offset=229511729 ver=246 hit=1/1 needle="function Vt(ln){"
+
+Ao();function Xt(){}var Wo=8,qo=10,Bo=2;function Vt(ln){let t=Ve(103),{title:no,placeholder:et,initialQuery:io,items:i,getKey:ro,renderItem:so,renderPreview:C,previewPosition:ot,visibleCount:tt,direction:nt,onQueryChange:co,onSelect:F,onTab:I,onFocus:ao,onCancel:lo,resetKey:ke,emptyMessage:it,matchLabel:Te,selectAction:rt,cancelAction:st,extraHints:uo}=ln,po=et===void 0?"Type to search\u2026":et,mo=ot===void 0?"bottom":ot,un=tt===void 0?Wo:tt,d=nt===void 0?"down":nt,_=it===void 0?"No results":it,Ie=rt===void 0?"select":rt,fo=st===void

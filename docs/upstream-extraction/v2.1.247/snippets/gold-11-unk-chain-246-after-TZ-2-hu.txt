@@ -1,0 +1,3 @@
+# 246-after-TZ n=2 function hu start=209161333 end=209161529 len=196 sha=c395ef576555be6f
+
+function hu(){if(be()==="windows"&&!xa())return{errors:["Windows sandbox is not enabled"],warnings:[]};let{checkDependenciesProbe:e}=Ce(),t=e();if(t.errors.includes(aN))e.cache.clear?.();return t}

@@ -1,0 +1,2 @@
+# Rz as Kc use@223848200 fn@223846081 end=223846242 len=161
+function d(){let I;while((I=process.stdin.read())!==null){if((typeof I==="string"?Buffer.from(I,"utf8"):I).includes(3)){process.emit("SIGINT");return}l.push(I)}}

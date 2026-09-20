@@ -1,0 +1,124 @@
+# SEA 247 C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+# peeled by _peel-unix-socket-sites.mjs (+pass2). Raw contexts: gold-unix-socket-sites.txt
+#
+# Every upstream ANTHROPIC_UNIX_SOCKET site mapped onto our tree. 32 hits total,
+# 3 in the string table, 29 in code. Site numbers match gold-unix-socket-sites.txt.
+
+## ALIGNED
+
+  7   getFetchOptions forAnthropicAPI -> { unix: sock }   src/utils/proxy.ts:399
+  9   1M-context gate: subscriber && (sock || 1P base)    src/utils/model/check1mAccess.ts:56
+  10  remote-control endpoint: 1P && (sock || 1P base)    src/bridge/remoteControlEndpointReason.ts:93
+  16  isAnthropicAuthEnabled: sock -> !!OAUTH_TOKEN       src/utils/auth.ts:215
+  17  OAuth 401: keep user env token unless sock/remote    src/utils/auth.ts:1865
+  18  async twin of 16                                     same guard
+  19  validateForceLoginOrg (J$)                           src/utils/auth.ts:2719  (finished this pass --
+                                                           see gold-forceLoginOrgUUID-pin.txt)
+  20  scrub settings-sourced env under a tunnel            src/utils/managedEnv.ts:52
+  21  the scrub member list                               same function. The five names upstream spells
+                                                           out match exactly. Upstream ALSO drops every
+                                                           CLAUDE_CODE_ARTIFACT* key -- ported this pass;
+                                                           we do have those vars (artifactGates.ts,
+                                                           services/artifactAutoReact/*).
+  23  attribution header env opt-out                       src/constants/system.ts:93
+  26  user-context email suppressed                        src/context.ts:222
+  29  API preconnect skipped                               src/utils/apiPreconnect.ts:68
+
+  4   is a bundler re-export table, not behaviour.
+
+## FIXED THIS PASS
+
+  30  api bootstrap must skip a unix-socket session:
+        if (C.ANTHROPIC_UNIX_SOCKET) return u("[Bootstrap] Skipped: unix-socket-proxied session"),
+          A("api_bootstrap_fetch","unix_socket_skip"), null;
+      We had the three skips above it (nonessential traffic / 3P provider / no usable
+      auth) but not this one, so a `claude ssh` remote fired a bootstrap request with
+      the launcher's placeholder token. Worse, bootstrap goes out over axios to
+      BASE_API_URL and never through the tunnel, so it could only 401.
+      Note upstream instruments THIS skip and not the ones above it; matched.
+      -> src/services/api/bootstrap.ts
+
+## NOT PRESENT IN OUR TREE (no corresponding feature -- nothing to align)
+
+  11,12  auth-state debug dump line (`ANTHROPIC_UNIX_SOCKET=set|unset`, `3P env=`)
+  13,14  remote-control unavailable copy: "ANTHROPIC_UNIX_SOCKET is set (claude ssh
+         remote), and the local proxy is API-key-authed." We have the endpoint
+         predicate (site 10) but not this explainer string.
+  22     tier/upsell gate GOe (also gates on --watch-artifact, which we do not have)
+  24     transport label for telemetry ("unix_socket"/"proxy"/"mtls"/"custom_ca")
+  25     side-query authToken suppression
+  27     artifact-upload auth-source selection
+  28     plugin env injection gate (tengu_amber_lattice)
+  31     Ze() bootstrap-eligibility predicate
+  32     WIF preflight wu(): env-quad && !API_KEY && !AUTH_TOKEN && !sock
+         (our env-quad lives in anthropicProfile.ts but there is no such preflight)
+
+## DIVERGENT ON PURPOSE -- wants a decision, not a drive-by edit
+
+  8   Cr, the env allowlist honored from remote/managed settings, contains
+      ANTHROPIC_UNIX_SOCKET upstream. Our equivalent list in
+      src/utils/managedEnvConstants.ts does not, so a settings.env naming it is
+      dropped by us and honored by upstream (when no tunnel is already active;
+      withoutSSHTunnelVars covers the active case on both sides).
+      Adding it lets a settings file redirect all Anthropic API traffic to an
+      arbitrary unix socket, so this is a security call rather than a typo.
+
+## RESOLVED IN A LATER PASS -- see _peel-RO-callsites/-consumers/-usage.mjs
+
+  5,6  Both were mismapped in the first pass. Corrected:
+
+       OE is NOT a "managed by host" predicate list. It is a denylist for the
+       *value* of CLAUDE_CODE_HOST_AUTH_ENV_VAR, consumed by exactly one
+       function:
+         function AE(_){ let E=_.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+                         if(!E||OE.includes(E)||D_.includes(E)) return
+                         return E }
+       D_ is the 14-name provider-selection list (CLAUDE_CODE_USE_BEDROCK ...
+       CLOUD_ML_REGION). So a host may not declare that its auth token lives in
+       a variable that routes or selects the provider.
+       PORTED: src/utils/hostCredsFile.ts getHostAuthEnvVarName(). This matters
+       more for us than upstream -- our 401 recovery writes process.env[name],
+       so an unguarded name lets a token overwrite the socket path or flip
+       provider selection. Upstream drops a denied value; we fall back to
+       ANTHROPIC_AUTH_TOKEN, since callers need a name to read and write. Our
+       comparison is case-folded (Windows env lookup ignores case, so exact
+       match is bypassable there); folding can only catch case variants of the
+       same variables. Tests in hostCredsFile.test.ts.
+
+       RO is NOT isManagedByHostSession(). It is never called in its own chunk;
+       it is exported as qOc and imported by two others, where all three call
+       sites build a *child process* environment:
+         tl()    if(RO(process.env)) return {}        -- contribute no provider env
+         spawn   if(RO(o)||dispatchSaysManaged){...}  -- strip provider+auth vars
+         bg os() if(RO(t)){...}                       -- same, for warm spares
+       So RO gates "the parent's provider is externally managed, so do not hand
+       provider/auth env down to children". Our isManagedByHostSession() feeds
+       settings-env stripping, an unrelated path -- the socket clause is
+       correctly absent there. bgWorker.ts:2052 is worker retirement, also
+       unrelated.
+       PORTED 2026-09-18 (child-env pass):
+         Me = R_ auth tokens, ke = OO endpoint keys, AO/He = AWS/GCP strip,
+         ne = truthy dispatch.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+         Ue = AE / getConfiguredHostAuthEnvVarName.
+         -> src/daemon/bgHostManagedEnv.ts, wired from buildWorkerEnv +
+            buildSpareHostEnv. Tests: bgHostManagedEnv.247.test.ts.
+       PORTED 2026-09-18 (tl + wt/pe/Ge):
+         tl() = inheritParentEndpointEnv — BASE_URL trio into dispatch.env
+         when !RO && (repl || no cwd override || cwd is current).
+         Ht() = snapshotProviderEnv — ee/bs allowlist (models, D_, AWS/GCP
+         routing, CONFIG_DIR). Empty values skipped except securestorage.
+         We/D = BG_SESSION_INHERIT_STRIP_KEYS (session + terminal identity).
+         pe/I = stripCasefoldArtifactKeys (4 eval/cowork keys).
+         Ge/O = stripHostEntrypoint (vscode/desktop/desktop-3p).
+         wt = J_+Z_+D_+EXTRA_BODY+w_+b_+CUSTOM_HEADERS+OE+HOST_CREDS.
+         Be = VERTEX_REGION_CLAUDE_ prefix.
+         Spare: We/pe/Ge, then RO (BASE_URL still visible), then wt
+         (drops BASE_URL). Worker: We/pe/Ge, isolation, wt, RO.
+         UNIX_SOCKET is in official wt and not in Ht/tl; we copy it onto
+         dispatch.env and restore it in buildWorkerEnv so ssh bg keeps
+         the tunnel. Tests extended in bgHostManagedEnv.247.test.ts.
+
+## UNRESOLVED -- needs its own pass, do not guess
+
+  15   ex() "any auth configured at all" -- ORs the socket in among ~12 other
+       credentials. Not located on our side.

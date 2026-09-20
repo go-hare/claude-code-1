@@ -1,0 +1,3 @@
+# 247 function ke start=207527609 end=207527853 len=244 sha=68508a2f714b3e1c
+
+function ke(e,t){let n=e.filter((r)=>Math.abs(r)>1);for(let r of n){try{process.kill(r,"SIGTERM")}catch{continue}return setTimeout((o,i,s)=>{if(!se(i,s))return;try{process.kill(o,"SIGKILL")}catch{}},5000,r,Math.abs(n[0]),t).unref(),!0}return!1}

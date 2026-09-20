@@ -33,6 +33,7 @@ const CONFIG_SECTION_IDS: Record<(typeof CONFIG_SECTIONS)[number], string[]> = {
     'autoScroll',
     'progressBar',
     'tips',
+    'feedbackDrafts',
     'turnDuration',
     'prStatus',
     'externalEditorContext',

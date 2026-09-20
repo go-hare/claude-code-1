@@ -1,0 +1,3 @@
+# offset=216845665 ver=246 hit=4/6 ratio=1.000 needle="await Rne("
+
+.hook.type==="prompt"&&h==="Stop")yield{hook:ne.hook,timedOut:!0};if(oe++,ne.systemMessage){q.systemMessageChars+=ne.systemMessage.length,X(ne.hook,"systemMessageChars",ne.systemMessage.length);let K=await Rne(ne.systemMessage,`${r}-${oe}`,"systemMessage",{storageV5:_});yield{message:or({type:"hook_system_message",content:K,hookName:y,toolUseID:r,hookEvent:h,...ne.heldForServedCall&&{heldForServedCall:!0}})}}if(ne.terminalSequence)Ast(ne.terminalSequence);if(ne.additionalContext)q.additionalContextChars+=ne.additionalContext.length,X(ne.hook,"additionalContextChars",ne.additionalContext.length

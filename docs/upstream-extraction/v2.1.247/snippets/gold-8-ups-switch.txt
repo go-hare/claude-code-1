@@ -1,0 +1,14 @@
+# ver=247 case"hook_success":if(! total=0
+# ver=247 truncated - exceeded count=0
+# ver=247 additionalContexts.map count=0
+# ver=247 substring(0,1e4) count=0
+# ver=247 substring(0,10000) count=0
+
+### ver=246 hit=0 off=220214544
+nuation){let v=m.stopReason?`${qt}: ${m.stopReason}`:qt;return i.messages.push(Ae({content:v,isMeta:!0}),Ye(v,"warning",void 0,!0)),i.shouldQuery=!1,i.resultText=v,i.allowedTools=void 0,{blocked:i}}if(m.sessionTitle)R=m.sessionTitle;if(m.additionalContexts&&m.additionalContexts.length>0)i.messages.push(St({type:"hook_additional_context",content:m.additionalContexts,hookName:"UserPromptSubmit",toolUseID:`hook-${_t()}`,hookEvent:"UserPromptSubmit"}));if(m.message)switch(m.message.attachment.type){case"hook_success":if(!m.message.attachment.content)break;i.messages.push(m.message);break;default:i.messages.push(m.message);break}}}catch(m){if(!(m instanceof nn))throw m;T("UserPromptSubmit hooks cancelled (control stream closed)")}return{sessionTitle:R}}var bi="the prompt did not go through prompt.submit (a command
+
+# ver=246 case"hook_success":if(! total=1
+# ver=246 truncated - exceeded count=0
+# ver=246 additionalContexts.map count=0
+# ver=246 substring(0,1e4) count=0
+# ver=246 substring(0,10000) count=0

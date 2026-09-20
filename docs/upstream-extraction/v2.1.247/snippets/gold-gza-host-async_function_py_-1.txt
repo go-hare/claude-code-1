@@ -1,0 +1,2 @@
+# needle=async function py( pos=219970450
+async function py(e,r,n,t){let i=await se(e,n);if(!i.ok)return i.error.kind==="absent"?m({kind:"missing"}):i;if(i.value.version!==r)return m({kind:"mismatch",currentVersion:i.value.version});if(t.suspect()||!await Ne(e,i.value))return m({kind:"declined"});return Xl(e)}

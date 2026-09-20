@@ -1,0 +1,3 @@
+# offset=210370340
+
+function bZ(e){return e.match(/^(.+):\*$/)?.[1]??null}

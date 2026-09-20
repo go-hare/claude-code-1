@@ -1,0 +1,9 @@
+# offset=201127131 needle="could not all be saved"
+
+[A-Z0-9_]+$..$...^Session closed with error code \d+$...d..
+[output truncated: exceeded ... disk cap]
+.
+...#...exhaustion...no errno ...Task output drain retry failed (%...`T..Task output still cannot be written (...!.); dropped ... chars of unwritten output..	...v.N.innerCall...	...=..[stderr] .../...
+Output truncated (.5...KB total). The full output could not all be saved to ...)...$rN.; that file may be missing or incomplete...!...7...KB total). Full output saved to: .../...X.Cannot access static private method or accessor. ...Command aborted before execution!...stream_no_events_fallback_warning...K.recentRequests...Ksd.whenRegistered...2...w100...4..w200...
+Preview feature:
+Use the optional `preview` field on o

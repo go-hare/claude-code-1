@@ -1,0 +1,2 @@
+# gold-forged-Ct-zero.txt official-247 SEA @210539330-210539400
+function Ct(){let e=Pn();return Q.filter((n)=>!e.includes(n))}function

@@ -1,0 +1,5 @@
+# JD unique async function JD( count=1 @214078883
+# lstat as vpt count=1 @214076933
+async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}
+# import
+nlinkSync as eIo}from"fs";import{lstat as vpt,mkdir as hSn,readdir as ySn,readFile as tIo,readlink as nIo,realpath as TOe,rm as Tpt,rmdir as rIo,stat 

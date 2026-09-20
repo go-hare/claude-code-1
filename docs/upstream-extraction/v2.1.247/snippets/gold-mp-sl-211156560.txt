@@ -1,0 +1,2 @@
+# needle=function sl(e pos=211156560 end=211156632 len=72
+function sl(e){return jo(e).reverse().map((o)=>({...o,code:o.endCode}))}

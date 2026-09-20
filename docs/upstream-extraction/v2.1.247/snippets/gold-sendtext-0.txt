@@ -1,0 +1,25 @@
+# ver=247 offset=199336768 hit=1/4 needle="terminal::SendText"
+
+pedLines...mn.isModifierPressed...='.prewarm...`.displayStartOffset.....~-v._wrappedLines...T..navigationCache...
+..graphemeBoundaries...i.Z.wordBoundariesCache...[..readlineWordBoundariesCache.	...yvi.prewarmed...classic...)..editedEmptyAtMs...7.>.lastLeftPressMs...attachConfirmArmedAtMs.....attach-absorb...
+...attach-arm...absorb...left-arrow-again-for-agents.<...L.\.Cannot destructure property 'r' from null or undefined valueB...Cannot destructure property 'onPaste' from null or undefined value..D...A4.Cannot destructure property 'startLine' from null or undefined value...k.endLine...y..^\s*\S..
+...".C.isWordLike..p...t.(^|\s)\[(Pasted text #\d+(?: \+\d+ lines)?|Image #\d+|Audio #\d+|\.\.\.Truncated text #\d+ \+\d+ lines\.\.\.)\]$#...+i..Failed to find wrapped line in text...>g..next:...L.prev:...Q!.^[\p{L}\p{N}\p{M}_]$...[\p{L}\p{N}][\p{L}\p{N}\p{M}]*...0.j.\p{N}...Ov.kill-paste-hint...7..Ctrl+Y to paste deleted text?...h].Cannot destructure property 'meta' from null or undefined value...j...tengu_left_arrow_editing_guard...tengu_left_arrow_fired.....k-.P.r.e.s.s. ..! .a.g.a.i.n......O...editing-quiet..."...A.m.b.i.g.u.o.u.s. ..!,. .p.r.e.s.s. .a.g.a.i.n. .t.o. .d.e.t.a.c.h...O..attach-quiet-hint...:... ...leftArrowGesture: attach-quiet hint armed (ms_since_stamp=...attach-quiet=...qs.leftArrowGesture: attach-quiet silent absorb (ms_since_stamp=...hDb.left_arrow_not_solo_reject...not-solo...Y^.soloKeypress...9F.ms_since_stamp...K.k.escape-again-to-clear...u.Esc again to clear...9..isPasted.../.\[I$...g.6.\[O$... (?=\/|[A-Za-z]:\\).1...".\/TemporaryItems\/.*screencaptureui.*\/Screenshot...
+...read_threw...Image paste read failed: ...O..file:///B:/%7EBUN/root/_286.js.._...6.^.i.T.e.r.m.2. ..! .S.e.t.t.i.n.g.s. ..! .G.e.n.e.r.a.l. ..! .S.e.l.e.c.t.i.o.n. ..! .c.h.e.c.k. .".A.p.p.l.i.c.a.t.i.o.n.s. .i.n. .t.e.r.m.i.n.a.l. .m.a.y. .a.c.c.e.s.s. .c.l.i.p.b.o.a.r.d.".../...| ..terminal.integrated.mouseWheelScrollSensitivity.#...terminal.integrated.gpuAcceleration...+..pathFor...x...vscode-server... [b..cursor-server...e[...windsurf-server...&..devin-server...VSCODE_GIT_ASKPASS_MAIN...]8;;.../.3.VSCode...Cursor.....-...Devin Desktop...d..Terminal...Ghostty...d.Kitty...
+...Warp...	..Windows Terminal...:..terminal::SendText...I.|.windows-terminal...com.googlecode.iterm2...Jt..AllowClipboardAccess'...iTerm2 clipboard access already enabled...U.[.-bool...)...w..Couldn't update iTerm2 clipboard setting...A...N.Enabled "Applications in terminal may access clipboard" in iTerm2...s...K.f.Restart iTerm2 for this to take effect. Undo: defaults write com.googlecode.iterm2 AllowClipboardAccess -bool false.l...Shift+Enter is natively supported in iTerm2.
+
+No configuration needed. Just use Shift+Enter to add newlines.%...K8..Shift+Enter is natively supported in ...A...1..
+
+No configuration needed. Just use Shift+Enter to add newlines...]...your current terminal...*. . . ."  .m.a.c.O.S.:. .A.p.p.l.e. .T.e.r.m.i.n.a.l.
+...y...U.*.You appear to be connected from iTerm2 on another machine. For /copy to reach your local clipboard, on that machine open:..."...Terminal setup cannot be run from ..U...88...
+
+This command configures a convenient Shift+Enter shortcut for multi-line prompts.
+...B...Note: You can already use backslash (\\) + return to add newlines...L..
+
+To set up the shortcut (optional):
+1. Exit tmux/screen temporarily
+2. Run /terminal-setup directly in one of these terminals:
+u...dz.. . . ."  .I.D.E.:. .V.S.C.o.d.e.,. .C.u.r.s.o.r.,. .D.e.v.i.n. .D.e.s.k.t.o.p.,. .Z.e.d.
+. . . ."  .O.t.h.e.r.:. .A.l.a.c.r.i.t.t.y.
+.3... .R.e.t.u.r.n. .t.o. .t.m.u.x./.s.c.r.e.e.n. .-. .s.e.t.t.i.n.g.s. .w.i.l.l. .p.e.r.s.i.s.t.
+.
+..._...)k.Note: iT

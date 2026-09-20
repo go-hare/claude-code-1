@@ -928,7 +928,7 @@ export async function handleSession(
           sessionId,
           sessionToken,
           epoch,
-          'running',
+          undefined,
           signal,
         ),
       {

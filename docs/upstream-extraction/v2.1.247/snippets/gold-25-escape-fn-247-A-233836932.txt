@@ -1,0 +1,3 @@
+# 247 function A start=233836932 end=233837142 len=210 sha=ef76d2482bdc1c27 dist=33579 hits=143
+
+function A(e){let{errorCode:r,displayDetail:o}=e;if(r&&!g.has(r)){let a=p(r),u=e.error!==void 0?`${a}: ${e.error}`:a;return c(o?`${u} ${o}`:u)}let n=e.error??r??"",s=o?`${n} ${o}`.trim():n;return s===""?s:c(s)}

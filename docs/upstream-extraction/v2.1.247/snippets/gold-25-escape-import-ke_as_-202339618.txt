@@ -1,0 +1,3 @@
+# 247 @202339618
+
+ession (org policy, launch gate, or the "Dynamic workflows" setting in /config).'...g$?.runId is not a field of this tool here..=...Z...This session restricts the Workflow tool to named workflows (........;p. is set). Not allowed here: ....</`.. Invoke as {name, args} only.........%.workflow_resolve......'.Workflow scripts must be deterministic: Date.now()/Math.random()/new Date() are unavailable (breaks resume). Stamp results after the workflow returns, or pass timestamps via args......6... is still running (task ......w.). Stop it first with ......a...({taskId: ".....9.V."}) before resuming.

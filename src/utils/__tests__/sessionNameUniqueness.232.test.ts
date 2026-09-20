@@ -269,6 +269,18 @@ describe('messages', () => {
     )
     expect(formatSessionRenamedMessage('foo')).toBe('Session renamed to: foo')
   })
+
+  test('densable 2.1.247 #13 registry-fail suffix', () => {
+    expect(formatSessionRenamedMessage('foo', undefined, false)).toBe(
+      'Session renamed to: foo Other sessions may still show the old name: the session registry could not be updated (run with --debug for the cause)',
+    )
+    expect(formatSessionRenamedMessage('foo-a-b', 'foo', false)).toBe(
+      'Session renamed to: foo-a-b ("foo" is held by another live session on this machine) Other sessions may still show the old name: the session registry could not be updated (run with --debug for the cause)',
+    )
+    expect(formatSessionRenamedMessage('foo', undefined, true)).toBe(
+      'Session renamed to: foo',
+    )
+  })
 })
 
 describe('collectOccupiedNameKeys', () => {

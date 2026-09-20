@@ -1,0 +1,241 @@
+# gold-1-pass3-scan SendFeedback 247 vs 246
+
+exe 247=253204128 expect=253204128 match=true
+exe 246=250948768 expect=250948768 match=true
+
+## 1. re-verify hit counts
+same 246=18 247=18 "SendFeedback"
+  246#0 @196629434 kind=tbl jsScore=0
+  246#1 @196629558 kind=tbl jsScore=0
+  246#2 @198427640 kind=tbl jsScore=0
+  246#3 @200754272 kind=tbl jsScore=1
+  246#4 @200754364 kind=tbl jsScore=0
+  246#5 @202169880 kind=tbl jsScore=0
+  246#6 @202170109 kind=tbl jsScore=0
+  246#7 @202433768 kind=tbl jsScore=0
+  246#8 @205478162 kind=tbl jsScore=0
+  246#9 @205478445 kind=tbl jsScore=0
+  246#10 @205569130 kind=tbl jsScore=0
+  246#11 @206426907 kind=tbl jsScore=0
+  246#12 @213778106 kind=tbl jsScore=0
+  246#13 @215149786 kind=tbl jsScore=2
+  246#14 @215155951 kind=tbl jsScore=1
+  246#15 @215156106 kind=tbl jsScore=0
+  246#16 @229885820 kind=tbl jsScore=0
+  246#17 @229885936 kind=tbl jsScore=0
+  247#0 @199046306 kind=tbl jsScore=0
+  247#1 @199046430 kind=tbl jsScore=0
+  247#2 @199967708 kind=tbl jsScore=0
+  247#3 @202344428 kind=tbl jsScore=1
+  247#4 @202344520 kind=tbl jsScore=0
+  247#5 @203777980 kind=tbl jsScore=0
+  247#6 @203778209 kind=tbl jsScore=0
+  247#7 @204050220 kind=tbl jsScore=0
+  247#8 @206781467 kind=tbl jsScore=0
+  247#9 @206781750 kind=tbl jsScore=0
+  247#10 @206879724 kind=tbl jsScore=0
+  247#11 @208027831 kind=tbl jsScore=0
+  247#12 @215156371 kind=tbl jsScore=0
+  247#13 @216531371 kind=tbl jsScore=2
+  247#14 @216537536 kind=tbl jsScore=1
+  247#15 @216537691 kind=tbl jsScore=0
+  247#16 @232016147 kind=tbl jsScore=0
+  247#17 @232016263 kind=tbl jsScore=0
+same 246=26 247=26 "feedbackDrafts"
+  246#0 @195658416 kind=tbl jsScore=0
+  246#1 @196597460 kind=tbl jsScore=0
+  246#2 @196630244 kind=tbl jsScore=0
+  246#3 @200219804 kind=tbl jsScore=0
+  246#4 @200219904 kind=tbl jsScore=0
+  246#5 @200220296 kind=tbl jsScore=0
+  246#6 @200220340 kind=tbl jsScore=0
+  246#7 @206426815 kind=tbl jsScore=0
+  246#8 @206538603 kind=tbl jsScore=0
+  246#9 @215139326 kind=tbl jsScore=1
+  246#10 @215139472 kind=tbl jsScore=1
+  246#11 @215142052 kind=tbl jsScore=1
+  246#12 @215142199 kind=tbl jsScore=1
+  246#13 @215142407 kind=tbl jsScore=1
+  246#14 @215142778 kind=tbl jsScore=0
+  246#15 @215147676 kind=tbl jsScore=2
+  246#16 @215148165 kind=tbl jsScore=0
+  246#17 @215148212 kind=tbl jsScore=1
+  246#18 @224021532 kind=tbl jsScore=0
+  246#19 @224021589 kind=tbl jsScore=0
+  246#20 @224021726 kind=tbl jsScore=1
+  246#21 @229888716 kind=tbl jsScore=1
+  246#22 @230877305 kind=tbl jsScore=3
+  246#23 @230877380 kind=tbl jsScore=2
+  246#24 @230877419 kind=tbl jsScore=0
+  246#25 @233730066 kind=tbl jsScore=1
+  247#0 @197166524 kind=tbl jsScore=0
+  247#1 @198183724 kind=tbl jsScore=0
+  247#2 @199047116 kind=tbl jsScore=0
+  247#3 @201795812 kind=tbl jsScore=0
+  247#4 @201795912 kind=tbl jsScore=0
+  247#5 @201796304 kind=tbl jsScore=0
+  247#6 @201796348 kind=tbl jsScore=0
+  247#7 @208027739 kind=tbl jsScore=0
+  247#8 @208140859 kind=tbl jsScore=0
+  247#9 @216520911 kind=tbl jsScore=1
+  247#10 @216521057 kind=tbl jsScore=1
+  247#11 @216523637 kind=tbl jsScore=1
+  247#12 @216523784 kind=tbl jsScore=1
+  247#13 @216523992 kind=tbl jsScore=1
+  247#14 @216524363 kind=tbl jsScore=0
+  247#15 @216529261 kind=tbl jsScore=2
+  247#16 @216529750 kind=tbl jsScore=0
+  247#17 @216529797 kind=tbl jsScore=1
+  247#18 @225095469 kind=tbl jsScore=0
+  247#19 @225095526 kind=tbl jsScore=0
+  247#20 @225095663 kind=tbl jsScore=1
+  247#21 @232019043 kind=tbl jsScore=1
+  247#22 @233009228 kind=tbl jsScore=3
+  247#23 @233009303 kind=tbl jsScore=2
+  247#24 @233009342 kind=tbl jsScore=0
+  247#25 @235799643 kind=tbl jsScore=1
+same 246=3 247=3 "CLAUDE_CODE_SEND_FEEDBACK"
+  246#0 @199061432 kind=tbl jsScore=0
+  246#1 @205249286 kind=tbl jsScore=1
+  246#2 @215147917 kind=tbl jsScore=2
+  247#0 @200612308 kind=tbl jsScore=0
+  247#1 @207185924 kind=tbl jsScore=1
+  247#2 @216529502 kind=tbl jsScore=2
+same 246=4 247=4 "fitFeedbackPayloadToBudget"
+  246#0 @196628860 kind=tbl jsScore=0
+  246#1 @196628932 kind=tbl jsScore=0
+  246#2 @229883825 kind=tbl jsScore=2
+  246#3 @229884847 kind=tbl jsScore=0
+  247#0 @199045732 kind=tbl jsScore=0
+  247#1 @199045804 kind=tbl jsScore=0
+  247#2 @232014152 kind=tbl jsScore=2
+  247#3 @232015174 kind=tbl jsScore=0
+same 246=2 247=2 "parseDraftTranscriptMessages"
+  246#0 @196629936 kind=tbl jsScore=0
+  246#1 @229886651 kind=tbl jsScore=2
+  247#0 @199046808 kind=tbl jsScore=0
+  247#1 @232016978 kind=tbl jsScore=2
+same 246=4 247=4 "Drafted by Claude via the SendFeedback tool"
+  246#0 @196629408 kind=tbl jsScore=0
+  246#1 @196629532 kind=tbl jsScore=0
+  246#2 @229885794 kind=tbl jsScore=0
+  246#3 @229885910 kind=tbl jsScore=0
+  247#0 @199046280 kind=tbl jsScore=0
+  247#1 @199046404 kind=tbl jsScore=0
+  247#2 @232016121 kind=tbl jsScore=0
+  247#3 @232016237 kind=tbl jsScore=0
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending."
+  246#0 @196629532 kind=tbl jsScore=0
+  246#1 @229885910 kind=tbl jsScore=0
+  247#0 @199046404 kind=tbl jsScore=0
+  247#1 @232016237 kind=tbl jsScore=0
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review."
+  246#0 @196629408 kind=tbl jsScore=0
+  246#1 @229885794 kind=tbl jsScore=0
+  247#0 @199046280 kind=tbl jsScore=0
+  247#1 @232016121 kind=tbl jsScore=0
+
+## 2. unique-247 wiring hunt (count=1 vs 246=0)
+same 246=0 247=0 "feature('SEND_FEEDBACK')"
+same 246=0 247=0 "feature(\"SEND_FEEDBACK\")"
+same 246=0 247=0 "feature(`SEND_FEEDBACK`)"
+same 246=0 247=0 "FEATURE_SEND_FEEDBACK"
+same 246=0 247=0 "MACRO.SEND_FEEDBACK"
+same 246=0 247=0 "MACRO['SEND_FEEDBACK']"
+same 246=0 247=0 "MACRO[\"SEND_FEEDBACK\"]"
+same 246=0 247=0 "SEND_FEEDBACK_TOOL"
+same 246=0 247=0 "SendFeedbackTool"
+same 246=0 247=0 "alwaysLoad:!0,name:xgr"
+same 246=0 247=0 "alwaysLoad:!0,name:Dpr"
+same 246=0 247=0 "CORE_TOOLS"
+same 246=0 247=0 "getAllBaseTools"
+same 246=0 247=0 "QueryEngine"
+same 246=1 247=1 "name:\"feedback\""
+same 246=0 247=0 "name:'feedback'"
+same 246=0 247=0 "name:\"SendFeedback\""
+same 246=0 247=0 "name:'SendFeedback'"
+same 246=0 247=0 "Claude can draft a feedback report"
+same 246=0 247=0 "turn off with the feedbackDrafts"
+same 246=0 247=0 "review and send from /feedback"
+same 246=0 247=0 "/feedback draft"
+same 246=0 247=0 "draft-review"
+same 246=0 247=0 "feedbackDrafts:\"off\""
+same 246=0 247=0 "feedbackDrafts:\"notify\""
+same 246=0 247=0 "feedbackDrafts:\"quiet\""
+same 246=13 247=13 "feedbackNotice"
+same 246=11 247=11 "sessionDraftCount"
+same 246=5 247=5 "tengu_juniper_relay"
+same 246=25 247=25 "allow_product_feedback"
+same 246=2 247=2 "Queue a draft feedback report"
+
+## 3. feature() / MACRO near SendFeedback assign (20k)
+near-assign-20k 246={"i":215149777,"alwaysLoad":0,"shouldDefer":0,"featureCall":0,"FEATURE":0,"MACRO":0,"QueryEngine":0,"CORE_TOOLS":0,"SEND_FEEDBACK":0,"beforeFeature":0,"beforeMACRO":0}
+near-assign-20k 247={"i":216531362,"alwaysLoad":0,"shouldDefer":0,"featureCall":0,"FEATURE":0,"MACRO":0,"QueryEngine":0,"CORE_TOOLS":0,"SEND_FEEDBACK":0,"beforeFeature":0,"beforeMACRO":0}
+
+## 4. feature( string catalog SEND/FEEDBACK
+feature( total names 246=0 247=0
+send/feedback-ish flags: []
+feature-only-247 count=0
+
+## 5. MACRO. ident SEND/FEEDBACK
+MACRO. total 246=0 247=0
+MACRO send/feedback-ish: []
+MACRO-only-247 count=0
+
+## 6. QueryEngine / CORE_TOOLS / /feedback dispatch
+same 246=1 247=1 "\"Brief\",\"PushNotification\",\"SendFeedback\""
+same 246=1 247=1 "\"PushNotification\",\"SendFeedback\",\"SendFile\""
+UNIQUE247 246=0 247=1 "J7,$gr,oee"
+DIFF 246=1 247=0 "A7,Upr,D7"
+DIFF 246=1 247=2 "function IE(){"
+same 246=2 247=2 "function mE(){"
+same 246=1 247=1 "name:\"feedback\""
+same 246=1 247=1 "name:\"bug\""
+same 246=0 247=0 "Submit feedback about Claude Code"
+same 246=2 247=2 "Queue a draft feedback report about Claude Code"
+same 246=2 247=2 "user can review them with /feedback"
+same 246=2 247=2 "review and send it with /feedback"
+same 246=9 247=9 "feedbackNotice.setState"
+same 246=1 247=1 "subtype:\"feedback_draft_queued\""
+same 246=2 247=2 "tengu_feedback_draft_created"
+same 246=2 247=2 "tengu_feedback_draft_call_capped"
+same 246=2 247=2 "tengu_feedback_draft_submitted"
+same 246=2 247=2 "tengu_feedback_draft_discarded"
+same 246=2 247=2 "tengu_feedback_draft_delete_failed"
+same 246=55 247=55 "tengu_feedback"
+same 246=0 247=0 "logEvent(\"tengu_feedback\""
+same 246=0 247=0 "logEvent('tengu_feedback'"
+
+## 7. /feedback command window (Submit feedback about Claude Code)
+cmd 246=@217166500 sha=5f5bd2d31197b343 norm=848cfae3b2c48bdf miss=false
+cmd 247=@218629970 sha=ff3bd37310631613 norm=848cfae3b2c48bdf miss=false
+cmd rawEq=false normEq=true
+
+## 8. leftover-wired function pairs (246=247 bodies)
+NORM-SAME isEnabled-wrapper rawEq=false rawLen=43/43 sha247=fa067907ed777bba sha246=eac99442b752f08d normSha=d9dd1eaad9f5d0ec/d9dd1eaad9f5d0ec miss=false
+NORM-SAME session-gate rawEq=false rawLen=338/338 sha247=d18191a530989b34 sha246=4ea6bd4d8d20a9f1 normSha=c5f49dbf7e2c3d82/c5f49dbf7e2c3d82 miss=false
+NORM-SAME get-feedbackDrafts rawEq=false rawLen=57/57 sha247=6568f645721a8873 sha246=21529a45036a3584 normSha=5a68228bb4130e5f/5a68228bb4130e5f miss=false
+NORM-SAME getAllBaseTools rawEq=false rawLen=714/713 sha247=d38d916672ce2b45 sha246=9a176d3dadc21457 normSha=253745c642660929/253745c642660929 miss=false
+NORM-SAME fitFeedbackPayloadToBudget rawEq=true rawLen=1207/1207 sha247=07fbddf252d9314e sha246=07fbddf252d9314e normSha=36ca8b7ac663b21b/36ca8b7ac663b21b miss=false
+NORM-SAME parseDraftTranscriptMessages rawEq=true rawLen=677/677 sha247=90e2c265307d953c sha246=90e2c265307d953c normSha=03d4feb9695d4b5a/03d4feb9695d4b5a miss=false
+NORM-SAME draft-bylines rawEq=true rawLen=1143/1143 sha247=e2e71de212b4451e sha246=e2e71de212b4451e normSha=63e20b44dcf10f05/63e20b44dcf10f05 miss=false
+NORM-SAME feedback-disabled-gates rawEq=true rawLen=743/743 sha247=8f61c2d9f132bd21 sha246=8f61c2d9f132bd21 normSha=6660a85170cd73d3/6660a85170cd73d3 miss=false
+NORM-SAME draft-submit-ot rawEq=true rawLen=2747/2747 sha247=1eb5077f676f7c29 sha246=1eb5077f676f7c29 normSha=9f4c828f052c3996/9f4c828f052c3996 miss=false
+NORM-DIFF call() rawEq=false rawLen=3253/3253 sha247=0a104dcd7311f521 sha246=9aa3f17a9e6c2682 normSha=ff09909b19eaee12/cd1d9a1bc716350f stampNormEq=false stampSha=857db43d025118bb/b81bcb65bbfe8031
+tool-name 247="var xgr=\"SendFeedback\";" 246="var Dpr=\"SendFeedback\";"
+NORM-DIFF tool-object rawEq=false rawLen=3927/3927 sha247=73e155e70a9c1170 sha246=1ffe78113932d91c normSha=4944224cbd41f98d/73986cf7956af094
+schema-describe rawEq=true 246@206426815 247@208027739 sha=d3745e09f9803503
+IE has $gr=true feature(=false
+mE has Upr=true feature(=false
+
+## 9. collision-ban (do not bind old manual report)
+same 246=0 247=0 collision "src/components/Feedback.tsx"
+same 246=0 247=0 collision "src/commands/feedback"
+same 246=19 247=19 collision "tengu_feedback_survey_event"
+same 246=3 247=3 collision "tengu_feedback_survey_config"
+same 246=0 247=0 collision "Submit feedback about Claude Code"
+
+## 10. unique247 list
+raw-UNIQUE247-probes=1 (includes minify renames)
+J7,$gr,oee 246=0 247=1
+unique-247-function (not rename)=NONE

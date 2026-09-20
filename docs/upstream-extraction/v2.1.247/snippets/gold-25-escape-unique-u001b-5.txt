@@ -1,0 +1,10 @@
+# offset=222955400 tag=u001b
+
+e}${e}To install the Shift+Enter keybinding:${e}1. Open ${n} on your local machine (not connected to remote)${e}2. Open the Command Palette (Cmd/Ctrl+Shift+P) \u2192 "Preferences: Open Keyboard Shortcuts (JSON)"${e}3. Add this keybinding (the file must be a JSON array):${e}${e}${l.dim(`[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\\u001b\\r" },
+    "when": "terminalFocus"
+  }
+]`)}${e}`;let o=await W.of(t).pathFor(n),a=y(o,"keybindings.json");try{await se(o,{recursive:!0});let i="[]",m=[],d=!1;try{i=await _(a,{encoding:"utf-8"}),d=!0,m=B(i)??[]}catch(g){if(!C(g))throw g}if(d){let g=D(4).toString("hex"),S=`${a}.${g}.bak`;try{await R(a,S)}catch{return`${s("warning",r)(`Error backing up existing ${n} terminal keybindings. Bailing out.`)}${e}${l.dim(`See ${w(a)}`)}${e}${l.dim(`Backup path: ${w(S)}`)}${e}`}}let f={key:"shift+en

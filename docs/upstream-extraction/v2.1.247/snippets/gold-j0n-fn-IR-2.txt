@@ -1,0 +1,2 @@
+# needle=function IR( pos=214577454 end=214577547 len=93
+function IR(){try{let e=GSt();return e?VSt(e):{version:2,plugins:{}}}catch(e){return q0n(e)}}

@@ -1,0 +1,8 @@
+# _0n@214579796
+async function _0n(e,t){if(!e)return{orphanedPaths:[],removedPluginIds:[]};let n=await ame((r)=>KBo(r,e),t);for(let r of n.removedPluginIds)_(`Removed installed plugin for marketplace removal: ${r}`);return n}
+
+# KBo@214580005
+function KBo(e,t){let n=`@${t}`,r=new Set,o=[];for(let s of Object.keys(e.plugins)){if(!s.endsWith(n))continue;for(let i of e.plugins[s]??[])if(i.installPath)r.add(i.installPath);delete e.plugins[s],o.push(s)}return{write:o.length>0,result:{orphanedPaths:Array.from(r),removedPluginIds:o}}}
+
+# ame@214576324
+async function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}

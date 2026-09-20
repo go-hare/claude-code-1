@@ -1,0 +1,3 @@
+# ver=246 name=z async=true start=221555533 end=221555870 len=337 sha=6d7ea8e88b9ba798 needle="exited with code ${"
+
+async function z(e){for(let t of[["add",g,"/ve","/d",`URL:${w}`,"/f"],["add",g,"/v","URL Protocol","/d","","/f"],["add",v,"/ve","/d",R(e),"/f"]]){let{code:r}=await l("reg",t,{useCwd:!1});if(r!==0)throw Object.assign(Error(`reg add exited with code ${r}`),{code:"REG_FAILED"})}c(`Registered ${o}:// protocol handler in Windows registry`)}

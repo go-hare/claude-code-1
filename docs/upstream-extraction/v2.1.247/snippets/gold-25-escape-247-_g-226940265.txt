@@ -1,0 +1,3 @@
+# 247 function _g start=226940265 len=154 sha=8c3018c0e383834a
+
+function _g(e){let t=new Set;for(let r in e.responses){let n=e.responses[r];if(n.bodyMapper&&n.bodyMapper.type.name===Jt.Stream)t.add(Number(r))}return t}

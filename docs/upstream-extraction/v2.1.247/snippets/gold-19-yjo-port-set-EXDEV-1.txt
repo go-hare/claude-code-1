@@ -1,0 +1,2 @@
+# pos=223137440
+object({slug:u.string().uuid(),title:u.string().min(1).max(256).optional(),writtenAtMs:u.number().finite().optional(),unattendedReplies:u.number().int().min(0).max(Ue).optional()}));xt=W(()=>Ct());or=new Set(["EXDEV","EPERM","ENOTSUP","EOPNOTSUPP","ENOSYS","EMLINK"]);pr=/^agent-[\w-]+\.(?:jsonl|meta\.json)$/,fr=new RegExp("^agent-[\\w-]+\\.(?:jsonl|meta\\.json)"+jt.replace(/[.]/g,"\\.")+"\\d+\\.(\\d+)\\.[0-9a-f]{8}$");kr=W(()=>u.object({agentType

@@ -1,0 +1,1 @@
+function pe(e){let n=Vn();if(e===void 0)return n;let t=Object.keys(n).filter((a)=>b()==="windows"?a.toUpperCase()==="PATH":a==="PATH"),r=(a)=>a!==""&&(e.some((p)=>T(p,a))||e.some((p)=>T(p,J(a)))),i=(a)=>b()==="windows"?a.split(le):a.split(/[:\s]+/),o=kr.filter((a)=>i(n[a]??"").some(r));return{...o.length===0?n:jn(n,o),...Object.fromEntries(t.map((a)=>[a,Pr(n[a]??"",e)]))}}

@@ -1,0 +1,3 @@
+# 247 @210972087
+
+w(e))return;let{detachedSinceLastAttach:t,stampMs:r}=i(),n=t||r===0?500:r+500-e;await b(Math.max(25,n)+25)}}var C=s(()=>{l();T();E();q()});function ae(e){return{request:a(`?${e}$p`),match:(t)=>t.type==="decrpm"&&t.mode===e}}function ue(){return{request:a("?6n"),match:(e)=>e.type==="cursorPosition"}}function ce(e){return{request:x(e,"?"),match:(t)=>t.type==="osc"&&t.code===e}}function me(){return{request:a(">0q"),match:(e)=>e.type==="xtversion"}}class N{stdout;queue=[];themeChangeSubscribers=new Set;constructor(e){this.stdout=e}subscribeThemeChange(e){return this.themeChangeSubscribers.add(e),()=>{this.themeChangeSubscribers.delete(e)}}send(e){return new Promise((t)=>{this.queue.push({kind:"q

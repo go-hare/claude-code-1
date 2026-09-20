@@ -1,0 +1,3 @@
+# 247-after-Zt n=5 function Xs start=210376887 end=210377068 len=181 sha=95cf1e6955da8b2f
+
+function Xs(e){let t=[],n=e;for(;;){if(Ji(n,jn())||Qi(n,jn()))break;try{n=Vt(n);break}catch{let r=$e(n);if(r===n)break;t.push(Da(n)),n=r}}return t.length===0?n:ht(n,...t.reverse())}

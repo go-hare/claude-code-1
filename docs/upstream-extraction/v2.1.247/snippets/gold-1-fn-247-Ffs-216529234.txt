@@ -1,0 +1,3 @@
+# ver=247 name=Ffs async=false start=216529234 end=216529291 len=57 sha=6568f645721a8873 needle="feedbackDrafts"
+
+function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}

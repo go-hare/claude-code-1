@@ -102,6 +102,7 @@ export const ENDED_BY_MODEL_ALLOWED_COMMANDS = new Set([
   'help',
   'exit',
   'feedback',
+  'bug',
 ])
 
 const ENDED_BY_MODEL_ALIAS_TO_NAME: Record<string, string> = {
@@ -363,7 +364,7 @@ export async function processUserInput({
       result.messages.push(
         createAttachmentMessage({
           type: 'hook_additional_context',
-          content: hookResult.additionalContexts.map(applyTruncation),
+          content: hookResult.additionalContexts,
           hookName: 'UserPromptSubmit',
           toolUseID: `hook-${randomUUID()}`,
           hookEvent: 'UserPromptSubmit',
@@ -371,27 +372,13 @@ export async function processUserInput({
       )
     }
 
-    // TODO: Clean this up
+    // densable 247 `rWe` — drop an empty hook_success attachment, pass every
+    // other attachment through untouched. Size is already bounded upstream by
+    // persistHookOutput, so there is nothing to truncate here.
     if (hookResult.message) {
-      switch (hookResult.message.attachment!.type) {
-        case 'hook_success':
-          if (!hookResult.message.attachment!.content) {
-            // Skip if there is no content
-            break
-          }
-          result.messages.push({
-            ...hookResult.message,
-            attachment: {
-              ...hookResult.message.attachment!,
-              content: applyTruncation(
-                hookResult.message.attachment!.content as string,
-              ),
-            },
-          } as AttachmentMessage)
-          break
-        default:
-          result.messages.push(hookResult.message as AttachmentMessage)
-          break
+      const attachment = hookResult.message.attachment!
+      if (attachment.type !== 'hook_success' || attachment.content) {
+        result.messages.push(hookResult.message as AttachmentMessage)
       }
     }
   }
@@ -401,15 +388,6 @@ export async function processUserInput({
   // so it resolves in the same frame as deferredMessages (no flicker gap).
   // Error paths are handled by handlePromptSubmit's finally block.
   return result
-}
-
-const MAX_HOOK_OUTPUT_LENGTH = 10000
-
-function applyTruncation(content: string): string {
-  if (content.length > MAX_HOOK_OUTPUT_LENGTH) {
-    return `${content.substring(0, MAX_HOOK_OUTPUT_LENGTH)}… [output truncated - exceeded ${MAX_HOOK_OUTPUT_LENGTH} characters]`
-  }
-  return content
 }
 
 async function processUserInputBase(

@@ -1,0 +1,10 @@
+# 247 complete initializer (extracted)
+var We=50000,Ns=500000,Ds=4,Bs=400000,Us=200000,Hs=50,zs=1e4,Ws=1e4
+# 246 complete initializer (extracted)
+var ze=50000,Ls=500000,Ms=4,Is=400000,Ns=200000,Ds=50,Bs=1e4
+# mapping (name-normalized by position):
+50000 500000 4 400000 200000 50 1e4 | 247 extra 1e4 (Ws)
+# offs 247=212668226 246=211303800
+# JWr chain: zs=1e4 → export zs as Yvb → import Yvb as JWr → lre threshold default
+# BBr chain: Bs=1e4 → export Bs as lHb → import lHb as BBr → Rne threshold default
+# Persist default is 1e4 in BOTH. Extra 247 Ws=1e4 is a second binding.

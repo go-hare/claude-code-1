@@ -1,0 +1,3 @@
+# 247 @211607505
+
+en();St();nu();su();Oe();au()});function uu(r){return r.endsWith(`@${ke}`)}function Fx(r){return K().builtinPlugins.get(r)}function Rp(){let r=ou(),n=[],a=[];for(let[u,l]of K().builtinPlugins){if(l.isAvailable&&!l.isAvailable())continue;let p=`${u}@${ke}`,m=l.enabledFromTrustedSettingsOnly?zn(p):r?.enabledPlugins?.[p],d=m!==void 0?m===!0:l.defaultEnabled??!0;l.onResolved?.(d);let v={name:u,manifest:{name:u,description:l.description,version:l.version,...l.defaultEnabled===void 0?{}:{defaultEnabled:l.defaultEnabled},...l.userConfig===void 0?{}:{userConfig:l.userConfig}},path:ke,source:p,reposito

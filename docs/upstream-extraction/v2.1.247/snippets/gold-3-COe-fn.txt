@@ -1,0 +1,3 @@
+# offset=214080676
+
+pid,...dU(await fR())})),!0}catch(l){return _(`Failed to write ${na} marker: ${e}: ${l}`),!1}}async function COe(e,t){if(await JD(e))return!0;let n=xf(e,na),r=xf(n,String(process.pid)),o=Ne()&&t!==void 0,s=o?mp(e,xf(Fs(),"cache")):null;try{let i=await Cpt(n);if(i==="absent"||o&&i==="junk")return pSn(Xn(),r),!0;if(i==="refused"||i==="junk")return!1;if(o&&s){let a=await t.delete(_r.pluginCache(s.marketplace,s.plugin,s.version,[na,String(process.pid)]));if(!a.ok)return _(`Failed to remove ${na} marker: ${e}: ${tr(a.error)}`),!1}else await Tpt(r,{force:!0});await rIo(n).catch(()=>{})}catch(i){return _(`Failed to remove ${na} marker: ${e}: ${i}`),!1}return pSn(Xn(),r),!0}async function TSn(e,t){i

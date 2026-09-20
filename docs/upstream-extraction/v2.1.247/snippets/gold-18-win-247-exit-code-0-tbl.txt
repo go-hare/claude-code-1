@@ -1,0 +1,65 @@
+# ver=247 offset=82241860 kind=tbl run=41 needle="(exit code"
+
+ed.
+
+.[1m.[32mWelcome to Bun v..!.[0m
+
+What's new in Bun v./:
+
+    .[36mhttps://bun.com/blog/release-notes/.{.[0m
+
+Report any bugs:
+
+    https://github.com/oven-sh/bun/issues
+
+Commit log:
+
+    https://github.com/oven-sh/bun/compare/...
+..aadadbbbea0403af14b21d4d7fa9dee0df186711...Z..D...	... Upgraded.
+
+Welcome to Bun's latest canary build!
+
+Report any bugs:
+
+    https://github.com/oven-sh/bun/issues
+
+Changelog:
+
+    https://github.com/oven-sh/bun/compare/...
+...[0m Upgraded.
+
+.[1m.[32mWelcome to Bun's latest canary build!.[0m
+
+Report any bugs:
+
+    https://github.com/oven-sh/bun/issues
+
+Changelog:
+
+    https://github.com/oven-sh/bun/compare/...
+...Congrats! You're already on the latest canary build of Bun
+
+To downgrade to the latest stable release, run bun upgrade --stable
+...[0m.[32mCongrats!.[0m You're already on the latest .[1mcanary.[0m.[32m build of Bun
+
+To downgrade to the latest stable release, run .[1m.[36mbun upgrade --stable.[0m
+..!error: Failed to read source bun ...[0m.[31merror:.[0m Failed to read source bun ...!error: Failed to read target bun ...[0m.[31merror:.[0m Failed to read target bun ...error: .. while trying to stat source ...[0m.[31merror:.[0m .. while trying to stat source ...error: .. while trying to stat target .. ...[0m.[31merror:.[0m .. while trying to stat target .. ...error: Failed to open Bun's install directory ...;.[0m.[31merror:.[0m Failed to open Bun's install directory ...(error: failed to verify Bun (exit code: ..)..A.[0m.[31merror.[0m.[2m:.[0m failed to verify Bun.[0m (exit code: ..)...error: 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+...[0m.[31merror.[0m.[2m:.[0m 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+..#error: Failed to verify Bun (code: ..)..8.[0m.[31merror.[0m.[2m:.[0m Failed to verify Bun (code: ..).[0m..)error: Failed to spawn Expand-Archive on .. due to error ...6.[0m.[31merror:.[0m Failed to spawn Expand-Archive on .. due to error ... error: Failed to open temp file ...-.[0m.[31merror:.[0m Failed to open temp file ...Failed to read temporary directory: {}Failed to open temporary directory: {}expected package names(s) or --all0 scripts ran. The following packages are already trusted, don't have scripts to run, or don't exist:
+
+0 scripts ran. This means all dependencies are already trusted or none have scripts..bun pm trust v..
+...[0m.[1mbun pm trust .[0m.[2mv...[0m
+.trust-a--all...Running script
+...  ...  Running script.[PackageManager] waiting for .	 scripts
+..%.[2m[PackageManager].[0m waiting for .	 scripts
+... .. script.. ran across .. package.. .. .[32m...[0m script.. ran 

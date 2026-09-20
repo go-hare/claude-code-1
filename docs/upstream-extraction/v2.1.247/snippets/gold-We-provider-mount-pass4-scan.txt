@@ -1,0 +1,179 @@
+# PASS4 Rz parents + ebb/fbb + 246 Us
+Rz as ... from _240.js count=12
+
+## Rz as Se import@223182733 mod=223182569..223189641 span=7072
+  ident Se count=2
+    @223182739 import ,Gz as Ce}from"B:/~BUN/root/_239.js";import{Rz as Se,Sz as Ne}from"B:/~BUN/root/_240.js";import{vD as V}from"B:/~BUN/root/_281.js";import{Bg
+    @223188091 import HAS-storageV5 ((a)=>{let i=(f)=>void a(f),[n,...d]=o;r.render(s(Se,{session:c,storageV5:e,children:n!==void 0&&d.length===0?s(ee,{serverName:n,isPluginSer
+      dumped gold-We-provider-mount-Rz-Se-fn-223187848.txt len=451
+
+## Rz as To import@223198291 mod=223195717..223382579 span=186862
+  ident To count=5
+    @223198297 import ;import{Jz as Ns,Kz as nm,Pz as Il,Qz as Rm,Rz as To,Sz as Ls}from"B:/~BUN/root/_240.js";import{Tz as gp,Vz as Gf}from"B:/~BUN/root/_241.js"
+    @223232629 other typeof t==="object"&&t instanceof Hi)throw Error("To add an Option object use addOption() instead of option() or requiredOption()");let i=th
+    @223282162 import void 0,n=o?.onChangeAppState,i=et(),l=vr(e,(s)=>x(To,{session:i,onChangeAppState:n&&((c)=>n(c,i)),children:t(s)}));if(!r)return l;return l.f
+    @223294349 import function d({CloudCreateChecklist:f},u){e.render(x(To,{session:t.session,children:x(f,{state:u,cancelling:n!==null,onCancel:()=>m(f)})},"clou
+    @223295451 import HAS-storageV5 storageV5:s,credentials:c}=t,d=br(s);await Ut(e,x(To,{session:l,storageV5:s,messageQueue:d,initialState:t.initialState,onChangeAppState:(a)=
+      dumped gold-We-provider-mount-Rz-To-fn-223295275.txt len=399
+
+## Rz as Kc import@223672814 mod=223671601..223851651 span=180050
+  ident Kc count=3
+    @223672820 import {Yx as Qy}from"B:/~BUN/root/_224.js";import{Rz as Kc,Sz as bC}from"B:/~BUN/root/_240.js";import{dA as hC}from"B:/~BUN/root/_242.js";import{o
+    @223847292 import HAS-storageV5 )=>{u.render(s(oS,{killRing:i.killRing,children:s(Kc,{session:Uc(),storageV5:t?.storageV5,initialState:V&&{...V,notifications:{current:null,
+      dumped gold-We-provider-mount-Rz-Kc-fn-223846081.txt len=161
+    @223848200 import HAS-storageV5 =await Promise.race([new Promise((N)=>{u.render(s(Kc,{session:Uc(),storageV5:t?.storageV5,initialState:V&&{...V,notifications:{current:null,
+      dumped gold-We-provider-mount-Rz-Kc-fn-223846081.txt len=161
+
+## Rz as A import@228568316 mod=228568289..228581999 span=13710
+  ident A count=2
+    @228568322 import and-compliance.  // Version: 2.1.247 import{Rz as A,Sz as ee}from"B:/~BUN/root/_240.js";import"B:/~BUN/root/_241.js";import"B:/~BUN/root/_24
+    @228581131 import n l=f,e(F,{currentStep:T,sessionId:m})}b.render(e(A,{session:g,keybindings:!1,children:e(d,{})},"teleport-progress"));let r=await z(m,l);l("
+
+## Rz as ue import@228802101 mod=228802022..228807553 span=5531
+  ident ue count=2
+    @228802107 import ,hx as be}from"B:/~BUN/root/_211.js";import{Rz as ue,Sz as Oe}from"B:/~BUN/root/_240.js";import{XB as Y,YB as Ye}from"B:/~BUN/root/_257.js";
+    @228806696 import ction xo(f,p){return new Promise((m)=>{f.render(e(ue,{session:fe(),children:e(Se,{errorsToIgnore:p,onComplete:()=>void m(),isStandalone:!0})
+
+## Rz as Y import@228867503 mod=228867266..228875918 span=8652
+  ident Y count=2
+    @228867509 import t{Dx as j}from"B:/~BUN/root/_220.js";import{Rz as Y,Sz as ge}from"B:/~BUN/root/_240.js";import{sG as d,vG as fe}from"B:/~BUN/root/_307.js";i
+    @228869739 import ,i=v(),u=!1;if(await new Promise((t)=>{n.render(p(Y,{session:i,onChangeAppState:(c)=>V(c,i),children:g(_,{flexDirection:"column",gap:1,child
+
+## Rz as be import@230120174 mod=230119859..230146230 span=26371
+  ident be count=9
+    @230120180 import 238.js";import"B:/~BUN/root/_239.js";import{Rz as be,Sz as st}from"B:/~BUN/root/_240.js";import"B:/~BUN/root/_241.js";import"B:/~BUN/root/_2
+    @230133684 import s)=>{r=s}),{unmount:o,waitUntilExit:a}=await ye(C(be,{session:ee(),children:ge(me,{flexDirection:"column",gap:1,paddingY:1,children:[C(he,{b
+    @230141685 other ll-snapshots/ are not project-scoped and will not be touched");let X=f(n,"backups");if(await S(X))d.push(`backups/ may still contain this pr
+    @230142572 other ll-snapshots/ are not project-scoped and will not be touched");let a=f(t,"backups");if(await S(a))r.push(`backups/ may still contain project
+    @230144247 other d),t.dryRun)T(`Dry run: ${s.length} item(s) would be deleted.`);if(!t.yes){if(!await D(`Delete ${s.length} item(s) for ALL projects? This ca
+    @230144342 other ${s.length} item(s) for ALL projects? This cannot be undone.`))g("Aborted.")}let l=[];for(let p of s){let m=await E(p,n);if(m)l.push(m)}x(l,
+    @230144786 other o),t.dryRun)T(`Dry run: ${i.length} item(s) would be deleted.`);if(t.interactive){let s=0,d=!1,l=[];for(let[p,m]of i.entries()){let h="delet
+    @230145344 other `Delete ${i.length} item(s) for ${r}? This cannot be undone.`))g("Aborted.")}let a=[];for(let s of i){let d=await E(s,n);if(d)a.push(d)}x(a,
+    @230145939 other ck under Anthropic's Commercial Terms, // and may be used to improve Anthropic's products, including training models. // You are responsible
+
+## Rz as c import@230653468 mod=230653357..230654779 span=1422
+  ident c count=3
+    @230653474 import t{yx as d}from"B:/~BUN/root/_218.js";import{Rz as c,Sz as D}from"B:/~BUN/root/_240.js";import{ebb as m,gbb as h}from"B:/~BUN/root/_490.js";i
+    @230653844 import t{rerender:e,unmount:a,waitUntilExit:f}=await m(n(c,{session:l(),children:n(u,{settings:S,onAccept:()=>{if(t=!0,r("approved"),i)e(null);else
+    @230654631 other r reviewing any code suggestions before use.  // (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined her
+
+## Rz as N import@230680456 mod=230680316..230694313 span=13997
+  ident N count=2
+    @230680462 import 238.js";import"B:/~BUN/root/_239.js";import{Rz as N,Sz as W}from"B:/~BUN/root/_240.js";import"B:/~BUN/root/_241.js";import"B:/~BUN/root/_242
+    @230693452 import t new Promise(async(a)=>{let{unmount:l}=await D(e(N,{session:O(),children:e(T,{filePath:r.filePath,errorDescription:r.message,onExit:()=>{l(
+
+## Rz as M import@231943156 mod=231942987..231945591 span=2604
+  ident M count=2
+    @231943162 import t{So as P}from"B:/~BUN/root/_127.js";import{Rz as M,Sz as I}from"B:/~BUN/root/_240.js";import{Uz as C,Vz as E}from"B:/~BUN/root/_241.js";imp
+    @231944437 import HAS-storageV5 bose:s,...f&&{mainLoopModel:f}},j=P(r),B=(o)=>T(a(M,{session:n,storageV5:p,initialState:w,keybindings:!1,children:S(F,{children:[o[0]===0&&a
+      dumped gold-We-provider-mount-Rz-M-fn-231944275.txt len=83
+
+## Rz as Dt import@233839126 mod=233838802..233869989 span=31187
+  ident Dt count=2
+    @233839132 import ,Gz as _r}from"B:/~BUN/root/_239.js";import{Rz as Dt,Sz as Vr}from"B:/~BUN/root/_240.js";import"B:/~BUN/root/_241.js";import"B:/~BUN/root/_2
+    @233866013 import HAS-storageV5 _mcp_add_from_desktop");let{unmount:l}=await Pt(a(Dt,{session:dt(),storageV5:e,children:a(Oe,{servers:s,scope:n,onDone:()=>{l()}})}),{exitOn
+      dumped gold-We-provider-mount-Rz-Dt-fn-233865569.txt len=656
+
+## Rz as a import@233931092 mod=233931065..233942835 span=11770
+  ident a count=3
+    @233931098 import and-compliance.  // Version: 2.1.247 import{Rz as a,Sz as b}from"B:/~BUN/root/_240.js";import"B:/~BUN/root/_241.js";import"B:/~BUN/root/_242
+    @233942224 other /_849.js";import"B:/~BUN/root/_850.js";b();export{a as AppRoot}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commerc
+    @233942276 other as AppRoot}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you a
+
+# Us prop literals
+"writesExitHandoff" count=6
+  @196983824 ialState...d.onChangeAppState...u...sessionHooks...L#.writesExitHandoff......!g.getFpsMetrics...=.stats...C}+.keybindings...aK..children...commands...UJ.engine...onCo
+  @222168989 )=>O(s,m,o,f),fleetNudgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,keybindings:!1,children:i(J,{...a})},"repl"),m,o,f)}catch(s){throw await W(
+  @223177446 n:Ot,initialState:un,onChangeAppState:fn,fleetNudgeStore:pn,writesExitHandoff:Zi,sessionHooks:mn}=hc,Sc=Zi===void 0?!1:Zi;if(z(ot)){throw Error("AppStateProvider can not be nested within another AppSt
+  @223180479 e:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybindings:Os,children:yr}=Lc,Mn=Os===void 0?!0:Os,Hs;if(oe[0]!==hr)Hs=Tr(hr),oe[0]=hr,oe[1]
+  @223181020 e:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,children:vr}),oe[7]=Tn,oe[8]=xn,oe[9]=_n,oe[10]=An,oe[11]=vr,oe[12]=Pn,oe[13]=kr;else kr=oe[13];let wr;if(oe[14]!==Rn||
+  @223295554 itialState:t.initialState,onChangeAppState:(a)=>ko(a,l,s,c),writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,children:x(i,{...r,worktreePaths:n})},"resume"),l,s,c)}Af();kf();xt();_m();
+"fleetNudgeStore" count=20
+  @196983696 ...repl...*.AppRoot...Wc.REPL...BM..session...A..fleetNudgeStore.	...onHealthy...l.messageQueue...initialState...d.onChangeAppState...u...sessionHooks...L#.writesExitHa
+  @222164302 HAS-storageV5 ){this.#a(),this.#u=!1,this.#r=!1}}function G(e,t){return e.fleetNudgeStore??=new v({storageV5:t}),e.fleetNudgeStore}function V(){let e=c(J);if(!e)throw ReferenceError("useFleetNudgeStore cannot be ca
+  @222164343 HAS-storageV5 on G(e,t){return e.fleetNudgeStore??=new v({storageV5:t}),e.fleetNudgeStore}function V(){let e=c(J);if(!e)throw ReferenceError("useFleetNudgeStore cannot be called outside of a FleetNudgeStoreContext 
+  @222168735 HAS-storageV5 ryParamsChange:ee})}let{session:m,storageV5:o,credentials:f,fleetNudgeStore:K=new T({storageV5:o})}=t,X=C(o);await D({onHealthy:()=>_(o),storageV5:o});try{await V(r,i(Y,{session:m,storageV5:o,messageQ
+  @222168943 nitialState:t.initialState,onChangeAppState:(s)=>O(s,m,o,f),fleetNudgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,keybindings:!1,children:i(J,{
+  @223177427 et x=O(56),{children:Ot,initialState:un,onChangeAppState:fn,fleetNudgeStore:pn,writesExitHandoff:Zi,sessionHooks:mn}=hc,Sc=Zi===void 0?!1:Zi;if(z(ot)){throw Error("AppStateProvider can not be nested w
+  @223180444 geV5:hr,messageQueue:Sr,initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybindings:Os,children:yr}=Lc,Mn=Os===void 0?!0:Os,Hs;if(
+  @223180985 r||oe[12]!==Pn)kr=n(nt,{initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,children:vr}),oe[7]=Tn,oe[8]=xn,oe[9]=_n,oe[10]=An,oe[11]=vr,oe[12]=Pn,oe[13]=kr;els
+"messageQueue:" count=30
+  @215510216 reshMcpClients:c?void 0:t.options.refreshMcpClients}}return{messageQueue:e.messageQueue,session:t?.session??e.session,hookOrigin:e.hookOrigin,hookCaller:e.hookCaller,pluginSteered:e.pluginSteered,read
+  @215728341 n){let{getAppState:P,setAppState:x,taskRegistry:A,session:L,messageQueue:F}=s;try{a7({goal:b,now:Date.now(),sessionScratch:L.sessionScratch,getAppState:P,setAppState:x,getDeferringTasks:()=>E7n(A.all(
+  @216660317 one themselves with /goal.");let i=s==="alwaysAsk"||t!==!1,{messageQueue:a,requestDialog:l}=n;if(l===void 0)throw Error("Goal proposals need an interactive session to render the approval prompt; none 
+  @222168867 HAS-storageV5 _(o),storageV5:o});try{await V(r,i(Y,{session:m,storageV5:o,messageQueue:X,initialState:t.initialState,onChangeAppState:(s)=>O(s,m,o,f),fleetNudgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:
+  @223180392 HAS-storageV5 !1)});function Us(Lc){let oe=O(29),{session:Rn,storageV5:hr,messageQueue:Sr,initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybin
+  @223295477 HAS-storageV5 entials:c}=t,d=br(s);await Ut(e,x(To,{session:l,storageV5:s,messageQueue:d,initialState:t.initialState,onChangeAppState:(a)=>ko(a,l,s,c),writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stat
+  @223314658 HAS-storageV5 nModeSuppliedOnInvocation,storageV5:e.storageV5,cliAgents:C,messageQueue:o,credentials:Do(e.storageV5),allowedTools:l,thinkingConfig:s,thinkingConfigExplicit:c,maxTurns:jt,maxBudgetUsd:t.maxBudgetUsd,
+  @224598826 userContext:t,systemContext:n}}async function Ee({session:s,messageQueue:c,tools:i,commands:l,mcpClients:m,messages:r,readFileState:d,toolState:f,sessionHooks:g,getAppState:e,setAppState:o,customSyste
+"getFpsMetrics:" count=15
+  @222169010 dgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,keybindings:!1,children:i(J,{...a})},"repl"),m,o,f)}catch(s){throw await W().catch(()=>!1),s}} e
+  @222810685 ion requires the runOnboarding capability");bt={root:n.root,getFpsMetrics:n.getFpsMetrics,stats:n.stats},is=n.mcpApprovalSkipWarning,O=n.dynamicMcpConfig,ee=n.appendSystemPrompt,ze=n.commands,Go=n.rem
+  @223162348 s q}from"B:/~BUN/root/_850.js";function Fe(Js){let qs=O(3),{getFpsMetrics:Nr,children:Kr}=Js,Nn;if(qs[0]!==Kr||qs[1]!==Nr)Nn=n(He.Provider,{value:Nr,children:Kr}),qs[0]=Kr,qs[1]=Nr,qs[2]=Nn;else Nn=qs
+  @223180500 :_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybindings:Os,children:yr}=Lc,Mn=Os===void 0?!0:Os,Hs;if(oe[0]!==hr)Hs=Tr(hr),oe[0]=hr,oe[1]=Hs;else Hs=oe[1];let
+  @223181407 ;else Rr=oe[19];let Fs;if(oe[20]!==En||oe[21]!==Rr)Fs=n(Fe,{getFpsMetrics:En,children:Rr}),oe[20]=En,oe[21]=Rr,oe[22]=Fs;else Fs=oe[22];let xr=Fs,Is;if(oe[23]!==Sr||oe[24]!==xr)Is=Sr===void 0?xr:n(Cr,
+  @223292157 _TIMING_SAMPLE_EVERY||1);if(i)try{l=im(i,"a")}catch{}return{getFpsMetrics:()=>r.getMetrics(),stats:n,renderOptions:{...o,onFrame:(d)=>{if(r.record(d.durationMs),n.observe("frame_duration_ms",d.duratio
+  @223295575 tate,onChangeAppState:(a)=>ko(a,l,s,c),writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,children:x(i,{...r,worktreePaths:n})},"resume"),l,s,c)}Af();kf();xt();_m();wa();ya();hm();_t();K
+  @223357477 f(!jt.valid)await de(ve,jt.message,()=>xr());return{root:ve,getFpsMetrics:Bt,stats:Te,mcpApprovalSkipWarning:Ct,mcpConfigPromise:We,dynamicMcpConfig:Ge,appendSystemPrompt:qe,commands:Ne,remoteControl:
+"sessionHooks:" count=30
+  @216373657 HAS-storageV5 eld*ld({session:e,hookInput:i,toolUseID:Spr(),timeoutMs:Idt,sessionHooks:t,storageV5:o,credentials:s})}async function*dWe(e,t,n,r,o={}){let s=n.agentId??n.session.id;if(!o.managedHooksOnly&&!Sh("UserP
+  @216376049 tf8",0,i)}${Uus}`}async function Bus(e,t,n,r){let{session:o,sessionHooks:s,getAppState:i}=r,a=n?`eval #${e} FAILED before settling:`:`eval #${e} settled:`,l=(p,f)=>jEe({kind:"repl-eval",at:new Date().
+  @216440994 ata:m})},{signal:t.abortController.signal,session:t.session,sessionHooks:t.sessionHooksRegistry,getAppState:()=>t.getAppState()}),u=c>0?`(dispatched #${l}, queued behind ${c} \u2014 the script is queu
+  @218240590 HAS-storageV5 ,toolUseID:`${t.messageId}-${t.index}`,signal:r,timeoutMs:o,sessionHooks:n,forceSyncExecution:!0,suppressPerInvocationTelemetry:!0,storageV5:s,credentials:i})}var vWr=w(()=>{sr();Ti();gm()});async fun
+  @218241950 HAS-storageV5 okInput:l,toolUseID:F1t(),matchQuery:n,signal:r,timeoutMs:o,sessionHooks:s,agentContext:i,managedHooksOnly:a?.managedHooksOnly,storageV5:e.storageV5,credentials:e.credentials})}async function EWr(e,t,
+  @218242097 HAS-storageV5 5,credentials:e.credentials})}async function EWr(e,t,n){let{sessionHooks:r,getAppState:o,signal:s,storageV5:i,credentials:a}=n||{},l={...Ys(e,ze()),hook_event_name:"SessionEnd",reason:t},c=await Vd({s
+  @218242246 HAS-storageV5 ook_event_name:"SessionEnd",reason:t},c=await Vd({session:e,sessionHooks:r,getAppState:o,hookInput:l,matchQuery:t,signal:s,timeoutMs:U1t,storageV5:i,credentials:a});for(let u of c)if(!u.succeeded&&u.o
+  @218243681 HAS-storageV5 tails,last_assistant_message:r};await Vd({session:t.session,sessionHooks:t.sessionHooksRegistry,getAppState:t.getAppState,hookInput:s,timeoutMs:n,matchQuery:o,storageV5:t.storageV5,credentials:t.crede
+"onChangeAppState:" count=11
+  @222168910 HAS-storageV5 on:m,storageV5:o,messageQueue:X,initialState:t.initialState,onChangeAppState:(s)=>O(s,m,o,f),fleetNudgeStore:K,sessionHooks:t.sessionHooks,writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.st
+  @223177407 });function nt(hc){let x=O(56),{children:Ot,initialState:un,onChangeAppState:fn,fleetNudgeStore:pn,writesExitHandoff:Zi,sessionHooks:mn}=hc,Sc=Zi===void 0?!1:Zi;if(z(ot)){throw Error("AppStateProvider
+  @223180424 HAS-storageV5 9),{session:Rn,storageV5:hr,messageQueue:Sr,initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,getFpsMetrics:En,stats:Cn,keybindings:Os,children:yr}=Lc,Mn=Os==
+  @223180965 10]!==An||oe[11]!==vr||oe[12]!==Pn)kr=n(nt,{initialState:xn,onChangeAppState:_n,fleetNudgeStore:Tn,sessionHooks:An,writesExitHandoff:Pn,children:vr}),oe[7]=Tn,oe[8]=xn,oe[9]=_n,oe[10]=An,oe[11]=vr,oe[
+  @223282176  0,n=o?.onChangeAppState,i=et(),l=vr(e,(s)=>x(To,{session:i,onChangeAppState:n&&((c)=>n(c,i)),children:t(s)}));if(!r)return l;return l.finally(()=>r.then((s)=>s?import("B:/~BUN/root/chunk-a1wm0vvm.js"
+  @223283760 ;await ne(t,(S)=>x(y,{host:e.host,onDone:()=>{am(c),S()}}),{onChangeAppState:ko})}let u=!1,g=!0;if(!O.CLAUBBIT){if(g=Ft(),!g||Ws()){u=!0;let{TrustDialog:y}=await import("B:/~BUN/root/chunk-k5r3g7xe.js
+  @223285800 ");await ne(t,(S)=>x(y,{customApiKeyTruncated:C,onDone:S}),{onChangeAppState:ko})}try{await dm(t,c)}catch(y){V(y)}try{await pm(t,c)}catch(y){V(y)}try{await cm(t)}catch(y){V(y)}if((o==="bypassPermissio
+  @223295520 HAS-storageV5 on:l,storageV5:s,messageQueue:d,initialState:t.initialState,onChangeAppState:(a)=>ko(a,l,s,c),writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,children:x(i,{...r,worktreePaths:n})},"re
+
+# ebb as (m8 ink render) from _490.js
+  skip ebb@223865842 N,abb as O,cbb as P,ebb as Q,fbb as R,gbb as S,mab as r,pab as s,u$a as m,uab as
+  ebb as S @228657343 mod=228657307..228659181 span=1874
+    ident count=2
+      @228657350 Version: 2.1.247 import{Kab as s,ebb as S,gbb as C}from"B:/~BUN/root/_490.js";import{qbb as A}from"B:/~BUN/root/_492.js";import{Ocb as w,Qcb
+      @228658282 eturn;m=!0,u=T.toString()}),await(await S(r(d,{children:r(b.Provider,{value:!0,children:r(w,{value:W,children:t})})}),{stdout:o,patchConsole
+  ebb as ye @230122889 mod=230119859..230146230 span=26371
+    ident count=2
+      @230122896 ort"B:/~BUN/root/_489.js";import{ebb as ye,gbb as nt,mab as me,pab as he}from"B:/~BUN/root/_490.js";import"B:/~BUN/root/_491.js";import"B:/~
+      @230133679 r=s}),{unmount:o,waitUntilExit:a}=await ye(C(be,{session:ee(),children:ge(me,{flexDirection:"column",gap:1,paddingY:1,children:[C(he,{bold:!
+  ebb as m @230653518 mod=230653357..230654779 span=1422
+    ident count=2
+      @230653525 rom"B:/~BUN/root/_240.js";import{ebb as m,gbb as h}from"B:/~BUN/root/_490.js";import{rdb as n,tdb as g}from"B:/~BUN/root/_501.js";import{Gid
+      @230653840 nder:e,unmount:a,waitUntilExit:f}=await m(n(c,{session:l(),children:n(u,{settings:S,onAccept:()=>{if(t=!0,r("approved"),i)e(null);else a()},
+  ebb as D @230682920 mod=230680316..230694313 span=13997
+    ident count=2
+      @230682927 ort"B:/~BUN/root/_489.js";import{ebb as D,gbb as K,mab as s,pab as i}from"B:/~BUN/root/_490.js";import"B:/~BUN/root/_491.js";import"B:/~BUN/
+      @230693448 Promise(async(a)=>{let{unmount:l}=await D(e(N,{session:O(),children:e(T,{filePath:r.filePath,errorDescription:r.message,onExit:()=>{l(),a(),
+  ebb as Pt @233842233 mod=233838802..233869989 span=31187
+    ident count=2
+      @233842240 ort"B:/~BUN/root/_489.js";import{ebb as Pt,gbb as it,mab as T,pab as _}from"B:/~BUN/root/_490.js";import"B:/~BUN/root/_491.js";import"B:/~BU
+      @233866008 add_from_desktop");let{unmount:l}=await Pt(a(Dt,{session:dt(),storageV5:e,children:a(Oe,{servers:s,scope:n,onDone:()=>{l()}})}),{exitOnCtrlC
+  ebb as U @235172982 mod=235171415..235187869 span=16454
+    ident count=2
+      @235172989 UN/root/_489.js";import{abb as N,ebb as U,gbb as se,mab as n,pab as t,xab as L}from"B:/~BUN/root/_490.js";import"B:/~BUN/root/_491.js";impor
+      @235187170 .startsWith("--"))[0],{unmount:h}=await U(e(ce,{onDone:(f,g)=>{h(),c(f,g)},force:d,target:u,storageV5:i?.storageV5}))}};export{ke as install
+
+# fbb as (h8) from _490.js
+  fbb as B @228867811 oot/_448.js";import{fbb as B,gbb as ce,mab as _,pab as w}from"B:/~BUN/root/_490.js";import{rdb as p,
+
+# 246 Us-equivalent
+246 AppState throw @221279172 mod=221259112..221284261 span=25149
+246 n(Eo,{ count=1
+  @221141818 ==Sr||rd[2]!==Tr||rd[3]!==hr||rd[4]!==gr||rd[5]!==wr||rd[6]!==Or||rd[7]!==Ir)oc=n(Eo,{isFocused:hr,isSelected:gr,description:Tr,showScrollDown:Or,showScrollUp:Ir,styled:!1,declareCursor:Sr,onClick:wr,children:yr}),rd[0]=yr,rd[1]=Sr,rd[2]=Tr
+246 in-mod "Eo,{..." count=1 221283331
+  @221283331 let Ws;if(ne[26]!==Po||ne[27]!==Fn)Ws=s(Eo,{...Fn,children:Po}),ne[26]=Po,ne[27]=Fn,ne[28]=Ws;else Ws=ne[28];return Ws}var qs=j(()=>{X();_n();Lo();Gs();zo();br(
+246 in-mod "{...ge(" count=0 
+246 in-mod "vbb as ge" count=1 221260727
+  @221260727 "B:/~BUN/root/_485.js";import{ubb as Eo,vbb as ge,wbb as gt}from"B:/~BUN/root/_491.js";import{Abb as L,zbb as O}from"B:/~BUN/root/_492.js";import{Bbb as At,Cbb 
+246 in-mod "function Eo" count=0 
+246 in-mod "hr===void 0" count=0 
+246 in-mod "===void 0){return" count=1 221283270
+  @221283270 ne[25]=js;else js=ne[25];let Po=js;if(vo===void 0){return Po}let Ws;if(ne[26]!==Po||ne[27]!==Fn)Ws=s(Eo,{...Fn,children:Po}),ne[26]=Po,ne[27]=Fn,ne[28]=Ws;else 

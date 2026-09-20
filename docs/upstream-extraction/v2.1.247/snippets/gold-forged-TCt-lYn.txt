@@ -1,0 +1,2 @@
+function lYn(e){return e.split("\x00").some((t)=>{let n=t.indexOf(`
+`),r=n===-1?t:t.slice(0,n),o=n===-1?"true":t.slice(n+1);return r==="extensions.partialclone"||/^remote\..*\.partialclonefilter$/s.test(r)||/^remote\..*\.promisor$/s.test(r)&&!["false","no","off","0",""].includes(o.toLowerCase())})}

@@ -162,6 +162,30 @@ describe('SettingsSchema', () => {
     })
     expect(result.success).toBe(true)
   })
+
+  // densable 2.1.247: the pin is `union([string, array(string)])` — "any one is
+  // permitted". A string-only schema silently rejects a valid enterprise
+  // managed-settings file.
+  test('accepts forceLoginOrgUUID as a single UUID', () => {
+    const result = SettingsSchema().safeParse({
+      forceLoginOrgUUID: 'org-1111',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  test('accepts forceLoginOrgUUID as an array of UUIDs', () => {
+    const result = SettingsSchema().safeParse({
+      forceLoginOrgUUID: ['org-1111', 'org-2222'],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  test('rejects forceLoginOrgUUID with a non-string entry', () => {
+    const result = SettingsSchema().safeParse({
+      forceLoginOrgUUID: ['org-1111', 42],
+    })
+    expect(result.success).toBe(false)
+  })
 })
 
 // ─── Permissions Schema ─────────────────────────────────────────────────

@@ -1,0 +1,2 @@
+# needle=function Z5( pos=213632413 end=213632821 len=408
+function Z5(e){let{unzipSync:t}=await import("B:/~BUN/root/chunk-8wjwjv8j.js"),r={fileCount:0,totalUncompressedSize:0,compressedSize:e.length,errors:[]},o=t(new Uint8Array(e),{filter:(s)=>{let i=Uwo(s,r);if(!i.isValid)throw new ye(i.error,"MCPB zip entry validation failed");return!0}});return _(`Zip extraction completed: ${r.fileCount} files, ${Math.round(r.totalUncompressedSize/1024)}KB uncompressed`),o}

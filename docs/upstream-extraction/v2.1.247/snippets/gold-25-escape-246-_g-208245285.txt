@@ -1,0 +1,3 @@
+# 246 function _g start=208245285 len=54 sha=1989a4db7bc1a7ca
+
+function _g(e){return e.match(/^(.+):\*$/)?.[1]??null}

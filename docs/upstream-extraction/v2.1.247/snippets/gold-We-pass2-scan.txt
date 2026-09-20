@@ -1,0 +1,142 @@
+# We/Jr pass2
+ZG-BACK 20000 hasImport=false head=we,u]),Ot({"select:previous":()=>{if(rt>0)Fe(rt-1)},"select:next":()=>{if(rt<x.length-1)Fe(rt+1)},"select:accept":()=>{l
+ZG-BACK 80000 hasImport=false head=ot/_601.js";import"B:/~BUN/root/_602.js";import"B:/~BUN/root/_603.js";import"B:/~BUN/root/_604.js";import"B:/~BUN/root/_
+ZG-BACK 200000 hasImport=false head=l),Sk=te(null);An(Sk,!0);let Ck;if(Nn[0]===T)Ck=(HR)=>{Sa.current=HR(Sa.current),GR(Sa.current)},Nn[0]=Ck;else Ck=Nn[0];
+ZG-BACK 500000 hasImport=true head=_475.js";import{Uib as ce,Wib as Ze}from"B:/~BUN/root/_511.js";import{$nb as M,dob as qe}from"B:/~BUN/root/_537.js";impo
+ZG last import{ @236017815
+ZG import as We: []
+READER "}=We()" count=15
+  @210948287 on(co){let v=te(52),{children:ct,initialState:Ce,onThemeSave:we}=co,{storageV5:X}=We(),Ir;if(v[0]!==we||v[1]!==X)Ir=(Cr)=>we?we(Cr):Le("theme",Cr,X),v[0]=we,v[1
+  @235964173 lt:h,setViewState:p,onAddComplete:g,cliMode:f=!1}){let{storageV5:y,credentials:d}=We(),x=xe(!1),[O,B]=S(!1),[L,Z]=S(""),K=async()=>{let q=e.trim();if(!q){u("Ple
+  @235971579 ){let Ho=V(24),{plugin:gn,pluginId:vo,onDone:wo}=ET,{storageV5:ws,credentials:wr}=We(),yb;if(Ho[0]!==wr||Ho[1]!==gn||Ho[2]!==vo||Ho[3]!==ws)yb=async function Wa
+  @235984773 2]=sc,px[3]=gx;else gx=px[3];return gx}function Nr(Vm){let jI=V(3),{storageV5:jm}=We(),fx;if(jI[0]!==Vm||jI[1]!==jm)fx=Dc(Vm,jm).then(Wx).catch(zx),jI[0]=Vm,jI[
+  @235989066 on _r(ZI){let Bx=V(8),{pluginId:Jm,entry:Zm,verb:eg,onShown:tg}=ZI,{storageV5:ng}=We(),Ax;if(Bx[0]!==Zm||Bx[1]!==Jm||Bx[2]!==ng)Ax=$c(Jm,Zm,ng).catch(Qx),Bx[0]=
+  @235995188 archMarketplaceName:s,onInstallComplete:u,onSearchModeChange:m}){let{storageV5:h}=We(),[p,g]=S(i),[f,y]=S(null),d=$e((ae)=>{y(ae),g("plugin-details")},[]),x=$e(
+  @235998459 hModeChange:l,targetMarketplace:r,targetPlugin:s}){let{storageV5:u,credentials:m}=We(),h=ao(e,Ei),{setError:p,setResult:g}=e,f=e.setViewState,[y,d]=S(null),[x,O
+  @236007190 )}),t(Vr,{...dt})]})}function vg(fE){let Wo=V(22),{pluginId:zc}=fE,{storageV5:Gc}=We(),[Un,tS]=S(null),nS,oS;if(Wo[0]!==zc||Wo[1]!==Gc)nS=()=>{tS(null);let iS=!
+READER "}=Ue()" count=15
+  @232098762 anks for reporting!",color:"success"}]}function _Ce(){let _Xt=V(4),{storageV5:Y_}=Ue(),{addNotification:d3}=Et(),Wot=T(!1),qot,Vot;if(_Xt[0]!==d3||_Xt[1]!==Y_)q
+  @232231777 ons:R1,dumpMode:Mu,onDumpToScrollback:Jle,onExit:zT}=wNt,Zle=lt(),{storageV5:eue}=Ue(),tue=Tt(),[vNt,TNt]=L(!1),Nc=vNt||Mu,[oue,D1]=L(!1),[P1,RYe]=L(""),A1=T(0)
+  @232301794 return Date.now()-yf()>=e}function zc(e,t){let o=Ak(),{storageV5:n,credentials:r}=Ue(),[s,a]=L(!1);x(()=>{Npe()},[]),x(()=>{a(!1)},[e,t,o]),vr(()=>{if(N7e(aq))a
+  @232310789 rverName:o,signal:n}=e,r=e.params,{message:s,requestedSchema:a}=r,{credentials:l}=Ue(),{parseRelatedTaskMetadata:u}=(vk(),Nr(wk)).mcpElicitationHandlerModule(),
+  @232357846 RemoteSession:nge,onMessageSelectorClose:rge}=F2t,{storageV5:ige,credentials:sge}=Ue(),age=Xt(),o_=st(),FF=I(v9e),u2=I(T9e),L2t=I(x9e),N2t=I(R9e),Yx=I(D9e),c2=I
+  @232360855 Jx,turn:Q2t,transcript:z2t,setInputValue:cge}=K2t,{storageV5:dge,credentials:mge}=Ue(),k2=Xt(),_2=st(),pge=Go(),LF=z2t.replace,NF=Q2t.guard,C2;if(f9e[0]!==mge||
+  @232362251 ;return w9e}function Sge({turn:e,sessionController:t,onClose:o}){let{storageV5:n}=Ue(),r=Xt(),s=st(),a=lt(),{messages:l}=xk(ko());return i(Ife,{messages:l,onPre
+  @232364306 ==eR)M9e=eR.now(),If[0]=eR,If[1]=M9e;else M9e=If[1];let I9e=T(M9e),{storageV5:BF}=Ue(),F9e;if(If[2]===H)F9e=[],If[2]=F9e;else F9e=If[2];x(G9e,F9e);let L9e;if(If
+READER "}=Oe()" count=4
+  @211379408 ,{action:"app:exit",run:s}]:[],[r,n,s]),exitState:o}}function Ne(e,t){let{exit:r}=Oe(),[n,s]=v({pending:!1,keyName:null}),o=m(()=>t??r,[t,r]),i=De(),a=se("app:i
+  @223539914 ,onError:t,enabled:o,focusMode:s,mode:p="hold"}){let{host:n}=pt(),{credentials:h}=Oe(),v=ft(),I=ro(),D=Jr(),L={onTranscript:e,onError:t,enabled:o,focusMode:s,mo
+  @223552003 Updating:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((_)=>_.autoUpdaterResult),h=Ie(),[v,I]=F({}),[D,L]=F(!1),w=gt(n?.vers
+  @223561260 Updating:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((i)=>i.autoUpdaterResult),h=Ie(),[v,I]=F({current:{ISSUES_EXPLAINER:"
+READER "}=Ce()" count=4
+  @231701562 yReason:m,onBeforePurchase:f,onPurchaseSuccess:d}){let{storageV5:g,credentials:c}=Ce(),[u,_]=b("USD"),[w,k]=b([]),[N,C]=b(),[h,D]=b(null);async function x(l=!0)
+  @231717390 ,stripeProductId:Tt,expiryMonths:Ga,onConfirm:ei,onCancel:Ee}=am,{credentials:Mt}=Ce(),[im,Ll]=b(!1),Qe=ql?ql.local_credit_minor_units:ke,Ze=Qe-ke,Ul;if(E[0]!==
+  @231736933 n Js(Mm){let Hi=j(11),{purchaseId:Yn,onSuccess:Am,onError:Em}=Mm,{credentials:Kn}=Ce(),Vu=T(0),Ki=ge(Am),Hn=ge(Em),Wn=oa(),qu;if(Hi[0]!==Wn||Hi[1]!==Kn||Hi[2]!=
+  @231740942 n",{})}function ol(Zc){let Be=j(20),{extraUsage:ao,onDone:Tn}=Zc,{credentials:fa}=Ce(),[Gc,ed]=b(!1),Wo=T(!1),Is;if(Be[0]===v)Is=[],Be[0]=Is;else Is=Be[0];z(tl,
+READER "}=Sr()" count=3
+  @223788911 );ne(()=>li("peek",e.state),[]);let g=Date.parse(e.state.updatedAt),{storageV5:b}=Sr(),[y,k]=Ee(()=>Date.now()),C=it(e.state.state)===null?qe(e.state.needs??"")
+  @223828336 tifications:n,notified:r}}function py(e,t){let o=uy(),{storageV5:n,credentials:r}=Sr(),i=mt(new Map);ne(()=>{let{next:l,notifications:d,notified:m}=eC(i.current
+  @223828862 st:f,storageV5:p}){let u=Rn(),{stdin:S,isRawModeSupported:g}=by(),{credentials:b}=Sr(),y=Yi.CLAUDE_CODE_FLEETVIEW_SIMPLE||yn("tengu_fleetview_simple",!1),k=!y||
+READER "}=j()" count=2
+  @223184642  ge}m();function ee({serverName:r,isPluginServer:c=!1,onDone:t}){let{storageV5:e}=j(),o=g(!1),l=g(Date.now());async function p(a){if(o.current)return;if(Date.no
+  @223185887 ();m();function ce({serverNames:r,pluginServerNames:c,onDone:t}){let{storageV5:e}=j(),o=g(!1),l=g(Date.now());async function p(i){if(o.current)return;if(Date.no
+READER "}=Te()" count=12
+  @210375176 d ${e} is not in the policy allowlist`}}function NZ(e){let{sessionAllowedHosts:t}=Te(),n=vZ(e);if(t.has(n))return;t.add(n),Su()}function Zt(e){let t;try{t=Wr(e)
+  @210413808 tagingDirGitignoreFired:!1}}function Gne(e,t){let{runtimeAllowWriteDirectories:n}=Te();if(n.get(t)===e)return;n.set(t,e),Su()}function PZ(){for(let e of Te().ba
+  @210414094 nted bare-repo file: ${e}`)}catch{}}}function LZ(){let{symlinkedDenyScrubPaths:e}=Te(),t=[],n;for(let r=0;r<e.length;r++){let{literal:s,resolved:i,hopDirectorie
+  @210417988 nction VZ(){let e=Re.getConfig();if(!e)return;let{denyLiteralSymlinkCandidates:t}=Te(),n=new Map;for(let i of t){if(n.has(i))continue;let a;try{a=Wr(i)}catch{co
+  @210419122 ors:["Windows sandbox is not enabled"],warnings:[]};let{checkDependenciesProbe:e}=Te(),t=e();if(t.errors.includes(_N))e.cache.clear?.();return t}async function 
+  @210427310 omise){La("sandbox_exec","sandbox_exec_not_initialized");let{initFailureReason:t}=Te(),n=t?`: ${t}`:"";if(ch()||or()&&so())throw new Km(`Sandbox is required but
+  @235790599 le:Gf,onComplete:Hf,onCancel:Kf,isStandaloneCommand:LS}=HT,Yf=Fe(),{storageV5:zf}=Te(),NS;if(zi[0]!==Yf.project.cwd||zi[1]!==zf)NS=()=>il(Yf.project.cwd,zf).the
+  @235799518 sHidden:i,onIsSearchModeChange:l,contentHeight:m}){let{storageV5:c,credentials:u}=Te(),g=Fe(),{headerFocused:p,focusHeader:S}=ho(),h=Ft(),[,y]=kn(),f=Bc(),[d,M]
+BODY "return{storageV5:" count=3
+  @210986828 o}:${t.size}:${t.mtimeNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsSto
+  @214121517 ,dir:i}];for(let l=1;l<=s.length;l++)a.push({namespace:"userConfigDir",dir:i,relPath:s.slice(0,l)});return{storageV5:n,chain:a,pipelineFolder:i9(t,o)}}function rDe(e){let t=e.at(-1);if(t===void 0)throw Error("empty sync-owned scope chain");return t}function Xw
+  @215691410 ngth>0)Fj({type:"state",patch:n})}function nts(e){m7().pendingStructuredResult=e}function rts(e={}){return{storageV5:e.storageV5,credentials:e.credentials,prevState:"",prevStateSince:Date.now(),accumulatedOutputs:{},lastClassifyAt:0,capturedIntent:"",inFlight:
+BODY "return{storageV5:t" count=0
+BODY "return{storageV5:n" count=1
+  @214121517 ,dir:i}];for(let l=1;l<=s.length;l++)a.push({namespace:"userConfigDir",dir:i,relPath:s.slice(0,l)});return{storageV5:n,chain:a,pipelineFolder:i9(t,o)}}function rDe(e){let t=e.at(-1);if(t===void 0)throw Error("empty sync-owned scope chain");return t}function Xw
+BODY "return{storageV5:e" count=2
+  @210986828 o}:${t.size}:${t.mtimeNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsSto
+  @215691410 ngth>0)Fj({type:"state",patch:n})}function nts(e){m7().pendingStructuredResult=e}function rts(e={}){return{storageV5:e.storageV5,credentials:e.credentials,prevState:"",prevStateSince:Date.now(),accumulatedOutputs:{},lastClassifyAt:0,capturedIntent:"",inFlight:
+BODY "storageV5:t.of" count=0
+BODY "storageV5:n.of" count=0
+BODY "storageV5:e.of" count=0
+BODY "credentials:t.of" count=0
+BODY "credentials:n.of" count=0
+BODY "credentials:e.of" count=0
+BODY ".of(e).storageV5" count=0
+BODY "storageV5:this." count=7
+  @208688088 eturn await yA(e)}catch{return[]}}currentBatch(){return F()&&this.storageV5!==void 0?{kind:"stream",storageV5:this.storageV5,stream:this.currentBatchStream()}:{kind:"file",filePath:this.getCurrentBatchFilePath()}}async loadEventsFromCurrentBatch(){return this.
+  @208697785 )??i:i,a=By(s,this.endpoint),u=!a.error,l=u?{...n,...a.headers}:n,d=py({url:this.endpoint,payload:e,storageV5:this.storageV5});try{let f=await U.post(this.endpoint,d?.body??e,{timeout:this.timeout,headers:d?{...l,...d.headers}:l});this.logSuccess(e.events.leng
+  @219675297 }try{await r({id:qe(),project:{originalCwd:mn(),projectRoot:Vo()}},t,{signal:AbortSignal.timeout(s),storageV5:this.handles.storageV5,credentials:this.handles.credentials})}catch{}N7e();try{await L7e()}catch{}try{Kao()}catch{}Kni();let a=WKe();if(a)D("tengu_cac
+  @230384856 ppendSystemPrompt:D,excludeDynamicSections:N,cacheBreakerPhrase:Ce.cacheBreakerPhrase,mcpClients:Pe,storageV5:this.config.storageV5,credentials:this.config.credentials};LS.applyPendingInvalidations();let{systemPrompt:qe,userContext:Ze,systemContext:ct}=await F
+  @230385986 essionHooks:this.sessionHooks,memorySelector:this.memorySelector,isolationLatch:this.isolationLatch,storageV5:this.config.storageV5,credentials:this.config.credentials},ut=Wr(vt,{phase:"input",messages:this.mutableMessages,mainLoopModel:ve,appState:Ce,abortCon
+nPe last import{ @213634262 jrImportHits=212819180,212819301,212819368,212819543,212819687,212819754,212819853,212820025,212820081,212820136,212820203,212820259,212820313,212820504,212820626,212820681,212820737,212820979,212821035,212821232,212821893,212824593,212824670,212824725,212825035,212825100,212825154,212825210,212825922,212825978,212826067,212826155,212826222,212826300,212826367,212826495,212826583,212838305,212838476,212838554,212838621,212838708,212838775,212839058,212839103,212839159,212839369,212839576,212839621,212839688,212839753,212839828,212839895,212839949,212840099,212840393,212840447,212840501,212840567,212840689,212841352,212841579,212841665,212842119,212842186,212842445,212842544,212843005,212843157,212843429,212843830,212843904,212844056,212844110,212844249
+  Jr-import @212843429 ["xRc as Jr,"] import{APc as oBn,BPc as GHo,DPc as Jrs,EPc as pG,FPc as xwt,GPc as nzo,IPc as HSt,JPc as $ln,LPc as fPe,OPc as Qfe,QPc as fFn,SPc as qBe,TPc as mFn,WPc as ewt,YPc as h2,ZPc as uNn,_Pc as Run,ePc as U
+  Jr-import @212843830 ["xRc as Jr,"] import{AQc as Y1,BQc as Zy,CQc as oD,zQc as gM}from"B:/~BUN/root/_717.js";import{DQc as LIt,FQc as jtr,GQc as ztr,HQc as zIt,IQc as Htr,JQc as Wtr,KQc as Ttr,LQc as qtr,MQc as d9,OQc as Lp,QQc as $_}f
+  Jr-import @212843904 ["xRc as Jr,"] import{DQc as LIt,FQc as jtr,GQc as ztr,HQc as zIt,IQc as Htr,JQc as Wtr,KQc as Ttr,LQc as qtr,MQc as d9,OQc as Lp,QQc as $_}from"B:/~BUN/root/_718.js";import{SQc as Pr,TQc as sh}from"B:/~BUN/root/_71
+  Jr-import @212844056 ["xRc as Jr,"] import{SQc as Pr,TQc as sh}from"B:/~BUN/root/_719.js";import{$Qc as jrr,UQc as av,VQc as Wye,XQc as SUr,ZQc as VWr,_Qc as Lct,eRc as Ea,fRc as hu,gRc as _S,hRc as zp}from"B:/~BUN/root/_720.js";import{
+  Jr-import @212844110 ["xRc as Jr,"] import{$Qc as jrr,UQc as av,VQc as Wye,XQc as SUr,ZQc as VWr,_Qc as Lct,eRc as Ea,fRc as hu,gRc as _S,hRc as zp}from"B:/~BUN/root/_720.js";import{iRc as HM,jRc as sKt,xRc as Jr,yRc as e3}from"B:/~BUN/
+  Jr-import @212844249 ["xRc as Jr,"] import{iRc as HM,jRc as sKt,xRc as Jr,yRc as e3}from"B:/~BUN/root/_721.js";import{PRc as JZe,URc as GM,XRc as QZe}from"B:/~BUN/root/_723.js";import{YRc as SA,ZRc as Pxt,_Rc as iHe,aSc as V2,cSc as aHe
+as Jr near nPe-mod count=4 allNear=212309044,212826934,212843461,212844280
+  @212309044  as Brb,ln as Crb,mn as Drb,hn as Erb,_n as Frb,Sn as Grb,Tn as Hrb,bn as Irb,ge as Jrb,In as Krb,En as Lrb,vn as Mrb,fe as Nrb,An as Orb,yn as Prb,Rn as Qrb,xn
+  @212826934 gWb as SMt,hWb as qGe,iWb as wMt,kWb as gmn,mWb as Vce,nWb as Nct,pWb as Cdt,qWb as Jrr,rWb as Qrr,sWb as PL,tWb as Ihe,uWb as hmn,vWb as yX,wWb as l9n,xWb as z
+  @212843461 ,dPc as _y,zOc as Px}from"B:/~BUN/root/_715.js";import{APc as oBn,BPc as GHo,DPc as Jrs,EPc as pG,FPc as xwt,GPc as nzo,IPc as HSt,JPc as $ln,LPc as fPe,OPc as 
+  @212844280 u,gRc as _S,hRc as zp}from"B:/~BUN/root/_720.js";import{iRc as HM,jRc as sKt,xRc as Jr,yRc as e3}from"B:/~BUN/root/_721.js";import{PRc as JZe,URc as GM,XRc as Q
+SEC "function getSecureStorage" count=0
+SEC "getSecureStorage" count=2
+  @163691299 SecureStorageForTestingcredManSelectionsgetSecureStorageisWindowsCredManBackendEnabledprimeWindowsCredManBackendEnabledB:/~BUN/root/_721.jsB:/~BUN/root/_722.jsB:/~BUN/root/_723.jsB
+  @228315639 eForTesting,b as credManSelections,g as getSecureStorage,c as isWindowsCredManBackendEnabled,d as primeWindowsCredManBackendEnabled}; .// @bun @bytecode // Claude Code is a Beta pr
+SEC ".mutate=async" count=0
+SEC "mutate(e,t){" count=1
+  @208358131 syncStrict(e){return B(e).readStrict()},mutate(e,t){return w(j,e,t)},update(e,t){return B(t).write(e)},delete(e){return B(e).remove()}}});function K(){let e=globalThis.Bun?.secrets
+SEC "async mutate(" count=0
+SEC "readAsync(e){" count=1
+  @208358053 h{return null}},invalidateCache(){ee()},readAsync(e){return B(e).read()},readAsyncStrict(e){return B(e).readStrict()},mutate(e,t){return w(j,e,t)},update(e,t){return B(t).write(e)}
+SEC "async readAsync(" count=2
+  @208354112 ==void 0)return n;return t.read(a)||{}},async readAsync(a){let n=await e.readAsync();if(n!==null&&n!==void 0)return n;return await t.readAsync(a)||{}},async readAsyncStrict(a){let 
+  @208361078 e.cache.cachedAt!==0?e.cache.data:te()},async readAsync(){let e=A();if(!x())return null;let t=e.cache;if(Date.now()-t.cachedAt<Z)return t.data;if(e.readInFlight)return e.readInFlig
+SEC "pluginSecrets" count=8
+  @201584908 Failed to load user config for ....=..pluginSecrets...6...L..Failed to save sensitive config to secure storage for ...Server secrets save warning: ..."...Q`l.saveMcpServe
+  @201587253 . .deletePluginOptions: failed to clear pluginSecrets for ...N. from keychain..2...deletePluginOptions: storage lock unavailable for ...& .Plugin option ".i...J." isn
+  @213634806 rvers?.[t],o=(await Jr().readAsync(n))?.pluginSecrets?.[eln(e,t)];if(!r&&!o)return null;return _(`Loaded user config for ${e}/${t} (settings + secureStorage)`),{...r,...o}}catch(r)
+  @213635267 ),d=0,p=await Jr().mutate((g)=>{let h=g.pluginSecrets?.[u],y=h?lT(h,(b,S)=>c.has(S)):void 0;if(d=y&&h?Object.keys(h).length-Object.keys(y).length:0,Object.keys(a).length===0&&d===0
+WM "class Xt{" count=5
+  @206984728 class Xt{#e=!1;#t=!1;#n=Vi;#o=b();selectorGate(){return this.#e}selectorGateEverOn(){return this.#t}replaceSelectorGate(e){this.#e=e,this.#t||=e}inheritSelectorGateEverOn(){this.#t
+  @222269375 class Xt{knownMarketplaces=void 0;marketplacePluginTips=void 0;sessionCountInFlight=void 0;desktopInstalled=void 0;ghAuthStatus=void 0;failedTipIds=new Set;getKnownMarketplaces(e){
+  @227784027 class Xt{_init=()=>{};_ep={};_middlewareFn=()=>[];_commandName="";_clientName="";_additionalContext={};_smithyContext={};_inputFilterSensitiveLog=void 0;_outputFilterSensitiveLog=v
+  @237916589 class Xt{compose(e){return new Oi(this,e)}static createSsl(e,t,r,i){var s;if(ln(e,"Root certificate"),ln(t,"Private key"),ln(r,"Certificate chain"),t&&!r)throw Error("Private key m
+  @238406898 class Xt{_sharedRegistry=new Map;_perCollectorRegistry=new Map;static create(){return new Xt}getStorages(e){let t=[];for(let i of this._sharedRegistry.values())t=t.concat(i);let r=
+WM "storageV5=void 0" count=6
+  @208729161 storageV5=void 0;replaceSessionCache(e){let t=this.sessionCache?.compliance_taints??[],n=e?.compliance_taints??[];if(this.sessionCache=e,Ay(n),qk(e?.monitoring_notice??null),t.leng
+  @208729448 storageV5=void 0}function uB(){return xn.sessionCache}function tT(){return iB(Ce(),sB)}function Js(){return nT()===void 0}function nT(e={}){if(A()!=="firstParty")return"third_party
+  @209143382 storageV5=void 0;adoptCredentials(e){if(e===void 0)return;if(this.credentials!==void 0&&this.credentials!==e){p("org-memory-credential: a credentials store was already handed in; t
+  @209156798 storageV5=void 0;credentials=void 0;discoverMemoized=Ce(()=>this.runDiscovery(),Vt,()=>!(this.decidingRun&&y().state==="undecided"));constructor(e=ve){this.identityWaitDelay=e}setI
+  @209157589 storageV5=void 0,this.credentials=void 0,this.clearCaches()}adoptHandIns(e,t){if(e!==void 0)this.storageV5=e;if(t===void 0)return;if(this.credentials!==void 0&&this.credentials!==t
+WM "this.storageV5" count=12
+  @207068708 this.storageV5=Yn(e.storageV5),e.launchIdentity!==void 0){this.minLevel=e.launchIdentity.minLevel,this.filter=e.launchIdentity.filter,this.toStderr=e.launchIdentity.toStderr,this.f
+  @207069736 this.storageV5!==void 0&&this.deps.syncExitDrain===!1)}launchIdentity(){return{minLevel:this.minLevel,filter:this.filter,toStderr:this.toStderr,filePath:this.filePath,debugFromLaun
+  @207070558 this.storageV5!==void 0}log(e,{level:t}={level:"debug"}){if(me[t]<me[this.minLevel])return;if(!this.shouldLog(e))return;let n=de(e.trim());if(n.includes(` `))n=We(n);let i=`${new D
+  @207070893 this.storageV5!==void 0){if(n={sessionId:this.deps.sessionId(),fromBackend:J.getStore()===!0},n.fromBackend)this.backendLinesLogged++}if(t.write({origin:n,content:e}),this.exiting)
+  @207071175 this.storageV5!==void 0&&this.successor)return this.successor.flush();for(let t=0;this.backendLinesLogged!==e&&t<3;t++)e=this.backendLinesLogged,this.writer?.flush(),await this.pen
+WM "credentials=void 0" count=5
+  @209143363 credentials=void 0;storageV5=void 0;adoptCredentials(e){if(e===void 0)return;if(this.credentials!==void 0&&this.credentials!==e){p("org-memory-credential: a credentials store was a
+  @209156815 credentials=void 0;discoverMemoized=Ce(()=>this.runDiscovery(),Vt,()=>!(this.decidingRun&&y().state==="undecided"));constructor(e=ve){this.identityWaitDelay=e}setIdentityWaitDelay(
+  @209157611 credentials=void 0,this.clearCaches()}adoptHandIns(e,t){if(e!==void 0)this.storageV5=e;if(t===void 0)return;if(this.credentials!==void 0&&this.credentials!==t){u("org-memory-discov
+  @211727159 credentials=void 0;reset(e){if(this.watcher=null,this.storeSkillConfigs=e?.storeSkillConfigs??null,this.storageV5=e?.storageV5,this.credentials=e?.credentials,this.resyncTimer)clea
+  @238297383 credentials=void 0;var Hs=Ri();Object.defineProperty(K,"CallCredentials",{enumerable:!0,get:function(){return Hs.CallCredentials}});var mO=Sn();Object.defineProperty(K,"Channel",{e
+WM "this.credentials" count=12
+  @206414244 this.credentials=new $r(this._client)}create(e,t){let{betas:r,...s}=e;return this._client.post("/v1/vaults?beta=true",{body:s,...t,headers:l([{"anthropic-beta":[...r??[],"managed-a
+  @206433862 this.credentials,...t?{credentials:void 0,config:void 0,profile:void 0}:{},...e,__auth:r?void 0:this._authState,__baseURLIsExplicit:"baseURL"in e?!0:this._baseURLIsExplicit};return
+  @208478824 this.credentials!==void 0&&this.credentials!==e){p("GrowthBook: a credentials store was already handed in; the later one is ignored");return}this.credentials=e}setStorageBackend(e)
+  @208478851 this.credentials!==e){p("GrowthBook: a credentials store was already handed in; the later one is ignored");return}this.credentials=e}setStorageBackend(e){if(this.storageV5!==void 0
+  @208478965 this.credentials=e}setStorageBackend(e){if(this.storageV5!==void 0&&this.storageV5!==e){p("GrowthBook: a storage backend was already handed in; the later one is ignored");return}th
+WM "new WeakMap" count=12
+WM "new ye(()=>" count=1
+  @222271275 new ye(()=>new Xt);function le(e){if(he()&&e?.storageV5!==void 0)return h.of(e.session.host).countSessionsOnce(e.storageV5);return ne(e?.storageV5)}async function Qt(e,t,n,o,s=w){i
+X/ce @210986780 turn v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")});
+export{X as X7b,ce as Y7b,G as Z7b,Q as _7b};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree 

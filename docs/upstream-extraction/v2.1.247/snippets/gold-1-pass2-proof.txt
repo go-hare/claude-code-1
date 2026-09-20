@@ -1,0 +1,81 @@
+# gold-1-pass2-proof — #1 send-feedback NEW ANGLES only
+
+STATUS: UNKNOWN
+Pass1 contract unchanged: 247=246 leftover bodies (ee/Oe/Le/ot/Ps + schema describe).
+Pass2: registry / isEnabled / alwaysLoad / feature() / getAllBaseTools slot
+are also 246 leftovers. No 247-unique function. Do not invent.
+
+## Angle 1 — tool registry / gates
+
+isEnabled wrapper:
+  247 function aLt(){return Ffs()!=="off"&&Ufs()}
+  246 function gDt(){return mls()!=="off"&&gls()}
+  NORM-SAME sha=d9dd1eaad9f5d0ec
+
+settings default:
+  247 function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}
+  246 function mls(){return cut("feedbackDrafts")[0]??"notify"}
+  NORM-SAME sha=5a68228bb4130e5f
+  off disables the tool; default is notify. Same as 246.
+
+session gate Ufs/gls NORM-SAME sha=c5f49dbf7e2c3d82 rawLen=338/338:
+  DISABLE_FEEDBACK_COMMAND || DISABLE_BUG_COMMAND → false
+  Ns() → false
+  vgr/Rpr → false
+  c7/UQ → false
+  !allow_product_feedback → false
+  provider !== "firstParty" → false
+  CLAUDE_CODE_SEND_FEEDBACK === false → false
+  else we("tengu_juniper_relay", false)  (both true and unset)
+
+tool object keys (Gt/Ht): name, maxResultSizeChars, searchHint,
+  description, prompt, inputSchema, outputSchema, isReadOnly,
+  isConcurrencySafe, isEnabled, checkPermissions, call,
+  mapToolResultToToolResultBlockParam, renderToolUseMessage
+  alwaysLoad 246=0 247=0
+  shouldDefer 246=0 247=0
+  feature() in object 246=0 247=0
+  20k after var xgr/Dpr="SendFeedback": alwaysLoad=0 feature(=0 FEATURE_=0
+
+FEATURE_SEND_FEEDBACK 246=0 247=0
+SEND_FEEDBACK 246=3 247=3 (CLAUDE_CODE_SEND_FEEDBACK only; pass1 already had 3=3)
+alwaysLoad:!0 246=2 247=2 — other tools, not SendFeedback
+
+getAllBaseTools: 247 function IE() / 246 function mE()
+  NORM-SAME sha=253745c642660929
+  slot unconditional: `J7,$gr,oee` / `A7,Upr,D7`
+  no ternary, no ...cond?[$gr], no feature() wrap
+
+name list E6o/xGo: same neighbors
+  "Brief","PushNotification","SendFeedback","SendFile","SendUserFile"
+  quoted "SendFeedback" count 2=2; non-assign window raw sha equal
+  06997a65e25638c7
+
+## Angle 2 — 247-only call site that wires leftover body?
+
+One list-mid push of $gr / Upr. Same slot in IE/mE. 246 has the same call.
+Wiring-only leftover. No extra 247 caller.
+
+## Angle 3 — still identical
+
+Stay UNKNOWN. No new function.
+
+## Leftover pins (constraint; not SendFeedback evidence)
+
+Did not invent empty qb / auto qF / blu===Slu.
+
+## Invent-ban
+
+No unique 247 body → do not port SendFeedback tool, /feedback draft-review
+UI, or feedbackDrafts product. Local /feedback stays
+src/commands/feedback + src/components/Feedback.tsx (older dialog).
+Local tools.ts / builtin-tools / CORE_TOOLS have no SendFeedback.
+
+## Gold
+
+pass1: gold-1-verdict.txt gold-1-sameness.txt gold-1-compare.txt
+pass2: gold-1-pass2-verdict.txt gold-1-pass2b-verdict.txt
+  gold-1-pass2-Ufs-247.txt gold-1-pass2-gls-246.txt
+  gold-1-pass2-toolsfn-247.txt gold-1-pass2-toolsfn-246.txt
+  gold-1-pass2-toolobj-247.txt gold-1-pass2-toolobj-246.txt
+  gold-1-pass2-slot-247.txt gold-1-pass2-slot-246.txt

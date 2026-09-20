@@ -1,0 +1,69 @@
+# We() official 2.1.247 peel. Invent-ban. Unique via Zg/nPe callers, not name We.
+
+## Uniqueness
+
+`{storageV5:p,credentials:g}=We()` count=2
+  @236022838  function Zg (ManageMarketplaces)  gold-gza-ui-Zr-8k.txt
+  @236092688  PluginSettings sibling
+`await Zr(ne.name,void 0,p,g)` count=1 @236024814
+`function We(){` hits=7 — NONE return {storageV5,credentials}
+  (opus model / fiber / nativeMessaging / runner / todos / usage-data / gh secret)
+We in Zg is an import alias, not a local function We.
+
+## Import → export → body
+
+Zg module:  import{kdb as We,ldb as On}from"B:/~BUN/root/_499.js"  @235958927
+REPL:       import{kdb as Ue,ldb as mo}from"B:/~BUN/root/_499.js"  @232053097
+            j_e: let{storageV5:d,credentials:g}=Ue()  @232452760
+
+_499 export @210899810 UNIQUE
+  export{z as jdb,b as kdb,k as ldb,w as mdb,B as ndb}
+
+function b(){return i(e)}  @210899679 len=25  UNIQUE count=1
+  i = gFb from _571 (React useContext)
+  e = createContext(c)  c=Object.freeze({})
+  gold-We-b-210899679.txt
+
+function z(j) @210899390 len=289 UNIQUE
+  {storageV5:n,credentials:s,children:S}=j
+  value = n===void 0&&s===void 0 ? c : {storageV5:n,credentials:s}
+  return a(e.Provider,{value:d,children:S})
+  gold-We-z-provider.txt
+
+## What We() is / is not
+
+LOCKED = React context reader of {storageV5, credentials}.
+NOT session.host WeakMaps. Body is `return i(e)` only.
+session.host WeakMaps exist elsewhere (Jr plaintext cache Je.of(H().host);
+CredMan gate se()=ot.of(H().host); tips h.of(e.session.host)) — not We.
+
+Provider mount (who renders z/jdb with storageV5+credentials): UNKNOWN
+  jdb imported as LR @210988511 and Ar @223160546
+  no unique `t(LR,{storageV5` / `Ar,{storageV5` hit
+
+## Local pin ≡ official We()?  NO
+
+Official We() reads React context filled by Provider z.
+Local getPinnedStorageV5() reads module lastPinned from pinStorageV5.
+Local getPinnedCredentials() reads module lastCredentials from pinCredentialsStore.
+Official SEA has zero strings getPinnedStorageV5 / getPinnedCredentials / pinCredentialsStore.
+
+Official CLI pin (not We):
+  pinStorageV5:Z; p=Z(n)
+  if(A()&&p!==void 0){ credentialsStoreFor:m; N=m(p); ... }
+  k({storageV5:p,credentials:m(p)})  @206275077
+  m({storageV5:p,credentials:N})     @206276235
+  A() is hover-rest gate (local isHoverRestOn)
+
+Official constructor pair (not We; takes a handle):
+  function X(e,t=S){return v()&&e!==void 0?G(t):void 0}  @210986760
+  function ce(e){return{storageV5:e,credentials:X(e)}}    @210986813
+  function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}
+  export{X as X7b,ce as Y7b,G as Z7b}
+  ≡ local credentialsStoreFor / sessionServicesFor / tryCreateCredentialsStore
+  gold-We-X-ce.txt
+
+Local ManageMarketplaces: getPinnedStorageV5() only; no credentials.
+Official Zg: We() → p+g; Zr(name, void 0, p, g).
+Local gza 4th _credentials unused.
+Local deletePluginOptions sync, no storage/credentials.

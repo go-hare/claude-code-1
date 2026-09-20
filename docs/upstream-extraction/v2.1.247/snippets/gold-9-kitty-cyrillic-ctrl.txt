@@ -1,0 +1,18 @@
+# densable 2.1.247 #9 — locked SEA Ea CSI u (247 vs 246)
+
+## yh 247 (offset 211028900)
+yh=/^\x1b\[(\d+)(?::(\d*)(?::(\d+))?)?(?:;(\d+))?u/
+
+## Ea CSI u 247
+s=parseInt(l[1],10)           // primary unicode-key-code
+u=l[4]?parseInt(l[4],10):1    // mods
+m=l[3]?parseInt(l[3],10):void 0  // base-layout-key
+h=f.ctrl&&s>127&&m!==void 0?m:s
+p=Ub(f,h)  // traditionalCtrlAliasName
+name=p??kb(h)
+
+## Ea CSI u 246
+s=parseInt(l[1],10); u=l[2]?parseInt(l[2],10):1
+name=kb(f,s)  // no base-layout remap
+
+Ctrl + non-ASCII primary (Cyrillic) uses kitty base-layout-key for naming.

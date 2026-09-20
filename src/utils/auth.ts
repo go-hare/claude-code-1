@@ -83,6 +83,7 @@ import {
   isRunningOnHomespace,
 } from './envUtils.js'
 import { errorMessage } from './errors.js'
+import { normalizeForceLoginOrgUuids } from './forceLoginOrg.js'
 import { decodeJwtExpiry } from './jwtExpiry.js'
 import { execSyncWithDefaults_DEPRECATED } from './execFileNoThrow.js'
 import * as lockfile from './lockfile.js'
@@ -101,6 +102,8 @@ import {
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
+  getAdminManagedPolicyUnreadableError,
+  formatPolicyUnreadableFailClose,
 } from './settings/settings.js'
 import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
@@ -128,6 +131,75 @@ function isManagedOAuthContext(): boolean {
   return isRemote || process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
 }
 
+/**
+ * Whether a non-Anthropic provider is configured, using the same precedence as
+ * `getAPIProvider()`: the cloud `CLAUDE_CODE_USE_*` flags outrank `modelType`,
+ * an explicit third-party `modelType` pins, and the OpenAI-style flags rank
+ * *below* `modelType === 'anthropic'`.
+ *
+ * That last rule is the load-bearing one. `/login` writes
+ * `CLAUDE_CODE_USE_OPENAI` / `OPENAI_BASE_URL` into `settings.env`, which
+ * `applyConfigEnvironmentVariables()` merges into `process.env`, and a later
+ * Anthropic login only flips `modelType` — so treating that residue as
+ * third-party would disable Anthropic auth for someone who is logged into
+ * Anthropic.
+ */
+export function isThirdPartyProviderConfigured(
+  settings: { modelType?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  let useBedrock = isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK)
+  let useVertex = isEnvTruthy(env.CLAUDE_CODE_USE_VERTEX)
+  let useFoundry = isEnvTruthy(env.CLAUDE_CODE_USE_FOUNDRY)
+  let useOpenAI = isEnvTruthy(env.CLAUDE_CODE_USE_OPENAI)
+  let useGemini = isEnvTruthy(env.CLAUDE_CODE_USE_GEMINI)
+  let useGrok = isEnvTruthy(env.CLAUDE_CODE_USE_GROK)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseVertexEnvEnabled,
+      isUseFoundryEnvEnabled,
+      isUseOpenAIEnvEnabled,
+      isUseGeminiEnvEnabled,
+      isUseGrokEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled(env)
+    useVertex = isUseVertexEnvEnabled(env)
+    useFoundry = isUseFoundryEnvEnabled(env)
+    useOpenAI = isUseOpenAIEnvEnabled(env)
+    useGemini = isUseGeminiEnvEnabled(env)
+    useGrok = isUseGrokEnvEnabled(env)
+  } catch {
+    // keep raw env fallback
+  }
+
+  const pinnedToThirdPartyModel =
+    settings.modelType === 'openai' ||
+    settings.modelType === 'gemini' ||
+    settings.modelType === 'grok'
+  // gemini and grok default their base URL, so `CLAUDE_CODE_USE_*` alone is a
+  // complete config — `*_BASE_URL` cannot be the only signal, or a working 3P
+  // user is routed into Anthropic OAuth and the onboarding preflight, which
+  // exits on failure.
+  const thirdPartyEnv =
+    useOpenAI ||
+    useGemini ||
+    useGrok ||
+    !!env.OPENAI_BASE_URL ||
+    !!env.GEMINI_BASE_URL ||
+    !!env.GROK_BASE_URL
+
+  return (
+    useBedrock ||
+    useVertex ||
+    useFoundry ||
+    pinnedToThirdPartyModel ||
+    (settings.modelType !== 'anthropic' && thirdPartyEnv)
+  )
+}
+
 /** Whether we are supporting direct 1P auth. */
 // this code is closely related to getAuthTokenSource
 export function isAnthropicAuthEnabled(): boolean {
@@ -146,32 +218,10 @@ export function isAnthropicAuthEnabled(): boolean {
   }
 
   const settings = getSettings_DEPRECATED() || {}
-  // Official USE_* densables for 3P provider detection.
-  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
-  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
-  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
-  try {
-    const {
-      isUseBedrockEnvEnabled,
-      isUseVertexEnvEnabled,
-      isUseFoundryEnvEnabled,
-    } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
-    useBedrock = isUseBedrockEnvEnabled()
-    useVertex = isUseVertexEnvEnabled()
-    useFoundry = isUseFoundryEnvEnabled()
-  } catch {
-    // keep raw env fallback
-  }
-  const is3P =
-    useBedrock ||
-    useVertex ||
-    useFoundry ||
-    settings.modelType === 'openai' ||
-    settings.modelType === 'gemini' ||
-    !!process.env.OPENAI_BASE_URL ||
-    !!process.env.GEMINI_BASE_URL
+  const is3P = isThirdPartyProviderConfigured({
+    modelType:
+      typeof settings.modelType === 'string' ? settings.modelType : undefined,
+  })
   const apiKeyHelper = settings.apiKeyHelper
   // Official API_KEY_FILE_DESCRIPTOR densable.
   let apiKeyFileDescriptor: string | null =
@@ -2617,6 +2667,27 @@ export type OrgValidationResult =
   | { valid: false; message: string }
 
 /**
+ * densable J$'s `q$` — an Anthropic-issued credential that is NOT first-party
+ * OAuth is configured, so it can never satisfy an org pin.
+ *
+ * Upstream also ORs in `getAPIProvider() === 'firstParty' && !tt() && !tn()`.
+ * `tt` is a gateway-state predicate we have not identified in the 2.1.247
+ * binary, so that clause is left out rather than guessed: this function only
+ * gates a fail-closed startup rejection, and under-matching merely lets a
+ * session through that upstream would stop, while over-matching would lock a
+ * working install out. The four credentials below are exactly the ones the
+ * rejection message names.
+ */
+function hasNonOAuthAnthropicCredential(): boolean {
+  return (
+    hasAnthropicApiKeyAuth() ||
+    !!process.env.ANTHROPIC_AUTH_TOKEN ||
+    !!process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR ||
+    !!getConfiguredApiKeyHelper()
+  )
+}
+
+/**
  * Validate that the active OAuth token belongs to the organization required
  * by `forceLoginOrgUUID` in managed settings. Returns a result object
  * rather than throwing so callers can choose how to surface the error.
@@ -2625,22 +2696,102 @@ export type OrgValidationResult =
  * token's org (network error, missing profile data), validation fails.
  */
 export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
+  const policy = getSettingsForSource('policySettings')
+  const configuredOrgUuid = policy?.forceLoginOrgUUID
+  // densable J$ `r` — either key counts as "an auth pin is configured", and both
+  // are read from policySettings only, never from merged settings.
+  const pinConfigured =
+    configuredOrgUuid !== undefined || policy?.forceLoginMethod !== undefined
+
+  // densable J$ — the host injects credentials, so the pin cannot apply here.
+  // Mirrors validateForcedLoginMethod's host-managed branch.
+  if (isHostManagedProviderAuth()) {
+    if (pinConfigured) {
+      logEvent('tengu_auth_force_login_org', {
+        reason: 'managed_by_host_under_pin' as never,
+      })
+    }
+    return { valid: true }
+  }
+
   // `claude ssh` remote: real auth lives on the local machine and is injected
   // by the proxy. The placeholder token can't be validated against the profile
   // endpoint. The local side already ran this check before establishing the session.
   if (process.env.ANTHROPIC_UNIX_SOCKET) {
+    const anthropicAuth = isAnthropicAuthEnabled()
+    const meta = {
+      api_provider: getAPIProvider() as never,
+      auth_token_source: getAuthTokenSource().source as never,
+    }
+    if (!anthropicAuth && pinConfigured) {
+      logEvent('tengu_auth_force_login_org', {
+        reason: 'unix_socket_3p_under_pin' as never,
+        ...meta,
+      })
+    } else if (anthropicAuth && configuredOrgUuid !== undefined) {
+      logEvent('tengu_auth_force_login_org', {
+        reason: 'unix_socket_ssh_under_pin' as never,
+        ...meta,
+      })
+    } else if (getAdminManagedPolicyUnreadableError()) {
+      logEvent('tengu_auth_force_login_org', {
+        reason: 'unix_socket_unreadable_policy' as never,
+        ...meta,
+      })
+    }
     return { valid: true }
   }
 
   if (!isAnthropicAuthEnabled()) {
+    // densable J$ — an org pin targets first-party OAuth. If the machine is
+    // pinned but carries an Anthropic-issued non-OAuth credential instead, the
+    // pin can never be satisfied, so refuse rather than start unpinned.
+    if (pinConfigured && hasNonOAuthAnthropicCredential()) {
+      return {
+        valid: false,
+        message:
+          `This machine's managed settings require a first-party login, but an\n` +
+          `Anthropic-issued credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,\n` +
+          `or apiKeyHelper) is configured. A non-OAuth Anthropic credential\n` +
+          `cannot satisfy the org pin.\n\n` +
+          `Remove the credential and run: claude auth login\n\n` +
+          `If this is a third-party desktop session: forceLoginOrgUUID targets\n` +
+          `first-party OAuth and should be removed from managed-settings.json.`,
+      }
+    }
     return { valid: true }
   }
 
-  const requiredOrgUuid =
-    getSettingsForSource('policySettings')?.forceLoginOrgUUID
-  if (!requiredOrgUuid) {
+  // densable 2.1.247 pm/J$ — fail-close if admin managed settings are
+  // unreadable, even when host/HKCU settings exist.
+  const unreadable = getAdminManagedPolicyUnreadableError()
+  if (unreadable) {
+    return {
+      valid: false,
+      message: formatPolicyUnreadableFailClose(unreadable),
+    }
+  }
+
+  if (configuredOrgUuid === undefined) {
     return { valid: true }
   }
+
+  // densable J$ — the pin accepts a single UUID or a list, and any one of the
+  // listed orgs is permitted.
+  const permittedOrgUuids = normalizeForceLoginOrgUuids(configuredOrgUuid)
+  if (permittedOrgUuids.length === 0) {
+    return {
+      valid: false,
+      message:
+        `forceLoginOrgUUID in managed settings is set to an empty array.\n` +
+        `No organizations are permitted. This is almost certainly a\n` +
+        `misconfiguration. Contact your administrator.`,
+    }
+  }
+  const requirement =
+    permittedOrgUuids.length === 1
+      ? `organization ${permittedOrgUuids[0]}`
+      : `one of these organizations: ${permittedOrgUuids.join(', ')}`
 
   // Ensure the access token is fresh before hitting the profile endpoint.
   // No-op for env-var tokens (refreshToken is null).
@@ -2666,7 +2817,7 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
       valid: false,
       message:
         `Unable to verify organization for the current authentication token.\n` +
-        `This machine requires organization ${requiredOrgUuid} but the profile could not be fetched.\n` +
+        `This machine requires ${requirement} but the profile could not be fetched.\n` +
         `This may be a network error, or the token may lack the user:profile scope required for\n` +
         `verification (tokens from 'claude setup-token' do not include this scope).\n` +
         `Try again, or obtain a full-scope token via 'claude auth login'.`,
@@ -2674,7 +2825,7 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
   }
 
   const tokenOrgUuid = profile.organization.uuid
-  if (tokenOrgUuid === requiredOrgUuid) {
+  if (permittedOrgUuids.includes(tokenOrgUuid)) {
     return { valid: true }
   }
 
@@ -2688,8 +2839,8 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
       message:
         `The ${envVarName} environment variable provides a token for a\n` +
         `different organization than required by this machine's managed settings.\n\n` +
-        `Required organization: ${requiredOrgUuid}\n` +
-        `Token organization:   ${tokenOrgUuid}\n\n` +
+        `Required: ${requirement}\n` +
+        `Token organization: ${tokenOrgUuid}\n\n` +
         `Remove the environment variable or obtain a token for the correct organization.`,
     }
   }
@@ -2698,7 +2849,7 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
     valid: false,
     message:
       `Your authentication token belongs to organization ${tokenOrgUuid},\n` +
-      `but this machine requires organization ${requiredOrgUuid}.\n\n` +
+      `but this machine requires ${requirement}.\n\n` +
       `Please log in with the correct organization: claude auth login`,
   }
 }

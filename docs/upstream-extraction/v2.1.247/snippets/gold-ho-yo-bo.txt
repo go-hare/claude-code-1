@@ -1,0 +1,2 @@
+# LOCKED bo pos=207874921 end=207875225 len=304
+function bo(e){let t=e.find((o)=>o.path.length===1&&o.path[0]==="source");if(!t||t.code!=="invalid_union")return;let s=t.errors.find((o)=>!o.some((n)=>n.path.length===0||n.code==="invalid_value"&&n.path[0]==="source"));if(!s||s.length===0)return;return ns(s.map((o)=>({...o,path:["source",...o.path]})))}

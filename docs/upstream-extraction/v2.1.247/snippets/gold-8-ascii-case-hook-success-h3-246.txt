@@ -1,0 +1,3 @@
+# offset=229375671 ver=246 hit=4/4 ratio=1.000 needle="case\"hook_success\""
+
+tion":{if(g.hookEvent==="Stop"||g.hookEvent==="SubagentStop"){return null}let _;if(S[196]!==g.hookName)_=s(j,{children:[g.hookName," hook warning"]}),S[196]=g.hookName,S[197]=_;else _=S[197];return _}case"hook_success":{return null}case"hook_stopped_continuation":{if(g.hookEvent==="Stop"||g.hookEvent==="SubagentStop"){return null}let _;if(S[198]!==g.hookName||S[199]!==g.message)_=s(j,{color:"warning",children:[g.hookName," hook stopped continuation: ",g.message]}),S[198]=g.hookName,S[199]=g.message,S[200]=_;else _=S[200];return _}case"hook_deferred_tool":{let _;if(S[201]!==g.hookName||S[202]!=

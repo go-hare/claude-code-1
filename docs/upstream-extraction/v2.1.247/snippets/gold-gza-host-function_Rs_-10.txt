@@ -1,0 +1,2 @@
+# needle=function Rs( pos=223540884
+function Rs(ol){return ol.voiceState}

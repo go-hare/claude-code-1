@@ -1,0 +1,4 @@
+# LOCKED So pos=207876604  So=3
+# LOCKED ko pos=207876609  ko=160
+# cluster: fo,_o,So=3,ko=160,xo,vo='...'
+So=3,ko=160

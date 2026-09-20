@@ -29,6 +29,11 @@ export type LocalShellTaskState = TaskStateBase & {
   // UI display variant. 'monitor' → shows description instead of command,
   // 'Monitor details' dialog title, distinct status bar pill.
   kind?: BashTaskKind
+  /**
+   * Official 2.1.247 nsc `isAdopted:!0` — shell rehydrated from a foreground
+   * carry-over / adopt.json. ADt/eA skip the `[exited with code …]` footer.
+   */
+  isAdopted?: boolean
 }
 
 export function isLocalShellTask(task: unknown): task is LocalShellTaskState {

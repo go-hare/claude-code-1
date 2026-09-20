@@ -1,0 +1,4 @@
+# let S 1
+# start=232423586 end=232424386
+
+let S=c!==null&&c.signal.aborted?tG(c.signal.reason):void 0;if(!(S==="user-cancel"||S==="remote-cancel"))TL(this.stream.inFlightMessageId);this.resetLoadingState();let k=e==="remote"?"remote-cancel":"user-cancel";if(t.isRemoteMode)t.cancelRequest(),c?.abort(Pu(k));else if(c?.abort(Pu(k)),e!=="remote")this._engine.interrupt(k,sG(e));return this.setAbortController(null),a(),!0};interruptForSubmit=()=>{let e=this.abortController;if(!e||e.signal.aborted)return!1;return TL(this.stream.inFlightMessageId),e.abort(Pu("user-cancel")),!0};buildToolUseContext=(e,t,o,n)=>this._buildToolUseContextWith(this._requireHost(),e,t,o,n);_buildToolUseContextWith(e,t,o,n,r){let{store:s,scope:a,gesture:l,messageQueue:u,session:c,commands:m,debug:d,fallbackModel:g,thinkingConfig:h,ideInstallationStatus:S,resolveC

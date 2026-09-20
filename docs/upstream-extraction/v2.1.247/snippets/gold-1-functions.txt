@@ -1,0 +1,139 @@
+# gold-1-functions innermost named function around JS hits
+
+## 246 JS hits=67
+- needle="SendFeedback" #8 @205478162 → NONE
+- needle="SendFeedback" #9 @205478445 → NONE
+- needle="SendFeedback" #11 @206426907 → function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112
+- needle="SendFeedback" #13 @215149786 → NONE
+- needle="SendFeedback" #14 @215155951 → NONE
+- needle="SendFeedback" #15 @215156106 → NONE
+- needle="SendFeedback" #16 @229885820 → function Le() start=229885474 end=229886617 len=1143 sha=e2e71de212b4451e
+- needle="feedbackDrafts" #9 @215139326 → async function lls() start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4
+- needle="feedbackDrafts" #10 @215139472 → async function lls() start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4
+- needle="feedbackDrafts" #11 @215142052 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts" #12 @215142199 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts" #13 @215142407 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts" #14 @215142778 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts" #15 @215147676 → function mls() start=215147649 end=215147706 len=57 sha=21529a45036a3584
+- needle="feedbackDrafts" #16 @215148165 → function ipc() start=215148087 end=215148305 len=218 sha=a1c14a4a44144676
+- needle="feedbackDrafts" #17 @215148212 → function ipc() start=215148087 end=215148305 len=218 sha=a1c14a4a44144676
+- needle="feedbackDrafts" #18 @224021532 → function pa() start=224017492 end=224038324 len=20832 sha=c2f47527ae2a9e07
+- needle="feedbackDrafts" #19 @224021589 → function pa() start=224017492 end=224038324 len=20832 sha=c2f47527ae2a9e07
+- needle="feedbackDrafts" #20 @224021726 → function pa() start=224017492 end=224038324 len=20832 sha=c2f47527ae2a9e07
+- needle="feedbackDrafts" #21 @229888716 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts" #22 @230877305 → function yqe() start=230877278 end=230877349 len=71 sha=2ddfc5210abead65
+- needle="feedbackDrafts" #23 @230877380 → function xne() start=230877349 end=230877466 len=117 sha=d71d1c41a19605b8
+- needle="feedbackDrafts" #24 @230877419 → function xne() start=230877349 end=230877466 len=117 sha=d71d1c41a19605b8
+- needle="feedbackDrafts" #25 @233730066 → function uu() start=233729822 end=233751132 len=21310 sha=72a41750827ed5fd
+- needle="fitFeedbackPayloadToBudget" #2 @229883825 → function ee() start=229883753 end=229884960 len=1207 sha=07fbddf252d9314e
+- needle="fitFeedbackPayloadToBudget" #3 @229884847 → function ee() start=229883753 end=229884960 len=1207 sha=07fbddf252d9314e
+- needle="parseDraftTranscriptMessages" #1 @229886651 → function Oe() start=229886617 end=229887294 len=677 sha=90e2c265307d953c
+- needle="Drafted by Claude via the SendFeedback tool" #2 @229885794 → function Le() start=229885474 end=229886617 len=1143 sha=e2e71de212b4451e
+- needle="Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review" #1 @229885794 → function Le() start=229885474 end=229886617 len=1143 sha=e2e71de212b4451e
+- needle="/feedback has been disabled" #4 @220142318 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #5 @220142458 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #6 @220142575 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #7 @220142739 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable" #1 @220142318 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable" #1 @220142458 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable" #1 @220142575 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled by your organization's policy" #1 @220142739 → function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21
+- needle="Feedback payload too large. Try again without the transcript, or shorten the details" #1 @229887302 → async function Kt() start=229814392 end=229944043 len=129651 sha=ae37f52ae48e710c
+- needle="fitFeedbackPayloadToBudget: still" #1 @229884847 → function ee() start=229883753 end=229884960 len=1207 sha=07fbddf252d9314e
+- needle="rawTranscriptJsonl withheld from feedback draft submit" #1 @229887742 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="draft transcript withheld from feedback submit: identity_not_corroborated" #1 @229887976 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="draft transcript withheld from feedback submit: contains_3p_transcript_markers" #1 @229888082 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts: post-submit draft delete failed" #1 @229888716 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_delete_failed" #1 @229888825 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_submitted" #1 @229888945 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_discarded" #1 @229890252 → async function ut() start=229890136 end=229890342 len=206 sha=bcdea15d40cf6f62
+- needle="feedback_draft_submit" #2 @229888951 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="feedback_draft_submit" #3 @229889416 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="feedback_draft_submit" #4 @229889484 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="The draft is still queued. Try again later" #2 @229890090 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="The draft is still queued. Try again later" #3 @234955552 → function sr() start=234951979 end=234962241 len=10262 sha=80c1d6def2674e0b
+- needle="\"SendFeedback\"" #1 @215149785 → NONE
+- needle="SendFeedback tool" #5 @205478162 → NONE
+- needle="SendFeedback tool" #6 @205478445 → NONE
+- needle="SendFeedback tool" #7 @206426907 → function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112
+- needle="SendFeedback tool" #8 @229885820 → function Le() start=229885474 end=229886617 len=1143 sha=e2e71de212b4451e
+- needle="feedbackDrafts:" #6 @215139326 → async function lls() start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4
+- needle="feedbackDrafts:" #7 @215139472 → async function lls() start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4
+- needle="feedbackDrafts:" #8 @215142052 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts:" #9 @215142199 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts:" #10 @215142407 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts:" #11 @215142778 → async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53
+- needle="feedbackDrafts:" #12 @215148165 → function ipc() start=215148087 end=215148305 len=218 sha=a1c14a4a44144676
+- needle="feedbackDrafts:" #13 @215148212 → function ipc() start=215148087 end=215148305 len=218 sha=a1c14a4a44144676
+- needle="feedbackDrafts:" #14 @224021726 → function pa() start=224017492 end=224038324 len=20832 sha=c2f47527ae2a9e07
+- needle="feedbackDrafts:" #15 @229888716 → async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts:" #16 @233730066 → function uu() start=233729822 end=233751132 len=21310 sha=72a41750827ed5fd
+
+## 247 JS hits=67
+- needle="SendFeedback" #8 @206781467 → NONE
+- needle="SendFeedback" #9 @206781750 → NONE
+- needle="SendFeedback" #11 @208027831 → function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc
+- needle="SendFeedback" #13 @216531371 → NONE
+- needle="SendFeedback" #14 @216537536 → NONE
+- needle="SendFeedback" #15 @216537691 → NONE
+- needle="SendFeedback" #16 @232016147 → function Le() start=232015801 end=232016944 len=1143 sha=e2e71de212b4451e
+- needle="feedbackDrafts" #9 @216520911 → async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d
+- needle="feedbackDrafts" #10 @216521057 → async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d
+- needle="feedbackDrafts" #11 @216523637 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts" #12 @216523784 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts" #13 @216523992 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts" #14 @216524363 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts" #15 @216529261 → function Ffs() start=216529234 end=216529291 len=57 sha=6568f645721a8873
+- needle="feedbackDrafts" #16 @216529750 → function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44
+- needle="feedbackDrafts" #17 @216529797 → function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44
+- needle="feedbackDrafts" #18 @225095469 → function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c
+- needle="feedbackDrafts" #19 @225095526 → function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c
+- needle="feedbackDrafts" #20 @225095663 → function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c
+- needle="feedbackDrafts" #21 @232019043 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts" #22 @233009228 → function vqe() start=233009201 end=233009272 len=71 sha=eddeffe65dfddd51
+- needle="feedbackDrafts" #23 @233009303 → function ore() start=233009272 end=233009389 len=117 sha=13f2e99a184df2d3
+- needle="feedbackDrafts" #24 @233009342 → function ore() start=233009272 end=233009389 len=117 sha=13f2e99a184df2d3
+- needle="feedbackDrafts" #25 @235799643 → function mu() start=235799399 end=235820713 len=21314 sha=c7e741abcbaf8640
+- needle="fitFeedbackPayloadToBudget" #2 @232014152 → function ee() start=232014080 end=232015287 len=1207 sha=07fbddf252d9314e
+- needle="fitFeedbackPayloadToBudget" #3 @232015174 → function ee() start=232014080 end=232015287 len=1207 sha=07fbddf252d9314e
+- needle="parseDraftTranscriptMessages" #1 @232016978 → function Oe() start=232016944 end=232017621 len=677 sha=90e2c265307d953c
+- needle="Drafted by Claude via the SendFeedback tool" #2 @232016121 → function Le() start=232015801 end=232016944 len=1143 sha=e2e71de212b4451e
+- needle="Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review" #1 @232016121 → function Le() start=232015801 end=232016944 len=1143 sha=e2e71de212b4451e
+- needle="/feedback has been disabled" #4 @222029883 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #5 @222030023 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #6 @222030140 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled" #7 @222030304 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable" #1 @222029883 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable" #1 @222030023 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable" #1 @222030140 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="/feedback has been disabled by your organization's policy" #1 @222030304 → function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21
+- needle="Feedback payload too large. Try again without the transcript, or shorten the details" #1 @232017629 → NONE
+- needle="fitFeedbackPayloadToBudget: still" #1 @232015174 → function ee() start=232014080 end=232015287 len=1207 sha=07fbddf252d9314e
+- needle="rawTranscriptJsonl withheld from feedback draft submit" #1 @232018069 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="draft transcript withheld from feedback submit: identity_not_corroborated" #1 @232018303 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="draft transcript withheld from feedback submit: contains_3p_transcript_markers" #1 @232018409 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts: post-submit draft delete failed" #1 @232019043 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_delete_failed" #1 @232019152 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_submitted" #1 @232019272 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="tengu_feedback_draft_discarded" #1 @232020579 → async function ut() start=232020463 end=232020669 len=206 sha=bcdea15d40cf6f62
+- needle="feedback_draft_submit" #2 @232019278 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="feedback_draft_submit" #3 @232019743 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="feedback_draft_submit" #4 @232019811 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="The draft is still queued. Try again later" #2 @232020417 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="The draft is still queued. Try again later" #3 @236997883 → function sr() start=236994310 end=237004572 len=10262 sha=80c1d6def2674e0b
+- needle="\"SendFeedback\"" #1 @216531370 → NONE
+- needle="SendFeedback tool" #5 @206781467 → NONE
+- needle="SendFeedback tool" #6 @206781750 → NONE
+- needle="SendFeedback tool" #7 @208027831 → function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc
+- needle="SendFeedback tool" #8 @232016147 → function Le() start=232015801 end=232016944 len=1143 sha=e2e71de212b4451e
+- needle="feedbackDrafts:" #6 @216520911 → async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d
+- needle="feedbackDrafts:" #7 @216521057 → async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d
+- needle="feedbackDrafts:" #8 @216523637 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts:" #9 @216523784 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts:" #10 @216523992 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts:" #11 @216524363 → async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4
+- needle="feedbackDrafts:" #12 @216529750 → function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44
+- needle="feedbackDrafts:" #13 @216529797 → function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44
+- needle="feedbackDrafts:" #14 @225095663 → function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c
+- needle="feedbackDrafts:" #15 @232019043 → async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29
+- needle="feedbackDrafts:" #16 @235799643 → function mu() start=235799399 end=235820713 len=21314 sha=c7e741abcbaf8640

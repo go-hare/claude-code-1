@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchInput } from '../hooks/useSearchInput.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
@@ -92,7 +92,14 @@ export function FuzzyPicker<T>({
 }: Props<T>): React.ReactNode {
   const isTerminalFocused = useTerminalFocus();
   const { rows, columns } = useTerminalSize();
-  const [focusedIndex, setFocusedIndex] = useState(0);
+  // densable 247 $t: je(lt) 3-tuple — Enter/Tab read ke().focus, not snapshot P.
+  const [focusedIndex, setFocusedIndexState] = useState(0);
+  const focusedIndexLive = useRef(0);
+  const setFocusedIndex = (action: React.SetStateAction<number>): void => {
+    const next = typeof action === 'function' ? action(focusedIndexLive.current) : action;
+    focusedIndexLive.current = next;
+    setFocusedIndexState(next);
+  };
 
   // Cap visibleCount so the picker never exceeds the terminal height. When it
   // overflows, each re-render (arrow key, ctrl+p) mis-positions the cursor-up
@@ -135,14 +142,14 @@ export function FuzzyPicker<T>({
     if (e.key === 'return') {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const selected = items[focusedIndex];
+      const selected = items[focusedIndexLive.current];
       if (selected) onSelect(selected);
       return;
     }
     if (e.key === 'tab') {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const selected = items[focusedIndex];
+      const selected = items[focusedIndexLive.current];
       if (!selected) return;
       const tabAction = e.shift ? (onShiftTab ?? onTab) : onTab;
       if (tabAction) {

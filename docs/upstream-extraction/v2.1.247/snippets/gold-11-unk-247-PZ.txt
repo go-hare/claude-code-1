@@ -1,0 +1,3 @@
+# 247-PZ function PZ() start=210413854 end=210414051 len=197 sha=efbf5c7565c58a59 near=210435229
+
+function PZ(){for(let e of Te().bareGitRepoScrubPaths){let t=e.slice(e.lastIndexOf(Tn)+1);try{Qv(e,{recursive:t!=="HEAD"&&t!==".git"}),W(`[Sandbox] scrubbed planted bare-repo file: ${e}`)}catch{}}}

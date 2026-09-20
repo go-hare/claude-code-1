@@ -1,0 +1,2 @@
+# needle=getSettingsForSource:()=>h pos=208304369
+getSettingsForSource:()=>h,getSettingsForSourceWriteSeed:()=>os,getSettingsRootPathForSource:()=>Xo,getSettingsWithErrors:()=>ie,getSettingsWithSources:()=>ys,getSettings_DEPRECATED:()=>ms,getShadowedManagedSources:()=>w

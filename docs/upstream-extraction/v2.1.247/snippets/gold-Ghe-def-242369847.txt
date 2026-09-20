@@ -1,0 +1,2 @@
+# needle=function Ghe( pos=242369847 end=242370020 len=173 tip=false
+function Ghe(e){tt(e.edges(),function(t){var r=e.edge(t);if(r.reversed){e.removeEdge(t);var i=r.forwardName;delete r.reversed,delete r.forwardName,e.setEdge(t.w,t.v,r,i)}})}

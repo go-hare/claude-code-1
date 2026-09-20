@@ -1,0 +1,2 @@
+# function Zt( pos=209553816 end=209554142 len=326
+function Zt(t){if(typeof t==="function")return t;if(typeof t==="string")return(s)=>t===s;if(t instanceof RegExp)return(s)=>t.test(s);if(typeof t==="object"&&t!==null)return(s)=>{if(t.path===s)return!0;if(t.recursive){let e=f.relative(t.path,s);if(!e)return!1;return!e.startsWith("..")&&!f.isAbsolute(e)}return!1};return()=>!1}

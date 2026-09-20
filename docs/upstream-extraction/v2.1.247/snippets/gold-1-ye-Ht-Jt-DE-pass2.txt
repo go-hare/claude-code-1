@@ -1,0 +1,256 @@
+# gold-1-ye-Ht-Jt-DE-pass2 247
+
+## sidechain-2216 containing "n.isSidechain===!0||n.isMeta===!0" hits=1
+- #0 @221614358 lastFn=function @221614218
+## sidechain-2216#0-win @221614358
+ Lr(t,e,{hard:!1,trim:!1}).split(`
+`).flatMap((n)=>Qo(n,e))}function ei(t){let e;try{e=kr(t)}catch{return[]}if(typeof e!=="object"||e===null)return[];let n=e;if(n.type!=="user"&&n.type!=="assistant"||n.isSidechain===!0||n.isMeta===!0)return[];let i=n.message?.content;if(typeof i==="string"){if(n.type==="user")return xr(i);let c=i.trim();return c===""?[]:[{role:"assistant",text:c}]}if(!Array.isArra
+
+## sidechain-2216#0-fn @221614218
+len=1053 sha=02c5c3c414636912
+function ei(t){let e;try{e=kr(t)}catch{return[]}if(typeof e!=="object"||e===null)return[];let n=e;if(n.type!=="user"&&n.type!=="assistant"||n.isSidechain===!0||n.isMeta===!0)return[];let i=n.message?.content;if(typeof i==="string"){if(n.type==="user")return xr(i);let c=i.trim();return c===""?[]:[{role:"assistant",text:c}]}if(!Array.isArray(i))return[];if(n.type==="user"){let c=[];for(let d of i){let p=d;if(p?.type==="text"&&typeof p.text==="string")c.push(p.text)}return xr(c.join(`
+`))}let a=[],o=[],l=()=>{let c=o.join(`
+`).trim();if(o=[],c!=="")a.push({role:"assistant",text:c})};for(let c of i){let d=c;if(d?.type==="text"&&typeof d.text==="string")o.push(d.text);else if(d?.type==="tool_use"&&typeof d.name==="string"){l();let p="";if(typeof d.input==="object"&&d.input!==null){for(let m of Object.values(d.input))if(typeof m==="string"&&m!==""){p=m;break}}a.push({role:"tool",text:`${d.name}(${p})`})}else if(d?.type==="thinking"&&typeof d.thinking==="string"&&d.thinking.trim()!=="")l(),a.push({role:"thinking",text:d.thinking})}return l(),a}
+
+
+## sidechain-2220 containing "e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)" hits=1
+- #0 @222031497 lastFn=function @222031129
+## sidechain-2220#0-win @222031497
+==null)continue;if(e.type==="system"&&e.subtype==="compact_boundary"){o=t.length;continue}if(e.type!=="user"&&e.type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e.uuid),t.push(e.type==="user"?{type:"user",uuid:e.uuid,timestamp:e.timestamp,message:e.message,...e.isMeta===!0&
+
+## sidechain-2220#0-fn @222031129
+len=932 sha=a199e93ffe7d4c10
+function Cs(s,a,u){if(!s)return[];let i=s.split(`
+`),t=[],n=[],c=new Set,o=-1;for(let d of i){if(!d)continue;let e;try{e=Be(d)}catch{continue}if(typeof e!=="object"||e===null)continue;if(e.type==="system"&&e.subtype==="compact_boundary"){o=t.length;continue}if(e.type!=="user"&&e.type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e.uuid),t.push(e.type==="user"?{type:"user",uuid:e.uuid,timestamp:e.timestamp,message:e.message,...e.isMeta===!0&&{isMeta:!0},...e.toolUseResult!==void 0&&{toolUseResult:e.toolUseResult},...e.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:e.uuid,timestamp:e.timestamp,message:e.message,requestId:e.requestId}),n.push(Buffer.byteLength(d))}if(o<=0)return[];let{start:p,oversized:r}=Ds(n,a,o),f=t.slice(p,o);return r.size===0?f:f.filter((d,e)=>!r.has(p+e))}
+
+
+## sidechain-2320 containing "t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"" hits=1
+- #0 @232017248 lastFn=function @232016944
+## sidechain-2320#0-win @232017248
+if(!a)continue;let t;try{t=te(a)}catch{continue}if(typeof t!=="object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.message,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResul
+
+## sidechain-2320#0-fn @232016944
+len=677 sha=90e2c265307d953c
+function Oe(e){let s=[];using m=v`parseDraftTranscriptMessages(${e.length})`;for(let a of e.split(`
+`)){if(!a)continue;let t;try{t=te(a)}catch{continue}if(typeof t!=="object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.message,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResult:t.toolUseResult},...t.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:t.uuid,timestamp:t.timestamp,message:t.message,requestId:t.requestId})}return s}
+
+
+## function kb(e){let hits=1
+- #0 @249181164 ptions:[e,t]}},uO=(e,t)=>{let n=x7(e);return{name:n.name,fn:n.fn,options:[e,t]}}});var T7=K(()=>{});function kb(e){let t=P7.useRef(!0);t.current&&(t.current=!1,e())}var P7,i1=K(()=>{"use client";P7=_(ie(),1)});var gt,A
+
+## function kb(e){return hits=0
+
+## kb=function hits=0
+
+## var kb= hits=0
+
+## kb=e=> hits=0
+
+## isCompactSummary===!0&&{isCompactSummary hits=2
+- #0 @222031776 age,...e.isMeta===!0&&{isMeta:!0},...e.toolUseResult!==void 0&&{toolUseResult:e.toolUseResult},...e.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:e.uuid,timestamp:e.timestamp,message:e.message,requestId:e.requestId}),
+- #1 @232017472 age,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResult:t.toolUseResult},...t.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:t.uuid,timestamp:t.timestamp,message:t.message,requestId:t.requestId})}
+
+## kb-as-xSa-import-back @219710851
+a,k9r as iOa,v9r as jOa,m3r as kOa,g3r as lOa,D0u as mOa,T3r as nOa,Q2t as oOa,D3r as pOa,z8e as qOa,eVt as rOa,$3r as sOa,YNu as tOa,XNu as uOa,ZNu as vOa,uVt as wOa,yXr as xOa,TXr as yOa,CXr as zOa,UGs as AOa,BGs as BOa,a9r as COa,oz as DOa,A2e as EOa,c9r as FOa,q8e as GOa,Z8e as HOa,GGs as IOa,t0 as JOa,Y8e as KOa,OE as LOa,u9r as MOa,Xpe as NOa,_Vt as OOa,ZI as POa,fke as QOa,rre as ROa,S2e as SOa,iv as TOa,Yir as UOa,d9r as VOa,kVt as WOa,p9r as XOa,vVt as YOa,f9r as ZOa,m9r as _Oa,g9r as $Oa,QGs as aPa,e2s as bPa,t2s as cPa,y9r as dPa,_9r as ePa,TVt as fPa,n2s as gPa,S9r as hPa,r2s as iPa,qke as jPa,cb as kPa,sz as lPa,oK as mPa,uzu as nPa,dzu as oPa,E9r as pPa,sC as qPa,yre as rPa,Aqt as sPa,y2s as tPa,_2s as uPa,W4 as vPa,j1e as wPa,fA as xPa,XHr as yPa,_V as zPa,Kke as APa,wp as BPa,lA as CPa,Yke as DPa,Ere as EPa,j9r as FPa,MVt as GPa,W9r as HPa,q9r as IPa,L2s as JPa,Cre as KPa,OVt as LPa,V9r as MPa,sZe as NPa,Q9r as OPa,e8r as PPa,zHu as QPa,HHu as RPa,uY as SPa,ls as TPa,WHu as UPa,p_ as VPa,Qke as WPa,r8r as XPa,KHu as YPa,YHu as ZPa,XHu as _Pa,o8r as $Pa,UM as aQa,$Vt as bQa,RWu as cQa,UVt as dQa,fZe as eQa,BVt as fQa,i4s as gQa,l4s as hQa,squ as iQa,rKt as jQa,Dre as kQa,AZe as lQa,PZe as mQa,xZe as nQa,sve as oQa,Z0 as pQa,$qu as qQa,Mw as rQa,Pv as sQa,Nre as tQa,Lqu as uQa,mve as vQa,rJe as wQa,EKt as xQa,C2u as yQa,R2u as zQa,A2u as AQa,PKt as BQa,$Kt as CQa,LKt as DQa,NKu as EQa,_Qr as FQa,bQr as GQa,wQr as HQa,kQr as IQa,UYt as JQa,oZs as KQa,sZs as LQa,iZs as MQa,aZs as NQa,lZs as OQa,cZs as PQa,uZs as QQa,dZs as RQa,pZs as SQa,Np as TQa,Fp as UQa,u6e as VQa,XZu as WQa,Fno as XQa,ZZu as YQa,JZu as ZQa,QZu as _Qa,eJu as $Qa,mz as aRa,woe as bRa,kZs as cRa,TZs as dRa,lJu as eRa,Kno as fRa,Yno as gRa,AZs as hRa,SJu as iRa,Ype as jRa,Xno as kRa,Zno as lRa,aro as mRa,lro as nRa,hro as oRa,qYt as pRa,GYt as qRa,Sro as rRa,JWt as sRa,ts as tRa,CD as uRa,$j as vRa,xV as wRa,W1e as xRa,sw as yRa,n7 as zRa,hnd as ARa,mX as BRa,xmn as CRa,ynd as DRa,_nd as ERa,Imn as FRa,Dct as GRa,Mmn as HRa,cQ as IRa,bnd as JRa,g7 as KRa,lK as LRa,Snd as MRa,RIt as NRa,wnd as ORa,dVt as PRa,knd as QRa,HQe as RRa,vb as SRa,vnd as TRa,tQs as URa,vm as VRa,xr as WRa,nQs as XRa,pt as YRa,Tnd as ZRa,Wj as _Ra,sQs as $Ra,iQs as aSa,aQs as bSa,End as cSa,UGe as dSa,zwe as eSa,Uf as fSa,bL as gSa,L0e as hSa,KYt as iSa,aTe as jSa,Tm as kSa,Pyt as lSa,Cnd as mSa,Rnd as nSa,uQs as oSa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as 
+
+## from chunk near kb hits=1
+- #0 @219710851 a,uQs as oSa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd as FSa,is as GSa,$Qs 
+
+## export{kb, hits=0
+
+##  kb as  hits=0
+
+## as kb, hits=6
+- #0 @224199555  as ja,Fqd as jb,Frd as jc,Fsd as jd,Ftd as je,Fud as kf,Fvd as kg,Fwd as kh,God as j,Gpd as ka,Gqd as kb,Grd as kc,Gsd as kd,Gtd as ke,Gud as lf,Gvd as lg,Gwd as lh,Hod as k,Hpd as la,Hqd as lb,Hrd as lc,H
+- #1 @224229691 qc as ha,Drc as hb,Epc as h,Eqc as ia,Erc as ib,Fpc as i,Fqc as ja,Frc as jb,Gpc as j,Gqc as ka,Grc as kb,Hpc as k,Hqc as la,Hrc as lb,Ipc as l,Iqc as ma,Irc as mb,Jpc as m,Jqc as na,Jrc as nb,Kpc as n,Kqc 
+- #2 @227351285 Xc as h,hYc as ia,hZc as ib,i0c as jc,iXc as i,iYc as ja,iZc as jb,j0c as kc,jXc as j,jYc as ka,jZc as kb,kXc as k,kYc as la,kZc as lb,lXc as l,lYc as ma,lZc as mb,mXc as m,mYc as na,mZc as nb,nXc as n,nYc 
+- #3 @227554783 mpliance.
+
+// Version: 2.1.247
+import{$Ta as K,$Ua as La,$Va as Lb,$Wa as Lc,ATa as j,AUa as ka,AVa as kb,AWa as kc,AXa as kd,BTa as k,BUa as la,BVa as lb,BWa as lc,BXa as ld,CTa as l,CUa as ma,CVa as mb,CW
+- #4 @228619109 l}`:""})`),e.reason!=="deferred")N("ccr_dir_sync_mode_prompt",`not_offered_${e.reason}`)}}
+export{A as kb,D as lb,ge as mb,Ze as nb,er as ob,rr as pb,or as qb,Yr as rb};
+.// @bun @bytecode
+// Claude Code is
+- #5 @230303208  as FE,eRa as Sb,eda as _p,eia as Nx,ela as Hx,epa as WS,era as sr,eta as CR,f4 as xM,fPa as PS,fRa as kb,fVa as vy,fka as Wn,fla as aS,fpa as Oo,fra as gR,fta as wh,fza as WR,g4 as vi,gEa as TF,gFa as LE,g
+
+## as kb} hits=0
+
+## _158.js token hits=14
+- #0 @180205102 B:/~BUN/root/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_165.jsB:/~BUN/root/_166.js
+- #1 @180379522 B:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.js
+- #2 @182527185 B:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.js
+- #3 @192216521 Dyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.jsB:/~BUN/root/_253.js
+- #4 @192234517 C00000851callcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.js
+- #5 @192661833 008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851callnB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.js
+- #6 @232030401 .js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/~BUN/root/
+- #7 @233177695 /root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/
+- #8 @233914797 /root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/
+- #9 @237069274 ocs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw as ot,Vw as nt,X
+- #10 @237085215 rsion: 2.1.247
+import{Ls as a,Ms as b,Ns as c}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/
+- #11 @237238426 mpliance.
+
+// Version: 2.1.247
+import{Ms as o}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/
+- #12 @253077007 BUN/root/_154.js.B:/~BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.B:/~BUN/root/_158.js.B:/~BUN/root/_158.js.B:/~BUN/root/_160.js.B:/~BUN/root/_160.js.B:/~BUN/root/_17
+- #13 @253077028 BUN/root/_154.js.B:/~BUN/root/_152.js.B:/~BUN/root/_152.js.B:/~BUN/root/_158.js.B:/~BUN/root/_158.js.B:/~BUN/root/_160.js.B:/~BUN/root/_160.js.B:/~BUN/root/_175.js.B:/~BUN/root/_17
+
+## OsPsQs hits=1
+- #0 @73962552 .q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q.q...=.=P..P...P.4.P.H.3r>rDrSrTr">.r.r<.*..r.r.r.rCsDsLsMsOsPsQsRsSsTsUs`tatbtctdtetftgthtjtktmtntptqtrtstttutvtwtxt.>.>R...R...R...R...R...R...R...R...R...R....u.u
+
+## PsQsOs hits=0
+
+## export{Os,Ps,Qs hits=0
+
+## export{Os as hits=0
+
+## export{Ps as hits=0
+
+## export{Qs as hits=0
+
+## avail-Ps-222029808 @222029808
+len=743 sha=8f61c2d9f132bd21
+function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable"};if(X())return{kind:"disabled",reason:"/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable"};if(!ee("allow_product_feedback"))return{kind:"disabled",reason:"/feedback has been disabled by your organization's policy"};let s=Q();if(s!=="firstParty")return{kind:"bundle",cause:"provider",label:Ms[s]};if(Oe().error)return{kind:"bundle",cause:"no_creds",label:"no Anthropic credentials"};return{kind:"post"}}
+
+## avail-Ps-export @222029808
+ock (Mantle)",gateway:"an API gateway"};function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable"};if(X())return{kind:"disabled",reason:"/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable"};if(!ee("allow_product_feedback"))return{kind:"disabled",reason:"/feedback has been disabled by your organization's policy"};let s=Q();if(s!=="firstParty")return{kind:"bundle",cause:"provider",label:Ms[s]};if(Oe().error)return{kind:"bundle",cause:"no_creds",label:"no Anthropic credentials"};return{kind:"post"}}var se=new Set(["transcript"]),te=new Set(["subagentTranscripts"]),Es=4194304,vs=2097152,V=8388608,Bs=2097152;function xs(s){return E(s,se,te).length}function Ct(){let s=Ps();switch(s.kind){case"post":case"share":return null;case"disabled":return s.reason;case"bundle":if(s.cause==="no_creds")return`/feedback requires Anthropic credentials (OAuth or API key). Report issues at ${we}`;return`/feedback is not available when using ${s.label}. Report issues a
+
+## surveyFeedbackSource:K hits=4
+- #0 @237072767 ignal:l,messages:n,initialDescription:c,onDone:d,backgroundTasks:b={},mode:p="post",readFileState:x,surveyFeedbackSource:K}){let{storageV5:J,credentials:A}=ue(),[m,h]=u("userInput"),[Q,X]=u(0),[S,Y]=u(c??""),[w,ee]=u(null)
+- #1 @237073310 "){let W=await rt({messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,surveyFeedbackSource:K,storageV5:J});if(W.success)ee(W.bundleId),ie(W.zipPath),h("done");else U(`Couldn't save the feedbac
+- #2 @237073608 .all([nt({messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,signal:l,surveyFeedbackSource:K,storageV5:J,credentials:A}),le?Promise.resolve(null):At(S,l,A)]);if(Wt(ke),i.success)ee(i.feedbackI
+- #3 @237083578 bortSignal:n,messages:c,initialDescription:d,onDone:l,backgroundTasks:b,mode:x.kind,readFileState:p,surveyFeedbackSource:K})}function ut(l,n,c){return Yo(l,n.abortController.signal,n.messages,c,{...n.taskRegistry.all()},n.
+
+## function Qs(){ hits=3
+- #0 @206935480 .length,s=0,a=[];while(++o<r){var l=e[o];if(t(l,o,e))a[s++]=l}return a}var Nn;var Kn=i(()=>{Nn=Zs});function Qs(){return[]}var Vn;var Jn=i(()=>{Vn=Qs});var ea,ta,zn,na,$n;var Xn=i(()=>{Kn();Jn();ea=Object.prototype
+- #1 @223550331 l[0]!==Gt)Bs=Gt?a(r,{color:Gt.hex,children:Gt.char}):null,Ul[0]=Gt,Ul[1]=Bs;else Bs=Ul[1];return Bs}function Qs(){let Pl=oe(1),Ks;if(Pl[0]===q)Ks=a(r,{dimColor:!0,children:"keep holding\u2026"}),Pl[0]=Ks;else Ks=Pl
+- #2 @235494003 {d}${l}`,level:e.outcome==="partial"||e.outputStyleMissing?"warning":r.length===0?"debug":"notice"}}function Qs(){return{holdMaxMs:Math.min(lt.CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS??qt,qt),verdictWaitMaxMs:Math.min
+
+## Qs=()=> hits=2
+- #0 @226784772 function"&&e instanceof ArrayBuffer||Object.prototype.toString.call(e)==="[object ArrayBuffer]";var Qs=()=>{};import{Buffer as Bt}from"buffer";var Ys=(e,t=0,r=e.byteLength-t)=>{if(!Ks(e))throw TypeError(`The
+- #1 @227906136 pHandlerConfigs()}}),qs=(o)=>({httpHandler:o.httpHandler()});var zs=()=>{};var Hs=t(()=>{zs()});var Qs=()=>{};var js=()=>{};var $s=()=>{};var Ks=()=>{};var Ys=()=>{};var Xs=()=>{};var Zs=()=>{};var om=t(()=>
+
+## getSurvey hits=0
+
+## surveySource hits=0
+
+## survey_feedback hits=0
+
+## &&!Ht() hits=1
+- #0 @237084438 ]=jt,_t[7]=se,_t[8]=lt,_t[9]=Ko;else Ko=_t[9];return Ko}async function jr(l,n,c){if(zt()&&!c?.trim()&&!Ht())return e(Xt,{onDone:l,context:n});return en(l,n,c)}
+export{Yo as Ls,en as Ms,jr as Ns};
+.// @bun @b
+
+## function Ht( hits=45
+- #0 @68262196 p_eatRegExpUnicodeEscapeSequence(e,i)&&(s=e.lastIntValue),Ht(s)?(e.lastIntValue=s,!0):(e.pos=t,!1)};function Ht(e){return O(e,!0)||e===36||e===95||e===8204||e===8205}c.regexp_eatAtomEscape=function(e){return this
+- #1 @207161941 <"u"&&Bun.isStandaloneExecutable===!0}var Y=()=>{};import{delimiter as y,isAbsolute as V}from"path";function Ht(o){let E=process.cwd();return o.filter((_)=>!h(_,E))}function X(o){return w(o,Bun.which(o))}function
+- #2 @207716631 ion Lt(e){return p.AWS_ENDPOINT_URL_STS||p.AWS_ENDPOINT_URL||`https://sts.${e}.amazonaws.com`}async function Ht(e){let t=await qe(e);if(!t)return{};let{defaultProvider:n}=await import("B:/~BUN/root/chunk-hj9rw43t
+- #3 @207955901 one capturing group \u2014 "+'group 1 is the credential value to mask (e.g. "token:\\s*(\\S+)").'})}function Ht(e){if(typeof e!=="object"||e===null)return e;let t=e;if(t.mode!=="deny")return e;let n={...t};if("ex
+- #4 @208106136 settings#environment-variables`,hooks:`${M}/hooks`}});function Jt(e){return e.code==="invalid_type"}function Ht(e){return e.code==="invalid_value"}function to(e){return e.code==="unrecognized_keys"}function Bt(e)
+- #5 @208202290 .relPath??[],n];return r?{kind:"scope",scope:{...e,relPath:t}}:{kind:"key",key:Un(e,e.agentType,t)}}function Ht(e,n){let r=e.channel;if(r===void 0)return;return h(n,r==="debug"?".txt":r==="telemetry"?".json":".js
+- #6 @208234762 "os";import{basename as he,dirname as W,isAbsolute as je,join as h,resolve as H,sep as R}from"path";function Ht(e,t){try{let r=ir(e);if(r.isSymbolicLink()){let n=Ve(e);if(n===null)return!1;if(F(n,t))return!1;if(r
+- #7 @208935113 ")}function z(t,r){if(a()==="windows")return n(S(),`${t.split("\\").pop()}.${r}`);return`${t}.${r}`}function Ht(t){if(a()==="windows")return n(S(),`${t.split("\\").pop()}.exec-exit`);return`${t}.exec-exit`}functi
+- #8 @208950794 unpinOpus48LaunchEffort;if(t.includes("fable-5")||He(e))return!_().unpinFable5LaunchEffort;return!1}function Ht(){let e=_();return Boolean(e.unpinOpus47LaunchEffort&&e.unpinOpus48LaunchEffort&&e.unpinFable5Launch
+- #9 @208991500 "done")return"success";if(e==="failed")return"failure";if(e==="stopped")return"stopped";return null}function Ht(e){return lr(e)!==null}function me(e){return Ht(e.state)&&e.tempo!=="active"}function Kt(e){return e
+- #10 @210502035 r)return{kind:"head-is-base",baseBranch:n};return{kind:"merge-base",mergeBase:r,baseBranch:n}}async function Ht(e,t,n=!1){let{stdout:i,code:s}=await b(v(),["--no-optional-locks","ls-files","--others","--exclude-s
+- #11 @210578694 n:ffi")}catch(e){E(`dirSync anchor: bun:ffi unavailable (${we(e)})`,{level:"warn"}),V=null}return V}function Ht(e){return e.noFollowAnyEnforced??=Mt(e)}async function Mt(e){let{fs:n,path:t}=e,i=null;try{i=await n
+
+## Ht=()=> hits=8
+- #0 @206459276 };var St=()=>{};var q=e(()=>{q();Mt();Y();Nt();Rt();wt();N();St()});var It=()=>{};var Ot=()=>{};var Ht=()=>{};var jt=()=>{};var At=()=>{};var z=e(()=>{z();It();Ot();Ht();jt();At()});var Pt=()=>{};var Ct=()=>
+- #1 @207115861 ,Le,gt,yt,Fe,vt,xt,kt,bt,wt,Tt,Ct,St,At,Rt,Ot,jt,It,Nt,Et,$t,Mt,Vt,Dt,zt,Pt,Lt,Ft,Wt,Bt,Ut,qt,Jt,Yt,Ht=()=>Pe().optional(),Gt=()=>Le().optional(),Qt=()=>Fe().optional(),Xt,Kt;var We=N(()=>{_e();ge();Ie();Ce(
+- #2 @217279370 .scanGeneration,C=Ce.stopGeneration;let je=t.userResumeWiring===!0,tt=b||He?.humanTurnSnapshot===!0,Ht=()=>e.supervisors.get(n)?.autoReactWiring?.title??He?.title,Wt=He===void 0||!He.commentVerbsInSchema?voi
+- #3 @225714792 (Rt={}))});var Ct;var Ot=s(()=>{(function(e){e.HEADER="header",e.QUERY="query"})(Ct||(Ct={}))});var Ht=()=>{};var It=()=>{};var Ut=()=>{};var Dt=()=>{};var Pt=s(()=>{Tt();Ot();Ht();It();Ut();Dt()});var Lt=()
+- #4 @227782390 r Pt=()=>{};var Tt=()=>{};var bt=()=>{};var kt=()=>{};var Lt=()=>{};var Ot=()=>{};var Nt=()=>{};var Ht=()=>{};var Ft=()=>{};var Dt=()=>{};var Mt=()=>{};var Ut;var qt=r(()=>{(function(e){e.HTTP_0_9="http/0.9"
+- #5 @228059075 ion(e){e.HTTP="http",e.HTTPS="https"})(kt||(kt={}))});var wt=()=>{};var Gt=()=>{};var Wt=()=>{};var Ht=()=>{};var Mt=()=>{};var Ft=o(()=>{wt();Gt();Wt();Ht();Mt()});var Ot=()=>{};var W;var Nt=o(()=>{(functio
+- #6 @235009465 t();bt();Lt();kt();wt()});var Ot=()=>{};var Nt=()=>{};var Ut=()=>{};var Ft=()=>{};var Gt=()=>{};var Ht=()=>{};var $t=()=>{};var zt=o(()=>{Gt();Ht();$t()});var Bt=()=>{};var jt=()=>{};var Wt;var qt=o(()=>{(fu
+- #7 @235926057 2]=i,s[3]=Ct;else Ct=s[3];let Gt;if(s[4]===A)Gt=[],s[4]=Gt;else Gt=s[4];Y(Ct,Gt);let Ht;if(s[5]!==i)Ht=()=>{d.current=!0,e("tengu_remote_setup_result",{result:a("cancelled")}),i()},s[5]=i,s[6]=Ht;else Ht=s[6
+
+## Poe-wrapper containing "function Poe(e){return DE(e)===void 0" hits=1
+- #0 @219563597 lastFn=function @219563597
+## Poe-wrapper#0-win @219563597
+h<4||t[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(o);if(s===null)return;let i=s[1],a=t.slice(3,-1);if(![n,r,i,...a].every(ol))return;return Poe(_r.transcript(n,r,i,a.length>0?a:void 0))}function Poe(e){return DE(e)===void 0?e:void 0}function Uio(e){let t=j7s(Um(),e);if(t===""||t===".."||t.startsWith(`..${_so}`)||hio(t))return;let n=t.split(_so);return e===fa(Um(),...n)?n:void 0}funct
+
+## Poe-wrapper#0-fn @219563597
+len=47 sha=32ebbac2300e51e7
+function Poe(e){return DE(e)===void 0?e:void 0}
+
+
+## function Poe( hits=2
+- #0 @219563597 .slice(3,-1);if(![n,r,i,...a].every(ol))return;return Poe(_r.transcript(n,r,i,a.length>0?a:void 0))}function Poe(e){return DE(e)===void 0?e:void 0}function Uio(e){let t=j7s(Um(),e);if(t===""||t===".."||t.startsWit
+- #1 @232939798 u();Cy();Au();Co();Ny();Au();Qi();function Doe(e){let t=vy(br(),e);return t?{effort_level:ke(t)}:{}}function Poe(){return Doe(Ns())}bt();Zn();Do();T$e();hd();At();Mo();AI();v$e();bo();z_();Z0e();IF();ci();Xs();var
+
+## DE(e)===void 0 hits=1
+- #0 @219563620 ,...a].every(ol))return;return Poe(_r.transcript(n,r,i,a.length>0?a:void 0))}function Poe(e){return DE(e)===void 0?e:void 0}function Uio(e){let t=j7s(Um(),e);if(t===""||t===".."||t.startsWith(`..${_so}`)||hio(t))re
+
+##  as DE} hits=0
+
+##  as DE, hits=5
+- #0 @210987952  as NE,Fcb as Mx,Gcb as $f,Hcb as YE,Jbb as _E,Jcb as ty,Kbb as rD,Kcb as q_,Lbb as Mu,Lcb as Ge,Mbb as DE,Mcb as Ru,Ncb as Ld,Obb as Jw,Ocb as Nx,Qbb as z0,Qcb as Vy,Ubb as Al,Xbb as Nd,Ybb as _f,Zbb as du,
+- #1 @212850974 d as iNn,Pbd as aNn,Rcd as L6t,Wbd as lNn,mbd as EYn,nbd as Vge,pbd as EXo,pdd as n_e,qbd as OOr,qcd as DE,ybd as gAs}from"B:/~BUN/root/_812.js";import{qdd as DOr,rdd as y3e,sdd as $Or}from"B:/~BUN/root/_813
+- #2 @222042046 ";function m(t){if(t)return!0;return r()&&e("tengu_cedar_marsh",!1)}var f=o(()=>{u();n()});
+export{m as DE,f as EE};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Se
+- #3 @230305050 a as xb,vga as Ms,voa as Hs,vpa as Yx,vqa as ly,vwa as fv,w4 as en,wBa as YR,wCa as Vn,wDa as si,wEa as DE,wQa as zp,wRa as So,wSa as EP,wTa as hh,wXa as kh,wda as rS,wka as KT,wma as eR,wna as ni,woa as u_,
+- #4 @232067979 _844.js";import{Bzd as eS,Ezd as eo,Gzd as Qr,Kzd as Tce,Ozd as sC,Pzd as Js,Qzd as Wu,Rzd as pA,Vzd as DE,Zzd as vRe,eAd as Vo}from"B:/~BUN/root/_845.js";import{fAd as mt,gAd as ke,hAd as mr,iAd as ig,lAd a
+
+## DE as  hits=11
+- #0 @207311894 CO as mOc,DO as nOc,LO as oOc,OE as pOc,RO as qOc,SO as rOc,AE as sOc,IO as tOc,NO as uOc,UO as vOc,DE as wOc};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Servic
+- #1 @222973629 gal-and-compliance.
+
+// Version: 2.1.247
+import{jE as Mt,oE as rn}from"B:/~BUN/root/_286.js";import{DE as Dt,EE as hn}from"B:/~BUN/root/_291.js";import{KE as Rt,OE as It,QE as cn}from"B:/~BUN/root/_293.js";
+- #2 @223009599 s Je,cE as Bt}from"B:/~BUN/root/_285.js";import{BE as $e,CE as Ot}from"B:/~BUN/root/_290.js";import{DE as Ce,EE as ht}from"B:/~BUN/root/_291.js";import{qF as nt,tF as Dt}from"B:/~BUN/root/_299.js";import{xF
+- #3 @223522209 s Yi,aE as Ys}from"B:/~BUN/root/_285.js";import{AE as bs,xE as Di}from"B:/~BUN/root/_289.js";import{DE as qi,EE as qs}from"B:/~BUN/root/_291.js";import{JE as zi,ME as ji,NE as Gi,QE as Gs}from"B:/~BUN/root/
+- #4 @223673031 "B:/~BUN/root/_264.js";import{PD as La,QD as Mb,bE as Ba,cE as Jb}from"B:/~BUN/root/_285.js";import{DE as Ja,EE as Lb}from"B:/~BUN/root/_291.js";import{FE as bm,GE as jk}from"B:/~BUN/root/_292.js";import{HE
+- #5 @228674204 s rs,_C as Ie}from"B:/~BUN/root/_278.js";import{cD as Gt,eD as ns}from"B:/~BUN/root/_279.js";import{DE as jt,EE as Qi}from"B:/~BUN/root/_291.js";import{HE as Io,IE as En,JE as we,LE as Eo,ME as ln,NE as Bo,
+- #6 @231580199 s vm,BD as mp}from"B:/~BUN/root/_283.js";import{AE as cp,uE as bm}from"B:/~BUN/root/_289.js";import{DE as Xn,EE as cu}from"B:/~BUN/root/_291.js";import{SE as _r,TE as sd}from"B:/~BUN/root/_294.js";import{BF
+- #7 @231690939 egal-and-compliance.
+
+// Version: 2.1.247
+import{Ap as Ke,zp as V}from"B:/~BUN/root/_138.js";import{DE as Ce,EE as Qe}from"B:/~BUN/root/_291.js";import{Aab as he,Cab as T,gbb as Ve,mab as u,pab as h,xab as 
+- #8 @231813558 "B:/~BUN/root/_276.js";import{AE as cw,tE as Go,yE as Hc,zE as Fc}from"B:/~BUN/root/_289.js";import{DE as ud,EE as ob}from"B:/~BUN/root/_291.js";import{KE as ld,NE as Ua,OE as cd,QE as tb}from"B:/~BUN/root/
+- #9 @233292501 as rt,_C as z}from"B:/~BUN/root/_278.js";import{vD as Ge,xD as St}from"B:/~BUN/root/_281.js";import{DE as O,EE as it}from"B:/~BUN/root/_291.js";import{SE as Xe,TE as Ht}from"B:/~BUN/root/_294.js";import{iF 
+- #10 @235752013 ot/_288.js";import{AE as Io,uE as ye}from"B:/~BUN/root/_289.js";import"B:/~BUN/root/_290.js";import{DE as Re,EE as Do}from"B:/~BUN/root/_291.js";import"B:/~BUN/root/_292.js";import"B:/~BUN/root/_293.js";imp
+
+## function DE(e) hits=0
+
+## function DE(e){ hits=0
+
+## ol-len-Kb @211019077
+len=47 sha=4fd324834ee19fda
+function ol(e){return e.length<=GM&&Kb.test(e)}
+
+## ol-len-Kb-ctx @211019077
+iled")||DM.has(s??"")){Se(`setRawMode(${o}) failed on revoked tty: ${l}`);return}throw i}}var DM;var uh=U(()=>{Uo();el();DM=new Set(["EIO","ENOTTY","EBADF"])});var Db,Ic;var ch=U(()=>{Ie();Db=Rn(!1);Db.displayName="InternalAccessibilityContext";Ic=Db});var qc;var Ob=U(()=>{Xc();qc=class qc extends nl{type;constructor(e){super();this.type=e}}});var fh=U(()=>{wb()});import{Buffer as Qc}from"buffer";function ol(e){return e.length<=GM&&Kb.test(e)}function Ib(e){let o=e._tokenizer?.buffer()??"";return e._tokenizer?.reset(),{...e,incomplete:"",droppedMousePrefix:o}}function Bb(e){return{kind:"key",n
+
+## isValidStoragePathSegment hits=0
+
+## Kb.test(e) hits=2
+- #0 @211019113 ype=e}}});var fh=U(()=>{wb()});import{Buffer as Qc}from"buffer";function ol(e){return e.length<=GM&&Kb.test(e)}function Ib(e){let o=e._tokenizer?.buffer()??"";return e._tokenizer?.reset(),{...e,incomplete:"",dr
+- #1 @227154468 =SC(t)?t+"":t}if(typeof e!="string")return e===0?e:+e;e=e.replace(Gb,"");var r=Vb.test(e);return r||Kb.test(e)?Yb(e.slice(2),r?2:8):jb.test(e)?IC:+e}_C.exports=Xb});var vC=R(function(KY,wC){var nO="[object Numb
+
+## invalid storage key hits=0
+
+## keyError hits=0
+
+## function _r( hits=32
+- #0 @206678704 ool_deferred":case"max_turns":case"background_requested":case"completed":return!1;default:return!1}}function _r(m){return m.reason==="api_error"?`api_error_${m.errorKind??"unknown"}`:m.reason}function yr(m){retur
+- #1 @207039367 ed"&&"telemetryCode"in e&&e.telemetryCode===It}function Dr(e){return e===Nt?"unknown":"environment"}function _r(e){if(e===void 0)return"unknown";if(Ct.has(e))return"permission";if(Ft.has(e))return"resource";if(Ht
+- #2 @207801746 )}catch{}this.identities.clear()}}function re(){return wt.of(Se().host)}function we(e){return te(e)}function _r(e,t,r,n){re().record(e,t,r,n)}function N(e){return}function He(e,t,r,n){let o=`${t}${r}`;return o}as
+- #3 @208085808 updated":return e.value;default:return}}function Ro(e){return e===null?"absent":`${e.length} chars`}function _r(e){if(!e?.env)return e;let t=ge(e.env,(n,o)=>Cr.has(o.toUpperCase()));return{...e,env:t}}function Pr
+- #4 @208892741 }.VERSION}${t}`}function pue(){return`Claude-User (${pr()}; +https://support.anthropic.com/)`}async function _r(){if(!Yt()&&tt())try{let{getWIFCredentials:e,getWIFTokenCache:t}=await import("B:/~BUN/root/chunk-6a
+- #5 @209093537  n.stopped=!0,n;return n.bytes+=o,n.lines.push(r),n},{bytes:0,lines:[],stopped:!1}).lines.join(`
+`)}function _r(e,t){let n=Object.fromEntries([["node_type",Nt],...Object.entries(e.metadata).filter(([s])=>s!=="nod
+- #6 @209133445 d 0)return null;let r=p(t.path),o=r.slice(r.lastIndexOf("/")+1);return o.startsWith("cagt_")?o:null}function _r(){let e=c().grantedStores;return e===null?[]:[...e]}function Sr(){return c().lastAskDowngraded}funct
+- #7 @210248006 tions:o};return c=E.remainder,{success:!0,value:[h.value,E.value],remainder:c,failedExpectations:o}}function _r(u){let o=[],c=u,g=On(c);if(o.push(...g.failedExpectations),g.success===!1)return{success:!1,remainde
+- #8 @210872632 .countForProject(e,t)}function br(e){return y().readForProject(e)}function Ve(e,t,n){y().add(e,t,n)}function _r(e,t,n){let r=!1;for(let i of e){if(!i.historyEntry)continue;r=!0;try{Ve(i.historyEntry,t,{submitMode
+- #9 @210914828 unction mr(r){return r.startsWith("light")}function lr(r){return typeof r==="string"&&A.includes(r)}function _r(r){return Object.hasOwn(R,r)}function ur(r){switch(r){case"light":return D;case"light-ansi":return P
+- #10 @211061985 ar t=_c!==0;return _c=0,t}function ei(t,n,r){n.updateQueue=t.updateQueue,n.flags&=-2053,t.lanes&=~r}function _r(t){if(Nc){for(t=t.memoizedState;t!==null;){var n=t.queue;n!==null&&(n.pending=null),t=t.next}Nc=!1}d
+- #11 @211593466 At()});var Pt=(r)=>r.type==="Identifier"?r.name:r.type==="Literal"?String(r.value):"";var Hi=()=>{};function _r({program:r,names:{functions:n,assigned:a,declaredOnce:u},refuse:l},p,m=""){let d=p==="default"?"the 

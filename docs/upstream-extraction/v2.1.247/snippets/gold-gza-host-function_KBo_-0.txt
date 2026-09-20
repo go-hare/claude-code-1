@@ -1,0 +1,2 @@
+# needle=function KBo( pos=214580005
+function KBo(e,t){let n=`@${t}`,r=new Set,o=[];for(let s of Object.keys(e.plugins)){if(!s.endsWith(n))continue;for(let i of e.plugins[s]??[])if(i.installPath)r.add(i.installPath);delete e.plugins[s],o.push(s)}return{write:o.length>0,result:{orphanedPaths:Array.from(r),removedPluginIds:o}}}

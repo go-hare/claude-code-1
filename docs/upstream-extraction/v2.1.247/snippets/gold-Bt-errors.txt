@@ -1,0 +1,3 @@
+# 247 offset=211375634 needle="function Bt(){return"
+
+"home"],["end","end"]]});function nt(){}function Bt(){return{decls:new WeakMap,scopesChanged:Z(),preemptiveScopes:new Map,swallowAll:new Map,keyDispatchTrace:Z()}}function tt(Gt){let D=P(24),{bindings:y,pendingChordRef:de,pendingChord:ue,setPendingChord:fe,activeContexts:ye,registerActiveContext:me,unregisterActiveContext:ge,handlerRegistryRef:he,preDispatchRef:W,keyHandlerRegistry:be,children:Ce}=Gt,q;if(D[0]!==y||D[1]!==de)q=(Yt,Wt,$t

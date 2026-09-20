@@ -1,0 +1,8 @@
+# off=215358785 needle="substring(0,"
+
+ow(),n=await aU();if(Ke("info","git_is_git_check_completed",{duration_ms:Date.now()-t,is_git:n}),!n)return Ke("info","git_status_skipped_not_git",{duration_ms:Date.now()-e}),ce("context_git_detect"),null;try{let r=Date.now(),[o,s,i,a,l]=await Promise.all([Z_(),RT(),Oo($n(),["--no-optional-locks","status","--short"],{preserveOutputOnError:!1}).then(({stdout:d})=>d.trim()),Oo($n(),["--no-optional-locks","log","--oneline","-n","5"],{preserveOutputOnError:!1}).then(({stdout:d})=>d.trim()),Oo($n(),["config","user.name"],{preserveOutputOnError:!1}).then(({stdout:d})=>d.trim())]);Ke("info","git_commands_completed",{duration_ms:Date.now()-r,status_length:i.length});let c=xs()?kn:Gn,u=i.length>zCt?i.substring(0,zCt)+`
+... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${c})`:i;return Ke("info","git_status_completed",{duration_ms:Date.now()-e,truncated:i.length>zCt}),ce("context_git_detect"),["This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.",`Current branch: ${o}`,`Main branch (you will usually use this for PRs): ${s}`,...l?[`Git user: ${l}`]:[],`Status:
+${u||"(clean)"}`,`Recent commits:
+${a}`].join(`
+
+`)}catch(r){return Ke("error","git_status_failed",{duration_ms:Date.now()-e}),te("context_git_detect","git_cmd_failed"),_(`Failed to get git

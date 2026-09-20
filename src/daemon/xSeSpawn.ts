@@ -26,6 +26,7 @@ import {
   shellExecSpec,
   type DispatchRequest,
 } from './bgWorker.js'
+import { buildDispatchProviderEnv } from './bgHostManagedEnv.js'
 import {
   CLOUD_BG_CONFLICT,
   collectUncWarnPaths,
@@ -341,6 +342,12 @@ function buildDispatchRequest(opts: XSeOpts): {
   }
 
   const env = {
+    ...buildDispatchProviderEnv({
+      exec: opts.exec,
+      source,
+      cwd: opts.cwd,
+      currentCwd: tryProcessCwd(),
+    }),
     ...inheritEnv,
     ...(opts.env ?? {}),
     ...(opts.reattachEnv ?? {}),

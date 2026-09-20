@@ -1,0 +1,21 @@
+# offset=201127010 ver=247 needle="unwritten output"
+
+tal_sessions...sessions_with_branches...max_branches_per_session...m&B.avg_branches_per_session...[S.total_transcript_count..*...appendEntryToExistingFileSync: short write...v..O_RDWR...R..O_APPENDR...vxf.Cannot destructure property 'relocationParkedAppends' from null or undefined value...ai-title...%...declaredDialogKinds...<.."history-suppression"...`...history-suppression.
+..._|..groupingId..
+...W.lastPrompt...x.*.leafTs...yw.Hook sessionTitle cached (...M...isolation-latch...D...{"parentUuid":...","timestamp":"...{"type":"attribution-snapshot"....."parentUuid":...A.O."compact_boundary"...%..."type":"last-prompt"...tengu_transcript_phantom_parent...streamTranscriptFile pass2 (...O.total_offsets...walked_slots...C.lastAttributionOffset...iw.lastAttributionLength...0B..ledgerLines.	...r..finalLine...D...H...Cannot destructure property 'holderPid' from null or undefined value...~..processEntry...[8..dropPreBoundaryEntries...o;.setTailTorn....R..keepAllLeaves...C."type":"frame-link"....c..."tool_result"..."...(.<command-name>/loop</command-name>..."isMeta": true...7.Proactive session...h.."type":"...m.cleanupTerminalModes	...oW.non-error...].isHostError...error_stack...GIc.SdkError...Z.".CONNECTION_CLOSED...tengu_scroll_summary...d..error_message_hash...Y..mainModelOverrideKeys...P.s1Suffix...s2Suffix	...s1Prefill...(...!...Failed to mirror auto mode dump to CCR: ...~...lineFor.@...Cannot destructure property 'claim' from null or undefined value2...^Stream closed with error code NGHTTP2_[A-Z0-9_]+$..$...^Session closed with error code \d+$...d..
+[output truncated: exceeded ... disk cap]
+.
+...#...exhaustion...no errno ...Task output drain retry failed (%...`T..Task output still cannot be written (...!.); dropped ... chars of unwritten output..	...v.N.innerCall...	...=..[stderr] .../...
+Output truncated (.5...KB total). The full output could not all be saved to ...)...$rN.; that file may be missing or incomplete...!...7...KB total). Full output saved to: .../...X.Cannot access static private method or accessor. ...Command aborted before execution!...stream_no_events_fallback_warning...K.recentRequests...Ksd.whenRegistered...2...w100...4..w200...
+Preview feature:
+Use the optional `preview` field on options when presenting concrete artifacts that users need to visually compare:
+- ASCII mockups of UI layouts or components
+- Code snippets showing different implementations
+- Diagram variations
+- Configuration examples
+
+Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. When any option has a preview, the UI switches to a side-by-side layout with a vertical option list on the left and preview on the right. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).
+...Q...C[.
+.P.r.e.v.i.e.w. .f.e.a.t.u.r.e.:.
+.U.s.e. .t.h.e. .o.p.t.i.o.n.a.l. .`.p.r.e.v.i.e.w.`. .f.i.e.l.d. .o.n. .o.p.t.i.o.n.s. .w.h.e.n. .p.r.e.s.e.n.t.i.n.g. .c.o.n.c.r.e.t.e. .a.r.t.i.f.a.c.t.s. .t.h.a.t. .u.s.e.r.s. .n.e.e.d. .t.o. .v.i.s.u.a.l.l.y. .c.o.m.p.a.r.e.:.
+.-. .H.T.M.L. .m.o.c.k.u.p.s. .o.f. .U.I. .l.a.y.o.u.t.s. .o.r. .c.

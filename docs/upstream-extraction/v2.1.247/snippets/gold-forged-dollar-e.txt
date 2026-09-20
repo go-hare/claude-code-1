@@ -1,0 +1,20 @@
+# $e / Qfd / ni which-on-PATH — official-247 SEA
+# Bare `function $e(e,n){` hits=3 NOT UNIQUE
+# lock: `Qfd as $e` @210531489 from `_825`; `ni as Qfd` @207220697
+# body: `function ni(o,E){` UNIQUE @207162110
+# Ir caller `$e("git"` UNIQUE @210559306
+# helpers same window: Ht @207161941, w @207162045, ft @207162204, Ft @207162282
+# h = `gyd as h` @207161563 = `Qo as gyd` @206915900; Qo UNIQUE @206912790
+# Qo @206912790 full: fe/pe/he/Kr/G + kr Set + xe=homedir. Wired.
+
+import{gyd as h,nyd as Gt}from"B:/~BUN/root/_841.js";
+import{delimiter as y,isAbsolute as V}from"path";
+function Ht(o){let E=process.cwd();return o.filter((_)=>!h(_,E))}
+function X(o){return w(o,Bun.which(o))}
+function w(o,E){if(!E||!1||V(o))return E;return Ht([E])[0]??null}
+function ni(o,E){let _=E.split(y).filter((n)=>ft(n));return _.length===0?null:Ft(o,_.join(y))}
+function ft(o){if(!V(o))return!1;return/^(?:[a-zA-Z]:[\\/]|[\\/]{2})/.test(o)}
+function Ft(o,E){return w(o,Bun.which(o,{PATH:E}))}
+export{...,ni as Qfd,z as Rfd,...};
+
+function Ir(e){let n=R(e,"PATH")??"",t=xn.get(n);if(t!==void 0)return t;let r=$e("git",n);if(r!==null)xn.set(n,r);return r}

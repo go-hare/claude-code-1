@@ -1,0 +1,108 @@
+# SEA 247 C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+# peeled by _peel-ssh-forwarding{,-pass2,-pass3,-pass4,-pass5}.mjs
+#
+# Question: does upstream have `claude ssh`, and what does it forward to the
+# remote CLI spawn? (Asked while auditing our own forwarding whitelist.)
+
+## 1. `claude ssh` takes a HOST upstream. sshConfigs is schema-only.
+
+FIRST READ OF THIS WAS WRONG and the wrong version briefly reached
+docs/features/ssh-remote.md. The schema text below mentions
+`claude ssh <config> [dir]`, which reads like the positional is a named config:
+
+  sshConfigs: array(object({
+    id:               string   "Unique identifier for this SSH config. Used to match configs across settings sources."
+    name:             string   "Display name for the SSH connection"
+    sshHost:          string   'SSH host in format "user@hostname" or "hostname", or a host alias from ~/.ssh/config'
+    sshPort:          int?     "SSH port (default: 22)"
+    sshIdentityFile:  string?  "Path to SSH identity file (private key)"
+    startDirectory:   string?  "Default working directory on the remote host. Supports tilde
+                                expansion (e.g. ~/projects). If not specified, defaults to the
+                                remote user home directory. Can be overridden by the [dir]
+                                positional argument in `claude ssh <config> [dir]`."
+  }))?  "SSH connection configurations for remote environments. Typically set in managed
+         settings by enterprise administrators to pre-configure SSH connections for team members."
+
+But that design is NOT SHIPPED in 247. Whole-binary occurrence counts:
+
+  sshConfigs      n=2   (string table + the zod schema above)
+  sshHost         n=2   (ditto)
+  startDirectory  n=2   (ditto)
+  .command("ssh   n=0   /  "ssh <  n=0   /  identityFile  n=0
+
+Zero consumers. What DOES ship reads a host off the invocation descriptor
+(@222790197, the main action handler):
+
+  hasSSH: Boolean(i?.host)
+  ...
+  if ($t !== null || Ht !== null || Pr || Boolean(s?.url) || Boolean(i?.host))
+    return f("Error: --watch-artifact is not available in sessions attached to a remote environment ...")
+
+  => upstream's shipped shape is a `.host`-bearing descriptor, i.e. the same as
+     our _pendingSSH.host, and our `claude ssh <host> [dir]` matches it.
+     Our sshConfigs is likewise schema-only (src/utils/settings/types.ts +
+     one config.test.ts validation case, no consumer) with all six fields
+     word-for-word identical. Both the schema and the CLI surface are 1:1.
+     Do NOT rewrite <host> into <config> against a describe() string.
+
+Also not found, so the `BatchMode` / "SSH config check" hits are a false lead --
+they belong to git/marketplace cloning (core.sshCommand=..., ssh -T git@github.com),
+not to `claude ssh`.
+
+## 2. `claude ssh` is one of four mutually exclusive remote backends
+
+@221654975 (the --cloud / --environment validator, `${n}` = the flag under test):
+
+  if (e.hasConnect || e.hasSSH || e.hasAssistant || e.hasTeleport) {
+    let t = e.hasConnect ? "a cc:// connect URL"
+          : e.hasSSH ? "`claude ssh`"
+          : e.hasAssistant ? "`claude assistant`"
+          : "--teleport";
+    return `Error: ${n} cannot be combined with ${t} \u2014 both select a remote backend; pick one.`
+  }
+
+  Also in the same validator: `${n}` cannot be combined with --continue, and
+  cannot be combined with --resume / --from-pr. Note this constrains `${n}`
+  (a backend selector), NOT ssh's own flag set -- it says nothing about whether
+  `claude ssh` may take --continue/--resume.
+
+## 3. Auth tunnel env var is ANTHROPIC_UNIX_SOCKET
+
+Consumed by the API client's fetch options (@207715569):
+
+  if (e.forAnthropicAPI) {
+    let s = p.ANTHROPIC_UNIX_SOCKET;
+    if (s) return { ...r, unix: s }
+  }
+
+Remote Control gate treats it as "am I an ssh remote" (@208741188):
+
+  if (process.env.ANTHROPIC_UNIX_SOCKET)
+    return `${e} ANTHROPIC_UNIX_SOCKET is set (claude ssh remote), and the local proxy is API-key-authed.`
+
+Classified as a host-managed provider marker alongside the managed-by-host vars
+(@207299067 / @207304643):
+
+  function RO(_) { return !!_.ANTHROPIC_UNIX_SOCKET
+    || N(_.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)
+    || !!_.CLAUDE_CODE_HOST_AUTH_ENV_VAR }
+  OE = ["ANTHROPIC_UNIX_SOCKET","CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST","CLAUDE_CODE_HOST_AUTH_ENV_VAR"]
+
+  => our src/utils/proxy.ts + auth.ts + managedEnv.ts already match this name.
+     But src/ssh/SSHAuthProxy.ts was PRODUCING `ANTHROPIC_AUTH_SOCKET`, which
+     nothing read anywhere -- fixed, see sshAuthSocketEnv.test.ts.
+
+## 4. NOT FOUND upstream (so these are ours, not extracted)
+
+  ---  StreamLocalBindUnlink        (our -R socket cleanup option)
+  ---  ANTHROPIC_AUTH_SOCKET        (the dead name we had)
+  ---  claude-ssh-auth-             (our socket path template)
+  ---  --remote-bin                 (our custom-binary escape hatch)
+  ---  "is not supported with claude ssh"  (our -p rejection message)
+  ---  identityFile / RemoteForward / unixSocket
+
+The only `ANTHROPIC_UNIX_SOCKET=` literal upstream (@208738101) is a debug label
+in the Remote Control auth dump ("  ANTHROPIC_UNIX_SOCKET="), not a spawn
+command assembly. Upstream's remote argv construction was not located in this
+pass, so our forwarding whitelist in main.tsx remains OUR design decision and is
+documented as such -- do not cite it as densable-aligned.

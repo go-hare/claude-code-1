@@ -1,0 +1,3 @@
+# 209665085
+
+function Qi(e,t){return e^t}

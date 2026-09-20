@@ -1,0 +1,116 @@
+# ver=246 offset=68779561 kind=js run=64451 needle="failed with exit code"
+
+, line.length > 0)
+            reporter.stderr({ __proto__: null, file: absolute, message: line + `
+` });
+        }
+      }
+      if (carry2.length > 0)
+        reporter.stderr({ __proto__: null, file: absolute, message: carry2 + `
+` });
+    })(), drainStderr.catch(() => {});
+    let handleStdoutLine = (line) => {
+      if (line.length === 0)
+        return;
+      let marker = line.indexOf("\x00bun:test:run\x00");
+      if (marker === -1) {
+        reporter.stdout({ __proto__: null, file: absolute, message: line + `
+` });
+        return;
+      }
+      if (marker > 0) {
+        let before = line.slice(0, marker).trimEnd();
+        if (before.length > 0)
+          reporter.stdout({ __proto__: null, file: absolute, message: before + `
+` });
+      }
+      let event;
+      try {
+        event = JSON.parse(line.slice(marker + 14));
+      } catch {
+        return;
+      }
+      if (event == null || typeof event.data !== "object" || event.data === null)
+        return;
+      republishChildEvent(event, absolute, reporter, fileCounts);
+    }, decoder = /* @__PURE__ */ new TextDecoder, carry = "";
+    for await (let chunk of proc.stdout) {
+      carry += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !0 });
+      let nl;
+      while ((nl = carry.indexOf(`
+`)) !== -1) {
+        let line = carry.slice(0, nl);
+        carry = carry.slice(nl + 1), handleStdoutLine(line);
+      }
+    }
+    if (carry.length > 0)
+      handleStdoutLine(carry);
+    await drainStderr;
+    let exitCode = await proc.exited, fileFailed = exitCode !== 0 && fileCounts.failed === 0, fileDuration = Date.now() - fileStarted, reportedChildren = fileCounts.tests + fileCounts.suites, error;
+    fileCounts.topLevel++;
+    let reportFileNode = reportedChildren === 0 || fileFailed;
+    if (reportFileNode)
+      if (fileCounts.tests++, fileFailed)
+        fileCounts.failed++;
+      else
+        fileCounts.passed++;
+    if (fileFailed)
+      error = makeTestFailure(stderrText.trim() || `Test file failed with exit code ${exitCode}`, "testCodeFailure");
+    else
+      reporter.summary({
+        __proto__: null,
+        success: fileCounts.failed === 0,
+        counts: { __proto__: null, ...fileCounts },
+        duration_ms: fileDuration,
+        file: absolute
+      });
+    if (reportFileNode) {
+      reporter.complete({
+        __proto__: null,
+        ...fileNode,
+        type: @undefined,
+        testNumber: 1,
+        details: {
+          __proto__: null,
+          duration_ms: fileDuration,
+          type: "test",
+          passed: !fileFailed,
+          error
+        }
+      });
+      let details = { __proto__: null, duration_ms: fileDuration, type: "test", error };
+      if (fileFailed)
+        reporter.fail({ __proto__: null, ...fileNode, type: @undefined, testNumber: 1, details });
+      else
+        reporter.pass({ __proto__: null, ...fileNode, type: @undefined, testNumber: 1, details });
+    }
+    addRunCounts(counts, fileCounts);
+  } finally {
+    if (proc.kill(), drainStderr !== @undefined)
+      await drainStderr.catch(() => {});
+  }
+}
+function rebuildError(serialized, depth = 0) {
+  let { message, stack, name, code, failureType, cause } = serialized, error = Error(message);
+  if (error.stack = stack, name !== @undefined && name !== "Error")
+    error.name = name;
+  if (code !== @undefined)
+    error.code = code;
+  if (failureType !== @undefined)
+    error.failureType = failureType;
+  if (cause !== @undefined && depth < 8)
+    error.cause = rebuildError(cause, depth + 1);
+  return error;
+}
+function republishChildEvent(event, file, reporter, counts) {
+  let { type, data } = event;
+  if (Object.setPrototypeOf(data, null), data.file = file, data.nesting = (data.nesting ?? 0) + 1, type === "test:pass" || type === "test:fail") {
+    let isSuite = data.type === "suite";
+    if (isSuite)
+      counts.suites++;
+    else if (counts.tests++, data.skip)
+      counts.skipped++;
+    else if (data.todo)
+      counts.todo++;
+    else if (type === "test:pass")
+ 

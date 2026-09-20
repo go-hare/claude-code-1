@@ -1,0 +1,3 @@
+# 247-after-LZ n=5 function pv start=210416192 end=210416411 len=219 sha=cd668f51aa0458c8
+
+function pv(e,t){if(e===null||t===null)return!0;let n=t.map((r)=>r.split("/").filter(Boolean));return e.some((r)=>{let s=r.split("/").filter(Boolean);return n.some((i)=>i.length<=s.length&&i.every((a,l)=>MZ(a,s[l])))})}

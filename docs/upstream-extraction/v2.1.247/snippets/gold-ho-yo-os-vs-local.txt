@@ -1,0 +1,7 @@
+# os@207875596 === local isBareMarketplacePluginSource
+# os: function os(e){return typeof e==="string"&&xo.test(e)&&!e.includes("..")}
+# xo@207910796: xo=/^[A-Za-z0-9][-A-Za-z0-9._]*$/
+# local marketplacePluginRoot.ts:
+#   BARE_PLUGIN_SOURCE_RE = /^[A-Za-z0-9][-A-Za-z0-9._]*$/
+#   isBareMarketplacePluginSource: typeof string && RE.test && !includes("..")
+# NOT RelativePath (that is j=p(()=>i().startsWith("./")) @ Ao init)

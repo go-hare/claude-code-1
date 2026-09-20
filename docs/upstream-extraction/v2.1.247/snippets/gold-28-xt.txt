@@ -1,0 +1,16 @@
+# 247 xt vs 246 Ar — peer collapse + body preview
+
+247 xt({displayName,count,addMargin,fallbackLabel,body})
+  count??1, addMargin??true
+  shortcut app:toggleTranscript ctrl+o
+  ME=cy(displayName)||fallbackLabel
+  sy=body?ly(body):""
+  label=count===1?"Message":`${n} messages`
+  italic ": "+preview if body
+  dim [pointerSmall, label, " from @", ME, preview, " ", Fo expand hint]
+
+246 Ar: same without body/ly/preview.
+
+UserCrossSession (!transcript): o(xt,{displayName,addMargin,fallbackLabel,body})
+transcript: @ name + full body
+ly() body not locked in this peel — one-line preview only, no invented char cap.

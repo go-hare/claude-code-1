@@ -290,9 +290,30 @@ const INTERRUPT_TOOL_RESULT_PREFIXES = [
 ] as const
 
 /**
+ * Bash/PowerShell mapToolResult abort tag. Mid-run Esc kills the process and
+ * writes this into the tool_result body — not an aTe prefix.
+ */
+const COMMAND_ABORTED_ERROR_TAG =
+  '<error>Command was aborted before completion</error>'
+
+function isInterruptedToolUseResult(value: unknown): boolean {
+  if (value === USER_REJECTED_TOOL_USE) return true
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'interrupted' in value &&
+    (value as { interrupted?: unknown }).interrupted === true
+  )
+}
+
+/**
  * densable `Nvo` / `qn.interruptedCall`.
  * Collapse uses this so "Ran 1 shell command" is not the only signal when
  * a command in the group was cut (2.1.246 #12).
+ *
+ * Mid-run shell abort is `is_error` + `toolUseResult.interrupted` (TUI
+ * equivalent of Desktop `calls[].interrupted`) or the abort error tag.
+ * foe / aTe still cover permission-reject synthetics.
  */
 export function interruptedCall(
   message:
@@ -318,11 +339,12 @@ export function interruptedCall(
   ) {
     return false
   }
-  if (message.toolUseResult === USER_REJECTED_TOOL_USE) return true
+  if (isInterruptedToolUseResult(message.toolUseResult)) return true
   const body = 'content' in first ? first.content : undefined
   return (
     typeof body === 'string' &&
-    INTERRUPT_TOOL_RESULT_PREFIXES.some(prefix => body.startsWith(prefix))
+    (INTERRUPT_TOOL_RESULT_PREFIXES.some(prefix => body.startsWith(prefix)) ||
+      body.includes(COMMAND_ABORTED_ERROR_TAG))
   )
 }
 
@@ -568,6 +590,8 @@ function baseCreateAssistantMessage({
   error,
   errorDetails,
   truncatedAfterOutput,
+  requestId,
+  apiErrorStatus,
   isVirtual,
   usage = {
     input_tokens: 0,
@@ -591,6 +615,8 @@ function baseCreateAssistantMessage({
   error?: SDKAssistantMessageError
   errorDetails?: string
   truncatedAfterOutput?: boolean
+  requestId?: string
+  apiErrorStatus?: number
   isVirtual?: true
   usage?: Usage
 }): AssistantMessage {
@@ -610,7 +636,8 @@ function baseCreateAssistantMessage({
       content: content as ContentBlock[],
       context_management: null,
     },
-    requestId: undefined,
+    requestId,
+    apiErrorStatus,
     apiError,
     error,
     errorDetails,
@@ -650,12 +677,16 @@ export function createAssistantAPIErrorMessage({
   error,
   errorDetails,
   truncatedAfterOutput,
+  requestId,
+  apiErrorStatus,
 }: {
   content: string
   apiError?: AssistantMessage['apiError']
   error?: SDKAssistantMessageError
   errorDetails?: string
   truncatedAfterOutput?: boolean
+  requestId?: string
+  apiErrorStatus?: number
 }): AssistantMessage {
   return baseCreateAssistantMessage({
     content: [
@@ -669,6 +700,8 @@ export function createAssistantAPIErrorMessage({
     error,
     errorDetails,
     truncatedAfterOutput,
+    requestId,
+    apiErrorStatus,
   })
 }
 

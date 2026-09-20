@@ -1,0 +1,3 @@
+# 246-xZ function xZ() start=209159601 end=209159798 len=197 sha=e002b570dedd216b near=209177589
+
+function xZ(){for(let e of Ce().bareGitRepoScrubPaths){let t=e.slice(e.lastIndexOf(En)+1);try{Yv(e,{recursive:t!=="HEAD"&&t!==".git"}),H(`[Sandbox] scrubbed planted bare-repo file: ${e}`)}catch{}}}

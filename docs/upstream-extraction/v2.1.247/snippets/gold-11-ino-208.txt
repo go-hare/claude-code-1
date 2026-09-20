@@ -1,0 +1,2 @@
+it o.stat();if(!a.isFile())return n;if(r?.requireNlink1&&a.nlink!==1)return n;if(r?.verifyHandlePath){let u=null;if(u===null){u=await z.realpath(e);let s=await z.stat(u);if(s.dev!==a.dev||s.ino!==a.ino)return n}if(!r.verifyHandlePath(u))return n}if(r?.fromTail===!0){let u=a.size>t?a.size-t:0,s=Buffer.alloc(a.size-u),c=await Ct(o,s,u),m=Ge(s.subarray(0,c),r.sniffEncoding);if(u===0)return{content:m,truncated:!1};let g=m.indexOf(`
+`);return{content:g===-1?"":m.slice(g+1),truncated:!0}}let l=Math.mi

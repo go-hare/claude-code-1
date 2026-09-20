@@ -20,7 +20,13 @@ import { tailFile } from '../../utils/fsOperations.js';
 import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
-import { evictTaskOutput, getTaskOutputPath, getTaskOutputSize } from '../../utils/task/diskOutput.js';
+import {
+  appendTaskOutput,
+  evictTaskOutput,
+  getTaskOutputPath,
+  getTaskOutputSize,
+} from '../../utils/task/diskOutput.js';
+import { formatLocalShellExitFooter, shouldAppendLocalShellExitFooter } from './exitFooter.js';
 import {
   addKeepaliveReason,
   bashKeepaliveReason,
@@ -245,7 +251,7 @@ function installShellPressureReap(
   };
 }
 
-async function enqueueShellNotification(
+export async function enqueueShellNotification(
   taskId: string,
   description: string,
   status: 'completed' | 'failed' | 'killed',
@@ -259,7 +265,11 @@ async function enqueueShellNotification(
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
   let shouldEnqueue = false;
+  let claimedTask: LocalShellTaskState | undefined;
   updateTaskState(taskId, setAppState, task => {
+    if (isLocalShellTask(task)) {
+      claimedTask = task;
+    }
     if (task.notified) {
       return task;
     }
@@ -269,6 +279,11 @@ async function enqueueShellNotification(
 
   if (!shouldEnqueue) {
     return;
+  }
+
+  // Official ADt: if(!u?.isAdopted) RW(`[exited with code ${r??"unknown"}]`)
+  if (shouldAppendLocalShellExitFooter(claimedTask)) {
+    appendTaskOutput(taskId, formatLocalShellExitFooter(status, exitCode));
   }
 
   // Abort any active speculation — background task state changed, so speculated
@@ -326,8 +341,10 @@ async function enqueueShellNotification(
   enqueuePendingNotification({
     value: message,
     mode: 'task-notification',
+    skipAttachments: true,
     priority: feature('MONITOR_TOOL') ? 'next' : 'later',
     agentId,
+    taskId,
   });
 
   // densable Ovu dual bookend: XML for model + once-gated SDK task_notification

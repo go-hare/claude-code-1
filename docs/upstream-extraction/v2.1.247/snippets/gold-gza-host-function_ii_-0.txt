@@ -1,0 +1,2 @@
+# needle=function ii( pos=208131006
+function ii(e){if(I(e).composes==="tier")return null;let{merged:t,composed:n}=C(e);if(!t)return null;let r=[];if(n.remote)r.push("remote");if(n.mdm)r.push(_e());if(n.file)r.push("file");return r}

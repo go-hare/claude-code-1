@@ -1,0 +1,2 @@
+# @223273850
+: user, project, or local. Omit to remove it from every scope.").addOption(r()).action(t(async(s,c,d)=>{let[{marketplaceRemoveHandler:a},{createSubcommandRoot:m}]=await Promise.all([import("B:/~BUN/root/chunk-1d7qpv1r.js"),import("B:/~BUN/root/chunk-

@@ -1,0 +1,4 @@
+# ver=247 name=Cg async=true start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2 needle="with exit code"
+
+async function Cg(e,t,n,r={command:"rg"}){let{command:s,args:i=[],argv0:a}=r,l=dk(s,[...i,...e,t],{argv0:a,signal:n,timeout:1e4,windowsHide:!0}),[d,f,m]=await Promise.all([Rg(l.stdout),Rg(l.stderr),new Promise((p,b)=>{l.on("close",p),l.on("error",b)})]);if(m===0)return d.trim().split(`
+`).filter(Boolean);if(m===1)return[];throw Error(`ripgrep failed with exit code ${m}: ${f}`)}

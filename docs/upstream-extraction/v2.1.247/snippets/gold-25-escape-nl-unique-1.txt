@@ -1,0 +1,9 @@
+# 247 nl @207249248
+
+ used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Gzd as o,Lzd as c,_zd as E,eAd as C}from"B:/~BUN/root/_845.js";import{FBd as g}from"B:/~BUN/root/_850.js";function s(e){return Bun.stripANSI(e)}var l=()=>{};function k(e,n,r){let t=r?.keepNewlines===!0||r?.keepEmojiJoiners===!0,i=s(e.replace(d,"\u200B")).replace(r?.keepNewlines?O:t?N:_,n);return t?i.replace(S,""):i}function A(e){let n=e.replace(/[\p{Cf}\p{Co}\p{Cn}]/gu,"");return n=n.replace(/[\u200B-\u200F]/g,"").replace(/[\u202A-\u202E]/g,"").replace(/[\u2066-\u2069]/g,"").replace(/[\uFEFF]/g,"").replace(/[\uE000-\uF8FF]/g,""),n}function I(e){let n=c(e);for(let r=0;r<10;r++){

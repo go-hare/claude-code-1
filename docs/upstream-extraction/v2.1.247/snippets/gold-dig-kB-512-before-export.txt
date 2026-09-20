@@ -1,0 +1,57 @@
+# offset=211619476
+
+}'s headersHelper (an --add-dir declaration may not run commands)`,{level:"warn"});return{...p,...l&&{headers:wt(l,`--add-dir marketplace ${r} entry ${p.name}`)}}})}};return n}var mu;var Mp=g(()=>{va();Dp();ya();zt();wa();Wt();Gr();mu=["settings.json","settings.local.json"]});
+export{na as oeb,sa as peb,Op as qeb,Un as reb,$n as seb,$r as teb,Gn as ueb,Wn as veb,qn as web,Wp as xeb,zn as yeb,Yn as zeb,ts as Aeb,Qp as Beb,rs as Ceb,ss as Deb,as as Eeb,ih as Feb,nh as Geb,sl as Heb,sh as Ieb,ah as Jeb,oh as Keb,uh as Leb,lh as Meb,ch as Neb,ph as Oeb,hh as Peb,dh as Qeb,os as Reb,gh as Seb,K as Teb,dt as Ueb,Ah as Veb,yl as Web,fs as Xeb,Qe as Yeb,vs as Zeb,bs as _eb,_l as $eb,ti as afb,El as bfb,Mh as cfb,Cs as dfb,Wl as efb,ql as ffb,ld as gfb,ce as hfb,cd as ifb,pd as jfb,Jl as kfb,hd as lfb,dd as mfb,Zs as nfb,li as ofb,da as pfb,mc as qfb,qd as rfb,yc as sfb,zd as tfb,xc as ufb,Yd as vfb,mi as wfb,Xd as xfb,Qd as yfb,Jd as zfb,kc as Afb,_c as Bfb,Zd as Cfb,Je as Dfb,ef as Efb,Cc as Ffb,Ec as Gfb,Dc as Hfb,tf as Ifb,rf as Jfb,Fc as Kfb,gi as Lfb,Vc as Mfb,wa as Nfb,_a as Ofb,Y as Pfb,Ee as Qfb,Rt as Rfb,Ji as Sfb,bi as Tfb,Ma as Ufb,tp as Vfb,rp as Wfb,ip as Xfb,np as Yfb,sp as Zfb,nr as _fb,up as $fb,Ua as agb,uu as bgb,Fx as cgb,Rp as dgb,Mx as egb,Ox as fgb,lu as ggb,pu as hgb,hu as igb,Kx as jgb,Lp as kgb,ev as lgb,tv as mgb,Mp as ngb};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Dmc as c,Sbc as u}from"B:/~BUN/root/_675.js";import{kAc as a}from"B:/~BUN/root/_685.js";import{dPc as E}from"B:/~BUN/root/_715.js";import{Kfd as o}from"B:/~BUN/root/_824.js";import{kmd as i}from"B:/~BUN/root/_837.js";import{bxd as s}from"B:/~BUN/root/_839.js";import{FBd as e}from"B:/~BUN/root/_850.js";var r=e(()=>{s();c();o();i();a()});var D="default";var n=()=>{};function w(t){return t.toolPermissionContext.proactivityBaseline===void 0?void 0:t}var l=e(()=>{E();u();o();i();r();n()});
+export{D as Dhb,n as Ehb,r as Fhb,w as Ghb,l as Hhb};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Bsc as h,Htc as w,Jpc as a,Lpc as c,Ovc as v,bvc as p,cvc as d,dvc as f,etc as s,kvc as E,nvc as i,otc as _,ptc as o}from"B:/~BUN/root/_675.js";import{JCc as n,WCc as x}from"B:/~BUN/root/_696.js";import{FBd as l}from"B:/~BUN/root/_850.js";var b="artifact-design",S="artifact-diagramming",M="artifact-capabilities",N="workshop",T="whiteboard",K="prototype",k="dataviz",C="code-review",y="artifact-pr-review",F="verify",O="simplify",P="commit",D="pr",U="commit-push-pr",B="cowork-plugin",H="loop",G="schedule";var I=()=>{};function t(){return o(L,null)}function X(){let e=t()?.cost_note;return typeof e==="string"&&e.length>0?e:"$10-$20"}function Z(){let e=t()?.duration_note;return typeof e==="string"&&e.length>0?e:"~10\u201320 min"}function j(){let e=t()?.model;return typeof e==="string"&&e.length>0?e:void 0}function J(){let e=t(),u=(r,g)=>typeof r==="number"&&Number.isFinite(r)&&r>0?Math.floor(r):g;return{maxFiles:u(e?.max_diff_files,500),maxLines:u(e?.max_diff_lines,8000)}}function Q(){return t()?.empty_tree_fallback_enabled!==!1}function m(){return A()&&d()}function ee(){if(m())return null;let e=_(L,null);if(e.source==="fallback"&&!s())return"config_unavailable";if(e.value?.enabled!==!0)return"kill_switch";if(!n())return"third_party_provider";if(i())return"remote_environment";if(!p())return"non_first_party_base_url";return"entitlement"}function A(){return t()?.enabled===!0&&n()&&!i()}function te(){return o("tengu_ultrareview_post_enabled",!0)}function re(){if(!A()||m())return null;switch(f()){case"api_key_auth":return`${E({prefix:"ultra (cloud review) requires claude.ai account auth.",suffix:"to use ultra."})} See https://code.claude.com/docs/en/ultrareview.`;case"no_profile_scope":{let{source:e}=c();if(e==="CLAUDE_CODE_OAUTH_TOKEN")return`ultra (cloud review) requires a full-scope login token. ${a(e)} Then run \`claude auth login\` to use it; see https://code.claude.com/docs/en/ultrareview.`;return"ultra (cloud review) requires a full-scope login token \u2014 run `claude auth login` to use it; see https://code.claude.com/docs/en/ultrareview."}case"not_in_rollout":return"ultra (cloud review) isn't enabled for your account yet \u2014 run `claude auth login` to refresh your entitlements; see https://code.claude.com/docs/en/ultrareview.";default:return"ultra (cloud review) requires a claude.ai account \u2014 sign in to claude.ai to use it; see https://code.claude.com/docs/en/ultrareview."}}var L="tengu_review_bughunter_config";var R=l(()=>{v();w();h();x()});
+export{b as Ihb,S as Jhb,M as Khb,N as Lhb,T as Mhb,K as Nhb,k as Ohb,C as Phb,y as Qhb,F as Rhb,O as Shb,P as Thb,D as Uhb,U as Vhb,B as Whb,H as Xhb,G as Yhb,I as Zhb,t as _hb,X as $hb,Z as aib,j as bib,J as cib,Q as dib,m as eib,ee as fib,A as gib,te as hib,re as iib,R as jib};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{FBd as r}from"B:/~BUN/root/_850.js";function u(e){return e.length>0&&e.length<=256&&!i.test(e)}function a(e){return t(e.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"))}function t(e){return e.replace(l,(n)=>`&#${n.charCodeAt(0)};`)}function s(e){return e.replaceAll("<","&lt;").replaceAll(">","&gt;")}function c(e){return t(s(String(e??"")))}function A(e){return c(e).replaceAll('"',"&quot;")}var l,p=256,i;var o=r(()=>{l=/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g,i=/[\x00-\x1f\x7f-\x9f\u2028\u2029<>]/});
+export{p as Pib,i as Qib,u as Rib,a as Sib,s as Tib,c as Uib,A as Vib,o as Wib};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{FBd as r}from"B:/~BUN/root/_850.js";function n(e){return e!==void 0&&t.has(e)}function R(e){return e.code==="Failed"&&n(e.telemetryCode)}var o,t;var E=r(()=>{o=["ELOOP","ENXIO","EISDIR"],t=new Set(o)});
+export{t as Xib,n as Yib,R as Zib,E as _ib};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.

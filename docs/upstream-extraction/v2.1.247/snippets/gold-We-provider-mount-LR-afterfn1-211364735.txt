@@ -1,0 +1,2 @@
+# afterfn1 @211364735 end=211364887
+function m8(e,o,i){let l=i?.storageV5!==void 0?L0(i.storageV5):void 0;if(o!==void 0&&"write"in o)return Iy(H0(e,l),o);return Iy(H0(e,l),{...kR(),...o})}

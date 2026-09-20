@@ -10,13 +10,16 @@
 
 import axios from 'axios'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
-import { dirname, join, resolve, sep } from 'path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { waitForScrollIdle } from '../../bootstrap/state.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { logEvent } from '../../services/analytics/index.js'
 import { logForDebugging } from '../debug.js'
 import { parseZipModes, unzipFile } from '../dxt/zip.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { errorMessage, getErrnoCode } from '../errors.js'
+import { isValidStoragePathSegment } from '../sessionNameJobSidecar.js'
+import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 
 type SafeString = AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 
@@ -32,6 +35,53 @@ const GCS_BASE =
 // so the titanium seed machinery can use the same zip. Strip this prefix when
 // extracting for a laptop install.
 const ARC_PREFIX = 'marketplaces/claude-plugins-official/'
+const GCS_SHA_FILENAME = '.gcs-sha'
+
+type OfficialMarketplaceGcsStorageV5 = {
+  readText: (reqs: unknown[]) => Promise<
+    | {
+        ok: true
+        value: { items: Array<{ found: boolean; value?: string }> }
+      }
+    | { ok: false; error?: unknown }
+  >
+}
+
+/**
+ * densable `J8`/`ph` — `.gcs-sha` under dirname(marketplacesCacheDir)/marketplaces.
+ * `Xr(n)` is leftover-wired default `{configHome}/plugins`.
+ */
+function marketplaceTreeKeyForGcsSha(
+  gcsShaPath: string,
+  marketplacesCacheDir: string,
+): Record<string, unknown> | null {
+  const pluginsDir = dirname(marketplacesCacheDir)
+  if (pluginsDir !== join(getClaudeConfigHomeDir(), 'plugins')) {
+    return null
+  }
+  const marketplacesDir = join(pluginsDir, 'marketplaces')
+  const rel = relative(marketplacesDir, gcsShaPath)
+  if (
+    rel === '' ||
+    rel === '..' ||
+    rel.startsWith(`..${sep}`) ||
+    isAbsolute(rel)
+  ) {
+    return null
+  }
+  const parts = rel.split(sep)
+  if (join(marketplacesDir, ...parts) !== gcsShaPath) {
+    return null
+  }
+  if (parts.length < 2 || !parts.every(isValidStoragePathSegment)) {
+    return null
+  }
+  return {
+    namespace: 'marketplaceCache',
+    marketplace: parts[0],
+    relPath: parts.slice(1),
+  }
+}
 
 /**
  * Fetch the official marketplace from GCS and extract to installLocation.
@@ -47,6 +97,7 @@ const ARC_PREFIX = 'marketplaces/claude-plugins-official/'
 export async function fetchOfficialMarketplaceFromGcs(
   installLocation: string,
   marketplacesCacheDir: string,
+  storageV5?: unknown,
 ): Promise<string | null> {
   // Defense in depth: this function does `rm(installLocation, {recursive})`
   // during the atomic swap. A corrupted known_marketplaces.json (gh-32793 —
@@ -91,11 +142,24 @@ export async function fetchOfficialMarketplaceFromGcs(
 
     // 2. Sentinel check — `.gcs-sha` at the install root holds the last
     //    extracted SHA. Matching means we already have this content.
-    const sentinelPath = join(installLocation, '.gcs-sha')
-    const currentSha = await readFile(sentinelPath, 'utf8').then(
-      s => s.trim(),
-      () => null, // ENOENT — first fetch, proceed to download
-    )
+    const sentinelPath = join(installLocation, GCS_SHA_FILENAME)
+    const treeKey =
+      isHoverRestOn() && storageV5 !== undefined
+        ? marketplaceTreeKeyForGcsSha(sentinelPath, marketplacesCacheDir)
+        : null
+    let currentSha: string | null
+    if (storageV5 !== undefined && treeKey !== null) {
+      const loaded = await (
+        storageV5 as OfficialMarketplaceGcsStorageV5
+      ).readText([treeKey])
+      const item = loaded.ok ? loaded.value.items[0] : undefined
+      currentSha = item?.found ? (item.value ?? '').trim() : null
+    } else {
+      currentSha = await readFile(sentinelPath, 'utf8').then(
+        s => s.trim(),
+        () => null, // ENOENT — first fetch, proceed to download
+      )
+    }
     if (currentSha === sha) {
       outcome = 'noop'
       return sha
@@ -135,7 +199,7 @@ export async function fetchOfficialMarketplaceFromGcs(
         await chmod(dest, mode & 0o777).catch(() => {})
       }
     }
-    await writeFile(join(staging, '.gcs-sha'), sha)
+    await writeFile(join(staging, GCS_SHA_FILENAME), sha)
 
     // Atomic swap: rm old, rename staging. Brief window where installLocation
     // doesn't exist — acceptable for a background refresh (caller retries next

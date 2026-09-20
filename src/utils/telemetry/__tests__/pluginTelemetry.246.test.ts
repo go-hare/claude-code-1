@@ -98,7 +98,9 @@ describe('Vsn server_plugin_id (2.1.246)', () => {
   })
 
   test('emits raw Nl-valid id, not a hash', () => {
-    expect(telemetryServerPluginId('plugin_abc123')).toBe('plugin_abc123')
+    expect(telemetryServerPluginId('plugin_abc123') as string | undefined).toBe(
+      'plugin_abc123',
+    )
     expect(telemetryServerPluginId('plugin_abc123')).not.toBe(
       hashPluginId('plugin_abc123'),
     )

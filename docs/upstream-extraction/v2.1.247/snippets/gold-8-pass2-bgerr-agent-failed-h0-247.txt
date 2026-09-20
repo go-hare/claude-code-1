@@ -1,0 +1,17 @@
+# off=217915089
+
+nfirmed.length + " confirmed, " + killed.length + " refuted, " + unverified.length + " unverified")
+
+const toRefuted = c => ({ claim: c.claim, vote: (c.verdicts.length - c.refutedVotes) + "-" + c.refutedVotes, source: c.sourceUrl })
+const toUnverified = c => ({ claim: c.claim, erroredVotes: c.erroredVotes, validVotes: c.verdicts.length, source: c.sourceUrl })
+
+if (confirmed.length === 0) {
+  // Distinguish "refuted on merit" from "could not verify (infra error)". A run
+  // where every verifier agent failed (rate-limit / API error) is an infra
+  // failure, not a research finding \u2014 report it as such so the user knows to
+  // retry rather than concluding the research found nothing.
+  let summary
+  if (killed.length === 0 && unverified.length > 0) {
+    summary = "Could not verify any claims \u2014 all " + unverified.length + " verifier panels failed (likely rate-limiting or API errors). This is an infrastructure failure, not a research finding. Raw extracted claims returned below; retry or verify manually."
+  } else if (unverified.length > 0) {
+    summary = killed.length + " claims refuted by adversarial verification; " + unverified.length + " could not be verified (verifier a

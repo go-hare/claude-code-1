@@ -1,0 +1,3 @@
+# offset=209996818 
+
+i=new Map;Re={initialize:mD,isSupportedPlatform:Db,isSandboxingEnabled:hD,checkDependencies:gD,checkDependenciesAsync:Lb,getFsReadConfig:bD,getFsWriteConfig:yD,getNetworkRestrictionConfig:xD,getAllowUnixSockets:Mb,getAllowLocalBinding:$b,getAllowMachLookup:Bb,getIgnoreViolations:Vb,getEnableWeakerNestedSandbox:Wb,getProxyPort:Vd,getProxyAuthToken:ND,getSocksProxyPort:Wd,getLinuxHttpSocketPath:Hb,getLinuxSocksSocketPath:jb,waitForNetworkInitialization:Gd,wrapWithSandbox:Yb,wrapWithSandboxArgv:RD,cleanupAfterCommand:kD,reset:Hd,getMitmCA:()=>St,getSentinelRegistry:()=>Rs,getAwsPairRegistry:()=>Dc,getMaskedFileStore:()=>kc,getSandboxViolationStore:LD,annotateStderrWithSandboxFailures:UD,getLinu

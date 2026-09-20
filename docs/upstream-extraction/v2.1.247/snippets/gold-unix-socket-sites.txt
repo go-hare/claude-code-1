@@ -1,0 +1,87 @@
+
+--- 4 @ 207217672 ---
+UNDRY_BASE_URL:()=>TI,ANTHROPIC_FOUNDRY_RESOURCE:()=>LI,ANTHROPIC_GOOGLE_CLOUD_BASE_URL:()=>AI,ANTHROPIC_GOOGLE_CLOUD_LOCATION:()=>sI,ANTHROPIC_GOOGLE_CLOUD_PROJECT:()=>nI,ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID:()=>CI,ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION:()=>MI,ANTHROPIC_UNIX_SOCKET:()=>uI,ANTHROPIC_VERTEX_BASE_URL:()=>OI,ANTHROPIC_VERTEX_PROJECT_ID:()=>DI,AWS_ACCESS_KEY_ID:()=>UI,AWS_CONFIG_FILE:()=>II,AWS_DEFAULT_REGION:()=>SI,AWS_ENDPOINT_URL:()=>lI,AWS_ENDPOINT_URL_STS:()=>PI,AWS_PROFILE:()=>RI,AWS_REGION:()=>pI,
+
+--- 5 @ 207299067 ---
+E=_.toUpperCase();return q_.has(E)||$_.some((O)=>E.startsWith(O))||z_.some((O)=>E.startsWith(O))}function CO(_){return j_.has(_.toUpperCase())}function DO(_){return _E.has(_.toUpperCase())}function LO(_){return EE.has(_.toUpperCase())}function RO(_){return!!_.ANTHROPIC_UNIX_SOCKET||N(_.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)||!!_.CLAUDE_CODE_HOST_AUTH_ENV_VAR}function SO(_){if(!N(_.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST))return[];let E=e.some((T)=>N(_[T])),O=!!_.CLAUDE_CODE_HOST_AUTH_ENV_VAR||v_.some((T)=>!!_[T])||!!_.
+
+--- 6 @ 207304643 ---
+ Set(["AWS_PROFILE"]);_E=new Set(["HTTP_PROXY","HTTPS_PROXY","NO_PROXY"]);EE=new Set(["CLAUDE_CODE_CLIENT_CERT","CLAUDE_CODE_CLIENT_KEY","CLAUDE_CODE_CLIENT_KEY_PASSPHRASE","NODE_EXTRA_CA_CERTS","NODE_TLS_REJECT_UNAUTHORIZED","CLAUDE_CODE_OAUTH_SCOPES"]);OE=["ANTHROPIC_UNIX_SOCKET","CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST","CLAUDE_CODE_HOST_AUTH_ENV_VAR"];IO=["apiKeyHelper","awsAuthRefresh","awsCredentialExport","fileSuggestion","gcpAuthRefresh","otelHeadersHelper","processWrapper","policyHelpers","proxyAuthHelper","s
+
+--- 7 @ 207715569 ---
+proxyAuthHelperConfig.trustAccepted())return;Me()}function vt(e){let t=process.env.API_FORCE_IDLE_TIMEOUT,n=e.forAnthropicAPI&&!te(t)&&(e.hasBodyIdleWatchdog||ne(t)),r={...f().keepAliveDisabled&&{keepalive:!1},...n&&{timeout:!1}};if(e.forAnthropicAPI){let s=p.ANTHROPIC_UNIX_SOCKET;if(s)return{...r,unix:s}}let o=_();if(o){if(e.url&&m(e.url))return{...r,...h()};let s=Ye();return{...r,proxy:s?{url:o,headers:{"Proxy-Authorization":s}}:o,...h()}}if(e.fallbackProxy){if(e.url&&(Z(e.url,e.fallbackProxy.noProxy)||Z(e.url,S(
+
+--- 8 @ 208086769 ---
+);gr=new mo(()=>new Po);St=ht.state("remote-settings"),wt=ht.state(_o);Cr=new Set(["HTTPS_PROXY","HTTP_PROXY","NO_PROXY","CLAUDE_CODE_PROXY_RESOLVES_HOSTS","CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER","CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS","API_FORCE_IDLE_TIMEOUT","ANTHROPIC_UNIX_SOCKET","NODE_EXTRA_CA_CERTS","CLAUDE_CODE_CERT_STORE","CLAUDE_CODE_CLIENT_CERT","CLAUDE_CODE_CLIENT_KEY","CLAUDE_CODE_CLIENT_KEY_PASSPHRASE","ALL_PROXY","NODE_OPTIONS","NODE_TLS_REJECT_UNAUTHORIZED",...So,...wo,"AWS_ENDPOINT_URL_STS","AWS_ENDPO
+
+--- 9 @ 208566851 ---
+vel_disabled":case"seat_tier_zero_credit_limit":case"group_zero_credit_limit":case"member_zero_credit_limit":case"org_service_level_disabled":case"no_limits_configured":case"fetch_error":case"unknown":return!1;default:return!1}}function Yb(){return se()&&(!!c.ANTHROPIC_UNIX_SOCKET||Be())}function qb(){if(Wn())return!1;if(Yb())return jb();return!0}function Xb(){if(Wn())return!1;if(Yb())return jb();return!0}var Jb=y(()=>{Me();Qe();_s();Ft();oe()});function gE(){return sE()??{sonnet:c.ANTHROPIC_DEFAULT_SONNET_MODEL!==
+
+--- 10 @ 208734527 ---
+olHardDisabled:()=>ea,isRemoteControlInternalEventsEnabled:()=>WB,isRunningInRemoteEnvironment:()=>go,isSdkBridgeStateAnnounceEnabled:()=>OB,isUdsEnableRemoteControlEnabled:()=>zB,resolveCcrAutoConnectDefault:()=>CT});function Zs(){if(!ie())return!1;return!!c.ANTHROPIC_UNIX_SOCKET||ii()}function Ag(){return Zs()&&hi()&&P("tengu_ccr_bridge",!1)}function _B(){if(Ag())return null;if(!lc())return"not_signed_in";if(!hi())return"api_key_auth";if(!cc())return"no_profile_scope";return"not_in_rollout"}function uc(){return!1
+
+--- 11 @ 208738101 ---
+IC_AUTH_TOKEN=${e(process.env.ANTHROPIC_AUTH_TOKEN)}`,` apiKeyHelper=${nt()?"set":"unset"}`,` CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=${e(process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR)}`,` CLAUDE_CODE_OAUTH_TOKEN=${e(process.env.CLAUDE_CODE_OAUTH_TOKEN)}`,` ANTHROPIC_UNIX_SOCKET=${e(process.env.ANTHROPIC_UNIX_SOCKET)}`,` 3P env=${n.length?n.join(","):"none"}`,...SB()].join(` `)}catch(t){return` [debug] failed to collect auth state: ${t}`}}function SB(){let e=(r)=>r?"set":"unset",t=sg(),n=CB();return[` isGrowthB
+
+--- 12 @ 208738139 ---
+C_AUTH_TOKEN)}`,` apiKeyHelper=${nt()?"set":"unset"}`,` CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=${e(process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR)}`,` CLAUDE_CODE_OAUTH_TOKEN=${e(process.env.CLAUDE_CODE_OAUTH_TOKEN)}`,` ANTHROPIC_UNIX_SOCKET=${e(process.env.ANTHROPIC_UNIX_SOCKET)}`,` 3P env=${n.length?n.join(","):"none"}`,...SB()].join(` `)}catch(t){return` [debug] failed to collect auth state: ${t}`}}function SB(){let e=(r)=>r?"set":"unset",t=sg(),n=CB();return[` isGrowthBookEnabled=${ai()}`,` telemetryDisabl
+
+--- 13 @ 208741124 ---
+_AUTH_TOKEN)return`${e} ANTHROPIC_AUTH_TOKEN is set, so this session is using API-key auth \u2014 unset it (or run in a shell without it) ${t}`;let{source:r}=mi(),o=Cg(r);if(r!=="none"&&o)return`${e} This session is using ${r} auth \u2014 ${o}`;if(process.env.ANTHROPIC_UNIX_SOCKET)return`${e} ANTHROPIC_UNIX_SOCKET is set (claude ssh remote), and the local proxy is API-key-authed.`}catch{}return`${e} Unset ANTHROPIC_API_KEY / apiKeyHelper / ANTHROPIC_AUTH_TOKEN ${t}`}function kB(){let e=A();if(e!=="firstParty"){if(e
+
+--- 14 @ 208741158 ---
+AUTH_TOKEN is set, so this session is using API-key auth \u2014 unset it (or run in a shell without it) ${t}`;let{source:r}=mi(),o=Cg(r);if(r!=="none"&&o)return`${e} This session is using ${r} auth \u2014 ${o}`;if(process.env.ANTHROPIC_UNIX_SOCKET)return`${e} ANTHROPIC_UNIX_SOCKET is set (claude ssh remote), and the local proxy is API-key-authed.`}catch{}return`${e} Unset ANTHROPIC_API_KEY / apiKeyHelper / ANTHROPIC_AUTH_TOKEN ${t}`}function kB(){let e=A();if(e!=="firstParty"){if(e==="gateway")return ic(Pt())?`${gi
+
+--- 15 @ 208836281 ---
+{providerChainResolver:t,credentials:async(n)=>(await t())(n)}}function lo(){return yo()&&!c.CLAUDE_CODE_HOST_AUTH_ENV_VAR&&c.CLAUDE_CODE_ENTRYPOINT!=="claude-desktop-3p"}function bG(){QR.cache.clear?.(),ZR.cache.clear?.()}function ex(){return Boolean(Te()||c.ANTHROPIC_UNIX_SOCKET||yo()||Ee()||c.ANTHROPIC_AUTH_TOKEN||c.CLAUDE_CODE_OAUTH_TOKEN||ft()||nt()||c.CLAUDE_CODE_USE_BEDROCK||c.CLAUDE_CODE_USE_VERTEX||c.CLAUDE_CODE_USE_FOUNDRY||c.CLAUDE_CODE_USE_ANTHROPIC_AWS||c.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD||c.CLAUD
+
+--- 16 @ 208837693 ---
+mismatch on restore for ${r}: pinned ${o}, live ${i.fingerprint}`,{level:"warn"});return}}catch(i){p(`[gateway] TLS fingerprint probe failed on restore for ${r} (${M(i)}); proceeding without re-verify`)}ho(n)}catch(t){I(t)}}function tn(){if(Te())return!1;if(c.ANTHROPIC_UNIX_SOCKET)return!!c.CLAUDE_CODE_OAUTH_TOKEN;if(tt())return!1;let e=!ie(),n=(ut()||{}).apiKeyHelper,r=Sr(),o;try{o=Pn({skipRetrievingKeyFromApiKeyHelper:!0}).source}catch{return!1}let i=o==="ANTHROPIC_API_KEY"||o==="apiKeyHelper",s=c.CLAUDE_CODE_API
+
+--- 17 @ 208864287 ---
+===null?"debug":"error"})}catch(a){Ue("oauth_401_recovery","oauth_401_sdk_callback_failed"),p(`SDK getOAuthToken callback failed: ${a instanceof Error?a.message:String(a)}`,{level:"error"})}let i=!1;if(!Ee()){if(i=Boolean(c.CLAUDE_CODE_OAUTH_TOKEN)&&!Im()&&!c.ANTHROPIC_UNIX_SOCKET,i)p("OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login.",{level:"error"});else if
+
+--- 18 @ 208878326 ---
+c function Bx(e={}){try{return await Ta(e)}catch{return{key:null,source:"none"}}}async function N$(){try{let{key:e,source:t}=await Ta({skipRetrievingKeyFromApiKeyHelper:!0});return e!==null&&t!=="none"}catch{return!1}}async function wa(){if(Te())return!1;if(c.ANTHROPIC_UNIX_SOCKET)return!!c.CLAUDE_CODE_OAUTH_TOKEN;if(tt())return!1;let e=!ie(),n=(ut()||{}).apiKeyHelper,r=Sr(),o;try{o=(await Ta({skipRetrievingKeyFromApiKeyHelper:!0})).source}catch{return!1}let i=o==="ANTHROPIC_API_KEY"||o==="apiKeyHelper",s=c.CLAUDE_
+
+--- 19 @ 208881853 ---
+tParty"&&!tt()&&!tn()}async function J$(e){let t=H("policySettings"),n=t?.forceLoginOrgUUID,r=n!==void 0||t?.forceLoginMethod!==void 0;if(c.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST){if(r)fe("auth_force_login_org","managed_by_host_under_pin");return{valid:!0}}if(c.ANTHROPIC_UNIX_SOCKET){let f={api_provider:Xe(A()),auth_token_source:Xe(mi().source)};if(!tn()&&r)fe("auth_force_login_org","unix_socket_3p_under_pin",f);else if(tn()&&n!==void 0)fe("auth_force_login_org","unix_socket_ssh_under_pin",f);else if(pm())fe("auth_fo
+
+--- 20 @ 209214746 ---
+as Ee,yid as V}from"B:/~BUN/root/_829.js";import{eld as c,kld as ie}from"B:/~BUN/root/_833.js";import{kmd as se}from"B:/~BUN/root/_837.js";import{uBd as M}from"B:/~BUN/root/_849.js";import{FBd as re}from"B:/~BUN/root/_850.js";function I(e){if(!e||!process.env.ANTHROPIC_UNIX_SOCKET)return e||{};let n={};for(let[t,o]of Object.entries(e))if(!Te.has(t.toUpperCase()))n[t]=o;return n}function U(){let e=M(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST),n=b(),t=process.env.CLAUDE_CODE_ENVIRONMENT_KIND;return{managedByHos
+
+--- 21 @ 209222610 ---
+entVariables()}function Ct(){S.applyConfigEnvironmentVariables()}function Ve(){S.reset()}var Te,v,Le,he,ue,ne,Ie,Ue,Pe,ye,me,He,Me,l,a,G,S,at;var Ke=re(()=>{Ae();pe();Re();ie();Ce();ae();se();le();Ee();fe();Oe();ce();De();Se();de();ge();Ne();_e();Te=new Set(["ANTHROPIC_UNIX_SOCKET","ANTHROPIC_BASE_URL","ANTHROPIC_API_KEY","ANTHROPIC_AUTH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN",...w.filter((e)=>e.startsWith("CLAUDE_CODE_ARTIFACT")||B(e))]);v=Object.freeze({managedByHost:!1,managedByHostFlag:!1,desktopHost:!1,hostOrchestrat
+
+--- 22 @ 214110519 ---
+ttingKey)||QSn().length>0&&JSn()!=="helper"||n||YSn(e.settingKey)||GSn()&&XSn()||Tq(e.policyKey)==="org_denied"||Tq(e.policyKey)==="unregistered"}function GOe(e){if(!Hpt(e.settingKey))return!1;if(!e.isTierInPlay())return!1;if(Vr()!=="firstParty")return!1;if(V.ANTHROPIC_UNIX_SOCKET)return!1;if(Hl())return!1;if(PS().source!=="claude.ai")return!1;if(Ns())return!1;if(!Z3(e.policyKey))return!1;return Wpt(e)}function Wpt(e){return we(e.flagName,!1)===!0}function VOe(e){return!twn()&&Tq(e.policyKey)==="cache_miss"}functio
+
+--- 23 @ 214331204 ---
+pCall:()=>n0o,serversWithTools:()=>Wht,toolNameCandidates:()=>Ght});var Kht=w(()=>{Kht();Pxn();qht();Vht()});var r0e=8192;var Yht=()=>{};var xxn=()=>{};var Ixn=()=>{};function o0e(e,t,n,r,o){let s=Vr();if(!(o?.ignoreEnvOptOut===!0&&s==="firstParty"&&Oxn()&&!V.ANTHROPIC_UNIX_SOCKET)&&_u(process.env.CLAUDE_CODE_ATTRIBUTION_HEADER))return"";let a=`${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/e
+
+--- 24 @ 214405648 ---
+ion uFo(e){if(e==="ccr_worker")return we(sFo,!1);return we(rFo,!1)||we(oFo,!1)}function qMn(e){return e==="ccr_worker"?V.CLAUDE_CODE_GZIP_CCR_REQUEST_BODIES:V.CLAUDE_CODE_GZIP_REQUEST_BODIES}function dFo(e){return e==="ccr_worker"?aFo:iFo}function pFo(e){if(V.ANTHROPIC_UNIX_SOCKET)return"unix_socket";if(R8()!==void 0&&!nNe(e))return"proxy";let t=zMn();if(t?.cert!==void 0||t?.key!==void 0)return"mtls";if(V.NODE_EXTRA_CA_CERTS&&!zW())return"custom_ca";return}function oNe(e,t,n,r="api"){if(!ux(e))return;let o=typeof t
+
+--- 25 @ 214432077 ---
+aBetas:y,onFetchAttempt:b,credentials:S}=e;kNe(t,e.querySource);let k=$f(),T=qU(e.querySource)?l:0,v=()=>Rk({maxRetries:T,model:t,source:"side_query",agentContext:k,credentials:S,...b&&{fetchOverride:(ee,re)=>(b(),ENe(ee,re))}}),E=await v(),C=VG()&&!wOn()&&!V.ANTHROPIC_UNIX_SOCKET?E.authToken??void 0:void 0,R=[...R$(t)];for(let ee of y??[])if(!R.includes(ee))R.push(ee);let P=Boolean(i)&&CNe(t)&&MP(t,"structured_outputs");if(P&&!R.includes(XG))R.push(XG);let x=WFo(r),A=v_t(x,{ISSUES_EXPLAINER:"report the issue at ht
+
+--- 26 @ 215369435 ---
+}async function D9o(e,t,n){let r=Date.now();Ke("info","user_context_started");let o=NU(),s=null,i=B6n;try{if(!o)i=ALe(await Tpe(e,!1,t)),s=CAn(i)}catch(u){throw J("context_claude_md_load","load_threw"),u}if(!o)ce("context_claude_md_load");U6n(s||null);let a=V.ANTHROPIC_UNIX_SOCKET?void 0:Dy()?.emailAddress,l=await I9o(n);return Ke("info","user_context_completed",{duration_ms:Date.now()-r,claudemd_length:s?.length??0,claudemd_disabled:Boolean(o),has_user_email:Boolean(a),has_project_context:Boolean(l)}),{blocks:{...
+
+--- 27 @ 217648029 ---
+ead.`;if(e===".txt"||e===".text"||e===".log")return`${n} Author an .html page from the text (or wrap it in a <pre> block in an .html file) and retry with that path.`;return`${n} Write the content as an .html page and retry with that path.`}function I0r(){if(V.ANTHROPIC_UNIX_SOCKET)return F0r;let e=PS().source;if(V.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR||e==="CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"||e==="CCR_OAUTH_TOKEN_FILE")return U0r;let{source:t}=YG({skipRetrievingKeyFromApiKeyHelper:!0});if(t==="ANTHROPIC_API_KEY
+
+--- 28 @ 218279624 ---
+Id:"third-party";n[o]=(n[o]||0)+1}return n}function CFs(e){if(!W9e(e))return!1;let t=e.lastIndexOf("@"),n=e.slice(0,t);return(we("tengu_amber_lattice",{}).plugins??[]).includes(n)}function RFs(e){if(!e||!CFs(e))return{};if(!oi())return{};if(Ns())return{};if(V.ANTHROPIC_UNIX_SOCKET)return{};try{if(Ei()){let n=Ni()?.accessToken;return n?{ANTHROPIC_AUTH_TOKEN:n}:{}}let t=KG();return t?{ANTHROPIC_API_KEY:t}:{}}catch{return{}}}function q0(e,t,n){if(!e||!t)return;if(!W9e(t))return;let r=Object.entries(e).slice(0,AFs).fil
+
+--- 29 @ 222200431 ---
+;Gt();li();si();zt();xt();It();ei();ct();j();ft();pt();gt();function q(){let t=W().providerCache;if(t.preconnectFired)return;if(t.preconnectFired=!0,z()!=="firstParty"||V()==="gateway"||Y())return;if(l.HTTPS_PROXY||l.https_proxy||l.HTTP_PROXY||l.http_proxy||l.ANTHROPIC_UNIX_SOCKET||l.CLAUDE_CODE_CLIENT_CERT||l.CLAUDE_CODE_CLIENT_KEY)return;let r=l.ANTHROPIC_BASE_URL||N().BASE_API_URL;fetch(`${r.replace(/\/+$/,"")}/api/hello`,{method:"HEAD",signal:AbortSignal.timeout(1e4)}).catch(()=>{})}j();Xt();kt();Et();Fe();St()
+
+--- 30 @ 222735829 ---
+etch failed: ${_.isAxiosError(n)?n.response?.status??n.code:n instanceof Error?n.constructor.name:"unknown"}`),A("api_bootstrap_fetch","wif_unavailable"),null}if(!B()?.accessToken&&!l)return u("[Bootstrap] Skipped: no usable OAuth, WIF, or API key"),null;if(C.ANTHROPIC_UNIX_SOCKET)return u("[Bootstrap] Skipped: unix-socket-proxied session"),A("api_bootstrap_fetch","unix_socket_skip"),null;let a=!1;try{let n=await _t(async()=>{let r=B()?.accessToken,d=x(),h;if(r&&(d||!l))a=!d&&!l,h={Authorization:`Bearer ${r}`,"anth
+
+--- 31 @ 222736659 ---
+d: 403 for OAuth token without profile scope"),A("api_bootstrap_fetch","no_profile_scope_403"),null;throw u(`[Bootstrap] Fetch failed: ${_.isAxiosError(n)?n.response?.status??n.code:"unknown"}`),ct("api_bootstrap_fetch","request_failed"),n}}function Ze(){if(C.ANTHROPIC_UNIX_SOCKET)return!1;return Boolean(F())||Boolean(B()?.accessToken)&&x()}async function to(t,o){await Ce(t,o)}async function Ce(t,o,{keepRenderCaches:i=!1}={}){me();try{let s=k()==="firstParty";if(!s)T(),I();let c=N(),l=w(),p=await Ae(c,o);if(!p)retu
+
+--- 32 @ 233598852 ---
+.dev)await fu(e).catch(()=>{})}pu();rr();we();gu();Si();Ri();hu();var _i=30000;async function Pi(){if(Ti()!=="firstParty")return{ok:!0};if(wu())return yu();return{ok:!0}}function wu(){return an()==="env-quad"&&!V.ANTHROPIC_API_KEY&&!V.ANTHROPIC_AUTH_TOKEN&&!V.ANTHROPIC_UNIX_SOCKET}async function yu(){let e;try{e=await $i()}catch(t){return{ok:!1,message:`workload identity federation is configured (${gr()}) but could not be set up: ${D(t)}`}}if(e===null)return{ok:!0};try{return await sn(e.getToken(),_i,`no answer fro

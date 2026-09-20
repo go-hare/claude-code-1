@@ -1,0 +1,2 @@
+# LR caller @211364564 end=211364670 len=106
+function H0(e,o){let i=Qu(z0,null,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}

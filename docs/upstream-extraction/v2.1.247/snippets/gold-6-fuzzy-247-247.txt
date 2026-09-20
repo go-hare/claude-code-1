@@ -1,0 +1,3 @@
+# offset=231647341 ver=247 hit=1/1 needle="function $t(gn){"
+
+Bo();function en(){}var Oo=8,So=10,Go=2;function $t(gn){let t=Xe(108),{title:so,placeholder:nt,initialQuery:co,items:r,getKey:ao,renderItem:lo,renderPreview:N,previewPosition:rt,visibleCount:it,direction:st,onQueryChange:uo,onSelect:F,onTab:D,onFocus:po,onCancel:fo,resetKey:ye,emptyMessage:ct,matchLabel:ve,selectAction:at,cancelAction:dt,extraHints:mo}=gn,go=nt===void 0?"Type to search\u2026":nt,ho=rt===void 0?"bottom":rt,hn=it===void 0?Oo:it,l=st===void 0?"down":st,X=ct===void 0?"No results":ct,xe=at===void 0?"select":at,wo=dt===void

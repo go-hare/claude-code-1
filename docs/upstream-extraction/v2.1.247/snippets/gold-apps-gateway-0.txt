@@ -1,0 +1,21 @@
+# offset=222350844 needle="apps gateway"
+
+O transcript views: each rendered message row no longer retains a full copy of the transcript-wide tool lookups
+- Fixed \`/ultrareview\` runs and cloud sessions launched at the same time from one repository (e.g. from several worktrees) sometimes starting with another launch's uncommitted changes
+- Fixed the task progress count (e.g. \`3/5\`) shown for background cloud sessions such as \`/autofix-pr\` occasionally missing a task
+- Fixed Remote Control sessions keeping their placeholder name in claude.ai and the Claude app until the second prompt; the auto-generated title now appears after the first prompt
+- Fixed MCP tools marked \`requiresUserInteraction\` still offering "Yes, and don't ask again" in their permission prompt; the option wrote an allow rule the tool then ignored
+- Fixed the self-hosted runner ending its live sessions or exiting when a work-poll response is malformed (e.g. an intercepting proxy's HTML page); it now retries the poll
+- Improved \`/cd\`: the new directory's project settings, hooks, \`.mcp.json\` servers (behind the usual approval prompt), skills, and agents now take effect right after the move instead of on \`--resume\`
+- Improved Bash tool latency on bash shells by replaying snapshot functions without a base64 subshell per function
+- Improved subagent results: a subagent that stops at its \`maxTurns\` limit now returns its output marked as partial, with a hint to continue it via \`SendMessage\`, instead of appearing finished
+- Improved non-interactive sessions (\`-p\`, SDK, cloud sessions) to automatically continue a response cut off mid-stream by a server error, connection loss, or stall instead of ending with an error
+- Improved attribution of usage telemetry to your organization for workload identity federation sessions, events sent while \`apiKeyHelper\` runs at startup, and after a login token expired while idle
+- Changed \`/code-review\` so Claude can also start it on its own on Bedrock, Vertex AI, and Foundry, through the Claude apps gateway, and when telemetry or non-essential traffic is disabled
+- \`/goal\`: Changed idle sessions to start at most three check-ins on long-running background work per goal; your next message allows three more
+- Changed \`claude install\` and \`claude update\` to defer a pending managed-settings consent prompt to the next interactive session instead of prompting mid-command
+- Changed OpenTelemetry plugin events for plugins synced from claude.ai: \`plugin_id_hash\` now reflects the plugin's real marketplace, and \`enabled_via\` is \`admin-install\` for admin-installed plugins
+- Fixed the command sandbox's filesystem configuration not respecting \`--setting-sources\`
+
+## 2.1.245
+- Fixed a crash on startup on Linux distributions that ship glibc 2.44 (for example Arch Linux, CachyOS and 

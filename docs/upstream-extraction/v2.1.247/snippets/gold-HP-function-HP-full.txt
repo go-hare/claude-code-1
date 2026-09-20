@@ -1,0 +1,11 @@
+# LOCKED HP @213647449 end=213647488 len=39
+# unique string function HP(){return aln.of(bn().host)} count=1
+# unique yln caller let{pendingUsage:t}=HP() count=1
+# collision function HP( count=3:
+#   @208506954 telemetry empty-event object (event_name:"")
+#   @213647449 THIS
+#   @250510798 html subtree join (e,t)
+# lowercase function hp( / async function hp( are different (bg-stop, proto keywords, bun versions, date week, hsv)
+# alias: HP as / as HP are other modules — not this. not in _448 export map.
+# same-module as yln/dPe/iln (213647167–213654265).
+function HP(){return aln.of(bn().host)}

@@ -1,0 +1,7 @@
+# 247 offset=196956961 needle="could not be read"
+
+worker/diagnostics...ForwardDiagnostics..#...2..[runner:api] ForwardDiagnostics -> ...
+.S.lines...3...5...[runner:warn] /v1/metrics rejected malformed body: .v...^...proxy authorization file could not be read: an earlier read has not returned yet (stalled mount?); not issuing another...H...read,...).D.proxy authorization file could not be read: ...Pd..function...H/.timed out after ...H.exited .
+...abnormally...i...proxy authorization command ...then...CLAUDE_CODE_PROXY_URL...CLAUDE_CODE_PROXY_HOST...n._.CLAUDE_CODE_PROXY_AUTHENTICATE...|...reject...(..stdin...U.useToolMemoryCgroup.	...Ck..extendEnv...#.failed...timedOut/...+|I.timed out waiting for the request/response head...=..
+
+-...	.request/response head exceeded the size limit...rest...jMV.connection closed before the head was complete...].proxy-authorization...w...[runner:egress-proxy] .. ...T..^HTTP\/1\.[01]\s+(\d{3})(?=\s|$)...m

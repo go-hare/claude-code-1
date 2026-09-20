@@ -1,0 +1,1 @@
+async function $4n(e,t,n,r,o){let s=await P4n(t,n,r,o.signal);if(!s.ok)return s;let i=await Hu(e,["bundle","list-heads",n],o);return i.code===0?s:{ok:!1,error:`git bundle list-heads exited ${i.code}: ${$I(i.stderr,o.hardened)}`}}

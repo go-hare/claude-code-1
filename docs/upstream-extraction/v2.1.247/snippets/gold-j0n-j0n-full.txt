@@ -1,0 +1,6 @@
+# LOCKED j0n @214574841 end=214575202 len=361
+# unique async function j0n( count=1
+# unique caller ame@214576324 return j0n(t,n,e) count=1
+# unique string Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface count=1
+# alias: none (j0n as / as j0n count=0). same-module as ame.
+async function j0n(e,t,n){let r=await z0n(e,t,(o)=>qBo(o,n),F0n);if(r.loadError!==void 0)_(`Failed to load installed plugins from disk: ${Y(r.loadError)}`,{level:"error"}),f2("load-from-disk",r.loadError,!0);if(r.written!==void 0)qSt(r.written),_(`Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface`);return r.result}

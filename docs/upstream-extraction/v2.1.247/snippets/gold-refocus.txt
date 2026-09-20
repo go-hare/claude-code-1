@@ -1,0 +1,254 @@
+# needle="refocus" hits=3
+
+===== offset=250283586 =====
+null)[0] || null;
+      if (!el || promoteNested(el) !== el) return;
+      var tid = parseInt(el.getAttribute('data-dc-tpl'), 10);
+      if (!textEditable[teKey(tid, ownerName(el))]) return;
+      clearForeign();
+      selTids = [tid];
+      selName = elOwner(el);
+      applySelected();
+      postSelection(el.tagName.toLowerCase());
+      startEdit(el, x, y);
+    },
+    select: function(tids, name){
+      clearForeign();
+      var nextTids = Array.isArray(tids) ? tids.slice() : tids == null ? [] : [tids];
+      var nextName = nextTids.length ? (name || null) : null;
+      // Identity guard BEFORE assignment: an echo for a selection the host
+      // just commanded to the same value would only churn (and the export
+      // pane's preview effect re-commands the current selection on every
+      // selection-object identity change, which the echo itself causes \u2014
+      // without this guard that pair ping-pongs through the 300ms debounce).
+      var same = nextTids.length === selTids.length &&
+        nextName === selName &&
+        nextTids.every(function(t, i){ return t === selTids[i]; });
+      selTids = nextTids;
+      selName = nextName;
+      applySelected();
+      // Echo the commanded selection back through the ONE selection event
+      // path (re-marshal validation, host ingest gate, panel refresh), so
+      // host-driven selections \u2014 insert, duplicate, outline click, group \u2014
+      // reach the host selection model exactly like user clicks do. Without
+      // this the in-frame handles and the host popover run on divergent
+      // state (handles painted here, popover fed only by pointer selects).
+      if (!same) postSelection();
+      // Restore scroll positions the text-edit commit's remount reset.
+      if (pendingScroll) {
+        clearTimeout(pendingScrollTimer);
+        for (var t in pendingScroll.s) {
+          var el = group(t, pendingScroll.name)[0];
+          if (el) { el.scrollTop = pendingScroll.s[t].t; el.scrollLeft = pendingScroll.s[t].l; }
+        }
+        pendingScroll = null;
+      }
+    },
+    hover: function(tid, name){
+      paintHover(tid, name);
+    },
+    finishEdit: function(){
+      // Returned to the caller (Save) instead of posted, so the host applies
+      // it exactly once; null when nothing changed.
+      return collectEdit();
+    },
+    // Host selection-menu format buttons (the embedded replacement for
+    // the old in-frame bar). Clicking HOST chrome takes document focus
+    // from this frame, so refocus the editable FIRST \u2014 Chrome keeps the
+    // contenteditable's selection across the refocus, and execCommand
+    // no-ops on an unfocused editable. Commands come from the host's
+    // own allowlist; unknown names no-op here regardless.
+    format: function(cmd){
+      if (!editing || editing.scriptTarget) return;
+      var fn = formatActions[cmd];
+      if (!fn) return;
+      try { editing.el.focus(); } catch (err) {}
+      fn();
+      postTextEditState(true);
+    },
+    // Host link popover answered. Focus order matters: execCommand no-ops on
+    // an unfocused editable, so focus FIRST, then restore the saved Range,
+    // then createLink/unlink. href null/'' removes the link.
+    applyLink: function(href){
+      if (!editing) return;
+      // No saved Range means this answer belongs to a session that already
+      // ended (the Link button always saves one when a selection exists) \u2014
+      // acting on the live selection could link text in a NEWER edit
+      // session. Refocus and drop.
+      if (!linkEditRange) { api.cancelLinkEdit(); return; }
+      var created = null;
+      try {
+        // Operate on the saved Range DIRECTLY \u2014 no selection restore, no
+        // execCommand. The popover round-trip moves real focus to the host
+        // document (a separate guest/host boundary under Electron), and
+        // selection-based editing proved unreliable across it in live
+        // runs: the restored selection collapsed and createLink inserted
+    
+
+===== offset=250283683 =====
+getAttribute('data-dc-tpl'), 10);
+      if (!textEditable[teKey(tid, ownerName(el))]) return;
+      clearForeign();
+      selTids = [tid];
+      selName = elOwner(el);
+      applySelected();
+      postSelection(el.tagName.toLowerCase());
+      startEdit(el, x, y);
+    },
+    select: function(tids, name){
+      clearForeign();
+      var nextTids = Array.isArray(tids) ? tids.slice() : tids == null ? [] : [tids];
+      var nextName = nextTids.length ? (name || null) : null;
+      // Identity guard BEFORE assignment: an echo for a selection the host
+      // just commanded to the same value would only churn (and the export
+      // pane's preview effect re-commands the current selection on every
+      // selection-object identity change, which the echo itself causes \u2014
+      // without this guard that pair ping-pongs through the 300ms debounce).
+      var same = nextTids.length === selTids.length &&
+        nextName === selName &&
+        nextTids.every(function(t, i){ return t === selTids[i]; });
+      selTids = nextTids;
+      selName = nextName;
+      applySelected();
+      // Echo the commanded selection back through the ONE selection event
+      // path (re-marshal validation, host ingest gate, panel refresh), so
+      // host-driven selections \u2014 insert, duplicate, outline click, group \u2014
+      // reach the host selection model exactly like user clicks do. Without
+      // this the in-frame handles and the host popover run on divergent
+      // state (handles painted here, popover fed only by pointer selects).
+      if (!same) postSelection();
+      // Restore scroll positions the text-edit commit's remount reset.
+      if (pendingScroll) {
+        clearTimeout(pendingScrollTimer);
+        for (var t in pendingScroll.s) {
+          var el = group(t, pendingScroll.name)[0];
+          if (el) { el.scrollTop = pendingScroll.s[t].t; el.scrollLeft = pendingScroll.s[t].l; }
+        }
+        pendingScroll = null;
+      }
+    },
+    hover: function(tid, name){
+      paintHover(tid, name);
+    },
+    finishEdit: function(){
+      // Returned to the caller (Save) instead of posted, so the host applies
+      // it exactly once; null when nothing changed.
+      return collectEdit();
+    },
+    // Host selection-menu format buttons (the embedded replacement for
+    // the old in-frame bar). Clicking HOST chrome takes document focus
+    // from this frame, so refocus the editable FIRST \u2014 Chrome keeps the
+    // contenteditable's selection across the refocus, and execCommand
+    // no-ops on an unfocused editable. Commands come from the host's
+    // own allowlist; unknown names no-op here regardless.
+    format: function(cmd){
+      if (!editing || editing.scriptTarget) return;
+      var fn = formatActions[cmd];
+      if (!fn) return;
+      try { editing.el.focus(); } catch (err) {}
+      fn();
+      postTextEditState(true);
+    },
+    // Host link popover answered. Focus order matters: execCommand no-ops on
+    // an unfocused editable, so focus FIRST, then restore the saved Range,
+    // then createLink/unlink. href null/'' removes the link.
+    applyLink: function(href){
+      if (!editing) return;
+      // No saved Range means this answer belongs to a session that already
+      // ended (the Link button always saves one when a selection exists) \u2014
+      // acting on the live selection could link text in a NEWER edit
+      // session. Refocus and drop.
+      if (!linkEditRange) { api.cancelLinkEdit(); return; }
+      var created = null;
+      try {
+        // Operate on the saved Range DIRECTLY \u2014 no selection restore, no
+        // execCommand. The popover round-trip moves real focus to the host
+        // document (a separate guest/host boundary under Electron), and
+        // selection-based editing proved unreliable across it in live
+        // runs: the restored selection collapsed and createLink inserted
+        // the URL as text at the caret. Manual Range surgery is the same
+        // pattern the past
+
+===== offset=250291673 =====
+contains or crosses BEFORE
+          // wrapping (same loop as Remove) \u2014 wrapping over an existing
+          // anchor nests <a>s, which the reparse splits into stray
+          // siblings with cloned attributes. Old createLink merged
+          // contained anchors the same way.
+          var inner = editing.el.querySelectorAll('a');
+          for (var wi = 0; wi < inner.length; wi++) {
+            var wa = inner[wi];
+            if (wa === editing.el || !editing.el.contains(wa)) continue;
+            if (!linkEditRange.intersectsNode(wa)) continue;
+            unwrapKeepingOutside(wa, sb, se);
+          }
+          linkEditRange.setStartAfter(sb);
+          linkEditRange.setEndBefore(se);
+          var a2 = document.createElement('a');
+          a2.setAttribute('href', href);
+          try {
+            linkEditRange.surroundContents(a2);
+          } catch (errw) {
+            // Range crosses element boundaries \u2014 extract and wrap, same
+            // fallback as the paste-to-link path.
+            var frag = linkEditRange.extractContents();
+            a2.appendChild(frag);
+            linkEditRange.insertNode(a2);
+          }
+          // Caret after the link so continued typing appends plain text.
+          try {
+            s.removeAllRanges();
+            var nr2 = document.createRange();
+            nr2.setStartAfter(a2);
+            nr2.collapse(true);
+            s.addRange(nr2);
+          } catch (errc) {}
+          if (sb.parentNode) sb.parentNode.removeChild(sb);
+          if (se.parentNode) se.parentNode.removeChild(se);
+          // Foreign sessions never take the select-the-link path: foreign
+          // elements have no tid for the host to select, and their edits
+          // stay in the live DOM where no model strip would ever remove
+          // the marker.
+          if (!editing.foreign) created = a2;
+        }
+      } catch (err) {}
+      linkEditRange = null;
+      if (created) {
+        // Selection follows the new link: commit the edit session so the
+        // anchor becomes a template element the host can select. The marker
+        // rides the textEdit commit; the host maps it to the restamped tid,
+        // strips it (it never reaches source), and selects the element \u2014
+        // which also surfaces the props panel's Link row.
+        try { created.setAttribute('${bF}', ''); } catch (err) {}
+        endEdit();
+        return;
+      }
+      postTextEditState(true);
+    },
+    // Host link popover dismissed \u2014 refocus the text edit so typing resumes
+    // where the user left off.
+    cancelLinkEdit: function(){
+      linkEditRange = null;
+      if (!editing) return;
+      try { editing.el.focus(); } catch (err) {}
+      postTextEditState(true);
+    },
+    // Remove the currently selected non-template element from the DOM.
+    // Returns its pre-delete {tag, html, text} for the host's op log \u2014
+    // editor attrs stripped and capped so a top-level container doesn't
+    // ship its whole subtree across the bridge.
+    deleteForeign: function(){
+      if (!foreignEl || !foreignEl.parentElement) return null;
+      // An inline edit may be live on this element (or a descendant) \u2014
+      // drop it without committing so collectEdit/finishEdit can't later
+      // return a payload for a node that's about to be removed.
+      if (editing && (editing.el === foreignEl || foreignEl.contains(editing.el))) {
+        linkEditRange = null;
+        editing.el.removeEventListener('input', onEditingInput);
+        editing.el.removeEventListener('paste', onEditingPaste);
+        document.removeEventListener('selectionchange', queueTextEditState);
+        // Restore the pre-edit state so the op-log snapshot (r below)
+        // reflects what's in source, not uncommitted keystrokes or the
+        // picker's contenteditable/data-dc-editor-editing attrs.
+        if (editing.origCE != null) editing.el.setAttribute('contenteditable', editing.origCE);
+        else editing.el.removeAttribute('cont

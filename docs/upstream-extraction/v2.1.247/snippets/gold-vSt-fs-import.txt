@@ -1,0 +1,2 @@
+# fs/path import immediately before vSt
+=w(()=>{d3();Wfe();be();ln();Ift();Z8();cq()});import{chmod as JUo,mkdir as FLn,readFile as QUo,rename as SSt,rm as wSt,writeFile as ULn}from"fs/promises";import{dirname as BLn,join as kSt,resolve as jLn,sep as eBo}from"path";

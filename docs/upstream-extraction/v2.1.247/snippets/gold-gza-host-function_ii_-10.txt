@@ -1,0 +1,2 @@
+# needle=function ii( pos=225216087
+function ii(e){return si.test(e)}

@@ -1,0 +1,3 @@
+# needleOff=206824603 start=206824603
+
+function VD(e){let t=`${H().BASE_API_URL}/api/claude_code_penguin_mode`,n="accessToken"in e?{Authorization:`Bearer ${e.accessToken}`,"anthropic-beta":Pt}:{"x-api-key":e.apiKey};return(await N.get(t,{headers:n})).data}

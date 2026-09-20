@@ -1,0 +1,4 @@
+# ver=246 name=wg async=true start=208667756 end=208668136 len=380 sha=8caa6ea94e07a62e needle="with exit code"
+
+async function wg(e,t,n,r={command:"rg"}){let{command:s,args:i=[],argv0:a}=r,l=ek(s,[...i,...e,t],{argv0:a,signal:n,timeout:1e4,windowsHide:!0}),[d,f,h]=await Promise.all([Tg(l.stdout),Tg(l.stderr),new Promise((p,b)=>{l.on("close",p),l.on("error",b)})]);if(h===0)return d.trim().split(`
+`).filter(Boolean);if(h===1)return[];throw Error(`ripgrep failed with exit code ${h}: ${f}`)}

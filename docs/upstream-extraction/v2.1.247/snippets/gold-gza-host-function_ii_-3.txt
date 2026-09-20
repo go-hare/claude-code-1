@@ -1,0 +1,2 @@
+# needle=function ii( pos=210599903
+function ii(e,n){try{let t=await Vn(Jn(e,n)),i=We(t);if(i!==null)return{kind:"skip",skipped:{path:n,reason:i}};return{kind:"candidate",candidate:{path:n,size:t.size}}}catch{return{kind:"skip",skipped:{path:n,reason:"unreadable"}}}}

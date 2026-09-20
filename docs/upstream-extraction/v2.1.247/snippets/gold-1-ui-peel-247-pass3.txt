@@ -1,0 +1,114 @@
+# leftover SendFeedback UI peel 247 pass3
+
+## function Ewc( hits=1 [216529672]
+@216529672 len=34 sha=92ca3ec09d060265
+function Ewc(e,{storageV5:t,via:n}
+
+
+## function Dwc( hits=1 [216530857]
+@216530857 len=146 sha=609825a92dbdf23a
+function Dwc(){let e=!1;return NE.feedbackNotice.setState((t)=>{if(t.seedStarted||t.seededFromDisk)return t;return e=!0,{...t,seedStarted:!0}}),e}
+
+
+## function $wc( hits=1 [216531003]
+@216531003 len=161 sha=5ef2039a58bc755f
+function $wc(e){NE.feedbackNotice.setState((t)=>{if(t.seededFromDisk)return t;return{...t,seededFromDisk:!0,sessionDraftCount:Math.max(t.sessionDraftCount,e)}})}
+
+
+## function vqe( hits=2 [233009201, 242141615]
+@233009201 len=71 sha=eddeffe65dfddd51
+function vqe(){return(Kt().feedbackDraftsTurnOffPromptDeclines??0)<cDt}
+
+@242141615 len=102 sha=5b8ff70f3cfae3d8
+function vqe(e,t,r,i,n){return(function(a,s){return M4(a,!0,s)})([[e,t],[e+r,t],[e+r,t+i],[e,t+i]],n)}
+
+
+## function ore( hits=3 [208751123, 233009272, 250343561]
+@208751123 len=195 sha=530774490221d7fe
+function ore(e,t){let n=mg(e);return Le((r)=>{if(r.projects?.[n]?.hasTrustDialogAccepted)return r;return{...r,projects:{...r.projects,[n]:{...r.projects?.[n]??Cr,hasTrustDialogAccepted:!0}}}},t)}
+
+@233009272 len=117 sha=13f2e99a184df2d3
+function ore(e){Nt((t)=>({...t,feedbackDraftsTurnOffPromptDeclines:(t.feedbackDraftsTurnOffPromptDeclines??0)+1}),e)}
+
+@250343561 len=400 sha=1afe73c4986436c4
+function ore(e,t,n,r){if(e==null||typeof e!="object")return{kind:"drop"};let o=e.prop,i=e.value;if(t!=null&&typeof t!="string")return{kind:"drop"};if(typeof o!="string"||typeof i!="string")return{kind:"drop"};let a=Object.hasOwn(n,o)?n[o]:void 0,s=Object.hasOwn(r,o)?r[o]:a?.default;if(!a||a.editor!=="text"||typeof s!="string")return{kind:"refuse"};if(s!==i)return{kind:"refuse"};let c=t??"";return 
+
+
+## function Fqe( hits=1 [233009539]
+@233009539 len=74 sha=0466fb8f6f3ccf3a
+function Fqe({isLoading:e,surveyActive:t,setInputValue:o,onOpenFeedback:n}
+
+
+## function Rqe( hits=0 []
+
+## function tP( hits=6 [208448701, 210027116, 217987046, 229626234, 236143088, 250347048]
+
+## function _6( hits=4 [210337102, 213019391, 229542361, 232626787]
+
+## function zO( hits=3 [208439092, 213157078, 232626873]
+@208439092 len=153 sha=b141d87200422fcb
+function zO(e,t,n){if(!Array.isArray(e))return!1;let r=Mh(t)?(o)=>$i(t,o,n):(o)=>or(o,t,n);for(let o=0;o<e.length;o++)if(e[o]&&r(e[o]))return!0;return!1}
+
+@213157078 len=29 sha=f24b28262282e575
+function zO(e){return e>=nrn}
+
+@232626873 len=151 sha=e88ecc66085b0d1d
+function zO(){let e=_6(),{storageV5:t}=Ue();return x(()=>{if(!tP()||!FRe())return;ERe(Pn(),t).then(LRe).catch(()=>{})},[t]),tP()?e.sessionDraftCount:0}
+
+
+## function Pqe( hits=0 []
+
+## var Pqe= hits=0 []
+
+## function K( hits=109 [206450540, 206470895, 206560525, 206586643, 207087654, 207247730, 207470194, 207591313]
+
+## function W() hits=26 [207096538, 207161788, 207246393, 207487255, 207554788, 208338217, 208358382, 208971760]
+
+## after Agr cluster
+function Agr(e=1){NE.feedbackNotice.setState((t)=>({...t,sessionDraftCount:Math.max(0,t.sessionDraftCount-e)}))}function Dwc(){let e=!1;return NE.feedbackNotice.setState((t)=>{if(t.seedStarted||t.seededFromDisk)return t;return e=!0,{...t,seedStarted:!0}}),e}function $wc(e){NE.feedbackNotice.setState((t)=>{if(t.seededFromDisk)return t;return{...t,seededFromDisk:!0,sessionDraftCount:Math.max(t.sessionDraftCount,e)}})}function Lwc(e){NE.feedbackNotice.setState((t)=>t.sessionDraftCount===e&&t.seededFromDisk?t:{...t,seededFromDisk:!0,sessionDraftCount:e})}var Pwc=20,Egr=160,lLt=4,xwc=6;var Pgr=w(()=>{ear();Q$t()});var xgr="SendFeedback";var Igr=()=>{};var Mgr="Queue a draft feedback report about Claude Code (the product OR the model's own behavior in this session) for the user to review and send later. Nothing is sent anywhere by this tool: it writes a local draft the user can review, edit, and explicitly submit (or discard) via /feedback.",Ogr=`Use this tool to draft feedback about Claude Code when you hit a high-signal moment. That includes both PRODUCT issues and MODEL-BEHAVIOR issues:
+- a reproducible tool or product failure was just resolved or abandoned
+- the user clearly expressed frustration with Claude Code or with how you handled the task
+- you hit a missing capability that blocked a reasonable request
+- you notice, or the user points out, that your own behavior in this session went wrong, for example: you gave a confident answer then had to retract it; you stopped short and handed work back when you could have finished; you declined or disputed a reasonable request; you spawned more subagents than the task warranted; your tone was off; you asked more clarifying questions than needed; you expanded scope beyond what was asked
+
+The draft is QUEUED LOCALLY. It is never sent without the user's explicit approval, and calling this tool renders no UI and does not interrupt the conversation, so never announce it or ask the user about it mid-task.
+
+Write \`details\` as short labeled bullets in this exact order, one to three lines each, no narrative paragraphs:
+- **What happened:** the observed behavior vs. what was expected, with exact error text if short. Facts only.
+- **What the user said:** the user's own words that prompted this, quoted. If nothing did, write "User didn't comment; observed by the model." Never paraphrase sentiment into a stronger claim.
+- **Repro:** the minimal steps or shape that reproduces it.
+- **Evidence:** identifiers a reader can cha
+
+## Ewc neighborhood
+fts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}function aLt(){return Ffs()!=="off"&&Ufs()}function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!==void 0?ay("userSettings",{feedbackDrafts:e},void 0,t):ay("userSettings",{feedbackDrafts:e});return D("tengu_feedback_drafts_setting_changed",{value:X(e),via:X(n)}),r}var Tgr=w(()=>{Lu();Dt();Ko();rs();Bu();Co();ju();nn();Pt();Zt()});function Cgr(e){let t="silent";return NE.feedbackNotice.setState((n)=>{let r={...n,sessionDraftCount:n.sessionDraftCount+1};if(n.notice!==null)return t="notice_pending",r.notice=e,r;if(n.promptedCount>=tgr())return t="silent",r;return r.promptedCount=n.promptedCount+1,t="notice_pending",r.notice=e,r}),t}function Rgr(){let e=!1;return NE.feedbackNotice.setState((t)=>{if(t.toolCallCount>=LKe())return t;return e=!0,{...t,toolCallCount:t.toolCallCount+1}}),e}function Iwc(e){NE.feedbackNotice.setState((t)=>t.notice
+
+## still queued hits [198154304, 199047314, 232020417, 236997883]
+--- queued @198154304 nearest function idx=-1
+
+--- queued @199047314 nearest function idx=-1
+
+--- queued @232020417 nearest function idx=2552
+start=232020469 len=200 sha=d38dc7ad2ea42a36
+function ut(e,s,m){let a=await H(e.draft_id,m);if(K(e.draft_id),!a)return;if(e.source_session_id===j())W();R("tengu_feedback_draft_discarded",{type:w(e.type),trigger:w(e.trigger),discarded_via:w(s)})}
+
+--- queued @236997883 nearest function idx=-1
+
+=== footer counter count=2 [204050330, 208027941]
+===  more queued count=5 [197166964, 200151048, 212938377, 212944783, 233014384]
+=== drafted: count=2 [197166985, 233014531]
+=== feedback draft count=21 [197139048, 198152343, 199046881, 200611996, 201795960, 201796000, 201796732, 201796772, 202344832, 216520355]
+=== sessionDraftCount count=11 [197139096, 210970827, 216530040, 216530060, 216530802, 216530833, 216531111, 216531140, 216531214, 216531280]
+=== function zO( count=3 [208439092, 213157078, 232626873]
+=== zO() count=5 [232626882, 232631097, 233009636, 249237401, 249351115]
+wrote Fqe len=74
+--- sessionDraftCount UI-ish @197139096
+ot destructure property 'id' from null or undefined value.........`.monitor......n..remote_agent....Ms..subagentStatusLine......8...excludeKeyed.....g..feedback draft......i.U.feedbackNotice..........sessionDraftCount...F....S..Cannot destructure property 'exitMessage' from null or undefined value......[-..Press ..	.....X. again to.......Va.catchupReplay........X..detach (session keeps running).......tl.exit-message......).P.a.s.t.i.n.g.& ....hf
+
+--- sessionDraftCount UI-ish @216530040
+_drafts_setting_changed",{value:X(e),via:X(n)}),r}var Tgr=w(()=>{Lu();Dt();Ko();rs();Bu();Co();ju();nn();Pt();Zt()});function Cgr(e){let t="silent";return NE.feedbackNotice.setState((n)=>{let r={...n,sessionDraftCount:n.sessionDraftCount+1};if(n.notice!==null)return t="notice_pending",r.notice=e,r;if(n.promptedCount>=tgr())return t="silent",r;return r.promptedCount=n.promptedCount+1,t="notice_pending",r.notice=e,r}),t}function Rgr(){let e=!1;retu
+
+--- sessionDraftCount UI-ish @216531214
+c(e){NE.feedbackNotice.setState((t)=>{if(t.seededFromDisk)return t;return{...t,seededFromDisk:!0,sessionDraftCount:Math.max(t.sessionDraftCount,e)}})}function Lwc(e){NE.feedbackNotice.setState((t)=>t.sessionDraftCount===e&&t.seededFromDisk?t:{...t,seededFromDisk:!0,sessionDraftCount:e})}var Pwc=20,Egr=160,lLt=4,xwc=6;var Pgr=w(()=>{ear();Q$t()});var xgr="SendFeedback";var Igr=()=>{};var Mgr="Queue a draft feedback report about Claude Code (the pr
+
+--- sessionDraftCount UI-ish @216531280
+;return{...t,seededFromDisk:!0,sessionDraftCount:Math.max(t.sessionDraftCount,e)}})}function Lwc(e){NE.feedbackNotice.setState((t)=>t.sessionDraftCount===e&&t.seededFromDisk?t:{...t,seededFromDisk:!0,sessionDraftCount:e})}var Pwc=20,Egr=160,lLt=4,xwc=6;var Pgr=w(()=>{ear();Q$t()});var xgr="SendFeedback";var Igr=()=>{};var Mgr="Queue a draft feedback report about Claude Code (the product OR the model's own behavior in this session) for the user to

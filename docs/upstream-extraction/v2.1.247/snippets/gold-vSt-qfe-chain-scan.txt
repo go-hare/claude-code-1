@@ -1,0 +1,47 @@
+# vSt qfe/J8 chain
+BUN-markers 212808000-214520000 count=0 hits=
+P "function ph(r,n)" count=1 hits=211422976
+  @211422976 function ph(r,n){let a=ol(r,n);if(a===null||a.length<2||!xe(a))return null;return Le.marketplaceTree(a[0],a.slice(1))}function hh(r){return r===De(le(),"plugins","asset-cache")?{na
+P "function ph(" count=8 hits=208424985,209508240,211422976,227470276,227749186,229756678,235799191,249485850
+  @208424985 function ph(e,t){let n,r;try{n=new URL(e),r=new URL(t)}catch(o){return console.error(`Unable to merge query strings: ${o}`),t}return n.searchParams.forEach((o,i)=>{if(r.searchParam
+  @209508240 function ph(e){if(!nd())return[];let t=new Set,n=new Set;for(let r of Gs(e)){let o=Ue(r);if(o===null&&Er(r))o=Ue(r);if(o===null||n.has(o))continue;if(n.add(o),!xn(o,e,kn(o)))contin
+  @211422976 function ph(r,n){let a=ol(r,n);if(a===null||a.length<2||!xe(a))return null;return Le.marketplaceTree(a[0],a.slice(1))}function hh(r){return r===De(le(),"plugins","asset-cache")?{na
+  @227470276 function ph(e){return{credentialNamed:e.withheld.credentialNamed.length,filterAttributed:e.withheld.filterAttributed.length,hardLinked:e.withheld.hardLinked.length}}function Bt(e,n
+  @227749186 function ph(e,t){let r=e.name||Yc(t),n=await b({message:"Extension name:",default:r,validate:(a)=>a.trim().length>0||"Name is required"}),i=await b({message:"Author name:",default:
+P "function ol(r,n)" count=1 hits=211422789
+  @211422789 function ol(r,n){if(!Xr(n))return null;let a=De(n,"marketplaces"),u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?
+P "function ol(" count=12 hits=206342417,208063748,208602918,209361673,211019077,211422789,219953311,223306354,231310671,231740869,234439919,237894148
+  @206342417 function ol(e){return ya.encode(e)}le.encodeURLSafe=ol;function al(e){return ya.decode(e)}le.decodeURLSafe=al;le.encodedLength=function(e){return ir.encodedLength(e)};le.maxDecoded
+  @208063748 function ol(e){return"serverCommand"in e&&e.serverCommand!==void 0}function sl(e){return"serverUrl"in e&&e.serverUrl!==void 0}var cs,Xa,us,ps,ms,fs,hs,gs,Nn,Ln,ys,vs,Cs='a .ps1 pat
+  @208602918 function ol(){return De().betas}function il(e,t,n){let r=e.get(t);if(r!==void 0)return r;let o=n();return e.set(t,o),o}function zM(e){return il(ol().midConversationSystem,e,()=>WM(
+  @209361673 function ol(e=nl,t={}){let n;try{n=Vn()}catch(l){return y(`memory-prompt-index: parseMemoryStoresEnv failed: ${Ut(l)}`,{level:"debug"}),[]}let r=n??(t.serveConnectedStores?[...St()
+  @211019077 function ol(e){return e.length<=GM&&Kb.test(e)}function Ib(e){let o=e._tokenizer?.buffer()??"";return e._tokenizer?.reset(),{...e,incomplete:"",droppedMousePrefix:o}}function Bb(e)
+P "ph as Oeb" count=1 hits=211612021
+  @211612021 ph as Oeb,hh as Peb,dh as Qeb,os as Reb,gh as Seb,K as Teb,dt as Ueb,Ah as Veb,yl as Web,fs as Xeb,Qe as Yeb,vs as Zeb,bs as _eb,_l as $eb,ti as afb,El as bfb,Mh as cfb,Cs as dfb,W
+P "Le.marketplaceTree" count=1 hits=211423058
+  @211423058 Le.marketplaceTree(a[0],a.slice(1))}function hh(r){return r===De(le(),"plugins","asset-cache")?{namespace:"pluginAssetCache"}:null}function dh(r,n){if(r===n)return n===qr()?{namesp
+P "marketplaceTree" count=3 hits=202689532,207948260,211423061
+  @202689532 marketplaceTree.#...A..tengu_plugin_command_source_refresh...Z.Z.maxStdoutBytes...maxStderrBytes..G...'Ak.mode "link": its output directory is used in place (linked, not 
+  @207948260 marketplaceTree:(e,n)=>({namespace:"marketplaceCache",marketplace:e,relPath:n}),pluginCache:(e,n,a,t)=>({namespace:"pluginCache",marketplace:e,plugin:n,version:a,relPath:t}),cache:
+  @211423061 marketplaceTree(a[0],a.slice(1))}function hh(r){return r===De(le(),"plugins","asset-cache")?{namespace:"pluginAssetCache"}:null}function dh(r,n){if(r===n)return n===qr()?{namespace
+DUMP ph @211422976 len=118
+DUMP ph-any @208424985 len=235
+DUMP ph-any @209508240 len=331
+DUMP ph-any @211422976 len=118
+DUMP ol @211422789 len=187
+DUMP ch-mkt @211422673 len=71
+EX "vSt as hea" count=1 hits=219687213
+EX "_St as gea" count=1 hits=219687202
+EX "qLn as iea" count=1 hits=219687224
+EX "export{vSt" count=0 hits=
+EX "vSt as " count=1 hits=219687213
+BODY "n.readText" hits=214518952
+BODY "n.writeText" hits=-
+BODY "n.write(" hits=-
+BODY ".write(" hits=-
+BODY "writeText" hits=-
+BODY "catalog" hits=-
+BODY "marketplaceCache" hits=-
+BODY "qfe" hits=214518879,214519613
+BODY "J8(" hits=214518903
+BODY "Ne()" hits=214518886

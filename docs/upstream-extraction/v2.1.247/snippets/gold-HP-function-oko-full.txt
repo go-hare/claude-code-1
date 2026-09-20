@@ -1,0 +1,6 @@
+# LOCKED oko @213652316 end=213652373 len=57
+# unique function oko( count=1
+# unique function oko(){let e=sPe() count=1
+# registered as flush: pPe uln({flush:oko,flushAtExit:sko})
+# drains pendingUsage via sPe then ki(xit(e),hln()) — persist pluginUsage
+function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}

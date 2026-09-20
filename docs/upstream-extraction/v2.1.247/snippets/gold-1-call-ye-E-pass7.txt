@@ -1,0 +1,139 @@
+# gold-1-call-ye-E-pass7 247
+
+## function aLt( hits=1
+- #0 @216529629 (e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}function aLt(){return Ffs()!=="off"&&Ufs()}function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!
+
+## function Ufs( hits=1
+- #0 @216529291 A-Za-z0-9-]{1,255}$/});function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1
+
+## function Ffs( hits=1
+- #0 @216529234 4}-[0-9a-fA-F]{12}$/,ggr=/^[A-Za-z0-9_-]{1,128}$/,sLt=/^[A-Za-z0-9-]{1,255}$/});function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK
+
+## aLt as hCa hits=1
+- #0 @219701273 Ba,bgr as aCa,Sgr as bCa,wgr as cCa,fwc as dCa,kgr as eCa,Ffs as fCa,Ufs as gCa,aLt as hCa,Ewc as iCa,Tgr as jCa,Pwc as kCa,xwc as lCa,Iwc as mCa,Mwc as nCa,Owc as oCa,Ag
+
+## Ufs as gCa hits=1
+- #0 @219701262 Ba,ogr as $Ba,bgr as aCa,Sgr as bCa,wgr as cCa,fwc as dCa,kgr as eCa,Ffs as fCa,Ufs as gCa,aLt as hCa,Ewc as iCa,Tgr as jCa,Pwc as kCa,xwc as lCa,Iwc as mCa,Mwc as nCa,Ow
+
+## DISABLE_FEEDBACK_COMMAND hits=9
+- #0 @197163140 he transcript...-.......You can share details with /feedback instead........!.3.DISABLE_FEEDBACK_COMMAND........DISABLE_BUG_COMMAND.........share_failed
+...N.<.submitting..........than
+- #1 @199048404 ipts.....l..diskSubagentTranscripts.Q...E.|./feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable...L.....3./feedback has been disabled via the DISABLE_BUG_
+- #2 @207187975 OMMAND:()=>as,DISABLE_ERROR_REPORTING:()=>Bs,DISABLE_EXTRA_USAGE_COMMAND:()=>bs,DISABLE_FEEDBACK_COMMAND:()=>ds,DISABLE_GROWTHBOOK:()=>ms,DISABLE_INSTALLATION_CHECKS:()=>Hs,DISABLE_INS
+- #3 @207307132 SE_VERTEX","DISABLE_AUTOUPDATER","DISABLE_BUG_COMMAND","DISABLE_COST_WARNINGS","DISABLE_FEEDBACK_COMMAND","DISABLE_GROWTHBOOK","DISABLE_INSTALLATION_CHECKS","DISABLE_UPDATES","ENABLE_T
+- #4 @216529311 });function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())retu
+- #5 @222029827 ",mantle:"Amazon Bedrock (Mantle)",gateway:"an API gateway"};function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEED
+- #6 @222029919 BACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMMAND)return{kind:"disabled",reason:"
+- #7 @232968318 ren:[i(Sr,{status:"error",withSpace:!0}),"Couldn't share the transcript."]}),ct.DISABLE_FEEDBACK_COMMAND||ct.DISABLE_BUG_COMMAND?null:i(p,{dimColor:!0,children:"You can share details w
+
+## DISABLE_BUG_COMMAND hits=9
+- #0 @197163172 share details with /feedback instead........!.3.DISABLE_FEEDBACK_COMMAND........DISABLE_BUG_COMMAND.........share_failed
+...N.<.submitting..........thanks......;s..highlighted...
+- #1 @199048496 BACK_COMMAND environment variable...L.....3./feedback has been disabled via the DISABLE_BUG_COMMAND environment variablea....D../feedback has been disabled via the CLAUDE_CODE_DIS
+- #2 @207187800 OUPDATER:()=>Ns,DISABLE_AUTO_COMPACT:()=>xs,DISABLE_BRIEF_MODE_STOP_HOOK:()=>ls,DISABLE_BUG_COMMAND:()=>Ps,DISABLE_COMPACT:()=>Ms,DISABLE_COST_WARNINGS:()=>us,DISABLE_DOCTOR_COMMA
+- #3 @207307086 LAUDE_CODE_USE_POWERSHELL_TOOL","CLAUDE_CODE_USE_VERTEX","DISABLE_AUTOUPDATER","DISABLE_BUG_COMMAND","DISABLE_COST_WARNINGS","DISABLE_FEEDBACK_COMMAND","DISABLE_GROWTHBOOK","DISAB
+- #4 @216529339 ("feedbackDrafts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_prod
+- #5 @222029972  has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_BUG_
+- #6 @222030059 _BUG_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable"};if(X())return{kind:"disabled",reason:"/feedback has been
+- #7 @232968347 hSpace:!0}),"Couldn't share the transcript."]}),ct.DISABLE_FEEDBACK_COMMAND||ct.DISABLE_BUG_COMMAND?null:i(p,{dimColor:!0,children:"You can share details with /feedback instead."}
+
+## aLt @216529629
+len=43 sha=fa067907ed777bba
+function aLt(){return Ffs()!=="off"&&Ufs()}
+
+## Ufs @216529291
+len=338 sha=d18191a530989b34
+function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}
+
+## Ufs-win @216529291
+afts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}function aLt(){return Ffs()!=="off"&&Ufs()}function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!==void 0?ay("userSettings",{feedbackDrafts:e},void 0,t):ay("userSettings",{feedbackDrafts:e});return D("tengu_feedback_drafts_setting_changed",{value:X(e),via:X(n)}),r}var Tgr=w(()=>{Lu();Dt();Ko();rs();Bu();Co();ju();nn();Pt();Zt()});function Cgr(e){let t="silent";return NE.feedbackNotice.setState((n)=>{let r={...n,sessionDraftCount:n.sessionDraftCount+1};if(n.notic
+
+## aLt-win @216529629
+_juniper_relay",!1)}function aLt(){return Ffs()!=="off"&&Ufs()}function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!==void 0?ay("userSettings",{feedbackDrafts:e},void 0,t):ay("userSettings",{feedbackDrafts:e});return D("tengu_feedback_drafts_setting_changed",{value:X(e),via:X(n)}),r}var Tgr=w(()=>{Lu();Dt();Ko();rs();Bu();Co();ju();nn();Pt();Zt()});function Cgr(e){let t="silent";return NE.feedbackNotice.setState((n)=>{let r={...n,sessionDraftCount:n.sessionDraftCount+1};if(n.notice!==null)return t="notice_pending",r.notice=e,r;if(n.promptedCount>=tgr())return t="silent",r;return r.promptedCount=n.promptedCount+1,t="notice_pending",r.notice=e,r}),t}function Rgr(){let e=!1;return NE.feedbackNotice.setState((t)=>{if(t.toolCallCount>=LKe())return t;return e=!0,{...t,toolCallCount:t.toolCallCount+1}}),e}function Iwc(
+
+## export from 158-ish hits=0
+
+## _158 export Ps Qs hits=9
+- #0 @206584170 tr as o8c,me as p8c,Dt as q8c,Ie as r8c,go as s8c,Gt as t8c,Is as u8c,ct as v8c,Ps as w8c,ft as x8c,zs as y8c,Zt as z8c,ti as A8c,Pg as B8c,Sn as C8c,da as D8c,ya as
+- #1 @208089804 bs as nMc,Ss as oMc,ws as pMc,Es as qMc,vs as rMc,ks as sMc,xs as tMc,Cs as uMc,Ps as vMc,Qa as wMc,U as xMc,Z as yMc,gn as zMc,Ls as AMc,Hs as BMc,tl as CMc,nl as D
+- #2 @208263542 ws as G3c,Lt as H3c,bs as I3c,Wn as J3c,Es as K3c,Rs as L3c,Un as M3c,xs as N3c,Ps as O3c,cr as P3c,w as Q3c,ur as R3c,dr as S3c,Kn as T3c,Ss as U3c,Cs as V3c,vs as 
+- #3 @208898979 oF as tjc,iF as ujc,sF as vjc,Cn as wjc,uF as xjc,jn as yjc,hS as zjc,_S as Ajc,Ps as Bjc,yS as Cjc,cF as Djc,dF as Ejc,fF as Fjc,pF as Gjc,gF as Hjc,mF as Ijc,hF as
+- #4 @210610023 ws as pHb,ci as qHb,Os as rHb,Ns as sHb,Ss as tHb,Is as uHb,pi as vHb,As as wHb,Ps as xHb,gi as yHb,vs as zHb,_i as AHb,yi as BHb,Cs as CHb,bi as DHb,wi as EHb,xs as
+- #5 @210843412 Lo as N7a,To as O7a,Yt as P7a,xo as Q7a,jt as R7a,bn as S7a,Xt as T7a,Cn as U7a,Ps as V7a,Ot as W7a,ws as X7a,Ds as Y7a,je as Z7a,_t as _7a,ks as $7a,Ls as a8a,Ts as
+- #6 @222041077 ,{success:!1,error:O(r)}}return js(p)}
+export{E as Iw,A as Jw,ae as Kw,ss as Lw,Ps as Mw,Es as Nw,V as Ow,xs as Pw,Ct as Qw,Fs as Rw,Ds as Sw,D as Tw,Dt as Uw,Lt as 
+- #7 @223486730 zr as pU,Qr as qU,Zr as rU,Vr as sU,en as tU,tn as uU,W as vU,Rs as wU,ks as xU,Ps as yU,_s as zU,sn as AU,an as BU,Cs as CU,cn as DU};
+.// @bun @bytecode
+// Claude 
+
+## _158-module-search @237069251
+
+
+## Qs as Jt hits=1
+- #0 @237069260 e.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw
+
+## function that exports Ps Qs hits=1391
+- #0 @82467142 romise.resolve(p).then(n,_=>(o(_),n()))}catch(_){o(_)}if(r)throw t};return n()};export{ve as $$typeof,ye as __EARLY_RETURN_SENTINEL,de as __MEMO_CACHE_SENTINEL,Oe as _
+- #1 @83090689 t class dovar export default Internal error: unexpected export default stmt dataexport{export {}from} from export * as export* as export*fromexport * from from  await 
+- #2 @83202777 edded node-fallback polyfill: invalid zstd frame(./. ?u..$.var console_default=;export{ as };......s.M&(./.`...B.
+L..#0Ic..=..b;..Z..uJq.a/..8......a00P%........d...].
+- #3 @206249451 . If invoking --handle-uri manually, place other flags before it.";return null}
+export{r as D7c};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's C
+- #4 @206251605 low-dangerously-skip-permissions")t++;return i[t]==="daemon"?i.slice(t+1):null}
+export{f as E7c,c as F7c,d as G7c,u as H7c};
+.// @bun @bytecode
+// Claude Code is a Bet
+- #5 @206253675 e_sentinel"),B=Symbol.for("react.early_return_sentinel"),C=import.meta.require;
+export{u as ABd,v as BBd,w as CBd,x as DBd,y as EBd,z as FBd,A as GBd,B as HBd,C as IBd
+- #6 @206254945 s-worker.js",DD_SOURCEMAP_GROUP:"win32"}.BUILD_REF_NAME){return""}var r=()=>{};
+export{t as I7c,r as J7c};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anth
+- #7 @206257486 GENT.startsWith("claude-code/"))process.env.AI_AGENT=a("harness")}var t=()=>{};
+export{s as K7c,r as L7c,a as M7c,n as N7c,t as O7c};
+.// @bun @bytecode
+// Claude Code
+
+## Os,Ps,Qs hits=8
+- #0 @208142891 hs as _Hc,Cr as $Hc,vs as aIc,bs as bIc,Ir as cIc,ws as dIc,ks as eIc,Es as fIc,Os as gIc,yt as hIc,T as iIc,Nr as jIc,Cs as kIc,kt as lIc,Z as mIc,Rt as nIc,Fr as o
+- #1 @208263781 Fs as c4c,we as d4c,Zn as e4c,Bs as f4c,As as g4c,Qe as h4c,Jn as i4c,Ts as j4c,Os as k4c,Gs as l4c,Ns as m4c,ro as n4c,Ms as o4c,no as p4c,oo as q4c,io as r4c,Hs as
+- #2 @208321648 ti as MGc,ht as NGc,ms as OGc,ys as PGc,hs as QGc,ie as RGc,_s as SGc,Es as TGc,Os as UGc,As as VGc,ws as WGc,ni as XGc,Ts as YGc,Cs as ZGc,ri as _Gc,bs as $Gc,vs as
+- #3 @208895387 as Mcc,Yx as Ncc,xS as Occ,fue as Pcc,pue as Qcc,_r as Rcc,fp as Scc,gue as Tcc,Os as Ucc,zP as Vcc,gj as Wcc,py as Xcc,gy as Ycc,my as Zcc,Cu as _cc,Mo as $cc,qd as
+- #4 @210609963 et as jHb,nt as kHb,ai as lHb,tt as mHb,ks as nHb,Es as oHb,ws as pHb,ci as qHb,Os as rHb,Ns as sHb,Ss as tHb,Is as uHb,pi as vHb,As as wHb,Ps as xHb,gi as yHb,vs as
+- #5 @219705723  DJa,rWt as EJa,IE as FJa,W7c as GJa,xXe as HJa,bK as IJa,iK as JJa,uWt as KJa,sOs as LJa,Teu as MJa,gUr as NJa,Eeu as OJa,yUr as PJa,iOs as QJa,FUr as RJa,FXe as SJ
+- #6 @219705778 Ja,iK as JJa,uWt as KJa,sOs as LJa,Teu as MJa,gUr as NJa,Eeu as OJa,yUr as PJa,iOs as QJa,FUr as RJa,FXe as SJa,BUr as TJa,WU as UJa,Nnu as VJa,Fnu as WJa,Unu as XJa
+- #7 @232030386 /~BUN/root/_152.js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";impo
+
+## _158 Ps def via survey hits=10
+- #0 @198149352 open GitHub issue........f[.any key to close.....ey.initialDescription........&.surveyFeedbackSource........gitStatePromise.........**Bug Description**
+#.......
+
+**Environment Info
+- #1 @222032996 description:a,surface:u,scope:i="session",backgroundTasks:t={},transcripts:n={},surveyFeedbackSource:c,excludeThirdPartyTranscripts:o,storageV5:p}){let[r,f]=await Promise.all([Te({
+- #2 @222038121 cription:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,signal:c,surveyFeedbackSource:o,storageV5:p,credentials:r}){let{payload:f,thirdPartyDroppedCount:d}=await Ue(
+- #3 @222038297  Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:o,excludeThirdPartyTranscripts:!0,storageV5:p}),e=f.latestAssistantMessageId,m=
+- #4 @222040704 ges:s,description:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,storageV5:o}){let p;try{let{payload:r}=await Ue({messages:s,description:a,sur
+- #5 @222040851  Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,excludeThirdPartyTranscripts:!1,storageV5:o}),f=xe(r);p=E(f,se,te)}catch(r){r
+- #6 @237072767 nitialDescription:c,onDone:d,backgroundTasks:b={},mode:p="post",readFileState:x,surveyFeedbackSource:K}){let{storageV5:J,credentials:A}=ue(),[m,h]=u("userInput"),[Q,X]=u(0),[S,Y]=u
+- #7 @237073310 essages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,surveyFeedbackSource:K,storageV5:J});if(W.success)ee(W.bundleId),ie(W.zipPath),h("done");else U(`Cou
+
+## !Ht() hits=3
+- #0 @212307489 t.error);e.end(),E(Nt,n)}function Ht(){return S()||rt()}function xn(e,t,n,r){if(!Ht())return a.trace.getActiveSpan()||d().startSpan("dummy");let s=d(),o=l(),{content
+- #1 @212307817 startTime:performance.now(),attributes:u,priorContext:o}),g}function Pn(e,t){if(!Ht())return;let n=b.get(e);if(!n||n.ended)return;n.ended=!0;let s={duration_ms:Math.
+- #2 @237084440 ,_t[9]=Ko;else Ko=_t[9];return Ko}async function jr(l,n,c){if(zt()&&!c?.trim()&&!Ht())return e(Xt,{onDone:l,context:n});return en(l,n,c)}
+export{Yo as Ls,en as Ms,jr
+
+## Ht() hits=216
+- #0 @206459341  Ot=()=>{};var Ht=()=>{};var jt=()=>{};var At=()=>{};var z=e(()=>{z();It();Ot();Ht();jt();At()});var Pt=()=>{};var Ct=()=>{};var _t=()=>{};var Kt=()=>{};var $t=()=>
+- #1 @206887475 y acknowledged."),pending_permission_requests:Nt(),pending_user_dialog_requests:Ht()}).describe("The request was handled.")),mr=s(()=>t({subtype:n("error"),request_
+- #2 @206887750 re description."),pending_permission_requests:Nt(),pending_user_dialog_requests:Ht()}).describe("The request failed or was rejected (unknown subtype, invalid argume
+- #3 @206907611 .clear();while(++e<r){var n=t[e];this.set(n[0],n[1])}}var Gt;var $t=i(()=>{Nt();Ht();zt();Mt();Wt();_.prototype.clear=jt;_.prototype.delete=Rt;_.prototype.get=It;_.
+- #4 @207443798 putToHrTime",{enumerable:!0,get:function(){return p.timeInputToHrTime}});var ss=Ht();Object.defineProperty(s,"unrefTimer",{enumerable:!0,get:function(){return ss.un
+- #5 @207884397 hen set, the agents/ directory is not auto-loaded.")])})),En=p(()=>d({skills:T([Ht().describe('Path to a skill directory, relative to the plugin root ("." / "./" de
+- #6 @207884701 etplace root, declaring a specific subdirectory replaces the skills/ scan).'),f(Ht().describe('Path to a skill directory, relative to the plugin root ("." / "./" de
+- #7 @208274889 ,"git","ignore");return xe(Et(),".config","git","ignore")}async function Rt(e,t=Ht()){try{if(!await bt(t))return{written:!1,effective:!1};let n=e.replaceAll("\\","/

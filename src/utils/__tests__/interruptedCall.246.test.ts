@@ -81,6 +81,32 @@ describe('densable 2.1.246 #12 interruptedCall (Nvo)', () => {
     expect(interruptedCall(userToolResult('command finished'))).toBe(false)
   })
 
+  test('mid-run shell abort: toolUseResult.interrupted or abort error tag', () => {
+    expect(
+      interruptedCall(
+        userToolResult('partial stdout', {
+          is_error: true,
+          toolUseResult: { stdout: 'partial stdout', interrupted: true },
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      interruptedCall(
+        userToolResult(
+          'partial\n<error>Command was aborted before completion</error>',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      interruptedCall(
+        userToolResult('exit 1', {
+          is_error: true,
+          toolUseResult: { stdout: '', interrupted: false },
+        }),
+      ),
+    ).toBe(false)
+  })
+
   test('collapse uses shell command wording + rejected fallback when fe', () => {
     expect(collapseSrc).toContain('shell {bashCount === 1 ? ')
     expect(collapseSrc).not.toContain('bash {bashCount === 1 ? ')

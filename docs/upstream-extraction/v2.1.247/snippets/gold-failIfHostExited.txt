@@ -1,0 +1,48 @@
+# densable 2.1.247 failIfHostExited + attach EHOSTDEAD (peeled)
+
+## constants @ 208925404
+ct="EHOSTDEAD"
+dt="terminal host process died — press Enter to restart"
+ut="This session's terminal host process died (the conversation is saved)"
+gt="terminal host process died — its output is gone; the command was not run again"
+mt="This command's terminal host process died — its output is gone and the command was not run again"
+ht=/ESTALLED|EUNVERIFIED|EHOSTDEAD/
+rt=/ERESPAWNING|ESTARTING/
+
+## official ze / Ge @ 207472739 (wi / stat-state)
+function Ge(e){let r=e.lastIndexOf(")");if(r<0)return;let n=e.slice(r+2),t=n.indexOf(" "),o=t<0?n:n.slice(0,t);return o.length===0?void 0:o}
+function ze(e){return e==="Z"||e==="X"}
+
+## official failIfHostExited @ 221893760
+async failIfHostExited(e){
+  let t=this.record.pid;
+  if(!t||this.record.outcome||this.isKilling||!this.pty)return!1;
+  let i=await Di(t);
+  if(!wi(i))return!1;
+  if(this.record.outcome||this.isKilling||!this.pty||this.record.pid!==t)return!1;
+  _(`bg: ${this.dispatch.short} pty host pid=${t} has exited but is unreaped (state ${i}) via=${e} — reaping it and marking the session failed`,{level:"warn"});
+  m("tengu_bg_ptyhost_zombie",{
+    short:P(this.dispatch.short),
+    via:O(e),
+    state:O(i==="Z"?"Z":"X"),
+    uptimeMs:Date.now()-this.record.startedAt,
+    attachers:this.attachers.size
+  });
+  this.kill("SIGKILL","failed",this.dispatch.launch.mode==="exec"?Gi:$i);
+  return!0
+}
+
+## official checkPid pty branch
+if(this.pty){await this.failIfHostExited("poll");return}
+
+## official attach (after ENOJOB/EUNVERIFIED/ERESPAWNING/legacy/upgrade)
+if(await r.failIfHostExited("attach"))
+  return u(e,{ok:!1,error:r.dispatch.launch.mode==="exec"?pn:fn,code:"EHOSTDEAD"});
+
+## official ah (job_attach) — do not invent Xe
+if(a.msg?.startsWith(`${kn}:`)){
+  j("job_attach","job_attach_host_dead");
+  let d=await K(O(e),t.storageV5).catch(()=>null);
+  let _=a.msg.slice(kn.length+1).trim();
+  return{kind:"error",msg:d!==null&&Xe(d)?_:`${_} — press Enter to restart it`}
+}

@@ -1,0 +1,1 @@
+function ne(e,t){if(!ae(e,t))return!0;let r=Dr(e);return r==="symlink"||r==="other"}

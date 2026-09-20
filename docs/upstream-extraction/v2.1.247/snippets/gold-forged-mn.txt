@@ -1,0 +1,1 @@
+async function mn(e,{path:t,status:i,oldMode:n,newMode:r,oldId:a,newId:o}

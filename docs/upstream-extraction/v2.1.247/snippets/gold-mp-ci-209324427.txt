@@ -1,0 +1,2 @@
+# @209324427 len=89
+function ci(){let e=_.CLAUDE_CODE_PLUGIN_CACHE_DIR;if(e)return Lr(e);return Ur(Y(),Od())}

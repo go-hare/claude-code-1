@@ -1,0 +1,3 @@
+# offset=204146060
+
+rator information...3...Collection of available plugins in this marketplace.h...*.}.When true, plugins removed from this marketplace will be automatically uninstalled and flagged for users...=)".Base directory for bare plugin source names, relative to the marketplace root (e.g. "./plugins" resolves "source": "formatter" as ./plugins/formatter). Sources that already start with "./" are unaffected...Marketplace version...Marketplace description...S.Optional marketplace metadata...0..M.a.r.k.e.t.p.l.a.c.e. .n.a.m.e.s. .w.h.o.s.e. .p.l.u.g.i.n.s. .m.a.y. .b.e. .a.u.t.o.-.

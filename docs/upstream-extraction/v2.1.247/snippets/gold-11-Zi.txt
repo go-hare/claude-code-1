@@ -1,0 +1,3 @@
+# offset=210378069
+
+function Zi(e,t){return/[\\/]$/.test(e.trim())&&!Yr(ri(t))?Vr(t):t}

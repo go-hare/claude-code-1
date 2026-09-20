@@ -1,0 +1,2 @@
+# gold-forged-on-Ki.txt official-247 SEA @210370901-210371400
+function Ki(e,t){return _Z(e,nh(t))}function Fne(){return null}function SZ(){return{}}function Ua(){return Te().tenguSandboxGbConfig()}function Mne(){let e=Te();if(e.tenguSandboxGbConfig.cache.clear?.(),e.gbHostRulesMemo=void 0,e.initializationPromise===void 0)e.installedFilterRequestEnforcesAllowlist=!1}function ih(){return Na().map((e)=>e?.sandbox?.network?.tlsTerminate).find((e)=>e!==void 0)}function oh(){let e=ih();if(e?.caCertPath||e?.caKeyPath)return{source:"trustedPair",...e.caCertPath&&

@@ -1,0 +1,3 @@
+# offset=202071004 needle="Agent terminated early due to an API error"
+
+pped because the provenance frame covers this delivery (tengu_auto_mode_config.classifyHandoff: false); the tool_result mapper MUST compose the frame when set, regardless of a fresh flag read.,...Agent terminated early due to an API error: *...:..Agent terminated early due to an API error...J...AgentApiErrorTerminationError...The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice...Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs o

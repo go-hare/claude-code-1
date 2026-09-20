@@ -1,0 +1,1 @@
+function ko(t,e){let r=c(e,t);if(ae(t,e)||ae(r,e))return!0;let n=N(e);for(let o of[t,r])if(J(o)){let a=N(o);if(a===null||a!==n)return!0}return!1}

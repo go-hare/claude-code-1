@@ -1,0 +1,69 @@
+# offset=222274387 hit=0/1 needle="{id:\"new-user-warmup\""
+# 66 tip objects; YES = providerAgnostic:!0
+
+YES  new-user-warmup
+YES  plan-mode-for-complex-tasks
+YES  default-permission-mode-config
+YES  git-worktrees
+YES  color-when-multi-clauding
+YES  agents-view-multiclauding
+YES  terminal-setup
+YES  vscode-gpu-accel-garbled-glyphs
+YES  shift-enter
+YES  shift-enter-setup
+YES  memory-command
+YES  theme-command
+YES  colorterm-truecolor
+YES  powershell-tool-env
+YES  status-line
+YES  prompt-queue
+YES  enter-to-steer-in-relatime
+YES  todo-list
+YES  vscode-command-install
+YES  ide-upsell-external-terminal
+ -   install-github-app
+ -   install-slack-app
+ -   install-slack-app-mcp
+YES  permissions
+YES  drag-and-drop-images
+YES  paste-images-mac
+YES  double-esc
+YES  double-esc-code-restore
+YES  continue
+YES  rename-conversation
+YES  custom-commands
+YES  shift-tab
+YES  image-paste
+YES  agent-flag
+ -   desktop-app
+ -   desktop-shortcut
+ -   desktop-contextual
+ -   claude-design-contextual
+ -   claude-design-command
+ -   artifact-publish-plan
+ -   artifact-duplicate
+ -   web-app
+ -   web-setup-github
+ -   remote-control
+ -   remote-control-next-surface
+ -   push-notif
+ -   voice-mode
+YES  no-flicker
+ -   console-api-key
+ -   c4e-desktop
+ -   c4e-remote-sessions
+ -   c4e-ultrareview
+ -   ultrareview-awareness
+YES  opusplan-mode-reminder
+YES  frontend-design-plugin
+YES  subagent-fanout-nudge
+YES  dynamic-workflows
+YES  workflow-size-prompting
+YES  workflow-size-prompting-ambient
+YES  loop-command-nudge
+YES  code-review-low-fast
+YES  plugin-disuse-review
+ -   goal-command-nudge
+ -   guest-passes
+ -   feedback-command
+ -   team-onboarding-share

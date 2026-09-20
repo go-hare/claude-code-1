@@ -1,0 +1,3 @@
+# offset=210370791
+
+function qs(e){if(ge()==="windows")return Yr(ri(e))?e.replace(/[\\/]+$/,""):e;return no(e,{evenAfterGlob:!0})}

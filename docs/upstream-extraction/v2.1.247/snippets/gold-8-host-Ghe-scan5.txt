@@ -1,0 +1,27 @@
+vn unique count=1
+  vn@228968311 len=1440
+dt({host:ft().host count=1
+REPL-back 30000 head= view them',children:Ce>0&&we>0?"Only hidden files changed":Ce>0?"Only read-denied files changed":"Only tests and generated files changed"}):i(y,{flexDirection:"column",gap:1,child
+REPL-back 50000 head=wre();var xEt=500,v3e=200;function D3e(e){let t=Go(),o=T(T3e()),n=vd(()=>{let r=o.current;o.current=T3e();for(let s of["held","denied","expired","delivered","refused"]){let a=r[s];
+REPL-back 80000 head=rn R("[lspRecommendation] No file extension found"),[];R(`[lspRecommendation] Looking for LSP plugins for ${n}`);let r=await zPt(o),a=Kt().lspRecommendationNeverPlugins??[],l=[];fo
+STR "function REPL(" count=0 hits=
+STR "function REPL({" count=0 hits=
+STR "session:ge," count=4 hits=233122931,233128169,233141271,233141846
+  NEAR @233122931 nM.createTurnEventTail((Z)=>ga({type:"append",messages:Z}))),[Pt]=L(()=>new ZW({session:ge,store:De,setAppState:Ke,transcript:to,turn:kt,draft:Ht,scope:gn,engine:ir,dialogStore:Yt,taskRegistry:ho,messageQueue:fe,storageV5:j,credentials:re,s
+  NEAR @233128169 uo]=L(()=>new V$({store:De,setAppState:Ke,transcript:to,turn:kt,messageQueue:fe,session:ge,taskRegistry:ho,storageV5:j,credentials:re,fleetNudgeStore:te,clock:be,now:Date.now,getInputValue:()=>Ht.value})),ui=Ot(uo,(Z)=>Z.leftArrowConfirm!==
+  NEAR @233141271 =B(()=>kt.cancel("remote"),[kt]),{sendBridgeResult:D$}=j_e(Qn,to,qM,rr,Bt,()=>({session:ge,tools:gn.computeTools(),customSystemPrompt:h,appendSystemPrompt:S}),wr,ir,qs.runBridgeImmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(Rn
+  NEAR @233141846 e:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammateColors:tt,messageQueue:fe,dialogStore:Yt,addNotifica
+STR "{session:ge" count=2 hits=233122930,233141270
+  NEAR @233122930 >nM.createTurnEventTail((Z)=>ga({type:"append",messages:Z}))),[Pt]=L(()=>new ZW({session:ge,store:De,setAppState:Ke,transcript:to,turn:kt,draft:Ht,scope:gn,engine:ir,dialogStore:Yt,taskRegistry:ho,messageQueue:fe,storageV5:j,credentials:re,
+  NEAR @233141270 M=B(()=>kt.cancel("remote"),[kt]),{sendBridgeResult:D$}=j_e(Qn,to,qM,rr,Bt,()=>({session:ge,tools:gn.computeTools(),customSystemPrompt:h,appendSystemPrompt:S}),wr,ir,qs.runBridgeImmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(R
+STR "ge:e.session" count=0 hits=
+STR "session:uk()" count=0 hits=
+STR "session:ft()" count=0 hits=
+STR "session:n()" count=0 hits=
+STR "ge=ft()" count=0 hits=
+STR "ge=uk()" count=0 hits=
+S assigns in -3k: 0
+"ft()" total=25 nearREPL=
+"uk()" total=6 nearREPL=232247411,232264073,232387542
+"tod(" total=0 nearREPL=
+"dt({host:" total=1 nearREPL=

@@ -1,0 +1,3 @@
+# 247 offset=231214201 needle="function Pt(){return"
+
+adePaths)}function Mt(){return E(It,{})}function Pt(){return be}function U(gt){return q(gt.phase==="armed"?Math.min(gt.fireAtMs,gt.resetsAtSeconds*1000):null)}function It(){let Wt=Z(5),D=A();const ht=U(D);let te;if(Wt[0]!==D||Wt[1]!==ht)te=Lt(D,ht),Wt[0]=D,Wt[1]=ht,Wt[2]=te;else te=Wt[2];let M=te,[P,Ye]=y(M);if(M!==""&&M!==P)Ye(M);let ee;

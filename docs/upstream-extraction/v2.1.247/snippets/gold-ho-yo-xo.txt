@@ -1,0 +1,2 @@
+# LOCKED xo pos=207910796 (os predicate regex)
+xo=/^[A-Za-z0-9][-A-Za-z0-9._]*$/

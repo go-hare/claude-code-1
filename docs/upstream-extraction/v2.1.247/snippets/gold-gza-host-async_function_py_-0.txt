@@ -1,0 +1,2 @@
+# needle=async function py( pos=209325064
+async function py(e){let t=Br(e);try{await Cd(t,{recursive:!0,force:!0})}catch(n){y(`Failed to delete plugin data dir ${t}: ${Ut(n)}`,{level:"warn"})}}

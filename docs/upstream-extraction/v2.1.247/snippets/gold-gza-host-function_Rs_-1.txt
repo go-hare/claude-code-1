@@ -1,0 +1,2 @@
+# needle=function Rs( pos=207845042
+function Rs(e){let t={};for(let s=0,o=e.length;s<o;s+=1){let n=e.charAt(s);t[n]=(t[n]||0)|1<<o-s-1}return t}

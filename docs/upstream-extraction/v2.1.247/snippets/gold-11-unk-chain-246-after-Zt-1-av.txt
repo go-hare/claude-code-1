@@ -1,0 +1,3 @@
+# 246-after-Zt n=1 function av start=209122950 end=209123164 len=214 sha=3a7a70300dbf4cab
+
+function av(e,t){let{osLinkedRootRealpaths:n}=oN();return _Z.some((r)=>{if(e!==r&&!e.startsWith(r+En))return!1;let s=n.get(r);if(s===void 0){try{s=xn(r)}catch{s=r}n.set(r,s)}return s!==r&&t===s+e.slice(r.length)})}

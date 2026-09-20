@@ -1,0 +1,6 @@
+# pos=66655637
+setDestTimestamps(src, dest) {
+  let updatedSrcStat = await stat(src);
+  return utimes(dest, updatedSrcStat.atime, updatedSrcStat.mtime);
+}
+function onDir(srcSt

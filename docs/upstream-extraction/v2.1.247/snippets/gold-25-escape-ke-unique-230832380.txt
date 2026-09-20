@@ -1,0 +1,3 @@
+# 247 function ke start=230832380 end=230832417 len=37 sha=cecf93b381c02440
+
+function ke(o){return o?180000:60000}

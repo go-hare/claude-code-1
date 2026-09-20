@@ -1,0 +1,44 @@
+### ot-before-4k off=232017716
+}from"B:/~BUN/root/_839.js";import{Ezd as se,eAd as ve}from"B:/~BUN/root/_845.js";import{fAd as n,gAd as w,hAd as I,oAd as Se}from"B:/~BUN/root/_846.js";Be();$e();Re();Ee();Z();Ae();Ce();Pe();Se();ze();Q();Z();var De=65536;function Me(e){return Buffer.byteLength(S(S(e)).slice(1,-1))}function G(e){let s=S(e).slice(1,-1);return Buffer.byteLength(S(s).slice(1,-1))}function ee(e){let s=P(e);if(s<=F)return{payload:e,trim:null};using m=v`fitFeedbackPayloadToBudget(${s})`;let a=s-(F-De),t=e.transcript.map((b)=>Me(b)+1),p=t.reduce((b,T)=>b+T,0),_=e.rawTranscriptJsonl===void 0?0:G(e.rawTranscriptJsonl),y=a<=p?p-a:Math.max(0,p-Math.max(0,a-_)),{start:d,keptBytes:u,oversized:c}=z(t,y),l=e.transcript.slice(d),D=c.size===0?l:l.filter((b,T)=>!c.has(d+T)),k=a-(p-u),o=e.rawTranscriptJsonl,i=o===void 0?"absent":"untouched";if(k>0&&o!==void 0){let b=_-k;if(b<=0)o=void 0,i="omitted";else{let T=o.split(`\u000a`),Te=T.map((U)=>G(U+`\u000a`)),{start:V,oversized:Y}=z(Te,b),N=T.slice(V),X=(Y.size===0?N:N.filter((U,we)=>!Y.has(V+we))).join(`\u000a`);if(X==="")o=void 0,i="omitted";else o=X,i="reduced"}}let A={keptMessageCount:D.length,totalMessageCount:e.transcript.length,oversizedMessageCount:c.size,rawTail:i,rawTailKeptBytes:o===void 0?0:Buffer.byteLength(o)},f=Fe(A);if(f===null)return{payload:e,trim:null};let{rawTranscriptJsonl:C,...M}=e,h={...M,message_count:D.length,description:`${e.description}\u000a${f}`,transcript:D,...o!==void 0&&{rawTranscriptJsonl:o}},r=P(h);if(r>F)g(`fitFeedbackPayloadToBudget: still ${r} bytes after trim (budget ${F})`,{level:"error"});return{payload:h,trim:A}}function Fe(e){let s=[];if(e.keptMessageCount<e.totalMessageCount)s.push(`kept ${e.keptMessageCount} of ${e.totalMessageCount} transcript messages (newest kept first)`);if(e.rawTail==="reduced")s.push(`kept ${Math.max(1,Math.round(e.rawTailKeptBytes/1024))} KiB of the raw session log (newest kept first)`);else if(e.rawTail==="omitted")s.push("omitted the raw session log");if(s.length===0)return null;return`transcript_truncated: ${s.join("; ")} (trimmed client-side to fit the upload size limit)`}Ie();Q();ve();function Le(e,s="panel"){let m=J(e.request_ids),a=le(e.area),t=fe(e.failure_mode),p=pe(e.task_category),_=ge(e.effort),y=me(e.thinking_type),d=B(e.thinking_budget),u=B(e.message_count),c=B(e.assistant_turn_count),l=B(e.subagent_count);return[`[${e.type}] ${ue(e.title)}`,"",ce(e.details),"","---",s==="card_send_as_is"?"Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review.":"Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending.",`trigger: ${e.trigger}`,...a!==void 0?[`area: ${a}`]:[],...t!==void 0?[`failure_mode: ${t}`]:[],...p!==void 0?[`task_category: ${p}`]:[],`draft_id: ${e.draft_id}`,`drafted_at: ${e.created_at}`,`source_session_id: ${e.source_session_id}`,`model: ${de(e.model)}`,`cli_version: ${O(e.cli_version,ne)}`,`os: ${O(e.os,oe)}`,..._!==void 0?[`effort: ${_}`]:[],...y!==void 0?[`thinking: ${y}${d!==void 0?` (budget ${d})`:""}`]:[],...c!==void 0?[`turns: ${c} assistant${u!==void 0?` / ${u} messages`:""}${l!==void 0&&l>0?`, ${l} ${se(l,"subagent")}`:""}`]:[],...m.length>0?[`request_ids: ${m.join(", ")}`]:[]].join(`\u000a`)}function Oe(e){let s=[];using m=v`parseDraftTranscriptMessages(${e.length})`;for(let a of e.split(`\u000a`)){if(!a)continue;let t;try{t=te(a)}catch{continue}if(typeof t!=="object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.message,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResult:t.toolUseResult},...t.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:t.uuid,timestamp:t.timestamp,message:t.message,requestId:t.requestId})}return s}var xe="Feedback payload too large. Try again without the transcript, or shorten the details.";async function ot({draft:e,includeTranscript:s,currentSessionMessages:m,surface:
+
+### zHs-load off=-1
+MISS
+
+### KGt-load off=-1
+MISS
+
+### HHs-load off=-1
+MISS
+
+### feedback-load-assign off=-1
+MISS
+
+### T-jsx-messages off=237022177
+e();Se();ve();M();A();function Re(){}function V(Ke){let a=X(26),{sessionDrafts:s,messages:q,renderExitFlow:n,onExit:u}=Ke,{storageV5:x}=I(),[D,qe]=k("nudge"),[h,ie]=k(null),ne=N(!1),me;if(a[0]!==s||a[1]!==x)me=async function y(){for(const xe of s)await G(xe,"exit_nudge",x).catch(
+
+### create-T off=243157714
+rable:!0}):r,e)),"__toESM"),u$=o(e=>t5(xT({},"__esModule",{value:!0}),e),"__toCommonJS"),q5={};xf(q5,{AnnotatedTextEdit:o(()=>th,"AnnotatedTextEdit"),ChangeAnnotation:o(()=>c0,"ChangeAnnotation"),ChangeAnnotationIdentifier:o(()=>ba,"ChangeAnnotationIdentifier"),CodeAction:o(()=>HB,"CodeAction"),CodeActionContext:o(()=>UB,"CodeActionContex
+
+### call-T off=242483927
+wn(i[h]);for(var d=n.sort(function(T,w){return t(T)-t(w)}),f=0;f<d.length;f++){var p=d[f],m=p.source()[0],g=p.target()[0],y=u(m),v=u(g),x=s[y],b=s[v];y!==v&&(l.merge(p),x.merge(b),s.splice(v,1))}return l},"kruskal")},xrt=va({root:null,goal:null,weight:o(function(t){return 1},"weight"),heuristic:o(function(t){return 0},"heuristic"),directe
+
+### call-i-T off=-1
+MISS
+
+### h-onWriteNew off=236994357
+anscript"]:[],"send"]}var Ue=500;function sr({messages:u,onDone:g,abortSignal:y,onWriteNew:h}){let[f,b]=C(null),[x,j]=C(0),[m,F]=C("list"),[n,A]=C(null),[N,L]=C(!1),[ke,xe]=C(0),[c,M]=C(null),[Ce,P]=C(null),ve=U(-1/0),[rt,R]=C(null),[it,Xt]=C(null),De=At().columns-6,w=Bt(),ee=U(0
+
+### onWriteNew-fn off=-1
+MISS
+
+### onWriteNew-arrow off=-1
+MISS
+
+### sCa= off=-1
+MISS
+
+### var-sCa off=-1
+MISS
+
+### function-sCa2 off=68287201
+return C.parse(e,t)}function $t(e,t,i){return C.parseExpressionAt(e,t,i)}function ei(e,t){return C.tokenizer(e,t)}g.Node=te,g.Parser=C,g.Position=z,g.SourceLocation=J,g.TokContext=V,g.Token=de,g.TokenType=v,g.defaultOptions=re,g.getLineInfo=ye,g.isIdentifierChar=O,g.isIdentifierStart=L,g.isNewLine=q,g.keywordTypes=ae,g

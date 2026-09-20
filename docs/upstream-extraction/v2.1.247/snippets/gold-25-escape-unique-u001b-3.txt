@@ -1,0 +1,5 @@
+# offset=198059093 tag=u001b
+
+rivedStateFromError.....n..componentDidCatch... ...{.0.https?:\/\/[^\s"'<>\\\x00-\x1f]+?.......^https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p\d+$.......#.^[a-zA-Z0-9_-]{1,128}$......\.9.\x1b\]8;[^;\x07\n\r\x18\x1a\x1b]*;([^\x07\n\r\x18\x1a\x1b]*)(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[\]P_X^][^\x07\n\r\x18\x1a\x1b]*(?:\x07|\x1b\\).......o.[\x00-\x08\x0b-\x1f\x7f-\x9f]...........\\u001b.,....5..\\u00(?:0[0-8b-f]|1[0-9a-f]|7f|[89][0-9a-f])........\s+source="([^"]*)"([^>]*)>\n?......3H..\buser="([^"]+)"....A.$.>[\s\S]*?</.........>\n*.....s1.Baked...........Brewed.......q..Churned.	.....9.Cogitated...........Cooked........i.Crunched....j.6.Saut.ed.......7.Captured......=.Access updated.......=..Clicked......r..Typed.......k...Pressed......3..Scrolled......a.Dragged.......f.Opened..
+...9...screenshot........#.zoom....j...request_access..
+.....P.left_click.......]..right_cli

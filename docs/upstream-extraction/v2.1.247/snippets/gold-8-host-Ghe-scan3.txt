@@ -1,0 +1,101 @@
+# peel-8-host-Ghe pass3 size=253204128
+STR ".bindHost(" count=4 hits=233141438,233141501,233141614,233141792
+  @233141438 ImmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(Rn,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,
+  @233141501 ,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefi
+  @233141614 Tools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefinition:yt,customSystemPrompt:h,appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,ter
+  @233141792 l:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teamma
+STR "bindHost({" count=4 hits=233141439,233141502,233141615,233141793
+  @233141439 mmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(Rn,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,o
+  @233141502 yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefin
+  @233141615 ools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefinition:yt,customSystemPrompt:h,appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,term
+  @233141793 :Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammat
+STR ".bindHost({" count=4 hits=233141438,233141501,233141614,233141792
+  @233141438 ImmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(Rn,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,o
+  @233141501 ,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefin
+  @233141614 Tools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefinition:yt,customSystemPrompt:h,appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,term
+  @233141792 l:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammat
+STR "turn.bindHost" count=0 hits=
+STR "TurnController" count=2 hits=197259264,232418759
+  @197259264 Activity...onStreamingDisplay...onMessageDisplay3...U\..TurnController: used before its screen bound a host...X...axBell..	...u...bashTools...	.../K..bashHosts...	...>>..toolsUsed...C.resolveCommandDialog...p.I.
+  @232418759 sy)}catch(e){Pe(e)}};_requireHost(){if(this._host===null)throw Error("TurnController: used before its screen bound a host");return this._host}readPendingQueryParams=()=>{let e=this.engineFeed.pendingQueryParams.shift();if(e===void 0)t
+STR "session,theme:" count=1 hits=233015709
+  @233015709 tion",compute:async(e)=>{if(!e)return null;let t=await Qhe({session:e.session,theme:"dark",storageV5:e.storageV5,credentials:e.credentials}),o=t?.pluginId;if(!t||!o)return null;return mL(t,"startup",e.storageV5),{key:"marketplace-plug
+STR "session:e,theme:" count=3 hits=232420055,232420369,232420584
+  @232420055 ip(){if(this._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this._signalsA
+  @232420369 rTip===void 0?c:{...c,spinnerTip:void 0,spinnerTipLabel:void 0});Vhe({session:e,theme:t,readFileState:o.readFileState,bashTools:this._bashTools,bashHosts:this._bashHosts,toolsUsed:this._toolsUsed,storageV5:di()?s:void 0,credentials:di()
+  @232420584 id 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{u(),Pe(Qs
+STR "theme:t,scope:" count=1 hits=232420065
+  @232420065 is._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this._signalsAbsorbedL
+STR "xod as uk" count=1 hits=232067384
+  @232067384 jie,umd as kze,vod as ode,vqd as ade,vud as BGe,wod as c7e,wqd as lde,xod as uk,xqd as kx,ymd as GW,yud as pde,zqd as ude}from"B:/~BUN/root/_839.js";import{dxd as Ks}from"B:/~BUN/root/_840.js";import{Fxd as MEe,Hxd as p5,Rxd as d
+STR "tod as " count=1 hits=228961746
+  @228961746 js";import"B:/~BUN/root/_838.js";import{Cmd as _e,bxd as Ae,tmd as ut,tod as dt,uod as ye,xod as ft,ymd as he,zmd as tt}from"B:/~BUN/root/_839.js";import"B:/~BUN/root/_840.js";import"B:/~BUN/root/_841.js";import"B:/~BUN/root/_8
+STR "Li as tod" count=1 hits=207022280
+  @207022280 Ur as mod,Wr as nod,Gr as ood,He as pod,pt as qod,gt as rod,Xr as sod,Li as tod,Ii as uod,_e as vod,Fi as wod,Tm as xod,ts as yod,Mm as zod,wm as Aod,Lm as Bod,Rm as Cod,Im as Dod,Fm as Eod,ss as Fod,Om as God,Em as Hod,Dm as Iod
+STR "as tod," count=1 hits=207022283
+  @207022283 as mod,Wr as nod,Gr as ood,He as pod,pt as qod,gt as rod,Xr as sod,Li as tod,Ii as uod,_e as vod,Fi as wod,Tm as xod,ts as yod,Mm as zod,wm as Aod,Lm as Bod,Rm as Cod,Im as Dod,Fm as Eod,ss as Fod,Om as God,Em as Hod,Dm as Iod,
+STR "Mm(e){re=e}" count=1 hits=206986995
+  @206986995 f(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessionId;if(e)return ae(e);let t=n();return t.identity.mainAgentId(t.id)}functio
+STR "function Mm(e){" count=5 hits=206986986,210426247,221473340,229626786,230445083
+  @206986986 eturn e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessionId;if(e)return ae(e);let t=n();return t.identity.mainAgentId(t.id)}fu
+  @210426247 tch(e){return W(`Failed to get injectHosts entry warnings: ${e}`),[]}}function Mm(e){return["flagSettings","policySettings"].some((t)=>xn(t)?.sandbox?.[e]!==void 0)}function IN(){return Mm("enabled")||Mm("autoAllowBashIfSandboxed")||Mm
+  @221473340 tchOSApplicationExtension","tvOS","tvOSApplicationExtension","swift"];function Mm(e){let t={match:/\s+/,relevance:0},n=e.COMMENT("/\\*","\\*/",{contains:["self"]}),a=[e.C_LINE_COMMENT_MODE,n],o={match:[/\./,ee(...Im,...xs)],className:{
+  @229626786 =>r.availableInVersion).sort(rP)[0]}function jm(e){return e==="@next"}function Mm(e){let t=e.support.enabled;return Array.isArray(t)?t:[t]}function qB(e){let t=Mm(e);return t.length>0&&t.every((r)=>jm(r.availableInVersion))}function WB
+  @230445083  models.";return`Model "${e}" is not a recognized model id.${s}`}hv();function Mm(e){return e!==void 0&&(Dn(e)||An(e))?Zt(e):void 0}function VO(e){if(e.trim().toLowerCase()==="default")return{kind:"default"};let t=gv(e);if(!t.recognize
+STR "re=e}" count=3 hits=206987001,219532492,227869634
+  @206987001 st)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessionId;if(e)return ae(e);let t=n();return t.identity.mainAgentId(t.id)}functio
+  @219532492 ;bytesSinceCompact=0;backstopThresholdBytes=OY;constructor(e){this.store=e}_resetFlushState(){if(this.pendingWriteCount=0,this.bytesSinceMetadataReAppend=0,this.sessionFileAppendSource=void 0,this.tornTailToSeal=null,this.byt
+  @227869634 o.close(),n})})}}var j=()=>{};class k{store;constructor(e={}){this.store=e}getItem(e){if(e in this.store)return this.store[e];return null}removeItem(e){delete this.store[e]}setItem(e,r){this.store[e]=r}}var q=()=>{};function 
+STR "re=e," count=4 hits=208472470,213433326,249187732,249532027
+  @208472470 clientData=e,t}registerFeature(e){let t=this.feature;return this.feature=e,t}}class r_{modelSteerFloor=null;promptModel=void 0;latched=void 0;registerModelFloor(e){let t=this.modelSteerFloor;return this.modelSteerFloor=e,t}re
+  @213433326 _serverIdentity="";constructor(e,t,n=()=>{},r="",o=Date.now){this._store=e,this._isUserSupplied=t,this._reportError=n,this._cachePartition=r,this._now=o}now(){return this._now()}setServerIdentity(e){this._serverIdentity=e}_pa
+  @249187732 .a2,r)||!Object.is(s.a3,o))&&(s.store!==e&&(i.didChangeStore=!0),s.store=e,s.selector=t,s.a1=n,s.a2=r,s.a3=o,s.value=t(e.getSnapshot(),n,r,o))):(s={store:e,selector:t,a1:n,a2:r,a3:o,value:t(e.getSnapshot(),n,r,o)},i.syncHooks
+  @249532027 tchMedia<"u"&&matchMedia(Ire).matches?"dark":"light"}function zre(e){Fre=e,document.documentElement.setAttribute("data-theme",e)}function Ore(){let e=X0?pP()??mP():mP();if(!X0&&pP()!==e&&zre(e),e!==$0){$0=e;for(let t of cz)t(
+STR "host.session.host" count=0 hits=
+STR ".session.host" count=25 hits=213887044,213889355,213895524,214968381,214985729,214997790,215060389,215598323,215617082,215646192,215661738,217473338,217486629,217499735,217505074,217853224,218128844,218212766,218280761,218639026,222097730,222271353,222283513,222283909,222286052
+  @213887044 yword.`,prompt:async()=>e.prompt,async call(t,n){let r=await e.fetch(n.session.host,n.abortController.signal,n.credentials);return{data:{results:qCo(r,t.keywords)}}},mapToolResultToToolResultBlockParam:Q3,renderToolUseMessage:eX})}va
+  @213889355 ync()=>e.prompt,async call(t,n){try{return{data:{results:await e.run(n.session.host,t.keywords,n.abortController.signal,n.credentials)}}}catch(r){if(Cr(r)||n.abortController.signal.aborted)throw r;if(r instanceof eR)throw r;throw aIe
+  @213895524 t may be empty.`,async call(e,t){try{return{data:{results:(await iIe(t.session.host,e.keywords,t.abortController.signal,t.credentials)).filter((o)=>o.enabled!==!0),trigger:e.trigger}}}catch(n){if(Cr(n)||t.abortController.signal.abort
+  @214968381 e,n,p));if(n==="write"&&(!mq(e,d).safe||J2o(d,a)||await eVo(a,Q2o.of(t.session.host))))return o(`${e} can't be changed from a cloud session yet: this machine always asks a person before writing a path like this (a settings file, a do
+  @214985729 ng:f}=_qn(e,t),!V.CLAUDE_CODE_SIMPLE&&t.remoteCall===void 0)await bJ(t.session.host,g,c,t.storageV5);if(t.remoteCall===void 0)await jZ.of(t.session).beforeFileEdited(g);await YU(a,l,g,n.uuid);let{originalFileContents:b,actualOldStrin
+  @214997790 );if(yJ(d,Le(n)))throw new vI(gTt);if(n.remoteCall===void 0)await bJ(n.session.host,d,u,n.storageV5);if(n.remoteCall===void 0)await jZ.of(n.session).beforeFileEdited(d);await YU(l,c,d,r.uuid);let g=await GR(d,async()=>{let v;try{v=wJ
+  @215060389 ShellProvider}async function xJ(e,t,n,r){let o=r.session,s=r.session?r.session.host:r.host,{timeout:i,onProgress:a,preventCwdChanges:l,shouldUseSandbox:c,sandboxAttributionId:u,attributionMessageId:d,shouldAutoBackground:p,onStdout:f
+  @215598323  K8n(e,t,n){if(t.agentId||Ba(n)!=="main"||!V8n())return;let r=G8n.of(t.session.host),o=RQo(e),s=QJ(Y8n(r),t.abortController.signal,()=>new yn),i=()=>AQo(r.held,o);return Ca(s,vQo).then(i,i)}function RQo(e){for(let t=e.length-1;t>=0;t
+STR "S.host" count=5 hits=213321669,213321756,213321818,232466404,238427995
+  @213321669 ,!k.tolerant&&S.scheme)v.scheme=S.scheme,v.userinfo=S.userinfo,v.host=S.host,v.port=S.port,v.path=r(S.path||""),v.query=S.query;else{if(S.userinfo!==void 0||S.host!==void 0||S.port!==void 0)v.userinfo=S.userinfo,v.host=S.host,
+  @213321756 ort,v.path=r(S.path||""),v.query=S.query;else{if(S.userinfo!==void 0||S.host!==void 0||S.port!==void 0)v.userinfo=S.userinfo,v.host=S.host,v.port=S.port,v.path=r(S.path||""),v.query=S.query;else{if(!S.path)if(v.path=b.path,S.q
+  @213321818 void 0||S.host!==void 0||S.port!==void 0)v.userinfo=S.userinfo,v.host=S.host,v.port=S.port,v.path=r(S.path||""),v.query=S.query;else{if(!S.path)if(v.path=b.path,S.query!==void 0)v.query=S.query;else v.query=b.query;else{if(S.p
+  @232466404 getToolPermissionContext:()=>De.getState().toolPermissionContext,host:S.host,workspaceDiffComputeBudget:Pt,getTools:()=>s().tools,onInboundMessage:(Xe)=>$ke(h,Xe,($t)=>et($t),void 0,()=>{let $t=sK(Rn,(Vt)=>C.current?.sendContr
+  @238427995 st=e.host||process.env.OTEL_EXPORTER_PROMETHEUS_HOST||y.DEFAULT_OPTIONS.host,this._port=e.port||Number(process.env.OTEL_EXPORTER_PROMETHEUS_PORT)||y.DEFAULT_OPTIONS.port,this._prefix=e.prefix||y.DEFAULT_OPTIONS.prefix,this._ap
+STR "e.session.host" count=16 hits=218212765,218280760,222271352,222283512,222283908,222286051,222286133,222289740,222293730,222293779,224809510,224809873,224810099,231851217,232387626,232438702
+  @218212765 taSummary,outputFilePath:ji(o.taskId)}))}function gNs(e){let t=$Hr.of(e.session.host).drain().map((a)=>({type:"memory_update",source:"sync_unsaved",summary:a,paths:[],inContextPaths:[]})),n=e.getAppState().pendingMemoryUpdates;if(n.le
+  @218280760 s(i,n).get(n);if(a)o.push(...a)}return o}function KHe(e){let t=xFs.of(e.session.host);function n(i){let a=t.tokens.get(i);if(a===void 0)t.next+=1,a=t.next,t.tokens.set(i,a);return a}let r=kx(e,"UserPromptSubmit",e.session.id),o=j9e(e.
+  @222271352 ()=>new Xt);function le(e){if(he()&&e?.storageV5!==void 0)return h.of(e.session.host).countSessionsOnce(e.storageV5);return ne(e?.storageV5)}async function Qt(e,t,n,o,s=w){if(!(await e.getKnownMarketplaces(n.storageV5))[s])return!1;if
+  @222283512 ktop",cooldownSessions:15,isRelevant:async(e)=>I()&&!y()&&!await h.of(e.session.host).getDesktopInstalled()},{id:"desktop-shortcut",advertisedCommand:"desktop",content:async(e)=>`Continue your session in Claude Code Desktop with ${a("
+  @222283908 rity:1,content:async(e)=>{let t=a("suggestion",e.theme);if(await h.of(e.session.host).getDesktopInstalled())return`Working on UI? See a live preview in Claude Code Desktop \xB7 run ${t("/desktop")}`;return`Working on UI? Claude Code D
+  @222286051 -setup-github")>=me||b("web-setup-github")<pe)return!1;if((await h.of(e.session.host).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}},{id:"remote-control",conte
+  @222286133 st).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}},{id:"remote-control",content:async(e)=>{let t=a("suggestion",e.theme);return`Control this session from ${k("
+  @222289740 fetimeShows:3,advertisedCommand:"plugin",isRelevant:async(e)=>Qt(h.of(e.session.host),"frontend-design",e,{filesRead:["**/*.html","**/*.css","**/*.htm"]})},{id:"subagent-fanout-nudge",providerAgnostic:!0,content:async(e)=>`Say ${a("su
+
+.bindHost( dumps 4
+  CALL @233141438 mPrompt:S}),wr,ir,qs.runBridgeImmediateCommand,z?W:void 0,no);cr(()=>{gn.setToolPoolInputs(Rn,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bin
+  CALL @233141501 r(()=>{gn.setToolPoolInputs(Rn,yt),qs.bindHost({commands:rr,mainLoopModel:Bt,addNotification:le}),Pt.bindHost({mainLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefinition:yt,customSyst
+  CALL @233141614 inLoopModel:Bt,combinedInitialTools:Rn,canUseTool:Pl,addNotification:le,reverify:IM,onSubmit:Sa}),uo.bindHost({mainLoopModel:Bt,mainThreadAgentDefinition:yt,customSystemPrompt:h,appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.b
+  CALL @233141792 appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammateColors:tt,messageQ
+SHAPE "session:e,theme:" count=3
+  @232420055 ewSpinnerTip(){if(this._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this._signalsAbsorbedLength)),this._signalsAbsor
+  @232420369 =>c.spinnerTip===void 0?c:{...c,spinnerTip:void 0,spinnerTipLabel:void 0});Vhe({session:e,theme:t,readFileState:o.readFileState,bashTools:this._bashTools,bashHosts:this._bashHosts,toolsUsed:this._toolsUsed,storageV5:di()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=
+  @232420584 :di()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{u(),Pe(Qs(jn(c),"spinner tip failed"))})}ab
+SHAPE "session:t,theme:" count=0
+SHAPE "session:n,theme:" count=0
+SHAPE "session:r,theme:" count=0
+SHAPE "session:s,theme:" count=0
+SHAPE ",theme:t,scope:" count=1
+  @232420064 Tip(){if(this._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this._signalsAbsorbedLength)),this._signalsAbsorbedLength
+SHAPE "storageV5:s,credentials:a" count=4
+  @232420108 ._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this._signalsAbsorbedLength)),this._signalsAbsorbedLength=l.length;let u=()=>r((c)=>c.spinnerTip===vo
+  @232782367 n_arm_monitor")}AN();function J0e({enabled:e}){let t=lt(),o=Xt(),n=st(),r=Ur(),{storageV5:s,credentials:a}=Ue(),l=I((u)=>u.plugins.enabled);x(()=>{if(!e)return;let u=()=>({abortController:new AbortController,taskRegistry:r,storageV5:s,credentials:a});return p7(l,(c)=>c.when==="al
+  @232782510 )=>{if(!e)return;let u=()=>({abortController:new AbortController,taskRegistry:r,storageV5:s,credentials:a});return p7(l,(c)=>c.when==="always",t.host,u()),Zl.of(t).skillInvoked.subscribe((c)=>{p7(o.getState().plugins.enabled,(m)=>m.when===`on-skill-invoke:${c}`,t.host,u())})},[e,
+  @232961019 1e(o.text))}function b1e(e,t,o=!1,{enabled:n=!0,otherSurveyActive:r=!1}={}){let{storageV5:s,credentials:a}=Ue(),l=y1e.of(lt().host),u=st(),c=T(new Set),m=T(null),d=T(e);d.current=e;let[g,h]=L(null),S=T(null),k=B((G,Y,Q)=>{U(PE,{event_type:ke(G),appearance_id:oo(Y),response:mr(Q)}
+tod as  count=1
+  @228961746 s";import{Cmd as _e,bxd as Ae,tmd as ut,tod as dt,uod as ye,xod as ft,ymd as he,zmd as tt}from"B:/~BUN/root/_839.js";imp

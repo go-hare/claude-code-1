@@ -1,0 +1,3 @@
+# needleOff=214013161 start=214013161
+
+function Pc(e,t=Mue){if(e.length<=t+dPo)return e;let n=Math.floor(t/2);return W_n(e,n,t-n,(r)=>{let o=e.slice(n,e.length-(t-n)),s=0;for(let i of o.matchAll(pPo)){let a=i[1].length<=15?Number(i[1]):Number.NaN;if(Number.isSafeInteger(a)&&a>=i[0].length)s+=a-i[0].length}return fPo(r+s)})}

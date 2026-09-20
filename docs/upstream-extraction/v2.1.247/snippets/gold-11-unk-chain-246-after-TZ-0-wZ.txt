@@ -1,0 +1,3 @@
+# 246-after-TZ n=0 function wZ start=209160257 end=209160812 len=555 sha=bf02f7508ef1d92d
+
+function wZ(){let e=Le.getConfig();if(!e)return;let{denyLiteralSymlinkCandidates:t}=Ce(),n=new Map;for(let i of t){if(n.has(i))continue;let a;try{a=zi(i)}catch{continue}let l;try{l=xn(i)}catch{l=re(dt(i),a);for(let d=0;d<8;d++){let f;try{f=zi(l)}catch{break}l=re(dt(l),f)}}n.set(i,l)}if(n.size===0)return;for(let i=t.length-1;i>=0;i--)if(n.has(t[i]))t.splice(i,1);let r={...e,filesystem:{...e.filesystem,denyWrite:Yi([...n.values(),...e.filesystem.denyWrite])}},s=Ce();s.builtConfigEnforcesAllowlist.set(r,s.installedFilterRequestEnforcesAllowlist),Ra(r)}

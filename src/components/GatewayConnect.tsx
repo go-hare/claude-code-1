@@ -1,9 +1,10 @@
 /**
  * densable 2.1.212 #43 — g2s Cloud gateway interactive OIDC device-flow UI.
+ * densable 2.1.247 #32 — Qe/J/K identify Claude Code: surface=jr + User-Agent be().
  *
  * densable: function g2s({onDone,onCancel,initialUrl,screenLocked})
  * States: url_input → connecting → trust_prompt? → connecting → polling → done
- * Helpers: $zd/mOc/o2r/i2r/gOc/Smc/wki/dl_/fl_/Tki (see gatewayLogin.ts + gatewayEnv.ts)
+ * Helpers: $zd/mOc/o2r/i2r/gOc/Smc/wki/dl_/fl_/Tki/jr/be (see gatewayLogin.ts + gatewayEnv.ts)
  */
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
@@ -19,7 +20,10 @@ import {
   errorMessage,
   extractOAuthDeviceError,
   formatGatewayTlsCertHint,
+  gatewayDeviceAuthorizationBody,
   gatewayDeviceAuthorizationResponseSchema,
+  gatewayLoginFormHeaders,
+  gatewayLoginMetadataHeaders,
   gatewayOAuthMetadataSchema,
   gatewayTokenResponseSchema,
   normalizeGatewayLoginUrl,
@@ -145,7 +149,10 @@ export function GatewayConnect({
       await assertGatewayLoginNetworkPolicy(base);
       if (y !== gen.current) return;
 
-      const metaRes = await axios.get(`${base}/.well-known/oauth-authorization-server`, { timeout: 10_000 });
+      const metaRes = await axios.get(`${base}/.well-known/oauth-authorization-server`, {
+        headers: gatewayLoginMetadataHeaders(),
+        timeout: 10_000,
+      });
       if (y !== gen.current) return;
       const parsed = gatewayOAuthMetadataSchema.safeParse(metaRes.data);
       const meta = parsed.success ? parsed.data : undefined;
@@ -188,8 +195,8 @@ export function GatewayConnect({
     const y = ++gen.current;
     setStatus({ state: 'connecting' });
     try {
-      const { data } = await axios.post(endpoints.deviceAuthorizationEndpoint, '', {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const { data } = await axios.post(endpoints.deviceAuthorizationEndpoint, gatewayDeviceAuthorizationBody(), {
+        headers: gatewayLoginFormHeaders(),
         timeout: 10_000,
       });
       if (y !== gen.current) return;
@@ -231,7 +238,7 @@ export function GatewayConnect({
             device_code: deviceCode,
           }).toString(),
           {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: gatewayLoginFormHeaders(),
             timeout: 10_000,
           },
         );

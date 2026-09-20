@@ -1,0 +1,3 @@
+# off=208664990
+
+function zO(e){return{streaming:e?.streaming??"deny",presigned:e?.presigned??"deny",sigv4a:e?.sigv4a??"deny"}}

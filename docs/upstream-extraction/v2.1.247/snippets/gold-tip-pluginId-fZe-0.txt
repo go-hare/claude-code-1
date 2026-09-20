@@ -1,0 +1,2 @@
+# needle=function fZe(){return pZe.of pos=232387513 end=232387553 len=40
+function fZe(){return pZe.of(uk().host)}

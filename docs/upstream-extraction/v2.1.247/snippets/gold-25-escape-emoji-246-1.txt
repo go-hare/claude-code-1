@@ -1,0 +1,3 @@
+# 246 emoji @205610769
+
+from"B:/~BUN/root/_831.js";import{Cxd as a}from"B:/~BUN/root/_836.js";function s(e){return Bun.stripANSI(e)}var g=()=>{};function h(e,n,r){return s(e.replace(d,"\u200B")).replace(r?.keepNewlines?N:r?.keepEmojiJoiners?R:f,n)}function O(e){let n=e.replace(/[\p{Cf}\p{Co}\p{Cn}]/gu,"");return n=n.replace(/[\u200B-\u200F]/g,"").replace(/[\u202A-\u202E]/g,"").replace(/[\u2066-\u2069]/g,"").replace(/[\uF

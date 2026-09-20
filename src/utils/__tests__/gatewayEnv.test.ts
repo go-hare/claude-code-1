@@ -51,6 +51,12 @@ import {
   GATEWAY_TLS_PIN_MISMATCH_MESSAGE,
 } from '../gatewayEnv.js'
 
+// MACRO.VERSION is only injected in dev/build. Refresh now sends
+// User-Agent: getClaudeCodeUserAgent() (densable 2.1.247 #32 / jK pr()).
+;(globalThis as unknown as { MACRO: { VERSION: string } }).MACRO = {
+  VERSION: '0.0.0-test',
+}
+
 function makeJwt(expSeconds: number | undefined): string {
   const header = Buffer.from(
     JSON.stringify({ alg: 'none', typ: 'JWT' }),

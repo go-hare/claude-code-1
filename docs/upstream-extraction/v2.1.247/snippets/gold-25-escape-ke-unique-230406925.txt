@@ -1,0 +1,3 @@
+# 247 function ke start=230406925 end=230406959 len=34 sha=6831b4c84b5ccbbb
+
+function ke(){V.abort(Pe?.reason)}

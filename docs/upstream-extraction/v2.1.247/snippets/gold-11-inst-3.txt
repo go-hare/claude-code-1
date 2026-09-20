@@ -1,0 +1,3 @@
+# offset=210413045 hit 3
+
+=t.builtConfigEnforcesAllowlist.get(e)??!1;if(t.initializationPromise===void 0)t.installedFilterRequestEnforcesAllowlist=n;else t.installsSinceInitializeStartedAllEnforce&&=n}class mN{tenguSandboxGbConfig=Gs(SZ);sessionAllowedHosts=new Set;initializationPromise=void 0;initializedWithTlsTerminate=!1;installedFilterRequestEnforcesAllowlist=!1;installsSinceInitializeStartedAllEnforce=!0;builtConfigEnforcesAllowlist=new WeakMap;settingsSubscriptionCleanup=void 0;sandboxDisabledThisSession=!1;initFailureReason=void 0;fsReadConfigMemo=void 0;gbHostRulesMemo=void 0;bareGitRepoScrubPaths=[];symlinkedD

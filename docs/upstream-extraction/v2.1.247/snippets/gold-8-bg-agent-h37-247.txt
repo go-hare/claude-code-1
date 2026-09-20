@@ -1,0 +1,32 @@
+# offset=213504526 ver=247 hit=38/83 js=true needle="background agent"
+
+p.
+
+**Output volume**: Every stdout line is a conversation message, so the filter should be selective \u2014 but selective means "the lines you'd act on," not "only good news." Never pipe raw logs; filter to exactly the success and failure signals you care about. Monitors that produce too many events are automatically stopped; restart with a tighter filter if this happens.
+
+Stdout lines within 200ms are batched into a single notification, so multiline output from a single event groups naturally.
+
+The script runs in the same shell environment as Bash. Exit ends the watch (exit code is reported). Timeout \u2192 killed. Set \`persistent: true\` for session-length watches (PR monitoring, log tails) \u2014 the monitor runs until you call TaskStop or the session ends. Use TaskStop to cancel early.`}var tst=`
+**ws source** \u2014 open a WebSocket and stream each incoming text frame as an event. No shell, no polling: the server pushes, you get notified.
+
+  Monitor({
+    ws: {url: 'wss://events.example.com/stream', protocols: ['v1']},
+    description: 'deploy events',
+  })
+
+Each text frame becomes one notification (multiline frames stay as one event). Binary frames are reported as \`[binary frame, N bytes]\` rather than passed through. Socket close ends the watch with the close code surfaced; errors are surfaced before close. Same rate limiting as bash \u2014 a firehose will be suppressed and eventually stopped, so subscribe to a filtered feed where one exists.
+
+Prefer this over \`command: 'websocat wss://\u2026'\` \u2014 it avoids the extra process and line-buffering pitfalls. Use bash when you need to transform or filter frames with shell tools before they become events.`;var GO=w(()=>{nn();Zv();Lae();KRe()});var L_="TaskList";var nF=()=>{};var ig="TaskStop",usn=`
+- Stops a running background task by its ID
+- Takes a task_id parameter identifying the task to stop
+- To stop an agent-team teammate, pass its agent ID ("name@team") or bare teammate name as task_id
+- To stop a background agent spawned with a name, pass that name as task_id
+- Returns a success or failure status
+- Use this tool when you need to terminate a long-running task
+`;var rF=()=>{};var bsn={};it(bsn,{AUTONOMOUS_LOOP_PREAMBLE:()=>Z_o,LOOP_FILE_DYNAMIC_SENTINEL:()=>Fae,LOOP_FILE_SENTINEL:()=>fsn,getAutonomousLoopPreamble:()=>nst,isAutonomousLoopSentinel:()=>sst,isLoopDefaultPromptEnabled:()=>QRe,isLoopDefaultSentinel:()=>nbo,isLoopFileSentinel:()=>eAe,isLoopPersistentPreambleEnabled:()=>JRe,logAutonomousLoopActivation:()=>rst,readLoopFile:()=>ast,readLoopFileAsync:()=>gsn,resolveAutonomousLoopFire:()=>ist,resolveLoopDefaultFire:()=>rbo,resolveLoopDefaultFireAsync:()=>obo,resolveLoopFileFire:()=>hsn,resolveLoopFileFireAsync:()=>ysn});import{readFileSync as X_o}from"fs";import{join as XRe}from"path";function JRe(){if(V.CLAUDE_CODE_LOOP_PERSISTENT)return!0;return we("tengu_kairos_loop_persistent",!1)}function nst(){return JRe()?isn:Xot}function rst(){D("tengu_kairos_loop_persistent_activated",{variant:JRe()})}function Nae(e=!1){if(!w5())return"";let n=!e&&JRe()?"newly blocked on a decision you won't make alone, you're ending the loop":"newly blocked on a decision you won't make alone, third straight tick with nothing to do, you're ending the loop";return`
+
+Use ${AC} when the loop can't move further without the user, or when something landed that they'd want to act on now: ${n}, or a major update arrived (CI went red, a review changes the plan). Progress you made yourself isn't a trigger \u2014 the transcript covers that. One ping per state, not per tick.`}function psn(){return`# Autonomous loop tick
+
+Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick. The recurring cron will fire the next tick automatically \u2014 do not call ${lu} from this tick.${Nae()}`}function J_o(){return`# Autonomous loop tick (dynamic pacing)
+
+Run the autonomous check using the loop instructions establ

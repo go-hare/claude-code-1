@@ -1,0 +1,2 @@
+# needle=function IR( pos=210278398 end=210278534 len=136
+function IR(u){let o=AR(u);if(o.success===!0)return o;return{success:!0,value:null,remainder:u,failedExpectations:o.failedExpectations}}

@@ -1,0 +1,3 @@
+# off=211001688 hit=14
+
+is.markDirty()}getDisplay(){return this.style.display}setPositionType(e){this.style.positionType=e,this.markDirty()}setPosition(e,o){this.style.position[e]=vo(o),this._hasPosition=Pc(this.style.position),this.markDirty()}setPositionPercent(e,o){this.style.position[e]=Xn(o),this._hasPosition=!0,this.markDirty()}setPositionAuto(e){this.style.position[e]=yi,this._hasPosition=!0,this.markDirty()}setOv

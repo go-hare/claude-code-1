@@ -1,0 +1,13 @@
+# map/sanitize needles
+
+same 246=1 247=1 "e.map(ke)"
+same 246=0 247=0 "e.map(ce)"
+same 246=0 247=0 "e.map(le)"
+same 246=0 247=0 "e.map(he)"
+DIFF 246=65 247=67 "function ke("
+DIFF 246=9 247=6 "function ce(e){return"
+same 246=17 247=17 ".replace(/[\\x00"
+same 246=12 247=12 ".replace(/[\\u0000"
+same 246=0 247=0 "JSON.stringify(e.name"
+same 246=0 247=0 "JSON.stringify(n.name"
+same 246=0 247=0 "JSON.stringify(t.name"

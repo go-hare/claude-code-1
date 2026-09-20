@@ -79,6 +79,7 @@ import {
   updateSettingsForSource,
 } from '../../utils/settings/settings.js';
 import { jsonParse } from '../../utils/slowOperations.js';
+import { re, Vr, Wr } from '../../utils/plugins/escapeSafeText.js';
 import { plural } from '../../utils/stringUtils.js';
 import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
 import { PluginOptionsDialog } from './PluginOptionsDialog.js';
@@ -309,7 +310,7 @@ function PluginComponentsDisplay({
               mcpServers: mcpServerNames.length > 0 ? mcpServerNames : null,
             });
           } else {
-            setError(`Built-in plugin ${plugin.name} not found`);
+            setError(`Built-in plugin ${re(plugin.name)} not found`);
           }
           setLoading(false);
           return;
@@ -403,7 +404,7 @@ function PluginComponentsDisplay({
             mcpServers: mcpServersList.length > 0 ? mcpServersList : null,
           });
         } else {
-          setError(`Plugin ${plugin.name} not found in marketplace`);
+          setError(`Plugin ${re(plugin.name)} not found in marketplace`);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load components');
@@ -1161,7 +1162,7 @@ export function ManagePlugins({
       // plain navigation (/plugin manage) should still just show the list.
       if (!hasAutoNavigated.current && action) {
         hasAutoNavigated.current = true;
-        setResult(`Plugin "${targetPlugin}" is not installed in this project`);
+        setResult(re(`Plugin "${targetPlugin}" is not installed in this project`));
       }
     }
   }, [targetPlugin, targetMarketplace, marketplaces, loading, unifiedItems, action, setResult]);
@@ -1293,7 +1294,7 @@ export function ManagePlugins({
           }
           // If already up to date, show message and exit
           if (result.alreadyUpToDate) {
-            setResult(`${selectedPlugin.plugin.name} is already at the latest version (${result.newVersion}).`);
+            setResult(re(`${re(selectedPlugin.plugin.name)} is already at the latest version (${result.newVersion}).`));
             if (onManageComplete) {
               await onManageComplete();
             }
@@ -1335,9 +1336,11 @@ export function ManagePlugins({
       // Single-line warning — notification timeout is ~8s, multi-line would scroll off.
       // The persistent record is in the Errors tab (dependency-unsatisfied after reload).
       const depWarn =
-        reverseDependents && reverseDependents.length > 0 ? ` · required by ${reverseDependents.join(', ')}` : '';
-      const message = `✓ ${operationName} ${selectedPlugin.plugin.name}${depWarn}. Run /reload-plugins to apply.`;
-      setResult(message);
+        reverseDependents && reverseDependents.length > 0
+          ? ` · required by ${reverseDependents.map(name => re(name)).join(', ')}`
+          : '';
+      const message = `✓ ${operationName} ${re(selectedPlugin.plugin.name)}${depWarn}. Run /reload-plugins to apply.`;
+      setResult(re(message));
 
       if (onManageComplete) {
         await onManageComplete();
@@ -1776,7 +1779,7 @@ export function ManagePlugins({
         }
         clearAllCaches();
         setResult(
-          `✓ Disabled ${selectedPlugin.plugin.name} in .claude/settings.local.json. Run /reload-plugins to apply.`,
+          `✓ Disabled ${re(selectedPlugin.plugin.name)} in .claude/settings.local.json. Run /reload-plugins to apply.`,
         );
         if (onManageComplete) void onManageComplete();
         setParentViewState({ type: 'menu' });
@@ -1816,7 +1819,7 @@ export function ManagePlugins({
           if (!result.success) throw new Error(result.message);
           clearAllCaches();
           const suffix = deleteDataDir ? '' : ' · data preserved';
-          setResult(`${figures.tick} ${result.message}${suffix}`);
+          setResult(re(`${figures.tick} ${result.message}${suffix}`));
           if (onManageComplete) void onManageComplete();
           setParentViewState({ type: 'menu' });
         } catch (e) {
@@ -1898,7 +1901,7 @@ export function ManagePlugins({
   if (typeof viewState === 'object' && viewState.type === 'plugin-options' && selectedPlugin) {
     const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
     function finish(msg: string): void {
-      setResult(msg);
+      setResult(re(msg));
       // Plugin is enabled regardless of whether config was saved or
       // skipped — onManageComplete → markPluginsChanged → the
       // persistent "run /reload-plugins" notice.
@@ -1914,13 +1917,13 @@ export function ManagePlugins({
         onDone={(outcome, detail) => {
           switch (outcome) {
             case 'configured':
-              finish(`✓ Enabled and configured ${selectedPlugin.plugin.name}. Run /reload-plugins to apply.`);
+              finish(`✓ Enabled and configured ${re(selectedPlugin.plugin.name)}. Run /reload-plugins to apply.`);
               break;
             case 'skipped':
-              finish(`✓ Enabled ${selectedPlugin.plugin.name}. Run /reload-plugins to apply.`);
+              finish(`✓ Enabled ${re(selectedPlugin.plugin.name)}. Run /reload-plugins to apply.`);
               break;
             case 'error':
-              finish(`Failed to save configuration: ${detail}`);
+              finish(`Failed to save configuration: ${detail !== undefined ? re(detail) : ''}`);
               break;
           }
         }}
@@ -1933,7 +1936,7 @@ export function ManagePlugins({
     const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
     return (
       <PluginOptionsDialog
-        title={`Configure ${selectedPlugin.plugin.name}`}
+        title={`Configure ${re(selectedPlugin.plugin.name)}`}
         subtitle="Plugin options"
         configSchema={viewState.schema}
         initialValues={loadPluginOptions(pluginId)}
@@ -2003,8 +2006,8 @@ export function ManagePlugins({
 
     return (
       <PluginOptionsDialog
-        title={`Configure ${configNeeded.manifest.name}`}
-        subtitle={`Plugin: ${selectedPlugin.plugin.name}`}
+        title={`Configure ${re(configNeeded.manifest.name)}`}
+        subtitle={`Plugin: ${re(selectedPlugin.plugin.name)}`}
         configSchema={configNeeded.configSchema}
         initialValues={configNeeded.existingConfig}
         onSave={handleSave}
@@ -2020,7 +2023,7 @@ export function ManagePlugins({
       <Box flexDirection="column">
         <Box>
           <Text bold>
-            {fp.name} @ {fp.marketplace}
+            {re(fp.name)} @ {re(fp.marketplace)}
           </Text>
         </Box>
 
@@ -2030,8 +2033,8 @@ export function ManagePlugins({
         </Box>
 
         <Box marginBottom={1} flexDirection="column">
-          <Text color="error">Removed from marketplace · reason: {fp.reason}</Text>
-          <Text>{fp.text}</Text>
+          <Text color="error">Removed from marketplace · reason: {re(fp.reason)}</Text>
+          <Text>{re(fp.text)}</Text>
           <Text dimColor>Flagged on {new Date(fp.flaggedAt).toLocaleDateString()}</Text>
         </Box>
 
@@ -2056,7 +2059,7 @@ export function ManagePlugins({
     return (
       <Box flexDirection="column">
         <Text bold color="warning">
-          {selectedPlugin.plugin.name} is enabled in .claude/settings.json (shared with your team)
+          {re(selectedPlugin.plugin.name)} is enabled in .claude/settings.json (shared with your team)
         </Text>
         <Box marginTop={1} flexDirection="column">
           <Text>Disable it just for you in .claude/settings.local.json?</Text>
@@ -2096,7 +2099,7 @@ export function ManagePlugins({
     return (
       <Box flexDirection="column">
         <Text bold>
-          {selectedPlugin.plugin.name} has {viewState.size.human} of persistent data
+          {re(selectedPlugin.plugin.name)} has {viewState.size.human} of persistent data
         </Text>
         <Box marginTop={1} flexDirection="column">
           <Text>Delete it along with the plugin?</Text>
@@ -2133,6 +2136,7 @@ export function ManagePlugins({
         e.source === pluginId ||
         e.source.startsWith(`${selectedPlugin.plugin.name}@`),
     );
+    const oe = Wr(selectedPlugin.plugin.manifest);
     const pluginErrorsSection =
       filteredPluginErrors.length === 0 ? null : (
         <Box flexDirection="column" marginBottom={1}>
@@ -2159,7 +2163,7 @@ export function ManagePlugins({
       <Box flexDirection="column">
         <Box>
           <Text bold>
-            {selectedPlugin.plugin.name} @ {selectedPlugin.marketplace}
+            {Vr(selectedPlugin.plugin)} @ {re(selectedPlugin.marketplace)}
           </Text>
         </Box>
 
@@ -2169,24 +2173,24 @@ export function ManagePlugins({
           <Text>{selectedPlugin.scope || 'user'}</Text>
         </Box>
 
-        {/* Plugin details */}
-        {selectedPlugin.plugin.manifest.version && (
+        {/* Plugin details — densable ah(I.plugin.manifest) / Wr */}
+        {oe.version && (
           <Box>
             <Text dimColor>Version: </Text>
-            <Text>{selectedPlugin.plugin.manifest.version}</Text>
+            <Text>{oe.version}</Text>
           </Box>
         )}
 
-        {selectedPlugin.plugin.manifest.description && (
+        {oe.description && (
           <Box marginBottom={1}>
-            <Text>{selectedPlugin.plugin.manifest.description}</Text>
+            <Text>{oe.description}</Text>
           </Box>
         )}
 
-        {selectedPlugin.plugin.manifest.author && (
+        {oe.author && (
           <Box>
             <Text dimColor>Author: </Text>
-            <Text>{selectedPlugin.plugin.manifest.author.name}</Text>
+            <Text>{oe.author.name}</Text>
           </Box>
         )}
 
@@ -2285,8 +2289,8 @@ export function ManagePlugins({
     return (
       <Box flexDirection="column">
         <Text>
-          <Text bold>{failedPlugin.name}</Text>
-          <Text dimColor> @ {failedPlugin.marketplace}</Text>
+          <Text bold>{Vr({ name: failedPlugin.name })}</Text>
+          <Text dimColor> @ {re(failedPlugin.marketplace)}</Text>
           <Text dimColor> ({failedPlugin.scope})</Text>
         </Text>
         <Text color="error">{errorMessage}</Text>

@@ -1,0 +1,2 @@
+# needle=function Z5( pos=243048747 end=243048795 len=48
+function Z5(e){return dr.isInstance(e,U2.$type)}

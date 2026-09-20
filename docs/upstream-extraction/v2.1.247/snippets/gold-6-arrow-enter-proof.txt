@@ -1,0 +1,63 @@
+# gold-6 arrow-enter-row — official 247 vs 246 (NO invent shared live-index)
+
+SEA 247: C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe
+SEA 246: C:/Users/Administrator/AppData/Local/Temp/official-246/package/claude.exe
+
+Invent-ban: do NOT invent a shared live-index helper. Official surface
+accept bodies are the contract. CustomSelect getFocusedValue getter is
+still PFm/ri(live.focusedValue, options) — 247 storage is Qr 3-tuple
+instead of C4i bag; local 235 bag already live-reads. Do not rewrite
+CustomSelect. Leftover pins: empty qb, no auto qF, blu ≠ Slu.
+
+## Counts (246 -> 247)
+
+- getFocusedValue: 9->9 (name table; getter still live-read)
+- ke().focus: 0->2
+- x().focusedValue: 0->3 (247 Zr; 246 used t.state.focusedValue)
+- r[ke().focus]: 0->2
+- i[P]: 3->0
+- he[B()]: 0->1
+- he[tt()]: 0->1
+- Ie[ce()]: 0->2
+- An(0) / vm(0) / let[vn,c,ke]=je( / let[r,a,x]=Qr(: 247-only
+
+## FuzzyPicker — COMPLETE 247 body ($t) vs 246 (Vt)
+
+246 Enter/Tab (gold-6-fuzzy-enter-246.txt):
+  let ht=i[P]; if(ht)F(ht);     // snapshot P from 2-tuple z(ct)
+  let To=i[P];
+
+247 Enter/Tab (gold-6-fuzzy-enter-247.txt / gold-6-kefocus-247.txt):
+  let[vn,c,ke]=je(lt)           // 3-tuple
+  let yt=r[ke().focus]; if(yt)F(yt);
+  let Do=r[ke().focus];
+
+History search + local /skills both call FuzzyPicker.
+
+## /mcp Et — COMPLETE 247 accept vs 246
+
+246: let[O,R]=…; nt=Me(()=>{let s=W[O];…},[W,O,…])
+247: let[O,R,B]=An(0); nt=Re(()=>{let s=he[B()];…},[he,B,…])
+
+## /config Ni — COMPLETE 247 toggle vs 246 Li
+
+246: Li=Be((c)=>{let A=be[c??L];…})   // optional arg or closed-over L
+247: Ni=Be(()=>{let a=he[tt()];…})     // live getter, no arg
+
+## background vm — COMPLETE 247 accept vs 246
+
+246: let s=Ce[N];          // confirm:yes + keydown
+247: let[U,ue,ce]=vm(0); let s=Ie[ce()];
+
+## /model + CustomSelect Zr
+
+246 Qr: getFocusedValue = Yr(t.state.focusedValue, i)   // C4i bag
+247 Zr: getFocusedValue = ri(x().focusedValue, t)       // Qr 3-tuple
+select:accept still r.getFocusedValue() in both.
+Local already has 235 C4i bag + getFocusedValue. Not rewritten.
+
+## Official 3-tuple hook body
+
+function AD( / je / Qr / An / vm implementation NOT locked
+(first AD hits are sandbox/PDF/etc). Surfaces inlined per-file
+ref+sync-setter matching official accept getters. No shared helper.

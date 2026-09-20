@@ -1,0 +1,3 @@
+# 247 emoji @207953523
+
+nction Ke(e){G().invalidateAll(e)}function Nr(){return G().pluginBase}function Lr(e){G().setPluginBase(e)}function Hr(){G().clearPluginBase()}var Pt=z(()=>{_t();To()});function re(e){return ie(e," ",{keepEmojiJoiners:!0})}function Io(e){return ie(e," ",{keepNewlines:!0})}function At(e){return ie(e,"",{keepEmojiJoiners:!0})}function se(e,t=re){if(e===void 0)return;let n=t(e);return n.trim()===""?vo

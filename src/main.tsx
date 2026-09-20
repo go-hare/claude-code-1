@@ -311,6 +311,8 @@ import {
 import { isRemoteEnvEnabled } from './utils/residualFinalEnvGates.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
 import { getRelevantTips } from 'src/services/tips/tipRegistry.js';
+import { getReplDiffHost } from 'src/utils/sessionHost.js';
+import { getPinnedStorageV5 } from 'src/utils/storageV5/index.js';
 import { logContextMetrics } from 'src/utils/api.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
 import { eagerParseCliFlag } from 'src/utils/cliArgs.js';
@@ -622,7 +624,10 @@ export function startDeferredPrefetches(): void {
   void initUser();
   void getUserContext();
   prefetchSystemContextIfSafe();
-  void getRelevantTips();
+  void getRelevantTips({
+    session: { host: getReplDiffHost() },
+    storageV5: getPinnedStorageV5(),
+  });
   // Official USE_*/SKIP_* densables for cloud-provider credential prefetch.
   let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK);
   let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX);
@@ -1041,10 +1046,29 @@ export async function main() {
         _pendingSSH.permissionMode = rawCliArgs[pmEqIdx]!.split('=')[1];
         rawCliArgs.splice(pmEqIdx, 1);
       }
-      // Forward session-resume + model flags to the remote CLI's initial spawn.
-      // --continue/-c and --resume <uuid> operate on the REMOTE session history
-      // (which persists under the remote's ~/.claude/projects/<cwd>/).
-      // --model controls which model the remote uses.
+      // Forward session-resume + inference flags to the remote CLI's initial spawn.
+      //
+      // `claude ssh` runs the whole agent loop on the remote (see useSSHSession:
+      // local input is sent over stream-json and handlePromptSubmit never runs),
+      // so anything that configures inference or session history is only
+      // meaningful there. A flag left out of this list stays in process.argv and
+      // configures the LOCAL REPL, which for those flags is inert — it does
+      // nothing and says nothing.
+      //
+      // Forward a flag only when all three hold:
+      //   1. it configures the remote loop (inference / session history), and
+      //   2. its value is machine-independent (NOT a local path — `--settings
+      //      <file>` / `--plugin-dir <path>` would resolve on the wrong host,
+      //      and they also legitimately configure the local UI shell), and
+      //   3. it takes at most one value — extractFlag consumes a single value,
+      //      so variadic flags (`--betas`, `--allowed-tools`, `--add-dir`,
+      //      `--mcp-config`, `--file`) cannot be forwarded without a
+      //      variadic-aware extractor.
+      //
+      // --continue/-c and --resume/-r <uuid> operate on the REMOTE session
+      // history (which persists under the remote's ~/.claude/projects/<cwd>/).
+      // --model / --fallback-model control which models the remote calls.
+      // Keep docs/features/ssh-remote.md in sync when this list changes.
       const extractFlag = (flag: string, opts: { hasValue?: boolean; as?: string } = {}) => {
         const i = rawCliArgs.indexOf(flag);
         if (i !== -1) {
@@ -1076,8 +1100,10 @@ export async function main() {
 
       extractFlag('-c', { as: '--continue' });
       extractFlag('--continue');
+      extractFlag('-r', { as: '--resume', hasValue: true });
       extractFlag('--resume', { hasValue: true });
       extractFlag('--model', { hasValue: true });
+      extractFlag('--fallback-model', { hasValue: true });
     }
     // After pre-extraction, any remaining dash-arg at [1] is either -h/--help
     // (commander handles) or an unknown-to-ssh flag (fall through to commander
@@ -3234,7 +3260,7 @@ async function run(): Promise<CommanderCommand> {
           // canary optional at early boot
         }
 
-        const { createRoot } = await import('@anthropic/ink');
+        const { createRoot } = await import('./utils/inkRoot.js');
         root = await createRoot(ctx.renderOptions);
 
         // Log startup time now, before any blocking dialog renders. Logging
@@ -4268,6 +4294,10 @@ async function run(): Promise<CommanderCommand> {
         appendSubagentSystemPrompt,
         taskListId,
         thinkingConfig,
+        // densable 2.1.247 #7: the interactive host destructures fallbackModel
+        // too, so AgentTool's firstFallbackModel() resolves in the REPL and not
+        // just in the headless path.
+        fallbackModel: userSpecifiedFallbackModel,
         ...(uploaderReady && {
           onTurnComplete: (messages: MessageType[]) => {
             void uploaderReady.then(uploader => (uploader as ((msgs: MessageType[]) => void) | null)?.(messages));
@@ -5733,8 +5763,12 @@ async function run(): Promise<CommanderCommand> {
     .command('remove <name>')
     .alias('rm')
     .description('Remove a configured marketplace')
+    .option(
+      '--scope <scope>',
+      'Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.',
+    )
     .addOption(coworkOption())
-    .action(async (name: string, options: { cowork?: boolean }) => {
+    .action(async (name: string, options: { cowork?: boolean; scope?: string }) => {
       const { marketplaceRemoveHandler } = await import('./cli/handlers/plugins.js');
       await marketplaceRemoveHandler(name, options);
     });
@@ -5836,7 +5870,7 @@ async function run(): Promise<CommanderCommand> {
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
         import('./cli/handlers/util.js'),
-        import('@anthropic/ink'),
+        import('./utils/inkRoot.js'),
       ]);
       const root = await createRoot(getBaseRenderOptions(false));
       await setupTokenHandler(root);
@@ -6039,7 +6073,7 @@ async function run(): Promise<CommanderCommand> {
     .action(async () => {
       const [{ doctorHandler }, { createRoot }] = await Promise.all([
         import('./cli/handlers/util.js'),
-        import('@anthropic/ink'),
+        import('./utils/inkRoot.js'),
       ]);
       const root = await createRoot(getBaseRenderOptions(false));
       await doctorHandler(root);

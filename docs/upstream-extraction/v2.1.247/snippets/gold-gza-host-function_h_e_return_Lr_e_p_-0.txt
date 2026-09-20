@@ -1,0 +1,2 @@
+# needle=function h(e){return Lr(e,p())} pos=208306694
+function h(e){return Lr(e,p())}

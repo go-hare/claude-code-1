@@ -24,7 +24,7 @@ describe('marketplace cold marketplaceName densable 2.1.238', () => {
 
   test('cache-miss getMarketplace path passes known name', () => {
     expect(src).toContain(
-      'await loadAndCacheMarketplace(\n        entry.source,\n        undefined,\n        name,\n      )',
+      'await loadAndCacheMarketplace(\n        entry.source,\n        undefined,\n        storageV5,\n        name,\n      )',
     )
   })
 
@@ -42,15 +42,20 @@ describe('marketplace cold marketplaceName densable 2.1.238', () => {
       src.indexOf('\nexport async function ', refreshFn + 1),
     )
     expect(body).toContain(
-      'const { cachePath } = await loadAndCacheMarketplace(\n        entry.source,\n        undefined,\n        name,\n      )',
+      'const { cachePath } = await loadAndCacheMarketplace(\n        entry.source,\n        undefined,\n        storageV5,\n        name,\n      )',
     )
   })
 
-  test('named refresh still passes name into cacheMarketplaceFromUrl', () => {
-    const idx = src.indexOf('URL sources: re-download to existing file')
-    expect(idx).toBeGreaterThan(0)
-    const slice = src.slice(idx, idx + 400)
-    expect(slice).toContain('cacheMarketplaceFromUrl(')
-    expect(slice).toContain('name,')
+  test('named refresh mints headers with marketplaceName then ABo/h0n', () => {
+    const refreshFn = src.indexOf('export async function refreshMarketplace(')
+    expect(refreshFn).toBeGreaterThan(0)
+    const body = src.slice(
+      refreshFn,
+      src.indexOf('\nexport async function ', refreshFn + 1),
+    )
+    expect(body).toContain('resolveUrlMarketplaceHeaders(source, {')
+    expect(body).toContain('marketplaceName: name,')
+    expect(body).toContain('publishUrlMarketplaceCatalogRefresh(')
+    expect(body).toContain('await cacheMarketplaceFromUrl(')
   })
 })

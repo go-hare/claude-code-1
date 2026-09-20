@@ -1,0 +1,3 @@
+# offset=206463247 ver=247 hit=1/43 needle=" as Qr"
+
+artsWith("../");var Go=()=>{};var be;var Me=e(()=>{be=["no such file","not a regular file","resolves outside the plugin's folder"]});import{lstat as Jr,realpath as Jo}from"fs/promises";import{basename as Qr,isAbsolute as Zr,relative as en}from"path";async function Ne(t,o,r){let a=await p.refusedAs(Jo(o),(l)=>p.unreadableError(r,Qr(o),l)),f=(l)=>p.absentError(r,t,l),i=await p.refusedAs(Jo(t),f),g=e

@@ -1,0 +1,5 @@
+# mismatch@15
+---247---
+async function iZ(e,t,n,r,o,s){let i=PT(),a=s?.linkFarm??CB(r?.source),l=s?.forceOverwrite??!1,c=s?.storageV5,u=QT(c),d=$R(t,n),p=uZ(t,n),f=(P,x,A)=>SUe(d,t,n,P,x,A),m=u?await _2(d):"real";if(m==="refused")await f("cache","before reuse",m);let g,h=()=>g??=m==="absent"?Promise.resolve("absent"):fzo(d,t,n,a);if(i){if(m!=="absent"&&(u?await fwt(p,t,n,()=>f("cache","before reuse")):await sl(p))){if(!l){if(_(`Plugin 
+---246---
+async function O8(e,t,n,r,o,s){let i=hT(),a=s?.linkFarm??QU(r?.source),l=s?.forceOverwrite??!1,c=s?.storageV5,u=NT(c),d=bR(t,n),p=L8(t,n),f=(P,x,A)=>vFe(d,t,n,P,x,A),m=u?await GG(d):"real";if(m==="refused")await f("cache","before reuse",m);let g,h=()=>g??=m==="absent"?Promise.resolve("absent"):T0o(d,t,n,a);if(i){if(m!=="absent"&&(u?await Vbt(p,t,n,()=>f("cache","before reuse")):await el(p))){if(!l){if(b(`Plugin 

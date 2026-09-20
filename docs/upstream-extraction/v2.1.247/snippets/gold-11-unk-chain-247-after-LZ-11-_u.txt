@@ -1,0 +1,3 @@
+# 247-after-LZ n=11 function _u start=210418991 end=210419187 len=196 sha=21da9e0473c59c5a
+
+function _u(){if(ge()==="windows"&&!Ra())return{errors:["Windows sandbox is not enabled"],warnings:[]};let{checkDependenciesProbe:e}=Te(),t=e();if(t.errors.includes(_N))e.cache.clear?.();return t}

@@ -1,0 +1,46 @@
+# 247 WZ / pN helper lock (2026-09-17)
+
+Sandbox chunk @210369698 imports fs/path only. WZ names resolve via
+the same ES module that starts @209853791:
+
+  Z2c as Vm  ← _752 `ne as Z2c` @208253323
+  $2c as Qi  ← _752 `re as $2c` @208254079 → xe
+  Qxd as Ji  ← _841 `ko as Qxd` @206910537
+  had as wv  ← _806 `_r as had` @207801746 → Ue.record
+
+## Vm = ne(e, t)
+  if (!ae(e, t)) return true          // hop-walk, residual
+  return Dr(e) === "symlink" || Dr(e) === "other"
+
+Dr @208252955: lstat; symlink | file | dir | (ENOENT|ENOTDIR→absent) | other
+
+## NOT 210738 1-arg Ji
+  `function Ji(e)` @210738867 = win/wsl `:` / `[. ]$` for `le()` →
+  `nn` diff-tree why=`forged`. Same module as `be`/`Ki` alias +
+  info/attributes. Gold: gold-11-Ji-210738-lock.txt. Do not fold into WZ.
+
+## Ji = ko(pointer, cwd) @206910537
+  import: resolve as c @206909276
+  r = c(e,t) = resolve(cwd, pointer)
+  return ae(pointer, cwd) || ae(r, cwd)   // _841 ae @206909878 UNC/NT
+  volume loop: J(t){return!1} @206910682 + N(t){return null} @206909994
+  Local: isWorktreePathNetworkRelativeToCwd
+
+## Qi = re = xe @208253980
+  _752 import @208218546: Pxd as J, Qxd as F  from _841
+  J = $o @206910465: if(!J(t))return!1 → always false (inner J stub)
+  F = ko (same as WZ Ji)
+  ae @208253529 depth 40, follow symlink (Ve utf-8 readlink)
+  Fo/Io/Ir/ko regexes @208262399
+  rt=dirname b=join se=resolve be=sep
+  if(J(i,n))return!1  — $o dead; skip = official = more accept
+  Do(d,rt(i)) = ko(target, parent)
+  xe: !ae(Ir?e:t+sep+e, t, void 0, r) || !ae(resolve(t,e), t, void 0, r)
+  Local: src/utils/git/gitdirHopWalk.ts
+
+## wv = _r(path, dev, ino, fd)
+  we(path) = resolve(path)
+  class Ue @207801397:
+    record: close previous fd, set {dev,ino,fd}
+    identity / reset
+  wt = new Ee(() => new Ue) per host

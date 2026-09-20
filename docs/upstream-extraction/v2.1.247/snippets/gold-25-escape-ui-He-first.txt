@@ -1,0 +1,3 @@
+# @236118900
+
+anifest);return o(a,{flexDirection:"column",children:[t(a,{children:o(n,{bold:!0,children:[He(I.plugin)," @"," ",he(I.marketplace)]})}),o(a,{children:[t(n,{dimColor:!0,children:"Scope: "}),t(n,{children:I.scope||"user"})]}),oe.version&&o(a,{children:[t(n,{dimColor:!0,children:"Version: "}),t(n,{children:oe.version})]}),oe.description&&t(a,{marginBottom:1,children:t(n,{children:oe.description})}),o

@@ -1,0 +1,2 @@
+# function Li(e) session ctor pos=206969731 end=206969821 len=90
+function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}

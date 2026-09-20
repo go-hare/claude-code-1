@@ -1,0 +1,330 @@
+# gold-1-call-ye-E-pass2 247
+exe=253204128
+
+## function xSa( needle="function xSa(" hits=0
+
+## async function xSa( needle="async function xSa(" hits=0
+
+## xSa=function needle="xSa=function" hits=0
+
+## function _Ba( needle="function _Ba(" hits=0
+
+## async function _Ba( needle="async function _Ba(" hits=0
+
+## _Ba=function needle="_Ba=function" hits=0
+
+## function Fkd( needle="function Fkd(" hits=0
+
+## async function Fkd( needle="async function Fkd(" hits=0
+
+## Fkd=function needle="Fkd=function" hits=0
+
+## function Nw( needle="function Nw(" hits=4
+- #0 @223808316 rstImpression(e){if(this.#s.has(e))return!1;return this.#s.add(e),!0}}function Nw(e,t){if(e.view)return e.view;let o=ro().fleetViewGroupMode??"state";re
+- #1 @229242033 nds_with",suffix:t.suffix,input:i.value,inst:e,continue:!t.abort})}});function Nw(e,t,r){if(e.issues.length)t.issues.push(..._t.prefixIssues(r,e.issues)
+- #2 @231901005 mories.map((o)=>o.content).join(`
+`);break}default:break}return pg(t)}function Nw(e){if(!e||typeof e!=="object"||cg.isProxy(e))return"";let t=e,o=[];for
+- #3 @241972493 n(i){return e(+i)},r}),"custom")(.5)});function ZJ(e){this._context=e}function Nw(e){return new ZJ(e)}var QJ=z(()=>{"use strict";fx();o(ZJ,"LinearClosed
+
+## async function Nw( needle="async function Nw(" hits=0
+
+## var Nw= needle="var Nw=" hits=1
+- #0 @227128943 t)=>e.sort((r,n)=>bw(n,r,t));eT.exports=Ow});var Ds=R(function(pY,rT){var Nw=Tt(),Pw=(e,t,r)=>Nw(e,t,r)>0;rT.exports=Pw});var Kc=R(function(gY,nT){
+
+## Nw= needle="Nw=" hits=15
+- #0 @211359131 eft-edge":!0;let Nw;if(Mw[4]!==N0||Mw[5]!==_0||Mw[6]!==hR||Mw[7]!==pR)Nw=Q(Ge,{alignSelf:hR,...N0,noSelect:pR,children:_0}),Mw[4]=N0,Mw[5]=_0,M
+- #1 @211359235 ct:pR,children:_0}),Mw[4]=N0,Mw[5]=_0,Mw[6]=hR,Mw[7]=pR,Mw[8]=Nw;else Nw=Mw[8];return Nw}var vR=U(()=>{Ru();ze();ft()});function bR($k){let _w=
+- #2 @216862792 _branches setup failed: ${Y(Ue)}`));let wW=Yqe(()=>dr.noteActivity()),Nw=new Map,gf=!R,b_="initial",Mv=0,Ov;function Dv(Ue){if(Dn)return;if(D("
+- #3 @218470669 t wW=kl?.type==="enabled"||kl?.type==="adaptive"||kl===void 0&&dye(d),Nw=s.toolChoice;if(Nw?.type==="tool"&&wW)_(`tool_choice {type:'tool', nam
+- #4 @218470805 l', name:'${Nw.name}'} demoted to auto: extended thinking is active`),Nw={type:"auto"};if(n.type==="disabled"&&n.mechanical===!0&&kl?.type==="d
+- #5 @218491645 STREAM_WATCHDOG??!0,pC=y_t(),pP=pC/2,wW=Math.min(_Ne(Vr()),YM?pC:1/0),Nw=Math.min(fjs,wW-Vqt),gf=!1,b_=null,Mv=null,Ov=null,Dv=null,XM=!1;w_();
+- #6 @227128947 e.sort((r,n)=>bw(n,r,t));eT.exports=Ow});var Ds=R(function(pY,rT){var Nw=Tt(),Pw=(e,t,r)=>Nw(e,t,r)>0;rT.exports=Pw});var Kc=R(function(gY,nT){
+- #7 @231514756 5];let Mp=H9,Nw,q9;if(Rp[6]!==Ue.id||Rp[7]!==hp.toolResultByToolUseID)Nw=hp.toolResultByToolUseID.get(Ue.id),q9=Qn.interruptedCall(Nw),Rp[6]=Ue
+- #8 @231514887 Nw),Rp[6]=Ue.id,Rp[7]=hp.toolResultByToolUseID,Rp[8]=Nw,Rp[9]=q9;else Nw=Rp[8],q9=Rp[9];let bp=q9,ti=Nw?.type==="user"?Nw.toolUseResult:void 0,
+- #9 @232826856 t]:[]);FU(Ua,OEo,void 0,!1)},onFocus:tyt,onCancel:ES,submitButtonText:Nw===Cp.length-1?"Submit":"Next",onSubmit:REo,onDownFromLastItem:nyt,isDi
+- #10 @235835486 ]=Pu,bo[26]=Wn,bo[27]=jn;else jn=bo[27];return jn}function pe(YE){let Nw=P(5),{width:Eh,text:_h}=YE,Lu;if(Nw[0]!==_h)Lu=e(o,{dimColor:!0,wrap:"
+- #11 @236137496 ==Kd||rr[27]!==os||rr[28]!==is||rr[29]!==qd||rr[30]!==ar||rr[31]!==Wd)Nw=o(Vd,{flexDirection:Hd,marginTop:Kd,children:[os,is,qd,ar,Wd]}),rr[24]
+- #12 @236137658 ]=Kd,rr[27]=os,rr[28]=is,rr[29]=qd,rr[30]=ar,rr[31]=Wd,rr[32]=Nw;else Nw=rr[32];return Nw}function op(JO){let rs=V(8),{disusedPlugins:zd}=JO;if
+- #13 @238307634 });zg.convertLegacyOtlpGrpcOptions=void 0;var Aw=wo(),Bg=Mg(),Pw=vi(),Nw=Ug();function Iw(e,t){if(e.headers)Aw.diag.warn("Headers cannot be set
+- #14 @249317642 >({openMethod:t,triggerProps:r}),[t,r])}var Nw,R2=K(()=>{"use client";Nw=_(ie(),1);Jn();S9();as();kw()});function C9(e,t,n=(r,o)=>r===o){return
+
+## async function Dfs( needle="async function Dfs(" hits=1
+- #0 @216521679 ap(r);else for(let d of c)i.push(await o(d));s=l}return i[a-l]??null}}async function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))
+
+## function Dfs( needle="function Dfs(" hits=1
+- #0 @216521685 else for(let d of c)i.push(await o(d));s=l}return i[a-l]??null}}async function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))
+
+## onWriteNew needle="onWriteNew" hits=3
+- #0 @198149976 ......'J).isHeadOnRemote.......H>.isClean.
+...N&?.branchName..
+...J.p.onWriteNew..&....H..Error submitting feedback / bug report.......}..Feedback bun
+- #1 @236994357 :[],"send"]}var Ue=500;function sr({messages:u,onDone:g,abortSignal:y,onWriteNew:h}){let[f,b]=C(null),[x,j]=C(0),[m,F]=C("list"),[n,A]=C(null),[N,L]=C
+- #2 @237084287 t)Ko=e(ct,{messages:jt,onDone:se,abortSignal:M.abortController.signal,onWriteNew:lt}),_t[5]=M.abortController.signal,_t[6]=jt,_t[7]=se,_t[8]=lt,_t[9]=
+
+## export{xSa needle="export{xSa" hits=0
+
+## xSa as ye needle="xSa as ye" hits=1
+- #0 @232013288  B,_Ba as _e,cCa as H,eCa as ze,mCa as K,oTa as Ee,pCa as W,tCa as Ie,xSa as ye}from"B:/~BUN/root/_448.js";import{olc as L,qlc as Pe}from"B:/~BUN/roo
+
+## _Ba as _e needle="_Ba as _e" hits=1
+- #0 @232013221 e,QBa as le,RBa as J,VBa as fe,WBa as pe,XBa as me,YBa as ge,ZBa as B,_Ba as _e,cCa as H,eCa as ze,mCa as K,oTa as Ee,pCa as W,tCa as Ie,xSa as ye}fr
+
+## Fkd as E needle="Fkd as E" hits=1
+- #0 @232013590 /_825.js";import{Hgd as R,Jgd as Ce}from"B:/~BUN/root/_827.js";import{Fkd as E,Ikd as $e,eld as g,gkd as v,jkd as S,kld as Q,mkd as te,pkd as Z}from
+
+## Nw as q needle="Nw as q" hits=1
+- #0 @232013009 en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Jw as x,Kw as ke,Nw as q,Ow as F,Pw as P,Sw as z,Tw as he}from"B:/~BUN/root/_205.js";import{$B
+
+## function async function Dfs( @216521679
+len=558 sha=cd550b3a4d3eb2f2
+async function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))return null;let{getSessionId:t}=await import("B:/~BUN/root/chunk-j3ftgb6r.js");if(e.source_session_id===t()){let{getTranscriptPathForSession:s}=await import("B:/~BUN/root/chunk-1fjh16vg.js");return s(e.source_session_id)}let{getProjectDir:n,getProjectsDir:r}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.transcript_ref.project_dir_key;if(o!==void 0&&sLt.test(o))return z_e(r(),o,`${e.source_session_id}.jsonl`);return z_e(n(e.cwd),`${e.source_session_id}.jsonl`)}
+
+## function function Dfs( @216521685
+len=552 sha=dee16ba2ab891c61
+function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))return null;let{getSessionId:t}=await import("B:/~BUN/root/chunk-j3ftgb6r.js");if(e.source_session_id===t()){let{getTranscriptPathForSession:s}=await import("B:/~BUN/root/chunk-1fjh16vg.js");return s(e.source_session_id)}let{getProjectDir:n,getProjectsDir:r}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.transcript_ref.project_dir_key;if(o!==void 0&&sLt.test(o))return z_e(r(),o,`${e.source_session_id}.jsonl`);return z_e(n(e.cwd),`${e.source_session_id}.jsonl`)}
+
+## function Dfs@216521705 @216521650
+len=587 sha=0039be110f54b924
+d));s=l}return i[a-l]??null}}async function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))return null;let{getSessionId:t}=await import("B:/~BUN/root/chunk-j3ftgb6r.js");if(e.source_session_id===t()){let{getTranscriptPathForSession:s}=await import("B:/~BUN/root/chunk-1fjh16vg.js");return s(e.source_session_id)}let{getProjectDir:n,getProjectsDir:r}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.transcript_ref.project_dir_key;if(o!==void 0&&sLt.test(o))return z_e(r(),o,`${e.source_session_id}.jsonl`);return z_e(n(e.cwd),`${e.source_session_id}.jsonl`)}
+
+## _448-root-marker needle="B:/~BUN/root/_448.js" hits=736
+- #0 @137458992 eevalidateWorktreeSlugworktreeBranchNameB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #1 @139507670 PVMnQVorRVTnSVOnTVInUVcrVVUnWVLnXVNnYVhrB:/~BUN/root/_448.jsB:/~BUN/root/_503.jsB:/~BUN/root/_671.js
+- #2 @140378771 B:/~BUN/root/_434.jsB:/~BUN/root/_435.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #3 @141476414 a1f1be4a04C00000851dDBdBlFBdAwYbBwHbCwKuB:/~BUN/root/_448.jsB:/~BUN/root/_561.jsB:/~BUN/root/_850.js
+- #4 @141544298 B:/~BUN/root/_221.jsB:/~BUN/root/_292.jsB:/~BUN/root/_448.jsB:/~BUN/root/_490.jsB:/~BUN/root/_544.js
+- #5 @141763366 B:/~BUN/root/_199.jsB:/~BUN/root/_313.jsB:/~BUN/root/_448.jsB:/~BUN/root/_475.jsB:/~BUN/root/_481.js
+- #6 @141839806 BPmoCPpoDPRoEPbtFPgoGPhoHPAoIP_oJPwtKPStB:/~BUN/root/_448.jsB:/~BUN/root/_539.jsB:/~BUN/root/_584.js
+- #7 @141870205 B:/~BUN/root/_343.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_508.jsB:/~BUN/root/_521.js
+- #8 @142303932 B:/~BUN/root/_319.jsB:/~BUN/root/_341.jsB:/~BUN/root/_448.jsB:/~BUN/root/_453.jsB:/~BUN/root/_475.js
+- #9 @142323559 B:/~BUN/root/_343.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #10 @143059473 B:/~BUN/root/_434.jsB:/~BUN/root/_435.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #11 @143176170 sTwDUwDtVwLtWwjsXwOtB:/~BUN/root/_206.jsB:/~BUN/root/_448.jsB:/~BUN/root/_603.jsB:/~BUN/root/_675.js
+- #12 @143261107 tdGxneGoefGYgGqthGVtB:/~BUN/root/_306.jsB:/~BUN/root/_448.jsB:/~BUN/root/_556.jsB:/~BUN/root/_572.js
+- #13 @143274083 C00000851CFBdPIBdSKheTKmeUKpeVKgeWKfeXKGB:/~BUN/root/_448.jsB:/~BUN/root/_535.jsB:/~BUN/root/_593.js
+- #14 @143290231 0851kFBdLPdMPWNPSOPDB:/~BUN/root/_398.jsB:/~BUN/root/_448.jsB:/~BUN/root/_850.js....................
+- #15 @143550101 B:/~BUN/root/_416.jsB:/~BUN/root/_428.jsB:/~BUN/root/_448.jsB:/~BUN/root/_454.jsB:/~BUN/root/_475.js
+- ... +720 more
+
+## version-headers count=1407
+
+## read-bytesRead,bytesTotal needle="bytesRead,bytesTotal" hits=0
+
+## read-{content: needle="{content:" hits=804
+- #0 @200072702 0;letter-spacing:-.005em;margin-bottom:20px}
+.status::before{content:"";width:6px;height:6px;border-radius:50%;background:#558A42
+- #1 @204810565 0;letter-spacing:-.005em;margin-bottom:20px}
+.status::before{content:"";width:6px;height:6px;border-radius:50%;background:#558A42
+- #2 @206357357 ync function Ca(e,t,r){try{let s=e.parse?e.parse(t):t;return{content:await e.run(s,r),isError:!1}}catch(s){return{content:wl(s),i
+- #3 @206357410 ;return{content:await e.run(s,r),isError:!1}}catch(s){return{content:wl(s),isError:!0}}}var Na=_(()=>{Kt()});function qa(e){retur
+- #4 @206841612 safe. Cancellable via control_cancel_request.')),Eo=s(()=>t({content:d(),structuredContent:c(e(),d()).optional(),_meta:c(e(),d())
+- #5 @206862472 ess payload answering remote_tools_announce.")),Lt=s(()=>It({content:r(d()),isError:i().optional(),structuredContent:c(e(),d()).o
+- #6 @207054161 Read:c}=await r.read(s,a,o-a,t+a);if(c===0)break;a+=c}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:i}}async funct
+- #7 @207054314 n=await C(e,"r");let r=(await n.stat()).size;if(r===0)return{content:"",bytesRead:0,bytesTotal:0};let i=Math.max(0,r-t),o=r-i,s=B
+- #8 @207054488 Read:c}=await n.read(s,a,o-a,i+a);if(c===0)break;a+=c}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:r}}async funct
+- #9 @207742270 o=r.readFileSync(e,{encoding:i}),f=E(o.slice(0,4096));return{content:o.replaceAll(`\r
+`,`
+`),encoding:i,lineEndings:f}}function _
+- #10 @207742565 await r.readFile(e,{encoding:i}),f=E(o.slice(0,4096));return{content:o.replaceAll(`\r
+`,`
+`),encoding:i,lineEndings:f}}var b=p(()
+- #11 @207805222 f=C(t,m);try{return await Ne(f),f}catch{return}}function Hr({content:e,startLine:t,tabAwareSeparator:r=!1}){if(!e)return"";let n=
+- #12 @208227289 o,s,u),m=Ge(s.subarray(0,c),r.sniffEncoding);if(u===0)return{content:m,truncated:!1};let g=m.indexOf(`
+`);return{content:g===-1?"
+- #13 @208227341 0)return{content:m,truncated:!1};let g=m.indexOf(`
+`);return{content:g===-1?"":m.slice(g+1),truncated:!0}}let l=Math.min(a.size,t
+- #14 @208227635 t ${t} bytes of ${a.size} bytes]`:c;return r.withBytes===!0?{content:g,bytes:s,truncated:m}:g}let d=Ge(p.subarray(0,f),!1);return
+- #15 @209344452 onse",`${n}: malformed response: ${o.error.message}`);return{content:o.data.content,sha256:o.data.content_sha256,updatedAt:o.data
+- ... +788 more
+
+## read-bytesTotal: needle="bytesTotal:" hits=20
+- #0 @207054205 reak;a+=c}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:i}}async function Ri(e,t){await using n=await C(e,"r");let r
+- #1 @207054338 await n.stat()).size;if(r===0)return{content:"",bytesRead:0,bytesTotal:0};let i=Math.max(0,r-t),o=r-i,s=Buffer.allocUnsafe(o),a=0;w
+- #2 @207054532 reak;a+=c}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:r}}async function*Li(e,t=65536){let n=await C(e,"r"),r=Buffe
+- #3 @212865319 newOffset:t}}}async function zoe(e,t=P5t){try{let{content:n,bytesTotal:r,bytesRead:o}=await Fw(ji(e),t);if(r>o)return`[${Math.round
+- #4 @212872656 is.#i)return;Fw(this.path,Dlo).then(({content:e,bytesRead:t,bytesTotal:n})=>{if(!this.#i)return;if(!e){this.#i("","",this.#o,n,!1);
+- #5 @212874415 h,0,e);if(!t)return this.#l=!0,"";let{content:n,bytesRead:r,bytesTotal:o}=t;return this.#d=o,this.#l=o<=r,n}catch(t){let n=t instan
+- #6 @219577309 =await Fw(e,t).catch(()=>null);return o&&{content:o.content,bytesTotal:o.bytesTotal,endsOnLineBoundary:o.content.endsWith(`
+`)}}asy
+- #7 @219577790 urn}let i=s.value.tornTailBytes??0;return{content:o.content,bytesTotal:o.totalBytes+i,endsOnLineBoundary:i===0&&o.content.endsWith(
+- #8 @219652230 t.split(`
+`),n.cut)r.shift()}else{let{content:a,bytesRead:l,bytesTotal:c}=await Fw(e,1048576);if(r=a.split(`
+`),l<c)r.shift()}let o
+- #9 @222026651 f(i!==void 0)return ts(u,i,a)}try{let{content:i,bytesRead:t,bytesTotal:n}=await w(s,a),c=i;if(t<n){let o=i.indexOf(`
+`);c=o>=0?i.sl
+- #10 @222028003 size===0||f+e.size>B)continue;try{let{content:m,bytesRead:l,bytesTotal:g}=await w(e.path,B);if(!m||l<g)continue;if(u&&A(m)){d++,_(`
+- #11 @222032730 ;if(!s)return null;try{await Fe();let{content:a,bytesRead:u,bytesTotal:i}=await w(s,vs),t=a;if(u<i)t=t.slice(t.indexOf(`
+`)+1),t=`[
+- #12 @222590282 .";return cs({content:Buffer.from(o.value).toString("utf8"),bytesTotal:o.totalBytes})}try{return cs(await tn(e,as))}catch(n){return
+- #13 @222590454 to read last ${je} lines: ${Qt(n)}`}}function cs({content:e,bytesTotal:t}){let n=e.split(`
+`).slice(-je).join(`
+`);return`Log size:
+- #14 @223685956 from(i.value).toString("utf8"),bytesRead:i.value.byteLength,bytesTotal:i.totalBytes}}return qp(e,t)}import{open as gk}from"fs/promi
+- #15 @231626938 =Bc(e.id);try{let a=await Pc(i,xd);return{content:a.content,bytesTotal:a.bytesTotal}}catch{return{content:"",bytesTotal:0}}}functio
+- ... +4 more
+
+## read-gN( needle="gN(" hits=18
+- #0 @84925240 ....'j....-.]T.....^.om5r....t.1B......Q...fN'..v..../^..s.:gN(dq.nk.V..2y..a>~.R.N....>.......Y.......l....u.....ce6.. o..
+- #1 @210415047 kind:hv(b)})}}catch{}}if(t.length>0)BZ(t)}function UZ(){if(!gN())return null;let e=Te(),t=Re.getConfig();if(!t||t.filesyste
+- #2 @210415403 l;return ys([...e.wrapWriteRootsThisSession,...r])}function gN(){let e=ge();return e==="linux"||e==="wsl"||e==="macos"}func
+- #3 @210415829 n[...n]}function FZ(){yN(Re.getConfig())}function yN(e){if(!gN())return;let t=Te();if(!e||e.filesystem.disabled||or()&&so()
+- #4 @212864985 ngs.delete(e)}async function M7e(e,t,n=P5t){try{let r=await gN(ji(e),t,n);if(!r)return{content:"",newOffset:t};return{conte
+- #5 @212874344 Start()}return this.#e}async#m(){let e=_N();try{let t=await gN(this.path,0,e);if(!t)return this.#l=!0,"";let{content:n,byte
+- #6 @218633600 s,c=r||i||a;if(!c&&l===void 0)return null;let u;try{u=await gN(e,0,I8e)}catch{return null}if(u===null)return null;let d=jke
+- #7 @218636857 oid 0||o.promptIndex===void 0)return null;let s;try{s=await gN(e,0,I8e)}catch{return null}if(s===null)return null;let i=jke
+- #8 @229499547 neProperty(jn,"__esModule",{value:!0});jn.default=yN;var dl=gN(V()),_N=()=>{let e={string:{unit:"\u062D\u0631\u0648\u0641",
+- #9 @230633804 ae(p);let l=p instanceof Error?`Failed to resume session: ${gN(p,i)}`:"Failed to resume session with --print mode";return M
+- #10 @230634063 torageV5:r.storageV5,credentials:r.credentials}))}}function gN(e,t){if(t!=="load_error")return e.message;switch(ZC(e)){case
+- #11 @242143680 ],n[1],t)),a=[n[0],n[1]]}return{type:"path",ops:i}}function gN(e,t){let r=[];for(let i of e)if(i.length){let n=t.maxRandomn
+- #12 @242154798 ,r],[t+i,r],[t+i,r+n],[t,r+n]];s.fillStyle==="solid"?l.push(gN([h],s)):l.push(Tg([h],s))}return s.stroke!==so&&l.push(u),th
+- #13 @242156622 ],a=M4(t,!0,i);return i.fill&&(i.fillStyle==="solid"?n.push(gN([t],i)):n.push(Tg([t],i))),i.stroke!==so&&n.push(a),this._d(
+- #14 @242157796 {type:"fillPath",ops:this._mergedShape(d.ops)})}else n.push(gN(u,i));else n.push(Tg(u,i));return s&&(l?u.forEach((d=>{n.pus
+- #15 @249074149 ictingClassGroupModifiers,o.conflictingClassGroupModifiers),gN(e,o,"postfixLookupClassGroups"),gN(e,o,"orderSensitiveModifi
+- ... +2 more
+
+## read-session_file needle="session_file" hits=8
+- #0 @200612212 ......\.assistantTurnCount.........subagentCount...........session_file.......message_range.......V...project_dir_key......%..teng
+- #1 @201919102 reHandoverRead' from null or undefined value......9...tengu_session_file_read.....g...hasPageRange.....}g.v5SidecarScope..........ma
+- #2 @202828264 ault.....I..skip_reason......fr.transcripts_deleted.........session_files_deleted.........X.artifacts_deleted.......5l..files_retain
+- #3 @208795378 dk_session_crash","tengu_sdk_stall","tengu_sdk_ttft","tengu_session_file_read","tengu_started","tengu_tool_use_error","tengu_tool_us
+- #4 @212289897 (e.transcriptsDeleted)},...e.sessionFilesDeleted!==void 0&&{session_files_deleted:String(e.sessionFilesDeleted)},...e.artifactsDelet
+- #5 @216523265 _count:Iz(e.subagentCount),transcript_ref:e.transcriptFile?{session_file:e.transcriptFile,message_range:null,project_dir_key:n}:null
+- #6 @216528880 ).optional().catch(void 0).transform(Iz),transcript_ref:pe({session_file:I(),message_range:Fee([Te(),Te()]).nullable(),project_dir_k
+- #7 @218137545 filePath:n,content:E});let q=DLs(n),Z=OM(n);return D("tengu_session_file_read",{totalLines:S,readLines:C,totalBytes:k,readBytes:P!==
+
+## read-project_dir_key needle="project_dir_key" hits=4
+- #0 @200612256 Count...........session_file.......message_range.......V...project_dir_key......%..tengu_juniper_relay......RG.CLAUDE_CODE_SEND_FEEDBA
+- #1 @216522093 import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.transcript_ref.project_dir_key;if(o!==void 0&&sLt.test(o))return z_e(r(),o,`${e.source_ses
+- #2 @216523314 criptFile?{session_file:e.transcriptFile,message_range:null,project_dir_key:n}:null,status:"queued"}}function $fs(e){let t=eLt(tLt(e));
+- #3 @216528939 {session_file:I(),message_range:Fee([Te(),Te()]).nullable(),project_dir_key:I().optional().transform((e)=>e!==void 0&&sLt.test(e)?e:voi
+
+## read-getTranscriptPathForSession needle="getTranscriptPathForSession" hits=7
+- #0 @161228280 SessionFilesWithMtimegetSessionIdFromLoggetSessionSidecarDirgetTranscriptPathForSessiongetTranscriptWriteFailureSeqgetTranscriptWriterDegradedgetTr
+- #1 @200117344 ....getSessionIdFromLog.....v...getSessionSidecarDir......v.getTranscriptPathForSession.....Sm..getTranscriptWriteFailureSeq....Z...getTranscriptWr
+- #2 @201796069 draft listing failed...V...^d3.Cannot destructure property 'getTranscriptPathForSession' from null or undefined value......#cQ.B:/~BUN/root/chunk-g
+- #3 @216521881 /root/chunk-j3ftgb6r.js");if(e.source_session_id===t()){let{getTranscriptPathForSession:s}=await import("B:/~BUN/root/chunk-1fjh16vg.js");return s(
+- #4 @216537885 and the user can review them with /feedback.`}}}let n=qe(),{getTranscriptPathForSession:r}=await import("B:/~BUN/root/chunk-1fjh16vg.js"),o=WKe(),s
+- #5 @219512496 >bTe,getSessionIdFromLog:()=>f8,getSessionSidecarDir:()=>ML,getTranscriptPathForSession:()=>Tu,getTranscriptWriteFailureSeq:()=>w0,getTranscriptWri
+- #6 @227570030 e,Kc as getSessionIdFromLog,Oa as getSessionSidecarDir,j as getTranscriptPathForSession,G as getTranscriptWriteFailureSeq,H as getTranscriptWriterD
+
+## read-getProjectsDir needle="getProjectsDir" hits=6
+- #0 @153574890 findSoleTranscriptWithMessagesByIdgetProjectDirgetProjectKeygetProjectsDirisHiddenFromSessionPickerisUuidShapedlegacyDerivedProjectKey
+- #1 @201796280 from null or undefined value...{}8.getProjectDir...........getProjectsDir..$.......feedbackDrafts: draft write failed: '...J...feedba
+- #2 @201796677 eadTail....0: .age_daysI...U.s.Cannot destructure property 'getProjectsDir' from null or undefined value.......O=	.feedback draft dele
+- #3 @216522009 16vg.js");return s(e.source_session_id)}let{getProjectDir:n,getProjectsDir:r}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.trans
+- #4 @216526204 t/chunk-j3ftgb6r.js"),o=e.source_session_id===r();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s
+- #5 @225421415 WithMessagesById,G as getProjectDir,E as getProjectKey,D as getProjectsDir,c as isHiddenFromSessionPicker,S as isUuidShaped,F as legac
+
+## T({ needle="T({" hits=59
+- #0 @76448665 ../..._.7.\~....}x4.~.!.o...[J..g%...._|#...	?..GT({..B.)...J.|c..^.r.s.v.!9;..\gk.........F`/C..[.z..
+- #1 @207123030 string,...f.errToObj(r)})}_addCheck(e){return new T({...this._def,checks:[...this._def.checks,e]})}emai
+- #2 @207125140 eturn this.min(1,f.errToObj(e))}trim(){return new T({...this._def,checks:[...this._def.checks,{kind:"tr
+- #3 @207125226 .checks,{kind:"trim"}]})}toLowerCase(){return new T({...this._def,checks:[...this._def.checks,{kind:"to
+- #4 @207125319 ,{kind:"toLowerCase"}]})}toUpperCase(){return new T({...this._def,checks:[...this._def.checks,{kind:"to
+- #5 @207126717 |t.value<e)e=t.value}return e}};T.create=(e)=>new T({checks:[],typeName:p.ZodString,coerce:e?.coerce??!
+- #6 @207607042 e:h[":status"]||-1,headers:te(h),body:u});if(f=!0,T({response:p}),r)d.close(),this.connectionManager.de
+- #7 @207721357 nk-c4pdvn9n.js"),u()]),o=new n({region:r,...await T({url:f(r),region:r,requestTimeoutMs:v})});await l(o
+- #8 @208735421 in with your claude.ai account.";if(!hi())return ST({prefix:"Remote Control requires claude.ai subscrip
+- #9 @208740478 urn`${r}h`;return`${Math.round(r/24)}d`}function ST({prefix:e,suffix:t}){try{let{source:n}=Pn({skipRetr
+- #10 @208744190 _version",{minVersion:"0.0.0"});if(e.minVersion&&dT({ISSUES_EXPLAINER:"report the issue at https://gith
+- #11 @210930382 30,180,210)"};X=O.terminal==="Apple_Terminal"?new T({level:2}):i});
+export{rr as Q2b,b as R2b,er as S2b
+- #12 @213301922 Q);return}}(0,t.boolOrEmptySchema)(oe,Q)}function T({schema:oe,self:Q}){if(typeof oe=="boolean")return!
+- #13 @213710207 ,dat=Ii(),rat={admitted:!0};$Pe=Svo();Hcn((e,t)=>uT({agentId:Tr(),mode:"prompt",value:`/${e}`,origin:t}
+- #14 @214303140 )));let o=SLo(),s=_x.recordSubmitted(o,r);return uT({agentId:Tr(),mode:"prompt",value:e,uuid:o,priority
+- #15 @215688090 ${e.text.slice(0,80)}`);return}let t=IQn(e.text);uT({agentId:Tr(),mode:t,value:MQn(e.text),priority:"ne
+- ... +43 more
+
+## o(T, needle="o(T," hits=24
+- #0 @207376474 T){for(var E in _)if(E!=="default"&&!Object.prototype.hasOwnProperty.call(T,E))io(T,_,E)};Object.defineProperty(t,"__esModule",{value:!0});uo(QN(),t)});var kN=O(fun
+- #1 @211390840 lexShrink:0,children:D}),L[0]=D,L[1]=w;else w=L[1];return w}let w;if(L[2]!==K)w=o(T,{color:K}),L[2]=K,L[3]=w;else w=L[3];let O;if(L[4]!==D)O=o(s,{flexDirection:"col
+- #2 @211428682 r",(T)=>{H({kind:"spawn-error",message:T.message,stdout:d,stderr:v})});function o(T,ie){if(A)return;if(typeof T==="number")H({kind:"exited",exitCode:T,stdout:d,stde
+- #3 @211429002 )=>ne(Ne,Re),Es,o,T,ie),typeof E==="object")E.unref()}),L.once("close",(T,ie)=>{o(T,ie)})})}var Es=2000;var Rs=g(()=>{Pl();Nl();Ps();Il()});import{createHash as Ks}
+- #4 @212679006 catch{return{errMsg:`files: ${JSON.stringify(c)} not found`}}let M;try{M=await eo(T,no.O_RDONLY|0)}catch(w){if(w?.code==="ELOOP")return{errMsg:`files: ${JSON.string
+- #5 @213668445 e((P,x)=>P+(a(x.toolUseId)?0:x.size),0),E=T.reduce((P,x)=>P+x.size,0),C=v+E>l?Iko(T,v,l):[],R=new Set(C.map((P)=>P.toolUseId));if(h.filter((P)=>!R.has(P.toolUseId))
+- #6 @219244110 t the plugin config to retry now)"},tools:[],commands:[]});return}let E=await Mto(T,v)?{kind:"miss",reason:"live-connection"}:await BZe(T,v),C=Bto(E);if(C.kind==="f
+- #7 @219244233 "}:await BZe(T,v),C=Bto(E);if(C.kind==="fresh"||C.kind==="stale"){wYt(),await Oto(T,v);let{entry:A,ageMs:L}=C,F={name:T,type:"cached",config:v,capabilities:A.capabi
+- #8 @223818596 ="c"||t.key==="escape"){l.abandonRespawnAttempt();let T=l.disarm();if(T!==null)uo(T,d).catch(()=>{});l.dropWarming(ve);return}if(!t.shift&&(t.key==="up"||t.key==="d
+- #9 @223818920 ==="n"?1:-1)===V)return;l.abandonRespawnAttempt();let T=l.disarm();if(T!==null)uo(T,d).catch(()=>{})}else return}if(t.ctrl&&t.key==="c"){if(Q(),ye||M){i.setHelpOpen
+- #10 @223822323 `
+`)){p(t);return}Se(null);let T=Lc(e,r.getSnapshot().focusedIdx,-1);r.navigateTo(T,D[T]);return}if((t.key==="home"||t.key==="end"||t.key==="pageup"||t.key==="paged
+- #11 @223822933 (`
+`)){p(t);return}Se(null);let T=Lc(e,r.getSnapshot().focusedIdx,1);r.navigateTo(T,D[T]);return}if(ee&&t.ctrl&&t.key==="x"){if(Q(),w&&me.some((J)=>J.id===w.id))ret
+- #12 @230559227 ,T=new Set(i().mcp.clients.filter((L)=>!w.has(L.name)).map((L)=>L.name));await po(T,"set_cwd")}catch(R){S(`set_cwd: re-homing plugins/MCP for the new directory fail
+- #13 @231950086 mation"},a[20]=To;else To=a[20];eo(No,To);let ko;if(a[21]===m)ko=t(e,{children:[o(T,{cooldown:Mo})," Fast mode (research preview)"]}),a[21]=ko;else ko=a[21];let Ue=
+- #14 @237023038 [12]!==E)v=()=>E(),a[12]=E,a[13]=v;else v=a[13];let g;if(a[14]!==q||a[15]!==v)g=o(T,{messages:q,onDone:v}),a[14]=q,a[15]=v,a[16]=g;else g=a[16];return g}const v=s.l
+- #15 @241537330 x=[],b=u!=null?[]:void 0;function T(){u&&e.gullet.macros.set("\\@eqnsw","1",!0)}o(T,"beginRow");function w(){b&&(e.gullet.macros.get("\\df@tag")?(b.push(e.subparse(
+- ... +8 more
+
+## m(T, needle="m(T," hits=11
+- #0 @213405714 harCodeAt(b+1)===T1?2:1))}return}let T=y.slice(b,S),v=T.indexOf(":");if(v===-1){m(T,"",T);return}let E=T.slice(0,v),C=T.charCodeAt(v+1)===T1?2:1,R=T.slice(v+C);m(E,
+- #1 @214291502 );for(let T of g.reverse()){let v=vpe(T,b);if(Li("projectSettings")&&!v){let E=Sm(T,"CLAUDE.md");a.push(...await ib(E,"Project",l,u));let C=Sm(T,".claude","CLAUDE.m
+- #2 @214291563 ings")&&!v){let E=Sm(T,"CLAUDE.md");a.push(...await ib(E,"Project",l,u));let C=Sm(T,".claude","CLAUDE.md");a.push(...await ib(C,"Project",l,u));let R=Sm(T,".claude"
+- #3 @214291634 );let C=Sm(T,".claude","CLAUDE.md");a.push(...await ib(C,"Project",l,u));let R=Sm(T,".claude","rules");a.push(...await CG({rulesDir:R,type:"Project",processedPaths:
+- #4 @214291803 ludeExternal:u,conditionalRule:!1,storageV5:o}))}if(Li("localSettings")){let E=Sm(T,"CLAUDE.local.md");a.push(...await ib(E,"Local",l,u))}}if(zr(V.CLAUDE_CODE_ADDIT
+- #5 @214370215 yThreshold:500,pollInterval:200},ignorePermissionErrors:!0}),e.on("change",(T)=>m(T,"change")),e.on("add",(T)=>m(T,"add")),e.on("unlink",(T)=>m(T,"unlink"));let k=!
+- #6 @214370246 },ignorePermissionErrors:!0}),e.on("change",(T)=>m(T,"change")),e.on("add",(T)=>m(T,"add")),e.on("unlink",(T)=>m(T,"unlink"));let k=!1;e.on("error",(T)=>{if(!k)k=!0
+- #7 @214370277 .on("change",(T)=>m(T,"change")),e.on("add",(T)=>m(T,"add")),e.on("unlink",(T)=>m(T,"unlink"));let k=!1;e.on("error",(T)=>{if(!k)k=!0,J("file_watcher_start","fs_err
+- #8 @234767962 .lineNumber,t.columnNumber=e.columnNumber,t}function Do(e,t,i,r,n,s,a){function m(T,v,S){if(ct(i.attributeNames,T))return s.fatalError("Attribute "+T+" redefined");
+- #9 @249146582 ue:k,children:[w&&u&&(0,Om.jsx)(yb,{"data-type":"outside",ref:d,onFocus:T=>{if(Nm(T,u))m.current?.focus();else{let C=v?v.domReference:null;Xk(C)?.focus()}}}),w&&u&&
+- #10 @249146802 atePortal(a,u),w&&u&&(0,Om.jsx)(yb,{"data-type":"outside",ref:p,onFocus:T=>{if(Nm(T,u))g.current?.focus();else{let C=v?v.domReference:null;Yk(C)?.focus(),v?.closeOn
+
+## S(T, needle="S(T," hits=5
+- #0 @210382322 gins")&&K!==oe&&!du(K))S(K,!1,!0);for(let _ of Zv()){let T=ee(_s(),_);if(!du(T))S(T,!1,!0)}for(let _ of Xv(qv()))if(eN(_)&&!du(ee(_)))S(ee(_),!1,!0);let ne=Fv(),O=n
+- #1 @210386710  N=Vt(_);if(N!==_)b(ee(N,".mcp.json"),!1)}catch{}continue}if(Vt(_)!==_)continue;S(T,!1)}catch{continue}for(let _ of t.runtimeAllowWriteDirectories.values()){f.push(
+- #2 @215426260 chTool: keyword search for "${a}" found ${T.length} matches after MCP refresh`),S(T,"keyword",C),AQ(T,a,C.freshDeferred.length,[])}}S(T,"keyword",v);let E=v?.freshD
+- #3 @215426312 matches after MCP refresh`),S(T,"keyword",C),AQ(T,a,C.freshDeferred.length,[])}}S(T,"keyword",v);let E=v?.freshDeferred.length??u.length;if(T.length===0){let C=f();
+- #4 @243487686 0,!1)}return O&&(R+="?",R+=_(O,!1,!1)),$&&(R+="#",R+=D?$:v($,!1,!1)),R}o(T,"b"),S(T,"b");function w(I){try{return decodeURIComponent(I)}catch{return I.length>3?I.su
+
+## return T( needle="return T(" hits=82
+- #0 @206452720 )?n:void 0}function gn(n){let e=s(n);return e!==void 0&&A.has(e)}function Sn(n){return T(s(n))}function T(n){return n!==void 0&&(O.has(n)||n==="EISDIR"||A.has(n))}functi
+- #1 @206482565 join(t):"";var vn=()=>{};function nu(e){let{tool:t,tool_use_id:r,[$e]:n,...s}=e;return T(n)?{...s,...n}:s}var aa=o(()=>{Y();At()});var su=(e,t)=>Le.envelope(e,void 0,t);
+- #2 @206554875 ds a description (what the model reads)`));let n=r.inputSchema??{type:"object"};return T(n)?t("tool.register",{name:r.name,description:r.description,inputSchema:{type:"o
+- #3 @206921707 e)===o(n))return!0;return C(e)===C(n)}function C(e){let n=o(e),r=X(n),s=v(r)??r;return T(E(s,G(n)))}function se(e){let n=process.env.NODE_OPTIONS;if(!n)return!1;return n
+- #4 @207508405 `)},F=(e)=>e.length;var U=()=>{};var zt=l(()=>{A();U()});async function pe(e,t){return T(e,Wr,t)}var jr=()=>({contents:new ArrayBuffer(0)}),kr=(e)=>Gr.encode(e),Gr,qt=(e
+- #5 @207509628 r Xt=(e)=>globalThis.Buffer.from(e);var Yt=l(()=>{me()});async function ye(e,t){return T(e,Vr,t)}var zr=()=>({contents:"",textDecoder:new TextDecoder}),W=(e,{textDecoder
+- #6 @207800209 r.includes("\x00"))throw Error("Path contains null bytes");let n=e.trim();if(!n)return T(K(r));if(n==="~")return T(j());if(n.startsWith("~/"))return T(Qe(j(),n.slice(2))
+- #7 @207800235 rror("Path contains null bytes");let n=e.trim();if(!n)return T(K(r));if(n==="~")return T(j());if(n.startsWith("~/"))return T(Qe(j(),n.slice(2)));let o=n;if(_()==="window
+- #8 @207800271  n=e.trim();if(!n)return T(K(r));if(n==="~")return T(j());if(n.startsWith("~/"))return T(Qe(j(),n.slice(2)));let o=n;if(_()==="windows"&&n.match(/^\/[a-z]\//i))try{o=ce(
+- #9 @207800382 t o=n;if(_()==="windows"&&n.match(/^\/[a-z]\//i))try{o=ce(n)}catch{o=n}if(Je(o))return T(K(o));return T(et(r,o))}function Kt(e){let t=qe(R(),e);return t.startsWith("..")
+- #10 @207800397 "windows"&&n.match(/^\/[a-z]\//i))try{o=ce(n)}catch{o=n}if(Je(o))return T(K(o));return T(et(r,o))}function Kt(e){let t=qe(R(),e);return t.startsWith("..")?e:t}function Z
+- #11 @207821682 )}function A(){let e=process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;if(e)return e;return T()}function U(){let e=A();if(!e)return{};if(e.startsWith("sk-ant-sid")){let o={Co
+- #12 @208147503 function _(t,e){let n=F(p(await h(t,e),!1));if(!n||typeof n!=="object")return!1;return T(n,t),f(n)}async function xt(t){if(!M()||!m().wslInherits)return"";let e=[];try{e
+- #13 @208151790 Math.floor(n/24)}d${String(n%24).padStart(2,"0")}h`}function U(t){let i=t>=1000;return T("en-US",i?O:C).format(t).toLowerCase()}function F(t){return U(t).replace(".0",""
+- #14 @208198206 o}.`;if((e.kind===void 0||e.kind===o)&&t.startsWith(i)){let l=t.slice(i.length);return T(l)?{kind:"key",key:{namespace:"globalConfig",kind:o,stamp:l}}:void 0}}return}fun
+- #15 @208235990 );r=i===r?n:i}}function Lt(e){let t=v().rootByPath;if(t.peek(e)===k)t.delete(e);return T(e)}async function bs(e){let t=Lt(e);if(t===null)return null;try{return await On(
+- ... +66 more
+
+## children:T( needle="children:T(" hits=2
+- #0 @237168933 to file"}),f[30]=Se,f[31]=je;else Se=f[30],je=f[31];let Fe;if(f[32]===C)Fe=m(Z,{children:T(G,{children:[Se,je,m(w,{chord:"escape",action:"cancel",format:{keyCase:"lower"}}
+- #1 @237169093 e:"lower"}})]})}),f[32]=Fe;else Fe=f[32];let Be;if(f[33]!==j||f[34]!==X)Be=m(J,{children:T(q,{gap:1,onKeyDown:j,children:[L,X,Fe]})}),f[33]=j,f[34]=X,f[35]=Be;else Be=f[35
+
+## zHs.load= needle="zHs.load" hits=0
+
+## HHs.load= needle="HHs.load" hits=0
+
+## KGt.load= needle="KGt.load" hits=0
+
+## YGt.load= needle="YGt.load" hits=0
+
+## zHs,load needle="load:()=>import" hits=45
+- #0 @218628846 a256 <64-hex> --apply-file <path>)",isEnabled:()=>HGt()&&xt(),get isHidden(){return!xt()},load:()=>import("B:/~BUN/root/chunk-48kbs27a.js")},FHs={type:"local-jsx",name:"auto-mode-setup",descripti
+- #1 @218630729 "[name]",aliases:["reset","new"],supportsNonInteractive:!0,thinClientDispatch:"post-text",load:()=>import("B:/~BUN/root/chunk-jy864xwv.js")},C8e=qHs});var GHs,XGt,ZGt;var UKr=w(()=>{$e();jce();GH
+- #2 @218631023 !0,argumentHint:`[${[...Ide,"default"].join("|")}]`,requires:{ink:!0},terminalOriented:!0,load:()=>import("B:/~BUN/root/chunk-qmkg8874.js")},XGt={type:"local",name:"color",terminalOriented:!0,sup
+- #3 @218631303 ntHint:`[${[...Ide,"default"].join("|")}]`,isEnabled:()=>xt(),get isHidden(){return!xt()},load:()=>import("B:/~BUN/root/chunk-c65nwhg4.js")},ZGt=GHs});var VHs,JGt;var BKr=w(()=>{VHs={type:"local-
+- #4 @218656998 rgumentHint:"<optional custom summarization instructions>",thinClientDispatch:"post-text",load:()=>import("B:/~BUN/root/chunk-xgk11e35.js")},D8e=MWs});var eYr,$8e;var tYr=w(()=>{$e();eYr={type:"l
+- #5 @218657559 idden(){return!xt()&&!Hl()},isEnabled(){return xt()||Hl()},argumentHint:"[auto|<tokens>]",load:()=>import("B:/~BUN/root/chunk-37xbpaap.js"),userFacingName(){return"autocompact"}}});var OWs,c2t,nY
+- #6 @218658143 a setting by key",argumentHint:"key=value",isEnabled:()=>xt(),get isHidden(){return!xt()},load:()=>import("B:/~BUN/root/chunk-581dp9m2.js")},nYr=OWs});function oYr(){return we("tengu_maple_sundia
+- #7 @218658897 ription:"Show current context usage",get isHidden(){return!xt()},isEnabled(){return xt()},load:()=>import("B:/~BUN/root/chunk-na2j5mbq.js")}});var f2t;var dYr=w(()=>{DWs();Lx();cS();f2t={type:"lo
+- #8 @218659635 on",isEnabled:()=>!1,isHidden:!1,supportsNonInteractive:!0,thinClientDispatch:"post-text",load:()=>import("B:/~BUN/root/chunk-gfnygg7p.js"),userFacingName(){return"pause-memory"}},m2t=LWs});var N
+- #9 @218661363 from another AI coding agent",get isHidden(){return!YH()||!xt()},isEnabled:()=>YH()&&xt(),load:()=>import("B:/~BUN/root/chunk-knew427f.js")},bYr=BWs});var uDu="Do NOT read the foreign-agent confi
+- #10 @218686630  your keyboard shortcuts file",isEnabled:()=>vYr(),supportsNonInteractive:!1,type:"local",load:()=>import("B:/~BUN/root/chunk-2pcj750g.js")},TYr=GWs});var VWs,CYr,RYr,AYr;var PYr=w(()=>{y4e();VWs
+- #11 @218686915 gn projects",argumentHint:"consent | revoke",isEnabled:()=>Nz(),supportsNonInteractive:!0,load:()=>import("B:/~BUN/root/chunk-pk0qm1ts.js")},CYr={type:"local",name:"design-consent",description:"G
+- #12 @218687127  access to your Design projects",isEnabled:()=>Nz(),supportsNonInteractive:!0,isHidden:!0,load:()=>import("B:/~BUN/root/chunk-8nzhq7zd.js")},RYr={type:"local",name:"design-revoke",description:"Re
+- #13 @218687339  access to your Design projects",isEnabled:()=>Nz(),supportsNonInteractive:!0,isHidden:!0,load:()=>import("B:/~BUN/root/chunk-qynck4eq.js")},AYr=VWs});var xYr=()=>({type:"local-jsx",name:"design-
+- #14 @218688503 ption:"Install the Claude Slack app",availability:["claude-ai"],supportsNonInteractive:!1,load:()=>import("B:/~BUN/root/chunk-654z7kdv.js")},UYr=YWs});var jYr;var zYr=w(()=>{jYr={isEnabled:()=>!1
+- #15 @218688895 ver>|all]]",thinClientDispatch:"post-text",isEnabled:()=>xt(),get isHidden(){return!xt()},load:()=>import("B:/~BUN/root/chunk-9mkf92tt.js")},XWs={type:"local-jsx",name:"mcp",description:"Manage M
+- ... +29 more

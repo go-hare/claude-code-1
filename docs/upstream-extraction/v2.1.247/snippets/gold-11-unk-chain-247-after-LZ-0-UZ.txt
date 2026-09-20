@@ -1,0 +1,3 @@
+# 247-after-LZ n=0 function UZ start=210415029 end=210415394 len=365 sha=2f75c3507f88d044
+
+function UZ(){if(!gN())return null;let e=Te(),t=Re.getConfig();if(!t||t.filesystem.disabled||e.unconfinedWrapThisSession)return null;if(or()&&so())return null;let n=new Set([...e.wrapCwdsThisSession,jn(),_s()]);try{n.add(process.cwd())}catch{}let r=bN([...Kr(),...t.filesystem.allowWrite],n);if(r===null)return null;return ys([...e.wrapWriteRootsThisSession,...r])}

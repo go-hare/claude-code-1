@@ -1,0 +1,38 @@
+# unique 247 u001b needle="\\u001b"
+246=12 247=14 unique247=11
+
+## u0 @198028956 sha=5d812509db766756
+essage........B.AgentPromptDisplay.......m..AgentResponseDisplay.....@..extractLastToolInfo.....P:..renderGroupedAgentToolUse........,..renderToolUseRejectedMessage....Q.S.renderToolUseTag....OK_.makeResultCountRenderer.
+.....d.countLines.. .....9.AssistantNarrationSummaryMessage	.......isVisible...@...j...Cannot destructure property 'hunks' from null or undefined value	.......isWarning...H.......\u001b\[([0-9]+;)*4(;[0-9]+)*m|\u001b\[4(;[0-9]+)*m|\u001b\[([0-9]+;)*4m......L.R.u.n.n.i.n.g.& ....i...P.r.o.c.e.s.s.i.n.g.&  .B...I...Cannot destructure property 'verbose' from null or undefined value........I.Sent a message to.......h#.. Large MCP response (~..*....=4. tokens), this can fill up context quickly..C.....D.Cannot destructure property 'maxChars' from null or undefined value.....W|b.maxKeys.....$#L."message_link".......wZ.\u241b..........\u2426..B...y...Cannot destructure property 
+
+## u1 @198028987 sha=9b65ade26e5e3b37
+lay.......m..AgentResponseDisplay.....@..extractLastToolInfo.....P:..renderGroupedAgentToolUse........,..renderToolUseRejectedMessage....Q.S.renderToolUseTag....OK_.makeResultCountRenderer.
+.....d.countLines.. .....9.AssistantNarrationSummaryMessage	.......isVisible...@...j...Cannot destructure property 'hunks' from null or undefined value	.......isWarning...H.......\u001b\[([0-9]+;)*4(;[0-9]+)*m|\u001b\[4(;[0-9]+)*m|\u001b\[([0-9]+;)*4m......L.R.u.n.n.i.n.g.& ....i...P.r.o.c.e.s.s.i.n.g.&  .B...I...Cannot destructure property 'verbose' from null or undefined value........I.Sent a message to.......h#.. Large MCP response (~..*....=4. tokens), this can fill up context quickly..C.....D.Cannot destructure property 'maxChars' from null or undefined value.....W|b.maxKeys.....$#L."message_link".......wZ.\u241b..........\u2426..B...y...Cannot destructure property 'handler' from null or undefine
+
+## u2 @198029008 sha=2b552554e5f92e94
+ponseDisplay.....@..extractLastToolInfo.....P:..renderGroupedAgentToolUse........,..renderToolUseRejectedMessage....Q.S.renderToolUseTag....OK_.makeResultCountRenderer.
+.....d.countLines.. .....9.AssistantNarrationSummaryMessage	.......isVisible...@...j...Cannot destructure property 'hunks' from null or undefined value	.......isWarning...H.......\u001b\[([0-9]+;)*4(;[0-9]+)*m|\u001b\[4(;[0-9]+)*m|\u001b\[([0-9]+;)*4m......L.R.u.n.n.i.n.g.& ....i...P.r.o.c.e.s.s.i.n.g.&  .B...I...Cannot destructure property 'verbose' from null or undefined value........I.Sent a message to.......h#.. Large MCP response (~..*....=4. tokens), this can fill up context quickly..C.....D.Cannot destructure property 'maxChars' from null or undefined value.....W|b.maxKeys.....$#L."message_link".......wZ.\u241b..........\u2426..B...y...Cannot destructure property 'handler' from null or undefined value.......6..reso
+
+## u3 @198059093 sha=8e75b951b318d3ae
+rivedStateFromError.....n..componentDidCatch... ...{.0.https?:\/\/[^\s"'<>\\\x00-\x1f]+?.......^https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p\d+$.......#.^[a-zA-Z0-9_-]{1,128}$......\.9.\x1b\]8;[^;\x07\n\r\x18\x1a\x1b]*;([^\x07\n\r\x18\x1a\x1b]*)(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[\]P_X^][^\x07\n\r\x18\x1a\x1b]*(?:\x07|\x1b\\).......o.[\x00-\x08\x0b-\x1f\x7f-\x9f]...........\\u001b.,....5..\\u00(?:0[0-8b-f]|1[0-9a-f]|7f|[89][0-9a-f])........\s+source="([^"]*)"([^>]*)>\n?......3H..\buser="([^"]+)"....A.$.>[\s\S]*?</.........>\n*.....s1.Baked...........Brewed.......q..Churned.	.....9.Cogitated...........Cooked........i.Crunched....j.6.Saut.ed.......7.Captured......=.Access updated.......=..Clicked......r..Typed.......k...Pressed......3..Scrolled......a.Dragged.......f.Opened..
+...9...screenshot........#.zoom....j...request_access..
+.....P.left_click.......]..right_cli
+
+## u4 @199342850 sha=81d101e1f6257813
+Enter key binding.<.......You may need to restart Alacritty for changes to take effect(...E...Failed to install Alacritty keybinding: 3....vM.Failed to install Alacritty Shift+Enter key binding.........XDG_CONFIG_HOME......Ce.keymap.json.C.....g.To add the binding yourself, add this block to the keymap array in .\...".x.{ "context": "Terminal", "bindings": { "shift-enter": ["terminal::SendText", "\u001b\r"] } }%.......Installed Zed Shift+Enter key binding...8.......Couldn't read your Zed keymap, so it was left unchanged.O...d...Your Zed keymap isn't a readable list of keybindings, so it was left unchanged........e.Zed Shift+Enter key binding already configured..........Failed to back up Zed keymap: ..3.......Couldn't back up your Zed keymap; not modifying it......{-_.Failed to edit Zed keymap: .:.....$.Couldn't update your Zed keymap, so it was left unchanged.../.......Failed to install 
+
+## u5 @222955400 sha=b9f9b5da14b469b1
+e}${e}To install the Shift+Enter keybinding:${e}1. Open ${n} on your local machine (not connected to remote)${e}2. Open the Command Palette (Cmd/Ctrl+Shift+P) \u2192 "Preferences: Open Keyboard Shortcuts (JSON)"${e}3. Add this keybinding (the file must be a JSON array):${e}${e}${l.dim(`[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\\u001b\\r" },
+    "when": "terminalFocus"
+  }
+]`)}${e}`;let o=await W.of(t).pathFor(n),a=y(o,"keybindings.json");try{await se(o,{recursive:!0});let i="[]",m=[],d=!1;try{i=await _(a,{encoding:"utf-8"}),d=!0,m=B(i)??[]}catch(g){if(!C(g))throw g}if(d){let g=D(4).toString("hex"),S=`${a}.${g}.bak`;try{await R(a,S)}catch{return`${s("warning",r)(`Error backing up existing ${n} terminal keybindings. Bailing out.`)}${e}${l.dim(`See ${w(a)}`)}${e}${l.dim(`Backup path: ${w(S)}`)}${e}`}}let f={key:"shift+en
+
+## u6 @222961451 sha=822e28380ef5fc63
+e(t){return T(t)&&t.context==="Terminal"&&T(t.bindings)&&"shift-enter"in t.bindings}async function ut(t){let n=ie()==="linux"?c.XDG_CONFIG_HOME:void 0,r=n?y(n,"zed"):y(L(),".config","zed"),o=y(r,"keymap.json"),a=l.dim(`See ${w(o)}`),i=l.dim(`To add the binding yourself, add this block to the keymap array in ${w(o)}:${e}{ "context": "Terminal", "bindings": { "shift-enter": ["terminal::SendText", "\\u001b\\r"] } }`),m=`${s("success",t)("Installed Zed Shift+Enter key binding")}${e}${a}${e}`,d=`${s("warning",t)("Couldn't read your Zed keymap, so it was left unchanged.")}${e}${i}${e}`,f=`${s("warning",t)("Your Zed keymap isn't a readable list of keybindings, so it was left unchanged.")}${e}${i}${e}`;try{await se(r,{recursive:!0});let u=null;try{u=await _(o,{encoding:"utf-8"})}catch(p){if(!C(p))throw p;if(!ge(p))return{message:d,installed:!1}}if(u===null||q(u).trim()==="")return await Q(o,$e([
+
+## u7 @231286023 sha=daebad137c69209f
+(ff[5]!==u0||ff[6]!==Qc||ff[7]!==f0)ns=gf(gR(Qc,u0,f0)),ff[5]=u0,ff[6]=Qc,ff[7]=f0,ff[8]=ns;else ns=ff[8];g0=ns}let T0=g0,h0=UZ?"error":EZ?"warning":void 0,ns;if(ff[9]!==T0)ns=o(He,{children:T0}),ff[9]=T0,ff[10]=ns;else ns=ff[10];let kq;if(ff[11]!==h0||ff[12]!==ns)kq=o(p,{children:o(t,{color:h0,children:ns})}),ff[11]=h0,ff[12]=ns,ff[13]=kq;else kq=ff[13];return kq}function gf(e){return e.replace(/\u001b\[([0-9]+;)*4(;[0-9]+)*m|\u001b\[4(;[0-9]+)*m|\u001b\[([0-9]+;)*4m/g,"")}var Sq=1e4,wq,Nq=1e5;var as=k(()=>{re();Vo();Pq();C();RR();is();_q();y0();I();e0();fR();T();b();wq=/https?:\/\/[^\s"'<>\\\x00-\x1f]+/g});function ree(t0){let[k,v]=t0;return`${k}: ${v}`}function see(t0){let[k_0]=t0;return Bo(k_0)}function yR(e){let r=e.at(-1);if(!r?.data)return o(p,{height:1,children:o(t,{dimColor:!0,children:"Running\u2026"})});let{progress:n,total:i}=r.data,l=Rf(r.data.progressMessage);if(n===void 0)

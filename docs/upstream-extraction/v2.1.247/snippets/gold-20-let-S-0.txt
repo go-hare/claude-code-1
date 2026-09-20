@@ -1,0 +1,4 @@
+# let S 0
+# start=232402452 end=232402852
+
+let S=jye(h.path),k=Uye(S),_=S.startsWith("/")?`/${k}/**`:k.startsWith("\\")?`./${k}/**`:`${k}/**`;R(`[TeammateInit] Applying team permission: ${h.toolName} allowed in ${h.path} (rule: ${_})`),e((C)=>({...C,toolPermissionContext:Tk(C.toolPermissionContext,{type:"addRules",rules:[{toolName:h.toolName,ruleContent:_}],behavior:"allow",destination:"session"})}))}}let g=u.members.find((h)=>h.agentId===

@@ -1,0 +1,54 @@
+ge tokens in -20k: 9
+  @233122931 pend",messages:Z}))),[Pt]=L(()=>new ZW({session:ge,store:De,setAppState:Ke,transcript:to,turn:kt,draft:Ht,scope:gn,engin
+  @233124301 ((Z)=>{let je=Z.shouldShowAutoDefaultNudge(De.getState().toolPermissionContext);if(je)Rt(lk,{currentMode:je},{queueBehin
+  @233128169 e,transcript:to,turn:kt,messageQueue:fe,session:ge,taskRegistry:ho,storageV5:j,credentials:re,fleetNudgeStore:te,clock:b
+  @233129397 let[EM]=Yr();x(()=>{let Z=()=>n8e()?Nue(ge,(gt)=>Ke((So)=>So.narration?.now===gt?.now&&So.narration?.next===gt?.next?So:
+  @233129550 ;let je=fm(Z);return()=>{je(),pW(ge)}},[ge,Ke]),x(()=>{if(HF()===void 0)TP(De.getState().toolPermissionContext.mode==="a
+  @233133567 erSetter(_b),()=>Z.unregisterSetter()},[ge,_b]);let Pl=UIe(),Cb={model:()=>Bt,messages:()=>to.getSnapshot(),tools:gn.com
+  @233137043 u)=>!xu.match.startsWith("[Image")))pwe(ge,Z.trim());let Xa=Z.trim().startsWith("/");if(Ht.stashedPrompt!==void 0&&!Xa&&
+  @233138605 e,Gt,Bn,Bt,Qe,le,Ke,$e,k,Pl,qs,Kn,lT,xl,ge,xt,Yt,j,fe]),T$=B(()=>Fye({mode:Ht.mode,turn:kt,queue:fe,interruptRunningTurn
+  @233141271 idgeResult:D$}=j_e(Qn,to,qM,rr,Bt,()=>({session:ge,tools:gn.computeTools(),customSystemPrompt:h,appendSystemPrompt:S}),w
+STR "let ge=" count=20 hits=211007710,211007805,211007996,211008707,211008874,215956889,216126856,216268550,216268673,217657135,217723795,218466255,219047859,219091998,219094003,219094964,219097097,219101742,219105289,219107803
+  @211007710 De(s)?s:NaN,G=o.flexWrap!==0,j=ab(o,A?1:0,z),J=V.length;for(let ge=0;ge<J;ge++){let Ye=V[ge];Ye._sz[va]=CM(Ye,E,F,z,x,P,W)}let I;if(!G||!De(F)||J===0){for(let ge=0;ge<J;ge++)V[ge]._lineIn
+  @211007805 ._sz[va]=CM(Ye,E,F,z,x,P,W)}let I;if(!G||!De(F)||J===0){for(let ge=0;ge<J;ge++)V[ge]._lineIndex=0;I=[V]}else I=yM(V,F,A,E,P,W,D);let ee=I.length,te=AM(e,V),ve=new Int32Array(ee),Ce=new In
+  @211007996 rray(ee),Le=te?new Int32Array(ee):mM,Et=A?p:y,rt=0,mt=0;for(let ge=0;ge<ee;ge++){let Ye=I[ge];hM(Ye,o,E,C,A,F,z,x,D,P,W,Et,N,G,b);let qe=Eb;if(te)qe=vM(e,Ye,P,Le,ge,qe);let Ae=Sb;ve[ge]=A
+  @211008707 ?lt:Ue,Xe=G||x!==1,ae=S[Pe]+v[Pe],Ee=o.alignItems,We=le;for(let ge=0;ge<ee;ge++){let Ye=I[ge],qe=Ce[ge];if(Xe)bM(Ye,Ee,A,C,an,oe,qe,P,W,b);pM(Ye,o,E,A,qe,ue?Ve-We-qe:We,ve[ge],ln,ae,ie,D,
+  @211008874 e,ve[ge],ln,ae,ie,D,P,W,de,ue,te,te?Le[ge]:0),We+=qe+se}for(let ge=0,Ye=k.length;ge<Ye;ge++)EM(e,k[ge],Ue,lt,S,v)}function hM(e,o,i,l,s,u,f,m,h,p,y,b,S,v,E){let C=e.length,A=o.alignItems,
+  @215956889 cation until resume`);return}if(!Xe)ce("subagent_complete");let ge=is(_e.content,` `),Ie=()=>Y7({agentMessages:b,tools:s.options.tools,toolPermissionContext:Le(s),abortSignal:t.signal,sub
+  @216126856 He?He.value:void 0;if(We!==null&&typeof We==="object")_e=We}let ge=eDt(g(Se));if(ge&&_e!==void 0){let He=K.get(_e);if(He===void 0)He=eDt(g(_e)),K.set(_e,He);ge.schema=He}if(Z.abortControl
+  @216268550 xt:()=>{if(Q)return Promise.resolve({value:void 0,done:!0});let ge=ue.shift();if(ge!==void 0)return Promise.resolve({value:ge,done:!1});return new Promise((Ie)=>{oe=Ie})},return:()=>{let 
+STR "ge=uk()" count=0 hits=
+STR "ge=Tm()" count=0 hits=
+STR "ge=n()" count=3 hits=238043180,238044736,240128580
+  @238043180 kDepth(T),l("{",!0)){var b={};while(!l("}",!0)){if(!Je.test(ge=n()))throw g(ge,"name");if(ge===null)throw g(ge,"end of input");var N,A=ge;if(l(":",!0),o()==="{")N=Ce(_,v+"."+ge,T+1);else
+  @238044736 hrow g(A);a(A),U(_,"optional",b,T+1);break}})}var ge;while((ge=n())!==null)switch(ge){case"package":if(!u)throw g(ge);W();break;case"import":if(!u)throw g(ge);S();break;case"syntax":if(!
+  @240128580 e),ownKeys:t=>ei(t),set(t,e,i){const s=t._storage||(t._storage=n());return t[e]=s[e]=i,delete t._keys,!0}})}function $e(t,e,i,s){const a={_cacheable:!1,_proxy:t,_context:e,_subProxy:i,_s
+STR "ge=ft()" count=0 hits=
+STR "session:ge" count=5 hits=233122931,233128169,233141271,233141846,233145050
+  @233122931 NEAR-REPL il((Z)=>ga({type:"append",messages:Z}))),[Pt]=L(()=>new ZW({session:ge,store:De,setAppState:Ke,transcript:to,turn:kt,draft:Ht,scope:gn,engine:ir,dialogStore:Yt,taskRegistry:ho,messageQueue:f
+  @233128169 NEAR-REPL ore:De,setAppState:Ke,transcript:to,turn:kt,messageQueue:fe,session:ge,taskRegistry:ho,storageV5:j,credentials:re,fleetNudgeStore:te,clock:be,now:Date.now,getInputValue:()=>Ht.value})),ui=Ot
+  @233141271 NEAR-REPL mote"),[kt]),{sendBridgeResult:D$}=j_e(Qn,to,qM,rr,Bt,()=>({session:ge,tools:gn.computeTools(),customSystemPrompt:h,appendSystemPrompt:S}),wr,ir,qs.runBridgeImmediateCommand,z?W:void 0,no);c
+  @233141846 NEAR-REPL T}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammateColors:tt,messageQueue
+  @233145050 NEAR-REPL :nm,submitPrompt:Sa,screen:Eo,disabled:w,isRemoteSession:Ce,session:ge});x8e(lGe,GM);let Rc=j8e({composer:Ht});i$e({enabled:hr()&&!Ce,isLoading:ao,focusedInputDialog:_s??cb,onSubmitMessage:k
+STR "host:ge.host" count=0 hits=
+STR "let S=" count=20 hits=206267633,206309855,206331983,206370455,206438984,206503844,206548663,206560075,206582454,206972571,206972639,206972699,207045498,207050571,207052195,207337988,207678602,207680293,207680573,207681590
+  @206267633 torageV5:s,credentials:V}),await K(V),await j(s),await _(s)}let S=await r();if(S)o(`Error: ${S}`+D());let b=C();if(b)o(b);let{waitForPolicyLimitsToLoad:v}=await import("B:/~BUN/root/chun
+  @206309855 lid expires_in: ${JSON.stringify(re(u))}`,y.status,re(u),d);let S=be()+g,R=u.refresh_token||a;return await ns(e.credentialsPath,{...n,version:fs,type:"oauth_token",access_token:u.access_
+  @206331983 d)=>y.start-d.start),i.length>0){let y=0,d=i.reduce((u,g)=>{let S=" ".repeat(g.start-y),R="^".repeat(g.length);return y=g.start+g.length,u+S+R},"");throw new b(`Path parameters result in
+  @206370455 oop failed",{work_id:t.id,error:String(S)});d.abort()});try{let S=new Ze(c,{client:i,tools:y,...this.maxIdleMs!==void 0?{maxIdleMs:this.maxIdleMs}:{},...this.requestOptions!==void 0?{req
+  @206438984 E)throw new Kr;if(w&&!In(u))throw u;throw new Oe({cause:u})}let S=[...u.headers.entries()].filter(([k])=>k==="request-id").map(([k,E])=>", "+k+": "+JSON.stringify(E)).join(""),R=`[${h}${
+  @206503844 rtController,u=Pt(i,y),x=Pt(f,y),h=t(m,y.signal).then((b)=>{let S=r.carry===void 0?b:r.carry(b,m,n);return c.belowRejected=void 0,c.fromBelow.push(S),S},(b)=>{throw c.belowRejected={erro
+  @206548663 rn new Promise((h,b)=>{if(u?.aborted){x?.(),b(yo(u));return}let S=()=>{return};function _(){t?.delete(j),S(),x?.()}let R=setTimeout((I,U)=>{I(),U()},f,_,h);if(u)S=G.relayAbort(u,{abort:(
+  @206560075 :d.sealNoun({name:r,root:n})};Object.setPrototypeOf(b,null);let S=Bt.createInterfaceOps({engine:b,core:Qt({pluginName:r,host:i,timers:x,unloaded:()=>h,invoke:c,wrapMethod:a,signalFrom:m}
+STR "S=ge" count=1 hits=211906600
+  @211906600 l?.aborted)return;if(y instanceof Error)return u(y);try{let S=ge(t,y.result);if(!S.success)u(S.error);else c(S.data)}catch(S){u(S)}}),r?.signal?.addEventListener("abort",()=>{f(r?.sign
+STR "S=uk()" count=0 hits=
+STR "const ge=" count=3 hits=223575389,228374568,236320882
+  @223575389 .key),Vr[5]=H.key,Vr[6]=ge,Vr[7]=di;else di=Vr[7];return di}const ge=!H.color;let di;if(Vr[8]!==H.color||Vr[9]!==H.text||Vr[10]!==ge)di=a(r,{color:H.color,dimColor:ge,wrap:"truncate",childr
+  @228374568 dTab:Vt,width:ke}=c(b),jt=Q();if(Vt!==(Nt??Wt)){return null}const ge=jt?0:void 0;let rt;if(zt[0]!==ve||zt[1]!==ge||zt[2]!==ke)rt=n(a,{width:ke,flexShrink:ge,children:ve}),zt[0]=ve,zt[1]=ge,
+  @236320882 =fe)Eo={label:fe,value:"open"},R[2]=fe,R[3]=Eo;else Eo=R[3];const ge=Dn==="closed"?`Strict sandbox mode ${Tn}`:"Strict sandbox mode";let No;if(R[4]!==ge)No={label:ge,value:"closed"},R[4]=ge
+STR "ge=es()" count=0 hits=
+STR "ge=Li(" count=0 hits=
+S.host @232466399 ount:Gn?Qp:void 0,onAuthProven:()=>{he.current=0},reattachSessionId:Cr,reattachSequenceNum:en?void 0:j.current,tags:oe?[cK]:[Re?lK:uK],getToolPermissionContext:()=>De.getState().toolPermissionContext,host:S.host,workspaceDiffComputeBudget:Pt,getTools:()=>s().tools,onInboundMessag
+dt({host: count=1
+  @228968348  b}function vn(e,t,n){let s=[],r=qt(),u=dt({host:ft().host,id:ut(e),project:{originalCwd:t,projectRoot:t,cwd:t}}),m=zt(r.toolPermissionContext,vt()),l={...r,too

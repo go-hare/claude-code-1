@@ -1,0 +1,9 @@
+# @88870211
+
+       number of matches           %[n]v       nth capture as CSV
+ %M          number of matching lines    %[n]x       nth capture as XML
+ %n          line number of a match      %[n]y       nth capture as hex
+ %N %[...]N  ... + line number, if -n    %[name]#    named group capture
+ %o          matching pattern, also %0   %[name]b    named capture byte offset
+ %O          matching line               %[name]d    named capture byte size
+ %p        

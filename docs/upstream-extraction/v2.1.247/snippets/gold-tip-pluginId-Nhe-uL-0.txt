@@ -1,0 +1,2 @@
+# uL=a=Nhe pos=222247452 end=222247508 len=56
+function a(n){return s().tipLifetimeShownCounts?.[n]??0}

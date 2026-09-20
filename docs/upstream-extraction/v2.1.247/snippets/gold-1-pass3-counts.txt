@@ -1,0 +1,12 @@
+# gold-1-pass3-counts
+
+exe 247=253204128 246=250948768
+same 246=18 247=18 "SendFeedback"
+same 246=26 247=26 "feedbackDrafts"
+same 246=3 247=3 "CLAUDE_CODE_SEND_FEEDBACK"
+same 246=4 247=4 "fitFeedbackPayloadToBudget"
+same 246=2 247=2 "parseDraftTranscriptMessages"
+same 246=4 247=4 "Drafted by Claude via the SendFeedback tool"
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending."
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review."
+counts-all-same=true

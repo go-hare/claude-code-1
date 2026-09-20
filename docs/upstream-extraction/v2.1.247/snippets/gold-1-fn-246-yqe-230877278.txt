@@ -1,0 +1,3 @@
+# ver=246 name=yqe async=false start=230877278 end=230877349 len=71 sha=2ddfc5210abead65 needle="feedbackDrafts"
+
+function yqe(){return($t().feedbackDraftsTurnOffPromptDeclines??0)<Cxt}

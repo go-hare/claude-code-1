@@ -1,0 +1,2 @@
+# 246 leftover @212280557 end=212280596 len=39
+function TP(){return _sn.of(hn().host)}

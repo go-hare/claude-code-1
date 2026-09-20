@@ -1,0 +1,2 @@
+# pos=223006218
+u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588",mn=0.7,pn=1.8,gn=0.15;var xn=N(()=>{cn();dn();ln();fn();Ze();hn()});import{basename as vn}from"path";function Bt(){return Xt(Kt())}function Fs({onPaste:e,handleKeyDown:t,onImagePaste:r,onAudioPaste:n}){let i=jt(),[a,u]=ie(!1),l=he(!0),d=he(!1),p=he(!1),[y,I]=ie(0),A=Re(()=>_e()==="macos",[]),E=Re(()=>_e()==="wsl",[]);te(()=>()=>{l.current=!1},[]);let H=Gt(()=>{t(new Ie({kind:"key",name:"return",fn:!1,ctrl:!1,meta:!1,shift:!1,option:!1,super:!1,sequence:"\r",raw:"\r",isPasted:!1,code:void 0,col:vo

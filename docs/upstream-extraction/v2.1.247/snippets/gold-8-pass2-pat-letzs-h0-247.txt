@@ -1,0 +1,3 @@
+# off=223733940 pat="let zs="
+
+nt={label:so,hasName:!0,fired:!0};let Xm=Math.max(Zr(Qm),Zr(so));if(Xm===0){return}td({old:Qm,n:1});let zs=1;let sv=Math.max(16,Math.floor(360/Xm));let od=null;let av=()=>{if(zs=zs+1,zs,zs>=Xm)td(null),od=null;else td({old:Qm,n:zs}),od=Ys.setTimeout(av,sv)};return od=Ys.setTimeout(av,sv),()=>{od?.(),td(null)}},iv=[Ys,so,vn],zm[3]=Ys,zm[4]=so,zm[5]=

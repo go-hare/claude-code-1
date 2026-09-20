@@ -1,0 +1,5 @@
+# 247 function ke start=223602915 end=223603176 len=261 sha=cea490bb17caeb02
+
+function ke(t,e,n){let o=n.text.split(`
+`),{line:s}=n.cursor.getPosition(),a=Math.min(e,o.length-s);Qe(o,s,s+a-1,t);let u=o.join(`
+`),x=((o[s]??"").match(/^\s*/)?.[0]??"").length;n.setText(u),n.setOffset(re(o,s)+x),n.recordChange({type:"indent",dir:t,count:e})}

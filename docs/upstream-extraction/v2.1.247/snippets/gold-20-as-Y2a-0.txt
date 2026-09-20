@@ -1,0 +1,11 @@
+# 
+# start=210504272 end=210505272
+
+=await se();if(a.startsWith("-"))return"HEAD";return await Ye(a,i)??"HEAD"}let s=n.startsWith("-")?"HEAD":n,{stdout:r,code:o}=await i(["--no-optional-locks","merge-base","HEAD",s]);if(o===0&&r.trim())return r.trim();return"HEAD"}async function Nt(e,t){try{if(!await Te(t,ze))return null;let i=(await Pt(t,"utf-8")).split(`
+`);if(i.length>0&&i.at(-1)==="")i.pop();let s=i.length,r=i.map((a)=>`+${a}`).join(`
+`),o=`@@ -0,0 +1,${s} @@
+${r}`;return{filename:e,status:"added",additions:s,deletions:0,changes:s,patch:o}}catch{return null}}var P=5000,ae=50,Rt=500,ze=1e6,Ft=400,B=500,Bt,te=3000;var Gt=E(()=>{wt();gt();ke();kt();pt();de();bt();St();xt();vt();Et();Bt=new _e(()=>new Xe)});
+export{Zt as N2a,st as O2a,ke as P2a,dt as Q2a,I as R2a,ht as S2a,at as T2a,mt as U2a,P as V2a,ze as W2a,Ft as X2a,hi as Y2a,mi as Z2a,pi as _2a,gi as $2a,qe as a3a,Ve as b3a,wi as c3a,Gt as d3a};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code,

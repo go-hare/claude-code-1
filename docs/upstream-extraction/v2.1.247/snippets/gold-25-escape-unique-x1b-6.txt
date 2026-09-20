@@ -1,0 +1,6 @@
+# offset=198210196 tag=x1b
+
+....}...checked.........strong..........codespan....+...^file:..
+.......localhost/.......#{.[#?]........^\/[A-Za-z]:(?=[\\/]|$).......6. (\d{1,9}[.)])(?!\w)....q...doctag........$.grey.....z..meta-keyword....e..meta-string.........meta.keyword........meta.string.....c...emphasis.....@..addition........deletion
+...0H..setOptions..........getDefaults.....M.8.(?:^|[^........])([.....<=.]*)$3.....	.\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\).;....v..(^|[^\w./-])([A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w.-]*)#(\d+)\b.
+....OV.gitlab.com.........bitbucket.org...........codeberg.org	...i.I.gitea.com...	....H..git.sr.ht.......Oo.dev.azure.com...........^[a-z][a-z0-9+.-]*:.	.......tokenizer...........emStrong....J...lheading.....S..autolink......../issues/........[.!?\u2026]["')\]]*$:....$..^~~(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))~~(?=[^~]|$)......Q...inlineTokens........file:///B:/%7EBU

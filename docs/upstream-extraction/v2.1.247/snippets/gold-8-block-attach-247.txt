@@ -1,0 +1,4 @@
+# offset=219492201 ver=247 hit=2/2 needle="hook blocking error from command: \""
+
+hook_blocking_error:(e)=>[pt({content:Il(`${e.hookName} hook blocking error from command: "${e.blockingError.command}": ${e.blockingError.blockingError}`),isMeta:!0})],hook_additional_context:(e)=>{if(e.content.length===0)return[];return[pt({content:Il(`${e.hookName} hook additional context: ${e.content.join(`
+`)}`),isMeta:!0})]}

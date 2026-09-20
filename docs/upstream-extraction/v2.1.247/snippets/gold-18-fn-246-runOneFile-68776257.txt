@@ -1,0 +1,124 @@
+# ver=246 name=runOneFile async=true start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56 needle="with exit code"
+
+async function runOneFile(file, opts, reporter, counts) {
+  let absolute = (@getInternalField(@internalModuleRegistry, 163) || @createInternalModuleById(163)).resolve(opts.cwd, file), args = [process.execPath, ...opts.execArgv, "test", absolute, ...opts.argv], fileStarted = Date.now(), fileCounts = makeRunCounts(), fileNode = {
+    nesting: 0,
+    name: file,
+    type: "test",
+    testId: 1,
+    parentId: 0,
+    tags: [],
+    line: 1,
+    column: 1,
+    file: absolute
+  };
+  reporter.enqueue({ __proto__: null, ...fileNode }), reporter.dequeue({ __proto__: null, ...fileNode });
+  let proc = Bun.spawn({
+    cmd: args,
+    cwd: opts.cwd,
+    env: { ...opts.env ?? process.env, BUN_TEST_DRAIN_EVENT_LOOP: "1", ["NODE_TEST_CONTEXT"]: "child-v8" },
+    stdout: "pipe",
+    stderr: "pipe",
+    signal: opts.signal
+  }), drainStderr;
+  try {
+    let stderrText = "";
+    drainStderr = (async () => {
+      let decoder2 = /* @__PURE__ */ new TextDecoder, carry2 = "";
+      for await (let chunk of proc.stderr) {
+        let text = typeof chunk === "string" ? chunk : decoder2.decode(chunk, { stream: !0 });
+        stderrText += text, carry2 += text;
+        let nl;
+        while ((nl = carry2.indexOf(`
+`)) !== -1) {
+          let line = carry2.slice(0, nl);
+          if (carry2 = carry2.slice(nl + 1), line.length > 0)
+            reporter.stderr({ __proto__: null, file: absolute, message: line + `
+` });
+        }
+      }
+      if (carry2.length > 0)
+        reporter.stderr({ __proto__: null, file: absolute, message: carry2 + `
+` });
+    })(), drainStderr.catch(() => {});
+    let handleStdoutLine = (line) => {
+      if (line.length === 0)
+        return;
+      let marker = line.indexOf("\x00bun:test:run\x00");
+      if (marker === -1) {
+        reporter.stdout({ __proto__: null, file: absolute, message: line + `
+` });
+        return;
+      }
+      if (marker > 0) {
+        let before = line.slice(0, marker).trimEnd();
+        if (before.length > 0)
+          reporter.stdout({ __proto__: null, file: absolute, message: before + `
+` });
+      }
+      let event;
+      try {
+        event = JSON.parse(line.slice(marker + 14));
+      } catch {
+        return;
+      }
+      if (event == null || typeof event.data !== "object" || event.data === null)
+        return;
+      republishChildEvent(event, absolute, reporter, fileCounts);
+    }, decoder = /* @__PURE__ */ new TextDecoder, carry = "";
+    for await (let chunk of proc.stdout) {
+      carry += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !0 });
+      let nl;
+      while ((nl = carry.indexOf(`
+`)) !== -1) {
+        let line = carry.slice(0, nl);
+        carry = carry.slice(nl + 1), handleStdoutLine(line);
+      }
+    }
+    if (carry.length > 0)
+      handleStdoutLine(carry);
+    await drainStderr;
+    let exitCode = await proc.exited, fileFailed = exitCode !== 0 && fileCounts.failed === 0, fileDuration = Date.now() - fileStarted, reportedChildren = fileCounts.tests + fileCounts.suites, error;
+    fileCounts.topLevel++;
+    let reportFileNode = reportedChildren === 0 || fileFailed;
+    if (reportFileNode)
+      if (fileCounts.tests++, fileFailed)
+        fileCounts.failed++;
+      else
+        fileCounts.passed++;
+    if (fileFailed)
+      error = makeTestFailure(stderrText.trim() || `Test file failed with exit code ${exitCode}`, "testCodeFailure");
+    else
+      reporter.summary({
+        __proto__: null,
+        success: fileCounts.failed === 0,
+        counts: { __proto__: null, ...fileCounts },
+        duration_ms: fileDuration,
+        file: absolute
+      });
+    if (reportFileNode) {
+      reporter.complete({
+        __proto__: null,
+        ...fileNode,
+        type: @undefined,
+        testNumber: 1,
+        details: {
+          __proto__: null,
+          duration_ms: fileDuration,
+          type: "test",
+          passed: !fileFailed,
+          error
+        }
+      });
+      let details = { __proto__: null, duration_ms: fileDuration, type: "test", error };
+      if (fileFailed)
+        reporter.fail({ __proto__: null, ...fileNode, type: @undefined, testNumber: 1, details });
+      else
+        reporter.pass({ __proto__: null, ...fileNode, type: @undefined, testNumber: 1, details });
+    }
+    addRunCounts(counts, fileCounts);
+  } finally {
+    if (proc.kill(), drainStderr !== @undefined)
+      await drainStderr.catch(() => {});
+  }
+}

@@ -1,0 +1,3 @@
+# off=216101207
+
+:c,taskRegistry:u,toolUseId:d,transcriptDir:p,scriptPath:f,workflowRunId:m,args:g,workflowProgress:h}){let{claimed:y,task:b}=dT(e,u),S=_Et({ownerAgentId:b?.ownerAgentId,keepaliveReason:`workflow:${e}`,delivering:y,taskRegistry:u});if(!y)return;let k=Pc(Ur(t??"Dynamic workflow")),T=Pc(n==="completed"?`Dynamic workflow "${k}" completed`:n==="failed"?`Dynamic workflow "${k}" failed: ${s?Pc(Ur(s)):"Unknown error"}`:`Dynamic workflow "${k}" was stoppe

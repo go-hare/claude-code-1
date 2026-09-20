@@ -1,0 +1,6 @@
+# needle="y3n={"
+# 247=215408309
+# 246=
+
+===== 247 offset=215408309 =====
+";var tAt=w(()=>{hN();$e();Pk();Ws();Tk();Dt();Woe();cfe();uo();i6();nn();Pt();Zt();ef();FI();YRt();y3n={"claude-sonnet-5":{surfaces:{remote_cowork:{default:500000},"local-agent":{default:500000}},default:1e6}};M8o=new Set(["claude-sonnet-4-6","claude-opus-4-6","claude-opus-4-8","claude-opus-5"])});function U8o(e){return e?.compacted===!0&&e.turnCounter<3?(e?.consecutiveRapidRefills??0)+1:0}function DWe(e){let t=U8o(e);return{action:t>=3?"trip":"proceed",consecutiveRapidRefills:t}}function nAt(e,t){return{compacted:!0,turnId:e,turnCounter:0,consecutiveFailures:0,consecutiveRapidRefills:t}}var A3n=3,rAt="Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.";var P3n=()=>{};function oAt(e)

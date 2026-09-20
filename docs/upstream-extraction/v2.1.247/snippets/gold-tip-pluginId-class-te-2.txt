@@ -1,0 +1,2 @@
+# class te{ @226773147 end=226773200 len=53
+class te{trace(){}debug(){}info(){}warn(){}error(){}}

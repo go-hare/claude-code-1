@@ -1,0 +1,3 @@
+# off=209992144 hit=12
+
+wRead/allowWrite is not supported "+"on Windows \u2014 `srt-win exec` only exposes per-exec "+"denies. Set them at the session level (initialize()).");let S=[...p?.denyRead??[],...Pc(n?.credentials)],A=p?.denyWrite??[];if(S.length>0||A.length>0){let w=new Set(mi?.denyRead??[]),C=new Set(mi?.denyWrite??[]),D=kd;b=D(S,{mode:"deny"}).filter((L)=>!w.has(L)),y=D(A,{mode:"deny"}).filter((L)=>!w.has(L)&&

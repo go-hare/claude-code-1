@@ -1,0 +1,9 @@
+# offset=215949937 needle="function tss("
+
+`
+`);if(s){let i=PE(s).sanitized;return n?`\u26A0 ${n.content}
+
+${i}`:i}}return}function tss(e,t){let n=is(e.message.content,`
+`),r=e.apiErrorStatus!==void 0||!!e.requestId,o=[e.error&&`error type ${e.error}`,e.apiErrorStatus!==void 0&&`HTTP ${e.apiErrorStatus}`,e.requestId&&`request id ${e.requestId}`,r&&`model sent to the API: ${t}`].filter((s)=>typeof s==="string");return o.length>0?`${n} (${o.join(", ")})`:n}function rss(e,t){if(!(e instanceof l2e))return null;if(!e.errorKind||!nss.has(e.errorKind))return null;let n=t.filter((r)=>r.type!=="assistant"||!r.isApiErrorMessage);if(K7(n)===void 0)return null;return{history:n,cutoffNote:`${a2e(PE(e.message,{prependMarker:!1}).sanitized)}
+
+`+"Everything below is PARTIAL output recovered from the agent before it was cut off. The agent did NOT finish its task \u2014 treat these results as incomplete."}}function kor(e,t){let n=rss(e,t);if(n)return te("subagent_complete","api_error_partial"),n;let r=e instanceof yn;if(e ins

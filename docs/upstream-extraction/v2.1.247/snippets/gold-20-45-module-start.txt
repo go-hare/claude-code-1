@@ -1,0 +1,8 @@
+# pos=235250494
+
+for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Df as nt,Gf as it,Hf as x,If as rt}from"B:/~BUN/root/_46.js";import{st as et,tt as B}from"B:/~BUN/root/_164.js";import{$2a as A,T2a as J,U2a as ht,V2a as Y,W2a as V,X2a as Z,Y2a as q,Z2a as Q,a3a as tt,d3a as kt}from"B:/~BUN/root/_464.js";import{onb as R,snb as mt}from"B:/~BUN/root/_533.js";import{FRb as gt,nRb as M}from"B:/~BUN/root/_585.js";import{D3c as dt,Q3c as w,z3c as X,z4c as pt}from"B:/~BUN/root/_752.js";import{y5c as k,z5c as lt}from"B:/~BUN/root/_760.js";import{tyd as K,xyd as ft}from"B:/~BUN/root/_843.js";ht();ft();lt();pt();kt();dt();gt();mt();import{open as wt,realpath as I}from"fs/promises";import{basename as G,dirname as v,isAbsolute as Et,join as st}from"path";async function _t(t){let n=v(t),i=[G(t)];for(let r=0;r<64;r++){try{let s=await I(n);ret

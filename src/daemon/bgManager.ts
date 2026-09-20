@@ -81,6 +81,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logEvent } from '../services/analytics/index.js'
 import { errorMessage } from '../utils/errors.js'
+import { EHOSTDEAD, hostDeadAttachError } from './hostDeath.js'
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -1428,7 +1429,7 @@ async function handleControlRequest(
     }
 
     case 'attach':
-      return handleAttachOp(
+      return await handleAttachOp(
         handles,
         dispatch,
         req,
@@ -1514,7 +1515,7 @@ function resolveAttachTranscriptPath(worker: BgWorker): string | undefined {
   return undefined
 }
 
-function handleAttachOp(
+async function handleAttachOp(
   handles: Map<string, BgWorker>,
   dispatch: (
     req: DispatchRequest,
@@ -1526,7 +1527,7 @@ function handleAttachOp(
   remainder: Buffer,
   addLease: (socket: Socket, info: LeaseInfo | null) => void,
   log: (msg: string) => void,
-): ControlResponse | null {
+): Promise<ControlResponse | null> {
   const short = req.short as string
   const worker = handles.get(short)
 
@@ -1554,6 +1555,14 @@ function handleAttachOp(
       ok: false,
       error: 'job is retiring; retry attach',
       code: 'ERESPAWNING',
+    }
+  }
+  // densable 2.1.247: failIfHostExited("attach") → EHOSTDEAD (fn/pn).
+  if (await worker.failIfHostExited('attach')) {
+    return {
+      ok: false,
+      error: hostDeadAttachError(worker.dispatch.launch.mode),
+      code: EHOSTDEAD,
     }
   }
 

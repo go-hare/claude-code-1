@@ -1,0 +1,2 @@
+# needle=async function Rs( pos=224042569
+async function Rs(e,t){let{getBridgeSession:r}=await import("B:/~BUN/root/chunk-wg5nfp0j.js");return(await r(e,{baseUrl:t}))?.title||void 0}

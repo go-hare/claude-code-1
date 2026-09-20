@@ -117,6 +117,9 @@ import {
 } from '@claude-code/builtin-tools/tools/ProposeGoalTool/proposeGoalGate.js';
 import { isArtifactToolRegistered } from '../../utils/artifactUrl.js';
 import { isWorkflowsAvailable, resolveWorkflowsAvailability } from '../../utils/workflowDisableGate.js';
+import { useSessionServices } from '../../context/sessionServices.js';
+import { type FeedbackDraftsSetting } from '../../utils/feedbackDrafts/constants.js';
+import { isSendFeedbackSessionEnabled, setFeedbackDraftsSetting } from '../../utils/feedbackDrafts/gates.js';
 import { isLeftArrowFleetEnabled } from '../../utils/leftArrowVia.js';
 import { isRefusalFallbackEnabled } from '../../utils/refusalFallback.js';
 
@@ -221,7 +224,14 @@ export function Config({
   const initialOutputStyle = React.useRef(currentOutputStyle);
   const [currentLanguage, setCurrentLanguage] = useState<string | undefined>(settingsData?.language);
   const initialLanguage = React.useRef(currentLanguage);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // densable 247 Ni: toggle reads he[tt()], not closed-over L / be[c??L].
+  const [selectedIndex, setSelectedIndexState] = useState(0);
+  const selectedIndexLive = useRef(0);
+  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
+    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
+    selectedIndexLive.current = next;
+    setSelectedIndexState(next);
+  };
   const [scrollOffset, setScrollOffset] = useState(0);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const isTerminalFocused = useTerminalFocus();
@@ -350,6 +360,7 @@ export function Config({
     onIsSearchModeChange?.(ownsEsc);
   }, [ownsEsc, onIsSearchModeChange]);
 
+  const { storageV5 } = useSessionServices();
   const isConnectedToIde = hasAccessToIDEExtensionDiffFeature(context.options.mcpClients);
 
   const isFileCheckpointingAvailable = !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING);
@@ -509,6 +520,30 @@ export function Config({
         });
       },
     },
+    // densable leftover Co()?[{id:"feedbackDrafts"...}] after Show tips.
+    // Co() leftover-wired as Ufs — row stays when the setting is off.
+    ...(isSendFeedbackSessionEnabled()
+      ? [
+          {
+            id: 'feedbackDrafts',
+            label: 'Claude-drafted feedback',
+            value: settingsData?.feedbackDrafts ?? 'notify',
+            options: ['notify', 'quiet', 'off'],
+            type: 'enum' as const,
+            onChange(value: string) {
+              const feedbackDrafts = value as FeedbackDraftsSetting;
+              setFeedbackDraftsSetting(feedbackDrafts, {
+                storageV5,
+                via: 'config',
+              });
+              setSettingsData(prev => ({
+                ...prev,
+                feedbackDrafts,
+              }));
+            },
+          } satisfies Setting,
+        ]
+      : []),
     {
       id: 'cacheWarningEnabled',
       label: 'Cache warnings',
@@ -2079,7 +2114,7 @@ export function Config({
   // Settings navigation and toggle actions via configurable keybindings.
   // Only active when not in search mode and no submenu is open.
   const toggleSetting = useCallback(() => {
-    const setting = filteredSettingsItems[selectedIndex];
+    const setting = filteredSettingsItems[selectedIndexLive.current];
     if (!setting || !setting.onChange) {
       return;
     }
@@ -2188,14 +2223,13 @@ export function Config({
     autoUpdaterDisabledReason,
     filteredSettingsItems,
     isMapleJrExternalIncludes,
-    selectedIndex,
     settingsData?.autoUpdatesChannel,
     setTabsHidden,
   ]);
 
   const moveSelection = (delta: -1 | 1): void => {
     setShowThinkingWarning(false);
-    const newIndex = Math.max(0, Math.min(filteredSettingsItems.length - 1, selectedIndex + delta));
+    const newIndex = Math.max(0, Math.min(filteredSettingsItems.length - 1, selectedIndexLive.current + delta));
     setSelectedIndex(newIndex);
     adjustScrollOffset(newIndex);
   };
@@ -2203,7 +2237,7 @@ export function Config({
   useKeybindings(
     {
       'select:previous': () => {
-        if (selectedIndex === 0) {
+        if (selectedIndexLive.current === 0) {
           // ↑ at top enters search mode so users can type-to-filter after
           // reaching the list boundary. Wheel-up (scroll:lineUp) clamps
           // instead — overshoot shouldn't move focus away from the list.

@@ -1,0 +1,29 @@
+# gold-1-pass2b getAllBaseTools / feature / CORE_TOOLS
+
+list-mid needle 246=@216470147 247=@217921937
+getAllBaseTools-ish rawLen 246=713 247=714 rawEq=false
+normEq=true normLen=604/604 sha246=253745c642660929 sha247=253745c642660929
+
+## slot
+247 {"ternaryBefore":false,"spreadConditional":false,"featureNear":false}
+246 {"ternaryBefore":false,"spreadConditional":false,"featureNear":false}
+
+## feature / alwaysLoad name probes (new angle, not pass1 needles)
+same 246=3 247=3 "SEND_FEEDBACK"
+same 246=0 247=0 "FEATURE_SEND_FEEDBACK"
+same 246=2 247=2 "alwaysLoad:!0"
+same 246=0 247=0 "alwaysLoad:true"
+same 246=0 247=0 "alwaysLoad:!1"
+same 246=0 247=0 "alwaysLoad:false"
+same 246=0 247=0 "feedbackDrafts:\"notify\""
+same 246=0 247=0 "feedbackDrafts:'notify'"
+same 246=0 247=0 "feedbackDrafts:\"off\""
+same 246=5 247=5 "juniper_relay"
+same 246=25 247=25 "allow_product_feedback"
+
+## CORE_TOOLS-ish quoted table
+tbl rawEq=false normEq=false
+tbl sha246=f684c7bfb969f191 sha247=b2b314468105e133
+
+## leftover pins (constraint only; not a SendFeedback body)
+empty qb / no auto qF / blu !== Slu — not used as SendFeedback evidence

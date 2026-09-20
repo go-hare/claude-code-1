@@ -1,0 +1,3 @@
+# 247 function Ge start=233830975 end=233831006 len=31 sha=9593908f9aa7293b dist=27622 hits=53
+
+function Ge(lo){return lo.file}

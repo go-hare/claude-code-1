@@ -1,0 +1,3 @@
+# 247 function ke start=227288566 end=227288880 len=314 sha=4fca01fcd673d9a4
+
+function ke(e,n,t=null){let o=e.findIndex((a)=>n.includes(a.worktreeCommit)),s=t===null?-1:e.findIndex((a)=>a.worktreeCommit===t),i=o===-1?P:Math.max(o,s,1)+1;return e.slice(0,Math.min(i,P)).map((a,u)=>o===-1||u<o||a.downApplied.length===0&&a.fastForwardedTo.length===0?a:{...a,downApplied:[],fastForwardedTo:[]})}

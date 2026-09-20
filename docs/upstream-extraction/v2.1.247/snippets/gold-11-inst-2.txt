@@ -1,0 +1,3 @@
+# offset=210412826 hit 2
+
+),bwrapPath:Hv(),socatPath:jv(),...ge()==="windows"&&{windows:{sandboxUser:_A,srtWin:{path:process.execPath}}}};return Te().builtConfigEnforcesAllowlist.set(Ya,Nu),Ya}function ro(e){Re.updateConfig(e),yN(e);let t=Te(),n=t.builtConfigEnforcesAllowlist.get(e)??!1;if(t.initializationPromise===void 0)t.installedFilterRequestEnforcesAllowlist=n;else t.installsSinceInitializeStartedAllEnforce&&=n}class mN{tenguSandboxGbConfig=Gs(SZ);sessionAllowedHosts=new Set;initializationPromise=void 0;initializedWithTlsTerminate=!1;installedFilterRequestEnforcesAllowlist=!1;installsSinceInitializeStartedAllEnfor

@@ -108,6 +108,9 @@ export type AssistantMessage = Message & {
    * decomposed into `${id}_n` v1 synthetics. Persist as `batch_tool_uses`.
    */
   batchToolUses?: BatchToolUseRef[]
+  /** densable 2.1.247 bBe / tss — HTTP status on API-error assistants. */
+  apiErrorStatus?: number
+  requestId?: string
 }
 export type AttachmentMessage<T = { type: string; [key: string]: unknown }> =
   Message & { type: 'attachment'; attachment: T }

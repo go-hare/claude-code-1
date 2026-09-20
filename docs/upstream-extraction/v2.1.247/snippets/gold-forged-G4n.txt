@@ -1,0 +1,1 @@
+function Ri(e){let n=yn(),t=Pn().includes("flagSettings")?Pe():void 0;if(t!==void 0&&n!==void 0&&hn(t,n))return!0;return y([...Se.map((i)=>kn(i)),bn(),Te(e.workTree,".claude","settings.json"),Te(e.workTree,".claude","settings.local.json"),...n===void 0?[t]:[]].filter((i)=>i!==void 0)).some((i)=>{try{if(!Nt(i).isFile())return!0}catch(o){return D(o)!=="ENOENT"}return hn(i)})}

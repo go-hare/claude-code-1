@@ -1,0 +1,7 @@
+# Xr is not a unique function name (20 hits). Do not invent a parser.
+# TCt import: vGc as Xr from _705.js @212842061
+# _583 import: vGc as ee from _705.js (same export; Ft uses ee(t)?.env)
+# _705 export: h as vGc @208321399
+# _705 API: getSettingsForSource:()=>h @208304369
+# wrapper @208306694 — local host is getSettingsForSource
+function h(e){return Lr(e,p())}

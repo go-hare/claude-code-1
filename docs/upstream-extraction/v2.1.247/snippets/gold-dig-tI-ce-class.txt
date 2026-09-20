@@ -1,0 +1,3 @@
+# offset=211438284
+
+Directory:l};return await Ys(l),await a(l,n),{contentSha256:await Gl(n),producerDirectory:l}})}var Ul=60,Ls=65536,$l=65536,Ds=500,Fs=268435456,Ms=20000,jl,Wl='This plugin source uses mode "link", which is not supported on Windows yet; the marketplace can use mode "copy" instead.',ce,Xl,Ql=16384;var Zs=g(()=>{ai();Wt();Jr();zt();Tl();_e();Ps();Hs();Rs();js();bs();Ll();os();Cs();Bs();jl=new Set(ti);ce=class ce extends F{};Xl=new Set([".git",Qe,as,ss])});function tc(r,n){let a=n?.baseURL,u=ec.test(r),l=null;if(u&&!xt(r))l=r;else if(a!=null&&!xt(a))l=a;else if(!u&&a==null)l=r;if(l!==null)throw Err

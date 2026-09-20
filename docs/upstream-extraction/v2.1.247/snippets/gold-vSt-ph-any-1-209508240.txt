@@ -1,0 +1,2 @@
+# function ph( pos=209508240 end=209508571 len=331
+function ph(e){if(!nd())return[];let t=new Set,n=new Set;for(let r of Gs(e)){let o=Ue(r);if(o===null&&Er(r))o=Ue(r);if(o===null||n.has(o))continue;if(n.add(o),!xn(o,e,kn(o)))continue;let s;try{s=It(await H().realpath(o))}catch{continue}if(s!==o){if(n.has(s))continue;n.add(s)}for(let i of await uu(o))t.add(i)}return Array.from(t)}

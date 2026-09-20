@@ -1,0 +1,19 @@
+# ver=247 name=gp async=true start=221745194 end=221747316 len=2122 sha=fac02eec7024ef9f needle="background session"
+
+async function gp(e,t){if(Vr(),e==="--help"||e==="-h"){process.stdout.write(`Usage: claude respawn <id>|--all
+
+  Restart a background session (or all of them) so it picks up the current Claude binary.
+`);return}if(e?.startsWith("-")&&e!=="--all"){process.stderr.write(`unknown option '${e}'
+Usage: claude respawn <id>|--all
+`),process.exitCode=1;return}if(!e){process.stderr.write(`usage: claude respawn <id>|--all
+`),process.exitCode=1;return}let r=await un(void 0,t);if(!r.ok){process.stderr.write(`Couldn't respawn \u2014 ${be()} is unavailable (${r.reason})${Nt("status")}
+`),await me("cli_bg_respawn","daemon_unavailable"),process.exitCode=1;return}if(e==="--all"){let a=(await ir(void 0,t)).filter((f)=>!Wt(f.state.state));if(a.length===0){process.stdout.write(`no live jobs to respawn
+`);return}let l=0,u=0;for(let f of a){let d=await Qn(f.id,{force:!0,knownState:f.state},t);if(d.ok)l++,process.stdout.write(`respawned ${f.id}${d.short!==f.id?` \u2192 ${d.short}`:""}
+`);else if(d.alive)u++,process.exitCode=1,process.stderr.write(`${f.id}: still running \u2014 couldn't confirm restart, retry in a moment
+`);else process.exitCode=1,process.stderr.write(`${f.id}: ${d.error}
+`)}if(l===a.length)await Ue("cli_bg_respawn");else if(l>0||u>0)await Et("cli_bg_respawn",u>0?"still_alive":"partial");else await me("cli_bg_respawn","spawn_failed");return}let o=(t?await eo(t)??[]:await Zr(At()).catch(()=>[])).filter((c)=>dt.test(c)).filter((c)=>c.startsWith(e));if(o.length!==1){process.stderr.write(o.length===0?`No job matching '${e}'
+`:`Ambiguous prefix '${e}', matches: ${o.join(", ")}
+`),await me("cli_bg_respawn",o.length===0?"no_match":"ambiguous"),process.exitCode=1;return}let s=o[0],i=await Qn(s,{force:!0},t);if(!i.ok&&i.alive){process.stderr.write(`${s}: still running \u2014 couldn't confirm restart, retry in a moment
+`),await Et("cli_bg_respawn","still_alive"),process.exitCode=1;return}if(!i.ok){process.stderr.write(`${i.error}
+`),await me("cli_bg_respawn","spawn_failed"),process.exitCode=1;return}await Ue("cli_bg_respawn"),process.stdout.write(`respawned ${s}${i.short!==s?` \u2192 ${i.short}`:""}
+`)}

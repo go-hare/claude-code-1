@@ -1,0 +1,2 @@
+# LOCKED ns pos=207875268 end=207875596 len=328
+function ns(e){let t=e.slice(0,So).map((o)=>{let n=o.path.map(String).map((a)=>Ft(a)).join("."),r=o.code==="unrecognized_keys"?`Unrecognized ${o.keys.length===1?"field":"fields"}: ${o.keys.map(Ft).join(", ")}`:$t(o.message,ko);return n?`${n}: ${r}`:r}),s=e.length-t.length;return s>0?`${t.join(", ")} (+${s} more)`:t.join(", ")}

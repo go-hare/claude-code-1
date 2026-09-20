@@ -7,6 +7,9 @@ import { getGlobalConfig, saveGlobalConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { findGitRootUncached } from './git.js'
 import { isWillowCrateEnabled } from './willowCrate.js'
+import { getReplDiffHost } from './sessionHost.js'
+
+export { getReplDiffHost } from './sessionHost.js'
 
 /** densable `G8e` */
 export const DIFF_SIDEBAR_MIN_COLS = 110
@@ -110,7 +113,6 @@ type ReplDiffHostState = {
 }
 
 const hostState = new WeakMap<object, ReplDiffHostState>()
-const sessionHosts = new Map<string, object>()
 
 function hostOf(host: object): ReplDiffHostState {
   let state = hostState.get(host)
@@ -119,20 +121,6 @@ function hostOf(host: object): ReplDiffHostState {
     hostState.set(host, state)
   }
   return state
-}
-
-/**
- * densable `ns().host` stand-in. Official keys a WeakMap on the session
- * host object; we keep one object per `getSessionId()`.
- */
-export function getReplDiffHost(): object {
-  const id = getSessionId()
-  let host = sessionHosts.get(id)
-  if (!host) {
-    host = {}
-    sessionHosts.set(id, host)
-  }
-  return host
 }
 
 /** densable `Dcs` */

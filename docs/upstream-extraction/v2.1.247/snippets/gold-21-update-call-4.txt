@@ -1,0 +1,3 @@
+# offset=220310236 idx=4/5 needle="updateSessionWorkerState"
+
+let H=P;if(await nn(()=>r.updateSessionWorkerState(p.api_base_url,e,A.current,H,void 0,n),{initialDelayMs:500,maxDelayMs:8000,maxAttempts:5,shouldRetry:rn,signal:n,onRetry:(k,y)=>{s(`[runner:session] updateSessionWorkerState attempt ${k} transient failure (${y instanceof Error?y.message:y}) \u2014 retrying`)}}),n.aborted)return{result:"interrupted"};Be=Pi(Ce,P);let Le=Be,ee=(k)=>{ot=!0;let y=k.cat

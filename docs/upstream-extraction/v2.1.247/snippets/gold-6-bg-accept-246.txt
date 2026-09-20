@@ -1,0 +1,3 @@
+# offset=229500127 ver=246 hit=1/3 needle="Ce[N]"
+
+current=s,u.length===0)return;let W=u[N];if(W!==void 0&&s[N]===W)return;if(W!==void 0){let Ee=s.indexOf(W);if(Ee!==-1){le(Ee);return}}le(Math.max(0,Math.min(N,s.length-1))),_t.current=!0},[Ce]);let E=Ce[N]??null;uo({"confirm:previous":()=>{_t.current=!1,le((s)=>Math.max(0,s-1))},"confirm:next":()=>{_t.current=!1,le((s)=>Math.min(Ce.length-1,s+1))},"confirm:yes":()=>{let s=Ce[N];if(s){if(s.type==="leader")Zo(f),e("Viewing leader",{display:"system"});else if(Wo(s))Ze(s.id,f),e("Viewing agent",{display:"system"});else if(Qr(s.type))te({mode:"detail",itemId:s.id})}}},{context:"Confirmation",isActi

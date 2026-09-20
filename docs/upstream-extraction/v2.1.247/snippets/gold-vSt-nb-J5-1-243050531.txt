@@ -1,0 +1,2 @@
+# needle=function J5( pos=243050531 end=243050614 len=83
+function J5(e,t){if(q0(e))return e;if(oh(e)){let r=W$(e,t,!1);if(r)return J5(r,t)}}

@@ -1,0 +1,149 @@
+# gza callee lock — official 2.1.247 peel ONLY. Invent-ban. No implement.
+
+gza FULL (not truncated) @214549449 len=2213
+  gold-gza-full.txt
+  also: gold-19-247-another-scope-1.txt
+
+gza(e,t,n,r) = (name, scope|undefined, storageV5, credentials)
+  CLI Tr: await Wn(n,a,r)  → gza(name, scope, storageV5)  4th OMITTED
+  UI Zg:  await Zr(ne.name, void 0, p, g) with let{storageV5:p,credentials:g}=We()
+  nPe(pluginId, storageV5, credentials): ay(..., storageV5); Jr().mutate(..., credentials)
+
+## Callees (each uniquely locked)
+
+wB  LOCKED  updateSettingsForSourceWithTransform
+  import: _705 cHc as wB
+  export: Rs as bHc, ii as cHc @208321748
+  API: updateSettingsForSource:()=>Rs  updateSettingsForSourceWithTransform:()=>ii
+  Rs(e,t,n,r){return ii(e,()=>t,n,r)}
+  ii(e,t,n,r){if(e==="policySettings"||e==="flagSettings")return Promise.resolve({error:null});let i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}
+  gza: await wB(source, updaterFn, void 0, storageV5)
+  gold-gza-wB-ii.txt  gold-gza-ii-Rs-body.txt
+  persist impl Is already in gold-forged-ee-h-body.txt — not a new gza callee
+
+sk  LOCKED  editable settings sources
+  import: _709 eIc as sk
+  export: ks as eIc @208142871
+  ks=["userSettings","projectSettings","localSettings"]
+  gold-gza-sk-ks.txt  gold-gza-709-near-ks.txt
+
+r0n LOCKED  identifier-shaped name predicate (NOT official-marketplace set)
+  import: DOb as r0n from plugin-dir pack
+  export: Bm as DOb @209536872 (same export as py as mMb)
+  only function Bm in that module:
+  function Bm(e){return/^\w[\w.@-]*$/.test(e)}
+  neighbor: ur() gates `claude ${cmd} ${name}` on Bm
+  gold-gza-r0n-Bm.txt
+
+_0n LOCKED  removeAllPluginsForMarketplace + storage
+  async function _0n(e,t){
+    if(!e)return{orphanedPaths:[],removedPluginIds:[]};
+    let n=await ame((r)=>KBo(r,e),t);
+    for(let r of n.removedPluginIds)_(`Removed installed plugin for marketplace removal: ${r}`);
+    return n
+  }
+  KBo + ame uniquely adjacent (not invented):
+  function KBo(e,t){let n=`@${t}`,r=new Set,o=[];for(let s of Object.keys(e.plugins)){if(!s.endsWith(n))continue;for(let i of e.plugins[s]??[])if(i.installPath)r.add(i.installPath);delete e.plugins[s],o.push(s)}return{write:o.length>0,result:{orphanedPaths:Array.from(r),removedPluginIds:o}}}
+  async function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}
+  gold-gza-_0n-full.txt
+  ame callees TB/j0n/IR/N0n NOT peeled (not requested; do not invent)
+
+K8  LOCKED  markPluginVersionOrphaned + storage
+  async function K8(e,t){
+    if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}
+    let n=Ne()&&t!==void 0?mp(e,ra()):null;
+    if(Ne()&&t!==void 0&&n!==null){
+      let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});
+      if(!r.ok)_(`Failed to write .orphaned_at: ${e}: ${tr(r.error)}`);
+      return
+    }
+    try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}
+  }
+  gold-gza-K8-full.txt
+
+nPe LOCKED  deletePluginOptions (pluginConfigs + pluginSecrets)
+  async function nPe(e,t,n){
+    if(Xr("userSettings")?.pluginConfigs?.[e]){
+      let o={[e]:void 0},{error:s}=await ay("userSettings",{pluginConfigs:o},void 0,t);
+      ...
+    }
+    try{ Jr().mutate(pluginSecrets filter e and e/, n) }  // n = credentials
+    catch storage lock unavailable
+    t3()
+  }
+  gold-gza-nPe-full.txt
+  CSS collision function nPe(e,t) at 241864166 is NOT this
+
+HFe LOCKED  deletePluginDataDir — pluginId ONLY, no storage
+  import: mMb as HFe
+  export: py as mMb @209535620
+  async function py(e){let t=Br(e);try{await Cd(t,{recursive:!0,force:!0})}catch(n){y(`Failed to delete plugin data dir ${t}: ${Ut(n)}`,{level:"warn"})}}
+  gold-gza-HFe-py.txt
+  uninstall neighbor GWa: if(r)await HFe(u)  r there is {deleteDataDir=!0} NOT gza.r
+
+dPe LOCKED  pluginUsage wipe + storage  (NOT data dir)
+  function dPe(e,t){
+    let n=new Set(e.map((r)=>r.toLowerCase()));
+    yln(n),
+    ki((r)=>{
+      let s=Object.keys(r.pluginUsage??{}).filter((a)=>n.has(a.toLowerCase()));
+      if(s.length===0)return r;
+      let i={...r.pluginUsage};for(let a of s)delete i[a];
+      return{...r,pluginUsage:i}
+    },t)
+  }
+  gold-gza-dPe-full.txt
+  CSS collision function dPe(e) at 241867890 is NOT this
+
+qFe LOCKED  settings-source short display (map lookup)
+  import: _506 Ahb as qFe
+  export: ie as Ahb @210754920
+  function ie(e){return K[e]}
+  K={policySettings:"managed",userSettings:"user",projectSettings:"project",localSettings:"local",flagSettings:"flag"}
+  gza: `not declared in ${qFe(t)} settings` → "user settings" / "local settings" / ...
+  NOTE: local getSettingSourceName maps localSettings → "project, gitignored" — official is "local"
+  gold-gza-qFe-ie.txt  gold-gza-506-export-ie-Ahb.txt
+
+Xr  LOCKED  already local getSettingsForSource
+  _705 getSettingsForSource:()=>h @208304369
+  function h(e){return Lr(e,p())}
+  h as vGc; gza imports vGc as Xr
+  gold-gza-Xr-h.txt  gold-forged-Xr.txt
+  other function Xr names in the SEA are different modules — do not use
+
+## 4th arg r
+
+LOCKED = credentials (secure-storage handle)
+  nPe 3rd → Jr().mutate(..., n)
+  neighbor evi/Kwo: Jr().readAsync(t) / mutate(..., credentials)
+  UI: credentials:g from We(), passed as gza 4th
+  CLI: 4th omitted (undefined); Tr's r is storageV5 into gza 3rd; then ce(r)=uSt as Rda (cache clear; body not requested)
+
+## Official callers --scope
+
+CLI HAS --scope:
+  .option("--scope <scope>","Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.")
+  Tr validates user|project|local, a=Qe(o), Wn(name,a,storageV5)
+  gold-gza-cli-remove-scope.txt  gold-gza-caller-Tr.txt
+  Qe body UNKNOWN (function Qe collision; do not invent = scopeToSettingSource)
+  _506 has U={user:"userSettings",project:"projectSettings",local:"localSettings"} — not proven as Qe
+
+UI ManageMarketplaces: Zr(name, void 0, storageV5, credentials) — no --scope
+PluginSettings local: name only (official PluginSettings gza call not uniquely required)
+
+## Local gap (do not implement)
+
+removeMarketplaceSource(name) only
+  missing: scope t, keep-if-other-scope l, storageV5 n, credentials r
+  missing: Xn().marketplaces.delete, Xfe+n.delete
+  missing: r0n split hint (local always official-style disable @name)
+  missing: qFe in "not declared in … settings"
+  missing: wB updater+storage (local updateSettingsForSource value-merge, no transform, voids storage)
+  missing: sk is hardcoded same 3 sources — OK shape
+  missing: _0n/ame storage path (local removeAllPluginsForMarketplace sync disk only)
+  missing: K8 storage write of .orphaned_at (local fs writeFile only)
+  missing: nPe storage+credentials (local deletePluginOptions sync, no args)
+  missing: HFe always (local deletePluginDataDir) — OK shape, no 4th
+  missing: dPe pluginUsage wipe entirely
+  CLI marketplaceRemoveHandler: no --scope, no storage/credentials, no "(from ${scope} settings)" suffix
+  ManageMarketplaces / PluginSettings: name-only; official UI already passes storage+credentials, scope undefined

@@ -1,0 +1,3 @@
+# 247 function ke start=209243951 end=209244392 len=441 sha=ff3959739e1ec00d
+
+function ke(){let e=new Set,t=!1,r=!1;for(let u of E().offSources)switch(u.layer){case"env":e.add("env");break;case"userSettings":e.add(u.via==="legacyDisableKey"?"setting":"config_pref");break;case"policySettings":case"flagSettings":t=!0;break;case"localSettings":case"projectSettings":r=!0;break}if(t)e.delete("setting"),e.delete("config_pref");if(e.size>1)return"multiple";let[a]=e;if(a!==void 0)return a;return t||r?"admin_managed":null}

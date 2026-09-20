@@ -1,0 +1,2 @@
+# needle=function nBo( pos=214520232 end=214520650 len=418
+function nBo(e){if(L$(e)){if(e.code==="ECONNABORTED")return"timeout";if(e.response)return`http_${e.response.status}`;return"network"}let t=De(e);if(t&&/^E[A-Z]+$/.test(t)&&!t.startsWith("ERR_"))return tBo.has(t)?`fs_${t}`:"fs_other";if(typeof e?.code==="number")return"zip_parse";let n=Y(e);if(/unzip|invalid zip|central directory/i.test(n))return"zip_parse";if(/empty body/.test(n))return"empty_latest";return"other"}

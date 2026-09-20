@@ -1,0 +1,16 @@
+# gold-25-escape-246-cli-ke "ke(" count=5
+
+--- @231783473 ---
+,{children:[l.tick," Successfully removed marketplace:"," ",ke(n),t.scope?` (from ${t.scope} settings)`:""]}))}function kt(Br){let rn=Se(11),{promise:Hr}=Br,{messages:tn,summary:an
+
+--- @231787063 ---
+_plugin_install"),b));e.render(m(Pe,{fallback:m(k,{children:ke(`Installing plugin "${n}"...`)}),children:m(yt,{promise:f})})),await e.waitUntilExit(),await me(0)}async function Ar(
+
+--- @231860201 ---
+o.getUdsMessagingSocketPath();if(u!==void 0)await d(u)}me();ke();Kt();Lt();Dt();fo();io();ne();po();oo();Ot();Mt();eo();Rt();Vt();uo();zt();ao();ye();ro();z();jt();Ut();Ht();Yt();B
+
+--- @231860360 ---
+jt();Ut();Ht();Yt();Bt();le();Ft();Jt();Gt();so();Zt();qt();ke();Et();ye();z();import{copyFile as It,stat as xt}from"fs/promises";import{homedir as Pt}from"os";import{join as vt}fr
+
+--- @231896668 ---
+iersWithPin=${n.length} candidates=${l.length}`),l}function ke(n){return U(n,E)}async function Ee(){if(x()!=="vertex")return[];if(o.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)return[];le

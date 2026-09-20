@@ -1,0 +1,1 @@
+async function P4n(e,t,n,r){let o=new x4n(n);try{return await H3o(U3o(e),o,B3o(t,{flags:"wx"}),{signal:r}),{ok:!0,sizeBytes:o.outputBytes}}catch(s){if(De(s)!=="EEXIST")await j3o(t).catch(()=>{});return{ok:!1,error:Y(s)}}}

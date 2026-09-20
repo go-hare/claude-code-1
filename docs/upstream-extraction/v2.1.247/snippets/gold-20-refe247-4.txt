@@ -1,0 +1,4 @@
+# offset=214909976 idx=4/6 needle="re(fe)"
+
+id 0&&he.parameterStructures===Us.ParameterStructures.byPosition)o.error(`Notification ${fe.method} defines parameters by position but received parameters by name`);Ve(fe.params)}else if(d)d(fe.method,fe.params)}catch(st){if(st.message)o.error(`Notification handler '${fe.method}' failed with message: ${st.message}`);else o.error(`Notification handler '${fe.method}' failed unexpectedly.`)}else R.fire(fe)}function ne(fe){if(!fe){o.error("Received empty message.");return}o.error(`Received message which is neither a response nor a notification message:
+${JSON.stringify(fe,null,4)}`);let he=fe;if(Nd.string(he.id)||Nd.number(he.id)){let Ve=he.id,st=h.get(Ve);if(st)st.reject(Error("The received response has neither a result nor an error property."))}}function oe(fe){if(fe===void 0||fe===null)retu

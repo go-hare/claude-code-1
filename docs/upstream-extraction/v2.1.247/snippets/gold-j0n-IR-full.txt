@@ -1,0 +1,15 @@
+# LOCKED IR @214577454 end=214577547 len=93
+# name collision function IR( count=6 — bind via unique string + unique caller
+# unique string function IR(){try{let e=GSt() count=1
+# unique caller ame@214576408 let r=IR() count=1
+# export: IR as Yea @219687673 (same map as eUe/mHa/sZ/O0n/H0n/yB/gHa)
+# import: Yea as Ge @222874759 (with baa as Ft = dPe)
+# other IR as Et is _412.js — not this
+function IR(){try{let e=GSt();return e?VSt(e):{version:2,plugins:{}}}catch(e){return q0n(e)}}
+
+# unique callee GSt @214571162 end=214571293 len=131
+# function GSt(){ count=1 — disk read sme()=vB(Fs(),"installed_plugins.json")
+function GSt(){let e=vt(),t=sme(),n;try{n=e.readFileSync(t,{encoding:"utf-8"})}catch(r){if(Et(r))return null;throw r}return sUe(n)}
+
+# unique sme @214568775
+function sme(){return vB(Fs(),"installed_plugins.json")}

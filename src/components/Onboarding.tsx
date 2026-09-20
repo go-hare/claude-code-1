@@ -8,6 +8,7 @@ import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeyb
 import { Box, Link, Newline, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { isAnthropicAuthEnabled } from '../utils/auth.js';
+import { shouldSkipOnboardingPreflight } from '../utils/forceLoginMethod.js';
 import { normalizeApiKeyForConfig } from '../utils/authPortable.js';
 import { getCustomApiKeyStatus } from '../utils/config.js';
 import { env } from '../utils/env.js';
@@ -37,6 +38,8 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [skipOAuth, setSkipOAuth] = useState(false);
   const [oauthEnabled] = useState(() => isAnthropicAuthEnabled());
+  // densable 2.1.247 l = Ae()||Ie() = Q$()||Z$()
+  const [skipAnthropicPreflight] = useState(() => shouldSkipOnboardingPreflight());
   const [theme, setTheme] = useTheme();
 
   useEffect(() => {
@@ -111,7 +114,6 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     </Box>
   );
 
-  const _preflightStep = <PreflightStep onSuccess={goToNextStep} />;
   // Create the steps array - determine which steps to include based on reAuth and oauthEnabled
   const apiKeyNeedingApproval = useMemo(() => {
     // Add API key step if needed
@@ -134,6 +136,13 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   }
 
   const steps: OnboardingStep[] = [];
+  // densable 247 Yo: if(c&&!l) push preflight before theme
+  if (oauthEnabled && !skipAnthropicPreflight) {
+    steps.push({
+      id: 'preflight',
+      component: <PreflightStep onSuccess={goToNextStep} />,
+    });
+  }
   steps.push({ id: 'theme', component: themeStep });
 
   if (apiKeyNeedingApproval) {

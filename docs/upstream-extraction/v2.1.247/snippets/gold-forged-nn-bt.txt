@@ -1,0 +1,2 @@
+# gold-forged-nn-bt.txt official-247 SEA @209860280
+function bt(e){let t=process.cwd();if(Ke()==="windows"){if(e=ri(UC(e)),/^[a-z]:/.test(e))e=e[0].toUpperCase()+e.slice(1);if(Ja(e)&&!Yr(e))return Ft.win32.normalize(e)}if(Ke()!=="windows"&&e.endsWith("/")&&e!=="/"&&!Sh(e))e=e.replace(/\/+$/,"")||"/";let n=LC(e);if(n!==e);else if(e.startsWith("./")||e.startsWith("../"))n

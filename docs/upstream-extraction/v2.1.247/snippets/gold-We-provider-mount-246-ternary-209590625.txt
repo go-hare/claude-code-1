@@ -1,0 +1,8 @@
+# 246 ternary @209590625 mod=209590296..209591595
+ outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.246
+import{Abb as m,zbb as v}from"B:/~BUN/root/_492.js";import{Cbb as a,Ebb as l}from"B:/~BUN/root/_493.js";import{BRb as i,IRb as p,ORb as f,uRb as r}from"B:/~BUN/root/_592.js";import{Cxd as u}from"B:/~BUN/root/_836.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()=>{f();l();m();c=Object.freeze({}),e=r(c)});var w;var B=u(()=>{f();w=r(null)});
+export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb};
+.// @bun @bytecode
+// Clau

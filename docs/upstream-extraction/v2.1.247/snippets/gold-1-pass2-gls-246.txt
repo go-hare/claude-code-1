@@ -1,0 +1,3 @@
+# 246 gls @215147706 sha=4ea6bd4d8d20a9f1
+
+function gls(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(Rpr())return!1;if(UQ())return!1;if(!ps("allow_product_feedback"))return!1;if(Qr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}

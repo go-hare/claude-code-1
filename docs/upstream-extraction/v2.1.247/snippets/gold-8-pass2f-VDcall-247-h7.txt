@@ -1,0 +1,3 @@
+# off=227702665 hit=7
+
+Sync:ar.writeFileSync}});var cr=d(function(cg,Gu){var WD=L().fromCallback,Ot=q(),Ju=C("path"),Ku=fe(),VD=xe().pathExists;function JD(e,t,r,n){if(typeof r==="function")n=r,r="utf8";let i=Ju.dirname(e);VD(i,(o,u)=>{if(o)return n(o);if(u)return Ot.writeFile(e,t,r,n);Ku.mkdirs(i,(s)=>{if(s)return n(s);Ot.writeFile(e,t,r,n)})})}function KD(e,...t){let r=Ju.dirname(e);if(Ot.existsSyn

@@ -1,0 +1,55 @@
+# gold-1-pass3-verdict — official-247 checklist #1 send-feedback
+
+STATUS: UNKNOWN
+CONTRACT: still leftover. 247=246 same bodies + same wiring. Changelog oversell.
+No unique 247-only function (count=1 vs 246 count=0) with complete body.
+
+## unique-247?
+no
+unique-247 function probes: NONE
+J7,$gr,oee vs A7,Upr,D7 / IE vs mE is minify rename of the same leftover slot, not a new function.
+
+## Hit counts re-verify
+same 246=18 247=18 "SendFeedback"
+same 246=26 247=26 "feedbackDrafts"
+same 246=3 247=3 "CLAUDE_CODE_SEND_FEEDBACK"
+same 246=4 247=4 "fitFeedbackPayloadToBudget"
+same 246=2 247=2 "parseDraftTranscriptMessages"
+same 246=4 247=4 "Drafted by Claude via the SendFeedback tool"
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending."
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review."
+counts-all-same=true
+
+## Unique wiring hunt
+feature('SEND_FEEDBACK') / FEATURE_SEND_FEEDBACK / MACRO.SEND_FEEDBACK: absent both
+near-assign feature(=0 FEATURE_=0 MACRO.=0 QueryEngine=0 CORE_TOOLS=0
+send/feedback-ish feature flags: NONE
+MACRO send/feedback-ish: NONE
+/feedback official stub normEq=true — "Send feedback to Anthropic or report a bug" already in 246; not draft-review
+IE()/mE() slot unconditional leftover; no 247-only CORE_TOOLS / QueryEngine insert
+
+## leftover bodies (local still lacks; NOT a HAVE license)
+- tool name var xgr="SendFeedback" (246 Dpr)
+- tool object + async call() (rename-only / MACRO stamp)
+- aLt / Ufs / Ffs / IE wiring (NORM-SAME vs gDt/gls/mls/mE)
+- ee fitFeedbackPayloadToBudget (byte-identical)
+- Oe parseDraftTranscriptMessages (byte-identical)
+- Le Drafted-by-Claude bylines (byte-identical)
+- ot draft submit (byte-identical)
+- Ps /feedback disabled gates (byte-identical)
+- feedbackDrafts schema describe string (byte-identical)
+
+## Collision-ban
+Do not bind src/components/Feedback.tsx, src/commands/feedback, or
+tengu_feedback / tengu_feedback_survey_* as SendFeedback evidence.
+Those are the older manual report already local.
+
+## Invent-ban
+No unique 247 body → do not port SendFeedback tool, /feedback draft-review
+UI, or feedbackDrafts setting. Leftover inventory is constraint only.
+Local /feedback stays src/commands/feedback + src/components/Feedback.tsx.
+
+## Gold
+pass1: gold-1-verdict.txt gold-1-sameness.txt
+pass2: gold-1-pass2-proof.txt gold-1-pass2-verdict.txt
+pass3: gold-1-pass3-verdict.txt gold-1-pass3-leftover-bodies.txt gold-1-pass3-scan.txt gold-1-pass3-counts.txt

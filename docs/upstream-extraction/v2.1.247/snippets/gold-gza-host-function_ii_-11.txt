@@ -1,0 +1,2 @@
+# needle=function ii( pos=226581370
+function ii(e,t,r){let s,a,o;if(typeof t>"u"&&typeof r>"u")s={},o=e;else if(s=e,typeof t==="function")return a=t,o=r,Dd(s,a,o);else o=t;for(let c of Object.keys(o)){if(!Array.isArray(o[c])){s[c]=o[c];continue}oi(s,null,o,c)}return s}

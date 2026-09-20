@@ -1,0 +1,2 @@
+# ie@210614865
+function ie(e){switch(e){case"nonorigin_cf":return"a network edge refused the connection before it reached Anthropic's server (HTTP 403 \u2014 Anthropic's CDN enforcing a region or network policy, or a Cloudflare gateway on this network) rather than this session; this often follows a VPN or network change";case"nonorigin_other":return"the connection was refused before it reached Anthropic (HTTP 403) \u2014 usually a proxy, VPN or firewall on this network"}}

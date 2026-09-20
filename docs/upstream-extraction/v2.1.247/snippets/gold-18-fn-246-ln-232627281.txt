@@ -1,0 +1,5 @@
+# ver=246 name=ln async=true start=232627281 end=232627957 len=676 sha=95ce7669181618e5 needle="background session"
+
+async function ln(e,n,t){if(S())return;let o=(c)=>q(0,"other",{finalMessage:t(c)});if(await Z(e.messages,e.storageV5),S())return;if(Ae())return o("a background session cannot restart itself (sign in from a session started directly with `claude`)");let r=Y(e),i=Ie(r,de());if(i.length>0)return o(`this session has restrictions a restart can't carry over (${i.join("; ")})`);let s={proactivityLevel:e.getProactivityLevel(),toolPermissionContext:r};try{await Xe({freshIfNoTranscript:!0,extraArgs:[...Fe(r,Ne(e)),...xe(r,le())],proactivity:s,env:Te(),preSpawn:()=>process.stdout.write(`
+${n}
+`)},e.storageV5)}catch(c){return pe(me(c)),o(`it could not restart itself (${fe(c)})`)}}

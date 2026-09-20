@@ -1,0 +1,51 @@
+# offset=222245804 hit=5/6 needle="sessionsSince"
+
+${g}`,r,T))}let V=m.length;for(let{source:s,override:o}of i)for(let p of o.tips??[]){let g=`${x}${I++}`;if(typeof p==="string")v(p,g,w,T);else n(`spinnerTipsOverride: object tip entries in ${s} are ignored; only plain strings are read from project settings`,{level:"warn"})}return{tips:m,trustedCount:V}}function v(e,t,i,r){if(typeof e==="string"){r(t,e,0,0,i);return}if(typeof e.text!=="string"){n('spinnerTipsOverride: tip object without a "text" string; dropped',{level:"warn"});return}if(typeof e.id!=="string"||!ye.test(e.id)){n('spinnerTipsOverride: tip object needs an "id" of 1-64 letters, digits, ".", "_" or "-"; dropped',{level:"warn"});return}let a=typeof e.cooldownSessions==="number"&&Number.isInteger(e.cooldownSessions)&&e.cooldownSessions>=0?Math.min(e.cooldownSessions,1000):0,l=typeof e.priority==="number"&&Number.isFinite(e.priority)?Math.max(-10,Math.min(10,Math.trunc(e.priority))):0;r(`${Ee}${e.id}`,e.text,a,l,i)}var Ee="org-tip:",x="custom-tip-",P=500,Fe=200,_=262144,w="Tip",ye,we=40,J,Re,be="org-tip:file:",Ie,xe,$e,Ce;var ze=te(()=>{ce();ie();pe();ae();ne();de();re();fe();le();me();_e();Oe();se();oe();ge();Te();ue();ye=/^[A-Za-z0-9._-]{1,64}$/,J=["policySettings","flagSettings","userSettings"],Re=[...X],Ie=new Set(["EAGAIN","EBUSY","EINTR","EIO","EMFILE","ENFILE"]),xe=/[\p{Cc}\p{Cf}\u2028\u2029\u180e\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu;$e=z(()=>k([y(F()),j({tips:y(F())}).transform((e)=>e.tips)]));Ce=new N(()=>new q)});
+export{Ee as JC,x as KC,rt as LC,nt as MC,ze as NC};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Kfd as n}from"B:/~BUN/root/_824.js";import{fgd as r}from"B:/~BUN/root/_825.js";import{FBd as e}from"B:/~BUN/root/_850.js";import{platform as t}from"os";function m(){return t()==="darwin"&&r.terminal==="Apple_Terminal"||r.terminal==="vscode"||r.terminal==="cursor"||r.terminal==="windsurf"||r.terminal==="alacritty"||r.terminal==="zed"}var i=e(()=>{n()});
+export{m as rE,i as sE};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,ugb as i}from"B:/~BUN/root/_505.js";import{Bhb as O,Zgb as S,nhb as P}from"B:/~BUN/root/_506.js";import{hlb as d,jlb as x}from"B:/~BUN/root/_519.js";import{iMb as f,oMb as I,pMb as p,rMb as H}from"B:/~BUN/root/_585.js";import{Lxc as E,owc as r}from"B:/~BUN/root/_675.js";import{eld as m,kld as k}from"B:/~BUN/root/_833.js";import{FBd as b}from"B:/~BUN/root/_850.js";async function Q(){try{let e=p().pluginLoadCacheOnly;if(e===void 0)return[];if(i()!==null)return[];let{enabled:n}=await e;if(n.length===0)return[];let h=d(),D=f(),L=r().numStartups,U=Date.now(),o=[];for(let t of n){let{marketplace:s}=P(t.repository);if(!s||S(s))continue;if(y(t,h,D)!=="user-install")continue;if(V(t))continue;let g=u(t.repository);if(!g)continue;if(a(t.repository))continue;let{sessionsSinceLastUse:w,daysSinceLastUse:c}=l(g,L,U);if(c>=C&&w>=T)o.push({pluginId:t.repository,name:t.name,daysSinceLastUse:c})}return o.sort((t,s)=>s.daysSinceLastUse-t.daysSinceLastUse),o}catch(e){return m(`plugin-disuse tip: failed to compute disused plugins: ${e}`,{level:"error"}),[]}}function W(e){if(i()!==null)return null;let n=u(e);if(!n)return null;if(a(e))return 0;return l(n,r().numStartups,Date.now()).daysSinceLastUse}function V(e){return Boolean(e.themesPath||e.themesPaths?.length||e.outputStylesPath||e.outputStylesPaths?.length||e.monitors?.length||e.workflowsPath||e.workflowsPaths?.length)}var C=14,T=10;var j=b(()=>{E();k();x();I();O();_();H();R();M();N()});
+export{Q as aK,W as bK,j as cK};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Lxc as S,kwc as u,owc as s}from"B:/~BUN/root/_675.js";import{FBd as g}from"B:/~BUN/root/_850.js";function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return o;let e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}function a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()});
+export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{tL as P,uL as Q,wL as q,zL as te}from"B:/~BUN/root/_360.js";import{Phb as y,Zhb as ee,eib as x,jib as re}from"B:/~BUN/root/_509.js";import{Htc as J,Lxc as Z,Yjc as _,Zjc as j,hjc as C,kwc as E,ojc as Y,owc as b,ptc as A}from"B:/~BUN/root/_675.js";import{Afd as v,Cfd as a,Ifd as M}from"B:/~BUN/root/_823.js";import{Kfd as G}from"B:/~BUN/root/_824.js";import{fgd as w}from"B:/~BUN/root/_825.js";import{Hgd as U,Jgd as K}from"B:/~BUN/root/_827.js";import{Hid as p,Iid as N}from"B:/~BUN/root/_830.js";import{Jid as L}from"B:/~BUN/root/_831.js";import{Vid as n}from"B:/~BUN/root/_832.js";import{eld as i,kld as F,lkd as d,pkd as D}from"B:/~BUN/root/_833.js";import{Hnd as c,Ind as O,bxd as B,xod as m}from"B:/~BUN/root/_839.js";import{gAd as R,oAd as X}from"B:/~BUN/root/_846.js";import{FBd as f}from"B:/~BUN/root/_850.js";async function W(e){let r=w.CLAUDE_CODE_ULTRAREVIEW_QUOTA_FIXTURE;if(r)try{let t=l().safeParse(d(r));return t.success?t.data:null}catch(t){return i(`fetchUltrareviewQuota fixture parse failed: ${t}`),null}try{let t=await _.get("/v1/ultrareview/quota",{auth:"teleport-org",timeout:3000,credentials:e});if(!t.ok)return a("a

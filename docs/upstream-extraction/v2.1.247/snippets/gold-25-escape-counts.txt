@@ -1,0 +1,62 @@
+# gold-25-escape counts 247 vs 246
+
+## string counts
+same 246=2 247=2 "sanitizeName"
+same 246=19 247=19 "util.inspect"
+same 246=67 247=67 "inspect("
+DIFF 246=697 247=703 "JSON.stringify"
+same 246=3 247=3 "Installed plugins:"
+same 246=4 247=4 "Configured marketplaces:"
+same 246=4 247=4 "Successfully added marketplace:"
+same 246=2 247=2 "Successfully installed plugin:"
+same 246=2 247=2 "Successfully removed marketplace:"
+same 246=16 247=16 "Marketplace '"
+same 246=3 247=3 "control or invisible"
+DIFF 246=0 247=4 "control or bidirectional"
+same 246=58 247=58 "Default_Ignorable"
+DIFF 246=95 247=105 "\\p{Cc}"
+DIFF 246=127 247=129 "\\x1b"
+DIFF 246=12 247=14 "\\u001b"
+same 246=20 247=20 "\\x1b]"
+DIFF 246=66 247=68 "OSC"
+same 246=2 247=2 "replace(/\\x1b"
+same 246=17 247=17 "replace(/[\\x00"
+same 246=13 247=13 "replace(/[\\x00-\\x1f"
+same 246=12 247=12 "replace(/[\\u0000"
+same 246=16 247=16 "\\u001B"
+DIFF 246=46 247=49 "unprintable"
+same 246=6 247=6 "nonprintable"
+same 246=9 247=9 "escape sequences"
+same 246=43 247=43 "escape sequence"
+same 246=3 247=3 "ANSI escape"
+DIFF 246=4 247=5 "osc52"
+DIFF 246=4 247=5 "OSC 52"
+same 246=5 247=5 "\\x1b["
+same 246=6 247=6 "stringify(name"
+same 246=2 247=2 "error detail withheld"
+same 246=20 247=20 "graphemes"
+DIFF 246=89 247=93 "FFFD"
+DIFF 246=81 247=85 "\\uFFFD"
+DIFF 246=0 247=4 "bidirectional-formatting"
+DIFF 246=0 247=2 "Marketplace name cannot contain control"
+DIFF 246=0 247=2 "Plugin name cannot contain control"
+same 246=2 247=2 "Human-readable name shown in UI"
+same 246=2 247=2 "Unlike `name`, may contain spaces"
+DIFF 246=404 247=406 "displayName"
+same 246=2 247=2 "Session-only plugins"
+same 246=4 247=4 "No plugins installed"
+same 246=6 247=6 "No marketplaces configured"
+same 246=2 247=2 "Updating marketplace:"
+same 246=10 247=10 "plugin list"
+DIFF 246=532 247=536 "/plugin"
+
+## extra / binary-ish counts
+same 246=2 247=2 replace-x1b-slash
+same 246=17 247=17 replace-x00-class
+same 246=1 247=1 replace-u001b
+DIFF 246=127 247=129 x1b-literal
+DIFF 246=12 247=14 u001b-literal
+same 246=5 247=5 esc-bracket
+same 246=20 247=20 esc-osc
+DIFF 246=677 247=683 json-stringify-name
+same 246=67 247=67 inspect-call

@@ -1,0 +1,12 @@
+# offset=211415690
+
+ the managed-settings dialog once in an interactive session (or ask your admin)",Ot="Command-sourced plugins are disabled by your organization's managed settings (disableCommandPluginSources / allowManagedHooksOnly). The plugin was not installed or updated and its command was not run.",R="ssh.github.com",ct,z;var ht=H(()=>{J();et();tt();Q();X();D();v();nt();ct=new Set(["http:","https:","git:","git+http:","git+https:"]);z=/^[A-Za-z0-9._-]+$/});
+export{yt as qgb,St as rgb,D as sgb,vt as tgb,M as ugb,Dt as vgb,Gt as wgb,Bt as xgb,rt as ygb,ot as zgb,Ft as Agb,it as Bgb,At as Cgb,Et as Dgb,Ot as Egb,Ut as Fgb,P as Ggb,st as Hgb,_t as Igb,$t as Jgb,It as Kgb,Tt as Lgb,C as Mgb,T as Ngb,lt as Ogb,Lt as Pgb,y as Qgb,gt as Rgb,dt as Sgb,ht as Tgb};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c

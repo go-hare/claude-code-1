@@ -1,0 +1,6 @@
+# off=214013962 needle="Pc("
+
+me:e,message:t,stack:n},r=5){let o=t?`${e}: ${t}`:e,s=n?n.split(`
+`).filter((i)=>mPo.test(i)).slice(0,r).map((i)=>i.length>H_n?`${tn(i,H_n)}\u2026`:i):[];return Pc([Pc(o),...s].join(`
+`))}var dPo=1024,pPo,mPo,H_n=500;var bx=w(()=>{ok();ln();pPo=/\n\n\.\.\. \[(\d+) characters truncated\] \.\.\.\n\n/g;mPo=/^\s*at /});function VD(e){if(e instanceof yn)return e.message||jw;if(!(e instanceof Error))return String(e);let n=gPo(e).filter(Boolean).join(`
+`).trim()||"Command failed with no output";return Pc(n)}function gPo(e){if(e instanceof hk)return[`Exit code ${e.code}`,e.interrupted?jw:"",e.stderr,e.stdout];let t=[e.message];if("stderr"in e&&typeof e.stderr==="string")t.push(e.stderr);if("stdout"in e&&typeof e.stdout==="string")t.push(e.stdout);return t}function q_n(e){if(e.length===0)return"";return e.reduce((t,n,r)=>{let o=String(n);if(typeof n==="number")return`${String(t)}[${o}]`;return r===0?o:`${String(t)}.${o}`},"")}function qq(e,t){let n=t.issues.filter((a)=>a.code==="invalid_type"&&

@@ -19,7 +19,9 @@ import {
 import { setupShellCompletion } from '../../utils/completionCache.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { env } from '../../utils/env.js';
-import { isFsInaccessible } from '../../utils/errors.js';
+import { isENOENT, isFsInaccessible } from '../../utils/errors.js';
+import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser/lib/esm/main.js';
+import type { ParseError } from 'jsonc-parser/lib/esm/main.js';
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
 import { addItemToJSONCArray, safeParseJSONC } from '../../utils/json.js';
 import { logError } from '../../utils/log.js';
@@ -568,84 +570,134 @@ chars = "\\u001B\\r"`;
   }
 }
 
-async function installBindingsForZed(theme: ThemeName): Promise<string> {
-  // Zed uses JSON keybindings similar to VSCode
-  const zedDir = join(homedir(), '.config', 'zed');
-  const keymapPath = join(zedDir, 'keymap.json');
+const ZED_SHIFT_ENTER = ['terminal::SendText', '\x1b\r'] as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** densable 2.1.247 me */
+export function isZedTerminalKeymapContext(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    value.context === 'Terminal' &&
+    isPlainObject(value.bindings) &&
+    'shift-enter' in value.bindings
+  );
+}
+
+function zedConfigDir(): string {
+  const xdg = platform() === 'linux' ? process.env.XDG_CONFIG_HOME : undefined;
+  return xdg ? join(xdg, 'zed') : join(homedir(), '.config', 'zed');
+}
+
+/** densable 2.1.247 ut — merge shift-enter without rewriting the keymap. */
+export async function installZedShiftEnterKeymap(
+  theme: ThemeName,
+  zedDir: string,
+  keymapPath: string,
+): Promise<{ message: string; installed: boolean }> {
+  const seePath = chalk.dim(`See ${formatPathLink(keymapPath)}`);
+  const manualBlock = chalk.dim(
+    `To add the binding yourself, add this block to the keymap array in ${formatPathLink(keymapPath)}:${EOL}{ "context": "Terminal", "bindings": { "shift-enter": ["terminal::SendText", "\\u001b\\r"] } }`,
+  );
+  const installedMessage = `${color('success', theme)('Installed Zed Shift+Enter key binding')}${EOL}${seePath}${EOL}`;
+  const unreadMessage = `${color('warning', theme)("Couldn't read your Zed keymap, so it was left unchanged.")}${EOL}${manualBlock}${EOL}`;
+  const notListMessage = `${color('warning', theme)("Your Zed keymap isn't a readable list of keybindings, so it was left unchanged.")}${EOL}${manualBlock}${EOL}`;
 
   try {
-    // Ensure zed directory exists (idempotent with recursive)
     await mkdir(zedDir, { recursive: true });
-
-    // Read existing keymap file, or default to empty array if it doesn't exist
-    let keymapContent = '[]';
-    let fileExists = false;
+    let contents: string | null = null;
     try {
-      keymapContent = await readFile(keymapPath, { encoding: 'utf-8' });
-      fileExists = true;
-    } catch (e: unknown) {
-      if (!isFsInaccessible(e)) throw e;
-    }
-
-    if (fileExists) {
-      // Check if keybinding already exists
-      if (keymapContent.includes('shift-enter')) {
-        return `${color(
-          'warning',
-          theme,
-        )(
-          'Found existing Zed Shift+Enter key binding. Remove it to continue.',
-        )}${EOL}${chalk.dim(`See ${formatPathLink(keymapPath)}`)}${EOL}`;
-      }
-
-      // Create backup
-      const randomSha = randomBytes(4).toString('hex');
-      const backupPath = `${keymapPath}.${randomSha}.bak`;
-      try {
-        await copyFile(keymapPath, backupPath);
-      } catch {
-        return `${color(
-          'warning',
-          theme,
-        )(
-          'Error backing up existing Zed keymap. Bailing out.',
-        )}${EOL}${chalk.dim(`See ${formatPathLink(keymapPath)}`)}${EOL}${chalk.dim(`Backup path: ${formatPathLink(backupPath)}`)}${EOL}`;
+      contents = await readFile(keymapPath, { encoding: 'utf-8' });
+    } catch (error: unknown) {
+      if (!isFsInaccessible(error)) throw error;
+      if (!isENOENT(error)) {
+        return { message: unreadMessage, installed: false };
       }
     }
+    if (contents === null || contents.trim() === '') {
+      await writeFile(
+        keymapPath,
+        jsonStringify([{ context: 'Terminal', bindings: { 'shift-enter': [...ZED_SHIFT_ENTER] } }], null, 2) + EOL,
+        { encoding: 'utf-8' },
+      );
+      return { message: installedMessage, installed: true };
+    }
 
-    // Parse and modify the keymap
-    let keymap: Array<{
-      context?: string;
-      bindings: Record<string, string | string[]>;
-    }>;
+    const errors: ParseError[] = [];
+    const text = contents;
+    const parsed = parseJsonc(text, errors, { allowTrailingComma: true });
+    if (errors.length > 0 || !Array.isArray(parsed)) {
+      return { message: notListMessage, installed: false };
+    }
+    if (parsed.some(isZedTerminalKeymapContext)) {
+      return {
+        message: `${color('success', theme)('Zed Shift+Enter key binding already configured')}${EOL}${seePath}${EOL}`,
+        installed: true,
+      };
+    }
+
+    const randomSha = randomBytes(4).toString('hex');
+    const backupPath = `${keymapPath}.${randomSha}.bak`;
     try {
-      keymap = jsonParse(keymapContent);
-      if (!Array.isArray(keymap)) {
-        keymap = [];
-      }
-    } catch {
-      keymap = [];
+      await copyFile(keymapPath, backupPath);
+    } catch (error: unknown) {
+      logError(`Failed to back up Zed keymap: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        message: `${color('warning', theme)("Couldn't back up your Zed keymap; not modifying it.")}${EOL}${manualBlock}${EOL}`,
+        installed: false,
+      };
     }
 
-    // Add the new keybinding for terminal context
-    keymap.push({
-      context: 'Terminal',
-      bindings: {
-        'shift-enter': ['terminal::SendText', '\u001b\r'],
-      },
-    });
+    const existingTerminal = parsed.findIndex(
+      (entry: unknown) => isPlainObject(entry) && entry.context === 'Terminal' && isPlainObject(entry.bindings),
+    );
+    const formattingOptions = { insertSpaces: true, tabSize: 2 };
+    let edited: string | null = null;
+    try {
+      const edits =
+        existingTerminal >= 0
+          ? modify(text, [existingTerminal, 'bindings', 'shift-enter'], [...ZED_SHIFT_ENTER], {
+              formattingOptions,
+            })
+          : modify(
+              text,
+              [parsed.length],
+              { context: 'Terminal', bindings: { 'shift-enter': [...ZED_SHIFT_ENTER] } },
+              { formattingOptions, isArrayInsertion: true },
+            );
+      edited = edits.length > 0 ? applyEdits(text, edits) : null;
+    } catch (error: unknown) {
+      logError(`Failed to edit Zed keymap: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
-    // Write the updated keymap
-    await writeFile(keymapPath, jsonStringify(keymap, null, 2) + '\n', {
-      encoding: 'utf-8',
-    });
+    const editedErrors: ParseError[] = [];
+    const editedParsed = edited === null ? null : parseJsonc(edited, editedErrors, { allowTrailingComma: true });
+    if (
+      edited === null ||
+      editedErrors.length > 0 ||
+      !Array.isArray(editedParsed) ||
+      !editedParsed.some(isZedTerminalKeymapContext)
+    ) {
+      return {
+        message: `${color('warning', theme)("Couldn't update your Zed keymap, so it was left unchanged.")}${EOL}${manualBlock}${EOL}`,
+        installed: false,
+      };
+    }
 
-    return `${color(
-      'success',
-      theme,
-    )('Installed Zed Shift+Enter key binding')}${EOL}${chalk.dim(`See ${formatPathLink(keymapPath)}`)}${EOL}`;
-  } catch (error) {
-    logError(error);
+    await writeFile(keymapPath, edited, { encoding: 'utf-8' });
+    return { message: installedMessage, installed: true };
+  } catch (error: unknown) {
+    logError(
+      `Failed to install Zed Shift+Enter key binding: ${error instanceof Error ? error.message : String(error)}`,
+    );
     throw new Error('Failed to install Zed Shift+Enter key binding');
   }
+}
+
+async function installBindingsForZed(theme: ThemeName): Promise<string> {
+  const zedDir = zedConfigDir();
+  const result = await installZedShiftEnterKeymap(theme, zedDir, join(zedDir, 'keymap.json'));
+  return result.message;
 }

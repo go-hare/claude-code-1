@@ -1,0 +1,2 @@
+# needle=updateSettingsForSource:()=>Rs pos=208305417
+updateSettingsForSource:()=>Rs,updateSettingsForSourceWithTransform:()=>ii});import{basename as Yo,dirname as ne,join as re,resolve as sr}from"path";class Xr{firedSites=new Set;fire(e){if(this.firedSites.has(e))return;th

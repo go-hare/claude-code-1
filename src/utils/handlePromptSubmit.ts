@@ -646,7 +646,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             modelScheduledOrigin: cmd.modelScheduledOrigin,
             wakeupSource: cmd.wakeupSource,
             isMeta: cmd.isMeta,
-            skipAttachments: !isFirst,
+            skipAttachments: cmd.skipAttachments === true || !isFirst,
             autonomy: cmd.autonomy,
             // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
             origin: cmd.origin,

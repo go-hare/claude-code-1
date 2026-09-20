@@ -1,0 +1,4 @@
+# gold-25-escape-ah "ah(" count=1
+
+--- @236118887 ---
+rror"}),t(Dd,{entries:R,color:"warning",noun:"note"})]}),oe=ah(I.plugin.manifest);return o(a,{flexDirection:"column",children:[t(a,{children:o(n,{bold:!0,children:[He(I.plugin)," @

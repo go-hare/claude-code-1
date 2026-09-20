@@ -1,0 +1,12 @@
+# off=218251623 js=true window="persist-to-disk failed: ${s.error}]`;let i=TF(s);return D(\"tengu_hook_output_persisted\",{source:X(n)"
+
+),{json:n.data};let r=n.error.issues,o=r[0],s=o?`${o.path.join(".")||"(root)"}: ${o.message}`:"unknown error";if(t&&typeof t==="object"&&"hookSpecificOutput"in t&&t.hookSpecificOutput&&typeof t.hookSpecificOutput==="object"&&!Array.isArray(t.hookSpecificOutput)&&!("hookEventName"in t.hookSpecificOutput))s='hookSpecificOutput is missing required field "hookEventName"';let i=r.slice(1).map((a)=>`  - ${a.path.join(".")||"(root)"}: ${a.message}`).join(`
+`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=await VP(e,`hook-${t}-${n}`,Cv(),o);if(KP(s))return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:e.length,persistedSizeBytes:0,truncatedFallback:!0}),`${e.slice(0,r)}
+
+[Hook ${n} truncated at ${r} chars \u2014 persist-to-disk failed: ${s.error}]`;let i=TF(s);return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:s.originalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}function B9e(e){let t=e.trim();if(!t.startsWith("{"))return _("Hook output does not start with {, treating as plain text"),{plainText:e};try{let n=n1r(t);if("json"in n)return n;let r=`${n.validationError}
+
+Expected schema:
+${le({continue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",permissionDecision:'"allow" | "deny" | "ask" (optional)',hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInpu

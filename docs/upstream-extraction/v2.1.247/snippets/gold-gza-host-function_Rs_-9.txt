@@ -1,0 +1,2 @@
+# needle=function Rs( pos=223479405
+function Rs(e){let t=await e.statMeta(A.state("last-cleanup"));if(t.ok||t.error.code==="NotFound"||!Pt(t.error))return;F("tengu_cleanup_throttle_marker",{marker:I("last-cleanup"),verdict:I("not_regular_rerun"),code:U(t.error.code),errno:kt("telemetryCode"in t.error?t.error.telemetryCode:void 0)});let r=await e.delete(A.state("last-cleanup"));w(`.last-cleanup: sentinel is not a regular file (${N(t.error)}) \u2014 ${_t(r)}; rewriting`,{level:"warn"})}

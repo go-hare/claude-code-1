@@ -1,0 +1,2 @@
+# p=tL=Lhe @222247238
+function p(n,i){let t=s().numStartups;u((o)=>{let r=o.tipsHistory??{};if(r[n]===t)return o;let e=o.tipLifetimeShownCounts??{};return{...o,tipsHistory:{...r,[n]:t},tipLifetimeShownCounts:{...e,[n]:(e[n]??0)+1}}},i)}

@@ -1,0 +1,5 @@
+# class Zt{ pos=227672146 end=227673167 len=1021
+class Zt{rl;height=0;extraLinesUnderPrompt=0;cursorPos;constructor(e){this.rl=e,this.rl=e,this.cursorPos=e.getCursorPos()}write(e){this.rl.output.unmute(),this.rl.output.write(e),this.rl.output.mute()}render(e,t=""){let r=Jl(e),n=Gi.default(r),i=n;if(this.rl.line.length>0)i=i.slice(0,-this.rl.line.length);this.rl.setPrompt(i),this.cursorPos=this.rl.getCursorPos();let o=Ht();if(e=Et(e,o),t=Et(t,o),n.length%o===0)e+=`
+`;let u=e+(t?`
+`+t:""),a=Math.floor(n.length/o)-this.cursorPos.rows+(t?Ji(t):0);if(a>0)u+=Se.default.cursorUp(a);u+=Se.default.cursorTo(this.cursorPos.cols),this.write(Ki(this.extraLinesUnderPrompt)+Se.default.eraseLines(this.height)+u),this.extraLinesUnderPrompt=a,this.height=Ji(u)}checkCursorPos(){let e=this.rl.getCursorPos();if(e.cols!==this.cursorPos.cols)this.write(Se.default.cursorTo(e.cols)),this.cursorPos=e}done({clearContent:e}){this.rl.setPrompt("");let t=Ki(this.extraLinesUnderPrompt);t+=e?Se.default.eraseLines(this.height):`
+`,t+=Se.default.cursorShow,this.write(t),this.rl.close()}}

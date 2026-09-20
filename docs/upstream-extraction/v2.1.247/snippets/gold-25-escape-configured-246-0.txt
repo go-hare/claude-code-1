@@ -1,0 +1,51 @@
+# offset=196469308 ver=246 hit=1/4 js=false sha=e30b495cafa736db needle="Configured marketplaces:"
+
+val [path]
+
+Run trigger evaluations for a skill against the queries in its evals/ folder.
+
+Examples:
+  /plugin eval ./my-skill
+  /plugin eval ~/.claude/skills/pdf-tools
+
+Each evals/*.md file needs frontmatter with `query` (string)
+and `should_trigger` (boolean). The spec recommends at least five.
+
+Or from the command line:
+  claude plugin eval [path]....=... Evaluation failed..@...Q.>. Eval queries validated; trigger tests pending model integration....V_@. Evaluation passed......^YM.Plugin eval failed for .........Marketplace not found: .........claude-plugin-directory.......f.Failed to load description..........alwaysAskRules..........mcpPermissionModeOverrides.......	..Failed to write settings: ..
+...b.:. Disabled ..>....... in .claude/settings.local.json. Run /reload-plugins to apply........... from .claude/settings.json.......	. . data preserved...%....%_.Failed to read raw marketplace.json: ........I^.enabledCount*.....z.Failed to check plugin update availability........5.No MCPB file found in plugin....6...needs-config%.....T.Failed to load MCPB for configuration.......S...Failed to load configuration: .......~<. Unexpected argument "......1...".
+
+	...}...Plugin:  .......'.X. (from ......%P.Marketplace entry: plugins[.......y.] in ........-.. (version: .	....zt.Tag:     .........m.git -C ......... push ..........--force ....j_..origin refs/tags/.......O... .D.r.y. .r.u.n. ..  .w.o.u.l.d. .c.r.e.a.t.e. .t.a.g. ......... at HEAD in 	...DkE.  git -C .......mT.. tag .........?. -m "......D... Created tag .........x. Pushed to origin......b...  Push with: ...<.....Q.For -m/--message and --remote, use: claude plugin tag --help....41k.versionFrom.
+...qv8.entryIndex........S.entryVersionO..... .Usage: /plugin validate <path>
+
+Validate a plugin or marketplace manifest, or the skills, agents,
+and commands in a directory.
+
+Examples:
+  /plugin validate .claude-plugin/plugin.json
+  /plugin validate /path/to/plugin-directory
+  /plugin validate .claude/skills
+  /plugin validate .claude
+  /plugin validate .
+
+When given a directory, validates .claude-plugin/marketplace.json
+or .claude-plugin/plugin.json (prefers marketplace if both exist).
+With no manifest, the components are validated instead: a directory
+named skills, agents, or commands validates its own; a directory
+named .claude validates the ones inside it; any other directory
+validates the ones under .claude, plus its top-level ones if a
+.claude-plugin directory or a skills/<name>/SKILL.md marks it as a
+plugin checkout.
+
+Or from the command line:
+  claude plugin validate <path>.C...Z...Cannot destructure property 'manifest' from null or undefined value....._Hl.Validating ......... manifest: .........Validating components in: ........G. Found .!...S.V. Validation passed with warnings
+........[=. Validation passed
+....._`U. Validation failed
+.*....R9.Plugin validation failed unexpectedly for ..%...sg!. Unexpected error during validation: ........>..fileType....gx|.No marketplaces configured.......3[.Configured marketplaces:
+.......$...Error loading marketplaces: C.... ..Cannot destructure property 'failures' from null or undefined value......5+. Removed marketplace ".....././.Failed to remove ".......Y..Failed to reverse the toggle: ..5......./plugin: reversing a pending toggle on the list threw...........alreadyInGoalState.......S..Failed to toggle: ..,...e.../plugin: toggling a plugin on the list threw........file:///B:/%7EBUN/root/_91.js...
+.....p.skillIndex..	.... ..no-plugin.........`.HTTP8.....#.useMcpReconnect must be used within MCPConnectionManager<...d...useMcpToggleEnabled must be used within MCPConnectionManagerM....qG.Cannot destructure property 'reconnectMcpServer' from null or undefined value..........policyVersion...........pluginReconnectKey..
+.......setChannel......_.s.mcp-first-party-scope-expanded..U....i..Cannot destructure property 'registerElicitationHandler' from null or undefined value... ....J..Channel notifications registered.....^	.notifications/claude/channel.....+S.Channel gate says skip:.3...bB.. .b.u.t. .w.a.s. .p.r.e.v.i.o.u.s.l.y. .r.e.g.i.s.t.e.r.e.d. ..  .p.r.e.s.e.r.v.i.n.g. .h.a.n.d.l.e.r...........Channel notifications skipped: .
+.....E.capability..........era:$....g..Channels are not currently available9....i/.Channels are not available on Bedrock, Vertex, or Foundry...k.....\.Channels are not enabled for your org . have an administrator set channelsEnabled: true in managed settings.....Q...Channel messages from ".R...U2.." are unavailable: this connection's protocol version has no channel delivery path......Z.U.channels-blocked-era-.......J.U.channels-blocked-.........).tengu_mcp_channel_gate..
+.......Transient .....<...<sse-no-code>........2I. .o.n. .i.n.i.t.i.a.l. .c.o.n.n.e.c.t. ..  .r.e.t.r.y. .....(...replaceOnly.......a.registerElicitationHandler..........transportErrorState.....4
+..removeNotificationHandler...	.....T.skip_kind...
+.......entry_kind......c...is_dev......I...listChanged......5..onMcpToolListChanged.....7..onMcpPromptListChanged........z.onMcpResourceListChanged........reconnectAttempt......S.maxReconnectAttempts........detachAndCloseConnection3....f..Server is disabled, skipping automatic reconnection.A....N]. transport closed/disconnected, attempting automatic reconnection.......bG..claude/channel/permission.......T.1.onMcpNotification...M.......Server blocked by managed policy during initial-connect retry, stopping retry.......`...takeSettledCachedDialFailure........useManageMCPConnecti

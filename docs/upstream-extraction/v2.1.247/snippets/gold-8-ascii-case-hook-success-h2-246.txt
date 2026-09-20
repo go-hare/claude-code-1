@@ -1,0 +1,3 @@
+# offset=220214544 ver=246 hit=3/4 ratio=1.000 needle="case\"hook_success\""
+
+ush(St({type:"hook_additional_context",content:m.additionalContexts,hookName:"UserPromptSubmit",toolUseID:`hook-${_t()}`,hookEvent:"UserPromptSubmit"}));if(m.message)switch(m.message.attachment.type){case"hook_success":if(!m.message.attachment.content)break;i.messages.push(m.message);break;default:i.messages.push(m.message);break}}}catch(m){if(!(m instanceof nn))throw m;T("UserPromptSubmit hooks cancelled (control stream closed)")}return{sessionTitle:R}}var bi="the prompt did not go through prompt.submit (a command, bash mode, an input that did not query, or a failed pass)";function Si(t){let 

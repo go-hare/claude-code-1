@@ -1,0 +1,8 @@
+# sk = _709 ks as eIc; gza imports eIc as sk
+# @208099456
+ks=["userSettings","projectSettings","localSettings"]
+# neighbors
+de=["userSettings","projectSettings","localSettings","flagSettings","policySettings"]
+Es=new Set(["projectSettings","localSettings"])
+Os=["localSettings","projectSettings","userSettings"]
+# export @208142871 ks as eIc

@@ -1,0 +1,4 @@
+# offset=197078776 tag=x1b
+
+.....D..^['\u2019]*$........surveyRating....$.v.rc-active-badge.$...9G.. Large workflow . /workflows to stop....u.8. Large workflow......%..idle-teammate-summary...........launch-prompt-warning...........persistence-suppressed..........transcript-writer-degraded..	....|..disk full.......M...read-only filesystem.....-..disk quota exceeded....;<A.path too long.......?W.permission denied...1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........K..rulz12.......W..cursorOffset......`.pastedContents.....T.).stashedPrompt........y..isInputOverlayActive....XW..isVimEditing....(...inputOwnsEscape. .....J.https://claude.ai/settings/usage
+....Q..fotw-claim........l.noteSend........noteSendFailed..........onResetFrame.....;..forget......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse.......eWx.low-priority

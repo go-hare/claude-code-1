@@ -1,0 +1,2 @@
+# pos=214105871 needle="function BOe(" len=60
+function BOe(e){return`${e}${Upt}${jIo(4).toString("hex")}`}

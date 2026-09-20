@@ -1,0 +1,193 @@
+# PASS2 extract jdb spread-mount callers
+LR-mount call@211364646 walkBack function@211364564
+LR-caller @211364564 end=211364670 len=106
+LR-prevfn @211364067 end=211364401 len=334
+LR-afterfn0 @211364670 len=59 function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}
+LR-afterfn1 @211364735 len=152 function m8(e,o,i){let l=i?.storageV5!==void 0?L0(i.storageV5):void 0;if(o!==void 0&&"write"in o)return Iy(H0(e,l),o);return Iy(H0(e,l),{...kR(),...o})}
+LR-afterfn2 @211364893 len=138 function h8(e,o){let i=await Fx({...kR(),...e}),l=o?.storageV5!==void 0?L0(o.storageV5):void 0;return{...i,render:(s)=>i.render(H0(s,l))}}
+LR-afterfn3 @211367579 len=623 function P(e){let t=e.split("+"),n={key:"",ctrl:!1,alt:!1,shift:!1,meta:!1,super:!1};for(let r of t){let o=r.toLowerCase();switch(o){case"ctrl":case"control":n.ctrl=!0;break;case"a
+Ar-mount call@223181692 walkBack function@223180338
+Ar-caller @223180338 end=223181771 len=1433
+LR-near-export strings count=67
+  STR "}};if(i===He.SCORC)return{type:"
+  STR ",action:{type:"
+  STR "}};if(i===He.DECSCUSR&&f==="
+  STR ")return{type:"
+  STR ",action:{type:"
+  STR ",...p0[p]??p0[0]}};if(s==="
+  STR "unknown"
+  STR "unknown"
+  STR "unknown"
+  STR "unknown"
+  STR ";if(o===93)return"
+  STR ";if(o===79)return"
+  STR ";return"
+  STR "}class Bd{tokenizer;forOutput;tail="
+  STR ",e}reset(){this.tail="
+  STR "){let u=this.tail+s.value;this.tail="
+  STR ")===-1){let u=[...B2(e)];return this.holdTail(u,o),u.length>0?[{type:"
+  STR ",graphemes:u,style:i}]:[]}let l=[];for(let u of e.split("
+  STR ")){if(u){let f=[...B2(u)];if(f.length>0)l.push({type:"
+  STR ",graphemes:f,style:i})}l.push({type:"
+  STR "})}l.pop();let s=l.at(-1);if(s?.type==="
+  STR ":{let i=ZO(e);if(!i)return[];if(Array.isArray(i))return i;if(i.type==="
+  STR ")return this.style=O2(i.params,this.style),[];return[i]}case"
+  STR ":{let i=e.slice(2);if(i.endsWith("
+  STR "))i=i.slice(0,-1);else if(i.endsWith("
+  STR "))i=i.slice(0,-2);let l=z2(i);if(l){if(l.type==="
+  STR ")if(l.action.type==="
+  STR ":{let i=e.slice(1),l=_2(i);if(l?.type==="
+  STR ")this.style=rs(),this.inLink=!1,this.linkUrl=void 0;return l?[l]:[]}case"
+  STR ":return[{type:"
+  STR ",sequence:e}];default:return[{type:"
+  STR "){if(u.action.type==="
+  STR ")s=u.action.url;else s=void 0;continue}if(u.type==="
+  STR "){let f=u.graphemes.map((p)=>p.value).join("
+  STR ":return lw[e.name];case"
+  STR ":return`ansi256(${e.index})`;case"
+  STR ":return`rgb(${e.r},${e.g},${e.b})`;case"
+  STR "string"
+  STR "ansi:black"
+  STR "ansi:red"
+Ar-mod strings count=59
+  STR ",Wn),()=>{aa?.(),process.off("
+  STR "action"
+  STR "single"
+  STR "command:"
+  STR "command:custom"
+  STR "tengu_keybinding_fired"
+  STR "[keybindings] Chord timeout - cancelling"
+  STR "legacy"
+  STR "Global"
+  STR "chord_started"
+  STR "legacy"
+  STR "chord_cancelled"
+  STR "unbound"
+  STR "Global"
+  STR "legacy"
+  STR "scopeChain"
+  STR "Global"
+  STR "&&ue){if(ve(ue,be,yt.action,!1,be.type==="
+  STR "single"
+  STR "chord_started"
+  STR "scopeChain"
+  STR "chord_started"
+  STR "scopeChain"
+  STR "single"
+  STR "unbound"
+  STR "wheelup"
+  STR "wheeldown"
+  STR "Global"
+  STR "column"
+  STR "attributes"
+  STR "string"
+  STR "useMailbox must be used within a MailboxProvider"
+  STR "artifact_live_subscribe"
+  STR "booting_consent_uncarried"
+  STR "artifact_live_subscribe"
+  STR "booting_consent_uncarried"
+  STR "background"
+  STR "background"
+  STR "task_local_agent_exit_handoff"
+  STR "flush_timeout"
+  STR "flush_failed"
+  STR "tengu_adopt_exit_handoff"
+  STR "task_local_shell_exit_handoff"
+  STR "task_local_workflow_exit_handoff"
+  STR "task_local_agent_exit_handoff"
+  STR "task_local_shell_exit_handoff"
+  STR "write_failed"
+  STR "task_local_workflow_exit_handoff"
+  STR "write_failed"
+  STR "task_local_agent_exit_handoff"
+"Qu(LR,{...o,children:i})" count=1 211364643
+  @211364643 null,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function m8(e,o,i){let l=i?.
+"o!==void 0?Qu(LR" count=1 211364632
+  @211364632 et i=Qu(z0,null,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function m8(e,o,i
+"n(Ar,{...Dn,children:_r})" count=1 223181690
+  @223181690 ){return _r}let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=oe[28];return Ls}var $s=B(()=>{ne();vn();Or();Ws();Br();
+"sessionServices" count=2 150322289,224228780
+  @150322289 0008500ec165a1f1be4a04C00000851credentialsStoreForsessionServicesFortryCreateCredentialsStoreB:/~BUN/root/_651.jsB:/~BUN/root/_723.jsB:/~BUN/root/_819.jsB:/~BUN/root/_826
+  @224228780 _850.js";d();export{a as credentialsStoreFor,b as sessionServicesFor,c as tryCreateCredentialsStore}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's 
+"Y7b as " count=3 210990148,223161300,224228076
+  @210990148 as Gy,z3b as Lu}from"B:/~BUN/root/_634.js";import{Y7b as L0,_7b as Zw}from"B:/~BUN/root/_651.js";import{Bac as nD,yac as SE}from"B:/~BUN/root/_668.js";import{Csc as ju,Fs
+  @223161300 as Xt,d4b as ws}from"B:/~BUN/root/_636.js";import{Y7b as Tr,_7b as js}from"B:/~BUN/root/_651.js";import{Bac as qi,yac as sn}from"B:/~BUN/root/_668.js";import{Awc as lt,Bw
+  @224228076 -compliance.  // Version: 2.1.247 import{X7b as a,Y7b as b,Z7b as c,_7b as d}from"B:/~BUN/root/_651.js";import"B:/~BUN/root/_723.js";import"B:/~BUN/root/_819.js";import"B
+"X7b as " count=7 221913673,221940991,222198009,223208480,224137756,224228067,237622291
+  @221913673 as le,T0b as Xe}from"B:/~BUN/root/_622.js";import{X7b as Se,_7b as rt}from"B:/~BUN/root/_651.js";import{Iuc as Te,Lxc as et,Mwc as Ae,Vuc as Qe,mwc as ve}from"B:/~BUN/roo
+  @221940991 root/_648.js";import"B:/~BUN/root/_649.js";import{X7b as Rt,_7b as Gn}from"B:/~BUN/root/_651.js";import"B:/~BUN/root/_655.js";import"B:/~BUN/root/_656.js";import"B:/~BUN/
+  @222198009  as T,W7b as jt}from"B:/~BUN/root/_650.js";import{X7b as A,_7b as qt}from"B:/~BUN/root/_651.js";import{$7b as D,a8b as Xt}from"B:/~BUN/root/_652.js";import{g_b as Ve,i_b 
+  @223208480 root/_649.js";import"B:/~BUN/root/_650.js";import{X7b as Do,_7b as _l}from"B:/~BUN/root/_651.js";import"B:/~BUN/root/_652.js";import"B:/~BUN/root/_655.js";import"B:/~BUN/
+  @224137756 root/_648.js";import"B:/~BUN/root/_649.js";import{X7b as K,_7b as ve}from"B:/~BUN/root/_651.js";import"B:/~BUN/root/_655.js";import"B:/~BUN/root/_656.js";import"B:/~BUN/r
+  @224228067 legal-and-compliance.  // Version: 2.1.247 import{X7b as a,Y7b as b,Z7b as c,_7b as d}from"B:/~BUN/root/_651.js";import"B:/~BUN/root/_723.js";import"B:/~BUN/root/_819.js"
+"ce as " count=15 82300482,82467308,83598852,85057422,87886678,87996360,88176190,198647467,201856519,201856630,203001919,203001982,203083067,203691150,204046469
+  @82300482 ort?.(err);     },   } as Bun.DirectUnderlyingSource as any); }  // Static builds can not stream suspense boundaries as they finish, but instead // produce a single HTML 
+  @82467308 ,fe as __decorateElement,K as __decoratorMetadata,ce as __decoratorStart,se as __esm,te as __export,oe as __exportDefault,re as __exportValue,be as __jsonParse,ae as __le
+  @83598852 un pm diff)Show files that differ only in whitespace as 'whitespace only' instead of hunks (bun pm diff)ignore-spaceOnly list the files that differ (bun pm diff)name-only
+  @85057422 ext.segment_length as u64) !=         position.slice as u64.Bad hash length: ...ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/...
+  @87886678 .I64Popcnt.I32Popcnt.MaxPgcnt.gost89-cnt.: in source as link-time-constant.initializer element is not constant.default value of column [%s] is not constant.can't parse 64
+  @87996360 eoptimizationTrigger.jsPsiTrigger.jigger.: in source as integer.switch value not an integer.Not an integer.size of variable length array should be an integer.day property
+"function ce(" count=15 68207374,206607166,206922304,206932978,207467893,207522475,207551776,207570191,207573234,207720469,207728960,207782473,207927722,208334473,208954064
+  @68207374 et"&&r==="sget"?(e[i]="true",!1):s?!0:(e[i]=r,!1)}function ce(e,t){var i=e.computed,s=e.key;return!i&&(s.type==="Identifier"&&s.name===t||s.type==="Literal"&&s.value===t)
+  @206607166 if(e instanceof File)return"file";return"unknown"}function ce(e){if(Array.isArray(e))return"array";if(typeof e==="string")return"string";return"unknown"}function De(...e)
+  @206922304 rn t(process.env.CLAUDE_CODE_SIMPLE)||p("--bare")}function ce(){return t(process.env.CLAUDE_CODE_SAFE_MODE)||p("--safe-mode")}function Ee(){return p("--safe-mode")?"resta
+  @206932978 this.__data__.has(e)}var kn;var xn=i(()=>{kn=Ps});function ce(e){var t=-1,o=e==null?0:e.length;this.__data__=new ue;while(++t<o)this.add(e[t])}var An;var Pn=i(()=>{Sn();C
+  @207467893 e=ae+te+ne,de="["+fe+"]",ie=RegExp(de,"g");S=se});function ce(e){return e.match(xe)||[]}var xe,E;var A=o(()=>{xe=/[^\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g;E=ce});functi
+  @207522475 f(ae.has(u))return;t.truncatedBy??=u,r.kill()}),t}function ce(r,t){if(r.shortMessage)return r.shortMessage;if(typeof r.signal==="string")return r.signal;return String(t)}
+LRmod "Y7b as " count=1 210990148
+  @210990148 as Lu}from"B:/~BUN/root/_634.js";import{Y7b as L0,_7b as Zw}from"B:/~BUN/root/_651.js";import{Bac as nD,yac as SE}from"B:/~BUN/root/_668.js"
+LRmod "X7b as " count=0 
+LRmod "Z7b as " count=0 
+LRmod "ce(" count=20 210997451,210997550,211011281,211011351,211022737,211022820,211040639,211040720,211063304,211148643,211148759,211148873,211155616,211162305,211162436,211162613,211162660,211162726,211162856,211162939
+  @210997451 onfig");e.parent=this,this.children.splice(o,0,e),this.markDirty()}removeChild(e){let o=this.children.indexOf(e);if(o>=0)this.children.splic
+  @210997550 en.indexOf(e);if(o>=0)this.children.splice(o,1),e.parent=null,this.markDirty()}getChild(e){return this.children[e]}getChildCount(){return th
+  @211011281 ),C=b>p?f:0;if(b>p&&y+C+E>o)m.push(e.slice(p,b)),p=b,y=E;else y+=C+E;S._lineIndex=m.length}return m.push(e.slice(p)),m}function vM(e,o,i,l,s
+  @211011351 ._lineIndex=m.length}return m.push(e.slice(p)),m}function vM(e,o,i,l,s,u){let f=0,m=0;for(let p=0,y=o.length;p<y;p++){let b=o[p];if(Rb(e,b)!
+  @211022737 =dh(x[0]);if(p.push(N??Ea(x[0])),M=w.slice(x[0].length),!M)continue}}if(!y&&u){let w=u+M,x=YM.exec(w);if(x){if(u="",M=w.slice(x[0].length),!
+LRmod "sessionServicesFor" count=0 
+LRmod "credentialsStoreFor" count=0 
+
+# 246 Provider export + mounts
+same 246=1 247=1 " as ubb"
+  246 @209590953 w;var B=u(()=>{f();w=r(null)}); export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Servic
+DIFF 246=2 247=1 "ubb as "
+  246 @209678726 as $w}from"B:/~BUN/root/_487.js";import{ubb as LR,wbb as Jw,xbb as ed,ybb as jE}from"B:/~BUN/root/_491.js";import{Abb as ft,zbb as it}from"B:/~BUN/root/_492.js";import{Cbb as Q,Dbb
+  246 @221260717 as Et}from"B:/~BUN/root/_485.js";import{ubb as Eo,vbb as ge,wbb as gt}from"B:/~BUN/root/_491.js";import{Abb as L,zbb as O}from"B:/~BUN/root/_492.js";import{Bbb as At,Cbb as s,Ebb a
+same 246=1 247=1 " as vbb"
+  246 @209590962 (()=>{f();w=r(null)}); export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By 
+DIFF 246=20 247=1 "vbb as "
+  246 @209634232 as Sn}from"B:/~BUN/root/_488.js";import{vbb as We,wbb as Zr}from"B:/~BUN/root/_491.js";import{Abb as wt,zbb as te}from"B:/~BUN/root/_492.js";import{Cbb as ee,Ebb as ce}from"B:/~BUN
+  246 @211445525 s Z0s}from"B:/~BUN/root/_489.js";import{vbb as Rwt,wbb as tBo}from"B:/~BUN/root/_491.js";import{Abb as aZ,zbb as lZ}from"B:/~BUN/root/_492.js";import{Bbb as tme,Cbb as Pc,Dbb as hc
+  246 @221077065 as Qr}from"B:/~BUN/root/_487.js";import{vbb as Ot,wbb as zr}from"B:/~BUN/root/_491.js";import{Ofb as br}from"B:/~BUN/root/_499.js";import{Shb as qt,Uhb as $t,Whb as Ut,Xhb as Yt,Zh
+  246 @221260727 "B:/~BUN/root/_485.js";import{ubb as Eo,vbb as ge,wbb as gt}from"B:/~BUN/root/_491.js";import{Abb as L,zbb as O}from"B:/~BUN/root/_492.js";import{Bbb as At,Cbb as s,Ebb as I}from"B
+  246 @221284988 as ne}from"B:/~BUN/root/_482.js";import{vbb as j,wbb as Y}from"B:/~BUN/root/_491.js";import{Abb as G,zbb as U}from"B:/~BUN/root/_492.js";import{Bbb as te,Cbb as s,Dbb as u,Ebb as m
+  246 @221636354 as js}from"B:/~BUN/root/_485.js";import{vbb as Oe,wbb as wi}from"B:/~BUN/root/_491.js";import{Abb as me,zbb as oe}from"B:/~BUN/root/_492.js";import{Bbb as et,Cbb as s,Dbb as h,Ebb 
+DIFF 246=1 247=0 "export{z as ubb"
+  246 @209590945 )});var w;var B=u(()=>{f();w=r(null)}); export{z as ubb,b as vbb,k as wbb,w as xbb,B as ybb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms o
+same 246=2 247=2 "{...o,children:"
+  246 @210054364 Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function d8(e,o,i){let l=i?.storageV5!==void 0?H0(i.st
+  246 @247317804 -danger",e),render:o=>(0,oi.jsxs)("div",{...o,children:[(0,oi.jsx)(Hi,{name:"WarningCircle",size:"sm",className:"mt-px shrink-0"}),(0,oi.jsx)("span",{children:t??o.children})]})}))
+DIFF 246=0 247=1 "{...Dn,children:"
+same 246=20 247=20 "!==void 0?"
+  246 @204726570 ntId:t,environmentKey:r,...this.workerId!==void 0?{workerId:this.workerId}:{},...s?{signal:s}:{},...this.requestOptions!==void 0?{requestOptions:this.requestOptions}:{},autoStop:!1
+  246 @204726649 ..s?{signal:s}:{},...this.requestOptions!==void 0?{requestOptions:this.requestOptions}:{},autoStop:!1});for await(let i of n)await o(this,Ws,"m",ni).call(this,i,r,n.signal)}async h
+  246 @204728953 nt,sessionId:c,...this.unrestrictedPaths!==void 0?{unrestrictedPaths:this.unrestrictedPaths}:{},...this.maxFileBytes!==void 0?{maxFileBytes:this.maxFileBytes}:{}},h=await import("B
+  246 @204729029 restrictedPaths}:{},...this.maxFileBytes!==void 0?{maxFileBytes:this.maxFileBytes}:{}},h=await import("B:/~BUN/root/chunk-93azvgr7.js"),m=async()=>{};try{m=await h.setupSkills(a)}c
+  246 @204729572 Ze(c,{client:i,tools:y,...this.maxIdleMs!==void 0?{maxIdleMs:this.maxIdleMs}:{},...this.requestOptions!==void 0?{requestOptions:this.requestOptions}:{},signal:d.signal});for await(
+  246 @204729634 his.maxIdleMs}:{},...this.requestOptions!==void 0?{requestOptions:this.requestOptions}:{},signal:d.signal});for await(let R of S);}finally{d.abort(),u(),await g,await m().catch((S)
+246 ubb as count=2
+  246 ubb-import @209678726 ~BUN/root/_486.js";import{jbb as zR,lbb as $w}from"B:/~BUN/root/_487.js";import{ubb as LR,wbb as Jw,xbb as ed,ybb as jE}from"B:/~BUN/root/_491.js";import{Abb as ft,zbb as it}from"B:/~BUN/root/_492.js";import{Cbb as Q,Dbb as Rt,Ebb as ze}fro
+  246 ubb-import @221260717 i}from"B:/~BUN/root/_482.js";import{Wab as Et}from"B:/~BUN/root/_485.js";import{ubb as Eo,vbb as ge,wbb as gt}from"B:/~BUN/root/_491.js";import{Abb as L,zbb as O}from"B:/~BUN/root/_492.js";import{Bbb as At,Cbb as s,Ebb as I}from"B:/~BUN/roo
+246 "{...o,children:i}" count=1
+  @210054364 (L0,null,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function d8(e,o,i){let l=i?.storageV5!==void 0?H0(i.st
+246 "{...o,children:" count=2
+  @210054364 (L0,null,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function d8(e,o,i){let l=i?.storageV5!==void 0?H0(i.st
+  @247317804 te leading-snug text-danger",e),render:o=>(0,oi.jsxs)("div",{...o,children:[(0,oi.jsx)(Hi,{name:"WarningCircle",size:"sm",className:"mt-px shrink-0"}),(0,oi.jsx)("span",{children:t??o.children})]})}))
+246 "children:i}):i}" count=1
+  @210054370 ll,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function d8(e,o,i){let l=i?.storageV5!==void 0?H0(i.storageV
+246 "!==void 0?Qu(" count=1
+  @210054348 F0(e,o){let i=Qu(L0,null,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function d8(e,o,i){let l=i?.storageV5!
+246 "!==void 0?n(" count=1
+  @234701950 ==_.rows||Q[17]!==_.unavailableReason)ft=_.unavailableReason!==void 0?n(o,{dimColor:!0,children:["None of this machine's hooks are offered (",_.unavailableReason,")."]}):_.rows.length===0?e(o,{dimColo
+246 "!==void 0?a(" count=0
+246 "!==void 0?t(" count=0

@@ -1,0 +1,32 @@
+# oKc/pKc vs lJc/mJc
+
+247 oKc function=0 var=0 as=7 fn@ var@
+247 pKc function=0 var=0 as=3 fn@ var@
+247 tKc function=0 var=0 as=8 fn@ var@
+247 vKc function=0 var=0 as=4 fn@ var@
+247 yKc function=0 var=0 as=10 fn@ var@
+246 lJc function=0 var=0 as=7 fn@ var@
+246 mJc function=0 var=0 as=3 fn@ var@
+246 qJc function=0 var=0 as=8 fn@ var@
+246 sJc function=0 var=0 as=4 fn@ var@
+246 vJc function=0 var=0 as=10 fn@ var@
+247 B:/~BUN/root/_712.js hits=874 @97537333,98205026,100436139,100642450,101350247
+246 B:/~BUN/root/_708.js hits=870 @97770756,98198551,100192847,100203127,100317081
+g-call 246=31 247=48 uniqueCtx=30
+function _g( 246=8 247=10
+247 _g @206496320 len=158 sha=3406381afee5e853
+247 _g @208717371 len=44 sha=117cb81fc92f9423
+247 _g @209911263 len=2519 sha=51c6840b9c207829
+247 _g @219952876 len=143 sha=03d4050e8e4a6df3
+247 _g @223747899 len=127 sha=7a77dc942f3e391d
+247 _g @226940265 len=154 sha=8c3018c0e383834a
+247 _g @229949761 len=148 sha=a967d84469652a7c
+247 _g @238394888 len=148 sha=03290651f6cf08d7
+247 _g @248965283 len=376 sha=22697f10c0a5e126
+246 _g @207403230 len=470 sha=23fd9c0c1048d20d
+246 _g @208245285 len=54 sha=1989a4db7bc1a7ca
+246 _g @211209443 len=31 sha=3ee9564a92007f54
+246 _g @224819104 len=154 sha=8c3018c0e383834a
+246 _g @228058475 len=148 sha=a967d84469652a7c
+246 _g @235633116 len=148 sha=03290651f6cf08d7
+246 _g @246843939 len=376 sha=22697f10c0a5e126

@@ -155,10 +155,25 @@ async function querySessionTitle({
   const text = extractTextContent(
     result.message.content as readonly { readonly type: string }[],
   )
+  return parseSessionTitleResponse(text)
+}
+
+/**
+ * Official `B` prefers fenced JSON `{title}`. Proxies that drop
+ * `output_config.format` often return a bare noun phrase — accept a single
+ * short line so local auto-title matches official Haiku success.
+ */
+export function parseSessionTitleResponse(text: string): string | null {
   const parsed = titleSchema().safeParse(
     safeParseJSON(stripMarkdownJsonFence(text), false),
   )
-  return parsed.success ? parsed.data.title.trim() || null : null
+  if (parsed.success) {
+    return parsed.data.title.trim() || null
+  }
+  const line = stripMarkdownJsonFence(text).trim()
+  if (!line || line.includes('\n') || line.length > 80) return null
+  if (line.startsWith('{') || /^API Error/i.test(line)) return null
+  return line
 }
 
 /**

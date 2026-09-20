@@ -1,0 +1,3 @@
+# 247 _g( @215960502
+
+rr();zf();tp();ia();_A();Nr();be();an();qTt();qw();Qo();so();xe();bx();Mt();aD();br();eh();uo();h3();zp();zIe();Rd();WG();ln();Mze();Gc();uh();fS();zy();ug();yi();Qm();Vye();la();JB();Op();ej();kd();CT();sS();op();ty();Qae();Qv();D1();nF();PC();DP();_g();ti();gye();$3();Hos=(Oi(),It(vze)).ARTIFACT_TOOL_NAME,Wos=(Oi(),It(vze)).isPublishShapedArtifactAction,brr=new Set([vf,sp,Up,eT,L_]);bor=ae(()=>pe({agentId:I(),harnessNoteCount:Te().optional().describe("@internal Count of leading harness-authored content blocks (hand-back provenance bookkeeping; not a stable consumer field)"),harnessTailCount:

@@ -1,0 +1,2 @@
+# needle=async function ame( pos=214576324
+async function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}

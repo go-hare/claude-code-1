@@ -1,0 +1,8 @@
+# offset=218251582 ver=247 hit=1/1 needle="Hook ${n} truncated"
+
+turn{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=await VP(e,`hook-${t}-${n}`,Cv(),o);if(KP(s))return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:e.length,persistedSizeBytes:0,truncatedFallback:!0}),`${e.slice(0,r)}
+
+[Hook ${n} truncated at ${r} chars \u2014 persist-to-disk failed: ${s.error}]`;let i=TF(s);return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:s.originalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}function B9e(e){let t=e.trim();if(!t.startsWith("{"))return _("Hook output does not start with {, treating as plain text"),{plainText:e};try{let n=n1r(t);if("json"in n)retu

@@ -1,0 +1,5 @@
+# r0n = Bm as DOb @209536872 (same export as py as mMb)
+# unique function Bm in that module @209388952
+function Bm(e){return/^\w[\w.@-]*$/.test(e)}
+# neighbor ur uses Bm to gate claude <cmd> <name> hint
+function Bm(e){return/^\w[\w.@-]*$/.test(e)}function ur(e,t,n){if(!Bm(t))return null;return`claude ${e} ${t}${n?` ${n}`:""}`}var $l=()=>{};function Fl(e){return Ho().safeParse(e).data}function V_(e){if(e.type==="path-not-found")return e.plugin===vo

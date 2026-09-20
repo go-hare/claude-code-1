@@ -1,0 +1,4 @@
+# mp SOURCE sl unique function sl(r count=1 @211421964
+# export sl as Heb @211611951 count=1
+# K8 import Heb as mp @212808064 count=1
+function sl(r,n){let a=zr(r,n);if(a===null||a.length!==3||!xe(a)||Yr(a[2]))return null;let[u,l,p]=a;return{marketplace:u,plugin:l,version:p}}

@@ -111,6 +111,23 @@ export const BLOCKED_OFFICIAL_NAME_PATTERN =
 const NON_ASCII_PATTERN = /[^\u0020-\u007E]/
 
 /**
+ * densable 2.1.247 — control + bidirectional-formatting code points rejected
+ * in marketplace / plugin names. Official: `[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]`.
+ */
+export const NAME_CONTROL_OR_BIDI_RE =
+  /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/u
+
+export const MARKETPLACE_NAME_CONTROL_OR_BIDI_MESSAGE =
+  'Marketplace name cannot contain control or bidirectional-formatting characters'
+
+export const PLUGIN_NAME_CONTROL_OR_BIDI_MESSAGE =
+  'Plugin name cannot contain control or bidirectional-formatting characters'
+
+export function hasControlOrBidiFormatting(name: string): boolean {
+  return NAME_CONTROL_OR_BIDI_RE.test(name)
+}
+
+/**
  * Check if a marketplace name impersonates an official Anthropic/Claude marketplace.
  *
  * @param name - The marketplace name to check
@@ -267,6 +284,9 @@ const MarketplaceNameSchema = lazySchema(() =>
       message:
         'Marketplace name cannot contain spaces. Use kebab-case (e.g., "my-marketplace")',
     })
+    .refine(name => !hasControlOrBidiFormatting(name), {
+      message: MARKETPLACE_NAME_CONTROL_OR_BIDI_MESSAGE,
+    })
     .refine(
       name =>
         !name.includes('/') &&
@@ -330,6 +350,9 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       .refine(name => !name.includes(' '), {
         message:
           'Plugin name cannot contain spaces. Use kebab-case (e.g., "my-plugin")',
+      })
+      .refine(name => !hasControlOrBidiFormatting(name), {
+        message: PLUGIN_NAME_CONTROL_OR_BIDI_MESSAGE,
       })
       .describe(
         'Unique identifier for the plugin, used for namespacing (prefer kebab-case)',
@@ -1293,6 +1316,14 @@ export const PluginSourceSchema = lazySchema(() =>
       .describe(
         'Plugin directory produced by running a shell command (marketplace `source: "command"`). The command must print a single absolute path to a plugin-shaped directory. Subject to managed-policy disableCommandPluginSources / allowManagedHooksOnly and interactive consent.',
       ),
+    z
+      .object({
+        source: z.literal('unsupported'),
+        error: z.string().optional(),
+      })
+      .describe(
+        'densable ho stub for a named marketplace plugin entry that failed schema parse',
+      ),
     // TODO (future work) gist
     // TODO (future work) single file?
   ]),
@@ -1326,6 +1357,9 @@ const SettingsMarketplacePluginSchema = lazySchema(() =>
         .refine(name => !name.includes(' '), {
           message:
             'Plugin name cannot contain spaces. Use kebab-case (e.g., "my-plugin")',
+        })
+        .refine(name => !hasControlOrBidiFormatting(name), {
+          message: PLUGIN_NAME_CONTROL_OR_BIDI_MESSAGE,
         })
         .describe('Plugin name as it appears in the target repository'),
       source: PluginSourceSchema().describe(
@@ -1473,6 +1507,9 @@ export const PluginMarketplaceEntrySchema = lazySchema(() =>
         .refine(name => !name.includes(' '), {
           message:
             'Plugin name cannot contain spaces. Use kebab-case (e.g., "my-plugin")',
+        })
+        .refine(name => !hasControlOrBidiFormatting(name), {
+          message: PLUGIN_NAME_CONTROL_OR_BIDI_MESSAGE,
         })
         .describe('Unique identifier matching the plugin name'),
       source: PluginSourceSchema().describe('Where to fetch the plugin from'),

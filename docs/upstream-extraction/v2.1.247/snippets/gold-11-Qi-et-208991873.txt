@@ -1,0 +1,3 @@
+# 208991873
+
+function Qi(e,t){if(e.backend==="remote")return!0;let n=Hn(t,ur(e));return n.split(/[/\\]/,1)[0]!==".."&&!Tt(n)}

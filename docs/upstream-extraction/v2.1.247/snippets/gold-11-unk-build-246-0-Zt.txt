@@ -1,0 +1,3 @@
+# 246 "denyLiteralSymlinkCandidates.push" @209122488 function Zt() start=209122437 end=209122769 len=332 sha=c8a7014972e4b89a
+
+function Zt(e){let t;try{t=zi(e)}catch{return Ce().denyLiteralSymlinkCandidates.push(e),e}let n;try{return n=xn(e),Ce().symlinkedDenyScrubPaths.push({literal:e,resolved:n}),n}catch{let r=re(dt(e),t);for(let s=0;s<8;s++){let i;try{i=zi(r)}catch{break}r=re(dt(r),i)}return Ce().symlinkedDenyScrubPaths.push({literal:e,resolved:r}),r}}

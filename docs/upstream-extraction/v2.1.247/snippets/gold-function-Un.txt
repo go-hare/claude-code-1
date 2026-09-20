@@ -1,0 +1,3 @@
+# 247 offset=208293662 needle="function Un(){"
+
+),x("settings_policy_helper"),"applied"}function Un(){return s.state?.output.managedSettings??null}function Bn(){let e=s.state;return e&&!e.armedFromRemote?e.output:void 0}function Va(){return Bn()?.claudeMd??null}function Ya(){return Bn()?.appendSystemPrompt??null}function Xa(){return s.state!==null}function Qa(){return s.initializeAttempted}function Gn(){return s.state?.armedFromRemote===!0}function jn(){return s.state?.mergesOutput==

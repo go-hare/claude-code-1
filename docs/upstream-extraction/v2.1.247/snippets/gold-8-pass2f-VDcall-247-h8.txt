@@ -1,0 +1,3 @@
+# off=229216153 hit=8
+
+])continue;c[u]=e?new e({type:"optional",innerType:s[u]}):s[u]}else for(let u in s)c[u]=e?new e({type:"optional",innerType:s[u]}):s[u];return Si(this,"shape",c),c},checks:[]});return Oi(t,a)}function VD(e,t,r){let i=ri(t._zod.def,{get shape(){let n=t._zod.def.shape,o={...n};if(r)for(let a in r){if(!(a in o))throw Error(`Unrecognized key: "${a}"`);if(!r[a])continue;o[a]=new e({t

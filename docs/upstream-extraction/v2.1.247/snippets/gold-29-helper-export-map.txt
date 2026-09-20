@@ -1,0 +1,30 @@
+# 247 helper export map for FE / d(a)
+# _841.js export @ 206915615
+# _552.js export @ 210969115
+# _845.js export @ 206472573
+
+_841.js:
+  P  as Fxd   # UNC // || NT ??  (su)
+  Zo as Txd   # P(t) || J(t); J(){return!1} win32 bu stub
+  R  as byd   # strip \\?\UNC\ and \\?\C:
+  Jr as nyd   # init (ge=/^[\\/]\?\?[\\/]/)
+
+_552.js:
+  a  as Dtb   # function a(e){return!1} win32 stub
+  j  as Etb   # file:// href: u(slice(7))||u(slice(8))
+  u  as Ctb   # l(e)||a(e)||g.test(r[0])||stripped Fxd/Dtb
+  k  as Btb   # strip leading T class
+  T  as Atb   # \s\u2800\uFFF9-\uFFFB\p{Cc}\p{M}\p{Default_Ignorable_Code_Point}
+  N  as Ftb   # percent-decode variants
+  w  as Gtb   # init
+
+_845.js:
+  P  as Zzd   # /[\x00-\x1F\x7F-\x9F]/  (re in markdown pt)
+  T  as eAd   # init (also sets Yzd E=/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g)
+
+d(a) / FE:
+  e=byd R, i=Txd Zo, l=Fxd P, n=Dtb a, s=Etb j, u=path.resolve, c=pathToFileURL
+
+markdown pt:
+  re = Zzd; Ee = /^[${Atb T}]+/u; ft = /^[a-z][a-z0-9+.-]*:/i
+  pe = Ctb u; ge = Ftb N; fe = Btb k; be = FE; de = Etb

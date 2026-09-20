@@ -1,0 +1,2 @@
+# needle=function sl( pos=212036619 end=212036642 len=23
+function sl(){return!0}

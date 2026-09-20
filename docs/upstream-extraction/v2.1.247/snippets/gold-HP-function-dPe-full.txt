@@ -1,0 +1,4 @@
+# already LOCKED dPe @213653071 end=213653329 len=258 — not re-derived
+# unique pluginUsage wipe after yln(n)
+# export dPe as baa @219684806. import baa as Ft @222874809.
+function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{let s=Object.keys(r.pluginUsage??{}).filter((a)=>n.has(a.toLowerCase()));if(s.length===0)return r;let i={...r.pluginUsage};for(let a of s)delete i[a];return{...r,pluginUsage:i}},t)}

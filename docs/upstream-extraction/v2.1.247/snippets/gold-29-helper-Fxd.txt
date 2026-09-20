@@ -1,0 +1,7 @@
+# offset=206909356 _841.js P as Fxd
+# v / ge / ye are the NT ?? predicate used by P.
+
+function P(t){return/^[\\/]{2}/.test(t)||v(t)}
+function v(t){return ge.test(t)||t.includes("??")&&ge.test(ye(t))}
+function ye(t){return K.win32?K.win32.normalize(t):t}
+# Jr init: ge=/^[\\/]\?\?[\\/]/

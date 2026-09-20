@@ -1,0 +1,2 @@
+# 246 pluginSuggestion #6 @220365916
+psHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e 

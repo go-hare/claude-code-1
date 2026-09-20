@@ -1,0 +1,3 @@
+# 247 function D start=231766382 len=137 sha=0df5ebd45bdc2c84 dist=2036971
+
+function D(s){if(!r())return;let o=m();if(a({type:"detach-request",msg:o,broadcast:s?.broadcast})){t();return}process.stdout.write(e(o))}

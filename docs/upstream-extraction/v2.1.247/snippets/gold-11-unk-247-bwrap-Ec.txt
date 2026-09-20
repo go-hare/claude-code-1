@@ -1,0 +1,3 @@
+# ver=247 function Ec() start=209925465 end=209925924 len=459 sha=644766794d9dfb9d needle="Cleaned up bwrap mount point (file):"
+
+function Ec(e){if(!e?.force){if(qr>0)qr--;if(qr>0){x(`[Sandbox Linux] Deferring mount point cleanup \u2014 ${qr} sandbox(es) still active`);return}}else qr=0;for(let t of Sc)try{let n=me.statSync(t);if(n.isFile()&&n.size===0)me.unlinkSync(t),x(`[Sandbox Linux] Cleaned up bwrap mount point (file): ${t}`);else if(n.isDirectory()){if(me.readdirSync(t).length===0)me.rmdirSync(t),x(`[Sandbox Linux] Cleaned up bwrap mount point (dir): ${t}`)}}catch{}Sc.clear()}

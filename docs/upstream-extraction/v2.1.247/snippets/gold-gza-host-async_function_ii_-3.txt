@@ -1,0 +1,2 @@
+# needle=async function ii( pos=220052775
+async function ii(e,r,n,t,i){if(Z(r.inode)){let s=await An(e,r,n);if(s.ok)return m({replaced:!1});if(s.error.kind!=="fs")return s;if(de(s.error.error,"EEXIST")){let d=await y(ge(n));return u(d.ok?Vr(n,d.value,t):{kind:"occupied"})}if(!ko(s.error.error))return s}let o=await y(ge(n));if(o.ok)return u(Vr(n,o.value,t));if(o.error.kind!=="absent")return o;if(!i())return u({kind:"suspect"});let a=await y(Te(e,n));return a.ok?m({replaced:!1}):a}

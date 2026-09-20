@@ -1,0 +1,3 @@
+# offset=210370650
+
+function no(e,{evenAfterGlob:t=!1}

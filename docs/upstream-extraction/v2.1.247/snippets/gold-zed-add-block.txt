@@ -1,0 +1,47 @@
+# ver=247 offset=199342696 hit=1/2 needle="To add the binding yourself"
+
+...Ghostty...d.Kitty...
+...Warp...	..Windows Terminal...:..terminal::SendText...I.|.windows-terminal...com.googlecode.iterm2...Jt..AllowClipboardAccess'...iTerm2 clipboard access already enabled...U.[.-bool...)...w..Couldn't update iTerm2 clipboard setting...A...N.Enabled "Applications in terminal may access clipboard" in iTerm2...s...K.f.Restart iTerm2 for this to take effect. Undo: defaults write com.googlecode.iterm2 AllowClipboardAccess -bool false.l...Shift+Enter is natively supported in iTerm2.
+
+No configuration needed. Just use Shift+Enter to add newlines.%...K8..Shift+Enter is natively supported in ...A...1..
+
+No configuration needed. Just use Shift+Enter to add newlines...]...your current terminal...*. . . ."  .m.a.c.O.S.:. .A.p.p.l.e. .T.e.r.m.i.n.a.l.
+...y...U.*.You appear to be connected from iTerm2 on another machine. For /copy to reach your local clipboard, on that machine open:..."...Terminal setup cannot be run from ..U...88...
+
+This command configures a convenient Shift+Enter shortcut for multi-line prompts.
+...B...Note: You can already use backslash (\\) + return to add newlines...L..
+
+To set up the shortcut (optional):
+1. Exit tmux/screen temporarily
+2. Run /terminal-setup directly in one of these terminals:
+u...dz.. . . ."  .I.D.E.:. .V.S.C.o.d.e.,. .C.u.r.s.o.r.,. .D.e.v.i.n. .D.e.s.k.t.o.p.,. .Z.e.d.
+. . . ."  .O.t.h.e.r.:. .A.l.a.c.r.i.t.t.y.
+.3... .R.e.t.u.r.n. .t.o. .t.m.u.x./.s.c.r.e.e.n. .-. .s.e.t.t.i.n.g.s. .w.i.l.l. .p.e.r.s.i.s.t.
+.
+..._...)k.Note: iTerm2, WezTerm, Ghostty, Kitty, Warp, and Windows Terminal support Shift+Enter natively...E.__CFBundleIdentifier...Ne/.sensitivity...1.For smoother scrolling, set "...
+...oY. settings...5... settings.json isn't a JSON object; not modifying it...3m.. already set; leaving as-is...?...See ...&.Couldn't update ...h%>. settings.json...0^...bak...v...Couldn't back up ...!...p.-. settings.json; not modifying it... ..... terminal scroll sensitivity to ...sP. settings.json at ...3pt.To fix garbled text, set "...": "(...w. settings (undo: set it back to "auto")...Z.terminal_setup_gpu_accel
+...remote_ssh...q_..not_json_object.,...#. GPU acceleration already off; leaving as-is...backup_failed...QoK.Turned off .%... GPU acceleration to fix garbled text...]l.Reload the ...@... window to apply. Undo: set "..." back to "auto"...)...E...Cannot install keybindings from a remote ...	...H... session...L... keybindings must be installed on your local machine, not the remote server.&...W.q.To install the Shift+Enter keybinding:...p..1. Open 0...Z... on your local machine (not connected to remote)^...
+W.2... .O.p.e.n. .t.h.e. .C.o.m.m.a.n.d. .P.a.l.e.t.t.e. .(.C.m.d./.C.t.r.l.+.S.h.i.f.t.+.P.). ..! .".P.r.e.f.e.r.e.n.c.e.s.:. .O.p.e.n. .K.e.y.b.o.a.r.d. .S.h.o.r.t.c.u.t.s. .(.J.S.O.N.).".7...n.3. Add this keybinding (the file must be a JSON array):...#.[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\u001b\r" },
+    "when": "terminalFocus"
+  }
+]...O...keybindings.json...,.Error backing up existing ..#... terminal keybindings. Bailing out.....C..Backup path: ...&... ...workbench.action.terminal.sendSequence..4... terminal Shift+Enter key binding already configuredR...@.. already has a Shift+Enter terminal binding with different args; leaving it as-is...!...nU}. terminal Shift+Enter key binding..."...B. terminal Shift+Enter keybinding: ...u.(./usr/libexec/PlistBuddy...P..Add :'Window Settings':'...e.':useOptionAsMetaKey bool true...N<;.Set :'Window Settings':'...+...':useOptionAsMetaKey true...>...6q.Failed to enable Option as Meta key for Terminal.app profile: ...J...':Bell bool false...zE..':Bell false7...t..Failed to disable audio bell for Terminal.app profile: ...{s..No Terminal.app changes needed..~...3..Shift+Return already enters a newline on this macOS version, and screen-reader mode leaves the audible bell setting unchanged...@...r...Failed to create backup of Terminal.app preferences, bailing out...X...Default Window Settings.+...Failed to read default Terminal.app profile...6...Startup Window Settings.+...2.Failed to read startup Terminal.app profile.9...
+...Failed to disable audio bell for any Terminal.app profile...@...G..Failed to enable Option as Meta key for any Terminal.app profileV...D+..Failed to enable Option as Meta key or disable audio bell for any Terminal.app profile...killall...cfprefsd!...x.Configured Terminal.app settings:..."...w..- Enabled "Use Option as Meta key"...g^..- Disabled the audible bell.F...$..- Left the audible bell setting unchanged (screen-reader mode uses it)..&...#~$.Shift+Return will now enter a newline...&...Option+Enter will now enter a newline...9...7.You must restart Terminal.app for changes to take effect...
+.p.Terminal.app setup failed: .2...Failed to disable the audio bell for Terminal.app...5...OE..Failed to enable Option as Meta key for Terminal.app...j.. Your settings have been restored from backup...U...o.7. Restoring from backup failed, try manually with: defaults import com.apple.Terminal ...)...g... No backup was available to restore from...
+..."...backupPath...\..alacritty.toml..(...No valid config path found for Alacritty...mods = "Shift"...A..key = "Return"..4...8b..Alacritty Shift+Enter key binding already configured8...i...Error backing up existing Alacritty config. Bailing out.H...
+[[keyboard.bindings]]
+key = "Return"
+mods = "Shift"
+chars = "\u001B\r"
++...w.0.Installed Alacritty Shift+Enter key binding.<...You may need to restart Alacritty for changes to take effect(...E...Failed to install Alacritty keybinding: 3...vM.Failed to install Alacritty Shift+Enter key binding...XDG_CONFIG_HOME...Ce.keymap.json.C...g.To add the binding yourself, add this block to the keymap array in .\...".x.{ "context": "Terminal", "bindings": { "shift-enter": ["terminal::SendText", "\u001b\r"] } }%...Installed Zed Shift+Enter key binding...8...Couldn't read your Zed keymap, so it was left unchanged.O...d...Your Zed keymap isn't a readable list of keybindings, so it was left unchanged...e.Zed Shift+Enter key binding already configured...Failed to back up Zed keymap: ..3...Couldn't back up your Zed keymap; not modifying it...{-_.Failed to edit Zed keymap: .:...$.Couldn't update your Zed keymap, so it was left unchanged.../...Failed to install Zed Shift+Enter key binding: .-...Failed to install Zed Shift+Enter key binding...allowTrailingComma...U`..insertSpaces...tabSize...<.formattingOptions...p.,.isArrayInsertion...5.Code...|<.Devin...E'.Windsurf...5...Roaming...Z!.Application Support...T..file:///B:/%7EBUN/root/_287.js.../zsh...]./zsh.exe...:..completion.zsh...|..zshrc...d.[[ -f "..." ]] && source ".../bash...	...k.2./bash.exe...completion.bash.../...bashrc...&.[ -f "...jn.." ] && source "...'}a./fish...	.../fish.exe...completion.fish...config.fish...rcFile..	...v.cacheFile...\..completionLine..	...^...shellFlag...d.h.--output...8...file:///B:/%7EBUN/root/_288.js...l.file:///B:/%7EBUN/root/_289.js...;.invalidatePrevFrame...M.e.file:///B:/%7EBUN/root/_290.js..	...B=T.relativeX...	...q.relativeY...x..file:///B:/%7EBUN/root/_291.js...tengu_cedar_marsh...file:///B:/%7EBUN/root/_292.js...>..file:///B:/%7EBUN/root/_293.js.....M..xterm-ghostty...*...&...rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)..."'...?>.6'...;'..._*k.='...z...file:///B:/%7EBUN/root/_294.js..	...V.ariaLabel... .0.done:...5..failed:...t...note:...pending:...94.loading:...J...file:///B:/%7EBUN/root/_295.js...!..hiddenState.g...	].useTasksV2 cannot be called outside of a TasksV2StoreContext provider (mounted by <AppStateProvider />)...t4.blocks...}...subscribing.
+...#..endedEarly..._...Task list subscription ended: ...	...givenUp...,...Task list watcher error: ...$...f...Task list subscription unavailable: ...x...ELOCKED...^.Task list lock is busy (another session or process sharing this task list, or an in-flight task write, holds it); completed tasks stay visible and the reset is retried on the next refresh.W... B.Task list reset failed on the tasks directory and will be retried on the next refresh: ...a.Task list read failed: .I...:.j.Task list reset still in flight; not arming another hide until it settles...	..._internal...W...file:///B:/%7EBUN/root/_296.js...P..spinnerVerbs...verbs...	...e`2.setColors......*..setCompacting...l...D..useSpinnerStore cannot be called outside of a SpinnerStoreContext provider (mounted by <AppStateProvider />)...E.Accomplishing...	...Actioning...]...Actualizing...j/~.Architecting...Baking...\...Beaming.	...nm..Beboppin'...
+...Befuddling..	...Fm.Billowing...	...a.Blanching...
+...B.}.Bloviating..	...6..Boogieing...Boondoggling...o.0.Booping....U.a.Bootstrapping...UG..Brewing...-U..Bunning.	...M..Burrowing...xm..Calculating.
+...#.O.Canoodling...F...Caramelizing	....Cascading...d'..Catapulting...Cerebrating.
+...Channeling...PX..Channelling...|G.Choreographing...Churning...o.Clauding
+...*.2.Coalescing..
+...Cogitating.....Combobulating...	...Composing...	...%,..Computing...
+...R...Concocting...*...Considering....Contemplating...Cooking...e.&.Crafting...Z..Creating	...Crunching......<...Crystallizing.....Cultivating...8V..Deciphering... .Deliberating...F.Determining...:%.Dilly-dallying...2...Discombobulating...,..Doing...

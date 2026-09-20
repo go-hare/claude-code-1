@@ -1,0 +1,3 @@
+# offset=214528782
+
+function Ok(e){let t=zS(e);return eI().find((n)=>{let r=zS(n);return t===r||t.startsWith(r+YFe)})}function N$(){let e=V.CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS;if(e!==void 0&&e>0)return e;return _Bo}async function m0n(e,t){await Nn($n(),["--git-dir=.git","remote","set-url","origin",t],{cwd:e,stdin:"ignore"})}async function bBo(e,t,n,r){_(`git pull: cwd=${e} ref=${t??"default"}`);let o={...$k(),...n?.skipLfs&&{GIT_LFS_SKIP_SMUDGE:"1"}},s=n?.disableCredentialHelper?["-c","credential.helper="]:[];if(t){i

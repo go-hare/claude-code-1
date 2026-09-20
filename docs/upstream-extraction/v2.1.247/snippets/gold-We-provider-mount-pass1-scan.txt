@@ -1,0 +1,283 @@
+# PASS1 every _499 source import + export aliases
+247 size=253204128 246 size=250948768
+247 "from\"B:/~BUN/root/_499.js\"" count=68
+  @210943109 jdb=- kdb=We ldb=Qr mdb=- ndb=- mod=210942998..210960286 span=17288
+    clause={kdb as We,ldb as Qr}
+  @210988551 jdb=LR kdb=- ldb=$w mdb=ed ndb=jE mod=210987644..211367378 span=379734
+    clause={jdb as LR,ldb as $w,mdb as ed,ndb as jE}
+  @211387672 jdb=- kdb=- ldb=- mdb=n ndb=o mod=211387627..211388552 span=925
+    clause={mdb as n,ndb as o}
+  @212807772 jdb=- kdb=Kkt ldb=W1o mdb=- ndb=- mod=212803853..219716299 span=6912446
+    clause={kdb as Kkt,ldb as W1o}
+  @222974356 jdb=- kdb=yt ldb=Qr mdb=- ndb=- mod=222973550..223009414 span=35864
+    clause={kdb as yt,ldb as Qr}
+  @223160576 jdb=Ar kdb=ge ldb=dt mdb=- ndb=- mod=223158870..223182569 span=23699
+    clause={jdb as Ar,kdb as ge,ldb as dt}
+  @223183314 jdb=- kdb=j ldb=Y mdb=- ndb=- mod=223182569..223189641 span=7072
+    clause={kdb as j,ldb as Y}
+  @223502873 jdb=- kdb=- ldb=- mdb=P ndb=j mod=223502616..223504628 span=2012
+    clause={mdb as P,ndb as j}
+  @223523416 jdb=- kdb=Oe ldb=wi mdb=- ndb=- mod=223521889..223576307 span=54418
+    clause={kdb as Oe,ldb as wi}
+  @223675751 jdb=- kdb=Sr ldb=dc mdb=- ndb=- mod=223671601..223851651 span=180050
+    clause={kdb as Sr,ldb as dc}
+  @228704416 jdb=- kdb=cr ldb=Oi mdb=- ndb=- mod=228703635..228737998 span=34363
+    clause={kdb as cr,ldb as Oi}
+  @228738727 jdb=- kdb=zt ldb=Ln mdb=- ndb=- mod=228737998..228768145 span=30147
+    clause={kdb as zt,ldb as Ln}
+  @228769174 jdb=- kdb=Ae ldb=ao mdb=- ndb=- mod=228768145..228802022 span=33877
+    clause={kdb as Ae,ldb as ao}
+  @228802714 jdb=- kdb=W ldb=$e mdb=- ndb=- mod=228802022..228807553 span=5531
+    clause={kdb as W,ldb as $e}
+  @231151153 jdb=- kdb=F ldb=Ee mdb=- ndb=- mod=231150732..231155718 span=4986
+    clause={kdb as F,ldb as Ee}
+  @231175967 jdb=- kdb=zn ldb=yc mdb=- ndb=- mod=231174865..231211339 span=36474
+    clause={kdb as zn,ldb as yc}
+  @231211833 jdb=- kdb=O ldb=le mdb=- ndb=- mod=231211339..231219000 span=7661
+    clause={kdb as O,ldb as le}
+  @231277460 jdb=- kdb=- ldb=- mdb=JU ndb=dq mod=231271106..231576074 span=304968
+    clause={mdb as JU,ndb as dq}
+  @231655537 jdb=- kdb=u ldb=Y mdb=- ndb=- mod=231655331..231657824 span=2493
+    clause={kdb as u,ldb as Y}
+  @231660628 jdb=- kdb=Vn ldb=wo mdb=- ndb=- mod=231659261..231690861 span=31600
+    clause={kdb as Vn,ldb as wo}
+  @231691101 jdb=- kdb=D ldb=Ue mdb=- ndb=- mod=231690861..231696970 span=6109
+    clause={kdb as D,ldb as Ue}
+  @231698137 jdb=- kdb=Ce ldb=ya mdb=- ndb=- mod=231696970..231743295 span=46325
+    clause={kdb as Ce,ldb as ya}
+  @231745005 jdb=- kdb=oe ldb=Pe mdb=- ndb=- mod=231744259..231751026 span=6767
+    clause={kdb as oe,ldb as Pe}
+  @231768546 jdb=- kdb=Ee ldb=Mt mdb=- ndb=- mod=231767133..231789661 span=22528
+    clause={kdb as Ee,ldb as Mt}
+  @231790486 jdb=- kdb=ie ldb=Vt mdb=- ndb=- mod=231789661..231803003 span=13342
+    clause={kdb as ie,ldb as Vt}
+  @231816128 jdb=- kdb=ge ldb=Kt mdb=Oc ndb=rw mod=231812076..231941767 span=129691
+    clause={kdb as ge,ldb as Kt,mdb as Oc,ndb as rw}
+  @231954682 jdb=- kdb=bo ldb=ht mdb=- ndb=- mod=231953470..231973620 span=20150
+    clause={kdb as bo,ldb as ht}
+  @231980306 jdb=- kdb=Zo ldb=ls mdb=- ndb=- mod=231979004..231991179 span=12175
+    clause={kdb as Zo,ldb as ls}
+  @232053124 jdb=- kdb=Ue ldb=mo mdb=- ndb=- mod=232024961..233151515 span=1126554
+    clause={kdb as Ue,ldb as mo}
+  @233153185 jdb=- kdb=De ldb=nn mdb=- ndb=- mod=233152131..233173763 span=21632
+    clause={kdb as De,ldb as nn}
+  @233185046 jdb=- kdb=to ldb=cn mdb=- ndb=- mod=233174473..233204058 span=29585
+    clause={kdb as to,ldb as cn}
+  @233222964 jdb=- kdb=g ldb=Z mdb=- ndb=- mod=233221783..233230795 span=9012
+    clause={kdb as g,ldb as Z}
+  @233293060 jdb=- kdb=Je ldb=Qt mdb=- ndb=- mod=233292319..233313104 span=20785
+    clause={kdb as Je,ldb as Qt}
+  @233326376 jdb=- kdb=A ldb=E mdb=- ndb=- mod=233326177..233328509 span=2332
+    clause={kdb as A,ldb as E}
+  @233371482 jdb=- kdb=_ ldb=N mdb=- ndb=- mod=233370837..233378914 span=8077
+    clause={kdb as _,ldb as N}
+  @233384960 jdb=- kdb=ie ldb=Ut mdb=- ndb=- mod=233384208..233391756 span=7548
+    clause={kdb as ie,ldb as Ut}
+  @233395492 jdb=- kdb=Ue ldb=Tt mdb=- ndb=- mod=233391756..233412725 span=20969
+    clause={kdb as Ue,ldb as Tt}
+  @233420446 jdb=- kdb=he ldb=ar mdb=- ndb=- mod=233417868..233436465 span=18597
+    clause={kdb as he,ldb as ar}
+  @233436682 jdb=- kdb=h ldb=H mdb=- ndb=- mod=233436465..233439479 span=3014
+    clause={kdb as h,ldb as H}
+  @233446527 jdb=- kdb=N ldb=no mdb=- ndb=- mod=233446026..233455614 span=9588
+    clause={kdb as N,ldb as no}
+  @233842572 jdb=- kdb=Ae ldb=dr mdb=- ndb=- mod=233838802..233869989 span=31187
+    clause={kdb as Ae,ldb as dr}
+  @235754082 jdb=- kdb=pe ldb=Po mdb=- ndb=- mod=235751453..235771916 span=20463
+    clause={kdb as pe,ldb as Po}
+  @235777524 jdb=- kdb=Te ldb=bs mdb=- ndb=- mod=235774470..235897506 span=123036
+    clause={kdb as Te,ldb as bs}
+  @235929968 jdb=- kdb=- ldb=g mdb=- ndb=- mod=235929281..235936697 span=7416
+    clause={ldb as g}
+  @235958954 jdb=- kdb=We ldb=On mdb=- ndb=- mod=235955050..236161791 span=206741
+    clause={kdb as We,ldb as On}
+  @236165968 jdb=- kdb=Me ldb=Qt mdb=- ndb=- mod=236161791..236185186 span=23395
+    clause={kdb as Me,ldb as Qt}
+  @236247572 jdb=- kdb=Ve ldb=jr mdb=- ndb=- mod=236244893..236267263 span=22370
+    clause={kdb as Ve,ldb as jr}
+  @236270052 jdb=- kdb=pe ldb=mn mdb=- ndb=- mod=236267263..236285117 span=17854
+    clause={kdb as pe,ldb as mn}
+  @236289885 jdb=- kdb=ue ldb=De mdb=- ndb=- mod=236285117..236303988 span=18871
+    clause={kdb as ue,ldb as De}
+  @236330281 jdb=- kdb=ie ldb=Ie mdb=- ndb=- mod=236329622..236340413 span=10791
+    clause={kdb as ie,ldb as Ie}
+  @236465523 jdb=- kdb=kt ldb=$n mdb=- ndb=- mod=236460624..236488017 span=27393
+    clause={kdb as kt,ldb as $n}
+  @236530367 jdb=- kdb=Kt ldb=Yr mdb=- ndb=- mod=236525593..236566776 span=41183
+    clause={kdb as Kt,ldb as Yr}
+  @236569899 jdb=- kdb=ko ldb=nr mdb=- ndb=- mod=236566776..236602052 span=35276
+    clause={kdb as ko,ldb as nr}
+  @236652780 jdb=- kdb=me ldb=Qe mdb=- ndb=- mod=236652123..236664422 span=12299
+    clause={kdb as me,ldb as Qe}
+  @236673892 jdb=- kdb=Bo ldb=Sa mdb=- ndb=- mod=236670170..236754638 span=84468
+    clause={kdb as Bo,ldb as Sa}
+  @236791034 jdb=- kdb=En ldb=ma mdb=- ndb=- mod=236787803..236851320 span=63517
+    clause={kdb as En,ldb as ma}
+  @236853881 jdb=- kdb=H ldb=Wt mdb=- ndb=- mod=236851320..236874884 span=23564
+    clause={kdb as H,ldb as Wt}
+  @236896947 jdb=- kdb=Ls ldb=Bl mdb=- ndb=- mod=236893709..236965008 span=71299
+    clause={kdb as Ls,ldb as Bl}
+  @236993196 jdb=- kdb=Mt ldb=hn mdb=- ndb=- mod=236992248..237008893 span=16645
+    clause={kdb as Mt,ldb as hn}
+  @237012982 jdb=- kdb=I ldb=ue mdb=- ndb=- mod=237008893..237025076 span=16183
+    clause={kdb as I,ldb as ue}
+  @237070243 jdb=- kdb=ue ldb=pt mdb=- ndb=- mod=237069224..237085130 span=15906
+    clause={kdb as ue,ldb as pt}
+  @237100496 jdb=- kdb=E ldb=$e mdb=- ndb=- mod=237097250..237113288 span=16038
+    clause={kdb as E,ldb as $e}
+  @237154919 jdb=- kdb=U ldb=Ue mdb=- ndb=- mod=237152617..237170547 span=17930
+    clause={kdb as U,ldb as Ue}
+  @237193009 jdb=- kdb=E ldb=G mdb=- ndb=- mod=237190447..237205829 span=15382
+    clause={kdb as E,ldb as G}
+  @237206086 jdb=- kdb=g ldb=k mdb=- ndb=- mod=237205829..237212010 span=6181
+    clause={kdb as g,ldb as k}
+  @237253936 jdb=- kdb=He ldb=gt mdb=- ndb=- mod=237250442..237276331 span=25889
+    clause={kdb as He,ldb as gt}
+  @237278683 jdb=- kdb=ke ldb=Qo mdb=- ndb=- mod=237276331..237297014 span=20683
+    clause={kdb as ke,ldb as Qo}
+  @237348782 jdb=- kdb=Er ldb=to mdb=- ndb=- mod=237345463..237381300 span=35837
+    clause={kdb as Er,ldb as to}
+"jdb as " count=2 210988511,223160546
+"kdb as " count=63 210943089,212807750,222974336,223160556,223183296,223523396,223675731,228704396,228738707,228769154,228802695,231151134,231175947,231211814,231655519,231660608,231691082,231698117,231744985,231768526,231790466,231816088,231954662,231980286,232053104,233153165,233185026,233222946,233293040,233326358,233371464,233384940,233395472,233420426,233436664,233446508,233842552,235754062,235777504,235958934,236165948,236247552,236270032,236289865,236330261,236465503,236530347,236569879,236652760,236673872,236791014,236853862,236896927,236993176,237012963,237070223,237100477,237154900,237192991,237206068,237253916,237278663,237348762
+"ldb as " count=65 210943099,210988521,212807761,222974346,223160566,223183305,223523406,223675741,228704406,228738717,228769164,228802704,231151143,231175957,231211823,231655528,231660618,231691091,231698127,231744995,231768536,231790476,231816098,231954672,231980296,232053114,233153175,233185036,233222955,233293050,233326367,233371473,233384950,233395482,233420436,233436673,233446517,233842562,235754072,235777514,235929959,235958944,236165958,236247562,236270042,236289875,236330271,236465513,236530357,236569889,236652770,236673882,236791024,236853871,236896937,236993186,237012972,237070233,237100486,237154909,237193000,237206077,237253926,237278673,237348772
+"mdb as " count=5 210988531,211387654,223502855,231277440,231816108
+"ndb as " count=5 210988541,211387663,223502864,231277450,231816118
+" as jdb" count=1 210899810
+" as kdb" count=1 210899819
+
+# PASS2 jdb importer modules — ident uses (collision-safe in-module)
+
+## jdb as LR import@210988551 mod=210987644..211367378 span=379734
+  export@211365263 export{nn as s_a,Ph as t_a,An as u_a,jo as v_a,sl as w_a,C4 as x_a,xS as y_a,mf as z_a,ru as A_a,Go as B_a,j4 as C_a,pf as D_a,NC as E_a,Zr as F_a,jg as G_a,i3 as H_a,Pg as I_a,tl as J_a,uh as K_a,WM as L_a,Qb as M_a,lf as N_a,Lh as O_a,af as P_a,aS as Q_a,Xh as R_a,rr as S_a,vf as T_a,fn as U_a,o6 
+  ident LR in-module count=2
+    @210988518 import-jdb rom"B:/~BUN/root/_495.js";import{jdb as LR,ldb as $w,mdb as ed,ndb as jE}from"B:/~BUN/root/_499.js";im
+    @211364646 jsx-factory:Qu(LR,{ ll,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx()
+  kind-tally {"import-jdb":1,"jsx-factory:Qu(LR,{":1}
+  strings[0..20]=["B:/~BUN/root/_491.js","B:/~BUN/root/_492.js","B:/~BUN/root/_493.js","B:/~BUN/root/_494.js","B:/~BUN/root/_495.js","B:/~BUN/root/_499.js","B:/~BUN/root/_500.js","B:/~BUN/root/_501.js","B:/~BUN/root/_507.js","B:/~BUN/root/_544.js","B:/~BUN/root/_552.js","B:/~BUN/root/_571.js","B:/~BUN/root/_590.js","B:/~BUN/root/_595.js","B:/~BUN/root/_608.js","B:/~BUN/root/_625.js","B:/~BUN/root/_626.js","B:/~BUN/root/_627.js","B:/~BUN/root/_628.js","B:/~BUN/root/_629.js"]
+  in-mod "(LR,{" count=1 211364645
+    @211364645 ll,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function m8(e,o,i){let l=i?.st
+  in-mod "(LR," count=1 211364645
+    @211364645 ll,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function m8(e,o,i){let l=i?.st
+  in-mod "LR({" count=0 
+  in-mod "LR(" count=0 
+  in-mod "LR as " count=0 
+  in-mod "export{LR" count=0 
+  in-mod "LR,{storageV5" count=0 
+  in-mod "LR,{children" count=0 
+  in-mod "LR,{..." count=1 211364646
+    @211364646 l,Qu(zR,null,Qu(Ug,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}async function m8(e,o,i){let l=i?.sto
+
+## jdb as Ar import@223160576 mod=223158870..223182569 span=23699
+  export@223181856 export{Kn as Hz,Or as Iz,Lr as Jz,Br as Kz,qe as Lz,ho as Mz,Ai as Nz,vo as Oz,Kt as Pz,dn as Qz,Us as Rz,$s as Sz}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acceptance or rejection decisions you
+  ident Ar in-module count=2
+    @223160553 import-jdb rom"B:/~BUN/root/_493.js";import{jdb as Ar,kdb as ge,ldb as dt}from"B:/~BUN/root/_499.js";import{odb a
+    @223181692 jsx-factory:n(Ar,{ let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=
+  kind-tally {"import-jdb":1,"jsx-factory:n(Ar,{":1}
+  strings[0..20]=["B:/~BUN/root/_241.js","B:/~BUN/root/_242.js","B:/~BUN/root/_243.js","B:/~BUN/root/_244.js","B:/~BUN/root/_245.js","B:/~BUN/root/_246.js","B:/~BUN/root/_247.js","B:/~BUN/root/_248.js","B:/~BUN/root/_249.js","B:/~BUN/root/_251.js","B:/~BUN/root/_252.js","B:/~BUN/root/_253.js","B:/~BUN/root/_295.js","B:/~BUN/root/_296.js","B:/~BUN/root/_299.js","B:/~BUN/root/_300.js","B:/~BUN/root/_301.js","B:/~BUN/root/_448.js","B:/~BUN/root/_459.js","B:/~BUN/root/_488.js"]
+  in-mod "(Ar,{" count=1 223181691
+    @223181691 {return _r}let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=oe[28];return Ls}var $s=B(()=>{ne();vn();Or();Ws();Br();h
+  in-mod "(Ar," count=1 223181691
+    @223181691 {return _r}let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=oe[28];return Ls}var $s=B(()=>{ne();vn();Or();Ws();Br();h
+  in-mod "Ar({" count=0 
+  in-mod "Ar(" count=0 
+  in-mod "Ar as " count=0 
+  in-mod "export{Ar" count=0 
+  in-mod "Ar,{storageV5" count=0 
+  in-mod "Ar,{children" count=0 
+  in-mod "Ar,{..." count=1 223181692
+    @223181692 return _r}let Ls;if(oe[26]!==_r||oe[27]!==Dn)Ls=n(Ar,{...Dn,children:_r}),oe[26]=_r,oe[27]=Dn,oe[28]=Ls;else Ls=oe[28];return Ls}var $s=B(()=>{ne();vn();Or();Ws();Br();ho
+
+# PASS3 object literals / destructures with storageV5+credentials+children
+storageV5: count=200
+  TRIPLE @210899416 destructure=true construct=false
+    t/_571.js";import{FBd as u}from"B:/~BUN/root/_850.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S})
+  TRIPLE @210899508 destructure=true construct=false
+    credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()=>{f()
+triple-window count=2 construct=0
+P3 "{storageV5:" count=20
+  @206267571 ort("B:/~BUN/root/chunk-wzbyr9w0.js")]),V=R(s);M(V),U(s),tt({storageV5:s,credentials:V}),await K(V),await j(s),await _(s)}let S=await r();if(S)o(`Error: ${S}`+D());let b=C();if(b)o(b);let{waitForPolic
+  @206268488 nk-abcd39h7.js")]);y();let p=Q(s);if(H(s),A()&&s!==void 0)X({storageV5:s}),Z(s);let{preflightTrustedDeviceBlocking:N}=await import("B:/~BUN/root/chunk-fegq9rs9.js"),Y=await N(p);if(Y)await Promise.rac
+  @206270103 BUN/root/chunk-abcd39h7.js")]),o=C(n);if(A()&&o!==void 0){D({storageV5:o}),P(o);let[{credentialsStoreFor:l},{setGrowthBookCredentials:u,setGrowthBookStorageBackend:d},{composePolicyLimitsClient:_,prim
+  @206270499 port("B:/~BUN/root/chunk-wzbyr9w0.js")]),b=l(o);u(b),d(o),_({storageV5:o,credentials:b}),await S(b),await s(o),await L(o)}switch(e[0]){case"logs":case"attach":case"stop":case"kill":case"respawn":case"
+  @206275079 -qfgksp5r.js"),import("B:/~BUN/root/chunk-qtwpak8g.js")]);k({storageV5:p,credentials:m(p)}),await G(p)}catch(m){import("B:/~BUN/root/chunk-cjjvhnjh.js").then(({logForDebugging:k})=>k(`Policy limits: s
+  @206276237 etRepoDetectionGuards:Rt},{initDefaultDebugLog:kt}])=>{if(m({storageV5:p,credentials:N}),Rt({trustProbe:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p);return tt.then(()=
+P3 "{storageV5,credentials,children" count=0
+P3 "{storageV5,credentials" count=0
+P3 "storageV5:n,credentials:s,children" count=1
+  @210899416 d as u}from"B:/~BUN/root/_850.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;
+P3 "n===void 0&&s===void 0?c:" count=1
+  @210899482 eV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:
+P3 "a(e.Provider,{value:" count=1
+  @210899602 R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()=>{f();l();m();c=Obj
+P3 ".Provider,{value:" count=20
+  @210899605 ]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()=>{f();l();m();c=Object
+  @210950657 else Vr=v[48];let Tt=Vr,Xr;if(v[49]!==ct||v[50]!==Tt)Xr=ee(S.Provider,{value:Tt,children:ct}),v[49]=ct,v[50]=Tt,v[51]=Xr;else Xr=v[51];return Xr}function sn(){let ho=te(3),{currentTheme:gt,setThemeSet
+  @210963032 ];let[M]=o(h);const u=r??M;let K;if(x[2]!==p||x[3]!==u)K=d(i.Provider,{value:u,children:p}),x[2]=p,x[3]=u,x[4]=K;else K=x[4];return K}function S(){let k=l(i);if(!k){throw ReferenceError("useKillRing c
+  @210992047 Ug({children:e}){let o=$e(null);return o.current??=zg(),Q(kg.Provider,{value:o.current,children:e})}function i3(){let e=Ne(kg),o=$e(null);if(e)return e;return o.current??=zg(),o.current}var kg;var Pg=
+  @211210466 else T_=R_[2];let z1=T_,A_;if(R_[3]!==F1||R_[4]!==z1)A_=Q(Ff.Provider,{value:z1,children:F1}),R_[3]=F1,R_[4]=z1,R_[5]=A_;else A_=R_[5];return A_}var Ff,Op;var wp=U(()=>{Ie();k1();ze();ft();Ff=Rn({isTe
+  @211211678 ,__=M_[3];Io(N_,__);let D_;if(M_[4]!==P1||M_[5]!==Pa)D_=Q(kn.Provider,{value:Pa,children:P1}),M_[4]=P1,M_[5]=Pa,M_[6]=D_;else D_=M_[6];return D_}var zf=(e,o)=>{let i=setTimeout(e,o);return()=>clearTim
+P3 "t(z,{storageV5" count=0
+P3 "jsx(z" count=0
+P3 "jsxs(z" count=0
+P3 "createElement(z" count=0
+P3 "t(LR,{" count=0
+P3 "t(Ar,{storageV5" count=0
+P3 "LR,{storageV5" count=0
+P3 "Ar,{storageV5" count=0
+P3 "children:S}=j" count=1
+  @210899442 850.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R
+
+# PASS4 as LR / as Ar uniqueness (Ar collision-ban vs Jr getSecureStorage)
+"jdb as LR" count=1 210988511
+  @210988511 as e3}from"B:/~BUN/root/_495.js";import{jdb as LR,ldb as $w,mdb as ed,ndb as jE}from"B:/~BUN/root/_499.js";import{odb as it,pdb as ft}from"B
+"jdb as Ar" count=1 223160546
+  @223160546 as Tt}from"B:/~BUN/root/_493.js";import{jdb as Ar,kdb as ge,ldb as dt}from"B:/~BUN/root/_499.js";import{odb as O,pdb as I}from"B:/~BUN/root/
+" as LR" count=10 208327641,208400467,209043521,210988514,214590103,219710423,225448939,230300388,232040400,232047825
+  @208327641 Rc,X as HRc,J as IRc,G as JRc,V as KRc,q as LRc,z as MRc,H as NRc}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Comm
+  @208400467 /~BUN/root/_722.js";import{PRc as Wc,QRc as LR,RRc as UR,URc as Sm,WRc as BR,XRc as Nw}from"B:/~BUN/root/_723.js";import{YRc as yT,ZRc as hB
+  @209043521 Rb,p as HRb,B as IRb,z as JRb,A as KRb,R as LRb,J as MRb,F as NRb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Comm
+  @210988514 e3}from"B:/~BUN/root/_495.js";import{jdb as LR,ldb as $w,mdb as ed,ndb as jE}from"B:/~BUN/root/_499.js";import{odb as it,pdb as ft}from"B:/~
+  @214590103  as hNn,realpath as Z0n,rename as J0n,rm as LR,utimes as njo}from"fs/promises";import{isAbsolute as rjo,join as Iy,relative as ojo}from"path
+  @219710423 as HRa,cQ as IRa,bnd as JRa,g7 as KRa,lK as LRa,Snd as MRa,RIt as NRa,wnd as ORa,dVt as PRa,knd as QRa,HQe as RRa,vb as SRa,vnd as TRa,tQs a
+  @225448939  as GR,S as HR,x as IR,L as JR,F as KR,w as LR,f as MR}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Term
+  @230300388  as yc,Fna as oR,Foa as lR,Fsa as sd,Fxa as LR,G0a as pd,G2 as ft,GDa as uy,GEa as xE,GFa as PF,GJa as VE,GSa as Id,Gba as zd,Gda as LS,Gga 
+" as Ar" count=30 82294321,206020223,207023972,208271859,208903308,211659004,211826592,212308954,212671677,212858123,219695015,219857034,220244359,220285184,221656506,221850222,222087477,222439455,223160549,223210104,223523922,223983616,224841715,226203677,226387553,227363607,228675106,230207179,230721459,231271731
+  @82294321 rscChunks: Array<BlobPart> = [int.buffer as ArrayBuffer, meta.styles.join("\n")];   rscPayload.on("data", chunk => rscChunks.push(chunk));  
+  @206020223 ned value%...*.Expected `appArguments` as Array type... ..xdg-open...browserPrivate...yn..execFile .../2.macOS only..8...
+  @207023972  as wrd,mb as xrd,Sb as yrd,vb as zrd,bb as Ard,yb as Brd,Cb as Crd,kb as Drd,xb as Erd,Ab as Frd,Pb as Grd,Tb as Hrd,Mb as Ird,wb as Jrd,Lb
+  @208271859  as Cn,RMc as bn,TMc as oo,bNc as vn,cKc as Ar,cNc as Je,dKc as Go,dNc as Rn,eKc as y,fMc as Hr,gKc as B,kKc as Fe,lKc as lt,nKc as zo,nMc a
+  @208903308  as wrc,C$ as xrc,A$ as yrc,Ln as zrc,Od as Arc,k$ as Brc,T$ as Crc,w$ as Drc,Je as Erc,el as Frc,R$ as Grc,tl as Hrc,x$ as Irc,nl as Jrc,jf
+  @211659004  as Eo,uUb as Fs,vUb as Or,wUb as ke,xUb as Ar,yUb as ps}from"B:/~BUN/root/_593.js";import{LUb as kt,MUb as Po}from"B:/~BUN/root/_597.js";im
+  @211826592 le}from"B:/~BUN/root/_845.js";import{pAd as Ar}from"B:/~BUN/root/_847.js";import{AAd as Hn,BAd as yn,CAd as kn,DAd as Bn,EAd as vn,FAd as xn
+  @212308954  as wrb,cn as xrb,pn as yrb,dn as zrb,gn as Arb,fn as Brb,ln as Crb,mn as Drb,hn as Erb,_n as Frb,Sn as Grb,Tn as Hrb,bn as Irb,ge as Jrb,In
+"Ar as xRc" count=1 208364026
+  @208364026 st as tRc,yr as uRc,wr as vRc,Cr as wRc,Ar as xRc,ct as yRc}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial
+"function Ar(){if(oe)return oe" count=1 208363721
+  @208363721 eForTesting called outside test build")}function Ar(){if(oe)return oe;if(st())return Se(ne,j);return j}var ot,oe;var ct=y(()=>{we();tt();ye(
+t(Ar,{ count=1
+  @231623049 inJdbMod=false mod=231579477..231645142 s?.stage,ec=!!ke.reviewProgress;let Tr;if(H[29]!==ot||H[30]!==Hl||H[31]!==ec)Tr=t(Ar,{stage:Hl,completed:ot,hasProgress:ec}),H[29]=ot,H[30]=Hl,H[31]=ec,H[32]=Tr;else Tr=H[32];let hr;if(H[33]!==ke)hr=sc(ke),H[33]=ke,H[34]=hr;else hr=H[34];le
+
+# PASS5 246 vs 247 Provider leftover?
+same 246=1 247=1 "storageV5:n,credentials:s,children"
+  246 @209590559 root/_836.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R
+same 246=1 247=1 "n===void 0&&s===void 0?c:"
+  246 @209590625 children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},R[0]=s,R[1]=n,R[2]=g;else g=R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=
+same 246=2 247=2 "jdb as "
+  246 @221017660 {$cb as W,Hdb as ve,Sdb as Dn,adb as On,jdb as be,kdb as z,ldb as Pe,mdb as w,pdb as $e,sdb as xn}from"B:/~BUN/root/_495.js";import{Ieb as we,Oeb as Se,Seb as k
+  246 @234070492 as ye}from"B:/~BUN/root/_493.js";import{jdb as kc,kdb as zm,ldb as bc,mdb as Rg,sdb as Ec,xcb as Lr,ycb as tg}from"B:/~BUN/root/_495.js";import{Deb as bo,Ieb as
+same 246=1 247=1 " as jdb"
+  246 @210275989  as fdb,ma as gdb,cl as hdb,Ir as idb,Oa as jdb,Da as kdb,Fl as ldb,te as mdb,Vl as ndb,Bl as odb,Ua as pdb,Hl as qdb,Ul as rdb,rs as sdb,Xt as tdb,xs as udb,so
+same 246=1 247=1 "function z(j){let R=v(6)"
+  246 @209590533 ort{Cxd as u}from"B:/~BUN/root/_836.js";function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{st
+DIFF 246=0 247=1 "export{z as jdb,b as kdb"
+  247 @210899802 )});var w;var B=u(()=>{f();w=r(null)}); export{z as jdb,b as kdb,k as ldb,w as mdb,B as ndb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic'
+same 246=1 247=1 "a(e.Provider,{value:"
+  246 @209590745 =R[2];let d=g,y;if(R[3]!==S||R[4]!==d)y=a(e.Provider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()
+same 246=0 247=0 "{storageV5,credentials,children"
+same 246=30 247=30 "from\"B:/~BUN/root/_499.js\""
+  246 @209678927 "B:/~BUN/root/_493.js";import{Ofb as al}from"B:/~BUN/root/_499.js";import{Vtb as XE,Wtb as vD}from"B:/~BUN/root/_530.js";import{Tvb as Ca,Uvb as Ob,Vvb as _S,Wv
+  246 @210078549 "B:/~BUN/root/_493.js";import{Ofb as xo}from"B:/~BUN/root/_499.js";import{BRb as t,ORb as lo,uRb as I}from"B:/~BUN/root/_592.js";import{pzc as N}from"B:/~BUN/ro
+  246 @210082216 "B:/~BUN/root/_493.js";import{Ofb as zt}from"B:/~BUN/root/_499.js";import{cBb as Ve,gBb as Yt,nBb as Ye,tBb as qt}from"B:/~BUN/root/_561.js";import{ARb as be,BR
+  246 @221077129 "B:/~BUN/root/_491.js";import{Ofb as br}from"B:/~BUN/root/_499.js";import{Shb as qt,Uhb as $t,Whb as Ut,Xhb as Yt,Zhb as yn}from"B:/~BUN/root/_507.js";import{Vt
+246 ternary @209590625 mod=209590296..209591595 span=1299
+  246 nearby as jdb   all jdb as 221017660,234070492

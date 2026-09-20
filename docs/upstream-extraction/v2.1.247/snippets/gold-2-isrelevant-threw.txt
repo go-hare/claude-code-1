@@ -1,0 +1,4 @@
+# offset=197419360 hit=1/2 needle="tip isRelevant threw"
+
+a.n. .o.n.b.o.a.r.d.i.n.g. .g.u.i.d.e. ..  .s.h.a.r.e. .i.t. .w.i.t.h. .y.o.u.r. .t.e.a.m. .i.n. .o.n.e. .l.i.n.k.........M.teamOnboardingLastUsedAt....._].hasUserDefined(.
+...,n..) failed: ..........B:/~BUN/root/chunk-xwd6kgep.js..V....7,.Cannot destructure property 'filterCommandsForRemoteMode' from null or undefined value.......G..filterCommandsForRemoteMode.......`.getBuiltinCommands..........tip isRelevant threw?....q..Cannot destructure property 'tips' from null or undefined value.........trustedCount.....V1.1000........--pretty=format:........--name-only.....y...--diff-filter=M.	...!+..

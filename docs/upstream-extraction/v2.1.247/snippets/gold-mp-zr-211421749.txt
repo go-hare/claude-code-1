@@ -1,0 +1,2 @@
+# @211421749 len=174
+function zr(r,n){let a=qr();if(n!==a)return null;let u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}

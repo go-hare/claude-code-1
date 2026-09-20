@@ -1,0 +1,3 @@
+# 247 offset=207953545 needle="function Io( lastBefore hu"
+
+{return ie(e," ",{keepEmojiJoiners:!0})}function Io(e){return ie(e," ",{keepNewlines:!0})}function At(e){return ie(e,"",{keepEmojiJoiners:!0})}function se(e,t=re){if(e===void 0)return;let n=t(e);return n.trim()===""?void 0:n}function Ve(e){if(e===void 0)return;let t=ie(e,"");try{let{protocol:n}=new URL(t);return n==="https:"||n==="http:"?t:void 0}catch{return}}function Wr(e){return{...e,displayName:se(e.displayName),version:se(e.version),description:se(e.description,Io),author:e.author===void 0?void 0:{...e.author,name:re(e.author.nam

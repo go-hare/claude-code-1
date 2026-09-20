@@ -1,0 +1,2 @@
+# ver=246 needle="lHb as BBr" hits=1
+# offsets=211460246

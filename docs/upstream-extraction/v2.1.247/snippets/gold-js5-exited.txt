@@ -1,0 +1,4 @@
+# offset=82256599 needle="exited with code"
+
+..[0m" due to:
+...Failed to run script "<b>{}<r>"Unexpected state: process is running.error: ".." exited with signal ...[0m.[31merror.[0m: ".[1m...[0m" exited with signal .[1m...[0m..test"<b>{}<r>" exited with code {}.note: a package.json script ".." was not found...[34mnote.[0m.[2m:.[0m a package.json script ".." was not found...error: Failed to run ".." due to exit code ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to exit code .[1m...[0m...error: Failed to run ".." due to signal ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to signal .[1m...[0m...error: Failed to run ".	" due to ...'.[0m.[31merror.[0m: Failed to run ".[1m...[0m" due to .[0m.[31m...[0m..Missing script to execute. Pass --interactive to start the Node.js-compatible REPL.NODEnpm_node_execpathnpm_execpat

@@ -1,0 +1,2 @@
+# JD neighbors
+unction pSn(e,t){e.ownInUseMarkerPaths.delete(t),e.ownInUseMarkerHandles.delete(t)}async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}function kSn(e){let t=Fs(),n=Que(xf(t,"cache"),e).split(_Sn);if(n.length!==3||n.some((r)=>r===""||r==="."||r===".."))return;return xf(t,Jue,...n)}async function dIo(e){let t=Fs();try{let n=await TOe(t),r=t;for(let o of Que(t,e).split(_Sn)

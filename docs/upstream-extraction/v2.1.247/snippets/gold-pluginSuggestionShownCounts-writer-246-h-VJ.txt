@@ -1,0 +1,2 @@
+# h=VJ @220365745
+function h(n){return s().pluginSuggestionShownCounts?.[n]??0}

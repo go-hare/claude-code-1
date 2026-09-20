@@ -1,0 +1,2 @@
+# pos=214105809
+ew WeakMap});import{randomBytes as jIo}from"crypto";import{lstat as mR,readdir as e9,rm as ade,rmdir as Fpt,unlink as UOe}from"fs/promises";import{basename as BSn,dirname as jSn,join as QX}from"path";function kg(e){let t=De(e);return t==="ENOENT"||t==="ENOTDIR"}function BOe(e){return`${e}${Upt}${jIo(4).toString("hex")}`}function HIo(e,t){if(e.startsWith(t+Upt)&&zIo.test(e.slice(t.length+Upt.length

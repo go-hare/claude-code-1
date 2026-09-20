@@ -1,0 +1,3 @@
+# off=207192734 pat=",zs="
+
+ol(),Ys=t.bool(),ys=t.bool(),hs=t.bool(),Vs=t.bool(),Xs=t.bool(),ws=t.bool(),ks=t.bool(),Zs=t.bool(),zs=t.bool(),js=t.bool(),Js=t.bool(),Qs=t.triBool(),$s=t.triBool(),qs=t.bool(),tC=t.bool(),oC=t.enum(["5m","1h"]),EC=t.enum(["5m","1h"]),_C=t.bool(),rC=t.bool(),eC=t.str(),nC=t.bool(),sC=t.bool(),CC=t.bool(),AC=t.bool(),OC=t.bool(),DC=t.bool(),cC=t.b

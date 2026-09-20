@@ -1,0 +1,24 @@
+# 247 SEA — /claude-api Admin API / CMEK
+# needles: "Admin API (Organization Management)" ascii 2 (246=0);
+# customer-managed encryption keys (CMEK); client.beta.organization; shared/admin-api.md
+# bun: B:/~BUN/root/admin-api-q1ana5hs.md
+# ascii guide offset=251480484 .. 251492266
+
+## SKILL.md Other API Surfaces QR
+
+**Admin API (beta, since 2026-08-26):** organization management - members, invites, workspaces and workspace members, API keys, rate limit reports, service accounts, federation issuers/rules, CMEK external keys - under `client.beta.organization` in all seven SDKs and `ant beta:organization` in the CLI. Requires an admin credential: an Admin API key (`sk-ant-admin...`, read from `ANTHROPIC_API_KEY`) or an `org:admin` OAuth token (`ANTHROPIC_AUTH_TOKEN`); regular API keys are rejected. Usage and cost reports and the Claude Enterprise user-management/analytics endpoints are **not** in the SDKs - raw HTTP only. See `shared/admin-api.md`.
+
+## SKILL.md Quick Task Reference
+
+**Organization administration (members, invites, workspaces, API keys, rate limit reports, service accounts, WIF resources, CMEK):**
+-> Read `shared/admin-api.md` - `client.beta.organization` endpoint/method table, admin credentials, per-language naming and pagination, what stays curl-only
+
+## shared/admin-api.md heading
+
+# Admin API (Organization Management)
+
+Read this file when the user wants to manage their Anthropic organization programmatically: members and roles, invites, workspaces and workspace members, API keys, rate limit reports, service accounts, workload identity federation (WIF), or customer-managed encryption keys (CMEK).
+
+The Admin API lives under `https://api.anthropic.com/v1/organizations/*`. It manages the organization itself - it does not send messages. As of **August 26, 2026** it is available in all seven SDKs (Python, TypeScript, C#, Go, Java, PHP, Ruby) under `client.beta.organization`, and in the `ant` CLI under `ant beta:organization`.
+
+Full official body: gold-admin-api.md

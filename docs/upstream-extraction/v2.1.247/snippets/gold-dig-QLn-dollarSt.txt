@@ -1,0 +1,7 @@
+# offset=214539101
+
+rname="***";if(t.password)t.password="***";return t.toString()}}catch{}return e}async function $St(e,t,n){let r=Em(e);if(Ch(n,`Downloading marketplace from ${r}`),_(`Downloading marketplace from URL: ${r}`),t&&Object.keys(t).length>0)_(`Using custom headers: ${le(EBo(t))}`);let o={...t,"User-Agent":i0n},s,i=performance.now();try{s=await lh.get(e,{timeout:1e4,maxContentLength:s0n,headers:o,beforeRedirect:l0n(e,a0n(t))})}catch(l){F_("marketplace_url",e,"failure",performance.now()-i,jC(l));let c=c0n(l);if(c)throw c;let u=(d)=>d.replaceAll(e,()=>r);if(L$(l)){if(l.code==="ECONNREFUSED"||l.code==="ENOTFOUND")throw Error(`Could not connect to ${r}. Please check your internet connection and verify the URL is correct.
+
+Technical details: ${u(l.message)}`);if(l.code==="ETIMEDOUT")throw Error(`Request timed out while downloading marketplace from ${r}. The server may be slow or unreachable.
+
+Technical details: ${u(l.message)}`);if(l.response)throw Error(`HTTP ${l.response.statu

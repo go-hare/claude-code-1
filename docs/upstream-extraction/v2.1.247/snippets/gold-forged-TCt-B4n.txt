@@ -1,0 +1,1 @@
+function B4n(e,t){if(e.unlisted!==void 0)return{ok:!1,error:`git bundle list-heads failed: ${$I(e.unlisted,t)}`,failReason:"git_error"};if(e.missing.length>0)return _Xo(e.missing);if(e.foreign.length>0)return j4n(e.foreign);return(e.notHeld?.length??0)>0?j4n(e.notHeld??[],"not_held"):null}

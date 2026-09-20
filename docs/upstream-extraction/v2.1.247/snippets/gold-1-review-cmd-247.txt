@@ -1,0 +1,29 @@
+### feedback-cmd-name off=218629970
+>!1,isHidden:!0,name:"stub"}});var zHs,KGt;var DKr=w(()=>{zHs={type:"local-jsx",name:"feedback",description:"Send feedback to Anthropic or report a bug",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},KGt=zHs});var HHs,YGt;var $Kr=w(()=>{HHs={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},YGt=HHs});var WHs,LKr;var NKr=w(()=>{WHs={type:"local-jsx",name:"cd",description:"Move this session to a new working directory",argumentHint:"<path>"},LKr=WHs});var qHs,C8e;var FKr=w(()=>{qHs={type:"local",name:"clear",description:"Start a new session with empty context; previous session stays on disk (resumable with /resume)",argumentHint:"[name]",aliases:["reset","new"],supportsNonInteractive:!0,thinClientDispatch:"post-text",load:()=>import("B:/~BUN/root/chunk-jy864xwv.js")},C8e=qHs});var GHs,XGt,ZGt;var UKr=w(()=>{$e();jce();GHs={type:"local-jsx",name:"color",description:"Set the prompt bar color for this session",immediate:!0,argumentHint:`[${[...Ide,"default"].join("|")}]`,requires:{ink:!0},terminalOriented:!0,load:()=>import("B:/~BUN/root/chunk-qmkg8874.js")},XGt={type:"local",name:"color",terminalOriented:!0,supportsNonInteractive:!0,description:"Set th
+
+### bug-cmd-name off=218630176
+}},KGt=zHs});var HHs,YGt;var $Kr=w(()=>{HHs={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},YGt=HHs});var WHs,LKr;var NKr=w(()=>{WHs={type:"local-jsx",name:"cd",description:"Move this session to a new working directory",argumentHint:"<path>"},LKr=WHs});var qHs,C8e;var FKr=w(()=>{qHs={type:"local",name:"clear",description:"Start a new session with empty context; previous session stays on disk (resumable with /resume)",argumentHint:"[name]",aliases:["reset","new"],supportsNonInteractive:!0,thinClientDispatch:"post-text",load:()=>import("B:/~BUN/root/chunk-jy864xwv.js")},C8e=qHs});var GHs,XGt,ZGt;var UKr=w(()=>{$e();jce();GHs={type:"local-jsx",name:"color",description:"Set the prompt bar color for this session",immediate:!0,argumentHint:`[${[...Ide,"default"].join("|")}]`,requires:{ink:!0},terminalOriented:!0,load:()=>import("B:/~BUN/root/chunk-qmkg8874.js")},XGt={type:"local",name:"color",terminalOriented:!0,supportsNonInteractive:!0,description:"Set the prompt bar color for this session",argumentHint:`[${[...Ide,"default"].join("|")}]`,isEnabled:()=>xt(),get isHidden(){return!xt()},load:()=>import("B:/~BUN/root/chunk-c65nwhg4.js")},ZGt=GHs});var VHs,JGt;
+
+### Rs-jsx off=-1
+MISS
+
+### call-feedback-sr off=198149976
+ndefined value\u0000\u0000\u000c\u0000\u0000\u0080\u00a6M\u00c2\u0000, not synced\u0013\u0000\u0000\u0080\u007f/\u0008\u0000, has local changes\u0000\u0014\u0000\u0000\u0080\u008f&_\u0000- Git repo metadata:\u000a\u0000\u0000\u0080\u00fb5u\u0000commitHash\u0000\u0000\u0009\u0000\u0000\u0080\u00bc%_\u0000remoteUrl\u0000\u0000\u0000\u000e\u0000\u0000\u0080'J)\u0000isHeadOnRemote\u0000\u0000\u0007\u0000\u0000\u0080\u0093H>\u0000isClean\u0000\u000a\u0000\u0000\u0080N&?\u0000branchName\u0000\u0000\u000a\u0000\u0000\u0080J\u00d2p\u0000onWriteNew\u0000\u0000&\u0000\u0000\u0080\u000eH\u00ca\u0000Error submitting feedback / bug report\u0000\u0000\u001a\u0000\u0000\u0080\u00bb}\u001f\u0000Feedback bundle saved to `\u0000\u0000\u001f\u0000\u0000\u0080O@\u00b7\u0000Feedback / bug report submitted\u0000\u001f\u0000\u0000\u0080\u000e\u00eb\u009b\u0000Feedback / bug report cancelled\u0000,\u0000\u0000\u0080\u00b0\u00d8\u00a7\u0000Please describe the issue before submitting.\u0012\u0000\u0000\u0080\u00811\u00b8\u0000Feedback cance
+
+### Ufs-then-sr off=-1
+MISS
+
+### Ufs-then-iT off=-1
+MISS
+
+### aLt-then-T off=-1
+MISS
+
+### export-call-feedback off=-1
+MISS
+
+### function-call-feedback off=219869975
+;return i.ok?m(t):i}async function zo(e,r,n,t){e.indexBytes+=r.bytes;for(let i of r.operations){if(i.kind==="tombstone"){for(let c of i.recordIds){let f=e.byId.get(c);if(f===void 0)e.pendingTombstones.add(c);else f.tombstoned=!0}continue}let{priorLogEnd:o,entries:a}=i.operation;for(let c of a)e.issuedSeq=Math.max(e.issuedSeq??-1,c.seq);if(o!==e.committedEnd||!ep(a,e)){e.rejectedLines+=1;continue}let s=a.map((c)=>({...c,tombstoned:!1})),l=a.every((c)=>c.offset+c.length<=n)?await t(s):m(!1);if(!l.ok)return l;if(!l.value){e.rejectedLines+=1,e.unbridgedVerificationRejection=!0,e.headSeq=Math.max(e.headSeq??-1,...a.map((c)=>c.seq));continue}e.unbridgedVerificationRejection=!1;for(let c of s){if(e.pendingTombstones.delete(c.recordId))c.tombstoned=!0;e.entries.push(c),e.byId.set(c.recordId,c)}e.headSeq=Math.max(e.he
+
+### load-feedback off=218630099
+,requires:{ink:!0}},KGt=zHs});var HHs,YGt;var $Kr=w(()=>{HHs={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},YGt=HHs});var WHs,LKr;var NKr=w(()=>{WHs={type:"local-jsx",name:"cd",description:"Move this session to a new working directory",argumentHint:"<path>"},LKr=WHs});var qHs,C8e;var FKr=w(()=>{qHs={type:"loc

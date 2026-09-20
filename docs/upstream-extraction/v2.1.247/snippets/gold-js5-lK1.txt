@@ -1,0 +1,3 @@
+# offset=219379194 needle="function lK("
+
+>`)||e.startsWith(`<${P_}>`)||e.startsWith(`<${hoo}>`)||e.startsWith(`<${my}>`)}function lK(e){return e.type!=="progress"&&e.type!=="attachment"&&e.type!=="system"&&Array.isArray(e.message.content)&&e.message.content[0]?.type==="text"&&cQ.has(e.message.content[0].text)}function Snd(e){return q5e(e)&&!Kb(e)}function RIt(e){if(!dVt(e))return!1;if(e.origin&&e.origin.kind!=="human")return!1;if(e.stackedExpansion)return!1;return!0}function wnd(e){if(e.type!=="attachment"||e.attach

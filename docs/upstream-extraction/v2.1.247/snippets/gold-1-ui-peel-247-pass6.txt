@@ -1,0 +1,95 @@
+# leftover SendFeedback UI peel 247 pass6
+
+## function Rqe( hits=0 []
+
+## function tP() hits=1 [210027116]
+@210027116 len=505 sha=08d116cb15f58eca
+function tP(){let e=this.buf[this.pos++],t=e&127;if((e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<7,(e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<14,(e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<21,(e&128)==0)return this.assertBounds(),t;e=this.buf[this.pos++],t|=(e&15)<<28;for(let n=5;(e&128)!==0&&n<10;n++)e=this.buf[this.pos++];if((e&128)!=0)throw Error("invalid varint");return this.assertBounds(),t>>>0}
+
+
+## function FRe() hits=1 [250705440]
+@250705440 len=189 sha=cf40318b8df39883
+function FRe(){pae||(pae=!0,EH().then(e=>{if(typeof e?.onPeers=="function")try{e.onPeers.call(e,t=>{wH=IRe(t.peers);for(let n of[...oA])n()},()=>{wH=SH;for(let t of[...oA])t()})}catch{}}))}
+
+
+## function ERe( hits=1 [250689536]
+@250689536 len=557 sha=0dba72ea25507924
+function ERe({state:e,onRetry:t}){let n=e.status,r=n==="loading"?"loading":n==="error"?"error":n==="dirty"||n==="saving"?"pending":"synced",o=e.message??(r==="pending"?"Syncing\u2026":r==="error"?"Couldn\u2019t sync \u2014 click to retry":"All changes synced");return(0,Zt.jsx)(Ic,{tip:o,side:"bottom",align:"right",wrap:!0,children:(0,Zt.jsx)("button",{type:"button",onClick:t,"aria-label":o,"data-sync":r,"data-testid":"sync-dot",className:vt("tb-action tb-sync-dot",Rh),children:(0,Zt.jsx)("span",{"aria-hidden":"true",className:"tb-sync-dot-mark"})})})}
+
+
+## function LRe( hits=2 [213419243, 250704579]
+@213419243 len=439 sha=7b2dda4e45661f29
+function LRe(e,t){let n,r;try{if(n=await $Re(e,{resourceMetadataUrl:t?.resourceMetadataUrl},t?.fetchFn),n.authorization_servers&&n.authorization_servers.length>0)r=n.authorization_servers[0]}catch(s){if(s instanceof TypeError)throw s}if(!r)r=String(new URL("/",e));let o=await R1(r,{fetchFn:t?.fetchFn,skipIssuerValidation:t?.skipIssuerMetadataValidation});return{authorizationServerUrl:r,authorizationServerMetadata:o,resourceMetadata:n}}
+
+@250704579 len=92 sha=6f1829b936f0065b
+function LRe(e){let t=typeof e=="object"&&e!==null?e.code:"";return typeof t=="string"?t:""}
+
+
+## function Eqe( hits=1 [215707194]
+@215707194 len=282 sha=47b099c971905a84
+function Eqe(e){let t=new Map;for(let n of e)if(Array.isArray(n.message.content)){for(let r of n.message.content)if(r.type==="tool_use"&&!kts.has(r.name))t.set(r.name,(t.get(r.name)??0)+1)}return[...t].sort((n,r)=>r[1]-n[1]).slice(0,5).map(([n,r])=>r>1?`${n}\xD7${r}`:n).join(", ")}
+
+
+## function nre( hits=3 [208748703, 242080315, 250341115]
+@208748703 len=313 sha=e8586566c406c44b
+function nre({onIndeterminate:e}){if(!gt()){if(SH()&&Mg(pt(),ci)===ct(pt()))return!1;return!0}let t=pt(),n=m.localSettingsGitTracked?.cwd===t?m.localSettingsGitTracked.value:void 0;if(n===void 0)n=vH(),m.setLocalSettingsGitTracked({cwd:t,value:n});if(n==="indeterminate")return e==="tracked";return n==="tracked"}
+
+@242080315 len=21 sha=8111c2211ed33346
+function nre(e){Sp=e}
+
+
+## function rre( hits=4 [208749016, 218773401, 242080840, 250342988]
+@208749016 len=52 sha=6eb5bbd3f287625e
+function rre(){m.setLocalSettingsGitTracked(void 0)}
+
+@218773401 len=147 sha=fc27aa3e0289154d
+function rre(e){if(W0())return[];if(jm())return e.filter((t)=>t.type==="prompt"&&t.loadedFrom==="mcp"&&!t.disableModelInvocation&&!lv(t));return[]}
+
+
+## function Dqe( hits=0 []
+
+## function xqe( hits=1 [242147638]
+@242147638 len=428 sha=85a241490ab935d0
+function xqe(e,t,r,i,n,a,s,l){let u=[],h=[l.maxRandomnessOffset||1,(l.maxRandomnessOffset||1)+.3],d=[0,0],f=l.disableMultiStroke?1:2,p=l.preserveVertices;for(let m=0;m<f;m++)m===0?u.push({op:"move",data:[s[0],s[1]]}):u.push({op:"move",data:[s[0]+(p?0:pr(h[0],l)),s[1]+(p?0:pr(h[0],l))]}),d=p?[n,a]:[n+pr(h[m],l),a+pr(h[m],l)],u.push({op:"bcurveTo",data:[e+pr(h[m],l),t+pr(h[m],l),r+pr(h[m],l),i+pr(h[m],l),d[0],d[1]]});return u}
+
+
+## function Mqe( hits=1 [215693534]
+@215693534 len=380 sha=96784c4efd696c12
+function Mqe(e,t,n){let r=le(n)+`
+`;if(e!==void 0&&ol(t)){e.append(_r.jobTimeline(t),[{data:r}]).then((o)=>{if(!o.ok){let s=o.error;of(Object.assign(new ye(`[jobs] v5 timeline append failed: ${tr(s)}`,"[jobs] v5 timeline append failed"),{code:Cqe(s)?"ENOENT":("telemetryCode"in s)?s.telemetryCode:void 0}))}}).catch(of);return}Qes(tts(bA(t),"timeline.jsonl"),r,"utf-8").catch(of)}
+
+
+## function Iqe( hits=0 []
+
+## var Tqe= hits=0 []
+
+## var Aqe= hits=0 []
+
+## var Pqe= hits=0 []
+
+## var Rqe= hits=0 []
+
+## function Pn() hits=4 [207058552, 210539254, 210826509, 212273147]
+
+## feedback draft hits=21 [197139048, 198152343, 199046881, 200611996, 201795960, 201796000, 201796732, 201796772]
+
+## sessionDraftCount hits=11 [197139096, 210970827, 216530040, 216530060, 216530802, 216530833, 216531111, 216531140]
+
+## footer zO consumer
+zO(),he=WRe()?.footer_indicator,it=K(()=>hRe(he),[he]),Me=ni(),ve=ii(),Be=I((ae)=>ae.mainLoopModel),vt=I((ae)=>ae.mainLoopModelForSession),ze=VRe(),Ke=K(()=>GRe(Mc({permissionMode:t.mode,mainLoopModel:Me})),[Me,Be,vt,t.mode,P,ve,ze]),$e=it??(Ke?gRe:null);if(e==="bash")return i(p,{color:"bashBorder",children:"! for shell mode"});let Qt=t?.mode,et=ws(),De=!et&&!jt(),ot=De?mct(re):null,Yt=De?pct(re):0,xt=!jRe(Qt),ho=G?D[G]:void 0,tt=q==="viewing-agent"&&ho?.type==="in_process_teammate",Ze=!1,Bt=0,an=Ze&&C&&!_&&!z&&!u&&!me,Ao=tt&&ho!=null&&ho.status!=="running",xn=ge>0,Zt=(J||xt?1:0)+(xn?1:0),wo=!O&&k&&!j.some((ae)=>ae.key===O6)?i(p,{dimColor:!0,children:nP(k)},"pr-status"):null,Ko=null,Oo=$e?f(p,{color:"ide",children:[f(p,{"aria-hidden":!0,children:[Ae.lozenge," "]}),$e]},"footer-indicator"):null,Ln=($e?pt($e)+5:0)+Yt+Bt,nt=Zt<2&&!((wo||j.length>0)&&b<60+(Ko?8:0)+Ln)&&!(Ko&&b<56+Ln)&&!(Oo&&b<48+Ln)&&!(ot&&b<48+Yt+Bt),no=et?oP("setPermissionMode")&&!et.viewerOnly:!jt(),Io=!xe&&zTe(D,G),Eo=Y&&!Io&&!xe&&G===void 0&&lo()&&!jt();if(W)return i(y,{height:1,overflow:"hidden",children:i(a8,{})});if(O){let ae=ge,Te=ae>=2,at=ge>=1,Ut=!!Qt&&no,zt=!1,_o=Fa(D,M,G).length>0||G!==void 0&&Bs(D[G]),en=d&&!tt&&l&&!z&&!s,Ir=fe&&Ce==="idle"&&ce&&o,Ro="none";if(fe&&me)Ro="warmup";else if(Ao)Ro="interrupt";else if(!n)Ro=r&&en&&!xe?"agents":"none";else if(u)Ro=en&&!xe?"interrupt_agents":"interrupt";else if(N)Ro="memories";else if((at||_o)&&!W)Ro="manage";else if(_e)Ro="ctrl_t";else if(en&&!xe)Ro="agents";else if(Io)Ro="none";else if(Ir)Ro="voice";else if(Ut&&(xt||Ze)&&F!=="")Ro="cycle";else Ro=o&&!xe?"shortcuts":"none";let vi=Q==="tasks"?"hide tasks":"show tasks",Ws=Ro==="cycle"?f(p,{dimColor:!0,children:[" ",i(Le,{chord:F,action:"cycle",parens:!0,format:{keyCase:"lower"}})]}):null,Rn=Ro==="manage"&&at?f(p,{dimColor:!0,children:[" ",g?i(Le,{chord:"enter",action:"view tasks",parens:!0}):i(Le,{chord:"down",action:"manage",parens:!0})]}):null,fn=null;if(Ro==="warmup")fn=i(E6,{},"voice-warmup");else if(Ro==="manage"&&!at)fn=i(p,{dimColor:!0,children:g?i(Le,{chord:"enter",action:"view tasks"}):i(Le,{chord:"down",action:"manage"})});else if(Ro==="memories")fn=i(p,{dimColor:!0,children:i(Le,{chord:"enter",action:"view memories"})});else if(Ro==="interrupt"||Ro==="interrupt_agents")fn=f(Ge,{children:[f(p,{dimColor:!0,children:[i(Le,{chord:Ee,action:Ao?"return to team lead":"interrupt",format:{keyCase:"lower"}}),Ro==="interrupt_agents"&&" \xB7 "]}),Ro==="interrupt_agents"&&i(qC,{})]});else i
+
+=== feedback draft count=21 [197139048, 198152343, 199046881, 200611996, 201795960, 201796000, 201796732, 201796772]
+=== drafts queued count=2 [198152352, 237000490]
+=== ${we} count=15 [209955294, 221010013, 221010027, 221010083, 221010128, 222030929, 222031010, 224045926]
+=== we===0 count=3 [220431190, 232634182, 235469632]
+=== we>0 count=5 [231915971, 232635226, 232636103, 233111607, 233111819]
+=== we? count=37 [85019759, 209240224, 210663647, 210948329, 217604093, 217606031, 221629020, 223817709]
+=== queued draft count=0 []
+=== /feedback count=57 [83829906, 197163111, 197165764, 197165828, 197418832, 198154487, 199048368, 199048460]
+footer window b'we>' 4226
+footer window b'we?' -1
+footer window b'we&&' -1
+footer window b'we!==' -1
+footer window b'we===' 3182
+footer window b'{we}' -1
+footer window b'${we' -1

@@ -47,6 +47,8 @@ import {
   isFleetNeedsInputNudgeEnabled,
   setFleetNeedsInputNudgeFocused,
 } from '../../utils/fleetNeedsInputNudge.js';
+import { FeedbackDraftFooter } from '../FeedbackDraftFooter.js';
+import { useSessionDraftCount } from '../../utils/feedbackDrafts/useSessionDraftCount.js';
 import { plural } from '../../utils/stringUtils.js';
 import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink';
 
@@ -388,6 +390,7 @@ function ModeIndicator({
   leftArrowAgain,
 }: ModeIndicatorProps): React.ReactNode {
   const { columns } = useTerminalSize();
+  const feedbackDraftCount = useSessionDraftCount();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
   const tasks = useAppState(s => s.tasks);
   const teamContext = useAppState(s => s.teamContext);
@@ -760,6 +763,10 @@ function ModeIndicator({
         /diff to hide diff
       </Text>,
     );
+  }
+
+  if (feedbackDraftCount > 0) {
+    parts.push(<FeedbackDraftFooter key="feedback-drafts" count={feedbackDraftCount} />);
   }
 
   if ((tasksPart || hasCoordinatorTasks) && showHint && !hasTeams) {

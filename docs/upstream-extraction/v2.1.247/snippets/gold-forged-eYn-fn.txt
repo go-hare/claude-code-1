@@ -1,0 +1,1 @@
+async function hs(e,t,i={}

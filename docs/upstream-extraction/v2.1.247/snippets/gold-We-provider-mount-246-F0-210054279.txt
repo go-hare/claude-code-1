@@ -1,0 +1,2 @@
+# 246 F0 (H0 leftover) @210054279 end=210054385 len=106
+function F0(e,o){let i=Qu(L0,null,Qu(zR,null,Qu(kg,null,e)));return o!==void 0?Qu(LR,{...o,children:i}):i}

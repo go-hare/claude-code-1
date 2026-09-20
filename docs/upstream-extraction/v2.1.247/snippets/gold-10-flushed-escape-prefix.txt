@@ -1,0 +1,19 @@
+# densable 2.1.247 #10 — locked SEA qb (247 NEW flushedEscapePrefix; 246: 0)
+
+## INITIAL 247
+Xb={mode:"NORMAL",incomplete:"",pasteBuffer:"",pendingByteEvents:[],droppedMousePrefix:"",flushedEscapePrefix:""}
+
+## regex 247
+jM=/^\x1b\[<\d+;\d+;\d+[Mm]/   // completed SGR after ESC/ESC[ prefix
+YM=/^\x1b\[<[\d;]*[Mm]/        // droppedMousePrefix complete (unchanged)
+
+## qb 247 vs 246
+247: f=isFlush?e.flushedEscapePrefix:""
+     m=e.flushedEscapePrefix
+     on flush, if buffer is "\x1B" or "\x1B[": f=buffer; then tokenizer.flush()
+     sequence token: droppedMousePrefix=""; m=""
+     text: if !paste && m: combine m+text, jM.exec; always m=""; if match parse mouse/key and slice
+     return {..., droppedMousePrefix, flushedEscapePrefix:f}
+
+246 qb has no flushedEscapePrefix; flush of ESC/ESC[ emits then later
+"<35;150;7M" is typed.

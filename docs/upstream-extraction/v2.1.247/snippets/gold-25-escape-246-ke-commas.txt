@@ -1,0 +1,23 @@
+# 246 ke, hits before U@231792233
+
+## hit1 @231719118
+eturn(await wt(t))?.plugins[e]}var ms=2000,st=3;async function fs(e,t,n){let a=await In(e,n);if(!a)return null;let s=a.tokens[t];if(s)return{alwaysOn:s.always_on,onInvoke:s.on_invoke,isEstimate:!1};let o=[...a.components.commands,...a.components.agents,...a.components.skills],i=0,r=0;for(let p of o)i+=p.chars?.always_on??0,r+=p.chars?.on_invoke??0;return{alw
+
+## hit2 @231757518
+un @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training m
+
+## hit3 @231767042
+:/~BUN/root/_702.js";import"B:/~BUN/root/_703.js";import"B:/~BUN/root/_704.js";import"B:/~BUN/root/_705.js";import"B:/~BUN/root/_706.js";import"B:/~BUN/root/_707.js";import{lJc as ke,mJc as D,qJc as Wt,sJc as fn,vJc as Vt}from"B:/~BUN/root/_708.js";import"B:/~BUN/root/_709.js";import"B:/~BUN/root/_710.js";import"B:/~BUN/root/_711.js";import"B:/~BUN/root/_712
+
+## hit4 @231791379
+;h.push("");let v=[...g.skills,...g.agents,...g.commands].filter((p)=>p.chars!=null),L={always_on:v.reduce((p,y)=>p+y.chars.always_on,0),on_invoke:v.reduce((p,y)=>p+y.chars.on_invoke,0)},F=Z[M[0]],S=F?.always_on??i(L.always_on,L.always_on,void 0);if(h.push("Projected token cost"),h.push(`  Always-on:   ~${S.toLocaleString()} tok   added to every session`),v.
+
+## hit5 @231791842
+.push(`  ${"component".padEnd(p)}  ${"always-on".padStart(9)}  ${"on-invoke".padStart(9)}`);for(let y of v){let j=i(y.chars.always_on,L.always_on,F?.always_on),bt=i(y.chars.on_invoke,L.on_invoke,F?.on_invoke);h.push(`  ${y.name.padEnd(p)}  ${u(j).padStart(9)}  ${u(bt).padStart(9)}`)}h.push(""),h.push("  On-invoke cost is paid each time a skill or agent fires
+
+## hit6 @231791854
+component".padEnd(p)}  ${"always-on".padStart(9)}  ${"on-invoke".padStart(9)}`);for(let y of v){let j=i(y.chars.always_on,L.always_on,F?.always_on),bt=i(y.chars.on_invoke,L.on_invoke,F?.on_invoke);h.push(`  ${y.name.padEnd(p)}  ${u(j).padStart(9)}  ${u(bt).padStart(9)}`)}h.push(""),h.push("  On-invoke cost is paid each time a skill or agent fires."),h.push("

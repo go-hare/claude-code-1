@@ -1,0 +1,8 @@
+# ver=246 name=np async=true start=220068689 end=220069798 len=1109 sha=1d22986b102f2ad0 needle="background session"
+
+async function np(e,t){let r=await qr(e,"claude stop <id>","Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`.",t),n=await z(M(r),t),{confirmed:o,error:s}=await vt(r,n??void 0,void 0,t);if(!o){await pe("cli_bg_stop","kill_unconfirmed"),process.stderr.write(s?`couldn't confirm ${r} was stopped \u2014 ${s}
+`:`couldn't confirm ${r} was stopped \u2014 the background service may be restarting. Try again in a moment.
+`),process.exitCode=1;return}await Ne("cli_bg_stop"),process.stdout.write(`stopped ${r}
+`);let i=M(r),c=await z(i,t);if(c&&!st(c)){let a=new Date().toISOString();await _e(i,{...c,state:"stopped",detail:"stopped",tempo:"idle",needs:void 0,block:void 0,inFlight:void 0,updatedAt:a,firstTerminalAt:c.firstTerminalAt??a},t).catch((d)=>y(`bg stop terminal write failed: ${x(d)}`,{level:"warn"}))}if(await bt("tengu_bg_agent_action",{action:ae("stop"),source:ae("cli"),jobSessionId:me(c?.sessionId)??ae("")}),c?.worktreePath)process.stdout.write(wt.dim(`  worktree retained at ${c.worktreePath}
+  run 'claude rm ${r}' to remove worktree and job state
+`))}

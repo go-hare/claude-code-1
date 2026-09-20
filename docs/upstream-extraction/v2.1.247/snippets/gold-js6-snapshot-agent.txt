@@ -1,0 +1,3 @@
+# offset=232292668 needle="this._snapshot.mainThreadAgentDefinition"
+
+er in the active context. Choose a more recent message.","warning")]);return}let g=Kr(),h=r.buildToolUseContext(m,[],g,l),S=await _me({toolUseContext:h,forkContextMessages:m,mainThreadAgentDefinition:this._snapshot.mainThreadAgentDefinition}),k=await Gde(m,d,h,S,{userFeedback:t,direction:o,onNotification:u,onResponseLength:r.stream.onResponseLength}),_=jde(k,o);if(lo()&&o==="from")c((w)=>{let b=w.findIndex((v)=>v.uuid===e.uuid);return[...w.slice(0,b===-1?0:b),..._]});else c(_);if(s((w)=>P0(w,n.getSnapshot())),this.bumpConversationId(),Wde(h.session,h.options.querySource,s,void 0,void 0,void 0,

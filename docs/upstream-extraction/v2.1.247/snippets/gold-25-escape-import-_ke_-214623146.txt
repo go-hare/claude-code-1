@@ -1,0 +1,3 @@
+# 247 @214623146
+
+{...ke?.enabledPlugins,...Ve}}),void 0,u);if(st)return await G(),{ok:!1,reason:"settings-write-failed",message:st.message};let Lt=[];for(let ke of he){let Ce=k.has(ke),He;try{He=await Ge(ke)}catch(We){if(Ce){_(`installResolvedPlugin: force-included ${ke} fetch threw (${We instanceof Error?We.message:String(We)}); skipping (pinner stays demoted)`);continue}throw We}if(!He.ok){if(Ce){_(`installResolvedPlugin: force-included ${ke} ${He.reason}; skipping (pinner stays demoted)`);continue}return await G(),He}Lt.push({manifestDeps:He.dependencies,declaringId:ke})}fe=Lt}}catch(Oe){throw await G(),Oe}

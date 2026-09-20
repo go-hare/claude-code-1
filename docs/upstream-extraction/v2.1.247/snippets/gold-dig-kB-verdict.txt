@@ -1,0 +1,36 @@
+# official kB — densable 2.1.247 lock
+
+## alias (Qt→cfa=G0n method)
+marketplace module header @212803853 (next module @219716299)
+import @212810236: {Yib as kB,_ib as OSt} from B:/~BUN/root/_512.js
+gold: gold-dig-kB-import-line.txt / gold-dig-kB-import-Yib.txt
+
+## export
+_512.js export @211619476: n as Yib
+gold: gold-dig-kB-Yib-export.txt
+one `n as Yib` in SEA; one `function n(e){` in this chunk @211619292
+
+## body (_512.js @211619292)
+function n(e){return e!==void 0&&t.has(e)}
+function R(e){return e.code==="Failed"&&n(e.telemetryCode)}
+var o,t; var E=r(()=>{o=["ELOOP","ENXIO","EISDIR"],t=new Set(o)});
+export{t as Xib,n as Yib,R as Zib,E as _ib};
+
+kB === n === (e) => e!==undefined && Set(ELOOP,ENXIO,EISDIR).has(e)
+R (Zib) unused at xSt/RBo (they split Failed + kB)
+OSt === E (module init); marketplace calls OSt() so `t` is live
+gold: gold-dig-kB-body.txt / gold-dig-kB-512-full.txt / gold-dig-kB-n-def.txt
+
+## marketplace kB( call sites (same import; not name-collision)
+214530185 xSt  return kB(s)?n():!1
+214541912 RBo  Failed && (kB(telemetryCode) || scopeKind directory)
+214646314 BFn  kB(o)?null:!1   (same-module extra)
+214646651 gzo  if(!kB(o)) return unknown
+215606444 zPt  computer-use lock (same-module extra)
+
+## local gap (marketplaceManager.ts) — do not implement
+xSt = marketplaceJsonExistsViaV5: !ok → return false (no kB disk fallback)
+  → more-reject (official disk-fallback on ELOOP/ENXIO/EISDIR)
+RBo = publishUrlMarketplaceCatalog: retry only if Failed && scopeKind directory
+  → more-reject (official also retries when kB(telemetryCode))
+helper: missing (no 3-code Set predicate; isEISDIR / ENVIRONMENT_ERRNOS / isFsInaccessible are not this set)

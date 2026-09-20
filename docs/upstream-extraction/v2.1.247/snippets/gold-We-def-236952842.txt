@@ -1,0 +1,3 @@
+# needle=async function We(){ pos=236952842 end=236953210 len=368
+async function We(){let ol=await j("gh",["secret","list","--app","actions","--repo",s.selectedRepoName]);if(ol.code===0){if(ol.stdout.split(`
+`).some(Fl))C(ql);else if(D)C((ld)=>({...ld,apiKeyOrOAuthToken:D,useExistingKey:!0})),await _e(D,s.secretName);else C(Yl)}else if(D)C((cd)=>({...cd,apiKeyOrOAuthToken:D,useExistingKey:!0})),await _e(D,s.secretName);else C(Vl)}

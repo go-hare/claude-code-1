@@ -1,0 +1,2 @@
+# Ohe( @217953403
+pe==="hook")W+=p9n(e.name,T,r.options.tools,Le(r),Ohe(r));let ne=[{type:"tool_result",content:W,is_error:!0,tool_use_id:t}],oe=z.behavior==="ask"?z.contentBlocks:void 0;if(oe?.length)ne.push

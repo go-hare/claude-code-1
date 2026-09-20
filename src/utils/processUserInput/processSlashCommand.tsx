@@ -80,6 +80,7 @@ import { getInitialSettings } from '../settings/settings.js';
 import { parseSlashCommand } from '../slashCommandParsing.js';
 import { slashCommandEditDistance, suggestSlashCommand } from '../slashCommandSuggest.js';
 import { sleep } from '../sleep.js';
+import { incrementPluginUsage } from '../plugins/pluginUsagePending.js';
 import { recordSkillUsage } from '../suggestions/skillUsageTracking.js';
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js';
 import { buildPluginCommandTelemetryFields } from '../telemetry/pluginTelemetry.js';
@@ -744,6 +745,7 @@ export async function processSlashCommand(
 
     // Add plugin metadata if this is a plugin command
     if (returnedCommand.type === 'prompt' && returnedCommand.pluginInfo) {
+      incrementPluginUsage(returnedCommand.pluginInfo.repository);
       const { pluginManifest, repository } = returnedCommand.pluginInfo;
       const { marketplace } = parsePluginIdentifier(repository);
       const isOfficial = isOfficialMarketplaceName(marketplace);
@@ -828,6 +830,7 @@ export async function processSlashCommand(
 
   // Add plugin metadata if this is a plugin command
   if (returnedCommand.type === 'prompt' && returnedCommand.pluginInfo) {
+    incrementPluginUsage(returnedCommand.pluginInfo.repository);
     const { pluginManifest, repository } = returnedCommand.pluginInfo;
     const { marketplace } = parsePluginIdentifier(repository);
     const isOfficial = isOfficialMarketplaceName(marketplace);

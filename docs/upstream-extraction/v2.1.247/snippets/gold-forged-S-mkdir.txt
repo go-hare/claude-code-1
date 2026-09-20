@@ -1,0 +1,2 @@
+# gold-forged-S-mkdir.txt official-247 SEA @209040451-209040750
+function S(e){let t=d(N(),"claude");if(t!==e.ensured){if(typeof process.getuid==="function")s(t,{recursive:!0,mode:448}),c(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}function G(){let e=w();s(e,{recursive:!0,mode:448}),c(e);let r=d(e,"plugin-tool-staging");return s(r,{

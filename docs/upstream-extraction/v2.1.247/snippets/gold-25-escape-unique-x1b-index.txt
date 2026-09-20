@@ -1,0 +1,39 @@
+# unique 247 x1b needle="\\x1b"
+246=127 247=129 unique247=66
+
+## u0 @197078776 sha=8bf4d7c5f7fc3bc3
+.....D..^['\u2019]*$........surveyRating....$.v.rc-active-badge.$...9G.. Large workflow . /workflows to stop....u.8. Large workflow......%..idle-teammate-summary...........launch-prompt-warning...........persistence-suppressed..........transcript-writer-degraded..	....|..disk full.......M...read-only filesystem.....-..disk quota exceeded....;<A.path too long.......?W.permission denied...1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........K..rulz12.......W..cursorOffset......`.pastedContents.....T.).stashedPrompt........y..isInputOverlayActive....XW..isVimEditing....(...inputOwnsEscape. .....J.https://claude.ai/settings/usage
+....Q..fotw-claim........l.noteSend........noteSendFailed..........onResetFrame.....;..forget......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse.......eWx.low-priority
+
+## u1 @197078790 sha=0db8b24c8db547bb
+019]*$........surveyRating....$.v.rc-active-badge.$...9G.. Large workflow . /workflows to stop....u.8. Large workflow......%..idle-teammate-summary...........launch-prompt-warning...........persistence-suppressed..........transcript-writer-degraded..	....|..disk full.......M...read-only filesystem.....-..disk quota exceeded....;<A.path too long.......?W.permission denied...1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........K..rulz12.......W..cursorOffset......`.pastedContents.....T.).stashedPrompt........y..isInputOverlayActive....XW..isVimEditing....(...inputOwnsEscape. .....J.https://claude.ai/settings/usage
+....Q..fotw-claim........l.noteSend........noteSendFailed..........onResetFrame.....;..forget......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse.......eWx.low-priority-offer.......q
+
+## u2 @197078804 sha=cd2dac7841938d1c
+surveyRating....$.v.rc-active-badge.$...9G.. Large workflow . /workflows to stop....u.8. Large workflow......%..idle-teammate-summary...........launch-prompt-warning...........persistence-suppressed..........transcript-writer-degraded..	....|..disk full.......M...read-only filesystem.....-..disk quota exceeded....;<A.path too long.......?W.permission denied...1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........K..rulz12.......W..cursorOffset......`.pastedContents.....T.).stashedPrompt........y..isInputOverlayActive....XW..isVimEditing....(...inputOwnsEscape. .....J.https://claude.ai/settings/usage
+....Q..fotw-claim........l.noteSend........noteSendFailed..........onResetFrame.....;..forget......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse.......eWx.low-priority-offer.......q..low-priority
+
+## u3 @197078818 sha=82a6f17a0e08c3b2
+..$.v.rc-active-badge.$...9G.. Large workflow . /workflows to stop....u.8. Large workflow......%..idle-teammate-summary...........launch-prompt-warning...........persistence-suppressed..........transcript-writer-degraded..	....|..disk full.......M...read-only filesystem.....-..disk quota exceeded....;<A.path too long.......?W.permission denied...1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........K..rulz12.......W..cursorOffset......`.pastedContents.....T.).stashedPrompt........y..isInputOverlayActive....XW..isVimEditing....(...inputOwnsEscape. .....J.https://claude.ai/settings/usage
+....Q..fotw-claim........l.noteSend........noteSendFailed..........onResetFrame.....;..forget......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse.......eWx.low-priority-offer.......q..low-priority-active.....2@
+
+## u4 @198124012 sha=82dddca5249b2f69
+rmed (..1.......). ..  .c.o.l.d.-.d.i.s.p.a.t.c.h.i.n.g. .w.i.t.h. .f.r.e.s.h. .s.e.s.s.i.o.n.I.d.;. .s.p.a.r.e. .......yl.. dir preserved..........job_attach_crashed..(...a.R.S.e.s.s.i.o.n. .c.r.a.s.h.e.d. ..  .p.r.e.s.s. .E.n.t.e.r. .t.o. .r.e.s.p.a.w.n.....1@..discarded_after_spawn.........Q.[PERF:bg-spare-spawned] ......,.file:///B:/%7EBUN/root/_142.js..........EFTYPE......M...ETXTBSY.....Fj..\x1b\[(?:<\d+;\d+;\d+[Mm]|M[\s\S]{3}|I|O|\??\d+;\d+(?:;\d+)*R|[?>]\d+(?:;\d+)*c|\?\d+(?:;\d+)*\$y|\?997;[12]n|\?\d+u)|\x1bP[^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\).l....w..^\x1b(?:$|\[(?:[<?>]?\d*(?:;\d*)*\$?|M[\s\S]{0,2})$|P(?:$|[>01][^\x1b]*\x1b?$)|\](?:$|\d[^\x07\x1b]*\x1b?$)).........[2mQ....\K. . .S.e.s.s.i.o.n. .i.s. .s.t.a.r.t.i.n.g. ..  .s.h.o.w.i.n.g. .i.t.s. .t.r.a.n.s.c.r.i.p.t. .u.n.t.i.l. .i.t. .a.p.p.e.a.r.s... .C.t.r.l.+.Z. .t.o. .d.e.t.a.c.h...........(\x1b\[[0-9;]*m)	...
+
+## u5 @198138348 sha=82e6039c7ce60072
+.c..skipUnlink......R...tengu_bg_attach_stall_gave_up..."...
+V..Session keeps stalling at startup.......2.".ESTALLED: Session ..#....6A. .k.e.e.p.s. .s.t.a.l.l.i.n.g. .a.t. .s.t.a.r.t.u.p. ..  .c.h.e.c.k. ...
+....... for logs...!....`..session keeps stalling at startup.......S...tengu_bg_attach_stall_respawn...	...~G..: worker .......n..., restarting......S.file:///B:/%7EBUN/root/_143.js.......v<.\x1b\[\?([\d;]+)([hl])..........daemon_bg_reap_all..*.....R.-(?:dev|engine)\.(\d{8})\.t(\d{6})(?:\.|$).......3J.[-:]....,.O.tengu_bg_low_mem_mb......(..lowMem..(...Z+3.bg low-mem: memoryPressureLevel failed: ....I\O.memoryPressureLevel....._.9.tengu_bg_attach_upgrade......A..pty-pids.....J)..pid.....vu.^\x1b(\[(\?[\d;]*)?)?$......6....sock...
+....tB..exec-exit......D.&.spare:........P.supervisorKilledAll.....-...file:///B:/%7EBUN/root/_144.js..h...2|..To reattach to a cloud session, pass its id:
+
+## u6 @198210196 sha=774de688e4f7447d
+....}...checked.........strong..........codespan....+...^file:..
+.......localhost/.......#{.[#?]........^\/[A-Za-z]:(?=[\\/]|$).......6. (\d{1,9}[.)])(?!\w)....q...doctag........$.grey.....z..meta-keyword....e..meta-string.........meta.keyword........meta.string.....c...emphasis.....@..addition........deletion
+...0H..setOptions..........getDefaults.....M.8.(?:^|[^........])([.....<=.]*)$3.....	.\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\).;....v..(^|[^\w./-])([A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w.-]*)#(\d+)\b.
+....OV.gitlab.com.........bitbucket.org...........codeberg.org	...i.I.gitea.com...	....H..git.sr.ht.......Oo.dev.azure.com...........^[a-z][a-z0-9+.-]*:.	.......tokenizer...........emStrong....J...lheading.....S..autolink......../issues/........[.!?\u2026]["')\]]*$:....$..^~~(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))~~(?=[^~]|$)......Q...inlineTokens........file:///B:/%7EBU
+
+## u7 @198210211 sha=33de043481c6df19
+.........strong..........codespan....+...^file:..
+.......localhost/.......#{.[#?]........^\/[A-Za-z]:(?=[\\/]|$).......6. (\d{1,9}[.)])(?!\w)....q...doctag........$.grey.....z..meta-keyword....e..meta-string.........meta.keyword........meta.string.....c...emphasis.....@..addition........deletion
+...0H..setOptions..........getDefaults.....M.8.(?:^|[^........])([.....<=.]*)$3.....	.\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\).;....v..(^|[^\w./-])([A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w.-]*)#(\d+)\b.
+....OV.gitlab.com.........bitbucket.org...........codeberg.org	...i.I.gitea.com...	....H..git.sr.ht.......Oo.dev.azure.com...........^[a-z][a-z0-9+.-]*:.	.......tokenizer...........emStrong....J...lheading.....S..autolink......../issues/........[.!?\u2026]["')\]]*$:....$..^~~(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))~~(?=[^~]|$)......Q...inlineTokens........file:///B:/%7EBUN/root/_200.js.

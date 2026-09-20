@@ -1,0 +1,2 @@
+# function Tm( @234640539 end=234640665 len=126
+function Tm(t,e){let i=ts.join(t,"_lastverified");return e.log.silly("verify","writing verifile to "+i),fm(i,`${Date.now()}`)}

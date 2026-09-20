@@ -331,7 +331,7 @@ function asPidStorageV5(
 async function updatePidFile(
   patch: Record<string, unknown>,
   storageV5?: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const pidFile = join(getSessionsDir(), `${process.pid}.json`)
   const v5 = asPidStorageV5(storageV5)
   if (v5) {
@@ -342,14 +342,14 @@ async function updatePidFile(
         logForDebugging(
           `[concurrentSessions] updatePidFile failed: ${read.error?.code ?? 'read'}`,
         )
-        return
+        return false
       }
       const item = read.value?.items[0]
       if (!item?.found || item.value === undefined) {
         logForDebugging(
           '[concurrentSessions] updatePidFile failed: pid file not found',
         )
-        return
+        return false
       }
       const current = jsonParse(
         Buffer.from(item.value).toString('utf8'),
@@ -365,13 +365,15 @@ async function updatePidFile(
         logForDebugging(
           `[concurrentSessions] updatePidFile failed: ${written.error?.code ?? 'write'}`,
         )
+        return false
       }
+      return true
     } catch (e) {
       logForDebugging(
         `[concurrentSessions] updatePidFile failed: ${errorMessage(e)}`,
       )
+      return false
     }
-    return
   }
   try {
     const data = jsonParse(await readFile(pidFile, 'utf8')) as Record<
@@ -383,10 +385,12 @@ async function updatePidFile(
       if (patch[key] === undefined) delete next[key]
     }
     await writeFile(pidFile, jsonStringify(next))
+    return true
   } catch (e) {
     logForDebugging(
       `[concurrentSessions] updatePidFile failed: ${errorMessage(e)}`,
     )
+    return false
   }
 }
 
@@ -476,12 +480,12 @@ export async function updateSessionName(
   name: string | undefined,
   source: SessionNameSource = 'user',
   storageV5?: unknown,
-): Promise<void> {
-  if (!name) return
+): Promise<boolean> {
+  if (!name) return true
   setRegisteredName(name, source)
   const persistSource =
     source === 'derived' || source === 'collision' ? source : undefined
-  await updatePidFile(
+  return updatePidFile(
     {
       name,
       nameSource: persistSource,

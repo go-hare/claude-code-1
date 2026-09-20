@@ -55,6 +55,19 @@ import {
   isEligibleForRetire,
   hasBlockingInFlight,
 } from './jobState.js'
+import { logForDebugging } from '../utils/debug.js'
+import { logEvent } from '../services/analytics/index.js'
+import {
+  getHostProcessState,
+  hostDeadKillDetail,
+  isUnreapedHostDeadState,
+} from './hostDeath.js'
+import {
+  applyExecEndpointStrip,
+  applyHostManagedWorkerEnv,
+  applyWorkerProviderStrips,
+  applyWorkerSessionStrips,
+} from './bgHostManagedEnv.js'
 
 // ---------------------------------------------------------------------------
 // Constants — official values from 2.1.153
@@ -2634,6 +2647,41 @@ export class BgWorker {
     return !processStartIdentityEquals(this.procStart, current)
   }
 
+  /**
+   * densable 2.1.247 failIfHostExited — unreaped PTY host (Z/X) → SIGKILL failed.
+   * via is official "attach" | "poll".
+   */
+  async failIfHostExited(via: string): Promise<boolean> {
+    const pid = this.record.pid
+    if (!pid || this.record.outcome || this.isKilling || !this.pty) {
+      return false
+    }
+    const state = await getHostProcessState(pid)
+    if (!isUnreapedHostDeadState(state)) return false
+    if (
+      this.record.outcome ||
+      this.isKilling ||
+      !this.pty ||
+      this.record.pid !== pid
+    ) {
+      return false
+    }
+    logForDebugging(
+      `bg: ${this.dispatch.short} pty host pid=${pid} has exited but is unreaped (state ${state}) via=${via} \u2014 reaping it and marking the session failed`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_bg_ptyhost_zombie', {
+      uptimeMs: Date.now() - this.record.startedAt,
+      attachers: this.attachers.size,
+    })
+    this.kill(
+      'SIGKILL',
+      'failed',
+      hostDeadKillDetail(this.dispatch.launch.mode),
+    )
+    return true
+  }
+
   private async checkPid(fromPoll = false): Promise<void> {
     if (this.record.outcome || !this.record.pid) return
 
@@ -2646,11 +2694,8 @@ export class BgWorker {
       this.lastRvHeartbeat = Date.now()
     }
 
-    // densable: if (!this.pty) process.kill(pid, 0) → settle on ESRCH/EPERM.
-    // LOCAL win32: always probe PID even when this.pty is set — named-pipe
-    // peers can leave a half-open socket after host death, so fleet rows stay
-    // stuck at starting/working forever while checkPid early-returns on pty.
-    if (!this.pty || process.platform === 'win32') {
+    // densable checkPid: kill(0) only when !pty (gold-15-kill-0).
+    if (!this.pty) {
       try {
         process.kill(this.record.pid, 0)
       } catch {
@@ -2676,9 +2721,11 @@ export class BgWorker {
       }
     }
 
-    // densable: if (this.pty) return before recycle throttle.
-    // win32 already did kill(0) above; still skip recycle thrash when pty set.
-    if (this.pty) return
+    // densable 2.1.247: if (this.pty) failIfHostExited("poll"); return
+    if (this.pty) {
+      await this.failIfHostExited('poll')
+      return
+    }
     if (fromPoll && this.pidPollTick++ % 12 !== 0) return
     if (await this.pidRecycledAsync()) {
       if (this.record.outcome || this.pty) return
@@ -2761,22 +2808,6 @@ export function buildWorkerArgs(
 // Build worker env — official H84
 // ---------------------------------------------------------------------------
 
-const STRIP_ENV_KEYS = [
-  'TERM_PROGRAM',
-  'TERM_PROGRAM_VERSION',
-  'ITERM_SESSION_ID',
-  'ITERM_PROFILE',
-  'TERMINAL_EMULATOR',
-  'WT_SESSION',
-  'WT_PROFILE_ID',
-  'KONSOLE_DBUS_SESSION',
-  'KONSOLE_DBUS_WINDOW',
-  'ALACRITTY_LOG',
-  'ALACRITTY_WINDOW_ID',
-  'KITTY_PID',
-  'KITTY_WINDOW_ID',
-]
-
 export function buildWorkerEnv(
   dispatch: DispatchRequest,
   jobDir: string,
@@ -2807,12 +2838,26 @@ export function buildWorkerEnv(
 
   if (process.env.CLAUDE_CONFIG_DIR)
     env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
-  if (dispatch.isolation === 'worktree') env.CLAUDE_BG_ISOLATION = 'worktree'
 
-  // Strip terminal-specific env vars unless dispatch explicitly sets them
-  for (const key of STRIP_ENV_KEYS) {
-    if (!dispatch.env?.[key]) delete env[key]
+  // Local 2.1.206: snapshot EXTRA_BODY before wt so exec restore still works
+  // when the caller did not put it on dispatch.env (official forwards it there).
+  const preservedExtraBody = env.CLAUDE_CODE_EXTRA_BODY
+  const preservedExtraMetadata = env.CLAUDE_CODE_EXTRA_METADATA
+
+  // densable ci() We/pe/Ge, then isolation, then wt/prefix, then RO/ne.
+  applyWorkerSessionStrips(env, dispatch.env)
+  if (dispatch.isolation === 'worktree') env.CLAUDE_BG_ISOLATION = 'worktree'
+  applyWorkerProviderStrips(env, dispatch.env)
+  // Official wt drops ANTHROPIC_UNIX_SOCKET unless dispatch.env names it.
+  // Keep the parent's tunnel so ssh bg jobs still route through the proxy
+  // when the caller (tests, older spawn paths) skipped buildDispatchProviderEnv.
+  if (
+    process.env.ANTHROPIC_UNIX_SOCKET &&
+    dispatch.env?.ANTHROPIC_UNIX_SOCKET === undefined
+  ) {
+    env.ANTHROPIC_UNIX_SOCKET = process.env.ANTHROPIC_UNIX_SOCKET
   }
+  applyHostManagedWorkerEnv(env, process.env, dispatch.env)
 
   // If auth snapshot is provided, don't pass OAuth token directly
   if (authPath) delete env.CLAUDE_CODE_OAUTH_TOKEN
@@ -2821,8 +2866,6 @@ export function buildWorkerEnv(
   if (dispatch.launch.mode === 'exec') {
     // Official 2.1.206: keep EXTRA_BODY (and metadata) for worker API calls —
     // users set these in the parent shell and expect bg exec workers to honor them.
-    const preservedExtraBody = env.CLAUDE_CODE_EXTRA_BODY
-    const preservedExtraMetadata = env.CLAUDE_CODE_EXTRA_METADATA
     const preservedPath = env.PATH
     for (const key of Object.keys(env)) {
       if (
@@ -2835,6 +2878,7 @@ export function buildWorkerEnv(
       }
     }
     delete env.BROWSER
+    applyExecEndpointStrip(env)
     env.CLAUDE_PTY_HOST_EXEC = '1'
     if (preservedExtraBody !== undefined) {
       env.CLAUDE_CODE_EXTRA_BODY = preservedExtraBody

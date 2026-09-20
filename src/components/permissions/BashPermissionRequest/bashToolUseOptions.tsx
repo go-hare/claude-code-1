@@ -9,6 +9,7 @@ import {
   type ShowPersistentAllowTool,
   shouldShowPersistentAllowOption,
 } from '../../../utils/permissions/showAlwaysAllow.js';
+import { WORKFLOW_AUTO_MODE_DESCRIPTION } from '../../../dialog/permissionAutoMode.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { generateShellSuggestionsLabel } from '../shellPermissionHelpers.js';
 
@@ -17,6 +18,7 @@ export type BashToolUseOption =
   | 'yes-apply-suggestions'
   | 'yes-prefix-edited'
   | 'yes-classifier-reviewed'
+  | 'yes-enable-auto-mode'
   | 'no';
 
 /**
@@ -54,6 +56,8 @@ export function bashToolUseOptions({
   tool,
   input,
   isAskCappedByOrg = false,
+  showEnableAutoModeOption = false,
+  enableAutoModeDescription = WORKFLOW_AUTO_MODE_DESCRIPTION,
 }: {
   suggestions?: PermissionUpdate[];
   decisionReason?: PermissionDecisionReason;
@@ -75,6 +79,10 @@ export function bashToolUseOptions({
   tool?: ShowPersistentAllowTool;
   input?: unknown;
   isAskCappedByOrg?: boolean;
+  /** densable 2.1.247 KNe showEnableAutoModeOption */
+  showEnableAutoModeOption?: boolean;
+  /** densable 2.1.247 KNe enableAutoModeDescription (UNe when !offered, else RA) */
+  enableAutoModeDescription?: string;
 }): OptionWithDescription<BashToolUseOption>[] {
   const options: OptionWithDescription<BashToolUseOption>[] = [];
 
@@ -164,6 +172,14 @@ export function bashToolUseOptions({
         resetCursorOnUpdate: true,
       });
     }
+  }
+
+  if (showEnableAutoModeOption) {
+    options.push({
+      label: 'Yes, and switch to auto mode',
+      description: enableAutoModeDescription,
+      value: 'yes-enable-auto-mode',
+    });
   }
 
   if (noInputMode) {

@@ -6,6 +6,7 @@
 import { resolveAutoCompactWindowOverride } from './residualFinalEnvGates.js'
 import { getSdkBetas } from '../bootstrap/state.js'
 import { getContextWindowForModel } from './context.js'
+import { getCanonicalName } from './model/model.js'
 import {
   getInitialSettings,
   updateSettingsForSource,
@@ -13,6 +14,82 @@ import {
 import { formatTokens } from './format.js'
 import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
+
+/**
+ * densable 2.1.247 y3n — model-default auto-compact window table.
+ * 246 LYn defaulted claude-sonnet-5 to 967000; 247 is 1e6.
+ */
+export const MODEL_AUTO_COMPACT_WINDOW_DEFAULTS: Record<
+  string,
+  { default: number; surfaces?: Record<string, { default: number }> }
+> = {
+  'claude-sonnet-5': {
+    surfaces: {
+      remote_cowork: { default: 500_000 },
+      'local-agent': { default: 500_000 },
+    },
+    default: 1_000_000,
+  },
+}
+
+/** densable _3n */
+function lookupWindowEntryDefault(
+  entry: { default?: number } & Record<string, unknown>,
+  key: string | undefined,
+): number | undefined {
+  if (key && Object.hasOwn(entry, key)) {
+    const v = entry[key]
+    return typeof v === 'number' ? v : undefined
+  }
+  return typeof entry.default === 'number' ? entry.default : undefined
+}
+
+/** densable C3n — ENTRYPOINT surface, then default. Ig() not locked: no per-surface model key. */
+export function resolveModelAutoCompactWindowEntry(
+  entry:
+    | number
+    | {
+        default?: number
+        surfaces?: Record<string, { default: number }>
+      },
+): number | undefined {
+  if (typeof entry === 'number') return entry
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return undefined
+  }
+  const { surfaces, ...rest } = entry
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  const surface =
+    entrypoint && surfaces && Object.hasOwn(surfaces, entrypoint)
+      ? surfaces[entrypoint]
+      : undefined
+  if (surface) {
+    const fromSurface = lookupWindowEntryDefault(surface, undefined)
+    if (fromSurface !== undefined) return fromSurface
+  }
+  return lookupWindowEntryDefault(rest, undefined)
+}
+
+/** densable I8o — gated by Nm() (isAutoCompactEnabled). */
+export function lookupModelAutoCompactWindow(
+  model: string,
+): number | undefined {
+  let enabled = true
+  try {
+    const { isAutoCompactEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/compact/autoCompact.js') as typeof import('../services/compact/autoCompact.js')
+    enabled = isAutoCompactEnabled()
+  } catch {
+    enabled = true
+  }
+  if (!enabled) return undefined
+  const key = getCanonicalName(model)
+  if (!Object.hasOwn(MODEL_AUTO_COMPACT_WINDOW_DEFAULTS, key)) return undefined
+  return resolveModelAutoCompactWindowEntry(
+    MODEL_AUTO_COMPACT_WINDOW_DEFAULTS[key]!,
+  )
+}
 
 /** densable GYo */
 export const AUTO_COMPACT_WINDOW_MIN = 100_000
@@ -95,6 +172,17 @@ export function resolveAutoCompactWindow(
       window: Math.min(modelMax, settingsWindow),
       configured: settingsWindow,
       source: 'settings',
+    }
+  }
+
+  // densable 2.1.247 I8o / EL model-default (after env/settings; skip
+  // clientdata/experiment — those helpers are not this bullet).
+  const modelDefault = lookupModelAutoCompactWindow(model)
+  if (modelDefault !== undefined) {
+    return {
+      window: Math.min(modelMax, modelDefault),
+      configured: modelDefault,
+      source: 'model-default',
     }
   }
 

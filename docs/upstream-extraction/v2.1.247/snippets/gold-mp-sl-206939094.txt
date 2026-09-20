@@ -1,0 +1,2 @@
+# needle=function sl(e pos=206939094 end=206939145 len=51
+function sl(e){return e!=null&&N(e.length)&&!To(e)}

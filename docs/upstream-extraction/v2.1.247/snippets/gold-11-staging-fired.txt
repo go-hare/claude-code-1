@@ -1,0 +1,4 @@
+# offset=203146208 hit=1/4 needle="stagingDirGitignoreFired"
+
+s.../.....0.ensureAtomicWriteStagingDirs: failed to create .&...qN..atomic_write_staging_dir_create_failed..........Staging dir 7...XGi. was just established but identity-record open failed (...../M..stagingDirGitignoreFired....T...managed-settings.d..........launch.json.........policy-limits.json.......N..cowork_plugins........\.remote-settings-helper-consent..........remote-settings.json......4..config.json......3.(?:[/\\]\*\*|[/\\])+$.......6._.config.lock._...D.o.Sandbox: ignoring permission rules and sandbox.filesystem entries from disabled setting source ........(?<=.)[/\\]+$...
+.....!.

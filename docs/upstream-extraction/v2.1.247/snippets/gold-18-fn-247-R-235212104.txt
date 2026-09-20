@@ -1,0 +1,3 @@
+# ver=247 name=R async=true start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4 needle="with exit code"
+
+async function R(e){let{command:m}=e,f=e.cwd??u(),{file:g,args:h}=c()==="powershell"?{file:"pwsh",args:["-NoProfile","-Command",m]}:{file:"/bin/sh",args:["-c",m]},{stdout:w,stderr:_,code:t,error:o}=await p(g,h,{abortSignal:e.abortSignal,cwd:f,preserveOutputOnError:!0}),n=o&&!o.startsWith(`Command failed with exit code ${t}`)?o:"";if(n)l("input_remote_bash","spawn_failed");else d("input_remote_bash");return{outputUuid:x(),outputText:`<${r}>${i(w)}</${r}><${a}>${i(_||n)}</${a}><${s}>${t}</${s}>`,exitCode:t}}

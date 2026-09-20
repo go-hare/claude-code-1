@@ -1,0 +1,5 @@
+# offset=202872121 tag=pcc
+
+resents........?...
+.[.& s.u.m.m.a.r.y. .t.r.u.n.c.a.t.e.d.]...
+...=...proxyError..... h..x-proxy-error........x..^[A-Za-z0-9._:-]{1,128}$.....2..^[\t\n\f\r ]+|[\t\n\f\r ]+$.....8.&.blocked-by-allowlist........host_not_allowed.......x-deny-reason.........0.content_scan_blocked....j.(fail closed)...........content_scan_permanent......)le.: sandbox proxy denied, ...B...^[a-z0-9_-]+$.......L{..[\p{Cc}\p{Cf}\p{Co}\p{Cs}].......... may not be empty.........V. is longer than L...;l9. contains control, formatting, or private-use characters, or a malformed oneM...I... .c.o.n.t.a.i.n.s. .a. .b.a.c.k.s.l.a.s.h. ..  .p.u.b.l.i.s.h.e.d. .p.a.t.h.s. .u.s.e. .f.o.r.w.a.r.d. .s.l.a.s.h.e.s. .o.n. .e.v.e.r.y. .p.l.a.t.f.o.r.m.......s]..[?#%]...L...d<.. contains characters that cannot appear in a served URL path ("?", "#", "%")@.....s. .i.s. .a.b.s.o.l.u.t.e. ..  .p.u.b.l.i.s.h.e.d. .p.a.t.h.s. .a.r

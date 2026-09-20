@@ -1,0 +1,6 @@
+# 247 @200612308
+
+maxToolCallsPerSession......V^..maxDraftPromptsPerSession.......w...\r\n......8.invalid feedback draft id.......i	.feedbackDraft...#...y[0.transcriptContentCorroboratesDraft(.........transcriptFile..
+.....-.requestIds.......7`.thinkingBudget........\.assistantTurnCount.........subagentCount...........session_file.......message_range.......V...project_dir_key......%..tengu_juniper_relay......RG.CLAUDE_CODE_SEND_FEEDBACK...%....JN.tengu_feedback_drafts_setting_changed...M.......formatUri called with undefined URI - indicates malformed LSP server response........[I.<unknown location>..
+...PQ$.^file:\/\/......Z...^\/[A-Za-z]:....g.
+.Failed to decode LSP URI '........... Using un-decoded path: .......N	).../../..	....{..targetUri.........f.targetSelectionRange.....vr.targetRange.....n.m.No definition found. This may occur if the cursor is not on a symbol, or if the definition is in an exte

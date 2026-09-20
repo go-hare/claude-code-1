@@ -912,9 +912,14 @@ export const SettingsSchema = lazySchema(() =>
         ),
       // Organization UUID to use for OAuth login (will be added as URL param to authorization URL)
       forceLoginOrgUUID: z
-        .string()
+        .union([z.string(), z.array(z.string())])
         .optional()
-        .describe('Organization UUID to use for OAuth login'),
+        .describe(
+          'Organization UUID to require for OAuth login. Accepts a single UUID ' +
+            'string or an array of UUIDs (any one is permitted). When set in ' +
+            'managed settings, login fails if the authenticated account does not ' +
+            'belong to a listed organization.',
+        ),
       otelHeadersHelper: z
         .string()
         .optional()
@@ -1020,6 +1025,12 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Probability (0–1) that the session quality survey appears when eligible. 0.05 is a reasonable starting point.',
         ),
+      feedbackDrafts: z
+        .enum(['notify', 'quiet', 'off'])
+        .optional()
+        .describe(
+          'Model-drafted feedback (the SendFeedback tool). "notify" (default) shows a one-line notice when a draft is queued; "quiet" shows only the footer counter; "off" disables the tool entirely so drafts are never queued.',
+        ),
       spinnerTipsEnabled: z
         .boolean()
         .optional()
@@ -1090,11 +1101,27 @@ export const SettingsSchema = lazySchema(() =>
       spinnerTipsOverride: z
         .object({
           excludeDefault: z.boolean().optional(),
-          tips: z.array(z.string()),
+          tips: z
+            .array(
+              z.union([
+                z.string(),
+                z
+                  .object({
+                    id: z.string().optional(),
+                    text: z.string().optional(),
+                    cooldownSessions: z.number().optional(),
+                    priority: z.number().optional(),
+                  })
+                  .passthrough(),
+              ]),
+            )
+            .optional(),
+          tipsFile: z.string().optional(),
+          label: z.string().optional(),
         })
         .optional()
         .describe(
-          'Override spinner tips. tips: array of tip strings. excludeDefault: if true, only show custom tips (default: false).',
+          'Override spinner tips. tips: strings or {id, text, cooldownSessions, priority}. tipsFile/label: user or managed only. excludeDefault: if true, only show override tips (default: false).',
         ),
       syntaxHighlightingDisabled: z
         .boolean()

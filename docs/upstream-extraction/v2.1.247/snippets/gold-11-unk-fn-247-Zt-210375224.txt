@@ -1,0 +1,3 @@
+# 247 function Zt() start=210375224 end=210375654 len=430 sha=2df992a947098d50 needle="danglingBaseline"
+
+function Zt(e){let t;try{t=Wr(e)}catch{return Te().denyLiteralSymlinkCandidates.push(e),e}let n;try{return n=Vt(e),Te().symlinkedDenyScrubPaths.push({literal:e,resolved:n,hopDirectories:bu(e,n),danglingBaseline:!1}),n}catch{let r=yu(e,t)??ee($e(e),t);for(let s=0;s<8;s++){let i;try{i=Wr(r)}catch{break}r=ee($e(r),i)}return Te().symlinkedDenyScrubPaths.push({literal:e,resolved:r,hopDirectories:bu(e,null),danglingBaseline:!1}),r}}

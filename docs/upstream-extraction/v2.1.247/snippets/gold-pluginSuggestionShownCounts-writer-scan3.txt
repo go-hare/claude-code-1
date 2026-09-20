@@ -1,0 +1,93 @@
+
+======== PASS3 SEA 247
+STR "vL as Ohe" count=1 hits=232036826
+  @232036826 oot/_359.js";import{tL as Lhe,uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as 
+STR "Ohe(r.pluginId)" count=1 hits=232387837
+  @232387837 ds.has(r.id))continue;let s=Nhe(r.id),a=Ohe(r.pluginId);if(fZe().fire(a,s),Math.max(s,a)>=EV)continue;if(IV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await jhe(r.adverti
+STR "from\"B:/~BUN/root/_360.js\"" count=5 hits=222248697,222265689,231954009,232036855,235957267
+  @222248697 import{tL as P,uL as Q,wL as q,zL as te}from"B:/~BUN/root/_360.js";import{Phb as y,Zhb as ee,eib as x,jib as re}from"B:/~BUN/root/_509.js";import{Htc as J,Lxc as Z,Yjc as _,Zjc as j,hjc as C,kwc as E,ojc as
+  @222265689 359.js";import{uL as C,wL as b,zL as fo}from"B:/~BUN/root/_360.js";import{mM as At,nM as uo}from"B:/~BUN/root/_367.js";import{zO as co}from"B:/~BUN/root/_392.js";import{$R as yt,XR as Q,aS as wt,bS as St,fS
+  @231954009 0.js";import{tL as Eo,wL as Mo,zL as yt}from"B:/~BUN/root/_360.js";import{g2 as ue,h2 as ae,j2 as te,l2 as pt}from"B:/~BUN/root/_448.js";import{Y2a as $e,Z2a as he,_2a as qe,d3a as zo}from"B:/~BUN/root/_464
+  @232036855 ,uL as Nhe,vL as Ohe,wL as IV,zL as dZe}from"B:/~BUN/root/_360.js";import{AM as oW,GM as d5e}from"B:/~BUN/root/_369.js";import{HM as bK,JM as kK,KM as _K,NM as tot,RM as CK,UM as wK,WM as tD,XM as oot}from"
+  @235957267 3.js";import{xL as Eg,yL as Mg,zL as cS}from"B:/~BUN/root/_360.js";import{QM as Af,RM as Of,UM as Lf,XM as GS}from"B:/~BUN/root/_370.js";import{$da as lo,A1 as Ed,Aaa as jl,Aea as Zr,B1 as bm,Bga as Va,C1 a
+STR "pluginSuggestion" count=9 hits=199438564,199438600,202734732,208023553,211408433,222247533,222247679,222247778,222247913
+  @199438564 ...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_coun
+  @199438600 ..o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...file:///B:/%7EBUN/root/_361.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.
+  @202734732 ad...pluginTrustMessage...m...pluginSuggestionMarketplaces...s.Invalid hostPattern regex in policy settings: ...D..blocklistDirection..F...Invalid pathPattern regex in policy 
+  @208023553 nored in user/project/local settings."),pluginSuggestionMarketplaces:u(s()).optional().describe("Marketplace names whose plugins may surface as contextual install suggestions (relevance-based tips
+  @211408433 nction It(){return s("policySettings")?.pluginSuggestionMarketplaces??[]}function Tt(t,e){let n=s("policySettings"),r=n?.extraKnownMarketplaces?.[t]?.source;if(r&&x(e,r))return!0;return n?.strictK
+  @222247533 Counts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSugg
+  @222247679 .numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(
+  @222247778 {if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDisco
+  @222247913 let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as tL,a as uL,h as vL,m as wL,w as xL,l as yL,c as zL}; .// @bun @bytecode // Claude
+STR "Le as kwc" count=1 hits=208905880
+  @208905880  as gwc,ire as hwc,sre as iwc,$T as jwc,Le as kwc,are as lwc,ure as mwc,lre as nwc,k as owc,XT as pwc,OH as qwc,PH as rwc,cre as swc,dre as twc,JT as uwc,fre as vwc,vi as wwc,pre as xwc,gre
+STR "k as owc" count=1 hits=208905923
+  @208905923 as kwc,are as lwc,ure as mwc,lre as nwc,k as owc,XT as pwc,OH as qwc,PH as rwc,cre as swc,dre as twc,JT as uwc,fre as vwc,vi as wwc,pre as xwc,gre as ywc,ug as zwc,HH as Awc,mre as Bwc,hre
+STR "function Ye(){return{numStartups:0" count=1 hits=208747056
+  @208747056  pc,join as Pe,resolve as ct}from"path";function Ye(){return{numStartups:0,installMethod:void 0,autoUpdates:void 0,theme:"dark",preferredNotifChannel:"auto",verbose:!1,editorMode:"normal",autoCompactEnabled:!0,auto
+STR "tipLifetimeShownCounts:{}" count=0 hits=
+STR "pluginSuggestionShownCounts:{}" count=0 hits=
+STR "pluginSuggestionDiscoverShownCounts:{}" count=0 hits=
+
+======== PASS3 SEA 246
+STR "VJ as fye" count=1 hits=229907762
+  @229907762 oot/_344.js";import{TJ as mye,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~BUN/
+STR "fye(r.pluginId)" count=1 hits=230266347
+  @230266347 ds.has(r.id))continue;let s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await hye(r.adverti
+STR "fye(" count=9 hits=214652834,214652900,214654013,214654347,214654469,214654657,230266347,247333245,247333325
+  @214652834 }:{present:!0,...kIt(n.error)}}function fye(e){return e===!0?{transientRead:!0}:{}}function kIt(e){return fye(krr(e))}async function Arr(e,t,n){let r=await e.write(t,Crr(n),{mode:438&~
+  @214652900 sientRead:!0}:{}}function kIt(e){return fye(krr(e))}async function Arr(e,t,n){let r=await e.write(t,Crr(n),{mode:438&~process.umask()});if(!r.ok)throw b(`forked-skill provenance marker
+  @214654013 nceMarker);return{status:"malformed",...fye(M7(De(o)))}}return Irr(r)}function Irr(e){let t;try{t=lt(e)}catch{return{status:"malformed"}}let n=ITe().safeParse(t);return n.success?{stat
+  @214654347 "unusable":return{status:"malformed",...fye(n.transientRead)};case"absent":{let r=await Mes(e,t.provenanceMarker);return r.present?{status:"absent-but-marked",...fye(r.transientRead)}:
+  @214654469 .present?{status:"absent-but-marked",...fye(r.transientRead)}:{status:"absent"}}}}async function $es(e){try{return await vIt(e),{status:"absent-but-marked"}}catch(t){return Et(t)?{stat
+  @214654657 absent"}:{status:"absent-but-marked",...fye(M7(De(t)))}}}async function Orr(e,t){let n,r=Be()&&t?CIt(e):void 0;if(t&&r){let i=await Rrr(t,r.provenanceMarker);if(i.kind!=="text")return;
+  @230266347 ds.has(r.id))continue;let s=pye(r.id),a=fye(r.pluginId);if(iZe().fire(a,s),Math.max(s,a)>=NV)continue;if(OV(r.id)<r.cooldownSessions)continue;if(r.advertisedCommand!==void 0&&!await hy
+  @247333245 &&(t=="object"||t=="function")}function fye(e){return!!e&&typeof e=="object"}function pye(e){return typeof e=="symbol"||fye(e)&&lye.call(e)==Jve}function _Z(e){if(typeof e=="number")re
+  @247333325 ction pye(e){return typeof e=="symbol"||fye(e)&&lye.call(e)==Jve}function _Z(e){if(typeof e=="number")return e;if(pye(e))return AZ;if(yI(e)){var t=typeof e.valueOf=="function"?e.valueO
+STR "from\"B:/~BUN/root/_345.js\"" count=5 hits=220366934,220386063,229786289,229907791,234068441
+  @220366934 import{TJ as P,UJ as Q,WJ as q,ZJ as te}from"B:/~BUN/root/_345.js";import{Bib as re,fib as y,pib as ee,wib as x}from"B:/~BUN/root/_508.js";import{Lvc as Z,Qrc as J,Vhc as _,Whc as j,ehc as C,lhc as Y,luc as
+  @220386063 344.js";import{UJ as C,WJ as I,ZJ as po}from"B:/~BUN/root/_345.js";import{mK as X,oK as fo}from"B:/~BUN/root/_349.js";import{WL as Rt,XL as lo}from"B:/~BUN/root/_364.js";import{EO as ao}from"B:/~BUN/root/_3
+  @229786289 2.js";import{TJ as Eo,WJ as Mo,ZJ as yt}from"B:/~BUN/root/_345.js";import{F1 as ue,G1 as ae,I1 as te,K1 as pt}from"B:/~BUN/root/_440.js";import{B1a as zo,u1a as $e,v1a as ge,w1a as qe}from"B:/~BUN/root/_454
+  @229907791 ,UJ as pye,VJ as fye,WJ as OV,ZJ as oZe}from"B:/~BUN/root/_345.js";import{sK as o5,tK as Xdt}from"B:/~BUN/root/_351.js";import{xK as wbe,yK as UZe}from"B:/~BUN/root/_352.js";import{CK as GKe,GK as DAt}from"
+  @234068441 1.js";import{XJ as pg,YJ as mg,ZJ as Ix}from"B:/~BUN/root/_345.js";import{fK as co,gK as sn,hK as Vd,iK as jd,kK as Dh,lK as rw}from"B:/~BUN/root/_348.js";import{mK as sh,nK as ch,oK as Nv}from"B:/~BUN/root
+STR "async function wye(e){if(LV().spinnerTipsEnabled" count=1 hits=230266039
+  @230266039 function iZe(){return rZe.of(Tk().host)}async function wye(e){if(LV().spinnerTipsEnabled===!1)return;let t=BV.of(e.session.host);if(gye(P_().spinnerTipsOverride))return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.le
+STR "function yN(e,t=\"spinner\",o){mye(e.id" count=1 hits=230266565
+  @230266565 (await yye(r,e))n.push(r)}return bye(n)}function yN(e,t="spinner",o){mye(e.id,o),Qe(t==="startup"?"tips_startup_show":"tips_spinner_show");let n=e.id.startsWith("marketplace-plugin:")&&e.id.includes("@")?"marketplace-
+STR "pluginSuggestion" count=9 hits=197886548,197886584,201131820,206422629,210096564,220365770,220365916,220366015,220366150
+  @197886548 ...l.I.tipLifetimeShownCounts...o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...M.file:///B:/%7EBUN/root/_346.js...W..[\uD800-\uDBFF]$...request_coun
+  @197886584 ..o.pluginSuggestionShownCounts.#...;.0.pluginSuggestionDiscoverShownCounts...M.file:///B:/%7EBUN/root/_346.js...W..[\uD800-\uDBFF]$...request_count......]-..session_count...K...kk'.
+  @201131820 ad...pluginTrustMessage...m...pluginSuggestionMarketplaces...s.Invalid hostPattern regex in policy settings: ...D..blocklistDirection..F...Invalid pathPattern regex in policy 
+  @206422629 nored in user/project/local settings."),pluginSuggestionMarketplaces:u(r()).optional().describe("Marketplace names whose plugins may surface as contextual install suggestions (relevance-based tips
+  @210096564 nction It(){return s("policySettings")?.pluginSuggestionMarketplaces??[]}function Tt(t,e){let n=s("policySettings"),r=n?.extraKnownMarketplaces?.[t]?.source;if(r&&x(e,r))return!0;return n?.strictK
+  @220365770 Counts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSugg
+  @220365916 .numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l(n,i){if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(
+  @220366015 {if(n.length===0)return;u((t)=>{let o=t.pluginSuggestionDiscoverShownCounts??{};if(n.every((e)=>(o[e]??0)>0))return t;let r={...o};for(let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDisco
+  @220366150 let e of n)r[e]=(r[e]??0)+1;return{...t,pluginSuggestionDiscoverShownCounts:r}},i)}var c=g(()=>{S()}); export{p as TJ,a as UJ,h as VJ,m as WJ,w as XJ,l as YJ,c as ZJ}; .// @bun @bytecode // Claude
+STR "function je(){return{numStartups:0" count=1 hits=207022721
+  @207022721  sc,join as xe,resolve as kt}from"path";function je(){return{numStartups:0,installMethod:void 0,autoUpdates:void 0,theme:"dark",preferredNotifChannel:"auto",verbose:!1,editorMode:"normal",autoCompactEnabled:!0,auto
+DUMP 246 wye@230266039 yN@230266565 h@220365745
+DUMP 247 h@222247508 p@222247238 l@222247723
+
+CLASS 247 pluginSuggestion count=9
+  #0 @199438564 ident="pluginSuggestionShownCounts.#...;.0.pluginSugges"
+  #1 @199438600 ident="pluginSuggestionDiscoverShownCounts...file"
+  #2 @202734732 ident="pluginSuggestionMarketplaces...s.Invalid host"
+  #3 @208023553 ident="pluginSuggestionMarketplaces:u(s()).optional().d"
+  #4 @211408433 ident="pluginSuggestionMarketplaces??[]}function Tt(t,e"
+  #5 @222247533 ident="pluginSuggestionShownCounts?.[n]??0}function m(n"
+  #6 @222247679 ident="pluginSuggestionDiscoverShownCounts?.[n]??0}func"
+  #7 @222247778 ident="pluginSuggestionDiscoverShownCounts??{};if(n.eve"
+  #8 @222247913 ident="pluginSuggestionDiscoverShownCounts:r}},i)}var c"
+
+CLASS 246 pluginSuggestion count=9
+  #0 @197886548 ident="pluginSuggestionShownCounts.#...;.0.pluginSugges"
+  #1 @197886584 ident="pluginSuggestionDiscoverShownCounts...M.file"
+  #2 @201131820 ident="pluginSuggestionMarketplaces...s.Invalid host"
+  #3 @206422629 ident="pluginSuggestionMarketplaces:u(r()).optional().d"
+  #4 @210096564 ident="pluginSuggestionMarketplaces??[]}function Tt(t,e"
+  #5 @220365770 ident="pluginSuggestionShownCounts?.[n]??0}function m(n"
+  #6 @220365916 ident="pluginSuggestionDiscoverShownCounts?.[n]??0}func"
+  #7 @220366015 ident="pluginSuggestionDiscoverShownCounts??{};if(n.eve"
+  #8 @220366150 ident="pluginSuggestionDiscoverShownCounts:r}},i)}var c"

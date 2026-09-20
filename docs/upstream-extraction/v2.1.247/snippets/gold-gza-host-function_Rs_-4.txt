@@ -1,0 +1,2 @@
+# needle=function Rs( pos=208311609
+function Rs(e,t,n,r){return ii(e,()=>t,n,r)}

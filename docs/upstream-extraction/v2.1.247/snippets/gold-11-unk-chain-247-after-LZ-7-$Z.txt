@@ -1,0 +1,3 @@
+# 247-after-LZ n=7 function $Z start=210416665 end=210416781 len=116 sha=fbdbffc6a308019b
+
+function $Z(e,t){if(e===null||t===null||e.length!==t.length)return!1;let n=new Set(e);return t.every((r)=>n.has(r))}

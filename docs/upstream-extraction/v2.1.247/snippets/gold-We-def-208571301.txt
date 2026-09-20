@@ -1,0 +1,2 @@
+# needle=function We(){let pos=208571301 end=208571391 len=90
+function We(){let e=c.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return ge(e);return Sn()}

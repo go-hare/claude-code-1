@@ -1,0 +1,92 @@
+# vSt peel official-247 size=253204128
+STR "Official marketplace GCS fetch failed" count=4 hits=201631916,201641732,214519932,214560590
+  @201631916 &...latest pointer returned empty body...&.e..staging...backup.'...?.Official marketplace GCS fetch failed: ...tengu_plugin_remote_fetch...z+J.marketplace_gcs...f..downloads
+  @201641732 own_marketplaces.json. ...H..Remove the entry...T.E. and re-add it..B...Official marketplace GCS fetch failed and git fallback is disabled..4...Official marketplace GCS failed; falling 
+  @214519932 recursive:!0,force:!0}).catch(()=>{}),i="updated",a}catch(u){return c=nBo(u),_(`Official marketplace GCS fetch failed: ${Y(u)}`,{level:"warn"}),null}finally{D("tengu_plugin_remote_fetch",{source:de
+  @214560590 ow J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),Error("Official marketplace GCS fetch failed and git fallback is disabled");i=!0,_("Official marketplace GCS failed; falling
+STR "fetchOfficialMarketplaceFromGcs" count=2 hits=201631748,214518565
+  @201631748 ce file (v5 backend error).."...uZ..Failed to load plugin marketplace ..B...U..fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: .../latest."...&...latest pointer retu
+  @214518565 ction vSt(e,t,n){let r=jLn(t),o=jLn(e);if(o!==r&&!o.startsWith(r+eBo))return _(`fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: ${e}`,{level:"error"}),null;await WLn();let s
+STR "refusing path outside cache dir" count=2 hits=201631781,214518598
+  @201631781 Z..Failed to load plugin marketplace ..B...U..fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: .../latest."...&...latest pointer returned empty body...&.e..staging
+  @214518598 Ln(e);if(o!==r&&!o.startsWith(r+eBo))return _(`fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: ${e}`,{level:"error"}),null;await WLn();let s=performance.now(),i="failed",a,l
+STR "latest pointer returned empty body" count=2 hits=201631840,214518830
+  @201631840 lMarketplaceFromGcs: refusing path outside cache dir: .../latest."...&...latest pointer returned empty body...&.e..staging...backup.'...?.Official marketplace GCS fetch failed:
+  @214518830 `,{responseType:"text",timeout:1e4});if(a=String(u.data).trim(),!a)throw Error("latest pointer returned empty body");let d=kSt(e,qfe),p=Ne()&&n!==void 0?J8(d,BLn(t)):null;if((n!==void 0&&p!==nul
+STR "tengu_plugin_remote_fetch" count=3 hits=201631964,211419582,214520012
+  @201631964 .staging...backup.'...?.Official marketplace GCS fetch failed: ...tengu_plugin_remote_fetch...z+J.marketplace_gcs...f..downloads.claude.ai...x...is_official...
+  @211419582 function tl(r){return r.includes(`anthropics/${Un}`)}function $r(r,n,a,u,l){jn("tengu_plugin_remote_fetch",{source:Ur(r),host:n?el(n):"unknown",is_official:r==="plugin_catalog"||(n?tl(n
+  @214520012 Official marketplace GCS fetch failed: ${Y(u)}`,{level:"warn"}),null}finally{D("tengu_plugin_remote_fetch",{source:de("marketplace_gcs"),host:de("downloads.claude.ai"),is_official:!0,ou
+STR "marketplace_gcs" count=2 hits=201632000,214520051
+  @201632000 cial marketplace GCS fetch failed: ...tengu_plugin_remote_fetch...z+J.marketplace_gcs...f..downloads.claude.ai...x...is_official...operatorAuthored*...|.
+  @214520051 ${Y(u)}`,{level:"warn"}),null}finally{D("tengu_plugin_remote_fetch",{source:de("marketplace_gcs"),host:de("downloads.claude.ai"),is_official:!0,outcome:i,duration_ms:Math.roun
+STR "downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official" count=2 hits=199924348,214520667
+  @199924348 6...{..the plugin is unloaded; /reload-plugins brings it back..P...~1.https://downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official%...marketplaces/claude-plugins-official/...'.[pluginBinaryAssets]...
+  @214520667 se";if(/empty body/.test(n))return"empty_latest";return"other"}var zLn="https://downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official",HLn="marketplaces/claude-plugins-official/",tBo;var qLn=w(()=>{$e();Pt();Zt();
+STR "marketplaces/claude-plugins-official/" count=2 hits=199924428,214520746
+  @199924428 downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official%...marketplaces/claude-plugins-official/...'.[pluginBinaryAssets]...asset-cache...+..links_materialized.k
+  @214520746 /downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official",HLn="marketplaces/claude-plugins-official/",tBo;var qLn=w(()=>{$e();Pt();Zt();Xan();be();ble();xe();Ko();Ey();tBo=new Set(
+STR ".gcs-sha" count=2 hits=202686636,211423477
+  @202686636 ..C.file:///B:/%7EBUN/root/_503.js.../...orphaned_at...{L...in_use...g7...gcs-sha...clearLoadCaches...D...evictDynamicSkillState...a...claude-plugin-l
+  @211423477 ce:"pluginCache",marketplace:u,plugin:l}}var ss=".orphaned_at",as=".in_use",ih=".gcs-sha",nh=".links_materialized";var os=g(()=>{Xn();Kt();rs()});class us{bundledSkills
+STR "plugin_official_marketplace_fetch" count=15 hits=197297388,214557825,214557997,214558321,214558400,214560397,214560516,214562247,214562372,233029236,233029896,233030624,233031801,233032075,233032427
+  @197297388 g...;...c.Official marketplace blocked by enterprise policy, skipping.!...&..plugin_official_marketplace_fetch...&...tengu_plugin_official_mkt_git_fallback...g.gcs_failed_fallback_d
+  @214557825 ontinue}let c=!1;if(i===Yfe){if(await vSt(a.installLocation,_B(),e)!==null){ce("plugin_official_marketplace_fetch"),s[i]={forSource:a.source,patch:{lastUpdated:new Date().toISOString()}};contin
+  @214557997 oISOString()}};continue}if(!we("tengu_plugin_official_mkt_git_fallback",!0)){J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),_("Skipping official marketplace bulk refresh:
+  @214558321 :a.source,patch:{lastUpdated:new Date().toISOString(),installLocation:u}},c)te("plugin_official_marketplace_fetch","gcs_failed_git_fallback")}catch(u){if(c)J("plugin_official_marketplace_fetch"
+  @214558400 "plugin_official_marketplace_fetch","gcs_failed_git_fallback")}catch(u){if(c)J("plugin_official_marketplace_fetch","gcs_and_git_failed");if(u instanceof tI){t.push(i),_(`Marketplace ${i} not re
+  @214560397 ve the entry"} and re-add it.`)}}if(e===Yfe){if(await vSt(a,_B(),t)!==null){ce("plugin_official_marketplace_fetch"),await PSt(e,t);return}if(!we("tengu_plugin_official_mkt_git_fallback",!0))thr
+STR "tengu_plugin_official_mkt_git_fallback" count=4 hits=197297432,214557949,214560463,233029847
+  @197297432 enterprise policy, skipping.!...&..plugin_official_marketplace_fetch...&...tengu_plugin_official_mkt_git_fallback...g.gcs_failed_fallback_disabledQ...A%%.O.f.f.i.c.i.a.l. .m.a.r.k.e.t.p.l.
+  @214557949 rSource:a.source,patch:{lastUpdated:new Date().toISOString()}};continue}if(!we("tengu_plugin_official_mkt_git_fallback",!0)){J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),_("
+  @214560463 )!==null){ce("plugin_official_marketplace_fetch"),await PSt(e,t);return}if(!we("tengu_plugin_official_mkt_git_fallback",!0))throw J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"
+  @233029847 nstall",{installed:!0,skipped:!1,via_gcs:!0}),{installed:!0,skipped:!1};if(!io("tengu_plugin_official_mkt_git_fallback",!0)){ut("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),R(
+STR "gcs_failed_fallback_disabled" count=4 hits=197297480,214558033,214560552,233029932
+  @197297480 ial_marketplace_fetch...&...tengu_plugin_official_mkt_git_fallback...g.gcs_failed_fallback_disabledQ...A%%.O.f.f.i.c.i.a.l. .m.a.r.k.e.t.p.l.a.c.e. .G.C.S. .f.a.i.l.e.d.;. .g.i.t.
+  @214558033 u_plugin_official_mkt_git_fallback",!0)){J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),_("Skipping official marketplace bulk refresh: GCS failed, git fallback disab
+  @214560552 gin_official_mkt_git_fallback",!0))throw J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),Error("Official marketplace GCS fetch failed and git fallback is disabled");i
+  @233029932 _plugin_official_mkt_git_fallback",!0)){ut("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),R("Official marketplace GCS failed; git fallback disabled by flag \u2014 skip
+FN "async function vSt(" count=1 hits=214518476
+  @214518476 async function vSt(e,t,n){let r=jLn(t),o=jLn(e);if(o!==r&&!o.startsWith(r+eBo))return _(`fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: ${e}`,{level:"error"}),null;await WLn();let s=performance.now(),i
+FN "function vSt(" count=1 hits=214518482
+  @214518482 function vSt(e,t,n){let r=jLn(t),o=jLn(e);if(o!==r&&!o.startsWith(r+eBo))return _(`fetchOfficialMarketplaceFromGcs: refusing path outside cache dir: ${e}`,{level:"error"}),null;await WLn();let s=performance.now(),i="fail
+FN "var vSt=" count=0 hits=
+FN "let vSt=" count=0 hits=
+FN "const vSt=" count=0 hits=
+FN "vSt=async" count=0 hits=
+FN "async function nBo(" count=0 hits=
+FN "function nBo(" count=1 hits=214520232
+  @214520232 function nBo(e){if(L$(e)){if(e.code==="ECONNABORTED")return"timeout";if(e.response)return`http_${e.response.status}`;return"network"}let t=De(e);if(t&&/^E[A-Z]+$/.test(t)&&!t.startsWith("ERR_"))return tBo.has(t)?`fs_${t}
+FN "function tBo(" count=0 hits=
+FN "async function SSt(" count=0 hits=
+FN "function SSt(" count=0 hits=
+FN "async function wSt(" count=0 hits=
+FN "function wSt(" count=0 hits=
+FN "await vSt(" count=2 hits=214557777,214560365
+  @214557777 await vSt(a.installLocation,_B(),e)!==null){ce("plugin_official_marketplace_fetch"),s[i]={forSource:a.source,patch:{lastUpdated:new Date().toISOString()}};continue}if(!we("tengu_plugin_official_mkt_git_fallback",!0)){J("
+  @214560365 await vSt(a,_B(),t)!==null){ce("plugin_official_marketplace_fetch"),await PSt(e,t);return}if(!we("tengu_plugin_official_mkt_git_fallback",!0))throw J("plugin_official_marketplace_fetch","gcs_failed_fallback_disabled"),Er
+COLLIDE "let vSt;" count=0 hits=
+COLLIDE "let vSt," count=0 hits=
+COLLIDE ",vSt;" count=1 hits=232841653
+  @232841653 ]=Xr.hasExternalRacer,qn[85]=wSt;else wSt=qn[85];let mNe=wSt,vSt;if(qn[86]!==Lg||qn[87]!==fc||qn[88]!==Jr||qn[89]!==Ng||qn[90]!==fs||qn[91]!==hc||qn[92]!==bA||qn[93]!==bi||qn[94]!==Xr.input||qn[95]!==
+COLLIDE ",vSt=" count=1 hits=244268297
+  @244268297 i=r(e,"r"),n=r(e,"g"),a=r(e,"b");return mn(i,n,a,t)},"fade"),vSt=o(e=>`.label {     font-family: ${e.fontFamily};     color: ${e.nodeTextColor||e.textColor};   }   .cluster-label text {     fill: ${e.
+COLLIDE "vSt=(" count=1 hits=232841809
+  @232841809 A||qn[93]!==bi||qn[94]!==Xr.input||qn[95]!==Ha||qn[96]!==Po)vSt=(TSt)=>{WU({questions:Po,answersToSubmit:Jr,questionStates:Ha,input:Xr.input,imageAttachments:Lg,imageLimits:Ng,afkTimeoutMs:TSt,isScree
+COLLIDE "vSt=async" count=0 hits=
+COLLIDE "qn[97]=vSt" count=1 hits=232842431
+  @232842431 =hc,qn[92]=bA,qn[93]=bi,qn[94]=Xr.input,qn[95]=Ha,qn[96]=Po,qn[97]=vSt;else vSt=qn[97];let pNe=vSt,rX;if(qn[98]!==sNe||qn[99]!==Jr||qn[100]!==Bw||qn[101]!==mu||qn[102]!==QLe||qn[103]!==SA||qn[104]!==j
+COLLIDE "else vSt=" count=1 hits=232842442
+  @232842442 bA,qn[93]=bi,qn[94]=Xr.input,qn[95]=Ha,qn[96]=Po,qn[97]=vSt;else vSt=qn[97];let pNe=vSt,rX;if(qn[98]!==sNe||qn[99]!==Jr||qn[100]!==Bw||qn[101]!==mu||qn[102]!==QLe||qn[103]!==SA||qn[104]!==jU||qn[105]!
+ALIAS "vSt as " count=1
+  @219687213 as dea,XUo as eea,eja as fea,_St as gea,vSt as hea,qLn as iea,Q8 as jea,TSt as kea,_B as lea,dza as mea,bB as nea,pza as
+ALIAS " as vSt" count=0
+ALIAS "export{vSt" count=0
+ALIAS ",vSt," count=1
+  @244268172 d:fSt,getDiagramId:pSt},o8e=ySt});var Eq,vSt,c8e,u8e=z(()=>{"use strict";Cn();k1();Eq=o((e,t)=>{let r=Ff,i=r(e,"r"),n=r(
+ALIAS "{vSt}" count=0
+DUMP async-vSt @214518476 end=214520232 len=1756
+SKIP function vSt( @214518482 (async prefix)
+DUMP fail-neighborhood @201631916
+CALL "await vSt(a.installLocation,_B()," count=1 hits=214557777
+CALL "await vSt(a,_B()," count=1 hits=214560365

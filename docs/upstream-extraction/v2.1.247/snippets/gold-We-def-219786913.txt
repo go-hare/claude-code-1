@@ -1,0 +1,2 @@
+# needle=function We(){return pos=219786913 end=219786975 len=62
+function We(){return Boolean(z.CLAUDE_RUNNER_FAIL_FAST_FETCH)}

@@ -1,0 +1,8 @@
+# pinStorageV5 @204295340
+nk-pq8vsbwe.js..O...2.+.Cannot destructure property 'execIntoTmuxWorktree' from null or undefined value...z...--update	...
+.--upgrade...oRl.B:/~BUN/root/chunk-ec906gee.js..O...)..Cannot destructure property 'NON_REPL_SUBCOMMANDS' from null or undefined value...{j.cli_before_main_import...N..cli_after_main_import...cli_after_main_complete...bf..profileCheckpoint...pinStorageV5FromEnv...runEvalMockServer...(.runClaudeInChromeMcpServer...runChromeNativeHost...runComputerUseMcpServer...D...loadFastPathPolicy...\.runDaemonWorker...Q...ensureFastPathSettingsLoaded
+...N..runPtyHost..
+...Q...runBgSpare..
+...c.runPreload.....[.exitWithError...b.restoreGatewayAuthForFastPath...[...BRIDGE_LOGIN_ERROR..
+...bridgeMain...pinStorageV5...\5..seedInstallIDs..	...]1..initSinks...k.initDefaultDebugLog...j.watchGlobalConfigThroughStorage.
+... ...daemonMain...(.logsHandler.....attachHandler...

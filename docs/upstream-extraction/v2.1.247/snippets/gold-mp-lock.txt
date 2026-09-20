@@ -1,0 +1,96 @@
+# mp / ra / _r / wg / JD / dSt peel lock — official 2.1.247
+# Invent-ban. No implement. Frozen checklists not edited.
+# K8 already locked @214509181 gold-gza-K8-full.txt
+
+## LOCKED / UNKNOWN
+
+| ident | status | official | offset | bind | gold |
+| ----- | ------ | -------- | ------ | ---- | ---- |
+| mp | LOCKED | sl(r,n) parse cache path → {marketplace,plugin,version}\|null | 211421964 | sl as Heb @211611951 → Heb as mp @212808064 (K8 mod) | gold-mp-sl-full.txt |
+| ra | LOCKED | 0-arg join(Fs(),"cache") — CACHE root, mp 2nd | 214636997 | local in K8/Yjo mod; Fo=join @214636711 | gold-mp-ra-full.txt |
+| Fs | LOCKED | ci() plugins dir (env or join(Y(),Od())) | 209324427 | ci as hMb @209535570 → hMb as Fs @212823619 | gold-mp-ci-full.txt |
+| Od | LOCKED | plugins \| cowork_plugins name | 209324339 | adjacent ci; Id/si same mod | gold-mp-Od-full.txt |
+| _r.pluginCache | LOCKED | key factory (m,p,v,rel)→{namespace:"pluginCache",...} | 207948340 | L as Edd @207950000 → Edd as _r @212851093 _814 | gold-mp-_r-pluginCache.txt |
+| wg | LOCKED | ".orphaned_at" | 211423438 | ss as Deb @211611911 → Deb as wg @212807979 | gold-mp-ss-wg.txt |
+| JD | LOCKED | isSymlinkedPluginVersion (lstat) | 214078883 | local; lstat as vpt @214076933 | gold-K8-v5-JD-full.txt gold-K8-v5-JD-vpt.txt |
+| dSt | LOCKED | join(e, wg) disk .orphaned_at path | 214510094 | unique function dSt(; join as OFe @214509025 | gold-K8-v5-dSt-full.txt gold-K8-v5-dSt-OFe.txt |
+| zr | LOCKED | rel parts vs qr(); n must === qr() | 211421749 | same mod as sl; function zr(r count=1 | gold-mp-zr-full.txt |
+| qr | LOCKED | De(le(),"plugins","cache") hardcoded "plugins" | 211421701 | sl callee | gold-mp-qr-full.txt |
+| Yr | LOCKED | version.endsWith(".zip") | 211421923 | unique that body | gold-mp-Yr-full.txt |
+| xe | LOCKED | E(e)=e.length>0&&e.every(C) | 207942213 | E as ydd @207949946 → ydd as xe @211418076 _814 | gold-mp-E-full.txt |
+| C | LOCKED | segment safe (no empty / \\ nul-ish / K(e)) | 207942094 | E.every(C) adjacent | gold-mp-C-full.txt |
+| Y / Lr / ii / ns / De / le / Gt / is / b / f / K | UNKNOWN | not requested; collision or not peeled | — | do not invent = getClaudeConfigHomeDir / expandTilde / relative / sep | — |
+
+## Collision-ban (short names)
+
+mp: 9× `function mp(` — NONE is parse (bg-logs @221737807, OCaml hljs, duration, …). Parse is import-only.
+ra: 20× `function ra(` — unique 0-arg `Fo(Fs(),"cache")` count=1.
+_r: many `var _r=` — unique `Edd as _r` count=1 + unique `pluginCache:(e,n,a,t)=>(…)` count=1.
+wg: 3× `var wg=` (React/Azure/OTel) — NOT orphan stamp. Unique `var ss=".orphaned_at"` + `Deb as wg` count=1.
+JD: 7× `function JD(` (hipaa/yoga/fs-extra/zod/d3/react) — unique `async function JD(` count=1 + isSymbolicLink.
+dSt: `function dSt(` count=1.
+
+## Full bodies (official)
+
+mp = sl:
+function sl(r,n){let a=zr(r,n);if(a===null||a.length!==3||!xe(a)||Yr(a[2]))return null;let[u,l,p]=a;return{marketplace:u,plugin:l,version:p}}
+
+zr:
+function zr(r,n){let a=qr();if(n!==a)return null;let u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}
+
+qr:
+function qr(){return De(le(),"plugins","cache")}
+
+ra:
+function ra(){return Fo(Fs(),"cache")}
+
+Fs = ci:
+function ci(){let e=_.CLAUDE_CODE_PLUGIN_CACHE_DIR;if(e)return Lr(e);return Ur(Y(),Od())}
+
+Od:
+function Od(){if(ii())return si;if(_.CLAUDE_CODE_USE_COWORK_PLUGINS)return si;return Id}
+
+_r.pluginCache (on L):
+pluginCache:(e,n,a,t)=>({namespace:"pluginCache",marketplace:e,plugin:n,version:a,relPath:t})
+
+wg = ss:
+var ss=".orphaned_at",as=".in_use",ih=".gcs-sha",nh=".links_materialized"
+
+JD:
+async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}
+
+dSt:
+function dSt(e){return OFe(e,wg)}
+
+## K8 call (already locked)
+
+async function K8(e,t){
+  if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}
+  let n=Ne()&&t!==void 0?mp(e,ra()):null;
+  if(Ne()&&t!==void 0&&n!==null){
+    let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});
+    if(!r.ok)_(`Failed to write .orphaned_at: ${e}: ${tr(r.error)}`);
+    return
+  }
+  try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}
+}
+
+## Facts (no invent)
+
+- mp 2nd is CACHE root (ra = join(Fs(),"cache")), not plugins root. Fs is plugins root.
+- zr requires n===qr(). qr hardcodes "plugins/cache". ra uses Od() (plugins|cowork_plugins). cowork + mp(e,ra()) can miss qr() — official, not patched here.
+- K8 storage write: _r.pluginCache(marketplace,plugin,version,[".orphaned_at"]).
+- K8 disk fallback: writeFile(join(e,".orphaned_at"), Date.now, "utf-8").
+- JD CONFIRMED = local isSymlinkedPluginVersion (lstat + isSymbolicLink, catch false).
+
+## Local gap (do not implement)
+
+src/utils/plugins/cacheUtils.ts markPluginVersionOrphaned(versionPath) disk-only 1-arg.
+Missing: storageV5 t, Ne() gate, mp+ra parse, t.write(_r.pluginCache(...,[wg]), …, {publishDiscipline:"inPlace"}).
+Disk path shape already dSt-equivalent (join(versionPath,".orphaned_at")).
+isPluginCacheVersionDirPath in pluginCacheStaging.ts matches sl/mp; getPluginCacheRoot matches ra.
+
+## Peel scripts
+
+_peel-mp-K8-v5.mjs _peel-mp-pass2.mjs … _peel-mp-pass7.mjs
+scan: gold-mp-scan.txt gold-mp-pass2.txt … gold-mp-pass7.txt

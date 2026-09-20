@@ -1,0 +1,3 @@
+# offset=214637035 hit=1/2 needle="function QT("
+
+n"."+oE+nE(mn(),e.path)}return a9(e.path)}function ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}async function m2(e){return await _2(e)==="real"}function uzo(e,t){return new ye(`Could not examine the plugin directory of ${e} (${Y(t)}); retry the install.`,"plugin cache version parent could not be examined")}async function Mwt(e){let t=ra(),n=nE(t,e),r=n.split(oE);if(!n||RUe(n)||r.length!==2||r.some((a)=>a===""||a==="."||a===".."))return!1;let[o,s]=r;if(o===void 0||s===void 0)return!1;let i=await Rm(t);return await XNn(Fo(i,o))&&await XNn(Fo(i,o,s))}async function XNn(e){if((await G$(e)).isDirectory()&&await dR(L

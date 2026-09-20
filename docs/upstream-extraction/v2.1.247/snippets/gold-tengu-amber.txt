@@ -1,0 +1,14 @@
+# 247 offset=199944512 needle="tengu_amber_moleskin"
+
+i.t.l.e. .i.n. .t.h.e. .l.a.n.g.u.a.g.e. .o.f. .t.h.e. .d.e.s.c.r.i.p.t.i.o.n.,. .t.h.e. .b.r.a.n.c.h. .n.a.m.e. .i.n. .E.n.g.l.i.s.h...	...Q...setActive.../v2/ccr-sessions/-/chat-project... ..user:projects:read...7...user:projects:write.q...the prompt did not go through prompt.submit (a command, bash mode, an input that did not query, or a failed pass)...]I..isOpen...D1.tengu_amber_moleskin...].Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh...:N..memdir_relevanced...U{..
+
+[... skill content truncated for compaction; use Read on the skill path if you need the full text]...zY.maybeInvalidate...x-anthropic-billing-header:...kubernetesNamespace...6..ociContainerId...I.PROVENANCE_REQUIRED...The permission request for this URL was not answered in time. Ask the user to approve the fetch or include the URL in a message, then try again...setUrl..)...Y`.(?:\./)?(?:(?:npx|bunx|uvx|uv\s+run)\s+)?...i.Q.tengu_dash_flame...Not enough messages to compact..5...aF.[earlier conversation truncated for compaction retry]...M...E..Conversation too long. Press esc twice to go up a few messages and try again...%...!. .Compaction blocked by PreCompact hook...N...Z^w.C.o.m.p.a.c.t.i.o.n. .i.n.t.e.r.r.u.p.t.e.d. ... .T.h.i.s. .m.a.y. .b.e. .d.u.e. .t.o. .n.e.t.w.o.r.k. .i.s.s.u.e.s. ..  .p.l.e.a.s.e. .t.r.y. .a.g.a.i.n...Z./memory_context...W..Write a short summary label describing what these tool calls accomplished. It appears as a single-line row in a mobile app and truncates around 30 characters, so think git-commit-subject, not sentence.
+
+Keep the verb in past tense and the most distinctive noun. Drop articles, connectors, and long location context first.
+
+Examples:
+- Searched in auth/
+- Fixed NPE in UserService
+- Created signup endpoint
+- Read config.json
+- Ran failing tests...a...tengu_toasty_thimble...M..computer-use.lock...	...;V.headless_...9.reanchorTaskBudget...@...cumulativeUsed...tengu_lapis_anchor...X	.tengu_lapis_anchor_budget...W.tengu_lapis_anchor_user_turn#...tengu_lapis_anchor_from_client_data....X-CCR-Turn-Id...w..claude/endTu

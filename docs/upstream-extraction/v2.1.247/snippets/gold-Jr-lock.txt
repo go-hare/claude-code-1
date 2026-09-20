@@ -1,0 +1,45 @@
+# Jr() official 2.1.247 peel. Invent-ban. Unique via nPe Jr().mutate, not name Jr.
+
+## Uniqueness
+
+`function Jr(){` count=3 — NONE are the store
+  @209853480 sha1 digest
+  @223474859 shell-snapshots path
+  @250805565 timeout clearer
+
+nPe @213644976 uses Jr().mutate((s)=>{...pluginSecrets...}, n)
+`Jr().mutate` also in same module: Sle/Kan/evi/Kwo (pluginSecrets)
+and later MCP OAuth module (mcpOAuth) — same Jr import from _721.
+
+## Import → export → body
+
+nPe-mod: import{iRc as HM,jRc as sKt,xRc as Jr,yRc as e3}from"B:/~BUN/root/_721.js"  @212844280
+_721 export @208364028: Ar as xRc
+_721 is also getSecureStorage pack (string table @163691299)
+
+function Ar(){if(oe)return oe;if(st())return Se(ne,j);return j}  @208363721 len=63
+  gold-Jr-Ar-208363721.txt
+
+st() @208363330
+  function st(){if(process.env.CLAUDE_CODE_FORCE_WINDOWS_CREDMAN==="1")return!0;return se().resolve(xe,it)}
+  se(){return ot.of(H().host)}  — CredMan gate WeakMap on host, not We()
+
+Se(e,t) @208353968 — primary+plaintext fallback wrapper
+  mutate(a,n){return w(r,a,n)}
+  gold-Jr-Se-208353968.txt
+
+j @208358053 (plaintext store object)
+  readAsync(e){return B(e).read()}
+  mutate(e,t){return w(j,e,t)}
+  update(e,t){return B(t).write(e)}
+  delete(e){return B(e).remove()}
+  B(e){return F()&&e!==void 0?Ve(e):Ge}
+  gold-Jr-store-208358.txt
+
+nPe 3rd arg n → Jr().mutate(updater, n) = credentials handle (same as gza 4th).
+
+## Local
+
+local deletePluginOptions: getSecureStorage().read() + .update() sync, no credentials arg.
+official nPe: await Jr().mutate(..., credentials) async, lock catch "storage lock unavailable".
+local pinCredentialsStore / getPinnedCredentials: no official string; official UI reads credentials from We() context, nPe receives it as 3rd arg.

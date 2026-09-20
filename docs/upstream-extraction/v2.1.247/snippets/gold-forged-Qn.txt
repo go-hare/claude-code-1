@@ -1,0 +1,1 @@
+function Qn(e){return ge(e).toLowerCase()===".git"?I(e):e}

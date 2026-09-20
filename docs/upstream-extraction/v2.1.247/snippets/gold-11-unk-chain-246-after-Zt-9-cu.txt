@@ -1,0 +1,3 @@
+# 246-after-Zt n=9 function cu start=209124288 end=209124428 len=140 sha=cd47cdab9ae176e3
+
+function cu(e){try{return Xi(Ji(dt(e),Yn.O_RDONLY|Yn.O_DIRECTORY|Yn.O_NOFOLLOW)),!0}catch(t){let n=Fn(t);return n!=="ELOOP"&&n!=="ENOTDIR"}}

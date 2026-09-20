@@ -1,0 +1,3 @@
+# offset=231647960 ver=247 hit=1/4 needle="]=je("
+
+0?"down":st,X=ct===void 0?"No results":ct,xe=at===void 0?"select":at,wo=dt===void 0?"cancel":dt,yo=Ge(),{rows:wn,columns:yn}=He(),lt;if(t[0]===Oe)lt={focus:0,window:0},t[0]=lt;else lt=t[0];let[vn,c,ke]=je(lt),{focus:Te,window:E}=vn,[xn,Z]=Se(void 0),Ie=Boolean(ve),a=Math.max(Go,Math.min(hn,wn-So-(Ie?1:0))),Pe=yn<120,K=Math.max(0,r.length-a),ut;if(t[1]!==r.length||t[2]!==c||t[3]!==a)ut=(kn)=>{Z(void 0),c((De)=>{let{focus:Tn,window:vo}=De;let _=y(Tn+kn,0,r.length-1);return{focus:_,window:_<vo?_:_>=vo+a?_-a+1:vo}})},t[1]=r.length,t[2]=c,t[3]=a,t[4]=ut;else ut=t[4];let ee=ut,De;if(t[5]!==K||t[6]!=

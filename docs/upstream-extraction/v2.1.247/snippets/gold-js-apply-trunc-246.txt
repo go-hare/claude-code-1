@@ -1,0 +1,25 @@
+# offset=82361233 ver=246 needle="output truncated"
+
+ stdout or stderrstdout and stderr cannot be used for stdin.Blob cannot be used for stdio[..] yet.This should never happenFailed to create ReadableStreamReadableStream cannot be used for stdout yet. For now, do .stdoutReadableStream cannot be used for stderr yet. For now, do .stderr(ReadableStream cannot be used for stdio[..] yet.ReadableStream cannot be used in sync modepipesocket-fdipcstdio must be an array of 'inherit', 'pipe', 'ignore', Bun.file(pathOrFd), number, or nullstdio: 'socket-fd' cannot be used with spawnSyncstdio: 'socket-fd' is only supported at indices >= 3stdinstdoutstderr.'.&' ReadableStream has already been used..'.,' ReadableStream cannot be used in sync mode.create_buffer returns a Uint8ArrayArrayBufferView cannot be used for stdout/stderr yetstdio must be an array of 'inherit', 'ignore', or null3file descriptor must be a valid integer, received: ..file descriptor must be a positive integerDecompression failed.Compression failed.ERR_BROTLI_COMPRESSION_FAILED.Failed to attach brotli dictionary.Failed to prepare brotli dictionary.Could not initialize Brotli instance.path must be a string or TypedArrayExpected `exec` state in If, this indicates a bug in Bun. Please file a GitHub issue.pipes set aboveinternal error: entered unreachable code: skipped aboveSeq.onIOWriterChunk-sseq: option requires an argument -- s
+-tseq: needs positive increment
+seq: needs negative decrement
+seq: zero increment
+seq: invalid argument
+seq: option requires an argument -- t
+
+... [output truncated: would exceed --parallel IPC frame limit]
+...)unexpected return code from uv_fs_write: ..fetchThis code path shouldn't be reached - sync_file in PipeWriter.rsSendQueue::new sets rootacceptedHandle did not reach the receiving process correctlySentHandleNotReceivedWarningSendQueue used after detach...:.. .."..:.. ...".."..:.. ...[..Symbol(..)..]:.. .napi_env / napi_value are only supported in bun:ffi cc() (compiled C source), not in dlopen/linkSymbols/CFunction/JSCallbackbuffer_length is only supported for bun:ffi dlopen/linkSymbols/CFunction arguments (the engine reads the view's byteLength at call time), not in cc(), viewSource, or JSCallback-std=c11 -nostdlib -Wl,--export-all-symbols.JSFunctionCall.missing generated symbol in source codeFailed to compile source codeImage: collected before read completedImage: Blob source is no longer a Blobfreshly created Uint8Array has a backing buffertoBeNumberthrowIfNoEntryexpect.stringContaining(string)
+
+Expected a string or regular expression
+.[2mexpect..[0mstringContaining.[2m(.[0mstring.[2m).[0m
+
+Expected a string or regular expression
+did not initialize server code.../_bun/client...D.../route-...js.scheduled napi async work holds a ticketInvalid path buffer: can't be emptyVThe argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ...tcp:..:...tcp:localhost:...unix:..internal error: entered unreachable code: locked_to_native_stream on non-Locked ValueBody object should not be disturbed or lockedInternal error: task for FormData must not be nulltoBeStringassertion failed: new_cap >= lenexpect.closeTo(number, precision?)
+
+Expected a number value.[2mexpect..[0mcloseTo.[2m(.[0mnumber.[2m, precision?).[0m
+
+Expected a number valueexpect.closeTo(number, precision?)
+
+Precision must be a number or undefined.[2mexpect..[0mcloseTo.[2m(number, .[0mprecision?.[2m).[0m
+
+Precision must be a number or undefinedloaded html route has no script injection offsetloaded html route

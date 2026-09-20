@@ -1,0 +1,3 @@
+# offset=206549329 hit=1/22 needle="Nu="
+
+oun({value:(t,r)=>e("flag.value",{name:t,fallback:r})});var tf=o(()=>{C()});var Nu="flag";var rf=()=>{};var Mu=()=>!1;var of=()=>{};var Ie={};g(Ie,{FLAG_NOUN_NAME:()=>Nu,default:()=>Ie,flagInterface:()=>Hu,internalBuild:()=>Mu});var go=o(()=>{go();tf();rf();of()});var $u=(e)=>d.s

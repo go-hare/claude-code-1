@@ -1,0 +1,7 @@
+# 247 ee @232014080 sha=07fbddf252d9314e
+
+function ee(e){let s=P(e);if(s<=F)return{payload:e,trim:null};using m=v`fitFeedbackPayloadToBudget(${s})`;let a=s-(F-De),t=e.transcript.map((b)=>Me(b)+1),p=t.reduce((b,T)=>b+T,0),_=e.rawTranscriptJsonl===void 0?0:G(e.rawTranscriptJsonl),y=a<=p?p-a:Math.max(0,p-Math.max(0,a-_)),{start:d,keptBytes:u,oversized:c}=z(t,y),l=e.transcript.slice(d),D=c.size===0?l:l.filter((b,T)=>!c.has(d+T)),k=a-(p-u),o=e.rawTranscriptJsonl,i=o===void 0?"absent":"untouched";if(k>0&&o!==void 0){let b=_-k;if(b<=0)o=void 0,i="omitted";else{let T=o.split(`
+`),Te=T.map((U)=>G(U+`
+`)),{start:V,oversized:Y}=z(Te,b),N=T.slice(V),X=(Y.size===0?N:N.filter((U,we)=>!Y.has(V+we))).join(`
+`);if(X==="")o=void 0,i="omitted";else o=X,i="reduced"}}let A={keptMessageCount:D.length,totalMessageCount:e.transcript.length,oversizedMessageCount:c.size,rawTail:i,rawTailKeptBytes:o===void 0?0:Buffer.byteLength(o)},f=Fe(A);if(f===null)return{payload:e,trim:null};let{rawTranscriptJsonl:C,...M}=e,h={...M,message_count:D.length,description:`${e.description}
+${f}`,transcript:D,...o!==void 0&&{rawTranscriptJsonl:o}},r=P(h);if(r>F)g(`fitFeedbackPayloadToBudget: still ${r} bytes after trim (budget ${F})`,{level:"error"});return{payload:h,trim:A}}

@@ -1,0 +1,2 @@
+# pos=213256801
+:String(t)}`,{level:"warn"})}}function o0o(e,t){return e.code==="Failed"&&e.cause instanceof Error?e.cause:Object.assign(new _e(`Failed to probe ${t}: ${Zn(e)}`,"failed to probe an installed plugin path (v5 backend error)"),{cause:e})}async function s0o(e,t,n,r,o){if(Be()&&r!==void 0&&o!==void 0)if(await ox(t,ea()))await K$n(e);else{await q$n(r,o.from);let l=await r.moveScope(o.from,o.to,{replace:!0});if(l.ok)return;let c=t0o(

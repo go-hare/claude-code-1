@@ -1,0 +1,2 @@
+# pos=214631176
+"&&e.cause instanceof Error?e.cause:Object.assign(new ye(`Failed to probe ${t}: ${tr(e)}`,"failed to probe an installed plugin path (v5 backend error)"),{cause:e})}function Kjo(e){let t=De(e);return t==="EXDEV"||t!==void 0&&RNn.has(t)}async function Yjo(e,t,n,r,o){if(Ne()&&r!==void 0&&o!==void 0)if(await Rx(t,ra()))await UNn(e);else{await LNn(r,o.from);let u=await r.moveScope(o.from,o.to,{replace:!0});if(u.ok)return;let d=Wjo(

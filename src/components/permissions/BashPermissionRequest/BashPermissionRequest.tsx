@@ -40,6 +40,20 @@ import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
 import { SedEditPermissionRequest } from '../SedEditPermissionRequest/SedEditPermissionRequest.js';
 import { useShellPermissionFeedback } from '../useShellPermissionFeedback.js';
 import { logUnaryPermissionEvent } from '../utils.js';
+import { isBashAlwaysAllowVetoed, isBashCommandWithheld } from '../../../dialog/permissionBash.js';
+import {
+  BASH_AUTO_MODE_DESCRIPTION,
+  BASH_AUTO_MODE_TIP,
+  BASH_PERMISSION_PROMPT_UPSELL_TRIGGER,
+  isBashAutoModeOfferBlocked,
+  shouldShowBashAutoModeOption,
+  useWorkflowAutoModeOffer,
+  WORKFLOW_PERMISSION_PROMPT_TRIGGER,
+} from '../../../dialog/permissionAutoMode.js';
+import {
+  resolvePermissionRequestSource,
+  type PermissionRequestSourceContext,
+} from '../../../dialog/permissionRequestSource.js';
 import { bashToolUseOptions } from './bashToolUseOptions.js';
 
 const CHECKING_TEXT = 'Attempting to auto-approve\u2026';
@@ -124,6 +138,23 @@ function BashPermissionRequestInner({
 }): React.ReactNode {
   const [theme] = useTheme();
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
+  const requestSource = resolvePermissionRequestSource(toolUseContext as PermissionRequestSourceContext);
+  const { offered, canOfferAutoMode, enableAutoMode } = useWorkflowAutoModeOffer(requestSource);
+  const bashOfferPayload = {
+    requestId: toolUseConfirm.toolUseID,
+    toolName: toolUseConfirm.tool.name,
+    permissionResult: toolUseConfirm.permissionResult,
+    command,
+    input: toolUseConfirm.input,
+    isAskCappedByOrg: toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask',
+    requestSource,
+  };
+  const showEnableAutoModeOption = shouldShowBashAutoModeOption(
+    isBashCommandWithheld(bashOfferPayload),
+    isBashAlwaysAllowVetoed(bashOfferPayload),
+    canOfferAutoMode,
+    isBashAutoModeOfferBlocked(toolUseConfirm.permissionResult),
+  );
   const explainerState = usePermissionExplainerUI({
     toolName: toolUseConfirm.tool.name,
     toolInput: toolUseConfirm.input,
@@ -289,6 +320,8 @@ function BashPermissionRequestInner({
         tool: toolUseConfirm.tool,
         input: toolUseConfirm.input,
         isAskCappedByOrg: toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask',
+        showEnableAutoModeOption,
+        enableAutoModeDescription: offered ? undefined : BASH_AUTO_MODE_DESCRIPTION,
       }),
     [
       toolUseConfirm,
@@ -299,6 +332,8 @@ function BashPermissionRequestInner({
       noInputMode,
       editablePrefix,
       onEditablePrefixChange,
+      showEnableAutoModeOption,
+      offered,
     ],
   );
 
@@ -395,6 +430,15 @@ function BashPermissionRequestInner({
       return;
     }
 
+    if (value === 'yes-enable-auto-mode') {
+      enableAutoMode(offered ? WORKFLOW_PERMISSION_PROMPT_TRIGGER : BASH_PERMISSION_PROMPT_UPSELL_TRIGGER);
+      const trimmedFeedback = acceptFeedback.trim();
+      logUnaryPermissionEvent('tool_use_single', toolUseConfirm, 'accept');
+      toolUseConfirm.onAllow(toolUseConfirm.input, [], trimmedFeedback || undefined);
+      onDone();
+      return;
+    }
+
     switch (value) {
       case 'yes': {
         const trimmedFeedback = acceptFeedback.trim();
@@ -462,7 +506,7 @@ function BashPermissionRequestInner({
     <PermissionDialog
       workerBadge={workerBadge}
       title={sandboxingEnabled && !isSandboxed ? 'Bash command (unsandboxed)' : 'Bash command'}
-      subtitle={classifierSubtitle}
+      subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
     >
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Text dimColor={explainerState.visible}>

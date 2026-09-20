@@ -68,6 +68,7 @@
     "format": "biome format --write .",
     "check": "biome check .",
     "check:fix": "biome check --fix .",
+    "check:ci": "biome ci .",
     "prepare": "husky",
     "test": "bun test",
     "test:production": "bun run scripts/production-test.ts",
@@ -81,7 +82,7 @@
     "docs:dev": "npx mintlify dev",
     "docs:check": "bun run scripts/docs-check.ts",
     "typecheck": "tsc --noEmit",
-    "precheck": "bun run typecheck && bun run check:fix && bun run docs:check --quiet && bun test",
+    "precheck": "bun run typecheck && bun run check:fix && bun run docs:check --quiet && bun test && bun run check:ci",
     "rcs": "bun run scripts/rcs.ts"
   },
   "dependencies": {

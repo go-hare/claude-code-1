@@ -1,0 +1,2 @@
+# class te{ @206941696 end=206941841 len=145
+class te{#e;#t=new WeakMap;constructor(e){this.#e=e}of(e){let t=this.#t.get(e);if(t!==void 0)return t;let o=this.#e();return this.#t.set(e,o),o}}

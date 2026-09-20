@@ -575,13 +575,13 @@ export default class App extends PureComponent<Props, State> {
 
   // Process input through the parser and handle the results
   processInput = (input: string | Buffer | null): void => {
-    // densable: expire parked droppedMousePrefix after droppedPrefixDropAt.
+    // densable: expire parked droppedMousePrefix / flushedEscapePrefix after droppedPrefixDropAt.
     if (
       this.droppedPrefixDropAt !== null &&
       performance.now() >= this.droppedPrefixDropAt &&
-      this.keyParseState.droppedMousePrefix
+      (this.keyParseState.droppedMousePrefix || this.keyParseState.flushedEscapePrefix)
     ) {
-      this.keyParseState = { ...this.keyParseState, droppedMousePrefix: '' };
+      this.keyParseState = { ...this.keyParseState, droppedMousePrefix: '', flushedEscapePrefix: '' };
       this.droppedPrefixDropAt = null;
     }
     // Parse input using our state machine
@@ -629,8 +629,8 @@ export default class App extends PureComponent<Props, State> {
     } else {
       this.mousePrefixDropAt = null;
     }
-    if (this.keyParseState.droppedMousePrefix) {
-      if (!prevState.droppedMousePrefix) {
+    if (this.keyParseState.droppedMousePrefix || this.keyParseState.flushedEscapePrefix) {
+      if (!prevState.droppedMousePrefix && !prevState.flushedEscapePrefix) {
         this.droppedPrefixDropAt = now + this.MOUSE_PREFIX_TIMEOUT;
       }
     } else {

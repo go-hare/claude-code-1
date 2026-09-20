@@ -1,0 +1,3 @@
+# off=209987517 hit=11
+
+.disabled??!1,denyRead:[...e.filesystem.denyRead],denyWrite:[...e.filesystem.denyWrite],allowRead:[...e.filesystem.allowRead??[]],allowWrite:[...e.filesystem.allowWrite],credFiles:Pc(e.credentials)}}function Ro(e,t){if(e.length!==t.length)return!1;let n=new Set(e);return t.every((r)=>n.has(r))}function SD(e,t){return e.disabled===t.disabled&&Ro(e.denyRead,t.denyRead)&&Ro(e.denyWrite,t.denyWrite)&&

@@ -1,0 +1,5 @@
+# gold-forged-Ve-eRc.txt official-247 SEA @207918800-207919400
+t",KillShell:"TaskStop",KillBash:"TaskStop",AgentOutputTool:"TaskOutput",BashOutputTool:"TaskOutput",AgentOutput:"TaskOutput",BashOutput:"TaskOutput",ListPeers:"ListAgents",Brief:"SendUserMessage",ListMcpResources:"ListMcpResourcesTool",ReadMcpResource:"ReadMcpResourceTool",ReadMcpResourceDir:"ReadMcpResourceDirTool"};R=`mcp__${a}__bash`,b=`mcp__${a}__web_fetch`});
+export{i as UQc,d as VQc,a as WQc,R as XQc,b as YQc,x as ZQc,A as _Qc,O as $Qc,u as aRc,T as bRc,_ as cRc,C as dRc,L as eRc,M as fRc,k as gRc,m as hRc};
+// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial 

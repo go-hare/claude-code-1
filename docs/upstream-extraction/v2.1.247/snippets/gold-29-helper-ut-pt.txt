@@ -1,0 +1,34 @@
+# offset=221588200 markdown ut + pt + dt
+# ft @ 221592543  ft=/^[a-z][a-z0-9+.-]*:/i
+# Ee @ init: Ee=new RegExp(`^[${j}]+`,"u")  j=Atb T
+# re = Zzd from _845.js
+# be = FE / d(a); de = Etb; pe = Ctb u; ge = Ftb N; fe = Btb k
+# ye = path.isAbsolute; nt = path.resolve; ie = cwd
+
+function ut(e){
+  if(!/^file:/i.test(e))return e;
+  let t=e.slice(5);
+  if(t.startsWith("//")){
+    if(t=t.slice(2),t==="localhost")t="/";
+    else if(t.startsWith("localhost/"))t=t.slice(9)
+  }
+  let n=t.search(/[#?]/),r=n===-1?"":t.slice(n),o=n===-1?t:t.slice(0,n);
+  if(o==="")return null;
+  try{o=decodeURIComponent(o)}catch{}
+  o=dt(o);
+  let a=ye(o)?o:nt(ie(),o),s=be(a);
+  if(s===null)return null;
+  let c=s+r;
+  return de(c)?null:c
+}
+function pt(e){
+  let t=ut(e);
+  if(t===null||re.test(t)||Ee.test(t)||t!==t.trimEnd())return null;
+  if(ft.test(t))return t;
+  let n=ge(t),r=n.some((o)=>/^file:/i.test(fe(o)));
+  return pe(t,n)||r?null:t
+}
+function dt(e,t=ye){
+  if(/^\/[A-Za-z]:(?=[\\/]|$)/.test(e)&&t(e.slice(1)))return e.slice(1);
+  return e
+}

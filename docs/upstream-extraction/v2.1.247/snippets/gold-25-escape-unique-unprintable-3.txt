@@ -1,0 +1,8 @@
+# offset=206496022 tag=unprintable
+
+        try {
+          const s = e?.stack
+          if (typeof s === 'string') stack = s
+        } catch {}
+        return { __proto__: null, msg, name, stack }
+      })`,e)}return Tn}function ba(e){try{let t=pu()(e);return{msg:typeof t.msg==="string"?t.msg:"<unprintable thrown value>",name:typeof t.name==="string"?t.name:"Error",stack:typeof t.stack==="string"?t.stack:void 0}}catch{return{msg:"<unprintable thrown value>",name:"Error"}}}function Ea(e){if(e==null||typeof e!=="object"&&typeof e!=="function")return String(e);return`[${typeof e}]`}function jg(e){let t=(...r)=>{try{return e(...r)}catch(n){let{msg:s,name:i,stack:c}=ba(n);throw ka(s,i,c)}};return Object.setPrototypeOf(t,null),t}function _g(e){let t=async(...r)=>{try{return await e(...r)}catch(n){let{msg:s,name:i,stack:c}=ba(n);throw ka(s,i,c)}};return Object.setPrototypeOf(t,null),t}function ma(e){let t=Error(e);return wa.add(

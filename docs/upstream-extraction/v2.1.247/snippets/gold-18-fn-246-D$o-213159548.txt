@@ -1,0 +1,20 @@
+# ver=246 name=D$o async=true start=213159548 end=213162504 len=2956 sha=37a911e4d5815257 needle="exited with code ${"
+
+async function D$o(e,t,n,r,o){let s=r&&r.length>0,i={...Sk(),...o&&{GIT_LFS_SKIP_SMUDGE:"1"}},a=["-c","core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes","clone","--depth","1"];if(s)a.push("--filter=blob:none","--no-checkout");else a.push("--recurse-submodules","--shallow-submodules");if(n)a.push("--branch",n);a.push("--",e,t);let l=f$();b(`git clone: url=${rfe(e)} ref=${n??"default"} timeout=${l}ms`);let c=await jn(Nn(),a,{timeout:l,stdin:"ignore",env:i}),u=rfe(e);if(e!==u){if(c.error)c.error=c.error.replaceAll(e,()=>u);if(c.stderr)c.stderr=c.stderr.replaceAll(e,()=>u)}if(c.code===0){if(s){let d=await jn(Nn(),["sparse-checkout","set","--cone","--",...r],{cwd:t,timeout:l,stdin:"ignore",env:i});if(d.code!==0)return{code:d.code,stderr:`git sparse-checkout set failed: ${d.stderr}`};let p=await jn(Nn(),["checkout","HEAD"],{cwd:t,timeout:l,stdin:"ignore",env:i});if(p.code!==0)return{code:p.code,stderr:`git checkout after sparse-checkout failed: ${p.stderr}`}}return b(`git clone succeeded: ${rfe(e)}`),c}if(b(`git clone failed: url=${rfe(e)} code=${c.code} error=${c.error??"none"} stderr=${c.stderr}`,{level:"warn"}),c.error?.includes("timed out"))return{...c,stderr:`Git clone timed out after ${Math.round(l/1000)}s. The repository may be too large for the current timeout. Set CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS to increase it (e.g., 300000 for 5 minutes).
+
+Original error: ${c.stderr}`};if(c.stderr){if(c.stderr.includes("REMOTE HOST IDENTIFICATION HAS CHANGED")){let d=sDn(e),p=d?`ssh-keygen -R ${d}`:"ssh-keygen -R <host>";return{...c,stderr:`SSH host key has changed (server key rotation or possible MITM). Remove the stale known_hosts entry:
+  ${p}
+Then connect once manually to verify and accept the new key.
+
+Original error: ${c.stderr}`}}if(c.stderr.includes("Host key verification failed")){let d=sDn(e),p=d?`ssh -T git@${d}`:"ssh -T git@<host>";return{...c,stderr:`SSH host key is not in your known_hosts file. To add it, connect once manually (this will show the fingerprint for you to verify):
+  ${p}
+
+Or use an HTTPS URL instead (recommended for public repos).
+
+Original error: ${c.stderr}`}}if(c.stderr.includes("Permission denied (publickey)")||c.stderr.includes("Could not read from remote repository"))return{...c,stderr:`SSH authentication failed. Please ensure your SSH keys are configured for ${M$o(e)}, or use an HTTPS URL instead.
+
+Original error: ${c.stderr}`};if(I$o(c.stderr))return{...c,stderr:`HTTPS authentication failed. Please ensure ${O$o(e)}.
+
+Original error: ${c.stderr}`};if(c.stderr.includes("timed out")||c.stderr.includes("timeout")||c.stderr.includes("Could not resolve host"))return{...c,stderr:`Network error or timeout while cloning repository. Please check your internet connection and try again.
+
+Original error: ${c.stderr}`}}if(!c.stderr)return{code:c.code,stderr:c.error||`git clone exited with code ${c.code} (no stderr output). Run with --debug to see the full command.`};return c}

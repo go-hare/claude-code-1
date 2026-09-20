@@ -1,0 +1,3 @@
+# offset=222272743
+
+isDefault}function ge(){let e=He.bindings??je();return Ve(jt(e),"Chat",e)}async function Lo(e){if(!te())return!0;let{filterCommandsForRemoteMode:t,getBuiltinCommands:n}=await import("B:/~BUN/root/chunk-xwd6kgep.js");return t(n()).some((o)=>o.name===e||o.aliases?.includes(e))}var Zt=[{id:"team-artifacts",priority:4,content:async(e)=>{let t=await mt(e.session,e.storageV5).catch((n)=>(Re("tips_team_artifact_show",n instanceof Error?"content_scan_error":"content_unknown_error"),[]));if(t.length===0)return"";return gt(t),ft(e.session,e.storageV5),ht(t)},cooldownSessions:1,isRelevant:async(e)=>pt(e.session,e.storageV5)},{id:"fotw-campaign",priority:4,content:async()=>{let e=Q()

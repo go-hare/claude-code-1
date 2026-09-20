@@ -1,0 +1,3 @@
+# ver=246 name=D async=true start=210856787 end=210856924 len=137 sha=56d29ea0a9cdccc3 needle="exited with code ${"
+
+async function D(){let{stdout:t,code:r}=await L("pbpaste",[],{useCwd:!1});if(r!==0)throw Error(`pbpaste exited with code ${r}`);return t}

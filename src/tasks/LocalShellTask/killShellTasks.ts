@@ -7,7 +7,14 @@ import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
 import { dequeueAllMatching } from '../../utils/messageQueueManager.js'
-import { evictTaskOutput } from '../../utils/task/diskOutput.js'
+import {
+  appendTaskOutput,
+  evictTaskOutput,
+} from '../../utils/task/diskOutput.js'
+import {
+  formatLocalShellExitFooter,
+  shouldAppendLocalShellExitFooter,
+} from './exitFooter.js'
 import {
   bashKeepaliveReason,
   monitorKeepaliveReason,
@@ -24,6 +31,7 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
   // (process already dead / kill races). removeKeepalive is idempotent.
   let ownerAgentId: string | undefined
   let kind: 'bash' | 'monitor' | undefined
+  let writeKilledFooter = false
   updateTaskState(taskId, setAppState, task => {
     if ((task as any).status !== 'running' || !isLocalShellTask(task)) {
       return task
@@ -44,6 +52,8 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
 
     ownerAgentId = task.agentId
     kind = task.kind
+    // Official eA: if(n&&!r){if(!n.isAdopted)RW(`[killed]`)}
+    writeKilledFooter = !task.notified && shouldAppendLocalShellExitFooter(task)
 
     return {
       ...task,
@@ -55,6 +65,9 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       endTime: Date.now(),
     }
   })
+  if (writeKilledFooter) {
+    appendTaskOutput(taskId, formatLocalShellExitFooter('killed', undefined))
+  }
   if (ownerAgentId) {
     const reason =
       kind === 'monitor'

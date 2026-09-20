@@ -1,0 +1,3 @@
+# ver=247 name=De async=false start=223105697 end=223105858 len=161 sha=c2eff009af858f6d needle="background sessions"
+
+function De(){let{tasks:e}=S();if(e===0)return;return`Detached \u2014 ${e} ${k(e,"task")} still running. Run \`claude agents\` to see your background sessions.`}

@@ -1,0 +1,28 @@
+# ho-yo pass2 $t/vo/fo/caps
+VO needle count=1 207876619
+VO @207876619 vo='Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names.',Io,Ur,Bt="[A-Za-z0-9][-A-Za-z0-9._]*",rs,Ar,Er,is,To,Co,zo,Or,Do,Ro,Kr,Uo,Hr;var Ao=U(()=>{At();pn();Ot();mn();cn();dn();Rt();hn();gn();qt=/[^\x20-\x7E]| {4,}/;kn=new Set(["cla
+FO count=1 207910685
+FO @207910685 fo=new Set(["npm","url","github","git-subdir","archive","command","unsupported"]);_o=/^[A-Za-z0-9_$.-]{1,40}$/;xo=/^[A-Za-z0-9][-A-Za-z0-9._]*$/;Io=p(()=>d({$schema:i().optional().
+SOKO count=1 207876597
+SOKO @207876597 ,fo,_o,So=3,ko=160,xo,vo='Bare source names resolve under metadata.pluginRoot, w
+XO count=1 207910796
+_O count=1 207910767
+bun before AQc export 207787524,207795831,207812826,207819479,207822109,207823031,207823994,207825711
+D717 "function d(e,t)" 
+D717 "function d(e,t){" 
+D717 "function d(t,e)" 
+D717 "d=(e,t)=>" 
+D717 "function d(e){" 
+TRUNC "function d(e,t){return typeof e===\"string\"" count=0 
+TRUNC "function d(e,t){if(typeof e!==\"string\")" count=0 
+TRUNC "function d(e,t){return e.length" count=0 
+TRUNC "function d(e,t){if(e.length" count=0 
+TRUNC ".slice(0,t)+\"...\"" count=0 
+TRUNC ".slice(0,t)+\"…\"" count=0 
+TRUNC "slice(0,t)+\"" count=0 
+EXPORT has bo as? false
+EXPORT snippet export{oe as ePc,Eo as fPc,Oo as gPc,je as hPc,ge as iPc,No as jPc,me as kPc,Be as lPc,We as mPc,X as nPc,ct as oPc,pt as pPc,dt as qPc,gt as rPc,Pe as sPc,ht as tPc,bt as uPc,xt as vPc,vt as wPc,tn as xPc,sn as yPc,nn as zPc,on as APc,wt as BPc,rn as CPc,Tt as DPc,ue as EPc,dr as FPc,Ot as GPc,Ee as HPc,Sn as IPc,kn as JPc,Yt as KPc,Ke as LPc,Pr as MPc,Pn as NPc,Mr as OPc,Tn as PPc,Ir as QPc,On as RPc,jt as SPc,qn as TPc,Vn as UPc,Qn as VPc,Tr as WPc,Xn as XPc,Cr as YPc,Jn as ZPc,no as _Pc,zr as $Pc,oo as aQc,Re as bQc,io as cQc,ao as dQc,Dr as eQc,Rr as fQc,co as gQc,po as hQc,go as iQc,yo as jQc,Ft as kQc,ns as lQc,os as mQc,wo as nQc,Po as oQc,Mo as pQc,Io as qQc,Ur as rQc,rs as sQc,Ar as tQc,Er as uQc,Or as vQc,Kr as wQc,Hr as xQc,Ao as yQc}
+OS BODY UNIQUE count=1 207875596
+YO BODY UNIQUE count=1 207874765
+BO BODY UNIQUE count=1 207874921
+NS BODY UNIQUE count=1 207875268

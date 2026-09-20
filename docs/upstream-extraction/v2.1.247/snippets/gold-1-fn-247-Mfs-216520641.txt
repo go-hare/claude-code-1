@@ -1,0 +1,3 @@
+# ver=247 name=Mfs async=true start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d needle="feedbackDrafts"
+
+async function Mfs(e){let t=[],n=await ph((r)=>e.listEntries({namespace:"feedbackDraft"},{cursor:r,skipKeyStats:!0}),(r)=>{for(let o of r)if(o.kind==="key"&&o.key.namespace==="feedbackDraft")t.push(o.key)});if(n.status==="done")return t;if(n.status==="capped")return _("feedbackDrafts: draft listing kept offering cursors past the page cap; treating it as failed",{level:"error"}),null;if(hy(iLt(n.error)))return _(`feedbackDrafts: draft listing failed: ${BKe(n.error)}`,{level:"error"}),null;throw new ye(`feedback draft listing failed: ${BKe(n.error)}`,"feedback draft listing failed")}

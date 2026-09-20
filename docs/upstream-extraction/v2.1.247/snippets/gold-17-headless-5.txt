@@ -1,0 +1,51 @@
+# offset=247795292 idx=5/6 needle="headless browser"
+
+ - "here's the
+architecture, plan the build" - the plan itself belongs in chat (or the
+file the user asked for), like any other planning turn: reconstruct the
+design from the elements and the picture, then write the plan from it.
+Still answer on the board too, in the same fast-then-fully rhythm: an
+acknowledgement first, then your open questions and any corrections
+drawn beside the parts they concern, so the user sees where your plan
+touches their sketch.
+
+Both drawing passes are the same mechanics:
+
+- Right before writing, read the artifact again and use that freshest
+  page as `--base` - it may carry a newer Publish than the one that woke
+  you.
+- `node board.mjs --base <saved.html> --template template.html --out <whiteboard.html> --add <additions.json> [--retire cl_a,cl_b] [--note "short note"]`
+  The helper keeps every element already on the board, appends yours
+  (nudged to the nearest clear spot, dragging your same-batch arrow
+  endpoints along; it refuses if there is none - aim elsewhere and
+  rerun; the summary's `landed:` lines say where everything actually
+  went, so read them instead of trusting your requested coordinates),
+  refuses to retire anything that is not your own `cl_` id, retires a
+  labeled box's riding label with it (the summary says so), drops the publisher-claimed snapshot picture (the page
+  renders a fresh one on the user's next publish, so a forged picture
+  never persists under your name), bumps the board version and marks
+  the publish as yours, and writes the skill template with the board
+  data filled in - never the fetched page's code.
+- Publish `whiteboard.html` with the Artifact tool from this session:
+  same path, same favicon, `capabilities` OMITTED (omission keeps the
+  stored set; `{}` would cut the board off), never `force`. A conflict
+  rejection means someone published while you drew: the rejection hands
+  you the newer page - save it, rerun the helper with it as `--base`,
+  publish again. Merge, never overwrite.
+- Where a headless browser is at hand you may open your `whiteboard.html`
+  to eyeball placement before publishing; it is never required, and
+  not worth the latency on the acknowledgement pass.
+- In chat, one line at most ("answered on the board - added a queue
+  between the API and the workers"). If the user asked to keep it all
+  on the board, say nothing in chat unless something failed.
+
+## Drawing
+
+Additions are a JSON array; every element needs a fresh `id` starting
+with `cl_` (at most 40 characters, unique on the board, stable for as
+long as the mark stands):
+
+- box: `{"id","type":"rect"|"ellipse"|"diamond"|"cylinder"|"sticky","x","y","w","h","label"?}` -
+  a `label` becomes centred text inside the box; `cylinder` is a
+  database, `diamond` a decision, `sticky` a paper note (solid yellow
+  un

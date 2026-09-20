@@ -1,0 +1,61 @@
+# gold-1-sameness SendFeedback 247 vs 246
+
+## exact string presence
+same 246=2 247=2 "Queue a draft feedback report about Claude Code (the product OR the model's own behavior in this session) for the user 
+same 246=2 247=2 "Use this tool to draft feedback about Claude Code when you hit a high-signal moment. That includes both PRODUCT issues 
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending."
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review."
+same 246=2 247=2 "Model-drafted feedback (the SendFeedback tool). \"notify\" (default) shows a one-line notice when a draft is queued; \"
+same 246=1 247=1 "title:e().describe(\"Sanitized one-line summary from the SendFeedback tool call.\")"
+same 246=2 247=2 "Emitted by the SendFeedback tool after it writes a local draft"
+DIFF 246=0 247=1 "var xgr=\"SendFeedback\""
+DIFF 246=1 247=0 "var Dpr=\"SendFeedback\""
+same 246=3 247=3 "CLAUDE_CODE_SEND_FEEDBACK"
+same 246=5 247=5 "tengu_juniper_relay"
+same 246=5 247=5 "feedback_draft_queued"
+same 246=8 247=8 "Claude-drafted feedback"
+
+toolAssign 246=215149777 247=216531362
+tool-module raw sha 246=9f0971db29f7681e 247=582468b8d1c91c1f equal=false
+tool-module norm sha 246=69bf62c2aa5c725e 247=69bf62c2aa5c725e equal=true
+tool-module raw len 246=3834 247=3834
+
+## CLAUDE_CODE_SEND_FEEDBACK windows
+246 hits=3 247 hits=3
+  246#0 @199061432 sha=e9b0122feca72272 norm=5048ee8533bc3fff
+  246#1 @205249286 sha=6ca645de2a10adf3 norm=515fc565ac2957fd
+  246#2 @215147917 sha=bd74ddcb285adcfe norm=d652875684027d32
+  247#0 @200612308 sha=e9b0122feca72272 norm=5048ee8533bc3fff
+  247#1 @207185924 sha=66aa9271d6306b22 norm=515fc565ac2957fd
+  247#2 @216529502 sha=983354007165f55b norm=d652875684027d32
+
+## feedbackDrafts schema field
+246 @206426815 sha=c482524d1c857487
+247 @208027739 sha=51c0295ecc8fc2a5 equal=false
+
+## normalized pair compare
+NORM-DIFF schema-Ls-Ds rawEq=false rawLen=50671/51239 normLen=45432/45952 normSha=f594d0b943804304/d04b340ee86b3cbf
+  firstDiff=264 246[+0] 247[+520]
+NORM-DIFF config-pa rawEq=false rawLen=20833/20833 normLen=16179/16179 normSha=d082427422d9315b/0a2b44f889654aad
+  firstDiff=3679 246[+0] 247[+0]
+NORM-DIFF mu-uu rawEq=false rawLen=21311/21315 normLen=16937/16943 normSha=a7632703de6fc41e/f41642593c3ead11
+  firstDiff=307 246[+0] 247[+6]
+NORM-DIFF list-Mfs rawEq=false rawLen=589/589 normLen=546/546 normSha=b09a07ee47ededec/c75d61f9f309f921
+  firstDiff=416 246[+0] 247[+0]
+NORM-DIFF write-bgr rawEq=false rawLen=1080/1080 normLen=946/946 normSha=b2f9ad20247ad44a/552f4ad06d21a24c
+  firstDiff=379 246[+0] 247[+0]
+NORM-SAME get-Ffs rawEq=false rawLen=58/58 normLen=56/56 normSha=c9652d87658d70aa/c9652d87658d70aa
+NORM-SAME set-Ewc rawEq=false rawLen=219/219 normLen=196/196 normSha=468d36bc50398aa7/468d36bc50398aa7
+NORM-SAME prompt-vqe rawEq=false rawLen=72/72 normLen=37/37 normSha=f125222b40415ffa/f125222b40415ffa
+NORM-SAME decline-ore rawEq=false rawLen=118/118 normLen=56/56 normSha=d9ac6ba0062e7d10/d9ac6ba0062e7d10
+
+## tool object after assign
+247 markers {"name:xgr":5638,"name:Dpr":-1,"call:async":-1,"async call(":6115,"async(e,t)":-1,"isEnabled:":-1,"isEnabled()":6020}
+246 markers {"name:xgr":-1,"name:Dpr":5638,"call:async":-1,"async call(":6115,"async(e,t)":-1,"isEnabled:":-1,"isEnabled()":6020}
+
+## changelog-index strings unique to 247?
+same 246=10 247=10 "SendFeedback tool"
+same 246=0 247=0 "feedbackDrafts setting"
+same 246=0 247=0 "turn off with the feedbackDrafts"
+same 246=0 247=0 "Claude can draft a feedback report"
+same 246=0 247=0 "review and send from /feedback"

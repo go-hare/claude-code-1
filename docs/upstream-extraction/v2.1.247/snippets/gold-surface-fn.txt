@@ -1,0 +1,70 @@
+# official 2.1.247 #32 — locked request builder (JS, not just protocol docs)
+# offsets: jr+Qe @228775083 / 228782138; be() @228774969; refresh jK @208822173
+# UA helper s() @206255644 → `claude-code/${VERSION}`
+
+## Official constants (same module as device grant)
+
+var Xr="urn:ietf:params:oauth:grant-type:device_code",jr="claude_code"
+
+## Official Qe metadata GET (ie)
+
+let f=await ve.get(`${y}/.well-known/oauth-authorization-server`,{
+  headers:{"User-Agent":be()},
+  timeout:1e4
+});
+
+## Official Qe/J device-authorization POST
+
+async function J(S,O){
+  let{data:f}=await ve.post(
+    O.deviceAuthorizationEndpoint,
+    new URLSearchParams({surface:jr}).toString(),
+    {
+      headers:{
+        "Content-Type":"application/x-www-form-urlencoded",
+        "User-Agent":be()
+      },
+      timeout:1e4
+    }
+  );
+}
+
+## Official Qe/K token poll POST
+
+let{data:z}=await ve.post(
+  O,
+  new URLSearchParams({grant_type:Xr,device_code:y}).toString(),
+  {
+    headers:{
+      "Content-Type":"application/x-www-form-urlencoded",
+      "User-Agent":be()
+    },
+    timeout:1e4
+  }
+);
+
+## Official jK refresh POST
+
+await Tc.post(
+  e.tokenEndpoint??`${e.url}/oauth/token`,
+  new URLSearchParams({grant_type:"refresh_token",refresh_token:t}).toString(),
+  {
+    headers:{
+      "Content-Type":"application/x-www-form-urlencoded",
+      "User-Agent":pr()
+    },
+    timeout:1e4
+  }
+);
+
+## Official be()/pr() — getClaudeCodeUserAgent
+
+function s(){return`claude-code/${MACRO.VERSION}`}
+
+## Protocol (same needle as gold-surface-claude-code.txt)
+
+The request body is form-encoded and may carry one extension parameter next
+to RFC 8628 §3.1's: `surface`, a stable identifier of the client application
+that is signing in. Claude Code sends `surface=claude_code`.
+Claude Code also sends `User-Agent: claude-code/<version>` on
+the metadata, device, token and refresh requests.

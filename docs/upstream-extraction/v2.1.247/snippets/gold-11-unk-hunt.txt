@@ -1,0 +1,56 @@
+# gold-11-unk-hunt settings.json near lstat/unlink/symlink in JS
+
+246 pair "settings.json"~"isSymbolicLink" r=2500 near=16/328
+  #0 a=195772041 b=195772504 dist=463 kind=tbl jsScore=4
+  #1 a=206513945 b=206514584 dist=639 kind=js jsScore=45
+    fn function To() start=206513909 end=206513961 len=52 sha=0f01ce2065c545c2
+  #2 a=206514348 b=206514584 dist=236 kind=js jsScore=35
+    fn function ye() start=206514275 end=206514937 len=662 sha=076723daa8855976
+  #3 a=206547070 b=206547187 dist=117 kind=js jsScore=34
+    fn async function xt() start=206546973 end=206547394 len=421 sha=23cbe4b920d805d8
+247 pair "settings.json"~"isSymbolicLink" r=2500 near=17/337
+  #0 a=197281221 b=197281684 dist=463 kind=tbl jsScore=4
+  #1 a=208115872 b=208116511 dist=639 kind=js jsScore=45
+    fn function To() start=208115836 end=208115888 len=52 sha=0f01ce2065c545c2
+  #2 a=208116275 b=208116511 dist=236 kind=js jsScore=35
+    fn function ye() start=208116202 end=208116864 len=662 sha=3470b93870fad58d
+  #3 a=208147619 b=208147736 dist=117 kind=js jsScore=34
+    fn async function xt() start=208147522 end=208147943 len=421 sha=23cbe4b920d805d8
+246 pair "settings.json"~"lstatSync" r=2500 near=2/328
+  #0 a=206517451 b=206518410 dist=959 kind=js jsScore=28
+    fn function Vo() start=206517386 end=206517481 len=95 sha=95b56746ddc5c865
+  #1 a=206520292 b=206518410 dist=1882 kind=js jsScore=27
+    fn function Dn() start=206520225 end=206520371 len=146 sha=28fd8178c2d2e276
+247 pair "settings.json"~"lstatSync" r=2500 near=3/337
+  #0 a=208119378 b=208120337 dist=959 kind=js jsScore=28
+    fn function Vo() start=208119313 end=208119408 len=95 sha=95b56746ddc5c865
+  #1 a=208122219 b=208120337 dist=1882 kind=js jsScore=27
+    fn function Dn() start=208122152 end=208122298 len=146 sha=28fd8178c2d2e276
+  #2 a=210539568 b=210541284 dist=1716 kind=js jsScore=25
+    fn function Ri() start=210539392 end=210539768 len=376 sha=668a8fcd3ce1ec3c
+246 pair "settings.json"~"unlinkSync" r=2500 near=0/328
+247 pair "settings.json"~"unlinkSync" r=2500 near=0/337
+246 pair "settings.json"~"cleanupAfterCommand" r=4000 near=0/328
+247 pair "settings.json"~"cleanupAfterCommand" r=4000 near=0/337
+246 pair "settings.json"~"lstat(" r=2500 near=2/328
+  #0 a=213594812 b=213592463 dist=2349 kind=js jsScore=18
+    fn function Qzn() start=213594667 end=213594996 len=329 sha=7db91ceac3c610de
+  #1 a=224317989 b=224316347 dist=1642 kind=js jsScore=33
+    fn async function Ts() start=224317939 end=224319269 len=1330 sha=d7f0c43419447fc7
+247 pair "settings.json"~"lstat(" r=2500 near=2/337
+  #0 a=214972614 b=214970265 dist=2349 kind=js jsScore=18
+    fn function K1n() start=214972469 end=214972798 len=329 sha=56030169e0fdf5ac
+  #1 a=225187478 b=225185836 dist=1642 kind=js jsScore=33
+    fn async function Ts() start=225187428 end=225188758 len=1330 sha=dddf16dc23064d63
+246 pair "settings.json"~"unlink(" r=2500 near=0/328
+247 pair "settings.json"~"unlink(" r=2500 near=0/337
+246 pair ".claude/settings.json"~"isSymbolicLink" r=2500 near=1/138
+  #0 a=195772033 b=195772504 dist=471 kind=tbl jsScore=3
+247 pair ".claude/settings.json"~"isSymbolicLink" r=2500 near=1/144
+  #0 a=197281213 b=197281684 dist=471 kind=tbl jsScore=3
+246 pair ".claude/settings.json"~"unlinkSync" r=2500 near=0/138
+247 pair ".claude/settings.json"~"unlinkSync" r=2500 near=0/144
+246 pair "~/.claude/settings.json"~"isSymbolicLink" r=2500 near=1/51
+  #0 a=195772031 b=195772504 dist=473 kind=tbl jsScore=3
+247 pair "~/.claude/settings.json"~"isSymbolicLink" r=2500 near=1/53
+  #0 a=197281211 b=197281684 dist=473 kind=tbl jsScore=3

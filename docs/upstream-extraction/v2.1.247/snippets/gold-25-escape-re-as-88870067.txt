@@ -1,0 +1,9 @@
+# @88870067
+
+      last line number of match   %[n]j       nth capture as JSON
+ %L          number of lines of a match  %[n]q       nth capture quoted
+ %m          number of matches           %[n]v       nth capture as CSV
+ %M          number of matching lines    %[n]x       nth capture as XML
+ %n          line number of a match      %[n]y       nth capture as hex
+ %N %[...]N  ... + line number, if -n    %[name]#    named group capture
+ %o          matching p

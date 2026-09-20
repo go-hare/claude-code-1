@@ -1,0 +1,38 @@
+# ver=247 offset=67056276 hit=5/292 js=false needle="isSymbolicLink()"
+
+ectory, pattern))
+      return;
+    let nextRealpaths = this.#nextRealpathsSync(fullpath, isDirectory, pattern), children, firstPattern = pattern.indexes.size === 1 && pattern.at(pattern.indexes.values().next().value);
+    if (typeof firstPattern === "string") {
+      let stat2 = this.#cache.statSync(join(fullpath, firstPattern));
+      if (stat2)
+        setDirentName(stat2, firstPattern), children = [stat2];
+      else
+        return;
+    } else
+      children = this.#cache.readdirSync(fullpath);
+    for (let i = 0;i < children.length; i++) {
+      let entry = children[i], entryPath = join(path, entry.name), entryFullpath = join(fullpath, entry.name);
+      this.#cache.addToStatCache(entryFullpath, entry);
+      let entryIsDirectory = entry.isDirectory() || this.#followSymlinks && entry.isSymbolicLink() && !!this.#cache.followStatSync(entryFullpath)?.isDirectory(), subPatterns = /* @__PURE__ */ new Set, nSymlinks = /* @__PURE__ */ new Set;
+      for (let index of pattern.indexes) {
+        if (this.#cache.seen(entryPath, pattern, index) || this.#cache.seen(entryPath, pattern, index + 1))
+          return;
+        let current = pattern.at(index), nextIndex = index + 1, next = pattern.at(nextIndex), fromSymlink = !this.#followSymlinks && pattern.symlinks.has(index);
+        if (current === lazyMinimatch().GLOBSTAR) {
+          let isDot = entry.name[0] === ".", nextMatches = pattern.test(nextIndex, entry.name), nextNonGlobIndex = nextIndex;
+          while (pattern.at(nextNonGlobIndex) === lazyMinimatch().GLOBSTAR)
+            nextNonGlobIndex++;
+          let matchesDot = isDot && pattern.test(nextNonGlobIndex, entry.name);
+          if (isDot && !matchesDot || this.#exclude && this.#exclude(this.#withFileTypes ? entry : entry.name))
+            continue;
+          if (!fromSymlink && entryIsDirectory)
+            subPatterns.add(index);
+          else if (!fromSymlink && index === last)
+            this.#results.add(entryPath);
+          if (nextMatches && nextIndex === last && !isLast)
+            this.#results.add(entryPath);
+          else if (nextMatches && entryIsDirectory)
+            subPatterns.add(index + 2);
+          if ((nextMatches || pattern.at(0) === ".") && (entryIsDirectory || entry.isSymbolicLink()) && !fromSymlink)
+            subPatterns.

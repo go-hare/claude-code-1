@@ -43,11 +43,11 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.49**; trust `package.json` / npm) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.49** = 243+246; 247 is landed, not bumped) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
 #### densable 2.1.246 alignment (2.7.49)
 
-Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** landed the 246 CLI product surface; **2.7.49** rebuilds all platform binaries. No official 2.1.244 bullets — **do not fold 245 glibc / 247+**.
+Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** landed the 246 CLI product surface; **2.7.49** rebuilds all platform binaries. No official 2.1.244 bullets — **do not fold 245 glibc**. 247 is closed but not in **2.7.49**; **do not fold 248+**.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -58,6 +58,17 @@ Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (
 | **#44 / #45 / #54 / #55** | withhold misrouted cred; `decodeJwtExpiry`; abort still yields `max_turns_reached`; GJn already yields `server_error` | no JWT `jp` / second yield invent |
 | **storageV5** | empty `qb` + pin `UF(e=qb)` | CLI does not auto-call `qF` |
 | **N/A 2** | #39 #59 official installer | same-missing = aligned; do not invent |
+
+#### densable 2.1.247 alignment (landed · not in 2.7.49)
+
+Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.246**. **Do not fold 248+**; do not invent cloud hosts / hook MB / `/share` alias.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **#1 SendFeedback** | leftover `/feedback`/`/bug` split + `jr`/`Dfs`/`Ri`/`Nfs` + `Lfs` `DE`=`validateStorageKey` | `ye`/`Ht`/`Jt` no body = aligned; do not steal official `share` alias |
+| **#8 / #19 / #25** | `lre` leftover; `Yjo` aside; `n0c`/`k` print | do not invent MB / stderr caps |
+| **#23 / #24** | N/A cloud host | same-missing = aligned |
+| **rest #2–#22 #26–#33** | HAVE (locked SEA bodies) | changelog oversell is not a contract |
 
 #### densable 2.1.243 alignment
 
@@ -285,7 +296,7 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 
 | Version | Highlights |
 | ------- | ---------- |
-| **2.7.49** | All-platform binary rebuild (8 `@go-hare/claude-code-*` targets). Product surface is still the **2.7.48** 243+246 landing. No 244/245/247+. |
+| **2.7.49** | All-platform binary rebuild (8 `@go-hare/claude-code-*` targets). Product surface is still the **2.7.48** 243+246 landing. No 244/245. 247 is landed and not in this release; no 248+. |
 | **2.7.48** | **densable 2.1.246** (on landed 243): HAVE **59** / N/A **2**. #1 wildcard allow warn, #4/#6 `rg` freeze abort, #16 keep user worktrees, #22 skill counts, #42 dangling `&&`/`\|\|`, #44 withhold, #52 `/cd` apply-now, #54 abort+maxTurns, storageV5 empty `qb` pin. N/A: official installer. No 244/245/247+; no `blu`←`Slu` / auto `qF` / JWT-org invent. 243 HAVE 49 ships in the same version. |
 | **2.7.47** | **densable 2.1.239 leftover closeout** (on 2.7.46 / 236–238): `@synced` disk hydrate (`CLAUDE_CODE_SYNC_PLUGINS` default OFF); artifact auto-react (watch/reply/relay + parse5); NMs permission Host split; plan resume **continue hard gate** (resume runs `y_u`; print `--continue` does not); CRI `createCriPolicyPrecheck` + NO_PROXY. **236** drops invent `goalIdleArmGeneration`. **234 leftover** anthropic profile / OIDC / oRr “Run /login”. Local: Win32 title 40ms unstick; DeepSeek/Grok/Kimi context windows + China vision-exp. No cowork / CCR E2E / VSCode banner / 240·241 invent. |
 | **2.7.46** | **densable 2.1.236–2.1.238**: 236 HAVE **32** / N/A 1 (`ANTHROPIC_DEFAULT_MODEL`, `notify_when_idle`, sandbox deny, fullscreen fallback, goal check-in, `/model` `LFh`/`sgM`); 237 HAVE 3 (`canMarkApiSystem`, Concise, `r7` truncate); 238 HAVE **39** (`keybindingFlavor`, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation pin, RC Stop/sign-out/403, update check 10s). Restores **234 leftovers** still in official 238 SEA (stale Enter, SendMessage `to`/truncated, `GGc`, session persist, markdown `d0l`). Ship-time README said PARTIAL; local contracts later closed. No leftover #3 / G0S / chrome UI invent. |

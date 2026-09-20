@@ -1,0 +1,3 @@
+# 246 @217166500 sha=5f5bd2d31197b343
+
+>!1,isHidden:!0,name:"stub"}});var d0s,k1t;var hqr=w(()=>{d0s={type:"local-jsx",name:"feedback",description:"Send feedback to Anthropic or report a bug",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},k1t=d0s});var p0s,v1t;var yqr=w(()=>{p0s={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentH

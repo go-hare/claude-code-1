@@ -1,0 +1,12 @@
+# offset=211619229
+
+aude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{FBd as r}from"B:/~BUN/root/_850.js";function n(e){return e!==void 0&&t.has(e)}function R(e){return e.code==="Failed"&&n(e.telemetryCode)}var o,t;var E=r(()=>{o=["ELOOP","ENXIO","EISDIR"],t=new Set(o)});
+export{t as Xib,n as Yib,R as Zib,E as _ib};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.

@@ -1,0 +1,21 @@
+# densable 2.1.247 tss + l2e (async agent aK)
+
+function tss(e,t){
+  let n=is(e.message.content,"\n"),
+  r=e.apiErrorStatus!==void 0||!!e.requestId,
+  o=[e.error&&`error type ${e.error}`,e.apiErrorStatus!==void 0&&`HTTP ${e.apiErrorStatus}`,e.requestId&&`request id ${e.requestId}`,r&&`model sent to the API: ${t}`].filter(s=>typeof s==="string");
+  return o.length>0?`${n} (${o.join(", ")})`:n
+}
+
+l2e=class extends ye {
+  constructor(e,t){
+    super(`Agent terminated early due to an API error: ${e}`,"Agent terminated early due to an API error");
+    this.errorKind=t;
+    this.name="AgentApiErrorTerminationError"
+  }
+}
+
+if(Se?.isApiErrorMessage&&!lK(Se)){
+  if(Se.error==="model_not_found") D("tengu_api_subagent_model_not_found",{...has_fallback_chain:!Vx()&&[s.options.fallbackModel].flat().some(Boolean)});
+  throw new l2e(tss(Se,Fe),Se.error)
+}

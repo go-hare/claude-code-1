@@ -1,0 +1,3 @@
+# 246 function he start=231792274 end=231792313 len=39 sha=6e1be5baf7b61a03 dist=41 hits=83
+
+function he(e){return mn(Ge(e,null,2))}

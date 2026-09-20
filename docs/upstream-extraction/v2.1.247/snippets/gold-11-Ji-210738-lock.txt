@@ -1,0 +1,23 @@
+# 210738 1-arg Ji — NOT WZ Ji
+
+function Ji(e) @210738867
+  W()==="windows"||"wsl"
+  replaceAll("\\","/") split "/"
+  some(seg includes ":" || /[. ]$/)
+
+Only callee in this module:
+  le(e){return ee(Vi(e))&&!Ji(e)}
+  nn() diff-tree -r -z --no-renames → why: forged|alias|added|changed
+  sibling be(): Ki.test(seg after strip ADS / trailing . space) → alias
+
+Module @bun @210705712 (fs/promises + crypto + path.join)
+  also: info/attributes, check-attr, hash-object, update-index
+
+WZ / sandbox Ji is 2-arg ko:
+  210418629 Ji(s,e)   WZ
+  210418869 Ji(d,e)   WZ
+  210376923 Ji(n,jn()) Xs
+  210388436 Ji(_,jn()) hop-split
+
+Whole classifier: gold-forged-alias-lock.txt (CCR eYn/Wi/nn, 246 leftover).
+Do not port 210738 Ji into detectWorktreeMainRepoPath. Do not invent eYn.

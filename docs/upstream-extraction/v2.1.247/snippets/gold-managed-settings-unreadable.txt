@@ -1,0 +1,57 @@
+# needle="managed settings"
+# 247=196984842,196987930,197156152,197171632,197274011,197276036,197419756,197499781
+# 246=195477410,195480498,195648428,195663352,195764811,195766836,195911660,195987773
+
+===== 247 offset=196984842 =====
+..providerCache..._.preconnectFired...?.ANTHROPIC_UNIX_SOCKET...g..CLAUDE_CODE_CLIENT_CERT...='.CLAUDE_CODE_CLIENT_KEY...BASE_API_URLH...er..[3P telemetry] Waiting for remote managed settings before telemetry init...o..Boolean...qSG.CLAUDE_CODE_ENABLE_TELEMETRY...T...OTEL_LOGS_EXPORTER...!...policySettings...info...	...init_started...A..init_function_start."...D5.CLAUDE_CONFIG_DIR no longer names ..X...h., where the v5 storage backend was built at start-up; init() loads its config without it...x<z.init_configs_enabled...:.J.init_remote_settings_p
+
+===== 247 offset=196987930 =====
+lizeTelemetry...N...meter...metricsExporterKinds	...omitUnits...
+...W.S.start_type...P0.none...l.initialize1PEventLogging...|.9.onGrowthBookRefresh.E...[3P telemetry] Remote managed settings loaded, initializing telemetry...$%K.B:/~BUN/root/chunk-te0a81gd.js..Y...g.$.Cannot destructure property 'captureAdmin3PSteeringSnapshot' from null or undefined value...+N..captureAdmin3PSteeringSnapshot...xP.changed....L..createCounter...)...R...reinitialize1PEventLoggingIfConfigChanged...b.B:/~BUN/root/chunk-szxfhq6a.js..N...Cannot destructure property 'c
+
+===== 247 offset=197156152 =====
+ automatically..\...;..The sender did not attest its permission mode, and this session bypasses permission prompts.-...gd.Your "crossSessionInbound" setting is "hold"...I...>.Your organization's managed settings set "crossSessionInbound" to "hold"...u...[..This repository's settings set "crossSessionInbound" to "hold" (your own "accept" cannot override a repo tightening)..."M..This session is not prompting for permissions...7...This session's permission mode could not be determined...\.no-mode-asserted...#Z`.repo-setting...managed-setting...explicit-setting...
+
+===== 247 offset=197171632 =====
+ts...n...mode-changed%...R..It is being reviewed before delivery...Z...%...Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages...Bhy.Your organization's managed settings set "crossSessionInbound" to "hold" (your own "accept" cannot override managed policy); ask your admin to change it...H .This repository's settings set "crossSessionInbound" to "hold" (a repo may only tighten, so your own "accept" cannot override it); remove the repo setting or exclude it with --setting-sources.;...%]r.It will be delivered once the session finishes starting 
+
+===== 247 offset=197274011 =====
+ 'teamName' from null or undefined value.-...(c.[TeammateInit] Team file not found for team: ...8..[TeammateInit] Skipping q...H. team-wide allowed path(s): permission rules are restricted to managed settings (allowManagedPermissionRulesOnly)...[TeammateInit] Found ...T. team-wide allowed path(s)..)...iR..[TeammateInit] Applying team permission: ...^... allowed in ... d.. (rule: N...H.[TeammateInit] This agent is the team leader - skipping idle notification hook..2...j..[TeammateInit] Registering Stop hook for teammate ... to notify leader ...q .Stop/..
+
+===== 247 offset=197276036 =====
+...(...terminal_reason...V..compact_result.....compactResult......B.*.compact_error...compactError...allow network: ...:.worker-sandbox...V..MCP input: ... .(.review: managed settings change...[b..preserveMode...=..bridge_repl..._B$.multi_session_crash...6.concurrent_bridge_sessions..K...E..Cannot destructure property 'archiveAbandoned' from null or undefined value...archiveAbandoned
+...Hw..unregister...s..targetExists...|?..authChangeGeneration...?.v.replBridgeInitialName...#v.tengu_bridge_repl_evaluated....H.would_auto_on...
+
+===== 247 offset=197419756 =====
+!+..--author=...>...Failed to collect frequently-modified files from git history: ..1...7.Skipping plugin suggestion tips for marketplace "...p...ZI..": its registered source is not declared in managed settings (extraKnownMarketplaces or strictKnownMarketplaces)	...I...relevance...k.topic...hasOpenedAgentsView...\.#.hasUsedAgentsFleet...Q.windsurf?...T...Working on UI? See a live preview in Claude Code Desktop . run .H...Working on UI? Claude Code Desktop has live preview and inline images . ...p...clau.de/desktop.	...[^a-z0-9]...
+...codereview...!.
+
+===== 247 offset=197499781 =====
+browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically...]...Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again...Browser tools were not enabled: the session switched to a mode that auto-allows tool calls withou
+
+===== 246 offset=195477410 =====
+LE_CLOUD...W...CLAUDE_CODE_USE_MANTLE...?.ANTHROPIC_UNIX_SOCKET...g..CLAUDE_CODE_CLIENT_CERT...='.CLAUDE_CODE_CLIENT_KEY...BASE_API_URLH...er..[3P telemetry] Waiting for remote managed settings before telemetry init...o..Boolean...qSG.CLAUDE_CODE_ENABLE_TELEMETRY...T...OTEL_LOGS_EXPORTER...!...policySettings...info...	...init_started...A..init_function_start."...D5.CLAUDE_CONFIG_DIR no longer names ..X...h., where the v5 storage backend was built at start-up; init() loads its config without it...x<z.init_configs_enabled...:.J.init_remote_settings_p
+
+===== 246 offset=195480498 =====
+lizeTelemetry...N...meter...metricsExporterKinds	...omitUnits...
+...W.S.start_type...P0.none...l.initialize1PEventLogging...|.9.onGrowthBookRefresh.E...[3P telemetry] Remote managed settings loaded, initializing telemetry...B:/~BUN/root/chunk-nzwnezeg.js..Y...g.$.Cannot destructure property 'captureAdmin3PSteeringSnapshot' from null or undefined value...+N..captureAdmin3PSteeringSnapshot...xP.changed....L..createCounter...)...R...reinitialize1PEventLoggingIfConfigChanged...J&.B:/~BUN/root/chunk-ywtw4vnf.js..N...Cannot destructure property 'c
+
+===== 246 offset=195648428 =====
+ automatically..\...;..The sender did not attest its permission mode, and this session bypasses permission prompts.-...gd.Your "crossSessionInbound" setting is "hold"...I...>.Your organization's managed settings set "crossSessionInbound" to "hold"...u...[..This repository's settings set "crossSessionInbound" to "hold" (your own "accept" cannot override a repo tightening)..."M..This session is not prompting for permissions...7...This session's permission mode could not be determined...explicit-setting...Du..bypass-default...]. .mode-unknown...managed-setting...
+
+===== 246 offset=195663352 =====
+...policy-accepts..%...R..It is being reviewed before delivery...Z...%...Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages...Bhy.Your organization's managed settings set "crossSessionInbound" to "hold" (your own "accept" cannot override managed policy); ask your admin to change it...H .This repository's settings set "crossSessionInbound" to "hold" (a repo may only tighten, so your own "accept" cannot override it); remove the repo setting or exclude it with --setting-sources.;...%]r.It will be delivered once the session finishes starting 
+
+===== 246 offset=195764811 =====
+ 'teamName' from null or undefined value.-...(c.[TeammateInit] Team file not found for team: ...8..[TeammateInit] Skipping q...H. team-wide allowed path(s): permission rules are restricted to managed settings (allowManagedPermissionRulesOnly)...[TeammateInit] Found ...T. team-wide allowed path(s)..)...iR..[TeammateInit] Applying team permission: ...^... allowed in ... d.. (rule: N...H.[TeammateInit] This agent is the team leader - skipping idle notification hook..2...j..[TeammateInit] Registering Stop hook for teammate ... to notify leader ...q .Stop/..
+
+===== 246 offset=195766836 =====
+...(...terminal_reason...V..compact_result.....compactResult......B.*.compact_error...compactError...allow network: ...:.worker-sandbox...V..MCP input: ... .(.review: managed settings change...[b..preserveMode...=..bridge_repl..._B$.multi_session_crash...6.concurrent_bridge_sessions..K...E..Cannot destructure property 'archiveAbandoned' from null or undefined value...archiveAbandoned
+...Hw..unregister...s..targetExists...~..bridgeOrigin...|?..authChangeGeneration...?.v.replBridgeInitialName...#v.tengu_bridge_repl_evaluated....H.
+
+===== 246 offset=195911660 =====
+!+..--author=...>...Failed to collect frequently-modified files from git history: ..1...7.Skipping plugin suggestion tips for marketplace "...p...ZI..": its registered source is not declared in managed settings (extraKnownMarketplaces or strictKnownMarketplaces)	...I...relevance...k.topic...hasOpenedAgentsView...\.#.hasUsedAgentsFleet...Q.windsurf?...T...Working on UI? See a live preview in Claude Code Desktop . run .H...Working on UI? Claude Code Desktop has live preview and inline images . ...p...clau.de/desktop.	...[^a-z0-9]...
+...codereview...!.
+
+===== 246 offset=195987773 =====
+browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically...]...Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again...Browser tools were not enabled: the session switched to a mode that auto-allows tool calls withou

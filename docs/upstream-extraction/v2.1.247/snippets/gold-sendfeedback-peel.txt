@@ -1,0 +1,204 @@
+=== "draft product or model-behavior feedback report queue" count=2 hits=201375584,216537045
+--- @201375584
+^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$...^[A-Za-z0-9-]{1,255}$...5...)B.draft product or model-behavior feedback report queue...;...code intelligence (definitions, references, symbols, hover).`...refresh or re-sync tool lists from connected MCP servers, recover missing device or server tools...ReadMcpResourceDir..._f.list the childre
+
+--- @216537045
+genuinely unclear.")})),qfs=ae(()=>pe({success:Qe(),message:I()})),$gr=Gt({name:xgr,maxResultSizeChars:1000,searchHint:"draft product or model-behavior feedback report queue",async description(){let{description:e}=j_e();return typeof e==="string"&&e!==""?e:Mgr},async prompt(){let{prompt:e}=j_e();return typeof e==="string"&&e!==""?e:Ogr},get inputSchema(){return Wfs()},get outputSchema(){return qfs
+
+=== "SendFeedback is not enabled in this session" count=2 hits=202344428,216537536
+--- @202344428
+dex ...'.read_not_found...m.refused_too_large.../...-byte read cap, so its content is not returned..,...SendFeedback is not enabled in this session. ...tengu_feedback_draft_call_capped&...O.SendFeedback has reached its limit of ...'.. calls per session. Do not call it again this session; drafts already queued are unaffected and the user can review them with /feedback...
+
+--- @216537536
+eckPermissions(e,t){return{behavior:"allow",updatedInput:e}},async call(e,t){if(!aLt())return{data:{success:!1,message:"SendFeedback is not enabled in this session."}};if(!Rgr()){let k=LKe();return D("tengu_feedback_draft_call_capped",{cap:Ha(k)}),{data:{success:!1,message:`SendFeedback has reached its limit of ${k} calls per session. Do not call it again this session; drafts already queued are un
+
+=== "Feedback draft queued locally (max " count=2 hits=202344900,216540543
+--- @202344900
+ails and try once more..+...C...Could not write the feedback draft to disk...j..tengu_feedback_draft_created#...Feedback draft queued locally (max ...#T. kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it...bM..presentation...n.w.request_id_count...;-..evicted_count...
+...draft_type...
+
+--- @216540543
+ed",draft_id:h.draft_id,draft_type:h.type,title:h.title,details_preview:Uee(h.details,200)}),{data:{success:!0,message:`Feedback draft queued locally (max ${FKe} kept). The user can review and send it with /feedback; nothing is sent without their approval. Do not announce this or ask the user about it.`}}},mapToolResultToToolResultBlockParam(e,t){return{type:"tool_result",tool_use_id:t,content:e.m
+
+=== "Claude can draft a feedback report" count=0 hits=
+=== "turn off with the feedbackDrafts" count=0 hits=
+=== "function Wfs(" count=0 hits=
+=== "function Rgr(" count=1 hits=216530262
+--- @216530262
+n.promptedCount>=tgr())return t="silent",r;return r.promptedCount=n.promptedCount+1,t="notice_pending",r.notice=e,r}),t}function Rgr(){let e=!1;return NE.feedbackNotice.setState((t)=>{if(t.toolCallCount>=LKe())return t;return e=!0,{...t,toolCallCount:t.toolCallCount+1}}),e}function Iwc(e){NE.feedbackNotice.setState((t)=>t.notice?.draftId===e?{...t,notice:null}:t)}function Mwc(){NE.feedbackNotice.s
+
+=== "function LKe(" count=1 hits=216519269
+--- @216519269
+("tengu_juniper_relay_config",{})}function egr(e,t,n,r){return typeof e==="number"&&Number.isInteger(e)&&e>=n&&e<=r?e:t}function LKe(){return egr(j_e().maxToolCallsPerSession,gfs,1,yfs)}function tgr(){return egr(j_e().maxDraftPromptsPerSession,hfs,0,_fs)}var gfs=10,hfs=3,yfs=50,_fs=20;var Q$t=w(()=>{nn()});import{randomUUID as bfs}from"crypto";import{basename as eLt,dirname as tLt,join as z_e}from
+
+=== "function _gr(" count=1 hits=216522612
+--- @216522612
+on_id&&o.cwd===t.cwd)return!0}return!1}function Uee(e,t){let n=Array.from(e);return n.length<=t?e:n.slice(0,t).join("")}function _gr(e,t=new Date){let n=e.transcriptFile?$fs(e.transcriptFile):void 0;return{draft_id:bfs(),created_at:t.toISOString(),source_session_id:e.sessionId,cwd:Mz(e.cwd,lgr),model:ugr(e.model),cli_version:Mz(e.cliVersion,igr),os:Mz(e.os,agr),request_ids:pgr(e.requestIds),type:e
+
+=== "function bgr(" count=1 hits=216523423
+--- @216523423
+range:null,project_dir_key:n}:null,status:"queued"}}function $fs(e){let t=eLt(tLt(e));return sLt.test(t)?t:void 0}async function bgr(e,t=new Date,n){let r=le(e,null,2);if(r===void 0||Buffer.byteLength(r,"utf8")>NKe)return{success:!1,reason:"too_large"};if(n){let s;try{s=await n.write(ygr(e.draft_id),r,{mode:384})}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"u
+
+=== "function FKe(" count=0 hits=
+=== "var FKe=" count=1 hits=216527039
+--- @216527039
+return!1}}async function fwc(e,t){let{queued:n}=await Sgr({lightweight:!0},t);return Qt(n,(r)=>r.source_session_id===e)}var FKe=10,Sfs=30,wfs,kfs=10240,vfs=200,NKe=32768,Tfs=5,Efs=64,igr=32,agr=64,lgr=512,Cfs=64,Rfs,rLt,Afs,zKe,HKe,fgr,Pfs=16,xfs=1e6,Ifs,oLt,ggr,sLt,ngr=8,rgr=262144;var kgr=w(()=>{qt();Pt();Zt();GUn();qP();nl();n_e();pr();ln();so();xe();Mt();be();OF();sm();wt();wfs=Sfs*24*60*60*10
+
+=== "FKe=" count=2 hits=216527043,242341637
+--- @216527043
+rn!1}}async function fwc(e,t){let{queued:n}=await Sgr({lightweight:!0},t);return Qt(n,(r)=>r.source_session_id===e)}var FKe=10,Sfs=30,wfs,kfs=10240,vfs=200,NKe=32768,Tfs=5,Efs=64,igr=32,agr=64,lgr=512,Cfs=64,Rfs,rLt,Afs,zKe,HKe,fgr,Pfs=16,xfs=1e6,Ifs,oLt,ggr,sLt,ngr=8,rgr=262144;var kgr=w(()=>{qt();Pt();Zt();GUn();qP();nl();n_e();pr();ln();so();xe();Mt();be();OF();sm();wt();wfs=Sfs*24*60*60*1000;R
+
+--- @242341637
+();qu();kd();MKe=1,NKe=2,IKe=4,uce="[object Arguments]",OKe="[object Array]",PKe="[object Boolean]",BKe="[object Date]",FKe="[object Error]",hce="[object Function]",$Ke="[object GeneratorFunction]",zKe="[object Map]",GKe="[object Number]",dce="[object Object]",VKe="[object RegExp]",WKe="[object Set]",qKe="[object String]",UKe="[object Symbol]",HKe="[object WeakMap]",YKe="[object ArrayBuffer]",jKe=
+
+=== "fitFeedbackPayloadToBudget: still" count=2 hits=199045804,232015174
+--- @199045804
+e transcript, or shorten the details...s...fitFeedbackPayloadToBudget(.	...<yv.untouched...reduced."...S..fitFeedbackPayloadToBudget: still ...>!. bytes after trim (budget ..	...keptBytes...	...?...oversized...-. .keptMessageCount... #-.totalMessageCount...!$@.oversizedMessageCount...z.rawTail...t...rawTailKeptBytes(...c.. transcript messages (newest kept fi
+
+--- @232015174
+count:D.length,description:`${e.description}
+${f}`,transcript:D,...o!==void 0&&{rawTranscriptJsonl:o}},r=P(h);if(r>F)g(`fitFeedbackPayloadToBudget: still ${r} bytes after trim (budget ${F})`,{level:"error"});return{payload:h,trim:A}}function Fe(e){let s=[];if(e.keptMessageCount<e.totalMessageCount)s.push(`kept ${e.keptMessageCount} of ${e.totalMessageCount} transcript messages (newest kept first)`
+
+=== "bytes after trim (budget" count=2 hits=199045849,232015213
+--- @199045849
+...fitFeedbackPayloadToBudget(.	...<yv.untouched...reduced."...S..fitFeedbackPayloadToBudget: still ...>!. bytes after trim (budget ..	...keptBytes...	...?...oversized...-. .keptMessageCount... #-.totalMessageCount...!$@.oversizedMessageCount...z.rawTail...t...rawTailKeptBytes(...c.. transcript messages (newest kept first)/...A.. KiB of the raw session log (newe
+
+--- @232015213
+tion}
+${f}`,transcript:D,...o!==void 0&&{rawTranscriptJsonl:o}},r=P(h);if(r>F)g(`fitFeedbackPayloadToBudget: still ${r} bytes after trim (budget ${F})`,{level:"error"});return{payload:h,trim:A}}function Fe(e){let s=[];if(e.keptMessageCount<e.totalMessageCount)s.push(`kept ${e.keptMessageCount} of ${e.totalMessageCount} transcript messages (newest kept first)`);if(e.rawTail==="reduced")s.push(`kept
+
+=== "Draft too large. Shorten the details" count=2 hits=202344748,216539388
+--- @202344748
+s already queued are unaffected and the user can review them with /feedback... x64...J5.feedback_drafts.7...e.Draft too large. Shorten the details and try once more..+...C...Could not write the feedback draft to disk...j..tengu_feedback_draft_created#...Feedback draft queued locally (max ...#T. kept). The user can review and send it with /feedback; nothing is sent without thei
+
+--- @216539388
+ Date,t.storageV5);if(!y.success)return J("feedback_drafts",y.reason),{data:{success:!1,message:y.reason==="too_large"?"Draft too large. Shorten the details and try once more.":"Could not write the feedback draft to disk."}};let b=Qt(y.evicted,(k)=>k.source_session_id===n);if(b>0)Agr(b);let S=Cgr({draftId:h.draft_id,title:h.title,type:h.type,detailsPreview:(()=>{let k=h.details.split(`
+`),T=k.slic
+
+=== "feedbackDrafts: draft write failed" count=4 hits=201796304,216523637,216523784,216523992
+--- @201796304
+estructure property 'getProjectDir' from null or undefined value...{}8.getProjectDir...getProjectsDir..$...feedbackDrafts: draft write failed: '...J...feedbackDrafts: eviction sweep failed: ...SJ.skipTranscriptCheck...;F..evicted...F@.listFeedbackDrafts parse(...V.tengu_feedback_draft_expired...tengu_feedback_draft_invalid_id.#...]..tengu_feedback_draft_oversized_f
+
+--- @216523637
+)return{success:!1,reason:"too_large"};if(n){let s;try{s=await n.write(ygr(e.draft_id),r,{mode:384})}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"unknown"}`,{level:"error"}),{success:!1,reason:"write_failed"}}if(!s.ok)return _(`feedbackDrafts: draft write failed: ${BKe(s.error)}`,{level:"error"}),{success:!1,reason:"write_failed"}}else{let s=Qi();try{await s.
+
+--- @216523784
+ failed: ${i instanceof Error?i.name:"unknown"}`,{level:"error"}),{success:!1,reason:"write_failed"}}if(!s.ok)return _(`feedbackDrafts: draft write failed: ${BKe(s.error)}`,{level:"error"}),{success:!1,reason:"write_failed"}}else{let s=Qi();try{await s.mkdir(UKe()),await s.atomicWrite(hgr(e.draft_id),r,384)}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"unknown
+
+=== "namespace:\"feedbackDraft\"" count=3 hits=207948726,208196220,216520703
+--- @207948726
+che",digest:e}),plan:(e)=>({namespace:"plan",name:e}),daemon:(e)=>({namespace:"daemon",relPath:e}),feedbackDraft:(e)=>({namespace:"feedbackDraft",draftId:e}),agentMemory:(e,n)=>({namespace:"agentMemory",layer:"user",agentType:e,relPath:n}),identity:()=>({namespace:"identity"}),team:(e)=>({namespace:"team",team:e}),sidecar:(e,n,a)=>({namespace:"sidecar",projectKey:e,sessionId:n,relPath:a}),mailbox:
+
+--- @208196220
+)=>({kind:"key",key:{namespace:"plan",name:o}}));case"feedbackDraft":return r?void 0:h(n,".json",(o)=>({kind:"key",key:{namespace:"feedbackDraft",draftId:o}}));case"sidecar":return $t(e,n,r);case"agentMemory":return Gt(e,n,r);case"scratch":if(e.sessionId===void 0)return r?{kind:"scope",scope:{namespace:"scratch",sessionId:n}}:void 0;return r?{kind:"scope",scope:{...e,relPath:[...e.relPath??[],n]}}
+
+--- @216520703
+e){let t=iLt(e);return t===void 0?e.code:`${e.code} ${t}`}async function Mfs(e){let t=[],n=await ph((r)=>e.listEntries({namespace:"feedbackDraft"},{cursor:r,skipKeyStats:!0}),(r)=>{for(let o of r)if(o.kind==="key"&&o.key.namespace==="feedbackDraft")t.push(o.key)});if(n.status==="done")return t;if(n.status==="capped")return _("feedbackDrafts: draft listing kept offering cursors past the page cap; t
+
+=== "namespace:'feedbackDraft'" count=0 hits=
+=== "feedbackDraft" count=12 hits=197166524,198183724,199047116,200612024,201795812,201795912
+--- @197166524
+rvey...H	..memorySurvey...8X..feedbackSurvey...frustrationDetection...A:3.handleSurveyRequestFeedback.#...R.^.feedbackDraftsTurnOffPromptDeclines...quiet......u.~.dismissPrompt...
+...$.offConfirm...%,..confirmSend.!...b...Turn off Claude-drafted feedback?...y%..turn off...;...keep7.../..Claude-drafted feedback is off. Turn back on in /config...o%..Feedback...n.Send
+
+--- @198183724
+ sessions ran in parallel...6...1u.% of your usage came from sessions active for 8+ hours...>..marginRight...w.feedbackDrafts..#...hasClaudeMdExternalIncludesApproved...].. custom API key...d.tengu_config_changed...env.ANTHROPIC_API_KEY......	.Set theme to ...<.Set notifications to ...Set output style to ...=.s.Set response language to ...)Y|.Default 
+
+--- @199047116
+tity_not_corroborated...N...C..draft transcript withheld from feedback submit: contains_3p_transcript_markers..1...F}..feedbackDrafts: post-submit draft delete failed: ..."...tengu_feedback_draft_delete_failed...post_submit...u.tengu_feedback_draft_submitted...Q.feedback_draft_submit...-...m... The draft is still queued. Try again later...
+...transcript_ref...late
+
+=== "failure_mode" count=12 hits=198152144,199046544,199970177,216522957,216528428,216533862
+--- @198152144
+missing capability..&...c.That edit would push Details past the ..!...J?.KB limit. Trim the details first...r..failure_mode...u2.task_category...).transcriptAvailable...}.>.write new feedback...shift+enter...ctrl+j...=.new line...cancel edit...R..Feedback drafts...l.#.No feedback drafts queued...R...\^..Claude drafts feedback at high-signal moments; d
+
+--- @199046544
+a the SendFeedback tool; reviewed and approved by the user before sending...	...X.#.trigger: ...-...area: ...4.failure_mode: ...1...task_category: .
+...draft_id: ...K.X.drafted_at: ...source_session_id: ...model: ....j.cli_version: ...$..os: ...5.effort: 
+...OO.thinking: ...turns: .
+...A.C. assistant....._..request_ids: ...t...parseDraftTransc
+
+--- @199970177
+ or workflow, e.g. "hooks config", "/help", "file editing") when there is a clear one; leave it blank otherwise.
+- Use `failure_mode` ONLY when the report is about model behavior (how Claude responded), not a product bug. Pick the single closest value, or `other` when it is a model-behavior issue that fits no listed value; omit the field only when the report is a product/tool bug with no model-beh
+
+=== "task_category" count=12 hits=198152164,199046568,199970481,216522984,216528474,216534170
+--- @198152164
+&...c.That edit would push Details past the ..!...J?.KB limit. Trim the details first...r..failure_mode...u2.task_category...).transcriptAvailable...}.>.write new feedback...shift+enter...ctrl+j...=.new line...cancel edit...R..Feedback drafts...l.#.No feedback drafts queued...R...\^..Claude drafts feedback at high-signal moments; drafts appear here fo
+
+--- @199046568
+ reviewed and approved by the user before sending...	...X.#.trigger: ...-...area: ...4.failure_mode: ...1...task_category: .
+...draft_id: ...K.X.drafted_at: ...source_session_id: ...model: ....j.cli_version: ...$..os: ...5.effort: 
+...OO.thinking: ...turns: .
+...A.C. assistant....._..request_ids: ...t...parseDraftTranscriptMessages(...V...K...
+
+--- @199970481
+its no listed value; omit the field only when the report is a product/tool bug with no model-behavior component.
+- Use `task_category` to name what kind of task the session was doing, or `other` when it is a clear task that fits no listed value. Omit only if genuinely unclear.
+- Do not include secrets or credentials. Refer to people by role ("a teammate", "the PR reviewer"), never by name, email a
+
+=== "area:" count=12 hits=82441047,82497972,82498022,199046528,206880407,216522940
+--- @82441047
+ea + ap->fp_offset - 32;
+            }
+        }
+        goto use_overflow_area;
+
+    case __va_stack:
+    use_overflow_area:
+        ap->overflow_arg_area += size;
+        ap->overflow_arg_area = (char*)((long long)(ap->overflow_arg_area + align - 1) & -align);
+        return ap->overflow_arg_area - size;
+
+    default:
+        /* unreachable: the compiler only emits the three classes above.
+     
+
+--- @82497972
+2px;
+  padding: 0.75rem;
+  color: #fbf0df;
+  font: monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.response-area:focus {
+  border-color: #f3d5a3;
+}
+.response-area::placeholder {
+  color: rgba(251, 240, 223, 0.4);
+}
+@media (prefers-reduced-motion) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+  }
+}
+src/APITester.tsximport { useRef, type FormEvent } from "react";
+
+export
+
+--- @82498022
+ monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.response-area:focus {
+  border-color: #f3d5a3;
+}
+.response-area::placeholder {
+  color: rgba(251, 240, 223, 0.4);
+}
+@media (prefers-reduced-motion) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+  }
+}
+src/APITester.tsximport { useRef, type FormEvent } from "react";
+
+export function APITester() {
+  const responseInputRef =
+

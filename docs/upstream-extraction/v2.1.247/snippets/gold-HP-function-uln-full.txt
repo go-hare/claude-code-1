@@ -1,0 +1,6 @@
+# LOCKED uln @213647374 end=213647449 len=75
+# unique function uln( count=1
+# unique function uln(e){r3.flushers=e;let t=HP() count=1
+# unique caller pPe: uln({flush:oko,flushAtExit:sko}) count=1 @213654265
+# not in export map
+function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}

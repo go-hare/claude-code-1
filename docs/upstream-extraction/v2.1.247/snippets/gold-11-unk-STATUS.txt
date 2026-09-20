@@ -1,0 +1,29 @@
+# gold-11-unk-STATUS sandbox-settings-symlink
+
+STATUS: HAVE (unique 247 body locked — not kD/Ec)
+
+kD/Ec remain bwrap empty-mount (statSync + unlink 0-byte). That is NOT
+the settings.json symlink fix. Changelog home-manager/stow is INDEX only
+(0 hits in 247 and 246 SEA).
+
+UNIQUE 247 vs 246:
+- wrap extras: PZ === 246 xZ (bare-git scrub, rename-only)
+- TZ 459 → LZ 978 (sha 41c5b4fd3d79f8b5)
+- Zt now stores hopDirectories + danglingBaseline (246 was {literal,resolved})
+- new: bu Xm yu RZ uN UZ gN bN FZ yN pv MZ $Z BZ
+- CZ=32 hop budget
+- class mN adds wrapCwdsThisSession / wrapWriteRootsThisSession /
+  unconfinedWrapThisSession
+- Pa: settings paths C.map(Zt); cwd extras Zt(.claude/settings.json)
+
+LZ contract (do not invent):
+- lstat literal; ENOENT skip
+- still symlink && realpath === stored resolved → skip unlink
+- dangling + danglingBaseline + same end + same hops → skip
+- hops outside write roots + current hops also outside → spare (BZ),
+  do not rm. f starts uninitialized so successful retarget takes this arm
+  (`f!==null` is true when f is undefined)
+- else rmSync(literal, {recursive:true, force:true})
+
+INVENT-BAN: no home-manager/stow branches. No settings.json filename check
+inside LZ — the list is generic symlinkedDenyScrubPaths.

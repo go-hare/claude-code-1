@@ -1,0 +1,2 @@
+# needle=function sl(e pos=208063815 end=208063874 len=59
+function sl(e){return"serverUrl"in e&&e.serverUrl!==void 0}

@@ -1,0 +1,5 @@
+# pos=67007150
+asyncWrap(fs.truncate, "truncate"),
+  unlink: asyncWrap(fs.unlink, "unlink"),
+  utimes: asyncWrap(fs.utimes, "utimes"),
+  lutimes: asyncWrap(fs.lutimes, "lutime

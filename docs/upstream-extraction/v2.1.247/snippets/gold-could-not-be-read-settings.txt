@@ -1,0 +1,5 @@
+# 247 offset=196956961 needle="could not be read first"
+
+eSessionWorkerState)...E.N.[runner:api] UpdateSessionWorkerState -> ......worker_status...^MW./worker/heartbeat...	...v.).Heartbeat...8.=./worker/diagnostics (... lines).../worker/diagnostics...ForwardDiagnostics..#...2..[runner:api] ForwardDiagnostics -> ...
+.S.lines...3...5...[runner:warn] /v1/metrics rejected malformed body: .v...^...proxy authorization file could not be read: an earlier read has not returned yet (stalled mount?); not issuing another...H...read,...).D.proxy authorization file could not be read: ...Pd..function...H/.timed out after ...H.exited .
+...abnormally...i...proxy authorization command ...then...CLAUDE_CODE_PROXY_URL...CLAUDE_CODE_PROXY_HOST...n._.CLAUDE_CODE_PROXY_AUTHENTICATE...|...rejec

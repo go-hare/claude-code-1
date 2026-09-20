@@ -1,0 +1,10 @@
+# offset=208148425
+
+nc function xt(t){if(!M()||!m().wslInherits)return"";let e=[];try{e.push(await h(o(d,"managed-settings.json"),t))}catch{e.push("")}try{let n=o(d,"managed-settings.d"),s=(await P(n,t)).filter((r)=>(r.isFile()||r.isSymbolicLink())&&r.name.endsWith(".json")&&!r.name.startsWith(".")).map((r)=>r.name).sort();for(let r of s)try{e.push(`${r}\x00${await h(o(n,r),t)}`)}catch{e.push(`${r}\x00`)}}catch{}return e.join("\x01")}async function lt(t){async function e(n){try{let s=p(await h(n,t),!1);return!!s&&typeof s==="object"&&"wslInheritsWindowsSettings"in s&&s.wslInheritsWindowsSettings===!0}catch{return!1}}if(await e(o(d,"managed-settings.json")))return!0;try{let n=o(d,"managed-settings.d");for(let s of await P(n,t))if((s.isFile()||s.isSymbolicLink())&&s.name.endsWith(".json")&&!s.name.startsWith(".")&&await e(o(n,s.name)))return!0}catch{}return!1}async function b(t,e){try{if(await _(o(t,"managed-settings.json"),e))return!0}catch{}try{let n=o(t,"managed-settings.d"),s=await P(n,e);for(let r of s){if(!(r.isFile()||r.isSymbolicLink())||!r.name.endsWith(".json")||r.name.startsWith("."))continue;try{if(await _(o(n,r.name),e))return!0}catch{}}}catch{}return!1}var a,it;var ct=G(()=>{U();K();X();V();q();Q();Z();z();J();tt();st();nt();et();rt();a=Object.freeze({settings:{},errors:[]});it=new j(()=>new A)});
+export{_t as FHc,bt as GHc,jt as HHc,Et as IHc,Ft as JHc,Dt as KHc,xt as LHc,ct as MHc};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for 

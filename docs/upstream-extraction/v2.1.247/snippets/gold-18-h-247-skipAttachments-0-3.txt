@@ -1,0 +1,17 @@
+# ver=247 offset=215175636 needle="skipAttachments:!0"
+
+(!dT(e,n).claimed)return;let l=l5o(t);ce("task_remote_agent",{remote_task_type:de("ultrareview"),...l!==void 0&&{findings_count:l}});let c=r?`
+
+This review was launched with --fix: apply these findings to the local working tree now. Skip findings that are wrong or not worth fixing, and run the relevant checks after.`:"",u=o?`
+
+This review was launched with a note, recorded at launch time: "${tn(o,ZVn)}". The cloud review did not see the note \u2014 it ran a standard review of the diff. When presenting these findings, prioritize and relate them to that note.`:"",d=s?await u5o(s,t,i,a):"";ua({value:ql({taskId:e,taskType:"remote_agent",status:"completed",summary:"Cloud review completed",trailing:`
+The cloud review produced the following findings:
+
+${t}${c}${u}${d}`}),mode:"task-notification",skipAttachments:!0,agentId:Tr(),priority:"next",taskId:e})}async function u5o(e,t,n,r){let o=await YVn(e,t,n,r);return o.status==="posting"?`
+
+This review was launched with a request to post the findings to the pull request as a single comment from the user's own GitHub account, and that is happening now (the posting session is at ${o.sessionUrl}). Tell the user the findings are being posted to the PR as a comment and give them that link; do not apply the findings locally unless they also asked for that.`:`
+
+This review was launched with a request to post the findings to the pull request, but the post did not start: ${o.reason} Tell the user this plainly.`}function fKn(e,t,n,r){let o=dT(e,n);if(!o.claimed)return;let s=o.task?.postReviewTo?`
+
+This review was launched with a request to post the findings to the pull request as a comment from the user's account. The review failed, so nothing was posted.`:"";J("task_remote_agent","task_remote_agent_review_failed",{remote_task_type:de("ultrareview"),reason:X(t)});let i=r?`: ${r.replace(/[<>]/g,"").slice(0,200)}`:"",a=DEt[t]+i;ua({value:ql({taskId:e,taskType:"remote_agent",status:"failed",summary:`Cloud review failed: ${a}`,trailing:`
+Clo

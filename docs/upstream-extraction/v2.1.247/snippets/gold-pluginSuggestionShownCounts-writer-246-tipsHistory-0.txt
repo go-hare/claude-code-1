@@ -1,0 +1,2 @@
+# 246 tipsHistory:{} @207023141 hasKey=false
+tCount:0,diffTool:"auto",customApiKeyResponses:{approved:[],rejected:[]},env:{},tipsHistory:{},memoryUsageCount:0,promptQueueUseCount:0,btwUseCount:0,todoFeatureEnabled:!0,showExpandedTodos:!1,briefTranscript:!1,messageIdleNotifThresholdMs:60000,autoConnectIde:!1,autoInstallIdeExtension:!0,fileCheckpointingEnabled:!0,terminalProgressBarEnabled:!0,cachedDynamicConfigs:{},cachedGrowthBookFeatures:{},respectGitignore:!0,copyFullResponse:!1

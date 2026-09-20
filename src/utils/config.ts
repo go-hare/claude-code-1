@@ -309,6 +309,13 @@ export type GlobalConfig = {
   tipLifetimeShownCounts?: {
     [tipId: string]: number
   }
+  /**
+   * densable 2.1.247 `Ohe` / `pluginSuggestionShownCounts` — reader only.
+   * This SEA has no write site.
+   */
+  pluginSuggestionShownCounts?: {
+    [pluginId: string]: number
+  }
 
   // /buddy companion soul — bones regenerated from userId on read. See src/buddy/.
   companion?: import('../buddy/types.js').StoredCompanion
@@ -401,6 +408,8 @@ export type GlobalConfig = {
   voiceLangHintShownCount?: number // Number of times the /voice dictation-language hint has been shown
   voiceLangHintLastLanguage?: string // Resolved STT language code when the hint was last shown — reset count when it changes
   voiceFooterHintSeenCount?: number // Number of sessions the "hold X to speak" footer hint has been shown
+  /** densable leftover Fqe `cDt` / `vqe` / `ore` */
+  feedbackDraftsTurnOffPromptDeclines?: number
 
   // densable 2.1.239 tengu_willow_crate REPL diff sidebar (not in GLOBAL_CONFIG_KEYS)
   diffSidebarOpen?: boolean
@@ -589,6 +598,10 @@ export type GlobalConfig = {
 
   // Skill usage tracking for autocomplete ranking
   skillUsage?: Record<string, { usageCount: number; lastUsedAt: number }>
+  pluginUsage?: Record<
+    string,
+    { usageCount: number; lastUsedAt: number; lastUsedNumStartups?: number }
+  >
   /**
    * densable 2.1.223 `codeReviewLastEffort` — last effort level the user typed
    * on `/code-review` (or alias `/review`). Reused when no level is given.

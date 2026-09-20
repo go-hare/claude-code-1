@@ -1,0 +1,1 @@
+function Ji(e){let t=W();return(t==="windows"||t==="wsl")&&e.replaceAll("\\","/").split("/").some((i)=>i.includes(":")||/[. ]$/.test(i))}

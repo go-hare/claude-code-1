@@ -1,0 +1,1 @@
+function m(){return o.O_RDONLY|d()}function d(){if(i()==="windows")return 0;return o.O_NOFOLLOW|o.O_NONBLOCK}function f(r,e){let n=e==="arm64"?"aarch64":e==="x64"?"x86_64":void 0;i

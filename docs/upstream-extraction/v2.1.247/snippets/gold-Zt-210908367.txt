@@ -1,0 +1,2 @@
+# function Zt( pos=210908367 end=210908504 len=137
+function Zt(t,e){if(!t)return Ct;let o={id:yt(t),...e},n=Object.entries(o).map(([r,i])=>`${r}=${i}`).join(":");return f(a.HYPERLINK,n,t)}

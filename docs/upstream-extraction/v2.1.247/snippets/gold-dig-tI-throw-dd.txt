@@ -1,0 +1,3 @@
+# offset=211437368
+
+on dd(r,n,a,u){if(Xt())throw new ce($s,"plugin command source disabled by managed policy");if(r.mode==="link"&&gt()==="windows")throw new ce(Wl,"plugin command source link mode unsupported on windows");return zl(r,u),Os("plugin_command_install",async()=>{let l=await Kl(r);if(Xe(l,ft(),{foldCase:!0}))throw new F(`Plugin

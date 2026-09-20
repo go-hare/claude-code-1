@@ -1,0 +1,201 @@
+# pluginSuggestionShownCounts WRITER lock — official 2.1.247 + 2.1.246 peel ONLY.
+# Invent-ban. Do not invent a writer. Collision-ban Ohe/Nhe (see gold-tip-pluginId-lock.txt).
+# SEA 247 size=253204128 match=true
+# SEA 246 size=250948768 match=true
+
+## VERDICT — proven ABSENT in both SEAs
+
+writer body: NONE
+writer bind: NONE
+increment site: NONE (not install, not tip-shown, not Qhe/wye, not mL/yN, not Lhe/tL/p)
+
+This is a reader-only leftover. Official itself labels the Qhe/wye pair a
+dead/legacy probe (`tengu_dead_probe_legacy_plugin_tip_counts`).
+NOT a 246 leftover writer present in 247 — 246 has the same reader-only
+shape (no `:` / `??` / `[` / `=` write). Writer UNKNOWN/absent (pre-246
+or disk-passthrough of an already-written ~/.claude.json map).
+
+## 1) Every hit of the exact key — LOCKED
+
+247 `pluginSuggestionShownCounts` count=2
+  HIT0 @199438564  kind=STRING_TABLE_OR_SMAP
+    sourcemap name list for _360.js: `o.pluginSuggestionShownCounts.#`
+    gold-pluginSuggestionShownCounts-writer-247-hit0.txt
+    gold-pluginSuggestionShownCounts-writer-247-hit0-win.txt
+  HIT1 @222247533  kind=READER_OPTIONAL
+    `function h(n){return s().pluginSuggestionShownCounts?.[n]??0}`
+    @222247508 unique
+    gold-pluginSuggestionShownCounts-writer-247-hit1.txt
+    gold-pluginSuggestionShownCounts-writer-247-h-vL.txt
+
+246 `pluginSuggestionShownCounts` count=2
+  HIT0 @197886548  kind=STRING_TABLE_OR_SMAP
+    sourcemap name list for _345.js: `o.pluginSuggestionShownCounts.#`
+    gold-pluginSuggestionShownCounts-writer-246-hit0.txt
+  HIT1 @220365770  kind=READER_OPTIONAL
+    same body: `function h(n){return s().pluginSuggestionShownCounts?.[n]??0}`
+    @220365745 unique
+    gold-pluginSuggestionShownCounts-writer-246-hit1.txt
+    gold-pluginSuggestionShownCounts-writer-246-h-VJ.txt
+
+UTF16LE key count=0 both SEAs.
+
+## 2) ALL write shapes — count=0 both SEAs
+
+shape                                      247  246
+pluginSuggestionShownCounts:                 0    0
+pluginSuggestionShownCounts??                0    0
+pluginSuggestionShownCounts[                 0    0
+pluginSuggestionShownCounts=                 0    0
+['pluginSuggestionShownCounts']              0    0
+["pluginSuggestionShownCounts"]              0    0
+[`pluginSuggestionShownCounts`]              0    0
+pluginSuggestionShownCounts:{                0    0
+pluginSuggestionShownCounts:{}               0    0
+pluginSuggestionShownCounts:n/e/t/r/o/i/a    0    0
+,pluginSuggestionShownCounts:                0    0
+{pluginSuggestionShownCounts:                0    0
+recordPluginSuggestion                       0    0
+pluginSuggestionShownCounts:{} (schema)      0    0
+
+partials collapse to the same 2 hits:
+  pluginSuggestionShown          2    2
+  pluginSuggestionShownCount     2    2
+  SuggestionShownCounts          2    2
+
+## 3) Reader binds — LOCKED (not writers)
+
+247 _360.js
+  export{p as tL, a as uL, h as vL, m as wL, w as xL, l as yL, c as zL}
+  unique @222247976
+  gold-pluginSuggestionShownCounts-writer-247-360-module.txt
+  import unique: `vL as Ohe` count=1 @232036826 from _360.js
+  call unique: `Ohe(r.pluginId)` count=1 @232387837  (Qhe only)
+
+246 _345.js  (older minified names)
+  export{p as TJ, a as UJ, h as VJ, m as WJ, w as XJ, l as YJ, c as ZJ}
+  unique @220366213
+  gold-pluginSuggestionShownCounts-writer-246-345-module.txt
+  import unique: `VJ as fye` count=1 @229907762 from _345.js
+  call unique: `fye(r.pluginId)` count=1 @230266347  (wye only)
+  other `fye(` = collide (forked-skill provenance / lodash isObject)
+
+_360/_345 imports that do NOT take vL/VJ (cannot write via those aliases):
+  247: tL+uL+wL+zL ; uL+wL+zL ; tL+wL+zL ; xL+yL+zL
+  246: TJ+UJ+WJ+ZJ ; UJ+WJ+ZJ ; TJ+WJ+ZJ ; XJ+YJ+ZJ
+
+## 4) Neighbor writers that DO exist (different keys) — contrast
+
+These prove the scan would have seen a write if one existed.
+
+Lhe / tL / p = recordTipShown  UNIQUE @222247238
+  gold-pluginSuggestionShownCounts-writer-247-p-tL-Lhe.txt
+  writes: tipsHistory[n]=numStartups + tipLifetimeShownCounts[n] += 1
+  DOES NOT touch pluginSuggestionShownCounts
+  247 shapes: tipLifetimeShownCounts: count=1 @222247401
+              tipLifetimeShownCounts?? count=1 @222247337
+
+yL / l = pluginSuggestionDiscoverShownCounts WRITER  UNIQUE @222247723
+  gold-pluginSuggestionShownCounts-writer-247-l-yL-discover.txt
+  247: pluginSuggestionDiscoverShownCounts: count=1 @222247913
+       pluginSuggestionDiscoverShownCounts?? count=1 @222247778
+  246: same writer, export l as YJ @220366150 / ?? @220366015
+  Different key. Do not confuse with ShownCounts.
+
+kwc / saveGlobalConfig
+  `Le as kwc` unique @208905880 ; `k as owc` unique @208905923 (_675.js)
+  _360 `u` = kwc. Only p() and l() call u() in that module.
+  Neither updater mentions pluginSuggestionShownCounts.
+  `function ki(` hits are collide (object-keys Promise, PowerShell, React, cache invalidate).
+
+## 5) Qhe / mL / wye / yN do NOT increment this map
+
+247 Qhe UNIQUE @232387553
+  gold-pluginSuggestionShownCounts-writer-247-Qhe.txt
+  READS Ohe(r.pluginId) + Nhe(r.id); skip if Math.max>=EV=2
+  no saveGlobalConfig / no map bump
+
+247 mL UNIQUE @232388055
+  gold-pluginSuggestionShownCounts-writer-247-mL.txt
+  Lhe(e.id,o) = recordTipShown (lifetime map only)
+  + tengu_tip_shown analytics
+  no pluginSuggestionShownCounts
+
+246 wye (= Qhe) UNIQUE @230266039
+  gold-pluginSuggestionShownCounts-writer-246-wye.txt
+  READS fye(r.pluginId) + pye(r.id); skip if Math.max>=NV=2
+  same read-only skip as Qhe
+
+246 yN (= mL) UNIQUE @230266565
+  gold-pluginSuggestionShownCounts-writer-246-yN.txt
+  mye(e.id,o) = recordTipShown (lifetime only)
+  no pluginSuggestionShownCounts
+
+install path: no recordPluginSuggestion; no ShownCounts write on plugin install.
+
+## 6) Config schema default — neighbor, key ABSENT
+
+247 `function Ye(){return{numStartups:0...}}` UNIQUE @208747056
+  gold-pluginSuggestionShownCounts-writer-247-default-config.txt
+  has `tipsHistory:{}` @208747476
+  hasKey pluginSuggestionShownCounts = false
+  tipLifetimeShownCounts:{} count=0
+  pluginSuggestionShownCounts:{} count=0
+  pluginSuggestionDiscoverShownCounts:{} count=0
+  default ends unpinFable5LaunchEffort:!1 — no count maps except tipsHistory:{}
+
+246 `function je(){return{numStartups:0...}}` UNIQUE @207022721
+  gold-pluginSuggestionShownCounts-writer-246-default-config.txt
+  tipsHistory:{} @207023141 hasKey=false
+  same three `*:{}` schema counts = 0
+
+## 7) pluginSuggestion* inventory (not invent)
+
+247 pluginSuggestion count=9 — all classified:
+  smap ShownCounts + smap DiscoverShownCounts
+  pluginSuggestionMarketplaces (policy string / zod / It() reader) ×3
+  reader ShownCounts
+  discover reader + discover ?? + discover :
+246 pluginSuggestion count=9 — same 9-shape inventory.
+
+Marketplaces / Discover are other keys. Not this writer.
+
+## 8) Collision-ban Ohe/Nhe (already in gold-tip-pluginId-lock.txt)
+
+NOT this reader:
+  function Ohe(e) @215503306  agentDefinitions
+  function Ohe(e,t) @242361411  string-join; uses Nhe as delimiter
+  function Nhe(e,t) @215518861  session-continue prompt
+  Ohe(this.toolUseContext) / Ohe(r) tool-depth helpers
+  Ohe(this._preds...) graph
+  no `var Ohe=` / `Ohe=e=>` / `function Ohe(` in Qhe±16k
+  246 `VJ(` / `function fye(` collide session/d3/zlib/lodash — not VJ-from-_345
+
+## 9) Local src facts ONLY (no edit, no invent)
+
+tipHistory.ts
+  HAS getPluginSuggestionShownCount = Ohe reader
+  HAS recordTipShown = Lhe (lifetime only)
+  MISSING writer for pluginSuggestionShownCounts
+
+src/utils/config.ts
+  HAS optional GlobalConfig.pluginSuggestionShownCounts
+  DEFAULT createDefaultGlobalConfig has tipLifetimeShownCounts:{} 
+    (official Ye()/je() do not — local extra, not this job)
+  DEFAULT does NOT include pluginSuggestionShownCounts
+    (matches official absence)
+
+tipScheduler.ts
+  local mL-equivalent calls recordTipShown only
+  MISSING Qhe/wye Ohe-skip (already locked elsewhere)
+
+Do not invent a pluginSuggestionShownCounts writer.
+
+## Peel scripts / scans
+
+_peel-pluginSuggestionShownCounts-writer.mjs
+_peel-pluginSuggestionShownCounts-writer-pass2.mjs
+_peel-pluginSuggestionShownCounts-writer-pass3.mjs
+gold-pluginSuggestionShownCounts-writer-scan.txt
+gold-pluginSuggestionShownCounts-writer-scan2.txt
+gold-pluginSuggestionShownCounts-writer-scan3.txt

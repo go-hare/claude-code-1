@@ -1,0 +1,5 @@
+# offset=202828737 tag=pcc
+
+d_fresh....pf..files_past_cutoff...
+.....8.at_mention......w.+.mention_type.....e..^"|"$.......h...invalid resource attribute key.. ...p$..invalid resource attribute value...."J..file:///B:/%7EBUN/root/_552.js........m.Invalid URL format: 8...H...Invalid URL protocol: must use http:// or https://, got ........WAYLAND_DISPLAY......8`.opener_missing.........spawn_error.@...A...\s\u2800\uFFF9-\uFFFB\p{Cc}\p{M}\p{Default_Ignorable_Code_Point}-....>..s..(..-...p.{.C.c.}.p.{.M.}.p.{.D.e.f.a.u.l.t._.I.g.n.o.r.a.b.l.e._.C.o.d.e._.P.o.i.n.t.}.........n.(?:%[0-9A-Fa-f]{2}){1,512}......x...^%[0-9A-Fa-f]{2}........vscode:.......n.vscode-insiders:.....e..cursor:.	...O.z.windsurf:...........zed:
+.......jetbrains:......x[..idea:.......X...slack:.......[..linear:.....s2..notion:.........figma:..........explorer....:vl./select,J.......[hyperlink] refusing to dispatch clicked link with non-allowlisted sc

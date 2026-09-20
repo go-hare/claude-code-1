@@ -1,0 +1,3 @@
+# offset=204120360
+
+$...MCPB URL must end with .mcpb or .dxt...+...URL to MCPB file...U.Marketplace must have a nameO...'.Marketplace name cannot contain spaces. Use kebab-case (e.g., "my-marketplace").N...y9.Marketplace name cannot contain control or bidirectional-formatting characters..S...O..Marketplace name cannot contain path separators (/ or \), ".." sequences, or be ".".F...<7.Marketplace name impersonates an official Anthropic/Claude marketplace...2.Plugin name cannot be empty.E...&b.Plugin name cannot contain spaces. Use kebab-case (e.g., "my-plugin")...I...Kd..Plugin name cannot conta

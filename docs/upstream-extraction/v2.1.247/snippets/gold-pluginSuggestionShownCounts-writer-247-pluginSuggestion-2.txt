@@ -1,0 +1,2 @@
+# 247 pluginSuggestion #2 @202734732
+proved marketplace / settings file instead...pluginTrustMessage...m...pluginSuggestionMarketplaces...s.Invalid hostPattern regex in policy settings: ...D..blocklistDirection..F...Invalid pathPattern regex in policy settings strictKnownMarketplaces: ...]S.

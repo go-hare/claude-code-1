@@ -1,0 +1,29 @@
+# offset=201793201 ver=247 hit=3/15 ratio=1.000 needle="output truncated"
+
+.f.a.i.l.u.r.e. .a.s. .s.u.c.c.e.s.s...
+
+```javascript
+const { filenames } = await Glob({ pattern: '*.ts' })
+const { file } = await Read({ file_path: 'config.json' })
+await Edit({ file_path: 'foo.ts', old_string: 'old', new_string: 'new' })
+const { stdout } = await ...V.(.{. .c.o.m.m.a.n.d.:. .'.g.i.t. .s.t.a.t.u.s.'. .}.).
+.`.`.`.
+.
+.#.#. .T.i.p.s.
+.-. .`.i.m.p.o.r.t.`./.`.r.e.q.u.i.r.e.`. .d.o.n.'.t. .w.o.r.k. .h.e.r.e. ..  .t.h.e. .v.m. .c.o.n.t.e.x.t. .i.s. .s.e.a.l.e.d... .F.o.r. .f.i.l.e.s.y.s.t.e.m. .a.c.c.e.s.s. .u.s.e. .`.R.e.a.d.`./.`.W.r.i.t.e.`./.`.G.l.o.b.`.;. .f.o.r. .s.h.e.l.l. .u.s.e. .`...`...
+.-. .U.s.e. .`.P.r.o.m.i.s.e...a.l.l.(.).`. .f.o.r. .p.a.r.a.l.l.e.l. .o.p.e.r.a.t.i.o.n.s.
+.-. .V.a.r.i.a.b.l.e.s. .p.e.r.s.i.s.t. .a.c.r.o.s.s. .R.E.P.L. .c.a.l.l.s.
+.-. .L.a.s.t. .e.x.p.r.e.s.s.i.o.n. .i.s. .r.e.t.u.r.n.e.d. .a.s. .t.h.e. .r.e.s.u.l.t.
+.-. .`.h.a.i.k.u.(.p.r.o.m.p.t.,. .s.c.h.e.m.a.?.).`. ..  .o.n.e.-.t.u.r.n. .m.o.d.e.l. .s.a.m.p.l.i.n.g... .W.i.t.h.o.u.t. .s.c.h.e.m.a. .r.e.t.u.r.n.s. .t.e.x.t.;. .w.i.t.h. .a. .J.S.O.N. .s.c.h.e.m.a. .r.e.t.u.r.n.s. .t.h.e. .p.a.r.s.e.d. .o.b.j.e.c.t...
+.-. .`.r.e.g.i.s.t.e.r.T.o.o.l.(.n.a.m.e.,. .d.e.s.c.,. .s.c.h.e.m.a.,. .h.a.n.d.l.e.r.).`. .d.e.f.i.n.e.s. .a. .n.e.w. .t.o.o.l.;. .`.u.n.r.e.g.i.s.t.e.r.T.o.o.l.(.n.a.m.e.).`.,. .`.l.i.s.t.T.o.o.l.s.(.).`.,. .`.g.e.t.T.o.o.l.(.n.a.m.e.).`. .m.a.n.a.g.e. .t.h.e.m.
+.-. ...`.s.h.Q.u.o.t.e.(.s.).`. .q.u.o.t.e.s. .a. .s.t.r.i.n.g. .f.o.r. .B.a.s.h. ..  .u.s.e. .t.h.i.s. .i.n.s.t.e.a.d. .o.f. .`.J.S.O.N...s.t.r.i.n.g.i.f.y.`. .(.d.o.u.b.l.e. .q.u.o.t.e.s. .d.o.n.'.t. .p.r.o.t.e.c.t. .b.a.c.k.t.i.c.k.s. .o.r. .`.$.`.).
+.-. .D.o.n.'.t. .w.r.i.t.e. .a. .t.e.m.p. .f.i.l.e. .j.u.s.t. .t.o. .f.e.e.d. .a. .s.h.e.l.l. .c.o.m.m.a.n.d. ..  .p.i.p.e. .v.i.a. .h.e.r.e.d.o.c.:. .`.a.w.a.i.t. ...b..({command: ":...u''."})`. Generic temp paths get clobbered by parallel agents...d..Execute registered tool "... .H.(...)..."...?..[console output truncated at 50MB]...<unprintable thrown value>...toPrimitive...^.exotics...`C.preventExtensions...1..wrapN......G...wrapPropagate...O. .callVM..k...p..registerTool: name must match ^[a-zA-Z0-9_-]{1,111}$ (wire name is prefixed with 'eval_registered__'), got ...:H.registerTool: '.:...=Gd.' collides with a built-in global; choose a different name..=..."..registerTool: schema must be a JSON-serializable object, got ...+... tool is not available in this REPL context...U... -R ...'V.repos/:owner/:repo..$...V..str: function replacer not supported	...position ...<. invoked but only ...>. calls cached (exhausted)...6...: expected .
+..., invoked ...O..drift...C...Cannot destructure property 'wrappers' from null or undefined value...repl-replay.js...0..REPL replay timed out after  ...
+.original threw, replay succeeded	...consumed ......)... cached calls...4. before expected throw...S..REPL replay 
+... at block ..
+...9.`.withResult...\..REPL state hydrated from .../...REPL hydration hit a poisoned context (global '.M...' pinned non-configurable by replayed code); starting fresh without hydration...
+'	.REPL state hydration failed: ...G...repl-tool-code.js...<...!..Cannot destructure property 'v' from null or undefined valueD...Cannot destructure property 'documents' from null or undefined value,...A<G. .t.o.o.l. .c.a.l.l.(.s.). .s.t.i.l.l. .p.e.n.d.i.n.g. .a.t. .s.c.r.i.p.t. .e.n.d. ..  ...results discarded: ...A... Add 'await'...0f.REPL error stack trace:
+)...
+
+Inner tool errors (likely root cause):
+...p...newTools...^...nativeTimeoutMs...*dw.server: ...R.^.tool: ...2.server task id: ...X..server status when stopped: ...N.5.status: ...jv..status message: 	...elapsed: ...^...poll interval: .2...`.e.waiting on the user: an elicitation dialog is open.._...x.runs on the server and survives exiting t

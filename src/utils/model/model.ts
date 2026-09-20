@@ -243,6 +243,14 @@ export function getDefaultHaikuModel(): ModelName {
   const primaryModel = getProviderPrimaryModel()
   if (primaryModel) return primaryModel
 
+  // Custom Anthropic-compatible host (not api.anthropic.com): Haiku IDs
+  // usually 404. Title / side queries must use the model the user actually
+  // configured — official auto-title works because it always has Haiku.
+  if (!isFirstPartyAnthropicBaseUrl()) {
+    const specified = getUserSpecifiedModelSetting()
+    if (specified) return parseUserSpecifiedModel(specified)
+  }
+
   // Haiku 4.5 is available on all platforms (first-party, Foundry, Bedrock, Vertex)
   return getModelStrings().haiku45
 }

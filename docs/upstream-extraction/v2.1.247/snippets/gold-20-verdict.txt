@@ -1,0 +1,30 @@
+#20 rc-worktree-diff — LOCKED 247 vs 246
+
+NOT an upload. Connected clients PULL via control_request subtype
+get_workspace_diff. 246 already had the schema + print.ts SDK stdin
+buildWorkspaceDiffResponse(host, permissionContext) + client
+remote_workspace_diff_fetch. 246 inbound jn had NO get_workspace_diff
+case (only cloud allowlist). /remote-control → initReplBridge did not
+register onGetWorkspaceDiff (no host / no callback) → default
+"does not handle subtype".
+
+Unique 247:
+- case"get_workspace_diff" in jn: !W → official not-supported string;
+  else AbortController + ye(W(signal), ht=8000, kt=timeout string)
+- cd onGetWorkspaceDiff:a?(e)=>{ cache ts=60000, pendingWaiters,
+  ki(a,n,t) } where ki = Cf = Yt
+- import{Cf as ki}from _45.js (246 exported Yt as
+  buildWorkspaceDiffResponse; 247 also Cf for initReplBridge)
+- Yt(t,n,i=bt) vs 246 Yt(t,e): budget i={perFileMs,totalMs},
+  Bt null → skippedLarge
+- ad={perFileMs:400,totalMs:1500} REPL
+  dd={perFileMs:2000,totalMs:6000} HEADLESS
+- useReplBridge: host:S.host, workspaceDiffComputeBudget:Pt
+- print.ts RC enable: host:e.host, HEADLESS budget
+
+A/gi = rev-parse --show-toplevel
+q/hi = fetchGitDiff(host, abort, mode="auto")
+Q/mi = hunkRefForDiff
+host is ns().host WeakMap key (local getReplDiffHost stand-in)
+
+Invent-ban: no websocket upload, no invented event name.

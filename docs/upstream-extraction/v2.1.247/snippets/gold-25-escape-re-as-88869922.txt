@@ -1,0 +1,9 @@
+# @88869922
+
+column number of a match    %[n]d       nth capture byte size
+ %K %[...]K  ... + column number, if -k  %[n]e       nth capture end offset
+ %l          last line number of match   %[n]j       nth capture as JSON
+ %L          number of lines of a match  %[n]q       nth capture quoted
+ %m          number of matches           %[n]v       nth capture as CSV
+ %M          number of matching lines    %[n]x       nth capture as XML
+ %n          line numbe

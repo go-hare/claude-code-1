@@ -1,0 +1,3 @@
+# 247 function ke start=235561999 end=235562184 len=185 sha=7808ff94e64a317b
+
+async function ke(){let d=await Ie(An(h).catch(()=>{return}),Ct);if(!d?.account_uuid)return!1;return u={accountUuid:d.account_uuid,organizationUuid:d.organization_uuid||void 0},k=!0,!0}

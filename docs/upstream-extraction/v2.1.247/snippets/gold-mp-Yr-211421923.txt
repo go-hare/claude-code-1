@@ -1,0 +1,2 @@
+# @211421923 len=41
+function Yr(r){return r.endsWith(".zip")}

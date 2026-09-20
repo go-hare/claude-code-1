@@ -1,0 +1,5 @@
+# offset=212868882 needle=",hlo="
+
+ n?.(s),r;n?.("fail");try{if((await I7e(r)).isFile())return r}catch(i){if(De(i)!=="ENOENT")return r}return await vW(r).catch(()=>{}),fN(e)})())}var mlo,P5t=8388608,Uoe=5368709120,OTe="5GB",EW=67108864,hlo=16777216,RTe=`
+[output omitted: it could not be written to disk]
+`;var su=w(()=>{pr();mP();$e();Sd();be();xe();oo();an();Foe();rO();mlo=PTe.O_NOFOLLOW??0});import{randomBytes as vlo}from"crypto";function jY(e){return Object.values(e).some($Te)}function $Te(e){return Tlo.has(e.type)&&!Xa(e.status)&&!(e.type==="in_process_teammate"&&e.isIdle)&&!(e.type==="remote_agent"&&e.isLongRunning)}functio

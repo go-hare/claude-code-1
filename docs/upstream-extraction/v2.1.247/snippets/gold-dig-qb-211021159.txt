@@ -1,0 +1,3 @@
+# offset=211021159
+
+ng(e);else if(!e)return"";else return e}function qb(e,o=""){let i=o===null,l=i?"":QM(o),s=e._tokenizer??xa({x10Mouse:!0}),u=e.droppedMousePrefix,f=i?e.flushedEscapePrefix:"",m=e.flushedEscapePrefix,h;if(i&&e.mode!=="IN_PASTE"){let T=s.buffer();if(ol(T))h=[];else if(Kb.test(T))s.reset(),u=T,h=[];else{if(T==="\x1B"||T==="\x1B[")f=T;h=s.flush()}}else h=i?s.flush():s.feed(l);let p=[],y=e.mode==="IN_PASTE",b=e.pasteBuffer,S=e.pendingByteEvents;function v(T){if(y)b+=String.fromCharCode(T.byte);else p.push(Ea(T.seq))}function E(){for(let T of S)v(T);S=[]}function C(T,M){if(S.length===0){if(M>=194&&M<=244){S=[{seq:T,byte:M}];return}v({seq:T

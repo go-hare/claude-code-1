@@ -1,0 +1,2 @@
+# needle=function sl(e pos=225965391 end=225965582 len=191
+function sl(e){if(!ji.test(e))return e;return e.replace(ji,(t)=>{switch(t){case"<":return"&lt;";case">":return"&gt;";case"&":return"&amp;";case'"':return"&quot;";case"\xA0":return"&nbsp;"}})}

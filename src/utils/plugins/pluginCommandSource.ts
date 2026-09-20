@@ -34,6 +34,7 @@ import { homedir } from 'os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
+import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../errors.js'
 import { getPlatform } from '../platform.js'
 import { denyCommandProducerDir } from './commandProducerDirs.js'
 import { getSettingsForSource } from '../settings/settings.js'
@@ -104,11 +105,11 @@ export type PluginCommandSpawnKind =
 /**
  * densable dTe — typed error carrying short densable reason codes.
  */
-export class PluginCommandSourceError extends Error {
+export class PluginCommandSourceError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
   readonly reason: string
 
   constructor(message: string, reason: string) {
-    super(message)
+    super(message, message)
     this.name = 'PluginCommandSourceError'
     this.reason = reason
   }

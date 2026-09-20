@@ -288,7 +288,8 @@ export type SelfHostedRunnerApi = {
     sessionId: string,
     sessionToken: string,
     workerEpoch: number,
-    workerStatus: string,
+    /** densable 247 #21 — omit until Claude Code has started (`void 0` → no worker_status). */
+    workerStatus?: string,
     signal?: AbortSignal,
   ) => Promise<void>
   heartbeat: (
@@ -713,7 +714,9 @@ export function createSelfHostedRunnerApi(
       debug(`[runner:api] PUT ${base}/v1/code/sessions/${sessionId}/worker`)
       const res = await http.put(
         `${base}/v1/code/sessions/${sessionId}/worker`,
-        { worker_epoch: workerEpoch, worker_status: workerStatus },
+        workerStatus === undefined
+          ? { worker_epoch: workerEpoch }
+          : { worker_epoch: workerEpoch, worker_status: workerStatus },
         {
           headers: sessionAuthHeaders(sessionToken),
           timeout: 15_000,

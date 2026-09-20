@@ -1,0 +1,3 @@
+# 247 offset=210824787 needle="function ie(){return"
+
+turn k(B())}function ve(){return k(G())}function ie(){return O(G())==="claude-sonnet-5"}function An(){let e=g.ANTHROPIC_DEFAULT_SONNET_MODEL;if(fe()&&e){let n=q(e);return{value:"sonnet",label:g.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME??e,description:g.ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION??`Custom Sonnet model${n?" (1M context)":""}`,desc

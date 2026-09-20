@@ -1,0 +1,3 @@
+# offset=214691149
+
+kedByBlocklist:H,allowedSources:H?[]:q.map((Z)=>$$(Z))}),null}let x=null,A=m.get(R);if(A&&P){let H=A.plugins.find((q)=>q.name===C);if(H)x={entry:H,marketplaceInstallLocation:P.installLocation}}else x=await NSt(v,n);if(!x){let H=k||!!S.plugins[v]?.length;if(!hR(E))_(`Skipping load-failure error for disabled plugin ${v}`);else if(!P)if(H)a.push({type:"marketplace-not-found",source:v,marketplace:R,availableMarketplaces:Object.keys(u)});else _(`Skipp

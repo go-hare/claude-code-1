@@ -1,0 +1,3 @@
+# 247 function D start=236347617 len=215 sha=40c89f1ea75227b4 dist=2544264
+
+function D(vo){let E=G(4),{qrLinesPromise:Bo}=vo,b=v(Bo);if(b.length===0){return null}let w;if(E[0]!==b)w=b.map(so),E[0]=b,E[1]=w;else w=E[1];let F;if(E[2]!==w)F=o(B,{children:w}),E[2]=w,E[3]=F;else F=E[3];return F}

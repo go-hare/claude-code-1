@@ -1,0 +1,27 @@
+# pass2 counts 246 / 247
+0	0	"printed megabytes" MISS
+0	0	"overflow the conversation" MISS
+0	0	"wedge the session" MISS
+0	0	"megabytes of error" MISS
+4	4	"background agent that"
+0	0	"agent that printed" MISS
+3	3	"Prompt is too long"
+10	10	"prompt is too long"
+0	0	"background agent error" MISS
+0	0	"Background agent error" MISS
+0	0	"agent error output" MISS
+0	0	"agent stderr" MISS
+2	2	"stderr.slice"
+1	1	"error.slice"
+23	23	"task_notification"
+0	0	"type:\"agent_error\"" MISS
+0	0	"type:\"background_agent" MISS
+0	0	"background_agent_error" MISS
+0	0	"agent_completion_error" MISS
+3	3	"truncatedFallback"
+1	1	"persist-to-disk failed"
+3	3	"tengu_hook_output_persisted"
+0	0	"tengu_agent_output_persisted" MISS
+0	0	"tengu_bg_output_persisted" MISS
+0	6	"await lre(" DIFF
+6	0	"await Rne(" DIFF

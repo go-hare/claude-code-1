@@ -1,0 +1,2 @@
+# needle=function IR( pos=241908095 end=241908442 len=347
+function IR(e){var t=this._name,r=this._id;typeof e!="function"&&(e=Uh(e));for(var i=this._groups,n=i.length,a=new Array(n),s=0;s<n;++s)for(var l=i[s],u=l.length,h=a[s]=new Array(u),d,f,p=0;p<u;++p)(d=l[p])&&(f=e.call(d,d.__data__,p,l))&&("__data__"in d&&(f.__data__=d.__data__),h[p]=f,Au(h[p],t,r,p,h,$n(d,r)));return new Ka(a,this._parents,t,r)}

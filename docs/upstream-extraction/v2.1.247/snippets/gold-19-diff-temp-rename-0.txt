@@ -1,0 +1,5 @@
+# mismatch@0
+---247---
+....d.p.unverifiable_windows....../.not_regular......n..bin_uninspectable........Z].bin_not_dir.....k.p.ifObject....&m].pluginAssetCache....E...asset_transient.+....... transient failure fetching asset (attempt .........); retrying in .6...B.../api/organizations/:orgUUID/marketplace/plugin-assets/........c.skipped_data_residency..........skipped_essential_traffic_only..........skipped_no_claude_ai
+---246---
+cache_hit_count.....o...download_count..........mismatch_removed_count......D...bare_placed_count........./.not_regular.....d.p.unverifiable_windows.....n..bin_uninspectable........Z].bin_not_dir.....k.p.ifObject....&m].pluginAssetCache....E...asset_transient.+....... transient failure fetching asset (attempt .........); retrying in .6...B.../api/organizations/:orgUUID/marketplace/plugin-assets/..

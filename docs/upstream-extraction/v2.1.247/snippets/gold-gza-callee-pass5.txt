@@ -1,0 +1,63 @@
+ZR @236024814
+CRED "{storageV5:p,credentials:g}" count=2
+  @236022838 tate:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]=S(
+  @236092688 targetPlugin:s,targetMarketplace:u,action:m,commands:h}){let{storageV5:p,credentials:g}=We(),f=Ae((c)=>c.mcp.clients),y=Ae((c)=>c.mcp.tools),d=Ae((c)=>c.plugins.errors),x=Ae((c)=>c
+CRED "{storageV5:p" count=7
+  @206275079 -qfgksp5r.js"),import("B:/~BUN/root/chunk-qtwpak8g.js")]);k({storageV5:p,credentials:m(p)}),await G(p)}catch(m){import("B:/~BUN/root/chunk-cjjvhnjh.js").then(({logForDebugging:k})=
+  @206276237 etRepoDetectionGuards:Rt},{initDefaultDebugLog:kt}])=>{if(m({storageV5:p,credentials:N}),Rt({trustProbe:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p
+  @206276338 be:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p);return tt.then(()=>{if(it())bt(),At(p)}),St("tengu_fleetview",{defaultToAgentsView:l,relaunch:Y}),y
+  @223551991 :e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((_)=>_.autoUpdaterResult),h=Ie(),[v,I]=F({}),[D,L]=F(!1),w=gt(n?.version);A(()=>{or().then(L)},[]
+  @223561248 :e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((i)=>i.autoUpdaterResult),h=Ie(),[v,I]=F({current:{ISSUES_EXPLAINER:"report the issue at https://
+  @236022838 tate:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]=S(
+CRED "credentials:g}" count=8
+  @218286522 try:d,managedHooksOnly:p,managedHooksExcluded:f,storageV5:m,credentials:g}){let h=t.hook_event_name,y=o?`${h}:${o}`:h,b=a?.storageV5??m,S=a?.credentials??g;if(SQ()){_(`Skipping ${y
+  @232354066 l,getAppState:u,isolationLatch:c,onQueryEvent:m,storageV5:d,credentials:g}){gi("ultraplan-choice");let h=lt(),S=st(),k=e_(),_=lr(),C=Ur(),w=Go();async function b(j){switch(j){case"
+  @232354829 nHooksRegistry:k,dialogStore:_,isolationLatch:c,storageV5:d,credentials:g}))m(fe);if(te)n((fe)=>[...fe,Ct(`Previous session saved \xB7 resume with: claude --resume ${re}`,"suggesti
+  @232452776 r jke=3;function j_e(e,t,o,n,r,s,a,l,u,c,m){let{storageV5:d,credentials:g}=Ue(),h=Go(),S=lt(),k=Tt(),_=Wo(o),C=T(null),w=B(()=>C.current,[]),b=T(void 0),v=T(null),A=T(null),N=T(new
+  @232472448 nk-gntc9zgb.js");return Xe({includeBehaviors:!1,storageV5:d,credentials:g})},onSetColor(Xe){let $t=Xe==="default";if(!$t&&!Hl.includes(Xe))return{ok:!1,error:`Unknown color "${Xe}"
+  @235924278 }}function mt(ie){let s=ct(34),{onDone:i,host:U,storageV5:W,credentials:g}=ie,ft;if(s[0]===A)ft={name:"checking"},s[0]=ft;else ft=s[0];let[_,kt]=B(ft),d=V(!1),Ct;if(s[1]!==g||s[2]!
+CRED "storageV5:p,credentials" count=8
+  @206275080 qfgksp5r.js"),import("B:/~BUN/root/chunk-qtwpak8g.js")]);k({storageV5:p,credentials:m(p)}),await G(p)}catch(m){import("B:/~BUN/root/chunk-cjjvhnjh.js").then(({logForDebugging:k})=>
+  @206276238 tRepoDetectionGuards:Rt},{initDefaultDebugLog:kt}])=>{if(m({storageV5:p,credentials:N}),Rt({trustProbe:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p)
+  @206277205 eturnRelaunch()?"list_return":O?"cli_agents":"default_home",storageV5:p,credentials:N};{let{mountFleetViewWithComposerBack:m}=await import("B:/~BUN/root/chunk-nmdcegq2.js");await m
+  @222038144 groundTasks:t,transcripts:n,signal:c,surveyFeedbackSource:o,storageV5:p,credentials:r}){let{payload:f,thirdPartyDroppedCount:d}=await Ue({messages:s,description:a,surface:u,scope:i
+  @223841571 )=>({submit:{editor:q,roster:w,selection:_,view:B,attach:Be,storageV5:p,credentials:b,onAction:e,exit:we,relaunchForUpdate:ep,searchKeyDown:Pr,vimMode:nS,dispatchInputActive:un,cur
+  @230329060 ,session:r,sessionHooks:a,isRemoteTransport:c,ingressTail:m,storageV5:p,credentials:i}){if(!c()){S("[session-notices] session_notice on a non-RemoteIO transport \u2014 dropping wit
+CRED "let{storageV5:p" count=4
+  @223551988 ing:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((_)=>_.autoUpdaterResult),h=Ie(),[v,I]=F({}),[D,L]=F(!1),w=gt(n?.version);A(()=>{or().then(L)}
+  @223561245 ing:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((i)=>i.autoUpdaterResult),h=Ie(),[v,I]=F({current:{ISSUES_EXPLAINER:"report the issue at https
+  @236022835 itState:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]
+  @236092685 :r,targetPlugin:s,targetMarketplace:u,action:m,commands:h}){let{storageV5:p,credentials:g}=We(),f=Ae((c)=>c.mcp.clients),y=Ae((c)=>c.mcp.tools),d=Ae((c)=>c.plugins.errors),x=Ae((c)
+CRED "let{storageV5:" count=10
+  @223184627 ();function ee({serverName:r,isPluginServer:c=!1,onDone:t}){let{storageV5:e}=j(),o=g(!1),l=g(Date.now());async function p(a){if(o.current)return;if(Date.now()-l.current<b)return;sw
+  @223185872 );function ce({serverNames:r,pluginServerNames:c,onDone:t}){let{storageV5:e}=j(),o=g(!1),l=g(Date.now());async function p(i){if(o.current)return;if(Date.now()-l.current<b)return;o.
+  @223551988 ing:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((_)=>_.autoUpdaterResult),h=Ie(),[v,I]=F({}),[D,L]=F(!1),w=gt(n?.version);A(()=>{or().then(L)}
+  @223561245 ing:e,onChangeIsUpdating:t,showSuccessMessage:o,verbose:s}){let{storageV5:p}=Oe(),n=N((i)=>i.autoUpdaterResult),h=Ie(),[v,I]=F({current:{ISSUES_EXPLAINER:"report the issue at https
+  @230360560 ;function nh(e){return bl(e.bridgeSessionId)}function lh(e){let{storageV5:t}=e,s=b(kl(),Ru),r,a=null,c=!1,m=!1,p,i=[];function l(){if(c)return!1;if(m)return!1;let _=rh();if(r?.acco
+  @231701533 ep:s,entryReason:m,onBeforePurchase:f,onPurchaseSuccess:d}){let{storageV5:g,credentials:c}=Ce(),[u,_]=b("USD"),[w,k]=b([]),[N,C]=b(),[h,D]=b(null);async function x(l=!0){if(l)t({s:
+CRED "Sr()" count=10
+  @206951595  y(e)?jr(e[0],e[1]):mr(e);return zr(e)}var He;var pt=i(()=>{Sr();qr();Gr();M();$r();He=vd});function bd(e,t){var o={};return t=He(t,3),dr(e,function(r,s,a){or(o,s,t(r,s,a))}),o}var
+  @208080782 0&&e.startsWith("@")&&e.length>1?e.slice(1):void 0}function Sr(){try{let e=Er();if(e===null)return null;let t=go(yo(e));if(!t||typeof t!=="object"||Array.isArray(t))return null;ret
+  @208086033 (e.sessionCache)return e.sessionCache;let t=bt()!==void 0,n=Sr();if(n){if(e.seedFromDisk(n),t)G().invalidatePolicyLayer();else Ke();return n}return null}function ad(){let e=Pr(),t=
+  @208093974 delete(l);U(e,n,d)}var Ye;var qe=S(()=>{ie();fr();pr();mr();Sr();dr();cr();De();ur();lr();$e();yr();gr();se();Fe();Ye=hr});function et(e,t,n,r,o){if(e===t)return;Qe(t,function(i,s)
+  @208257270 nvalidate()})}async onHeadChanged(){this.invalidate(),await Sr(),await this.watchCurrentBranchRef()}invalidate(){for(let e of this.cache.values())e.dirty=!0;this.stateChanged.emit(
+  @208305993 Provider:me.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,flagInline:Sr(),flagPath:gr(),flagExpectedContent:fr()??pr(),coworkPlugins:hr(),canonicalGitRoot:wr,mdm:()=>M(),hkcu:()=>Re(),helpe
+CLI2 "createSubcommandRoot" count=8
+  @181816165 createSubcommandRootdoctorHandlerinstallHandlerparseSetupTokenExpiryDayssetupTokenHandlerB:/~BUN/root/_214.jsB:/~BUN/root/_215.jsB:/~BUN/roo
+  @204782309 createSubcommandRoot' from null or undefined value...~...mcpRemoveHandler...W`..createSubcommandRootI...Cannot destructure property '
+  @204782392 createSubcommandRootI...Cannot destructure property 'mcpListHandler' from null or undefined value...]...mcpListHandler..H...8.G.Cann
+  @223262872 createSubcommandRoot:c}]=await Promise.all([import("B:/~BUN/root/chunk-w1y824sd.js"),import("B:/~BUN/root/chunk-qtxet1f6.js")]);return await
+  @223263304 createSubcommandRoot:l},{credentialsStoreFor:s}]=await Promise.all([import("B:/~BUN/root/chunk-w1y824sd.js"),import("B:/~BUN/root/chunk-qtxe
+CLI2 "function Qe(" count=8
+  @207316408 function Qe(r){return x(r)&&j(r)==Je}var Je="[object Map]",Dr;var Gr=i(()=>{D();N();Dr=Qe});var Rr,Ve,Yr;var qr=i(()=>{Gr();Kr();Hr();Rr=A&&
+  @207470590 function Qe(e,u){await x("tengu_feature_sad",{feature_name:a(e),error_code:u})}async function Xe(e,u,r){try{let t=await u();return K(e),t}ca
+  @207775292 function Qe(e,n=new Set,i){if(A(e)===null)return null;if(i!==void 0&&i.hoverRestOn&&i.source.isKeySegment(e))return en(e,n,i.source);let t=k
+  @207839993 function Qe(e){return typeof e==="number"}function hs(e){return e===!0||e===!1||fs(e)&&Ze(e)=="[object Boolean]"}function Xe(e){return typeo
+  @207987288 function Qe(e,t){let n=0,o=t-1;while(o>=0&&e[o]==="\\")n++,o--;return n%2!==0}function Je(e,t){let n=0;for(let o=0;o<e.length;o++)if(e[o]===
+CLI2 "Qe=e=>" count=0
+CLI2 "function ce(" count=8
+  @68207374 function ce(e,t){var i=e.computed,s=e.key;return!i&&(s.type==="Identifier"&&s.name===t||s.type==="Literal"&&s.value===t)}l.parseExportAllDec
+  @206607166 function ce(e){if(Array.isArray(e))return"array";if(typeof e==="string")return"string";return"unknown"}function De(...e){let[t,r,o]=e;if(typ
+  @206922304 function ce(){return t(process.env.CLAUDE_CODE_SAFE_MODE)||p("--safe-mode")}function Ee(){return p("--safe-mode")?"restart without --safe-mo
+  @206932978 function ce(e){var t=-1,o=e==null?0:e.length;this.__data__=new ue;while(++t<o)this.add(e[t])}var An;var Pn=i(()=>{Sn();Cn();xn();ce.prototyp
+  @207467893 function ce(e){return e.match(xe)||[]}var xe,E;var A=o(()=>{xe=/[^\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g;E=ce});function _e(e){return me.t

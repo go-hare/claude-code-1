@@ -1,0 +1,5 @@
+# confirm-only J path — same _705 module as ii/Is; export J as oGc @208321331
+# function J(e){return le(e,p())} pos=208306382 end=208306413 len=31
+function J(e){return le(e,p())}
+# next function J(e){ in file is AFTER this module export @208326222 (different module)
+# le(e,p()) body not requested; Pr() factory for oi not uniquely bound (20 function Pr)

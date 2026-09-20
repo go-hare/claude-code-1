@@ -1,0 +1,2 @@
+# 247 pluginSuggestionShownCounts hit1 @222247533 kind=READER_OPTIONAL fn@222247508..222247569 trunc=false
+function h(n){return s().pluginSuggestionShownCounts?.[n]??0}

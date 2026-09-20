@@ -1,0 +1,8 @@
+# off=216102557
+
+),R="";if(n==="completed"&&r!==void 0){let L=Ur(le(r)),F=8000;if(L.length>8000){let O=tn(L,8000);R=`
+<result>${O}
+... (truncated ${L.length-O.length} chars, full result in ${C})</result>`}else R=`
+<result>${L}</result>`}let P=o?.length?`
+<failures>${Pc(Ur(o.join(`
+`)),Jis)}</failures>`:"",x="";if(h){let L=0,F=0,O=0,H=0;for(let q of h){if(q.type!=="workflow_agent")continue;if(q.state==="done"){if(L++,q.resultPreview===void 0||Zis.test(q.resultPrev

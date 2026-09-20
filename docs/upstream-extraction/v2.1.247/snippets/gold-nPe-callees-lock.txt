@@ -1,0 +1,26 @@
+# nPe callees official-247. Invent-ban. Unique via nPe/Zg strings not name alone.
+
+nPe @213644976 LOCKED (gold-gza-nPe-full.txt)
+  ay("userSettings",{pluginConfigs:o},void 0,t)  @213645080 UNIQUE
+  Jr().mutate(..., n)                           @213645246
+  t3()                                          after catch
+
+ay  LOCKED  updateSettingsForSource (value merge)
+  nPe-mod import: bHc as ay from _705 @212841889
+  _705 export: Rs as bHc @208321748
+  function Rs(e,t,n,r){return ii(e,()=>t,n,r)} @208311609
+  same pack as wB=cHc=ii transform form
+  gold-nPe-callees-ay.txt
+
+Jr  LOCKED  getSecureStorage getter
+  nPe-mod import: xRc as Jr from _721 @212844280
+  _721 export: Ar as xRc @208364028
+  function Ar(){if(oe)return oe;if(st())return Se(ne,j);return j} @208363721
+  j has readAsync/mutate/update/delete (plaintext+keychain)
+  mutate(e,t){return w(j,e,t)}  t = credentials handle (nPe 3rd)
+  gold-Jr-Ar-208363721.txt
+
+t3  LOCKED  optionValues cache clear
+  function t3(){Xn().optionValues.clear()} @213643845 UNIQUE count=1
+  also called at end of evi
+  gold-nPe-callees-t3.txt

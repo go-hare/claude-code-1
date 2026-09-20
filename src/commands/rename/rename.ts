@@ -127,7 +127,11 @@ export async function call(
   // (updateSessionName → PID registry so peers see the claim).
   await saveAgentName(sessionId, newName, fullPath)
   // densable nameSource: collision when yielded, else user.
-  await updateSessionName(newName, yieldedFrom ? 'collision' : 'user')
+  // densable 2.1.247 #13 — `registryUpdated` from pid-file persist.
+  const registryUpdated = await updateSessionName(
+    newName,
+    yieldedFrom ? 'collision' : 'user',
+  )
   sessionNameState.userTypedName = newName
   context.setAppState(prev => ({
     ...prev,
@@ -164,7 +168,7 @@ export async function call(
     },
   })
 
-  onDone(formatSessionRenamedMessage(newName, yieldedFrom), {
+  onDone(formatSessionRenamedMessage(newName, yieldedFrom, registryUpdated), {
     display: 'system',
   })
   return null

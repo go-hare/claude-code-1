@@ -1,0 +1,2 @@
+# pos=214632274
+w Date;await $jo(u,d,d).catch(()=>{})}catch(d){if(Kjo(d))_(`The occupant of ${t} cannot be renamed aside (${De(d)}); removing it in place instead`,{level:"debug"}),await cZ(t,{recursive:!0,force:!0});else if(!kg(d))throw d}}let a=e.endsWith(dwt)?e:e+dwt,l=t.startsWith(a),c=e;try{if(l){let u=pwt(cme(e),`.claude-plugin-temp-${Date.now()}-${Djo(4).toString("hex")}`);await cl(e,u),await vt().mkdir(cme

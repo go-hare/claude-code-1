@@ -1,0 +1,2 @@
+# needle=function K8( pos=241883063 end=241883163 len=100
+function K8(e){return e instanceof jh||(e=Tl(e)),e?(e=e.rgb(),new ua(e.r,e.g,e.b,e.opacity)):new ua}

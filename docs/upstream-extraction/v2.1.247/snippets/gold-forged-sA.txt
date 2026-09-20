@@ -1,0 +1,1 @@
+function sA(e){let t=e.slice(0,O4n).map((r)=>bp($l(r),nYn)).join(", "),n=e.length-O4n;return n>0?`${t} and ${n} more`:t}

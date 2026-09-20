@@ -1,0 +1,3 @@
+# offset=197390228
+
+_delisted_enforcement...{.K.uninstalled...q.t.uninstall-failed)...W.Failed to auto-uninstall delisted plugin ...)...u.Failed to check for delisted plugins in "...scan-failed...u.forceRemoveDeletedPlugins...b.is_official_marketplace.G...*...reconciler: failed to load known_marketplaces.json, treating as empty: ....L.Q.[reconcile] '...:...' declared path does not exist; keeping materialized entry...z..[reconcile] ...D.. marketplace(s): ...[reconcile] failed to ...u... marketplace '...alreadyMaterialized...zH>.same-transcript...\r.tran

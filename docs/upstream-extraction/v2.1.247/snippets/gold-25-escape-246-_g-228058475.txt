@@ -1,0 +1,3 @@
+# 246 function _g start=228058475 len=148 sha=a967d84469652a7c
+
+function _g(e){try{let t=new URL(e);if(t.protocol==="https:")return!0;if(t.protocol==="http:"&&A$.has(t.hostname))return!0;return!1}catch{return!1}}

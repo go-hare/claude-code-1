@@ -1,0 +1,1 @@
+async function Lo(e){if(!te())return!0;let{filterCommandsForRemoteMode:t,getBuiltinCommands:n}=await import("B:/~BUN/root/chunk-xwd6kgep.js");return t(n()).some((o)=>o.name===e||o.aliases?.includes(e))}

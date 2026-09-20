@@ -1,0 +1,3 @@
+# off=211447329 hit=18
+
+ketplace headersHelper disabled by managed policy");if(!Zr())return j(`${u}: headersHelper not run \u2014 disabled by the plugin command kill switch`,{level:"warn"}),p;let m=await Pc(a.headersHelper,r.url,n.marketplaceName,a.operatorAuthored);return{...p,...l(m,"helper output")}}async function Pc(r,n,a,u){let l=`${r}\x00${n}\x00${a??""}\x00${u?"operator":"repo"}`,p=Date.now(),{marketplaceHelperMem

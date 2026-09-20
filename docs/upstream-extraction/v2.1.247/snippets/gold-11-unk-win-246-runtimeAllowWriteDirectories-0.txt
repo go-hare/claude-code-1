@@ -1,0 +1,10 @@
+# 246 NO_FN "runtimeAllowWriteDirectories" @201196404
+
+lsTerminate.'...`ss.installedFilterRequestEnforcesAllowlist.(...S.installsSinceInitializeStartedAllEnforce...&.builtConfigEnforcesAllowlist...2..settingsSubscriptionCleanup...i. .sandboxDisabledThisSession...I...initFailureReason...fsReadConfigMemo...gbHostRulesMemo...@.W.bareGitRepoScrubPaths...h.|.symlinkedDenyScrubPaths...K.denyLiteralSymlinkCandidates...runtimeAllowWriteDirectories...(..dependencyProbeGeneration...checkDependenciesProbe...V.	.baseIsSupportedPlatform...'eval' '...y..' 2>/dev/null || 'true'...mq..[SandboxDebug]..	...SRT_DEBUG...claude/agents...F.I.^\\\\\?\\unc\\...$..\\?\...`.O.^[\\/]{2}[?.][\\/]unc[\\/]...ok..toNamespacedPath...Y.z./tmp/...+:./var/......p./private/tmp/......<.y./private/var/......%USERPROFILE%...%HOMEDRIVE%.
+...b.%HOMEPATH%...(.h.^[a-z]:...i.[*?]...%./dev/dtracehelper...%.../dev/autofs_nowait...4../tmp/claude.../private/tmp/claude.
+...|...npm/_logs.....*.b..claude/debug...(...SANDBOX_RUNTIME=1...TMPDIR=...y.@.169.254.0.0/16..
+...Hr..10.0.0.0/8.....172.16.0.0/12...T...192.168.0.0/16..	...Nb.NO_PROXY=...	...zO.no_proxy=...j.0.HTTP_PROXY=http://..
+... ..localhost:...4...HTTPS_PROXY=http://...http_proxy=http://...f..https_proxy=http://.2...GIT_CONFIG_PARAMETERS='http.proxyAuthMethod=basic'..
+...0..socks5h://..
+...ALL_PROXY=..
+...k.all_proxy=...w...GRPC_PROXY=...th..grpc_proxy=.b...GIT_SSH_COMMAND=ssh -o ControlMaster=no -o ControlPath=none -o ProxyCommand='nc -X 5 -x localhost:...o... %h %p'...b..,proxyauth=.u...U..GIT_SSH_COMMAND=ssh -o ControlMaster=no -o ControlPath=none -o ProxyCommand='socat - PROXY:localhost:%h:%p,proxyport=...FTP_PROXY=socks5h://...u.ftp_proxy=socks5h://...<.RSYNC_PROXY=localhost:...'.DOCKER_HTTP_PROXY=http://...O..DOCKER_HTTPS_PROXY=http://...CLOUDSDK_PROXY_TYPE=http ...

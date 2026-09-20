@@ -1,0 +1,231 @@
+# ver=246 name= async=false start=66419598 end=66427026 len=7428 sha=468788b8da49c54a needle="with exit code"
+
+function (createShellInterpreter_, createParsedShellScript_) {"use strict";
+  let createShellInterpreter = createShellInterpreter_, createParsedShellScript = createParsedShellScript_;
+  function lazyBufferToHumanReadableString() {
+    return this.toString();
+  }
+
+  class ShellError extends Error {
+    #output = @undefined;
+    info;
+    exitCode;
+    stdout;
+    stderr;
+    constructor() {
+      super("");
+    }
+    initialize(output, code) {
+      this.message = `Failed with exit code ${code}`, this.#output = output, this.name = "ShellError", Object.defineProperty(this, "info", {
+        value: {
+          exitCode: code,
+          stderr: output.stderr,
+          stdout: output.stdout
+        },
+        writable: !0,
+        enumerable: !1,
+        configurable: !0
+      }), this.info.stdout.toJSON = lazyBufferToHumanReadableString, this.info.stderr.toJSON = lazyBufferToHumanReadableString, this.stdout = output.stdout, this.stderr = output.stderr, this.exitCode = code;
+    }
+    text(encoding) {
+      return this.#output.text(encoding);
+    }
+    json() {
+      return this.#output.json();
+    }
+    arrayBuffer() {
+      return this.#output.arrayBuffer();
+    }
+    bytes() {
+      return this.#output.bytes();
+    }
+    blob() {
+      return this.#output.blob();
+    }
+  }
+
+  class ShellOutput {
+    stdout;
+    stderr;
+    exitCode;
+    constructor(stdout, stderr, exitCode) {
+      this.stdout = stdout, this.stderr = stderr, this.exitCode = exitCode;
+    }
+    text(encoding) {
+      return this.stdout.toString(encoding);
+    }
+    json() {
+      return JSON.parse(this.stdout.toString());
+    }
+    arrayBuffer() {
+      return this.stdout.buffer;
+    }
+    bytes() {
+      return new @Uint8Array(this.arrayBuffer());
+    }
+    blob() {
+      return new Blob([this.stdout]);
+    }
+  }
+
+  class ShellPromise extends Promise {
+    #args = @undefined;
+    #hasRun = !1;
+    #throws = !0;
+    #resolve;
+    #reject;
+    constructor(args, throws) {
+      let potentialError = new ShellError, resolve, reject;
+      super((res, rej) => {
+        resolve = (code, stdout, stderr) => {
+          let out = new ShellOutput(stdout, stderr, code);
+          if (this.#throws && code !== 0)
+            potentialError.initialize(out, code), rej(potentialError);
+          else
+            potentialError = @undefined, res(out);
+        }, reject = (error) => {
+          potentialError = @undefined, rej(error);
+        };
+      });
+      this.#throws = throws, this.#args = args, this.#hasRun = !1, this.#resolve = resolve, this.#reject = reject;
+    }
+    cwd(newCwd) {
+      if (this.#throwIfRunning(), typeof newCwd > "u" || newCwd === "." || newCwd === "" || newCwd === "./")
+        newCwd = defaultCwd ?? process.cwd();
+      return this.#args.setCwd(newCwd), this;
+    }
+    env(newEnv) {
+      if (this.#throwIfRunning(), typeof newEnv > "u")
+        newEnv = defaultEnv;
+      return this.#args.setEnv(newEnv), this;
+    }
+    #run() {
+      if (!this.#hasRun) {
+        this.#hasRun = !0;
+        let interp = createShellInterpreter(this.#resolve, this.#reject, this.#args);
+        this.#args = @undefined, interp.run();
+      }
+    }
+    #quiet(isQuiet = !0) {
+      return this.#throwIfRunning(), this.#args.setQuiet(isQuiet), this;
+    }
+    quiet(isQuiet) {
+      return this.#quiet(isQuiet ?? !0);
+    }
+    nothrow() {
+      return this.#throws = !1, this;
+    }
+    throws(doThrow) {
+      return this.#throws = !!doThrow, this;
+    }
+    async text(encoding) {
+      let { stdout } = await this.#quiet(!0);
+      return stdout.toString(encoding);
+    }
+    async json() {
+      let { stdout } = await this.#quiet(!0);
+      return JSON.parse(stdout.toString());
+    }
+    async* lines() {
+      let { stdout } = await this.#quiet(!0);
+      yield* stdout.toString().split(/\r?\n/);
+    }
+    async arrayBuffer() {
+      let { stdout } = await this.#quiet(!0);
+      return stdout.buffer;
+    }
+    async bytes() {
+      return this.arrayBuffer().then((x) => new @Uint8Array(x));
+    }
+    async blob() {
+      let { stdout } = await this.#quiet(!0);
+      return new Blob([stdout]);
+    }
+    #throwIfRunning() {
+      if (this.#hasRun)
+        throw Error("Shell is already running");
+    }
+    run() {
+      return this.#run(), this;
+    }
+    then(onfulfilled, onrejected) {
+      return this.#run(), super.then(onfulfilled, onrejected);
+    }
+    static get [Symbol.species]() {
+      return @Promise;
+    }
+  }
+  var defaultEnv = process.env || {};
+  let originalDefaultEnv = defaultEnv;
+  var defaultCwd = @undefined;
+  let cwdSymbol = Symbol("cwd"), envSymbol = Symbol("env"), throwsSymbol = Symbol("throws");
+
+  class ShellPrototype {
+    [cwdSymbol];
+    [envSymbol];
+    [throwsSymbol] = !0;
+    env(newEnv) {
+      if (typeof newEnv > "u" || newEnv === originalDefaultEnv)
+        this[envSymbol] = originalDefaultEnv;
+      else if (newEnv)
+        this[envSymbol] = Object.assign({}, newEnv);
+      else
+        @throwTypeError("env must be an object or undefined");
+      return this;
+    }
+    cwd(newCwd) {
+      if (typeof newCwd > "u" || typeof newCwd === "string") {
+        if (newCwd === "." || newCwd === "" || newCwd === "./")
+          newCwd = defaultCwd ?? process.cwd();
+        this[cwdSymbol] = newCwd;
+      } else
+        @throwTypeError("cwd must be a string or undefined");
+      return this;
+    }
+    nothrow() {
+      return this[throwsSymbol] = !1, this;
+    }
+    throws(doThrow) {
+      return this[throwsSymbol] = !!doThrow, this;
+    }
+  }
+  var BunShell = function BunShell2(first, ...rest) {
+    if (first?.raw === @undefined)
+      throw Error("Please use '$' as a tagged template function: $`cmd arg1 arg2`");
+    let parsed_shell_script = createParsedShellScript(first.raw, rest), cwd = BunShell2[cwdSymbol], env = BunShell2[envSymbol], throws = BunShell2[throwsSymbol];
+    if (cwd)
+      parsed_shell_script.setCwd(cwd);
+    if (env)
+      parsed_shell_script.setEnv(env);
+    return new ShellPromise(parsed_shell_script, throws);
+  };
+  function Shell() {
+    if (!new.target)
+      @throwTypeError("Class constructor Shell cannot be invoked without 'new'");
+    var Shell2 = function Shell3(first, ...rest) {
+      if (first?.raw === @undefined)
+        throw Error("Please use '$' as a tagged template function: $`cmd arg1 arg2`");
+      let parsed_shell_script = createParsedShellScript(first.raw, rest), cwd = Shell3[cwdSymbol], env = Shell3[envSymbol], throws = Shell3[throwsSymbol];
+      if (cwd)
+        parsed_shell_script.setCwd(cwd);
+      if (env)
+        parsed_shell_script.setEnv(env);
+      return new ShellPromise(parsed_shell_script, throws);
+    };
+    return Object.setPrototypeOf(Shell2, ShellPrototype.prototype), Object.defineProperty(Shell2, "name", { value: "Shell", configurable: !0, enumerable: !0 }), Shell2[cwdSymbol] = defaultCwd, Shell2[envSymbol] = defaultEnv, Shell2[throwsSymbol] = !0, Shell2;
+  }
+  return Shell.prototype = ShellPrototype.prototype, Object.setPrototypeOf(Shell, ShellPrototype), Object.setPrototypeOf(BunShell, ShellPrototype.prototype), BunShell[cwdSymbol] = defaultCwd, BunShell[envSymbol] = defaultEnv, BunShell[throwsSymbol] = !0, Object.defineProperties(BunShell, {
+    Shell: {
+      value: Shell,
+      enumerable: !0
+    },
+    ShellPromise: {
+      value: ShellPromise,
+      enumerable: !0
+    },
+    ShellError: {
+      value: ShellError,
+      enumerable: !0
+    }
+  }), BunShell;
+}

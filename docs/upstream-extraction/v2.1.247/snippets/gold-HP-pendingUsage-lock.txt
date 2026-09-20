@@ -1,0 +1,153 @@
+# HP / pendingUsage lock — official 2.1.247 peel ONLY. Invent-ban.
+
+Start (already locked, not re-derived):
+  yln@213648410
+    function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}
+  dPe@213653071
+    function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{...pluginUsage...},t)}
+
+| name | verdict | offset | end | len | bind | gold |
+|------|---------|--------|-----|-----|------|------|
+| HP | LOCKED | 213647449 | 213647488 | 39 | unique function HP(){return aln.of(bn().host)} count=1 + unique let{pendingUsage:t}=HP() count=1 | gold-HP-function-HP-full.txt |
+| iln | LOCKED | 213647167 | 213647259 | 92 | unique class iln{pendingUsage=new Map count=1 | gold-HP-class-iln-full.txt |
+| lln | LOCKED | 213647259 | 213647306 | 47 | unique class lln{ count=1 | gold-HP-class-lln-full.txt |
+| cln | LOCKED | 213647317 |  |  | unique aln=new fn(()=>new iln) count=1 | gold-HP-var-cln-full.txt |
+| uln | LOCKED | 213647374 | 213647449 | 75 | unique function uln( count=1 | gold-HP-function-uln-full.txt |
+| dm | LOCKED | 213647488 | 213647665 | 177 | collision function dm( count=12; unique pendingUsage.set(e,{count:1,lastUsedAt:t}) count=1 | gold-HP-function-dm-full.txt |
+| dln | LOCKED | 213647665 | 213647846 | 181 | unique function dln( count=1 | gold-HP-function-dln-full.txt |
+| pln | LOCKED | 213647846 | 213647895 | 49 | unique function pln(e){HP().exitFlushesInFlight.push(e)} count=1 | gold-HP-function-pln-full.txt |
+| fln | LOCKED | 213647895 | 213647981 | 86 | unique function fln(e){let t=HP().exitFlushesInFlight count=1 | gold-HP-function-fln-full.txt |
+| mln | LOCKED | 213647981 | 213648088 | 107 | unique function mln(){let e=HP(),t=e.exitFlushesInFlight count=1 | gold-HP-function-mln-full.txt |
+| gln | LOCKED | 213648088 | 213648126 | 38 | unique function gln(e){HP().flushStorageV5=e} count=1 | gold-HP-function-gln-full.txt |
+| hln | LOCKED | 213648126 | 213648168 | 42 | unique function hln(){return HP().flushStorageV5} count=1 | gold-HP-function-hln-full.txt |
+| sPe | LOCKED | 213648168 | 213648362 | 194 | collision function sPe( count=2 (CSS @241866153); unique function sPe(){let e=HP() count=1 | gold-HP-function-sPe-full.txt |
+| uvi | LOCKED | 213648362 | 213648410 | 48 | unique function uvi( count=1 | gold-HP-function-uvi-full.txt |
+| yln | LOCKED | 213648410 | 213648511 | 101 | already locked — not re-derived | gold-yln-yln-full.txt |
+| oko | LOCKED | 213652316 | 213652373 | 57 | unique function oko( count=1 | gold-HP-function-oko-full.txt |
+| Aln | LOCKED | 213652373 | 213652453 | 80 | unique async function Aln( count=1 | gold-HP-async-function-Aln-full.txt |
+| xvi | LOCKED | 213652453 | 213652526 | 73 | unique function xvi( count=1 | gold-HP-function-xvi-full.txt |
+| sko | LOCKED | 213652526 | 213652610 | 84 | unique function sko( count=1 | gold-HP-function-sko-full.txt |
+| xit | LOCKED | 213652610 | 213652823 | 213 | unique function xit( count=1 | gold-HP-function-xit-full.txt |
+| xln | LOCKED | 213652823 | 213653071 | 248 | unique function xln( count=1 — pluginUsage seed only, not pendingUsage | gold-HP-function-xln-full.txt |
+| dPe | LOCKED | 213653071 | 213653329 | 258 | already locked — not re-derived | gold-yln-lock.txt |
+| Iln | LOCKED | 213653329 | 213653374 | 45 | unique function Iln( count=1 — reads es().pluginUsage, not pendingUsage | gold-HP-function-Iln-full.txt |
+| pPe | LOCKED | 213654230 |  |  | unique uln({flush:oko,flushAtExit:sko}) count=1 | gold-HP-var-pPe-full.txt |
+| fn | UNKNOWN |  |  |  | class fn{ @237948179 is a different ctor; of(bn().host) pattern count=15. do not invent WeakMap | |
+| bn | UNKNOWN |  |  |  | function bn( count=15. do not invent which bn HP uses | |
+| dm callee @216056711 | UNKNOWN | 216056711 |  |  | unique dm(f.pluginInfo.repository) count=1 but function dm( count=12 and no Y$/_448 import walk | |
+
+## Collision-ban HP
+
+function HP( count=3 in official-247:
+  @208506954 function HP(){return{event_name:"",...}} — telemetry empty event
+  @213647449 function HP(){return aln.of(bn().host)} — THIS (yln callee)
+  @250510798 function HP(e,t){...subtreeHtml...} — html
+lowercase function hp( / async function hp( are different (bg-stop @221747316, proto, bun versions, date week, hsv).
+HP as / as HP hits are other modules (Rye, Ao as HP, SWa as HP, h9c as HP, Opa as HP). not this.
+
+## What HP returns / where pendingUsage is created
+
+function HP(){return aln.of(bn().host)}
+
+class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}
+class lln{flushers=null;exitFlushRegistered=!1}
+var aln,r3
+var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln})
+
+- pendingUsage is created as an iln instance field: new Map. unique pendingUsage=new Map count=1.
+- HP returns aln.of(bn().host) — an iln instance keyed by bn().host.
+- aln is constructed once in cln: new fn(()=>new iln). unique count=1.
+- r3 is a module singleton new lln (flushers + exitFlushRegistered). not the Map.
+- not React context (no createContext/useContext in this cluster).
+- fn implementation UNKNOWN (do not invent WeakMap/session). fact: same .of(bn().host) host-scope pattern appears 15 times. class fn{ @237948179 constructor(e,t,r=1) is a different fn.
+
+## Aliases
+
+HP  same-module only. HP as / as HP are other modules. not in _448 export map @219684757.
+dm  export dm as Y$ @219684757. import Y$ as qe from _448.js @225459219. Y$ as tsc @208903776 is a different Y$.
+uvi export uvi as Z$ @219684766. import Z$ as a from _448.js @222244939.
+xvi export xvi as $$ @219684785. import $$ as tt from _448.js @222197331.
+xln export xln as aaa @219684795. import aaa as At @222874789.
+dPe export dPe as baa @219684806. import baa as Ft @222874809 (already locked).
+zC  export zC as _$ @219684776. import _$ as M from _448.js @222244947 (module init).
+pPe export pPe as faa @219684850. import faa as ri / N / oi.
+Iln export Iln as caa @219684817. import caa as u @222244955.
+yln / sPe / uln / oko / xit / Aln / sko / iln / HP — as / as-name count=0 in export map.
+
+## pendingUsage write sites (all)
+
+pendingUsage string count=11:
+  @200123472 sourcemap/debug names
+  @200264005 Cannot destructure property 'pendingUsage' (runtime string)
+  @213647177 CREATE class iln pendingUsage=new Map
+  @213647420 READ uln t.pendingUsage.size
+  @213647531 READ dm n.pendingUsage.get(e)
+  @213647588 WRITE dm n.pendingUsage.set(e,{count:1,lastUsedAt:t})  — unique set( count=1
+  @213648260 READ sPe e.pendingUsage.size
+  @213648306 READ sPe e.pendingUsage.entries()
+  @213648339 WRITE sPe e.pendingUsage.clear()  — unique clear() count=1
+  @213648390 READ uvi HP().pendingUsage.has(e)
+  @213648430 READ yln destructure {pendingUsage:t}=HP()
+
+pendingUsage.delete( count=0.
+yln deletes via destructured alias: t.delete(n) @213648499 (inside unique yln body).
+dm also mutates in place: r.count++, r.lastUsedAt=t @213647556 unique r.count++,r.lastUsedAt=t count=1.
+
+Who increments before persist: dm @213647488.
+  same-module dm( call count=0 besides def.
+  uniquely bound callers (Y$ as qe):
+    qe(s.pluginInfo.repository) @225476838 count=1
+    qe(p.pluginInfo.repository) @225484253 count=1
+    both inside function cn @225475733 (slash/prompt). gold-HP-qe-increment-callers.txt
+  leftover UNKNOWN: dm(f.pluginInfo.repository) @216056711 count=1 — callee not uniquely walked.
+
+## Readers besides yln
+
+- uln @213647374 — t.pendingUsage.size>0 then dln
+- dm @213647488 — get then set/increment
+- sPe @213648168 — size / entries / clear (drain)
+- uvi @213648362 — has(e)
+- yln @213648410 — keys + delete (already locked)
+
+## Is pendingUsage the in-memory queue that flushes to pluginUsage via ki?
+
+Yes. official bodies:
+  sPe() drains Map → entries[] and clear().
+  oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}
+  Aln(e){let t=sPe();...await ki(xit(t),e)...}
+  sko(){let e=[...mln()??[],...sPe()??[]];...Pln(xit(e))}
+  xit(e) merges e into t.pluginUsage {usageCount, lastUsedAt, lastUsedNumStartups}.
+  pPe=w(()=>{...uln({flush:oko,flushAtExit:sko})})
+  xvi(e) stores flushStorageV5 and schedules Aln.
+  dPe calls yln(n) first (drop in-memory keys) then ki persist-wipe of pluginUsage.
+
+Xwo=60000 (flush delay). var zC=w(()=>{$e();cln()}).
+
+## 246 same-shape leftover
+
+246 does not have HP / yln / iln names.
+  TP@212280557 function TP(){return _sn.of(hn().host)}  — 247 HP equivalent
+  Asn@212281518 function Asn(e){let{pendingUsage:t}=TP();...t.delete(n)}  — 247 yln equivalent
+  class ysn{pendingUsage=new Map...} @212280275 — 247 iln equivalent
+  pendingUsage.set(e,{count:1,lastUsedAt:t}) @212280696 increment via TP()
+gold-HP-246-TP-full.txt gold-HP-246-Asn-full.txt
+
+## Local 1:1 (names only)
+
+dPe / yln → wipePluginUsage in marketplaceManager.ts
+  wipePluginUsage ← dPe (pluginUsage persist only)
+  saveGlobalConfig ← ki
+  no local HP / pendingUsage / yln / dm / sPe / uvi / uln / oko / xit / xvi
+  skillUsageTracking.ts is skillUsage, not plugin pendingUsage
+
+## Local gap (arity/path facts only — do not implement)
+
+wipePluginUsage(pluginIds, storageV5?) 2-arg
+  official dPe(e,t) 2-arg then yln(Set) 1-arg
+  missing: yln(pendingUsage) delete before ki/saveGlobalConfig
+src/ has ZERO pendingUsage / HP()
+  missing: in-memory Map queue (iln.pendingUsage)
+  missing: increment dm(pluginId) before persist
+  missing: sPe drain + oko/Aln/sko flush to pluginUsage via ki(xit)
+  missing: uvi has() / xvi register / pPe uln flushers
+Do not invent HP()/pendingUsage locally.

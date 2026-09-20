@@ -1,0 +1,3 @@
+# LOCKED gln @213648088 end=213648126 len=38
+# unique function gln(e){HP().flushStorageV5=e} count=1
+function gln(e){HP().flushStorageV5=e}

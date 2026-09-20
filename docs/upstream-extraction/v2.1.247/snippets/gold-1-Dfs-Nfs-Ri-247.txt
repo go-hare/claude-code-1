@@ -1,0 +1,21 @@
+# leftover-locked 247 ot callees
+# _e = Dfs as _Ba as _e   @216521679
+# Nfs uses Dfs            @216526035
+# E  = Ri as Fkd as E     @207054225
+# q  = Es as Nw           @222030618  Es=4194304 (4 MiB tail)
+
+async function Dfs(e){if(!e.transcript_ref)return null;if(!ggr.test(e.source_session_id))return null;let{getSessionId:t}=await import("B:/~BUN/root/chunk-j3ftgb6r.js");if(e.source_session_id===t()){let{getTranscriptPathForSession:s}=await import("B:/~BUN/root/chunk-1fjh16vg.js");return s(e.source_session_id)}let{getProjectDir:n,getProjectsDir:r}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),o=e.transcript_ref.project_dir_key;if(o!==void 0&&sLt.test(o))return z_e(r(),o,`${e.source_session_id}.jsonl`);return z_e(n(e.cwd),`${e.source_session_id}.jsonl`)}
+
+async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId:r}=await import("B:/~BUN/root/chunk-j3ftgb6r.js"),o=e.source_session_id===r();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s());if(i!==void 0)try{if(o)return(await t.statMeta(i)).ok;let a=await t.read([{key:i,tail:rgr}]);if(!a.ok)return!1;let[l]=a.value.items;return l.found&&ogr(Buffer.from(l.value).toString("utf8"),e)}catch{return!1}}if(o)try{return await Qi().stat(n),!0}catch{return!1}try{let s=await Qi().readTail(n,rgr);return ogr(s.toString("utf8"),e)}catch{return!1}}
+
+async function Ri(e,t){await using n=await C(e,"r");let r=(await n.stat()).size;if(r===0)return{content:"",bytesRead:0,bytesTotal:0};let i=Math.max(0,r-t),o=r-i,s=Buffer.allocUnsafe(o),a=0;while(a<o){let{bytesRead:c}=await n.read(s,a,o-a,i+a);if(c===0)break;a+=c}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:r}}
+
+# ot then: {content:C,bytesRead:M,bytesTotal:h}=await E(f,q)
+# if(M<h) r=r.slice(r.indexOf(`\n`)+1)  — drop torn first JSONL line on tail cap
+
+function aLt(){return Ffs()!=="off"&&Ufs()}
+function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}
+
+# ye = xSa from _448 = kb as xSa in leftover barrel. function body NOT peeled this pass.
+# persist writes transcript_ref:{session_file, message_range:null, project_dir_key}
+# _e/Dfs does NOT read session_file; it rebuilds path from session id + cwd/project_dir_key

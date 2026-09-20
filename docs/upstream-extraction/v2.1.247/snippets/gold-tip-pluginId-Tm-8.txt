@@ -1,0 +1,2 @@
+# function Tm( @249131904 end=249131947 len=43
+function Tm(e){return qn(e)&&e.matches(OM)}

@@ -1,0 +1,2 @@
+# needle=function Z5( pos=231450510 end=231450597 len=87
+function Z5(e){return e.startsWith(o$)&&e.endsWith(t$)?e.slice(o$.length,-t$.length):e}

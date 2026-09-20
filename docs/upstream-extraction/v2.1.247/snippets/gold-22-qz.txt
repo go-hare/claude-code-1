@@ -1,0 +1,28 @@
+# densable 2.1.247 #22 — official Q$ / Z$ / Yo preflight gate
+# SEA claude.exe 2.1.247
+#
+# Onboarding imports: wsc as Ae, xsc as Ie from _675.js
+# _675 export: Q$ as wsc, Z$ as xsc
+#
+# function Q$(){
+#   if(!Io(Un()))return!1;
+#   let e=H("policySettings");
+#   if(e?.forceLoginMethod==="gateway")return!0;
+#   return e?.forceLoginGatewayUrl!==void 0&&e?.forceLoginMethod===void 0
+# }
+#
+# function Z$(){return Bt().length>0}
+# Bt = ZGc = Cs; Cs(){return ri(Hs())}
+# function Hs(){
+#   let e=y(),t=e.policy.adminLoadErrors;
+#   if(t!==void 0)return t;
+#   let n=[];
+#   n.push(...V(p()).errors),n.push(...M().errors),n.push(...X().errors);
+#   e.policy.adminLoadErrors=n; return n
+# }
+# function ri(e){return e.filter((t)=>t.severity!=="warning")}
+#
+# 246 Yo: if(s)f.push({id:"preflight",...})  // oauth only
+# 247 Yo: [l]=g(()=>Ae()||Ie()); if(c&&!l)u.push({id:"preflight",...})
+#
+# Z$ is 247 NEW. Q$ existed in 246 (used elsewhere). Ae()||Ie() is 247 NEW.

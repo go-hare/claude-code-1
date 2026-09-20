@@ -1,0 +1,2 @@
+# function XX( @241875397 end=241875465 len=68
+function XX(e,t){for(var r=N8(e),i=-1,n=t.length;++i<n;)r.add(t[i])}

@@ -1,0 +1,1 @@
+function sn(e){let n=er(e),t=n.at(-1)??"",i=an(t),o=[...n.slice(0,-1),i];return n.some((r)=>Yt.includes(r))||zt.some((r)=>tn(n,r)||tn(o,r))||rn(t)||rn(i)||tr(i)&&nr(n,n.length-1)}

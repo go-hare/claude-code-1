@@ -1,0 +1,3 @@
+# 247 @203045439
+
+a different app, click it first to bring it forward. For shell commands, use the Bash tool......EE.right-click, middle-click, and clicks with modifier keys require tier "full". Right-click opens a context menu with Paste/Cut, and modifier chords fire as keystrokes before the click. Plain left_click is allowed here........z..File Explorer...........Finder..?....... That grant is click-only: typing into the shell stays blocked......V...The desktop shell is frontmost. Double-click, right-click, and Enter on desktop items can launch applications outside the allowlist. To click on the desktop, tas

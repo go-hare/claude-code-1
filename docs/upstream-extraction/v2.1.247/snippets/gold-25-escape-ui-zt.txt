@@ -1,0 +1,4 @@
+# @236031984
+
+lledPlugins.map((de)=>o(En,{children:[he(de.name),`
+`,t(n,{dimColor:!0,children:zt(de.manifest.description??"")})]},de.name))})]}),T&&o(a,{marginTop:1,flexDirection:"column",children:[t(n,{color:"claude",children:"Updating marketplace\u2026"}),_e&&t(n,{dimColor:!0,children:he(_e)

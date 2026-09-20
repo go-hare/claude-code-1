@@ -1,0 +1,3 @@
+# off=231389556 hit=10
+
+ildren:["Searching: ",n.query]})});case"search_results_received":return o(p,{children:s(t,{dimColor:!0,children:["Found ",n.resultCount,' results for "',n.query,'"']})});default:return null}}function VD(e){let r=e.searchCount??zX(e.results??[]),n=e.durationSeconds>=1?`${Math.round(e.durationSeconds)}s`:`${Math.round(e.durationSeconds*1000)}ms`;return o(a,{justifyContent:"space-

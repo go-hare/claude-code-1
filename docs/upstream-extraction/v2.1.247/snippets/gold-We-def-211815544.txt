@@ -1,0 +1,2 @@
+# needle=function We(){let pos=211815544 end=211815894 len=350
+function We(){let e=_(),a=G(),t=[];for(let o of E){let r=b[o];switch(e){case"macos":if(r.macos.nativeMessagingPath.length>0)t.push({browser:o,path:l(a,...r.macos.nativeMessagingPath)});break;case"linux":case"wsl":if(r.linux.nativeMessagingPath.length>0)t.push({browser:o,path:l(a,...r.linux.nativeMessagingPath)});break;case"windows":break}}return t}

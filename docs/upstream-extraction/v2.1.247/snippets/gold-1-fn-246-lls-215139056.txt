@@ -1,0 +1,3 @@
+# ver=246 name=lls async=true start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4 needle="feedbackDrafts"
+
+async function lls(e){let t=[],n=await yf((r)=>e.listEntries({namespace:"feedbackDraft"},{cursor:r,skipKeyStats:!0}),(r)=>{for(let o of r)if(o.kind==="key"&&o.key.namespace==="feedbackDraft")t.push(o.key)});if(n.status==="done")return t;if(n.status==="capped")return b("feedbackDrafts: draft listing kept offering cursors past the page cap; treating it as failed",{level:"error"}),null;if(Xh(mDt(n.error)))return b(`feedbackDrafts: draft listing failed: ${MVe(n.error)}`,{level:"error"}),null;throw new _e(`feedback draft listing failed: ${MVe(n.error)}`,"feedback draft listing failed")}

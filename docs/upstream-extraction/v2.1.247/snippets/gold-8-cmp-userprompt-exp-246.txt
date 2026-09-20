@@ -1,0 +1,3 @@
+# offset=156319315 ver=246 hit=1/39 needle="UserPromptExpansion"
+
+505a055818ce5fa82C0000083605a055818ce5fa82C00000837formatSkillLoadingMetadataisSlashCommandBlockedByEndedByModellooksLikeCommandpeelStackedPromptCommandsprocessPromptSlashCommandprocessSlashCommandrunUserPromptExpansionHookB:/~BUN/root/_406.jsB:/~BUN/root/_407.jsB:/~BUN/root/_408.jsB:/~BUN/root/_409.jsB:/~BUN/root/_440.jsB:/~BUN/root/_441.jsB:/~BUN/root/_442.jsB:/~BUN/root/_443.jsB:/~BUN/root/_444.jsB:/~BUN/root/_445.jsB:/~BUN/root/_446.jsB:/~BUN/root/_447.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.jsB:/~BUN/root/_451.jsB:/~BUN/root/_452.jsB:/~BUN/root/_453.jsB:/~BUN/root/_454

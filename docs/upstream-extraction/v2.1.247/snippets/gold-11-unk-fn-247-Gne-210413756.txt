@@ -1,0 +1,3 @@
+# 247 function Gne() start=210413756 end=210413854 len=98 sha=661869a9fef3d7c8 needle="runtimeAllowWriteDirectories"
+
+function Gne(e,t){let{runtimeAllowWriteDirectories:n}=Te();if(n.get(t)===e)return;n.set(t,e),Su()}

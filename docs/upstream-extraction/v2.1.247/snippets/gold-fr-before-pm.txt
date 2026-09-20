@@ -1,0 +1,3 @@
+# 247 offset=208238509 needle="function fr( lastBefore pm"
+
+,{duration_ms:Date.now()-e,is_git:t}),t}function fr(){return N()}function dr(){let e=ur.of(fr()),t=V(),r=e.get(t);if(r!==void 0)return r;let n=zn();return e.set(t,n),n}function Kn(e){ur.of(e).clear()}function Ss(){Kn(fr())}function Cs(e){return C(e)}async function vs(){let e=B(),t=T(e);if(!t)return!1;try{let[r,n]=await Promise.all([Mt(e),Mt(t)]);return r===n}catch{return e===t}}async function Is(e,t){return(await j(w(),[..._,"show-ref",

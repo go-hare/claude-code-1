@@ -1,0 +1,4 @@
+# 
+# start=222820488 end=222821288 len=800
+
+files":return{kind:"reject",error:yy};case"get_context_usage":case"get_session_cost":case"mcp_status":case"list_models":case"get_usage":case"get_binary_version":case"file_suggestions":case"read_file":case"get_workspace_diff":case"get_plan":case"stop_task":case"background_tasks":case"get_settings":case"submit_feedback":case"message_rated":case"generate_session_title":case"side_question":case"mcp_call":return o;case"rename_session":return o;case"mcp_set_servers":return{kind:"reject",error:_y};case"set_cwd":case"add_directory":case"register_repo_root":return{kind:"reject",error:`${e.subtype} ${py}`};case"remote_control":case"channel_enable":case"ultrareview_launch":case"claude_authenticate":case"claude_oauth_callback":case"claude_oauth_wait_for_completion":case"mcp_authenticate":case"mcp_clea

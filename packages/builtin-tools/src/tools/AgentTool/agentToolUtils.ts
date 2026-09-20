@@ -45,7 +45,12 @@ import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isInProtectedNamespace } from 'src/utils/envUtils.js'
 import { isBackgroundAbortReason } from 'src/utils/abortController.js'
-import { AbortError, errorMessage, isAbortError } from 'src/utils/errors.js'
+import {
+  AgentApiErrorTerminationError,
+  AbortError,
+  errorMessage,
+  isAbortError,
+} from 'src/utils/errors.js'
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
@@ -392,6 +397,32 @@ export function readMaxTurnsReached(
     }
   }
   return
+}
+
+/**
+ * densable 2.1.247 tss — parent-visible API error: type / HTTP / request id / model.
+ */
+export function formatApiErrorForParent(
+  message: MessageType,
+  model: string,
+): string {
+  const content = message.message?.content
+  const text = Array.isArray(content)
+    ? extractTextContent(content, '\n')
+    : typeof content === 'string'
+      ? content
+      : ''
+  const apiErrorStatus = (message as { apiErrorStatus?: number }).apiErrorStatus
+  const requestId = (message as { requestId?: string }).requestId
+  const error = (message as { error?: string }).error
+  const includeModel = apiErrorStatus !== undefined || !!requestId
+  const parts = [
+    error && `error type ${error}`,
+    apiErrorStatus !== undefined && `HTTP ${apiErrorStatus}`,
+    requestId && `request id ${requestId}`,
+    includeModel && `model sent to the API: ${model}`,
+  ].filter((part): part is string => typeof part === 'string')
+  return parts.length > 0 ? `${text} (${parts.join(', ')})` : text
 }
 
 export function finalizeAgentTool(
@@ -981,6 +1012,31 @@ export async function runAsyncAgentLifecycle({
     )
 
     stopSummarization?.()
+
+    // densable 2.1.247 aK: last assistant API error → l2e(tss()) before finalize.
+    const lastAssistant = getLastAssistantMessage(agentMessages)
+    if (lastAssistant?.isApiErrorMessage) {
+      const model = metadata.resolvedAgentModel
+      if (lastAssistant.error === 'model_not_found') {
+        logEvent('tengu_api_subagent_model_not_found', {
+          model:
+            model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          status: (lastAssistant as { apiErrorStatus?: number }).apiErrorStatus,
+          request_id:
+            lastAssistant.requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          has_fallback_chain: [toolUseContext.options.fallbackModel]
+            .flat()
+            .some(Boolean),
+          is_built_in_agent: metadata.isBuiltInAgent,
+        })
+      }
+      throw new AgentApiErrorTerminationError(
+        formatApiErrorForParent(lastAssistant, model),
+        typeof lastAssistant.error === 'string'
+          ? lastAssistant.error
+          : undefined,
+      )
+    }
 
     // densable Yqe (single Jeo + same Z):
     //   Jeo(e,s); let Z=JXt(e,s); if(!Z) j("completed");

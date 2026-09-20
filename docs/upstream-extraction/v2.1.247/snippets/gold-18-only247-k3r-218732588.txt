@@ -1,0 +1,3 @@
+# 247-only name=k3r start=218732588 len=99 sha=57467f47aa391ecd needle="background session"
+
+function k3r(){return da()?"Detach from this background session (it keeps running)":"Exit the CLI"}

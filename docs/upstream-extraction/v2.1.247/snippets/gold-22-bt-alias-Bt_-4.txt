@@ -1,0 +1,2 @@
+# pos=227860675
+.filter((t)=>t!=null).map(v);if(typeof e==="object"){let t={};for(let o of Object.keys(e)){if(e[o]==null)continue;t[o]=v(e[o])}return t}return e};var Bt=()=>{};var f={};Or(f,{Client:()=>pt,Command:()=>w,NoOpLogger:()=>$t,SENSITIVE_STRING:()=>lr,ServiceException:()=>h,_json:()=>v,collectBody:()=>mt.collectBody,convertMap:()=>Tr,createAggregatedClient:()=>hr,decorateServiceException:()=>R,emitWarningIfUnsupportedVersion:()=>yr,extendedEncodeURIComponent:()=>wt.extendedEncodeURIComponent,getArrayIfSingleItem:()=>Ir,getDefaultClientConfiguration:()

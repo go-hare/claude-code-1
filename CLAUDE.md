@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI coding 
 
 ## Project Overview
 
-This is a **reverse-engineered / decompiled** version of Anthropic's official Claude Code CLI tool. The goal is to restore core functionality while trimming secondary capabilities. Many modules are stubbed or feature-flagged off. TypeScript strict mode is enforced — **`bun run precheck` 必须零错误通过**（typecheck + lint fix + docs 体检 + test）。
+This is a **reverse-engineered / decompiled** version of Anthropic's official Claude Code CLI tool. The goal is to restore core functionality while trimming secondary capabilities. Many modules are stubbed or feature-flagged off. TypeScript strict mode is enforced — **`bun run precheck` 必须零错误通过**（typecheck + lint/format 自动修 + docs 体检 + test + `biome ci` 复核）。
 
 ## Git Commit Message Convention
 
@@ -53,6 +53,7 @@ bun run lint:fix          # auto-fix lint issues
 bun run format            # format all (全项目)
 bun run check             # lint + format check (全项目)
 bun run check:fix         # lint + format auto-fix
+bun run check:ci          # 非改写复核，等同 CI 的 `biome ci .`（precheck 末尾会跑）
 
 # Check unused exports
 bun run check:unused
@@ -429,7 +430,7 @@ bun run precheck
 
 ## Working with This Codebase
 
-- **precheck must pass** — `bun run precheck`（typecheck + lint fix + `docs:check` + test）必须零错误，任何修改都不能引入新的类型/lint/文档/测试错误。
+- **precheck must pass** — `bun run precheck`（typecheck + `check:fix` + `docs:check` + test + `check:ci`）必须零错误，任何修改都不能引入新的类型/lint/格式/文档/测试错误。最后那步 `check:ci`（= `biome ci .`）是**非改写**的复核，跑在 `bun test` 之后：`check:fix` 会顺手改文件，所以它自己"通过"不代表工作树最终是干净的。有它兜底，precheck 就不可能放过一个 `biome ci` 会拒的状态。
 - **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（42 个默认 ON，含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`）。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
 - **React Compiler output** — Components have decompiled memoization boilerplate (`const $ = _c(N)`). This is normal.
 - **`bun:bundle` import** — `import { feature } from 'bun:bundle'` 是 Bun 内置模块，由运行时/构建器解析。不要用自定义函数替代它。**`feature()` 只能直接用在 `if` 语句或三元表达式的条件位置**（Bun 编译器限制），不能赋值给变量、不能放在箭头函数体里、不能作为 `&&` 链的一部分。正确：`if (feature('X')) {}` 或 `feature('X') ? a : b`。

@@ -1,0 +1,1 @@
+function tr(e){let n=new Set(["GIT_CONFIG","GIT_ATTR_SOURCE"]),t=Object.keys(e).filter((r)=>n.has(r.toUpperCase()));return{...e,...Object.fromEntries(t.map((r)=>[r,void 0])),GIT_CONFIG:void 0,GIT_ATTR_SOURCE:void 0}}

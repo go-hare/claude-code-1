@@ -1,0 +1,4 @@
+# ver=247 name=Oe async=false start=232016944 end=232017621 len=677 sha=90e2c265307d953c needle="parseDraftTranscriptMessages"
+
+function Oe(e){let s=[];using m=v`parseDraftTranscriptMessages(${e.length})`;for(let a of e.split(`
+`)){if(!a)continue;let t;try{t=te(a)}catch{continue}if(typeof t!=="object"||t===null)continue;if(t.type!=="user"&&t.type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestamp,message:t.message,...t.isMeta===!0&&{isMeta:!0},...t.toolUseResult!==void 0&&{toolUseResult:t.toolUseResult},...t.isCompactSummary===!0&&{isCompactSummary:!0}}:{type:"assistant",uuid:t.uuid,timestamp:t.timestamp,message:t.message,requestId:t.requestId})}return s}

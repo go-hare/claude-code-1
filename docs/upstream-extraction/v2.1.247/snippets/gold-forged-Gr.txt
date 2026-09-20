@@ -1,0 +1,1 @@
+function Gr({gitDir:e,commonDir:n,workTree:t,adminDir:r}){return r===void 0?{GIT_DIR:e,GIT_COMMON_DIR:n,GIT_WORK_TREE:t}:{GIT_DIR:r,GIT_WORK_TREE:t,GIT_INDEX_FILE:d(r,"index")}}

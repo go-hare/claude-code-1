@@ -1,0 +1,2 @@
+# needle=async function _0n( pos=214579796 end=214580005 len=209
+async function _0n(e,t){if(!e)return{orphanedPaths:[],removedPluginIds:[]};let n=await ame((r)=>KBo(r,e),t);for(let r of n.removedPluginIds)_(`Removed installed plugin for marketplace removal: ${r}`);return n}

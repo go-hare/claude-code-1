@@ -1,0 +1,1 @@
+function be(e){let t=W();return(t==="windows"||t==="wsl")&&e.replaceAll("\\","/").split("/").some((i)=>Ki.test(i.replace(/:.*$/,"").replace(/[. ]+$/,"")))}

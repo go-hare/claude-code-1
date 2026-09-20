@@ -1,0 +1,4 @@
+# @233803374
+
+ke,F?.on_invoke);h.push(`  ${y.name.padEnd(p)}  ${u(j).padStart(9)}  ${u(bt).padStart(9)}`)}h.push(""),h.push("  On-invoke cost is paid each time a skill or agent fires."),h.push("  Token counts are estimates and may differ from actual usage.")}if(F)O("cli_plugin_details");else le("cli_plugin_details","count_tokens_unreachable");let H=await e();await A(H,m(k,{children:U(h)}))}function U(e){return e.map(ke).join(`
+`)}function he(e){return fn(Ge(e,null,2))}function Le(e,n){let t=(d)=>bn(d.source)===e,r=n.plugins.filter(t),a=n.errors.filter(t),o=n.warnings.filter(t);return{plugins:r,errors:a,warnings:o,standaloneErrorRows:a.filter((d)=>!r.some((i)=>Ie(d,i))),standaloneWarningRows:o.filter((d)=>!r.some((i)=>Re(d,i)))}}function St(e){return e.plugins.length>0||e.standaloneErrorRows.length>0||e.standaloneWarningRows.length>0}function Pa(e){if(!St(e))return[];let{standaloneErrorRows:n,standalon

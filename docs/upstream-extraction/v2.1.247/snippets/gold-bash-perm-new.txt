@@ -1,0 +1,30 @@
+# ver=247 offset=222417649 hit=5/5 needle="Bash permission"
+
+ached clients
+- Improved Remote Control: connection failures now show a persistent failure indicator with details and a reconnect shortcut, instead of only an 8-second toast
+- Removed the 200-subagent-per-session spawn cap; long-running sessions no longer refuse new agents (concurrency and depth limits still apply)
+- Changed managed settings: the approval prompt no longer re-appears after re-login or org switching when the organization's settings are unchanged
+- Changed the feedback-survey transcript share: with your consent it now also uploads the last request's model settings \u2014 the system prompt (which includes your \`CLAUDE.md\` instructions), tool definitions, and model parameters. Secrets are redacted as before, and these fields are dropped first if the share is too large
+- Changed the Bash tool description to always note that command output is displayed to the model, not reliably to the user
+- Changed recalled paste placeholder numbers to renumber when accepted into the input
+- Changed Remote Control to archive the stale server session instead of leaving a dead one listed when a fresh session is minted after compaction or \`/resume\`
+- [VSCode] Fixed the extension showing Remote Control as connected after the connection failed
+- Fixed a session resume silently reconnecting Remote Control after the user turned it off (\`--resume\`, SDK hosts, and the VS Code extension)
+- [VSCode] Fixed sessions not honoring \`remoteControlAtStartup\` when explicitly enabled
+
+## 2.1.223
+- Added owner wildcard entries (\`"owner/*"\`) to the \`strictKnownMarketplaces\` and \`blockedMarketplaces\` managed settings for allowing or blocking all marketplace repos under a GitHub org
+- Added a warning when workflow agents, forked skills, slash commands, or resumed background agents' requested subagent model is restricted and the parent model runs instead
+- Added a \`/teleport\` hint in cloud sessions showing how to continue locally with \`claude --teleport <session id>\`
+- Fixed a Bash permission bypass where a crafted command could hide parts of itself from permission checks
+- Fixed permission prompts so commands padded with tabs or invisible Unicode can no longer hide part of the command from the approval dialog
+- Fixed workflow scripts being able to use dynamic \`import()\` to run code outside the workflow sandbox
+- Fixed a permission gap where an agent definition's \`bypassPermissions\` mode ignored the org bypass-permissions disable policy
+- Fixed resuming a session after a mid-session \`/cd\` coming back empty
+- Fixed gateway model discovery hiding Claude models registered under provider-prefixed IDs such as \`vertex_ai/claude-*\` or \`bedrock/anthropic.claude-*\`
+- Fixed \`modelOverrides\` keys that aren't Anthropic model IDs being treated as the session's canonical model ID; unknown keys are now ignored as documented
+- Fixed managed settings: server-delivered settings no longer disable the env block of a machine-local \`managed-settings.json\` or MDM profile; admin env now merges per key
+- Fixed sandboxed commands failing to start on Linux when \`sandbox.filesystem.denyWrite\` covers the working directory
+- Fixed forked background agents getting stuck "already resuming" for the rest of the session when rebuilding the fork's parent prompt failed during resume
+- Fixed a resumed session failing every turn, or leaving the interactive app on an unresponsive error screen, when its history held a malformed diagnostics attachment
+- Fixed a rare hang wh

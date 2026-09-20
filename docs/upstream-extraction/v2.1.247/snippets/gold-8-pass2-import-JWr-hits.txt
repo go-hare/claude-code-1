@@ -1,0 +1,2 @@
+# ver=247 needle="Yvb as JWr" hits=1
+# offsets=212816204

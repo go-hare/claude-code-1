@@ -1,0 +1,48 @@
+# #19 mkt-versionless-cache — peel lock (247 vs 246)
+# STATUS: UNKNOWN. Official function BODY is contract. No skip-rm branch.
+# Invent-ban: do NOT invent skip-rm / keep-cache. Do NOT port Yjo as skip-rm.
+
+## Locked bodies
+
+| official | 247 | 246 | identifier-normalized |
+| -------- | --- | --- | --------------------- |
+| calculatePluginVersion | j$ @214566254 | y$ @213192177 | SAME |
+| copyPluginToVersionedCache | iZ @214656791 | O8 @213282100 | SAME (6035 vs 6044 = name lengths) |
+| cacheAndRegister / install move parent | Fjo @214609144 | YLo @213234837 | SAME (2858 vs 2860) |
+| dest publish/move helper | Yjo @214631161 | s0o @213256786 | DIFF — rename-aside vs rm-in-place |
+
+## Fjo move site (shape-same as YLo)
+
+```
+if(h.path!==E){
+  let x=QT(u);
+  try{
+    if(dZ(m)){ /* zip/special: Xjo adopt else iZ + rm staged */ }
+    else await Yjo(h.path,E,{pluginId:e,version:v,strictCache:x},u,R),C=E
+  }catch(A){ if(x) await cZ(h.path,{recursive:!0,force:!0}).catch(()=>{}); throw A }
+}
+```
+
+No `version==="unknown"` / `v==="unknown"` gate. Fjo source has zero "unknown" substring.
+Literal `version==="unknown"` hit count: 247=0 246=0.
+
+## Yjo vs s0o (unique 247, NOT skip-rm)
+
+246 s0o: if occupant recurse → `rm(dest,{recursive:!0,force:!0})` then rename src→dest.
+247 Yjo: if occupant recurse → rename dest aside (`BOe`), stamp; on Kjo(EXDEV/RNn) fallback `rm` in place;
+  then rename src→dest; on failure restore aside; on success `rm` aside.
+
+Still deletes the live tree (aside after success, or in-place fallback). Not a second-scope keep-cache branch.
+
+247-only strings: `cannot be renamed aside`, `removing it in place instead`.
+Extra `==="unknown"&&` (10 vs 9) is remote-tools `kind==="unknown"&&awaitAnnounce` + artifact comments — not plugin cache.
+
+## Local
+
+pluginVersioning.ts returns 'unknown' (same last-resort as j$/y$).
+pluginLoader copyPluginToVersionedCache matches iZ/O8 shape (already-cached / in-use defer).
+pluginInstallationHelpers cacheAndRegisterPlugin still `rm(versionedPath,{recursive:true,force:true})` = 246 s0o.
+
+## Tests
+
+None. No unique skip-rm body to port 1:1.

@@ -1,0 +1,3 @@
+# offset=206909356 function P Fxd
+
+as K from"path";function Fo(t){return t}function P(t){return/^[\\/]{2}/.test(t)||v(t)}function Mo(t){return/(^|[\\/])\.\.([\\/]|$)/.test(t)}function Uo(t){return/^[\\/]\?\?[\\/]/.test(t)}function ie(t){if(/^[\\/]{2}[?.][\\/](?!unc[\\/])/i.test(t))return null;return t.match(/^[\\/]{2}(?:[?.][\\/]unc[\\/])?([^\\/]+)/i)?.[1]?.replace(/[A-Z]/g,(e)=>e.toLowerCase())??null}function _e(t){return/(^|[\\/])\.{1,2}([\\/]|$)/.test(t)}function be(t

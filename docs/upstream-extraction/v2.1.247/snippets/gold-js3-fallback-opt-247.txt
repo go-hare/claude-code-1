@@ -1,0 +1,50 @@
+# offset=215534124 ver=247 needle="options.fallbackModel"
+
+eded to understand and continue the work in subsequent messages.
+
+Here's an example of how your output should be structured:
+
+<example>
+<analysis>
+[Your thought process, ensuring all points are covered thoroughly and accurately]
+</analysis>
+
+<summary>
+1. Primary Request and Intent:
+   [Detailed description]
+
+2. Key Technical Concepts:
+   - [Concept 1]
+   - [Concept 2]
+
+3. Files and Code Sections:
+   - [File Name 1]
+      - [Summary of why this file is important]
+      - [Important Code Snippet]
+
+4. Errors and fixes:
+    - [Error description]:
+      - [How you fixed it]
+
+5. Problem Solving:
+   [Description]
+
+6. All user messages:
+    - [Detailed non tool use user message]
+
+7. Pending Tasks:
+   - [Task 1]
+
+8. Work Completed:
+   [Description of what was accomplished]
+
+9. Context for Continuing Work:
+   [Key context, decisions, or state needed to continue the work]
+
+</summary>
+</example>
+
+Please provide your summary following this structure, ensuring precision and thoroughness in your response.
+`,R9n=`
+
+REMINDER: Do NOT call any tools. Respond with plain text only \u2014 `+"an <analysis> block followed by a <summary> block. Tool calls will be rejected and you will fail the task."});async function _Jo(e,t,n,r){let o=k1e(n),s=pt({content:o}),i;try{i=await ow({promptMessages:[s],cacheSafeParams:{...t,forkContextMessages:r?iPt(e):e},canUseTool:aPt(),querySource:"compact",forkLabel:"reactive-compact",maxTurns:1,fallbackModel:v1e(t.toolUseContext.options.mainLoopModel,t.toolUseContext.options.fallbackModel),skipTranscript:!0,skipCacheWrite:!0,overrides:{onRetryStatus:t.toolUseContext.onRetryStatus}})}catch(d){let p=Y(d);if(jR(p))_(`Reactive compact API call failed: ${p}`,{level:"error"});else me(d);return{ok:!1,reason:"error",detail:p,status:void 0,isTimeout:!1}}if(t.toolUseContext.abortController.signal.aborted)return{ok:!1,reason:"aborted"};let a=vb(i.messages);if(!a)return me(Error(`Reactive compact: no assistant message in summarization response (${i.messages.length} messages, types: ${i.messages.map((d)=>d.type).join(", ")})`)),{ok:!1,reason:"error",detail:"no assistant message in summarization response",status:void 0,isTimeout:!1};if(fI(a))return{ok:!1,reason:"prompt_too_long",tokenGap:xZ(a)};if(Ojn(a)){let d=wp(e)-TL;return{ok:!1,reason:"prompt_too_long",tokenGap:d>0?d:void 0,viaCreditsBoundary:!0}}if(uBe(a))return{ok:!1,reason:"media_too_large"};if(a.isApiErrorMessage){let d=Qk(a)??"API error";return _(`Reactive compact: summarization returned API error: ${d}`,{level:"error"}),{ok:!1,reason:"error",detail:d,status:a.apiErrorStatus,isTimeout:d===Tkt,...a.apiError==="dlp_request_denied"&&{isDlpDenied:!0}}}let l=w1e(i.messages);if(!l)return me(Error("Reactive compact: empty summary text in summarization response")),{ok:!1,reason:"error",detail:"summarization produced empty response",status:void 0,isTimeout:!1};let c=Gu(),u=Xp()&&Hue(t.toolUseContext.toolState,t.toolUseContext.agentId);return{ok:!0,summaryText:l,forkAssistantMessageCount:Qt(i.messages,(d)=>d.type==="assistant"&&!d.isApiErrorMessage),totalUsage:i.totalUsage,messages:[pt({content:Nhe(l,{suppressFollowUpQuestions:!0,transcriptPath:c,replStateCleared:u}),isCompactSummary:!0,isVisibleInTranscriptOnly:!0})]}}function P9n(e,t,n){let r=0,o=0;for(let s=t-1;s>=0;s--)if(r+=e[s],o++,r>=n)break;if(o>=t-1)return Math.max(1,Math.floor(t/2));return o}function bJo(e,t,n){if(e===void 0)return{mode:"gap_unparseable",step:1};return{mode:"gap_guided",step:P9n(t,n,e)}}async function r1e(e,t,n){let

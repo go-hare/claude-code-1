@@ -1,0 +1,14 @@
+# offset=84421457 idx=0/21 needle="dd="
+
+ach line]'
+    $no"--no-trim[don't trim ASCII whitespace prefix from each line]"
+
+    + type # Type options
+    '*'{-t+,--type=}'[only search files matching specified type]: :_rg_types'
+    '*--type-add=[add new glob for specified file type]: :->typespec'
+    '*--type-clear=[clear globs previously defined for specified file type]: :_rg_types'
+    # This should actually be exclusive with everything but other type options
+    '(: *)--type-list[show all supported file types and their associated globs]'
+    '*'{-T+,--type-not=}"[don't search files matching specified file type]: :_rg_types"
+
+    + 

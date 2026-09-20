@@ -1,0 +1,2 @@
+# needle=function J8( pos=241890308 end=241890351 len=43
+function J8(e){return e>jm?e*e*e:LK*(e-RK)}

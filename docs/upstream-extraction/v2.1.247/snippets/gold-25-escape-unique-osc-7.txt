@@ -1,0 +1,4 @@
+# offset=206151285 tag=osc
+
+ming a previous client request.*.......No connection established for request ID: ......YL..resolveJson......N..Failed replay events(.......file:///B:/%7EBUN/root/chunk-y904gete.js(...5...file:///B:/%7EBUN/root/chunk-r7zkjzjp.js(...YE..file:///B:/%7EBUN/root/chunk-jb88wnfd.js....:...muxTimeoutMs....l5..mux-bare.....f..systemTheme: OSC 11 query (via=.....Y.`.) got no response...........systemTheme: OSC 11 response=...
+...I... detected=.......... via=...(.....S.file:///B:/%7EBUN/root/chunk-fdkzskkg.js....p.}.processImage(.......file:///B:/%7EBUN/root/chunk-4xzfszp0.js........plainObject.......E.inRange.........inArray...../...invalidParameterError.........c.nativeError.....R.u.isLinux........./usr/bin/ldd.....m..LDD_PATH	...~h..SELF_PATH........k..interpreterPath.B...+N'.Cannot destructure property 'isLinux' from null or undefined value..C.......Cannot destructure property 'LDD_PATH' from n

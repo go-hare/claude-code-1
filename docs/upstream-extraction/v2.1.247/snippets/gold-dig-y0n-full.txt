@@ -1,0 +1,3 @@
+# offset=214551978
+
+urn Qfe(e,t.source)}function y0n(e,t){let n=rme(e,t);if(n)throw new ye(`Marketplace "${e}" is registered from an untrusted source: ${n} To fix it, remove the marketplace and re-add it from the official source.`,"Reserved marketplace name registered from untrusted source")}async function Vfe(e,t){let n=await e.read([t]);if(!n.ok)throw new ye(`Failed to read cached marketplace: ${tr(n.error)}`,"failed to read cached marketplace (v5 backend error)");let r=n.value.items[0];if(r===void 0)throw new ye("Failed to read cached marketplace: the backend returned no item for the key","failed to read cached marketplace (v5 ba

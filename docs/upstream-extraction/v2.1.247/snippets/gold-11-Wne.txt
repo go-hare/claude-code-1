@@ -1,0 +1,3 @@
+# offset=210374753
+
+function Wne(e,t){let n=ir();if(cN([...qm([wn(),...n],"deny"),...[]]).some((i)=>uv(i,e,t,"match")))return{allowed:!1,reason:`${e} is in sandbox.network.deniedDomains`};if(!iN())return{allowed:!0};if(lN(qm(n,"allow")).some((i)=>uv(i,e,t,"no-match")))return{allowed:!0};return{allowed:!1,reason:`sandbox.network.allowManagedDomainsOnly is set and ${e} is not in the policy allowlist`}}

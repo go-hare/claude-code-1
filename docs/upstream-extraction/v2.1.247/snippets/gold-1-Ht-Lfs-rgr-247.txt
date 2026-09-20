@@ -1,0 +1,114 @@
+# gold-1-Ht-Lfs-rgr 247
+
+## _157-imports-158 @237069244
+al-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN
+
+## export{Ps, hits=0
+
+##  as Ps,Qs as  hits=0
+
+## Ps as Ht,Qs hits=1
+- #0 @237069251 tps://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";imp
+
+## _158.js export map hits=14
+- #0 @180205102 B:/~BUN/root/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_165.jsB:/~BUN/root/_166.js
+- #1 @180379522 B:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.js
+- #2 @182527185 B:/~BUN/root/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/root/_165.js
+- #3 @192216521 Dyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.jsB:/~BUN/root/_253.js
+- #4 @192234517 C00000851callcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.js
+- #5 @192661833 008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851callnB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/root/_198.js
+- #6 @232030401 .js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/~BUN/root/
+- #7 @233177695 /root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/
+- #8 @233914797 /root/_153.js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/~BUN/root/
+- #9 @237069274 ocs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw as ot,Vw as nt,X
+- #10 @237085215 rsion: 2.1.247
+import{Ls as a,Ms as b,Ns as c}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/
+- #11 @237238426 mpliance.
+
+// Version: 2.1.247
+import{Ms as o}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/
+
+## PsQs _158 table hits=0
+
+## table 158 names hits=0
+
+## Nfs-before-Lfs @216526035
+,reason:"too_large"};if(n){let s;try{s=await n.write(ygr(e.draft_id),r,{mode:384})}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"unknown"}`,{level:"error"}),{success:!1,reason:"write_failed"}}if(!s.ok)return _(`feedbackDrafts: draft write failed: ${BKe(s.error)}`,{level:"error"}),{success:!1,reason:"write_failed"}}else{let s=Qi();try{await s.mkdir(UKe()),await s.atomicWrite(hgr(e.draft_id),r,384)}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"unknown"}`,{level:"error"}),{success:!1,reason:"write_failed"}}}let o=[];try{let{queued:s}=await Sgr({now:t,skipTranscriptCheck:!0},n);if(s.length>FKe){let i=s.slice().sort((a,l)=>a.created_at.localeCompare(l.created_at));for(let a of i.slice(0,s.length-FKe))await wgr(a.draft_id,n),o.push(a)}}catch(s){_(`feedbackDrafts: eviction sweep failed: ${s instanceof Error?s.name:"unknown"}`,{level:"error"})}return{success:!0,draft:e,evicted:o}}async function Sgr(e,t){let n=e?.now??new Date,r=e?.lightweight===!0,o=r||e?.skipTranscriptCheck===!0,s,i,a=t?void 0:Qi();if(t){let p=await Mfs(t);if(p===null)return{queued:[],expired:[]};s=p.map((f)=>`${f.draftId}.json`),i=Ofs(t,p,NKe+1)}else{let p;try{p=await a.list(UKe())}catch(f){if(No(f))return{queued:[],expired:[]};throw f}s=p.filter((f)=>f.endsWith(".json"))}let l=[],c=[],u=0,d=0;for(let[p,f]of s.entries()){let m;try{let h=i===void 0?await a.readTail(z_e(UKe(),f),NKe+1):await i(p);if(h===null)continue;if(h.length>NKe){d++;continue}using y=H_e`listFeedbackDrafts parse(${h.length})`;let b=pd(h.toString("utf8")),S=Ifs().safeParse(b);if(!S.success){let k=b?.draft_id;if(typeof k==="string"&&!oLt.test(k))u++;continue}m=S.data}catch{continue}if(f!==`${m.draft_id}.json`){u++;continue}if(m.status!=="queued")continue;let g=Date.parse(m.created_at);if(Number.isFinite(g)&&n.getTime()-g>wfs){if(r)continue;if(await wgr(m.draft_id,t).catch(()=>!1))c.push(m),D("tengu_feedback_draft_expired",{type:X(m.type),trigger:X(m.trigger),age_days:Ha(Math.round((n.getTime()-g)/86400000))});continue}l.push({...m,transcriptAvailable:o?!1:await Nfs(m,t)})}if(l.sort((p,f)=>f.created_at.localeCompare(p.created_at)),u>0)D("tengu_feedback_draft_invalid_id",{count:Ha(u)});if(d>0)D("tengu_feedback_draft_oversized_file",{count:Ha(d)});return{queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId
+
+## function Lfs( hits=1
+- #0 @216525849 "tengu_feedback_draft_oversized_file",{count:Ha(d)});return{queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);
+
+## Lfs as  hits=0
+
+## var rgr= hits=0
+
+## rgr= hits=1
+- #0 @216527192 =64,lgr=512,Cfs=64,Rfs,rLt,Afs,zKe,HKe,fgr,Pfs=16,xfs=1e6,Ifs,oLt,ggr,sLt,ngr=8,rgr=262144;var kgr=w(()=>{qt();Pt();Zt();GUn();qP();nl();n_e();pr();ln();so();xe();M
+
+## function Lfs hits=1
+- #0 @216525849 "tengu_feedback_draft_oversized_file",{count:Ha(d)});return{queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6)
+
+## Lfs(n,s()) hits=2
+- #0 @216525858 edback_draft_oversized_file",{count:Ha(d)});return{queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);
+- #1 @216526271 ();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s());if(i!==void 0)try{if(o)return(await t.statMeta(i)).ok;let a=await t.read(
+
+## readTail( hits=11
+- #0 @67348934 llback])
+    socket.unref?.(), self[kPausedUnref] = !1;
+}
+function deferEndForOnreadTail(self) {
+  if (self[kOnreadTail] === @undefined || self.destroyed)
+    return !1;
+- #1 @67362362     }
+  },
+  end(socket) {
+    let { self } = socket.data;
+    if (deferEndForOnreadTail(self))
+      return;
+    finishSocketEnd(self);
+  },
+  session(socket, session) 
+- #2 @67363337     } else
+        self.destroy(err);
+      return;
+    }
+    if (!deferEndForOnreadTail(self))
+      finishSocketEnd(self);
+    let pendingWrite = self[kwriteCallback];
+- #3 @67384906 ion.writableLength > 0 || connection[kwriteCallback] != null;
+}
+function drainOnreadTail(self, fromRead) {
+  if (self[kOnreadTail] === @undefined)
+    return !1;
+  if (f
+- #4 @67385938 et ret = Duplex.prototype.resume.@call(this);
+  if (!this.connecting && !drainOnreadTail(this))
+    this._handle?.resume?.();
+  return restorePausedHold(this, this._hand
+- #5 @67388100 Socket.prototype.read = function read(size) {
+  if (!this.connecting && !drainOnreadTail(this, !0))
+    this._handle?.resume?.(), restorePausedHold(this, this._handle);
+
+- #6 @67388422 | !socket)
+    this.once("connect", () => this._read(size));
+  else if (!drainOnreadTail(this, !0))
+    socket?.resume?.(), restorePausedHold(this, socket);
+};
+Socket.pr
+- #7 @208215997 );let n=await u(r,"r");try{return await f(n,e,t)}finally{await n.close()}}async readTail(r,e,t){a("readTail","maxBytes",e);let n=t?.noFollow?F.O_RDONLY|p:"r",i=await u(r
+- #8 @216524949 =[],c=[],u=0,d=0;for(let[p,f]of s.entries()){let m;try{let h=i===void 0?await a.readTail(z_e(UKe(),f),NKe+1):await i(p);if(h===null)continue;if(h.length>NKe){d++;continu
+- #9 @216526565 rn!1}}if(o)try{return await Qi().stat(n),!0}catch{return!1}try{let s=await Qi().readTail(n,rgr);return ogr(s.toString("utf8"),e)}catch{return!1}}async function wgr(e,t){
+- #10 @218861358 olicLink)throw new IZe(e);if(!o.isFile)throw new MZe(e)}let r;try{r=await $re().readTail(e,ave+1,{noFollow:!0})}catch(o){let s=De(o);if(s==="ELOOP")throw new IZe(e);if(s
+
+## function z_e( hits=0
+
+## z_e as  hits=0

@@ -1,0 +1,2 @@
+# function Zt( pos=210485614 end=210485715 len=101
+function Zt(e){W().repoCheckouts.onMetadataChanged=e;for(let[,t]of X())await he(t);me(()=>void st())}

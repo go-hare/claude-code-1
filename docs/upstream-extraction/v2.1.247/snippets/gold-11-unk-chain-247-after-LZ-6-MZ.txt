@@ -1,0 +1,3 @@
+# 247-after-LZ n=6 function MZ start=210416411 end=210416665 len=254 sha=7f74f01d600d69e5
+
+function MZ(e,t){if(e===t)return!0;let n=e.normalize("NFD"),r=t.normalize("NFD");if(n.toLowerCase()===r.toLowerCase()||n.toUpperCase()===r.toUpperCase())return!0;return mv??=new Intl.Collator("en",{usage:"search",sensitivity:"base"}),mv.compare(n,r)===0}

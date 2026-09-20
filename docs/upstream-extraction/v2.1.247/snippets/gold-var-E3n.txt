@@ -1,0 +1,3 @@
+# 247 offset=215408146 needle="var E3n="
+
+,s);if(a<TL)return!1;return e>=VRt(i,o)}var E3n=20000,IWe=1e5,ZRt=1e6,y3n,M8o,L8o="tengu_amber_moleskin";var tAt=w(()=>{

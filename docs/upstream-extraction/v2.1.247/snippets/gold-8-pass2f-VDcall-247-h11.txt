@@ -1,0 +1,3 @@
+# off=232598676 hit=11
+
+},{value:"false",label:"Disabled",description:"Claude will respond without extended thinking"}],tp[0]=elt;else elt=tp[0];let gio=elt,tlt;if(tp[1]!==Sl||tp[2]!==VD)tlt=()=>{if(Sl!==null)Zat(null);else VD()},tp[1]=Sl,tp[2]=VD,tp[3]=tlt;else tlt=tp[3];let olt;if(tp[4]===H)olt={context:"Confirmation"},tp[4]=olt;else olt=tp[4];fo("confirm:no",tlt,olt);let nlt;if(tp[5]!==Sl||tp[6]!==

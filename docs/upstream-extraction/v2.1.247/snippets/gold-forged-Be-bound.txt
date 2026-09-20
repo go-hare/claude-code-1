@@ -1,0 +1,1 @@
+function Be(e){return e.bound===!0?qn(e.workTree,e):void 0}

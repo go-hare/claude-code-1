@@ -1,0 +1,12 @@
+# offset=206472573 _845.js P as Zzd
+# 246: 0 hits of ` as Zzd` — NEW name in 247 (body may have existed under another export).
+
+# init T:
+# E=/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g   # Yzd (excludes TAB/LF/VT/FF/CR)
+# P=/[\x00-\x1F\x7F-\x9F]/              # Zzd — ALL C0 + DEL + C1
+
+export{P as Zzd, T as eAd}
+
+# markdown pt imports Zzd as re:
+# if(t===null||re.test(t)||Ee.test(t)||t!==t.trimEnd())return null
+# Ee=new RegExp(`^[${j}]+`,"u")  j=Atb T (leading invisible class)

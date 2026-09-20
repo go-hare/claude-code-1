@@ -1,0 +1,3 @@
+# offset=207011469
+
+function Ok(e){n().sessionFlags.replaceHomeTrustDialogAccepted(e)}function Ek(){return n().sessionFlags.homeTrustDialogAccepted()}function Dk(e){n().host.launchOptions.replaceSessionPersistenceDisabled(e)}function Hk(){return n().host.launchOptions.sessionPersistenceDisabled()}function Bk(){return n().sessionFlags.hasExitedPlanMode()}function _k(e){n().sessionFlags.replaceHasExitedPlanMode(e)}function Uk(){return n().host.proactivity.selectorGate()}function jk(){return n().host.proactivity.selec

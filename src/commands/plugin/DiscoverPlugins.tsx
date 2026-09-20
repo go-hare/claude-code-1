@@ -42,6 +42,7 @@ import { resolveShownArchiveHeadersHelper } from '../../utils/plugins/marketplac
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
+import { Io, re, Vr } from '../../utils/plugins/escapeSafeText.js';
 import { truncateToWidth } from '../../utils/truncate.js';
 import { useAppStateStore, useSetAppState } from '../../state/AppState.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
@@ -398,14 +399,16 @@ export function DiscoverPlugins({
 
     if (failureCount === 0) {
       const suffix = formatBatchInstallActivateSuffix(activateOutcome, successCount);
-      setResult(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`);
+      setResult(re(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`));
     } else if (successCount === 0) {
       setError(`Failed to install: ${formatFailureDetails(newFailedPlugins, true)}`);
     } else {
       const suffix = formatPartialBatchInstallActivateSuffix(activateOutcome, successCount);
       setResult(
-        `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
-          `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+        re(
+          `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
+            `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+        ),
       );
     }
 
@@ -459,7 +462,7 @@ export function DiscoverPlugins({
         return;
       }
       const outcome = await tryActivateInstalled(result.closure);
-      setResult(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`);
+      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
@@ -473,7 +476,7 @@ export function DiscoverPlugins({
   // Handle error state
   useEffect(() => {
     if (error) {
-      setResult(error);
+      setResult(re(error));
     }
   }, [error, setResult]);
 
@@ -650,7 +653,7 @@ export function DiscoverPlugins({
     const { plugin, pluginId, closure } = viewState;
     async function finish(baseMsg: string): Promise<void> {
       const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
-      setResult(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`);
+      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         void onInstallComplete();
       }
@@ -663,13 +666,13 @@ export function DiscoverPlugins({
         onDone={(outcome, detail) => {
           switch (outcome) {
             case 'configured':
-              void finish(`✓ Installed and configured ${plugin.name}.`);
+              void finish(`✓ Installed and configured ${re(plugin.name)}.`);
               break;
             case 'skipped':
-              void finish(`✓ Installed ${plugin.name}.`);
+              void finish(`✓ Installed ${re(plugin.name)}.`);
               break;
             case 'error':
-              void finish(`Installed but failed to save config: ${detail}`);
+              void finish(`Installed but failed to save config: ${detail !== undefined ? re(detail) : ''}`);
               break;
           }
         }}
@@ -701,12 +704,12 @@ export function DiscoverPlugins({
         </Box>
 
         <Box flexDirection="column" marginBottom={1}>
-          <Text bold>{selectedPlugin.entry.name}</Text>
-          <Text dimColor>from {selectedPlugin.marketplaceName}</Text>
-          {selectedPlugin.entry.version && <Text dimColor>Version: {selectedPlugin.entry.version}</Text>}
+          <Text bold>{Vr(selectedPlugin.entry)}</Text>
+          <Text dimColor>from {re(selectedPlugin.marketplaceName)}</Text>
+          {selectedPlugin.entry.version && <Text dimColor>Version: {re(selectedPlugin.entry.version)}</Text>}
           {selectedPlugin.entry.description && (
             <Box marginTop={1}>
-              <Text>{selectedPlugin.entry.description}</Text>
+              <Text>{Io(selectedPlugin.entry.description)}</Text>
             </Box>
           )}
           {selectedPlugin.entry.author && (
@@ -714,8 +717,8 @@ export function DiscoverPlugins({
               <Text dimColor>
                 By:{' '}
                 {typeof selectedPlugin.entry.author === 'string'
-                  ? selectedPlugin.entry.author
-                  : selectedPlugin.entry.author.name}
+                  ? re(selectedPlugin.entry.author)
+                  : re(selectedPlugin.entry.author.name)}
               </Text>
             </Box>
           )}
@@ -846,8 +849,8 @@ export function DiscoverPlugins({
               </Text>
               <Text>
                 {isInstallingThis ? figures.ellipsis : isSelectedForInstall ? figures.radioOn : figures.radioOff}{' '}
-                {plugin.entry.name}
-                <Text dimColor> · {plugin.marketplaceName}</Text>
+                {Vr(plugin.entry)}
+                <Text dimColor> · {re(plugin.marketplaceName)}</Text>
                 {plugin.entry.tags?.includes('community-managed') && <Text dimColor> [Community Managed]</Text>}
                 {installCounts && plugin.marketplaceName === OFFICIAL_MARKETPLACE_NAME && (
                   <Text dimColor>
@@ -859,7 +862,7 @@ export function DiscoverPlugins({
             </Box>
             {plugin.entry.description && (
               <Box marginLeft={4}>
-                <Text dimColor>{truncateToWidth(plugin.entry.description, 60)}</Text>
+                <Text dimColor>{truncateToWidth(re(plugin.entry.description), 60)}</Text>
               </Box>
             )}
           </Box>

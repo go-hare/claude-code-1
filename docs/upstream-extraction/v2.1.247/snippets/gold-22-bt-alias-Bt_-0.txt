@@ -1,0 +1,2 @@
+# pos=206293666
+n"Windows";if(e==="freebsd")return"FreeBSD";if(e==="openbsd")return"OpenBSD";if(e==="linux")return"Linux";if(e)return`Other:${e}`;return"Unknown"},ho,Bt=()=>ho??(ho=yc());var is=_(()=>{Ut()});function Wt(e){if(typeof e!=="object")return{};return e??{}}function un(e){if(!e)return!0;for(let t in e)return!1;return!0}function mo(e,t){return Object.prototype.hasOwnProperty.call(e,t)}var Sc,po=(e)=>Sc.test(e),Z=(e)=>(Z=Array.isArray,Z(e)),ln,_o=(e,t)=>{if(typeof t!=="number"||!Number.isInteger(t))throw new b(`${e} must be an integer`);if(t<0)throw ne

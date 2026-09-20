@@ -1,0 +1,3 @@
+# 247-after-LZ n=4 function yN start=210415810 end=210416192 len=382 sha=7bd2293417e6657b
+
+function yN(e){if(!gN())return;let t=Te();if(!e||e.filesystem.disabled||or()&&so()){t.unconfinedWrapThisSession=!0;return}let n;try{n=process.cwd()}catch{t.unconfinedWrapThisSession=!0;return}t.wrapCwdsThisSession.add(n);let r=bN([...Kr(),...e.filesystem.allowWrite],new Set([n]));if(r===null){t.unconfinedWrapThisSession=!0;return}for(let s of r)t.wrapWriteRootsThisSession.add(s)}

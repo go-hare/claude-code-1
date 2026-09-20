@@ -7,6 +7,7 @@ import {
 } from 'src/utils/auth.js'
 import { z } from 'zod'
 import { getOauthConfig, OAUTH_BETA_HEADER } from '../../constants/oauth.js'
+import { logEvent } from '../analytics/index.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { withOAuth401Retry } from '../../utils/http.js'
@@ -91,6 +92,19 @@ async function fetchBootstrapAPI(): Promise<BootstrapResponse | null> {
     getClaudeAIOAuthTokens()?.accessToken && hasProfileScope()
   if (!hasUsableOAuth && !apiKey) {
     logForDebugging('[Bootstrap] Skipped: no usable OAuth or API key')
+    return null
+  }
+
+  // densable — `claude ssh` remote. The credentials visible here are the
+  // launcher's placeholders; the real ones live behind the local auth proxy, and
+  // this request goes out over axios straight to BASE_API_URL rather than through
+  // the ANTHROPIC_UNIX_SOCKET tunnel, so it can only 401. Upstream instruments
+  // this skip specifically (the ones above are debug-only).
+  if (process.env.ANTHROPIC_UNIX_SOCKET) {
+    logForDebugging('[Bootstrap] Skipped: unix-socket-proxied session')
+    logEvent('tengu_api_bootstrap_fetch', {
+      reason: 'unix_socket_skip' as never,
+    })
     return null
   }
 

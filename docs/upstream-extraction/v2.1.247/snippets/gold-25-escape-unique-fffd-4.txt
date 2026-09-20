@@ -1,0 +1,5 @@
+# offset=209084608 tag=fffd
+
+turn{trimmed:t,lineCount:R(t,`
+`)+1,byteCount:t.length}}function Rn(e){return e.normalize("NFC").toLowerCase()}function In(e){let t=e?.lastIndexOf("/")??-1;if(t<=0)return"";let n=e.slice(0,t+1);return n.split("/").some((r)=>r.startsWith("."))?"":n}function Nn(e){let t="";for(let n of P(M(e.replace(/\r\n?|[\u2028\u2029]/g,`
+`)))){let r=n.codePointAt(0),o=r!==9&&r!==10&&(r<32||r>=127&&r<=159);t+=o?"\uFFFD":n}return t}var S="MEMORY.md",Tn="Memory is paused. Run /pause-memory to resume automemory.",ue=200,ct=25000,An,Mn=200,B=4096,Ln="This directory already exists \u2014 write to it directly with the Write tool (do not run mkdir or check for its existence).",jn="Both directories already exist \u2014 write to them directly with the Write tool (do not run mkdir or check for their existence).";var me=f(()=>{le();ne();D();An=4*ct});import{normalize as I}from"path";function he(e){return Bun.hash(

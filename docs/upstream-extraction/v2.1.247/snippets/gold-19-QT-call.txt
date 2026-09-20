@@ -1,0 +1,3 @@
+# offset=214610597 hit=1/1 needle="let x=QT("
+
+string(0,12)}`:T,E=$R(e,v),C=h.path,R=Hjo(h.stagingScope,E),P=!0;if(h.path!==E){let x=QT(u);try{if(dZ(m)){let A=x&&await _2(E)==="refused",L=uZ(e,v),F=!A&&PT()&&(x?await fwt(L,e,v,()=>SUe(E,e,v,"cache","before reuse")):await sl(L));if(!A&&!F&&await Xjo(h.path,E,x,u,R))C=E;else C=

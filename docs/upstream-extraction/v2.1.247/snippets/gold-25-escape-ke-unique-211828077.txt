@@ -1,0 +1,3 @@
+# 247 function ke start=211828077 end=211828274 len=197 sha=8e948434ed24d497
+
+function ke(n){return n.replace(ye,"$1<path>'").replace(Pe,"~/<path>").replace(we,"<path>").replace(be,"<path>").replace(Me,"<path>").replace(Fe,"<path>").replace(Ue,"<path>").replace(He,"<path>")}

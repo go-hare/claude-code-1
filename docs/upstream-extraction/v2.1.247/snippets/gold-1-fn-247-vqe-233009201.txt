@@ -1,0 +1,3 @@
+# ver=247 name=vqe async=false start=233009201 end=233009272 len=71 sha=eddeffe65dfddd51 needle="feedbackDrafts"
+
+function vqe(){return(Kt().feedbackDraftsTurnOffPromptDeclines??0)<cDt}

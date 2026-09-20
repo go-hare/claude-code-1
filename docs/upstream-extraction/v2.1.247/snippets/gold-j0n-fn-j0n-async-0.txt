@@ -1,0 +1,2 @@
+# needle=async function j0n( pos=214574841 end=214575202 len=361
+async function j0n(e,t,n){let r=await z0n(e,t,(o)=>qBo(o,n),F0n);if(r.loadError!==void 0)_(`Failed to load installed plugins from disk: ${Y(r.loadError)}`,{level:"error"}),f2("load-from-disk",r.loadError,!0);if(r.written!==void 0)qSt(r.written),_(`Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface`);return r.result}

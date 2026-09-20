@@ -1,0 +1,3 @@
+# 247 _g( @214739778
+
+portTargetTaskId},reportTargetName:e.reportTargetName,...r!==void 0&&{coordinatorTask:r}},inheritedArming:{permissionMode:e.armingPermissionMode,toolUseContext:e.armingToolUseContext,canUseTool:e.canUseTool,parentPairing:e}}}var lHo=2;var jwt=w(()=>{_g();be();Bwt()});function Lk(e){let t=PB(e);return t===void 0?Y(e):`${Y(e)} (${t})`}function yme(e){return(t)=>(_(`${e}: agent metadata sidecar unreadable, treating as absent: ${Lk(t)}`),null)}var T2=w(()=>{be();xe()});function xB(e){return e.replace(uHo,"<\\")}function iI(e){if(e.length<=zwt)return e;return`${e.slice(0,zwt)}\u2026 [+${e.length-zw

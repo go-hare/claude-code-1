@@ -1,0 +1,3 @@
+# 247 function _g start=223747899 len=127 sha=7a77dc942f3e391d
+
+function _g(e){let{query:t,mode:o}=e.editor.getSnapshot();return ra(t,o,na(t,o,e.roster.jobs,e.cwdFilter),e.parseScope)!==null}

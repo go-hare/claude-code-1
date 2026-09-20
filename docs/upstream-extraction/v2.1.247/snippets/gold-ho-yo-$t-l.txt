@@ -1,0 +1,2 @@
+# l pos=207827924 end=207827979
+function l(r){return s(r).replace(/ {2,}/g," ").trim()}

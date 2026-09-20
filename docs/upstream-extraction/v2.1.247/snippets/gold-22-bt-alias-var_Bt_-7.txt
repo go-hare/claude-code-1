@@ -1,0 +1,2 @@
+# pos=211532543
+his.awaitPos=this.start;var t=this.startNode();return this.next(),t.argument=this.parseMaybeUnary(null,!0,!1,e),this.finishNode(t,"AwaitExpression")};var Bt=B.prototype;Bt.raise=function(e,t){var i=Tr(this.input,e);if(t+=" ("+i.line+":"+i.column+")",this.sourceFile)t+=" in "+this.sourceFile;var s=SyntaxError(t);throw s.pos=e,s.loc=i,s.raisedAt=this.pos,s},Bt.raiseRecoverable=Bt.raise,Bt.curPosition=function(){if(this.options.locations)return new Ke(this.curLine,this.pos-this.lineStart)};var Se=B.prototype,Eu=function(t){this.flags=t,this.var=[]

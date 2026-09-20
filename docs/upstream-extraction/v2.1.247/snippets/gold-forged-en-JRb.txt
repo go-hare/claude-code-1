@@ -1,0 +1,4 @@
+# gold-forged-en-JRb.txt official-247 SEA @209042850-209043550
+(()=>new m)});import{join as M,sep as o}from"path";function B(){let e=s();if(e.claudeTempDir!==void 0)return e.claudeTempDir;let r=D(),t=i(),n=r;try{n=t.realpathSync(r)}catch{}return e.claudeTempDir=n+o,e.claudeTempDir}function z(){let e=s();if(e.childProcessTmpDir!==void 0)return e.childProcessTmpDir;let r=S(),t=i(),n=r;try{n=t.realpathSync(r)}catch{}return e.childProcessTmpDir=n+o,e.childProcessTmpDir}function A(){return R(h())}function R(e){return M(B(),y(e))+o}function J(e){if(f(e)||u(e)||g(P,e)!==void 0)return e;let r=i();try{return r.realpathSync(e)}catch{return e}}var F=d(()=>{l();k();x();v();w();p()});
+export{s as GRb,p as HRb,B as IRb,z as JRb,A as KRb,R as LRb,J as MRb,F as NRb};
+

@@ -181,6 +181,7 @@ import {
   mapFailedMcpServersForDelta,
   type DeferredToolsDeltaScanContext,
 } from './searchExtraTools.js'
+import { shouldSurfaceFailedMcpServers } from './surfaceFailedMcpServers.js'
 import {
   getMcpInstructionsDelta,
   isMcpInstructionsDeltaEnabled,
@@ -1117,11 +1118,8 @@ export async function getAttachments(
                 .filter(c => c.type === 'needs-auth')
                 .map(c => c.name)
             : undefined,
-          // densable drn / tengu_surface_failed_mcp_servers (default false)
-          getFeatureValue_CACHED_MAY_BE_STALE(
-            'tengu_surface_failed_mcp_servers',
-            false,
-          )
+          // densable 2.1.247 Xb — tengu_surface_failed_mcp_servers default true
+          shouldSurfaceFailedMcpServers()
             ? mapFailedMcpServersForDelta(
                 toolUseContext.options.mcpClients ?? [],
               )

@@ -14,6 +14,7 @@ import { uniq } from '../array.js'
 import { logForDebugging } from '../debug.js'
 import { logForDiagnosticsNoPII } from '../diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { getErrnoCode, isENOENT } from '../errors.js'
 import { writeFileSyncAndFlush_DEPRECATED } from '../file.js'
 import { readFileSync } from '../fileRead.js'
@@ -400,6 +401,7 @@ function parseSettingsFileUncached(path: string): {
       file: w.file,
       path: w.path,
       message: w.message,
+      severity: w.severity,
     }))
 
     // Filter invalid permission rules before schema validation so one bad
@@ -422,7 +424,19 @@ function parseSettingsFileUncached(path: string): {
     }
   } catch (error) {
     handleFileSystemError(error, path)
-    return { settings: null, errors: [] }
+    if (isENOENT(error)) {
+      return { settings: null, errors: [] }
+    }
+    return {
+      settings: null,
+      errors: [
+        {
+          file: path,
+          path: '',
+          message: `${path} could not be read`,
+        },
+      ],
+    }
   }
 }
 
@@ -591,6 +605,37 @@ export function getSettingsForSourceUncached(
 }
 
 /**
+ * densable 2.1.247 J$ / pm — admin managed (file + MDM) load errors only.
+ * HKCU / host are not sufficient when admin policy cannot be read.
+ */
+export function getAdminManagedPolicyLoadErrors(): ValidationError[] {
+  const { errors: fileErrors } = loadManagedFileSettings()
+  const mdmErrors = getMdmSettings().errors
+  return [...fileErrors, ...mdmErrors]
+}
+
+export function getAdminManagedPolicyUnreadableError(): ValidationError | null {
+  return (
+    getAdminManagedPolicyLoadErrors().find(e =>
+      e.message.includes('could not be read'),
+    ) ?? null
+  )
+}
+
+export function formatPolicyUnreadableFailClose(error: {
+  file?: string
+  message: string
+}): string {
+  const detail = error.file ? `${error.file}: ${error.message}` : error.message
+  return (
+    `Unable to read managed policy settings.\n` +
+    `This machine may require organization login enforcement, but the policy file failed to load.\n` +
+    `Contact your administrator.\n\n` +
+    `Detail: ${detail}`
+  )
+}
+
+/**
  * Get the origin of the highest-priority active policy settings source.
  * Uses "first source wins" — returns the first source that has content.
  * Priority: remote > plist/hklm > file (managed-settings.json) > hkcu
@@ -647,12 +692,144 @@ export function getPolicySettingsOrigin():
  * set it to `undefined` — do NOT use `delete`. mergeWith only detects deletion when
  * the key is present with an explicit `undefined` value.
  */
+type SettingsStorageV5 = {
+  write: (
+    key: unknown,
+    value: string,
+    opts?: { publishDiscipline?: string },
+  ) => Promise<{ ok: true } | { ok: false; error: unknown }>
+}
+
+/** densable leftover `q.userSettings()`. */
+function userSettingsStorageV5Key(): { namespace: 'settings'; layer: 'user' } {
+  return { namespace: 'settings', layer: 'user' }
+}
+
+/** densable `ke` — userSettings at the default path for this process. */
+function isDefaultUserSettingsPath(
+  source: EditableSettingSource,
+  filePath: string,
+): boolean {
+  return (
+    source === 'userSettings' &&
+    filePath === getSettingsFilePathForSource('userSettings')
+  )
+}
+
+function settingsStorageV5Write(
+  storageV5: unknown,
+): SettingsStorageV5['write'] | undefined {
+  if (
+    storageV5 !== null &&
+    typeof storageV5 === 'object' &&
+    'write' in storageV5 &&
+    typeof storageV5.write === 'function'
+  ) {
+    return storageV5.write.bind(storageV5) as SettingsStorageV5['write']
+  }
+  return undefined
+}
+
+function mergeSettingsForSource(
+  existingSettings: SettingsJson | null,
+  settings: SettingsJson,
+): SettingsJson {
+  return mergeWith(
+    existingSettings || {},
+    settings,
+    (
+      _objValue: unknown,
+      srcValue: unknown,
+      key: string | number | symbol,
+      object: Record<string | number | symbol, unknown>,
+    ) => {
+      if (srcValue === undefined && object && typeof key === 'string') {
+        delete object[key]
+        return undefined
+      }
+      if (Array.isArray(srcValue)) {
+        return srcValue
+      }
+      return undefined
+    },
+  )
+}
+
+function noteLocalSettingsGitignore(): void {
+  void addFileGlobRuleToGitignore(
+    getRelativeSettingsFilePathForSource('localSettings'),
+    getOriginalCwd(),
+  ).then(result => {
+    if (!result.written) return
+    if (result.effective) {
+      logForDebugging('gitignore_global_rule')
+    } else if (result.reason === 'already_tracked') {
+      logForDebugging('gitignore_global_rule already_tracked')
+    } else {
+      logForDebugging(
+        `gitignore_global_rule ${result.reason ?? 'write_ineffective'}`,
+      )
+    }
+  })
+}
+
+function loadExistingSettingsForWrite(
+  source: EditableSettingSource,
+  filePath: string,
+): { error: Error } | { settings: SettingsJson | null } {
+  let existingSettings = getSettingsForSourceUncached(source)
+  if (!existingSettings) {
+    let content: string | null = null
+    try {
+      content = readFileSync(filePath)
+    } catch (e) {
+      if (!isENOENT(e)) {
+        throw e
+      }
+    }
+    if (content !== null) {
+      const rawData = safeParseJSON(content)
+      if (rawData === null) {
+        return {
+          error: new Error(
+            `Invalid JSON syntax in settings file at ${filePath}`,
+          ),
+        }
+      }
+      if (rawData && typeof rawData === 'object') {
+        existingSettings = rawData as SettingsJson
+        logForDebugging(
+          `Using raw settings from ${filePath} due to validation failure`,
+        )
+      }
+    }
+  }
+  return { settings: existingSettings }
+}
+
+function writeSettingsFile(
+  source: EditableSettingSource,
+  filePath: string,
+  updatedSettings: SettingsJson,
+): void {
+  markInternalWrite(filePath)
+  writeFileSyncAndFlush_DEPRECATED(
+    filePath,
+    jsonStringify(updatedSettings, null, 2) + '\n',
+  )
+  resetSettingsCache()
+  if (source === 'localSettings') {
+    noteLocalSettingsGitignore()
+  }
+}
+
+/**
+ * densable `Rs` / `ay` — value-merge persist. 4th is storageV5 (`Is` 5th).
+ * Official `oi.run`/`Pr()` queue is UNKNOWN — this path stays unqueued.
+ */
 export function updateSettingsForSource(
   source: EditableSettingSource,
   settings: SettingsJson,
-  /**
-   * densable ga(..., D) — official persist handle when `$t()`. Unused locally.
-   */
   _storageV5?: unknown,
 ): { error: Error | null } {
   void _storageV5
@@ -663,7 +840,6 @@ export function updateSettingsForSource(
     return { error: null }
   }
 
-  // Create the folder if needed
   const filePath = getSettingsFilePathForSource(source)
   if (!filePath) {
     return { error: null }
@@ -671,86 +847,81 @@ export function updateSettingsForSource(
 
   try {
     getFsImplementation().mkdirSync(dirname(filePath))
-
-    // Try to get existing settings with validation. Bypass the per-source
-    // cache — mergeWith below mutates its target (including nested refs),
-    // and mutating the cached object would leak unpersisted state if the
-    // write fails before resetSettingsCache().
-    let existingSettings = getSettingsForSourceUncached(source)
-
-    // If validation failed, check if file exists with a JSON syntax error
-    if (!existingSettings) {
-      let content: string | null = null
-      try {
-        content = readFileSync(filePath)
-      } catch (e) {
-        if (!isENOENT(e)) {
-          throw e
-        }
-        // File doesn't exist — fall through to merge with empty settings
-      }
-      if (content !== null) {
-        const rawData = safeParseJSON(content)
-        if (rawData === null) {
-          // JSON syntax error - return validation error instead of overwriting
-          // safeParseJSON will already log the error, so we'll just return the error here
-          return {
-            error: new Error(
-              `Invalid JSON syntax in settings file at ${filePath}`,
-            ),
-          }
-        }
-        if (rawData && typeof rawData === 'object') {
-          existingSettings = rawData as SettingsJson
-          logForDebugging(
-            `Using raw settings from ${filePath} due to validation failure`,
-          )
-        }
-      }
+    const loaded = loadExistingSettingsForWrite(source, filePath)
+    if ('error' in loaded) {
+      return { error: loaded.error }
     }
-
-    const updatedSettings = mergeWith(
-      existingSettings || {},
-      settings,
-      (
-        _objValue: unknown,
-        srcValue: unknown,
-        key: string | number | symbol,
-        object: Record<string | number | symbol, unknown>,
-      ) => {
-        // Handle undefined as deletion
-        if (srcValue === undefined && object && typeof key === 'string') {
-          delete object[key]
-          return undefined
-        }
-        // For arrays, always replace with the provided array
-        // This puts the responsibility on the caller to compute the desired final state
-        if (Array.isArray(srcValue)) {
-          return srcValue
-        }
-        // For non-arrays, let lodash handle the default merge behavior
-        return undefined
-      },
-    )
-
-    // Mark this as an internal write before writing the file
-    markInternalWrite(filePath)
-
-    writeFileSyncAndFlush_DEPRECATED(
+    writeSettingsFile(
+      source,
       filePath,
-      jsonStringify(updatedSettings, null, 2) + '\n',
+      mergeSettingsForSource(loaded.settings, settings),
     )
+  } catch (e) {
+    const error = new Error(
+      `Failed to read raw settings from ${filePath}: ${e}`,
+    )
+    logError(error)
+    return { error }
+  }
 
-    // Invalidate the session cache since settings have been updated
-    resetSettingsCache()
+  return { error: null }
+}
 
-    if (source === 'localSettings') {
-      // Okay to add to gitignore async without awaiting
-      void addFileGlobRuleToGitignore(
-        getRelativeSettingsFilePathForSource('localSettings'),
-        getOriginalCwd(),
-      )
+/**
+ * densable `Is` userSettings V5 arm: `A()&&i&&ke` →
+ * `i.write(q.userSettings(), P, {publishDiscipline:"followAtomic"})`.
+ * `legacyRevocation` / transform / `Pr()` queue are not invented.
+ */
+export async function persistSettingsForSource(
+  source: EditableSettingSource,
+  settings: SettingsJson,
+  _options?: { legacyRevocation?: 'skip' },
+  storageV5?: unknown,
+): Promise<{ error: Error | null }> {
+  void _options
+  if (
+    (source as unknown) === 'policySettings' ||
+    (source as unknown) === 'flagSettings'
+  ) {
+    return { error: null }
+  }
+
+  const filePath = getSettingsFilePathForSource(source)
+  if (!filePath) {
+    return { error: null }
+  }
+
+  const write = settingsStorageV5Write(storageV5)
+  const viaStorageV5 =
+    isHoverRestOn() &&
+    write !== undefined &&
+    isDefaultUserSettingsPath(source, filePath)
+
+  if (!viaStorageV5) {
+    return updateSettingsForSource(source, settings, storageV5)
+  }
+
+  try {
+    getFsImplementation().mkdirSync(dirname(filePath))
+    const loaded = loadExistingSettingsForWrite(source, filePath)
+    if ('error' in loaded) {
+      return { error: loaded.error }
     }
+    const updatedSettings = mergeSettingsForSource(loaded.settings, settings)
+    const payload = jsonStringify(updatedSettings, null, 2) + '\n'
+    const written = await write(userSettingsStorageV5Key(), payload, {
+      publishDiscipline: 'followAtomic',
+    })
+    if (!written.ok) {
+      const code =
+        written.error !== null &&
+        typeof written.error === 'object' &&
+        'code' in written.error
+          ? String(written.error.code)
+          : String(written.error)
+      throw new Error(`settings storageV5 write failed: ${code}`)
+    }
+    resetSettingsCache()
   } catch (e) {
     const error = new Error(
       `Failed to read raw settings from ${filePath}: ${e}`,

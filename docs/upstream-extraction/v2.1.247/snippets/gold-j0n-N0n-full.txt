@@ -1,0 +1,6 @@
+# LOCKED N0n @214573520 end=214574046 len=526
+# unique async function N0n(e,t) count=1
+# unique callers: ame@214576437 await N0n(r) 1-arg; also @214589142 await N0n({version:2,plugins:m},e) 2-arg
+# unique string Failed to save installed_plugins.json to @214573954 (string-table twin @201644408)
+# alias: none (N0n as / as N0n count=0). same-module as ame.
+async function N0n(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null){let s=await t.write(n,le(e,null,2),{mode:L0n()});if(!s.ok)throw F0n(s.error);qSt(e),_(`Saved ${Object.keys(e.plugins).length} installed plugins through the storage interface`);return}let r=vt(),o=sme();try{r.mkdirSync(Fs());let s=le(e,null,2);u2(o,s),Xn().installedPluginsFile=e,_(`Saved ${Object.keys(e.plugins).length} installed plugins to ${o}`)}catch(s){throw _(`Failed to save installed_plugins.json to ${o}: ${Y(s)}`,{level:"error"}),f2("save",s,!1),s}}

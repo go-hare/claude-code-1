@@ -1,0 +1,18 @@
+# EV + Khe + pZe + fZe unique @232387223..232387553
+# tengu_dead_probe_legacy_plugin_tip_counts is the only JS hit besides sourcemap
+
+var EV=2;
+class Khe{
+  fired=new Set;
+  fire(e,t){
+    if(e<=0)return;
+    let o=e>t?"true":"false",
+        n=e>=EV&&t<EV?"true":"false",
+        r=`${o}|${n}`;
+    if(this.fired.has(r))return;
+    this.fired.add(r),
+    U("tengu_dead_probe_legacy_plugin_tip_counts",{changes_max:ke(o),changes_outcome:ke(n)})
+  }
+}
+var pZe=new wa(()=>new Khe);
+function fZe(){return pZe.of(uk().host)}

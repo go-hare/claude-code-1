@@ -1,0 +1,3 @@
+# @210381731
+
+(b(ee(G,".claude","hooks"),!0,!0),L!==G)b(ee(L,".claude","hooks"),!0,!0);p.push(Vr(ee(Kt(),"local"))),p.push(...dN().map(Vr)),b(ee(Kt(),"jobs"),!0,!0);let Q=ee(Kt(),"seed-admin");b(Q,!1,!0),b(ee(Kt(),"daemon"),!0,!0);{let _=ef(),T=_;try{T=Vt(_)}catch{try{T=ee(Vt($e(_)),Qd)}catch{}}b(_,!0,!0),A.push(Vr(T))}let re=new Set(["scheduled_tasks.json","launch.json","CLAUDE.md","daemon.json","policy-limits.json"]);for(let _ of["shell-snapshots","session-env","plugins","hooks","skills","workflows","commands","agents","routines","rules","output-styles","scheduled_tasks.json","launch.json","CLAUDE.md","projects","daemon.json","policy-limits.json","backups"]){let T=Zt(ee(Kt(),_));p.push(re.has(_)?T:Vr(T)

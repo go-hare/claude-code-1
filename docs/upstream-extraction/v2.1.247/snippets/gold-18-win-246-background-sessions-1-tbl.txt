@@ -1,0 +1,17 @@
+# ver=246 offset=196539741 kind=tbl run=109 needle="background sessions"
+
+l_holder_unknown_origin@...Not installing the background service: a foreground daemon (pid ..., started with `claude daemon run`) holds the daemon lock and will serve this session. Stop it (Ctrl-C in its terminal or 'claude daemon stop') and re-run to install...S...; it will serve this session. Stop it ('claude daemon stop') and re-run to install...b..Service install failed (...~...). Falling back to a transient .
+...7... for now.
+...J.Installed: .(...0..
+Run 'claude daemon uninstall' to undo.
+!...service installed but the daemon ... ...s. ..  .c.h.e.c.k. .'.c.l.a.u.d.e. .d.a.e.m.o.n. .s.t.a.t.u.s.'...|..service.U...A..n.o.t.e.:. .t.h.e. .i.n.s.t.a.l.l.e.d. .s.e.r.v.i.c.e. .h.a.s. .n.o.t. .c.o.m.e. .u.p. .y.e.t. ..  .a. .t.e.m.p.o.r.a.r.y. .b.a.c.k.g.r.o.u.n.d. .d.a.e.m.o.n. .(.p.i.d. ...9...) is serving this session; check 'claude daemon status'.
+...
+...C..onStarting...0...spawnIntent.
+...>...askInstall...j..isCI
+...answer_yes...Y...answer_once...ESt.answer_never	...a.5.causeCode...N...forceTransient...3>.jsonPath...B..logPath... ...servicePath..._...field...4...cli-bg-dispatch...".no ack...;...bg: stale handle for ...;..., retrying dispatch (..."...bg: socket dispatch fell through (...&...), using file path..	...ij..await-ack...ENOCONN...cj..bg: ...l.bg: daemon dispatch fallback (... ..ensureInFlight...0.`.worktreeHookBased...X.providerEnv.l.../Z..warning: background sessions do not support Windows network (UNC) paths; the following will be neutralized: p...q5..warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)
+...y...warning: no agent named '...#...s..'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...C(.(.i.d.l.e. ..  .w.a.i.t.i.n.g. .f.o.r. ...	...bg: daemon dispatch ...ISA. but worker is live...?..tengu_bg_dispatch_rescued...*...bg: ack-timeout recovered via redispatch (...k.Q.Session %...*.N. .i.s. .a.l.r.e.a.d.y. .r.u.n.n.i.n.g. ..  .`.c.l.a.u.d.e. .a.t.t.a.c.h. ...p3..` to join it...d...short_alive.?...P.r.e.v.i.o.u.s. .s.e.s.s.i.o.n. .i.s. .s.t.i.l.l. .s.h.u.t.t.i.n.g. .d.o.w.n. ..  .t.r.y. .a.g.a.i.n. .i.n. .a. .m.o.m.e.n.t...stale_short...h.daemon_unavailable_...u.freshDir...6n..triggers...T.resumeTranscriptPath...w...ownershipToken...rescued...w.via_redispatch...V...--exec requires a command.
+...warning: --exec ignores ...B].. (only --name composes)
+...=...cli_bg_dispatch_exec...?..cli_bg_dispatch...b..readBgStdin: stdin unreadable: ...r6..tengu_bg_stdin_unreadable...warning: stdin is unreadable (.."...>.), proceeding without piped input
+...c.warning: piped stdin exceeds ...$.. bytes, truncated
+...E...\r?\n$...l.[bg] v5 jobs listing failed: ...3...e..[bg] v5 jobs listing failed: cursor did not advance.'...[bg] v5 jobs listing 

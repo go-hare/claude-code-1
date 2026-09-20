@@ -1,0 +1,2 @@
+# 247 pluginSuggestion #5 @222247533
+unction a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}function l

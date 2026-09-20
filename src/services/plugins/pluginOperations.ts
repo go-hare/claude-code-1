@@ -27,6 +27,7 @@ import {
   formatReverseDependentsSuffix,
 } from '../../utils/plugins/dependencyResolver.js'
 import { denyCommandProducerDir } from '../../utils/plugins/commandProducerDirs.js'
+import { re } from '../../utils/plugins/escapeSafeText.js'
 import {
   loadInstalledPluginsFromDisk,
   loadInstalledPluginsV2,
@@ -574,7 +575,7 @@ export async function installPluginOp(
       case 'local-source-no-location':
         return {
           success: false,
-          message: `Cannot install local plugin "${failResult.pluginName}" without marketplace install location`,
+          message: `Cannot install local plugin "${re(failResult.pluginName)}" without marketplace install location`,
         }
       case 'settings-write-failed':
         return {
@@ -589,12 +590,12 @@ export async function installPluginOp(
       case 'blocked-by-policy':
         return {
           success: false,
-          message: `Plugin "${failResult.pluginName}" is blocked by your organization's policy and cannot be installed`,
+          message: `Plugin "${re(failResult.pluginName)}" is blocked by your organization's policy and cannot be installed`,
         }
       case 'dependency-blocked-by-policy':
         return {
           success: false,
-          message: `Plugin "${failResult.pluginName}" depends on "${failResult.blockedDependency}", which is blocked by your organization's policy`,
+          message: `Plugin "${re(failResult.pluginName)}" depends on "${re(failResult.blockedDependency)}", which is blocked by your organization's policy`,
         }
     }
   }
@@ -606,7 +607,7 @@ export async function installPluginOp(
 
   return {
     success: true,
-    message: `Successfully installed plugin: ${pluginId} (scope: ${scope})${(result as Extract<typeof result, { ok: true }>).depNote}${staleInstallWarning}`,
+    message: `Successfully installed plugin: ${re(pluginId)} (scope: ${scope})${(result as Extract<typeof result, { ok: true }>).depNote}${staleInstallWarning}`,
     pluginId,
     pluginName: entry.name,
     scope,
@@ -752,7 +753,7 @@ export async function uninstallPluginOp(
   // pluginConfigs.mcpServers is written ungated so its cleanup must run
   // ungated too.
   if (isLastScope) {
-    deletePluginOptions(pluginId)
+    await deletePluginOptions(pluginId)
     if (deleteDataDir) {
       await deletePluginDataDir(pluginId)
     }

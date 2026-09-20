@@ -1,0 +1,12 @@
+# 247 offset=197141052 needle="prStatusFooterEnabled"
+
+...3.9.ctrl+c..5... .set macOptionClickForcesSelection in VS Code settings...
+.A. to native select...k6.option+click...Q4..shift+click...9..selection-copy..
+...0..voice-hint...manage-tasks...$...view-memories.../...footer_indicator...lozenge.
+...viewerOnly...G.height...T..parens...copyOnSelect...H.lastPressHadAlt...toggle-tasks...prStatusFooterEnabled...?...Ot.Cannot destructure property 'link' from null or undefined value.	...<1..underline......assumeSupport...%.../tasks to see subagents.../diff to hide diff..	...^ \u00B7 ...^%D.hintB...u..Cannot destructure property 'reading' from null or undefined value..
+...PromptHint...MF..reading...v.Z.onHidden...T..useRenderInput...Fi.renderDraws...K)..firstEngineRef...R. .heldRenderInput...+.props......useRenderHook...U...flex...&..useRenderVersion...hasRenderHooks...t...remoteSessionUrl...h..remoteConnectionStatus...BkX. ... .r.e.c.o.n.n.e.c.t.i.n.g.& ...oA. . disconnected...disconnectedG...i...Cannot destructure property 'ideSelection' from null or undefined value...M#..hipaa...A...ju.Cannot destructure property 'suffix' from null or undefined value...$... cloud...-...Debug...y...ideSelection...bridgeSelected..
+...modeLabels...circleDouble...modes...	...separated...@...Cannot destructure property 'modes' from null or undefined value...SessionMode...t|.from ...	.../..from diff...Y..) ...T8..) .I.n. ...	...'a|.lineCount...>...briefTranscript.H...1..Cannot destructure property 'notifications' from null or undefined value...8...isScreenReader...%.nowrap...viewingAgentName...viewingAgentColor...(.flexWrap...A...queueEditIndex.....</bash-input>...C..idle_notification...i.?.task-notification...1..artifact-auto-react... more auto-reply ...l. on Artifact: ...5... more tasks completed...
+2.>completed</...=...>
+</...X...History...3..History A...D...Cannot destructure property 'banner' from null or undefined value...P..banner...o...fastModeTag.
+...borderOnly...V...padded..K.../...Cannot destructure property 'internal_querier' from null or undefined value...7Q..internal_querier...6S..[...Truncated text #
+... lines...].....{S.

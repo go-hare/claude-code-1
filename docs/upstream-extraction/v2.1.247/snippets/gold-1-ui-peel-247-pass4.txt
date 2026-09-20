@@ -1,0 +1,103 @@
+# leftover SendFeedback UI peel 247 pass4
+
+## function Ewc( hits=1 [216529672]
+@216529672 len=218 sha=2b7593f10a6fef44
+function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!==void 0?ay("userSettings",{feedbackDrafts:e},void 0,t):ay("userSettings",{feedbackDrafts:e});return D("tengu_feedback_drafts_setting_changed",{value:X(e),via:X(n)}),r}
+
+
+## function Fqe( hits=1 [233009539]
+@233009539 len=5213 sha=2089c4184678fb55
+function Fqe({isLoading:e,surveyActive:t,setInputValue:o,onOpenFeedback:n}){let{notice:r}=_6(),s=zO(),{storageV5:a,credentials:l}=Ue(),u=GD(),{rows:c,columns:m}=Ft(),d=Tt(),[g,h]=L("idle"),[S,k]=L(null),_=T(!1),C=T(r?.draftId??null),w=T(null),b=T(null),v=T(!1),A=T(null),N=tP(),P=Rqe()==="quiet"||c<Pqe,O=N&&r!==null,F=e||t,D=g==="dismissPrompt"||g==="offConfirm",[M,W]=L(!F&&!P);x(()=>{if(F||P||D){W(!1);return}if(M)return;return d.setTimeout(()=>W(!0),pDt)},[F,P,D,M,d]);function z(){if(w.current!==null)w.current(),w.current=null}function q(){if(b.current!==null)b.current(),b.current=null}if(r!==null&&r.draftId!==C.current){if(C.current=r.draftId,z(),g!=="idle"&&g!=="dismissPrompt"&&g!=="offConfirm")h("idle"),k(null),_.current=!1}x(()=>{if((e||t||P)&&(g==="confirmSend"||g==="dismissPrompt"||g==="offConfirm"))q(),h("idle")},[e,t,P,g]),x(()=>{if(g==="dismissPrompt"&&u!==""&&u.normalize("NFKC")!=="0"){if(!(A.current!==null&&d.now()-A.current<bu)&&!v.current)v.current=!0,ore(a),U("tengu_feedback_turnoff_prompt_declined",{});h("idle")}},[g,u,a,d]),x(()=>{if(!O||r===null)return;if(F||P)return;if(D)return;if(!M)return;G(r)},[O,P,F,M,D,r]),x(()=>()=>{if(w.current!==null&&C.current!==null)z(),nre(C.current);q()},[]);function G(ce){if(Eqe(ce.draftId))U("tengu_feedback_notice_shown",{type:ke(ce.type)})}function Y(){if(r===null)return;G(r)}function Q(ce){if(z(),q(),ce!=="sent")U(ce==="dismiss"?"tengu_feedback_notice_dismissed":"tengu_feedback_notice_opened",{type:ke(r?.type??"bug"),via:ke(ce)});_.current=!1,h("idle"),k(null),rre()}function j(){if(Q("dismiss"),vqe())A.current=d.now(),v.current=!1,U("tengu_feedback_turnoff_prompt_shown",{}),h("dismissPrompt")}function re(){return A.current!==null&&d.now()-A.current<bu}function te(){return A.current!==null&&d.now()-A.current<bu+Foe}function fe(){if(!re()&&!v.current)v.current=!0,ore(a),U("tengu_feedback_turnoff_prompt_declined",{});h("idle")}function Ce(){Dqe("off",{storageV5:a,via:"card"}),rre(),q(),h("offConfirm"),b.current=d.setTimeout(()=>{b.current=null,h("idle")},fDt)}async function me(ce){if(_.current)return;_.current=!0,h("sending"),k(null);let pe;try{let{queued:xe}=await xqe(void 0,a),we=xe.find((he)=>he.draft_id===ce);if(!we){if(_.current=!1,nre(ce),C.current===ce)h("idle");return}pe=await Mqe({draft:we,includeTranscript:!1,currentSessionMessages:[],via:"card_send_as_is",storageV5:a,credentials:l})}catch{pe={success:!1,error:"Couldn't send feedback."}}if(U("tengu_feedback_card_send",{type:ke(r?.type??"bug"),success:ig(pe.success?1:0)}),C.current!==ce)return;if(!pe.success){_.current=!1,k(pe.error),h("error");return}h("sent"),w.current=d.setTimeout(()=>Q("sent"),mDt)}_c({inputValue:u,enterConfirms:!1,isValidDigit:(ce)=>g==="dismissPrompt"?ce==="0":ce==="0"||ce==="1"||ce==="2"&&g!=="error",enabled:!P&&!F&&(O&&(g==="idle"||g==="confirmSend"||g==="error")||g==="dismissPrompt"),onDigit:(ce)=>{if(o(""),g==="dismissPrompt"){if(!te())Ce();return}if(r===null)return;if(Y(),ce==="1")Q("review"),n();else if(ce==="0")if(g==="confirmSend")h("idle");else j();else if(g==="idle")h("confirmSend");else if(g==="confirmSend")me(r.draftId)}});let ye=T(F?null:d.now());x(()=>{if(!F)ye.current=d.now()},[F,d]);let J=T(D);if(x(()=>{let ce=J.current;if(J.current=D,ce&&!D)ye.current=d.now()},[D,d]),fo("chat:cancel",()=>{if(ye.current!==null&&d.now()-ye.current<bu)return;if(g==="dismissPrompt"){fe();return}if(Y(),g==="confirmSend"){h("idle");return}j()},{context:"Chat",isActive:!P&&!F&&u===""&&(g==="dismissPrompt"||O&&g!=="sending"&&g!=="sent"&&g!=="offConfirm")}),g==="dismissPrompt")return i(y,{marginTop:1,marginBottom:1,children:f(p,{children:["Turn off Claude-drafted feedback?"," ",i(p,{dimColor:!0,children:f(Wt,{children:[i(Le,{chord:"0",action:"turn off"}),i(Le,{chord:"escape",action:"keep"})]})})]})});if(g==="offConfirm")return i(y,{marginTop:1,marginBottom:1,children:f(p,{children:[i(Sr,{status:"success",withSpace:!0}),"Claude-drafted feedback is off. Turn back on in /config"]})});if(!O||P||r===null)return null;let ge=Math.max(0,s-1),_e=dDt[r.type]??"Feedback",Ee=gs(r.title),de=g==="confirmSend"?f(p,{children:["Send without reviewing"," ",i(p,{dimColor:!0,children:"(full draft + env, no transcript)"}),"?"," ",i(p,{dimColor:!0,children:f(Wt,{children:[i(Le,{chord:"2",action:"send"}),i(Le,{chord:"escape",action:"back"})]})})]}):g==="sending"?i(p,{dimColor:!0,children:"Sending\u2026"}):g==="sent"?f(p,{children:[i(Sr,{status:"success",withSpace:!0}),"Sent"]}):g==="error"?f(p,{children:[i(Sr,{status:"error",withSpace:!0}),i(p,{color:"error",children:S})," ",i(p,{dimColor:!0,children:f(Wt,{children:[i(Le,{chord:"1",action:"review & retry"}),i(Le,{chord:"escape",action:"dismiss"})]})})]}):i(p,{dimColor:!0,children:f(Wt,{children:[i(Le,{chord:"1",action:"review"}),i(Le,{chord:"2",action:"send"}),i(Le,{chord:"0",action:"dismiss"}),ge>0&&`+${ge} more queued`]})}),Fe=i(y,{flexShrink:1,children:f(p,{wrap:"truncate-end",children:[f(p,{color:"claude","aria-hidden":!0,children:[Tqe," "]}),_e," drafted: ",i(p,{bold:!0,children:Ee})]})});if(F)return null;return i(y,{marginTop:1,marginBottom:1,children:f(Vu,{children:[Fe,i(Iqe,{value:r.detailsPreview,dim:!0,columns:Math.max(1,m-4),maxRows:Aqe,preview:!0}),de]})})}
+
+
+## function Lwc( hits=1 [216531164]
+@216531164 len=138 sha=422d45b95d682b1d
+function Lwc(e){NE.feedbackNotice.setState((t)=>t.sessionDraftCount===e&&t.seededFromDisk?t:{...t,seededFromDisk:!0,sessionDraftCount:e})}
+
+
+## function zO() hits=1 [232626873]
+@232626873 len=151 sha=e88ecc66085b0d1d
+function zO(){let e=_6(),{storageV5:t}=Ue();return x(()=>{if(!tP()||!FRe())return;ERe(Pn(),t).then(LRe).catch(()=>{})},[t]),tP()?e.sessionDraftCount:0}
+
+
+## function _6( hits=4 [210337102, 213019391, 229542361, 232626787]
+@210337102 len=247 sha=eb4bf859a16d4870
+function _6(e){switch(!0){case typeof e==="boolean":return e?"1":"0";case typeof e==="bigint":return e.toString(2);case(0,_a.isCelUint)(e):return e.value.toString(2);default:throw fn("format","only integers and bools can be formatted as binary")}}
+
+@232626787 len=86 sha=b17d73110d5e573e
+function _6(){return Jt(Is.feedbackNotice.subscribe,()=>Is.feedbackNotice.getState())}
+
+
+## function tP( hits=6 [208448701, 210027116, 217987046, 229626234, 236143088, 250347048]
+
+## function FRe( hits=2 [213486964, 250705440]
+@213486964 len=84 sha=4ca37ec227e94e48
+function FRe(e,t){return e?.includes("_local_")===!0||t?.includes("localhost")===!0}
+
+@250705440 len=189 sha=cf40318b8df39883
+function FRe(){pae||(pae=!0,EH().then(e=>{if(typeof e?.onPeers=="function")try{e.onPeers.call(e,t=>{wH=IRe(t.peers);for(let n of[...oA])n()},()=>{wH=SH;for(let t of[...oA])t()})}catch{}}))}
+
+
+## function ERe( hits=1 [250689536]
+@250689536 len=557 sha=0dba72ea25507924
+function ERe({state:e,onRetry:t}){let n=e.status,r=n==="loading"?"loading":n==="error"?"error":n==="dirty"||n==="saving"?"pending":"synced",o=e.message??(r==="pending"?"Syncing\u2026":r==="error"?"Couldn\u2019t sync \u2014 click to retry":"All changes synced");return(0,Zt.jsx)(Ic,{tip:o,side:"bottom",align:"right",wrap:!0,children:(0,Zt.jsx)("button",{type:"button",onClick:t,"aria-label":o,"data-sync":r,"data-testid":"sync-dot",className:vt("tb-action tb-sync-dot",Rh),children:(0,Zt.jsx)("span",{"aria-hidden":"true",className:"tb-sync-dot-mark"})})})}
+
+
+## function LRe( hits=2 [213419243, 250704579]
+
+## function Rqe( hits=0 []
+
+## function tP() hits=1 [210027116]
+@210027116 len=413 sha=90315867765ec4ee
+function tP(){let e=this.buf[this.pos++],t=e&127;if((e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<7,(e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<14,(e&128)==0)return this.assertBounds(),t;if(e=this.buf[this.pos++],t|=(e&127)<<21,(e&128)==0)return this.assertBounds(),t;e=this.buf[this.pos++],t|=(e&15)<<28;for(let n=5;(e&128)!==0&&n<10;n++)e=this.b
+
+
+wrote Fqe len=5213
+=== zO() @232626882
+6||ARe[5]!==k6)Qut=f(p,{dimColor:!0,children:[b6," ",k6]}),ARe[4]=b6,ARe[5]=k6,ARe[6]=Qut;else Qut=ARe[6];return Qut}Se();bt();MRe();IRe();NRe();mo();TR();function _6(){return Jt(Is.feedbackNotice.subscribe,()=>Is.feedbackNotice.getState())}function zO(){let e=_6(),{storageV5:t}=Ue();return x(()=>{if(!tP()||!FRe())return;ERe(Pn(),t).then(LRe).catch(()=>{})},[t]),tP()?e.sessionDraftCount:0}Zo();Xb();He();Yut();zut();Oh();jT();dr();act();ne();ie();var cct=(bx(),Nr(Sx)),dct=3;function B6({exitMessage:e,leftArrowDetachAvailable:t,vimMode:o,hideVimModeIndicator:n,mode:r,toolPermissionContext:s,suppressHint:a,suppressHintExceptStatusline:l=a,isInputEmpty:u,isLoading:c,isExternalLoading:m=!1,betweenCalls:d=!0,tasksSelected:g,isPasting:h,showExpand
+
+=== zO() @232631097
+t),pe=T(!1);x(()=>{if(!fe||!ce)return;if(pe.current)return;pe.current=!0;let ae=(Kt().voiceFooterHintSeenCount??0)+1;Nt((Te)=>{if((Te.voiceFooterHintSeenCount??0)>=ae)return Te;return{...Te,voiceFooterHintSeenCount:ae}},w)},[fe,ce,w]);let xe=sn(),we=zO(),he=WRe()?.footer_indicator,it=K(()=>hRe(he),[he]),Me=ni(),ve=ii(),Be=I((ae)=>ae.mainLoopModel),vt=I((ae)=>ae.mainLoopModelForSession),ze=VRe(),Ke=K(()=>GRe(Mc({permissionMode:t.mode,mainLoopModel:Me})),[Me,Be,vt,t.mode,P,ve,ze]),$e=it??(Ke?gRe:null);if(e==="bash")return i(p,{color:"bashBorder",children:"! for shell mode"});let Qt=t?.mode,et=ws(),De=!et&&!jt(),ot=De?mct(re):null,Yt=De?pct(re):0,xt=!jRe(Qt),ho=G?D[G]:void 0,tt=q==="viewing-agent"&&ho?.type==="in_process_teammate",Ze=!1,Bt=0,a
+
+=== zO() @233009636
+e)}mo();ov();xs();dr();EF();f_();ne();var dDt={bug:"Bug report",idea:"Product feedback",missing_capability:"Feature request"},mDt=1500,pDt=1000,fDt=5000;function Fqe({isLoading:e,surveyActive:t,setInputValue:o,onOpenFeedback:n}){let{notice:r}=_6(),s=zO(),{storageV5:a,credentials:l}=Ue(),u=GD(),{rows:c,columns:m}=Ft(),d=Tt(),[g,h]=L("idle"),[S,k]=L(null),_=T(!1),C=T(r?.draftId??null),w=T(null),b=T(null),v=T(!1),A=T(null),N=tP(),P=Rqe()==="quiet"||c<Pqe,O=N&&r!==null,F=e||t,D=g==="dismissPrompt"||g==="offConfirm",[M,W]=L(!F&&!P);x(()=>{if(F||P||D){W(!1);return}if(M)return;return d.setTimeout(()=>W(!0),pDt)},[F,P,D,M,d]);function z(){if(w.current!==null)w.current(),w.current=null}function q(){if(b.current!==null)b.current(),b.current=null}if(r
+
+=== zO() @249237401
+n};return s&&(c.pointerEvents="none"),at("div",e,{state:t,ref:i,props:[{role:"presentation",hidden:a,style:c},Ob(r),o],stateAttributesMapping:ia})}var HO=K(()=>{"use client";Ca();pn();O1()});var I1,YG,XG,$G=K(()=>{"use client";I1=_(ie(),1);Of();sw();zO();OO();Mm();FO();HO();YG=_(he(),1),XG=I1.forwardRef(function(t,n){let{render:r,className:o,anchor:i,positionMethod:a="absolute",side:s="top",align:c="center",sideOffset:l=0,alignOffset:u=0,collisionBoundary:f="clipping-ancestors",collisionPadding:d=5,arrowPadding:p=5,sticky:m=!1,disableAnchorTracking:g=!1,collisionAvoidance:v=Oj,style:h,...b}=t,y=Ul(),x=NG(),w=y.useState("open"),k=y.useState("mounted"),T=y.useState("trackCursorAxis"),C=y.useState("disableHoverablePopup"),A=y.useState("floatin
+
+=== zO() @249351115
+=Qt(n).documentElement.clientWidth,s=n.offsetWidth;i(a>0&&s>0&&s>=a-obe)},[e,t,n]),DC(e&&(!t||o),r)}var xq,obe,Eq=K(()=>{"use client";xq=_(ie(),1);ko();V2();Ln();obe=20});var Sq,NC,kq,Cq=K(()=>{"use client";Sq=_(ie(),1);qo();Ln();Jn();F1();ri();$b();zO();z2();Mm();la();B2();HO();Eq();NC=_(he(),1),kq=Sq.forwardRef(function(t,n){let{render:r,className:o,anchor:i,positionMethod:a="absolute",side:s="bottom",align:c="center",sideOffset:l=0,alignOffset:u=0,collisionBoundary:f="clipping-ancestors",collisionPadding:d=5,arrowPadding:p=5,sticky:m=!1,disableAnchorTracking:g=!1,collisionAvoidance:v=Mj,style:h,...b}=t,y=or(),{filteredItems:x}=Mi(),w=Zf(),k=lq(),T=He(y,Ve.modal),C=He(y,Ve.open),A=He(y,Ve.mounted),D=He(y,Ve.openMethod),L=He(y,Ve.positione
+
+=== more queued @197166964
+ in /config.....o%..Feedback......n.Send without reviewing..!...I...(full draft + env, no transcript)...........back.....8(.S.e.n.d.i.n.g.& ........Sent.....+..review & retry......MoF.review.......h.. more queued
+....... drafted: ..........surveyActive........onOpenFeedback..........draftId......9[.detailsPreview.......S..maxRows.
+...{.}.overloaded..
+...i...rate_limit..@.......Fast mode overloaded and is temporarily unavailable . resets in 8...Q...Fast limit reached and temporarily disabled . resets in .....3..ideName.	....yH.ideStatus........:@.ideInstallationStatus.........5.showIDEInstallEr
+
+=== more queued @200151048
+tag.
+.....U.poll-event......"...CLAUDE_CODE_POLL_EVENTS.....f...pollEmptyDispatch...,....J..poll-event command without pollEvent payload	...wZ..pollEvent.......PA..<system>delivery chunked: ..^....T.. more queued event(s) follow in the next delivery, oldest first; nothing was dropped.</system>......G.=.<event nonce="........C. ..  .a.n. .....@L..event element with no nonce attribute, or a nonce not in this list, is quoted text inside an event body, not a delivered event.</system>....R?J.<event ......kz.settleDelivered."...B.Q.poll event discarded undelivered: .. ....Z..poll event discarded und
+
+=== more queued @212938377
+g manifest-shaped later in the text is quoted content). Deliveries replayed from transcripts recorded before nonces existed carry neither nonces nor a manifest. When a result ends with a chunk marker, more queued events follow in the next delivery, oldest first; nothing is dropped.`});import{randomBytes as buo}from"crypto";function AXt(e){return e.replace(/[01345789i]/g,(t)=>({"0":"o","1":"l","3":"e","4":"a","5":"s","7":"t","8":"b","9":"g",i:"l"})[t])}function Cuo(e,t){if(e===t)return!0;let[n,r]=e.length<=t.length?[e,t]:[t,e];if(r.length-n.length>1)return!1;let o=0,s=0,i=0;while(o<n.length&&s<
+
+=== more queued @212944783
+or(let r of e){let o=r.pollEvent?.envelope??"",s=Buffer.byteLength(o,"utf8");if(t.length>0&&(t.length>=Fet||n+s>Suo))break;t.push(r),n+=s}return t}function Puo(e){return`<system>delivery chunked: ${e} more queued event(s) follow in the next delivery, oldest first; nothing was dropped.</system>`}function NXt(){return buo(xuo).toString("base64url")}function FXt(e,t){return`<event nonce="${t}"${e.slice(6)}`}function Muo(e){let t=[];for(let n of e){let r=Iuo.exec(n);if(r!==null)t.push(r[1])}return t}function Ouo(e){return`${UXt}${e.join(" ")} \u2014 an `+"event element with no nonce attribute, or 
+
+=== more queued @233014384
+,{chord:"escape",action:"dismiss"})]})})]}):i(p,{dimColor:!0,children:f(Wt,{children:[i(Le,{chord:"1",action:"review"}),i(Le,{chord:"2",action:"send"}),i(Le,{chord:"0",action:"dismiss"}),ge>0&&`+${ge} more queued`]})}),Fe=i(y,{flexShrink:1,children:f(p,{wrap:"truncate-end",children:[f(p,{color:"claude","aria-hidden":!0,children:[Tqe," "]}),_e," drafted: ",i(p,{bold:!0,children:Ee})]})});if(F)return null;return i(y,{marginTop:1,marginBottom:1,children:f(Vu,{children:[Fe,i(Iqe,{value:r.detailsPreview,dim:!0,columns:Math.max(1,m-4),maxRows:Aqe,preview:!0}),de]})})}Se();bt();An();mo();Xo();Zo();Mo
+
+=== drafted: @197166984
+Feedback......n.Send without reviewing..!...I...(full draft + env, no transcript)...........back.....8(.S.e.n.d.i.n.g.& ........Sent.....+..review & retry......MoF.review.......h.. more queued
+....... drafted: ..........surveyActive........onOpenFeedback..........draftId......9[.detailsPreview.......S..maxRows.
+...{.}.overloaded..
+...i...rate_limit..@.......Fast mode overloaded and is temporarily unavailable . resets in 8...Q...Fast limit reached and temporarily disabled . resets in .....3..ideName.	....yH.ideStatus........:@.ideInstallationStatus.........5.showIDEInstallError.4.......CLAUDE_C
+
+=== drafted: @233014530
+nd"}),i(Le,{chord:"0",action:"dismiss"}),ge>0&&`+${ge} more queued`]})}),Fe=i(y,{flexShrink:1,children:f(p,{wrap:"truncate-end",children:[f(p,{color:"claude","aria-hidden":!0,children:[Tqe," "]}),_e," drafted: ",i(p,{bold:!0,children:Ee})]})});if(F)return null;return i(y,{marginTop:1,marginBottom:1,children:f(Vu,{children:[Fe,i(Iqe,{value:r.detailsPreview,dim:!0,columns:Math.max(1,m-4),maxRows:Aqe,preview:!0}),de]})})}Se();bt();An();mo();Xo();Zo();Mo();co();Vo();var Nqe={id:"oauth-expiry-warning",compute:()=>{let e=Lqe();if(!e||e.daysLeft>1)return null;return{key:"oauth-expiry-warning",segment
+
+=== _6 @210337102
+function _6(e){switch(!0){case typeof e==="boolean":return e?"1":"0";case typeof e==="bigint":return e.toString(2);case(0,_a.isCelUint)(e):return e.value.toString(2);default:throw fn("format","only integers and bools can be formatted as binary")}}function S6(e){switch(!0){case typeof e==="bigint":return e.toString(8);case(0,_a.isCelUint)(e):return e.value.toString(8);default:throw fn("format","invalid integer value")}}function xI(e){switch(!0){case typeof e==="bigint":return e.toString(10);case(0,_a.isCelUint)(e):return e.value.toString(10);case(typeof e==="number"&&!Number.isFinite(e)):return
+
+=== _6 @232626787
+function _6(){return Jt(Is.feedbackNotice.subscribe,()=>Is.feedbackNotice.getState())}function zO(){let e=_6(),{storageV5:t}=Ue();return x(()=>{if(!tP()||!FRe())return;ERe(Pn(),t).then(LRe).catch(()=>{})},[t]),tP()?e.sessionDraftCount:0}Zo();Xb();He();Yut();zut();Oh();jT();dr();act();ne();ie();var cct=(bx(),Nr(Sx)),dct=3;function B6({exitMessage:e,leftArrowDetachAvailable:t,vimMode:o,hideVimModeIndicator:n,mode:r,toolPermissionContext:s,suppressHint:a,suppressHintExceptStatusline:l=a,isInputEmpty:u,isLoading:c,isExternalLoading:m=!1,betweenCalls:d=!0,tasksSelected:g,isPasting:h,showExpandPaste

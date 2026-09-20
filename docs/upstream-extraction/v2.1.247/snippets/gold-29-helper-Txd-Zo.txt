@@ -1,0 +1,3 @@
+# offset=206910729 function Zo Txd
+
+===null||a!==n)return!0}return!1}function J(t){return!1}function Ko(t){return!1}function Zo(t){return P(t)||J(t)}function L(t){return zr(t)!==null}function zr(t){return ve(t,"net")}function ve(t,e){if(!t.startsWith("/"))return null;let r=[];for(let n of t.split("/")){if(n===""||n===".")continue;if(n===".."){r.pop();continue}if(r.push(n),r.length===2&&r[0].toLowerCase()===e)return"/"+r.join("/")}return null}function Bo(t){return L(t)||/^\/Network\//iu.test(t)||ve(t,"network")!

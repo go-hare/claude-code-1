@@ -1,0 +1,3 @@
+# offset=221846208 needle="code:-1"
+
+.length>0,hadHello:L,via:O(u),short:a,...M&&{stderr_errno:M}})}),Ce(R?[-t,R]:[-t],u!=="hung"?void 0:Y);let A=W().length>0,k=A?(v,E)=>void S.then((M)=>x(v,E,Ft(M)),()=>x(v,E)):x;if(o){let v=null;o.exited.then((E)=>{v={code:E,signal:o.signalCode??void 0},k(E,v.signal)},()=>k(-1)),setTimeout(()=>x(v?v.code:-1,v?.signal),1000).unref();return}if(k(-1),A)setTimeout(x,1000,-1).unref()}function pr(u){if(u.kind===Kt){if(!D){let S=l.write(u.payload);if(oe)c.emit(S);else if(S.length>0){let A=(ae+S).replaceAll(z,""),k=wr(A);ae=k>0?A.slice(A.length-k):"";let v=k>0?A.slice(0,A.length-k):A;if(v.length>0)c.emit(v)}}}else if(u.ctrl.t==="hello"){if(L)D=!0,l.end(),ae="";else ye(q(e)).catch(()=>{});L=!0,R=u.ctr

@@ -1,0 +1,3 @@
+# off=209406783 len=181
+
+async function VP(e){if(e==="")return{kind:"simple",commands:[],bareAssignmentNames:[]};let t=await xc(e);return t===null?{kind:"simple",commands:[],bareAssignmentNames:[]}:$p(e,t)}

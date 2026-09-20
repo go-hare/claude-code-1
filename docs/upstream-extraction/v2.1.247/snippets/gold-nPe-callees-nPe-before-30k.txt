@@ -1,0 +1,261 @@
+# nPe@213644976 before 30k
+(let o of r.commands)n(o);if(r.nestedCommands)for(let o of r.nestedCommands)n(o);if(r.securityPatterns){if(r.securityPatterns.hasMemberInvocations)t.hasMemberInvocations=!0;if(r.securityPatterns.hasSubExpressions)t.hasSubExpressions=!0;if(r.securityPatterns.hasExpandableStrings)t.hasExpandableStrings=!0;if(r.securityPatterns.hasScriptBlocks)t.hasScriptBlocks=!0}}for(let r of e.variables)if(r.isSplatted){t.hasSplatting=!0;break}return t}var lwo=5000,uwo=2,dwo=1e4,Nan=`
+if (-not $EncodedCommand) {
+    Write-Output '{"valid":false,"errors":[{"message":"No command provided","errorId":"NoInput"}],"statements":[],"variables":[],"hasStopParsing":false,"originalCommand":""}'
+    exit 0
+}
+
+$Command = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($EncodedCommand))
+
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $Command,
+    [ref]$tokens,
+    [ref]$parseErrors
+)
+
+$allVariables = [System.Collections.ArrayList]::new()
+
+function Get-RawCommandElements {
+    param([System.Management.Automation.Language.CommandAst]$CmdAst)
+    $elems = [System.Collections.ArrayList]::new()
+    foreach ($ce in $CmdAst.CommandElements) {
+        $ceData = @{ type = $ce.GetType().Name; text = $ce.Extent.Text }
+        if ($ce.PSObject.Properties['Value'] -and $null -ne $ce.Value -and $ce.Value -is [string]) {
+            $ceData.value = $ce.Value
+        }
+        if ($ce -is [System.Management.Automation.Language.CommandExpressionAst]) {
+            $ceData.expressionType = $ce.Expression.GetType().Name
+        }
+        $a=$ce.Argument;if($a){$ceData.children=@(@{type=$a.GetType().Name;text=$a.Extent.Text})}
+        [void]$elems.Add($ceData)
+    }
+    return $elems
+}
+
+function Get-RawRedirections {
+    param($Redirections)
+    $result = [System.Collections.ArrayList]::new()
+    foreach ($redir in $Redirections) {
+        $redirData = @{ type = $redir.GetType().Name }
+        if ($redir -is [System.Management.Automation.Language.FileRedirectionAst]) {
+            $redirData.append = [bool]$redir.Append
+            $redirData.fromStream = $redir.FromStream.ToString()
+            $redirData.locationText = $redir.Location.Extent.Text
+        }
+        [void]$result.Add($redirData)
+    }
+    return $result
+}
+
+function Get-SecurityPatterns($A) {
+    $p = @{}
+    foreach ($n in $A.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.MemberExpressionAst] -or
+        $x -is [System.Management.Automation.Language.SubExpressionAst] -or
+        $x -is [System.Management.Automation.Language.ArrayExpressionAst] -or
+        $x -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -or
+        $x -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or
+        $x -is [System.Management.Automation.Language.ParenExpressionAst]
+    }, $true)) { switch ($n.GetType().Name) {
+        'InvokeMemberExpressionAst' { $p.hasMemberInvocations = $true }
+        'MemberExpressionAst' { $p.hasMemberInvocations = $true }
+        'SubExpressionAst' { $p.hasSubExpressions = $true }
+        'ArrayExpressionAst' { $p.hasSubExpressions = $true }
+        'ParenExpressionAst' { $p.hasSubExpressions = $true }
+        'ExpandableStringExpressionAst' { $p.hasExpandableStrings = $true }
+        'ScriptBlockExpressionAst' { $p.hasScriptBlocks = $true }
+    }}
+    if ($p.Count -gt 0) { return $p }
+    return $null
+}
+
+$varExprs = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.VariableExpressionAst] }, $true)
+foreach ($v in $varExprs) {
+    [void]$allVariables.Add(@{
+        path = $v.VariablePath.ToString()
+        isSplatted = [bool]$v.Splatted
+    })
+}
+
+$typeLiterals = [System.Collections.ArrayList]::new()
+foreach ($t in $ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.TypeExpressionAst] -or
+    $n -is [System.Management.Automation.Language.TypeConstraintAst]
+}, $true)) { [void]$typeLiterals.Add($t.TypeName.FullName) }
+
+$hasStopParsing = $false
+foreach ($tok in $tokens) {
+    $norm = $tok.Text -replace '[\\u2013\\u2014\\u2015]','-' -replace '[\`''""\\u2018-\\u201f]',''
+    if ($norm -eq '--%') {
+        $hasStopParsing = $true; break
+    }
+}
+
+$statements = [System.Collections.ArrayList]::new()
+$script:hasBg = $false
+foreach ($p in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.PipelineBaseAst]}, $true)) {
+    if ($p.PSObject.Properties['Background'] -and $p.Background) { $script:hasBg = $true; break }
+}
+
+function Process-BlockStatements {
+    param($Block)
+    if (-not $Block) { return }
+
+    foreach ($stmt in $Block.Statements) {
+        $statement = @{
+            type = $stmt.GetType().Name
+            text = $stmt.Extent.Text
+        }
+
+        if ($stmt -is [System.Management.Automation.Language.PipelineAst]) {
+            $elements = [System.Collections.ArrayList]::new()
+            foreach ($element in $stmt.PipelineElements) {
+                $elemData = @{
+                    type = $element.GetType().Name
+                    text = $element.Extent.Text
+                }
+
+                if ($element -is [System.Management.Automation.Language.CommandAst]) {
+                    $elemData.commandElements = @(Get-RawCommandElements -CmdAst $element)
+                    $elemData.redirections = @(Get-RawRedirections -Redirections $element.Redirections)
+                } elseif ($element -is [System.Management.Automation.Language.CommandExpressionAst]) {
+                    $elemData.expressionType = $element.Expression.GetType().Name
+                    $elemData.redirections = @(Get-RawRedirections -Redirections $element.Redirections)
+                }
+
+                [void]$elements.Add($elemData)
+            }
+            $statement.elements = @($elements)
+
+            $allNestedCmds = $stmt.FindAll(
+                { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
+                $true
+            )
+            $nestedCmds = [System.Collections.ArrayList]::new()
+            foreach ($cmd in $allNestedCmds) {
+                if ($cmd.Parent -eq $stmt) { continue }
+                $nested = @{
+                    type = $cmd.GetType().Name
+                    text = $cmd.Extent.Text
+                    commandElements = @(Get-RawCommandElements -CmdAst $cmd)
+                    redirections = @(Get-RawRedirections -Redirections $cmd.Redirections)
+                }
+                [void]$nestedCmds.Add($nested)
+            }
+            if ($nestedCmds.Count -gt 0) {
+                $statement.nestedCommands = @($nestedCmds)
+            }
+            $r = $stmt.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+            if ($r.Count -gt 0) {
+                $rr = @(Get-RawRedirections -Redirections $r)
+                $statement.redirections = if ($statement.redirections) { @($statement.redirections) + $rr } else { $rr }
+            }
+        } else {
+            $nestedCmdAsts = $stmt.FindAll(
+                { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
+                $true
+            )
+            $nested = [System.Collections.ArrayList]::new()
+            foreach ($cmd in $nestedCmdAsts) {
+                [void]$nested.Add(@{
+                    type = 'CommandAst'
+                    text = $cmd.Extent.Text
+                    commandElements = @(Get-RawCommandElements -CmdAst $cmd)
+                    redirections = @(Get-RawRedirections -Redirections $cmd.Redirections)
+                })
+            }
+            if ($nested.Count -gt 0) {
+                $statement.nestedCommands = @($nested)
+            }
+            $r = $stmt.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+            if ($r.Count -gt 0) { $statement.redirections = @(Get-RawRedirections -Redirections $r) }
+        }
+
+        $sp = Get-SecurityPatterns $stmt
+        if ($sp) { $statement.securityPatterns = $sp }
+
+        [void]$statements.Add($statement)
+    }
+
+    if ($Block.Traps) {
+        foreach ($trap in $Block.Traps) {
+            $statement = @{
+                type = 'TrapStatementAst'
+                text = $trap.Extent.Text
+            }
+            $nestedCmdAsts = $trap.FindAll(
+                { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
+                $true
+            )
+            $nestedCmds = [System.Collections.ArrayList]::new()
+            foreach ($cmd in $nestedCmdAsts) {
+                $nested = @{
+                    type = $cmd.GetType().Name
+                    text = $cmd.Extent.Text
+                    commandElements = @(Get-RawCommandElements -CmdAst $cmd)
+                    redirections = @(Get-RawRedirections -Redirections $cmd.Redirections)
+                }
+                [void]$nestedCmds.Add($nested)
+            }
+            if ($nestedCmds.Count -gt 0) {
+                $statement.nestedCommands = @($nestedCmds)
+            }
+            $r = $trap.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+            if ($r.Count -gt 0) { $statement.redirections = @(Get-RawRedirections -Redirections $r) }
+            $sp = Get-SecurityPatterns $trap
+            if ($sp) { $statement.securityPatterns = $sp }
+            [void]$statements.Add($statement)
+        }
+    }
+}
+
+Process-BlockStatements -Block $ast.BeginBlock
+Process-BlockStatements -Block $ast.ProcessBlock
+Process-BlockStatements -Block $ast.EndBlock
+Process-BlockStatements -Block $ast.CleanBlock
+Process-BlockStatements -Block $ast.DynamicParamBlock
+
+if ($ast.ParamBlock) {
+  $pb = $ast.ParamBlock
+  $pn = [System.Collections.ArrayList]::new()
+  foreach ($c in $pb.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]}, $true)) {
+    [void]$pn.Add(@{type='CommandAst';text=$c.Extent.Text;commandElements=@(Get-RawCommandElements -CmdAst $c);redirections=@(Get-RawRedirections -Redirections $c.Redirections)})
+  }
+  $pr = $pb.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+  $ps = Get-SecurityPatterns $pb
+  $st = @{type='ParamBlockAst';text=$pb.Extent.Text}
+  if ($pn.Count -gt 0) { $st.nestedCommands = @($pn) }
+  if ($pr.Count -gt 0) { $st.redirections = @(Get-RawRedirections -Redirections $pr) }
+  if ($ps) { $st.securityPatterns = $ps }
+  [void]$statements.Add($st)
+}
+
+$hasUsingStatements = $ast.UsingStatements -and $ast.UsingStatements.Count -gt 0
+$hasScriptRequirements = $ast.ScriptRequirements -ne $null
+
+$output = @{
+    valid = ($parseErrors.Count -eq 0)
+    errors = @($parseErrors | ForEach-Object {
+        @{
+            message = $_.Message
+            errorId = $_.ErrorId
+        }
+    })
+    statements = @($statements)
+    variables = @($allVariables)
+    hasStopParsing = $hasStopParsing
+    originalCommand = $Command
+    typeLiterals = @($typeLiterals)
+    hasUsingStatements = [bool]$hasUsingStatements
+    hasScriptRequirements = [bool]$hasScriptRequirements
+    hasBackgroundJob = [bool]$script:hasBg
+}
+
+$output | ConvertTo-Json -Depth 10 -Compress
+`,fwo=32767,mwo=200,gwo=21,hwo=100,ywo,_wo,bwo,uit,Swo,Rwo,Awo,sT,iy;var BC=w(()=>{$e();ro();be();Qo();K1();G1();G5();wt();ywo=(fwo-mwo)*3/8,_wo=ywo-Nan.length-gwo,bwo=Math.max(0,Math.floor(_wo*3/4)-hwo),uit=bwo,Swo={valid:!1,statements:[],variables:[],hasStopParsing:!1};Rwo=new Set(["PwshSpawnError","PwshError","PwshTimeout","EmptyOutput","InvalidJson"]);Awo=new fn(()=>new Fan);sT=Object.assign(Object.create(null),{ls:"Get-ChildItem",dir:"Get-ChildItem",gci:"Get-ChildItem",cat:"Get-Content",type:"Get-Content",gc:"Get-Content",cd:"Set-Location",sl:"Set-Location",chdir:"Set-Location",pushd:"Push-Location",popd:"Pop-Location",pwd:"Get-Location",gl:"Get-Location",gi:"Get-Item",gp:"Get-ItemProperty",ni:"New-Item",mkdir:"New-Item",md:"New-Item",ri:"Remove-Item",del:"Remove-Item",rd:"Remove-Item",rmdir:"Remove-Item",rm:"Remove-Item",erase:"Remove-Item",mi:"Move-Item",mv:"Move-Item",move:"Move-Item",ci:"Copy-Item",cp:"Copy-Item",copy:"Copy-Item",cpi:"Copy-Item",si:"Set-Item",rni:"Rename-Item",ren:"Rename-Item",ps:"Get-Process",gps:"Get-Process",kill:"Stop-Process",spps:"Stop-Process",start:"Start-Process",saps:"Start-Process",sajb:"Start-Job",ipmo:"Import-Module",echo:"Write-Output",write:"Write-Output",sleep:"Start-Sleep",help:"Get-Help",man:"Get-Help",gcm:"Get-Command",gsv:"Get-Service",gv:"Get-Variable",sv:"Set-Variable",h:"Get-History",history:"Get-History",iex:"Invoke-Expression",iwr:"Invoke-WebRequest",irm:"Invoke-RestMethod",icm:"Invoke-Command",ii:"Invoke-Item",iwmi:"Invoke-WmiMethod",icim:"Invoke-CimMethod",nsn:"New-PSSession",etsn:"Enter-PSSession",exsn:"Exit-PSSession",gsn:"Get-PSSession",rsn:"Remove-PSSession",cls:"Clear-Host",clear:"Clear-Host",select:"Select-Object",where:"Where-Object",foreach:"ForEach-Object","%":"ForEach-Object","?":"Where-Object",measure:"Measure-Object",ft:"Format-Table",fl:"Format-List",fw:"Format-Wide",oh:"Out-Host",ogv:"Out-GridView",ac:"Add-Content",clc:"Clear-Content",tee:"Tee-Object",epcsv:"Export-Csv",sp:"Set-ItemProperty",rp:"Remove-ItemProperty",cli:"Clear-Item",epal:"Export-Alias",sls:"Select-String"});iy=new Set(["-","\u2013","\u2014","\u2015"])});import{mkdir as xwo}from"fs/promises";import{join as Ban}from"path";import{join as Iwo}from"path/posix";function git(){let e=["-NoProfile","-NonInteractive"];if(!V.CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY)e.push("-ExecutionPolicy","Bypass");return e}function hit(e){return[...git(),"-Command",e]}function Han(e,t){return{binShell:{exe:e,args:[...git(),"-EncodedCommand"]},command:VAe(t)}}function Owo(e){let t=0;for(;;){while(t<e.length&&/[\s;]/.test(e[t]))t++;if(e[t]==="#"){while(t<e.length&&e[t]!==`
+`)t++;continue}if(e.startsWith("<#",t)){let r=e.indexOf("#>",t+2);t=r===-1?e.length:r+2;continue}break}let n=e.slice(t);return/^using\s+(namespace|module|assembly)\b/i.test(n)||/^param\s*\(/i.test(n)||/^(begin|process|end|clean|dynamicparam)\s*\{/i.test(n)||/^\[\w/.test(n)&&!/^\[[\w.]+\]::/.test(n)}function Wan(e){let t;return{type:"powershell",shellPath:e,detached:!1,stdin:"ignore",async buildExecCommand(n,r){t=r.useSandbox?r.sandboxTmpDir:void 0;let o;if(r.useSandbox&&r.sandboxTmpDir)o=(Ft()==="windows"?Ban:Iwo)(r.sandboxTmpDir,`claude-pwd-ps-${r.id}`);else{let u=gF();await xwo(u,{recursive:!0,mode:448}).catch(()=>{}),o=Ban(u,`claude-pwd-ps-${r.id}`)}let i=`
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath ${XAe(o,"the temp-directory path (override with CLAUDE_CODE_TMPDIR)")} -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }`,l=(Owo(n)?"":Mwo)+n+i;return{commandString:r.useSandbox&&Ft()!=="windows"?[`'${e.replace(/'/g,"'\\''")}'`,...git(),"-EncodedCommand",VAe(l)].join(" "):l,cwdFilePath:o}},getSpawnArgs(n){return hit(n)},async getEnvironmentOverrides(n,r,o){let s={...jan(process.env)},i=process.env.FORCE_COLOR!==void 0||o?.has("FORCE_COLOR");for(let[a,l]of Object.entries(Dwo)){if(process.env[a]!==void 0)continue;if(a==="NO_COLOR"&&i)continue;s[a]=l}if(o)for(let[a,l]of o)s[a]=l;if(t)s.TMPDIR=t,s.CLAUDE_CODE_TMPDIR=gF();return s}}}var Mwo="try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ",Dwo;var yit=w(()=>{Qo();xo();X5();BC();iT();zan();Dwo={PYTHONIOENCODING:"utf-8:surrogateescape",NO_COLOR:"1"}});async function $wo(e){let{McpbManifestSchema:t}=await import("B:/~BUN/root/chunk-sjbnhsjw.js"),n=t.safeParse(e);if(!n.success){let r=n.error.flatten(),o=[...Object.entries(r.fieldErrors).map(([s,i])=>`${s}: ${i?.join(", ")}`),...r.formErrors||[]].filter(Boolean).join("; ");throw new ye(`Invalid manifest: ${o}`,"MCPB manifest schema validation failed")}return n.data}async function Lwo(e){let t;try{t=ut(e)}catch(n){throw Error(`Invalid JSON in manifest.json: ${Y(n)}`)}return $wo(t)}async function _it(e){let t=new TextDecoder().decode(e);return Lwo(t)}var qan=w(()=>{xe();wt()});import{isAbsolute as Nwo,normalize as Fwo}from"path";function bit(e){if(aT(e))return!1;for(let n of e.split(/[/\\]/))if(/^\.\. [ .]*$/.test(n))return!1;let t=Fwo(e);if(Nwo(t))return!1;return!0}function Uwo(e,t){t.fileCount++;let n;if(t.fileCount>hF.MAX_FILE_COUNT)n=`Archive contains too many files: ${t.fileCount} (max: ${hF.MAX_FILE_COUNT})`;let r=Y1(e.name,120);if(!bit(e.name))n=`Unsafe file path detected: "${r}". Path traversal or absolute paths are not allowed.`;let o=e.originalSize||0;if(o>hF.MAX_FILE_SIZE)n=`File "${r}" is too large: ${Math.round(o/1024/1024)}MB (max: ${Math.round(hF.MAX_FILE_SIZE/1024/1024)}MB)`;if(t.totalUncompressedSize+=o,t.totalUncompressedSize>hF.MAX_TOTAL_SIZE)n=`Archive total size is too large: ${Math.round(t.totalUncompressedSize/1024/1024)}MB (max: ${Math.round(hF.MAX_TOTAL_SIZE/1024/1024)}MB)`;let s=t.totalUncompressedSize/t.compressedSize;if(s>hF.MAX_COMPRESSION_RATIO)n=`Suspicious compression ratio detected: ${s.toFixed(1)}:1 (max: ${hF.MAX_COMPRESSION_RATIO}:1). This may be a zip bomb.`;return n?{isValid:!1,error:n}:{isValid:!0}}async function Z5(e){let{unzipSync:t}=await import("B:/~BUN/root/chunk-8wjwjv8j.js"),r={fileCount:0,totalUncompressedSize:0,compressedSize:e.length,errors:[]},o=t(new Uint8Array(e),{filter:(s)=>{let i=Uwo(s,r);if(!i.isValid)throw new ye(i.error,"MCPB zip entry validation failed");return!0}});return _(`Zip extraction completed: ${r.fileCount} files, ${Math.round(r.totalUncompressedSize/1024)}KB uncompressed`),o}function J5(e){let t=Buffer.from(e.buffer,e.byteOffset,e.byteLength),n={},r=Math.max(0,t.length-22-65535),o=-1;for(let a=t.length-22;a>=r;a--)if(t.readUInt32LE(a)===101010256){o=a;break}if(o<0)return n;let s=t.readUInt16LE(o+10),i=t.readUInt32LE(o+16);for(let a=0;a<s;a++){if(i+46>t.length||t.readUInt32LE(i)!==33639248)break;let l=t.readUInt16LE(i+4),c=t.readUInt16LE(i+28),u=t.readUInt16LE(i+30),d=t.readUInt16LE(i+32),p=t.readUInt32LE(i+38),f=t.toString("utf8",i+46,i+46+c);if(l>>8===3){let m=p>>>16&65535;if(m)n[f]=m}i+=46+c+u+d}return n}var hF;var ble=w(()=>{be();oD();xe();qi();hF={MAX_FILE_SIZE:536870912,MAX_TOTAL_SIZE:1073741824,MAX_FILE_COUNT:1e5,MAX_COMPRESSION_RATIO:50}});import{homedir as Bwo}from"os";import{join as Q5}from"path";function Gan(e){let t=e?.platform??Ft(),n=e?.homedir??Bwo(),r=e?.env??process.env,o={HOME:n,DESKTOP:Q5(n,"Desktop"),DOCUMENTS:Q5(n,"Documents"),DOWNLOADS:Q5(n,"Downloads")};switch(t){case"windows":{let s=r.USERPROFILE||n;return{HOME:n,DESKTOP:Q5(s,"Desktop"),DOCUMENTS:Q5(s,"Documents"),DOWNLOADS:Q5(s,"Downloads")}}case"linux":case"wsl":return{HOME:n,DESKTOP:r.XDG_DESKTOP_DIR||o.DESKTOP,DOCUMENTS:r.XDG_DOCUMENTS_DIR||o.DOCUMENTS,DOWNLOADS:r.XDG_DOWNLOAD_DIR||o.DOWNLOADS};case"macos":default:{if(t==="unknown")_("Unknown platform detected, using default paths");return o}}}var Van=w(()=>{be();xo()});import{createHash as wit}from"crypto";import{chmod as jwo,writeFile as kit}from"fs/promises";import{dirname as zwo,join as yF}from"path";function ePe(e){return e.endsWith(".mcpb")||e.endsWith(".dxt")}function Zan(e){return e.startsWith("http://")||e.startsWith("https://")}function Jan(e){return yF(e,".mcpb-cache")}function Wwo(e,t){let n=wit("md5").update(t).digest("hex").substring(0,8);return yF(e,`${n}.metadata.json`)}function Qan(e,t){return kle(Wwo(e,t),()=>Hwo().nullable(),{defaultValue:null,indent:2})}function eln(e,t){return`${e}/${t}`}async function Sle(e,t,n){try{let r=QAe(e).mcpServers?.[t],o=(await Jr().readAsync(n))?.pluginSecrets?.[eln(e,t)];if(!r&&!o)return null;return _(`Loaded user config for ${e}/${t} (settings + secureStorage)`),{...r,...o}}catch(r){return _(`Failed to load user config for ${e}/${t}: ${r}`,{level:"error"}),null}}async function Kan(e,t,n,r,o,s){try{let i={},a={};for(let[g,h]of Object.entries(n))if(r[g]?.sensitive===!0)a[g]=String(h);else i[g]=h;let l=new Set(Object.keys(a)),c=new Set(Object.keys(i)),u=eln(e,t),d=0,p=await Jr().mutate((g)=>{let h=g.pluginSecrets?.[u],y=h?lT(h,(b,S)=>c.has(S)):void 0;if(d=y&&h?Object.keys(h).length-Object.keys(y).length:0,Object.keys(a).length===0&&d===0)return g;return{...g,pluginSecrets:{...g.pluginSecrets,[u]:{...y,...a}}}},s);if(!p.success)throw Error(`Failed to save sensitive config to secure storage for ${u}`);if(p.warning)_(`Server secrets save warning: ${p.warning}`,{level:"warn"});if(d>0)_(`saveMcpServerUserConfig: scrubbed ${d} stale non-sensitive key(s) from secureStorage for ${u}`);let f=Xr("userSettings")?.pluginConfigs?.[e]?.mcpServers?.[t]??{},m=Object.keys(f).filter((g)=>l.has(g));if(Object.keys(i).length>0||m.length>0){let g=Object.fromEntries(m.map((y)=>[y,void 0])),h=await ay("userSettings",{pluginConfigs:{[e]:{mcpServers:{[t]:{...i,...g}}}}},void 0,o);if(h.error)throw h.error;if(m.length>0)_(`saveMcpServerUserConfig: scrubbed ${m.length} plaintext sensitive key(s) from settings.json for ${e}/${t}`)}_(`Saved user config for ${e}/${t} (${Object.keys(i).length} non-sensitive, ${Object.keys(a).length} sensitive)`)}catch(i){let a=Wn(i);throw _(`Failed to save user config for ${e}/${t}: ${a.message}`,{level:"error"}),Error(`Failed to save user configuration for ${e}/${t}: ${a.message}`)}}function _F(e,t){let n=[];for(let[r,o]of Object.entries(t)){let s=e[r];if(o.required&&(s===void 0||s==="")){n.push(`${o.title||r} is required but not provided`);continue}if(s===void 0||s==="")continue;if(o.type==="string"){if(Array.isArray(s)){if(!o.multiple)n.push(`${o.title||r} must be a string, not an array`);else if(!s.every((i)=>typeof i==="string"))n.push(`${o.title||r} must be an array of strings`)}else if(typeof s!=="string")n.push(`${o.title||r} must be a string`)}else if(o.type==="number"&&typeof s!=="number")n.push(`${o.title||r} must be a number`);else if(o.type==="boolean"&&typeof s!=="boolean")n.push(`${o.title||r} must be a boolean`);else if((o.type==="file"||o.type==="directory")&&typeof s!=="string")n.push(`${o.title||r} must be a path string`);if(o.type==="number"&&typeof s==="number"){if(o.min!==void 0&&s<o.min)n.push(`${o.title||r} must be at least ${o.min}`);if(o.max!==void 0&&s>o.max)n.push(`${o.title||r} must be at most ${o.max}`)}}return{valid:n.length===0,errors:n}}async function ZAe(e,t,n={}){let{getMcpConfigForManifest:r}=await import("B:/~BUN/root/chunk-sjbnhsjw.js"),o=await r({manifest:e,extensionPath:t,systemDirs:Gan(),userConfig:n,pathSeparator:"/"});if(!o){let s=Ar(Error(`Failed to generate MCP server configuration from manifest "${e.name}"`),"MCPB manifest: failed to generate MCP server configuration");throw me(s),s}return o}async function tln(e,t){try{return await Qan(e,t).read()}catch(n){return _(`Failed to load MCPB cache metadata: ${n}`,{level:"error"}),null}}async function Sit(e,t,n){await vt().mkdir(e),await Qan(e,t).write(n)}async function qwo(e,t,n){if(_(`Downloading MCPB from ${e}`),n)n(`Downloading ${e}...`);let r=performance.now(),o=!1;try{let i=await(Yan(e)?wle.get:lh.get)(e,{timeout:120000,responseType:"arraybuffer",maxRedirects:5,onDownloadProgress:(l)=>{if(l.total&&n){let c=Math.round(l.loaded/l.total*100);n(`Downloading... ${c}%`)}}}),a=new Uint8Array(i.data);if(F_("mcpb",e,"success",performance.now()-r),o=!0,await kit(t,Buffer.from(a)),_(`Downloaded ${a.length} bytes to ${t}`),n)n("Download complete");return a}catch(s){if(!o)F_("mcpb",e,"failure",performance.now()-r,jC(s));let i=Y(s),a=Error(`Failed to download MCPB file from ${e}: ${i}`);throw _(`Failed to download MCPB file from ${e}: ${i}`,{level:"error"}),a}}async function Gwo(e,t,n,r){if(r)r("Extracting files...");await vt().mkdir(t);let o=0,s=Object.entries(e).filter(([a])=>!a.endsWith("/")),i=s.length;for(let[a,l]of s){let c=yF(t,a),u=zwo(c);if(u!==t)await vt().mkdir(u);if(a.endsWith(".json")||a.endsWith(".js")||a.endsWith(".ts")||a.endsWith(".txt")||a.endsWith(".md")||a.endsWith(".yml")||a.endsWith(".yaml")){let f=new TextDecoder().decode(l);await kit(c,f,"utf-8")}else await kit(c,Buffer.from(l));let p=n[a];if(p&&p&73)await jwo(c,p&511).catch(()=>{});if(o++,r&&o%10===0)r(`Extracted ${o}/${i} files`)}if(_(`Extracted ${o} files to ${t}`),r)r(`Extraction complete (${o} files)`)}async function Vwo(e,t){let n=vt(),r=Jan(t),o=await tln(r,e);if(!o)return!0;try{await n.stat(o.extractedPath)}catch(s){if(De(s)==="ENOENT")_(`MCPB extraction path missing: ${o.extractedPath}`);else _(`MCPB extraction path inaccessible: ${o.extractedPath}: ${s}`,{level:"error"});return!0}if(!Zan(e)){let s=yF(t,e),i;try{i=await n.stat(s)}catch(l){if(De(l)==="ENOENT")_(`MCPB source file missing: ${s}`);else _(`MCPB source file inaccessible: ${s}: ${l}`,{level:"error"});return!0}if(o.sourceMtimeMs===void 0)return!0;let a=Math.floor(i.mtimeMs);if(a!==o.sourceMtimeMs)return _(`MCPB file modified: mtime ${new Date(a).toISOString()} != cached ${new Date(o.sourceMtimeMs).toISOString()}`),!0}return!1}async function nln(e,t,n,r,o,s,i,a){let l=vt(),c=Jan(t);await l.mkdir(c),_(`Loading MCPB from source: ${e}`);let u=await tln(c,e);if(u&&!await Vwo(e,t)){_(`Using cached MCPB from ${u.extractedPath} (hash: ${u.contentHash})`);let v=yF(u.extractedPath,"manifest.json"),E;try{E=await l.readFile(v,{encoding:"utf-8"})}catch(x){if(Et(x)){let A=Error(`Cached manifest not found: ${v}`);throw me(A),A}throw x}let C=new TextEncoder().encode(E),R=await _it(C);if(R.user_config&&Object.keys(R.user_config).length>0){let x=R.name,A=await Sle(n,x,a),L=o||A||{},F=_F(L,R.user_config);if(s||!F.valid)return{status:"needs-config",manifest:R,extractedPath:u.extractedPath,contentHash:u.contentHash,configSchema:R.user_config,existingConfig:A||{},validationErrors:F.valid?[]:F.errors};if(o)await Kan(n,x,o,R.user_config??{},i,a);let O=await ZAe(R,u.extractedPath,L);return{manifest:R,mcpConfig:O,extractedPath:u.extractedPath,contentHash:u.contentHash}}let P=await ZAe(R,u.extractedPath);return{manifest:R,mcpConfig:P,extractedPath:u.extractedPath,contentHash:u.contentHash}}let d,p,f;if(Zan(e)){let v=wit("md5").update(e).digest("hex").substring(0,8);p=yF(c,`${v}.mcpb`),d=await qwo(e,p,r)}else{let v=yF(t,e);if(r)r(`Loading ${e}...`);try{d=await l.readFileBytes(v),p=v,f=Math.floor((await l.stat(v)).mtimeMs)}catch(E){if(Et(E)){let C=Error(`MCPB file not found: ${v}`);throw _(`MCPB file not found: ${v}`,{level:"error"}),C}throw E}}let m=wit("sha256").update(d).digest("hex").substring(0,16);if(_(`MCPB content hash: ${m}`),r)r("Extracting MCPB archive...");let g=await Z5(Buffer.from(d)),h=J5(d),y=g["manifest.json"];if(!y){let v=Error("No manifest.json found in MCPB file");throw _(`No manifest.json found in MCPB file: ${p}`,{level:"error"}),v}let b=await _it(y);if(_(`MCPB manifest: ${b.name} v${b.version} by ${b.author.name}`),!b.server){let v=Ar(Error(`MCPB manifest for "${b.name}" does not define a server configuration`),"MCPB manifest does not define a server configuration");throw me(v),v}let S=yF(c,m);if(await Gwo(g,S,h,r),b.user_config&&Object.keys(b.user_config).length>0){let v=b.name,E=await Sle(n,v,a),C=o||E||{},R=_F(C,b.user_config);if(!R.valid){let A={source:e,contentHash:m,extractedPath:S,cachedAt:new Date().toISOString(),lastChecked:new Date().toISOString(),sourceMtimeMs:f};return await Sit(c,e,A),{status:"needs-config",manifest:b,extractedPath:S,contentHash:m,configSchema:b.user_config,existingConfig:E||{},validationErrors:R.errors}}if(o)await Kan(n,v,o,b.user_config??{},i,a);if(r)r("Generating MCP server configuration...");let P=await ZAe(b,S,C),x={source:e,contentHash:m,extractedPath:S,cachedAt:new Date().toISOString(),lastChecked:new Date().toISOString(),sourceMtimeMs:f};return await Sit(c,e,x),{manifest:b,mcpConfig:P,extractedPath:S,contentHash:m}}if(r)r("Generating MCP server configuration...");let k=await ZAe(b,S),T={source:e,contentHash:m,extractedPath:S,cachedAt:new Date().toISOString(),lastChecked:new Date().toISOString(),sourceMtimeMs:f};return await Sit(c,e,T),_(`Successfully loaded MCPB: ${b.name} (extracted to ${S})`),{manifest:b,mcpConfig:k,extractedPath:S,contentHash:m}}var Hwo;var tPe=w(()=>{vit();qt();Xan();U_();JAe();be();qan();ble();xe();oo();Tit();Mt();an();e3();Co();Van();Eit();vle();Hwo=ae(()=>pe({source:I(),contentHash:I(),extractedPath:I(),cachedAt:I(),lastChecked:I(),sourceMtimeMs:Te().optional()}))});function ly(e){return e.source}function Qki(e,t){return e.find((n)=>n.repository===t||n.source===t)}function tk(e,t){let{optionValues:n}=Xn(),r=n.get(e);if(r!==void 0)return r;let o=Kwo(e,t);return n.set(e,o),o.catch(()=>{if(n.get(e)===o)n.delete(e)}),o}async function Kwo(e,t){let n=QAe(e).options??{},r=(await Jr().readAsync(t))?.pluginSecrets?.[e]??{};return{...n,...r}}function t3(){Xn().optionValues.clear()}async function evi(e,t,n,r,o){let s={},i={};for(let[p,f]of Object.entries(t))if(n[p]?.sensitive===!0)i[p]=String(f);else s[p]=f;let a=new Set(Object.keys(i)),l=new Set(Object.keys(s)),c=await Jr().mutate((p)=>{let f=p.pluginSecrets?.[e],m=f?lT(f,(h,y)=>l.has(y)):void 0,g=m&&f&&Object.keys(m).length!==Object.keys(f).length;if(Object.keys(i).length===0&&!g)return p;return{...p,pluginSecrets:{...p.pluginSecrets,[e]:{...m,...i}}}},o);if(!c.success){let p=Error(`Failed to save sensitive plugin options for ${e} to secure storage`);throw _(p.message,{level:"error"}),p}if(c.warning)_(`Plugin secrets save warning: ${c.warning}`,{level:"warn"});let u=Xr("userSettings")?.pluginConfigs?.[e]?.options??{},d=Object.keys(u).filter((p)=>a.has(p));if(Object.keys(s).length>0||d.length>0){let p=Object.fromEntries(d.map((m)=>[m,void 0])),f=await ay("userSettings",{pluginConfigs:{[e]:{options:{...s,...p}}}},void 0,r);if(f.error)throw _(`Failed to save plugin options for ${e} to settings.json: ${Y(f.error)}`,{level:"error"}),Error(`Failed to save plugin options for ${e}: ${f.error.message}`)}t3()}

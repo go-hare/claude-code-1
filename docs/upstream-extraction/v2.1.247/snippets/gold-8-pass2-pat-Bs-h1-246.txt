@@ -1,0 +1,3 @@
+# off=205255858 pat=",Bs="
+
+ol(),Us=t.bool(),xs=t.bool(),Ns=t.bool(),ls=t.bool(),Ps=t.bool(),Ms=t.bool(),us=t.bool(),as=t.bool(),Bs=t.bool(),bs=t.bool(),ds=t.bool(),ms=t.bool(),Gs=t.bool(),Hs=t.bool(),fs=t.bool(),Fs=t.bool(),Ks=t.bool(),vs=t.bool(),Ws=t.bool(),gs=t.bool(),Ys=t.bool(),ys=t.bool(),Vs=t.bool(),hs=t.bool(),Xs=t.triBool(),ws=t.triBool(),ks=t.bool(),Zs=t.bool(),zs=

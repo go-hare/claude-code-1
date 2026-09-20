@@ -1,0 +1,9 @@
+# offset=207528547 ver=247 hit=2/212 ratio=1.000 needle="stdout.trim()"
+
+ocessId -or $proc.ParentProcessId -eq 0) { break }
+        $currentPid = $proc.ParentProcessId
+        $ancestors += $currentPid
+      }
+      $ancestors -join ','
+    `.trim(),s=await l("powershell.exe",["-NoProfile","-Command",i],{timeout:3000});return{ancestors:s.code!==0||!s.stdout?.trim()?[]:s.stdout.trim().split(",").filter(Boolean).map((a)=>parseInt(a,10)).filter((a)=>!isNaN(a)),readFailed:!1,truncated:!1}}let n=`pid=${String(e)}; for i in $(seq 1 ${t}); do ppid=$(ps -o ppid= -p $pid 2>/dev/null | tr -d ' '); if [ -z "$ppid" ]; then echo FAIL; exit 0; fi; if [ "$ppid" = "0" ] || [ "$ppid" = "1" ]; then echo END; exit 0; fi; echo $ppid; pid=$ppid; done`,r=await l("sh",["-c",n],{timeout:3000}),o=(r.stdout??"").trim().split(`
+`).filter(Boolean);return{ancestors:o.filter((i)=>i!=="END"&

@@ -1,0 +1,2 @@
+# function Xi(){ pos=222712814 end=222712898 len=84
+function Xi(){let e=oe.CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS;return e&&e>0?e:5000}

@@ -1,0 +1,324 @@
+# peel-8-host-Ghe official-247=253204128 official-246=250948768
+
+## A hook-mb-ptl pass-3 confirm
+needle	246	247	diff
+"MAX_HOOK_OUTPUT"	0	0
+"MAX_HOOK_OUTPUT_LENGTH"	0	0
+"output truncated - exceeded"	0	0
+"applyTruncation"	0	0
+"slice(0,1048576)"	0	0
+"slice(0,1e6)"	0	0
+"slice(0,2e6)"	0	0
+"substring(0,10000)"	0	0
+".length>1e6"	0	0
+".length>2e6"	0	0
+"length>1048576"	1	1
+"1MB"	6	7 DIFF
+"1 MiB"	1	3 DIFF
+"1048576"	184	187 DIFF
+"hook conversation"	0	0
+"conversation attach"	0	0
+"attach cap"	0	0
+"lre(he.stderr"	0	0
+"Rne(ye.stderr"	0	0
+"blockingError:await lre"	0	0
+"blockingError:await Rne"	0	0
+",\"stderr\",{storageV5"	0	0
+"tengu_hook_output_persisted"	3	3
+"Hook ${n} truncated"	1	1
+"persist-to-disk failed"	1	1
+"threshold:r=JWr"	0	1 DIFF
+"threshold:r=BBr"	1	0 DIFF
+"Yvb as JWr"	0	1 DIFF
+"lHb as BBr"	1	0 DIFF
+"async function lre("	0	1 DIFF
+"async function Rne("	1	0 DIFF
+"printed megabytes"	0	0
+"overflow the conversation"	0	0
+"wedge the session"	0	0
+"megabytes of error"	0	0
+"background agent error"	0	0
+"Background agent error"	0	0
+"agent error output"	0	0
+"tengu_agent_output_persisted"	0	0
+"tengu_bg_output_persisted"	0	0
+
+ATTACH-WINDOW 247 unique vs 246 (cap tokens in ±400 of attach strings):
+  "hook_blocking_error" 246=18 247=18
+    247@197325820 capTokensInWin=NONE
+    247@214015964 capTokensInWin=NONE
+    247@214016054 capTokensInWin=NONE
+    247@214018338 capTokensInWin=NONE
+  "hook_success" 246=20 247=20
+    247@197325800 capTokensInWin=NONE
+    247@201926581 capTokensInWin=NONE
+    247@214377273 capTokensInWin=NONE
+    247@214385472 capTokensInWin=NONE
+  "hook_additional_context" 246=20 247=20
+    247@198010184 capTokensInWin=NONE
+    247@206763669 capTokensInWin=NONE
+    247@214016605 capTokensInWin=NONE
+    247@214018644 capTokensInWin=NONE
+  "No stderr output" 246=14 247=14
+    247@197969492 capTokensInWin=NONE
+    247@202529864 capTokensInWin=NONE
+    247@215050004 capTokensInWin=NONE
+    247@218298589 capTokensInWin=NONE
+  "hook blocking error from command" 246=4 247=4
+    247@202240641 capTokensInWin=NONE
+    247@202298189 capTokensInWin=NONE
+    247@218249550 capTokensInWin=slice(0,
+    247@219492201 capTokensInWin=NONE
+
+## B1 Ghe defs + calls + collisions
+GHEDEF "async function Ghe(e,t){" count=1 hits=232387070
+  @232387070 TIP async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t
+GHEDEF "function Ghe(e,t){" count=1 hits=232387076
+  @232387076 TIP function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true
+GHEDEF "async function Ghe(" count=1 hits=232387070
+  @232387070 TIP async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t
+GHEDEF "function Ghe(" count=3 hits=219651062,232387076,242369847
+  @219651062 COLLIDE function Ghe(e,t=e){let n=e.filter(BGe);if(c7e()==="ant")return n;let r=t instanceof Set?t:$ao(t);return wni(n,r)}async function kni(e,t){return(await Rao(void 0,t))[e]||null}function Lao(e,t){let n=null;for(let r of e)i
+  @232387076 TIP function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true
+  @242369847 COLLIDE function Ghe(e){tt(e.edges(),function(t){var r=e.edge(t);if(r.reversed){e.removeEdge(t);var i=r.forwardName;delete r.reversed,delete r.forwardName,e.setEdge(t.w,t.v,r,i)}})}var WI=z(()=>{"use strict";ci();$he();o(zhe,"ru
+GHEDEF "Ghe=async" count=0 hits=
+GHEDEF "Ghe=(e,t)" count=0 hits=
+GHECALL "await Ghe(" count=1 hits=232420571
+  @232420571 sed,storageV5:di()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{
+GHECALL "Ghe(c,{session:" count=1 hits=232420577
+  @232420577 orageV5:di()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{u(),Pe(Qs(j
+GHECALL "Ghe(c,{" count=1 hits=232420577
+  @232420577 orageV5:di()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{u()
+GHECALL "return Ghe(" count=0 hits=
+GHECALL "=Ghe(" count=2 hits=215567497,219561545
+  @215567497 attachments,...e.hookResults]}function DAt(e,t,n,r=n){let o=n.map((i)=>i.uuid),s=Ghe([...n],r).map((i)=>i.uuid);if(o.length===0)return e;return{...e,compactMetadata:{...e.compactMetadata,...s.length>0&&{preservedSegment:{headUuid:s[0],anchorUuid
+  @219561545 :i,event_count:a,duration_ms:Date.now()-o})}}}async function aV(e,t,n,r,o){let s=Ghe(e,r),i=qe(),a=Ooe(hh(i)),l=await Bs().sessionMessages(i,o),c=[],u=n;if(u&&!Ep()&&!l.has(u))D("tengu_phantom_parent_hint",{});let d=!1;for(let f of s)if(l.has(f.
+GHECALL "=await Ghe(" count=0 hits=
+RAW Ghe( count=8
+  OTHER @215567498 t(e,t,n,r=n){let o=n.map((i)=>i.uuid),s=Ghe([...n],r).map((i)=>i.uuid);if(o.length===0)return e;return{...e,compactMetad
+  OTHER @219561546 })}}}async function aV(e,t,n,r,o){let s=Ghe(e,r),i=qe(),a=Ooe(hh(i)),l=await Bs().sessionMessages(i,o),c=[],u=n;if(u&&!E
+  OTHER @219562592 oe(hh(o));await qn().insertMessageChain(Ghe(e),!0,t,n,void 0,o,s,r)}async function hMt(e,t){await qn().appendEntry({type
+  DEF @219651071 ,...i}=r;return[i]}return[r]})}function Ghe(e,t=e){let n=e.filter(BGe);if(c7e()==="ant")return n;let r=t instanceof Set?
+  DEF @232387085 ==0)return;return qhe(t)}async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).fai
+  CALL @232420577 :void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)
+  DEF @242369856 n o(n,"dfs"),tt(e.nodes(),n),t}function Ghe(e){tt(e.edges(),function(t){var r=e.edge(t);if(r.reversed){e.removeEdge(t);v
+  OTHER @242393120 s",()=>ttt(e)),t("    acyclic.undo",()=>Ghe(e))}function Fet(e,t){tt(e.nodes(),function(r){var i=e.node(r),n=t.node(r);i
+UNIQUE tip-Ghe count=1
+
+246 Ghe twins:
+  246 "async function Ghe(e,t){try{return await e.content(t)}" count=0
+  246 "tip content threw" count=2
+  246 "failedTipIds.add" count=2
+
+## B2 session.host constructor Li/Xi/k/es
+CTOR "Li({host:Xi()" count=1 hits=206986764
+  @206986764 function"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re(
+CTOR "return Li({host:Xi()" count=1 hits=206986757
+  @206986757  Zi==="function"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re(
+CTOR "function Li(e){return Ri({kind:\"root\",host:e.host" count=1 hits=206969731
+  @206969731 turn o}}function Mi(e,t){return`${e}\x00${t}`}var wi=()=>{};function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}function Ri(e,t){let o=D(t.originalCwd),r=D(t.projectRoot),s=D(t.cwd),a=b(),l=e.kind==="fork"?e.root.observers:new it,d=e.kind==="fork"?e.r
+CTOR "function Li(e){return Ri({kind:\"root\"" count=1 hits=206969731
+  @206969731 turn o}}function Mi(e,t){return`${e}\x00${t}`}var wi=()=>{};function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}function Ri(e,t){let o=D(t.originalCwd),r=D(t.projectRoot),s=D(t.cwd),a=b(),l=e.kind==="fork"?e.root.observers:new it,d=e.kind=
+CTOR "host:Xi()" count=1 hits=206986768
+  @206986768 tion"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re(
+CTOR "function es(){" count=2 hits=206986612,208306564
+  @206986612 {realpathSync as Zi}from"fs";import{cwd as Pd}from"process";function es(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof Zi==="function"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{origi
+  @208306564 ettings"),t=J("userSettings");return!!e&&!!t&&sr(e)===sr(t)}function es(){let e=J("localSettings");if(!e)return[];return Ce(e).errors}function ts(){return V(p())}function X(){return ut(p())}function h(e){return Lr(e,p())}function ns(){return Mr(p())}func
+CTOR "function Tm(){return n()}" count=1 hits=206986838
+  @206986838 id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??
+CTOR "function n(){return re()?.session??k}" count=1 hits=206986863
+  @206986863 iginalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessi
+CTOR "re()?.session??k" count=1 hits=206986883
+  @206986883 oot:e,cwd:e}})}function Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sess
+CTOR "e.of(k.host)" count=1 hits=206986922
+  @206986922 }function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessionId;if(e)return ae(e);let t=n();r
+CTOR "function ts(e){return e.of(k.host)}" count=1 hits=206986900
+  @206986900 nction Tm(){return n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()?.sessionId;if(e)return ae(e);let t=n();re
+CTOR "function Xi(){" count=2 hits=206986123,222712814
+  @206986123 CreditLatches,this.proactivity=e.proactivity}}var $i=()=>{};function Xi(){return new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,
+  @222712814 s C,join as M,relative as Jt}from"path";var Qt=600000,qe=15;function Xi(){let e=oe.CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS;return e&&e>0?e:5000}function Zi(){let e=oe.CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS;return e&&e>0?e:30000}function Ce(){if(!g.fi
+CTOR "function Xi(){return" count=1 hits=206986123
+  @206986123 CreditLatches,this.proactivity=e.proactivity}}var $i=()=>{};function Xi(){return new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,creden
+CTOR "Xi=()=>" count=3 hits=227885948,228122392,250678182
+  @227885948 var ji=()=>{};var $i=()=>{};var Ki=()=>{};var Yi=()=>{};var Xi=()=>{};var Zi=()=>{};var oa=()=>{};var ea=()=>{};var ta=()=>{};var na;var ra=t(()=>{(function(o){o.HTTP_0_9="http/0.9",o.HTTP_1_0="http/1.0",o.TDS_8_0="tds/8.0"})(na||(na={}))});var ia
+  @228122392 r=yr();e=Rr(r)}}}return e},Wi=async()=>ne()&&await Ar()!==G,Xi=()=>ne()&&kr()!==G,Vi=async()=>{if(F!==void 0)return F;F=null;try{let r=(await qe(ye)).match(Pr);if(r)F=r[1]}catch(e){}return F},Qi=()=>{if(F!==void 0)return F;F=null;try{let r=Ce(ye).
+  @250678182 ventListener("pointercancel",Xi),kn("resize",!1),ar(vo,!0)},Xi=()=>{Fn.removeEventListener("pointermove",Nr),Fn.removeEventListener("pointerup",Er),Fn.removeEventListener("pointercancel",Xi),kn("resize",!1),n(U0(t,t.artboards.map(vo=>vo.file===ne.
+CTOR "Xi=()=>{" count=2 hits=227885948,250678182
+  @227885948 var ji=()=>{};var $i=()=>{};var Ki=()=>{};var Yi=()=>{};var Xi=()=>{};var Zi=()=>{};var oa=()=>{};var ea=()=>{};var ta=()=>{};var na;var ra=t(()=>{(function(o){o.HTTP_0_9="http/0.9",o.HTTP_1_0="http/1.0",o.TDS_8_0="tds/8.0"})(na||(na={}))});var ia=
+  @250678182 ventListener("pointercancel",Xi),kn("resize",!1),ar(vo,!0)},Xi=()=>{Fn.removeEventListener("pointermove",Nr),Fn.removeEventListener("pointerup",Er),Fn.removeEventListener("pointercancel",Xi),kn("resize",!1),n(U0(t,t.artboards.map(vo=>vo.file===ne.f
+LI-SESSION count=1
+RI-SESSION count=1
+ES count=1
+host:Xi() count=1
+function Xi(){ count=2
+  @206986123 len=312 function Xi(){return new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,credentialSlots:new Vt,mcpProcessWiring:new Jt
+  @222712814 len=84 function Xi(){let e=oe.CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS;return e&&e>0?e:5000}
+function Xi(e){ count=9 (collision-ban unless host:Xi bind)
+  COLLIDE @206417490 function Xi(e){return e.type==="tool_use"||e.type==="server_tool_use"}function lc(e){}var _e,qe,Lt,Fr,Ys,Lr,Hr,Qs,Dr,Re,Ur,Zs,en,nt,tn,rn,Br,qi,ac,Ki,Ji,Vi,zi,c
+  COLLIDE @206478194 function Xi(e){let t={};for(let[r,n]of e)t[r]=St(n);return t}var qi=o(()=>{un()});var ee={};g(ee,{PROTO_KEY:()=>Ji,REGEX_WIRE_KEY:()=>fr,default:()=>ee,fromWire
+  COLLIDE @207979172 function Xi(e){return Bt(e)??"default"}function Qi(e){return ue(e).title}function ea(e){return e==="default"||e===void 0}function ta(e,t){if(e==="auto")return"c
+  COLLIDE @210736029 function Xi(e){let t=await e(["rev-parse","-q","--verify","HEAD"]);if(t.code!==0)return t.exitCode===1?{kind:"none",leftOut:[]}:_("rev-parse",t.stderr);let i=t.
+  COLLIDE @225966087 function Xi(e){return e.includes(">")?e.replaceAll(">","&gt;"):e}function ul(e,t){var r="";switch(e.nodeType){case 1:var a=e.namespaceURI,s=a===Tt.HTML,c=s||a==
+  COLLIDE @226400926 function Xi(e){return Ie(e,_o)}var Wi="trash",_o="stat-cache.json";var Oo=v(()=>{ko();wo();So();Eo()}); export{q as bW,We as cW,Ue as dW,Xe as eW,Q as fW,jo as 
+  COLLIDE @228452595 function Xi(e){if(e.type!=="user"||!e.parentUuid)return!1;let t=e.message;if(typeof t!=="object"||t===null)return!1;let s=t.content;if(!Array.isArray(s))return!
+  COLLIDE @230432942 function Xi(e){return typeof e==="string"?e:void 0}lb();vs();sb();om();kO();pb();bO();ob();yr();Bn();Vi();am();function gb(){if(!Ji()&&!Td())return;if(!Rt("teng
+  COLLIDE @234365791 function Xi(e){let n=oo(Ye(e._meta?.[xe]));return n!==void 0&&n.tool===Je(...zi(e.name))&&Ie(n.target.name)?n:void 0}function zi(e){let n=e.indexOf("__");return
+
+k-assign needles:
+  "var k=es()" count=0 hits=
+  "k=es()" count=1 hits=207021117
+    @207021117 =60000,us,Od=1e4;var Dd=i(()=>{tn();an();Qo();E();rt();le();Ii();Fi();ot();Yi();k=es();ss=new _e(()=>b());ls=new _e(()=>b());us=new te(()=>b())}); export{qe as rmd,tn as smd,_d as tmd,ae as umd,Ud as vmd,jd as wmd,qd as xmd,le as ymd,de as zmd,rn as Amd,Kd as Bmd,sn as Cmd,$d as 
+  "var k=Li(" count=0 hits=
+  "k=Li({" count=0 hits=
+  ",k=es()" count=0 hits=
+  "k=es()," count=0 hits=
+  "var k,re" count=1 hits=207021007
+    @207021007 es.mainLoopBusy()}function GA(e){n().surfaceCapabilities.replaceMainLoopBusy(e)}var k,re=()=>{return},ss,ls,Ld=60000,us,Od=1e4;var Dd=i(()=>{tn();an();Qo();E();rt();le();Ii();Fi();ot();Yi();k=es();ss=new _e(()=>b());ls=new _e(()=>b());us=new te(()=>b())}); export{qe as rmd,tn as 
+  "var re,k" count=0 hits=
+  "k=es()" count=1 hits=207021117
+    @207021117 =60000,us,Od=1e4;var Dd=i(()=>{tn();an();Qo();E();rt();le();Ii();Fi();ot();Yi();k=es();ss=new _e(()=>b());ls=new _e(()=>b());us=new te(()=>b())}); export{qe as rmd,tn as smd,_d as tmd,ae as umd,Ud as vmd,jd as wmd,qd as xmd,le as ymd,de as zmd,rn as Amd,Kd as Bmd,sn as Cmd,$d as 
+k=es()=1 k=Li(=0
+Li as tod count=1 hits=207022280
+
+## B3 identity binds
+ID "uk().host" count=3 hits=232247411,232264073,232387542
+  @232247411 ")}catch{}}}}var P5e=new wa(()=>new Oue);function Bue(){return P5e.of(uk().host)}function Uue(){Bue().acquire()}function Hue(){Bue().release()}Dx();tIt();bt();GW();At();kI();bt();cf();Ks();function jue(){let e=ln(),t=ln
+  @232264073 ,o)))]}function RW(e,t){if(!e||e.length===0||!t)return[];let o=z5e.of(uk().host),n=[];for(let r of e){if(r.type!=="regex")continue;let{pattern:s,url:a,label:l}=r;if(typeof s!=="string"||typeof a!=="string"||l!==void 0&&
+  @232387542 ome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePlugi
+ID "e.session.host" count=16 hits=218212765,218280760,222271352,222283512,222283908,222286051,222286133,222289740,222293730,222293779,224809510,224809873,224810099,231851217,232387626,232438702
+  @218212765 taSummary,outputFilePath:ji(o.taskId)}))}function gNs(e){let t=$Hr.of(e.session.host).drain().map((a)=>({type:"memory_update",source:"sync_unsaved",summary:a,paths:[],inContextPaths:[]})),n=e.getAppState().pendingMemoryUpdat
+  @218280760 s(i,n).get(n);if(a)o.push(...a)}return o}function KHe(e){let t=xFs.of(e.session.host);function n(i){let a=t.tokens.get(i);if(a===void 0)t.next+=1,a=t.next,t.tokens.set(i,a);return a}let r=kx(e,"UserPromptSubmit",e.session.id
+  @222271352 ()=>new Xt);function le(e){if(he()&&e?.storageV5!==void 0)return h.of(e.session.host).countSessionsOnce(e.storageV5);return ne(e?.storageV5)}async function Qt(e,t,n,o,s=w){if(!(await e.getKnownMarketplaces(n.storageV5))[s])r
+  @222283512 ktop",cooldownSessions:15,isRelevant:async(e)=>I()&&!y()&&!await h.of(e.session.host).getDesktopInstalled()},{id:"desktop-shortcut",advertisedCommand:"desktop",content:async(e)=>`Continue your session in Claude Code Desktop 
+  @222283908 rity:1,content:async(e)=>{let t=a("suggestion",e.theme);if(await h.of(e.session.host).getDesktopInstalled())return`Working on UI? See a live preview in Claude Code Desktop \xB7 run ${t("/desktop")}`;return`Working on UI? Cla
+  @222286051 -setup-github")>=me||b("web-setup-github")<pe)return!1;if((await h.of(e.session.host).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}},{id:"remote-cont
+  @222286133 st).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}},{id:"remote-control",content:async(e)=>{let t=a("suggestion",e.theme);return`Control this session 
+  @222289740 fetimeShows:3,advertisedCommand:"plugin",isRelevant:async(e)=>Qt(h.of(e.session.host),"frontend-design",e,{filesRead:["**/*.html","**/*.css","**/*.htm"]})},{id:"subagent-fanout-nudge",providerAgnostic:!0,content:async(e)=>`S
+ID "t.session.host" count=14 hits=213895523,214968380,214985728,215598322,215646191,215661737,217853223,222097729,222293618,222324486,222325014,232387146,232419368,236339665
+  @213895523 lt may be empty.`,async call(e,t){try{return{data:{results:(await iIe(t.session.host,e.keywords,t.abortController.signal,t.credentials)).filter((o)=>o.enabled!==!0),trigger:e.trigger}}}catch(n){if(Cr(n)||t.abortController.si
+  @214968380 (e,n,p));if(n==="write"&&(!mq(e,d).safe||J2o(d,a)||await eVo(a,Q2o.of(t.session.host))))return o(`${e} can't be changed from a cloud session yet: this machine always asks a person before writing a path like this (a settings 
+  @214985728 ing:f}=_qn(e,t),!V.CLAUDE_CODE_SIMPLE&&t.remoteCall===void 0)await bJ(t.session.host,g,c,t.storageV5);if(t.remoteCall===void 0)await jZ.of(t.session).beforeFileEdited(g);await YU(a,l,g,n.uuid);let{originalFileContents:b,actu
+  @215598322 n K8n(e,t,n){if(t.agentId||Ba(n)!=="main"||!V8n())return;let r=G8n.of(t.session.host),o=RQo(e),s=QJ(Y8n(r),t.abortController.signal,()=>new yn),i=()=>AQo(r.held,o);return Ca(s,vQo).then(i,i)}function RQo(e){for(let t=e.lengt
+  @215646191 (d,u).unref())])}}async function W7o(e,t){await nqe.of(e.toolUseContext.session.host).extractor?.(e,t)}async function q7o(e,t){await nqe.of(e).drainer(t)}var fJn=3,cqe="rm|remove-item|ri|del|erase",U7o;var kxt=w(()=>{$e();$S
+  @215661737 relPath:["logs"]}}async function HJn(e,t){await vxt.of(e.toolUseContext.session.host).runner?.(e,t)}var ies=600000,aes,zJn;var WJn=w(()=>{kE();br();jc();qEt();Spe();be();xe();pr();ln();nl();jf();Lu();Dt();Pt();nn();NB();Eg()
+  @217853223 s(tXe);let Vn=_t?await Q0r():null,Kn=await JLr(Ct.html,await Ewe(),Vn,t.session.host);if(Kn!==null)throw new at(Kn,"pr_review_republish_template_drift");if(!Ct.ver)throw new at("the published page reported no version \u2014 
+  @222097729  Ur{state=void 0}var ci=new Xs(()=>new Ur);function Vs(t){let r=ci.of(t.session.host);if(r.state===void 0)r.state=ut?.().createClassifierJobState(t)??null;return r.state}async function Dr({input:t,preExpansionInput:r,suppres
+ID "n.session.host" count=9 hits=213887043,213889354,214997789,217473337,217486628,217499734,217505073,222951352,237311403
+  @213887043 eyword.`,prompt:async()=>e.prompt,async call(t,n){let r=await e.fetch(n.session.host,n.abortController.signal,n.credentials);return{data:{results:qCo(r,t.keywords)}}},mapToolResultToToolResultBlockParam:Q3,renderToolUseMessa
+  @213889354 sync()=>e.prompt,async call(t,n){try{return{data:{results:await e.run(n.session.host,t.keywords,n.abortController.signal,n.credentials)}}}catch(r){if(Cr(r)||n.abortController.signal.aborted)throw r;if(r instanceof eR)throw r
+  @214997789 ");if(yJ(d,Le(n)))throw new vI(gTt);if(n.remoteCall===void 0)await bJ(n.session.host,d,u,n.storageV5);if(n.remoteCall===void 0)await jZ.of(n.session).beforeFileEdited(d);await YU(l,c,d,r.uuid);let g=await GR(d,async()=>{let 
+  @217473337 n).mode!=="auto"){if(xM(e,"write_db",t.slug))_jt(e,n)}let b=await Xxr(n.session.host,{slug:t.slug,ops:m},n.abortController.signal,n.storageV5,n.credentials);if(b.kind==="error"){if(g>0)J("artifact_db_write_file",`write_${b.r
+  @217486628 =o!==void 0?` \u2014 a batch of ${Uzt(o)}${A===""?"":`, ${A}`}, ${Nzt(n.session.host)}${L}`:P===void 0?"":` from the local file "${P.askPath}"${P.outside}${P.linkNote}`;return{behavior:"ask",message:`Claude wants to write to
+  @217499734 )VI(r.slug);if(xM(t,"read_db",r.slug))IMr(t,n,r.slug);let T=await qxr(n.session.host,{slug:r.slug,op:s,collection:i,...a!==void 0&&{docId:a},...c!==void 0&&{query:c}},n.abortController.signal,n.storageV5,n.credentials);if(T.
+  @217505073 n).mode!=="auto"){if(xM(t,"write_db",r.slug))_jt(t,n)}let h=await Kxr(n.session.host,{slug:r.slug,op:s,collection:i,docId:a,...f!==void 0&&{data:f}},n.abortController.signal,n.storageV5,n.credentials);if(h.kind==="error"){if
+  @222951352 t Shift+Enter natively.")}${d}${j()}`;return t(f),null}let o=await at(n.session.host,n.options.theme,n.storageV5);return t(o+j()),null}async function zt(t){let n=lt();if(!n||G())return null;try{let r=await _(y(await W.of(t).
+ID "getReplDiffHost" count=0 hits=
+ID "session:{host:" count=0 hits=
+ID "session: { host:" count=0 hits=
+ID "{session:e,theme:t" count=3 hits=232420054,232420368,232420583
+  @232420054 Tip(){if(this._tipPickedThisTurn)return;this._tipPickedThisTurn=!0;let{session:e,theme:t,scope:o,transcript:n,setAppState:r,storageV5:s,credentials:a}=this._requireHost(),l=n.getSnapshot();this.absorbSessionSignals(l.slice(this.
+  @232420368 erTip===void 0?c:{...c,spinnerTip:void 0,spinnerTipLabel:void 0});Vhe({session:e,theme:t,readFileState:o.readFileState,bashTools:this._bashTools,bashHosts:this._bashHosts,toolsUsed:this._toolsUsed,storageV5:di()?s:void 0,credent
+  @232420583 oid 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{
+ID "Ghe(c,{session:e,theme:t" count=1 hits=232420577
+  @232420577 ()?s:void 0,credentials:di()?a:void 0}).then(async(c)=>{let m=c?await Ghe(c,{session:e,theme:t,storageV5:di()?s:void 0}):"";if(!m){u();return}if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)}).catch((c)=>{
+ID "host:S.host" count=1 hits=232466399
+  @232466399 :uK],getToolPermissionContext:()=>De.getState().toolPermissionContext,host:S.host,workspaceDiffComputeBudget:Pt,getTools:()=>s().tools,onInboundMessage:(Xe)=>$ke(h,Xe,($t)=>et($t),void 0,()=>{let $t=sK(Rn,(Vt)=>C.current?
+ID "host:e.host" count=15 hits=206969769,206970148,207644363,208429964,211978171,213923065,213923180,214238357,223283722,225900241,230542006,230598243,232294943,232295016,232914886
+  @206969769 urn`${e}\x00${t}`}var wi=()=>{};function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}function Ri(e,t){let o=D(t.originalCwd),r=D(t.projectRoot),s=D(t.cwd),a=b(),l=e.kind==="fork"?e.roo
+  @206970148 tRoot(){return r},get cwd(){return s}},v={host:e.kind==="fork"?e.root.host:e.host,get id(){return e.kind==="fork"?e.root.id:e.id},get parentId(){return e.kind==="fork"?e.root.parentId:e.parentId},get root(){return e.kind=
+  @207644363 st"};if(typeof e==="string")e=Cc(e),n=pr({port:e.port,path:e.pathname,host:e.hostname,protocol:e.protocol},o);else if(n=pr(e,o),!n.port)n.port=n.protocol==="https:"?443:80;if(n.headers=this.getHeaders(e.headers),n.protoco
+  @208429964 ="active")e.state="disabled"}function gd(e){e.src=xt.eventSourceCall({host:e.host,clientKey:e.clientKey,headers:e.headers}),e.state="active",e.src.addEventListener("features",e.cb),e.src.addEventListener("features-updated
+  @211978171 o!==void 0&&n.toLowerCase()===o.toLowerCase()}function Re(e,t){let r={host:e.host,scheme:e.scheme,userinfo:e.userinfo,port:e.port,path:e.path,query:e.query,nid:e.nid,nss:e.nss,uuid:e.uuid,fragment:e.fragment,reference:e.r
+  @213923065 rkerId,workerName:e.workerName,workerColor:e.workerColor,hostPattern:{host:e.host},createdAt:Date.now()}}function _ct(e){return{type:"sandbox_permission_response",requestId:e.requestId,host:e.host,allow:e.allow,timestamp:
+  @213923180 ct(e){return{type:"sandbox_permission_response",requestId:e.requestId,host:e.host,allow:e.allow,timestamp:new Date().toISOString()}}function MRo(e){try{let t=ut(e);if(t&&t.type==="sandbox_permission_request")return t}catc
+  @214238357 ignal:t.signal}),s={...rb(t.headers,(i,a)=>a.toLowerCase()!==BT.HOST),host:e.host};return fetch(o.href,{...r,...o.tls!==void 0&&{tls:{...r.tls,...o.tls}},method:t.method,headers:s,...t.body!==void 0&&{body:t.body},redirec
+ID "{storageV5:p,credentials:g}=We()" count=2 hits=236022838,236092688
+  @236022838 lt:r,exitState:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]=S(null),[C,_]=S("list"),[re,Ze]=S(null),[J,fe]=S(0),we
+  @236092688 eChange:r,targetPlugin:s,targetMarketplace:u,action:m,commands:h}){let{storageV5:p,credentials:g}=We(),f=Ae((c)=>c.mcp.clients),y=Ae((c)=>c.mcp.tools),d=Ae((c)=>c.plugins.errors),x=Ae((c)=>c.plugins.warnings),O=$h(),B=cy(),[L,Z]=S(!1),K=()=>Z
+ID "function We(){return i(e)}" count=0 hits=
+ID "function b(){return i(e)}" count=1 hits=210899679
+  @210899679 vider,{value:d,children:S}),R[3]=S,R[4]=d,R[5]=y;else y=R[5];return y}function b(){return i(e)}var c,e;var k=u(()=>{f();l();m();c=Object.freeze({}),e=r(c)});var w;var B=u(()=>{f();w=r(null)}); export{z as jdb,b as kdb,k as ldb,w as mdb
+ID "pZe.of(uk().host)" count=1 hits=232387535
+  @232387535 es_outcome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePlugin
+ID "FV.of(t.session.host)" count=1 hits=232387140
+  @232387140 async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true":"fa
+ID "FV.of(e.session.host)" count=1 hits=232387620
+  @232387620 t)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(!r.pluginId)continue
+ID "h.of(e.session.host)" count=6 hits=222271347,222283507,222283903,222286046,222289735,222293725
+  @222271347 w ye(()=>new Xt);function le(e){if(he()&&e?.storageV5!==void 0)return h.of(e.session.host).countSessionsOnce(e.storageV5);return ne(e?.storageV5)}async function Qt(e,t,n,o,s=w){if(!(await e.getKnownMarketplaces(n.storageV5))[s])re
+  @222283507 e/desktop",cooldownSessions:15,isRelevant:async(e)=>I()&&!y()&&!await h.of(e.session.host).getDesktopInstalled()},{id:"desktop-shortcut",advertisedCommand:"desktop",content:async(e)=>`Continue your session in Claude Code Desktop w
+  @222283903 ,priority:1,content:async(e)=>{let t=a("suggestion",e.theme);if(await h.of(e.session.host).getDesktopInstalled())return`Working on UI? See a live preview in Claude Code Desktop \xB7 run ${t("/desktop")}`;return`Working on UI? Clau
+  @222286046 ("web-setup-github")>=me||b("web-setup-github")<pe)return!1;if((await h.of(e.session.host).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}},{id:"remote-contr
+  @222289735 maxLifetimeShows:3,advertisedCommand:"plugin",isRelevant:async(e)=>Qt(h.of(e.session.host),"frontend-design",e,{filesRead:["**/*.html","**/*.css","**/*.htm"]})},{id:"subagent-fanout-nudge",providerAgnostic:!0,content:async(e)=>`Sa
+  @222293725 ),ke(we(Se(n),"tip isRelevant threw")),!1}}async function Pi(e){let t=h.of(e.session.host),{tips:n,trustedCount:o}=await Gt(e.session.host),s=n.filter((c)=>b(c.id)>=c.cooldownSessions);if(o>0&&Wt())return s;let r=[...Zt,...Mo,...a
+ID "h.of(t.session.host)" count=1 hits=222293613
+  @222293613 ync function Do(e,t){try{return await e.isRelevant(t)}catch(n){return h.of(t.session.host).failedTipIds.add(e.id),ke(we(Se(n),"tip isRelevant threw")),!1}}async function Pi(e){let t=h.of(e.session.host),{tips:n,trustedCount:o}=awa
+ID "ns().host" count=0 hits=
+ID "Tm().host" count=0 hits=
+ID "n().host" count=25 hits=206989899,206989965,206990045,206990107,206991191,206991247,206991317,206991381,206991459,206991526,206991607,206991670,206992477,206992531,206996658,206996713,206997232,206997307,206997396,206997464,206997694,206997765,206997850,206997921,206998763
+  @206989899 ();return n().costLedger.anchorLogicalStart(e),t}function Km(){return n().host.mcpProcessWiring.directConnectServerUrl()}function Vm(e){n().host.mcpProcessWiring.replaceDirectConnectServerUrl(e)}function Jm(){return n(
+  @206989965 urn n().host.mcpProcessWiring.directConnectServerUrl()}function Vm(e){n().host.mcpProcessWiring.replaceDirectConnectServerUrl(e)}function Jm(){return n().host.mcpProcessWiring.connectNonBlocking()}function zm(e){n().ho
+  @206990045 cpProcessWiring.replaceDirectConnectServerUrl(e)}function Jm(){return n().host.mcpProcessWiring.connectNonBlocking()}function zm(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}function $m(){return n().sessio
+  @206990107 {return n().host.mcpProcessWiring.connectNonBlocking()}function zm(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}function $m(){return n().sessionFlags.teardownUnwindRequested()}function Xm(e){n().sessionFla
+  @206991191 n().sessionFlags.forgetPendingContextCompacted()}function uS(){return n().host.mcpProcessWiring.strictConfig()}function cS(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function pS(){return n().host.launchOptions
+  @206991247 n uS(){return n().host.mcpProcessWiring.strictConfig()}function cS(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function pS(){return n().host.launchOptions.cliSessionConfigCarried()}function gS(e){n().host.launc
+  @206991317 n().host.mcpProcessWiring.replaceStrictConfig(e)}function pS(){return n().host.launchOptions.cliSessionConfigCarried()}function gS(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function fS(){return n().ho
+  @206991381 eturn n().host.launchOptions.cliSessionConfigCarried()}function gS(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function fS(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function hS(e){n()
+ID "k.host" count=3 hits=206986927,217940048,218541515
+  @206986927 n n()}function n(){return re()?.session??k}function ts(e){return e.of(k.host)}function f(){let e=re();return e?.session?void 0:e}function Mm(e){re=e}function wm(){return f()?.sessionId??n().id}function Lm(){let e=f()
+  @217940048 lAssistantUUID:t.uuid,now:o})};return}if(k.where==="elsewhere"){yield*k.hosts.runToolUse({tool:i,toolUse:e,route:k.route,assistantMessage:t,toolUseContext:r,canUseTool:n,now:o});return}let T=k.input;for await(let v o
+  @218541515 (k)}))},m=async(S)=>{let k=pzs(S);if(!k)return"unresolved";return S8e(k.host,k.owner,k.name)};p(l);let g=(S)=>{let k=rzs(S);if(k===void 0)return l;return Vjs(k)?k:Kjs(l,k)};for(let S of i){let k=g(S.optsSpan),T=p(k);
+PICK Ghe(c,{session:e,theme:t count=1
+  pick@232420577 preceding fns=
+
+We() hostish (must be 0):
+  "We().host" 247=0 246=0
+  "We().session" 247=0 246=0
+  "of(We())" 247=0 246=0
+  "of(We().host)" 247=0 246=0
+
+host: collision-ban:
+  "host:e.host" count=15
+    @206969769 r wi=()=>{};function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}function Ri(e,t){let o=D(t.originalCwd),r=D(t.pr
+    @206970148 t cwd(){return s}},v={host:e.kind==="fork"?e.root.host:e.host,get id(){return e.kind==="fork"?e.root.id:e.id},get parentId(){return e.kind==="fork"?e.
+    @207644363 string")e=Cc(e),n=pr({port:e.port,path:e.pathname,host:e.hostname,protocol:e.protocol},o);else if(n=pr(e,o),!n.port)n.port=n.protocol==="https:"?443:8
+    @208429964 isabled"}function gd(e){e.src=xt.eventSourceCall({host:e.host,clientKey:e.clientKey,headers:e.headers}),e.state="active",e.src.addEventListener("featu
+    @211978171 rCase()===o.toLowerCase()}function Re(e,t){let r={host:e.host,scheme:e.scheme,userinfo:e.userinfo,port:e.port,path:e.path,query:e.query,nid:e.nid,nss:
+  "host:t.host" count=2
+    @209197947 me)return{host:"",port:"",user:"",pass:""};return{host:t.hostname.startsWith("[")&&t.hostname.endsWith("]")?t.hostname.slice(1,-1):t.hostname,port:t.p
+    @214051936 )-s.lastReviewFetchAt>=GPo;if(m){let h=await ZPo({host:t.host,owner:o.owner,repo:o.repo},r,d.number);if(h!==null){if(p=h,s.pr?.number===d.number)s.rev
+  "host:S.host" count=1
+    @232466399 onContext:()=>De.getState().toolPermissionContext,host:S.host,workspaceDiffComputeBudget:Pt,getTools:()=>s().tools,onInboundMessage:(Xe)=>$ke(h,Xe,($t
+  "host:n.host" count=4
+    @206568657 .protocol,username:n.username,password:n.password,host:n.host,hostname:n.hostname,port:n.port,pathname:n.pathname,search:n.search,hash:n.hash}),r={roo
+    @218539371 Dir(t)){let n=e.dirState(t);return n?{slug:n.slug,host:n.host,visibility:n.visibility}:null}return AVr(t)}async function yzs(e,t,n,r){if(e.hasDir(t))r
+    @218987016 }if(!n.host||n.username||n.password)return;return{host:n.host,url:n.href}}function l5s(e,t){let n=[];if(e==="browser_batch"){if(!Array.isArray(t.actio
+    @234418433 Timing:c=ht}){let l=Date.now(),f=await Id({tool:e,host:n.host,input:n.input,rawInput:t,toolUseContext:o,toolUseId:r,signal:s,approve:a,onStatus:d,reco
+  "host:uk()" count=0
+  "host:getReplDiffHost" count=0
+  "{host:Xi()" count=1
+    @206986767 t t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}function Tm(){return n()}func
+  "{host:e.host" count=7
+    @208429963 disabled"}function gd(e){e.src=xt.eventSourceCall({host:e.host,clientKey:e.clientKey,headers:e.headers}),e.state="active",e.src.addEventListener("feat
+    @211978170 erCase()===o.toLowerCase()}function Re(e,t){let r={host:e.host,scheme:e.scheme,userinfo:e.userinfo,port:e.port,path:e.path,query:e.query,nid:e.nid,nss
+    @213923064 .workerName,workerColor:e.workerColor,hostPattern:{host:e.host},createdAt:Date.now()}}function _ct(e){return{type:"sandbox_permission_response",reques
+    @223283721 ~BUN/root/chunk-besqx2k5.js");await ne(t,(S)=>x(y,{host:e.host,onDone:()=>{am(c),S()}}),{onChangeAppState:ko})}let u=!1,g=!0;if(!O.CLAUBBIT){if(g=Ft()
+    @225900240 tyCredentials.token);let y=St.Gaxios.mergeHeaders({host:e.host},t.has("date")?{}:{"x-amz-date":c},t),E="",S=[...y.keys()].sort();S.forEach((B)=>{E+=`$
+as Ghe count=0 hits=
+Ghe as  count=1 hits=219713796
+  @219713796 Xa,xao as rXa,Tte as sXa,_ni as tXa,Dao as uXa,bni as vXa,BGe as wXa,$ao as xXa,Ghe as yXa,kni as zXa,Lao as AXa,vni as BXa,Byt as CXa,bTe as DXa,C6t as EXa,lP as FXa,STe as GXa,xni as HXa,vi as IXa,L
+
+LOCAL strings in official 247/246:
+  "getReplDiffHost" 246=0 247=0
+  "spinnerTipHostFromContext" 246=0 247=0
+  "SpinnerTipHostState" 246=0 247=0
+  "WeakOwnerCache" 246=0 247=0
+  "evaluateTipContent" 246=0 247=0
+
+246 ctor twins:
+  246 "Li({host:Xi()" count=1
+  246 "function Li(e){return Ri({kind:\"root\",host:e.host" count=1
+  246 "function es(){let e=\"\";if(typeof process<\"u\"" count=1
+  246 "re()?.session??k" count=1
+  246 "function Tm(){return n()}" count=0
+  246 "async function Ghe(e,t){try{return await e.content(t)}" count=0

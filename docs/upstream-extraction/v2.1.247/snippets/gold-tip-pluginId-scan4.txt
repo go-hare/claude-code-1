@@ -1,0 +1,87 @@
+# tip-pluginId pass4 size=253204128
+STR "xod as uk" count=1 hits=232067384
+  @232067384 ie,tud as jie,umd as kze,vod as ode,vqd as ade,vud as BGe,wod as c7e,wqd as lde,xod as uk,xqd as kx,ymd as GW,yud as pde,zqd as ude}from"B:/~BUN/root/_839.js";import{dxd as Ks}from"B:/~BUN/root/_840.js";import{Fxd as MEe,Hxd as p5,Rxd as dw,_xd as V
+STR "xod as " count=25 hits=207027622,207037334,207161519,207222835,207224771,207236207,207244280,207486845,207525541,207563306,207567664,207706788,207718761,207723534,207797277,207952246,208144681,208156912,208218440,208264939,208273738,208322764,208352805,208364698,208368716
+  @207027622 en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as i,Ind as p,bxd as c,xod as a}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_850.js";function d(e){if(typeof e==="function")return e;if(Symbol.asyncDispose in e)return()=>e[
+  @207037334 as Mn}from"B:/~BUN/root/_837.js";import{Aod as Ot,Hnd as wt,Ind as Un,bxd as Me,xod as vt}from"B:/~BUN/root/_839.js";import{Exd as ne,Fxd as k,Jxd as R,Kxd as Je,Mxd as Ye,Pxd as Xe,Rxd as w,Uxd as U,Wxd as Qe,Zxd as x,_xd as re,dyd as At,fyd as q
+  @207161519 as nt,qmd as gt}from"B:/~BUN/root/_838.js";import{Hnd as _t,Ind as Kt,bxd as vt,xod as rt}from"B:/~BUN/root/_839.js";import{gyd as h,nyd as Gt}from"B:/~BUN/root/_841.js";import{tyd as st,xyd as Wt}from"B:/~BUN/root/_843.js";import{uBd as e,vBd as 
+  @207222835 {mld as c,rld as L}from"B:/~BUN/root/_834.js";import{Hnd as a,Ind as h,bxd as y,xod as g}from"B:/~BUN/root/_839.js";import{FBd as D}from"B:/~BUN/root/_850.js";import{dirname as k}from"path";function f(){}async function P(n,t){let i=u();try{await i
+  @207224771 en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as s,Ind as c,bxd as v,xod as i}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_850.js";function S(t){let e;for(let n in t)if(n.startsWith("_PROTO_")){if(e===void 0)e={...t};de
+  @207236207 en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as n,Ind as s,bxd as l,xod as o}from"B:/~BUN/root/_839.js";import{dxd as t}from"B:/~BUN/root/_840.js";import{xBd as e}from"B:/~BUN/root/_849.js";import{FBd as i}from"B:/~BUN/root/_850.js";cl
+  @207244280 {fgd as s}from"B:/~BUN/root/_825.js";import{Hnd as T,Ind as h,bsd as b,bxd as v,xod as S}from"B:/~BUN/root/_839.js";import{EBd as N,FBd as C}from"B:/~BUN/root/_850.js";import{AsyncLocalStorage as E}from"async_hooks";function r(){return d.getStore(
+  @207486845 {fgd as p,igd as T}from"B:/~BUN/root/_825.js";import{Hnd as c,Ind as S,bxd as C,xod as a}from"B:/~BUN/root/_839.js";import{gyd as d,nyd as x}from"B:/~BUN/root/_841.js";import{EBd as v,FBd as y}from"B:/~BUN/root/_850.js";var A={};v(A,{ResolvedExecu
+  @207525541 {lmd as U,qmd as z}from"B:/~BUN/root/_838.js";import{Hnd as E,Ind as Z,bxd as J,xod as k}from"B:/~BUN/root/_839.js";import{Azd as j,Oyd as L}from"B:/~BUN/root/_844.js";import{FBd as S,IBd as K}from"B:/~BUN/root/_850.js";function y(e,t){if(t in e)r
+  @207563306 {Xld as u,kmd as k}from"B:/~BUN/root/_837.js";import{Hnd as x,Ind as F,bxd as L,xod as v}from"B:/~BUN/root/_839.js";import{Cxd as T,Dxd as N}from"B:/~BUN/root/_841.js";import{tyd as R,xyd as z}from"B:/~BUN/root/_843.js";import{FBd as O,IBd as S}fr
+STR " as xod" count=1 hits=207022322
+  @207022322  as pod,pt as qod,gt as rod,Xr as sod,Li as tod,Ii as uod,_e as vod,Fi as wod,Tm as xod,ts as yod,Mm as zod,wm as Aod,Lm as Bod,Rm as Cod,Im as Dod,Fm as Eod,ss as Fod,Om as God,Em as Hod,Dm as Iod,Td as Jod,Hm as Kod,Bm as Lod,Qt as Mod,_m as Nod
+STR "Hnd as ye" count=1 hits=222268660
+  @222268660 ~BUN/root/_833.js";import{gmd as ve,kmd as mn}from"B:/~BUN/root/_837.js";import{Hnd as ye,Ind as un,asd as x,bxd as dn}from"B:/~BUN/root/_839.js";import{oyd as he,qyd as cn}from"B:/~BUN/root/_842.js";import{Azd as pn,Iyd as we,Myd as Se}from"B:/~BUN
+STR "Hnd as wa" count=1 hits=232066716
+  @232066716 s ide,Epd as nle,Eqd as XPe,Eud as Ise,Fsd as FT,Ftd as k$e,God as aN,Gtd as TL,Hnd as wa,Hqd as dde,Htd as B$e,Ind as Lh,Jod as Di,Jud as sze,Kpd as OR,Kud as aze,Lod as jO,Lpd as NLe,Mpd as $G,Mud as fde,Nnd as Nae,Npd as Npe,Ppd as rle,Qpd as ile
+STR "export{h as Td,Lo as Ud,Do as Vd,Pi as Wd" count=1 hits=222296752
+  @222296752 function Hi(e,t,n){return(o,s)=>sn(e,o,s,{storageV5:t,credentials:n}).then(rn)} export{h as Td,Lo as Ud,Do as Vd,Pi as Wd,Ni as Xd,Bi as Yd,Hi as Zd}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agre
+STR "pluginSuggestionShownCounts?.[n]" count=1 hits=222247533
+  @222247533 unction a(n){return s().tipLifetimeShownCounts?.[n]??0}function h(n){return s().pluginSuggestionShownCounts?.[n]??0}function m(n){let i=s(),t=i.tipsHistory?.[n];if(!t)return 1/0;return i.numStartups-t}function w(n){return s().pluginSuggestionDiscoverShownCounts?.[n]??0}fu
+STR "pluginSuggestionShownCounts??" count=0 hits=
+STR "pluginSuggestionShownCounts:" count=0 hits=
+NEAR839 " as xod" count=1 all=1
+  @207022322  as rod,Xr as sod,Li as tod,Ii as uod,_e as vod,Fi as wod,Tm as xod,ts as yod,Mm as zod,wm as Aod,Lm as Bod,Rm as Cod,Im as Dod,Fm as Eod,ss as Fod,Om as God,Em
+NEAR839 "xod as " count=16 all=20
+  KEEP @207027622 nce.  // Version: 2.1.247 import{Hnd as i,Ind as p,bxd as c,xod as a}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_850.js";function d(e){if(type
+  KEEP @207037334 oot/_837.js";import{Aod as Ot,Hnd as wt,Ind as Un,bxd as Me,xod as vt}from"B:/~BUN/root/_839.js";import{Exd as ne,Fxd as k,Jxd as R,Kxd as Je,Mxd as Ye,Pxd as X
+  KEEP @207161519 "B:/~BUN/root/_838.js";import{Hnd as _t,Ind as Kt,bxd as vt,xod as rt}from"B:/~BUN/root/_839.js";import{gyd as h,nyd as Gt}from"B:/~BUN/root/_841.js";import{tyd
+  KEEP @207222835 rom"B:/~BUN/root/_834.js";import{Hnd as a,Ind as h,bxd as y,xod as g}from"B:/~BUN/root/_839.js";import{FBd as D}from"B:/~BUN/root/_850.js";import{dirname as k}f
+  KEEP @207224771 nce.  // Version: 2.1.247 import{Hnd as s,Ind as c,bxd as v,xod as i}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_850.js";function S(t){let e;f
+  KEEP @207236207 nce.  // Version: 2.1.247 import{Hnd as n,Ind as s,bxd as l,xod as o}from"B:/~BUN/root/_839.js";import{dxd as t}from"B:/~BUN/root/_840.js";import{xBd as e}from"
+  KEEP @207244280 UN/root/_825.js";import{Hnd as T,Ind as h,bsd as b,bxd as v,xod as S}from"B:/~BUN/root/_839.js";import{EBd as N,FBd as C}from"B:/~BUN/root/_850.js";import{Async
+  KEEP @207486845 rom"B:/~BUN/root/_825.js";import{Hnd as c,Ind as S,bxd as C,xod as a}from"B:/~BUN/root/_839.js";import{gyd as d,nyd as x}from"B:/~BUN/root/_841.js";import{EBd a
+NEAR839 " as Hnd" count=1 all=1
+  @207021885 e as Bnd,Eo as Cnd,nt as Dnd,qo as End,J as Fnd,zo as Gnd,te as Hnd,ot as Ind,Xo as Jnd,Zo as Knd,Qo as Lnd,z as Mnd,Fp as Nnd,Op as Ond,Ep as Pnd,Dp as Qnd,Hp 
+NEAR839 "Hnd as " count=17 all=20
+  KEEP @207027595 m/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as i,Ind as p,bxd as c,xod as a}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_85
+  KEEP @207037304  as z,kmd as Mn}from"B:/~BUN/root/_837.js";import{Aod as Ot,Hnd as wt,Ind as Un,bxd as Me,xod as vt}from"B:/~BUN/root/_839.js";import{Exd as ne,Fxd as k,Jxd as 
+  KEEP @207161489 mport{mmd as nt,qmd as gt}from"B:/~BUN/root/_838.js";import{Hnd as _t,Ind as Kt,bxd as vt,xod as rt}from"B:/~BUN/root/_839.js";import{gyd as h,nyd as Gt}from"B:
+  KEEP @207222808 ;import{mld as c,rld as L}from"B:/~BUN/root/_834.js";import{Hnd as a,Ind as h,bxd as y,xod as g}from"B:/~BUN/root/_839.js";import{FBd as D}from"B:/~BUN/root/_85
+  KEEP @207224744 m/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as s,Ind as c,bxd as v,xod as i}from"B:/~BUN/root/_839.js";import{FBd as l}from"B:/~BUN/root/_85
+  KEEP @207236180 m/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Hnd as n,Ind as s,bxd as l,xod as o}from"B:/~BUN/root/_839.js";import{dxd as t}from"B:/~BUN/root/_84
+  KEEP @207244244 /_824.js";import{fgd as s}from"B:/~BUN/root/_825.js";import{Hnd as T,Ind as h,bsd as b,bxd as v,xod as S}from"B:/~BUN/root/_839.js";import{EBd as N,FBd as C}fro
+  KEEP @207471919 _833.js";import{kmd as le}from"B:/~BUN/root/_837.js";import{Hnd as G,Ind as ie,bxd as ue,yod as c}from"B:/~BUN/root/_839.js";import{Azd as se,Oyd as a,Pyd as z}
+WeakMap count first30=30
+FAC "class ye{" count=6 hits=207415844,225721916,226644007,226982997,231239223,234583416
+  @207415844 class ye{constructor(){this._proxyTracerProvider=new un.ProxyTracerProvider,this.wrapSpanContext=ln.wrapSpanContext,this.isSpanContextValid=ln.isSpanContextValid,this.deleteSpan=E.deleteSpan,this.getSpan=E.getSpan,this.g
+  @225721916 class ye{format(e){let n=[];for(let o of Object.keys(e)){let a=T(o);n.push(Uint8Array.from([a.byteLength]),a,this.formatHeaderValue(e[o]))}let t=new Uint8Array(n.reduce((o,a)=>o+a.byteLength,0)),r=0;for(let o of n)t.set(
+  @226644007 class ye{serdeContext;setSerdeContext(e){this.serdeContext=e}}function Wh(e,t,r){if(r?.source){let s=r.source;if(typeof t==="number"){if(t>Number.MAX_SAFE_INTEGER||t<Number.MIN_SAFE_INTEGER||s!==String(t))if(s.includes("
+  @226982997 class ye{constructor(e){let t=e?re.trimArrayEntries([...e]):[],r=t?re.removeEmptyStringsFromArray(t):[];if(!r||!r.length)throw ee(wn);this.scopes=new Set,r.forEach((n)=>this.scopes.add(n))}static fromString(e){let r=(e||
+  @231239223 class ye{code;filePath;constructor(e,t){this.code=e,this.filePath=t}render(e,t,n){let i=Je(e),o=Ve(e,i),r=this.code.split(` `);if(r.at(-1)==="")r.pop();let s=r[0]??null,c={lang:Ze(this.filePath,s),stack:null},a=String(r.
+  @234583416 class ye{heap;length;static#e=!1;static create(t){let e=Yh(t);if(!e)return[];ye.#e=!0;let i=new ye(t,e);return ye.#e=!1,i}constructor(t,e){if(!ye.#e)throw TypeError("instantiate Stack using Stack.create(n)");this.heap=ne
+FAC "this.#e=new WeakMap" count=0 hits=
+FAC "#e=new WeakMap" count=2 hits=230327707,234359686
+  @230327707 #e=new WeakMap;mark(e,t){this.#e.set(e,t)}laneOf(e){return this.#e.get(e)}}var Jg=new el(()=>new Xg);Yg();var Zg=1e4;class e_{uuids=new Set;order=[];has(e){return this.uuids.has(e)}track(e){if(this.uuids.has(e))return!1;
+  @234359686 #e=new WeakMap;reinitialize(e){let n=this.#e.get(e);if(n)return n;let t=ie().clearServerCache(e.name,e.config).catch(()=>{});return this.#e.set(e,t),t}}var Ei=-32000;async function Xe(e,n,t){let o=await so(e,n,t);if(o.ki
+FAC "of(e){let t=this.#e.get(e)" count=1 hits=217593410
+  @217593410 of(e){let t=this.#e.get(e);if(t===void 0)t=await KLr(e,"fragment"),this.#e.set(e,t);return t}has(e){return this.#e.has(e)}}async function KLr(e,t){let{parse:n,parseFragment:r}=await import("B:/~BUN/root/chunk-yznb5kdg.js
+FAC "of(e){let t=this.#e.get(e);if(t)return t" count=0 hits=
+HG "function uk(){" count=0
+HG "uk=()=>" count=0
+HG ".host}" count=15
+  @67629442 .host}${this.path}`,           headers: typeof this.getHeaders === "function" ? this.getHeaders() : {}         }       }     });   if (onCli
+  @67741611 .host}]` : reqOptions.host, requestPort = reqOptions.port || agent.defaultPort, endpoint = `${requestHost}:${requestPort}`;   validateHeader
+  @207240006 .host}`:n.protocol==="ws:"?`http://${n.host}`:n.origin)!==t.origin)return!1;return S.some((i)=>n.pathname.includes(i))}function J(e,r){if(!(
+  @207240044 .host}`:n.origin)!==t.origin)return!1;return S.some((i)=>n.pathname.includes(i))}function J(e,r){if(!("url"in r)||typeof r.url!=="string")re
+  @207589462 .host};return e};class x extends pe.Agent{constructor(e,t){super(t);this.options={path:void 0},this.proxy=typeof e==="string"?new _e.URL(e):
+  @207590330 .host}]`:t.host,s=`CONNECT ${u}:${t.port} HTTP/1.1\r `;if(r.username||r.password){let a=`${decodeURIComponent(r.username)}:${decodeURICompon
+  @207662634 .host}if(!e.pathname&&e.path){var t=e.path.indexOf("?");if(t<0)e.pathname=e.path;else e.pathname=e.path.substring(0,t),e.search=e.path.subst
+  @207724207 .host}`}function Wt(){return!1}function T(){return}var B=R(()=>{Ie();Ce();N();xe()});var k="\u02F9-\u02FC\u230C-\u230F\u231C-\u231F\u239B-\u
+HG "return{host:" count=15
+  @208378486 return{host:e[1],owner:e[2],name:e[3]}}let o=r.match(/^(https?|ssh|git):\/\/(?:[^@/?#]*@)?([^/:?#@]+(?::\d+)?)\/([^/]+)\/([^/]+?)(?:\.git)?$
+  @208378776 return{host:R,owner:o[3],name:o[4]}}return null}function ut(t){let r=t.trim().replace(/\/+$/,"").replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i,"")
+  @208620633 return{host:"memory",auth:"async",refreshOAuth:!0};let e=un.CLAUDE_CODE_MEMORY_API_TOKEN;return{host:"memory",auth:"none",refreshOAuth:!1,..
+  @208620722 return{host:"memory",auth:"none",refreshOAuth:!1,...e&&{headers:{Authorization:`Bearer ${e}`}}}}var CF;var AS=y(()=>{B();Fe();Q();Ft();vF();
+  @209197824 return{host:"",port:"",user:"",pass:""};try{let t=new URL(e);if(!t.hostname)return{host:"",port:"",user:"",pass:""};return{host:t.hostname.s
+  @209197900 return{host:"",port:"",user:"",pass:""};return{host:t.hostname.startsWith("[")&&t.hostname.endsWith("]")?t.hostname.slice(1,-1):t.hostname,p
+  @209197940 return{host:t.hostname.startsWith("[")&&t.hostname.endsWith("]")?t.hostname.slice(1,-1):t.hostname,port:t.port||(t.protocol==="https:"?"443"
+  @209198166 return{host:"",port:"",user:"",pass:""}}}function ut(e,t,n){let o=[],a=(s,c)=>{if(c&&!dt.test(c))o.push(`-D${s}=${c}`)};if(a("http.proxyHost
+HG "getSession()" count=2
+  @67513597 getSession() {   return this._handle?.getSession?.(); }; TLSSocket.prototype.getEphemeralKeyInfo = function getEphemeralKeyInfo() {   let in
+  @209806552 getSession(),c!==null)l=c.id}if(n.session={id:l,version:null,cipherSuite:null,compressionMethod:null,serverCertificate:null,certificateReque
+DUMP tips-export @222296752

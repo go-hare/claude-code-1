@@ -1,0 +1,5 @@
+# LOCKED dln @213647665 end=213647846 len=181
+# unique function dln( count=1
+# unique function dln(e,t){if(!r3.exitFlushRegistered) count=1
+# callers: uln, dm. schedules t.flush after Xwo=60000; process.on("exit", t.flushAtExit)
+function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTimer)e.flushTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}

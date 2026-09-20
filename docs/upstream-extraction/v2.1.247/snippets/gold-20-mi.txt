@@ -1,0 +1,4 @@
+# mi Z2a
+# start=210498105 end=210498905
+
+function mi(e){if(e.noCommits)return"--cached";return e.source.kind==="branch"?e.source.baseRef:"HEAD"}async function pi(e,t="HEAD"){if(!await re())return null;if(await Je())return null;let{stdout:i,code:s}=await b(v(),["--no-optional-locks","-c","diff.relative=false","diff",t,"--shortstat"],{timeout:P,preserveOutputOnError:!1,abortSignal:e});if(s===0){let l=Ve(i);if(l&&l.filesCount>B)return{hunks:new Map,skippedLarge:new Set}}let{stdout:r,code:o}=await b(v(),["--no-optional-locks","-c","diff.relative=false","diff",...ie,t],{timeout:P,preserveOutputOnError:!1,abortSignal:e});if(o!==0)return null;let a=Mt(r);if(t==="--cached"&&a.hunks.size>0){let l=await $e(e);if(l===null)return null;for(let f of l.perFileStats.keys())a.hunks.delete(f)}return a}async function gi(e){let{stdout:t,code:n}=awai

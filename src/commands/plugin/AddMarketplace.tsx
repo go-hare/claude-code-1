@@ -14,6 +14,7 @@ import { logError } from '../../utils/log.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { addMarketplaceSource, saveMarketplaceToSettings } from '../../utils/plugins/marketplaceManager.js';
 import { parseMarketplaceInput } from '../../utils/plugins/parseMarketplaceInput.js';
+import { re } from '../../utils/plugins/escapeSafeText.js';
 import type { ViewState } from './types.js';
 
 type Props = {
@@ -95,7 +96,7 @@ export function AddMarketplace({
 
       if (cliMode) {
         // In CLI mode, set result to trigger completion
-        setResult(`Successfully added marketplace: ${name}`);
+        setResult(re(`Successfully added marketplace: ${name}`));
       } else {
         // In interactive mode, switch to browse view
         setViewState({ type: 'browse-marketplace', targetMarketplace: name });
@@ -109,7 +110,7 @@ export function AddMarketplace({
 
       if (cliMode) {
         // In CLI mode, set result with error to trigger completion
-        setResult(`Error: ${error.message}`);
+        setResult(re(`Error: ${error.message}`));
       } else {
         setResult(null);
       }

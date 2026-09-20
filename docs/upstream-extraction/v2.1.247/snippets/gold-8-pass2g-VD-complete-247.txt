@@ -1,0 +1,4 @@
+# off=214013779
+
+function VD(e){if(e instanceof yn)return e.message||jw;if(!(e instanceof Error))return String(e);let n=gPo(e).filter(Boolean).join(`
+`).trim()||"Command failed with no output";return Pc(n)}function gPo(e){if(e instanceof hk)return[`Exit code ${e.code}`,e.interrupted?jw:"",e.stderr,e.stdout];let t=[e.message];if("stderr"in e&&typeof e.stderr==="string")t.push(e.stderr);if("stdout"in e&&typeof e.std

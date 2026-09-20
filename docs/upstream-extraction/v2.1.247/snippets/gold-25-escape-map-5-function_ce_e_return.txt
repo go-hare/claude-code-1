@@ -1,0 +1,3 @@
+# 247 @222136956
+
+as Y,bsd as O,bxd as X,xod as D}from"B:/~BUN/root/_839.js";import{gAd as v,oAd as U}from"B:/~BUN/root/_846.js";X();Y();q();U();J();re();W();ee();oe();te();ie();Z();z();Q();ne();import{hostname as se}from"os";var le=2,ae=1e4,ue=600000,de=2592000000;function V(){try{return se()}catch{return"unknown"}}function ce(e){return{now:e,version:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.247",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-26T05:55:19Z",GIT_SHA:"89c726188daf6407b6b57bf67d312f2958e5b9f2",HOOKS_WORK

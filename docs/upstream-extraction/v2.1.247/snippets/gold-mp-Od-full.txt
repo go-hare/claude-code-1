@@ -1,0 +1,3 @@
+# Od unique via adjacency to ci CLAUDE_CODE_PLUGIN_CACHE_DIR @209324339
+# Id="plugins" si="cowork_plugins" same module (var Id= after ui())
+function Od(){if(ii())return si;if(_.CLAUDE_CODE_USE_COWORK_PLUGINS)return si;return Id}

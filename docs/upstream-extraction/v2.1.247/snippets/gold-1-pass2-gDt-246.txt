@@ -1,0 +1,3 @@
+# 246 gDt @215148044 sha=eac99442b752f08d
+
+function gDt(){return mls()!=="off"&&gls()}

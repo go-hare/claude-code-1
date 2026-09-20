@@ -1,0 +1,3 @@
+# 247 offset=206261967 needle="function Bt(){"
+
+t:W,allowBypass:n}:void 0,rest:f}}async function Bt(){let c=pt(process.argv);if(c)console.error(c),process.exit(1);let e=process.argv.slice(2);if((e.length===1||e.length===2&&e[1]==="--verbose")&&(e[0]==="--version"||e[0]==="-v"||e[0]==="-V")){if(console.log(`${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overv

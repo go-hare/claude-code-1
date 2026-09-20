@@ -1,0 +1,6 @@
+# LOCKED xln @213652823 end=213653071 len=248
+# unique function xln( count=1
+# export: xln as aaa @219684795
+# import: aaa as At @222874789 (same map as baa as Ft = dPe)
+# seeds persisted pluginUsage keys at 0 — does not write pendingUsage
+function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filter((i)=>!r.pluginUsage?.[i]);if(o.length===0)return r;let s={...r.pluginUsage};for(let i of o)s[i]={usageCount:0,lastUsedAt:n,lastUsedNumStartups:r.numStartups};return{...r,pluginUsage:s}},t)}

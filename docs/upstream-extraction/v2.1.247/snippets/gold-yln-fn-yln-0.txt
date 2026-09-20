@@ -1,0 +1,2 @@
+# needle=function yln( pos=213648410 end=213648511 len=101
+function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}

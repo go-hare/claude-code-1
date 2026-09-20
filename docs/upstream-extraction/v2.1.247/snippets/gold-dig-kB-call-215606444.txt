@@ -1,0 +1,3 @@
+# offset=215606444
+
+lZn(n)?n:void 0}catch{return}}function uZn(e){try{return process.kill(e,0),!0}catch{return!1}}async function GQo(){try{return!(await jQo(IV())).isFile()}catch(e){return De(e)==="ENOENT"}}async function zPt(e,t){if(Ne()&&t!==void 0){let n=await t.write(o7(),le(e),{precondition:{type:"ifAbsent"},mode:438&~process.umask()});if(n.ok)return!0;if(n.error.code==="AlreadyExists"||n.error.code==="Failed"&&kB("telemetryCode"in n.error?n.error.telemetryCode:void 0)&&await GQo())return!1;throw new ye(`failed to create computer-use lock: ${n.error.code}`,"computer-use lock v5 create failed")}try{return awa

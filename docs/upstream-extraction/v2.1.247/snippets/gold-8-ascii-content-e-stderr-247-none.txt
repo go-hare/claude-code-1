@@ -1,0 +1,1 @@
+# no high-ASCII windows ver=247 hits=0 needle="content:e.stderr"

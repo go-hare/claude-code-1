@@ -33,6 +33,11 @@ import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import type { ReplBridgeTransport } from './replBridgeTransport.js'
 import {
+  GET_WORKSPACE_DIFF_NOT_SUPPORTED,
+  GET_WORKSPACE_DIFF_TIMEOUT_ERROR,
+  GET_WORKSPACE_DIFF_TIMEOUT_MS,
+} from './workspaceDiffBudget.js'
+import {
   BASH_INPUT_TAG,
   CHANNEL_MESSAGE_TAG,
   CROSS_SESSION_MESSAGE_TAG,
@@ -385,6 +390,11 @@ export type ServerControlRequestHandlers = {
   onRenameSession?: (
     title: string,
   ) => { ok: true } | { ok: false; error: string }
+  /**
+   * densable 2.1.247 jn `onGetWorkspaceDiff`. Host callback for
+   * `get_workspace_diff`. Missing → official not-supported string.
+   */
+  onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
 }
 
 const OUTBOUND_ONLY_ERROR =
@@ -441,6 +451,71 @@ function replyStopTaskAsync(
     })
 }
 
+/** densable 2.1.247 `_838` `T` / `mmd` — `ye(promise, ht, kt)`. */
+function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Error(message)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
+
+/**
+ * densable 2.1.247 `E` — async control_response for get_workspace_diff.
+ */
+function replyGetWorkspaceDiffAsync(
+  request: SDKControlRequest,
+  transport: ReplBridgeTransport,
+  sessionId: string,
+  result: Promise<unknown>,
+): void {
+  void result
+    .then(
+      payload =>
+        ({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: request.request_id,
+            response:
+              payload && typeof payload === 'object' && !Array.isArray(payload)
+                ? (payload as Record<string, unknown>)
+                : {},
+          },
+        }) satisfies SDKControlResponse,
+    )
+    .catch(
+      err =>
+        ({
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: errorMessage(err),
+          },
+        }) satisfies SDKControlResponse,
+    )
+    .then(response => {
+      const event = { ...response, session_id: sessionId }
+      void transport.write(event)
+      const resultSubtype = response.response.subtype
+      rcLog(
+        `control_response: subtype=get_workspace_diff` +
+          ` request_id=${request.request_id}` +
+          ` result=${resultSubtype}`,
+      )
+      logForDebugging(
+        `[bridge:repl] Sent control_response for get_workspace_diff request_id=${request.request_id} result=${resultSubtype}`,
+      )
+    })
+}
+
 /**
  * Respond to inbound control_request messages from the server. The server
  * sends these for session lifecycle events (initialize, set_model) and
@@ -465,6 +540,7 @@ export function handleServerControlRequest(
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
     onRenameSession,
+    onGetWorkspaceDiff,
   } = handlers
   if (!transport) {
     logForDebugging(
@@ -697,6 +773,35 @@ export function handleServerControlRequest(
         }
       }
       break
+    }
+
+    case 'get_workspace_diff': {
+      if (!onGetWorkspaceDiff) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: GET_WORKSPACE_DIFF_NOT_SUPPORTED,
+          },
+        }
+        break
+      }
+      const abort = new AbortController()
+      replyGetWorkspaceDiffAsync(
+        request,
+        transport,
+        sessionId,
+        raceWithTimeout(
+          onGetWorkspaceDiff(abort.signal),
+          GET_WORKSPACE_DIFF_TIMEOUT_MS,
+          GET_WORKSPACE_DIFF_TIMEOUT_ERROR,
+        ).catch(err => {
+          abort.abort()
+          throw err
+        }),
+      )
+      return
     }
 
     case 'set_mcp_permission_mode_override': {

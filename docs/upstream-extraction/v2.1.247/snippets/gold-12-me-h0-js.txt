@@ -1,0 +1,3 @@
+# ver=247 offset=222961041 hit=1/1 js=true needle="function me(t){return T(t)&&t.context===\"Terminal\""
+
+.message:String(d)}`,{level:"error"}),Error("Failed to install Alacritty Shift+Enter key binding")}}function me(t){return T(t)&&t.context==="Terminal"&&T(t.bindings)&&"shift-enter"in t.bindings}async function ut(t){let n=ie()==="linux"?c.XDG_CONFIG_HOME:void 0,r=n?y(n,"zed"):y(L(),".config","zed"),o=y(r,"keymap.json"),a=l.dim(`See ${w(o)}`),i=l.dim(`To add the binding yourself, add this block to the keymap array in ${w(o)}:${e}{ "context": "Terminal", "bindings": { "shift-enter": ["terminal::Sen

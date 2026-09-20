@@ -1,0 +1,3 @@
+# 247 @215156370 js=false
+
+LS","TodoWrite","TaskCreate","TaskGet","TaskList","TaskUpdate","TaskStop","TaskOutput","LSP","ReadMcpResourceTool","ReadMcpResourceDirTool","ListMcpResourcesTool","Snip","WebFetch","WebSearch","WebBrowser","Agent","Task","Workflow","Skill","CronCreate","CronDelete","CronList","ScheduleWakeup","RemoteTrigger","EnterWorktree","ExitWorktree","SendMessage","SendUserMessage","Brief","PushNotification","SendFeedback","SendFile","SendUserFile","SubscribePR","Artifact","DesignSync","ClaudeDesign","Projects","ConnectGitHub","ReportFindings","ObserverReport","propose_skills","RefreshMcpTools","SuggestPl

@@ -1,0 +1,4 @@
+# 247 @204440294
+
+must be one of the session journal names (..-.......must be one of the global-config copy kinds (.......J.>.tiny_memory........^[0-9]{1,16}$.......
+...<stamp>......h.. inside a session's folder is that session's terminal recording stream: address it as keys.recording(projectKey, sessionId, stamp)..........must not end with ..4...;f..: those name a session's project-level sibling filesI...%2..: that names a cloud session's directory-sync record at the project level...<....;7. are reserved: they name project-level entries, not sessionsD.....3. is the job's timeline stream: address it as keys.jo

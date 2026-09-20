@@ -1,0 +1,5 @@
+# mismatch@15
+---247---
+async function HUo(e,t,n){if(await JD(e))return;let r=dSt(e),o,s=Ne()&&n!==void 0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.pluginCache(s.marketplace,s.plugin,s.version,[wg]));if(!i.ok){if(i.error.code==="NotFound"){await K8(e,n);return}_(`Failed to stat orphaned marker: ${e}: ${tr(i.error)}`);return}o=i.value.mtimeMs}else try{o=(await $Uo(r)).mtimeMs}catch(i){if(De(i)==="ENOENT"){await 
+---246---
+async function e$o(e,t,n){if(await AD(e))return;let r=Y_t(e),o,s=Be()&&n!==void 0?np(e,ea()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(Dr.pluginCache(s.marketplace,s.plugin,s.version,[ag]));if(!i.ok){if(i.error.code==="NotFound"){await k8(e,n);return}b(`Failed to stat orphaned marker: ${e}: ${Zn(i.error)}`);return}o=i.value.mtimeMs}else try{o=(await GDo(r)).mtimeMs}catch(i){if(De(i)==="ENOENT"){await 

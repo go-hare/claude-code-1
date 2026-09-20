@@ -1,0 +1,2 @@
+# Ohe( @217937911
+let S=pxt(s,r.options.tools,r.agentId,MD(r),Le(r),Ohe(r),e.input);dxt(s,e.id,r,l),yield{message:pt({content:[{type:"tool_result",content:`<tool_use_error>Error: No such tool available: ${s}$

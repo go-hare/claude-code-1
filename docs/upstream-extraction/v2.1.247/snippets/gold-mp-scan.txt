@@ -1,0 +1,315 @@
+# mp/K8-v5 peel official-247 size=253204128
+K8 locked @214509181
+K8 body: async function K8(e,t){if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}let n=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!r.ok)_(`Failed to write .orphaned_at: ${e}: ${tr(r.error)}`);return}try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}}async function ABa(e){if(PT())return;try{let t=Ne()&&e!==vo
+STR "mp(e,ra())" count=9 hits=214509300,214510205,214510909,214641543,214647092,214647612,214648671,214659480,214680463
+  @214509300 king a symlinked plugin version: ${e}`);return}let n=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.pl
+  @214510205 nction BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!==void 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=await t.delete(_r.pluginCache(r.marketplace,r.plugin,
+  @214510909 on HUo(e,t,n){if(await JD(e))return;let r=dSt(e),o,s=Ne()&&n!==void 0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.pluginCache(s.marketplace,s.plugi
+  @214641543 ory could not be examined before a strict install step")}if(n===null&&mp(e,ra())!==null)throw new ye(`Could not prepare ${e} for its ${t}: it is no longer a plain version
+  @214647092 :!1}}}async function S2(e,t,n=(r)=>$Oe.has(r)){let r=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&r!==null){let s=await txe(t,{namespace:"pluginCache",marketplac
+  @214647612 eturn o.some((s)=>!n(s))}async function g2(e,t){if(!Ne()||t===void 0||mp(e,ra())===null)return S2(e);let n=await G$(Fo(e,hzo)).catch(()=>null);return n!==null&&n.isFile()
+  @214648671 nc function pme(e,t){if(await JD(e))return;let n=Ne()&&t!==void 0,r=n?mp(e,ra()):null;if(n&&r!==null){await t.delete(_r.pluginCache(r.marketplace,r.plugin,r.version,[wg])
+  @214659480 lugin ${t} at ${d}`),d}async function $Fe(e,t){let n=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null&&!await Rx(e,ra())){let r=await t.deleteScope({namespa
+STR "mp(Fo(ra(),\"_\",\"_\",\"_\"),ra())" count=1 hits=214637075
+  @214637075  ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}async function m2(e){return await _2(e)==="real"}function uzo(e,t){return new ye(`
+STR "function ra(){return Fo(Fs(),\"cache\")}" count=1 hits=214636997
+  @214636997 .path.startsWith(t+oE))return"."+oE+nE(mn(),e.path)}return a9(e.path)}function ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}async functio
+STR "_r.pluginCache(" count=12 hits=214080204,214080956,214082838,214509367,214510267,214510973,214582237,214595010,214596862,214628414,214648718,214869412
+  @214080204  directory of markers`),!1}let i=r?mp(e,xf(Fs(),"cache")):null,a=r&&i?_r.pluginCache(i.marketplace,i.plugin,i.version,[na,String(process.pid)]):void 0;dSn(n,s,r&&a?{storageV5:
+  @214080956 0;if(i==="refused"||i==="junk")return!1;if(o&&s){let a=await t.delete(_r.pluginCache(s.marketplace,s.plugin,s.version,[na,String(process.pid)]));if(!a.ok)return _(`Failed to r
+  @214082838 await Tpt(s,{force:!0})}return r}async function pIo(e,t,n){let r=(l)=>_r.pluginCache(t.marketplace,t.plugin,t.version,[na,l]),o=[],s;do{let l=await e.listEntries({namespace:"p
+  @214509367  0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!
+  @214510267 =void 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=await t.delete(_r.pluginCache(r.marketplace,r.plugin,r.version,[wg]));if(!o.ok)_(`Failed to remove .orphaned_at: ${e}: $
+  @214510973 oid 0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.pluginCache(s.marketplace,s.plugin,s.version,[wg]));if(!i.ok){if(i.error.code==="NotFound"){await K8(e
+  @214582237 (Fs(),"cache")):null;if(Ne()&&n!==void 0&&s){let i=await n.read([{key:_r.pluginCache(s.marketplace,s.plugin,s.version,[".claude-plugin","plugin.json"]),offset:0,length:nUe}]);
+  @214595010 !n.ok||n.value.kind!=="directory")return;let r=await e.readText([{key:_r.pluginCache(t.marketplace,t.plugin,t.version,[".claude-plugin","plugin.json"]),offset:0,length:h2+1}])
+STR "n.marketplace,n.plugin,n.version,[wg]" count=1 hits=214509382
+  @214509382 ull;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!r.ok)_(`Failed to write .orphaned_at:
+STR "s.marketplace,s.plugin,s.version,[wg]" count=1 hits=214510988
+  @214510988 ):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.pluginCache(s.marketplace,s.plugin,s.version,[wg]));if(!i.ok){if(i.error.code==="NotFound"){await K8(e,n);return}_(`Failed to stat orphaned
+STR "Not marking a symlinked plugin version:" count=2 hits=201630860,214509223
+  @201630860 e.2...loadPluginHooks: plugin-affecting settings changed..(...-.Not marking a symlinked plugin version: ...Failed to write .orphaned_at: ...Plugin cache cleanup failed: ...F
+  @214509223 {UUo(e,t),Xpe(),Rvn(),O0e()}async function K8(e,t){if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}let n=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r
+STR "Failed to write .orphaned_at" count=3 hits=201630908,214509480,214509598
+  @201630908 ings changed..(...-.Not marking a symlinked plugin version: ...Failed to write .orphaned_at: ...Plugin cache cleanup failed: ...Failed to remove .orphaned_at: . ...X.
+  @214509480 sion,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!r.ok)_(`Failed to write .orphaned_at: ${e}: ${tr(r.error)}`);return}try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`
+  @214509598 )}`);return}try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}}async function ABa(e){if(PT())return;try{let t=Ne()&&e!==void 0?await zUo(
+STR "Failed to remove .orphaned_at" count=3 hits=201630988,214510334,214510451
+  @201630988 write .orphaned_at: ...Plugin cache cleanup failed: ...Failed to remove .orphaned_at: . ...X.m.Failed to stat orphaned marker: 1...>.c.Skipping orphan cleanup, in use by live
+  @214510334 te(_r.pluginCache(r.marketplace,r.plugin,r.version,[wg]));if(!o.ok)_(`Failed to remove .orphaned_at: ${e}: ${tr(o.error)}`);return}try{await LUo(n)}catch(o){if(De(o)==="ENOENT")return;_(`Fa
+  @214510451 or)}`);return}try{await LUo(n)}catch(o){if(De(o)==="ENOENT")return;_(`Failed to remove .orphaned_at: ${e}: ${o}`)}}function jUo(){try{return MLn(IR())}catch(e){return _(`Failed to load inst
+STR "Failed to stat orphaned marker:" count=3 hits=201631028,214511092,214511260
+  @201631028 he cleanup failed: ...Failed to remove .orphaned_at: . ...X.m.Failed to stat orphaned marker: 1...>.c.Skipping orphan cleanup, in use by live session: ...#... for live users, skip
+  @214511092 wg]));if(!i.ok){if(i.error.code==="NotFound"){await K8(e,n);return}_(`Failed to stat orphaned marker: ${e}: ${tr(i.error)}`);return}o=i.value.mtimeMs}else try{o=(await $Uo(r)).mtimeMs}catch(i
+  @214511260 $Uo(r)).mtimeMs}catch(i){if(De(i)==="ENOENT"){await K8(e,n);return}_(`Failed to stat orphaned marker: ${e}: ${i}`);return}if(t-o>FUo){try{if(await RS(e,void 0,n)){_(`Skipping orphan cleanup, 
+STR "Could not drop a stray orphan marker" count=3 hits=201651104,214628481,214630764
+  @201651104 ce ... o .command-source-refused...;.unexpected-error=...[..Could not drop a stray orphan marker from the staged plugin: ...*...,...A publish that stood named a set-aside at ..N...{.; 
+  @214628481 te(_r.pluginCache(t.marketplace,t.plugin,t.version,[wg]));if(!n.ok)_(`Could not drop a stray orphan marker from the staged plugin: ${tr(n.error)}`,{level:"warn"})}function Wjo(e){if(e.code!=="Fail
+  @214630764 }async function UNn(e){try{await cZ(pwt(e,wg),{force:!0})}catch(t){_(`Could not drop a stray orphan marker from the staged plugin: ${t instanceof Error?t.message:String(t)}`,{level:"warn"})}}funct
+STR "plugin cache version parent could not be examined" count=2 hits=200364744,214637273
+  @200364744 ine the plugin directory of ...( ..); retry the install...1...u=.plugin cache version parent could not be examined... ...1.m.Could not ...NE..: what occupies its cache path .6... could not be exami
+  @214637273  examine the plugin directory of ${e} (${Y(t)}); retry the install.`,"plugin cache version parent could not be examined")}async function Mwt(e){let t=ra(),n=nE(t,e),r=n.split(oE);if(!n||RUe(n)||r.length!==2||r
+STR "isSymbolicLink" count=30 hits=66644058,66653569,67042918,67051755,67052028,67056276,67057717,67057837,67062777,67064436,67064556,67162961,67165454,68860078,68881711,68891845,88079505,197281684,207050167,207052386,207489884,207802133,207806138,207808574,208116511,208147736,208148259,208148546,208159723,208162444
+  @66644058 return onFile(srcStat, destStat, src, dest, opts);   else if (srcStat.isSymbolicLink())     return onLink(destStat, src, dest, opts);   else if (srcStat.isSocket())     throw
+  @66653569 return onFile(srcStat, destStat, src, dest, opts);   else if (srcStat.isSymbolicLink())     return onLink(destStat, src, dest, opts);   else if (srcStat.isSocket())     throw
+  @67042918 sDirectory",       "isFIFO",       "isFile",       "isSocket",       "isSymbolicLink"     ])       DirentFromStats.prototype[key] = function() {         return this[kStats][k
+  @67051755 ttern) {     if (stat?.isDirectory())       return !0;     if (!stat?.isSymbolicLink())       return !1;     if (this.#followSymlinks)       return !!this.#cache.followStatSy
+  @67052028 ttern) {     if (stat?.isDirectory())       return !0;     if (!stat?.isSymbolicLink())       return !1;     if (this.#followSymlinks)       return !!(await this.#cache.follo
+  @67056276 tryIsDirectory = entry.isDirectory() || this.#followSymlinks && entry.isSymbolicLink() && !!this.#cache.followStatSync(entryFullpath)?.isDirectory(), subPatterns = /* @__PURE
+  @67057717 ((nextMatches || pattern.at(0) === ".") && (entryIsDirectory || entry.isSymbolicLink()) && !fromSymlink)             subPatterns.add(nextIndex);           if (!this.#followSy
+  @67057837 Patterns.add(nextIndex);           if (!this.#followSymlinks && entry.isSymbolicLink())             nSymlinks.add(index);           if (next === ".." && entryIsDirectory) {  
+STR "\".orphaned_at\"" count=1 hits=211423445
+  @211423445 arketplace:u}:{namespace:"pluginCache",marketplace:u,plugin:l}}var ss=".orphaned_at",as=".in_use",ih=".gcs-sha",nh=".links_materialized";var os=g(()=>{Xn();Kt();rs()});class 
+STR "'.orphaned_at'" count=0 hits=
+STR "wg=\".orphaned_at\"" count=0 hits=
+STR "var wg=" count=3 hits=211141525,226943119,238402474
+  @211141525 ptimistic:Qe,useMemoCache:Qe,useCacheRefresh:Qe};Us.useEffectEvent=Qe;var wg={readContext:le,use:un,useCallback:function(t,n){return gt().memoizedState=[t,n===void 0?n
+  @226943119 :e};let o={[t]:e};return o[Dd]={[r]:n},o}var e_="serializationPolicy";var wg=u(()=>{Ud();mi();ka();ba()});function vg(e={}){let t=Pd(e!==null&&e!==void 0?e:{});if(e.cr
+  @238402474 roperty(xa,"__esModule",{value:!0});xa.TemporalMetricProcessor=void 0;var wg=Be(),Cg=ye();class Me{_aggregator;_unreportedAccumulations=new Map;_reportHistory=new Map;
+STR "wg=\".orphaned" count=0 hits=
+STR "function dSt(" count=1 hits=214510094
+  @214510094 xLn(l)}await xLn(i)}}catch(t){_(`Plugin cache cleanup failed: ${t}`)}}function dSt(e){return OFe(e,wg)}async function BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!=
+STR "function mp(" count=9 hits=209403046,210183410,219882396,221269077,221737813,222755038,226677386,240329464,249850850
+  @209403046 }from"fs";import{isAbsolute as cc,join as cp,resolve as up}from"path";function mp(e){let t=Me(),n=t.commandProducerDirsDenied;t.commandProducerDirsScannedAt=Date.now(),t.co
+  @210183410 =hn(),pp=1000000000n,VW=9223372036854775807n,WW=-9223372036854775808n;function mp(e=0n,t=0n){let n=e*pp+BigInt(t);if(n>VW||n<WW)throw Error("duration out of range");return(
+  @219882396 t xd(i.indexTemporary,e.index);if(!a.ok)return a;return gi(e,t)}async function mp(e,r,n){let t=await bi(n);if(!t.ok){if(t.error.kind!=="absent")return t;let p=await y(yi(r)
+  @221269077 CORE_IDENT_RE,relevance:0}]}}Hi.exports=pp});var zi=d(function(TT,qi){function mp(e){return{name:"OCaml",aliases:["ml"],keywords:{$pattern:"[a-z_]\\w*!?",keyword:"and as as
+  @221737813 uous prefix '${e}', matches: ${s.join(", ")} `),process.exit(1)}async function mp(e,t){let r=await to(e,"claude logs <id>","Print the background session's recent terminal o
+  @222755038  t}return null}tg();Sa();dg();mh();Qf();qe();lp();Je();ap();mn();dp();function mp(){let e=process.env.CLAUDE_BG_SESSION_PERMISSION_RULES;if(!e||process.env.CLAUDE_CODE_SESS
+  @226677386 ="object"&&typeof t.headers==="object"}clone(){return Nt.clone(this)}}function mp(e){return Object.keys(e).reduce((t,r)=>{let s=e[r];return{...t,[r]:Array.isArray(s)?[...s]
+  @240329464 });Ft.exports=we;we.HighlightJS=we;we.default=we});var Nt=d((pf,Pt)=>{function mp(e){let o="... "+("... ... ...
+STR "async function mp(" count=2 hits=219882390,221737807
+  @219882390 a=await xd(i.indexTemporary,e.index);if(!a.ok)return a;return gi(e,t)}async function mp(e,r,n){let t=await bi(n);if(!t.ok){if(t.error.kind!=="absent")return t;let p=await y(yi(r)
+  @221737807 `Ambiguous prefix '${e}', matches: ${s.join(", ")} `),process.exit(1)}async function mp(e,t){let r=await to(e,"claude logs <id>","Print the background session's recent terminal o
+STR "function ra(" count=20 hits=206935864,208158388,211953164,214636997,223053984,223293738,223741508,225665874,225788707,227423011,228782888,229675296,230262168,230441196,230792308,231047460,231781166,232485362,240275116,249541203
+  @206935864 =Array(e);while(++o<e)r[o]=t(o);return r}var Yn;var Zn=i(()=>{Yn=oa});function ra(e){return e!=null&&typeof e=="object"}var A;var W=i(()=>{A=ra});function sa(e){return A(e)
+  @208158388 fied":return e.error;case"fs":case"linkRefused":return zn(e.error,n)}}function ra(e,n,r){return e.kind==="absent"&&!r?Le(n):Xn(e,n)}function zn(e,n){let r=R(e),t=Ce(r);if(r
+  @211953164 )&&r.some(Vn))return!0;if(typeof r=="object"&&Vn(r))return!0}return!1}function ra(e){let t=0;for(let r in e){if(r==="$ref")return 1/0;if(t++,Fp.has(r))continue;if(typeof e[
+  @214636997 .path.startsWith(t+oE))return"."+oE+nE(mn(),e.path)}return a9(e.path)}function ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),
+  @223053984 oa(gp){return gp.type==="input"}function ia(yp){return yp.description}function ra(Tp){return Tp.type==="image"}function sa(Op){return Op.type==="image"}function la(){return
+  @223293738 positoryRoot:t.repositoryRoot,onDone:r,storageV5:t.storageV5}))}async function ra(e,t){let{SyncOfferCheck:o}=await import("B:/~BUN/root/chunk-k3vcf6f2.js");return ne(e,(r)=
+  @223741508 >ed(f,l):null;return m?(o??[]).find((f)=>d(f)&&m(f.state))?.id:void 0}function ra(e,t,o,n){return o?null:Bs(t==="bash"?`!${e}`:e,n.templates,n.allRepos,n.routines)}function
+  @225665874 TML),e.activeFormattingElements.pushElement(e.openElements.current,t)}function ra(e,t){e._reconstructActiveFormattingElements(),e._insertElement(t,E.HTML),e.activeFormattin
+STR "function JD(" count=7 hits=208536047,211287937,214078889,227702586,229216610,241863691,248955352
+  @208536047 "}function cs(){return c.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS||JD()}function JD(){return Mo("hipaa")}function Br(){return Ou()&&!cs()}var lf=y(()=>{Fo();Ft();oe()});funct
+  @211287937 s=l.length-1;s>=0;s--){let u=l[s];if(u.nodeName!=="#text")o.push(u)}}}function JD(e,o,i){let l=[{node:e,offsetX:o,offsetY:i}];for(let s=l.pop();s!==void 0;s=l.pop()){let u=
+  @214078889 ownInUseMarkerPaths.delete(t),e.ownInUseMarkerHandles.delete(t)}async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}function kSn(e){let t=Fs(),n=
+  @227702586 ar WD=L().fromCallback,Ot=q(),Ju=C("path"),Ku=fe(),VD=xe().pathExists;function JD(e,t,r,n){if(typeof r==="function")n=r,r="utf8";let i=Ju.dirname(e);VD(i,(o,u)=>{if(o)retur
+  @229216610 r<e.issues.length;r++)if(e.issues[r]?.continue!==!0)return!0;return!1}function JD(e,t=0){if(e.aborted===!0)return!0;for(let r=t;r<e.issues.length;r++)if(e.issues[r]?.contin
+  @241863691 {return arguments.length?(u=+m,p):u},p}function QD(e){return bX(Ak,e)}function JD(e){return bX(ZD,e)}var Ak,KD,ZD,Ek,xX,TX=z(()=>{"use strict";vX();Ak=1,KD=2,ZD=3,Ek=4,xX=1
+  @248955352 ,n),jy(i,i.return);break;case 30:break;default:Ju(o,i,n)}t=t.sibling}}function JD(e,t){var n=null;e!==null&&e.memoizedState!==null&&e.memoizedState.cachePool!==null&&(n=e.m
+STR "async function JD(" count=1 hits=214078883
+  @214078883 ,t){e.ownInUseMarkerPaths.delete(t),e.ownInUseMarkerHandles.delete(t)}async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}function kSn(e){let t=Fs(),n=
+STR "dSt(e)" count=4 hits=214509554,214510103,214510179,214510881
+  @214509554 ed to write .orphaned_at: ${e}: ${tr(r.error)}`);return}try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}}async fu
+  @214510103 ait xLn(i)}}catch(t){_(`Plugin cache cleanup failed: ${t}`)}}function dSt(e){return OFe(e,wg)}async function BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!==v
+  @214510179 {return OFe(e,wg)}async function BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!==void 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=await t.delete(_r.plugi
+  @214510881 lPath);return t}async function HUo(e,t,n){if(await JD(e))return;let r=dSt(e),o,s=Ne()&&n!==void 0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.p
+STR "await JD(e)" count=7 hits=214079553,214080697,214081971,214509207,214510154,214510856,214648625
+  @214079553 redirected"}}async function EOe(e,t){let n=Xn(),r=Ne()&&t!==void 0;if(await JD(e)){let l=kSn(e);if(l===void 0)return!1;let c=xf(l,String(process.pid));try{if(!await dIo(l)
+  @214080697 ed to write ${na} marker: ${e}: ${l}`),!1}}async function COe(e,t){if(await JD(e))return!0;let n=xf(e,na),r=xf(n,String(process.pid)),o=Ne()&&t!==void 0,s=o?mp(e,xf(Fs(),"
+  @214081971 mp ${wpt}: ${i}`)}}async function RS(e,t,n){let r=Ne()&&n!==void 0;if(await JD(e)){let i=kSn(e);if(i===void 0)return!1;let a=await vSn(i);if(a!=="ours"){if(a==="redirected
+  @214509207 unction uSt(e,t){UUo(e,t),Xpe(),Rvn(),O0e()}async function K8(e,t){if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}let n=Ne()&&t!==void 0?mp(e,ra(
+  @214510154 : ${t}`)}}function dSt(e){return OFe(e,wg)}async function BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!==void 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=awa
+  @214510856 let r of n)t.add(r.installPath);return t}async function HUo(e,t,n){if(await JD(e))return;let r=dSt(e),o,s=Ne()&&n!==void 0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=a
+  @214648625 n(", ")}); treating as stale`),!1;return!0}async function pme(e,t){if(await JD(e))return;let n=Ne()&&t!==void 0,r=n?mp(e,ra()):null;if(n&&r!==null){await t.delete(_r.plugi
+STR "pluginCache:" count=2 hits=207948340,208211457
+  @207948340 eTree:(e,n)=>({namespace:"marketplaceCache",marketplace:e,relPath:n}),pluginCache:(e,n,a,t)=>({namespace:"pluginCache",marketplace:e,plugin:n,version:a,relPath:t}),cache:(e
+  @208211457 , a key, not a scope: the tree narrows with relPath only"]],memory:[],pluginCache:[],daemon:[],sidecar:[],agentMemory:[],scratch:[],userConfigDir:[],job:[],bridgeSpawn:[]}}
+STR "pluginCache(" count=13 hits=211422557,214080207,214080959,214082841,214509370,214510270,214510976,214582240,214595013,214596865,214628417,214648721,214869415
+  @211422557 |a.length<4||!xe(a)||Yr(a[2]))return null;let[u,l,p,...m]=a;return Le.pluginCache(u,l,p,m)}function uh(r,n){return al(r,n)??ts(r)}function lh(r,n){return Xr(n)?Le.pluginReg
+  @214080207 rectory of markers`),!1}let i=r?mp(e,xf(Fs(),"cache")):null,a=r&&i?_r.pluginCache(i.marketplace,i.plugin,i.version,[na,String(process.pid)]):void 0;dSn(n,s,r&&a?{storageV5:
+  @214080959 f(i==="refused"||i==="junk")return!1;if(o&&s){let a=await t.delete(_r.pluginCache(s.marketplace,s.plugin,s.version,[na,String(process.pid)]));if(!a.ok)return _(`Failed to r
+  @214082841 it Tpt(s,{force:!0})}return r}async function pIo(e,t,n){let r=(l)=>_r.pluginCache(t.marketplace,t.plugin,t.version,[na,l]),o=[],s;do{let l=await e.listEntries({namespace:"p
+  @214509370 mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!
+  @214510270 id 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=await t.delete(_r.pluginCache(r.marketplace,r.plugin,r.version,[wg]));if(!o.ok)_(`Failed to remove .orphaned_at: ${e}: $
+  @214510976  0?mp(e,ra()):null;if(n!==void 0&&s!==null){let i=await n.statMeta(_r.pluginCache(s.marketplace,s.plugin,s.version,[wg]));if(!i.ok){if(i.error.code==="NotFound"){await K8(e
+  @214582240 (),"cache")):null;if(Ne()&&n!==void 0&&s){let i=await n.read([{key:_r.pluginCache(s.marketplace,s.plugin,s.version,[".claude-plugin","plugin.json"]),offset:0,length:nUe}]);
+STR "namespace:\"pluginCache\"" count=15 hits=207948365,208194850,208194948,208195068,208195236,208203022,211422291,211423232,211423350,211423390,214082931,214647158,214659573,214680564,218259353
+  @207948365 "marketplaceCache",marketplace:e,relPath:n}),pluginCache:(e,n,a,t)=>({namespace:"pluginCache",marketplace:e,plugin:n,version:a,relPath:t}),cache:(e,n)=>({namespace:"cache",store:e,id:
+  @208194850 "pluginCache":if(e.marketplace===void 0)return r?{kind:"scope",scope:{namespace:"pluginCache",marketplace:n}}:void 0;if(e.plugin===void 0)return r?{kind:"scope",scope:{namespace:"plug
+  @208194948 etplace:n}}:void 0;if(e.plugin===void 0)return r?{kind:"scope",scope:{namespace:"pluginCache",marketplace:e.marketplace,plugin:n}}:void 0;if(e.version===void 0)return r?{kind:"scope",
+  @208195068 plugin:n}}:void 0;if(e.version===void 0)return r?{kind:"scope",scope:{namespace:"pluginCache",marketplace:e.marketplace,plugin:e.plugin,version:n}}:void 0;return r?{kind:"scope",scope
+  @208195236 d:"scope",scope:{...e,relPath:[...e.relPath??[],n]}}:{kind:"key",key:{namespace:"pluginCache",marketplace:e.marketplace,plugin:e.plugin,version:e.version,relPath:[...e.relPath??[],n]}
+  @208203022 e.marketplace===void 0||e.plugin===void 0||e.version===void 0?void 0:{namespace:"pluginCache",marketplace:e.marketplace,plugin:e.plugin,version:e.version,relPath:[...e.relPath??[],...
+  @211422291 relPath===void 0}function ah(r,n){let a=sl(r,n);return a===null?null:{namespace:"pluginCache",...a}}function oh(r,n){let a=[r.marketplace,r.plugin,r.version];if(n!==qr()||!xe(a)||Yr(r
+  @211423232 e:"pluginAssetCache"}:null}function dh(r,n){if(r===n)return n===qr()?{namespace:"pluginCache"}:null;let a=zr(r,n);if(a===null||a.length>2||!xe(a))return null;let[u,l]=a;return l===voi
+STR "Fo(Fs(),\"cache\")" count=1 hits=214637018
+  @214637018 ))return"."+oE+nE(mn(),e.path)}return a9(e.path)}function ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}async functi
+STR "Fo(e,wg)" count=1 hits=214648789
+  @214648789 r.pluginCache(r.marketplace,r.plugin,r.version,[wg]));return}await rE(Fo(e,wg),{force:!0}).catch(()=>{})}async function yzo(e,{storageV5:t}={}){let n=e?.filter(aUe);if(
+STR "Fo(e,\".orphaned_at\")" count=0 hits=
+K8 bun-header last=212803258 dist=1705923
+ALIAS " as mp}" count=3
+  @222865227 nearK8=false I(d){if(o(),r(),t().providerCache=e(),i(),s(),l(),d==="firstParty")n()} export{I as mp}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Ser
+  @231580106 nearK8=false /_278.js";import{vD as nt,xD as rd}from"B:/~BUN/root/_281.js";import{AD as vm,BD as mp}from"B:/~BUN/root/_283.js";import{AE as cp,uE as bm}from"B:/~BUN/root/_289.js";import{DE as X
+  @236670226 nearK8=false /legal-and-compliance.  // Version: 2.1.247 import{pj as ye,rj as sa,sj as qs,tj as mp}from"B:/~BUN/root/_92.js";import{Cv as Hl,Dv as zo}from"B:/~BUN/root/_189.js";import"B:/~BUN/
+ALIAS " as mp," count=6
+  @212808067 nearK8=false g,Dfb as gUe,Eeb as na,Efb as ONn,Feb as qfe,Ffb as DNn,Geb as ym,Gfb as jFe,Heb as mp,Ieb as bFn,Ifb as _Ue,Jeb as y2,Jfb as $Nn,Keb as SFn,Kfb as W$,Leb as fZ,Lfb as DFn,Meb as X
+  @223198444 nearK8=false m"B:/~BUN/root/_241.js";import"B:/~BUN/root/_242.js";import{eA as Tl,gA as Im,jA as mp,kA as fp,mA as Wf}from"B:/~BUN/root/_243.js";import"B:/~BUN/root/_244.js";import"B:/~BUN/root
+  @230301994 nearK8=false T2 as ou,T5 as $u,TAa as zR,TFa as BE,TOa as iP,TPa as Wt,TQa as $k,TRa as MP,U4 as mp,U6 as FS,U9 as Dx,UAa as yS,UFa as DF,UJa as NF,UMa as XE,UOa as xl,UPa as uP,UQa as Vk,Uja a
+  @231274552 nearK8=false D$,R3 as iV,R4 as _q,R5 as SS,RIa as n1,RMa as fk,Rra as MT,S0 as Xg,S2 as B3,S3 as mp,S4 as j$,S7 as oj,SIa as i1,SMa as cd,Sra as aP,T0 as aO,T3 as fw,T4 as W3,T5 as I6,T7 as i6,
+  @231817906 nearK8=false  as Zi,dmc as Xi,fdc as ea,fhc as Hn,fvc as up,ghc as fs,gmc as Pd,kwc as ke,lvc as mp,mhc as en,mvc as dp,orc as Ms,owc as pe,ptc as sn,toc as vd,ugc as xl,uhc as os,woc as yb,zrc
+  @232048364 nearK8=false s R$e,tda as vMt,tia as Ck,tja as cx,tka as sc,tya as _Ee,u0a as OMe,u3 as Mn,u5 as mp,u8 as Uae,uAa as kpe,uCa as I2e,uDa as Iy,uIa as pme,uKa as fme,uMa as wHe,uRa as vEe,uWa as 
+ALIAS ",mp as " count=3
+  @208899448 nearK8=false ,cX as mkc,XS as nkc,JS as okc,pX as pkc,QS as qkc,tN as rkc,yl as skc,hX as tkc,mp as ukc,OX as vkc,rN as wkc,Sl as xkc,uv as ykc,yp as zkc,cN as Akc,dN as Bkc,fN as Ckc,pN as Dkc
+  @209537359 nearK8=false ,kP as qPb,ip as rPb,xP as sPb,vP as tPb,nc as uPb,EP as vPb,sc as wPb,ic as xPb,mp as yPb,LP as zPb,pp as APb,FP as BPb,dc as CPb,R as DPb,GP as EPb,Rp as FPb,Ep as GPb,Ap as HPb,
+  @221790783 nearK8=false up as zq,Ze as Aq,fp as Bq,Md as Cq,Ld as Dq,Gi as Eq,Jd as Fq,eo as Gq,Ls as Hq,mp as Iq,pp as Jq,Yd as Kq,gp as Lq,hp as Mq,_p as Nq,qi as Oq,no as Pq,zd as Qq,js as Rq,Xd as Sq,
+ALIAS "{mp as " count=2
+  @223197269 nearK8=false B:/~BUN/root/_114.js";import{cn as Sp,dn as qf}from"B:/~BUN/root/_117.js";import{mp as Cp}from"B:/~BUN/root/_132.js";import{np as pr,op as yp}from"B:/~BUN/root/_133.js";import"B:/~
+  @234659046 nearK8=false ttps://code.claude.com/docs/en/legal-and-compliance.  // Version: 2.1.247 import{mp as qe}from"B:/~BUN/root/_132.js";import{op as Qe}from"B:/~BUN/root/_133.js";import{pp as H}from"
+ALIAS " as ra}" count=3
+  @220286201 nearK8=false 0.js";import{Fxd as Ls,nyd as oa}from"B:/~BUN/root/_841.js";import{oyd as Cs,qyd as ra}from"B:/~BUN/root/_842.js";import{syd as Zn,tyd as Is,xyd as Us}from"B:/~BUN/root/_843.js";im
+  @222095347 nearK8=false );Ki();Yi();Gi();import{randomUUID as ta}from"crypto";import{readFile as sa,stat as ra}from"fs/promises";vi();ms();or();wt();Hs();Ns();Ii();Ji();Ms();Qi();Vi();Bi();Is();Wi();Ai();
+  @233632095 nearK8=false  elided\u2026]`,...r].join(` `)}we();Je();ia();hn();import{mkdir as $d,writeFile as ra}from"fs/promises";import xt from"path";Ci();Gt();we();$e();import{lstat as rd,readdir as Gs,s
+ALIAS " as ra," count=21
+  @208402657 nearK8=false 8.js";import{cbd as Jm,ebd as Sk,fbd as Qm}from"B:/~BUN/root/_809.js";import{gbd as ra,kbd as OT}from"B:/~BUN/root/_810.js";import{mbd as xg,nbd as wg,pbd as ZB}from"B:/~BUN/root/_
+  @209319105 nearK8=false  as ji,Yjc as Ke,Zgc as qe,Zjc as Uf,Ztc as Tt,_ec as _c,_tc as Bn,_vc as Yr,aec as ra,buc as Do,cec as vf,cuc as K,dmc as vi,dwc as Ei,ggc as Wi,huc as Dr,iuc as Tu,juc as Ls,kuc 
+  @211417911 nearK8=false 3.js";import{h9c as ca,i9c as nc}from"B:/~BUN/root/_794.js";import{k9c as xt,l9c as ra,n9c as ia,s9c as Zl,u9c as ma,v9c as dc}from"B:/~BUN/root/_795.js";import{H9c as ui,P9c as ta
+  @221688000 nearK8=false La,_jb as di,vjb as on,yjb as Le}from"B:/~BUN/root/_515.js";import{Ilb as na,Jlb as ra,Klb as sl}from"B:/~BUN/root/_521.js";import{dmb as ud}from"B:/~BUN/root/_524.js";import{Hvb a
+  @222749002 nearK8=false  as bp,rfc as kg,rkc as st,snc as Wf,tnc as wn,uhc as At,vhc as na,vnc as Si,whc as ra,wnc as Ea,xhc as td,xwc as xd,yhc as sa,yuc as cn,zcc as zl,zgc as yi,zhc as ia,zuc as Rd}fro
+  @222840928 nearK8=false nction ct(e){return e==="localSettings"||e==="projectSettings"&&!cm()} export{T_ as ra,M_ as sa,R_ as ta,D_ as ua,un as va,Fa as wa,ry as xa,ay as ya,AA as za,TA as Aa,MA as Ba,RA 
+  @224164517 nearK8=false ,Ywc as ma,Zvc as m,Zwc as na,_vc as n,_wc as oa,awc as p,axc as qa,bwc as q,bxc as ra,cwc as r,cxc as sa,dwc as s,dxc as ta,ewc as t,exc as ua,fwc as u,fxc as va,gwc as v,gxc as w
+  @224200167 nearK8=false d as qb,Mrd as qc,Msd as qd,Mtd as qe,Mud as rf,Mvd as rg,Mwd as rh,Nod as q,Npd as ra,Nqd as rb,Nrd as rc,Nsd as rd,Ntd as re,Nud as sf,Nvd as sg,Nwd as sh,Ood as r,Opd as sa,Oqd 
+ALIAS ",ra as " count=15
+  @208211664 nearK8=false bd,qt as obd,ee as pbd,re as qbd,ea as rbd,c as sbd,H as tbd,na as ubd,Xn as vbd,ra as wbd,zn as xbd,ve as ybd,L as zbd,Y as Abd,w as Bbd,k as Cbd,dr as Dbd,ha as Ebd,ya as Fbd,le 
+  @212647781 nearK8=false ,zo as LAb,Gr as MAb,qo as NAb,Ko as OAb,Xo as PAb,Jo as QAb,na as RAb,Wm as SAb,ra as TAb,qm as UAb,$e as VAb,Km as WAb,sa as XAb,Xr as YAb,pa as ZAb,pg as _Ab,hg as $Ab,Pa as aBb
+  @219687966 nearK8=false pfa,Qjo as qfa,c1a as rfa,ezo as sfa,tzo as tfa,VNn as ufa,KNn as vfa,dme as wfa,ra as xfa,QT as yfa,m2 as zfa,SUe as Afa,_2 as Bfa,wUe as Cfa,fwt as Dfa,mwt as Efa,gwt as Ffa,hwt 
+  @223196014 nearK8=false oot/_8.js";import{Aa as Hr,Ba as St,Ca as vd,Oa as Nl,Xa as Hp,Ya as Fp,Za as Up,ra as Op,sa as Pp,ta as Rp,ua as Ip,va as Tp,wa as xp,xa as _i,ya as Gr,za as Cr}from"B:/~BUN/root/
+  @224169224 nearK8=false  as _getConfigWriteGenerationForTesting,Ja as _getCurrentProjectConfigForTesting,ra as _getFreshnessBackendForTesting,va as _getFreshnessWatcherStartedForTesting,Ia as _getGlobalCo
+  @224212692 nearK8=false esampleProactivitySelectorGate,Wb as resetCostState,Wd as resetFdCredentialState,ra as resetInteractionBaseline,pf as resetLoopWakeFires,$b as resetModelStrings,cc as resetModelStr
+  @224238531 nearK8=false ,a as isHostManagedProviderAuth,jb as isMaxSubscriber,Rb as isMaxSubscriberAsync,ra as isOAuthRefreshKnownDead,sa as isOAuthRefreshKnownDeadAsync,tb as isOtelHeadersHelperFromProje
+  @225432328 nearK8=false as DEFAULT_VERTEX_OPUS_KEY,M as antGrants1MContext,K as antUpstreamContextWindow,ra as buildAvailabilityFallbackChain,za as bytesPerTokenForModel,Ia as curatedModelLabel,Z as defau
+ALIAS "{ra as " count=1
+  @224243680 nearK8=false t/_848.js";import"B:/~BUN/root/_849.js";import"B:/~BUN/root/_850.js";va();export{ra as AUTO_MODE_TRUSTED_SOURCES,da as SECURITY_SENSITIVE_SETTING_SOURCES,qa as autoModeConfigSchema
+ALIAS " as JD}" count=1
+  @235777685 nearK8=false mport{qdb as N,rdb as e,sdb as s,tdb as ue}from"B:/~BUN/root/_501.js";import{Chb as JD}from"B:/~BUN/root/_507.js";import{Dkb as py,Ekb as H0}from"B:/~BUN/root/_518.js";import{bmb a
+ALIAS " as JD," count=3
+  @223019930 nearK8=false ();P()}); export{ge as CD,pe as DD,ke as ED,we as FD,Z as GD,ee as HD,ye as ID,G as JD,Le as KD,Qe as LD,Ze as MD,Kt as ND,_t as OD}; .// @bun @bytecode // Claude Code is a Beta pr
+  @230301234 nearK8=false M_ as d_,Maa as $b,Mba as tS,Mca as xT,Mna as Sp,Moa as tk,N4 as tx,N6 as uT,NDa as JD,NKa as Fp,NOa as Vp,NPa as Fk,NRa as CP,NSa as dd,Nla as sO,Nma as nR,Nna as nm,Noa as nk,O2 
+  @232052504 nearK8=false pAe,p$a as lmt,pab as p,qab as qge,s_a as Hge,t_a as eXe,u$a as gm,uab as ls,v$a as JD,vab as lct,w$a as ix,wab as zr,x_a as Nge,xab as Tt,y_a as X9e,yab as jF,zab as hv}from"B:/~B
+ALIAS ",JD as " count=2
+  @208896006 nearK8=false ,YD as Udc,Jj as Vdc,XD as Wdc,Qj as Xdc,Zj as Ydc,jy as Zdc,Yy as _dc,cs as $dc,JD as aec,Br as bec,lf as cec,dY as dec,df as eec,fY as fec,Jy as gec,mY as hec,Zy as iec,Pu as jec
+  @232034724 nearK8=false /root/_282.js";import{CD as x8e,DD as gIt,ED as gxe,FD as ult,HD as eP,ID as Zxe,JD as XX,KD as Bbt,LD as hxe,MD as clt,ND as td,OD as hF}from"B:/~BUN/root/_284.js";import{PD as ZT
+ALIAS "{JD as " count=0
+ALIAS " as dSt}" count=0
+ALIAS " as dSt," count=0
+ALIAS ",dSt as " count=0
+ALIAS "{dSt as " count=0
+ALIAS " as _r}" count=9
+  @211660314 nearK8=false rt{Edd as yt,Ndd as Vt,xdd as Ae}from"B:/~BUN/root/_814.js";import{Ked as Oe,Oed as _r}from"B:/~BUN/root/_816.js";import{ffd as rt,ifd as ci}from"B:/~BUN/root/_819.js";import{vfd a
+  @221844675 nearK8=false ;st();ot();nt();import{rename as mr,unlink as ye}from"fs/promises";import{Socket as _r}from"net";import{StringDecoder as Sr}from"string_decoder";var Bt=[50,100,250,500,1000,2000],V
+  @223025259 nearK8=false ht,T9a as Br,d_a as ei,e_a as Wc}from"B:/~BUN/root/_488.js";import{h_a as xn,k_a as _r}from"B:/~BUN/root/_489.js";import{Aab as Mi,H$a as is,J$a as Jc,Oab as qr,Pab as Kc,gbb as ft
+  @223207291 nearK8=false :/~BUN/root/_610.js";import"B:/~BUN/root/_611.js";import{VYb as ld,WYb as wt,YYb as _r}from"B:/~BUN/root/_612.js";import"B:/~BUN/root/_613.js";import{iZb as li,tZb as mf}from"B:/~B
+  @224842836 nearK8=false UN/root/_824.js";import{fgd as oe}from"B:/~BUN/root/_825.js";import{Hgd as c,Jgd as _r}from"B:/~BUN/root/_827.js";import{Hid as ye,Iid as ur}from"B:/~BUN/root/_830.js";import{Jid a
+  @233839085 nearK8=false js";import"B:/~BUN/root/_237.js";import"B:/~BUN/root/_238.js";import{Fz as Ie,Gz as _r}from"B:/~BUN/root/_239.js";import{Rz as Dt,Sz as Vr}from"B:/~BUN/root/_240.js";import"B:/~BUN
+  @236536278 nearK8=false ";import"B:/~BUN/root/_701.js";import"B:/~BUN/root/_702.js";import{hFc as Lt,lFc as _r}from"B:/~BUN/root/_703.js";import"B:/~BUN/root/_704.js";import"B:/~BUN/root/_705.js";import"B
+  @236580250 nearK8=false /~BUN/root/_849.js";import"B:/~BUN/root/_850.js";br();bo();vr();import{writeFile as _r}from"fs/promises";Or();Yn();bo();ir();nt();cr();sr();Qn();tr();zn();Ct();St();ar();lr();Lt();
+ALIAS " as _r," count=21
+  @208092588 nearK8=false  as pt,Tmd as ae,Umd as cr,Vnd as Te,Wnd as er,Xnd as Qe,Ynd as br,bnd as xe,bxd as _r,cnd as nr,dnd as le,end as dr,fnd as He,gnd as ur,lod as Et,mod as jr,nnd as Be,nod as rt,ond
+  @208273936 nearK8=false UN/root/_841.js";import{oyd as A,qyd as Ke}from"B:/~BUN/root/_842.js";import{syd as _r,tyd as Me,xyd as $t}from"B:/~BUN/root/_843.js";import{Azd as pe,Hyd as ee,Nyd as Q,Oyd as fe,
+  @210567991 nearK8=false rt{nmd as Nn,qmd as hr}from"B:/~BUN/root/_838.js";import{Hnd as En,Ind as gr,bxd as _r,xod as wn}from"B:/~BUN/root/_839.js";import{syd as jn,tyd as oe,xyd as Se}from"B:/~BUN/root/_
+  @212487852 nearK8=false  $d,ZZb as Xt,b0b as O,o0b as Ve}from"B:/~BUN/root/_618.js";import{c5b as $s,d5b as _r,e5b as Bs,g5b as js,h5b as Ge,k5b as Hs}from"B:/~BUN/root/_643.js";import{I_b as ys,J_b as Rc
+  @212851096 nearK8=false s";import{qdd as DOr,rdd as y3e,sdd as $Or}from"B:/~BUN/root/_813.js";import{Edd as _r,Fdd as eio,Hdd as sNn,Mdd as XLn,Ndd as nl,tdd as CNn,xdd as ol,ydd as lHn}from"B:/~BUN/root/
+  @220274646 nearK8=false as ci,CQ as fi,DQ as pi,EQ as gi,FQ as hi,GQ as mi,HQ as Lr,IQ as ss,qQ as oi,rQ as _r,sQ as Yt,tQ as Ht,uQ as ai,vQ as ui,wQ as Cr,xQ as di,yQ as li,zQ as Nr}from"B:/~BUN/root/_40
+  @221596377 nearK8=false /_145.js";import{_t as oe}from"B:/~BUN/root/_169.js";import{Mu as ze,Nu as Rn,Ru as _r,Vu as hr,Xu as wr,Yu as Nt,_u as te,av as xn}from"B:/~BUN/root/_183.js";import{kw as Vr,lw as
+  @221934285 nearK8=false ~BUN/root/_319.js";import{NH as Pi,OH as Ko}from"B:/~BUN/root/_323.js";import{RH as _r,TH as Uo}from"B:/~BUN/root/_324.js";import"B:/~BUN/root/_325.js";import{TU as Yo}from"B:/~BUN
+ALIAS ",_r as " count=17
+  @206892875 nearK8=false ls the CLI to finish the current turn and exit."))}); export{$t as wyc,Jt as xyc,_r as yyc,yr as zyc,Qe as Ayc,ut as Byc,Ct as Cyc,Y as Dyc,pe as Eyc,No as Fyc,ke as Gyc,Go as Hyc,
+  @207022199 nearK8=false d,Rr as dod,Ir as eod,Ee as fod,ut as god,L as hod,oe as iod,De as jod,ct as kod,_r as lod,Ur as mod,Wr as nod,Gr as ood,He as pod,pt as qod,gt as rod,Xr as sod,Li as tod,Ii as uod
+  @207078753 nearK8=false ,Er as yjd,kr as zjd,xr as Ajd,wr as Bjd,Ar as Cjd,vr as Djd,Or as Ejd,Dr as Fjd,_r as Gjd,Ae as Hjd,ve as Ijd,Rr as Jjd,Ut as Kjd,Lr as Ljd,Pr as Mjd,Cr as Njd,Mt as Ojd,Fr as Pjd
+  @207812495 nearK8=false ,Kt as $$c,Zt as aad,Xt as bad,Vt as cad,Jt as dad,Qt as ead,me as fad,$r as gad,_r as had,E as iad,Pr as jad,A as kad,xr as lad,Cr as mad,X as nad,yt as oad,vr as pad,Fr as qad,Lr
+  @208895355 nearK8=false as Jcc,tue as Kcc,jx as Lcc,nue as Mcc,Yx as Ncc,xS as Occ,fue as Pcc,pue as Qcc,_r as Rcc,fp as Scc,gue as Tcc,Os as Ucc,zP as Vcc,gj as Wcc,py as Xcc,gy as Ycc,my as Zcc,Cu as _c
+  @209120365 nearK8=false ,hr as LTb,Rt as MTb,pr as NTb,Ie as OTb,wr as PTb,xr as QTb,vr as RTb,kr as STb,_r as TTb,Pt as UTb,Oe as VTb,U as WTb,Fr as XTb,Kt as YTb,Yt as ZTb,Rr as _Tb,Ir as $Tb,Lr as aUb,
+  @209138889 nearK8=false b,z as p7b,fr as q7b,gr as r7b,mr as s7b,pr as t7b,Ge as u7b,hr as v7b,yr as w7b,_r as x7b,Sr as y7b,lt as z7b,Mr as A7b,br as B7b,Or as C7b,vr as D7b,De as E7b,Le as F7b,pt as G7b
+  @210875224 nearK8=false ,Cr as $8a,xr as a9a,Er as b9a,vr as c9a,Sr as d9a,Pr as e9a,br as f9a,Ve as g9a,_r as h9a,Tr as i9a,Ar as j9a,wr as k9a,kr as l9a,Rr as m9a,en as n9a,rt as o9a,ot as p9a,Wr as q9a
+ALIAS "{_r as " count=0
+ALIAS " as wg}" count=0
+ALIAS " as wg," count=11
+  @208402721 nearK8=false 9.js";import{gbd as ra,kbd as OT}from"B:/~BUN/root/_810.js";import{mbd as xg,nbd as wg,pbd as ZB}from"B:/~BUN/root/_812.js";import{Edd as j,Ndd as Yr,xdd as pv}from"B:/~BUN/root/_8
+  @209495078 nearK8=false }from"fs/promises";import{homedir as bg}from"os";import{dirname as Sg,isAbsolute as wg,join as gn,relative as lu,resolve as Ps,sep as cu}from"path";async function uu(e){let t=gn(e,
+  @212807982 nearK8=false rom"B:/~BUN/root/_501.js";import{Aeb as xun,Afb as MNn,Beb as _Fn,Ceb as Iun,Deb as wg,Dfb as gUe,Eeb as na,Efb as ONn,Feb as qfe,Ffb as DNn,Geb as ym,Gfb as jFe,Heb as mp,Ieb as b
+  @222748132 nearK8=false cd,ybc as Rg}from"B:/~BUN/root/_674.js";import{$jc as Og,Amc as Cd,Bhc as vn,Bic as wg,Bqc as qn,Bsc as la,Buc as ms,Cgc as um,Chc as so,Cqc as ho,Csc as kd,Dcc as bg,Dmc as Ug,Dsc
+  @223677630 nearK8=false 2.js";import{B4c as Ft,E4c as ni,M4c as Xn}from"B:/~BUN/root/_753.js";import{Q4c as wg,R4c as $d,T4c as Eu,W4c as cd}from"B:/~BUN/root/_754.js";import{$4c as Zr,Y4c as mh,a5c as Zs
+  @224200583 nearK8=false d as vh,Rod as u,Rpd as va,Rqd as vb,Rrd as vc,Rsd as vd,Rtd as ve,Rud as wf,Rvd as wg,Rwd as wh,Sod as v,Spd as wa,Sqd as wb,Srd as wc,Ssd as wd,Std as we,Sud as xf,Svd as xg,Swd 
+  @228558953 nearK8=false data,mimeType:n.source.media_type})} export{y as sg,ee as tg,Be as ug,O as vg,Un as wg,Vn as xg,b as yg,Bn as zg,Ye as Ag,u as Bg,Yn as Cg,Qn as Dg,Kn as Eg,Zn as Fg,$n as Gg,tn as
+  @229049287 nearK8=false t/_694.js";import"B:/~BUN/root/_695.js";import{CCc as ti,DCc as Jf,fCc as CT,gCc as wg,jCc as bo,kCc as j$,wCc as Js}from"B:/~BUN/root/_696.js";import"B:/~BUN/root/_697.js";import"
+ALIAS ",wg as " count=3
+  @224211520 nearK8=false ons,hb as latchRefusalFallbackModel,e as mainAgentId,nh as markEffortUnsupported,wg as markFirstTeleportMessageLogged,ph as markMidConvCachePromotionRejected,th as markPerTurnEffor
+  @226832099 nearK8=false ,Ig as LUc,Bg as MUc,Tg as NUc,kg as OUc,Dg as PUc,Pg as QUc,Gg as RUc,bg as SUc,wg as TUc,Mg as UUc,Fg as VUc,Lg as WUc,Og as XUc,Ng as YUc,Ug as ZUc,dm as _Uc}; .// @bun @bytecod
+  @234346324 nearK8=false Mg as Ro,Ng as Eo,Qg as ho,Sg as _o,Tg as ae,sg as ko,tg as Xn,ug as le,vg as Bn,wg as po,xg as fo,yg as bs}from"B:/~BUN/root/_58.js";import{Ama as ao,BRa as ls,Bma as lo,C0 as wn,
+ALIAS "{wg as " count=0
+FN "function mp(" count=9 hits=209403046,210183410,219882396,221269077,221737813,222755038,226677386,240329464,249850850
+  @209403046 function mp(e){let t=Me(),n=t.commandProducerDirsDenied;t.commandProducerDirsScannedAt=Date.now(),t.commandProducerDirsComparable=null;for(let r of new Set(e)){let o;try{let i=cp(r,"installed_plugins.json"),a=lp(i);if(!a
+  @210183410 function mp(e=0n,t=0n){let n=e*pp+BigInt(t);if(n>VW||n<WW)throw Error("duration out of range");return(0,BW.create)($W.DurationSchema,{seconds:n/pp,nanos:Number(n%pp)})}
+  @219882396 function mp(e,r,n){let t=await bi(n);if(!t.ok){if(t.error.kind!=="absent")return t;let p=await y(yi(r));if(!p.ok&&p.error.kind!=="absent")return p;return m(p.ok?"back":"finish")}let i=Qe(t.value),o=i.predecessor;if(o===v
+  @221269077 function mp(e){return{name:"OCaml",aliases:["ml"],keywords:{$pattern:"[a-z_]\\w*!?",keyword:"and as assert asr begin class constraint do done downto else end exception external for fun function functor if in include inhe
+  @221737813 function mp(e,t){let r=await to(e,"claude logs <id>","Print the background session's recent terminal output.",t),n=await new Promise((o)=>{let s=Bs(r,500,(i)=>{if(i.type==="snapshot")s(),o(i.streamTail)},(i)=>{s(),o(i)})
+  @222755038 function mp(){let e=process.env.CLAUDE_BG_SESSION_PERMISSION_RULES;if(!e||process.env.CLAUDE_CODE_SESSION_KIND!=="bg")return;try{let t=JSON.parse(e);return Array.isArray(t.allow)&&Array.isArray(t.deny)?{allow:t.allow,den
+  @226677386 function mp(e){return Object.keys(e).reduce((t,r)=>{let s=e[r];return{...t,[r]:Array.isArray(s)?[...s]:s}},{})}
+  @240329464 function mp(e){let o="... "+("... ... ... ... ... .. ... ... ... ... ... ... ... "+"... ... ... ... ... ... ... ... ... ... ... ... ... ... "),_="... ",n="... "+("... ... ... ... ... ... ... "+"... ... ... ... ... ... ..
+  @249850850 function mp(e,t,n,r=0,o=!1,i=!1,a=0,s="",c=!1,l=!1,u=!1,f="",d="",p="",m=!1,g=!1,v=null,h=null){let b={__FMT__:JSON.stringify(e),__Q__:String(t),__MAX__:String(n),__SCALE__:String(r),__VP__:o?"1":"0",__CROP__:i?"1":"0",_
+FN "async function mp(" count=2 hits=219882390,221737807
+  @219882390 async function mp(e,r,n){let t=await bi(n);if(!t.ok){if(t.error.kind!=="absent")return t;let p=await y(yi(r));if(!p.ok&&p.error.kind!=="absent")return p;return m(p.ok?"back":"finish")}let i=Qe(t.value),o=i.predecessor;if
+  @221737807 async function mp(e,t){let r=await to(e,"claude logs <id>","Print the background session's recent terminal output.",t),n=await new Promise((o)=>{let s=Bs(r,500,(i)=>{if(i.type==="snapshot")s(),o(i.streamTail)},(i)=>{s(),
+FN "function ra(" count=20 hits=206935864,208158388,211953164,214636997,223053984,223293738,223741508,225665874,225788707,227423011,228782888,229675296,230262168,230441196,230792308,231047460,231781166,232485362,240275116,249541203
+  @206935864 function ra(e){return e!=null&&typeof e=="object"}
+  @208158388 function ra(e,n,r){return e.kind==="absent"&&!r?Le(n):Xn(e,n)}
+  @211953164 function ra(e){let t=0;for(let r in e){if(r==="$ref")return 1/0;if(t++,Fp.has(r))continue;if(typeof e[r]=="object")(0,Vp.eachItem)(e[r],(n)=>t+=ra(n));if(t===1/0)return 1/0}return t}
+  @214636997 function ra(){return Fo(Fs(),"cache")}
+  @223053984 function ra(Tp){return Tp.type==="image"}
+  @223293738 function ra(e,t){let{SyncOfferCheck:o}=await import("B:/~BUN/root/chunk-k3vcf6f2.js");return ne(e,(r)=>x(o,{decide:t.decide,onDecided:t.onDecided,onDone:r}))}
+  @223741508 function ra(e,t,o,n){return o?null:Bs(t==="bash"?`!${e}`:e,n.templates,n.allRepos,n.routines)}
+  @225665874 function ra(e,t){e._reconstructActiveFormattingElements(),e._insertElement(t,E.HTML),e.activeFormattingElements.pushElement(e.openElements.current,t)}
+  @225788707 function ra(e){let r=(e.currentRetryAttempt?0:e.retryDelay??100)+(Math.pow(e.retryDelayMultiplier,e.currentRetryAttempt)-1)/2*1000,s=e.totalTimeout-(Date.now()-e.timeOfFirstRequest);return Math.min(r,s,e.maxRetryDelay)}
+  @227423011 function ra(e,n){if(e.length%2!==0)return null;let t=[];for(let r=0;r<e.length;r+=2){let o=n.exec(e[r]);if(o===null)return null;let i=o[1].trim().split(" "),s=o[2];if(/[AMT]/.test(s))t.push({mode:i.at(-1),path:e[r+1],del
+  @228782888 function ra({onDone:i,onAuthSuccess:s,onAccountOnHold:T,startingMessage:P,mode:_="login",expiresIn:g,forceLoginMethod:b,urlOutdent:F=0}
+  @229675296 function ra(e){return e.server!==void 0}
+FN "async function ra(" count=3 hits=223293732,231047454,231781160
+  @223293732 async function ra(e,t){let{SyncOfferCheck:o}=await import("B:/~BUN/root/chunk-k3vcf6f2.js");return ne(e,(r)=>x(o,{decide:t.decide,onDecided:t.onDecided,onDone:r}))}
+  @231047454 async function ra(e,t,s){let n=await yo();if(!n.valid)return{kind:"refused",code:"org_pin",message:n.message};await lo();let o=Io();if(o)return{kind:"refused",code:"unavailable",message:`Error: ${o}`};let i=e.inputPrompt
+  @231781160 async function ra(e,r,o){let a=qe(e),t=$o()&&o!==void 0?o:void 0;if(t===void 0)await Rn(a,{recursive:!0,mode:448});await wn(a,r,{parent:"create"},t)}
+FN "function JD(" count=7 hits=208536047,211287937,214078889,227702586,229216610,241863691,248955352
+  @208536047 function JD(){return Mo("hipaa")}
+  @211287937 function JD(e,o,i){let l=[{node:e,offsetX:o,offsetY:i}];for(let s=l.pop();s!==void 0;s=l.pop()){let u=s.node.yogaNode;if(!u||u.getDisplay()===1)continue;let f=s.offsetX+u.getComputedLeft(),m=s.offsetY+u.getComputedTop();
+  @214078889 function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}
+  @227702586 function JD(e,t,r,n){if(typeof r==="function")n=r,r="utf8";let i=Ju.dirname(e);VD(i,(o,u)=>{if(o)return n(o);if(u)return Ot.writeFile(e,t,r,n);Ku.mkdirs(i,(s)=>{if(s)return n(s);Ot.writeFile(e,t,r,n)})})}
+  @229216610 function JD(e,t=0){if(e.aborted===!0)return!0;for(let r=t;r<e.issues.length;r++)if(e.issues[r]?.continue===!1)return!0;return!1}
+  @241863691 function JD(e){return bX(ZD,e)}
+  @248955352 function JD(e,t){var n=null;e!==null&&e.memoizedState!==null&&e.memoizedState.cachePool!==null&&(n=e.memoizedState.cachePool.pool),e=null,t.memoizedState!==null&&t.memoizedState.cachePool!==null&&(e=t.memoizedState.cache
+FN "async function JD(" count=1 hits=214078883
+  @214078883 async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}
+FN "function dSt(" count=1 hits=214510094
+  @214510094 function dSt(e){return OFe(e,wg)}
+FN "async function dSt(" count=0 hits=
+FN "function QT(" count=2 hits=214637035,238203039
+  @214637035 function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}
+  @238203039 function QT(e,t){return new Ya(e,t)}
+FN "var wg=" count=3 hits=211141525,226943119,238402474
+  @211141525 var wg={readContext:le,use:un,useCallback:function(t,n){return gt().memoizedState=[t,n===void 0?null:n],t},useContext:le,useEffect:bs,useImperativeHandle:function(t,n,r){r=r!==null&&r!==void 0?r.concat([t]):null,Br(41943
+  @226943119 var wg=u(()=>{Ud();mi();ka();ba()});function vg(e={}){let t=Pd(e!==null&&e!==void 0?e:{});if(e.credentialOptions)t.addPolicy(fi({credential:e.credentialOptions.credential,scopes:e.credentialOptions.credentialScopes}));re
+  @238402474 var wg=Be(),Cg=ye();class Me{_aggregator;_unreportedAccumulations=new Map;_reportHistory=new Map;constructor(e,t){this._aggregator=e,t.forEach((r)=>{this._unreportedAccumulations.set(r,[])})}buildMetrics(e,t,r,i){this._s
+FN "var _r=" count=19 hits=206509450,207650625,208252084,210676684,211254193,212018001,220902037,222826306,225715863,226748720,226859276,226922262,227788700,228073083,229017808,234115098,234155532,235072373,237675270
+  @206509450 var _r=32000;var Bn=()=>{};var Op=(e,t)=>e===t||e.length<=_r?void 0:`a text over ${_r} characters`;var Ap=o(()=>{Bn()});var Rp=(e,t)=>e===t?void 0:typeof e==="boolean"?"a wait the engine did not set (whether the prompt w
+  @207650625 var _r=R(()=>{C();Ct=Xc});function Yc(e,t,r){if(u.isString(e))try{return(t||JSON.parse)(e),u.trim(e)}catch(n){if(n.name!=="SyntaxError")throw n}return(r||JSON.stringify)(e)}var He=(e,t)=>e!=null&&u.hasOwnProp(e,t)?e[t]:v
+  @208252084 var _r=65536,ho=4096,X=10,yo=32,wr=94,_o=35,wo;var Er=P(()=>{wo=/^[0-9a-f]+$/});import{lstatSync as xo,readlinkSync as Po,unwatchFile as oe}from"fs";import{readdir as So,readFile as Re,stat as vr}from"fs/promises";import
+  @210676684 var _r=h(function(Gn,jr){var ei=Z(),ri=(e,r,t)=>ei(e,r,">",t);jr.exports=ri});var Ur=h(function(Fn,Xr){var ti=Z(),si=(e,r,t)=>ti(e,r,"<",t);Xr.exports=si});var br=h(function(yn,Hr){var Vr=S(),ii=(e,r,t)=>(e=new Vr(e,t),r
+  @211254193 var _r=re[ei];if(K[_r]&(V|W)){var gt=0,nt=0;for(var wi=ei-1;wi>=0;wi--)if(gt=K[re[wi]],!(gt&h))break;for(var ti=ei+1;ti<re.length;ti++)if(nt=K[re[ti]],!(nt&h))break;if(gt===nt&&(K[_r]===V?gt===D:gt&(D|P)))he(_r,gt)}}if(s
+  @212018001 var _r=M(),Ou=N(),i_={message:({params:e})=>_r.str`must match "${e.ifClause}" schema`,params:({params:e})=>_r._`{failingKeyword: ${e.ifClause}}`},a_={keyword:"if",schemaType:["object","boolean"],trackErrors:!0,error:i_,c
+  @220902037 var _r=d(function(Mg,cr){function lE(e){let t=e.regex,n={className:"number",relevance:0,variants:[{begin:/([+-]+)?[\d]+_[\d_]+/},{begin:e.NUMBER_RE}]},a=e.COMMENT();a.variants=[{begin:/;/,end:/$/},{begin:/#/,end:/$/}];le
+  @222826306 var _r=H("bypass","bypass"),Xu={debug:de,debugFile:de,debugToStderr:de,verbose:de,inputFormat:de,outputFormat:de,includePartialMessages:de,replayUserMessages:de,settingSources:({settingSources:e})=>zy(e)?de:dt("the cloud
+  @225715863 var _r=()=>{};var br=()=>{};var vr=()=>{};var Ar=()=>{};var Er=()=>{};var wr;var Sr=s(()=>{(function(e){e.HTTP_0_9="http/0.9",e.HTTP_1_0="http/1.0",e.TDS_8_0="tds/8.0"})(wr||(wr={}))});var Rr=()=>{};var Tr=()=>{};var Cr=
+  @226748720 var _r=(e)=>(t,r)=>async(n)=>{let{request:s}=n;if(!P.isInstance(s))return t(n);return e.eventStreamPayloadHandler.handle(t,n,r)},fr;var Le=o(()=>{Fe();fr={tags:["EVENT_STREAM","SIGNATURE","HANDLE"],name:"eventStreamHandl
+  @226859276 var _r=c(()=>{ke()});var Ie=(e)=>{let r=O(e,"utf8");return new Uint8Array(r.buffer,r.byteOffset,r.byteLength/Uint8Array.BYTES_PER_ELEMENT)};var Ue=c(()=>{_()});var Br=c(()=>{Ue()});var Tr=(e)=>{if(typeof e==="string")ret
+  @226922262 var _r=u(()=>{Ca();Ip();Sp();Ia=mo,ci=mo});function vd(e){return typeof e[Rp]==="function"}function wp(e){if(vd(e))return e[Rp]();else return e}var Rp;var vp=u(()=>{Rp=Symbol("rawContent")});function kp(){let e=Ed();retu
+FN "_r={" count=10 hits=209475438,216630611,216638156,216646685,216647900,216649059,216650602,216654484,216657091,216662605
+  @209475438 _r={"--since":"string","--after":"string","--until":"string","--before":"string"},Pr={"--oneline":"none","--graph":"none","--decorate":"none","--no-decorate":"none","--date":"string","--relative-date":"none"},kr={"--max-
+  @216630611 _r={};it(u_r,{SELF_HOSTED_RUNNER_TOOLS:()=>wgs,SELF_HOSTED_RUNNER_TOOL_NAMES:()=>Wlt});var wgs;var d_r=w(()=>{Byr();zyr();Wyr();Gyr();Kyr();Jyr();e_r();i_r();c_r();bT();wgs=[Uyr,Hyr,jyr,qyr,s_r,Vyr,Zyr,l_r,Qyr]});var p_r
+  @216638156 _r={};it(k_r,{RemoteTriggerTool:()=>Wgs,buildScheduleSummary:()=>b_r,triggerResponseSchema:()=>__r});function b_r(e,t=new Date){let n=e.enabled??!0,r=[],o=NVn(e.next_run_at);if(o){let s=SEt(o,{now:t}),i=o.toISOString().r
+  @216646685 _r={};it(R_r,{SearchMcpRegistryTool:()=>Jgs});var Xgs,Zgs,Jgs;var A_r=w(()=>{qt();g4e();En();xe();Mt();wt();Yae();clt();Xgs=ae(()=>Rt({keywords:Me(I().min(1).max(64)).min(1).max(8).describe("Keyword phrases describing th
+  @216647900 _r={};it(P_r,{SuggestConnectorsTool:()=>ths});var Qgs,ehs,ths;var x_r=w(()=>{qt();g4e();En();xe();Mt();wt();ln();Yae();flt();Qgs=ae(()=>Rt({uuids:Me(I().min(1).max(64)).min(1).max(32).describe("directoryUuid or server_id
+  @216649059 _r={};it(O_r,{ListConnectorsTool:()=>ohs,applyKeywordFilter:()=>M_r});function I_r(e,t){let n=e.toLowerCase();return t.some((r)=>n.includes(r.toLowerCase()))}function M_r(e,t){if(!t?.length)return e;return e.filter((n)=>
+  @216650602 _r={};it(N_r,{SendUserFileTool:()=>ahs});var shs,ihs,ahs;var F_r=w(()=>{qt();$e();nn();Pt();Zt();ju();En();Lu();Dt();Mt();rs();Bu();ln();d$t();h7();tle();shs=ae(()=>Rt({files:FT((e)=>typeof e==="string"?[e]:e,Me(I()).min
+  @216654484 _r={};it(U_r,{ProposeSkillsTool:()=>uhs});var lhs,chs,uhs;var B_r=w(()=>{qt();nn();Pt();En();$e();Lu();pr();Dt();ln();Mt();lAe();DLt();lhs=ae(()=>pe({proposals:Me(pe({name:I().min(1).describe("kebab-case skill slug"),kin
+  @216657091 _r={};it(X_r,{ProposeGoalTool:()=>ghs});import{randomUUID as dhs}from"crypto";function mhs(e){if(q_r())return;G_r(),D("tengu_goal_proposal_available",{setting:X(e)})}var phs,fhs,ghs;var Z_r=w(()=>{qt();$e();aIt();z_r();b
+  @216662605 _r={};it(Q_r,{PushNotificationTool:()=>bhs});var hhs,yhs,_hs=300000,bhs;var ebr=w(()=>{qt();$e();nn();Pt();Zt();En();Dt();Mt();S5();Lae();hhs=ae(()=>Rt({message:I().min(1).describe("The notification body. Keep it under 2

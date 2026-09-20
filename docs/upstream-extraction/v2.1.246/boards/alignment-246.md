@@ -52,7 +52,7 @@
 8x. **#47 HAVE** — 窄合同：settings-sync raced 文案；无 dirty-tree 隔离。本地同形。  
 8y. **#48 HAVE** — `Ie` completed/total；poll `W.todos()`=`pGn`（TaskCreate pending + TaskUpdate + TodoWrite fallback）。无 padMissing。  
 8z. **#54 HAVE** — abort 边角已锁：query `aborted_tools` 超限仍 yield `max_turns_reached`；runAgent `!aborted` 才 event+yield，always break。勿 invent 第二条 yield。`gold-maxturns-abort.246.txt`。  
-9. **不**开 247 直到 246 GAP 收口或明确跳过。  
+9. **247 已收口**（见 `v2.1.247/`）。不回改 246。不折入 248+。  
 10. **RC 内部（非 changelog，2026-09-08）** — occupancy / elevated_auth / takeover / bounce / torn-pair / auth-revive **HAVE**。auth-revive：`sK`=`tengu_bridge_auth_revive` 默认 true；`Qtt=10`；`$e=ot||!nt&&ye>=Qtt` 仍轮询不拉凭证；`/login` 改 generation 绕帽。
 
 ## 邻版
@@ -61,4 +61,5 @@
 | ---- | ---- |
 | 244 | 无节，不折入 |
 | 245 | glibc/host · 不折入 |
-| 247+ | 未开 |
+| 247 | 已入库，见 `v2.1.247/` · npm 仍 2.7.49 |
+| 248+ | 未开 |

@@ -1,0 +1,5 @@
+# 247 VP
+async function VP(e,t,n,r){let o=Array.isArray(e);if(o){if(e.some((d)=>d.type!=="text"))return{error:"Cannot persist tool results containing non-text content"}}await uD(n,r);let s=Dle(n,t,o),i=o?le(e,null,2):e,a=Ne()&&r!
+
+# 246 AP
+async function AP(e,t,n,r){let o=Array.isArray(e);if(o){if(e.some((d)=>d.type!=="text"))return{error:"Cannot persist tool results containing non-text content"}}await zO(n);let s=ele(n,t,o),i=o?ae(e,null,2):e,a=Be()&&r!==

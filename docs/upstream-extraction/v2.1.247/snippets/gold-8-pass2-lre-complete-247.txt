@@ -1,0 +1,5 @@
+# off=218251306 len=504
+
+async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=await VP(e,`hook-${t}-${n}`,Cv(),o);if(KP(s))return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:e.length,persistedSizeBytes:0,truncatedFallback:!0}),`${e.slice(0,r)}
+
+[Hook ${n} truncated at ${r} chars \u2014 persist-to-disk failed: ${s.error}]`;let i=TF(s);return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:s.originalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}

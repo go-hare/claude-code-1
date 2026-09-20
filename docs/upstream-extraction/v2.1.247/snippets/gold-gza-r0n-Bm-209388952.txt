@@ -1,0 +1,2 @@
+# Bm@209388952
+function Bm(e){return/^\w[\w.@-]*$/.test(e)}

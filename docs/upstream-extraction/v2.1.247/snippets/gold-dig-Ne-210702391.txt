@@ -1,0 +1,3 @@
+# offset=210702391
+
+,Boolean(await g())}function Ne(){let{isClaudeAISubscriber:e}=(X(),T(Q));if(!S()||!e())return;if(a())return;c(),y().mutate((r)=>r.trustedDeviceToken?{...r,trustedDeviceToken:void 0}:r).catch(()=>{})}async function A({tri

@@ -1,0 +1,3 @@
+# offset=211552052 ver=246 hit=1/1 needle="function nW("
+
+80B-\u180F]/gu,"").trim())>0}function Voo(e){return/^[A-Za-z_$][\w$]*$/.test(e)}function nW(e){return RY(e)}function bTe(e){return Sl(Woo(e,(t,n,r,o)=>{if(n===65038||n===65039)return!(r>127||o===8419);if(n===8204||n===8205)return!(r>127&&o>127);if(n>=6155&&n<=6159)return!(r>127);return STe(t,n)}))}function WYt(e){if(e===void 0)return!1;let t=RY(e).replace(/\uFFFD/g,"").replace(/\s+/g," ").trim();return t!==""&&Ec(t)>0}function ZYt(e){let t=nW(on(e,Mh)),n=t.replace(/\s+/g," ").trim();return Hu(JQe(n,t,e.length>Mh),XYt)}function JQe(e,t,n=!1){let r=e.startsWith('"')||e.endsWith('"')||e.endsWith("\u2026");return e===t&&!r&&!n?e:ae(t)}function JYt(e){let t=nW(on(e,Mh)),n=t.re

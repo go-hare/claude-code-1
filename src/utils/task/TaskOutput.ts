@@ -4,7 +4,11 @@ import { logForDebugging } from '../debug.js'
 import { readFileRange, tailFile } from '../fsOperations.js'
 import { getMaxOutputLength } from '../shell/outputLimits.js'
 import { safeJoinLines } from '../stringUtils.js'
-import { DiskTaskOutput, getTaskOutputPath } from './diskOutput.js'
+import {
+  DiskTaskOutput,
+  formatLostOutputNotice,
+  getTaskOutputPath,
+} from './diskOutput.js'
 
 const DEFAULT_MAX_MEMORY = 8 * 1024 * 1024 // 8MB
 const POLL_INTERVAL_MS = 1000
@@ -288,7 +292,10 @@ export class TaskOutput {
       const recent = this.#recentLines.getRecent(5)
       const tail = safeJoinLines(recent, '\n')
       const sizeKB = Math.round(this.#totalBytes / 1024)
-      const notice = `\nOutput truncated (${sizeKB}KB total). Full output saved to: ${this.path}`
+      const notice =
+        this.#disk.failing || this.#disk.lostOutput
+          ? `\n${formatLostOutputNotice(sizeKB, this.path)}`
+          : `\nOutput truncated (${sizeKB}KB total). Full output saved to: ${this.path}`
       return tail ? tail + notice : notice.trimStart()
     }
     return this.#stdoutBuffer

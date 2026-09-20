@@ -1,0 +1,29 @@
+J3c/Wn unique@208236744
+function Wn(e){let t=T(e);if(!t)return null;return ge(v().canonicalRootByRoot,t,lr)}
+
+Wn as J3c unique@208263492
+Lt as H3c,bs as I3c,Wn as J3c,Es as K3c,Rs as L3c,Un as M3c
+
+J3c as h unique@212748442 (_577 fe)
+import{E3c as E,J3c as h,z4c as Z}from"B:/~BUN/root/_752.js"
+
+ge unique@208233426
+function ge(e,t,r){let n=e.get(t);if(n!==void 0)return n;let o=r(t);return e.set(t,o),o}
+
+v unique@208233514
+function v(){return bn.of(N().host)}var k,bn;var $e=P(()=>{wn();Y();Fe();k=Symbol("git-repo-negative-result");bn=new Z(()=>new Ot)})
+
+T unique@208235493
+function T(e){let t=ge(v().rootByPath,e,ar);return t===k?null:t}
+
+Es/I8e unique@208236828
+function Es(e){let t=Ln(e);if(!t)return null;return lr(t)}
+
+lr/Ydu@208236196
+function lr(e){try{let t=L(h(e,".git"),"utf-8").trim();if(!t.startsWith("gitdir:"))return e;let r=t.slice(7).trim();if(F(r,e))return e;if(re(r,e))return e;let n=H(e,r);if(ne(h(n,"commondir"),n))return e;let o=L(h(n,"commondir"),"utf-8").trim();if(F(o,n))return e;if(re(o,n))return e;let i=H(n,o);if(H(W(n))!==h(i,"worktrees"))return e;if(ne(h(n,"gitdir"),n))return e;let a=L(h(n,"gitdir"),"utf-8").trim();if(F(a,e))return e;if(re(a,n,e))return e;if(_e(H(n,a))!==h(_e(e),".git"))return e;if(he(i)!==".git")return A(i);return A(W(i))}catch{return e}}
+
+Ot.canonicalRootByRoot@208232724
+class Ot{rootByPath=new M({max:50});canonicalRootByRoot=new M({max:50});remoteSlugByRoot=new M({max:50});monorepoRuledOutByRoot=new M({max:50});gitDirByCwd=new Map;linkedFromRootByPin=new M({max:64});markersByRoot=new M({max:50});repositoryByCwd=new Map;repoClassByCanonicalRoot=new Map;linguistGeneratedByPath=new Map;wcRootByPath=new M({max:50});gitExecutable=null;clear(){this.rootByPath.clear(),this.canonicalRootByRoot.clear(),this.remoteSlugByRoot.clear(),this.monorepoRuledOutByRoot.clear(),this.gitDirByCwd.clear(),this.linkedFromRootByPin.clear(),this.markersByRoot.clear(),this.repositoryByCwd.clear(),this.repoClassByCanonicalRoot.clear(),this.linguistGeneratedByPath.clear(),this.wcRootByPath.clear(),this.gitExecutable=null}}
+
+h(e)??e @212749652 W / @212749745 fe
+function W(e,o={}){let t=h(e)??e;if(!O(t))return"monorepo_or_unreadable_config";return fe(e,o,t)}function fe(e,o={},t=h(e)??e){let r=t===e?[a(e)]:[a(e),a(t)];if(r.some((s)=>s===A(s).root||w(s)))return"folder_is_root";

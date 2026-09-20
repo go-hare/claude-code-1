@@ -1,0 +1,3 @@
+# 247 function _g @240996070
+
+function _g(e){let t=e.regex,r={className:"variable",variants:[{begin:/\$\d+/},{begin:/\$\{\w+\}/},{begin:t.concat(/[$@]/,e.UNDERSCORE_IDENT_RE)}]},o={endsWithParent:!0,keywords:{$pattern:/[a-z_]{2,}|\/dev\/poll/,literal:["on","off","yes","no","true","false","none","blocked","debug","info","notice","warn","error","crit","select","break","last","permanent","redirect","kqueue","rtsig","epoll","poll","/dev/poll"]},relevance:0,illegal:"=>",contains:[e.HASH_COMMENT_MODE,{className:"string",contains:[e.BACKSLASH_ESCAPE,r],variants:[{begin:/"/,end:/"/},{begin:/'/,end:/'/}]},{begin:"([a-z]+):/",end:"\

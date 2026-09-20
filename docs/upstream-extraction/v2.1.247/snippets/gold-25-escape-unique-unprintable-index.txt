@@ -1,0 +1,57 @@
+# unique 247 unprintable needle="unprintable"
+246=46 247=49 unique247=31
+
+## u0 @198044021 sha=c5f50c364300574e
+ed)
+....}..list_types..
+.....Y.list types.........describe_type..........describe type.......FPj.(unrecognized address)........b. ..  ."......f..read_page_data......t.$.read_db......aW.write_db	.......room_send...........unwatch.....G...resume_replies......D...verify........".read page data.....	...read database.........?.write database..
+.......room send .......co.resume auto-replies......G..(unprintable path).......... ..! .(.u.n.r.e.s.o.l.v.a.b.l.e. .o.u.t._.d.i.r.)...B...._..Cannot destructure property 'opLabel' from null or undefined value..?...m.b.Cannot destructure property 'data' from null or undefined value.........upload_asset.....yE.upload .
+....*..list files..
+....]..save file ..	.....L.(no path)........X..dest....#.[.(no destination).....O<.list_assets.
+...~...read_asset.......,..delete_assetB.....5.Cannot destructure property 'assetId' from null or undefined value.......
+
+## u1 @202155297 sha=5083633c45b2c3da
+...!...preview cannot identify this file (no file identity on this volume).........preview local file .w...1... (read-only render; nothing uploaded; the page's requests are refused except Google Fonts; pop-ups and WebRTC disabled).b....PD.Render a local page file in a headless browser to check it before publishing. Nothing is uploaded...).......preview a local artifact file (read-only).......n.B.(unprintable name)..)...XQ.. locally (read-only; nothing is uploaded).......Y;..The permission check for this room_send failed before its approval could be shown, so nothing was sent. Retry after the underlying failure clears...N...H...Artifact room broadcast fails closed when its permission check cannot complete..........The permission check for this delete failed before the confirmation could be shown, so nothing was deleted. Retry after the underlying failure clears...F...&.!.Artifact delete f
+
+## u2 @206495883 sha=52d5b5891ba46867
+ '<unprintable thrown value>' }
+        try {
+          const n = e?.name
+          if (typeof n === 'string') name = n
+        } catch {}
+        try {
+          const s = e?.stack
+          if (typeof s === 'string') stack = s
+        } catch {}
+        return { __proto__: null, msg, name, stack }
+      })`,e)}return Tn}function ba(e){try{let t=pu()(e);return{msg:typeof t.msg==="string"?t.msg:"<unprintable thrown value>",name:typeof t.name==="string"?t.name:"Error",stack:typeof t.stack==="string"?t.stack:void 0}}catch{return{msg:"<unprintable thrown value>",name:"Error"}}}function Ea(e){if(e==null||typeof e!=="object"&&typeof e!=="function")return String(e);return`[${typeof e}]`}function jg(e){let t=(...r)=>{try{return e(...r)}catch(n){let{msg:s,name:i,stack:c}=ba(n);throw ka(s,i,c)}};return Object.setPrototypeOf(t,null),t}function _g(e){let t=async(...r)=>{try{return await e(...r)}cat
+
+## u3 @206496022 sha=9f272af60fdecfd1
+        try {
+          const s = e?.stack
+          if (typeof s === 'string') stack = s
+        } catch {}
+        return { __proto__: null, msg, name, stack }
+      })`,e)}return Tn}function ba(e){try{let t=pu()(e);return{msg:typeof t.msg==="string"?t.msg:"<unprintable thrown value>",name:typeof t.name==="string"?t.name:"Error",stack:typeof t.stack==="string"?t.stack:void 0}}catch{return{msg:"<unprintable thrown value>",name:"Error"}}}function Ea(e){if(e==null||typeof e!=="object"&&typeof e!=="function")return String(e);return`[${typeof e}]`}function jg(e){let t=(...r)=>{try{return e(...r)}catch(n){let{msg:s,name:i,stack:c}=ba(n);throw ka(s,i,c)}};return Object.setPrototypeOf(t,null),t}function _g(e){let t=async(...r)=>{try{return await e(...r)}catch(n){let{msg:s,name:i,stack:c}=ba(n);throw ka(s,i,c)}};return Object.setPrototypeOf(t,null),t}function ma(e){let t=Error(e);return wa.add(
+
+## u4 @209527258 sha=7a6d283474ddffe7
+e||wd(e.toolName)!==t.toolName||!Xs(t))return null;return t}function Lx(e){if(!e)return[];return e.flatMap((t)=>{switch(t.type){case"addRules":return t.rules;default:return[]}})}function Js(e){if(e===null||typeof e!=="object")return!1;let t=e;return typeof t.toolName==="string"&&(t.ruleContent===void 0||typeof t.ruleContent==="string")}function Ce(e){let t;try{t=Js(e)?B(e):String(xe(e))}catch{t="(unprintable value)"}return t.length>200?`${Sd(t,200)}\u2026`:t}function Qs(e){if(e===null||typeof e!=="object")return{action:"drop",reason:`non-object permission update: ${Ce(e)}`};let{type:t,destination:n}=e;if(typeof n!=="string"||!Lh.has(n))return{action:"drop",reason:`${typeof t==="string"?Ce(t):"permission update"} with out-of-enum destination: ${Ce(n)}`};let r=n;switch(t){case"addRules":case"replaceRules":case"removeRules":{let o=e.behavior;if(typeof o!=="string"||!Object.hasOwn($r,o))retu
+
+## u5 @214705646 sha=7a49b869dbd93abf
+,validationErrors:[`name: "${iG(e.name)}" is not a valid plugin name (must be non-empty and must not contain "@", ":", whitespace, path separators, or invisible/control characters)${o?" \u2014 this plugin is named after its directory; rename the directory":""}`]};return null}function rUn(e){if(e.manifest.version!==void 0&&hFn.test(e.manifest.version))_(`Plugin ${e.name}: manifest version contains unprintable characters; treating as absent`,{level:"warn"}),e.manifest.version=void 0}function Fwt(e){switch(e){case"userSettings":case"flagSettings":case"policySettings":return!0;case"localSettings":return!rZ({onIndeterminate:"tracked"});case"projectSettings":return!1}}function kUe(e,t,n,r,{repoAuthoredContent:o=!1}={}){let s=o?vOe():void 0,i=(a)=>{let l=vFn(a,n);if(l===void 0||l.enabled)return!1;if(s===void 0)return!0;let c=s[l.index];return c!==void 0&&Fwt(c)};return i(`${e}@${t}`)||r!==void 
+
+## u6 @216109039 sha=2e9e334efc6b180f
+"&&typeof s!=="function")try{return le(s)}catch{return`[${typeof s}]`}let i;try{let l=le(t.sanitize(s));if(l!==void 0&&l!=="{}")return l;i=l??`[${typeof s}]`}catch(l){let c=!1;try{let u=l?.message;c=typeof u==="string"&&u.includes("exceeds the maximum")}catch{}return c?`[${typeof s}: array exceeds the ${jU}-element logging cap]`:`[${typeof s}]`}let a=t.toStr(s);return a==="[object Object]"||a==="<unprintable>"?i:a}).join(" ")}let r=(o)=>qd((...s)=>e(o+n(s)));return{__proto__:null,log:r(""),info:r(""),debug:r(""),error:r("[error] "),warn:r("[warn] ")}}function Zar(e){let t=new Map;return yz(async function(r,o){if(e.abortSignal?.aborted)return new Promise(()=>{});let s=e.intakeClone(r),i,a;if(typeof s==="string"){let g=await e.resolveWorkflow(s,ze());if(!g){let y=(await e.getAllWorkflows(ze())).map((b)=>b.name).join(", ");throw Error(`workflow('${s}'): no workflow with that name. Available
+
+## u7 @216413137 sha=2805ebcbd3a916ba
+nt16Array,
+        Int32Array, Uint32Array, Float32Array, Float64Array, BigInt64Array, BigUint64Array,
+        ...(typeof URL !== 'undefined' ? [URL] : []),
+      ].map(C => C.prototype)),
+      Err: Error,
+      stringify: JSON.stringify,
+      parse: JSON.parse,
+      toStr: String,
+      errMsg: _errStr,
+      }
+    })()`,e),n=pee(e).sanitize;function r(l){let c;try{c=t.errMsg(l)}catch{return"<unprintable thrown value>"}return typeof c==="string"?c:"<unprintable thrown value>"}function o(l,c=new WeakMap,u=!0){if(typeof l==="function")return;if(l===null||typeof l!=="object")return l;if(Vpr.isProxy(l))return;let d=c.get(l);if(d!==void 0)return d;if(!Object.hasOwn(l,"then")&&!Object.hasOwn(l,"toJSON")&&!Object.hasOwn(l,"toString")&&!Object.hasOwn(l,"valueOf")&&!Object.hasOwn(l,Symbol.toPrimitive)&&t.exotics.has(Object.getPrototypeOf(l))){if(u)try{Object.preventExtensions(l)}catch{return}

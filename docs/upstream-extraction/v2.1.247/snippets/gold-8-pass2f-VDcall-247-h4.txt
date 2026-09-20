@@ -1,0 +1,3 @@
+# off=216398787 hit=4
+
+ame,input:g}),a?.({type:"progress",toolUseID:d,data:{type:"repl_tool_call",toolName:e.name,toolInput:g,toolUseId:d,phase:"complete",result:O}}),Cee(e.name,O)}catch(y){if(y instanceof TK)throw y;let b=VD(y),S=Cr(y);if(h!==void 0)m(g,void 0);for await(let k of KMe(t,e,d,r.message.id,g,b,S,r.requestId,void 0,void 0,h!==void 0?Date.now()-h:void 0));if(a?.({type:"progress",toolUseID

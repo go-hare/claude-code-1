@@ -1,0 +1,2 @@
+# _requireHost(){ @232275570 end=232275694 len=124
+_requireHost(){if(this._host===null)throw Error("SessionController: used before its screen bound a host");return this._host}

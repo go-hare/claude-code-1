@@ -1,0 +1,4 @@
+# bwd 3 @230570551
+# start=230570251 end=230570751
+
+d_file")try{let{readFileForRemote:f}=await import("B:/~BUN/root/chunk-80t124td.js"),g=await f(n.request.path,n.request.max_bytes,i().toolPermissionContext,n.request.encoding,"headless_stream");pe(n,g)}catch(f){Y(n,ce(f))}else if(n.request.subtype==="get_workspace_diff"){let f=n;It(async()=>{try{let{buildWorkspaceDiffResponse:g}=await import("B:/~BUN/root/chunk-7tk6q947.js");pe(f,await g(e.host,i().toolPermissionContext))}catch(g){Y(f,ce(g))}})}else if(n.request.subtype==="get_plan")try{let{peekP

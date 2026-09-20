@@ -1,0 +1,7 @@
+# pinStorageV5 @204295752
+FromEnv...runEvalMockServer...(.runClaudeInChromeMcpServer...runChromeNativeHost...runComputerUseMcpServer...D...loadFastPathPolicy...\.runDaemonWorker...Q...ensureFastPathSettingsLoaded
+...N..runPtyHost..
+...Q...runBgSpare..
+...c.runPreload.....[.exitWithError...b.restoreGatewayAuthForFastPath...[...BRIDGE_LOGIN_ERROR..
+...bridgeMain...pinStorageV5...\5..seedInstallIDs..	...]1..initSinks...k.initDefaultDebugLog...j.watchGlobalConfigThroughStorage.
+... ...daemonMain...(.logsHandler.....attachHandler...respawnHandler..	...rmHandler...;.stopHandler...e5.handleBgFlag...hasAgentsPositional...startCapturingEarlyInput...*..consumeEarlyInput...startMdmRawRead...R...startKeychainPrefetch......6..enableConfigs...5K.getGlobalConfig...c\g.loadSettingsFromFlag...setInlinePlugins...k..setInlinePluginsNoMcp...b...clearPluginCache ...8...areSideloadFlagsDisa

@@ -1,0 +1,2 @@
+# qfe= @242510078
+ath.abs(r-t)},"absDiff"),Wfe=o(function(t,r,i){return t+gme(r,i)},"addAbsDiff"),qfe=o(function(t,r,i){return t+Math.pow(i-r,2)},"addSquaredDiff"),mit=o(function(t){return Math.sqrt(t)},"sqrt"),git=o(function(t,r,i){return Math.max(t,gme(r,i))},"maxAbsDiff"),Nb=o(function(t,r,i,n,

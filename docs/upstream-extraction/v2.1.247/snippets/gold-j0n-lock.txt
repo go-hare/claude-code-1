@@ -1,0 +1,72 @@
+# j0n/TB/IR/N0n lock — official 2.1.247 peel ONLY. Invent-ban.
+
+Start (already locked, not re-derived):
+  ame@214576324
+    async function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}
+  _0n@214579796 → ame((r)=>KBo(r,e),t)
+  same-module cluster 214568775–214579939 (sme … _0n)
+
+| name | verdict | offset | end | len | bind | gold |
+|------|---------|--------|-----|-----|------|------|
+| TB | LOCKED | 214573412 | 214573477 | 65 | unique XX("installed",Fs()) count=1 + callers ame/N0n | gold-j0n-TB-full.txt |
+| j0n | LOCKED | 214574841 | 214575202 | 361 | unique async function j0n( count=1 + ame return j0n(t,n,e) | gold-j0n-j0n-full.txt |
+| IR | LOCKED | 214577454 | 214577547 | 93 | name collision function IR( count=6; unique function IR(){try{let e=GSt() count=1 + ame let r=IR() count=1 | gold-j0n-IR-full.txt |
+| N0n | LOCKED | 214573520 | 214574046 | 526 | unique async function N0n(e,t) count=1 + ame await N0n(r) | gold-j0n-N0n-full.txt |
+
+## Aliases
+
+TB  same-module as ame/_0n. no import. no export of THIS TB.
+    function TB( count=3: @208743048 no-arg autoUpload; @214573412 THIS; @248864378 React no-arg.
+    TB as mvc @208905352 is the autoUpload TB (go neighbor). TB as ur/fi/XP/W/Ke is _255.js. not this.
+
+j0n same-module. j0n as / as j0n count=0. not in export map @219687673.
+
+IR  export IR as Yea @219687673 (same map as eUe/mHa/sZ/O0n/H0n/yB/gHa).
+    import Yea as Ge @222874759 (with baa as Ft = dPe). Yea as A / Yea as O are other consumers.
+    IR as Et @225449596 is _412.js — not this.
+    other function IR(: parser @210278398, fiber @211124189, sku @227085422, css @241908095, html @249803910.
+
+N0n same-module. N0n as / as N0n count=0. not in export map.
+
+## Bodies (complete, brace-balanced)
+
+function TB(e){return!Ne()||e===void 0?null:XX("installed",Fs())}
+
+async function j0n(e,t,n){let r=await z0n(e,t,(o)=>qBo(o,n),F0n);if(r.loadError!==void 0)_(`Failed to load installed plugins from disk: ${Y(r.loadError)}`,{level:"error"}),f2("load-from-disk",r.loadError,!0);if(r.written!==void 0)qSt(r.written),_(`Saved ${Object.keys(r.written.plugins).length} installed plugins through the storage interface`);return r.result}
+
+function IR(){try{let e=GSt();return e?VSt(e):{version:2,plugins:{}}}catch(e){return q0n(e)}}
+
+async function N0n(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null){let s=await t.write(n,le(e,null,2),{mode:L0n()});if(!s.ok)throw F0n(s.error);qSt(e),_(`Saved ${Object.keys(e.plugins).length} installed plugins through the storage interface`);return}let r=vt(),o=sme();try{r.mkdirSync(Fs());let s=le(e,null,2);u2(o,s),Xn().installedPluginsFile=e,_(`Saved ${Object.keys(e.plugins).length} installed plugins to ${o}`)}catch(s){throw _(`Failed to save installed_plugins.json to ${o}: ${Y(s)}`,{level:"error"}),f2("save",s,!1),s}}
+
+## What the bodies write (no invented V5 key object)
+
+TB: returns null, or XX("installed", Fs()). XX body UNKNOWN (function XX( count=1 is CSS classList @241875397; not this). Fs() body UNKNOWN (name collision). unique sme@214568775: vB(Fs(),"installed_plugins.json") — Fs() is the plugins-dir prefix only.
+
+j0n: z0n(storage, key, qBo(mutator), F0n). on loadError logs Failed to load installed plugins from disk. on written: qSt(written) + storage-interface save log. returns r.result. does not construct a key.
+
+IR: GSt() then VSt(raw) or {version:2,plugins:{}} or q0n(err). GSt unique @214571162: readFileSync(sme(),"utf-8") → sUe, ENOENT→null.
+
+N0n(e,t): if V5 key, t.write(key, le(e,null,2), {mode:L0n()}); else mkdirSync(Fs()) + u2(sme(), json) + Xn().installedPluginsFile=e. ame disk path calls N0n(r) 1-arg (t undefined → disk branch).
+
+## Local 1:1 (names only)
+
+_0n / ame / KBo / TB / j0n / IR / N0n  →  installedPluginsManager
+  removeAllPluginsForMarketplace  ← _0n
+  loadInstalledPluginsFromDisk    ← IR
+  saveInstalledPluginsV2          ← N0n disk branch
+  no local TB / j0n / ame
+
+## Local gap (arity/path facts only)
+
+removeAllPluginsForMarketplace(marketplaceName) 1-arg sync
+  official _0n(e,t) 2-arg async → ame(mutator, storage)
+  missing: storage 2nd; V5 TB/j0n path
+
+loadInstalledPluginsFromDisk() 0-arg  ≡ IR() 0-arg
+  path: local getInstalledPluginsFilePath = join(getPluginsDirectory(), "installed_plugins.json")
+  official sme = vB(Fs(),"installed_plugins.json")
+
+saveInstalledPluginsV2(data) 1-arg sync
+  official N0n(e,t) 2-arg async (state, storage)
+  ame disk call is N0n(r) 1-arg
+  missing: storage 2nd; t.write V5 branch

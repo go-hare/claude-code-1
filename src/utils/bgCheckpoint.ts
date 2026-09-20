@@ -1862,6 +1862,23 @@ export function isMainThreadAdoptedShell(raw: unknown): boolean {
   return (raw as { agentId?: unknown }).agentId === undefined
 }
 
+/** Official nsc `yo(d)&&(d.status==="running"||tA(d))` — owner still live. */
+function isAdoptOwnerAgentLive(owner: unknown): boolean {
+  if (!owner || typeof owner !== 'object') return false
+  const task = owner as {
+    type?: string
+    status?: string
+    keepaliveReasons?: unknown
+  }
+  if (task.type !== 'local_agent') return false
+  if (task.status === 'running') return true
+  return (
+    task.status === 'completed' &&
+    task.keepaliveReasons instanceof Set &&
+    task.keepaliveReasons.size > 0
+  )
+}
+
 /**
  * Official Lvu + k$a portable — rehydrate adopted shells from claim payload.
  * Registers local_bash tasks with createAdoptedShellCommand poll handles.
@@ -1970,6 +1987,7 @@ export async function rehydrateAdoptedShells(
         isBackgrounded: true,
         agentId: es.agentId,
         kind: es.kind === 'monitor' ? ('monitor' as const) : ('bash' as const),
+        isAdopted: true,
       }
 
       // registerTask expects TaskState; portable cast is intentional.
@@ -1981,9 +1999,10 @@ export async function rehydrateAdoptedShells(
         setState,
       )
 
-      // Official Lvu: on result, mark terminal + clear shellCommand.
+      // Official nsc: result → update + ADt + Bl. isAdopted skips the
+      // `[exited with code ${r??"unknown"}]` footer (247 ADt).
       void shellCommand.result.then(
-        (result: { code?: number; interrupted?: boolean }) => {
+        async (result: { code?: number; interrupted?: boolean }) => {
           const status = result.interrupted ? 'killed' : 'completed'
           updateTaskState(es.taskId, setState, task => {
             if (
@@ -2005,6 +2024,38 @@ export async function rehydrateAdoptedShells(
               endTime: Date.now(),
             } as typeof task
           })
+
+          let ownerLive = false
+          if (es.agentId !== undefined) {
+            setAppState(prev => {
+              ownerLive = isAdoptOwnerAgentLive(prev.tasks[es.agentId!])
+              return prev
+            })
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { enqueueShellNotification } =
+            require('../tasks/LocalShellTask/LocalShellTask.js') as typeof import('../tasks/LocalShellTask/LocalShellTask.js')
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { asAgentId } =
+            require('../types/ids.js') as typeof import('../types/ids.js')
+          await enqueueShellNotification(
+            es.taskId,
+            description,
+            status,
+            result.code,
+            setState,
+            es.toolUseId,
+            es.kind === 'monitor' ? 'monitor' : 'bash',
+            ownerLive && es.agentId !== undefined
+              ? asAgentId(es.agentId)
+              : undefined,
+          )
+          // Official Bl(n)
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { evictTaskOutput } =
+            require('./task/diskOutput.js') as typeof import('./task/diskOutput.js')
+          void evictTaskOutput(es.taskId)
         },
       )
 

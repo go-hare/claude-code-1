@@ -1,0 +1,65 @@
+# session.host constructor chain — official 2.1.247 UNIQUE bodies
+# SEA C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+# Same _839.js module as Tm as xod / Li as tod / te as Hnd.
+# Invent-ban: this is the host factory. Do not invent another.
+
+## class Zt — host object UNIQUE (this module) @206985409 len=700
+# collide class Zt{} codegen @211912208; class Zt{rl;height...} prompt @227672146
+# collide function Zt( many; only `new Zt({backgroundHousekeeping` count=1
+
+class Zt{backgroundHousekeeping;launchOptions;settingsSource;extensionsConfig;modelStringsCache;diagnostics;telemetryHandles;credentialSlots;mcpProcessWiring;requestLatches;accountCreditLatches;proactivity;constructor(e){this.backgroundHousekeeping=e.backgroundHousekeeping,this.launchOptions=e.launchOptions,this.settingsSource=e.settingsSource,this.extensionsConfig=e.extensionsConfig,this.modelStringsCache=e.modelStringsCache,this.diagnostics=e.diagnostics,this.telemetryHandles=e.telemetryHandles,this.credentialSlots=e.credentialSlots,this.mcpProcessWiring=e.mcpProcessWiring,this.requestLatches=e.requestLatches,this.accountCreditLatches=e.accountCreditLatches,this.proactivity=e.proactivity}}
+
+## function Xi() — host factory UNIQUE @206986123 len=312
+# collide function Xi(){...5000} skills-wait timeout @222712814
+# collide function Xi(e){ git/permission-mode (not this)
+# host:Xi() count=1 @206986768 (es only)
+
+function Xi(){return new Zt({backgroundHousekeeping:new Yt,launchOptions:new jt,settingsSource:new qt,extensionsConfig:new Wt,modelStringsCache:new Gt,diagnostics:new Nt,telemetryHandles:new Kt,credentialSlots:new Vt,mcpProcessWiring:new Jt,requestLatches:new zt,accountCreditLatches:new $t,proactivity:new Xt})}
+
+## function Li — root session ctor UNIQUE @206969731 len=90
+# Li({host: count=1 @206986764 (es only)
+# Li({ elsewhere = daemon/pagination/settings COLLIDE
+# export Li as tod @207022280; import tod as dt @228961746 (vn reuse)
+
+function Li(e){return Ri({kind:"root",host:e.host,id:e.id,parentId:e.parentId},e.project)}
+
+## function Ri — session object UNIQUE @206969821 len=2937
+# host field: fork shares e.root.host, else e.host. withProject forks keep host.
+
+function Ri(e,t){let o=D(t.originalCwd),r=D(t.projectRoot),s=D(t.cwd),a=b(),l=e.kind==="fork"?e.root.observers:new it,d=e.kind==="fork"?e.root.autonomousLoopPreamble:new Dt,g=e.kind==="fork"?e.root.precompute:new wt,c={get originalCwd(){return o},get projectRoot(){return r},get cwd(){return s}},v={host:e.kind==="fork"?e.root.host:e.host,get id(){return e.kind==="fork"?e.root.id:e.id},get parentId(){return e.kind==="fork"?e.root.parentId:e.parentId},get root(){return e.kind==="fork"?e.root:v},project:c,observers:l,autonomousLoopPreamble:d,btwHistory:e.kind==="fork"?e.root.btwHistory:new Ht,ccrRecap:e.kind==="fork"?e.root.ccrRecap:new It,conversationLatches:e.kind==="fork"?e.root.conversationLatches:new st,costLedger:e.kind==="fork"?e.root.costLedger:new ft,fableConsentSlots:e.kind==="fork"?e.root.fableConsentSlots:new ht,hookRegistry:e.kind==="fork"?e.root.hookRegistry:new mt,identity:e.kind==="fork"?e.root.identity:new Lt,invokedSkills:e.kind==="fork"?e.root.invokedSkills:new St,mcpSessionWiring:e.kind==="fork"?e.root.mcpSessionWiring:new vt,modelSelection:e.kind==="fork"?e.root.modelSelection:new bt,promptAssembly:e.kind==="fork"?e.root.promptAssembly:new yt,promptSuggestion:e.kind==="fork"?e.root.promptSuggestion:new Ot,pendingHint:e.kind==="fork"?e.root.pendingHint:new Bt,pluginsSync:e.kind==="fork"?e.root.pluginsSync:new Ft,precompute:g,requestJournal:e.kind==="fork"?e.root.requestJournal:new Ct,sessionCron:e.kind==="fork"?e.root.sessionCron:new kt,sessionFlags:e.kind==="fork"?e.root.sessionFlags:new xt,sessionRefsGate:e.kind==="fork"?e.root.sessionRefsGate:new Et,sessionScratch:e.kind==="fork"?e.root.sessionScratch:new At,surfaceCapabilities:e.kind==="fork"?e.root.surfaceCapabilities:new Pt,toolProgressThrottle:e.kind==="fork"?e.root.toolProgressThrottle:new _t,turnBudget:e.kind==="fork"?e.root.turnBudget:new Tt,userPresence:e.kind==="fork"?e.root.userPresence:new Mt,workflowUsageConsent:e.kind==="fork"?e.root.workflowUsageConsent:new Rt,writePermissionStash:e.kind==="fork"?e.root.writePermissionStash:new Ut,subscribe(u){let p=a.subscribe(u);if(e.kind!=="fork")return p;let h=e.root,S=h.id,C=h.parentId,P=h.subscribe(()=>{if(h.id===S&&h.parentId===C)return;S=h.id,C=h.parentId,u()});return()=>{p(),P()}},setCwd(u){v.update({project:{cwd:u}})},withProject(u){return Ri({kind:"fork",root:v.root},{originalCwd:u.originalCwd??o,projectRoot:u.projectRoot??r,cwd:u.cwd??s})},update(u){let p=!1;if(u.id!==void 0||"parentId"in u){if(e.kind==="fork")throw Error("A withProject fork cannot re-identify the session \u2014 update the root session instead");if(u.id!==void 0&&u.id!==e.id)e.id=u.id,p=!0;if("parentId"in u&&u.parentId!==e.parentId)e.parentId=u.parentId,p=!0}let h=u.project;if(h){if(h.originalCwd!==void 0){let S=D(h.originalCwd);if(S!==o)o=S,p=!0}if(h.projectRoot!==void 0){let S=D(h.projectRoot);if(S!==r)r=S,p=!0}if(h.cwd!==void 0){let S=D(h.cwd);if(S!==s)s=S,p=!0}}if(p)a.emit()}};return v}
+
+## function es() — bootstrap session UNIQUE @206986612 len=226
+# collide function es(){ localSettings errors @208306564
+
+function es(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof Zi==="function"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}
+
+## uk = Tm = n ; k fallback
+# function Tm(){return n()} UNIQUE @206986838
+# function n(){return re()?.session??k} UNIQUE @206986863
+# function ts(e){return e.of(k.host)} UNIQUE
+# function Mm(e){re=e} UNIQUE this-module @206986995 (collide function Mm( elsewhere)
+# var k,re=()=>{return},...; var Dd=i(()=>{...;k=es();...}) @207021007
+# k=es() count=1 @207021117
+
+function Tm(){return n()}
+function n(){return re()?.session??k}
+function ts(e){return e.of(k.host)}
+function f(){let e=re();return e?.session?void 0:e}
+function Mm(e){re=e}
+var k,re=()=>{return},ss,ls,Ld=60000,us,Od=1e4;
+var Dd=i(()=>{tn();an();Qo();E();rt();le();Ii();Fi();ot();Yi();k=es();ss=new _e(()=>b());ls=new _e(()=>b());us=new te(()=>b())});
+
+## vn — second SESSION (not host) ctor @228968311
+# tod as dt = Li; xod as ft = Tm/uk
+# dt({host:ft().host count=1 — REUSES uk().host, new id/project
+
+function vn(e,t,n){let s=[],r=qt(),u=dt({host:ft().host,id:ut(e),project:{originalCwd:t,projectRoot:t,cwd:t}}),...;return{...,session:u,...}}
+
+## 246 twins (minifier names)
+# function Xi(){return new Zt({backgroundHousekeeping... count=1 @205057780
+# host:Xi() count=1 @205058425
+# function es(){let e="";if(typeof process<"u" count=1 @205058269
+# function Li(e){return Ri({kind:"root",host:e.host count=1 @205041388
+# k=es() present
+# Tm name is Am() in 246: function Am(){return n()}
+# Not a 247-new factory.

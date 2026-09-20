@@ -1,0 +1,46 @@
+TCt@215257791
+
+async function TCt(e,t){let n=t?.cwd??ze(),r=t?.currentBranchOnly===!0,o=si(n);if(!o)return J("teleport_git_bundle_upload","empty_repo"),{success:!1,error:"Not in a git repository"};let s=t?.hardenForDeviceSessions===!0,
+
+
+
+Hu-count@TCt=5
+
+Hu[0]@215262838
+await Hu(o,["for-each-ref","--format=%(refname)","refs/seed/"],{hardened:i,layout:h,...i&&{signal:f}});if(i&&f?.aborted)return m();if(v.code!==0)_(`[gitBundle] could not list refs/seed/ (${v.code}), so private refs a kil
+
+Hu[1]@215263481
+await Hu(o,["rev-parse","--verify","--quiet","HEAD"],{hardened:i,layout:h,...i&&{signal:f}})).code===0,R=await Hu(o,["for-each-ref","--count=1","refs/heads/","refs/tags/"],{hardened:i,layout:h,...i&&{signal:f}});if(R.cod
+
+Hu[2]@215263586
+await Hu(o,["for-each-ref","--count=1","refs/heads/","refs/tags/"],{hardened:i,layout:h,...i&&{signal:f}});if(R.code===0&&R.stdout.trim()===""&&!C)return D("tengu_ccr_bundle_upload",{...a,outcome:de("empty_repo"),current
+
+Hu[3]@215271539
+await Hu(e,["config","-z","--list"],{hardened:!0,layout:t,signal:n});if(r.code!==0)return!0;return lYn(r.stdout)}function lYn(e){return e.split("\x00").some((t)=>{let n=t.indexOf(`
+`),r=n===-1?t:t.slice(0,n),o=n===-1?"tr
+
+Hu[4]@215271983
+await Hu(e,["version"],{hardened:!0,layout:t,signal:n}),o=r.code===0?Y4n(r.stdout):null;if(o===null)return!1;let{major:s,minor:i,patch:a}=o;if(s!==2)return s>2;if(i>=45)return!0;let l=kXo.get(i);return l!==void 0&&a>=l}f
+
+
+
+bHe-count@TCt=4
+
+bHe[0]@215263301
+eturn hCt();for(let O of E){let H=await bHe(o,["-d",O],{hardened:i,layout:h,...i&&{signal:f}});if(i&&f?.aborted)return m();if(H.code!==0)_(`[gitBundle] could not sweep a stale seed ref: ${H.stderr.sli
+
+bHe[1]@215267399
+!await JS(h,u))return hCt();let O=await bHe(o,[c.stash,P.commit],{hardened:i,layout:h,...i&&{signal:f}});if(O.code!==0)return f?.aborted?m():TXo(O.stderr,a)}let L=null,F=i?"":H4n("ccr-seed",".bundle")
+
+bHe[2]@215271468
+,!h||await JS(h,u))for(let O of u)await bHe(o,["-d",O],{hardened:i,layout:h})}}async function wXo(e,t,n){let r=await Hu(e,["config","-z","--list"],{hardened:!0,layout:t,signal:n});if(r.code!==0)return
+
+bHe[3]@215272211
+get(i);return l!==void 0&&a>=l}function bHe(e,t,n){return Hu(e,["update-ref","--no-deref",...t],n)}function hCt(){let e=fj();return _(`[gitBundle] ${e.error}`),D("tengu_ccr_bundle_upload",{hardened:!0
+
+
+
+finally-count@TCt=1
+
+finally[0]@215271233
+}finally{if(F!==""){try{await gCt(F)}catch{_(`[gitBundle] Could not delete ${F} (non-fatal)`)}await gCt(`${F}.lock`).catch(()=>{}),await gCt(`${F}.relabelled`).catch(()=>{})}if(await L?.dispose(),!h||await JS(h,u))for(let O of u)await bHe(o,["-d",O],{hardened:i,layout:h})}}async function wXo(e,t,n){let r=await Hu(e,["config","-z","--list"],{hardened:!0,layout:t,signal:n});if(r.code!==0)return!0;return lYn(r.stdout)}f

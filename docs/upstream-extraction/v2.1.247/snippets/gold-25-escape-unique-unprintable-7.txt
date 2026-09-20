@@ -1,0 +1,13 @@
+# offset=216413137 tag=unprintable
+
+nt16Array,
+        Int32Array, Uint32Array, Float32Array, Float64Array, BigInt64Array, BigUint64Array,
+        ...(typeof URL !== 'undefined' ? [URL] : []),
+      ].map(C => C.prototype)),
+      Err: Error,
+      stringify: JSON.stringify,
+      parse: JSON.parse,
+      toStr: String,
+      errMsg: _errStr,
+      }
+    })()`,e),n=pee(e).sanitize;function r(l){let c;try{c=t.errMsg(l)}catch{return"<unprintable thrown value>"}return typeof c==="string"?c:"<unprintable thrown value>"}function o(l,c=new WeakMap,u=!0){if(typeof l==="function")return;if(l===null||typeof l!=="object")return l;if(Vpr.isProxy(l))return;let d=c.get(l);if(d!==void 0)return d;if(!Object.hasOwn(l,"then")&&!Object.hasOwn(l,"toJSON")&&!Object.hasOwn(l,"toString")&&!Object.hasOwn(l,"valueOf")&&!Object.hasOwn(l,Symbol.toPrimitive)&&t.exotics.has(Object.getPrototypeOf(l))){if(u)try{Object.preventExtensions(l)}catch{return}

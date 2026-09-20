@@ -1,0 +1,1 @@
+_=Object.freeze(["-c","core.hooksPath=/dev/null","-c","core.fsmonitor="]),Gt=["G

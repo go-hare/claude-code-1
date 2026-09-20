@@ -1,0 +1,24 @@
+Bc @_845 R / Pzd @206469431
+function Bc( not unique (10). Lock TCt Pzd as Bc.
+
+_845 @206469367
+function C(t,n){let e=t.indexOf(n);return e===-1?t:t.slice(0,e)}
+function R(t){return C(t,`
+`)}
+
+export R as Pzd, C as Ozd, H as Wzd (bp)
+
+TCt import @212858642
+import{Pzd as Bc,...,Wzd as bp,...}from"B:/~BUN/root/_845.js"
+
+U4n @215248200
+unlisted:Bc(s.stderr.trim())||`exit ${s.code}`
+
+TCt admin @215262163
+bp($l(Bc(T.detail)),yCt)
+
+TCt temp-ref @215272850
+bp($l(Bc(e.trim())),yCt)
+
+$I stays t?bp($l(e),200):e.slice(0,200) — not Bc.
+Bc is first-line wash (up to \n), not clip/sanitize.

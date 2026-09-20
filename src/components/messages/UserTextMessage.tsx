@@ -151,7 +151,7 @@ export function UserTextMessage({
       const { UserCrossSessionMessage } =
         require('./UserCrossSessionMessage.js') as typeof import('./UserCrossSessionMessage.js');
       /* eslint-enable @typescript-eslint/no-require-imports */
-      return <UserCrossSessionMessage addMargin={addMargin} param={param} />;
+      return <UserCrossSessionMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} />;
     }
   }
 

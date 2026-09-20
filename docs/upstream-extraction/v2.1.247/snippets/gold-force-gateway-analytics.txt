@@ -1,0 +1,7 @@
+# 247 offset=196993524 needle="forceLoginMethod"
+
+disableWorkflows... ...disableArtifact...p.enableArtifact...=.b.workflowKeywordTriggerEnabled...respondToBashCommands...autoCompactWindow...+..cleanupPeriodDays...forceLoginMethod...0..keybindingFlavor...[..^(?:session|cse)_[A-Za-z0-9_]+$...=...local..	...x..internal...	...O...intranet...3.'..lan... ..corp...home...
+...home.arpa...localdomain...L...private...I...ts.net... . .pnpm-lock.yaml...$A.pnpm	...Z(..yarn.lock...G.yarn...C&..bun.lock	.../..bun.lockb...TG}.package-lock.json...npm-shrinkwrap.json.	...deno.lock...g.deno...poetry.lock...poetry...uv.lock...Pipfile.lock...pipenv..._~;.requirements.txt
+...D...Cargo.lock...
+..cargo...#...go.sum.....up.composer.lock...$F.composer...E.Gemfile.lock...bundler...f[.gradle.lockfile..._..gradle...packages.lock.json...ub..nuget...QZ.Podfile.lock	...cocoapods...Package.resolved...9..swift...xg..mix.lock...>..pubspec.lock
+...~.conan.lock...0...other...8...r.(?:registry|index-url)\s*=\s*["']?(https?:\/\/[^\s"'`]+)T...\[\[tool\.(?:poetry\.source|uv\.index)\]\][^[]*?url\s*=\s*["'](https?:\/\/[^\s"'`]+)3...npmRegistryServer\s*:\s*["']?(https?:\/\/[^\s"'`]+).A...(?:index|registry)\s*=\s*["']?(?:sparse\+)?(https?:\/\/[^\s"'`]+)...I...\b(?:VAULT_ADDR|SOPS_[A-Z_]*|op read|aws secretsmanager|gcloud secrets)\b...R...\bcom\.android\.(?:application|library|test|dynamic-feature|tools\.build:gradle)\b..{...#...\b(?:enable_language\s*\(\s*CUDA|LANGUAGES\b[^)\n]{0,200}\bCUDA\b|find_package\s*\(\s*CUDA|cuda_add_(?:e

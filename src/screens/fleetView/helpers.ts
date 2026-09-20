@@ -10,6 +10,7 @@ import { join } from 'path'
 import type { SessionEntry } from '../../cli/bg/engine.js'
 import figures from 'figures'
 import { formatDuration } from '../../utils/format.js'
+import { formatHostDeadAttachError } from '../../daemon/hostDeath.js'
 
 // ---------------------------------------------------------------------------
 // Status bands
@@ -1829,6 +1830,9 @@ export function repoGroupLabel(session: SessionEntry): string {
  */
 export function formatAttachError(msg: string | undefined): string {
   if (!msg) return "Couldn't attach to that session"
+  // densable 2.1.247 ah: EHOSTDEAD:… is not "Couldn't attach — …"
+  const hostDead = formatHostDeadAttachError(msg)
+  if (hostDead !== undefined) return hostDead
   if (
     /ENOJOB|not found|restarting|estarting|still starting|socket missing|ENOTCONN|ENOCONN/i.test(
       msg,

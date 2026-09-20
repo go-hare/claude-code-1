@@ -1,0 +1,108 @@
+# gold-1-call-ye-E-pass6 247
+
+## hCa as hits=4
+- #0 @232045761 a as FSt,h1 as zce,h3 as sHe,h5 as W0e,h7 as mbt,h9 as bpe,hAa as Jde,hCa as tP,hFa as Sw,hGa as _7e,hHa as aae,hMa as yme,hTa as Gye,hWa as PK,he
+- #1 @233978447 05.js";import"B:/~BUN/root/_206.js";import{SBa as f,bCa as c,eCa as _,hCa as u,jCa as F}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";im
+- #2 @237011345 /root/_357.js";import"B:/~BUN/root/_396.js";import{bCa as U,eCa as we,hCa as Z,jCa as Me,q0a as Be}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/
+- #3 @237069810 "B:/~BUN/root/_301.js";import{H0a as Ot,HMa as Nt,J0a as _o,WMa as Mo,hCa as zt,jCa as Qo}from"B:/~BUN/root/_448.js";import{B9a as Ye,C9a as No}fr
+
+##  as hCa hits=1
+- #0 @219701276 ,Sgr as bCa,wgr as cCa,fwc as dCa,kgr as eCa,Ffs as fCa,Ufs as gCa,aLt as hCa,Ewc as iCa,Tgr as jCa,Pwc as kCa,xwc as lCa,Iwc as mCa,Mwc as nCa,Owc
+
+## Ps as Ht hits=1
+- #0 @237069251 .claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root
+
+##  as Ps} hits=10
+- #0 @211418325 rt{Hgd as jn,Jgd as Qu}from"B:/~BUN/root/_827.js";import{Pgd as gt,Vgd as Ps}from"B:/~BUN/root/_828.js";import{oid as cs,sid as hl}from"B:/~BUN/roo
+- #1 @223159712  as Er,QB as Bs}from"B:/~BUN/root/_253.js";import{UE as sr,VE as ar,_E as Ps}from"B:/~BUN/root/_295.js";import{bF as tr,cF as rr,hF as _s}from"B:/~
+- #2 @223524518 rt{y5c as vr,z5c as Fa}from"B:/~BUN/root/_760.js";import{ofd as Fo,pfd as Ps}from"B:/~BUN/root/_820.js";import{Afd as pe,Bfd as Y,Cfd as Nt,Ifd as 
+- #3 @225460181 /~BUN/root/_538.js";import{Hob as _e,Job as ko,Pob as Ds,wob as Te,zob as Ps}from"B:/~BUN/root/_541.js";import{Ypb as We,fqb as lo,kqb as Ts}from"B
+- #4 @227780098 N/root/_777.js";import{x7c as Us}from"B:/~BUN/root/_780.js";import{A7c as Ps}from"B:/~BUN/root/_783.js";import{C7c as $r}from"B:/~BUN/root/_785.js"
+- #5 @230161706 ort{XCc as pe,YCc as Ds}from"B:/~BUN/root/_697.js";import{ZCc as X,_Cc as Ps}from"B:/~BUN/root/_698.js";import{DHc as it,EHc as Rs}from"B:/~BUN/roo
+- #6 @230208071 rt{hlb as Tn,jlb as Tl}from"B:/~BUN/root/_519.js";import{Hlb as rr,Klb as Ps}from"B:/~BUN/root/_521.js";import{bmb as hi,dmb as dl,fmb as bi,gmb as
+- #7 @233722639 rt{ffd as lt,ifd as Pn}from"B:/~BUN/root/_819.js";import{ofd as oe,pfd as Ps}from"B:/~BUN/root/_820.js";import{Hid as G,Iid as $n}from"B:/~BUN/root
+- #8 @235007829 N/root/_772.js";import{j7c as hs}from"B:/~BUN/root/_773.js";import{k7c as Ps}from"B:/~BUN/root/_774.js";import"B:/~BUN/root/_775.js";import{m7c as 
+- #9 @235295683 :/~BUN/root/_758.js";import"B:/~BUN/root/_759.js";import{y5c as Sr,z5c as Ps}from"B:/~BUN/root/_760.js";import"B:/~BUN/root/_761.js";import"B:/~BUN
+
+## export{Ps hits=0
+
+## function hCa hits=0
+
+## isSendFeedbackSessionEnabled hits=0
+
+## Ufs hits=1
+- #0 @216529291 ]{1,255}$/});function Ffs(){return zdt("feedbackDrafts")[0]??"notify"}function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns
+
+## feedbackDrafts: hits=17
+- #0 @199047116 ithheld from feedback submit: contains_3p_transcript_markers..1...F}..feedbackDrafts: post-submit draft delete failed: ...".......tengu_feedback_draft_dele
+- #1 @201795812 te twice although the document is unchanged. Try again later..\...a...feedbackDrafts: draft listing kept offering cursors past the page cap; treating it as
+- #2 @201795912 kept offering cursors past the page cap; treating it as failed&...%...feedbackDrafts: draft listing failed: .......f..feedback draft listing failed: .....G
+- #3 @201796304 ndefined value...{}8.getProjectDir...........getProjectsDir..$.......feedbackDrafts: draft write failed: '...J...feedbackDrafts: eviction sweep failed: ..
+- #4 @201796348 ..getProjectsDir..$.......feedbackDrafts: draft write failed: '...J...feedbackDrafts: eviction sweep failed: ......SJ.skipTranscriptCheck.....;F..evicted..
+- #5 @208027739  survey appears when eligible. 0.05 is a reasonable starting point."),feedbackDrafts:m(["notify","quiet","off"]).optional().describe('Model-drafted feedbac
+- #6 @216520911 key)});if(n.status==="done")return t;if(n.status==="capped")return _("feedbackDrafts: draft listing kept offering cursors past the page cap; treating it as
+- #7 @216521057 ing it as failed",{level:"error"}),null;if(hy(iLt(n.error)))return _(`feedbackDrafts: draft listing failed: ${BKe(n.error)}`,{level:"error"}),null;throw ne
+- #8 @216523637 ;try{s=await n.write(ygr(e.draft_id),r,{mode:384})}catch(i){return _(`feedbackDrafts: draft write failed: ${i instanceof Error?i.name:"unknown"}`,{level:"e
+- #9 @216523784 level:"error"}),{success:!1,reason:"write_failed"}}if(!s.ok)return _(`feedbackDrafts: draft write failed: ${BKe(s.error)}`,{level:"error"}),{success:!1,rea
+
+## callLegacyFeedbackDialog hits=2
+- #0 @192234450 1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851callcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN
+- #1 @237096598 ~BUN/root/_849.js";import"B:/~BUN/root/_850.js";export{c as call,b as callLegacyFeedbackDialog,a as renderFeedbackComponent};
+.// @bun @bytecode
+// Claude Code is a
+
+## renderFeedbackComponent hits=2
+- #0 @192234474 f1be4a04C000008500ec165a1f1be4a04C00000851callcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/ro
+- #1 @237096628 BUN/root/_850.js";export{c as call,b as callLegacyFeedbackDialog,a as renderFeedbackComponent};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's
+
+## isSidechain===!0 hits=5
+- #0 @207836759 of s){let c=cs(l.timestamp);if(a.isSidechain===void 0)a.isSidechain=l.isSidechain===!0;if(a.createdAt===void 0&&c!==void 0)a.createdAt=c;if(a.cwd===void 0){
+- #1 @207837183  u==="string"&&u)a.cwd=u}}return r}function No(e,t){let s=e.data;if(s.isSidechain===!0)return null;let o=Q(s.firstPromptLocked===!0?s.firstPrompt:s.commandF
+- #2 @221614360 e===null)return[];let n=e;if(n.type!=="user"&&n.type!=="assistant"||n.isSidechain===!0||n.isMeta===!0)return[];let i=n.message?.content;if(typeof i==="strin
+- #3 @222031499 ontinue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e
+- #4 @232017250 ontinue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,
+
+## isSidechain!==!0 hits=0
+
+## !.isSidechain hits=0
+
+## filter ye-ish hits=0
+
+## Es=4194304 hits=2
+- #0 @217318069 }var Oxr="/api/frame/db/agent",yBt,ww,GE,sf=1000,ISe,gH,A0=262144,d4,DEs=4194304,kBt=16384,Dxr=1000,Hm=50,xSe=1048576,$Es,LEs,$xr,Lxr,Nxr,jEs,zEs,Fxr,
+- #1 @222030618 "}}var se=new Set(["transcript"]),te=new Set(["subagentTranscripts"]),Es=4194304,vs=2097152,V=8388608,Bs=2097152;function xs(s){return E(s,se,te).leng
+
+## Es-neighbors @222030618
+kind:"post"}}var se=new Set(["transcript"]),te=new Set(["subagentTranscripts"]),Es=4194304,vs=2097152,V=8388608,Bs=2097152;function xs(s){return E(s,se,te).length}function Ct(){let s=Ps();switch(s.kind){case"post":case"share":return null;case"disabled":return s.reason;case"bundle
+
+## export{kb hits=0
+
+## kb as xSa already hits=1
+- #0 @219710851  qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as
+
+## p8 as wSa hits=1
+- #0 @219710841 pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as 
+
+## _158.js hits=14
+- #0 @180205102 ot/_150.jsB:/~BUN/root/_151.jsB:/~BUN/root/_152.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_165.jsB:/~BUN/ro
+- #1 @180379522 ot/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/ro
+- #2 @182527185 ot/_152.jsB:/~BUN/root/_153.jsB:/~BUN/root/_154.jsB:/~BUN/root/_155.jsB:/~BUN/root/_158.jsB:/~BUN/root/_160.jsB:/~BUN/root/_163.jsB:/~BUN/root/_164.jsB:/~BUN/ro
+- #3 @192216521 1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.jsB:/~BUN/ro
+- #4 @192234517 allcallLegacyFeedbackDialogrenderFeedbackComponentB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/ro
+- #5 @192661833 5a1f1be4a04C000008500ec165a1f1be4a04C00000851callnB:/~BUN/root/_157.jsB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_160.jsB:/~BUN/root/_193.jsB:/~BUN/ro
+- #6 @232030401 t{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}from"B:/
+- #7 @233177695 .js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/
+- #8 @233914797 .js";import"B:/~BUN/root/_154.js";import"B:/~BUN/root/_155.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_163.js";import"B:/
+- #9 @237069274 al-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw as ot,
+
+## _158-Ps-Qs @237069251
+ion: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_

@@ -1,0 +1,3 @@
+# 210427400-210427800
+
+ initialize${n}. Restart to retry.`);throw Te().sandboxDisabledThisSession=!0,new Km(`Sandbox is enabled but failed to initialize${n}. Sandboxing is disabled for the rest of this session; restart to retry.`)}await fN(),pN(),VZ(),FZ()}}function r5(e){if(e instanceof Error&&/Windows sandbox argv is|CreateProcessW limit/i.test(e.message))return La("sandbox_exec","windows_argv_too_long"),new rN("Comma

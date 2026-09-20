@@ -1,0 +1,3 @@
+# offset=218298995 ver=247 hit=3/6 ratio=1.000 needle="await lre("
+
+ockingError?"blocking":"success",hook:W};return}if(he.status===0){xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:"success"});let Ce=await lre(he.stdout.trim(),ge,"stdout",{storageV5:b});yield{message:Qn({type:"hook_success",hookName:y,toolUseID:r,hookEvent:h,content:Ce,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,command:Be,durationMs:Ve}),outcome:"success",hook:W};return}if(he.status===2&&cFs({hookEvent:h,stdout:he.stdout,stderr:he.stderr,pluginId:oe})){xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:"error"}),yield{message:Qn({type:"hook_non_blockin

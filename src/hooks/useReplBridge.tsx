@@ -21,6 +21,8 @@ import {
   REMOTE_CONTROL_NOT_STARTED_HERE,
 } from '../bridge/bridgeStatusUtil.js';
 import type { LocalBridgeSessionHolder } from '../bridge/initReplBridge.js';
+import { REPL_WORKSPACE_DIFF_COMPUTE_BUDGET } from '../bridge/initReplBridge.js';
+import { getReplDiffHost } from '../utils/replDiffTab.js';
 import {
   clearBridgeSessionMeta,
   getPersistedBridgeSession,
@@ -984,6 +986,9 @@ export function useReplBridge(
           persistSuppressedRef.current = leftoverEt || leftoverDt || (leftoverGt && leftoverPn);
           const leftoverMo = leftoverGt && leftoverPn;
           const rawHandle = await initReplBridge({
+            host: getReplDiffHost(),
+            workspaceDiffComputeBudget: REPL_WORKSPACE_DIFF_COMPUTE_BUDGET,
+            getToolPermissionContext: () => store.getState().toolPermissionContext,
             outboundOnly,
             reattachSessionId: leftoverPn ? undefined : lastBridgeSessionIdRef.current,
             reattachOrFail: leftoverPn

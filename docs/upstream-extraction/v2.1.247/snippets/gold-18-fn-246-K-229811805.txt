@@ -1,0 +1,3 @@
+# ver=246 name=K async=false start=229811805 end=229812013 len=208 sha=33493f85674b6a2e needle="background session"
+
+function K(e){if(e===0)return"";return`Automatic replies to ${e===1?"Artifact comments":`comments on ${e} Artifacts`} continue in the background session. You'll see a summary of the replies when you return.`}

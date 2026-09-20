@@ -1,0 +1,3 @@
+# 230276024
+
+function Ji(e,t){if((e.source==="directory"||e.source==="file")&&!Ll(e.path)){let n=t??xn(),o=un(n);return{...e,path:Dl(o??n,e.path)}}return e}

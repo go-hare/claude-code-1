@@ -1,0 +1,3 @@
+# offset=222240719
+
+function nt(e){let t=R(J),i=R(Re);if(t.length===0&&i.length===0)return{tips:[],trustedCount:0};let r=Pe(Q(t,"label")),a=t.find((s)=>!!s.override.tipsFile),l=a?.source,u=Ae(l==="policySettings"&&Le()?void 0:a?.override.tipsFile);for(let{source:s,override:o}of i)if(o.tipsFile||o.label!==void 0)n(`spinnerTipsOverride.tipsFile/label in ${s} are ignored; set them in user or managed settings`,{level:"warn"});let f=u?(await Ce.of(e).read(u)).entries:[],c=new Set,m=[],T=(s,o,p,g,ee)=>

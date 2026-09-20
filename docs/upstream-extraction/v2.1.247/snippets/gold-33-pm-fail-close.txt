@@ -1,0 +1,18 @@
+# 247 J$ / pm policy-unreadable fail-close
+
+pm(){return H("policySettings")===null&&_m().length>0||Bt().length>0&&!fr()}
+if(pm()){
+  let f=Bt()[0]??_m()[0]
+  if(f){
+    h=f.message.includes("could not be read")
+    return {valid:false, message:
+`Unable to read managed policy settings.
+This machine may require organization login enforcement, but the policy file failed to load.
+Contact your administrator.
+
+Detail: ${f.file?`${f.file}: ${f.message}`:f.message}`}
+  }
+}
+
+unix_socket still valid:true (logs unix_socket_unreadable_policy)
+Bt/_m/fr bodies not locked as error collectors — admin file/mdm "could not be read" only; do not treat HKCU/host as sufficient

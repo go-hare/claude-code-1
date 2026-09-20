@@ -1,0 +1,3 @@
+# 246 function Ane() start=209159503 end=209159601 len=98 sha=a7f049207fe1acde needle="runtimeAllowWriteDirectories"
+
+function Ane(e,t){let{runtimeAllowWriteDirectories:n}=Ce();if(n.get(t)===e)return;n.set(t,e),gu()}

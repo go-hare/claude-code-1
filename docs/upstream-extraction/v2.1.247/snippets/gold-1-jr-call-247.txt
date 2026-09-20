@@ -1,0 +1,17 @@
+# leftover-locked 247 /feedback call = jr (Ns)
+# host export @237096583
+# export{c as call,b as callLegacyFeedbackDialog,a as renderFeedbackComponent}
+# c=jr=Ns  b=en=Ms  a=Yo=Ls
+# zt = hCa = aLt   Ht = Ps from _158.js (body not peeled this pass)
+
+function Yo(l,n,c,d="",b={},p){let x=Gt();if(x.kind==="disabled")return l(x.reason),null;let K=Jt()??void 0;return e(Mt,{abortSignal:n,messages:c,initialDescription:d,onDone:l,backgroundTasks:b,mode:x.kind,readFileState:p,surveyFeedbackSource:K})}
+function ut(l,n,c){return Yo(l,n.abortController.signal,n.messages,c,{...n.taskRegistry.all()},n.readFileState)}
+async function en(l,n,c){let d=c?.trim()==="public"?"":c||"";return ut(l,n,d)}
+function Xt(Gr){let _t=q(10),{onDone:se,context:M}=Gr,[Vo,Hr]=u(),qo;if(_t[0]!==M.messages)qo=()=>[...M.messages],_t[0]=M.messages,_t[1]=qo;else qo=_t[1];let[jt]=u(qo),Zo=ce(!1);if(Vo!==void 0){return Vo}let lt;if(_t[2]!==M||_t[3]!==se)lt=()=>{if(Zo.current){return}let Jr=ut(se,M,"");Zo.current=!0,Hr(Jr)},_t[2]=M,_t[3]=se,_t[4]=lt;else lt=_t[4];let Ko;if(_t[5]!==M.abortController.signal||_t[6]!==jt||_t[7]!==se||_t[8]!==lt)Ko=e(ct,{messages:jt,onDone:se,abortSignal:M.abortController.signal,onWriteNew:lt}),_t[5]=M.abortController.signal,_t[6]=jt,_t[7]=se,_t[8]=lt,_t[9]=Ko;else Ko=_t[9];return Ko}
+async function jr(l,n,c){if(zt()&&!c?.trim()&&!Ht())return e(Xt,{onDone:l,context:n});return en(l,n,c)}
+export{Yo as Ls,en as Ms,jr as Ns};
+
+# jr opens sr (ct/Rs) ONLY when aLt() && no args && !Ht()
+# else always old Feedback (en → Yo → Mt)
+# /bug leftover export is callLegacyFeedbackDialog = en, not jr
+# official HHs aliases:["share"] — do not land (share stays local leftover)

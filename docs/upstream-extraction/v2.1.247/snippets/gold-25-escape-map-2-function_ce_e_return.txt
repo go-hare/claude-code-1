@@ -1,0 +1,7 @@
+# 247 @210986813
+
+(e,{bigint:!0})}catch(r){let n=a(r);return E(n)==="absent"?{state:"absent"}:{state:"read-failed",code:n}}if(t.isSymbolicLink())return{state:"read-failed",code:"ELOOP"};return{state:"present",version:`${t.dev}:${t.ino}:${t.size}:${t.mtimeNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")});
+export{X as X7b,ce as Y7b,G as Z7b,Q as _7b};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejec

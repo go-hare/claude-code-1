@@ -1,0 +1,9 @@
+# off=230254079 js=true window="Background agent \"${O(e.description)}\" from the previous session could not be automatically restarte"
+
+d agent(s) to the bg auto-resume path`),o(f)}function wu(e){je(e,void 0,`Background agent "${O(e.description)}" had no completion record after the previous Claude Code process exited, and was automatically restarted from its saved transcript. It is running in the background again; its result will arrive as a separate task notification.`)}function Au(e,t){let n=t.get(e.agentId),o=e.isWebFetchLaunch||n?.type==="local_agent"&&n.webFetchSavedFiles!==void 0;je(o?{...e,isWebFetchLaunch:!0}:e,"completed",`Background agent "${O(e.description)}" had already completed before the previous Claude Code process exited \u2014 only its completion notification was lost, so it was not restarted and no further task notification will arrive. ${o?"Send it a message with SendMessage to get its report.":"Read its output file (and check its worktree, if any) for the result."}`)}function vu(e,t){je(e,"stopped",`Background agent "${O(e.description)}" from the previous session could not be automatically restarted: ${O(t)}. Its transcript may still be resumable by sending it a message with SendMessage${e.isWebFetchLaunch?", which is the only way to get its report.":"; check its worktree/output for partial work before assuming the task landed."}`)}function je(e,t,n){let o=qt(e),r=o?`
+<${Gt}>${O(o)}</${Gt}>`:"",i=t?`
+<${re}>${t}</${re}>`:"";be({value:`<${Y}>
+<${ne}>${O(e.agentId)}</${ne}>${r}${i}
+<${ue}>${n}</${ue}>
+</${Y}>`,agentId:he(),mode:"task-notification",skipAttachments:!0,priority:"next",shouldQuery:!1})}function qs(e,t){let n=t.map((d)=>`<${ne}>${O(d.agentId)}</${ne}>`).join(`
+`),o=t.map((d)=>`"${O(d.description)}" (${O(d.agentId)})`).join(", "),r=t.filter((d)=>d.isWebFetchLaunch).map((d)=>O(d.agentId)),i=r.length===t.length,s=r.length===1?`${r[0]} fetched web content and has`:`${r.join(",

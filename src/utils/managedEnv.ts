@@ -58,7 +58,16 @@ function withoutSSHTunnelVars(
     CLAUDE_CODE_OAUTH_TOKEN: _5,
     ...rest
   } = env
-  return rest
+  // densable's scrub set also covers every CLAUDE_CODE_ARTIFACT* key: artifact
+  // hosting is wired up by the local launcher, so a remote's settings.env must
+  // not redirect it. Upstream ORs in one further predicate we have not
+  // identified; the prefix half is unambiguous, so only it is ported.
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(rest)) {
+    if (key.toUpperCase().startsWith('CLAUDE_CODE_ARTIFACT')) continue
+    out[key] = value
+  }
+  return out
 }
 
 /**
@@ -171,6 +180,8 @@ let ccdSpawnEnvKeys: Set<string> | null | undefined
  * plus managed-settings env (Y6u), not live settings-file env on process.env.
  */
 let frozenStartupEnv: Readonly<Record<string, string>> | undefined
+/** densable `_612` `appliedGlobalConfigEnv` / `Tn` / `QYb` */
+let appliedGlobalConfigEnv: Record<string, string> | undefined
 
 /**
  * densable VQr — capture and freeze process.env on first call.
@@ -188,6 +199,14 @@ export function getFrozenStartupEnv(): Readonly<Record<string, string>> {
 /** Test helper densable Qmy/q_s — clear VQr freeze so tests can re-capture. */
 export function clearFrozenStartupEnvForTests(): void {
   frozenStartupEnv = undefined
+  appliedGlobalConfigEnv = undefined
+}
+
+/** densable `rt` / `QYb` / `Tn` — latch written by applySafeConfigEnvironmentVariables. */
+export function getAppliedGlobalConfigEnv():
+  | Record<string, string>
+  | undefined {
+  return appliedGlobalConfigEnv
 }
 
 /**
@@ -458,10 +477,12 @@ export function applySafeConfigEnvironmentVariables(): void {
   // Global config (~/.claude.json) is user-controlled. In CCD mode,
   // filterSettingsEnv strips keys that were in the spawn env snapshot so
   // the desktop host's operational vars (OTEL, etc.) are not overridden.
-  Object.assign(
-    process.env,
-    filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),
+  // densable Tn latch: appliedGlobalConfigEnv = filterSettingsEnv(L().env)
+  appliedGlobalConfigEnv = filterSettingsEnv(
+    getGlobalConfig().env,
+    'globalConfig',
   )
+  Object.assign(process.env, appliedGlobalConfigEnv)
 
   // Apply ALL env vars from trusted setting sources, policySettings last.
   // Gate on isSettingSourceEnabled so SDK settingSources: [] (isolation mode)
@@ -529,10 +550,11 @@ export function applyConfigEnvironmentVariables(): void {
   // densable pz/Put — ensure VQr freeze even if safe-path was skipped.
   getFrozenStartupEnv()
 
-  Object.assign(
-    process.env,
-    filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),
+  appliedGlobalConfigEnv = filterSettingsEnv(
+    getGlobalConfig().env,
+    'globalConfig',
   )
+  Object.assign(process.env, appliedGlobalConfigEnv)
 
   Object.assign(
     process.env,

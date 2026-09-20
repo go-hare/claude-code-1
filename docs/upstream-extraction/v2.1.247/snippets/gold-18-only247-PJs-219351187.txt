@@ -1,0 +1,4 @@
+# 247-only name=PJs start=219351187 len=805 sha=b04a8f50195c8c4f needle="Exit code "
+
+async function PJs(e,t,n){let{filePath:r,newContent:o}=e,s=On(r),i=Vi(s),a=vt(),l,c,u;try{let d=await a.readFileBytes(s),p=d.subarray(0,4096);c=Dro(p),l=d.toString(c),u=$ro(p.toString("utf8"))}catch(d){if(Et(d))return{data:{stdout:"",stderr:`sed: ${r}: No such file or directory
+Exit code 1`,interrupted:!1}};throw d}if(n)await YU(t.getFileHistoryState,t.applyFileHistoryOp,s,n.uuid);return await GR(s,async()=>{Uy(s,i);let d=t.readFileState.get(s),p=await Wk(s),f;try{f=await YB(s,o,c,u)}catch(g){throw Mm(s),g}let m=CI(d)&&(Oje(d,l)||p<=d.timestamp);if(t.readFileState.set(s,{content:tE(o),timestamp:f,offset:void 0,limit:void 0,...!m&&{contentNotInModelContext:!0}}),c==="utf8"&&u!=="CRLF")hJ(s,o);else Mm(s)}),XU(s,l,o),t.applyFileHistoryOp({kind:"touch"}),{data:{stdout:"",stderr:"",interrupted:!1}}}

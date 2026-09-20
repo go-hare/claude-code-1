@@ -1,0 +1,1 @@
+async function nn(e,t,i,n){let r=await e(["diff-tree","-r","-z","--no-renames",t,i]),a=r.code===0?ze(r.stdout):null;if(a===null)return null;let o=a.filter(({path:u,status:l})=>l!=="D"&&(!le(u)||be(u)||n(u))),d=new Map(o.map(({path:u,status:l})=>[u,l]));return U(o.map(({path:u})=>u)).sort().map((u)=>({path:u,why:!le(u)?"forged":be(u)?"alias":d.get(u)==="A"?"added":"changed"}))}

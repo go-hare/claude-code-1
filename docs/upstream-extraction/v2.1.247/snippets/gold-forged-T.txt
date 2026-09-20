@@ -1,0 +1,1 @@
+function T(e,n){if(!re(n))return!1;let t=b(),r=t==="macos"||t==="windows",i=(a)=>r?a.normalize("NFC").toLowerCase():a,o=Tt(i(e),i(n)),s=o===".."||o.startsWith(`..${F}`)||o.startsWith("../");return o===""||!s&&!re(o)}

@@ -1,0 +1,3 @@
+# 247 _g( @216451648
+
+gent has no report yet \u2014 it is still running, or it stopped before reporting. Its transcript is raw fetched page content and is not returned.]",ips,Rfr;var Afr=w(()=>{A$t();Vj();Iu();zi();qt();En();a$t();xe();Mt();eK();br();VB();vr();su();Tfr();_g();ti();uU();gye();I1();ips=ae(()=>Rt({task_id:I().describe("The task ID to get output from"),block:_p(Qe().default(!0)).describe("Whether to wait for completion"),timeout:Te().min(0).max(600000).default(30000).describe("Max wait time in ms")}));Rfr=Gt({name:Xw,searchHint:"read output/logs from a background task",maxResultSizeChars:1e5,shouldDefe

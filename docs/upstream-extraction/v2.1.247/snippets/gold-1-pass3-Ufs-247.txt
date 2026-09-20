@@ -1,0 +1,3 @@
+# 247 Ufs @216529291 sha=d18191a530989b34
+
+function Ufs(){if(V.DISABLE_FEEDBACK_COMMAND||V.DISABLE_BUG_COMMAND)return!1;if(Ns())return!1;if(vgr())return!1;if(c7())return!1;if(!hs("allow_product_feedback"))return!1;if(Vr()!=="firstParty")return!1;let e=V.CLAUDE_CODE_SEND_FEEDBACK;if(e===!1)return!1;if(e===!0)return we("tengu_juniper_relay",!1);return we("tengu_juniper_relay",!1)}

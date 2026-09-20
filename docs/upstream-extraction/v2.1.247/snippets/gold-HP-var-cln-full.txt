@@ -1,0 +1,3 @@
+# LOCKED var cln @213647317
+# unique aln=new fn(()=>new iln) count=1
+var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln})

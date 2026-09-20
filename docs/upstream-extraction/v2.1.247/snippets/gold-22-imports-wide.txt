@@ -1,0 +1,5 @@
+# offset=233412103 idx=0/1 needle="export{Yo as Onboarding}"
+
+"column",children:[e(Ye,{}),o(r,{flexDirection:"column",marginTop:1,children:[q?.component,D.pending&&e(r,{padding:1,children:o(t,{dimColor:!0,children:["Press ",D.keyName," again to exit"]})})]})]})}export{Yo as Onboarding};
+.// @bun @bytecode
+// Cl

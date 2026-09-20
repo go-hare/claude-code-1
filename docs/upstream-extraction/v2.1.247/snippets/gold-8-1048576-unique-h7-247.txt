@@ -1,0 +1,8 @@
+# offset=221734530
+
+urn}if(a.rescued)await Et("cli_bg_dispatch","rescued");else await Ue("cli_bg_dispatch");process.stdout.write(Gi(a.short,a.idle?sr:void 0,a.name)+`
+`)}async function Md(e=process.stdin){if(e.isTTY)return"";let t="",r=!1,n=(s)=>{if(r)return;if(t.length+s.length>jr){t+=s.slice(0,jr-t.length),r=!0;return}t+=s};try{e.setEncoding("utf8"),e.on("data",n)}catch(s){if(e.off("data",n),!es(s))throw s;return y(`readBgStdin: stdin unreadable: ${N(s)}`,{level:"error"}),await St("tengu_bg_stdin_unreadable",{error_code:Vi(s)??se("none")}),process.stderr.write(`warning: stdin is unreadable (${gt(s)}), proceeding without piped input
+`),""}let o=await ts(e,3000);if(e.off("data",n),o)return"";if(r)process.stderr.write(`warning: piped stdin exceeds ${jr} bytes, truncated
+`);return t.replace(/\r?\n$/,"")}var jr=1048576;function Ld(e,t){let r=Lt(e);if(r>=0){let s=e.slice(r+1).join(" ");return[...e.slice(0,r),"--",s?`${s}
+${t}`:t]}let n=pe(e),o=-1;for(let s=0;s<e.length;s++){if(n.has(s))continue;let i=e[s];if(Ce(i)){if(i.includes("="))continue;let c=e[s+1];if(c===void 0)continue;let{rest:a}=Pe(i);if(i==="--resume"||a==="-r"){if(!Ce(c))s++;continue}if(a.length>2&&(/^-r./.test(a)||Gr.has(a.slice(0,2))))continue;if(Kr.has(i)&&i!=="--remote-control"&&i!=="--rc"||qr.has(a))continue;if(!n.has(s+1)&&!Ce(c))s++;continue}o=s}if(o>=0){let s=[...e];return s[o]=`${e[o]}
+${t}`,s}return[...e,"--",t]}var jd=new RegExp(`${Gn} \\d+s`);function Ud(e){let t=Xn(e)[0];if(t)return t;if(jd.test(e))return"timeout";return e.includes(zn)?"exited":"other"}function Wd(e){switch(e){case"daemon-unreachable":return"not running";

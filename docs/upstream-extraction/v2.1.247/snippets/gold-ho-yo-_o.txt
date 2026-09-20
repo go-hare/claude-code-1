@@ -1,0 +1,2 @@
+# LOCKED _o pos=207910767 (Ft key allowlist)
+_o=/^[A-Za-z0-9_$.-]{1,40}$/

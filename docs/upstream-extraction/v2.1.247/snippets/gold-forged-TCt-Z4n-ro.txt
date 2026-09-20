@@ -1,0 +1,1 @@
+function ro(){let e=Vn(),n=R(e,"CLAUDE_CODE_TMPDIR");if(n!==void 0&&n!=="")return n;let t=b();if(t==="windows"){let i=R(e,"TEMP")??R(e,"TMP");return i!==void 0&&i!==""?i:er()}let r=t==="macos"?void 0:R(e,"TMPDIR")??R(e,"TMP")??R(e,"TEMP");return r!==void 0&&r!==""?r.length>1&&r.endsWith("/")?r.slice(0,-1):r:"/tmp"}

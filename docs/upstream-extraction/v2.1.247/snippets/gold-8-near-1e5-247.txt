@@ -1,0 +1,24 @@
+# offset=206393968 ver=247 nearHits=12 needle="=1e5"
+
+encrypted_content};break}default:Qa(t.delta)}return r}case"content_block_stop":{let s=r.content.at(t.index);if(s&&Ei(s)&&De in s){let n;try{n=s.input}catch(i){n={},o(this,Rr,"f").call(this,o(this,se,"m",ki).call(this,s,i))}Object.defineProperty(s,"input",{value:n,enumerable:!0,configurable:!0,writable:!0})}return r}}},ki=function(t,r){let s=t[De];return new b(`Unable to parse tool parameter JSON from model. Please retry your request or adjust your prompt. Error: ${r}. JSON: ${s}`)},Symbol.asyncIterator)](){let e=[],t=[],r=!1;return this.on("streamEvent",(s)=>{let n=t.shift();if(n)n.resolve(s);else e.push(s)}),this.on("end",()=>{r=!0;for(let s of t)s.resolve(void 0);t.length=0}),this.on("abort",(s)=>{r=!0;for(let n of t)n.reject(s);t.length=0}),this.on("error",(s)=>{r=!0;for(let n of t)n.reject(s);t.length=0}),{next:async()=>{if(!e.length){if(r)return{value:void 0,done:!0};return new Promise((n,i)=>t.push({resolve:n,reject:i})).then((n)=>n?{value:n,done:!1}:{value:void 0,done:!0})}return{value:e.shift(),done:!1}},return:async()=>(this.abort(),{value:void 0,done:!0})}}toReadableStream(){return new te(this[Symbol.asyncIterator].bind(this),this.controller).toReadableStream()}}});var ec=1e5,tc=`You have been working on the task described above but have not yet completed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
+1. Task Overview
+The user's core request and success criteria
+Any clarifications or constraints they specified
+2. Current State
+What has been completed so far
+Files created, modified, or analyzed (with paths if relevant)
+Key outputs or artifacts produced
+3. Important Discoveries
+Technical constraints or requirements uncovered
+Decisions made and their rationale
+Errors encountered and how they were resolved
+What approaches were tried that didn't work (and why)
+4. Next Steps
+Specific actions needed to complete the task
+Any blockers or open questions to resolve
+Priority order if multiple steps remain
+5. Context to Preserve
+User preferences or style requirements
+Domain-specific details that aren't obvious
+Any promises made to the user
+Be concise but complete\u2014err on the side of including information that would prevent duplicat

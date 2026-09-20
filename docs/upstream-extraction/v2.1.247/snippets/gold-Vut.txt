@@ -1,0 +1,3 @@
+# 247 offset=213993679 needle="var Vut="
+
+e,methods:[...e.methods],owner:e.owner};var Vut=()=>{};var CMe=(e)=>({name:e.name,events:[...e.events],calls:[...e.calls],generation:e.generation});var Kut=()=>{};var jhn;var zhn=w(()=>{om();jhn=Ii()});var Hhn;var Whn=w(()=>{om();Hhn=Ii()})

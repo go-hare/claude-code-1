@@ -1,0 +1,5 @@
+# 247 @202023659
+
+ode: {source: true}`...'....*..It is default now, see option `strict`..*...VQ.."uniqueItems" keyword is always validated...L.....a.Disable strict mode or pass `true` to `ajv.addFormat` (or `formats` option).+.......Map is used as cache, schema object as key......N9..It is default now...B...q_.."minLength"/"maxLength" account for unicode characters by default.........a.compileAsync	....g..addSchema.......Y`.addMetaSchema.........C.removeSchema....BF.addVocabulary...
+.....Y.addKeyword..
+...7...getKeyword.....i...removeKeyword...	.......addFormat.......F.u.$dataMetaSchema.....-..._removeAllSch

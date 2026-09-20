@@ -7,7 +7,9 @@ import { MessageResponse } from '../../components/MessageResponse.js';
 import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWorkspaceDirectory.js';
 import { Box, Text } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
+import { randomUUID } from 'crypto';
 import { logForDebugging } from '../../utils/debug.js';
+import { persistHookOutput } from '../../utils/hooks/persistHookOutput.js';
 import { executeDirectoryAddedHooks } from '../../utils/hooks.js';
 import { applyPermissionUpdate, persistPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from '../../utils/permissions/PermissionUpdateSchema.js';
@@ -82,9 +84,14 @@ export async function call(
     // densable 2.1.219 #3 s2t — DirectoryAdded after /add-dir (slash_command)
     try {
       const { systemMessages } = await executeDirectoryAddedHooks(path, 'slash_command');
-      for (const sm of systemMessages) {
-        logForDebugging(`DirectoryAdded hook: ${sm}`);
-      }
+      const seed = randomUUID();
+      await Promise.all(
+        systemMessages.map((sm, index) =>
+          persistHookOutput(sm, `add-dir-${seed}-${index}`, 'systemMessage').then(text => {
+            logForDebugging(`DirectoryAdded hook: ${text}`);
+          }),
+        ),
+      );
     } catch (error) {
       logForDebugging(`DirectoryAdded hook failed: ${error instanceof Error ? error.message : String(error)}`, {
         level: 'warn',

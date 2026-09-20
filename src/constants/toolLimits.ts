@@ -54,3 +54,16 @@ export const MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000
  * for display in grouped agent rendering.
  */
 export const TOOL_SUMMARY_MAX_LENGTH = 50
+
+/**
+ * Size in characters above which a hook's output is spilled to the session
+ * tool-results dir instead of entering the conversation in full. Hook output
+ * is attacker-shaped in the same way tool output is: a single `git log` or
+ * test-runner hook can produce megabytes, and before the spill existed that
+ * text went to the model verbatim and blew the context window.
+ *
+ * densable leftover: `zs`/`Ws` = `1e4` (247 @212668226, exported as `Yvb`
+ * and imported by the hook runner as `JWr`), the default for `lre`'s
+ * `threshold` option. Same `1e4` in 246 (`Bs` → `lHb` → `BBr`).
+ */
+export const HOOK_OUTPUT_PERSIST_THRESHOLD_CHARS = 10_000

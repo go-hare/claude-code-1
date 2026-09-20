@@ -1,0 +1,37 @@
+# PASS5 REPL parent + 246 zs + leftover Kc/M
+"},\"repl\")" count=1 222169089
+  @222169089 ,getFpsMetrics:t.getFpsMetrics,stats:t.stats,keybindings:!1,children:i(J,{...a})},"repl"),m,o,f)}catch(s){throw await W().catch(()=>!1),s}} export{C as ca,Xe as da,Pe as ea}; .// @
+"},\"resume\")" count=1 223295655
+  @223295655 getFpsMetrics:t.getFpsMetrics,stats:t.stats,children:x(i,{...r,worktreePaths:n})},"resume"),l,s,c)}Af();kf();xt();_m();wa();ya();hm();_t();Kt();Er();gm();ce();pe();_t();ca();import
+"export{a as AppRoot}" count=1 233942217
+  @233942217 BUN/root/_848.js";import"B:/~BUN/root/_849.js";import"B:/~BUN/root/_850.js";b();export{a as AppRoot}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial
+"AppRoot" count=8 182554801,196983405,196983652,222167825,223407635,223425157,228399956,233942229
+  @182554801 008480ec165a1f1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851AppRootB:/~BUN/root/_240.jsB:/~BUN/root/_241.jsB:/~BUN/root/_242.jsB:/~BUN/root/_243.jsB:/~BUN/root/
+  @196983405 on...'...B:/~BUN/root/chunk-qzgjaf91.js..B...8_=.Cannot destructure property 'AppRoot' from null or undefined value...B:/~BUN/root/chunk-axvamdkm.js..?...d.Cannot destru
+  @196983652 estructure property 'session' from null or undefined value...repl...*.AppRoot...Wc.REPL...BM..session...A..fleetNudgeStore.	...onHealthy...l.messageQueue
+  @222167825 ;pe();ie();v();function Xe(...r){return Pe(...r)}async function Pe(r,t,a,V){let{AppRoot:Y}=await import("B:/~BUN/root/chunk-qzgjaf91.js"),{REPL:z}=await import("B:/~BUN/root/chunk-
+  @223407635 js"),import("B:/~BUN/root/chunk-9568vyrr.js")]);o(r),i();return}case"ask":{let[{AppRoot:o},{TrustDialog:i},{getCommands:k}]=await Promise.all([import("B:/~BUN/root/chunk-qzgjaf91.j
+  @223425157 i(o))return;if(y())return;if(a()||d().bypassPermissionsModeAccepted)return;let[{AppRoot:l},u]=await Promise.all([import("B:/~BUN/root/chunk-qzgjaf91.js"),import("B:/~BUN/root/chunk
+  @228399956 t("B:/~BUN/root/chunk-c0dxm44b.js"),import("B:/~BUN/root/chunk-3ban8f7g.js")]),{AppRoot:v}=await import("B:/~BUN/root/chunk-qzgjaf91.js"),{getEraseScreenSequence:d}=await import("B
+  @233942229 8.js";import"B:/~BUN/root/_849.js";import"B:/~BUN/root/_850.js";b();export{a as AppRoot}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Se
+REPL-prop @222168735 fn@222167939
+REPL-fn len=756 end=222168695
+repl-key @222168989 fn@222167939
+246 function zs(Jc){ @221281977
+246 zs len=1433
+246 function F0(e,o){ @210054279
+Kc @223847292 fn@223846081
+  Kc-fn len=161 head=function d(){let I;while((I=process.stdin.read())!==null){if((typeof I==="string"?Buffer.from(I,"utf8"):I).includes(3)){process.emit("SIGINT");return}l.push(I)}
+Kc @223848200 fn@223846081
+  Kc-fn len=161 head=function d(){let I;while((I=process.stdin.read())!==null){if((typeof I==="string"?Buffer.from(I,"utf8"):I).includes(3)){process.emit("SIGINT");return}l.push(I)}
+M-head function _(n,e,r,d,{columns:m,verbose:s=!1,chunkSize:t=40,onProgress:K,storageV5:p}={}){let f=U(e),w={...C(),verbose:s,...f&&{mainLoopModel:f}},j=P(r),B=(o)=>T(a(M,{session:n,storageV5:p,initialState:
+AppRoot count=8
+  @182554801 be4a04C000008500ec165a1f1be4a04C00000851AppRootB:/~BUN/root/_240.jsB:/~BUN/root/_241.jsB:/~BUN/root/_242.jsB:/~BUN/root/
+  @196983405 s..B...8_=.Cannot destructure property 'AppRoot' from null or undefined value...B:/~BUN/root/chunk-axvamdkm.js..?
+  @196983652 or undefined value...repl...*.AppRoot...Wc.REPL...BM..session...A..fleetNudgeStore.	...onHealthy...
+  @222167825 Pe(...r)}async function Pe(r,t,a,V){let{AppRoot:Y}=await import("B:/~BUN/root/chunk-qzgjaf91.js"),{REPL:z}=await import(
+  @223407635 .js")]);o(r),i();return}case"ask":{let[{AppRoot:o},{TrustDialog:i},{getCommands:k}]=await Promise.all([import("B:/~BUN/r
+  @223425157 passPermissionsModeAccepted)return;let[{AppRoot:l},u]=await Promise.all([import("B:/~BUN/root/chunk-qzgjaf91.js"),import
+  @228399956 rt("B:/~BUN/root/chunk-3ban8f7g.js")]),{AppRoot:v}=await import("B:/~BUN/root/chunk-qzgjaf91.js"),{getEraseScreenSequenc
+  @233942229 t"B:/~BUN/root/_850.js";b();export{a as AppRoot}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Co
+Us-mod Y7b as Tr @223161300 s";import{Y7b as Tr,_7b as js}from"B:/~BUN/root/_651.js";import{Bac as qi,yac as sn}from"B

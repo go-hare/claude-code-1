@@ -1,0 +1,38 @@
+# peel around ehostdead @ 198098040
+
+
+----- 198094056 len=70 -----
+Cannot destructure property 'sessionFile' from null or undefined value
+
+----- 198094240 len=66 -----
+ to the background session, so automatic replies stopped. Publish 
+
+----- 198094496 len=73 -----
+Cannot destructure property 'carryOverCount' from null or undefined value
+
+----- 198094644 len=43 -----
+ will carry over to the background session.
+
+----- 198095832 len=69 -----
+; before making code changes, create a new worktree of your own with 
+
+----- 198095956 len=73 -----
+, and if the task builds on the original's work, base your new branch on 
+
+----- 198096040 len=87 -----
+ rather than checking that branch out (it stays checked out in the original's worktree)
+
+----- 198096156 len=85 -----
+This conversation was forked from a session that is still working in this checkout (F
+
+----- 198096248 len=70 -----
+). Before making code changes, create a new worktree of your own with 
+
+----- 198096328 len=64 -----
+ so your edits don't land where the original session is editing.
+
+----- 198099216 len=41 -----
+has commits that are not pushed anywhere!
+
+----- 198099440 len=54 -----
+is the working directory of a live Claude Code session

@@ -1,0 +1,3 @@
+# 247-after-LZ n=1 function gN start=210415394 end=210415462 len=68 sha=e5efa107b89d62eb
+
+function gN(){let e=ge();return e==="linux"||e==="wsl"||e==="macos"}

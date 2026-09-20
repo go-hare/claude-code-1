@@ -1,0 +1,6 @@
+# function dT( @213710265
+
+function dT(e,t,n){let r=!1,o;return t.update(e,(s)=>{if(o=s,s.notified)return s;if(r=!0,n?.skipStampIfRunning&&s.status==="running")return s;return{...s,notified:!0}}),{claimed:r,task:o}}function ql({taskId:e,toolUseId:t,taskType:n,outputFile:r,status:o,summary:s,body:i,trailing:a}){let l=[[tun,e],[nun,t],[Gle,n],[run,r],[mD,o],[gD,s]],c=`<${my}>`;for(let[u,d]of l)if(d)c+=`
+<${u}>${d}</${u}>`;return`${c}${i??""}
+</${my}>${a??""}`}var ik=w(()=>{Zu()});function k3({summary:e,body:t,priority:n,stopHookActive:r,queue:o,origin:s}){(o===void 0?ua:o.enqueuePendingNotification)({value:ql({summary:Ur(e),trailing:`
+${Il(t)}`}),mode:"task-notification",agentId:Tr(),priority:n,stopHookActive:r,origin:s,skipAttachments:!0})}var BPe=w(()=>{$e();sd();br();Iu();ik()});var oun=w(()=>{En();Qg();dO();IW();y

@@ -1,0 +1,255 @@
+# HP/pendingUsage pass2 callers + export aliases + 246 leftover
+
+## 247 pass2 needles
+247 "dm as Y$" count=1 hits=219684757
+  @219684757 P$,dOe as Q$,wYi as R$,kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq 
+247 "uvi as Z$" count=1 hits=219684766
+  @219684766  Q$,wYi as R$,kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF 
+247 "zC as _$" count=1 hits=219684776
+  @219684776  R$,kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mi
+247 "xvi as $$" count=1 hits=219684785
+  @219684785 s S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,A
+247 "xln as aaa" count=1 hits=219684795
+  @219684795 s T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,Ale as laa,a
+247 "dPe as baa" count=1 hits=219684806
+  @219684806 U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,Ale as laa,ako as maa,l
+247 "Y$ as " count=2 hits=208903776,225459219
+  @208903776 K$ as lsc,G$ as msc,$$ as nsc,V$ as osc,z$ as psc,W$ as qsc,$x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as xsc,pm as ysc,e1 as zsc,bT as Asc,Me as Bsc,QV as Csc,ZV as Dsc,ez as Esc,tz as 
+  @225459219 s,TLa as de,U9 as Os,Vra as Io,WSa as N,Wra as Ws,XRa as Vo,XSa as Ko,Xra as To,Y$ as qe,YRa as y,Yra as zs,ZLa as _n,ZRa as G,_$ as Hs,_Ra as Ae,a2 as Ms,aSa as Go,bwa as $o,cwa as Js,fsa as Mo,g6 as st,gs
+247 "Z$ as " count=2 hits=208903816,222244939
+  @208903816 z$ as psc,W$ as qsc,$x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as xsc,pm as ysc,e1 as zsc,bT as Asc,Me as Bsc,QV as Csc,ZV as Dsc,ez as Esc,tz as Fsc,nz as Gsc,rz as Hsc,oz as Isc,iz as 
+  @222244939 tps://code.claude.com/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,ugb as i}from"B:/~BUN/
+247 "$$ as " count=2 hits=208903716,222197331
+  @208903716 ba as fsc,B$ as gsc,In as hsc,H$ as isc,Kx as jsc,Gx as ksc,K$ as lsc,G$ as msc,$$ as nsc,V$ as osc,z$ as psc,W$ as qsc,$x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as xsc,pm as ysc,e1 as 
+  @222197331 js";import{oM as rt,pM as F,qM as nt,yM as li}from"B:/~BUN/root/_368.js";import{$$ as tt,A2 as Ze,Ala as ai,Bpa as ot,Cpa as si,F2 as L,L2 as ti,P1 as Qe,Q1 as ei,dia as it,eia as ni,faa as ri,o1 as Je,p1 a
+247 "aaa as " count=1 hits=222874789
+  @222874789 Wba as qt,Wda as Zt,Xba as Yt,Xea as os,Yda as fi,Yea as Ge,Zea as qe,_ea as dn,aaa as At,aca as Cn,baa as Ft,bca as Qt,bga as ms,cca as di,daa as xt,efa as as,faa as oi,ffa as gi,hga as ys,ifa as ls,iga as 
+247 "_$ as " count=3 hits=208903146,222244947,225459266
+  @208903146 f$ as crc,Fm as drc,p$ as erc,g$ as frc,m$ as grc,cm as hrc,Gc as irc,Nm as jrc,_$ as krc,lt as lrc,Dx as mrc,Ix as nrc,se as orc,y$ as prc,Ds as qrc,bt as rrc,Ff as src,b$ as trc,E$ as urc,S$ as vrc,v$ as 
+  @222244947 de.claude.com/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,ugb as i}from"B:/~BUN/root/_50
+  @225459266 Ws,XRa as Vo,XSa as Ko,Xra as To,Y$ as qe,YRa as y,Yra as zs,ZLa as _n,ZRa as G,_$ as Hs,_Ra as Ae,a2 as Ms,aSa as Go,bwa as $o,cwa as Js,fsa as Mo,g6 as st,gsa as vo,h6 as Fs,iwa as mt,joa as Co,kPa as Sn,
+247 "baa as " count=1 hits=222874809
+  @222874809 Xba as Yt,Xea as os,Yda as fi,Yea as Ge,Zea as qe,_ea as dn,aaa as At,aca as Cn,baa as Ft,bca as Qt,bga as ms,cca as di,daa as xt,efa as as,faa as oi,ffa as gi,hga as ys,ifa as ls,iga as hs,kfa as cs,lfa as 
+247 "t.delete(n)" count=18 hits=207761502,208354583,211675847,212683399,213648499,214067873,215669677,217101210,217140714,217276133,217288836,219907533,219907676,226386025,232483829,232483900,249196821,250504675
+  @207761502 amp:Date.now(),refreshing:!1,lifetimeMs:r(l)});return l}finally{if(t.get(n)===m)t.delete(n)}}if(s&&p-s.timestamp>s.lifetimeMs&&!s.refreshing){s.refreshing=!0;let g=s,m=o(...i);return g.refreshPromise=m,m.then((l
+  @208354583 ){let o=await e.readAsync(),s=await e.update(a);if(s.success){if(o===null)await t.delete(n);return le("secure_storage_credentials_write"),s}if(s.transient)return I("secure_storage_credentials_write","primary_tra
+  @211675847 {e.lastPersistedBasisBody=void 0;let n=on(t,e);if(t!==void 0&&n!==void 0){await t.delete(n);return}try{await tn(W(e.mountDir,mt))}catch{}}function Ur(e,t){return _e()&&t!==void 0&&e.v5MemoryBase!==void 0?{storag
+  @212683399 (e){let t=_().shareStatus.filePathToSlug;for(let n of[...t.keys()])if(!e.has(n))t.delete(n)}function Ea(e,t){let{bySlug:n}=_().shareStatus,r=n.get(e)??t,{lastProbeAt:i,lastProbeLandedAt:o,...d}=r;n.set(e,{...d,.
+  @213648499 yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{createHash as Zwo}from"crypto";function J1(e){return Zwo("sha256").upda
+  @214067873 ed:o}}function XD(e){let t=npt(),n=e.catch(()=>{return});t.add(n),n.finally(()=>t.delete(n))}async function wYi(){let e=npt();if(e.size===0)return;await Ca(Promise.allSettled([...e]),Nxo)}function kYi(e){if(Ns()
+  @215669677 ssionIds;if(t.add(li(e)),t.size>64){let n=t.values().next().value;if(n!==void 0)t.delete(n)}}function Bg(e){return SA().teleportedSessionIds.has(li(e))}function uLl(e){SA().teleportedSessionIds.delete(li(e))}var
+  @217101210 tedReplyIds;if(t.add(e),t.size>Yws){let n=t.values().next().value;if(n!==void 0)t.delete(n)}}function fSe(e){return e!==""&&Ee().postedReplyIds.has(e)}function qCr(){return Ee().postedReplyIds.size>0}function ac
+  @217140714 ))t.retiredInFlightArms.add(n),t.bootingWiredArms.delete(n),t.inFlightWiredIntent.delete(n)}function oUt(){return Ee().autoReact.unattendedReplies}function sUt(e){let t=oUt();t.set(e,Math.min((t.get(e)??0)+1,$Rr
+  @217276133 ditor";if(Z.editor===!0)e.nonEditorSlugs.delete(n);if(j){if(e.inFlightWiredIntent.delete(n),e.bootingWiredArms.delete(n),!B&&Ee().accountEpoch===O)e.nonEditorSlugs.add(n)}let U=j?void 0:t.autoReactWiring,G=j?voi
+247 "r.count++" count=4 hits=209561239,210649365,213647556,224673000
+  @209561239 rottled.get(t);if(!i)throw Error("invalid throttle");let r=i.get(s);if(r)return r.count++,!1;let a,n=()=>{let c=i.get(s),h=c?c.count:0;if(i.delete(s),clearTimeout(a),c)clearTimeout(c.timeoutObject);return h};a
+  @210649365 :n.messageDropNoticeWindow,i=Date.now();if(i-r.start>=zt)r.start=i,r.count=0;if(r.count++,r.count<=Ce)we(e);else if(r.count===Ce+1)we({status:e.status,payloadType:e.payloadType,...e.subtype!==void 0&&{subtype:
+  @213647556 (bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if
+  @224673000 ds:new Set,cost:0,count:0},e.buckets.set(a,r);r.sids.add(n.sessionId),r.cost+=o,r.count++}function ie(e){let n=0,t=0;for(let c of e.buckets.values())if(c.sids.size>=dn)n+=c.cost,t+=c.count;let o=0,i=0,s=0,a=0;
+247 "pendingUsage.set(e,{count:1,lastUsedAt:t})" count=1 hits=213647588
+  @213647588 =Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("ex
+247 "function TP(){return" count=0 hits=
+247 "let{pendingUsage:t}=TP()" count=0 hits=
+247 "class ysn{pendingUsage=new Map" count=0 hits=
+247 "uln(" count=2 hits=213647383,213654265
+  @213647383 !1}var aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let 
+  @213654265 ax(0,Math.floor((n-e.lastUsedAt)/86400000))}}var pPe=w(()=>{Ko();ip();Ls();zC();uln({flush:oko,flushAtExit:sko})});import{sep as Dln}from"path";function cD(e,t){let n=Ait(e,t)??t,r=n?`${e}@${n.toLowerCase
+247 "uvi(" count=1 hits=213648371
+  @213648371 ll;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase
+247 "oko(" count=1 hits=213652325
+  @213652325 e().clear()}var rko;var Pit=w(()=>{$e();ro();rko=new fn(()=>new Tln)});function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln
+247 "sko(" count=1 hits=213652535
+  @213652535 nction xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}function xit(e){return(t)=>{let n={...t.pluginUsa
+247 "xvi(" count=1 hits=213652462
+  @213652462 ction Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length
+247 "sPe()" count=4 hits=213648177,213652337,213652401,213652564
+  @213648177 gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[.
+  @213652337 var rko;var Pit=w(()=>{$e();ro();rko=new fn(()=>new Tln)});function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function 
+  @213652401 ion oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}
+  @213652564 id 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n[
+247 "sPe(" count=5 hits=213648177,213652337,213652401,213652564,241866162
+  @213648177 gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[
+  @213652337 var rko;var Pit=w(()=>{$e();ro();rko=new fn(()=>new Tln)});function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function
+  @213652401 ion oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))
+  @213652564 id 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n
+  @241866162 ace:r8[t],local:e}:e}var Rk=z(()=>{"use strict";i8();o(dc,"default")});function sPe(e){return function(){var t=this.ownerDocument,r=this.namespaceURI;return r===Dk&&t.documentElement.namespaceURI===Dk?t.c
+247 "Aln(" count=3 hits=213652388,213652503,213652518
+  @213652388  Tln)});function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i
+  @213652503 (t),await ki(xit(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}function xit(e){r
+  @213652518 t(t),e),fln(t)}function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}function xit(e){return(t)=>{let 
+247 "xit(" count=25 hits=66406363,66414961,66595030,66704253,67328414,67333943,67334099,67452834,67460094,67963539,67972790,67977552,67977602,67984033,67990590,67990634,67990679,67990853,67998724,68357953,68540138,68860706,68900001,82255579,82255602
+  @66406363 (ref, fn) {       registerWithEvent(ref, fn, "exit");     },     registerBeforeExit(ref, fn) {       registerWithEvent(ref, fn, "beforeExit");     },     unregister(ref) {       validateRef(ref), entries 
+  @66414961 .stack === "string" ? err.stack : err);           } catch {}           process.exit(1);         }     }     queue.push(tock), @putInternalField(nextTickQueue, 0, 1);   }   return nextTick; }) (function (p
+  @66595030 et(clone);         return;       }     set(context.concat(this, store));   }   exit(cb, ...args) {     return this.run(@undefined, cb, ...args);   }   run(store_value, callback, ...args) {     if (!this.#
+  @66704253 rr.write(`Uncaught ${util.inspect(err)} `);         } catch {}         process.exit(1);       });     } catch {       return;     }   }   captureCallbacks.push(cb); } $ = {   addUncaughtExceptionCaptureCa
+  @67328414  null, worker.emit("disconnect"), !worker.exitedAfterDisconnect)       process.exit(0);   }), onInternalMessage(worker, onmessage), send({ act: "online" });   function onmessage(message, handle) {     let
+  @67333943 eturn;   if (this.exitedAfterDisconnect = !0, !this.isConnected())     process.exit(0);   else     this.state = "destroying", send({ act: "exitedAfterDisconnect" }, () => process.disconnect()), process.on
+  @67334099 nect" }, () => process.disconnect()), process.once("disconnect", () => process.exit(0)); }; return $})  .(function (){"use strict";// build/release/tmp_modules/node/cluster.ts var $, { isPrimary } = @getI
+  @67452834   [Symbol.dispose]() {     if (!this.killed)       this.kill();   }   #handleOnExit(exitCode, signalCode, err) {     if (signalCode)       this.signalCode = signalCode;     else       this.exitCode = exit
+  @67460094 });           process.nextTick((exitCode2, signalCode2, err2) => this.#handleOnExit(exitCode2, signalCode2, err2), exitCode, signalCode, err);         },         lazy: !0,         ipc: has_ipc ? this.#emi
+  @67963539 (executionContextId, url, createBackend, send, close);   } catch (error) {     exit(`Failed to start inspector: `, error);   }   if (!isAutomatic) {     let debugUrl = debug.url;     if (debugUrl) {      
+247 "dm(e)" count=5 hits=211957197,211957352,213647497,221431599,229251518
+  @211957197 t,v._`${s} === ${k.default.errors}`)}function ha(e){(0,he.checkUnknownRules)(e),dm(e)}function ya(e,t){if(e.opts.jtd)return ua(e,[],!1,t);let r=(0,aa.getSchemaTypes)(e.schema),n=(0,aa.coerceAndCheckDataTyp
+  @211957352 hemaTypes)(e.schema),n=(0,aa.coerceAndCheckDataType)(e,r);ua(e,r,!n,t)}function dm(e){let{schema:t,errSchemaPath:r,opts:n,self:o}=e;if(t.$ref&&n.ignoreKeywordsWithRef&&(0,he.schemaHasRulesButRef)(t,o.RULES
+  @213647497 (t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUs
+  @221431599 ,e.C_BLOCK_COMMENT_MODE,n,T]}}Ns.exports=_m});var fs=d(function(sb,Os){function dm(e){let t=e.regex,n=["functions","model","data","parameters","quantities","transformed","generated"],a=["for","in","if","el
+  @229251518 d_format",format:"cidrv6",input:r.value,inst:e,continue:!t.abort})}}});function dm(e){if(e==="")return!0;if(/\s/.test(e))return!1;if(e.length%4!==0)return!1;try{return atob(e),!0}catch{return!1}}b.$ZodBase
+247 "Y$(" count=12 hits=208880962,214777442,218250202,218450246,218464664,219367066,229978299,230066751,232214095,232218521,233140334,249435606
+  @208880962 tion j$(e){let t=await In(e);return await Ra(e)&&t!==null&&Lx(t)}async function Y$(e){if(A()!=="firstParty")return;let{source:n}=await Hx(e),r={};if(n==="CLAUDE_CODE_OAUTH_TOKEN"||n==="CLAUDE_CODE_OAUTH_
+  @214777442 s("opus"))return{lever:"model",text:"try /model sonnet \xB7 ~2\xD7 runway"};if(!Y$(t))return null;let r=Ix(t,n);if(r==="high"||r==="xhigh"||r==="max")return{lever:"effort",text:"try /effort medium"};retu
+  @218250202 ?[])if(c.kind==="effort"&&c.effort!==void 0)i=c.effort;let a=s&&r?.getAppState&&Y$(s)?{level:Ix(s,i)}:void 0,l=r?.remoteCall;if(l!==void 0)return{session_id:`served:${(sFs.test(l.origin.callerSessionId??
+  @218450246 (gh-68567)`,{level:"warn"});return{type:"disabled"}}function JBs(e,t,n,r,o){if(!Y$(o)){delete t.effort;return}if("effort"in t)return;if(e===void 0)r.push(Xqt);else if(typeof e==="string")t.effort=e,r.pus
+  @218464664 r((Hn)=>Hn!==Ct)};if(!O)lt(lE);if(!H)lt(cE);lt(XG)}let Z=Bee(d,s.effortValue),z=Y$(d)&&Z!==void 0?oVr(Z):void 0,N=Jp(s.agentContext)&&(s.querySource.startsWith("repl_main_thread")||s.querySource==="sdk")
+  @219367066 ionRoot:jB(t),sessionEnvVars:t.sessionEnvVars,storageV5:t.storageV5,effortLevel:Y$(t.options.mainLoopModel)?Ix(t.options.mainLoopModel,gc(t)):void 0}),ne;do if(ne=await W.next(),!ne.done&&o){let Xe=ne.va
+  @229978299 ignal])})}finally{clearTimeout(o)}}var Td=3600000,xg=new WeakMap;async function Y$(e){let t=(r)=>{r.delete("authorization"),r.delete("x-api-key")};return Promise.all(e.map(async(r)=>{switch(r.provider){c
+  @230066751 en.tls,[be,si,ct,ie]=await Promise.all([t.oidc?ew(t.oidc):Promise.resolve(null),Y$(t.upstreams),T$(t),me?Promise.all([AT(me.cert,"utf8"),AT(me.key,"utf8")]).then(([L,le])=>({cert:L,key:le})):Promise.reso
+  @232214095 rrent_usage:e,used_percentage:o.used,remaining_percentage:o.remaining}}function Y$(e){return pm(e)?.uuid??null}async function X$(e){let[t,o]=await Promise.all([ule(e),jt()?Promise.resolve(null):cle()]);r
+  @232218521 Controller;this.#l=e;let t=Zp(this.#e.getMessages()),o=this.#d;this.#d=!1;let n=Y$(t);if(n!==this.#s)this.#s=n,this.#p=gle(t);this.#T(e.signal,t,o,this.#p).catch(Pe)}async#T(e,t,o,n){let{session:r}=this.
+247 "Z$(" count=4 hits=208884897,243054144,243054279,249440105
+  @208884897 ;return e?.forceLoginGatewayUrl!==void 0&&e?.forceLoginMethod===void 0}function Z$(){return Bt().length>0}function pm(){return H("policySettings")===null&&_m().length>0||Bt().length>0&&!fr()}function e1(
+  @243054144 return a}return o(n,"process2"),S(n,"process"),new RegExp(n(),e.flags)}function Z$(e){return e.rules.find(t=>cs(t)&&t.entry)}function Q$(e){return e.rules.filter(t=>rl(t)&&t.hidden)}function iA(e,t){let 
+  @243054279 $(e){return e.rules.filter(t=>rl(t)&&t.hidden)}function iA(e,t){let r=new Set,i=Z$(e);if(!i)return new Set(e.rules);let n=[i].concat(Q$(e));for(let s of n)J$(s,r,t);let a=new Set;for(let s of e.rules)(r.
+  @249440105 mbobox";tZ=Os.Control,nZ=Os.Validity});var rZ,eI,tI,oZ=K(()=>{"use client";QL();Z$();rZ=_(ie()),eI=_(he()),tI=(0,rZ.forwardRef)(({label:e,hint:t,error:n,required:r,fieldClassName:o,...i},a)=>(0,eI.jsx)(X
+247 "$$(" count=19 hits=85148937,199700809,208880401,214515993,214542877,214547373,214547473,214547588,214559366,214690576,214690997,229966886,230064259,232195349,232363103,232451453,243045595,243050158,249435798
+  @85148937 ...BE..%@..%@...F..%@..%@..%@...F..%@..%@...	...$$((//:;..%@..%@..%@..%@..%@..%@..%@..%@...*...%@..%@..%@..%@..%@..%@..%@...((77FF..%@..%@..%@..%
+  @199700809 ...{...u...J . .m.	.&...(...%...k...~.` .!.".#.#B$$(.).-H../.0.296.7.8(:q:.:.;..E.M.a.b.c.f.g.l.m.n.o.p.r.s.t.u.\.b.f.m.s...l.i.g.;...@P.;.&.&@c.u.t.e.
+  @208880401 t In(e)==="max"}async function G$(e){return await In(e)==="team"}async function $$(e){return await In(e)==="team"&&await Kx(e)==="default_claude_max_5x"}async function V$(e){return await In(e)==="enterpr
+  @214515993 laces. Errors: ${e.map((n)=>`${X8(n.name)}: ${n.error}`).join("; ")}`}}function $$(e){switch(e.source){case"github":return`github:${e.repo}${e.ref?`@${e.ref}`:""}`;case"url":return e.url;case"git":return
+  @214542877 ror)")}async function LSt(e,t,n,r){if(!D$(e))throw Error(`Marketplace source '${$$(e)}' is blocked by enterprise policy.`);let o=vt(),s=_B();await o.mkdir(s);let i,a,l=!1,c,u,d=CBo(e);try{switch(e.source
+  @214547373 ={...e,path:zS(e.path)};if(!D$(o)){if(VFe(o))throw Error(`Marketplace source '${$$(o)}' is blocked by enterprise policy.`);let u=c2()||[],d=o0n(),p=GFe(o),f=`Marketplace source '${$$(o)}'`;if(p)f+=` (${p
+  @214547473 y enterprise policy.`);let u=c2()||[],d=o0n(),p=GFe(o),f=`Marketplace source '${$$(o)}'`;if(p)f+=` (${p})`;if(f+=" is blocked by enterprise policy.",u.length>0)f+=` Allowed sources: ${u.map((m)=>$$(m)).j
+  @214547588 is blocked by enterprise policy.",u.length>0)f+=` Allowed sources: ${u.map((m)=>$$(m)).join(", ")}`;else f+=" No external marketplaces are allowed.";if(o.source==="github"&&d.length>0)f+=`  Tip: The shor
+  @214559366 bject.keys(o).join(", ")}`);if(!D$(s.source))throw Error(`Marketplace source '${$$(s.source)}' is blocked by enterprise policy.`);if(y0n(e,s),Xn().marketplaces.delete(e),r?.skipIfRecent&&s.lastUpdated){l
+  @214690576 gin:C,marketplace:R,blockedByBlocklist:d===null,allowedSources:(d??[]).map((H)=>$$(H))}),null;if(P){let H=rme(R,P);if(H){if(hR(E))a.push({type:"marketplace-load-failed",source:v,marketplace:R,reason:H,un
+247 "HP as " count=1 hits=232037547
+  @232037547 m"B:/~BUN/root/_394.js";import{BP as RR,DP as EAe,EP as vye,FP as Tye,GP as xye,HP as Rye,KP as Wh,fP as Cme,kP as cIe,lP as YSe,mP as i8e,nP as nG,oP as dIe,pP as R5,qP as XSe,rP as s8e,uP as JSe,xP as mIe
+247 ",HP as " count=1 hits=232037546
+  @232037546 om"B:/~BUN/root/_394.js";import{BP as RR,DP as EAe,EP as vye,FP as Tye,GP as xye,HP as Rye,KP as Wh,fP as Cme,kP as cIe,lP as YSe,mP as i8e,nP as nG,oP as dIe,pP as R5,qP as XSe,rP as s8e,uP as JSe,xP as mIe
+247 "HP as Y$" count=0 hits=
+247 "HP as Z$" count=0 hits=
+247 " as HP," count=4 hits=221678809,230301860,231281008,232041819
+  @221678809 as yP,lo as zP,fo as AP,mo as BP,po as CP,Ro as DP,bt as EP,go as FP,ho as GP,Ao as HP,_o as IP,wt as JP,St as KP}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Ser
+  @230301860 ,Rva as PR,S$ as ET,S0 as Xc,S5 as eT,S6 as Ki,SAa as GR,SDa as ZD,SPa as Lk,SWa as HP,S_ as c_,Saa as Ub,Sva as AR,T$ as Ix,T0 as Zb,T2 as ou,T5 as $u,TAa as zR,TFa as BE,TOa as iP,TPa as Wt,TQa as $k,TRa a
+  @231281008 N/root/_755.js";import{j5c as Bo,k5c as Lv}from"B:/~BUN/root/_756.js";import{h9c as HP,i9c as k4}from"B:/~BUN/root/_794.js";import{i_c as lo,j_c as x4}from"B:/~BUN/root/_800.js";import{I$c as Ju,K$c as qd,Q$
+  @232041819 TK,OSa as Ct,OUa as wme,OWa as Ame,O_ as bL,Oha as Ode,Oia as vOe,Ooa as zye,Opa as HP,Oqa as AL,Osa as Kde,Ova as jR,P4 as dvt,P5 as ySe,P6 as DVe,P8 as $je,PAa as WSe,PFa as tme,PGa as GSe,PJa as mW,PKa as
+247 "t.keys())if(e.has(n.toLowerCase()))t.delete(n)" count=1 hits=213648464
+  @213648464  HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{createHash as Zwo}from"crypto";function J1(e){return Zwo("sha256").upda
+247 "flushers=e" count=1 hits=213647393
+  @213647393 ,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=H
+247 "r3.flushers" count=3 hits=213647390,213647634,213647652
+  @213647390 aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n
+  @213647634 r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtEx
+  @213647652 UsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTim
+247 "flushAtExit" count=3 hits=200263956,213647756,213654280
+  @200263956 IR\}...1.v.\$\{CLAUDE_PLUGIN_DATA\}...m.\$\{user_config\.([^}]+)\}...K3[.flushAtExit.G...n.K.Cannot destructure property 'pendingUsage' from null or undefined value...*..attributionMcpTool...age
+  @213647756 n(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTimer)e.flushTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}function pln(e){HP().exitFlushesInFlight.
+  @213654280 ((n-e.lastUsedAt)/86400000))}}var pPe=w(()=>{Ko();ip();Ls();zC();uln({flush:oko,flushAtExit:sko})});import{sep as Dln}from"path";function cD(e,t){let n=Ait(e,t)??t,r=n?`${e}@${n.toLowerCase()}`:e;return Nu(J1(r)
+247 "var Xwo=60000" count=1 hits=213648511
+  @213648511 endingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{createHash as Zwo}from"crypto";function J1(e){return Zwo("sha256").update(e+Jwo).dige
+
+## 246 leftover extract TP/Asn/ysn
+246 "function TP(){return" count=1 hits=212280557
+  @212280557 function TP(){return _sn.of(hn().host)}
+246 "class ysn{pendingUsage=new Map" count=1 hits=212280275
+  @212280275 class ysn{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}
+246 "function Asn(e){let{pendingUsage:t}=TP()" count=1 hits=212281518
+  @212281518 function Asn(e){let{pendingUsage:t}=TP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}
+246 "pendingUsage.set(e,{count:1,lastUsedAt:t})" count=1 hits=212280696
+  @212280696 =Date.now(),n=TP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(M6.flushers)ksn(n,M6.flushers)}function ksn(e,t){if(!M6.exitFlushRegistered)M6.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);i
+246 "let{pendingUsage:t}=TP()" count=1 hits=212281534
+  @212281534 Usage.clear(),t}function ygi(e){return TP().pendingUsage.has(e)}function Asn(e){let{pendingUsage:t}=TP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var oyo=60000;var TC=w(()=>{Oe();Ssn()});import{createHash as syo}from"crypto";
+
+## export map walk back from dm as Y$ @219684757
+ as U_,eun as V_,sd as W_,yx as X_,$X as Y_,_x as Z_,Aue as __,qGi as $_,GMe as a$,gPo as b$,qq as c$,VMe as d$,I2i as e$,gm as f$,X_n as g$,F2i as h$,Z_n as i$,_g as j$,oU as k$,UX as l$,ZMe as m$,Nue as n$,eOe as o$,wX as p$,uR as q$,Uue as r$,KD as s$,Bue as t$,YD as u$,zue as v$,ubn as w$,iU as x$,Xp as y$,CT as z$,GKi as A$,Kdt as B$,Qdt as C$,Tbn as D$,bg as E$,W4i as F$,Obn as G$,WPo as H$,q4i as I$,G4i as J$,V4i as K$,K4i as L$,Y4i as M$,X4i as N$,Fbn as O$,ipt as P$,dOe as Q$,wYi as R$,kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,Ale as laa,ako as maa,l3 as naa,lko as oaa,rk as paa,_Pe as qaa,Ple as raa,Zvi as saa,d
+EXPORTWIN "HP as" idx=-1
+EXPORTWIN "sPe as" idx=-1
+EXPORTWIN "yln as" idx=-1
+EXPORTWIN "uln as" idx=-1
+EXPORTWIN "oko as" idx=-1
+EXPORTWIN "xit as" idx=-1
+EXPORTWIN "iln as" idx=-1
+EXPORTWIN "lln as" idx=-1
+EXPORTWIN "aln as" idx=-1
+EXPORTWIN "pln as" idx=-1
+EXPORTWIN "fln as" idx=-1
+EXPORTWIN "mln as" idx=-1
+EXPORTWIN "gln as" idx=-1
+EXPORTWIN "hln as" idx=-1
+EXPORTWIN "dln as" idx=-1
+EXPORTWIN "Aln as" idx=-1
+EXPORTWIN "sko as" idx=-1
+EXPORTWIN "dm as" idx=4757
+EXPORTWIN "uvi as" idx=4766
+EXPORTWIN "xvi as" idx=4785
+EXPORTWIN "xln as" idx=4795
+EXPORTWIN "dPe as" idx=4806
+
+## same-module call tokens 213640000-213660000
+CLUSTER dm( count=1 hits=213647497
+CLUSTER uln( count=2 hits=213647383,213654265
+CLUSTER uvi( count=1 hits=213648371
+CLUSTER sPe( count=4 hits=213648177,213652337,213652401,213652564
+CLUSTER oko( count=1 hits=213652325
+CLUSTER sko( count=1 hits=213652535
+CLUSTER xvi( count=1 hits=213652462
+CLUSTER xit( count=4 hits=213652359,213652436,213652602,213652619
+CLUSTER Aln( count=3 hits=213652388,213652503,213652518
+CLUSTER yln( count=2 hits=213648419,213653132
+CLUSTER HP() count=11 hits=213647410,213647458,213647522,213647862,213647917,213648002,213648104,213648148,213648189,213648385,213648446
+CLUSTER dln( count=3 hits=213647440,213647646,213647674
+CLUSTER pln( count=2 hits=213647855,213652420
+CLUSTER gln( count=2 hits=213648097,213652489
+CLUSTER hln( count=2 hits=213648135,213652366
+
+## hashed import consumers Y$ Z$ $$ aaa _$ baa
+IMP2 "Y$ as " count=2
+  @208903776 $$ as nsc,V$ as osc,z$ as psc,W$ as qsc,$x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as xsc,pm as ysc,e1 as zsc,bT as Asc,Me as Bsc,QV as Csc,ZV as 
+  @225459219 ,Vra as Io,WSa as N,Wra as Ws,XRa as Vo,XSa as Ko,Xra as To,Y$ as qe,YRa as y,Yra as zs,ZLa as _n,ZRa as G,_$ as Hs,_Ra as Ae,a2 as Ms,aSa as Go,bwa as $o,cwa as Js,f
+IMP2 "Z$ as " count=2
+  @208903816 $x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as xsc,pm as ysc,e1 as zsc,bT as Asc,Me as Bsc,QV as Csc,ZV as Dsc,ez as Esc,tz as Fsc,nz as Gsc,rz as 
+  @222244939 m/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,ug
+IMP2 "$$ as " count=2
+  @208903716 In as hsc,H$ as isc,Kx as jsc,Gx as ksc,K$ as lsc,G$ as msc,$$ as nsc,V$ as osc,z$ as psc,W$ as qsc,$x as rsc,j$ as ssc,Y$ as tsc,J$ as usc,fm as vsc,Q$ as wsc,Z$ as 
+  @222197331 pM as F,qM as nt,yM as li}from"B:/~BUN/root/_368.js";import{$$ as tt,A2 as Ze,Ala as ai,Bpa as ot,Cpa as si,F2 as L,L2 as ti,P1 as Qe,Q1 as ei,dia as it,eia as ni,faa
+IMP2 "aaa as " count=1
+  @222874789 Xba as Yt,Xea as os,Yda as fi,Yea as Ge,Zea as qe,_ea as dn,aaa as At,aca as Cn,baa as Ft,bca as Qt,bga as ms,cca as di,daa as xt,efa as as,faa as oi,ffa as gi,hga as 
+IMP2 "_$ as " count=3
+  @208903146 p$ as erc,g$ as frc,m$ as grc,cm as hrc,Gc as irc,Nm as jrc,_$ as krc,lt as lrc,Dx as mrc,Ix as nrc,se as orc,y$ as prc,Ds as qrc,bt as rrc,Ff as src,b$ as trc,E$ as 
+  @222244947 n/legal-and-compliance.  // Version: 2.1.247 import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,ugb as i}f
+  @225459266 Ko,Xra as To,Y$ as qe,YRa as y,Yra as zs,ZLa as _n,ZRa as G,_$ as Hs,_Ra as Ae,a2 as Ms,aSa as Go,bwa as $o,cwa as Js,fsa as Mo,g6 as st,gsa as vo,h6 as Fs,iwa as mt,
+IMP2 "baa as " count=1
+  @222874809 Yda as fi,Yea as Ge,Zea as qe,_ea as dn,aaa as At,aca as Cn,baa as Ft,bca as Qt,bga as ms,cca as di,daa as xt,efa as as,faa as oi,ffa as gi,hga as ys,ifa as ls,iga as 
+IMP2 "Y$," count=8
+  @208829906 getAccountInformation:()=>Ux,getAccountInformationAsync:()=>Y$,getAdditionalModelOptionsCache:()=>eo,getAnthropicApiKey:()=>Xr,getAnthropicApiKeyAsync:()=>F$,getAn
+  @212813322 ,kpb as UXr,kqb as up,lpb as $cr,mpb as U1,npb as i$,rpb as Y$,upb as N4e,wpb as fX,xpb as F4e,ypb as iGt,zpb as nVr}from"B:/~BUN/root/_543.js";import{rqb as VYr,s
+  @219684763  as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as
+  @231274015  JB,IKa as q6,IMa as id,IPa as y6,Ika as oO,Iqa as $O,J5 as Y$,JIa as ZB,JMa as ck,JPa as I0,K5 as X3,K8 as _y,KEa as oq,KIa as N4,KMa as dd,KPa as Mf,L8 as Py,LEa
+  @243152359 g5,T0,Gs,C0,ah,k0,U2,w0,S0,y5,H2,E0,A0,$1,P$,dr,Xc,z$,U$,eA,Y$,x5,b5,y1e,Klt,mE,Zlt,Bve,tA,Fve,$ve,Qlt,N0,Gve,uz,Jlt,exe,ect,tct,tu,rct,el,txe,ict,nct,x2,act,sct,o
+  @243301352 n"),RefResolving:o(()=>f0,"RefResolving"),RegExpUtils:o(()=>Y$,"RegExpUtils"),RootCstNodeImpl:o(()=>yG,"RootCstNodeImpl"),SimpleCache:o(()=>LG,"SimpleCache"),Strea
+  @243333369 ");o(H$,"assertCondition");S(H$,"assertCondition");Y$={};xf(Y$,{NEWLINE_REGEXP:o(()=>Fve,"NEWLINE_REGEXP"),escapeRegExp:o(()=>sy,"escapeRegExp"),getTerminalParts:o
+  @243553619 ncelled"),Reduction:o(()=>iT,"Reduction"),RegExpUtils:o(()=>Y$,"RegExpUtils"),SimpleCache:o(()=>LG,"SimpleCache"),StreamImpl:o(()=>Kc,"StreamImpl"),TreeStreamImpl:
+IMP2 ",Y$}" count=0
+IMP2 "{Y$ as" count=0
+IMP2 "{Z$ as" count=1
+  @222244938 om/docs/en/legal-and-compliance.  // Version: 2.1.247 import{Z$ as a,_$ as M,caa as u,eaa as l,faa as N,oaa as y,yaa as R}from"B:/~BUN/root/_448.js";import{Tgb as _,u
+IMP2 "{$$ as" count=1
+  @222197330 ,pM as F,qM as nt,yM as li}from"B:/~BUN/root/_368.js";import{$$ as tt,A2 as Ze,Ala as ai,Bpa as ot,Cpa as si,F2 as L,L2 as ti,P1 as Qe,Q1 as ei,dia as it,eia as ni,fa
+
+## increment-adjacent unique strings
+INC "pendingUsage.set(e,{count:1,lastUsedAt:t})" count=1 hits=213647588
+  @213647588 =Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegister
+INC "r.count++,r.lastUsedAt=t" count=1 hits=213647556
+  @213647556 (bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,
+INC "lastUsedNumStartups" count=6 hits=200264640,213652760,213653005,213653574,213653970,213654141
+  @200264640 efined value...9...pluginUsage...#.pluginUsageLspGraceAppliedIds...lastUsedNumStartups...E.default-bundle...official	...%.l.community... ...p`.user-local...~p..skill_activ
+  @213652760 {let s=n[r];n[r]={usageCount:(s?.usageCount??0)+o.count,lastUsedAt:o.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:n}}}function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filt
+  @213653005 eturn r;let s={...r.pluginUsage};for(let i of o)s[i]={usageCount:0,lastUsedAt:n,lastUsedNumStartups:r.numStartups};return{...r,pluginUsage:s}},t)}function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerC
+  @213653574 .pluginUsage};for(let i of o){let a=s[i];if(!a)continue;s[i]={...a,lastUsedAt:n,lastUsedNumStartups:r.numStartups}}return{...r,pluginUsage:s}},t)}function Mln(e,t){let n=es().pluginUsageLspGraceAppli
+  @213653970 r(let l of i){let c=a[l];if(!c||c.usageCount>0)continue;a[l]={...c,lastUsedAt:r,lastUsedNumStartups:o.numStartups}}return{...o,pluginUsage:a,pluginUsageLspGraceAppliedIds:[...s,...i]}},t)}function Ol
+  @213654141 [...s,...i]}},t)}function Oln(e,t,n){return{sessionsSinceLastUse:Math.max(0,t-e.lastUsedNumStartups),daysSinceLastUse:Math.max(0,Math.floor((n-e.lastUsedAt)/86400000))}}var pPe=w(()=>{Ko();ip();Ls();
+INC "plugin-telemetry" count=2 hits=199885975,213648682
+  @199885975  try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ...I7.claude-plugin-telemetry-v1... V[.<persisted-output>...F;.</persisted-output>.!...S.[Old tool result content cleare
+  @213648682 e){return Zwo("sha256").update(e+Jwo).digest("hex").slice(0,16)}var Jwo="claude-plugin-telemetry-v1";var Cit=()=>{};class bln{firstPartyPlugins=new Map;loggableMcpServers=new Set}function lPe(){re
+INC "claude-plugin-telemetry-v1" count=2 hits=199885968,213648675
+  @199885968 tyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ...I7.claude-plugin-telemetry-v1... V[.<persisted-output>...F;.</persisted-output>.!...S.[Old tool result content cleared].
+  @213648675 ion J1(e){return Zwo("sha256").update(e+Jwo).digest("hex").slice(0,16)}var Jwo="claude-plugin-telemetry-v1";var Cit=()=>{};class bln{firstPartyPlugins=new Map;loggableMcpServers=new Set}function lPe(){retur

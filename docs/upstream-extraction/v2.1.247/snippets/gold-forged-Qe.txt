@@ -1,0 +1,1 @@
+function Qe(e){return!e.split("/").some((t)=>t===""||t==="."||t==="..")}

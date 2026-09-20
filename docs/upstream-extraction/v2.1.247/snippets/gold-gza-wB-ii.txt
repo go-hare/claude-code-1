@@ -1,0 +1,6 @@
+# wB = _705 ii as cHc; gza imports cHc as wB
+# API updateSettingsForSourceWithTransform:()=>ii
+# Rs (updateSettingsForSource) = ii(e,()=>t,n,r)
+function Rs(e,t,n,r){return ii(e,()=>t,n,r)}
+
+function ii(e,t,n,r){if(e==="policySettings"||e==="flagSettings")return Promise.resolve({error:null});let i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}

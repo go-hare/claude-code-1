@@ -1,0 +1,13 @@
+# Tm = xod = uk. Same _839.js module as `Tm as xod` @207022322
+# bytecode/Version between Tm@206986838 and export@207021184: 0
+# pos=206986838
+
+function Tm(){return n()}
+function n(){return re()?.session??k}
+function ts(e){return e.of(k.host)}
+function f(){let e=re();return e?.session?void 0:e}
+function Mm(e){re=e}
+function wm(){return f()?.sessionId??n().id}
+
+# bootstrap neighbor @2069865xx:
+# function es(){... return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}

@@ -1,0 +1,3 @@
+# 247 function D start=233836523 len=293 sha=4d5984442fec6c27 dist=33170
+
+function D(e){let r=f("url"in e.config&&typeof e.config.url==="string"&&(e.config.scope==="dynamic"||d(e.config))&&l(e.config.url)?{...e.config,url:E(e.config.url)}:e.config),o=e.errorCode;if(o!==void 0&&g.has(o))return e.error??o;if(o){let n=p(o);return r?`${n} at ${r}`:n}return e.error??""}

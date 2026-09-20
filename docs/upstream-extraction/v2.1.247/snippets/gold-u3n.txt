@@ -1,0 +1,3 @@
+# 247 offset=215401823 needle="function u3n(){"
+
+od2","")||we("tengu_amber_redwood3","")}function u3n(){return Boolean(V.DISABLE_COMPACT||V.DISABLE_AUTO_COMPACT)}function Nm(){if(u3n())return!1;return ah("autoCompactEnabled",!0).value}function wSl(){if(u3n())return!1;let e=ah("autoCompactEnabled",!0);if(e.value)return!1;if(e.source==="userSettings")return!0;if(e.source==="legacyGlobalConfig")return vy().includes("userSettings");return!1}class d3n{latched=void 0;isOpen(){return this.la

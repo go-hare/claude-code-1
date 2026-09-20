@@ -1,0 +1,3 @@
+# off=206310612 hit=1
+
+ull;let{config:s,fromFile:n}=r,i=s.authentication.credentials_path||!n?s:{...s,authentication:{...s.authentication,credentials_path:await Lo(s,t)??void 0}};return Rn(i,e)}function Pc(e,t,r,s){switch(e.authentication.type){case"oidc_federation":{let n=e.authentication,i=Tc(n);if(!i)throw new C("oidc_federation config requires an identity token (set authentication.identity_token, ANTHROPIC_IDENTITY_

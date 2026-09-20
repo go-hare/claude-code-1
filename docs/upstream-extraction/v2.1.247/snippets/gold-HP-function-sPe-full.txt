@@ -1,0 +1,7 @@
+# LOCKED sPe @213648168 end=213648362 len=194
+# name collision function sPe( count=2 — other is CSS createElement @241866153
+# bind via unique function sPe(){let e=HP() count=1
+# unique pendingUsage.clear() count=1
+# unique pendingUsage.entries() count=1
+# not in _448 export map. same-module callers: oko, Aln, sko
+function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}

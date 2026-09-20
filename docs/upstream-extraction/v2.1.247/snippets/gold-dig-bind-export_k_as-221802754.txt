@@ -1,0 +1,3 @@
+# offset=221802754
+
+t/_849.js";import"B:/~BUN/root/_850.js";export{k as attachHandler,g as bgVerbExtraArgsNote,w as callerProviderEnv,x as detailForStderr,v as flagsWithoutPositional,f as formatBgHints,c as handleBgFlag,h as listJobIdsV5,j as logsHandler,s as 

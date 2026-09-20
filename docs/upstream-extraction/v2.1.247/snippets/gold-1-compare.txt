@@ -1,0 +1,55 @@
+# gold-1-compare 247 vs 246 extracted function SHAs
+
+246 functions: 17
+247 functions: 16
+shared sha: 7
+247-only sha: 9
+246-only sha: 10
+
+## 247 functions
+- function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc from "SendFeedback" shared=false
+- function Le() start=232015801 end=232016944 len=1143 sha=e2e71de212b4451e from "SendFeedback" shared=true
+- async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d from "feedbackDrafts" shared=false
+- async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4 from "feedbackDrafts" shared=false
+- function Ffs() start=216529234 end=216529291 len=57 sha=6568f645721a8873 from "feedbackDrafts" shared=false
+- function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44 from "feedbackDrafts" shared=false
+- function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c from "feedbackDrafts" shared=false
+- async function ot() start=232017716 end=232020463 len=2747 sha=1eb5077f676f7c29 from "feedbackDrafts" shared=true
+- function vqe() start=233009201 end=233009272 len=71 sha=eddeffe65dfddd51 from "feedbackDrafts" shared=false
+- function ore() start=233009272 end=233009389 len=117 sha=13f2e99a184df2d3 from "feedbackDrafts" shared=false
+- function mu() start=235799399 end=235820713 len=21314 sha=c7e741abcbaf8640 from "feedbackDrafts" shared=false
+- function ee() start=232014080 end=232015287 len=1207 sha=07fbddf252d9314e from "fitFeedbackPayloadToBudget" shared=true
+- function Oe() start=232016944 end=232017621 len=677 sha=90e2c265307d953c from "parseDraftTranscriptMessages" shared=true
+- function Ps() start=222029808 end=222030551 len=743 sha=8f61c2d9f132bd21 from "/feedback has been disabled" shared=true
+- async function ut() start=232020463 end=232020669 len=206 sha=bcdea15d40cf6f62 from "tengu_feedback_draft_discarded" shared=true
+- function sr() start=236994310 end=237004572 len=10262 sha=80c1d6def2674e0b from "The draft is still queued. Try again later" shared=true
+
+## 246 functions
+- function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112 from "SendFeedback" shared=false
+- function Le() start=229885474 end=229886617 len=1143 sha=e2e71de212b4451e from "SendFeedback" shared=true
+- async function lls() start=215139056 end=215139644 len=588 sha=fa50fc305f25bce4 from "feedbackDrafts" shared=false
+- async function vpr() start=215141832 end=215142911 len=1079 sha=5d27b3767c61be53 from "feedbackDrafts" shared=false
+- function mls() start=215147649 end=215147706 len=57 sha=21529a45036a3584 from "feedbackDrafts" shared=false
+- function ipc() start=215148087 end=215148305 len=218 sha=a1c14a4a44144676 from "feedbackDrafts" shared=false
+- function pa() start=224017492 end=224038324 len=20832 sha=c2f47527ae2a9e07 from "feedbackDrafts" shared=false
+- async function ot() start=229887389 end=229890136 len=2747 sha=1eb5077f676f7c29 from "feedbackDrafts" shared=true
+- function yqe() start=230877278 end=230877349 len=71 sha=2ddfc5210abead65 from "feedbackDrafts" shared=false
+- function xne() start=230877349 end=230877466 len=117 sha=d71d1c41a19605b8 from "feedbackDrafts" shared=false
+- function uu() start=233729822 end=233751132 len=21310 sha=72a41750827ed5fd from "feedbackDrafts" shared=false
+- function ee() start=229883753 end=229884960 len=1207 sha=07fbddf252d9314e from "fitFeedbackPayloadToBudget" shared=true
+- function Oe() start=229886617 end=229887294 len=677 sha=90e2c265307d953c from "parseDraftTranscriptMessages" shared=true
+- function Ps() start=220142243 end=220142986 len=743 sha=8f61c2d9f132bd21 from "/feedback has been disabled" shared=true
+- async function Kt() start=229814392 end=229944043 len=129651 sha=ae37f52ae48e710c from "Feedback payload too large. Try again without the transcript, or shorten the details" shared=false
+- async function ut() start=229890136 end=229890342 len=206 sha=bcdea15d40cf6f62 from "tengu_feedback_draft_discarded" shared=true
+- function sr() start=234951979 end=234962241 len=10262 sha=80c1d6def2674e0b from "The draft is still queued. Try again later" shared=true
+
+## 247-only
+- function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc from "SendFeedback"
+- async function Mfs() start=216520641 end=216521229 len=588 sha=62a73a5a628bcd0d from "feedbackDrafts"
+- async function bgr() start=216523417 end=216524496 len=1079 sha=b8f90f53a0767eb4 from "feedbackDrafts"
+- function Ffs() start=216529234 end=216529291 len=57 sha=6568f645721a8873 from "feedbackDrafts"
+- function Ewc() start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44 from "feedbackDrafts"
+- function pa() start=225091429 end=225112261 len=20832 sha=779a12bd2819ef5c from "feedbackDrafts"
+- function vqe() start=233009201 end=233009272 len=71 sha=eddeffe65dfddd51 from "feedbackDrafts"
+- function ore() start=233009272 end=233009389 len=117 sha=13f2e99a184df2d3 from "feedbackDrafts"
+- function mu() start=235799399 end=235820713 len=21314 sha=c7e741abcbaf8640 from "feedbackDrafts"

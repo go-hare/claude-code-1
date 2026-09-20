@@ -1,0 +1,2 @@
+# needle=function ii( pos=221991194
+function ii(t){if(t==="service"||t==="transient"||t==="foreground")return t;if(t==="auto")return"transient";return}

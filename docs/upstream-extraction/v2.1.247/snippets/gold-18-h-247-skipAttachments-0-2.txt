@@ -1,0 +1,10 @@
+# ver=247 offset=215173834 needle="skipAttachments:!0"
+
+ay be temporary). Retry in a moment; if it persists, install the app:
+${bEt}`:`The Claude GitHub app must be installed on this repository first.
+${bEt}`;case"policy_blocked":return"Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them."}}function Yze(e,t,n,r,o,s){if(!dT(e,r).claimed)return;switch(n){case"completed":ce("task_remote_agent");break;case"failed":J("task_remote_agent","task_remote_agent_failed");break;case"blocked":J("task_remote_agent","requires_action");break;case"killed":break}let i=n==="completed"?"completed successfully":n==="failed"?"failed":n==="blocked"?"is blocked":"was stopped";ua({value:ql({taskId:e,toolUseId:o,taskType:"remote_agent",outputFile:ji(e),status:n,summary:s??`${Rge}${t}" ${i}`}),mode:"task-notification",skipAttachments:!0,agentId:Tr(),priority:"next",taskId:e})}function i5o(e){let t=hKn(e);if(t!==null)return t;return e.filter((r)=>r.type==="assistant").map((r)=>is(r.message.content,`
+`)).join(`
+`).trim()||null}function hKn(e){for(let r=e.length-1;r>=0;r--){let o=e[r];if(o?.type==="system"&&(o.subtype==="hook_progress"||o.subtype==="hook_response")){let s=Uf(o.stdout,Xze);if(s?.trim())return s.trim()}}for(let r=e.length-1;r>=0;r--){let o=e[r];if(o?.type!=="assistant")continue;let s=is(o.message.content,`
+`),i=Uf(s,Xze);if(i?.trim())return i.trim()}let t=e.filter((r)=>r.type==="system"&&(r.subtype==="hook_progress"||r.subtype==="hook_response")).map((r)=>r.stdout).join(""),n=Uf(t,Xze);if(n?.trim())return n.trim();return null}function a5o(e){try{let t=ut(e);if(t&&typeof t==="object"&&!Array.isArray(t)){let n=t.error;if(typeof n==="string")return n}}catch{}return null}function l5o(e){try{let t=ut(e);return Array.isArray(t)?t.length:void 0}catch{return}}async function c5o(e,t,n,r,o,s,i,a){if(!dT(e,n).claimed)return;let l=l5o(t);ce("task_remote_agent",{remote_task_type:de("ultrareview"),...l!==void 0&&{findings_count:l}});let c=r?`
+
+This review was launched with --fix: apply these findi

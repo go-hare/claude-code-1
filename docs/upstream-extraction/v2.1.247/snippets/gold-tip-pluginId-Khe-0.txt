@@ -1,0 +1,2 @@
+# class Khe pos=232387232 end=232387485 len=253
+class Khe{fired=new Set;fire(e,t){if(e<=0)return;let o=e>t?"true":"false",n=e>=EV&&t<EV?"true":"false",r=`${o}|${n}`;if(this.fired.has(r))return;this.fired.add(r),U("tengu_dead_probe_legacy_plugin_tip_counts",{changes_max:ke(o),changes_outcome:ke(n)})}}

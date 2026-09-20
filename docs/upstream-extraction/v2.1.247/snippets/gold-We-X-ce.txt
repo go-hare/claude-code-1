@@ -1,0 +1,14 @@
+# official credentialsStoreFor / sessionServicesFor — NOT We()
+# @210986760 UNIQUE
+
+function X(e,t=S){return v()&&e!==void 0?G(t):void 0}
+function ce(e){return{storageV5:e,credentials:X(e)}}
+function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}
+var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")});
+export{X as X7b,ce as Y7b,G as Z7b,Q as _7b};
+
+# X = credentialsStoreFor (local credentialsStore.ts)
+# ce = sessionServicesFor
+# G = tryCreateCredentialsStore
+# v() = hover-rest on (local isHoverRestOn / Po)
+# S = getSecureStorage() default backend

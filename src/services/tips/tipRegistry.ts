@@ -1,6 +1,12 @@
 import chalk from 'chalk'
 import { logForDebugging } from 'src/utils/debug.js'
 import { fileHistoryEnabled } from 'src/utils/fileHistory.js'
+import { getPluginSuggestionMarketplaces } from '../../utils/plugins/marketplaceHelpers.js'
+import type { KnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js'
+import {
+  loadOrgSpinnerTips,
+  shouldExcludeDefaultSpinnerTips,
+} from './orgTips.js'
 import {
   getInitialSettings,
   getSettings_DEPRECATED,
@@ -35,10 +41,15 @@ import {
   isVSCodeInstalled,
   isWindsurfInstalled,
 } from '../../utils/ide.js'
+import { getIsRemoteMode } from '../../bootstrap/state.js'
 import {
   getMainLoopModel,
   getUserSpecifiedModelSetting,
 } from '../../utils/model/model.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from '../../utils/model/providers.js'
 import { getPlatform } from '../../utils/platform.js'
 import { isPluginInstalled } from '../../utils/plugins/installedPluginsManager.js'
 import { loadKnownMarketplacesConfigSafe } from '../../utils/plugins/marketplaceManager.js'
@@ -105,6 +116,7 @@ async function isMarketplacePluginRelevant(
 const externalTips: Tip[] = [
   {
     id: 'new-user-warmup',
+    providerAgnostic: true,
     content: async () =>
       `Start with small features or bug fixes, tell Claude to propose a plan, and verify its suggested edits`,
     cooldownSessions: 3,
@@ -115,6 +127,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'plan-mode-for-complex-tasks',
+    providerAgnostic: true,
     content: async () =>
       `Use Plan Mode to prepare for a complex request before making changes. Press ${getShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab')} twice to enable.`,
     cooldownSessions: 5,
@@ -129,6 +142,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'default-permission-mode-config',
+    providerAgnostic: true,
     content: async () =>
       `Use /config to change your default permission mode (including Plan Mode)`,
     cooldownSessions: 10,
@@ -151,6 +165,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'git-worktrees',
+    providerAgnostic: true,
     content: async () =>
       'Use git worktrees to run multiple Claude sessions in parallel.',
     cooldownSessions: 10,
@@ -166,6 +181,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'color-when-multi-clauding',
+    providerAgnostic: true,
     content: async () =>
       'Running multiple Claude sessions? Use /color and /rename to tell them apart at a glance.',
     cooldownSessions: 10,
@@ -177,6 +193,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'terminal-setup',
+    providerAgnostic: true,
     content: async () =>
       env.terminal === 'Apple_Terminal'
         ? 'Run /terminal-setup to enable convenient terminal integration like Option + Enter for new line and more'
@@ -192,6 +209,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'shift-enter',
+    providerAgnostic: true,
     content: async () =>
       env.terminal === 'Apple_Terminal'
         ? 'Press Option+Enter to send a multi-line message'
@@ -208,6 +226,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'shift-enter-setup',
+    providerAgnostic: true,
     content: async () =>
       env.terminal === 'Apple_Terminal'
         ? 'Run /terminal-setup to enable Option+Enter for new lines'
@@ -225,6 +244,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'memory-command',
+    providerAgnostic: true,
     content: async () => 'Use /memory to view and manage Claude memory',
     cooldownSessions: 15,
     async isRelevant() {
@@ -234,12 +254,14 @@ const externalTips: Tip[] = [
   },
   {
     id: 'theme-command',
+    providerAgnostic: true,
     content: async () => 'Use /theme to change the color theme',
     cooldownSessions: 20,
     isRelevant: async () => true,
   },
   {
     id: 'colorterm-truecolor',
+    providerAgnostic: true,
     content: async () =>
       'Try setting environment variable COLORTERM=truecolor for richer colors',
     cooldownSessions: 30,
@@ -247,6 +269,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'powershell-tool-env',
+    providerAgnostic: true,
     content: async () =>
       'PowerShell is the default shell on Windows. Set CLAUDE_CODE_USE_POWERSHELL_TOOL=0 or defaultShell=bash to prefer Bash/Git Bash instead.',
     cooldownSessions: 20,
@@ -257,6 +280,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'status-line',
+    providerAgnostic: true,
     content: async () =>
       'Use /statusline to set up a custom status line that will display beneath the input box',
     cooldownSessions: 25,
@@ -264,6 +288,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'prompt-queue',
+    providerAgnostic: true,
     content: async () =>
       'Hit Enter to queue up additional messages while Claude is working.',
     cooldownSessions: 5,
@@ -274,6 +299,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'enter-to-steer-in-relatime',
+    providerAgnostic: true,
     content: async () =>
       'Send messages to Claude while it works to steer Claude in real-time',
     cooldownSessions: 20,
@@ -281,6 +307,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'todo-list',
+    providerAgnostic: true,
     content: async () =>
       'Ask Claude to create a todo list when working on complex tasks to track progress and remain on track',
     cooldownSessions: 20,
@@ -288,6 +315,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'vscode-command-install',
+    providerAgnostic: true,
     content: async () =>
       `Open the Command Palette (Cmd+Shift+P) and run "Shell Command: Install '${env.terminal === 'vscode' ? 'code' : env.terminal}' command in PATH" to enable IDE integration`,
     cooldownSessions: 0,
@@ -315,6 +343,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'ide-upsell-external-terminal',
+    providerAgnostic: true,
     content: async () => 'Connect Claude to your IDE · /ide',
     cooldownSessions: 4,
     async isRelevant() {
@@ -369,6 +398,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'permissions',
+    providerAgnostic: true,
     content: async () =>
       'Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools',
     cooldownSessions: 10,
@@ -379,6 +409,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'drag-and-drop-images',
+    providerAgnostic: true,
     content: async () =>
       'Did you know you can drag and drop image files into your terminal?',
     cooldownSessions: 10,
@@ -386,6 +417,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'paste-images-mac',
+    providerAgnostic: true,
     content: async () =>
       'Paste images into Claude Code using control+v (not cmd+v!)',
     cooldownSessions: 10,
@@ -393,6 +425,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'double-esc',
+    providerAgnostic: true,
     content: async () =>
       'Double-tap esc to rewind the conversation to a previous point in time',
     cooldownSessions: 10,
@@ -400,6 +433,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'double-esc-code-restore',
+    providerAgnostic: true,
     content: async () =>
       'Double-tap esc to rewind the code and/or conversation to a previous point in time',
     cooldownSessions: 10,
@@ -407,6 +441,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'continue',
+    providerAgnostic: true,
     content: async () =>
       'Run claude --continue or claude --resume to resume a conversation',
     cooldownSessions: 10,
@@ -414,6 +449,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'rename-conversation',
+    providerAgnostic: true,
     content: async () =>
       'Name your conversations with /rename to find them easily in /resume later',
     cooldownSessions: 15,
@@ -422,6 +458,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'custom-commands',
+    providerAgnostic: true,
     content: async () =>
       'Create skills by adding .md files to .claude/skills/ in your project or ~/.claude/skills/ for skills that work in any project',
     cooldownSessions: 15,
@@ -432,6 +469,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'shift-tab',
+    providerAgnostic: true,
     content: async () =>
       `Hit ${getShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab')} to cycle between default, accept edits, plan, auto, and bypass modes`,
     cooldownSessions: 10,
@@ -439,6 +477,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'image-paste',
+    providerAgnostic: true,
     content: async () =>
       `Use ${getShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v')} to paste images from your clipboard`,
     cooldownSessions: 20,
@@ -449,6 +488,7 @@ const externalTips: Tip[] = [
   // (tengu_alder_compass GB, default false) — local has no powerup tip id.
   {
     id: 'agent-flag',
+    providerAgnostic: true,
     content: async () =>
       'Use --agent <agent_name> to directly start a conversation with a subagent',
     cooldownSessions: 15,
@@ -520,6 +560,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'opusplan-mode-reminder',
+    providerAgnostic: true,
     content: async () =>
       `Your default model setting is Opus Plan Mode. Press ${getShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab')} twice to activate Plan Mode and plan with Claude Opus.`,
     cooldownSessions: 2,
@@ -537,6 +578,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'frontend-design-plugin',
+    providerAgnostic: true,
     content: async (ctx?) => {
       const blue = color('suggestion', ctx?.theme ?? 'dark')
       return `Working with HTML/CSS? Install the frontend-design plugin:\n${blue(`/plugin install frontend-design@${OFFICIAL_MARKETPLACE_NAME}`)}`
@@ -594,6 +636,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'subagent-fanout-nudge',
+    providerAgnostic: true,
     content: async (ctx?) => {
       const blue = color('suggestion', ctx?.theme ?? 'dark')
       const variant = getFeatureValue_CACHED_MAY_BE_STALE<
@@ -616,6 +659,7 @@ const externalTips: Tip[] = [
   },
   {
     id: 'loop-command-nudge',
+    providerAgnostic: true,
     content: async (ctx?) => {
       const blue = color('suggestion', ctx?.theme ?? 'dark')
       const variant = getFeatureValue_CACHED_MAY_BE_STALE<
@@ -702,38 +746,113 @@ const internalOnlyTips: Tip[] =
       ]
     : []
 
-function getCustomTips(): Tip[] {
-  const settings = getInitialSettings()
-  const override = settings.spinnerTipsOverride
-  if (!override?.tips?.length) return []
-
-  return override.tips.map((content, i) => ({
-    id: `custom-tip-${i}`,
-    content: async () => content,
-    cooldownSessions: 0,
-    isRelevant: async () => true,
-  }))
+/** densable `N` / `h` / `FV` */
+class WeakOwnerCache<T> {
+  #e = new WeakMap<object, T>()
+  constructor(private readonly factory: () => T) {}
+  of(owner: object): T {
+    const hit = this.#e.get(owner)
+    if (hit) return hit
+    const created = this.factory()
+    this.#e.set(owner, created)
+    return created
+  }
 }
 
-export async function getRelevantTips(context?: TipContext): Promise<Tip[]> {
-  const settings = getInitialSettings()
-  const override = settings.spinnerTipsOverride
-  const customTips = getCustomTips()
+/** densable `Xt` */
+export class SpinnerTipHostState {
+  knownMarketplaces: Promise<KnownMarketplacesConfig> | undefined
+  marketplacePluginTips: Promise<Tip[]> | undefined
+  failedTipIds = new Set<string>()
 
-  // If excludeDefault is true and there are custom tips, skip built-in tips entirely
-  if (override?.excludeDefault && customTips.length > 0) {
-    return customTips
+  getKnownMarketplaces(storageV5?: unknown): Promise<KnownMarketplacesConfig> {
+    return (this.knownMarketplaces ??=
+      loadKnownMarketplacesConfigSafe(storageV5))
   }
 
-  // Official Q4o: built-ins + marketplace-declared (fHa) + custom tips.
-  // Built-in first-party tips are never gated by pluginSuggestionMarketplaces.
-  const marketplaceTips = await loadMarketplaceDeclaredPluginTips()
-  const tips = [...externalTips, ...internalOnlyTips, ...marketplaceTips]
-  const isRelevant = await Promise.all(
-    tips.map(_ => _.isRelevant?.(context) ?? Promise.resolve(true)),
+  getMarketplacePluginTips(storageV5?: unknown): Promise<Tip[]> {
+    return (this.marketplacePluginTips ??=
+      this.loadMarketplacePluginTips(storageV5))
+  }
+
+  async loadMarketplacePluginTips(storageV5?: unknown): Promise<Tip[]> {
+    const allowlist = getPluginSuggestionMarketplaces()
+    if (allowlist.length === 0) return []
+    return loadMarketplaceDeclaredPluginTips(
+      storageV5,
+      await this.getKnownMarketplaces(storageV5),
+      v5 => this.getKnownMarketplaces(v5),
+    )
+  }
+}
+
+const spinnerTipHosts = new WeakOwnerCache(() => new SpinnerTipHostState())
+
+/** densable `h.of(e.session.host)` / `FV.of(t.session.host)`. */
+export function spinnerTipHostFromContext(
+  context: TipContext,
+): SpinnerTipHostState {
+  return spinnerTipHosts.of(context.session.host)
+}
+
+/** densable `Do` / `$he`. */
+export async function tipIsRelevant(
+  tip: Tip,
+  context: TipContext,
+): Promise<boolean> {
+  try {
+    return await tip.isRelevant(context)
+  } catch (err) {
+    spinnerTipHostFromContext(context).failedTipIds.add(tip.id)
+    logForDebugging(`tip isRelevant threw: ${String(err)}`)
+    return false
+  }
+}
+
+/** densable `Lo` / `jhe` — remote mode only; else advertised commands pass. */
+export async function advertisedCommandAllowed(
+  command: string | undefined,
+): Promise<boolean> {
+  if (command === undefined) return true
+  if (!getIsRemoteMode()) return true
+  const { filterCommandsForRemoteMode, getBuiltinCommands } = await import(
+    '../../commands.js'
   )
-  // densable Joi: cooldownSessions + optional maxLifetimeShows (Svr < max)
-  const filtered = tips
+  return filterCommandsForRemoteMode(getBuiltinCommands()).some(
+    cmd => cmd.name === command || cmd.aliases?.includes(command),
+  )
+}
+
+export async function getRelevantTips(context: TipContext): Promise<Tip[]> {
+  // densable 2.1.247 `Pi`: org tips cooldown-filtered first (`s`), then
+  // `o>0&&Wt()` returns only `s`. Built-ins Joi, then `[...filtered, ...s]`.
+  const host = context.session.host
+  const t = spinnerTipHosts.of(host)
+  const { tips: customTips, trustedCount } = await loadOrgSpinnerTips(host)
+  const orgTips = customTips.filter(
+    tip => getSessionsSinceLastShown(tip.id) >= tip.cooldownSessions,
+  )
+  if (shouldExcludeDefaultSpinnerTips() && trustedCount > 0) {
+    return orgTips
+  }
+
+  const marketplaceTips = await t.getMarketplacePluginTips(context.storageV5)
+  const tips = [...externalTips, ...internalOnlyTips, ...marketplaceTips]
+  // densable `d=Pe()!=="firstParty"||!Ie()` — Ie ≡ Gd first-party base URL
+  const restrictToProviderAgnostic =
+    getAPIProvider() !== 'firstParty' || !isFirstPartyAnthropicBaseUrl()
+  const notFailed = tips.filter(tip => !t.failedTipIds.has(tip.id))
+  const providerScoped = restrictToProviderAgnostic
+    ? notFailed.filter(tip => tip.providerAgnostic)
+    : notFailed
+  const advertisedOk = await Promise.all(
+    providerScoped.map(tip => advertisedCommandAllowed(tip.advertisedCommand)),
+  )
+  const advertised = providerScoped.filter((_, i) => advertisedOk[i])
+  const isRelevant = await Promise.all(
+    advertised.map(tip => tipIsRelevant(tip, context)),
+  )
+  const filtered = advertised
     .filter((_, index) => isRelevant[index])
     .filter(_ => getSessionsSinceLastShown(_.id) >= _.cooldownSessions)
     .filter(
@@ -742,5 +861,5 @@ export async function getRelevantTips(context?: TipContext): Promise<Tip[]> {
         getTipLifetimeShownCount(_.id) < _.maxLifetimeShows,
     )
 
-  return [...filtered, ...customTips]
+  return [...filtered, ...orgTips]
 }

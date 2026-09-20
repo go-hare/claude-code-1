@@ -1,0 +1,33 @@
+# offset=225050962 hit=2/4 needle="`Tip: "
+
+e Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Bla as n,Cla as g,bsa as f,lpa as a,lsa as S,mpa as p,r0a as y,rpa as u,t0a as A}from"B:/~BUN/root/_448.js";import{Hob as i,Pob as C}from"B:/~BUN/root/_541.js";import{uhc as l,ygc as m}from"B:/~BUN/root/_675.js";import{FBd as d}from"B:/~BUN/root/_850.js";async function b({toolUseContext:e,forkContextMessages:t,mainThreadAgentDefinition:o}){let{systemPrompt:s,userContext:r,systemContext:P}=f()??await c(e,o);return{systemPrompt:s,userContext:r,systemContext:P,toolUseContext:e,forkContextMessages:t}}async function c(e,t){let[o,s,r]=await Promise.all([e.renderedSystemPrompt??h(e,t),p(e.session,e.storageV5,e.credentials),a(e.session,e.options.cacheBreakerPhrase)]);return{systemPrompt:o,userContext:s,systemContext:r}}async function h(e,t){let o=i(e),s=await y(e.options.tools,m({permissionMode:o.mode,mainLoopModel:e.options.mainLoopModel}),Array.from(o.additionalWorkingDirectories.keys()));return n({mainThreadAgentDefinition:t,toolUseContext:e,customSystemPrompt:e.options.customSystemPrompt,defaultSystemPrompt:s,appendSystemPrompt:e.options.appendSystemPrompt})}var M=d(()=>{A();u();C();S();l();g()});
+export{b as aO,M as bO};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ffc as n,Gfc as r,Ghc as s,Hfc as u,Qfc as i,sgc as l,uhc as o}from"B:/~BUN/root/_675.js";import{FBd as a}from"B:/~BUN/root/_850.js";function c(){let e=i();if(e==="opus"&&n())return{alias:"opus[1m]",name:"Opus 1M",multiplier:5};else if(e==="sonnet"&&r()&&!s(l()))return{alias:"sonnet[1m]",name:"Sonnet 1M",multiplier:5};return null}function d(e){let t=c();if(!t)return null;switch(e){case"warning":return`/model ${t.alias}`;case"tip":return`Tip: You have access to ${t.name} with ${t.multiplier}x more context`;default:return null}}var m=a(()=>{u();o()});
+export{d as cO,m as dO};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{aO as z,bO as ne}from"B:/~BUN/root/_386.js";import{cO as j,dO as se}from"B:/~BUN/root/_387.js";import{$1 as P,Ara as te,BPa as E,CPa as ue,F0 as h,Isa as g,Jsa as N,Ksa as l,Msa as U,Osa as ae,S0 as W,_Sa as K,a2 as Y,fYa as G,oTa as de,psa as D,qpa as b,qsa as u,rpa as x,rsa as B,ssa as F,tra as A,usa as re,wra as ee,wsa as L,xZa as le,xra as O,xsa as oe,yra as I}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";import"B:/~BUN/root/_450.js";import"B:/~BUN/root/_451.js";import"B:/~BUN/root/_452.js";import"B:/~BUN/root/_453.js";import"B:/~BUN/root/_454.js";import"B:/~BUN/root/_455.js";import"B:/~BUN/root/_456.js";import"B:/~BUN/root/_457.js";import"B:/~BUN/root/_458.js";import"B:/~BUN/root/_459.js";import"B:/~BUN/root/_460.js";import"B:/~BUN/root/_461.js";import"B:/~BUN/root/_462.js";import"B:/~BUN/root/_463.js";import"B:/~BUN/root/_464.js";import"B:/~BUN/root/_465.js";import"B:/~BUN/root/_466.js";import"B:/~BUN/root/_467.js";import"B:/~BUN/root/_468.js";import"B:/~BUN/root/_469.js";import"B:/~BUN/root/_470.js";import"B:/~BUN/root/_471.js";import"B:/~BUN/root/_472.js";import"B:/~BUN/root/_473.js";import"B:/~BUN/root/_474.js";import"B:/~BUN/root/_475.js";import"B:/~BUN/root/_476.js";import"B:/~BUN/root/_477.js";i

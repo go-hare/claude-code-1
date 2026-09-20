@@ -36,6 +36,7 @@ import { resolveShownArchiveHeadersHelper } from '../../utils/plugins/marketplac
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
+import { Io, re, Vr } from '../../utils/plugins/escapeSafeText.js';
 import { truncateToWidth } from '../../utils/truncate.js';
 import { useAppStateStore, useSetAppState } from '../../state/AppState.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
@@ -487,15 +488,17 @@ export function BrowseMarketplace({
     // Handle installation results
     if (failureCount === 0) {
       const suffix = formatBatchInstallActivateSuffix(activateOutcome, successCount);
-      setResult(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`);
+      setResult(re(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`));
     } else if (successCount === 0) {
       // All failed - show error with reasons
       setError(`Failed to install: ${formatFailureDetails(newFailedPlugins, true)}`);
     } else {
       const suffix = formatPartialBatchInstallActivateSuffix(activateOutcome, successCount);
       setResult(
-        `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
-          `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+        re(
+          `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
+            `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+        ),
       );
     }
 
@@ -551,7 +554,7 @@ export function BrowseMarketplace({
         return;
       }
       const outcome = await tryActivateInstalled(result.closure);
-      setResult(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`);
+      setResult(re(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
@@ -565,7 +568,7 @@ export function BrowseMarketplace({
   // Handle error state
   useEffect(() => {
     if (error) {
-      setResult(error);
+      setResult(re(error));
     }
   }, [error, setResult]);
 
@@ -707,7 +710,7 @@ export function BrowseMarketplace({
     const { plugin, pluginId, closure } = viewState;
     async function finish(baseMsg: string): Promise<void> {
       const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
-      setResult(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`);
+      setResult(re(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`));
       if (outcome === 'reload-required' && onInstallComplete) {
         void onInstallComplete();
       }
@@ -720,13 +723,13 @@ export function BrowseMarketplace({
         onDone={(outcome, detail) => {
           switch (outcome) {
             case 'configured':
-              void finish(`✓ Installed and configured ${plugin.name}.`);
+              void finish(`✓ Installed and configured ${re(plugin.name)}.`);
               break;
             case 'skipped':
-              void finish(`✓ Installed ${plugin.name}.`);
+              void finish(`✓ Installed ${re(plugin.name)}.`);
               break;
             case 'error':
-              void finish(`Installed but failed to save config: ${detail}`);
+              void finish(`Installed but failed to save config: ${detail !== undefined ? re(detail) : ''}`);
               break;
           }
         }}
@@ -786,14 +789,14 @@ export function BrowseMarketplace({
           <Box key={marketplace.name} flexDirection="column" marginBottom={index < marketplaces.length - 1 ? 1 : 0}>
             <Box>
               <Text color={selectedIndex === index ? 'suggestion' : undefined}>
-                {selectedIndex === index ? figures.pointer : ' '} {marketplace.name}
+                {selectedIndex === index ? figures.pointer : ' '} {re(marketplace.name)}
               </Text>
             </Box>
             <Box marginLeft={2}>
               <Text dimColor>
                 {marketplace.totalPlugins} {plural(marketplace.totalPlugins, 'plugin')} available
                 {marketplace.installedCount > 0 && ` · ${marketplace.installedCount} already installed`}
-                {marketplace.source && ` · ${marketplace.source}`}
+                {marketplace.source && ` · ${re(marketplace.source)}`}
               </Text>
             </Box>
           </Box>
@@ -831,11 +834,11 @@ export function BrowseMarketplace({
 
         {/* Plugin metadata */}
         <Box flexDirection="column" marginBottom={1}>
-          <Text bold>{selectedPlugin.entry.name}</Text>
-          {selectedPlugin.entry.version && <Text dimColor>Version: {selectedPlugin.entry.version}</Text>}
+          <Text bold>{Vr(selectedPlugin.entry)}</Text>
+          {selectedPlugin.entry.version && <Text dimColor>Version: {re(selectedPlugin.entry.version)}</Text>}
           {selectedPlugin.entry.description && (
             <Box marginTop={1}>
-              <Text>{selectedPlugin.entry.description}</Text>
+              <Text>{Io(selectedPlugin.entry.description)}</Text>
             </Box>
           )}
           {selectedPlugin.entry.author && (
@@ -843,8 +846,8 @@ export function BrowseMarketplace({
               <Text dimColor>
                 By:{' '}
                 {typeof selectedPlugin.entry.author === 'string'
-                  ? selectedPlugin.entry.author
-                  : selectedPlugin.entry.author.name}
+                  ? re(selectedPlugin.entry.author)
+                  : re(selectedPlugin.entry.author.name)}
               </Text>
             </Box>
           )}
@@ -1002,8 +1005,8 @@ export function BrowseMarketplace({
                     : isSelectedForInstall
                       ? figures.radioOn
                       : figures.radioOff}{' '}
-                {plugin.entry.name}
-                {plugin.entry.category && <Text dimColor> [{plugin.entry.category}]</Text>}
+                {Vr(plugin.entry)}
+                {plugin.entry.category && <Text dimColor> [{re(plugin.entry.category)}]</Text>}
                 {plugin.entry.tags?.includes('community-managed') && <Text dimColor> [Community Managed]</Text>}
                 {plugin.isInstalled && <Text dimColor> (installed)</Text>}
                 {installCounts && selectedMarketplace === OFFICIAL_MARKETPLACE_NAME && (
@@ -1016,8 +1019,8 @@ export function BrowseMarketplace({
             </Box>
             {plugin.entry.description && (
               <Box marginLeft={4}>
-                <Text dimColor>{truncateToWidth(plugin.entry.description, 60)}</Text>
-                {plugin.entry.version && <Text dimColor> · v{plugin.entry.version}</Text>}
+                <Text dimColor>{truncateToWidth(re(plugin.entry.description), 60)}</Text>
+                {plugin.entry.version && <Text dimColor> · v{re(plugin.entry.version)}</Text>}
               </Box>
             )}
           </Box>

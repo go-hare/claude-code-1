@@ -1,0 +1,3 @@
+# offset=210430396 hit 7
+
+ache.clear?.();let l=dA.subscribe(()=>{let f=wn();ro(Pa(f)),W("Sandbox configuration updated from settings change")}),d=Jv.subscribe(()=>Su());Te().settingsSubscriptionCleanup=()=>{l(),d()},zs("sandbox_init")}catch(s){r=!0;let i=Te();i.initializationPromise=void 0,i.initializedWithTlsTerminate=!1,i.installedFilterRequestEnforcesAllowlist=!1,W(`Failed to initialize sandbox: ${rr(s)}`),Te().initFailureReason=Ca(rr(s)),zi("sandbox_init","sandbox_init_failed")}})(),r){t.initializationPromise=void 0;return}return t.initializationPromise}function o5(){let e=Te();return e.initializationPromise!==void

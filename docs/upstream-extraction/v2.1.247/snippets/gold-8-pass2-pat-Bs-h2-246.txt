@@ -1,0 +1,3 @@
+# off=205402166 pat=",Bs="
+
+(),Rs(),As(),Es(),qs(),Ms(),Ks(),Os(),Us()])),Fs=s(()=>t({async:o(!0),asyncTimeout:n().optional()})),Bs=s(()=>t({hookEventName:o("PreToolUse"),permissionDecision:ns().optional(),permissionDecisionReason:e().optional(),updatedInput:c(e(),d()).optional(),additionalContext:e().optional()})),Ws=s(()=>t({hookEventName:o("UserPromptSubmit"),additionalCon

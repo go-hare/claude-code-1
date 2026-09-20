@@ -1,0 +1,69 @@
+### kind=stdout hit=0 off=218299024
+ame:y,toolUseID:r,hookEvent:h,content:He,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,command:Be,durationMs:Ve}),outcome:"success",hook:W};return}if(he.status===2&&!Ce.blockingError)Ce.blockingError={blockingError:`[${v?`${W.type} hook`:Fe}]: ${he.stderr||"No stderr output"}`,command:Fe};xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:he.status===0?"success":"error"}),yield{...Ce,outcome:Ce.blockingError?"blocking":"success",hook:W};return}if(he.status===0){xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:"success"});let Ce=await lre(he.stdout.trim(),ge,"stdout",{storageV5:b});yield{message:Qn({type:"hook_success",hookName:y,toolUseID:r,hookEvent:h,content:Ce,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,command:Be,durationMs:Ve}),outcome:"su
+
+# kind=stdout total=1
+
+### kind=additionalContext hit=0 off=218288455
+f R.entries()){let{hook:Ae}=Se;if(Ae.type!=="callback")continue;let Xe=await Ae.callback(t,r,s,ue,oe);if(sP(Xe)||Object.keys(Xe).length===0)continue;let nt=wke({json:Xe,command:"callback",hookName:`${h}:Callback`,toolUseID:r,hookEvent:h,expectedHookEvent:h,stdout:void 0,stderr:void 0,exitCode:void 0});if(nt.permissionBehavior==="deny")ne++,_(`Hook ${h} (${fy(Ae)}) returned permissionDecision: deny${nt.hookPermissionDecisionReason?` (reason: ${nt.hookPermissionDecisionReason})`:""}`),yield{permissionBehavior:"deny",hookPermissionDecisionReason:nt.hookPermissionDecisionReason,hookSource:Se.hookSource};if(nt.additionalContext)yield{additionalContexts:[await lre(nt.additionalContext,`${r}-${ue}`,"additionalContext",{storageV5:b})]};if(nt.systemMessage)yield{message:Qn({type:"hook_system_message",content:await lre(nt.systemMessage,`${r}-${ue}`,"systemMessage",{storageV5:b}),hookName:y,toolUse
+
+### kind=additionalContext hit=1 off=218304299
+ie++,ne.systemMessage){j.systemMessageChars+=ne.systemMessage.length,K(ne.hook,"systemMessageChars",ne.systemMessage.length);let Q=await lre(ne.systemMessage,`${r}-${ie}`,"systemMessage",{storageV5:b});yield{message:Qn({type:"hook_system_message",content:Q,hookName:y,toolUseID:r,hookEvent:h,...ne.heldForServedCall&&{heldForServedCall:!0}})}}if(ne.terminalSequence)Xit(ne.terminalSequence);if(ne.additionalContext)j.additionalContextChars+=ne.additionalContext.length,K(ne.hook,"additionalContextChars",ne.additionalContext.length),_(`Hook ${h} (${fy(ne.hook)}) provided additionalContext (${ne.additionalContext.length} chars)`),yield{additionalContexts:[await lre(ne.additionalContext,`${r}-${ie}`,"additionalContext",{storageV5:b})]};if(ne.initialUserMessage)j.initialUserMessageChars+=ne.initialUserMessage.length,K(ne.hook,"initialUserMessageChars",ne.initialUserMessage.length),_(`Hook ${h} ($
+
+# kind=additionalContext total=2
+
+### kind=systemMessage hit=0 off=218288605
+et nt=wke({json:Xe,command:"callback",hookName:`${h}:Callback`,toolUseID:r,hookEvent:h,expectedHookEvent:h,stdout:void 0,stderr:void 0,exitCode:void 0});if(nt.permissionBehavior==="deny")ne++,_(`Hook ${h} (${fy(Ae)}) returned permissionDecision: deny${nt.hookPermissionDecisionReason?` (reason: ${nt.hookPermissionDecisionReason})`:""}`),yield{permissionBehavior:"deny",hookPermissionDecisionReason:nt.hookPermissionDecisionReason,hookSource:Se.hookSource};if(nt.additionalContext)yield{additionalContexts:[await lre(nt.additionalContext,`${r}-${ue}`,"additionalContext",{storageV5:b})]};if(nt.systemMessage)yield{message:Qn({type:"hook_system_message",content:await lre(nt.systemMessage,`${r}-${ue}`,"systemMessage",{storageV5:b}),hookName:y,toolUseID:r,hookEvent:h})}}let Q=Date.now()-W;H4()?.observe("hook_duration_ms",Q),D("tengu_repl_hook_finished",{hookName:y,numCommands:R.length,numSuccess:R.
+
+### kind=systemMessage hit=1 off=218303769
+&&ue.skillRoot===void 0})()}]}}if(ne.preventContinuation)_(`Hook ${h} (${fy(ne.hook)}) requested preventContinuation`),yield{preventContinuation:!0,stopReason:ne.stopReason};let oe=ne.hook?.type==="prompt"?{hook:ne.hook,stopReason:ne.stopReason,impossible:ne.impossible}:{};if(ne.blockingError)yield{blockingError:ne.blockingError,suppressOriginalPrompt:ne.suppressOriginalPrompt,...oe},ee="deny";if(ne.message)yield{message:ne.message,...oe};if(ne.timedOut&&ne.hook.type==="prompt"&&h==="Stop")yield{hook:ne.hook,timedOut:!0};if(ie++,ne.systemMessage){j.systemMessageChars+=ne.systemMessage.length,K(ne.hook,"systemMessageChars",ne.systemMessage.length);let Q=await lre(ne.systemMessage,`${r}-${ie}`,"systemMessage",{storageV5:b});yield{message:Qn({type:"hook_system_message",content:Q,hookName:y,toolUseID:r,hookEvent:h,...ne.heldForServedCall&&{heldForServedCall:!0}})}}if(ne.terminalSequence)Xit(
+
+### kind=systemMessage hit=2 off=237484574
+)try{await W(U,o.storageV5),l=`Added ${n.bold(e)} as a working directory and saved to local settings`}catch(r){l=`Added ${n.bold(e)} as a working directory. Failed to save to local settings: ${r instanceof Error?r.message:"Unknown error"}`}else l=`Added ${n.bold(e)} as a working directory for this session`;let eo=`${l} ${n.dim("\xB7 /permissions to manage")}`;s(eo);let ro=Uo();Y(o.session,e,"slash_command",{storageV5:o.storageV5,credentials:o.credentials}).then(async({results:r,systemMessages:io})=>{for(let t of r)if(!t.succeeded&&t.output)T(`DirectoryAdded hook failed: ${t.output}`,{level:"error"});let p=X(r,(t)=>!t.succeeded),M=[...await Promise.all(io.map((t,to)=>Z(t,`add-dir-${ro}-${to}`,"systemMessage",{storageV5:o.storageV5}).then((so)=>`DirectoryAdded hook: ${so}`))),...p>0?[`${p} DirectoryAdded ${J(p,"hook")} failed; output is in the debug log, not shown here`]:[]];if(M.length>0)
+
+# kind=systemMessage total=3
+
+### kind=initialUserMessage hit=0 off=218304653
+nalSequence)Xit(ne.terminalSequence);if(ne.additionalContext)j.additionalContextChars+=ne.additionalContext.length,K(ne.hook,"additionalContextChars",ne.additionalContext.length),_(`Hook ${h} (${fy(ne.hook)}) provided additionalContext (${ne.additionalContext.length} chars)`),yield{additionalContexts:[await lre(ne.additionalContext,`${r}-${ie}`,"additionalContext",{storageV5:b})]};if(ne.initialUserMessage)j.initialUserMessageChars+=ne.initialUserMessage.length,K(ne.hook,"initialUserMessageChars",ne.initialUserMessage.length),_(`Hook ${h} (${fy(ne.hook)}) provided initialUserMessage (${ne.initialUserMessage.length} chars)`),yield{initialUserMessage:await lre(ne.initialUserMessage,`${r}-${ie}`,"initialUserMessage",{storageV5:b})};if(ne.watchPaths&&ne.watchPaths.length>0)_(`Hook ${h} (${fy(ne.hook)}) provided ${ne.watchPaths.length} watchPaths`),yield{watchPaths:ne.watchPaths};if(ne.reloadS
+
+# kind=initialUserMessage total=1
+
+### lreCall hit=0 off=208759038
+ion===r)return}if(m.pendingWriteCount(Y())>0){m.deferExternalRefresh("storage");return}gc();return;case"deleted":case"appended":case"tombstoned":return}}function ia(e){if(m.pendingWriteCount(Y())>1){m.advanceFreshnessCursor();return}m.writeThrough(e)}function lre(e){return m.installed.subscribe(e)}function k(){if(Jn())return m.testGlobalConfig;let e=m.readCache();if(e)return e;if(!m.enableSettled)throw Error("Config 
+
+### lreCall hit=1 off=218251321
+required field "hookEventName"';let i=r.slice(1).map((a)=>`  - ${a.path.join(".")||"(root)"}: ${a.message}`).join(`\u000a`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`\u000a`+i:""}\u000a\u000aThe hook's output was: ${le(t,null,2)}`}}async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=await VP(e,`hook-${t}-${n}`,Cv(),o);if(KP(s))return D("tengu_hook_output_persisted",{s
+
+### lreCall hit=2 off=218288418
+t.hookPermissionDecisionReason?` (reason: ${nt.hookPermissionDecisionReason})`:""}`),yield{permissionBehavior:"deny",hookPermissionDecisionReason:nt.hookPermissionDecisionReason,hookSource:Se.hookSource};if(nt.additionalContext)yield{additionalContexts:[await lre(nt.additionalContext,`${r}-${ue}`,"additionalContext",{storageV5:b})]};if(nt.systemMessage)yield{message:Qn({type:"hook_system_message",content:await lre(nt
+
+### lreCall hit=3 off=218288572
+ermissionDecisionReason,hookSource:Se.hookSource};if(nt.additionalContext)yield{additionalContexts:[await lre(nt.additionalContext,`${r}-${ue}`,"additionalContext",{storageV5:b})]};if(nt.systemMessage)yield{message:Qn({type:"hook_system_message",content:await lre(nt.systemMessage,`${r}-${ue}`,"systemMessage",{storageV5:b}),hookName:y,toolUseID:r,hookEvent:h})}}let Q=Date.now()-W;H4()?.observe("hook_duration_ms",Q),D(
+
+### lreCall hit=4 off=218299001
+atus===0?"success":"error"}),yield{...Ce,outcome:Ce.blockingError?"blocking":"success",hook:W};return}if(he.status===0){xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:"success"});let Ce=await lre(he.stdout.trim(),ge,"stdout",{storageV5:b});yield{message:Qn({type:"hook_success",hookName:y,toolUseID:r,hookEvent:h,content:Ce,stdout:he.stdout,stderr:he.s
+
+### lreCall hit=5 off=218303736
+age)yield{message:ne.message,...oe};if(ne.timedOut&&ne.hook.type==="prompt"&&h==="Stop")yield{hook:ne.hook,timedOut:!0};if(ie++,ne.systemMessage){j.systemMessageChars+=ne.systemMessage.length,K(ne.hook,"systemMessageChars",ne.systemMessage.length);let Q=await lre(ne.systemMessage,`${r}-${ie}`,"systemMessage",{storageV5:b});yield{message:Qn({type:"hook_system_message",content:Q,hookName:y,toolUseID:r,hookEvent:h,...ne
+
+### lreCall hit=6 off=218304262
+onalContext)j.additionalContextChars+=ne.additionalContext.length,K(ne.hook,"additionalContextChars",ne.additionalContext.length),_(`Hook ${h} (${fy(ne.hook)}) provided additionalContext (${ne.additionalContext.length} chars)`),yield{additionalContexts:[await lre(ne.additionalContext,`${r}-${ie}`,"additionalContext",{storageV5:b})]};if(ne.initialUserMessage)j.initialUserMessageChars+=ne.initialUserMessage.length,K(ne
+
+### lreCall hit=7 off=218304615
+essage)j.initialUserMessageChars+=ne.initialUserMessage.length,K(ne.hook,"initialUserMessageChars",ne.initialUserMessage.length),_(`Hook ${h} (${fy(ne.hook)}) provided initialUserMessage (${ne.initialUserMessage.length} chars)`),yield{initialUserMessage:await lre(ne.initialUserMessage,`${r}-${ie}`,"initialUserMessage",{storageV5:b})};if(ne.watchPaths&&ne.watchPaths.length>0)_(`Hook ${h} (${fy(ne.hook)}) provided ${ne
+
+### lreCall hit=8 off=233026918
+if(u){let c=u.getAllServers(),m=0;for(let[d,g]of c)if(g.state==="error"&&g.lastError)m++,n(d,g.lastError.message);r(m)}return!0}if(!jt()&&!s())return;let a=A2e(o,()=>{if(!s())a()},ODt);return a}}};bt();co();Do();vn();It();Zo();At();on();UDt();$v();BDt();HDt();lre();import{join as jDt}from"path";function $Dt(){return ct.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL}var Mj={MAX_ATTEMPTS:10,INITIAL_DELAY_MS:36000
+
+### lreCall hit=9 off=233060499
+`),!1;let n=WPt.of(e),r=n.lookup(o);if(r!==void 0)return R(`[binaryCheck] Cache hit for '${o}': ${r}`),r;let s=!1;if(await GN(o).catch(()=>null))s=!0;return n.remember(o,s),R(`[binaryCheck] Binary '${o}' ${s?"found":"not found"}`),s}Zo();At();nqe();$v();VPt();lre();bw();var KPt=5;function QPt(e){if(!e)return null;if(typeof e==="string")return R("[lspRecommendation] Skipping string path lspServers (not readable from m
+
+### lreCall hit=10 off=233081681
+,a;for(let[u,c]of Object.entries(s?.modelSettings??{})){let m=c?.effortLevel;if(m===void 0||Oie(u)!==t)continue;if(u===t){a=m;break}a??=m}let l=a??s?.effortLevel;if(l!==void 0)return{source:r,effortLevel:l}}return}Au();Zo();At();_0e();Mo();co();$v();bw();m7();lre();yEt();aG();hEt();vh();tqe();Do();It();Co();var SEt=5000;function Bie(e,t,o,n){e((r)=>({...r,plugins:{...r.plugins,installationStatus:{...r.plugins.install
+
+### lreCall hit=11 off=250350796
+ersion:A,...L!==void 0?{settledProps:L}:{}}}}catch(D){console.warn("[dc-editor] post-save adopt read failed:",D)}return y?{kind:"saved",rebased:!0,version:A,...C!==void 0?{settledProps:C}:{}}:{kind:"saved",version:A,...C!==void 0?{settledProps:C}:{}}}function lre(e,t,n){let o=(e.get(t)??Promise.resolve()).then(n,n),i=o.then(()=>{},()=>{});return e.set(t,i),i.finally(()=>{e.get(t)===i&&e.delete(t)}),o}function tz(e,t=
+
+### lreCall hit=12 off=250397257
+eError(lt)):console.error("[dc-model] post-save callback threw after landed write:",lt)}finally{H.current-=1,setTimeout(()=>{let lt=me.get(O.path)??0;lt<=1?(me.delete(O.path),m.current.delete(O.path)&&v.current(O.path)):me.set(O.path,lt-1)},500)}return qt},We=lre(L.current,V,Je);return O&&ee!==void 0&&M.current.set(V,{token:Xe,models:Z,payload:ee,pendingScript:q,pendingProps:be,run:We}),We},[e,I]),z=(0,Dn.useCallback
+
+# lre( total=13

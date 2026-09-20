@@ -1,0 +1,4 @@
+# xe SOURCE E unique function E(e){return e.length>0&&e.every(C)} @207942213
+# export E as ydd @207949946 count=1
+# sl-mod import ydd as xe @211418076 count=1 from _814.js
+function E(e){return e.length>0&&e.every(C)}

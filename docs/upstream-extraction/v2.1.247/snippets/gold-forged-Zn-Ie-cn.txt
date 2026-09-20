@@ -1,0 +1,33 @@
+# Zn / Ie / cn list roots — official-247 SEA
+# Zn UNIQUE @210558360
+# Ie UNIQUE @210540281 — `At`/`Te` are `basename`/`join` from"path" @210539xxx
+# xt UNIQUE @210540420; Gt UNIQUE @210540487 (t="/tmp" unused); In UNIQUE @210540568
+# pn UNIQUE @210534261
+# oe = `wZb as oe` @210530797 = `w as wZb` @209041074; w UNIQUE @209040413
+# un = `yZb as un` @210530807 = `J as yZb`; J UNIQUE @209040781 (same S() as w)
+# N UNIQUE @209038900 — CLAUDE_CODE_TMPDIR || os.tmpdir(); join(N(),"claude")
+# ne = `yKb as ne` @210530552 = `Kr as yKb` @210435606
+# `function Kr(){let e=qa();return["/dev/stdout"` UNIQUE @209860953
+# qa = `import{homedir as qa}from"os"` @209858726
+# cn UNIQUE @210533172; pt UNIQUE @210532931; wt UNIQUE @210533108; an UNIQUE @210532330
+# Q = `YHc as Q` @210531062 = `de as YHc` @208142791
+# de=["userSettings","projectSettings","localSettings","flagSettings","policySettings"] @208099367
+# Qe = `IRb as Qe` @210530606 = `B as IRb` @209043495; B UNIQUE @209042901 (realpath+sep)
+# en = JRb/z childProcessTmpDir via S() @209040451
+# sn = WZ / detectWorktreeMainRepoPath; ze = additionalDirectoriesForClaudeMd
+# gt = ee/Ve/Ze/rn/on/he wired via local hosts
+
+function Zn(e,n){let t=[e,...n,...Ie(),...cn(e)];return y([...t,...t.map((r)=>J(r))])}
+import{basename as At,join as Te}from"path";
+function Ie(){let e=pn(),n=j();if(n===void 0)return e;let t=xt(n);if(t===void 0)return e;let r=At(oe()),i=Te(t,r),o=i;return y([...e,i,o])}
+function xt(e){return In(R(e,"CLAUDE_CODE_TMPDIR")||void 0)??Gt(e)}
+function Gt(e){let n=(r)=>R(e,r)||void 0,t="/tmp";return In(n("TEMP")??n("TMP"))}
+function In(e){return e!==void 0&&e.length>1?e.replace(/[\\/]+$/,""):e}
+function pn(){return y([oe(),un(),...ne().map((e)=>e==="~"||e.startsWith("~/")?G(mn(),e.slice(1)):e)])}
+function N(){let e=l.CLAUDE_CODE_TMPDIR;if(e)return e;return T()}
+function w(){return S(_.of(f().host))}
+function J(){let e=_.of(f().host),r=S(e);return r}
+function S(e){let t=d(N(),"claude");...;return t}
+function Kr(){let e=qa();return["/dev/stdout","/dev/stderr","/dev/null","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",Ft.join(e,".npm/_logs"),Ft.join(e,".claude/debug")]}
+function cn(e){return y([...pt(e),...Q.flatMap((n)=>wt(e,n,null))])}
+function B(){let e=s();if(e.claudeTempDir!==void 0)return e.claudeTempDir;let r=D(),t=i(),n=r;try{n=t.realpathSync(r)}catch{}return e.claudeTempDir=n+o,e.claudeTempDir}

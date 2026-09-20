@@ -40,9 +40,14 @@ import {
   isBashCommandWithheld,
 } from '../permissionBash.js';
 import {
-  shouldShowWorkflowAutoModeOption,
+  BASH_AUTO_MODE_DESCRIPTION,
+  BASH_AUTO_MODE_TIP,
+  BASH_PERMISSION_PROMPT_UPSELL_TRIGGER,
+  isBashAutoModeOfferBlocked,
+  shouldShowBashAutoModeOption,
   useWorkflowAutoModeOffer,
   workflowAutoModeSelectOption,
+  WORKFLOW_PERMISSION_PROMPT_TRIGGER,
 } from '../permissionAutoMode.js';
 
 function previewNode(preview: UrlPreview): React.ReactNode {
@@ -59,9 +64,17 @@ function previewNode(preview: UrlPreview): React.ReactNode {
 export function PermissionBashDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
   const p = payload as BashPermissionPayload;
   const row = shouldShowBashPersistentAllow(p) ? buildBashSuggestionsRow(p) : null;
-  const { offered, enableAutoMode } = useWorkflowAutoModeOffer(p.requestSource);
-  const autoModeRow = shouldShowWorkflowAutoModeOption(offered, isBashCommandWithheld(p), isBashAlwaysAllowVetoed(p))
-    ? workflowAutoModeSelectOption()
+  const { offered, canOfferAutoMode, enableAutoMode } = useWorkflowAutoModeOffer(p.requestSource);
+  const withheld = isBashCommandWithheld(p);
+  const vetoed = isBashAlwaysAllowVetoed(p);
+  const showEnableAutoModeOption = shouldShowBashAutoModeOption(
+    withheld,
+    vetoed,
+    canOfferAutoMode,
+    isBashAutoModeOfferBlocked(p.permissionResult),
+  );
+  const autoModeRow = showEnableAutoModeOption
+    ? workflowAutoModeSelectOption(offered ? undefined : BASH_AUTO_MODE_DESCRIPTION)
     : null;
   const preview = bashCommandPreview(p);
   const description = typeof p.description === 'string' ? p.description : '';
@@ -161,7 +174,11 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
   });
 
   return (
-    <PermissionDialog title={bashCommandTitle(p)} subtitle={classifierSubtitle} requestSource={p.requestSource}>
+    <PermissionDialog
+      title={bashCommandTitle(p)}
+      subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
+      requestSource={p.requestSource}
+    >
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Box flexDirection={preview.kind === 'withheld' || preview.needsGutter ? 'column' : 'row'}>
           {explainerState.visible ? (
@@ -190,7 +207,9 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
           options={options}
           onSelect={(choice, feedback) => {
             if (classifierApproved) return;
-            if (choice === 'yes-enable-auto-mode') enableAutoMode();
+            if (choice === 'yes-enable-auto-mode') {
+              enableAutoMode(offered ? WORKFLOW_PERMISSION_PROMPT_TRIGGER : BASH_PERMISSION_PROMPT_UPSELL_TRIGGER);
+            }
             answer(
               resolveBashPermissionAnswer(choice, p, row, {
                 feedback,

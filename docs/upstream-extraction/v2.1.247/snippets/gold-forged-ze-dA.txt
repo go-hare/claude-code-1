@@ -1,0 +1,2 @@
+# gold-forged-ze-dA.txt official-247 SEA @207018188-207018588
+function dA(){return n().host.extensionsConfig.additionalDirectoriesForClaudeMd()}function uA(e){n().host.extensionsConfig.replaceAdditionalDirectoriesForClaudeMd(e)}function cA(){return n().host.extensionsConfig.allowedChannels()}function pA(e){n().host.extensionsConfig.replaceAllowedChannels(e)}function gA(){return n().host.extensionsConfig.hasDevChannels()}function fA(e){n().host.extensionsConf

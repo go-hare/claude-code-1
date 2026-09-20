@@ -1,0 +1,7 @@
+# already LOCKED yln @213648410 end=213648511 len=101 — not re-derived
+# unique function yln( count=1
+# unique function yln(e){let{pendingUsage:t}=HP() count=1
+# unique caller dPe yln(n),ki( count=1
+# delete site: t.delete(n) — pendingUsage.delete( count=0
+# alias: yln as / as yln count=0. not in export map.
+function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}

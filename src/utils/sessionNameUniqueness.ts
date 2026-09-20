@@ -282,13 +282,22 @@ export function formatSessionNameYieldMessage(
   return `Another live session on this machine goes by "${desiredName}", so this session is now "${newName}". Use /rename to pick a different name.`
 }
 
+/** densable 2.1.247 #13 — registry write failed after a local rename. */
+export const SESSION_REGISTRY_UPDATE_FAILED_SUFFIX =
+  ' Other sessions may still show the old name: the session registry could not be updated (run with --debug for the cause)'
+
 /** densable rename success with collision parenthetical. */
 export function formatSessionRenamedMessage(
   finalName: string,
   yieldedFrom?: string,
+  registryUpdated: boolean = true,
 ): string {
-  if (!yieldedFrom) return `Session renamed to: ${finalName}`
-  return `Session renamed to: ${finalName} ("${yieldedFrom}" is held by another live session on this machine)`
+  const base = !yieldedFrom
+    ? `Session renamed to: ${finalName}`
+    : `Session renamed to: ${finalName} ("${yieldedFrom}" is held by another live session on this machine)`
+  return registryUpdated
+    ? base
+    : `${base}${SESSION_REGISTRY_UPDATE_FAILED_SUFFIX}`
 }
 
 /**
@@ -764,7 +773,9 @@ export type ApplySessionNameOptions = {
     name: string,
     source: 'user' | 'auto' | 'hook',
   ) => Promise<void>
-  writeName?: (name: string, source: SessionNameSource) => Promise<void>
+  // Resolution value is always discarded — the default writer resolves boolean,
+  // injected ones resolve void, and no call site reads either.
+  writeName?: (name: string, source: SessionNameSource) => Promise<unknown>
   deps?: SessionNameUniquenessDeps
   scheduleRecheck?: (fn: () => void) => void
   storageV5?: unknown
@@ -1192,8 +1203,8 @@ export type RunSessionNameStartupUniquenessInput = {
   /** densable Bid `sessionNameArg` — CLI `--name` / env seed. */
   sessionNameArg?: string
   interactive: boolean
-  /** densable writeName(name, source). */
-  writeName?: (name: string, source: SessionNameSource) => Promise<void>
+  /** densable writeName(name, source). Resolution value is discarded. */
+  writeName?: (name: string, source: SessionNameSource) => Promise<unknown>
   onRenamed?: (newName: string, previous: string) => void
   deps?: SessionNameUniquenessDeps
   scheduleRecheck?: (fn: () => void) => void

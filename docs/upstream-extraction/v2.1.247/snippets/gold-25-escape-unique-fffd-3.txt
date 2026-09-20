@@ -1,0 +1,5 @@
+# offset=209083916 tag=fffd
+
+th?`\u2026 [+${r(a.slice(h.length))} graphemes]`:"",d=h.length+k.length+i.length,p=d*d;if(h.length>0&&p<=n)return n-=p,te(h)+k+i;return`\u2026 [+${r(a)} graphemes]`+i}).join(`
+`)}function xn(e){for(let t=0;t<e.length;t++)if(oe(e.charCodeAt(t)))return!1;return!0}function vn(e){return ce(e,!0)}function ce(e,t){let n="";for(let o of e){let s=o.codePointAt(0);if(Ze(s))continue;n+=oe(s)||se(s)||Qe(s)?"\uFFFD":o}let r=re(n);return t?it(r):r}function P(e){return e.replace(at,"")}function kn(e){return ce(P(M(e)),!1)}var E=4096,bn,Je=4064,et=256,ot,O=1024,st,at;var le=f(()=>{Xe();Ve();ne();Ge();bn=/\u2026 \[\+\d+ graphemes\]/;ot=4*E*E,st=64*O*O;at=/\p{DI}/gu});function Fn(e){let t=e.trim();return{trimmed:t,lineCount:R(t,`
+`)+1,byteCount:t.length}}function Rn(e){return e.normalize("NFC").toLowerCase()}function In(e){let t=e?.lastIndexOf("/")??-1;if(t<=0)return"";let n=e.slice(0,t+1);return n.split

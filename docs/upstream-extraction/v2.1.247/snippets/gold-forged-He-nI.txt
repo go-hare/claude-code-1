@@ -1,0 +1,23 @@
+He/nI @_604 @210529090
+function He( not unique (70). function nI( unique but _712 Monitor UI
+@231391248 — not open flags. Lock TCt / _604 alias.
+
+_604 @210529090 import{constants as o}from"fs"
+function m(){return o.O_RDONLY|d()}
+function d(){if(i()==="windows")return 0;return o.O_NOFOLLOW|o.O_NONBLOCK}
+
+export @210529807
+export{m as JVb,d as KVb,w as LVb,_ as MVb,g as NVb,N as OVb,c as PVb};
+
+TCt import @212826502
+import{JVb as nI,...}from"B:/~BUN/root/_604.js"
+
+_583-adj @210530670
+import{JVb as He,PVb as Xt}from"B:/~BUN/root/_604.js"
+
+E4n @215231294 $3o(e,nI())
+iXo @215234879 Z3o(e,nI())
+
+TCt nI === JVb === He === O_RDONLY|KVb().
+KVb nI-extra: windows 0 else O_NOFOLLOW|O_NONBLOCK.
+O_RDONLY is 0 on POSIX so He()===nI-extra there.

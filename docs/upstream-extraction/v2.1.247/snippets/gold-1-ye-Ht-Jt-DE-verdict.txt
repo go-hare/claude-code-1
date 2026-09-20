@@ -1,0 +1,60 @@
+# gold-1-ye-Ht-Jt-DE-verdict 247
+#
+# ye  MISS — ot `xSa as ye` ← leftover barrel `kb as xSa`. No live-array Oe filter body.
+#      Do not steal normalize-kb @219402110 (4-arg, attachments/tool_use).
+# Ht  MISS — `_158.js` `Ps as Ht`. `!Ht()` boolean. `_158` source not in SEA ascii.
+# Jt  MISS — `_158.js` `Qs as Jt`. `Jt()??void 0` → surveyFeedbackSource. Body not peeled.
+# DE  leftover-locked — Lfs `DE(s)===void 0?s:void 0` landed as validateStorageKey
+#      DE = `_812` `qcd` = writeValidate `Ja` @208170422 = leftover `z`/`Ua` = validateStorageKey
+#      Ja: object/null → key err; hn extras; Dn field specs; else namespace err; sn("key",r)
+#      Poe is the same wrapper: `DE(e)===void 0?e:void 0`
+# ol  already leftover-locked as isValidStoragePathSegment (Lfs `!ol(r)||!ol(o)`)
+#
+# invent-ban: ye / Ht / Jt / surveyFeedbackSource / Yo mode+readFileState
+# landed: Lfs DE → validateStorageKey(key)===undefined ? key : undefined
+# 247 pack 已收口 2026-09-19。ye/Ht/Jt 无体 = 对齐。不要再挖。
+
+
+## Ja-DE-validateStorageKey @208170422
+len=228 sha=eecdb80fb261d267
+function Ja(e){if(typeof e!=="object"||e===null)return s("key","expected a key object");let n=hn(e);if(n!==void 0)return n;let r=Dn(e);if(r===void 0)return s("key",`${e.namespace} is not a storage namespace`);return sn("key",r)}
+
+## Ja-export-qcd @208212142
+ as mcd,Mr as ncd,Va as ocd,Ba as pcd,Ja as qcd,on as rcd,ln as scd,dn as tcd,Br as ucd,fn as vcd,mn as wcd,ye as xcd,Zr
+
+## function Ps(){ all
+- @208309717 len=106 function Ps(){let e=M();return{settings:Object.keys(e.settings).length>0?e.settings:null,errors:e.errors}}
+- @222029808 len=743 function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"};if(S.DISABLE_BUG_COMM
+- @225822602 len=100 function Ps(){return!!(process.env.CLOUD_RUN_JOB||process.env.FUNCTION_NAME||process.env.K_SERVICE)}
+- @249103968 len=58 function Ps(){return fk.useContext(hfe)?.direction??"ltr"}
+
+## function Qs(){ all
+- @206935480 len=23 function Qs(){return[]}
+- @223550331 len=128 function Qs(){let Pl=oe(1),Ks;if(Pl[0]===q)Ks=a(r,{dimColor:!0,children:"keep holding\u2026"}),Pl[0]=Ks;else Ks=Pl[0];return Ks}
+- @235494003 len=168 function Qs(){return{holdMaxMs:Math.min(lt.CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS??qt,qt),verdictWaitMaxMs:Math.min(lt.CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS??Yt,Yt)}}
+
+## Ps=()=>{ hits=0
+
+## Qs=()=>{ hits=2
+- #0 @226784772 eof ArrayBuffer||Object.prototype.toString.call(e)==="[object ArrayBuffer]";var Qs=()=>{};import{Buffer as Bt}from"buffer";var Ys=(e,t=0,r=e.byteLength-t)=>{if(!Ks(e))t
+- #1 @227906136 ,qs=(o)=>({httpHandler:o.httpHandler()});var zs=()=>{};var Hs=t(()=>{zs()});var Qs=()=>{};var js=()=>{};var $s=()=>{};var Ks=()=>{};var Ys=()=>{};var Xs=()=>{};var Zs=(
+
+## function Ps(){return hits=2
+- #0 @225822602 /dmi/id/bios_date",BIOS_VENDOR:"/sys/class/dmi/id/bios_vendor"};var ma=/^42:01/;function Ps(){return!!(process.env.CLOUD_RUN_JOB||process.env.FUNCTION_NAME||process.env.K_SERVICE)}
+- #1 @249103968 ar Rf,JU,dk=K(()=>{"use client";Rf=_(ie(),1);os();Jn();Ln();aM();JU=_(he(),1)});function Ps(){return fk.useContext(hfe)?.direction??"ltr"}var fk,hfe,xm=K(()=>{"use client";fk=_(ie(
+
+## function Qs(){return hits=2
+- #0 @206935480 le(++o<r){var l=e[o];if(t(l,o,e))a[s++]=l}return a}var Nn;var Kn=i(()=>{Nn=Zs});function Qs(){return[]}var Vn;var Jn=i(()=>{Vn=Qs});var ea,ta,zn,na,$n;var Xn=i(()=>{Kn();Jn();ea=Ob
+- #1 @235494003 come==="partial"||e.outputStyleMissing?"warning":r.length===0?"debug":"notice"}}function Qs(){return{holdMaxMs:Math.min(lt.CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS??qt,qt),verdictWait
+
+## tengu_feedback_survey_config hits=3
+- #0 @197161728 _feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_config&...=...tengu_bad_survey_transcript_ask_config..'....]..tengu_fine_survey_transc
+- #1 @230433252 _SURVEY)return;if(im())return;if(!Qr("allow_product_feedback"))return;let t=Rt("tengu_feedback_survey_config",fb);return{...t,probability:Rd().feedbackSurveyRate??t.probability,lastSurveyS
+- #2 @232947930 tShown:null,timeLastShownAtClock:null,submitCountAtLastAppearance:null})),g=KS("tengu_feedback_survey_config",q$e),h=KS("tengu_bad_survey_transcript_ask_config",XH),S=KS("tengu_fine_survey
+
+## good_feedback_survey hits=2
+- #0 @197161644 leFollowupResolve.......vS7.thanksFromFollowup.......o..submittingShare.....(...good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_s
+- #1 @232947562 n ah(e){return pm(e)?.message?.id||"unknown"}function Ioe(e){return e==="good"?"good_feedback_survey":e==="fine"?"fine_feedback_survey":"bad_feedback_survey"}function V$e({turn:e,t
+
+## survey-config-fn @197161728
+handleTranscriptSelect......T.-.handleFollowupResolve.......vS7.thanksFromFollowup.......o..submittingShare.....(...good_feedback_survey......x.fine_feedback_survey........bad_feedback_survey.....R...tengu_feedback_survey_config&...=...tengu_bad_survey_transcript_ask_config..'....]..tengu_fine_survey_transcript_ask_config.'...'...tengu_good_survey_transcript_ask_config.@.......Cannot destructure p

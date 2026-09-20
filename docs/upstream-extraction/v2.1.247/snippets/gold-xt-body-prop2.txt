@@ -1,0 +1,3 @@
+# 247 offset=206307432 needle=",body:"
+
+ser-Agent":e.userAgent||`anthropic-sdk-typescript/${fe} oidcFederationProvider`},body:JSON.stringify(r)})}catch(h){throw new C(`Failed to reach token endpoint ${s}: ${h}`)}let i=n.headers.get("Request-Id");if(!n.ok){let h=await n.text().catch(()=>""),m=re(h),y="";if(n.status===401)y=` Ensure your federation rule matches your identity token. ${e.workspaceId?"":"If your federation rule is scoped to multiple workspaces, set the ANTHROPIC_WORKSPACE_ID environment variable, the 'w

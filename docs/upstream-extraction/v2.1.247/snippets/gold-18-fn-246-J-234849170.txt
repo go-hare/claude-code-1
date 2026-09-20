@@ -1,0 +1,3 @@
+# ver=246 name=J async=true start=234849170 end=234849641 len=471 sha=8685fedb2ad3b179 needle="background session"
+
+async function J(c,o){let t=r();if(!t)n({action:"logout",success:!0,authMethod:"oauth"});if(await i({clearOnboarding:!0,storageV5:o.storageV5,credentials:o.credentials}),t)return c("This background session shares credentials with other sessions; /logout here has no effect. Run /logout from your main terminal to sign out.",{display:"system"}),null;let u=a(m,{children:"Successfully logged out from your Anthropic account."});return setTimeout(()=>{s(0,"logout")},200),u}

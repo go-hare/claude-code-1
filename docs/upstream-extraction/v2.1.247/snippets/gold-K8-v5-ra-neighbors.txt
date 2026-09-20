@@ -1,0 +1,2 @@
+# ra+QT neighbors
+(),".claude","skills");if(e.path.startsWith(t+oE))return"."+oE+nE(mn(),e.path)}return a9(e.path)}function ra(){return Fo(Fs(),"cache")}function QT(e){return Ne()&&e!==void 0&&mp(Fo(ra(),"_","_","_"),ra())!==null}async function m2(e){return await _2(e)==="real"}function uzo(e,t){return new ye(`Could 

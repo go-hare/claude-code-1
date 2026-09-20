@@ -1,0 +1,300 @@
+# gold-18-functions innermost named function around JS hits
+
+## 246 JS hits=148
+- needle="exited with code ${" #0 @206616930 → async function Vn() start=206615493 end=206617733 len=2240 sha=eb1846090e99e8c2
+- needle="exited with code ${" #1 @207686708 → async function l() start=207683714 end=207687498 len=3784 sha=b3b8f5682f4a1ed5
+- needle="exited with code ${" #2 @208674117 → async function Ug() start=208673679 end=208675394 len=1715 sha=b21766621fef5a5b
+- needle="exited with code ${" #3 @208674581 → async function Ug() start=208673679 end=208675394 len=1715 sha=b21766621fef5a5b
+- needle="exited with code ${" #4 @209110638 → function OA() start=209109964 end=209110976 len=1012 sha=6b33adfc178cc7b7
+- needle="exited with code ${" #5 @209112134 → async function dee() start=209111465 end=209112418 len=953 sha=44bf16cc2b1218dc
+- needle="exited with code ${" #6 @210119836 → async function La() start=210119474 end=210122350 len=2876 sha=6b826a153038f6ff
+- needle="exited with code ${" #7 @210856891 → async function D() start=210856787 end=210856924 len=137 sha=56d29ea0a9cdccc3
+- needle="exited with code ${" #8 @210857026 → async function H() start=210856924 end=210857050 len=126 sha=4d9436e8076efb15
+- needle="exited with code ${" #9 @212245520 → async function Dho() start=212244200 end=212263017 len=18817 sha=e0b002f9f8d9a0eb
+- needle="exited with code ${" #10 @212245569 → async function Dho() start=212244200 end=212263017 len=18817 sha=e0b002f9f8d9a0eb
+- needle="exited with code ${" #11 @213162404 → async function D$o() start=213159548 end=213162504 len=2956 sha=37a911e4d5815257
+- needle="exited with code ${" #12 @214862260 → function LMt() start=214862158 end=214862659 len=501 sha=cb936940802ef3fb
+- needle="exited with code ${" #13 @218440074 → function Xu() start=218439944 end=218440840 len=896 sha=0d633d8c95f33129
+- needle="exited with code ${" #14 @221555432 → async function q() start=221555035 end=221555533 len=498 sha=09daa4e74c0650ad
+- needle="exited with code ${" #15 @221555764 → async function z() start=221555533 end=221555870 len=337 sha=6d7ea8e88b9ba798
+- needle="exited with code ${" #16 @226492051 → NONE
+- needle="exited with code ${" #17 @226492140 → NONE
+- needle="exited with code" #20 @206616930 → async function Vn() start=206615493 end=206617733 len=2240 sha=eb1846090e99e8c2
+- needle="exited with code" #21 @207686708 → async function l() start=207683714 end=207687498 len=3784 sha=b3b8f5682f4a1ed5
+- needle="exited with code" #22 @208674117 → async function Ug() start=208673679 end=208675394 len=1715 sha=b21766621fef5a5b
+- needle="exited with code" #23 @208674581 → async function Ug() start=208673679 end=208675394 len=1715 sha=b21766621fef5a5b
+- needle="exited with code" #24 @208703863 → function jg() start=208702991 end=208703958 len=967 sha=945e34fa97c6a64a
+- needle="exited with code" #25 @209110638 → function OA() start=209109964 end=209110976 len=1012 sha=6b33adfc178cc7b7
+- needle="exited with code" #26 @209112134 → async function dee() start=209111465 end=209112418 len=953 sha=44bf16cc2b1218dc
+- needle="exited with code" #27 @210119836 → async function La() start=210119474 end=210122350 len=2876 sha=6b826a153038f6ff
+- needle="exited with code" #28 @210856891 → async function D() start=210856787 end=210856924 len=137 sha=56d29ea0a9cdccc3
+- needle="exited with code" #29 @210857026 → async function H() start=210856924 end=210857050 len=126 sha=4d9436e8076efb15
+- needle="exited with code" #30 @212245520 → async function Dho() start=212244200 end=212263017 len=18817 sha=e0b002f9f8d9a0eb
+- needle="exited with code" #31 @212245569 → async function Dho() start=212244200 end=212263017 len=18817 sha=e0b002f9f8d9a0eb
+- needle="exited with code" #32 @213162404 → async function D$o() start=213159548 end=213162504 len=2956 sha=37a911e4d5815257
+- needle="exited with code" #33 @214862260 → function LMt() start=214862158 end=214862659 len=501 sha=cb936940802ef3fb
+- needle="exited with code" #34 @218440074 → function Xu() start=218439944 end=218440840 len=896 sha=0d633d8c95f33129
+- needle="exited with code" #35 @221555432 → async function q() start=221555035 end=221555533 len=498 sha=09daa4e74c0650ad
+- needle="exited with code" #36 @221555764 → async function z() start=221555533 end=221555870 len=337 sha=6d7ea8e88b9ba798
+- needle="exited with code" #37 @226024136 → NONE
+- needle="exited with code" #38 @226492051 → NONE
+- needle="exited with code" #39 @226492140 → NONE
+- needle="(exit code" #7 @214862010 → function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b
+- needle="(exit code" #8 @220046572 → function Ir() start=220046460 end=220047176 len=716 sha=64bdd35865e194e2
+- needle="(exit code" #9 @221782490 → function K() start=221781742 end=221782671 len=929 sha=faa5cff37ccb2be4
+- needle="(exit code" #10 @229494453 → function Er() start=229493252 end=229496189 len=2937 sha=65c6e8828f19a551
+- needle="(exit code" #11 @229494577 → function Er() start=229493252 end=229496189 len=2937 sha=65c6e8828f19a551
+- needle="(exit code" #12 @229494676 → function Er() start=229493252 end=229496189 len=2937 sha=65c6e8828f19a551
+- needle="(exit code ${" #0 @214862010 → function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b
+- needle="(exit code ${" #1 @221782490 → function K() start=221781742 end=221782671 len=929 sha=faa5cff37ccb2be4
+- needle="Exit code ${" #0 @212641986 → function _To() start=212641943 end=212642195 len=252 sha=2613874207ed68d9
+- needle="Exit code ${" #1 @214342203 → NONE
+- needle="Exit code ${" #2 @214348013 → NONE
+- needle="Exit code ${" #3 @217897038 → function vYs() start=217856930 end=217968696 len=111766 sha=ce0177666a6e603e
+- needle="Exit code ${" #4 @224523192 → async function Nt() start=224522729 end=224523750 len=1021 sha=91b7ae07b45e8067
+- needle="Exit code ${" #5 @224541030 → async function fn() start=224534551 end=224544408 len=9857 sha=f0c1fc90190d4380
+- needle="Exit code " #46 @212641986 → function _To() start=212641943 end=212642195 len=252 sha=2613874207ed68d9
+- needle="Exit code " #47 @214342203 → NONE
+- needle="Exit code " #48 @214348013 → NONE
+- needle="Exit code " #49 @217881245 → async function GYs() start=217880966 end=217881771 len=805 sha=cb64113042ba6b58
+- needle="Exit code " #50 @217897038 → function vYs() start=217856930 end=217968696 len=111766 sha=ce0177666a6e603e
+- needle="Exit code " #51 @224523192 → async function Nt() start=224522729 end=224523750 len=1021 sha=91b7ae07b45e8067
+- needle="Exit code " #52 @224541030 → async function fn() start=224534551 end=224544408 len=9857 sha=f0c1fc90190d4380
+- needle="with exit code" #0 @66420074 → function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a
+- needle="with exit code" #1 @68779568 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="with exit code" #14 @205747034 → NONE
+- needle="with exit code" #15 @208139684 → NONE
+- needle="with exit code" #16 @208668108 → async function wg() start=208667756 end=208668136 len=380 sha=8caa6ea94e07a62e
+- needle="with exit code" #17 @214862086 → function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b
+- needle="with exit code" #18 @216525928 → function zLr() start=216524928 end=216532389 len=7461 sha=b6c86ced24f42b58
+- needle="with exit code" #19 @217854337 → function xQr() start=217851152 end=217968696 len=117544 sha=56d9bea92beeee8d
+- needle="with exit code" #20 @222932411 → NONE
+- needle="with exit code" #21 @233183214 → async function R() start=233182909 end=233183420 len=511 sha=e8eb552cea5feab4
+- needle="with exit code" #22 @234177627 → function nv() start=234175323 end=234178490 len=3167 sha=f793862c46a97b61
+- needle="exit code ${" #0 @66420079 → function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a
+- needle="exit code ${" #1 @68779573 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="exit code ${" #2 @205747039 → NONE
+- needle="exit code ${" #3 @208139689 → NONE
+- needle="exit code ${" #4 @208668113 → async function wg() start=208667756 end=208668136 len=380 sha=8caa6ea94e07a62e
+- needle="exit code ${" #5 @213560318 → function Ozo() start=213558612 end=213563430 len=4818 sha=f98a76e8656da421
+- needle="exit code ${" #6 @214862011 → function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b
+- needle="exit code ${" #7 @214862091 → function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b
+- needle="exit code ${" #8 @216525933 → function zLr() start=216524928 end=216532389 len=7461 sha=b6c86ced24f42b58
+- needle="exit code ${" #9 @217854342 → function xQr() start=217851152 end=217968696 len=117544 sha=56d9bea92beeee8d
+- needle="exit code ${" #10 @219890822 → async function Pn() start=219885820 end=219891108 len=5288 sha=f6e1b92738db703f
+- needle="exit code ${" #11 @221782491 → function K() start=221781742 end=221782671 len=929 sha=faa5cff37ccb2be4
+- needle="exit code ${" #12 @233183219 → async function R() start=233182909 end=233183420 len=511 sha=e8eb552cea5feab4
+- needle="exit code ${" #13 @234177632 → function nv() start=234175323 end=234178490 len=3167 sha=f793862c46a97b61
+- needle="exit code unknown" #1 @230144842 → NONE
+- needle="internal error was logged" #1 @230076234 → async function Kae() start=230071448 end=230076266 len=4818 sha=8ca2f7fd858be66f
+- needle="Couldn't background this session" #1 @230076197 → async function Kae() start=230071448 end=230076266 len=4818 sha=8ca2f7fd858be66f
+- needle="background sessions" #8 @206411704 → function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112
+- needle="background sessions" #11 @219898664 → function Ot() start=219898540 end=219898711 len=171 sha=06e3da600fd22c28
+- needle="background sessions" #13 @219968933 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background sessions" #14 @219970738 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background sessions" #15 @219971721 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background sessions" #16 @220049781 → async function Ed() start=220048839 end=220054596 len=5757 sha=81da221b1ba43a9b
+- needle="background sessions" #21 @221207464 → function De() start=221207325 end=221207486 len=161 sha=c2eff009af858f6d
+- needle="background sessions" #23 @221449444 → async function Xf() start=221444331 end=221454647 len=10316 sha=fc66a6469a42badf
+- needle="background sessions" #24 @228203458 → async function Vr() start=228203327 end=228204770 len=1443 sha=d55ee3f13b3884e5
+- needle="background session" #31 @206411704 → function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112
+- needle="background session" #32 @213585205 → function tb() start=213584207 end=213585502 len=1295 sha=93db6223dbee5457
+- needle="background session" #34 @217266554 → function QKr() start=217266509 end=217266608 len=99 sha=0d0671539968ee0f
+- needle="background session" #35 @217295743 → NONE
+- needle="background session" #39 @219898664 → function Ot() start=219898540 end=219898711 len=171 sha=06e3da600fd22c28
+- needle="background session" #41 @219967930 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background session" #42 @219968933 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background session" #43 @219969831 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background session" #44 @219970738 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background session" #45 @219971721 → async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5
+- needle="background session" #46 @220049781 → async function Ed() start=220048839 end=220054596 len=5757 sha=81da221b1ba43a9b
+- needle="background session" #47 @220060054 → async function Vm() start=220059984 end=220060414 len=430 sha=b40b9bf37dc09c69
+- needle="background session" #48 @220062041 → async function ep() start=220061945 end=220066452 len=4507 sha=dddd47637d840805
+- needle="background session" #49 @220066690 → async function tp() start=220066567 end=220068689 len=2122 sha=4b38a242765d64c2
+- needle="background session" #50 @220068756 → async function np() start=220068689 end=220069798 len=1109 sha=1d22986b102f2ad0
+- needle="background session" #51 @220069908 → async function rp() start=220069798 end=220072088 len=2290 sha=a28c42366efbe8b4
+- needle="background session" #52 @220071249 → async function rp() start=220069798 end=220072088 len=2290 sha=a28c42366efbe8b4
+- needle="background session" #53 @220106878 → async function ze() start=220104824 end=220108725 len=3901 sha=de1477d0c42cbfce
+- needle="background session" #59 @221207464 → function De() start=221207325 end=221207486 len=161 sha=c2eff009af858f6d
+- needle="background session" #60 @221218436 → async function _o() start=221215911 end=221218640 len=2729 sha=e64b06c7f125e761
+- needle="background session" #62 @221449444 → async function Xf() start=221444331 end=221454647 len=10316 sha=fc66a6469a42badf
+- needle="background session" #63 @221772564 → NONE
+- needle="background session" #65 @221903542 → function bc() start=221901491 end=221905817 len=4326 sha=a7fa13202ffb4fa7
+- needle="background session" #66 @226471701 → function Nt() start=226470172 end=226472243 len=2071 sha=41cfe60bb1216876
+- needle="background session" #67 @228203458 → async function Vr() start=228203327 end=228204770 len=1443 sha=d55ee3f13b3884e5
+- needle="background session" #69 @229811939 → function K() start=229811805 end=229812013 len=208 sha=33493f85674b6a2e
+- needle="background session" #70 @229812867 → function wr() start=229812547 end=229813591 len=1044 sha=bcab3664c2eabb8b
+- needle="background session" #71 @229821267 → function oe() start=229821137 end=229821502 len=365 sha=b7c18b17c8e7e57f
+- needle="background session" #72 @229827921 → function Tn() start=229825068 end=229828766 len=3698 sha=18c82c48151f2434
+- needle="background session" #73 @232627430 → async function ln() start=232627281 end=232627957 len=676 sha=95ce7669181618e5
+- needle="background session" #74 @234148399 → NONE
+- needle="background session" #78 @234849357 → async function J() start=234849170 end=234849641 len=471 sha=8685fedb2ad3b179
+- needle="tasks carry" #1 @229812841 → function wr() start=229812547 end=229813591 len=1044 sha=bcab3664c2eabb8b
+- needle="task carries" #1 @229812826 → function wr() start=229812547 end=229813591 len=1044 sha=bcab3664c2eabb8b
+- needle="carry over to the background" #1 @229827903 → function Tn() start=229825068 end=229828766 len=3698 sha=18c82c48151f2434
+- needle="misleading" #3 @248032958 → function updatePanBars() start=247995375 end=248042920 len=47545 sha=40b23c98c93ff1da
+- needle="code:-1" #0 @218626246 → function Je() start=218625637 end=218626327 len=690 sha=69141cb722b815aa
+- needle="code:-1" #1 @218628899 → function Ye() start=218627943 end=218629071 len=1128 sha=65aac69531dda9ad
+- needle="code:-1" #2 @224298247 → async function jn() start=224297075 end=224298845 len=1770 sha=87443ac3fab8f620
+- needle="code:-1" #3 @230144966 → NONE
+- needle="Command failed with exit code" #1 @216525913 → function zLr() start=216524928 end=216532389 len=7461 sha=b6c86ced24f42b58
+- needle="Command failed with exit code" #2 @217854322 → function xQr() start=217851152 end=217968696 len=117544 sha=56d9bea92beeee8d
+- needle="Command failed with exit code" #3 @233183199 → async function R() start=233182909 end=233183420 len=511 sha=e8eb552cea5feab4
+- needle="Background command \"" #0 @205148010 → NONE
+- needle="failed with exit code" #0 @68779561 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="failed with exit code" #1 @82346876 → NONE
+- needle="failed with exit code" #7 @205747027 → NONE
+- needle="failed with exit code" #8 @208668101 → async function wg() start=208667756 end=208668136 len=380 sha=8caa6ea94e07a62e
+- needle="failed with exit code" #9 @216525921 → function zLr() start=216524928 end=216532389 len=7461 sha=b6c86ced24f42b58
+- needle="failed with exit code" #10 @217854330 → function xQr() start=217851152 end=217968696 len=117544 sha=56d9bea92beeee8d
+- needle="failed with exit code" #11 @222932404 → NONE
+- needle="failed with exit code" #12 @233183207 → async function R() start=233182909 end=233183420 len=511 sha=e8eb552cea5feab4
+
+## 247 JS hits=147
+- needle="exited with code ${" #0 @208296973 → async function Vn() start=208295536 end=208297776 len=2240 sha=a8ef9824f43f4c65
+- needle="exited with code ${" #1 @209926902 → async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132
+- needle="exited with code ${" #2 @209927366 → async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132
+- needle="exited with code ${" #3 @210363425 → function FA() start=210362751 end=210363763 len=1012 sha=0a7a2bcb4a0cb7e1
+- needle="exited with code ${" #4 @210364921 → async function Nee() start=210364252 end=210365205 len=953 sha=0a70e48dd3eecdd7
+- needle="exited with code ${" #5 @211429758 → async function Kl() start=211429396 end=211432272 len=2876 sha=cc0c132913339d27
+- needle="exited with code ${" #6 @212234370 → async function D() start=212234266 end=212234403 len=137 sha=56d29ea0a9cdccc3
+- needle="exited with code ${" #7 @212234505 → async function H() start=212234403 end=212234529 len=126 sha=4d9436e8076efb15
+- needle="exited with code ${" #8 @213612412 → async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0
+- needle="exited with code ${" #9 @213612461 → async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0
+- needle="exited with code ${" #10 @214535921 → async function vBo() start=214533065 end=214536021 len=2956 sha=5c35645e3f03a5a8
+- needle="exited with code ${" #11 @216242591 → function ADt() start=216242459 end=216243012 len=553 sha=8b99f44ad4742961
+- needle="exited with code ${" #12 @219803574 → async function l() start=219800580 end=219804364 len=3784 sha=1777aeb50d9dc7ed
+- needle="exited with code ${" #13 @220383596 → function Vu() start=220383466 end=220384362 len=896 sha=3eb593056a525bd0
+- needle="exited with code ${" #14 @223442124 → async function q() start=223441727 end=223442225 len=498 sha=09daa4e74c0650ad
+- needle="exited with code ${" #15 @223442456 → async function z() start=223442225 end=223442562 len=337 sha=6d7ea8e88b9ba798
+- needle="exited with code ${" #16 @228419594 → NONE
+- needle="exited with code ${" #17 @228419683 → NONE
+- needle="exited with code" #20 @208296973 → async function Vn() start=208295536 end=208297776 len=2240 sha=a8ef9824f43f4c65
+- needle="exited with code" #21 @209926902 → async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132
+- needle="exited with code" #22 @209927366 → async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132
+- needle="exited with code" #23 @209956648 → function Jg() start=209955776 end=209956743 len=967 sha=996c2eb9d62f9a69
+- needle="exited with code" #24 @210363425 → function FA() start=210362751 end=210363763 len=1012 sha=0a7a2bcb4a0cb7e1
+- needle="exited with code" #25 @210364921 → async function Nee() start=210364252 end=210365205 len=953 sha=0a70e48dd3eecdd7
+- needle="exited with code" #26 @211429758 → async function Kl() start=211429396 end=211432272 len=2876 sha=cc0c132913339d27
+- needle="exited with code" #27 @212234370 → async function D() start=212234266 end=212234403 len=137 sha=56d29ea0a9cdccc3
+- needle="exited with code" #28 @212234505 → async function H() start=212234403 end=212234529 len=126 sha=4d9436e8076efb15
+- needle="exited with code" #29 @213612412 → async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0
+- needle="exited with code" #30 @213612461 → async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0
+- needle="exited with code" #31 @214535921 → async function vBo() start=214533065 end=214536021 len=2956 sha=5c35645e3f03a5a8
+- needle="exited with code" #32 @216242591 → function ADt() start=216242459 end=216243012 len=553 sha=8b99f44ad4742961
+- needle="exited with code" #33 @219803574 → async function l() start=219800580 end=219804364 len=3784 sha=1777aeb50d9dc7ed
+- needle="exited with code" #34 @220383596 → function Vu() start=220383466 end=220384362 len=896 sha=3eb593056a525bd0
+- needle="exited with code" #35 @223442124 → async function q() start=223441727 end=223442225 len=498 sha=09daa4e74c0650ad
+- needle="exited with code" #36 @223442456 → async function z() start=223442225 end=223442562 len=337 sha=6d7ea8e88b9ba798
+- needle="exited with code" #37 @227610215 → NONE
+- needle="exited with code" #38 @228419594 → NONE
+- needle="exited with code" #39 @228419683 → NONE
+- needle="(exit code" #7 @216242311 → function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8
+- needle="(exit code" #8 @221724398 → function Mr() start=221724286 end=221725002 len=716 sha=1992854d28dfbfed
+- needle="(exit code" #9 @223669566 → function K() start=223668818 end=223669747 len=929 sha=faa5cff37ccb2be4
+- needle="(exit code" #10 @231628242 → function Zr() start=231627002 end=231630047 len=3045 sha=f30c06906ac378b5
+- needle="(exit code" #11 @231628366 → function Zr() start=231627002 end=231630047 len=3045 sha=f30c06906ac378b5
+- needle="(exit code" #12 @231628465 → function Zr() start=231627002 end=231630047 len=3045 sha=f30c06906ac378b5
+- needle="(exit code ${" #0 @216242311 → function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8
+- needle="(exit code ${" #1 @223669566 → function K() start=223668818 end=223669747 len=929 sha=faa5cff37ccb2be4
+- needle="Exit code ${" #0 @214014011 → function gPo() start=214013968 end=214014220 len=252 sha=fc052f434a0d58ad
+- needle="Exit code ${" #1 @215717437 → NONE
+- needle="Exit code ${" #2 @215723246 → NONE
+- needle="Exit code ${" #3 @219367964 → function sJs() start=219330827 end=219439674 len=108847 sha=84e6c1397b13c434
+- needle="Exit code ${" #4 @225464527 → async function Nt() start=225464064 end=225465085 len=1021 sha=3423011bbfcd3204
+- needle="Exit code ${" #5 @225482375 → async function cn() start=225475727 end=225485749 len=10022 sha=d2e8d30a41df6428
+- needle="Exit code " #46 @214014011 → function gPo() start=214013968 end=214014220 len=252 sha=fc052f434a0d58ad
+- needle="Exit code " #47 @215717437 → NONE
+- needle="Exit code " #48 @215723246 → NONE
+- needle="Exit code " #49 @219351466 → async function PJs() start=219351187 end=219351992 len=805 sha=b04a8f50195c8c4f
+- needle="Exit code " #50 @219367964 → function sJs() start=219330827 end=219439674 len=108847 sha=84e6c1397b13c434
+- needle="Exit code " #51 @225464527 → async function Nt() start=225464064 end=225465085 len=1021 sha=3423011bbfcd3204
+- needle="Exit code " #52 @225482375 → async function cn() start=225475727 end=225485749 len=10022 sha=d2e8d30a41df6428
+- needle="with exit code" #0 @66420074 → function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a
+- needle="with exit code" #1 @68779568 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="with exit code" #14 @207503163 → NONE
+- needle="with exit code" #15 @209391749 → NONE
+- needle="with exit code" #16 @209920893 → async function Cg() start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2
+- needle="with exit code" #17 @216242387 → function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8
+- needle="with exit code" #18 @217977750 → function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7
+- needle="with exit code" #19 @219328234 → function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba
+- needle="with exit code" #20 @225908294 → NONE
+- needle="with exit code" #21 @235212409 → async function R() start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4
+- needle="with exit code" #22 @236068007 → function _v() start=236065703 end=236068870 len=3167 sha=cf7fad70208605d5
+- needle="exit code ${" #0 @66420079 → function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a
+- needle="exit code ${" #1 @68779573 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="exit code ${" #2 @207503168 → NONE
+- needle="exit code ${" #3 @209391754 → NONE
+- needle="exit code ${" #4 @209920898 → async function Cg() start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2
+- needle="exit code ${" #5 @214938116 → function R2o() start=214936410 end=214941228 len=4818 sha=582cd8f794e19ee9
+- needle="exit code ${" #6 @216242312 → function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8
+- needle="exit code ${" #7 @216242392 → function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8
+- needle="exit code ${" #8 @217977755 → function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7
+- needle="exit code ${" #9 @219328239 → function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba
+- needle="exit code ${" #10 @221643923 → async function Dn() start=221638921 end=221644209 len=5288 sha=f52be0f59b28b376
+- needle="exit code ${" #11 @223669567 → function K() start=223668818 end=223669747 len=929 sha=faa5cff37ccb2be4
+- needle="exit code ${" #12 @235212414 → async function R() start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4
+- needle="exit code ${" #13 @236068012 → function _v() start=236065703 end=236068870 len=3167 sha=cf7fad70208605d5
+- needle="exit code unknown" #1 @232272368 → NONE
+- needle="internal error was logged" #1 @232203771 → async function Fae() start=232198982 end=232203803 len=4821 sha=8bacf6bae9906f7d
+- needle="Couldn't background this session" #1 @232203734 → async function Fae() start=232198982 end=232203803 len=4821 sha=8bacf6bae9906f7d
+- needle="background sessions" #8 @208012628 → function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc
+- needle="background sessions" #11 @221651765 → function Ot() start=221651641 end=221651812 len=171 sha=d0399dc1021ff949
+- needle="background sessions" #12 @221727602 → async function Nd() start=221726665 end=221732419 len=5754 sha=25f9a93d9d3aaeb2
+- needle="background sessions" #14 @222001929 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background sessions" #15 @222003734 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background sessions" #16 @222004717 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background sessions" #24 @223105836 → function De() start=223105697 end=223105858 len=161 sha=c2eff009af858f6d
+- needle="background sessions" #26 @223347951 → async function Zf() start=223342838 end=223353184 len=10346 sha=7524cd42affb79f5
+- needle="background sessions" #27 @230095730 → async function Vr() start=230095599 end=230097042 len=1443 sha=35a1d2bb43b1bf88
+- needle="background session" #31 @208012628 → function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc
+- needle="background session" #32 @214963007 → function yb() start=214962009 end=214963304 len=1295 sha=dd3e1997d96da764
+- needle="background session" #34 @218732633 → function k3r() start=218732588 end=218732687 len=99 sha=57467f47aa391ecd
+- needle="background session" #35 @218761822 → NONE
+- needle="background session" #39 @221651765 → function Ot() start=221651641 end=221651812 len=171 sha=d0399dc1021ff949
+- needle="background session" #40 @221727602 → async function Nd() start=221726665 end=221732419 len=5754 sha=25f9a93d9d3aaeb2
+- needle="background session" #41 @221737877 → async function mp() start=221737807 end=221738237 len=430 sha=5f518301845d935b
+- needle="background session" #42 @221739864 → async function pp() start=221739768 end=221745079 len=5311 sha=1f32d13e5e84bb9d
+- needle="background session" #43 @221745317 → async function gp() start=221745194 end=221747316 len=2122 sha=fac02eec7024ef9f
+- needle="background session" #44 @221747383 → async function hp() start=221747316 end=221748425 len=1109 sha=35279cd299ec1a44
+- needle="background session" #45 @221748535 → async function _p() start=221748425 end=221750715 len=2290 sha=848e5e7b6d822676
+- needle="background session" #46 @221749876 → async function _p() start=221748425 end=221750715 len=2290 sha=848e5e7b6d822676
+- needle="background session" #47 @221786554 → async function Qe() start=221784504 end=221788398 len=3894 sha=65a4637d987e1e28
+- needle="background session" #49 @222000926 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background session" #50 @222001929 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background session" #51 @222002827 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background session" #52 @222003734 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background session" #53 @222004717 → async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac
+- needle="background session" #62 @223105836 → function De() start=223105697 end=223105858 len=161 sha=c2eff009af858f6d
+- needle="background session" #63 @223116808 → async function _o() start=223114283 end=223117012 len=2729 sha=d3781324383fee74
+- needle="background session" #65 @223347951 → async function Zf() start=223342838 end=223353184 len=10346 sha=7524cd42affb79f5
+- needle="background session" #66 @223659640 → NONE
+- needle="background session" #68 @223798819 → function kc() start=223796768 end=223801094 len=4326 sha=abc56245280574aa
+- needle="background session" #69 @228399244 → function Nt() start=228397715 end=228399786 len=2071 sha=b86db94af9c1889d
+- needle="background session" #70 @230095730 → async function Vr() start=230095599 end=230097042 len=1443 sha=35a1d2bb43b1bf88
+- needle="background session" #72 @231772111 → function K() start=231771977 end=231772185 len=208 sha=33493f85674b6a2e
+- needle="background session" #73 @231773039 → function wr() start=231772719 end=231773763 len=1044 sha=bcab3664c2eabb8b
+- needle="background session" #74 @231781439 → function oe() start=231781309 end=231781674 len=365 sha=b7c18b17c8e7e57f
+- needle="background session" #75 @231788093 → function Tn() start=231785240 end=231788938 len=3698 sha=ae360bb40d26eb39
+- needle="background session" #76 @234666960 → async function ln() start=234666811 end=234667487 len=676 sha=95ce7669181618e5
+- needle="background session" #77 @236038786 → NONE
+- needle="tasks carry" #1 @231773013 → function wr() start=231772719 end=231773763 len=1044 sha=bcab3664c2eabb8b
+- needle="task carries" #1 @231772998 → function wr() start=231772719 end=231773763 len=1044 sha=bcab3664c2eabb8b
+- needle="carry over to the background" #1 @231788075 → function Tn() start=231785240 end=231788938 len=3698 sha=ae360bb40d26eb39
+- needle="misleading" #3 @250154344 → function updatePanBars() start=250116761 end=250164306 len=47545 sha=40b23c98c93ff1da
+- needle="code:-1" #0 @221846208 → function Je() start=221845599 end=221846289 len=690 sha=273300e7af6ba7dd
+- needle="code:-1" #1 @221848861 → function Ye() start=221847905 end=221849033 len=1128 sha=c7597a9393a16cc9
+- needle="code:-1" #2 @225167736 → async function jn() start=225166564 end=225168334 len=1770 sha=87443ac3fab8f620
+- needle="code:-1" #3 @232272492 → NONE
+- needle="Command failed with exit code" #1 @217977735 → function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7
+- needle="Command failed with exit code" #2 @219328219 → function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba
+- needle="Command failed with exit code" #3 @235212394 → async function R() start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4
+- needle="Background command \"" #0 @207085187 → NONE
+- needle="failed with exit code" #0 @68779561 → async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56
+- needle="failed with exit code" #1 @82346876 → NONE
+- needle="failed with exit code" #7 @207503156 → NONE
+- needle="failed with exit code" #8 @209920886 → async function Cg() start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2
+- needle="failed with exit code" #9 @217977743 → function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7
+- needle="failed with exit code" #10 @219328227 → function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba
+- needle="failed with exit code" #11 @225908287 → NONE
+- needle="failed with exit code" #12 @235212402 → async function R() start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4

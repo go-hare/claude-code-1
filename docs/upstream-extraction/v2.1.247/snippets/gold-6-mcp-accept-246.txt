@@ -1,0 +1,3 @@
+# offset=234886506 ver=246 hit=1/1 needle="W[O]"
+
+f i)s.push({type:"agent-server",agentServer:g});for(let g of w)s.push({type:"server",server:g});return s},[b,B,E,S,i,w]),ot=Me(()=>{u("MCP dialog dismissed",{display:"system"})},[u]),nt=Me(()=>{let s=W[O];if(!s)return;if(s.type==="server")a(s.server);else if(s.type==="agent-server")c(s.agentServer);else if(s.type==="unused-connectors-fold")M()},[W,O,a,c,M]);vn({"confirm:previous":()=>R((s)=>s===0?W.length-1:s-1),"confirm:next":()=>R((s)=>s===W.length-1?0:s+1),"confirm:yes":nt,"confirm:no":ot},{context:"Confirmation"}),z(()=>{R((s)=>Math.min(s,Math.max(0,W.length-1)))},[W.length]);let rt=dn(),W

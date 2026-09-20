@@ -1,0 +1,3 @@
+# 247 offset=228757726 needle="function Zi(){return"
+
+ig","gcloud")}var Ur=X(()=>{sr();Mi()});function Zi(){return[]}function Qi(){return fo().catch(Zi)}function ea(Ji){return{label:Ji,value:Ji}}function bo(){let Ui=E(3),[Wr]=l(Qi),Wi;if(Ui[0]===c)Wi=e(g,{subtitle:"GCP project",children:e(He,{message:"Reading ~/.config/gcloud\u2026"})}),Ui[0]=Wi;else Wi=Ui[0];let Gi;if(Ui[1]!==Wr)Gi=e(Do,{fa

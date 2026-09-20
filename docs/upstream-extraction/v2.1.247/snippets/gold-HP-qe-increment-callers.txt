@@ -1,0 +1,14 @@
+# LOCKED increment callers of dm via export Y$ → import Y$ as qe
+# dm as Y$ @219684757 count=1
+# Y$ as qe from _448.js @225459219 count=1
+# Y$ as tsc @208903776 is a different Y$ (not _448) — collision-ban
+#
+# unique qe(s.pluginInfo.repository) count=1 @225476838
+#   if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repository)
+# unique qe(p.pluginInfo.repository) count=1 @225484253
+#   p.pluginInfo)qe(p.pluginInfo.repository),lt(p.pluginInfo.repository,"command",...)
+# both inside function cn @225475733 end=225485749 (slash/prompt path)
+#
+# leftover UNKNOWN: dm(f.pluginInfo.repository) @216056711 count=1
+#   unique string, but callee name dm has function dm( count=12 and no Y$/ _448 import walk
+#   do not invent that it is THIS dm

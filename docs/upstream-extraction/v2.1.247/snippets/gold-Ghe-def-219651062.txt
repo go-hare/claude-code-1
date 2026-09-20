@@ -1,0 +1,2 @@
+# needle=function Ghe( pos=219651062 end=219651176 len=114 tip=false
+function Ghe(e,t=e){let n=e.filter(BGe);if(c7e()==="ant")return n;let r=t instanceof Set?t:$ao(t);return wni(n,r)}

@@ -1,0 +1,3 @@
+# offset=206989396 hit=1/17 needle="function Qi("
+
+{return f()?.projectRoot??n().project.projectRoot}function Qi(e){return e}function as(e){return e}function Qt(e){let t=n();if(t.update({project:as(e)}),e.originalCwd!==void 0)rs(t)}function _m(e){Qt({originalCwd:e})}function Um(e){return ls.of(n()).subscribe(e)}function jm(e){Qt({projectRoot:e})}function qm(){return n().project.cwd}function Wm(e){Qt({cwd:e})}function Gm(){n().costLedger.restartClock()}function Md(){return n().costLedger.sessionSt

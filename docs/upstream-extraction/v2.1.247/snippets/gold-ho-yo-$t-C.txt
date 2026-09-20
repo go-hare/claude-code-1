@@ -1,0 +1,2 @@
+# C=BQc pos=207828048
+function C(r,n=160){let t=o(r).replace(/[\p{Cc}\p{Cf}]/gu,(i)=>/\s/.test(i)?i:"").replace(/\s+/g," ").trim();return t.length>n?`${e(t,n)}\u2026`:t}

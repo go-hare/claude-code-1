@@ -1,0 +1,7 @@
+# async gi
+# start=210498859 end=210500359
+
+async function gi(e){let{stdout:t,code:n}=await b(v(),["--no-optional-locks","rev-parse","--show-toplevel"],{timeout:P,preserveOutputOnError:!1,abortSignal:e});if(n!==0||t.trim()==="")return null;return t.trim()}function qe(e,t=ae){let n=e.trim().split(`
+`).filter(Boolean),i=0,s=0,r=0,o=new Map;for(let a of n){let l=a.split("\t");if(l.length<3)continue;r++;let f=l[0],m=l[1],u=l.slice(2).join("\t"),c=f==="-"||m==="-",g=c?0:parseInt(f??"0",10)||0,d=c?0:parseInt(m??"0",10)||0;if(i+=g,s+=d,o.size<t)o.set(u,{added:g,removed:d,isBinary:c,isUntracked:!1})}return{stats:{filesCount:r,linesAdded:i,linesRemoved:s},perFileStats:o}}function Mt(e){let t=new Map,n=new Set;if(!e.trim())return{hunks:t,skippedLarge:n};let i=e.split(/^diff --git /m).filter(Boolean);for(let s of i){if(t.size+n.size>=ae)break;let r=s.indexOf(`
+`),a=(r===-1?s:s.slice(0,r)).match(/^a\/(.+?) b\/(.+)$/);if(!a)continue;let l=a[2]??a[1]??"";if(s.length>ze){n.add(l);continue}let f=s.split(`
+`),m=[],u=null,c=0;for(let g=1;g<f.length;g++){let d=f[g]??"",S=d.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);if(S){if(u)m.push(u);u={oldStart:parseInt(S[1]??"0",10),oldLines:parseInt(S[2]??"1",10),newStart:parseInt(S[3]??"0",10),newLines:parseInt(S[4]??"1",10),lines:[]};continue}if(d.startsWith("index ")||d.startsWith("---")||d.startsWith("+++")||d.startsWith("new file")||d.startsWith("deleted file")||d.startsWith("old mode")||d.startsWith("new mode")||d.startsWith("Binary files"))continue;if(u&&(d.startsWith("+")||d.starts

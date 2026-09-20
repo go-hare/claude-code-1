@@ -61,6 +61,8 @@ type ExecFileWithCwdOptions = {
   shell?: boolean | string | undefined
   stdin?: 'ignore' | 'inherit' | 'pipe'
   input?: string
+  /** densable git harden `stripFinalNewline:!1` — keep trailing NL for `Ae`. */
+  stripFinalNewline?: boolean
 }
 
 type ExecaResultWithError = {
@@ -108,6 +110,7 @@ export function execFileNoThrowWithCwd(
     shell,
     stdin: finalStdin,
     input: finalInput,
+    stripFinalNewline: finalStripFinalNewline,
   }: ExecFileWithCwdOptions = {
     timeout: 10 * SECONDS_IN_MINUTE * MS_IN_SECOND,
     preserveOutputOnError: true,
@@ -128,6 +131,7 @@ export function execFileNoThrowWithCwd(
       shell,
       stdin: finalStdin,
       input: finalInput,
+      ...(finalStripFinalNewline === false ? { stripFinalNewline: false } : {}),
       reject: false, // Don't throw on non-zero exit codes
     })
       .then(result => {

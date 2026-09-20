@@ -1,0 +1,2 @@
+# hook blocking error slice window @218249550
+nue;if(jp(S)){if(q0(S.metrics,u,o),typeof S.rewakeSummary==="string"&&S.rewakeSummary.trim()&&W9e(u))h=S.rewakeSummary.trim().replace(/\s+/g," ").slice(0,oFs)}break}catch{}}if(f.code===2){let y=`Stop hook blocking error from command "${s}":`,b="Stop hook feedback";if(l!==void 0)y=l;if(h!==void 0)b=h;else if(c!==void 0)b=c;k3({summary:b,body:`${y} ${g||m}`,priority:"next",stopHookActive:!0})}}),p=t1r();return p.add(d),d.finally(()=>p.delete(d)),!0}if(!n.background(e,{skipSpill:!0}))return!1;retur

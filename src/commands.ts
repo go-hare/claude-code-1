@@ -11,6 +11,7 @@ import {
 import goodClaude from './commands/good-claude/index.js'
 import issue from './commands/issue/index.js'
 import feedback from './commands/feedback/index.js'
+import bug from './commands/bug/index.js'
 import clear from './commands/clear/index.js'
 import cdCommand from './commands/cd/index.js'
 import color from './commands/color/index.js'
@@ -436,6 +437,7 @@ const COMMANDS = memoize((): Command[] => [
   tag,
   theme,
   feedback,
+  bug,
   review,
   ultrareview,
   ultrareviewNonInteractive,
@@ -525,6 +527,11 @@ const COMMANDS = memoize((): Command[] => [
     ? INTERNAL_ONLY_COMMANDS
     : []),
 ])
+
+/** densable `getBuiltinCommands` — sync COMMANDS() bag for Pi `Lo`. */
+export function getBuiltinCommands(): Command[] {
+  return COMMANDS()
+}
 
 export const builtInCommandNames = memoize(
   (): Set<string> =>
@@ -924,6 +931,7 @@ export const REMOTE_SAFE_COMMANDS: Set<Command> = new Set([
   copy, // Copy last message
   btw, // Quick note
   feedback, // Send feedback
+  bug,
   plan, // Plan mode toggle
   proactive, // Toggle proactive mode
   keybindings, // Keybinding management

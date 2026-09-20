@@ -1,0 +1,6 @@
+# offset=197910288 ver=247 hit=1/39 needle="select:accept"
+
+ on GitHub...k4..Back to plugin list.I...Cannot destructure property 'selectedPlugin' from null or undefined value... ..selectedPlugin...select:previous...6..select:next....j..select:accept...'s..detailsMenuOptions...ST..detailsMenuIndex	...o.\.Version: ...<P..onEntryHelperShown...0.showMarketplace...T..extraSection...B.installError...b...menuOptions...;.isInstalling...
+..bylinePaddingLeft...
+...'..refreshKey..G...L\.Cannot destructure property 'hasSelection' from null or undefined value...G...plugin:install.....G..plugin:toggle...Z.q.Space...	...$.canToggle...Z.].canView...c.entryPromiseG... ..Cannot destructure property 'entryPromise' from null or undefined value...|.Last updated: ...iF5.last_updated
+...X.Installing.....j.0.Will install:...	...verb...-.P.marketplaceEntryB...n...Cannot destructure property 'consent' from null or undefined value..9...w+.. runs a local command and sends its output as headers to:...2.2.The command:...d..hiddenCharactersWarning./...'x.Installed by running a c

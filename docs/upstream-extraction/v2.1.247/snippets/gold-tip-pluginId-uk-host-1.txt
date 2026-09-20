@@ -1,0 +1,2 @@
+# uk().host @232264073
+===o.label&&n.prefix===o.prefix&&n.color===o.color)return e;return[{...o,key:t},...e.filter((r)=>r.key!==t&&(r.key!==void 0||!m0(r,o)))]}function RW(e,t){if(!e||e.length===0||!t)return[];let o=z5e.of(uk().host),n=[];for(let r of e){if(r.type!=="regex")continue;let{pattern:s,url:a,label:l}=r;if(typeof s!=="string"||typeof a!=="string"||l!==void 0&&typeof l!=="string"){o.warnUnreadableRegexEntry(`${typeof s}/${typeof a}/${typeof l}`);continue}let u

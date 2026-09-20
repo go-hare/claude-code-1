@@ -1,0 +1,3 @@
+# off=218298577 needle="he.stderr||\"No stderr output\""
+
+dout,stderr:he.stderr,exitCode:he.status,command:Be,durationMs:Ve}),outcome:"success",hook:W};return}if(he.status===2&&!Ce.blockingError)Ce.blockingError={blockingError:`[${v?`${W.type} hook`:Fe}]: ${he.stderr||"No stderr output"}`,command:Fe};xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:he.status===0?"success":"error"}),yield{...Ce,outcome:Ce.blockingError?"blocking":"success",hook:W};return}if(he.status===0){xd({hookId:ge,hookName:y,hookEvent:h,output:he.output,stdout:he.stdout,stderr:he.stderr,exitCode:he.status,outcome:"

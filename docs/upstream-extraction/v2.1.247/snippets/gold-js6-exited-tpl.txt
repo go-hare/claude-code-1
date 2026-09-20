@@ -1,0 +1,3 @@
+# offset=208296973 needle="exited with code ${"
+
+rker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION},extendEnv:!1,stdin:a.input===void 0?"ignore":"pipe",input:a.input});if(m)g(`policyHelper stderr: ${m}`,{level:"debug"});if(fi)return{error:`${m.length>d.length?"stderr":"stdout"} exceeded ${Pe} bytes`,code:"oversize"};if(H!==0)return{error:`exited with code ${H}: ${m||d||ce||""}`,code:"exit_nonzero"};if(Buffer.byteLength(d,"utf8")>Pe)return{error:`stdout exceeded ${Pe} bytes`,code:"oversize"};let Ne=T(d,!1);if(Ne===null||typeof Ne!=="object")return{error:"stdout is not a JSON object",code:"parse_failed"};let b=co().safeParse(Ne);if(!b.success)return{error:`invalid envelope: ${b.error.message}`,code:"envelope_invalid"};let de={},ge=[]

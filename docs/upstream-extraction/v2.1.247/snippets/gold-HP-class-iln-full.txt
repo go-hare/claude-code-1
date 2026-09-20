@@ -1,0 +1,6 @@
+# LOCKED class iln @213647167 end=213647259 len=92
+# unique class iln{pendingUsage=new Map count=1
+# unique pendingUsage=new Map count=1
+# instance fields: pendingUsage Map, flushTimer, exitFlushesInFlight[], flushStorageV5
+# factory: aln=new fn(()=>new iln) unique count=1; HP() returns aln.of(bn().host)
+class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}

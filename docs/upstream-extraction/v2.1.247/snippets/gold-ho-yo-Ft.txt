@@ -1,0 +1,2 @@
+# LOCKED Ft pos=207875225 end=207875268 len=43
+function Ft(e){return _o.test(e)?e:"<key>"}

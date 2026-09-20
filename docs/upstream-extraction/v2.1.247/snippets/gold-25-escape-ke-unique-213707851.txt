@@ -1,0 +1,3 @@
+# 247 function ke start=213707851 end=213707934 len=83 sha=a124b8c0c1632347
+
+function ke(Ce){let He=OPe[Ce];return r.filter((We)=>OPe[We.priority??"next"]<=He)}

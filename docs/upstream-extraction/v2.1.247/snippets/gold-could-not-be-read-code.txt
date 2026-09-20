@@ -1,0 +1,20 @@
+# 247 offset=208882759 needle="could not be read\")"
+
+_force_login_org","unix_socket_3p_under_pin",f);else if(tn()&&n!==void 0)fe("auth_force_login_org","unix_socket_ssh_under_pin",f);else if(pm())fe("auth_force_login_org","unix_socket_unreadable_policy",f);else _e("auth_force_login_org");return{valid:!0}}if(!tn()){if(r&&q$())return{valid:!1,message:`This machine's managed settings require a first-party login, but an
+Anthropic-issued credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+or apiKeyHelper) is configured. A non-OAuth Anthropic credential
+cannot satisfy the org pin.
+
+Remove the credential and run: claude auth login
+
+If this is a third-party desktop session: forceLoginOrgUUID targets first-party OAuth and should be removed from managed-settings.json.`};return{valid:!0}}if(pm()){let f=Bt()[0]??_m()[0];if(f){let h=f.message.includes("could not be read"),g=f.message.match(X$),_=Vx.find((w)=>w===g?.[1]),b=h?sr(_)??te("other"):te("malformed");return await IR("auth_force_login_org","policy_unreadable_fail_close",{errno:b}),{valid:!1,message:`Unable to read managed policy settings.
+This machine may require organization login enforcement, but the policy file failed to load.
+Contact your administrator.
+
+Detail: ${f.file?`${f.file}: ${f.message}`:f.message}`}}}if(n===void 0)return{valid:!0};let o=typeof n==="string"?[n]:n;if(o.length===0)return{valid:!1,message:`forceLoginOrgUUID in managed settings is set to an empty array.
+No organizations are permitted. This is almost certainly a misconfiguration.
+Contact your administrator.`};let i=o.length===1?`organization ${o[0]}`:`one of these organizations: ${o.join(", ")}`;await lt({credentials:e});let s=D();if(!s)return{valid:!0};let{source:a}=mi(),u=a==="CLAUDE_CODE_OAUTH_TOKEN"||a==="CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",l=await kw(s.accessToken);if(!l)return{valid:!1,message:`Unable to verify organization for the current authentication token.
+This machine requires ${i} but the token could not be validated.
+This may be a network error, or the token may have been revoked.
+Try again, or run: claude auth login`};let d=l.organization_uuid;if(o.includes(d))return{valid:!0};if(u)return{valid:!1,message:`The ${a==="CLAUDE_CODE_OAUTH_TOKEN"?"CLAUDE_CODE_OAUTH_TOKEN":"CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"} environment variable provides a token for a
+different organizati

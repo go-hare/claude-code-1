@@ -5,6 +5,7 @@ import { color } from '@anthropic/ink'
 import { BLOCKQUOTE_BAR } from '../constants/figures.js'
 import { stringWidth, supportsHyperlinks } from '@anthropic/ink'
 import { createHyperlink } from '../utils/hyperlink.js'
+import { sanitizeMarkdownHref } from './markdownFileUrl.js'
 import type { CliHighlight } from './cliHighlight.js'
 import { logForDebugging } from './debug.js'
 import { supportsStrikethrough } from './forceStrikethrough.js'
@@ -358,13 +359,18 @@ export function formatToken(
         const email = token.href.replace(/^mailto:/, '')
         return email
       }
-      // densable jG link: `d0l(href)` for display / OSC8 target sanitization
-      const href = stripMarkdownHrefInvisibles(token.href)
+      // densable jG link: 247 `pt` gates OSC8; `d0l` still sanitizes the
+      // allowed target (234 display / unusual-Unicode href).
+      const target = sanitizeMarkdownHref(token.href)
+      const href = stripMarkdownHrefInvisibles(target ?? token.href)
       // Extract display text from the link's child tokens
       const linkText = (token.tokens ?? [])
         .map(_ => formatToken(_, theme, 0, null, token, highlight, childOpts()))
         .join('')
       const plainLinkText = stripAnsi(linkText)
+      if (target === null) {
+        return plainLinkText || href
+      }
       // If the link has meaningful display text (different from the URL),
       // show it as a clickable hyperlink. In terminals that support OSC 8,
       // users see the text and can hover/click to see the URL.

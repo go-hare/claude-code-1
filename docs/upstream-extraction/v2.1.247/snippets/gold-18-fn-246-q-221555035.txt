@@ -1,0 +1,10 @@
+# ver=246 name=q async=true start=221555035 end=221555533 len=498 sha=09daa4e74c0650ad needle="exited with code ${"
+
+async function q(e){await a.mkdir(n.dirname(m()),{recursive:!0});let t=`[Desktop Entry]
+Name=${w}
+Comment=Handle ${o}:// deep links for Claude Code
+${A(e)}
+Type=Application
+NoDisplay=true
+MimeType=x-scheme-handler/${o};
+`;await a.writeFile(m(),t);let r=await E("xdg-mime");if(r){let{code:i}=await l(r,["default",x,`x-scheme-handler/${o}`],{useCwd:!1});if(i!==0)throw Object.assign(Error(`xdg-mime exited with code ${i}`),{code:"XDG_MIME_FAILED"})}c(`Registered ${o}:// protocol handler at ${m()}`)}

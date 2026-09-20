@@ -1,0 +1,3 @@
+# 247 function kD() start=209993434 end=209993453 len=19 sha=08a1107c825139f2
+
+function kD(){Ec()}

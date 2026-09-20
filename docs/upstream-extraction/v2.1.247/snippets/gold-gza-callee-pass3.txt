@@ -1,0 +1,115 @@
+EIC "ks as eIc" count=1
+  @208142871 Cr as $Hc,vs as aIc,bs as bIc,Ir as cIc,ws as dIc,ks as eIc,Es as fIc,Os as gIc,yt as hIc,T as iIc,Nr as jIc,Cs as kIc,kt as lIc,Z as mIc,Rt
+EIC "Os as eIc" count=0
+EIC "Es as eIc" count=0
+EIC " as eIc" count=1
+  @208142873  as $Hc,vs as aIc,bs as bIc,Ir as cIc,ws as dIc,ks as eIc,Es as fIc,Os as gIc,yt as hIc,T as iIc,Nr as jIc,Cs as kIc,kt as lIc,Z as mIc,Rt a
+EIC "eIc=" count=0
+EIC "var eIc" count=0
+AHB " as Ahb" count=1
+  @210754920 e as vhb,F as whb,ne as xhb,te as yhb,re as zhb,ie as Ahb,W as Bhb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Com
+AHB "Ahb=" count=0
+AHB "function Ahb" count=0
+AHB "gs as Ahb" count=0
+AHB "hs as Ahb" count=0
+AHB "ds as Ahb" count=0
+AHB "cs as Ahb" count=0
+AHB "bs as Ahb" count=0
+DOB " as DOb" count=1
+  @209536872  as yOb,Il as zOb,F_ as AOb,U_ as BOb,Ol as COb,Bm as DOb,ur as EOb,$l as FOb,Ho as GOb,Fl as HOb,V_ as IOb,Y_ as JOb,q_ as KOb,K_ as LOb,Z_
+DOB "DOb=" count=0
+DOB "function DOb" count=0
+DOB "fPe as DOb" count=0
+FPE "var fPe=" count=0
+FPE "fPe=new Set" count=0
+FPE "fPe.has(" count=2
+  @213660513 ion fko(e){let t=e.toLowerCase();return fPe.has(t)?Nu(t):de(ch)}function eTi(e,t,n){for(let r of e){let{name:o,marketplace:s}=ho(r.source),i="plugin"in r&&r.plugin?r.plugin:o;D("te
+  @214551684 ce source: ${e}`)}function rme(e,t){if(!fPe.has(e.toLowerCase()))return null;if(typeof t.installLocation==="string"&&Ok(t.installLocation))return null;let n=t.source;if(typeof n!==
+FPE "claude-code-plugins" count=7
+  @201641936 ith ...VN.., falling back to ...*v.claude-code-plugins.M...b...We've deprecated "claude-code-plugins" in favor of "claude-plugins-official"...E...~r.This marketplace may hav
+  @201641982 -code-plugins.M...b...We've deprecated "claude-code-plugins" in favor of "claude-plugins-official"...E...~r.This marketplace may have been deprecated or moved to a new location..
+  @205507668 de.git'           plugins: 'code-review@claude-code-plugins'           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.numbe
+  @207877115 ,Yt=new Set(["claude-code-marketplace","claude-code-plugins","claude-plugins-official","anthropic-marketplace","anthropic-plugins","agent-skills","anthropic-agent-skills","life-sci
+  @214561375 urce==="github"?l.repo:Em(l.url),p=e==="claude-code-plugins"?`We've deprecated "claude-code-plugins" in favor of "claude-plugins-official".`:"This marketplace may have been depreca
+  @214561415 claude-code-plugins"?`We've deprecated "claude-code-plugins" in favor of "claude-plugins-official".`:"This marketplace may have been deprecated or moved to a new location.",f=JT("p
+FPE "function r0n" count=0
+FPE "r0n=" count=0
+RM "Remove the marketplace declaration from a specific settings scope" count=2
+  @204727508 .(t.Where to declare the marketplace: user (default), project, or local...-Z.Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.....update [name]...z..install <plugin>+...SK2.Installation sco
+  @223273735 aliases).description(K.marketplaceRemove.description).option("--scope <scope>","Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.").addOption(r()).action(t(async(s,c,d)=>{let[{marketplaceRemoveHandler:a
+RM "Successfully removed marketplace" count=2
+  @205654225 e...DC..cli_marketplace_remove_failed...c.remove marketplace.."...t. Successfully removed marketplace:...u..Updating marketplace: ...B.cli_marketplace_update.."...m...cli_marketplace_update_load_failed...q..update marketplace(s)...h...Updating marketpl
+  @233794554 ve marketplace")}O("cli_marketplace_remove"),await A(e,ue(k,{children:[l.tick," Successfully removed marketplace:"," ",ke(n),t.scope?` (from ${t.scope} settings)`:""]}))}function kt(jr){let on=Se(11),{promise:Ur}=jr,{messages:an,summary:rn}=q(Ur),Ae,xe,Me;if(on[0]!==an||on[1]!==r
+RM "marketplaceRemoveHandler" count=5
+  @182180686 teResultyahandleMarketplaceErrorKmarketplaceAddHandlerIrmarketplaceListHandlerRrmarketplaceRemoveHandlerTrmarketplaceUpdateHandlerArpluginDetailsHandlerFrpluginDisableHandlerOrpluginEnableHandlerDrpluginInitHandlervrpluginInstallHandlerxrpluginListHandlerErpluginPruneHandlerCrplu
+  @204784549 ed value...m..marketplaceListHandler..S...ps.Cannot destructure property 'marketplaceRemoveHandler' from null or undefined value...>..marketplaceRemoveHandlerS...Cannot destructure property 'marketplaceUpdateHandler' from null or undefined value...	.marketplaceUp
+  @204784612 ucture property 'marketplaceRemoveHandler' from null or undefined value...>..marketplaceRemoveHandlerS...Cannot destructure property 'marketplaceUpdateHandler' from null or undefined value...	.marketplaceUpdateHandlerO...I.Cannot destructure property 'pluginInstallHa
+  @223273909 it to remove it from every scope.").addOption(r()).action(t(async(s,c,d)=>{let[{marketplaceRemoveHandler:a},{createSubcommandRoot:m}]=await Promise.all([import("B:/~BUN/root/chunk-1d7qpv1r.js"),import("B:/~BUN/root/chunk-qtxet1f6.js")]);await a(await m(),c,d,s),Oe()})),l.command(
+  @233805507 MarketplaceError,Ir as marketplaceAddHandler,Rr as marketplaceListHandler,Tr as marketplaceRemoveHandler,Ar as marketplaceUpdateHandler,Fr as pluginDetailsHandler,Or as pluginDisableHandler,Dr as pluginEnableHandler,vr as pluginInitHandler,xr as pluginInstallHandler,Er as pluginL
+RM "tengu_marketplace_removed" count=3
+  @197939224 ... Run /reload-plugins to apply...	...l..top-level...channel:...tengu_marketplace_removed...}d..Marketplace ...]J. not updated (managed policy): ...$.. could not be refreshed: ...U.tengu_marketplace_updated...B...	w..Cannot destructure property 'upd
+  @233794329 ope '${o}'. Use: user, project, or local`);a=Qe(o)}try{await Wn(n,a,r),ce(r),Q("tengu_marketplace_removed",{marketplace_name:n})}catch(o){await ne("cli_marketplace_remove","cli_marketplace_remove_failed"),await ve(),K(o,"remove marketplace")}O("cli_marketplace_remove"),await A(e,
+  @236024852 ]=!1}return{enabledPlugins:Me}},void 0,p);await Zr(ne.name,void 0,p,g),Qe++,$t("tengu_marketplace_removed",{marketplace_name:ne.name,plugins_uninstalled:ne.installedPlugins.length});continue}if(ne.pendingUpdate){try{await Gg(ne.name,p,(G)=>{ye(G)})}catch(G){if(G instanceof qg){ae
+GZACALL "gza as " count=2
+  @219687415  as wea,fza as xea,Ok as yea,mza as zea,gza as Aea,rme as Bea,eZ as Cea,bSt as Dea,NSt as Eea,B$ as Fea,hza as Gea,yza as Hea,_za as Iea,bza as Jea,Z8 as Kea,S0
+  @231660054 eza as ut,fna as Zn,fza as mt,gna as Nn,gza as ft,hza as _o,kPa as no,kQa as Mt,kna as et,lQa as vt,lna as q,mPa as to,mQa as Et,mna as rn,nQa as Pt,nma as zn,o
+GZACALL "Aea as " count=2
+  @233769560 "B:/~BUN/root/_353.js";import{$da as Ln,Aea as Wn,Bga as pa,E2 as ge,Gaa as Cn,Gea as Vn,Haa as ra,Hea as Gn,Kea as ca,L2 as Yt,Nba as Dn,Oba as pe,Qba as oa,Rd
+  @235957400 js";import{$da as lo,A1 as Ed,Aaa as jl,Aea as Zr,B1 as bm,Bga as Va,C1 as ph,D1 as xm,Daa as xh,Dea as Bi,E1 as Pr,Eaa as hw,F1 as Tr,Gma as pa,H1 as Qa,Hea as
+GZACALL "await Aea" count=0
+GZACALL "Aea(" count=0
+GZACALL "ft as " count=12
+  @201654654 before dependency install.g...v... is left as a directory this time (fully usable): it is not a version directory inside the plugin cache.M...UQ. is left as a 
+  @201654766 y inside the plugin cache.M...UQ. is left as a directory this time (fully usable): another session is using it...G...V.. is left as a directory this time: it 
+  @201654854 her session is using it...G...V.. is left as a directory this time: it moved while its users were probed... .i.s. .l.e.f.t. .a.s. .a. .d.i.r.e.c.t.o.r.y.
+  @202198357 hing it could re-enable. The stop was left as it was; do not retry in this session...9.Auto-replies were NOT resumed (.(...J...). The live watch could not b
+  @204113880 solved; all other $VAR references are left as empty strings. Required for env var interpolation to work...g..@internal Where this hook may run when a cloud s
+  @204412667 ... to judge it (...:..); it is left as it is...u_A.globalConfigFile...Z.subscriptionTiming...f_>.hostFilesServe...z...lockUnconditionalPublis
+  @205253598 ssion trash, not overwritten: 3...:.Left as they were here despite the user's changes (...D...Uncommitted changes on the user's machine to credential-named 
+  @205538862 ns when you want to choose...$..Left as it was: ...C.o.u.l.d.n.. t. .s.a.v.e. .t.h.a.t.:. .,...wG>. .c.o.u.l.d. .n.o.t. .b.e. .w.r.i.t.t.e.n.,. .s.o.
+GZACALL "await ft(" count=10
+  @210572030 it n.mkdirp(d);if(n.backend==="by_name")await ft(e,n.realRoot,c,r);else if(await _t(n,s))throw A("WORKING_DEST_SYMLINK");let l=`${s}.${process.hrtime.bigint().t
+  @211791671 ssionId: ${e}`);let n=V(i);for(let r of await ft(t,n)){if(S()&&n!==void 0){let a=Z(r,n.isKeySegment);if(a!==void 0){if(await lt(a,e,n))return;continue}}let o=v(
+  @212622196 s:$e(),timeout:30000,credentials:f}),he=await ft();if(he.ok&&he.fromFrame&&he.status===429&&Gt(he.data)===void 0&&await Je(he.response?.headers?.["retry-after"]
+  @212622321 .response?.headers?.["retry-after"]))he=await ft();return he},oe=(re)=>typeof re?.slug==="string"&&Pe.test(re.slug)?re.slug:void 0,D,ae="";for(let re=0;re<2;re+
+  @224906984 space_name:t.workspaceName,...O});let T=await ft(u(o,"active_config"),e+` `);return m(`Console profile login: wrote credentials for profile ${e}${f?" (new profi
+  @224976518 om?[pt(e.from)].filter((s)=>s!==void 0):await ft(t);if(e.from&&n.length===0)return{scans:[],error:`Unknown source "${e.from}". Known: ${ae.map((s)=>s.id).join("
+  @230140552 (u)&&m.some((j)=>c.name.startsWith(j))&&await ft(u,o,t))l.add(u)}}catch{}let w=[...l],R=new Set;for(let c of w)for(let u of await _t(c,t))R.add(u);for(let c of 
+  @233784003 t(d?0:1)}async function br(e,n,t){let r=await ft(n??".",{force:t.force}),a=[];for(let f of r.warnings)a.push(`${l.warning} ${f}`);if(!r.ok){C("cli_plugin_tag","
+JR "function Jr(" count=8
+  @206622804 },r)}function Wr(e){return e.value=Object.freeze(e.value),e}function Jr(e,t,r,o){if(!e){let n={code:"custom",input:r,inst:o,path:[...o._zod.def.path??[]],continue:!o._zod.def.abort};if(o._zod.def.params)n.params=o._zod.d
+  @207044437  Kr(e){let t=e??{};return P(e)??L(t.follow,"opts","follow")}function Jr(e){let t=e??{};return P(e)??L(t.native,"opts","native")}var zt,Re,jt,Zt="a path under the config home is the store's own state: address it by its ke
+  @207674159 =>(...t)=>u.asap(()=>e(...t));var It=R(()=>{Ei();wi();C()});function Jr(e){if(!e||typeof e!=="string")return 0;if(!e.startsWith("data:"))return 0;let t=e.indexOf(",");if(t<0)return 0;let r=e.slice(5,t),n=e.slice(t+1);if(
+  @208100840 abled";return}var Ct=()=>{};function xt(e){return e.map(Jr)}function Jr(e){let{file:t,severity:n,docLink:r,statusOnly:o,startupFatal:i,mcpErrorMetadata:s,path:a,message:l,expected:c,suggestion:d,invalidValue:u,...f}=e,p=
+  @208570278 5+"[1m]")}function h4(){let e=Rt();return Bf.map((t)=>e[t])}function Jr(e,t){if(A()!=="firstParty"||!Be())return null;let n=Ze(e.toLowerCase().trim())?J(e):e,r=t?.ignoreModelOverrides?(u)=>Et(T(u.toLowerCase()).trim()):Q
+  @208968750 on dn(e){let t=qe([e]);return t.length===1&&t[0]===e&&ae(e)}function Jr(e,t){return[...t?[`launch flags: ${Ve}`]:[],...(e.alwaysDenyRules.session??[]).length>0||(e.alwaysAskRules.session??[]).length>0?["permission rules 
+  @209118776 ==2||t[1]!=="memory")return;let n=t[0];return C(n)?n:void 0}function Jr(e,t){if(e==="user"){let r=on(t);return r===void 0?void 0:{projectKey:r,baseRelPath:[]}}let n=sn(t);return n===void 0?void 0:{projectKey:n.projectKey
+  @209853480 tes(r)}function nr(e,t){e.putInt32(t.length),e.putString(t)}function Jr(){var e=Ee.md.sha1.create(),t=arguments.length;for(var a=0;a<t;++a)e.update(arguments[a]);return e.digest()}});var nf=Q(function(Yf,vs){vs.exports=Y
+JR "Jr().mutate" count=8
+  @213635241 t.keys(a)),c=new Set(Object.keys(i)),u=eln(e,t),d=0,p=await Jr().mutate((g)=>{let h=g.pluginSecrets?.[u],y=h?lT(h,(b,S)=>c.has(S)):void 0;if(d=y&&h?Object.keys(h).length-Object.keys(y).length:0,Object.keys(a).length===0&
+  @213644077 a=new Set(Object.keys(i)),l=new Set(Object.keys(s)),c=await Jr().mutate((p)=>{let f=p.pluginSecrets?.[e],m=f?lT(f,(h,y)=>l.has(y)):void 0,g=m&&f&&Object.keys(m).length!==Object.keys(f).length;if(Object.keys(i).length===0
+  @213645246 Configs[${e}]: ${s.message}`,{level:"warn"})}try{if(!(await Jr().mutate((s)=>{if(!s.pluginSecrets)return s;let i=`${e}/`,a=Object.entries(s.pluginSecrets).filter(([l])=>l!==e&&!l.startsWith(i));if(a.length===Object.keys(
+  @218884647 000)return;return r.idToken}async function BZr(e,t,n){await Jr().mutate((r)=>({...r,mcpXaaIdp:{...r.mcpXaaIdp,[_Y(e)]:{idToken:t,expiresAt:n}}}))}async function fYs(e,t){let n=jZr(t),r=n?n*1000:Date.now()+3600000;return 
+  @218884870 it BZr(e,t,r),r}async function VZe(e){let t=_Y(e);try{await Jr().mutate((n)=>{if(!n.mcpXaaIdp?.[t])return n;let r={...n.mcpXaaIdp};return delete r[t],{...n,mcpXaaIdp:r}})}catch(n){se("xaa",`clearIdpIdToken(${t}) failed: 
+  @218885082 failed: ${Y(n)}`)}}async function mYs(e,t){try{return await Jr().mutate((n)=>({...n,mcpXaaIdpConfig:{...n.mcpXaaIdpConfig,[_Y(e)]:{clientSecret:t}}}))}catch(n){return{success:!1,warning:Y(n)}}}async function KZe(e){retur
+  @218885352 ]?.clientSecret}async function gYs(e){let t=_Y(e);try{await Jr().mutate((n)=>{if(!n.mcpXaaIdpConfig?.[t])return n;let r={...n.mcpXaaIdpConfig};return delete r[t],{...n,mcpXaaIdpConfig:r}})}catch(n){se("xaa",`clearIdpClie
+  @218896530 ?.[n];if(!r||r.accessToken||r.refreshToken)return;try{await Jr().mutate((o)=>{let s=o.mcpOAuth?.[n];if(!s||s.accessToken||s.refreshToken)return o;let i={...o.mcpOAuth};return delete i[n],{...o,mcpOAuth:i}})}catch(o){se(e
+JR "storage lock unavailable" count=2
+  @201587325 s for ...N. from keychain..2...deletePluginOptions: storage lock unavailable for ...& .Plugin option ".i...J." isn't set. Open /plugin manage to configure it, or check that the plugin's userConfig schema de
+  @213645646  keychain`,{level:"warn"})}catch(o){_(`deletePluginOptions: storage lock unavailable for ${e}: ${Y(o)}`,{level:"warn"})}t3()}async function tvi(e,t){let n=e.manifest.userConfig;if(!n||Object.keys(n).length===0)return{};l
+KS "ks as " count=10
+  @84508570 fP not only disable colors, but hyperlinks as well. Similarly, colors and hyperlinks are disabled when ripgrep is not writing to a tty. (Unl
+  @85057156 tion failed: index < context.memory_blocks as u64assertion failed: curr_offset != prev_offset && (curr_offset as u64) != indexassertion fail
+  @200197176 d as search result blocks, including links as markdown hyperlinks - Use this tool for accessing information beyond Claude's knowledge cutoff
+  @201547336 ut false-positives. Launch these sub-tasks as parallel sub-tasks. In the prompt for these sub-tasks, include everything in the "FALSE POSITI
+  @204733200 es..g...u...Include partial message chunks as they arrive (only works with --print and --output-format=stream-json)...--forward-subage
+  @204733355 .Forward subagent text and thinking blocks as assistant/user messages with parent_tool_use_id set (only works with --print and --output-form
+  @204733900 G.C.Enable bypassing all permission checks as an option, without it being enabled by default. Recommended only for sandboxes with no interne
+  @206880923 tFeedbackUnavailableReason() policy checks as the terminal /feedback command \u2014 when feedback is disabled (3P provider, org policy, env 
+  @208089774 Ss as oMc,ws as pMc,Es as qMc,vs as rMc,ks as sMc,xs as tMc,Cs as uMc,Ps as vMc,Qa as wMc,U as xMc,Z as yMc,gn as zMc,Ls as AMc,Hs as BMc,tl
+  @208142871 vs as aIc,bs as bIc,Ir as cIc,ws as dIc,ks as eIc,Es as fIc,Os as gIc,yt as hIc,T as iIc,Nr as jIc,Cs as kIc,kt as lIc,Z as mIc,Rt as nIc,Fr
+KS "export{ks" count=0
+KS "ks as e" count=2
+  @208142871 vs as aIc,bs as bIc,Ir as cIc,ws as dIc,ks as eIc,Es as fIc,Os as gIc,yt as hIc,T as iIc,Nr as jIc,Cs as kIc,kt as lIc,Z as mIc,Rt as nIc,Fr
+  @230894942  $d,ve as ae,en as be,fs as ce,ws as de,ks as ee,bs as fe,ko as ge,De as he,Ie as ie,bo as je,ts as ke,jt as le,qo as me,Lt as ne,Do as oe,I
+DOBEQ count=0 

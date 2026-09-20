@@ -1,0 +1,2 @@
+# pos=233748839 fnStartRel=0 header="ries may not set; Claude Code drops it at download time.`})});if(!l.description&"
+ries may not set; Claude Code drops it at download time.`})});if(!l.description&&!l.metadata?.description)n.push({path:"description",message:"No marketplace description provided. Adding a description helps users understand what this marketplace offers"}

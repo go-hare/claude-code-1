@@ -1,0 +1,1 @@
+async function vXo(e,t,n){let r=await Hu(e,["version"],{hardened:!0,layout:t,signal:n}),o=r.code===0?Y4n(r.stdout):null;if(o===null)return!1;let{major:s,minor:i,patch:a}=o;if(s!==2)return s>2;if(i>=45)return!0;let l=kXo.get(i);return l!==void 0&&a>=l}

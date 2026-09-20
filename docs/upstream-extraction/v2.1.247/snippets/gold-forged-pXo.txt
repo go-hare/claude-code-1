@@ -1,0 +1,1 @@
+function pXo(e){let t=bCt;try{if(G4n(e))return{kind:"unreadable"};for(let r of q4n()){let s=Object.keys(Xr(r)?.env??{}).find((i)=>t.includes(i.toUpperCase()));if(s!==void 0)return{kind:"names",name:s}}let n=V4n(t);return n===void 0?null:{kind:"moved",name:n}}catch(n){return _(`[gitBundle] could not read the repository's settings: ${Y(n)}`),{kind:"unreadable"}}}

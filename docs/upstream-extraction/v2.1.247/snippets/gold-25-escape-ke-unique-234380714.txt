@@ -1,0 +1,3 @@
+# 247 function ke start=234380714 end=234380787 len=73 sha=feb0bb96c683db0d
+
+function ke({name:e,ruleMessage:n}){return`${n} ${e} was not contacted.`}

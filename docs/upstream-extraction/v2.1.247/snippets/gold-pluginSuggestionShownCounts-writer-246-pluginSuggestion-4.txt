@@ -1,0 +1,2 @@
+# 246 pluginSuggestion #4 @210096564
+"policySettings")?.pluginTrustMessage}function It(){return s("policySettings")?.pluginSuggestionMarketplaces??[]}function Tt(t,e){let n=s("policySettings"),r=n?.extraKnownMarketplaces?.[t]?.source;if(r&&x(e,r))return!0;return n?.strictKnownMarketplaces?.some((o)=>Z(e,o))??!1}func

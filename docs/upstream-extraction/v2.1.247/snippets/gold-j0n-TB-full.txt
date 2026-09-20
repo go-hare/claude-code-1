@@ -1,0 +1,6 @@
+# LOCKED TB @214573412 end=214573477 len=65
+# unique string XX("installed",Fs()) count=1
+# unique callers: ame@214576324 let n=TB(t); N0n@214573520 let n=TB(t)
+# name collision function TB( count=3 — other hits are no-arg (autoUpload @208743048, React @248864378)
+# alias: none for THIS TB (same-module as ame/_0n). TB as mvc is the other TB (go neighbor). TB as ur/fi/XP/W/Ke is _255.js.
+function TB(e){return!Ne()||e===void 0?null:XX("installed",Fs())}

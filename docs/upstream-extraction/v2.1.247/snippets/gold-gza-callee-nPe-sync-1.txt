@@ -1,0 +1,2 @@
+# needle=function nPe( pos=241864166 end=241864382 len=216
+function nPe(e,t){return e.trim().split(/^|\s+/).map(function(r){var i="",n=r.indexOf(".");if(n>=0&&(i=r.slice(n+1),r=r.slice(0,n)),r&&!t.hasOwnProperty(r))throw new Error("unknown type: "+r);return{type:r,name:i}})}

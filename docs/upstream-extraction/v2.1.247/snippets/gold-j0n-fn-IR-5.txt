@@ -1,0 +1,2 @@
+# needle=function IR( pos=249803910 end=249804054 len=144
+function IR(e){let t=Object.keys(e.files).sort();return t.includes("Main.dc.html")?"Main.dc.html":t.find(n=>n.endsWith(".dc.html"))??t[0]??null}

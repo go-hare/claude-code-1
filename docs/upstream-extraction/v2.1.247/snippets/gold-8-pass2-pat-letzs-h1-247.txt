@@ -1,0 +1,3 @@
+# off=230490191 pat="let zs="
+
+ntries()){let y=pn.get(o);if(!y||u.timestamp>y.timestamp)pn.set(o,u)}}function Gn(){Os(),ps.clear()}let zs=[],k=qv();S(k?"[print] turns run on the engine session (createHeadlessSession)":"[print] turns run on legacy per-turn ask()");let yt;if(U&&U.kind!=="none"&&B.CLAUDE_CODE_RESUME_INTERRUPTED_TURN){let o={mode:"prompt",agentId:Yn(),value:U.messag

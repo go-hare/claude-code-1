@@ -15,10 +15,12 @@
 import memoize from 'lodash-es/memoize.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
+import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { getSecureStorage } from '../secureStorage/index.js'
 import {
   getSettingsForSource,
+  persistSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
 import {
@@ -238,7 +240,11 @@ export function savePluginOptions(
  * the uninstall itself succeeded and we don't want to surface a confusing
  * "uninstall failed" message for a cleanup side-effect.
  */
-export function deletePluginOptions(pluginId: string): void {
+export async function deletePluginOptions(
+  pluginId: string,
+  storageV5?: unknown,
+  credentials?: unknown,
+): Promise<void> {
   // Settings side — also wipes the legacy mcpServers sub-key (same story:
   // orphaned on uninstall, never cleaned up before this PR).
   //
@@ -261,9 +267,14 @@ export function deletePluginOptions(pluginId: string): void {
     // for the undefined value, and Partial-of-X overlaps with X so the cast
     // is a narrowing TS accepts (same approach as marketplaceManager.ts:1795).
     const pluginConfigs: Partial<PluginConfigs> = { [pluginId]: undefined }
-    const { error } = updateSettingsForSource('userSettings', {
-      pluginConfigs: pluginConfigs as PluginConfigs,
-    })
+    const { error } = await persistSettingsForSource(
+      'userSettings',
+      {
+        pluginConfigs: pluginConfigs as PluginConfigs,
+      },
+      undefined,
+      storageV5,
+    )
     if (error) {
       logForDebugging(
         `deletePluginOptions: failed to clear settings.pluginConfigs[${pluginId}]: ${error.message}`,
@@ -277,30 +288,53 @@ export function deletePluginOptions(pluginId: string): void {
   // saveMcpServerUserConfig's sensitive split). `/` prefix match is safe:
   // plugin IDs are `name@marketplace`, never contain `/`, so
   // startsWith(`${id}/`) can't false-positive on a different plugin.
-  const storage = getSecureStorage()
-  const existing = storage.read()
-  if (existing?.pluginSecrets) {
+  try {
+    const storage = getSecureStorage()
     const prefix = `${pluginId}/`
-    const survivingEntries = Object.entries(existing.pluginSecrets).filter(
-      ([k]) => k !== pluginId && !k.startsWith(prefix),
-    )
-    if (
-      survivingEntries.length !== Object.keys(existing.pluginSecrets).length
-    ) {
-      const result = storage.update({
-        ...existing,
+    const mutator = (data: {
+      pluginSecrets?: Record<string, unknown>
+    }): typeof data => {
+      if (!data.pluginSecrets) return data
+      const survivingEntries = Object.entries(data.pluginSecrets).filter(
+        ([k]) => k !== pluginId && !k.startsWith(prefix),
+      )
+      if (survivingEntries.length === Object.keys(data.pluginSecrets).length) {
+        return data
+      }
+      return {
+        ...data,
         pluginSecrets:
           survivingEntries.length > 0
             ? Object.fromEntries(survivingEntries)
             : undefined,
-      })
-      if (!result.success) {
-        logForDebugging(
-          `deletePluginOptions: failed to clear pluginSecrets for ${pluginId} from keychain`,
-          { level: 'warn' },
-        )
       }
     }
+    const mutate = storage.mutate as
+      | ((
+          fn: typeof mutator,
+          creds?: unknown,
+        ) => Promise<{ success: boolean }> | { success: boolean })
+      | undefined
+    const result =
+      typeof mutate === 'function'
+        ? await mutate(mutator, credentials)
+        : (() => {
+            const existing = storage.read() ?? {}
+            const next = mutator(existing)
+            if (next === existing) return { success: true }
+            return storage.update(next)
+          })()
+    if (!result.success) {
+      logForDebugging(
+        `deletePluginOptions: failed to clear pluginSecrets for ${pluginId} from keychain`,
+        { level: 'warn' },
+      )
+    }
+  } catch (error) {
+    logForDebugging(
+      `deletePluginOptions: storage lock unavailable for ${pluginId}: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
   }
 
   clearPluginOptionsCache()

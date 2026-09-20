@@ -130,7 +130,12 @@ async function createUnixSocketAuthProxy(id: string): Promise<AuthProxyInfo> {
   return {
     proxy,
     localAddress: socketPath,
-    authEnv: { ANTHROPIC_AUTH_SOCKET: socketPath },
+    // Must be ANTHROPIC_UNIX_SOCKET — that is the name the remote's API client
+    // reads (getFetchOptions, forAnthropicAPI branch) and the name upstream
+    // uses. Under any other name the remote gets no route to this proxy and no
+    // ANTHROPIC_BASE_URL override either, so it silently calls the API direct
+    // with whatever credentials happen to exist on that host.
+    authEnv: { ANTHROPIC_UNIX_SOCKET: socketPath },
   }
 }
 

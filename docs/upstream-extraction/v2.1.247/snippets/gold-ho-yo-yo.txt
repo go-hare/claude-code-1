@@ -1,0 +1,2 @@
+# LOCKED yo pos=207874765 end=207874921 len=156
+function yo(e){if(!e||typeof e!=="object")return!1;let t=e.source;if(!t||typeof t!=="object")return!1;let s=t.source;return typeof s==="string"&&!fo.has(s)}

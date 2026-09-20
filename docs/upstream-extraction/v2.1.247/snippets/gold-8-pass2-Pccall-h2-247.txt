@@ -1,0 +1,3 @@
+# off=206539927 hit=2
+
+.max(0,r-(Date.now()-n))},resume:f,clear:()=>clearTimeout(s)}}var Cc=o(()=>{ke();w()});var Pc=()=>{};var st={};g(st,{createDeadline:()=>Ic,default:()=>st});var oo=o(()=>{oo();Cc();Pc()});function no(e){return e.catch(()=>{}),e}var as=()=>{};function jc(e,t){if(e<=0)return{expired:void 0,isExpired:()=>!1,pause(){},resume(){},clear(){}};let r=0,n=!1,s,i=st.createDeadline(e,`exceeded ${e}ms budget`),

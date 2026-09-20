@@ -1,0 +1,7 @@
+# LOCKED yln @213648410 end=213648511 len=101
+# unique function yln( count=1 in official-247 (239 Select yln is gone/renamed)
+# unique string function yln(e){let{pendingUsage:t}=HP() count=1
+# unique caller dPe@213653132 yln(n),ki( count=1
+# alias: none (yln as / as yln count=0). same-module as dPe.
+# dPe export: dPe as baa @219684806. import baa as Ft @222874809.
+function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}

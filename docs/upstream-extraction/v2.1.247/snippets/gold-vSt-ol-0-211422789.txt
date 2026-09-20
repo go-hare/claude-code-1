@@ -1,0 +1,2 @@
+# function ol(r,n) pos=211422789 end=211422976 len=187
+function ol(r,n){if(!Xr(n))return null;let a=De(n,"marketplaces"),u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}

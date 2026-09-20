@@ -1,0 +1,283 @@
+# We/Jr/ay/t3 peel official-247 size=253204128
+STR "{storageV5:p,credentials:g}=We()" count=2 hits=236022838,236092688
+  @236022838 :l,setResult:r,exitState:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]=S(null),[C,_]=
+  @236092688 nSearchModeChange:r,targetPlugin:s,targetMarketplace:u,action:m,commands:h}){let{storageV5:p,credentials:g}=We(),f=Ae((c)=>c.mcp.clients),y=Ae((c)=>c.mcp.tools),d=Ae((c)=>c.plugins.errors),x=Ae((c)=>c.plugins.war
+STR "let{storageV5:p,credentials:g}=We()" count=2 hits=236022835,236092685
+  @236022835 ror:l,setResult:r,exitState:s,onManageComplete:u,targetMarketplace:m,action:h}){let{storageV5:p,credentials:g}=We(),[f,y]=S([]),[d,x]=S(!0),[O,B]=S(0),[L,Z]=S(!1),[K,q]=S(null),[se,Se]=S(null),[_e,ye]=S(null),[C,_]=
+  @236092685 l,onSearchModeChange:r,targetPlugin:s,targetMarketplace:u,action:m,commands:h}){let{storageV5:p,credentials:g}=We(),f=Ae((c)=>c.mcp.clients),y=Ae((c)=>c.mcp.tools),d=Ae((c)=>c.plugins.errors),x=Ae((c)=>c.plugins.war
+STR "let{storageV5:u,credentials:m}=We()" count=1 hits=235998430
+  @235998430 e,onInstallComplete:i,onSearchModeChange:l,targetMarketplace:r,targetPlugin:s}){let{storageV5:u,credentials:m}=We(),h=ao(e,Ei),{setError:p,setResult:g}=e,f=e.setViewState,[y,d]=S(null),[x,O]=S([]),[B,L]=S([]),[Z,K]=
+STR "await Zr(ne.name,void 0,p,g)" count=1 hits=236024814
+  @236024814 gins){let ht=lo(yt.name,ne.name);Me[ht]=!1}return{enabledPlugins:Me}},void 0,p);await Zr(ne.name,void 0,p,g),Qe++,$t("tengu_marketplace_removed",{marketplace_name:ne.name,plugins_uninstalled:ne.installedPlugi
+STR "ay(\"userSettings\",{pluginConfigs:o},void 0,t)" count=1 hits=213645080
+  @213645080 ){if(Xr("userSettings")?.pluginConfigs?.[e]){let o={[e]:void 0},{error:s}=await ay("userSettings",{pluginConfigs:o},void 0,t);if(s)_(`deletePluginOptions: failed to clear settings.pluginConfigs[${e}]: ${s.message}`,{level:"wa
+STR "await ay(\"userSettings\",{pluginConfigs:o},void 0,t)" count=1 hits=213645074
+  @213645074 (e,t,n){if(Xr("userSettings")?.pluginConfigs?.[e]){let o={[e]:void 0},{error:s}=await ay("userSettings",{pluginConfigs:o},void 0,t);if(s)_(`deletePluginOptions: failed to clear settings.pluginConfigs[${e}]: ${s.message}`,{level:"wa
+STR "deletePluginOptions: failed to clear pluginSecrets" count=2 hits=201587216,213645522
+  @201587216 n: .<...GG..deletePluginOptions: failed to clear settings.pluginConfigs[7... .deletePluginOptions: failed to clear pluginSecrets for ...N. from keychain..2...deletePluginOptions: storage lock unavailable for ...& .Pl
+  @213645522 urn{...s,pluginSecrets:a.length>0?Object.fromEntries(a):void 0}},n)).success)_(`deletePluginOptions: failed to clear pluginSecrets for ${e} from keychain`,{level:"warn"})}catch(o){_(`deletePluginOptions: storage lock unavailable f
+STR "deletePluginOptions: storage lock unavailable" count=2 hits=201587304,213645625
+  @201587304 uginOptions: failed to clear pluginSecrets for ...N. from keychain..2...deletePluginOptions: storage lock unavailable for ...& .Plugin option ".i...J." isn't set. Open /plugin manage to configure it, or check th
+  @213645625 iled to clear pluginSecrets for ${e} from keychain`,{level:"warn"})}catch(o){_(`deletePluginOptions: storage lock unavailable for ${e}: ${Y(o)}`,{level:"warn"})}t3()}async function tvi(e,t){let n=e.manifest.userConfig;if(!n||
+STR "Jr().mutate" count=20 hits=213635241,213644077,213645246,218884647,218884870,218885082,218885352,218896530,218901426,218903815,218911483,218911741,218916548,218916860,218920397,218921853,218923906,218925642,218927358,218936773
+  @213635241 ;let l=new Set(Object.keys(a)),c=new Set(Object.keys(i)),u=eln(e,t),d=0,p=await Jr().mutate((g)=>{let h=g.pluginSecrets?.[u],y=h?lT(h,(b,S)=>c.has(S)):void 0;if(d=y&&h?Object.keys(h).length-O
+  @213644077 (f);else s[p]=f;let a=new Set(Object.keys(i)),l=new Set(Object.keys(s)),c=await Jr().mutate((p)=>{let f=p.pluginSecrets?.[e],m=f?lT(f,(h,y)=>l.has(y)):void 0,g=m&&f&&Object.keys(m).length!==O
+  @213645246 lear settings.pluginConfigs[${e}]: ${s.message}`,{level:"warn"})}try{if(!(await Jr().mutate((s)=>{if(!s.pluginSecrets)return s;let i=`${e}/`,a=Object.entries(s.pluginSecrets).filter(([l])=>l!
+  @218884647 At-Date.now()<=pYs*1000)return;return r.idToken}async function BZr(e,t,n){await Jr().mutate((r)=>({...r,mcpXaaIdp:{...r.mcpXaaIdp,[_Y(e)]:{idToken:t,expiresAt:n}}}))}async function fYs(e,t){l
+  @218884870 )+3600000;return await BZr(e,t,r),r}async function VZe(e){let t=_Y(e);try{await Jr().mutate((n)=>{if(!n.mcpXaaIdp?.[t])return n;let r={...n.mcpXaaIdp};return delete r[t],{...n,mcpXaaIdp:r}})}
+  @218885082 earIdpIdToken(${t}) failed: ${Y(n)}`)}}async function mYs(e,t){try{return await Jr().mutate((n)=>({...n,mcpXaaIdpConfig:{...n.mcpXaaIdpConfig,[_Y(e)]:{clientSecret:t}}}))}catch(n){return{succ
+STR "Jr().readAsync" count=20 hits=213634786,213643784,218884504,218885250,218896443,218897721,218899518,218902555,218928949,218930701,218931406,218937136,219149224,219149970,219158535,219159813,219161546,219164583,219188639,219189878
+  @213634786 `${e}/${t}`}async function Sle(e,t,n){try{let r=QAe(e).mcpServers?.[t],o=(await Jr().readAsync(n))?.pluginSecrets?.[eln(e,t)];if(!r&&!o)return null;return _(`Loaded user config for ${e}/${t} (se
+  @213643784 )===o)n.delete(e)}),o}async function Kwo(e,t){let n=QAe(e).options??{},r=(await Jr().readAsync(t))?.pluginSecrets?.[e]??{};return{...n,...r}}function t3(){Xn().optionValues.clear()}async functio
+  @218884504 oString()}catch{return e.replace(/\/+$/,"")}}async function _ve(e){let r=(await Jr().readAsync())?.mcpXaaIdp?.[_Y(e)];if(!r)return;if(r.expiresAt-Date.now()<=pYs*1000)return;return r.idToken}asy
+  @218885250 ))}catch(n){return{success:!1,warning:Y(n)}}}async function KZe(e){return(await Jr().readAsync())?.mcpXaaIdpConfig?.[_Y(e)]?.clientSecret}async function gYs(e){let t=_Y(e);try{await Jr().mutate(
+  @218896443 urn Pn().activeOAuthFlows.get(e)}async function tJe(e,t){let n=vs(e,t),r=(await Jr().readAsync())?.mcpOAuth?.[n];if(!r||r.accessToken||r.refreshToken)return;try{await Jr().mutate((o)=>{let s=o.m
+  @218897721 oked ${r} with Bearer auth`);else throw u}}async function FYs(e,t){let r=(await Jr().readAsync())?.mcpOAuth?.[vs(e,t)];if(!r?.accessToken&&!r?.refreshToken)return;return{accessToken:r.accessToke
+STR "function t3(){Xn().optionValues.clear()}" count=1 hits=213643845
+  @213643845 tions??{},r=(await Jr().readAsync(t))?.pluginSecrets?.[e]??{};return{...n,...r}}function t3(){Xn().optionValues.clear()}async function evi(e,t,n,r,o){let s={},i={};for(let[p,f]of Object.entries(t))if(n[p]?.sensitive===!0
+STR "Xn().optionValues.clear()" count=1 hits=213643859
+  @213643859 wait Jr().readAsync(t))?.pluginSecrets?.[e]??{};return{...n,...r}}function t3(){Xn().optionValues.clear()}async function evi(e,t,n,r,o){let s={},i={};for(let[p,f]of Object.entries(t))if(n[p]?.sensitive===!
+STR "return{storageV5:" count=3 hits=210986828,214121517,215691410
+  @210986828 meNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q()
+  @214121517 ;l<=s.length;l++)a.push({namespace:"userConfigDir",dir:i,relPath:s.slice(0,l)});return{storageV5:n,chain:a,pipelineFolder:i9(t,o)}}function rDe(e){let t=e.at(-1);if(t===void 0)throw Error("empty sy
+  @215691410 te",patch:n})}function nts(e){m7().pendingStructuredResult=e}function rts(e={}){return{storageV5:e.storageV5,credentials:e.credentials,prevState:"",prevStateSince:Date.now(),accumulatedOutputs:{},l
+STR "return {storageV5:" count=0 hits=
+STR "storageV5:e,credentials:" count=8 hits=210986835,214716879,214717814,214717954,218350008,228635249,232752117,233861689
+  @210986835 }}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol(
+  @214716879 oUn(e);n.pluginLoadArm=r;let s=(async()=>{let i=await Uwt(()=>$wt({cacheOnly:!1,storageV5:e,credentials:t}),{storageV5:e});if(n.pluginLoad===s||(!Ne()||e===void 0)&&n.pluginLoadArm!=="v5"&&n.pluginLoadCac
+  @214717814 urn n.pluginLoadCacheOnlyArm=n.pluginLoadArm,r}return Uwt(()=>$wt({cacheOnly:!0,storageV5:e,credentials:void 0}),{storageV5:e})})(),n.pluginLoadCacheOnly}async function iUn(e){return Uwt(()=>$wt({cacheOnl
+  @214717954 LoadCacheOnly}async function iUn(e){return Uwt(()=>$wt({cacheOnly:!0,preview:!0,storageV5:e,credentials:void 0}),{preview:!0,storageV5:e})}async function aUn(e){let{enabled:t}=await If(e);return t.filter(
+  @218350008 !1;if(i)if(l=await yke({id:qe(),project:{originalCwd:mn(),projectRoot:Vo()}},r,{storageV5:e,credentials:t}),l)_(`Removed hook-based worktree at: ${r}`);else if(C1r())return _(`WorktreeRemove hook did not 
+  @228635249 serveQuotaAutoResume:r,artifactAccount:p,incomingIdentity:n}}async function ue({storageV5:e,credentials:o,preserveQuotaAutoResume:t=!1,incomingIdentity:i}){if(await Q(e,{preserveQuotaAutoResume:t,artifact
+STR "function ce(e){return{storageV5:e,credentials:" count=1 hits=210986813
+  @210986813 t.size}:${t.mtimeNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol(
+STR "CredentialsStoreHandle" count=4 hits=203430468,203430778,210986898,210986974
+  @203430468 nicalRoot...).I.file:///B:/%7EBUN/root/_651.js...~,..read-failed...'U.CredentialsStoreHandle...~...oauth_token...]:...api_key...t...session_ingress_token...X...readCredentials...a.
+  @203430778 ...}.writeHandoffCredential...v...probeCredentials$...BF..secureStorage.CredentialsStoreHandle...yP..refused-symlink. ...7.C.fileHandle..D...mj.Cannot destructure property 'storePath' from nul
+  @210986898 ion ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")}); export{X as X7b,ce
+  @210986974 J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")}); export{X as X7b,ce as Y7b,G as Z7b,Q as _7b}; .// @bun @bytecode // Claude Code is a Beta prod
+STR "secureStorage.CredentialsStoreHandle" count=2 hits=203430764,210986960
+  @203430764 offCredential...}.writeHandoffCredential...v...probeCredentials$...BF..secureStorage.CredentialsStoreHandle...yP..refused-symlink. ...7.C.fileHandle..D...mj.Cannot destructure property 'storePath' from nul
+  @210986960 {return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureStorage.CredentialsStoreHandle")}); export{X as X7b,ce as Y7b,G as Z7b,Q as _7b}; .// @bun @bytecode // Claude Code is a Beta prod
+STR "getPinnedStorageV5" count=0 hits=
+STR "getPinnedCredentials" count=0 hits=
+STR "credentialsStoreFor" count=19 hits=150322270,199389445,199389828,206267198,206268055,206270128,206274178,206274895,206278986,220108992,220123913,220148980,223263329,223263826,223264342,223264631,223344762,224157550,224228755
+  @150322270 008480ec165a1f1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851credentialsStoreForsessionServicesFortryCreateCredentialsStoreB:/~BUN/root/_651.jsB:/~BUN/root/_723.jsB:/~BUN/root/_819
+  @199389445 s...@.y.B:/~BUN/root/chunk-0p9wy3bv.js..N...Cannot destructure property 'credentialsStoreFor' from null or undefined value..Y...Cannot destructure property 'primeFileDescriptorCredentials'
+  @199389828 d...primeRemoteManagedSettingsCache...z.>.primeWorkspaceRoots... .credentialsStoreFor...6S.primeFileDescriptorCredentials...o..primeStoredLoginCopy...bgAuthSnapshot...{.
+  @206267198 root/chunk-abcd39h7.js")]);if(!u())o(L+D());let s=d(n);if(A()&&s!==void 0){let[{credentialsStoreFor:R},{setGrowthBookCredentials:M,setGrowthBookStorageBackend:U},{composePolicyLimitsClient:tt,primePo
+  @206268055 ialize1PEventLogging:H,shutdown1PEventLogging:z},{shutdownDatadog:q},{sleep:J},{credentialsStoreFor:Q},{initDefaultDebugLog:X},{watchGlobalConfigThroughStorage:Z}]=await Promise.all([import("B:/~BUN/
+  @206270128 oot/chunk-abcd39h7.js")]),o=C(n);if(A()&&o!==void 0){D({storageV5:o}),P(o);let[{credentialsStoreFor:l},{setGrowthBookCredentials:u,setGrowthBookStorageBackend:d},{composePolicyLimitsClient:_,primePol
+STR "pinCredentialsStore" count=0 hits=
+STR "pinStorageV5" count=12 hits=142393514,150443050,204290769,204295340,204295752,206263961,206266965,206269795,206273845,206278750,221836586,224280824
+  @142393514 008480ec165a1f1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851pinStorageV5B:/~BUN/root/_323.jsB:/~BUN/root/_675.jsB:/~BUN/root/_676.jsB:/~BUN/root/_677.jsB:/~BUN/root/_678.js
+  @150443050 008480ec165a1f1be4a04C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851pinStorageV5FromEnvrecordHoverRestDecisiontryCreateLocalV5BackendtryCreateV5BackendB:/~BUN/root/_801.jsB:/~BUN/r
+  @204290769 dOAuthToken' from null or undefined value..G...y.*.Cannot destructure property 'pinStorageV5' from null or undefined value.I...q...Cannot destructure property 'seedInstallIDs' from null or und
+  @204295340 in_import...cli_after_main_complete...bf..profileCheckpoint...pinStorageV5FromEnv...runEvalMockServer...(.runClaudeInChromeMcpServer...runChromeNativeHost.
+  @204295752 atewayAuthForFastPath...[...BRIDGE_LOGIN_ERROR.. ...bridgeMain...pinStorageV5...\5..seedInstallIDs..	...]1..initSinks...k.initDefaultDebugLog...j.watchGlobalConfigThr
+  @206263961 ess.env.CLAUDE_CODE_HOVER_REST?(await import("B:/~BUN/root/chunk-0pv6xmv7.js")).pinStorageV5FromEnv():void 0;if(process.argv[2]==="--eval-mock-server"){g("cli_eval_mock_server_path");let{runEv
+WEDEF "function We(){" count=7
+  @208571301 function We(){let e=c.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return ge(e);return Sn()}function Sn(e=Rt()){return Zu("opus",e)??e.opus5}function b4(){return Sn(on())}function Xt(){let e=c.ANTHROPIC_DEFAULT_SONNET_MODE
+  @211046162 function We(){ge()}function ge(){Rc=Dm=!1;var t=0;Vr!==0&&vT()&&(t=Vr);for(var n=En(),r=null,a=xc;a!==null;){var c=a.next,d=Ye(a,n);if(d===0)a.next=null,r===null?xc=c:r.next=c,c===null&&(oa=r);else if(r=a,t!==0||(d&3)!==
+  @211815544 function We(){let e=_(),a=G(),t=[];for(let o of E){let r=b[o];switch(e){case"macos":if(r.macos.nativeMessagingPath.length>0)t.push({browser:o,path:l(a,...r.macos.nativeMessagingPath)});break;case"linux":case"wsl":if(r.li
+  @219786913 function We(){return Boolean(z.CLAUDE_RUNNER_FAIL_FAST_FETCH)}function Nt(){return Boolean(z.CLAUDE_RUNNER_STALL_GIVEUP)}function Mt(e){return e.split(` `).some((t)=>{let n=t.indexOf("Operation too slow");if(n===-1)retur
+  @223103597 function We(){let{items:e,kinds:o}=S(),n=[];for(let t of e){if(t.kind==="todo"||t.doneAt!==void 0)continue;n.push({label:re[t.kind],detail:l(t.label,I,!0)})}if(o.includes("auto_mode_scan"))n.push({label:h.auto_mode_scan,
+  @224383854 function We(){return we()}function $t(){return we()}function Z(){return L(je(),"usage-data")}function le(){return L(Z(),"facets")}function Et(){return L(Z(),"session-meta")}function he(e){return te.userConfigDir("usage-d
+  @236952848 function We(){let ol=await j("gh",["secret","list","--app","actions","--repo",s.selectedRepoName]);if(ol.code===0){if(ol.stdout.split(` `).some(Fl))C(ql);else if(D)C((ld)=>({...ld,apiKeyOrOAuthToken:D,useExistingKey:!0})
+WEDEF "function We(){return" count=2
+  @219786913 function We(){return Boolean(z.CLAUDE_RUNNER_FAIL_FAST_FETCH)}function Nt(){return Boolean(z.CLAUDE_RUNNER_STALL_GIVEUP)}function Mt(e){return e.split(` `).some((t)=>{let n=t.indexOf("Operation too slow");if(n===-1)retur
+  @224383854 function We(){return we()}function $t(){return we()}function Z(){return L(je(),"usage-data")}function le(){return L(Z(),"facets")}function Et(){return L(Z(),"session-meta")}function he(e){return te.userConfigDir("usage-d
+WEDEF "function We(){let" count=4
+  @208571301 function We(){let e=c.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return ge(e);return Sn()}function Sn(e=Rt()){return Zu("opus",e)??e.opus5}function b4(){return Sn(on())}function Xt(){let e=c.ANTHROPIC_DEFAULT_SONNET_MODE
+  @211815544 function We(){let e=_(),a=G(),t=[];for(let o of E){let r=b[o];switch(e){case"macos":if(r.macos.nativeMessagingPath.length>0)t.push({browser:o,path:l(a,...r.macos.nativeMessagingPath)});break;case"linux":case"wsl":if(r.li
+  @223103597 function We(){let{items:e,kinds:o}=S(),n=[];for(let t of e){if(t.kind==="todo"||t.doneAt!==void 0)continue;n.push({label:re[t.kind],detail:l(t.label,I,!0)})}if(o.includes("auto_mode_scan"))n.push({label:h.auto_mode_scan,
+  @236952848 function We(){let ol=await j("gh",["secret","list","--app","actions","--repo",s.selectedRepoName]);if(ol.code===0){if(ol.stdout.split(` `).some(Fl))C(ql);else if(D)C((ld)=>({...ld,apiKeyOrOAuthToken:D,useExistingKey:!0})
+WEDEF "async function We(){" count=1
+  @236952842 async function We(){let ol=await j("gh",["secret","list","--app","actions","--repo",s.selectedRepoName]);if(ol.code===0){if(ol.stdout.split(` `).some(Fl))C(ql);else if(D)C((ld)=>({...ld,apiKeyOrOAuthToken:D,useExistingKe
+WEDEF "We=()=>" count=5
+  @206457422 We=()=>{};var Ye=()=>{};var qe=()=>{};var ze=()=>{};var O=e(()=>{O();Xe();We();Ye();qe();ze()});var H=e(()=>{H()});var j=e(()=>{j()});var Ge=()=>{};var Je=()=>{};var A=e(()=>{A();Ge();Je()});var Qe=()=>{};var Ze=()=>{};v
+  @226862954 We=()=>{};var dn=()=>{};var mn=()=>{};var qe=function(){let e=Object.getPrototypeOf(this).constructor,t=new(Function.bind.apply(String,[null,...arguments]));return Object.setPrototypeOf(t,e.prototype),t};var pn=c(()=>{qe
+  @227781378 We=()=>{};var Qe=r(()=>{Be();Ve();We()});var Ke=()=>{};var Ye=()=>{};var Xe;var Je=r(()=>{(function(e){e.HTTP="http",e.HTTPS="https"})(Xe||(Xe={}))});var Ze=()=>{};var et=()=>{};var tt=()=>{};var rt=()=>{};var ot=()=>{};
+  @227851071 We=()=>{};var Ke=()=>{};var Ve;var je=r(()=>{(function(e){e.HTTP_0_9="http/0.9",e.HTTP_1_0="http/1.0",e.TDS_8_0="tds/8.0"})(Ve||(Ve={}))});var Ye=()=>{};var Ze=()=>{};var Be=()=>{};var Ge=()=>{};var Qe=()=>{};var Je=()=>
+  @230735122 We=()=>{B("declined",`Hooks stay on this machine only \u2014 you chose not to run them for cloud sessions (${Ne}).`,"debug"),_e("declined")},B=(r,k,T="info")=>{if(xe.has(r))return;xe.add(r),e.onLine({line:k,level:T})},Qe
+WEDEF "We=()=>{" count=5
+  @206457422 We=()=>{};var Ye=()=>{};var qe=()=>{};var ze=()=>{};var O=e(()=>{O();Xe();We();Ye();qe();ze()});var H=e(()=>{H()});var j=e(()=>{j()});var Ge=()=>{};var Je=()=>{};var A=e(()=>{A();Ge();Je()});var Qe=()=>{};var Ze=()=>{};v
+  @226862954 We=()=>{};var dn=()=>{};var mn=()=>{};var qe=function(){let e=Object.getPrototypeOf(this).constructor,t=new(Function.bind.apply(String,[null,...arguments]));return Object.setPrototypeOf(t,e.prototype),t};var pn=c(()=>{qe
+  @227781378 We=()=>{};var Qe=r(()=>{Be();Ve();We()});var Ke=()=>{};var Ye=()=>{};var Xe;var Je=r(()=>{(function(e){e.HTTP="http",e.HTTPS="https"})(Xe||(Xe={}))});var Ze=()=>{};var et=()=>{};var tt=()=>{};var rt=()=>{};var ot=()=>{};
+  @227851071 We=()=>{};var Ke=()=>{};var Ve;var je=r(()=>{(function(e){e.HTTP_0_9="http/0.9",e.HTTP_1_0="http/1.0",e.TDS_8_0="tds/8.0"})(Ve||(Ve={}))});var Ye=()=>{};var Ze=()=>{};var Be=()=>{};var Ge=()=>{};var Qe=()=>{};var Je=()=>
+  @230735122 We=()=>{B("declined",`Hooks stay on this machine only \u2014 you chose not to run them for cloud sessions (${Ne}).`,"debug"),_e("declined")},B=(r,k,T="info")=>{if(xe.has(r))return;xe.add(r),e.onLine({line:k,level:T})},Qe
+ZG @236022714
+WEALIAS " as We" count=25
+  nearZg=
+  @207313048 d as Lo,lnd as A,mnd as Hr,nod as Gt,ood as ko,rnd as Ur,snd as We,vnd as Zt,wnd as yn,xnd as h,ynd as X,znd as kr}from"B:/~BUN/root/_839.js";import{exd as Vt,fxd as gn,kxd as ir,l
+  @207795681 SPC","EIO","EDQUOT","EFBIG"])}); export{K as Ued,mt as Ved,V as Wed,Mt as Xed,pt as Yed,Et as Zed,Nt as _ed,Ut as $ed,It as afd,R as bfd,bt as cfd,Dt as dfd,_t as efd,Jt as ffd,Pt 
+  @207801126 ync as pe,openSync as k,readSync as mt}from"fs";import{lstat as We,open as V,opendir as ir,readlink as ht,realpath as Ie,stat as Ne}from"fs/promises";import{homedir as Be}from"os";
+  @207952135 lr,lkd as go,pkd as lt}from"B:/~BUN/root/_833.js";import{Rld as We,Sld as ho,kmd as ar}from"B:/~BUN/root/_837.js";import{Hnd as mo,Ind as rr,Knd as Ct,Lnd as To,bxd as _t,xod as ve
+WEALIAS "We as " count=25
+  nearZg=
+  @207079043 ,Kr as bkd,Jr as ckd,Ce as dkd,Qr as ekd,Ie as fkd,m as gkd,We as hkd,ai as ikd,ui as jkd,di as kkd,ci as lkd,li as mkd,fi as nkd,gi as okd,X as pkd,ie as qkd,ki as rkd,xi as skd,B
+  @207295425 c,h as tAc,He as uAc,ue as vAc,Me as wAc,Ue as xAc,H as yAc,We as zAc,ke as AAc,ve as BAc,Fe as CAc,U as DAc,Ke as EAc,Ve as FAc,_e as GAc,Ge as HAc,k as IAc,Ye as JAc,Je as KAc,v 
+  @207325079 e();Ee();ve();Ne();W();D();Re()}); export{g as SAc,y as TAc,We as UAc,pe as VAc,S as WAc,L as XAc,ye as YAc,D as ZAc,Se as _Ac}; .// @bun @bytecode // Claude Code is a Beta product
+  @207532678 ,Me as QBc,ve as RBc,g as SBc,ce as TBc,De as UBc,Ge as VBc,We as WBc,He as XBc,m as YBc,Ke as ZBc,Be as _Bc,de as $Bc}; .// @bun @bytecode // Claude Code is a Beta product per Ant
+WEALIAS "{We}" count=16
+  nearZg=
+  @208279438 exe`,`${$e}\\powershell.exe`];bi=`$env:PSModulePath = $env:${We}; `;Ri=jt(`& ($env:${Ue})`),Ii=jt("Invoke-Expression (@($input) -join [char]10)");Fi=["DOTNET_","COMPLUS_","COR_","C
+  @213703391 elope_too_large"),new ye(`poll event rejected: envelope is ${We} bytes after nonce stamping (cap ${hO})`,"poll event rejected: envelope too large");let jt=Ce.wake??!0,je,tt,Ht=new 
+  @213705603 h} queued command(s): ${Object.entries(He).map(([We,jt])=>`${We}=${jt.length}`).join(" ")}`,{level:"warn"}),BXt(r.filter(bC),"queue cleared"),ot(()=>!0,Ce)}function Ge(){r.length=0
+  @216129684 e}).catch((We)=>_(`workflow journal started-append failed: ${We}`,{level:"warn"}))},st=async()=>{if(!a||!_t||Z.abortController?.signal.aborted)return;await a.append({type:"failed",
+WEALIAS ",We," count=25
+  nearZg=
+  @206808291 ,sr,Ie,nr,Ee,qe,Me,Ke,Oe,or,Ue,Le,rr,Ne,ar,He,ir,Fe,lr,Be,dr,We,cr,Ge,ur,pa,ma,hr,ga,A,Nt,Ht,pr,mr,Ft,Bt,Wt,gr,br,zr,ba,za,fa;var fr=x(()=>{st();ot();Ye();_o();Ct();Mt=s(()=>d().de
+  @207189415 ,ie,Ue,xe,Ne,le,Pe,Me,ue,ae,Be,be,de,me,Ge,He,fe,Fe,Ke,ve,ge,We,Ye,ye,he,Ve,Xe,we,ke,Ze,ze,je,Je,Qe,$e,qe,tn,on,En,_n,rn,en,nn,sn,Cn,An,On,Dn,cn,Tn,Ln,pn,Sn,Rn,In,Un,xn,Nn,ln,Pn,Mn
+  @208279708 SCACHEPATH","PSMODULEPATH","PATH","PATHEXT","COMSPEC","TERM",We,Ue]),Mi=["LD_","DYLD_","BASH_FUNC_","__BASH_FUNC<","LC_"],Di=new Set(["ENV","BASH_ENV","SHELLOPTS","PS4","GCONV_PATH
+  @209308458 ")return t===":"||t==="}";return t===""||t===` `}var Be,j,Me,We,xn,mn;var $e=ke(()=>{Be={parse:He};j=new Set(["?","$","@","*","#","-","!","_"]),Me=new Set(["export","declare","type
+WEALIAS "We(){return{storageV5" count=0
+  nearZg=
+JR "function Jr(){" count=3
+  @209853480 nt32(t.length),e.putString(t)}function Jr(){var e=Ee.md.sha1.create(),t=arguments.length;for(var a=0;a<t;++a)e.update(arguments[a]);return e.digest()}});var nf=Q(function(Yf,vs){vs.exports=Y();Tt();On();st();Sr
+  @223474859 ump-prompts"),".jsonl",!0,fe)}function Jr(){return k(i(S(),"shell-snapshots"),".sh")}async function qr(){let e=D(),t=P();if(e===null)return t;let r=h(),n=ke();for(let s of await r.readdir(n).catch(()=>[])){if(!
+  @250805565 e"},pt("failed"))},A?ZTe:ise)}function Jr(){for(let oe of b)oe();b=[],Ut!==void 0&&(r.clearTimeout(Ut),Ut=void 0)}function ao(oe){if(!xe){if(LH.includes(oe.code))return po(oe);if(!(x||v==="failed")){if(Y={code:
+JR "function Jr(){return" count=1
+  @223474859 ump-prompts"),".jsonl",!0,fe)}function Jr(){return k(i(S(),"shell-snapshots"),".sh")}async function qr(){let e=D(),t=P();if(e===null)return t;let r=h(),n=ke();for(let s of await r.readdir(n).catch(()=>[])){if(!
+JR "async function Jr(){" count=0
+JR "Jr=()=>" count=3
+  @218944033 .test(t))return;return t}var fJr=()=>{};import{readFile as r6s,stat as o6s}from"fs/promises";import{join as lW}from"path";function hJr(){return lW(jr(),vve)}function xKt(e,t){return _r.userConfigDir(vve,[e,t,Tv
+  @218959847 ";return o.startsWith(s)}var zJr=()=>{};var Eu,dJe,Vre,cW,Kre,pJe,fJe,mJe,KM,Yre,gJe,hJe,yJe,_Je,Xre,Zre,bJe,SJe,HJr;var FKt=w(()=>{Eu=class Eu extends Error{constructor(e,t){super(e);this.errorUri=t,this.name=
+  @225717307 r Wr=()=>{};var Vr=()=>{};var Jr=()=>{};var eo=()=>{};var to=()=>{};var ro=()=>{};var oo=()=>{};var no=s(()=>{to();ro();oo()});var so=()=>{};var ao=()=>{};var io;var fo=s(()=>{(function(e){e.HTTP="http",e.HTTPS
+JR " as Jr" count=25
+  @206463192 ugin's folder"]});import{lstat as Jr,realpath as Jo}from"fs/promises";import{basename as Qr,isAbsolute as Zr,relative as en}from"path";async function Ne(t,o,r){let a=await p.refusedAs(Jo(o),(l)=>p.unreadableErr
+  @207024062  as Grd,Tb as Hrd,Mb as Ird,wb as Jrd,Lb as Krd,Rb as Lrd,Ib as Mrd,Fb as Nrd,Ob as Ord,Eb as Prd,Db as Qrd,Hb as Rrd,Bb as Srd,_b as Trd,Ub as Urd,jb as Vrd,qb as Wrd,Wb as Xrd,Gb as Yrd,Nb as Zrd,Kb as _rd,Vb
+  @208220121 ;import{basename as Zr,dirname as Jr,join as gt}from"path";function Qr(e){let{firstPage:t,lastPage:r}=e??{};if(t===void 0)return"page range";if(r===void 0||r===1/0)return`pages ${t}-`;if(t===r)return`page ${t}`
+  @208271645  as jr,hIc as Ko,hJc as Kr,iJc as Jr,jJc as pt,kJc as zr,lJc as Vr,mJc as Yr,pJc as He,qIc as In,rIc as ao,vIc as ze,yIc as lo,zIc as br}from"B:/~BUN/root/_709.js";import{BMc as Cr,GMc as De,LMc as Ae,QMc as Cn
+  @208903398  as Grc,tl as Hrc,x$ as Irc,nl as Jrc,jf as Krc,su as Lrc,Mx as Mrc,Fx as Nrc,Lm as Orc,Nx as Prc,qc as Qrc,P$ as Rrc,D$ as Src,I$ as Trc,Xp as Urc,Ux as Vrc,M$ as Wrc,ka as Xrc,Ta as Yrc,F$ as Zrc,Bx as _rc,N$
+  @211418836  as ms,kyd as Xe,lyd as qt,nyd as Jr}from"B:/~BUN/root/_841.js";import{tyd as ls,xyd as pl}from"B:/~BUN/root/_843.js";import{Azd as _e,Hyd as F,Nyd as Ce,Oyd as yt}from"B:/~BUN/root/_844.js";import{Gzd as Ro,eA
+  @211651574 s qr,isAbsolute as Qr,relative as Jr,sep as Zr}from"path";function Mt(){return ae("invariant",{telemetryCode:"BackendClosed"})}function Ot(e,r){if(e.bus.emit(r,e.instanceId),(r.kind==="created"||r.kind==="updat
+  @212309044  as Grb,Tn as Hrb,bn as Irb,ge as Jrb,In as Krb,En as Lrb,vn as Mrb,fe as Nrb,An as Orb,yn as Prb,Rn as Qrb,xn as Rrb,Pn as Srb,le as Trb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Co
+  @212826934  Vce,nWb as Nct,pWb as Cdt,qWb as Jrr,rWb as Qrr,sWb as PL,tWb as Ihe,uWb as hmn,vWb as yX,wWb as l9n,xWb as za,zWb as aI}from"B:/~BUN/root/_605.js";import{HWb as $y,MWb as Ume,NWb as KB,OWb as nJ,PWb as wBe,QW
+  @212843461 port{APc as oBn,BPc as GHo,DPc as Jrs,EPc as pG,FPc as xwt,GPc as nzo,IPc as HSt,JPc as $ln,LPc as fPe,OPc as Qfe,QPc as fFn,SPc as qBe,TPc as mFn,WPc as ewt,YPc as h2,ZPc as uNn,_Pc as Run,ePc as Ule,eQc as cw
+JR "Jr as " count=15
+  @206445827 Oe as xAd,Kr as yAd,on as zAd,Jr as AAd,Vr as BAd,zr as CAd,Xr as DAd,Gr as EAd,Yr as FAd,Qr as GAd,Zr as HAd,j as IAd,xe as JAd,Yo as KAd,ze as LAd,ot as MAd,ns as NAd,C as OAd,at as PAd,cn as QAd,co as RAd,O 
+  @206915969 ,ri as kyd,Br as lyd,v as myd,Jr as nyd}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acceptance or rejectio
+  @207078994 jr as $jd,Zr as akd,Kr as bkd,Jr as ckd,Ce as dkd,Qr as ekd,Ie as fkd,m as gkd,We as hkd,ai as ikd,ui as jkd,di as kkd,ci as lkd,li as mkd,fi as nkd,gi as okd,X as pkd,ie as qkd,ki as rkd,xi as skd,B as tkd,En 
+  @208088525 Ae as _Jc,Uo as $Jc,jo as aKc,Jr as bKc,Ge as cKc,Ut as dKc,G as eKc,Dr as fKc,Ke as gKc,Nr as hKc,Lr as iKc,Hr as jKc,Pt as kKc,Rr as lKc,Or as mKc,Fe as nKc,re as oKc,Io as pKc,se as qKc,Ve as rKc,Wr as sKc,z
+  @208897196 g4 as igc,m4 as jgc,h4 as kgc,Jr as lgc,_4 as mgc,y4 as ngc,eE as ogc,yE as pgc,We as qgc,b4 as rgc,Xt as sgc,Ss as tgc,bE as ugc,E4 as vgc,EE as wgc,Uf as xgc,S4 as ygc,tM as zgc,Mu as Agc,nM as Bgc,Gf as Cgc,
+  @208997043 sn as $5a,Br as a6a,dn as b6a,Jr as c6a,Nr as d6a,Z as e6a,tt as f6a,un as g6a,cn as h6a,fn as i6a,gn as j6a,mn as k6a,se as l6a,W as m6a,B as n6a,Oi as o6a,Ei as p6a,re as q6a,dt as r6a,Pi as s6a,Ii as t6a,H a
+  @209120665 zr as sUb,Zt as tUb,on as uUb,Jr as vUb,eo as wUb,to as xUb,sn as yUb,no as zUb,an as AUb}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Co
+  @219691755 as Vla,vve as Wla,i6s as Xla,TJr as Yla,vwr as Zla,Twr as _la,SOc as $la,wOc as ama,U4e as bma,wns as cma,tHl as dma,kns as ema,gtr as fma,htr as gma,jL as hma,w7 as ima,$It as jma,GV as kma,btr as lma,Vj as mm
+  @221596253 root/_143.js";import{Fr as Lt,Jr as kn,Mr as On,Nr as Pn}from"B:/~BUN/root/_145.js";import{_t as oe}from"B:/~BUN/root/_169.js";import{Mu as ze,Nu as Rn,Ru as _r,Vu as hr,Xu as wr,Yu as Nt,_u as te,av as xn}from
+  @221933566 Sr,Gr as Zn,Hr as yr,Ir as At,Jr as Ti,Kr as Er,Lr as Mi,Mr as xi,Nr as xt}from"B:/~BUN/root/_145.js";import{_t as tt}from"B:/~BUN/root/_169.js";import"B:/~BUN/root/_170.js";import{$u as br,Nu as vr,Pu as Jn,Qu
+JR.mutate count=20
+  @213635241 ;let l=new Set(Object.keys(a)),c=new Set(Object.keys(i)),u=eln(e,t),d=0,p=await Jr().mutate((g)=>{let h=g.pluginSecrets?.[u],y=h?lT(h,(b,S)=>c.has(S)):void 0;if(d=y&&h?Object.keys(h).length-Object.keys(y).length:0,Object.keys(a).length===0&
+  @213644077 (f);else s[p]=f;let a=new Set(Object.keys(i)),l=new Set(Object.keys(s)),c=await Jr().mutate((p)=>{let f=p.pluginSecrets?.[e],m=f?lT(f,(h,y)=>l.has(y)):void 0,g=m&&f&&Object.keys(m).length!==Object.keys(f).length;if(Object.keys(i).length===0
+  @213645246 lear settings.pluginConfigs[${e}]: ${s.message}`,{level:"warn"})}try{if(!(await Jr().mutate((s)=>{if(!s.pluginSecrets)return s;let i=`${e}/`,a=Object.entries(s.pluginSecrets).filter(([l])=>l!==e&&!l.startsWith(i));if(a.length===Object.keys(
+  @218884647 At-Date.now()<=pYs*1000)return;return r.idToken}async function BZr(e,t,n){await Jr().mutate((r)=>({...r,mcpXaaIdp:{...r.mcpXaaIdp,[_Y(e)]:{idToken:t,expiresAt:n}}}))}async function fYs(e,t){let n=jZr(t),r=n?n*1000:Date.now()+3600000;return 
+  @218884870 )+3600000;return await BZr(e,t,r),r}async function VZe(e){let t=_Y(e);try{await Jr().mutate((n)=>{if(!n.mcpXaaIdp?.[t])return n;let r={...n.mcpXaaIdp};return delete r[t],{...n,mcpXaaIdp:r}})}catch(n){se("xaa",`clearIdpIdToken(${t}) failed: 
+  @218885082 earIdpIdToken(${t}) failed: ${Y(n)}`)}}async function mYs(e,t){try{return await Jr().mutate((n)=>({...n,mcpXaaIdpConfig:{...n.mcpXaaIdpConfig,[_Y(e)]:{clientSecret:t}}}))}catch(n){return{success:!1,warning:Y(n)}}}async function KZe(e){retur
+  @218885352 XaaIdpConfig?.[_Y(e)]?.clientSecret}async function gYs(e){let t=_Y(e);try{await Jr().mutate((n)=>{if(!n.mcpXaaIdpConfig?.[t])return n;let r={...n.mcpXaaIdpConfig};return delete r[t],{...n,mcpXaaIdpConfig:r}})}catch(n){se("xaa",`clearIdpClie
+  @218896530 adAsync())?.mcpOAuth?.[n];if(!r||r.accessToken||r.refreshToken)return;try{await Jr().mutate((o)=>{let s=o.mcpOAuth?.[n];if(!s||s.accessToken||s.refreshToken)return o;let i={...o.mcpOAuth};return delete i[n],{...o,mcpOAuth:i}})}catch(o){se(e
+  @218901426 ;else ce("mcp_oauth_revoke")}async function wKt(e,t,n){let r=vs(e,t),o;if(await Jr().mutate((s)=>{let i=s.mcpOAuth?.[r];if(!i)return s;let a={...s.mcpOAuth};if(n?.preserveClientRegistration&&i.clientId){if(!i.accessToken&&!i.refreshToken)re
+  @218903815 f(S.includes("jwt-bearer"))d="jwt_bearer";throw b}let g=vs(e,t),h,y;try{h=await Jr().mutate((b)=>{let S=b.mcpOAuth?.[g];return{...b,mcpOAuth:{...b.mcpOAuth,[g]:{...S,serverName:e,serverUrl:t.url,accessToken:m.access_token,refreshToken:m.ref
+  @218911483 ode==="invalid_client"||g.code==="unauthorized_client"){let E=vs(e,t);try{await Jr().mutate((C)=>{let R=C.mcpOAuth?.[E];if(!R)return C;return{...C,mcpOAuth:{...C.mcpOAuth,[E]:{...R,clientId:void 0,clientSecret:void 0}}}})}catch(C){se(e,`cle
+  @218911741 : ${Y(C)}`)}}}if(h==="timeout"||S.includes("OAuth error:")){let E=vs(e,t);await Jr().mutate((C)=>{let R=C.mcpOAuth?.[E];if(!R?.clientId||R.accessToken||R.refreshToken||R.clientId!==a?.clientId)return C;return{...C,mcpOAuth:{...C.mcpOAuth,[E
+  @218916548 o client info found");return}async patchStoredClientEntry(e,t,n){try{if(!(await Jr().mutate((o)=>{let s=o.mcpOAuth?.[e];if(!s)return o;return{...o,mcpOAuth:{...o.mcpOAuth,[e]:{...s,...t}}}}))?.success)se(this.serverName,`${n} resolved unsuc
+  @218916860 eClientInformation(e){let t=vs(this.serverName,this.serverConfig);try{if((await Jr().mutate((r)=>({...r,mcpOAuth:{...r.mcpOAuth,[t]:{...r.mcpOAuth?.[t],serverName:this.serverName,serverUrl:this.serverConfig.url,clientId:e.client_id,clientSe
+  @218920397 (this.serverName,`Has refresh token: ${!!e.refresh_token}`);let o,s;try{o=await Jr().mutate((i)=>({...i,mcpOAuth:{...i.mcpOAuth,[r]:{...i.mcpOAuth?.[r],serverName:this.serverName,serverUrl:this.serverConfig.url,accessToken:e.access_token,re
+  @218921853 point},this.serverName),a=vs(this.serverName,this.serverConfig),l,c;try{l=await Jr().mutate((u)=>{let d=u.mcpOAuth?.[a];return{...u,mcpOAuth:{...u.mcpOAuth,[a]:{...d,serverName:this.serverName,serverUrl:this.serverConfig.url,accessToken:i.a
+  @218923906 cope){let f=vs(this.serverName,this.serverConfig),m=this._scopes,g=!1;try{await Jr().mutate((h)=>{let y=h.mcpOAuth?.[f];if(!y)return h;return g=!0,{...h,mcpOAuth:{...h.mcpOAuth,[f]:{...y,stepUpScope:m}}}})}catch(h){se(this.serverName,`step-
+  @218925642 rvedClientId,s=this._lastServedAccessToken,i=this._lastServedRefreshToken;await Jr().mutate((a)=>{let l=a.mcpOAuth?.[n];if(!l)return a;let c={...a.mcpOAuth};switch(t){case"all":{let u=s!=null&&!!l.accessToken&&l.accessToken!==s,d=o!=null&&l
+  @218927358 e,`Saving discovery state (authServer: ${e.authorizationServerUrl})`);try{await Jr().mutate((n)=>({...n,mcpOAuth:{...n.mcpOAuth,[t]:{...n.mcpOAuth?.[t],serverName:this.serverName,serverUrl:this.serverConfig.url,accessToken:n.mcpOAuth?.[t]?.
+  @218936773 s.stdin.on("data",o)})}async function WYs(e,t,n){let r=vs(e,t);try{return await Jr().mutate((o)=>({...o,mcpOAuthClientConfig:{...o.mcpOAuthClientConfig,[r]:{clientSecret:n}}}))}catch(o){return{success:!1,warning:Y(o)}}}async function qYs(e,
+nPe import-as-ay last=[]
+nPe import-as-Jr last=[]
+AY "function ay(e,t,n,r){" count=0
+AY "async function ay(e,t,n,r){" count=0
+AY "function ay(e,t,n){" count=0
+AY "async function ay(e,t,n){" count=0
+AY "function ay(e,t){" count=0
+AY " as ay" count=11
+  @206915844  as ayd,R as byd,Xo as cyd,Ur as dyd,ue as eyd,B as fyd,Qo as gyd,ti as hyd,ei as iyd,me as jyd,ri as kyd,Br as lyd,v as myd,Jr as nyd}; .// @bun @bytecode // Claude Code is a Beta product per Anthrop
+  @208906927  as ayc}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Claude Code, you agree that all code acceptance or rejection decisions you make, 
+  @212659298  as ayb,he as byb,X as cyb,Je as dyb,Pe as eyb,Qe as fyb,en as gyb,Q as hyb,nn as iyb,ee as jyb,sn as kyb,dn as lyb,un as myb,re as nyb,j as oyb,Fn as pyb,Cn as qyb,Hn as ryb,Bn as syb,Ue as tyb,An as
+  @212841892  as ay,cHc as wB,hHc as zdt,kHc as Mtr,lGc as VSn,lHc as Pct,mHc as FK,nHc as Qqe,oGc as cT,pHc as Hpt,qGc as KSn,qHc as Wrr,rGc as Tht,sHc as nIn,tHc as $Lt,uHc as V_r,vGc as Xr,xHc as NIe,zGc as UU}
+  @219698838  as aya,UMt as bya,Qor as cya,Xye as dya,d2e as eya,asr as fya,csr as gya,dsr as hya,J7 as iya,p2e as jya,bsr as kya,VMt as lya,Ky as mya,Ass as nya,Osr as oya,XMt as pya,JMt as qya,s3l as rya,QMt as 
+  @230305417  as ay,zma as yp,zra as _h,zsa as nF}from"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";import"B:/~BUN/root/_450.js";import"B:/~BUN/root/_451.js";import"B:/~BUN/root/_452.js";import"B:/~BUN/root/
+  @231814237  as ay,Cja as lu,D6 as oh,DMa as sh,E3 as Ah,E6 as EM,EMa as ih,Eja as Fg,F3 as Dh,FMa as AM,Fja as Fu,Gja as kr,Hja as Hr,Ija as cu,Jja as Lh,Kja as Wu,L4 as sl,Lja as Bh,N4 as Wb,Nna as cS,Oja as Zr
+  @232059536  as aye,$sc as fm,Anc as $r,Auc as az,Awc as AMe,Bsc as Zf,Buc as lO,Cec as JPe,Cic as Ls,Csc as Gj,Dfc as qG,Dic as Gke,Dmc as Lr,Dxc as WRe,Efc as Wtt,Emc as PB,Epc as BWe,Erc as $y,Etc as VH,Evc as
+AY "ay as " count=20
+  @198840188 ay as asc aspect assembly async begin break block by case class concat const copy constructor continue create default delegate desc distinct div do downto dynamic each else empty end ensure enum equal
+  @199801517 ay as they are on this machine and go up again with your next message.....w".kept-earlier:...%...D... Claude removed in the cloud session ...<...;.. moved to this session's trash on this machine, n
+  @202277741 ay as the first argument...P...`.pipeline() stages must be functions: pipeline(items, item => ..., result => ...) ...d&.pipeline: ...Yh. workflows from plugin . ...plugin_load_workflows_dir
+  @204134388 ay as pointers instead of downloading their content. Use for marketplaces hosted in repos with large LFS objects...H..Full git repository URL.'...z...NPM package containing marketplace.json.#...
+  @205157314 ay as it accepts..>...D..one of the call's input fields is not accepted on that machine..L...R..that machine serves no tools while its sandbox is off or not fully confining2...yb.that machine has n
+  @207024400 ay as psd,ly as qsd,dy as rsd,uy as ssd,cy as tsd,py as usd,gy as vsd,fy as wsd,hy as xsd,my as ysd,Sy as zsd,vy as Asd,by as Bsd,yy as Csd,Cy as Dsd,ky as Esd,xy as Fsd,Ay as Gsd,Py as Hsd,Ty as Isd,
+  @207897055 ay as pointers instead of downloading their content. Use for marketplaces hosted in repos with large LFS objects.")}),d({source:S("git"),url:i().describe("Full git repository URL"),ref:i().optional().
+  @207897851 ay as pointers instead of downloading their content. Use for marketplaces hosted in repos with large LFS objects.")}),d({source:S("npm"),package:ts().describe("NPM package containing marketplace.json"
+AYCALL pluginConfigs count=3
+  @213635956 Entries(m.map((y)=>[y,void 0])),h=await ay("userSettings",{pluginConfigs:{[e]:{mcpServers:{[t]:{...i,...g}}}}},void 0,o);if(h.error)throw h.error;if(m.length>0)_(`saveMcpServerUserConfig: scrubbed ${m.length} plaintext s
+  @213644722 Entries(d.map((m)=>[m,void 0])),f=await ay("userSettings",{pluginConfigs:{[e]:{options:{...s,...p}}}},void 0,r);if(f.error)throw _(`Failed to save plugin options for ${e} to settings.json: ${Y(f.error)}`,{level:"error"})
+  @213645080 [e]){let o={[e]:void 0},{error:s}=await ay("userSettings",{pluginConfigs:o},void 0,t);if(s)_(`deletePluginOptions: failed to clear settings.pluginConfigs[${e}]: ${s.message}`,{level:"warn"})}try{if(!(await Jr().mutate((s
+T3DEF count=1
+  @213643845 len=40 function t3(){Xn().optionValues.clear()}
+HOST "session.host" count=15
+  @213887045 red by keyword.`,prompt:async()=>e.prompt,async call(t,n){let r=await e.fetch(n.session.host,n.abortController.signal,n.credentials);return{data:{results:qCo(r,t.keywords)}}},mapToolResultToToolResultBlockParam:Q3,render
+  @213889356 prompt:async()=>e.prompt,async call(t,n){try{return{data:{results:await e.run(n.session.host,t.keywords,n.abortController.signal,n.credentials)}}}catch(r){if(Cr(r)||n.abortController.signal.aborted)throw r;if(r instanceo
+  @213895525 The result may be empty.`,async call(e,t){try{return{data:{results:(await iIe(t.session.host,e.keywords,t.abortController.signal,t.credentials)).filter((o)=>o.enabled!==!0),trigger:e.trigger}}}catch(n){if(Cr(n)||t.abortC
+  @214968382 rn o(Z2o(e,n,p));if(n==="write"&&(!mq(e,d).safe||J2o(d,a)||await eVo(a,Q2o.of(t.session.host))))return o(`${e} can't be changed from a cloud session yet: this machine always asks a person before writing a path like this 
+  @214985730 ,new_string:f}=_qn(e,t),!V.CLAUDE_CODE_SIMPLE&&t.remoteCall===void 0)await bJ(t.session.host,g,c,t.storageV5);if(t.remoteCall===void 0)await jZ.of(t.session).beforeFileEdited(g);await YU(a,l,g,n.uuid);let{originalFileCon
+  @214997791 ed_floor");if(yJ(d,Le(n)))throw new vI(gTt);if(n.remoteCall===void 0)await bJ(n.session.host,d,u,n.storageV5);if(n.remoteCall===void 0)await jZ.of(n.session).beforeFileEdited(d);await YU(l,c,d,r.uuid);let g=await GR(d,as
+HOST ".host).storageV5" count=0
+HOST "storageV5:Xt" count=0
+HOST "credentials:Ce" count=0
+HOST "function We(){return{" count=0
+HOST "return{storageV5:t.of" count=0
+HOST "return{storageV5:" count=3
+  @210986828 meNs}`}}}});function X(e,t=S){return v()&&e!==void 0?G(t):void 0}function ce(e){return{storageV5:e,credentials:X(e)}}function G(e=S){return{...e,[J]:"CredentialsStoreHandle"}}var J;var Q=H(()=>{q();_();J=Symbol("secureSt
+  @214121517 ;l<=s.length;l++)a.push({namespace:"userConfigDir",dir:i,relPath:s.slice(0,l)});return{storageV5:n,chain:a,pipelineFolder:i9(t,o)}}function rDe(e){let t=e.at(-1);if(t===void 0)throw Error("empty sync-owned scope chain");
+  @215691410 te",patch:n})}function nts(e){m7().pendingStructuredResult=e}function rts(e={}){return{storageV5:e.storageV5,credentials:e.credentials,prevState:"",prevStateSince:Date.now(),accumulatedOutputs:{},lastClassifyAt:0,capture
+HOST "of(e.session.host)" count=11
+  @218212762 Summary:o.deltaSummary,outputFilePath:ji(o.taskId)}))}function gNs(e){let t=$Hr.of(e.session.host).drain().map((a)=>({type:"memory_update",source:"sync_unsaved",summary:a,paths:[],inContextPaths:[]})),n=e.getAppState().p
+  @218280757 tFunctionHooks(i,n).get(n);if(a)o.push(...a)}return o}function KHe(e){let t=xFs.of(e.session.host);function n(i){let a=t.tokens.get(i);if(a===void 0)t.next+=1,a=t.next,t.tokens.set(i,a);return a}let r=kx(e,"UserPromptSub
+  @222271349 var h=new ye(()=>new Xt);function le(e){if(he()&&e?.storageV5!==void 0)return h.of(e.session.host).countSessionsOnce(e.storageV5);return ne(e?.storageV5)}async function Qt(e,t,n,o,s=w){if(!(await e.getKnownMarketplaces(n
+  @222283509 : clau.de/desktop",cooldownSessions:15,isRelevant:async(e)=>I()&&!y()&&!await h.of(e.session.host).getDesktopInstalled()},{id:"desktop-shortcut",advertisedCommand:"desktop",content:async(e)=>`Continue your session in Cla
+  @222283905 desktop",priority:1,content:async(e)=>{let t=a("suggestion",e.theme);if(await h.of(e.session.host).getDesktopInstalled())return`Working on UI? See a live preview in Claude Code Desktop \xB7 run ${t("/desktop")}`;return`W
+  @222286048 n!1;if(C("web-setup-github")>=me||b("web-setup-github")<pe)return!1;if((await h.of(e.session.host).getGhAuthStatus()).status!=="authenticated")return!1;return At.of(e.session.host).peek(e.credentials)==="not_connected"}}
+HOST "of(e.host)" count=6
+  @215598219 _trigger")&&H8n()&&we("tengu_misty_anchor",!1)}function Vxl(e){if(V8n())Y8n(G8n.of(e.host)).catch(()=>{})}function K8n(e,t,n){if(t.agentId||Ba(n)!=="main"||!V8n())return;let r=G8n.of(t.session.host),o=RQo(e),s=QJ(Y8n(r),
+  @218315482 kLogged=!1;badLogged=!1}async function tbu(e,t,n,r=!1){if(iD())return;let o=OFs.of(e.host);if(ba("statusLine"))return;if(SQ()){_("Skipping StatusLine command execution - workspace trust not accepted");return}let s=rln(dl
+  @223526972 vailable,this.#K=e.probeVoiceConnectivity,this.#P=e.getVoiceKeyterms,this.#u=Nn.of(e.host),this.#i=e.inputs}subscribe=(e)=>this.#H.subscribe(e);getSnapshot=()=>this.#D;setInputs=(e)=>{if(this.#E)return;let t=this.#i,o=!t
+  @224535534 ,{}),w("workflow_event_launch","rescue_record_unconfirmed");return}let x=j();Ee.of(e.host).stash(x,{script:m.script,args:O,postResultLine:(c)=>Z(e,c,n),onRunSettled:async(c)=>{if(t.outcome=c?"executed":"run-failed",e.per
+  @230625982 });else Po(m,{storageV5:r.storageV5});if(!r.forkSession){let i=null;try{i=gf(of.of(e.host),m.worktreeSession,void 0,{storageV5:r.storageV5})}catch(l){ae(l)}if(i)if(i.reason==="worktree-gone")process.stderr.write(ff(i));e
+  @230632624 });else Po(D,{storageV5:r.storageV5});if(!r.forkSession){let A=null;try{A=gf(of.of(e.host),D.worktreeSession,void 0,{storageV5:r.storageV5})}catch(E){ae(E)}if(A)if(A.reason==="worktree-gone")process.stderr.write(ff(A));e
+HOST "of(t.session.host)" count=6
+  @214968377 )return o(Z2o(e,n,p));if(n==="write"&&(!mq(e,d).safe||J2o(d,a)||await eVo(a,Q2o.of(t.session.host))))return o(`${e} can't be changed from a cloud session yet: this machine always asks a person before writing a path like 
+  @215598319 =>{})}function K8n(e,t,n){if(t.agentId||Ba(n)!=="main"||!V8n())return;let r=G8n.of(t.session.host),o=RQo(e),s=QJ(Y8n(r),t.abortController.signal,()=>new yn),i=()=>AQo(r.held,o);return Ca(s,vQo).then(i,i)}function RQo(e){
+  @222097726 vt(Yo));class Ur{state=void 0}var ci=new Xs(()=>new Ur);function Vs(t){let r=ci.of(t.session.host);if(r.state===void 0)r.state=ut?.().createClassifierJobState(t)??null;return r.state}async function Dr({input:t,preExpansi
+  @222293615 Mo=[];async function Do(e,t){try{return await e.isRelevant(t)}catch(n){return h.of(t.session.host).failedTipIds.add(e.id),ke(we(Se(n),"tip isRelevant threw")),!1}}async function Pi(e){let t=h.of(e.session.host),{tips:n,t
+  @222325011 void 0,t.storageV5)}else Ut(e,{storageV5:t.storageV5});if(Et(e),!i){let f=Dn(Wt.of(t.session.host),e.worktreeSession,void 0,{storageV5:t.storageV5});if(f)e.messages.push(I(Pn(f),"warning"));if(Ke()&&t.storageV5!==void 0)
+  @232387143 qhe(t)}async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}var EV=2;class Khe{fired=new Set;fire(e,t){if(e<=0)return;le
+HOST "ns().host" count=0
+HOST "session:{host:" count=0
+PIN "pinStorageV5" count=10
+  @142393514 4C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851pinStorageV5B:/~BUN/root/_323.jsB:/~BUN/root/_675.jsB:/~BUN/root/_676.jsB:/~BUN/root/_677.jsB:/~BUN/root/_678.jsB:/~BUN/root/_679.jsB:/~BUN/root/_680.jsB:/~BUN/
+  @150443050 4C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851pinStorageV5FromEnvrecordHoverRestDecisiontryCreateLocalV5BackendtryCreateV5BackendB:/~BUN/root/_801.jsB:/~BUN/root/_802.jsB:/~BUN/root/_803.jsB:/~BUN/root/_804
+  @204290769 ll or undefined value..G...y.*.Cannot destructure property 'pinStorageV5' from null or undefined value.I...q...Cannot destructure property 'seedInstallIDs' from null or undefined value...T...c..Cannot destructure proper
+  @204295340 cli_after_main_complete...bf..profileCheckpoint...pinStorageV5FromEnv...runEvalMockServer...(.runClaudeInChromeMcpServer...runChromeNativeHost...runComputerUseMcpServer...D...loadFast
+  @204295752 h...[...BRIDGE_LOGIN_ERROR.. ...bridgeMain...pinStorageV5...\5..seedInstallIDs..	...]1..initSinks...k.initDefaultDebugLog...j.watchGlobalConfigThroughStorage. ... ...daemonMain...(.logsHand
+PIN "pinCredentialsStore" count=0
+PIN "credentialsStoreFor" count=10
+  @150322270 4C000008490ec165a1f1be4a04C000008500ec165a1f1be4a04C00000851credentialsStoreForsessionServicesFortryCreateCredentialsStoreB:/~BUN/root/_651.jsB:/~BUN/root/_723.jsB:/~BUN/root/_819.jsB:/~BUN/root/_826.jsB:/~BUN/root/_833.
+  @199389445 oot/chunk-0p9wy3bv.js..N...Cannot destructure property 'credentialsStoreFor' from null or undefined value..Y...Cannot destructure property 'primeFileDescriptorCredentials' from null or undefined value...O...C
+  @199389828 oteManagedSettingsCache...z.>.primeWorkspaceRoots... .credentialsStoreFor...6S.primeFileDescriptorCredentials...o..primeStoredLoginCopy...bgAuthSnapshot...{..file:///B:/%7EBUN/root/_325.js...
+  @206267198 js")]);if(!u())o(L+D());let s=d(n);if(A()&&s!==void 0){let[{credentialsStoreFor:R},{setGrowthBookCredentials:M,setGrowthBookStorageBackend:U},{composePolicyLimitsClient:tt,primePolicyLimitsCache:j},{primeFastPathCredenti
+  @206268055 :H,shutdown1PEventLogging:z},{shutdownDatadog:q},{sleep:J},{credentialsStoreFor:Q},{initDefaultDebugLog:X},{watchGlobalConfigThroughStorage:Z}]=await Promise.all([import("B:/~BUN/root/chunk-vv17pmqe.js"),import("B:/~BUN/
+PIN "A()&&p!==void 0" count=3
+  @206274156 js"),import("B:/~BUN/root/chunk-dgaamg36.js")]),p=Z(n),N;if(A()&&p!==void 0){let[{credentialsStoreFor:m},{setGrowthBookCredentials:k,setGrowthBookStorageBackend:G},{primeFastPathCredentials:et}]=await Promise.all([import
+  @206274870 ()=>{},tt=new Promise((m)=>{U=m});setImmediate(async()=>{if(A()&&p!==void 0)try{let[{credentialsStoreFor:m},{composePolicyLimitsClient:k,primePolicyLimitsCache:G}]=await Promise.all([import("B:/~BUN/root/chunk-qfgksp5r.j
+  @206276319 ls:N}),Rt({trustProbe:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p);return tt.then(()=>{if(it())bt(),At(p)}),St("tengu_fleetview",{defaultToAgentsView:l,relaunch:Y}),yt()}).finally(()=>pro
+PIN "A()&&l!==void 0" count=0
+PIN "k({storageV5:p,credentials:m(p)})" count=1
+  @206275077 nk-qfgksp5r.js"),import("B:/~BUN/root/chunk-qtwpak8g.js")]);k({storageV5:p,credentials:m(p)}),await G(p)}catch(m){import("B:/~BUN/root/chunk-cjjvhnjh.js").then(({logForDebugging:k})=>k(`Policy limits: start-up compositio
+PIN "m({storageV5:p,credentials:N})" count=1
+  @206276235 {setRepoDetectionGuards:Rt},{initDefaultDebugLog:kt}])=>{if(m({storageV5:p,credentials:N}),Rt({trustProbe:it}),Dt().catch(()=>{}),k(),G(),et(p),A()&&p!==void 0)kt({storageV5:p}),Lt(p);return tt.then(()=>{if(it())bt(),At(
+PIN "let{storageV5:d,credentials:g}=Ue()" count=1
+  @232452760 ayName:Fr(n)}}var jke=3;function j_e(e,t,o,n,r,s,a,l,u,c,m){let{storageV5:d,credentials:g}=Ue(),h=Go(),S=lt(),k=Tt(),_=Wo(o),C=T(null),w=B(()=>C.current,[]),b=T(void 0),v=T(null),A=T(null),N=T(new WeakSet),P=T(0),O=T(new

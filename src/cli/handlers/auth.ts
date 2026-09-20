@@ -30,6 +30,7 @@ import {
   saveOAuthTokensIfNeeded,
   validateForceLoginOrg,
 } from '../../utils/auth.js'
+import { oauthLoginOrgUUIDHint } from '../../utils/forceLoginOrg.js'
 import { saveGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isRunningOnHomespace } from '../../utils/envUtils.js'
@@ -148,10 +149,10 @@ export async function authLogin({
   const methodMismatch =
     settings.forceLoginMethod !== undefined &&
     loginWithClaudeAi !== (settings.forceLoginMethod === 'claudeai')
-  const orgUUID =
-    typeof settings.forceLoginOrgUUID === 'string' && !methodMismatch
-      ? settings.forceLoginOrgUUID
-      : undefined
+  const orgUUID = oauthLoginOrgUUIDHint(
+    settings.forceLoginOrgUUID,
+    methodMismatch,
+  )
 
   // Fast path: if a refresh token is provided via env var, skip the browser
   // OAuth flow and exchange it directly for tokens.

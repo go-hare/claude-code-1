@@ -1,0 +1,3 @@
+# 246 function Ve start=206352806 end=206352944 len=138 sha=c67783f5dfe84f82 dist=239
+
+function Ve(e){if(e===void 0)return;let t=ie(e,"");try{let{protocol:n}=new URL(t);return n==="https:"||n==="http:"?t:void 0}catch{return}}

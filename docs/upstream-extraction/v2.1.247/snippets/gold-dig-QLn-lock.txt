@@ -1,0 +1,42 @@
+# QLn unique lock (densable 2.1.247)
+
+## Call site (unique)
+$St @214540247
+  let a=QLn().extend({plugins:Me(wn())}).safeParse(s.data);
+  ...
+  return s.data   # raw axios body, not a.data
+
+## Import alias (marketplace mega-module)
+@212843677  _716.js:  qQc as QLn, rQc as jS
+@212846176  _750.js:  i1c as wn, l1c as Me
+  no function/var/let wn|Me shadow between import and $St
+
+## Export (_716.js @207915962)
+  Io as qQc, Ur as rQc
+
+## QLn body = Io @207910830
+Io=p(()=>d({
+  $schema:i().optional().describe("JSON Schema reference for editor autocomplete/validation; ignored at load time"),
+  name:Qt(),
+  version:i().optional().describe("Marketplace manifest version"),
+  description:i().optional().describe("Human-readable description of this marketplace"),
+  owner:He().describe("Marketplace maintainer or curator information"),
+  plugins:f(B()).transform(ho).describe("Collection of available plugins in this marketplace"),
+  forceRemoveDeletedPlugins:x().optional().describe("When true, ..."),
+  metadata:d({
+    pluginRoot:i().optional().describe("Base directory for bare plugin source names..."),
+    version:i().optional(),
+    description:i().optional()
+  }).optional(),
+  allowCrossMarketplaceDependenciesOn:f(i()).optional(),
+  renames:M(i(),i().nullable()).optional().catch(void 0)
+}))
+
+## QLn does NOT wrap Mo / pluginRoot
+pluginRoot lives on metadata.pluginRoot as a string field only.
+
+## $St extend Me(wn())
+Me = l1c = vc(e,t){return Nn(gc,e,t)}  # zod array  (Nn type:"array")
+wn = i1c = Zt(){return Tn(_c)}         # zod unknown (Tn type:"unknown")
+_716 Io already uses the same pair as f(B()) = array(unknown)
+$St .extend REPLACES plugins, dropping .transform(ho)

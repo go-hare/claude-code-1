@@ -58,6 +58,11 @@ export type ValidationError = {
   expected?: string
   /** The actual invalid value that was provided */
   invalidValue?: unknown
+  /**
+   * densable 2.1.247 `ri` — `severity === "warning"` is dropped by Z$/Cs.
+   * Alias both-keys-set warnings carry `"warning"`.
+   */
+  severity?: 'warning' | 'fatal' | string
   /** Suggestion for fixing the error */
   suggestion?: string
   /** Link to relevant documentation */

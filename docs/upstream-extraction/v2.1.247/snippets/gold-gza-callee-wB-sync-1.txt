@@ -1,0 +1,2 @@
+# needle=function wB( pos=248851680 end=248851746 len=66
+function wB(e,t){var n=Ar.p;try{return Ar.p=e,t()}finally{Ar.p=n}}

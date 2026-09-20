@@ -1,0 +1,4 @@
+# offset=197860213 tag=pcc
+
+ed_no_surface.......6..hook_blocked....w...validation_failed.........y.duplicate_call.......M..asked_in_session....N5..approved_by_session......t..denied_by_session.......v...ask_expired......5..__remote_tool_call.......3..anthropic/remoteToolExecution.......j.X.claudecode/remoteToolCall.......e...claudecode/toolUseId........sender_below_floor.."....Lr.^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$..........[\p{Cc}\p{Cf}]......n.~.working_dir.	...?.s.transform...A.......Cannot destructure property 'callId' from null or undefined value......J`b.ccr_container......6Ij.local_process.......P.S.callId.......p..expiresInMs......j7.isBypassAvailable........Df.is_bypass_available......j..caller.....].B.expires_in_ms...C...../.Cannot destructure property 'attested' from null or undefined value.....h?..attested....."..incompatible...u...elicit_result........<..ask_id.......r1.refused_input_fields
+.......l

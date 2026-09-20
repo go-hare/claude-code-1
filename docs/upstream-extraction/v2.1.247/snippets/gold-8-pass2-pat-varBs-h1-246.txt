@@ -1,0 +1,3 @@
+# off=204896396 pat="var Bs="
+
+Mu,methodsOf:()=>mo,missingNounTrap:()=>Lu,objectFor:()=>yo,proxyFor:()=>lo,suppressedStub:()=>ct});var Bs=r(()=>{Bs();Au();Du();Kt();Uu();Bu();xo()});var Ks=(e,t)=>e===!0&&t===void 0;var Vs=()=>{};var hy=(e,t)=>g.sealNoun({play:(o,n)=>{let{signal:s,loop:i,gain:m}=n??{};return s!==void 0&&!p.isAbortSignalLike(s)?Promise.reject(new p.HooksError(`${e

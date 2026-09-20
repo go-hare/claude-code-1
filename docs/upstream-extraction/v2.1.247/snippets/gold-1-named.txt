@@ -1,0 +1,9 @@
+# gold-1-named exact unminified names
+
+same 246=0 247=0 "function fitFeedbackPayloadToBudget"
+same 246=0 247=0 "function parseDraftTranscriptMessages"
+same 246=0 247=0 "async function fitFeedbackPayloadToBudget"
+same 246=0 247=0 "async function parseDraftTranscriptMessages"
+same 246=0 247=0 "function SendFeedback"
+same 246=0 247=0 "SendFeedback:"
+same 246=0 247=0 "SendFeedback,"

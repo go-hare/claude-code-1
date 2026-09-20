@@ -1,0 +1,15 @@
+# K8 v5 callees — official 2.1.247 peel. Invent-ban.
+
+K8 LOCKED @214509181 gold-gza-K8-full.txt gold-mp-K8-call.txt
+
+| callee | status | offset | gold |
+| ------ | ------ | ------ | ---- |
+| mp | LOCKED sl | 211421964 | gold-mp-sl-full.txt gold-mp-lock.txt |
+| ra | LOCKED join(Fs(),"cache") | 214636997 | gold-mp-ra-full.txt |
+| _r.pluginCache | LOCKED L key factory | 207948340 | gold-mp-_r-pluginCache.txt |
+| wg | LOCKED ".orphaned_at" | 211423438 | gold-mp-ss-wg.txt |
+| JD | LOCKED lstat symlink | 214078883 | gold-K8-v5-JD-full.txt |
+| dSt | LOCKED join(e,wg) | 214510094 | gold-K8-v5-dSt-full.txt |
+
+Local: markPluginVersionOrphaned disk-only 1-arg. No storage write.
+Do not implement.

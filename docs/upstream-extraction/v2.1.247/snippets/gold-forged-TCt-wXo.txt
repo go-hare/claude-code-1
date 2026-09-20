@@ -1,0 +1,1 @@
+async function wXo(e,t,n){let r=await Hu(e,["config","-z","--list"],{hardened:!0,layout:t,signal:n});if(r.code!==0)return!0;return lYn(r.stdout)}

@@ -1,0 +1,2 @@
+# afterfn0 @211364670 end=211364729
+function kR(){return{nativeCursor:qx(),atlasRecorder:Px()}}

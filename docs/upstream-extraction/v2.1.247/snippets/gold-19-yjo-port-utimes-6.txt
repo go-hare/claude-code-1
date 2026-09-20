@@ -1,0 +1,5 @@
+# pos=67005024
+ncate: asyncWrap(fs.ftruncate, "ftruncate"),
+  futimes: asyncWrap(fs.futimes, "futimes"),
+  glob,
+  lchmod: constants.O_SYMLINK !== @undefined ? asyncWrap(fs.lc

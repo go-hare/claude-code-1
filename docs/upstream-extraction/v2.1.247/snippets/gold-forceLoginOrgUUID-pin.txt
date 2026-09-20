@@ -1,0 +1,121 @@
+# SEA 247 C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+# peeled by _peel-forceLoginOrg-unix.mjs / _peel-forceLogin-schema.mjs
+#
+# Found while mapping all 29 upstream ANTHROPIC_UNIX_SOCKET code sites onto ours
+# (site 19 = J$ = validateForceLoginOrg).
+
+## Schema (@208026156) — union, NOT a bare string
+
+  forceLoginOrgUUID: N([s(), u(s())]).optional().describe(
+    "Organization UUID to require for OAuth login. Accepts a single UUID string
+     or an array of UUIDs (any one is permitted). When set in managed settings,
+     login fails if the authenticated account does not belong to a listed
+     organization.")
+
+  N=union s=string u=array. Ours was `z.string()` with the describe
+  "Organization UUID to use for OAuth login" -> an array pin was rejected by
+  schema validation before it could ever be honored. FIXED + config.test.ts cases.
+
+## J$ body (@208881853)
+
+  async function J$(e) {
+    let t = H("policySettings"),
+        n = t?.forceLoginOrgUUID,
+        r = n !== void 0 || t?.forceLoginMethod !== void 0;      // "a pin is configured"
+    if (c.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) {
+      if (r) fe("auth_force_login_org", "managed_by_host_under_pin");
+      return { valid: !0 }
+    }
+    if (c.ANTHROPIC_UNIX_SOCKET) {
+      let f = { api_provider: Xe(A()), auth_token_source: Xe(mi().source) };
+      if (!tn() && r)            fe("auth_force_login_org", "unix_socket_3p_under_pin",     f);
+      else if (tn() && n !== void 0) fe("auth_force_login_org", "unix_socket_ssh_under_pin",  f);
+      else if (pm())             fe("auth_force_login_org", "unix_socket_unreadable_policy", f);
+      else                       _e("auth_force_login_org");
+      return { valid: !0 }
+    }
+    if (!tn()) {
+      if (r && q$()) return { valid: !1, message:
+        `This machine's managed settings require a first-party login, but an
+         Anthropic-issued credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or
+         apiKeyHelper) is configured. A non-OAuth Anthropic credential cannot
+         satisfy the org pin. Remove the credential and run: claude auth login
+         If this is a third-party desktop session: forceLoginOrgUUID targets
+         first-party OAuth and should be removed from managed-settings.json.` };
+      return { valid: !0 }
+    }
+    if (pm()) { ... policy_unreadable_fail_close, errno telemetry ... }
+    if (n === void 0) return { valid: !0 };
+    let o = typeof n === "string" ? [n] : n;
+    if (o.length === 0) return { valid: !1, message:
+      `forceLoginOrgUUID in managed settings is set to an empty array. No
+       organizations are permitted. This is almost certainly a misconfiguration.
+       Contact your administrator.` };
+    let i = o.length === 1 ? `organization ${o[0]}`
+                           : `one of these organizations: ${o.join(", ")}`;
+    ...
+    if (o.includes(d)) return { valid: !0 };
+
+  tn() = isAnthropicAuthEnabled (sync)   pm() = admin policy unreadable
+  q$() = tx() || !!ANTHROPIC_AUTH_TOKEN || !!CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR
+         || !!nt() || (A()==="firstParty" && !tt() && !tn())
+
+## DONE
+
+  - schema widened to union([string, array(string)]) + upstream describe text
+  - normalize to a list; `undefined` is the only "unset" value
+  - empty array denies with the upstream message. NOTE the old code did not
+    mis-permit it: `![]` is false, so it fell through to the comparison below and
+    denied anyway, just with a message naming a single organization.
+  - membership via includes() (was: `tokenOrgUuid === requiredOrgUuid`, which
+    compared one UUID against the whole pin). This was the severe one: had an
+    array pin ever reached it, every account would be denied, including members
+    of a listed org. Schema rejection kept it unreachable in practice.
+  - singular/plural requirement phrase threaded through every message
+
+  - CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST early branch + managed_by_host_under_pin,
+    mirroring the branch validateForcedLoginMethod (densable e1) already had
+  - `r` = "a pin is configured" now also counts forceLoginMethod, read from
+    policySettings only (upstream `t = H("policySettings")`), not merged settings
+  - the three unix-socket analytics reasons
+  - the `!tn() && r && q$()` rejection, as hasNonOAuthAnthropicCredential()
+
+## Minified identifiers resolved (do not re-derive these)
+
+  tx() -> hasAnthropicApiKeyAuth()        (auth.ts; same skipRetrieving... probe)
+  nt() -> getConfiguredApiKeyHelper()
+  tn() -> isAnthropicAuthEnabled()  (sync)
+  pm() -> getAdminManagedPolicyUnreadableError()
+  A()  -> getAPIProvider()
+  mi() -> getAuthTokenSource()
+  H(s) -> getSettingsForSource(s)
+  c.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST -> isHostManagedProviderAuth()
+  fe(name, reason, extra) -> logEvent(`tengu_${name}`, { reason, ...extra })
+    Confirmed by our port of e1 in forceLoginMethod.ts, which already emits
+    tengu_auth_force_login_org with reason "managed_by_host_under_method_pin".
+
+## STILL UNRESOLVED — deliberately not guessed
+
+  tt() in q$'s second clause: `A()==="firstParty" && !tt() && !tn()`.
+    Defined @208836560 as `if(!NR())return!1; if(ex())return!1;
+    if(bm()==="profile-implicit"){...} return ZR(),!0` — a gateway-state
+    predicate whose own helpers are unidentified. Omitted from
+    hasNonOAuthAnthropicCredential(). Note the enclosing branch is already
+    `if (!tn())`, so inside it the clause reduces to `firstParty && !tt()`, a
+    catch-all beyond the four credentials the refusal message names. Omitting it
+    can only UNDER-block (we start a session upstream would stop); including a
+    wrong version would lock a working install out of startup, since the sole
+    caller is main.tsx -> exitWithError.
+
+  _e(name): the else-branch counterpart to fe() in the unix-socket block
+    (upstream calls it when no pin situation applies). Not emitted by us.
+
+## Other ANTHROPIC_UNIX_SOCKET sites checked
+
+  site 7  fetch options -> { unix }                 ours: proxy.ts:399           OK
+  site 16 tn(): unix socket -> !!OAUTH_TOKEN        ours: auth.ts:215            OK
+  site 18 async twin of 16                          ours: same guard             OK
+  site 20 scrub managed env when socket set         ours: managedEnv.ts:52       OK
+  site 26 user context email suppressed             ours: context.ts:221         OK
+  site 5/6  RO()/OE host-managed provider grouping  ours: not mapped             TODO
+  site 9/10/13/14/15/17/22/24/27/28/29/30/31/32     ours: not mapped             TODO

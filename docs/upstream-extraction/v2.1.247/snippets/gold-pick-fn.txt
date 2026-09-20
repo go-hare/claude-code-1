@@ -1,0 +1,23 @@
+# densable 2.1.247 `qhe` / `Vhe` — spinner tip pick
+# offset=232386xxx needle=tengu_tip_shown (JS chunk, hit 1)
+# IGNORE changelog "tie-break among never-shown" — lock this body.
+# `IV` = getSessionsSinceLastShown (`wL` / local tipHistory).
+# `Whe` = getRelevantTips. `MV().spinnerTipsEnabled`.
+# FORCE_TIP is env-catalog only in this SEA; `Vhe` does not read it.
+
+function qhe(e){
+  if(e.length===0)return;
+  if(e.length===1)return e[0];
+  let t=e.map((o)=>({tip:o,sessions:IV(o.id)}));
+  return t.sort((o,n)=>{
+    if(o.sessions!==n.sessions)return n.sessions-o.sessions;
+    return(n.tip.priority??0)-(o.tip.priority??0)
+  }),t[0]?.tip
+}
+
+async function Vhe(e){
+  if(MV().spinnerTipsEnabled===!1)return;
+  let t=await Whe(e);
+  if(t.length===0)return;
+  return qhe(t)
+}

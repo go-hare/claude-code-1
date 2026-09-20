@@ -1,0 +1,2 @@
+# needle=function sl(e pos=235977915 end=235978141 len=226
+function sl(e){if(e.entry.source&&typeof e.entry.source==="object"&&"source"in e.entry.source&&e.entry.source.source==="github"&&typeof e.entry.source==="object"&&"repo"in e.entry.source)return e.entry.source.repo;return null}

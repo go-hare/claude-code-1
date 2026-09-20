@@ -1,0 +1,302 @@
+# gold-11-unk-counts 247 vs 246 settings-symlink / cleanup / lstat
+
+same 246=0 247=0 "home-manager"
+same 246=0 247=0 "home_manager"
+same 246=0 247=0 "homeManager"
+same 246=5 247=5 "stow"
+  246#0 offset=82010620 kind=tbl run=10753 jsScore=3
+  246#1 offset=85978764 kind=tbl run=5 jsScore=0
+  246#2 offset=197131182 kind=tbl run=2552 jsScore=0
+  246#3 offset=219145646 kind=tbl run=1099666 jsScore=0
+  246#4 offset=238563927 kind=tbl run=192040 jsScore=0
+  247#0 offset=82010620 kind=tbl run=10753 jsScore=3
+  247#1 offset=85978764 kind=tbl run=5 jsScore=0
+  247#2 offset=198649846 kind=tbl run=2552 jsScore=0
+  247#3 offset=220895104 kind=tbl run=1099666 jsScore=0
+  247#4 offset=240647623 kind=tbl run=192040 jsScore=0
+same 246=0 247=0 "dotfile-managed"
+same 246=0 247=0 "dotfile managed"
+same 246=0 247=0 "repointed"
+same 246=0 247=0 "writable area"
+same 246=8 247=8 "outside the sandbox"
+  246#0 offset=199509292 kind=tbl run=65 jsScore=0
+  246#1 offset=202475450 kind=tbl run=212 jsScore=0
+  246#2 offset=203786537 kind=tbl run=163 jsScore=2
+  246#3 offset=206374675 kind=tbl run=139238 jsScore=7
+  246#4 offset=217871882 kind=tbl run=6796973 jsScore=0
+  246#5 offset=228953737 kind=js run=89368 jsScore=12
+  246#6 offset=228958100 kind=js run=89368 jsScore=11
+  246#7 offset=234008296 kind=tbl run=25546 jsScore=7
+  247#0 offset=200887592 kind=tbl run=65 jsScore=0
+  247#1 offset=204092338 kind=tbl run=212 jsScore=0
+  247#2 offset=205428549 kind=tbl run=163 jsScore=2
+  247#3 offset=207975599 kind=tbl run=140241 jsScore=7
+  247#4 offset=218155469 kind=tbl run=6912445 jsScore=0
+  247#5 offset=230805676 kind=js run=106510 jsScore=11
+  247#6 offset=230812781 kind=js run=106510 jsScore=11
+  247#7 offset=236322160 kind=tbl run=25633 jsScore=7
+same 246=0 247=0 "settings.json symlink"
+DIFF 246=328 247=337 "settings.json"
+  246#0 offset=195562272 kind=tbl run=21 jsScore=1
+  246#1 offset=195589208 kind=tbl run=13 jsScore=2
+  246#2 offset=195772041 kind=tbl run=151 jsScore=4
+  246#3 offset=196061677 kind=tbl run=1721 jsScore=4
+  246#4 offset=196062838 kind=tbl run=1721 jsScore=0
+  246#5 offset=196062863 kind=tbl run=1721 jsScore=0
+  246#6 offset=196112378 kind=tbl run=89 jsScore=2
+  246#7 offset=196257968 kind=tbl run=163 jsScore=0
+  246 ... 320 more hits omitted
+  247#0 offset=197070048 kind=tbl run=21 jsScore=1
+  247#1 offset=197097068 kind=tbl run=13 jsScore=2
+  247#2 offset=197281221 kind=tbl run=151 jsScore=4
+  247#3 offset=197573669 kind=tbl run=1721 jsScore=4
+  247#4 offset=197574830 kind=tbl run=1721 jsScore=0
+  247#5 offset=197574855 kind=tbl run=1721 jsScore=0
+  247#6 offset=197624370 kind=tbl run=89 jsScore=2
+  247#7 offset=197769960 kind=tbl run=163 jsScore=0
+  247 ... 329 more hits omitted
+DIFF 246=51 247=53 "~/.claude/settings.json"
+  246#0 offset=195772031 kind=tbl run=151 jsScore=3
+  246#1 offset=196062828 kind=tbl run=1721 jsScore=0
+  246#2 offset=196112368 kind=tbl run=89 jsScore=2
+  246#3 offset=197594269 kind=tbl run=74 jsScore=2
+  246#4 offset=197604332 kind=tbl run=23 jsScore=2
+  246#5 offset=198508594 kind=tbl run=119 jsScore=0
+  246#6 offset=199614091 kind=tbl run=39 jsScore=6
+  246#7 offset=199657446 kind=tbl run=708 jsScore=2
+  246 ... 43 more hits omitted
+  247#0 offset=197281211 kind=tbl run=151 jsScore=3
+  247#1 offset=197574820 kind=tbl run=1721 jsScore=0
+  247#2 offset=197624360 kind=tbl run=89 jsScore=2
+  247#3 offset=199299721 kind=tbl run=74 jsScore=2
+  247#4 offset=199309816 kind=tbl run=23 jsScore=2
+  247#5 offset=200058050 kind=tbl run=119 jsScore=0
+  247#6 offset=200439669 kind=tbl run=217 jsScore=3
+  247#7 offset=201176615 kind=tbl run=39 jsScore=4
+  247 ... 45 more hits omitted
+DIFF 246=138 247=144 ".claude/settings.json"
+  246#0 offset=195562264 kind=tbl run=21 jsScore=1
+  246#1 offset=195772033 kind=tbl run=151 jsScore=3
+  246#2 offset=196061669 kind=tbl run=1721 jsScore=4
+  246#3 offset=196062830 kind=tbl run=1721 jsScore=0
+  246#4 offset=196062855 kind=tbl run=1721 jsScore=0
+  246#5 offset=196112370 kind=tbl run=89 jsScore=3
+  246#6 offset=196257960 kind=tbl run=163 jsScore=0
+  246#7 offset=196394156 kind=tbl run=37 jsScore=0
+  246 ... 130 more hits omitted
+  247#0 offset=197070040 kind=tbl run=21 jsScore=1
+  247#1 offset=197281213 kind=tbl run=151 jsScore=3
+  247#2 offset=197573661 kind=tbl run=1721 jsScore=4
+  247#3 offset=197574822 kind=tbl run=1721 jsScore=0
+  247#4 offset=197574847 kind=tbl run=1721 jsScore=0
+  247#5 offset=197624362 kind=tbl run=89 jsScore=3
+  247#6 offset=197769952 kind=tbl run=163 jsScore=0
+  247#7 offset=197925235 kind=tbl run=61 jsScore=2
+  247 ... 136 more hits omitted
+same 246=7 247=7 "cleanupAfterCommand"
+  246#0 offset=200896732 kind=tbl run=36 jsScore=0
+  246#1 offset=200896768 kind=tbl run=19 jsScore=0
+  246#2 offset=208744033 kind=tbl run=577666 jsScore=6
+  246#3 offset=209177589 kind=js run=577666 jsScore=16
+  246#4 offset=209177617 kind=js run=577666 jsScore=16
+  246#5 offset=213688865 kind=js run=6796973 jsScore=31
+  246#6 offset=213688908 kind=js run=6796973 jsScore=22
+  247#0 offset=202487808 kind=tbl run=36 jsScore=0
+  247#1 offset=202487844 kind=tbl run=19 jsScore=0
+  247#2 offset=209996818 kind=tbl run=582601 jsScore=6
+  247#3 offset=210435229 kind=js run=582601 jsScore=16
+  247#4 offset=210435257 kind=js run=582601 jsScore=16
+  247#5 offset=215066758 kind=js run=6912445 jsScore=31
+  247#6 offset=215066801 kind=js run=6912445 jsScore=22
+same 246=2 247=2 "sandbox cleanupAfterCommand failed"
+  246#0 offset=200896724 kind=tbl run=36 jsScore=1
+  246#1 offset=213688900 kind=js run=6796973 jsScore=23
+  247#0 offset=202487800 kind=tbl run=36 jsScore=1
+  247#1 offset=215066793 kind=js run=6912445 jsScore=23
+same 246=4 247=4 "Cleaned up bwrap mount point"
+  246#0 offset=201207228 kind=tbl run=53 jsScore=5
+  246#1 offset=201207292 kind=tbl run=53 jsScore=5
+  246#2 offset=208672941 kind=js run=577666 jsScore=26
+  246#3 offset=208673077 kind=js run=577666 jsScore=37
+  247#0 offset=203121288 kind=tbl run=53 jsScore=5
+  247#1 offset=203121352 kind=tbl run=53 jsScore=5
+  247#2 offset=209925726 kind=js run=582601 jsScore=26
+  247#3 offset=209925862 kind=js run=582601 jsScore=37
+same 246=1 247=1 "Deferring mount point cleanup"
+  246#0 offset=208672750 kind=js run=577666 jsScore=38
+  247#0 offset=209925535 kind=js run=582601 jsScore=38
+same 246=300 247=300 "isSymbolicLink"
+  246#0 offset=66644058 kind=js run=13114 jsScore=18
+  246#1 offset=66653569 kind=js run=9431 jsScore=18
+  246#2 offset=67042918 kind=js run=82438 jsScore=13
+  246#3 offset=67051755 kind=js run=82438 jsScore=18
+  246#4 offset=67052028 kind=js run=82438 jsScore=18
+  246#5 offset=67056276 kind=js run=82438 jsScore=9
+  246#6 offset=67057717 kind=js run=82438 jsScore=16
+  246#7 offset=67057837 kind=js run=82438 jsScore=14
+  246 ... 292 more hits omitted
+  247#0 offset=66644058 kind=js run=13114 jsScore=18
+  247#1 offset=66653569 kind=js run=9431 jsScore=18
+  247#2 offset=67042918 kind=js run=82438 jsScore=13
+  247#3 offset=67051755 kind=js run=82438 jsScore=18
+  247#4 offset=67052028 kind=js run=82438 jsScore=18
+  247#5 offset=67056276 kind=js run=82438 jsScore=9
+  247#6 offset=67057717 kind=js run=82438 jsScore=16
+  247#7 offset=67057837 kind=js run=82438 jsScore=14
+  247 ... 292 more hits omitted
+DIFF 246=97 247=99 "lstatSync"
+  246#0 offset=66635591 kind=tbl run=13114 jsScore=3
+  246#1 offset=66641537 kind=js run=13114 jsScore=21
+  246#2 offset=66643578 kind=js run=13114 jsScore=17
+  246#3 offset=67043734 kind=js run=82438 jsScore=31
+  246#4 offset=67155236 kind=js run=37378 jsScore=12
+  246#5 offset=67155251 kind=js run=37378 jsScore=13
+  246#6 offset=67157867 kind=js run=37378 jsScore=19
+  246#7 offset=67162168 kind=js run=37378 jsScore=17
+  246 ... 89 more hits omitted
+  247#0 offset=66635591 kind=tbl run=13114 jsScore=3
+  247#1 offset=66641537 kind=js run=13114 jsScore=21
+  247#2 offset=66643578 kind=js run=13114 jsScore=17
+  247#3 offset=67043734 kind=js run=82438 jsScore=31
+  247#4 offset=67155236 kind=js run=37378 jsScore=12
+  247#5 offset=67155251 kind=js run=37378 jsScore=13
+  247#6 offset=67157867 kind=js run=37378 jsScore=19
+  247#7 offset=67162168 kind=js run=37378 jsScore=17
+  247 ... 91 more hits omitted
+DIFF 246=102 247=101 "lstat("
+  246#0 offset=66650704 kind=js run=9431 jsScore=23
+  246#1 offset=67007450 kind=js run=43631 jsScore=17
+  246#2 offset=67043464 kind=js run=82438 jsScore=21
+  246#3 offset=67152616 kind=js run=37378 jsScore=24
+  246#4 offset=67164525 kind=js run=37378 jsScore=22
+  246#5 offset=67165317 kind=js run=37378 jsScore=28
+  246#6 offset=67166048 kind=js run=37378 jsScore=22
+  246#7 offset=205112777 kind=js run=42400 jsScore=47
+  246 ... 94 more hits omitted
+  247#0 offset=66650704 kind=js run=9431 jsScore=23
+  247#1 offset=67007450 kind=js run=43631 jsScore=17
+  247#2 offset=67043464 kind=js run=82438 jsScore=21
+  247#3 offset=67152616 kind=js run=37378 jsScore=24
+  247#4 offset=67164525 kind=js run=37378 jsScore=22
+  247#5 offset=67165317 kind=js run=37378 jsScore=28
+  247#6 offset=67166048 kind=js run=37378 jsScore=22
+  247#7 offset=207049490 kind=js run=43110 jsScore=47
+  247 ... 93 more hits omitted
+same 246=51 247=51 "unlinkSync"
+  246#0 offset=66635675 kind=tbl run=13114 jsScore=4
+  246#1 offset=66644934 kind=js run=13114 jsScore=24
+  246#2 offset=66648013 kind=js run=13114 jsScore=27
+  246#3 offset=67157555 kind=js run=37378 jsScore=12
+  246#4 offset=67157571 kind=js run=37378 jsScore=12
+  246#5 offset=67175624 kind=tbl run=37378 jsScore=0
+  246#6 offset=67179879 kind=js run=37378 jsScore=15
+  246#7 offset=67179892 kind=js run=37378 jsScore=15
+  246 ... 43 more hits omitted
+  247#0 offset=66635675 kind=tbl run=13114 jsScore=4
+  247#1 offset=66644934 kind=js run=13114 jsScore=24
+  247#2 offset=66648013 kind=js run=13114 jsScore=27
+  247#3 offset=67157555 kind=js run=37378 jsScore=12
+  247#4 offset=67157571 kind=js run=37378 jsScore=12
+  247#5 offset=67175624 kind=tbl run=37378 jsScore=0
+  247#6 offset=67179879 kind=js run=37378 jsScore=15
+  247#7 offset=67179892 kind=js run=37378 jsScore=15
+  247 ... 43 more hits omitted
+same 246=54 247=54 "unlink("
+  246#0 offset=66654458 kind=js run=9431 jsScore=16
+  246#1 offset=66657760 kind=js run=9431 jsScore=28
+  246#2 offset=67154093 kind=js run=37378 jsScore=24
+  246#3 offset=204648057 kind=js run=162275 jsScore=26
+  246#4 offset=204926293 kind=js run=114765 jsScore=38
+  246#5 offset=205119069 kind=js run=42400 jsScore=34
+  246#6 offset=205806328 kind=js run=12614 jsScore=49
+  246#7 offset=205875681 kind=js run=16994 jsScore=30
+  246 ... 46 more hits omitted
+  247#0 offset=66654458 kind=js run=9431 jsScore=16
+  247#1 offset=66657760 kind=js run=9431 jsScore=28
+  247#2 offset=67154093 kind=js run=37378 jsScore=24
+  247#3 offset=206288990 kind=js run=162345 jsScore=26
+  247#4 offset=206572132 kind=js run=111835 jsScore=38
+  247#5 offset=207055785 kind=js run=43110 jsScore=34
+  247#6 offset=207810064 kind=js run=16994 jsScore=30
+  247#7 offset=207810385 kind=js run=16994 jsScore=24
+  247 ... 46 more hits omitted
+DIFF 246=39 247=41 "readlinkSync"
+  246#0 offset=66635632 kind=tbl run=13114 jsScore=2
+  246#1 offset=66646809 kind=js run=13114 jsScore=23
+  246#2 offset=66647047 kind=js run=13114 jsScore=17
+  246#3 offset=67157327 kind=js run=37378 jsScore=12
+  246#4 offset=67157345 kind=js run=37378 jsScore=12
+  246#5 offset=67163113 kind=js run=37378 jsScore=13
+  246#6 offset=67175388 kind=tbl run=37378 jsScore=0
+  246#7 offset=67179267 kind=js run=37378 jsScore=15
+  246 ... 31 more hits omitted
+  247#0 offset=66635632 kind=tbl run=13114 jsScore=2
+  247#1 offset=66646809 kind=js run=13114 jsScore=23
+  247#2 offset=66647047 kind=js run=13114 jsScore=17
+  247#3 offset=67157327 kind=js run=37378 jsScore=12
+  247#4 offset=67157345 kind=js run=37378 jsScore=12
+  247#5 offset=67163113 kind=js run=37378 jsScore=13
+  247#6 offset=67175388 kind=tbl run=37378 jsScore=0
+  247#7 offset=67179267 kind=js run=37378 jsScore=15
+  247 ... 33 more hits omitted
+same 246=6 247=6 "getSettingsFilePathForSource"
+  246#0 offset=149415162 kind=tbl run=5375 jsScore=0
+  246#1 offset=196400244 kind=tbl run=28 jsScore=0
+  246#2 offset=206624018 kind=js run=51142 jsScore=12
+  246#3 offset=222351197 kind=tbl run=5722 jsScore=0
+  246#4 offset=228921429 kind=js run=89368 jsScore=16
+  246#5 offset=228922044 kind=js run=89368 jsScore=21
+  247#0 offset=150352707 kind=tbl run=5812 jsScore=0
+  247#1 offset=197967516 kind=tbl run=28 jsScore=0
+  247#2 offset=208304334 kind=js run=51481 jsScore=12
+  247#3 offset=224244984 kind=tbl run=6027 jsScore=0
+  247#4 offset=230725729 kind=js run=106510 jsScore=16
+  247#5 offset=230726344 kind=js run=106510 jsScore=21
+same 246=2 247=2 "scrubbed planted"
+  246#0 offset=201245482 kind=tbl run=43 jsScore=1
+  246#1 offset=209159749 kind=js run=577666 jsScore=36
+  247#0 offset=203159538 kind=tbl run=43 jsScore=1
+  247#1 offset=210414002 kind=js run=582601 jsScore=35
+same 246=0 247=0 "scrubBareGit"
+DIFF 246=50 247=52 "denyWrite"
+  246#0 offset=84640952 kind=tbl run=146 jsScore=0
+  246#1 offset=84652305 kind=tbl run=14 jsScore=6
+  246#2 offset=84672647 kind=tbl run=14 jsScore=10
+  246#3 offset=200111072 kind=tbl run=9 jsScore=0
+  246#4 offset=201217516 kind=tbl run=14 jsScore=0
+  246#5 offset=201305125 kind=tbl run=74 jsScore=0
+  246#6 offset=201305241 kind=tbl run=73 jsScore=0
+  246#7 offset=201305320 kind=tbl run=68 jsScore=0
+  246 ... 42 more hits omitted
+  247#0 offset=84640952 kind=tbl run=146 jsScore=0
+  247#1 offset=84652305 kind=tbl run=14 jsScore=6
+  247#2 offset=84672647 kind=tbl run=14 jsScore=10
+  247#3 offset=201684152 kind=tbl run=9 jsScore=1
+  247#4 offset=203131560 kind=tbl run=14 jsScore=0
+  247#5 offset=203219721 kind=tbl run=74 jsScore=0
+  247#6 offset=203219837 kind=tbl run=73 jsScore=0
+  247#7 offset=203219916 kind=tbl run=68 jsScore=0
+  247 ... 44 more hits omitted
+DIFF 246=0 247=1 "cleanupAfterCommand:kD"
+  247#0 offset=209996818 kind=tbl run=582601 jsScore=6
+DIFF 246=1 247=0 "cleanupAfterCommand:ED"
+  246#0 offset=208744033 kind=tbl run=577666 jsScore=6
+DIFF 246=0 247=1 "function kD(){Ec()}"
+  247#0 offset=209993434 kind=js run=582601 jsScore=28
+same 246=4 247=4 "function Ec(e){"
+  246#0 offset=208175441 kind=js run=222143 jsScore=32
+  246#1 offset=220654816 kind=js run=266853 jsScore=33
+  246#2 offset=227196562 kind=js run=1040747 jsScore=52
+  246#3 offset=246989189 kind=js run=590927 jsScore=29
+  247#0 offset=208757628 kind=js run=510352 jsScore=19
+  247#1 offset=209925465 kind=js run=582601 jsScore=47
+  247#2 offset=229087848 kind=js run=1041965 jsScore=52
+  247#3 offset=249110533 kind=js run=590927 jsScore=29
+DIFF 246=0 247=1 "PZ(),LZ()"
+  247#0 offset=210435279 kind=js run=582601 jsScore=16
+DIFF 246=1 247=0 "xZ(),TZ()"
+  246#0 offset=209177639 kind=js run=577666 jsScore=16
+DIFF 246=0 247=1 "Re.cleanupAfterCommand(),PZ(),LZ()"
+  247#0 offset=210435254 kind=js run=582601 jsScore=16
+DIFF 246=1 247=0 "Le.cleanupAfterCommand(),xZ(),TZ()"
+  246#0 offset=209177614 kind=js run=577666 jsScore=16

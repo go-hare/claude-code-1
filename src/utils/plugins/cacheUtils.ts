@@ -6,8 +6,10 @@ import { clearAgentDefinitionsCache } from '@claude-code/builtin-tools/tools/Age
 import { clearPromptCache } from '@claude-code/builtin-tools/tools/SkillTool/prompt.js'
 import { resetSentSkillNames } from '../attachments.js'
 import { logForDebugging } from '../debug.js'
-import { getErrnoCode } from '../errors.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { errorMessage, getErrnoCode } from '../errors.js'
 import { logError } from '../log.js'
+import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { loadInstalledPluginsFromDisk } from './installedPluginsManager.js'
 import { clearPluginAgentCache } from './loadPluginAgents.js'
 import { clearPluginCommandCache } from './loadPluginCommands.js'
@@ -18,7 +20,11 @@ import {
 import { clearPluginOutputStyleCache } from './loadPluginOutputStyles.js'
 import { clearPluginCache, getPluginCachePath } from './pluginLoader.js'
 import { clearPluginOptionsCache } from './pluginOptionsStorage.js'
-import { isPluginCacheStagingName } from './pluginCacheStaging.js'
+import {
+  getPluginCacheRoot,
+  isPluginCacheStagingName,
+  isPluginCacheVersionDirPath,
+} from './pluginCacheStaging.js'
 import { isPluginZipCacheEnabled } from './zipCache.js'
 
 const ORPHANED_AT_FILENAME = '.orphaned_at'
@@ -67,12 +73,53 @@ async function isSymlinkedPluginVersion(versionPath: string): Promise<boolean> {
  * Called when a plugin is uninstalled or updated to a new version.
  * densable Mst: never mark a symlinked plugin version (dev/link installs).
  */
+type PluginCacheStorageV5 = {
+  write: (
+    key: unknown,
+    value: string,
+    opts?: { publishDiscipline?: string },
+  ) => Promise<{ ok: true } | { ok: false; error: unknown }>
+}
+
+/** densable `qr` — hardcoded `{configHome}/plugins/cache`, not cowork `ra()`. */
+function officialPluginCacheRoot(): string {
+  return join(getClaudeConfigHomeDir(), 'plugins', 'cache')
+}
+
 export async function markPluginVersionOrphaned(
   versionPath: string,
+  storageV5?: unknown,
 ): Promise<void> {
   // densable: if (await YEt(e)) { w(`Not marking a symlinked plugin version: ${e}`); return }
   if (await isSymlinkedPluginVersion(versionPath)) {
     logForDebugging(`Not marking a symlinked plugin version: ${versionPath}`)
+    return
+  }
+  const cacheRoot = getPluginCacheRoot()
+  // densable `mp(e,ra())` then `zr` requires `ra()===qr()`. cowork miss is official.
+  const parsed =
+    isHoverRestOn() &&
+    storageV5 !== undefined &&
+    cacheRoot === officialPluginCacheRoot()
+      ? isPluginCacheVersionDirPath(versionPath, cacheRoot)
+      : null
+  if (isHoverRestOn() && storageV5 !== undefined && parsed !== null) {
+    const written = await (storageV5 as PluginCacheStorageV5).write(
+      {
+        namespace: 'pluginCache',
+        marketplace: parsed.marketplace,
+        plugin: parsed.plugin,
+        version: parsed.version,
+        relPath: [ORPHANED_AT_FILENAME],
+      },
+      `${Date.now()}`,
+      { publishDiscipline: 'inPlace' },
+    )
+    if (!written.ok) {
+      logForDebugging(
+        `Failed to write .orphaned_at: ${versionPath}: ${errorMessage(written.error)}`,
+      )
+    }
     return
   }
   try {

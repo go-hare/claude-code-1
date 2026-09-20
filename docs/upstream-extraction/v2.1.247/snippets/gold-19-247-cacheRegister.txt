@@ -1,0 +1,2 @@
+# pos=214698922 header="async function $zo(e,t,n,r,o,s,i,a,l,{storageV5:c,linkFarm:u=!1,entryEnabled:d=o,credentia" len=95
+async function $zo(e,t,n,r,o,s,i,a,l,{storageV5:c,linkFarm:u=!1,entryEnabled:d=o,credentials:p}

@@ -28,6 +28,11 @@ import {
   getSpareDir,
 } from './bgWorker.js'
 import { encodeCtrlFrame } from './ptyHost.js'
+import {
+  applyHostManagedSpareEnv,
+  applySpareProviderStrips,
+  applySpareSessionStrips,
+} from './bgHostManagedEnv.js'
 import { logEvent } from '../services/analytics/index.js'
 import {
   setCwdState,
@@ -287,54 +292,6 @@ export async function runBgSpare(args: string[]): Promise<void> {
 // Supervisor spare pool — official M3q / D3q / f3q / _mO / TmO
 // ---------------------------------------------------------------------------
 
-/** Official rqq — env keys stripped from spare host env. */
-const SPARE_STRIP_ENV_KEYS = [
-  'CLAUDE_CODE_QUESTION_PREVIEW_FORMAT',
-  'GITHUB_ACTIONS',
-  'CLAUDECODE',
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_CODE_COORDINATOR_MODE',
-  'TERM_PROGRAM',
-  'TERM_PROGRAM_VERSION',
-  '__CFBundleIdentifier',
-  'KITTY_WINDOW_ID',
-  'WT_SESSION',
-  'KONSOLE_VERSION',
-  'VTE_VERSION',
-  'ZED_TERM',
-  'ZELLIJ',
-  'TMUX',
-  'TMUX_PANE',
-  'STY',
-  'LC_TERMINAL',
-  'SSH_CONNECTION',
-  'SSH_CLIENT',
-  'SSH_TTY',
-  'COLORFGBG',
-  'CURSOR_TRACE_ID',
-  'GIT_ASKPASS',
-  'SSH_ASKPASS',
-  'SSH_ASKPASS_REQUIRE',
-  'VSCODE_GIT_ASKPASS_MAIN',
-  'VSCODE_GIT_ASKPASS_NODE',
-  'VSCODE_GIT_ASKPASS_EXTRA_ARGS',
-  'VSCODE_GIT_IPC_HANDLE',
-  'TERMINAL_EMULATOR',
-  'ITERM_SESSION_ID',
-  'GNOME_TERMINAL_SERVICE',
-  'XTERM_VERSION',
-  'ALACRITTY_LOG',
-  'TILIX_ID',
-  'TERMINATOR_UUID',
-  'ConEmuANSI',
-  'ConEmuPID',
-  'ConEmuTask',
-  'MSYSTEM',
-  'CLAUDE_CODE_SSE_PORT',
-  'FORCE_CODE_TERMINAL',
-] as const
-
 /** Official GG4 — send-claim connect backoff (ms). */
 const SEND_CLAIM_BACKOFFS = [50, 100, 150, 200, 250, 300, 400, 500, 500, 500]
 
@@ -382,9 +339,10 @@ export function buildSpareHostEnv(opts?: {
   claimNonce?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
-  for (const key of SPARE_STRIP_ENV_KEYS) {
-    delete env[key]
-  }
+  // densable os() We/pe/Ge, then RO (BASE_URL still visible), then wt.
+  applySpareSessionStrips(env)
+  applyHostManagedSpareEnv(env)
+  applySpareProviderStrips(env)
   // Official: strip OAuth on macOS (auth snapshot path used on claim).
   if (process.platform === 'darwin') {
     delete env.CLAUDE_CODE_OAUTH_TOKEN

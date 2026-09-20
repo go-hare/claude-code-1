@@ -1,0 +1,3 @@
+# offset=231634219 ver=247 hit=1/2 needle="Ie[ce()]"
+
+.current=!0},[Ie]);let F=Ie[U]??null;bo({"confirm:previous":()=>{Nt.current=!1,ue((s)=>Math.max(0,s-1))},"confirm:next":()=>{Nt.current=!1,ue((s)=>Math.min(Ie.length-1,s+1))},"confirm:yes":()=>{let s=Ie[ce()];if(s){if(s.type==="leader")un(f),e("Viewing leader",{display:"system"});else if(Zo(s))at(s.id,f),e("Viewing agent",{display:"system"});else if(Ci(s.type))se({mode:"detail",itemId:s.id})}}},{context:"Confirmation",isActive:Q.mode==="list"});let Rm=(s)=>{if(Q.mode!=="list")return;let u=Ie[ce()];if(!u)return;if(s.key==="x"&&!s.ctrl&&!s.meta){if(s.preventDefault(),Nt.current){Nt.current=!1;re

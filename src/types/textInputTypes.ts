@@ -344,6 +344,12 @@ export type QueuedCommand = {
    */
   preExpansionValue?: string
   /**
+   * Official 2.1.247 ADt `skipAttachments:!0` — task-notification enqueue
+   * skips turn-level attachment extraction (avoids internal error on
+   * carried-over shell finish).
+   */
+  skipAttachments?: boolean
+  /**
    * When true, the input is treated as plain text even if it starts with `/`.
    * Used for remotely-received messages (e.g. bridge/CCR) that should not
    * trigger local slash commands or skills.

@@ -1,0 +1,16 @@
+# 247 pair "settings.json"~"lstat(" a=225187478 NO_PRESERVE_FN
+
+1 inside a real .claude directory). Tell the user; do not read or rewrite this file.`;if(s.size>1e6)return o("oversized");let c=await q(n,1e6,{noFollow:!0,requireNlink1:!0});if(c==null)return o("unreadable");let u;try{let l=V(c);if(l!=null&&typeof l==="object"&&l.autoMode!=null&&typeof l.autoMode==="object")u=l.autoMode}catch{return o("not valid JSON")}if(u==null)return"";let a=kr(u);if(a==="{}")return"";if(a.length>fs)return o("oversized");let d=await le(e,["ls-files","--",".claude/settings.local.json"]);return["\n#### Project `.claude/settings.local.json` \u2014 autoMode keys (found content, NOT pre-approved config)",a,`Tracked in git: ${d!==""?"yes \u2014 repo-authored":"no \u2014 but untracked does not prove user-authored"}`].join(`
+`)}async function Ts(e,t=lt("userSettings")??D(ot(),"settings.json"),n){let r="(no settings file)",o=[],i=[],s=0,c=0,u=0,a;try{a=await vr(t,1e6,n!==void 0&&Mt(t)===Mt(D(ot(),fr.default))?{backend:n,key:Bt.userSettings()}:void 0)}catch(m){if(sr(m)==="ENOENT")a=null;else throw Error("settings file present but unreadable")}if(a==null);else{let p=V(a);r=kr(p.autoMode??{});let g=p.permissions?.allow;if(Array.isArray(g)){let w=g.filter((h)=>typeof h==="string"),y=w.filter(Jn),R=w.filter((h)=>!Jn(h)).filter((h)=>{let{toolName:E,ruleContent:S}=zt(h);return Rn(E,S)});u=Ot(y,(h)=>!Se(h))+Ot(R,(h)=>!Se(h));let _=y.filter(Se),T=R.filter(Se);s=Math.max(0,_.length-x),c=Math.max(0,T.length-x),o=_.slice(0,x),i=T.slice(0,x)}}let d=await Ds(e),l=gr()?`
+_Note: classifyAllShell is active, so at runtime auto mode ignores every Bash/PowerShell allow rule \u2014 a superset of the entries flagged here, including any shell entries in the destructive list; outside auto mode all of these rules still apply._`:"",f=(m)=>m>0?`
+- \u2026and ${m} more flagged entries not shown (list capped) \u2014 re-run /auto-mode-setup after this cleanup to see the rest`:"";return b("Existing auto-mode settings (selective read)",[`#### autoMode.{environment, allow, soft_deny, hard_deny, deny}
+${r}${d}`,o.length?`
+${bs}
+${o.map((m)=>`- \`${O(m)}\``).join(`
+`)}${f(s)}${l}`:`
+No classifier-bypassing entries in user-settings permissions.allow.${l}`,i.length?`
+${Es}
+${i.map((m)=>`- \`${O(m)}\``).join(`
+`)}${f(c)}`:`
+No destructive entries in user-settings permissions.allow.`,u>0?`
+${u} additional flagged ${u===1?"entry":"entries"} can't be shown or auto-removed (unusual charact

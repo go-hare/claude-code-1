@@ -13,13 +13,15 @@ import { logForDebugging } from 'src/utils/debug.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { cacheKeys } from 'src/utils/fileStateCache.js'
 import { isPluginInstalled } from 'src/utils/plugins/installedPluginsManager.js'
+import { getSettingsForSource } from 'src/utils/settings/settings.js'
 import {
   getPluginSuggestionMarketplaces,
   isMarketplaceSourceDeclaredInManagedSettings,
 } from 'src/utils/plugins/marketplaceHelpers.js'
 import {
-  getMarketplace,
+  getMarketplaceCacheOnly,
   loadKnownMarketplacesConfigSafe,
+  type KnownMarketplacesConfig,
 } from 'src/utils/plugins/marketplaceManager.js'
 import { OFFICIAL_MARKETPLACE_NAME } from 'src/utils/plugins/officialMarketplace.js'
 import type { PluginMarketplaceEntry } from 'src/utils/plugins/schemas.js'
@@ -169,9 +171,12 @@ async function isRelevantForSignals(
   signals: CompiledSignals,
   context: TipContext | undefined,
 ): Promise<boolean> {
-  const config = await loadKnownMarketplacesConfigSafe()
-  if (!(marketplaceName in config)) return false
-  if (isPluginInstalled(`${pluginName}@${marketplaceName}`)) return false
+  const pluginId = `${pluginName}@${marketplaceName}`
+  if (isPluginInstalled(pluginId)) return false
+  if (
+    getSettingsForSource('policySettings')?.enabledPlugins?.[pluginId] === false
+  )
+    return false
 
   const { bashTools, bashHosts, readFileState } = context ?? {}
   if (signals.cli?.length && bashTools?.size) {
@@ -209,26 +214,27 @@ async function isRelevantForSignals(
   return false
 }
 
-let cachedTips: Tip[] | undefined
-
 /**
- * Official fHa — memoized for the process lifetime (marketplace config is
- * relatively stable within a session).
+ * densable `Xt.buildMarketplacePluginTips` / fHa.
+ * `storageV5` is official `n` — `et(e)` / `tt(s,n)` / `Qt(..., n.storageV5)`.
+ * Cache lives on `Xt`, not here.
  */
-export async function loadMarketplaceDeclaredPluginTips(): Promise<Tip[]> {
-  if (cachedTips !== undefined) return cachedTips
-
+export async function loadMarketplaceDeclaredPluginTips(
+  storageV5?: unknown,
+  known?: KnownMarketplacesConfig,
+  getKnown: (v5?: unknown) => Promise<KnownMarketplacesConfig> = v5 =>
+    loadKnownMarketplacesConfigSafe(v5),
+): Promise<Tip[]> {
   const allowlist = getPluginSuggestionMarketplaces()
   if (allowlist.length === 0) {
-    cachedTips = []
-    return cachedTips
+    return []
   }
 
-  const known = await loadKnownMarketplacesConfigSafe()
+  const resolved = known ?? (await getKnown(storageV5))
   const tips: Tip[] = []
 
   for (const marketplaceName of allowlist) {
-    const knownEntry = known[marketplaceName]
+    const knownEntry = resolved[marketplaceName]
     if (!knownEntry) continue
 
     if (
@@ -244,12 +250,11 @@ export async function loadMarketplaceDeclaredPluginTips(): Promise<Tip[]> {
       continue
     }
 
-    let marketplace
-    try {
-      marketplace = await getMarketplace(marketplaceName)
-    } catch {
-      continue
-    }
+    const marketplace = await getMarketplaceCacheOnly(
+      marketplaceName,
+      storageV5,
+    ).catch(() => null)
+    if (!marketplace) continue
 
     for (const plugin of marketplace.plugins) {
       const signals = compileSignals(plugin.name, plugin.relevance)
@@ -272,22 +277,28 @@ export async function loadMarketplaceDeclaredPluginTips(): Promise<Tip[]> {
 
       tips.push({
         id: tipId,
+        pluginId: `${plugin.name}@${marketplaceName}`,
+        advertisedCommand: 'plugin',
+        providerAgnostic: true,
+        priority: 1,
         cooldownSessions: 3,
         content: async ctx => {
           const blue = color('suggestion', ctx?.theme ?? 'dark')
           return `Working with ${topic}? Install the ${plugin.name} plugin:\n${blue(`/plugin install ${plugin.name}@${marketplaceName}`)}`
         },
-        isRelevant: async ctx =>
-          isRelevantForSignals(plugin.name, marketplaceName, signals, ctx),
+        isRelevant: async ctx => {
+          const config = await getKnown(ctx?.storageV5)
+          if (!(marketplaceName in config)) return false
+          return isRelevantForSignals(
+            plugin.name,
+            marketplaceName,
+            signals,
+            ctx,
+          )
+        },
       })
     }
   }
 
-  cachedTips = tips
-  return cachedTips
-}
-
-/** Test helper — clear the fHa memo. */
-export function clearMarketplaceDeclaredPluginTipsCache(): void {
-  cachedTips = undefined
+  return tips
 }

@@ -1,0 +1,3 @@
+# @233742735
+
+),renames:U(v(),v().nullable()).optional()}).safeParse(Ft(o));if(!c.success)t.push(...Jt(c.error));if(c.success&&c.data.renames){let l=new Set(c.data.plugins.map((d)=>d.name));for(let d of Object.keys(c.data.renames)){let y=Kt(d,c.data.renames,l);if(y?.kind==="unresolved")t.push({path:`renames.${d}`,message:`chain does not resolve (${y.reason}) \u2014 target must be a name in plugins[], a key in r

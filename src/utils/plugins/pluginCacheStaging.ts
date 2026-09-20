@@ -22,6 +22,12 @@
  *   Qw @212702166              removePathEntry
  *   GLn @213263690             removeStrayPluginCacheLink
  *   TFe @213264030             clearPluginCacheOccupant
+ *   BOe @214105871             stagePluginCachePath (`${dest}${Upt}${hex8}`)
+ *   kg @214105809              ENOENT|ENOTDIR
+ *   Kjo @214631090             EXDEV || RNn (EPERM|EBUSY|EACCES)
+ *   $jo                        lutimes
+ *   cl                         renameWithRetry (Et/Zed)
+ *   Yjo @214631161             dest aside-rename + src publish
  *
  * Official NT = Be() && handle && np(dummy). np = Yn @210112490.
  * Official QU=Hl, AFe=Bl, BLn=Vl (`${dest}.linking-${pid}`).
@@ -32,6 +38,7 @@ import { randomBytes } from 'crypto'
 import type { Stats } from 'fs'
 import {
   lstat,
+  lutimes,
   readdir,
   readlink,
   realpath,
@@ -60,6 +67,8 @@ import {
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../errors.js'
 import { logForDebugging } from '../debug.js'
+import { getFsImplementation } from '../fsOperations.js'
+import { RENAME_TRANSIENT_CODES, renameWithRetry } from '../renameRetry.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
 import { hasCommandPluginLinkFarm } from './pluginCommandSource.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
@@ -999,5 +1008,108 @@ export async function clearPluginCacheOccupant(
         version,
         action,
       )
+  }
+}
+
+/**
+ * densable Kjo @214631090.
+ * `t==="EXDEV"||t!==void 0&&RNn.has(t)`
+ * RNn = Ved = mt = EPERM|EBUSY|EACCES (not CQ EEXIST).
+ */
+export function isPluginCacheAsideRenameFallback(error: unknown): boolean {
+  const code = getErrnoCode(error)
+  return (
+    code === 'EXDEV' || (code !== undefined && RENAME_TRANSIENT_CODES.has(code))
+  )
+}
+
+export type PluginCacheDestMoveOpts = {
+  pluginId: string
+  version: string
+  strictCache?: boolean
+}
+
+/**
+ * densable Yjo @214631161 file-calls path (after the V5 `Ne&&r&&o` prefix).
+ *
+ * Occupant: BOe aside rename + $jo lutimes; Kjo → official log + rm in
+ * place; kg (ENOENT|ENOTDIR) swallows. Then src→dest (temp hop if dest
+ * is under src); restore aside on fail; rm aside on success.
+ *
+ * V5 prefix (`Rx`/`moveScope`/`Wjo`/`qjo`) is official `r!==void 0&&
+ * o!==void 0`. This helper is the dest publish Fjo always calls. No
+ * `version==="unknown"` skip-rm gate.
+ */
+export async function movePluginCacheDest(
+  src: string,
+  dest: string,
+  opts: PluginCacheDestMoveOpts,
+): Promise<void> {
+  const strictCache = opts.strictCache === true
+  const assertParent = (
+    stage = 'before move',
+    probe?: PluginCacheVersionParentProbe,
+  ) =>
+    assertPluginCacheVersionParentReal(
+      dest,
+      opts.pluginId,
+      opts.version,
+      'cache',
+      stage,
+      probe,
+    )
+  if (strictCache) {
+    const probe = await probePluginCacheVersionParent(dest)
+    if (probe === 'refused') await assertParent('before move', probe)
+  }
+  await getFsImplementation().mkdir(dirname(dest))
+  if (strictCache) await assertParent()
+  let aside: string | undefined
+  if (
+    !strictCache ||
+    (await clearPluginCacheOccupant(dest, opts.pluginId, opts.version)) ===
+      'recurse'
+  ) {
+    const asidePath = stagePluginCachePath(dest)
+    try {
+      await renameWithRetry(dest, asidePath)
+      aside = asidePath
+      const stamped = new Date()
+      await lutimes(asidePath, stamped, stamped).catch(() => {})
+    } catch (error) {
+      if (isPluginCacheAsideRenameFallback(error)) {
+        logForDebugging(
+          `The occupant of ${dest} cannot be renamed aside (${getErrnoCode(error)}); removing it in place instead`,
+          { level: 'debug' },
+        )
+        await rm(dest, { recursive: true, force: true })
+      } else if (!isAbsentPathError(error)) {
+        throw error
+      }
+    }
+  }
+  const srcPrefix = src.endsWith(sep) ? src : src + sep
+  const destUnderSrc = dest.startsWith(srcPrefix)
+  let from = src
+  try {
+    if (destUnderSrc) {
+      const hop = join(
+        dirname(src),
+        `.claude-plugin-temp-${Date.now()}-${randomBytes(4).toString('hex')}`,
+      )
+      await renameWithRetry(src, hop)
+      await getFsImplementation().mkdir(dirname(dest))
+      from = hop
+    }
+    if (strictCache) await assertParent('during move')
+    await renameWithRetry(from, dest)
+  } catch (error) {
+    if (aside !== undefined) {
+      await renameWithRetry(aside, dest).catch(() => {})
+    }
+    throw error
+  }
+  if (aside !== undefined) {
+    await rm(aside, { recursive: true, force: true }).catch(() => {})
   }
 }

@@ -264,6 +264,15 @@ type QueryMessage =
   | ToolUseSummaryMessage
   | TombstoneMessage
 
+/** densable 2.1.247 `[s.options.fallbackModel].flat()` — do not invent a chain. */
+function firstFallbackModel(
+  value: string | string[] | undefined,
+): string | undefined {
+  const flat = [value].flat()
+  const first = flat.find(item => typeof item === 'string' && item.length > 0)
+  return first
+}
+
 /**
  * Type guard to check if a message from query() is a recordable Message type.
  * Matches the types we want to record: assistant, user, progress, or system compact_boundary.
@@ -875,6 +884,7 @@ export async function* runAgent({
     // reads undefined and only the message-scan fallback fires — which
     // autocompact defeats by replacing the fork-boilerplate message.
     ...(useExactTools && { querySource }),
+    fallbackModel: toolUseContext.options.fallbackModel,
   }
 
   // Create subagent context using shared helper
@@ -985,6 +995,7 @@ export async function* runAgent({
       toolUseContext: agentToolUseContext,
       querySource,
       maxTurns: maxTurns ?? agentDefinition.maxTurns,
+      fallbackModel: firstFallbackModel(toolUseContext.options.fallbackModel),
     })) {
       onQueryProgress?.()
       // Forward subagent API request starts to parent's metrics display

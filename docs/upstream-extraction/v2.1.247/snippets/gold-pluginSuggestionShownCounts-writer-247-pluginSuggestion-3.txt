@@ -1,0 +1,2 @@
+# 247 pluginSuggestion #3 @208023553
+. Only honored from managed settings; ignored in user/project/local settings."),pluginSuggestionMarketplaces:u(s()).optional().describe("Marketplace names whose plugins may surface as contextual install suggestions (relevance-based tips). No marketplace-declared suggestions surfa

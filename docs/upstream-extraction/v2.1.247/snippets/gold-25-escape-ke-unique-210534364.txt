@@ -1,0 +1,3 @@
+# 247 function ke start=210534364 end=210534511 len=147 sha=180c5a23307a4c29
+
+function ke(e=process.env){let{HOME:n,HOMEDRIVE:t,HOMEPATH:r}=e;return y([n,b()==="windows"&&t&&r?`${t}${r}`:void 0,mn()].filter((i)=>Boolean(i)))}

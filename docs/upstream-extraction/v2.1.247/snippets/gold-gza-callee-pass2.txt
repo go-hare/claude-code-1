@@ -1,0 +1,210 @@
+WIN r0n_DOb @212822076 r,BOb as yK,CMb as mDe,CNb as lmr,COb as aee,CPb as WSt,CQb as VF,DNb as cmr,DOb as r0n,DPb as Uu,DQb as fce,EMb as dmn,ENb as umr,EOb as JT,EPb as Udn,EQb as tx,ERb as Dst,FMb as $q,FOb as eme,FPb as
+WIN qFe_Ahb @212809276 ugb as c2,vgb as Oun,xgb as TFn,ygb as EFn}from"B:/~BUN/root/_505.js";import{Ahb as qFe,Bhb as Rd,Vgb as c9,Wgb as Cm,Xgb as s$,Ygb as a3,Zgb as bF,_gb as iSn,ahb as mtr,dhb as aSn,ghb as vFn,jhb as I
+WIN HFe_mMb @212823888 L,kPb as lq,kQb as bdn,kRb as vJ,lNb as R9r,lOb as Spe,lPb as Tkn,lQb as Sdn,mMb as HFe,mNb as pke,mOb as CLe,mPb as exe,mQb as Sxe,nNb as $z,nQb as Hp,nRb as Id,oMb as pS,oNb as hin,oQb as JXe,oRb as
+WIN wB_cHc @212841902 ,RFc as sAn,RGc as HKn,VGc as JSn,ZGc as QSn,_Gc as ewn,aGc as L$o,bHc as ay,cHc as wB,hHc as zdt,kHc as Mtr,lGc as VSn,lHc as Pct,mHc as FK,nHc as Qqe,oGc as cT,pHc as Hpt,qGc as KSn,qHc as Wrr,rGc a
+WIN sk_eIc @212842292 1r,UHc as ZXr,UIc as k1r,XHc as PGs,YHc as dg,ZHc as JXr,cIc as vy,dIc as Li,eIc as sk,fIc as zFe,gIc as pcn,hIc as Wc,iIc as bD,kJc as e0n,lIc as XPe,oIc as w4r,pIc as sPn,pJc as t0n,uIc as Kvt,yIc a
+WIN gza_Aea @219687415 as sea,fBo as tea,U$ as uea,tZ as vea,d2 as wea,fza as xea,Ok as yea,mza as zea,gza as Aea,rme as Bea,eZ as Cea,bSt as Dea,NSt as Eea,B$ as Fea,hza as Gea,yza as Hea,_za as Iea,bza as Jea,Z8 as Kea,S0
+WIN nPe_G1 @219679344 x1,Kan as y1,_F as z1,nln as A1,tPe as B1,ly as C1,Qki as D1,tk as E1,evi as F1,nPe as G1,tvi as H1,zP as I1,rPe as J1,nk as K1,rln as L1,oln as M1,sln as N1,El as O1,_oi as P1,lO as Q1,Ooi as R1,z7e 
+WIN dPe_baa @219684806 U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,Ale as laa,ak
+WIN K8_Sda @219687027 da,I0e as Lda,lSt as Mda,PLn as Nda,RLn as Oda,nBa as Pda,kyt as Qda,uSt as Rda,K8 as Sda,ABa as Tda,pSt as Uda,fSt as Vda,gSt as Wda,FFe as Xda,ySt as Yda,VBa as Zda,KBa as _da,YBa as $da,XBa as aea,
+HOST "function DOb(" count=0 hits=
+HOST "async function DOb(" count=0 hits=
+HOST "function Ahb(" count=0 hits=
+HOST "async function Ahb(" count=0 hits=
+HOST "function mMb(" count=0 hits=
+HOST "async function mMb(" count=0 hits=
+HOST "function eIc(" count=0 hits=
+HOST "async function eIc(" count=0 hits=
+HOST "function cHc(" count=0 hits=
+HOST "async function cHc(" count=0 hits=
+HOST "function bHc(" count=0 hits=
+HOST "async function bHc(" count=0 hits=
+HOST "function KBo(" count=1 hits=214580005
+  @214580005 function KBo(e,t){let n=`@${t}`,r=new Set,o=[];for(let s of Object.keys(e.plugins)){if(!s.endsWith(n))continue;for(let i of e.plugins[s]??[])if(i.installPath)r.add(i.installPath);d
+HOST "async function ame(" count=1 hits=214576324
+  @214576324 async function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}
+HOST "function ame(" count=1 hits=214576330
+  @214576330 function ame(e,t){let n=TB(t);if(Ne()&&t!==void 0&&n!==null)return j0n(t,n,e);let r=IR(),o=e(r);if(o.write)await N0n(r);return o.result}
+HOST "function py(" count=5 hits=207002403,208525496,209325070,219970456,223828282
+  @207002403 function py({hasStreamingInput:e,sdkUrl:t}
+  @208525496 function py({url:e,payload:t,storageV5:n}
+  @209325070 function py(e){let t=Br(e);try{await Cd(t,{recursive:!0,force:!0})}catch(n){y(`Failed to delete plugin data dir ${t}: ${Ut(n)}`,{level:"warn"})}}
+  @219970456 function py(e,r,n,t){let i=await se(e,n);if(!i.ok)return i.error.kind==="absent"?m({kind:"missing"}):i;if(i.value.version!==r)return m({kind:"mismatch",currentVersion:i.value.versi
+  @223828282 function py(e,t){let o=uy(),{storageV5:n,credentials:r}=Sr(),i=mt(new Map);ne(()=>{let{next:l,notifications:d,notified:m}=eC(i.current,e);i.current=l;for(let p of d)cy(p,o,{storage
+HOST "async function py(" count=2 hits=209325064,219970450
+  @209325064 async function py(e){let t=Br(e);try{await Cd(t,{recursive:!0,force:!0})}catch(n){y(`Failed to delete plugin data dir ${t}: ${Ut(n)}`,{level:"warn"})}}
+  @219970450 async function py(e,r,n,t){let i=await se(e,n);if(!i.ok)return i.error.kind==="absent"?m({kind:"missing"}):i;if(i.value.version!==r)return m({kind:"mismatch",currentVersion:i.value
+HOST "function ii(" count=12 hits=208131006,208311653,209868071,210599903,211069805,211930637,212196509,212711439,220052781,221991194,225216087,226581370
+  @208131006 function ii(e){if(I(e).composes==="tier")return null;let{merged:t,composed:n}=C(e);if(!t)return null;let r=[];if(n.remote)r.push("remote");if(n.mdm)r.push(_e());if(n.file)r.push("f
+  @208311653 function ii(e,t,n,r){if(e==="policySettings"||e==="flagSettings")return Promise.resolve({error:null});let i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e
+  @209868071 function ii(e){return yt.create(Pn.UNIVERSAL,cr.SEQUENCE,!0,e)}
+  @210599903 function ii(e,n){try{let t=await Vn(Jn(e,n)),i=We(t);if(i!==null)return{kind:"skip",skipped:{path:n,reason:i}};return{kind:"candidate",candidate:{path:n,size:t.size}}}catch{return{
+  @211069805 function ii(){}
+  @211930637 function ii({mergeNames:e,mergeToName:t,mergeValues:r,resultToName:n}
+  @212196509 function ii(e,n,t,o){if(U)await e.executor.mouseUp(),U=!1,Y=!1;let r=we(n,"coordinate");if(r instanceof Error)return p(r.message,"bad_args");let i=r,s;if(n.start_coordinate!==void 
+  @212711439 function ii(e,t){for(let n=0;;n++){let r;try{r=await ne.get(e,{refreshOAuth:!0,headers:ue(),timeout:15000,maxContentLength:t.maxContentLength,signal:t.signal,credentials:t.credenti
+  @220052781 function ii(e,r,n,t,i){if(Z(r.inode)){let s=await An(e,r,n);if(s.ok)return m({replaced:!1});if(s.error.kind!=="fs")return s;if(de(s.error.error,"EEXIST")){let d=await y(ge(n));retu
+  @221991194 function ii(t){if(t==="service"||t==="transient"||t==="foreground")return t;if(t==="auto")return"transient";return}
+  @225216087 function ii(e){return si.test(e)}
+  @226581370 function ii(e,t,r){let s,a,o;if(typeof t>"u"&&typeof r>"u")s={},o=e;else if(s=e,typeof t==="function")return a=t,o=r,Dd(s,a,o);else o=t;for(let c of Object.keys(o)){if(!Array.isArr
+HOST "async function ii(" count=5 hits=210599897,212196503,212711433,220052775,230803366
+  @210599897 async function ii(e,n){try{let t=await Vn(Jn(e,n)),i=We(t);if(i!==null)return{kind:"skip",skipped:{path:n,reason:i}};return{kind:"candidate",candidate:{path:n,size:t.size}}}catch{r
+  @212196503 async function ii(e,n,t,o){if(U)await e.executor.mouseUp(),U=!1,Y=!1;let r=we(n,"coordinate");if(r instanceof Error)return p(r.message,"bad_args");let i=r,s;if(n.start_coordinate!=
+  @212711433 async function ii(e,t){for(let n=0;;n++){let r;try{r=await ne.get(e,{refreshOAuth:!0,headers:ue(),timeout:15000,maxContentLength:t.maxContentLength,signal:t.signal,credentials:t.cr
+  @220052775 async function ii(e,r,n,t,i){if(Z(r.inode)){let s=await An(e,r,n);if(s.ok)return m({replaced:!1});if(s.error.kind!=="fs")return s;if(de(s.error.error,"EEXIST")){let d=await y(ge(n)
+  @230803366 async function ii(e,t,n=!1,o=!1){if(!Le(e.event))return{kind:"held",reason:`event_${(Ta(e.event)?ci(e.event):null)??"container_internal"}`};let{hook:i}=e;if(i.type!=="command"&&i.t
+HOST "function Rs(" count=12 hits=206933356,207845042,207994104,208236892,208311609,211095093,212716125,220348683,222443201,223479405,223540884,223693185
+  @206933356 function Rs(e,t,o,r,s,a){var l=o&ws,d=e.length,g=t.length;if(d!=g&&!(l&&g>d))return!1;var c=a.get(e),v=a.get(t);if(c&&v)return c==t&&v==e;var u=-1,p=!0,h=o&Ls?new An:void 0;a.set(e
+  @207845042 function Rs(e){let t={};for(let s=0,o=e.length;s<o;s+=1){let n=e.charAt(s);t[n]=(t[n]||0)|1<<o-s-1}return t}
+  @207994104 function Rs(e){return e==="windows"?"win32":"posix"}
+  @208236892 function Rs(e,t){if(e.hostFiles.serving("workspace")!=="host")return;let r=v(),n=r.rootByPath.peek(t);if(n!==void 0){let i=n===k?null:n;return{gitRoot:i,canonicalRoot:i===null?null
+  @208311609 function Rs(e,t,n,r){return ii(e,()=>t,n,r)}
+  @211095093 function Rs(t,n){if(!_e)switch(t.tailMode){case"hidden":n=t.tail;for(var r=null;n!==null;)n.alternate!==null&&(r=n),n=n.sibling;r===null?t.tail=null:r.sibling=null;break;case"colla
+  @212716125 function Rs(e,t,n,r){let i=r!==void 0&&r.length>0?r:void 0;if(i!==void 0&&!i.includes(Re))return{kind:"none"};let o=await ot({...e,file:Re},t,n,"artifact_type_instructions_read");i
+  @220348683 function Rs(e){let t=e.expiresInSeconds!==void 0?` (expires_in=${e.expiresInSeconds}s)`:"";if(!e.write){e.onStatus(`[runner:session] ${e.label} refreshed for ${e.sessionId} but chi
+  @222443201 function Rs(){l({name:"design",menuDescription:"Work with Claude Design (claude.ai/design) \u2014 create, import, export, sync, login",description:()=>"Hub for Claude Design (claud
+  @223479405 function Rs(e){let t=await e.statMeta(A.state("last-cleanup"));if(t.ok||t.error.code==="NotFound"||!Pt(t.error))return;F("tengu_cleanup_throttle_marker",{marker:I("last-cleanup"),v
+  @223540884 function Rs(ol){return ol.voiceState}
+  @223693185 function Rs(e){return e.sortOrder??Date.parse(e.createdAt)}
+HOST "async function Rs(" count=4 hits=208236886,212716119,223479399,224042569
+  @208236886 async function Rs(e,t){if(e.hostFiles.serving("workspace")!=="host")return;let r=v(),n=r.rootByPath.peek(t);if(n!==void 0){let i=n===k?null:n;return{gitRoot:i,canonicalRoot:i===nul
+  @212716119 async function Rs(e,t,n,r){let i=r!==void 0&&r.length>0?r:void 0;if(i!==void 0&&!i.includes(Re))return{kind:"none"};let o=await ot({...e,file:Re},t,n,"artifact_type_instructions_re
+  @223479399 async function Rs(e){let t=await e.statMeta(A.state("last-cleanup"));if(t.ok||t.error.code==="NotFound"||!Pt(t.error))return;F("tengu_cleanup_throttle_marker",{marker:I("last-clean
+  @224042569 async function Rs(e,t){let{getBridgeSession:r}=await import("B:/~BUN/root/chunk-wg5nfp0j.js");return(await r(e,{baseUrl:t}))?.title||void 0}
+HOST "function h(e){return Lr(e,p())}" count=1 hits=208306694
+  @208306694 function h(e){return Lr(e,p())}
+HOST "updateSettingsForSourceWithTransform:()=>ii" count=1 hits=208305448
+  @208305448 updateSettingsForSourceWithTransform:()=>ii});import{basename as Yo,dirname as ne,join as re,resolve as sr}from"path";class Xr{firedSites=new Set;fire(e){if(this.firedSites.has(e))
+HOST "updateSettingsForSource:()=>Rs" count=1 hits=208305417
+  @208305417 updateSettingsForSource:()=>Rs,updateSettingsForSourceWithTransform:()=>ii});import{basename as Yo,dirname as ne,join as re,resolve as sr}from"path";class Xr{firedSites=new Set;fir
+HOST "getSettingsForSource:()=>h" count=1 hits=208304369
+  @208304369 getSettingsForSource:()=>h,getSettingsForSourceWriteSeed:()=>os,getSettingsRootPathForSource:()=>Xo,getSettingsWithErrors:()=>ie,getSettingsWithSources:()=>ys,getSettings_DEPRECATE
+EXP "ii as " count=8
+  @208088814 oi as BKc,si as CKc,ri as DKc,ii as EKc,ai as FKc,li as GKc,di as HKc,ci as IKc,ui as JKc,pi as KKc,
+  @208321748 bs as $Gc,vs as aHc,Rs as bHc,ii as cHc,si as dHc,_t as eHc,Ns as fHc,xs as gHc,ue as hHc,li as iHc,
+  @219680238 yEe as m3,tse as n3,r6 as o3,eii as p3,nse as q3,bP as r3,tii as s3,Bco as t3,SP as u3,nii as v3,rii
+  @219680267 eii as p3,nse as q3,bP as r3,tii as s3,Bco as t3,SP as u3,nii as v3,rii as w3,W3t as x3,oii as y3,OW
+  @219680296 tii as s3,Bco as t3,SP as u3,nii as v3,rii as w3,W3t as x3,oii as y3,OW as z3,Aii as A3,nXt as B3,Pi
+  @219680306 Bco as t3,SP as u3,nii as v3,rii as w3,W3t as x3,oii as y3,OW as z3,Aii as A3,nXt as B3,Pii as C3,rX
+  @219680326 ii as v3,rii as w3,W3t as x3,oii as y3,OW as z3,Aii as A3,nXt as B3,Pii as C3,rXt as D3,Ret as E3,Xi
+  @219680345 W3t as x3,oii as y3,OW as z3,Aii as A3,nXt as B3,Pii as C3,rXt as D3,Ret as E3,Xii as F3,BW as G3,nu
+EXP "Rs as " count=8
+  @206675808 ,Vi as T0c,A as U0c,Et as V0c,Rs as W0c,Nt as X0c,mu as Y0c,fu as Z0c,du as _0c,hu as $0c,Pe as a1c,
+  @208263512 bs as I3c,Wn as J3c,Es as K3c,Rs as L3c,Un as M3c,xs as N3c,Ps as O3c,cr as P3c,w as Q3c,ur as R3c,d
+  @208321738 ri as _Gc,bs as $Gc,vs as aHc,Rs as bHc,ii as cHc,si as dHc,_t as eHc,Ns as fHc,xs as gHc,ue as hHc,
+  @209564347 {_t as U3b,j as V3b,os as W3b,Rs as X3b,as as Y3b}; .// @bun @bytecode // Claude Code is a Beta prod
+  @212729710 cl as Rxb,ws as Sxb,As as Txb,Rs as Uxb,Ss as Vxb,Hn as Wxb,ai as Xxb,Vl as Yxb,Xl as Zxb,Ms as _xb}
+  @219704979 as tIa,ZKc as uIa,qIr as vIa,tRs as wIa,sRs as xIa,ojt as yIa,X4c as zIa,Z4c as AIa,J4c as BIa,gMr a
+  @219704990 as uIa,qIr as vIa,tRs as wIa,sRs as xIa,ojt as yIa,X4c as zIa,Z4c as AIa,J4c as BIa,gMr as CIa,aYc a
+  @223486712  sU,en as tU,tn as uU,W as vU,Rs as wU,ks as xU,Ps as yU,_s as zU,sn as AU,an as BU,Cs as CU,cn as D
+EXP "DOb as " count=1
+  @212822073 b as WSt,CQb as VF,DNb as cmr,DOb as r0n,DPb as Uu,DQb as fce,EMb as dmn,ENb as umr,EOb as JT,EPb as
+EXP "Ahb as " count=1
+  @212809273 "B:/~BUN/root/_505.js";import{Ahb as qFe,Bhb as Rd,Vgb as c9,Wgb as Cm,Xgb as s$,Ygb as a3,Zgb as bF
+EXP "mMb as " count=2
+  @212823885  as Spe,lPb as Tkn,lQb as Sdn,mMb as HFe,mNb as pke,mOb as CLe,mPb as exe,mQb as Sxe,nNb as $z,nQb a
+  @222875947 FOb as Zs,JOb as ft,POb as Js,mMb as dt,oMb as Ys,pMb as xe,rMb as Ds}from"B:/~BUN/root/_585.js";imp
+EXP "eIc as " count=3
+  @209319892 YHc as _u,ZHc as Ll,cIc as An,eIc as ki,hIc as Vr}from"B:/~BUN/root/_709.js";import{vJc as Pu,xJc as
+  @212842289 Hc as JXr,cIc as vy,dIc as Li,eIc as sk,fIc as zFe,gIc as pcn,hIc as Wc,iIc as bD,kJc as e0n,lIc as 
+  @235960651 XHc as mw,ZHc as ih,cIc as hm,eIc as rh,hIc as km}from"B:/~BUN/root/_709.js";import{$Lc as Zf,FKc as
+EXP "cHc as " count=8
+  @209319694 KGc as io,NGc as pl,bHc as xd,cHc as De,lGc as jr,oGc as xu,pGc as vu,qGc as zr,rGc as xi,vGc as Wt,
+  @209855425 YFc as Mv,ZFc as $v,aGc as eZ,cHc as rh,iGc as aA,jGc as Z6,oGc as js,pGc as nh,qGc as va,vGc as xn}
+  @212841899 c as ewn,aGc as L$o,bHc as ay,cHc as wB,hHc as zdt,kHc as Mtr,lGc as VSn,lHc as Pct,mHc as FK,nHc as
+  @222133782 .js";import{BHc as U,NGc as p,cHc as c}from"B:/~BUN/root/_705.js";import{Afd as a,Cfd as f,Ifd as F}
+  @222876173 oot/_687.js";import{BHc as zs,cHc as Ne,vGc as te}from"B:/~BUN/root/_705.js";import{YHc as it,ZHc as
+  @223183730 .js";import{BHc as X,bHc as q,cHc as S}from"B:/~BUN/root/_705.js";import{$Lc as B,XLc as v}from"B:/~
+  @223210999 ,YGc as rd,aGc as Hm,bHc as Q,cHc as Pa,kHc as fr,sGc as Oa,vGc as Z,xHc as Zd}from"B:/~BUN/root/_70
+  @224240958  T,_Gc as U,aHc as W,bHc as X,cHc as Y,dHc as Z,eHc as _,fHc as aa,gHc as ba,hHc as ca,iHc as da,jHc
+EXP "bHc as " count=8
+  @208399567 VGc as Un,XGc as _m,ZGc as Bt,bHc as $o,jHc as cE,rGc as Lk,vGc as H,wGc as Gn,xGc as Eb}from"B:/~BU
+  @208945460 QGc as ct,SFc as dt,aGc as rn,bHc as I,kHc as pt,vGc as L}from"B:/~BUN/root/_705.js";import{cIc as F
+  @209319684 BHc as jt,KGc as io,NGc as pl,bHc as xd,cHc as De,lGc as jr,oGc as xu,pGc as vu,qGc as zr,rGc as xi,
+  @212841889  as QSn,_Gc as ewn,aGc as L$o,bHc as ay,cHc as wB,hHc as zdt,kHc as Mtr,lGc as VSn,lHc as Pct,mHc as
+  @223183721 root/_687.js";import{BHc as X,bHc as q,cHc as S}from"B:/~BUN/root/_705.js";import{$Lc as B,XLc as v}
+  @223210990 VFc as od,YGc as rd,aGc as Hm,bHc as Q,cHc as Pa,kHc as fr,sGc as Oa,vGc as Z,xHc as Zd}from"B:/~BUN
+  @224240949  S,ZGc as T,_Gc as U,aHc as W,bHc as X,cHc as Y,dHc as Z,eHc as _,fHc as aa,gHc as ba,hHc as ca,iHc 
+  @224490630 s";import{BHc as at,QGc as _e,bHc as ke,vGc as he}from"B:/~BUN/root/_705.js";import{UIc as Fe}from"B
+EXP "py as " count=7
+  @207024450 dy as rsd,uy as ssd,cy as tsd,py as usd,gy as vsd,fy as wsd,hy as xsd,my as ysd,Sy as zsd,vy as Asd,
+  @207705459 cy as z9c,fy as A9c,ly as B9c,py as C9c,dy as D9c,hy as E9c,my as F9c,yy as G9c,by as H9c,gy as I9c,
+  @208895417 Os as Ucc,zP as Vcc,gj as Wcc,py as Xcc,gy as Ycc,my as Zcc,Cu as _cc,Mo as $cc,qd as adc,Cj as bdc,
+  @209535620 Br as jMb,fy as kMb,my as lMb,py as mMb,ui as nMb,di as oMb,Me as pMb,wy as qMb,gi as rMb,hi as sMb,
+  @217567795 own file, leaving the saved copy as it is \u2014 do not resend your previous content unchanged, and 
+  @235956065 Hl,Fy as Kl,Hy as Eh,Iy as $c,py as $g,qy as bg,ry as xg,uy as Ji,wy as Rh,yy as Zi,zy as ri}from"B:
+  @250196065 e) and treats a forged   // copy as at most a harmless self-selection. Interactive content is   // l
+EXP "KBo as " count=0
+EXP "ame as " count=8
+  @82173333 ffer h2 in fetch() TLS ALPN. Same as BUN_FEATURE_FLAG_EXPERIMENTAL_HTTP2_CLIENT=1experimental-http2-
+  @82173461 tch() and upgrade to HTTP/3. Same as BUN_FEATURE_FLAG_EXPERIMENTAL_HTTP3_CLIENT=1experimental-http3-
+  @82213000 WarningExpected an algorithm name as an argumentInvalid algorithm namekey must be a string or buffer
+  @82364134 criberCount requires a topic name as a stringsubscriberCountunhandled exception from ServePlugins.ge
+  @83530804 ority signing certificateThe same as `--ca`, but is a file path to the certificatePerform a dry run 
+  @84444893 . .sp Using this flag is the same as passing \fB\-\-engine=pcre2\fP. Users may instead elect to use 
+  @87856175 eset token %s in seqno %llu, same as in seqno %u. inputPosition %u. frameLocation %u.extension %u.Ab
+  @88136860 w prototype value is not the same as the current prototype value. It should have returned false.Prox
+CALL "gza(" count=1
+  @214549464 ame,alreadyMaterialized:!1,resolvedSource:o}}async function gza(e,t,n,r){let o=await U$(n);if(!o[e])throw Error(`Marketplace '${e}' not found`);let s=o[e],i=Ok(s.installLocation),a=r0n(e)?` To stop us
+CALL "await gza(" count=0
+CALL "Aea(" count=0
+CALL "await Aea(" count=0
+CLI "plugin marketplace remove" count=8
+  @197803712 ...D.}.plugin marketplace list. ...List all configured marketplaces ...plugin marketplace remove <name>...Remove a configured marketplace. ...K.plugin marketplace update [name]J...Update marketplace(s) from their source 
+  @197931938 .../plugin marketplace update <name> - Update specific marketplace.2...LA. /plugin marketplace remove - Remove a marketplace..?...RO../plugin marketplace remove <name> - Remove specific marketplace.1...0... /plugin marketplace list - Li
+  @197931997 arketplace.2...LA. /plugin marketplace remove - Remove a marketplace..?...RO../plugin marketplace remove <name> - Remove specific marketplace.1...0... /plugin marketplace list - List all marketplaces...a..Validation:.?... ../plugin v
+  @201641436 trolled by the seed image. To update: ask your admin to update the seed...3.plugin marketplace remove...#...y.' has a corrupted installLocation (...<.x.). ..  .e.x.p.e.c.t.e.d. .a. .p.a.t.h. .i.n.s.i.d.e. ..._... This can happe
+  @214555337 und in configuration");if(y0n(e,i),fb(i.source)&&!u0n(i.source.path)){let l=JT("plugin marketplace remove",e);throw Ar(Error(`Marketplace "${e}" has a relative source path (${i.source.path}) `+"in known_marketplaces.json \u2014 this is stal
+  @214560063 .`);if(!fb(l)){let u=zS(_B()),d=zS(a);if(d!==u&&!d.startsWith(u+YFe)){let p=JT("plugin marketplace remove",e);throw Error(`Marketplace '${e}' has a corrupted installLocation (${a}) \u2014 expected a path inside ${u}. This can happen after c
+  @214561554 `:"This marketplace may have been deprecated or moved to a new location.",f=JT("plugin marketplace remove",e);throw Error(`The marketplace.json file is no longer present in this repository.  ${p} Source: ${d}`+(f?`  You can remove this mark
+  @222490175 list",description:"List all configured marketplaces"},marketplaceRemove:{usage:"plugin marketplace remove <name>",aliases:["rm"],description:"Remove a configured marketplace"},marketplaceUpdate:{usage:"plugin marketplace update [name]",desc
+CLI "--scope to remove" count=2
+  @201639737 tartup.3...J:.It is registered from the read-only seed directory..*...X...Omit --scope to remove it from all scopes...|.0.' is not declared in ...4.. settings. .$...Failed to delete cached marketplace  ...~.e.Failed to clean u
+  @214550006 s?.[e]){let p=i?`It is registered from the read-only seed directory.${a}`:"Omit --scope to remove it from all scopes.";throw Error(`Marketplace '${e}' is not declared in ${qFe(t)} settings. ${p}`)}l=Boolean(i)||sk.some((p)=>p!==t&&Xr(p)?.ex
+CLI "marketplace remove" count=8
+  @197803719 .plugin marketplace list. ...List all configured marketplaces ...plugin marketplace remove <name>...Remove a configured marketplace. ...K.plugin marketplace update [name]J...Update marketplace(s) from their source - updat
+  @197931945 plugin marketplace update <name> - Update specific marketplace.2...LA. /plugin marketplace remove - Remove a marketplace..?...RO../plugin marketplace remove <name> - Remove specific marketplace.1...0... /plugin marketplace list - List all 
+  @197932004 ace.2...LA. /plugin marketplace remove - Remove a marketplace..?...RO../plugin marketplace remove <name> - Remove specific marketplace.1...0... /plugin marketplace list - List all marketplaces...a..Validation:.?... ../plugin validate
+  @201641443  by the seed image. To update: ask your admin to update the seed...3.plugin marketplace remove...#...y.' has a corrupted installLocation (...<.x.). ..  .e.x.p.e.c.t.e.d. .a. .p.a.t.h. .i.n.s.i.d.e. ..._... This can happen after
+  @214555344 configuration");if(y0n(e,i),fb(i.source)&&!u0n(i.source.path)){let l=JT("plugin marketplace remove",e);throw Ar(Error(`Marketplace "${e}" has a relative source path (${i.source.path}) `+"in known_marketplaces.json \u2014 this is stale state
+  @214560070 !fb(l)){let u=zS(_B()),d=zS(a);if(d!==u&&!d.startsWith(u+YFe)){let p=JT("plugin marketplace remove",e);throw Error(`Marketplace '${e}' has a corrupted installLocation (${a}) \u2014 expected a path inside ${u}. This can happen after cross-pl
+  @214561561  marketplace may have been deprecated or moved to a new location.",f=JT("plugin marketplace remove",e);throw Error(`The marketplace.json file is no longer present in this repository.  ${p} Source: ${d}`+(f?`  You can remove this marketplace
+  @222490182 escription:"List all configured marketplaces"},marketplaceRemove:{usage:"plugin marketplace remove <name>",aliases:["rm"],description:"Remove a configured marketplace"},marketplaceUpdate:{usage:"plugin marketplace update [name]",description
+CLI ".option(\"--scope" count=2
+  @223272973  git sparse-checkout (for monorepos). Example: --sparse .claude-plugin plugins").option("--scope <scope>","Where to declare the marketplace: user (default), project, or local").action(o(async(s,c,d,a)=>{let[{marketplaceAddHandler:m},{create
+  @223273708 liases(K.marketplaceRemove.aliases).description(K.marketplaceRemove.description).option("--scope <scope>","Remove the marketplace declaration from a specific settings scope: user, project, or local. Omit to remove it from every scope.").add
+CLI ".option('--scope" count=0
+HFECALL "await HFe(" count=2
+  @214551602 :d}=await _0n(e,n);for(let p of u)await K8(p,n);for(let p of d)await nPe(p,n,r),await HFe(p);dPe(d,n),_(`Removed marketplace source: ${e}`)}function rme(e,t){if(!fPe.has(e.toLowerCase()))return null;i
+  @214613618 age}`);uSt(o);for(let{id:u,installPath:d}of i)if(await K8(d,o),await nPe(u,o),r)await HFe(u);return dPe(i.map((u)=>u.id),o),a}async function VWa(e,t,n){let r=hUe(t);if(!Pft(r).has(e))return!1;let o=t!
+HFECALL "HFe(p)" count=1
+  @214551608 ait _0n(e,n);for(let p of u)await K8(p,n);for(let p of d)await nPe(p,n,r),await HFe(p);dPe(d,n),_(`Removed marketplace source: ${e}`)}function rme(e,t){if(!fPe.has(e.toLowerCase()))return null;if(type
+HFECALL "HFe(e)" count=0
+SK "eIc as sk" count=1
+  @212842289  as k1r,XHc as PGs,YHc as dg,ZHc as JXr,cIc as vy,dIc as Li,eIc as sk,fIc as zFe,gIc as pcn,hIc as Wc,iIc as bD,kJc as e0n,lIc as XPe,oIc as w4r,pIc as sPn,pJc as t0n,uIc as Kvt,yIc as cVo}from"B:/~BU
+SK "sk.some(" count=1
+  @214550137 is not declared in ${qFe(t)} settings. ${p}`)}l=Boolean(i)||sk.some((p)=>p!==t&&Xr(p)?.extraKnownMarketplaces?.[e])||Boolean(Xr("policySettings")?.extraKnownMarketplaces?.[e])}if(!l){await d2((y)=>{if
+SK "for(let p of sk)" count=1
+  @214550745 );let h=Dc(m,`${e}.json`);await f.rm(h,{force:!0})}let c=!l;for(let p of sk){let f=t===void 0||p===t;if(!f&&!c)continue;let m=!1,g=await wB(p,(h)=>{if(!h)return null;let y=!1,b={};if(f&&h.extraKnownMa
+SK "[\"userSettings\",\"projectSettings\",\"localSettings\"]" count=1
+  @208099456 ttings","localSettings","flagSettings","policySettings"];ks=["userSettings","projectSettings","localSettings"],Es=new Set(["projectSettings","localSettings"]),Os=["localSettings","projectSettings","us
+SK "['userSettings','projectSettings','localSettings']" count=0
+R0N "claude-plugins-official" count=8
+  @197935820 ...E./.UPDATE...D@.REMOVE...,...claude-plugins-official...Fk..;' ...%0.. .;'...5B. ."  ... ...Q;.. installed..	...e."  .U.p.d.a.t.e.d......T[E.
+  @199924397 .claude.ai/claude-code-releases/plugins/claude-plugins-official%...marketplaces/claude-plugins-official/...'.[pluginBinaryAssets]...asset-cache..
+  @199924441 de-plugins-official%...marketplaces/claude-plugins-official/...'.[pluginBinaryAssets]...asset-cache...+..links_materialized.k...U..This plug
+  @201642016 ated "claude-code-plugins" in favor of "claude-plugins-official"...E...~r.This marketplace may have been deprecated or moved to a new location...D...I...The 
+  @202699119 may not run commands)"...I...anthropics/claude-plugins-official...lx..gist.githubusercontent.com...ssh.dev.azure.com... p!.storage.googleapis.com.
+R0N "function DOb" count=0
+R0N "ALLOWED_OFFICIAL" count=0
+R0N "isOfficialMarketplaceName" count=0
+QFE "project, gitignored" count=2
+  @204001668 docs/en...2...managedFilePath...project, gitignored...lJ[.cli flag...Memory store...M.shared project settings..._.project local settings...$.command line arguments...o...
+  @208097743 urn"project";case"localSettings":return"project, gitignored";case"flagSettings":return"cli flag";case"policySettings":return"managed"}}function hs(e){switch(e){case"userSettings":return"User";case"pro
+QFE "shared project settings" count=2
+  @204001732 lJ[.cli flag...Memory store...M.shared project settings..._.project local settings...$.command line arguments...o...enterprise managed settings...?..CLI argument...E.command 
+  @208098282  settings";case"projectSettings":return"shared project settings";case"localSettings":return"project local settings";case"flagSettings":return"command line arguments";case"policySettings":return"enterp
+QFE "enterprise managed settings" count=2
+  @204001828 ...$.command line arguments...o...enterprise managed settings...?..CLI argument...E.command configuration...q..CLI tool narrowing...=.<.MCP server policy...'&..Invalid setting 
+  @208098436  arguments";case"policySettings":return"enterprise managed settings";case"cliArg":return"CLI argument";case"command":return"command configuration";case"session":return"current session";case"toolsNarro
+QFE "function Ahb" count=0

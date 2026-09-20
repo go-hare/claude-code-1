@@ -1,0 +1,3 @@
+# 247 pair "settings.json"~"isSymbolicLink" async function xt() start=208147522 end=208147943 len=421 sha=23cbe4b920d805d8
+
+async function xt(t){if(!M()||!m().wslInherits)return"";let e=[];try{e.push(await h(o(d,"managed-settings.json"),t))}catch{e.push("")}try{let n=o(d,"managed-settings.d"),s=(await P(n,t)).filter((r)=>(r.isFile()||r.isSymbolicLink())&&r.name.endsWith(".json")&&!r.name.startsWith(".")).map((r)=>r.name).sort();for(let r of s)try{e.push(`${r}\x00${await h(o(n,r),t)}`)}catch{e.push(`${r}\x00`)}}catch{}return e.join("\x01")}

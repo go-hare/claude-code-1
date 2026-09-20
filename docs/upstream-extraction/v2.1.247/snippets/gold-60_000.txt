@@ -1,0 +1,287 @@
+# needle="60_000"
+# 247=252711039
+# 246=250457881
+
+===== 247 offset=252711039 =====
+.:. .V.e.r.i.f.y. .C.l.a.u.d.e. .u.s.e.s. .t.o.o.l.s. .c.o.r.r.e.c.t.l.y. .i.n. .v.a.r.i.o.u.s. .s.c.e.n.a.r.i.o.s..
+..
+.F.o.r. .d.e.t.a.i.l.e.d. .t.o.o.l. .u.s.e. .d.o.c.u.m.e.n.t.a.t.i.o.n.,. .u.s.e. .W.e.b.F.e.t.c.h.:..
+..
+.-. .U.R.L.:. .`.h.t.t.p.s.:././.p.l.a.t.f.o.r.m...c.l.a.u.d.e...c.o.m./.d.o.c.s./.e.n./.a.g.e.n.t.s.-.a.n.d.-.t.o.o.l.s./.t.o.o.l.-.u.s.e./.o.v.e.r.v.i.e.w.`..
+...# Message Batches API - TypeScript
+
+The Batches API (`POST /v1/messages/batches`) processes Messages API requests asynchronously at 50% of standard prices.
+
+## Key Facts
+
+- Up to 100,000 requests or 256 MB per batch
+- Most batches complete within 1 hour; maximum 24 hours
+- Results available for 29 days after creation
+- 50% cost reduction on all token usage
+- All Messages API features supported (vision, tools, caching, etc.)
+
+---
+
+## Create a Batch
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic();
+
+const messageBatch = await client.messages.batches.create({
+  requests: [
+    {
+      custom_id: "request-1",
+      params: {
+        model: "{{OPUS_ID}}",
+        max_tokens: 16000,
+        messages: [
+          { role: "user", content: "Summarize climate change impacts" },
+        ],
+      },
+    },
+    {
+      custom_id: "request-2",
+      params: {
+        model: "{{OPUS_ID}}",
+        max_tokens: 16000,
+        messages: [
+          { role: "user", content: "Explain quantum computing basics" },
+        ],
+      },
+    },
+  ],
+});
+
+console.log(`Batch ID: ${messageBatch.id}`);
+console.log(`Status: ${messageBatch.processing_status}`);
+```
+
+---
+
+## Poll for Completion
+
+```typescript
+let batch;
+while (true) {
+  batch = await client.messages.batches.retrieve(messageBatch.id);
+  if (batch.processing_status === "ended") break;
+  console.log(
+    `Status: ${batch.processing_status}, processing: ${batch.request_counts.processing}`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60_000));
+}
+
+console.log("Batch complete!");
+console.log(`Succeeded: ${batch.request_counts.succeeded}`);
+console.log(`Errored: ${batch.request_counts.errored}`);
+```
+
+---
+
+## Retrieve Results
+
+```typescript
+for await (const result of await client.messages.batches.results(
+  messageBatch.id,
+)) {
+  switch (result.result.type) {
+    case "succeeded":
+      console.log(
+        `[${result.custom_id}] ${result.result.message.content[0].text.slice(0, 100)}`,
+      );
+      break;
+    case "errored":
+      if (result.result.error.type === "invalid_request") {
+        console.log(`[${result.custom_id}] Validation error - fix and retry`);
+      } else {
+        console.log(`[${result.custom_id}] Server error - safe to retry`);
+      }
+      break;
+    case "expired":
+      console.log(`[${result.custom_id}] Expired - resubmit`);
+      break;
+  }
+}
+```
+
+---
+
+## Cancel a Batch
+
+```typescript
+const cancelled = await client.messages.batches.cancel(messageBatch.id);
+console.log(`Status: ${cancelled.processing_status}`); // "canceling"
+```
+.# Files API - TypeScript
+
+The Files API uploads files for use in Messages API requests. Reference files via `file_id` in content blocks, avoiding re-uploads across multiple API calls.
+
+**Beta:** Pass `betas: ["files-api-2025-04-14"]` in your API calls (the SDK sets the required header automatically).
+
+## Key Facts
+
+- Maximum file size: 500 MB
+- Total storage: 100 GB per organization
+- Files persist until deleted
+- File operations (upload, list, delete) are free; content used in messages is billed as input tokens
+- Not available on Amazon Bedrock or Google Vertex AI
+
+---
+
+## Upload a File
+
+```typescript
+import Anthropic, { toFile } from "@anthropic-ai/sdk";
+import fs from "fs";
+
+const client = new Anthropic();
+
+const uploaded = await client.beta.files.upload({
+  file: await toFile(fs.createReadStream("report.pdf"), undefined, {
+    type: "application/pdf",
+  }),
+  betas: [
+
+===== 246 offset=250457881 =====
+.:. .V.e.r.i.f.y. .C.l.a.u.d.e. .u.s.e.s. .t.o.o.l.s. .c.o.r.r.e.c.t.l.y. .i.n. .v.a.r.i.o.u.s. .s.c.e.n.a.r.i.o.s..
+..
+.F.o.r. .d.e.t.a.i.l.e.d. .t.o.o.l. .u.s.e. .d.o.c.u.m.e.n.t.a.t.i.o.n.,. .u.s.e. .W.e.b.F.e.t.c.h.:..
+..
+.-. .U.R.L.:. .`.h.t.t.p.s.:././.p.l.a.t.f.o.r.m...c.l.a.u.d.e...c.o.m./.d.o.c.s./.e.n./.a.g.e.n.t.s.-.a.n.d.-.t.o.o.l.s./.t.o.o.l.-.u.s.e./.o.v.e.r.v.i.e.w.`..
+...# Message Batches API - TypeScript
+
+The Batches API (`POST /v1/messages/batches`) processes Messages API requests asynchronously at 50% of standard prices.
+
+## Key Facts
+
+- Up to 100,000 requests or 256 MB per batch
+- Most batches complete within 1 hour; maximum 24 hours
+- Results available for 29 days after creation
+- 50% cost reduction on all token usage
+- All Messages API features supported (vision, tools, caching, etc.)
+
+---
+
+## Create a Batch
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic();
+
+const messageBatch = await client.messages.batches.create({
+  requests: [
+    {
+      custom_id: "request-1",
+      params: {
+        model: "{{OPUS_ID}}",
+        max_tokens: 16000,
+        messages: [
+          { role: "user", content: "Summarize climate change impacts" },
+        ],
+      },
+    },
+    {
+      custom_id: "request-2",
+      params: {
+        model: "{{OPUS_ID}}",
+        max_tokens: 16000,
+        messages: [
+          { role: "user", content: "Explain quantum computing basics" },
+        ],
+      },
+    },
+  ],
+});
+
+console.log(`Batch ID: ${messageBatch.id}`);
+console.log(`Status: ${messageBatch.processing_status}`);
+```
+
+---
+
+## Poll for Completion
+
+```typescript
+let batch;
+while (true) {
+  batch = await client.messages.batches.retrieve(messageBatch.id);
+  if (batch.processing_status === "ended") break;
+  console.log(
+    `Status: ${batch.processing_status}, processing: ${batch.request_counts.processing}`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60_000));
+}
+
+console.log("Batch complete!");
+console.log(`Succeeded: ${batch.request_counts.succeeded}`);
+console.log(`Errored: ${batch.request_counts.errored}`);
+```
+
+---
+
+## Retrieve Results
+
+```typescript
+for await (const result of await client.messages.batches.results(
+  messageBatch.id,
+)) {
+  switch (result.result.type) {
+    case "succeeded":
+      console.log(
+        `[${result.custom_id}] ${result.result.message.content[0].text.slice(0, 100)}`,
+      );
+      break;
+    case "errored":
+      if (result.result.error.type === "invalid_request") {
+        console.log(`[${result.custom_id}] Validation error - fix and retry`);
+      } else {
+        console.log(`[${result.custom_id}] Server error - safe to retry`);
+      }
+      break;
+    case "expired":
+      console.log(`[${result.custom_id}] Expired - resubmit`);
+      break;
+  }
+}
+```
+
+---
+
+## Cancel a Batch
+
+```typescript
+const cancelled = await client.messages.batches.cancel(messageBatch.id);
+console.log(`Status: ${cancelled.processing_status}`); // "canceling"
+```
+.# Files API - TypeScript
+
+The Files API uploads files for use in Messages API requests. Reference files via `file_id` in content blocks, avoiding re-uploads across multiple API calls.
+
+**Beta:** Pass `betas: ["files-api-2025-04-14"]` in your API calls (the SDK sets the required header automatically).
+
+## Key Facts
+
+- Maximum file size: 500 MB
+- Total storage: 100 GB per organization
+- Files persist until deleted
+- File operations (upload, list, delete) are free; content used in messages is billed as input tokens
+- Not available on Amazon Bedrock or Google Vertex AI
+
+---
+
+## Upload a File
+
+```typescript
+import Anthropic, { toFile } from "@anthropic-ai/sdk";
+import fs from "fs";
+
+const client = new Anthropic();
+
+const uploaded = await client.beta.files.upload({
+  file: await toFile(fs.createReadStream("report.pdf"), undefined, {
+    type: "application/pdf",
+  }),
+  betas: [

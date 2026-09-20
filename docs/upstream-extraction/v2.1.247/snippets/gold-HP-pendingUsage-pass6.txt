@@ -1,0 +1,21 @@
+# HP/pendingUsage pass6 — dm(f.pluginInfo.repository) bind
+"dm(f.pluginInfo.repository)" count=1 hits=216056711
+  @216056711 e(n),f=RA(a,p);if(f)n.options.activeSkill=OE(f);if(!u){if(bir(n.session,a,n.storageV5),f?.type==="prompt"&&f.pluginInfo)dm(f.pluginInfo.repository)}if(f?.type==="prompt"&&Qir(f,t||"",n)==="fork"&&!u)try{return await fis(f,a,t,n
+"dm(s.pluginInfo.repository)" count=0 hits=
+"dm(p.pluginInfo.repository)" count=0 hits=
+"dm(e.pluginInfo.repository)" count=0 hits=
+"pluginInfo)dm(" count=1 hits=216056700
+  @216056700  p=await C2e(n),f=RA(a,p);if(f)n.options.activeSkill=OE(f);if(!u){if(bir(n.session,a,n.storageV5),f?.type==="prompt"&&f.pluginInfo)dm(f.pluginInfo.repository)}if(f?.type==="prompt"&&Qir(f,t||"",n)==="fork"&&!u)try{
+"pluginInfo)qe(" count=2 hits=225476827,225484242
+  @225476827 and:s,resultText:d}}if(s.type==="prompt"&&s.userInvocable!==!1)Je(t.session,s.name,t.storageV5);if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repository);if(!t.deferSlashToEngine?.(s))De({commandName:s.name,ag
+  @225484242 tions.isNonInteractiveSession),setAppState:t.setAppState,credentials:t.credentials}),Je(t.session,p.name,t.storageV5),p.pluginInfo)qe(p.pluginInfo.repository),lt(p.pluginInfo.repository,"command",it(p,p.pluginInfo.
+"B_(e.pluginInfo.repository" count=1 hits=216046456
+  @216046456 undled:p,isOfficial:d}),g=r.queryTracking?.depth??0,h=g>0?"nested-skill":"claude-proactive",y=r.agentId;if(e.pluginInfo)B_(e.pluginInfo.repository,"skill",Dit(e,e.pluginInfo.pluginManifest.name));D("tengu_skill_tool_invocation
+"B_(f.pluginInfo.repository" count=1 hits=216057573
+  @216057573 sted-skill":"claude-proactive",A=n.agentId,L=f?.type==="prompt"?f.source:void 0;if(f?.type==="prompt"&&f.pluginInfo&&!u)B_(f.pluginInfo.repository,"skill",Dit(f,f.pluginInfo.pluginManifest.name));D("tengu_skill_tool_invocation
+"Y$ as dm" count=0 hits=
+" as dm}from\"B:/~BUN/root/_448.js\"" count=0 hits=
+"dm as Y$" count=1 hits=219684757
+  @219684757 L$,Y4i as M$,X4i as N$,Fbn as O$,ipt as P$,dOe as Q$,wYi as R$,kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as
+bun-header before dm(f.pluginInfo @216056716 last=-1 dist=216056717
+imports before call count=0

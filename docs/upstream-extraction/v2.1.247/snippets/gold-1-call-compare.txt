@@ -1,0 +1,7 @@
+# call 246 sha=9aa3f17a9e6c2682 len=3253
+# call 247 sha=0a104dcd7311f521 len=3253
+# rawEq=false (expected: VERSION/BUILD_TIME/GIT_SHA + minified names)
+# same length 3253; same official strings and branches
+# 247 VERSION=2.1.247 BUILD_TIME=2026-08-26T05:55:19Z
+# 246 VERSION=2.1.246 BUILD_TIME=2026-08-25T18:33:51Z
+# NOT a unique 247 function.

@@ -1,0 +1,2 @@
+# async function JD count=1 @214078883
+async function JD(e){try{return(await vpt(e)).isSymbolicLink()}catch{return!1}}

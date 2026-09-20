@@ -1,0 +1,28 @@
+# ver=246 offset=82340220 kind=tbl run=19 needle="exited with code"
+
+Run a package.json script.[0m
+  .[1m.[32mbun run.[0m .[34mdev.[0m
+  .[1m.[32mbun run.[0m .[34mlint.[0m
+
+Full documentation is available at .[35mhttps://bun.com/docs/cli/run.[0m
+%
+No "scripts" found in package.json.
+..2
+.[0m.[33mNo "scripts" found in package.json..[0m
+...
+package.json scripts (.. found):..
+.[1mpackage.json scripts (.. found):.[0m..  $ bun run ..
+...  .[2m$.[0m bun run.[0m .[34m...[0m
+...    ..
+...  .[2m  ...[0m
+..,error: preconnect URL must have a hostname: ...A.[0m.[31merror.[0m.[2m:.[0m preconnect URL must have a hostname: ...error: preconnect URL must have a valid port: ...C.[0m.[31merror.[0m.[2m:.[0m preconnect URL must have a valid port: ...-error: preconnect URL must be HTTP or HTTPS: ...B.[0m.[31merror.[0m.[2m:.[0m preconnect URL must be HTTP or HTTPS: ...p.c@...7A...7A...Pb.@...b.@...p.7A...0b.@...C:\Windows\System32\cmd.exe.error loading current directory..npm_config_local_prefixBUN_FEATURE_FLAG_NO_ORPHANSnpm_config_user_agent...&...bun/1.4.1 npm/? node/v26.3.0 win32 x64..npm_package_namenpm_package_jsonnpm_package_versionnpm_package_config_.error: .. loading directory ... .[0m.[31merror.[0m.[2m:.[0m .[1m...[0m loading directory ...error: Failed to run script ..: argument .N contains a cmd.exe special character and cannot be passed to the system shell..-.[0m.[31merror.[0m: Failed to run script .[1m...[0m: argument .N contains a cmd.exe special character and cannot be passed to the system shell...error: script ".." exited with code ...(.[0m.[31merror.[0m.[2m:.[0m script .[1m"..".[0m exited with code ...[0m...error: Failed to run script .. due to error ...-.[0m.[31merror.[0m: Failed to run script .[1m...[0m due to error .[1m...[0m../c.error: script ".." was terminated by signal ...(.[0m.[31merror.[0m.[2m:.[0m script .[1m"..".[0m was terminated by signal ...[0m...error: Failed to run script .. due to error:
+...-.[0m.[31merror.[0m: Failed to run script .[1m...[0m due to error:
+...const mod = await import("...");
+const scheduled = (mod.default || mod).scheduled;
+if (typeof scheduled !== "function") throw new Error("Module does not export default.scheduled()");
+const controller = { cron: ".P", type: "scheduled", scheduledTime: Date.now() };
+await scheduled(controller);
+.When using --package, you must specify the binary to run>  usage: bunx --package=<package-name> <binary-name> [args...]..F  .[2musage: bunx --package=<package-name> <binary-name> [args...].[0m..-v--bun-b--no-install--package requires a non-empty package name--package requires a package name. + ... + .[0m.[2m...[0m... + ... + .[0m.[2m...[0m..
+bun pack v...[0m.[1mbun pack .[0m.[2mv...[0m..package.json must have `name` and `version` fieldspackage.json `name` and `version` fields must be non-empty strings.tests=".." assertions=".." failures=".." skipped=".." time="..".</testsuites>
+Failed to write JUnit report to {}
+{}.tests=".." assertions=".." failures=".." skipped=".." time=".." hostname=".."... (..:..:... time="..".. 

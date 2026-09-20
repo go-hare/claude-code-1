@@ -1,0 +1,2 @@
+# function es() pos=206986612 end=206986838 len=226
+function es(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof Zi==="function"){let t=Pd();try{e=Qi(Zi(t))}catch{e=Qi(t)}}return Li({host:Xi(),id:Ge()??qe(),project:{originalCwd:e,projectRoot:e,cwd:e}})}

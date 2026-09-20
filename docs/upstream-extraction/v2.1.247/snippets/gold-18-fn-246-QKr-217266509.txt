@@ -1,0 +1,3 @@
+# ver=246 name=QKr async=false start=217266509 end=217266608 len=99 sha=0d0671539968ee0f needle="background session"
+
+function QKr(){return ba()?"Detach from this background session (it keeps running)":"Exit the CLI"}

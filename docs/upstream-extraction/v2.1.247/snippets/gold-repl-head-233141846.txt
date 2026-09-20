@@ -1,0 +1,2 @@
+# session:ge, @233141846
+ThreadAgentDefinition:yt,customSystemPrompt:h,appendSystemPrompt:S,canUseTool:Pl,fallbackModel:q,agentTitle:vM,haikuTitle:ro,terminalTitle:eT}),kt.bindHost({store:De,setAppState:Ke,setSessionState:$e,session:ge,transcript:to,storageV5:j,credentials:re,spinnerStore:xt,taskRegistry:ho,sessionHooks:ot,teammateColors:tt,messageQueue:fe,dialogStore:Yt,addNotification:le,scope:gn,commands:rr,canUseTool:Pl,debug:t,fallbackModel:q,thinkingConfig:W,ideInstallationStatus:MM,disabled:w,resolveCommandDialog

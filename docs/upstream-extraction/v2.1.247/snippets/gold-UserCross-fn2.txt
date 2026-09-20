@@ -1,0 +1,3 @@
+# 247 offset=208595984 needle="function zf("
+
+laude-opus-4-5"||e==="claude-haiku-4-5"}function zf(e){if(Wn())return!1;let t=O(e);if(Yo(t))return!1;if(It(t)?.context?.supports_1m_beta)return!0;return yt(at(e))}function Qr(e,t){let n=HE();if(n!==void 0)return n;if(wM(e,t))return UE;return KE(e,t)}function HE(){if(c.DISABLE_COMPACT){let e=c.CLAUDE_CODE_MAX_CONTEXT_TOKENS;if(e!==void 0&&e>0)return e}return}function wM(e,t){return NE()&&HE()===void 0&&KE(e,t)>UE}function KE(e,t){if(xe(e

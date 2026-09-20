@@ -1,0 +1,14 @@
+# 247 y3n / EL / xWe / CL vs 246 LYn
+
+247 y3n={"claude-sonnet-5":{surfaces:{remote_cowork:{default:500000},"local-agent":{default:500000}},default:1e6}}
+246 LYn= same surfaces, default:967000
+
+I8o(e){if(!Nm())return;if(!Object.hasOwn(y3n,e))return;return C3n(y3n[e])}
+C3n: ENTRYPOINT surface then _3n(..., Ig()) else default
+_3n(e,t){if(t&&Object.hasOwn(e,t))return e[t];return e.default}
+
+EL: env → settings → clientdata → experiment → (o<1e6 && M8o) → I8o model-default → unknown-model → auto
+CL(e,t){let n=Math.min(uV(e),E3n); ... return o-n}  E3n=20000
+xWe(e,t){let n=e-13000; ... return n}  f3n=13000
+
+1M window - 20k - 13k = 967k (246 table 967k window - 20k - 13k = 934k)

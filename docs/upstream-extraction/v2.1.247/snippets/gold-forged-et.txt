@@ -1,0 +1,1 @@
+function et(e){let n=Yn(),t=(r)=>{let i=I(r);return i===r||T(i,n)?[]:[i,...t(i)]};return t(e).filter((r)=>br(d(r,".git")))}

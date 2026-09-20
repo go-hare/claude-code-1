@@ -1,0 +1,3 @@
+# 247 function Be start=207954430 end=207954500 len=70 sha=30d7fb9a61262731 dist=939
+
+function Be(e){if(typeof e!=="string")return;return e.trim()?e:void 0}

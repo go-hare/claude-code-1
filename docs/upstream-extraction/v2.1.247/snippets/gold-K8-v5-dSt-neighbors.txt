@@ -1,0 +1,2 @@
+# dSt neighbors
+it cSt(i,e,n,r)){let l=OFe(i,a);for(let c of await cSt(l,e,n,r)){let u=OFe(l,c);if(t.has(u))continue;await HUo(u,o,e)}await xLn(l)}await xLn(i)}}catch(t){_(`Plugin cache cleanup failed: ${t}`)}}function dSt(e){return OFe(e,wg)}async function BUo(e,t){if(await JD(e))return;let n=dSt(e),r=Ne()&&t!==void 0?mp(e,ra()):null;if(t!==void 0&&r!==null){let o=await t.delete(_r.pluginCache(r.marketplace,r.plugin,r.version,[wg]));if(!o.ok)_(`Failed to remove .orphaned_at: ${e}: ${tr(o.error)}`);return}try{a

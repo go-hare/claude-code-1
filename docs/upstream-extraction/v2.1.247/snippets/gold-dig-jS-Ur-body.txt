@@ -1,0 +1,3 @@
+# offset=207912312
+
+llows this on plugin-not-found and migrates user settings to the new name.")})),Ur=p(()=>te(Mo,Io())),rs=p(()=>i().regex(new RegExp(`^${Bt}@${Bt}$`),"Plugin ID must be in format: plugin@marketplace")),Ar=new RegExp(`[@:\\s/\\\\${Ae}]`,"u"),Er=new RegExp(`[${Ae}]`,"u"),is=/[\p{Cc}

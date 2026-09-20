@@ -1,0 +1,3 @@
+# offset=214612026
+
+.dependencies,defaultEnabled:h.manifest.defaultEnabled}}function qWa(e){let t=e.split("@");if(t.length!==2||!t[0]||!t[1])return null;return{name:t[0],marketplace:t[1]}}function Ujo(e){switch(e.reason){case"cycle":return`Dependency cycle: ${e.chain.join(" \u2192 ")}`;case"cross-marketplace":{let t=ho(e.dependency).marketplace,n=t?`marketplace "${t}"`:"a different marketplace",r=t?` Add "${t}" to allowCrossMarketplaceDependenciesOn in the ROOT marketplace's marketplace.json (th

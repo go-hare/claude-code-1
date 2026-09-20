@@ -1,0 +1,6 @@
+# offset=206910729 _841.js Zo as Txd
+# 246: 0 hits — NEW in 247.
+# J is win32 bu automount stub (same 246+247). Do NOT invent /net here.
+
+function J(t){return!1}
+function Zo(t){return P(t)||J(t)}

@@ -1,0 +1,3 @@
+# offset=208372047 hit=1/8 needle="function Ie()"
+
+return e.authType={filled:!0,value:t},t}function Ie(){let e=d();if(e===null)return null;if(e==="env-quad")return"oidc_federation";let t=v();if(t===null)return null;let n=e==="profile-explicit"?process.env.ANTHROPIC_PROFILE?.trim()??"default":R(t),r=F(t,n);return r==="oidc_federation"||r==="user_oauth"?r:null}function Je(){return d()==="profile-implicit"&&x()==="user_oauth"}function Xe(){let e=d();if(e==="env-quad"){let t=process.env.ANT

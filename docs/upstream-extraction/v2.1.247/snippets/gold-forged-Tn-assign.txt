@@ -1,0 +1,2 @@
+# gold-forged-Tn-assign.txt official-247 SEA @209220350-209220700
+ect.keys(process.env).map((t)=>t.toUpperCase())):null;this.settingsColorEnv={},this.appliedGlobalConfigEnv=this.filterSettingsEnv(L().env,"globalConfig"),Object.assign(process.env,this.appliedGlobalConfigEnv);for(let t of Me){if(t==="policySettings")continue;if(!A(t))continue;Object.assign(process.env,this.filterSettingsEnv(C(t)?.env,t))}ee(),Objec

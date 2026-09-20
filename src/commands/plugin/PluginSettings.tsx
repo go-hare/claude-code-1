@@ -12,6 +12,7 @@ import { errorMessage } from '../../utils/errors.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { loadMarketplacesWithGracefulDegradation } from '../../utils/plugins/marketplaceHelpers.js';
 import { loadKnownMarketplacesConfig, removeMarketplaceSource } from '../../utils/plugins/marketplaceManager.js';
+import { useSessionServices } from '../../context/sessionServices.js';
 import { getPluginEditableScopes } from '../../utils/plugins/pluginStartupCheck.js';
 import type { EditableSettingSource } from '../../utils/settings/constants.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -337,6 +338,7 @@ function ErrorsTabContent({
   setActiveTab: (tab: TabId) => void;
   markPluginsChanged: () => void;
 }): React.ReactNode {
+  const { storageV5, credentials } = useSessionServices();
   const errors = useAppState(s => s.plugins.errors);
   const installationStatus = useAppState(s => s.plugins.installationStatus);
   const setAppState = useSetAppState();
@@ -453,7 +455,7 @@ function ErrorsTabContent({
       case 'remove-installed-marketplace': {
         void (async () => {
           try {
-            await removeMarketplaceSource(action.name);
+            await removeMarketplaceSource(action.name, undefined, storageV5, credentials);
             clearAllCaches();
             setMarketplaceLoadFailures(prev => prev.filter(f => f.name !== action.name));
             setActionMessage(`${figures.tick} Removed marketplace "${action.name}"`);

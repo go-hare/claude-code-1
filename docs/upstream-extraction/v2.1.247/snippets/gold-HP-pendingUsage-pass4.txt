@@ -1,0 +1,35 @@
+# HP/pendingUsage pass4 — qe/tt callers in _448 consumer modules
+qe-import@225459219 nextBun@225493109 span=33890
+qe( in qe-module count=2 hits=225476838,225484253
+  @225476838 ="prompt"&&s.userInvocable!==!1)Je(t.session,s.name,t.storageV5);if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repository);if(!t.deferSlashToEngine?.(s))De({commandName:s.name
+  @225484253 setAppState:t.setAppState,credentials:t.credentials}),Je(t.session,p.name,t.storageV5),p.pluginInfo)qe(p.pluginInfo.repository),lt(p.pluginInfo.repository,"command",it(p,p.pluginIn
+  ENCLOSE-near@225476838 tail= skill: ${o}`,"warning")]:[]],shouldQuery:!1,command:s,resultText:d}}if(s.type==="prompt"&&s.userInvocable!==!1)Je(t.session,s.name,t.storageV5);if(s.type==="prompt"&&s.pluginInfo)qe(s.pluginInfo.repo
+  ENCLOSE-near@225484253 tail=Id:t.agentId,isNonInteractiveSession:Boolean(t.options.isNonInteractiveSession),setAppState:t.setAppState,credentials:t.credentials}),Je(t.session,p.name,t.storageV5),p.pluginInfo)qe(p.pluginInfo.repo
+tt-import@222197331 nextBun@222206881 span=9550
+tt( in tt-module count=1 hits=222202257
+  @222202257 :i,credentials:m}),Ie(m),Re(i),d()&&m!==void 0){if(await D(m),Le())await De(m)}if(await ye(i),Me(i),tt(i),Ze({storageV5:i,credentials:m}),s("init_after_graceful_shutdown"),Promise.
+
+## dm(e) all
+  @211957197 t,v._`${s} === ${k.default.errors}`)}function ha(e){(0,he.checkUnknownRules)(e),dm(e)}function ya(e,t){if(e.opts.jtd)return ua(e,[],!1,t);let r=(0,aa.getSchemaT
+  @211957352 hemaTypes)(e.schema),n=(0,aa.coerceAndCheckDataType)(e,r);ua(e,r,!n,t)}function dm(e){let{schema:t,errSchemaPath:r,opts:n,self:o}=e;if(t.$ref&&n.ignoreKeywordsW
+  @213647497 (t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedA
+  @221431599 ,e.C_BLOCK_COMMENT_MODE,n,T]}}Ns.exports=_m});var fs=d(function(sb,Os){function dm(e){let t=e.regex,n=["functions","model","data","parameters","quantities","tra
+  @229251518 d_format",format:"cidrv6",input:r.value,inst:e,continue:!t.abort})}}});function dm(e){if(e==="")return!0;if(/\s/.test(e))return!1;if(e.length%4!==0)return!1;try
+QESHAPE "qe(" count=15 hits=206457506,206476729,206476893,206476947,206648734,206648814,206884267,206884723,206885467,206986787,206987740,207052902,207087187,207104750,207294894
+QESHAPE "qe(e)" count=15 hits=206476729,206476893,206476947,207104750,207610993,207613599,207614436,207716658,207716916,207726874,208371094,208949650,208955335,209249771,209331327
+QESHAPE "qe(t)" count=6 hits=224391123,225271061,226751130,227834685,234089946,235140765
+QESHAPE "qe(n)" count=14 hits=207052902,207614652,208196814,215737524,218125034,221693999,221694408,221695223,222272066,222975762,226159191,226345604,233016999,237443392
+QESHAPE "qe(r)" count=8 hits=221694131,221843848,221844529,222884566,225777235,231779708,238454913,240311186
+QESHAPE "qe(o)" count=12 hits=207611568,215676456,215676488,215701871,215702774,215706909,215737311,222897737,222906565,233017027,233017038,236236389
+QESHAPE "qe(s)" count=3 hits=209254302,210498099,215693778
+QESHAPE "qe(i)" count=1 hits=240317065
+QESHAPE "qe(a)" count=3 hits=240311393,240311667,242168335
+QESHAPE "qe(l)" count=0 hits=
+QESHAPE "qe(c)" count=1 hits=221959325
+QESHAPE "qe(u)" count=2 hits=221969381,233018838
+QESHAPE "qe(d)" count=1 hits=223741097
+QESHAPE "qe(p)" count=0 hits=
+
+## 246 leftover already extracted as gold-HP-246-*
+_448.js imports total count=80
+_448 imports mentioning Y$ count=0

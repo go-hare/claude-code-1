@@ -1,0 +1,23 @@
+# densable 2.1.247 #12 — locked SEA me + ut (246 overwrite path)
+
+function me(t){
+  return isPlainObject(t)&&t.context==="Terminal"&&isPlainObject(t.bindings)&&"shift-enter"in t.bindings
+}
+
+async function ut(theme){
+  linux XDG_CONFIG_HOME ? $XDG/zed : ~/.config/zed
+  keymap.json
+  mkdir
+  read: throw if !isFsInaccessible; if inaccessible && !ENOENT → "Couldn't read your Zed keymap, so it was left unchanged."
+  missing or whitespace → write pretty [{context:Terminal, bindings:{shift-enter:X}}] + newline
+  parse jsonc allowTrailingComma; errors or !array → "Your Zed keymap isn't a readable list of keybindings, so it was left unchanged."
+  some(me) → already configured
+  backup fail → "Couldn't back up your Zed keymap; not modifying it."
+  jsonc modify: existing Terminal bindings → set ["bindings","shift-enter"]; else array-insert new context object
+  X=["terminal::SendText","\x1B\r"]
+  formattingOptions {insertSpaces:true, tabSize:2}
+  reparse; if edit fail or !some(me) → "Couldn't update your Zed keymap, so it was left unchanged."
+  write edited string (not full rewrite)
+}
+
+Manual block copy is in the warning footer.

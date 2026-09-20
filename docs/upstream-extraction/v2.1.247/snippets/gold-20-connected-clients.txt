@@ -1,0 +1,21 @@
+# offset=222388993 idx=0/1 needle="connected clients" count247=1 count246=1
+
+load, so they open on phone and web instead of showing an empty card
+- Fixed: after \`/login\` while \`CLAUDE_CODE_OAUTH_TOKEN\` is set, the stale-token reminder no longer leaks into Claude's automatically resumed turn \u2014 it now appears only to you
+- Fixed: permission previews now relay only to channel servers admitted by the inbound trust gate, and a server's explicit permission-capability opt-out is honored
+- Fixed: credential masking on relayed permission previews can no longer hide commands, paths, or destinations from the approver; oversized private-key blocks now redact under full-strength redaction
+- Fixed: provider API tokens that mask on permission previews now mask even when directly followed by shell delimiters
+- Fixed Claude Desktop inter-session messages being silently dropped by the recipient session when cross-session messaging read as disabled, which left the sender's query "thinking" for many minutes
+- Remote Control: signing this computer in to a different claude.ai account or organization now stops the running session within seconds and says why, instead of a misleading HTTP 404 hours later
+- Remote Control sessions started from Claude Code Desktop or VS Code now keep phones and claude.ai/code updated on the session's permission mode (and claude.ai/code on the model) as they change
+- Remote Control: effort picks made on a phone or on claude.ai/code now apply to terminal- and Desktop/VS Code-hosted sessions, and the session publishes its effort level to connected clients
+- \`SendMessage\` and \`ListAgents\` now say when your account's session list was too long to check completely, instead of treating unseen sessions as absent
+- Expired Anthropic profile credential now points you at \`/login\` when a claude.ai login would take precedence
+- Improved the transcript: your own prompts now render markdown (highlighted code blocks, inline code, lists) the same way replies do
+- Improved the "API returned an empty or malformed response" error to say what came back (content type, body kind, size, request ID) and why the original streaming request failed
+- Improved auto-generated session titles to read as short, specific names (e.g. "Login button bug") rather than sentences restating your request (e.g. "Fix the login button on mobile")
+- Reduced the context cost of loading the built-in \`claude-api\` skill from ~200k+ tokens to ~25k by loading reference docs on demand
+- \`/permissions\` can now be opened while Claude is working \u2014 rule changes apply to the rest of the current turn
+- \`/add-dir <path>\` can now be used while Claude is working; \`/add-dir\`, \`/autocompact\`, \`/theme\`, \`/help\`, \`/config\` and \`/advisor\` dialogs open mid-turn in the fullscreen TUI
+- \`/goal\` now clears itself with a notice when a turn dies on an unrecoverable error (e.g. revoked auth, an exhausted credit balance, or a context overflow) instead of staying armed
+- \`/goal\`: when background tasks keep a goal waiting for 30+ minutes, Claude now c

@@ -222,9 +222,62 @@ export const HOST_AUTH_401_MAX_SAME_TOKEN = 2
  */
 export const HOST_AUTH_REFRESH_TIMEOUT_MS_DEFAULT = 10_000
 
-/** Official sMo — env var holding the host-injected auth token. */
+/**
+ * Official OE + D_ — names CLAUDE_CODE_HOST_AUTH_ENV_VAR may not take. The
+ * first three route or select the provider; the rest pick a cloud backend.
+ */
+const HOST_AUTH_ENV_VAR_DENYLIST: ReadonlySet<string> = new Set([
+  'ANTHROPIC_UNIX_SOCKET',
+  'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+  'CLAUDE_CODE_HOST_AUTH_ENV_VAR',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+  'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
+  'CLAUDE_CODE_USE_MANTLE',
+  'CLAUDE_CODE_USE_GATEWAY',
+  'ANTHROPIC_FOUNDRY_RESOURCE',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'ANTHROPIC_AWS_WORKSPACE_ID',
+  'ANTHROPIC_GOOGLE_CLOUD_PROJECT',
+  'ANTHROPIC_GOOGLE_CLOUD_LOCATION',
+  'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID',
+  'CLOUD_ML_REGION',
+])
+
+/**
+ * Official sMo — env var holding the host-injected auth token.
+ *
+ * A configured name that collides with a provider control variable is refused
+ * (official AE). This matters more here than upstream: 401 recovery writes to
+ * `process.env[name]`, so a host naming ANTHROPIC_UNIX_SOCKET would have its
+ * token overwrite the socket path, and CLAUDE_CODE_USE_BEDROCK would flip
+ * provider selection to a truthy string. Upstream drops the value; we fall back
+ * to the default, because every caller needs a name to read and write.
+ *
+ * The comparison is case-folded where upstream's is exact. Env var lookup is
+ * case-insensitive on Windows, so an exact match there is bypassed by typing
+ * the name in lower case. Folding can only catch case variants of these same
+ * variables, so it rejects nothing upstream would legitimately accept.
+ */
+/**
+ * Official AE — the configured CLAUDE_CODE_HOST_AUTH_ENV_VAR value, or
+ * undefined when empty / on the OE+D_ denylist. Spawn-env strip uses this
+ * (delete the custom name only when it is a real token slot).
+ */
+export function getConfiguredHostAuthEnvVarName(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const configured = env.CLAUDE_CODE_HOST_AUTH_ENV_VAR
+  if (!configured || HOST_AUTH_ENV_VAR_DENYLIST.has(configured.toUpperCase())) {
+    return undefined
+  }
+  return configured
+}
+
 export function getHostAuthEnvVarName(): string {
-  return process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR || 'ANTHROPIC_AUTH_TOKEN'
+  return getConfiguredHostAuthEnvVarName() || 'ANTHROPIC_AUTH_TOKEN'
 }
 
 /**

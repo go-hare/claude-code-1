@@ -1,0 +1,7 @@
+# firstDiff=264
+
+---246---
+)).ID((ID)=>{for(let[ID,ID]of Object.ID(ID.ID))if(ID.ID.ID==="settings"&&ID.ID.ID!==ID)ID.ID.ID({ID:"custom",ID:ID.ID.ID,ID:[ID,"source","name"],ID:`Settings-sourced marketplace name must match its ${s} key (got key "${h}" but source.name "${c.source.name}")`})})}let ID=(ID,ID)=>ID?ID((ID)=>{if(ID===null)return;return ID?ID(ID):ID},ID):ID.catch(void 0);return ID({ID:ID().ID().ID("JSON Schema reference for Claude Code settings"),ID:ID().ID().ID("Path to a script that outputs authentication values"),ID:ID().ID().ID("Shell command that outputs a Proxy-Authorization header value (EAP)"),ID:ID().ID
+
+---247---
+)).ID((ID)=>{for(let[ID,ID]of Object.ID(ID.ID))if(ID.ID.ID==="settings"&&ID.ID.ID!==ID)ID.ID.ID({ID:"custom",ID:ID.ID.ID,ID:[ID,"source","name"],ID:`Settings-sourced marketplace name must match its ${r} key (got key "${h}" but source.name "${c.source.name}")`})})}let ID=(ID,ID)=>ID?ID((ID)=>{if(ID===null)return;return ID?ID(ID):ID},ID):ID.catch(void 0);return ID({ID:ID().ID().ID("JSON Schema reference for Claude Code settings"),ID:ID().ID().ID("Path to a script that outputs authentication values"),ID:ID().ID().ID("Shell command that outputs a Proxy-Authorization header value (EAP)"),ID:ID().ID

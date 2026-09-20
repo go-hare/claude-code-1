@@ -19,6 +19,7 @@ This file contains WebFetch URLs for fetching current information from platform.
 | Migration Guide | `https://platform.claude.com/docs/en/about-claude/models/migration-guide.md` | "Extract breaking changes, deprecated parameters, and per-model migration steps when moving to a newer Claude model" |
 | Introducing Claude Fable 5 | `https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5.md` | "Extract capabilities, API changes, and availability stages for Claude Fable 5 and Claude Mythos 5" |
 | Pricing         | `https://platform.claude.com/docs/en/pricing.md`                             | "Extract current pricing per million tokens for input and output"               |
+| Cost Optimization | `https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence.md` | "Extract measured cost levers, cache and batch savings, effort and model cost-per-task comparisons, budget controls, and multi-model guidance" |
 
 ### Core Features
 
@@ -46,10 +47,22 @@ This file contains WebFetch URLs for fetching current information from platform.
 | Files API        | `https://platform.claude.com/docs/en/build-with-claude/files.md`            | "Extract file upload, download, and referencing in messages, including supported types and beta header" |
 | Token Counting   | `https://platform.claude.com/docs/en/build-with-claude/token-counting.md`   | "Extract token counting API usage and examples"                                                         |
 | Rate Limits      | `https://platform.claude.com/docs/en/api/rate-limits.md`                    | "Extract current rate limits by tier and model"                                                         |
+| Usage and Cost Admin API | `https://platform.claude.com/docs/en/manage-claude/usage-cost-api.md` | "Extract the usage_report and cost_report endpoints, Admin API key requirements, filter and group_by dimensions, token fields, and granularity limits" |
 | Errors           | `https://platform.claude.com/docs/en/api/errors.md`                         | "Extract HTTP error codes, meanings, and retry guidance"                                                |
 | Amazon Bedrock   | `https://platform.claude.com/docs/en/build-with-claude/claude-on-amazon-bedrock.md` | "Extract the AnthropicBedrockMantle client per language, `anthropic.`-prefixed model IDs, auth paths, feature availability, and regions" |
 | Claude Platform on AWS | `https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws.md` | "Extract the AnthropicAWS client per language, SigV4 auth, credential precedence, short-term API keys, workspace_id, and region requirements" |
 | Claude Platform on AWS — IAM actions | `https://platform.claude.com/docs/en/api/claude-platform-on-aws-iam-actions.md` | "Extract the IAM action names, resource ARNs, and policy examples required for each API capability" |
+
+### Admin API (Organization Management)
+
+| Topic                | URL                                                                     | Extraction Prompt                                                                     |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Admin API Guide      | `https://platform.claude.com/docs/en/manage-claude/admin-api.md`        | "Extract Admin API authentication, SDK/CLI usage, and member/invite/key management"   |
+| Admin API Reference  | `https://platform.claude.com/docs/en/api/admin.md`                      | "Extract endpoint parameters, responses, and pagination for the Admin API"            |
+| Workspaces           | `https://platform.claude.com/docs/en/manage-claude/workspaces.md`       | "Extract workspace create/list/archive and member management via API"                  |
+| Rate Limits API      | `https://platform.claude.com/docs/en/manage-claude/rate-limits-api.md`  | "Extract org and workspace rate limit report endpoints and filters"                    |
+| WIF Admin            | `https://platform.claude.com/docs/en/manage-claude/wif-admin-api.md`    | "Extract service account, federation issuer, and federation rule management"           |
+| Usage & Cost Reports | `https://platform.claude.com/docs/en/manage-claude/usage-cost-api.md`   | "Extract usage and cost report endpoints (curl-only, not in the SDKs)"                 |
 
 ### Tools
 

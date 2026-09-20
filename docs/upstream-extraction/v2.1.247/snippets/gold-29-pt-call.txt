@@ -1,0 +1,3 @@
+# offset=221585214 
+
+t,{listDepth:0,orderedListNumber:null,parent:null,highlight:s,glueProse:!1,linkCap:E,promptMode:x})).join("");return(e.depth===1?l.bold.italic.underline:l.bold)(M(i))+y+y}case"hr":return"---"+y;case"image":{if(!e.text&&!e.title)return e.href;let i=e.text?`${e.text} `:"",p=e.title?` "${e.title}"`:"";return`${i}(${e.href}${p})`}case"link":{let i=e.title?` ("${e.title}")`:"";if(e.href.startsWith("mailto:")){let I=e.href.replace(/^mailto:/,"");return(e.text&&e.text!==I?`${e.text} (${I})`:I)+i}let p=E?pt(e.href):e.href,f=E&&p!==null,m=p??z(e.href),b=(e.tokens??[]).map((I)=>k(I,t,{listDepth:0,orderedListNumber:null,parent:e,highlight:s,glueProse:!1,linkCap:E,promptMode:x})).join(""),d=w(b),T=G(e.h

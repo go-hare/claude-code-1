@@ -1,0 +1,5 @@
+# mismatch@15
+---247---
+async function j$(e,t,n,r,o,s,i){if(typeof t==="object"&&t.source==="command"){if(!i){if(o)return _(`Using recorded version for command-sourced ${e} (pre-fetch probe): ${o}`),o;return _(`No content hash yet for command-sourced ${e}; version unknown until the command runs`),"unknown"}let l=S0n(i),c=n?.version?`${n.version}-${l}`:l;return _(`Using content-hash version for command-sourced ${e}: ${c}`),c}if(n?.versi
+---246---
+async function y$(e,t,n,r,o,s,i){if(typeof t==="object"&&t.source==="command"){if(!i){if(o)return b(`Using recorded version for command-sourced ${e} (pre-fetch probe): ${o}`),o;return b(`No content hash yet for command-sourced ${e}; version unknown until the command runs`),"unknown"}let l=IDn(i),c=n?.version?`${n.version}-${l}`:l;return b(`Using content-hash version for command-sourced ${e}: ${c}`),c}if(n?.versi

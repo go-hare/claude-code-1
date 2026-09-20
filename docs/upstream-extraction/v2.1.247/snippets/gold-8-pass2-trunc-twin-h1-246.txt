@@ -1,0 +1,12 @@
+# off=220676630 needle="Math.floor(t/2)"
+
+ast min(files_changed, 4) findings \u2014 if you see fewer, widen to other hunks in the same diff before stopping. If fewer than 4 genuine findings exist, emit what you have.
+`}`,ui=(e)=>(t)=>e(t).replace(`## Output
+`,`## Output
+
+Target **at least ${Math.floor(t/2)} findings**. If fewer genuine findings exist, emit what you have \u2014 do not invent to hit the floor.
+`).replace(/nothing survives verification/g,"nothing survives"),hi=`### Angle A \u2014 line-by-line diff scan
+
+Read every hunk in the diff, line by line. Then Read the enclosing function for
+each hunk \u2014 bugs in unchanged lines of a touched function are in scope (the PR
+re-ex

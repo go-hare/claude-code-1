@@ -1,0 +1,7 @@
+# LOCKED uvi @213648362 end=213648410 len=48
+# unique function uvi( count=1
+# unique HP().pendingUsage.has(e) count=1
+# export: uvi as Z$ @219684766
+# import: Z$ as a from _448.js @222244939 (with _$ as M = zC, caa as u = Iln, faa as N = pPe)
+# same-module uvi( call count=0 besides the def
+function uvi(e){return HP().pendingUsage.has(e)}

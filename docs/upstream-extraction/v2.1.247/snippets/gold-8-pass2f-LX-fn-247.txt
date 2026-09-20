@@ -1,0 +1,5 @@
+# needleOff=214013447 start=214013447
+
+function LX({name:e,message:t,stack:n},r=5){let o=t?`${e}: ${t}`:e,s=n?n.split(`
+`).filter((i)=>mPo.test(i)).slice(0,r).map((i)=>i.length>H_n?`${tn(i,H_n)}\u2026`:i):[];return Pc([Pc(o),...s].join(`
+`))}

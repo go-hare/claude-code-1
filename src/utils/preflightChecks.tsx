@@ -158,6 +158,16 @@ interface PreflightStepProps {
   onSuccess: () => void;
 }
 
+/**
+ * densable ft — `Q("preflight_endpoint"), process.exit(1)`.
+ * `Q` is upstream's synchronous exit marker, not the SessionEnd hook reason
+ * (`preflight_endpoint` is absent from the 247 exit-reason enum), so there is no
+ * local equivalent to call here. Only the exit itself is ported.
+ */
+function exitAfterPreflightFailure(): void {
+  process.exit(1);
+}
+
 export function PreflightStep({ onSuccess }: PreflightStepProps): React.ReactNode {
   const [result, setResult] = useState<PreflightCheckResult | null>(null);
   const [isChecking, setIsChecking] = useState(true);
@@ -181,18 +191,12 @@ export function PreflightStep({ onSuccess }: PreflightStepProps): React.ReactNod
     }
   }, [result, onSuccess]);
 
-  // densable Biv: hard-exit after brief delay on failure so onboarding can't proceed offline
+  // densable ft via O(ft, a && !a.success ? 100 : null). The error screen has no
+  // key handler, so anything short of exiting leaves onboarding wedged.
   useEffect(() => {
-    if (result && !result.success) {
-      const t = setTimeout(() => {
-        // densable ix("preflight_endpoint"); process.exit(1)
-        // Soft: leave UI error visible; exit only if env requests strict gate.
-        if (process.env.CLAUDE_CODE_STRICT_PREFLIGHT === '1') {
-          process.exit(1);
-        }
-      }, 100);
-      return () => clearTimeout(t);
-    }
+    if (!result || result.success) return;
+    const timer = setTimeout(exitAfterPreflightFailure, 100);
+    return () => clearTimeout(timer);
   }, [result]);
 
   return (

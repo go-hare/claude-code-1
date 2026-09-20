@@ -1,0 +1,13 @@
+# 247 pair "settings.json"~"lstat(" a=214972614 NO_PRESERVE_FN
+
+(()=>{$e();ro();yi();pr();Si();ka();Nr();xe();Gi();oo();qi();lce();Rs();Q2o=new fn(()=>new Map)});function yje(){return iVo().value}function iVo(){let e=As.CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL;if(e!==void 0)return{value:e,src:"env"};let t=nc();return typeof t?.editRemovalVisibility==="boolean"?{value:t.editRemovalVisibility,src:"gb"}:{value:!1,src:"default"}}function G1n(){return lVo().value}function lVo(){let e=As.CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL_CAP;if(e!==void 0)return{value:e,src:"env"};let n=nc()?.editRemovalCap;return typeof n==="number"&&Number.isFinite(n)?{value:n,src:"gb"}:{value:aVo,src:"default"}}var aVo=3000;var Vvt=w(()=>{Qo();OC()});function K1n(e,t,n){if(!V1n(e))return null;if(!Kvt(t).isValid)return null;let o=n(),s=Kvt(o);if(!s.isValid)return{result:!1,message:`Claude Code settings.json validation failed after edit:
+${s.error}
+
+Full schema:
+${s.fullSchema}
+IMPORTANT: Do not update the env unless explicitly instructed to do so.`,errorCode:10};return null}var Y1n=w(()=>{Rs();cVo()});function X1n(e){if(!cn(e))return null;let t={...e},n=[];if("replace_name"in t){let r=t.replace_name;if(!("replace_all"in t))t.replace_all=r===!0||r==="true";delete t.replace_name,n.push("alias_replace_name")}if("path"in t&&!("file_path"in t)&&typeof t.path==="string")t.file_path=t.path,delete t.path,n.push("path");if("old_str"in t&&!("old_string"in t)&&typeof t.old_str==="string")t.old_string=t.old_str,delete t.old_str,n.push("old_str");if("new_str"in t&&!("new_string"in t)&&typeof t.new_str==="string")t.new_string=t.new_str,delete t.new_str,n.push("new_str");return n.length?{input:t,shapeClass:n.join(",")}:null}var Z1n=w(()=>{wi()});function uVo(){return`
+- You must use your \`${Tn}\` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file.`}function dVo(){return`
+- If the file is outside the working directory, you must use your \`${Tn}\` tool to read it before editing. This tool will error if you edit such a file without reading it first.`}function J1n(e){return pVo(e)}function pVo(e){let t=O2(),n=!yO()&&d6(e);if(uu(e)){let s=t?"line number + a single tab or `:`":"line number + tab";return`Performs exact string replacement in a file.
+${n?`
+- If the file is outside the working directory, you must ${Tn} it in this conversation before editing, or the call will fail.`:`
+- You must ${Tn} the file in th

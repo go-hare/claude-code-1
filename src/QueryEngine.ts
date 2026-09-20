@@ -418,6 +418,7 @@ export class QueryEngine {
         tools,
         verbose,
         mainLoopModel: initialMainLoopModel,
+        fallbackModel,
         thinkingConfig: initialThinkingConfig,
         mcpClients,
         mcpResources: {},

@@ -1,0 +1,3 @@
+# 246 leftover (renamed) TP @212280557 end=212280596 len=39
+# 247 HP equivalent. same-shape leftover, not 247 name.
+function TP(){return _sn.of(hn().host)}

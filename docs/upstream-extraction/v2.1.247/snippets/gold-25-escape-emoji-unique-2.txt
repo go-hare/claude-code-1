@@ -1,0 +1,4 @@
+# 247 emoji @207289764
+
+s X,Gxd as P,hyd as j,nyd as pe}from"B:/~BUN/root/_841.js";import{Gzd as m,eAd as G}from"B:/~BUN/root/_845.js";import{FBd as x}from"B:/~BUN/root/_850.js";import{createHmac as ee}from"crypto";function S(e){let n=ie(e).trim(),r=[...n];return r.length>64?`${r.slice(0,64).join("")}\u2026`:n}function ie(e){return e.replace(/[\p{Cf}\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/gu,"")}function Te(e){let n=0;while(n<=e.length){let r=e.indexOf(`
+`,n),s=r===-1?e.length:r,t=s-n<=_,i=m(e.slice(n,Math.min(s,n+_)),_),o=y(i," ",{keepEmojiJoiners:!0}).replace(/\s+/g," ").trim();if(o!==""||!t){let d=m(o,O),V=!t||d.length<o.length;return N(V?`${d}\u2026`:d,oe)}if(r===-1)break;n=r+1}return""}function be(e){let n=S(e).replace(ne,"-").replace(re,"");if(!te.test(n))return"";let r=m(n,se);return r===n?n:`${r}\u2026`}function Le(e){return de.has(e)}function b(e){let n=new TextEncoder;return e.replace(/[^A-Za-z0-9:_/.\\-]/gu,(r)=>A

@@ -1,0 +1,32 @@
+# 246 offset=202069312 needle="unix_socket_unreadable_policy"
+
+edAccessToken...&...@...tengu_oauth_401_sdk_callback_refreshed...K
+:.oauth_401_recovery..=...SDK getOAuthToken callback returned null (no token available)...R...".h.SDK getOAuthToken callback returned the same expired token; treating as no refresh...6...oauth_401_sdk_callback_failed...#...^..SDK getOAuthToken callback failed: ...?...OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login..#...tengu_oauth_401_recovered_from_disk...i...oauth_401_disk_read_failed.."...OAuth 401 recovery: waiting up to ... n_.ms for a rotated env token..'...tengu_oauth_401_recovered_from_rotation. ...oauth_401_skipped_user_env_token$...!"B.oauth_401_no_refresh_token_bg_worker&...oauth_401_no_refresh_token_interactive...G_.tengu_oauth_401_zombie_exit.}...;.O.A.u.t.h. .4.0.1. .u.n.r.e.c.o.v.e.r.e.d. .p.a.s.t. .C.L.A.U.D.E._.C.O.D.E._.A.U.T.H._.F.A.I.L._.E.X.I.T._.M.S. ..  .e.x.i.t.i.n.g. .s.o. .t.h.e. .r.u.n.n.e.r. .r.e.c.y.c.l.e.s. .t.h.i.s. .s.e.s.s.i.o.n. .w.i.t.h. .f.r.e.s.h. .c.r.e.d.e.n.t.i.a.l.s...'...tengu_oauth_401_recovered_from_keychain. .../.2.OAuth refresh lock compromised: )...tengu_oauth_refresh_legacy_lock_contended...*...7..OAuth refresh legacy-lock acquire failed: ..#...&..OAuth refresh lock release failed: ...u.lockAttempts...no_refresh_token...c"M.known_dead_refresh_token...not_refreshable.'...:...tengu_oauth_token_refresh_race_resolved.$...-...tengu_oauth_token_refresh_lock_retry2...JK..tengu_oauth_token_refresh_lock_retry_limit_reached...`.D.oauth_refresh_lock_timeout...g...lock_timeout$...d.tengu_oauth_token_refresh_lock_error...)...oauth_refresh_lock_error
+...:&.lock_error..,...W..tengu_oauth_token_refresh_locked_read_failed ...;i..oauth_refresh_locked_read_failed3...7...tengu_oauth_token_refresh_lock_compromised_pre_post...oauth_refresh_lock_compromised..*...$.tengu_oauth_refresh_invalid_scope_fallback..-...#...OAuth refresh failed while lock compromised: ...3...LA.tengu_oauth_token_refresh_lock_compromised_in_catch.(...t..tengu_oauth_token_refresh_race_recovered!...|.OAuth refresh failed (expected): ...)...tengu_oauth_refresh_token_account_on_hold...,...W..tengu_oauth_token_refresh_lock_release_error...managed_by_host_under_pin...P.unix_socket_3p_under_pin...p..unix_socket_ssh_under_pin...+.unix_socket_unreadable_policy...o9U.This machine's managed settings require a first-party login, but an
+Anthropic-issued credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+or apiKeyHelper) is configured. A non-OAuth Anthropic credential
+cannot satisfy the org pin.
+
+Remove the credential and run: claude auth login
+
+If this is a third-party desktop session: forceLoginOrgUUID targets first-party OAuth and should be removed from managed-settings.json...i.could not be read...hO..policy_unreadable_fail_close...s0A.Unable to read managed policy settings.
+This machine may require organization login enforcement, but the policy file failed to load.
+Contact your administrator.
+
+Detail: ...h.forceLoginOrgUUID in managed settings is set to an empty array.
+No organizations are permitted. This is almost certainly a misconfiguration.
+Contact your administrator....;..organization ...<..one of these organizations: Z...&.[.Unable to verify organization for the current authentication token.
+This machine requires ...|.W. but the token could not be validated.
+This may be a network error, or the token may have been revoked.
+Try again, or run: claude auth login...2.. environment variable provides a token for a
+different organization than required by this machine's managed settings.
+
+Required: ...i.
+Token organization: ...Q...(..
+
+Remove the environment variable or obtain a token for a permitted organization...2...Your authentication token belongs to organization ...,
+but this machine requires A.../..
+
+Please log in with a permitted organization: claude auth login...j^'.api_provider...t.E.auth_token_source...az..B:/~BUN/root/chunk-n91e144z.js..L...1.Cannot destructure property 'getWIFCredentials' from null or undefined value#...@...WIF auth header resolution failed: .	...em..wif_error...<.getWIFCredentials...
+2..getWIFTokenCache...;...also403Revoked...>./api/features/..
+...]F./api/eval/.../sub/..., .visibilitychange...G...cacheSettings...)...subscribeToChanges.....(...navigateDelay...1...*[.Cannot log event to destroyed GrowthBook instance...U..No event logger configured... ...GITHUB_ACTOR_ID...q=..GITHUB_REPOSITORY...GITHUB_REPOSITORY_ID...4G..GITHUB_REPOSITORY_OWNER...repositoryOwner...GITHUB_REPOSITORY_OWNER_ID..K...Cannot destructure property 'experimentResult' from null or undefined value...{r..:key=......S.,variationId=...7...B..proc

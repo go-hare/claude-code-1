@@ -1,0 +1,3 @@
+# 247 _g( @215504878
+
+n,{activeAgents:r.activeAgents})||za(n,Fh)||!Fh.isEnabled())return t;let l=t.findIndex((c)=>c.isMcp||c.name.startsWith(Jze)||zQ(c,Fh)>0);if(l===-1)l=t.length;return t.toSpliced(l,0,Fh)}var TV=w(()=>{KO();En();ai();Md();zp();ty();Y_();f1e();ti();$3();_g();m1e();Uft()});function g1e(e){return cJo.has(e)?`/${e}`:null}var cJo,f9n="(?:\\./)?(?:(?:npx|bunx|uvx|uv\\s+run)\\s+)?",zEl,HEl;var QAt=w(()=>{kN();cJo=new Set([EV,Dhe]),zEl=[/^(?:bun|npm|yarn|pnpm|deno)\s+(?:run\s+)?test\b/,/^(?:\.\/)?(?:go|cargo|make|mvn|gradle|gradlew|dotnet|swift|mix|sbt|lein|rake|zig|bazel|nx|turbo)\s+test\b/,new RegExp(`

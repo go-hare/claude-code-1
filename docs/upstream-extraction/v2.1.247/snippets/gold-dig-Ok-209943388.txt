@@ -1,0 +1,3 @@
+# offset=209943388
+
+function Ok(e){let t=[],n=!1,r=e.allows.filter((s)=>!s.glob).map((s)=>s.path);for(let s of e.denies){if(!s.glob){if(r.some((l)=>s.path.startsWith(l+"/")))t.push(vs(s.path));continue}let i=new RegExp(xd(s.path));if(i.test("/"))n=!0;let a=e.allows.filter((l)=>Kg(i,l)).map((l)=>ui(l.path));t.push(Sd(vs(s.path),a))}return{filters:t,coversRoot:n}}function Zg(e){let t=e.split(/[*?[\]]/)[0];if(!t||t==="/")return"/";return t.endsWith("/")?t.slice(0,-1):Ar.dirname(t)}function kk(e,t){let{denies:n,allows:

@@ -1,0 +1,3 @@
+# 247 function ke start=207291791 end=207291873 len=82 sha=810ebe6903dffcea
+
+function ke(e,n,r){if(e.body===void 0||n===r)return e;let{body:s,...t}=e;return t}

@@ -1,0 +1,2 @@
+# needle=function We(){let pos=223103597 end=223103890 len=293
+function We(){let{items:e,kinds:o}=S(),n=[];for(let t of e){if(t.kind==="todo"||t.doneAt!==void 0)continue;n.push({label:re[t.kind],detail:l(t.label,I,!0)})}if(o.includes("auto_mode_scan"))n.push({label:h.auto_mode_scan,detail:"environment scan for /auto-mode-setup"});return n.push(...y()),n}

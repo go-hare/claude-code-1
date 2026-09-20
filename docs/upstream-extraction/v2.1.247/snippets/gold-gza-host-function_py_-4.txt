@@ -1,0 +1,2 @@
+# needle=function py( pos=223828282
+function py(e,t){let o=uy(),{storageV5:n,credentials:r}=Sr(),i=mt(new Map);ne(()=>{let{next:l,notifications:d,notified:m}=eC(i.current,e);i.current=l;for(let p of d)cy(p,o,{storageV5:n,credentials:r});let f=Date.now();for(let p of m)if(Fp(t,p.sessionId,p.kind,f))Ie("tengu_bg_agent_notification",{kind:It(p.kind),jobSessionId:Ot(p.sessionId)})})}

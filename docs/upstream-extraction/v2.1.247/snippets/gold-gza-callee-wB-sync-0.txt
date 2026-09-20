@@ -1,0 +1,2 @@
+# needle=function wB( pos=208743099 end=208743196 len=97
+function wB(){try{return qn()?.settings.autoUploadSessions??k().autoUploadSessions}catch{return}}

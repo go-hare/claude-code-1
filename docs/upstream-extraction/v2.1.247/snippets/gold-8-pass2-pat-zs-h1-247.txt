@@ -1,0 +1,3 @@
+# off=206695377 pat=",zs="
+
+nal().describe("Tool execution time in milliseconds. Excludes permission-prompt and hook time.")}))),zs=s(()=>t({tool_name:e(),tool_input:d(),tool_use_id:e(),tool_response:d().optional()})),fs=s(()=>h().and(t({hook_event_name:n("PostToolBatch"),tool_calls:r(zs())})).describe("Hook input for the PostToolBatch event. Fired once after every tool call 

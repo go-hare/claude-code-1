@@ -1,0 +1,23 @@
+# ver=246 name=rp async=true start=220069798 end=220072088 len=2290 sha=a28c42366efbe8b4 needle="background session"
+
+async function rp(e,t){if(Hr(),e==="--help"||e==="-h")process.stdout.write(`Usage: claude rm <id>
+
+  Delete a background session and its worktree. Unlike \`stop\`, works on already-exited sessions.
+`),process.exit(0);if(e?.startsWith("-"))process.stderr.write(`unknown option '${e}'
+Usage: claude rm <id>
+`),process.exit(1);if(!e)process.stderr.write(`Usage: claude rm <id>
+`),process.exit(1);let n=(t?await Kr(t)??[]:await Jr(St()).catch(()=>[])).filter((w)=>it.test(w)).filter((w)=>w.startsWith(e));if(n.length!==1)process.stderr.write(n.length===0?`No job matching '${e}'
+`:`Ambiguous prefix '${e}', matches: ${n.join(", ")}
+`),process.exit(1);let o=n[0],s=await z(M(o),t),{removed:i,error:c,errorCode:a,keptWorktree:d,keptReason:u,keptErrorSummary:f,leftWorktreeDir:l}=await ze(o,{},t);if(!i){if(d){await kt("cli_bg_rm","kept_worktree"),process.stdout.write(`kept ${o} \u2014 worktree ${Rs(u,f)}
+  worktree kept at ${d}
+`+(u==="unverified"||u==="shared_record"?`  if you don't need its contents, remove the directory, then run 'claude rm ${o}' again
+`:u==="identity_changed"?`  retry the delete (the directory's resolution changed while it was being verified), then run 'claude rm ${o}' again if it recurs
+`:u==="records_unreadable"?`  retry once sibling records are readable (see ~/.claude/jobs), then run 'claude rm ${o}' again
+`:u==="occupied"?`  exit the Claude Code session using that directory (shown above; or 'claude stop <id>' if it is a background session), then run 'claude rm ${o}' again
+`:u==="in_use"||u==="live_lock"?`  wait for that session to finish (or stop it), then run 'claude rm ${o}' again
+`:`  resolve that (commit/push, or remove the worktree), then run 'claude rm ${o}' again
+`)),process.exitCode=1;return}await pe("cli_bg_rm",a??"kill_unconfirmed"),process.stderr.write(`couldn't remove ${o} \u2014 ${c??"the background service may be restarting. Try again in a moment."}
+`),process.exitCode=1;return}if(await bt("tengu_bg_agent_action",{action:ae("delete"),source:ae("cli"),jobSessionId:me(s?.sessionId)??ae("")}),l)await kt("cli_bg_rm","worktree_left_in_place");else await Ne("cli_bg_rm");process.stdout.write(`removed ${o}`+(l?`
+  worktree directory left at ${l} (git no longer recognized it)`:s?.worktreePath?`
+  worktree: ${yt(s.worktreePath)}`:"")+`
+`)}

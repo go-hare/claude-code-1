@@ -1,0 +1,5 @@
+# offset=235143748
+
+consumePrefetchedHistory,ut as gateSeed,k as historyPageToSeed,ct as partialSeedNotice,at as peekPrefetchedHistory,A as prefetchRemoteHistory,lt as reportPrefetchOutcome};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's 

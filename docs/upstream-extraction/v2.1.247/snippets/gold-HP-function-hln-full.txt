@@ -1,0 +1,3 @@
+# LOCKED hln @213648126 end=213648168 len=42
+# unique function hln(){return HP().flushStorageV5} count=1
+function hln(){return HP().flushStorageV5}

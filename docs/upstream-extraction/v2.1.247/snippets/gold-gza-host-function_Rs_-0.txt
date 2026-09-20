@@ -1,0 +1,2 @@
+# needle=function Rs( pos=206933356
+function Rs(e,t,o,r,s,a){var l=o&ws,d=e.length,g=t.length;if(d!=g&&!(l&&g>d))return!1;var c=a.get(e),v=a.get(t);if(c&&v)return c==t&&v==e;var u=-1,p=!0,h=o&Ls?new An:void 0;a.set(e,t),a.set(t,e);while(++u<d){var S=e[u],C=t[u];if(r)var P=l?r(C,S,u,t,e,a):r(S,C,u,e,t,a);if(P!==void 0){if(P)continue;p=!1;break}if(h){if(!Tn(t,function(R,I){if(!wn(h,I)&&(S===R||s(S,R,o,r,a)))return h.push(I)})){p=!1;break}}else if(!(S===C||s(S,C,o,r,a))){p=!1;break}}return a.delete(e),a.delete(t),p}

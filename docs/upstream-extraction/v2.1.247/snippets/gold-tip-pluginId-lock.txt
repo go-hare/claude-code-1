@@ -1,0 +1,204 @@
+# tip pluginId / Ohe / Nhe / FV / pZe / uk lock — official 2.1.247 peel ONLY.
+# Invent-ban. Collision-ban Ohe/Nhe/FV/We. Do not reopen providerAgnostic/Vhe (#2 HAVE).
+# No shared live-index invented.
+
+## 1) Tip record that carries pluginId — LOCKED
+
+SETTER unique count=1 @222270548
+  needle `o.push({id:O,pluginId:`
+  who: Xt.buildMarketplacePluginTips only
+  gold-tip-pluginId-setter-0.txt
+  gold-tip-pluginId-Xt-0.txt  class Xt @222269375
+
+shape (marketplace-declared tip only):
+  {
+    id: O,                                          // official mkt: marketplace-plugin:${name}
+                                                    // else: marketplace-plugin:${name}@${mkt}
+    pluginId: `${l.name}@${s}`,                     // ALWAYS name@marketplace
+    advertisedCommand: "plugin",
+    priority: 1,
+    providerAgnostic: !0,
+    cooldownSessions: 3,
+    content, isRelevant
+  }
+
+CONSUMER unique count=1 @232387758
+  `if(!r.pluginId)continue` then `Ohe(r.pluginId)`
+  only Qhe reads r.pluginId
+  Pi / Vhe / Whe do not read pluginId — not reopened
+
+pluginId: elsewhere in SEA = hooks/install/schema (30 hits). Those are not tip records.
+`pluginId:`${l.name}@${s}`` count=1 — this setter only.
+
+## 2) Ohe(pluginId) / Nhe(tipId) — LOCKED (NOT host WeakMaps)
+
+User guess "WeakMap-on-host show counters" is FALSE for Ohe/Nhe.
+
+Import unique count=1 @232036799
+  `uL as Nhe, vL as Ohe` from _360.js
+  gold-tip-pluginId-import-360.txt
+
+_360.js unique @222247237..222247985
+  gold-tip-pluginId-360-export-0.txt
+  export{p as tL, a as uL, h as vL, m as wL, w as xL, l as yL, c as zL}
+
+  tL = p = Lhe  recordTipShown (tipsHistory + tipLifetimeShownCounts)
+  uL = a = Nhe  function a(n){return s().tipLifetimeShownCounts?.[n]??0}     @222247452
+  vL = h = Ohe  function h(n){return s().pluginSuggestionShownCounts?.[n]??0} @222247508
+  wL = m = IV   sessions since last shown
+  gold-tip-pluginId-Nhe-uL-0.txt
+  gold-tip-pluginId-Ohe-vL-0.txt
+
+Qhe use @232387825 / 232387837 unique:
+  let s=Nhe(r.id), a=Ohe(r.pluginId)
+  fZe().fire(a,s)
+  Math.max(s,a)>=EV  continue   EV=2 unique @232387223
+
+pluginSuggestionShownCounts writer in this SEA: NONE
+  `pluginSuggestionShownCounts:` count=0
+  `pluginSuggestionShownCounts??` count=0
+  string+reader only (sourcemap @199438564 + h() @222247533)
+  so Ohe(pluginId) is a config-map READ with no 247 write site
+
+COLLIDE (banned, not this):
+  function Ohe(e) @215503306  agentDefinitions
+  function Ohe(e,t) @242361411  string-join; uses Nhe as delimiter
+  function Nhe(e,t) @215518861  session-continue prompt
+  no `var Ohe=` / `Ohe=e=>` / `function Ohe(` in Qhe±16k
+
+## 3) FV.of(session.host) marketplace tip cache — LOCKED
+
+Qhe: `let t=FV.of(e.session.host)` unique count=1 @232387620
+Ghe: `FV.of(t.session.host).failedTipIds.add` unique count=1 @232387140
+  (same cache as tips-module `h.of(t.session.host).failedTipIds`)
+
+chain unique:
+  var h=new ye(()=>new Xt)     @222271269   gold-tip-pluginId-h-Xt-0.txt
+  export{h as Td, Lo as Ud, Do as Vd, Pi as Wd, ...}  @222296752
+    gold-tip-pluginId-tips-export-Td-0.txt
+    `h as Td` count=1
+  import{Td as FV, Ud as jhe, Vd as $he, Wd as Whe, ...} from _35.js  @232025902
+    gold-tip-pluginId-FV-import.txt
+    `Td as FV` count=1
+
+Xt @222269375:
+  knownMarketplaces, marketplacePluginTips, sessionCountInFlight,
+  desktopInstalled, ghAuthStatus, failedTipIds
+  getMarketplacePluginTips(e){return this.marketplacePluginTips??=this.loadMarketplacePluginTips(e), ...}
+
+ye = Hnd = class te WeakMap factory (same as wa below).
+
+COLLIDE ` as FV` count=8 — only Td as FV is this binding.
+getMarketplacePluginTips(e.storageV5) count=2: Pi @222293892 (h.of) and Qhe @232387672 (FV.of). Same Xt method, two hosts.
+
+## 4) pZe.of(host) / uk().host — LOCKED
+
+pZe UNIQUE @232387485
+  var pZe=new wa(()=>new Khe)
+  function fZe(){return pZe.of(uk().host)}   @232387513 len=40
+  gold-tip-pluginId-fZe-0.txt
+  gold-tip-pluginId-Khe-0.txt
+
+class Khe UNIQUE @232387232 len=253
+  fired=new Set
+  fire(e,t){
+    if(e<=0)return;
+    o=e>t?"true":"false"
+    n=e>=EV&&t<EV?"true":"false"
+    r=`${o}|${n}`
+    if(this.fired.has(r))return
+    this.fired.add(r)
+    U("tengu_dead_probe_legacy_plugin_tip_counts",{changes_max, changes_outcome})
+  }
+  This is a host WeakMap telemetry latch, NOT the show-count store.
+
+wa = Hnd UNIQUE
+  `Hnd as wa` count=1 @232066716 from _839.js
+  `Hnd as ye` count=1 @222268660 (tips module, same factory for h)
+  export `te as Hnd` count=1 @207021885
+  class te{#e;#t=new WeakMap; constructor(e){this.#e=e}
+    of(e){let t=this.#t.get(e); if(t!==void 0)return t;
+      let o=this.#e(); this.#t.set(e,o); return o}}
+    @206941696 same _839 module (0 @bun/@Version to export)
+    gold-tip-pluginId-class-te-1.txt
+
+uk = xod = Tm UNIQUE
+  `xod as uk` count=1 @232067384 from _839.js  (Qhe bundle)
+  export `Tm as xod` count=1 @207022322
+  function Tm(){return n()}
+  function n(){return re()?.session??k}
+    @206986838 same _839 module (0 bytecode to export)
+  gold-tip-pluginId-uk-Tm.txt
+  gold-tip-pluginId-Tm-neigh.txt
+  bootstrap neighbor es() returns Li({host:Xi(), id, project})
+  k is the fallback session when re() has no session
+
+uk().host count=3 (same getter, different caches):
+  @232247411  P5e.of(uk().host)  Oue sleep inhibitor — NOT tips
+  @232264073  z5e.of(uk().host)  regex — NOT tips
+  @232387542  pZe.of(uk().host)  Khe — THIS
+
+function uk( collide 3: launchOptions / realpath / react memo — NOT xod.
+
+## 5) Local src facts (marketplacePluginTips.ts + tipScheduler.ts)
+
+marketplacePluginTips.ts
+  MISSING pluginId field on the pushed tip object
+  (local `const pluginId = name@mkt` is only isPluginInstalled / enabledPlugins)
+  types.ts Tip has no pluginId
+  HAS advertisedCommand / providerAgnostic / cooldownSessions / id shape
+
+tipScheduler.ts
+  MISSING Qhe entirely (no pluginId skip, no Ohe/Nhe, no EV=2, no fZe/Khe/pZe)
+  HAS Vhe-equivalent: getRelevantTips → selectTipWithLongestTimeSinceShown (qhe)
+  no host WeakMap in this file
+  evaluateTipContent uses spinnerTipHostFromContext (tipRegistry FV-stand-in)
+
+also (named files only; no invent):
+  tipHistory.ts HAS Nhe map (tipLifetimeShownCounts)
+  tipHistory.ts MISSING Ohe map (pluginSuggestionShownCounts) — no write, no read
+  tipRegistry.ts HAS Xt/h WeakOwnerCache (FV) — not in the two named files
+
+## Qhe body (unique) @232387553 len=502
+
+gold-tip-pluginId-Qhe-0.txt
+
+async function Qhe(e){
+  if(MV().spinnerTipsEnabled===!1)return;
+  let t=FV.of(e.session.host);
+  if(Hhe())return;
+  let o=await t.getMarketplacePluginTips(e.storageV5);
+  if(o.length===0)return;
+  let n=[];
+  for(let r of o){
+    if(!r.pluginId)continue;
+    if(t.failedTipIds.has(r.id))continue;
+    let s=Nhe(r.id), a=Ohe(r.pluginId);
+    if(fZe().fire(a,s), Math.max(s,a)>=EV)continue;
+    if(IV(r.id)<r.cooldownSessions)continue;
+    if(r.advertisedCommand!==void 0 && !await jhe(r.advertisedCommand))continue;
+    if(await $he(r,e)) n.push(r)
+  }
+  return qhe(n)
+}
+
+Vhe remains Whe→qhe (gold-2-qhe-before.txt). Not reopened.
+
+## UNKNOWN (not requested / collide / no body)
+
+Hhe() in Qhe — not uniquely requested; do not invent (= exclude-default-tips?)
+$he / jhe — already Pi-side Do / Lo aliases (Vd / Ud); not re-peeled
+We() in mL — collide function We( count=30; analytics fire; not this job
+re / k / Li / Xi inside _839 session bootstrap — neighbor-seen, not separately requested
+who WRITES pluginSuggestionShownCounts — no 247 write site; UNKNOWN if external/older
+no shared live-index
+
+## Peel scripts
+
+_peel-tip-pluginId.mjs
+_peel-tip-pluginId-pass2.mjs
+_peel-tip-pluginId-pass3.mjs
+_peel-tip-pluginId-pass4.mjs
+_peel-tip-pluginId-pass5.mjs
+_peel-tip-pluginId-pass6.mjs
+scans: gold-tip-pluginId-scan.txt … scan5.txt

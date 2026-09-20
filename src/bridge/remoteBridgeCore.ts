@@ -219,6 +219,8 @@ export type EnvLessBridgeParams = {
   onRenameSession?: (
     title: string,
   ) => { ok: true } | { ok: false; error: string }
+  /** densable 2.1.247 `onGetWorkspaceDiff` — RC working-tree diff pull. */
+  onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * When true, skip opening the SSE read stream — only the CCRClient write
@@ -321,6 +323,7 @@ export async function initEnvLessBridgeCore(
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
     onRenameSession,
+    onGetWorkspaceDiff,
     onStateChange,
     outboundOnly,
     tags,
@@ -992,6 +995,7 @@ export async function initEnvLessBridgeCore(
             onSetPermissionMode,
             onSetMcpPermissionModeOverride,
             onRenameSession,
+            onGetWorkspaceDiff,
             outboundOnly,
           }),
       )

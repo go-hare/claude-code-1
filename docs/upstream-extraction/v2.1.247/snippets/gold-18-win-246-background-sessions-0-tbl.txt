@@ -1,0 +1,38 @@
+# ver=246 offset=196318946 kind=tbl run=159 needle="background sessions"
+
+R. .c.o.m.m.e.n.t.s... .T.e.l.l. .t.h.e. .u.s.e.r. .t.h.i.s. .i.n. .o.n.e. .s.h.o.r.t. .l.i.n.e...).
+.
+...s..(.T.h.e. .t.y.p.e.d. .`.-.-.p.o.s.t.`. .a.p.p.l.i.e.s. .o.n.l.y. .t.o. .t.h.e. .`./.c.o.d.e.-.r.e.v.i.e.w. .u.l.t.r.a.`. .c.l.o.u.d. .r.e.v.i.e.w. .a.n.d. .w.a.s. .i.g.n.o.r.e.d. ..  .t.h.i.s. .l.o.c.a.l. .r.e.v.i.e.w. .w.i.l.l. .n.o.t. .p.o.s.t. .t.o. .G.i.t.H.u.b.;. .`.-.-.c.o.m.m.e.n.t.`. .i.s. .t.h.e. .f.l.a.g. .t.h.a.t. .p.o.s.t.s. .l.o.c.a.l. .f.i.n.d.i.n.g.s. .a.s. .i.n.l.i.n.e. .P.R. .c.o.m.m.e.n.t.s... .T.e.l.l. .t.h.e. .u.s.e.r. .t.h.i.s. .i.n. .o.n.e. .s.h.o.r.t. .l.i.n.e...).
+.
+.F... Open your report with one short line telling the user this, and that ..6...!22.; that opening line reaches them with the findings.)
+
+..C...8... Tell the user this in one short line as you begin, including that ..._.O..)
+
+...l~..Reusing &... .. effort, the level you typed last time..5...vm.. Type a level like `/code-review high` to change it...
+... ;..daemon-log...W.[.#.#. .D.a.e.m.o.n.
+.
+.N.o. .d.a.e.m.o.n. .l.o.c.k. .o.r. .s.t.a.t.u.s. .f.i.l.e. .f.o.u.n.d. ..  .t.h.e. .b.a.c.k.g.r.o.u.n.d. .d.a.e.m.o.n. .d.o.e.s. .n.o.t. .a.p.p.e.a.r. .t.o. .b.e. .r.u.n.n.i.n.g... .I.f. .t.h.e. .i.s.s.u.e. .i.n.v.o.l.v.e.s. .b.a.c.k.g.r.o.u.n.d. .s.e.s.s.i.o.n.s. .o.r. .`.c.l.a.u.d.e. .a.g.e.n.t.s.`.,. .t.h.e. .d.a.e.m.o.n. .l.o.g. .(.i.f. .a.n.y.). .i.s. .a.t. .`...## Daemon
+
+The background daemon manages `& <prompt>` jobs and `claude agents`. If the issue involves background sessions, look here.
+
+### daemon.lock
+```json
+.	...K,..(missing)...%...a[.
+```
+
+### daemon.status.json
+```json
+...m.$.
+```
+
+### Daemon log (`.`...
+.
+.O.t.h.e.r. .d.a.e.m.o.n. .s.t.a.t.e. .o.n. .d.i.s.k. .(.R.e.a.d. .i.f. .r.e.l.e.v.a.n.t. ..  .r.o.s.t.e.r. .c.o.n.t.a.i.n.s. .u.s.e.r. .p.r.o.m.p.t.s. .a.n.d. .e.n.v. .v.a.r.s.).:.
+.-. .`...rm.`. ..  .l.i.v.e. .w.o.r.k.e.r. .r.o.s.t.e.r.
+.-. .`.$...V./.<.s.h.o.r.t.>./.s.t.a.t.e...j.s.o.n.`. ..  .p.e.r.-.j.o.b. .s.t.a.t.e...`	..Failed to read last ...G... lines: ...w..No log file exists yet.....C.(read error: ...'.1.DISABLE_DOCTOR_COMMAND..,...\..
+
+## Additional instructions from the user
+
+...S.h.o.w. .m.e. .w.h.e.r.e. .t.h.i.s. .s.e.s.s.i.o.n.'.s. .t.o.k.e.n.s. .w.e.n.t...
+.
+.T.h.e. .t.r.a.n.s.c.r.i.p.t. .i.s. .a. .*...j.s.o.n.l. .f.i.l.e. .a.t. .`.$.{.C.L.A.U.D.E._.C.O.N.F.I.G._.D.I.R.:.-.$.H.O.M.E./...c.l.a.u.d.e.}./.p.r.o.j.e.c.t.s./.*./.`... .B.r.e.a.k. .t.h.e. .u.s.a.g.e. .i.n.t.o. .g.r.o.u.p.s. .(.a.p.p.r.o.x.i.m.a.t.e. .i.s. .f.i.n.e.).:. .C.l.a.u.d.e.'.s. .i.n.s.t.r.u.c.t.i.o.n.s. .(.t.h.e. .s.y.s.t.e.m. .p.r.o.m.p.t. .a.n.d. .t.o.o.l. .l.i.s.t. .t.h.a.t. .g.e.t. .r.e.-.r.e.a.d. .e.a.c.h. .t.u.r.n.).,. .C.l.a.u.d.e. .i.n. .C.h.r.o.m.e. .(.`.m.c.p._._.c.l.a.u.d.e.-.i.n.-.c.h.r.o.m.e._._.`. .t.o.o.l.s.).,. .c.o.n.n.e.c.t.o.r.s. .(.o.t.h.e.r. .`.m.c.p._._.`. .t.o.o.l.s.,. .g.r.o.u.p.e.d. .b.y. .c.o.n.n.e.c.t.o.r.).,. .w.e.b. .r.e.s.e.a.r.c.h. .(.W.e.b.S.e.a.r.c.h. .a.n.d. .W.e.b.F.

@@ -1,0 +1,21 @@
+# offset=210358232 idx=2/6 needle="headless browser"
+
+st Read. Refer to that earlier tool_result instead.",vA="<system-reminder>This file is already in your context",B7="[Truncated: PARTIAL view \u2014 ",wA=2000,V7="Read a file from the local filesystem.",aK="- Results are returned using cat -n format, with line numbers starting at 1",W7,G7="- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters",H7="- When you already know which part of the file you need, only read that part. This can be important for larger files.";var NA=le(()=>{IA();xA();iK();W7=`${aK}. Each line is the line number, a single separator (a tab or \`:\`), then the verbatim file content (including any leading whitespace).`});class OA{ms=void 0}function dK(){let e=uK.of(Gi().host);return e.ms??=sn.CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS??lK,e.ms}function kA(){let e=Math.max(1,Math.round(dK()/60000));return`${e} ${RA(e,"minute")}`}function eee(e,t=!1){if(nu(e))return`Fetches a URL, converts the page to markdown, and answers \`prompt\` against it using a small fast model.
+
+- Fails on authenticated/private URLs \u2014 use an authenticated MCP tool or \`gh\` for those instead.${t?" Exception: claude.ai/code/artifact/{uuid} URLs ARE fetchable via your claude.ai login \u2014 use WebFetch, not curl (curl gets the SPA shell or a Cloudflare 403).":""}
+- HTTP is upgraded to HTTPS. Cross-host redirects are returned to you rather than followed; call again with the redirect URL.
+- Responses are cached for ${kA()} per URL.`;return`IMPORTANT: WebFetch WILL FAIL for authenticated or private URLs. Before using this tool, check if the URL points to an authenticated service (e.g. Google Docs, Confluence, Jira, GitHub). If so, look for a specialized MCP tool that provides authenticated access.
+${t?`- Exception: claude.ai/code/artifact/{uuid} URLs (including preview.claude.ai) ARE fetchable \u2014 WebFetch uses your claude.ai login. Use WebFetch for these, not curl or a headless browser (those return the SPA shell or a Cloudflare 403, not the content).
+`:""}${fK()}`}function fK(){return`
+- Fetches content from a specified URL and processes it using an AI model
+- Takes a URL and a prompt as input
+- Fetches the URL content, converts HTML to markdown
+- Processes the content with the prompt using a small, fast model
+- Returns the model's response about the content
+- Use this tool when you need to retrieve and analyze web content
+
+Usage notes:
+  - IMPORTANT: If an MCP-provided web fetch tool is available, prefer using that tool instead of this one, as it may have fewer restrictions.
+  - The URL must be a fully-formed valid URL
+  - HTTP URLs will be automatically upgraded to HTTPS
+  - The prompt should describe what information you want to extract from the page

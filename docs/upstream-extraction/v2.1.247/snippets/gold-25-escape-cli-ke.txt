@@ -1,0 +1,13 @@
+# gold-25-escape-cli-ke "ke(" count=4
+
+--- @233794593 ---
+,{children:[l.tick," Successfully removed marketplace:"," ",ke(n),t.scope?` (from ${t.scope} settings)`:""]}))}function kt(jr){let on=Se(11),{promise:Ur}=jr,{messages:an,summary:rn
+
+--- @233798183 ---
+_plugin_install"),b));e.render(m(Pe,{fallback:m(k,{children:ke(`Installing plugin "${n}"...`)}),children:m(yt,{promise:f})})),await e.waitUntilExit(),await ge(0)}async function Mr(
+
+--- @233819801 ---
+getUdsMessagingSocketPath();if(k!==void 0)await _(k,r)}de();ke();Kt();Lt();Dt();fo();no();ne();co();ro();Ot();Mt();eo();Rt();Vt();uo();zt();oo();ye();so();z();jt();Ut();Ht();Yt();B
+
+--- @233819960 ---
+jt();Ut();Ht();Yt();Bt();le();Ft();Jt();Gt();io();Zt();qt();ke();Et();ye();z();import{copyFile as It,stat as Pt}from"fs/promises";import{homedir as xt}from"os";import{join as vt}fr

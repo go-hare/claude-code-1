@@ -1,0 +1,3 @@
+# offset=219748385 idx=2/5 needle="updateSessionWorkerState"
+
+och:a,events:i.map((h)=>({payload:h}))},{headers:q(s),timeout:15000,signal:d,validateStatus:(h)=>h<500});N(l.status,l.data,"PostWorkerEvents"),n(`[runner:api] PostWorkerEvents -> ${l.status}`)},async updateSessionWorkerState(r,t,s,a,i,d){D(t,"sessionId"),n(`[runner:api] PUT ${r}/v1/code/sessions/${t}/worker`);let l=await A.put(`${r}/v1/code/sessions/${t}/worker`,i===void 0?{worker_epoch:a}:{worker

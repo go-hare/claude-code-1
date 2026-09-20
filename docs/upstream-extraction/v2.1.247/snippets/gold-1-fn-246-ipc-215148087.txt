@@ -1,0 +1,3 @@
+# ver=246 name=ipc async=false start=215148087 end=215148305 len=218 sha=a1c14a4a44144676 needle="feedbackDrafts"
+
+function ipc(e,{storageV5:t,via:n}){let r=Be()&&t!==void 0?jh("userSettings",{feedbackDrafts:e},void 0,t):jh("userSettings",{feedbackDrafts:e});return L("tengu_feedback_drafts_setting_changed",{value:Z(e),via:Z(n)}),r}

@@ -1,0 +1,107 @@
+# needle="claude-sonnet-5"
+# 247=197576720,201168456,203962301,203962334,204112654,204114521,204957646,204957710
+# 246=196064728,199606316,202349209,202349242,202495682,202497549,203333838,203333902
+
+===== 247 offset=197576720 =====
+deCodeSkill...8...registerRunSkill...registerRunSkillGeneratorSkill..	...9L.ccrHosted......F...metaConnector...hosted...
+..cell...FR>.modelEffort...ag.finderBudgetHint...O.).claude-sonnet-5...D
+..measuredExternal...s..$schema...>.$docs......ctrl+k ctrl+t......2..liveDocBacked...h7.({operation: "..J...r..You are handling a `/design` command for Claude Design (claude.ai/design)...H...2L..If the tools are available, dispatch on the first word of the arguments:...+./.| first word | what to do |....f.4.| --- | --- |...e...P...|. .`.c.o.n.s.e.n.t.`. .o.r. .`.r.e.v.o.k.e.`. .|. .A.s.k. .t.h.e. .u.s.e.r. .t.o. .r.u.n. .`./.d.e.s.i.g.n. .c.o.n.s.e.n.t.`. .o.r. .`./.d.e.s.i.g.n. .r.e.v.o.k.e.`. .t.h.e.m.s.e.l.v.e.s. ..  .t.h.e. .d.e.d.i.c.a.t.e.d. .c.o.m.m.a.n.d.s. .m.a.n.a.g.e. .t.h.e. .d.u.r.a.b.l.e. .a.g.e.n.t.-.a.c.c.e.s.s. .g.r.a.n.t.,. .a.n.d. .a.r.e. .a.v.a.i.l.a.b.l.e. .o.n.l.y. .w.i.t.h. .a. .f.i.r.s.t.-.p.a.r.t.y. .c.l.a.u.d.e...a.i. .l.
+
+===== 247 offset=201168456 =====
+ook cache, no payload yet)...'...Add a new working directory...%.<path>..E...j...Choose whether cloud sessions use the plugins enabled on this machine...dk..sameTurnSiblingContext...claude-sonnet-5[1m]...X.claude-opus-4-8[1m]...auto_mode_bypass...O..blind_apply...browser_file_upload_exfil...	d..browser_input_exfil...browser_js_exfil...5.browser_navigate_exfil...8.b.browser_shortcut_execution...chatops_trigger_comments	...Gr..ci_bypass...'...cloud_storage_mass_delete...OeI.cluster_wide_workload_creation...}...code_from_external...D.code_that_leaks_when_run...create_public_surface...create_rce_surface...%c-.create_unsafe_agents...credential_exploration...?..credential_leakage...O..credential_materialization...$...data_exfiltration...{>..dns_domain_cert_changes...Y..excess_sensitive_detail...I...exfil_scouting..._...expose_local_services...G...external_ingress_tunnel.
+
+===== 247 offset=203962301 =====
+9...C.VERTEX_REGION_CLAUDE_4_5_SONNET...M.P.August 2025...$G~.us.anthropic.claude-sonnet-4-6...VERTEX_REGION_CLAUDE_4_6_SONNET...6H.Sonnet 5...\.January 2026...2F.us.anthropic.claude-sonnet-5...(..anthropic.claude-sonnet-5...?...VERTEX_REGION_CLAUDE_5_SONNET...	...tier_2_10...A.Opus 4..(...w...us.anthropic.claude-opus-4-20250514-v1:0...7...claude-opus-4@20250514...VERTEX_REGION_CLAUDE_4_0_OPUS...
+...\.tier_15_75..*...<...us.anthropic.claude-opus-4-1-20250805-v1:0...$.claude-opus-4-1@20250805...VERTEX_REGION_CLAUDE_4_1_OPUS...w.Opus 4.5...$K.May 2025...claude-opus-4-5-20251101*...r.w.us.anthropic.claude-opus-4-5-20251101-v1:0...0..claude-opus-4-5@20251101...#.VERTEX_REGION_CLAUDE_4_5_OPUS...	...f.tier_5_25...us.anthropic.claude-opus-4-6-v1...[x.VERTEX_REGION_CLAUDE_4_6_OPUS...'.us.anthropic.claude-opus-4-7...anthropic.claude-opus-4-7...%.VERTEX_REGION_CLAUDE_4_7_OPUS...u
+
+===== 247 offset=203962334 =====
+_5_SONNET...M.P.August 2025...$G~.us.anthropic.claude-sonnet-4-6...VERTEX_REGION_CLAUDE_4_6_SONNET...6H.Sonnet 5...\.January 2026...2F.us.anthropic.claude-sonnet-5...(..anthropic.claude-sonnet-5...?...VERTEX_REGION_CLAUDE_5_SONNET...	...tier_2_10...A.Opus 4..(...w...us.anthropic.claude-opus-4-20250514-v1:0...7...claude-opus-4@20250514...VERTEX_REGION_CLAUDE_4_0_OPUS...
+...\.tier_15_75..*...<...us.anthropic.claude-opus-4-1-20250805-v1:0...$.claude-opus-4-1@20250805...VERTEX_REGION_CLAUDE_4_1_OPUS...w.Opus 4.5...$K.May 2025...claude-opus-4-5-20251101*...r.w.us.anthropic.claude-opus-4-5-20251101-v1:0...0..claude-opus-4-5@20251101...#.VERTEX_REGION_CLAUDE_4_5_OPUS...	...f.tier_5_25...us.anthropic.claude-opus-4-6-v1...[x.VERTEX_REGION_CLAUDE_4_6_OPUS...'.us.anthropic.claude-opus-4-7...anthropic.claude-opus-4-7...%.VERTEX_REGION_CLAUDE_4_7_OPUS...us.anthropic.claude-opus-4-8...`
+
+===== 247 offset=204112654 =====
+peL...sf..Prompt to evaluate with LLM. Use $ARGUMENTS placeholder for hook input JSON.6...H.~.Timeout in seconds for this specific prompt evaluation..q...c..Model to use for this prompt hook (e.g., "claude-sonnet-5"). If not specified, uses the default small fast model...Sets the continue value for the decision:"block" produced when ok is false. Default false (turn ends). Whether continue:true lets the turn proceed depends on the event's decision:"block" semantics. On PostToolUse, the reason is fed back to Claude and the turn continues...N..MCP tool hook type..2...-x..Name of an already-configured MCP server to invoke..'...[=..Name of the tool on that server to call...mN..Arguments passed to the MCP tool. String values support ${path} interpolation from the hook input JSON (e.g. "${tool_input.file_path}")...=..Timeout in seconds for this specific tool call...O..HTTP hook type.."...5.URL to POST the hook input JSON to..,...g1.Timeout in seconds for this specif
+
+===== 247 offset=204114521 =====
+erify that unit tests ran and passed."). Use $ARGUMENTS placeholder for hook input JSON...3...Timeout in seconds for agent execution (default 60).Y...^..Model to use for this agent hook (e.g., "claude-sonnet-5"). If not specified, uses Haiku...}4.BashCommandHookSchema...!..PromptHookSchema...BC..HttpHookSchema...AgentHookSchema...{..McpToolHookSchema...G...3..must be an object mapping hook event names to matcher arrays; received .B...T.The `command`-source command the user accepted at explicit install/update. The once-per-session background re-resolve only runs while the marketplace entry still declares this exact command; a changed command (or an entry that became command-sourced later) is skipped with a warning until the user runs an explicit update...The directory a `command`-source plugin was last resolved to (what its command printed). Served in place in link mode and re-copied every session in copy mode, so the sandbox write-denies it; refre
+
+===== 247 offset=204957646 =====
+..].../configuration#models...
+...Model list..
+...V.hv0F38ESRM..
+...s.nameSubset..	...U.#.Add model...
+...(.{.zUO6Ii5EAT..3...Use the **provider's exact model ID**: Vertex publisher IDs (`claude-sonnet-5`), Bedrock inference-profile IDs (`us.anthropic.claude-sonnet-5`), or Foundry deployment names. The first entry is the default. Entries may be plain ID strings or objects.
+
+**Gateway:** the `name` must be the exact ID your gateway's `/v1/models` endpoint returns. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won't appear.
+
+**Extended context** (`supports1m`) is a capability assertion you make about your deployment; only set it for models you've confirmed support the 1M-token window:
+```json
+[{"name": "claude-sonnet-5", "supports1m": true}, "claude-opus-4-8"]
+```
+
+**Default to 1M context** (`prefer1m`) makes the 1M-context variant the default picker selection when this entry is the default model (the first entry); users can sti
+
+===== 247 offset=204957710 =====
+ESRM..
+...s.nameSubset..	...U.#.Add model...
+...(.{.zUO6Ii5EAT..3...Use the **provider's exact model ID**: Vertex publisher IDs (`claude-sonnet-5`), Bedrock inference-profile IDs (`us.anthropic.claude-sonnet-5`), or Foundry deployment names. The first entry is the default. Entries may be plain ID strings or objects.
+
+**Gateway:** the `name` must be the exact ID your gateway's `/v1/models` endpoint returns. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won't appear.
+
+**Extended context** (`supports1m`) is a capability assertion you make about your deployment; only set it for models you've confirmed support the 1M-token window:
+```json
+[{"name": "claude-sonnet-5", "supports1m": true}, "claude-opus-4-8"]
+```
+
+**Default to 1M context** (`prefer1m`) makes the 1M-context variant the default picker selection when this entry is the default model (the first entry); users can still switch to the standard variant, and an explicit user pick is 
+
+===== 246 offset=196064728 =====
+deCodeSkill...8...registerRunSkill...registerRunSkillGeneratorSkill..	...9L.ccrHosted......F...metaConnector...hosted...
+..cell...FR>.modelEffort...ag.finderBudgetHint...O.).claude-sonnet-5...D
+..measuredExternal...s..$schema...>.$docs......ctrl+k ctrl+t......2..liveDocBacked...h7.({operation: "..J...r..You are handling a `/design` command for Claude Design (claude.ai/design)...H...2L..If the tools are available, dispatch on the first word of the arguments:...+./.| first word | what to do |....f.4.| --- | --- |...e...P...|. .`.c.o.n.s.e.n.t.`. .o.r. .`.r.e.v.o.k.e.`. .|. .A.s.k. .t.h.e. .u.s.e.r. .t.o. .r.u.n. .`./.d.e.s.i.g.n. .c.o.n.s.e.n.t.`. .o.r. .`./.d.e.s.i.g.n. .r.e.v.o.k.e.`. .t.h.e.m.s.e.l.v.e.s. ..  .t.h.e. .d.e.d.i.c.a.t.e.d. .c.o.m.m.a.n.d.s. .m.a.n.a.g.e. .t.h.e. .d.u.r.a.b.l.e. .a.g.e.n.t.-.a.c.c.e.s.s. .g.r.a.n.t.,. .a.n.d. .a.r.e. .a.v.a.i.l.a.b.l.e. .o.n.l.y. .w.i.t.h. .a. .f.i.r.s.t.-.p.a.r.t.y. .c.l.a.u.d.e...a.i. .l.
+
+===== 246 offset=199606316 =====
+ook cache, no payload yet)...'...Add a new working directory...%.<path>..E...j...Choose whether cloud sessions use the plugins enabled on this machine...dk..sameTurnSiblingContext...claude-sonnet-5[1m]...X.claude-opus-4-8[1m]...auto_mode_bypass...O..blind_apply...browser_file_upload_exfil...	d..browser_input_exfil...browser_js_exfil...5.browser_navigate_exfil...8.b.browser_shortcut_execution...chatops_trigger_comments	...Gr..ci_bypass...'...cloud_storage_mass_delete...OeI.cluster_wide_workload_creation...}...code_from_external...D.code_that_leaks_when_run...create_public_surface...create_rce_surface...%c-.create_unsafe_agents...credential_exploration...?..credential_leakage...O..credential_materialization...$...data_exfiltration...{>..dns_domain_cert_changes...Y..excess_sensitive_detail...I...exfil_scouting..._...expose_local_services...G...external_ingress_tunnel.
+
+===== 246 offset=202349209 =====
+9...C.VERTEX_REGION_CLAUDE_4_5_SONNET...M.P.August 2025...$G~.us.anthropic.claude-sonnet-4-6...VERTEX_REGION_CLAUDE_4_6_SONNET...6H.Sonnet 5...\.January 2026...2F.us.anthropic.claude-sonnet-5...(..anthropic.claude-sonnet-5...?...VERTEX_REGION_CLAUDE_5_SONNET...	...tier_2_10...A.Opus 4..(...w...us.anthropic.claude-opus-4-20250514-v1:0...7...claude-opus-4@20250514...VERTEX_REGION_CLAUDE_4_0_OPUS...
+...\.tier_15_75..*...<...us.anthropic.claude-opus-4-1-20250805-v1:0...$.claude-opus-4-1@20250805...VERTEX_REGION_CLAUDE_4_1_OPUS...w.Opus 4.5...$K.May 2025...claude-opus-4-5-20251101*...r.w.us.anthropic.claude-opus-4-5-20251101-v1:0...0..claude-opus-4-5@20251101...#.VERTEX_REGION_CLAUDE_4_5_OPUS...	...f.tier_5_25...us.anthropic.claude-opus-4-6-v1...[x.VERTEX_REGION_CLAUDE_4_6_OPUS...'.us.anthropic.claude-opus-4-7...anthropic.claude-opus-4-7...%.VERTEX_REGION_CLAUDE_4_7_OPUS...u
+
+===== 246 offset=202349242 =====
+_5_SONNET...M.P.August 2025...$G~.us.anthropic.claude-sonnet-4-6...VERTEX_REGION_CLAUDE_4_6_SONNET...6H.Sonnet 5...\.January 2026...2F.us.anthropic.claude-sonnet-5...(..anthropic.claude-sonnet-5...?...VERTEX_REGION_CLAUDE_5_SONNET...	...tier_2_10...A.Opus 4..(...w...us.anthropic.claude-opus-4-20250514-v1:0...7...claude-opus-4@20250514...VERTEX_REGION_CLAUDE_4_0_OPUS...
+...\.tier_15_75..*...<...us.anthropic.claude-opus-4-1-20250805-v1:0...$.claude-opus-4-1@20250805...VERTEX_REGION_CLAUDE_4_1_OPUS...w.Opus 4.5...$K.May 2025...claude-opus-4-5-20251101*...r.w.us.anthropic.claude-opus-4-5-20251101-v1:0...0..claude-opus-4-5@20251101...#.VERTEX_REGION_CLAUDE_4_5_OPUS...	...f.tier_5_25...us.anthropic.claude-opus-4-6-v1...[x.VERTEX_REGION_CLAUDE_4_6_OPUS...'.us.anthropic.claude-opus-4-7...anthropic.claude-opus-4-7...%.VERTEX_REGION_CLAUDE_4_7_OPUS...us.anthropic.claude-opus-4-8...`
+
+===== 246 offset=202495682 =====
+peL...sf..Prompt to evaluate with LLM. Use $ARGUMENTS placeholder for hook input JSON.6...H.~.Timeout in seconds for this specific prompt evaluation..q...c..Model to use for this prompt hook (e.g., "claude-sonnet-5"). If not specified, uses the default small fast model...Sets the continue value for the decision:"block" produced when ok is false. Default false (turn ends). Whether continue:true lets the turn proceed depends on the event's decision:"block" semantics. On PostToolUse, the reason is fed back to Claude and the turn continues...N..MCP tool hook type..2...-x..Name of an already-configured MCP server to invoke..'...[=..Name of the tool on that server to call...mN..Arguments passed to the MCP tool. String values support ${path} interpolation from the hook input JSON (e.g. "${tool_input.file_path}")...=..Timeout in seconds for this specific tool call...O..HTTP hook type.."...5.URL to POST the hook input JSON to..,...g1.Timeout in seconds for this specif
+
+===== 246 offset=202497549 =====
+erify that unit tests ran and passed."). Use $ARGUMENTS placeholder for hook input JSON...3...Timeout in seconds for agent execution (default 60).Y...^..Model to use for this agent hook (e.g., "claude-sonnet-5"). If not specified, uses Haiku...}4.BashCommandHookSchema...!..PromptHookSchema...BC..HttpHookSchema...AgentHookSchema...{..McpToolHookSchema...G...3..must be an object mapping hook event names to matcher arrays; received .B...T.The `command`-source command the user accepted at explicit install/update. The once-per-session background re-resolve only runs while the marketplace entry still declares this exact command; a changed command (or an entry that became command-sourced later) is skipped with a warning until the user runs an explicit update...The directory a `command`-source plugin was last resolved to (what its command printed). Served in place in link mode and re-copied every session in copy mode, so the sandbox write-denies it; refre
+
+===== 246 offset=203333838 =====
+..].../configuration#models...
+...Model list..
+...V.hv0F38ESRM..
+...s.nameSubset..	...U.#.Add model...
+...(.{.zUO6Ii5EAT..3...Use the **provider's exact model ID**: Vertex publisher IDs (`claude-sonnet-5`), Bedrock inference-profile IDs (`us.anthropic.claude-sonnet-5`), or Foundry deployment names. The first entry is the default. Entries may be plain ID strings or objects.
+
+**Gateway:** the `name` must be the exact ID your gateway's `/v1/models` endpoint returns. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won't appear.
+
+**Extended context** (`supports1m`) is a capability assertion you make about your deployment; only set it for models you've confirmed support the 1M-token window:
+```json
+[{"name": "claude-sonnet-5", "supports1m": true}, "claude-opus-4-8"]
+```
+
+**Default to 1M context** (`prefer1m`) makes the 1M-context variant the default picker selection when this entry is the default model (the first entry); users can sti
+
+===== 246 offset=203333902 =====
+ESRM..
+...s.nameSubset..	...U.#.Add model...
+...(.{.zUO6Ii5EAT..3...Use the **provider's exact model ID**: Vertex publisher IDs (`claude-sonnet-5`), Bedrock inference-profile IDs (`us.anthropic.claude-sonnet-5`), or Foundry deployment names. The first entry is the default. Entries may be plain ID strings or objects.
+
+**Gateway:** the `name` must be the exact ID your gateway's `/v1/models` endpoint returns. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won't appear.
+
+**Extended context** (`supports1m`) is a capability assertion you make about your deployment; only set it for models you've confirmed support the 1M-token window:
+```json
+[{"name": "claude-sonnet-5", "supports1m": true}, "claude-opus-4-8"]
+```
+
+**Default to 1M context** (`prefer1m`) makes the 1M-context variant the default picker selection when this entry is the default model (the first entry); users can still switch to the standard variant, and an explicit user pick is 

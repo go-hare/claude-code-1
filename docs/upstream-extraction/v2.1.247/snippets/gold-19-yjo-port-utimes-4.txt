@@ -1,0 +1,6 @@
+# pos=67004992
+.fdatasync, "fdatasync"),
+  ftruncate: asyncWrap(fs.ftruncate, "ftruncate"),
+  futimes: asyncWrap(fs.futimes, "futimes"),
+  glob,
+  lchmod: constants.O_SYMLINK 

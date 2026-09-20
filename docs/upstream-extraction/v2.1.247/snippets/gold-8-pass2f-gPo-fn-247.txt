@@ -1,0 +1,3 @@
+# needleOff=214013968 start=214013968
+
+function gPo(e){if(e instanceof hk)return[`Exit code ${e.code}`,e.interrupted?jw:"",e.stderr,e.stdout];let t=[e.message];if("stderr"in e&&typeof e.stderr==="string")t.push(e.stderr);if("stdout"in e&&typeof e.stdout==="string")t.push(e.stdout);return t}

@@ -1,0 +1,2 @@
+# gold-forged-rn-Lm.txt official-247 SEA @210370534-210370900
+function Lm(e,t){return yZ(e,nh(t))}function _Z(e,t){if(e.startsWith("//"))return no(e.slice(1));return no(th(e,t))}function no(e,{evenAfterGlob:t=!1}={}){if(ge()==="windows"||!e.endsWith("/"))return e;if(!t&&Ge(e))return e;return e.replace(/\/+$/,"")||"/"}function qs(e){if(ge()==="windows")return Yr(ri(e))?e.replace(/[\\/]+$/,""):e;return no(e,{evenAfterGlob:!0})

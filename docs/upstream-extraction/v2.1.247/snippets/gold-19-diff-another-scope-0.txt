@@ -1,0 +1,7 @@
+# mismatch@11832
+---247---
+........cacheHit........placed_count........already_present_count........US.cache_hit_count.....o...download_count..........mismatch_removed_count......D...bare_placed_count.......d.p.unverifiable_windows....../.not_regular......n..bin_uninspectable........Z].bin_not_dir.....k.p.ifObject....&m].pluginAssetCache....E...asset_transient.+....... tra
+/*TRUNC*/
+---246---
+........cacheHit........placed_count........already_present_count........US.cache_hit_count.....o...download_count..........mismatch_removed_count......D...bare_placed_count........./.not_regular.....d.p.unverifiable_windows.....n..bin_uninspectable........Z].bin_not_dir.....k.p.ifObject....&m].pluginAssetCache....E...asset_transient.+....... tra
+/*TRUNC*/

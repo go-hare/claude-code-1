@@ -1,0 +1,85 @@
+# mp pass4 Fs / zr / xe / Yr / Edd
+K8Fs " as Fs}" count=0
+K8Fs " as Fs," @212823622 s W_,gMb as En,gNb as tF,gOb as NB,gPb as mg,gQb as bce,gRb as _mn,hMb as Fs,hNb as r8e,hPb as lS,hQb as MWt,hRb as bmn,iMb as eI,iNb as jqr,iPb as ace,iQb as _dn,iRb as yT,jNb as bze,jOb as
+K8Fs "Fs as " count=0
+K8Fs "function Fs()" count=0
+EDD "Edd as _r" count=1
+  @212851093 s $Or}from"B:/~BUN/root/_813.js";import{Edd as _r,Fdd as eio,Hdd as sNn,Mdd as XLn,Ndd as nl,tdd as CNn,xdd as ol,ydd as lHn}from"B:/~BUN/ro
+EDD "L as Edd" count=1
+  @207950000 zdd,y as Add,l as Bdd,N as Cdd,o as Ddd,L as Edd,v as Fdd,g as Gdd,O as Hdd,x as Idd,W as Jdd,R as Kdd,G as Ldd,_ as Mdd,A as Ndd}; .// @bun
+EDD "Edd as " count=15
+  @207951741 as ur}from"B:/~BUN/root/_807.js";import{Edd as ht,Gdd as gt,Ndd as dr}from"B:/~BUN/root/_814.js";import{Kfd as kn}from"B:/~BUN/root/_824.js"
+  @208213355  as g}from"B:/~BUN/root/_812.js";import{Edd as l,Ndd as j,xdd as r,zdd as p}from"B:/~BUN/root/_814.js";import{Ied as K,red as y}from"B:/~BUN
+  @208272786 as $o}from"B:/~BUN/root/_809.js";import{Edd as q,Ndd as qn}from"B:/~BUN/root/_814.js";import{ofd as Ht,pfd as Si}from"B:/~BUN/root/_820.js";
+  @208402772 as ZB}from"B:/~BUN/root/_812.js";import{Edd as j,Ndd as Yr,xdd as pv}from"B:/~BUN/root/_814.js";import{Ied as T0,led as sk,sed as ak}from"B:
+  @208937065 as ae}from"B:/~BUN/root/_809.js";import{Edd as P,Ndd as oe}from"B:/~BUN/root/_814.js";import{ffd as L,ifd as ne}from"B:/~BUN/root/_819.js";i
+  @208965279 as Fn}from"B:/~BUN/root/_810.js";import{Edd as T,Ndd as xn,xdd as Pe}from"B:/~BUN/root/_814.js";import{Ged as ve,Ied as In}from"B:/~BUN/root
+  @209048237 as le}from"B:/~BUN/root/_812.js";import{Edd as ae,Ndd as Me}from"B:/~BUN/root/_814.js";import{Jed as ie,Ked as se,Oed as Oe}from"B:/~BUN/roo
+  @209078684 root/_812.js";import{Add as j,Bdd as Ke,Edd as Ye,Ndd as en,xdd as C}from"B:/~BUN/root/_814.js";import{Ied as Jt,red as Be}from"B:/~BUN/root
+  @209151495 as Ot}from"B:/~BUN/root/_808.js";import{Edd as Oe,Ndd as bt}from"B:/~BUN/root/_814.js";import{ofd as Re,pfd as Pt}from"B:/~BUN/root/_820.js"
+  @209320689 "B:/~BUN/root/_806.js";import{Add as $a,Edd as lr,Ndd as _o,xdd as Dl}from"B:/~BUN/root/_814.js";import{Ied as Cm,led as vl,red as Ml,ued as
+  @209856523 as Iv}from"B:/~BUN/root/_806.js";import{Edd as ZI,Ndd as H6}from"B:/~BUN/root/_814.js";import{ofd as au,pfd as hK}from"B:/~BUN/root/_820.js"
+  @210684499 as re}from"B:/~BUN/root/_797.js";import{Edd as ie,Ndd as De}from"B:/~BUN/root/_814.js";import{Afd as A,Bfd as T,Cfd as I,Ifd as We}from"B:/~
+  @210773764 as ge}from"B:/~BUN/root/_810.js";import{Edd as U,Ndd as ce}from"B:/~BUN/root/_814.js";import{Afd as K,Bfd as F,Cfd as q,Gfd as I,Ifd as pe}f
+  @210853562 as Ht}from"B:/~BUN/root/_810.js";import{Edd as k,Ndd as ye}from"B:/~BUN/root/_814.js";import{Ked as fe,Oed as xt}from"B:/~BUN/root/_816.js";
+  @210933163 as Ee}from"B:/~BUN/root/_809.js";import{Edd as D,Ndd as $e,xdd as te}from"B:/~BUN/root/_814.js";import{Jed as q,Ked as ee,Oed as je}from"B:/
+CAL "function zr(" count=15 hits=206910796,207043823,207667287,207805872,208173530,208588083,208967942,209096343,209138272,210874754,211073301,211421749,211847339,212339700,212416642
+  @206910796 function zr(t){return ve(t,"net")}
+  @207043823 function zr(e){let t=e??{};return P(e)??Pe(t.mode,"opts")??L(t.recursive,"opts","recursive")}
+  @207667287 function zr(e,t,r){let n=r&&r.Blob||v.classes.Blob,o=ft(e);if(t===void 0&&n)t=!0;if(o==="data"){e=o.length?e.slice(o.length+1):e;let s=Af.exec(e);if(!s)throw new h("Invalid URL",h.ERR_INVALID_URL);let i=s[1],a=s[2],l=s[3],f=Buffer.from(decodeURIComponent(l),a?
+  @207805872 function zr(e,t,r={encoding:"utf-8"}
+  @208173530 function zr(e){let n=V("key.sessionId",e.sessionId);if(n!==void 0)return n;if(B(e.agentRelPath))return s("key.agentRelPath",O);if("sessionJournal"in e){if(typeof e.sessionJournal!=="string"||!gn(e.sessionJournal))return s("key.sessionJournal",Wr);return e.agen
+  @208588083 function zr(){if(Wn()||jf()||A()!=="firstParty")return!1;if(se()&&Je()===null)return!1;return!0}
+CAL "function zr(r" count=1 hits=211421749
+  @211421749 function zr(r,n){let a=qr();if(n!==a)return null;let u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}
+CAL "function xe(" count=15 hits=207314730,207475060,207647852,207708607,208161058,208253980,208363200,208595128,208942330,209005159,209090747,209245029,210466864,210701815,211828329
+  @207314730 function xe(r,t){var e=t?y(r.buffer):r.buffer;return new r.constructor(e,r.byteOffset,r.byteLength)}
+  @207475060 function xe(e){return me(e,{throwIfNoEntry:!1})!==void 0}
+  @207647852 function xe(e,t,r){if(!t)return e;let n=r&&r.encode||jc,o=u.isFunction(r)?{serialize:r}:r,s=o&&o.serialize,i;if(s)i=s(t,o);else i=u.isURLSearchParams(t)?t.toString():new Ts(t,o).toString(n);if(i){let a=e.indexOf("#");if(a!==-1)e=e.slice(0,a);e+=(e.indexOf("?")
+  @207708607 function xe(e,t,n){let r=n>>3;for(let u=0;u<r;u++)if(e[u]!==t[u])return!1;let o=n&7;if(o===0)return!0;let s=255<<8-o&255;return((e[r]??0)&s)===((t[r]??0)&s)}
+  @208161058 function xe(e,n){if(!e.ok)return e.error.kind==="absent"?u(!1):e;if(!e.value.isFile())return u(!1);if(!C(n.ino)||!C(e.value.ino)||n.nlink===0n||e.value.nlink===0n)return u("unavailable");return u(e.value.ino===n.ino&&e.value.dev===n.dev)}
+  @208253980 function xe(e,t,r=t){if(!ae(Ir.test(e)?e:t+be+e,t,void 0,r))return!0;return!ae(se(t,e),t,void 0,r)}
+CAL "function xe(e){return e.every" count=0 hits=
+CAL "function xe(r){return r.every" count=0 hits=
+CAL "function Yr(" count=15 hits=207810865,209859002,211421923,211683993,211845581,212170307,212560706,212685389,221856251,221952349,222683543,222880399,223474458,223539329,224003133
+  @207810865 function Yr(){let e=_(),t=Be(),r=y();if(e==="macos")return C(t,"Desktop");if(e==="windows"){let o=b.USERPROFILE?b.USERPROFILE.replaceAll("\\","/"):null;if(o){let s=`/mnt/c${o.replace(/^[A-Z]:/,"")}/Desktop`;if(await X(s))return s}try{let s=await r.readdir("/mn
+  @209859002 function Yr(e){return e.includes("*")||e.includes("?")}
+  @211421923 function Yr(r){return r.endsWith(".zip")}
+  @211683993 function Yr(e){return e.size===0&&Date.now()-e.mtimeMs>_i}
+  @211845581 function Yr(n,e,t){let r=w(n),s=Sn(r),o=Gn(n),i=s&&o===void 0?`thrown outside the Claude Code bundle (${t})`:En(cn(n,o??kr(n)??n.message??String(n))),a=In({name:t,message:i},r),{version:c,sourcemapGroup:u}=Pr({ISSUES_EXPLAINER:"report the issue at https://gith
+  @212170307 function Yr(e,n){if(n.length===0)return[];let t=await e.executor.listDisplays();if(t.length<=1)return[];let o=n.map((a)=>a.bundleId),r=await e.executor.findWindowDisplays(o),i=new Map(t.map((a)=>[a.displayId,a])),s=It(t),c=new Map(r.map((a)=>[a.bundleId,a.disp
+CAL "function Yr(r){return r.endsWith" count=1 hits=211421923
+  @211421923 function Yr(r){return r.endsWith(".zip")}
+CAL "function qr(" count=15 hits=206533320,208173242,208308549,209138376,209326889,211421701,211684548,211874255,212140017,216851126,220288202,221621910,222880301,223474920,223539125
+  @206533320 function qr(e,t){let{children:r,...n}=t??{};return Xr(Ke.h(e,n,...r??[]))}
+  @208173242 function qr(e){return typeof e.backupFileName!=="string"||!pe.test(e.backupFileName)?s("key.backupFileName","must be a backup file name the engine has ever written (hex hash @v version)"):void 0}
+  @208308549 function qr(){let e=p(),t=Y(e);if(!t)return null;return z(t,e.store).settings??null}
+  @209138376 function qr(){return g().shrinkWriteAsk()}
+  @209326889 function qr(){return Wt("policySettings")?.allowManagedPermissionRulesOnly===!0}
+  @211421701 function qr(){return De(le(),"plugins","cache")}
+zr-ssmod @211421749 len=174 function zr(r,n){let a=qr();if(n!==a)return null;let u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}
+Yr-ssmod @211421923 len=41 function Yr(r){return r.endsWith(".zip")}
+PLUG "function Fs(){return" count=3
+  @208316911 ({source:n,value:r})}return t}function Fs(){return!!(h("userSettings")?.skipDangerousModePermissionPrompt||h("localSettings")?.skipDangerousModePermissionPrompt||h("flagS
+  @222031018 el}. Report issues at ${we}`}}function Fs(){return De().map((s)=>{let a={...s};if(a&&typeof a.error==="string")a.error=k(a.error);return a})}function Cs(s,a,u){if(!s)retu
+  @228407912 ull}var ki=new xs(()=>new js);function Fs(){return ki.of(Ds().host)}function Ls(e){if(e.initPromise)return e.initPromise;if(!he.DEBUG_CLAUDE_AGENT_SDK)return e.debugFileP
+PLUG "Fs=()=>" count=0
+PLUG "join(homedir()" count=0
+PLUG "\"plugins\",\"cache\"" count=4
+  @208186952 ;case"pluginCache":return a(r,"plugins","cache",n.marketplace,n.plugin,n.version,...n.relPath);case"cache":return a(r,"cache",an.get(`${n.store}/${n.id}`)??a(n.store,n.id
+  @208190450 "drafts")||n===a(e.configHome,"plugins","cache")||n===a(e.configHome,"plugins","marketplaces")||n===xt(e)}function is(e,n){return Yn(e,n)||n===e.bridgeSpawnRoot}function 
+  @208191574 nCache":return[{directory:a(r,"plugins","cache",...n.marketplace===void 0?[]:[n.marketplace],...n.plugin===void 0?[]:[n.plugin],...n.version===void 0?[]:[n.version],...n.
+  @211421730 ;function qr(){return De(le(),"plugins","cache")}function zr(r,n){let a=qr();if(n!==a)return null;let u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return
+PLUG ",\"plugins\")" count=11
+  @209325246 unction ui(){return En([Rn(Y(),"plugins"),Rn(Y(),"cowork_plugins"),Rn(z(),ci()),...$d().map((e)=>Rn(z(),e))])}var Id="plugins",si="cowork_plugins";var di=P(()=>{oe();Fr()
+  @210382237 K=ee(_s(),Kv());if(K!==ee(Kt(),"plugins")&&K!==oe&&!du(K))S(K,!1,!0);for(let _ of Zv()){let T=ee(_s(),_);if(!du(T))S(T,!1,!0)}for(let _ of Xv(qv()))if(eN(_)&&!du(ee(_)))S
+  @211422777 ction Xr(r){return r===De(le(),"plugins")}function ol(r,n){if(!Xr(n))return null;let a=De(n,"marketplaces"),u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))
+  @214112290 e is not enabled");return n$(e,"plugins")}class fwn{keyOf=()=>uwn;statesByKey=new Map;useKey(e){this.keyOf=e}key(){return this.keyOf()}existing(e){return this.statesByKey
+  @214141830 ate.now()-r});let y=a9(MT(jr(),"plugins"));n.syncErrors.push({type:"generic-error",source:`${s$}[root]`,error:m.reason==="unverified"||m.reason==="landing_unverified"?`cl
+  @214837958 {t.push(u);continue}let d=Ly(u,"plugins");try{await n.stat(d),t.push(d)}catch{}}}catch{continue}return t.filter((i,a)=>t.indexOf(i)===a)}async function C1o(e){let t=await
+PLUG "function Fs(){return Fo(" count=0
+WG "Deb as wg" count=1 212807979
+WG "ss as Deb" count=1 211611911
+WG "var ss=\".orphaned_at\"" count=1 211423438
+MPBIND "Heb as mp" count=1 212808064
+MPBIND "sl as Heb" count=1 211611951

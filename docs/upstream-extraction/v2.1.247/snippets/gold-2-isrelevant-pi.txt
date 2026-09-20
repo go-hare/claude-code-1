@@ -1,0 +1,3 @@
+# offset=222293670
+
+boarding",content:async(e)=>`Run ${a("suggestion",e.theme)("/team-onboarding")} to turn your Claude usage into an onboarding guide \u2014 share it with your team in one link`,cooldownSessions:5,async isRelevant(){let e=i();if(e.numStartups<15)return!1;if(e.teamOnboardingLastUsedAt!==void 0&&Date.now()-e.teamOnboardingLastUsedAt<2592000000)return!1;return Rt()}}],Mo=[];async function Do(e,t){try{return await e.isRelevant(t)}catch(n){return h.of(t.session.host).failedTipIds.add(e.id),ke(we(Se(n),"tip isRelevant threw")),!1}}async function Pi(e){let t=h.of(e.session.host),{tips:n,trustedCount:o}=await Gt(e.session.host),s=n.filter((c)=>b(c.id)>=c.cooldownSessions);if(o>0&&Wt())return s;let r=[.

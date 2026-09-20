@@ -1,0 +1,80 @@
+# wB-Is peel official-247 size=253204128
+STR "async function Is(e,t,n,r,i)" count=1 hits=208311876
+  @208311876 oi.run(i,()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c=
+STR "function Is(e,t,n,r,i)" count=1 hits=208311882
+  @208311882 (i,()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c=
+STR "settings storageV5 write failed" count=4 hits=203999628,203999672,208312992,208313102
+  @203999628 w settings from ...f... due to validation failure..!...settings storageV5 write failed: ...?".settings storageV5 write failed.B...E7..localSettings: legacy setti
+  @203999672 ailure..!...settings storageV5 write failed: ...?".settings storageV5 write failed.B...E7..localSettings: legacy settings.local.json could not be evaluated (..U..
+  @208312992 ,{publishDiscipline:"followAtomic"});if(!d.ok)throw new ee(`settings storageV5 write failed: ${d.error.code}${"failureClass"in d.error?` (${d.error.failureClass})`:""}`,"s
+  @208313102 "failureClass"in d.error?` (${d.error.failureClass})`:""}`,"settings storageV5 write failed")}else{let d=tt(ne(n));await st(n,P,{encoding:"utf-8",allowSymlink:e==="userSet
+STR "updateSettingsForSource: invalid JSON" count=2 hits=203999444,208312187
+  @203999444  re-seeded:  ...listFolder.. ...`..non-object..:...]...updateSettingsForSource: invalid JSON in settings file at ..(...%..Invalid JSON syntax in settings file at ...G..U
+  @208312187 m))throw m}if(d!==null){let m=T(d,!1);if(m===null)return g(`updateSettingsForSource: invalid JSON in settings file at ${n}`,{level:"error"}),{error:Error(`Invalid JSON syntax in
+STR "updateSettingsForSource: written settings not seeded" count=2 hits=203995684,208314295
+  @203995684 ttings_validation_errors...g.F.remote_error_count..6...+.updateSettingsForSource: written settings not seeded: ..$...oy..tengu_plugin_settings_premature_read...02..pluginBaseLoaded!...Q..
+  @208314295 uffer.byteLength(t)>w)return;let n;try{n=j(t,e)}catch(i){g(`updateSettingsForSource: written settings not seeded: ${Q(i)}`);return}let r=y();return r.seedParsedFile(e,"userSettings",n,r.epoch)
+STR "oi.run(i,()=>Is(e,t,i,n,r))" count=1 hits=208311816
+  @208311816 et i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==voi
+STR "oi=Pr()" count=1 hits=208320642
+  @208320642 );or();De();zo();Jo();He();He();Qr=new cr(()=>new Xr);ms=ht;oi=Pr();Tr(si);li=["policySettings","flagSettings","userSettings"];di=Oe(()=>Er({allow:
+STR "function si(){return oi.drain()}" count=1 hits=208311844
+  @208311844 se.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocatio
+STR "J as oGc" count=1 hits=208321331
+  @208321331 ir as iGc,or as jGc,Qr as kGc,Ce as lGc,Xo as mGc,Qo as nGc,J as oGc,Zo as pGc,qo as qGc,mt as rGc,es as sGc,ts as tGc,X as uGc,h as vGc,ns as wGc,r
+STR "let i=J(e)" count=1 hits=208311755
+  @208311755 s"||e==="flagSettings")return Promise.resolve({error:null});let i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}f
+STR "legacyRevocation" count=4 hits=202485024,208311941,214619028,223299597
+  @202485024 ed deps; manually disable then reinstall to recover...legacyRevocation...YI..materializeOne(.2... .. on marketplace repo; falling through to HEAD co
+  @208311941  function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c={[Symbol.dispose]:()=>l?.()};try{let f=pt(e,p(),{incl
+  @214619028 (e)??!0:x[Fe];let{error:ot}=await ay(d,{enabledPlugins:Oe},{legacyRevocation:"skip"},u);if(ot)_(`Failed to roll back enabledPlugins after install failure fo
+  @223299597 ledMcpjsonServers])}return Object.keys(d).length>0?d:null},{legacyRevocation:"skip"});if(l){b(`migrateEnableAllProjectMcpServersToSettings: settings write f
+STR "publishDiscipline:\"followAtomic\"" count=3 hits=208312934,208761298,208769507
+  @208312934 _,null,2)+` `;if(o){let d=await i.write(q.userSettings(),P,{publishDiscipline:"followAtomic"});if(!d.ok)throw new ee(`settings storageV5 write failed: ${d.error.code}${"fai
+  @208761298 (pc(Y()));let i=await n.write(j.globalConfig(),R(o,null,2),{publishDiscipline:"followAtomic",mode:384,precondition:{type:"none"}});if(!i.ok)throw Error("Config fallback wri
+  @208769507 :ye,repairingFromCache:nn}},..._===void 0&&{missing:!0}}}},{publishDiscipline:"followAtomic",mode:384,acquireTimeoutMs:0}),l=await u(0);for(let g=1;l.ok;g++){let _=l.value.
+STR "i.write(q.userSettings()" count=1 hits=208312906
+  @208312906 d,m);return});Le(n);let P=F(_,null,2)+` `;if(o){let d=await i.write(q.userSettings(),P,{publishDiscipline:"followAtomic"});if(!d.ok)throw new ee(`settings storageV5
+IS_HITS count=1
+DUMP Is @208311876 end=208314097 len=2221
+FN "function J(e){" count=29
+  near-705 208306382,208326222
+  J@208306382 len=31 function J(e){return le(e,p())}
+  J@208326222 len=30 function J(e){a().lastKnown=e}
+FN "function J(e,t){" count=3
+  near-705 
+FN "function J(e,t,n){" count=0
+  near-705 
+OI "oi=Pr()" count=1 hits=208320642
+  @208320642 );He();He();Qr=new cr(()=>new Xr);ms=ht;oi=Pr();Tr(si);li=["policySettings","flagSettings","userSettings"];di=Oe(()=>Er({allow:K(C()).optional(),soft_deny:K(C()).optional(),hard_deny:K(C()).optional(),deny:K(C()).optiona
+OI "function Pr(" count=20 hits=206907918,207658385,207801862,207871640,208085909,208448570,209657186,210514172,210558974,210872505,211132659,211599469,211643561,211843315,212127210,212674163,219878765,220345766,223134958,223469157
+  @206907918 Zt;var Bt=i(()=>{Dt();$t();Kt();Zt=Ar});function Pr(t){var e=typeof t;return e=="string"||e=="number"||e=="symbol"||e=="boolean"?t!=="__proto__":t===null}var Jt;var Vt=i(()=>{Jt=Pr});function Or(t,e){var r=t.__data__;ret
+  @207658385 "*")s=s.slice(1);return!e.endsWith(s)})}function Pr(e){return process.env[e.toLowerCase()]||process.env[e.toUpperCase()]||""}var af;var Js=R(()=>{af={ftp:21,gopher:70,http:80,https:443,ws:80,wss:443}});var Xs=_(function(
+  @207801862 ,t,r,n){let o=`${t}${r}`;return o}async function Pr(e,t){let r=ee(e,t);if(r===""||r.startsWith("..")||q(r))throw new W(`assertDirChainReal: dir must be strictly inside base (rel: ${r})`,"assertDirChainReal: dir must be s
+  @207871640 es) with no runs of 4 or more spaces"})}function Pr(e,t,s){if(s!==void 0)return s;let o=e.toLowerCase();return t.autoUpdate??(Yt.has(o)&&!xn.has(o))}function Pn(e){if(Ke.has(e.toLowerCase()))return!1;if(wn.test(e))return
+  @208085909 as(o.toUpperCase()));return{...e,env:t}}function Pr(){let e=P();if(!we()&&e.eligible!==!0)return null;if(e.sessionCache)return e.sessionCache;let t=bt()!==void 0,n=Sr();if(n){if(e.seedFromDisk(n),t)G().invalidatePolicyLa
+  @208448570 url==="string")e.url=ud(e.url)}return e}function Pr(e,t,n){let r=t||"id",o="",i=Lh(e);if(i[r])o=i[r];if(!o&&n){if(i[n])o=i[n];if(o)r=n}return{hashAttribute:r,hashValue:o}}function tP(e,t){let n=t.user.url;if(!n)return!1;
+  @209657186 data[a]-e.data[a])!=0)return t;return 0}function Pr(e){var t=1,a;if((a=e>>>16)!=0)e=a,t+=16;if((a=e>>8)!=0)e=a,t+=8;if((a=e>>4)!=0)e=a,t+=4;if((a=e>>2)!=0)e=a,t+=2;if((a=e>>1)!=0)e=a,t+=1;return t}function $s(){if(this.t
+  @210514172 ion Nr(e){return h().evictedEtag.get(e)}function Pr(e){return h().terminalRejects.get(e)}function Ar(){h().reset()}function jr(e){return h().lastSeenMtime.has(e)}function ae(e,t){return h().inFlight.run(e,t)}function Mr(
+OI "Pr=()=>" count=5 hits=225716353,226860448,235018355,236841709,237460903
+  @225716353 ();Hr();Ir()});var Dr=s(()=>{Ur()});var Pr=()=>{};var Lr=()=>{};var jr=()=>{};var Nr=()=>{};var Br=()=>{};var hs=s(()=>{wt();Dr();Pr();Lr();At();jr();Nr();Br()});function $r(e){if(e.length%2!==0)throw Error("Hex encoded 
+  @226860448 =()=>{};var Le=()=>{};var Nr=()=>{};var Pr=()=>{};var Lr=()=>{};var je=()=>{};var jr=c(()=>{K();Pe();$r();Le();Nr();Pr();Lr();je()});var Hr=()=>{};var zr=c(()=>{Hr()});var Wr=c(()=>{K();Pe();Le();zr();je()});var qr=()=>{
+  @235018355 ue;t[r]=Re(e[r])}return t}return e};var Pr=()=>{};var x={};cs(x,{Client:()=>M,Command:()=>a,NoOpLogger:()=>U,SENSITIVE_STRING:()=>Xi,ServiceException:()=>v,_json:()=>Re,collectBody:()=>vt.collectBody,convertMap:()=>rs,cr
+  @236841709 geV5:io}=En(),ue=On(ka),Pr;if(c[1]!==ue)Pr=()=>{let Dr=Cn();if(Dr.workspace!=="remote"){return null}return Dr.transcriptSource!=="ccr-api"?"remote_host":Ce.of(ue).isAttached(_e())?"cloud":"off"},c[1]=ue,c[2]=Pr;else Pr=c
+  @237460903 [D,ot]=m(null),A=U(null),Pr;if(u[3]===H)Pr=()=>{R.current=null,ot(null),A.current?.scrollTo(0)},u[3]=Pr;else Pr=u[3];let fn=Pr,[X,Rr]=m(0),{rows:Ie,columns:Ue}=ce(ue()),Dr;if(u[4]===H)Dr=ct(),u[4]=Dr;else Dr=u[4];let _r=
+OI "oi.run(" count=1 hits=208311816
+  @208311816 rn Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c={[Symbol.dis
+OI "oi.drain()" count=1 hits=208311865
+  @208311865 ()=>Is(e,t,i,n,r))}function si(){return oi.drain()}async function Is(e,t,n,r,i){let o=A()&&i!==void 0&&ke(e,n),a=r?.legacyRevocation==="skip",u=null,l;using c={[Symbol.dispose]:()=>l?.()};try{let f=pt(e,p(),{includeLegac
+EXPORT J as oGc @208321331
+HELP "async function ar(e,t)" count=1 hits=208314097
+  HELP@208314097 len=117 async function ar(e,t){let n=J("userSettings");if(n===void 0||n===t||!ke("userSettings",n))return;return ir(e,y(),n)}
+HELP "function ke(e,n)" count=2 hits=208185780,212088533
+HELP "function ke(e,t)" count=6 hits=206649103,207527609,208308006,210861403,211793219,225673971
+  HELP@208308006 len=63 function ke(e,t){return e==="userSettings"&&Yo(t)===Fr.default}
+HELP "function A(){" count=15 hits=207035163,207821604,209043257,209045197,209242751,210745227,210884021,210931495,210976061,211615983,212021417,212230501,213699728,219404134,221927932
+UNIQ J-path count=1 hits=208306382
+UNIQ ke-user-default count=1 hits=208308006
+UNIQ ar-full count=1 hits=208314097
+UNIQ ii-full count=1 hits=208311653
+UNIQ Rs-full count=1 hits=208311609

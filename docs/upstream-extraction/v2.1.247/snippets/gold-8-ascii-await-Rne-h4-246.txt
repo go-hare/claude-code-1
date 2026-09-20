@@ -1,0 +1,3 @@
+# offset=216846191 ver=246 hit=5/6 ratio=1.000 needle="await Rne("
+
+text.length,X(ne.hook,"additionalContextChars",ne.additionalContext.length),b(`Hook ${h} (${Vh(ne.hook)}) provided additionalContext (${ne.additionalContext.length} chars)`),yield{additionalContexts:[await Rne(ne.additionalContext,`${r}-${oe}`,"additionalContext",{storageV5:_})]};if(ne.initialUserMessage)q.initialUserMessageChars+=ne.initialUserMessage.length,X(ne.hook,"initialUserMessageChars",ne.initialUserMessage.length),b(`Hook ${h} (${Vh(ne.hook)}) provided initialUserMessage (${ne.initialUserMessage.length} chars)`),yield{initialUserMessage:await Rne(ne.initialUserMessage,`${r}-${oe}`,"i

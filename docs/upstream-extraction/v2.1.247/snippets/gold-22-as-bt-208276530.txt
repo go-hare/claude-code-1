@@ -1,0 +1,2 @@
+# pos=208276530
+function aa(e,t){let n=y().internalWrites,r=n.get(e);if(r!==void 0&&Date.now()-r<t)return n.delete(e),!0;return!1}function la(){y().internalWrites.clear()}var sa=5000;var kt=v(()=>{Fe()});import{win32 as Bt}from"path";function Hi(){if(k()!=="windows")return null;for(let e of Ti){let t=Lt(e);if(t===null){if(R().existsSync(e))return null;continue}if(t.toLowerCase()===e.toLowerCase())return e}return 

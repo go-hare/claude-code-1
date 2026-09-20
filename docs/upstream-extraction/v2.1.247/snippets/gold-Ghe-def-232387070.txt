@@ -1,0 +1,2 @@
+# needle=async function Ghe( pos=232387070 end=232387223 len=153 tip=true
+async function Ghe(e,t){try{return await e.content(t)}catch(o){return FV.of(t.session.host).failedTipIds.add(e.id),Pe(Qs(jn(o),"tip content threw")),""}}

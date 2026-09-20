@@ -1,0 +1,51 @@
+# gold-1-pass2 send-feedback registry / wiring
+
+## 1. isEnabled / settings-default / session gate
+NORM-SAME isEnabled-wrapper aLt/gDt rawEq=false rawLen=43/43 normSha=d9dd1eaad9f5d0ec/d9dd1eaad9f5d0ec miss=false
+NORM-SAME get-feedbackDrafts Ffs/mls rawEq=false rawLen=57/57 normSha=5a68228bb4130e5f/5a68228bb4130e5f miss=false
+NORM-SAME session-gate Ufs/gls rawEq=false rawLen=338/338 normSha=c5f49dbf7e2c3d82/c5f49dbf7e2c3d82 miss=false
+
+## 2. tool object keys (Gt/Ht)
+hint 246=@215155448 247=@216537033
+obj rawLen 246=3927 247=3927 rawEq=false
+obj normEq=false normSha 246=73986cf7956af094 247=4944224cbd41f98d
+keys247 ["name","maxResultSizeChars","searchHint","async description","description","async prompt","prompt","get inputSchema","get outputSchema","isReadOnly","isConcurrencySafe","isEnabled","async checkPermissions","behavior","updatedInput","async call","if","data","success","message","cap","data","success","message","getTranscriptPathForSession","permissionMode","mainLoopModel","exceeds200kTokens","gc","type","title","details","area","failureMode","taskCategory","trigger","requestIds","sessionId","cwd","model","cliVersion","ISSUES_EXPLAINER","PACKAGE_URL","README_URL","VERSION","FEEDBACK_CHANNEL","BUILD_TIME","GIT_SHA","HOOKS_WORKER_URL","DD_SOURCEMAP_GROUP","os","effort","thinkingType","thinkingBudget","messageCount","assistantTurnCount","subagentCount","transcriptFile","data","success","message","draftId","title","type","detailsPreview","type","trigger","presentation","request_id_count","evicted_count","failure_mode","task_category","effort","thinking_type","thinking_budget","message_count","assistant_turn_count","subagent_count","ce","Bp","type","subtype","draft_id","draft_type","title","details_preview","data","success","message","mapToolResultToToolResultBlockParam","type","tool_use_id","content","is_error","renderToolUseMessage"]
+keys246 ["name","maxResultSizeChars","searchHint","async description","description","async prompt","prompt","get inputSchema","get outputSchema","isReadOnly","isConcurrencySafe","isEnabled","async checkPermissions","behavior","updatedInput","async call","if","data","success","message","cap","data","success","message","getTranscriptPathForSession","permissionMode","mainLoopModel","exceeds200kTokens","fc","type","title","details","area","failureMode","taskCategory","trigger","requestIds","sessionId","cwd","model","cliVersion","ISSUES_EXPLAINER","PACKAGE_URL","README_URL","VERSION","FEEDBACK_CHANNEL","BUILD_TIME","GIT_SHA","HOOKS_WORKER_URL","DD_SOURCEMAP_GROUP","os","effort","thinkingType","thinkingBudget","messageCount","assistantTurnCount","subagentCount","transcriptFile","data","success","message","draftId","title","type","detailsPreview","type","trigger","presentation","request_id_count","evicted_count","failure_mode","task_category","effort","thinking_type","thinking_budget","message_count","assistant_turn_count","subagent_count","le","Pp","type","subtype","draft_id","draft_type","title","details_preview","data","success","message","mapToolResultToToolResultBlockParam","type","tool_use_id","content","is_error","renderToolUseMessage"]
+keys-only-247 ["gc","ce","Bp"]
+keys-only-246 ["fc","le","Pp"]
+key alwaysLoad 246=0 247=0
+key shouldDefer 246=0 247=0
+key isDeferredTool 246=0 247=0
+key isEnabled 246=1 247=1
+key feature 246=0 247=0
+
+## 3. alwaysLoad / feature / defer near SendFeedback assign
+near-assign-20k 246={"i":215149777,"alwaysLoad":0,"shouldDefer":0,"featureCall":0,"FEATURE":0,"isDeferred":0}
+near-assign-20k 247={"i":216531362,"alwaysLoad":0,"shouldDefer":0,"featureCall":0,"FEATURE":0,"isDeferred":0}
+
+## 4. tool-var identifier hits ($gr / Upr)
+$gr ident hits=7 js=4
+Upr ident hits=10 js=3
+$gr classes {"other":5,"assign-factory":1,"list-mid":1}
+Upr classes {"other":8,"assign-factory":1,"list-mid":1}
+registry-list-windows 246=5 247=2
+
+## 5. quoted SendFeedback sites besides var assign
+quoted SendFeedback 246=2 247=2
+  246#0 @213778105 js=false sha=06997a65e25638c7
+  246#1 @215149785 js=true sha=0e9e640f14153859
+  247#0 @215156370 js=false sha=06997a65e25638c7
+  247#1 @216531370 js=true sha=0e1df80a911cbf24
+quoted-tbl normEq=true sha246=14b38137c0dec7a9 sha247=14b38137c0dec7a9
+
+## 6. settings default / off-disable (already pass1, confirm)
+Ffs body "function Ffs(){return zdt(\"feedbackDrafts\")[0]??\"notify\"}"
+mls body "function mls(){return cut(\"feedbackDrafts\")[0]??\"notify\"}"
+aLt body "function aLt(){return Ffs()!==\"off\"&&Ufs()}"
+gDt body "function gDt(){return mls()!==\"off\"&&gls()}"
+
+## 7. leftover pins (qb / qF / blu / Slu) — not SendFeedback
+pin "function qb(" 246=8 247=7
+pin "function qF(" 246=4 247=2
+pin "function blu(" 246=1 247=0
+pin "function Slu(" 246=1 247=0

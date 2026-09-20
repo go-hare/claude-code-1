@@ -1,0 +1,5 @@
+# LOCKED sko @213652526 end=213652610 len=84
+# unique function sko( count=1
+# registered as flushAtExit: pPe uln({flush:oko,flushAtExit:sko})
+# process.on("exit") via dln. drains mln()+sPe() then Pln(xit(e))
+function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}

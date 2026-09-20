@@ -1,0 +1,13 @@
+# offset=213769456 
+
+k detected"}}var idn="__SED_MULTIPLE_I_FLAGS__";var lxe=w(()=>{XP();E3();gy();Jle();FF()});import{homedir as jTo}from"os";import{isAbsolute as U3,normalize as zTo,resolve as udn,sep as HTo}from"path";function kD(e,t,n){return{behavior:"ask",message:t,decisionReason:{type:"safetyCheck",reason:`Dangerous ${e} operation ${n}`,classifierApprovable:!1,circuitBreaker:"dangerousRemoval"},suggestions:[]}}function B3(e,t,n,r,o){let s=j3[e],i=s(t),{resolvedPath:a}=oc(vt(),n),l=a===n?[n]:[n,a],c=Cn([...l,...r?mh(r):[]].flatMap((u)=>{let{resolvedPath:d}=oc(vt(),u);return d===u?[u]:[u,d]}));for(let u of i){let d=vD(u),p=U3(d)?d:udn(n,d),f=p;for(let h="";h!==f;){h=f;let y=f.replace(/([\\/]\*+)+[\\/]*$/,"")||"/";if(y!==f)f=/[\\/]/.test(y)?zTo(y):y}let m=f!==p;if(o&&m&&!U3(d)&&/[\\/]\*$/.test(p))return kD(e,`Dangerous ${e} operation detected: '${p}'
+
+This command changes directories before the removal, so the relative glob target cannot be statically resolved. This requires explicit approval and cannot be auto-allowed by permission rules.`,`on statically-unresolvable target: ${p}`);let g=f;if(!U3(d)){let h=/[\\/]$/.test(n)?n:n+HTo;if(f.startsWith(h))g=f.slice(h.length);else if(f===n)g=""}if(m&&(cxe(d)||Uu(p)||d.startsWith("~")||Gl(d)||!U3(d)&&/(^|[\\/])\.\.([\\/]|$)/.test(d)&&/[\\/]\*$/.test(p)||e==="rmdir"&&/[\\/]\*$/.test(p)&&t.some((h)=>/^--p/.test(h)||/^-[a-z]*p/.test(h))||!U3(d)&&/\*[\\/]+$/.test(d)&&/[\\/]\*$/.test(p)))return kD(e,`Dangerous ${e} operation detected: '${p}'
+
+This command's removal target cannot be statically resolved to a directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,`on statically-unresolvable target: ${p}`);if(!m||!/[*?[]/.test(g)){let h=[f];if(f!==p){let{resolvedPath:y}=oc(vt(),f);if(y!==f)h.push(y)}for(let y of h){if(gq(y))return kD(e,`Dangerous ${e} operation detected: '${p}'
+
+This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,`on critical path: ${p}`);if((m?c:l).some((S)=>yT(S,y)))return kD(e,`Dangerous ${e} operation detected: '${p}'
+
+This command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories). This requires explicit approval and cannot be auto-allowed by permission rules.`,`on working directory or its ancestor: ${p}`)}}if(m&&/[\\/]\*$/.test(p)){let h=Qt(p.split(/[\\/]+/),(b)=>b&&b!==".")-Qt(f.split(/[\\/]+/),(b)=>b&&b!=="."),y=Qt(g.split(/[\\/]+/),(b)=>/[*?[]/.test(b));if(h+y>1)return kD(e,`Dangerous ${e} operation detected: '${p}'
+
+This command's glob pattern traverses directories that cannot be statically enumerated. This requir

@@ -1,0 +1,3 @@
+# 247 _g( @215503299
+
+==null&&"subagent_type"in e&&xL(e.subagent_type,t)}function EEl(e,t,n=!1){let r=e.find((o)=>o.data.type==="agent_progress");if(!r)return n;return r.data.isBuiltIn===void 0?xL(r.data.agentType,t):r.data.isBuiltIn&&r.data.agentType===Kc}var m1e=w(()=>{_g()});function Ohe(e){let{activeAgents:t,allowedAgentTypes:n}=e.options.agentDefinitions;return{depth:Jc(e.agentContext),allowedAgentTypes:n,activeAgents:t}}function vV(e,t,{depth:n=0,allowedAgentTypes:r,activeAgents:o}={}){return wDe()&&(o===void 0||JAt(o))&&e.some((s)=>Zn(s,gn))&&!za(t,{name:gn})&&!aI(t,gn,Kc)&&n<lm()&&(r===void 0||r.includes(Kc

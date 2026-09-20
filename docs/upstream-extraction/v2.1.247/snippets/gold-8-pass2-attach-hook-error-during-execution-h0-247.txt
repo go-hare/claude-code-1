@@ -1,0 +1,8 @@
+# off=197325880 ver=247
+
+undelivered after .......... .a.t.t.e.m.p.t.s. ..  .g.i.v.i.n.g. .u.p.......b...remote-permission-mode-unsynced.Z...w...C.o.u.l.d.n.'.t. .r.e.a.c.h. .t.h.e. .c.l.o.u.d. .s.e.s.s.i.o.n. ..  .p.e.r.m.i.s.s.i.o.n. .m.o.d.e. .m.a.y. .b.e. .o.u.t. .o.f. .s.y.n.c. ... .s.h.i.f.t.+.t.a.b. .t.o. .r.e.t.r.y.........broadcastSeq.....-n.trusted......m..alive........Df.holderProcStart.....z91.holderProcStartFt.......6.
+.procStartFt.........dir:....j...touched:.....?b.present:....p.^.consent:.....!..stop_hook_summary.........P.hook_success........hook_blocking_error......L..hook_non_blocking_error.........hook_error_during_execution........hook_cancelled.......2..radioOn.........radioOff$....s..Failed to restore the conversation:
+........tengu_message_selector_selected......PE.index_from_end..........is_current_prompt........v	.tengu_message_selector_restore_option_selected.......c=.Message not found.......n...up_to.......9X..Failed to summarize:
+.......1/..Restored the code, but skipped .E...ws.... .S.k.i.p.p.e.d. .f.i.l.e.s. .w.e.r.e. .l.e.f.t. .u.n.t.o.u.c.h.e.d. ..  .r.u.n. .w.i.t.h. .-.-.d.e.b.u.g. .f.o.r. .t.h.e. .p.a.t.h.s.....-...T...Failed to restore the conversation and code:
+........-..Failed to restore the code:
+....3...skippedLinks7.......Give the user a brief summary, then start implementing..........T.h.e. .u.s.e.r. .a.p.p.r.o.v.e.d. .t.h.e. .u.l.t.r.a.p.l.a.n. .i.n. .t.h.e.

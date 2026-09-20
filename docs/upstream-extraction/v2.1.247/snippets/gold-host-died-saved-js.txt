@@ -1,0 +1,83 @@
+# peel around This session's terminal host process died @ 202685016
+
+
+----- 202677324 len=58 -----
+^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux
+
+----- 202677452 len=61 -----
+Cannot destructure property 'CI' from null or undefined value
+
+----- 202678048 len=110 -----
+ for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+
+----- 202678500 len=72 -----
+Cannot destructure property 'entanglements' from null or undefined value
+
+----- 202679160 len=73 -----
+Cannot destructure property 'suspendedLanes' from null or undefined value
+
+----- 202679520 len=70 -----
+Cannot destructure property 'updateQueue' from null or undefined value
+
+----- 202679600 len=74 -----
+Cannot destructure property 'firstBaseUpdate' from null or undefined value
+
+----- 202680908 len=68 -----
+Cannot destructure property 'stateNode' from null or undefined value
+
+----- 202681008 len=65 -----
+Cannot destructure property 'create' from null or undefined value
+
+----- 202681176 len=68 -----
+Cannot destructure property 'alternate' from null or undefined value
+
+----- 202681592 len=52 -----
+findAllNodes was able to match part of the selector:
+
+----- 202681924 len=98 -----
+Raw mode is not supported on the current process.stdin, which Ink uses as input stream by default.
+
+----- 202682023 len=95 -----
+Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported
+
+----- 202682128 len=55 -----
+Raw mode is not supported on the stdin provided to Ink.
+
+----- 202682184 len=95 -----
+Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported
+
+----- 202682312 len=53 -----
+stdin readable handler threw during input processingI
+
+----- 202682372 len=73 -----
+handleReadable: re-attaching stdin readable listener after error recovery
+
+----- 202683160 len=71 -----
+Cannot destructure property 'currentTheme' from null or undefined value
+
+----- 202683420 len=65 -----
+useTerminalNotification must be used within TerminalWriteProvider
+
+----- 202683908 len=75 -----
+Cannot destructure property 'watchSystemTheme' from null or undefined value
+
+----- 202684228 len=108 -----
+useKillRing cannot be called outside of a <KillRingProvider /> (mounted around every Ink root by src/ink.ts)
+
+----- 202684548 len=56 -----
+useTerminalSize must be used within an Ink App component
+
+----- 202685016 len=69 -----
+This session's terminal host process died (the conversation is saved)
+
+----- 202685460 len=77 -----
+[jobs] stripped non-allowlisted providerEnv key(s) from persisted job state: 
+
+----- 202685548 len=80 -----
+[jobs] stripped non-allowlisted respawnFlags token(s) from persisted job state: 
+
+----- 202686412 len=58 -----
+\bE(?:NOENT|CONNREFUSED|CONNRESET)\b|control socket closed
+
+----- 202686760 len=120 -----
+This plugin source uses mode "link", which is not supported on Windows yet; the marketplace can use mode "copy" instead.

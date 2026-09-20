@@ -11,6 +11,7 @@
 
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getClaudeCodeUserAgent } from './userAgent.js'
 
 export type GatewayAuthSession = {
   url: string
@@ -937,7 +938,10 @@ async function runGatewayIdpRefresh(
     const res = await postToken({
       endpoint,
       body,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': getClaudeCodeUserAgent(),
+      },
     })
     const token = parseGatewayIdpTokenResponse(res.data)
     if (!token) {

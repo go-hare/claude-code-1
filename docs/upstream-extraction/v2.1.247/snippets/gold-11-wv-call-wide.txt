@@ -1,0 +1,3 @@
+# offset=210379185 hit=1/1 needle="wv(t,s.dev,s.ino,r)"
+
+led")}}try{let r=to(t,Yn.O_RDONLY|Yn.O_DIRECTORY|Yn.O_NOFOLLOW);try{let s=sh(r);wv(t,s.dev,s.ino,r)}catch(s){throw eo(r)

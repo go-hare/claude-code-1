@@ -1,0 +1,23 @@
+# densable 2.1.247 spinnerTipLabel + `sr` Et/Bt
+# pickNewSpinnerTip @232420321 (`spinnerTip:`)
+# spinner `sr` @228694622 (`Use /clear to start fresh`)
+
+# TurnController.pickNewSpinnerTip — store text + label separately
+let u=()=>r((c)=>c.spinnerTip===void 0?c:{...c,spinnerTip:void 0,spinnerTipLabel:void 0});
+Vhe({...}).then(async(c)=>{
+  let m=c?await Ghe(c,{session:e,theme:t,...}):"";
+  if(!m){u();return}
+  if(r((d)=>({...d,spinnerTip:m,spinnerTipLabel:c?.label})),c)mL(c,"spinner",s)
+})
+
+# Spinner `sr` — F=spinnerTip, C=spinnerTipLabel, V=effective tip
+# Ae is hardcoded !1 (same as local contextTipsActive=false)
+F=S((T)=>T.spinnerTip)
+C=S((T)=>T.spinnerTipLabel)
+V=Ae?F:pr()?F:st&&!nt?"Use /clear to start fresh when switching topics and free up context":It&&!nt?"Use /btw to ask a quick side question without interrupting Claude's current work":F
+Et=V===F&&C?C:"Tip"
+Bt=it?void 0:nt?`Next: ${nt.subject}`:V?`${Et}: ${V}`:void 0
+
+# Default org label constant remains w="Tip" (nt / Pe).
+# Context /clear /btw overrides force Et back to "Tip" because V!==F.
+# Empty/undefined C is falsy → "Tip".

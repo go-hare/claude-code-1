@@ -1,0 +1,3 @@
+# offset=218860268 ver=247 hit=1/2 needle="function nW("
+
+eys()){if(!r.startsWith(t))continue;if(E4s.test(r.slice(t.length)))n.delete(r)}}function nW(e,t){return wr(e,RZr(t))}async function xZr(e,t){return(await X0(e,t))?.path}async function Pv(e,t){if(!ks())return;try{return(await X0(e,t))?.legToken}catch{return}}async function X0(e,t){let n=nW(e,t),r=p4s(),o=f4s(),s=`${n}\x00${o}\x00era:${r}`,i=Ap().filePathMemo,a=i.get(s);if(a)return a;let l=(async()=>{let u=await T4s(e,t);if(u===void 0)return;return{path:lve(yY(),aKt(n,u.fingerprint,r)),grantToken:u.grantToken,fingerprint:u.fingerprint,legToken:`${u.grantToken}\x00era:${r}\x00${o}`}})();i.set(s,l);let c=()=>{if(i.get(s)===l)i.delete(s)};return l.then((u)=>{if(u===void 0)c()}

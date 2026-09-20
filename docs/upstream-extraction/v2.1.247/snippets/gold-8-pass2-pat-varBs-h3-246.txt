@@ -1,0 +1,3 @@
+# off=222458075 pat="var Bs="
+
+class ne extends w{static symbol=Symbol.for("@smithy/lis");name;traits;valueSchema;symbol=ne.symbol}var Bs=(e,t,r,s)=>w.assign(new ne,{name:t,namespace:e,traits:r,valueSchema:s});class oe extends w{static symbol=Symbol.for("@smithy/map");name;traits;keySchema;valueSchema;symbol=oe.symbol}var As=(e,t,r,s,n)=>w.assign(new oe,{name:t,namespace:e,trait

@@ -1,0 +1,7 @@
+# firstDiff=3679
+
+---246---
+D:"Thinking mode",ID:ID??!0,ID:"boolean",ID(ID){ID((ID)=>({...ID,ID:ID})),ID({ID:ID?void 0:!1}),ID("tengu_thinking_toggled",{ID:ID}),ID("thinking_toggle")}},...ID()&&ID()?[{ID:"fast",ID:`Fast mode (${Ge()})`,ID:!!ID,ID:"boolean",ID(ID){if(ID(),ID({ID:ID?!0:void 0}),ID){let ID=!ID(ID);ID((ID)=>({...ID,...ID&&{ID:ID(),ID:null},ID:!0})),ID((ID)=>({...ID,...ID&&{ID:ID()},"Fast mode":"ON"}))}else ID((ID)=>({...ID,ID:!1})),ID((ID)=>({...ID,"Fast mode":"OFF"}))}}]:[],...ID("tengu_chomp_inflection",!1)?[{ID:"promptSuggestionEnabled",ID:"Prompt suggestions",ID:ID,ID:"boolean",ID(ID){ID((ID)=>({...ID,ID
+
+---247---
+D:"Thinking mode",ID:ID??!0,ID:"boolean",ID(ID){ID((ID)=>({...ID,ID:ID})),ID({ID:ID?void 0:!1}),ID("tengu_thinking_toggled",{ID:ID}),ID("thinking_toggle")}},...ID()&&ID()?[{ID:"fast",ID:`Fast mode (${Ke()})`,ID:!!ID,ID:"boolean",ID(ID){if(ID(),ID({ID:ID?!0:void 0}),ID){let ID=!ID(ID);ID((ID)=>({...ID,...ID&&{ID:ID(),ID:null},ID:!0})),ID((ID)=>({...ID,...ID&&{ID:ID()},"Fast mode":"ON"}))}else ID((ID)=>({...ID,ID:!1})),ID((ID)=>({...ID,"Fast mode":"OFF"}))}}]:[],...ID("tengu_chomp_inflection",!1)?[{ID:"promptSuggestionEnabled",ID:"Prompt suggestions",ID:ID,ID:"boolean",ID(ID){ID((ID)=>({...ID,ID

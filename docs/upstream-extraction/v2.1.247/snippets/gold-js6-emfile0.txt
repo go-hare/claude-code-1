@@ -1,0 +1,20 @@
+# offset=66569698 needle="EMFILE"
+
+rgument",
+  EFBIG: "file too large",
+  EHOSTUNREACH: "host is unreachable",
+  EINTR: "interrupted system call",
+  EINVAL: "invalid argument",
+  EIO: "i/o error",
+  EISCONN: "socket is already connected",
+  EISDIR: "illegal operation on a directory",
+  ELOOP: "too many symbolic links encountered",
+  EMFILE: "too many open files",
+  EMSGSIZE: "message too long",
+  ENAMETOOLONG: "name too long",
+  ENETDOWN: "network is down",
+  ENETUNREACH: "network is unreachable",
+  ENFILE: "file table overflow",
+  ENOBUFS: "no buffer space available",
+  ENODEV: "no such device",
+  ENOENT: "no such file or dire

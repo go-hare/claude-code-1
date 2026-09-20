@@ -22,9 +22,14 @@ export function recordTipShown(tipId: string): void {
   })
 }
 
-/** densable `Svr` — lifetime show count for a tip id. */
+/** densable `Nhe` / `Svr` — lifetime show count for a tip id. */
 export function getTipLifetimeShownCount(tipId: string): number {
   return getGlobalConfig().tipLifetimeShownCounts?.[tipId] ?? 0
+}
+
+/** densable `Ohe` — config-map reader; no 247 write site. */
+export function getPluginSuggestionShownCount(pluginId: string): number {
+  return getGlobalConfig().pluginSuggestionShownCounts?.[pluginId] ?? 0
 }
 
 export function getSessionsSinceLastShown(tipId: string): number {

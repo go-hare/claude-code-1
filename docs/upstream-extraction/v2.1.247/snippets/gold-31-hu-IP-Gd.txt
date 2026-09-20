@@ -1,0 +1,11 @@
+# 247 hu analytics-off from startup
+
+Gd(){return Io(Un())&&H("policySettings")?.forceLoginMethod==="gateway"}
+sy(){return Gd()||Bt().length>0}
+IP(){return c.CLAUDE_CODE_CUSTOM_OAUTH_URL!==void 0||sy()}
+hu(){return DP()||Pt()!==null||Zi()||IP()}
+
+Un(){return s.state?.output.managedSettings??null}
+
+Locked for this bullet: CUSTOM_OAUTH_URL!==undefined and managed forceLoginMethod==="gateway"
+Not implemented (helpers not locked 1:1): Bt().length>0, Pt()!==null, Io() identity

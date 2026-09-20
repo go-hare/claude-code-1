@@ -1,0 +1,6 @@
+# LOCKED xit @213652610 end=213652823 len=213
+# unique function xit( count=1
+# unique function xit(e){return(t)=>{let n={...t.pluginUsage} count=1
+# not in export map. same-module callers: oko, Aln, sko
+# merges drained pendingUsage entries into persisted pluginUsage
+function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n[r];n[r]={usageCount:(s?.usageCount??0)+o.count,lastUsedAt:o.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:n}}}

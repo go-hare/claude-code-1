@@ -1,0 +1,2 @@
+# function Zt( pos=211830711 end=211830905 len=194
+function Zt(n,e){if(n.includes("://"))return-1;let t=n.search(Kt);if(t>0)return t;let r=n.search(Gt);if(r>=0)return r;let s=e?n.search(Vt):-1;if(s>=0)return s;let o=n.search(zt);return o>0?o:-1}

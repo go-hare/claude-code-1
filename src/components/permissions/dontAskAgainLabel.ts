@@ -9,6 +9,7 @@
 import { homedir } from 'os'
 import { sep } from 'path'
 import { stringWidth } from '@anthropic/ink'
+import stripAnsi from 'strip-ansi'
 import { getGraphemeSegmenter } from '../../utils/intl.js'
 
 /** densable `xMi` — tool name display width ceiling before DAA is withheld. */
@@ -34,12 +35,9 @@ function graphemeSegments(text: string): string[] {
  * ported (KCt-lite).
  */
 export function sanitizeDontAskCwd(cwd: string): string {
-  let stripped = cwd
-  try {
-    stripped = Bun.stripANSI(cwd)
-  } catch {
-    stripped = cwd
-  }
+  // stripAnsi over Bun.stripANSI: dist/cli.js also runs under Node, where the
+  // Bun global is absent and a throw here would pass ANSI through unmarked.
+  const stripped = stripAnsi(cwd)
   const marked = stripped === cwd ? stripped : `${stripped}\uFFFD`
   // U+2028/U+2029 are JS line terminators — must be unicode escapes, not literals.
   const IH_CONTROLS =

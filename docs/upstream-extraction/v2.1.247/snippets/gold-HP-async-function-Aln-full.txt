@@ -1,0 +1,6 @@
+# LOCKED Aln @213652373 end=213652453 len=80
+# unique async function Aln( count=1
+# unique async function Aln(e){let t=sPe() count=1
+# callers: xvi ca(()=>Aln(e)), i3(()=>Aln(e))
+# drain pendingUsage then await ki(xit(t),e)
+async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}

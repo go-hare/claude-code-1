@@ -1,0 +1,3 @@
+# 247 function ke start=223011947 end=223012106 len=159 sha=1eb16a5cd80efe41
+
+function ke({isTerminalFocused:e,canPasteImages:n}){let{addNotification:i}=Se(),r=Pe();ge(xt,{isTerminalFocused:e,canPasteImages:n,addNotification:i,clock:r})}

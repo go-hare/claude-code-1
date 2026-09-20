@@ -1,0 +1,40 @@
+# densable 2.1.247 #3 — locked SEA bodies (247 vs 246 DualInk/Cmy)
+
+## NEW 247 strings (246: 0)
+- choose "switch to auto mode" below
+- auto mode handles these prompts for you
+- function KNe(
+- sW.workflow
+- var UNe=
+- bash_permission_prompt_upsell
+
+## NX + UNe + KNe (offset 232849329)
+var UNe="\xB7 auto mode handles these prompts for you";
+function NX(){
+  return Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+}
+function KNe({..., showEnableAutoModeOption:c=!1, enableAutoModeDescription:m=RA}){
+  ...
+  if(c)d.push({label:sW.workflow,description:m,value:"yes-enable-auto-mode"});
+  ...
+}
+sW={workflow:"Yes, and switch to auto mode","exit-plan-resume":"Yes, and use auto mode"}
+RA="\xB7 workflows run best with it on"   // 239 workflow-only default; NOT this bullet
+
+## jw (unchanged shape; 247 xOe now reads canOfferAutoMode)
+canOfferAutoMode = (mode==="default"||mode==="acceptEdits") && FKe
+offered = requestSource?.type==="workflow-agent" && canOfferAutoMode
+
+## xOe 246 vs 247
+246: Ce=!1; showEnableAutoModeOption=!a&&!c&&(B||Ce); enableAutoModeDescription:void 0
+     yes-enable-auto-mode → te("workflow_permission_prompt"); subtitle empty
+247: fe=COe(r)||matchedAskRule?.ruleBehavior==="ask"||r?.type==="hook"
+     Ce=canOfferAutoMode&&!fe
+     showEnableAutoModeOption=!a&&!c&&Ce
+     enableAutoModeDescription=!offered?UNe:void 0
+     yes-enable-auto-mode → te(!offered?"bash_permission_prompt_upsell":"workflow_permission_prompt")
+     subtitle=Ce&&!a&&!c?NX():void 0
+a = withheld preview || command not string
+c = classifier veto || isAskCappedByOrg || remote-agent || requestedMachine
+COe(r) body not uniquely locked in this chunk (name collides); local uses
+findSafetyCheckDecision on decisionReason (same as Wg already in c).

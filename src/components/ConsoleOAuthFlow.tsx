@@ -30,6 +30,7 @@ import {
 import { clearOpenAIClientCache } from '../services/api/openai/client.js';
 import { OAuthService } from '../services/oauth/index.js';
 import { getOauthAccountInfo, validateForceLoginOrg } from '../utils/auth.js';
+import { oauthLoginOrgUUIDHint } from '../utils/forceLoginOrg.js';
 import { isHeadlessBrowserEnvironment, openBrowser } from '../utils/browser.js';
 import { isFullscreenActive, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getNativeSelectionHoldKey } from './ScrollKeybindingHandler.js';
@@ -129,8 +130,7 @@ export function ConsoleOAuthFlow({
   const loginWithClaudeAiInitial = mode === 'setup-token' || forceLoginMethod === 'claudeai';
   const methodMismatch =
     settings.forceLoginMethod !== undefined && loginWithClaudeAiInitial !== (settings.forceLoginMethod === 'claudeai');
-  const orgUUID =
-    typeof settings.forceLoginOrgUUID === 'string' && !methodMismatch ? settings.forceLoginOrgUUID : undefined;
+  const orgUUID = oauthLoginOrgUUIDHint(settings.forceLoginOrgUUID, methodMismatch);
   const forcedMethodMessage =
     forceLoginMethod === 'claudeai'
       ? 'Login method pre-selected: Subscription Plan (Claude Pro/Max)'

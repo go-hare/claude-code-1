@@ -1,0 +1,91 @@
+# gold-1-call-ye-E-pass5 247
+
+## _157-header @237069224
+al-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw as ot,Vw as nt,Xw as rt}from"B:/~BUN/root/_205.js";import{ex as st,fx as Jo}from"B:/~BUN/root/_210.js";import{QB as ro}from"B:/~BUN/root/_253.js";import{fD as G,gD as Ho}from"B:/~BUN/root/_280.js";import{vD as tt,xD as Go}from"B:/~BUN/root/_281.js";import{ND as et,OD as zo}from"B:/~BUN/root/_284.js";import{SE as re,TE as jo}from"B:/~BUN/root/_294.js";import{BF as de,HF as mt}from"B:/~BUN/root/_301.js";import{H0a as Ot,HMa as Nt,J0a as _o,WMa as Mo,hCa as zt,jCa as Qo}from"B:/~BUN/root/_448.js";import{B9a as Ye,C9a as No}from"B:/~BUN/root/_485.js";import{F9a as z,G9a as Lo}from"B:/~BUN/root/_486.js";import{H9a as L,I9a as Bo}from"B:/~BUN/root/_487.js";import{Q9a as Ke,T9a as To,d_a as F,e_a as Eo}from"B:/~BUN/root/_488.js";import{gbb as Po,mab as r,pab as t,yab as no}from"B:/~BUN/root/_490.js";import{hdb as Qe,idb as $o}from"B:/~BUN/root/_498.js";import{kdb as ue,ldb as pt}from"B:/~BUN/root/_499.js";import{odb as q,pdb as V}from"B:/~BUN/root/_500.js";import{qdb as qe,rdb as e,sdb as o,tdb as he}from"B:/~BUN/root/_501.js";import{Anb as Oo,znb as $t}from"B:/~BUN/root/_535.js";import{Mtb as Ze,Ntb as wo}from"B:/~BUN/root/_552.js";import{ZEb as We,eFb as Ve,fFb as ne,pFb as ce,qFb as u,tFb as Se}from"B:/~BUN/root/_571.js";import{zTb as to}from"B:/~BUN/root/_593.js";import{S1b as oo}from"B:/~BUN/root/_626.js";import{Htc as Ao,dnc as Bt,ptc as Xe,snc as xo}from"B:/~BUN/root/_675.js";import{iBc as eo}from"B:/~BUN/root/_689.js";import{$1c as Ge,S3c as He,Z1c as ze,d2c as Uo,t4c as Je,z4c as Do}from"B:/~BUN/root/_752.js";import{Ifd as Yt}from"B:/~BUN/root/_823.js";import{Kfd as Io}from"B:/~BUN/root/_824.js";import{fgd as H}from"B:/~BUN/root/_825.js";import{Gid as Fo,yid as Lt}from"B:/~BUN/root/_829.js";import{Kkd as je,Pkd as vo,eld as Et,hkd as Pt,kld as Ro,pkd as So}from"B:/~BUN/root/_833.js";import{Azd as dt,Dyd as wt}from"B:/~BUN/root/_844.js";import{Pzd as Tt,eAd as Co}from"B:/~BUN/root/_845.js";import{GBd as ge}from"B:/~BUN/root/_850.js";Se();Se();$o();Po();To();Uo();Ao();_o();Mo();pt();mt();xo();wo();Ro();Io();dt();Do();Fo();vo();So();Co();Oo();Lo();Go();Bo();No();Ho();Jo();Eo();jo();eo();Se();no();oo();Yt();pt();ro();mt();dt();to();V();zo();he();V();var Ut=7250,it="https://github.com/anthropics/claude-code/issues",fe={session:"this session only",day:"this session + this project\u2019s other sessions from the last 24 hours",wee
+
+## as zt} hits=0
+
+## as Ht} hits=0
+
+## zt as hits=0
+
+## Ht as hits=0
+
+## Nfs @216526035
+len=595 sha=69e4e79c1a15b814
+async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId:r}=await import("B:/~BUN/root/chunk-j3ftgb6r.js"),o=e.source_session_id===r();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s());if(i!==void 0)try{if(o)return(await t.statMeta(i)).ok;let a=await t.read([{key:i,tail:rgr}]);if(!a.ok)return!1;let[l]=a.value.items;return l.found&&ogr(Buffer.from(l.value).toString("utf8"),e)}catch{return!1}}if(o)try{return await Qi().stat(n),!0}catch{return!1}try{let s=await Qi().readTail(n,rgr);return ogr(s.toString("utf8"),e)}catch{return!1}}
+
+## Nfs-win @216526035
+)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId:r}=await import("B:/~BUN/root/chunk-j3ftgb6r.js"),o=e.source_session_id===r();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s());if(i!==void 0)try{if(o)return(await t.statMeta(i)).ok;let a=await t.read([{key:i,tail:rgr}]);if(!a.ok)return!1;let[l]=a.value.items;return l.found&&ogr(Buffer.from(l.value).toString("utf8"),e)}catch{return!1}}if(o)try{return await Qi().stat(n),!0}catch{return!1}try{let s=await Qi().readTail(n,rgr);return ogr(s.toString("utf8"),e)}catch{return!1}}async function wgr(e,t){if(t){let n=await t.delete(ygr(e));if(!n.ok){if(hy(iLt(n.error)))return!1;throw new ye(`feedback draft delete failed: ${BKe(n.error)}`,"feedback draft delete failed")}return n.value
+
+## function kb( before xSa export hits=0
+
+## kb-export-mod @219710851
+a,wnd as ORa,dVt as PRa,knd as QRa,HQe as RRa,vb as SRa,vnd as TRa,tQs as URa,vm as VRa,xr as WRa,nQs as XRa,pt as YRa,Tnd as ZRa,Wj as _Ra,sQs as $Ra,iQs as aSa,aQs as bSa,End as cSa,UGe as dSa,zwe as eSa,Uf as fSa,bL as gSa,L0e as hSa,KYt as iSa,aTe as jSa,Tm as kSa,Pyt as lSa,Cnd as mSa,Rnd as nSa,uQs as oSa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as 
+
+## Es-as-Nw-export @222041092
+ranscripts:!1,storageV5:o}),f=xe(r);p=E(f,se,te)}catch(r){return R(r),T("feedback_bundle","write_failed"),{success:!1,error:O(r)}}return js(p)}
+export{E as Iw,A as Jw,ae as Kw,ss as Lw,Ps as Mw,Es as Nw,V as Ow,xs as Pw,Ct as Qw,Fs as Rw,Ds as Sw,D as Tw,Dt as Uw,Lt as Vw,js as Ww,Ot as Xw};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By usin
+
+## function Es( hits=0
+
+## var Es= hits=0
+
+## Es= hits=1
+- #0 @222030618  Set(["subagentTranscripts"]),Es=4194304,vs=2097152,V=8388608,B
+
+## after-jr-importer @237085165
+.247
+import{Ls as a,Ms as b,Ns as c}from"B:/~BUN/root/_157.js";import"B:/~BUN/root/_158.js";import"B:/~BUN/root/_159.js";import"B:/~BUN/root/_160.js";import"B:/~BUN/root/_193.js";import"B:/~BUN/root/_198.js";import"B:/~BUN/root/_199.js";import"B:/~BUN/root/_200.js";import"B:/~BUN/root/_201.js";import"B:/~BUN/root/_204.js";import"B:/~BUN/root/_205.js";import"B:/~BUN/root/_206.js";import"B:/~BUN/root/_210.js";import"B:/~BUN/root/_221.js";import"B:/~BUN/root/_253.js";import"B:/~BUN/root/_278.js";import"B:/~BUN/root/_280.js";import"B:/~BUN/root/_281.js";import"B:/~BUN/root/_282.js";import"B:/~BUN/root/_283.js";import"B:/~BUN/root/_284.js";import"B:/~BUN/root/_285.js";import"B:/~BUN/root/_286.js";import"B:/~BUN/root/_287.js";import"B:/~BUN/root/_288.js";import"B:/~BUN/root/_289.js";import"B:/~BUN/root/_290.js";import"B:/~BUN/root/_291.js";import"B:/~BUN/root/_292.js";import"B:/~BUN/root/_293.js";import"B:/~BUN/root/_294.js";import"B:/~BUN/root/_299.js";import"B:/~BUN/root/_300.js";import"B:/~BUN/root/_301.js";import"B:/~BUN/root/_303.js";import"B:/~BUN/root/_448.js";import"B:/~BUN/root/_449.js";import"B:/~BUN/root/_450.js";import"B:/~BUN/root/_451.js";import"B:/~BUN/root/_452.js";import"B:/~BUN/root/_453.js";import"B:/~BUN/root/_454.js";import"B:/~BUN/root/_455.js";import"B:/~BUN/root/_456.js";import"B:/~BUN/root/_457.js";import"B:/~BUN/root/_458.js";import"B:/~BUN/root/_459.js";import"B:/~BUN/root/_460.js";import"B:/~BUN/root/_461.js";import"B:/~BUN/root/_462.js";import"B:/~BUN/root/_463.js";import"B:/~BUN/root/_464.js";import"B:/~BUN/root/_465.js";import"B:/~BUN/root/_466.js";import"B:/~BUN/root/_467.js";import"B:/~BUN/root/_468.js";import"B:/~BUN/root/_469.js";import"B:/~BUN/root/_470.js";import"B:/~BUN/root/_471.js";import"B:/~BUN/root/_472.js";import"B:/~BUN/root/_473.js";import"B:/~BUN/root/_474.js";import"B:/~BUN/root/_475.js";import"B:/~BUN/root/_476.js";import"B:/~BUN/root/_477.js";import"B:/~BUN/root/_478.js";import"B:/~BUN/root/_479.js";import"B:/~BUN/root/_480.js";import"B:/~BUN/root/_481.js";import"B:/~BUN/root/_482.js";import"B:/~BUN/root/_483.js";import"B:/~BUN/root/_484.js";import"B:/~BUN/root/_485.js";import"B:/~BUN/root/_486.js";import"B:/~BUN/root/_487.js";import"B:/~BUN/root/_488.js";import"B:/~BUN/root/_489.js";import"B:/~BUN/root/_490.js";import"B:/~BUN/root/_491.js";import"B:/~BUN/root/_492.js";import"B:/~BUN/root/_493.js";import"B:/~BUN/root/_494.js";import"B:/~BUN/root/_495.js";import"B:/~BUN/root/_496.js";import"B:/~BUN/root/_497.js";import"B:/~BUN/root/_498.js";import"B:/~BUN/root/_499.js";import"B:/~BUN/root/_500.js";import"B:/~BUN/root/_501.js";import"B:/~BUN/root/_502.js";import"B:/~BUN/root/_503.js";import"B:/~BUN/root/_504.js";import"B:/~BUN/root/_505.js";import"B:/~BUN/root/_506.js";import"B:/~BUN/root/_507.js";import"B:/~BUN/root/_508.js";import"B:/~BUN/root/_509.js";import"B:/~BUN/root/_510.js";import"B:/~BUN/root/_511.js";import"B:/~BUN/root/_512.js";import"B:/~BUN/root/_513.js";import"B:/~BUN/root/_514.js";import"B:/~BUN/root/_515.js";import"B:/~BUN/root/_516.js";import"B:/~BUN/root/_517.js";import"B:/~BUN/root/_518.js";import"B:/~BUN/root/_519.js";import"B:/~BUN/root/_520.js";import"B:/~BUN/root/_521.js";import"B:/~BUN/root/_522.js";import"B:/~BUN/root/_523.js";import"B:/~BUN/root/_524.js";import"B:/~BUN/root/_525.js";import"B:/~BUN/root/_526.js";import"B:/~BUN/root/_527.js";import"B:/~BUN/root/_528.js";import"B:/~BUN/root/_529.js";import"B:/~BUN/root/_530.js";import"B:/~BUN/root/_531.js";import"B:/~BUN/root/_532.js";import"B:/~BUN/root/_533.js";import"B:/~BUN/root/_534.js";import"B:/~BUN/root/_535.js";import"B:/~BUN/root/_536.js";import"B:/~BUN/root/_537.js";import"B:/~BUN/root/_538.js";import"B:/~BUN/root/_539.js";import"B:/~BUN/root/_540.js";import"B:/~BUN/root/_541.js";import"B:/~BUN/root/_542.js";import"B:/~BUN/root/_543.js";import"B:/~BUN/root/_544.js";import"B:/~BUN/root/_545.js";import"B:/~BUN/root/_546.js";import"B:/~BUN/root/_547.js";import"B:/~BUN/root/_548.js";import"B:/~BUN/root/_549.js";import"B:/~BU
+
+## c as call hits=4
+- #0 @224561318 ${e.url} to manage usage credits.`}}var m=a(()=>{s();i()});m();export{c as call};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's
+- #1 @224650098 (e)},e.storageV5),{type:"skip"}}var p=s(()=>{i();a();m()});p();export{c as call};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's
+- #2 @236198205 n c(a,e){return t(m,{onClose:a,context:e,defaultTab:"Status"})}export{c as call};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's
+- #3 @237096583 .js";import"B:/~BUN/root/_849.js";import"B:/~BUN/root/_850.js";export{c as call,b as callLegacyFeedbackDialog,a as renderFeedbackComponent};
+.// @bun
+
+## ,c as  hits=0
+
+## call:c hits=0
+
+## load:c hits=5
+- #0 @206878629 swered dialog is cancelled by the CLI after its dialog deadline.'),payload:c(e(),d()).describe("Dialog-specific data passed to the host renderer. 
+- #1 @211066434 r,a,c){if(ec(t))throw Error(l(485));if(t=n.action,t!==null){var d={payload:c,action:t,next:null,isTransition:!0,status:"pending",value:null,reason
+- #2 @220172124 ,{kid:p}=await j({headerB64:n,payloadB64:o,signatureB64:i,header:s,payload:c,jwksUrl:f,fetchFn:fetch,checkExpiry:r.checkExpiry}),a=r.checkExpiry?"
+- #3 @234965889 chema()){for(let[e,n]of t.structIterator()){let{eventHeader:l,eventPayload:c}=n.getMergedTraits();if(c){p=e;break}else if(l){let u=o[a][e],s="bina
+- #4 @249594432 if(null!==c){do{var g={eventTime:c.eventTime,lane:c.lane,tag:c.tag,payload:c.payload,callback:c.callback,next:null};null===f?e=f=g:f=f.next=g;c=c.
+
+## Ns} hits=1
+- #0 @237084529 (l,n,c)}
+export{Yo as Ls,en as Ms,jr as Ns};
+.// @bun @bytecode
+// Claude Code is a
+
+## name:"feedback",load hits=1
+- #0 @218629970 en:!0,name:"stub"}});var zHs,KGt;var DKr=w(()=>{zHs={type:"local-jsx",name:"feedback",description:"Send feedback to Anthropic or report a bug",argumentHint
+
+## HHs={aliases hits=1
+- #0 @218630136 ,immediate:!0,requires:{ink:!0}},KGt=zHs});var HHs,YGt;var $Kr=w(()=>{HHs={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or sh
+
+## .call=c hits=0
+
+## .call=b hits=0
+
+## call:b hits=2
+- #0 @206506486 bortController,x=G.relayAbort(a,u),h=B.createBudget(e.budgetMs??n,a),{call:b,runBelow:S}=G.makeCall({handler:e,below:t,site:r,e:c,budget:h,downstre
+- #1 @206506597 below:t,site:r,e:c,budget:h,downstreamSignal:f.signal,state:m}),_=Rr({call:b,signal:u.signal,event:r.event,origin:s}),R,j;try{j=B.runningBudget.run
+
+## call:c, hits=0

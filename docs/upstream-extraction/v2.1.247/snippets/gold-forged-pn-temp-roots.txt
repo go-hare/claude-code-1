@@ -1,0 +1,60 @@
+# densable 2.1.247 `_583` `pn` temp-root list
+# SEA: official-247/package/claude.exe
+# Windows gold: this file only (do not write gold-forged-ie / Ie / fe / Fe / ne / Ne)
+
+# uniqueness
+# function pn(){return y([oe(),un()  UNIQUE @210534261 (function pn(){ total=8, win=1)
+# function Ie(){let e=pn(),n=j()     UNIQUE @210540281  j() unset ⇒ return e (pn)
+# async function nt()                UNIQUE win @210559455  Ie() then realpath
+# wZb as oe                          UNIQUE @210530797  from _615.js
+# yZb as un                          UNIQUE @210530807  from _615.js
+# yKb as ne                          UNIQUE @210530552  from _584.js
+# export{… w as wZb … J as yZb …}    UNIQUE @209041073  _615
+# Kr as yKb                          UNIQUE @210435605  _584
+# function w(){return S(_.of(        UNIQUE @209040413
+# function J(){let e=_.of(f().host)  UNIQUE @209040781
+# function S(e){let t=d(N(),"claude") UNIQUE @209040451
+# function N(){let e=l.CLAUDE_CODE_TMPDIR UNIQUE @209038900
+# tmpdir as T                        @209038851 _615 (2 hits; this is the import)
+# homedir as mn                      UNIQUE @210533467  _583
+# join as G                          @210533528  _583
+# homedir as qa                      UNIQUE @209858718  _584
+# function Kr(){let e=qa();return["/dev/stdout" UNIQUE @209860953
+# function oe(){ / un(){ / ne(){     NOT UNIQUE — lock via alias, do not invent TEMP/os.tmpdir
+
+# _583 imports
+import{xKb as nn,yKb as ne,zKb as tn}from"B:/~BUN/root/_584.js";
+import{AZb as fn,wZb as oe,yZb as un}from"B:/~BUN/root/_615.js";
+import{homedir as mn}from"os";
+import{join as G}from"path";
+
+# _615 N / T / w=oe / J=un / S
+import{tmpdir as T}from"os";
+import{join as d}from"path";
+function N(){let e=l.CLAUDE_CODE_TMPDIR;if(e)return e;return T()}
+function w(){return S(_.of(f().host))}
+function S(e){let t=d(N(),"claude");if(t!==e.ensured){if(typeof process.getuid==="function")s(t,{recursive:!0,mode:448}),c(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}
+function J(){let e=_.of(f().host),r=S(e);return r}
+
+# _584 Kr=ne / qa=homedir
+import{homedir as qa}from"os";
+function Kr(){let e=qa();return["/dev/stdout","/dev/stderr","/dev/null","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",Ft.join(e,".npm/_logs"),Ft.join(e,".claude/debug")]}
+
+# _583 pn / Ie / nt (j() unset ⇒ pn)
+function pn(){return y([oe(),un(),...ne().map((e)=>e==="~"||e.startsWith("~/")?G(mn(),e.slice(1)):e)])}
+function Ie(){let e=pn(),n=j();if(n===void 0)return e;let t=xt(n);if(t===void 0)return e;let r=At(oe()),i=Te(t,r),o=i;return y([...e,i,o])}
+async function nt(){let e=Ie(),n=await Promise.all(e.map((t)=>W(t).catch(()=>t)));return y([...e,...n])}
+
+# list oe() returns (and un() — same S path); ne() extras after ~ expand (none of Kr starts with ~)
+#   G(N(),"claude")  N=CLAUDE_CODE_TMPDIR||T()
+#   /dev/stdout
+#   /dev/stderr
+#   /dev/null
+#   /dev/tty
+#   /dev/dtracehelper
+#   /dev/autofs_nowait
+#   /tmp/claude
+#   /private/tmp/claude
+#   G(mn(),".npm/_logs")
+#   G(mn(),".claude/debug")
+# y uniq: oe===un so one claude tmp + 10 Kr rows = 11 (or 10 if claude tmp already in Kr)

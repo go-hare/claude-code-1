@@ -1,0 +1,3 @@
+# 246-after-Zt n=4 function Mr start=209123717 end=209123942 len=225 sha=ba7a32168bbe35c3
+
+function Mr(e){if(be()!=="windows")return e;let t=e.replace(/[\\/]+$/,""),n=Qs(t);if(t.length===0||/^[A-Za-z]:$/.test(n))return e;if(/^[\\/]{2}/.test(n)||Zm(t))return t;try{if(!ps(t).isDirectory())return t}catch{}return t+En}

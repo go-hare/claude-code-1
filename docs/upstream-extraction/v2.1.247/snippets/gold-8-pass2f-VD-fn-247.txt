@@ -1,0 +1,4 @@
+# needleOff=214013779 start=214013779
+
+function VD(e){if(e instanceof yn)return e.message||jw;if(!(e instanceof Error))return String(e);let n=gPo(e).filter(Boolean).join(`
+`).trim()||"Command failed with no output";return Pc(n)}

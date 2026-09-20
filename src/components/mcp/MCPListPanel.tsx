@@ -1,5 +1,5 @@
 import figures from 'figures';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -74,7 +74,14 @@ export function MCPListPanel({
   onComplete,
 }: Props): React.ReactNode {
   const [theme] = useTheme();
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // densable 247 Et: An(0) 3-tuple — confirm:yes reads he[B()], not W[O].
+  const [selectedIndex, setSelectedIndexState] = useState(0);
+  const selectedIndexLive = useRef(0);
+  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
+    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
+    selectedIndexLive.current = next;
+    setSelectedIndexState(next);
+  };
 
   // Non-claudeai servers grouped by scope
   const serversByScope = React.useMemo(() => {
@@ -125,14 +132,14 @@ export function MCPListPanel({
   }, [onComplete]);
 
   const handleSelect = useCallback((): void => {
-    const item = selectableItems[selectedIndex];
+    const item = selectableItems[selectedIndexLive.current];
     if (!item) return;
     if (item.type === 'server') {
       onSelectServer(item.server);
     } else if (item.type === 'agent-server' && onSelectAgentServer) {
       onSelectAgentServer(item.agentServer);
     }
-  }, [selectableItems, selectedIndex, onSelectServer, onSelectAgentServer]);
+  }, [selectableItems, onSelectServer, onSelectAgentServer]);
 
   // Use configurable keybindings for navigation and selection
   useKeybindings(

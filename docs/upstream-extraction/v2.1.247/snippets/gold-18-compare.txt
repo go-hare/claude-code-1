@@ -1,0 +1,182 @@
+# gold-18-compare 247 vs 246 extracted function SHAs
+
+246 functions: 62
+247 functions: 61
+shared sha: 15
+247-only sha: 46
+246-only sha: 47
+
+## 247 functions
+- async function Vn() start=208295536 end=208297776 len=2240 sha=a8ef9824f43f4c65 from "exited with code ${" shared=false
+- async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132 from "exited with code ${" shared=false
+- function FA() start=210362751 end=210363763 len=1012 sha=0a7a2bcb4a0cb7e1 from "exited with code ${" shared=false
+- async function Nee() start=210364252 end=210365205 len=953 sha=0a70e48dd3eecdd7 from "exited with code ${" shared=false
+- async function Kl() start=211429396 end=211432272 len=2876 sha=cc0c132913339d27 from "exited with code ${" shared=false
+- async function D() start=212234266 end=212234403 len=137 sha=56d29ea0a9cdccc3 from "exited with code ${" shared=true
+- async function H() start=212234403 end=212234529 len=126 sha=4d9436e8076efb15 from "exited with code ${" shared=true
+- async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0 from "exited with code ${" shared=false
+- async function vBo() start=214533065 end=214536021 len=2956 sha=5c35645e3f03a5a8 from "exited with code ${" shared=false
+- function ADt() start=216242459 end=216243012 len=553 sha=8b99f44ad4742961 from "exited with code ${" shared=false
+- async function l() start=219800580 end=219804364 len=3784 sha=1777aeb50d9dc7ed from "exited with code ${" shared=false
+- function Vu() start=220383466 end=220384362 len=896 sha=3eb593056a525bd0 from "exited with code ${" shared=false
+- async function q() start=223441727 end=223442225 len=498 sha=09daa4e74c0650ad from "exited with code ${" shared=true
+- async function z() start=223442225 end=223442562 len=337 sha=6d7ea8e88b9ba798 from "exited with code ${" shared=true
+- function Jg() start=209955776 end=209956743 len=967 sha=996c2eb9d62f9a69 from "exited with code" shared=false
+- function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8 from "(exit code" shared=false
+- function Mr() start=221724286 end=221725002 len=716 sha=1992854d28dfbfed from "(exit code" shared=false
+- function K() start=223668818 end=223669747 len=929 sha=faa5cff37ccb2be4 from "(exit code" shared=true
+- function Zr() start=231627002 end=231630047 len=3045 sha=f30c06906ac378b5 from "(exit code" shared=false
+- function gPo() start=214013968 end=214014220 len=252 sha=fc052f434a0d58ad from "Exit code ${" shared=false
+- function sJs() start=219330827 end=219439674 len=108847 sha=84e6c1397b13c434 from "Exit code ${" shared=false
+- async function Nt() start=225464064 end=225465085 len=1021 sha=3423011bbfcd3204 from "Exit code ${" shared=false
+- async function cn() start=225475727 end=225485749 len=10022 sha=d2e8d30a41df6428 from "Exit code ${" shared=false
+- async function PJs() start=219351187 end=219351992 len=805 sha=b04a8f50195c8c4f from "Exit code " shared=false
+- function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a from "with exit code" shared=true
+- async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56 from "with exit code" shared=true
+- async function Cg() start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2 from "with exit code" shared=false
+- function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7 from "with exit code" shared=false
+- function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba from "with exit code" shared=false
+- async function R() start=235212104 end=235212615 len=511 sha=e8eb552cea5feab4 from "with exit code" shared=true
+- function _v() start=236065703 end=236068870 len=3167 sha=cf7fad70208605d5 from "with exit code" shared=false
+- function R2o() start=214936410 end=214941228 len=4818 sha=582cd8f794e19ee9 from "exit code ${" shared=false
+- async function Dn() start=221638921 end=221644209 len=5288 sha=f52be0f59b28b376 from "exit code ${" shared=false
+- async function Fae() start=232198982 end=232203803 len=4821 sha=8bacf6bae9906f7d from "internal error was logged" shared=false
+- function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc from "background sessions" shared=false
+- function Ot() start=221651641 end=221651812 len=171 sha=d0399dc1021ff949 from "background sessions" shared=false
+- async function Nd() start=221726665 end=221732419 len=5754 sha=25f9a93d9d3aaeb2 from "background sessions" shared=false
+- async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac from "background sessions" shared=false
+- function De() start=223105697 end=223105858 len=161 sha=c2eff009af858f6d from "background sessions" shared=true
+- async function Zf() start=223342838 end=223353184 len=10346 sha=7524cd42affb79f5 from "background sessions" shared=false
+- async function Vr() start=230095599 end=230097042 len=1443 sha=35a1d2bb43b1bf88 from "background sessions" shared=false
+- function yb() start=214962009 end=214963304 len=1295 sha=dd3e1997d96da764 from "background session" shared=false
+- function k3r() start=218732588 end=218732687 len=99 sha=57467f47aa391ecd from "background session" shared=false
+- async function mp() start=221737807 end=221738237 len=430 sha=5f518301845d935b from "background session" shared=false
+- async function pp() start=221739768 end=221745079 len=5311 sha=1f32d13e5e84bb9d from "background session" shared=false
+- async function gp() start=221745194 end=221747316 len=2122 sha=fac02eec7024ef9f from "background session" shared=false
+- async function hp() start=221747316 end=221748425 len=1109 sha=35279cd299ec1a44 from "background session" shared=false
+- async function _p() start=221748425 end=221750715 len=2290 sha=848e5e7b6d822676 from "background session" shared=false
+- async function Qe() start=221784504 end=221788398 len=3894 sha=65a4637d987e1e28 from "background session" shared=false
+- async function _o() start=223114283 end=223117012 len=2729 sha=d3781324383fee74 from "background session" shared=false
+- function kc() start=223796768 end=223801094 len=4326 sha=abc56245280574aa from "background session" shared=false
+- function Nt() start=228397715 end=228399786 len=2071 sha=b86db94af9c1889d from "background session" shared=false
+- function K() start=231771977 end=231772185 len=208 sha=33493f85674b6a2e from "background session" shared=true
+- function wr() start=231772719 end=231773763 len=1044 sha=bcab3664c2eabb8b from "background session" shared=true
+- function oe() start=231781309 end=231781674 len=365 sha=b7c18b17c8e7e57f from "background session" shared=true
+- function Tn() start=231785240 end=231788938 len=3698 sha=ae360bb40d26eb39 from "background session" shared=false
+- async function ln() start=234666811 end=234667487 len=676 sha=95ce7669181618e5 from "background session" shared=true
+- function updatePanBars() start=250116761 end=250164306 len=47545 sha=40b23c98c93ff1da from "misleading" shared=true
+- function Je() start=221845599 end=221846289 len=690 sha=273300e7af6ba7dd from "code:-1" shared=false
+- function Ye() start=221847905 end=221849033 len=1128 sha=c7597a9393a16cc9 from "code:-1" shared=false
+- async function jn() start=225166564 end=225168334 len=1770 sha=87443ac3fab8f620 from "code:-1" shared=true
+
+## 246 functions
+- async function Vn() start=206615493 end=206617733 len=2240 sha=eb1846090e99e8c2 from "exited with code ${" shared=false
+- async function l() start=207683714 end=207687498 len=3784 sha=b3b8f5682f4a1ed5 from "exited with code ${" shared=false
+- async function Ug() start=208673679 end=208675394 len=1715 sha=b21766621fef5a5b from "exited with code ${" shared=false
+- function OA() start=209109964 end=209110976 len=1012 sha=6b33adfc178cc7b7 from "exited with code ${" shared=false
+- async function dee() start=209111465 end=209112418 len=953 sha=44bf16cc2b1218dc from "exited with code ${" shared=false
+- async function La() start=210119474 end=210122350 len=2876 sha=6b826a153038f6ff from "exited with code ${" shared=false
+- async function D() start=210856787 end=210856924 len=137 sha=56d29ea0a9cdccc3 from "exited with code ${" shared=true
+- async function H() start=210856924 end=210857050 len=126 sha=4d9436e8076efb15 from "exited with code ${" shared=true
+- async function Dho() start=212244200 end=212263017 len=18817 sha=e0b002f9f8d9a0eb from "exited with code ${" shared=false
+- async function D$o() start=213159548 end=213162504 len=2956 sha=37a911e4d5815257 from "exited with code ${" shared=false
+- function LMt() start=214862158 end=214862659 len=501 sha=cb936940802ef3fb from "exited with code ${" shared=false
+- function Xu() start=218439944 end=218440840 len=896 sha=0d633d8c95f33129 from "exited with code ${" shared=false
+- async function q() start=221555035 end=221555533 len=498 sha=09daa4e74c0650ad from "exited with code ${" shared=true
+- async function z() start=221555533 end=221555870 len=337 sha=6d7ea8e88b9ba798 from "exited with code ${" shared=true
+- function jg() start=208702991 end=208703958 len=967 sha=945e34fa97c6a64a from "exited with code" shared=false
+- function $Mt() start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b from "(exit code" shared=false
+- function Ir() start=220046460 end=220047176 len=716 sha=64bdd35865e194e2 from "(exit code" shared=false
+- function K() start=221781742 end=221782671 len=929 sha=faa5cff37ccb2be4 from "(exit code" shared=true
+- function Er() start=229493252 end=229496189 len=2937 sha=65c6e8828f19a551 from "(exit code" shared=false
+- function _To() start=212641943 end=212642195 len=252 sha=2613874207ed68d9 from "Exit code ${" shared=false
+- function vYs() start=217856930 end=217968696 len=111766 sha=ce0177666a6e603e from "Exit code ${" shared=false
+- async function Nt() start=224522729 end=224523750 len=1021 sha=91b7ae07b45e8067 from "Exit code ${" shared=false
+- async function fn() start=224534551 end=224544408 len=9857 sha=f0c1fc90190d4380 from "Exit code ${" shared=false
+- async function GYs() start=217880966 end=217881771 len=805 sha=cb64113042ba6b58 from "Exit code " shared=false
+- function () start=66419598 end=66427026 len=7428 sha=468788b8da49c54a from "with exit code" shared=true
+- async function runOneFile() start=68776257 end=68780632 len=4375 sha=25697c5f88d87a56 from "with exit code" shared=true
+- async function wg() start=208667756 end=208668136 len=380 sha=8caa6ea94e07a62e from "with exit code" shared=false
+- function zLr() start=216524928 end=216532389 len=7461 sha=b6c86ced24f42b58 from "with exit code" shared=false
+- function xQr() start=217851152 end=217968696 len=117544 sha=56d9bea92beeee8d from "with exit code" shared=false
+- async function R() start=233182909 end=233183420 len=511 sha=e8eb552cea5feab4 from "with exit code" shared=true
+- function nv() start=234175323 end=234178490 len=3167 sha=f793862c46a97b61 from "with exit code" shared=false
+- function Ozo() start=213558612 end=213563430 len=4818 sha=f98a76e8656da421 from "exit code ${" shared=false
+- async function Pn() start=219885820 end=219891108 len=5288 sha=f6e1b92738db703f from "exit code ${" shared=false
+- async function Kae() start=230071448 end=230076266 len=4818 sha=8ca2f7fd858be66f from "internal error was logged" shared=false
+- function Ds() start=206395082 end=206445752 len=50670 sha=88803d1e281db112 from "background sessions" shared=false
+- function Ot() start=219898540 end=219898711 len=171 sha=06e3da600fd22c28 from "background sessions" shared=false
+- async function rl() start=219960393 end=219974078 len=13685 sha=caf77152d20ec1d5 from "background sessions" shared=false
+- async function Ed() start=220048839 end=220054596 len=5757 sha=81da221b1ba43a9b from "background sessions" shared=false
+- function De() start=221207325 end=221207486 len=161 sha=c2eff009af858f6d from "background sessions" shared=true
+- async function Xf() start=221444331 end=221454647 len=10316 sha=fc66a6469a42badf from "background sessions" shared=false
+- async function Vr() start=228203327 end=228204770 len=1443 sha=d55ee3f13b3884e5 from "background sessions" shared=false
+- function tb() start=213584207 end=213585502 len=1295 sha=93db6223dbee5457 from "background session" shared=false
+- function QKr() start=217266509 end=217266608 len=99 sha=0d0671539968ee0f from "background session" shared=false
+- async function Vm() start=220059984 end=220060414 len=430 sha=b40b9bf37dc09c69 from "background session" shared=false
+- async function ep() start=220061945 end=220066452 len=4507 sha=dddd47637d840805 from "background session" shared=false
+- async function tp() start=220066567 end=220068689 len=2122 sha=4b38a242765d64c2 from "background session" shared=false
+- async function np() start=220068689 end=220069798 len=1109 sha=1d22986b102f2ad0 from "background session" shared=false
+- async function rp() start=220069798 end=220072088 len=2290 sha=a28c42366efbe8b4 from "background session" shared=false
+- async function ze() start=220104824 end=220108725 len=3901 sha=de1477d0c42cbfce from "background session" shared=false
+- async function _o() start=221215911 end=221218640 len=2729 sha=e64b06c7f125e761 from "background session" shared=false
+- function bc() start=221901491 end=221905817 len=4326 sha=a7fa13202ffb4fa7 from "background session" shared=false
+- function Nt() start=226470172 end=226472243 len=2071 sha=41cfe60bb1216876 from "background session" shared=false
+- function K() start=229811805 end=229812013 len=208 sha=33493f85674b6a2e from "background session" shared=true
+- function wr() start=229812547 end=229813591 len=1044 sha=bcab3664c2eabb8b from "background session" shared=true
+- function oe() start=229821137 end=229821502 len=365 sha=b7c18b17c8e7e57f from "background session" shared=true
+- function Tn() start=229825068 end=229828766 len=3698 sha=18c82c48151f2434 from "background session" shared=false
+- async function ln() start=232627281 end=232627957 len=676 sha=95ce7669181618e5 from "background session" shared=true
+- async function J() start=234849170 end=234849641 len=471 sha=8685fedb2ad3b179 from "background session" shared=false
+- function updatePanBars() start=247995375 end=248042920 len=47545 sha=40b23c98c93ff1da from "misleading" shared=true
+- function Je() start=218625637 end=218626327 len=690 sha=69141cb722b815aa from "code:-1" shared=false
+- function Ye() start=218627943 end=218629071 len=1128 sha=65aac69531dda9ad from "code:-1" shared=false
+- async function jn() start=224297075 end=224298845 len=1770 sha=87443ac3fab8f620 from "code:-1" shared=true
+
+## 247-only
+- async function Vn() start=208295536 end=208297776 len=2240 sha=a8ef9824f43f4c65 from "exited with code ${"
+- async function Wg() start=209926464 end=209928179 len=1715 sha=3f16ee17dfb0f132 from "exited with code ${"
+- function FA() start=210362751 end=210363763 len=1012 sha=0a7a2bcb4a0cb7e1 from "exited with code ${"
+- async function Nee() start=210364252 end=210365205 len=953 sha=0a70e48dd3eecdd7 from "exited with code ${"
+- async function Kl() start=211429396 end=211432272 len=2876 sha=cc0c132913339d27 from "exited with code ${"
+- async function Cwo() start=213611092 end=213629909 len=18817 sha=aea0b5d1c3b7fcb0 from "exited with code ${"
+- async function vBo() start=214533065 end=214536021 len=2956 sha=5c35645e3f03a5a8 from "exited with code ${"
+- function ADt() start=216242459 end=216243012 len=553 sha=8b99f44ad4742961 from "exited with code ${"
+- async function l() start=219800580 end=219804364 len=3784 sha=1777aeb50d9dc7ed from "exited with code ${"
+- function Vu() start=220383466 end=220384362 len=896 sha=3eb593056a525bd0 from "exited with code ${"
+- function Jg() start=209955776 end=209956743 len=967 sha=996c2eb9d62f9a69 from "exited with code"
+- function RDt() start=216241947 end=216242459 len=512 sha=7185357f1b68e6a8 from "(exit code"
+- function Mr() start=221724286 end=221725002 len=716 sha=1992854d28dfbfed from "(exit code"
+- function Zr() start=231627002 end=231630047 len=3045 sha=f30c06906ac378b5 from "(exit code"
+- function gPo() start=214013968 end=214014220 len=252 sha=fc052f434a0d58ad from "Exit code ${"
+- function sJs() start=219330827 end=219439674 len=108847 sha=84e6c1397b13c434 from "Exit code ${"
+- async function Nt() start=225464064 end=225465085 len=1021 sha=3423011bbfcd3204 from "Exit code ${"
+- async function cn() start=225475727 end=225485749 len=10022 sha=d2e8d30a41df6428 from "Exit code ${"
+- async function PJs() start=219351187 end=219351992 len=805 sha=b04a8f50195c8c4f from "Exit code "
+- async function Cg() start=209920541 end=209920921 len=380 sha=6b58ca61559c4eb2 from "with exit code"
+- function KUr() start=217976750 end=217984211 len=7461 sha=b56615576e5b88d7 from "with exit code"
+- function sro() start=219325049 end=219439674 len=114625 sha=418ee65d1f9f8eba from "with exit code"
+- function _v() start=236065703 end=236068870 len=3167 sha=cf7fad70208605d5 from "with exit code"
+- function R2o() start=214936410 end=214941228 len=4818 sha=582cd8f794e19ee9 from "exit code ${"
+- async function Dn() start=221638921 end=221644209 len=5288 sha=f52be0f59b28b376 from "exit code ${"
+- async function Fae() start=232198982 end=232203803 len=4821 sha=8bacf6bae9906f7d from "internal error was logged"
+- function Ls() start=207996006 end=208047244 len=51238 sha=5cc13a91caee8fbc from "background sessions"
+- function Ot() start=221651641 end=221651812 len=171 sha=d0399dc1021ff949 from "background sessions"
+- async function Nd() start=221726665 end=221732419 len=5754 sha=25f9a93d9d3aaeb2 from "background sessions"
+- async function il() start=221993325 end=222007074 len=13749 sha=94f0a4c758f3b8ac from "background sessions"
+- async function Zf() start=223342838 end=223353184 len=10346 sha=7524cd42affb79f5 from "background sessions"
+- async function Vr() start=230095599 end=230097042 len=1443 sha=35a1d2bb43b1bf88 from "background sessions"
+- function yb() start=214962009 end=214963304 len=1295 sha=dd3e1997d96da764 from "background session"
+- function k3r() start=218732588 end=218732687 len=99 sha=57467f47aa391ecd from "background session"
+- async function mp() start=221737807 end=221738237 len=430 sha=5f518301845d935b from "background session"
+- async function pp() start=221739768 end=221745079 len=5311 sha=1f32d13e5e84bb9d from "background session"
+- async function gp() start=221745194 end=221747316 len=2122 sha=fac02eec7024ef9f from "background session"
+- async function hp() start=221747316 end=221748425 len=1109 sha=35279cd299ec1a44 from "background session"
+- async function _p() start=221748425 end=221750715 len=2290 sha=848e5e7b6d822676 from "background session"
+- async function Qe() start=221784504 end=221788398 len=3894 sha=65a4637d987e1e28 from "background session"
+- async function _o() start=223114283 end=223117012 len=2729 sha=d3781324383fee74 from "background session"
+- function kc() start=223796768 end=223801094 len=4326 sha=abc56245280574aa from "background session"
+- function Nt() start=228397715 end=228399786 len=2071 sha=b86db94af9c1889d from "background session"
+- function Tn() start=231785240 end=231788938 len=3698 sha=ae360bb40d26eb39 from "background session"
+- function Je() start=221845599 end=221846289 len=690 sha=273300e7af6ba7dd from "code:-1"
+- function Ye() start=221847905 end=221849033 len=1128 sha=c7597a9393a16cc9 from "code:-1"

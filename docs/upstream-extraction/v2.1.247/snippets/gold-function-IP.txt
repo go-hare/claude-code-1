@@ -1,0 +1,3 @@
+# 247 offset=208503974 needle="function IP(){return c.CLAUDE_CODE_CUSTOM_OAUTH_URL"
+
+urn c.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!c.CLAUDE_CODE_BYOC_ENABLE_DATADOG}function IP(){return c.CLAUDE_CODE_CUSTOM_OAUTH_URL!==void 0||sy()}function hu(){return DP()||Pt()!==null||Zi()||IP()}function Vd(){return c.CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL}function nj(){if(Vd())return!1;return Zi()}var _u=y(()=>{B();me();oe();Bn();$d()});function MP(){return{seconds:0,nanos:0}}function uy(e){return e!==null&&e!==void 0}var es;var zd=y(()=>{es={fromJSON(e){return{secon

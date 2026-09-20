@@ -1,0 +1,3 @@
+# offset=221895157 hit=1/1 needle="failIfHostExited(\"poll\")"
+
+(!i&&!this.stalledLogged&&r!==void 0&&Date.now()-r>Wr){let a=await F(B(this.dispatch.short),this.storageV5);if(!this.stalledLogged&&(a?.tempo??this.record.tempo)==="active")this.stalledLogged=!0,m("tengu_bg_worker_stalled",{short:P(this.dispatch.short),sinceMs:Date.now()-r})}if(this.pty){await this.failIfHostExited("poll");return}if(e&&this.pidPollTick++%12!==0)return;if(await this.pidRecycledAsync()){if(this.record.outcome||this.pty)return;this.logVanished(!0,e),this.settle(this.isKilling?"kill

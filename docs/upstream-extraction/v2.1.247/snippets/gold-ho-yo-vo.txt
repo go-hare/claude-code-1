@@ -1,0 +1,2 @@
+# LOCKED vo pos=207876619
+vo='Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names.'

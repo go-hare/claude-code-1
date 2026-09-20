@@ -1,0 +1,55 @@
+# 247 needle="row above" hits=2
+
+===== HIT 0 offset=246545194 =====
+d the series name is secondary - the legend's hierarchy
+  inverted, because here the reader has the series and wants the number.
+- **Line keys, not boxes.** Tooltip rows key their series with a short stroke of the
+  series color; at tooltip density a filled box is data-weight ink doing a label's
+  job. (Legends still mirror the mark: rect for bars/areas, line for lines.)
+- **The hit target is bigger than the mark.** A mark's hover/focus area includes its
+  2px surface gap and then some - never only the painted pixels. An 8px scatter dot is a
+  pinpoint nobody hits reliably; give each point a transparent hit area of at least
+  **24px**, or - for dense scatter - a nearest-point / Voronoi layer so the pointer only
+  has to be *closest*, not dead-center. (The crosshair already does this for the X on
+  line and bar charts; scatter and bubble need the per-point version.)
+- **A value pushed off its mark lives in the tooltip.** When a label won't fit inside a
+  small bar (see `marks-and-anatomy.md`), that bar's hit area carries the value on hover
+  and focus - the tooltip is its overflow home, and the table view keeps it reachable
+  without hovering at all.
+
+## Filters & time ranges
+
+Every monitoring dashboard needs the same controls. These are **standard UI, not
+chart marks** - build them with ordinary HTML form controls styled to match the
+chart chrome. Dataviz only adds composition rules:
+
+- **One row, above the charts.** Filters sit in a single left-aligned row above the
+  content they scope - never inside a chart card, never per-chart. If one chart needs
+  its own range, it's a different dashboard.
+- **Date range first.** It's the filter every reader reaches for; presets (today,
+  last 7 / 30 / 90 days) before a custom range.
+- **Filters scope everything below them.** Every chart, stat, and table re-renders
+  against the same slice, so the num
+
+===== HIT 1 offset=252581953 =====
+oad-bearing trigger text.
+7. **Format-pinning examples on genuinely format-sensitive outputs stay**, labeled illustrative.
+8. **Working redundancy is not cruft.** Duplicated or overlapping content that is *functioning* - the same contract stated in two files, a worked example the prompt could in principle do without, content you would merely organize differently - is a refactoring preference, not a dated pattern. If it isn't causing errors and the target model reconciles it, an audit leaves it alone; propose deduplication or consolidation only when the duplicates actually disagree. "An audit that finds nothing should change nothing" extends to this: on a clean surface, report that it is clean.
+9. **A one-line role statement is fine.** Flag identity text only when it substitutes for real context.
+10. **Deliberate recap is not padding.** A single end-of-prompt restatement of the few key constraints is a known, reasonable pattern; the anti-pattern is scattered duplication.
+11. **Re-baselining adds text too.** Matching a prompt to a new model sometimes means *adding* guidance for the new model's failure modes (see the per-target "Behavioral shifts" sections in `shared/model-migration.md`). The audit's job is fit, in both directions.
+
+---
+
+## Step 5: Produce the audit report
+
+One entry per finding, in this shape:
+
+| Field | Content |
+|---|---|
+| **Location** | `file:line` (or `file:line-range`) |
+| **Evidence** | The exact text, quoted |
+| **Pattern** | The group/row above it matches |
+| **Why obsolete** | One or two sentences tying it to the target model's documented behavior ("current models are proactive by default; this booster now causes over-triggering") |
+| **Confidence** | **High** - documented in current Claude docs or errors on the target model. **Medium** - consistent, widely-observed behavior (e.g. example over-indexing). **Low** - heuristic 
+

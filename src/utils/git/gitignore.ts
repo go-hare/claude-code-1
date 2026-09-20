@@ -1,7 +1,8 @@
 import { appendFile, mkdir, readFile, writeFile } from 'fs/promises'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { dirname, isAbsolute, join } from 'path'
 import { getCwd } from '../cwd.js'
+import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { dirIsInGitRepo } from '../git.js'
@@ -26,7 +27,7 @@ export async function isPathGitignored(
 ): Promise<boolean> {
   const { code } = await execFileNoThrowWithCwd(
     'git',
-    ['check-ignore', filePath],
+    ['check-ignore', '--', filePath],
     {
       preserveOutputOnError: false,
       cwd,
@@ -34,6 +35,56 @@ export async function isPathGitignored(
   )
 
   return code === 0
+}
+
+/** densable `wt` — path is already in the index. */
+async function isPathGitTracked(
+  filePath: string,
+  cwd: string,
+): Promise<boolean> {
+  const { code } = await execFileNoThrowWithCwd(
+    'git',
+    ['ls-files', '--error-unmatch', '--', filePath],
+    {
+      preserveOutputOnError: false,
+      cwd,
+    },
+  )
+  return code === 0
+}
+
+function gitignoreIneffectiveReason(
+  reason: 'already_tracked' | 'excludesfile_not_read',
+  testPath: string,
+): string {
+  return reason === 'already_tracked'
+    ? `'${testPath}' is tracked in the index; gitignore rules do not apply to tracked files`
+    : `core.excludesfile is set but git is not reading it for '${testPath}'`
+}
+
+/**
+ * densable `Ei` — `git config --global --get core.excludesfile`, else
+ * `$XDG_CONFIG_HOME/git/ignore` when absolute, else `~/.config/git/ignore`.
+ */
+export async function resolveGlobalGitignorePath(cwd: string): Promise<string> {
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    'git',
+    ['config', '--global', '--get', 'core.excludesfile'],
+    {
+      preserveOutputOnError: false,
+      cwd,
+    },
+  )
+  const configured = code === 0 ? stdout.trim() : ''
+  if (configured) {
+    if (configured === '~' || configured.startsWith('~/')) {
+      return join(homedir(), configured.slice(2))
+    }
+    if (isAbsolute(configured)) return configured
+  }
+  const xdg = process.env.XDG_CONFIG_HOME
+  if (xdg && isAbsolute(xdg)) return join(xdg, 'git', 'ignore')
+  return getGlobalGitignorePath()
 }
 
 /**
@@ -44,56 +95,80 @@ export function getGlobalGitignorePath(): string {
   return join(homedir(), '.config', 'git', 'ignore')
 }
 
+/** densable `Rt` return. */
+export type GitignoreGlobalRuleResult = {
+  written: boolean
+  effective: boolean
+  reason?: string
+}
+
+const GLOBAL_IGNORE_PREFIX = '**/'
+
 /**
- * Adds a file pattern to the global gitignore file (.config/git/ignore)
- * if it's not already ignored by existing patterns in any gitignore file
- * @param filename The filename to add to gitignore
- * @param cwd The current working directory (optional)
+ * densable `Rt` / `kv` — add GLOBAL_IGNORE_PREFIX + filename to the
+ * global excludesfile. Concat (not a template) so Biome does not eat
+ * slash-star-star as a regex character class.
  */
 export async function addFileGlobRuleToGitignore(
   filename: string,
   cwd: string = getCwd(),
-): Promise<void> {
+): Promise<GitignoreGlobalRuleResult> {
   try {
     if (!(await dirIsInGitRepo(cwd))) {
-      return
+      return { written: false, effective: false }
     }
 
-    // First check if the pattern is already ignored by any gitignore file (including global)
-    const gitignoreEntry = `**/${filename}`
-    // For directory patterns (ending with /), check with a sample file inside
-    const testPath = filename.endsWith('/')
-      ? `${filename}sample-file.txt`
-      : filename
+    const normalized = filename.replaceAll('\\', '/')
+    const gitignoreEntry = GLOBAL_IGNORE_PREFIX + normalized
+    const testPath = normalized.endsWith('/')
+      ? `${normalized}sample-file.txt`
+      : normalized
     if (await isPathGitignored(testPath, cwd)) {
-      // File is already ignored by existing patterns (local or global)
-      return
+      return { written: false, effective: true }
     }
 
-    // Use the global gitignore file in .config/git/ignore
-    const globalGitignorePath = getGlobalGitignorePath()
+    const globalGitignorePath = await resolveGlobalGitignorePath(cwd)
+    await mkdir(dirname(globalGitignorePath), { recursive: true })
 
-    // Create the directory if it doesn't exist
-    const configGitDir = dirname(globalGitignorePath)
-    await mkdir(configGitDir, { recursive: true })
-
-    // Add the entry to the global gitignore
     try {
       const content = await readFile(globalGitignorePath, { encoding: 'utf-8' })
       if (content.includes(gitignoreEntry)) {
-        return // Pattern already exists, don't add again
+        const reason = (await isPathGitTracked(testPath, cwd))
+          ? 'already_tracked'
+          : 'excludesfile_not_read'
+        logForDebugging(
+          `[gitignore] '${gitignoreEntry}' already present in ${globalGitignorePath} but git check-ignore reports not-ignored — ${gitignoreIneffectiveReason(reason, testPath)}`,
+          { level: 'warn' },
+        )
+        return { written: false, effective: false, reason }
       }
       await appendFile(globalGitignorePath, `\n${gitignoreEntry}\n`)
     } catch (e: unknown) {
       const code = getErrnoCode(e)
       if (code === 'ENOENT') {
-        // Create global gitignore with entry
         await writeFile(globalGitignorePath, `${gitignoreEntry}\n`, 'utf-8')
       } else {
         throw e
       }
     }
+
+    if (!(await isPathGitignored(testPath, cwd))) {
+      const reason = (await isPathGitTracked(testPath, cwd))
+        ? 'already_tracked'
+        : 'excludesfile_not_read'
+      logForDebugging(
+        `[gitignore] wrote '${gitignoreEntry}' to ${globalGitignorePath} but git check-ignore still reports not-ignored — ${gitignoreIneffectiveReason(reason, testPath)}`,
+        { level: 'warn' },
+      )
+      return { written: true, effective: false, reason }
+    }
+    return { written: true, effective: true }
   } catch (error) {
+    logForDebugging(
+      `Failed to add gitignore entry to global gitignore: ${error instanceof Error ? error.message : String(error)}`,
+      { level: 'error' },
+    )
     logError(error)
+    return { written: false, effective: false }
   }
 }

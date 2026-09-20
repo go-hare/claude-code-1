@@ -104,11 +104,47 @@ export class TeleportOperationError extends Error {
  */
 export class TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS extends Error {
   readonly telemetryMessage: string
+  readonly errorClass: string | undefined
 
-  constructor(message: string, telemetryMessage?: string) {
+  constructor(message: string, telemetryMessage?: string, errorClass?: string) {
     super(message)
     this.name = 'TelemetrySafeError'
     this.telemetryMessage = telemetryMessage ?? message
+    this.errorClass = errorClass
+  }
+}
+
+/** densable `Ar` / `withTelemetryMessage` — stamp, do not wrap. */
+export function withTelemetryMessage<T>(error: T, telemetryMessage: string): T {
+  try {
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      !('telemetryMessage' in error) &&
+      Object.isExtensible(error)
+    ) {
+      Object.assign(error, { telemetryMessage })
+    }
+  } catch {
+    // ignore
+  }
+  return error
+}
+
+/**
+ * densable 2.1.247 l2e — async sub-agent first-call API error termination.
+ * User message includes tss() detail; telemetry stays generic.
+ */
+export class AgentApiErrorTerminationError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  readonly errorKind: string | undefined
+
+  constructor(formatted: string, errorKind?: string) {
+    super(
+      `Agent terminated early due to an API error: ${formatted}`,
+      'Agent terminated early due to an API error',
+    )
+    this.name = 'AgentApiErrorTerminationError'
+    this.errorKind = errorKind
   }
 }
 

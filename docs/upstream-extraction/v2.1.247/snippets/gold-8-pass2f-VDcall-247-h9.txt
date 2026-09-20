@@ -1,0 +1,3 @@
+# off=230332743 hit=9
+
+teWriteStream as eI,fstatSync as tI}from"fs";import{PassThrough as nI}from"stream";import{URL as sI}from"url";er();yr();XD();GD();QD();cu();oy();ln();Mo();Ti();Zs();Ai();Cs();K_();YD();tr();V_();To();VD();zD();w_();su();var FD="VERIFIED_BY_GATE",LD="refuse";function b_(e,{floor:t=FD,unstamped:s=LD}={}){let r=v_(e.device_attestation_status);if(C_(r,t))return{verdict:"pass",statu

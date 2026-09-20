@@ -1,0 +1,3 @@
+# 247 n0c <= k start=207249221 end=207249381 len=160 sha=a65a793c9dbd22f2
+
+function k(e,n,r){let t=r?.keepNewlines===!0||r?.keepEmojiJoiners===!0,i=s(e.replace(d,"\u200B")).replace(r?.keepNewlines?O:t?N:_,n);return t?i.replace(S,""):i}

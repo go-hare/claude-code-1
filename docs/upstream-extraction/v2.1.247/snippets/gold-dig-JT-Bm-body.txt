@@ -1,0 +1,3 @@
+# offset=209388952
+
+();_o();Ve();Lo();ce();Pe();Bt();Cm()});function Bm(e){return/^\w[\w.@-]*$/.test(e)}function ur(e,t,n){if(!Bm(t))return null;return`claude ${e} ${t}${n?` ${n}`:""}`}var $l=()=>{};function Fl(e){return Ho().safeParse(e).data}function V_(e){if(e.type==="path-not-found")return e.plugin===void 0&&e.errno!==void 0;if(e.type

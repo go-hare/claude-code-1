@@ -10,6 +10,37 @@ import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
 import { isFeedbackSurveyForOtelEnabled } from '../../utils/residualFinalEnvGates.js'
 
 /**
+ * densable 2.1.247 IP — custom OAuth URL forces analytics off from startup.
+ */
+export function isCustomOAuthAnalyticsOff(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.CLAUDE_CODE_CUSTOM_OAUTH_URL !== undefined
+}
+
+/**
+ * densable 2.1.247 Gd — managed settings forceLoginMethod==="gateway".
+ * Io(Un()) not locked 1:1; admin-managed origin is the existing 212 contract.
+ */
+export function isManagedGatewayAnalyticsOff(
+  origin:
+    | ReturnType<
+        typeof import('../../utils/settings/settings.js').getPolicySettingsOrigin
+      >
+    | 'helper'
+    | null,
+  forceLoginMethod: string | undefined,
+): boolean {
+  // densable h5t — do not import forceLoginMethod (analytics cycle).
+  const adminManaged =
+    origin === 'helper' ||
+    origin === 'plist' ||
+    origin === 'hklm' ||
+    origin === 'file'
+  return adminManaged && forceLoginMethod === 'gateway'
+}
+
+/**
  * Check if analytics operations should be disabled
  *
  * Analytics is disabled in the following cases:
@@ -36,12 +67,26 @@ export function isAnalyticsDisabled(): boolean {
   } catch {
     // keep raw env fallback
   }
+  let managedGateway = false
+  try {
+    const { getPolicySettingsOrigin, getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/settings/settings.js') as typeof import('../../utils/settings/settings.js')
+    managedGateway = isManagedGatewayAnalyticsOff(
+      getPolicySettingsOrigin(),
+      getSettingsForSource('policySettings')?.forceLoginMethod,
+    )
+  } catch {
+    managedGateway = false
+  }
   return (
     process.env.NODE_ENV === 'test' ||
     useBedrock ||
     useVertex ||
     useFoundry ||
-    isTelemetryDisabled()
+    isTelemetryDisabled() ||
+    isCustomOAuthAnalyticsOff() ||
+    managedGateway
   )
 }
 

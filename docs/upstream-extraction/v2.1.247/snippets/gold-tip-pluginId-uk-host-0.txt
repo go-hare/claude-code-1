@@ -1,0 +1,2 @@
+# uk().host @232247411
+ss!==null){let e=this.inhibitorProcess;this.inhibitorProcess=null;try{e.kill("SIGKILL"),R("Stopped sleep inhibitor, allowing sleep")}catch{}}}}var P5e=new wa(()=>new Oue);function Bue(){return P5e.of(uk().host)}function Uue(){Bue().acquire()}function Hue(){Bue().release()}Dx();tIt();bt();GW();At();kI();bt();cf();Ks();function jue(){let e=ln(),t=ln(),o=ln(),n=new Map,r=0;return{subscribe:e.subscribe,onCancel:t.subscribe,onUpdate:o.subscribe,reply(

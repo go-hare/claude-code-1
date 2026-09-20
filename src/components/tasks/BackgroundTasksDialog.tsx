@@ -267,7 +267,14 @@ export function BackgroundTasksDialog({
     }
     return { mode: 'list' };
   });
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  // densable 247: vm(0) 3-tuple — confirm:yes / keydown read Ie[ce()], not Ce[N].
+  const [selectedIndex, setSelectedIndexState] = useState<number>(0);
+  const selectedIndexLive = useRef(0);
+  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
+    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
+    selectedIndexLive.current = next;
+    setSelectedIndexState(next);
+  };
 
   // Register as modal overlay so parent Chat keybindings (up/down for history)
   // are deactivated while this dialog is open
@@ -386,7 +393,7 @@ export function BackgroundTasksDialog({
         setSelectedIndex(prev => Math.min(allSelectableItems.length - 1, prev + 1));
       },
       'confirm:yes': () => {
-        const current = allSelectableItems[selectedIndex];
+        const current = allSelectableItems[selectedIndexLive.current];
         if (current) {
           if (current.type === 'leader') {
             exitTeammateView(setAppState);
@@ -417,7 +424,7 @@ export function BackgroundTasksDialog({
     }
 
     // Compute current selection at the time of the key press
-    const currentSelection = allSelectableItems[selectedIndex];
+    const currentSelection = allSelectableItems[selectedIndexLive.current];
     if (!currentSelection) return; // everything below requires a selection
 
     if (e.key === 'x' && !e.ctrl && !e.meta) {

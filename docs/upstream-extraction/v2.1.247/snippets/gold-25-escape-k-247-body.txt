@@ -1,0 +1,31 @@
+# 247 n0c / k @207249221 sha=a65a793c9dbd22f2 len=160
+# 246 uYc / h @205610690 sha=eca44c7dc628a235 len=103  (no S leading-joiner strip)
+
+function s(e){return Bun.stripANSI(e)}
+function k(e,n,r){let t=r?.keepNewlines===!0||r?.keepEmojiJoiners===!0,i=s(e.replace(d,"\u200B")).replace(r?.keepNewlines?O:t?N:_,n);return t?i.replace(S,""):i}
+
+# F0c regexes used by k
+f="\\p{Default_Ignorable_Code_Point}\\u2800"
+a="\\u200D\\uFE0E\\uFE0F"
+u=`\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Cn}\\u2028\\u2029${f}`
+_=new RegExp(`[${u}]+`,"gu")
+N=new RegExp(`(?:(?![${a}])[${u}])+`,"gu")
+O=new RegExp(`(?:(?![${a}\\n])[${u}])+`,"gu")
+S=new RegExp(`(?<!\\S)[${a}]+`,"gu")
+d=/\p{Cs}/gu
+
+# wrappers 247===246 (same module as re @207953491)
+re(e){return ie(e," ",{keepEmojiJoiners:!0})}
+Io(e){return ie(e," ",{keepNewlines:!0})}
+At(e){return ie(e,"",{keepEmojiJoiners:!0})}
+se(e,t=re){if(e===void 0)return;let n=t(e);return n.trim()===""?void 0:n}
+Ve(e){if(e===void 0)return;let t=ie(e,"");try{let{protocol:n}=new URL(t);return n==="https:"||n==="http:"?t:void 0}catch{return}}
+Wr(e){return{...e,displayName:se(e.displayName),version:se(e.version),description:se(e.description,Io),author:e.author===void 0?void 0:{...e.author,name:re(e.author.name),email:se(e.author.email),url:Ve(e.author.url)},homepage:Ve(e.homepage),repository:Ve(e.repository),license:se(e.license),keywords:e.keywords?.map(re)}}
+Rt(e){return At(e)}
+Vr(e){let t=Ot(e)?e.manifest.displayName:e.displayName;return Be(typeof t==="string"?re(t).trim():t)??Be(Rt(e.name))??Be(Rt(Ot(e)?e.source:""))??"(unprintable plugin name)"}
+Be(e){if(typeof e!=="string")return;return e.trim()?e:void 0}
+Ot(e){return"manifest"in e&&typeof e.manifest==="object"&&e.manifest!==null}
+U(e){return e.map(ke).join(`\n`)}
+
+# CLI aliases: oKc as ke (re), pKc as D (Io), vKc as _n (Vr)
+# /plugin aliases: oKc as he (re), pKc as zt (Io), sKc as ah (Wr), vKc as He (Vr)

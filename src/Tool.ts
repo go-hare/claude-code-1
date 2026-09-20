@@ -171,6 +171,11 @@ export type ToolUseContext = {
     commands: Command[]
     debug: boolean
     mainLoopModel: string
+    /**
+     * densable 2.1.247 s.options.fallbackModel — first-call 404 fallback
+     * for sub-agent query(). string or settings array (flattened).
+     */
+    fallbackModel?: string | string[]
     tools: Tools
     verbose: boolean
     thinkingConfig: ThinkingConfig

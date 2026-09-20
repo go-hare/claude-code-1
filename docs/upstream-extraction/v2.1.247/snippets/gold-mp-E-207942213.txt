@@ -1,0 +1,2 @@
+# @207942213 len=44
+function E(e){return e.length>0&&e.every(C)}

@@ -1,0 +1,3 @@
+# off=209971161 hit=3
+
+=e.pendingScrollDelta,Ue=e.scrollClampMin,lt=e.scrollClampMax,ln=Ue!==void 0&&lt!==void 0;if(ht!==void 0&&ht!==0){let ie=ln&&(ht<0&&Ut<Ue||ht>0&&Ut>lt)?Math.min(4,j>>3):j,K=jC().useAdaptiveDrain,le=K?VD(e,ht,ie):WD(e,ht,ie);Ut+=le,HC(le,e.pendingScrollDelta??0,K?"adaptive":"proportional")}else if(ht===0)e.pendingScrollDelta=void 0;let Tt=Math.max(0,Math.min(Ut,Math.max(Ce,mt-j)

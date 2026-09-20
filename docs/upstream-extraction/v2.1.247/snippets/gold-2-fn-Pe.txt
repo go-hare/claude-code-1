@@ -1,0 +1,3 @@
+# offset=207476118 hit=1/12 needle="function Pe()"
+
+s; } 2>/dev/null; exec "$@"',t,r,...n]}}function Pe(){return c(f).dir===void 0}function ar(e,r,n,t=E){try{if(!r)return;R();let o=c(f);if(o.dir===null)return;let i=t.readStarttime(r);if(i===void 0)return;let d={cls:e,starttime:i,shouldStayUn

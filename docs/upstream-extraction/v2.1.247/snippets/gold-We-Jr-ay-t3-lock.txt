@@ -1,0 +1,46 @@
+# We / Jr / ay / t3 / pin — official 2.1.247 LOCKED/UNKNOWN
+# Unique via Zg/nPe caller strings. Invent-ban. Peel only.
+
+| item | status | official | local |
+|------|--------|----------|-------|
+| We() | LOCKED | React context reader. Zg `{storageV5:p,credentials:g}=We()`. import kdb as We from _499. `function b(){return i(e)}` @210899679. Provider z @210899390. NOT session.host WeakMaps. | ≢ getPinnedStorageV5 / getPinnedCredentials (module lastPinned). Official has no those strings. |
+| Jr() | LOCKED | getSecureStorage getter. nPe `Jr().mutate(..., n)`. import xRc as Jr from _721. `function Ar(){if(oe)return oe;if(st())return Se(ne,j);return j}` @208363721. | ≢ getSecureStorage() call site in deletePluginOptions (sync read/update, no credentials arg). |
+| ay(...) | LOCKED | updateSettingsForSource value-merge. nPe `ay("userSettings",{pluginConfigs:o},void 0,t)` @213645080 UNIQUE. bHc as ay from _705. Rs@208311609 `return ii(e,()=>t,n,r)`. | local updateSettingsForSource — no storage 4th in deletePluginOptions. |
+| t3() | LOCKED | `function t3(){Xn().optionValues.clear()}` @213643845 UNIQUE count=1. After nPe + evi. | local clearPluginOptionsCache() — same role, not proven name-equal. |
+| X / ce | LOCKED | credentialsStoreFor / sessionServicesFor @210986760. `X(e,t=S){return v()&&e!==void 0?G(t):void 0}` `ce(e){return{storageV5:e,credentials:X(e)}}`. | ≡ local credentialsStoreFor / sessionServicesFor shape. |
+| CLI pin | LOCKED | pinStorageV5 then if A()&&p: N=credentialsStoreFor(p); k({storageV5:p,credentials:m(p)}). | local cli.tsx pinStorageV5 + pinCredentialsStore(credentialsStoreFor(pinned)). |
+| Provider mount | UNKNOWN | z/jdb imported as LR @210988511, Ar @223160546. Who renders Provider with storageV5+credentials not uniquely found. | local has no Provider; REPL/UI call getPinnedStorageV5() directly. |
+| We ≡ lastPinned | NO | We reads context. | getPinnedStorageV5 reads lastPinned. Different mechanism. |
+
+## Offsets
+
+We/b     @210899679  function b(){return i(e)}
+We/z     @210899390  Provider
+We export @210899810  b as kdb, z as jdb
+We call Zg @236022838
+Jr/Ar    @208363721
+Jr export @208364028  Ar as xRc
+Jr import @212844280  xRc as Jr
+ay/Rs    @208311609
+ay import @212841889  bHc as ay
+t3       @213643845
+nPe      @213644976  body LOCKED gold-gza-nPe-full.txt
+X        @210986760
+ce       @210986813
+CLI pin  @206274156 / @206275077
+
+## Bodies (facts)
+
+We: function b(){return i(e)}
+z:  function z(j){let R=v(6),{storageV5:n,credentials:s,children:S}=j,g;if(R[0]!==s||R[1]!==n)g=n===void 0&&s===void 0?c:{storageV5:n,credentials:s},...;y=a(e.Provider,{value:d,children:S});return y}
+Jr: function Ar(){if(oe)return oe;if(st())return Se(ne,j);return j}
+ay: function Rs(e,t,n,r){return ii(e,()=>t,n,r)}
+t3: function t3(){Xn().optionValues.clear()}
+
+## Local facts (do not implement)
+
+ManageMarketplaces: getPinnedStorageV5() only; official Zg We() → p+g into Zr(...,p,g).
+gza 4th _credentials unused.
+deletePluginOptions sync, no storage/credentials; official nPe(e,t,n) ay(...,t) Jr().mutate(...,n) t3().
+REPL local: storageV5: getPinnedStorageV5() on tipContext / ProcessUserInputContext — no credentials from We().
+Official REPL j_e: let{storageV5:d,credentials:g}=Ue()  (Ue = same kdb as We).

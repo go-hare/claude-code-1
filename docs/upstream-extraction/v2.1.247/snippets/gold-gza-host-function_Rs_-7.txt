@@ -1,0 +1,3 @@
+# needle=function Rs( pos=220348683
+function Rs(e){let t=e.expiresInSeconds!==void 0?` (expires_in=${e.expiresInSeconds}s)`:"";if(!e.write){e.onStatus(`[runner:session] ${e.label} refreshed for ${e.sessionId} but child stdin is not wired yet \u2014 token NOT delivered; next interval will retry${t}`);return}let n;if(e.pendingAcks)n=`shr-token-${e.label}-${ru().next()}`,e.pendingAcks.set(n,{label:e.label,sentAtMs:e.nowMs??Date.now()});e.write(nt({type:"update_environment_variables",variables:{[e.envVar]:e.token},...n&&{request_id:n}})+`
+`),e.onStatus(`[runner:session] ${e.label} refreshed for ${e.sessionId} \u2014 pushed to child via stdin${t}${n?` [${n}]`:""}`)}

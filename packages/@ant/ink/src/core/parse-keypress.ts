@@ -82,6 +82,9 @@ const INCOMPLETE_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*$/
 const COMPLETED_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*[Mm]/
 /** densable hwS — max length still treated as a held incomplete SGR prefix. */
 const HELD_SGR_MOUSE_PREFIX_MAX = 32
+/** densable 2.1.247 jM — completed SGR after flushed ESC / ESC[. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const FLUSHED_ESCAPE_MOUSE_COMPLETE_RE = /^\x1b\[<\d+;\d+;\d+[Mm]/
 // densable 2.1.228 kTd text-branch orphan mouse recovery (was ZXc):
 // whole-token only — not prefix peel, not multi-event burst, not embedded.
 //   /^\[<\d+;\d+;\d+[Mm]$/   SGR
@@ -305,6 +308,11 @@ export type KeyParseState = {
    * tokenizer (too long for Qpr, or Jyf after mousePrefixDropAt).
    */
   droppedMousePrefix: string
+  /**
+   * densable 2.1.247 flushedEscapePrefix — ESC / ESC[ parked on flush.
+   * Next text is prepended so `<35;150;7M` completes SGR instead of typing.
+   */
+  flushedEscapePrefix: string
   // Internal tokenizer instance — incomplete CSI stays in tokenizer.buffer()
   // until App NORMAL_TIMEOUT / mousePrefixDropAt flush (densable Qyf).
   _tokenizer?: Tokenizer
@@ -316,6 +324,7 @@ export const INITIAL_STATE: KeyParseState = {
   pasteBuffer: '',
   pendingByteEvents: [],
   droppedMousePrefix: '',
+  flushedEscapePrefix: '',
 }
 
 /** densable Qpr */
@@ -398,6 +407,9 @@ export function parseMultipleKeypresses(
   // densable Qyf: mbt({x10Mouse:!0}) + droppedMousePrefix hold on flush
   const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true })
   let droppedMousePrefix = prevState.droppedMousePrefix ?? ''
+  // densable 2.1.247 qb: f is only written on flush; m is the working copy.
+  let flushedEscapePrefix = isFlush ? (prevState.flushedEscapePrefix ?? '') : ''
+  let flushedEscapeWorking = prevState.flushedEscapePrefix ?? ''
   let tokens: Token[]
   if (isFlush && prevState.mode !== 'IN_PASTE') {
     const held = tokenizer.buffer()
@@ -408,6 +420,9 @@ export function parseMultipleKeypresses(
       droppedMousePrefix = held
       tokens = []
     } else {
+      if (held === '\x1b' || held === '\x1b[') {
+        flushedEscapePrefix = held
+      }
       tokens = tokenizer.flush()
     }
   } else {
@@ -485,7 +500,9 @@ export function parseMultipleKeypresses(
   for (const token of tokens) {
     if (token.type === 'sequence') {
       // densable Qyf: any sequence clears droppedMousePrefix (comma).
+      // densable 2.1.247 qb: sequence also clears flushedEscape working copy.
       droppedMousePrefix = ''
+      flushedEscapeWorking = ''
       if (token.value === PASTE_START) {
         flushPendingBytes()
         inPaste = true
@@ -554,6 +571,17 @@ export function parseMultipleKeypresses(
       // densable: d() before text.
       flushPendingBytes()
       let text = token.value
+      if (!inPaste && flushedEscapeWorking) {
+        const combined = flushedEscapeWorking + text
+        flushedEscapeWorking = ''
+        const completed = FLUSHED_ESCAPE_MOUSE_COMPLETE_RE.exec(combined)
+        if (completed) {
+          const mouse = parseMouseEvent(completed[0])
+          keys.push(mouse ?? parseKeypress(completed[0]))
+          text = combined.slice(completed[0].length)
+          if (!text) continue
+        }
+      }
       if (!inPaste && droppedMousePrefix) {
         const combined = droppedMousePrefix + text
         const completed = COMPLETED_SGR_MOUSE_PREFIX_RE.exec(combined)
@@ -627,6 +655,7 @@ export function parseMultipleKeypresses(
     pasteBuffer,
     pendingByteEvents,
     droppedMousePrefix,
+    flushedEscapePrefix,
     _tokenizer: tokenizer,
   }
 
@@ -1155,15 +1184,32 @@ function parseKeypress(s: string = ''): ParsedKey {
     // Name for keybindings uses primary codepoint (physical key). The text to
     // insert is recovered later in InputEvent via unicodeFromExtendedKeySequence
     // / key name when printable non-ASCII.
-    const remapped = traditionalCtrlAliasName(mods, primary)
-    const mapped = remapped ?? keycodeToName(primary)
+    // densable 2.1.247 Ea: Ctrl + non-ASCII primary uses kitty base-layout-key
+    // (CSI u field 1 `::base`) so Cyrillic Ctrl+C names `c`, not `ф`.
+    const field1Parts = match[1]?.split(':') ?? []
+    const baseLayoutKey = field1Parts[2]
+      ? parseInt(field1Parts[2], 10)
+      : undefined
+    const usedBaseLayoutKey =
+      mods.ctrl &&
+      primary > 127 &&
+      baseLayoutKey !== undefined &&
+      Number.isFinite(baseLayoutKey)
+    const namedCode = usedBaseLayoutKey ? baseLayoutKey : primary
+    const remapped = traditionalCtrlAliasName(mods, namedCode)
+    const mapped = remapped ?? keycodeToName(namedCode)
     const textChar = isRelease ? undefined : characterFromCsiUMatch(match)
     // Functional names (return/escape/tab/space/backspace/numpad labels) are
     // multi-char and must win for keybindings. Otherwise prefer the recovered
     // text character so ESC[58:65306;2u] inserts `：` rather than `:`.
     // On release, keep the functional/primary name for bindings but InputEvent
     // will clear printable insert (empty textChar + nonAlphanumeric / name).
-    const name = mapped && mapped.length > 1 ? mapped : (textChar ?? mapped)
+    // Official Ea names p??kb(h) when the base-layout remap applies.
+    const name = usedBaseLayoutKey
+      ? (mapped ?? '')
+      : mapped && mapped.length > 1
+        ? mapped
+        : (textChar ?? mapped)
     return {
       kind: 'key',
       name: isRelease && !(mapped && mapped.length > 1) ? '' : name,

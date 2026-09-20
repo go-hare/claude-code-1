@@ -1,0 +1,295 @@
+# gold-1-counts 247 vs 246 SendFeedback / feedbackDrafts
+
+same 246=18 247=18 "SendFeedback"
+  246#0 offset=196629434 kind=tbl run=113 jsScore=2
+  246#1 offset=196629558 kind=tbl run=94 jsScore=1
+  246#2 offset=198427640 kind=tbl run=12 jsScore=3
+  246#3 offset=200754272 kind=tbl run=45 jsScore=4
+  246#4 offset=200754364 kind=tbl run=38 jsScore=0
+  246#5 offset=202169880 kind=tbl run=59 jsScore=2
+  246#6 offset=202170109 kind=tbl run=304 jsScore=0
+  246#7 offset=202433768 kind=tbl run=214 jsScore=4
+  246#8 offset=205478162 kind=js run=207478 jsScore=8
+  246#9 offset=205478445 kind=js run=207478 jsScore=8
+  246#10 offset=205569130 kind=tbl run=207478 jsScore=6
+  246#11 offset=206426907 kind=js run=139238 jsScore=9
+  246#12 offset=213778106 kind=tbl run=6796973 jsScore=0
+  246#13 offset=215149786 kind=js run=6796973 jsScore=32
+  246#14 offset=215155951 kind=js run=6796973 jsScore=28
+  246#15 offset=215156106 kind=js run=6796973 jsScore=10
+  246#16 offset=229885820 kind=js run=8327 jsScore=8
+  246#17 offset=229885936 kind=tbl run=8327 jsScore=1
+  247#0 offset=199046306 kind=tbl run=113 jsScore=2
+  247#1 offset=199046430 kind=tbl run=94 jsScore=1
+  247#2 offset=199967708 kind=tbl run=12 jsScore=3
+  247#3 offset=202344428 kind=tbl run=45 jsScore=4
+  247#4 offset=202344520 kind=tbl run=38 jsScore=0
+  247#5 offset=203777980 kind=tbl run=59 jsScore=2
+  247#6 offset=203778209 kind=tbl run=304 jsScore=0
+  247#7 offset=204050220 kind=tbl run=214 jsScore=4
+  247#8 offset=206781467 kind=js run=216008 jsScore=8
+  247#9 offset=206781750 kind=js run=216008 jsScore=8
+  247#10 offset=206879724 kind=tbl run=216008 jsScore=6
+  247#11 offset=208027831 kind=js run=140241 jsScore=9
+  247#12 offset=215156371 kind=tbl run=6912445 jsScore=0
+  247#13 offset=216531371 kind=js run=6912445 jsScore=32
+  247#14 offset=216537536 kind=js run=6912445 jsScore=28
+  247#15 offset=216537691 kind=js run=6912445 jsScore=10
+  247#16 offset=232016147 kind=js run=8327 jsScore=8
+  247#17 offset=232016263 kind=tbl run=8327 jsScore=1
+same 246=26 247=26 "feedbackDrafts"
+  246#0 offset=195658416 kind=tbl run=35 jsScore=0
+  246#1 offset=196597460 kind=tbl run=14 jsScore=0
+  246#2 offset=196630244 kind=tbl run=49 jsScore=1
+  246#3 offset=200219804 kind=tbl run=93 jsScore=1
+  246#4 offset=200219904 kind=tbl run=38 jsScore=1
+  246#5 offset=200220296 kind=tbl run=37 jsScore=2
+  246#6 offset=200220340 kind=tbl run=39 jsScore=1
+  246#7 offset=206426815 kind=tbl run=139238 jsScore=6
+  246#8 offset=206538603 kind=tbl run=52853 jsScore=6
+  246#9 offset=215139326 kind=js run=6796973 jsScore=23
+  246#10 offset=215139472 kind=js run=6796973 jsScore=24
+  246#11 offset=215142052 kind=js run=6796973 jsScore=24
+  246#12 offset=215142199 kind=js run=6796973 jsScore=22
+  246#13 offset=215142407 kind=js run=6796973 jsScore=20
+  246#14 offset=215142778 kind=js run=6796973 jsScore=16
+  246#15 offset=215147676 kind=js run=6796973 jsScore=30
+  246#16 offset=215148165 kind=js run=6796973 jsScore=34
+  246#17 offset=215148212 kind=js run=6796973 jsScore=20
+  246#18 offset=224021532 kind=js run=26808 jsScore=12
+  246#19 offset=224021589 kind=js run=26808 jsScore=8
+  246#20 offset=224021726 kind=js run=26808 jsScore=21
+  246#21 offset=229888716 kind=js run=8327 jsScore=20
+  246#22 offset=230877305 kind=js run=1127882 jsScore=55
+  246#23 offset=230877380 kind=js run=1127882 jsScore=23
+  246#24 offset=230877419 kind=js run=1127882 jsScore=44
+  246#25 offset=233730066 kind=js run=122974 jsScore=43
+  247#0 offset=197166524 kind=tbl run=35 jsScore=0
+  247#1 offset=198183724 kind=tbl run=14 jsScore=0
+  247#2 offset=199047116 kind=tbl run=49 jsScore=1
+  247#3 offset=201795812 kind=tbl run=93 jsScore=1
+  247#4 offset=201795912 kind=tbl run=38 jsScore=1
+  247#5 offset=201796304 kind=tbl run=37 jsScore=2
+  247#6 offset=201796348 kind=tbl run=39 jsScore=1
+  247#7 offset=208027739 kind=tbl run=140241 jsScore=6
+  247#8 offset=208140859 kind=tbl run=53192 jsScore=6
+  247#9 offset=216520911 kind=js run=6912445 jsScore=23
+  247#10 offset=216521057 kind=js run=6912445 jsScore=24
+  247#11 offset=216523637 kind=js run=6912445 jsScore=24
+  247#12 offset=216523784 kind=js run=6912445 jsScore=22
+  247#13 offset=216523992 kind=js run=6912445 jsScore=20
+  247#14 offset=216524363 kind=js run=6912445 jsScore=16
+  247#15 offset=216529261 kind=js run=6912445 jsScore=30
+  247#16 offset=216529750 kind=js run=6912445 jsScore=34
+  247#17 offset=216529797 kind=js run=6912445 jsScore=20
+  247#18 offset=225095469 kind=js run=26808 jsScore=12
+  247#19 offset=225095526 kind=js run=26808 jsScore=8
+  247#20 offset=225095663 kind=js run=26808 jsScore=21
+  247#21 offset=232019043 kind=js run=8327 jsScore=20
+  247#22 offset=233009228 kind=js run=1126553 jsScore=55
+  247#23 offset=233009303 kind=js run=1126553 jsScore=23
+  247#24 offset=233009342 kind=js run=1126553 jsScore=44
+  247#25 offset=235799643 kind=js run=123035 jsScore=43
+same 246=4 247=4 "fitFeedbackPayloadToBudget"
+  246#0 offset=196628860 kind=tbl run=27 jsScore=1
+  246#1 offset=196628932 kind=tbl run=34 jsScore=2
+  246#2 offset=229883825 kind=js run=8327 jsScore=45
+  246#3 offset=229884847 kind=js run=8327 jsScore=22
+  247#0 offset=199045732 kind=tbl run=27 jsScore=1
+  247#1 offset=199045804 kind=tbl run=34 jsScore=2
+  247#2 offset=232014152 kind=js run=8327 jsScore=45
+  247#3 offset=232015174 kind=js run=8327 jsScore=22
+same 246=2 247=2 "parseDraftTranscriptMessages"
+  246#0 offset=196629936 kind=tbl run=29 jsScore=1
+  246#1 offset=229886651 kind=js run=8327 jsScore=33
+  247#0 offset=199046808 kind=tbl run=29 jsScore=1
+  247#1 offset=232016978 kind=js run=8327 jsScore=33
+same 246=4 247=4 "Drafted by Claude via the SendFeedback tool"
+  246#0 offset=196629408 kind=tbl run=113 jsScore=3
+  246#1 offset=196629532 kind=tbl run=94 jsScore=1
+  246#2 offset=229885794 kind=js run=8327 jsScore=12
+  246#3 offset=229885910 kind=tbl run=8327 jsScore=2
+  247#0 offset=199046280 kind=tbl run=113 jsScore=3
+  247#1 offset=199046404 kind=tbl run=94 jsScore=1
+  247#2 offset=232016121 kind=js run=8327 jsScore=12
+  247#3 offset=232016237 kind=tbl run=8327 jsScore=2
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; approved by the user from the above-prompt card without full review"
+  246#0 offset=196629408 kind=tbl run=113 jsScore=3
+  246#1 offset=229885794 kind=js run=8327 jsScore=12
+  247#0 offset=199046280 kind=tbl run=113 jsScore=3
+  247#1 offset=232016121 kind=js run=8327 jsScore=12
+same 246=2 247=2 "Drafted by Claude via the SendFeedback tool; reviewed and approved by the user before sending"
+  246#0 offset=196629532 kind=tbl run=94 jsScore=1
+  246#1 offset=229885910 kind=tbl run=8327 jsScore=2
+  247#0 offset=199046404 kind=tbl run=94 jsScore=1
+  247#1 offset=232016237 kind=tbl run=8327 jsScore=2
+same 246=8 247=8 "/feedback has been disabled"
+  246#0 offset=196631512 kind=tbl run=81 jsScore=0
+  246#1 offset=196631604 kind=tbl run=77 jsScore=0
+  246#2 offset=196631688 kind=tbl run=97 jsScore=0
+  246#3 offset=196631796 kind=tbl run=57 jsScore=0
+  246#4 offset=220142318 kind=js run=20349 jsScore=20
+  246#5 offset=220142458 kind=js run=20349 jsScore=11
+  246#6 offset=220142575 kind=js run=20349 jsScore=11
+  246#7 offset=220142739 kind=js run=20349 jsScore=20
+  247#0 offset=199048368 kind=tbl run=81 jsScore=0
+  247#1 offset=199048460 kind=tbl run=77 jsScore=0
+  247#2 offset=199048544 kind=tbl run=97 jsScore=0
+  247#3 offset=199048652 kind=tbl run=57 jsScore=0
+  247#4 offset=222029883 kind=js run=20349 jsScore=20
+  247#5 offset=222030023 kind=js run=20349 jsScore=11
+  247#6 offset=222030140 kind=js run=20349 jsScore=11
+  247#7 offset=222030304 kind=js run=20349 jsScore=20
+same 246=2 247=2 "/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable"
+  246#0 offset=196631512 kind=tbl run=81 jsScore=0
+  246#1 offset=220142318 kind=js run=20349 jsScore=20
+  247#0 offset=199048368 kind=tbl run=81 jsScore=0
+  247#1 offset=222029883 kind=js run=20349 jsScore=20
+same 246=2 247=2 "/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable"
+  246#0 offset=196631604 kind=tbl run=77 jsScore=0
+  246#1 offset=220142458 kind=js run=20349 jsScore=11
+  247#0 offset=199048460 kind=tbl run=77 jsScore=0
+  247#1 offset=222030023 kind=js run=20349 jsScore=11
+same 246=2 247=2 "/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable"
+  246#0 offset=196631688 kind=tbl run=97 jsScore=0
+  246#1 offset=220142575 kind=js run=20349 jsScore=11
+  247#0 offset=199048544 kind=tbl run=97 jsScore=0
+  247#1 offset=222030140 kind=js run=20349 jsScore=11
+same 246=2 247=2 "/feedback has been disabled by your organization's policy"
+  246#0 offset=196631796 kind=tbl run=57 jsScore=0
+  246#1 offset=220142739 kind=js run=20349 jsScore=20
+  247#0 offset=199048652 kind=tbl run=57 jsScore=0
+  247#1 offset=222030304 kind=js run=20349 jsScore=20
+same 246=2 247=2 "Feedback payload too large. Try again without the transcript, or shorten the details"
+  246#0 offset=196628764 kind=tbl run=85 jsScore=0
+  246#1 offset=229887302 kind=js run=8327 jsScore=9
+  247#0 offset=199045636 kind=tbl run=85 jsScore=0
+  247#1 offset=232017629 kind=js run=8327 jsScore=9
+same 246=2 247=2 "fitFeedbackPayloadToBudget: still"
+  246#0 offset=196628932 kind=tbl run=34 jsScore=2
+  246#1 offset=229884847 kind=js run=8327 jsScore=22
+  247#0 offset=199045804 kind=tbl run=34 jsScore=2
+  247#1 offset=232015174 kind=js run=8327 jsScore=22
+same 246=3 247=3 "rawTranscriptJsonl withheld from feedback draft submit"
+  246#0 offset=196629976 kind=tbl run=86 jsScore=1
+  246#1 offset=229887742 kind=js run=8327 jsScore=19
+  246#2 offset=229888174 kind=tbl run=8327 jsScore=7
+  247#0 offset=199046848 kind=tbl run=86 jsScore=1
+  247#1 offset=232018069 kind=js run=8327 jsScore=19
+  247#2 offset=232018501 kind=tbl run=8327 jsScore=7
+same 246=2 247=2 "draft transcript withheld from feedback submit: identity_not_corroborated"
+  246#0 offset=196630072 kind=tbl run=73 jsScore=0
+  246#1 offset=229887976 kind=js run=8327 jsScore=21
+  247#0 offset=199046944 kind=tbl run=73 jsScore=0
+  247#1 offset=232018303 kind=js run=8327 jsScore=21
+same 246=2 247=2 "draft transcript withheld from feedback submit: contains_3p_transcript_markers"
+  246#0 offset=196630156 kind=tbl run=78 jsScore=0
+  246#1 offset=229888082 kind=js run=8327 jsScore=13
+  247#0 offset=199047028 kind=tbl run=78 jsScore=0
+  247#1 offset=232018409 kind=js run=8327 jsScore=13
+same 246=2 247=2 "feedbackDrafts: post-submit draft delete failed"
+  246#0 offset=196630244 kind=tbl run=49 jsScore=1
+  246#1 offset=229888716 kind=js run=8327 jsScore=20
+  247#0 offset=199047116 kind=tbl run=49 jsScore=1
+  247#1 offset=232019043 kind=js run=8327 jsScore=20
+same 246=2 247=2 "tengu_feedback_draft_delete_failed"
+  246#0 offset=196630304 kind=tbl run=34 jsScore=1
+  246#1 offset=229888825 kind=js run=8327 jsScore=20
+  247#0 offset=199047176 kind=tbl run=34 jsScore=1
+  247#1 offset=232019152 kind=js run=8327 jsScore=20
+same 246=2 247=2 "tengu_feedback_draft_submitted"
+  246#0 offset=196630368 kind=tbl run=30 jsScore=0
+  246#1 offset=229888945 kind=js run=8327 jsScore=27
+  247#0 offset=199047240 kind=tbl run=30 jsScore=0
+  247#1 offset=232019272 kind=js run=8327 jsScore=27
+same 246=2 247=2 "tengu_feedback_draft_discarded"
+  246#0 offset=196630768 kind=tbl run=30 jsScore=0
+  246#1 offset=229890252 kind=js run=8327 jsScore=28
+  247#0 offset=199047640 kind=tbl run=30 jsScore=0
+  247#1 offset=232020579 kind=js run=8327 jsScore=28
+same 246=5 247=5 "feedback_draft_submit"
+  246#0 offset=196630374 kind=tbl run=30 jsScore=0
+  246#1 offset=196630408 kind=tbl run=21 jsScore=0
+  246#2 offset=229888951 kind=js run=8327 jsScore=27
+  246#3 offset=229889416 kind=js run=8327 jsScore=17
+  246#4 offset=229889484 kind=js run=8327 jsScore=13
+  247#0 offset=199047246 kind=tbl run=30 jsScore=0
+  247#1 offset=199047280 kind=tbl run=21 jsScore=0
+  247#2 offset=232019278 kind=js run=8327 jsScore=27
+  247#3 offset=232019743 kind=js run=8327 jsScore=17
+  247#4 offset=232019811 kind=js run=8327 jsScore=13
+same 246=4 247=4 "The draft is still queued. Try again later"
+  246#0 offset=196626944 kind=tbl run=67 jsScore=0
+  246#1 offset=196630442 kind=tbl run=45 jsScore=0
+  246#2 offset=229890090 kind=js run=8327 jsScore=22
+  246#3 offset=234955552 kind=js run=16644 jsScore=13
+  247#0 offset=198154304 kind=tbl run=67 jsScore=0
+  247#1 offset=199047314 kind=tbl run=45 jsScore=0
+  247#2 offset=232020417 kind=js run=8327 jsScore=22
+  247#3 offset=236997883 kind=js run=16644 jsScore=13
+same 246=0 247=0 "name:\"SendFeedback\""
+same 246=0 247=0 "name:'SendFeedback'"
+same 246=0 247=0 "name: \"SendFeedback\""
+same 246=2 247=2 "\"SendFeedback\""
+  246#0 offset=213778105 kind=tbl run=6796973 jsScore=0
+  246#1 offset=215149785 kind=js run=6796973 jsScore=32
+  247#0 offset=215156370 kind=tbl run=6912445 jsScore=0
+  247#1 offset=216531370 kind=js run=6912445 jsScore=32
+same 246=10 247=10 "SendFeedback tool"
+  246#0 offset=196629434 kind=tbl run=113 jsScore=2
+  246#1 offset=196629558 kind=tbl run=94 jsScore=1
+  246#2 offset=202169880 kind=tbl run=59 jsScore=2
+  246#3 offset=202170109 kind=tbl run=304 jsScore=0
+  246#4 offset=202433768 kind=tbl run=214 jsScore=4
+  246#5 offset=205478162 kind=js run=207478 jsScore=8
+  246#6 offset=205478445 kind=js run=207478 jsScore=8
+  246#7 offset=206426907 kind=js run=139238 jsScore=9
+  246#8 offset=229885820 kind=js run=8327 jsScore=8
+  246#9 offset=229885936 kind=tbl run=8327 jsScore=1
+  247#0 offset=199046306 kind=tbl run=113 jsScore=2
+  247#1 offset=199046430 kind=tbl run=94 jsScore=1
+  247#2 offset=203777980 kind=tbl run=59 jsScore=2
+  247#3 offset=203778209 kind=tbl run=304 jsScore=0
+  247#4 offset=204050220 kind=tbl run=214 jsScore=4
+  247#5 offset=206781467 kind=js run=216008 jsScore=8
+  247#6 offset=206781750 kind=js run=216008 jsScore=8
+  247#7 offset=208027831 kind=js run=140241 jsScore=9
+  247#8 offset=232016147 kind=js run=8327 jsScore=8
+  247#9 offset=232016263 kind=tbl run=8327 jsScore=1
+same 246=17 247=17 "feedbackDrafts:"
+  246#0 offset=196630244 kind=tbl run=49 jsScore=1
+  246#1 offset=200219804 kind=tbl run=93 jsScore=1
+  246#2 offset=200219904 kind=tbl run=38 jsScore=1
+  246#3 offset=200220296 kind=tbl run=37 jsScore=2
+  246#4 offset=200220340 kind=tbl run=39 jsScore=1
+  246#5 offset=206426815 kind=tbl run=139238 jsScore=6
+  246#6 offset=215139326 kind=js run=6796973 jsScore=23
+  246#7 offset=215139472 kind=js run=6796973 jsScore=24
+  246#8 offset=215142052 kind=js run=6796973 jsScore=24
+  246#9 offset=215142199 kind=js run=6796973 jsScore=22
+  246#10 offset=215142407 kind=js run=6796973 jsScore=20
+  246#11 offset=215142778 kind=js run=6796973 jsScore=16
+  246#12 offset=215148165 kind=js run=6796973 jsScore=34
+  246#13 offset=215148212 kind=js run=6796973 jsScore=20
+  246#14 offset=224021726 kind=js run=26808 jsScore=21
+  246#15 offset=229888716 kind=js run=8327 jsScore=20
+  246#16 offset=233730066 kind=js run=122974 jsScore=43
+  247#0 offset=199047116 kind=tbl run=49 jsScore=1
+  247#1 offset=201795812 kind=tbl run=93 jsScore=1
+  247#2 offset=201795912 kind=tbl run=38 jsScore=1
+  247#3 offset=201796304 kind=tbl run=37 jsScore=2
+  247#4 offset=201796348 kind=tbl run=39 jsScore=1
+  247#5 offset=208027739 kind=tbl run=140241 jsScore=6
+  247#6 offset=216520911 kind=js run=6912445 jsScore=23
+  247#7 offset=216521057 kind=js run=6912445 jsScore=24
+  247#8 offset=216523637 kind=js run=6912445 jsScore=24
+  247#9 offset=216523784 kind=js run=6912445 jsScore=22
+  247#10 offset=216523992 kind=js run=6912445 jsScore=20
+  247#11 offset=216524363 kind=js run=6912445 jsScore=16
+  247#12 offset=216529750 kind=js run=6912445 jsScore=34
+  247#13 offset=216529797 kind=js run=6912445 jsScore=20
+  247#14 offset=225095663 kind=js run=26808 jsScore=21
+  247#15 offset=232019043 kind=js run=8327 jsScore=20
+  247#16 offset=235799643 kind=js run=123035 jsScore=43
+same 246=0 247=0 "H(\"feedbackDrafts\")"
+same 246=0 247=0 "H('feedbackDrafts')"

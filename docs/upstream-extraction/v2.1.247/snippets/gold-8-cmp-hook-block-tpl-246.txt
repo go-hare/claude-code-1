@@ -1,0 +1,4 @@
+# offset=218020995 ver=246 hit=2/2 needle="hook blocking error from command: \""
+
+ssion)}`),isMeta:!0})]},hook_blocking_error:(e)=>[dt({content:El(`${e.hookName} hook blocking error from command: "${e.blockingError.command}": ${e.blockingError.blockingError}`),isMeta:!0})],hook_additional_context:(e)=>{if(e.content.length===0)return[];return[dt({content:El(`${e.hookName} hook additional context: ${e.content.join(`
+`)}`),isMeta:!0})]},inlined_image_paths:(e)=>{let t=Array.isArray(e.paths)?e.paths.filter((n)=>typeof n==="string"):[];if(t.length===0)return[];

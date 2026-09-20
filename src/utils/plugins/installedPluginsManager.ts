@@ -28,6 +28,7 @@ import {
   denyCommandProducerDir,
   emitCommandProducerDirsChanged,
 } from './commandProducerDirs.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
 import {
   type InstalledPlugin,
@@ -796,20 +797,34 @@ export async function initializeVersionedPlugins(): Promise<void> {
   )
 }
 
+/** densable `TB` / `XX("installed", Fs())` — leftover-wired pluginRegistry key. */
+export function installedPluginsRegistryKey(
+  pluginsDir: string = getPluginsDirectory(),
+): { namespace: 'pluginRegistry'; file: 'installed' } | null {
+  if (pluginsDir !== join(getClaudeConfigHomeDir(), 'plugins')) {
+    return null
+  }
+  return { namespace: 'pluginRegistry', file: 'installed' }
+}
+
 /**
  * Remove all plugin entries belonging to a specific marketplace from installed_plugins.json.
  *
- * Loads V2 data once, finds all plugin IDs matching the `@{marketplaceName}` suffix,
- * collects their install paths, removes the entries, and saves once.
+ * Official `_0n`/`ame` V5 RMW is `j0n` → `z0n`/`qBo`/`F0n` (bodies UNKNOWN).
+ * Disk path stays `IR` + `N0n(r)` 1-arg.
  *
  * @param marketplaceName - The marketplace name (matched against `@{name}` suffix)
  * @returns orphanedPaths (for markPluginVersionOrphaned) and removedPluginIds
  *   (for deletePluginOptions) from the removed entries
  */
-export function removeAllPluginsForMarketplace(marketplaceName: string): {
+export async function removeAllPluginsForMarketplace(
+  marketplaceName: string,
+  _storageV5?: unknown,
+): Promise<{
   orphanedPaths: string[]
   removedPluginIds: string[]
-} {
+}> {
+  void _storageV5
   if (!marketplaceName) {
     return { orphanedPaths: [], removedPluginIds: [] }
   }

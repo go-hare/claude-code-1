@@ -4,6 +4,7 @@ import { toError } from '../errors.js'
 import { logError } from '../log.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import { plural } from '../stringUtils.js'
+import { re } from './escapeSafeText.js'
 import { checkGitAvailable } from './gitAvailability.js'
 import { getMarketplace } from './marketplaceManager.js'
 import type { KnownMarketplace, MarketplaceSource } from './schemas.js'
@@ -359,7 +360,7 @@ export function formatFailureDetails(
     .slice(0, maxShow)
     .map(f => {
       const reason = f.reason || f.error || 'unknown error'
-      return includeReasons ? `${f.name} (${reason})` : f.name
+      return includeReasons ? `${re(f.name)} (${re(reason)})` : re(f.name)
     })
     .join(includeReasons ? '; ' : ', ')
 

@@ -1,0 +1,6 @@
+# offset=198176865 tag=osc
+
+....
+$.changeNotifChannel.......1..changeInputNeededNotif..........changeAgentPushNotif....VKw.defaultToAgentsView........onThemeSelect.......w...helpText....hM..hideEscToCancel.......(.skipExitHandling.....w..externalIncludes
+.......cancelHint........U.envVar......=.V.preferredNotifChannel.......j...Auto....Y[j.iTerm2 .....D...(OSC 9).....z+Z.Terminal Bell ..........(\a)....P..Kitty ......)nc.(OSC 99).....mq.Ghostty 	.....G.(OSC 777)...........iTerm2 w/ Bell.....*.".terminal_bell.......j.3.kitty.......B`..ghostty.....Jp..iterm2_with_bell....."..notifications_disabled..
+...e...disabled (.......9..isDefaultValue......NT..revampSections......&@..Enter a number to change [1-....b.i.], or .......n..tok/turn......x.Plugin skill-listing footprint.......9..What each plugin's skill descriptions add to the system prompt (cached input after the first turn). Agents and MCP tools not yet counted.

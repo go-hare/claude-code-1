@@ -1,0 +1,53 @@
+# 247 offset=82208838 needle="HKCU"
+
+pull/692
+# They are used instead of `SetEnvironmentVariable` because of unwanted variable expansions.
+function Write-Env {
+  param([String]$Key, [String]$Value)
+
+  $RegisterKey = Get-Item -Path 'HKCU:'
+  $EnvRegisterKey = $RegisterKey.OpenSubKey('Environment', $true)
+  if ($null -eq $Value) {
+    $EnvRegisterKey.DeleteValue($Key)
+  } else {
+    $RegistryValueKind = if ($Value.Contains('%')) {
+      [Microsoft.Win32.RegistryValueKind]::ExpandString
+    } elseif ($EnvRegisterKey.GetValue($Key)) {
+      $EnvRegisterKey.GetValueKind($Key)
+    } else {
+      [Microsoft.Win32.RegistryValueKind]::String
+    }
+    $EnvRegisterKey.SetValue($Key, $Value, $RegistryValueKind)
+  }
+}
+
+function Get-Env {
+  param([String] $Key)
+
+  $RegisterKey = Get-Item -Path 'HKCU:'
+  $EnvRegisterKey = $RegisterKey.OpenSubKey('Environment')
+  $EnvRegisterKey.GetValue($Key, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+}
+
+if (-not (Test-Path "${PSScriptRoot}\bin\bun.exe")) {
+  Write-Host "bun.exe not found in ${PSScriptRoot}\bin`n`nRefusing to delete this directory as it may.`n`nIf this uninstallation is still intentional, please just manually delete this folder."
+  if ($PauseOnError) { pause }
+  exit 1
+}
+
+function Stop-Bun {
+  try {
+    Get-Process -Name bun | Where-Object { $_.Path -eq "${PSScriptRoot}\bin\bun.exe" } | Stop-Process -Force
+  } catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
+    # ignore
+  } catch {
+    Write-Host "There are open instances of bun.exe that could not be automatically closed."
+    if ($PauseOnError) { pause }
+    exit 1
+  }
+}
+
+# Remove ~\.bun\bin\bun.exe
+try {
+  Stop-Bun
+  Remov

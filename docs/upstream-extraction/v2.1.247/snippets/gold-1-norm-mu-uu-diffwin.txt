@@ -1,0 +1,7 @@
+# firstDiff=307
+
+---246---
+=ID(),ID=ID(),[ID,ID]=ID(ID),ID=ID(ID),[ID,ID]=ID(()=>({...ID(),...ID(),ID:ID(),ID:ID()})),ID=ID(ID()),[ID,ID]=ID(ID?.ID||ID),ID=ID(ID),[ID,ID]=ID(()=>ID().ID===!0),[ID,ID]=ID(ID?.ID),ID=ID(ID),[ID,ID]=ID(0),[ID,ID]=ID(0),ID=ID(),[ID,ID]=ID(!ID),ID=ID(),{ID:ID,ID:ID}=ID(),ID=ID(null),[ID,ID]=ID(1),as=Math.ID(44,Math.ID(14,ID-16)),ID=ID??Math.ID(Math.ID(ID*0.8),30),ID=Math.ID(5,ID-8-ID),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=ID()??ID,ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID()?ID.ID:!1),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=(ID(),ID(ID)).ID(),ID=ID(),[ID,ID]=ID({}),ID=ID(ID);ID(
+
+---247---
+=ID(),ID=ID(),[ID,ID]=ID(ID),ID=ID(ID),[ID,ID]=ID(()=>({...ID(),...ID(),ID:ID(),ID:ID()})),ID=ID(ID()),[ID,ID]=ID(ID?.ID||ID),ID=ID(ID),[ID,ID]=ID(()=>ID().ID===!0),[ID,ID]=ID(ID?.ID),ID=ID(ID),[ID,ID,ID]=ID(0),[ID,ID]=ID(0),ID=ID(),[ID,ID]=ID(!ID),ID=ID(),{ID:ID,ID:ID}=ID(),ID=ID(null),[ID,ID]=ID(1),ID=Math.ID(44,Math.ID(14,ID-16)),ID=ID??Math.ID(Math.ID(ID*0.8),30),ID=Math.ID(5,ID-8-ID),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=ID()??ID,ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID()?ID.ID:!1),ID=ID((ID)=>ID.ID),ID=ID((ID)=>ID.ID),ID=(ID(),ID(ID)).ID(),ID=ID(),[ID,ID]=ID({}),ID=ID(ID);

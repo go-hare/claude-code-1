@@ -1,0 +1,3 @@
+# 247 @242679157
+
+var at=rt[He];if(!(at.isEdge()||at.isParent()||!i.has(at))){var qe=r1(at);if(qe!=null){var Ue=qe.index,ye=qe.depth;if(!(Ue==null||ye==null)){var ve=x[ye].length;ye<de&&(ke+=Ue/ve,Fe++)}}}}return Fe=Math.max(1,Fe),ke=ke/Fe,Fe===0&&(ke=0),V[$e.id()]=ke,ke},"getWeightedPercent"),j=o(function($e,de){var rt=H($e),ke=H(de),Fe=rt-ke;return Fe===0?K0e($e.id(),de.id()):Fe},"sortFn");e.depthSort!==void 0&&(j=e.depthSort);for(var U=x.length,Q=0;Q<U;Q++)x[Q].sort(j),A(Q);for(var Y=[],ae=0;ae<C.length;ae++)Y.push(C[ae]);var J=o(function(){for(var $e=0;$e<U;$e++)A($e)},"assignDepths");Y.length&&(x.unshift(Y

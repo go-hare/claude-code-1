@@ -1,0 +1,11 @@
+# pos=66648964
+stat,
+  mkdir,
+  opendir,
+  readdir,
+  readlink,
+  stat,
+  symlink,
+  unlink,
+  utimes
+} = @getInternalField(@internalModuleRegistry, 153) || @createInternalMod

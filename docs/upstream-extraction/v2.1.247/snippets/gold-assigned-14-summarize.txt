@@ -1,0 +1,12 @@
+# densable 2.1.247 handleSummarize (247 NEW vs 246 void 0)
+
+S=await _me({
+  toolUseContext:h,
+  forkContextMessages:m,
+  mainThreadAgentDefinition:this._snapshot.mainThreadAgentDefinition
+})
+
+# 246 compact ge / summarize used mainThreadAgentDefinition:void 0
+# 247 remaining void 0 is compact ie → z({..., mainThreadAgentDefinition:void 0})
+# Ce lookup (both versions, fork/cache helper):
+p=e.agent?e.agentDefinitions.activeAgents.find(n=>n.agentType===e.agent):void 0

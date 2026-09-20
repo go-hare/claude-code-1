@@ -1,0 +1,64 @@
+# gold-18 fg-shell-bg-exit — locked 247 bodies (vs 246 LMt)
+
+## 247 ADt @216242459 — enqueue + footer
+function ADt(e,t,n,r,o,s,i="bash",a,l){
+  let{claimed:c,task:u}=dT(e,o);
+  if(!c)return;
+  if(!u?.isAdopted)RW(e,`
+[${n==="killed"?"killed":`exited with code ${r??"unknown"}`}]
+`);
+  if(n==="completed")ce("task_local_shell");
+  else if(n==="failed")J("task_local_shell","task_local_shell_failed");
+  let d=RDt(i,t,n,r,l),p=ji(e);
+  if(ua({value:ql({taskId:e,toolUseId:s,outputFile:p,status:n,summary:Ur(d)}),mode:"task-notification",skipAttachments:!0,priority:"next",agentId:a??Tr(),taskId:e}),a!==void 0)
+    pa(e,n==="killed"?"stopped":n,{toolUseId:s,summary:d,outputFile:p})
+}
+
+## 246 LMt — always wrote footer, no skipAttachments
+function LMt(e,t,n,r,o,s,i="bash",a,l){
+  if(!Qv(e,o).claimed)return;
+  if(ZH(e,`
+[${n==="killed"?"killed":`exited with code ${r??"unknown"}`}]
+`), ...)
+}
+
+## 247 dT @213710265 — claim returns task
+function dT(e,t,n){
+  let r=!1,o;
+  return t.update(e,(s)=>{
+    if(o=s,s.notified)return s;
+    if(r=!0,n?.skipStampIfRunning&&s.status==="running")return s;
+    return{...s,notified:!0}
+  }),{claimed:r,task:o}
+}
+
+## 247 eA — kill footer
+function eA(e,t){
+  ...
+  return r=o.notified,n={...,isAdopted:o.isAdopted===!0},{...o,status:"killed",notified:!0,...}
+  if(n&&!r){
+    if(!n.isAdopted)RW(e,`
+[killed]
+`);
+    pa(e,"stopped",...)
+  }
+  Bl(e)
+}
+
+## 247 nsc — only setter of isAdopted:!0
+function nsc(e,t){
+  let l={...,isBackgrounded:!0,agentId:a!==void 0?jo(a):void 0,kind:i,isAdopted:!0};
+  t.register(l);
+  e.shellCommand.result.then(async(c)=>{
+    let u=c.interrupted?"killed":"completed";
+    t.update(...);
+    ADt(n,o,u,c.code,t,s,i,p?jo(a):void 0,void 0);
+    Bl(n)
+  })
+}
+
+## 247 RDt — unchanged vs 246 $Mt (no -1 mapping)
+`exited with code ${r??"unknown"}`  // footer; -1 stays -1
+`${nj}"${t}" completed${r!==void 0?` (exit code ${r})`:""}`  // summary
+
+INVENT-BAN: do not map -1 → null / 0 / omitted. Suppress is `!task?.isAdopted` on the whole footer write.

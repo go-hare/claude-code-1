@@ -1,0 +1,5 @@
+# 247 async function tk start=236143530 end=236143773 len=243 sha=e9995094191f751b needle@236143657
+
+async function tk(){;try{let xN=await bn(hp);let cC=Object.keys(xN);if(cC.length===0)wa("No marketplaces configured");else wa(`Configured marketplaces:
+${cC.map(QC).join(`
+`)}`)}catch(kp){let SN=kp;wa(`Error loading marketplaces: ${ce(SN)}`)}}

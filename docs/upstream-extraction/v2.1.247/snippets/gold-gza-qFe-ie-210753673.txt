@@ -1,0 +1,2 @@
+# ie@210753673
+function ie(e){return K[e]}

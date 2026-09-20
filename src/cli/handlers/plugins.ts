@@ -41,7 +41,9 @@ import {
   refreshMarketplace,
   removeMarketplaceSource,
   saveMarketplaceToSettings,
+  settingsSourceFromMarketplaceScope,
 } from '../../utils/plugins/marketplaceManager.js'
+import { getPinnedStorageV5 } from '../../utils/storageV5/index.js'
 import { loadPluginMcpServers } from '../../utils/plugins/mcpPluginIntegration.js'
 import { parseMarketplaceInput } from '../../utils/plugins/parseMarketplaceInput.js'
 import {
@@ -56,9 +58,15 @@ import {
   validateManifest,
   validatePluginContents,
 } from '../../utils/plugins/validatePlugin.js'
+import { Io, re } from '../../utils/plugins/escapeSafeText.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { plural } from '../../utils/stringUtils.js'
 import { cliError, cliOk } from '../exit.js'
+
+/** densable CLI `U`/`ke` — human plugin/marketplace lines go through `re`. */
+function printCli(line: string): void {
+  console.log(re(line))
+}
 
 // Re-export for main.tsx to reference in option definitions
 export { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES }
@@ -68,27 +76,27 @@ export { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES }
  */
 export function handleMarketplaceError(error: unknown, action: string): never {
   logError(error)
-  cliError(`${figures.cross} Failed to ${action}: ${errorMessage(error)}`)
+  cliError(Io(`${figures.cross} Failed to ${action}: ${errorMessage(error)}`))
 }
 
 function printValidationResult(result: ValidationResult): void {
   if (result.errors.length > 0) {
-    console.log(
+    printCli(
       `${figures.cross} Found ${result.errors.length} ${plural(result.errors.length, 'error')}:\n`,
     )
     result.errors.forEach(error => {
-      console.log(`  ${figures.pointer} ${error.path}: ${error.message}`)
+      printCli(`  ${figures.pointer} ${error.path}: ${error.message}`)
     })
-    console.log('')
+    printCli('')
   }
   if (result.warnings.length > 0) {
-    console.log(
+    printCli(
       `${figures.warning} Found ${result.warnings.length} ${plural(result.warnings.length, 'warning')}:\n`,
     )
     result.warnings.forEach(warning => {
-      console.log(`  ${figures.pointer} ${warning.path}: ${warning.message}`)
+      printCli(`  ${figures.pointer} ${warning.path}: ${warning.message}`)
     })
-    console.log('')
+    printCli('')
   }
 }
 
@@ -101,7 +109,7 @@ export async function pluginValidateHandler(
   try {
     const result = await validateManifest(manifestPath)
 
-    console.log(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
+    printCli(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
     printValidationResult(result)
 
     // If this is a plugin manifest located inside a .claude-plugin directory,
@@ -114,7 +122,7 @@ export async function pluginValidateHandler(
       if (basename(manifestDir) === '.claude-plugin') {
         contentResults = await validatePluginContents(dirname(manifestDir))
         for (const r of contentResults) {
-          console.log(`Validating ${r.fileType}: ${r.filePath}\n`)
+          printCli(`Validating ${r.fileType}: ${r.filePath}\n`)
           printValidationResult(r)
         }
       }
@@ -132,13 +140,15 @@ export async function pluginValidateHandler(
           : `${figures.tick} Validation passed`,
       )
     } else {
-      console.log(`${figures.cross} Validation failed`)
+      printCli(`${figures.cross} Validation failed`)
       process.exit(1)
     }
   } catch (error) {
     logError(error)
     console.error(
-      `${figures.cross} Unexpected error during validation: ${errorMessage(error)}`,
+      Io(
+        `${figures.cross} Unexpected error during validation: ${errorMessage(error)}`,
+      ),
     )
     process.exit(2)
   }
@@ -393,7 +403,7 @@ export async function pluginListHandler(options: {
   }
 
   if (pluginIds.length > 0) {
-    console.log('Installed plugins:\n')
+    printCli('Installed plugins:\n')
   }
 
   for (const pluginId of pluginIds.sort()) {
@@ -417,19 +427,19 @@ export async function pluginListHandler(options: {
       const version = installation.version || 'unknown'
       const scope = installation.scope
 
-      console.log(`  ${figures.pointer} ${pluginId}`)
-      console.log(`    Version: ${version}`)
-      console.log(`    Scope: ${scope}`)
-      console.log(`    Status: ${status}`)
+      printCli(`  ${figures.pointer} ${pluginId}`)
+      printCli(`    Version: ${version}`)
+      printCli(`    Scope: ${scope}`)
+      printCli(`    Status: ${status}`)
       for (const error of pluginErrors) {
-        console.log(`    Error: ${getPluginErrorMessage(error)}`)
+        printCli(`    Error: ${getPluginErrorMessage(error)}`)
       }
-      console.log('')
+      printCli('')
     }
   }
 
   if (inlinePlugins.length > 0 || inlineLoadErrors.length > 0) {
-    console.log('Session-only plugins (--plugin-dir):\n')
+    printCli('Session-only plugins (--plugin-dir):\n')
     for (const p of inlinePlugins) {
       // Same dirName≠manifestName fallback as the JSON path above — error
       // sources use the dir basename but p.source uses the manifest name.
@@ -440,28 +450,28 @@ export async function pluginListHandler(options: {
         pErrors.length > 0
           ? `${figures.cross} loaded with errors`
           : `${figures.tick} loaded`
-      console.log(`  ${figures.pointer} ${p.source}`)
-      console.log(`    Version: ${p.manifest.version ?? 'unknown'}`)
-      console.log(`    Path: ${p.path}`)
-      console.log(`    Status: ${status}`)
+      printCli(`  ${figures.pointer} ${p.source}`)
+      printCli(`    Version: ${p.manifest.version ?? 'unknown'}`)
+      printCli(`    Path: ${p.path}`)
+      printCli(`    Status: ${status}`)
       for (const e of pErrors) {
-        console.log(`    Error: ${getPluginErrorMessage(e)}`)
+        printCli(`    Error: ${getPluginErrorMessage(e)}`)
       }
-      console.log('')
+      printCli('')
     }
     // Path-level failures: no LoadedPlugin object exists. Show them so
     // `--plugin-dir /typo` doesn't just silently produce nothing.
     for (const e of inlineLoadErrors.filter(e =>
       e.source.startsWith('inline['),
     )) {
-      console.log(
+      printCli(
         `  ${figures.pointer} ${e.source}: ${figures.cross} ${getPluginErrorMessage(e)}\n`,
       )
     }
   }
 
   if (syncedPlugins.length > 0 || syncedLoadErrors.length > 0) {
-    console.log('Synced plugins:\n')
+    printCli('Synced plugins:\n')
     for (const p of syncedPlugins) {
       const pErrors = syncedLoadErrors.filter(
         e => e.source === p.source || ('plugin' in e && e.plugin === p.name),
@@ -472,19 +482,19 @@ export async function pluginListHandler(options: {
           : p.enabled !== false
             ? `${figures.tick} enabled`
             : `${figures.cross} disabled`
-      console.log(`  ${figures.pointer} ${p.source}`)
-      console.log(`    Version: ${p.manifest.version ?? 'unknown'}`)
-      console.log(`    Path: ${p.path}`)
-      console.log(`    Status: ${status}`)
+      printCli(`  ${figures.pointer} ${p.source}`)
+      printCli(`    Version: ${p.manifest.version ?? 'unknown'}`)
+      printCli(`    Path: ${p.path}`)
+      printCli(`    Status: ${status}`)
       for (const e of pErrors) {
-        console.log(`    Error: ${getPluginErrorMessage(e)}`)
+        printCli(`    Error: ${getPluginErrorMessage(e)}`)
       }
-      console.log('')
+      printCli('')
     }
     for (const e of syncedLoadErrors.filter(e =>
       e.source.startsWith(`${SYNCED_MARKETPLACE_NAME}[`),
     )) {
-      console.log(
+      printCli(
         `  ${figures.pointer} ${e.source}: ${figures.cross} ${getPluginErrorMessage(e)}\n`,
       )
     }
@@ -539,11 +549,11 @@ export async function marketplaceAddHandler(
       }
     }
 
-    console.log('Adding marketplace...')
+    printCli('Adding marketplace...')
 
     const { name, alreadyMaterialized, resolvedSource } =
       await addMarketplaceSource(marketplaceSource, message => {
-        console.log(message)
+        printCli(message)
       })
 
     // Write intent to settings at the requested scope
@@ -563,8 +573,12 @@ export async function marketplaceAddHandler(
 
     cliOk(
       alreadyMaterialized
-        ? `${figures.tick} Marketplace '${name}' already on disk — declared in ${scope} settings`
-        : `${figures.tick} Successfully added marketplace: ${name} (declared in ${scope} settings)`,
+        ? re(
+            `${figures.tick} Marketplace '${name}' already on disk — declared in ${scope} settings`,
+          )
+        : re(
+            `${figures.tick} Successfully added marketplace: ${name} (declared in ${scope} settings)`,
+          ),
     )
   } catch (error) {
     handleMarketplaceError(error, 'add marketplace')
@@ -603,26 +617,26 @@ export async function marketplaceListHandler(options: {
       cliOk('No marketplaces configured')
     }
 
-    console.log('Configured marketplaces:\n')
+    printCli('Configured marketplaces:\n')
     names.forEach(name => {
       const marketplace = config[name]
-      console.log(`  ${figures.pointer} ${name}`)
+      printCli(`  ${figures.pointer} ${name}`)
 
       if (marketplace?.source) {
         const src = marketplace.source
         if (src.source === 'github') {
-          console.log(`    Source: GitHub (${src.repo})`)
+          printCli(`    Source: GitHub (${src.repo})`)
         } else if (src.source === 'git') {
-          console.log(`    Source: Git (${src.url})`)
+          printCli(`    Source: Git (${src.url})`)
         } else if (src.source === 'url') {
-          console.log(`    Source: URL (${src.url})`)
+          printCli(`    Source: URL (${src.url})`)
         } else if (src.source === 'directory') {
-          console.log(`    Source: Directory (${src.path})`)
+          printCli(`    Source: Directory (${src.path})`)
         } else if (src.source === 'file') {
-          console.log(`    Source: File (${src.path})`)
+          printCli(`    Source: File (${src.path})`)
         }
       }
-      console.log('')
+      printCli('')
     })
 
     cliOk()
@@ -634,11 +648,21 @@ export async function marketplaceListHandler(options: {
 // marketplace remove (lines 5576–5598)
 export async function marketplaceRemoveHandler(
   name: string,
-  options: { cowork?: boolean },
+  options: { cowork?: boolean; scope?: string },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
+  let scope: ReturnType<typeof settingsSourceFromMarketplaceScope>
+  if (options.scope !== undefined) {
+    const raw = options.scope
+    if (raw !== 'user' && raw !== 'project' && raw !== 'local') {
+      cliError(
+        `${figures.cross} Invalid scope '${raw}'. Use: user, project, or local`,
+      )
+    }
+    scope = settingsSourceFromMarketplaceScope(raw)
+  }
   try {
-    await removeMarketplaceSource(name)
+    await removeMarketplaceSource(name, scope, getPinnedStorageV5())
     clearAllCaches()
 
     logEvent('tengu_marketplace_removed', {
@@ -646,7 +670,11 @@ export async function marketplaceRemoveHandler(
         name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
 
-    cliOk(`${figures.tick} Successfully removed marketplace: ${name}`)
+    cliOk(
+      re(
+        `${figures.tick} Successfully removed marketplace: ${name}${options.scope ? ` (from ${options.scope} settings)` : ''}`,
+      ),
+    )
   } catch (error) {
     handleMarketplaceError(error, 'remove marketplace')
   }
@@ -660,11 +688,16 @@ export async function marketplaceUpdateHandler(
   if (options.cowork) setUseCoworkPlugins(true)
   try {
     if (name) {
-      console.log(`Updating marketplace: ${name}...`)
+      printCli(`Updating marketplace: ${name}...`)
 
-      await refreshMarketplace(name, message => {
-        console.log(message)
-      })
+      await refreshMarketplace(
+        name,
+        message => {
+          printCli(message)
+        },
+        undefined,
+        getPinnedStorageV5(),
+      )
 
       clearAllCaches()
 
@@ -673,18 +706,18 @@ export async function marketplaceUpdateHandler(
           name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
 
-      cliOk(`${figures.tick} Successfully updated marketplace: ${name}`)
+      cliOk(re(`${figures.tick} Successfully updated marketplace: ${name}`))
     } else {
-      const config = await loadKnownMarketplacesConfig()
+      const config = await loadKnownMarketplacesConfig(getPinnedStorageV5())
       const marketplaceNames = Object.keys(config)
 
       if (marketplaceNames.length === 0) {
         cliOk('No marketplaces configured')
       }
 
-      console.log(`Updating ${marketplaceNames.length} marketplace(s)...`)
+      printCli(`Updating ${marketplaceNames.length} marketplace(s)...`)
 
-      await refreshAllMarketplaces()
+      await refreshAllMarketplaces(getPinnedStorageV5())
       clearAllCaches()
 
       logEvent('tengu_marketplace_updated_all', {

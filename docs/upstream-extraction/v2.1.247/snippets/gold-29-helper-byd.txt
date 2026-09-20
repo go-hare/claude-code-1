@@ -1,0 +1,8 @@
+# offset=206911800 _841.js R as byd
+# 246: SAME body (1 hit). 247 NEW is wrapping d(a), not R.
+
+function R(t){
+  if(t.startsWith("\\\\?\\UNC\\"))return"\\\\"+t.slice(8);
+  if(t.startsWith("\\\\?\\")&&t.length>=7&&t[5]===":")return t.slice(4);
+  return t
+}

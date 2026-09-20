@@ -5,9 +5,7 @@
  * system to reduce code duplication and improve maintainability.
  */
 
-import { randomBytes } from 'crypto'
-import { rename, rm } from 'fs/promises'
-import { dirname, join, resolve, sep } from 'path'
+import { resolve, sep } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
@@ -15,7 +13,6 @@ import {
 } from '../../services/analytics/index.js'
 import { getCwd } from '../cwd.js'
 import { toError } from '../errors.js'
-import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
 import {
   getSettingsForSource,
@@ -58,6 +55,10 @@ import {
   loadKnownMarketplacesConfigSafe,
 } from './marketplaceManager.js'
 import {
+  isPluginCacheStorageV5,
+  movePluginCacheDest,
+} from './pluginCacheStaging.js'
+import {
   commandPluginConsentKey,
   isCommandPluginSource,
   mergePreviousProducerPaths,
@@ -70,6 +71,7 @@ import {
 } from './pluginIdentifier.js'
 import {
   cachePlugin,
+  copyPluginCacheOptionsFromPin,
   getVersionedCachePath,
   getVersionedZipCachePath,
 } from './pluginLoader.js'
@@ -331,38 +333,16 @@ export async function cacheAndRegisterPlugin(
   const versionedPath = getVersionedCachePath(pluginId, version)
   let finalPath = cacheResult.path
 
-  // Only move if the paths are different and plugin was cached to a different location
+  // densable Fjo: always Yjo when path!==versioned. No version==="unknown"
+  // skip-rm. Yjo aside-renames dest (BOe/Kjo) then src→dest.
   if (cacheResult.path !== versionedPath) {
-    // Create the versioned directory structure
-    await getFsImplementation().mkdir(dirname(versionedPath))
-
-    // Remove existing versioned path if present (force: no-op if missing)
-    await rm(versionedPath, { recursive: true, force: true })
-
-    // Check if versionedPath is a subdirectory of cacheResult.path
-    // This happens when marketplace name equals plugin name (e.g., "exa-mcp-server@exa-mcp-server")
-    // In this case, we can't directly rename because we'd be moving a directory into itself
-    const normalizedCachePath = cacheResult.path.endsWith(sep)
-      ? cacheResult.path
-      : cacheResult.path + sep
-    const isSubdirectory = versionedPath.startsWith(normalizedCachePath)
-
-    if (isSubdirectory) {
-      // Move to a temp location first, then to final destination
-      // We can't directly rename/copy a directory into its own subdirectory
-      // Use the parent of cacheResult.path (same filesystem) to avoid EXDEV
-      // errors when /tmp is on a different filesystem (e.g., tmpfs)
-      const tempPath = join(
-        dirname(cacheResult.path),
-        `.claude-plugin-temp-${Date.now()}-${randomBytes(4).toString('hex')}`,
-      )
-      await rename(cacheResult.path, tempPath)
-      await getFsImplementation().mkdir(dirname(versionedPath))
-      await rename(tempPath, versionedPath)
-    } else {
-      // Move the cached plugin to the versioned location
-      await rename(cacheResult.path, versionedPath)
-    }
+    // densable Fjo `x=QT(u)` — QT ≡ isPluginCacheStorageV5
+    const storageV5 = copyPluginCacheOptionsFromPin().storageV5
+    await movePluginCacheDest(cacheResult.path, versionedPath, {
+      pluginId,
+      version,
+      strictCache: isPluginCacheStorageV5(storageV5),
+    })
     finalPath = versionedPath
   }
 

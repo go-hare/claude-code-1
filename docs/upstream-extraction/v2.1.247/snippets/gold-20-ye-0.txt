@@ -1,0 +1,4 @@
+# function ye 0
+# start=210570367 end=210571200
+
+function ye(e,n){return e.path.sep==="/"?n:n.split(e.path.sep).join("/")}async function zi(e,n,t){let i=await n.lstat(t);if(!i.isFile()||i.nlink>1n)throw A("ELOOP");if(n.backend==="by_name"&&await he(e,n.realRoot,t))throw A("ELOOP");let o=await n.open(t,pt);try{let r=await o.stat({bigint:!0});if(!r.isFile()||r.nlink>1n||r.dev!==i.dev||r.ino!==i.ino)throw A("ELOOP");return{handle:o,stats:r}}catch(r){throw await o.close(),r}}async function he(e,n,t){let{fs:i,path:o}=e,r=t.split("/"),a=o.relative(n,await i.realpath(o.join(n,...r)));return ee(e,a)||ne(e,a)||a!==o.join(...r)}async function ft(e,n,t,i){let{fs:o,path:r}=e,{basename:a,dirname:u,join:s,relative:d}=r,c=d(n,await o.realpath(u(t)));if(ee(e,c))throw A("WORKING_PARENT_ESCAPE");let l=c===""?a(t):s(c,a(t));if(ne(e,l))throw A("WORKING_DEST_IGNORED");if(i?.(ye(e,l))===!0)t

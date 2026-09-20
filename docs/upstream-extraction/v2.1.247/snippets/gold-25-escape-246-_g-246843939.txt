@@ -1,0 +1,3 @@
+# 246 function _g start=246843939 len=376 sha=22697f10c0a5e126
+
+function _g(e,t,n,r){rd=dm=null,UD(t),Lg=null,ex=0;var o=t.return;try{if(vce(e,o,t,n,fr)){ti=1,gS(e,Ll(n,e.current)),lr=null;return}}catch(i){if(o!==null)throw lr=o,i;ti=1,gS(e,Ll(n,e.current)),lr=null;return}t.flags&32768?(pr||r===1?e=!0:Qg||(fr&536870912)!==0?e=!1:(tf=e=!0,(r===2||r===9||r===3||r===6)&&(r=ll.current,r!==null&&r.tag===13&&(r.flags|=16384))),t6(t,e)):GS(t)}

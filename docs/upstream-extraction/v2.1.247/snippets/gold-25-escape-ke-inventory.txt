@@ -1,0 +1,60 @@
+# ke inventory 246 extracted=65/65 247=67/67
+small 246=64 247=66 uniqueNorm247=18
+
+UNIQUE 247 ke @207291791 len=82 sha=810ebe6903dffcea
+UNIQUE 247 ke @207527609 len=244 sha=68508a2f714b3e1c
+UNIQUE 247 ke @208185780 len=2756 sha=a75c365be31b8ea0
+UNIQUE 247 ke @208224941 len=51 sha=8a4d21b8195ff3a3
+UNIQUE 247 ke @208308006 len=63 sha=997696b7451bb6f6
+UNIQUE 247 ke @209243951 len=441 sha=ff3959739e1ec00d
+UNIQUE 247 ke @210534364 len=147 sha=180c5a23307a4c29
+UNIQUE 247 ke @210573424 len=88 sha=400765dbba6781ab
+UNIQUE 247 ke @211828077 len=197 sha=8e948434ed24d497
+UNIQUE 247 ke @213707851 len=83 sha=a124b8c0c1632347
+UNIQUE 247 ke @221682530 len=312 sha=246f9222bc960428
+UNIQUE 247 ke @223011947 len=159 sha=1eb16a5cd80efe41
+UNIQUE 247 ke @223602915 len=261 sha=cea490bb17caeb02
+UNIQUE 247 ke @227288566 len=314 sha=4fca01fcd673d9a4
+UNIQUE 247 ke @230406925 len=34 sha=6831b4c84b5ccbbb
+UNIQUE 247 ke @230832380 len=37 sha=cecf93b381c02440
+UNIQUE 247 ke @234380714 len=73 sha=feb0bb96c683db0d
+UNIQUE 247 ke @235561999 len=185 sha=7808ff94e64a317b
+hist246 {"<80":23,"<200":21,"<800":16,"<4k":4,"big":1}
+hist247 {"<80":20,"<200":23,"<800":19,"<4k":4,"big":1}
+interesting247=5
+INT 247 ke @207581855 len=132 sha=03dff228be7f3f66
+INT 247 ke @208999276 len=1140 sha=4a15988caeeea7fe
+INT 247 ke @211828077 len=197 sha=8e948434ed24d497
+INT 247 ke @235561999 len=185 sha=7808ff94e64a317b
+INT 247 ke @235765126 len=3183 sha=3c00546bd7acdded
+interesting246=5
+INT 246 ke @206066465 len=132 sha=03dff228be7f3f66
+INT 246 ke @207781449 len=1140 sha=4a15988caeeea7fe
+INT 246 ke @220006687 len=1345 sha=4e0441a07a16747d
+INT 246 ke @233508082 len=144 sha=a32fef61ecfdd0b5
+INT 246 ke @233695606 len=3183 sha=3c00546bd7acdded
+
+## plugin chunk ke binding probes in 80k before U
+0	"ke="
+0	"ke ="
+0	",ke,"
+0	"{ke}"
+0	"ke as "
+6	"ke,"
+0	"ke}"
+
+## nearest function D(
+D @233836523 dist=33170 name=D len=293 sha=4d5984442fec6c27
+D @233733971 dist=69382 name=D len=122 sha=bc0ed332f4b03016
+D @233297883 dist=505470 name=D len=148 sha=9cdc669c8e4994c1
+D @234969649 dist=1166296 name=D len=216 sha=842703f0f37f065e
+D @231959248 dist=1844105 name=D len=338 sha=f58db495e7ceb928
+D @231804708 dist=1998645 name=D len=168 sha=81be81d925c9de8a
+D @231766382 dist=2036971 name=D len=137 sha=0df5ebd45bdc2c84
+D @236347617 dist=2544264 name=D len=215 sha=40c89f1ea75227b4
+assign "ke=e=>" 246=1 247=1
+assign "ke=(e)=>" 246=6 247=7
+assign "ke=function" 246=6 247=6
+assign "var ke=" 246=31 247=33
+assign "let ke=" 246=75 247=49
+assign "const ke=" 246=2 247=2

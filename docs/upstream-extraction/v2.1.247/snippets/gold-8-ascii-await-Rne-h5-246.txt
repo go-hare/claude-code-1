@@ -1,0 +1,3 @@
+# offset=216846544 ver=246 hit=6/6 ratio=1.000 needle="await Rne("
+
+e.length,X(ne.hook,"initialUserMessageChars",ne.initialUserMessage.length),b(`Hook ${h} (${Vh(ne.hook)}) provided initialUserMessage (${ne.initialUserMessage.length} chars)`),yield{initialUserMessage:await Rne(ne.initialUserMessage,`${r}-${oe}`,"initialUserMessage",{storageV5:_})};if(ne.watchPaths&&ne.watchPaths.length>0)b(`Hook ${h} (${Vh(ne.hook)}) provided ${ne.watchPaths.length} watchPaths`),yield{watchPaths:ne.watchPaths};if(ne.reloadSkills)b(`Hook ${h} (${Vh(ne.hook)}) requested reloadSkills`),yield{reloadSkills:!0};if(ne.sessionTitle)b(`Hook ${h} (${Vh(ne.hook)}) provided sessionTitle (

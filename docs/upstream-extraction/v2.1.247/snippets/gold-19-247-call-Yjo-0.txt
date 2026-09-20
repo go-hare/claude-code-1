@@ -1,0 +1,2 @@
+# pos=214610912
+,v),F=!A&&PT()&&(x?await fwt(L,e,v,()=>SUe(E,e,v,"cache","before reuse")):await sl(L));if(!A&&!F&&await Xjo(h.path,E,x,u,R))C=E;else C=await iZ(h.path,e,v,t,void 0,{storageV5:u,credentials:p}),await cZ(h.path,{recursive:!0,force:!0}),P=!1}else await Yjo(h.path,E,{pluginId:e,version:v,strictCache:x},u,R),C=E}catch(A){if(x)await cZ(h.path,{recursive:!0,force:!0}).catch(()=>{});throw A}}if(P&&!CB(m)){try{await mwt(C,u);let x=awai

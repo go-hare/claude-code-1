@@ -1,0 +1,4 @@
+# offset=199413652
+
+a.y. .r.u.n...dependency-resolution...(...@.resolveMissingDependencies: install of "...R.|." did not complete (	...:.." threw: ...
+.r.stillUnresolved...5...marketplaceMissing..#...allowCrossMarketplaceDependenciesOn...c.J.requiredByEnabledDependent..D...;..Cannot destructure property 'installed' from null or undefined value...W:/.file:///B:/%7EBUN/root/_354.js..."b.{"type":"KeepAlive"}...T..{"type":"CloseStream"}..#...6../api/ws/speech_to_text/voice_stream...tengu_brick_follow..(...	{..CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED...:o..[^\x20-\x7E]..._Kz.safe

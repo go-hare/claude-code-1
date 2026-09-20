@@ -1,0 +1,3 @@
+# 247 _g( @209911272
+
+teFileSync(n,t,{mode:384}),n}dispose(){if(this.dir!==void 0)try{qn.rmSync(this.dir,{recursive:!0,force:!0})}catch(e){x(`MaskedFileStore cleanup failed: ${e}`,{level:"error"})}this.dir=void 0,this.byKey.clear()}get dirPath(){return this.dir}}function _g(e,t,n,r){let s=[],i=[];for(let a of e){if(a.mode!=="mask")continue;let l=bt(a.path),d;try{if(qn.statSync(l).isDirectory()){x(`[credential-mask] Skipping masked file entry that resolves to a directory: ${a.path} \u2014 use mode "deny" for directories.`,{level:"warn"});continue}let S=qn.readFileSync(l);if(d=S.toString("utf8"),Buffer.byteLength(d,"

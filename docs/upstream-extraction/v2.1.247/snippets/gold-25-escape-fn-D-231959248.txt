@@ -1,0 +1,3 @@
+# 247 function D start=231959248 len=338 sha=f58db495e7ceb928 dist=1844105
+
+function D(){let f=o.getState(),l=e.handle,M=p.current;if(!f?.isDragging||!f.focus||!l||M===0||++A.current>tt){x();return}if(l.getPendingDelta()!==0)return;if(M<0){if(l.getScrollTop()<=0){x();return}l.scrollBy(-eo)}else{let H=Math.max(0,l.getScrollHeight()-l.getViewportHeight());if(l.getScrollTop()>=H){x();return}l.scrollBy(eo)}b(!1,l)}

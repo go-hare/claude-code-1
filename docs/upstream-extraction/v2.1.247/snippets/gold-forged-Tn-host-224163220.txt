@@ -1,0 +1,6 @@
+# gold-forged-Tn-host-224163220.txt official-247 SEA @224163020-224163620
+VARS,e as _resetPreSettingsEnvSnapshotForTesting,k as _resetSpawnEnvSnapshotForTesting,j as applyConfigEnvironmentVariables,i as applySafeConfigEnvironmentVariables,g as filterPolicyPredicateEnv,d as getAppliedGlobalConfigEnv,c as getLatchedPreSettingsEnvSnapshot,b as getPreSettingsEnvSnapshot,f as resetPreSettingsEnvSnapshotForClaim};
+// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback unde

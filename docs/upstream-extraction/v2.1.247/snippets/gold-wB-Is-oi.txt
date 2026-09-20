@@ -1,0 +1,8 @@
+# confirm-only oi.run queue
+# oi.run(i,()=>Is(e,t,i,n,r)) UNIQUE @208311816
+# function si(){return oi.drain()} UNIQUE @208311844
+# oi=Pr() UNIQUE @208320642 in same module init Vs
+# function Pr( collision count=20 — Pr body UNKNOWN (do not invent)
+function ii(e,t,n,r){if(e==="policySettings"||e==="flagSettings")return Promise.resolve({error:null});let i=J(e);if(!i)return Promise.resolve({error:null});return oi.run(i,()=>Is(e,t,i,n,r))}
+function si(){return oi.drain()}
+oi=Pr()

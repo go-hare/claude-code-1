@@ -1,0 +1,3 @@
+# offset=210374620
+
+function uv(e,t,n,r){let{hostPattern:s,port:i}=vc(e);if(!FI(s,t))return!1;if(i===void 0)return!0;return n===void 0?r==="match":i===n}

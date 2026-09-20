@@ -1,8 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
+import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { getLastInteractionTime } from '../bootstrap/state.js'
 import { fetchPrStatus, type PrReviewState } from '../utils/ghPrStatus.js'
 
 const POLL_INTERVAL_MS = 60_000
+/** densable 2.1.247 Wut — skip GitHub re-check on refocus if last check is fresher. */
+export const PR_STATUS_FOCUS_RECHECK_MS = 60_000
+
+/**
+ * densable y6 #b — lastFetch===0 ignore; >=Wut refresh; else skip.
+ */
+export function classifyPrStatusFocusRecheck(
+  lastFetchAt: number,
+  now: number,
+): 'ignore' | 'refresh' | 'skip' {
+  if (lastFetchAt === 0) return 'ignore'
+  if (now - lastFetchAt >= PR_STATUS_FOCUS_RECHECK_MS) return 'refresh'
+  return 'skip'
+}
 const SLOW_GH_THRESHOLD_MS = 4_000
 const IDLE_STOP_MS = 60 * 60_000 // stop polling after 60 min idle
 
@@ -93,8 +108,25 @@ export function usePrStatus(isLoading: boolean, enabled = true): PrStatusState {
       timeoutRef.current = setTimeout(poll, POLL_INTERVAL_MS - elapsed)
     }
 
+    const onFocus = () => {
+      if (getTerminalFocusState() === 'blurred') return
+      const decision = classifyPrStatusFocusRecheck(
+        lastFetchRef.current,
+        Date.now(),
+      )
+      if (decision !== 'refresh') return
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      lastFetchRef.current = 0
+      void poll()
+    }
+    const unsubscribeFocus = subscribeTerminalFocus(onFocus)
+
     return () => {
       cancelled = true
+      unsubscribeFocus()
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
         timeoutRef.current = null

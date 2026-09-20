@@ -1,0 +1,2 @@
+# afterfn2 @211364893 end=211365031
+function h8(e,o){let i=await Fx({...kR(),...e}),l=o?.storageV5!==void 0?L0(o.storageV5):void 0;return{...i,render:(s)=>i.render(H0(s,l))}}

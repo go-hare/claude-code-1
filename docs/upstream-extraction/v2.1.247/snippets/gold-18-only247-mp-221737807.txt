@@ -1,0 +1,4 @@
+# 247-only name=mp start=221737807 len=430 sha=5f518301845d935b needle="background session"
+
+async function mp(e,t){let r=await to(e,"claude logs <id>","Print the background session's recent terminal output.",t),n=await new Promise((o)=>{let s=Bs(r,500,(i)=>{if(i.type==="snapshot")s(),o(i.streamTail)},(i)=>{s(),o(i)})});if(typeof n==="string")return await me("cli_bg_logs","read_failed"),process.stderr.write(`Couldn't read logs for ${r} \u2014 ${on(n)}
+`),at(1);return await xs(n.join("")),await Ue("cli_bg_logs"),at(0)}

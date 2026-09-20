@@ -1,0 +1,2 @@
+# pos=213236605
+v),U=!A&&hT()&&(x?await Vbt(O,e,v,()=>vFe(E,e,v,"cache","before reuse")):await el(O));if(!A&&!U&&await i0o(h.path,E,x,u,R))C=E;else C=await O8(h.path,e,v,t,void 0,{storageV5:u,credentials:p}),await Sfe(h.path,{recursive:!0,force:!0}),P=!1}else await s0o(h.path,E,{pluginId:e,version:v,strictCache:x},u,R),C=E}catch(A){if(x)await Sfe(h.path,{recursive:!0,force:!0}).catch(()=>{});throw A}}if(P&&!QU(m)){try{await Kbt(C,u);let x=awa

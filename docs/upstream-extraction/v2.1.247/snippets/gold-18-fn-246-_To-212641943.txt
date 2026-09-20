@@ -1,0 +1,3 @@
+# ver=246 name=_To async=false start=212641943 end=212642195 len=252 sha=2613874207ed68d9 needle="Exit code ${"
+
+function _To(e){if(e instanceof Xw)return[`Exit code ${e.code}`,e.interrupted?kw:"",e.stderr,e.stdout];let t=[e.message];if("stderr"in e&&typeof e.stderr==="string")t.push(e.stderr);if("stdout"in e&&typeof e.stdout==="string")t.push(e.stdout);return t}

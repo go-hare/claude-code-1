@@ -1,0 +1,9 @@
+# densable 2.1.247 DiskTaskOutput constants (joe)
+
+hlo=16777216
+RTe=`
+[output omitted: it could not be written to disk]
+`
+
+getStdout failing||lostOutput:
+Output truncated (${n}KB total). The full output could not all be saved to ${path}; that file may be missing or incomplete.

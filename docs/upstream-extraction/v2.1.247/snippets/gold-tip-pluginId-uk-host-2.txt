@@ -1,0 +1,2 @@
+# uk().host @232387542
+|${n}`;if(this.fired.has(r))return;this.fired.add(r),U("tengu_dead_probe_legacy_plugin_tip_counts",{changes_max:ke(o),changes_outcome:ke(n)})}}var pZe=new wa(()=>new Khe);function fZe(){return pZe.of(uk().host)}async function Qhe(e){if(MV().spinnerTipsEnabled===!1)return;let t=FV.of(e.session.host);if(Hhe())return;let o=await t.getMarketplacePluginTips(e.storageV5);if(o.length===0)return;let n=[];for(let r of o){if(!r.pluginId)continue;if(t.faile

@@ -1,0 +1,2 @@
+# LOCKED os pos=207875596 end=207875669 len=73
+function os(e){return typeof e==="string"&&xo.test(e)&&!e.includes("..")}

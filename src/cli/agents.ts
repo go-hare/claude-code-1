@@ -171,7 +171,7 @@ export async function agentsMain(args: string[]): Promise<void> {
   // densable 2.1.225 FXv: await ensureAgentsWorkspaceTrust(root, agentsTrustDecision())
   // before mountFleetView. Short-lived Ink root for TrustDialog only.
   {
-    const { createRoot } = await import('@anthropic/ink')
+    const { createRoot } = await import('../utils/inkRoot.js')
     const { ensureAgentsWorkspaceTrust, agentsTrustDecision } = await import(
       './agentsTrust.js'
     )

@@ -1,0 +1,3 @@
+# LOCKED Iln @213653329 end=213653374 len=45
+# unique function Iln( count=1. READ persisted pluginUsage via es(), not pendingUsage.
+function Iln(e){return es().pluginUsage?.[e]}

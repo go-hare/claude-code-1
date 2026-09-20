@@ -1,0 +1,2 @@
+# qr unique via De(le(),"plugins","cache") @211421701
+function qr(){return De(le(),"plugins","cache")}

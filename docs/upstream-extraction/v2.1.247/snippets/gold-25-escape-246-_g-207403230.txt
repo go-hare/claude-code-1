@@ -1,0 +1,3 @@
+# 246 function _g start=207403230 len=470 sha=23fd9c0c1048d20d
+
+async function _g(e,r){let n=await ir(r);if(!n.ok||n.value==="missing")return n.ok?m(void 0):n;let t=Qe(n.value),i=await un(r.log);if(!i.ok)return i;if(i.value===void 0||ue(t.logIdentity,i.value))return m(void 0);let a=await ht(r.log);if(!a.ok)return a;let s=await Hr(t,a.value,(d)=>Pr(r.log,d));if(!s.ok)return s;if(t.logIdentity!==void 0&&s.value.unbridgedVerificationRejection)return u({kind:"corruptRecord",recordId:"<log-replaced>"});return fe(e,r),hi(r,t,i.value)}

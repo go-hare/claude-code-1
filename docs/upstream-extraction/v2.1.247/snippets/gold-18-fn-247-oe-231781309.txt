@@ -1,0 +1,5 @@
+# ver=247 name=oe async=false start=231781309 end=231781674 len=365 sha=b7c18b17c8e7e57f needle="background session"
+
+function oe(e){let r=e.frameLiveLost>0?`
+Couldn't move ${e.frameLiveLost} ${R(e.frameLiveLost,"Artifact comment monitor")} to the background session, so automatic replies stopped. Publish ${e.frameLiveLost===1?"the Artifact":"each Artifact"} again to turn them back on.`:"",o=e.ok&&e.adopted.adopted_frame_live>0?`
+${K(e.adopted.adopted_frame_live)}`:"";return r+o}

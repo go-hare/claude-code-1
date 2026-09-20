@@ -1,0 +1,17 @@
+# j() startup env snapshot — official-247 SEA
+# V UNIQUE @210541503: s=i===void 0&&j()===void 0?xe():Ir(o)
+# pe @210557299 uses Vn(); Vn uses j()
+# lock: `PYb as j` @210530724 from `_612`; `ot as PYb` @209225721
+# ot UNIQUE @209216997
+# get @209217496; peek @209217621
+
+function V(e,n,t){...;let i=t.reach??(t.layout?.bound===!0?qn(e,t.layout):void 0),o=pe(i),s=i===void 0&&j()===void 0?xe():Ir(o);if(s===null)return Promise.resolve({stdout:"",stderr:i===void 0?je:Tr,code:127});...}
+function Vn(){let e=j();if(e===void 0)return process.env;let n=Re();if(b()!=="windows")return{...e,...n};let t=new Set(Object.keys(n).map((r)=>r.toUpperCase()));return{...$n(e,(r,i)=>!t.has(i.toUpperCase())),...n}}
+function ot(){return S.peekPreSettingsEnvSnapshot()}
+function Ge(){return S.getPreSettingsEnvSnapshot()}
+getPreSettingsEnvSnapshot(){return this.preSettingsEnvSnapshot??=Object.freeze({...process.env}),this.preSettingsEnvSnapshot}
+peekPreSettingsEnvSnapshot(){return this.preSettingsEnvSnapshot}
+dropPreSettingsEnvSnapshot(){this.preSettingsEnvSnapshot=void 0}
+export{ue as NYb,Ge as OYb,ot as PYb,rt as QYb,st as RYb,it as SYb,...};
+
+# Re @210540017 + Tn latch + Ft/Ct/Pn wired. Vn overlays Re on j().

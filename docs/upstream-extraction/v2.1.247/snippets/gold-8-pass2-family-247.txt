@@ -1,0 +1,39 @@
+## We count=1
+
+# off=212668230
+We=50000
+
+## Ns count=1
+
+# off=212668239
+Ns=500000
+
+## Ds count=1
+
+# off=212668249
+Ds=4
+
+## Bs count=1
+
+# off=212668254
+Bs=400000
+
+## Us count=1
+
+# off=212668264
+Us=200000
+
+## Hs count=1
+
+# off=212668274
+Hs=50
+
+## zs count=1
+
+# off=212668280
+zs=1e4
+
+## Ws count=1
+
+# off=212668287
+Ws=1e4

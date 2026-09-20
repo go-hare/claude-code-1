@@ -292,6 +292,8 @@ export type BridgeCoreParams = {
   onRenameSession?: (
     title: string,
   ) => { ok: true } | { ok: false; error: string }
+  /** densable 2.1.247 `onGetWorkspaceDiff` — RC working-tree diff pull. */
+  onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * Fires on each real user message to flow through writeMessages() until
@@ -402,6 +404,7 @@ export async function initBridgeCore(
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
     onRenameSession,
+    onGetWorkspaceDiff,
     onStateChange,
     onUserMessage,
     perpetual,
@@ -1342,6 +1345,7 @@ export async function initBridgeCore(
           onSetPermissionMode,
           onSetMcpPermissionModeOverride,
           onRenameSession,
+          onGetWorkspaceDiff,
         })
 
       let initialFlushDone = false

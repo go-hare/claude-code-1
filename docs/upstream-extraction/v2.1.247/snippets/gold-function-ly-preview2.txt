@@ -1,0 +1,4 @@
+# 247 offset=231819676 needle="function ly(e){let"
+
+;gi();cy();iy();ay();var di=1,pi=2,fi=4;function ly(e){let{raw:t,transformed:o,salvage:n,exact:s}=e,i=o??(t||null),u=(n!==null?Gu(n,i??"",s):i)||null;return{displayed:u,hideTrailingLine:o===null&&!!t,displayedHasNewline:u!==null&&u.includes(`
+`)}}function Iv(){let e=$u({raw:null,transformed:null,salvage:null,exact:!1}),t=null,o=null;function n(){let i=e.getState();if(o===null||t!==i)t=i,o=ly(i);return o}function s(i,a){e.setState((u)=>u[i]===a?u:{...u,[i]:a})}return{setRaw:(i)=>s("raw",i),setTransformed:(i)=>s("transformed",i),setSalvage:(i,a)=>e.setState((u)=>{let m=a??u.exact;if(u.salvage===i&&u.exact===m)return u;return{...u,salvage:i,exact:m}}),getState:e.getState,getDerived:n,getFlags(){let i=e.getState(),{displayed:a,hideTrailingLine:u,displayedHasNewline:m}=n();return(i.raw!==null?di:0)|(a!==null?pi:0)|(a!==null&&u&&!m?fi

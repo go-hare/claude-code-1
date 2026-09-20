@@ -1,0 +1,3 @@
+# offset=216830254 ver=246 hit=1/6 ratio=1.000 needle="await Rne("
+
+missionDecisionReason})`:""}`),yield{permissionBehavior:"deny",hookPermissionDecisionReason:et.hookPermissionDecisionReason,hookSource:Ie.hookSource};if(et.additionalContext)yield{additionalContexts:[await Rne(et.additionalContext,`${r}-${me}`,"additionalContext",{storageV5:_})]};if(et.systemMessage)yield{message:or({type:"hook_system_message",content:await Rne(et.systemMessage,`${r}-${me}`,"systemMessage",{storageV5:_}),hookName:y,toolUseID:r,hookEvent:h})}}let K=Date.now()-ce;_4()?.observe("hook_duration_ms",K),L("tengu_repl_hook_finished",{hookName:y,numCommands:R.length,numSuccess:R.length

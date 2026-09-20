@@ -1,0 +1,3 @@
+# offset=227588177
+
+orEvent,ua as hasInstructionsLoadedHook,X as hookMatchQuery,W as hookMatcherMatches,Y as isBareMcpServerMatcher,aa as isPluginEligibleForCredentials,va as parseElicitationHookOutput,O as parseHookOutput,P as parseHttpHookOutput,H as pending

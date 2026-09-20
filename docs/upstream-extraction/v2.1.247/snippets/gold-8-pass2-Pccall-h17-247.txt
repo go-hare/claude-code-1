@@ -1,0 +1,3 @@
+# off=211002728 hit=17
+
+g),this.markDirty()}setPaddingPercent(e,o){this.style.padding[e]=Xn(o),this._hasPadding=!0,this.markDirty()}setBorder(e,o){this.style.border[e]=o===void 0?Kt:Vc(o),this._hasBorder=Pc(this.style.border),this.markDirty()}setGap(e,o){this.style.gap[e]=vo(o),this.markDirty()}setGapPercent(e,o){this.style.gap[e]=Xn(o),this.markDirty()}getFlexDirection(){return this.style.flexDirection}getJustifyContent

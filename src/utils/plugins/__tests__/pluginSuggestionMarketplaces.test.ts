@@ -2,10 +2,7 @@
  * Official 2.1.x: pluginSuggestionMarketplaces managed allowlist semantics.
  */
 import { describe, expect, test } from 'bun:test'
-import {
-  clearMarketplaceDeclaredPluginTipsCache,
-  loadMarketplaceDeclaredPluginTips,
-} from '../../../services/tips/marketplacePluginTips.js'
+import { loadMarketplaceDeclaredPluginTips } from '../../../services/tips/marketplacePluginTips.js'
 
 /**
  * Pure mirror of isPluginSuggestionMarketplaceAllowed without settings I/O.
@@ -36,7 +33,6 @@ describe('pluginSuggestionMarketplaces gate', () => {
 
 describe('loadMarketplaceDeclaredPluginTips (fHa)', () => {
   test('returns empty when policy allowlist is empty (default)', async () => {
-    clearMarketplaceDeclaredPluginTipsCache()
     // Without managed pluginSuggestionMarketplaces, official returns [].
     const tips = await loadMarketplaceDeclaredPluginTips()
     expect(tips).toEqual([])

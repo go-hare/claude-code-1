@@ -1,0 +1,8 @@
+# 247-only name=hp start=221747316 len=1109 sha=35279cd299ec1a44 needle="background session"
+
+async function hp(e,t){let r=await to(e,"claude stop <id>","Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`.",t),n=await K(O(r),t),{confirmed:o,error:s}=await Tt(r,n??void 0,void 0,t);if(!o){await me("cli_bg_stop","kill_unconfirmed"),process.stderr.write(s?`couldn't confirm ${r} was stopped \u2014 ${s}
+`:`couldn't confirm ${r} was stopped \u2014 the background service may be restarting. Try again in a moment.
+`),process.exitCode=1;return}await Ue("cli_bg_stop"),process.stdout.write(`stopped ${r}
+`);let i=O(r),c=await K(i,t);if(c&&!lt(c)){let a=new Date().toISOString();await he(i,{...c,state:"stopped",detail:"stopped",tempo:"idle",needs:void 0,block:void 0,inFlight:void 0,updatedAt:a,firstTerminalAt:c.firstTerminalAt??a},t).catch((l)=>y(`bg stop terminal write failed: ${N(l)}`,{level:"warn"}))}if(await St("tengu_bg_agent_action",{action:se("stop"),source:se("cli"),jobSessionId:ue(c?.sessionId)??se("")}),c?.worktreePath)process.stdout.write(bt.dim(`  worktree retained at ${c.worktreePath}
+  run 'claude rm ${r}' to remove worktree and job state
+`))}

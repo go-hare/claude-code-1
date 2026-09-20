@@ -1,0 +1,3 @@
+# 247 offset=211221605 needle="function cy(e){"
+
+M??"unset"} TERM=${ke.TERM??"unset"})`)}function cy(e){if(e.kind==="response")return!1;if(e.kind==="mouse")return!vy(e.button);if(e.name==="mouse")return!1;return e.sequence!==Zs&&e.sequence!==Ca}function dD(e,o,i,l){let s=BE(Date.now());if(!s&&o.some(cy))yE(),Kf();let u=_E(e.jediTermInput,o,performance.now(),e.emitJediTermScrollBug);yD(e,u);let f=vE(u,cy)===1;for(let m of u){if(s&&cy(m)&&!(m.kind==="key"&&m.name==="left")){Se(`attachQu

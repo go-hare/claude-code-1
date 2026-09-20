@@ -1,0 +1,53 @@
+# jS unique lock (densable 2.1.247)
+
+## Call sites (marketplace 2145xxxxx only; cost-ledger function jS @206992959 is a different binding)
+RBo:  MR(n,r,jS())
+LSt:  MR(c,a,jS()) / MR(await PBo(...),a,jS()) / MR(await xBo(...),a,jS()) / ISt(a,jS())
+Zfe:  MR(...,jS()) / ISt(r,jS()) / ISt(e,jS())
+
+## Import alias
+@212843677  _716.js: rQc as jS
+
+## Export (_716.js @207915962)
+  Ur as rQc
+
+## jS body = Ur @207912312
+Ur=p(()=>te(Mo,Io()))
+
+te = D1c = Eu(e,t){return wt(oi(e),t)}  # zod preprocess
+p  = Hid from _830.js                    # lazySchema
+Io = QLn body (marketplace object schema)
+Mo = apply pluginRoot @207876056
+
+## Mo / wo / Po / os @207875596 (=== local applyMarketplacePluginRoot)
+function os(e){return typeof e==="string"&&xo.test(e)&&!e.includes("..")}
+function wo(e){ /* sanitize pluginRoot */ }
+function Po(e,t){ /* rewrite bare source under pluginRoot */ }
+function Mo(e){
+  if(!Z(e)||!Array.isArray(e.plugins))return e;
+  let t=Z(e.metadata)?wo(e.metadata.pluginRoot):void 0;
+  if(t===void 0)return e;
+  return{...e,plugins:e.plugins.map((s)=>Po(s,t))}
+}
+
+## Io plugins transform ho @207874075
+function ho(e){
+  let t=go();
+  return e.flatMap((s,o)=>{
+    let n=t.safeParse(s);
+    if(n.success){
+      let l=n.data.source;
+      if(typeof l==="object"&&l.source==="unsupported"&&l.error!==void 0)
+        return[{...n.data,source:{source:"unsupported"}}];
+      return[n.data]
+    }
+    let r=mo().safeParse(s).data?.name, a=...issues...;
+    if(r){ /* stub unsupported entry */ return[{name:r,source:{source:"unsupported",...},strict:!0}] }
+    /* drop nameless */ return[]
+  })
+}
+
+## pluginRoot
+jS APPLIES pluginRoot internally via te(Mo, Io()).
+QLn does not.
+MR itself is n.safeParse only (no pluginRoot). pluginRoot happens because callers pass jS().

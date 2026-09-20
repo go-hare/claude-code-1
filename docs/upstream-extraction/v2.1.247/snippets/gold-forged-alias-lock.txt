@@ -1,0 +1,52 @@
+# CCR seed forged/alias — not WZ, not 247 NEW
+
+Module `_465.js` @bun 210705712–210744111. 246 SEA already has
+`why:"forged"` @209340376. Same contract.
+
+## predicates (unique)
+
+le(e) @210738834  export G3a
+  = ee(Vi(e)) && !Ji(e)
+  Vi: windows → replaceAll("\\","/")
+  ee = _582 Qe @210508964
+    !split("/").some(seg === "" | "." | "..")
+  Ji @210738867  win|wsl && some(seg includes ":" || /[. ]$/)
+  !le → why forged
+
+be(e) @210739047  export H3a
+  win|wsl && some(Ki.test(seg after :ADS strip + /[. ]+$/))
+  Ki=/^[^~.]{1,6}~[0-9]+(?:\.[^.]{1,3})?$/   8.3 FILE~1.TXT
+  be → why alias
+
+## classifiers
+
+Yi({staged,working})
+  unique paths → !le forged / be alias / else []
+
+Wi(git, inspection, isCredential, alsoLeaveOut)
+  forged + alias + added + changed + resurrected
+  (mn/er inspect working entries; n(s) credential name)
+
+nn(git, a, b, isCredential)  only if leaveOutUncommittedCredentialFiles
+  diff-tree -r -z --no-renames
+  keep !D && (!le || be || isCredential)
+  why: !le forged / be alias / A added / else changed
+  caller then drops forged+alias from update-index; leftover
+  forged/alias in built tree → refuse
+
+## callers
+
+eYn(..., {leaveOutUncommittedCredentialFiles:true, alsoLeaveOut:withholdFor})
+  @215264011 gitBundle upload
+  refused → tengu_ccr_bundle_upload outcome uncommitted_credentials
+  "forged path(s), or credential-named path(s) that reached a built tree"
+
+G3a/H3a also imported @227364731 as no/ro (apply-side same pack).
+
+## local
+
+src/utils/teleport/gitBundle.ts = TCt host (tYn = stash create still).
+eYn listing gate (Xi+Yi+SXo forged/alias) in seedPathClassify.ts /
+seedWipInspect.ts. Runs when TCt `i` (`hardenForDeviceSessions` or
+non-windows). hs write-tree / Wi / `on`/`sn` credential leave-out /
+K4n layout **not** ported. `$l`/`bp` in sA = slice(120). `gXo` skipped.

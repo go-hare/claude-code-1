@@ -1,0 +1,27 @@
+# gold-11-unk-leftover remaining cleanupAfterCommand hits
+
+## 246 cleanupAfterCommand hits=7
+  #0 offset=200896732 kind=tbl run=36 jsScore=0
+  #1 offset=200896768 kind=tbl run=19 jsScore=0
+  #2 offset=208744033 kind=tbl run=577666 jsScore=6
+  #3 offset=209177589 kind=js run=577666 jsScore=16
+    win="andboxViolationStore:Le.getSandboxViolationStore,annotateStderrWithSandboxFailures:Le.annotateStderrWithSandboxFailures,cleanupAfterCommand:()=>{Le.cleanupAfterCommand(),xZ(),TZ()}}});\nexport{m7 as rlb,wm as slb,h7 as tl"
+  #4 offset=209177617 kind=js run=577666 jsScore=16
+    win="andboxViolationStore,annotateStderrWithSandboxFailures:Le.annotateStderrWithSandboxFailures,cleanupAfterCommand:()=>{Le.cleanupAfterCommand(),xZ(),TZ()}}});\nexport{m7 as rlb,wm as slb,h7 as tlb,gA as ulb,_7 as vlb,S7 as "
+  #5 offset=213688865 kind=js run=6796973 jsScore=31
+    win="ata\",(ct)=>{f(typeof ct===\"string\"?ct:ct.toString())});let ve=F;return Ae.result=Ae.result.then(async(ct)=>{if(c)try{is.cleanupAfterCommand()}catch(Ke){b(`sandbox cleanupAfterCommand failed: ${Ke}`,{level:\"warn\"})}if(ct&"
+  #6 offset=213688908 kind=js run=6796973 jsScore=22
+    win="String())});let ve=F;return Ae.result=Ae.result.then(async(ct)=>{if(c)try{is.cleanupAfterCommand()}catch(Ke){b(`sandbox cleanupAfterCommand failed: ${Ke}`,{level:\"warn\"})}if(ct&&!l&&!ct.backgroundTaskId)try{let Ke=(await"
+
+## 247 cleanupAfterCommand hits=7
+  #0 offset=202487808 kind=tbl run=36 jsScore=0
+  #1 offset=202487844 kind=tbl run=19 jsScore=0
+  #2 offset=209996818 kind=tbl run=582601 jsScore=6
+  #3 offset=210435229 kind=js run=582601 jsScore=16
+    win="andboxViolationStore:Re.getSandboxViolationStore,annotateStderrWithSandboxFailures:Re.annotateStderrWithSandboxFailures,cleanupAfterCommand:()=>{Re.cleanupAfterCommand(),PZ(),LZ()}}});\nexport{O7 as WJb,Rm as XJb,k7 as YJ"
+  #4 offset=210435257 kind=js run=582601 jsScore=16
+    win="andboxViolationStore,annotateStderrWithSandboxFailures:Re.annotateStderrWithSandboxFailures,cleanupAfterCommand:()=>{Re.cleanupAfterCommand(),PZ(),LZ()}}});\nexport{O7 as WJb,Rm as XJb,k7 as YJb,xA as ZJb,U7 as _Jb,F7 as "
+  #5 offset=215066758 kind=js run=6912445 jsScore=31
+    win="ata\",(Ze)=>{f(typeof Ze===\"string\"?Ze:Ze.toString())});let Fe=q;return Oe.result=Oe.result.then(async(Ze)=>{if(c)try{Yo.cleanupAfterCommand()}catch(Ge){_(`sandbox cleanupAfterCommand failed: ${Ge}`,{level:\"warn\"})}if(Ze&"
+  #6 offset=215066801 kind=js run=6912445 jsScore=22
+    win="String())});let Fe=q;return Oe.result=Oe.result.then(async(Ze)=>{if(c)try{Yo.cleanupAfterCommand()}catch(Ge){_(`sandbox cleanupAfterCommand failed: ${Ge}`,{level:\"warn\"})}if(Ze&&!l&&!Ze.backgroundTaskId)try{let Ge=(await"

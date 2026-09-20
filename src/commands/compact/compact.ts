@@ -19,9 +19,11 @@ import { microcompactMessages } from '../../services/compact/microCompact.js'
 import { runPostCompactCleanup } from '../../services/compact/postCompactCleanup.js'
 import { trySessionMemoryCompaction } from '../../services/compact/sessionMemoryCompact.js'
 import { setLastSummarizedMessageId } from '../../services/SessionMemory/sessionMemoryUtils.js'
+import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import type { Message } from '../../types/message.js'
+import type { AppState } from '../../state/AppState.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import { formatTokens } from '../../utils/format.js'
 import { executePreCompactHooks } from '../../utils/hooks.js'
@@ -264,6 +266,17 @@ function buildDisplayText(
   return chalk.dim('Compacted ' + dimmed.join('\n'))
 }
 
+/** densable 2.1.247 Ce — appState.agent → activeAgents definition. */
+export function resolveMainThreadAgentDefinition(
+  appState: Pick<AppState, 'agent' | 'agentDefinitions'>,
+): AgentDefinition | undefined {
+  return appState.agent
+    ? appState.agentDefinitions.activeAgents.find(
+        agent => agent.agentType === appState.agent,
+      )
+    : undefined
+}
+
 async function getCacheSharingParams(
   context: ToolUseContext,
   forkContextMessages: Message[],
@@ -284,7 +297,7 @@ async function getCacheSharingParams(
     context.options.mcpClients,
   )
   const systemPrompt = buildEffectiveSystemPrompt({
-    mainThreadAgentDefinition: undefined,
+    mainThreadAgentDefinition: resolveMainThreadAgentDefinition(appState),
     toolUseContext: context,
     customSystemPrompt: context.options.customSystemPrompt,
     defaultSystemPrompt: defaultSysPrompt,

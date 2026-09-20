@@ -1,0 +1,9 @@
+# pos=66635689
+Sync,
+  readdirSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  utimesSync
+} = @getInternalField(@internalModuleRegistry, 154) || @createInterna

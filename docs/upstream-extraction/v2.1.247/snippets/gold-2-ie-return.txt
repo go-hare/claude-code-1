@@ -1,0 +1,3 @@
+# offset=234108505
+
+}async function ur(t,e){return}function ve(){return p.GIT_CONFIG_COUNT===void 0}function Ie(){return!te().state.standalone&&p.SSH_AUTH_SOCK===void 0&&p.GIT_SSH_COMMAND===void 0}function xe(t,e){let n=e?`see ${e} and `:"",r=te().state;if(r.toolScoped)return`GitHub access for git${r.ghShimDir?" and gh":""} goes through a pre-configured session proxy (CA bundle: ${t}) via per-session git config${r.ghShimDir?" and a gh PATH shim":""}; other network traffic uses this machine's own

@@ -1,0 +1,4 @@
+# offset=198028956 tag=u001b
+
+essage........B.AgentPromptDisplay.......m..AgentResponseDisplay.....@..extractLastToolInfo.....P:..renderGroupedAgentToolUse........,..renderToolUseRejectedMessage....Q.S.renderToolUseTag....OK_.makeResultCountRenderer.
+.....d.countLines.. .....9.AssistantNarrationSummaryMessage	.......isVisible...@...j...Cannot destructure property 'hunks' from null or undefined value	.......isWarning...H.......\u001b\[([0-9]+;)*4(;[0-9]+)*m|\u001b\[4(;[0-9]+)*m|\u001b\[([0-9]+;)*4m......L.R.u.n.n.i.n.g.& ....i...P.r.o.c.e.s.s.i.n.g.&  .B...I...Cannot destructure property 'verbose' from null or undefined value........I.Sent a message to.......h#.. Large MCP response (~..*....=4. tokens), this can fill up context quickly..C.....D.Cannot destructure property 'maxChars' from null or undefined value.....W|b.maxKeys.....$#L."message_link".......wZ.\u241b..........\u2426..B...y...Cannot destructure property 

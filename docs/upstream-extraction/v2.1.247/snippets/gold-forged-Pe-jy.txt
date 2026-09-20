@@ -1,0 +1,2 @@
+# gold-forged-Pe-jy.txt official-247 SEA @207004355-207004755
+function jy(){return n().host.settingsSource.flagSettingsPath()}function qy(e){n().host.settingsSource.replaceFlagSettingsPath(e)}function Wy(){return n().host.settingsSource.flagSettingsExpectedContent()}function Gy(e){n().host.settingsSource.replaceFlagSettingsExpectedContent(e)}function Ny(){return n().host.settingsSource.flagSettingsFilePinnedContent()}function Ky(e){n().host.settingsSource.re

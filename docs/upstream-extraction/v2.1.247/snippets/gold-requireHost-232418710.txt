@@ -1,0 +1,2 @@
+# _requireHost(){ @232418710 end=232418831 len=121
+_requireHost(){if(this._host===null)throw Error("TurnController: used before its screen bound a host");return this._host}

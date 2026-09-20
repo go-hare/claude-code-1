@@ -1,0 +1,28 @@
+# offset=208879621
+
+oauthAccount:void 0}async function B$(e){let n=(await ba())?.billingType;if(!await Ra(e)||!n)return!1;if(n!=="stripe_subscription"&&n!=="stripe_subscription_contracted"&&n!=="apple_subscription"&&n!=="google_play_subscription")return!1;return!0}async function In(e){if(id())return od();if(!await wa())return null;let t=await rt(e);if(!t)return null;return t.subscriptionType??null}async function H$(e){let t=await In(e);return t==="max"||t==="enterprise"||t==="team"||t==="pro"||t===null}async function Kx(e){let t=rd();if(t!==null)return t;if(!await wa())return null;let n=await rt(e);if(!n)return null;return n.rateLimitTier??null}async function Gx(){return(await ba())?.seatTier??null}async function K$(e){return await In(e)==="max"}async function G$(e){return await In(e)==="team"}async function $$(e){return await In(e)==="team"&&await Kx(e)==="default_claude_max_5x"}async function V$(e){return await In(e)==="enterprise"}async function z$(e){return await In(e)==="enterprise"&&await Gx()==="enterprise_usage_based"}async function W$(e){return await In(e)==="pro"}async function $x(e){switch(await In(e)){case"enterprise":return"Claude Enterprise";case"team":return"Claude Team";case"max":return"Claude Max";case"pro":return"Claude Pro";default:return"Claude API"}}async function j$(e){let t=await In(e);return await Ra(e)&&t!==null&&Lx(t)}async function Y$(e){if(A()!=="firstParty")return;let{source:n}=await Hx(e),r={};if(n==="CLAUDE_CODE_OAUTH_TOKEN"||n==="CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR")r.tokenSource=n;else if(await Ra(e))r.subscription=await $x(e);else if(n!=="profile")r.tokenSource=n;let{key:o,source:i}=await Bx();if(o)r.apiKeySource=i;if(n==="claude.ai"||i==="/login managed key"){let a=(await ba())?.organizationName;if(a)r.organization=a}let s=(await ba())?.emailAddress;if((n==="claude.ai"||i==="/login managed key")&&s)r.email=s;return r}function q$(){if(tx()||!!c.ANTHROPIC_AUTH_TOKEN||!!c.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR||!!nt())return!0;return A()==="firstParty"&&!tt()&&!tn()}async function J$(e){let t=H("policySettings"),n=t?.forceLoginOrgUUID,r=n!==void 0||t?.forceLoginMethod!==void 0;if(c.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST){if(r)fe("auth_force_login_org","managed_by_host_under_pin");return{valid:!0}}if(c.ANTHROPIC_UNIX_SOCKET){let f={api_provider:Xe(A()),auth_token_source:Xe(mi().source)};if(!tn()&&r)fe("auth_force_login_org","unix_socket_3p_under_pin",f);else if(tn()&&n!==void 0)fe("auth_force_login_org","unix_socket_ssh_under_pin",f);else if(pm())fe("auth_force_login_org","unix_socket_unreadable_policy",f);else _e("auth_force_login_org");return{valid:!0}}if(!tn()){if(r&&q$())return{valid:!1,message:`This machine's managed settings require a first-party login, but an
+Anthropic-issued credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+or apiKeyHelper) is configured. A non-OAuth Anthropic credential
+cannot satisfy the org pin.
+
+Remove the credential and run: claude auth login
+
+If this is a third-party desktop session: forceLoginOrgUUID targets first-party OAuth and should be removed from managed-settings.json.`};return{valid:!0}}if(pm()){let f=Bt()[0]??_m()[0];if(f){let h=f.message.includes("could not be read"),g=f.message.match(X$),_=Vx.find((w)=>w===g?.[1]),b=h?sr(_)??te("other"):te("malformed");return await IR("auth_force_login_org","policy_unreadable_fail_close",{errno:b}),{valid:!1,message:`Unable to read managed policy settings.
+This machine may require organization login enforcement, but the policy file failed to load.
+Contact your administrator.
+
+Detail: ${f.file?`${f.file}: ${f.message}`:f.message}`}}}if(n===void 0)return{valid:!0};let o=typeof n==="string"?[n]:n;if(o.length===0)return{valid:!1,message:`forceLoginOrgUUID in managed settings is set to an empty array.
+No organizations are permitted. This is almost certainly a misconfiguration.
+Contact your administrator.`};let i=o.length===1?`organization ${o[0]}`:`one of these organizations: ${o.join(", ")}`;await lt({credentials:e});let s=D();if(!s)return{valid:!0};let{source:a}=mi(),u=a==="CLAUDE_CODE_OAUTH_TOKEN"||a==="CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",l=await kw(s.accessToken);if(!l)return{valid:!1,message:`Unable to verify organization for the current authentication token.
+This machine requires ${i} but the token could not be validated.
+This may be a network error, or the token may have been revoked.
+Try again, or run: claude auth login`};let d=l.organization_uuid;if(o.includes(d))return{valid:!0};if(u)return{valid:!1,message:`The ${a==="CLAUDE_CODE_OAUTH_TOKEN"?"CLAUDE_CODE_OAUTH_TOKEN":"CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"} environment variable provides a token for a
+different organization than required by this machine's managed settings.
+
+Required: ${i}
+Token organization: ${d}
+
+Remove the environment variable or obtain a token for a permitted organization.`};return{valid:!1,message:`Your authentication token belongs to organization ${d},
+but this machine requires ${i}.
+
+Please log in with a permitted organization: claude auth login`}}functi

@@ -1,0 +1,898 @@
+# ver=246 name=updatePanBars async=false start=247995375 end=248042920 len=47545 sha=40b23c98c93ff1da needle="misleading"
+
+function updatePanBars(){
+    if (!panBarEl) return;
+    var m = panBarMetrics();
+    // Horizontal thumb: position \u221D how far the content's left edge is past
+    // the viewport's. Clamped \u2014 in canvas mode pan is unbounded, and a thumb
+    // parked at the track end is the "content is back that way" signal.
+    if (m.cw > m.vw + 1) {
+      var fx = Math.max(0, Math.min(1, -m.left / (m.cw - m.vw)));
+      panBarEl.x.style.display = 'block';
+      panBarEl.x.style.left = (m.inset + fx * (m.trackW - m.thumbW)) + 'px';
+      panBarEl.x.style.width = m.thumbW + 'px';
+    } else if (!panBarDrag || panBarDrag.axis !== 'x') {
+      // Extent can collapse to the viewport mid-drag (content was smaller
+      // than the viewport but offscreen; dragging it back crosses the
+      // threshold). Don't yank the thumb the user is holding \u2014 release()
+      // resyncs and hides it then.
+      panBarEl.x.style.display = 'none';
+    }
+    if (m.ch > m.vh + 1) {
+      var fy = Math.max(0, Math.min(1, -m.top / (m.ch - m.vh)));
+      panBarEl.y.style.display = 'block';
+      panBarEl.y.style.top = (m.inset + fy * (m.trackH - m.thumbH)) + 'px';
+      panBarEl.y.style.height = m.thumbH + 'px';
+    } else if (!panBarDrag || panBarDrag.axis !== 'y') {
+      panBarEl.y.style.display = 'none';
+    }
+  }
+  // Host-owned pan/zoom: forward a wheel/pinch tick to the PARENT canvas.
+  // rAF-coalesced so the bridge sees at most one message per frame;
+  // a pinch tick anywhere in the frame marks the whole frame pinch.
+  var fwdAcc = null, fwdPending = false;
+  function fwdPanZoom(pinch, dx, dy, dz, cx, cy, touch){
+    if (!fwdAcc) fwdAcc = { pinch: false, touch: false, dx: 0, dy: 0, dz: 0, x: 0, y: 0 };
+    if (pinch) fwdAcc.pinch = true;
+    /* touch marks the whole frame, like pinch: the host's view-mode
+     * legitimacy gate has a host-observed HOVER for mouse input, but a
+     * finger landing directly inside this iframe is invisible to the
+     * host document \u2014 the flag is the honest "no hover exists for
+     * this input" signal (see the host gate's note on what trusting
+     * it costs). */
+    if (touch) fwdAcc.touch = true;
+    fwdAcc.dx += dx; fwdAcc.dy += dy; fwdAcc.dz += dz; fwdAcc.x = cx; fwdAcc.y = cy;
+    if (fwdPending) return;
+    fwdPending = true;
+    requestAnimationFrame(function(){
+      fwdPending = false;
+      var a = fwdAcc; fwdAcc = null;
+      if (a) post({ type: 'panZoom', pinch: a.pinch, touch: a.touch, dx: a.dx, dy: a.dy, dz: a.dz, x: a.x, y: a.y });
+    });
+  }
+  function onWheel(e){
+    if (hostScroll) { if (e.ctrlKey || e.metaKey) e.preventDefault(); return; }
+    if (!enabled && !panZoomArmed && !hostPanZoom) return;
+    // Click-through mode: the page handles its own events. Pan/zoom-only mode
+    // has no tool, so the bail only applies while the full editor is armed.
+    if (enabled && tool === 'interact') return;
+    // Safari fires ctrlKey wheel events during the same trackpad pinch that
+    // drives the gesture* handlers below \u2014 drop them entirely while a
+    // gesture is active so the two paths can't double-zoom (same latch as
+    // the design-canvas starter component).
+    if (gestureActive) { e.preventDefault(); e.stopPropagation(); return; }
+    // Host-owned camera: while the mega host is editing,
+    // EVERY wheel here belongs to the parent canvas \u2014 no internal pan,
+    // no internal zoom, no native-scroll latch (the interact tool
+    // bailed above, so live-content scrolling is untouched there).
+    if (hostPanZoom) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Parity with the host surface: the same
+      // non-pixel delta normalization canvas-gestures applies (LINE is
+      // ~16px per notch \u2014 Firefox mouse wheels \u2014 PAGE the viewport,
+      // per axis), and pinch is accumulated in LOG space with the
+      // surface's per-EVENT factor clamp, so N coalesced events equal
+      // N events applied one by one.
+      var unitY2 = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
+      var unitX2 = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerWidth : 1;
+      if (e.ctrlKey || e.metaKey) {
+        var lnf = Math.max(-0.22314, Math.min(0.22314, -e.deltaY * unitY2 * 0.01));
+        fwdPanZoom(true, 0, 0, lnf, e.clientX, e.clientY);
+      } else {
+        fwdPanZoom(false, e.deltaX * unitX2, e.deltaY * unitY2, 0, e.clientX, e.clientY);
+      }
+      return;
+    }
+    var pinch = e.ctrlKey || e.metaKey;
+    // Pinch (ctrl/meta+wheel) zooms the canvas wherever it happens and is its
+    // own gesture \u2014 it clears the scroll/pan latch so the next plain wheel
+    // re-decides. For plain wheel, one passthrough-vs-pan decision per
+    // gesture, latched: if the first event is over an inner scroller that can
+    // still move in its delta direction the whole gesture \u2014 including the
+    // trackpad momentum tail after the scroller hits its limit \u2014 stays with
+    // native scroll; if it starts over open canvas, or the scroller is
+    // already at its edge in that direction, the whole gesture pans. A >200ms
+    // gap between wheel events marks a new gesture. Marked scrollviews
+    // (deck-stage's thumbnail rail) and legacy chrome scrollers latch the
+    // same way; scrollableContentAlongPath is the pan-zoom-only preview case
+    // (!enabled here implies panZoomArmed) \u2014 any overflow:auto/scroll element
+    // in the user's content.
+    if (pinch) {
+      wheelLatch = 0;
+    } else {
+      var now = e.timeStamp;
+      if (now - lastWheelAt > 200) wheelLatch = 0;
+      lastWheelAt = now;
+      if (wheelLatch === 0) {
+        // A true zero-delta first event carries no direction signal. Swallow
+        // it (preventDefault keeps the gesture cancelable) without latching;
+        // the next event with a nonzero delta decides. Nonzero sub-pixel
+        // events do latch \u2014 a sustained slow pan must accumulate, not stall.
+        if (!e.deltaX && !e.deltaY) { e.preventDefault(); e.stopPropagation(); return; }
+        wheelLatch = (matchesAlongPath(e, WHEEL_PASSTHRU_SEL)
+          || (isEditTransparent(e) && scrollableChromeAlongPath(e))
+          || (!enabled && scrollableContentAlongPath(e))) ? 1 : -1;
+      }
+      if (wheelLatch === 1) return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    // Anchors and drag overlays are positioned in viewport coordinates \u2014 hide
+    // them while the canvas pans/zooms underneath; the next mousemove rebuilds.
+    clearAnchors();
+    clearStructure();
+    if (pinch) {
+      // Pinch: scale the component host with a transform anchored under the
+      // cursor, not native page zoom \u2014 vh/vw and fixed-position elements keep
+      // their meaning at every zoom level.
+      zoomTo(zoomZ * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+      return;
+    }
+    pan.x -= e.deltaX;
+    pan.y -= e.deltaY;
+    applyPan();
+  }
+  // Safari delivers trackpad pinch as native gesture* events with a smooth
+  // cumulative e.scale \u2014 it does NOT deliver it as the ctrl+wheel that
+  // Chromium and Firefox synthesize, so without these handlers the preview
+  // has no pinch zoom at all in Safari. Other browsers never fire gesture*
+  // events, so they take only the onWheel path. gestureActive additionally
+  // makes onWheel drop the ctrlKey wheels Safari fires during the same
+  // pinch (see onWheel above). Zoom anchors under the fingers, like the
+  // wheel pinch.
+  var gestureBase = 1, gestureActive = false, gesturePrev = 1;
+  function onGestureStart(e){
+    if (hostScroll) { e.preventDefault(); return; }
+    if (!enabled && !panZoomArmed && !hostPanZoom) return;
+    if (enabled && tool === 'interact') return;
+    e.preventDefault();
+    gestureActive = true;
+    gestureBase = zoomZ;
+    gesturePrev = 1;
+  }
+  function onGestureChange(e){
+    if (!gestureActive) return;
+    e.preventDefault();
+    if (hostPanZoom) {
+      // Host-owned camera: per-tick pinch factor in LOG space, same
+      // per-event clamp as the wheel path.
+      var s = e.scale || 1;
+      var f = s / (gesturePrev || 1);
+      gesturePrev = s;
+      if (f > 0) {
+        var lnf2 = Math.max(-0.22314, Math.min(0.22314, Math.log(f)));
+        fwdPanZoom(true, 0, 0, lnf2, e.clientX, e.clientY);
+      }
+      return;
+    }
+    // Viewport-anchored overlays can't track the transform mid-gesture \u2014
+    // hide them; the next mousemove rebuilds (same as onWheel's pinch arm).
+    clearAnchors();
+    clearStructure();
+    zoomTo(gestureBase * (e.scale || 1), e.clientX, e.clientY);
+  }
+  function onGestureEnd(e){
+    if (!gestureActive) return;
+    e.preventDefault();
+    gestureActive = false;
+  }
+  // Paired with onWheel's attach/detach sites. addEventListener is
+  // idempotent for the same handler, so re-attaching on a mode switch is a
+  // no-op, like onWheel's.
+  function addGestureListeners(){
+    document.addEventListener('gesturestart', onGestureStart, { capture: true, passive: false });
+    document.addEventListener('gesturechange', onGestureChange, { capture: true, passive: false });
+    document.addEventListener('gestureend', onGestureEnd, { capture: true, passive: false });
+    // The touch pan/pinch forwarding arm (below) rides the same
+    // lifecycle: CAPTURE so content can't starve the host-owned camera
+    // (wheel parity), passive because suppression belongs to
+    // touch-action plus the dedicated touch-swallow arm below, not to
+    // these pointer handlers. Handlers self-gate on pointerType and
+    // touchForwardActive(), so attaching them everywhere is inert
+    // outside mega-host touch gestures.
+    document.addEventListener('pointerdown', onTouchDown, { capture: true, passive: true });
+    document.addEventListener('pointermove', onTouchMove, { capture: true, passive: true });
+    document.addEventListener('pointerup', onTouchEnd, { capture: true, passive: true });
+    document.addEventListener('pointercancel', onTouchEnd, { capture: true, passive: true });
+    // The touch-swallow arm (below): touchmove is the ONE non-passive
+    // listener \u2014 it must be able to preventDefault.
+    document.addEventListener('touchstart', onSwallowTouchStart, { capture: true, passive: true });
+    document.addEventListener('touchmove', onSwallowTouchMove, { capture: true, passive: false });
+    document.addEventListener('touchend', onSwallowTouchEnd, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onSwallowTouchEnd, { capture: true, passive: true });
+    syncTouchAction();
+  }
+  function removeGestureListeners(){
+    gestureActive = false;
+    document.removeEventListener('gesturestart', onGestureStart, { capture: true });
+    document.removeEventListener('gesturechange', onGestureChange, { capture: true });
+    document.removeEventListener('gestureend', onGestureEnd, { capture: true });
+    document.removeEventListener('pointerdown', onTouchDown, { capture: true });
+    document.removeEventListener('pointermove', onTouchMove, { capture: true });
+    document.removeEventListener('pointerup', onTouchEnd, { capture: true });
+    document.removeEventListener('pointercancel', onTouchEnd, { capture: true });
+    document.removeEventListener('touchstart', onSwallowTouchStart, { capture: true });
+    document.removeEventListener('touchmove', onSwallowTouchMove, { capture: true });
+    document.removeEventListener('touchend', onSwallowTouchEnd, { capture: true });
+    document.removeEventListener('touchcancel', onSwallowTouchEnd, { capture: true });
+    touchPts = {}; touchIds = []; touchPanLive = false; swallowTouches = {};
+    // A full detach also releases the root styles the arm owns.
+    document.documentElement.style.touchAction = '';
+    document.documentElement.style.overscrollBehavior = '';
+  }
+  // \u2500\u2500 Touch pan/pinch \u2192 host canvas \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Parity for the wheel/gesture* forwarding above, which covers only
+  // mouse and trackpad input: on TOUCH devices this frame otherwise has
+  // no pan/zoom path at all \u2014 the drag engine is mouse-event-only, so a
+  // one-finger drag rubber-bands/scrolls the page and a two-finger
+  // pinch drives the BROWSER's page zoom instead of the canvas. While
+  // the parent canvas owns pan/zoom (hostPanZoom), the iframe root
+  // carries inline touch-action:none so the browser never starts a
+  // native scroll or pinch-zoom from a touch landing here (an inner
+  // scrollable element keeps its own touch pan: the root is consulted
+  // only for gestures it would handle itself), and the handlers below
+  // forward one-finger pans and two-finger pinches through the same
+  // rAF-coalesced panZoom channel the wheel path uses \u2014 the host
+  // re-validates and per-event clamps every field either way. The style
+  // RELAXES whenever native behavior should win instead: the interact
+  // tool (live content owns its gestures \u2014 onWheel's bail) and inline
+  // text editing (selection handles, magnifier, and the keyboard's
+  // scroll-into-view must stay native).
+  function touchForwardActive(){
+    return hostPanZoom && !(enabled && tool === 'interact') && !editing;
+  }
+  function syncTouchAction(){
+    var on = touchForwardActive();
+    // Inline on the root, like the kit surface's own drag rule \u2014 ''
+    // restores whatever the page had. overscroll-behavior rides along
+    // so an inner scroller hitting its edge can't chain into a
+    // pull-to-refresh while the canvas owns the camera.
+    document.documentElement.style.touchAction = on ? 'none' : hostScroll ? 'pan-x pan-y' : '';
+    document.documentElement.style.overscrollBehavior = on || hostScroll ? 'none' : '';
+    if (!on) { touchPts = {}; touchIds = []; touchPanLive = false; }
+  }
+  // Tracked touch contacts (id -> points). The first two drive the
+  // gesture; later fingers just keep their coordinates fresh. A small
+  // slop keeps taps clean: the compat mouse events that deliver tap
+  // selection still fire untouched, and a pan only engages once the
+  // finger has clearly moved.
+  //
+  // COORDINATES are the whole trick here. clientX/Y inside this frame
+  // are the artboard's INTERNAL px, measured against an origin that
+  // every forwarded pan/zoom MOVES \u2014 a motionless finger appears to
+  // travel as the camera responds, which fed the forwarded deltas
+  // back into themselves (pans settled at HALF the finger's motion,
+  // pinches pinned at their equilibrium). screenX/Y is the stable
+  // frame: it's glass-anchored, so neither the iframe's motion nor
+  // its CSS scale moves a stationary finger's sample. All DELTAS and
+  // the pinch spread are computed in screen space; only the ANCHOR
+  // point forwards in internal px (clientX/Y), because the host maps
+  // anchors through the artboard spec \u2014 the same contract the wheel
+  // path uses. Screen-space deltas are glass px, which is the wheel
+  // convention too, so they drop into the same channel unchanged.
+  var touchPts = {}, touchIds = [], touchPanLive = false;
+  var TOUCH_PAN_SLOP = 6;
+  function onTouchDown(e){
+    if (e.pointerType !== 'touch' || !touchForwardActive()) return;
+    if (touchIds.indexOf(e.pointerId) === -1) touchIds.push(e.pointerId);
+    // ix/iy: the contact's last INTERNAL-px position \u2014 kept alongside
+    // the glass samples so the pinch can anchor at the PAIR's
+    // midpoint (anchoring at whichever finger fired the event put the
+    // focal point half the separation off-center, jittering between
+    // contacts as their events interleave).
+    touchPts[e.pointerId] = { x: e.screenX, y: e.screenY, sx: e.screenX, sy: e.screenY, ix: e.clientX, iy: e.clientY };
+    // Membership changed \u2014 a pan in progress must not continue under a
+    // joining finger (the pinch math re-bases from fresh coordinates).
+    touchPanLive = false;
+  }
+  function onTouchMove(e){
+    var p = touchPts[e.pointerId];
+    if (!p || !touchForwardActive()) return;
+    var gx = e.screenX, gy = e.screenY;
+    p.ix = e.clientX; p.iy = e.clientY;
+    var idx = touchIds.indexOf(e.pointerId);
+    if (idx > 1) { p.x = gx; p.y = gy; return; }
+    if (touchIds.length >= 2) {
+      // Pinch: pan by the pair midpoint's screen motion, zoom by the
+      // screen spread ratio in LOG space with the wheel path's
+      // per-event clamp (the host clamps and budget-caps again).
+      // Increments of a physical quantity telescope \u2014 a clamped tick
+      // loses a little zoom rather than desyncing anything.
+      var oid = touchIds[idx === 0 ? 1 : 0];
+      var o = touchPts[oid];
+      if (!o) return;
+      var beforeMidX = (p.x + o.x) / 2, beforeMidY = (p.y + o.y) / 2;
+      var beforeDist = Math.hypot(p.x - o.x, p.y - o.y);
+      p.x = gx; p.y = gy;
+      var afterMidX = (p.x + o.x) / 2, afterMidY = (p.y + o.y) / 2;
+      var afterDist = Math.hypot(p.x - o.x, p.y - o.y);
+      var dz = 0;
+      if (beforeDist > 0 && afterDist > 0) {
+        dz = Math.max(-0.22314, Math.min(0.22314, Math.log(afterDist / beforeDist)));
+      }
+      // Same sign convention as onWheel: the host pans by the NEGATED
+      // forwarded delta, so content follows the fingers. The anchor is
+      // the PAIR's midpoint in INTERNAL px (each contact's own latest
+      // sample \u2014 see the header note): the point that should hold
+      // still on screen while the spread changes around it.
+      fwdPanZoom(true, beforeMidX - afterMidX, beforeMidY - afterMidY, dz, (p.ix + o.ix) / 2, (p.iy + o.iy) / 2, true);
+      return;
+    }
+    // One finger: a canvas pan once past the slop.
+    if (!touchPanLive) {
+      if (Math.hypot(gx - p.sx, gy - p.sy) < TOUCH_PAN_SLOP) {
+        p.x = gx; p.y = gy;
+        return;
+      }
+      touchPanLive = true;
+    }
+    var dx = p.x - gx, dy = p.y - gy;
+    p.x = gx; p.y = gy;
+    if (dx !== 0 || dy !== 0) fwdPanZoom(false, dx, dy, 0, e.clientX, e.clientY, true);
+  }
+  function onTouchEnd(e){
+    if (touchPts[e.pointerId] === undefined) return;
+    delete touchPts[e.pointerId];
+    var i = touchIds.indexOf(e.pointerId);
+    if (i !== -1) touchIds.splice(i, 1);
+    touchPanLive = false;
+  }
+  // \u2500\u2500 Touch swallow (the iOS-host parity of touch-action) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // The root touch-action above tells the BROWSER's own scroller to
+  // stand down, but an iOS app hosting the artifact inside a sheet
+  // watches these same touches with a native drag-to-dismiss
+  // recognizer, and WebKit cancels that native side only when the page
+  // actually CONSUMES the move stream \u2014 a downward one-finger pan that
+  // is merely forwarded (never preventDefaulted) can still drag the
+  // whole sheet closed. While the canvas owns the camera (the SAME
+  // touchForwardActive predicate that sets the root touch-action),
+  // moves whose touch began on canvas content are consumed with a real
+  // preventDefault. Classification happens once, at touchstart, keyed
+  // by Touch.identifier (touch identifiers and pointer ids share no
+  // contract): a touch starting in a text-entry control (its selection
+  // drag must stay native) or a genuinely scrollable element keeps its
+  // native gesture \u2014 the same inner-scroller carve-out the root
+  // touch-action consultation gives. preventDefault fires only when
+  // EVERY touch the event reports is canvas input, so a finger
+  // scrolling an inner list is never cancelled by a sibling finger
+  // panning the canvas. Inline text editing needs no extra carve-out:
+  // editing flips touchForwardActive false, and both handlers re-check
+  // it per event.
+  var swallowTouches = {};
+  // The expanded artboard (hostScroll) swallows too, except where its own
+  // PAGE scrolls \u2014 that gesture stays native like any inner scroller's.
+  function swallowArmed(){ return touchForwardActive() || hostScroll; }
+  function pageScrolls(){
+    var se = document.scrollingElement || document.documentElement;
+    return se.scrollHeight > se.clientHeight + 1 || se.scrollWidth > se.clientWidth + 1;
+  }
+  function touchKeepsNativeGesture(target){
+    if (hostScroll && pageScrolls()) return true;
+    var node = target;
+    while (node && node !== document.documentElement) {
+      if (node.nodeType === 1) {
+        var tag = node.tagName;
+        // contenteditable rides the text-entry carve-out (house
+        // convention): selection-handle drags must stay native. Inline
+        // artboard editing is additionally covered by the editing gate
+        // in touchForwardActive.
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || node.isContentEditable === true) return true;
+        var cs = null;
+        try { cs = window.getComputedStyle(node); } catch (err) { cs = null; }
+        if (cs &&
+            (((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && node.scrollHeight > node.clientHeight) ||
+             ((cs.overflowX === 'auto' || cs.overflowX === 'scroll') && node.scrollWidth > node.clientWidth))) {
+          return true;
+        }
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+  function onSwallowTouchStart(e){
+    if (!swallowArmed()) return;
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      swallowTouches[t.identifier] = !touchKeepsNativeGesture(t.target);
+    }
+  }
+  function onSwallowTouchMove(e){
+    if (!swallowArmed() || !e.cancelable) return;
+    var n = e.changedTouches.length;
+    if (n === 0) return;
+    for (var i = 0; i < n; i++) {
+      // Unknown identifiers (a touch predating the arm) default to NOT
+      // swallowing \u2014 native behavior is the safe side.
+      if (swallowTouches[e.changedTouches[i].identifier] !== true) return;
+    }
+    e.preventDefault();
+  }
+  function onSwallowTouchEnd(e){
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      delete swallowTouches[e.changedTouches[i].identifier];
+    }
+  }
+  // OS drag-and-drop of image files onto the canvas.
+  function onDragOver(e){
+    if (!enabled) return;
+    // Click-through mode: the page handles its own events.
+    if (tool === 'interact') return;
+    var dt = e.dataTransfer;
+    if (!dt || !dt.types || Array.prototype.indexOf.call(dt.types, 'Files') === -1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Deck chrome takes no drops \u2014 except rail thumbnails.
+    dt.dropEffect = deckChromeAlongPath(e) &&
+      !railThumbAt(e.clientX, e.clientY) ? 'none' : 'copy';
+  }
+  function onDrop(e){
+    if (!enabled) return;
+    // Click-through mode: the page handles its own events.
+    if (tool === 'interact') return;
+    var dt = e.dataTransfer;
+    if (!dt || !dt.files || dt.files.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (deckChromeAlongPath(e) && !railThumbAt(e.clientX, e.clientY)) return;
+    var files = [];
+    for (var i = 0; i < dt.files.length; i++) {
+      if ((dt.files[i].type || '').indexOf('image/') === 0) files.push(dt.files[i]);
+    }
+    if (files.length === 0) return;
+    var plan = fileDropPlan(e.clientX, e.clientY);
+    if (plan && plan.refuse) return;
+    var hovered = plan ? plan.el : null;
+    post({
+      type: 'fileDrop',
+      files: files,
+      name: hovered ? elOwner(hovered) : null,
+      targetTid: hovered ? parseInt(hovered.getAttribute('data-dc-tpl'), 10) : null,
+      position: plan ? plan.position : 'root-end',
+      slide: hovered ? slideAnchorFor(hovered) : null,
+      point: plan ? plan.point : null,
+    });
+    if (hovered) navigateToDropSlide(slideOf(hovered));
+  }
+  // \u2318V while this document holds focus: image files go to the host's
+  // image intake (same lane as onDrop); anything else stays the in-tab paste.
+  var pasteKeyTimer = null;
+  function onPaste(e){
+    if (!e.isTrusted) return;
+    clearTimeout(pasteKeyTimer);
+    if (!enabled || tool === 'interact' || editing) return;
+    if (drag || toolDraw || resizeDrag || endpointDrag || drawStroke || drawSession) return;
+    var pt = e.target;
+    if (pt && (pt.tagName === 'INPUT' || pt.tagName === 'TEXTAREA' || pt.tagName === 'SELECT' || pt.isContentEditable)) return;
+    var cd = e.clipboardData;
+    var files = [];
+    for (var i = 0; cd && cd.files && i < cd.files.length; i++) {
+      if ((cd.files[i].type || '').indexOf('image/') === 0) files.push(cd.files[i]);
+    }
+    e.preventDefault(); e.stopPropagation();
+    post(files.length ? { type: 'filePaste', files: files } : { type: 'clipboardKey', key: 'v' });
+  }
+  // The pointer left the frame (onto the host canvas or out of the window):
+  // no further mousemove arrives, so retire the cursor-following chrome now.
+  function onOut(e){
+    if (e.relatedTarget) return;
+    clearHover();
+    hideToolGhost();
+  }
+  function onMove(e){
+    if (!enabled || editing) return;
+    // A mouseup outside the iframe never reaches us; the next buttonless
+    // mousemove is the signal the gesture ended elsewhere.
+    if (e.buttons === 0 && (dragArm || toolDragArm || drawStroke || resizeDrag || endpointDrag || toolDraw || drag)) {
+      onMouseUp(e);
+    }
+    if (drawStroke) {
+      var lp = drawStroke.points[drawStroke.points.length - 1];
+      var ddx = e.clientX - lp[0], ddy = e.clientY - lp[1];
+      if (ddx * ddx + ddy * ddy >= 4) {
+        drawStroke.points.push([e.clientX, e.clientY]);
+        drawStroke.path.setAttribute('d', strokeD(drawStroke.points, 0, 0));
+      }
+      return;
+    }
+    if (endpointDrag) {
+      var ed = endpointDrag;
+      var mx = e.clientX, my = e.clientY;
+      // True extent (CSS px) of the drag, then clamped to an 8px-min box with
+      // the stroke centered inside any clamped axis \u2014 mirrors
+      // arrow-template.ts shaft() so a near-flat drag keeps its real (tiny)
+      // slope instead of snapping corner-to-corner across the 8px floor.
+      var rw = Math.abs(mx - ed.fixX) / ed.scl;
+      var rh = Math.abs(my - ed.fixY) / ed.scl;
+      var cw = Math.max(Math.round(rw), 8), ch = Math.max(Math.round(rh), 8);
+      var ox = (cw - rw) / 2, oy = (ch - rh) / 2;
+      var cl = Math.round(
+        ed.startLeft + (Math.min(ed.fixX, mx) - ed.startRect.left) / ed.scl - ox
+      );
+      var ct = Math.round(
+        ed.startTop + (Math.min(ed.fixY, my) - ed.startRect.top) / ed.scl - oy
+      );
+      // Endpoints in the new viewBox: each is the centering offset + its
+      // share of the true extent. which=0 moves the tail; which=1 the head.
+      var fxv = ox + (ed.fixX <= mx ? 0 : rw), fyv = oy + (ed.fixY <= my ? 0 : rh);
+      var mxv = ox + (ed.fixX <= mx ? rw : 0), myv = oy + (ed.fixY <= my ? rh : 0);
+      var sx = ed.which === 0 ? mxv : fxv, sy = ed.which === 0 ? myv : fyv;
+      var ex2 = ed.which === 0 ? fxv : mxv, ey2 = ed.which === 0 ? fyv : myv;
+      var nd = buildStrokeD(sx, sy, ex2, ey2);
+      // Write directly to the live element for the drag preview \u2014 unlike the
+      // resize path (which round-trips through the host per move), rewriting
+      // the svg attrs + path d is cheap and self-contained.
+      ed.el.style.left = cl + 'px'; ed.el.style.top = ct + 'px';
+      ed.el.style.width = cw + 'px'; ed.el.style.height = ch + 'px';
+      ed.el.setAttribute('width', cw); ed.el.setAttribute('height', ch);
+      ed.el.setAttribute('viewBox', '0 0 ' + cw + ' ' + ch);
+      ed.path.setAttribute('d', nd);
+      ed.last = { left: cl, top: ct, w: cw, h: ch, d: nd };
+      updateHandles();
+      e.preventDefault();
+      return;
+    }
+    if (resizeDrag) {
+      var rd = resizeDrag;
+      var w = rd.startRect.width, h = rd.startRect.height;
+      if (rd.corner === 'se') { w = e.clientX - rd.startRect.left; h = e.clientY - rd.startRect.top; }
+      else if (rd.corner === 'ne') { w = e.clientX - rd.startRect.left; h = rd.startRect.bottom - e.clientY; }
+      else if (rd.corner === 'sw') { w = rd.startRect.right - e.clientX; h = e.clientY - rd.startRect.top; }
+      else { w = rd.startRect.right - e.clientX; h = rd.startRect.bottom - e.clientY; }
+      // Shift locks the element's starting aspect ratio; whichever axis the
+      // cursor changed proportionally more drives the other.
+      if (e.shiftKey && rd.startRect.width > 0 && rd.startRect.height > 0) {
+        var ar = rd.startRect.width / rd.startRect.height;
+        if (w / rd.startRect.width >= h / rd.startRect.height) h = w / ar;
+        else w = h * ar;
+      }
+      // Screen px -> CSS px: rects and cursor deltas are scaled by the canvas
+      // zoom transform, authored values must not be.
+      w = Math.max(8, w / rd.scl); h = Math.max(8, h / rd.scl);
+      rd.lastW = w; rd.lastH = h;
+      // n/w handles on an abs element: the dragged edge is the one that moves,
+      // so the origin shifts by however much the size changed.
+      if (rd.absX && (rd.corner === 'nw' || rd.corner === 'sw')) rd.lastLeft = rd.startLeft + (rd.startRect.width / rd.scl - w);
+      if (rd.absY && (rd.corner === 'nw' || rd.corner === 'ne')) rd.lastTop = rd.startTop + (rd.startRect.height / rd.scl - h);
+      // Provisional values patch the live box here and update the host's
+      // template per frame; the template is re-rendered once, on release.
+      var rst = { width: Math.round(w - rd.boxDx) + 'px', height: Math.round(h - rd.boxDy) + 'px' };
+      if (rd.lastLeft != null) rst.left = Math.round(rd.lastLeft) + 'px';
+      if (rd.lastTop != null) rst.top = Math.round(rd.lastTop) + 'px';
+      if (patchesRoot(rd.name)) { rd.lastPatch = rst; patchEls(rd.gestureKey, rd.els && rd.els.length ? rd.els : [rd.el], rst); }
+      postStylePreview({ type: 'stylePreview', tid: rd.tid, name: rd.name, gestureKey: rd.gestureKey, styles: rst });
+      updateHandles();
+      e.preventDefault();
+      return;
+    }
+    if (toolDraw) {
+      // Draw to wherever the cursor goes for every tool \u2014 a drag past the
+      // container it started in is a placement the user is asking for, and
+      // clamping to the container reads as an invisible wall.
+      var tx = e.clientX;
+      var ty = e.clientY;
+      toolDraw.w = Math.abs(tx - toolDraw.startX);
+      toolDraw.h = Math.abs(ty - toolDraw.startY);
+      // Shift draws a square (1:1), anchored at the press point.
+      if (e.shiftKey) {
+        var side = Math.max(toolDraw.w, toolDraw.h);
+        toolDraw.w = side; toolDraw.h = side;
+        toolDraw.x = tx < toolDraw.startX ? toolDraw.startX - side : toolDraw.startX;
+        toolDraw.y = ty < toolDraw.startY ? toolDraw.startY - side : toolDraw.startY;
+      } else {
+        toolDraw.x = Math.min(toolDraw.startX, tx);
+        toolDraw.y = Math.min(toolDraw.startY, ty);
+      }
+      // Sign of end \u2212 start per axis; the arrow tool aims its head here.
+      toolDraw.dirX = tx >= toolDraw.startX ? 1 : -1;
+      toolDraw.dirY = ty >= toolDraw.startY ? 1 : -1;
+      toolDraw.box.style.left = toolDraw.x + 'px';
+      toolDraw.box.style.top = toolDraw.y + 'px';
+      toolDraw.box.style.width = toolDraw.w + 'px';
+      toolDraw.box.style.height = toolDraw.h + 'px';
+      if (tool === 'arrow' || tool === 'line') {
+        // Live stroke preview \u2014 identical box clamp, centering, placement
+        // offset, and stroke width to what the host inserts, so nothing
+        // jumps on release and a flat drag stays visible (an unclamped 0px
+        // box squashes the stroke to nothing). The preview draws in screen
+        // px while the insert lands in CSS px under the parent's transform,
+        // so the px constants scale by the parent's screen scale.
+        var adsc = screenScale(toolDraw.parentEl) || 1;
+        var aw = toolDraw.w, ah = toolDraw.h;
+        var abw = Math.max(aw, 8 * adsc), abh = Math.max(ah, 8 * adsc);
+        var aox = (abw - aw) / 2, aoy = (abh - ah) / 2;
+        toolDraw.box.style.left = (toolDraw.x - aox) + 'px';
+        toolDraw.box.style.top = (toolDraw.y - aoy) + 'px';
+        toolDraw.box.style.width = abw + 'px';
+        toolDraw.box.style.height = abh + 'px';
+        var asx = aox + (toolDraw.dirX === 1 ? 0 : aw);
+        var asy = aoy + (toolDraw.dirY === 1 ? 0 : ah);
+        var aex = aox + (toolDraw.dirX === 1 ? aw : 0);
+        var aey = aoy + (toolDraw.dirY === 1 ? ah : 0);
+        var ad = 'M ' + asx + ' ' + asy + ' L ' + aex + ' ' + aey;
+        var amark = tool === 'arrow'
+          ? '<defs><marker id="dc-draw-head" orient="auto" markerWidth="5" markerHeight="5" refX="0.8" refY="2" overflow="visible">' +
+            '<path d="M-3.2 -1.7 L0.8 0 L-3.2 1.7" transform="translate(0 2)" fill="none" style="stroke:' + SEL_ACCENT + '" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>'
+          : '';
+        toolDraw.box.innerHTML =
+          '<svg width="100%" height="100%" viewBox="0 0 ' + abw + ' ' + abh + '" ' +
+          'style="display:block;overflow:visible">' + amark +
+          '<path d="' + ad + '" fill="none" style="stroke:' + SEL_ACCENT + '" stroke-width="' + (4 * adsc) +
+          '" stroke-linecap="round" stroke-linejoin="round"' +
+          (tool === 'arrow' ? ' marker-end="url(#dc-draw-head)"' : '') + '/></svg>';
+      }
+      return;
+    }
+    if (toolDragArm) {
+      var tdx = e.clientX - toolDragArm.x, tdy = e.clientY - toolDragArm.y;
+      if (tdx * tdx + tdy * tdy > 16) {
+        var dbox = document.createElement('div');
+        dbox.setAttribute('data-dc-editor-overlay', '');
+        // The preview wears the shape being drawn \u2014 an Oval drag shows an
+        // ellipse, Arrow/Line drags show the stroke itself (drawn per-move
+        // below), everything else the plain box.
+        dbox.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;' +
+          (tool === 'arrow' || tool === 'line'
+            ? 'border:none;background:transparent;'
+            : 'border:1.5px solid ' + SEL_ACCENT + ';background:color-mix(in srgb,' + SEL_ACCENT + ' 10%,transparent);') +
+          'border-radius:' + (tool === 'oval' ? '50%' : '0') + ';';
+        overlayRoot().appendChild(dbox);
+        toolDraw = { box: dbox, startX: toolDragArm.x, startY: toolDragArm.y, x: toolDragArm.x, y: toolDragArm.y, w: 0, h: 0, dirX: 1, dirY: 1,
+          parentEl: toolDragArm.parentEl, parentTid: toolDragArm.parentTid, parentName: toolDragArm.parentName, parentRect: toolDragArm.parentRect };
+        toolDragArm = null;
+        hideToolGhost();
+      }
+      return;
+    }
+    if (tool !== 'select' && tool !== 'interact') { updateToolGhost(e); return; }
+    if (tool === 'interact') return;
+    if (drag) {
+      // \u2500\u2500 cross-artboard exit protocol \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+      // The gesture is captive in this frame (capture holds even with the
+      // pointer outside the viewport \u2014 S1), so crossing the viewport edge
+      // is the handoff moment: announce dragExit ONCE (key + the dragged
+      // tid + geometry; NO content \u2014 the host serializes at commit through
+      // the gated handle), then stream throttled dragMove while outside.
+      // Re-entering cancels the handoff (dragReturn) and the in-frame drag
+      // continues as if nothing happened (B5's identity-preserving path).
+      var offV = e.clientX < 0 || e.clientY < 0 ||
+        e.clientX > window.innerWidth || e.clientY > window.innerHeight;
+      if (offV) {
+        if (!drag.exited) {
+          drag.exited = true;
+          post({ type: 'dragExit', gestureKey: drag.gestureKey,
+            tids: [drag.tid], name: drag.name, alt: !!e.altKey });
+          // park the in-frame preview while the host owns the visual
+          cancelFlowPreviewIfAny(drag);
+          clearStructure();
+          hideDropParent();
+          if (toolGhost) toolGhost.box.style.display = 'none';
+          drag.commit = null;
+        }
+        if (!drag.lastStream || Date.now() - drag.lastStream > 30) {
+          drag.lastStream = Date.now();
+          post({ type: 'dragMove', gestureKey: drag.gestureKey,
+            x: e.clientX, y: e.clientY, alt: !!e.altKey });
+        }
+        return;
+      }
+      if (drag.exited) {
+        drag.exited = false;
+        post({ type: 'dragReturn', gestureKey: drag.gestureKey });
+      }
+      var wasAlt = drag.alt;
+      drag.alt = e.altKey;
+      // \u2325 disables the live structural preview (the original must stay put \u2014
+      // the preview physically moves it); the emphasized slot line still
+      // shows where the copy will land.
+      if (drag.alt && !wasAlt) cancelFlowPreviewIfAny(drag);
+      syncAltClone();
+      var dEl2 = liveDragEl();
+      if (!dEl2) return;
+      applyDragVisual(dEl2);
+      var cand = dropContainerAt(e.clientX, e.clientY, drag, dEl2);
+      if (cand.invalid) {
+        // No legal target here (deck-stage child level) \u2014 show nothing and
+        // make releasing the mouse a cancel.
+        cancelFlowPreviewIfAny(drag);
+        clearStructure();
+        hideDropParent();
+        if (toolGhost) toolGhost.box.style.display = 'none';
+        drag.commit = null;
+        updateHandles();
+        return;
+      }
+      // Identity comparison \u2014 tids renumber across preview re-renders.
+      var sameParent = cand.el === drag.origParentStamped;
+      // The drop parent outlines while dragging \u2014 except the root host, whose
+      // synthetic extent (viewport-stretched) would draw a misleading box.
+      if (cand.tid == null) hideDropParent();
+      else showDropParent(cand.el.getBoundingClientRect(), '');
+      if (drag.mode === 'abs' && sameParent) {
+        // Same parentage keeps the position mode: absolute elements reposition
+        // along the authored/dominant axes (right/bottom when those are what's
+        // set, else left/top). Provisional values patch the box here and edit
+        // the host's template per frame; the template re-renders on release.
+        cancelFlowPreviewIfAny(drag);
+        drag.previewParentEl = null;
+        clearStructure();
+        if (toolGhost) toolGhost.box.style.display = 'none';
+        var adx = (e.clientX - drag.startX) / drag.scl, ady = (e.clientY - drag.startY) / drag.scl;
+        var st = {};
+        if (drag.useRight) st.right = Math.round(drag.startRight - adx) + 'px';
+        else st.left = Math.round(drag.startLeft + adx) + 'px';
+        if (drag.useBottom) st.bottom = Math.round(drag.startBottom - ady) + 'px';
+        else st.top = Math.round(drag.startTop + ady) + 'px';
+        drag.absStyles = st;
+        drag.commit = { kind: 'absSame' };
+        if (patchesRoot(drag.name)) {
+          var pels = group(String(drag.tid), drag.name);
+          if (pels.indexOf(dEl2) < 0) pels = [dEl2];
+          drag.lastPatch = st;
+          patchEls(drag.gestureKey, pels, st);
+        }
+        postStylePreview({ type: 'stylePreview', tid: drag.tid, name: drag.name, gestureKey: drag.gestureKey, styles: st });
+        updateHandles();
+        return;
+      }
+      // A drag NEVER changes the element's position mode \u2014 with ONE
+      // exception: the root level (outside any stamped parent) is the
+      // freeform canvas, so dropping there always lands absolute. Otherwise
+      // an absolute element drops absolute wherever it lands (same-parent
+      // reposition handled above; here it's an abs reparent at the cursor)
+      // and a flow element always re-enters the flow at the cursor's slot.
+      if (drag.mode === 'abs' || cand.tid == null) {
+        clearStructure();
+        // The positioning-context question is answered ONCE per candidate
+        // parent, BEFORE any preview touches it \u2014 after the preview applies
+        // position:relative the computed style would lie, and the commit
+        // (which restores the baseline first) needs the original answer.
+        if (!drag.absParent || drag.absParent.el !== cand.el) {
+          drag.absParent = {
+            el: cand.el,
+            needsPositioning: cand.tid != null && getComputedStyle(cand.el).position === 'static',
+          };
+        }
+        var pr = cand.el.getBoundingClientRect();
+        // Anchor at the grab point, not the cursor: the element keeps the
+        // same offset under the hand it had when the drag started.
+        drag.absStyles = {
+          left: Math.round((e.clientX - drag.grabDx - pr.left) / drag.scl) + 'px',
+          top: Math.round((e.clientY - drag.grabDy - pr.top) / drag.scl) + 'px',
+        };
+        drag.commit = {
+          kind: 'abs', tid: cand.tid,
+          needsPositioning: drag.absParent.needsPositioning,
+        };
+        if (drag.alt) {
+          // \u2325-duplicate: the original must stay put, so no live preview \u2014
+          // the ghost box stands in for the copy.
+          cancelFlowPreviewIfAny(drag);
+          drag.previewParentEl = null;
+          var er = drag.startRect;
+          var g3 = ensureToolGhost();
+          g3.box.style.display = 'block';
+          g3.box.style.left = (e.clientX - drag.grabDx) + 'px';
+          g3.box.style.top = (e.clientY - drag.grabDy) + 'px';
+          g3.box.style.width = er.width + 'px';
+          g3.box.style.height = er.height + 'px';
+          g3.label.style.display = 'none';
+          updateHandles();
+          return;
+        }
+        if (toolGhost) toolGhost.box.style.display = 'none';
+        // Live abs preview: one structural movePreview when the candidate
+        // parent changes, then cheap per-frame offsets via stylePreview
+        // (the host routes them to the moved element's preview tid).
+        if (!drag.previewActive || drag.previewParentEl !== cand.el) {
+          drag.previewParentEl = cand.el;
+          drag.previewKey = 'abs';
+          drag.previewActive = true;
+          post({
+            type: 'movePreview', tid: drag.tid, name: drag.name, gestureKey: drag.gestureKey,
+            targetTid: cand.tid, position: cand.tid == null ? 'root-end' : 'into',
+            absolute: true, absStyles: drag.absStyles,
+            parentNeedsPositioning: drag.absParent.needsPositioning,
+            // Drag-out freeze rides the preview too (optimistic):
+            // siblings pin the moment the element leaves the flow, and
+            // the commit converges on the identical layout. Null for
+            // abs-mode drags (nothing left a layout).
+            flatten: (!drag.alt && drag.flatten) || undefined,
+            // Mid-drag parity: the drag-start typography rides the
+            // preview too, so mid-drag equals post-release.
+            freezeFont: drag.freezeFont || undefined,
+          });
+        } else {
+          if (patchesRoot(drag.name)) { drag.lastPatch = drag.absStyles; patchEls(drag.gestureKey, [dEl2], drag.absStyles); }
+          postStylePreview({ type: 'stylePreview', tid: drag.tid, name: drag.name, gestureKey: drag.gestureKey, styles: drag.absStyles });
+        }
+        updateHandles();
+        return;
+      }
+      // Flow drop: live-preview the structural move (the host applies a
+      // provisional template edit), and paint the container's structure.
+      if (toolGhost) toolGhost.box.style.display = 'none';
+      drag.previewParentEl = null;
+      var slot = flowSlot(cand.el, cand.tid, dEl2, e.clientX, e.clientY);
+      showStructure(cand.el, dEl2, slot);
+      drag.commit = { kind: 'flow', slot: slot, clearPositioning: false };
+      if (!drag.alt) maybePostFlowPreview(slot, false);
+      updateHandles();
+      return;
+    }
+    if (dragArm) {
+      var dx = e.clientX - dragArm.x, dy = e.clientY - dragArm.y;
+      if (dx * dx + dy * dy > 16) {
+        // A repeated-template instance (an sc-for row) shares ONE
+        // template node with its copies \u2014 "dragging one row" would move
+        // or reparent that shared node and take every copy with it.
+        // Refused in BOTH modes (the host explains): measured in the
+        // real bundle, an advanced-mode drag out of the loop removes
+        // every rendered row, writes the damage into the template, and
+        // \u2318Z does not restore it \u2014 that fails the
+        // undoable-and-non-destructive bar, so template-level loop
+        // surgery stays with the code/outline views, not the canvas.
+        {
+          var repEls = group(String(dragArm.tid), dragArm.name);
+          if (repEls && repEls.length > 1) {
+            post({ type: 'repeatRefused', count: repEls.length, reason: 'self' });
+            dragArm = null;
+            return;
+          }
+        }
+        var dEl = dragArm.el;
+        var cs0 = getComputedStyle(dEl);
+        var isAbs = cs0.position === 'absolute' || cs0.position === 'fixed';
+        var opEl = dEl.parentElement ? dEl.parentElement.closest('[data-dc-tpl]') : null;
+        // Drag-out freeze prep: a FLOW element may leave its layout (an
+        // absolute drop at root level). Geometry of the parent and its
+        // in-flow siblings is captured NOW (pre-detach), so that commit
+        // can freeze the layout they had before anything moved \u2014 "drag
+        // an element out of a layout and nothing else moves". Applies
+        // to any flow container (stack, grid, plain block).
+        var flatten = null;
+        if (!isAbs && opEl) {
+          // Layouts with loop-rendered (repeated) siblings can't honor
+          // the freeze (one shared node per row \u2014 pinning is
+          // impossible). Fall back to the plain structural drag-out
+          // (siblings reflow) instead of refusing or garbling.
+          var preScan = opEl.firstElementChild;
+          var preCounts = {};
+          var hasRepeatedSib = false;
+          for (; preScan; preScan = preScan.nextElementSibling) {
+            if (!preScan.hasAttribute || !preScan.hasAttribute('data-dc-tpl')) continue;
+            var preId = preScan.getAttribute('data-dc-tpl');
+            preCounts[preId] = (preCounts[preId] || 0) + 1;
+            if (preCounts[preId] > 1) { hasRepeatedSib = true; break; }
+          }
+          if (!hasRepeatedSib) {
+            var fOwn = elOwner(dEl);
+            var fpr = opEl.getBoundingClientRect();
+            var fscl = screenScale(dEl) || 1;
+            var fsibs = [];
+            for (var fc = opEl.firstElementChild; fc; fc = fc.nextElementSibling) {
+              if (fc === dEl || !fc.hasAttribute || !fc.hasAttribute('data-dc-tpl')) continue;
+              if (elOwner(fc) !== fOwn) continue;
+              var fccs = getComputedStyle(fc);
+              if (fccs.position === 'absolute' || fccs.position === 'fixed') continue;
+              var fcr = fc.getBoundingClientRect();
+              fsibs.push({
+                tid: parseInt(fc.getAttribute('data-dc-tpl'), 10),
+                left: Math.round((fcr.left - fpr.left) / fscl),
+                top: Math.round((fcr.top - fpr.top) / fscl),
+                w: Math.round(fcr.width / fscl),
+                h: Math.round(fcr.height / fscl),
+              });
+            }
+            // (Repeated siblings were handled above: this branch only
+            // runs for fully pinnable layouts. The host-side dedupe
+            // stays as defense against forged payloads.)
+            var fptid = parseInt(opEl.getAttribute('data-dc-tpl'), 10);
+            flatten = {
+              parentTid: isNaN(fptid) ? null : fptid,
+              w: Math.round(fpr.width / fscl),
+              h: Math.round(fpr.height / fscl),
+              siblings: fsibs,
+            };
+          }
+        }

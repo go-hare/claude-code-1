@@ -1,0 +1,3 @@
+# 247 vKc <= Vr start=207954248 end=207954430 len=182 sha=5917d5817f022355
+
+function Vr(e){let t=Ot(e)?e.manifest.displayName:e.displayName;return Be(typeof t==="string"?re(t).trim():t)??Be(Rt(e.name))??Be(Rt(Ot(e)?e.source:""))??"(unprintable plugin name)"}

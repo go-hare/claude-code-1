@@ -16,6 +16,7 @@ import {
   classifyPluginCommandRefusal,
   errorFromPluginFailureCode,
 } from '../../utils/plugins/pluginCommandRefusal.js'
+import { Io, re } from '../../utils/plugins/escapeSafeText.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
 import { hydrateSyncedPluginDirsFromDisk } from '../../utils/plugins/syncedPluginHydrate.js'
 import type { PluginScope } from '../../utils/plugins/schemas.js'
@@ -68,7 +69,7 @@ function handlePluginCommandError(
       ? 'disable all plugins'
       : `${command} plugins`
   console.error(
-    `${figures.cross} Failed to ${operation}: ${errorMessage(error)}`,
+    Io(`${figures.cross} Failed to ${operation}: ${errorMessage(error)}`),
   )
   const telemetryFields = plugin
     ? (() => {
@@ -117,7 +118,7 @@ export async function installPlugin(
   shownEntryHelper?: { command: string; archiveUrl: string },
 ): Promise<void> {
   try {
-    console.log(`Installing plugin "${plugin}"...`)
+    console.log(re(`Installing plugin "${plugin}"...`))
 
     const result = await installPluginOp(plugin, scope, {
       shownSourceCommand,
@@ -128,7 +129,7 @@ export async function installPlugin(
       throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
-    console.log(`${figures.tick} ${result.message}`)
+    console.log(Io(`${figures.tick} ${result.message}`))
 
     // densable $Jy — apply --config / report unset userConfig (soft on failure)
     const { formatPostInstallUserConfigNotice } = await import(
@@ -139,7 +140,7 @@ export async function installPlugin(
       configEntries,
     )
     if (notice) {
-      console.log(notice)
+      console.log(Io(notice))
     }
 
     // _PROTO_* routes to PII-tagged plugin_name/marketplace_name BQ columns.
@@ -187,7 +188,7 @@ export async function uninstallPlugin(
       throw new Error(result.message)
     }
 
-    console.log(`${figures.tick} ${result.message}`)
+    console.log(Io(`${figures.tick} ${result.message}`))
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -228,7 +229,7 @@ export async function enablePlugin(
       throw new Error(result.message)
     }
 
-    console.log(`${figures.tick} ${result.message}`)
+    console.log(Io(`${figures.tick} ${result.message}`))
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -269,7 +270,7 @@ export async function disablePlugin(
       throw new Error(result.message)
     }
 
-    console.log(`${figures.tick} ${result.message}`)
+    console.log(Io(`${figures.tick} ${result.message}`))
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -305,7 +306,7 @@ export async function disableAllPlugins(): Promise<void> {
       throw new Error(result.message)
     }
 
-    console.log(`${figures.tick} ${result.message}`)
+    console.log(Io(`${figures.tick} ${result.message}`))
 
     logEvent('tengu_plugin_disabled_all_cli', {})
 
@@ -330,7 +331,7 @@ export async function updatePluginCli(
 ): Promise<void> {
   try {
     writeToStdout(
-      `Checking for updates for plugin "${plugin}" at ${scope} scope…\n`,
+      `${re(`Checking for updates for plugin "${plugin}" at ${scope} scope…`)}\n`,
     )
 
     const { promptCommandSourceConsent } = await import(
@@ -345,7 +346,7 @@ export async function updatePluginCli(
       // SEA nyh: explicit:!0 + onEntryHelperDisclosure → bl + f3l
       explicit: true,
       onEntryHelperDisclosure: async disclosure => {
-        writeToStdout(`${disclosure}\n`)
+        writeToStdout(`${Io(disclosure)}\n`)
         return promptEntryHeadersHelperConfirm({ yes: options.yes === true })
       },
       // densable R0v announceCommandSource → ptm; declined aborts
@@ -365,7 +366,7 @@ export async function updatePluginCli(
       throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
-    writeToStdout(`${figures.tick} ${result.message}\n`)
+    writeToStdout(`${Io(`${figures.tick} ${result.message}`)}\n`)
 
     if (!result.alreadyUpToDate) {
       const { name, marketplace } = parsePluginIdentifier(

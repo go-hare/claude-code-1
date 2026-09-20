@@ -11,6 +11,7 @@ import {
 } from 'fs/promises'
 import { join, sep } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
+import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
 import { readFileRange, tailFile } from '../fsOperations.js'
 import { logError } from '../log.js'
@@ -31,6 +32,18 @@ const DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024 // 8MB
  */
 export const MAX_TASK_OUTPUT_BYTES = 5 * 1024 * 1024 * 1024
 export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '5GB'
+
+/** densable 2.1.247 RTe — queued when the output file cannot be written. */
+export const UNWRITTEN_OUTPUT_NOTICE = `
+[output omitted: it could not be written to disk]
+`
+/** densable 2.1.247 hlo — drop the in-memory queue after a failed drain retry. */
+export const UNWRITTEN_CHARS_DROP_THRESHOLD = 16_777_216
+
+/** densable 2.1.247 TaskOutput.getStdout when failing || lostOutput. */
+export function formatLostOutputNotice(sizeKB: number, path: string): string {
+  return `Output truncated (${sizeKB}KB total). The full output could not all be saved to ${path}; that file may be missing or incomplete.`
+}
 
 /**
  * Get the task output directory for this session.
@@ -148,11 +161,16 @@ export class DiskTaskOutput {
   #queue: string[] = []
   #bytesWritten = 0
   #capped = false
+  #unwrittenChars = 0
+  #generation = 0
+  #failing = false
+  #loggedKeys = new Set<string>()
+  #lostOutput = false
   #flushPromise: Promise<void> | null = null
   #flushResolve: (() => void) | null = null
 
-  constructor(taskId: string) {
-    this.#path = getTaskOutputPath(taskId)
+  constructor(taskId: string, outputPath?: string) {
+    this.#path = outputPath ?? getTaskOutputPath(taskId)
   }
 
   append(content: string): void {
@@ -164,12 +182,12 @@ export class DiskTaskOutput {
     this.#bytesWritten += content.length
     if (this.#bytesWritten > MAX_TASK_OUTPUT_BYTES) {
       this.#capped = true
-      this.#queue.push(
-        `\n[output truncated: exceeded ${MAX_TASK_OUTPUT_BYTES_DISPLAY} disk cap]\n`,
-      )
-    } else {
-      this.#queue.push(content)
     }
+    const chunk = this.#capped
+      ? `\n[output truncated: exceeded ${MAX_TASK_OUTPUT_BYTES_DISPLAY} disk cap]\n`
+      : content
+    this.#queue.push(chunk)
+    this.#unwrittenChars += chunk.length
     if (!this.#flushPromise) {
       this.#flushPromise = new Promise<void>(resolve => {
         this.#flushResolve = resolve
@@ -182,8 +200,22 @@ export class DiskTaskOutput {
     return this.#flushPromise ?? Promise.resolve()
   }
 
+  get failing(): boolean {
+    return this.#failing
+  }
+
+  get lostOutput(): boolean {
+    return this.#lostOutput
+  }
+
+  get unwrittenChars(): number {
+    return this.#unwrittenChars
+  }
+
   cancel(): void {
+    this.#generation += 1
     this.#queue.length = 0
+    this.#unwrittenChars = 0
   }
 
   async #drainAllChunks(): Promise<void> {
@@ -202,7 +234,17 @@ export class DiskTaskOutput {
           )
         }
         while (true) {
-          await this.#writeAllChunks()
+          const generation = this.#generation
+          try {
+            await this.#writeAllChunks()
+          } catch (t) {
+            if (this.#generation === generation) {
+              this.#lostOutput = true
+              this.#queue.unshift(UNWRITTEN_OUTPUT_NOTICE)
+              this.#unwrittenChars += UNWRITTEN_OUTPUT_NOTICE.length
+            }
+            throw t
+          }
           if (this.#queue.length === 0) {
             break
           }
@@ -237,6 +279,7 @@ export class DiskTaskOutput {
   #queueToBuffers(): Buffer {
     // Use .splice to in-place mutate the array, informing the GC it can free it.
     const queue = this.#queue.splice(0, this.#queue.length)
+    this.#unwrittenChars = 0
 
     let totalLength = 0
     for (const str of queue) {
@@ -255,25 +298,55 @@ export class DiskTaskOutput {
   async #drain(): Promise<void> {
     try {
       await this.#drainAllChunks()
+      this.#clearFailing()
     } catch (e) {
-      // Transient fs errors (EMFILE on busy CI, EPERM on Windows pending-
-      // delete) previously rode up through `void this.#drain()` as an
-      // unhandled rejection while the flush promise resolved anyway — callers
-      // saw an empty file with no error. Retry once for the transient case
-      // (queue is intact if open() failed), then log and give up.
-      logError(e)
+      // densable 2.1.247 joe.#g: first fail marks failing and retries once.
+      // A growing queue on permanent write failure is dropped at hlo.
+      if (!this.#failing) {
+        this.#failing = true
+        logForDebugging(`Task output drain failed (will retry once): ${e}`, {
+          level: 'error',
+        })
+      }
       if (this.#queue.length > 0) {
         try {
           await this.#drainAllChunks()
+          this.#clearFailing()
         } catch (e2) {
-          logError(e2)
+          this.#giveUp(e2)
         }
+      } else {
+        this.#giveUp(e)
       }
     } finally {
       const resolve = this.#flushResolve!
       this.#flushPromise = null
       this.#flushResolve = null
       resolve()
+    }
+  }
+
+  #clearFailing(): void {
+    this.#failing = false
+    this.#loggedKeys.clear()
+  }
+
+  #giveUp(e: unknown): void {
+    const errno = getErrnoCode(e)
+    const key = `unexpected:${errno ?? 'no errno'}`
+    if (!this.#loggedKeys.has(key)) {
+      this.#loggedKeys.add(key)
+      logError(e)
+    }
+    if (this.#unwrittenChars > UNWRITTEN_CHARS_DROP_THRESHOLD) {
+      logForDebugging(
+        `Task output still cannot be written (${errno ?? 'no errno'}); dropped ${this.#unwrittenChars} chars of unwritten output`,
+        { level: 'error' },
+      )
+      this.#lostOutput = true
+      this.#queue.length = 0
+      this.#queue.push(UNWRITTEN_OUTPUT_NOTICE)
+      this.#unwrittenChars = UNWRITTEN_OUTPUT_NOTICE.length
     }
   }
 }
@@ -339,6 +412,12 @@ export function evictTaskOutput(taskId: string): Promise<void> {
       const output = outputs.get(taskId)
       if (output) {
         await output.flush()
+        if (output.failing && output.unwrittenChars > 0) {
+          logForDebugging(
+            `Task output writer evicted while failing; discarded ${output.unwrittenChars} chars of unwritten output`,
+            { level: 'error' },
+          )
+        }
         outputs.delete(taskId)
       }
     })(),

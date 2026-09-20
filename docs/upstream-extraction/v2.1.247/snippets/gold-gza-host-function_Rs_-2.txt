@@ -1,0 +1,2 @@
+# needle=function Rs( pos=207994104
+function Rs(e){return e==="windows"?"win32":"posix"}

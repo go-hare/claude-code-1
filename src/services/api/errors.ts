@@ -770,7 +770,55 @@ export function extractUnknownErrorFormat(value: unknown): string | undefined {
   return undefined
 }
 
+function attachApiErrorFields(
+  message: AssistantMessage,
+  error: unknown,
+): AssistantMessage {
+  // densable 2.1.247 bBe — stamp HTTP status + request id for tss().
+  if (error instanceof APIError) {
+    if (error.status !== undefined) {
+      message.apiErrorStatus = error.status
+    }
+    const requestId =
+      error.requestID ||
+      (error.error &&
+      typeof error.error === 'object' &&
+      'request_id' in error.error
+        ? String((error.error as { request_id?: unknown }).request_id ?? '') ||
+          undefined
+        : undefined)
+    if (requestId) {
+      message.requestId = requestId
+    }
+  } else if (error instanceof Error && error.cause instanceof APIError) {
+    if (error.cause.status !== undefined) {
+      message.apiErrorStatus = error.cause.status
+    }
+    const requestId = error.cause.requestID
+    if (requestId) {
+      message.requestId = requestId
+    }
+  }
+  return message
+}
+
 export function getAssistantMessageFromError(
+  error: unknown,
+  model: string,
+  options?: {
+    messages?: Message[]
+    messagesForAPI?: Array<
+      UserMessage | AssistantMessage | { type: string; message?: unknown }
+    >
+  },
+): AssistantMessage {
+  return attachApiErrorFields(
+    buildAssistantMessageFromError(error, model, options),
+    error,
+  )
+}
+
+function buildAssistantMessageFromError(
   error: unknown,
   model: string,
   options?: {

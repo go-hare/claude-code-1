@@ -1,0 +1,7 @@
+# qFe = _506 ie as Ahb; gza imports Ahb as qFe
+# @210753673
+function ie(e){return K[e]}
+# K init in same module:
+K={policySettings:"managed",userSettings:"user",projectSettings:"project",localSettings:"local",flagSettings:"flag"}
+# inverse U={user:"userSettings",project:"projectSettings",local:"localSettings"}
+# export ie as Ahb @210754920

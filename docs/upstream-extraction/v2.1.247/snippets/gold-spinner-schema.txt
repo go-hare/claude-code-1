@@ -1,0 +1,3 @@
+# offset=199326232 needle="spinnerTipsOverride.tipsFile must be an absolute"
+
+dedTime...D...isCLIActive...D.!.USER_ACTIVITY_TIMEOUT_MS...getNow...k...getActiveTimeCounter...isUserActive...n*.activeOperationCount...file:///B:/%7EBUN/root/_271.js...K..org-tip:...a...custom-tip-....org-tip:file:...J...[\t\n\r\u2028\u2029]+...l... {2,}...W.z.spinnerTipsOverride.tipsFile from remote managed settings is ignored; ship inline tips or install the file path via managed-settings.json...?H.spinnerTipsOverride...^.tipsFileB...spinnerTipsOverride.tipsFile must be an absolute or ~/ path (got "...L.c."); ignoring it.X...spinnerTipsOverride.tipsFile must be a local path, not a network (UNC) path; ignoring it...<..spin

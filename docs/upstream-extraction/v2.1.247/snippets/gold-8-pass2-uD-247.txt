@@ -1,0 +1,3 @@
+# off=209978544
+
+function uD(){if(!V?.credentials)return;return(e,t,n,r)=>vg(Dc,V?.credentials?.sigv4,vr)(e,t,n,r)}

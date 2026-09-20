@@ -1,0 +1,28 @@
+# off=84454175
+
+ compiled regex, where the compiled regex generally
+corresponds to a single object in memory that can match all of the patterns
+provided to ripgrep. The default limit is generous enough that most reasonable
+patterns (or even a small number of them) should fit.
+.sp
+This useful to change when you explicitly want to let ripgrep spend potentially
+much more time and/or memory building a regex matcher.
+.sp
+The input format accepts suffixes of \fBK\fP, \fBM\fP or \fBG\fP which
+correspond to kilobytes, megabytes and gigabytes, respectively. If no suffix is
+provided the input is treated as bytes.
+The size limit of the compiled regex.regex-size-limitPATTERN
+A pattern to search for. This option can be provided multiple times, where
+all patterns given are searched, in addition to any patterns provided by
+\flag{file}. Lines matching at least one of the provided patterns are printed.
+This flag can also be used when searching for patterns that start with a dash.
+.sp
+For example, to search for the literal \fB\-foo\fP:
+.sp
+.EX
+    rg \-e \-foo
+.EE
+.sp
+You can also use the special \fB\-\-\fP delimiter to indicate that no more
+flags will be provided. Namely, the following is equivalent to the above:
+

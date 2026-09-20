@@ -1,0 +1,2 @@
+# bindHost(e){ @232275545 end=232275570 len=25
+bindHost(e){this._host=e}

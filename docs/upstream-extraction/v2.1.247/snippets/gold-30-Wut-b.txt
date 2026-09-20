@@ -1,0 +1,13 @@
+# 247 y6 PR poller focus skip
+
+Wut=60000
+#b(){
+  if(!isDirectApiEnabled())return!1
+  if(!focused||pollerDisabled)return!1
+  if(#c===0)return!1
+  if(now-#c>=Wut)#s=0,#c=0
+  return!0
+}
+setInputs: focused changed && #b() → #h() schedule
+Fresh last fetch (<Wut): #c kept, #y waits remaining interval (skip GitHub re-check)
+Stale (>=Wut): reset #c, #y fetches immediately

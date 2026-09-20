@@ -1,0 +1,3 @@
+# off=209985729 hit=9
+
+radeToDenyPaths:f}=_g(l,r,Rs,kc);return{denyReadPaths:[...new Set([...n,...f])],unsetEnvVars:[...new Set(s)],setEnvVars:i,maskedFileBinds:d,maskedFileStoreDir:kc.dirPath}}function Pc(e){let t=e?.files??[];return[...new Set(t.filter((n)=>n.mode==="deny").map((n)=>n.path))]}function Ub(e,t){return[...new Set([...e,...t.denyReadPaths])]}function bD(){if(!V||V.filesystem.disabled)return{denyOnly:[],al

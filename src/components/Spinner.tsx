@@ -40,6 +40,18 @@ export type { SpinnerMode } from './Spinner/index.js';
 
 const DEFAULT_CHARACTERS = getDefaultCharacters();
 
+/**
+ * densable 2.1.247 `sr` Et — custom label only while showing the selected tip.
+ * `Et=V===F&&C?C:"Tip"`
+ */
+export function resolveSpinnerTipLabel(
+  displayedTip: string | undefined,
+  selectedTip: string | undefined,
+  label: string | undefined,
+): string {
+  return displayedTip === selectedTip && label ? label : 'Tip';
+}
+
 const SPINNER_FRAMES = [...DEFAULT_CHARACTERS, ...[...DEFAULT_CHARACTERS].reverse()];
 
 type Props = {
@@ -48,6 +60,8 @@ type Props = {
   totalPausedMsRef: React.RefObject<number>;
   pauseStartTimeRef: React.RefObject<number | null>;
   spinnerTip?: string;
+  /** densable 2.1.247 `spinnerTipLabel` — `sr` `C`; Et uses it only when V===F. */
+  spinnerTipLabel?: string;
   responseLengthRef: React.RefObject<number>;
   apiMetricsRef?: React.RefObject<
     Array<{
@@ -111,6 +125,7 @@ function SpinnerWithVerbInner({
   totalPausedMsRef,
   pauseStartTimeRef,
   spinnerTip,
+  spinnerTipLabel,
   responseLengthRef,
   overrideColor,
   overrideShimmerColor,
@@ -407,7 +422,11 @@ function SpinnerWithVerbInner({
           )}
           {(nextTask || effectiveTip) && (
             <MessageResponse>
-              <Text dimColor>{nextTask ? `Next: ${nextTask.subject}` : `Tip: ${effectiveTip}`}</Text>
+              <Text dimColor>
+                {nextTask
+                  ? `Next: ${nextTask.subject}`
+                  : `${resolveSpinnerTipLabel(effectiveTip, spinnerTip, spinnerTipLabel)}: ${effectiveTip}`}
+              </Text>
             </MessageResponse>
           )}
         </Box>

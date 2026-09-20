@@ -1,0 +1,2 @@
+# needle=function K8( pos=231554654 end=231554687 len=33
+function K8(WNe){return WNe.host}

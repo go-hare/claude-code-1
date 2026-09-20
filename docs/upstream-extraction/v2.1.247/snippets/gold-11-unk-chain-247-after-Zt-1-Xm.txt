@@ -1,0 +1,3 @@
+# 247-after-Zt n=1 function Xm start=210376221 end=210376424 len=203 sha=06486a101b1aa767
+
+function Xm(e,t){let n=t.split("/"),r=n.findIndex((i)=>i!==".."&&i!=="."&&i!==""),s=r!==-1&&n.indexOf("..",r)!==-1;if(eN(t))return n.includes("..")?null:ee(t);if(s||e===void 0)return null;return ee(e,t)}

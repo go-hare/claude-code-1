@@ -1,0 +1,3 @@
+# offset=210752765
+
+=="project"&&e.source.endsWith(`@${p}`)}function k(e){if(e.includes("@")){let n=e.split("@");return{name:n[0]||"",marketplace:n[1]}}return{name:e}}function v(e){let n=e.lastIndexOf("@");if(n<0)return{name:e};return{name:e.slice(0,n),marketp

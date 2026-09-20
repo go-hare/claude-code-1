@@ -1,0 +1,8 @@
+# 247 _g( @215907529
+
+he();R7();fnr();Q1();En();zf();JIt();F7();z1();T2();xEe();ai();KI();bh();Nr();mm();Dt();IBe();so();Pt();Ji();xe();Gi();My();kE();hDe();orr();Ti();br();z7();XJ();FGe();ix();jf();vi();DF();ln();$g();LGe();LC();irr();Zx();zue();op();HS();rK();oK();_O();_g();TV();j1();UT();a$();prr=`Other agents active in this session, addressable via ${wo}`});function _os(e){return`Describe your most recent action in 3-5 words using present tense (-ing). Name the file or function, not the branch. Do not use tools.
+${e?`
+Previous: "${e}" \u2014 say something NEW.
+`:""}
+Good: "Reading runAgent.ts"
+Good: "Fixing nul

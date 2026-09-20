@@ -1,0 +1,5 @@
+# gold-25-escape-cli-_n "_n(" count=1
+
+--- @233801566 ---
+nts.map(p),skills:g.skills.map(p)}})+`
+`);return}let h=[],P=_n(_),w=P===_.name?_.name:`${P} (${_.name})`;if(h.push(`${w} ${_.manifest.version??""}`.trimEnd()),_.manifest.descriptio

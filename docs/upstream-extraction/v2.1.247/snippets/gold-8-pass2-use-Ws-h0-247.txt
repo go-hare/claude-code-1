@@ -1,0 +1,3 @@
+# off=206367679 needle=",Ws,"
+
+orkerId}:{},...s?{signal:s}:{},...this.requestOptions!==void 0?{requestOptions:this.requestOptions}:{},autoStop:!1});for await(let i of n)await o(this,Ws,"m",ni).call(this,i,r,n.signal)}async handleItem(e){let t=e?.workId??A("ANTHROPIC_WORK_ID"),r=e?.environmentId??A("ANTHROPIC_ENVIRONMENT_ID"),s=e?.sessionId??A("ANTHROPIC_SESSION_ID"),n=e?.environmentKey??this.environmentKey??A("ANTHROPIC_ENVIRON

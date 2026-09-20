@@ -1,0 +1,3 @@
+# 247 function D start=231804708 len=168 sha=81be81d925c9de8a dist=1998645
+
+function D(e,t){f((r)=>{if(!r.oauthAccount||r.oauthAccount.claudeCodeTrialEndsAt===e)return r;return{...r,oauthAccount:{...r.oauthAccount,claudeCodeTrialEndsAt:e}}},t)}

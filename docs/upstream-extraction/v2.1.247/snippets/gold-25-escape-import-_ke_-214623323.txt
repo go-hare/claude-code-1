@@ -1,0 +1,3 @@
+# 247 @214623323
+
+=await Ge(ke)}catch(We){if(Ce){_(`installResolvedPlugin: force-included ${ke} fetch threw (${We instanceof Error?We.message:String(We)}); skipping (pinner stays demoted)`);continue}throw We}if(!He.ok){if(Ce){_(`installResolvedPlugin: force-included ${ke} ${He.reason}; skipping (pinner stays demoted)`);continue}return await G(),He}Lt.push({manifestDeps:He.dependencies,declaringId:ke})}fe=Lt}}catch(Oe){throw await G(),Oe}if(K!==void 0){let Oe=new Set(K.map((ot)=>Tg(ot,e)));for(let ot of t.dependencies??[]){let Fe=Tg(ot,e);if(!Oe.has(Fe))_(`Marketplace entry for ${e} lists dependency "${ot}" not 

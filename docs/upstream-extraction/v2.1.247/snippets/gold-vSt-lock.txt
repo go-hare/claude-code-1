@@ -1,0 +1,101 @@
+# vSt / fetchOfficialMarketplaceFromGcs LOCK
+# official-247 claude.exe size=253204128
+# peel: _peel-vSt.mjs _peel-vSt-neighbors.mjs _peel-vSt-aliases.mjs _peel-vSt-qfe-J8.mjs _peel-vSt-qfe-chain.mjs _peel-vSt-Ne-WLn.mjs
+
+VERDICT: LOCKED
+OFFSET: 214518476
+END: 214520232
+LEN: 1756
+GOLD: docs/upstream-extraction/v2.1.247/snippets/gold-vSt-full.txt
+PRETTY: docs/upstream-extraction/v2.1.247/snippets/gold-vSt-pretty.txt
+DEF: docs/upstream-extraction/v2.1.247/snippets/gold-vSt-def-0-214518476.txt
+
+## arity
+LOCKED 3: async function vSt(e, t, n)
+  e = installLocation
+    hza @214557777: await vSt(a.installLocation, _B(), e)
+    IBo @214560365: await vSt(a, _B(), t)  // a = s.installLocation
+  t = marketplacesCacheDir = _B()
+  n = storageV5 (same object callers pass to U$)
+    hza(e) does o=await U$(e) then vSt(..., e)
+    IBo(e,t,...) does o=await U$(t) then vSt(..., t)
+Local fetchOfficialMarketplaceFromGcs(installLocation, marketplacesCacheDir) is 2-arg. Official 3rd arg is extra.
+
+## 3rd-arg contract (from vSt body ONLY)
+LOCKED: n is optional (n!==void 0).
+LOCKED: n is used ONLY for a V5 READ of the .gcs-sha sentinel, to decide skip/noop.
+LOCKED: no V5 write of catalog in vSt body (BODY "catalog" hits=-, "marketplaceCache" hits=-).
+LOCKED: no n.write / n.writeText / writeText in vSt body.
+LOCKED: .gcs-sha WRITE is filesystem only: ULn(kSt(b,qfe), a) = writeFile(join(staging, ".gcs-sha"), sha)
+        then rename-swap via SSt. Not a V5 write.
+
+Gate:
+  d = kSt(e, qfe)                    // join(installLocation, ".gcs-sha")
+  p = Ne() && n!==void 0 ? J8(d, BLn(t)) : null
+      // J8 = ph(path, dirname(marketplacesCacheDir))
+      // ph -> ol -> Le.marketplaceTree(...) or null
+  sentinel =
+    (n!==void 0 && p!==null)
+      ? n.readText([p]) -> item.found ? value.trim() : null
+      : QUo(d, "utf8")   // fs readFile
+  if sentinel === latestSha: outcome="noop", return sha  // SKIP download
+
+If Ne() is false or J8 returns null, 3rd arg is ignored and FS sentinel is used.
+
+## name identity
+LOCKED async function vSt( count=1 @214518476
+LOCKED string fetchOfficialMarketplaceFromGcs inside that unique body
+LOCKED export vSt as hea @219687213 (same module as _St as gea, qLn as iea)
+
+## collision-ban (other vSt names — NOT this fn)
+- @232841653 let mNe=wSt,vSt; vSt=(TSt)=>{WU({questions:Po,...afkTimeoutMs:TSt}) }  // ask_user_question AFK
+- @232842431 qn[97]=vSt; else vSt=qn[97]; let pNe=vSt
+- @244268297 mermaid fade CSS helper var Eq,vSt,c8e
+- @232029067 ym as qfe  (different module; NOT vSt's qfe)
+Do not bind those.
+
+## neighbors uniquely called from vSt (in-body only)
+
+LOCKED fs/path imports immediately before vSt @214518304:
+  chmod as JUo, mkdir as FLn, readFile as QUo, rename as SSt, rm as wSt, writeFile as ULn
+  dirname as BLn, join as kSt, resolve as jLn, sep as eBo
+
+LOCKED qfe = ".gcs-sha" via unique chain, same module (0 bun markers 212808000-214520000):
+  ih=".gcs-sha" UNIQUE @211423473
+  ih as Feb UNIQUE @211611931
+  Feb as qfe UNIQUE @212808021  (import from _503.js into vSt module)
+  vSt uses qfe only as kSt(e,qfe) and kSt(b,qfe)
+
+LOCKED J8 = ph via unique chain, same module:
+  function ph(r,n) UNIQUE arity @211422976
+    let a=ol(r,n); if(a===null||a.length<2||!xe(a)) return null;
+    return Le.marketplaceTree(a[0], a.slice(1))
+  function ol(r,n) UNIQUE arity @211422789
+    if(!Xr(n)) return null;
+    let a=De(n,"marketplaces"), u=ns(a,r);
+    ...
+  ph as Oeb UNIQUE @211612021
+  Oeb as J8 UNIQUE @212808202
+  J8(d,BLn(t)) UNIQUE call @214518903 (only this shape)
+
+LOCKED nBo classify helper UNIQUE function nBo( @214520232 immediately after vSt
+LOCKED zLn / HLn UNIQUE after nBo @214520650
+  zLn="https://downloads.claude.ai/claude-code-releases/plugins/claude-plugins-official"
+  HLn="marketplaces/claude-plugins-official/"
+
+LOCKED Z5+J5 pair @213632413 / 213632821 in same module (unzipSync + zip external_attr modes)
+  Z5 name collides elsewhere; this pair is the one inside 212808000-214520000
+
+LOCKED await vSt( call sites count=2
+  214557777 hza
+  214560365 IBo
+
+IN-BODY but identity UNKNOWN (colliding names / no unique def in module):
+  Ne()  — gate only; 12x function Ne(){, 0 in 212808000-214518476, no unique `as Ne` import in-module
+  WLn() — unique import sqd as WLn @212857085; sqd def not found
+  wle.get — unique import oeb as wle @212808698 from _503.js; oeb def not found
+  _  Y  D  de  De — log / errorMessage / logEvent / SafeString / errno; not uniquely peeled here
+
+## local vs official (observation only, not a patch)
+Local officialMarketplaceGcs.ts: 2 args, no storage, rm+rename swap, writeFile .gcs-sha on staging.
+Official: 3rd arg V5 read of .gcs-sha for noop; backup+rename dance (`${e}.backup`); same GCS URL / ARC prefix / telemetry.

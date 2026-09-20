@@ -1,0 +1,2 @@
+# Rz as To use@223295451 fn@223295275 end=223295674 len=399
+function sa(e,t,o,r){let[n,{ResumeConversation:i}]=await Promise.all([o,import("B:/~BUN/root/chunk-kqfxs2v7.js")]),{session:l,storageV5:s,credentials:c}=t,d=br(s);await Ut(e,x(To,{session:l,storageV5:s,messageQueue:d,initialState:t.initialState,onChangeAppState:(a)=>ko(a,l,s,c),writesExitHandoff:!0,getFpsMetrics:t.getFpsMetrics,stats:t.stats,children:x(i,{...r,worktreePaths:n})},"resume"),l,s,c)}

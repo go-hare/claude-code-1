@@ -1,0 +1,3 @@
+# offset=206454728
+
+rtOperationError"}};h=class h extends Error{telemetryMessage;errorClass;constructor(n,e,r){super(n);this.name="TelemetrySafeError",this.telemetryMessage=e??n,this.errorClass=r}};nn=new Set(["ENOSPC","EDQUOT","ENFILE","EMFILE"]),en=new Set([

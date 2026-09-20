@@ -1,0 +1,5 @@
+# 247-only name=ADt start=216242459 len=553 sha=8b99f44ad4742961 needle="exited with code ${"
+
+function ADt(e,t,n,r,o,s,i="bash",a,l){let{claimed:c,task:u}=dT(e,o);if(!c)return;if(!u?.isAdopted)RW(e,`
+[${n==="killed"?"killed":`exited with code ${r??"unknown"}`}]
+`);if(n==="completed")ce("task_local_shell");else if(n==="failed")J("task_local_shell","task_local_shell_failed");let d=RDt(i,t,n,r,l),p=ji(e);if(ua({value:ql({taskId:e,toolUseId:s,outputFile:p,status:n,summary:Ur(d)}),mode:"task-notification",skipAttachments:!0,priority:"next",agentId:a??Tr(),taskId:e}),a!==void 0)pa(e,n==="killed"?"stopped":n,{toolUseId:s,summary:d,outputFile:p})}

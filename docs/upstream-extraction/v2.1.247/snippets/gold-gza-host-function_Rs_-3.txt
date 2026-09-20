@@ -1,0 +1,2 @@
+# needle=function Rs( pos=208236892
+function Rs(e,t){if(e.hostFiles.serving("workspace")!=="host")return;let r=v(),n=r.rootByPath.peek(t);if(n!==void 0){let i=n===k?null:n;return{gitRoot:i,canonicalRoot:i===null?null:r.canonicalRootByRoot.peek(i)}}let o=await $n(e.hostFiles,t);if(o===void 0)return;return Un(t,o.gitRoot,o.canonicalRoot),o}

@@ -37,7 +37,13 @@ import rubyClaudeApi from './claude-api/ruby/claude-api/README.md' with {
   type: 'text',
 }
 import skillPrompt from './claude-api/SKILL.md' with { type: 'text' }
+import sharedAdminApi from './claude-api/shared/admin-api.md' with {
+  type: 'text',
+}
 import sharedAgentDesign from './claude-api/shared/agent-design.md' with {
+  type: 'text',
+}
+import sharedCostOptimization from './claude-api/shared/cost-optimization.md' with {
   type: 'text',
 }
 import sharedErrorCodes from './claude-api/shared/error-codes.md' with {
@@ -109,19 +115,12 @@ export const SKILL_MODEL_VARS = {
 export const SKILL_PROMPT: string = skillPrompt
 
 /**
- * densable X5T — bare subcommands recognized by matchSubcommand.
- * `prompt-audit` is non-interactive (221 #4).
+ * densable X5T — defined next to wRc in claudeApi.ts so markdown stays lazy.
  */
-export const CLAUDE_API_SUBCOMMANDS = [
-  'migrate',
-  'managed-agents-onboard',
-  'prompt-audit',
-  'upgrade',
-] as const
-
-export type ClaudeApiSubcommand =
-  | (typeof CLAUDE_API_SUBCOMMANDS)[number]
-  | 'none'
+export {
+  CLAUDE_API_SUBCOMMANDS,
+  type ClaudeApiSubcommand,
+} from './claudeApi.js'
 
 export const SKILL_FILES: Record<string, string> = {
   'csharp/claude-api/README.md': csharpClaudeApi,
@@ -136,7 +135,9 @@ export const SKILL_FILES: Record<string, string> = {
   'python/claude-api/streaming.md': pythonClaudeApiStreaming,
   'python/claude-api/tool-use.md': pythonClaudeApiToolUse,
   'ruby/claude-api/README.md': rubyClaudeApi,
+  'shared/admin-api.md': sharedAdminApi,
   'shared/agent-design.md': sharedAgentDesign,
+  'shared/cost-optimization.md': sharedCostOptimization,
   'shared/error-codes.md': sharedErrorCodes,
   'shared/live-sources.md': sharedLiveSources,
   'shared/managed-agents-self-hosted-sandboxes.md':

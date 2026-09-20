@@ -1,0 +1,6 @@
+# 247 Xb vs 246 Lb — tengu_surface_failed_mcp_servers GB default
+
+247: function Xb(){return N("tengu_surface_failed_mcp_servers",!0)}
+246: function Lb(){return j("tengu_surface_failed_mcp_servers",!1)}
+
+Default flip false→true. Bedrock/Vertex/Foundry and telemetry-disabled skip GrowthBook and use this hardcoded default, so failed configured MCP is now told to Claude.

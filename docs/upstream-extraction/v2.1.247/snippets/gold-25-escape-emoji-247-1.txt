@@ -1,0 +1,3 @@
+# 247 emoji @207249270
+
+ o,Lzd as c,_zd as E,eAd as C}from"B:/~BUN/root/_845.js";import{FBd as g}from"B:/~BUN/root/_850.js";function s(e){return Bun.stripANSI(e)}var l=()=>{};function k(e,n,r){let t=r?.keepNewlines===!0||r?.keepEmojiJoiners===!0,i=s(e.replace(d,"\u200B")).replace(r?.keepNewlines?O:t?N:_,n);return t?i.replace(S,""):i}function A(e){let n=e.replace(/[\p{Cf}\p{Co}\p{Cn}]/gu,"");return n=n.replace(/[\u200B-\u

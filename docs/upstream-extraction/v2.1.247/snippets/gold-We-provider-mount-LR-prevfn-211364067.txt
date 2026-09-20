@@ -1,0 +1,2 @@
+# prev fn @211364067 end=211364401 len=334
+function Xw(e,o,i){let l=Ne(kn),s=typeof e==="function",u=s?e:null,f=s?o:e,m=s?void 0:o,h=$e(u);h.current=u;let p=$e(null),y=l?.setTimeout??zf,b=mn(()=>{if(f===null)return Ya;let v=(E)=>(p.current=null,E(),y(()=>{if(p.current=v,s)h.current?.();else E()},f));return v},[y,f,s,m,...i??[]]),S=Dt(b,s?Iw:()=>p.current===b);if(!s)return S}

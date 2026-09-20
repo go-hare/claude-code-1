@@ -1,0 +1,2 @@
+# already-locked K8 @214509181
+async function K8(e,t){if(await JD(e)){_(`Not marking a symlinked plugin version: ${e}`);return}let n=Ne()&&t!==void 0?mp(e,ra()):null;if(Ne()&&t!==void 0&&n!==null){let r=await t.write(_r.pluginCache(n.marketplace,n.plugin,n.version,[wg]),`${Date.now()}`,{publishDiscipline:"inPlace"});if(!r.ok)_(`Failed to write .orphaned_at: ${e}: ${tr(r.error)}`);return}try{await NUo(dSt(e),`${Date.now()}`,"utf-8")}catch(r){_(`Failed to write .orphaned_at: ${e}: ${r}`)}}

@@ -1,0 +1,1 @@
+function qn(e,n){let t=n?.workTree??e;return Zn(t,[...et(t),...n===void 0?[]:[Qn(n.commonDir)]])}

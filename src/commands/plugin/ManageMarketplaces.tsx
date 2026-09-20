@@ -27,10 +27,12 @@ import {
   removeMarketplaceSource,
   setMarketplaceAutoUpdate,
 } from '../../utils/plugins/marketplaceManager.js';
+import { useSessionServices } from '../../context/sessionServices.js';
 import { updatePluginsForMarketplaces } from '../../utils/plugins/pluginAutoupdate.js';
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
 import { isMarketplaceAutoUpdate } from '../../utils/plugins/schemas.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
+import { Io, re } from '../../utils/plugins/escapeSafeText.js';
 import { plural } from '../../utils/stringUtils.js';
 import type { ViewState } from './types.js';
 
@@ -71,6 +73,7 @@ export function ManageMarketplaces({
   targetMarketplace,
   action,
 }: Props): React.ReactNode {
+  const { storageV5, credentials } = useSessionServices();
   const [marketplaceStates, setMarketplaceStates] = useState<MarketplaceState[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -215,7 +218,7 @@ export function ManageMarketplaces({
           }
 
           // Then remove the marketplace
-          await removeMarketplaceSource(state.name);
+          await removeMarketplaceSource(state.name, undefined, storageV5, credentials);
           removedCount++;
 
           logEvent('tengu_marketplace_removed', {
@@ -228,9 +231,14 @@ export function ManageMarketplaces({
         // Handle update
         if (state.pendingUpdate) {
           // Refresh individual marketplace for efficiency with progress reporting
-          await refreshMarketplace(state.name, (message: string) => {
-            setProgressMessage(message);
-          });
+          await refreshMarketplace(
+            state.name,
+            (message: string) => {
+              setProgressMessage(message);
+            },
+            undefined,
+            storageV5,
+          );
           updatedCount++;
           refreshedMarketplaces.add(state.name.toLowerCase());
 
@@ -602,7 +610,7 @@ export function ManageMarketplaces({
     return (
       <Box flexDirection="column">
         <Text bold color="warning">
-          Remove marketplace <Text italic>{selectedMarketplace.name}</Text>?
+          Remove marketplace <Text italic>{re(selectedMarketplace.name)}</Text>?
         </Text>
         <Box flexDirection="column">
           {pluginCount > 0 && (
@@ -616,7 +624,7 @@ export function ManageMarketplaces({
             <Box flexDirection="column" marginTop={1} marginLeft={2}>
               {selectedMarketplace.installedPlugins.map(plugin => (
                 <Text key={plugin.name} dimColor>
-                  • {plugin.name}
+                  • {re(plugin.name)}
                 </Text>
               ))}
             </Box>
@@ -641,8 +649,8 @@ export function ManageMarketplaces({
 
     return (
       <Box flexDirection="column">
-        <Text bold>{selectedMarketplace.name}</Text>
-        <Text dimColor>{selectedMarketplace.source}</Text>
+        <Text bold>{re(selectedMarketplace.name)}</Text>
+        <Text dimColor>{re(selectedMarketplace.source)}</Text>
         <Box marginTop={1}>
           <Text>
             {selectedMarketplace.pluginCount || 0} available {plural(selectedMarketplace.pluginCount || 0, 'plugin')}
@@ -661,8 +669,8 @@ export function ManageMarketplaces({
                 <Box key={plugin.name} flexDirection="row" gap={1}>
                   <Text>{figures.bullet}</Text>
                   <Box flexDirection="column">
-                    <Text>{plugin.name}</Text>
-                    <Text dimColor>{plugin.manifest.description}</Text>
+                    <Text>{re(plugin.name)}</Text>
+                    <Text dimColor>{Io(plugin.manifest.description ?? '')}</Text>
                   </Box>
                 </Box>
               ))}
@@ -783,12 +791,12 @@ export function ManageMarketplaces({
                 <Box flexDirection="row" gap={1}>
                   <Text bold strikethrough={state.pendingRemove} dimColor={state.pendingRemove}>
                     {state.name === 'claude-plugins-official' && <Text color="claude">✻ </Text>}
-                    {state.name}
+                    {re(state.name)}
                     {state.name === 'claude-plugins-official' && <Text color="claude"> ✻</Text>}
                   </Text>
                   {indicators.length > 0 && <Text color="warning">[{indicators.join(', ')}]</Text>}
                 </Box>
-                <Text dimColor>{state.source}</Text>
+                <Text dimColor>{re(state.source)}</Text>
                 <Text dimColor>
                   {state.pluginCount !== undefined && <>{state.pluginCount} available</>}
                   {state.installedPlugins && state.installedPlugins.length > 0 && (

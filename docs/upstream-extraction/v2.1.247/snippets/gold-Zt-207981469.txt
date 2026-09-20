@@ -1,0 +1,2 @@
+# function Zt( pos=207981469 end=207981543 len=74
+function Zt(e){let t={};for(let n of e)t={...t,...Te[n].shape()};return t}

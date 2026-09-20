@@ -1,0 +1,3 @@
+# 246 tip content threw @195763168
+ don't ask again for...
+,.deltaY..G...1..Cannot destructure property 'ultraplanArg' from null or undefined value...j...ultraplanArg...Y.promptIdentifier...Y...disconnectedBridge...fU..onStatusMessage...,...message_selector%...G,..tengu_auto_mode_env_onboarding_accept...$..."..tengu_auto_mode_env_onboarding_later&...tengu_auto_mode_env_onboarding_dismiss...;.sessions...?]..tip content threw...#?@.failedTipIds...?H.spinnerTipsOverride...getMarketplacePluginTips...^...pluginId...&*A.advertisedCommand...B...Cannot destructure property 'helpers' from null 

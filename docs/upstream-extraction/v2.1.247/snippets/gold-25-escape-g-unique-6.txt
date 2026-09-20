@@ -1,0 +1,3 @@
+# 247 _g( @214029447
+
+art of the agent's report: ",Odt;var _g=w(()=>{$ue();Y_();Mdt();SPo=wx(Kc);Odt=`${JMe}${Ho} saved `});function kx(e,t,n){let r=e?.agentId??n,o=e?.agentContext;return o!==void 0&&Gq(o)&&kPo.has(t)?[r,o.parentAgentId??n]:[r]}var Ddt,kPo;var QMe=w(()=>{_g();Ddt=new Set(["PreToolUse","PostToolUse","PostToolUseFailure","PermissionRequest","PermissionDenied"]),kPo=new Set([...Ddt,"PostToolBatch"])});async function*oU(e,t,n,r,o,s,i=Ms,a){let l=r.managedPass,c=!a?.managedHooksOnly&&l?.toolUseId===t&&pp.stableKey(l.input)===pp.stableKey(n)?l.pass:void 0,u=!a?.managedHooksOnly&&(c!==void 0||Dl.hasModule

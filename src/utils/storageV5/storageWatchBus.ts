@@ -572,15 +572,17 @@ export async function withStorageWatchExpect<T>(
  * densable leftover `Ot` host — hb store `e` for `K(e, r)`.
  * `resolvePath` = leftover `Qe`/`Ee`; `keyId` = leftover `ue`.
  */
-export type StorageAnnounceHost = {
+export type StorageAnnounceHost<
+  TRoots extends { configHome: string } = { configHome: string },
+> = {
   bus: StorageWatchBus
   instanceId: string
-  roots: { configHome: string }
+  roots: TRoots
   timing: { echoDeadlineMs: number }
-  resolvePath: (
-    roots: { configHome: string },
-    key: Record<string, unknown>,
-  ) => string | null
+  // Generic in the roots shape: announceStorageChange only ever feeds the
+  // host's own `roots` back in, while callers' resolvePath implementations
+  // need their concrete roots type (e.g. DigestStorageRoots).
+  resolvePath: (roots: TRoots, key: Record<string, unknown>) => string | null
   keyId: (key: Record<string, unknown>) => string
 }
 
@@ -590,8 +592,8 @@ export type StorageAnnounceHost = {
  * created|updated|deleted && `!qe(key)` && `Xe(key)==="refuse"`
  * (`qe`=`Nr`, `Xe`=`Lr`).
  */
-export function announceStorageChange(
-  e: StorageAnnounceHost,
+export function announceStorageChange<TRoots extends { configHome: string }>(
+  e: StorageAnnounceHost<TRoots>,
   r: unknown,
 ): void {
   const change = r as { kind?: string; key?: Record<string, unknown> }

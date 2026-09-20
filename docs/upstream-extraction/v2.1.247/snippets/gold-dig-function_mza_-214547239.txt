@@ -1,0 +1,6 @@
+# offset=214547239
+
+up temporary marketplace cache at ${i}: ${Y(f)}`,{level:"warn"})}throw p}}async function mza(e,t,n,r){let o=e;if(fb(e)&&!u0n(e.path))o={...e,path:zS(e.path)};if(!D$(o)){if(VFe(o))throw Error(`Marketplace source '${$$(o)}' is blocked by enterprise policy.`);let u=c2()||[],d=o0n(),p=GFe(o),f=`Marketplace source '${$$(o)}'`;if(p)f+=` (${p})`;if(f+=" is blocked by enterprise policy.",u.length>0)f+=` Allowed sources: ${u.map((m)=>$$(m)).join(", ")}`;else f+=" No external marketplaces are allowed.";if(o.source==="github"&&d.length>0)f+=`
+
+Tip: The shorthand "${o.repo}" assumes github.com. `+`For an internal git host (GitHub Enterprise, GitLab Self-Managed or Dedicated, \u2026), use the full repository URL:
+`+`  git@your-git-host.com:${o.repo}.git`;throw Error(f)}let s=await U$(n);for(let[u,d]of Object.entries(s))if(Rh(d.source,o))return _(`Source already materialized as '${u}', skipping clone`),{name:u,alreadyMaterialized:!0,resolvedSource:o};let{marketplace:i,cachePath:a}=await LSt(o,t,n,r),l=Qfe(i.name,o);if(l)throw Error(l);let c;if(await d2((u)=>{if(c=u[i.name],c){let d=Ok(c.installLocation);if(d)throw Error(`Marketplace '${i.name}' is seed-managed (${d}). To use a different source, ask your admin to update the seed, or use a different marketplace name.`);_(`Mar

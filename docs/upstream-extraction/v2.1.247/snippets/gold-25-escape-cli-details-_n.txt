@@ -1,0 +1,5 @@
+# @233801400
+
+)=>j;await be(he({plugin:_.name,version:_.manifest.version,source:_.source,sha:_.sha??null,tokens:Z,components:{...g,commands:g.commands.map(p),agents:g.agents.map(p),skills:g.skills.map(p)}})+`
+`);return}let h=[],P=_n(_),w=P===_.name?_.name:`${P} (${_.name})`;if(h.push(`${w} ${_.manifest.version??""}`.trimEnd()),_.manifest.description){let[p,...y]=_.manifest.description.split(`
+`);h.push(`  Description: ${p}`);for(let j of y)h.push(`      ${j}`)}h.push(`  Source: ${_.source}`),h.push(""),h.push("Component inventory");let T=[["Skills",[...g.skills,...g.commands].map((p)=>p.name).sort(),""],["Agents",g.agents.map((p)=>p.name),""],["Hooks",g.hooks,"  (harness-only \u2014 no model context cost)"],["MCP servers",g.mcpServers,"  (tool schemas resolved at runtime; not counted)"],["LSP servers",g.lspServers,"  (out-of-process tooling; no model context cost)"]];for(let[p,y,j]of T)h.push(`  ${p} (${y.length})${y.length>0?`  ${y.join(", ")}`:""}$

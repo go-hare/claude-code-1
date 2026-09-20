@@ -1,0 +1,3 @@
+# 247 function ke start=207581855 end=207581987 len=132 sha=03dff228be7f3f66
+
+function ke(e){e.inspectOpts={};let t=Object.keys(Z.inspectOpts);for(let r=0;r<t.length;r++)e.inspectOpts[t[r]]=Z.inspectOpts[t[r]]}

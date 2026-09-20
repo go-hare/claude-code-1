@@ -1,0 +1,21 @@
+# 246 NO_FN "function Wr(" @204860493
+
+var Ie="any kind";var Kr=()=>{};var Vr;var Wn=r(()=>{Kr();Vr={AskUserQuestion:{metadataSource:["a string","missing"]},ToolUse:{input:Ie,output:Ie},ToolResult:{output:Ie},Spinner:{message:["a string","null"]},InfoNotice:{command:["a string","null"]}}});var $t="PermissionRequest";var zn=()=>{};var st=(e)=>Array.isArray(e)?"an array":e===null?"null":e===void 0?"missing":`a ${typeof e}`;var Gn=()=>{};function Wr(e,t){let o=e.props;if(!T(o))return"no { props } (an object)";let n=Vr[t.component]??{};for(let[s,i]of Object.entries(n)){let m=st(o[s]);if(i!==Ie&&!i.includes(m))return`a props.${s} that is ${m}, not ${i.join(" or ")}`}for(let[s,i]of Object.entries(t.props)){if(i===void 0||Object.hasOwn(n,s))continue;let m=st(i),a=st(o[s]);if(a!==m)return`a props.${s} that is ${a}, not ${m}`}return}var Yn=r(()=>{Y();Kr();Wn();Gn()});var Lm;var Fm=r(()=>{It();Y();zn();Yn();Lm={event:"ui.render",checkArgument:Wr,checkMatcher:(e)=>Object.hasOwn(e,"component")&&ee.matches(e.component,$t)?`${$t} is drawn by the engine alone; its answer authorises an action. A plugin adds context with $.ui.notice`:void 0,check:(e)=>T(e)&&typeof e.type==="string"?void 0:"something that is not a tree element"}});var it;var zr=r(()=>{it={terminal:["Box","Text","div","span","b"],desktop:["div","span","b","Box","Text"]}});var Lt;var Gr=r(()=>{wg();zr();Lt=Dm([...it.terminal,...it.desktop])});var Um=()=>{};var Bm=()=>{};var Xn;var Jn=r(()=>{Xn=String.raw`(() => {
+  const INTRINSIC = {
+    Box: 'Box', box: 'Box', Text: 'Text', text: 'Text',
+    div: 'div', span: 'span', b: 'b',
+  }
+  const flatten = (children, into) => {
+    for (const child of children) {
+      if (child === null || child === undefined || typeof child === 'boolean') {
+        continue
+      }
+      if (Array.isArray(child)) flatten(child, into)
+      else if (typeof child === 'number') into.push(String(child))
+      else into.push(child)
+    }
+  }
+  function Fragment(props) {
+    return {
+      type: 'Box',
+      props: { flexDirection: 'co

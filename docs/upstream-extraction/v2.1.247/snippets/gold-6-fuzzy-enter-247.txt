@@ -1,0 +1,3 @@
+# offset=231649439 ver=247 hit=1/2 needle="r[ke().focus]"
+
+=="pagedown"){n.preventDefault(),n.stopImmediatePropagation();let wt=n.key==="pagedown"?1:-1;ee((l==="up"?-wt:wt)*a);return}if(n.key==="return"){n.preventDefault(),n.stopImmediatePropagation();let yt=r[ke().focus];if(yt)F(yt);return}if(n.key==="tab"){n.preventDefault(),n.stopImmediatePropagation();let Do=r[ke().focus];if(D)D.handler(Do);else if(Do)F(Do);return}Io(n)},t[14]=l,t[15]=ke,t[16]=r,t[17]

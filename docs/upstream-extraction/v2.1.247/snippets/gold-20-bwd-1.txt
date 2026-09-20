@@ -1,0 +1,4 @@
+# bwd 1 @205208177
+# start=205207877 end=205208377
+
+d permission(s) toolUseIDs=....m.F. in the transcript failed: .O...U...Cannot destructure property 'resumeWorkflowLaunch' from null or undefined value......`..resumeWorkflowLaunch$....}=.poll-event enqueue hook pass aborted.....n..B:/~BUN/root/chunk-7tk6q947.js..U.......Cannot destructure property 'buildWorkspaceDiffResponse' from null or undefined value.......;...buildWorkspaceDiffResponse..........tengu_ptc_enabled.......s$a.ccr_mcp_call_staged......:..staged mcp_call is disabled.......u.mcp_c

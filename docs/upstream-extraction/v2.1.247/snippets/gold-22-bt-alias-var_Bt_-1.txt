@@ -1,0 +1,2 @@
+# pos=206546593
+ise.reject(new p.HooksError(`$.${r} (${t.pluginName}) has no method ${n}`))}}}var Jc=o(()=>{X();Te();w();xe();Ft();lo()});var Yc=()=>{};var Xc=()=>{};var Bt={};g(Bt,{EMPTY:()=>Je,NOT_A_NOUN:()=>po,createInterfaceOps:()=>Pu,createOpsState:()=>$c,default:()=>Bt,describe:()=>Fc,inertFor:()=>ao,isNoun:()=>it,materialize:()=>Wc,methodsOf:()=>io,missingNounTrap:()=>Vc,objectFor:()=>uo,proxyFor:()=>fo,suppressedStub:()=>at});var ds=o(()=>{ds();Mc();Jc();Ft();Yc();Xc();lo()});var ys=(e,t)=>e===!0&&t===void 0;var gs=()=>{};var ju=(e,t)=>d.sealNoun({play

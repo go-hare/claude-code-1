@@ -132,10 +132,10 @@ export async function createSSHSession(
     sshArgs.push('-o', 'StreamLocalBindUnlink=yes')
     // Override auth env to use the remote socket path
     const idx = remoteCli.indexOf(
-      `ANTHROPIC_AUTH_SOCKET=${authEnv.ANTHROPIC_AUTH_SOCKET}`,
+      `ANTHROPIC_UNIX_SOCKET=${authEnv.ANTHROPIC_UNIX_SOCKET}`,
     )
     if (idx !== -1) {
-      remoteCli[idx] = `ANTHROPIC_AUTH_SOCKET=${remoteSocket}`
+      remoteCli[idx] = `ANTHROPIC_UNIX_SOCKET=${remoteSocket}`
     }
   } else {
     // Windows: TCP reverse forward

@@ -1,0 +1,3 @@
+# 247-after-Zt n=4 function uN start=210376666 end=210376887 len=221 sha=70abc8d3a8454203
+
+function uN(e){let t=[];for(let n=e;;n=$e(n))try{let r=Vt(n);return t.length===0?{path:r,exists:!0}:{path:ht(r,...t),exists:!1}}catch(r){let s=pn(r);if(s!=="ENOENT"&&s!=="ENOTDIR"||$e(n)===n)return null;t.unshift(Da(n))}}

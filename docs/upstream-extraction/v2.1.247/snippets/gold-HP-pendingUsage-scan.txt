@@ -1,0 +1,346 @@
+# HP/pendingUsage peel official-247 size=253204128
+# official-246 size=250948768
+# already locked yln@213648410 dPe@213653071 — not re-derived
+
+## 247 unique/shape needles
+247 STR "let{pendingUsage:t}=HP()" count=1 hits=213648426
+  @213648426 r(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{c
+247 STR "function yln(e){let{pendingUsage:t}=HP()" count=1 hits=213648410
+  @213648410 endingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{c
+247 STR "function HP(){return aln.of(bn().host)}" count=1 hits=213647449
+  @213647449 ion uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsa
+247 STR "class iln{pendingUsage=new Map" count=1 hits=213647167
+  @213647167 r("policySettings")?.fileSuggestion:e}var sln=w(()=>{Ls();Co();n3()});class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}class lln{flushers=null;exitFlushRegistered=!1}v
+247 STR "pendingUsage=new Map" count=1 hits=213647177
+  @213647177 ettings")?.fileSuggestion:e}var sln=w(()=>{Ls();Co();n3()});class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}class lln{flushers=null;exitFlushRegistered=!1}v
+247 STR "aln=new fn(()=>new iln)" count=1 hits=213647337
+  @213647337 n{flushers=null;exitFlushRegistered=!1}var aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return 
+247 STR "aln.of(bn().host)" count=1 hits=213647470
+  @213647470 s=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUs
+247 STR "pendingUsage.set(" count=1 hits=213647588
+  @213647588 ),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.ex
+247 STR "pendingUsage.delete(" count=0 hits=
+247 STR "pendingUsage.clear()" count=1 hits=213648339
+  @213648339 age.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.key
+247 STR "pendingUsage.get(" count=1 hits=213647531
+  @213647531 ){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flu
+247 STR "pendingUsage.has(" count=1 hits=213648390
+  @213648390 ntries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xw
+247 STR "pendingUsage.size" count=2 hits=213647420,213648260
+  @213647420 =>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get
+  @213648260 P();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP
+247 STR "pendingUsage.keys()" count=0 hits=
+247 STR "pendingUsage.entries()" count=1 hits=213648306
+  @213648306 ,e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingU
+247 STR "Cannot destructure property 'pendingUsage'" count=1 hits=200263976
+  @200263976 DATA\}...m.\$\{user_config\.([^}]+)\}...K3[.flushAtExit.G...n.K.Cannot destructure property 'pendingUsage' from null or undefined value...*..attributionMcpTool...agent:builtin:.....agent:custom:...
+247 STR "function uln(e){r3.flushers=e;let t=HP()" count=1 hits=213647374
+  @213647374 1}var aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP
+247 STR "function dm(e){let t=Date.now(),n=HP()" count=1 hits=213647488
+  @213647488 t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3
+247 STR "function sPe(){let e=HP()" count=1 hits=213648168
+  @213648168 ln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[..
+247 STR "function uvi(e){return HP().pendingUsage.has(e)}" count=1 hits=213648362
+  @213648362 l;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=6
+247 STR "HP().pendingUsage" count=1 hits=213648385
+  @213648385 age.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}v
+247 STR "HP().exitFlushesInFlight" count=2 hits=213647862,213647917
+  @213647862 hTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}function pln(e){HP().exitFlushesInFlight.push(e)}function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}function mln(){
+  @213647917 unction pln(e){HP().exitFlushesInFlight.push(e)}function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}function mln(){let e=HP(),t=e.exitFlushesInFlight.flat();return e.exit
+247 STR "HP().flushStorageV5" count=2 hits=213648104,213648148
+  @213648104 t();return e.exitFlushesInFlight=[],t.length>0?t:null}function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTim
+  @213648148 >0?t:null}function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size
+247 STR "function pln(e){HP().exitFlushesInFlight.push(e)}" count=1 hits=213647846
+  @213647846 lushTimer)e.flushTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}function pln(e){HP().exitFlushesInFlight.push(e)}function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}function mln(){let e=HP(
+247 STR "function gln(e){HP().flushStorageV5=e}" count=1 hits=213648088
+  @213648088 shesInFlight.flat();return e.exitFlushesInFlight=[],t.length>0?t:null}function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer)
+247 STR "function hln(){return HP().flushStorageV5}" count=1 hits=213648126
+  @213648126 esInFlight=[],t.length>0?t:null}function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size=
+247 STR "yln(n),ki(" count=1 hits=213653132
+  @213653132 e:s}},t)}function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{let s=Object.keys(r.pluginUsage??{}).filter((a)=>n.has(a.toLowerCase()));if(s.length===0)return r;let i=
+247 STR "pluginUsage" count=26 hits=200264580,200264600,203629448,208754720,208754973,213652650,213652807,213652890,213652945,213653052,213653168,213653258,213653310,213653357,213653440,213653495,213653621,213653669,213653780,213653875,213654017,213654031,222598143,222598532,222607622,222607833
+  @200264580 ture property 'firstPartyPlugins' from null or undefined value...9...pluginUsage...#.pluginUsageLspGraceAppliedIds...lastUsedNumStartups...E.default-bundle...official	
+  @200264600 PartyPlugins' from null or undefined value...9...pluginUsage...#.pluginUsageLspGraceAppliedIds...lastUsedNumStartups...E.default-bundle...official	...%.l.community... 
+  @203629448 ...M.speculationEnabled...U...fleetViewPeakConcurrent...Aw.pluginUsageLspGraceApplied...D..autoModeOptInDismissed..	...pF.prideFlag...B...t.7.Cannot destructure property 'hist
+  @208754720 &t.speculationEnabled===void 0&&t.fleetViewPeakConcurrent===void 0&&t.pluginUsageLspGraceApplied===void 0&&t.autoModeOptInDismissed===void 0&&t.prideFlag===void 0)return e;let{opus1mMergeNoti
+  @208754973 pus48LaunchSeenCount:i,speculationEnabled:s,fleetViewPeakConcurrent:a,pluginUsageLspGraceApplied:u,autoModeOptInDismissed:l,prideFlag:d,...f}=t;return f}function dc(e){if(!e)return e;let t={}
+  @213652650 length===0)return;Pln(xit(e))}function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n[r];n[r]={usageCount:(s?.usageCount??0)+o.count,lastUsedAt:o.lastUsedAt,lastUsedNum
+  @213652807 astUsedAt:o.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:n}}}function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filter((i)=>!r.pluginUsage?.[i]);if(o.length===0)retu
+  @213652890 }}}function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filter((i)=>!r.pluginUsage?.[i]);if(o.length===0)return r;let s={...r.pluginUsage};for(let i of o)s[i]={usageCount:0,lastUsedAt:n,lastUs
+
+## 246 same-shape leftover
+246 STR "let{pendingUsage:t}=HP()" count=0 hits=
+246 STR "function HP(){return aln.of(bn().host)}" count=0 hits=
+246 STR "class iln{pendingUsage=new Map" count=0 hits=
+246 STR "pendingUsage=new Map" count=1 hits=212280285
+  @212280285 ettings")?.fileSuggestion:e}var hsn=w(()=>{zs();Po();I6()});class ysn{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}class bsn{flushers=null;exitFlushRegistered=!1}v
+246 STR "pendingUsage.set(" count=1 hits=212280696
+  @212280696 ),n=TP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(M6.flushers)ksn(n,M6.flushers)}function ksn(e,t){if(!M6.exitFlushRegistered)M6.ex
+246 STR "pendingUsage.delete(" count=0 hits=
+246 STR "pendingUsage.clear()" count=1 hits=212281447
+  @212281447 age.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function ygi(e){return TP().pendingUsage.has(e)}function Asn(e){let{pendingUsage:t}=TP();for(let n of t.key
+246 STR "function yln(" count=1 hits=212387340
+  @212387340 turn Rbo.of(hn().host)}function cPe(e){lPe().markSnapshotAvailable(e)}function yln(e){lPe().replaceSessionEnvVarKeys(e)}function uPe(e){lPe().replaceProbedEnvKeys(e)}function Mle(){return lPe()
+246 STR "let{pendingUsage:t}=" count=1 hits=212281534
+  @212281534 r(),t}function ygi(e){return TP().pendingUsage.has(e)}function Asn(e){let{pendingUsage:t}=TP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var oyo=60000;var TC=w(()=>{Oe();Ssn()});impo
+
+## function HP( collision scan 247
+function HP( count=3 hits=208506954,213647449,250510798
+  HP@208506954 end=208507541 len=587 function HP(){return{event_name:"",client_timestamp:void 0,model:"",session_id:"",user_type:"",betas:"",env:void 0,entrypoint:"",agent_sdk_version:"",is_interactive:!1,client_type:
+  HP@213647449 end=213647488 len=39 function HP(){return aln.of(bn().host)}
+  HP@250510798 end=250510977 len=179 function HP(e,t){if(t.length===0||Lp(e,t))return null;let n=Vh(e,[...new Set(t.map(r=>Iu(e,r)))]).map(r=>e.subtreeHtml(r)).filter(r=>r!=null);return n.length===0?null:n.join(` `)}
+
+## async function HP( / function hp( / async function hp(
+"async function HP(" count=0 hits=
+"function hp(" count=6 hits=208631818,221317491,221747322,226920345,241936871,249857271
+  @208631818 function hp(e){return nv(`${rv(e)}tool`)?.serverName}
+  @221317491 function hp(e){let t=["package","import","option","optional","required","repeated","group","oneof"],n=["double","float","int32","int64","uint32","uint64","sint32","sint64","fixed32
+  @221747322 function hp(e,t){let r=await to(e,"claude stop <id>","Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`.",t),n=await K(O(r),t),{confirm
+  @226920345 function hp(e){if(ga&&ga.versions){let t=ga.versions;if(t.bun)e.set("Bun",t.bun);else if(t.deno)e.set("Deno",t.deno);else if(t.node)e.set("Node",t.node)}e.set("OS",`(${go.arch()}-$
+  @241936871 function hp(e){return ki(t=>{t.setUTCDate(t.getUTCDate()-(t.getUTCDay()+7-e)%7),t.setUTCHours(0,0,0,0)},(t,r)=>{t.setUTCDate(t.getUTCDate()+r*7)},(t,r)=>(r-t)/6048e5)}
+  @249857271 function hp(e){let{h:t,s:n,v:r,a:o}=e,i=r*n,a=i*(1-Math.abs(t/60%2-1)),s=r-i,c=0,l=0,u=0;t<60?(c=i,l=a):t<120?(c=a,l=i):t<180?(l=i,u=a):t<240?(l=a,u=i):t<300?(c=a,u=i):(c=i,u=a);le
+"async function hp(" count=2 hits=221747316,226920339
+  @221747316 async function hp(e,t){let r=await to(e,"claude stop <id>","Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`.",t),n=await K(O(r),t),{c
+  @226920339 async function hp(e){if(ga&&ga.versions){let t=ga.versions;if(t.bun)e.set("Bun",t.bun);else if(t.deno)e.set("Deno",t.deno);else if(t.node)e.set("Node",t.node)}e.set("OS",`(${go.arc
+"var HP=" count=0 hits=
+"let HP=" count=0 hits=
+"const HP=" count=0 hits=
+
+## HP() call sites near pendingUsage cluster (213640000-213660000)
+HP() in cluster count=11 hits=213647410,213647458,213647522,213647862,213647917,213648002,213648104,213648148,213648189,213648385,213648446
+  @213647410 =>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}fu
+  @213647458 ers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pending
+  @213647522 {return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.s
+  @213647862 Timeout(t.flush,Xwo),e.flushTimer.unref?.()}function pln(e){HP().exitFlushesInFlight.push(e)}function fln(e){let t=HP().exitFlushesInFlight,
+  @213647917 n(e){HP().exitFlushesInFlight.push(e)}function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}function mln(){l
+  @213648002 n=t.indexOf(e);if(n!==-1)t.splice(n,1)}function mln(){let e=HP(),t=e.exitFlushesInFlight.flat();return e.exitFlushesInFlight=[],t.length>0?t
+  @213648104  e.exitFlushesInFlight=[],t.length>0?t:null}function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){l
+  @213648148 function gln(e){HP().flushStorageV5=e}function hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flu
+  @213648189 ction hln(){return HP().flushStorageV5}function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUs
+  @213648385 s()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t
+  @213648446 P().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;v
+
+## pendingUsage all hits 247 (full)
+pendingUsage count=11 hits=200123472,200264005,213647177,213647420,213647531,213647588,213648260,213648306,213648339,213648390,213648430
+  @200123472 ..._stderrStream...w.reader.../.".expansionByRootCanonical...pendingUsage...exitFlushesInFlight...OA).flushStorageV5...Tb.flushers...?.exitFlushRegistered...firstPartyPlugins...
+  @200264005 ser_config\.([^}]+)\}...K3[.flushAtExit.G...n.K.Cannot destructure property 'pendingUsage' from null or undefined value...*..attributionMcpTool...agent:builtin:.....agent:custom:...K...agent:...Q
+  @213647177 r("policySettings")?.fileSuggestion:e}var sln=w(()=>{Ls();Co();n3()});class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}class lln{flushers=null;exitFlushRegistered=!1}var aln,r3;
+  @213647420 =new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.co
+  @213647531 nction HP(){return aln.of(bn().host)}function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}functi
+  @213647588 =Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegist
+  @213648260 (){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsa
+  @213648306 lushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=
+  @213648339 .pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.h
+  @213648390 ingUsage.entries()];return e.pendingUsage.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var z
+  @213648430 e.clear(),t}function uvi(e){return HP().pendingUsage.has(e)}function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}var Xwo=60000;var zC=w(()=>{$e();cln()});import{createHash 
+
+## extract cluster fns from unique strings
+EXTRACT class iln needle count=1 hits=213647167
+  LOCK-CANDIDATE class iln@213647167 end=213647259 len=92
+  BODY class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}
+EXTRACT function HP needle count=1 hits=213647449
+  LOCK-CANDIDATE function HP@213647449 end=213647488 len=39
+  BODY function HP(){return aln.of(bn().host)}
+EXTRACT function uln needle count=1 hits=213647374
+  LOCK-CANDIDATE function uln@213647374 end=213647449 len=75
+  BODY function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}
+EXTRACT function dm needle count=1 hits=213647488
+  LOCK-CANDIDATE function dm@213647488 end=213647665 len=177
+  BODY function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}
+EXTRACT function dln needle count=1 hits=213647665
+  LOCK-CANDIDATE function dln@213647665 end=213647846 len=181
+  BODY function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTimer)e.flushTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}
+EXTRACT function pln needle count=1 hits=213647846
+  LOCK-CANDIDATE function pln@213647846 end=213647895 len=49
+  BODY function pln(e){HP().exitFlushesInFlight.push(e)}
+EXTRACT function fln needle count=1 hits=213647895
+  LOCK-CANDIDATE function fln@213647895 end=213647981 len=86
+  BODY function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}
+EXTRACT function mln needle count=1 hits=213647981
+  LOCK-CANDIDATE function mln@213647981 end=213648088 len=107
+  BODY function mln(){let e=HP(),t=e.exitFlushesInFlight.flat();return e.exitFlushesInFlight=[],t.length>0?t:null}
+EXTRACT function gln needle count=1 hits=213648088
+  LOCK-CANDIDATE function gln@213648088 end=213648126 len=38
+  BODY function gln(e){HP().flushStorageV5=e}
+EXTRACT function hln needle count=1 hits=213648126
+  LOCK-CANDIDATE function hln@213648126 end=213648168 len=42
+  BODY function hln(){return HP().flushStorageV5}
+EXTRACT function sPe needle count=1 hits=213648168
+  LOCK-CANDIDATE function sPe@213648168 end=213648362 len=194
+  BODY function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}
+EXTRACT function uvi needle count=1 hits=213648362
+  LOCK-CANDIDATE function uvi@213648362 end=213648410 len=48
+  BODY function uvi(e){return HP().pendingUsage.has(e)}
+EXTRACT function yln needle count=1 hits=213648410
+  LOCK-CANDIDATE function yln@213648410 end=213648511 len=101
+  BODY function yln(e){let{pendingUsage:t}=HP();for(let n of t.keys())if(e.has(n.toLowerCase()))t.delete(n)}
+EXTRACT function oko needle count=1 hits=213652316
+  LOCK-CANDIDATE function oko@213652316 end=213652373 len=57
+  BODY function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}
+EXTRACT async function Aln needle count=1 hits=213652373
+  LOCK-CANDIDATE async function Aln@213652373 end=213652453 len=80
+  BODY async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}
+EXTRACT function xvi needle count=1 hits=213652453
+  LOCK-CANDIDATE function xvi@213652453 end=213652526 len=73
+  BODY function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}
+EXTRACT function sko needle count=1 hits=213652526
+  LOCK-CANDIDATE function sko@213652526 end=213652610 len=84
+  BODY function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}
+EXTRACT function xit needle count=1 hits=213652610
+  LOCK-CANDIDATE function xit@213652610 end=213652823 len=213
+  BODY function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n[r];n[r]={usageCount:(s?.usageCount??0)+o.count,lastUsedAt:o.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:n}}}
+EXTRACT function xln needle count=1 hits=213652823
+  LOCK-CANDIDATE function xln@213652823 end=213653071 len=248
+  BODY function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filter((i)=>!r.pluginUsage?.[i]);if(o.length===0)return r;let s={...r.pluginUsage};for(let i of o)s[i]={usageCount:0,lastUsedAt:n,lastUsedNumStartups:r.numStartups};return{...r,pluginUsage:s}},t)}
+EXTRACT function dPe needle count=1 hits=213653071
+  LOCK-CANDIDATE function dPe@213653071 end=213653329 len=258
+  BODY function dPe(e,t){let n=new Set(e.map((r)=>r.toLowerCase()));yln(n),ki((r)=>{let s=Object.keys(r.pluginUsage??{}).filter((a)=>n.has(a.toLowerCase()));if(s.length===0)return r;let i={...r.pluginUsage};for(let a of s)delete i[a];return{...r,pluginUsage:i}},t)}
+
+## name-collision defs (dm / sPe / uln / uvi / xit / xln / dln)
+FN "function dm(" count=12 hits=208868836,211957343,213647488,220067579,221431590,222837322,223288247,227518232,227716207,229251509,230433466,237909520
+  @208868836 function dm(e,t,n,r,o){await a$(r);let s=await rt(r);if(!t){if(s&&!An(s.expiresAt))return"not_needed";if(!s?.refreshToken)return"no_refresh_token"}if(!s?.refreshToken)return"no_refresh_token";if(ya.ha
+  @211957343 function dm(e){let{schema:t,errSchemaPath:r,opts:n,self:o}=e;if(t.$ref&&n.ignoreKeywordsWithRef&&(0,he.schemaHasRulesButRef)(t,o.RULES))o.logger.warn(`$ref: keywords ignored in schema at path "${r}"`)
+  @213647488 function dm(e){let t=Date.now(),n=HP(),r=n.pendingUsage.get(e);if(r)r.count++,r.lastUsedAt=t;else n.pendingUsage.set(e,{count:1,lastUsedAt:t});if(r3.flushers)dln(n,r3.flushers)}
+  @220067579 function dm(e,r,n){return typeof e==="string"&&e.length>0&&!e.includes("\x00")&&wv(e)&&!qf(e)?void 0:w(r,n)}
+  @221431590 function dm(e){let t=e.regex,n=["functions","model","data","parameters","quantities","transformed","generated"],a=["for","in","if","else","while","break","continue","return"],o=["array","tuple","compl
+  @222837322 function dm(e,t){let o=re(t,200);return e?`It was archived (nothing was left running); it is listed under Archived at ${o}.`:`It was left running and could not be archived from here; open or archive i
+  @223288247 function dm(e,t){let[{findBedrockUpgradeCandidates:o},{upgradeKey:r}]=await Promise.all([import("B:/~BUN/root/chunk-1d9jcwe9.js"),import("B:/~BUN/root/chunk-e2fm4tk7.js")]),n=await Pn("bedrock-upgrade
+  @227518232 function dm(e,n){let t=ai(n).split(mn),r=t[0]===""?mn:t[0];for(let o of t.slice(1)){r=Rt(r,o);let i=await Kr(r).catch((a)=>B(a)==="ENOENT"?null:void 0);if(i===void 0)return!0;if(i===null)return!1;let 
+  @227716207 function dm(e,t){return G.unlinkSync(t),G.symlinkSync(e,t)}
+  @229251509 function dm(e){if(e==="")return!0;if(/\s/.test(e))return!1;if(e.length%4!==0)return!1;try{return atob(e),!0}catch{return!1}}
+FN "async function dm(" count=3 hits=208868830,223288241,227518226
+  @208868830 async function dm(e,t,n,r,o){await a$(r);let s=await rt(r);if(!t){if(s&&!An(s.expiresAt))return"not_needed";if(!s?.refreshToken)return"no_refresh_token"}if(!s?.refreshToken)return"no_refresh_token";if
+  @223288241 async function dm(e,t){let[{findBedrockUpgradeCandidates:o},{upgradeKey:r}]=await Promise.all([import("B:/~BUN/root/chunk-1d9jcwe9.js"),import("B:/~BUN/root/chunk-e2fm4tk7.js")]),n=await Pn("bedrock-u
+  @227518226 async function dm(e,n){let t=ai(n).split(mn),r=t[0]===""?mn:t[0];for(let o of t.slice(1)){r=Rt(r,o);let i=await Kr(r).catch((a)=>B(a)==="ENOENT"?null:void 0);if(i===void 0)return!0;if(i===null)return!
+FN "function sPe(" count=2 hits=213648168,241866153
+  @213648168 function sPe(){let e=HP();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}
+  @241866153 function sPe(e){return function(){var t=this.ownerDocument,r=this.namespaceURI;return r===Dk&&t.documentElement.namespaceURI===Dk?t.createElement(e):t.createElementNS(r,e)}}
+FN "function uln(" count=1 hits=213647374
+  @213647374 function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}
+FN "function uvi(" count=1 hits=213648362
+  @213648362 function uvi(e){return HP().pendingUsage.has(e)}
+FN "function xit(" count=1 hits=213652610
+  @213652610 function xit(e){return(t)=>{let n={...t.pluginUsage};for(let[r,o]of e){let s=n[r];n[r]={usageCount:(s?.usageCount??0)+o.count,lastUsedAt:o.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,plu
+FN "function xln(" count=1 hits=213652823
+  @213652823 function xln(e,t){let n=Date.now();ki((r)=>{let o=e.filter((i)=>!r.pluginUsage?.[i]);if(o.length===0)return r;let s={...r.pluginUsage};for(let i of o)s[i]={usageCount:0,lastUsedAt:n,lastUsedNumStartup
+FN "function dln(" count=1 hits=213647665
+  @213647665 function dln(e,t){if(!r3.exitFlushRegistered)r3.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTimer)e.flushTimer=setTimeout(t.flush,Xwo),e.flushTimer.unref?.()}
+FN "function pln(" count=1 hits=213647846
+  @213647846 function pln(e){HP().exitFlushesInFlight.push(e)}
+FN "function fln(" count=1 hits=213647895
+  @213647895 function fln(e){let t=HP().exitFlushesInFlight,n=t.indexOf(e);if(n!==-1)t.splice(n,1)}
+FN "function mln(" count=1 hits=213647981
+  @213647981 function mln(){let e=HP(),t=e.exitFlushesInFlight.flat();return e.exitFlushesInFlight=[],t.length>0?t:null}
+FN "function gln(" count=1 hits=213648088
+  @213648088 function gln(e){HP().flushStorageV5=e}
+FN "function hln(" count=1 hits=213648126
+  @213648126 function hln(){return HP().flushStorageV5}
+FN "function oko(" count=1 hits=213652316
+  @213652316 function oko(){let e=sPe();if(!e)return;ki(xit(e),hln())}
+FN "function xvi(" count=1 hits=213652453
+  @213652453 function xvi(e){if(Ne()&&e!==void 0)gln(e),ca(()=>Aln(e)),i3(()=>Aln(e))}
+FN "function sko(" count=1 hits=213652526
+  @213652526 function sko(){let e=[...mln()??[],...sPe()??[]];if(e.length===0)return;Pln(xit(e))}
+FN "async function Aln(" count=1 hits=213652373
+  @213652373 async function Aln(e){let t=sPe();if(!t)return;pln(t),await ki(xit(t),e),fln(t)}
+FN "class iln{" count=1 hits=213647167
+  @213647167 class iln{pendingUsage=new Map;flushTimer=null;exitFlushesInFlight=[];flushStorageV5=void 0}
+FN "class lln{" count=1 hits=213647259
+  @213647259 class lln{flushers=null;exitFlushRegistered=!1}
+FN "var aln=" count=0 hits=
+FN "var r3=" count=0 hits=
+FN "var cln=" count=1 hits=213647317
+  @213647317 var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP(){return aln.of(
+FN "var zC=" count=2 hits=213648525,232610486
+  @213648525 var zC=w(()=>{$e();cln()});import{createHash as Zwo}from"crypto";function J1(e){return Zwo("sha256").update(e+Jwo).digest("hex").slice(0,16)}var Jwo="claude-plu
+  @232610486 var zC={};tc(zC,{FooterHintLine:()=>cDe,HINT_REREAD_MS:()=>JO,PromptHintPart:()=>uP,PromptHintSite:()=>sP,clean:()=>rP,default:()=>zC,read:()=>oDe});Ts();He();l
+
+## aliases HP / pendingUsage cluster
+ALIAS " HP as " count=0
+ALIAS "HP as " count=1
+  @232037547 nearCluster=false root/_394.js";import{BP as RR,DP as EAe,EP as vye,FP as Tye,GP as xye,HP as Rye,KP as Wh,fP as Cme,kP as cIe,lP as YSe,mP as i8e,nP as nG,oP as dIe,pP as R5,qP as XSe
+ALIAS " as HP}" count=0
+ALIAS " as HP," count=4
+  @221678809 nearCluster=false s zP,fo as AP,mo as BP,po as CP,Ro as DP,bt as EP,go as FP,ho as GP,Ao as HP,_o as IP,wt as JP,St as KP}; .// @bun @bytecode // Claude Code is a Beta product per Anthr
+  @230301860 nearCluster=false ,S$ as ET,S0 as Xc,S5 as eT,S6 as Ki,SAa as GR,SDa as ZD,SPa as Lk,SWa as HP,S_ as c_,Saa as Ub,Sva as AR,T$ as Ix,T0 as Zb,T2 as ou,T5 as $u,TAa as zR,TFa as BE,TOa a
+  @231281008 nearCluster=false 5.js";import{j5c as Bo,k5c as Lv}from"B:/~BUN/root/_756.js";import{h9c as HP,i9c as k4}from"B:/~BUN/root/_794.js";import{i_c as lo,j_c as x4}from"B:/~BUN/root/_800.js"
+  @232041819 nearCluster=false Ct,OUa as wme,OWa as Ame,O_ as bL,Oha as Ode,Oia as vOe,Ooa as zye,Opa as HP,Oqa as AL,Osa as Kde,Ova as jR,P4 as dvt,P5 as ySe,P6 as DVe,P8 as $je,PAa as WSe,PFa as t
+ALIAS ",HP as " count=1
+  @232037546 nearCluster=false /root/_394.js";import{BP as RR,DP as EAe,EP as vye,FP as Tye,GP as xye,HP as Rye,KP as Wh,fP as Cme,kP as cIe,lP as YSe,mP as i8e,nP as nG,oP as dIe,pP as R5,qP as XSe
+ALIAS "{HP as " count=0
+ALIAS " yln as " count=0
+ALIAS "yln as " count=0
+ALIAS " as yln}" count=0
+ALIAS " as yln," count=0
+ALIAS " sPe as " count=0
+ALIAS "sPe as " count=0
+ALIAS " as sPe}" count=0
+ALIAS " as sPe," count=0
+ALIAS " dm as " count=0
+ALIAS " as dm}" count=4
+  @209317703 nearCluster=false Qt,uUb as Io,zUb as Oo}from"B:/~BUN/root/_593.js";import{LUb as vo,MUb as dm}from"B:/~BUN/root/_597.js";import{NUb as yl,UUb as ym}from"B:/~BUN/root/_598.js";import{bV
+  @223678836 nearCluster=false rt{dxd as Sn}from"B:/~BUN/root/_840.js";import{$xd as lm,_xd as Cg,nyd as dm}from"B:/~BUN/root/_841.js";import{oyd as ji,qyd as Tw}from"B:/~BUN/root/_842.js";import{sy
+  @231813239 nearCluster=false N/root/_209.js";import{Ty as Ji,Uy as Qi,Yy as $i,Zy as Gi,_y as mm,bz as dm}from"B:/~BUN/root/_228.js";import{BA as sv,wA as Jh}from"B:/~BUN/root/_245.js";import{PB a
+  @232056271 nearCluster=false Pt}from"B:/~BUN/root/_572.js";import{GFb as Kr,JFb as Pu,KFb as tG,YFb as dm}from"B:/~BUN/root/_576.js";import{kGb as gs,mGb as ov}from"B:/~BUN/root/_578.js";import{DL
+ALIAS " as dm," count=3
+  @209856052 nearCluster=false rt{PRc as Gv,XRc as rZ}from"B:/~BUN/root/_723.js";import{mSc as um,nSc as dm,oSc as fm,pSc as pm}from"B:/~BUN/root/_725.js";import{G1c as YK,Y0c as fu,l1c as Av,n1c as
+  @231575010 nearCluster=false s Xl,je as Yl,$r as Zl,Ml as _l,ox as $l,KU as am,VU as bm,cL as cm,mL as dm,Lme as em,uL as fm,Aa as gm,mR as hm,Ia as im,kR as jm,cm as km,WR as lm,PR as mm,q0 as nm
+  @231580515 nearCluster=false Ja as gt,Ika as ma,Ioa as uc,Iva as ls,JJa as Wa,M4 as ka,N4 as Om,Nva as dm,Qga as ia,T0 as ra,Uja as lt,V0 as Bc,VAa as fm,Vga as Lm,Vja as aa,Vna as mc,Vva as ul,WA
+ALIAS " uvi as " count=0
+ALIAS " as uvi}" count=0
+ALIAS " as uvi," count=0
+ALIAS " xit as " count=0
+ALIAS " as xit}" count=0
+ALIAS " xvi as " count=0
+ALIAS " as xvi}" count=0
+ALIAS " oko as " count=0
+ALIAS " as oko}" count=0
+ALIAS " uln as " count=0
+ALIAS " as uln}" count=0
+ALIAS " iln as " count=0
+ALIAS " as iln}" count=0
+
+## export window around dPe as baa @219684806
+kYi as S$,Kue as T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit as kaa,Ale as laa,ako as maa,l3 as naa,lko as oaa,rk as paa,_Pe as qaa,Ple as raa,Zvi as saa,dko as taa,Jvi as uaa,Qvi as vaa,Fln as waa,eTi as xaa,fS as yaa,lSn as zaa,Spt as Aaa,t6i as Baa,n6i as Caa,r6i as Daa,cSn as Eaa,own as Faa,KIo as Gaa,Gpt as Haa,PT as Iaa,Vpt as Jaa,D5i as Kaa,$5i a
+
+## import windows mentioning HP / sPe / dm / yln / uvi / xit / xvi
+IMP "HP as " count=1
+  @232037547 DP as EAe,EP as vye,FP as Tye,GP as xye,HP as Rye,KP as Wh,fP as Cme,kP as cIe,lP as YSe,mP as i8e,nP as nG,oP as dIe,pP as R5,qP as XSe,rP as s8e,uP as JSe,xP 
+IMP "sPe as " count=0
+IMP "uvi as " count=1
+  @219684766 U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq a
+IMP "xvi as " count=1
+  @219684785 W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as haa,eq as iaa,wF as jaa,Mit
+IMP "xit as " count=0
+IMP "oko as " count=0
+IMP "uln as " count=0
+IMP "dm as " count=4
+  @219684757 T$,bk as U$,kOe as V$,ch as W$,aD as X$,dm as Y$,uvi as Z$,zC as _$,xvi as $$,xln as aaa,dPe as baa,Iln as caa,Ivi as daa,Oln as eaa,pPe as faa,cD as gaa,Xvi as
+  @226832170 Lg as WUc,Og as XUc,Ng as YUc,Ug as ZUc,dm as _Uc}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using
+  @231210732 ort{yo as Eh,Xi as Fh,im as Gh,lm as Hh,dm as Ih}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using 
+  @231579644 s vt,Rm as $n,Vm as gc,Wm as ld,cm as Z,dm as yt,sm as wa,um as $m,vm as fc,wm as ad,xm as bt,ym as pl}from"B:/~BUN/root/_116.js";import{Wr as wm,Xr as up}from"
+IMP "yln as " count=0
+
+## fn/bn bind (storage shape only, no invent)
+SHAPE "aln=new fn(()=>new iln)" count=1 hits=213647337
+  @213647337 FlushRegistered=!1}var aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP
+SHAPE "new fn(()=>new iln)" count=1 hits=213647341
+  @213647341 hRegistered=!1}var aln,r3;var cln=w(()=>{ro();aln=new fn(()=>new iln);r3=new lln});function uln(e){r3.flushers=e;let t=HP();if(t.pendingUsage.size>0)dln(t,e)}function HP
+SHAPE "function bn(" count=15 hits=206648101,207048477,207939591,208563918,209297233,210596523,210855905,210954382,211071827,212305775,212517246,212692367,219749791,222181052,222317300
+  @206648101 ew e({type:"number",coerce:!0,checks:[],..._(t)})}function bn(e,t){return new e({type:"number",check:"number_format",abort:!1,format:"safeint",..._(t)})}function 
+  @207048477 eplace(/(?<=[^\\/])[\\/]+$/,"");return n===""?e:n}function bn(e){let t=d.join(e).replace(/(?<=[^\\/])[\\/]+$/,"");if(k(t)&&!x(t))return t;return yn(e)}function je
+  @207939591 peof e==="string")return ze(e);return De(e)}async function bn(e){let{size:r}=await Pe(e);if(r<=P)return ie(await Fe(e));await using t=await Ve(e,"r");let n=Buffer
+  @208563918 ase()),r=Ze(n)?J(n):n;return t.has(O(r))||HI(r,t)}function bn(){let e=A();if(e!=="firstParty"&&e!=="gateway")return new Set;return UI(Gu())}function KI(){return A
+  @209297233 e,"redirected_statement",t.startIndex,f,[l,...i])}function bn(e,o){let t=y(e,"unset",o),s=[t],i=[];while(!0){x(e.L);let u=U(e);if(u){i.push(u);continue}let d=L(e.
+  @210596523 y:r<0?o:o.slice(0,r),value:r<0?"":o.slice(r+1)}})}function bn(e,n,t,i){let o=/^~[^/]*\//.exec(e);return(o!==null?Pn().map((a)=>`${a}${Ie}${e.slice(o[0].length)}`)
+SHAPE "class fn{" count=1 hits=237948179
+  @237948179 tion(Gl){Object.defineProperty(Gl,"t",{value:!0});class fn{constructor(e,t,r=1){this.i=void 0,this.h=void 0,this.o=void 0,this.u=e,this.l=t,this.p=r}I(){let e=
+SHAPE "fn=class" count=1 hits=228009922
+  @228009922 );var Sl,fn;var gn=t(()=>{m();c();l();Sl=s(d(),1);fn=class fn extends r.classBuilder().ep(i).m(function(o,n,e,a){return[Sl.getEndpointPlugin(e,o.getEndpointPa
+SHAPE "of(bn().host)" count=15 hits=212859840,212872181,212875615,212892906,212925499,212927859,213584465,213599571,213613007,213647474,213648807,213652087,213685510,213685889,213689515
+  @212859840 m(this.pendingWrites))}}function A7e(){return slo.of(bn().host)}function tri(e){A7e().track(e)}function k5t(){return A7e().hasPending()}function v5t(){return A7e()
+  @212872181 lear(),this.#n.clear()}}function NTe(){return $lo.of(bn().host)}class T_{taskId;path;stdoutToFile;#e="";#n="";#t=null;#r=new O7e(1000);#o=0;#s=0;#a=0;#c;#i;#l=!1;#
+  @212875615 veShellCommands=new Set}function $7e(){return jlo.of(bn().host)}async function L7e(){await Promise.allSettled(Array.from($7e().pendingKillBackstops))}function N7e(
+  @212892906 id 0,this.hasAdopter=!1}}function Ip(){return s3t.of(bn().host)}function eco(e,t){Ip().noteCorrespondent(e,t)}function tco(){let e=Ip(),t=e.pendingYield;return e.p
+  @212925499 LAN_AGENTS,this.latched}}function o6(){return Hco.of(bn().host).isEnabled()}var Hco;var EEe=w(()=>{$e();ro();Dt();Hco=new fn(()=>new J3t)});var Wco,CEe,Q3t,REe;var
+  @212927859 t(){this.lines.clear()}}function vet(){return Zco.of(bn().host)}function Tet(e,t){vet().record(e,t)}function aXt(e){vet().forget(e)}function ose(e){return vet().li

@@ -1,0 +1,3 @@
+# ver=246 name=$Mt async=false start=214861646 end=214862158 len=512 sha=0d68392e3118cd9b needle="(exit code"
+
+function $Mt(e,t,n,r,o){let s=r!==void 0?` (exit ${r})`:"";if(e==="monitor")switch(n){case"completed":return o===0?`Monitor "${t}" ended without producing output${s}`:`Monitor "${t}" stream ended`;case"failed":return`Monitor "${t}" script failed${s}`;case"killed":return`Monitor "${t}" stopped`}switch(n){case"completed":return`${PB}"${t}" completed${r!==void 0?` (exit code ${r})`:""}`;case"failed":return`${PB}"${t}" failed${r!==void 0?` with exit code ${r}`:""}`;case"killed":return`${PB}"${t}" was stopped`}}

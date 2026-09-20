@@ -1,0 +1,47 @@
+# gold-1-verdict — official-247 checklist #1 send-feedback
+
+STATUS: UNKNOWN
+CONTRACT: 247 SendFeedback / feedbackDrafts function bodies are 246 leftovers.
+Changelog 2.1.247 #1 is an index oversell, not a new function.
+
+## Hit counts (see gold-1-counts.txt)
+All feature needles same 246→247:
+SendFeedback 18=18; feedbackDrafts 26=26; fitFeedbackPayloadToBudget 4=4;
+parseDraftTranscriptMessages 2=2; Drafted-by-Claude strings 2=2;
+/feedback has been disabled* 2=2 each; CLAUDE_CODE_SEND_FEEDBACK 3=3.
+
+Changelog-index probes unique to 247: NONE
+("Claude can draft a feedback report", "turn off with the feedbackDrafts",
+ "review and send from /feedback") = 0/0.
+
+## Byte-identical JS functions (same sha 246 and 247)
+- function ee() fitFeedbackPayloadToBudget sha=07fbddf252d9314e
+- function Oe() parseDraftTranscriptMessages sha=90e2c265307d953c
+- function Le() draft description / SendFeedback bylines sha=e2e71de212b4451e
+- async function ot() draft submit / feedbackDrafts sha=1eb5077f676f7c29
+- function Ps() /feedback disabled gates sha=8f61c2d9f132bd21
+- async function ut() tengu_feedback_draft_discarded sha=bcdea15d40cf6f62
+- function sr() queue UI "The draft is still queued" sha=80c1d6def2674e0b
+
+## Rename-only (same length + same strings; minified callees differ)
+- tool module var xgr="SendFeedback" / var Dpr="SendFeedback"
+  raw len 3834/3834; identifier-normalized sha equal 69bf62c2aa5c725e
+- async call() 3253/3253: same control flow and official strings.
+  SHA differs only by MACRO stamp VERSION 2.1.247 vs 2.1.246,
+  BUILD_TIME / GIT_SHA, and chunk import id. Not a new function.
+- get/set feedbackDrafts (Ffs/Ewc), turn-off prompt (vqe/ore): NORM-SAME
+- list/write drafts (Mfs/bgr): same body; only ${BKe} vs ${MVe} in templates
+- feedbackDrafts schema describe() string is identical:
+  'Model-drafted feedback (the SendFeedback tool). "notify" (default)...'
+
+## Size-changed wrappers — not a unique SendFeedback function
+- Ls vs Ds settings schema +568B: spinnerTipsOverride tipsFile/label (#2 HAVE).
+  feedbackDrafts field text unchanged (gold-1-schema-*.txt).
+- mu vs uu /config panel +4B: hook tuple [B,Se,tt]=ou(0) vs [L,xe]=D(0).
+  That is Config UI, not a SendFeedback tool/call/setting body.
+- pa /config settings list: same length; Fast mode ${Ke()} vs ${Ge()} only.
+
+## Invent-ban
+No unique 247 function → do not port SendFeedback tool, /feedback draft
+review UI, or feedbackDrafts setting. Local /feedback is still the older
+manual report dialog (src/commands/feedback + src/components/Feedback.tsx).

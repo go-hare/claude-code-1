@@ -1,0 +1,3 @@
+# ver=247 name=Ewc async=false start=216529672 end=216529890 len=218 sha=2b7593f10a6fef44 needle="feedbackDrafts"
+
+function Ewc(e,{storageV5:t,via:n}){let r=Ne()&&t!==void 0?ay("userSettings",{feedbackDrafts:e},void 0,t):ay("userSettings",{feedbackDrafts:e});return D("tengu_feedback_drafts_setting_changed",{value:X(e),via:X(n)}),r}

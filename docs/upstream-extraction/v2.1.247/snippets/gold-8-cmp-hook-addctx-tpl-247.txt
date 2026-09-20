@@ -1,0 +1,4 @@
+# offset=219492413 ver=247 hit=1/1 needle="hook additional context: ${"
+
+g error from command: "${e.blockingError.command}": ${e.blockingError.blockingError}`),isMeta:!0})],hook_additional_context:(e)=>{if(e.content.length===0)return[];return[pt({content:Il(`${e.hookName} hook additional context: ${e.content.join(`
+`)}`),isMeta:!0})]},inlined_image_paths:(e)=>{let t=Array.isArray(e.paths)?e.paths.filter((n)=>typeof n==="string"):[];if(t.length===0)return[];return[pt({content:Il(qoo(t)),isMeta:!0})]},hook_stopped_continuation:(e)=>[pt({content:Il(`${e.hookName} hook stopped continuation: ${e.message}`),isMeta:!0})],date_change:(e)=>qo([pt({content:`The date has changed. Today's date is now ${e.newDate}. No need to announce the new date \u2014 the user's own clock 

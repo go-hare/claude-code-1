@@ -1,0 +1,4 @@
+# ver=246 name=Vm async=true start=220059984 end=220060414 len=430 sha=b40b9bf37dc09c69 needle="background session"
+
+async function Vm(e,t){let r=await qr(e,"claude logs <id>","Print the background session's recent terminal output.",t),n=await new Promise((o)=>{let s=Es(r,500,(i)=>{if(i.type==="snapshot")s(),o(i.streamTail)},(i)=>{s(),o(i)})});if(typeof n==="string")return await pe("cli_bg_logs","read_failed"),process.stderr.write(`Couldn't read logs for ${r} \u2014 ${tn(n)}
+`),rt(1);return await Ss(n.join("")),await Ne("cli_bg_logs"),rt(0)}

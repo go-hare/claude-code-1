@@ -1,0 +1,306 @@
+# gold-1-ye-Ht-Jt-DE 247
+
+## xSa as ye hits=1
+- #0 @232013288  me,YBa as ge,ZBa as B,_Ba as _e,cCa as H,eCa as ze,mCa as K,oTa as Ee,pCa as W,tCa as Ie,xSa as ye}from"B:/~BUN/root/_448.js";import{olc as L,qlc as Pe}from"B:/~BUN/root/_675.js";import{Af
+
+## kb as xSa hits=1
+- #0 @219710851 Sa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd as FSa,is a
+
+## export{kb hits=0
+
+## ,kb, hits=2
+- #0 @231330402 return e}function xg(aie){let wK=R(12),{addMargin:cA,param:lie}=aie,{text:mA}=lie,Mb,bb,xb,kb,dA;if(wK[0]!==cA||wK[1]!==mA){dA=Y;bb0:{let NK=bg(mA);if(NK.length===0){dA=null;break bb0}
+- #1 @238271053 Ue(),Mb=Ae(),Fp=Re(),xb=Z(),kb="ip_resolver";function qp(e){xb.trace(Ls.LogVerbosity.DEBUG,kb,e)}var co="ipv4",uo="ipv6",Db=443;class ho{constructor(e,t,r){var i;this.listener=t,this.e
+
+## function kb( hits=10
+- #0 @206999369 metryHandles.sessionCounter()}function Cb(){return n().host.telemetryHandles.locCounter()}function kb(){return n().host.telemetryHandles.prCounter()}function xb(){return n().host.telemetryHand
+- #1 @208550688 !0,configurable:!0})}function fs(e,t){return Object.hasOwn(e,t)?e[t]:void 0}var pb=()=>{};function kb(e){if(!Kt())return Wr[e]??Cf;if(e==="claude-opus-4-8"||e==="claude-opus-5")return Fu;retur
+- #2 @209976857 rror"})});process.once("exit",e),process.once("SIGINT",e),process.once("SIGTERM",e),Ab=!0}function kb(e,t){let n=t?.commandId,r=t?.commandText??e;if(n===void 0)return;let s=Ts(kn(n));fi.delete
+- #3 @211023364 A]}function mh(e){let o=e-1;return{shift:!!(o&1),meta:!!(o&2),ctrl:!!(o&4),super:!!(o&8)}}function kb(e){switch(e){case 8:return"backspace";case 9:return"tab";case 13:return"return";case 27:re
+- #4 @212574220 n.success)return{err:"malformed contract response",cause:"malformed"};return n.data}async function kb(e,t,n){if(!ot.test(e)||!wt.test(t))return{err:"invalid contract version or capability name
+- #5 @219402110 ssage:{...l.message,content:u}}}else e.splice(n+1,0,pt({content:[a],isMeta:!0}));return!0}function kb(e,t=[],n,r){let o=n!==void 0&&t7(n),s=nre(),i=n!==void 0&&o&&Q9e(n),a=o?new Map:void 0,l=n
+- #6 @220091914 a));if(!d.ok)return u(G(k(d.error,e),"stage"));a+=o}return m({records:s,bytes:a-t})}async function kb(e,r,n,t,i,o,a){if(t===void 0)return m({carried:0,liveBytes:0,readThrough:0});let s=await E
+- #7 @227152234 ay;function Zh(e){return e!=null&&bb(e.length)&&!kb(e)}function vb(e){return ef(e)&&Zh(e)}function kb(e){var t=Xh(e)?rl.call(e):"";return t==tb||t==rb}function bb(e){return typeof e=="number"&
+- #8 @249181164 t]}},uO=(e,t)=>{let n=x7(e);return{name:n.name,fn:n.fn,options:[e,t]}}});var T7=K(()=>{});function kb(e){let t=P7.useRef(!0);t.current&&(t.current=!1,e())}var P7,i1=K(()=>{"use client";P7=_(ie
+- #9 @249639928 .return||b.return===a)return!0;b=b.return}b.sibling.return=b.return;b=b.sibling}}return!0}function kb(a,b){b&=~Sf;b&=~Md;a.suspendedLanes|=b;a.pingedLanes&=
+~b;for(a=a.expirationTimes;0<b;){va
+
+## async function kb( hits=2
+- #0 @212574214 );if(!n.success)return{err:"malformed contract response",cause:"malformed"};return n.data}async function kb(e,t,n){if(!ot.test(e)||!wt.test(t))return{err:"invalid contract version or capability name
+- #1 @220091908 (0,o),a));if(!d.ok)return u(G(k(d.error,e),"stage"));a+=o}return m({records:s,bytes:a-t})}async function kb(e,r,n,t,i,o,a){if(t===void 0)return m({carried:0,liveBytes:0,readThrough:0});let s=await E
+
+## isSidechain===!0 hits=5
+- #0 @207836759 ,a=r.data;for(let l of s){let c=cs(l.timestamp);if(a.isSidechain===void 0)a.isSidechain=l.isSidechain===!0;if(a.createdAt===void 0&&c!==void 0)a.createdAt=c;if(a.cwd===void 0){let u=l.cwd;if(typeo
+- #1 @207837183 locatedCwd;if(typeof u==="string"&&u)a.cwd=u}}return r}function No(e,t){let s=e.data;if(s.isSidechain===!0)return null;let o=Q(s.firstPromptLocked===!0?s.firstPrompt:s.commandFallback)||void 0,n=Q
+- #2 @221614360 ypeof e!=="object"||e===null)return[];let n=e;if(n.type!=="user"&&n.type!=="assistant"||n.isSidechain===!0||n.isMeta===!0)return[];let i=n.message?.content;if(typeof i==="string"){if(n.type==="use
+- #3 @222031499 type!=="assistant")continue;if(typeof e.uuid!=="string"||typeof e.timestamp!=="string"||e.isSidechain===!0||!e.message)continue;if(u.has(e.uuid)||c.has(e.uuid))continue;c.add(e.uuid),t.push(e.type
+- #4 @232017250 type!=="assistant")continue;if(typeof t.uuid!=="string"||typeof t.timestamp!=="string"||t.isSidechain===!0||!t.message)continue;s.push(t.type==="user"?{type:"user",uuid:t.uuid,timestamp:t.timestam
+
+## sessionMessagesToDraft hits=0
+
+## u=ye(m) hits=1
+- #0 @232017945 let d=e.source_session_id===j(),u=[],c;if(s&&e.transcript_ref){let f=await _e(e);if(d){if(u=ye(m),f!==null)try{let{content:C,bytesRead:M,bytesTotal:h}=await E(f,q),r=C;if(M<h)r=r.slice(r.
+
+## ot-ye-call @232017945
+urce_session_id===j(),u=[],c;if(s&&e.transcript_ref){let f=await _e(e);if(d){if(u=ye(m),f!==null)try{let{content:C,bytesRead:M,bytesTotal:h}=await E(f,q),r=C;if
+
+## _448-ye-import @232013288
+ements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Jw as x,Kw as ke,Nw as q,Ow as F,Pw as P,Sw as z,Tw as he}from"B:/~BUN/root/_205.js";import{$Ba as be,KBa as ne,LBa as oe,MBa as ue,NBa as ce,OBa as O,PBa as de,QBa as le,RBa as J,VBa as fe,WBa as pe,XBa as me,YBa as ge,ZBa as B,_Ba as _e,cCa as H,eCa as ze,mCa as K,oTa as Ee,pCa as W,tCa as Ie,xSa as ye}from"B:/~BUN/root/_448.js";import{olc as L,qlc as Pe}from"B:/~BUN/root
+
+## leftover-kb-as-xSa @219710851
+s eSa,Uf as fSa,bL as gSa,L0e as hSa,KYt as iSa,aTe as jSa,Tm as kSa,Pyt as lSa,Cnd as mSa,Rnd as nSa,uQs as oSa,too as pSa,And as qSa,Pnd as rSa,xnd as sSa,Ind as tSa,Mnd as uSa,$oo as vSa,p8 as wSa,kb as xSa,zI as ySa,Ond as zSa,DQs as ASa,Hoo as BSa,Qk as CSa,JI as DSa,Dnd as ESa,$nd as FSa,is as GSa,$Qs as HSa,MCt as ISa,LQs as JSa,aWr as KSa,dGt as LSa,Il as MSa,Lnd as NSa,wb as OSa,Nnd as PS
+
+## _448.js hits=736
+- #0 @137458992 eevalidateWorktreeSlugworktreeBranchNameB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #1 @139507670 PVMnQVorRVTnSVOnTVInUVcrVVUnWVLnXVNnYVhrB:/~BUN/root/_448.jsB:/~BUN/root/_503.jsB:/~BUN/root/_671.js
+- #2 @140378771 B:/~BUN/root/_434.jsB:/~BUN/root/_435.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #3 @141476414 a1f1be4a04C00000851dDBdBlFBdAwYbBwHbCwKuB:/~BUN/root/_448.jsB:/~BUN/root/_561.jsB:/~BUN/root/_850.js
+- #4 @141544298 B:/~BUN/root/_221.jsB:/~BUN/root/_292.jsB:/~BUN/root/_448.jsB:/~BUN/root/_490.jsB:/~BUN/root/_544.js
+- #5 @141763366 B:/~BUN/root/_199.jsB:/~BUN/root/_313.jsB:/~BUN/root/_448.jsB:/~BUN/root/_475.jsB:/~BUN/root/_481.js
+- #6 @141839806 BPmoCPpoDPRoEPbtFPgoGPhoHPAoIP_oJPwtKPStB:/~BUN/root/_448.jsB:/~BUN/root/_539.jsB:/~BUN/root/_584.js
+- #7 @141870205 B:/~BUN/root/_343.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_508.jsB:/~BUN/root/_521.js
+- #8 @142303932 B:/~BUN/root/_319.jsB:/~BUN/root/_341.jsB:/~BUN/root/_448.jsB:/~BUN/root/_453.jsB:/~BUN/root/_475.js
+- #9 @142323559 B:/~BUN/root/_343.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #10 @143059473 B:/~BUN/root/_434.jsB:/~BUN/root/_435.jsB:/~BUN/root/_448.jsB:/~BUN/root/_449.jsB:/~BUN/root/_450.js
+- #11 @143176170 sTwDUwDtVwLtWwjsXwOtB:/~BUN/root/_206.jsB:/~BUN/root/_448.jsB:/~BUN/root/_603.jsB:/~BUN/root/_675.js
+- #12 @143261107 tdGxneGoefGYgGqthGVtB:/~BUN/root/_306.jsB:/~BUN/root/_448.jsB:/~BUN/root/_556.jsB:/~BUN/root/_572.js
+- #13 @143274083 C00000851CFBdPIBdSKheTKmeUKpeVKgeWKfeXKGB:/~BUN/root/_448.jsB:/~BUN/root/_535.jsB:/~BUN/root/_593.js
+- #14 @143290231 0851kFBdLPdMPWNPSOPDB:/~BUN/root/_398.jsB:/~BUN/root/_448.jsB:/~BUN/root/_850.js....................
+- #15 @143550101 B:/~BUN/root/_416.jsB:/~BUN/root/_428.jsB:/~BUN/root/_448.jsB:/~BUN/root/_454.jsB:/~BUN/root/_475.js
+- #16 @143584711 UoAdossehostnameqhxerhTeshMethIeuhNevhHeB:/~BUN/root/_448.jsB:/~BUN/root/_629.jsB:/~BUN/root/_675.js
+- #17 @143626655 B:/~BUN/root/_372.jsB:/~BUN/root/_396.jsB:/~BUN/root/_448.jsB:/~BUN/root/_475.jsB:/~BUN/root/_542.js
+- #18 @143670922 B:/~BUN/root/_242.jsB:/~BUN/root/_301.jsB:/~BUN/root/_448.jsB:/~BUN/root/_480.jsB:/~BUN/root/_501.js
+- #19 @143688004 04C00000851qFBdzMKAMLBMVCMXDMYEMZFMeeGMBB:/~BUN/root/_448.jsB:/~BUN/root/_494.jsB:/~BUN/root/_520.js
+
+## xSa as hits=3
+- #0 @222021539 7
+import{Yw as x}from"B:/~BUN/root/_206.js";import{IXa as Ts,ZSa as Z,oTa as hs,vXa as We,xSa as Ne}from"B:/~BUN/root/_448.js";import{BVb as ke,HVb as Se,IVb as Ze,yVb as _e}from"B:/~BUN
+- #1 @232013288  me,YBa as ge,ZBa as B,_Ba as _e,cCa as H,eCa as ze,mCa as K,oTa as Ee,pCa as W,tCa as Ie,xSa as ye}from"B:/~BUN/root/_448.js";import{olc as L,qlc as Pe}from"B:/~BUN/root/_675.js";import
+- #2 @232049167 s Kwt,x4 as pI,xAa as tq,xBa as jW,xDa as Ztt,xEa as __e,xFa as Xie,xGa as ame,xOa as RPt,xSa as x$e,xTa as mbe,xXa as Ebe,xZa as $T,x_ as lp,xda as jse,xea as d3e,xha as koe,xia as aBe,
+
+## function xSa( hits=0
+
+## xSa= hits=0
+
+## kb-bodies-with-message-markers
+- @219402110 function kb(e,t=[],n,r){let o=n!==void 0&&t7(n),s=nre(),i=n!==void 0&&o&&Q9e(n),a=o?new Map:void 0,l=new Set(t.map((z)=>z.name)),c=pQs(e,!0),u=$Ee(e),d,p=!1;for(let z of c)if(z.type==="attachment"&&z.attachment.type==="r
+## kb-msg @219402110 @219402110
+len=5649 sha=511dbc069c835a3c
+function kb(e,t=[],n,r){let o=n!==void 0&&t7(n),s=nre(),i=n!==void 0&&o&&Q9e(n),a=o?new Map:void 0,l=new Set(t.map((z)=>z.name)),c=pQs(e,!0),u=$Ee(e),d,p=!1;for(let z of c)if(z.type==="attachment"&&z.attachment.type==="read_truncation_notice")(d??=new Set).add(z.attachment.toolUseID);else if(!p&&z.type==="user"&&z.toolUseResult?.file?.truncatedByTokenCap===!0)p=!0;let f;if(p){f=new Set;for(let z of c)if(z.type==="assistant"&&Array.isArray(z.message.content)){for(let N of z.message.content)if(N.type==="tool_use")f.add(N.id)}}let m,g=new Map,h=new Map,y=0,b=y,S=!1,k,T;for(let z=0;z<c.length;z++){let N=c[z];if(!HQe(N)){S=!1;continue}if(!S)S=!0,b++;let B=Foo(N)??(Array.isArray(N.message.content)&&N.message.content[0]?.type==="text"?(m??=_Qs())[N.message.content[0].text]:void 0);if(!B)continue;for(let j=z-1;j>=0;j--){let M=c[j],U;if(N.healsDistinctCarrier){if(M.type!=="user"&&M.type!=="attachment")continue;let ie=h.get(M.uuid),ee=ie?new Set([...B].filter((re)=>{let W=ie.get(re);return W===void 0||W===b})):B;if(ee.size===0)continue;if(M.type==="attachment"){T??=new Map;let re=T.get(M.uuid);if(re===void 0)re=vQs(M.attachment,kQs),T.set(M.uuid,re);if(U=new Set([...ee].filter((W)=>re.has(W))),U.size===0)continue}else if(!YYt(M,ee)){if(!bQs(M))continue;if(k===void 0){k=new Map;for(let oe of c){if(oe.type!=="assistant"||!Array.isArray(oe.message.content))continue;for(let Q of oe.message.content)if(Q.type==="tool_use")k.set(Q.id,Q.name)}}let re=wQs(M,k),W=[...ee].filter((oe)=>re.has(oe));if(W.length===0)continue;let ne=h.get(M.uuid)??new Map;for(let oe of W)if(!ne.has(oe))ne.set(oe,b);h.set(M.uuid,ne);break}else U=new Set([...ee].filter((re)=>YYt(M,new Set([re]))))}else if(M.type!=="user"||!YYt(M,B)){if(HQe(M)||zI(M)||M.type==="user"&&M.isMeta)continue;break}else U=B;let G=g.get(M.uuid);if(G)for(let ie of U)G.add(ie);else g.set(M.uuid,new Set(U));let K=h.get(M.uuid)??new Map;for(let ie of U)if(!K.has(ie))K.set(ie,N.healsDistinctCarrier?b:y);h.set(M.uuid,K);break}}let v=[],E=[],C=!1,R=!1,P=new Map,x=0;function A(){if(E.length===0)return;let z=E.join(`
+
+`),N=C;E.length=0,C=!1;let B=yE(v);if(B?.type==="api_system"){if(B.message.content+=`
+
+${z}`,N)B.ephemeral=!0}else if(B?.type==="user"){R=!0;let j=uEe(z);if(N)j.ephemeral=!0;v.push(j)}else v.push(pt({content:i?z:Il(z),isMeta:!0}))}for(let z of c){if(TE(z))continue;switch(z.type){case"progress":continue;case"system":{if(!$oo(z))continue;let N=pt({content:z.content,uuid:z.uuid,timestamp:z.timestamp}),B=yE(v);if(B?.type==="user"){v[v.length-1]=WQe(B,N);continue}v.push(N);continue}case"user":{let N=z;if(z.origin?.kind==="task-notification"){let G=N.message.content,K,ie=z.origin.subkind==="scheduled-trigger"?met:z.origin.subkind==="projects-relay"&&z.hearthRelayMessageIds!==void 0?(ee,re=!1)=>det(ee,{serverEnvelope:!re}):void 0;if(ie)K=typeof G==="string"?ie(G):[{type:"text",text:ie(G.filter((ee)=>ee.type==="text").map((ee)=>ee.type==="text"?ee.text:"").join(`
+
+`),Qt(G,(ee)=>ee.type==="text")>1)},...G.filter((ee)=>ee.type!=="text")];else if(typeof G==="string")K=fet(G);else{let ee=G.filter((re)=>re.type==="text").map((re)=>re.text).join(`
+`);K=[{type:"text",text:fet(ee)},...G.filter((re)=>re.type!=="text")]}N={...N,origin:void 0,message:{...N.message,content:K}}}if(!Ng())N=uGt(N);else N=fQs(N,l);let B=g.get(N.uuid);if(B){let G=noo(N,B);if(G===null)continue;N=G}let j=N.message.content;if(Array.isArray(j)&&!j.some((G)=>G.type==="text"&&G.text.startsWith(Jro))&&mQs(j))N={...N,message:{...N.message,content:[...j,{type:"text",text:Jro}]}};if(a){let G=zQs(N,a);if(G)N=G.cleaned,E.push(...i?G.reminders.map(Il):G.reminders)}let M=HQs(z,d,f),U=yE(v);if(U?.type==="user")v[v.length-1]=WQe(U,N);else v.push(N);if(M!==void 0){let G=j7(M);if(o)E.push(G);else{let K=yE(v),ie=pt({content:Il(G),isMeta:!0});if(K?.type==="user")v[v.length-1]=roo(K,ie);else v.push(ie)}}continue}case"assistant":{let N=Ng(),B=gGr(z.message.content,z.batchToolUses,t),j;for(let ie=0;ie<B.length;ie++){let ee=B[ie];if(ee.type!=="tool_use")continue;a?.set(ee.id,ee.name);let re=ws(t,ee.name),W=re?.name??ee.name,ne=Xqr(W,ee.input,re!==void 0);if(N&&ne===ee.input&&W===ee.name)continue;j??=B.slice(),j[ie]=N?{...ee,name:W,input:ne}:{type:"tool_use",id:ee.id,name:W,input:ne}}let M=j??(B!==z.message.content?B:void 0),U=M?{...z,message:{...z.message,content:M}}:z;for(;x<v.length;x++){let ie=v[x];if(ie.type==="assistant")P.set(ie.message.id,x);else if(ie.type!=="api_system"&&!zI(ie))P.clear()}let G=P.get(U.message.id),K=G===void 0?void 0:v[G];if(G!==void 0&&K?.type==="assistant")v[G]=EQs(K,U);else{A();let ie=U.message.content,ee=Boo(ie);v.push(ee===ie?U:{...U,message:{...U.message,content:ee}})}continue}case"attachment":{if(z.attachment.type==="poll_events"&&z.attachment.deliveredVia===void 0&&HW()&&TQs(v,z.attachment))continue;let N=z.attachment.type==="batching_reminder";if(N&&!o)continue;let B=nZe(z.attachment,{inHumanTurn:u.has(z.uuid)}),j=g.get(z.uuid);if(j)B=B.flatMap((G)=>{let K=noo(G,j);return K===null?[]:[K]});if(o&&!(s&&z.attachment.type==="relevant_memories")&&z.attachment.type!=="dir_sync_notice"&&z.attachment.type!=="poll_events"&&z.attachment.type!=="cowork_memory_context"&&!(z.attachment.type==="queued_command"&&mO(z.attachment.origin))){let G=WQs(B);if(G!==null){if(E.push(i?Il(G):G),N)C=!0;continue}}let M=we("tengu_chair_sermon",!1)?B.map(gQs):B,U=yE(v);if(U?.type==="user"){v[v.length-1]=M.reduce((G,K)=>roo(G,K),U);continue}v.push(...M);continue}}}A();let L=QU(v,r?.preserveTrailingThinking),F=n7s(L,r?.preserveTrailingThinking),O=JU(F),H=r7s(O),q;if(o)q=R?CQs(H,i):H;else if(we("tengu_chair_sermon",!1))q=Noo(joo(H));else q=H;let Z=yQs(q);return hGr(Z,t)}
+
+
+## Ps as Ht,Qs as Jt hits=1
+- #0 @237069251 d here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{Ps as Ht,Qs as Jt}from"B:/~BUN/root/_158.js";import{Rs as ct}from"B:/~BUN/root/_159.js";import{Mw as Gt,Rw 
+
+## export{Ps, hits=0
+
+## export{Ps} hits=0
+
+## Ps,Qs hits=0
+
+## function Ps( hits=20
+- #0 @206353072  e+Math.random()*(t-e)}function Oa(e){return e*(1-Math.random()*0.25)}var lr=_(()=>{j()});function Ps(e,{authToken:t,helper:r}){if(!t)throw new b(`copyClientForHelper: expected a non-empty aut
+- #1 @206932906  this.__data__.set(e,xs),this}var xs="__lodash_hash_undefined__",yn;var Cn=i(()=>{yn=As});function Ps(e){return this.__data__.has(e)}var kn;var xn=i(()=>{kn=Ps});function ce(e){var t=-1,o=e==n
+- #2 @208238135 :null};let a=W(r);r=a===r?n:a}}function xs(e){let t=T(e);return t!==null&&Wn(e)!==t}async function Ps(e){if(ee())return null;let t=await C(e);if(!t||he(t)===".git"||he(W(t))!=="worktrees")retu
+- #3 @208309717 (u.name)})}catch{}if(n||r)return{hasBase:n,hasDropIns:r}}return{hasBase:!1,hasDropIns:!1}}function Ps(){let e=M();return{settings:Object.keys(e.settings).length>0?e.settings:null,errors:e.erro
+- #4 @208614102 ssion_context.outcomes?.find((n)=>n.type==="git_repository")?.git_info?.branches[0]}async function Ps(e){return{...jn(e),...await yS()}}async function lF(e,t,n){if(e.status!==403)return e;let{
+- #5 @210076972 ",{proto:e,parent:t})}function CU(e,t){return bU==Ps("utf8Validation",{proto:e,parent:t})}function Ps(e,t){var n,r;let s=(n=t.proto.options)===null||n===void 0?void 0:n.features;if(s){let i=s[
+- #6 @210607148 CH:"1",GIT_TERMINAL_PROMPT:"0"}});function As(){let e=D();return e==="windows"||e==="wsl"}function Ps(e){return e.split("/").some((n)=>n.includes(":")||n.endsWith(".")||n.endsWith(" ")||fi.tes
+- #7 @210834135 xB7 select ${t.alias} for ${i}`};return{value:e,label:n,description:`${t.slogan} (${e})`}}function Ps(e=!1){return je(e).filter((n)=>!n.disabled)}function Ot(e){if(!bt.has(g.CLAUDE_CODE_ENTRYP
+- #8 @222029808 aude Platform on Google Cloud",mantle:"Amazon Bedrock (Mantle)",gateway:"an API gateway"};function Ps(){if(S.DISABLE_FEEDBACK_COMMAND)return{kind:"disabled",reason:"/feedback has been disabled
+- #9 @222440930 BUN/root/_849.js";import{CBd as ee,EBd as re,FBd as W,IBd as b}from"B:/~BUN/root/_850.js";function Ps(e){return`${Fe}({operation: "${e}"})`}function Od(e){let t=e.trim(),n=Ps;return["You are h
+- #10 @223480200 )}catch{}}))}function Ot(e){return{target:`${e}#throttle`,lockfilePath:`${e}.lock`}}async function Ps(e){let t=i(S(),".npm-cache-cleanup");if(M()&&e!==void 0){if(await Ct(e,"npm-cache-cleanup"
+- #11 @224063949 Kn(Q,Z,u,Ce,Y,E,t,void 0,ie,async()=>e.getAccessToken())}finally{if(ge)clearInterval(ge)}}function Ps(e){let t=()=>{};return{printBanner:(r,o)=>e(`registered environmentId=${o} dir=${r.dir} sp
+- #12 @225822602 /sys/class/dmi/id/bios_date",BIOS_VENDOR:"/sys/class/dmi/id/bios_vendor"};var ma=/^42:01/;function Ps(){return!!(process.env.CLOUD_RUN_JOB||process.env.FUNCTION_NAME||process.env.K_SERVICE)}fu
+- #13 @227711338 eturn i(u);if(s)return fr(e,t,r,n,i);Nd(o,(a)=>{if(a)return i(a);return fr(e,t,r,n,i)})})}function Ps(e,t,r,n,i,o){Promise.resolve(i.filter(r,n)).then((u)=>{if(u)return e(t,r,n,i,o);return o()
+- #14 @228187957 ("inputMatrix","cardinality of 9 or 16",r.length);return this.options.recombMatrix=r,this}function Ps(e){if(!c.plainObject(e))throw c.invalidParameterError("options","plain object",e);if("brig
+- #15 @231196522 c,eu),!Ut||!St){return null}if(!Ll||Ll.agentId!==St){return"loading"}return Ll.transcript}function Ps(t,o){let n=[];for(let r of t.split(`
+`)){if(r===""){n.push("");continue}n.push(...ga(r,Mat
+
+## function Qs( hits=22
+- #0 @206935480 0,a=[];while(++o<r){var l=e[o];if(t(l,o,e))a[s++]=l}return a}var Nn;var Kn=i(()=>{Nn=Zs});function Qs(){return[]}var Vn;var Jn=i(()=>{Vn=Qs});var ea,ta,zn,na,$n;var Xn=i(()=>{Kn();Jn();ea=Obje
+- #1 @207664800 ders:n};o(this._options,y,p),this._sanitizeOptions(this._options)}this._performRequest()};function Qs(e){var t={maxRedirects:21,maxBodyLength:10485760},r={};return Object.keys(e).forEach(funct
+- #2 @207860748 t o=e.charCodeAt(t-1);if(Qs(o))return St;if(Xs(o)&&Zs(e.charCodeAt(t)))return $s;return 0}function Qs(e){return e===47||e===92||e===45||e===95||e===46||e===32}function Xs(e){return e>=97&&e<=1
+- #3 @209527321 e):String(xe(e))}catch{t="(unprintable value)"}return t.length>200?`${Sd(t,200)}\u2026`:t}function Qs(e){if(e===null||typeof e!=="object")return{action:"drop",reason:`non-object permission upd
+- #4 @209655512  Hi(e){return Gs.charAt(e)}function Gi(e,t){var a=Ur[e.charCodeAt(t)];return a==null?-1:a}function Qs(e){for(var t=this.t-1;t>=0;--t)e.data[t]=this.data[t];e.t=this.t,e.s=this.s}function zs(e)
+- #5 @210995847 .unit;if(i===1)return e.value;if(i===2){let l=e.value*o/100;return zo(l)?Qn(l):0}return 0}function Qs(e){return e===2||e===3}function vb(e){return e===3||e===1}function rM(e){return Qs(e)?0:2}
+- #6 @211436828 (m,Qe),a,{flag:"wx"}),await Ol(m,n)}catch(d){throw await Ts(m,{recursive:!0,force:!0}),d}}function Qs(r){return Xl.has(r.toLowerCase())}async function pd(r){try{return ei().parse(JSON.parse(aw
+- #7 @223292701 ualHeight:a.availableHeight,reason:a.reason});t=m}}}}}Pe();ce();ft();Io();Mt();mr();async function Qs(e,t){let{InvalidSettingsDialog:o}=await import("B:/~BUN/root/chunk-d0rz4720.js");return ne
+- #8 @223550331 Bs=Gt?a(r,{color:Gt.hex,children:Gt.char}):null,Ul[0]=Gt,Ul[1]=Bs;else Bs=Ul[1];return Bs}function Qs(){let Pl=oe(1),Ks;if(Pl[0]===q)Ks=a(r,{dimColor:!0,children:"keep holding\u2026"}),Pl[0]=K
+- #9 @225213649 ermissionsAllowRemoved:c,permissionsAllowNotFound:u,permissionsAllowSkipped:a,warnings:f}}function Qs(e,t){return`The settings file at ${e} contains invalid JSON \u2014 fix or remove it, then 
+- #10 @228214657 this.options.colourspacePipeline=e,this}function Vs(e){return this.pipelineColourspace(e)}function Qs(e){if(!H.string(e))throw H.invalidParameterError("colourspace","string",e);return this.opt
+- #11 @228728653 on Gs(){return Yr().catch(js)}function Xs(rl){return rl.toLowerCase().includes("bedrock")}function Qs(Ys){return{label:Ys,value:Ys}}function ot(){let Ks=T(3),[vn]=f(Gs),Ms;if(Ks[0]===l)Ms=e(h,
+- #12 @229992829 Number.isInteger(r)||r<1||r>1000)return null;return r}var Pa=["daily","weekly","monthly"];function Qs(e="monthly",t=new Date){if(e==="monthly")return t.toISOString().slice(0,7);if(e==="daily")
+- #13 @230165986 review"};case wt:return{label:S(t.name),body:""};default:return{label:S(t.name),body:""}}}function Qs(t,e,n,s,r){let o=Js(t,e);if(o)return{tool_name:t.name,display_tool_name:o.label,action_des
+- #14 @230256229 agentId:he(),mode:"task-notification",skipAttachments:!0,priority:"next",shouldQuery:!1})}function Qs({bgShells:e,notifiedTaskIds:t,stoppedTaskIds:n},o){let r=[],i=[];for(let s of e.values()){
+- #15 @230496292 li={getAppState:i,setAppState:l,getDynamicMcpState:()=>Me,setDynamicMcpState:(o)=>{Me=o}};function Qs(o,u){wd(li,o,u)}let ro=new Map,Ac=new Map,Ea=async(o,u,y)=>{let n=Fe(),h=Wt(),P=(I)=>({...
+
+## surveyFeedbackSource hits=10
+- #0 @198149352 ......b*1.open GitHub issue........f[.any key to close.....ey.initialDescription........&.surveyFeedbackSource........gitStatePromise.........**Bug Description**
+#.......
+
+**Environment Info**
+- Platf
+- #1 @222032996 essages:s,description:a,surface:u,scope:i="session",backgroundTasks:t={},transcripts:n={},surveyFeedbackSource:c,excludeThirdPartyTranscripts:o,storageV5:p}){let[r,f]=await Promise.all([Te({messages:s
+- #2 @222038121 ages:s,description:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,signal:c,surveyFeedbackSource:o,storageV5:p,credentials:r}){let{payload:f,thirdPartyDroppedCount:d}=await Ue({messages:
+- #3 @222038297 t:d}=await Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:o,excludeThirdPartyTranscripts:!0,storageV5:p}),e=f.latestAssistantMessageId,m=await D(f,
+- #4 @222040704  Ot({messages:s,description:a,surface:u,scope:i="session",backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,storageV5:o}){let p;try{let{payload:r}=await Ue({messages:s,description:a,surface:u,sco
+- #5 @222040851 d:r}=await Ue({messages:s,description:a,surface:u,scope:i,backgroundTasks:t,transcripts:n,surveyFeedbackSource:c,excludeThirdPartyTranscripts:!1,storageV5:o}),f=xe(r);p=E(f,se,te)}catch(r){return R(r)
+- #6 @237072767 ssages:n,initialDescription:c,onDone:d,backgroundTasks:b={},mode:p="post",readFileState:x,surveyFeedbackSource:K}){let{storageV5:J,credentials:A}=ue(),[m,h]=u("userInput"),[Q,X]=u(0),[S,Y]=u(c??""),[w
+- #7 @237073310 wait rt({messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,surveyFeedbackSource:K,storageV5:J});if(W.success)ee(W.bundleId),ie(W.zipPath),h("done");else U(`Couldn't save
+- #8 @237073608 messages:n,description:S,surface:"cli",scope:oe,backgroundTasks:b,transcripts:be,signal:l,surveyFeedbackSource:K,storageV5:J,credentials:A}),le?Promise.resolve(null):At(S,l,A)]);if(Wt(ke),i.success)ee
+- #9 @237083578 :n,messages:c,initialDescription:d,onDone:l,backgroundTasks:b,mode:x.kind,readFileState:p,surveyFeedbackSource:K})}function ut(l,n,c){return Yo(l,n.abortController.signal,n.messages,c,{...n.taskRegist
+
+## Jt()?? hits=1
+- #0 @237083451 ion Yo(l,n,c,d="",b={},p){let x=Gt();if(x.kind==="disabled")return l(x.reason),null;let K=Jt()??void 0;return e(Mt,{abortSignal:n,messages:c,initialDescription:d,onDone:l,backgroundTasks
+
+## Jt() hits=87
+- #0 @206459818 ();Gt()});var Z=e(()=>{Z()});var Jt=()=>{};var Qt=()=>{};var Zt=()=>{};var ee=e(()=>{ee();Jt();Qt();Zt()});var te=e(()=>{te()});var eo=()=>{};var to=()=>{};var oo=()=>{};var ro=()=>{};
+- #1 @207162846 jt(){let o=`.claude${Ct()}.json`;return l(process.env.CLAUDE_CONFIG_DIR||kt(),o)}function Jt(){return O().getGlobalClaudeFile()}function Mi(o){return O().seedGlobalClaudeFile(o)}async 
+- #2 @207320986 t();Mt();Wt();$t=an});var pn=1,ln=2,un=4,cn,Rf;var sn=i(()=>{mn();it();bt();st();b();At();Jt();rt();cn=$t(function(r,t){var e={};if(r==null)return e;var o=!1;if(t=Qt(t,function(f){retu
+- #3 @207623788 u(e){if(typeof this.jobs[e]=="function")this.jobs[e]()}});var Xt=_(function(Al,Bn){var Cn=Jt(),iu=Kt();Bn.exports=au;function au(e,t,r,n){var o=r.keyedList?r.keyedList[r.index]:r.index
+- #4 @207624399 t:function(o,s){return t(e[o],e[s])});return n}});var Qt=_(function(vl,Dn){var fu=Kt(),lu=Jt();Dn.exports=pu;function pu(e){if(!Object.keys(this.jobs).length)return;this.index=this.siz
+- #5 @207888873 core; no leading digit) \u2014 they become CLAUDE_PLUGIN_OPTION_<KEY> env vars in hooks"),Jt()).optional().describe("User-configurable values this plugin needs. Prompted at enable time
+- #6 @207889515 e config dialog title (e.g., "Telegram"). Defaults to the server name.'),userConfig:M(i(),Jt()).optional().describe("Fields to prompt the user for when enabling this plugin in assistan
+- #7 @208248577 eak}u=s}return te("git_bare_repo_gate"),!1}var cr,ur,Ds=async(e)=>T(e)!==null,jn=async()=>Jt(),pr=async(e)=>{if(e===void 0)return Zt();let{stdout:t,code:r}=await j(w(),[..._,"rev-parse
+- #8 @208260821 es/origin/${n}`))return n;return"main"}function Zt(){return I().get("branch",Ao)}function Jt(){return I().get("head",To)}function Ze(){return I().get("remoteUrl",Oo)}function Qt(){retu
+- #9 @209119759 e)).some((n)=>Ke(n).includes(j))}catch(t){return De(t)}}var an=f(()=>{nn();en();tn();Qt();Jt()});
+export{bn as NSb,wn as OSb,xn as PSb,vn as QSb,P as RSb,kn as SSb,le as TSb,X as USb,T
+- #10 @209168079 )}function Nn(e){return v().reconnect(e)}function Yn(e){return v().disconnect(e)}function Jt(){let e=y();if(e.state!=="on"||e.selectionSource!=="preference")return;let t=e.request.sele
+- #11 @209168337 t):j(t);if(n===void 0)return;if(se(t)&&!ae(n.path,t))return;return n}function qn(e){let t=Jt();return t!==void 0&&e.some((r)=>f(r.path)===f(t.path))}var jt="/v1/code/local/memory/mount
+- #12 @210729571 urn"clear";return"unreadable"}}return"clear"}var ki=8,wi=1048576;var Zt=se(()=>{me();Yt();Jt();xe();Wt()});import{createHash as ln,randomBytes as Ri}from"crypto";import{lstat as ue,mkd
+- #13 @210742807 576,Gi=67108864,$i=536870912,Qt,Hi=16384,Ki,Zi,tr,nr=600000;var dr=se(()=>{Ti();me();Yt();Jt();Ee();xe();Wt();Oi();Rt();Pi();Zt();Di();Li=/^:([0-7]{6}) ([0-7]{6}) ([0-9a-f]{40}(?:[0-9a
+- #14 @210862783 `${t.path.join(".")||"value"}: ${t.message}`).join("; ")}function Kt(e){try{let t=Be(e),n=Jt().safeParse(t);if(n.success)return{entry:n.data,droppedPasteRecords:Yt(t,n.data)};return l(
+- #15 @211401233 ]=Gt;else Gt=D[42];return Gt}var oe;var en=J(()=>{ae();Vt();Yt();Lt();de();Ge();Qe();zt();Jt();qt();Qt();_();ee();oe=K(pt,{children:[n(dt,{chord:"enter",action:"confirm"}),n(ft,{action
+
+## jr-Ht-call @212307489
+or)e.setAttribute("error",t.error),Dt(e,t.error);e.end(),E(Nt,n)}function Ht(){return S()||rt()}function xn(e,t,n,r){if(!Ht())return a.trace.getActiveSpan()||d().startSpan("dummy");let s=d(),o=l(),{co
+
+## _158-table @192216509
+1be4a04C00000675AoHtcBtdncXeptcxosnc0ec165a1f1be4a04C00000689eoiBc0ec165a1f1be4a04C00000752Ge$1cHeS3czeZ1cUod2cJet4cDoz4c0ec165a1f1be4a04C00000824YtIfd0ec165a1f1be4a04C00000825IoKfd0ec165a1f1be4a04C00000826Hfgd0ec165a1f1be4a04C00000830FoGidLtyid0ec165a1f1be4a04C00000834jeKkdvoPkdEteldPthkdRokldSopkd0ec165a1f1be4a04C00000845dtAzdwtDyd0ec165a1f1be4a04C00000846TtPzdCoeAd0ec165a1f1be4a04C00000851geGBdLsYoMsenNsjrB:/~BUN/root/_158.jsB:/~BUN/root/_159.jsB:/~BUN/root/_205.jsB:/~BUN/root/_210.jsB:/~BUN/root/_253.jsB:/~BUN/root/_280.jsB:/~BUN/root/_281.jsB:/~BUN/root/_284.jsB:/~BUN/root/_294.jsB:/~BUN/
+
+## function Os( hits=21
+- #0 @206934061 rray(e.size);return e.forEach(function(r,s){o[++t]=[s,r]}),o}var In;var Fn=i(()=>{In=Fs});function Os(e){var t=-1,o=Array(e.size);return e.forEach(function(r){o[++t]=r}),o}var On;var En=i(()=>
+- #1 @207647425 ,"%20":"+"};return encodeURIComponent(e).replace(/[!'()~]|%20/g,function(n){return t[n]})}function Os(e,t){this._pairs=[],e&&be(e,this,t)}var vs,Ts;var Ps=R(()=>{et();vs=Os.prototype;vs.append
+- #2 @207994156 ssage||"invalid inline helper config"}function Rs(e){return e==="windows"?"win32":"posix"}function Os(e){return{rejectDriveRelative:e==="windows",rejectUnc:e==="windows",rejectNetworkRoot:e!==
+- #3 @208241061 )=>{let o=We(t,"remote","origin",n);return o?Qe(o):null};return r("pushurl")??r("url")??k}function Os(e){let t=ge(v().remoteSlugByRoot,e,eo);return t===k?null:t}function Gs(e){try{let t=!0;try
+- #4 @208310069 i}=ct(e);if(i)return i;let o=Re();return Object.keys(o.settings).length>0?o.settings:null}function Os(){let e=gt({...p(),helper:void 0});return e==="helper"?null:e}function As(){let e=y(),t=e.
+- #5 @210605149 Map((g)=>g.kind==="skip"?[g.skipped]:[]),chosen:O.slice(0,m),overBudget:O.slice(m)}}async function Os({gitRoot:e,realRoot:n,anchor:t,signal:i,uploadFilter:o,rowBudget:r,alreadyJudged:a,filterA
+- #6 @216140475 ,Re.map((pn)=>pn.name).join(","),ge?.schema?le(ge.schema):"",dt??ze()].join(`
+`),kr;async function Os(pn,fo,Rr,In,Ot){let Zr=Am();Ie(Zr);let dr={agentId:Zr,parentAgentId:Jp(Oe)?void 0:Oe?.agen
+- #7 @220374053 rim()||`exit ${S}`}); starting from source HEAD`),d(!1)}),c.on("error",()=>d(!1))})}async function Os(e,t,n=qt){return new Promise((r)=>{let i=!1,a=(d)=>{if(i)return;i=!0,clearTimeout(f),r(d)}
+- #8 @222032646 ctSummary===!0),c=n===-1?s.length:n;return[...i,...s.slice(0,c),...t,...s.slice(c)]}async function Os(){let s=Ce();if(!s)return null;try{await Fe();let{content:a,bytesRead:u,bytesTotal:i}=awai
+- #9 @223711620 on(){this.#d++,this.#l({newSessionOpening:!1})}markAutoOpened(){this.#l({autoOpened:!0})}}function Os(e){return e.attach??=new Kf}Bl();Nl();Hl();function jf(e,t,{pruneTextPastes:o=!1}={}){let 
+- #10 @223961478 :" ",WB:"\u2584",BB:"\u2588",BW:"\u2580"},Ms={BB:" ",BW:"\u2584",WW:"\u2588",WB:"\u2580"};function Os(t,e,r){if(t&&e)return r.BB;if(t&&!e)return r.BW;if(!t&&e)return r.WB;return r.WW}Ns.render
+- #11 @225202055 erge these with the per-project counts in the section above.`].filter(Boolean).join(`
+`))}function Os(e){switch(e){case"none":case"network-home":case"home-unreadable":return"";case"timeout":re
+- #12 @226461935 ide:!0},rt={name:"serializerMiddleware",step:"serialize",tags:["SERIALIZER"],override:!0};function Os(e){return{applyToStack:(t)=>{t.add(Cs(e),rt),t.add(Ms(e),tt),e.protocol.setSerdeContext(e)
+- #13 @227395699 plice(t,1)}function As(e){return{dev:e.dev,ino:e.ino,size:e.size,mtimeNs:e.mtimeNs}}async function Os({gitRoot:e,gitDir:n,branch:t,head:r,incomingHead:o,paths:i,keptLocal:s=[],checkoutEnv:a,re
+- #14 @227711186 copy",(a)=>{if(a)return n(a);if(r.filter)return Ps(Os,s,e,t,r,n);return Os(s,e,t,r,n)})})}function Os(e,t,r,n,i){let o=Pt.dirname(r);Ld(o,(u,s)=>{if(u)return i(u);if(s)return fr(e,t,r,n,i);Nd(
+- #15 @228213911 [r],t)n=t(n);return n}}function R(e){return function(r){return Math.max(0,Math.min(e,r))}}function Os(e){return Array.isArray(e)?e:[e]}function rr(e,r){for(let t=0;t<r;t++)if(typeof e[t]!=="nu
+
+## Os as Yne hits=1
+- #0 @232030386 l$}from"B:/~BUN/root/_152.js";import{Fs as rce,Gs as dk}from"B:/~BUN/root/_155.js";import{Os as Yne}from"B:/~BUN/root/_158.js";import{Ss as Iqe}from"B:/~BUN/root/_160.js";import{rt as dU}fr
+
+## DE(s)===void 0 hits=1
+- #0 @216526011 o=eLt(e).slice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId
+
+## function DE( hits=3
+- #0 @208593052 .length||t.id.localeCompare(n.id))}function ks(){return De().modelCapabilitiesByCachePath}function DE(e,t=De().modelCapabilitiesStorageV5){let n=ks();if(n.has(e))return n.get(e)??null;if(t)ret
+- #1 @229606918 or(`Reference not found: ${e}`);return t.defs[n]}throw Error(`Reference not found: ${e}`)}function DE(e,t){if(e.not!==void 0){if(typeof e.not==="object"&&Object.keys(e.not).length===0)return K
+- #2 @248882867 e,rd=null,e=e.dependencies,e!==null&&(e.firstContext=null)}function ya(e){return N4(dm,e)}function DE(e,t){return dm===null&&rm(e),N4(e,t)}function N4(e,t){var n=t._currentValue;if(t={context:
+
+## function ol( hits=13
+- #0 @206342417 )>>>8&-V+r-65+0,s+=(96-r&r-123)>>>8&-V+r-97+26,s},t}(Vn);le.URLSafeCoder=ba;var ya=new ba;function ol(e){return ya.encode(e)}le.encodeURLSafe=ol;function al(e){return ya.decode(e)}le.decodeURL
+- #1 @208063748 oid 0)delete i[l];return i})}function nl(e){return"serverName"in e&&e.serverName!==void 0}function ol(e){return"serverCommand"in e&&e.serverCommand!==void 0}function sl(e){return"serverUrl"in 
+- #2 @208602918 t.includes("claude-3-")||t==="claude-opus-4-0"||t==="claude-sonnet-4-0")return!1;return!0}function ol(){return De().betas}function il(e,t,n){let r=e.get(t);if(r!==void 0)return r;let o=n();ret
+- #3 @209361673 <t)o.retryAtMs=Date.now()+fm;return s}),this.current=o}return this.current.entries}}async function ol(e=nl,t={}){let n;try{n=Vn()}catch(l){return y(`memory-prompt-index: parseMemoryStoresEnv f
+- #4 @211019077 structor(e){super();this.type=e}}});var fh=U(()=>{wb()});import{Buffer as Qc}from"buffer";function ol(e){return e.length<=GM&&Kb.test(e)}function Ib(e){let o=e._tokenizer?.buffer()??"";return 
+- #5 @211422789 Xr(a)&&xe([r])?Le.marketplaceCache(r,n):null}function Xr(r){return r===De(le(),"plugins")}function ol(r,n){if(!Xr(n))return null;let a=De(n,"marketplaces"),u=ns(a,r);if(u===""||u===".."||u.sta
+- #6 @219953311 il(Buffer.from(r))}function il(e){return Buffer.from(e.subarray(Math.max(0,e.length-Lg)))}function ol(e){return`${e.device}:${e.inode}`}function al(e){let r=e.headSeq??-1,n=Hn(e).length;return
+- #7 @223306354 t_in","migration_reset_auto_mode_write_failed"),!1}return!0}ce();Pe();Po();Ce();Ht();ye();function ol(e){if(U().opusProMigrationComplete)return;if(Ee()!=="firstParty"||!kr()){F((n)=>({...n,opu
+- #8 @231310671 ]=Uy,Ny[17]=Ey,Ny[18]=vy,Ny[19]=Ay,Ny[20]=Oy,Ny[21]=Ja,Ny[22]=tG;else tG=Ny[22];return tG}function ol(pre){let bm=R(14),{displayName:VE,inkColor:YE,content:Fy,summary:$y}=pre,rG;if(bm[0]===y)r
+- #9 @231740869 ya();nl();so();lo();function tl(){A("tengu_usage_credits_admin_request_confirm_shown",{})}function ol(Zc){let Be=j(20),{extraUsage:ao,onDone:Tn}=Zc,{credentials:fa}=Ce(),[Gc,ed]=b(!1),Wo=T(!1)
+- #10 @234439919 nced":e;if(i===void 0)return;return{kind:"error",code:"host_offline",message:ol(i,t,o,r)}}function ol(e,n,t,o){switch(e){case"connecting":return zo(n);case"not_connected":return er();case"serv
+- #11 @237894148 y??f.agentFactory,userAgent:l.userAgent}}uo.mergeOtlpNodeHttpConfigurationWithDefaults=nl;function ol(l,u){return{...(0,oo.getHttpConfigurationDefaults)(l,u),agentFactory:io({keepAlive:!0})}}u
+- #12 @238332393 rTimeToNanoseconds=nl;function sl(e){return e[0]*1000+e[1]/1e6}ei.hrTimeToMilliseconds=sl;function ol(e){return e[0]*1e6+e[1]/1000}ei.hrTimeToMicroseconds=ol;function pt(e){return Array.isArra
+
+## _r.transcript hits=8
+- #0 @216525985 urn;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===nul
+- #1 @219563360 ===2){let l=/^(.+)\.jsonl$/.exec(o);if(l===null)return;let c=l[1];return ol(n)&&ol(c)?Poe(_r.transcript(n,c)):void 0}if(t.length<4||t[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(o)
+- #2 @219563555 f(s===null)return;let i=s[1],a=t.slice(3,-1);if(![n,r,i,...a].every(ol))return;return Poe(_r.transcript(n,r,i,a.length>0?a:void 0))}function Poe(e){return DE(e)===void 0?e:void 0}function Uio(e
+- #3 @219636781 l(e))return;let n=Yy();if(n!==null){let l=$oe(n);if(xv(n)!==Um()||!ol(l))return;let c=Poe(_r.transcript(l,e));if(c===void 0)return;return{key:c,path:fa(n,`${e}.jsonl`)}}let r=mn(),o=O6t(r),s=[o
+- #4 @219637498 cope.projectKey);m=y.value.cursor}while(m&&++g<Kso)}catch{}let h={backend:t,transcriptKey:_r.transcript,isKeySegment:ol};for(let y of f)if(await D6t(fa(Um(),y),r,!0,NS(h)))s.push(y)}for(let l o
+- #5 @219637616 l};for(let y of f)if(await D6t(fa(Um(),y),r,!0,NS(h)))s.push(y)}for(let l of s){let c=Poe(_r.transcript(l,e));if(c===void 0)continue;if((await t.stat(c)).ok)return{key:c,path:fa(Um(),l,`${e}.js
+- #6 @219637736 d 0)continue;if((await t.stat(c)).ok)return{key:c,path:fa(Um(),l,`${e}.jsonl`)}}let a=Poe(_r.transcript(o,e));return a===void 0?void 0:{key:a,path:fa(Um(),o,`${e}.jsonl`)}}async function dni(e)
+- #7 @219653068 meMs===void 0)continue;let i=nw(s.key.sessionId);if(i===null||n.has(i))continue;let a=Poe(_r.transcript(t,i));if(a===void 0)continue;n.set(i,{key:a,mtimeMs:s.mtimeMs,createdMs:s.createdMs,size:
+
+## function Lfs( hits=1
+- #0 @216525849 ;if(d>0)D("tengu_feedback_draft_oversized_file",{count:Ha(d)});return{queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);if(tLt(n)!
+
+## Lfs @216525849
+len=186 sha=a5500e47badd386d
+function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}
+
+## Lfs-win @216525849
+queued:l,expired:c}}function Lfs(e,t){if(!e.endsWith(".jsonl"))return;let n=tLt(e),r=eLt(n),o=eLt(e).slice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===null)return!1;let{getSessionId:r}=await import("B:/~BUN/root/chunk-j3ftgb6r.js"),o=e.source_session_id===r();if(t){let{getProjectsDir:s}=await import("B:/~BUN/root/chunk-g7f2jjk2.js"),i=Lfs(n,s());if(i!==void 0)try{if(o)return(await t.statMeta(i)).ok;let a=await t
+
+## DE#0 @208593052
+len=182 sha=6f2e4dfcdd9e71c1
+function DE(e,t=De().modelCapabilitiesStorageV5){let n=ks();if(n.has(e))return n.get(e)??null;if(t)return null;let r;try{let o=EM(e,"utf-8");r=rl(o)}catch{r=null}return n.set(e,r),r}
+
+## DE#1 @229606918
+MISS {"i":229606918,"missEnd":true,"preview":"function DE(e,t){if(e.not!==void 0){if(typeof e.not===\"object\"&&Object.keys(e.not).length===0)return K.never();throw Error(\"not is not supported in Zod (except { not: {} } for never)\")}if(e.unevaluatedItems!==void 0)throw Error(\"unevaluatedItems is not supported\");if(e.unevaluate"}
+
+## DE#2 @248882867
+len=49 sha=8a57973d0e73ddeb
+function DE(e,t){return dm===null&&rm(e),N4(e,t)}
+
+## ol#0 @206342417 skip function ol(e){return ya.encode(e)}le.encodeURLSafe=ol;function al(e){return ya.decode(e)}le.decodeURLSafe=al;le.encoded
+
+## ol#1 @208063748 skip function ol(e){return"serverCommand"in e&&e.serverCommand!==void 0}function sl(e){return"serverUrl"in e&&e.serverUrl!==v
+
+## ol#2 @208602918 skip function ol(){return De().betas}function il(e,t,n){let r=e.get(t);if(r!==void 0)return r;let o=n();return e.set(t,o),o}f
+
+## ol#3 @209361673 skip function ol(e=nl,t={}){let n;try{n=Vn()}catch(l){return y(`memory-prompt-index: parseMemoryStoresEnv failed: ${Ut(l)}`,{
+
+## ol#4 @211019077 skip function ol(e){return e.length<=GM&&Kb.test(e)}function Ib(e){let o=e._tokenizer?.buffer()??"";return e._tokenizer?.rese
+
+## ol-storage#5 @211422789
+len=187 sha=804b9129b90f938b
+function ol(r,n){if(!Xr(n))return null;let a=De(n,"marketplaces"),u=ns(a,r);if(u===""||u===".."||u.startsWith(`..${Gt}`)||is(u))return null;let l=u.split(Gt);return De(a,...l)===r?l:null}
+
+## ol#6 @219953311 skip function ol(e){return`${e.device}:${e.inode}`}function al(e){let r=e.headSeq??-1,n=Hn(e).length;return`stream:${e.applyG
+
+## ol#7 @223306354 skip function ol(e){if(U().opusProMigrationComplete)return;if(Ee()!=="firstParty"||!kr()){F((n)=>({...n,opusProMigrationCompl
+
+## ol#8 @231310671 skip function ol(pre){let bm=R(14),{displayName:VE,inkColor:YE,content:Fy,summary:$y}=pre,rG;if(bm[0]===y)rG=o(t,{"aria-hidde
+
+## ol#9 @231740869 skip function ol(Zc){let Be=j(20),{extraUsage:ao,onDone:Tn}=Zc,{credentials:fa}=Ce(),[Gc,ed]=b(!1),Wo=T(!1),Is;if(Be[0]===v)I
+
+## ol#10 @234439919 skip function ol(e,n,t,o){switch(e){case"connecting":return zo(n);case"not_connected":return er();case"serves_nothing":return
+
+## ol#11 @237894148 skip function ol(l,u){return{...(0,oo.getHttpConfigurationDefaults)(l,u),agentFactory:io({keepAlive:!0})}}uo.getNodeHttpConfi
+
+## Lfs-DE-call @216526011
+lice(0,-6);if(tLt(n)!==t||!ol(r)||!ol(o))return;let s=_r.transcript(r,o);return DE(s)===void 0?s:void 0}async function Nfs(e,t){let n=await Dfs(e);if(n===null)r
+
+## DE-def-before-Lfs-call @212757308
+refix:!1,base:null}}function de(e,t){return e.quote!==null||
+
+## DE-before-call function de( @212757308
+len=77 sha=8124089698a88426
+function de(e,t){return e.quote!==null||e.text.startsWith("~/")||!ce.test(t)}

@@ -1,0 +1,3 @@
+# ver=247 name=k3r async=false start=218732588 end=218732687 len=99 sha=57467f47aa391ecd needle="background session"
+
+function k3r(){return da()?"Detach from this background session (it keeps running)":"Exit the CLI"}

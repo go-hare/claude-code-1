@@ -1,0 +1,3 @@
+# off=206368444 needle=",Ws,"
+
+\u2014 pass it, construct the worker with it, or set ANTHROPIC_ENVIRONMENT_KEY");let i={id:t,environment_id:r,data:{type:"session",id:s}};await o(this,Ws,"m",ni).call(this,i,n,e?.signal??o(this,mr,"f"))}}async function Pl(e,t,r,s){try{await e.beta.environments.work.stop(t.id,{environment_id:t.environment_id,force:!0},{...s,headers:l([s?.headers])})}catch(n){if(!$e(n,409))r.error("force-stop on exi

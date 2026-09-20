@@ -1,0 +1,2 @@
+# call await vSt(a,_B(), @214560365
+tes or manual edits to known_marketplaces.json. ${p?`Run \`${p}\``:"Remove the entry"} and re-add it.`)}}if(e===Yfe){if(await vSt(a,_B(),t)!==null){ce("plugin_official_marketplace_fetch"),await PSt(e,t);return}if(!we("tengu_plugin_official_mkt_git_fallback",!0))throw J("plugin_official_marketplace_fetch","gcs_failed_fa

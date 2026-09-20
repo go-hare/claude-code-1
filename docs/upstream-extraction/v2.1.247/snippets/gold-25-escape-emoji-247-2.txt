@@ -1,0 +1,4 @@
+# 247 emoji @207289764
+
+e){return e.replace(/[\p{Cf}\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/gu,"")}function Te(e){let n=0;while(n<=e.length){let r=e.indexOf(`
+`,n),s=r===-1?e.length:r,t=s-n<=_,i=m(e.slice(n,Math.min(s,n+_)),_),o=y(i," ",{keepEmojiJoiners:!0}).replace(/\s+/g," ").trim();if(o!==""||!t){let d=m(o,O),V=!t||d.length<o.length;return N(V?`${d}\u2026`:d,oe)}if(r===-1)break;n=r+1}return""}function be(e){let n=S(e).replace(ne,"

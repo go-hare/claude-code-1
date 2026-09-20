@@ -1,0 +1,5 @@
+# ver=246 name=LMt async=false start=214862158 end=214862659 len=501 sha=cb936940802ef3fb needle="exited with code ${"
+
+function LMt(e,t,n,r,o,s,i="bash",a,l){if(!Qv(e,o).claimed)return;if(ZH(e,`
+[${n==="killed"?"killed":`exited with code ${r??"unknown"}`}]
+`),n==="completed")le("task_local_shell");else if(n==="failed")J("task_local_shell","task_local_shell_failed");let c=$Mt(i,t,n,r,l),u=$i(e);if(ia({value:Ul({taskId:e,toolUseId:s,outputFile:u,status:n,summary:fo(c)}),mode:"task-notification",priority:"next",agentId:a??vr(),taskId:e}),a!==void 0)ca(e,n==="killed"?"stopped":n,{toolUseId:s,summary:c,outputFile:u})}

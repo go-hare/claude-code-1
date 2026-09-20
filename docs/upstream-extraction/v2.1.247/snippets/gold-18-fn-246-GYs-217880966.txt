@@ -1,0 +1,4 @@
+# ver=246 name=GYs async=true start=217880966 end=217881771 len=805 sha=cb64113042ba6b58 needle="Exit code "
+
+async function GYs(e,t,n){let{filePath:r,newContent:o}=e,s=Dn(r),i=va(s),a=yt(),l,c,u;try{let d=await a.readFileBytes(s),p=d.subarray(0,4096);c=i7r(p),l=d.toString(c),u=a7r(p.toString("utf8"))}catch(d){if(Et(d))return{data:{stdout:"",stderr:`sed: ${r}: No such file or directory
+Exit code 1`,interrupted:!1}};throw d}if(n)await TU(t.getFileHistoryState,t.applyFileHistoryOp,s,n.uuid);return await xR(s,async()=>{Ey(s,i);let d=t.readFileState.get(s),p=await Ik(s),f;try{f=await kB(s,o,c,u)}catch(g){throw Sm(s),g}let m=nI(d)&&(FBe(d,l)||p<=d.timestamp);if(t.readFileState.set(s,{content:UT(o),timestamp:f,offset:void 0,limit:void 0,...!m&&{contentNotInModelContext:!0}}),c==="utf8"&&u!=="CRLF")zZ(s,o);else Sm(s)}),EU(s,l,o),t.applyFileHistoryOp({kind:"touch"}),{data:{stdout:"",stderr:"",interrupted:!1}}}

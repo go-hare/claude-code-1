@@ -1,0 +1,1 @@
+class Ue{identities=new Map;record(e,t,r,n){let o=we(e),i=this.identities.get(o);if(i)try{P(i.fd)}catch{}this.identities.set(o,{dev:t,ino:r,fd:n})}identity(e){return this.identities.get(we(e))}reset(){for(let{fd:e}of this.identities.values())try{P(e)}catch{}this.identities.clear()}}

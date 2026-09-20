@@ -19,7 +19,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
 import {
-  createRoot,
   Box,
   Text,
   useInput,
@@ -29,6 +28,7 @@ import {
   enterAltScreenSequence,
   supportsExtendedKeys,
 } from '@anthropic/ink';
+import { createRoot } from '../utils/inkRoot.js';
 import { AppStateProvider } from '../state/AppState.js';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { useNotifications } from '../context/notifications.js';

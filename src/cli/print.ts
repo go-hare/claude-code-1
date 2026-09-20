@@ -257,6 +257,7 @@ import {
 } from 'src/services/PromptSuggestion/promptSuggestion.js'
 import { getLastCacheSafeParams } from 'src/utils/forkedAgent.js'
 import { getAccountInformation } from 'src/utils/auth.js'
+import { oauthLoginOrgUUIDHint } from 'src/utils/forceLoginOrg.js'
 import { OAuthService } from 'src/services/oauth/index.js'
 import { installOAuthTokens } from 'src/cli/handlers/auth.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
@@ -5305,11 +5306,10 @@ function runHeadlessStreaming(
             const methodMismatch =
               authSettings.forceLoginMethod !== undefined &&
               wantsClaudeAi !== (authSettings.forceLoginMethod === 'claudeai')
-            const orgUUID =
-              typeof authSettings.forceLoginOrgUUID === 'string' &&
-              !methodMismatch
-                ? authSettings.forceLoginOrgUUID
-                : undefined
+            const orgUUID = oauthLoginOrgUUIDHint(
+              authSettings.forceLoginOrgUUID,
+              methodMismatch,
+            )
             let urlResolver!: (urls: {
               manualUrl: string
               automaticUrl: string
@@ -5817,10 +5817,19 @@ function runHeadlessStreaming(
                 // instead of a generic "initialization failed".
                 let bridgeFailureDetail: string | undefined
                 try {
-                  const { initReplBridge } = await import(
-                    'src/bridge/initReplBridge.js'
+                  const {
+                    initReplBridge,
+                    HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
+                  } = await import('src/bridge/initReplBridge.js')
+                  const { getReplDiffHost } = await import(
+                    'src/utils/replDiffTab.js'
                   )
                   const handle = await initReplBridge({
+                    host: getReplDiffHost(),
+                    workspaceDiffComputeBudget:
+                      HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
+                    getToolPermissionContext: () =>
+                      getAppState().toolPermissionContext,
                     onInboundMessage(msg) {
                       const fields = extractInboundMessageFields(msg)
                       if (!fields) return

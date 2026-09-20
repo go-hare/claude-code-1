@@ -1,0 +1,4 @@
+# 
+# start=233205694 end=233206294
+
+h>0);let n=j(t),o=j(e);return[{oldStart:n.length===0?0:1,oldLines:n.length,newStart:o.length===0?0:1,newLines:o.length,lines:[...n.map((s)=>`-${s}`),...o.map((s)=>`+${s}`)]}]}function xt(t){let e=V,i=[];for(let r of t){if(e<=0)break;let n=r.lines.slice(0,e);e-=n.length,i.push({...r,lines:n})}return i}async function Yt(t,e){let i=await A();if(i===null)return{diff:null};let r=await Z(t);if(r===null)return{diff:null};let n=await A();if(n===null||n!==i)return{diff:null};let o=q(r),s=(u)=>({diff:{stats:r.stats,perFileStats:Array.from(r.perFileStats,([g,L])=>({path:g,...L})),hunks:u.hunks,skippedLar
