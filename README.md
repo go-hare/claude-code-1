@@ -11,6 +11,8 @@
 基于官方 Claude Code CLI 的**源码还原 / 工程化重建**项目。目标是在保留 Claude Code 终端交互体验的同时，补齐多模型接入、自托管 Remote Control、ACP、daemon / 后台会话、MCP、插件与本地自动化等能力。
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
+>
+> 当前 npm：**`2.7.50`**（densable **2.1.247** HAVE 31 / N/A 2）。`npm i -g @go-hare/claude-code`
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,7 +47,18 @@
 
 近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.50** = 243+246+247），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.246 对齐说明（2.7.49）
+#### densable 2.1.247 对齐说明（2.7.50）
+
+对照文档：`docs/upstream-extraction/v2.1.247/official-247-checklist.md`（**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.246** 上。**勿折入 248+**；不 invent 云宿主 / hook MB / `/share` alias。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **#1 SendFeedback** | leftover `/feedback`/`/bug` 拆开 + `jr`/`Dfs`/`Ri`/`Nfs` + `Lfs` `DE`=`validateStorageKey` | `ye`/`Ht`/`Jt` 无体 = 对齐；不偷官方 `share` alias |
+| **#8 / #19 / #25** | `lre` leftover；`Yjo` aside；`n0c`/`k` 打印 | 不 invent MB / stderr cap |
+| **#23 / #24** | N/A 云宿主 | 同缺 = 对齐 |
+| **其余 #2–#22 #26–#33** | HAVE（以已锁 SEA 体为准） | changelog 超卖不 invent |
+
+#### densable 2.1.246 对齐说明（2.7.48 / 2.7.49）
 
 对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面，**2.7.49** 全平台重编；官方无 2.1.244 bullets，**勿折入 245 glibc**。247 进 **2.7.50**；**勿折入 248+**。
 
@@ -59,20 +72,9 @@
 | **storageV5** | `qb` 空壳 + pin `UF(e=qb)` | CLI 不自动 `qF` |
 | **N/A 2** | #39 #59 官方 installer | 同缺 = 对齐；不 invent |
 
-#### densable 2.1.247 对齐说明（2.7.50）
-
-对照文档：`docs/upstream-extraction/v2.1.247/official-247-checklist.md`（**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.246** 上。**勿折入 248+**；不 invent 云宿主 / hook MB / `/share` alias。
-
-| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
-| -- | ----------- | --------------- |
-| **#1 SendFeedback** | leftover `/feedback`/`/bug` 拆开 + `jr`/`Dfs`/`Ri`/`Nfs` + `Lfs` `DE`=`validateStorageKey` | `ye`/`Ht`/`Jt` 无体 = 对齐；不偷官方 `share` alias |
-| **#8 / #19 / #25** | `lre` leftover；`Yjo` aside；`n0c`/`k` 打印 | 不 invent MB / stderr cap |
-| **#23 / #24** | N/A 云宿主 | 同缺 = 对齐 |
-| **其余 #2–#22 #26–#33** | HAVE（以已锁 SEA 体为准） | changelog 超卖不 invent |
-
 #### densable 2.1.243 对齐说明
 
-对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.49**。官方无 2.1.240/241 bullets，**勿折入 245+**。
+对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.49**，现随 **2.7.50** 继续发。官方无 2.1.240/241 bullets，**勿折入 245+**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -365,7 +367,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.17`）。  
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.50`）。  
 旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
 ---

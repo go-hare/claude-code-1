@@ -11,6 +11,8 @@
 A **source restoration / engineering rebuild** of Anthropic’s official Claude Code CLI. The goal is to keep the Claude Code terminal experience while adding multi-provider models, self-hosted Remote Control, ACP, daemon / background sessions, MCP, plugins, and local automation.
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
+>
+> Current npm: **`2.7.50`** (densable **2.1.247** HAVE 31 / N/A 2). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,7 +47,18 @@ There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `s
 
 Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.50** = 243+246+247) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.246 alignment (2.7.49)
+#### densable 2.1.247 alignment (2.7.50)
+
+Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.246**. **Do not fold 248+**; do not invent cloud hosts / hook MB / `/share` alias.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **#1 SendFeedback** | leftover `/feedback`/`/bug` split + `jr`/`Dfs`/`Ri`/`Nfs` + `Lfs` `DE`=`validateStorageKey` | `ye`/`Ht`/`Jt` no body = aligned; do not steal official `share` alias |
+| **#8 / #19 / #25** | `lre` leftover; `Yjo` aside; `n0c`/`k` print | do not invent MB / stderr caps |
+| **#23 / #24** | N/A cloud host | same-missing = aligned |
+| **rest #2–#22 #26–#33** | HAVE (locked SEA bodies) | changelog oversell is not a contract |
+
+#### densable 2.1.246 alignment (2.7.48 / 2.7.49)
 
 Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** landed the 246 CLI product surface; **2.7.49** rebuilds all platform binaries. No official 2.1.244 bullets — **do not fold 245 glibc**. 247 ships in **2.7.50**; **do not fold 248+**.
 
@@ -59,20 +72,9 @@ Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (
 | **storageV5** | empty `qb` + pin `UF(e=qb)` | CLI does not auto-call `qF` |
 | **N/A 2** | #39 #59 official installer | same-missing = aligned; do not invent |
 
-#### densable 2.1.247 alignment (2.7.50)
-
-Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.246**. **Do not fold 248+**; do not invent cloud hosts / hook MB / `/share` alias.
-
-| Surface | Landed 1:1 | Intentionally out of scope |
-| ------- | ---------- | -------------------------- |
-| **#1 SendFeedback** | leftover `/feedback`/`/bug` split + `jr`/`Dfs`/`Ri`/`Nfs` + `Lfs` `DE`=`validateStorageKey` | `ye`/`Ht`/`Jt` no body = aligned; do not steal official `share` alias |
-| **#8 / #19 / #25** | `lre` leftover; `Yjo` aside; `n0c`/`k` print | do not invent MB / stderr caps |
-| **#23 / #24** | N/A cloud host | same-missing = aligned |
-| **rest #2–#22 #26–#33** | HAVE (locked SEA bodies) | changelog oversell is not a contract |
-
 #### densable 2.1.243 alignment
 
-Source of truth: `docs/upstream-extraction/v2.1.243/official-243-checklist.md` (**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**), `cross-pack-residuals.md`. Already landed; ships with 246 as **2.7.49**. No official 2.1.240/241 bullets — **do not fold 245+**.
+Source of truth: `docs/upstream-extraction/v2.1.243/official-243-checklist.md` (**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**), `cross-pack-residuals.md`. Already landed; shipped with 246 as **2.7.49**, and continues in **2.7.50**. No official 2.1.240/241 bullets — **do not fold 245+**.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -365,7 +367,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.17`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.50`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---
