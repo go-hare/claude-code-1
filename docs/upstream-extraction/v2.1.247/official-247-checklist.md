@@ -8,7 +8,7 @@
 > 更新：2026-09-19 — #1 接 leftover `jr`/`Dfs`/`Ri`/`Nfs`。HAVE **31** / PARTIAL **0** / UNKNOWN **0** / N/A **2**。  
 > 更新：2026-09-19 — #1 `Lfs` `DE` leftover-locked（`validateStorageKey`）。`ye`/`Ht`/`Jt` 体未剥。HAVE 桶不变。  
 > 更新：2026-09-19 — **本 pack 已收口**（HAVE **31** / PARTIAL **0** / UNKNOWN **0** / N/A **2**）。不要再挖本清单。未进 tip（npm 仍 **2.7.49** = 243+246）。  
-> 更新：2026-09-20 — 247 已入库，npm 仍 **2.7.49**（未 bump）。不折入 248+。  
+> 更新：2026-09-20 — 247 已入库，npm **2.7.50**。不折入 248+。  
 > 口径：本地实现 + 已锁 SEA 函数体是合同。changelog 字面大于代码 → **不升桶、不 invent**。禁止 invent 云宿主 / 248 `--restricted`。
 
 ## Summary
@@ -70,5 +70,5 @@
 ## 下一步
 
 1. **2.1.247 pack 已收口**（HAVE 31 / N/A 2 / UNKNOWN 0）。不要再挖 `ye`/`Ht`/`Jt` / 云宿主 / changelog 超卖。
-2. 已入库。发布线仍是 npm **2.7.49**（243+246）。不 auto bump。
+2. 已入库。发布线 npm **2.7.50**（243+246+247）。不折入 248+。
 3. 下一 pack 才看 248+。不 invent `--restricted`。

@@ -6,7 +6,7 @@
 > 口径：densable-first 1:1 · invent-ban · **只盘 247**（勿折入 248+；勿按 changelog 扩写 SendFeedback）  
 > 更新：2026-09-17 — UNKNOWN 复剥。HAVE **29** / PARTIAL **0** / UNKNOWN **2** / N/A **2**。金标以已锁 SEA 函数体为准；changelog 是索引。  
 > 更新：2026-09-19 — **本 pack 已收口**（HAVE **31** / N/A **2**）。未进 tip。不折入 248+。  
-> 更新：2026-09-20 — 247 已入库，npm 仍 **2.7.49**（未 bump）。不折入 248+。
+> 更新：2026-09-20 — 247 已入库，npm **2.7.50**。不折入 248+。
 
 ## What's changed（官方原文 · 33 bullets）
 
