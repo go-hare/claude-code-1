@@ -16,7 +16,7 @@ import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode, isFsInaccessible } from './errors.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
-import type { SessionKind } from './concurrentSessions.js'
+import type { SessionKind, SessionStatus } from './concurrentSessions.js'
 import {
   MAX_UDS_FRAME_BYTES,
   assertUdsPayloadUnderLineCap,
@@ -49,7 +49,70 @@ export type PeerSession = {
   bridgeSessionId?: string | null
   /** densable 2.1.238 #28 — pre-warm spare hidden until claimed. */
   spare?: boolean
+  /**
+   * densable parkedJobId — left-arrow park. terminalHolders skip when set
+   * (`parkedJobId===void 0` is the holder fill).
+   */
+  parkedJobId?: string
+  /** Official mapper @181016699 — gc #O statuses + adoptedPeers. */
+  jobId?: string
+  status?: SessionStatus
+  waitingFor?: string
+  updatedAt?: number
+  statusUpdatedAt?: number
+  peerProtocol?: number
   alive: boolean
+}
+
+const SESSION_STATUSES = new Set<SessionStatus>(['busy', 'idle', 'waiting'])
+
+function asSessionStatus(value: unknown): SessionStatus | undefined {
+  return typeof value === 'string' &&
+    SESSION_STATUSES.has(value as SessionStatus)
+    ? (value as SessionStatus)
+    : undefined
+}
+
+/**
+ * Official live-session mapper @181016699 — leftover host for listAllLiveSessions.
+ * Reads peerProtocol / jobId / status so fleet #O is not inventing fields.
+ */
+export function peerSessionFromRegistry(
+  pid: number,
+  data: Record<string, unknown>,
+): PeerSession {
+  const jobId = typeof data.jobId === 'string' ? data.jobId : undefined
+  const parkedJobId =
+    typeof data.parkedJobId === 'string' ? data.parkedJobId : undefined
+  const peerProtocol =
+    typeof data.peerProtocol === 'number' ? data.peerProtocol : undefined
+  const updatedAt =
+    typeof data.updatedAt === 'number' ? data.updatedAt : undefined
+  const statusUpdatedAt =
+    typeof data.statusUpdatedAt === 'number' ? data.statusUpdatedAt : undefined
+  const waitingFor =
+    typeof data.waitingFor === 'string' ? data.waitingFor : undefined
+  const status = asSessionStatus(data.status)
+  return {
+    pid,
+    sessionId: data.sessionId as string | undefined,
+    cwd: data.cwd as string | undefined,
+    startedAt: data.startedAt as number | undefined,
+    kind: data.kind as SessionKind | undefined,
+    name: data.name as string | undefined,
+    messagingSocketPath: data.messagingSocketPath as string | undefined,
+    entrypoint: data.entrypoint as string | undefined,
+    bridgeSessionId: data.bridgeSessionId as string | null | undefined,
+    ...(data.spare === true ? { spare: true } : {}),
+    ...(parkedJobId ? { parkedJobId } : {}),
+    ...(jobId ? { jobId } : {}),
+    ...(status ? { status } : {}),
+    ...(waitingFor ? { waitingFor } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
+    ...(statusUpdatedAt !== undefined ? { statusUpdatedAt } : {}),
+    ...(peerProtocol !== undefined ? { peerProtocol } : {}),
+    alive: true,
+  }
 }
 
 export class UdsPeerConnectionError extends Error {
@@ -144,19 +207,7 @@ export async function listAllLiveSessions(): Promise<PeerSession[]> {
     try {
       const raw = await readFile(join(dir, file), 'utf8')
       const data = jsonParse(raw) as Record<string, unknown>
-      results.push({
-        pid,
-        sessionId: data.sessionId as string | undefined,
-        cwd: data.cwd as string | undefined,
-        startedAt: data.startedAt as number | undefined,
-        kind: data.kind as SessionKind | undefined,
-        name: data.name as string | undefined,
-        messagingSocketPath: data.messagingSocketPath as string | undefined,
-        entrypoint: data.entrypoint as string | undefined,
-        bridgeSessionId: data.bridgeSessionId as string | null | undefined,
-        ...(data.spare === true ? { spare: true } : {}),
-        alive: true,
-      })
+      results.push(peerSessionFromRegistry(pid, data))
     } catch {
       // Corrupted file — skip
     }

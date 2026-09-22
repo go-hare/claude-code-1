@@ -40,6 +40,7 @@ import {
   pickProcessStartIdentity,
 } from './genericProcessUtils.js'
 import { isUncOrNtObjectPath } from './path.js'
+import { p, tGn } from './overflowuidTrust.js'
 import { getPlatform } from './platform.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 
@@ -115,6 +116,23 @@ let childToken: string | null = null
 let authRequired = false
 /** densable lastStartDegradedCause — Unix key publish fail continues. */
 let lastStartDegradedCause: string | undefined
+/**
+ * Official `s().lastStartFailureCause` / wZe @201218721.
+ * SEA ye() assigns bind_failed / path_refused / key_publish_failed /
+ * post_bind_setup_failed. socket_dir_refused is read by wZe + Bf notice;
+ * leftover ensureSocketParent is the dir-setup that names the detail.
+ */
+export type UdsStartFailureCause =
+  | 'socket_dir_refused'
+  | 'path_refused'
+  | 'bind_failed'
+  | 'key_publish_failed'
+  | 'post_bind_setup_failed'
+
+let lastStartFailureCause: UdsStartFailureCause | undefined
+let lastStartFailureDetail: string | undefined
+/** Official `s().startInFlight` — Wnr wrap; wZe stays silent while starting. */
+let startInFlight = false
 let capabilityFilePath: string | null = null
 let inboxBytes = 0
 
@@ -152,6 +170,73 @@ export const UDS_SOCKETS_PATH_NOT_A_DIRECTORY = `A component of the sockets path
 
 /** Official `qi`. */
 export const UDS_SOCKETS_PATH_SYMLINK_LOOP = `The sockets path runs through a symlink loop. ${UDS_SOCKETS_PATH_HINT}`
+
+/**
+ * Official `cn` — Re() `uid_collapse` @198268400.
+ * UDS sockets-dir copy (mentions --messaging-socket-path). ≠ daemon `tsn`.
+ */
+export const UDS_SOCKETS_UID_COLLAPSE =
+  'This process runs in a user namespace without a uid mapping (its own uid reads as the kernel overflow uid), so file ownership cannot be verified. Start it with a uid map (e.g. `unshare -Ur` / `--map-current-user`), or pass --messaging-socket-path.'
+
+/**
+ * Official Re() `directory_rule` @198268400.
+ * Thrown when leftover ancestor walk fails gold `p()` @198269713.
+ */
+export const UDS_SOCKETS_DIRECTORY_RULE = `A directory on the sockets path is shared (world- or group-writable without the sticky bit, e.g. a container volume mounted at /tmp) or not owned by you or root. ${UDS_SOCKETS_PATH_HINT}`
+
+/** Official wZe host snapshot (uFe / s()). */
+export type UdsStartFailureSnapshot = {
+  startInFlight?: boolean
+  activeSocketPath?: string
+  lastStartFailureCause?: UdsStartFailureCause
+  lastStartFailureDetail?: string
+}
+
+/**
+ * Official `wZe` @201218721 sha=bf7e3df16fb2603b.
+ * Gold: interpolates lastStartFailureDetail on socket_dir_refused.
+ */
+export function formatUdsStartFailureReason(
+  e: UdsStartFailureSnapshot,
+): string | undefined {
+  if (e.startInFlight || e.activeSocketPath !== undefined) return
+  switch (e.lastStartFailureCause) {
+    case 'socket_dir_refused':
+      return e.lastStartFailureDetail !== undefined
+        ? `its socket directory could not be set up: ${e.lastStartFailureDetail}`
+        : 'its socket directory could not be set up'
+    case 'path_refused':
+      return 'its socket path is not a usable local address'
+    case 'bind_failed':
+      return 'it could not be started'
+    case 'key_publish_failed':
+      return 'its peer key could not be published'
+    case 'post_bind_setup_failed':
+      return 'setting it up after bind failed'
+    case undefined:
+      return
+  }
+}
+
+/** Official `Kmr`. */
+export function getUdsStartFailureCause(): UdsStartFailureCause | undefined {
+  return lastStartFailureCause
+}
+
+/** Official `r0t` — `return wZe(s())`. */
+export function getUdsStartFailureReason(): string | undefined {
+  return formatUdsStartFailureReason({
+    startInFlight,
+    activeSocketPath: socketPath ?? undefined,
+    lastStartFailureCause,
+    lastStartFailureDetail,
+  })
+}
+
+/** Official `s().lastStartFailureDetail` — named by socket-dir setup. */
+export function getUdsStartFailureDetail(): string | undefined {
+  return lastStartFailureDetail
+}
 
 /** Official `s().firstLineDeadlineMs`. */
 let firstLineDeadlineMs = UDS_FIRST_LINE_DEADLINE_MS
@@ -736,10 +821,34 @@ async function sweepDeadMessagingKeyTmps(
 }
 
 /**
- * Official 243 sockets-path walk: a regular file in the way → Vi; ELOOP → qi.
- * Missing components are created later at 0700.
+ * Official Re() kinds leftover already throws as the message itself
+ * (Vi / qi / cn / directory_rule / foreign_owner→V).
+ */
+function isOfficialSocketsDirRefuse(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    (error.message === UDS_SOCKETS_PATH_NOT_A_DIRECTORY ||
+      error.message === UDS_SOCKETS_PATH_SYMLINK_LOOP ||
+      error.message === UDS_SOCKETS_UID_COLLAPSE ||
+      error.message === UDS_SOCKETS_DIRECTORY_RULE ||
+      error.message === UDS_SOCKETS_PATH_HINT)
+  )
+}
+
+/**
+ * Official leftover dir walk + 248 Ce() overflowuid vet @198269713:
+ * `r=await tGn()` then `r?.uidCollapses` → uid_collapse (`cn`).
+ * Ancestor owner via gold `p()` (root-equivalent only on eGn dirs).
+ * Does not rewrite official `C()` symlink/inode walker. Leaf 0700/owner
+ * stays leftover `assertPrivateDirectory` (`s()`, not `p()`).
  */
 async function walkSocketsPathComponents(dir: string): Promise<void> {
+  const uid = process.getuid?.()
+  const snap = await tGn()
+  if (snap?.uidCollapses) {
+    throw new Error(UDS_SOCKETS_UID_COLLAPSE)
+  }
+
   const resolved = resolve(dir)
   const parts = resolved.split(/[\\/]+/).filter(part => part.length > 0)
   if (parts.length === 0) return
@@ -751,28 +860,25 @@ async function walkSocketsPathComponents(dir: string): Promise<void> {
     try {
       const stat = await lstat(acc)
       if (stat.isSymbolicLink()) {
+        let resolvedLink: string | undefined
         try {
-          await realpath(acc)
+          resolvedLink = await realpath(acc)
         } catch (error) {
           if (getErrnoCode(error) === 'ELOOP') {
             throw new Error(UDS_SOCKETS_PATH_SYMLINK_LOOP)
           }
           throw error
         }
+        if (!p(Number(stat.uid), false, resolvedLink, uid, snap)) {
+          throw new Error(UDS_SOCKETS_PATH_HINT)
+        }
       } else if (stat.isFile() || !stat.isDirectory()) {
         throw new Error(UDS_SOCKETS_PATH_NOT_A_DIRECTORY)
+      } else if (!p(Number(stat.uid), false, acc, uid, snap)) {
+        throw new Error(UDS_SOCKETS_DIRECTORY_RULE)
       }
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === UDS_SOCKETS_PATH_NOT_A_DIRECTORY
-      ) {
-        throw error
-      }
-      if (
-        error instanceof Error &&
-        error.message === UDS_SOCKETS_PATH_SYMLINK_LOOP
-      ) {
+      if (isOfficialSocketsDirRefuse(error)) {
         throw error
       }
       const code = getErrnoCode(error)
@@ -807,11 +913,7 @@ async function ensureSocketParent(path: string): Promise<void> {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await chmod(dir, 0o700)
   } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message === UDS_SOCKETS_PATH_NOT_A_DIRECTORY ||
-        error.message === UDS_SOCKETS_PATH_SYMLINK_LOOP)
-    ) {
+    if (isOfficialSocketsDirRefuse(error)) {
       throw error
     }
     const detail = error instanceof Error ? error.message : String(error)
@@ -1223,11 +1325,38 @@ export async function startUdsMessaging(
     return
   }
 
+  // Official Wnr: startInFlight wrap. ye() stamps bind_failed first.
+  startInFlight = true
+  lastStartFailureCause = 'bind_failed'
+  lastStartFailureDetail = undefined
+  try {
+    await startUdsMessagingBody(path, opts)
+  } finally {
+    startInFlight = false
+  }
+}
+
+async function startUdsMessagingBody(
+  path: string,
+  opts?: {
+    isExplicit?: boolean
+    requireAuth?: boolean
+    firstLineDeadlineMs?: number
+  },
+): Promise<void> {
   assertValidUnixSocketPath(path)
 
   // Ensure parent directory exists (skip only for Windows named pipes).
+  // Official leftover dir walk (Tn / Un / refuse-to-bind) names lastStartFailureDetail.
   if (!isWindowsNamedPipePath(path)) {
-    await ensureSocketParent(path)
+    try {
+      await ensureSocketParent(path)
+    } catch (error) {
+      lastStartFailureCause = 'socket_dir_refused'
+      lastStartFailureDetail =
+        error instanceof Error ? error.message : String(error)
+      throw error
+    }
   }
 
   // Clean up stale socket file (skip only for Windows named pipes).
@@ -1588,6 +1717,7 @@ export async function startUdsMessaging(
           `[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${detail}`,
         )
         ;(err as Error & { code?: string }).code = 'key_publish_failed'
+        lastStartFailureCause = 'key_publish_failed'
         throw err
       }
       logForDebugging(
@@ -1663,6 +1793,9 @@ export async function startUdsMessaging(
       `[uds-messaging] Connect when the data is ready (run the command first, then connect and write its output as ONE line, as in the node recipe above): a connection that sends no complete line within ${firstLineDeadlineMs} ms is closed`,
       { level: 'info' },
     )
+    // Official ye(): lastStartFailureCause=void 0 after listen succeeds.
+    lastStartFailureCause = undefined
+    lastStartFailureDetail = undefined
   } catch (error) {
     if (capabilityFilePath) {
       try {
@@ -1688,6 +1821,15 @@ export async function startUdsMessaging(
     authToken = null
     childToken = null
     authRequired = false
+    const code = (error as { code?: string }).code
+    if (code === 'key_publish_failed') {
+      lastStartFailureCause = 'key_publish_failed'
+    } else if (startedServer && lastStartFailureCause === 'bind_failed') {
+      lastStartFailureCause = 'post_bind_setup_failed'
+    }
+    logForDebugging(`[uds-messaging] Failed to start: ${error}`, {
+      level: 'error',
+    })
     throw error
   }
 

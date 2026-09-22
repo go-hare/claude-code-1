@@ -22,6 +22,8 @@ export type BgNeedsSource =
 export type BgNeedsPayload = {
   text: string
   questions?: Array<{ question: string; options?: Array<{ label: string }> }>
+  /** densable rA.emit({text, toolUseID}) — keys noteHookFailure. */
+  toolUseID?: string
 }
 
 const SOURCE_PRIORITY: readonly BgNeedsSource[] = [
@@ -47,18 +49,83 @@ const slots: Record<BgNeedsSource, Slot> = {
 let lastEmitted: BgNeedsPayload | null = null
 const listeners = new Set<(payload: BgNeedsPayload | null) => void>()
 
+/** densable 2.1.248 rA hook-failure map. o=8, u=240. */
+const HOOK_FAILURE_CAP = 8
+const HOOK_FAILURE_LINE_CAP = 240
+const hookFailures = new Map<string, string>()
+
+/** densable za — code-unit cap + ellipsis, drop lone high surrogate. */
+function za(text: string, max: number): string {
+  if (text.length <= max) return text
+  let cut = max - 1
+  const prev = text.charCodeAt(cut - 1)
+  if (prev >= 0xd800 && prev <= 0xdbff) cut--
+  return `${text.slice(0, cut)}\u2026`
+}
+
+function sanitizeHookFailure(text: string): string {
+  return za(
+    text
+      .replace(/[^\x20-\x7e]/g, ' ')
+      .replace(/ {2,}/g, ' ')
+      .trim(),
+    HOOK_FAILURE_LINE_CAP,
+  )
+}
+
+function collapseNeedsText(text: string): string {
+  return za(text.replace(/\s+/g, ' ').trim(), HOOK_FAILURE_LINE_CAP)
+}
+
+/** densable 2.1.248 k() — prefix permission needs with hook+schema. */
+function attachHookFailure(payload: BgNeedsPayload): BgNeedsPayload {
+  if (payload.toolUseID === undefined) return payload
+  const failure = hookFailures.get(payload.toolUseID)
+  if (failure === undefined) return payload
+  return {
+    ...payload,
+    text: collapseNeedsText(
+      `${sanitizeHookFailure(failure)} \u00b7 ${payload.text}`,
+    ),
+  }
+}
+
 function recompute(): void {
   let next: BgNeedsPayload | null = null
   for (const src of SOURCE_PRIORITY) {
     const s = slots[src]
     if (s) {
-      next = s
+      next = attachHookFailure(s)
       break
     }
   }
   if (next?.text === lastEmitted?.text) return
   lastEmitted = next
   for (const fn of listeners) fn(next)
+}
+
+/**
+ * densable 2.1.248 rA.noteHookFailure(C, M).
+ * Evicts an older key (never the live permission toolUseID) when over cap.
+ */
+export function noteHookFailure(toolUseID: string, message: string): void {
+  hookFailures.delete(toolUseID)
+  hookFailures.set(toolUseID, message)
+  if (hookFailures.size > HOOK_FAILURE_CAP) {
+    const keep = slots.permission?.toolUseID
+    for (const id of hookFailures.keys()) {
+      if (id !== keep) {
+        hookFailures.delete(id)
+        break
+      }
+    }
+  }
+  recompute()
+}
+
+/** densable 2.1.248 rA.clearHookFailure(C) — no recompute. */
+export function clearHookFailure(toolUseID: string): void {
+  hookFailures.delete(toolUseID)
 }
 
 /**
@@ -71,7 +138,13 @@ export function emitBgNeedsInput(
   extra?: Omit<BgNeedsPayload, 'text'>,
 ): void {
   const next: Slot =
-    text === null || text === '' ? null : { text, questions: extra?.questions }
+    text === null || text === ''
+      ? null
+      : {
+          text,
+          questions: extra?.questions,
+          toolUseID: extra?.toolUseID,
+        }
   if (slots[source]?.text === next?.text) return
   slots[source] = next
   recompute()
@@ -615,6 +688,7 @@ export function setBgNeedsBridgeInFlight(
 /** Test helper. */
 export function _resetBgNeedsInputBridgeForTests(): void {
   for (const k of SOURCE_PRIORITY) slots[k] = null
+  hookFailures.clear()
   lastEmitted = null
   bridgeState.permissionBridgeSubscribed = false
   bridgeState.bridgeWriteChain = Promise.resolve()

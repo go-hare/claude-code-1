@@ -22,6 +22,9 @@ import type { BgJobState } from './jobState.js'
 export const FORK_TRANSCRIPT_NEVER_MATERIALIZED =
   'fork_transcript_never_materialized' as const
 
+/** densable Be("job_respawn","dead_epoch_transcript_gone") */
+export const DEAD_EPOCH_TRANSCRIPT_GONE = 'dead_epoch_transcript_gone' as const
+
 /**
  * densable Xyr error string (CLI `claude respawn` wording).
  * FleetView remaps to tYo banner; keep this for non-Fleet callers.
@@ -34,6 +37,15 @@ export function formatForkTranscriptNeverMaterializedError(
     `response finished. If it was backgrounded from another conversation, ` +
     `that one is still intact; \`claude respawn ${short}\` starts this one fresh.`
   )
+}
+
+/**
+ * densable 2.1.248 #17 p$e error @189672901.
+ * Fleet remaps to ip (FLEET_DEAD_EPOCH_GONE); keep this command form for
+ * daemon / `claude respawn`.
+ */
+export function formatDeadEpochTranscriptGoneError(short: string): string {
+  return `This session's saved conversation is no longer on disk (it ended while the background service was off, and old transcripts are cleaned up), so there is nothing to resume. \`claude rm ${short}\` deletes the row; \`claude respawn ${short}\` runs its original prompt again instead.`
 }
 
 /** densable fleet tYo banner (UI). */
@@ -262,13 +274,22 @@ export type RespawnTranscriptGateInput = {
   forceRefusalRetry?: boolean
   /** When true, caller already chose launch.mode=prompt (fresh). */
   forceFreshPrompt?: boolean
+  /**
+   * densable g.deadEpochReapedAt — dead-epoch refuse when transcript is gone
+   * and resumeSessionId is not pointing elsewhere (R).
+   */
+  deadEpochReapedAt?: string
 }
+
+export type RespawnTranscriptRefuseCode =
+  | typeof FORK_TRANSCRIPT_NEVER_MATERIALIZED
+  | typeof DEAD_EPOCH_TRANSCRIPT_GONE
 
 export type RespawnTranscriptGate =
   | { allow: true; probe: TranscriptProbeResult }
   | {
       allow: false
-      errorCode: typeof FORK_TRANSCRIPT_NEVER_MATERIALIZED
+      errorCode: RespawnTranscriptRefuseCode
       error: string
       probe: TranscriptProbeResult
     }
@@ -380,20 +401,33 @@ export async function evaluateRespawnTranscriptGate(
     return { allow: true, probe }
   }
 
-  // force / forceRefusalRetry / explicit fresh prompt → allow (starts clean)
-  // densable still BJe-quarantines empty transcript on the non-refuse path.
-  if (input.force || input.forceRefusalRetry || input.forceFreshPrompt) {
-    await quarantineOrphanTranscript(probe.path)
-    return { allow: true, probe }
-  }
-
   const isolation = input.bgIsolation ?? 'none'
+  const forced =
+    input.force || input.forceRefusalRetry || input.forceFreshPrompt
   // densable: only refuse fork-handoff same-tree when resume id is the job's own session
-  if (isolation === 'none' && resumeId === input.sessionId) {
+  if (!forced && isolation === 'none' && resumeId === input.sessionId) {
     return {
       allow: false,
       errorCode: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
       error: formatForkTranscriptNeverMaterializedError(input.short),
+      probe,
+    }
+  }
+
+  // densable p$e: deadEpochReapedAt && !force && !R (R = resumeId points elsewhere).
+  // forceRefusalRetry does NOT bypass this refuse.
+  const resumePointsElsewhere =
+    input.resumeSessionId !== undefined &&
+    input.resumeSessionId !== input.sessionId
+  if (
+    input.deadEpochReapedAt !== undefined &&
+    !input.force &&
+    !resumePointsElsewhere
+  ) {
+    return {
+      allow: false,
+      errorCode: DEAD_EPOCH_TRANSCRIPT_GONE,
+      error: formatDeadEpochTranscriptGoneError(input.short),
       probe,
     }
   }

@@ -11,7 +11,8 @@
  *   - keepParent worktree relocate: child cwd = originalCwd; parent keeps wt
  *   - Job: forkSourceAlive + boundary/ids + bgIsolation "default"
  *   - CLI inherit: --permission-mode, --model, --effort, --add-dir, tools,
- *     --append-system-prompt (isolation), -- <prompt>
+ *     --append-system-prompt (isolation), Yk() --restricted (#l, not nZ_),
+ *     -- <prompt>
  *   - submitDispatch resume path + forkSession + providedSessionId
  */
 
@@ -50,20 +51,24 @@ import {
 import { findGitRoot } from './git.js'
 import { getMainLoopModel } from './model/model.js'
 import { isAutoMemoryEnabled } from '../memdir/paths.js'
+import { isRestrictedSession, restrictedSpawnEnv } from './restricted.js'
+import { FORK_RESTRICTED_LAUNCH_FLAGS_DESCRIPTION } from './tuiRelaunchCarry.js'
 import { getCurrentWorktreeSession } from './worktree.js'
 
 /** densable keepParent flush cap (ms) — D$t uses 10000 when keepParent. */
 export const KEEP_PARENT_FLUSH_CAP_MS = 10_000
 
-/** densable nZ_ restricted-launch refusal (Pl || lf || Hei). */
-export const FORK_RESTRICTED_LAUNCH_ERROR =
-  "Cannot fork — this session was started with launch flags (safe or bare mode, a custom system prompt, a tool allowlist, or restricted settings) that the copy wouldn't inherit, so it would run with fewer restrictions than this session. Run the task here, or start a session without those flags and fork from there."
+/**
+ * official nZ_ @209796532 — `if(wr()||No()||GC())return i(\`Can't fork: … ${CGe}\`)`.
+ * CGe = FORK_RESTRICTED_LAUNCH_FLAGS_DESCRIPTION. Not Yk / #l.
+ */
+export const FORK_RESTRICTED_LAUNCH_ERROR = `Can't fork: this session was started with launch flags (safe or bare mode, ${FORK_RESTRICTED_LAUNCH_FLAGS_DESCRIPTION}) that the copy wouldn't inherit, so it would run with fewer restrictions than this session. Run the task here, or start a session without those flags and fork from there.`
 
 export const FORK_PERSISTENCE_OFF_ERROR =
-  'Cannot fork — session persistence is off, so the new session would have nothing to start from.'
+  "Can't fork: session persistence is off, so the new session would have nothing to start from. Run the task here, or fork from a session that saves its transcript."
 
 export const FORK_NOTHING_YET_ERROR =
-  'Nothing to fork yet — send a message first.'
+  'Nothing to fork yet. Send a message first.'
 
 /**
  * densable `pwd` / `deriveForkName` (2.1.212 binary):
@@ -94,7 +99,7 @@ export function collapseForkPromptLabel(prompt: string, max = 60): string {
 }
 
 /**
- * densable nZ_ restricted half: Pl()||lf()||Hei().
+ * official nZ_ restricted half: wr()||No()||GC().
  *
  * Prefer sticky Hei (`getForkRestrictedLaunchConfig` / xei at launch). Fall
  * back to argv scan when launch never set the sticky bit (tests / late import).
@@ -657,6 +662,12 @@ async function spawnBackgroundSessionForkImpl(
     extraArgs.push('--append-system-prompt', replay.appendSystemPrompt)
   }
 
+  // leftover /fork inherit Yk() (#l), not Cwn/GC (#w / nZ_ refuse).
+  // official G9 / left-arrow: ...Yk()&&{dispatchExtraArgs:["--restricted"]}
+  if (isRestrictedSession() && !extraArgs.includes('--restricted')) {
+    extraArgs.push('--restricted')
+  }
+
   // densable: ...t?["--", t]:[]
   if (prompt) {
     extraArgs.push('--', prompt)
@@ -688,6 +699,7 @@ async function spawnBackgroundSessionForkImpl(
       forkSession: true,
       providedSessionId,
       extraArgs: extraArgs.length > 0 ? extraArgs : undefined,
+      reattachEnv: restrictedSpawnEnv(),
       sessionPermissionRules: opts.sessionPermissionRules,
       memoryToggledOff,
     })

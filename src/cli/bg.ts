@@ -1,6 +1,8 @@
 import { readdir, readFile, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
+import { logEventAsync } from '../services/analytics/index.js'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
@@ -13,6 +15,11 @@ import {
   stripBgFlags,
   type DetachAttachResult,
 } from './bg/helpers.js'
+import { formatClaudeLogsReplay } from './bg/logsReplay.js'
+import {
+  sanitizeDaemonControlError,
+  subscribeJobStreamTail,
+} from './bg/logsSubscribe.js'
 
 export type { SessionEntry } from './bg/engine.js'
 
@@ -116,49 +123,117 @@ export async function psHandler(_args: string[]): Promise<void> {
   }
 }
 
+const CLI_BG_LOGS =
+  'cli_bg_logs' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+const CLI_BG_LOGS_READ_FAILED =
+  'read_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+
+const LOGS_USAGE = 'claude logs <id>'
+const LOGS_DESCRIPTION =
+  "Print the background session's recent terminal output."
+
+/** Gold `ov` @187616399 sha=0bd2593aeb86dc1f — flushed stdout write. */
+async function writeStdoutFlushed(text: string): Promise<void> {
+  await new Promise<void>(resolve => {
+    process.stdout.write(text, () => resolve())
+  })
+}
+
 /**
- * `claude daemon logs <target>` — show logs for a session.
+ * Gold `Ype` @187616616 + `Pi` @187616733 sha=008b1b49d3a37fd4.
+ * Ype is flushAnalyticsSinks (local leftover: 1P shutdown). Nj is
+ * generic shutdown, not a logs-exit caller — do not invent mode reset.
  */
-export async function logsHandler(target: string | undefined): Promise<void> {
-  const sessions = await listLiveSessions()
-
-  if (!target) {
-    if (sessions.length === 0) {
-      console.log('No active sessions.')
-      return
-    }
-    if (sessions.length === 1) {
-      target = sessions[0]!.sessionId
-    } else {
-      console.log('Multiple sessions active. Specify one:')
-      for (const s of sessions) {
-        const label = s.name ? `${s.name} (${s.sessionId})` : s.sessionId
-        console.log(`  ${label}  PID=${s.pid}`)
-      }
-      return
-    }
-  }
-
-  const session = findSession(sessions, target)
-  if (!session) {
-    console.error(`Session not found: ${target}`)
-    process.exitCode = 1
-    return
-  }
-
-  if (!session.logPath) {
-    console.log(`No log path recorded for session ${session.sessionId}`)
-    return
-  }
-
+async function exitAfterAnalyticsFlush(code: number): Promise<void> {
   try {
-    const content = await readFile(session.logPath, 'utf-8')
-    process.stdout.write(content)
-  } catch (e) {
-    console.error(`Failed to read log file: ${session.logPath}`)
-    console.error(e instanceof Error ? e.message : String(e))
-    process.exitCode = 1
+    const { shutdown1PEventLogging } = await import(
+      '../services/analytics/firstPartyEventLogger.js'
+    )
+    await shutdown1PEventLogging()
+  } catch {
+    // gold Ype swallows flush errors
   }
+  process.exit(code)
+}
+
+/**
+ * Gold `dn` @189641683 sha=3e886fec3a355447 — resolve 8-hex job prefix.
+ * Disk list is `sn(iS())`; storageV5 `bqt` is unlanded (no listJobIdsV5).
+ */
+async function resolveLogsJobId(target: string | undefined): Promise<string> {
+  if (target === '--help' || target === '-h') {
+    process.stdout.write(`Usage: ${LOGS_USAGE}\n\n  ${LOGS_DESCRIPTION}\n`)
+    process.exit(0)
+  }
+  if (target?.startsWith('-')) {
+    process.stderr.write(`unknown option '${target}'\nUsage: ${LOGS_USAGE}\n`)
+    process.exit(1)
+  }
+  if (!target) {
+    process.stderr.write(`Usage: ${LOGS_USAGE}\n`)
+    process.exit(1)
+  }
+
+  const { resolveJobShortByPrefix } = await import('../daemon/deleteJob.js')
+  const resolved = await resolveJobShortByPrefix(target)
+  if (resolved.ok) return resolved.short
+  process.stderr.write(
+    resolved.kind === 'none'
+      ? `No job matching '${target}'. Run 'claude agents' to list running sessions.\n`
+      : `Ambiguous prefix '${target}', matches: ${resolved.matches.join(', ')}\n`,
+  )
+  process.exit(1)
+}
+
+/**
+ * Official `claude logs <id>` — densable `Pmr` @189642272 sha=90e236fb25f3e1ac
+ * (export `Pmr as logsHandler`). Replay streamTail via `tr`, write via `ov`,
+ * exit via `Pi(0)`.
+ */
+export async function logsHandler(
+  target: string | undefined,
+  _storageV5?: unknown,
+): Promise<void> {
+  const short = await resolveLogsJobId(target)
+  const streamTail = await new Promise<string[] | string>(resolve => {
+    const unsub = subscribeJobStreamTail(
+      short,
+      500,
+      msg => {
+        if (msg.type === 'snapshot') {
+          unsub()
+          const tail = msg.streamTail
+          resolve(
+            Array.isArray(tail)
+              ? tail.map(line => (typeof line === 'string' ? line : ''))
+              : [],
+          )
+        }
+      },
+      err => {
+        unsub()
+        resolve(err)
+      },
+    )
+  })
+
+  if (typeof streamTail === 'string') {
+    await logEventAsync('tengu_feature_bad', {
+      feature_name: CLI_BG_LOGS,
+      error_code: CLI_BG_LOGS_READ_FAILED,
+    })
+    process.stderr.write(
+      `Couldn't read logs for ${short} \u2014 ${sanitizeDaemonControlError(streamTail)}\n`,
+    )
+    return await exitAfterAnalyticsFlush(1)
+  }
+
+  const rows = process.stdout.rows || 9999
+  await writeStdoutFlushed(
+    formatClaudeLogsReplay(streamTail, process.stdout.isTTY === true, rows),
+  )
+  await logEventAsync('tengu_feature_ok', { feature_name: CLI_BG_LOGS })
+  return await exitAfterAnalyticsFlush(0)
 }
 
 /**

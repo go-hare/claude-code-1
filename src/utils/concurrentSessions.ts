@@ -9,7 +9,7 @@ import {
   unlink,
   writeFile,
 } from 'fs/promises'
-import { join } from 'path'
+import { basename, join } from 'path'
 import {
   getAttacherCaps,
   getIsInteractive,
@@ -44,6 +44,20 @@ function vu(name: string): string {
 
 export type SessionKind = 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
 export type SessionStatus = 'busy' | 'idle' | 'waiting'
+
+/** Official `_2t` @180535795 — registry `peerProtocol`. */
+export const PEER_PROTOCOL = 1
+
+/**
+ * Official registry `jobId` — `CLAUDE_JOB_DIR` basename (`~/.claude/jobs/<short>`).
+ */
+export function registryJobIdFromEnv(
+  jobDir: string | undefined = process.env.CLAUDE_JOB_DIR,
+): string | undefined {
+  if (typeof jobDir !== 'string' || jobDir === '') return undefined
+  const id = basename(jobDir)
+  return id.length > 0 ? id : undefined
+}
 
 /** densable session-registry capability voucher for idle notices (tqo). */
 export const SESSION_FEATURE_NOTIFY_IDLE = 'notify_idle'
@@ -254,6 +268,7 @@ export async function registerSession(): Promise<boolean> {
           claimed: await isSpareJobClaimed(),
         })
       : undefined
+    const jobId = registryJobIdFromEnv()
     await writeFile(
       pidFile,
       jsonStringify({
@@ -262,6 +277,9 @@ export async function registerSession(): Promise<boolean> {
         cwd: getOriginalCwd(),
         startedAt: Date.now(),
         kind,
+        // Official `_2t` + mapper jobId @181016699
+        peerProtocol: PEER_PROTOCOL,
+        ...(jobId ? { jobId } : {}),
         entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
         ...processStartFields,
         ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
@@ -561,9 +579,12 @@ export async function updateSessionActivity(patch: {
   if (!feature('BG_SESSIONS')) return
   // densable zMn — first busy of a bornSpare worker clears spare:true.
   const clearSpare = sessionBornSpare && patch.status === 'busy'
+  // Official tMe @180542998 — status write also stamps statusUpdatedAt.
+  const now = Date.now()
   await updatePidFile({
     ...patch,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    ...(patch.status !== undefined ? { statusUpdatedAt: now } : {}),
     ...(clearSpare ? { spare: undefined } : {}),
   })
 }

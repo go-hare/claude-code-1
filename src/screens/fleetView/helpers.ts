@@ -11,6 +11,8 @@ import type { SessionEntry } from '../../cli/bg/engine.js'
 import figures from 'figures'
 import { formatDuration } from '../../utils/format.js'
 import { formatHostDeadAttachError } from '../../daemon/hostDeath.js'
+import { isRestrictedSession } from '../../utils/restricted.js'
+import { fleetJobChildren } from './prStatuses.js'
 
 // ---------------------------------------------------------------------------
 // Status bands
@@ -90,11 +92,21 @@ export type Activity =
   | 'failure'
   | 'stopped'
 
+export type PrStatusLookup = ReadonlyMap<
+  string,
+  { state?: string } | null | undefined
+>
+
 /**
  * Derive fine-grained activity from session state.
- * Upstream: jZ6 (deriveActivity)
+ * Official `Oo` @192124798 — Cf analog, then PR-all-MERGED
+ * (`template === aF.name` = `"claude"`), then flowing/slowing/stuck.
+ * Do not invent leftover `bg` === official `claude`.
  */
-export function deriveActivity(session: SessionEntry): Activity {
+export function deriveActivity(
+  session: SessionEntry,
+  prStatuses?: PrStatusLookup | null,
+): Activity {
   if (
     session.status === 'completed' ||
     session.status === 'done' ||
@@ -104,6 +116,19 @@ export function deriveActivity(session: SessionEntry): Activity {
   }
   if (session.status === 'failed' || session.status === 'stopped')
     return 'failure'
+
+  const prChildren = fleetJobChildren(session.children).filter(
+    child => child.kind !== 'frame',
+  )
+  if (
+    prStatuses &&
+    session.tempo !== 'active' &&
+    session.template === 'claude' &&
+    prChildren.length > 0 &&
+    prChildren.every(child => prStatuses.get(child.href)?.state === 'MERGED')
+  ) {
+    return 'success'
+  }
 
   const updatedAt = session.updatedAt ?? session.startedAt
   const elapsed = Date.now() - updatedAt
@@ -393,6 +418,45 @@ export function hasComposedDispatch(
 }
 
 /**
+ * densable 2.1.248 #45 editor leftover: shift+return or ctrl+j inserts a
+ * newline. Gold `xe`/`willInsertNewline` @192073232/@192269870 is
+ * shift|meta|backslash on `return`; local leftover already maps shift+enter
+ * and ctrl+j. Do not steal #45 ctrl+enter (`Lc` `Ne=d.ctrl`).
+ */
+export function isFleetDispatchNewlineKey(
+  key: { return?: boolean; shift?: boolean; ctrl?: boolean },
+  input: string,
+): boolean {
+  return (
+    Boolean(key.return && key.shift) || (input === 'j' && Boolean(key.ctrl))
+  )
+}
+
+/**
+ * densable 2.1.248 #45 `Lc` `Ne=d.ctrl`: return+ctrl dispatches and attaches.
+ * Shift+return stays newline leftover — do not treat as attach.
+ */
+export function isFleetDispatchAndOpenKey(key: {
+  return?: boolean
+  ctrl?: boolean
+  shift?: boolean
+}): boolean {
+  return Boolean(key.return && key.ctrl && !key.shift)
+}
+
+/**
+ * Gold `canDispatchAndOpen`: `cm==="local" && EHt()`.
+ * `EHt` leftover is `supportsExtendedKeys` (iTerm/kitty/WezTerm/ghostty/tmux/
+ * windows-terminal/WarpTerminal).
+ */
+export function canFleetDispatchAndOpen(
+  activeTab: string,
+  supportsExtendedKeys: boolean,
+): boolean {
+  return activeTab === 'local' && supportsExtendedKeys
+}
+
+/**
  * densable JIy: physical up/down with a newline → leftover `u(t)`.
  * ctrl+p / ctrl+n never take this branch.
  */
@@ -493,6 +557,94 @@ export const FLEET_NEW_SESSION_POLL_MS = 100
 /** densable VIy row_pending copy. */
 export const FLEET_NEW_SESSION_PENDING_MSG =
   'Still starting \u2014 open the new session once it appears'
+
+/**
+ * Gold `function sp` @192184937 sha=d2d0ec8103689cec: attach `keepQuery`
+ * when the composer still parses as a composed dispatch. Leftover
+ * `hasComposedDispatch`. Gold `dropDraft` @192150926 is
+ * `setQuery("")`+prompt+prune on attach when `!keepQuery` — not inside
+ * `up` / `fleet_view_new_session`. Do not invent clear-on-new.
+ */
+export function shouldFleetKeepQueryOnOpen(
+  parsed: ParsedDispatch | null | undefined,
+): boolean {
+  return hasComposedDispatch(parsed)
+}
+
+/**
+ * Gold `Lc` @192158881: `De?.intent||De?.routine||De?.matched` starts a NEW
+ * session from the typed prompt — never `yt(Fe)` an older focused job.
+ */
+export function hasFleetLcDispatchIntent(
+  parsed: ParsedDispatch | null | undefined,
+): boolean {
+  return !!(parsed && (parsed.intent || parsed.routine || parsed.matched))
+}
+
+export type FleetReturnAction =
+  | 'dispatch-new'
+  | 'newsession'
+  | 'open-focused'
+  | 'fold'
+  | 'header'
+  | 'earlier'
+  | 'none'
+
+/**
+ * Gold `Lc` enter after willInsertNewline: composed intent → dispatch-new
+ * (`setQuery("")` only after the prompt is the new session's intent). Else
+ * `!De?.cwd&&De?.exec===void 0` then newsession → `lt(Ie.origin)` /
+ * `ye(X.origin)`. Do not invent the cwd/exec-only tail.
+ */
+export function decideFleetReturnAction(input: {
+  parsed: ParsedDispatch | null | undefined
+  focusedKind?: 'fold' | 'header' | 'earlier' | 'newsession' | 'job' | string
+}): FleetReturnAction {
+  if (hasFleetLcDispatchIntent(input.parsed)) return 'dispatch-new'
+  if (input.parsed?.cwd !== undefined || input.parsed?.exec !== undefined) {
+    return 'none'
+  }
+  switch (input.focusedKind) {
+    case 'fold':
+      return 'fold'
+    case 'header':
+      return 'header'
+    case 'earlier':
+      return 'earlier'
+    case 'newsession':
+      return 'newsession'
+    default:
+      return 'open-focused'
+  }
+}
+
+/**
+ * Official `up` `$L` first arg @192190421 sha=c787d79639381466:
+ * `Yk()?["--restricted"]:[]`.
+ */
+export function fleetUpRestrictedArgs(): string[] {
+  return isRestrictedSession() ? ['--restricted'] : []
+}
+
+/**
+ * Leftover `up` host keeps CLI passthrough, then official `Yk()` arm.
+ */
+export function fleetUpExtraArgs(
+  dispatchExtraArgs: readonly string[] = [],
+): string[] {
+  const restricted = fleetUpRestrictedArgs()
+  if (restricted.length === 0) return [...dispatchExtraArgs]
+  if (dispatchExtraArgs.includes('--restricted')) return [...dispatchExtraArgs]
+  return [...dispatchExtraArgs, '--restricted']
+}
+
+/** Gold `up` `Du=(H)=>up(ra,H)` / `ye(X.origin)` — row origin, else fallback. */
+export function fleetNewSessionRowOrigin(
+  row: { kind: string; origin?: string } | undefined,
+  fallbackOrigin: string,
+): string {
+  return row?.kind === 'newsession' && row.origin ? row.origin : fallbackOrigin
+}
 
 /** densable VIy: `newSessionOpening || attachingJobId !== null`. */
 export function isFleetNewSessionSpawnBusy(
@@ -1320,7 +1472,7 @@ export type FleetFlatRow =
   | { kind: 'job'; session: SessionEntry; group?: string }
   | { kind: 'fold'; group: string; hidden: number }
   | { kind: 'earlier'; session: SessionEntry }
-  | { kind: 'newsession' }
+  | { kind: 'newsession'; origin: string; group?: string }
 
 /** Official job.origin for Wky — launcher cwd match. */
 export function fleetJobOrigin(session: SessionEntry): string {
@@ -1464,6 +1616,8 @@ export function fleetHomeIdx(
 /** densable oxy constants (2.1.239). */
 export const FLEET_SIMPLE_PINNED_GROUP = 'simple:pinned' // iAn
 export const FLEET_SIMPLE_FINISHED_GROUP = 'simple:finished' // OXt
+/** Gold `Rb` @192174826 — newsession row group. */
+export const FLEET_SIMPLE_NEW_SESSION_GROUP = 'simple:new-session'
 const SIMPLE_Y5A = 172_800_000 // 48h
 const SIMPLE_X5A = 3
 const SIMPLE_J5A = 3
@@ -1524,6 +1678,8 @@ export function buildSimpleModeFlatRows(input: {
   now: number
   terminalRows: number
   showFinishedEarlier: boolean
+  /** Gold `np` `fallbackOrigin:w` — `ye(X.origin)` / `lt(Ie.origin)`. */
+  fallbackOrigin: string
 }): SimpleModeBuilt {
   const pinned: SessionEntry[] = []
   const needs: SessionEntry[] = []
@@ -1553,7 +1709,13 @@ export function buildSimpleModeFlatRows(input: {
   }
   done.sort((a, b) => simpleJobRecencyMs(b) - simpleJobRecencyMs(a))
 
-  const rows: FleetFlatRow[] = [{ kind: 'newsession' }]
+  const rows: FleetFlatRow[] = [
+    {
+      kind: 'newsession',
+      origin: input.fallbackOrigin,
+      group: FLEET_SIMPLE_NEW_SESSION_GROUP,
+    },
+  ]
   const pushJobs = (items: readonly SessionEntry[], group: string): void => {
     for (const session of items) rows.push({ kind: 'job', session, group })
   }
@@ -1719,6 +1881,11 @@ export function buildFleetFooterHints(input: {
   exitArmed: boolean
   runningCount: number
   helpOpen: boolean
+  /**
+   * Gold Fs `$f`: show "ctrl+enter to start and open" when
+   * `canDispatchAndOpen` (`cm==="local" && EHt()`).
+   */
+  canDispatchAndOpen?: boolean
 }): string {
   if (input.helpOpen) {
     const parts: string[] = []
@@ -1726,6 +1893,11 @@ export function buildFleetFooterHints(input: {
     if (input.canRename) parts.push('ctrl+r to rename')
     if (input.canGroup) parts.push('ctrl+e to set group')
     parts.push('ctrl+s to switch views')
+    // Gold Fs: if(ud){ ctrl+s, ctrl+j, $f → ctrl+enter to start and open }
+    parts.push('ctrl+j for newline')
+    if (input.canDispatchAndOpen) {
+      parts.push('ctrl+enter to start and open')
+    }
     if (input.canMention) parts.push('@ to mention')
     if (input.canPin) {
       parts.push(input.pinned ? 'ctrl+t to unpin' : 'ctrl+t to pin to top')
@@ -1847,6 +2019,200 @@ export function formatAttachError(msg: string | undefined): string {
 /**
  * Official isOrigin match: job id / short equals or prefixes restore/current id.
  */
+/**
+ * densable 2.1.248 #19 v$e — fleet open refused because another terminal
+ * holds this conversation. Gold @189584464 / T(v$e) @192188226.
+ */
+export const FLEET_OPEN_IN_ANOTHER_TERMINAL =
+  "Can't open \u2014 this session is running in another terminal"
+
+/** densable 2.1.248 #19 Wr row @192201067 */
+export const FLEET_HELD_IN_TERMINAL_LABEL = 'Open in a terminal'
+export const FLEET_HELD_IN_TERMINAL_HINT = 'continue it there'
+
+/**
+ * densable 2.1.248 #17 ja @192184216 — first Enter on a dead-epoch row.
+ * This is the gold "ask", not a confirm modal.
+ */
+export const FLEET_DEAD_EPOCH_OFFER =
+  'Press enter again to resume this session (it ended while the background service was off), or ctrl+x to delete it.'
+
+/**
+ * densable 2.1.248 #17 ip @192184216 — gone-row after transcript cleanup.
+ */
+export const FLEET_DEAD_EPOCH_GONE =
+  "This session's saved conversation is no longer on disk (old transcripts are cleaned up), so there is nothing to resume. ctrl+x deletes the row."
+
+/** densable 2.1.248 #17 Tb — offer debounce window (ms). */
+export const FLEET_DEAD_EPOCH_OFFER_MS = 700
+
+/** densable 2.1.248 #17 H1t @182995128 — stale-reap threshold (ms). */
+export const DEAD_EPOCH_STALE_MS = 172_800_000
+
+/** densable 2.1.248 #17 mcr @182995142 */
+export const DEAD_EPOCH_DETAIL = 'ended while the background service was off'
+
+/** densable 2.1.248 #17 errorCode */
+export const DEAD_EPOCH_TRANSCRIPT_GONE = 'dead_epoch_transcript_gone'
+
+/** densable sS — exec template with no respawn flags. */
+export function isFleetExecJob(state: {
+  template?: string
+  respawnFlags?: readonly string[]
+}): boolean {
+  return state.template === 'exec' && (state.respawnFlags?.length ?? 0) === 0
+}
+
+/**
+ * densable Di / Nw+Cf — done|failed|stopped and tempo !== active.
+ */
+export function isFleetBhSettled(state: {
+  state?: string
+  tempo?: string
+}): boolean {
+  const s = state.state
+  return (
+    (s === 'done' || s === 'failed' || s === 'stopped') &&
+    state.tempo !== 'active'
+  )
+}
+
+/** Live session fields used to fill the terminalHolders map. */
+export type FleetLiveTerminalSession = {
+  kind?: string
+  pid: number
+  sessionId?: string
+  parkedJobId?: string
+}
+
+/**
+ * densable #O fill: interactive && pid!==self && sessionId && parkedJobId===void 0.
+ */
+export function isFleetTerminalHolderLive(
+  session: FleetLiveTerminalSession,
+  selfPid: number,
+): boolean {
+  return (
+    session.kind === 'interactive' &&
+    session.pid !== selfPid &&
+    session.sessionId !== undefined &&
+    session.sessionId !== '' &&
+    session.parkedJobId === undefined
+  )
+}
+
+/**
+ * densable #O `m.set(h.sessionId, h.pid)` for terminalHolders.
+ */
+export function buildTerminalHolders(
+  sessions: readonly FleetLiveTerminalSession[],
+  selfPid: number,
+): Map<string, number> {
+  const holders = new Map<string, number>()
+  for (const session of sessions) {
+    if (!isFleetTerminalHolderLive(session, selfPid)) continue
+    holders.set(session.sessionId!, session.pid)
+  }
+  return holders
+}
+
+export type FleetTerminalHolderJob = {
+  backend?: string
+  sessionId?: string
+  resumeSessionId?: string
+}
+
+/**
+ * densable terminalHolderOf @192133382:
+ * peer|remote → void; else holders.get(resumeSessionId ?? sessionId).
+ */
+export function terminalHolderOf(
+  job: FleetTerminalHolderJob,
+  holders: ReadonlyMap<string, number>,
+): number | undefined {
+  if (job.backend === 'peer' || job.backend === 'remote') return undefined
+  const key = job.resumeSessionId ?? job.sessionId
+  if (key === undefined) return undefined
+  return holders.get(key)
+}
+
+export type FleetOpenGateInput = {
+  heldInTerminal: boolean
+  deadEpochReapedAt?: string
+  settled: boolean
+  isExec: boolean
+  jobId: string
+  forkRefusedJobId: string | null
+  deadEpochGoneJobId: string | null
+  deadEpochOfferedJobId: string | null
+  deadEpochOfferAgeMs: number
+  /** densable Ka(..., ja): error banner is still the offer and no overlay. */
+  offerArmed: boolean
+}
+
+export type FleetOpenGate =
+  | { action: 'refuse'; error: string }
+  | { action: 'offer'; error: string }
+  | { action: 'debounce' }
+  | { action: 'proceed'; clearOffered: boolean }
+
+/**
+ * densable cs open path @192188196 — holder refuse, then dead-epoch offer/gone.
+ * Does not spawn. Does not invent a confirm overlay.
+ */
+export function decideFleetOpenGate(input: FleetOpenGateInput): FleetOpenGate {
+  if (input.heldInTerminal) {
+    return { action: 'refuse', error: FLEET_OPEN_IN_ANOTHER_TERMINAL }
+  }
+  if (
+    input.deadEpochReapedAt !== undefined &&
+    input.settled &&
+    !input.isExec &&
+    input.forkRefusedJobId !== input.jobId
+  ) {
+    if (input.deadEpochGoneJobId === input.jobId) {
+      return { action: 'refuse', error: FLEET_DEAD_EPOCH_GONE }
+    }
+    const offered =
+      input.deadEpochOfferedJobId === input.jobId && input.offerArmed
+    if (offered && input.deadEpochOfferAgeMs < FLEET_DEAD_EPOCH_OFFER_MS) {
+      return { action: 'debounce' }
+    }
+    if (!offered) {
+      return { action: 'offer', error: FLEET_DEAD_EPOCH_OFFER }
+    }
+    return { action: 'proceed', clearOffered: true }
+  }
+  return {
+    action: 'proceed',
+    clearOffered: input.deadEpochOfferedJobId === input.jobId,
+  }
+}
+
+/**
+ * densable Ka subset — offer is armed only when the ja banner is showing
+ * and leftover overlays (preview/help/rename/group/exit/delete) are closed.
+ */
+export function isFleetDeadEpochOfferArmed(input: {
+  error: string | null
+  previewOpen: boolean
+  helpOpen: boolean
+  exitArmed: boolean
+  renaming: boolean
+  groupEdit: boolean
+  deletePending: boolean
+}): boolean {
+  return (
+    input.error === FLEET_DEAD_EPOCH_OFFER &&
+    !input.previewOpen &&
+    !input.helpOpen &&
+    !input.exitArmed &&
+    !input.renaming &&
+    !input.groupEdit &&
+    !input.deletePending
+  )
+}
+
 export function isOriginSessionId(
   session: Pick<SessionEntry, 'sessionId' | 'short'>,
   originSessionId: string | undefined,

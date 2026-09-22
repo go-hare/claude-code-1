@@ -30,6 +30,7 @@ import {
   shouldFleetViewReorder,
   FLEET_CLIPBOARD_IMAGE_NOT_FOUND,
   FLEET_CLIPBOARD_IMAGE_READ_FAILED,
+  FLEET_SIMPLE_NEW_SESSION_GROUP,
   FLEET_SIMPLE_PINNED_GROUP,
   FLEET_STATE_GROUP_DESCRIPTIONS,
   FLEET_STATE_GROUP_LABELS,
@@ -553,8 +554,13 @@ describe('buildSimpleModeFlatRows (densable oxy)', () => {
       now,
       terminalRows: 40,
       showFinishedEarlier: false,
+      fallbackOrigin: '/proj',
     })
-    expect(rows[0]).toEqual({ kind: 'newsession' })
+    expect(rows[0]).toEqual({
+      kind: 'newsession',
+      origin: '/proj',
+      group: FLEET_SIMPLE_NEW_SESSION_GROUP,
+    })
     expect(rows.some(r => r.kind === 'header')).toBe(false)
     expect(
       rows
@@ -573,6 +579,7 @@ describe('buildSimpleModeFlatRows (densable oxy)', () => {
       now,
       terminalRows: 40,
       showFinishedEarlier: false,
+      fallbackOrigin: '/proj',
     })
     expect(rows.map(r => (r.kind === 'job' ? r.session.name : r.kind))).toEqual(
       ['newsession', 'pin', 'need', 'live'],
@@ -587,6 +594,7 @@ describe('buildSimpleModeFlatRows (densable oxy)', () => {
       now,
       terminalRows: 40,
       showFinishedEarlier: false,
+      fallbackOrigin: '/proj',
     })
     expect(rows.find(r => r.kind === 'fold')).toBeUndefined()
     expect(rows.filter(r => r.kind === 'job')).toHaveLength(1)
@@ -606,8 +614,13 @@ describe('buildSimpleModeFlatRows (densable oxy)', () => {
       now,
       terminalRows: 20,
       showFinishedEarlier: false,
+      fallbackOrigin: '/proj',
     })
-    expect(folded.rows[0]).toEqual({ kind: 'newsession' })
+    expect(folded.rows[0]).toEqual({
+      kind: 'newsession',
+      origin: '/proj',
+      group: FLEET_SIMPLE_NEW_SESSION_GROUP,
+    })
     expect(folded.rows.find(r => r.kind === 'header')).toBeUndefined()
     expect(folded.rows.find(r => r.kind === 'fold')).toEqual({
       kind: 'fold',
@@ -621,6 +634,7 @@ describe('buildSimpleModeFlatRows (densable oxy)', () => {
       now,
       terminalRows: 20,
       showFinishedEarlier: true,
+      fallbackOrigin: '/proj',
     })
     expect(expanded.rows.find(r => r.kind === 'fold')).toBeUndefined()
     expect(expanded.rows.filter(r => r.kind === 'job')).toHaveLength(5)

@@ -43,6 +43,7 @@ import {
 import { asSessionId } from '../types/ids.js'
 import { errorMessage } from '../utils/errors.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
+import { restrictedSpawnEnv } from '../utils/restricted.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 
 // ---------------------------------------------------------------------------
@@ -347,7 +348,7 @@ export function buildSpareHostEnv(opts?: {
   if (process.platform === 'darwin') {
     delete env.CLAUDE_CODE_OAUTH_TOKEN
   }
-  Object.assign(env, {
+  Object.assign(env, restrictedSpawnEnv(), {
     CLAUDE_CODE_SESSION_KIND: 'bg',
     CLAUDE_BG_SOURCE: 'spare',
     CLAUDE_BG_BACKEND: 'daemon',

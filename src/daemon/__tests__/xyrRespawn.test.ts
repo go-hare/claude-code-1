@@ -128,6 +128,25 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
     expect(killCalled).toBe(true)
   })
 
+  test('Zxe findResumeSessionConflict prefers interactive over bg', async () => {
+    listAllLiveSessions.mockImplementation(async () => [
+      {
+        sessionId: 'sess-1',
+        pid: process.pid + 1,
+        kind: 'bg',
+        jobId: 'bg-job',
+      },
+      {
+        sessionId: 'sess-1',
+        pid: process.pid + 2,
+        kind: 'interactive',
+        jobId: 'tty-job',
+      },
+    ])
+    const c = await findResumeSessionConflict('sess-1')
+    expect(c).toEqual({ kind: 'interactive', jobId: 'tty-job' })
+  })
+
   test('Zxe findResumeSessionConflict finds other non-interactive', async () => {
     listAllLiveSessions.mockImplementation(async () => [
       {
@@ -139,6 +158,31 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
     ])
     const c = await findResumeSessionConflict('sess-1')
     expect(c).toEqual({ kind: 'bg', jobId: 'other' })
+  })
+
+  test('xyrPreflight Zxe interactive conflict uses v$e', async () => {
+    sendControlRequest.mockImplementation(async () => ({
+      ok: true,
+      op: 'has',
+      alive: false,
+      present: false,
+    }))
+    listAllLiveSessions.mockImplementation(async () => [
+      {
+        sessionId: 'sess-1',
+        pid: process.pid + 1,
+        kind: 'interactive',
+        jobId: 'other',
+      },
+    ])
+    const err = await xyrPreflightBeforeRespawn({
+      short: 'mine',
+      resumeSessionId: 'sess-1',
+      hasMessages: true,
+    })
+    expect(err).toBe(
+      "Can't open \u2014 this session is running in another terminal",
+    )
   })
 
   test('xyrPreflight Zxe conflict when hasMessages', async () => {

@@ -152,6 +152,11 @@ export function peerInboundDialogCauseMessage(
       return 'The sender did not attest its permission mode, and this session bypasses permission prompts.'
     case 'explicit-setting':
       return 'Your "crossSessionInbound" setting is "hold".'
+    case 'invalid-setting':
+      return (
+        'A settings file has an unrecognized "crossSessionInbound" value ' +
+        '(see the settings warning), so messages are held while it is present.'
+      )
     case 'bypass-default':
       return 'This session is not prompting for permissions.'
     case 'mode-unknown':

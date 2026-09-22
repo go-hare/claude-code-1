@@ -50,7 +50,21 @@ export interface SessionEntry {
   /** densable firstTerminalAt — V0n fallback when group==="done". */
   firstTerminalAt?: number
   /** densable job.state.backend — RqA only swaps daemon rows. */
-  backend?: 'daemon' | 'peer'
+  backend?: 'daemon' | 'peer' | 'remote'
+  /** densable resumeSessionId — terminalHolderOf key + dead-epoch R. */
+  resumeSessionId?: string
+  /** densable 2.1.248 #17 deadEpochReapedAt */
+  deadEpochReapedAt?: string
+  /** densable job.state.template — sS exec gate. */
+  template?: string
+  /** densable job.state.respawnFlags — sS exec gate. */
+  respawnFlags?: string[]
+  /** densable job.state.tempo — Di with state. */
+  tempo?: 'active' | 'idle' | 'blocked'
+  /** densable job.state.state — Di / Nw (not the mapped status). */
+  daemonState?: string
+  /** densable job.state.children — official Oo / zhO. */
+  children?: Array<{ id?: string; href: string; kind?: string }> | null
 }
 
 export interface BgStartOptions {

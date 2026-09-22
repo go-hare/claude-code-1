@@ -57,6 +57,10 @@ import {
   type BgCheckpointPayload,
   writeAdoptJson,
 } from '../../utils/bgCheckpoint.js'
+import {
+  isRestrictedSession,
+  restrictedSpawnEnv,
+} from '../../utils/restricted.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
@@ -989,9 +993,16 @@ export async function openAgentsViaLeftArrow(
         providedSessionId,
         isolation: worktree ? 'worktree' : undefined,
         worktree: worktree ? { path: worktree.path } : undefined,
-        reattachEnv,
+        reattachEnv: {
+          ...reattachEnv,
+          ...restrictedSpawnEnv(),
+        },
         // densable yNo: ...c?.replyOnResume?["--reply-on-resume"]:[]
-        extraArgs: options?.replyOnResume ? ['--reply-on-resume'] : undefined,
+        // official G9: ...Yk()&&{dispatchExtraArgs:["--restricted"]}
+        extraArgs: [
+          ...(options?.replyOnResume ? ['--reply-on-resume'] : []),
+          ...(isRestrictedSession() ? ['--restricted'] : []),
+        ],
         // Official BF_: CLAUDE_BG_SESSION_PERMISSION_RULES / MEMORY_TOGGLED_OFF
         sessionPermissionRules: options?.sessionPermissionRules,
         memoryToggledOff: options?.memoryToggledOff,

@@ -166,6 +166,15 @@ export interface BgJobState {
   forkSessionId?: string
   /** densable forkParentSessionId — parent session that stayed live. */
   forkParentSessionId?: string
+  /**
+   * densable 2.1.248 #17 uae — ISO time when a stale auto-resume reap
+   * marked the row stopped (dead-epoch).
+   */
+  deadEpochReapedAt?: string
+  /** densable uae — mid-work reap timestamp (auto-resume, not stale). */
+  reapedMidWorkAt?: string
+  /** densable uae — wake-only roster-gap reap timestamp. */
+  reapedUnsettledAt?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +248,108 @@ export function isTerminalState(state: BgJobState): boolean {
  */
 export function isBhSettled(state: BgJobState): boolean {
   return isTerminalState(state) && state.tempo !== 'active'
+}
+
+/** densable sS — exec template with empty respawnFlags. */
+export function isExecJob(
+  state: Pick<BgJobState, 'template' | 'respawnFlags'>,
+): boolean {
+  return state.template === 'exec' && state.respawnFlags.length === 0
+}
+
+/** densable yIe — blocked and not exec. */
+export function isBlockedNonExec(state: BgJobState): boolean {
+  return state.state === 'blocked' && !isExecJob(state)
+}
+
+/** densable H1t @182995128 */
+export const DEAD_EPOCH_STALE_MS = 172_800_000
+
+/** densable mcr @182995142 */
+export const DEAD_EPOCH_DETAIL = 'ended while the background service was off'
+
+export type ReapResumable = 'auto-resume' | 'wake-only'
+
+export type ReapedJobSettlePlan =
+  | { verdict: 'none' }
+  | { verdict: 'dead-epoch' | 'settled'; next: BgJobState }
+
+/**
+ * densable 2.1.248 #17 uae @182998858 — plan the reap write.
+ * Stale auto-resume failed non-exec → stopped + deadEpochReapedAt + mcr.
+ */
+export function planReapedJobSettle(
+  current: BgJobState,
+  outcomeState: string,
+  outcomeDetail: string,
+  opts: { resumable?: ReapResumable } | undefined,
+  nowMs: number,
+): ReapedJobSettlePlan {
+  if (
+    isBhSettled(current) ||
+    (outcomeState === 'failed' && isBlockedNonExec(current))
+  ) {
+    return { verdict: 'none' }
+  }
+  const nowIso = new Date(nowMs).toISOString()
+  const stale =
+    opts?.resumable === 'auto-resume' &&
+    outcomeState === 'failed' &&
+    !isExecJob(current) &&
+    nowMs - Date.parse(current.updatedAt) > DEAD_EPOCH_STALE_MS
+  const next: BgJobState = {
+    ...current,
+    state: stale
+      ? 'stopped'
+      : outcomeState === 'crashed'
+        ? 'failed'
+        : (outcomeState as BgJobState['state']),
+    detail: stale
+      ? DEAD_EPOCH_DETAIL
+      : outcomeState === 'stopped'
+        ? 'stopped'
+        : outcomeState === 'failed'
+          ? (current.detail || outcomeDetail).replace(/; respawning$/, '')
+          : outcomeDetail,
+    tempo: 'idle',
+    inFlight: undefined,
+    needs: undefined,
+    updatedAt: nowIso,
+    firstTerminalAt:
+      current.firstTerminalAt ?? (stale ? current.updatedAt : nowIso),
+    ...(opts?.resumable === 'auto-resume' && outcomeState === 'failed'
+      ? stale
+        ? { deadEpochReapedAt: nowIso }
+        : { reapedMidWorkAt: current.updatedAt }
+      : {}),
+    ...(opts?.resumable === 'wake-only' && outcomeState === 'failed'
+      ? { reapedUnsettledAt: nowIso }
+      : {}),
+  }
+  return { verdict: stale ? 'dead-epoch' : 'settled', next }
+}
+
+/**
+ * densable uae — read job, plan, write. Returns none|dead-epoch|settled.
+ */
+export function applyReapedJobSettle(
+  short: string,
+  outcomeState: string,
+  outcomeDetail: string,
+  opts?: { resumable?: ReapResumable; nowMs?: number },
+): ReapedJobSettlePlan['verdict'] {
+  const current = readBgJobState(short)
+  if (!current) return 'none'
+  const plan = planReapedJobSettle(
+    current,
+    outcomeState,
+    outcomeDetail,
+    opts,
+    opts?.nowMs ?? Date.now(),
+  )
+  if (plan.verdict === 'none') return 'none'
+  writeBgJobState(short, plan.next)
+  return plan.verdict
 }
 
 /** densable YP — empty interactive bg waiting for first prompt. */

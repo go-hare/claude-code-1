@@ -14,6 +14,7 @@
 
 import { connect, type Socket } from 'net'
 import { randomUUID } from 'crypto'
+import { Yot } from '@anthropic/ink'
 import { getControlSocketPath } from './controlSocket.js'
 import { createDecModeTracker } from './bgWorker.js'
 import { jsonStringify, jsonParse } from '../utils/slowOperations.js'
@@ -221,7 +222,14 @@ export async function attachToSession(
         (outcome === 'disconnected' && opts.holdScreenOnDisconnect)
           ? '' // Stay in alt screen (caller will handle)
           : exitAltScreen()
-      stdout.write(restoreModes + '\x1B[0m\x1B7\x1B[r\x1B8' + restore)
+      // Official: she + snapshot.map(Hj).reverse + dT + (windows?Yot:"") + SGR/DECSTBM + WE
+      // #12 only lands Yot — leftover restoreModes / DECSTBM / alt-exit stay.
+      stdout.write(
+        restoreModes +
+          (isWindows ? Yot : '') +
+          '\x1B[0m\x1B7\x1B[r\x1B8' +
+          restore,
+      )
     }
 
     // Restore raw mode

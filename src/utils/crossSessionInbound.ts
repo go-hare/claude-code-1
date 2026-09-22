@@ -16,7 +16,9 @@ import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import {
   type CrossSessionInbound,
+  type CrossSessionInboundDecidedBy,
   resolveCrossSessionInbound,
+  resolveCrossSessionInboundDecision,
 } from './settings/settings.js'
 
 export type PermissionModeClass = 'bypass' | 'prompting'
@@ -27,6 +29,7 @@ export type PeerInboundHoldCause =
   | 'mode-mismatch'
   | 'mode-unknown'
   | 'no-mode-asserted'
+  | 'invalid-setting'
 
 export type PeerInboundPolicyDecision = {
   policy: CrossSessionInbound
@@ -101,6 +104,8 @@ export function shouldHonorPeerFromMode(): boolean {
  */
 export function decidePeerInboundPolicy(opts: {
   explicit?: CrossSessionInbound
+  /** densable 2.1.248 #37 w().decidedBy — O() maps invalidSetting → invalid-setting. */
+  decidedBy?: CrossSessionInboundDecidedBy
   selfMode: PeerModeSnapshot | null
   origin?: PeerOriginMeta | null
   /** densable Wei / tengu_harbor_kite_mode_emit — honor origin.fromMode when true. */
@@ -108,7 +113,13 @@ export function decidePeerInboundPolicy(opts: {
 }): PeerInboundPolicyDecision {
   const explicit = opts.explicit
   if (explicit !== undefined) {
-    return { policy: explicit, holdCause: 'explicit-setting' }
+    return {
+      policy: explicit,
+      holdCause:
+        explicit === 'hold' && opts.decidedBy === 'invalidSetting'
+          ? 'invalid-setting'
+          : 'explicit-setting',
+    }
   }
   if (opts.origin?.selfSent) {
     return { policy: 'accept', holdCause: 'bypass-default' }
@@ -143,11 +154,18 @@ export function decidePeerInboundPolicy(opts: {
  */
 export function decideSessionInboundPolicy(opts: {
   explicit?: CrossSessionInbound
+  decidedBy?: CrossSessionInboundDecidedBy
   selfMode: PeerModeSnapshot | null
 }): PeerInboundPolicyDecision {
   const explicit = opts.explicit
   if (explicit !== undefined) {
-    return { policy: explicit, holdCause: 'explicit-setting' }
+    return {
+      policy: explicit,
+      holdCause:
+        explicit === 'hold' && opts.decidedBy === 'invalidSetting'
+          ? 'invalid-setting'
+          : 'explicit-setting',
+    }
   }
   const self = opts.selfMode
   if (self === null || !KNOWN_MODES.has(self.mode)) {
@@ -374,9 +392,15 @@ export function gatePeerInboundMessage<T>(
     explicit?: CrossSessionInbound
   } = {},
 ): PeerInboundGateResult {
-  const explicit = Object.hasOwn(opts, 'explicit')
-    ? opts.explicit
-    : resolveCrossSessionInbound()
+  let explicit: CrossSessionInbound | undefined
+  let decidedBy: CrossSessionInboundDecidedBy | undefined
+  if (Object.hasOwn(opts, 'explicit')) {
+    explicit = opts.explicit
+  } else {
+    const resolved = resolveCrossSessionInboundDecision()
+    explicit = resolved.value
+    decidedBy = resolved.decidedBy
+  }
   const selfMode =
     opts.selfMode !== undefined ? opts.selfMode : getPeerInboundSelfMode()
   const origin =
@@ -387,6 +411,7 @@ export function gatePeerInboundMessage<T>(
       : shouldHonorPeerFromMode()
   const decision = decidePeerInboundPolicy({
     explicit,
+    decidedBy,
     selfMode,
     origin,
     honorFromMode,
@@ -430,9 +455,15 @@ export function releaseHeldPeerInboundMessages(
 ): number {
   if (holdBuffer.length === 0) return 0
 
-  const explicit = Object.hasOwn(opts, 'explicit')
-    ? opts.explicit
-    : resolveCrossSessionInbound()
+  let explicit: CrossSessionInbound | undefined
+  let decidedBy: CrossSessionInboundDecidedBy | undefined
+  if (Object.hasOwn(opts, 'explicit')) {
+    explicit = opts.explicit
+  } else {
+    const resolved = resolveCrossSessionInboundDecision()
+    explicit = resolved.value
+    decidedBy = resolved.decidedBy
+  }
   const selfMode = Object.hasOwn(opts, 'selfMode')
     ? (opts.selfMode ?? null)
     : getPeerInboundSelfMode()
@@ -440,7 +471,11 @@ export function releaseHeldPeerInboundMessages(
     ? opts.honorFromMode === true
     : shouldHonorPeerFromMode()
   // densable gqb() === "refuse" → drop all held
-  const sessionPolicy = decideSessionInboundPolicy({ explicit, selfMode })
+  const sessionPolicy = decideSessionInboundPolicy({
+    explicit,
+    decidedBy,
+    selfMode,
+  })
   const dropAll = sessionPolicy.policy === 'refuse'
 
   const kept: HeldPeerInboundMessage[] = []
@@ -456,6 +491,7 @@ export function releaseHeldPeerInboundMessages(
     }
     const decision = decidePeerInboundPolicy({
       explicit,
+      decidedBy,
       selfMode,
       origin: peerOriginMetaFromMessage(entry.message),
       honorFromMode,
@@ -535,6 +571,12 @@ export function peerInboundHoldCauseMessage(
       return 'It is being reviewed before delivery.'
     case 'explicit-setting':
       return 'Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages.'
+    case 'invalid-setting':
+      return (
+        'A settings file has an unrecognized "crossSessionInbound" value ' +
+        '(the settings warning names the file); messages are held while it ' +
+        'is present — set it to "accept", "hold", or "refuse".'
+      )
     case 'mode-unknown':
       return 'It will be delivered once the session finishes starting up.'
     case 'mode-mismatch':

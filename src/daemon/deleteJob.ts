@@ -20,12 +20,14 @@ import {
 } from '../utils/path.js'
 import {
   canReapDespiteLock,
+  isJobWorktreeFullyUpstream,
   isWorktreeToplevelElsewhere,
   listPorcelainWorktrees,
   parseClaudeWorktreeLockPid,
   removeAgentWorktree,
   resolveGitRootIfPresent,
   resolveJobWorktreeGitRoot,
+  resolveOriginHeadRef,
   WORKTREE_RESOLUTION_CHANGED,
 } from '../utils/worktree.js'
 import {
@@ -146,21 +148,6 @@ async function worktreeDirtyAndGitError(
     return { dirty: true, gitError: true }
   }
   return { dirty: stdout.trim().length > 0, gitError: false }
-}
-
-/**
- * densable unpushed gate: commits not reachable from any remote.
- */
-async function worktreeHasUnpushedCommits(
-  worktreePath: string,
-): Promise<boolean> {
-  const { code, stdout } = await execFileNoThrowWithCwd(
-    gitExe(),
-    ['rev-list', '--all', '--not', '--remotes', '--max-count=1'],
-    { cwd: worktreePath },
-  )
-  if (code !== 0) return false
-  return stdout.trim().length > 0
 }
 
 type LiveSessionLike = {
@@ -558,12 +545,17 @@ export async function deleteJob(
       )
       keptReason = 'dirty'
     }
+    // densable 248 oG: !b1t(k, mGe(N), {primaryCheckoutVouches:true})
     if (
       keptReason === undefined &&
       !gitError &&
       gitRoot &&
       !opts.force &&
-      (await worktreeHasUnpushedCommits(wt))
+      !(await isJobWorktreeFullyUpstream(
+        wt,
+        await resolveOriginHeadRef(gitRoot),
+        { primaryCheckoutVouches: true },
+      ))
     ) {
       logForDebugging(
         `deleteJob: ${wt} has commits that are on no remote, kept`,

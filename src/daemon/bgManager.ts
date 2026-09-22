@@ -61,6 +61,7 @@ import {
   writeBgJobState,
   getJobDirPath,
   isTerminalState,
+  applyReapedJobSettle,
 } from './jobState.js'
 import {
   startControlSocket,
@@ -941,19 +942,14 @@ export async function startBgManager(opts?: {
         handleDispatch(entry.dispatch, 0, true)
       } else {
         dead++
-        // Update job state to failed
-        const state = readBgJobState(short)
-        if (state && !isTerminalState(state)) {
-          const now = new Date().toISOString()
-          writeBgJobState(short, {
-            ...state,
-            state: 'failed',
-            detail: 'process gone while supervisor was down',
-            tempo: 'idle',
-            updatedAt: now,
-            firstTerminalAt: state.firstTerminalAt ?? now,
-          })
-        }
+        // densable 2.1.248 #17 uae: process gone while supervisor was down
+        // with auto-resume (no exec-exit snapshot on this leftover path).
+        applyReapedJobSettle(
+          short,
+          'failed',
+          'process gone while supervisor was down',
+          { resumable: 'auto-resume' },
+        )
         // Clean up sockets
         if (process.platform !== 'win32') {
           unlink(getRendezvousSockPath(short)).catch(() => {})
@@ -1222,7 +1218,6 @@ async function handleControlRequest(
           queueRespawnInitialPrompt,
           resolveRespawnLaunchPrompt,
           clearQueuedPrompt,
-          FORK_TRANSCRIPT_NEVER_MATERIALIZED,
         } = await import('./transcriptProbe.js')
         const resumeSessionId =
           state?.resumeSessionId ??
@@ -1240,19 +1235,23 @@ async function handleControlRequest(
           force: d.force === true,
           forceRefusalRetry: d.forceRefusalRetry === true,
           forceFreshPrompt: d.launch?.mode === 'prompt',
+          deadEpochReapedAt: state?.deadEpochReapedAt,
         })
         if (!gate.allow) {
+          const deadEpoch = gate.errorCode === 'dead_epoch_transcript_gone'
           log(
-            `bg: respawn of ${d.short} refused — fork handoff whose own transcript never materialized`,
+            deadEpoch
+              ? `bg: respawn of ${d.short} refused — dead-epoch row whose transcript is gone`
+              : `bg: respawn of ${d.short} refused — fork handoff whose own transcript never materialized`,
           )
-          // densable gpn: queue initialPrompt when present so next force retry can use it
+          // densable gpn: queue initialPrompt on fork refuse only (not dead-epoch)
           let queued = false
           const initialPrompt =
             d.initialPrompt ??
             (typeof d.intent === 'string' && d.intent.trim()
               ? d.intent
               : undefined)
-          if (initialPrompt && state) {
+          if (!deadEpoch && initialPrompt && state) {
             queued = await queueRespawnInitialPrompt(
               d.short,
               state,
@@ -1262,8 +1261,8 @@ async function handleControlRequest(
           return {
             ok: false,
             error: gate.error,
-            errorCode: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
-            code: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
+            errorCode: gate.errorCode,
+            code: gate.errorCode,
             queued,
           }
         }

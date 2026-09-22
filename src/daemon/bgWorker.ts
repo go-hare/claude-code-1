@@ -35,6 +35,7 @@ import {
 import { randomBytes } from 'crypto'
 import { spawn as nodeSpawn } from 'child_process'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { restrictedSpawnEnv } from '../utils/restricted.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import {
   encodeDataFrame,
@@ -2234,6 +2235,8 @@ export class BgWorker {
       env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN = '1'
     }
     if (reattachEnv) Object.assign(env, reattachEnv)
+    // official Yk()&&{CLAUDE_CODE_RESTRICTED:"1"} @202357703
+    Object.assign(env, restrictedSpawnEnv())
 
     const cols = this.ptyCols || (dispatch.cols ?? 200)
     const rows = this.ptyRows || (dispatch.rows ?? 50)

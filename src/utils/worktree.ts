@@ -35,6 +35,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { getSessionId } from '../bootstrap/state.js'
 import { saveCurrentProjectConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
@@ -63,6 +64,7 @@ import {
 import {
   assertIsolationWorktreeAllowed,
   liveLaunchDirs,
+  probeIsolationWorktreePin,
 } from './isolationWorktreePin.js'
 import {
   executeWorktreeCreateHook,
@@ -468,6 +470,12 @@ export async function enterExistingWorktreeSession(
  */
 export function restoreWorktreeSession(session: WorktreeSession | null): void {
   currentWorktreeSession = session
+}
+
+/** densable 2.1.248 #35 `j` — job fields used at bg-boot adopt. */
+export type BgBootWorktreeJob = {
+  worktreePath?: string
+  worktreeHookBased?: boolean
 }
 
 export function generateTmuxSessionName(
@@ -2944,6 +2952,109 @@ async function lockClaudeWorktree(
 }
 
 /**
+ * densable U @204223670 — porcelain lock pid is this process.
+ */
+export async function worktreeLockNamesThisProcess(
+  worktreePath: string,
+  gitRoot: string,
+): Promise<boolean> {
+  try {
+    return (
+      parseClaudeWorktreeLockPid(
+        await porcelainLockReason(worktreePath, gitRoot),
+      ) === process.pid
+    )
+  } catch {
+    return false
+  }
+}
+
+function isLinkedWorktreeCwd(cwd: string): boolean {
+  const nearest = findGitRoot(cwd)
+  return nearest !== null && findCanonicalGitRoot(cwd) !== nearest
+}
+
+/**
+ * densable j @204222840 sha=b780c8c7af192372 — bg boot adopt + leftover pGe hold.
+ * GOLD warn 1:1: `[worktree] bg boot: adopted ${e} but no worktree lock names this process`
+ */
+export async function adoptWorktreeForBgBoot(
+  cwd: string,
+  job?: BgBootWorktreeJob | null,
+): Promise<WorktreeSession | null> {
+  if (!job?.worktreePath || job.worktreeHookBased) {
+    return null
+  }
+  const realCwd = await realpath(cwd).catch(() => cwd)
+  if (
+    !(
+      job.worktreePath === cwd ||
+      job.worktreePath === realCwd ||
+      resolve(job.worktreePath) === realCwd
+    )
+  ) {
+    return null
+  }
+  const gitRoot = findCanonicalGitRoot(cwd)
+  if (
+    !gitRoot ||
+    !isLinkedWorktreeCwd(cwd) ||
+    !isWorktreeUnderClaudeWorktrees(cwd, gitRoot)
+  ) {
+    return null
+  }
+  const worktreeName = basename(cwd).replaceAll('+', '/')
+  try {
+    validateWorktreeSlug(worktreeName)
+  } catch {
+    return null
+  }
+  const pin = await probeIsolationWorktreePin(
+    cwd,
+    [],
+    liveLaunchDirs(cwd, gitRoot),
+  )
+  const e = cwd
+  const w = pin
+  if (!w.ok) {
+    logForDebugging(`[worktree] bg boot: not adopting ${e} — ${w.message}`, {
+      level: 'warn',
+    })
+    return null
+  }
+  let locked = await lockClaudeWorktree(cwd, gitRoot, worktreeName, 'session')
+  if (!locked || !(await worktreeLockNamesThisProcess(cwd, gitRoot))) {
+    await sleep(250)
+    locked = await lockClaudeWorktree(cwd, gitRoot, worktreeName, 'session')
+    if (locked && !(await worktreeLockNamesThisProcess(cwd, gitRoot))) {
+      logForDebugging(
+        `[worktree] bg boot: adopted ${e} but no worktree lock names this process`,
+        { level: 'warn' },
+      )
+    }
+  }
+  if (!locked) {
+    return null
+  }
+  const session: WorktreeSession = {
+    originalCwd: gitRoot,
+    worktreePath: cwd,
+    worktreeName,
+    worktreeBranch: worktreeBranchName(worktreeName),
+    originalHeadCommit: (await readWorktreeHeadSha(cwd)) ?? undefined,
+    sessionId: getSessionId(),
+    hookBased: false,
+    enteredExisting: false,
+  }
+  currentWorktreeSession = session
+  saveCurrentProjectConfig(current => ({
+    ...current,
+    activeWorktreeSession: session,
+  }))
+  return session
+}
+
+/**
  * densable Ejr / releaseOwnWorktreeLock @216880667.
  * Unlock when One/canReapDespiteLock says the porcelain lock is ours or dead.
  */
@@ -3141,9 +3252,12 @@ async function porcelainLockReason(
 }
 
 /**
- * densable GHt — origin HEAD ref, else first of origin/main|master that exists.
+ * densable GHt / mGe — origin HEAD ref, else first of origin/main|master
+ * that exists.
  */
-async function resolveOriginHeadRef(gitRoot: string): Promise<string | null> {
+export async function resolveOriginHeadRef(
+  gitRoot: string,
+): Promise<string | null> {
   const symbolic = await execFileNoThrowWithCwd(
     gitExe(),
     ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'],
@@ -3199,19 +3313,110 @@ async function isUpstreamGoneWithNoUniqueCommits(
 }
 
 /**
- * densable UMs — no unique commits, HEAD===CLAUDE_BASE, or `$jr`.
+ * densable P0n @186369915 sha=87c14d737c9dcf6e — local default branch of
+ * the primary checkout, only when this is a linked worktree and that
+ * checkout is on `refs/heads/{origin default}` (e.g. local `main`).
  */
-async function isJobWorktreeFullyUpstream(
+async function resolvePrimaryCheckoutVouchRef(
   worktreePath: string,
   originHeadRef: string | null,
-): Promise<boolean> {
-  const unique = await execFileNoThrowWithCwd(
+): Promise<string | null> {
+  if (!originHeadRef?.startsWith('origin/')) return null
+  const localDefault = `refs/heads/${originHeadRef.slice('origin/'.length)}`
+  const parsed = await execFileNoThrowWithCwd(
     gitExe(),
-    ['rev-list', '--max-count=1', 'HEAD', '--not', '--remotes'],
+    [
+      'rev-parse',
+      '--git-dir',
+      '--git-common-dir',
+      '--symbolic-full-name',
+      'HEAD',
+    ],
     { cwd: worktreePath, env: gitWorktreeEnv() },
   )
+  const lines = parsed.stdout.trim().split('\n')
+  const [gitDir, commonDir, headName] = lines
+  if (
+    parsed.code !== 0 ||
+    lines.length !== 3 ||
+    !gitDir ||
+    !commonDir ||
+    !headName ||
+    lines.some(line => line.startsWith('-')) ||
+    (headName !== 'HEAD' && !headName.startsWith('refs/heads/')) ||
+    resolve(worktreePath, gitDir) === resolve(worktreePath, commonDir)
+  ) {
+    return null
+  }
+  const [bare, mainHead] = await Promise.all([
+    execFileNoThrowWithCwd(
+      gitExe(),
+      ['config', '--bool', '--get', 'core.bare'],
+      { cwd: worktreePath, env: gitWorktreeEnv() },
+    ),
+    execFileNoThrowWithCwd(
+      gitExe(),
+      [
+        'rev-parse',
+        '--verify',
+        '-q',
+        '--symbolic-full-name',
+        'main-worktree/HEAD',
+      ],
+      { cwd: worktreePath, env: gitWorktreeEnv() },
+    ),
+  ])
+  const primary = mainHead.stdout.trim()
+  if (
+    bare.code !== 0 ||
+    bare.stdout.trim() !== 'false' ||
+    mainHead.code !== 0 ||
+    primary !== localDefault ||
+    primary === headName
+  ) {
+    return null
+  }
+  return primary
+}
+
+/**
+ * densable UMs / b1t @186369395 sha=a6321b76b8763900 — no unique commits,
+ * primary-checkout voucher (P0n), HEAD===CLAUDE_BASE, or `$jr`.
+ */
+export async function isJobWorktreeFullyUpstream(
+  worktreePath: string,
+  originHeadRef: string | null,
+  opts: { primaryCheckoutVouches: boolean },
+): Promise<boolean> {
+  const remotesOnly = [
+    'rev-list',
+    '--max-count=1',
+    'HEAD',
+    '--not',
+    '--remotes',
+  ]
+  const unique = await execFileNoThrowWithCwd(gitExe(), remotesOnly, {
+    cwd: worktreePath,
+    env: gitWorktreeEnv(),
+  })
   if (unique.code !== 0) return false
   if (unique.stdout.trim().length === 0) return true
+  if (opts.primaryCheckoutVouches) {
+    const vouch = await resolvePrimaryCheckoutVouchRef(
+      worktreePath,
+      originHeadRef,
+    )
+    if (vouch) {
+      const againstDefault = await execFileNoThrowWithCwd(
+        gitExe(),
+        [...remotesOnly, vouch, '--'],
+        { cwd: worktreePath, env: gitWorktreeEnv() },
+      )
+      if (againstDefault.code === 0 && !againstDefault.stdout.trim()) {
+        return true
+      }
+    }
+  }
   const [head, baseline] = await Promise.all([
     execFileNoThrowWithCwd(gitExe(), ['rev-parse', 'HEAD'], {
       cwd: worktreePath,
@@ -3241,7 +3446,9 @@ async function isJobWorktreeSafeToReap(
   if (status.code !== 0 || status.stdout.trim().length > 0) {
     return false
   }
-  return isJobWorktreeFullyUpstream(worktreePath, originHeadRef)
+  return isJobWorktreeFullyUpstream(worktreePath, originHeadRef, {
+    primaryCheckoutVouches: false,
+  })
 }
 
 /**

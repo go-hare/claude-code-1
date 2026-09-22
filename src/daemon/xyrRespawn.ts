@@ -137,24 +137,56 @@ export async function killJobYiaFallback(
 }
 
 /**
- * densable Zxe — another non-interactive live session owns this resume sessionId.
- * Returns conflict descriptor or null.
+ * densable 2.1.248 #19 v$e — interactive holder owns resume sessionId.
+ * Gold @189584464 / respawn `ie.kind==="interactive"?v$e:…`.
+ */
+export const RESUME_SESSION_LIVE_ELSEWHERE_INTERACTIVE =
+  "Can't open \u2014 this session is running in another terminal"
+
+/**
+ * densable 2.1.248 #19 non-interactive spawn-refuse fallback.
+ * Gold @189673903 — same sentence when holder is not interactive.
+ */
+export const RESUME_SESSION_LIVE_ELSEWHERE_FALLBACK =
+  'This conversation is already open in another running Claude session — use that one, or close it and try again'
+
+/** Official `ie.kind==="interactive"?v$e:fallback`. */
+export function formatResumeSessionLiveElsewhereError(kind: string): string {
+  return kind === 'interactive'
+    ? RESUME_SESSION_LIVE_ELSEWHERE_INTERACTIVE
+    : RESUME_SESSION_LIVE_ELSEWHERE_FALLBACK
+}
+
+/**
+ * densable Zxe / Rqt — live sessions owning this resume sessionId.
+ * Prefer interactive (official `J.find(se=>se.kind==="interactive")??J[0]`).
+ * Own jobIds are filtered by the caller (official filter before find).
  */
 export async function findResumeSessionConflict(
   resumeSessionId: string,
+  opts?: { excludeJobIds?: readonly string[] },
 ): Promise<{ kind: string; jobId?: string } | null> {
   try {
     const { listAllLiveSessions } = await import('../utils/udsClient.js')
     const live = await listAllLiveSessions()
+    const matches: { kind: string; jobId?: string }[] = []
     for (const s of live) {
       if (s.sessionId !== resumeSessionId) continue
       if (s.pid === process.pid) continue
-      if (!s.kind || s.kind === 'interactive') continue
-      return {
-        kind: s.kind,
-        jobId: (s as { jobId?: string }).jobId,
+      const jobId = (s as { jobId?: string }).jobId
+      if (
+        jobId !== undefined &&
+        opts?.excludeJobIds !== undefined &&
+        opts.excludeJobIds.includes(jobId)
+      ) {
+        continue
       }
+      matches.push({
+        kind: typeof s.kind === 'string' ? s.kind : 'unknown',
+        jobId,
+      })
     }
+    return matches.find(m => m.kind === 'interactive') ?? matches[0] ?? null
   } catch {
     // ignore
   }
@@ -219,18 +251,14 @@ export async function xyrPreflightBeforeRespawn(opts: {
   }
 
   // densable R path: resume conflict only when hasMessages.
-  // Conflict if another non-interactive session owns resumeId and its jobId
-  // is not this short (own jobId is OK). No jobId still conflicts.
+  // Official: prefer interactive holder → v$e; else long fallback.
+  // Own jobId is OK (filtered via excludeJobIds).
   if (opts.hasMessages) {
-    const conflict = await findResumeSessionConflict(opts.resumeSessionId)
+    const conflict = await findResumeSessionConflict(opts.resumeSessionId, {
+      excludeJobIds: [opts.short],
+    })
     if (conflict) {
-      const own = conflict.jobId !== undefined && conflict.jobId === opts.short
-      if (!own) {
-        return (
-          'This conversation is already open in another running Claude session — ' +
-          'use that one, or close it and try again'
-        )
-      }
+      return formatResumeSessionLiveElsewhereError(conflict.kind)
     }
   }
 

@@ -26,6 +26,10 @@ import {
   shellExecSpec,
   type DispatchRequest,
 } from './bgWorker.js'
+import {
+  restrictedDispatchExtraArgs,
+  restrictedSpawnEnv,
+} from '../utils/restricted.js'
 import { buildDispatchProviderEnv } from './bgHostManagedEnv.js'
 import {
   CLOUD_BG_CONFLICT,
@@ -244,6 +248,7 @@ function buildDispatchRequest(opts: XSeOpts): {
 } {
   const source = opts.source || 'fleet'
   const argv = opts.argv ?? []
+  const extraArgs = restrictedDispatchExtraArgs(opts.extraArgs)
   const peeled = argv.length > 0 ? peelUqArgv(argv) : null
 
   // densable: resume id from peel (WLp) wins when present; else opts
@@ -284,7 +289,7 @@ function buildDispatchRequest(opts: XSeOpts): {
       cwd: opts.cwd,
       exec: opts.exec,
       resumeSessionId,
-      respawnFlags: peeled?.respawnFlags ?? opts.extraArgs ?? [],
+      respawnFlags: peeled?.respawnFlags ?? extraArgs,
     })
     if (unc.length > 0) {
       process.stderr.write(
@@ -349,12 +354,13 @@ function buildDispatchRequest(opts: XSeOpts): {
       currentCwd: tryProcessCwd(),
     }),
     ...inheritEnv,
+    ...restrictedSpawnEnv(),
     ...(opts.env ?? {}),
     ...(opts.reattachEnv ?? {}),
   }
 
   // densable w = n2o(head); dispatch.respawnFlags = w; seed filters via qat
-  const respawnFlagsField = peeled?.respawnFlags ?? opts.extraArgs ?? []
+  const respawnFlagsField = peeled?.respawnFlags ?? extraArgs
   // densable GLp(e) for prompt args after session-id strip
   const GLpArgs = peeled?.promptArgs ?? []
 
@@ -385,7 +391,7 @@ function buildDispatchRequest(opts: XSeOpts): {
             ...W,
             ...(derivedName ? ['-n', derivedName] : []),
             ...(agent ? ['--agent', agent] : []),
-            ...(opts.extraArgs || []),
+            ...extraArgs,
           ],
     }
   }
