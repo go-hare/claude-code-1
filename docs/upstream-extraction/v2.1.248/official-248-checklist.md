@@ -1,7 +1,7 @@
 # densable 2.1.248 — 官方更新清单 × tip 对照
 
 > 来源：CHANGELOG **2.1.248**（49 bullets）。SEA `@anthropic-ai/claude-code-win32-x64@2.1.248` **SEA_OK**（`claude.exe` 226708128 · `--version` 2.1.248）。  
-> 基线：本地 tip npm **2.7.50** = densable **2.1.247**。**本 pack 只盘点 2.1.248**（勿折入 249 空号 / 250 stub / 251+）。  
+> 基线：本地 tip npm **2.7.51** = densable **2.1.248**。**本 pack 只盘点 2.1.248**（勿折入 249 空号 / 250 stub / 251+）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 更新：2026-09-20 — 对齐中。**HAVE 47**。`#16` leftover 宿主是 `AgentView.refresh`（官方 `gc` `#x`/`#E`/`load` PR 切片 + `V$n`/`Oo`/`KC` + Fh 缺字段）。  
 > 口径：本地实现 + 已锁 SEA 函数体是合同。changelog 字面大于代码 → **不升桶、不 invent**。  

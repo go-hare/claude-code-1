@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current npm: **`2.7.50`** (densable **2.1.247** HAVE 31 / N/A 2). `npm i -g @go-hare/claude-code`
+> Current npm: **`2.7.51`** (densable **2.1.248** HAVE 47 / N/A 2). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,11 +45,23 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.50** = 243+246+247) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.51** = 243+246+247+248) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+
+#### densable 2.1.248 alignment (2.7.51)
+
+Source of truth: `docs/upstream-extraction/v2.1.248/official-248-checklist.md` (**HAVE 47 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.247**. **Do not fold 249+**; do not invent cloud-container credentials / VSCode host / `workflow-authoring` skill body.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **#1 restricted** | `--restricted` / `CLAUDE_CODE_RESTRICTED` + leftover LaunchOptions / SettingsSource bags | `Cwn`/`GC` ≠ `Yk`; no Yt / pinned-wrapper invent |
+| **#16 / #23 / #24** | AgentView.refresh + Fh missing fields; official Claude.ai connector classify; headersHelper 401 retry | no second Fh/rp invent; no oauth toast invent |
+| **#40 workflow-authoring** | SEA `pXt` + playbook slim; bundled skill registration | do not invent skill body |
+| **#32 / #39** | N/A cloud credentials / VSCode | same-missing = aligned |
+| **rest #2–#31 #33–#38 #41–#49** | HAVE (locked SEA bodies) | changelog oversell is not a contract |
 
 #### densable 2.1.247 alignment (2.7.50)
 
-Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.246**. **Do not fold 248+**; do not invent cloud hosts / hook MB / `/share` alias.
+Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.246**. Shipped in **2.7.50**; continues under **2.7.51**. **Do not fold 249+**; do not invent cloud hosts / hook MB / `/share` alias.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -60,7 +72,7 @@ Source of truth: `docs/upstream-extraction/v2.1.247/official-247-checklist.md` (
 
 #### densable 2.1.246 alignment (2.7.48 / 2.7.49)
 
-Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** landed the 246 CLI product surface; **2.7.49** rebuilds all platform binaries. No official 2.1.244 bullets — **do not fold 245 glibc**. 247 ships in **2.7.50**; **do not fold 248+**.
+Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** landed the 246 CLI product surface; **2.7.49** rebuilds all platform binaries. No official 2.1.244 bullets — **do not fold 245 glibc**. 247 ships in **2.7.50**, 248 in **2.7.51**; **do not fold 249+**.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -74,7 +86,7 @@ Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (
 
 #### densable 2.1.243 alignment
 
-Source of truth: `docs/upstream-extraction/v2.1.243/official-243-checklist.md` (**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**), `cross-pack-residuals.md`. Already landed; shipped with 246 as **2.7.49**, and continues in **2.7.50**. No official 2.1.240/241 bullets — **do not fold 245+**.
+Source of truth: `docs/upstream-extraction/v2.1.243/official-243-checklist.md` (**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**), `cross-pack-residuals.md`. Already landed; shipped with 246 as **2.7.49**, and continues in **2.7.51**. No official 2.1.240/241 bullets — **do not fold 245+**.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -294,10 +306,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.50)
+### Recent updates (2.7.5 → 2.7.51)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.51** | **densable 2.1.248** (on landed 243+246+247): HAVE **47** / N/A **2**. `--restricted`, agent `cacheTtl`, runner `--client-label`, managed-settings load diagnostics, official Claude.ai connector classify, headersHelper 401, `workflow-authoring` skill, PR Not-Modified, `/loop` 3P, SendMessage parent-session reply, etc. N/A: cloud-container credentials / VSCode. No cloud host / VSCode extension body / skill body / 249+ invent. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.50** | **densable 2.1.247** (on landed 243+246): HAVE **31** / N/A **2**. SendFeedback leftover, REPL `fallbackModel`, hook `lre`, sandbox settings-symlink scrub, PTY `EHOSTDEAD` (including Node/Windows adapter), marketplace `strip-ansi`, unconditional preflight exit. No cloud host / hook MB / `/share` alias / 248+ invent. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.49** | All-platform binary rebuild (8 `@go-hare/claude-code-*` targets). Product surface is still the **2.7.48** 243+246 landing. No 244/245. 247 is not in this release. |
 | **2.7.48** | **densable 2.1.246** (on landed 243): HAVE **59** / N/A **2**. #1 wildcard allow warn, #4/#6 `rg` freeze abort, #16 keep user worktrees, #22 skill counts, #42 dangling `&&`/`\|\|`, #44 withhold, #52 `/cd` apply-now, #54 abort+maxTurns, storageV5 empty `qb` pin. N/A: official installer. No 244/245/247+; no `blu`←`Slu` / auto `qF` / JWT-org invent. 243 HAVE 49 ships in the same version. |
@@ -367,7 +380,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.50`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.51`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---

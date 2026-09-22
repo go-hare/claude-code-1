@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前 npm：**`2.7.50`**（densable **2.1.247** HAVE 31 / N/A 2）。`npm i -g @go-hare/claude-code`
+> 当前 npm：**`2.7.51`**（densable **2.1.248** HAVE 47 / N/A 2）。`npm i -g @go-hare/claude-code`
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,11 +45,23 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.50** = 243+246+247），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.51** = 243+246+247+248），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+
+#### densable 2.1.248 对齐说明（2.7.51）
+
+对照文档：`docs/upstream-extraction/v2.1.248/official-248-checklist.md`（**HAVE 47 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.247** 上。**勿折入 249+**；不 invent 云容器凭证 / VSCode 宿主 / `workflow-authoring` skill 正文。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **#1 restricted** | `--restricted` / `CLAUDE_CODE_RESTRICTED` + leftover LaunchOptions / SettingsSource bags | `Cwn`/`GC` ≠ `Yk`；不 invent Yt / pinned wrappers |
+| **#16 / #23 / #24** | AgentView.refresh + Fh 缺字段；官方 Claude.ai connector 分类；headersHelper 401 重跑 | 不 invent 第二份 Fh/rp；不 invent oauth toast |
+| **#40 workflow-authoring** | SEA `pXt` + playbook slim；bundled skill 注册 | 不 invent skill 正文 |
+| **#32 / #39** | N/A 云凭证 / VSCode | 同缺 = 对齐 |
+| **其余 #2–#31 #33–#38 #41–#49** | HAVE（以已锁 SEA 体为准） | changelog 超卖不 invent |
 
 #### densable 2.1.247 对齐说明（2.7.50）
 
-对照文档：`docs/upstream-extraction/v2.1.247/official-247-checklist.md`（**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.246** 上。**勿折入 248+**；不 invent 云宿主 / hook MB / `/share` alias。
+对照文档：`docs/upstream-extraction/v2.1.247/official-247-checklist.md`（**HAVE 31 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.246** 上。已随 **2.7.50** 发；现叠进 **2.7.51**。**勿折入 249+**；不 invent 云宿主 / hook MB / `/share` alias。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -60,7 +72,7 @@
 
 #### densable 2.1.246 对齐说明（2.7.48 / 2.7.49）
 
-对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面，**2.7.49** 全平台重编；官方无 2.1.244 bullets，**勿折入 245 glibc**。247 进 **2.7.50**；**勿折入 248+**。
+对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面，**2.7.49** 全平台重编；官方无 2.1.244 bullets，**勿折入 245 glibc**。247 进 **2.7.50**，248 进 **2.7.51**；**勿折入 249+**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -74,7 +86,7 @@
 
 #### densable 2.1.243 对齐说明
 
-对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.49**，现随 **2.7.50** 继续发。官方无 2.1.240/241 bullets，**勿折入 245+**。
+对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.49**，现随 **2.7.51** 继续发。官方无 2.1.240/241 bullets，**勿折入 245+**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -294,10 +306,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.50）
+### 近期更新（2.7.5 → 2.7.51）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.51** | **densable 2.1.248**（叠在已入库 243+246+247 上）：HAVE **47** / N/A **2**。`--restricted`、agent `cacheTtl`、runner `--client-label`、managed-settings 加载诊断、官方 Claude.ai connector 分类、headersHelper 401、`workflow-authoring` skill、PR Not-Modified、`/loop` 三方、SendMessage 父会话回复等。N/A：云容器凭证 / VSCode。不 invent 云宿主 / VSCode 插件体 / skill 正文 / 249+。全平台重编 8 个 `@go-hare/claude-code-*`。 |
 | **2.7.50** | **densable 2.1.247**（叠在已入库 243+246 上）：HAVE **31** / N/A **2**。SendFeedback leftover、`fallbackModel` 进 REPL、hook `lre`、sandbox 清 settings 软链、PTY `EHOSTDEAD`（含 Node/Windows 适配）、marketplace `strip-ansi`、preflight 失败无条件退出。不 invent 云宿主 / hook MB / `/share` alias / 248+。全平台重编 8 个 `@go-hare/claude-code-*`。 |
 | **2.7.49** | 全平台二进制重编（8 个 `@go-hare/claude-code-*`）。产品面仍是 **2.7.48** 落地的 243+246；不折入 244/245。247 未进本版。 |
 | **2.7.48** | **densable 2.1.246**（叠在已入库 243 上）：HAVE **59** / N/A **2**。#1 wildcard allow warn、#4/#6 `rg` freeze abort、#16 worktree 不扫用户树、#22 skills 计数、#42 dangling `&&`/`\|\|`、#44 withhold、#52 `/cd` apply-now、#54 abort+maxTurns、storageV5 `qb` 空 pin。N/A：官方 installer。不折入 244/245/247+；不 invent `blu`←`Slu` / 自动 `qF` / JWT-org。243 HAVE 49 同发。 |
@@ -367,7 +380,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.50`）。  
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.51`）。  
 旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
 ---
