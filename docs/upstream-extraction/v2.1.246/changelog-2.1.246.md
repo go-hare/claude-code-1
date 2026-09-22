@@ -79,4 +79,4 @@
 | **2.1.244** | **无此节**（跳号，同 230 / 242） |
 | **2.1.245** | 1 条：glibc 2.44 Linux startup crash（runtime / mimalloc，不是 JS） |
 | **2.1.247** | 已收口（HAVE 31 / N/A 2）。本 pack 不回改 |
-| **2.1.248+** | 未开 |
+| **2.1.248** | changelog 已落。SEA 未下。本 pack 不折入 |
