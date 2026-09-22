@@ -100,17 +100,38 @@ export function isGlobalCommentMonitorActive(
  */
 export function getTuiRelaunchBlocker(
   tasks: Record<string, TaskLike | TaskState> | Iterable<TaskLike | TaskState>,
-  deps: { isGlobalCommentMonitorActive?: () => boolean } = {},
+  deps: {
+    isGlobalCommentMonitorActive?: () => boolean
+    /**
+     * densable hoe `autoRepliesCarried` — when true, skip qHe-like comment
+     * monitors (armed + frameLive) and do not refuse on global monitor alone.
+     */
+    autoRepliesCarried?: boolean
+  } = {},
 ): TuiRelaunchBlocker | undefined {
   const values = Array.isArray(tasks)
     ? tasks
     : Symbol.iterator in Object(tasks)
       ? Array.from(tasks as Iterable<TaskLike | TaskState>)
       : Object.values(tasks as Record<string, TaskLike | TaskState>)
-  const blocking = values.filter(isTuiBlockingTask)
+  const carried = deps.autoRepliesCarried === true
+  const blocking = values.filter(task => {
+    if (!isTuiBlockingTask(task)) return false
+    // official hoe: !(autoRepliesCarried && m(i)) where m = NOe && frameLive
+    if (
+      carried &&
+      isCommentMonitorTask(task) &&
+      (task as { frameLive?: unknown }).frameLive !== undefined
+    ) {
+      return false
+    }
+    return true
+  })
   const globalMonitor =
     deps.isGlobalCommentMonitorActive ?? isGlobalCommentMonitorActive
   if (blocking.length === 0) {
+    // official: !n && f() → comment_monitor; when carried (n), global alone ok
+    if (carried) return undefined
     return globalMonitor()
       ? { kind: 'comment_monitor', activeTasks: false }
       : undefined

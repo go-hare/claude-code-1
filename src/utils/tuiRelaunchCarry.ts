@@ -9,6 +9,11 @@
  *   W4e(e,t)  — uncarriable reason list (restricted launch, session rules,
  *               ask cliArg, non-eLa rules, bad add-dir)
  *   UYh / Jpc — refuse / save-without-restart copy
+ *
+ * densable 2.1.248 leftover aliases (Mhr A / le extraArgs — not Yk):
+ *   o5(c, wle) === buildTuiCarryPermissionArgs (Cmt)
+ *   i5(c, AL()) === buildTuiCarryToolRuleArgs (Rmt)
+ *   official compose `[...o5(w,wle(t)),...i5(w,AL())]`
  */
 
 import type {
@@ -229,8 +234,9 @@ export function getLastCliFlagValue(
 }
 
 /**
- * densable Cmt — build carry argv from permission context + effort.
- * Strips `--add-dir` pairs from replConfigArgv (re-added from context).
+ * densable Cmt / official 248 o5 — carry argv from permission context +
+ * effort. Strips `--add-dir` pairs from replConfigArgv (re-added from
+ * context).
  */
 export function buildTuiCarryPermissionArgs(
   ctx: Pick<
@@ -310,7 +316,8 @@ export function buildTuiCarryPermissionArgs(
 }
 
 /**
- * densable Rmt — allowed/disallowed cliArg tools + forkReplay agent flags.
+ * densable Rmt / official 248 i5 — allowed/disallowed cliArg tools +
+ * forkReplay agent flags (AL()).
  */
 export function buildTuiCarryToolRuleArgs(
   ctx: Pick<ToolPermissionContext, 'alwaysAllowRules' | 'alwaysDenyRules'>,
@@ -328,7 +335,10 @@ export function buildTuiCarryToolRuleArgs(
   ]
 }
 
-/** densable Cmt+Rmt compose — full extraArgs for I_r / acceptTuiRelaunch. */
+/**
+ * densable Cmt+Rmt compose — official 248 `[...o5(c,wle),...i5(c,AL())]`.
+ * Full extraArgs for I_r / acceptTuiRelaunch / Mhr `_G` / le.
+ */
 export function buildTuiRelaunchExtraArgs(input: {
   toolPermissionContext: ToolPermissionContext
   effort?: unknown

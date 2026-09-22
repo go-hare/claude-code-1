@@ -29,6 +29,7 @@ import { getOriginalCwd, getSessionId, isSessionPersistenceDisabled } from '../b
 import { isBgSession } from '../utils/concurrentSessions.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
+import { isRestrictedSession, restrictedSpawnEnv } from '../utils/restricted.js';
 import { shouldSkipPromptHistory } from '../utils/residualFinalEnvGates.js';
 
 type Props = {
@@ -199,7 +200,12 @@ export async function runExitBackgroundHandoff(input: {
       forkSession: true,
       // densable yNo providedSessionId — job dir short matches spawn target
       providedSessionId,
-      extraArgs: input.isMidTurn ? ['--reply-on-resume'] : [],
+      // leftover yNo inherit Yk() like official G9 / left-arrow
+      extraArgs: [
+        ...(input.isMidTurn ? ['--reply-on-resume'] : []),
+        ...(isRestrictedSession() ? ['--restricted'] : []),
+      ],
+      reattachEnv: restrictedSpawnEnv(),
     });
 
     // densable: if (n.ok) { if (t && r) t.disown(reg) }

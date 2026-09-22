@@ -31,41 +31,75 @@ afterAll(() => {
 import {
   FULLSCREEN_UPSELL_MAX_SEEN,
   incrementFullscreenUpsellSeen,
+  isFullscreenUpsellAutoOffReason,
   markFullscreenUpsellFullySeen,
   shouldShowFullscreenUpsell,
 } from '../fullscreenUpsellGate.js'
 
+/** Arms that must be false for a positive eligibility path under tip default-on. */
+const eligibleArms = {
+  isNonInteractiveOrDemo: false,
+  isBgSession: false,
+  isRemoteWorkspace: false,
+  hasBgTakeover: false,
+  isFullscreenAlready: false,
+  isHardDisabled: false,
+  hasExplicitTuiSetting: false,
+  isLatchedFullscreen: false,
+  isAutoOffGateReason: false,
+  isGrowthBookFallback: false,
+  isForkRestrictedLaunchConfig: false,
+  isStickyAutoDisabled: false,
+  seenCount: 0,
+} as const
+
 describe('shouldShowFullscreenUpsell Npf densable', () => {
-  test('FORCE_FULLSCREEN_UPSELL wins over other gates', () => {
+  test('FORCE_FULLSCREEN_UPSELL wins over Lt/Om/tui/seen — not over bg/remote/takeover', () => {
     expect(
       shouldShowFullscreenUpsell({
+        ...eligibleArms,
         env: { CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL: '1' },
-        isNonInteractiveOrDemo: false,
         isFullscreenAlready: true,
         hasExplicitTuiSetting: true,
         seenCount: 99,
       }),
     ).toBe(true)
+
+    expect(
+      shouldShowFullscreenUpsell({
+        ...eligibleArms,
+        env: { CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL: '1' },
+        isBgSession: true,
+      }),
+    ).toBe(false)
   })
 
   test('non-interactive / demo skips', () => {
     expect(
       shouldShowFullscreenUpsell({
+        ...eligibleArms,
         isNonInteractiveOrDemo: true,
-        seenCount: 0,
-        isFullscreenAlready: false,
-        hasExplicitTuiSetting: false,
       }),
+    ).toBe(false)
+  })
+
+  test('official _t / On / hg skip before FORCE', () => {
+    expect(
+      shouldShowFullscreenUpsell({ ...eligibleArms, isBgSession: true }),
+    ).toBe(false)
+    expect(
+      shouldShowFullscreenUpsell({ ...eligibleArms, isRemoteWorkspace: true }),
+    ).toBe(false)
+    expect(
+      shouldShowFullscreenUpsell({ ...eligibleArms, hasBgTakeover: true }),
     ).toBe(false)
   })
 
   test('already fullscreen skips', () => {
     expect(
       shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
+        ...eligibleArms,
         isFullscreenAlready: true,
-        hasExplicitTuiSetting: false,
-        seenCount: 0,
       }),
     ).toBe(false)
   })
@@ -73,11 +107,8 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
   test('hard-disabled skips', () => {
     expect(
       shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
-        isFullscreenAlready: false,
+        ...eligibleArms,
         isHardDisabled: true,
-        hasExplicitTuiSetting: false,
-        seenCount: 0,
       }),
     ).toBe(false)
   })
@@ -85,36 +116,68 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
   test('explicit tui setting skips', () => {
     expect(
       shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
-        isFullscreenAlready: false,
+        ...eligibleArms,
         hasExplicitTuiSetting: true,
-        seenCount: 0,
       }),
     ).toBe(false)
+  })
+
+  test('GHe latched fullscreen / uft auto-off / gqn / mwt skip', () => {
+    expect(
+      shouldShowFullscreenUpsell({
+        ...eligibleArms,
+        isLatchedFullscreen: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowFullscreenUpsell({
+        ...eligibleArms,
+        isAutoOffGateReason: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowFullscreenUpsell({
+        ...eligibleArms,
+        isGrowthBookFallback: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowFullscreenUpsell({
+        ...eligibleArms,
+        isStickyAutoDisabled: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('uft maps official auto-off reasons', () => {
+    expect(isFullscreenUpsellAutoOffReason('env_off')).toBe(true)
+    expect(isFullscreenUpsellAutoOffReason('sr_auto_off')).toBe(true)
+    expect(isFullscreenUpsellAutoOffReason('tmux_cc_auto_off')).toBe(true)
+    expect(isFullscreenUpsellAutoOffReason('win_ssh_auto_off')).toBe(true)
+    expect(isFullscreenUpsellAutoOffReason('ant_default')).toBe(false)
+    expect(isFullscreenUpsellAutoOffReason('crash_auto_off')).toBe(false)
   })
 
   test('seen count at max skips', () => {
     expect(
       shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
-        isFullscreenAlready: false,
-        isHardDisabled: false,
-        hasExplicitTuiSetting: false,
+        ...eligibleArms,
         seenCount: FULLSCREEN_UPSELL_MAX_SEEN,
       }),
     ).toBe(false)
   })
 
   test('eligible when under max (no GB required)', () => {
+    expect(shouldShowFullscreenUpsell({ ...eligibleArms })).toBe(true)
+  })
+
+  test('official tae GC() (#w) skips — not Yk/#l', () => {
     expect(
       shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
-        isFullscreenAlready: false,
-        isHardDisabled: false,
-        hasExplicitTuiSetting: false,
-        seenCount: 0,
+        ...eligibleArms,
+        isForkRestrictedLaunchConfig: true,
       }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
   test('markFullscreenUpsellFullySeen caps at max', () => {

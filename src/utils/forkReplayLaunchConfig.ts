@@ -2,11 +2,19 @@
  * densable 2.1.212 process-level launch state used by keepParent `/fork`:
  *
  *   kei / Iei  — forkReplayLaunchConfig {appendSystemPrompt, agent, agents}
- *   Hei / xei  — forkRestrictedLaunchConfig boolean (Ajs at launch)
+ *   GC / Cwn   — forkRestrictedLaunchConfig boolean (Cwn(Win(C)) at launch)
  *   gXe / rti  — replConfigArgv (settings/plugin/add-dir/mcp/… flags)
+ *
+ * 2.1.248 leftover bits on official Ie (do not invent Yt):
+ *   Cwn/GC → `Ie.#w`  (NOT #1 Yk / restrictedSession)
+ *   AL/Rwn → `Ie.#L`
+ *   gXe/rti → `Ie.#g`
+ * Hei/xei are gone (SEA hits=0).
  *
  * Kept out of bootstrap/state.ts (leaf module; no import cycle risk).
  */
+
+import { getBootstrapSessionHost } from './sessionHost.js'
 
 export type ForkReplayLaunchConfig = {
   /** Raw CLI `--append-system-prompt` string (not file/chrome mutations). */
@@ -16,12 +24,6 @@ export type ForkReplayLaunchConfig = {
   /** Raw CLI `--agents` JSON string. */
   agents?: string
 }
-
-let forkReplayLaunchConfig: ForkReplayLaunchConfig = {}
-/** densable `Dt.forkRestrictedLaunchConfig` — sticky from launch Ajs. */
-let forkRestrictedLaunchConfig = false
-/** densable `Dt.replConfigArgv` — flat argv flags replayed into keepParent child. */
-let replConfigArgv: string[] = []
 /**
  * densable `Dt.settingsEffortAtStartup` / M_s — settings-derived effort at
  * launch (O_s). Used by nMr/kXs so /tui only carries `--effort` when it
@@ -29,38 +31,59 @@ let replConfigArgv: string[] = []
  */
 let settingsEffortAtStartup: string | undefined
 
-/** densable `Iei(e)` — store launch config for later keepParent forks. */
+/**
+ * official Rwn @178553301
+ * `function Rwn(e){n().host.launchOptions.replaceForkReplayLaunchConfig(e)}`
+ * export alias `Rwn as setForkReplayLaunchConfig`
+ */
 export function setForkReplayLaunchConfig(
   config: ForkReplayLaunchConfig,
 ): void {
-  forkReplayLaunchConfig = { ...config }
+  getBootstrapSessionHost().launchOptions.replaceForkReplayLaunchConfig({
+    ...config,
+  })
 }
 
-/** densable `kei()` — read launch config for D$t keepParent argv merge. */
+/**
+ * official AL @178553301
+ * `function AL(){return n().host.launchOptions.forkReplayLaunchConfig()}`
+ * export alias `AL as getForkReplayLaunchConfig`
+ */
 export function getForkReplayLaunchConfig(): ForkReplayLaunchConfig {
   // Defensive copy — callers must not mutate process-global sticky state.
-  return { ...forkReplayLaunchConfig }
+  return {
+    ...getBootstrapSessionHost().launchOptions.forkReplayLaunchConfig(),
+  }
 }
 
-/** densable `xei(e)` — sticky restricted-launch bit from Ajs at startup. */
+/**
+ * official Cwn @178553330 sha=c836daccafc6bb62
+ * `function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}`
+ * export alias `Cwn as setForkRestrictedLaunchConfig` @192785069
+ */
 export function setForkRestrictedLaunchConfig(restricted: boolean): void {
-  forkRestrictedLaunchConfig = restricted
+  getBootstrapSessionHost().launchOptions.replaceForkRestrictedLaunchConfig(
+    restricted,
+  )
 }
 
-/** densable `Hei()` — nZ_ reads this (plus Pl/lf) for restricted launch. */
+/**
+ * official GC @178553257 sha=c75e51a6d6ddf107
+ * `function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}`
+ * export alias `GC as getForkRestrictedLaunchConfig` @192776753
+ */
 export function getForkRestrictedLaunchConfig(): boolean {
-  return forkRestrictedLaunchConfig
+  return getBootstrapSessionHost().launchOptions.forkRestrictedLaunchConfig()
 }
 
-/** densable `rti(e)` — store REPL config argv for gXe() merge into D$t. */
+/** densable `rti(e)` — official `Ie.replaceReplConfigArgv` / `#g`. */
 export function setReplConfigArgv(argv: readonly string[]): void {
-  replConfigArgv = [...argv]
+  getBootstrapSessionHost().launchOptions.replaceReplConfigArgv([...argv])
 }
 
-/** densable `gXe()` — flat argv slice for keepParent child spawn. */
+/** densable `gXe()` — official `Ie.replConfigArgv()` / `#g`. */
 export function getReplConfigArgv(): readonly string[] {
-  // Defensive copy — callers must not mutate process-global sticky state.
-  return [...replConfigArgv]
+  return [...getBootstrapSessionHost().launchOptions.replConfigArgv()]
 }
 
 /** densable `O_s(e)` — store settings effort baseline for nMr/kXs. */
@@ -74,25 +97,25 @@ export function getSettingsEffortAtStartup(): string | undefined {
   return settingsEffortAtStartup
 }
 
-/** Test helper — clear between cases. */
+/** Test helper — clear leftover fork-replay slots (not full Ie.reset). */
 export function resetForkReplayLaunchConfig(): void {
-  forkReplayLaunchConfig = {}
-  forkRestrictedLaunchConfig = false
-  replConfigArgv = []
+  const opts = getBootstrapSessionHost().launchOptions
+  opts.replaceForkReplayLaunchConfig({})
+  opts.replaceForkRestrictedLaunchConfig(false)
+  opts.replaceReplConfigArgv([])
   settingsEffortAtStartup = undefined
 }
 
 /**
- * densable `Ajs(options)` — true when launch flags make a keepParent copy
- * less restricted than the parent (nZ_ refuses).
+ * official Win @182967044 — true when launch options make a keepParent copy
+ * less restricted than the parent (nZ_ refuses). Cwn(Win(C)) writes #w.
  *
- * densable:
- *   Pl()||lf()||[systemPrompt, systemPromptFile, appendSystemPromptFile,
+ *   [systemPrompt, systemPromptFile, appendSystemPromptFile,
  *     permissionPromptTool, settingSources, managedSettings].some(defined)
  *     || (tools??[]).some(t !== "default")
  *
  * Pl/lf (safe/bare) are checked separately by `isForkRestrictedLaunch` /
- * callers; this pure helper covers the options-object half.
+ * callers; this pure helper covers the options-object half (not Yk/#l).
  */
 export function isForkRestrictedLaunchOptions(opts: {
   systemPrompt?: unknown

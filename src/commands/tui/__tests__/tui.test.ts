@@ -378,6 +378,8 @@ describe('densable 2.1.234 W4e/iyt refuse before persist', () => {
         toolPermissionContext: ctx,
         effortValue: 'high',
         tasks: { a: { type: 'local_shell', status: 'running' } as never },
+        messages: [{ type: 'user' } as never],
+        proactivityLevel: 'high',
       }),
     })
     expect(carry?.toolPermissionContext?.alwaysDenyRules.session).toEqual([
@@ -385,6 +387,27 @@ describe('densable 2.1.234 W4e/iyt refuse before persist', () => {
     ])
     expect(carry?.effort).toBe('high')
     expect(carry?.tasks?.a).toBeTruthy()
+    expect(carry?.messages).toHaveLength(1)
+    expect(carry?.proactivityLevel).toBe('high')
+    expect(carry).not.toHaveProperty('responseStreaming')
+  })
+})
+
+describe('densable 2.1.248 Ake leftover', () => {
+  test('applyTuiRelaunchAfterSwitch wires zL + proactivity, keeps TUI switch', async () => {
+    const src = readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')
+    const start = src.indexOf('async function applyTuiRelaunchAfterSwitch')
+    expect(start).toBeGreaterThan(-1)
+    const apply = src.slice(
+      start,
+      src.indexOf('async function refuseBeforeTuiPersist', start),
+    )
+    expect(apply).toContain('snapshotSessionForRelaunch')
+    expect(apply).toContain('"relaunch"')
+    expect(apply).toContain('proactivity:')
+    expect(apply).toContain('getProactivityLevel')
+    expect(apply).not.toContain('injectTuiSwitch: false')
+    expect(apply).toContain('withRelaunchKet')
   })
 })
 

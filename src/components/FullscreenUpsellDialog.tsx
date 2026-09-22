@@ -27,15 +27,26 @@ export function carryFromAppStore(store: {
     toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
     effortValue?: unknown;
     tasks?: TuiRelaunchCarryInput['tasks'];
+    messages?: TuiRelaunchCarryInput['messages'];
+    proactivityLevel?: unknown;
   };
 }): TuiRelaunchCarryInput | undefined {
   try {
     const state = store.getState();
-    if (!state.toolPermissionContext && !state.tasks) return undefined;
+    if (
+      !state.toolPermissionContext &&
+      !state.tasks &&
+      state.messages === undefined &&
+      state.proactivityLevel === undefined
+    ) {
+      return undefined;
+    }
     return {
       toolPermissionContext: state.toolPermissionContext,
       effort: state.effortValue,
       tasks: state.tasks,
+      messages: state.messages,
+      proactivityLevel: state.proactivityLevel,
     };
   } catch {
     return undefined;

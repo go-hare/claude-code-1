@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { getEmptyToolPermissionContext } from '../../Tool.js'
 import type { ToolPermissionContext } from '../../types/permissions.js'
 import {
@@ -131,6 +133,17 @@ describe('tuiRelaunchCarry densable 2.1.234 (#21–22)', () => {
       '--append-system-prompt',
       'hi',
     ])
+  })
+
+  test('248 leftover aliases o5/i5 are Cmt/Rmt, not Yk', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../tuiRelaunchCarry.ts'),
+      'utf8',
+    )
+    expect(src).toContain('o5(c, wle) === buildTuiCarryPermissionArgs')
+    expect(src).toContain('i5(c, AL()) === buildTuiCarryToolRuleArgs')
+    expect(src).toContain('[...o5(w,wle(t)),...i5(w,AL())]')
+    expect(src).toContain('not Yk')
   })
 
   test('Cmt+Rmt compose buildTuiRelaunchExtraArgs', () => {

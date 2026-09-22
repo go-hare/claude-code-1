@@ -47,6 +47,13 @@ describe('V1y shouldShowFullscreenUpsell (2.1.239, no ochre_hollow)', () => {
         isFullscreenAlready: false,
         isHardDisabled: false,
         hasExplicitTuiSetting: false,
+        isForkRestrictedLaunchConfig: false,
+        isBgSession: false,
+        isRemoteWorkspace: false,
+        hasBgTakeover: false,
+        isLatchedFullscreen: false,
+        isAutoOffGateReason: false,
+        isStickyAutoDisabled: false,
         seenCount: 0,
       }),
     ).toBe(true)

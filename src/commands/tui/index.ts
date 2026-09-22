@@ -140,6 +140,15 @@ export type TuiRelaunchCarryInput = {
   effort?: unknown
   /** densable `t.taskRegistry.all()` — AppState.tasks for iyt. */
   tasks?: Record<string, import('../../tasks/types.js').TaskState>
+  /** official Ake y — session messages for leftover zL. */
+  messages?: readonly import('../../types/message.js').Message[]
+  /** official getProactivityLevel() — leftover AppState.proactivityLevel. */
+  getProactivityLevel?: () => unknown
+  proactivityLevel?: unknown
+  /** official Ake C — storageV5 pass-through to leftover zL. */
+  storageV5?: unknown
+  /** official Ake m — leftover zL `{responseStreaming}`. */
+  responseStreaming?: boolean
 }
 
 function logTuiRefused(
@@ -259,15 +268,33 @@ async function applyTuiRelaunchAfterSwitch(
     const { transcriptHasBytes } =
       require('../../utils/sessionStorage.js') as typeof import('../../utils/sessionStorage.js')
     const hasNonEmptyTranscript = await transcriptHasBytes()
+    // official Ake zL(y,"relaunch",{responseStreaming:m},C) — leftover host.
+    // Ake is NOT `_G`/Mhr: keep injectTuiSwitch default (TUI_JUST_SWITCHED).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { snapshotSessionForRelaunch, withRelaunchKet } =
+      require('../../utils/sessionRelaunchSnapshot.js') as typeof import('../../utils/sessionRelaunchSnapshot.js')
+    const persist = await snapshotSessionForRelaunch(
+      carry?.messages ?? [],
+      'relaunch',
+      { responseStreaming: carry?.responseStreaming },
+      carry?.storageV5,
+    )
     // Omit screenReaderEnv so buildTuiRelaunchPlan uses getScreenReaderChildEnv
     // (official zZe). Passing {} is truthy and would strip CLAUDE_AX_SCREEN_READER.
-    const result = acceptTuiRelaunch({
-      target,
-      sessionId: getSessionId(),
-      hasNonEmptyTranscript,
-      toolPermissionContext: carry?.toolPermissionContext,
-      effort: carry?.effort,
-    })
+    const result = await withRelaunchKet(persist, () =>
+      acceptTuiRelaunch({
+        target,
+        sessionId: getSessionId(),
+        hasNonEmptyTranscript,
+        toolPermissionContext: carry?.toolPermissionContext,
+        effort: carry?.effort,
+        proactivity: {
+          proactivityLevel:
+            carry?.getProactivityLevel?.() ?? carry?.proactivityLevel,
+          toolPermissionContext: carry?.toolPermissionContext,
+        },
+      }),
+    )
     if (result.mode === 'spawned' && result.spawn.ok) {
       process.exit(result.spawn.status ?? 0)
     }
@@ -558,11 +585,22 @@ export const tuiNonInteractive: Command = {
       let carry: TuiRelaunchCarryInput | undefined
       try {
         const state = context.getAppState?.()
-        if (state?.toolPermissionContext || state?.tasks) {
+        if (
+          state?.toolPermissionContext ||
+          state?.tasks ||
+          context.messages ||
+          context.getProactivityLevel ||
+          context.storageV5 !== undefined ||
+          state?.proactivityLevel !== undefined
+        ) {
           carry = {
-            toolPermissionContext: state.toolPermissionContext,
-            effort: state.effortValue,
-            tasks: state.tasks,
+            toolPermissionContext: state?.toolPermissionContext,
+            effort: state?.effortValue,
+            tasks: state?.tasks,
+            messages: context.messages,
+            getProactivityLevel: context.getProactivityLevel,
+            storageV5: context.storageV5,
+            proactivityLevel: state?.proactivityLevel,
           }
         }
       } catch {

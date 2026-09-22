@@ -18,14 +18,33 @@ function carryFromContext(context: unknown): TuiRelaunchCarryInput | undefined {
         toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
         effortValue?: unknown;
         tasks?: TuiRelaunchCarryInput['tasks'];
+        messages?: TuiRelaunchCarryInput['messages'];
+        proactivityLevel?: unknown;
       };
+      messages?: TuiRelaunchCarryInput['messages'];
+      getProactivityLevel?: () => unknown;
+      storageV5?: unknown;
     };
     const state = ctx.getAppState?.();
-    if (!state?.toolPermissionContext && !state?.tasks) return undefined;
+    const messages = ctx.messages ?? state?.messages;
+    if (
+      !state?.toolPermissionContext &&
+      !state?.tasks &&
+      messages === undefined &&
+      !ctx.getProactivityLevel &&
+      ctx.storageV5 === undefined &&
+      state?.proactivityLevel === undefined
+    ) {
+      return undefined;
+    }
     return {
-      toolPermissionContext: state.toolPermissionContext,
-      effort: state.effortValue,
-      tasks: state.tasks,
+      toolPermissionContext: state?.toolPermissionContext,
+      effort: state?.effortValue,
+      tasks: state?.tasks,
+      messages,
+      getProactivityLevel: ctx.getProactivityLevel,
+      storageV5: ctx.storageV5,
+      proactivityLevel: state?.proactivityLevel,
     };
   } catch {
     return undefined;
