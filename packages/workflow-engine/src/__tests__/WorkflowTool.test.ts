@@ -242,15 +242,14 @@ test('metadata methods: description/prompt/renderToolUseMessage', async () => {
   )
 })
 
-test('prompt includes host-derived concurrency + AskUserQuestion guidance', async () => {
+test('prompt defers script-API / concurrency dump to workflow-authoring skill', async () => {
   const { ports } = mockPorts('/tmp', new Map())
   const tool = createWorkflowTool(ports)
   const p = await tool.prompt()
-  // densable 2.1.229 #17: host-derived default (availableParallelism), not hard-coded 3
-  expect(p).toMatch(/host-derived default|availableParallelism/i)
-  expect(p).toMatch(/OMIT it to use the host-derived default/i)
-  expect(p).toMatch(/maxConcurrency/i)
-  expect(p).toMatch(/AskUserQuestion/i)
+  // densable 2.1.248 #40: remaining tool text + skill pointer; concurrency lives on pXt
+  expect(p).toContain('load the `workflow-authoring` skill')
+  expect(p).not.toMatch(/host-derived default|availableParallelism/i)
+  expect(p).not.toMatch(/AskUserQuestion/i)
 })
 
 test('name does not exist → returns error (does not enter background)', async () => {
@@ -528,15 +527,14 @@ test('returnValue is an object → complete (formatValue takes JSON branch)', as
   }
 })
 
-test('prompt is densable full playbook on the tool (not See /ultracode stub)', async () => {
+test('prompt is densable 248 slim tool description (authoring lives on skill)', async () => {
   const { ports } = mockPorts('/tmp', new Map())
   const tool = createWorkflowTool(ports)
   const prompt = await tool.prompt()
   expect(prompt).toContain(
     'ONLY call this tool when the user has explicitly opted',
   )
-  expect(prompt).toContain('Script body hooks')
-  expect(prompt).toContain('Quality patterns')
-  expect(prompt).toContain('resumeFromRunId')
+  expect(prompt).toContain('load the `workflow-authoring` skill')
+  expect(prompt).not.toContain('Script body hooks')
   expect(prompt).not.toContain('See /ultracode for the full playbook')
 })

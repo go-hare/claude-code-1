@@ -8,7 +8,11 @@
  *   BKu — short description (constants)
  */
 
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { should1hCacheTTL } from 'src/services/api/claude.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  getPinnedFeatureValue,
+} from 'src/services/analytics/growthbook.js'
 import { isClaudeAISubscriber } from 'src/utils/auth.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
@@ -25,11 +29,6 @@ export {
   AUTONOMOUS_LOOP_SENTINEL,
   SCHEDULE_WAKEUP_DESCRIPTION,
   SCHEDULE_WAKEUP_TOOL_NAME,
-}
-
-/** densable `jKe` */
-export function isKairosLoopDynamicEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_dynamic', false)
 }
 
 /** densable `Cfr` — 243 default-on (same as `loopDynamic.isLoopNoopFoldEnabled`). */
@@ -77,13 +76,23 @@ export function isPromptCache1hForQuerySource(querySource: string): boolean {
   })
 }
 
+/** densable 2.1.248 `FAn` */
+const SLATE_ANCHOR_FEATURE = 'tengu_slate_anchor'
+
+/** densable 2.1.248 `NAn` — `zce(FAn, true)` */
+export function isSlateAnchorEnabled(): boolean {
+  return getPinnedFeatureValue(SLATE_ANCHOR_FEATURE, true)
+}
+
 /**
- * densable prompt() cache arg:
- *   e=DUe("repl_main_thread"), t=DUe("sdk"); e===t ? e : void 0
+ * densable 2.1.248 prompt() cache arg:
+ *   e=NAn(), t=B1("repl_main_thread",{ignoreOverage:e}),
+ *   r=B1("sdk",{ignoreOverage:e}); t===r ? t : void 0
  */
 export function resolveScheduleWakeupCacheGuidance(): boolean | undefined {
-  const repl = isPromptCache1hForQuerySource('repl_main_thread')
-  const sdk = isPromptCache1hForQuerySource('sdk')
+  const ignoreOverage = isSlateAnchorEnabled()
+  const repl = should1hCacheTTL('repl_main_thread', { ignoreOverage })
+  const sdk = should1hCacheTTL('sdk', { ignoreOverage })
   return repl === sdk ? repl : undefined
 }
 

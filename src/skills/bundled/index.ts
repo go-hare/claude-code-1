@@ -14,6 +14,7 @@ import { registerDoctorSkill } from './doctor.js'
 import { registerSkillifySkill } from './skillify.js'
 import { registerStuckSkill } from './stuck.js'
 import { registerUltracodeSkill } from './ultracode.js'
+import { registerWorkflowAuthoringSkill } from './workflowAuthoring.js'
 import { registerCronDeleteSkill, registerCronListSkill } from './cronManage.js'
 import { registerLoopSkill } from './loop.js'
 import { registerDreamSkill } from './dream.js'
@@ -81,6 +82,8 @@ export function initBundledSkills(): void {
   registerBatchSkill()
   registerStuckSkill()
   registerUltracodeSkill()
+  // densable 2.1.248 #40 Fmr — workflow-authoring reference skill
+  registerWorkflowAuthoringSkill()
   registerLoopSkill()
   registerCronListSkill()
   registerCronDeleteSkill()

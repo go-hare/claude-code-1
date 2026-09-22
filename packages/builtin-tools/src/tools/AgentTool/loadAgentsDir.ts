@@ -21,6 +21,10 @@ import {
 } from 'src/utils/effort.js'
 import { isBareMode } from 'src/utils/envUtils.js'
 import { parsePositiveIntFromFrontmatter } from 'src/utils/frontmatterParser.js'
+import {
+  type PromptCacheTtl,
+  parseAgentFrontmatterCacheTtl,
+} from 'src/utils/promptCacheTtl.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
 import {
@@ -128,6 +132,8 @@ export type BaseAgentDefinition = {
   effort?: EffortValue
   permissionMode?: PermissionMode
   maxTurns?: number // Maximum number of agentic turns before stopping
+  /** densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h"). */
+  cacheTtl?: PromptCacheTtl
   filename?: string // Original filename without .md extension (for user/project/managed agents)
   baseDir?: string
   criticalSystemReminder_EXPERIMENTAL?: string // Short message re-injected at every user turn
@@ -722,6 +728,9 @@ export function parseAgentFromMarkdown(
       )
     }
 
+    // densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h")
+    const cacheTtl = parseAgentFrontmatterCacheTtl(frontmatter)
+
     // Extract filename without extension
     const filename = basename(filePath, '.md')
 
@@ -822,6 +831,7 @@ export function parseAgentFromMarkdown(
         ? { permissionMode: permissionModeRaw as PermissionMode }
         : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
+      ...(cacheTtl !== undefined ? { cacheTtl } : {}),
       ...(background ? { background } : {}),
       ...(memory ? { memory } : {}),
       ...(isolation ? { isolation } : {}),

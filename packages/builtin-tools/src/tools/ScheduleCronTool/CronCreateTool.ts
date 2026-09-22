@@ -56,6 +56,8 @@ export type CreateOutput = z.infer<OutputSchema>
 export const CronCreateTool = buildTool({
   name: CRON_CREATE_TOOL_NAME,
   searchHint: 'schedule a recurring or one-shot prompt',
+  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @196753194
+  enablesCodeExecution: true,
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   get inputSchema(): InputSchema {

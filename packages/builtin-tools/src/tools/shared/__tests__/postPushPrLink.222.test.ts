@@ -272,7 +272,7 @@ describe('densable 2.1.222 #7 wire-up source', () => {
     )
     expect(src).toContain('pendingBranchLinks')
     expect(src).toContain('getPendingBranchLinks')
-    expect(src).toContain('2.1.222 #7')
+    expect(src).toContain('densable Lzr()')
   })
 
   test('BashTool and PowerShellTool call trackGitOperations', () => {

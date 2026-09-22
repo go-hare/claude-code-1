@@ -9,6 +9,7 @@ import {
   isOverageProvisioningAllowed,
 } from '../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../utils/billing.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatResetTime } from '../utils/format.js'
 import type { ClaudeAILimits } from './claudeAiLimits.js'
 
@@ -154,6 +155,34 @@ const CONSUMER_USAGE_SETTINGS_URL =
   'claude.ai/settings/usage?from=cc_cli_limit_message'
 
 /**
+ * densable 2.1.248 v_() — hint gate only. SEA kS() is `return null`;
+ * else Zur() = isOverageProvisioningAllowed (DN = #6 allowlist).
+ * DISABLE_EXTRA_USAGE_COMMAND must use isEnvTruthy (same as /usage-credits
+ * command + official Me()) — bare truthy would hide hints for `=0`/`=false`.
+ */
+export function isUsageCreditsHintEnabled(): boolean {
+  if (isEnvTruthy(process.env.DISABLE_EXTRA_USAGE_COMMAND)) {
+    return false
+  }
+  return isOverageProvisioningAllowed()
+}
+
+/**
+ * densable 2.1.248 Nde() @184100558 sha=c8ad9d2a1a2d348e
+ */
+export function getUsageCreditsAskAdminHint(): string {
+  return isUsageCreditsHintEnabled()
+    ? ' · run /usage-credits to ask your admin for a higher limit'
+    : ' · ask your admin for a higher limit'
+}
+
+function getUsageCreditsRaiseHint(): string {
+  return isUsageCreditsHintEnabled()
+    ? ' · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage'
+    : ' · visit claude.ai/admin-settings/usage to raise it'
+}
+
+/**
  * densable 2.1.239 Kvi — when a monthly spend cap is hit, also say when the
  * current session/weekly (or Opus/Sonnet) window resets. Official returns
  * null for overage / missing resetsAt. seven_day_sonnet uses $Wa(): pro or
@@ -217,8 +246,8 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
         ? 'individual spend limit'
         : "org's monthly spend limit"
       const suffix = hasBillingAccess
-        ? ' · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage'
-        : ' · run /usage-credits to ask your admin for a higher limit'
+        ? getUsageCreditsRaiseHint()
+        : getUsageCreditsAskAdminHint()
       return formatLimitReachedText(
         limit,
         `${suffix}${sessionWeeklyHint}`,
@@ -358,7 +387,7 @@ function getWarningUpsellText(
   // 5-hour session limit warning
   if (rateLimitType === 'five_hour') {
     // Teams/Enterprise with overages disabled: prompt to request extra usage
-    // Only show if overage provisioning is allowed for this org type (e.g., not AWS marketplace)
+    // Only show if Zur() — DN includes marketplace / self-serve / trial
     if (subscriptionType === 'team' || subscriptionType === 'enterprise') {
       if (!hasExtraUsageEnabled && isOverageProvisioningAllowed()) {
         return '/extra-usage to request more'

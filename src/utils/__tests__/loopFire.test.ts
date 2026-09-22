@@ -139,11 +139,14 @@ describe('resolveLoopDefaultFire', () => {
     expect(resolveLoopDefaultFire('check the deploy')).toBe('check the deploy')
   })
 
-  test('sentinel ignored when qAs off', () => {
+  test('sentinel expands when qAs always-on (248 dropped GB gate)', () => {
+    // densable 2.1.248 #46: isLoopDefaultPromptEnabled() is always true;
+    // tengu_kairos_loop_prompt GB no longer gates expansion.
     gb.set('tengu_kairos_loop_prompt', false)
-    expect(resolveLoopDefaultFire(AUTONOMOUS_LOOP_SENTINEL)).toBe(
-      AUTONOMOUS_LOOP_SENTINEL,
-    )
+    resetAutonomousLoopDelivered()
+    const expanded = resolveLoopDefaultFire(AUTONOMOUS_LOOP_SENTINEL)
+    expect(expanded).toContain('# Autonomous loop check')
+    expect(expanded).toContain('# Autonomous loop tick')
   })
 
   test('autonomous sentinel expands with preamble then tick', () => {

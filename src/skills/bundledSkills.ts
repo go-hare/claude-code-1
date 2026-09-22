@@ -18,6 +18,8 @@ export type BundledSkillDefinition = {
   aliases?: string[]
   whenToUse?: string
   argumentHint?: string
+  /** Official menu/typeahead blurb (Fmr menuDescription). */
+  menuDescription?: string
   allowedTools?: string[]
   model?: string
   disableModelInvocation?: boolean
@@ -102,6 +104,7 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     hasUserSpecifiedDescription: true,
     allowedTools: definition.allowedTools ?? [],
     argumentHint: definition.argumentHint,
+    menuDescription: definition.menuDescription,
     whenToUse: definition.whenToUse,
     model: definition.model,
     disableModelInvocation: definition.disableModelInvocation ?? false,

@@ -21,6 +21,8 @@ type REPLOutput = { result: string; tool_calls: number }
 export const REPLTool = buildTool({
   name: REPL_TOOL_NAME,
   searchHint: 'repl execute batch code read write edit glob grep bash',
+  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @185592858
+  enablesCodeExecution: true,
   maxResultSizeChars: 100_000,
   strict: true,
 

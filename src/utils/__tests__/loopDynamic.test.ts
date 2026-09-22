@@ -190,12 +190,16 @@ describe('scheduleModelWakeup / stopDynamicLoop', () => {
     expect(getLoopEnded()).toBe(true)
   })
 
-  test('scheduleKeepaliveWakeup gate_off when jKe default false', () => {
+  test('scheduleKeepaliveWakeup arms when 248 jKe is always-on', () => {
     setLoopEnded(false)
     setLoopConsecutiveKeepalives(0)
     const r = scheduleKeepaliveWakeup('p')
-    expect(r).toBeNull()
-    expect(getLoopEnded()).toBe(true)
+    expect(r).not.toBeNull()
+    expect(r!.clampedDelaySeconds).toBeGreaterThanOrEqual(
+      LOOP_WAKEUP_MIN_SECONDS,
+    )
+    expect(hasPendingLoopWakeups()).toBe(true)
+    expect(getLoopEnded()).toBe(false)
   })
 
   test('scheduleKeepaliveWakeup arms when jKe on and budget free', () => {

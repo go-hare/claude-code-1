@@ -51,9 +51,13 @@ export function isLoopPersistentPreambleEnabled(): boolean {
   )
 }
 
-/** densable `qAs` */
+/**
+ * densable `qAs` — empty-prompt autonomous /loop default.
+ * densable 2.1.248 #46: SEA dropped tengu_kairos_loop_prompt GB; always on
+ * (including Bedrock/Vertex/Foundry).
+ */
 export function isLoopDefaultPromptEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_prompt', false)
+  return true
 }
 
 /** densable `emt` subset — agent push notif setting for loop ping guidance */

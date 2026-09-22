@@ -15,8 +15,8 @@
  *   return s || a
  *
  * CLI-absent gold callees fail closed (not invented):
- *   MHs() host `accountCreditLatches.fableCreditsRequired` → false
  *   zpt() `seatTier==="enterprise_usage_based"` → false (no seatTier in CLI)
+ *   tEn()/MHs host latch via n().host.accountCreditLatches.fableCreditsRequired()
  */
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
@@ -36,6 +36,7 @@ import {
 } from './model/model.js'
 import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
 import { getAPIProvider } from './model/providers.js'
+import { getBootstrapSessionHost } from './sessionHost.js'
 
 /** densable ASm / qjt billing fragment. */
 export const DRAWS_FROM_USAGE_CREDITS_SUFFIX = ' · Draws from usage credits'
@@ -100,11 +101,14 @@ export function isKSlCreditsExemptPlan(): boolean {
 
 /**
  * densable `amt() || BXe()`.
- * `amt` = `KLe()` (`tengu_saffron_lattice`) || `MHs()` (absent → false).
+ * `amt` = `KLe()` (`tengu_saffron_lattice`) || `tEn()`/`MHs` host latch.
  * `BXe` = enterprise (KKb, zpt false) or subscriptionType ∈ GB
  * `tengu_saffron_credits_only_tiers` default `["enterprise"]`.
  */
 export function isKSlFableCreditsRequired(): boolean {
+  if (getBootstrapSessionHost().accountCreditLatches.fableCreditsRequired()) {
+    return true
+  }
   if (isOverageConsentRequiredGate()) return true
   const sub = getSubscriptionType()
   if (sub === 'enterprise') return true

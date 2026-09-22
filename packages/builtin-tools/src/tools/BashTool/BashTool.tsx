@@ -586,6 +586,8 @@ async function applySedEdit(
 export const BashTool = buildTool({
   name: BASH_TOOL_NAME,
   searchHint: 'execute shell commands',
+  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @187127917
+  enablesCodeExecution: true,
   // 30K chars - tool result persistence threshold
   maxResultSizeChars: 30_000,
   strict: true,

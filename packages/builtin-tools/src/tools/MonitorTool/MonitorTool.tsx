@@ -48,6 +48,8 @@ export type MonitorOutput = z.infer<OutputSchema>;
 export const MonitorTool = buildTool({
   name: MONITOR_TOOL_NAME,
   searchHint: 'start long-running background monitor for streaming events',
+  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @189896058
+  enablesCodeExecution: true,
   maxResultSizeChars: 10_000,
   strict: true,
 

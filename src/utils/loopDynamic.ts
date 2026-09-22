@@ -2,7 +2,7 @@
  * densable ScheduleWakeup / dynamic /loop runtime (SEA 2.1.221).
  *
  * Mirrors:
- *   jKe  — tengu_kairos_loop_dynamic gate
+ *   jKe  — dynamic /loop always on (248 dropped GB)
  *   Cfr  — tengu_loop_noop_fold (optional noop field)
  *   NU_  — clamp delaySeconds to [60,3600] + minute snap + cacheLeadMs
  *   ZKu  — schedule one-shot kind:"loop" session cron
@@ -69,11 +69,12 @@ export const AUTONOMOUS_LOOP_SENTINEL = '<<autonomous-loop>>'
 export const AUTONOMOUS_LOOP_DYNAMIC_SENTINEL = '<<autonomous-loop-dynamic>>'
 
 /**
- * densable `jKe` — GrowthBook gate for ScheduleWakeup / dynamic /loop.
- * Default false (must be explicitly enabled).
+ * densable `jKe` — ScheduleWakeup / dynamic /loop availability.
+ * densable 2.1.248 #46: SEA dropped tengu_kairos_loop_dynamic GB; always on
+ * (including Bedrock/Vertex/Foundry).
  */
 export function isKairosLoopDynamicEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_dynamic', false)
+  return true
 }
 
 /**

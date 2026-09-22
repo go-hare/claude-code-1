@@ -48,6 +48,8 @@ const TRIGGERS_BETA = 'ccr-triggers-2026-01-30'
 export const RemoteTriggerTool = buildTool({
   name: REMOTE_TRIGGER_TOOL_NAME,
   searchHint: 'manage scheduled remote agent triggers',
+  // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @196564806
+  enablesCodeExecution: true,
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   get inputSchema(): InputSchema {

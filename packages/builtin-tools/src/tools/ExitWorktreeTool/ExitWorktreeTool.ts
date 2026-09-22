@@ -15,7 +15,7 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { count } from 'src/utils/array.js'
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
 import { execFileNoThrow } from 'src/utils/execFileNoThrow.js'
-import { updateHooksConfigSnapshot } from 'src/utils/hooks/hooksConfigSnapshot.js'
+import { updateHooksConfigSnapshotUnderPrime } from 'src/utils/hooks/hooksConfigSnapshot.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlansDirectory } from 'src/utils/plans.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -151,10 +151,10 @@ async function restoreSessionToOriginalCwd(
   // identity" contract.
   if (projectRootIsWorktree) {
     setProjectRoot(originalCwd)
-    // setup.ts's --worktree block called updateHooksConfigSnapshot() to re-read
-    // hooks from the worktree. Restore symmetrically. (Mid-session
-    // EnterWorktreeTool never touched the snapshot, so no-op there.)
-    updateHooksConfigSnapshot()
+    // Official ExitWorktree restore: D()&&g ? nHe(Gqe) : uP(Yl).
+    // setup.ts --worktree used UnderPrime; restore symmetrically.
+    const { getPinnedStorageV5 } = await import('src/utils/storageV5/index.js')
+    await updateHooksConfigSnapshotUnderPrime(getPinnedStorageV5())
   }
   saveWorktreeState(null)
   clearSystemPromptSections()

@@ -2,7 +2,7 @@
  * densable `otp` / ScheduleWakeup (SEA 2.1.221) — 1:1 product tool.
  *
  * Always registered in the base tools pool (no isEnabled). Call-time gate is
- * densable `jKe` (tengu_kairos_loop_dynamic); TX never-defers when jKe is on.
+ * densable `jKe` (248 always-on); TX never-defers when jKe is on.
  * Runtime: QKu / JKu / $$t via src/utils/loopDynamic.ts.
  */
 

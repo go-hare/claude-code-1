@@ -70,7 +70,7 @@ describe('ScheduleWakeupTool', () => {
     mock.module('src/services/analytics/growthbook.js', growthbookMock)
     mock.module('src/services/analytics/growthbook.ts', growthbookMock)
     gb.clear()
-    // densable jKe default false
+    // 248 jKe is always-on; leftover GB key no longer gates the call path.
     gb.set('tengu_kairos_loop_dynamic', false)
     gb.set('tengu_loop_noop_fold', false)
     setLoopEnded(false)
@@ -123,19 +123,16 @@ describe('ScheduleWakeupTool', () => {
     ).rejects.toBeInstanceOf(ScheduleWakeupInputError)
   })
 
-  test('gate_off when jKe false — zeros and no schedule', async () => {
+  test('248 jKe always-on: GB false still schedules', async () => {
     gb.set('tengu_kairos_loop_dynamic', false)
     const result = await ScheduleWakeupTool.call({
       delaySeconds: 120,
       reason: 'watch CI',
       prompt: 'check CI',
     } as never)
-    expect(result.data).toEqual({
-      scheduledFor: 0,
-      clampedDelaySeconds: 0,
-      wasClamped: false,
-    })
-    expect(getSessionCronTasks().filter(t => t.kind === 'loop')).toHaveLength(0)
+    expect(result.data.scheduledFor).toBeGreaterThan(Date.now())
+    expect(result.data.clampedDelaySeconds).toBeGreaterThanOrEqual(60)
+    expect(getSessionCronTasks().filter(t => t.kind === 'loop')).toHaveLength(1)
   })
 
   test('schedules loop wakeup when jKe true', async () => {

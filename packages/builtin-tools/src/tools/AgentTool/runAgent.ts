@@ -996,6 +996,7 @@ export async function* runAgent({
       querySource,
       maxTurns: maxTurns ?? agentDefinition.maxTurns,
       fallbackModel: firstFallbackModel(toolUseContext.options.fallbackModel),
+      agentCacheTtlOverride: agentDefinition.cacheTtl,
     })) {
       onQueryProgress?.()
       // Forward subagent API request starts to parent's metrics display

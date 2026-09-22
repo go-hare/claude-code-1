@@ -1,10 +1,13 @@
 /**
  * densable `/loop` skill (SEA 2.1.221 `vjT` / `TjT` / `bjT` / `aqm`).
  *
+ * densable 2.1.248 #46: self-paced dynamic + empty-prompt autonomous default
+ * are always on (no tengu_kairos_loop_dynamic / _prompt GB).
+ *
  * Modes:
- *   - Fixed interval → CronCreate (bjT)
- *   - jKe + no interval → ScheduleWakeup dynamic self-pace (TjT)
- *   - qAs + empty/interval-only → autonomous / loop.md default (aqm)
+ *   - empty → autonomous / loop.md + ScheduleWakeup self-pace
+ *   - interval-only → autonomous / loop.md + CronCreate
+ *   - prompt (optional interval) → dynamic / CronCreate (TjT)
  */
 import {
   CRON_CREATE_TOOL_NAME,
@@ -20,11 +23,9 @@ import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
   AUTONOMOUS_LOOP_SENTINEL,
   clearLoopEndedOnLoopStart,
-  isKairosLoopDynamicEnabled,
 } from 'src/utils/loopDynamic.js'
 import {
   getAutonomousLoopPreamble,
-  isLoopDefaultPromptEnabled,
   isLoopPushNotifGuidanceEnabled,
   logAutonomousLoopActivation,
   LOOP_FILE_DYNAMIC_SENTINEL,
@@ -68,22 +69,6 @@ function everyMatchToInterval(match: RegExpMatchArray): string {
   return `${n}m`
 }
 
-function fixedIntervalUsage(): string {
-  return `Usage: /loop [interval] <prompt>
-
-Run a prompt or slash command on a recurring interval.
-
-Intervals: Ns, Nm, Nh, Nd (e.g. 5m, 30m, 2h, 1d). Minimum granularity is 1 minute.
-If no interval is specified, defaults to ${DEFAULT_INTERVAL}.
-
-Examples:
-  /loop 5m /babysit-prs
-  /loop 30m check the deploy
-  /loop 1h /standup 1
-  /loop check the deploy          (defaults to ${DEFAULT_INTERVAL})
-  /loop check the deploy every 20m`
-}
-
 /** densable `SjT` */
 function dynamicUsage(): string {
   return `Usage: /loop [interval] <prompt>
@@ -101,49 +86,7 @@ Examples:
   /loop check the deploy every 20m`
 }
 
-/** densable `bjT` — fixed CronCreate path (jKe off or interval present). */
-function buildFixedIntervalPrompt(args: string): string {
-  return `# /loop — schedule a recurring prompt
-
-Parse the input below into \`[interval] <prompt…>\` and schedule it with ${CRON_CREATE_TOOL_NAME}.
-
-## Parsing (in priority order)
-
-1. **Leading token**: if the first whitespace-delimited token matches \`^\\d+[smhd]$\` (e.g. \`5m\`, \`2h\`), that's the interval; the rest is the prompt.
-2. **Trailing "every" clause**: otherwise, if the input ends with \`every <N><unit>\` or \`every <N> <unit-word>\` (e.g. \`every 20m\`, \`every 5 minutes\`, \`every 2 hours\`), extract that as the interval and strip it from the prompt. Only match when what follows "every" is a time expression — \`check every PR\` has no interval.
-3. **Default**: otherwise, interval is \`${DEFAULT_INTERVAL}\` and the entire input is the prompt.
-
-If the resulting prompt is empty, show usage \`/loop [interval] <prompt>\` and stop — do not call ${CRON_CREATE_TOOL_NAME}.
-
-Examples:
-- \`5m /babysit-prs\` → interval \`5m\`, prompt \`/babysit-prs\` (rule 1)
-- \`check the deploy every 20m\` → interval \`20m\`, prompt \`check the deploy\` (rule 2)
-- \`run tests every 5 minutes\` → interval \`5m\`, prompt \`run tests\` (rule 2)
-- \`check the deploy\` → interval \`${DEFAULT_INTERVAL}\`, prompt \`check the deploy\` (rule 3)
-- \`check every PR\` → interval \`${DEFAULT_INTERVAL}\`, prompt \`check every PR\` (rule 3 — "every" not followed by time)
-- \`5m\` → empty prompt → show usage
-
-## Interval → cron
-
-Supported suffixes: \`s\` (seconds, rounded up to nearest minute, min 1), \`m\` (minutes), \`h\` (hours), \`d\` (days). Convert:
-
-${INTERVAL_CRON_TABLE}
-
-## Action
-
-1. Call ${CRON_CREATE_TOOL_NAME} with:
-   - \`cron\`: the expression from the table above
-   - \`prompt\`: the parsed prompt from above, verbatim (slash commands are passed through unchanged)
-   - \`recurring\`: \`true\`
-2. Briefly confirm: what's scheduled, the cron expression, the human-readable cadence, that recurring tasks auto-expire after ${DEFAULT_MAX_AGE_DAYS} days, and that they can cancel sooner with ${CRON_DELETE_TOOL_NAME} (include the job ID).
-3. **Then immediately execute the parsed prompt now** — don't wait for the first cron fire. If it's a slash command, invoke it via the Skill tool; otherwise act on it directly.
-
-## Input
-
-${args}`
-}
-
-/** densable `TjT` — jKe dynamic self-pace when no interval. */
+/** densable `TjT` — dynamic self-pace when no interval (248 always on). */
 function buildDynamicPrompt(args: string): string {
   const dynamicBody = `The user wants you to self-pace. Decide what makes the next iteration worth running — a passage of time, or an observable event.
 
@@ -199,7 +142,7 @@ ${args}`
 }
 
 /**
- * densable `aqm` — empty / interval-only + qAs → autonomous or loop.md default.
+ * densable `aqm` — empty / interval-only → autonomous or loop.md default.
  */
 function buildAutonomousDefaultPrompt(
   loopFile: LoopFile | null,
@@ -287,15 +230,12 @@ ${body}`
 export function registerLoopSkill(): void {
   registerBundledSkill({
     name: 'loop',
-    // densable menuDescription
-    description: isKairosLoopDynamicEnabled()
-      ? 'Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.'
-      : 'Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo, defaults to 10m)',
+    // densable 2.1.248 register @204828749 — always self-pace, no GB ternary
+    description:
+      'Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.',
     whenToUse:
       'When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.',
-    argumentHint: isLoopDefaultPromptEnabled()
-      ? '[interval] [prompt]'
-      : '[interval] <prompt>',
+    argumentHint: '[interval] [prompt]',
     userInvocable: true,
     isEnabled: isKairosCronEnabled,
     async getPromptForCommand(args, context) {
@@ -320,16 +260,16 @@ export function registerLoopSkill(): void {
         )
       }
 
-      // densable qAs path: empty or interval-only → autonomous / loop.md
+      // gold: empty or interval-only → autonomous / loop.md (no qAs gate)
       const everyOnly = trimmed.match(EVERY_INTERVAL_ONLY)
       const empty = !trimmed
       const intervalOnly = LEADING_INTERVAL.test(trimmed) || everyOnly !== null
-      if ((empty || intervalOnly) && isLoopDefaultPromptEnabled()) {
+      if (empty || intervalOnly) {
         const intervalToken = everyOnly
           ? everyMatchToInterval(everyOnly)
           : trimmed || DEFAULT_INTERVAL
         const loopFile = readLoopFile()
-        if (empty && isKairosLoopDynamicEnabled()) {
+        if (empty) {
           if (!isSystem) clearLoopEndedOnLoopStart()
           return [
             {
@@ -346,18 +286,12 @@ export function registerLoopSkill(): void {
         ]
       }
 
-      if (isKairosLoopDynamicEnabled()) {
-        if (!trimmed) {
-          return [{ type: 'text', text: dynamicUsage() }]
-        }
-        if (!isSystem) clearLoopEndedOnLoopStart()
-        return [{ type: 'text', text: buildDynamicPrompt(trimmed) }]
-      }
-
+      // gold: if (!t) return E() — unreachable after empty handled above
       if (!trimmed) {
-        return [{ type: 'text', text: fixedIntervalUsage() }]
+        return [{ type: 'text', text: dynamicUsage() }]
       }
-      return [{ type: 'text', text: buildFixedIntervalPrompt(trimmed) }]
+      if (!isSystem) clearLoopEndedOnLoopStart()
+      return [{ type: 'text', text: buildDynamicPrompt(trimmed) }]
     },
   })
 }

@@ -93,14 +93,14 @@ describe('registerLoopSkill', () => {
     expect(skill!.userInvocable).toBe(true)
   })
 
-  test('empty args → usage when jKe off', async () => {
+  test('empty args → autonomous dynamic default (248 jKe always-on)', async () => {
     const skill = asPrompt(getBundledSkills().find(s => s.name === 'loop')!)
     const blocks = await skill.getPromptForCommand('', {
       options: {},
     } as never)
     const text = textOf(blocks)
-    expect(text).toContain('Usage: /loop')
-    expect(text).toContain('defaults to 10m')
+    expect(text).toContain('autonomous default with dynamic pacing')
+    expect(text).toContain('<<autonomous-loop-dynamic>>')
   })
 
   test('jKe on + no interval → dynamic mode prompt', async () => {

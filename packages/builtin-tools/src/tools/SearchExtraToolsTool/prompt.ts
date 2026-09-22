@@ -9,6 +9,7 @@ import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '../EnterWorktreeTool/constants.js'
 import { SEND_USER_FILE_TOOL_NAME } from '../SendUserFileTool/prompt.js'
 import { isForkSubagentEnabled } from 'src/utils/forkSubagentGate.js'
+import { isKairosLoopDynamicEnabled } from 'src/utils/loopDynamic.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 
 export { SEARCH_EXTRA_TOOLS_TOOL_NAME } from './constants.js'
@@ -95,13 +96,6 @@ function isRemoteTriggerEntrypoint(): boolean {
 }
 
 /**
- * densable `jKe` — kairos dynamic loop gate (ScheduleWakeup always-load arm).
- */
-function isKairosLoopDynamicEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_dynamic', false)
-}
-
-/**
  * densable `tCo` / T3_+v3_|E3_+w3_ — ToolSearch prompt.
  * Model fetches schemas via this tool, then calls deferred tools **directly**
  * (API expands tool_reference). No ExecuteExtraTool indirection.
@@ -141,7 +135,7 @@ Query forms:
  * 5. Agent + fork subagent enabled → never defer
  * 6. Brief / SendUserFile → never defer
  * 7. PushNotification + remote_trigger entrypoint → never defer
- * 8. ScheduleWakeup + tengu_kairos_loop_dynamic → never defer
+ * 8. ScheduleWakeup + jKe (248 always-on) → never defer
  * 9. EnterWorktree + SESSION_KIND=bg → never defer
  * 10. else shouldDefer === true
  */
