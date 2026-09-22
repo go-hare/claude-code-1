@@ -1,10 +1,9 @@
 /**
- * densable 2.1.225 #2 — agentsTrustDecision / DTt early-outs.
+ * densable 2.1.248 #15 T() @191847905 sha=cf8fc01922dce784 —
+ * skip is IS_DEMO | CLAUBBIT only. Me(!1) is always false; CI does not skip.
  *
- * Bun mock.module is process-global: always spread pre-mock snapshots and
- * restore in afterAll. Incomplete cwd/settings/bootstrap stubs poison
- * pathGlob/cd/getDefaultOpusModel co-suites (getCwd() → undefined after
- * mockReset; getInitialSettings missing → settings.modelType TypeError).
+ * Bun mock.module is process-global: spread pre-mock snapshots and restore
+ * in afterAll (same contract as agentsTrust.225.test.ts).
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realConfig from '../../utils/config.js'
@@ -83,15 +82,10 @@ afterAll(() => {
   }))
 })
 
-import {
-  agentsTrustDecision,
-  agentsWorkspaceTrustNeedsReask,
-} from '../agentsTrust.js'
+import { agentsTrustDecision } from '../agentsTrust.js'
 
-describe('densable 2.1.225 agentsTrustDecision', () => {
+describe('densable 2.1.248 #15 agentsTrustDecision T()', () => {
   afterEach(() => {
-    // mockReset clears implementations → co-suites would see undefined getCwd.
-    // Re-seed defaults after clear.
     checkHasTrustDialogAcceptedMock.mockReset()
     checkHasTrustDialogAcceptedMock.mockReturnValue(false)
     getSessionTrustAcceptedMock.mockReset()
@@ -111,43 +105,21 @@ describe('densable 2.1.225 agentsTrustDecision', () => {
     delete process.env.CLAUBBIT
   })
 
-  // 2.1.248 #15 T() supersedes 225 NXv: CI is not a skip arm.
-  test('CI=1 does not skip (248 supersede: still ask/trusted)', () => {
+  test('CI=1 does not skip', () => {
     process.env.CI = '1'
-    checkHasTrustDialogAcceptedMock.mockReturnValue(false)
+    expect(agentsTrustDecision()).not.toBe('skip')
     expect(agentsTrustDecision()).toBe('ask')
     checkHasTrustDialogAcceptedMock.mockReturnValue(true)
-    getEnabledSettingSourcesMock.mockReturnValue([])
-    expect(agentsWorkspaceTrustNeedsReask()).toBe(false)
     expect(agentsTrustDecision()).toBe('trusted')
   })
 
-  test('trusted when dialog accepted and no reask surface', () => {
-    checkHasTrustDialogAcceptedMock.mockReturnValue(true)
-    getSessionTrustAcceptedMock.mockReturnValue(false)
-    isSandboxedSessionMock.mockReturnValue(false)
-    isBgSessionMock.mockReturnValue(false)
-    getEnabledSettingSourcesMock.mockReturnValue([])
-    expect(agentsWorkspaceTrustNeedsReask()).toBe(false)
-    expect(agentsTrustDecision()).toBe('trusted')
+  test('IS_DEMO still skip', () => {
+    process.env.IS_DEMO = '1'
+    expect(agentsTrustDecision()).toBe('skip')
   })
 
-  test('ask when dialog not accepted', () => {
-    checkHasTrustDialogAcceptedMock.mockReturnValue(false)
-    getEnabledSettingSourcesMock.mockReturnValue([])
-    expect(agentsTrustDecision()).toBe('ask')
-  })
-
-  test('DTt reask when projectSettings has allow rules', () => {
-    checkHasTrustDialogAcceptedMock.mockReturnValue(true)
-    getSessionTrustAcceptedMock.mockReturnValue(false)
-    isSandboxedSessionMock.mockReturnValue(false)
-    isBgSessionMock.mockReturnValue(false)
-    getEnabledSettingSourcesMock.mockReturnValue(['projectSettings'])
-    getSettingsForSourceMock.mockReturnValue({
-      permissions: { allow: ['Bash(*)'] },
-    })
-    expect(agentsWorkspaceTrustNeedsReask()).toBe(true)
-    expect(agentsTrustDecision()).toBe('ask')
+  test('CLAUBBIT still skip', () => {
+    process.env.CLAUBBIT = '1'
+    expect(agentsTrustDecision()).toBe('skip')
   })
 })

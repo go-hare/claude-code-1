@@ -58,7 +58,17 @@ import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/cons
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
-import { getToolsForDefaultPreset, parseToolPreset } from '../../tools.js'
+import {
+  restrictedAlwaysCodeRunningNames,
+  restrictedDenyToolNames,
+  restrictedNamedKeepSet,
+  RESTRICTED_BYPASS_REFUSE,
+} from '../restricted.js'
+import {
+  getAllBaseTools,
+  getToolsForDefaultPreset,
+  parseToolPreset,
+} from '../../tools.js'
 import {
   getFsImplementation,
   safeResolvePath,
@@ -1037,6 +1047,7 @@ export async function initializeToolPermissionContext({
   allowedToolsCli,
   disallowedToolsCli,
   baseToolsCli,
+  restricted = false,
   permissionMode,
   allowDangerouslySkipPermissions: _allowDangerouslySkipPermissions,
   addDirs,
@@ -1044,6 +1055,8 @@ export async function initializeToolPermissionContext({
   allowedToolsCli: string[]
   disallowedToolsCli: string[]
   baseToolsCli?: string[]
+  /** densable 2.1.248 #1 rrn `restricted:o=!1` */
+  restricted?: boolean
   permissionMode: PermissionMode
   allowDangerouslySkipPermissions: boolean
   addDirs: string[]
@@ -1073,6 +1086,28 @@ export async function initializeToolPermissionContext({
     parsedDisallowedToolsCli = [...parsedDisallowedToolsCli, ...toolsToDisallow]
   }
 
+  // official rrn: if(o)G=se([...G,...Nnt(Unt(),Fnt(U))]) into toolsNarrowing
+  let restrictedToolsNarrowing: string[] = []
+  if (restricted) {
+    const joined = (baseToolsCli ?? []).join(' ').trim()
+    const isPreset =
+      Boolean(parseToolPreset(joined)) ||
+      (baseToolsCli ?? []).some(t => t.startsWith('preset:'))
+    const namedKeep = isPreset
+      ? []
+      : parseToolListFromCLI(baseToolsCli ?? []).map(normalizeLegacyToolName)
+    const codeRunning = new Set([
+      ...getAllBaseTools()
+        .filter(tool => tool.enablesCodeExecution)
+        .map(tool => tool.name),
+      ...restrictedAlwaysCodeRunningNames(),
+    ])
+    restrictedToolsNarrowing = restrictedDenyToolNames(
+      codeRunning,
+      restrictedNamedKeepSet(namedKeep),
+    )
+  }
+
   const warnings: string[] = []
   const additionalWorkingDirectories = new Map<
     string,
@@ -1091,7 +1126,8 @@ export async function initializeToolPermissionContext({
     })
   }
 
-  const isBypassPermissionsModeAvailable = true
+  // leftover was always true; official Pe && !o — land only the !restricted bit
+  const isBypassPermissionsModeAvailable = !restricted
 
   // Load all permission rules from disk
   const rulesFromDisk = loadAllPermissionRulesFromDisk()
@@ -1156,9 +1192,15 @@ export async function initializeToolPermissionContext({
       mode: permissionMode,
       additionalWorkingDirectories,
       alwaysAllowRules: { cliArg: parsedAllowedToolsCli },
-      alwaysDenyRules: { cliArg: parsedDisallowedToolsCli },
+      alwaysDenyRules: {
+        cliArg: parsedDisallowedToolsCli,
+        ...(restrictedToolsNarrowing.length > 0
+          ? { toolsNarrowing: restrictedToolsNarrowing }
+          : {}),
+      },
       alwaysAskRules: {},
       isBypassPermissionsModeAvailable,
+      ...(restricted ? { restricted: true } : {}),
       mcpPermissionModeOverrides: {},
       chromeClassifierFloorEnabled,
       previewClassifierFloorEnabled,
@@ -1806,6 +1848,13 @@ export function setPermissionModeWithGuards(
   trigger?: string,
 ): SetPermissionModeResult {
   if (mode === 'bypassPermissions') {
+    // official dRe @185215800 — `if(t.restricted)return{ok:!1,error:RSe}`
+    if (context.restricted) {
+      return {
+        ok: false,
+        error: RESTRICTED_BYPASS_REFUSE,
+      }
+    }
     if (isBypassPermissionsModeDisabled()) {
       return {
         ok: false,

@@ -124,6 +124,8 @@ const PERMISSION_RULE_SOURCES = [
   'session',
   // densable Ryl — dynamic MCP tools[].permission_policy buckets
   'mcpServerPolicy',
+  // densable 2.1.248 #1 rrn toolsNarrowing
+  'toolsNarrowing',
 ] as const satisfies readonly PermissionRuleSource[]
 
 export function permissionRuleSourceDisplayString(
@@ -1720,7 +1722,8 @@ export async function deletePermissionRule({
       break
     }
     case 'cliArg':
-    case 'session': {
+    case 'session':
+    case 'toolsNarrowing': {
       // No action needed for in-memory sources - not persisted to disk
       break
     }

@@ -49,6 +49,7 @@ import { getToolResultsDir } from '../toolResultStorage.js'
 import { windowsPathToPosixPath } from '../windowsPaths.js'
 import type {
   PermissionDecision,
+  PermissionDenyDecision,
   PermissionResult,
 } from './PermissionResult.js'
 import type { PermissionRule, PermissionRuleSource } from './PermissionRule.js'
@@ -56,6 +57,7 @@ import { createReadRuleSuggestion } from './PermissionUpdate.js'
 import type { PermissionUpdate } from './PermissionUpdateSchema.js'
 import { getRuleByContentsForToolName } from './permissions.js'
 import { matchWildcardPattern } from './shellRuleMatching.js'
+import { restrictedFileToolOutsideMessage } from '../restricted.js'
 
 declare const MACRO: { VERSION: string }
 
@@ -780,6 +782,35 @@ export function pathInAllowedWorkingPath(
   )
 }
 
+/**
+ * official vi @181746129:
+ * `if(!r.restricted)return null;if(mb(e,r,t)||o().behavior==="allow")return null;
+ *  return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`}`
+ */
+export function denyRestrictedFileToolOutsideCwd(
+  path: string,
+  context: ToolPermissionContext,
+  precomputedPathsToCheck?: readonly string[],
+  internalAllow?: () => PermissionResult,
+): PermissionDenyDecision | null {
+  if (!context.restricted) return null
+  if (pathInAllowedWorkingPath(path, context, precomputedPathsToCheck)) {
+    return null
+  }
+  if (internalAllow?.().behavior === 'allow') return null
+  return {
+    behavior: 'deny',
+    message: restrictedFileToolOutsideMessage(
+      path,
+      allWorkingDirectories(context),
+    ),
+    decisionReason: {
+      type: 'other',
+      reason: '--restricted confines the file tools to the working directory.',
+    },
+  }
+}
+
 export function pathInWorkingPath(path: string, workingPath: string): boolean {
   const absolutePath = expandPath(path)
   const absoluteWorkingPath = expandPath(workingPath)
@@ -823,6 +854,7 @@ function rootPathForSource(source: PermissionRuleSource): string {
     case 'command':
     case 'session':
     case 'mcpServerPolicy':
+    case 'toolsNarrowing':
       return expandPath(getOriginalCwd())
     case 'userSettings':
     case 'policySettings':
@@ -1340,7 +1372,20 @@ export function checkReadPermissionForTool(
 
   // 7. Allow reads from internal harness paths (session-memory, plans, tool-results)
   const absolutePath = expandPath(path)
-  const internalReadResult = checkReadableInternalPath(absolutePath, input)
+  const internalReadResult = checkReadableInternalPath(
+    absolutePath,
+    input,
+    toolPermissionContext.restricted,
+  )
+  const restrictedReadDeny = denyRestrictedFileToolOutsideCwd(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    () => internalReadResult,
+  )
+  if (restrictedReadDeny) {
+    return restrictedReadDeny
+  }
   if (internalReadResult.behavior !== 'passthrough') {
     return internalReadResult
   }
@@ -1432,9 +1477,18 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   const internalEditResult = checkEditableInternalPath(
     absolutePathForEdit,
     input,
+    toolPermissionContext.restricted,
   )
   if (internalEditResult.behavior !== 'passthrough') {
     return internalEditResult
+  }
+  const restrictedWriteDeny = denyRestrictedFileToolOutsideCwd(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+  )
+  if (restrictedWriteDeny) {
+    return restrictedWriteDeny
   }
 
   // 1.6. Check for .claude/** allow rules BEFORE safety checks
@@ -1712,6 +1766,7 @@ export function generateSuggestions(
 export function checkEditableInternalPath(
   absolutePath: string,
   input: { [key: string]: unknown },
+  restricted?: boolean,
 ): PermissionResult {
   // SECURITY: Normalize path to prevent traversal bypasses via .. segments
   // This is defense-in-depth; individual helper functions also normalize
@@ -1789,7 +1844,8 @@ export function checkEditableInternalPath(
   }
 
   // Agent memory directory (for self-improving agents)
-  if (isAgentMemoryPath(normalizedPath)) {
+  // official uqe: `if(!o?.restricted&&u.endsWith(".md")&&RPe(u))`
+  if (!restricted && isAgentMemoryPath(normalizedPath)) {
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -1807,7 +1863,11 @@ export function checkEditableInternalPath(
   // so it gets NO special permission treatment here — writes go through normal
   // permission flow (step 5 → ask). SDK callers who want silent memory should
   // pass an allow rule for the override path.
-  if (!hasAutoMemPathOverride() && isAutoMemPath(normalizedPath)) {
+  if (
+    !restricted &&
+    !hasAutoMemPathOverride() &&
+    isAutoMemPath(normalizedPath)
+  ) {
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -1826,8 +1886,11 @@ export function checkEditableInternalPath(
   // applied → silent downgrade from auto mode. Matches the project-level
   // .claude/ only (not ~/.claude/) since launch.json is per-project.
   if (
+    !restricted &&
     normalizeCaseForComparison(normalizedPath) ===
-    normalizeCaseForComparison(join(getOriginalCwd(), '.claude', 'launch.json'))
+      normalizeCaseForComparison(
+        join(getOriginalCwd(), '.claude', 'launch.json'),
+      )
   ) {
     return {
       behavior: 'allow',
@@ -1849,6 +1912,7 @@ export function checkEditableInternalPath(
 export function checkReadableInternalPath(
   absolutePath: string,
   input: { [key: string]: unknown },
+  restricted?: boolean,
 ): PermissionResult {
   // SECURITY: Normalize path to prevent traversal bypasses via .. segments
   // This is defense-in-depth; individual helper functions also normalize
@@ -1873,7 +1937,8 @@ export function checkReadableInternalPath(
 
   // Project directory (for reading past session memories)
   // Path format: ~/.claude/projects/{sanitized-cwd}/...
-  if (isProjectDirPath(normalizedPath)) {
+  // official lV: `if(!o?.restricted&&fl(u))`
+  if (!restricted && isProjectDirPath(normalizedPath)) {
     return {
       behavior: 'allow',
       updatedInput: input,

@@ -1,6 +1,7 @@
 import { z } from 'zod/v4'
 import { lazySchema } from '../../utils/lazySchema.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
+import type { RemoteManagedSettingsErrorKind } from './loadStatus.js'
 
 /**
  * Schema for the remotely managed settings response.
@@ -28,4 +29,7 @@ export type RemoteManagedSettingsFetchResult = {
   checksum?: string
   error?: string
   skipRetry?: boolean // If true, don't retry on failure (e.g., auth errors)
+  /** WTt errorKind — set on failure. */
+  errorKind?: RemoteManagedSettingsErrorKind
+  httpStatus?: number
 }

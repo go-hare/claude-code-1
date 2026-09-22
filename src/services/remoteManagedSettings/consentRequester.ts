@@ -5,6 +5,7 @@
  * surface instead of opening a second standalone render (236 #11).
  */
 import { Stream } from '../../utils/stream.js'
+import { createSignal } from '../../utils/signal.js'
 import { withTimeout } from '../../utils/sleep.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { logEvent } from '../analytics/index.js'
@@ -63,6 +64,29 @@ class ManagedSettingsConsentRegistry {
   replRequester: ManagedSettingsRequester | null = null
   requesterWaiters: Array<(requester: ManagedSettingsRequester) => void> = []
   pendingReview: PendingReview | null = null
+  /** densable G 248 — login handoff */
+  noConsentSurface = false
+  startupConsentRelease: (() => void) | null = null
+  consentNeededRelease: (() => void | Promise<void>) | null = null
+  consentHandoffHolds = new Set<symbol>()
+  consentHandoffSignal = createSignal()
+  consentHandoffRevealActive = false
+
+  fireStartupConsentRelease(): void {
+    const release = this.startupConsentRelease
+    if (release) {
+      this.startupConsentRelease = null
+      release()
+    }
+  }
+
+  async fireConsentNeededRelease(): Promise<void> {
+    const release = this.consentNeededRelease
+    if (release) {
+      this.consentNeededRelease = null
+      await release()
+    }
+  }
 
   registerRequester(requester: ManagedSettingsRequester | null): void {
     this.replRequester = requester
@@ -130,6 +154,70 @@ export function getManagedSettingsConsentRegistry(): ManagedSettingsConsentRegis
   return registry
 }
 
+/** densable DKt */
+export function isConsentHandoffRevealActive(): boolean {
+  return registry.consentHandoffRevealActive
+}
+
+/** densable Ixt */
+export function isConsentHandoffHeld(): boolean {
+  return registry.consentHandoffHolds.size > 0
+}
+
+/** densable PKt */
+export function holdConsentHandoff(): () => void {
+  const token = Symbol('consent-handoff-hold')
+  registry.consentHandoffHolds.add(token)
+  if (registry.consentHandoffHolds.size === 1) {
+    registry.consentHandoffSignal.emit()
+  }
+  return () => {
+    if (
+      registry.consentHandoffHolds.delete(token) &&
+      registry.consentHandoffHolds.size === 0
+    ) {
+      registry.consentHandoffSignal.emit()
+    }
+  }
+}
+
+/** densable xHn */
+export function subscribeConsentHandoff(listener: () => void): () => void {
+  return registry.consentHandoffSignal.subscribe(listener)
+}
+
+/** densable CHn */
+export function registerConsentNeededRelease(
+  release: () => void | Promise<void>,
+): () => void {
+  registry.consentNeededRelease = release
+  return () => {
+    if (registry.consentNeededRelease === release) {
+      registry.consentNeededRelease = null
+    }
+  }
+}
+
+/**
+ * densable zI — yield one macrotask so /login JSX unmounts before review.
+ */
+export function yieldConsentMacrotask(): Promise<void> {
+  if (typeof setImmediate === 'function') {
+    return new Promise(resolve => setImmediate(resolve))
+  }
+  if (typeof MessageChannel === 'function') {
+    return new Promise(resolve => {
+      const channel = new MessageChannel()
+      channel.port1.onmessage = () => {
+        channel.port1.close()
+        resolve()
+      }
+      channel.port2.postMessage(null)
+    })
+  }
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
 /** densable cMl(e) — REPL mount/unmount */
 export function registerManagedSettingsRequester(
   requester: ManagedSettingsRequester | null,
@@ -172,4 +260,10 @@ export function resetManagedSettingsConsentRegistryForTests(): void {
   registry.replRequester = null
   registry.requesterWaiters = []
   registry.pendingReview = null
+  registry.noConsentSurface = false
+  registry.startupConsentRelease = null
+  registry.consentNeededRelease = null
+  registry.consentHandoffHolds.clear()
+  registry.consentHandoffSignal.clear()
+  registry.consentHandoffRevealActive = false
 }

@@ -10,6 +10,7 @@ import {
 } from '../../utils/git.js'
 import { parseSettingsFile } from '../../utils/settings/settings.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
+import { truncateCodeUnitsSafe } from '../../utils/stringUtils.js'
 import { hasUnsafePathChars } from './cdPermission.js'
 
 const MAX_DISCLOSURE_ENTRY_LENGTH = 200
@@ -20,13 +21,17 @@ const MAX_DISCLOSURE_ENTRY_LENGTH = 200
  * newlines or escape sequences in an allow rule or additionalDirectories entry
  * and restructure the very dialog that decides whether to trust it. Same
  * smuggling UNSAFE_PATH_CHARS already blocks for the directory argument.
+ *
+ * densable 2.1.248 #28 `d`: long entries use leftover `de` /
+ * `truncateCodeUnitsSafe` (not `slice`) so a mid-emoji cut cannot leave a
+ * lone high surrogate. 247 `H` still sliced.
  */
 function safeDisclosureEntry(value: string): string {
   if (hasUnsafePathChars(value)) {
     return '<unprintable entry>'
   }
   return value.length > MAX_DISCLOSURE_ENTRY_LENGTH
-    ? `${value.slice(0, MAX_DISCLOSURE_ENTRY_LENGTH)}…`
+    ? `${truncateCodeUnitsSafe(value, MAX_DISCLOSURE_ENTRY_LENGTH)}…`
     : value
 }
 

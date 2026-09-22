@@ -1,12 +1,14 @@
 /**
  * densable 2.1.225 NXv / $Xv — workspace trust gate for `claude agents`.
+ * 2.1.248 #15 T() @191847905 sha=cf8fc01922dce784 — skip is IS_DEMO | CLAUBBIT
+ * only. Me(!1) is always false (process.env.CI is not in T).
  *
  * Gold:
- *   NXv/agentsTrustDecision:
- *     CI | IS_DEMO | CLAUBBIT → "skip"
+ *   T/agentsTrustDecision:
+ *     IS_DEMO | CLAUBBIT → "skip"
  *     checkHasTrustDialogAccepted() && !DTt() → "trusted"
  *     else → "ask"
- *   $Xv/ensureAgentsWorkspaceTrust(root, decision):
+ *   B/$Xv/ensureAgentsWorkspaceTrust(root, decision):
  *     skip: if !CLAUBBIT && trusted → setSessionTrustAccepted + prime policy
  *     trusted: setSessionTrustAccepted + prime
  *     ask: render TrustDialog, then setSessionTrustAccepted + clearPluginCache + resetGrowthBook
@@ -71,9 +73,9 @@ export function agentsWorkspaceTrustNeedsReask(): boolean {
   return sourceHasTrustSensitivePermissions('projectSettings') || sourceHasTrustSensitivePermissions('localSettings');
 }
 
-/** densable NXv */
+/** densable NXv / 248 T() — CI is not a skip arm */
 export function agentsTrustDecision(): AgentsTrustDecision {
-  if (isEnvTruthy(process.env.CI) || isEnvTruthy(process.env.IS_DEMO) || isEnvTruthy(process.env.CLAUBBIT)) {
+  if (isEnvTruthy(process.env.IS_DEMO) || isEnvTruthy(process.env.CLAUBBIT)) {
     return 'skip';
   }
   // densable: rp() && !DTt() → trusted

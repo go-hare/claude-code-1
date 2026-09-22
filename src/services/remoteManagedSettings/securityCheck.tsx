@@ -6,6 +6,7 @@ import {
   hasDangerousSettings,
   hasDangerousSettingsChanged,
 } from '../../components/ManagedSettingsSecurityDialog/utils.js';
+import { isWithinRefuseWindow } from '../../hooks/useRefuseWithin.js';
 import { KeybindingSetup } from '../../keybindings/KeybindingProviderSetup.js';
 import { AppStateProvider } from '../../state/AppState.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
@@ -16,6 +17,7 @@ import { logEvent } from '../analytics/index.js';
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js';
 import {
   getManagedSettingsConsentRegistry,
+  holdConsentHandoff,
   waitForManagedSettingsRequester,
   type ManagedSettingsConsentResult,
 } from './consentRequester.js';
@@ -54,6 +56,11 @@ export async function showManagedSettingsSecurityDialog(
 ): Promise<'approved' | 'rejected'> {
   return new Promise<'approved' | 'rejected'>((resolve, reject) => {
     let answered = false;
+    // densable qEt `n` / `a()` — refuse until mounted and outside ed()
+    let mountedAt: number | null = null;
+    function accepts(): boolean {
+      return mountedAt !== null && !isWithinRefuseWindow(mountedAt);
+    }
     void (async () => {
       const { rerender, unmount, waitUntilExit } = await render(
         <AppStateProvider>
@@ -61,7 +68,12 @@ export async function showManagedSettingsSecurityDialog(
             <ManagedSettingsSecurityDialog
               key="managed-settings-security"
               settings={settings}
+              reveal="default"
+              accepts={accepts}
               onAccept={() => {
+                if (!accepts()) {
+                  return false;
+                }
                 answered = true;
                 void import('../../utils/bgNeedsInputBridge.js').then(m => {
                   m.emitBgNeedsInput(null, 'managed-settings');
@@ -74,6 +86,9 @@ export async function showManagedSettingsSecurityDialog(
                 }
               }}
               onReject={() => {
+                if (!accepts()) {
+                  return false;
+                }
                 answered = true;
                 void import('../../utils/bgNeedsInputBridge.js').then(m => {
                   m.emitBgNeedsInput(null, 'managed-settings');
@@ -90,6 +105,7 @@ export async function showManagedSettingsSecurityDialog(
         </AppStateProvider>,
         getBaseRenderOptions(false),
       );
+      mountedAt = Date.now();
       await waitUntilExit();
       if (!answered) {
         const err = new Error('Managed-settings consent dialog exited without an answer');
@@ -136,17 +152,46 @@ export async function checkManagedSettingsSecurity(
 
   const reg = getManagedSettingsConsentRegistry();
   if (reg.replRequester) {
+    // densable ee — login handoff: fire CHn, review with DKt
+    if (reg.consentNeededRelease) {
+      let hold: (() => void) | null = null;
+      try {
+        hold = holdConsentHandoff();
+        await reg.fireConsentNeededRelease();
+        const requester = reg.replRequester;
+        if (requester) {
+          reg.consentHandoffRevealActive = true;
+          return await reg.review(requester, newSettings);
+        }
+        if (instances.has(process.stdout)) {
+          const waited = await waitForManagedSettingsRequester();
+          if (waited) {
+            reg.consentHandoffRevealActive = true;
+            return await reg.review(waited, newSettings);
+          }
+        }
+        return 'deferred_no_consent_surface';
+      } finally {
+        reg.consentHandoffRevealActive = false;
+        hold?.();
+      }
+    }
     return reg.review(reg.replRequester, newSettings);
   }
 
+  if (reg.noConsentSurface) {
+    return 'deferred_no_consent_surface';
+  }
+
   if (instances.has(process.stdout)) {
+    reg.fireStartupConsentRelease();
     const requester = await waitForManagedSettingsRequester();
     if (requester) {
       return reg.review(requester, newSettings);
     }
   }
 
-  if (showSecurityDialog === undefined) {
+  if (showSecurityDialog === undefined || reg.noConsentSurface) {
     return 'deferred_no_consent_surface';
   }
 

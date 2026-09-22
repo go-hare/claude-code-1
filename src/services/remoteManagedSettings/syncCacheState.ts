@@ -21,8 +21,8 @@
  * subsequent read hits the cached bool instead of re-running the auth chain.
  *
  * densable 2.1.238 OBu / dD — sessionCache + verifiedPayload + consentedPayload
- * (Qxn triple-pointer). Does NOT invent storageV5 backendView / resetEpoch /
- * helper attestation (MN_).
+ * (Qxn triple-pointer). densable 2.1.248 xt.backendView slot for Ut/_Ke
+ * (RemoteSettingsBackendView) — see remoteSettingsBackendView.ts.
  */
 
 import { join } from 'path'
@@ -34,6 +34,7 @@ import { SETTINGS_KEY_ALIASES } from '../../utils/settings/settingsAliases.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonParse } from '../../utils/slowOperations.js'
 import { getRemoteSettingsPath } from '../../utils/residualFinalEnvGates.js'
+import type { RemoteSettingsBackendView } from '../../utils/settings/remoteSettingsBackendView.js'
 
 const SETTINGS_FILENAME = 'remote-settings.json'
 
@@ -41,6 +42,8 @@ let sessionCache: SettingsJson | null = null
 let verifiedPayload: SettingsJson | null = null
 let consentedPayload: SettingsJson | null = null
 let eligible: boolean | undefined
+/** Official xt.backendView — Ut instance while storage prime is live. */
+let backendView: RemoteSettingsBackendView | undefined
 
 export type ReplaceSessionCacheOptions = {
   /** densable RMr(..., {verified:true}) — marks this object as the verified pointer. */
@@ -65,8 +68,7 @@ export function setSessionCache(
  * densable q8s portable: auto-consent from disk only when there is no
  * policy-helper / extraKnownMarketplaces surface (canonical or nxn alias
  * `additionalMarketplaces`). Full q8s hashes helpers against MN_()
- * attestation — tip has no backendView, so a helper surface does NOT
- * auto-consent (do not invent helper attestation).
+ * attestation — auto-consent still disk-surface only (do not invent MN_).
  */
 function shouldAutoConsentFromDisk(settings: SettingsJson): boolean {
   const rec = settings as SettingsJson & {
@@ -106,6 +108,25 @@ export function resetSyncCache(): void {
   verifiedPayload = null
   consentedPayload = null
   eligible = undefined
+  backendView = undefined
+}
+
+/** densable xt.sessionCache read for Ut/uo host bag. */
+export function getSessionCache(): SettingsJson | null {
+  return sessionCache
+}
+
+/** densable xt.backendView slot — owned by remoteSettingsBackendView host. */
+export function getRemoteSettingsBackendViewSlot():
+  | RemoteSettingsBackendView
+  | undefined {
+  return backendView
+}
+
+export function setRemoteSettingsBackendViewSlot(
+  view: RemoteSettingsBackendView | undefined,
+): void {
+  backendView = view
 }
 
 export function setEligibility(v: boolean): boolean {

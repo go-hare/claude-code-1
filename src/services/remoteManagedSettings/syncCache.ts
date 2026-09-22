@@ -7,7 +7,6 @@
  * mirror alongside the leaf's state.
  */
 
-import { CLAUDE_AI_INFERENCE_SCOPE } from '../../constants/oauth.js'
 import {
   getAnthropicApiKeyWithSource,
   getClaudeAIOAuthTokens,
@@ -17,6 +16,11 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from '../../utils/model/providers.js'
 
+import { isGatewayAuthPinned } from '../../utils/gatewayEnv.js'
+import {
+  recordEligibility,
+  resetRemoteManagedSettingsLoadStatus,
+} from './loadStatus.js'
 import {
   resetSyncCache as resetLeafCache,
   setEligibility,
@@ -27,6 +31,15 @@ let cached: boolean | undefined
 export function resetSyncCache(): void {
   cached = undefined
   resetLeafCache()
+  resetRemoteManagedSettingsLoadStatus()
+}
+
+function memoEligibility(
+  eligible: boolean,
+  reason?: Parameters<typeof recordEligibility>[1],
+): boolean {
+  recordEligibility(eligible, reason)
+  return (cached = setEligibility(eligible))
 }
 
 /**
@@ -55,28 +68,36 @@ export function isRemoteManagedSettingsEligible(): boolean {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
     if (isMockRemoteSettingsEnabled()) {
-      return (cached = setEligibility(true))
+      return memoEligibility(true)
     }
   } catch {
     // densable optional
   }
 
+  // _P: gateway pin before 3p. Unpinned → ineligible (r: unpinned_gateway).
+  if (getAPIProvider() === 'gateway') {
+    const pinned = isGatewayAuthPinned()
+    return memoEligibility(pinned, pinned ? undefined : 'unpinned_gateway')
+  }
+
   // 3p provider users should not hit the settings endpoint
   if (getAPIProvider() !== 'firstParty') {
-    return (cached = setEligibility(false))
+    return memoEligibility(false, 'third_party_provider')
   }
 
   // Custom base URL users should not hit the settings endpoint
   if (!isFirstPartyAnthropicBaseUrl()) {
-    return (cached = setEligibility(false))
+    return memoEligibility(false, 'custom_base_url')
   }
 
-  // Cowork runs in a VM with its own permission model; server-managed settings
-  // (designed for CLI/CCD) don't apply there, and per-surface settings don't
-  // exist yet. MDM/file-based managed settings still apply via settings.ts —
-  // those require physical deployment and a different IT intent.
-  if (process.env.CLAUDE_CODE_ENTRYPOINT === 'local-agent') {
-    return (cached = setEligibility(false))
+  // _P sandboxed_entrypoint: local-agent / remote_cowork / claude-coworker*
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  if (
+    entrypoint === 'local-agent' ||
+    entrypoint === 'remote_cowork' ||
+    entrypoint?.startsWith('claude-coworker')
+  ) {
+    return memoEligibility(false, 'sandboxed_entrypoint')
   }
 
   // Check OAuth first: most Claude.ai users have no API key in the keychain.
@@ -93,16 +114,16 @@ export function isRemoteManagedSettingsEligible(): boolean {
   // settings.ts falls through to MDM/file when remote is empty, so ineligible
   // orgs pay one round-trip and nothing else changes.
   if (tokens?.accessToken && tokens.subscriptionType === null) {
-    return (cached = setEligibility(true))
+    return memoEligibility(true)
   }
 
+  // _P: enterprise/team oauth is eligible (scope check is ISe-only).
   if (
     tokens?.accessToken &&
-    tokens.scopes?.includes(CLAUDE_AI_INFERENCE_SCOPE) &&
     (tokens.subscriptionType === 'enterprise' ||
       tokens.subscriptionType === 'team')
   ) {
-    return (cached = setEligibility(true))
+    return memoEligibility(true)
   }
 
   // Console users (API key) are eligible if we can get the actual key
@@ -114,11 +135,14 @@ export function isRemoteManagedSettingsEligible(): boolean {
       skipRetrievingKeyFromApiKeyHelper: true,
     })
     if (apiKey) {
-      return (cached = setEligibility(true))
+      return memoEligibility(true)
     }
   } catch {
     // No API key available (e.g., CI/test environment)
   }
 
-  return (cached = setEligibility(false))
+  return memoEligibility(
+    false,
+    tokens?.accessToken ? 'unsupported_subscription' : 'no_auth',
+  )
 }

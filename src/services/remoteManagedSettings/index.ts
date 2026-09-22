@@ -45,6 +45,10 @@ import {
   getConsentIdentity,
   recordOrgConsent,
 } from './orgConsent.js'
+import {
+  classifyRemoteManagedSettingsErrorKind,
+  recordRemoteManagedSettingsFetchOutcome,
+} from './loadStatus.js'
 import { isRemoteManagedSettingsEligible, resetSyncCache } from './syncCache.js'
 import {
   getRemoteManagedSettingsSyncFromCache,
@@ -276,6 +280,7 @@ async function fetchRemoteManagedSettings(
       return {
         success: false,
         error: `Authentication required for remote settings`,
+        errorKind: 'no_auth_available',
         skipRetry: true,
       }
     }
@@ -372,6 +377,7 @@ async function fetchRemoteManagedSettings(
       return {
         success: false,
         error: 'Invalid remote settings format',
+        errorKind: 'parse_error',
       }
     }
 
@@ -384,6 +390,7 @@ async function fetchRemoteManagedSettings(
       return {
         success: false,
         error: 'Invalid settings structure',
+        errorKind: 'invalid_settings',
       }
     }
 
@@ -399,20 +406,42 @@ async function fetchRemoteManagedSettings(
       // 404 means no remote settings configured
       return { success: true, settings: {}, checksum: '' }
     }
+    const classified = classifyRemoteManagedSettingsErrorKind({
+      kind,
+      status,
+      message,
+    })
     switch (kind) {
       case 'auth':
         // Auth errors (401, 403) should not be retried - the API key doesn't have access
         return {
           success: false,
           error: 'Not authorized for remote settings',
+          errorKind: classified.errorKind,
+          httpStatus: classified.httpStatus,
           skipRetry: true,
         }
       case 'timeout':
-        return { success: false, error: 'Remote settings request timeout' }
+        return {
+          success: false,
+          error: 'Remote settings request timeout',
+          errorKind: 'timeout',
+          httpStatus: classified.httpStatus,
+        }
       case 'network':
-        return { success: false, error: 'Cannot connect to server' }
+        return {
+          success: false,
+          error: 'Cannot connect to server',
+          errorKind: 'network_error',
+          httpStatus: classified.httpStatus,
+        }
       default:
-        return { success: false, error: message }
+        return {
+          success: false,
+          error: message,
+          errorKind: classified.errorKind,
+          httpStatus: classified.httpStatus,
+        }
     }
   }
 }
@@ -478,10 +507,25 @@ type FetchAndLoadOptions = {
  * Internal function that handles the full load/fetch logic
  * Fails open - returns null if fetch fails and no cache exists
  */
+function failureOf(result: RemoteManagedSettingsFetchResult): {
+  errorKind: NonNullable<RemoteManagedSettingsFetchResult['errorKind']>
+  httpStatus?: number
+} {
+  const errorKind = result.errorKind ?? 'unknown_error'
+  if (result.httpStatus !== undefined) {
+    return { errorKind, httpStatus: result.httpStatus }
+  }
+  return { errorKind }
+}
+
 async function fetchAndLoadRemoteManagedSettings(
   options?: FetchAndLoadOptions,
 ): Promise<SettingsJson | null> {
   if (!isRemoteManagedSettingsEligible()) {
+    recordRemoteManagedSettingsFetchOutcome({
+      fetchSucceeded: true,
+      settings: null,
+    })
     return null
   }
 
@@ -505,11 +549,27 @@ async function fetchAndLoadRemoteManagedSettings(
           'Remote settings: Using stale cache after fetch failure',
         )
         setSessionCache(cachedSettings)
+        recordRemoteManagedSettingsFetchOutcome({
+          fetchSucceeded: false,
+          settings: cachedSettings,
+          failure: failureOf(result),
+        })
         return cachedSettings
       }
       // No cache available - fail open, continue without remote settings
+      recordRemoteManagedSettingsFetchOutcome({
+        fetchSucceeded: false,
+        settings: null,
+        failure: failureOf(result),
+      })
       return null
     }
+
+    recordRemoteManagedSettingsFetchOutcome({
+      fetchSucceeded: true,
+      settings:
+        result.settings === null ? cachedSettings : result.settings || {},
+    })
 
     // Handle 304 Not Modified - cached settings are still valid
     // densable RMr(r, {verified:true}) — consentedPayload stays (no W8s).
@@ -602,10 +662,20 @@ async function fetchAndLoadRemoteManagedSettings(
     if (cachedSettings) {
       logForDebugging('Remote settings: Using stale cache after error')
       setSessionCache(cachedSettings)
+      recordRemoteManagedSettingsFetchOutcome({
+        fetchSucceeded: false,
+        settings: cachedSettings,
+        failure: { errorKind: 'unknown_error' },
+      })
       return cachedSettings
     }
 
     // No cache available - fail open, continue without remote settings
+    recordRemoteManagedSettingsFetchOutcome({
+      fetchSucceeded: false,
+      settings: null,
+      failure: { errorKind: 'unknown_error' },
+    })
     return null
   }
 }
