@@ -63,8 +63,8 @@ export function getPersistenceSuppressCause(
   if (getNodeEnv() === 'test' && !allowTestPersistence) {
     return 'test_env'
   }
-  // densable ere() — bootstrap sessionPersistenceDisabled only.
-  // Local isSessionPersistenceDisabled already returns false under FORCE.
+  // densable ere() — bootstrap sessionPersistenceDisabled only (qC).
+  // FORCE is official Kce/x0t nested_marker only — not in qC.
   if (isSessionPersistenceDisabled()) {
     return 'explicit_disable'
   }

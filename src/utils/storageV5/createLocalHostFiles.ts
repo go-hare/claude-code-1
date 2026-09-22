@@ -452,6 +452,7 @@ function statKindDk(e: {
   mtimeMs: number | bigint
   mode: number | bigint
   nlink: number | bigint
+  uid?: number | bigint
   ino?: number | bigint
   dev?: number | bigint
 }): Record<string, unknown> {
@@ -468,6 +469,8 @@ function statKindDk(e: {
     mtimeMs: Number(e.mtimeMs),
     mode: Number(e.mode),
     nlink: Number(e.nlink),
+    // Official hostFiles.stat exposes uid for settingsPrime ownership probe (y @179535953).
+    ...(e.uid !== undefined && { uid: Number(e.uid) }),
     ...(e.ino !== undefined &&
       e.dev !== undefined && {
         objectId: `${e.dev.toString()}:${e.ino.toString()}`,

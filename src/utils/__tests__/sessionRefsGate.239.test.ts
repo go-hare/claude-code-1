@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { getBootstrapSession } from '../sessionHost.js'
 import {
   SessionRefsGate,
+  getSessionRefsGate,
   isSessionRefsSyncEnabled,
   latchCcrSessionId,
   resetSessionRefsGateForTests,
@@ -66,5 +68,9 @@ describe('leftover 239 Fhr / E4s sessionRefsGate', () => {
     expect(gate.syncEnabled()).toBeUndefined()
     expect(gate.latchSyncEnabled(true)).toBe(true)
     expect(isSessionRefsSyncEnabled(gate, {})).toBe(true)
+  })
+
+  test('getSessionRefsGate is n().sessionRefsGate', () => {
+    expect(getSessionRefsGate()).toBe(getBootstrapSession().sessionRefsGate)
   })
 })

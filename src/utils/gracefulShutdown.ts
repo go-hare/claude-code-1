@@ -35,7 +35,10 @@ import {
   logEvent,
 } from '../services/analytics/index.js'
 import type { AppState } from '../state/AppState.js'
-import { runCleanupFunctions } from './cleanupRegistry.js'
+import {
+  CLEANUP_DRAIN_TIMEOUT_MS,
+  runCleanupFunctions,
+} from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { isEnvTruthy } from './envUtils.js'
@@ -62,7 +65,8 @@ import { profileReport } from './startupProfiler.js'
  * 3. Failing to disable leaves the terminal in a broken state
  */
 /* eslint-disable custom-rules/no-sync-fs -- must be sync to flush before process.exit */
-function cleanupTerminalModes(): void {
+/** Official Nj — Dcn()?.cleanupTerminalModes() on leftover `_G`. */
+export function cleanupTerminalModes(): void {
   if (!process.stdout.isTTY) {
     return
   }
@@ -498,6 +502,11 @@ export function isShuttingDown(): boolean {
   return shutdownInProgress
 }
 
+/** Official qje — tb().claimShutdown() on leftover `_G`. */
+export function claimShutdown(): void {
+  shutdownInProgress = true
+}
+
 /** Reset shutdown state - only for use in tests */
 export function resetShutdownState(): void {
   shutdownInProgress = false
@@ -633,12 +642,13 @@ export async function gracefulShutdown(
       }
     })()
 
+    // densable: race mEe() against tde=2000 (CLEANUP_DRAIN_TIMEOUT_MS)
     await Promise.race([
       cleanupPromise,
       new Promise((_, reject) => {
         cleanupTimeoutId = setTimeout(
           rej => rej(new CleanupTimeoutError()),
-          2000,
+          CLEANUP_DRAIN_TIMEOUT_MS,
           reject,
         )
       }),

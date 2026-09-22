@@ -15,7 +15,7 @@ import { dirname, join } from 'path'
 import { getSessionId } from '../bootstrap/state.js'
 import { createBufferedWriter } from './bufferedWriter.js'
 import { CACHE_PATHS } from './cachePaths.js'
-import { registerCleanup } from './cleanupRegistry.js'
+import { registerCleanup, registerPreExitFlush } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { getFsImplementation } from './fsOperations.js'
 import { attachErrorLogSink, dateToFilename } from './log.js'
@@ -63,6 +63,16 @@ function createJsonlWriter(options: {
 const logWriters = new Map<string, JsonlWriter>()
 
 /**
+ * Official TIn.flush / flushBeforeExit — drain all buffered writers.
+ * Leftover: sync writers (no pendingWrites.fm invent); Vk registers this.
+ */
+async function flushAllLogWriters(): Promise<void> {
+  for (const writer of logWriters.values()) {
+    writer.flush()
+  }
+}
+
+/**
  * Flush all buffered log writers. Used for testing.
  * @internal
  */
@@ -104,7 +114,9 @@ function getLogWriter(path: string): JsonlWriter {
       maxBufferSize: 50,
     })
     logWriters.set(path, writer)
+    // Official TIn.writerFor: Et(dispose+settle) + Vk(flushBeforeExit)
     registerCleanup(async () => writer?.dispose())
+    registerPreExitFlush(flushAllLogWriters)
   }
   return writer
 }

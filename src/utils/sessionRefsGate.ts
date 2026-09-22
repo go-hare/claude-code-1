@@ -2,46 +2,23 @@
  * leftover 2.1.239 E4s / czt / vtw / Fhr — session-refs sync latch.
  *
  * Official czt latches CLAUDE_CODE_SESSION_ID when Mf(id)!==id
- * (Mf strips `session_`/`cse_`). CLI has no session-host object — E4s
- * is a process singleton (forks share root in leftover).
+ * (Mf strips `session_`/`cse_`). Leftover wrappers go through
+ * n().sessionRefsGate (Official Te @178530131).
  */
 
-/** leftover 239 E4s */
-export class SessionRefsGate {
-  #ccrSessionID: string | undefined
-  #syncEnabled: boolean | undefined
+import { getBootstrapSession } from 'src/utils/sessionHost.js'
+import { SessionRefsGate } from './sessionSlots.js'
 
-  ccrSessionID(): string | undefined {
-    return this.#ccrSessionID
-  }
-
-  latchCcrSessionID(id: string): void {
-    this.#ccrSessionID = id
-  }
-
-  syncEnabled(): boolean | undefined {
-    return this.#syncEnabled
-  }
-
-  latchSyncEnabled(value: boolean): boolean {
-    this.#syncEnabled = value
-    return value
-  }
-
-  reset(): void {
-    this.#ccrSessionID = undefined
-    this.#syncEnabled = undefined
-  }
-}
-
-const gate = new SessionRefsGate()
+export { SessionRefsGate }
 
 export function getSessionRefsGate(): SessionRefsGate {
-  return gate
+  return getBootstrapSession().sessionRefsGate
 }
 
 export function resetSessionRefsGateForTests(): void {
-  gate.reset()
+  const gate = getBootstrapSession().sessionRefsGate
+  gate.latchCcrSessionID(undefined)
+  gate.latchSyncEnabled(undefined)
 }
 
 /** leftover 239 Mf — strip cse_/session_ prefix. */
@@ -51,7 +28,7 @@ export function stripCcrSessionPrefix(id: string): string {
 
 /** leftover 239 czt */
 export function latchCcrSessionId(
-  sessionGate: SessionRefsGate = gate,
+  sessionGate: SessionRefsGate = getBootstrapSession().sessionRefsGate,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   if (sessionGate.ccrSessionID() === undefined) {
@@ -60,12 +37,12 @@ export function latchCcrSessionId(
       sessionGate.latchCcrSessionID(raw)
     }
   }
-  return sessionGate.ccrSessionID()
+  return sessionGate.ccrSessionID() as string | undefined
 }
 
 /** leftover 239 vtw */
 export function hasLatchedCcrSession(
-  sessionGate: SessionRefsGate = gate,
+  sessionGate: SessionRefsGate = getBootstrapSession().sessionRefsGate,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return latchCcrSessionId(sessionGate, env) !== undefined
@@ -73,13 +50,13 @@ export function hasLatchedCcrSession(
 
 /** leftover 239 Fhr */
 export function isSessionRefsSyncEnabled(
-  sessionGate: SessionRefsGate = gate,
+  sessionGate: SessionRefsGate = getBootstrapSession().sessionRefsGate,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const latched = sessionGate.syncEnabled()
-  if (latched !== undefined) return latched
+  if (latched !== undefined) return latched as boolean
   return sessionGate.latchSyncEnabled(
     Boolean(env.CLAUDE_CODE_SYNC_SESSION_REFS) &&
       hasLatchedCcrSession(sessionGate, env),
-  )
+  ) as boolean
 }

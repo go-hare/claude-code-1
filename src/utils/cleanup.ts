@@ -1,7 +1,7 @@
 import type { Dirent } from 'fs'
 import * as fs from 'fs/promises'
 import { homedir } from 'os'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
 import {
   type BgJobState,
   getJobsBaseDir,
@@ -23,9 +23,15 @@ import { logError } from './log.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
 import { cleanupOldPastes } from './pasteStore.js'
 import { getProjectsDir } from './sessionPaths.js'
+import {
+  LITE_READ_BUF_SIZE,
+  readHeadAndTail,
+} from './sessionStoragePortable.js'
 import { getSettingsWithAllErrors } from './settings/allErrors.js'
 import {
+  getSecuritySensitiveSetting,
   getSettings_DEPRECATED,
+  getSettingsForSource,
   rawSettingsContainsKey,
 } from './settings/settings.js'
 import { TOOL_RESULTS_SUBDIR } from './toolResultStorage.js'
@@ -35,6 +41,261 @@ import {
 } from './worktree.js'
 
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30
+
+/**
+ * densable `$te` — keys that block the retention sweep when settings
+ * errors make their value unknowable or explicitly set-but-invalid.
+ */
+export const CLEANUP_PERIOD_SETTINGS_KEYS = [
+  'cleanupPeriodDays',
+  'desktopSessionCleanupPeriodDays',
+] as const
+
+/** densable `Ce` — desktop ceiling default; 0 = no ceiling. */
+const DEFAULT_DESKTOP_SESSION_CLEANUP_PERIOD_DAYS = 0
+
+/** densable `lyn` — parent-managed errors are ignored by `xe`. */
+const PARENT_MANAGED_SETTINGS_FILE = 'parent managed settings'
+
+/**
+ * densable `Ae` — desktop-host transcript ceiling cutoff.
+ * `tx("desktopSessionCleanupPeriodDays")[0] ?? Ce`; 0 → null (no ceiling).
+ */
+export function getDesktopSessionCleanupCutoff(): Date | null {
+  const days =
+    getSecuritySensitiveSetting('desktopSessionCleanupPeriodDays')[0] ??
+    DEFAULT_DESKTOP_SESSION_CLEANUP_PERIOD_DAYS
+  if (days === 0) return null
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+}
+
+/**
+ * densable `xe` — org policy or settings-error skip for the desktop
+ * exemption. `policySettings.cleanupPeriodDays !== undefined` → true;
+ * else any non-parent-managed error whose path is in `$te` or whose
+ * severity is not `"warning"`.
+ */
+export function isDesktopSessionCleanupBlocked(): boolean {
+  if (getSettingsForSource('policySettings')?.cleanupPeriodDays !== undefined) {
+    return true
+  }
+  return getSettingsWithAllErrors().errors.some(
+    error =>
+      error.file !== PARENT_MANAGED_SETTINGS_FILE &&
+      (CLEANUP_PERIOD_SETTINGS_KEYS.some(key => key === error.path) ||
+        error.severity !== 'warning'),
+  )
+}
+
+/**
+ * densable Sgn set `r` @179726935 — desktop-host jsonl `entrypoint` values.
+ * Cowork hosts write `local-agent`; do not invent a cowork ident.
+ */
+const DESKTOP_HOST_ENTRYPOINTS = new Set([
+  'claude-desktop',
+  'claude-desktop-3p',
+  'local-agent',
+])
+
+/** densable `U` — sibling of `<id>.jsonl`. Reader only; no host writer. */
+const DESKTOP_RELEASED_SUFFIX = '.desktop-released.json'
+
+/** densable `Ie` — `readFileFdGated` cap for the release marker. */
+const DESKTOP_RELEASED_MAX_BYTES = 4096
+
+/** densable `Fe` — session id on an `agent-*.jsonl` parent marker. */
+const DESKTOP_RELEASE_SESSION_ID = /^[0-9A-Za-z_-]{1,64}$/
+
+/**
+ * densable `Sgn` @179727060 — `r.has(e==="local_agent"?"local-agent":e)`.
+ */
+export function isDesktopHostEntrypoint(entrypoint: string): boolean {
+  return DESKTOP_HOST_ENTRYPOINTS.has(
+    entrypoint === 'local_agent' ? 'local-agent' : entrypoint,
+  )
+}
+
+type DesktopReleaseVerdict = 'none' | 'release-now' | 'grace'
+
+/** densable `X` — strip `.jsonl` (6 chars) and append `U`. */
+function desktopReleasedPathForJsonl(jsonlPath: string): string {
+  return jsonlPath.slice(0, -6) + DESKTOP_RELEASED_SUFFIX
+}
+
+/**
+ * densable `BY` @179198018 — first complete jsonl line with string field `n`.
+ */
+function extractJsonlStringFieldFirst(
+  text: string,
+  field: string,
+): string | undefined {
+  const needle = `"${field}":`
+  let offset = 0
+  while (offset < text.length) {
+    const nl = text.indexOf('\n', offset)
+    const line = nl < 0 ? text.slice(offset) : text.slice(offset, nl)
+    offset = nl < 0 ? text.length : nl + 1
+    if (!line.includes(needle)) continue
+    try {
+      const parsed: unknown = JSON.parse(line)
+      if (typeof parsed === 'object' && parsed !== null) {
+        const value = (parsed as Record<string, unknown>)[field]
+        if (typeof value === 'string') return value
+      }
+    } catch {
+      // truncated / non-JSON line
+    }
+  }
+  return undefined
+}
+
+/**
+ * densable `U` / `i4t(e,n)` @179197675 — last complete jsonl line with
+ * string field `n` (no type filter).
+ */
+function extractJsonlStringFieldLast(
+  text: string,
+  field: string,
+): string | undefined {
+  const needle = `"${field}":`
+  let end = text.length
+  while (end > 0) {
+    const prevNl = text.lastIndexOf('\n', end - 1)
+    const line = text.slice(prevNl + 1, end)
+    end = prevNl
+    if (line.includes(needle)) {
+      try {
+        const parsed: unknown = JSON.parse(line)
+        if (typeof parsed === 'object' && parsed !== null) {
+          const value = (parsed as Record<string, unknown>)[field]
+          if (typeof value === 'string') return value
+        }
+      } catch {
+        // truncated / non-JSON line
+      }
+    }
+    if (prevNl < 0) break
+  }
+  return undefined
+}
+
+/** densable `FSn` — drop the incomplete first line of a mid-file tail. */
+function dropIncompleteLeadingLine(text: string): string {
+  const nl = text.indexOf('\n')
+  return nl >= 0 ? text.slice(nl + 1) : ''
+}
+
+/**
+ * densable `ie` @191903239 — `{reason?: string}` on `.desktop-released.json`.
+ * `delete` → release-now; `archive` + mtime < regular cutoff → release-now;
+ * `archive` still inside the regular window → grace.
+ */
+async function readDesktopReleaseVerdict(
+  markerPath: string,
+  fsImpl: FsOperations,
+  regularCutoff: Date,
+): Promise<DesktopReleaseVerdict> {
+  try {
+    const stats = await fsImpl.stat(markerPath)
+    if (!stats.isFile()) return 'none'
+    const buf = await fsImpl.readFileBytes(
+      markerPath,
+      DESKTOP_RELEASED_MAX_BYTES,
+    )
+    const parsed: unknown = JSON.parse(buf.toString('utf8'))
+    const reason =
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'reason' in parsed &&
+      typeof (parsed as { reason?: unknown }).reason === 'string'
+        ? (parsed as { reason: string }).reason
+        : undefined
+    if (reason === 'delete') return 'release-now'
+    if (reason === 'archive') {
+      return stats.mtime < regularCutoff ? 'release-now' : 'grace'
+    }
+    return 'none'
+  } catch {
+    return 'none'
+  }
+}
+
+/**
+ * densable Ior skipIf `y` — true means skip delete (desktop exemption).
+ * Ceiling (`Ae` / `w`) is a hard cap before the release-marker grace.
+ */
+export async function shouldExemptDesktopSessionTranscript(
+  filePath: string,
+  stats: { mtime: Date; size: number },
+  regularCutoff: Date,
+  desktopCutoff: Date | null,
+  fsImpl: FsOperations,
+  headTailBuf: Buffer,
+): Promise<boolean> {
+  if (desktopCutoff !== null && stats.mtime < desktopCutoff) return false
+  const companion = desktopReleasedPathForJsonl(filePath)
+  const released = await readDesktopReleaseVerdict(
+    companion,
+    fsImpl,
+    regularCutoff,
+  )
+  if (released === 'release-now') return false
+  if (released === 'grace') return true
+  if (stats.size === 0) {
+    const sessionDir = filePath.slice(0, -6)
+    const isSessionDir = await fsImpl
+      .stat(sessionDir)
+      .then(st => st.isDirectory())
+      .catch(() => false)
+    if (!isSessionDir) return true
+  }
+  const { head, tail } = await readHeadAndTail(
+    filePath,
+    stats.size,
+    headTailBuf,
+  )
+  if (head === '' && stats.size > 0) {
+    await fsImpl.stat(filePath)
+    throw new Error(
+      'transient read failure while classifying a transcript for the desktop retention exemption',
+    )
+  }
+  const tailForParse =
+    stats.size > LITE_READ_BUF_SIZE ? dropIncompleteLeadingLine(tail) : tail
+  const headEntrypoint = extractJsonlStringFieldFirst(head, 'entrypoint')
+  const tailEntrypoint = extractJsonlStringFieldLast(tailForParse, 'entrypoint')
+  if (
+    !(
+      (headEntrypoint !== undefined &&
+        isDesktopHostEntrypoint(headEntrypoint)) ||
+      (tailEntrypoint !== undefined && isDesktopHostEntrypoint(tailEntrypoint))
+    )
+  ) {
+    return false
+  }
+  const sessionId = basename(filePath).startsWith('agent-')
+    ? (extractJsonlStringFieldFirst(head, 'sessionId') ??
+      extractJsonlStringFieldLast(tailForParse, 'sessionId'))
+    : undefined
+  if (sessionId !== undefined && DESKTOP_RELEASE_SESSION_ID.test(sessionId)) {
+    const parentMarker = join(
+      dirname(filePath),
+      `${sessionId}${DESKTOP_RELEASED_SUFFIX}`,
+    )
+    if (parentMarker !== companion) {
+      if (
+        (await readDesktopReleaseVerdict(
+          parentMarker,
+          fsImpl,
+          regularCutoff,
+        )) === 'release-now'
+      ) {
+        return false
+      }
+    }
+  }
+  return true
+}
 
 /**
  * densable `WMu` — project-level reserved entry names that are NOT session
@@ -703,9 +964,17 @@ async function unlinkIfOld(
   filePath: string,
   cutoffDate: Date,
   fsImpl: FsOperations,
+  skipIf?: (
+    path: string,
+    stats: { mtime: Date; size: number },
+  ) => Promise<boolean>,
 ): Promise<boolean> {
   const stats = await fsImpl.stat(filePath)
   if (stats.mtime < cutoffDate) {
+    // densable F `u` — skipIf true keeps the file (Ior desktop exemption).
+    if (skipIf !== undefined && (await skipIf(filePath, stats))) {
+      return false
+    }
     await fsImpl.unlink(filePath)
     return true
   }
@@ -725,6 +994,26 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
   const result = emptyCleanupResult()
   const projectsDir = getProjectsDir()
   const fsImpl = getFsImplementation()
+  // densable Ior: `let p=fe(),w=Ae()` — Ae always runs; skipIf is off when xe.
+  const desktopCutoff = getDesktopSessionCleanupCutoff()
+  const desktopExemptionBlocked = isDesktopSessionCleanupBlocked()
+  let headTailBuf: Buffer | undefined
+  const skipDesktopJsonl = desktopExemptionBlocked
+    ? undefined
+    : async (
+        filePath: string,
+        stats: { mtime: Date; size: number },
+      ): Promise<boolean> => {
+        headTailBuf ??= Buffer.allocUnsafe(LITE_READ_BUF_SIZE)
+        return shouldExemptDesktopSessionTranscript(
+          filePath,
+          stats,
+          cutoffDate,
+          desktopCutoff,
+          fsImpl,
+          headTailBuf,
+        )
+      }
 
   let projectDirents
   try {
@@ -759,7 +1048,12 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
         }
         try {
           if (
-            await unlinkIfOld(join(projectDir, entry.name), cutoffDate, fsImpl)
+            await unlinkIfOld(
+              join(projectDir, entry.name),
+              cutoffDate,
+              fsImpl,
+              entry.name.endsWith('.jsonl') ? skipDesktopJsonl : undefined,
+            )
           ) {
             result.messages++
           }
@@ -1152,15 +1446,19 @@ export async function cleanupOldVersionsThrottled(): Promise<void> {
 }
 
 export async function cleanupOldMessageFilesInBackground(): Promise<void> {
-  // If settings have validation errors but the user explicitly set cleanupPeriodDays,
-  // skip cleanup entirely rather than falling back to the default (30 days).
-  // This prevents accidentally deleting files when the user intended a different retention period.
+  // densable Jrt / $te: if settings have validation errors but a retention
+  // key was explicitly set, skip rather than falling back to defaults.
   const { errors } = getSettingsWithAllErrors()
-  if (errors.length > 0 && rawSettingsContainsKey('cleanupPeriodDays')) {
-    logForDebugging(
-      'Skipping cleanup: settings have validation errors but cleanupPeriodDays was explicitly set. Fix settings errors to enable cleanup.',
+  if (errors.length > 0) {
+    const blockingKey = CLEANUP_PERIOD_SETTINGS_KEYS.find(key =>
+      rawSettingsContainsKey(key),
     )
-    return
+    if (blockingKey !== undefined) {
+      logForDebugging(
+        `Skipping cleanup: settings have validation errors but ${blockingKey} was explicitly set. Fix settings errors to enable cleanup.`,
+      )
+      return
+    }
   }
 
   await cleanupOldMessageFiles()
