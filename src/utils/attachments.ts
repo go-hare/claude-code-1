@@ -146,6 +146,7 @@ import {
   matchingRuleForInput,
   pathInAllowedWorkingPath,
 } from './permissions/filesystem.js'
+import { restrictedAttachmentOutsideMessage } from './restricted.js'
 import {
   generateTaskAttachments,
   applyTaskOffsetsAndEvictions,
@@ -2425,6 +2426,19 @@ async function processAtMentionedFiles(
         ) {
           return null
         }
+        // official Wdt @183550610
+        if (
+          appState.toolPermissionContext.restricted &&
+          !pathInAllowedWorkingPath(
+            absoluteFilename,
+            appState.toolPermissionContext,
+          )
+        ) {
+          logEvent('tengu_at_mention_extracting_filename_error', {
+            reason: restrictedAttachmentOutsideMessage(file),
+          } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+          return null
+        }
 
         // Check if it's a directory
         try {
@@ -3603,6 +3617,13 @@ export async function generateFileAttachment(
   if (isFileReadDenied(filename, appState.toolPermissionContext)) {
     return null
   }
+  // official Wdt @183550610
+  if (
+    appState.toolPermissionContext.restricted &&
+    !pathInAllowedWorkingPath(filename, appState.toolPermissionContext)
+  ) {
+    return null
+  }
 
   // Check file size before attempting to read (skip for PDFs — they have their own size/page handling below)
   if (
@@ -4611,5 +4632,13 @@ function isFileReadDenied(
     'read',
     'deny',
   )
-  return denyRule !== null
+  if (denyRule !== null) return true
+  // official isFileReadDenied restricted cwd lock @186213591
+  if (
+    toolPermissionContext.restricted &&
+    !pathInAllowedWorkingPath(filePath, toolPermissionContext)
+  ) {
+    return true
+  }
+  return false
 }

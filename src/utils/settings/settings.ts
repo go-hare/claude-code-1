@@ -379,6 +379,65 @@ export function parseSettingsFile(path: string): {
   }
 }
 
+/**
+ * Official FMe @179441524 (content path; policy flag collapsed in leftover to
+ * the same SettingsSchema parse as parseSettingsFile). Used by settingsPrime
+ * Vjt/wn/On without reading disk again.
+ */
+export function parseSettingsFileContent(
+  content: string,
+  path: string,
+): {
+  settings: SettingsJson | null
+  errors: ValidationError[]
+} {
+  if (content.trim() === '') {
+    return { settings: {}, errors: [] }
+  }
+
+  const data = safeParseJSON(content, false)
+
+  // densable 2.1.232 #8 sRe — alias keys → canonical before schema parse
+  const aliasWarnings: ValidationError[] = applySettingsKeyAliases(
+    data,
+    path,
+  ).map(w => ({
+    file: w.file,
+    path: w.path,
+    message: w.message,
+    severity: w.severity,
+  }))
+
+  // Filter invalid permission rules before schema validation so one bad
+  // rule doesn't cause the entire settings file to be rejected.
+  const ruleWarnings = filterInvalidPermissionRules(data, path)
+
+  // densable 2.1.248 #37 ho() user-path — strip unrecognized
+  // crossSessionInbound so the rest of the file still loads, and emit the
+  // settings warning N() reads. Hold only.
+  const inboundWarnings = filterInvalidCrossSessionInbound(data, path)
+
+  const result = SettingsSchema().safeParse(data)
+
+  if (!result.success) {
+    const errors = formatZodError(result.error, path)
+    return {
+      settings: null,
+      errors: [
+        ...aliasWarnings,
+        ...ruleWarnings,
+        ...inboundWarnings,
+        ...errors,
+      ],
+    }
+  }
+
+  return {
+    settings: result.data,
+    errors: [...aliasWarnings, ...ruleWarnings, ...inboundWarnings],
+  }
+}
+
 function parseSettingsFileUncached(path: string): {
   settings: SettingsJson | null
   errors: ValidationError[]
@@ -386,42 +445,7 @@ function parseSettingsFileUncached(path: string): {
   try {
     const { resolvedPath } = safeResolvePath(getFsImplementation(), path)
     const content = readFileSync(resolvedPath)
-
-    if (content.trim() === '') {
-      return { settings: {}, errors: [] }
-    }
-
-    const data = safeParseJSON(content, false)
-
-    // densable 2.1.232 #8 sRe — alias keys → canonical before schema parse
-    const aliasWarnings: ValidationError[] = applySettingsKeyAliases(
-      data,
-      path,
-    ).map(w => ({
-      file: w.file,
-      path: w.path,
-      message: w.message,
-      severity: w.severity,
-    }))
-
-    // Filter invalid permission rules before schema validation so one bad
-    // rule doesn't cause the entire settings file to be rejected.
-    const ruleWarnings = filterInvalidPermissionRules(data, path)
-
-    const result = SettingsSchema().safeParse(data)
-
-    if (!result.success) {
-      const errors = formatZodError(result.error, path)
-      return {
-        settings: null,
-        errors: [...aliasWarnings, ...ruleWarnings, ...errors],
-      }
-    }
-
-    return {
-      settings: result.data,
-      errors: [...aliasWarnings, ...ruleWarnings],
-    }
+    return parseSettingsFileContent(content, path)
   } catch (error) {
     handleFileSystemError(error, path)
     if (isENOENT(error)) {
@@ -1451,21 +1475,116 @@ export function dialogExpiryToMs(
 /** densable 2.1.224 #5 — inbound cross-session policy. */
 export type CrossSessionInbound = 'accept' | 'hold' | 'refuse'
 
+/** densable 2.1.248 #37 Zjt — settings-error path N() matches. */
+export const CROSS_SESSION_INBOUND_SETTING_PATH = 'crossSessionInbound'
+
+const CROSS_SESSION_INBOUND_VALUES = ['accept', 'hold', 'refuse'] as const
+
+const CROSS_SESSION_INBOUND_RANK: Record<CrossSessionInbound, number> = {
+  accept: 0,
+  hold: 1,
+  refuse: 2,
+}
+
+/** densable 2.1.248 #37 w().decidedBy — invalidSetting only. */
+export type CrossSessionInboundDecidedBy = 'invalidSetting'
+
+export type CrossSessionInboundDecision = {
+  value: CrossSessionInbound | undefined
+  decidedBy: CrossSessionInboundDecidedBy | undefined
+}
+
+type SettingsErrorWithStatus = ValidationError & { statusOnly?: boolean }
+
+function formatReceivedCrossSessionInbound(value: unknown): string {
+  if (typeof value === 'string') return `"${value}"`
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
+}
+
+/** densable 2.1.248 #37 Ot() */
+function invalidCrossSessionInboundDetail(value: unknown): string {
+  const allowed = CROSS_SESSION_INBOUND_VALUES.map(v => `"${v}"`).join(', ')
+  const received = formatReceivedCrossSessionInbound(value)
+  return `must be one of ${allowed}; received ${received}`
+}
+
+/** densable 2.1.248 #37 vo() user-path — hold copy, never managed refuse. */
+function invalidCrossSessionInboundWarning(
+  value: unknown,
+  filePath: string,
+): ValidationError {
+  const expected = CROSS_SESSION_INBOUND_VALUES.map(v => `"${v}"`).join(', ')
+  return {
+    file: filePath,
+    path: CROSS_SESSION_INBOUND_SETTING_PATH,
+    message:
+      `"crossSessionInbound" ${invalidCrossSessionInboundDetail(value)}. ` +
+      'This value was ignored; while it is present, cross-session ' +
+      'messages are held for your approval instead of being delivered. ' +
+      'Set it to one of the values above.',
+    severity: 'warning',
+    expected,
+  }
+}
+
 /**
- * densable TPr() — resolve crossSessionInbound across settings sources.
+ * densable 2.1.248 #37 ho() user-path.
+ * User-path only: delete the invalid key and emit a warning.
+ */
+function filterInvalidCrossSessionInbound(
+  data: unknown,
+  filePath: string,
+): ValidationError[] {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const obj = data as Record<string, unknown>
+  const value = obj.crossSessionInbound
+  if (
+    value === undefined ||
+    value === 'accept' ||
+    value === 'hold' ||
+    value === 'refuse'
+  ) {
+    return []
+  }
+  delete obj.crossSessionInbound
+  return [invalidCrossSessionInboundWarning(value, filePath)]
+}
+
+/**
+ * densable 2.1.248 #37 N() @196196105 sha=8852096933c85ace
+ * function N(){return k_().errors.some((e)=>e.path===Zjt&&e.severity==="warning"&&!e.statusOnly)}
+ */
+export function hasInvalidCrossSessionInboundWarning(
+  errors: readonly SettingsErrorWithStatus[] = getSettingsWithErrors().errors,
+): boolean {
+  return errors.some(
+    e =>
+      e.path === CROSS_SESSION_INBOUND_SETTING_PATH &&
+      e.severity === 'warning' &&
+      !e.statusOnly,
+  )
+}
+
+/**
+ * densable TPr() / 2.1.248 #37 w() — resolve crossSessionInbound across sources.
  * Trusted first (policy → flag → user): first explicit wins.
  * Project/local may only *tighten* (accept < hold < refuse) over the current value.
+ * Then: if rank < hold && N() → hold / invalidSetting.
  */
-export function resolveCrossSessionInbound(
+export function resolveCrossSessionInboundDecision(
   getSource: typeof getSettingsForSource = getSettingsForSource,
   isEnabled: typeof isSettingSourceEnabled = isSettingSourceEnabled,
-): CrossSessionInbound | undefined {
-  const rank: Record<CrossSessionInbound, number> = {
-    accept: 0,
-    hold: 1,
-    refuse: 2,
-  }
+  isInvalidInboundWarning?: () => boolean,
+): CrossSessionInboundDecision {
+  const checkInvalid =
+    isInvalidInboundWarning ??
+    (getSource === getSettingsForSource
+      ? hasInvalidCrossSessionInboundWarning
+      : () => false)
   let resolved: CrossSessionInbound | undefined
+  let decidedBy: CrossSessionInboundDecidedBy | undefined
   for (const source of [
     'policySettings',
     'flagSettings',
@@ -1482,12 +1601,34 @@ export function resolveCrossSessionInbound(
     if (!isEnabled(source)) continue
     const v = getSource(source)?.crossSessionInbound
     if (v === 'accept' || v === 'hold' || v === 'refuse') {
-      if (rank[v] > rank[resolved ?? 'accept']) {
+      const current = CROSS_SESSION_INBOUND_RANK[resolved ?? 'accept']
+      if (CROSS_SESSION_INBOUND_RANK[v] > current) {
         resolved = v
       }
     }
   }
-  return resolved
+  // densable: if(p[e??"accept"]<p.hold&&N())e="hold",o="invalidSetting"
+  if (
+    CROSS_SESSION_INBOUND_RANK[resolved ?? 'accept'] <
+      CROSS_SESSION_INBOUND_RANK.hold &&
+    checkInvalid()
+  ) {
+    resolved = 'hold'
+    decidedBy = 'invalidSetting'
+  }
+  return { value: resolved, decidedBy }
+}
+
+export function resolveCrossSessionInbound(
+  getSource: typeof getSettingsForSource = getSettingsForSource,
+  isEnabled: typeof isSettingSourceEnabled = isSettingSourceEnabled,
+  isInvalidInboundWarning?: () => boolean,
+): CrossSessionInbound | undefined {
+  return resolveCrossSessionInboundDecision(
+    getSource,
+    isEnabled,
+    isInvalidInboundWarning,
+  ).value
 }
 
 export function getCrossSessionInbound(): CrossSessionInbound | undefined {

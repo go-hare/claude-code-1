@@ -23,6 +23,12 @@ import {
   isSignedIn,
   RedactedGithubToken,
 } from './api.js';
+import {
+  checkGhTokenWorkflowScope,
+  type GhTokenWorkflowScope,
+  WEB_SETUP_WORKFLOW_SCOPE_DOCS,
+  WEB_SETUP_WORKFLOW_SCOPE_WARNING,
+} from './ghTokenWorkflowScope.js';
 
 type CheckResult =
   | { status: 'not_signed_in' }
@@ -79,7 +85,22 @@ function errorMessage(err: ImportTokenError, codeUrl: string): string {
   }
 }
 
-type Step = { name: 'checking' } | { name: 'confirm'; token: RedactedGithubToken } | { name: 'uploading' };
+type Step =
+  | { name: 'checking' }
+  | { name: 'confirm'; token: RedactedGithubToken; ghTokenWorkflowScope: GhTokenWorkflowScope }
+  | { name: 'uploading' };
+
+/** densable 2.1.248 #5 B() @208680749 sha=0e0a881993c11f88 */
+function WorkflowScopeWarning() {
+  return (
+    <Box marginTop={1}>
+      <Text color="warning">
+        {WEB_SETUP_WORKFLOW_SCOPE_WARNING}:{` `}
+        {WEB_SETUP_WORKFLOW_SCOPE_DOCS}
+      </Text>
+    </Box>
+  );
+}
 
 function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
   const [step, setStep] = useState<Step>({ name: 'checking' });
@@ -127,8 +148,10 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
           onDone(formatWebSetupGhCheckFailedMessage(result.error, `${getCodeWebUrl()}/onboarding?step=alt-auth`));
           return;
         }
-        case 'has_gh_token':
-          setStep({ name: 'confirm', token: result.token });
+        case 'has_gh_token': {
+          const ghTokenWorkflowScope = await checkGhTokenWorkflowScope();
+          setStep({ name: 'confirm', token: result.token, ghTokenWorkflowScope });
+        }
       }
     });
     // onDone is stable across renders; intentionally not in deps.
@@ -142,7 +165,7 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
     onDone();
   };
 
-  const handleConfirm = async (token: RedactedGithubToken) => {
+  const handleConfirm = async (token: RedactedGithubToken, ghTokenWorkflowScope: GhTokenWorkflowScope) => {
     setStep({ name: 'uploading' });
 
     const result = await importGithubToken(token);
@@ -151,6 +174,7 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
       logEvent('tengu_remote_setup_result', {
         result: 'import_failed' as SafeString,
         error_kind: err.kind as SafeString,
+        gh_token_workflow_scope: ghTokenWorkflowScope as SafeString,
       });
       onDone(errorMessage(err, getCodeWebUrl()));
       return;
@@ -166,6 +190,7 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
 
     logEvent('tengu_remote_setup_result', {
       result: 'success' as SafeString,
+      gh_token_workflow_scope: ghTokenWorkflowScope as SafeString,
     });
     onDone(`Connected as ${result.result.github_username}. Opened ${url}`);
   };
@@ -179,11 +204,13 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
   }
 
   const token = step.token;
+  const ghTokenWorkflowScope = step.ghTokenWorkflowScope;
   return (
     <Dialog title="Connect Claude on the web to GitHub?" onCancel={handleCancel} hideInputGuide>
       <Box flexDirection="column">
         <Text>Claude on the web requires connecting to your GitHub account to clone and push code on your behalf.</Text>
         <Text dimColor>Your local credentials are used to authenticate with GitHub</Text>
+        {ghTokenWorkflowScope === 'missing' && <WorkflowScopeWarning />}
       </Box>
       <Select
         options={[
@@ -192,7 +219,7 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
         ]}
         onChange={value => {
           if (value === 'send') {
-            void handleConfirm(token);
+            void handleConfirm(token, ghTokenWorkflowScope);
           } else {
             handleCancel();
           }

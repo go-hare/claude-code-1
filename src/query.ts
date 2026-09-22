@@ -115,6 +115,7 @@ import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prom
 import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.js'
 import { executeStopFailureHooks } from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
+import type { PromptCacheTtl } from './utils/promptCacheTtl.js'
 import type { QueuedCommand } from './types/textInputTypes.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
@@ -297,6 +298,8 @@ export type QueryParams = {
   maxOutputTokensOverride?: number
   maxTurns?: number
   skipCacheWrite?: boolean
+  /** densable 2.1.248 #2 — per-agent experimental.cacheTtl → Ivt/jTt. */
+  agentCacheTtlOverride?: PromptCacheTtl
   /**
    * Official drain: when the dequeued turn carried stopHookActive (stop-hook
    * continuation / concurrent re-queue), seed the loop so nested stop hooks
@@ -655,6 +658,7 @@ async function* queryLoop(
     querySource,
     maxTurns,
     skipCacheWrite,
+    agentCacheTtlOverride,
   } = params
   const deps = params.deps ?? productionDeps()
 
@@ -1158,10 +1162,15 @@ async function* queryLoop(
           }
         }
         // Official purchase-intent densable after consent — ExtraUsageDialog
-        // 3DS remains denser; open_purchase surfaces /usage-credits hint.
+        // 3DS remains denser; open_purchase surfaces /usage-credits hint
+        // only when v_() / Zur() allow the command (#38).
+        const { isUsageCreditsHintEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./services/rateLimitMessages.js') as typeof import('./services/rateLimitMessages.js')
         if (
           flow.choice === 'consent' &&
-          flow.purchaseIntent?.next === 'open_purchase'
+          flow.purchaseIntent?.next === 'open_purchase' &&
+          isUsageCreditsHintEnabled()
         ) {
           const hint = flow.purchaseIntent.commandHint ?? '/usage-credits'
           toolUseContext.addNotification?.({
@@ -1520,6 +1529,7 @@ async function* queryLoop(
               effortValue: layeredEffortValue,
               advisorModel: appState.advisorModel,
               skipCacheWrite,
+              agentCacheTtlOverride,
               agentId: toolUseContext.agentId,
               isBackgroundAgent: toolUseContext.isBackgroundAgent,
               requestDialog: toolUseContext.requestDialog,

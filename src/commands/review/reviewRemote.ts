@@ -44,8 +44,14 @@ import {
   gitExe,
   RAW_GIT_DIFF_FLAGS,
 } from '../../utils/git.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { getPlatform } from '../../utils/platform.js'
 import { teleportToRemote } from '../../utils/teleport.js'
+import {
+  formatGithubAccessPrecheckError,
+  probeLinkedGithubAccountAccess,
+  shouldProbeGithubAccess,
+} from './githubAccessPrecheck.js'
 
 /** densable H1g — default CCR bundle cap (100 MiB) */
 const DEFAULT_CCR_BUNDLE_MAX_BYTES = 100 * 1024 * 1024
@@ -1173,20 +1179,58 @@ export async function launchRemoteReview(
     }
 
     // densable: gh pr view --json additions,deletions,changedFiles → pr_diff_too_large
+    // densable 2.1.248 #43 bxt: probe in parallel with gh pr view; refuse before size/cloud
     const { maxFiles, maxLines } = getUltrareviewDiffLimits(raw)
-    const prView = await execFileNoThrow(
-      'gh',
-      [
-        'pr',
-        'view',
-        prNumber,
-        '--repo',
-        `${repo.host}/${repo.owner}/${repo.name}`,
-        '--json',
-        'additions,deletions,changedFiles',
-      ],
-      { timeout: 5000, preserveOutputOnError: false },
-    )
+    const [prView, accessProbe] = await Promise.all([
+      execFileNoThrow(
+        'gh',
+        [
+          'pr',
+          'view',
+          prNumber,
+          '--repo',
+          `${repo.host}/${repo.owner}/${repo.name}`,
+          '--json',
+          'additions,deletions,changedFiles',
+        ],
+        { timeout: 5000, preserveOutputOnError: false },
+      ),
+      shouldProbeGithubAccess(repo.host, isGithubComHost)
+        ? probeLinkedGithubAccountAccess(repo.owner, repo.name)
+        : null,
+    ])
+    if (accessProbe) {
+      logForDebugging(
+        `ultrareview: linked GitHub account access to ${repo.owner}/${repo.name}: ${accessProbe.verdict} (HTTP ${accessProbe.httpStatus ?? 'none'})`,
+      )
+      logEvent('tengu_review_remote_github_access_probe', {
+        verdict: meta(accessProbe.verdict),
+        http_status: accessProbe.httpStatus ?? undefined,
+      })
+    }
+    if (
+      accessProbe?.verdict === 'github_not_connected' ||
+      accessProbe?.verdict === 'github_repo_not_found'
+    ) {
+      logEvent('tengu_review_remote_precondition_failed', {
+        reason: meta(accessProbe.verdict),
+        cwd_is_home: isCwdHome(),
+      })
+      logPrArgRecovery('failed')
+      return [
+        {
+          type: 'text',
+          text: formatGithubAccessPrecheckError({
+            verdict: accessProbe.verdict,
+            owner: repo.owner,
+            name: repo.name,
+            invocation,
+            prArg: prNumber,
+            ghPrViewCode: prView.code,
+          }),
+        },
+      ]
+    }
     if (prView.code === 0 && prView.stdout.trim()) {
       try {
         const info = JSON.parse(prView.stdout) as {

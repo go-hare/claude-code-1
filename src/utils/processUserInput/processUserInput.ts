@@ -54,6 +54,7 @@ import {
   createSystemMessage,
   createUserMessage,
 } from '../messages.js'
+import { logForDebugging } from '../debug.js'
 import { queryCheckpoint } from '../queryProfiler.js'
 import { parseSlashCommand } from '../slashCommandParsing.js'
 import {
@@ -383,6 +384,26 @@ export async function processUserInput({
     }
   }
   queryCheckpoint('query_hooks_end')
+
+  // densable 2.1.248 #40 wl — autoload workflow-authoring on keyword / ultracode.
+  if (result.shouldQuery) {
+    try {
+      const { getWorkflowAuthoringAutoloadMessages } = await import(
+        '../../skills/bundled/workflowAuthoring.js'
+      )
+      result.messages.push(
+        ...(await getWorkflowAuthoringAutoloadMessages(
+          result.messages,
+          messages,
+          context.options.tools,
+        )),
+      )
+    } catch (err) {
+      logForDebugging(
+        `workflow-authoring autoload failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
 
   // Happy path: onQuery will clear userInputOnProcessing via startTransition
   // so it resolves in the same frame as deferredMessages (no flicker gap).

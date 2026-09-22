@@ -29,6 +29,8 @@ import {
   isPidBasedLockingEnabled,
   type LockInfo,
 } from '../utils/nativeInstaller/pidLock.js';
+import { formatRemoteManagedSettingsDoctorLine } from '../services/remoteManagedSettings/loadStatus.js';
+import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettings/syncCache.js';
 import { getInitialSettings } from '../utils/settings/settings.js';
 import { BASH_MAX_OUTPUT_DEFAULT, BASH_MAX_OUTPUT_UPPER_LIMIT } from '../utils/shell/outputLimits.js';
 import { TASK_MAX_OUTPUT_DEFAULT, TASK_MAX_OUTPUT_UPPER_LIMIT } from '../utils/task/outputFormatting.js';
@@ -112,6 +114,8 @@ export function Doctor({ onDone }: Props): React.ReactNode {
   const [contextWarnings, setContextWarnings] = useState<ContextWarnings | null>(null);
   const [versionLockInfo, setVersionLockInfo] = useState<VersionLockInfo | null>(null);
   const validationErrors = useSettingsErrors();
+  isRemoteManagedSettingsEligible();
+  const remoteManagedLine = formatRemoteManagedSettingsDoctorLine();
 
   // Create promise once for dist-tags fetch (depends on diagnostic)
   const distTagsPromise = useMemo(
@@ -314,6 +318,7 @@ export function Doctor({ onDone }: Props): React.ReactNode {
           <DistTagsDisplay promise={distTagsPromise} />
         </Suspense>
         <LastUpdateDisplay />
+        {remoteManagedLine && <Text>{remoteManagedLine}</Text>}
       </Box>
 
       <SandboxDoctorSection />

@@ -157,6 +157,41 @@ function getProviderPrimaryModel(): ModelName | undefined {
   return undefined
 }
 
+const CLAUDE_FAMILY_ALIASES = new Set([
+  'haiku',
+  'sonnet',
+  'opus',
+  'opusplan',
+  'fable',
+])
+
+/** Claude catalog / alias ids written as leftover proxy special markers. */
+function isClaudeFamilySpecialId(model: string): boolean {
+  const raw = model
+    .trim()
+    .toLowerCase()
+    .replace(/\[1m\]$/i, '')
+  return CLAUDE_FAMILY_ALIASES.has(raw) || raw.startsWith('claude-')
+}
+
+/**
+ * Leftover custom-host remap. Official first-party keeps Claude family
+ * ids. Anthropic-compatible proxies often write ANTHROPIC_DEFAULT_*_MODEL
+ * as Claude special ids while settings.model / ANTHROPIC_MODEL is the
+ * real upstream id (e.g. grok-4.6). Title and other Haiku side queries
+ * that honor the special id 404 and the tab stays "Claude Code".
+ */
+function resolveCustomHostFamilyModel(
+  familyEnvModel: string,
+): ModelName | undefined {
+  if (isFirstPartyAnthropicBaseUrl()) return undefined
+  if (!isClaudeFamilySpecialId(familyEnvModel)) return undefined
+  const specified = getUserSpecifiedModelSetting()
+  if (specified == null) return undefined
+  if (isClaudeFamilySpecialId(String(specified))) return undefined
+  return parseUserSpecifiedModel(specified)
+}
+
 // @[MODEL LAUNCH]: Update the default Opus model (3P providers may lag so keep defaults unchanged).
 export function getDefaultOpusModel(): ModelName {
   const provider = getAPIProvider()
@@ -172,8 +207,11 @@ export function getDefaultOpusModel(): ModelName {
     return process.env.GEMINI_DEFAULT_OPUS_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  const envOpus = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  if (envOpus) {
+    const resolved = resolveCustomHostFamilyModel(envOpus)
+    if (resolved) return resolved
+    return envOpus
   }
   // 3P providers: if user set a primary model (e.g. OPENAI_MODEL=glm-5.1),
   // fall back to it instead of a hardcoded Anthropic model. This prevents
@@ -205,8 +243,11 @@ export function getDefaultSonnetModel(): ModelName {
     return process.env.GEMINI_DEFAULT_SONNET_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+  const envSonnet = process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+  if (envSonnet) {
+    const resolved = resolveCustomHostFamilyModel(envSonnet)
+    if (resolved) return resolved
+    return envSonnet
   }
   // 3P providers: fall back to user's primary model instead of a hardcoded
   // Anthropic model name. Prevents background API calls from being routed to
@@ -235,8 +276,11 @@ export function getDefaultHaikuModel(): ModelName {
     return process.env.GEMINI_DEFAULT_HAIKU_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  const envHaiku = process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  if (envHaiku) {
+    const resolved = resolveCustomHostFamilyModel(envHaiku)
+    if (resolved) return resolved
+    return envHaiku
   }
   // 3P providers: fall back to user's primary model instead of a hardcoded
   // Anthropic model name.

@@ -122,7 +122,7 @@ describe('REPL Host waitingFor wiring', () => {
       'utf8',
     )
     expect(hostSrc).toContain('resolveHostWaitingFor')
-    expect(hostSrc).toContain("emitBgNeedsInput(label, 'permission')")
+    expect(hostSrc).toContain("emitBgNeedsInput(label, 'permission'")
     expect(replSrc).not.toContain("emitBgNeedsInput(hostLabel, 'permission')")
     expect(replSrc).toContain(
       'densable P1u permission needs emit lives on DialogHost',

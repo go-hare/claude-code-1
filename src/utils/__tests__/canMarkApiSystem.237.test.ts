@@ -3,7 +3,10 @@
  * Gold: docs/upstream-extraction/v2.1.237/snippets/gold-canMarkApiSystem-eDT.txt
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { setMidConvCachePromotionRejected } from '../../bootstrap/state.js'
+import {
+  markMidConvCachePromotionRejected,
+  resetRequestLatches,
+} from '../../bootstrap/state.js'
 import {
   isApiSystemCacheControlEligible,
   shouldCacheControlOnApiSystem,
@@ -29,7 +32,7 @@ const cleanFirstParty: NodeJS.ProcessEnv = {
 }
 
 afterEach(() => {
-  setMidConvCachePromotionRejected(false)
+  resetRequestLatches()
 })
 
 describe('densable canMarkApiSystem eDT 237', () => {
@@ -124,7 +127,7 @@ describe('densable canMarkApiSystem eDT 237', () => {
         CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
       }),
     ).toBe(false)
-    setMidConvCachePromotionRejected(true)
+    markMidConvCachePromotionRejected()
     expect(shouldCacheControlOnApiSystem('firstParty', cleanFirstParty)).toBe(
       false,
     )

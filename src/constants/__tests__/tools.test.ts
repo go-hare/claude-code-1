@@ -218,6 +218,14 @@ describe('isDeferredTool (densable TX)', () => {
     ).toBe(false)
   })
 
+  test('ScheduleWakeup never defers when 248 jKe is always-on', () => {
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'ScheduleWakeup', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+  })
+
   test('EnterWorktree never defers when SESSION_KIND=bg', () => {
     process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
     expect(

@@ -315,37 +315,10 @@ async function main(): Promise<void> {
       }
     }
 
-    const { getBridgeDisabledReason, checkBridgeMinVersion } = await import('../bridge/bridgeEnabled.js');
-    const { BRIDGE_LOGIN_ERROR } = await import('../bridge/types.js');
-    const { bridgeMain } = await import('../bridge/bridgeMain.js');
-    const { exitWithError } = await import('../utils/process.js');
-
-    // Auth check must come before the GrowthBook gate check — without auth,
-    // GrowthBook has no user context and would return a stale/default false.
-    // getBridgeDisabledReason awaits GB init, so the returned value is fresh
-    // (not the stale disk cache), but init still needs auth headers to work.
-    const { getClaudeAIOAuthTokens } = await import('../utils/auth.js');
-    const { getBridgeAccessToken } = await import('../bridge/bridgeConfig.js');
-    if (!getClaudeAIOAuthTokens()?.accessToken && !getBridgeAccessToken()) {
-      exitWithError(BRIDGE_LOGIN_ERROR);
-    }
-    const disabledReason = await getBridgeDisabledReason();
-    if (disabledReason) {
-      exitWithError(`Error: ${disabledReason}`);
-    }
-    const versionError = checkBridgeMinVersion();
-    if (versionError) {
-      exitWithError(versionError);
-    }
-
-    // Bridge is a remote control feature - check policy limits
-    const { waitForPolicyLimitsToLoad, isPolicyAllowed } = await import('../services/policyLimits/index.js');
-    await waitForPolicyLimitsToLoad();
-    if (!isPolicyAllowed('allow_remote_control')) {
-      exitWithError("Error: Remote Control is disabled by your organization's policy.");
-    }
-
-    await bridgeMain(args.slice(1));
+    // densable 2.1.248 #33 — gold R: m() then g() then y()/bridgeMain.
+    // Verb-first only (args[0]); flags before the verb go to commander.
+    const { enterRemoteControl } = await import('./remoteControlFlags.js');
+    await enterRemoteControl(args.slice(1));
     return;
   }
 

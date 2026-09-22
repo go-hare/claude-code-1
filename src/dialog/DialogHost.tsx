@@ -155,11 +155,12 @@ export function isFullscreenModalChromeActive(opts: {
  * densable Host answer goes through c_y debounce (same as permission kinds).
  */
 const managedSettingsSecurityRenderer: DialogRenderer = ({ payload, answer }) => {
-  const { settings } = payload as ManagedSettingsSecurityPayload;
+  const { settings, reveal } = payload as ManagedSettingsSecurityPayload;
   return (
     <ManagedSettingsSecurityDialog
-      key="managed-settings-security"
+      key={`managed-settings-security:${reveal}`}
       settings={settings}
+      reveal={reveal}
       onAccept={() => {
         void import('../utils/bgNeedsInputBridge.js').then(m => {
           m.emitBgNeedsInput(null, 'managed-settings');
@@ -248,10 +249,18 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
   // densable P1u / msf permission needs — Host top owns emit (not tip queue).
   useEffect(() => {
     let cancelled = false;
+    const permissionToolUseID =
+      top?.payload &&
+      typeof top.payload === 'object' &&
+      'requestId' in top.payload &&
+      typeof (top.payload as { requestId?: unknown }).requestId === 'string'
+        ? (top.payload as { requestId: string }).requestId
+        : undefined;
     if (suppressReason != null) {
       void import('../utils/bgNeedsInputBridge.js').then(m => {
         if (cancelled) return;
         if (!m.isBgJobSession()) return;
+        if (permissionToolUseID) m.clearHookFailure(permissionToolUseID);
         m.emitBgNeedsInput(null, 'permission');
         m.emitBgNeedsFromDialogKind(null);
       });
@@ -265,7 +274,7 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
       m.ensureBgNeedsPermissionBridge();
       const label = resolveHostWaitingFor(top?.kind, top?.payload);
       if (label && isPermissionDialogKind(top?.kind)) {
-        m.emitBgNeedsInput(label, 'permission');
+        m.emitBgNeedsInput(label, 'permission', permissionToolUseID ? { toolUseID: permissionToolUseID } : undefined);
         m.emitBgNeedsFromDialogKind(null);
         return;
       }

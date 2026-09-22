@@ -17,6 +17,10 @@ import { getPlatform, getWslVersion } from '../../utils/platform.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { profileCheckpoint } from '../../utils/startupProfiler.js'
 import { getCoreUserData } from '../../utils/user.js'
+import {
+  AnthropicTelemetryExportCounter,
+  wrapAnthropicTelemetryExporter,
+} from './anthropicTelemetryExport.js'
 import { isAnalyticsDisabled } from './config.js'
 import { FirstPartyEventLoggingExporter } from './firstPartyEventLoggingExporter.js'
 import type { GrowthBookUserAttributes } from './growthbook.js'
@@ -340,14 +344,18 @@ export function initialize1PEventLogging(): void {
   // NOTE: This is kept separate from customer telemetry logs to ensure
   // internal events don't leak to customer endpoints and vice versa.
   // We don't register this globally - it's only used for internal event logging.
-  const eventLoggingExporter = new FirstPartyEventLoggingExporter({
-    maxBatchSize: maxExportBatchSize,
-    skipAuth: batchConfig.skipAuth,
-    maxAttempts: batchConfig.maxAttempts,
-    path: batchConfig.path,
-    baseUrl: batchConfig.baseUrl,
-    isKilled: () => isSinkKilled('firstParty'),
-  })
+  // densable 2.1.248 QO(new op(...), new Oht("1P event logging"))
+  const eventLoggingExporter = wrapAnthropicTelemetryExporter(
+    new FirstPartyEventLoggingExporter({
+      maxBatchSize: maxExportBatchSize,
+      skipAuth: batchConfig.skipAuth,
+      maxAttempts: batchConfig.maxAttempts,
+      path: batchConfig.path,
+      baseUrl: batchConfig.baseUrl,
+      isKilled: () => isSinkKilled('firstParty'),
+    }),
+    new AnthropicTelemetryExportCounter('1P event logging'),
+  )
   firstPartyEventLoggerProvider = new LoggerProvider({
     resource,
     processors: [

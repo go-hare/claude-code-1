@@ -105,6 +105,7 @@ import {
   MAIN_PROMPT_CACHE_QUERY_SOURCES,
   querySourceMatchesAllowlist,
   resolvePromptCacheTtlOverride,
+  type PromptCacheTtl,
 } from '../../utils/promptCacheTtl.js'
 import { errorMessage } from '../../utils/errors.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
@@ -463,15 +464,19 @@ export function getPromptCachingEnabled(model: string): boolean {
 export function getCacheControl({
   scope,
   querySource,
+  agentCacheTtlOverride,
 }: {
   scope?: CacheScope
   querySource?: QuerySource
+  agentCacheTtlOverride?: PromptCacheTtl
 } = {}): {
   type: 'ephemeral'
   ttl?: '5m' | '1h'
   scope?: CacheScope
 } {
-  const resolved = resolvePromptCacheTtl(querySource)
+  const resolved = resolvePromptCacheTtl(querySource, {
+    agentCacheTtlOverride,
+  })
   return {
     type: 'ephemeral',
     ...(resolved.ttl && { ttl: resolved.ttl }),
@@ -480,30 +485,53 @@ export function getCacheControl({
 }
 
 /**
- * densable 2.1.243 `FUr` — env/settings override (`sFr`) then subscriber/GB.
+ * densable 2.1.248 `Ivt` — `jTt` override then subscriber/GB.
  * Default GB allowlist is `_zt` (main conversation sources), not empty.
  */
-function resolvePromptCacheTtl(querySource?: QuerySource): {
+function resolvePromptCacheTtl(
+  querySource?: QuerySource,
+  opts: {
+    agentCacheTtlOverride?: PromptCacheTtl
+    ignoreOverage?: boolean
+  } = {},
+): {
   ttl: '5m' | '1h'
   reason: string
 } {
-  const override = resolvePromptCacheTtlOverride(querySource)
+  const ignoreOverage = opts.ignoreOverage === true
+  const subscriptionInOverage =
+    isClaudeAISubscriber() &&
+    !ignoreOverage &&
+    currentLimits.isUsingOverage === true
+  const override = resolvePromptCacheTtlOverride(
+    querySource,
+    opts.agentCacheTtlOverride,
+    subscriptionInOverage,
+  )
   if (override !== undefined) {
     return override
   }
 
-  // Latch eligibility in bootstrap state for session stability — prevents
-  // mid-session overage flips from changing the cache_control TTL, which
-  // would bust the server-side prompt cache (~20K tokens per flip).
-  let userEligible = getPromptCache1hEligible()
-  if (userEligible === null) {
-    userEligible =
-      process.env.USER_TYPE === 'ant' ||
-      (isClaudeAISubscriber() && !currentLimits.isUsingOverage)
-    setPromptCache1hEligible(userEligible)
-  }
-  if (!userEligible) {
-    return { ttl: '5m', reason: 'default' }
+  // densable Ivt: if(!o||u)return 5m. ignoreOverage skips leftover
+  // eligibility latch so ScheduleWakeup B1 stays 1h across --resume.
+  if (ignoreOverage) {
+    if (!isClaudeAISubscriber()) {
+      return { ttl: '5m', reason: 'default' }
+    }
+  } else {
+    // Latch eligibility in bootstrap state for session stability — prevents
+    // mid-session overage flips from changing the cache_control TTL, which
+    // would bust the server-side prompt cache (~20K tokens per flip).
+    let userEligible = getPromptCache1hEligible()
+    if (userEligible === null) {
+      userEligible =
+        process.env.USER_TYPE === 'ant' ||
+        (isClaudeAISubscriber() && !currentLimits.isUsingOverage)
+      setPromptCache1hEligible(userEligible)
+    }
+    if (!userEligible) {
+      return { ttl: '5m', reason: 'default' }
+    }
   }
 
   let allowlist = getPromptCache1hAllowlist()
@@ -522,8 +550,15 @@ function resolvePromptCacheTtl(querySource?: QuerySource): {
     : { ttl: '5m', reason: 'default' }
 }
 
-function should1hCacheTTL(querySource?: QuerySource): boolean {
-  return resolvePromptCacheTtl(querySource).ttl === '1h'
+/** densable 2.1.248 `B1(e,t)` — `Ivt(e,t).ttl==="1h"`. */
+export function should1hCacheTTL(
+  querySource?: QuerySource,
+  opts: {
+    agentCacheTtlOverride?: PromptCacheTtl
+    ignoreOverage?: boolean
+  } = {},
+): boolean {
+  return resolvePromptCacheTtl(querySource, opts).ttl === '1h'
 }
 
 /**
@@ -715,6 +750,7 @@ export function userMessageToMessageParam(
   addCache = false,
   enablePromptCaching: boolean,
   querySource?: QuerySource,
+  agentCacheTtlOverride?: PromptCacheTtl,
 ): MessageParam {
   if (addCache) {
     if (typeof message.message!.content === 'string') {
@@ -725,7 +761,10 @@ export function userMessageToMessageParam(
             type: 'text',
             text: message.message!.content,
             ...(enablePromptCaching && {
-              cache_control: getCacheControl({ querySource }),
+              cache_control: getCacheControl({
+                querySource,
+                agentCacheTtlOverride,
+              }),
             }),
           },
         ],
@@ -737,7 +776,12 @@ export function userMessageToMessageParam(
           ..._,
           ...(i === message.message!.content!.length - 1
             ? enablePromptCaching
-              ? { cache_control: getCacheControl({ querySource }) }
+              ? {
+                  cache_control: getCacheControl({
+                    querySource,
+                    agentCacheTtlOverride,
+                  }),
+                }
               : {}
             : {}),
         })),
@@ -761,6 +805,7 @@ export function assistantMessageToMessageParam(
   addCache = false,
   enablePromptCaching: boolean,
   querySource?: QuerySource,
+  agentCacheTtlOverride?: PromptCacheTtl,
 ): MessageParam {
   if (addCache) {
     if (typeof message.message!.content === 'string') {
@@ -771,7 +816,10 @@ export function assistantMessageToMessageParam(
             type: 'text',
             text: message.message!.content,
             ...(enablePromptCaching && {
-              cache_control: getCacheControl({ querySource }),
+              cache_control: getCacheControl({
+                querySource,
+                agentCacheTtlOverride,
+              }),
             }),
           },
         ],
@@ -790,7 +838,12 @@ export function assistantMessageToMessageParam(
               ? !isConnectorTextBlock(contentBlock)
               : true)
               ? enablePromptCaching
-                ? { cache_control: getCacheControl({ querySource }) }
+                ? {
+                    cache_control: getCacheControl({
+                      querySource,
+                      agentCacheTtlOverride,
+                    }),
+                  }
                 : {}
               : {}),
           }
@@ -841,6 +894,8 @@ export type Options = {
   fetchOverride?: ClientOptions['fetch']
   enablePromptCaching?: boolean
   skipCacheWrite?: boolean
+  /** densable 2.1.248 #2 — Ivt `{agentCacheTtlOverride}` from query. */
+  agentCacheTtlOverride?: PromptCacheTtl
   temperatureOverride?: number
   effortValue?: EffortValue
   mcpTools: Tools
@@ -1790,6 +1845,7 @@ async function* queryModel(
   const system = buildSystemPromptBlocks(systemPrompt, enablePromptCaching, {
     skipGlobalCacheForSystemPrompt: needsToolBasedCacheMarker,
     querySource: options.querySource,
+    agentCacheTtlOverride: options.agentCacheTtlOverride,
   })
   const useBetas = betas.length > 0
 
@@ -1894,7 +1950,9 @@ async function* queryModel(
       isUsingOverage: currentLimits.isUsingOverage ?? false,
       cachedMCEnabled: cacheEditingHeaderLatched,
       anyDeferLoading: toolsForCacheDetection.length !== allTools.length,
-      is1hCacheTTL: should1hCacheTTL(options.querySource),
+      is1hCacheTTL: should1hCacheTTL(options.querySource, {
+        agentCacheTtlOverride: options.agentCacheTtlOverride,
+      }),
       queryDepth: options.queryTracking?.depth,
       cacheDiagnosis: cacheDiagnosisLatched,
       effortValue: effort,
@@ -2233,6 +2291,7 @@ async function* queryModel(
         consumedCacheEdits as any,
         consumedPinnedEdits as any,
         options.skipCacheWrite,
+        options.agentCacheTtlOverride,
       ),
       system,
       tools: allTools,
@@ -4993,6 +5052,7 @@ export function addCacheBreakpoints(
   newCacheEdits?: CachedMCEditsBlock | null,
   pinnedEdits?: CachedMCPinnedEdits[],
   skipCacheWrite = false,
+  agentCacheTtlOverride?: PromptCacheTtl,
 ): MessageParam[] {
   // densable Jdy / SEA eDT canMarkApiSystem: prefer cache_control on trailing
   // nonempty api_system when !demote && !dje() && provider/base-URL eligible.
@@ -5058,7 +5118,10 @@ export function addCacheBreakpoints(
             {
               type: 'text' as const,
               text,
-              cache_control: getCacheControl({ querySource }),
+              cache_control: getCacheControl({
+                querySource,
+                agentCacheTtlOverride,
+              }),
             },
           ],
         } as unknown as MessageParam
@@ -5074,6 +5137,7 @@ export function addCacheBreakpoints(
         addCache,
         enablePromptCaching,
         querySource,
+        agentCacheTtlOverride,
       )
     }
     return assistantMessageToMessageParam(
@@ -5081,6 +5145,7 @@ export function addCacheBreakpoints(
       addCache,
       enablePromptCaching,
       querySource,
+      agentCacheTtlOverride,
     )
   })
 
@@ -5196,6 +5261,7 @@ export function buildSystemPromptBlocks(
   options?: {
     skipGlobalCacheForSystemPrompt?: boolean
     querySource?: QuerySource
+    agentCacheTtlOverride?: PromptCacheTtl
   },
 ): TextBlockParam[] {
   // IMPORTANT: Do not add any more blocks for caching or you will get a 400
@@ -5210,6 +5276,7 @@ export function buildSystemPromptBlocks(
           cache_control: getCacheControl({
             scope: block.cacheScope,
             querySource: options?.querySource,
+            agentCacheTtlOverride: options?.agentCacheTtlOverride,
           }),
         }),
     }

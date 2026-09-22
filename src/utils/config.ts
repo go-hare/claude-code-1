@@ -13,7 +13,11 @@ import type {
   ReferralEligibilityResponse,
 } from '../services/oauth/types.js'
 import { getCwd } from '../utils/cwd.js'
-import { registerCleanup } from './cleanupRegistry.js'
+import {
+  cleanupDrainStarted,
+  registerCleanup,
+  type CleanupUnregister,
+} from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getGlobalClaudeFile } from './env.js'
@@ -1337,13 +1341,74 @@ function removeProjectHistory(
 // fs.watchFile poll interval for detecting writes from other instances (ms)
 const CONFIG_FRESHNESS_POLL_MS = 1000
 let freshnessWatcherStarted = false
+/** Official I.freshnessResubscribed — one resubscribe per watch generation. */
+let globalConfigFreshnessResubscribed = false
+let globalConfigFreshnessCleanup: CleanupUnregister | undefined
 
-// fs.watchFile polls stat on the libuv threadpool and only calls us when mtime
-// changed — a stalled stat never blocks the main thread.
-function startGlobalConfigFreshnessWatcher(): void {
-  if (freshnessWatcherStarted || process.env.NODE_ENV === 'test') return
-  freshnessWatcherStarted = true
+function formatGlobalConfigFreshnessWatchError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+/** Official claimFreshnessResubscribe @ global config cache. */
+function claimGlobalConfigFreshnessResubscribe(): boolean {
+  if (globalConfigFreshnessResubscribed) return false
+  globalConfigFreshnessResubscribed = true
+  return true
+}
+
+function applyGlobalConfigFreshnessStat(curr: {
+  mtimeMs: number
+  size: number
+}): void {
+  if (curr.mtimeMs <= globalConfigCache.mtime) return
   const file = getGlobalClaudeFile()
+  void getFsImplementation()
+    .readFile(file, { encoding: 'utf-8' })
+    .then(content => {
+      if (curr.mtimeMs <= globalConfigCache.mtime) return
+      const parsed = safeParseJSON(stripBOM(content))
+      if (parsed === null || typeof parsed !== 'object') return
+      globalConfigCache = {
+        config: migrateConfigFields({
+          ...createDefaultGlobalConfig(),
+          ...(parsed as Partial<GlobalConfig>),
+        }),
+        mtime: curr.mtimeMs,
+      }
+      lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
+    })
+    .catch(error => {
+      if (getErrnoCode(error) === 'ENOENT') return
+      handleGlobalConfigFreshnessWatchEnded(error)
+    })
+}
+
+/** Official Ma — watchFile host (CD(); no storage wa). */
+function ensureGlobalConfigFreshnessMa(options?: {
+  allowInTest?: boolean
+}): void {
+  if (cleanupDrainStarted()) return
+  startGlobalConfigFreshnessWatchCd(options)
+}
+
+/** Official CD — fs.watchFile fallback freshness (Nr off / no storage backend). */
+function startGlobalConfigFreshnessWatchCd(options?: {
+  allowInTest?: boolean
+}): void {
+  if (freshnessWatcherStarted) return
+  if (!options?.allowInTest && process.env.NODE_ENV === 'test') return
+  if (cleanupDrainStarted()) return
+  freshnessWatcherStarted = true
+  globalConfigFreshnessResubscribed = false
+  const file = getGlobalClaudeFile()
+  if (globalConfigFreshnessCleanup === undefined) {
+    globalConfigFreshnessCleanup = registerCleanup(async () => {
+      unwatchFile(file)
+      freshnessWatcherStarted = false
+      globalConfigFreshnessCleanup = undefined
+    })
+  }
   watchFile(
     file,
     { interval: CONFIG_FRESHNESS_POLL_MS, persistent: false },
@@ -1352,31 +1417,34 @@ function startGlobalConfigFreshnessWatcher(): void {
       // overshoot makes cache.mtime > file mtime, so we skip the re-read.
       // Bun/Node also fire with curr.mtimeMs=0 when the file doesn't exist
       // (initial callback or deletion) — the <= handles that too.
-      if (curr.mtimeMs <= globalConfigCache.mtime) return
-      void getFsImplementation()
-        .readFile(file, { encoding: 'utf-8' })
-        .then(content => {
-          // A write-through may have advanced the cache while we were reading;
-          // don't regress to the stale snapshot watchFile stat'd.
-          if (curr.mtimeMs <= globalConfigCache.mtime) return
-          const parsed = safeParseJSON(stripBOM(content))
-          if (parsed === null || typeof parsed !== 'object') return
-          globalConfigCache = {
-            config: migrateConfigFields({
-              ...createDefaultGlobalConfig(),
-              ...(parsed as Partial<GlobalConfig>),
-            }),
-            mtime: curr.mtimeMs,
-          }
-          lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
-        })
-        .catch(() => {})
+      applyGlobalConfigFreshnessStat(curr)
     },
   )
-  registerCleanup(async () => {
-    unwatchFile(file)
-    freshnessWatcherStarted = false
-  })
+}
+
+/** Official kD (!e.ok) — resubscribe on watch/read failure; gated by DYe. */
+function handleGlobalConfigFreshnessWatchEnded(error: unknown): void {
+  if (cleanupDrainStarted()) return
+  logForDebugging(
+    `Watching ~/.claude.json through the storage interface ended: ${formatGlobalConfigFreshnessWatchError(error)}`,
+    { level: 'warn' },
+  )
+  const file = getGlobalClaudeFile()
+  unwatchFile(file)
+  freshnessWatcherStarted = false
+  const allowInTest =
+    process.env.NODE_ENV === 'test' ? { allowInTest: true } : {}
+  if (claimGlobalConfigFreshnessResubscribe()) {
+    ensureGlobalConfigFreshnessMa(allowInTest)
+  } else {
+    ensureGlobalConfigFreshnessMa(allowInTest)
+  }
+}
+
+// fs.watchFile polls stat on the libuv threadpool and only calls us when mtime
+// changed — a stalled stat never blocks the main thread.
+function startGlobalConfigFreshnessWatcher(): void {
+  ensureGlobalConfigFreshnessMa()
 }
 
 // Write-through: what we just wrote IS the new config. cache.mtime overshoots
@@ -2057,7 +2125,13 @@ export function getCurrentProjectConfig(): ProjectConfig {
 
 export function saveCurrentProjectConfig(
   updater: (currentConfig: ProjectConfig) => ProjectConfig,
+  /**
+   * densable cc(K, D) — official persist handle when `$t()`. Unused locally;
+   * disk write stays the path when this arg is omitted.
+   */
+  _storageV5?: unknown,
 ): void {
+  void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_PROJECT_CONFIG_FOR_TESTING)
     // Skip if no changes (same reference returned)
@@ -2250,4 +2324,34 @@ export function _setGlobalConfigCacheForTesting(
 ): void {
   globalConfigCache.config = config
   globalConfigCache.mtime = config ? Date.now() : 0
+}
+
+export function _ensureGlobalConfigFreshnessMaForTesting(): void {
+  ensureGlobalConfigFreshnessMa()
+}
+
+export function _startGlobalConfigFreshnessWatchCdForTesting(): void {
+  startGlobalConfigFreshnessWatchCd({ allowInTest: true })
+}
+
+export function _handleGlobalConfigFreshnessWatchEndedForTesting(
+  error: unknown,
+): void {
+  handleGlobalConfigFreshnessWatchEnded(error)
+}
+
+export function _isGlobalConfigFreshnessWatcherStartedForTesting(): boolean {
+  return freshnessWatcherStarted
+}
+
+export function _resetGlobalConfigFreshnessWatchForTesting(): void {
+  try {
+    unwatchFile(getGlobalClaudeFile())
+  } catch {
+    // file may never have been watched
+  }
+  freshnessWatcherStarted = false
+  globalConfigFreshnessResubscribed = false
+  globalConfigFreshnessCleanup?.()
+  globalConfigFreshnessCleanup = undefined
 }

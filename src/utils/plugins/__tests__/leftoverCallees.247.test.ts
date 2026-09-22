@@ -86,11 +86,19 @@ describe('densable 2.1.247 leftover callee 接', () => {
     )
     expect(src).toContain('export class SessionHost')
     expect(src).toContain('export function createSessionHost()')
-    expect(src).toContain('backgroundHousekeeping: {}')
-    expect(src).toContain('return getBootstrapSessionHost()')
+    expect(src).toContain(
+      'backgroundHousekeeping: new BackgroundHousekeeping()',
+    )
     expect(src).not.toContain('new Map<string, object>')
     expect(src).not.toContain('class Yt')
     expect(src).not.toContain('class jt')
+    const root = readFileSync(
+      join(import.meta.dir, '../../sessionRoot.ts'),
+      'utf8',
+    )
+    expect(root).toContain('return getBootstrapSessionHost()')
+    expect(root).not.toContain('class Yt')
+    expect(root).not.toContain('class jt')
   })
 
   test('cn increments dm(pluginInfo.repository) on prompt paths', () => {

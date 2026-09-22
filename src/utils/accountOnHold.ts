@@ -140,6 +140,16 @@ export class OAuthRefreshDeadError extends Error {
   }
 }
 
+/** densable 2.1.248 `Zye` — fk throws when refresh returns lock_timeout. */
+export class OAuthRefreshLockTimeoutError extends Error {
+  constructor() {
+    super(
+      'OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock',
+    )
+    this.name = 'OAuthRefreshLockTimeoutError'
+  }
+}
+
 type AxiosLikeError = {
   isAxiosError: true
   response?: {

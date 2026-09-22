@@ -142,7 +142,11 @@ import type {
 } from '../entrypoints/sdk/controlTypes.js'
 import type { StdoutMessage } from '../entrypoints/sdk/controlTypes.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
-import { setSessionMetadataChangedListener } from '../utils/sessionState.js'
+import {
+  setSessionMetadataChangedListener,
+  type RequiresActionDetails,
+} from '../utils/sessionState.js'
+import { buildUserDialogRequiresActionDetails } from '../utils/userDialog.js'
 import { generateShortWordSlug } from '../utils/words.js'
 
 /**
@@ -155,6 +159,99 @@ import { generateShortWordSlug } from '../utils/words.js'
  * TypeScript can't verify that objects with session_id are valid StdoutMessage.
  */
 type TransportMessage = StdoutMessage & { session_id?: string }
+
+/**
+ * densable 2.1.248 #31 official strings (sendControlRequest / cancel).
+ * Gold: `[remote-bridge] Not forwarding request_user_dialog while writes
+ * are gated / transport recovering (local-only): ${id}`
+ * and `Local-only retract of a declined dialog forward request_id=`.
+ */
+export const NOT_FORWARDING_GATED_DIALOG =
+  '[remote-bridge] Not forwarding request_user_dialog while writes are gated / transport recovering (local-only):'
+export const LOCAL_ONLY_RETRACT =
+  '[remote-bridge] Local-only retract of a declined dialog forward request_id='
+
+/** Official 248 pe entry. */
+export type PendingControlForward = {
+  request: SDKControlRequest
+  details?: RequiresActionDetails
+}
+
+export function isBridgePermissionForwardSubtype(
+  subtype: string | undefined,
+): subtype is 'can_use_tool' | 'request_user_dialog' {
+  return subtype === 'can_use_tool' || subtype === 'request_user_dialog'
+}
+
+/**
+ * Official 248 remote-bridge pe / Ze / ot / xi host (closure locals in
+ * densable). Leftover-readable names; comments cite official names.
+ * Hht (attestation resolvedPromptRequestIds) has no leftover host — ot
+ * still deletes pe/Ze; do not invent attestation.
+ */
+export function createRemoteBridgePendingForwards(): {
+  /** official pe */
+  readonly pendingControlForwards: Map<string, PendingControlForward>
+  /** official Ze — shown local-only, not forwarded */
+  readonly localOnlyDialogForwards: Set<string>
+  noteForward(request: SDKControlRequest, details?: RequiresActionDetails): void
+  markLocalOnly(requestId: string): void
+  /** official cancel: `if (Ze.delete(e)) { pe.delete(e); return }` */
+  retractLocalOnly(requestId: string): boolean
+  /** official ot(e,r) without Hht */
+  forgetPendingForward(requestId: string): void
+  /**
+   * official setOnConnect: `if (pe.size>0) { findLast details; ye;
+   * Ze.clear() }`. pe stays so xi can still return requests.
+   */
+  onReconnect(): {
+    reemit: boolean
+    details: RequiresActionDetails | undefined
+  }
+  /** official xi */
+  getPendingPrompts(): SDKControlRequest[]
+} {
+  const pendingControlForwards = new Map<string, PendingControlForward>()
+  const localOnlyDialogForwards = new Set<string>()
+  return {
+    pendingControlForwards,
+    localOnlyDialogForwards,
+    noteForward(request, details) {
+      pendingControlForwards.delete(request.request_id)
+      pendingControlForwards.set(
+        request.request_id,
+        details ? { request, details } : { request },
+      )
+      localOnlyDialogForwards.delete(request.request_id)
+    },
+    markLocalOnly(requestId) {
+      localOnlyDialogForwards.add(requestId)
+    },
+    retractLocalOnly(requestId) {
+      if (!localOnlyDialogForwards.delete(requestId)) return false
+      pendingControlForwards.delete(requestId)
+      return true
+    },
+    forgetPendingForward(requestId) {
+      localOnlyDialogForwards.delete(requestId)
+      pendingControlForwards.delete(requestId)
+    },
+    onReconnect() {
+      if (pendingControlForwards.size === 0) {
+        return { reemit: false, details: undefined }
+      }
+      const details = [...pendingControlForwards.values()].findLast(
+        t => t.details !== undefined,
+      )?.details
+      localOnlyDialogForwards.clear()
+      return { reemit: true, details }
+    },
+    getPendingPrompts() {
+      localOnlyDialogForwards.clear()
+      return [...pendingControlForwards.values()].map(e => e.request)
+    },
+  }
+}
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -722,6 +819,8 @@ export async function initEnvLessBridgeCore(
   // FlushGate: queue live writes while the history flush POST is in flight,
   // so the server receives [history..., live...] in order.
   const flushGate = new FlushGate<Message>()
+  // densable 2.1.248 #31 pe / Ze — pending permission forwards + local-only ids.
+  const pendingForwards = createRemoteBridgePendingForwards()
 
   let initialFlushDone = false
   let tornDown = false
@@ -896,6 +995,16 @@ export async function initEnvLessBridgeCore(
   function wireTransportCallbacks(): void {
     transport.setOnConnect(() => {
       clearTimeout(connectDeadline)
+      // official 248: if(pe.size>0){ findLast details; ye("requires_action",
+      // details); Ze.clear() }. Leftover persist/flush below stays.
+      const replay = pendingForwards.onReconnect()
+      if (replay.reemit) {
+        // official ye: reportState + pending_action when details exist
+        transport.reportState('requires_action', replay.details)
+        if (replay.details) {
+          transport.reportMetadata({ pending_action: replay.details })
+        }
+      }
       logForDebugging('[remote-bridge] v2 transport connected')
       logForDiagnosticsNoPII('info', 'bridge_repl_v2_transport_connected')
       logEvent('tengu_bridge_repl_ws_connected', {
@@ -980,6 +1089,8 @@ export async function initEnvLessBridgeCore(
         // user message or turn-end result.
         onPermissionResponse
           ? res => {
+              // official inbound: ot(request_id, success)
+              pendingForwards.forgetPendingForward(res.response.request_id)
               transport.reportState('running')
               onPermissionResponse(res)
             }
@@ -996,6 +1107,7 @@ export async function initEnvLessBridgeCore(
             onSetMcpPermissionModeOverride,
             onRenameSession,
             onGetWorkspaceDiff,
+            getPendingPrompts: () => pendingForwards.getPendingPrompts(),
             outboundOnly,
           }),
       )
@@ -1991,21 +2103,53 @@ export async function initEnvLessBridgeCore(
       void transport.writeBatch(events)
     },
     sendControlRequest(request: SDKControlRequest) {
-      if (authRecoveryInFlight()) {
-        logForDebugging(
-          `[remote-bridge] Dropping control_request during 401 recovery: ${request.request_id}`,
-        )
+      const subtype = (request as { request?: { subtype?: string } }).request
+        ?.subtype
+      // official pe.set({request}); Ze.delete
+      if (isBridgePermissionForwardSubtype(subtype)) {
+        pendingForwards.noteForward(request)
+      }
+      // official: request_user_dialog && (de.active||ce) → Ze.add; local-only
+      if (
+        subtype === 'request_user_dialog' &&
+        (flushGate.active || authRecoveryInFlight())
+      ) {
+        pendingForwards.markLocalOnly(request.request_id)
+        logForDebugging(`${NOT_FORWARDING_GATED_DIALOG} ${request.request_id}`)
         return
       }
       const event: TransportMessage = {
         ...request,
         session_id: sessionId,
       } as TransportMessage
-      if (
-        (request as { request?: { subtype?: string } }).request?.subtype ===
-        'can_use_tool'
-      ) {
-        transport.reportState('requires_action')
+      if (isBridgePermissionForwardSubtype(subtype)) {
+        let details:
+          | ReturnType<typeof buildUserDialogRequiresActionDetails>
+          | undefined
+        if (
+          subtype === 'request_user_dialog' &&
+          getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_bridge_requires_action_details',
+            false,
+          )
+        ) {
+          const inner = request.request as {
+            dialog_kind?: string
+            payload?: unknown
+            tool_use_id?: string
+          }
+          details = buildUserDialogRequiresActionDetails(
+            inner.dialog_kind ?? 'dialog',
+            inner.payload,
+            request.request_id,
+            inner.tool_use_id,
+          )
+          pendingForwards.noteForward(request, details)
+        }
+        transport.reportState('requires_action', details)
+        if (details) {
+          transport.reportMetadata({ pending_action: details })
+        }
       }
       void transport.write(event as StdoutMessage)
       logForDebugging(
@@ -2013,6 +2157,10 @@ export async function initEnvLessBridgeCore(
       )
     },
     sendControlResponse(response: SDKControlResponse) {
+      pendingForwards.forgetPendingForward(
+        (response as { response?: { request_id?: string } }).response
+          ?.request_id ?? '',
+      )
       if (authRecoveryInFlight()) {
         logForDebugging(
           '[remote-bridge] Dropping control_response during 401 recovery',
@@ -2028,12 +2176,12 @@ export async function initEnvLessBridgeCore(
       logForDebugging('[remote-bridge] Sent control_response')
     },
     sendControlCancelRequest(requestId: string) {
-      if (authRecoveryInFlight()) {
-        logForDebugging(
-          `[remote-bridge] Dropping control_cancel_request during 401 recovery: ${requestId}`,
-        )
+      // Official: Ze.delete → Local-only retract; do not write cancel.
+      if (pendingForwards.retractLocalOnly(requestId)) {
+        logForDebugging(`${LOCAL_ONLY_RETRACT}${requestId}`)
         return
       }
+      pendingForwards.forgetPendingForward(requestId)
       const event: TransportMessage = {
         type: 'control_cancel_request' as const,
         request_id: requestId,

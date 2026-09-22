@@ -14,6 +14,7 @@ import {
   FABLE_OVERAGE_CONSENT_DIALOG_KIND,
   fableOverageConsentDialogSpec,
 } from './printRequestDialog.js'
+import { isUsageCreditsHintEnabled } from '../services/rateLimitMessages.js'
 import { getAgentId } from './teammate.js'
 
 /** Official model family match for Claude Fable 5. */
@@ -149,7 +150,9 @@ export function getFableConsentCopy(input?: {
   }
   return {
     title: 'Fable 5 requires usage credits.',
-    body: "You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models.",
+    body: isUsageCreditsHintEnabled()
+      ? "You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models."
+      : "You're out of usage credits. /model to switch models.",
     acceptLabel: 'Continue with Fable 5',
     declineLabel: 'Not now',
   }
@@ -236,7 +239,9 @@ export function planFablePurchaseIntent(input: {
     input.canPurchase !== false &&
     (input.lane === 'no_credits_yet' || input.lane === 'out_of_credits')
   ) {
-    return { next: 'open_purchase', commandHint: '/usage-credits' }
+    return isUsageCreditsHintEnabled()
+      ? { next: 'open_purchase', commandHint: '/usage-credits' }
+      : { next: 'open_purchase' }
   }
   if (input.lane === 'credits_off') {
     return { next: 'mark_consent_only' }

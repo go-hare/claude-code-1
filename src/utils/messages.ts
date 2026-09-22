@@ -100,6 +100,7 @@ import {
   wrapScheduledTaskDisclaimer,
 } from './scheduledTaskDisclaimer.js'
 import { jsonStringify } from './slowOperations.js'
+import { em } from './model/modelNoticeCode.js'
 
 export {
   isScheduledTaskOrigin,
@@ -1006,7 +1007,7 @@ export function createModelSwitchBreadcrumbs(
     createSyntheticUserCaveatMessage(),
     createUserMessage({ content: formatCommandInputTags('model', modelArg) }),
     createUserMessage({
-      content: `<${LOCAL_COMMAND_STDOUT_TAG}>Set model to ${resolvedDisplay}</${LOCAL_COMMAND_STDOUT_TAG}>`,
+      content: `<${LOCAL_COMMAND_STDOUT_TAG}>Set model to ${em(resolvedDisplay)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
     }),
   ]
 }

@@ -1,6 +1,7 @@
 /**
  * densable `_580` `sn` / `er` / `k0` (Ptc/`on` segment fold).
  * Gold: gold-forged-sn-wide.txt; k0 @208712687.
+ * 2.1.248 #30: leftover `rr`/`or`/`ar`/`Ke` (not cloud upload).
  *
  * `_465` hs `on` is `EGb` = this `sn` (not confusable `Eo`).
  */
@@ -91,11 +92,17 @@ const LEAF_NAMES = [
 const ENV_LEAF = '.env'
 const CLAUDE_JSON = '.claude.json'
 const ENV_EXCEPTIONS = ['example', 'sample', 'template', 'dist'] as const
-const BACKUP_SUFFIX = /(?:\.bak|\.old|\.orig|\.backup|\.~\d+~|~)$/
+/** densable `Ke` @183206850 — swap/tmp/backup source for `Xn`. */
+const Ke = String.raw`\.sw[a-p]|\.un~|\.rej|\.save|\.tmp|\.temp|\.bak|\.old|\.orig|\.backup|\.~\d+~|~`
+/** densable `Xn` — `(?:${Ke})$` with flag `i`. */
+const BACKUP_SUFFIX = new RegExp(`(?:${Ke})$`, 'i')
 const GIT_DIR_NAME = '.git'
 const CONFIG_LEAF = 'config'
+/** densable `zn` @183208418 — terraform.tfvars moved to `ar`/`sr`. */
 const SECRET_LEAF =
-  /(?:\.(?:pem|key|p12|pfx|keystore|jks)|_(?:rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml)|^terraform\.tfvars(?:\.json)?)$/
+  /(?:\.(?:pem|key|p12|pfx|keystore|jks)|_(?:rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml))$/
+/** densable `sr` @183210199 — `*.tfvars` / `*.tfvars.json`. */
+const sr = /^(.*)\.tfvars(?:\.json)?$/
 
 /**
  * densable `k0` / Ptc — fold one path segment before `sn` tables.
@@ -144,7 +151,25 @@ function ancestorEndsWithGit(
   return segs.slice(0, leafIndex).some(seg => seg.endsWith(GIT_DIR_NAME))
 }
 
-/** densable `rn` — leaf name / secret suffix / `.env` / `.claude.json`. */
+/** densable `St` @183210297 sha=a8f001497cd8bc11. */
+function St(e: string): boolean {
+  return (ENV_EXCEPTIONS as readonly string[]).includes(
+    e.split('.').at(-1) ?? '',
+  )
+}
+
+/** densable `or` @183210134 sha=6df6c632fdd8df6a — `*.env`. */
+function or(e: string): boolean {
+  return e.endsWith(ENV_LEAF) && !St(e.slice(0, -ENV_LEAF.length))
+}
+
+/** densable `ar` @183210234 sha=a525019b7323fc5f — `*.tfvars`. */
+function ar(e: string): boolean {
+  const t = sr.exec(e)?.[1]
+  return t !== undefined && !St(t)
+}
+
+/** densable `rr` @183209926 sha=767a227a812950d5. */
 function isCredentialLeaf(name: string): boolean {
   return (
     (LEAF_NAMES as readonly string[]).includes(name) ||
@@ -154,7 +179,9 @@ function isCredentialLeaf(name: string): boolean {
     (name.startsWith(`${ENV_LEAF}.`) &&
       !(ENV_EXCEPTIONS as readonly string[]).includes(
         name.slice(ENV_LEAF.length + 1),
-      ))
+      )) ||
+    or(name) ||
+    ar(name)
   )
 }
 

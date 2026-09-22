@@ -17,6 +17,8 @@ import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/Ag
 import { getAgentDescriptionsTotalTokens, AGENT_DESCRIPTIONS_THRESHOLD } from './statusNoticeHelpers.js';
 import { isSupportedJetBrainsTerminal, toIDEDisplayName, getTerminalIdeType } from './ide.js';
 import { isJetBrainsPluginInstalledCachedSync } from './jetbrains.js';
+import { formatRemoteManagedSettingsStartupWarning } from '../services/remoteManagedSettings/loadStatus.js';
+import { getUdsStartFailureCause, getUdsStartFailureReason } from './udsMessaging.js';
 
 // Types
 export type StatusNoticeType = 'warning' | 'info';
@@ -184,6 +186,51 @@ const largeAgentDescriptionsNotice: StatusNoticeDefinition = {
   },
 };
 
+/**
+ * Official Bf @201567134 — startup notice when inbox dir was refused.
+ * Gold: "Cross-session messaging is off:" + wZe + debug-file hint.
+ */
+const crossSessionMessagingOffNotice: StatusNoticeDefinition = {
+  id: 'cross-session-messaging-off',
+  type: 'warning',
+  isActive: () => getUdsStartFailureCause() === 'socket_dir_refused',
+  render: () => (
+    <Box flexDirection="row">
+      <Text color="warning">{figures.warning}</Text>
+      <Text color="warning">
+        Cross-session messaging is off: {getUdsStartFailureReason() ?? 'its socket directory could not be set up'}
+        <Text dimColor>{' · run with --debug-file <path> for the full log'}</Text>
+      </Text>
+    </Box>
+  ),
+};
+
+/**
+ * Official Gf @201568447 — startup warning when remote managed settings
+ * failed / stale_cache. Same StatusNotices table as Bf / Uf.
+ */
+const remoteManagedSettingsLoadFailNotice: StatusNoticeDefinition = {
+  id: 'remote-managed-settings-load-fail',
+  type: 'warning',
+  isActive: () => formatRemoteManagedSettingsStartupWarning() !== undefined,
+  render: () => {
+    const text = formatRemoteManagedSettingsStartupWarning();
+    if (!text) return null;
+    const dimMark = ' \u00b7 /status for details';
+    const dimAt = text.endsWith(dimMark) ? text.length - dimMark.length : -1;
+    const main = dimAt === -1 ? text : text.slice(0, dimAt);
+    return (
+      <Box flexDirection="row">
+        <Text color="warning">{figures.warning}</Text>
+        <Text color="warning">
+          {main}
+          {dimAt === -1 ? null : <Text dimColor>{dimMark}</Text>}
+        </Text>
+      </Box>
+    );
+  },
+};
+
 const jetbrainsPluginNotice: StatusNoticeDefinition = {
   id: 'jetbrains-plugin-install',
   type: 'info',
@@ -224,6 +271,8 @@ export const statusNoticeDefinitions: StatusNoticeDefinition[] = [
   apiKeyConflictNotice,
   bothAuthMethodsNotice,
   jetbrainsPluginNotice,
+  crossSessionMessagingOffNotice,
+  remoteManagedSettingsLoadFailNotice,
 ];
 
 // Helper functions for external use

@@ -21,6 +21,7 @@ import {
   getOAuthAccountOnHold,
   OAuthAccountOnHoldError,
   OAuthRefreshDeadError,
+  OAuthRefreshLockTimeoutError,
 } from 'src/utils/accountOnHold.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
 import { getUserAgent } from 'src/utils/http.js'
@@ -203,7 +204,17 @@ export async function getAnthropicClient({
   }
 
   logForDebugging('[API:auth] OAuth token check starting')
-  await checkAndRefreshOAuthTokenIfNeeded(0, false, credentials, storageV5)
+  // densable 2.1.248 fk `Q` — leftover boolean refresh throws Zye on lock
+  // exhaustion; remember it and throw at the official site after hold.
+  let oauthRefreshLockTimeout = false
+  try {
+    await checkAndRefreshOAuthTokenIfNeeded(0, false, credentials, storageV5)
+  } catch (error) {
+    if (!(error instanceof OAuthRefreshLockTimeoutError)) {
+      throw error
+    }
+    oauthRefreshLockTimeout = true
+  }
   logForDebugging('[API:auth] OAuth token check complete')
 
   // Official uRi first branch: resolve + apply gateway BEFORE getAPIProvider()
@@ -769,6 +780,15 @@ export async function getAnthropicClient({
   if (oauthSubscriber) {
     const hold = getOAuthAccountOnHold()
     if (hold) throw new OAuthAccountOnHoldError(hold.url)
+    // densable 2.1.248 fk: Q==="lock_timeout" && expired → throw Zye
+    const oauthTokens = getClaudeAIOAuthTokens()
+    if (
+      oauthRefreshLockTimeout &&
+      oauthTokens?.expiresAt != null &&
+      Date.now() >= oauthTokens.expiresAt
+    ) {
+      throw new OAuthRefreshLockTimeoutError()
+    }
   }
   assertValidOutgoingHeaders({
     apiKey: oauthSubscriber ? null : apiKey || getAnthropicApiKey(),

@@ -545,6 +545,10 @@ export type AppState = DeepImmutable<{
   advisorModel?: string
   // Effort value
   effortValue?: EffortValue
+  /**
+   * official AppState.proactivityLevel — leftover getProactivityLevel().
+   */
+  proactivityLevel?: unknown
   // densable AppState.ultracode — session multi-agent orchestration mode.
   // Orthogonal to EffortLevel; wire effort is set separately (prefer catalog top).
   ultracode?: boolean
@@ -739,6 +743,7 @@ export function getDefaultAppState(): AppState {
     authVersion: 0,
     initialMessage: null,
     effortValue: undefined,
+    proactivityLevel: undefined,
     ultracode: false,
     // densable default ultrareviewOverageConfirmed:!1
     ultrareviewOverageConfirmed: false,

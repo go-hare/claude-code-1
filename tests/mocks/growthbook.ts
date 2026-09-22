@@ -41,6 +41,9 @@ export function growthbookMock() {
   return {
     getFeatureValue_CACHED_MAY_BE_STALE: (n: string, d: unknown) =>
       applyGrowthbookFeatureGetters(n, d),
+    // densable 2.1.248 `zce` — mock pins via the same getter stack.
+    getPinnedFeatureValue: (n: string, d: unknown) =>
+      applyGrowthbookFeatureGetters(n, d),
     getDynamicConfig_CACHED_MAY_BE_STALE: (_n: string, d: unknown) => d,
     getDynamicConfig_BLOCKS_ON_INIT: async (_n: string, d: unknown) => d,
     checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,

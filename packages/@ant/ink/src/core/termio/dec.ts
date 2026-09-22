@@ -21,6 +21,7 @@ export const DEC = {
   FOCUS_EVENTS: 1004,
   BRACKETED_PASTE: 2004,
   SYNCHRONIZED_UPDATE: 2026,
+  WIN32_INPUT_MODE: 9001,
 } as const
 
 /** Generate CSI ? N h sequence (set mode) */
@@ -44,6 +45,8 @@ export const SHOW_CURSOR = decset(DEC.CURSOR_VISIBLE)
 export const HIDE_CURSOR = decreset(DEC.CURSOR_VISIBLE)
 export const ENTER_ALT_SCREEN = decset(DEC.ALT_SCREEN_CLEAR)
 export const EXIT_ALT_SCREEN = decreset(DEC.ALT_SCREEN_CLEAR)
+/** Official Yot = Hj(wf.WIN32_INPUT_MODE) — disable win32-input-mode (?9001l). */
+export const Yot = decreset(DEC.WIN32_INPUT_MODE)
 
 /** Official alt-screen entry wrapper: enter, clear, home, then restore extended keys. */
 export function enterAltScreenSequence(extendedKeys = false): string {

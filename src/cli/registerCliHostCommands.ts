@@ -714,6 +714,7 @@ export function registerCliHostCommands(
       'Fallback model for dispatched sessions',
     )
     .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
+    .option('--restricted', 'Start dispatched sessions in restricted mode')
     .allowUnknownOption(true)
     .action(async () => {
       const agentsIdx = process.argv.indexOf('agents')

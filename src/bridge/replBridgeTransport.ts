@@ -6,7 +6,10 @@ import type { NonOrigin403Streak } from '../cli/transports/nonOrigin403.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { updateSessionIngressAuthToken } from '../utils/sessionIngressAuth.js'
-import type { SessionState } from '../utils/sessionState.js'
+import type {
+  RequiresActionDetails,
+  SessionState,
+} from '../utils/sessionState.js'
 import { closeCodeForClassifiedReason } from './remintRecovery.js'
 import { registerWorker } from './workSecret.js'
 
@@ -59,7 +62,7 @@ export type ReplBridgeTransport = {
    * "waiting for input" indicator. REPL/daemon callers don't need this
    * (user watches the REPL locally); multi-session worker callers do.
    */
-  reportState(state: SessionState): void
+  reportState(state: SessionState, details?: RequiresActionDetails): void
   /** PUT /worker external_metadata (v2 only; v1 is a no-op). */
   reportMetadata(metadata: Record<string, unknown>): void
   /**
@@ -340,8 +343,8 @@ export async function createV2ReplTransport(opts: {
     },
     // v2 write path (CCRClient) doesn't set maxConsecutiveFailures — no drops.
     droppedBatchCount: 0,
-    reportState(state) {
-      ccr.reportState(state)
+    reportState(state, details) {
+      ccr.reportState(state, details)
     },
     reportMetadata(metadata) {
       ccr.reportMetadata(metadata)

@@ -247,6 +247,14 @@ import {
 import { ensureModelStringsInitialized } from './utils/model/modelStrings.js';
 import { PERMISSION_MODES } from './utils/permissions/PermissionMode.js';
 import {
+  foldRestrictedLaunchOptions,
+  isRestrictedEnv,
+  RESTRICTED_CLOUD_SSH_REFUSE,
+  RESTRICTED_DISPATCH_OPTION_HELP,
+  RESTRICTED_OPTION_HELP,
+  refuseRestrictedBypass,
+} from './utils/restricted.js';
+import {
   getAutoModeEnabledStateIfCached,
   initializeToolPermissionContext,
   initialPermissionModeFromCLI,
@@ -315,7 +323,7 @@ import { getReplDiffHost } from 'src/utils/sessionHost.js';
 import { getPinnedStorageV5 } from 'src/utils/storageV5/index.js';
 import { logContextMetrics } from 'src/utils/api.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
-import { eagerParseCliFlag } from 'src/utils/cliArgs.js';
+import { eagerHasCliFlag, eagerParseCliFlag } from 'src/utils/cliArgs.js';
 import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
 import { countConcurrentSessions, registerSession, updateSessionName } from 'src/utils/concurrentSessions.js';
 import { getCwd } from 'src/utils/cwd.js';
@@ -362,8 +370,10 @@ import {
   setOriginalCwd,
   setParentManagedSettings,
   setQuestionPreviewFormat,
+  getRestrictedSession,
+  setRestrictedSession,
   setSessionBypassPermissionsMode,
-  setSessionSource,
+  setStrictMcpConfig,
   setTodoToolsOptIn,
   setUserMsgOptIn,
   switchSession,
@@ -804,6 +814,12 @@ function eagerLoadSettings(): void {
   if (settingSourcesArg !== undefined) {
     loadSettingSourcesFromFlag(settingSourcesArg);
   }
+  // official k3t @189721038 — restricted overwrites --setting-sources:
+  // `if(t0("--restricted")||O2())g(""),c7e(!0)`
+  if (eagerHasCliFlag('--restricted') || isRestrictedEnv()) {
+    loadSettingSourcesFromFlag('');
+    setRestrictedSession(true);
+  }
   profileCheckpoint('eagerLoadSettings_end');
 }
 
@@ -1196,10 +1212,8 @@ export async function main() {
     setQuestionPreviewFormat('markdown');
   }
 
-  // Tag sessions created via `claude remote-control` so the backend can identify them
-  if (process.env.CLAUDE_CODE_ENVIRONMENT_KIND === 'bridge') {
-    setSessionSource('remote-control');
-  }
+  // densable 2.1.248: cut dead STATE.sessionSource (write-only; SEA/ge/Ie have
+  // no slot). Bridge createSession already sends body.source='remote-control'.
 
   profileCheckpoint('main_client_type_determined');
 
@@ -1502,6 +1516,7 @@ async function run(): Promise<CommanderCommand> {
       '--tools <tools...>',
       'Specify the list of available tools from the built-in set. Use "" to disable all tools, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").',
     )
+    .option('--restricted', RESTRICTED_OPTION_HELP)
     .option(
       '--disallowedTools, --disallowed-tools <tools...>',
       'Comma or space-separated list of tool names to deny (e.g. "Bash(git:*) Edit")',
@@ -1781,6 +1796,7 @@ async function run(): Promise<CommanderCommand> {
         includeHookEvents,
         includePartialMessages,
         forwardSubagentText,
+        restricted: restrictedOpt,
       } = options;
 
       if (options.prefill) {
@@ -1796,8 +1812,9 @@ async function run(): Promise<CommanderCommand> {
         process.env.CLAUDE_CODE_AGENT = agentCli;
       }
 
-      // densable 2.1.212 launch sticky state for keepParent /fork:
-      //   xei(Ajs(a)) + Iei({appendSystemPrompt, agent, agents}) + rti(gXe argv)
+      // densable 2.1.248 launch sticky for keepParent /fork (Ie.#w / #L / #g):
+      //   Cwn(Win(C)) + Rwn({appendSystemPrompt, agent, agents}) + qYe/rti argv
+      //   #w = forkRestrictedLaunchConfig — NOT #1 Yk / restrictedSession (#l)
       try {
         const {
           setForkReplayLaunchConfig,
@@ -1810,13 +1827,13 @@ async function run(): Promise<CommanderCommand> {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           require('./utils/forkReplayLaunchConfig.js') as typeof import('./utils/forkReplayLaunchConfig.js');
         const rawAppend = typeof options.appendSystemPrompt === 'string' ? options.appendSystemPrompt : undefined;
-        // densable Iei
+        // densable Rwn / Iei
         setForkReplayLaunchConfig({
           ...(typeof rawAppend === 'string' && rawAppend !== '' && { appendSystemPrompt: rawAppend }),
           ...(typeof agentCli === 'string' && agentCli !== '' && { agent: agentCli }),
           ...(typeof agentsJson === 'string' && agentsJson !== '' && { agents: agentsJson }),
         });
-        // densable xei(Ajs(a)) — sticky restricted launch for nZ_/Hei()
+        // official Cwn(Win(C)) @191374601 — sticky #w for GC()/nZ_/Hei()
         setForkRestrictedLaunchConfig(
           isForkRestrictedLaunchOptions({
             systemPrompt: options.systemPrompt,
@@ -2205,6 +2222,27 @@ async function run(): Promise<CommanderCommand> {
         dangerouslySkipPermissions,
       });
 
+      // official zin @182966251 then c7e(xe) + D2n({restricted, permissionMode, allowDangerouslySkipPermissions})
+      const { restricted } = foldRestrictedLaunchOptions(
+        { restricted: Boolean(restrictedOpt) },
+        getRestrictedSession(),
+      );
+      setRestrictedSession(restricted);
+      const restrictedBypassRefuse = refuseRestrictedBypass({
+        restricted,
+        permissionMode,
+        allowDangerouslySkipPermissions,
+      });
+      if (restrictedBypassRefuse) {
+        process.stderr.write(chalk.red(`Error: ${restrictedBypassRefuse}\n`));
+        process.exit(1);
+      }
+      // leftover host-refuse path only — do not invent a cloud host
+      if (restricted && (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host))) {
+        process.stderr.write(chalk.red(`${RESTRICTED_CLOUD_SSH_REFUSE}\n`));
+        process.exit(1);
+      }
+
       // Store session bypass permissions mode for trust dialog check
       setSessionBypassPermissionsMode(permissionMode === 'bypassPermissions');
       if (feature('TRANSCRIPT_CLASSIFIER')) {
@@ -2459,6 +2497,8 @@ async function run(): Promise<CommanderCommand> {
 
       // Extract strict MCP config flag
       const strictMcpConfig = options.strictMcpConfig || false;
+      // official Awn — latch on k.host.mcpProcessWiring
+      setStrictMcpConfig(strictMcpConfig);
 
       // Check if enterprise MCP configuration exists. When it does, only allow dynamic MCP
       // configs that contain special server types (sdk)
@@ -2668,6 +2708,7 @@ async function run(): Promise<CommanderCommand> {
         allowedToolsCli: allowedTools,
         disallowedToolsCli: disallowedTools,
         baseToolsCli: baseTools,
+        restricted,
         permissionMode,
         allowDangerouslySkipPermissions,
         addDirs: addDir,
@@ -5906,6 +5947,7 @@ async function run(): Promise<CommanderCommand> {
     .option('--allow-dangerously-skip-permissions', 'Allow dangerously-skip-permissions for dispatched sessions')
     .option('--fallback-model <model>', 'Fallback model for dispatched sessions')
     .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
+    .option('--restricted', RESTRICTED_DISPATCH_OPTION_HELP)
     .allowUnknownOption(true)
     .action(async () => {
       const agentsIdx = process.argv.indexOf('agents');
@@ -6024,23 +6066,33 @@ async function run(): Promise<CommanderCommand> {
   }
 
   // Remote Control command — connect local environment to claude.ai/code.
-  // The actual command is intercepted by the fast-path in cli.tsx before
-  // Commander.js runs, so this registration exists only for help output.
+  // cli.tsx still fast-paths when the verb is argv[0]. Global flags or
+  // wrapper-injected options before the verb miss that path and land here.
   // Always hidden: isBridgeEnabled() at this point (before enableConfigs)
   // would throw inside isClaudeAISubscriber → getGlobalConfig and return
   // false via the try/catch — but not before paying ~65ms of side effects
   // (25ms settings Zod parse + 40ms sync `security` keychain subprocess).
   // The dynamic visibility never worked; the command was always hidden.
+  // densable 2.1.248 #33: helpOption(false).allowUnknownOption().allowExcessArguments(true)
+  // then C(Y(L)) refuse parent CLI flags that are not in the allow-list.
   if (feature('BRIDGE_MODE')) {
     program
       .command('remote-control', { hidden: true })
       .alias('rc')
       .description('Connect your local environment for remote-control sessions via claude.ai/code')
-      .action(async () => {
-        // Unreachable — cli.tsx fast-path handles this command before main.tsx loads.
-        // If somehow reached, delegate to bridgeMain.
-        const { bridgeMain } = await import('./bridge/bridgeMain.js');
-        await bridgeMain(process.argv.slice(3));
+      .helpOption(false)
+      .allowUnknownOption()
+      .allowExcessArguments(true)
+      .action(async (P, M) => {
+        const L = M;
+        const { enterRemoteControl, rootOptionsRefusedMessage, rootOptionsRemoteControlRefuses, suppliedRootOptions } =
+          await import('./entrypoints/remoteControlFlags.js');
+        const refused = rootOptionsRemoteControlRefuses(suppliedRootOptions(L));
+        if (refused.length > 0) {
+          const { exitWithError } = await import('./utils/process.js');
+          return exitWithError(rootOptionsRefusedMessage(refused));
+        }
+        await enterRemoteControl(L.args, P, M);
       });
   }
 

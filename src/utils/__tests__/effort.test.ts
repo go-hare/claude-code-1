@@ -803,6 +803,25 @@ describe('densable effort catalog matrix', () => {
     expect(clampEffortForModel('xhigh', m)).toBe('high')
   })
 
+  test('grok-4.7: 4-tier with xhigh (does not inherit grok-4.5 3-tier)', () => {
+    const m = 'grok-4.7'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('high')
+    expect(getSupportedEffortLevels(m)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
+    expect(modelSupportsMaxEffort(m)).toBe(false)
+    expect(modelSupportsXhighEffort(m)).toBe(true)
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(clampEffortForModel('xhigh', m)).toBe('xhigh')
+    expect(clampEffortForModel('low', m)).toBe('low')
+    expect(resolveAppliedEffort(m, 'xhigh')).toBe('xhigh')
+    expect(resolveAppliedEffort(m, 'max')).toBe('high')
+  })
+
   test('grok-4.6: 4-tier with xhigh (does not inherit grok-4.5 3-tier)', () => {
     const m = 'grok-4.6'
     expect(modelSupportsEffort(m)).toBe(true)
@@ -877,6 +896,10 @@ describe('densable effort catalog matrix', () => {
 
   test('getUltracodeEffortForModel: grok-4.6 tops at xhigh', () => {
     expect(getUltracodeEffortForModel('grok-4.6')).toBe('xhigh')
+  })
+
+  test('getUltracodeEffortForModel: grok-4.7 tops at xhigh', () => {
+    expect(getUltracodeEffortForModel('grok-4.7')).toBe('xhigh')
   })
 
   test('grok-4.20-reasoning: 3-tier, does not inherit multi-agent xhigh', () => {

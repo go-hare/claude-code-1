@@ -5,7 +5,8 @@ process.env.ANTHROPIC_API_KEY ??= 'test-key-for-unit'
 
 import {
   resetStickyBetas,
-  setMidConvCachePromotionRejected,
+  markMidConvCachePromotionRejected,
+  resetRequestLatches,
 } from '../../../bootstrap/state.js'
 import { clearGatewayAuth } from '../../../utils/gatewayEnv.js'
 import { createApiSystemMessage } from '../../../utils/midConversationSystem.js'
@@ -17,7 +18,7 @@ describe('addCacheBreakpoints Jdy api_system', () => {
 
   beforeEach(() => {
     resetStickyBetas()
-    setMidConvCachePromotionRejected(false)
+    resetRequestLatches()
     // Sticky gatewayAuth short-circuits getAPIProvider() → 'gateway' even after
     // USE_* env scrub; clear so shouldCacheControlOnApiSystem() sees firstParty.
     clearGatewayAuth()
@@ -39,7 +40,7 @@ describe('addCacheBreakpoints Jdy api_system', () => {
 
   afterEach(() => {
     resetStickyBetas()
-    setMidConvCachePromotionRejected(false)
+    resetRequestLatches()
     clearGatewayAuth()
     for (const k of Object.keys(process.env)) {
       if (!(k in prevEnv)) delete process.env[k]
@@ -70,7 +71,7 @@ describe('addCacheBreakpoints Jdy api_system', () => {
   })
 
   test('demote latch strips cache_control from api_system but keeps role:system', () => {
-    setMidConvCachePromotionRejected(true)
+    markMidConvCachePromotionRejected()
     const user = createUserMessage({ content: 'hi' })
     const sys = createApiSystemMessage('mid-conv note')
     const out = addCacheBreakpoints([user, sys], true, 'repl_main_thread')

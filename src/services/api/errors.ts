@@ -42,6 +42,7 @@ import {
   getProfileAccountOnHold,
   isAccountOnHoldAppealLine,
   OAuthAccountOnHoldError,
+  OAuthRefreshLockTimeoutError,
 } from '../../utils/accountOnHold.js'
 import { InvalidRequestHeaderValueError } from './invalidRequestHeader.js'
 import {
@@ -289,6 +290,12 @@ export const ORG_DISABLED_ERROR_MESSAGE_ENV_KEY =
   'Your ANTHROPIC_API_KEY belongs to a disabled organization · Update or unset the environment variable'
 export const TOKEN_REVOKED_ERROR_MESSAGE =
   'OAuth token revoked · Please run /login'
+/** densable 2.1.248 `h5t` — interactive Zye copy. */
+export const OAUTH_REFRESH_LOCK_TIMEOUT_MESSAGE =
+  'Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login'
+/** densable 2.1.248 non-interactive Zye copy (`De()` true). */
+export const OAUTH_REFRESH_LOCK_TIMEOUT_API_MESSAGE =
+  'Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again'
 /** leftover 239 IbE / densable 2.1.234 cbS */
 export const PROFILE_LOGIN_EXPIRED_MESSAGE =
   'Anthropic profile login expired · Re-authenticate your Anthropic profile'
@@ -1328,6 +1335,16 @@ function buildAssistantMessageFromError(
     })
   }
 
+  // densable 2.1.248: if (e instanceof Zye) return Ho({error:"server_error", content: De()?API:h5t})
+  if (error instanceof OAuthRefreshLockTimeoutError) {
+    return createAssistantAPIErrorMessage({
+      error: 'server_error',
+      content: getIsNonInteractiveSession()
+        ? OAUTH_REFRESH_LOCK_TIMEOUT_API_MESSAGE
+        : OAUTH_REFRESH_LOCK_TIMEOUT_MESSAGE,
+    })
+  }
+
   // densable `let r = e instanceof yz ? e : Upe(e); if (r) oo({error:"account_on_hold", content: YOn(r.url)})`
   {
     const hold =
@@ -1727,6 +1744,11 @@ export function classifyAPIError(error: unknown): string {
   // densable `e instanceof N8 || e instanceof yz` → auth_error. N8 is not local.
   if (error instanceof OAuthAccountOnHoldError) {
     return 'auth_error'
+  }
+
+  // densable 2.1.248: if (e instanceof Zye) return "oauth_refresh_lock_timeout"
+  if (error instanceof OAuthRefreshLockTimeoutError) {
+    return 'oauth_refresh_lock_timeout'
   }
 
   // Generic auth errors

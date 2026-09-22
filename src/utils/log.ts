@@ -5,9 +5,11 @@ import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import type { QuerySource } from 'src/constants/querySource.js'
 import {
+  addToInMemoryErrorLog,
   setLastAPIRequest,
   setLastAPIRequestMessages,
 } from '../bootstrap/state.js'
+import { getBootstrapSessionHost } from './sessionHost.js'
 import { TICK_TAG } from '../constants/xml.js'
 import {
   type LogOption,
@@ -61,20 +63,8 @@ export function dateToFilename(date: Date): string {
   return date.toISOString().replace(/[:.]/g, '-')
 }
 
-// In-memory error log for recent errors
-// Moved from bootstrap/state.ts to break import cycle
-const MAX_IN_MEMORY_ERRORS = 100
-let inMemoryErrorLog: Array<{ error: string; timestamp: string }> = []
-
-function addToInMemoryErrorLog(errorInfo: {
-  error: string
-  timestamp: string
-}): void {
-  if (inMemoryErrorLog.length >= MAX_IN_MEMORY_ERRORS) {
-    inMemoryErrorLog.shift() // Remove oldest error
-  }
-  inMemoryErrorLog.push(errorInfo)
-}
+// In-memory error log: leftover yEr → host.diagnostics (He.#e).
+// Do not keep a second array — Feedback / QueryEngine / print read this.
 
 /**
  * Sink interface for the error logging backend
@@ -199,7 +189,7 @@ export function logError(error: unknown): void {
       timestamp: new Date().toISOString(),
     }
 
-    // Always add to in-memory log (no dependencies needed)
+    // leftover yEr — official He.#e, not a private log.ts array
     addToInMemoryErrorLog(errorInfo)
 
     // If sink not attached, queue the event
@@ -215,7 +205,7 @@ export function logError(error: unknown): void {
 }
 
 export function getInMemoryErrors(): { error: string; timestamp: string }[] {
-  return [...inMemoryErrorLog]
+  return [...getBootstrapSessionHost().diagnostics.errorLog()]
 }
 
 /**
@@ -374,5 +364,5 @@ export function captureAPIRequest(
 export function _resetErrorLogForTesting(): void {
   errorLogSink = null
   errorQueue.length = 0
-  inMemoryErrorLog = []
+  getBootstrapSessionHost().diagnostics.reset()
 }

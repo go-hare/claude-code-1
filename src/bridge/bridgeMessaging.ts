@@ -395,6 +395,12 @@ export type ServerControlRequestHandlers = {
    * `get_workspace_diff`. Missing → official not-supported string.
    */
   onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
+  /**
+   * Official getPendingPrompts (248 xi / 247 dP). Initialize includes
+   * pending_permission_requests / pending_user_dialog_requests.
+   * 248 xi also Ze.clear().
+   */
+  getPendingPrompts?: () => SDKControlRequest[]
 }
 
 const OUTBOUND_ONLY_ERROR =
@@ -541,6 +547,7 @@ export function handleServerControlRequest(
     onSetMcpPermissionModeOverride,
     onRenameSession,
     onGetWorkspaceDiff,
+    getPendingPrompts,
   } = handlers
   if (!transport) {
     logForDebugging(
@@ -579,9 +586,17 @@ export function handleServerControlRequest(
   }
 
   switch (req.subtype) {
-    case 'initialize':
+    case 'initialize': {
       // Respond with minimal capabilities — the REPL handles
       // commands, models, and account info itself.
+      // official LKn: u=i?.()??[]; split can_use_tool / request_user_dialog
+      const pending = getPendingPrompts?.() ?? []
+      const pendingPermissionRequests = pending.filter(
+        e => e.request.subtype === 'can_use_tool',
+      )
+      const pendingUserDialogRequests = pending.filter(
+        e => e.request.subtype === 'request_user_dialog',
+      )
       response = {
         type: 'control_response',
         response: {
@@ -595,9 +610,16 @@ export function handleServerControlRequest(
             account: {},
             pid: process.pid,
           },
+          ...(pendingPermissionRequests.length > 0 && {
+            pending_permission_requests: pendingPermissionRequests,
+          }),
+          ...(pendingUserDialogRequests.length > 0 && {
+            pending_user_dialog_requests: pendingUserDialogRequests,
+          }),
         },
       }
       break
+    }
 
     case 'set_model': {
       // densable Zkd: non-string (except null/undefined) → invalid_model_type;

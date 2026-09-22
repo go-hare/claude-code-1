@@ -59,6 +59,7 @@ import {
   CHATGPT_CODEX_MODEL_OPTIONS,
   isChatGPTAuthMode,
 } from './chatgptModels.js'
+import { GROK_MODEL_OPTIONS } from './grokModels.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -483,6 +484,28 @@ function getChatGPTCodexModelOptions(): ModelOption[] {
   ]
 }
 
+function mapVendorPickerRows(
+  rows: readonly { value: string; label: string; description: string }[],
+): ModelOption[] {
+  return rows.map(model => ({
+    value: model.value,
+    label: model.label,
+    description: model.description,
+    descriptionForModel: `${model.description} (${model.value})`,
+  }))
+}
+
+function getGrokModelPickerOptions(): ModelOption[] {
+  return [getDefaultOptionForUser(), ...mapVendorPickerRows(GROK_MODEL_OPTIONS)]
+}
+
+function getOpenAIApiModelPickerOptions(): ModelOption[] {
+  return [
+    getDefaultOptionForUser(),
+    ...mapVendorPickerRows(CHATGPT_CODEX_MODEL_OPTIONS),
+  ]
+}
+
 // @[MODEL LAUNCH]: Update the model picker lists below to include/reorder options for the new model.
 // Each user tier (ant, Max/Team Premium, Pro/Team Standard/Enterprise, PAYG 1P, PAYG 3P) has its own list.
 function getModelOptionsBase(fastMode = false): ModelOption[] {
@@ -507,6 +530,14 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
   if (getAPIProvider() === 'openai' && isChatGPTAuthMode()) {
     return getChatGPTCodexModelOptions()
+  }
+
+  if (getAPIProvider() === 'grok') {
+    return getGrokModelPickerOptions()
+  }
+
+  if (getAPIProvider() === 'openai') {
+    return getOpenAIApiModelPickerOptions()
   }
 
   if (isClaudeAISubscriber()) {
@@ -767,7 +798,7 @@ export function getModelOptions(fastMode = false): ModelOption[] {
   } else if (initialMainLoopModel !== null) {
     customModel = initialMainLoopModel
   }
-  if (customModel === null || options.some(opt => opt.value === customModel)) {
+  if (customModel == null || options.some(opt => opt.value === customModel)) {
     return filterModelOptionsByAllowlist(options)
   } else if (customModel === 'opusplan') {
     return filterModelOptionsByAllowlist([...options, getOpusPlanOption()])
@@ -791,7 +822,8 @@ export function getModelOptions(fastMode = false): ModelOption[] {
   } else {
     // Try to show a human-readable label for known Anthropic models, with an
     // upgrade hint if the alias now resolves to a newer version.
-    const knownOption = getKnownModelOption(customModel)
+    const knownOption =
+      typeof customModel === 'string' ? getKnownModelOption(customModel) : null
     if (knownOption) {
       options.push(knownOption)
     } else {

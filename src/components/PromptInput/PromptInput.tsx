@@ -138,6 +138,7 @@ import { cacheImagePath, storeImage } from '../../utils/imageStore.js';
 import { isMacosOptionChar, MACOS_OPTION_SPECIAL_CHARS } from '../../utils/keyboardShortcuts.js';
 import { logError } from '../../utils/log.js';
 import { isOpus1mMergeEnabled, modelDisplayString } from '../../utils/model/model.js';
+import { Dv } from '../../utils/model/modelNoticeCode.js';
 import { cyclePermissionMode, getNextPermissionMode } from '../../utils/permissions/getNextPermissionMode.js';
 import { getPlatform } from '../../utils/platform.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
@@ -184,6 +185,7 @@ import { BackgroundTasksDialog } from '../tasks/BackgroundTasksDialog.js';
 import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { TeamsDialog } from '../teams/TeamsDialog.js';
 import VimTextInput from '../VimTextInput.js';
+import { dismissExitHintIfShowing } from './dismissExitHintIfShowing.js';
 import { getModeFromInput, getValueFromInput } from './inputModes.js';
 import { mergePastedContentsDualWrite, resolveSubmitInputFromLive } from './inputPaste.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications } from './Notifications.js';
@@ -2033,6 +2035,9 @@ function PromptInput({
 
   // Handler for chat:cycleMode - cycle through permission modes
   const handleCycleMode = useCallback(() => {
+    // densable 2.1.248 #29 a9: Vr((Ci)=>Ci.show?{show:!1}:Ci)
+    setExitMessage(dismissExitHintIfShowing);
+
     // When viewing a teammate, cycle their mode instead of the leader's
     if (isAgentSwarmsEnabled() && viewedTeammate && viewingAgentTaskId) {
       const teammateContext: ToolPermissionContext = {
@@ -2751,7 +2756,7 @@ function PromptInput({
       if (result) {
         addNotification({
           key: 'fast-mode-toggled',
-          jsx: <Text>{result}</Text>,
+          jsx: <Text>{Dv(result)}</Text>,
           priority: 'immediate',
           timeoutMs: 3000,
         });

@@ -28,9 +28,17 @@ export function speculationMock(overrides: Record<string, unknown> = {}) {
 export function cleanupRegistryMock(overrides: Record<string, unknown> = {}) {
   return {
     ...cleanupRegistrySnap,
-    registerCleanup: () => () => {},
+    registerCleanup: () => {
+      const unreg = (): void => {}
+      return Object.assign(unreg, { [Symbol.dispose]: unreg })
+    },
     ...overrides,
   }
+}
+
+/** Restore real cleanupRegistry after process-global task stubs. */
+export function restoreCleanupRegistryModule(): typeof cleanupRegistrySnap {
+  return { ...cleanupRegistrySnap }
 }
 
 export function abortControllerMock(overrides: Record<string, unknown> = {}) {

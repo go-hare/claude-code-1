@@ -52,6 +52,8 @@ import {
   isEmojiJustCompleted,
 } from '../utils/emoji/index.js';
 import { getInitialSettings } from '../utils/settings/settings.js';
+import { DM_AT_MENTION_RE, mentionNameMatchesFoldedQuery } from '../utils/dmAtMention.js';
+import { normalizeSessionNameKey } from '../utils/sessionNameUniqueness.js';
 
 // Unicode-aware character class for file path tokens:
 // \p{L} = letters (CJK, Latin, Cyrillic, etc.)
@@ -241,7 +243,8 @@ export function applyShellSuggestion(
   setCursorOffset(wordStart + replacementText.length);
 }
 
-const DM_MEMBER_RE = /(^|\s)@[\w-]*$/;
+/** densable 2.1.248 `bP` — same as `DM_AT_MENTION_RE` (apply + clear). */
+const DM_MEMBER_RE = DM_AT_MENTION_RE;
 
 function applyTriggerSuggestion(
   suggestion: SuggestionItem,
@@ -682,9 +685,10 @@ export function useTypeahead({
       // Check for @ to trigger team member / named subagent / peer session suggestions
       // Must check before @ file symbol to prevent conflict
       // Skip in bash mode - @ has no special meaning in shell commands
-      const atMatch = mode !== 'bash' ? value.substring(0, effectiveCursorOffset).match(/(^|\s)@([\w-]*)$/) : null;
+      const atMatch = mode !== 'bash' ? value.substring(0, effectiveCursorOffset).match(DM_AT_MENTION_RE) : null;
       if (atMatch) {
-        const partialName = (atMatch[2] ?? '').toLowerCase();
+        // Official 248: Bn=dr(jn[2]??"") — fold query; names via dr(name).startsWith(Bn)
+        const partialName = normalizeSessionNameKey(atMatch[2] ?? '');
         // Imperative read — reading at call-time fixes staleness for
         // teammates/subagents added mid-session.
         const state = store.getState();
@@ -694,7 +698,7 @@ export function useTypeahead({
         if (isAgentSwarmsEnabled() && state.teamContext) {
           for (const t of Object.values(state.teamContext.teammates ?? {})) {
             if (t.name === TEAM_LEAD_NAME) continue;
-            if (!t.name.toLowerCase().startsWith(partialName)) continue;
+            if (!mentionNameMatchesFoldedQuery(t.name, partialName)) continue;
             seen.add(t.name);
             members.push({
               id: `dm-${t.name}`,
@@ -706,7 +710,7 @@ export function useTypeahead({
 
         for (const [name, agentId] of state.agentNameRegistry) {
           if (seen.has(name)) continue;
-          if (!name.toLowerCase().startsWith(partialName)) continue;
+          if (!mentionNameMatchesFoldedQuery(name, partialName)) continue;
           const status = state.tasks[agentId]?.status;
           members.push({
             id: `dm-${name}`,
@@ -1021,7 +1025,7 @@ export function useTypeahead({
       if (suggestionType === 'agent' && suggestionsRef.current.some((s: SuggestionItem) => s.id?.startsWith('dm-'))) {
         // If we had team member suggestions but the input no longer has @
         // we need to clear the suggestions.
-        const hasAt = value.substring(0, effectiveCursorOffset).match(/(^|\s)@([\w-]*)$/);
+        const hasAt = value.substring(0, effectiveCursorOffset).match(DM_AT_MENTION_RE);
         if (!hasAt) {
           clearSuggestions();
         }

@@ -19,10 +19,18 @@ import { formatProcessWrapperStatusLines, PROCESS_WRAPPER_ENV_KEY } from './proc
 import { getProxyUrl } from './proxy.js';
 import { shouldSkipAnthropicAwsAuth, shouldSkipMantleAuth } from './residualFinalEnvGates.js';
 import { SandboxManager } from './sandbox/sandbox-adapter.js';
+import {
+  formatRemoteManagedSettingsStartupWarning,
+  formatRemoteManagedSettingsStatusValue,
+  zre,
+} from '../services/remoteManagedSettings/loadStatus.js';
+import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettings/syncCache.js';
 import { getSettingsWithAllErrors } from './settings/allErrors.js';
 import { getEnabledSettingSources, getSettingSourceDisplayNameCapitalized } from './settings/constants.js';
 import { getManagedFileSettingsPresence, getPolicySettingsOrigin, getSettingsForSource } from './settings/settings.js';
 import type { ThemeName } from './theme.js';
+import { isHarborKiteEnabled } from './teleport/cloudPeerAccess.js';
+import { getUdsStartFailureReason } from './udsMessaging.js';
 
 export type Property = {
   label?: string;
@@ -223,6 +231,8 @@ export function buildSettingSourcesProperties(): Property[] {
     .filter((name): name is string => name !== null);
 
   const skipped = getSkippedManagedSettingSources();
+  isRemoteManagedSettingsEligible();
+  const remoteManagedValue = formatRemoteManagedSettingsStatusValue();
 
   return [
     {
@@ -234,6 +244,14 @@ export function buildSettingSourcesProperties(): Property[] {
           {
             label: 'Skipped sources',
             value: skipped,
+          },
+        ]
+      : []),
+    ...(remoteManagedValue
+      ? [
+          {
+            label: 'Managed settings (remote)',
+            value: remoteManagedValue,
           },
         ]
       : []),
@@ -276,6 +294,12 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
   const diagnostic = await getDoctorDiagnostic();
   const items: Diagnostic[] = [];
 
+  isRemoteManagedSettingsEligible();
+  const remoteLoadWarning = formatRemoteManagedSettingsStartupWarning(zre());
+  if (remoteLoadWarning) {
+    items.push(remoteLoadWarning);
+  }
+
   const { errors: validationErrors } = getSettingsWithAllErrors();
   if (validationErrors.length > 0) {
     const invalidFiles = Array.from(
@@ -299,6 +323,30 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
   }
 
   return items;
+}
+
+/**
+ * Official Wm /status Peer address (r0t / wZe @208535688).
+ * Po() && socket → `uds:${socket}`; Po() && !socket && r0t() → unavailable copy.
+ */
+export function buildCrossSessionPeerAddressProperties(): Property[] {
+  if (!isHarborKiteEnabled()) {
+    return [];
+  }
+  const socket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+  if (socket) {
+    return [{ label: 'Peer address', value: `uds:${socket}` }];
+  }
+  const reason = getUdsStartFailureReason();
+  if (reason !== undefined) {
+    return [
+      {
+        label: 'Peer address',
+        value: `unavailable \u2014 ${reason} (details in the --debug log)`,
+      },
+    ];
+  }
+  return [];
 }
 
 export function buildAccountProperties(): Property[] {

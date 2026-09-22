@@ -19,6 +19,7 @@ import {
   parsePositiveIntFromFrontmatter,
 } from '../frontmatterParser.js'
 import { validateAgentMarkdownName } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import { parseAgentFrontmatterCacheTtl } from '../promptCacheTtl.js'
 import { getFsImplementation, isDuplicatePath } from '../fsOperations.js'
 import {
   parseAgentToolsFromFrontmatter,
@@ -188,6 +189,9 @@ async function loadAgentFromFile(
       )
     }
 
+    // densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h")
+    const cacheTtl = parseAgentFrontmatterCacheTtl(frontmatter)
+
     // Parse disallowedTools
     const disallowedTools =
       frontmatter.disallowedTools !== undefined
@@ -231,6 +235,7 @@ async function loadAgentFromFile(
       ...(isolation ? { isolation } : {}),
       ...(effort !== undefined ? { effort } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
+      ...(cacheTtl !== undefined ? { cacheTtl } : {}),
     } as AgentDefinition
   } catch (error) {
     logForDebugging(`Failed to load agent from ${filePath}: ${error}`, {

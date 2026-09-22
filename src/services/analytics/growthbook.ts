@@ -2,6 +2,7 @@ import { GrowthBook } from '@growthbook/growthbook'
 import { isEqual, memoize } from 'lodash-es'
 import {
   getIsNonInteractiveSession,
+  getPinnedFeatureValues,
   getSessionTrustAccepted,
 } from '../../bootstrap/state.js'
 import { getGrowthBookClientKey } from '../../constants/keys.js'
@@ -38,6 +39,7 @@ import {
 } from '../../utils/user.js'
 import { registerAccountOnHoldGateReader } from '../../utils/accountOnHold.js'
 import { registerFileGateReader } from '../../utils/file.js'
+import { i_ } from '../../utils/toolSchemaCache.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
 import {
@@ -1099,6 +1101,21 @@ export async function awaitGrowthBookBeforePermissionMode(): Promise<void> {
   }
 }
 
+/**
+ * densable 2.1.248 `zce(e,t)` — pin the first GB read for this process.
+ * `let r=rl().pinnedFeatureValues??=new Map;if(!r.has(e))r.set(e,R(e,t));return r.get(e)`
+ */
+export function getPinnedFeatureValue<T>(feature: string, defaultValue: T): T {
+  const pinned = getPinnedFeatureValues()
+  if (!pinned.has(feature)) {
+    pinned.set(
+      feature,
+      getFeatureValue_CACHED_MAY_BE_STALE(feature, defaultValue),
+    )
+  }
+  return pinned.get(feature) as T
+}
+
 export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
   feature: string,
   defaultValue: T,
@@ -1638,3 +1655,7 @@ registerAccountOnHoldGateReader(gate =>
 registerFileGateReader((gate, fallback) =>
   getFeatureValue_CACHED_MAY_BE_STALE(gate, fallback),
 )
+
+// densable i_/Bl — tengu_still_kestrel (default false). Leaf cache
+// reads GB through this slot so auth.ts does not import this module.
+i_((gate, fallback) => getFeatureValue_CACHED_MAY_BE_STALE(gate, fallback))

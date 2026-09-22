@@ -3,6 +3,9 @@ import { isRestrictedToPluginOnly } from '../settings/pluginOnlyPolicy.js'
 // Import as module object so spyOn works in tests (direct imports bypass spies)
 import * as settingsModule from '../settings/settings.js'
 import { resetSettingsCache } from '../settings/settingsCache.js'
+import { loadSettingsUnderPrime } from '../settings/settingsPrimer.js'
+import type { StorageV5 } from '../storageV5/createLocalFsBackend.js'
+import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import type { HooksSettings } from '../settings/types.js'
 
 let initialHooksConfig: HooksSettings | null = null
@@ -109,6 +112,25 @@ export function updateHooksConfigSnapshot(): void {
   // threshold hasn't elapsed).
   resetSettingsCache()
   initialHooksConfig = getHooksFromAllowedSources()
+}
+
+/**
+ * Official nHe @180749964 — Gqe then refresh hooks snapshot, dispose retainers.
+ * Leftover: updateHooksConfigSnapshotUnderPrime.
+ */
+export async function updateHooksConfigSnapshotUnderPrime(
+  storageV5: StorageV5 | undefined,
+): Promise<void> {
+  if (!isHoverRestOn() || storageV5 === undefined) {
+    updateHooksConfigSnapshot()
+    return
+  }
+  const dispose = await loadSettingsUnderPrime(storageV5)
+  try {
+    initialHooksConfig = getHooksFromAllowedSources()
+  } finally {
+    dispose?.()
+  }
 }
 
 /**

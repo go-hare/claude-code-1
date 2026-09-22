@@ -29,6 +29,19 @@ export function eagerParseCliFlag(
 }
 
 /**
+ * official t0 / a @178589274 — argv includes `flag` before `--`.
+ * Gold: `function a(e){let n=process.argv.indexOf("--");return(n===-1?process.argv:process.argv.slice(0,n)).includes(e)}`
+ */
+export function eagerHasCliFlag(
+  flagName: string,
+  argv: string[] = process.argv,
+): boolean {
+  const sep = argv.indexOf('--')
+  const slice = sep === -1 ? argv : argv.slice(0, sep)
+  return slice.includes(flagName)
+}
+
+/**
  * Handle the standard Unix `--` separator convention in CLI arguments.
  *
  * When using Commander.js with `.passThroughOptions()`, the `--` separator

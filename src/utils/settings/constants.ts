@@ -76,7 +76,13 @@ export function getSourceDisplayName(
  * @returns Display name for the source in lowercase
  */
 export function getSettingSourceDisplayNameLowercase(
-  source: SettingSource | 'cliArg' | 'command' | 'session' | 'mcpServerPolicy',
+  source:
+    | SettingSource
+    | 'cliArg'
+    | 'command'
+    | 'session'
+    | 'mcpServerPolicy'
+    | 'toolsNarrowing',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -97,6 +103,8 @@ export function getSettingSourceDisplayNameLowercase(
       return 'current session'
     case 'mcpServerPolicy':
       return 'MCP server policy'
+    case 'toolsNarrowing':
+      return 'restricted tools'
   }
 }
 
@@ -106,7 +114,13 @@ export function getSettingSourceDisplayNameLowercase(
  * @returns Display name for the source with first letter capitalized
  */
 export function getSettingSourceDisplayNameCapitalized(
-  source: SettingSource | 'cliArg' | 'command' | 'session' | 'mcpServerPolicy',
+  source:
+    | SettingSource
+    | 'cliArg'
+    | 'command'
+    | 'session'
+    | 'mcpServerPolicy'
+    | 'toolsNarrowing',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -127,6 +141,8 @@ export function getSettingSourceDisplayNameCapitalized(
       return 'Current session'
     case 'mcpServerPolicy':
       return 'MCP server policy'
+    case 'toolsNarrowing':
+      return 'Restricted tools'
   }
 }
 

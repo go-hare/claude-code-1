@@ -3,8 +3,12 @@
  * family alias fable steps via XNn (getDefaultFableModel), not the haiku else.
  * Suggestion candidates include official qOe fable / fable[1m].
  */
-import { afterEach, describe, expect, test } from 'bun:test'
-
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { resetModelStringsForTestingOnly } from 'src/bootstrap/state.js'
+import {
+  resetSettingsCache,
+  setSessionSettingsCache,
+} from 'src/utils/settings/settingsCache.js'
 import { ALL_MODEL_CONFIGS } from '../configs.js'
 import { getDefaultFableModel } from '../model.js'
 import {
@@ -14,8 +18,46 @@ import {
   unrecognizedModelMessage,
 } from '../printSetModel.js'
 
+const envKeys = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_OPENAI',
+  'CLAUDE_CODE_USE_GEMINI',
+  'CLAUDE_CODE_USE_GROK',
+  'CLAUDE_CODE_USE_GATEWAY',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_BASE_URL',
+  '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL',
+] as const
+
+const savedEnv: Record<string, string | undefined> = {}
+
+function resetProviderState(): void {
+  for (const key of envKeys) {
+    delete process.env[key]
+  }
+  resetSettingsCache()
+  // Empty cache blocks disk modelType (e.g. grok) without pinning anthropic
+  // for co-suites that intentionally exercise third-party providers.
+  setSessionSettingsCache({ settings: {}, errors: [] })
+  resetModelStringsForTestingOnly()
+}
+
+beforeEach(() => {
+  for (const key of envKeys) {
+    savedEnv[key] = process.env[key]
+  }
+  resetProviderState()
+})
+
 afterEach(() => {
-  delete process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+  for (const key of envKeys) {
+    if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key]
+    else delete process.env[key]
+  }
+  resetProviderState()
 })
 
 describe('printSetModel 239 fable leftover', () => {

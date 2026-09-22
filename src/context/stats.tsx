@@ -1,5 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import { useSessionServices } from './sessionServices.js';
 import { saveCurrentProjectConfig } from '../utils/config.js';
+import { registerPreExitFlush } from '../utils/cleanupRegistry.js';
+import { isHoverRestOn } from '../utils/storageV5/hoverRestPin.js';
 
 export type StatsStore = {
   increment(name: string, value?: number): void;
@@ -109,9 +112,30 @@ type Props = {
 export function StatsProvider({ store: externalStore, children }: Props): React.ReactNode {
   const internalStore = useMemo(() => createStatsStore(), []);
   const store = externalStore ?? internalStore;
+  const { storageV5 } = useSessionServices();
 
   useEffect(() => {
+    // Official wt @190429245: Vk(async lastSessionMetrics) when D()&&storageV5;
+    // sync process.on('exit') fallback if pre-exit flush did not run.
+    let asyncDone = false;
+    const unregister =
+      isHoverRestOn() && storageV5 !== undefined
+        ? registerPreExitFlush(async () => {
+            const metrics = store.getAll();
+            if (Object.keys(metrics).length > 0) {
+              saveCurrentProjectConfig(
+                current => ({
+                  ...current,
+                  lastSessionMetrics: metrics,
+                }),
+                storageV5,
+              );
+            }
+            asyncDone = true;
+          })
+        : undefined;
     const flush = () => {
+      if (asyncDone) return;
       const metrics = store.getAll();
       if (Object.keys(metrics).length > 0) {
         saveCurrentProjectConfig(current => ({
@@ -122,9 +146,10 @@ export function StatsProvider({ store: externalStore, children }: Props): React.
     };
     process.on('exit', flush);
     return () => {
+      unregister?.();
       process.off('exit', flush);
     };
-  }, [store]);
+  }, [store, storageV5]);
 
   return <StatsContext.Provider value={store}>{children}</StatsContext.Provider>;
 }

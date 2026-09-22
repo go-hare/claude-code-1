@@ -6,6 +6,7 @@ import {
 import {
   GROK_1M_CONTEXT_WINDOW,
   GROK_500K_CONTEXT_WINDOW,
+  GROK_MODEL_OPTIONS,
   getGrokModelContextWindow,
 } from '../grokModels.js'
 
@@ -19,7 +20,27 @@ afterEach(() => {
   }
 })
 
+describe('GROK_MODEL_OPTIONS', () => {
+  test('lists current-spec public API ids with grok-4.7 first', () => {
+    expect(GROK_MODEL_OPTIONS.map(row => row.value)).toEqual([
+      'grok-4.7',
+      'grok-4.6',
+      'grok-4.5',
+      'grok-4.20-reasoning',
+      'grok-4.20-multi-agent',
+      'grok-4.3',
+    ])
+  })
+})
+
 describe('getGrokModelContextWindow', () => {
+  test('grok-4.7 is 500k', () => {
+    expect(getGrokModelContextWindow('grok-4.7')).toBe(GROK_500K_CONTEXT_WINDOW)
+    expect(getGrokModelContextWindow('grok-4.7-fast')).toBe(
+      GROK_500K_CONTEXT_WINDOW,
+    )
+  })
+
   test('grok-4.6 is 500k', () => {
     expect(getGrokModelContextWindow('grok-4.6')).toBe(GROK_500K_CONTEXT_WINDOW)
   })
@@ -67,6 +88,10 @@ describe('getGrokModelContextWindow', () => {
     expect(getGrokModelContextWindow('grok-4.60')).toBeUndefined()
   })
 
+  test('version-boundary: grok-4.70 is not grok-4.7', () => {
+    expect(getGrokModelContextWindow('grok-4.70')).toBeUndefined()
+  })
+
   test('unlisted grok ids stay undefined (no invented window)', () => {
     expect(getGrokModelContextWindow('grok-3-mini-fast')).toBeUndefined()
     expect(getGrokModelContextWindow('grok-4')).toBeUndefined()
@@ -80,6 +105,12 @@ describe('getGrokModelContextWindow', () => {
 })
 
 describe('Grok window wiring through getContextWindowForModel', () => {
+  test('grok-4.7 is recognized at 500k', () => {
+    delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT
+    expect(isRecognizedModelForWindowEnforcement('grok-4.7')).toBe(true)
+    expect(getContextWindowForModel('grok-4.7')).toBe(GROK_500K_CONTEXT_WINDOW)
+  })
+
   test('grok-4.6 is recognized at 500k', () => {
     delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT
     expect(isRecognizedModelForWindowEnforcement('grok-4.6')).toBe(true)

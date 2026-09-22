@@ -3,7 +3,8 @@ import { APIError } from '@anthropic-ai/sdk'
 import {
   isStickyBetaRejected,
   resetStickyBetas,
-  setMidConvCachePromotionRejected,
+  markMidConvCachePromotionRejected,
+  resetRequestLatches,
   stickyRejectBeta,
 } from '../../bootstrap/state.js'
 import { MID_CONVERSATION_SYSTEM_BETA_HEADER } from '../../constants/betas.js'
@@ -45,7 +46,7 @@ describe('shouldUseMidConversationSystem (J8t)', () => {
     }
     Object.assign(process.env, prev)
     resetStickyBetas()
-    setMidConvCachePromotionRejected(false)
+    resetRequestLatches()
   })
 
   test('FORCE env turns on', () => {
@@ -240,12 +241,12 @@ describe('B6n / w3y / $3y', () => {
 describe('Jdy cache gate + xNi o3 allowlist', () => {
   beforeEach(() => {
     resetStickyBetas()
-    setMidConvCachePromotionRejected(false)
+    resetRequestLatches()
   })
 
   afterEach(() => {
     resetStickyBetas()
-    setMidConvCachePromotionRejected(false)
+    resetRequestLatches()
     delete process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
   })
 

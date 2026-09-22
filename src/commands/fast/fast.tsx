@@ -23,6 +23,7 @@ import {
 } from '../../utils/fastMode.js';
 import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
+import { em } from '../../utils/model/modelNoticeCode.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 
 function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void): void {
@@ -70,7 +71,7 @@ export function FastModePicker({
     });
     if (enableFastMode) {
       const fastIcon = getFastIconString(enableFastMode);
-      const modelUpdated = !isFastModeSupportedByModel(model) ? ` · model set to ${FAST_MODE_MODEL_DISPLAY}` : '';
+      const modelUpdated = !isFastModeSupportedByModel(model) ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}` : '';
       onDone(`${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`);
     } else {
       setAppState(prev => ({ ...prev, fastMode: false }));
@@ -188,7 +189,9 @@ async function handleFastModeShortcut(
 
   if (enable) {
     const fastIcon = getFastIconString(true);
-    const modelUpdated = !isFastModeSupportedByModel(mainLoopModel) ? ` · model set to ${FAST_MODE_MODEL_DISPLAY}` : '';
+    const modelUpdated = !isFastModeSupportedByModel(mainLoopModel)
+      ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}`
+      : '';
     const pricing = formatModelPricing(getOpus46CostTier(true));
     return `${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`;
   } else {

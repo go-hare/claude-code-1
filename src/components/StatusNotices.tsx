@@ -26,8 +26,11 @@ export function StatusNotices({ agentDefinitions }: Props = {}): React.ReactNode
     return null;
   }
 
+  // densable 2.1.248 #34 Fr @201575834 sha=0fa3ee49235f4963 —
+  // warnings column is flexDirection:"column" with no paddingLeft (247 Ds
+  // @231859373 had paddingLeft:1, which sat one column right of transcript).
   return (
-    <Box flexDirection="column" paddingLeft={1}>
+    <Box flexDirection="column">
       {activeNotices.map(notice => (
         <React.Fragment key={notice.id}>{notice.render(context)}</React.Fragment>
       ))}

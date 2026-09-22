@@ -3,6 +3,7 @@ import type { Command } from '../../commands.js'
 import { isOverageProvisioningAllowed } from '../../utils/auth.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 
+/** densable v_() enablement: DISABLE_EXTRA_USAGE_COMMAND then Zur(). */
 function isExtraUsageAllowed(): boolean {
   if (isEnvTruthy(process.env.DISABLE_EXTRA_USAGE_COMMAND)) {
     return false

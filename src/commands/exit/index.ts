@@ -6,6 +6,10 @@ const exit = {
   aliases: ['quit'],
   description: 'Exit the REPL',
   immediate: true,
+  // official tip SEA: fleetHostCall:async({exit:e})=>e()
+  fleetHostCall: async ({ exit: hostExit }) => {
+    hostExit()
+  },
   load: () => import('./exit.js'),
 } satisfies Command
 

@@ -144,6 +144,10 @@ export type ToolPermissionContext = DeepImmutable<{
    * `default`.
    */
   canAutoClassifierRun?: boolean
+  /**
+   * densable 2.1.248 #1 rrn `...o&&{restricted:o}`
+   */
+  restricted?: boolean
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -259,6 +263,11 @@ export type ToolUseContext = {
   activeTaskExecutionContext?: ActiveTaskExecutionContext
   readFileState: FileStateCache
   getAppState(): AppState
+  /**
+   * official getProactivityLevel() — AppState.proactivityLevel.
+   * Optional on leftover hosts that have not yet wired the slot.
+   */
+  getProactivityLevel?: () => unknown
   setAppState(f: (prev: AppState) => AppState): void
   /**
    * densable `setToolPermissionContext` — UI / mode writes. Async subagents
@@ -651,6 +660,11 @@ export type Tool<
    * Prefer terms not already in the tool name (e.g. 'jupyter' for NotebookEdit).
    */
   searchHint?: string
+  /**
+   * densable 2.1.248 #1 Unt — official `enablesCodeExecution:!0` on
+   * Bash / PowerShell / REPL / Monitor / CronCreate / Workflow / RemoteTrigger.
+   */
+  enablesCodeExecution?: boolean
   /**
    * densable `jh` batch-tool fields. When all four are set, normalize `tHr`
    * merges per-entry `tool_result` ids (`${id}_0`) back onto the parent.

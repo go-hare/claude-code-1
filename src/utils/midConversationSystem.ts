@@ -19,7 +19,7 @@ import { APIError } from '@anthropic-ai/sdk'
 import {
   getMidConvCachePromotionRejected,
   isStickyBetaRejected,
-  setMidConvCachePromotionRejected,
+  markMidConvCachePromotionRejected,
   stickyRejectBeta,
 } from '../bootstrap/state.js'
 import { MID_CONVERSATION_SYSTEM_BETA_HEADER } from '../constants/betas.js'
@@ -200,7 +200,7 @@ export function isMidConvCachePromotionRejected(): boolean {
 
 /** densable Vri */
 export function latchMidConvCachePromotionRejected(): void {
-  setMidConvCachePromotionRejected(true)
+  markMidConvCachePromotionRejected()
 }
 
 /**

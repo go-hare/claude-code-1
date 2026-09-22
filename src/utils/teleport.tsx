@@ -49,6 +49,7 @@ import { createSystemMessage, createUserMessage } from './messages.js';
 import { getMainLoopModel } from './model/model.js';
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
 import { isTranscriptMessage } from './sessionPaths.js';
+import { isRestrictedSession, RESTRICTED_CLOUD_CREATE_REFUSE } from './restricted.js';
 import { getInitialSettings } from './settings/settings.js';
 import { sleep } from './sleep.js';
 import { jsonStringify } from './slowOperations.js';
@@ -1183,10 +1184,14 @@ export async function teleportToRemote(options: {
   const { initialMessage, signal } = options;
   // densable: n = e.cwd ?? Ct()
   const cwd = options.cwd ?? getCwd();
-  // densable Qre early gates (before try body network): policy + first-party
+  // densable Qre early gates (before try body network): policy + Yk/MMt + first-party
   const policyDeny = remoteSessionsPolicyDenyMessage();
   if (policyDeny) {
     options.onCreateFail?.(policyDeny, 'policy_denied');
+    return null;
+  }
+  if (isRestrictedSession()) {
+    options.onCreateFail?.(RESTRICTED_CLOUD_CREATE_REFUSE, 'restricted_session');
     return null;
   }
   if (getAPIProvider() !== 'firstParty' || !isFirstPartyAnthropicBaseUrl()) {

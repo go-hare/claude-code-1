@@ -20,6 +20,7 @@ import {
   buildProcessWrapperProperties,
   buildSandboxProperties,
   buildSettingSourcesProperties,
+  buildCrossSessionPeerAddressProperties,
   type Diagnostic,
   getModelDisplayLabel,
   type Property,
@@ -59,6 +60,7 @@ function buildPrimarySection(): Property[] {
     { label: 'Session ID', value: sessionId },
     // densable 2.1.221 — Session kind after Session ID
     { label: 'Session kind', value: resolveSessionKindLabel() },
+    ...buildCrossSessionPeerAddressProperties(),
     { label: 'cwd', value: getCwd() },
     ...buildAccountProperties(),
     ...buildAPIProviderProperties(),

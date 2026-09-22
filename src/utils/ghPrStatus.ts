@@ -251,8 +251,8 @@ export async function fetchGitlabMrStatus(): Promise<PrStatus | null> {
   }
 }
 
-/** densable `pWb` — `gh pr view` for current branch. */
-async function fetchGithubPrStatus(
+/** densable `sJt` / `pWb` — `gh pr view` for current branch. No 304. */
+export async function fetchGithubPrStatus(
   defaultBranch: string,
 ): Promise<PrStatus | null> {
   const { stdout, code } = await execFileNoThrow(
@@ -315,7 +315,8 @@ export async function fetchPrStatus(): Promise<PrStatus | null> {
   ])
   if (branch === defaultBranch) return null
 
-  // densable: Iya()?yWb:pWb — harbor_prism API path not enabled locally; pWb only.
+  // densable eDt `Wen()?uJt:sJt` lives in prStatusPoller (footer hook).
+  // This leftover `_pp` is sJt + tXe only — no 304.
   return (
     (await fetchGithubPrStatus(defaultBranch)) ?? (await fetchGitlabMrStatus())
   )

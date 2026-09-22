@@ -46,6 +46,8 @@ function buildWorkflowTool(): Tool {
   }
   return buildTool({
     name: WORKFLOW_TOOL_NAME,
+    // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @196825547
+    enablesCodeExecution: true,
     maxResultSizeChars: 50_000,
     inputSchema: workflowInputSchema,
     isEnabled: () => {

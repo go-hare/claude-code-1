@@ -119,11 +119,23 @@ export function installArtifactAutoReactProduct(
         const connected = clients.find(c => c.type === 'connected')
         if (!connected || connected.type !== 'connected') return null
         try {
-          // Lazy: avoid mcp/client ↔ artifactAutoReact cycles at module load
+          // Official vx — dial via host.mcpProcessWiring (w7e/vx).
+          // Re-register after require so reminted test hosts still dial.
           // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { ensureConnectedClient } =
+          const { ensureConnectedClient: mcpEnsure } =
             require('../mcp/client.js') as typeof import('../mcp/client.js')
-          const live = await ensureConnectedClient(connected)
+          const {
+            registerEnsureConnectedClient,
+            ensureConnectedClient: getRegisteredEnsureConnectedClient,
+          } =
+            require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+          registerEnsureConnectedClient(mcpEnsure)
+          const dial = getRegisteredEnsureConnectedClient() as
+            | ((c: typeof connected) => Promise<typeof connected>)
+            | undefined
+          if (!dial) return null
+          const live = await dial(connected)
+          if (!live?.client) return null
           const result = await live.client.callTool(
             { name, arguments: args },
             { timeout: 15_000 },

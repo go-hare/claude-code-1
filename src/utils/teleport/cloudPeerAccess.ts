@@ -1,13 +1,13 @@
 /**
- * densable 2.1.234 #34 — hasCloudPeerAccess (R5v) + harbor kite gate (yg).
+ * densable 2.1.248 Po() same-machine harbor kite + leftover R5v cloud walk.
  *
- * SEA:
- *   yg(): CLAUDE_CODE_HARBOR_KITE || (!windows||tengu_harbor_kite_win) && tengu_harbor_kite
- *   R5v(): yg() && firstParty && !ia() && allow_remote_sessions && Yi() && orgUUID
- *          && (CLAUDE_CODE_HARBOR_KITE_CLOUD || tengu_harbor_kite_cloud)
+ * SEA Po @180993160:
+ *   if CLAUDE_CODE_HARBOR_KITE !== undefined → Me(e)
+ *   windows && !R("tengu_harbor_kite_win", !0) → false
+ *   else R("tengu_harbor_kite", !0)
  *
- * Local: ia() ≈ essential-traffic-only / privacy hard-off is not mirrored here;
- * keep peel gates that already exist in-repo.
+ * R5v / hasCloudPeerAccess still layers firstParty + cloud GB leftover.
+ * Do not fold Ye() / cloud hop into Po.
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
@@ -19,18 +19,19 @@ import { getAPIProvider } from '../model/providers.js'
 import { getPlatform } from '../platform.js'
 
 /**
- * densable yg — cross-session / ListAgents remote peer surface gate.
- * Local ListAgents remains UDS_INBOX-gated at the tool; this gates cloud/CCR walks.
+ * densable Po() — same-machine SendMessage/ListAgents gate.
+ * GB default ON. Env defined (including explicit off) wins via Me/isEnvTruthy.
  */
 export function isHarborKiteEnabled(): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_HARBOR_KITE)) return true
+  const e = process.env.CLAUDE_CODE_HARBOR_KITE
+  if (e !== undefined) return isEnvTruthy(e)
   if (
     getPlatform() === 'windows' &&
-    !getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite_win', false)
+    !getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite_win', true)
   ) {
     return false
   }
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite', false)
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite', true)
 }
 
 function hasOrgUuidHint(): boolean {

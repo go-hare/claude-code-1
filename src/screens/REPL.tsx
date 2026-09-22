@@ -4365,6 +4365,7 @@ export function REPL({
           refreshTools: computeTools,
         },
         getAppState: () => store.getState(),
+        getProactivityLevel: () => store.getState().proactivityLevel,
         setAppState,
         // densable y8r: main session both setters write toolPermissionContext
         setToolPermissionContext: setSessionToolPermissionContext,

@@ -40,6 +40,7 @@ import {
   runFableOverageConsentFlow,
 } from '../fableConsent.js'
 import { FABLE_OVERAGE_CONSENT_DIALOG_KIND } from '../printRequestDialog.js'
+import { isUsageCreditsHintEnabled } from '../../services/rateLimitMessages.js'
 
 describe('fableConsent densables', () => {
   test('isFableModel matches official family names', () => {
@@ -301,7 +302,11 @@ describe('fableConsent densables', () => {
         choice: 'consent',
         lane: 'no_credits_yet',
       }),
-    ).toEqual({ next: 'open_purchase', commandHint: '/usage-credits' })
+    ).toEqual(
+      isUsageCreditsHintEnabled()
+        ? { next: 'open_purchase', commandHint: '/usage-credits' }
+        : { next: 'open_purchase' },
+    )
     expect(
       planFablePurchaseIntent({
         choice: 'consent',
@@ -333,7 +338,9 @@ describe('fableConsent densables', () => {
     })
     expect(flow.choice).toBe('consent')
     expect(flow.purchaseIntent?.next).toBe('open_purchase')
-    expect(flow.purchaseIntent?.commandHint).toBe('/usage-credits')
+    expect(flow.purchaseIntent?.commandHint).toBe(
+      isUsageCreditsHintEnabled() ? '/usage-credits' : undefined,
+    )
     expect(flow.purchaseIntent?.lane).toBe('no_credits_yet')
   })
 })

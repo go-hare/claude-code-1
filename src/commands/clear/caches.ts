@@ -5,9 +5,9 @@
 import { feature } from 'bun:bundle'
 import {
   clearInvokedSkills,
+  resetRequestLatches,
   resetStickyBetas,
   setLastEmittedDate,
-  setMidConvCachePromotionRejected,
 } from '../../bootstrap/state.js'
 import { clearCommandsCache } from '../../commands.js'
 import { getSessionStartDate } from '../../constants/common.js'
@@ -73,7 +73,7 @@ export function clearSessionCaches(
   // densable xxr stickyBetas + midConvCachePromotionRejected — /clear resets
   // mid-conv system latch and cache demotion so o3 can be retried.
   resetStickyBetas()
-  setMidConvCachePromotionRejected(false)
+  resetRequestLatches()
   // getAllModelBetas is memoized; re-evaluate J8t after sticky reset.
   void import('../../utils/betas.js').then(({ clearBetasCaches }) =>
     clearBetasCaches(),

@@ -31,6 +31,7 @@ const PASSTHROUGH_FLAGS = [
   '--allow-dangerously-skip-permissions',
   '--fallback-model',
   '--strict-mcp-config',
+  '--restricted',
 ]
 
 /**
@@ -62,7 +63,8 @@ function extractPassthroughArgs(args: string[]): string[] {
     if (
       arg === '--dangerously-skip-permissions' ||
       arg === '--allow-dangerously-skip-permissions' ||
-      arg === '--strict-mcp-config'
+      arg === '--strict-mcp-config' ||
+      arg === '--restricted'
     ) {
       result.push(arg)
       continue

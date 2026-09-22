@@ -105,6 +105,30 @@ export const init = memoize(async (): Promise<void> => {
     })
     profileCheckpoint('init_configs_enabled')
 
+    // Official densable 2.1.248 init b(): when D() && backend —
+    // Npn(seedUserSettings) at configs enable; early _Ke; later $pn after safe env.
+    // Pin is set in cli.tsx via pinStorageV5; getPinnedStorageV5() is the wire.
+    {
+      const { getPinnedStorageV5, isHoverRestOn } = await import(
+        '../utils/storageV5/index.js'
+      )
+      const pinned = getPinnedStorageV5()
+      if (isHoverRestOn() && pinned !== undefined) {
+        const { getSettingsOwner } = await import(
+          '../utils/settings/settingsCache.js'
+        )
+        const { seedUserSettings } = await import(
+          '../utils/settings/settingsPrimer.js'
+        )
+        const { primeRemoteSettingsBackendView } = await import(
+          '../utils/settings/remoteSettingsBackendView.js'
+        )
+        await seedUserSettings(pinned, getSettingsOwner())
+        await primeRemoteSettingsBackendView(pinned)
+        profileCheckpoint('init_remote_settings_primed')
+      }
+    }
+
     // Apply only safe environment variables before trust dialog
     // Full environment variables are applied after trust is established
     const envVarsStart = Date.now()
@@ -122,6 +146,18 @@ export const init = memoize(async (): Promise<void> => {
       duration_ms: Date.now() - envVarsStart,
     })
     profileCheckpoint('init_safe_env_vars_applied')
+
+    // Official `$pn(i, ra())` @191443858 — settingsPrime after safe env vars.
+    {
+      const { getPinnedStorageV5 } = await import('../utils/storageV5/index.js')
+      const { getSettingsOwner } = await import(
+        '../utils/settings/settingsCache.js'
+      )
+      const { settingsPrime } = await import(
+        '../utils/settings/settingsPrimer.js'
+      )
+      await settingsPrime(getPinnedStorageV5(), getSettingsOwner())
+    }
 
     // Make sure things get flushed on exit
     setupGracefulShutdown()

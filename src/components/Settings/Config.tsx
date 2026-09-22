@@ -136,17 +136,16 @@ function isConfigSettingManagedOutsideUser(key: keyof SettingsJson): boolean {
 }
 
 /**
- * densable `ig` / `crossSessionInboxRowVisible` — product surface for inbound
- * peer messages. Local: UDS_INBOX feature (DEFAULT ON). densable also has
- * CLAUDE_CODE_HARBOR_KITE env + tengu_harbor_kite GB; honor env override.
+ * densable 2.1.248 `Po()` / `crossSessionInboxRowVisible`.
+ * Same-machine inbox row: env defined → Me/isEnvTruthy; GB default ON.
  */
 function isCrossSessionInboxConfigRowVisible(): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_HARBOR_KITE)) return true;
-  if (feature('UDS_INBOX')) return true;
-  if (getPlatform() === 'windows' && !getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite_win', false)) {
+  const e = process.env.CLAUDE_CODE_HARBOR_KITE;
+  if (e !== undefined) return isEnvTruthy(e);
+  if (getPlatform() === 'windows' && !getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite_win', true)) {
     return false;
   }
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite', false);
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite', true);
 }
 
 type Props = {

@@ -65,6 +65,8 @@ export type PermissionRuleSource =
   | 'session'
   /** densable mcpServerPolicy — tools[].permission_policy from dynamic MCP. */
   | 'mcpServerPolicy'
+  /** densable 2.1.248 #1 rrn toolsNarrowing — restricted / --tools deny bucket. */
+  | 'toolsNarrowing'
 
 /**
  * The value of a permission rule - specifies which tool and optional content
@@ -535,4 +537,8 @@ export type ToolPermissionContext = {
    * `default`.
    */
   readonly canAutoClassifierRun?: boolean
+  /**
+   * densable 2.1.248 #1 rrn `...o&&{restricted:o}` @185220424
+   */
+  readonly restricted?: boolean
 }

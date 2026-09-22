@@ -36,8 +36,9 @@ mock.module('src/services/analytics/index.ts', analyticsMock)
 mock.module('src/services/analytics/index.js', analyticsMock)
 
 // Drive interactivity through the real setter instead of mocking bootstrap/state:
-// getIsNonInteractiveSession() is just !STATE.isInteractive, and a process-global
-// mock of it pins every co-running suite (telemetry/events.ts reads the same gate).
+// getIsNonInteractiveSession() is official De — !host.launchOptions.isInteractive().
+// A process-global mock of it pins every co-running suite (telemetry/events.ts
+// reads the same gate).
 const savedIsInteractive = getIsInteractive()
 
 // Use the real `recognizePrintModel` (densable est). It short-circuits to

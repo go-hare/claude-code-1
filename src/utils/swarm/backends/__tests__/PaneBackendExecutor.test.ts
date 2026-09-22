@@ -2,12 +2,35 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type {
+  CleanupRegistrable,
+  CleanupUnregister,
+} from '../../../cleanupRegistry.js'
 import { createPaneBackendExecutor } from '../PaneBackendExecutor'
 import type { PaneBackend } from '../types'
 
 let tempHome: string
 let previousConfigDir: string | undefined
 let cleanupFns: Array<() => Promise<void>>
+
+function registerTestCleanup(cleanupFn: CleanupRegistrable): CleanupUnregister {
+  const run = async (): Promise<void> => {
+    if (typeof cleanupFn === 'function') {
+      await cleanupFn()
+      return
+    }
+    if (Symbol.asyncDispose in cleanupFn) {
+      await cleanupFn[Symbol.asyncDispose]()
+      return
+    }
+    cleanupFn[Symbol.dispose]()
+  }
+  cleanupFns.push(run)
+  const unregister = (): void => {
+    cleanupFns = cleanupFns.filter(fn => fn !== run)
+  }
+  return Object.assign(unregister, { [Symbol.dispose]: unregister })
+}
 
 beforeEach(() => {
   cleanupFns = []
@@ -62,12 +85,7 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend, cleanupFn => {
-      cleanupFns.push(cleanupFn)
-      return () => {
-        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
-      }
-    })
+    const executor = createPaneBackendExecutor(backend, registerTestCleanup)
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -134,12 +152,7 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend, cleanupFn => {
-      cleanupFns.push(cleanupFn)
-      return () => {
-        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
-      }
-    })
+    const executor = createPaneBackendExecutor(backend, registerTestCleanup)
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -200,12 +213,7 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend, cleanupFn => {
-      cleanupFns.push(cleanupFn)
-      return () => {
-        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
-      }
-    })
+    const executor = createPaneBackendExecutor(backend, registerTestCleanup)
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -264,12 +272,7 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend, cleanupFn => {
-      cleanupFns.push(cleanupFn)
-      return () => {
-        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
-      }
-    })
+    const executor = createPaneBackendExecutor(backend, registerTestCleanup)
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {

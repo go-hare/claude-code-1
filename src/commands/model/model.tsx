@@ -1,4 +1,3 @@
-import chalk from 'chalk';
 import * as React from 'react';
 import { useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
@@ -34,6 +33,7 @@ import {
   renderDefaultModelSetting,
 } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
+import { em } from '../../utils/model/modelNoticeCode.js';
 import { validateModel } from '../../utils/model/validateModel.js';
 
 function ModelPickerWrapper({
@@ -57,7 +57,7 @@ function ModelPickerWrapper({
       action: 'cancel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     const displayModel = renderModelLabel(mainLoopModel);
-    onDone(`Kept model as ${chalk.bold(displayModel)}`, {
+    onDone(`Kept model as ${em(displayModel)}`, {
       display: 'system',
     });
   }
@@ -77,9 +77,9 @@ function ModelPickerWrapper({
     // Persist as default for new sessions (matching upstream 2.1.153 behavior)
     updateSettingsForSource('userSettings', { model: model ?? undefined });
 
-    let message = `Set model to ${chalk.bold(renderModelLabel(model))}`;
+    let message = `Set model to ${em(renderModelLabel(model))}`;
     if (effort !== undefined) {
-      message += ` with ${chalk.bold(effort)} effort`;
+      message += ` with ${em(effort)} effort`;
     }
 
     // densable 2.1.218 #31 — Rft/uU/dU on /model picker confirm
@@ -255,7 +255,7 @@ function SetModelAndClose({
         mainLoopModelForSession: null,
         ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
       }));
-      let message = `Set model to ${chalk.bold(renderModelLabel(modelValue))}`;
+      let message = `Set model to ${em(renderModelLabel(modelValue))}`;
       message += applied.suffix;
       onDone(message);
     }
@@ -287,12 +287,12 @@ function ShowModelAndClose({ onDone }: { onDone: (result?: string) => void }): R
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
   const effortValue = useAppState(s => s.effortValue);
-  const displayModel = renderModelLabel(mainLoopModel);
+  const displayModel = em(renderModelLabel(mainLoopModel));
   const effortInfo = effortValue !== undefined ? ` (effort: ${effortValue})` : '';
 
   if (mainLoopModelForSession) {
     onDone(
-      `Current model: ${chalk.bold(renderModelLabel(mainLoopModelForSession))} (session override from plan mode)\nBase model: ${displayModel}${effortInfo}`,
+      `Current model: ${em(renderModelLabel(mainLoopModelForSession))} (session override from plan mode)\nBase model: ${displayModel}${effortInfo}`,
     );
   } else {
     onDone(`Current model: ${displayModel}${effortInfo}`);

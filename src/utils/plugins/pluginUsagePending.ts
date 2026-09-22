@@ -3,12 +3,13 @@
  * `Aln`/`dln`/`uln`/`sko`/`xvi`/`pPe`).
  *
  * `fn`/`bn` UNKNOWN — leftover-wired WeakOwnerCache.of(k.host), not an
- * invented WeakMap factory or `bn()` body. `ca`/`i3` UNKNOWN — `xvi` stores
- * `flushStorageV5` only; `Aln` is not invented-scheduled. `Pln` UNKNOWN —
- * leftover-wired to `saveGlobalConfig` (sync exit path).
+ * invented WeakMap factory or `bn()` body. Official `X$n`/`xvi` @183765544:
+ * `TNe` + `Et(()=>CNe)` + `Vk(()=>CNe)`. `Pln` UNKNOWN — leftover-wired to
+ * `saveGlobalConfig` (sync exit path).
  */
 
 import { type GlobalConfig, saveGlobalConfig } from '../config.js'
+import { registerCleanup, registerPreExitFlush } from '../cleanupRegistry.js'
 import { getBootstrapSessionHost } from '../sessionHost.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 
@@ -191,9 +192,16 @@ export function incrementPluginUsage(e: string): void {
   if (r3.flushers) dln(n, r3.flushers)
 }
 
-/** densable `xvi`. `ca`/`i3` UNKNOWN — store handle only. */
+/**
+ * densable `xvi` / official `X$n` @183765544:
+ * `if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))`.
+ */
 export function registerPluginUsageStorageV5(e: unknown): void {
-  if (isHoverRestOn() && e !== undefined) gln(e)
+  if (isHoverRestOn() && e !== undefined) {
+    gln(e)
+    registerCleanup(() => flushPendingPluginUsageToStorageV5(e))
+    registerPreExitFlush(() => flushPendingPluginUsageToStorageV5(e))
+  }
 }
 
 /** densable `pPe` — `uln({flush:oko,flushAtExit:sko})`. */

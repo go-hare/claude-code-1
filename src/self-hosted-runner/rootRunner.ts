@@ -175,6 +175,7 @@ export type RootRunnerArgs = {
   healthPort: number
   debugTokenDir: string | undefined
   lockToAccountId: string | undefined
+  clientLabel?: string
   poolSecretFile: string | undefined
   gitSshRewriteHosts: string[]
   gitHostRewrites: Array<[string, string]>
@@ -636,6 +637,8 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
     ),
     debugTokenDir: process.env.SELF_HOSTED_RUNNER_DEBUG_TOKEN_DIR,
     lockToAccountId: process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,
+    clientLabel:
+      process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim() || undefined,
     poolSecretFile: undefined,
     gitSshRewriteHosts: [],
     gitHostRewrites: [],
@@ -957,6 +960,15 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
           n++
         }
         break
+      case '--client-label':
+        if (i && !i.startsWith('--')) {
+          const u = i.trim()
+          if (u) {
+            t.clientLabel = u
+            n++
+          }
+        }
+        break
       case '--debug-token-dir':
         if (i) {
           t.debugTokenDir = i
@@ -1075,6 +1087,11 @@ Connection:
   --lock-to-account <id>      Lock runner to a single account at registration (webhook-driven on-demand
                               spawn). Only that account's sessions are assigned.
                               [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Shown
+                              beside the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
   --proxy-authorization-command <shell command>
                               For egress proxies that require a Proxy-Authorization header (for
                               example a short-lived bearer token) on every CONNECT. The command's
@@ -2846,7 +2863,7 @@ export async function selfHostedRunnerMain(
     poolSecret: secret,
     onDebug,
   })
-  const clientLabel = (deps.hostname ?? hostname)()
+  const clientLabel = args.clientLabel ?? (deps.hostname ?? hostname)()
   if (args.lockToAccountId) {
     onStatus(`Registering locked to account: ${args.lockToAccountId}`)
   }

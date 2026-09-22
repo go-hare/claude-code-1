@@ -140,39 +140,46 @@ export function restoreCostStateForSession(sessionId: string): boolean {
 /**
  * Saves the current session's costs to project config.
  * Call this before switching sessions to avoid losing accumulated costs.
+ * Official ZFn(e,t) / eUn(e) — optional storageV5 is densable cc second arg.
  */
-export function saveCurrentSessionCosts(fpsMetrics?: FpsMetrics): void {
-  saveCurrentProjectConfig(current => ({
-    ...current,
-    lastCost: getTotalCostUSD(),
-    lastAPIDuration: getTotalAPIDuration(),
-    lastAPIDurationWithoutRetries: getTotalAPIDurationWithoutRetries(),
-    lastToolDuration: getTotalToolDuration(),
-    lastDuration: getTotalDuration(),
-    lastLinesAdded: getTotalLinesAdded(),
-    lastLinesRemoved: getTotalLinesRemoved(),
-    lastTotalInputTokens: getTotalInputTokens(),
-    lastTotalOutputTokens: getTotalOutputTokens(),
-    lastTotalCacheCreationInputTokens: getTotalCacheCreationInputTokens(),
-    lastTotalCacheReadInputTokens: getTotalCacheReadInputTokens(),
-    lastTotalWebSearchRequests: getTotalWebSearchRequests(),
-    lastFpsAverage: fpsMetrics?.averageFps,
-    lastFpsLow1Pct: fpsMetrics?.low1PctFps,
-    lastModelUsage: Object.fromEntries(
-      Object.entries(getModelUsage()).map(([model, usage]) => [
-        model,
-        {
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          cacheReadInputTokens: usage.cacheReadInputTokens,
-          cacheCreationInputTokens: usage.cacheCreationInputTokens,
-          webSearchRequests: usage.webSearchRequests,
-          costUSD: usage.costUSD,
-        },
-      ]),
-    ),
-    lastSessionId: getSessionId(),
-  }))
+export function saveCurrentSessionCosts(
+  fpsMetrics?: FpsMetrics,
+  _storageV5?: unknown,
+): void {
+  saveCurrentProjectConfig(
+    current => ({
+      ...current,
+      lastCost: getTotalCostUSD(),
+      lastAPIDuration: getTotalAPIDuration(),
+      lastAPIDurationWithoutRetries: getTotalAPIDurationWithoutRetries(),
+      lastToolDuration: getTotalToolDuration(),
+      lastDuration: getTotalDuration(),
+      lastLinesAdded: getTotalLinesAdded(),
+      lastLinesRemoved: getTotalLinesRemoved(),
+      lastTotalInputTokens: getTotalInputTokens(),
+      lastTotalOutputTokens: getTotalOutputTokens(),
+      lastTotalCacheCreationInputTokens: getTotalCacheCreationInputTokens(),
+      lastTotalCacheReadInputTokens: getTotalCacheReadInputTokens(),
+      lastTotalWebSearchRequests: getTotalWebSearchRequests(),
+      lastFpsAverage: fpsMetrics?.averageFps,
+      lastFpsLow1Pct: fpsMetrics?.low1PctFps,
+      lastModelUsage: Object.fromEntries(
+        Object.entries(getModelUsage()).map(([model, usage]) => [
+          model,
+          {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            webSearchRequests: usage.webSearchRequests,
+            costUSD: usage.costUSD,
+          },
+        ]),
+      ),
+      lastSessionId: getSessionId(),
+    }),
+    _storageV5,
+  )
 }
 
 function formatCost(cost: number, maxDecimalPlaces: number = 4): string {

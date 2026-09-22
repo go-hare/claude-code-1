@@ -3,9 +3,10 @@ import { isEnvTruthy } from './envUtils.js'
 import { getInitialSettings } from './settings/settings.js'
 
 /**
- * densable 2.1.243 `sFr` / `_zt` — prompt-cache TTL for the main conversation
- * vs subagents. Settings keys are `promptCacheTtl` / `subagentPromptCacheTtl`.
- * Env wins over settings; FORCE_PROMPT_CACHING_5M wins over both.
+ * densable 2.1.243 `sFr` / `_zt` + 2.1.248 `jTt` — prompt-cache TTL for the
+ * main conversation vs subagents. Settings keys are `promptCacheTtl` /
+ * `subagentPromptCacheTtl`. Resolve order: force_5m_env > env > setting >
+ * agent_frontmatter > enable_1h_env.
  */
 
 export type PromptCacheTtl = '5m' | '1h'
@@ -14,6 +15,7 @@ export type PromptCacheTtlReason =
   | 'force_5m_env'
   | 'env'
   | 'setting'
+  | 'agent_frontmatter'
   | 'enable_1h_env'
 
 export type PromptCacheTtlResolution = {
@@ -55,11 +57,32 @@ function parsePromptCacheTtl(value: unknown): PromptCacheTtl | undefined {
 }
 
 /**
- * densable `sFr(e)` — env / settings / ENABLE_PROMPT_CACHING_1H override.
- * Returns undefined so the caller can apply the subscriber/GB default.
+ * densable 2.1.248 `mUt` — agent frontmatter `experimental.cacheTtl`.
+ * Key match is case-insensitive (`cachettl`); only `"5m"` / `"1h"` survive.
+ */
+export function parseAgentFrontmatterCacheTtl(
+  frontmatter: Record<string, unknown>,
+): PromptCacheTtl | undefined {
+  const experimental = frontmatter.experimental
+  if (typeof experimental !== 'object' || experimental === null) {
+    return undefined
+  }
+  const ttl = Object.entries(experimental).find(
+    ([key]) => key.toLowerCase() === 'cachettl',
+  )?.[1]
+  return ttl === '5m' || ttl === '1h' ? ttl : undefined
+}
+
+/**
+ * densable 2.1.248 `jTt(e,t,r=!1)` — env / settings / agent frontmatter /
+ * ENABLE_PROMPT_CACHING_1H override. `"1h"` from frontmatter is ignored while
+ * a Claude subscription is in overage. Returns undefined so the caller can
+ * apply the subscriber/GB default.
  */
 export function resolvePromptCacheTtlOverride(
   querySource?: string,
+  agentCacheTtlOverride?: PromptCacheTtl,
+  subscriptionInOverage = false,
 ): PromptCacheTtlResolution | undefined {
   if (isEnvTruthy(process.env.FORCE_PROMPT_CACHING_5M)) {
     return { ttl: '5m', reason: 'force_5m_env' }
@@ -81,6 +104,13 @@ export function resolvePromptCacheTtlOverride(
   )
   if (settingTtl !== undefined) {
     return { ttl: settingTtl, reason: 'setting' }
+  }
+
+  if (
+    agentCacheTtlOverride !== undefined &&
+    !(agentCacheTtlOverride === '1h' && subscriptionInOverage)
+  ) {
+    return { ttl: agentCacheTtlOverride, reason: 'agent_frontmatter' }
   }
 
   if (

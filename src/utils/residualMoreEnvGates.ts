@@ -63,9 +63,9 @@ export function isGatewayModelDiscoveryEnabled(
 }
 
 /**
- * Official $5l densable — gateway model discovery is eligible when:
- * ENABLE_GATEWAY_MODEL_DISCOVERY + provider firstParty + !Gd() + ANTHROPIC_BASE_URL set.
- * Full q5l /v1/models download remains denser.
+ * Official $5l / su densable — gateway model discovery is eligible when:
+ * ENABLE_GATEWAY_MODEL_DISCOVERY + provider firstParty + !Uo() + ANTHROPIC_BASE_URL set.
+ * Official c9n fetch (helper-as-cred) is {@link fetchAndCacheGatewayModels}.
  */
 export function shouldEnableGatewayModelDiscovery(input?: {
   env?: NodeJS.ProcessEnv
@@ -183,9 +183,135 @@ export function planGatewayModelsCacheWrite(input: {
   return { baseUrl, models }
 }
 
+/** Official c9n skip when Bmn is false. */
+const GATEWAY_DISCOVERY_HELPER_TRUST_SKIP =
+  'apiKeyHelper requires workspace trust'
+
+/** Official c9n skip when Bmn is true but no token/helper/key. */
+const GATEWAY_DISCOVERY_NO_CREDENTIAL =
+  'no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)'
+
 /**
- * Official q5l densable consumer — GET `{baseUrl}/v1/models` and write
- * gateway-models.json when $5l is on. Injectable get/write for tests.
+ * Official Bmn densable — `return!(gN()&&!Jo())`.
+ * gN = helper comes from projectSettings/localSettings; Jo = trust accepted.
+ */
+function isGatewayDiscoveryHelperAllowed(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getConfiguredApiKeyHelper } = require('./auth.js') as {
+      getConfiguredApiKeyHelper: () => string | undefined
+    }
+    const helper = getConfiguredApiKeyHelper()
+    if (!helper) return true
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSettingsForSource } = require('./settings/settings.js') as {
+      getSettingsForSource: (source: 'projectSettings' | 'localSettings') => {
+        apiKeyHelper?: string
+      } | null
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { checkHasTrustDialogAccepted } = require('./config.js') as {
+      checkHasTrustDialogAccepted: () => boolean
+    }
+    const fromProjectOrLocal =
+      getSettingsForSource('projectSettings')?.apiKeyHelper === helper ||
+      getSettingsForSource('localSettings')?.apiKeyHelper === helper
+    return !(fromProjectOrLocal && !checkHasTrustDialogAccepted())
+  } catch {
+    return true
+  }
+}
+
+function readIsNonInteractiveSession(): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getIsNonInteractiveSession } = require('../bootstrap/state.js') as {
+    getIsNonInteractiveSession: () => boolean
+  }
+  return getIsNonInteractiveSession()
+}
+
+async function resolveGatewayDiscoveryAuth(input: {
+  env: NodeJS.ProcessEnv
+  resolveAuthHeaders?: () => Record<string, string> | null | undefined
+  canUseApiKeyHelper?: () => boolean
+  getApiKeyFromApiKeyHelper?: (
+    isNonInteractive: boolean,
+  ) => Promise<string | null>
+  getAnthropicApiKey?: () => string | null
+  isNonInteractiveSession?: boolean
+}): Promise<
+  { ok: true; headers: Record<string, string> } | { ok: false; reason: string }
+> {
+  if (input.resolveAuthHeaders) {
+    const headers = input.resolveAuthHeaders() ?? {}
+    if (!headers.Authorization && !headers['x-api-key']) {
+      return { ok: false, reason: 'no_auth' }
+    }
+    return { ok: true, headers }
+  }
+
+  // Official c9n: r=ANTHROPIC_AUTH_TOKEN, o=Bmn(),
+  // u=r||!o?void 0:(await Oce(De()))?.trim(), p=r||u, g=S_()?.trim()||u
+  const authToken = input.env.ANTHROPIC_AUTH_TOKEN
+  const helperAllowed =
+    input.canUseApiKeyHelper?.() ?? isGatewayDiscoveryHelperAllowed()
+  let helperKey: string | undefined
+  if (!authToken && helperAllowed) {
+    const isNonInteractive =
+      input.isNonInteractiveSession ?? readIsNonInteractiveSession()
+    let raw: string | null
+    if (input.getApiKeyFromApiKeyHelper) {
+      raw = await input.getApiKeyFromApiKeyHelper(isNonInteractive)
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getApiKeyFromApiKeyHelper } = require('./auth.js') as {
+        getApiKeyFromApiKeyHelper: (
+          isNonInteractive: boolean,
+        ) => Promise<string | null>
+      }
+      raw = await getApiKeyFromApiKeyHelper(isNonInteractive)
+    }
+    const trimmed = raw?.trim()
+    if (trimmed) helperKey = trimmed
+  }
+
+  let apiKey: string | undefined
+  try {
+    const key = input.getAnthropicApiKey
+      ? input.getAnthropicApiKey()
+      : // eslint-disable-next-line @typescript-eslint/no-require-imports
+        (
+          require('./auth.js') as {
+            getAnthropicApiKey?: () => string | null
+          }
+        ).getAnthropicApiKey?.()
+    const trimmed = key?.trim()
+    if (trimmed) apiKey = trimmed
+  } catch {
+    // Official S_() — PW() wrapped, null on throw
+  }
+  if (!apiKey) apiKey = helperKey
+
+  const bearer = authToken || helperKey
+  if (!bearer && !apiKey) {
+    return {
+      ok: false,
+      reason: helperAllowed
+        ? GATEWAY_DISCOVERY_NO_CREDENTIAL
+        : GATEWAY_DISCOVERY_HELPER_TRUST_SKIP,
+    }
+  }
+
+  const headers: Record<string, string> = {}
+  if (bearer) headers.Authorization = `Bearer ${bearer}`
+  if (apiKey) headers['x-api-key'] = apiKey
+  return { ok: true, headers }
+}
+
+/**
+ * Official q5l/c9n densable consumer — GET `{baseUrl}/v1/models` and write
+ * gateway-models.json when $5l is on. apiKeyHelper is a credential (Oce);
+ * skip only when Bmn is false (helper requires workspace trust).
  */
 export async function fetchAndCacheGatewayModels(input?: {
   env?: NodeJS.ProcessEnv
@@ -194,6 +320,12 @@ export async function fetchAndCacheGatewayModels(input?: {
   getJson?: (url: string, headers: Record<string, string>) => Promise<unknown>
   writeFile?: (path: string, body: string) => void | Promise<void>
   resolveAuthHeaders?: () => Record<string, string> | null | undefined
+  canUseApiKeyHelper?: () => boolean
+  getApiKeyFromApiKeyHelper?: (
+    isNonInteractive: boolean,
+  ) => Promise<string | null>
+  getAnthropicApiKey?: () => string | null
+  isNonInteractiveSession?: boolean
   mkdirp?: (dir: string) => void | Promise<void>
 }): Promise<
   { ok: true; path: string; modelCount: number } | { ok: false; reason: string }
@@ -205,27 +337,16 @@ export async function fetchAndCacheGatewayModels(input?: {
   const baseUrl = env.ANTHROPIC_BASE_URL?.replace(/\/+$/, '')
   if (!baseUrl) return { ok: false, reason: 'no_base_url' }
 
-  let headers: Record<string, string> = {}
-  try {
-    if (input?.resolveAuthHeaders) {
-      headers = input.resolveAuthHeaders() ?? {}
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const auth = require('./auth.js') as {
-        getAnthropicApiKey?: () => string | null
-        getClaudeAIOAuthTokens?: () => { accessToken?: string } | null
-      }
-      const oauth = auth.getClaudeAIOAuthTokens?.()?.accessToken
-      const apiKey = auth.getAnthropicApiKey?.()
-      if (oauth) headers = { Authorization: `Bearer ${oauth}` }
-      else if (apiKey) headers = { 'x-api-key': apiKey }
-    }
-  } catch {
-    // densable optional auth
-  }
-  if (!headers.Authorization && !headers['x-api-key']) {
-    return { ok: false, reason: 'no_auth' }
-  }
+  const auth = await resolveGatewayDiscoveryAuth({
+    env,
+    resolveAuthHeaders: input?.resolveAuthHeaders,
+    canUseApiKeyHelper: input?.canUseApiKeyHelper,
+    getApiKeyFromApiKeyHelper: input?.getApiKeyFromApiKeyHelper,
+    getAnthropicApiKey: input?.getAnthropicApiKey,
+    isNonInteractiveSession: input?.isNonInteractiveSession,
+  })
+  if (!auth.ok) return auth
+  const headers = auth.headers
 
   const url = `${baseUrl}/v1/models`
   let body: unknown

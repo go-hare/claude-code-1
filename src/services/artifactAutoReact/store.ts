@@ -260,7 +260,7 @@ export type ArtifactAutoReactStore = {
     pendingRestoredRows: Map<string, DurableWatchRow>
     slugOps: Map<string, unknown>
     stopLatches: StopLatches
-    pendingOps: Set<string>
+    pendingOps: Set<Promise<unknown>>
     originatorRefused: boolean
     watchUrlWithheld: string | null
     watchUrlGranted: boolean

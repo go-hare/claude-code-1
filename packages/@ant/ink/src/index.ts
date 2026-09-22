@@ -209,6 +209,7 @@ export {
   ENABLE_MOUSE_TRACKING,
   ENABLE_MOUSE_TRACKING_SCROLL,
   enableMouseTracking,
+  Yot,
   type MouseTrackingMode,
 } from './core/termio/dec.js'
 export { default as instances } from './core/instances.js'

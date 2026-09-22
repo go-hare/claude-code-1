@@ -248,6 +248,8 @@ export type CommandBase = {
   subcommands?: Record<string, string>
   isMcp?: boolean
   argumentHint?: string // Hint text for command arguments (displayed in gray after command)
+  /** Official menu/typeahead blurb (Fmr menuDescription). Distinct from whenToUse. */
+  menuDescription?: string
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command
   version?: string // Version of the command/skill
   disableModelInvocation?: boolean // Whether to disable this command from being invoked by models
@@ -271,6 +273,25 @@ export type CommandBase = {
   isSensitive?: boolean // If true, args are redacted from the conversation history
   /** Defaults to `name`. Only override when the displayed name differs (e.g. plugin prefix stripping). */
   userFacingName?: () => string
+  /**
+   * densable 2.1.248 FleetView `Lc` — when set, AgentsView slash dispatch calls
+   * this instead of free-form intent / normal load(). Host injects exit /
+   * relaunch / login / setError / setInfo. Tip SEA: update/exit/login.
+   */
+  fleetHostCall?: (
+    host: FleetHostCallContext,
+    args: string,
+  ) => void | Promise<void>
+}
+
+/** densable FleetView slash host bag (`exit`/`relaunch`/`login`/`setError`/`setInfo`). */
+export type FleetHostCallContext = {
+  exit: () => void
+  relaunch: () => void | Promise<void>
+  login: () => void
+  setError: (message: string | null) => void
+  setInfo: (message: string | null) => void
+  storageV5?: unknown
 }
 
 export type Command = CommandBase &

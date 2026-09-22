@@ -2,6 +2,7 @@
 
 import { feature } from 'bun:bundle'
 import chalk from 'chalk'
+import { basename } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -23,10 +24,12 @@ import { initSessionMemory } from './services/SessionMemory/sessionMemory.js'
 import { initSkillLearning } from './services/skillLearning/runtimeObserver.js'
 import { asSessionId } from './types/ids.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
+import { isBgSession } from './utils/concurrentSessions.js'
 import { checkAndRestoreTerminalBackup } from './utils/appleTerminalBackup.js'
 import { prefetchApiKeyFromApiKeyHelperIfSafe } from './utils/auth.js'
 import { clearMemoryFileCaches } from './utils/claudemd.js'
 import { getCurrentProjectConfig, getGlobalConfig } from './utils/config.js'
+import { logForDebugging } from './utils/debug.js'
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
 import { env } from './utils/env.js'
 import { envDynamic } from './utils/envDynamic.js'
@@ -38,10 +41,7 @@ import {
 } from './utils/residualFinalEnvGates.js'
 import { findCanonicalGitRoot, findGitRoot, getIsGit } from './utils/git.js'
 import { initializeFileChangedWatcher } from './utils/hooks/fileChangedWatcher.js'
-import {
-  captureHooksConfigSnapshot,
-  updateHooksConfigSnapshot,
-} from './utils/hooks/hooksConfigSnapshot.js'
+import { updateHooksConfigSnapshotUnderPrime } from './utils/hooks/hooksConfigSnapshot.js'
 import { hasWorktreeCreateHook } from './utils/hooks.js'
 import { checkAndRestoreITerm2Backup } from './utils/iTermBackup.js'
 import { logError } from './utils/log.js'
@@ -51,10 +51,13 @@ import type { PermissionMode } from './utils/permissions/PermissionMode.js'
 import { getPlanSlug } from './utils/plans.js'
 import { saveWorktreeState } from './utils/sessionStorage.js'
 import { profileCheckpoint } from './utils/startupProfiler.js'
+import { isHarborKiteEnabled } from './utils/teleport/cloudPeerAccess.js'
 import {
+  adoptWorktreeForBgBoot,
   createTmuxSessionForWorktree,
   createWorktreeForSession,
   generateTmuxSessionName,
+  getCurrentWorktreeSession,
   worktreeBranchName,
 } from './utils/worktree.js'
 
@@ -97,20 +100,22 @@ export async function setup(
     // and $CLAUDE_CODE_MESSAGING_SOCKET is exported before any hook
     // (SessionStart in particular) can spawn and snapshot process.env.
     if (feature('UDS_INBOX')) {
-      const m = await import('./utils/udsMessaging.js')
-      try {
-        await m.startUdsMessaging(
-          messagingSocketPath ?? m.getDefaultUdsSocketPath(),
-          { isExplicit: messagingSocketPath !== undefined },
+      if (!isHarborKiteEnabled()) {
+        logForDebugging(
+          '[uds-messaging] Skipped: cross-session messaging gate off',
         )
-      } catch (error) {
-        logError(error)
-        console.error(
-          chalk.red(
-            `Error: Failed to start messaging socket (UDS_INBOX): ${errorMessage(error)}`,
-          ),
-        )
-        process.exit(1)
+      } else {
+        const m = await import('./utils/udsMessaging.js')
+        try {
+          await m.startUdsMessaging(
+            messagingSocketPath ?? m.getDefaultUdsSocketPath(),
+            { isExplicit: messagingSocketPath !== undefined },
+          )
+        } catch (error) {
+          // Official setup_uds: record lastStartFailureCause (wZe / /status)
+          // and continue — do not exit. ye() logs Failed to start.
+          logError(error)
+        }
       }
     }
   }
@@ -172,8 +177,12 @@ export async function setup(
 
   // Capture hooks configuration snapshot to avoid hidden hook modifications.
   // IMPORTANT: Must be called AFTER setCwd() so hooks are loaded from the correct directory
+  // Official: D()&&i ? nHe(Gqe) : zan(Yl) @ setup_hooks_snapshot — leftover UnderPrime.
   const hooksStart = Date.now()
-  captureHooksConfigSnapshot()
+  {
+    const { getPinnedStorageV5 } = await import('./utils/storageV5/index.js')
+    await updateHooksConfigSnapshotUnderPrime(getPinnedStorageV5())
+  }
   logForDiagnosticsNoPII('info', 'setup_hooks_captured', {
     duration_ms: Date.now() - hooksStart,
   })
@@ -287,9 +296,34 @@ export async function setup(
     // Clear memory files cache since originalCwd has changed
     clearMemoryFileCaches()
     // Settings cache was populated in init() (via applySafeConfigEnvironmentVariables)
-    // and again at captureHooksConfigSnapshot() above, both from the original dir's
+    // and again at updateHooksConfigSnapshotUnderPrime() above, both from the original dir's
     // .claude/settings.json. Re-read from the worktree and re-capture hooks.
-    updateHooksConfigSnapshot()
+    // Official deeplink cwd-change @191362512 uses Gqe then uP(retain); leftover
+    // has no --deep-link-cwd-b64 host — worktree cwd change is the nHe/Gqe wire.
+    const { getPinnedStorageV5 } = await import('./utils/storageV5/index.js')
+    await updateHooksConfigSnapshotUnderPrime(getPinnedStorageV5())
+  } else if (isBgSession() && !getCurrentWorktreeSession()) {
+    // densable 2.1.248 #35 Xt else-if(_t()&&!Ws()) → j() pGe hold
+    try {
+      const { getBgJobDirectory } = await import(
+        './utils/sessionNameJobSidecar.js'
+      )
+      const jobDir = getBgJobDirectory()
+      let job: { worktreePath?: string; worktreeHookBased?: boolean } | null =
+        null
+      if (jobDir) {
+        const { readBgJobState } = await import('./daemon/jobState.js')
+        job = readBgJobState(basename(jobDir))
+      }
+      const adopted = await adoptWorktreeForBgBoot(cwd, job)
+      if (adopted) {
+        saveWorktreeState(adopted)
+      }
+    } catch (u) {
+      logForDebugging(
+        `[worktree] bg adopt-time reclaim skipped: ${errorMessage(u)}`,
+      )
+    }
   }
 
   // Background jobs - only critical registrations that must happen before first query

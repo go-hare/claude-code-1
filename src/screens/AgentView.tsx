@@ -71,6 +71,16 @@ import {
   computeFleetColumnWidths,
   sessionArtifactLabel,
   formatAttachError,
+  buildTerminalHolders,
+  terminalHolderOf,
+  decideFleetOpenGate,
+  isFleetDeadEpochOfferArmed,
+  isFleetBhSettled,
+  isFleetExecJob,
+  FLEET_HELD_IN_TERMINAL_LABEL,
+  FLEET_HELD_IN_TERMINAL_HINT,
+  FLEET_DEAD_EPOCH_GONE,
+  DEAD_EPOCH_TRANSCRIPT_GONE,
   isOriginSessionId,
   decideOriginEscAction,
   normalizeFleetGroupName,
@@ -90,6 +100,12 @@ import {
   FLEET_CLIPBOARD_IMAGE_READ_FAILED,
   shouldFleetViewVimHandleEscape,
   hasComposedDispatch,
+  decideFleetReturnAction,
+  fleetNewSessionRowOrigin,
+  fleetUpExtraArgs,
+  isFleetDispatchNewlineKey,
+  isFleetDispatchAndOpenKey,
+  canFleetDispatchAndOpen,
   shouldFleetViewArrowDelegateToEditor,
   shouldFleetViewTabToggleAllAgents,
   shouldFleetViewRightOpenFocusedRow,
@@ -123,6 +139,52 @@ import {
   type StatusBand,
   fleetHomeIdx,
 } from './fleetView/helpers.js';
+import { resolveFleetCanonicalLauncherCwd, sweepExpiredFleetLauncherDrafts } from './fleetView/launcherDraft.js';
+import {
+  useFleetComposerDraftPersistence,
+  type FleetComposerDraftRestore,
+} from './fleetView/useFleetComposerDraftPersistence.js';
+import { fleetJobChildren, fleetPrStatuses, prReviewStateFromEntry } from './fleetView/prStatuses.js';
+import {
+  FLEET_LOOP_KICK_TIMES,
+  FLEET_NOT_DELETED_LABEL,
+  FLEET_REMOTE_POLL_MS,
+  appendFleetPending,
+  buildAdoptedPeers,
+  buildFleetStatuses,
+  fleetLiveStatus,
+  fleetRemotePoll,
+  fleetRowLogTailDetail,
+  fleetRpMerge,
+  fleetSimpleWantsRemote,
+  isFleetLogTailEligible,
+  isFleetLoopKickState,
+  isFleetPeersWanted,
+  loadRemoteJobs,
+  mintFleetPending,
+  nextFleetStatuses,
+  nextLogTails,
+  noteDeleteRefusal,
+  patchFleetPending,
+  pruneDeleteRefusals,
+  readFleetLogTail,
+  refreshLoopKicks,
+  refreshRemoteJobsActivity,
+  removeFleetPending,
+  resetFhOverlay,
+  archiveRemote as runArchiveRemote,
+  settleLandedPendings,
+  stopRemote as runStopRemote,
+  shouldResetFhOverlay,
+  shouldShowDeleteRefusal,
+  type FleetAdoptedPeer,
+  type FleetDeleteRefusals,
+  type FleetLogTails,
+  type FleetLoopKicks,
+  type FleetPendingJob,
+  type FleetRemoteJob,
+  type FleetStatuses,
+} from './fleetView/fhFields.js';
 import { PrBadge } from '../components/PrBadge.js';
 import { isFleetPastSessionsEnabled } from '../utils/permissions/autoModeFlags.js';
 import { isFleetSimpleViewEnabled } from '../utils/residualUiEnvGates.js';
@@ -140,6 +202,7 @@ const voiceModule: { useVoice: typeof import('../hooks/useVoice.js').useVoice } 
 
 import { generateCommandSuggestions } from '../utils/suggestions/commandSuggestions.js';
 import type { Command } from '../types/command.js';
+import { isCommandEnabled } from '../types/command.js';
 import type { SuggestionItem } from '../components/PromptInput/PromptInputFooterSuggestions.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
 import { useVimInput } from '../hooks/useVimInput.js';
@@ -160,6 +223,7 @@ import {
   FORK_TRANSCRIPT_NEVER_MATERIALIZED,
   evaluateRespawnTranscriptGate,
 } from '../daemon/transcriptProbe.js';
+import { listAllLiveSessions } from '../utils/udsClient.js';
 
 export { FLEET_FORCE_RESTART_MSG };
 
@@ -168,9 +232,16 @@ export { FLEET_FORCE_RESTART_MSG };
 // ---------------------------------------------------------------------------
 
 const REFRESH_INTERVAL_MS = 3000;
+/** Official `Oy` when `Z` is false — `nt=Z?xe:Oy`. */
+const EMPTY_REMOTE_JOBS: FleetRemoteJob[] = [];
 
 /** Module-level arm for densable double-enter force fresh after tYo. */
 let forceFreshNextShort: string | null = null;
+/** densable h.deadEpochOfferedJobId + #u timestamp. */
+let deadEpochOfferedJobId: string | null = null;
+let deadEpochOfferedAt = 0;
+/** densable h.deadEpochGoneJobId — gone-row after dead_epoch_transcript_gone. */
+let deadEpochGoneJobId: string | null = null;
 
 type ResumePickerEntry = {
   sessionId: string;
@@ -233,29 +304,6 @@ function computeJobLabel(job: BgJobState, currentSessionId?: string): string {
 const prCheckCache = new Map<number, number>(); // pid -> last check timestamp
 const PR_CHECK_INTERVAL_MS = 60_000; // Only check once per minute per session
 
-/** Cached `gh pr view` results keyed by `repo#prNum` — throttle refresh probes. */
-type PrViewCacheEntry = {
-  at: number;
-  prReviewState?: SessionEntry['prReviewState'];
-};
-const prViewCache = new Map<string, PrViewCacheEntry>();
-const PR_VIEW_INTERVAL_MS = 60_000;
-/** Cap concurrent `gh pr view` spawns per refresh pass. */
-const PR_VIEW_CONCURRENCY = 3;
-/** Bound process-lifetime cache so long-lived fleets do not grow unbounded. */
-const PR_VIEW_CACHE_MAX = 200;
-
-function prViewCacheSet(key: string, entry: PrViewCacheEntry): void {
-  // Refresh insertion order for LRU-ish eviction (Map preserves set order).
-  if (prViewCache.has(key)) prViewCache.delete(key);
-  prViewCache.set(key, entry);
-  while (prViewCache.size > PR_VIEW_CACHE_MAX) {
-    const oldest = prViewCache.keys().next().value;
-    if (oldest === undefined) break;
-    prViewCache.delete(oldest);
-  }
-}
-
 /**
  * Derive a display name from the intent string (official: DC6).
  * Takes first 3 words, truncates to 25 chars.
@@ -289,10 +337,6 @@ async function detectPrForSession(session: SessionEntry): Promise<void> {
   } catch {
     // Silently ignore — PR detection is best-effort
   }
-}
-
-function prViewCacheKey(repo: string, prNum: string): string {
-  return `${repo}#${prNum}`;
 }
 
 /**
@@ -329,18 +373,6 @@ export function worstPrReviewState(
     }
   }
   return best;
-}
-
-async function mapPool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
-  if (items.length === 0) return;
-  let next = 0;
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      await worker(items[i]!);
-    }
-  });
-  await Promise.all(runners);
 }
 
 /**
@@ -395,6 +427,11 @@ function SessionRow({
   isDeletePending,
   isJustKilled,
   isUngroupPending,
+  heldInTerminal,
+  logTail,
+  deleteRefused,
+  loopKickCount,
+  liveStatus,
   renameValue,
   cols,
   onSelect,
@@ -414,14 +451,26 @@ function SessionRow({
   /** densable cy.justKilled — first Ctrl+X ran stop; second deletes. */
   isJustKilled?: boolean;
   isUngroupPending?: boolean;
+  /** densable 2.1.248 #19 Wr — terminalHolderOf(job)!==void 0 */
+  heldInTerminal?: boolean;
+  /** Official Ss `logTail:nf[at.id]`. */
+  logTail?: string;
+  /** Official Ss `deleteRefused:Tl.get(at.id)`. */
+  deleteRefused?: string;
+  /** Official Ss `loopKickCount:Cs.get(sessionId)?.count`. */
+  loopKickCount?: number;
+  /** Official Ss `status:xs(at)` — leftover glyph overlay only, not list grouping. */
+  liveStatus?: string;
   renameValue: string;
   cols: FleetColumnWidths;
   onSelect?: () => void;
   onOpen?: () => void;
 }): React.ReactElement {
   const band = deriveBand(session);
-  const activity = deriveActivity(session);
-  const { color, dim } = glyphColor(band, activity, session);
+  const activity = deriveActivity(session, fleetPrStatuses.prStatuses);
+  // Official yn(activity, tempo, liveStatus, Cf) — overlay live on glyph only.
+  const glyphBand = liveStatus === 'busy' ? 'active' : liveStatus === 'waiting' ? 'blocked' : band;
+  const { color, dim } = glyphColor(glyphBand, activity, session);
   const icon = pickIcon(band, activity, session.pinned);
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
@@ -434,6 +483,10 @@ function SessionRow({
     detail = 'ctrl+x again to ungroup';
   } else if (isDeletePending) {
     detail = isJustKilled ? 'stopped \u00b7 ctrl+x again to delete' : 'ctrl+x again to delete';
+  } else if (shouldShowDeleteRefusal({ state: session.daemonState, tempo: session.tempo }, deleteRefused)) {
+    detail = '';
+  } else if (heldInTerminal) {
+    detail = '';
   } else if (isOrigin && isSelected) {
     if (band === 'blocked') {
       const needs = session.waitingFor ?? session.lastMessage ?? '';
@@ -446,7 +499,7 @@ function SessionRow({
   } else if (band === 'blocked') {
     detail = session.waitingFor ?? session.lastMessage ?? '';
   } else {
-    detail = session.lastMessage ?? '';
+    detail = fleetRowLogTailDetail({ state: session.daemonState, tempo: session.tempo }, session.lastMessage, logTail);
   }
   // Strip any ANSI escape sequences from detail
   detail = detail
@@ -481,13 +534,39 @@ function SessionRow({
       </Box>
       {/* Detail column (flex) */}
       <Box flexGrow={1} width={0} paddingLeft={2}>
-        <Text
-          dimColor={!isDeletePending && !isUngroupPending}
-          color={isDeletePending || isUngroupPending ? ('error' as never) : undefined}
-          wrap={'truncate' as never}
-        >
-          {detail}
-        </Text>
+        {heldInTerminal && !isDeletePending && !isUngroupPending ? (
+          <Text wrap={'truncate' as never}>
+            <Text color={'suggestion' as never}>{FLEET_HELD_IN_TERMINAL_LABEL}</Text>
+            <Text dimColor>{FLEET_HELD_IN_TERMINAL_HINT}</Text>
+          </Text>
+        ) : shouldShowDeleteRefusal({ state: session.daemonState, tempo: session.tempo }, deleteRefused) &&
+          !isDeletePending &&
+          !isUngroupPending ? (
+          <Text wrap={'truncate' as never}>
+            <Text color={'error' as never}>{FLEET_NOT_DELETED_LABEL}</Text>
+            <Text dimColor>{` \u00b7 ${deleteRefused}`}</Text>
+          </Text>
+        ) : (
+          <Text
+            dimColor={!isDeletePending && !isUngroupPending}
+            color={isDeletePending || isUngroupPending ? ('error' as never) : undefined}
+            wrap={'truncate' as never}
+          >
+            {detail}
+          </Text>
+        )}
+        {loopKickCount &&
+        !isDeletePending &&
+        !isUngroupPending &&
+        !heldInTerminal &&
+        !shouldShowDeleteRefusal({ state: session.daemonState, tempo: session.tempo }, deleteRefused) ? (
+          <Box flexShrink={0} paddingLeft={1}>
+            <Text dimColor>
+              {FLEET_LOOP_KICK_TIMES}
+              {loopKickCount}
+            </Text>
+          </Box>
+        ) : null}
       </Box>
       {/* Artifact / PR column (official zhO; hidden when no PRs in list) */}
       {cols.artifact > 0 && (
@@ -561,6 +640,30 @@ function AgentViewApp({
   ) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  /** densable #t.terminalHolders — interactive peers holding a session. */
+  const [terminalHolders, setTerminalHolders] = useState<ReadonlyMap<string, number>>(() => new Map());
+  /** densable Fh leftover-missing fields — AgentView.refresh is gc.load / #O / #P. */
+  const [logTails, setLogTails] = useState<FleetLogTails>(() => ({}));
+  const [deleteRefusals, setDeleteRefusals] = useState<FleetDeleteRefusals>(() => new Map());
+  const [loopKicks, setLoopKicks] = useState<FleetLoopKicks>(() => new Map());
+  const loopKicksRef = useRef(loopKicks);
+  loopKicksRef.current = loopKicks;
+  const [overlaidLoadLanded, setOverlaidLoadLanded] = useState(false);
+  const [adoptedPeers, setAdoptedPeers] = useState<FleetAdoptedPeer[]>([]);
+  const [remoteJobs, setRemoteJobs] = useState<FleetRemoteJob[]>([]);
+  const [remoteListLoaded, setRemoteListLoaded] = useState(false);
+  const remoteJobsRef = useRef(remoteJobs);
+  remoteJobsRef.current = remoteJobs;
+  const remoteWantedRef = useRef(false);
+  const remotePollStopRef = useRef<(() => void) | null>(null);
+  const remoteGenRef = useRef(0);
+  const remoteAttachedRef = useRef(true);
+  const remoteStopUntilRef = useRef(new Map<string, number>());
+  const remoteArchiveUntilRef = useRef(new Map<string, number>());
+  const [pendings, setPendings] = useState<FleetPendingJob[]>([]);
+  const [statuses, setStatuses] = useState<FleetStatuses>(() => new Map());
+  /** Official rp `loopJobIds` — $ye shorts; not an Fh field. */
+  const [loopJobIds, setLoopJobIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedIndex, setSelectedIndex] = useState(0);
   /**
    * Official jH/KH: index last focused via mouse. When selectedIndex === jH,
@@ -569,6 +672,8 @@ function AgentViewApp({
    */
   const [mouseSelectedIndex, setMouseSelectedIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
+  /** densable setHint — fleetHostCall setInfo (not error). */
+  const [info, setInfo] = useState<string | null>(null);
   // densable: when remounted with tYo, keep force arm for next enter on same short
   useEffect(() => {
     if (initialError === FLEET_FORCE_RESTART_MSG && forceFreshNextShort) {
@@ -597,6 +702,24 @@ function AgentViewApp({
   const [groupValue, setGroupValue] = useState('');
   // Per-group fold state
   const [foldedGroups, setFoldedGroups] = useState<Set<string>>(() => new Set());
+  const canonicalLauncherCwd = useMemo(() => resolveFleetCanonicalLauncherCwd(), []);
+  const onRestoreComposerDraft = useCallback((draft: FleetComposerDraftRestore) => {
+    setDispatchInput(draft.query);
+    setCursorOffset(draft.query.length);
+    setDispatchMode(draft.mode);
+    if (draft.collapsed.length > 0) {
+      setFoldedGroups(new Set(draft.collapsed));
+    }
+  }, []);
+  useFleetComposerDraftPersistence({
+    canonicalLauncherCwd,
+    snapshot: {
+      query: dispatchInput,
+      mode: dispatchMode,
+      collapsed: [...foldedGroups],
+    },
+    onRestore: onRestoreComposerDraft,
+  });
   /** When true, show all completed rows (past doneCap fold). */
   const [doneCapExpanded, setDoneCapExpanded] = useState(false);
   /** Expand soft-archived "Earlier" section (official earlier load). */
@@ -973,94 +1096,46 @@ function AgentViewApp({
             return Number.isFinite(ms) ? ms : undefined;
           })(),
           backend: job.backend,
+          resumeSessionId: job.resumeSessionId,
+          deadEpochReapedAt: job.deadEpochReapedAt,
+          template: job.template,
+          respawnFlags: job.respawnFlags,
+          tempo: job.tempo,
+          daemonState: job.state,
+          children: job.children ?? null,
         };
       });
 
-      // Seed PR artifact fields from job children (official zhO / $hO).
-      // Probe ALL PR children for reviewDecision via gh (best-effort), then
-      // aggregate worst review state onto the row. Rate-limited + concurrency-
-      // capped so multi-PR fleets don't spawn unbounded `gh` every 3s refresh.
+      let live: Awaited<ReturnType<typeof listAllLiveSessions>> = [];
       try {
-        const { execFileNoThrow } = await import('../utils/execFileNoThrow.js');
-        type PrProbe = {
-          entry: SessionEntry;
-          prNum: string;
-          repo: string;
-          cacheKey: string;
-        };
-        const probes: PrProbe[] = [];
-        /** Per-entry collected review states (cached + freshly probed). */
-        const entryReviewStates = new Map<SessionEntry, Array<SessionEntry['prReviewState'] | undefined>>();
-        const now = Date.now();
+        live = await listAllLiveSessions();
+        if (generation !== refreshGenerationRef.current) return;
+        setTerminalHolders(buildTerminalHolders(live, process.pid));
+      } catch {
+        if (generation !== refreshGenerationRef.current) return;
+        setTerminalHolders(new Map());
+      }
+
+      // Official gc #x + load() PR slice (leftover host = this refresh).
+      try {
+        await fleetPrStatuses.loadOnAttach();
+        if (generation !== refreshGenerationRef.current) return;
+        await fleetPrStatuses.refreshFromJobs(jobs.map(j => j.state));
+        if (generation !== refreshGenerationRef.current) return;
         for (const entry of entries) {
           const job = jobs.find(j => j.state.sessionId === entry.sessionId);
-          const children = (job?.state.children ?? []).filter(c => c.kind !== 'frame' && c.href?.includes('/pull/'));
+          const children = fleetJobChildren(job?.state.children).filter(
+            c => c.kind !== 'frame' && c.href.includes('/pull/'),
+          );
           if (!children.length) continue;
           entry.prCount = children.length;
           const first = children[0]!;
           entry.prUrl = first.href;
           const firstMatch = /\/pull\/(\d+)/.exec(first.href);
           if (firstMatch) entry.prNumber = Number(firstMatch[1]);
-
-          const states: Array<SessionEntry['prReviewState'] | undefined> = [];
-          entryReviewStates.set(entry, states);
-
-          for (const child of children) {
-            const prMatch = /\/pull\/(\d+)/.exec(child.href ?? '');
-            if (!prMatch) continue;
-            const prNum = prMatch[1]!;
-            const repo = (child.href ?? '').replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
-            const cacheKey = prViewCacheKey(repo, prNum);
-            const cached = prViewCache.get(cacheKey);
-            if (cached && now - cached.at < PR_VIEW_INTERVAL_MS) {
-              // Reuse last successful / empty probe within the throttle window.
-              if (cached.prReviewState !== undefined) {
-                states.push(cached.prReviewState);
-              }
-              continue;
-            }
-            probes.push({ entry, prNum, repo, cacheKey });
-          }
-        }
-        await mapPool(probes, PR_VIEW_CONCURRENCY, async ({ entry, prNum, repo, cacheKey }) => {
-          if (generation !== refreshGenerationRef.current) return;
-          try {
-            const { stdout, code } = await execFileNoThrow(
-              'gh',
-              ['pr', 'view', prNum, '--repo', repo, '--json', 'reviewDecision,isDraft,state'],
-              { timeout: 3000, preserveOutputOnError: false },
-            );
-            let prReviewState: SessionEntry['prReviewState'] | undefined;
-            if (code === 0 && stdout.trim()) {
-              const data = JSON.parse(stdout) as {
-                reviewDecision: string;
-                isDraft: boolean;
-                state: string;
-              };
-              if (data.state === 'OPEN') {
-                prReviewState = data.isDraft
-                  ? 'draft'
-                  : data.reviewDecision === 'APPROVED'
-                    ? 'approved'
-                    : data.reviewDecision === 'CHANGES_REQUESTED'
-                      ? 'changes_requested'
-                      : 'pending';
-              }
-            }
-            prViewCacheSet(cacheKey, { at: Date.now(), prReviewState });
-            if (prReviewState !== undefined) {
-              const states = entryReviewStates.get(entry);
-              if (states) states.push(prReviewState);
-            }
-          } catch {
-            // Still stamp the cache so a failing gh does not thrash every 3s.
-            prViewCacheSet(cacheKey, { at: Date.now() });
-          }
-        });
-        if (generation !== refreshGenerationRef.current) return;
-        // Aggregate worst review state across all PRs for the fleet band.
-        for (const [entry, states] of entryReviewStates) {
-          const worst = worstPrReviewState(states);
+          const worst = worstPrReviewState(
+            children.map(c => prReviewStateFromEntry(fleetPrStatuses.prStatuses.get(c.href))),
+          );
           if (worst !== undefined) entry.prReviewState = worst;
         }
       } catch {
@@ -1153,6 +1228,40 @@ function AgentViewApp({
       // Drop stale results if a newer generation was started (or we were
       // superseded while awaiting listAllJobs / gh probes).
       if (generation !== refreshGenerationRef.current) return;
+
+      // Official gc.load / #O / #P leftover-missing Fh writes (not a second store).
+      const nextStatuses = buildFleetStatuses(live);
+      setStatuses(prev => nextFleetStatuses(prev, nextStatuses));
+      const landedIds = new Set(entries.map(s => s.short ?? s.sessionId?.slice(0, 8) ?? '').filter(Boolean));
+      setPendings(prev => settleLandedPendings(prev, landedIds));
+      setLoopJobIds(new Set(jobs.filter(j => isFleetLoopKickState(j.state)).map(j => j.short)));
+      if (isFleetPeersWanted()) {
+        const jobSessionIds = new Set(jobs.map(j => j.state.sessionId).filter((id): id is string => !!id));
+        setAdoptedPeers(buildAdoptedPeers(live, jobSessionIds, process.pid));
+      } else {
+        setAdoptedPeers([]);
+      }
+      const liveRefusalIds = new Set([...jobs.map(j => j.short), ...deletedJobIdsRef.current]);
+      setDeleteRefusals(prev => pruneDeleteRefusals(prev, liveRefusalIds));
+
+      const tailPairs = await Promise.all(
+        jobs
+          .filter(j => isFleetLogTailEligible(j.state))
+          .map(async j => [j.short, await readFleetLogTail({ state: j.state })] as const),
+      );
+      if (generation !== refreshGenerationRef.current) return;
+      setLogTails(prev => nextLogTails(prev, tailPairs));
+
+      const nextKicks = await refreshLoopKicks(
+        jobs.map(j => ({ state: j.state })),
+        loopKicksRef.current,
+      );
+      if (generation !== refreshGenerationRef.current) return;
+      loopKicksRef.current = nextKicks;
+      setLoopKicks(nextKicks);
+
+      // Official load `#r>0` → overlaidLoadLanded true. Leftover view is attached.
+      setOverlaidLoadLanded(true);
       setSessions(sortSessions(entries));
     } catch (e) {
       if (generation === refreshGenerationRef.current) {
@@ -1177,8 +1286,150 @@ function AgentViewApp({
       // after deps change that recreated `refresh`.
       refreshGenerationRef.current += 1;
       refreshQueuedRef.current = false;
+      // Official #P only on last view detach (empty-deps effect below),
+      // not when `refresh` identity changes.
     };
   }, [refresh]);
+
+  const fhOverlayRef = useRef({
+    pendings,
+    remoteJobs,
+    remoteListLoaded,
+    overlaidLoadLanded,
+  });
+  fhOverlayRef.current = {
+    pendings,
+    remoteJobs,
+    remoteListLoaded,
+    overlaidLoadLanded,
+  };
+  useEffect(() => {
+    return () => {
+      const cur = fhOverlayRef.current;
+      if (!shouldResetFhOverlay(cur)) return;
+      const next = resetFhOverlay(cur);
+      setPendings(next.pendings);
+      setRemoteJobs(next.remoteJobs);
+      setRemoteListLoaded(next.remoteListLoaded);
+      setOverlaidLoadLanded(next.overlaidLoadLanded);
+    };
+  }, []);
+
+  const loadRemote = useCallback(() => {
+    const generation = ++remoteGenRef.current;
+    void loadRemoteJobs({
+      generation,
+      currentGeneration: () => remoteGenRef.current,
+      prev: remoteJobsRef.current,
+      attached: remoteAttachedRef.current,
+      stopUntil: remoteStopUntilRef.current,
+      archiveUntil: remoteArchiveUntilRef.current,
+      onError: err => {
+        void import('../utils/debug.js').then(({ logForDebugging }) => {
+          logForDebugging(`[fleet:remote] poll mapper threw: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      },
+    }).then(result => {
+      if (!result) return;
+      if (result.jobs) setRemoteJobs(result.jobs);
+      if (result.loaded) setRemoteListLoaded(true);
+    });
+  }, []);
+
+  const startRemoteI = useCallback(() => {
+    setRemoteJobs(jobs => refreshRemoteJobsActivity(jobs));
+    loadRemote();
+    remotePollStopRef.current?.();
+    remotePollStopRef.current = fleetRemotePoll(
+      {
+        setTimeout: (fn, ms) => {
+          const id = setTimeout(fn, ms);
+          return () => clearTimeout(id);
+        },
+      },
+      loadRemote,
+      FLEET_REMOTE_POLL_MS,
+    );
+  }, [loadRemote]);
+
+  const remoteJobOf = useCallback((session: SessionEntry) => {
+    return remoteJobsRef.current.find(job => job.id === session.short || job.state?.sessionId === session.sessionId);
+  }, []);
+
+  // Official gc `stopRemote` @192140769. Leftover host is AgentView X-stop.
+  const stopRemote = useCallback(
+    async (job: FleetRemoteJob) => {
+      await runStopRemote({
+        job,
+        stopUntil: remoteStopUntilRef.current,
+        updateRemoteJobs: fn => setRemoteJobs(fn),
+        loadRemote,
+        onError: err => {
+          void import('../utils/debug.js').then(({ logForDebugging }) => {
+            logForDebugging(
+              `[fleet:remote] interrupt ${job.state?.sessionId ?? ''} failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        },
+      });
+    },
+    [loadRemote],
+  );
+
+  // Official gc `archiveRemote` @192141350. Leftover host is AgentView `a`.
+  const archiveRemote = useCallback(
+    async (job: FleetRemoteJob) => {
+      await runArchiveRemote({
+        job,
+        archiveUntil: remoteArchiveUntilRef.current,
+        updateRemoteJobs: fn => setRemoteJobs(fn),
+        loadRemote,
+        onError: err => {
+          void import('../utils/debug.js').then(({ logForDebugging }) => {
+            logForDebugging(
+              `[fleet:remote] archive ${job.state?.sessionId ?? ''} failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        },
+      });
+    },
+    [loadRemote],
+  );
+
+  const setRemoteWanted = useCallback(
+    (wanted: boolean) => {
+      if (wanted === remoteWantedRef.current) return;
+      remoteWantedRef.current = wanted;
+      if (!remoteAttachedRef.current) return;
+      if (wanted) startRemoteI();
+      else {
+        remotePollStopRef.current?.();
+        remotePollStopRef.current = null;
+      }
+    },
+    [startRemoteI],
+  );
+
+  // Official gg `Y` / `Z=!Y||!!d?.startsWith("remote-")`. `d` = initialJobId.
+  const simpleView = isFleetSimpleViewEnabled();
+  const simpleWantsRemote = fleetSimpleWantsRemote({
+    simpleView,
+    initialJobId: restoreSessionId,
+  });
+
+  useEffect(() => {
+    remoteAttachedRef.current = true;
+    return () => {
+      remoteAttachedRef.current = false;
+      remotePollStopRef.current?.();
+      remotePollStopRef.current = null;
+    };
+  }, []);
+
+  // Official `k(()=>{Q.setRemoteWanted(Z)},[Q,Z])`.
+  useEffect(() => {
+    setRemoteWanted(simpleWantsRemote);
+  }, [setRemoteWanted, simpleWantsRemote]);
 
   // Tab title: show awaiting-input count
   useEffect(() => {
@@ -1211,7 +1462,7 @@ function AgentViewApp({
           `Continue the previous task (session "${name}" was restarted)`,
           '--name',
           name,
-          ...dispatchExtraArgs,
+          ...fleetUpExtraArgs(dispatchExtraArgs),
         ]).then(refresh);
         break; // One relaunch per cycle
       }
@@ -1229,10 +1480,28 @@ function AgentViewApp({
   // Computed values
   // -------------------------------------------------------------------------
 
+  // Official rp Ct/Mt/Lt — leftover SessionEntry list (no second rp).
+  // Official gg `Zs=!1` — showRemoteTabs stays false.
+  // Official `nt=Z?xe:Oy`.
+  const listSessions = React.useMemo(
+    () =>
+      fleetRpMerge({
+        sessions,
+        adoptedPeers,
+        remoteJobs: simpleWantsRemote ? remoteJobs : EMPTY_REMOTE_JOBS,
+        pendings,
+        peersEnabled: isFleetPeersWanted(),
+        showRemoteTabs: false,
+        simpleWantsRemote,
+        cwdFilter,
+      }),
+    [sessions, adoptedPeers, remoteJobs, pendings, cwdFilter, simpleWantsRemote],
+  );
+
   // Soft-archived sessions live under Earlier; main bands exclude them.
   const { active: mainSessions, earlier: earlierSessions } = React.useMemo(
-    () => partitionArchivedSessions(sessions),
-    [sessions],
+    () => partitionArchivedSessions(listSessions),
+    [listSessions],
   );
   const pinned = mainSessions.filter(s => s.pinned);
   const unpinned = mainSessions.filter(s => !s.pinned);
@@ -1241,8 +1510,6 @@ function AgentViewApp({
   const active = unpinned.filter(s => deriveBand(s) === 'active');
   const done = unpinned.filter(s => deriveBand(s) === 'completed');
   const termRows = process.stdout.rows || 54;
-  // densable cHy `h` — oxy vs zky. Default OFF (grouped). Do not invent always-on.
-  const simpleView = isFleetSimpleViewEnabled();
   const runningCount = mainSessions.filter(s => {
     const band = deriveBand(s);
     return band === 'active' || band === 'blocked' || band === 'review';
@@ -1310,6 +1577,7 @@ function AgentViewApp({
       now: Date.now(),
       terminalRows: termRows,
       showFinishedEarlier: doneCapExpanded,
+      fallbackOrigin: getCwd(),
     });
   }, [simpleView, mainSessions, termRows, doneCapExpanded]);
 
@@ -1449,6 +1717,8 @@ function AgentViewApp({
   const openableJobs = flatRows
     .filter((r): r is Extract<FleetFlatRow, { kind: 'job' | 'earlier' }> => r.kind === 'job' || r.kind === 'earlier')
     .map(r => r.session);
+  // Gold canDispatchAndOpen: cm==="local" && EHt(). AgentView is the local tab.
+  const canDispatchAndOpen = canFleetDispatchAndOpen('local', supportsExtendedKeys());
   const footerHints = buildFleetFooterHints({
     focusArea,
     viewMode,
@@ -1467,6 +1737,7 @@ function AgentViewApp({
     exitArmed,
     runningCount,
     helpOpen,
+    canDispatchAndOpen,
   });
 
   const groupSessionCount = (group: string): number => {
@@ -1632,7 +1903,7 @@ function AgentViewApp({
           resumeSessionId: sessionId,
           forkSession: true,
           cwd: getCwd(),
-          extraArgs: dispatchExtraArgs,
+          extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
           source: 'fleet-resume',
         });
         setError(null);
@@ -1646,115 +1917,205 @@ function AgentViewApp({
     [dispatchExtraArgs, refresh],
   );
 
-  const handleDispatch = useCallback(async () => {
-    if (dispatchingRef.current) return;
-    const rawForParse = dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput;
-    if (!rawForParse.trim()) return;
+  const handleDispatch = useCallback(
+    async (andOpen?: boolean) => {
+      if (dispatchingRef.current) return;
+      const rawForParse = dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput;
+      if (!rawForParse.trim()) return;
 
-    // densable eSo: exit/quit/:q… from prompt composer exits FleetView (not bash).
-    if (dispatchMode !== 'bash') {
-      const quitToken = dispatchInput.trim().toLowerCase();
-      if (FLEET_QUIT_TOKENS.has(quitToken)) {
+      // densable eSo: exit/quit/:q… from prompt composer exits FleetView (not bash).
+      if (dispatchMode !== 'bash') {
+        const quitToken = dispatchInput.trim().toLowerCase();
+        if (FLEET_QUIT_TOKENS.has(quitToken)) {
+          setDispatchInput('');
+          setCursorOffset(0);
+          setDispatchMode('prompt');
+          forceExit();
+          return;
+        }
+        // densable: bare /resume opens past-session picker → bg resume
+        if (quitToken === '/resume' || quitToken.startsWith('/resume ')) {
+          await openResumePicker();
+          return;
+        }
+        // densable Lc fleetHostCall — slash with host bag before free-form intent.
+        if (quitToken.startsWith('/')) {
+          const raw = dispatchInput.trim().slice(1);
+          const [nameToken = '', argsRest = ''] = raw.split(/\s+(.*)/, 2);
+          const cmd = commands.find(
+            c => c.name === nameToken.toLowerCase() || c.aliases?.includes(nameToken.toLowerCase()),
+          );
+          if (cmd?.fleetHostCall && isCommandEnabled(cmd)) {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setDispatchMode('prompt');
+            void Promise.resolve(
+              cmd.fleetHostCall(
+                {
+                  exit: () => forceExit(),
+                  // Official P("manual") — FleetView host relaunch (acceptTuiRelaunch family).
+                  relaunch: async () => {
+                    try {
+                      const { acceptTuiRelaunch, flushStreamsBeforeRelaunchExit } = await import(
+                        '../utils/cliRelaunch.js'
+                      );
+                      const result = await acceptTuiRelaunch({ target: 'default' });
+                      if (result.mode === 'spawned' && result.spawn.ok) {
+                        flushStreamsBeforeRelaunchExit();
+                        process.exit(result.spawn.status ?? 0);
+                      }
+                      if (result.mode === 'spawned' && !result.spawn.ok) {
+                        setError(result.spawn.error);
+                      }
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    }
+                  },
+                  login: () => onAction?.({ type: 'login' }),
+                  setError: msg => {
+                    setInfo(null);
+                    setError(msg);
+                  },
+                  setInfo: msg => {
+                    setError(null);
+                    setInfo(msg);
+                  },
+                },
+                argsRest,
+              ),
+            ).catch(err => {
+              setError(err instanceof Error ? err.message : String(err));
+            });
+            return;
+          }
+        }
+      }
+
+      const cwdMap = buildCwdBasenameMap(sessions);
+      const templateTargets = fleetTemplates.map(t => ({ name: t.name }));
+      const routineTargets = fleetRoutines.map(r => ({ name: r.name }));
+      const parsed = parseDispatch(rawForParse, templateTargets, cwdMap, routineTargets);
+      // Expand paste placeholders before submit (official jye).
+      // Use !== undefined so empty bash (`!` / `!   `) is not collapsed to free-form.
+      let expandedIntent = expandPastedTextRefs(parsed.intent, pastesRef.current);
+      const expandedExec = parsed.exec !== undefined ? expandPastedTextRefs(parsed.exec, pastesRef.current) : undefined;
+
+      // Bash path: empty / whitespace-only command
+      if (expandedExec !== undefined && !expandedExec.trim()) {
+        setError('Empty bash command');
+        return;
+      }
+      // Official H5b short-prompt guard for free-form (not bash/matched/template/routine)
+      if (
+        expandedExec === undefined &&
+        !parsed.matched &&
+        !parsed.routine &&
+        expandedIntent.trim().length < FLEET_MIN_INTENT_LEN
+      ) {
+        setError('Too short \u2014 describe the task');
+        return;
+      }
+
+      dispatchingRef.current = true;
+      try {
+        // densable: n?.exec → launch.mode exec via $F_; template → agent;
+        // routine is a separate dispatch field (not agent).
+        const templateName = expandedExec ? undefined : parsed.templateName;
+        // Official wbs: mint sessionId, write pasted-N.ext, replace [Image #N] with path.
+        // Exec skips wbs. Do not put base64 on DispatchRequest.
+        let dispatchSessionId: string | undefined;
+        if (expandedExec === undefined) {
+          const hasImages = parseFleetPasteRefs(expandedIntent).some(
+            r => imagePastesRef.current[r.id]?.type === 'image',
+          );
+          if (hasImages) {
+            dispatchSessionId = randomUUID();
+            expandedIntent = await materializeFleetPastedImages(
+              expandedIntent,
+              imagePastesRef.current,
+              getJobDirPath(dispatchSessionId.slice(0, 8)),
+            );
+          }
+        }
+        const dispatchCwd = parsed.cwd ?? getCwd();
+        const pendingId = (dispatchSessionId ?? randomUUID()).slice(0, 8);
+        const pending = mintFleetPending({
+          id: pendingId,
+          intent: expandedExec ? expandedExec : expandedIntent,
+          cwd: dispatchCwd,
+          template: templateName,
+        });
+        // Official updatePendings append before spawn @192163434
+        setPendings(prev => appendFleetPending(prev, pending));
+        let result: { short: string; sessionId: string };
+        try {
+          result = await submitDispatch({
+            intent: expandedExec ? expandedExec : expandedIntent,
+            name: expandedExec ? expandedExec.slice(0, 40) : (parsed.templateName ?? parsed.routine),
+            agent: expandedExec ? undefined : parsed.templateName,
+            routine: expandedExec ? undefined : parsed.routine,
+            exec: expandedExec,
+            cwd: dispatchCwd,
+            extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+            source: 'fleet',
+            sessionId: dispatchSessionId,
+          });
+        } catch (err) {
+          setPendings(prev => removeFleetPending(prev, pendingId));
+          throw err;
+        }
+        // Official patch pending sessionId after spawn @192164445
+        setPendings(prev =>
+          patchFleetPending(prev, pendingId, {
+            ...pending,
+            id: result.short,
+            state: { ...pending.state, sessionId: result.sessionId },
+          }),
+        );
+        if (templateName && templateName !== FLEET_DEFAULT_TEMPLATE_NAME) {
+          const now = Date.now();
+          saveGlobalConfig(c => ({
+            ...c,
+            agentLastUsed: { ...(c.agentLastUsed ?? {}), [templateName]: now },
+          }));
+          setAgentLastUsed(u => ({ ...u, [templateName]: now }));
+        }
         setDispatchInput('');
         setCursorOffset(0);
         setDispatchMode('prompt');
-        forceExit();
-        return;
-      }
-      // densable: bare /resume opens past-session picker → bg resume
-      if (quitToken === '/resume' || quitToken.startsWith('/resume ')) {
-        await openResumePicker();
-        return;
-      }
-    }
-
-    const cwdMap = buildCwdBasenameMap(sessions);
-    const templateTargets = fleetTemplates.map(t => ({ name: t.name }));
-    const routineTargets = fleetRoutines.map(r => ({ name: r.name }));
-    const parsed = parseDispatch(rawForParse, templateTargets, cwdMap, routineTargets);
-    // Expand paste placeholders before submit (official jye).
-    // Use !== undefined so empty bash (`!` / `!   `) is not collapsed to free-form.
-    let expandedIntent = expandPastedTextRefs(parsed.intent, pastesRef.current);
-    const expandedExec = parsed.exec !== undefined ? expandPastedTextRefs(parsed.exec, pastesRef.current) : undefined;
-
-    // Bash path: empty / whitespace-only command
-    if (expandedExec !== undefined && !expandedExec.trim()) {
-      setError('Empty bash command');
-      return;
-    }
-    // Official H5b short-prompt guard for free-form (not bash/matched/template/routine)
-    if (
-      expandedExec === undefined &&
-      !parsed.matched &&
-      !parsed.routine &&
-      expandedIntent.trim().length < FLEET_MIN_INTENT_LEN
-    ) {
-      setError('Too short \u2014 describe the task');
-      return;
-    }
-
-    dispatchingRef.current = true;
-    try {
-      // densable: n?.exec → launch.mode exec via $F_; template → agent;
-      // routine is a separate dispatch field (not agent).
-      const templateName = expandedExec ? undefined : parsed.templateName;
-      // Official wbs: mint sessionId, write pasted-N.ext, replace [Image #N] with path.
-      // Exec skips wbs. Do not put base64 on DispatchRequest.
-      let dispatchSessionId: string | undefined;
-      if (expandedExec === undefined) {
-        const hasImages = parseFleetPasteRefs(expandedIntent).some(r => imagePastesRef.current[r.id]?.type === 'image');
-        if (hasImages) {
-          dispatchSessionId = randomUUID();
-          expandedIntent = await materializeFleetPastedImages(
-            expandedIntent,
-            imagePastesRef.current,
-            getJobDirPath(dispatchSessionId.slice(0, 8)),
-          );
+        dispatchVimSetModeRef.current('INSERT');
+        setVimMode('INSERT');
+        pastesRef.current = {};
+        imagePastesRef.current = {};
+        pasteIdRef.current = 1;
+        setError(null);
+        await refresh();
+        // Gold Lc: if(Ne) C.arm(Ut.id,null), F({type:"open",job:Ut,freshDispatch:!0})
+        if (andOpen && onAction) {
+          onAction({
+            type: 'open',
+            sessionId: result.sessionId,
+            short: result.short,
+          });
         }
+      } finally {
+        dispatchingRef.current = false;
       }
-      await submitDispatch({
-        intent: expandedExec ? expandedExec : expandedIntent,
-        name: expandedExec ? expandedExec.slice(0, 40) : (parsed.templateName ?? parsed.routine),
-        agent: expandedExec ? undefined : parsed.templateName,
-        routine: expandedExec ? undefined : parsed.routine,
-        exec: expandedExec,
-        cwd: parsed.cwd ?? getCwd(),
-        extraArgs: dispatchExtraArgs,
-        source: 'fleet',
-        sessionId: dispatchSessionId,
-      });
-      if (templateName && templateName !== FLEET_DEFAULT_TEMPLATE_NAME) {
-        const now = Date.now();
-        saveGlobalConfig(c => ({
-          ...c,
-          agentLastUsed: { ...(c.agentLastUsed ?? {}), [templateName]: now },
-        }));
-        setAgentLastUsed(u => ({ ...u, [templateName]: now }));
-      }
-      setDispatchInput('');
-      setCursorOffset(0);
-      setDispatchMode('prompt');
-      dispatchVimSetModeRef.current('INSERT');
-      setVimMode('INSERT');
-      pastesRef.current = {};
-      imagePastesRef.current = {};
-      pasteIdRef.current = 1;
-      setError(null);
-      await refresh();
-    } finally {
-      dispatchingRef.current = false;
-    }
-  }, [
-    dispatchInput,
-    dispatchMode,
-    refresh,
-    dispatchExtraArgs,
-    sessions,
-    fleetTemplates,
-    fleetRoutines,
-    forceExit,
-    openResumePicker,
-  ]);
+    },
+    [
+      dispatchInput,
+      dispatchMode,
+      refresh,
+      dispatchExtraArgs,
+      sessions,
+      fleetTemplates,
+      fleetRoutines,
+      forceExit,
+      openResumePicker,
+      onAction,
+      commands,
+    ],
+  );
 
   const applySelectedSuggestion = useCallback(() => {
     const selected = suggestions[selectedSuggestion];
@@ -1839,6 +2200,8 @@ function AgentViewApp({
     if (!short) return;
     clearDeleteArm();
     const releaseTombstone = tombstoneJob(session);
+    // Official cp: noteDeleteRefusal(id, null) at delete start.
+    setDeleteRefusals(prev => noteDeleteRefusal(prev, short, null));
     // densable optimistic remove from list while delete runs
     setSessions(prev =>
       prev.filter(s => {
@@ -1850,7 +2213,9 @@ function AgentViewApp({
     try {
       result = await deleteJob(short, { force: true });
       if (!result.removed && !result.keptWorktree) {
-        throw new Error(result.error ?? 'worker may still be running');
+        const reason = result.error ?? 'worker may still be running';
+        setDeleteRefusals(prev => noteDeleteRefusal(prev, short, reason));
+        throw new Error(reason);
       }
     } catch (err) {
       setError(`Couldn't delete \u2014 ${err instanceof Error ? err.message : String(err)}`);
@@ -1872,6 +2237,8 @@ function AgentViewApp({
     }
     if (result.keptWorktree) {
       const phrase = formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary);
+      // Official cp: noteDeleteRefusal(id, `worktree ${K}`).
+      setDeleteRefusals(prev => noteDeleteRefusal(prev, short, `worktree ${phrase}`));
       setError(`Worktree kept at ${result.keptWorktree} \u2014 ${phrase}; the session was not deleted`);
     }
   }, [getSelectedSession, refresh, clearDeleteArm, tombstoneJob]);
@@ -1882,6 +2249,16 @@ function AgentViewApp({
    */
   const handleStopThenArmDelete = useCallback(
     async (session: SessionEntry) => {
+      if (session.backend === 'remote') {
+        const job = remoteJobOf(session);
+        if (!job) return;
+        try {
+          await stopRemote(job);
+        } catch (err) {
+          setError(`Couldn't stop \u2014 ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
       const short = session.short ?? session.sessionId?.slice(0, 8);
       if (!short) return;
       armDeleteConfirm(session.sessionId, { justKilled: true });
@@ -1924,7 +2301,7 @@ function AgentViewApp({
         await refresh();
       }
     },
-    [armDeleteConfirm, refresh],
+    [armDeleteConfirm, refresh, remoteJobOf, stopRemote],
   );
 
   const handleDeleteAll = useCallback(async () => {
@@ -1994,6 +2371,16 @@ function AgentViewApp({
   const handleArchive = useCallback(async () => {
     const session = getSelectedSession();
     if (!session) return;
+    if (session.backend === 'remote') {
+      const job = remoteJobOf(session);
+      if (!job) return;
+      try {
+        await archiveRemote(job);
+      } catch (err) {
+        setError(`Couldn't archive \u2014 ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
     const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
     // densable archive also clears pins.json so daemon retire is not blocked
@@ -2024,7 +2411,7 @@ function AgentViewApp({
     setDeleteConfirmSessionId(null);
     setUngroupConfirmSessionId(null);
     await refresh();
-  }, [getSelectedSession, refresh]);
+  }, [getSelectedSession, refresh, remoteJobOf, archiveRemote]);
 
   const handleUnarchive = useCallback(async () => {
     const session = getSelectedSession();
@@ -2072,12 +2459,62 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const checkAndAttach = useCallback(
-    async (
-      short: string,
-      session: SessionEntry,
-      onActionCb: typeof onAction,
-      _setErr: (msg: string | null) => void,
-    ) => {
+    async (short: string, session: SessionEntry, onActionCb: typeof onAction, setErr: (msg: string | null) => void) => {
+      const jobId = session.short ?? short;
+      const held =
+        terminalHolderOf(
+          {
+            backend: session.backend,
+            sessionId: session.sessionId,
+            resumeSessionId: session.resumeSessionId,
+          },
+          terminalHolders,
+        ) !== undefined;
+      const gate = decideFleetOpenGate({
+        heldInTerminal: held,
+        deadEpochReapedAt: session.deadEpochReapedAt,
+        settled: isFleetBhSettled({
+          state: session.daemonState,
+          tempo: session.tempo,
+        }),
+        isExec: isFleetExecJob({
+          template: session.template,
+          respawnFlags: session.respawnFlags,
+        }),
+        jobId,
+        forkRefusedJobId: forceFreshNextShort,
+        deadEpochGoneJobId,
+        deadEpochOfferedJobId,
+        deadEpochOfferAgeMs:
+          deadEpochOfferedJobId === null ? Number.POSITIVE_INFINITY : Date.now() - deadEpochOfferedAt,
+        offerArmed: isFleetDeadEpochOfferArmed({
+          error,
+          previewOpen,
+          helpOpen,
+          exitArmed,
+          renaming: viewMode === 'rename',
+          groupEdit: viewMode === 'group',
+          deletePending: deleteConfirmSessionId !== null,
+        }),
+      });
+      if (gate.action === 'refuse') {
+        setErr(gate.error);
+        return;
+      }
+      if (gate.action === 'offer') {
+        forceFreshNextShort = null;
+        deadEpochOfferedJobId = jobId;
+        deadEpochOfferedAt = Date.now();
+        setErr(gate.error);
+        return;
+      }
+      if (gate.action === 'debounce') {
+        deadEpochOfferedJobId = jobId;
+        return;
+      }
+      if (gate.clearOffered) {
+        deadEpochOfferedJobId = null;
+      }
       // Official: Enter → respawnJob → onAction({type:'open'})
       // Attach goes through daemon control socket, no need to probe PTY socket directly
       if (onActionCb) {
@@ -2089,13 +2526,16 @@ function AgentViewApp({
         });
       }
     },
-    [],
+    [terminalHolders, error, previewOpen, helpOpen, exitArmed, viewMode, deleteConfirmSessionId],
   );
 
   /**
-   * densable VIy — empty-shell spawn from + new session (Enter / empty-right).
-   * xAe([], undefined, "shell", origin) analog: idle submitDispatch, no H5b.
-   * Does not invent launch.mode='shell'.
+   * densable `up` @192190196 sha=c787d79639381466 — idle-shell spawn.
+   * Gold aliases: `ye`/`lt`/`Du=(H)=>up(ra,H)` / `mf`. Callers pass origin
+   * (`ye(X.origin)` @192261457, `lt(Ie.origin)`, `mf(Ke.origin)`).
+   * `up` does not `setQuery("")` — typed-prompt drop is Lc dispatch-new
+   * (`m.setQuery("")` after the prompt is the new session intent), not a
+   * clear-on-new heuristic here. Do not attach an older job.
    */
   const openNewSessionRow = useCallback(
     async (origin?: string) => {
@@ -2108,20 +2548,31 @@ function AgentViewApp({
       setError(null);
       const isCurrent = () => attempt === newSessionAttemptRef.current;
       const cwd = origin || getCwd();
+      const pendingId = randomUUID().slice(0, 8);
+      const pending = mintFleetPending({ id: pendingId, intent: '', cwd });
+      setPendings(prev => appendFleetPending(prev, pending));
       try {
         let result: { short: string; sessionId: string };
         try {
           result = await submitDispatch({
             intent: '',
             cwd,
-            extraArgs: dispatchExtraArgs,
+            extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
             source: 'shell',
           });
         } catch (e) {
+          setPendings(prev => removeFleetPending(prev, pendingId));
           if (!isCurrent()) return;
           setError(formatFleetNewSessionThrow(e));
           return;
         }
+        setPendings(prev =>
+          patchFleetPending(prev, pendingId, {
+            ...pending,
+            id: result.short,
+            state: { ...pending.state, sessionId: result.sessionId },
+          }),
+        );
         if (!isCurrent()) return;
         await refresh();
         const job = await waitForFleetJobByShort(
@@ -2563,13 +3014,13 @@ function AgentViewApp({
     }
 
     // Official JIy empty-right: earlier / newsession / openOrRespawn.
-    // newsession → VIy (idle shell spawn + attach).
+    // Gold `ag` @192261457: newsession → `ye(X.origin)`.
     if (key.rightArrow && shouldFleetViewRightOpenFocusedRow(!!key.shift, dispatchInput, dispatchMode, false)) {
       if (currentRow?.kind === 'earlier') {
         const past = currentRow.session;
         void resumePastAsBackground(past.sessionId ?? '', past.name || past.sessionId?.slice(0, 8) || 'resume');
       } else if (currentRow?.kind === 'newsession') {
-        void openNewSessionRow();
+        void openNewSessionRow(fleetNewSessionRowOrigin(currentRow, getCwd()));
       } else {
         const session = getSelectedSession();
         if (session) {
@@ -2582,9 +3033,9 @@ function AgentViewApp({
 
     // Dispatch input handling (with cursor / bash / paste / multiline support)
     if (focusArea === 'dispatch') {
-      // densable 2.1.212 #14: Ctrl+J inserts newline (extended key reporting);
-      // Shift+Enter kept for terminals that map it to a return+shift event.
-      if ((key.return && key.shift) || (input === 'j' && key.ctrl)) {
+      // densable 2.1.212 #14 / 2.1.248 #45 leftover: shift+enter or ctrl+j
+      // inserts a newline. Gold Lc: !ctrl && willInsertNewline → editor.
+      if (isFleetDispatchNewlineKey(key, input)) {
         setDispatchInput(v => v.slice(0, cursorOffset) + '\n' + v.slice(cursorOffset));
         setCursorOffset(o => o + 1);
         return;
@@ -2595,7 +3046,15 @@ function AgentViewApp({
           return;
         }
         if (dispatchInput.trim() || dispatchMode === 'bash') {
-          void handleDispatch();
+          // Gold Lc Ne=d.ctrl: dispatch then attach when canDispatchAndOpen.
+          void handleDispatch(isFleetDispatchAndOpenKey(key) && canDispatchAndOpen);
+        } else if (
+          decideFleetReturnAction({
+            parsed: parsedNav,
+            focusedKind: currentRow?.kind,
+          }) === 'newsession'
+        ) {
+          void openNewSessionRow(fleetNewSessionRowOrigin(currentRow, getCwd()));
         }
         return;
       }
@@ -2656,6 +3115,19 @@ function AgentViewApp({
         return;
       }
     } else if (key.return && flatRows.length > 0) {
+      // Gold Lc @192158881: composed intent/routine/matched → NEW session from
+      // the typed prompt (`setQuery("")` after). Never attach an older job.
+      const returnAction = decideFleetReturnAction({
+        parsed: parsedNav,
+        focusedKind: currentRow?.kind,
+      });
+      if (returnAction === 'dispatch-new') {
+        void handleDispatch(isFleetDispatchAndOpenKey(key) && canDispatchAndOpen);
+        return;
+      }
+      if (returnAction === 'none') {
+        return;
+      }
       if (currentRow?.kind === 'fold') {
         // Official fold expand: show all completed / earlier rows.
         if (currentRow.group === 'earlier') {
@@ -2690,7 +3162,7 @@ function AgentViewApp({
         return;
       }
       if (currentRow?.kind === 'newsession') {
-        void openNewSessionRow();
+        void openNewSessionRow(fleetNewSessionRowOrigin(currentRow, getCwd()));
         return;
       }
       const session = getSelectedSession();
@@ -2956,7 +3428,7 @@ function AgentViewApp({
           </Box>
 
           {/* Empty state (official P9H when Bj empty / every-origin) */}
-          {sessions.length === 0 && !error && !simpleView && (
+          {sessions.length === 0 && overlaidLoadLanded && !error && !simpleView && (
             <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
               <Text dimColor>
                 {originSessionPresent
@@ -2971,6 +3443,11 @@ function AgentViewApp({
           {error && (
             <Box marginBottom={1} paddingLeft={1}>
               <Text color={'error' as never}>{error}</Text>
+            </Box>
+          )}
+          {info && !error && (
+            <Box marginBottom={1} paddingLeft={1}>
+              <Text dimColor>{info}</Text>
             </Box>
           )}
 
@@ -3029,7 +3506,8 @@ function AgentViewApp({
                             ? ('warning' as never)
                             : row.group === 'review'
                               ? ('success' as never)
-                              : row.group === 'done' && done.some(s => deriveActivity(s) === 'failure')
+                              : row.group === 'done' &&
+                                  done.some(s => deriveActivity(s, fleetPrStatuses.prStatuses) === 'failure')
                                 ? ('error' as never)
                                 : undefined
                         }
@@ -3062,7 +3540,8 @@ function AgentViewApp({
                     }}
                     onClick={() => {
                       selectRowByMouse(idx);
-                      setFocusArea('dispatch');
+                      // Gold `mf(Ke.origin)` @192210383 — spawn, do not attach older.
+                      void openNewSessionRow(fleetNewSessionRowOrigin(row, getCwd()));
                     }}
                   >
                     <Text
@@ -3118,6 +3597,49 @@ function AgentViewApp({
                   isDeletePending={deleteConfirmSessionId === session.sessionId}
                   isJustKilled={justKilledSessionId === session.sessionId}
                   isUngroupPending={ungroupConfirmSessionId === session.sessionId}
+                  heldInTerminal={
+                    terminalHolderOf(
+                      {
+                        backend: session.backend,
+                        sessionId: session.sessionId,
+                        resumeSessionId: session.resumeSessionId,
+                      },
+                      terminalHolders,
+                    ) !== undefined
+                  }
+                  logTail={logTails[session.short ?? '']}
+                  deleteRefused={deleteRefusals.get(session.short ?? '')}
+                  loopKickCount={
+                    loopJobIds.has(session.short ?? '') ? loopKicks.get(session.sessionId)?.count : undefined
+                  }
+                  liveStatus={fleetLiveStatus(
+                    {
+                      id: session.short ?? '',
+                      state: {
+                        state: session.daemonState,
+                        tempo: session.tempo,
+                        sessionId: session.sessionId,
+                        resumeSessionId: session.resumeSessionId,
+                        template: session.template,
+                        respawnFlags: session.respawnFlags,
+                        backend: session.backend,
+                      },
+                    },
+                    {
+                      statuses,
+                      holders: terminalHolders,
+                      pendings,
+                      heldInTerminal:
+                        terminalHolderOf(
+                          {
+                            backend: session.backend,
+                            sessionId: session.sessionId,
+                            resumeSessionId: session.resumeSessionId,
+                          },
+                          terminalHolders,
+                        ) !== undefined,
+                    },
+                  )}
                   renameValue={renameValue}
                   cols={cols}
                   onSelect={() => {
@@ -3348,9 +3870,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     if (job) {
       const resumeId = job.state.resumeSessionId ?? job.state.sessionId;
       const attachShort = job.short || short;
-      const { probeJobAlive, xyrPreflightBeforeRespawn, findResumeSessionConflict } = await import(
-        '../daemon/xyrRespawn.js'
-      );
+      const { probeJobAlive, xyrPreflightBeforeRespawn } = await import('../daemon/xyrRespawn.js');
       // densable 2.1.246 Kn/Ti: worker still booting (present, not alive).
       // Opening it must retry attach — not kill+respawn (Windows race).
       if (!forceFresh) {
@@ -3390,25 +3910,33 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           linkScanPath: job.state.linkScanPath,
           forceRefusalRetry: forceFresh,
           forceFreshPrompt: forceFresh,
+          deadEpochReapedAt: job.state.deadEpochReapedAt,
         });
         const hasMessages = gate.allow && gate.probe.hasMessages;
 
         // densable tYo: refuse + arm when fork handoff never materialized
         if (!gate.allow) {
-          forceFreshNextShort = short;
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
+          if (gate.errorCode === DEAD_EPOCH_TRANSCRIPT_GONE) {
+            deadEpochGoneJobId = job.short || short;
+            return { error: FLEET_DEAD_EPOCH_GONE };
+          }
+          forceFreshNextShort = short;
           return { error: FLEET_FORCE_RESTART_MSG };
         }
 
         // densable R = hasMessages && !exec → Zxe resume_session_live_elsewhere
         if (hasMessages) {
-          const conflict = await findResumeSessionConflict(resumeId);
-          const ownJob = conflict?.jobId !== undefined && (conflict.jobId === short || conflict.jobId === attachShort);
-          if (conflict && !ownJob) {
+          const { findResumeSessionConflict: findConflict, formatResumeSessionLiveElsewhereError } = await import(
+            '../daemon/xyrRespawn.js'
+          );
+          const conflict = await findConflict(resumeId, {
+            excludeJobIds: [short, attachShort],
+          });
+          if (conflict) {
             process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
             return {
-              error:
-                'This conversation is already open in another running Claude session — use that one, or close it and try again',
+              error: formatResumeSessionLiveElsewhereError(conflict.kind),
             };
           }
         }
@@ -3475,6 +4003,10 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
           const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
+          if (code === DEAD_EPOCH_TRANSCRIPT_GONE || code === 'dead_epoch_transcript_gone') {
+            deadEpochGoneJobId = job.short || short;
+            return { error: FLEET_DEAD_EPOCH_GONE };
+          }
           if (
             code === FORK_TRANSCRIPT_NEVER_MATERIALIZED ||
             code === 'fork_transcript_never_materialized' ||
@@ -3551,6 +4083,8 @@ export async function renderAgentView(options?: {
     }
     inProcessManager = daemon.manager;
   }
+
+  void sweepExpiredFleetLauncherDrafts();
 
   // Track last-selected session so we can restore position after attach.
   // Prefer explicit option, then env select (official initialJobId).

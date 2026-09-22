@@ -4,7 +4,7 @@
  *
  * xAI Chat Completions accepts OpenAI-shaped `reasoning_effort`:
  *   grok-4.5 / grok-4.20-reasoning → low | medium | high
- *   grok-4.6 / grok-4.20-multi-agent → low | medium | high | xhigh
+ *   grok-4.7 / grok-4.6 / grok-4.20-multi-agent → low | medium | high | xhigh
  *   (4.6 = depth; multi-agent = agent count)
  * `max` is not an xAI value — drop it (caller should have clamped first).
  *

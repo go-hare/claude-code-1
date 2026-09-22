@@ -5,6 +5,7 @@
  * Requires CLAUDE_CODE_REMOTE + setWatchUrlDeps({ callTool }) + OAuth for
  * /api/frame/subscribe. Local interactive sessions use Cji WS instead.
  */
+import { be } from './durablePendingOps.js'
 import { publishDurableRegistry } from './durable.js'
 import { DL } from './frameDl.js'
 import { frameControlPlaneHeaders } from './mint.js'
@@ -88,7 +89,23 @@ async function postFrameSubscribe(
 /**
  * densable nxm — mint watch_url trigger + POST frame subscribe.
  */
-export async function durableSubscribe(
+/**
+ * densable D9t entry — nxm/vr subscribe with be(l) before await (official @190739086).
+ */
+export function durableSubscribe(
+  slug: string,
+  opts: {
+    signal?: AbortSignal
+    detachedFromUser?: boolean
+    previous?: { triggerId: string; unreleased?: string[] }
+  } = {},
+): Promise<DurableSubscribeOutcome> {
+  const l = durableSubscribeImpl(slug, opts)
+  be(l)
+  return l
+}
+
+async function durableSubscribeImpl(
   slug: string,
   opts: {
     signal?: AbortSignal
