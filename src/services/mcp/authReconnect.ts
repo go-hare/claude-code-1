@@ -38,6 +38,8 @@ export function classifyAuthReconnectKind(opts: {
   headersHelper?: string
   url?: string
   hasRefreshToken: boolean
+  /** Official `gC` — static Authorization already set → not OAuth discovery. */
+  hasUserAuthHeader?: boolean
 }): AuthReconnectKind | null {
   const transport =
     opts.type === 'http' || opts.type === 'sse' || opts.type === 'ws'
@@ -47,6 +49,7 @@ export function classifyAuthReconnectKind(opts: {
   if (
     (opts.type === 'http' || opts.type === 'sse') &&
     !opts.headersHelper &&
+    !opts.hasUserAuthHeader &&
     !!opts.url &&
     opts.hasRefreshToken
   ) {

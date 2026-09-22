@@ -46,6 +46,7 @@ import {
   isOAuthRefreshTokenOnHold,
   isStoredOAuthRefreshTokenCleared,
   markDeadOAuthRefreshToken,
+  OAuthRefreshLockTimeoutError,
   rememberOAuthAccountOnHold,
 } from './accountOnHold.js'
 import {
@@ -67,7 +68,6 @@ import {
   resolveWithStallGuard,
 } from './aws.js'
 import { AwsAuthStatusManager } from './awsAuthStatusManager.js'
-import { clearBetasCaches } from './betas.js'
 import {
   type AccountInfo,
   checkHasTrustDialogAccepted,
@@ -107,7 +107,7 @@ import {
 } from './settings/settings.js'
 import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
-import { clearToolSchemaCache } from './toolSchemaCache.js'
+import { Ip } from './toolSchemaCache.js'
 
 /**
  * CCR and Claude Desktop spawn the CLI with OAuth and should never fall back
@@ -1580,8 +1580,9 @@ export function saveOAuthTokensIfNeeded(tokens: OAuthTokens): {
     }
 
     getClaudeAIOAuthTokens.cache?.clear?.()
-    clearBetasCaches()
-    clearToolSchemaCache()
+    // densable G2t @180709491: lY(),Ip()
+    // Ip @180712775: if(jN(),!s_())IW();else o_() — dropInFlight when s_
+    Ip()
     return updateStatus
   } catch (error) {
     logError(error)
@@ -2128,7 +2129,8 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
       logEvent('tengu_oauth_token_refresh_lock_retry_limit_reached', {
         maxRetries: MAX_RETRIES,
       })
-      return false
+      // densable 2.1.248 vp → "lock_timeout"; leftover boolean API throws Zye
+      throw new OAuthRefreshLockTimeoutError()
     }
     logError(err)
     logEvent('tengu_oauth_token_refresh_lock_error', {
@@ -2317,29 +2319,31 @@ export function getOauthAccountInfoFromDisk(): AccountInfo | undefined {
 }
 
 /**
- * Checks if overage/extra usage provisioning is allowed for this organization.
- * This mirrors the logic in apps/claude-ai `useIsOverageProvisioningAllowed` hook as closely as possible.
+ * densable 2.1.248 DN — extra-usage / usage-credits billing allowlist.
+ * Gold 1:1; do not invent types beyond this set.
+ */
+export const OVERAGE_PROVISIONING_BILLING_TYPES = new Set([
+  'stripe_subscription',
+  'stripe_subscription_contracted',
+  'stripe_subscription_enterprise_self_serve',
+  'aws_marketplace',
+  'c4e_consumption_trial',
+  'apple_subscription',
+  'google_play_subscription',
+])
+
+/**
+ * densable 2.1.248 Zur:
+ *   let e = In()?.billingType
+ *   if (!St() || !e) return false
+ *   return DN.has(e)
  */
 export function isOverageProvisioningAllowed(): boolean {
-  const accountInfo = getOauthAccountInfo()
-  const billingType = accountInfo?.billingType
-
-  // Must be a Claude subscriber with a supported subscription type
+  const billingType = getOauthAccountInfo()?.billingType
   if (!isClaudeAISubscriber() || !billingType) {
     return false
   }
-
-  // only allow Stripe and mobile billing types to purchase extra usage
-  if (
-    billingType !== 'stripe_subscription' &&
-    billingType !== 'stripe_subscription_contracted' &&
-    billingType !== 'apple_subscription' &&
-    billingType !== 'google_play_subscription'
-  ) {
-    return false
-  }
-
-  return true
+  return OVERAGE_PROVISIONING_BILLING_TYPES.has(billingType)
 }
 
 // Returns whether the user has Opus access at all, regardless of whether they

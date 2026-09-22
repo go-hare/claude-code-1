@@ -47,6 +47,28 @@ describe('classifyAuthReconnectKind', () => {
       }),
     ).toBeNull()
   })
+
+  test('248 gC: static Authorization skips OAuth discovery', () => {
+    expect(
+      classifyAuthReconnectKind({
+        type: 'http',
+        url: 'https://x',
+        hasRefreshToken: true,
+        hasUserAuthHeader: true,
+      }),
+    ).toBeNull()
+  })
+
+  test('248 gC: headersHelper still re-runs helper when Authorization is set', () => {
+    expect(
+      classifyAuthReconnectKind({
+        type: 'http',
+        headersHelper: 'mint.sh',
+        hasRefreshToken: true,
+        hasUserAuthHeader: true,
+      }),
+    ).toBe('mcp_headers_helper')
+  })
 })
 
 describe('planAuthReconnectJoin', () => {

@@ -11,6 +11,7 @@
 
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 import { getClaudeCodeUserAgent } from './userAgent.js'
 
 export type GatewayAuthSession = {
@@ -33,8 +34,7 @@ export type ResolveGatewayFromEnvResult =
   | { status: 'invalid_url'; message: string }
   | { status: 'ok'; session: GatewayEnvSession }
 
-// Official Pt.gatewayAuth densable store
-let gatewayAuth: GatewayAuthSession | null = null
+// Official o_/XFe store is n().host.credentialSlots.gatewayAuth().
 
 /**
  * Process-level cache for default secure-storage restore.
@@ -103,8 +103,8 @@ let gatewaySecureStorageNowMs: () => number = () => Date.now()
 /**
  * Official zzo / eTn densable — in-flight IdP refresh promise for store path
  * (lXe). Concurrent getAnthropicClient / provider calls share one refresh.
+ * Store is n().host.credentialSlots.gatewayRefreshInFlight() (248).
  */
-let gatewayRefreshInFlight: Promise<GatewayIdpRefreshResult> | null = null
 
 /**
  * Official _E.post densable host for IdP token refresh. Tests inject via
@@ -158,16 +158,18 @@ export function invalidateGatewaySecureStorageRestoreCache(): void {
   clearSecureStorageRestoreSkipState()
 }
 
-/** Official getGatewayRefreshInFlight densable. */
+/** Official getGatewayRefreshInFlight densable — credentialSlots. */
 export function getGatewayRefreshInFlight(): Promise<GatewayIdpRefreshResult> | null {
-  return gatewayRefreshInFlight
+  return getBootstrapSessionHost().credentialSlots.gatewayRefreshInFlight() as Promise<GatewayIdpRefreshResult> | null
 }
 
-/** Official setGatewayRefreshInFlight densable. */
+/** Official setGatewayRefreshInFlight densable — credentialSlots. */
 export function setGatewayRefreshInFlight(
   promise: Promise<GatewayIdpRefreshResult> | null,
 ): void {
-  gatewayRefreshInFlight = promise
+  getBootstrapSessionHost().credentialSlots.replaceGatewayRefreshInFlight(
+    promise,
+  )
 }
 
 /** @internal test helper — reset negative cache + clear read override. */
@@ -175,7 +177,7 @@ export function resetGatewaySecureStorageRestoreCache_FOR_TESTS(): void {
   clearSecureStorageRestoreSkipState()
   testSecureStorageRead = null
   gatewaySecureStorageNowMs = () => Date.now()
-  gatewayRefreshInFlight = null
+  setGatewayRefreshInFlight(null)
   testGatewayIdpPostToken = null
 }
 
@@ -212,9 +214,9 @@ export function setTestGatewaySecureStorageRead_FOR_TESTS(
   testSecureStorageRead = read
 }
 
-/** Official o_ — current gateway auth session, if any. */
+/** Official o_ — `n().host.credentialSlots.gatewayAuth()`. */
 export function getGatewayAuth(): GatewayAuthSession | null {
-  return gatewayAuth
+  return getBootstrapSessionHost().credentialSlots.gatewayAuth() as GatewayAuthSession | null
 }
 
 /**
@@ -244,9 +246,9 @@ function storeAuthIdentityChangedMidRefresh(
   return !isSameGatewayAuthIdentity(getGatewayAuth(), captured)
 }
 
-/** Official XFe — pin/replace gateway auth session. */
+/** Official XFe — `n().host.credentialSlots.replaceGatewayAuth(e)`. */
 export function setGatewayAuth(session: GatewayAuthSession | null): void {
-  gatewayAuth = session
+  getBootstrapSessionHost().credentialSlots.replaceGatewayAuth(session)
   // Non-null replace (login / restore / refresh apply): drop stale transient
   // reread + HTTP backoff scheduled against a prior session.
   if (session !== null) {
@@ -256,15 +258,15 @@ export function setGatewayAuth(session: GatewayAuthSession | null): void {
 }
 
 export function clearGatewayAuth(): void {
-  gatewayAuth = null
+  getBootstrapSessionHost().credentialSlots.replaceGatewayAuth(null)
   // Logout / test reset: drop any in-flight IdP refresh and allow restore again.
-  gatewayRefreshInFlight = null
+  setGatewayRefreshInFlight(null)
   clearSecureStorageRestoreSkipState()
 }
 
 /** Official eGo — session present and expired. */
 export function isGatewayAuthExpired(
-  session: GatewayAuthSession | null | undefined = gatewayAuth,
+  session: GatewayAuthSession | null | undefined = getGatewayAuth(),
   nowMs: number = Date.now(),
 ): boolean {
   return !!session && session.expiresAtMs <= nowMs
@@ -272,7 +274,7 @@ export function isGatewayAuthExpired(
 
 /** Official Sht — pinned (enterprise) session, not env-unpinned. */
 export function isGatewayAuthPinned(
-  session: GatewayAuthSession | null | undefined = gatewayAuth,
+  session: GatewayAuthSession | null | undefined = getGatewayAuth(),
 ): boolean {
   return !!session && !session.unpinned
 }
@@ -544,7 +546,7 @@ export function parseGatewayIdpTokenResponse(
  * Requires idpRefreshToken and expires within GATEWAY_IDP_REFRESH_SKEW_MS.
  */
 export function shouldRefreshGatewayIdp(
-  session: GatewayAuthSession | null | undefined = gatewayAuth,
+  session: GatewayAuthSession | null | undefined = getGatewayAuth(),
   nowMs: number = Date.now(),
   skewMs: number = GATEWAY_IDP_REFRESH_SKEW_MS,
 ): boolean {
@@ -832,7 +834,7 @@ export async function maybeRefreshGatewayIdp(input?: {
   // Official lXe: store-path only — skip early, then coalesce in-flight.
   const usesStoreSession = input?.session === undefined
   if (usesStoreSession) {
-    const current = gatewayAuth
+    const current = getGatewayAuth()
     if (!current) return { status: 'skipped', reason: 'no_session' }
     if (!current.idpRefreshToken) {
       return { status: 'skipped', reason: 'no_refresh_token' }
@@ -858,18 +860,18 @@ export async function maybeRefreshGatewayIdp(input?: {
         retryable: true,
       }
     }
-    if (gatewayRefreshInFlight) {
-      return gatewayRefreshInFlight
+    if (getGatewayRefreshInFlight()) {
+      return getGatewayRefreshInFlight()!
     }
     const run = runGatewayIdpRefresh(input, {
       session: current,
       usesStoreSession: true,
     }).finally(() => {
-      if (gatewayRefreshInFlight === run) {
-        gatewayRefreshInFlight = null
+      if (getGatewayRefreshInFlight() === run) {
+        setGatewayRefreshInFlight(null)
       }
     })
-    gatewayRefreshInFlight = run
+    setGatewayRefreshInFlight(run)
     return run
   }
 

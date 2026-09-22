@@ -30,6 +30,13 @@ import {
 import { clearOpenAIClientCache } from '../services/api/openai/client.js';
 import { OAuthService } from '../services/oauth/index.js';
 import { getOauthAccountInfo, validateForceLoginOrg } from '../utils/auth.js';
+import {
+  ConsoleProfileLoginError,
+  noteKeylessConsoleFallback,
+  RECOMMENDED_SIGNIN_UNAVAILABLE,
+  startConsoleProfileLoginPreflight,
+} from '../commands/login/getAuthStatus.js';
+import { getAPIProvider } from '../utils/model/providers.js';
 import { oauthLoginOrgUUIDHint } from '../utils/forceLoginOrg.js';
 import { isHeadlessBrowserEnvironment, openBrowser } from '../utils/browser.js';
 import { isFullscreenActive, resolveMouseTrackingMode } from '../utils/fullscreen.js';
@@ -152,8 +159,10 @@ export function ConsoleOAuthFlow({
     if (forceLoginMethod === 'claudeai') {
       return { state: 'ready_to_start' };
     }
+    // densable H6: force console → ready_to_start (API-key). Recommended
+    // keyless is at=false until the user picks wif on console_method.
     if (forceLoginMethod === 'console') {
-      return { state: 'console_method' };
+      return { state: 'ready_to_start' };
     }
     // densable: g → gateway_setup (forceLoginMethod gateway or admin URL prefill)
     if (gatewayForced) {
@@ -169,8 +178,16 @@ export function ConsoleOAuthFlow({
     // Use Claude AI auth for setup-token mode to support user:inference scope
     return mode === 'setup-token' || forceLoginMethod === 'claudeai';
   });
-  // densable 2.1.243 #5 `oe` — Console WIF (keyless) vs create API key.
-  const [preferConsoleToken, setPreferConsoleToken] = useState(true);
+  // densable 2.1.248 `at` — Console profile (keyless) login. Default false.
+  const [preferConsoleToken, setPreferConsoleToken] = useState(false);
+  // densable Ht / st — shown on waiting_for_login after fallbackCures.
+  const [keyMintFallbackReason, setKeyMintFallbackReason] = useState<{
+    cause: string;
+    message: string;
+  } | null>(null);
+  // densable Be — firstParty, no forceLoginOrgUUID pin, not claudeai.
+  const consoleProfileLoginAllowed =
+    getAPIProvider() === 'firstParty' && settings.forceLoginOrgUUID === undefined && forceLoginMethod !== 'claudeai';
   // After a few seconds we suggest the user to copy/paste url if the
   // browser did not open automatically. In this flow we expect the user to
   // copy the code from the browser and paste it in the terminal
@@ -306,25 +323,48 @@ export function ConsoleOAuthFlow({
   }
 
   const startOAuth = useCallback(async () => {
+    const showLoginUrl = (url: string) => {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+      setCopyPath(null);
+      setShowPastePrompt(false);
+      setOAuthStatus({ state: 'waiting_for_login', url });
+      // densable Xo / D: headless (SSH / no TTY / linux no display) → immediate.
+      if (isHeadlessBrowserEnvironment()) {
+        setShowPastePrompt(true);
+      } else {
+        setTimeout(() => setShowPastePrompt(true), 3000);
+      }
+    };
+    // densable st(null) at the start of each attempt
+    setKeyMintFallbackReason(null);
+    let fellBackToApiKey = false;
     try {
       logEvent('tengu_oauth_flow_start', { loginWithClaudeAi });
+
+      if (preferConsoleToken && mode !== 'setup-token') {
+        if (!consoleProfileLoginAllowed) {
+          throw new Error(
+            'Settings on this machine pin the login method or organization, so signing in without an API key is not available here.',
+          );
+        }
+        try {
+          await startConsoleProfileLoginPreflight();
+        } catch (err) {
+          if (!(err instanceof ConsoleProfileLoginError) || !err.fallbackCures) {
+            throw err;
+          }
+          setKeyMintFallbackReason(noteKeylessConsoleFallback(err));
+          fellBackToApiKey = true;
+        }
+      }
 
       const result = await oauthService
         .startOAuthFlow(
           async url => {
-            if (copyResetTimerRef.current !== null) {
-              clearTimeout(copyResetTimerRef.current);
-              copyResetTimerRef.current = null;
-            }
-            setCopyPath(null);
-            setShowPastePrompt(false);
-            setOAuthStatus({ state: 'waiting_for_login', url });
-            // densable Xo / D: headless (SSH / no TTY / linux no display) → immediate.
-            if (isHeadlessBrowserEnvironment()) {
-              setShowPastePrompt(true);
-            } else {
-              setTimeout(() => setShowPastePrompt(true), 3000);
-            }
+            showLoginUrl(url);
           },
           {
             loginWithClaudeAi,
@@ -361,7 +401,7 @@ export function ConsoleOAuthFlow({
         setOAuthStatus({ state: 'success', token: result.accessToken });
       } else {
         await installOAuthTokens(result, {
-          skipApiKey: !loginWithClaudeAi && preferConsoleToken,
+          skipApiKey: !loginWithClaudeAi && preferConsoleToken && !fellBackToApiKey,
         });
 
         const orgResult = await validateForceLoginOrg();
@@ -407,7 +447,15 @@ export function ConsoleOAuthFlow({
         ssl_error: sslHint !== null,
       });
     }
-  }, [oauthService, setShowPastePrompt, loginWithClaudeAi, preferConsoleToken, mode, orgUUID]);
+  }, [
+    oauthService,
+    setShowPastePrompt,
+    loginWithClaudeAi,
+    preferConsoleToken,
+    consoleProfileLoginAllowed,
+    mode,
+    orgUUID,
+  ]);
 
   const pendingOAuthStartRef = useRef(false);
 
@@ -506,6 +554,7 @@ export function ConsoleOAuthFlow({
           gatewayUnsupportedWarning={gatewayUnsupportedWarning}
           forceLoginGatewayUrl={forceLoginGatewayUrl}
           gatewayScreenLocked={gatewayScreenLocked}
+          keyMintFallbackReason={keyMintFallbackReason}
           showPastePrompt={showPastePrompt}
           pastedCode={pastedCode}
           setPastedCode={setPastedCode}
@@ -516,6 +565,7 @@ export function ConsoleOAuthFlow({
           setOAuthStatus={setOAuthStatus}
           setLoginWithClaudeAi={setLoginWithClaudeAi}
           setPreferConsoleToken={setPreferConsoleToken}
+          consoleProfileLoginAllowed={consoleProfileLoginAllowed}
           onDone={onDone}
         />
       </Box>
@@ -532,6 +582,7 @@ type OAuthStatusMessageProps = {
   gatewayUnsupportedWarning: string | null;
   forceLoginGatewayUrl: string | undefined;
   gatewayScreenLocked: boolean;
+  keyMintFallbackReason: { cause: string; message: string } | null;
   showPastePrompt: boolean;
   pastedCode: string;
   setPastedCode: (value: string) => void;
@@ -543,6 +594,7 @@ type OAuthStatusMessageProps = {
   setOAuthStatus: (status: OAuthStatus) => void;
   setLoginWithClaudeAi: (value: boolean) => void;
   setPreferConsoleToken: (value: boolean) => void;
+  consoleProfileLoginAllowed: boolean;
 };
 
 function OAuthStatusMessage({
@@ -553,6 +605,7 @@ function OAuthStatusMessage({
   gatewayUnsupportedWarning,
   forceLoginGatewayUrl,
   gatewayScreenLocked,
+  keyMintFallbackReason,
   showPastePrompt,
   pastedCode,
   setPastedCode,
@@ -563,6 +616,7 @@ function OAuthStatusMessage({
   setOAuthStatus,
   setLoginWithClaudeAi,
   setPreferConsoleToken,
+  consoleProfileLoginAllowed,
   onDone,
 }: OAuthStatusMessageProps): React.ReactNode {
   switch (oauthStatus.state) {
@@ -613,6 +667,7 @@ function OAuthStatusMessage({
               },
               { label: 'Go back', value: 'back' },
             ]}
+            onCancel={() => setOAuthStatus({ state: 'idle' })}
             onChange={value => {
               if (value === 'back') {
                 setOAuthStatus({ state: 'idle' });
@@ -779,11 +834,16 @@ function OAuthStatusMessage({
                   if (value === 'claudeai') {
                     logEvent('tengu_oauth_claudeai_selected', {});
                     setLoginWithClaudeAi(true);
+                    setPreferConsoleToken(false);
                     setOAuthStatus({ state: 'ready_to_start' });
+                  } else if (consoleProfileLoginAllowed) {
+                    logEvent('tengu_oauth_console_selected', {});
+                    setOAuthStatus({ state: 'console_method' });
                   } else {
                     logEvent('tengu_oauth_console_selected', {});
                     setLoginWithClaudeAi(false);
-                    setOAuthStatus({ state: 'console_method' });
+                    setPreferConsoleToken(false);
+                    setOAuthStatus({ state: 'ready_to_start' });
                   }
                 }
               }}
@@ -1831,6 +1891,14 @@ function OAuthStatusMessage({
             </Box>
           )}
 
+          {keyMintFallbackReason && (
+            <Box>
+              <Text dimColor>
+                {`${RECOMMENDED_SIGNIN_UNAVAILABLE} (${keyMintFallbackReason.cause}), so this sign-in will create an API key.`}
+              </Text>
+            </Box>
+          )}
+
           {!showPastePrompt && (
             <Box>
               <Spinner />
@@ -1894,6 +1962,11 @@ function OAuthStatusMessage({
       return (
         <Box flexDirection="column" gap={1}>
           <Text color="error">OAuth error: {oauthStatus.message}</Text>
+          {keyMintFallbackReason && (
+            <Text dimColor>
+              {RECOMMENDED_SIGNIN_UNAVAILABLE}: {keyMintFallbackReason.message}
+            </Text>
+          )}
 
           {oauthStatus.toRetry && (
             <Box marginTop={1}>

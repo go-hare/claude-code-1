@@ -5,6 +5,7 @@ import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
+import { isOfficialClaudeAiConnector } from '../../services/mcp/officialClaudeAiConnector.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
 import { describeMcpConfigFilePath } from '../../services/mcp/utils.js';
 import { isDebugMode } from '../../utils/debug.js';
@@ -83,14 +84,15 @@ export function MCPListPanel({
     setSelectedIndexState(next);
   };
 
-  // Non-claudeai servers grouped by scope
+  // densable 2.1.248 `ebn(config)` — official claude.ai heading, not type-only.
   const serversByScope = React.useMemo(() => {
-    const regularServers = servers.filter(s => s.client.config.type !== 'claudeai-proxy');
+    const regularServers = servers.filter(s => !isOfficialClaudeAiConnector(s.client.config));
     return groupServersByScope(regularServers);
   }, [servers]);
 
   const claudeAiServers = React.useMemo(
-    () => servers.filter(s => s.client.config.type === 'claudeai-proxy').sort((a, b) => a.name.localeCompare(b.name)),
+    () =>
+      servers.filter(s => isOfficialClaudeAiConnector(s.client.config)).sort((a, b) => a.name.localeCompare(b.name)),
     [servers],
   );
 

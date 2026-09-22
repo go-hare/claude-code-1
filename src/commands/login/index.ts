@@ -10,5 +10,9 @@ export default () =>
       ? 'Switch Anthropic accounts'
       : 'Sign in with your Anthropic account',
     isEnabled: () => !isEnvTruthy(process.env.DISABLE_LOGIN_COMMAND),
+    // official tip SEA: fleetHostCall:async({login:e})=>e()
+    fleetHostCall: async ({ login: hostLogin }) => {
+      hostLogin()
+    },
     load: () => import('./login.js'),
   }) satisfies Command

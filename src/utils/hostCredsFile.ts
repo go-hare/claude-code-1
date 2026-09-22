@@ -13,6 +13,7 @@ import {
   isProcessRunning,
 } from './genericProcessUtils.js'
 import { jsonParse } from './slowOperations.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 /** Official size cap on host creds file. */
 export const HOST_CREDS_MAX_BYTES = 65_536
@@ -318,7 +319,7 @@ export async function withHostAuthRefreshTimeout<T>(
 export type HostAuthTokenRefreshCallback = () => Promise<string | null>
 
 // Module state for host-creds apply + 401 recovery (official afa / Gan / cLp).
-let hostAuthTokenRefreshCallback: HostAuthTokenRefreshCallback | null = null
+// densable 2.1.248: refresh callback lives on credentialSlots.
 let lockedHostEndpoints: Map<string, string> | null = null
 let appliedHostSecretKeys = new Set<string>()
 let hostAuth401SameTokenCount = 0
@@ -327,12 +328,14 @@ let hostAuth401SameTokenCount = 0
 export function setHostAuthTokenRefreshCallback(
   cb: HostAuthTokenRefreshCallback | null,
 ): void {
-  hostAuthTokenRefreshCallback = cb
+  getBootstrapSessionHost().credentialSlots.replaceHostAuthTokenRefreshCallback(
+    cb,
+  )
 }
 
-/** Official S$t */
+/** Official S$t / e7e */
 export function getHostAuthTokenRefreshCallback(): HostAuthTokenRefreshCallback | null {
-  return hostAuthTokenRefreshCallback
+  return getBootstrapSessionHost().credentialSlots.hostAuthTokenRefreshCallback() as HostAuthTokenRefreshCallback | null
 }
 
 /**
@@ -340,7 +343,7 @@ export function getHostAuthTokenRefreshCallback(): HostAuthTokenRefreshCallback 
  * registered (desktop host-creds path).
  */
 export function isHostAuthTokenRefreshAvailable(): boolean {
-  return hostAuthTokenRefreshCallback !== null
+  return getHostAuthTokenRefreshCallback() !== null
 }
 
 /**
@@ -387,7 +390,7 @@ export async function refreshHostCredsToken(): Promise<string | null> {
 export async function tryHostAuth401Recovery(): Promise<
   'updated' | 'same' | 'exhausted' | 'unavailable' | 'failed'
 > {
-  const cb = hostAuthTokenRefreshCallback
+  const cb = getHostAuthTokenRefreshCallback()
   if (!cb) return 'unavailable'
 
   const envVar = getHostAuthEnvVarName()
@@ -434,7 +437,7 @@ export async function applyHostCredsFromFileIfManaged(): Promise<Record<
   string
 > | null> {
   // Official mLp: skip if a host auth refresh callback is already installed.
-  if (hostAuthTokenRefreshCallback) return null
+  if (getHostAuthTokenRefreshCallback()) return null
   // Official PROVIDER_MANAGED_BY_HOST densable.
   let providerManagedByHost = isEnvTruthy(
     process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
@@ -475,7 +478,7 @@ export async function applyHostCredsFromFileIfManaged(): Promise<Record<
 
 /** Test helper — reset module state between cases. */
 export function resetHostCredsModuleStateForTests(): void {
-  hostAuthTokenRefreshCallback = null
+  setHostAuthTokenRefreshCallback(null)
   lockedHostEndpoints = null
   appliedHostSecretKeys = new Set()
   hostAuth401SameTokenCount = 0

@@ -54,6 +54,7 @@ import {
   getOriginalCwd,
   getProjectRoot,
   getSessionId,
+  registerEnsureConnectedClient,
 } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
@@ -207,6 +208,15 @@ export {
   seedMcpIdentityCheck,
 } from './mcpIdentity.js'
 import { getMcpServerHeaders } from './headersHelper.js'
+import {
+  classifyConnectAuthHeaderRejection,
+  connectAuthStatusCode,
+  headersHaveAuthorization,
+  resolveConnectAuthFlags,
+  shouldSkipOAuthAuthProvider,
+  type ConnectAuthFlags,
+  type ConnectAuthHeaderRejection,
+} from './connectAuthClassify.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
 import type {
   ConnectedMCPServer,
@@ -423,6 +433,75 @@ function mcpBaseUrlAnalytics(serverRef: ScopedMcpServerConfig): {
  * emits tengu_mcp_server_needs_auth, caches the needs-auth entry, and returns
  * the needs-auth connection result.
  */
+function wrapRemoteMcpFetch(
+  authProvider: ClaudeAuthProvider | undefined,
+): FetchLike {
+  const base = createFetchWithInit()
+  return wrapFetchWithTimeout(
+    authProvider ? wrapFetchWithStepUpDetection(base, authProvider) : base,
+  )
+}
+
+function connectAuthRejectedResult(
+  name: string,
+  serverRef: ScopedMcpServerConfig,
+  transportType: 'sse' | 'http',
+  classified: ConnectAuthHeaderRejection,
+): MCPServerConnection {
+  logEvent('tengu_mcp_server_connection_failed', {
+    transportType:
+      transportType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    errorCode:
+      classified.errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    ...mcpBaseUrlAnalytics(serverRef),
+  })
+  logMCPError(name, classified.message)
+  return {
+    name,
+    type: 'failed',
+    config: serverRef,
+    error: classified.message,
+    errorCode: classified.errorCode,
+    ...(classified.displayDetail !== undefined
+      ? { displayDetail: classified.displayDetail }
+      : {}),
+  }
+}
+
+function maybeConnectAuthHeaderRejection(
+  error: unknown,
+  flags: ConnectAuthFlags | undefined,
+): ConnectAuthHeaderRejection | undefined {
+  if (!flags) return undefined
+  return classifyConnectAuthHeaderRejection({
+    error,
+    statusCode: connectAuthStatusCode(error),
+    hasUserAuthHeader: flags.hasUserAuthHeader,
+    helperMintsAuthHeader: flags.helperMintsAuthHeader,
+  })
+}
+
+function resolveRemoteConnectAuth(
+  name: string,
+  serverRef: ScopedMcpServerConfig,
+  combinedHeaders: Record<string, string>,
+): {
+  flags: ConnectAuthFlags
+  authProvider: ClaudeAuthProvider | undefined
+} {
+  const flags = resolveConnectAuthFlags(serverRef, combinedHeaders)
+  // Official `k=ce||re||…?void 0:new EFe` — no authProvider → no OAuth discovery.
+  const authProvider = shouldSkipOAuthAuthProvider(flags)
+    ? undefined
+    : new ClaudeAuthProvider(
+        name,
+        serverRef as
+          | import('./types.js').McpSSEServerConfig
+          | import('./types.js').McpHTTPServerConfig,
+      )
+  return { flags, authProvider }
+}
+
 function handleRemoteAuthFailure(
   name: string,
   serverRef: ScopedMcpServerConfig,
@@ -741,27 +820,30 @@ export const connectToServer = memoize(
       | undefined
     try {
       let transport: Transport
+      let connectAuthFlags: ConnectAuthFlags | undefined
 
       // If we have the session ingress JWT, we will connect via the session ingress rather than
       // to remote MCP's directly.
       const sessionIngressToken = getSessionIngressAuthToken()
 
       if (serverRef.type === 'sse') {
-        // Create an auth provider for this server
-        const authProvider = new ClaudeAuthProvider(name, serverRef)
-
-        // Get combined headers (static + dynamic)
+        // Get combined headers (static + dynamic) before deciding on OAuth.
         const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+        const remoteAuth = resolveRemoteConnectAuth(
+          name,
+          serverRef,
+          combinedHeaders,
+        )
+        connectAuthFlags = remoteAuth.flags
+        const authProvider = remoteAuth.authProvider
 
         // Use the auth provider with SSEClientTransport
         const transportOptions: SSEClientTransportOptions = {
-          authProvider,
+          ...(authProvider ? { authProvider } : {}),
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
-          fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
-          ),
+          fetch: wrapRemoteMcpFetch(authProvider),
           requestInit: {
             headers: {
               'User-Agent': getMCPUserAgent(),
@@ -779,7 +861,7 @@ export const connectToServer = memoize(
           fetch: async (url: string | URL, init?: RequestInit) => {
             // Get auth headers from the auth provider
             const authHeaders: Record<string, string> = {}
-            const tokens = await authProvider.tokens()
+            const tokens = await authProvider?.tokens()
             if (tokens) {
               authHeaders.Authorization = `Bearer ${tokens.access_token}`
             }
@@ -928,18 +1010,22 @@ export const connectToServer = memoize(
           })}`,
         )
 
-        // Create an auth provider for this server
-        const authProvider = new ClaudeAuthProvider(name, serverRef)
-
-        // Get combined headers (static + dynamic)
+        // Get combined headers (static + dynamic) before deciding on OAuth.
         const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+        const remoteAuth = resolveRemoteConnectAuth(
+          name,
+          serverRef,
+          combinedHeaders,
+        )
+        connectAuthFlags = remoteAuth.flags
+        const authProvider = remoteAuth.authProvider
 
         // Check if this server has stored OAuth tokens. If so, the SDK's
         // authProvider will set Authorization — don't override with the
         // session ingress token (SDK merges requestInit AFTER authProvider).
         // CCR proxy URLs (ccr_shttp_mcp) have no stored OAuth, so they still
         // get the ingress token. See PR #24454 discussion.
-        const hasOAuthTokens = !!(await authProvider.tokens())
+        const hasOAuthTokens = !!(await authProvider?.tokens())
 
         // Use the auth provider with StreamableHTTPClientTransport
         const proxyOptions = getProxyFetchOptions()
@@ -949,13 +1035,11 @@ export const connectToServer = memoize(
         )
 
         const transportOptions: StreamableHTTPClientTransportOptions = {
-          authProvider,
+          ...(authProvider ? { authProvider } : {}),
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
-          fetch: wrapFetchWithTimeout(
-            wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
-          ),
+          fetch: wrapRemoteMcpFetch(authProvider),
           requestInit: {
             ...proxyOptions,
             headers: {
@@ -1296,15 +1380,19 @@ export const connectToServer = memoize(
       const recreateTransportForPinnedLegacy = async (): Promise<Transport> => {
         // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
         if (serverRef.type === 'http') {
-          const authProvider = new ClaudeAuthProvider(name, serverRef)
           const combinedHeaders = await getMcpServerHeaders(name, serverRef)
-          const hasOAuthTokens = !!(await authProvider.tokens())
+          const remoteAuth = resolveRemoteConnectAuth(
+            name,
+            serverRef,
+            combinedHeaders,
+          )
+          connectAuthFlags = remoteAuth.flags
+          const authProvider = remoteAuth.authProvider
+          const hasOAuthTokens = !!(await authProvider?.tokens())
           const proxyOptions = getProxyFetchOptions()
           const transportOptions: StreamableHTTPClientTransportOptions = {
-            authProvider,
-            fetch: wrapFetchWithTimeout(
-              wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
-            ),
+            ...(authProvider ? { authProvider } : {}),
+            fetch: wrapRemoteMcpFetch(authProvider),
             requestInit: {
               ...proxyOptions,
               headers: {
@@ -1565,6 +1653,13 @@ export const connectToServer = memoize(
           )
           logMCPError(name, error)
 
+          const classified = maybeConnectAuthHeaderRejection(
+            error,
+            connectAuthFlags,
+          )
+          if (classified) {
+            return connectAuthRejectedResult(name, serverRef, 'sse', classified)
+          }
           if (error instanceof UnauthorizedError) {
             return handleRemoteAuthFailure(name, serverRef, 'sse')
           }
@@ -1581,6 +1676,18 @@ export const connectToServer = memoize(
           )
           logMCPError(name, error)
 
+          const classified = maybeConnectAuthHeaderRejection(
+            error,
+            connectAuthFlags,
+          )
+          if (classified) {
+            return connectAuthRejectedResult(
+              name,
+              serverRef,
+              'http',
+              classified,
+            )
+          }
           if (error instanceof UnauthorizedError) {
             return handleRemoteAuthFailure(name, serverRef, 'http')
           }
@@ -2347,6 +2454,9 @@ export async function ensureConnectedClient(
   return connectedClient
 }
 
+// Official w7e — register dial path on host.mcpProcessWiring for vx() callers.
+registerEnsureConnectedClient(ensureConnectedClient)
+
 /**
  * Compares two MCP server configurations to determine if they are equivalent.
  * Used to detect when a server needs to be reconnected due to config changes.
@@ -2767,6 +2877,9 @@ export const fetchToolsForClient = memoizeWithLRU(
                       headersHelper: serverConfig.headersHelper,
                       url: serverConfig.url,
                       hasRefreshToken,
+                      hasUserAuthHeader: headersHaveAuthorization(
+                        serverConfig.headers,
+                      ),
                     })
                     const cacheKey = getServerCacheKey(
                       client.name,
