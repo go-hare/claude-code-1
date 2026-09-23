@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current npm: **`2.7.51`** (densable **2.1.248** HAVE 47 / N/A 2). `npm i -g @go-hare/claude-code`
+> Current npm: **`2.7.52`** (248 surface + densable **2.1.251 #13** `GMt` hotfix). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,7 +45,11 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.51** = 243+246+247+248) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.52** = 243+246+247+248 + 251 `#13` hotfix) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+
+#### densable 2.1.251 #13 hotfix (2.7.52)
+
+Stacked on landed **2.1.248**. **Not** the 251 leftover pack. thinking off + xhigh/max no longer client-throws; gold `GMt` clamps outgoing `{type:"disabled"}`; `Du`/`Ln`/`i5n`; mechanical `sX` / MCP host. Do not invent `artifact_comment_triage` / classifier `Vm` / leftover 44 PARTIAL. `Ge` persist writers are out of this hotfix.
 
 #### densable 2.1.248 alignment (2.7.51)
 
@@ -306,10 +310,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.51)
+### Recent updates (2.7.5 → 2.7.52)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.52** | **densable 2.1.251 #13 `GMt` hotfix** (on 2.7.51 / 248): thinking off + xhigh/max no longer client-throws; clamp outgoing `{type:"disabled"}`; `Du`/`Ln`/`i5n`; mechanical helpers / artifact `sX` / MCP host. No leftover pack / triage / classifier `Vm` invent. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.51** | **densable 2.1.248** (on landed 243+246+247): HAVE **47** / N/A **2**. `--restricted`, agent `cacheTtl`, runner `--client-label`, managed-settings load diagnostics, official Claude.ai connector classify, headersHelper 401, `workflow-authoring` skill, PR Not-Modified, `/loop` 3P, SendMessage parent-session reply, etc. N/A: cloud-container credentials / VSCode. No cloud host / VSCode extension body / skill body / 249+ invent. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.50** | **densable 2.1.247** (on landed 243+246): HAVE **31** / N/A **2**. SendFeedback leftover, REPL `fallbackModel`, hook `lre`, sandbox settings-symlink scrub, PTY `EHOSTDEAD` (including Node/Windows adapter), marketplace `strip-ansi`, unconditional preflight exit. No cloud host / hook MB / `/share` alias / 248+ invent. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.49** | All-platform binary rebuild (8 `@go-hare/claude-code-*` targets). Product surface is still the **2.7.48** 243+246 landing. No 244/245. 247 is not in this release. |
@@ -380,7 +385,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.51`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.52`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---
