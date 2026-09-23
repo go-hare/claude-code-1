@@ -96,10 +96,7 @@ import {
   getSonnet1mExpTreatmentEnabled,
 } from '../../utils/context.js'
 import { resolveAppliedEffort } from '../../utils/effort.js'
-import {
-  formatEffortThinkingOffError,
-  isTopEffortWithThinkingOff,
-} from '../../utils/effortThinkingGuard.js'
+import { decideEffortWhenThinkingDisabled } from '../../utils/effortThinkingGuard.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import {
   MAIN_PROMPT_CACHE_QUERY_SOURCES,
@@ -2084,8 +2081,23 @@ async function* queryModel(
     // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
     const effortName = typeof effort === 'string' ? effort : undefined
-    if (isTopEffortWithThinkingOff(effortName, !hasThinking)) {
-      throw new Error(formatEffortThinkingOffError(effortName))
+    // densable 2.1.251 #13 — `ga.effort=Wht` when thinking is disabled and
+    // `bJn` (above high) and (`Vm` mechanical or `SJn`). Gold does not throw.
+    const effortDecision = decideEffortWhenThinkingDisabled({
+      effort: effortName,
+      thinkingOff: !hasThinking,
+      model: options.model,
+      mechanical:
+        thinkingConfig.type === 'disabled' &&
+        thinkingConfig.mechanical === true,
+    })
+    if (effortDecision.action === 'clamp') {
+      logForDebugging(
+        `output_config.effort '${effortDecision.from}' clamped to '${effortDecision.to}': thinking is disabled for this request, and this model rejects higher effort when thinking is disabled`,
+      )
+      if ('effort' in outputConfig) {
+        ;(outputConfig as { effort?: string }).effort = effortDecision.to
+      }
     }
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 

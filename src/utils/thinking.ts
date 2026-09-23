@@ -12,7 +12,11 @@ import { getSettingsWithErrors } from './settings/settings.js'
 export type ThinkingConfig =
   | { type: 'adaptive' }
   | { type: 'enabled'; budgetTokens: number }
-  | { type: 'disabled' }
+  | {
+      type: 'disabled'
+      /** densable `Vm` — `r.mechanical===true` clamps effort even off SJn. */
+      mechanical?: boolean
+    }
 
 /**
  * Build-time gate (feature) + runtime gate (GrowthBook). The build flag

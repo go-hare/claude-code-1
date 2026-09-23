@@ -44,6 +44,7 @@ import {
   OAuthAccountOnHoldError,
   OAuthRefreshLockTimeoutError,
 } from '../../utils/accountOnHold.js'
+import { parseEffortUnsupportedWhenThinkingDisabled } from '../../utils/effortThinkingGuard.js'
 import { InvalidRequestHeaderValueError } from './invalidRequestHeader.js'
 import {
   formatGenericRequestTooLargeMessage,
@@ -1694,6 +1695,11 @@ export function classifyAPIError(error: unknown): string {
     error.message.includes('`tool_use` ids must be unique')
   ) {
     return 'duplicate_tool_use_id'
+  }
+
+  // densable 2.1.251 d6e — parse only; gold does not throw.
+  if (parseEffortUnsupportedWhenThinkingDisabled(error) !== null) {
+    return 'effort_thinking_disabled'
   }
 
   // Invalid model errors (400)
