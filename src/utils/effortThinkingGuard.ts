@@ -1,18 +1,28 @@
 /**
  * densable 2.1.251 #13 — request-builder clamp when thinking is disabled.
  *
- * Gold `GMt`: `ga.effort=Wht` when thinking is `{type:"disabled"}` and
- * `(Vm || SJn)` and `bJn(ga.effort)`. `Wht="high"`. `bJn` is rank above high.
- * `SJn` is canonical `claude-opus-5` or catalog `thinking_disabled_effort_cap`.
- * `d6e` only parses the API 400; gold does not throw a client error.
+ * Gold `GMt`: `ga.effort=Wht` when outgoing thinking is `{type:"disabled"}`
+ * and `(Vm || SJn)` and `bJn(ga.effort)`. `Wht="high"`. `bJn` is rank above
+ * high. `SJn` is canonical `claude-opus-5` or catalog
+ * `thinking_disabled_effort_cap`. `d6e` only parses the API 400; gold does
+ * not throw a client error.
  *
  * 243 `formatEffortThinkingOffError` copy is kept for tests / CLI messaging.
  * The request builder no longer throws it.
  */
 
+import { APIError } from '@anthropic-ai/sdk'
 import { firstPartyNameToCanonical } from './model/model.js'
 import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
+import { onSessionSwitch } from '../bootstrap/state.js'
 import { getSettingsWithErrors } from './settings/settings.js'
+import {
+  getSessionOnceLatches,
+  resetOnceLatchesOnSessionSwitch,
+} from './sessionRoot.js'
+
+/** densable `i5n` — `au((e,t)=>{if(t==="cd"||t==="hydrate")return;Du().resetStreamNoEventsWarningLatch()})` */
+onSessionSwitch(resetOnceLatchesOnSessionSwitch)
 
 /** densable `Wht` */
 export const EFFORT_CLAMPED_WHEN_THINKING_DISABLED = 'high' as const
@@ -44,8 +54,11 @@ export type EffortThinkingOffDecision =
   | { action: 'clamp'; from: 'xhigh' | 'max'; to: 'high' }
 
 /**
- * densable `GMt` clamp: thinking disabled and effort above high, and either
- * mechanical (`Vm`) or `SJn`. Other models pass the wire effort through.
+ * densable `GMt` clamp: outgoing thinking `{type:"disabled"}` and effort
+ * above high, and either mechanical (`Vm`) or `SJn`. Other models pass the
+ * wire effort through. `thinkingOff` is `Up?.type==="disabled"`, not
+ * "user asked thinking off" (env DISABLE_THINKING omits the field and
+ * does not clamp).
  */
 export function decideEffortWhenThinkingDisabled(input: {
   effort: string | undefined
@@ -71,17 +84,74 @@ export function decideEffortWhenThinkingDisabled(input: {
 }
 
 /**
+ * densable `Xl` — bucket a querySource for the clamp analytics gate.
+ * `repl_main_thread*` / `sdk` → `main`; `agent:*` / `hook_agent` →
+ * `subagent`; else `auxiliary`.
+ */
+export function querySourceBucket(
+  source: string | undefined,
+): 'main' | 'subagent' | 'auxiliary' | undefined {
+  if (source === undefined) return undefined
+  if (source.startsWith('repl_main_thread') || source === 'sdk') return 'main'
+  if (source.startsWith('agent:') || source === 'hook_agent') return 'subagent'
+  return 'auxiliary'
+}
+
+/**
+ * densable `Ye` — skip transcript effort when thinking is mechanically off.
+ * Gold: `typeof et==="string" && !(r.type==="disabled"&&r.mechanical===!0) ? lt : void 0`.
+ */
+export function transcriptEffortWhenMechanicalDisabled<T>(
+  mechanical: boolean,
+  wire: T | undefined,
+): T | undefined {
+  return mechanical ? undefined : wire
+}
+
+/**
+ * densable `ip` then `RE` — collapse `agent:custom:…` before analytics.
+ * Gold `Vo` is the bun analytics string wrapper; locally the branded
+ * `logEvent` cast is the equivalent.
+ */
+export function analyticsQuerySource(source: string | undefined): string {
+  if (source === undefined) return ''
+  if (source.startsWith('agent:custom:')) return 'agent:custom'
+  return source
+}
+
+/** densable `n(\`output_config.effort … thinking is ${Vm?"mechanically ":""}disabled\`)` */
+export function formatEffortClampDebugMessage(
+  from: string,
+  to: string,
+  mechanical: boolean,
+): string {
+  const mechanically = mechanical ? 'mechanically ' : ''
+  return (
+    `output_config.effort '${from}' clamped to '${to}': thinking is ` +
+    `${mechanically}disabled for this request, and this model rejects higher effort when thinking is disabled`
+  )
+}
+
+/** densable `Du().once` — `Ge.firedOnceKeys` on the session-root bag. */
+export function oncePerSession(key: string): boolean {
+  return getSessionOnceLatches().once(key)
+}
+
+export function resetEffortThinkingGuardOnceForTests(): void {
+  getSessionOnceLatches().firedOnceKeys.clear()
+}
+
+/**
  * densable `d6e` — parse API 400
  * `effort '…' is not supported when thinking is disabled`.
- * Gold only reads the level; it does not throw.
+ * Gold: `!(e instanceof Gt) || e.status!==400` → null. Does not throw.
  */
 export function parseEffortUnsupportedWhenThinkingDisabled(
   error: unknown,
 ): string | null {
-  if (typeof error !== 'object' || error === null) return null
-  const status = (error as { status?: unknown }).status
-  const message = (error as { message?: unknown }).message
-  if (status !== 400 || typeof message !== 'string') return null
+  if (!(error instanceof APIError) || error.status !== 400) return null
+  const message = error.message
+  if (typeof message !== 'string') return null
   return (
     /effort '([a-z]+)' is not supported when thinking is disabled/i.exec(
       message,

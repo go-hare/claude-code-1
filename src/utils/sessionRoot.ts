@@ -29,6 +29,7 @@ import {
   SessionIdentity,
   SessionObservers,
   SessionRefsGate,
+  SessionOnceLatches,
   SessionScratch,
   SurfaceCapabilities,
   ToolProgressThrottle,
@@ -343,7 +344,61 @@ export function getBootstrapSessionHost(): SessionHost {
   return getBootstrapSession().host
 }
 
+/**
+ * densable `Ln` — WeakMap keyed on `session.root`.
+ * Gold: `of(e){let t=e.root,o=this.#t.get(t);if(o!==void 0)return o;let r=this.#e();return this.#t.set(t,r),r}`
+ */
+class RootKeyedBag<T extends object> {
+  #e: () => T
+  #t = new WeakMap<object, T>()
+  constructor(e: () => T) {
+    this.#e = e
+  }
+  peek(e: { root: object }): T | undefined {
+    return this.#t.get(e.root)
+  }
+  of(e: { root: object }): T {
+    const t = e.root
+    const o = this.#t.get(t)
+    if (o !== undefined) return o
+    const r = this.#e()
+    this.#t.set(t, r)
+    return r
+  }
+  drop(e: { root: object }): void {
+    this.#t.delete(e.root)
+  }
+}
+
+/** densable `jt = new Ln(() => new Ge)` */
+const sessionOnceLatchBag = new RootKeyedBag(() => new SessionOnceLatches())
+
+/**
+ * densable `Du()` — `jt.of(G())`. `G()` is `n()` (bootstrap session).
+ */
+export function getSessionOnceLatches(): SessionOnceLatches {
+  return sessionOnceLatchBag.of(getBootstrapSession())
+}
+
+/** densable `jt.of(session)` — forks share the root bag. */
+export function sessionOnceLatchesOf(session: Session): SessionOnceLatches {
+  return sessionOnceLatchBag.of(session)
+}
+
+/**
+ * densable `i5n` body — skip `cd`/`hydrate`, else
+ * `Du().resetStreamNoEventsWarningLatch()`.
+ */
+export function resetOnceLatchesOnSessionSwitch(
+  _id: string,
+  reason?: string,
+): void {
+  if (reason === 'cd' || reason === 'hydrate') return
+  getSessionOnceLatches().resetStreamNoEventsWarningLatch()
+}
+
 export function resetSessionHostForTests(): void {
+  if (bootstrapSession) sessionOnceLatchBag.drop(bootstrapSession)
   bootstrapSession = undefined
 }
 
