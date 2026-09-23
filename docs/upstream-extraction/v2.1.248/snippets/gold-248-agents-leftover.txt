@@ -1,0 +1,242 @@
+# gold-248-agents-leftover
+when=2026-09-20T02:09:35.770Z
+scope=src/ + packages/ only; tests listed when they are the only hit
+rule=leftover = same unique string exists locally; missing = no file:line
+
+## #12  needle="applyFleetViewHostWindowsEnv"  localHits=1
+- src/screens/AgentView.tsx:3528 applyFleetViewHostWindowsEnv — force full repaint on Windows
+
+## #12  needle="WIN32_INPUT_MODE"  localHits=0
+- MISSING
+
+## #12  needle="handoffRawMode"  localHits=19
+- src/main.tsx:5140 handoffRawMode).
+- src/replLauncher.tsx:126 handoffRawMode();
+- src/screens/AgentView.tsx:3606 handoffRawMode prevents unmount from disabling raw mode
+- src/screens/AgentView.tsx:3608 handoffRawMode();
+- src/utils/inkRoot.ts:37 handoffRawMode: () => root.handoffRawMode(),
+- src/utils/inkRoot.ts:37 handoffRawMode(),
+- packages/@ant/ink/src/core/ink.tsx:1520 handoffRawMode(): void {
+- packages/@ant/ink/src/core/ink.tsx:1521 handoffRawMode = true;
+- … +11 more
+
+## #12  needle="CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT"  localHits=9
+- src/daemon/bgWorker.ts:2821 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT: '1',
+- src/screens/AgentView.tsx:3530 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
+- packages/@ant/ink/src/core/ink.tsx:424 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT.
+- packages/@ant/ink/src/core/ink.tsx:452 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)
+- packages/@ant/ink/src/core/ink.tsx:453 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT);
+- packages/@ant/ink/src/core/ink.tsx:1096 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT).
+- packages/@ant/ink/src/core/ink.tsx:2494 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT, after parking the caret with CUP,
+- packages/@ant/ink/src/core/screen.ts:472 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT so every non-spacer next cell diffs
+- … +1 more
+
+## #14  needle="showFastModeNotice"  localHits=10
+- src/commands/model/model.tsx:166 showFastModeNotice={
+- src/components/ModelPicker.tsx:67 showFastModeNotice?: boolean;
+- src/components/ModelPicker.tsx:103 showFastModeNotice,
+- src/components/ModelPicker.tsx:118 showFastModeNotice,
+- src/components/ModelPicker.tsx:442 showFastModeNotice ? (
+- src/components/PromptInput/PromptInput.tsx:2740 showFastModeNotice={
+- src/components/Settings/Config.tsx:2367 showFastModeNotice={
+- src/utils/model/modelPickerVisible.ts:48 showFastModeNotice,
+- … +2 more
+
+## #14  needle="fast-mode-toggled"  localHits=1
+- src/components/PromptInput/PromptInput.tsx:2753 fast-mode-toggled',
+
+## #14  needle="model-switch-fast-mode"  localHits=1
+- src/hooks/useReplBridge.tsx:1112 model-switch-fast-mode',
+
+## #14  needle="Fast mode ON"  localHits=13
+- src/commands/fast/fast.tsx:74 Fast mode ON${modelUpdated} · ${pricing}`);
+- src/commands/fast/fast.tsx:90 Fast mode ON` : `Kept Fast mode OFF`;
+- src/commands/fast/fast.tsx:193 Fast mode ON${modelUpdated} · ${pricing}`;
+- src/utils/fastMode.ts:354 Fast mode ON'
+- src/utils/fastMode.ts:379 Fast mode ON${DRAWS_FROM_USAGE_CREDITS_SUFFIX}`
+- src/utils/fastMode.ts:380 Fast mode ON'
+- src/utils/__tests__/fastMode.modelSwitch.218.test.ts:208 Fast mode ON')
+- src/utils/__tests__/fastMode.modelSwitch.218.test.ts:213 Fast mode ON')
+- … +5 more
+
+## #15  needle="ensureAgentsWorkspaceTrust"  localHits=5
+- src/cli/agents.ts:171 ensureAgentsWorkspaceTrust(root, agentsTrustDecision())
+- src/cli/agents.ts:175 ensureAgentsWorkspaceTrust, agentsTrustDecision } = await import(
+- src/cli/agents.ts:180 ensureAgentsWorkspaceTrust(trustRoot, agentsTrustDecision())
+- src/cli/agentsTrust.tsx:9 ensureAgentsWorkspaceTrust(root, decision):
+- src/cli/agentsTrust.tsx:100 ensureAgentsWorkspaceTrust(
+
+## #15  needle="agentsTrustDecision"  localHits=13
+- src/cli/agents.ts:171 agentsTrustDecision())
+- src/cli/agents.ts:175 agentsTrustDecision } = await import(
+- src/cli/agents.ts:180 agentsTrustDecision())
+- src/cli/agentsTrust.tsx:5 agentsTrustDecision:
+- src/cli/agentsTrust.tsx:75 agentsTrustDecision(): AgentsTrustDecision {
+- src/cli/agentsTrust.tsx:102 agentsTrustDecision(),
+- src/cli/__tests__/agentsTrust.225.test.ts:2 agentsTrustDecision / DTt early-outs.
+- src/cli/__tests__/agentsTrust.225.test.ts:87 agentsTrustDecision,
+- … +5 more
+
+## #15  needle="process.env.CI"  localHits=15
+- src/cli/agentsTrust.tsx:76 process.env.CI) || isEnvTruthy(process.env.IS_DEMO) || isEnvTruthy(process.env.C
+- src/cli/__tests__/agentsTrust.225.test.ts:109 process.env.CI
+- src/cli/__tests__/agentsTrust.225.test.ts:115 process.env.CI = '1'
+- src/commands/autofix-pr/__tests__/AutofixProgress.test.tsx:11 process.env.CI)('AutofixProgress', () => {
+- src/daemon/installPrompt.ts:75 process.env.CI === 'true' || process.env.CI === '1') return 'no'
+- src/daemon/installPrompt.ts:75 process.env.CI === '1') return 'no'
+- src/daemon/installPrompt.ts:512 process.env.CI === 'true' ||
+- src/daemon/installPrompt.ts:513 process.env.CI === '1'
+- … +7 more
+
+## #16  needle="loadPrStatusCache"  localHits=0
+- MISSING
+
+## #16  needle="persistPrStatusCache"  localHits=0
+- MISSING
+
+## #16  needle="malformed cache entries"  localHits=0
+- MISSING
+
+## #16  needle="gh-pr-status-cache"  localHits=2
+- src/utils/storageV5/createLocalFsBackend.ts:708 gh-pr-status-cache', 'gh-pr-status-cache.json'],
+- src/utils/storageV5/createLocalFsBackend.ts:708 gh-pr-status-cache.json'],
+
+## #17  needle="dead_epoch_transcript_gone"  localHits=0
+- MISSING
+
+## #17  needle="ended while the background service was off"  localHits=0
+- MISSING
+
+## #17  needle="saved conversation is no longer on disk"  localHits=0
+- MISSING
+
+## #17  needle="deadEpochReapedAt"  localHits=0
+- MISSING
+
+## #18  needle="openNewSessionRow"  localHits=4
+- src/screens/AgentView.tsx:2100 openNewSessionRow = useCallback(
+- src/screens/AgentView.tsx:2572 openNewSessionRow();
+- src/screens/AgentView.tsx:2693 openNewSessionRow();
+- src/screens/fleetView/__tests__/vimEsc.239.test.ts:68 openNewSessionRow')
+
+## #18  needle="willInsertNewline"  localHits=0
+- MISSING
+
+## #19  needle="Open in a terminal"  localHits=0
+- MISSING
+
+## #19  needle="continue it there"  localHits=0
+- MISSING
+
+## #19  needle="terminalHolderOf"  localHits=0
+- MISSING
+
+## #19  needle="resume_session_live_elsewhere"  localHits=1
+- src/screens/AgentView.tsx:3403 resume_session_live_elsewhere
+
+## #19  needle="already open in another running Claude session"  localHits=3
+- src/daemon/xyrRespawn.ts:230 already open in another running Claude session — ' +
+- src/daemon/__tests__/xyrRespawn.test.ts:164 already open in another running Claude session')
+- src/screens/AgentView.tsx:3411 already open in another running Claude session — use that one, or close it and t
+
+## #20  needle="has commits that are not pushed anywhere"  localHits=2
+- src/daemon/deleteJob.ts:81 has commits that are not pushed anywhere',
+- src/daemon/__tests__/deleteJob.214.test.ts:85 has commits that are not pushed anywhere',
+
+## #20  needle="rev-list\"],\"--all\",\"--not\",\"--remotes"  localHits=0
+- MISSING
+
+## #21  needle="async hook JSON output failed schema validation"  localHits=0
+- MISSING
+
+## #21  needle="PermissionRequest hook"  localHits=11
+- src/cli/structuredIO.ts:918 PermissionRequest hooks in parallel with the SDK permission
+- src/cli/structuredIO.ts:1324 PermissionRequest hooks and return a decision if one is made.
+- src/cli/structuredIO.ts:1404 PermissionRequest hook',
+- src/hooks/toolPermission/handlers/interactiveHandler.ts:836 PermissionRequest hooks asynchronously.
+- src/services/tools/toolExecution.ts:1080 PermissionRequest hook
+- src/utils/hooks.ts:3377 PermissionRequest hooks)
+- src/utils/permissions/permissions.ts:522 PermissionRequest hooks for headless/async agents that cannot show
+- src/utils/permissions/permissions.ts:594 PermissionRequest hook failed for headless agent', {
+- … +3 more
+
+## #27  needle="cli_bg_logs"  localHits=0
+- MISSING
+
+## #27  needle="claude logs <id>"  localHits=0
+- MISSING
+
+## #27  needle="cleanupTerminalModes"  localHits=12
+- src/components/TrustDialog/TrustDialog.tsx:109 cleanupTerminalModes() unmounts and exits
+- src/components/TrustDialog/TrustDialog.tsx:154 cleanupTerminalModes races React's re-render and leaves
+- src/utils/gracefulShutdown.ts:65 cleanupTerminalModes(): void {
+- src/utils/gracefulShutdown.ts:226 cleanupTerminalModes() sent
+- src/utils/gracefulShutdown.ts:269 cleanupTerminalModes(); this is
+- src/utils/gracefulShutdown.ts:482 cleanupTerminalModes()
+- src/utils/gracefulShutdown.ts:567 cleanupTerminalModes — on Ctrl+C that left mouse tracking on long
+- src/utils/gracefulShutdown.ts:571 cleanupTerminalModes()
+- … +4 more
+
+## #28  needle="toWellFormed"  localHits=0
+- MISSING
+
+## #28  needle="cut off mid-emoji"  localHits=0
+- MISSING
+
+## #29  needle="Press Ctrl-C again to exit"  localHits=2
+- src/screens/fleetView/helpers.ts:1750 Press Ctrl-C again to exit${keep}`
+- src/screens/fleetView/__tests__/helpers.test.ts:724 Press Ctrl-C again to exit')
+
+## #29  needle="exitArmed"  localHits=22
+- src/screens/AgentView.tsx:638 exitArmed, setExitArmed] = useState(false);
+- src/screens/AgentView.tsx:639 exitArmedRef = useRef(false);
+- src/screens/AgentView.tsx:668 exitArmedRef.current = false;
+- src/screens/AgentView.tsx:686 exitArmedRef.current) return;
+- src/screens/AgentView.tsx:691 exitArmedRef.current = false;
+- src/screens/AgentView.tsx:702 exitArmedRef.current) {
+- src/screens/AgentView.tsx:706 exitArmedRef.current = true;
+- src/screens/AgentView.tsx:710 exitArmedRef.current = false;
+- … +14 more
+
+## #34  needle="mcp-needs-auth"  localHits=5
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:101 mcp-needs-auth',
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:130 mcp-needs-auth',
+- src/services/mcp/client.ts:348 mcp-needs-auth-cache.json')
+- src/utils/storageV5/createLocalFsBackend.ts:722 mcp-needs-auth-cache', 'mcp-needs-auth-cache.json'],
+- src/utils/storageV5/createLocalFsBackend.ts:722 mcp-needs-auth-cache.json'],
+
+## #34  needle="mcpNeedsAuthCount"  localHits=6
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:61 mcpNeedsAuthCount = countMcpNeedsAuth(mcpClients, ever, session);
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:63 mcpNeedsAuthCount === 0) {
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:98 mcpNeedsAuthCount > 0) {
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:134 mcpNeedsAuthCount} MCP {mcpNeedsAuthCount === 1 ? 'server needs' : 'servers need
+- src/hooks/notifs/useMcpConnectivityStatus.tsx:134 mcpNeedsAuthCount === 1 ? 'server needs' : 'servers need'} authentication
+- src/services/mcp/__tests__/mcpNeedsAuthCount.218.test.ts:2 mcpNeedsAuthCount filter.
+
+## #34  needle="servers need authentication"  localHits=1
+- src/services/mcp/__tests__/mcpNeedsAuthCount.218.test.ts:4 servers need authentication" startup notice.
+
+## #35  needle="no worktree lock names this process"  localHits=0
+- MISSING
+
+## #35  needle="worktree lock --reason"  localHits=2
+- src/utils/worktree.ts:2873 worktree lock --reason`.
+- src/utils/__tests__/worktreeLockWriter.246.test.ts:26 worktree lock --reason (Cjr)', () => {
+
+## #35  needle="git worktree lock"  localHits=3
+- src/utils/worktree.ts:1526 git worktree lock` after create/resume.
+- src/utils/worktree.ts:2873 git worktree lock --reason`.
+- src/utils/__tests__/worktreeLockWriter.246.test.ts:26 git worktree lock --reason (Cjr)', () => {
+
+## #36  needle="toLocaleLowerCase"  localHits=0
+- MISSING
+
+## #45  needle="canDispatchAndOpen"  localHits=0
+- MISSING
+
+## #45  needle="ctrl+enter to start and open"  localHits=0
+- MISSING
+
+## #45  needle="ctrl+j for newline"  localHits=2
+- src/screens/AgentView.tsx:3205 ctrl+j for newline · shift+↑↓ reorder · alt+1-9 open</Text>
+- src/screens/fleetView/helpers.ts:1773 ctrl+j for newline \u00b7 \u2191 list \u00b7 esc clear'

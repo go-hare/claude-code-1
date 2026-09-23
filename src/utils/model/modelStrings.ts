@@ -1,9 +1,10 @@
 import {
+  getMainLoopModelOverride,
   getModelStrings as getModelStringsState,
   setModelStrings as setModelStringsState,
 } from 'src/bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
-import { getAWSRegion } from '../envUtils.js'
+import { getAWSRegion, isEnvTruthy } from '../envUtils.js'
 import { logError } from '../log.js'
 import { sequential } from '../sequential.js'
 import { getInitialSettings } from '../settings/settings.js'
@@ -18,6 +19,7 @@ import {
   resolveBedrockRegionPrefix,
   type BedrockRegionPrefix,
 } from './bedrock.js'
+import { isModelAlias } from './aliases.js'
 import {
   ALL_MODEL_CONFIGS,
   CANONICAL_ID_TO_KEY,
@@ -42,6 +44,52 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
   return out
 }
 
+/**
+ * densable NU — first-party catalog id → internal key.
+ * Jbn treats Object.hasOwn(NU, id) as an alias (not a provider id).
+ */
+export const FIRST_PARTY_ID_TO_KEY = CANONICAL_ID_TO_KEY
+
+/**
+ * densable Jbn — alias (`jm`) or first-party catalog id (`NU`).
+ * Blank is not a model id.
+ */
+export function sessionModelIsProviderId(
+  model: string | null | undefined,
+): boolean {
+  if (model == null) return false
+  const trimmed = model.trim()
+  if (!trimmed) return false
+  const lowered = trimmed.toLowerCase()
+  if (isModelAlias(lowered)) return false
+  return !Object.hasOwn(FIRST_PARTY_ID_TO_KEY, lowered)
+}
+
+function readBedrockSessionModelId(): string | undefined {
+  const override = getMainLoopModelOverride()
+  if (typeof override === 'string' && override.trim()) return override
+  const fromEnv = process.env.ANTHROPIC_MODEL
+  if (typeof fromEnv === 'string' && fromEnv.trim()) return fromEnv
+  const fromSettings = getInitialSettings().model
+  if (typeof fromSettings === 'string' && fromSettings.trim())
+    return fromSettings
+  return undefined
+}
+
+/**
+ * densable Pbt gate: host flag AND a concrete provider model id.
+ * Pass `modelId` to avoid reading the session (null/'' means no model id).
+ * Omit `modelId` to read override, then ANTHROPIC_MODEL, then settings.model.
+ */
+export function shouldSkipHostManagedBedrockProfileDiscovery(
+  env: NodeJS.ProcessEnv = process.env,
+  modelId?: string | null,
+): boolean {
+  if (!isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) return false
+  const model = modelId === undefined ? readBedrockSessionModelId() : modelId
+  return sessionModelIsProviderId(model)
+}
+
 /** densable Bpt — rewrite/add preferred cross-region prefix on a bedrock model id. */
 function applyPreferredBedrockPrefix(
   modelId: string,
@@ -57,7 +105,7 @@ function applyPreferredBedrockPrefix(
  *   discovery fail/empty → warn if preferred≠derived; builtins with preferred applied
  *   discovery ok → prefer profile under preferred prefix + needle; warn mismatches
  */
-async function getBedrockModelStrings(): Promise<ModelStrings> {
+export async function getBedrockModelStrings(): Promise<ModelStrings> {
   const awsRegion = getAWSRegion()
   const preferred = resolveBedrockRegionPrefix(awsRegion)
   const derived = deriveBedrockRegionPrefixFromAwsRegion(awsRegion)
@@ -73,6 +121,14 @@ async function getBedrockModelStrings(): Promise<ModelStrings> {
         formatBedrockRegionPrefixNoDiscoveryWarn(preferred, derived),
       )
     }
+  }
+
+  // densable Pbt: host-managed + provider model id returns before ef()
+  // (ListInferenceProfiles). ME() and gl() bodies are absent — keep the
+  // builtin fallback. S/F's host-flag-only empty return is not applied:
+  // no model id still discovers.
+  if (shouldSkipHostManagedBedrockProfileDiscovery()) {
+    return fallback
   }
 
   let profiles: string[] | undefined

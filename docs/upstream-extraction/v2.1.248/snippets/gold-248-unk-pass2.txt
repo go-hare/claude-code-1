@@ -1,0 +1,398 @@
+# gold-248-unk-pass2
+# when=2026-09-20T03:39:58.071Z
+
+# ---- #8 oauth-save clears ----
+## #8 G2t after save @180709316
+tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf
+
+## #8 247 yx after save @208857301
+tengu_oauth_tokens_saved",{storageBackend:l});else E("tengu_oauth_tokens_save_failed",{storageBackend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OAuth tokens: ${M(d)}`,{level:"error"}),E("tengu_oauth_tokens_save_exception",{storageBackend:l,...Ar(d)}),{success:!1,warning:"Failed to save OAuth
+
+## #8 find lY @180712164 n=4
+## #8 lY @180712164 len=39 sha=3611e9129dcf8433 otherHits=0
+function lY(){yve.of(z().host).clear()}
+
+## #8 find Ip @180712775 n=7
+## #8 Ip @180712775 len=43 sha=043f2d44f49faba4 otherHits=0
+function Ip(){if(jN(),!s_())IW();else o_()}
+
+## #8 find ON @180712818 n=4
+## #8 ON @180712818 len=29 sha=f37fdd844f70491a otherHits=0
+function ON(){lY(),mE(),Ip()}
+
+## #8 find Hk @180712847 n=7
+## #8 Hk @180712847 len=31 sha=d406634b0df40921 otherHits=0
+function Hk(){if(ON(),D())_Y()}
+
+## #8 find Bgt @180713042 n=2
+## #8 Bgt @180713042 len=459 sha=d00067e1d744d8b5 otherHits=0
+function Bgt(e,t){if(!Wgt())return;let r=yve.of(z().host),o;try{let g=await e.probeCredentials();o=g.state==="present"?g.version:void 0}catch(g){n(`Credentials version prime failed: ${l(g)}`,{level:"error"})}if(await t?.catch(()=>null),await r.promise?.catch(()=>null),r.promise=null,o!==void 0)r.lastCredentialsVersion=o;let u=See(e);if(r.promise=u,await u===null){if(o!==void 0)r.lastCredentialsVersion=void 0;if(r.promise===u)r.promise=null}r.value=void 0}
+
+## #8 find SN @180706952 n=4
+## #8 SN @180706952 len=326 sha=73c7383d2c9bb5d3 otherHits=0
+function SN(e,t){return{accessToken:t.accessToken,refreshToken:t.refreshToken,expiresAt:t.expiresAt,refreshTokenExpiresAt:t.refreshTokenExpiresAt??e?.refreshTokenExpiresAt,scopes:t.scopes,subscriptionType:t.subscriptionType??e?.subscriptionType??null,rateLimitTier:t.rateLimitTier??e?.rateLimitTier??null,clientId:t.clientId}}
+
+## #8 all function lY( hits=4 180712164,182745895,183811272,203011399
+## #8 lY#180712164 @180712164 len=39 sha=3611e9129dcf8433 otherHits=0
+function lY(){yve.of(z().host).clear()}
+
+## #8 lY#182745895 @182745895 len=222 sha=14941c3fb1f4e4e0 otherHits=0
+function lY(){return[...PS(),be("flagSettings"),yo("userSettings")?be("userSettings"):null,yo("projectSettings")?be("projectSettings"):null,yo("localSettings")?be("localSettings"):null].some((e)=>e?.sandbox?.enabled===!0)}
+
+## #8 lY#183811272 @183811272 len=48 sha=e39a29c52043ab17 otherHits=0
+function lY(e){return e!==void 0&&KFt(e)?e:null}
+
+## #8 lY#203011399 @203011399 len=548 sha=b7fb289ea8f077fd otherHits=0
+function lY(ulo){let Efe=g(8),{selected:clo,onClick:sY,children:Mfe}=ulo,[dlo,_Ye]=u(!1);const Ife=clo||dlo;let RYe;if(Efe[0]!==Mfe||Efe[1]!==Ife)RYe=e(t,{color:"background",inverse:Ife,children:Mfe}),Efe[0]=Mfe,Efe[1]=Ife,Efe[2]=RYe;else RYe=Efe[2];let aY=RYe;if(!sY){return aY}let xYe,PYe;if(Efe[3]===p)xYe=()=>_Ye(!0),PYe=()=>_Ye(!1),Efe[3]=xYe,Efe[4]=PYe;else xYe=Efe[3],PYe=Efe[4];let AYe;if(Efe[5]!==aY||Efe[6]!==sY)AYe=e(o,{onClick:sY,onMouseEnter:xYe,onMouseLeave:PYe,children:aY}),Efe[5]=aY,Efe[6]=sY,Efe[7]=AYe;else AYe=Efe[7];return AYe}
+
+## #8 all function Ip( hits=7 180712775,181822426,188858635,189384830,200412173,206454200,213616648
+## #8 Ip#180712775 @180712775 len=43 sha=043f2d44f49faba4 otherHits=0
+function Ip(){if(jN(),!s_())IW();else o_()}
+
+## #8 Ip#181822426 @181822426 len=35 sha=b4726a443f66f0b3 otherHits=0
+function Ip(r,t){return n(r,t)===1}
+
+## #8 Ip#188858635 @188858635 len=664 sha=f7ce753a2b05c14b otherHits=0
+function Ip(e){let t=["package","import","option","optional","required","repeated","group","oneof"],n=["double","float","int32","int64","uint32","uint64","sint32","sint64","fixed32","fixed64","sfixed32","sfixed64","bool","string","bytes"],a={match:[/(message|enum|service)\s+/,e.IDENT_RE],scope:{1:"keyword",2:"title.class"}};return{name:"Protocol Buffers",aliases:["proto"],keywords:{keyword:t,type:n,literal:["true","false"]},contains:[e.QUOTE_STRING_MODE,e.NUMBER_MODE,e.C_LINE_COMMENT_MODE,e.C_BLOCK_COMMENT_MODE,a,{className:"function",beginKeywords:"rpc",end:/[{;]/,excludeEnd:!0,keywords:"rpc returns"},{begin:/^\s*[A-Z_]+(?=\s*=[^\n]+;$)/}]}}Co.exports=Ip}
+
+## #8 Ip#189384830 @189384830 len=63 sha=4f7e1e1ed5ddeb0e otherHits=0
+function Ip(t){return t===fSe||t===Jle||xf.test(t)||k1.test(t)}
+
+## #8 247 function Pi( hits=18 206603876,208220993,208859995,208972523,211071309,211672246
+## #8 247 Pi @206603876 len=96 sha=5bab505ec31f69f2 otherHits=0
+function Pi(e){let t=0;for(let r in e)if(Object.prototype.hasOwnProperty.call(e,r))t++;return t}
+
+## #8 247 Pi @208220993 len=202 sha=cfb4a4263e12c78b otherHits=0
+function Pi(e){let{code:t,stdout:r}=await E("pdfinfo",[e],{timeout:1e4,useCwd:!1});if(t!==0)return null;let n=/^Pages:\s+(\d+)/m.exec(r);if(!n)return null;let o=parseInt(n[1],10);return isNaN(o)?null:o}
+
+## #8 247 Pi @208859995 len=38 sha=52f67032b298ecdf otherHits=0
+function Pi(){tr.of(C().host).clear()}
+
+## #8 247 function no( hits=36 201455392,206539934,207077051,207164578,208074077,208108004
+## #8 247 no @201455392 len=102 sha=db14c326f04a48e1 otherHits=2
+function no(x){var m;try{m=S(x&&x.message||x)}catch(y){m='routine failed'}ap(send,port,[{id:id,e:m}])}
+
+## #8 247 no @206539934 len=40 sha=eed5337b725240bc otherHits=0
+function no(e){return e.catch(()=>{}),e}
+
+## #8 247 no @207077051 len=353 sha=fc80544627f6e008 otherHits=0
+function no(e){let t=I();t.setInit({storageV5:e.storageV5,configHome:z(),syncExitDrain:e.syncExitDrain});let n=t.instance;if(n){let r=ye(t,n.launchIdentity());t.setInstance(r),r.succeed(n)}if(e.syncExitDrain===!1&&!v().drainsSyncAtExit())Q("Sync exit drain off for this process: debug lines still queued at exit are dropped, so this log may end short")}
+
+## #8 247 function ki( hits=20 206603300,207049191,207436902,208276853,208828664,211069301
+## #8 247 ki @206603300 len=148 sha=fcd6a870a764d0ae otherHits=0
+function ki(e){let t=Object.keys(e),r=t.map((o)=>e[o]);return Promise.all(r).then((o)=>{let n={};for(let i=0;i<t.length;i++)n[t[i]]=o[i];return n})}
+
+## #8 247 ki @207049191 len=52 sha=3f5453f439e5e28b otherHits=0
+function ki(e){return re(e)||U(e)||B(oe,e)!==void 0}
+
+## #8 247 ki @207436902 len=33 sha=284503aa437cae18 otherHits=0
+function ki(e){return pr.call(e)}
+
+## #8 247 function Pi()( hits=0 
+## #8 247 function no()( hits=0 
+## #8 247 function ki()( hits=0 
+## #8 needle "clearToolSchemaCache" 248=0 247=0
+## #8 needle "toolSchemaCache" 248=0 247=0
+## #8 needle "betas cache" 248=0 247=0
+## #8 needle "clearBetas" 248=0 247=0
+## #8 needle "getClaudeAIOAuthTokens.cache" 248=0 247=0
+## #8 needle ".cache?.clear" 248=7 247=7
+## #8 needle "cache.clear" 248=50 247=50
+## #8 needle "cache?.clear" 248=7 247=7
+## #8 G2t ascii 800
+Hk(),u.success?"saved":"save_failed"}function TN(){return _n().name}async function G2t(e,t){if(!VA(e.scopes))return s("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return s("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,clientId:E}=e,C=_n(),O=TN();try{let k=await C.mutate((N)=>({...N,claudeAiOauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==
+
+## #8 assign var lY= hits=0
+## #8 assign lY=function hits=0
+## #8 assign ,lY= hits=0
+## #8 assign function lY hits=9
+## #8 function lY @180562434
+M=new K(()=>new jM);function lYn(){return{...YM.of(z().host).memPeaks}}function ZZ(e){let{memPeaks:t}=e;try{let r=process.memoryUsage();if(r.rss>t.rss)t.rss=r.rss;if(r.heapUsed>t.heapUsed)t.heapUsed=r.heapUsed;if(r.exter
+
+## #8 function lY @180712164
+;return e.value=t,t}function lY(){yve.of(z().host).clear()}function r8e(){let e=RN();if(typeof e==="string")return e;let t=_n().read()?.claudeAiOauth?.accessToken;return CN(e,t)}async function Bv(e){let t=RN();if(typeof 
+
+## #8 function lY @182745895
+"||KU()!=="relaxed"}function lY(){return[...PS(),be("flagSettings"),yo("userSettings")?be("userSettings"):null,yo("projectSettings")?be("projectSettings"):null,yo("localSettings")?be("localSettings"):null].some((e)=>e?.s
+
+## #8 function lY @183811272
+Gt}from"perf_hooks";function lY(e){return e!==void 0&&KFt(e)?e:null}async function $8(e){let t=jv(),r=lY(a.CLAUDE_CODE_ORGANIZATION_UUID??t?.organizationUuid);if(r===null)return null;switch(await Bv(e)){case"store":{let 
+
+## #8 function lY @184410925
+d=!0;return o}async function lYe({mainAgentDefinition:e,activeAgents:t,toolUseContext:r,canUseTool:o}){try{if(!e?.observer)return;let u=r.session.observers;if(u.pairings.get(QF)||u.mainSlotBlocked)return;if(u.mainEnsureI
+
+## #8 assign var Ip= hits=2
+## #8 var Ip= @191228136
+BootStrikes.count>0}var Ip=`Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer. It will try fullscreen again next launch; /tui default keeps t
+
+## #8 var Ip= @211395880
+UDE_KEY_PREFIX}})});var Ip=d(function(Np){Object.defineProperty(Np,"__esModule",{value:!0});Np.setup=_b;var vb=Ue(),yb=Dt();class Pp{constructor(e,t,r){this.listener=t,this.hasReturnedResult=!1,this.endpoints=[];let i;if
+
+## #8 assign Ip=function hits=0
+## #8 assign ,Ip= hits=8
+## #8 ,Ip= @178778190
+p=C.int(),Sp=C.int(),Ip=C.int({min:1}),Up=C.int();var P={};je(P,{ANTHROPIC_CUSTOM_MODEL_OPTION:()=>vp,ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION:()=>gp,ANTHROPIC_CUSTOM_MODEL_OPTION_NAME:()=>Wp,ANTHROPIC_DEFAULT_FABLE_MOD
+
+## #8 ,Ip= @181304123
+alue:!0});var Rp=z(),Ip={keyword:"anyOf",schemaType:"array",trackErrors:!0,code:Rp.validateUnion,error:{message:"must match a schema in anyOf"}};ii.default=Ip});var ui=d(function(ci){Object.defineProperty(ci,"__esModule"
+
+## #8 ,Ip= @182556427
+bject=R4;var Ft=tr(),Ip=Er(),I4=gs(),A4=eo(),Ar=cs(),$l=Kr(),Vl=ys(),tt=Hn(),v4=cl(),N4=pr(),wp=cl();function R4(e,t){let r=(0,A4.getMsgDesc)(e),o=(0,Ar.reflect)(r);for(let[u,p]of t.entries()){let E=r.fields.find((I)=>I.
+
+## #8 ,Ip= @192198568
+ws.at(-1)??Cp.at(-1),Ip=co?"selected, ":"",xp=$o?`${Ip}opening:`:To?.justKilled?`${Ip}stopped:`:$r!==ll?`${Ip}needs attention:`:Vn(ht.activity,ht.state.tempo,il,qn,co);const Pp=o,Op=Ao.label+2,Ap=!co&&!po,Tp=SE||$r===voi
+
+## #8 ,Ip= @195764709
+e-artifact-preview-",Ip=8192;async function qd(e,t,r=Tp){let o=await r.mkdtemp(Sp(Rp(),Pp)),d=()=>r.rm(o,{recursive:!0,force:!0,maxRetries:3}).catch(()=>{}),u;try{u=r.spawn(e,[...t,`--user-data-dir=${o}`])}catch{throw aw
+
+## #8 assign function Ip hits=12
+## #8 function Ip @180712775
+(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW()
+
+## #8 function Ip @181822426
+{throw ut(Ee(e),o)}}function Ip(r,t){return n(r,t)===1}function Fg(r,t){return n(r,t)>=0}function MN(r,t){return n(r,t)===-1}function X9(r,t){return n(r,t)<=0}function Lpn(r,t){return Bun.semver.satisfies(r,t)}var i=/^\d
+
+## #8 function Ip @183070578
+_ethereal_mist",!0)}function Ipn(){return R("tengu_bridge_resume_respects_local_owner",!0)}function Hpn(){return R("tengu_sequential_puffin",!0)}function ESe(){return R("tengu_bridge_owner_pinned_end",!0)}function Ppn(){
+
+## #8 function Ip @183241942
+includes(T(n)??""))}function Ipt({staysAttached:e,folderSync:n=y9(),home:t,configHome:o,surface:i}){let r=(S)=>{s("tengu_dir_sync_mode_prompt_skipped",{reason:S,...i!==void 0&&{surface:v(i)}})};if(!e)return r(v("not_atta
+
+## #8 function Ip @184230832
+AllowSuspended===!0}function Ipe(e,t,r){switch(e.type){case"raw_string":t.raw.push([e.startIndex,e.endIndex]);return;case"ansi_c_string":t.ansiC.push([e.startIndex,e.endIndex]);return;case"string":if(!r)t.double.push([e.
+
+## #8 247 function Pi( late hits=18 206603876,208220993,208859995,208972523,211071309
+## #8 247 function Pi( @206603876 len=96 sha=5bab505ec31f69f2 otherHits=0
+function Pi(e){let t=0;for(let r in e)if(Object.prototype.hasOwnProperty.call(e,r))t++;return t}
+
+## #8 247 function Pi( @208220993 len=202 sha=cfb4a4263e12c78b otherHits=0
+function Pi(e){let{code:t,stdout:r}=await E("pdfinfo",[e],{timeout:1e4,useCwd:!1});if(t!==0)return null;let n=/^Pages:\s+(\d+)/m.exec(r);if(!n)return null;let o=parseInt(n[1],10);return isNaN(o)?null:o}
+
+## #8 247 function no( late hits=36 201455392,206539934,207077051,207164578,208074077
+## #8 247 function no( @201455392 len=102 sha=db14c326f04a48e1 otherHits=2
+function no(x){var m;try{m=S(x&&x.message||x)}catch(y){m='routine failed'}ap(send,port,[{id:id,e:m}])}
+
+## #8 247 function no( @206539934 len=40 sha=eed5337b725240bc otherHits=0
+function no(e){return e.catch(()=>{}),e}
+
+## #8 247 function ki( late hits=20 206603300,207049191,207436902,208276853,208828664
+## #8 247 function ki( @206603300 len=148 sha=fcd6a870a764d0ae otherHits=0
+function ki(e){let t=Object.keys(e),r=t.map((o)=>e[o]);return Promise.all(r).then((o)=>{let n={};for(let i=0;i<t.length;i++)n[t[i]]=o[i];return n})}
+
+## #8 247 function ki( @207049191 len=52 sha=3f5453f439e5e28b otherHits=0
+function ki(e){return re(e)||U(e)||B(oe,e)!==void 0}
+
+## #8 247 var Pi= late hits=8 206403427,206474441,206968846,211256452,223921133
+## #8 247 var Pi= @206403427 len=1946 sha=ee8d038356e57f17 otherHits=0
+var Pi=_(()=>{I();N();P();L();Bs();Bs();Ot=class Ot extends x{list(e,t={},r){let{betas:s,...n}=t??{};return this._client.getAPIList(f`/v1/sessions/${e}/events?beta=true`,v,{query:n,...r,headers:l([{"anthropic-beta":[...s??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}send(e,t,r){let{betas:s,...n}=t;return this._client.post(f`/v1/sessions/${e}/events?beta=true`,{body:n,...r,headers:l([{"anthropic-beta":[...s??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}stream(e,t={},r){let{betas:s,...n}=t??{};return this._client.get(f`/v1/sessions/${e}/events/stream?beta=true`,{query:n,...r,headers:l([{"anthropic-beta":[...s??[],"managed-agents-2026-04-01"].toString()},r?.headers]),stream:!0})}toolRunner(e,t){return new Ze(e,{...t,client:this._client})}};Ot.SessionToolRunner=Ze});var Or;var Ti=_(()=>{I();N();P();L();Or=class Or extends x{retrieve(e,t,r){let{session_id:s,betas:n}=t;return this._client.get(f`/v1/sessions/${s}/resources/${e}?beta=true`,{...r,headers:l([{"anthropic-beta":[...n??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}update(e,t,r){let{session_id:s,betas:n,...i}=t;return this._client.post(f`/v1/sessions/${s}/resources/${e}?beta=true`,{body:i,...r,headers:l([{"anthropic-beta":[...n??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}list(e,t={},r){let{betas:s,...n}=t??{};return this._client.getAPIList(f`/v1/sessions/${e}/resources?beta=true`,v,{query:n,...r,headers:l([{"anthropic-beta":[...s??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}delete(e,t,r){let{session_id:s,betas:n}=t;return this._client.delete(f`/v1/sessions/${s}/resources/${e}?beta=true`,{...r,headers:l([{"anthropic-beta":[...n??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}add(e,t,r){let{betas:s,...n}=t;return this._client.post(f`/v1/sessions/${e}/resources?beta=true`,{body:n,...r,headers:l([{"anthropic-beta":[...s??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}}}
+
+## #8 247 var Pi= @206474441 len=13 sha=d5ff5fbff3a717a0 otherHits=0
+var Pi=()=>{}
+
+## #8 247 var no= late hits=19 206459912,206936296,211582383,212002180,212228452
+## #8 247 var no= @206459912 len=13 sha=871db4a6046eee1f otherHits=0
+var no=()=>{}
+
+## #8 247 var no= @206936296 len=31 sha=a7e6be29dfd432f3 otherHits=0
+var no=i(()=>{to=ua});var me={}
+
+## #8 247 var ki= late hits=10 206577949,206968199,210729526,211255838,211577348
+## #8 247 var ki= @206577949 len=51 sha=522778436fb2106f otherHits=0
+var ki=o(()=>{w();yi();xi()});var dl=({tree:e,...t}
+
+## #8 247 var ki= @206968199 len=13 sha=f13bf53a3df0731c otherHits=0
+var ki=()=>{}
+
+# ---- #23 ebn ----
+## #23 function ebn( hits=1
+## #23 ebn @178923743 len=112 sha=9bc2689a12631d73 otherHits=0
+function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}
+
+## #23 scope claudeai||dynamic 248=1 247=0
+## #23 ebn-win @178923804
+),Zyn()]));function _bt(e){return e?.pluginSource!==void 0}function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}var y=h(()=>m({mcpServers:Oe(i(),AY())}));function zo(e){return e.type==="connected"||e.type==="cached"}function RKe(e,r){if(r.type!=="cached"||!e)re
+
+## #23 ebn-fn ebn @178923743 len=112 sha=9bc2689a12631d73 otherHits=0
+function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}
+
+## #23 children:"claude.ai" 248=1 247=1
+## #23 heading children @201570960
+]=wf;else wf=Un[3];let Si=wf,Mf;if(Un[4]===p)Mf=e(t,{bold:!0,children:"Keep working from anywhere"}),Un[4]=Mf;else Mf=Un[4];let bi;if(Un[5]!==Si)bi=e(t,{color:"text",children:e(it,{url:Si,fallback:Si,children:"claude.ai"})}),Un[5]=Si,Un[6]=bi;else bi=Un[6];let vf;if(Un[7]===p)vf=e(t,{color:"text",children:"/remote-control"}),Un[7]=vf;else vf=Un[7];let Cf;if(Un[8]!==bi)Cf=r(o,{flexDirection:"column",children:[Mf,r(t,{dimColor:!0,children:["Check progress or reply to any session from the mobile app, desktop app, or"," ",bi,". To keep a session in this terminal only, run"," ",vf]})]}),Un[8]=bi,Un
+
+## #23 bold claude.ai 248=0 247=0
+## #23 scope==="claudeai" 248=9 247=8
+## #23 scope!=="claudeai" 248=4 247=4
+## #23 scope!=="project" 248=2 247=2
+## #23 isOfficialClaude 248=0 247=0
+## #23 isTrustedClaude 248=0 247=0
+## #23 enterpriseManaged 248=7 247=7
+## #23 panel title @209652068
+,v,te,P,l]);if(s.length===0&&v.length===0&&i.length===0)return null;let Vt=s.length+v.length,ot=Math.max(ln,oe-(a?cn:an)-(Ht?1:0)),Wt=_e.length>ot,nt=Wt?Math.max(1,ot-2):ot,Go=Math.max(0,_e.findIndex((c)=>c.selectableIndex===P)),Ke=la(Go-Math.floor(nt/2),0,Math.max(0,_e.length-nt)),Xt=_e.slice(Ke,Ke+nt),Gt=Ke,Jt=_e.length-(Ke+Xt.length);return r(o,{flexDirection:"column",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,{flexDirection:"column",children:[Gt>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:[
+
+## #23 panel-8k last claudeai-proxy rel=-1
+## #23 247 panel-8k last claudeai-proxy @236549574 rel=4324
+()=>{let s=t.filter((h)=>h.client.config.type!=="claudeai-proxy");return Ar(s)},[t]),{claudeAiServers:H,unusedClaudeAiServers:x}=X(()=>{let s=Mn(),h=[],Z=[];for(let d of t){if(d.client.config.type!=="claudeai-proxy")continue;if((d.client.type==="needs-auth"||d.client.type==="failed")&&!s.has(d.name))Z.push(d);else h.push(d)}return h.sort((d,I)=>d.name.localeCompare(I.name)),Z.sort((d,I)=>d.name.localeCompare(I.name)),{claudeAiServers:h,unusedClaudeAiServers:Z}},[t]),q=X(()=>(E.get("dynamic")??[]
+
+# ---- #9 k5n vs S3t ----
+## #9 k5n first 2000
+function k5n(e){return`${t}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and there\'s nothing to report ("no change", "still waiting", "quiet hold"). Set `noop: false` if something happened worth keeping \u2014 you edited a file, posted a message, advanced state, or surfaced a finding. Consecutive `noop: true` ticks are collapsed in the user\'s terminal view and tracked as a streak, so long quiet holds stay legible to the user without scrolling. Omit `noop` when stopping (`stop: true`).'}
+
+${e===!0?`## Picking delaySeconds
+
+This session's requests use a 1-hour Anthropic prompt-cache TTL, so effectively every allowed delay (the runtime clamps to [60, 3600]) wakes up with your conversation context still cached. There is no cache cliff inside that range to pace around, and scheduling extra wakeups just to keep the cache warm is pure waste \u2014 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Match the delay to what you're actually waiting for:
+
+- **Actively polling external state the harness can't notify you about** (a CI run, a deploy, a remote queue): pick the delay from how fast that state actually changes. A CI run that takes ~8 minutes deserves one ~480s check, not eight 60s ones.
+- **The long fallback heartbeat** (something else \u2014 a Monitor, a task notification \u2014 is the primary wake signal): 1200s+, so quiet wakeups stay rare.
+- **Idle ticks with no specific signal to watch**: default to **1200s\u20131800s** (20\u201330 min). The loop still checks back regularly, and the user can always interrupt if they need you sooner.
+
+Don't think in cache windows \u2014 think about what you're actually waiting for.`:e===!1?`## Picking delaySeconds
+
+This session's requests use the default 5-minute Anthropic prompt-cache TTL. Sleeping past 300 seconds means the next wake-up reads your full conversation context uncached \u2014 slowe
+
+## #9 k5n overage rel=885
+ound, and scheduling extra wakeups just to keep the cache warm is pure waste \u2014 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Match the delay to what you're actually waiting for:
+
+- **Actively polling external state the harness can't notify you about** (a CI run, a deploy, a remote queue): pick the delay from how fast that state actually changes. A CI run that takes ~8 minutes deserves one ~480s check, not eight 60s ones.
+- **The long fallback heartbeat** (something
+
+## #9 247 S3t first 2000
+function S3t(e){return`${pco}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and there\'s nothing to report ("no change", "still waiting", "quiet hold"). Set `noop: false` if something happened worth keeping \u2014 you edited a file, posted a message, advanced state, or surfaced a finding. Consecutive `noop: true` ticks are collapsed in the user\'s terminal view and tracked as a streak, so long quiet holds stay legible to the user without scrolling. Omit `noop` when stopping (`stop: true`).'}
+
+${e===!0?`## Picking delaySeconds
+
+This session's requests use a 1-hour Anthropic prompt-cache TTL, so effectively every allowed delay (the runtime clamps to [60, 3600]) wakes up with your conversation context still cached. There is no cache cliff inside that range to pace around, and scheduling extra wakeups just to keep the cache warm is pure waste \u2014 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Match the delay to what you're actually waiting for:
+
+- **Actively polling external state the harness can't notify you about** (a CI run, a deploy, a remote queue): pick the delay from how fast that state actually changes. A CI run that takes ~8 minutes deserves one ~480s check, not eight 60s ones.
+- **The long fallback heartbeat** (something else \u2014 a Monitor, a task notification \u2014 is the primary wake signal): 1200s+, so quiet wakeups stay rare.
+- **Idle ticks with no specific signal to watch**: default to **1200s\u20131800s** (20\u201330 min). The loop still checks back regularly, and the user can always interrupt if they need you sooner.
+
+Don't think in cache windows \u2014 think about what you're actually waiting for.`:e===!1?`## Picking delaySeconds
+
+This session's requests use the default 5-minute Anthropic prompt-cache TTL. Sleeping past 300 seconds means the next wake-up reads your full conversation context uncached \u2014 slo
+
+## #9 S3t overage rel=887
+ound, and scheduling extra wakeups just to keep the cache warm is pure waste \u2014 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Match the delay to what you're actually waiting for:
+
+- **Actively polling external state the harness can't notify you about** (a CI run, a deploy, a remote queue): pick the delay from how fast that state actually changes. A CI run that takes ~8 minutes deserves one ~480s check, not eight 60s ones.
+- **The long fallback heartbeat** (something
+
+## #9 k5n( hits=2
+## #9 k5n-call @181122908
+ field) \u2014 the loop ends immediately and no further wakeups fire.`;function k5n(e){return`${t}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and there\'s nothing to report ("no change", "still waiting", "quiet hold"). Set `
+
+## #9 k5n-call @185604985
+t=B1("repl_main_thread",{ignoreOverage:e}),r=B1("sdk",{ignoreOverage:e});return k5n(t===r?t:void 0)},get inputSchema(){return DAn()},get outputSchema(){return LAn()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.st
+
+## #9 cache1h 248=0 247=0
+## #9 promptCache1h 248=3 247=3
+## #9 promptCache1h @178545544
+=new Map;#o=new Set;#r=!1;#i=!1;#a=!1;#s=new Map;#d=new Map;promptCache1hAllowlist(){return this.#e}replacePromptCache1hAllowlist(e){this.#e=e}thinkingTypeOverrides(){return this.#t}recordThinkingTypeOverride(e,t){this.#t.set(e,t)}servedMod
+
+## #9 promptCache1h @178581416
+evChannels(e)}function nTn(){return n().host.requestLatches.promptCache1hAllowlist()}function rTn(e){n().host.requestLatches.replacePromptCache1hAllowlist(e)}function oTn(e){return n().host.requestLatches.thinkingTypeOverrides().get(e)}func
+
+## #9 isUsingOverage)&& 248=0 247=0
+## #9 yle().isUsingOverage 248=0 247=0
+## #9 isUsingOverage)return 248=1 247=2
+## #9 isUsingOverage)return @184110803
+usChanged.emit(e),t.status===e.status&&t.isUsingOverage===e.isUsingOverage)return;let r=Math.round((e.resetsAt?e.resetsAt-Date.now()/1000:0)/3600*10)/10;s("tengu_claudeai_limits_status_changed",{status:c(e.status),previousStatus:c(t.status)
+
+# ---- #14 wrap model ----
+## #14 function cGn( hits=1
+## #14 cGn @183527207 len=39 sha=9366451a0055bd03 otherHits=0
+function cGn(n,t){return d(n)?c(n,t):n}
+
+## #14 FAST_MODE_MODEL_DISPLAY 248=0 247=0
+## #14 available with 248=33 247=31
+## #14 available with @191278236
+hre();function n6(){let d=Le();if(d!=="firstParty")return`Cloud sessions aren't available with ${fE[d]}. They run on Anthropic's infrastructure and require an Anthropic account.`;return ky("allow_remote_sessions","Cloud sessions","are")}import*as ir from"path";var Bf=1000,Uf=500,jf=300,$f=2000,xc=30000,Hf=60000,Gi="<skill-watche
+
+## #14 available with @192687841
+if(!e.bridgeConfig)return{content:[{type:"text",text:"Browser switching is only available with bridge connections."}],isError:!0};if(!await t.ensureConnected())return y(e);let o=await t.switchBrowser?.()??null;if(o==="no_other_browsers")return{content:[{type:"text",text:"No other browsers available to switch to. Open Chrome with
+
+## #14 available with @192688548
+ConnectedExtensions)return{content:[{type:"text",text:"Listing browsers is only available with bridge connections."}],isError:!0};if(!await t.ensureConnected())return y(e);let o=await t.listConnectedExtensions(),l=o.map((s,r)=>({...s,name:b(s,r)})),c=[{type:"text",text:JSON.stringify(l)}];if(o.length>1)c.push({type:"text",text:`
+
+## #14 Switching to other models 248=2 247=2
+## #14 Switching to other models @202125922
+ode is ",e(t,{bold:!0,children:"ON"})," and available with"," ",Ek()," (/fast). Switching to other models turns off fast mode."]})}):e(o,{marginBottom:1,children:r(t,{dimColor:!0,children:["Use ",e(t,{bold:!0,children:"/fast"})," to turn on Fast mode (",Ek(),")."]})}):null]}),I&&e(gs,{children:de?r(ue,{children:[e(t,{children:"T
+
+## #14 and available with 248=2 247=2
+## #14 and available with @202125882
+ldren:r(t,{dimColor:!0,children:["Fast mode is ",e(t,{bold:!0,children:"ON"})," and available with"," ",Ek()," (/fast). Switching to other models turns off fast mode."]})}):e(o,{marginBottom:1,children:r(t,{dimColor:!0,children:["Use ",e(t,{bold:!0,children:"/fast"})," to turn on Fast mode (",Ek(),")."]})}):null]}),I&&e(gs,{chil
+
+# ---- #28 trust rules ----
+## #28 hasProjectAllowRules 248=3 247=3
+## #28 projectAllowRules 248=0 247=0
+## #28 Allow: 248=17 247=15
+## #28 permission rules: 248=0 247=0
+## #28 cTe() 248=3 247=0
+## #28 uTe() 248=2 247=0
+## #28 hasProjectAllowRules @203836964
+ust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De,w,R,B,He,ve,_e,Te,je,Ae,F,Pe,Re],n[17]=
+
+## #28 hasProjectAllowRules @203838010
+st_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re}),Po)Sx(!0),t1e(!0);else cc(qo,xe);P()},n[24]=w,n[25
+
+## #28 Go body needles
+- slice(: false idx=-1
+- truncate: false idx=-1
+- …: false idx=-1
+- toWellFormed: false idx=-1
+- Segmenter: false idx=-1
+- grapheme: false idx=-1
+- Allow: true idx=1470
+AllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De
+
+# ---- #25 consent 248-new hit ----
+## #25 deferred hits 248=11 247=10
+## #25 deferred248 @190464828
+ngu_managed_settings_security_dialog_shown",{});let d;try{d=e(t,o.updates)}catch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_s
+
+## #25 deferred248 @190464904
+atch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_settings_security_dialog_accepted",{}),b("remote_managed_settings_security_ch
+
+## #25 deferred248 @190467101
+ess.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.
+
+## #25 deferred248 @190467246
+tHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no
+
+## #25 deferred248 @190467415
+ConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdout),c=r(t,d);if(!d)_o.claimForStandaloneRender(c);let a;try{a=await c}cat
+
+## #25 deferred248 @190467927
+ged_settings_security_check");return a}function te(e){switch(e){case"rejected":return Lr(1),!1;case"deferred_no_consent_surface":return!1;case"superseded":return!1;case"approved":case"no_check_needed":case"deferred_non_interactive":return!0}}import{open as xe,readFile as He,rm as
+
+## #25 deferred248 @190481291
+ver the pending consent review; leaving the decision to it"),{settings:r,fetchSucceeded:!0};if(k==="deferred_no_consent_surface"){if(Z())n("Remote settings: Consent prompt deferred to the next interactive session (this command cannot host it); keeping the consented baseline"),y("
+
+## #25 deferred248 @190482544
+,b("remote_managed_settings_pull",{status:v("applied_consent_deferred")});break;case"rejected":case"deferred_no_consent_surface":case"superseded":break}return{settings:u,fetchSucceeded:!0}}if(VMe(u,{verified:!0}),!o){if(await B(),E(c))return{settings:null,fetchSucceeded:!1}}if(gz
+
+## #25 deferred248 @202549862
+bject"&&d!==null),reveal:le(["login_handoff","default"])})),result:h(()=>le(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async fun
+
+## #25 deferred248 @202549903
+ff","default"])})),result:h(()=>le(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff
+
+# ---- #31 afterReconnect ----
+## #31 dNe @204894232 len=1769 sha=b522ee7db3bbc025 otherHits=0
+function dNe(e,t,r,{afterReconnect:o=!1}={}){let d=vEt(t),a=t.name;switch(r.kind){case"result":if(r.envelope!==void 0)return{outcome:xe(e,t,r.envelope,{afterReconnect:o,dirSync:r.dirSync}),responseBytes:r.responseBytes,metaCopy:r.metaCopy,refusalCode:r.envelope.outcome==="refused"?r.envelope.code:void 0,failureCode:r.envelope.outcome==="failed"?r.envelope.code:void 0};if(r.isError)return{outcome:{kind:"error",code:"transport_error",message:Ce({name:a,detail:cw(vke(r.content))}),host:d},responseBytes:r.responseBytes};return{outcome:{kind:"completed",host:d,homeDir:ae(t),..._e(r.content),isError:!1,output:void 0,disposition:void 0,notes:[],hostLocal:[],envelope:"missing",delivery:"fresh"},responseBytes:r.responseBytes};case"unreachable":return{outcome:{kind:"error",code:"unreachable",message:t.transport.kind==="session"?fEt(a,r.detail):aNe(a),host:d}};case"approval_unverified":return{outcome:{kind:"error",code:"approval_unverified",message:t.transport.kind==="session"?ne(a):L(a),host:d}};case"timed_out":return{outcome:{kind:"error",code:"timed_out",message:Y({name:a,capMs:r.capMs}),host:d}};case"stalled":return{outcome:{kind:"error",code:"stalled",message:r.request==="probe"?re({name:a,capMs:r.capMs}):te({name:a,capMs:r.capMs}),host:d}};case"host_gone":return{outcome:{kind:"error",code:r.why==="withdrawn"?"host_withdrawn":"host_gone",message:oe({name:a,why:r.why,unsent:r.unsent}),host:d}};case"dropped":return{outcome:{kind:"error",code:"dropped",message:r.why==="unverified_refusal"?Q(a):J(a),host:d}};case"cancelled":return{outcome:uJe(d)};case"transport_error":return{outcome:{kind:"error",code:"transport_error",message:r.unreadableResult===!0?Se(a):_Et({name:a,detail:cw(r.detail)}),host:d,...r.unreadableResult===!0&&{unreadableResult:!0}}}}}
+
+## #31 xe afterReconnect @204896568 len=1575 sha=16244d6b28e3d139 otherHits=0
+function xe(e,t,r,{afterReconnect:o=!1,dirSync:d}={}){let a={name:t.name,working_dir:U(r.target.working_dir)},u=r.outcome!=="refused"&&r.outcome!=="failed"?"":o?` ${yEt(r.outcome)}`:r.replayed===!0?` ${bEt(r.served_at,r.outcome)}`:"";switch(r.outcome){case"completed":{let f=se(e.name===wt?$e(r.content,r.documents):r.content),p=Me(e,r.output),g=ve(p.output);return{kind:"completed",host:a,homeDir:ae(t),content:f.content,truncated:r.truncated===!0,...(f.cut||g.truncated)&&{cutHere:!0},isError:r.is_error,output:g.output,hostLocal:p.hostLocal,disposition:r.disposition,notes:r.notes??[],envelope:"present",delivery:o?"after_reconnect":r.replayed===!0?"replayed":"fresh",...r.served_at!==void 0&&{servedAt:r.served_at},...d!==void 0&&{dirSync:d}}}case"refused":{if(r.code==="no_approval")return{kind:"error",code:"approval_unverified",message:`${L(t.name)}${u}`,host:a};return{kind:"error",code:"refused_by_host",message:`${(t.transport.kind==="session"?Z:cNe)({name:t.name,message:cw(r.message,pNe)})}${u}`,host:a}}case"failed":return{kind:"error",code:"failed_on_host",message:`${ee({name:t.name,message:cw(r.message,pNe)})}${u}`,host:a};case"in_progress":return{kind:"error",code:"still_running",message:gEt({name:t.name,state:r.state,cause:"unasked"}),host:a};case"needs_approval":return{kind:"error",code:"refused_by_host",message:cNe({name:t.name,message:cw(r.message,pNe)}),host:a};case"acknowledged":return{kind:"error",code:"refused_by_host",message:cNe({name:t.name,message:"the machine acknowledged a decision for a call this session did not ask about"}),host:a}}}

@@ -1,7 +1,16 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
+import {
+  dequeue,
+  getCommandQueue,
+  remove,
+} from 'src/utils/messageQueueManager.js'
 import type { ToolUseContext } from 'src/Tool.js'
-import { resolveSenderDisplayName } from '../SendMessageTool.js'
+import {
+  MAIN_RECIPIENT,
+  resolveSenderDisplayName,
+  SendMessageTool,
+} from '../SendMessageTool.js'
 
 function makeContext(opts: {
   tasks?: Record<string, unknown>
@@ -18,6 +27,13 @@ function makeContext(opts: {
   } as unknown as ToolUseContext
 }
 
+function drainQueue(): void {
+  while (getCommandQueue().length > 0) {
+    const cmd = dequeue()
+    if (cmd) remove([cmd])
+  }
+}
+
 describe('resolveSenderDisplayName', () => {
   test('teammate agentContext.agentName wins over registry and task', () => {
     const senderId = 'researcher@team-1'
@@ -31,7 +47,7 @@ describe('resolveSenderDisplayName', () => {
       },
     })
 
-    const name = runWithAgentContext(
+    const resolved = runWithAgentContext(
       {
         agentType: 'teammate',
         agentId: senderId,
@@ -43,7 +59,10 @@ describe('resolveSenderDisplayName', () => {
       },
       () => resolveSenderDisplayName(ctx, senderId),
     )
-    expect(name).toBe('researcher')
+    expect(resolved).toEqual({
+      from: 'researcher',
+      displayName: 'researcher',
+    })
   })
 
   test('registry reverse lookup when no teammate ALS', () => {
@@ -51,10 +70,13 @@ describe('resolveSenderDisplayName', () => {
     const ctx = makeContext({
       agentNameRegistry: new Map([['worker-a', senderId]]),
     })
-    expect(resolveSenderDisplayName(ctx, senderId)).toBe('worker-a')
+    expect(resolveSenderDisplayName(ctx, senderId)).toEqual({
+      from: 'worker-a',
+      displayName: 'worker-a',
+    })
   })
 
-  test('local_agent agentType after registry miss', () => {
+  test('unnamed local_agent from is id; agentType is only displayName', () => {
     const senderId = 'agent-xyz'
     const ctx = makeContext({
       tasks: {
@@ -64,10 +86,13 @@ describe('resolveSenderDisplayName', () => {
         },
       },
     })
-    expect(resolveSenderDisplayName(ctx, senderId)).toBe('Explore')
+    expect(resolveSenderDisplayName(ctx, senderId)).toEqual({
+      from: senderId,
+      displayName: 'Explore',
+    })
   })
 
-  test('in-process teammate identity.agentName', () => {
+  test('in-process teammate identity.agentName before local_agent fallback', () => {
     const senderId = 'tm-1'
     const ctx = makeContext({
       tasks: {
@@ -77,12 +102,18 @@ describe('resolveSenderDisplayName', () => {
         },
       },
     })
-    expect(resolveSenderDisplayName(ctx, senderId)).toBe('coder')
+    expect(resolveSenderDisplayName(ctx, senderId)).toEqual({
+      from: 'coder',
+      displayName: 'coder',
+    })
   })
 
   test('falls back to raw agent id', () => {
     const ctx = makeContext({})
-    expect(resolveSenderDisplayName(ctx, 'orphan-id')).toBe('orphan-id')
+    expect(resolveSenderDisplayName(ctx, 'orphan-id')).toEqual({
+      from: 'orphan-id',
+      displayName: 'orphan-id',
+    })
   })
 
   test('subagent ALS does not short-circuit (not teammate)', () => {
@@ -90,7 +121,7 @@ describe('resolveSenderDisplayName', () => {
     const ctx = makeContext({
       agentNameRegistry: new Map([['named-sub', senderId]]),
     })
-    const name = runWithAgentContext(
+    const resolved = runWithAgentContext(
       {
         agentType: 'subagent',
         agentId: senderId,
@@ -99,6 +130,56 @@ describe('resolveSenderDisplayName', () => {
       },
       () => resolveSenderDisplayName(ctx, senderId),
     )
-    expect(name).toBe('named-sub')
+    expect(resolved).toEqual({
+      from: 'named-sub',
+      displayName: 'named-sub',
+    })
+  })
+})
+
+describe('SendMessage envelope uses Ce.from', () => {
+  beforeEach(() => {
+    drainQueue()
+  })
+  afterEach(() => {
+    drainQueue()
+  })
+
+  test('unnamed sibling local_agent from= is the agent id, not agentType', async () => {
+    const senderId = 'agent-unnamed-1'
+    const result = await SendMessageTool.call!(
+      {
+        to: MAIN_RECIPIENT,
+        summary: 'status update',
+        message: 'scan done',
+      },
+      {
+        agentId: senderId,
+        getAppState: () => ({
+          tasks: {
+            [senderId]: {
+              type: 'local_agent',
+              agentType: 'Explore',
+              status: 'running',
+            },
+          },
+          agentNameRegistry: new Map(),
+        }),
+        setAppState: () => {},
+      } as never,
+      (async () => ({ behavior: 'allow' as const, updatedInput: {} })) as never,
+      {
+        type: 'assistant',
+        uuid: '00000000-0000-4000-8000-000000000002',
+        message: { role: 'assistant', content: [] },
+      } as never,
+    )
+    expect(result.data.success).toBe(true)
+    const cmd = getCommandQueue()[0]
+    expect(String(cmd?.value)).toContain(`from="${senderId}"`)
+    expect(String(cmd?.value)).not.toContain('from="Explore"')
+    const origin = cmd?.origin as { from?: string; name?: string } | undefined
+    expect(origin?.from).toBe(senderId)
+    expect(origin?.name).toBe('Explore')
   })
 })

@@ -22,6 +22,7 @@ import type {
 } from 'src/types/message.js'
 import type { DeepImmutable } from 'src/types/utils.js'
 import stripAnsi from 'strip-ansi'
+import { stampIdLessAssistantEntry } from '../conversationRecovery.js'
 import { createAssistantMessage } from '../messages.js'
 import { getPlan } from '../plans.js'
 
@@ -32,13 +33,14 @@ export function toInternalMessages(
     if (!message) return []
     switch (message.type) {
       case 'assistant': {
+        const stamped = stampIdLessAssistantEntry(message)
         const batchToolUses = (
-          message as { batch_tool_uses?: { id: string; name: string }[] }
+          stamped as { batch_tool_uses?: { id: string; name: string }[] }
         ).batch_tool_uses
         return [
           {
             type: 'assistant',
-            message: message.message,
+            message: stamped.message,
             uuid: message.uuid,
             requestId: undefined,
             timestamp: new Date().toISOString(),

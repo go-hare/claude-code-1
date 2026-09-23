@@ -1,7 +1,10 @@
 /**
  * densable 2.1.248 #41 — PR-badge unchanged: REST 304/etag + streak.
+ * densable 2.1.251 #63 — ign always REST: Accept + API-version, 304/etag,
+ * same-origin redirect, agn review fetch, tengu events.
  *
  * GOLD: gold-248-na-41-A$.txt / gold-248-na-41-dXe.txt / gold-248-na-41-304.txt
+ * GOLD 251: gold-251-l.md / gold-251-f.md `ign` @185402726 sha=5a676d2f3cc48c37
  * A$ @178817076 sha=e64adecbbf14ad90
  * dXe @184546378 — pollerNotModifiedStreak + bump.emit reset (247=0)
  * uJt @184548939 — REST list `status===304` empty-ok
@@ -13,13 +16,17 @@
  * 247 Wut leftover stays as p5e=60000 sibling inside wY #b.
  */
 import { z } from 'zod/v4'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
 import { parseGitRemote } from './detectRepository.js'
+import { getErrnoCode } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import {
   deriveReviewState,
-  fetchGithubPrStatus,
   fetchGitlabMrStatus,
   type PrStatus,
 } from './ghPrStatus.js'
@@ -28,6 +35,7 @@ import { getUserAgent } from './http.js'
 import { lazySchema } from './lazySchema.js'
 import {
   githubRestApiBase,
+  isGithubDotComHost,
   resolveGithubAuthToken,
 } from './permissions/autoModeRepoVisibility.js'
 import type { PrStatusCacheEntry } from './prStatusCache.js'
@@ -66,8 +74,19 @@ export const PR_STATUS_FOCUS_RECHECK_MS = 60_000
 /** densable f5e / qut */
 export const PR_STATUS_BAD_STREAK_DISABLE = 3
 
-/** densable aJt */
+/** densable ngn — review GraphQL TTL after a 304 list. */
+export const PR_STATUS_REVIEW_TTL_MS = 300_000
+
+/** densable aJt / rgn */
 const REST_REDIRECT_STATUSES = new Set([301, 302, 307, 308])
+
+/** densable ign `f`/`g`/`_` feature_name. */
+const GH_PR_STATUS_DIRECT =
+  'github_pr_status_direct' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+
+/** densable agn query — locked SEA string. */
+export const REVIEW_DECISION_QUERY =
+  'query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision}}}'
 
 export type DirectPr = {
   number: number
@@ -649,7 +668,7 @@ query { rateLimit{cost remaining resetAt} ${repoFields.join(' ')} }`
   return { statuses, rateLimit, unbatched }
 }
 
-/** densable lJt */
+/** densable lJt / ogn */
 export const restListSchema = lazySchema(() =>
   z.array(
     z.object({
@@ -659,6 +678,82 @@ export const restListSchema = lazySchema(() =>
     }),
   ),
 )
+
+/** densable sgn */
+export const restReviewSchema = lazySchema(() =>
+  z.object({
+    data: z.object({
+      repository: z
+        .object({
+          pullRequest: z
+            .object({
+              reviewDecision: z.string().nullable(),
+            })
+            .nullable(),
+        })
+        .nullable(),
+    }),
+  }),
+)
+
+/** densable lsr */
+export function githubGraphqlApi(host: string): string {
+  return isGithubDotComHost(host)
+    ? 'https://api.github.com/graphql'
+    : `https://${host}/api/graphql`
+}
+
+/**
+ * densable lI — `n?.name` only when it looks like an Error name.
+ * ign catch: `lI(ge)??w("unknown")`.
+ */
+export function telemetryErrorName(err: unknown): string {
+  const name =
+    err && typeof err === 'object' && 'name' in err
+      ? (err as { name: unknown }).name
+      : undefined
+  if (typeof name === 'string' && /^[A-Z][a-zA-Z]{0,63}$/.test(name)) {
+    return name
+  }
+  return 'unknown'
+}
+
+/**
+ * densable agn — GraphQL reviewDecision. null = unavailable (sad).
+ * `""` is a successful empty decision.
+ */
+export async function fetchDirectReviewDecision(
+  repo: { host: string; owner: string; repo: string },
+  token: string,
+  number: number,
+): Promise<string | null> {
+  const url = githubGraphqlApi(repo.host)
+  const body = jsonStringify({
+    query: REVIEW_DECISION_QUERY,
+    variables: { o: repo.owner, r: repo.repo, n: number },
+  })
+  try {
+    const resp = await fetch(url, {
+      keepalive: false,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'User-Agent': getUserAgent(),
+      },
+      body,
+      redirect: 'error',
+      signal: AbortSignal.timeout(GH_TIMEOUT_MS),
+    })
+    if (!resp.ok) return null
+    const parsed = restReviewSchema().safeParse(await resp.json())
+    return parsed.success
+      ? (parsed.data.data.repository?.pullRequest?.reviewDecision ?? '')
+      : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * densable uJt headers — `...g.etag&&{"If-None-Match":g.etag}`.
@@ -731,6 +826,8 @@ export class PrStatusShared {
   pollerBadStreak = 0
   pollerNotModifiedStreak = 0
   directState: DirectState | null = null
+  /** densable xtt.lastLoggedGhAuthState */
+  lastLoggedGhAuthState: string | null = null
   prStatusByUrl = createAsyncTtlCache(
     fetchPrStatusByUrl,
     PR_STATUS_BY_URL_TTL_MS,
@@ -775,9 +872,39 @@ export class PrStatusShared {
     return true
   }
 
+  /**
+   * densable xtt.logAuthState
+   * `if(e===this.lastLoggedGhAuthState)return;this.lastLoggedGhAuthState=e,s("tengu_gh_pr_status_auth_state",{auth_state:c(e)})`
+   */
+  logAuthState(state: string): void {
+    if (state === this.lastLoggedGhAuthState) return
+    this.lastLoggedGhAuthState = state
+    logEvent('tengu_gh_pr_status_auth_state', {
+      auth_state:
+        state as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+
   /** densable dXe.backOffUntil */
   backOffUntil(until: number): void {
     this.ghBackoffUntil = until
+  }
+
+  /**
+   * densable xtt.backOffFromResponse — retry-after seconds, else
+   * x-ratelimit-reset epoch, else kke=60000.
+   */
+  backOffFromResponse(resp: {
+    headers: { get: (name: string) => string | null }
+  }): void {
+    const retryAfter = Number(resp.headers.get('retry-after'))
+    const reset = Number(resp.headers.get('x-ratelimit-reset'))
+    this.ghBackoffUntil =
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? Date.now() + retryAfter * 1000
+        : Number.isFinite(reset) && reset > 0
+          ? reset * 1000
+          : Date.now() + PR_STATUS_BATCH_BACKOFF_MS
   }
 
   reset(): void {
@@ -785,6 +912,7 @@ export class PrStatusShared {
     this.pollerBadStreak = 0
     this.pollerNotModifiedStreak = 0
     this.directState = null
+    this.lastLoggedGhAuthState = null
     this.lastPersistedCacheBody = ''
     this.ghBackoffUntil = 0
     this.prStatusByUrl.cache.clear()
@@ -893,22 +1021,30 @@ function isGithubLikeHost(host: string): boolean {
 }
 
 /**
- * densable uJt — REST list + 304 empty-ok. Called from eDt when Wen().
+ * densable ign @185402726 — REST list + 304 empty-ok + agn review.
+ * Harbor is not a fetch gate. Token is leftover resolveGithubAuthToken
+ * (no new Kfn/_ke cache).
  */
 export async function fetchDirectPrStatus(
   branch: string,
 ): Promise<PollerFetchResult> {
-  if (isEssentialTrafficOnly()) return null
+  const startedAt = Date.now()
+  // densable ign: kt() (essential-traffic) or gZ() (gh backoff).
+  // DISABLE_TELEMETRY / no-telemetry does not skip REST.
+  if (isEssentialTrafficOnly() || isGhPrBatchInBackoff()) return null
   if (branch === 'main' || branch === 'master') return null
   const remote = await getRemoteUrl()
   const parsed = remote ? parseGitRemote(remote) : null
   if (!parsed) return null
+  const poller = getPrStatusShared()
   const token = await resolveGithubAuthToken(parsed.host)
   if (!token) {
     if (!isGithubLikeHost(parsed.host)) return null
-    return whichSync('gh') === null ? 'gh-missing' : 'needs-auth'
+    const kind = whichSync('gh') === null ? 'gh-missing' : 'needs-auth'
+    poller.logAuthState(kind === 'gh-missing' ? 'gh_missing' : 'needs_auth')
+    return kind
   }
-  const poller = getPrStatusShared()
+  poller.logAuthState('token_present')
   const state = poller.directStateForBranch(branch)
   const prev = state.pr
     ? { ...state.pr, reviewDecision: state.reviewDecision }
@@ -921,9 +1057,12 @@ export async function fetchDirectPrStatus(
     'User-Agent': getUserAgent(),
     ...restListConditionalHeaders(state.etag),
   }
+  let listStatus: number | undefined
+  let listChanged = false
   try {
     const getList = (href: string): Promise<Response> =>
       fetch(href, {
+        keepalive: false,
         method: 'GET',
         headers,
         redirect: 'manual',
@@ -938,23 +1077,105 @@ export async function fetchDirectPrStatus(
       state.redirectedListUrl = redirected.href
       resp = await getList(redirected.href)
     }
+    listStatus = resp.status
     const applied = await applyRestListResponse(state, {
       status: resp.status,
       ok: resp.ok,
       headers: { get: name => resp.headers.get(name) },
       json: () => resp.json(),
     })
-    if (applied === 'fetch-failed') return 'fetch-failed'
+    if (applied === 'fetch-failed') {
+      if (resp.status === 403 || resp.status === 429) {
+        poller.backOffFromResponse(resp)
+      }
+      logEvent('tengu_feature_bad', {
+        http_status: resp.status,
+        feature_name: GH_PR_STATUS_DIRECT,
+        error_code: (resp.status === 401
+          ? 'unauthorized'
+          : resp.status === 403 || resp.status === 429
+            ? 'rate_limited'
+            : 'http_error') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      logForDebugging(
+        `[ghPrStatus] REST list ${resp.status} on ${parsed.host}`,
+        { level: 'debug' },
+      )
+      return 'fetch-failed'
+    }
+    listChanged = applied === 'updated'
   } catch (err) {
-    logForDebugging(String(err), { level: 'error' })
+    const cause =
+      err && typeof err === 'object' && 'cause' in err ? err.cause : undefined
+    logEvent('tengu_feature_bad', {
+      error_name: telemetryErrorName(
+        err,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errno_code: (getErrnoCode(err) ??
+        getErrnoCode(cause) ??
+        '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      feature_name: GH_PR_STATUS_DIRECT,
+      error_code:
+        'fetch_threw' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
     return 'fetch-failed'
   }
-  if (!state.pr) return null
-  return buildDirectPrStatus(prev, state.pr, state.reviewDecision, false)
+  const found = state.pr
+  if (!found) {
+    logEvent('tengu_feature_ok', {
+      feature_name: GH_PR_STATUS_DIRECT,
+      http_status: listStatus,
+      pr_found: false,
+      review_fetched: false,
+    })
+    return null
+  }
+  let reviewDecision = state.reviewDecision
+  let reviewFailed = false
+  const reviewFetched =
+    listChanged ||
+    Date.now() - state.lastReviewFetchAt >= PR_STATUS_REVIEW_TTL_MS
+  if (reviewFetched) {
+    const decision = await fetchDirectReviewDecision(
+      { host: parsed.host, owner: parsed.owner, repo: parsed.name },
+      token,
+      found.number,
+    )
+    if (decision !== null) {
+      reviewDecision = decision
+      if (state.pr?.number === found.number) {
+        state.reviewDecision = decision
+        state.lastReviewFetchAt = startedAt
+      }
+    } else reviewFailed = true
+  }
+  const reviewExtra = {
+    http_status: listStatus,
+    pr_found: true,
+    review_fetched: reviewFetched,
+  }
+  if (reviewFailed) {
+    logEvent('tengu_feature_sad', {
+      ...reviewExtra,
+      feature_name: GH_PR_STATUS_DIRECT,
+      error_code:
+        'review_decision_unavailable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  } else {
+    logEvent('tengu_feature_ok', {
+      feature_name: GH_PR_STATUS_DIRECT,
+      ...reviewExtra,
+    })
+  }
+  return buildDirectPrStatus(prev, found, reviewDecision, reviewFailed)
 }
 
 /**
- * densable eDt — `Wen()?uJt(r):sJt(o) ?? tXe(e)`.
+ * densable n$t — `ign(branch) ?? wtt`. Gold footer always uses REST
+ * (`ign`), including Bedrock/Vertex/Foundry and when telemetry is off.
+ * `gh pr view` / leftover fetchGithubPrStatus stays on the URL cache
+ * (`prStatusByUrl` / sJt). Harbor prism remains the official gate for
+ * poll-interval / focus recheck.
  */
 export async function fetchPrStatusForPoller(): Promise<PollerFetchResult> {
   if (!(await getIsGit())) return null
@@ -963,10 +1184,7 @@ export async function fetchPrStatusForPoller(): Promise<PollerFetchResult> {
     getDefaultBranch(),
   ])
   if (branch === defaultBranch) return null
-  const primary = isDirectApiEnabled()
-    ? await fetchDirectPrStatus(branch)
-    : await fetchGithubPrStatus(defaultBranch)
-  return primary ?? (await fetchGitlabMrStatus())
+  return (await fetchDirectPrStatus(branch)) ?? (await fetchGitlabMrStatus())
 }
 
 export type PrStatusSnapshot = {

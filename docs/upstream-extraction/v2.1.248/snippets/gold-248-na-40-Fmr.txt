@@ -1,0 +1,6 @@
+# gold-248-na-40-Fmr  register workflow-authoring
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=204697553
+
+len=428 sha=ffb0cd26d4123e4f
+function Fmr(){Wr({name:$w,description:`Reference for writing a ${md} tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize running one.`,menuDescription:"Load the reference for writing Workflow tool scripts",userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}

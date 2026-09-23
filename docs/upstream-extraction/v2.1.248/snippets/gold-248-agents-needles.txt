@@ -1,0 +1,1020 @@
+# gold-248-agents-needles
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:06:03.869Z
+helpers=247 _peel-1-ye-Ht-Jt-DE.mjs asciiSlice/allHits/extractFnAt/lastFnStart
+scope=#12 #14 #15 #16 #17 #18 #19 #20 #21 #27 #28 #29 #34 #35 #36 #45
+
+## #12 win32-input-mode  needle="win32-input-mode"  hits=0
+
+## #12 win32 input mode  needle="win32 input mode"  hits=0
+
+## #12 win32InputMode  needle="win32InputMode"  hits=0
+
+## #12 WIN32_INPUT  needle="WIN32_INPUT"  hits=3
+- #0 @96143448 ;.file:///B:/%7EBUN/root/chunk-65c3f6mz.js	....#..MOUSE_SGR...........THEME_NOTIFY....R...WIN32_INPUT_MODE(....n,.file:///B:/%7EBUN/root/chunk-82ac1fr1.js(.......file:///B:/%7EBUN/root/chunk-
+- #1 @187972832 GR:1006,FOCUS_EVENTS:1004,BRACKETED_PASTE:2004,THEME_NOTIFY:2031,SYNCHRONIZED_UPDATE:2026,WIN32_INPUT_MODE:9001};function CH(E){return Rp(`?${E}h`)}function Hj(E){return Rp(`?${E}l`)}var Eje=
+- #2 @187973257 0=Hj(wf.CURSOR_VISIBLE),Kot=CH(wf.ALT_SCREEN_CLEAR),lNn=Hj(wf.ALT_SCREEN_CLEAR),Yot=Hj(wf.WIN32_INPUT_MODE),_=CH(wf.MOUSE_NORMAL)+CH(wf.MOUSE_BUTTON)+CH(wf.MOUSE_ANY)+CH(wf.MOUSE_SGR),t=CH(wf
+
+## #12 ENABLE_VIRTUAL_TERMINAL_INPUT  needle="ENABLE_VIRTUAL_TERMINAL_INPUT"  hits=0
+
+## #12 ENABLE_QUICK_EDIT_MODE  needle="ENABLE_QUICK_EDIT_MODE"  hits=0
+
+## #12 ENABLE_EXTENDED_FLAGS  needle="ENABLE_EXTENDED_FLAGS"  hits=0
+
+## #12 virtual terminal input  needle="virtual terminal input"  hits=0
+
+## #12 kitty keyboard  needle="kitty keyboard"  hits=0
+
+## #12 DISABLE_KITTY_KEYBOARD  needle="DISABLE_KITTY_KEYBOARD"  hits=0
+
+## #12 modifyOtherKeys  needle="modifyOtherKeys"  hits=1
+- #0 @189800616 entry\n- Fixed Ctrl+[ not leaving vim INSERT mode in terminals that encode modified keys (modifyOtherKeys / kitty protocol)\n- Fixed the local IDE connection being routed through `HTTPS_PROXY` (a
+
+## #12 ?9001  needle="?9001"  hits=2
+- #0 @93481406 .....[27u............[27;1u.
+...&.V..[27;5;99~.......0..ascii.........6.._cc-d....../.A..[?9001.....J...not_in........k.starts_with.........contains....z|..glob....b...ABCDEFGHJKLMPSTXZ
+- #1 @189605595 ii"),Vt=Buffer.from(dut,"ascii"),Fn=Buffer.from("\x1B_cc-d","ascii"),yt=Buffer.from("\x1B[?9001","ascii"),Qr=100;function it(e,t,o){return e.length-t>=o.length&&e.compare(o,0,o.length,t
+
+## #12 after detaching  needle="after detaching"  hits=0
+
+## #12 after detach  needle="after detach"  hits=1
+- #0 @82678244 e did not reach the receiving process correctlySentHandleNotReceivedWarningSendQueue used after detachThis code path shouldn't be reached - sync_file in PipeWriter.rs....:.. .."..:.. ...".."..
+
+## #12 CLAUDE_AGENTS_SELECT  needle="CLAUDE_AGENTS_SELECT"  hits=9
+- #0 @92526188  .r.e.s.u.m.e. .i.t. .w.i.t.h.:. .c.l.a.u.d.e. .-.-.r.e.s.u.m.e. .........unmount.....A.t.CLAUDE_AGENTS_SELECT
+...."b.createRoot..........seedHostJobs......\.applyFleetViewHostWindowsEnv........mountF
+- #1 @178765179 UDE_AFK_COUNTDOWN_MS:()=>Ic,CLAUDE_AFK_TIMEOUT_MS:()=>Uc,CLAUDE_AFTER_LAST_COMPACT:()=>NO,CLAUDE_AGENTS_SELECT:()=>lO,CLAUDE_AGENT_SDK_CLIENT_APP:()=>PO,CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS:()=>sL,
+- #2 @183377652 _VIEW_RELAUNCH";function oBt(){return!1}function h_r(e){return!1}function Bpn(){return!!a.CLAUDE_AGENTS_SELECT}function jpn(){let e=Me(process.env[yht]);return delete process.env[yht],e}
+export{gDe,Ug
+- #3 @189648782 .isTTY,process.stdin.isTTY))return await Ns("cli_bg_attach",p()),_G({args:["agents"],env:{CLAUDE_AGENTS_SELECT:i}});if(A.outcome==="detached"&&A.msg)process.stderr.write(`${A.msg.replace(Wye,"")}
+`);i
+- #4 @191626467 ~BUN/root/chunk-52nmgz25.js"),import("B:/~BUN/root/chunk-sdcvfr13.js")]);ko(),process.env.CLAUDE_AGENTS_SELECT=WKe(V);let Ct=await pt(nv(!1));return await Ut(Ct,{entryChannel:"remote_detach",storageV5
+- #5 @192284727 ults),T=D()?d?.storageV5:void 0;Et(T?()=>Gkt(T):Gkt),Et(w$e("claude agents"));let P=i,V=a.CLAUDE_AGENTS_SELECT,K=d?.autoOpenJobId,W=K!==void 0&&d?.canGoBack,Y=V,Z=_i(),ee=0,X=(de)=>{let re={...Wu(de.i
+- #6 @192284955 sionId,Date.now())};return ee++,re},Q=d?.originJobId,le=d?.originSpawn;delete process.env.CLAUDE_AGENTS_SELECT;let ye=await BLn(await jl(te(),Au(d?.storageV5)),d?.storageV5),xe=xr(h,d?.storageV5);Wi(h
+- #7 @202349972 et(process.stdout)?.unmount(),await new Promise((Ae)=>setImmediate(Ae)),ken(),process.env.CLAUDE_AGENTS_SELECT=d;let[{createRoot:Z},{seedHostJobs:ee},{applyFleetViewHostWindowsEnv:re},{mountFleetViewW
+- … +1 more
+
+## #12 setRawMode  needle="setRawMode"  hits=42
+- #0 @67043194 s = Symbol("_sawKeyPress"), kSawReturnAt = Symbol("_sawReturnAt"), kSetRawMode = Symbol("_setRawMode"), kTabComplete = Symbol("_tabComplete"), kTabCompleter = Symbol("_tabCompleter"), kTtyWr
+- #1 @67049780  [kSetRawMode](mode) {
+    let wasInRawMode = this.input.isRaw;
+    if (typeof this.input.setRawMode === "function")
+      this.input.setRawMode(mode);
+    return wasInRawMode;
+  }
+  prompt(
+- #2 @67049824 = this.input.isRaw;
+    if (typeof this.input.setRawMode === "function")
+      this.input.setRawMode(mode);
+    return wasInRawMode;
+  }
+  prompt(preserveCursor) {
+    if (this.paused)
+     
+- #3 @67085904 rface.prototype, {
+  [kSetRawMode]: {
+    __proto__: null,
+    get() {
+      return this._setRawMode;
+    }
+  },
+  [kOnLine]: {
+    __proto__: null,
+    get() {
+      return this._onLine;
+  
+- #4 @67089165  },
+    set(value) {
+      this[kSawReturnAt] = value;
+    }
+  }
+});
+Interface.prototype._setRawMode = _Interface.prototype[kSetRawMode];
+Interface.prototype._onLine = _Interface.prototype[k
+- #5 @68072695 eturn $})
+
+.(function (){"use strict";// build/release/tmp_modules/node/tty.ts
+var $, {
+  setRawMode: ttySetMode,
+  isatty,
+  getWindowSize: _getWindowSize,
+  rawModeStateSize
+} = @lazy(113)
+- #6 @68073709  if (source?.updateRef)
+        source.updateRef(!1);
+      return this;
+    }, Prototype.setRawMode = function(flag) {
+      if (flag = !!flag, this.fd === 0) {
+        let err = ttySetMode
+- #7 @68073877   let err = ttySetMode(flag);
+        if (err)
+          return this.emit("error", Error("setRawMode failed with errno: " + err)), this;
+      } else {
+        let handle = this.@bunNativePt
+- … +34 more
+
+## #14 append [1m] to the model name  needle="append [1m] to the model name"  hits=2
+- #0 @92291084 ..d...supports_1m_beta.....j..unknown-model notice failed........unknown-model...$.....p.append [1m] to the model name for 1M5...M%..set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window.......C.O.If the mode
+- #1 @191312071 X_CONTEXT_TOKENS;if(H&&W!==void 0&&W>0)return null;let G=j<1e6,re=[];if(!kO()&&G)re.push("append [1m] to the model name for 1M");if(H)re.push("set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window");let ee=re.
+
+## #14 neutralizedByFork  needle="neutralizedByFork"  hits=7
+- #0 @92673192 n.g. .	....S.. instead........LP..opus.....|..sonnet.......c..haiku........U..[1m]........neutralizedByFork........?..tengu_resume_model_restore..........is_eap..#...N...tengu_refusal_fallback_resu
+- #1 @191079384 ngth-1;o>=0;o--){let t=e[o];if(t?.type==="system"&&t.subtype==="model_refusal_fallback")t.neutralizedByFork=!0}}function ye(e){let o=J(e);return o?.neutralizedByFork===!0?{fallbackModel:o.fallbackM
+- #2 @191079442 pe==="model_refusal_fallback")t.neutralizedByFork=!0}}function ye(e){let o=J(e);return o?.neutralizedByFork===!0?{fallbackModel:o.fallbackModel}:void 0}function F(e,o){s("tengu_resume_model_restore
+- #3 @191080414 e==="model_refusal_fallback"&&(r.apiRefusalCategory==="cyber"||r.sawCyberRefusal===!0)&&r.neutralizedByFork!==!0?[r]:[]);if(t.length>0)BLe(t.find((r)=>r.apiRefusalCategory==="cyber"&&r.requestId!=n
+- #4 @193491934 get(e.uuid);if(!f)continue;let c=f.type==="system"&&f.subtype==="model_refusal_fallback"?{neutralizedByFork:!0}:void 0,L={...f,...c,sessionId:a,parentUuid:y,isSidechain:!1,sessionKind:void 0,forked
+- #5 @193494369 get(r.uuid);if(!o)continue;let y=o.type==="system"&&o.subtype==="model_refusal_fallback"?{neutralizedByFork:!0}:void 0,R={...o,...y,sessionId:i,parentUuid:I,isSidechain:!1,sessionKind:void 0,forked
+- #6 @205458613 get(C.logicalParentUuid)??null,U=C.type==="system"&&C.subtype==="model_refusal_fallback"?{neutralizedByFork:!0}:void 0,F={...C,...U,uuid:R,parentUuid:I,logicalParentUuid:j,sessionId:w,timestamp:O,i
+
+## #14 sonnet[1m]  needle="sonnet[1m]"  hits=10
+- #0 @94916112 p.p.l.i.e.s. .o.n. .r.e.s.t.a.r.t.....Io..override_user_selection.........
+     ..
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: ...
+- #1 @99657962 tengu_opus_to_opus1m_migration..........sonnet-4-5-20250929[1m].,....
+..Failed to migrate sonnet[1m] model setting: ......".migration_sonnet1m_to_sonnet45......H]..migration_sonnet1m_write_f
+- #2 @179703741 t-4-5","claude-sonnet-4-6","claude-sonnet-5"],LO=["sonnet","opus","haiku","fable","best","sonnet[1m]","opus[1m]","fable[1m]","opusplan"],xyt=["sonnet","opus","haiku","fable"];var Mjt="claude
+- #3 @180875627 h 1M context window - for long sessions with large codebases"}}function B(){let e={value:"sonnet[1m]",label:"Sonnet 5 (1M context)",descriptionForModel:"Sonnet 5 with 1M context window - for
+- #4 @191561804 (t){if(oe().sonnet1m45MigrationComplete)return!0;let p=!1;if(be("userSettings")?.model==="sonnet[1m]"){let{error:w}=await Wt("userSettings",{model:"sonnet-4-5-20250929[1m]"},void 0,t);if(w)r
+- #5 @191561931 serSettings",{model:"sonnet-4-5-20250929[1m]"},void 0,t);if(w)return n(`Failed to migrate sonnet[1m] model setting: ${w}`,{level:"error"}),f("migration_sonnet1m_to_sonnet45","migration_sonne
+- #6 @191562069 ,f("migration_sonnet1m_to_sonnet45","migration_sonnet1m_write_failed"),!1;p=!0}if(zl()==="sonnet[1m]")Su("sonnet-4-5-20250929[1m]"),p=!0;if(_e((w)=>({...w,sonnet1m45MigrationComplete:!0}),t)
+- #7 @191562546 250929[1m]")return!0;let p=o.endsWith("[1m]"),{error:u}=await Wt("userSettings",{model:p?"sonnet[1m]":"sonnet"},void 0,t);if(u)return n(`Failed to migrate Sonnet 4.5 model setting: ${u}`,{le
+- … +2 more
+
+## #14 render as code  needle="render as code"  hits=0
+
+## #14 as code so  needle="as code so"  hits=0
+
+## #14 markdown link  needle="markdown link"  hits=1
+- #0 @181322809 sults.
+- After answering from results, end with a "Sources:" list of the URLs you used as markdown links.`;return`
+- Allows Claude to search the web and use the results to inform responses
+- Pr
+
+## #14 fast-mode  needle="fast-mode"  hits=33
+- #0 @92418552 O.cost-threshold......L1W.model-deprecation-warning.......b7..device-tool-notices......Uw.fast-mode-cooldown-started..........fast-mode-cooldown-expired......G...fast-mode-org-changed......
+- #1 @92418588 ecation-warning.......b7..device-tool-notices......Uw.fast-mode-cooldown-started..........fast-mode-cooldown-expired......G...fast-mode-org-changed.......*...fast-mode-overage-rejected.....
+- #2 @92418624 l-notices......Uw.fast-mode-cooldown-started..........fast-mode-cooldown-expired......G...fast-mode-org-changed.......*...fast-mode-overage-rejected.......q..fast-mode-cooldown......D:Q.ide
+- #3 @92418656 down-started..........fast-mode-cooldown-expired......G...fast-mode-org-changed.......*...fast-mode-overage-rejected.......q..fast-mode-cooldown......D:Q.ide-status-disconnected.....\|<.ide
+- #4 @92418692 down-expired......G...fast-mode-org-changed.......*...fast-mode-overage-rejected.......q..fast-mode-cooldown......D:Q.ide-status-disconnected.....\|<.ide-status-install-error...._.\.install
+- #5 @92567528 nModel........onSetDefault......W.isStandaloneCommand.....ev..showFastModeNotice........f.fast-mode-toggled...........unavailableReason...........tengu_thinking_toggled_hotkey...........thi
+- #6 @92618133 icted-bridge-........not_allowed..... LY.family_alias_stepped_down........	u.model-switch-fast-mode......~.;.Unknown color ".....Fz..". Available: ..	....E.., default.........9.href.....#9.
+- #7 @93350288 y unavailable.........You've hit your fast limit..).....y.https://code.claude.com/docs/en/fast-mode.......;...High-speed mode for H....Gq.. Draws from usage credits at a higher rate. Separa
+- … +25 more
+
+## #14 Fast mode  needle="Fast mode"  hits=91
+- #0 @92497344 ined value........internal_eventEmitter...
+...{.}.overloaded..
+...i...rate_limit..@.......Fast mode overloaded and is temporarily unavailable . resets in 8...Q...Fast limit reached and temp
+- #1 @92558164 <. failed: http_.......bd.pluginSurveyState...	....2..perPlugin.........i.suspend.-....d'.Fast mode is now available . /fast to turn on.........1.hideTrailingZeros.......F...invalidates.&..
+- #2 @93350077 h9.jsC...19..Cannot destructure property 'cooldown' from null or undefined value.....F... Fast mode (research preview)...	.......Fast mode.......-Y. . resets in ...3....6..Fast mode overlo
+- #3 @93350116 y 'cooldown' from null or undefined value.....F... Fast mode (research preview)...	.......Fast mode.......-Y. . resets in ...3....6..Fast mode overloaded and is temporarily unavailable....
+- #4 @93350160 ..F... Fast mode (research preview)...	.......Fast mode.......-Y. . resets in ...3....6..Fast mode overloaded and is temporarily unavailable.........You've hit your fast limit..).....y.htt
+- #5 @93350460 gher rate. Separate rate limits apply......V".confirm:nextField.......{.j.resetAt........Fast mode OFF......._B.. Kept Fast mode ON..........Kept Fast mode OFF.......T..Fast mode is not av
+- #6 @93350490 s apply......V".confirm:nextField.......{.j.resetAt........Fast mode OFF......._B.. Kept Fast mode ON..........Kept Fast mode OFF.......T..Fast mode is not available..........shortcut.....
+- #7 @93350517 tField.......{.j.resetAt........Fast mode OFF......._B.. Kept Fast mode ON..........Kept Fast mode OFF.......T..Fast mode is not available..........shortcut........tengu_fast_mode_picker_s
+- … +83 more
+
+## #14 switched to  needle="switched to"  hits=12
+- #0 @92755064 Do not suggest the extension again............Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was i
+- #1 @96069795 ; files Claude changes there are not arriving here......`.cloud-branch:.........w.Claude switched to branch ..0...rN.. in the cloud; its commits will be carried onto ........ at the next tur
+- #2 @100168528 ched).*...]..., which it follows at every turn (you had .........detached HEAD........B..switched to ....x`s.The user switched to ...!...w...; this checkout followed (it was ...........The u
+- #3 @100168557 ows at every turn (you had .........detached HEAD........B..switched to ....x`s.The user switched to ...!...w...; this checkout followed (it was ...........The user is on .*....... and this 
+- #4 @100486354 m...The cloud session reset its model to the workspace default..........The cloud session switched to ..$.......Reset model to the workspace default....\...[remote] set_model rejected: ......
+- #5 @180372127 ontent:i(),uuid:X(),session_id:i()}).describe('@internal Emitted when the current turn is switched to the configured fallback model because the primary model failed (trigger "model_not_found"
+- #6 @186549595 not just an explicit \`navigate\`), a \`navigate\` was redirected elsewhere, or the agent switched to another tab. The same line repeats on consecutive calls until an action on \`to\` is allo
+- #7 @190899280 lly. Do not suggest the extension again.",Xn="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was i
+- … +4 more
+
+## #14 model name cannot be empty  needle="Model name cannot be empty"  hits=2
+- #0 @94916220 8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: .........m.Model name cannot be empty..(...3C#.' is not in the list of available models......&.model_validation	.......ephemera
+- #1 @193083137 Cache.validatedModels}async function UUe(e,o){let n=e.trim();if(!n)return{valid:!1,error:"Model name cannot be empty"};if(!br(n,o.skipEntitlementDenyOverlay?{skipEntitlementDenyOverlay:!0}:void 0))return{va
+
+## #15 ensureAgentsWorkspaceTrust  needle="ensureAgentsWorkspaceTrust"  hits=6
+- #0 @99262141 nhppj23n.js.......K..B:/~BUN/root/chunk-pg2skz11.js..U.......Cannot destructure property 'ensureAgentsWorkspaceTrust' from null or undefined value.........S.list_return.
+.......cli_agents......~.z.default_h
+- #1 @99265404 riesSessionConfig.....m.*.refuseBypassUnderRoot.......*A..applyBypassPolicyGate...........ensureAgentsWorkspaceTrust..........agentsTrustDecision.........ensureAgentsBypassConsent.......H...isListReturnRela
+- #2 @101796421 unk-0rq3ej08.jscreateDeviceHooksProcessMemorydeviceHooksProcessMemoriesagentsTrustDecisionensureAgentsWorkspaceTrustinitinitStatesinitializeTelemetryAfterTrustshouldOmitMetricUnitsagentsCommandHandler0c30af
+- #3 @178183475 void 0;U?.refuseBypassUnderRoot(u);let Q=U?.applyBypassPolicyGate(u)??u,Y=await _(f(!1)),{ensureAgentsWorkspaceTrust:mt,agentsTrustDecision:gt}=await import("B:/~BUN/root/chunk-pg2skz11.js");if(await mt(Y,g
+- #4 @191849350 PendingExposures:!0}),u().catch(d),l(t),g();return}}}export{T as agentsTrustDecision,B as ensureAgentsWorkspaceTrust};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of
+- #5 @199399935 nsent:C}=await import("B:/~BUN/root/chunk-nhppj23n.js");w(l);let c=h(l),r=await d(f(!1)),{ensureAgentsWorkspaceTrust:y,agentsTrustDecision:S}=await import("B:/~BUN/root/chunk-pg2skz11.js");await y(r,S(),o),
+
+## #15 agentsTrustDecision  needle="agentsTrustDecision"  hits=5
+- #0 @99265440 ssUnderRoot.......*A..applyBypassPolicyGate...........ensureAgentsWorkspaceTrust..........agentsTrustDecision.........ensureAgentsBypassConsent.......H...isListReturnRelaunch......R.gracefulShutdown 
+- #1 @101796402 oolsB:/~BUN/root/chunk-0rq3ej08.jscreateDeviceHooksProcessMemorydeviceHooksProcessMemoriesagentsTrustDecisionensureAgentsWorkspaceTrustinitinitStatesinitializeTelemetryAfterTrustshouldOmitMetricUnits
+- #2 @178183505 t(u);let Q=U?.applyBypassPolicyGate(u)??u,Y=await _(f(!1)),{ensureAgentsWorkspaceTrust:mt,agentsTrustDecision:gt}=await import("B:/~BUN/root/chunk-pg2skz11.js");if(await mt(Y,gt(),l),J(),U)await U.en
+- #3 @191849325 tne3hy.js")]);m({preservePendingExposures:!0}),u().catch(d),l(t),g();return}}}export{T as agentsTrustDecision,B as ensureAgentsWorkspaceTrust};
+.// @bun @bytecode
+// Claude Code is a Beta product per
+- #4 @199399964 N/root/chunk-nhppj23n.js");w(l);let c=h(l),r=await d(f(!1)),{ensureAgentsWorkspaceTrust:y,agentsTrustDecision:S}=await import("B:/~BUN/root/chunk-pg2skz11.js");await y(r,S(),o),d7e("agents_view");let
+
+## #15 Workspace trust not yet accepted  needle="Workspace trust not yet accepted"  hits=3
+- #0 @96927280 nnot destructure property 'primaryCheckoutVouches' from null or undefined value...~....?..Workspace trust not yet accepted. Run `claude` once in this directory and accept the trust dialog, then retry with --workt
+- #1 @186344839  lock ${o} worktree ${e}: ${l(u)}`),!0}}async function Gct(e,t,r,o){if(!Jo())throw Error("Workspace trust not yet accepted. Run `claude` once in this directory and accept the trust dialog, then retry with --workt
+- #2 @186374112 =await uIe(e,t);return r||o>0}async function hbr(e,t,r){if(!Jo())return{handled:!1,error:"Workspace trust not yet accepted. Run `claude` once in this directory and accept the trust dialog, then retry with --workt
+
+## #15 skipping workspace trust  needle="skipping workspace trust"  hits=0
+
+## #15 skip workspace trust  needle="skip workspace trust"  hits=0
+
+## #15 process.env.CI  needle="process.env.CI"  hits=1
+- #0 @178739359 .GITHUB_ACTIONS))return"github-actions";if(Me(process.env.GITLAB_CI))return"gitlab-ci";if(process.env.CIRCLECI)return"circleci";if(process.env.BUILDKITE)return"buildkite";if(Me(!1))return"ci";if
+
+## #15 CLAUBBIT  needle="CLAUBBIT"  hits=7
+- #0 @98821164 ...&k.getPackageManagers........2.getRuntimes.........CLAUDE_CODE_HOST_PLATFORM...........CLAUBBIT........CLAUDE_CODE_TAGS.....va.CLAUDE_CODE_ACTION.......I..detectDeploymentEnvironment...
+- #1 @178765052 LOW_ANT_COMPUTER_USE_MCP:()=>EL,ANTHROPIC_CONFIG_DIR:()=>xO,BASH_MAX_OUTPUT_LENGTH:()=>Sc,CLAUBBIT:()=>_L,CLAUDECODE:()=>rL,CLAUDE_AFK_COUNTDOWN_MS:()=>Ic,CLAUDE_AFK_TIMEOUT_MS:()=>Uc,CLAU
+- #2 @180560151 (","),runtimes:t.join(","),isRunningWithBun:a.isRunningWithBun(),isCi:Me(!1),isClaubbit:a.CLAUBBIT,isClaudeCodeRemote:Me(process.env.CLAUDE_CODE_REMOTE),isLocalAgentMode:process.env.CLAUDE
+- #3 @191537549 n{averageFps:Math.round(o*100)/100,low1PctFps:Math.round(w*100)/100}}}function Qi(t){if(a.CLAUBBIT||!Jo())return;Sx(!0),Hh(t)}function Zi(t){_e((o)=>({...o,hasCompletedOnboarding:!0,lastOn
+- #4 @191542110 (U)=>e(N,{host:t.host,onDone:()=>{Zi(O),U()}}),{onChangeAppState:w7})}let P=!1,M=!0;if(!a.CLAUBBIT){if(M=Jo(),!M||cre()){P=!0;let{TrustDialog:N}=await import("B:/~BUN/root/chunk-xm96b37r.j
+- #5 @191847951 .js";import"B:/~BUN/root/chunk-90xxmjzx.js";function T(){if(Me(!1)||Boolean(a.IS_DEMO)||a.CLAUBBIT)return"skip";return Jo()&&!cre()?"trusted":"ask"}async function B(s,i,t){switch(i){case"s
+- #6 @191848060 p";return Jo()&&!cre()?"trusted":"ask"}async function B(s,i,t){switch(i){case"skip":if(!a.CLAUBBIT&&Jo()){Sx(!0);let{primePlanSlugCollisions:o}=await import("B:/~BUN/root/chunk-63yqfkx8.js
+
+## #15 IS_DEMO  needle="IS_DEMO"  hits=10
+- #0 @93403888 ......vj..companyAnnouncements........companyAnnouncement....S...Message from .......)E..IS_DEMO.......5.organizationName.....>..passesLastSeenRemaining.....	{..hasCache......h.passesUps
+- #1 @178761121 ,INTELLIJ_TERMINAL_COMMAND_BLOCKS:()=>fC,INTELLIJ_TERMINAL_COMMAND_BLOCKS_REWORKED:()=>KC,IS_DEMO:()=>SO,IS_SANDBOX:()=>RO,ITERM_SESSION_ID:()=>cC,JAVA_HOME:()=>$n,JAVA_TOOL_OPTIONS:()=>q
+- #2 @186776062 yr=[fG,txe,nxe,rxe].filter(Boolean);function dRt(){return{fleetFork:{open:()=>Ug()&&!Me(a.IS_DEMO),whenOpen:[yAt,_At],whenClosed:[hAt]},fleetBackground:{open:()=>Ug(),whenOpen:[_5n,S5n],w
+- #3 @191541706 e,O),{onboardingShown:!1,mcpApprovalSkipWarning:E,claudeInChromeAccepted:!1};if(Me(!1)||a.IS_DEMO)return Qi(O),BJe(),{onboardingShown:!1,mcpApprovalSkipWarning:E,claudeInChromeAccepted:!1
+- #4 @191847939 unk-m0p20t24.js";import"B:/~BUN/root/chunk-90xxmjzx.js";function T(){if(Me(!1)||Boolean(a.IS_DEMO)||a.CLAUBBIT)return"skip";return Jo()&&!cre()?"trusted":"ask"}async function B(s,i,t){swi
+- #5 @200514346 label:"Login",value:"Expired \u2014 log in again"});let o=In();if(o?.organizationName&&!a.IS_DEMO)s.push({label:"Organization",value:o.organizationName});if(o?.emailAddress&&!a.IS_DEMO)s.
+- #6 @200514433 !a.IS_DEMO)s.push({label:"Organization",value:o.organizationName});if(o?.emailAddress&&!a.IS_DEMO)s.push({label:"Email",value:o.emailAddress});return s}if(e.subscription)s.push({label:"Lo
+- #7 @200514777 alue:e.apiKeySource});if(gd())s.push({label:"Profile",value:YKe()});if(e.organization&&!a.IS_DEMO)s.push({label:"Organization",value:e.organization});if(e.email&&!a.IS_DEMO)s.push({label:
+- … +2 more
+
+## #15 agents skipping  needle="agents skipping"  hits=0
+
+## #16 PR-status  needle="PR-status"  hits=0
+
+## #16 pr-status  needle="pr-status"  hits=8
+- #0 @92484600 	.ctrl+t.......H..voice:pushToTalk........! for shell mode.....].viewing-agent...	...].).pr-status.......%.P.footer-indicator..... ..warmup........+.interrupt_agents........manage........q
+- #1 @96310959 tate{state count}
+      statusContextCountsByState{state count}
+    }
+  }}}}
+}.......>.gh-pr-status-cache.. ...;...(?:^|\s)(?:-n|--dry-run)(?=\s|$)2....*..\bgh\s+pr\s+checkout\b[^&|;]*\s(\d
+- #2 @97175095 ...auth_state.......d..x-ratelimit-reset.......`...html_url....`...pullRequest.....y...gh-pr-status-cache.json.....z...^#?\d+$.9.....D.Display name. Defaults to the filename without extensi
+- #3 @179298406 us.json"],["active-time-ledger","active-time.json"],["last-cleanup",".last-cleanup"],["gh-pr-status-cache","gh-pr-status-cache.json"],["server-sessions","server-sessions.json"],["deep-link-
+- #4 @179298427 me-ledger","active-time.json"],["last-cleanup",".last-cleanup"],["gh-pr-status-cache","gh-pr-status-cache.json"],["server-sessions","server-sessions.json"],["deep-link-register-failed",".de
+- #5 @184558561 await Promise.all(p.map(g)),{statuses:t,rateLimit:o,unbatched:r}}var gXe=()=>rJt(ge(),"gh-pr-status-cache.json"),hXe=Se.state("gh-pr-status-cache");function q$n(e,t){let r={};for(let[u,p]of
+- #6 @184558601 rateLimit:o,unbatched:r}}var gXe=()=>rJt(ge(),"gh-pr-status-cache.json"),hXe=Se.state("gh-pr-status-cache");function q$n(e,t){let r={};for(let[u,p]of e)if(p)r[u]=p;let o=S(r);if(o==="{}"||!
+- #7 @203029517 :0)+(ai?1:0),qi=!Jt&&Ne&&!mo.some((Sn)=>Sn.key===tqt)?e(t,{dimColor:!0,children:nst(Ne)},"pr-status"):null,Ds=null,ws=Un?r(t,{color:"ide",children:[r(t,{"aria-hidden":!0,children:[O.lozenge
+
+## #16 prStatusByUrl  needle="prStatusByUrl"  hits=4
+- #0 @96556616 ost........^..directState.........lastLoggedGhAuthState......{...baseRepoCache......l8Z.prStatusByUrl........ ..ghBackoffUntil......T.d.lastPersistedCacheBody......+...backoffUntil........act
+- #1 @184546548 ollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.
+- #2 @184547585 =null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.of(z().host)}function 
+- #3 @184554762 catch{return null}}function G$n(e){if(Tt()||KX())return Promise.resolve(null);return JE().prStatusByUrl(e).catch(()=>null)}function bJt(e,t){if(!t)return e;let r=tst(e);if(!r)return e;return t.
+
+## #16 lastPersistedCacheBody  needle="lastPersistedCacheBody"  hits=5
+- #0 @96556664 thState......{...baseRepoCache......l8Z.prStatusByUrl........ ..ghBackoffUntil......T.d.lastPersistedCacheBody......+...backoffUntil........activityKey.....Od..mainLoopActivityListener....Q...nestedCh
+- #1 @184546593 tLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.directState?.branch!==e)this.directState={branch:e,eta
+- #2 @184547290 *1000:Number.isFinite(r)&&r>0?r*1000:Date.now()+xfe}notePersistedCacheBody(e){if(e===this.lastPersistedCacheBody)return!1;return this.lastPersistedCacheBody=e,!0}reset(){this.pollerDisabled=!1,this.poll
+- #3 @184547334 w()+xfe}notePersistedCacheBody(e){if(e===this.lastPersistedCacheBody)return!1;return this.lastPersistedCacheBody=e,!0}reset(){this.pollerDisabled=!1,this.pollerBadStreak=0,this.pollerNotModifiedStreak=0
+- #4 @184547554 null,this.lastLoggedGhAuthState=null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.
+
+## #16 prStatuses  needle="prStatuses"  hits=15
+- #0 @92720516 ........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..
+- #1 @92728225 erty 'attachingJobId' from null or undefined value...E...,...Cannot destructure property 'prStatuses' from null or undefined value...I.......Cannot destructure property 'toggleCollapse' from
+- #2 @192130838 [],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class
+- #3 @192131709 )return;if(i)this.#I();else this.#o?.(),this.#o=null}#x(i){if(this.#i=i,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new 
+- #4 @192134546 bs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.pr
+- #5 @192134569 bs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJ
+- #6 @192134592 ){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs(
+- #7 @192134644 es;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S
+- … +7 more
+
+## #16 prStatusFooterEnabled  needle="prStatusFooterEnabled"  hits=7
+- #0 @92485420 ow.....T..parens..........copyOnSelect......H.lastPressHadAlt.........toggle-tasks........prStatusFooterEnabled...?....Ot.Cannot destructure property 'link' from null or undefined value.	...<1..underli
+- #1 @180605994 "copyOnSelect","leftArrowOpensAgents","defaultToAgentsView","permissionExplainerEnabled","prStatusFooterEnabled","remoteControlAtStartup","autoUploadSessions","autoAddRemoteControlDaemonWorker","remote
+- #2 @193635825 ",{enabled:e})}},{id:"prStatus",label:T("Show PR status footer","Show PR status"),value:i.prStatusFooterEnabled??!0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...
+- #3 @193635891 how PR status"),value:i.prStatusFooterEnabled??!0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e
+- #4 @193635938 !0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e})),s("tengu_pr_status_footer_setting_changed",
+- #5 @193635979 o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e})),s("tengu_pr_status_footer_setting_changed",{enabled:e})}},{id:"model",label:"Model",
+- #6 @203037384 wer"}})},"toggle-tasks")]:[]]}function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}function NY(nmo){let w0=g(17),{link:pl}=nmo,MY;if(w0[0]!==pl.prefix)MY=pl.prefix!==vo
+
+## #16 gh-pr-status-cache  needle="gh-pr-status-cache"  hits=6
+- #0 @96310956 ByState{state count}
+      statusContextCountsByState{state count}
+    }
+  }}}}
+}.......>.gh-pr-status-cache.. ...;...(?:^|\s)(?:-n|--dry-run)(?=\s|$)2....*..\bgh\s+pr\s+checkout\b[^&|;]*\s(\d+)(?=\
+- #1 @97175092 ......auth_state.......d..x-ratelimit-reset.......`...html_url....`...pullRequest.....y...gh-pr-status-cache.json.....z...^#?\d+$.9.....D.Display name. Defaults to the filename without extension....
+- #2 @179298403 tatus.json"],["active-time-ledger","active-time.json"],["last-cleanup",".last-cleanup"],["gh-pr-status-cache","gh-pr-status-cache.json"],["server-sessions","server-sessions.json"],["deep-link-regist
+- #3 @179298424 -time-ledger","active-time.json"],["last-cleanup",".last-cleanup"],["gh-pr-status-cache","gh-pr-status-cache.json"],["server-sessions","server-sessions.json"],["deep-link-register-failed",".deep-lin
+- #4 @184558558 rn await Promise.all(p.map(g)),{statuses:t,rateLimit:o,unbatched:r}}var gXe=()=>rJt(ge(),"gh-pr-status-cache.json"),hXe=Se.state("gh-pr-status-cache");function q$n(e,t){let r={};for(let[u,p]of e)if(
+- #5 @184558598 :t,rateLimit:o,unbatched:r}}var gXe=()=>rJt(ge(),"gh-pr-status-cache.json"),hXe=Se.state("gh-pr-status-cache");function q$n(e,t){let r={};for(let[u,p]of e)if(p)r[u]=p;let o=S(r);if(o==="{}"||!JE().n
+
+## #16 baseRepoCache  needle="baseRepoCache"  hits=5
+- #0 @96556592 ted.......J..resultsByHost........^..directState.........lastLoggedGhAuthState......{...baseRepoCache......l8Z.prStatusByUrl........ ..ghBackoffUntil......T.d.lastPersistedCacheBody......+..
+- #1 @184546527 1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directState
+- #2 @184546977 te=e,s("tengu_gh_pr_status_auth_state",{auth_state:c(e)})}rememberBaseRepo(e){return this.baseRepoCache=e,e}backOffUntil(e){this.ghBackoffUntil=e}backOffFromResponse(e){let t=Number(e.headers.g
+- #3 @184547506 this.pollerNotModifiedStreak=0,this.directState=null,this.lastLoggedGhAuthState=null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clea
+- #4 @184552572 ()})}).nullish()}));async function fJt(e,t){let r=`${e.host}/${e.owner}/${e.repo}`,o=JE().baseRepoCache;if(o?.forOrigin===r)return o;let u=await gJt(),p=u?fXe(u):null;if(p&&p.host===e.host)retu
+
+## #16 Cannot destructure property prStatuses  needle="Cannot destructure property 'prStatuses'"  hits=1
+- #0 @92728196 ......Cannot destructure property 'attachingJobId' from null or undefined value...E...,...Cannot destructure property 'prStatuses' from null or undefined value...I.......Cannot destructure property 'toggleCollapse' from 
+
+## #16 malformed  needle="malformed"  hits=706
+- #0 @66496060 must start with a non-digit.this version of PCRE2 does not have support for \P, \p, or \X.malformed \P or \p sequence.unknown property after \P or \p.subpattern name is too long (maximum 12
+- #1 @66496759 owed by a closing parenthesis.obsolete error (should not occur).(*VERB) not recognized or malformed.subpattern number is too big.subpattern name expected.internal error: parsed pattern over
+- #2 @82623092 ength - 1];
+
+    // Release assertions for React's behavior. If these break there will be malformed HTML.
+    if (typeof lastChunk === "string") {
+      this.destroy(new Error("The last chu
+- #3 @83095390 Image(): invalid base64 in data: URLImage(): only base64 data: URLs are supportedImage(): malformed data: URL (no comma)Image(): resizable / shared ArrayBuffer is not supported; pass a fixe
+- #4 @83761092 ..............`X.@....`X.@.......@.....................\.A.....P	A.....Q	A....Lockfile is malformed (dependency path is too long)Lockfile is malformed (dependency name "{}" is not a valid f
+- #5 @83761143 ....\.A.....P	A.....Q	A....Lockfile is malformed (dependency path is too long)Lockfile is malformed (dependency name "{}" is not a valid folder name)trees.2,.D.............Saving .. ...
+<in
+- #6 @83776111 LLUnexpected lockfile versionOutdated lockfile versionLockfile is missing dataLockfile is malformed (expected 0 at the end)Lockfile is missing resolution dataLockfile validation failed: lis
+- #7 @83834040 alid package nameMissing dependencies objectMissing package binaries objectUnsupported or malformed integrity hash; ignoringMissing integrity hash for npm package resolved to a tarball URL 
+- … +698 more
+
+## #16 JSON.parse pr  needle="prStatus"  hits=50
+- #0 @92416124 ..?W.permission denied...
+.......tokenUsage.......1..vimMode.....q^y.effortValue.........prStatus1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........W..cursorOffset...T.).st
+- #1 @92485420 ow.....T..parens..........copyOnSelect......H.lastPressHadAlt.........toggle-tasks........prStatusFooterEnabled...?....Ot.Cannot destructure property 'link' from null or undefined value.	.
+- #2 @92720516 ........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded
+- #3 @92728225 erty 'attachingJobId' from null or undefined value...E...,...Cannot destructure property 'prStatuses' from null or undefined value...I.......Cannot destructure property 'toggleCollapse' fr
+- #4 @96556616 ost........^..directState.........lastLoggedGhAuthState......{...baseRepoCache......l8Z.prStatusByUrl........ ..ghBackoffUntil......T.d.lastPersistedCacheBody......+...backoffUntil......
+- #5 @180605994 "copyOnSelect","leftArrowOpensAgents","defaultToAgentsView","permissionExplainerEnabled","prStatusFooterEnabled","remoteControlAtStartup","autoUploadSessions","autoAddRemoteControlDaemonWo
+- #6 @184546548 ollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(
+- #7 @184547585 =null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.of(z().host)}func
+- … +42 more
+
+## #17 weeks-old  needle="weeks-old"  hits=0
+
+## #17 weeks old  needle="weeks old"  hits=0
+
+## #17 machine was off  needle="machine was off"  hits=3
+- #0 @100834930 n.d. .c.a.n.'.t. .b.e. .r.e.s.u.m.e.d...S...V.;.This environment was cleaned up while the machine was offline and can't be resumed..$...R.e.Y.o.u.r. .w.o.r.k. .i.s. .s.a.f.e. ..  .w.o.r.k.t.r.e.e
+- #1 @205347806 );function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This envi
+- #2 @205347944 leaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kep
+
+## #17 ask before resuming  needle="ask before resuming"  hits=0
+
+## #17 ask before resume  needle="ask before resume"  hits=0
+
+## #17 Resume this session  needle="Resume this session"  hits=6
+- #0 @97323309  transcript; try again.......I1..AgentTranscriptFetchError........7!.--worktree ."...3P%.
+Resume this session with:
+claude ..	...-{..--resume .......K/p.SIGBREAK.....c..unhandledRejection.......%..Cl
+- #1 @100818436 lling stuck sessionId=.....l..[bridge:shutdown] Cleaning up ......Z.2. worktree(s)6.......Resume this session by running `claude remote-control ......_..--session-id ...V.......Environment preserved
+- #2 @101191886 hat's next..........finish: ........All tasks completed.?...xf..Don't want these changes? Resume this session (above), then run.?....#..`/rewind` to roll back the turn's tool edits (bash-made changes
+- #3 @187438105 ").replaceAll('"',"\\\"")}"`;else r=e;let o=c7n(),u=o?`--worktree ${o} `:"";zG(1,ae.dim(`
+Resume this session with:
+claude ${u}--resume ${r}
+`)),this.resumeHintPrinted=!0}catch{}}forceExit(e){if(this
+- #4 @194010688 inish: ${r}`:"All tasks completed.")}return e.push("","---","","Don't want these changes? Resume this session (above), then run","`/rewind` to roll back the turn's tool edits (bash-made changes",`exc
+- #5 @205362115 led([...De]);if(e.preserveOnShutdown&&!et){i.logStatus(e.spawnMode==="single-session"&&p?`Resume this session by running \`claude remote-control ${e.ownsPointer?"--continue":`--session-id ${p}`}\``:"
+
+## #17 Resume the saved  needle="Resume the saved"  hits=0
+
+## #17 lastHeartbeat  needle="lastHeartbeat"  hits=16
+- #0 @95552888 .......*Q.probeBeatSpacingMs........[.heartbeatTimer.......Au.heartbeatInFlight...........lastHeartbeatSentAtMs...........lastHeartbeatSuccessAtMs......r.lastHeartbeat429AtMs.....x,.idleGrantLa
+- #1 @95552920 ....[.heartbeatTimer.......Au.heartbeatInFlight...........lastHeartbeatSentAtMs...........lastHeartbeatSuccessAtMs......r.lastHeartbeat429AtMs.....x,.idleGrantLatched....\.4.reactivationBeatArm
+- #2 @95552952 artbeatInFlight...........lastHeartbeatSentAtMs...........lastHeartbeatSuccessAtMs......r.lastHeartbeat429AtMs.....x,.idleGrantLatched....\.4.reactivationBeatArmed.........s.pendingForcedBeat..
+- #3 @198269381 racker;unsubscribeIdleTracker;probeBeatSpacingMs;heartbeatTimer=null;heartbeatInFlight=!1;lastHeartbeatSentAtMs=0;lastHeartbeatSuccessAtMs=Date.now();lastHeartbeat429AtMs=0;idleGrantLatched=!1;
+- #4 @198269405 acker;probeBeatSpacingMs;heartbeatTimer=null;heartbeatInFlight=!1;lastHeartbeatSentAtMs=0;lastHeartbeatSuccessAtMs=Date.now();lastHeartbeat429AtMs=0;idleGrantLatched=!1;reactivationBeatArmed=!1
+- #5 @198269441 mer=null;heartbeatInFlight=!1;lastHeartbeatSentAtMs=0;lastHeartbeatSuccessAtMs=Date.now();lastHeartbeat429AtMs=0;idleGrantLatched=!1;reactivationBeatArmed=!1;pendingForcedBeat=!1;probeBeatTimer
+- #6 @198284186 igger=e;if(this.heartbeatInFlight){this.pendingForcedBeat=!0;return}let r=Date.now()-this.lastHeartbeatSentAtMs;if(r<this.probeBeatSpacingMs){if(this.probeBeatTimer)return;this.probeBeatTimer=s
+- #7 @198285000 his.beatOnReactivation&&this.reactivationBeatArmed&&this.isIdleAdvised()&&Date.now()-this.lastHeartbeat429AtMs>this.seedHeartbeatIntervalMs}restoreReactivationArm(){this.reactivationBeatArmed=t
+- … +8 more
+
+## #17 hostDied  needle="hostDied"  hits=0
+
+## #17 stale session  needle="stale session"  hits=5
+- #0 @100337702 y (.&..."2d.[voice] Accumulated final transcript (..-.....e.[voice] ignoring onError from stale session: ...8.......[voice] ignoring stale onError from superseded attempt: B....AT.[voice] early
+- #1 @100882836  re-authorization (token expired).&...P...MCP session expired during tool call (......w..stale session.......N=Q.connection closed...2...U'..), clearing connection cache for re-initialization.
+- #2 @205759288 .E,voiceInterimTranscript:g}})}},onError:(t,d)=>{if(p()){n(`[voice] ignoring onError from stale session: ${t}`);return}if(this.#T!==v){n(`[voice] ignoring stale onError from superseded attempt:
+- #3 @207117849 p"||ee.type==="claudeai-proxy");if(Q||se){X(N,`MCP session expired during tool call (${Q?"stale session":"connection closed"}), clearing connection cache for re-initialization`);let Pe=Xe(ee,N)
+- #4 @207259400 "||r.type==="claudeai-proxy");if(Pe||be){X(t,`MCP session expired during tool call (${Pe?"stale session":"connection closed"}), clearing connection cache for re-initialization`);let ae=Le(r,t),
+
+## #17 real end  needle="real end"  hits=0
+
+## #17 stopped at  needle="stopped at"  hits=25
+- #0 @92377452 vision........HEAD^{tree}
+0.......dir-sync: seed measurement failed (pack-objects ....=Q..stopped at the limit........, changed tracked files ........stashBlocked0....i..dir-sync: untracked 
+- #1 @92526554 alized.......s.forkSessionId........*H.suppressResumeHint..(.....A.[tasks] carry to fork stopped at the cap......E.[tasks] carry to fork skipped ..........CLAUDE_CODE_TASK_LIST_ID........[t
+- #2 @95201267 jpeg' from null or undefined value......}..n.o.t. .c.a.p.t.u.r.e.d. ..  ...........render stopped at ..A.....?.Cannot destructure property 'issues' from null or undefined value.........S.inj
+- #3 @95902098  action=........executor_threw..
+........  .a.c.t.i.o.n.s.[......	@.STOPPED.......K.Batch stopped at actions[......*iP.). Completed ...	.....'. not run.........2.. actions ok.	...+.Z.isAbor
+- #4 @96117326 W1..>; skipping deeper subtree instead of overflowing the call stack'....+..ink tree walk stopped at MAX_TREE_DEPTH.>.......Cannot destructure property 'col' from null or undefined value....
+- #5 @97086168 kId=.....9... taskPresent=...........already-notified........task-not-in-registry........stopped at its .....>...-turn limit (partial result; .......	l.. to task-id to continue)........fail
+- #6 @98348849 e:///B:/%7EBUN/root/chunk-280yeq4g.js.....n#.agent:builtin:fork.. ...r.Z.NOTE: this agent stopped at its U...[\..subagent_type is required: the general-purpose agent is not available in this
+- #7 @100861970 urned InvalidParams on cursor; returning .........:. entries from prior pages......p.b.: stopped at .......$*M. pages with more pending(...z.4.file:///B:/%7EBUN/root/chunk-26rq0ae2.js(...Y3
+- … +17 more
+
+## #17 resume overlay  needle="resume overlay"  hits=0
+
+## #17 Resume saved  needle="Resume saved"  hits=0
+
+## #18 older conversation  needle="older conversation"  hits=0
+
+## #18 typed prompt  needle="typed prompt"  hits=1
+- #0 @200154503 ent to your collector (this data never reaches Anthropic):
+`+"- `userPrompts` \u2014 user-typed prompt text\n"+"- `assistantResponses` \u2014 assistant message text\n"+"- `toolDetails` \u2014 
+
+## #18 queuedPrompt  needle="queuedPrompt"  hits=14
+- #0 @92238968 s.......].failure.....#.o.no_task_contract........stopped by an external signal........?..queuedPrompt.....gR.bridgeSessionSeq.....f..bridgeOutboundOnly..........bridgeSessionGroupingId.......
+- #1 @182976061 neage:W().optional(),intent:i(),displayIntent:i().optional(),initialPrompt:i().optional(),queuedPrompt:i().optional(),name:i().optional(),nameSource:le(["user","auto","collision"]).optional().
+- #2 @189669424 onId}}function Gkt(e){return qe().discard(e)}async function pt(e,t,o,r){return ps(e,{...t,queuedPrompt:o,updatedAt:new Date().toISOString()},r).then(()=>!0,(i)=>(ea(i),!1))}async function p$e(
+- #3 @189674551 nt",se)):me.toSpliced(we,1,...oS("--agent",se))}let Ve=R,he=Re?void 0:t?.initialPrompt??g.queuedPrompt??(Oe||Ve?void 0:u.intent);if(!Re&&he!==void 0&&t?.initialPrompt===void 0&&g.queuedPrompt=
+- #4 @189674640 .queuedPrompt??(Oe||Ve?void 0:u.intent);if(!Re&&he!==void 0&&t?.initialPrompt===void 0&&g.queuedPrompt===void 0)s("tengu_resume_interrupted_turn",{surface:v("respawn_job"),kind:v("intent_repla
+- #5 @189678330 ,kinds:[]}},...Oe?{}:{firstTerminalAt:null},daemonShort:ue.short,...Pt&&{respawnFlags:Pt},queuedPrompt:void 0,...C&&{sessionId:N,resumeSessionId:N},sessionIdTaken:void 0,updatedAt:new Date().t
+- #6 @189681943 tion cr(e,t,o){if(iy(t)!=="prompt")return!1;Uu(e);let r=await nr(e,o);if(!r)return!1;if(r.queuedPrompt!==void 0)return r.queuedPrompt===t;return pt(e,r,t,o)}async function Kke(e,t,o,r,i,d){let
+- #7 @189681974 pt")return!1;Uu(e);let r=await nr(e,o);if(!r)return!1;if(r.queuedPrompt!==void 0)return r.queuedPrompt===t;return pt(e,r,t,o)}async function Kke(e,t,o,r,i,d){let u=Date.now(),m=(C,N)=>{s("teng
+- … +6 more
+
+## #18 initialPrompt  needle="initialPrompt"  hits=68
+- #0 @68678188  function onSigCont() {
+        if (self.editorMode)
+          self.output.write(`${self._initialPrompt}.editor
+`), self.output.write(`// Entering editor mode (Ctrl+D to finish, Ctrl+C to cance
+- #1 @68686139 reset", this.context);
+    }
+    displayPrompt(preserveCursor) {
+      let prompt = this._initialPrompt;
+      if (this[kBufferedCommandSymbol].length)
+        prompt = kMultilinePrompt.descrip
+- #2 @68686350 setPrompt(prompt), this.prompt(preserveCursor);
+    }
+    setPrompt(prompt) {
+      this._initialPrompt = prompt, super.setPrompt(prompt);
+    }
+    complete() {
+      ReflectApply(this.complet
+- #3 @68688657 
+  }
+  function _turnOffEditorMode(repl) {
+    repl.editorMode = !1, repl.setPrompt(repl._initialPrompt);
+  }
+  function defineDefaultCommands(repl) {
+    repl.defineCommand("break", {
+      he
+- #4 @92355924 perty_count.......%B..required.....f..has_required_fields.....E.&.getSystemPrompt........initialPrompt.........S.apply3PDefaultFallbacks.........pendingUserModel.....h..mantleOverride........'
+- #5 @92538136 ..remote_bootstrap.....C).workerCameUp
+....H..onWorkerUp.....*@..queue_dropped...........initialPromptUuid......./$..provisioning......>.(\u2026|\.\.\.)$.....!..overrideMessage.
+....(?.setMess
+- #6 @180310107 ills:x(i()).optional().describe("Array of skill names to preload into the agent context"),initialPrompt:i().optional().describe("Auto-submitted as the first user turn when this agent is the mai
+- #7 @181384786 "keywords","compatibility","tools","disallowedTools","color","permissionMode","maxTurns","initialPrompt","memory","background","isolation","observer","observerMessage","observeSubagents","keep-
+- … +60 more
+
+## #18 starting a new session  needle="starting a new session"  hits=2
+- #0 @99531652 ktrees....f.).The session process G...Ut... You can try again by sending a new message or starting a new session......$b*.
+
+Last output before exit:
+.
+...F.&.exitSignal......n.}.runner_exit.....J.
+./wor
+- #1 @187900304 "failed to start":`exited with code ${e}`}. You can try again by sending a new message or starting a new session.`;if(n.trim().length>0){let m=n.length>Vr?`\u2026${n.slice(-Vr)}`:n;d+=`
+
+Last output bef
+
+## #18 newsession  needle="newsession"  hits=7
+- #0 @92722756 .......x.. isn't available in ........tengu_fleetview_fold_expand......;9.section.
+.......newsession.......d..relaunchForUpdate......%...searchKeyDown.......wM..willInsertNewline........=r.
+- #1 @192165261 null,We(Ie.group)}else if(Ie?.kind==="earlier")ze(Ie.entry,"section");else if(Ie?.kind==="newsession")lt(Ie.origin);else yt(Fe)}function Jc(i,d){let{editor:m,dispatchInputActive:w,insertAtCu
+- #2 @192175921 eak;case"done":F.push(me);break}}F.sort((me,be)=>Ha(be.state)-Ha(me.state));let K=[{kind:"newsession",origin:w,group:Rb}],W=(me,be)=>{for(let Te of be)K.push({kind:"job",job:Te,origin:EU(Te.
+- #3 @192210221 HiddenFailed} failed`:""})`:`\u2026 ${Ke.hidden} more`]})},`f:${Ke.group}`)}if(Ke.kind==="newsession"){return r(o,{flexDirection:"column",children:[r(o,{ref:Xt?In:void 0,paddingLeft:Co,backg
+- #4 @192211545  ",e(t,{color:"suggestion",children:"/fork"})," a session you're already in."]})]})]})]},"newsession")}if(Ke.kind==="earlier"){let Kl=Ke.entry;return r(o,{ref:Xt?In:void 0,width:"100%",paddi
+- #5 @192218038 "?e(t,{dimColor:!0,wrap:"truncate-end",children:r(ue,{children:[e(t,{children:zo?.kind==="newsession"?`${O.arrowRight} or enter to start`:`${O.arrowRight} or enter to open`}),sn&&!ui&&e(t,{c
+- #6 @192261445 ode==="prompt"&&!Ge){if(Je(),X?.kind==="earlier")le(X.entry,"section");else if(X?.kind==="newsession")ye(X.origin);else xe(Q);return}if((d.meta||d.superKey)&&d.key>="1"&&d.key<="9"){Je();let
+
+## #18 restoreSessionId  needle="restoreSessionId"  hits=0
+
+## #18 dropped prompt  needle="dropped prompt"  hits=0
+
+## #19 open in a terminal  needle="open in a terminal"  hits=0
+
+## #19 open in another terminal  needle="open in another terminal"  hits=0
+
+## #19 already resumed  needle="already resumed"  hits=4
+- #0 @95979691 ken.....%y.currentAttr.....).t.currentLocation......Y.entityDecoder.......k...Parser was already resumed.........Unknown state...B....m..Cannot destructure property 'element' from null or undef
+- #1 @96760092 eceipt reaches you with a later turn: if that turn is the user's own typed message it has already resumed ;....... (comments sent to Claude meanwhile are being answered now).,.....@., otherwise t
+- #2 @185180587 eceipt reaches you with a later turn: if that turn is the user's own typed message it has already resumed ${o}${r.catchUp===!1?"":" (comments sent to Claude meanwhile are being answered now)"}, o
+- #3 @204352660 )}this.inLoop=!1}pause(){this.paused=!0}resume(e){if(!this.paused)throw Error("Parser was already resumed");if(this.paused=!1,this.inLoop)return;if(this._runParsingLoop(),!this.paused)e===null||e
+
+## #19 already open  needle="already open"  hits=5
+- #0 @88371106 tion provided to archive_read_open.format-open.res-open.file-open.bundle-open.database is already open.session is not open.database is not open.async iterator open.IfNotOpen.isOpen.SorterOpen.
+- #1 @97676942 server for file ....!.h.LSP request failed for file 
+......., method '..-....'..LSP: File already open, skipping didOpen for ...........textDocument/didOpen.....)..LSP: Sent didOpen for ......
+- #2 @187011244 )return;let Be=CG(dT.resolve(Te)).href;if(u.get(Be)===Fe.name){E(Be,Fe.name),n(`LSP: File already open, skipping didOpen for ${Te}`);return}let Ne=dT.extname(Te).toLowerCase(),Ke=Fe.config.ext
+- #3 @189673903 &&await pt(r,g,t.initialPrompt,o),error:ie.kind==="interactive"?v$e:"This conversation is already open in another running Claude session \u2014 use that one, or close it and try again",errorCo
+- #4 @202638727 f(X.has(H))return n(`[TransportPermissionDispatcher] can_use_tool ${Zq(H).slice(0,80)} is already open here \u2014 not dispatching it again`,{level:"warn"}),!1;let{toolRegistry:Z,toolPermissio
+
+## #19 terminalHolders  needle="terminalHolders"  hits=4
+- #0 @92720492 dPeers
+....q..remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..o
+- #1 @192130814 {jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidL
+- #2 @192133480 HolderOf(i){if(i.state.backend==="peer"||i.state.backend==="remote")return;return this.#t.terminalHolders.get(i.state.resumeSessionId??i.state.sessionId)}bumpGen(){this.#u=++this.#f}resetPrFetchG
+- #3 @192139226 #p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_
+
+## #19 open elsewhere  needle="open elsewhere"  hits=2
+- #0 @179873426  page, a diagram, an image. Use `\'attach\'` when the file is something they\'ll save and open elsewhere \u2014 source code, a spreadsheet, a document for another app \u2014 and an inline previe
+- #1 @196372326 h' shows a download card only, no inline preview (for deliverables the user will save and open elsewhere). Omit to let the client decide by file type \u2014 today that means renderable types ren
+
+## #19 attached elsewhere  needle="attached elsewhere"  hits=0
+
+## #19 open in another  needle="open in another"  hits=2
+- #0 @84960721 HandleEx(FileStandardInfo) '..'..rename incompatible state DB .. ... ..: .\ ... the DB is open in another process (likely a running srt-win/broker); close it and retry..rename incompatible state 
+- #1 @189673911 pt(r,g,t.initialPrompt,o),error:ie.kind==="interactive"?v$e:"This conversation is already open in another running Claude session \u2014 use that one, or close it and try again",errorCode:"resume_
+
+## #19 in a terminal  needle="in a terminal"  hits=25
+- #0 @92333205 .'...Not an interactive terminal, so the command was only displayed, not accepted. Re-run in a terminal to confirm it, or pass -y/--yes to accept the command shown above.
+..........Run this com
+- #1 @92727273 e......{.ctrl+x again to delete......I...not deleted.....y.k.o.p.e.n.i.n.g.& ....{...Open in a terminal......b...continue it there...........focusFg.........isOrigin....1.K.logTail......o>.show
+- #2 @94448003 ...p...(...
+This install runs that command; confirm it by running `claude plugin install` in a terminal (or with -y/--yes).....'...entry_helper_unconfirmed....3)..Cannot install local plugin ".
+- #3 @97077738 ache was not rebuilt. Run `.+...D_..claude plugin update <plugin>@<marketplace>.....gX#.` in a terminal to rebuild it...........linkFarm.....c.entryEnabled........ (e.g. .......$.\.zip$.......
+- #4 @98194378 o it was not run. Review and accept the new command with `claude plugin update .<....8..` in a terminal (add `--scope` for a project/local install).3...4...plugin command source command changed
+- #5 @98195254  and accept it from its /plugin details pane, or with `claude plugin install ........r..` in a terminal.%....I..plugin command source without consent...0.......plugin command source disabled by
+- #6 @99623229 ew.......Nb..-i, --interactive...a.....%.Run the authoring interview (already the default in a terminal); requires an interactive terminal........}..--interview......vv.Alias for --interactive.
+- #7 @100729110 authoring interview requires an interactive terminal (TTY). Run `claude plugin eval init` in a terminal, or drop --interactive to write a blank template for `.......J..` instead.
+......m..The a
+- … +17 more
+
+## #19 already running  needle="already running"  hits=34
+- #0 @66740209 ut]);
+    }
+    #throwIfRunning() {
+      if (this.#hasRun)
+        throw Error("Shell is already running");
+    }
+    run() {
+      return this.#run(), this;
+    }
+    then(onfulfilled, onreject
+- #1 @84981794 t + the user-SID-keyed WFP filter set in one elevated step.
+
+Self-elevates via UAC if not already running as admin (one prompt; the elevated child does the work and the parent relays its exit cod
+- #2 @93499376 w.n. ..  .t.h.a.t. .j.o.b.'.s. .s.a.v.e.d. .s.t.a.t.e. .i.s. .m.i.s.s.i.n.g.......,&.. is already running.-...?... has exited; attach shows the captured output........
+..exec_output_expired.:...:
+- #3 @94714774 B...no-turn......q..ccr_recap_generate..9...e.g.[awaySummary] ccr recap dropped: new turn already running.......BK..[awaySummary] fallback params rebuild failed: ..0...=...[awaySummary] no CacheS
+- #4 @95445480 ..Cannot destructure property 'resumesInFlight' from null or undefined value..$...[t.. is already running or being resumed........resumesInFlight.....1V..observer-activity........1?. was stopped 
+- #5 @95639188  .m.e.n.u.,. .w.h.i.c.h. .c.o.p.i.e.s. .t.h.a.t. .c.o.m.m.a.n.d...;...X.l.This session is already running in Claude Code on the web: .9........ To continue it in your terminal, run claude --telep
+- #6 @95639429 tory.x....({.Remote Control connects a terminal session to claude.ai, and this session is already running in Claude Code on the web: !.......Removing one-shot hook for event ........... in skill 
+- #7 @95916852 i.n. .w.h.y. .i.n. ...-.......your reply first so they know what to expect........+... is already running with a reachable window. Use the app_* tools to act on it in the background. If those ret
+- … +26 more
+
+## #20 not pushed anywhere  needle="not pushed anywhere"  hits=2
+- #0 @93482749 .s.i.o.n. .r.e.s.t.a.r.t.s.......7...has uncommitted changes.(...k&..has commits that are not pushed anywhere!.......is claimed by another running job...=....5..i.s. .l.o.c.k.e.d. ..  .i.n. .u.s.e. .
+- #1 @189689981 n{kind:"detached"}}var ei={dirty:"has uncommitted changes",unpushed:"has commits that are not pushed anywhere",in_use:"is claimed by another running job",live_lock:"is locked \u2014 in use by another
+
+## #20 not pushed anywhere!  needle="not pushed anywhere!"  hits=1
+- #0 @93482749 .s.i.o.n. .r.e.s.t.a.r.t.s.......7...has uncommitted changes.(...k&..has commits that are not pushed anywhere!.......is claimed by another running job...=....5..i.s. .l.o.c.k.e.d. ..  .i.n. .u.s.e. .b
+
+## #20 merged into  needle="merged into"  hits=9
+- #0 @95775555 _id........connector_as_host........].. manifest entries resolve to .........i." and were merged into one (....?./.). A viewer with more than one ......LA. named "R...B..." gets server_ambigu
+- #1 @98623435 he message is appended to the transcript without triggering an assistant turn. It will be merged into the next user message that does query........y.t.ISO timestamp when the message was creat
+- #2 @100205892 ed$.......the stored copy could not be fetched/.......the settings file here could not be merged into.....N...they could not be written here..........ready_unreadable....[c..rules_unverifiabl
+- #3 @180320409 he message is appended to the transcript without triggering an assistant turn. It will be merged into the next user message that does query."),timestamp:i().optional().describe("ISO timestamp
+- #4 @189967875 1){let z=eh(N),K=qe(N);v.push(`${C.from} manifest entries resolve to ${K} "${z}" and were merged into one (${D} ${I(D,"tool")}). A viewer with more than one ${K} named "${z}" gets server_ambi
+- #5 @207917076  stored copy could not be fetched",settings_unusable:"the settings file here could not be merged into",nothing_applied:"they could not be written here"};function qa(e){if(e.kind==="not_restor
+- #6 @220753379 js: noClobber },
+    });
+  }
+  writeFileSync(join(out, '_vendor', 'react-dom.js'), '/* merged into react.js */');
+}
+
+// Serialize the floor card's crash-prevention props to a JS express
+- #7 @221531569 le page: the skill's own template
+// with the two islands filled in - Claude's additions merged into the scene,
+// the user's snapshot carried forward byte-for-byte. The page code comes onl
+- … +1 more
+
+## #20 already merged  needle="already merged"  hits=2
+- #0 @94755828 ......) is empty. If you have local edits, stage or commit them first. If your branch was already merged or you meant a different base, ........p.core.quotepath=false#.......Diff is too large fo
+- #1 @193387767 (0,7)}) is empty. If you have local edits, stage or commit them first. If your branch was already merged or you meant a different base, ${i}.`}}let E=Wst(ne);if(E){let{maxFiles:i,maxLines:u}=sMt
+
+## #20 default branch  needle="default branch"  hits=32
+- #0 @95712631 nch '..Z...|We.' is not pushed to origin; remote agents will run against the repository's default branch...
+.......[Circular]..	....=q.parallel[...	.......pipeline[...........agentControllers...
+- #1 @97100748 c.h.a.n.g.e.,. .p.e.r. .t.h.e. .p.r.e.-.s.h.i.p. .g.a.t.e. .b.e.l.o.w.).....@.. If on the default branch, branch first........a. .`cat`, `head`, `tail`, `sed`, `awk`, or `echo`..>...B...`find`, 
+- #2 @97422385 _default_guard_observe...r...[...[teleportToRemote] reuse-outcome-branch collision guard: default branch unknown (no preflight answer, origin/HEAD .. .......u.n.r.e.s.o.l.v.e.d.). ..  .f.a.i.l.i
+- #3 @97423293 anch '.......).4.' is ........X..The requested outcome branch '......]\..the repository's default branch, which this environment's runner cannot reuse as its work branch (its git checkout -b fai
+- #4 @97423722 this PR from a self-hosted (BYOC) default environment, whose runner tolerates reusing the default branch........O...Use a non-default branch........_Dc.outcome_branch_is_default...........[telep
+- #5 @97423758 fault environment, whose runner tolerates reusing the default branch........O...Use a non-default branch........_Dc.outcome_branch_is_default...........[teleportToRemote] Git source: ......,.., 
+- #6 @97442654 nch '...X.....U.' is not pushed to origin; remote agent will run against the repository's default branch......<.notificationId..........--- Notification .......{... . id: .......@. . origin: ...
+- #7 @99051170 n.e.....Y.......Git branch or tag to use (e.g., "main", "v1.0.0"). Defaults to repository default branch....R....t..Path to marketplace.json within repo (defaults to .claude-plugin/marketplace.j
+- … +24 more
+
+## #20 --not --remotes  needle="--not --remotes"  hits=0
+
+## #20 rev-list --all --not --remotes  needle="rev-list\"],\"--all\",\"--not\",\"--remotes"  hits=0
+
+## #20 merge-base --is-ancestor  needle="merge-base\"],\"--is-ancestor"  hits=0
+
+## #21 schema error  needle="schema error"  hits=0
+
+## #21 invalid answer  needle="invalid answer"  hits=0
+
+## #21 hook schema  needle="hook schema"  hits=0
+
+## #21 PermissionRequest hook  needle="PermissionRequest hook"  hits=11
+- #0 @92394529 exit).....&..scaleBudgetToQueue..........PermissionRequest...+.......Permission denied by PermissionRequest hook.....{V..permissionRequestResult.....^...hookUpdatedInput	.......permanent...........userM
+- #1 @95604300 approval_watch....&^Z.watcher_stopped.!.....].Server-approval watcher stopped (...9...\1..PermissionRequest hooks cancelled (control stream closed)...........buildDescriptor.....d.b.Dialog teardown fail
+- #2 @96655128 ilable because every tool it may use is denied by the current permission settings.........PermissionRequest hook allowed .....mt.. with updatedInput, but .....w*. rule overrides: ...]...f.7.Action requi
+- #3 @96921628 ision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."} in a PermissionRequest hook).....}.".
+
+The hook's output was: ........./.boolean (optional)......Y.
+.string (optional
+- #4 @97362072 ....F.^[+-]\d+$.......Q.T.nodeType
+...^...nodeTypeId......f...subcommandPrefixes..2.....Y.PermissionRequest hook failed for headless agent: ..%.....w.tengu_mcp_server_policy_bypass_exempt...........Cann
+- #5 @184355276 Type)):e,r,ft,o)}function Xxe(e,t){if(e?.behavior==="deny"||e?.behavior==="ask")return n(`PermissionRequest hook allowed ${t} with updatedInput, but ${e.behavior} rule overrides: ${e.message}`),e;return
+- #6 @184356451 decisionReason:{type:"hook",hookName:"PermissionRequest",reason:k.message}}}}}catch(g){n(`PermissionRequest hook failed for headless agent: ${Ee(g).message}`,{level:"error"})}return null}function $B(e){
+- #7 @185832006  validation: ${Vie(e.name,fn)}
+This is a configuration issue in your canUseTool callback, PermissionRequest hook, or permission-prompt tool \u2014 updatedInput must satisfy the tool's input schema. The 
+- … +3 more
+
+## #21 PreToolUse hook  needle="PreToolUse hook"  hits=34
+- #0 @96304492 rmission_check_crashed4....9K.\n\n\.\.\. \[(\d+) characters truncated\] \.\.\.\n\n.....c..PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was no
+- #1 @96304664 ). The tool call was not executed; other configured hooks may not have completed..........PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks m
+- #2 @96921401  the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field; for "...p...~.r." use 
+- #3 @96921549 acy approve|block field; for "...p...~.r." use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."} in a PermissionRequest hook)...
+- #4 @97363972  prompt...
+.......agentMsgId..........hookAllowVouched....k.:.hookPermissionResult....W.=.PreToolUse hook for 6....... returned updatedInput that failed schema validation: ..#...N.Q.Hook result h
+- #5 @97364228 tool......x...tengu_pre_tool_hooks_cancelled..........tengu_pre_tool_hook_error...(.....i.PreToolUse hook cancelled (parent abort)1.......PreToolUse hook cancelled (control stream closed)...*...|
+- #6 @97364276 ......tengu_pre_tool_hook_error...(.....i.PreToolUse hook cancelled (parent abort)1.......PreToolUse hook cancelled (control stream closed)...*...|...PreToolUse hook timed out (per-hook abort)...
+- #7 @97364336 ncelled (parent abort)1.......PreToolUse hook cancelled (control stream closed)...*...|...PreToolUse hook timed out (per-hook abort).......h..PreToolUse hook dispatch failed.B...C...Cannot destru
+- … +26 more
+
+## #21 hook returned blocking error  needle="hook returned blocking error"  hits=2
+- #0 @93439497 lls restored (........s..Read MCP resource ......>[.. from........0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e
+- #1 @201440056 z[173];let Wh=F;let Y;if(z[174]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook returned blocking error"]}),z[174]=A.hookName,z[175]=Y;else Y=z[175];let X;if(z[176]!==Wh)X=Wh?e(ne,{color:"error
+
+## #21 hook error  needle=" hook error"  hits=32
+- #0 @93439536 rce ......>[.. from........0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e.d... .R.a.i.s.e. .t.h
+- #1 @93449960 ..comma-......!l..hook-...........^claude\.ai ....Cj..hint-...........isInProgress.....5. hook error: ........Z..summary-	.......startUuid.......g0.. (one-shot).....I... [session-only]......
+- #2 @94559983 structure property 'elicitationResponse' from null or undefined value......@...Elicitation hook error: ........elicitationResponse.T...`...Cannot destructure property 'elicitationResultRespon
+- #3 @94560233 e for server "...
+....H..": decline......8...elicitation_response........ElicitationResult hook error: .......37.elicitationResultResponse...........Skip confirmation...(....*1.file:///B:/%7E
+- #4 @95639612 .. in skill '.........goal_met....o...evaluator_timeout...
+.....\.Exit code ......}.5.Stop hook error: ...".......Forked command Stop hooks failed: ......._..additionalContexts......a...reque
+- #5 @95642364 eration stopped by hook.......#Z..cmd_prompt_submit_hook_stopped.......r..UserPromptSubmit hook error: ...........cmd_prompt_aborted......L...cmd_prompt_threw....e.9.Stacked skill /.$...;c.. 
+- #6 @97477916 rn	...z...loop tick.......E..., no model re-invoke): .........stop-hook-error.......e.Stop hook error occurred . ...../... to see.....y...Stop hook cancelled (abort or stream teardown).......
+- #7 @97508537  out after ..
+.......ms (limit ......]M..tengu_hook_prompt_timeout........?..Hooks: Prompt hook error: ......)V..Error executing prompt hook: .......	7..continueOnBlock.....e+..^&\s*........0
+- … +24 more
+
+## #21 invalid PermissionRequest  needle="invalid PermissionRequest"  hits=0
+
+## #21 invalid PreToolUse  needle="invalid PreToolUse"  hits=0
+
+## #21 hook answer  needle="hook answer"  hits=8
+- #0 @96286207 urnDurationMessage.......!.InfoNoticeLine..........SessionStateRow.8....v..agent.spawn: a hook answered with neither model nor deny%....R0.an earlier prompt in the batch failed.........o.\bgi
+- #1 @97649662 : the press is not plain data: .....p@u. registered the tool ...M....... but no tool.call hook answered this call: add on("tool.call", { tool: "mcp__...0...G.	." }, ($, e) => ({ result: ... }
+- #2 @100083487 leState....o...getMemoryAttribution.....=I.The SDK host reconnected before its PreToolUse hook answered, so this tool call was not executed. No one denied it; retry the same tool call....j...
+- #3 @100083635 denied it; retry the same tool call....j.......The SDK host reconnected before its prompt hook answered, so this prompt was not submitted. Send it again...%...~...The response above may be in
+- #4 @184202152 Promise.resolve(u)}},runs:t}}var u6t=va.SITE_RULES["agent.spawn"];var hpe="agent.spawn: a hook answered with neither model nor deny";var ype=(e,t)=>t!==void 0&&e===t.made.model?t.input.model:
+- #5 @184870928 !0,content:[{type:"text",text:`${e} registered the tool ${g.params.name} but no tool.call hook answered this call: add on("tool.call", { tool: "mcp__${e}__${g.params.name}" }, ($, e) => ({ re
+- #6 @200864009 tials:w}))}case"ask":return e(p)}}}var up="The SDK host reconnected before its PreToolUse hook answered, so this tool call was not executed. No one denied it; retry the same tool call.",tu="T
+- #7 @200864152  one denied it; retry the same tool call.",tu="The SDK host reconnected before its prompt hook answered, so this prompt was not submitted. Send it again.";function nu(e){switch(e.hook_event_n
+
+## #27 mouse tracking  needle="mouse tracking"  hits=0
+
+## #27 bracketed paste  needle="bracketed paste"  hits=0
+
+## #27 alternate screen  needle="alternate screen"  hits=0
+
+## #27 cleanupTerminalModes  needle="cleanupTerminalModes"  hits=5
+- #0 @96100616 si:magentaBright......./..ansi:cyanBright......b..ansi:whiteBright....R...Waiting.......m.cleanupTerminalModes
+...l...drainStdin..........statusColor.	....#..forOutput...........inLink......E.$.onFram
+- #1 @101867958 ERY_WINDOW_MSRECOVERED_DD_REPORT_CAPSTARTUP_MOUNT_GRACE_MSShutdownCoordinatorclaimShutdowncleanupTerminalModesclearBeforeInteractiveShutdownemitScrollTelemetrySummaryexitIfStartupNeverMountedflushAnal
+- #2 @187437327 sible (${e.length-g} remaining on disk)`);return{logs:u,nextIndex:g}}function Nj(){Dcn()?.cleanupTerminalModes()}var rtr=10,gOe=5000,otr=3,qsr=50,Ksr=60000,Ysr=10,Xsr=1e4,Jsr=15000,str=1500;class t$n{
+- #3 @190496198 TITLE)process.title=""}catch{}}function oo(){_o.get(process.stdout)?.drainStdin()}var de={cleanupTerminalModes:to,drainStdin:oo};var no=(r,i)=>{let l=so(i),d={stdout:process.stdout,stdin:process.stdin
+- #4 @192770351 T_CAP,Xsr as STARTUP_MOUNT_GRACE_MS,t$n as ShutdownCoordinator,qje as claimShutdown,Nj as cleanupTerminalModes,Aen as clearBeforeInteractiveShutdown,hPt as emitScrollTelemetrySummary,yyr as exitIfStar
+
+## #27 DISABLE_MOUSE_TRACKING  needle="DISABLE_MOUSE_TRACKING"  hits=0
+
+## #27 ?1000l  needle="?1000l"  hits=1
+- #0 @82467450 2m..[0m.	.[2m(.[0m.	.[2m).[0m.Bunredissqlconnect. .	 install
+.	 .[0m.[2m. install.[0m
+..[?1000l.[?1006lCould not resolve path<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUplo
+
+## #27 ?2004l  needle="?2004l"  hits=0
+
+## #27 ?1049l  needle="?1049l"  hits=3
+- #0 @88393426 al.DeleteByVal.SetPrivateNameByVal.DefinePrivateNameByVal.Zl.Nl.Ll..[1;1H.[2J.[m.[?1007l.[?1049l.icudt78l.rwk.jwk.awk.Awk.avk.tuk.suk.tcl,itcl,itk.Batk.kx-psk.auth-psk.derived psk.archiv
+- #1 @96121866 049h....3....[?1004l....0....[0m.[?25h.[2J.[H.........A..[2J.[H.....^....[?25l......[....[?1049l.....)&..[?1004h
+.......retryFault..6.......ink layout pass threw a value that cannot be d
+- #2 @189508956 Seq()+"\x1B[?25l"),this.resetFramesForAltScreen();else if(this.options.stdout.write("\x1B[?1049l"+A8(this.altScreenMouseTracking)+(this.accessibilityMode||this.isScreenReaderEnabled?"":"
+
+## #27 claude logs  needle="claude logs"  hits=4
+- #0 @93487484 .......V..backgrounded . ........list sessions..........open in this terminal.........M.claude logs ....hE..show recent output..........claude stop .....Gv.stop this session.........Q.cyan.
+- #1 @93493692 nts' to list running sessions.
+.........'.Ambiguous prefix '......v.P.', matches: .....Sr.claude logs <id>6...E...Print the background session's recent terminal output........>R.cli_bg_logs..
+- #2 @189640254 "}`,r("claude agents","list sessions"),r(`claude attach ${e}`,"open in this terminal"),r(`claude logs ${e}`,"show recent output"),r(`claude stop ${e}`,"stop this session")].join(`
+`)}function
+- #3 @189642314 }', matches: ${d.join(", ")}
+`),process.exit(1)}async function Pmr(e,t){let o=await dn(e,"claude logs <id>","Print the background session's recent terminal output.",t),r=await new Promise((p)
+
+## #27 leaving mouse  needle="leaving mouse"  hits=0
+
+## #28 mid-emoji  needle="mid-emoji"  hits=1
+- #0 @189843162 ray garbled character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due to concur
+
+## #28 mid emoji  needle="mid emoji"  hits=0
+
+## #28 toWellFormed  needle="toWellFormed"  hits=5
+- #0 @66879079 fied, descriptors), callbackified;
+}
+var toUSVString = (input) => {
+  return (input + "").toWellFormed();
+}, kEscape = "\x1B[", kEscapeEnd = "m", kDimCode = 2, kBoldCode = 1, kHexCloseSeq = kE
+- #1 @88553186  been opened.Debugger.resumed.database disk image is malformed.URI malformed.isWellFormed.toWellFormed.flex scanner jammed.named.Named.scheduled..defer() called after the onLoad callback settl
+- #2 @99411248 u009C))|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))......#..isWellFormed.....Am.toWellFormed........totalBytesReceived......?...[\uFF10-\uFF19].....!......[truncated]......}Y..\s\S*$
+- #3 @178358433 ction.prototype.call.bind(String.prototype.isWellFormed):void 0,g=typeof String.prototype.toWellFormed==="function"?Function.prototype.call.bind(String.prototype.toWellFormed):void 0;function 
+- #4 @178358505  String.prototype.toWellFormed==="function"?Function.prototype.call.bind(String.prototype.toWellFormed):void 0;function eu(t){if(u)return u(t);return!x.test(t)}function zy(t){if(g)return g(t);
+
+## #28 isWellFormed  needle="isWellFormed"  hits=6
+- #0 @88553173 t has not yet been opened.Debugger.resumed.database disk image is malformed.URI malformed.isWellFormed.toWellFormed.flex scanner jammed.named.Named.scheduled..defer() called after the onLoad c
+- #1 @99411228 u0007|\u001B\u005C|\u009C))|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))......#..isWellFormed.....Am.toWellFormed........totalBytesReceived......?...[\uFF10-\uFF19].....!......[trunca
+- #2 @101856224 MessagesWithInterruptDetectiondropMalformedAttachmentsdropRetractedMessagesgetResumePromptisWellFormedAttachmentPayloadloadConversationForResumeloadMessagesFromJsonlPathlogResumeInterruptedTur
+- #3 @178358314 uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,u=typeof String.prototype.isWellFormed==="function"?Function.prototype.call.bind(String.prototype.isWellFormed):void 0,g=typeof 
+- #4 @178358386  String.prototype.isWellFormed==="function"?Function.prototype.call.bind(String.prototype.isWellFormed):void 0,g=typeof String.prototype.toWellFormed==="function"?Function.prototype.call.bind(
+- #5 @198142417 lt as dropMalformedAttachments,E4e as dropRetractedMessages,Ylt as getResumePrompt,plr as isWellFormedAttachmentPayload,W3 as loadConversationForResume,Oyr as loadMessagesFromJsonlPath,w4e as 
+
+## #28 Intl.Segmenter  needle="Intl.Segmenter"  hits=14
+- #0 @88305319  pointer.BignumPointer.specialPointer.SetFilePointer.ConstantStoragePointer.IntlSegmenter.Intl.Segmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value that's no
+- #1 @88305365 ointer.ConstantStoragePointer.IntlSegmenter.Intl.Segmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototype.resolve
+- #2 @88305437 tialize Segmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototype.resolvedOptions called on value that's not a Segmenter.center.op_enter.**enter.
+- #3 @178380958 uld otherwise see a writable .then on the chain.
+      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+   
+- #4 @178381012  ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p; p = Obje
+- #5 @179393116 f(!m)m=new Intl.DisplayNames(["en"],{type:"language"});return m}function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return Xi().segm
+- #6 @179393548 (!e)return[];return Array.from(Xi().segment(e),(t)=>t.segment)}function w_n(){if(!l)l=new Intl.Segmenter(void 0,{granularity:"word"});return l}function eQn(e){let t=e.trim();if(t==="")return 0;l
+- #7 @192560833 );return typeof n==="object"&&n!==null?Error(n.error):n}var pt=8,ar=50,Qt=(()=>{try{let e=Intl.Segmenter;if(typeof e==="function")return new e(void 0,{granularity:"grapheme"})}catch{}return})();
+- … +6 more
+
+## #28 grapheme  needle="grapheme"  hits=61
+- #0 @66657074 ender.extpict.gara.garay.geor.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gukh.gunjala
+- #1 @66657087 .gara.garay.geor.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gukh.gunjalagondi.gurmukh
+- #2 @66657102 r.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gukh.gunjalagondi.gurmukhi.guru.gurungkh
+- #3 @85781770 enderextpictfcnfkcFC_NFKC_ClosurefcnfkcclosurefullcompositionexclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangu
+- #4 @85781782 fcnfkcFC_NFKC_ClosurefcnfkcclosurefullcompositionexclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_Syllable_T
+- #5 @85781802 efcnfkcclosurefullcompositionexclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_Syllable_Typehexdigithsthyphen
+- #6 @85781816 fullcompositionexclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_Syllable_Typehexdigithsthyphenidcidcompatmat
+- #7 @85783147 lphaocommentodiogrextoidcoidsoloweromathotheralphabeticotherdefaultignorablecodepointothergraphemeextendotheridcontinueotheridstartotherlowercaseothermathotheruppercaseoupperpatsynpatterns
+- … +53 more
+
+## #28 \uFFFD  needle="\\uFFFD"  hits=86
+- #0 @93764797 .h...[\uF900-\uFD3D\uFD40-\uFDCF\uFDF0-\uFE1F\uFE30-\uFE44].......m..[\uFE47-\uFEFE\uFF00-\uFFFD]6.....Q.[\u0300-\u036F\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]........d.autoclosure......
+- #1 @96032675 -9._\/-]+$.......?.^(filter|hook)\.(.+)\.[^.]+$....&1G.^(?:filter|hook)\...........[\r\n\0\uFFFD].....?...index.claude-.../.......^filter\.(.+)\.(clean|smudge|process|required)$........
+- #2 @96039196 ...&..[AMT].......N...by_name.......$.rootOnly....]_`.trashRel
+.....U.shouldKeep........_.\uFFFD+$J...1...Cannot destructure property 'directoryCounts' from null or undefined value......
+- #3 @96562416 lope...........(..........[\uFE0E\uFE0F\u180B-\u180F].......=.^[A-Za-z_$][\w$]*$......-...\uFFFD......|...[\u007f-\uffff].....\}h.\b\w(...DfM.payload exceeds the serialization budget#...
+- #4 @98015397 0-9a-f]+)\t(.+)$.....F.(.stale_basis.....2=..[\x00-\x20\x7f~^:?*[\\]......fx.[\p{Cc}\p{Cf}\uFFFD]	.......heldCount..........exitHookCount.........}.transportFailureSeq.........sessionTe
+- #5 @99156269 u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD.(....=..\-.\d\u00B7\u0300-\u036F\u203F-\u2040]*$........__defineGetter__.....B..__defineS
+- #6 @100741261 .DOMExceptionName...\...ExceptionCode...0...Svp.[-\x09\x0A\x0D\x20-\x2C\x2E-\uD7FF\uE000-\uFFFD]....!...\u{10000}-\u{10FFFF}....,...[\x20\x09\x0D\x0A].......Y=.[:_a-zA-Z\xC0-\xD6\xD8-\x
+- #7 @100741455 u02FF\u0370-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]......u...[-.0-9\xB7].........[\u0300-\u036F\u203F-\u2040]....<*..&#[0-9]+;|&#x[0-9a-fA-F
+- … +78 more
+
+## #28 replacement character  needle="replacement character"  hits=7
+- #0 @98164527 cture initialized..........incomplete data.....f.:.\x07V....^..Unexpected string encoding replacement character. This should be an unreachable error...........Upstream response error: ...(....ZE.Cleanu
+- #1 @98530854 ........an ellipsis character (U+2026)......_.M.a line or paragraph separator (. ....t..a replacement character (U+FFFD)....i.O.an unpaired UTF-16 surrogate....n...Invalid X-Api-Key header value.......
+- #2 @100785080 ied........%..not a valid xml name "..........document is an html document?.....=.Unicode replacement character detected, source encoding issues?.
+.....V.\r\n?|\n|$......g~..unclosed xml tag(s): ......
+- #3 @180207382 ;case 8232:case 8233:return`a line or paragraph separator (${To(e)})`;case 65533:return"a replacement character (U+FFFD)";default:return e>=55296&&e<=57343?"an unpaired UTF-16 surrogate":null}}function
+- #4 @182479965 ;case"\v":return"\\v";case"'":return"\\'";default:throw Error("Unexpected string encoding replacement character. This should be an unreachable error.")}})+"'"}function o(p){let E=[...new Set(p.map((I)=
+- #5 @205838306 {var s=ho(r.mimeType);if(e.indexOf(F.UNICODE_REPLACEMENT_CHARACTER)>=0)n.warning("Unicode replacement character detected, source encoding issues?");function a(B){if(B>65535){B-=65536;var z=55296+(B>>10
+- #6 @223245693 +ee.code+": "+ee.message+"). This is usually a content problem \u2014 most often a pasted replacement character (U+FFFD, the question-mark-in-a-box glyph), which the platform rejects; find and remove t
+
+## #29 Press Ctrl-C again to exit  needle="Press Ctrl-C again to exit"  hits=2
+- #0 @92728832 ocusedRow' from null or undefined value........B..press ctrl+c or q again to exit......v..Press Ctrl-C again to exit.......... will keep running.......wv.save....'>..deselect......A.stopped . ctrl+x again t
+- #1 @192217064 !==rd||Jf[35]!==Pf)ld=Ef?r(t,{dimColor:!0,children:[li?"press ctrl+c or q again to exit":"Press Ctrl-C again to exit",Ts>0&&` \xB7 ${Ts} ${I(Ts,"agent")} will keep running`]}):Lf!==null||di!==null?e(t,{dimC
+
+## #29 press ctrl+c or q again to exit  needle="press ctrl+c or q again to exit"  hits=2
+- #0 @92728792 ueE...>...Cannot destructure property 'focusedRow' from null or undefined value........B..press ctrl+c or q again to exit......v..Press Ctrl-C again to exit.......... will keep running.......wv.save....'>..desel
+- #1 @192217030 ||Jf[32]!==As||Jf[33]!==xf||Jf[34]!==rd||Jf[35]!==Pf)ld=Ef?r(t,{dimColor:!0,children:[li?"press ctrl+c or q again to exit":"Press Ctrl-C again to exit",Ts>0&&` \xB7 ${Ts} ${I(Ts,"agent")} will keep running`]}):L
+
+## #29 will keep running  needle="will keep running"  hits=4
+- #0 @92728869 ue........B..press ctrl+c or q again to exit......v..Press Ctrl-C again to exit.......... will keep running.......wv.save....'>..deselect......A.stopped . ctrl+x again to delete . esc to keep..$...
+- #1 @101175066 |.......)? The runner will execute that environment's queued sessions on this machine and will keep running after this session ends.K.....8.Cannot destructure property 'secret_file_path' from null 
+- #2 @192217128 rl+c or q again to exit":"Press Ctrl-C again to exit",Ts>0&&` \xB7 ${Ts} ${I(Ts,"agent")} will keep running`]}):Lf!==null||di!==null?e(t,{dimColor:!0,children:r(ue,{children:[e(M,{chord:"enter",act
+- #3 @196547859 _dir??S})? The runner will execute that environment's queued sessions on this machine and will keep running after this session ends.`}},async description(){return jHt},async prompt(){return jHt},as
+
+## #29 shift+tab  needle="shift+tab"  hits=25
+- #0 @92307040 ..O$..Use Plan Mode to prepare for a complex request before making changes. Press 	...B~\.shift+tab.........m. twice to enable........9.6.lastPlanModeUse.H....sk.Use /config to change your 
+- #1 @92448940 e Code on the web.......V.No, keep planning........f..Tell Claude what to change..'...?.e.shift+tab to approve with this feedback.....HQ..showClearContext.....o.showUltraplan..........use
+- #2 @93284312 ..o... to attach a whole directory tree........f".@folder/....A.?.Steer with modes........shift+tab, plan, auto......^7..Undo anything.......^.?./rewind, Esc-Esc6.......Claude checkpoints 
+- #3 @95821208 p.	.......ctrl+down......._.N.ctrl+alt+delete.......2.alt+f4......9...alt+tab........alt+shift+tab.........'.ctrl+alt+tab....O..ctrl+alt+shift+tab........x.meta+l......z.b.meta+d.........
+- #4 @95821257 ...2.alt+f4......9...alt+tab........alt+shift+tab.........'.ctrl+alt+tab....O..ctrl+alt+shift+tab........x.meta+l......z.b.meta+d..........meta+r......u...meta+e..........meta+s......T-V.
+- #5 @95833964 o type....U.....J.Press a key or key combination (e.g. "return", "escape", "cmd+a", "ctrl+shift+tab"). ...........S.y.s.t.e.m.-.l.e.v.e.l. .c.o.m.b.o.s. .(.q.u.i.t. .a.p.p.,. .s.w.i.t.c.h. 
+- #6 @97838840 dings apply. Global bindings work everywhere../....f..Keystroke pattern (e.g., "ctrl+k", "shift+tab").b...5Yc.Command binding (e.g., "command:help", "command:compact"). Executes the slash c
+- #7 @183315217 ?Lpn("1.4.1",">=1.2.23"):Lpn(process.versions.node,">=22.17.0 <23.0.0 || >=24.2.0")),W=X?"shift+tab":"meta+m",zIe=[{context:"Global",bindings:{"ctrl+c":"app:interrupt","ctrl+d":"app:exit","
+- … +17 more
+
+## #29 Shift+Tab  needle="Shift+Tab"  hits=3
+- #0 @100323056 hat allow harmful commands to run, it's recommended to only use in isolated environments. Shift+Tab to change mode....(....7..file:///B:/%7EBUN/root/chunk-e5fndpq6.js(.....|.file:///B:/%7EB
+- #1 @189825430 mentions) appearing shifted by one or more characters in some multi-line prompts\n- Fixed Shift+Tab inside the permission prompt\'s comment field approving the edit and granting session-wid
+- #2 @208349734 hat allow harmful commands to run, it's recommended to only use in isolated environments. Shift+Tab to change mode.",a=`${t} ${n} ${o}`,s=`${t} ${o}`;function r(){let e=An();return e==="pro
+
+## #34 MCP servers need authentication  needle="MCP servers need authentication"  hits=0
+
+## #34 servers need authentication  needle="servers need authentication"  hits=0
+
+## #34 need authentication  needle="need authentication"  hits=4
+- #0 @97917578 Returns ready=true when servers are.I.......ready, ready=false if they failed to connect, need authentication, or are...	...1...disabled....B...>|..You do not need to ask the user for confirmation to
+- #1 @100528861 nt-only..........Type:.........#.Used by:....b... not connected (agent-only)......... may need authentication1.......This server connects only when running the agent........(N..agentServer.........Pr
+- #2 @181332359 ctly. Returns ready=true when servers are","ready, ready=false if they failed to connect, need authentication, or are","disabled."],"","You do not need to ask the user for confirmation to use this to
+- #3 @209645113 ildren:[e(L,{children:"Auth:"}),r(t,{children:[ct("warning",d)(O.triangleUpOutline)," may need authentication"]})]})]})}),e(o,{children:e(t,{dimColor:!0,children:"This server connects only when runni
+
+## #34 one column  needle="one column"  hits=8
+- #0 @68133976 (definedColumnCount === 0)
+              throw SyntaxError("Insert needs to have at least one column with a defined value");
+            let lastDefinedColumnIndex = definedColumnCount - 1;
+
+- #1 @68144049 , hasValues) {
+    if (!hasValues)
+      throw SyntaxError("Update needs to have at least one column");
+  }
+  normalizeQuery(strings, values, binding_idx = 1) {
+    return normalizeQuery(thi
+- #2 @68221359 , hasValues) {
+    if (!hasValues)
+      throw SyntaxError("Update needs to have at least one column");
+  }
+  connect(onConnected, reserved) {
+    if (this._closed)
+      return onConnected(
+- #3 @84793124  first
+match on each line. This does not try to account for Unicode. One byte is equal
+to one column. This implies \flag{line-number}.
+.sp
+When \flag{only-matching} is used, then the column 
+- #4 @88704105 many arguments on function %T.unknown database %T.foreign key on %s should reference only one column of table %T.CREATE VIRTUAL TABLE %T.hex literal too big: %s%#T.no such function: %#T.not 
+- #5 @189842987 d gateway deployments\n- Fixed content-sized overlays containing truncated text rendering one column too wide, and start-truncated text collapsing to an ellipsis\n- Fixed a stray garbled cha
+- #6 @215740754 nknown column alignment: "+h,l)});if(i.length>1)throw new Pt("{subarray} can contain only one column");var a={cols:i,hskipBeforeAndAfter:!1,arraystretch:.5},s=Dd(e.parser,a,"script");if(s.bo
+- #7 @215740928 script");if(s.body.length>0&&s.body[0].length>1)throw new Pt("{subarray} can contain only one column");return s},htmlBuilder:Vc,mathmlBuilder:Wc});Gc({type:"array",names:["cases","dcases","r
+
+## #34 one column right  needle="one column right"  hits=0
+
+## #34 startup warning  needle="startup warning"  hits=2
+- #0 @189786238 ven if host-supplied or per-user Windows registry settings exist\n\n## 2.1.246\n- Added a startup warning for Bash allow rules with a wildcard before the subcommand (e.g. `Bash(git * main)`), sin
+- #1 @189863152 laude model with a native 1M window to 200K via auto-compaction, not just a fixed list; a startup warning now appears when auto-compaction isn\'t holding the session to 200K\n- Changed auto-compa
+
+## #35 git worktree lock  needle="git worktree lock"  hits=0
+
+## #35 worktree lock  needle="worktree lock"  hits=2
+- #0 @100802352 ..[worktree] bg boot: not adopting .......r.V.[worktree] bg boot: adopted (....?<. but no worktree lock names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code 
+- #1 @204223420 ,h=await pGe(e,m,g,"session"),h&&!await U(e,m))n(`[worktree] bg boot: adopted ${e} but no worktree lock names this process`,{level:"warn"})}if(!h)return null;let E={originalCwd:m,worktreePath:e
+
+## #35 lock --reason  needle="lock --reason"  hits=0
+
+## #35 git worktree remove  needle="git worktree remove"  hits=13
+- #0 @97520387 out in a worktree at ..O...yje.. cd into that directory and run `claude`, remove it with `git worktree remove .'....N..`, or pass a different --worktree name..........^fatal: .* already exists...
+...
+- #1 @97520579 ...
+...d.y.worktree ".......... but cannot be reused (./.....`.). Remove that directory (`git worktree remove .,...*...` if it's a registered worktree, or `rm -rf A....C5.` if it's a stray directory)
+- #2 @97526523 ot remove worktree, kept at: ..L...h...No WorktreeRemove hook configured; falling back to git worktree remove for: ...."...cleanupWorktree: kept ..?....K.. ..  .c.a.n.n.o.t. .r.e.a.d. .t.h.e. .w.o.r.
+- #3 @97530781 .u.n.e. .f.r.o.m. ...........), left the directory in place..6.......removeAgentWorktree: git worktree remove failed, kept .......#z.^(fatal|error|warning):\s*......~...Removed agent worktree at: .!.
+- #4 @97631608 r.e.t.u.r.n. .t.o. ............ If no other session is using it, remove it yourself with `git worktree remove`; while a live session's lock is present, git will refuse and name the owner....#...B2U.C
+- #5 @98219639  working tree..)...N...[TeammateTool] Worktree already removed: ...?.......[TeammateTool] git worktree remove failed, falling back to rm: .4...+...[TeammateTool] Removed worktree directory manually: 
+- #6 @183270030 rking tree")){n(`[TeammateTool] Worktree already removed: ${e}`);return}n(`[TeammateTool] git worktree remove failed, falling back to rm: ${i.stderr}`)}try{await I(e,{recursive:!0,force:!0}),n(`[Team
+- #7 @185465594 grow this list without bound. From another terminal, remove worktrees you no longer need (git worktree remove <path>; git worktree prune for already-deleted checkouts), then restart Claude Code so th
+- … +5 more
+
+## #35 holds the worktree  needle="holds the worktree"  hits=0
+
+## #35 hold the worktree  needle="hold the worktree"  hits=0
+
+## #36 non-Latin  needle="non-Latin"  hits=1
+- #0 @189782108 dge the session on "Prompt is too long"\n- Fixed Ctrl keyboard shortcuts not firing under non-Latin (e.g. Cyrillic) keyboard layouts in kitty-protocol terminals\n- Fixed text like `<35;150;
+
+## #36 non-latin  needle="non-latin"  hits=1
+- #0 @89087452 to': 1st argument '.The argument '.Wrong protocol for WebSocket '.Cannot access '.Invalid non-latin character in RexExp literal's flags '.A duplicate key for import attributes '.' because o
+
+## #36 IME  needle="IME"  hits=1547
+- #0 @28401667 .....f.%..........A..bHRM~)A..gIST.IA..cHRMtzA..tRNStqA..sBITth.....A..aKGD~@A..bKGDtQA..tIMEtHA..PLTEt?.....A..hISTt1A..pHYst(A..oFFst......A..gAMAt.A..sRGB........@...............A.
+- #1 @28402950 ..t,L..IF....D.......F..L..D.......B..T.......................	......	...A..bKGD..k	..A..tIME.............. .............'...f.nB.f.o.f...f.o.f...f.t.fA...f.8!..P.A.;...........D..B.A
+- #2 @66745628 
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (
+- #3 @66745640  (){"use strict";// build/release/tmp_modules/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use stric
+- #4 @66745672 e/tmp_modules/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/
+- #5 @66745686 internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/
+- #6 @66873665 n } = @getInternalField(@internalModuleRegistry, 67) || @createInternalModuleById(67), { MIMEType, MIMEParams } = @getInternalField(@internalModuleRegistry, 120) || @createInternalMod
+- #7 @66873675 InternalField(@internalModuleRegistry, 67) || @createInternalModuleById(67), { MIMEType, MIMEParams } = @getInternalField(@internalModuleRegistry, 120) || @createInternalModuleById(12
+- … +1539 more
+
+## #36 Korean  needle="Korean"  hits=2
+- #0 @88596684 ith_sha.rsa-sha.Alpha.lha.kha.IsLepcha.uga.sga.purga.mga.Amiga.giga.mega.tcc 05f0fafa.zea.Korean_Korea.geopoly_area.private use area.IsPrivateUseArea.kea.id-pda.Knda.IsSharada.IsKannada.
+- #1 @190315613 same holds in every language: the title is a noun phrase, not a clause, so in Japanese or Korean it does not end in a verb either. Do not append an explanation after a dash or colon. A g
+
+## #36 NFKC  needle="NFKC"  hits=41
+- #0 @68565262 hen_Casefolded CWCF Changes_When_Casemapped CWCM Changes_When_Lowercased CWL Changes_When_NFKC_Casefolded CWKCF Changes_When_Titlecased CWT Changes_When_Uppercased CWU Dash Default_Ign
+- #1 @81930633 riation_Selector..nfdinert.NFD_Inert..nfkdinert.NFKD_Inert..nfcinert.NFC_Inert..nfkcinert.NFKC_Inert..segstart.Segment_Starter..Pat_Syn.Pattern_Syntax..Pat_WS.Pattern_White_Space...aln
+- #2 @81930962 itlecased..CWCF.Changes_When_Casefolded..CWCM.Changes_When_Casemapped..CWKCF.Changes_When_NFKC_Casefolded..Emoji.Emoji..EPres.Emoji_Presentation..EMod.Emoji_Modifier..EBase.Emoji_Modif
+- #3 @81950303 .NFD_Quick_Check..N.No..Y.Yes..NFKD_QC.NFKD_Quick_Check..NFC_QC.NFC_Quick_Check..M.Maybe..NFKC_QC.NFKC_Quick_Check..lccc.Lead_Canonical_Combining_Class..tccc.Trail_Canonical_Combining_
+- #4 @81950311 ck_Check..N.No..Y.Yes..NFKD_QC.NFKD_Quick_Check..NFC_QC.NFC_Quick_Check..M.Maybe..NFKC_QC.NFKC_Quick_Check..lccc.Lead_Canonical_Combining_Class..tccc.Trail_Canonical_Combining_Class..G
+- #5 @81953403 _Character.Not_Character..Deprecated.Deprecated..Default_Ignorable.Default_Ignorable..Not_NFKC.Not_NFKC..Not_XID.Not_XID..Exclusion.Exclusion..Obsolete.Obsolete..Technical.Technical..U
+- #6 @81953412 r.Not_Character..Deprecated.Deprecated..Default_Ignorable.Default_Ignorable..Not_NFKC.Not_NFKC..Not_XID.Not_XID..Exclusion.Exclusion..Obsolete.Obsolete..Technical.Technical..Uncommon_U
+- #7 @85780652 casefoldedchangeswhencasemappedchangeswhenlowercasedchangeswhennfkccasefoldedChanges_When_NFKC_CasefoldedchangeswhentitlecasedchangeswhenuppercasedcjkaccountingnumerickAccountingNumeri
+- … +33 more
+
+## #36 NFD  needle=".normalize(\"NFD\")"  hits=6
+- #0 @181628603 e.replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g,"").replace(/\u1e9e/g,"\xDF").normalize("NFD").toUpperCase().toLowerCase()}function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\
+- #1 @182790153 =u.length&&p.every((E,I)=>xY(E,u[I])))})}var D0;function xY(e,t){if(e===t)return!0;let r=e.normalize("NFD"),o=t.normalize("NFD");if(r.toLowerCase()===o.toLowerCase()||r.toUpperCase()===o.toUpperCas
+- #2 @182790174 ,I)=>xY(E,u[I])))})}var D0;function xY(e,t){if(e===t)return!0;let r=e.normalize("NFD"),o=t.normalize("NFD");if(r.toLowerCase()===o.toLowerCase()||r.toUpperCase()===o.toUpperCase())return!0;return D
+- #3 @194459397 ...c.filter((d)=>d.status==="D"&&o(d))].map((d)=>d.path),w=(d)=>se([d,d.normalize("NFC"),d.normalize("NFD")]),M=t.filter(o).map((d)=>d.path),[O,N,D]=await Promise.all([Ce(e,A.flatMap(w),s),q(e,M,["
+- #4 @194602981 t,r,o){if(t.length===0)return[];let i=(g)=>o.normalizationBlind?se([g,g.normalize("NFC"),g.normalize("NFD")]):[g],a=se(t.flatMap(i));if(r!==null){if((await e(["-c","core.splitIndex=false","read-tre
+- #5 @222825800 d-md mt-1 h-px shrink-0 bg-border",IY="shrink-0 pt-1",FY="No results",gbe=32,bbe=3,tL=e=>e.normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase();vbe=e=>e.label,ybe=e=>e.value;nL=(0,Ft.forwar
+
+## #36 NFC  needle=".normalize(\"NFC\")"  hits=94
+- #0 @178493158 claude"?s(s(s(t))):null}function KEe(t,{foldCase:e}={}){if(e??=!0,Kh(t)||_i(t)){let a=u(t).normalize("NFC");return e?a.toLowerCase():a}let r=u(t),n=[],o=Ub(r);while(o===null&&s(r)!==r)n.unshift(P(r
+- #1 @178493321 e(o===null&&s(r)!==r)n.unshift(P(r)),r=s(r),o=Ub(r);o=n.length>0?u(o??r,...n):o??r;let i=o.normalize("NFC");return e?i.toLowerCase():i}function Xk(t,e,{alreadyComparable:r=!1,foldCase:n}={}){let o=
+- #2 @178588180 ]];function s(){return process.env.CLAUDE_CONFIG_DIR}var ge=Ko(()=>(s()??i(g(),".claude")).normalize("NFC"),s);function Dde(e){return t(ge())===t(e)}function Mde(){return i(ge(),"teams")}function _
+- #3 @178620994 i=i===""?c.basename(r):c.basename(r)+c.sep+i,r=o}}function Ri(e){let t=e;if(t==="~")t=Se().normalize("NFC");else if(t.startsWith("~/"))t=c.join(Se().normalize("NFC"),t.slice(2));let r=new Set,i=ce(
+- #4 @178621052  Ri(e){let t=e;if(t==="~")t=Se().normalize("NFC");else if(t.startsWith("~/"))t=c.join(Se().normalize("NFC"),t.slice(2));let r=new Set,i=ce();if(r.add(t),Vn(t)&&!Ea(t)||Er(t))return Array.from(r);le
+- #5 @179378075 ,u--}return s}function Eue(){let e=ce(),t=te(),r=De(e,t,t)??t;try{r=X.native(r)}catch{}r=r.normalize("NFC").toLowerCase();let o=r.endsWith(C)?r:r+C,i=(c)=>{let d=c.toLowerCase();return d===r||d.sta
+- #6 @179378330 {if(!/^[\\/]{2}wsl(\$|\.localhost)[\\/]/i.test(c))return null;if(!Vn(t))return{canonical:c.normalize("NFC"),crossOs:!0}}let d=De(e,c,t);if(d===null)return null;try{d=X.native(d)}catch{return null}r
+- #7 @179378454 d=De(e,c,t);if(d===null)return null;try{d=X.native(d)}catch{return null}return{canonical:d.normalize("NFC"),crossOs:!1}}function a(c,d){if(!d&&i(c))return!0;for(let R of c.split(d?/[\\/]+/:C))if(R.
+- … +86 more
+
+## #36 mention match  needle="mention match"  hits=0
+
+## #36 @ mention  needle="@ mention"  hits=2
+- #0 @98941165 ll XAA-enabled MCP servers reuse this....3....D..Custom file suggestion configuration for @ mentions.n.... I.Whether file picker should respect .gitignore files (default: true). Note: .igno
+- #1 @179086729 :F("command"),command:i()}).optional().describe("Custom file suggestion configuration for @ mentions"),respectGitignore:W().optional().describe("Whether file picker should respect .gitignor
+
+## #45 shift+enter  needle="shift+enter"  hits=6
+- #0 @93571888 de....u2.task_category.........).transcriptAvailable.....}.>.write new feedback..........shift+enter.........ctrl+j........=.new line........cancel edit......R..Feedback drafts......E..recei
+- #1 @94501954 7.....n.3. Add this keybinding (the file must be a JSON array):.......#.[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\u001b\
+- #2 @190539194 . Add this keybinding (the file must be a JSON array):${h}${h}${ae.dim(`[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\\u001b
+- #3 @190539795 .`)}${h}${ae.dim(`See ${re(o)}`)}${h}${ae.dim(`Backup path: ${re(W)}`)}${h}`}}let w={key:"shift+enter",command:"workbench.action.terminal.sendSequence",args:{text:"\x1B\r"},when:"terminalFocu
+- #4 @209401039 save"}),ut[6]=qm;else qm=ut[6];let Gm;if(ut[7]===p)Gm=r(ue,{children:[qm,e(M,{chord:tX()?"shift+enter":"ctrl+j",action:"new line"}),e(M,{chord:"escape",action:"cancel"})]}),ut[7]=Gm;else Gm=u
+- #5 @209742660 e"}),e(M,{chord:"enter",action:c==="send"?"send":"next"}),c==="details"&&e(M,{chord:tX()?"shift+enter":"ctrl+j",action:"new line"}),!ee&&e(M,{chord:"d",action:"discard"}),e(M,{chord:"esc",act
+
+## #45 ctrl+enter  needle="ctrl+enter"  hits=2
+- #0 @92729464 ..ctrl+e to set group......t.ctrl+s to switch views......+...ctrl+j for newline......~...ctrl+enter to start and open........@ to mention
+....l$.ctrl+t to .......!~.unpin...
+....!).pin to t
+- #1 @192220684 p");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if(Uf)no.push(`ctrl+t to ${Hf?"unpin":"
+
+## #45 Ctrl+Enter  needle="Ctrl+Enter"  hits=0
+
+## #45 dispatch and attach  needle="dispatch and attach"  hits=0
+
+## #45 dispatches and attaches  needle="dispatches and attaches"  hits=0
+
+## #45 ctrl+j  needle="ctrl+j"  hits=6
+- #0 @92729436 ....d.ctrl+r to rename........ctrl+e to set group......t.ctrl+s to switch views......+...ctrl+j for newline......~...ctrl+enter to start and open........@ to mention
+....l$.ctrl+t to ..
+- #1 @93571908 ory.........).transcriptAvailable.....}.>.write new feedback..........shift+enter.........ctrl+j........=.new line........cancel edit......R..Feedback drafts......E..receipt.....l.#.No f
+- #2 @183316020 ta+w":"chat:workflowKeywordToggle",enter:"chat:submit","ctrl+x enter":"chat:queueSubmit","ctrl+j":"chat:newline",up:"history:previous",down:"history:next","ctrl+_":"chat:undo","ctrl+-":"
+- #3 @192220651 if(Wf)no.push("ctrl+e to set group");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if
+- #4 @209401053 qm;else qm=ut[6];let Gm;if(ut[7]===p)Gm=r(ue,{children:[qm,e(M,{chord:tX()?"shift+enter":"ctrl+j",action:"new line"}),e(M,{chord:"escape",action:"cancel"})]}),ut[7]=Gm;else Gm=ut[7];let 
+- #5 @209742674 d:"enter",action:c==="send"?"send":"next"}),c==="details"&&e(M,{chord:tX()?"shift+enter":"ctrl+j",action:"new line"}),!ee&&e(M,{chord:"d",action:"discard"}),e(M,{chord:"esc",action:ee?"c

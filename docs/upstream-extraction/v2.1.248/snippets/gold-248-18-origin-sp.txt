@@ -1,0 +1,40 @@
+when=2026-09-20T03:40:04.647Z
+
+## newsession-row-origin-w @192175915
+ds&&i.needs!==sh)return"needs";return"live"}function Ha(i){for(let d of[i.firstTerminalAt,i.updatedAt,i.createdAt])if(d){let m=Date.parse(d);if(Number.isFinite(m))return m}return 0}function Tr(i,d){if(i===void 0)return!1;return!(tp(i)===Un.done&&tp(d)===Un.done)}function tp(i){return i.group===Zo?Un.done:i.group}function _b(i,d){return Math.max(0,i-bb-ka-d)}function np(i,{statusFor:d,now:m,fallbackOrigin:w,showFinishedEarlier:S,terminalRows:h}){let C=[],x=[],A=[],F=[],T=0,P=0,V=0;for(let me of i){let be=d(me),Te=jn(me.state,be);if(Te==="needs")T++;else if(Te==="live"){if(P++,be==="busy"||be==="shell")V++}if(me.state.pinned){C.push(me);continue}switch(Te){case"needs":x.push(me);break;case"live":A.push(me);break;case"done":F.push(me);break}}F.sort((me,be)=>Ha(be.state)-Ha(me.state));let K=[{kind:"newsession",origin:w,group:Rb}],W=(me,be)=>{for(let Te of be)K.push({kind:"job",job:Te,origin:EU(Te.state),group:me})};W($n,C),W(Un.needs,x),W(Un.live,A);let Z=1+(A.length*yb+(C.length+x.length)
+
+## "function sp(" count=1 192184937
+-- @192184937 l&&S.groupEdit===null&&m.pending===null}function sp(i){let{query:d,mode:m}=i.editor.getSnapshot();return us(d,m,ds(d,m,i.roster.jobs,i.cwdFilter),i.parseScope)!==null}async function dp(i,d,m){let{editor:w,roster:S,selection:h,view:C,attach:x,storageV5:
+
+## "sp=(" count=0 
+
+## "function Ka(" count=1 192184745
+-- @192184745 ,i.restartOfferedJobId=m,d.setError(qa)}function Ka(i,d,m,w){let S=d.getSnapshot();return i.getSnapshot().error===w&&!S.previewOpen&&!S.helpOpen&&!S.debugOpen&&!S.exitPending&&S.renaming===null&&S.groupEdit===null&&m.pending===null}function sp(i){let{q
+
+## "scopedFallbackOrigin" count=6 192126572,192159100,192178638,192181807,192275218,192279983
+-- @192126572 byGroup:S,onRemoteTab:h,launcherGroup:C,scopedFallbackOrigin:x,doneFoldAt:A,emptyBucketHint:F,earlier:T=[]}=m,P=[];if(w&&F){let Q=0,le=0,ye=w&&!h?T:[];for(let me of gn){let be=i.filter((Te)=>d.get(Te.id)===me);if(me==="review"&&be.length===0)continue;P.push({k
+-- @192159100 ncherCwd:W,launcherCwd:Y,effectiveCwd:Z,scopedFallbackOrigin:ee,cwdFilter:X,dispatchDefaults:Q,query:le,dispatch:ye,templates:xe,allRepos:me,routines:be,templateCache:Te,suggestions:ge,skills:de,modelArgMatch:re,modelSuggestions:He,pickSuggestion:tt,applySugge
+-- @192178638 Tabs:de,launcherCwd:re,launcherGroup:He,scopedFallbackOrigin:tt,termRows:Ge,columns:wt,now:Me}){let he=(pe)=>Ko(K,pe),et=Z==="bash"||ee?.exec!==void 0,ut=Ib(ee),Ie=xb(ee),{template:Fe,state:Ve,output:We,pr:ze,url:lt,text:yt}=Bc(ee?"":Y),Ft=ze?os(ze):void 0,Ct=
+-- @192181807 RemoteTab:W==="remote",launcherGroup:He,scopedFallbackOrigin:tt,doneFoldAt:dt,emptyBucketHint:vt,earlier:mt}),Je=Ut.rows,eo=new Map;for(let pe of nt){let ft=je.get(pe.id);eo.set(ft,(eo.get(ft)??0)+1)}if(mt.length>0&&W!=="remote"){let pe=De?"done":fy;eo.set(pe,
+
+## function sp @192184937 sha=d2d0ec8103689cec len=127
+function sp(i){let{query:d,mode:m}=i.editor.getSnapshot();return us(d,m,ds(d,m,i.roster.jobs,i.cwdFilter),i.parseScope)!==null}
+
+## 247 "function up(i,d){" count=0 
+
+## 247 "beginNewSession()" count=2 223711351,223752448
+-- @223711351 f this.#u)if(e.has(t))this.#u.delete(t)}beginNewSession(){return this.#l({newSessionOpening:!0}),++this.#d}isCurrentNewSessionAttempt(e){return this.#d===e}endNewSession(){this.#l({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#l({newSessionOpening:!1})}markAutoOpe
+-- @223752448 |d.attachingJobId!==null)return;let m=r.beginNewSession();l(null);let f=()=>r.isCurrentNewSessionAttempt(m);Ig([],void 0,"shell",t,void 0,void 0,void 0,i).then(async(p)=>{try{if(!p.ok){if(!f())return;r.endNewSession(),Ce("fleet_view_new_session",p.reason??"spawn_failed"),l(p.e
+
+## 247 "openNewSessionRow:" count=5 223723027,223767699,223815007,223842149,223844778
+-- @223723027 ding:me,toggleCollapse:te,openEarlier:j,openNewSessionRow:We,openOrRespawn:Be}=e,Re=()=>{t.preventDefault(),t.stopImmediatePropagation()},Qe=(le)=>{o.beginProgrammaticChange(),o.setQuery(le),i.setHelpOpen(!1)};if(!t.shift&&(t.meta||o.getSnapshot().query[g-1]==="\\")){S(t);retur
+-- @223767699 apse:Kh,openOrRespawn:mu,openEarlier:$h,openNewSessionRow:jh}=TO,gu=JO?.jobId??null,mR;if(Xt[0]!==iu)mR=(BO)=>iu.liveStatus(BO),Xt[0]=iu,Xt[1]=mR;else mR=Xt[1];let Ra=mR,qh=fR.setError,gR;if(Xt[2]!==Si)gR=(NO)=>Bo(Si,NO),Xt[2]=Si,Xt[3]=gR;else gR=Xt[3];let Yh=gR,hR;if(Xt[4]!==S
+-- @223815007 :C,focusedRow:v,focused:w,openEarlier:x,openNewSessionRow:F,openOrRespawn:H}=e.submit,{deleteConfirm:P,rows:D,focusedIdx:V,focusedOrigin:O,byGroup:I,hasComposedDispatch:_,headerJobs:X,groupSuggestions:be,previewOpen:ee,helpOpen:ye,debugOpen:M,groupEdit:B,renamingJobId:ie,attach
+
+## 247 "kind:\"newsession\"" count=1 223739483
+-- @223739483 (P,D)=>ud(D.state)-ud(P.state));let g=[{kind:"newsession",origin:n,group:Dv}],b=(P,D)=>{for(let V of D)g.push({kind:"job",job:V,origin:Fo(V.state),group:P})};b(ir,l),b(rr.needs,d),b(rr.live,m);let k=1+(m.length*Pv+(l.length+d.length)*Iv)+(p+u===0?Ov:0)+(f.length>0?1+Tv:0),C=Fv
+
+## 247 "fleet_view_new_session" count=6 197477692,223752630,223752887,223753001,223753086,223753220
+-- @197477692 terialized..	....zx.gestureId........?..fleet_view_new_session......I.e.C.o.u.l.d.n.'.t. .s.t.a.r.t. .a. .n.e.w. .s.e.s.s.i.o.n. ..  .........[.header:.........nearest.....-h..scrollTo.....`.. above..........userMessageBackground......Mq.. (name taken).......wxo. (rename group)...
+-- @223752630 k){if(!f())return;r.endNewSession(),Ce("fleet_view_new_session",p.reason??"spawn_failed"),l(p.error);return}n.reload();let u=Date.now()+Uv,S=n.jobs?.find((g)=>g.id===p.short);while(!S&&Date.now()<u&&f())await Eg(100),S=n.jobs?.find((g)=>g.id===p.short);if(!f())return;if(r.endNewSes
+-- @223752887 f())return;if(r.endNewSession(),!S){St("fleet_view_new_session","row_pending"),l("Still starting \u2014 open the new session once it appears");return}Te("fleet_view_new_session"),sa(e,S)}catch(u){if(!f())return;r.endNewSession(),ze(u),Ce("fleet_view_new_session","threw"),l(`Couldn'

@@ -1,0 +1,95 @@
+{
+  "callAt": 196617994,
+  "callBody": null,
+  "wT": {
+    "i": 185738595,
+    "len": 29228,
+    "sha": "0878913b1e7695bb"
+  },
+  "excerpts": {
+    "callDesktop": {
+      "off": 196618369,
+      "text": "desktop_host\",\"not_reachable\"),{data:{success:!1,message:U5e}};let h=!1;if(h=ne(e),typeof e.message!==\"string\")return r(\"desktop_host\",\"invalid_target\"),{data:{success:!1,message:`Not sent: a Claude Desktop session takes a plain-text message, not a structured ${e.message.type}.`}};if(e.message.trim().length===0){if(Ss(e,o,s.toolUseId))return r(\"desktop_host\",\"handler_rewrite\"),h?ks:Oe;return r(\"desktop_host\",h?\"not_reachable\":\"empty_message\"),{data:{success:!1,message:h?`Nothing was subscribed: ${ue}`:\"Not sent: the message is empty.\"}}}let T=qe(s);if(\"kind\"in T)switch(T.kind){case\"unavailable\":return r(\"unresolved\",\"desktop_session_id\"),{data:{success:!1,message:`No agent named '${e.to}' is reachable. It has the shape of a Claude Desktop session id, but Claude Desktop's session messaging tool is not available in this session, so SendMessage cannot deliver to it.`}};case\"loop-paused\":return r(\"desktop_host\",void 0,{degradedClass:\"hop_loop\"}),{data:{success:!1,message:`Not delivered: this session has already messaged Claude Desktop sessions ${T.forwards} times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.`}}}let P=d?Ce(s,d).from:void 0,D=d!==void 0&&P!==void 0?Afe(P,e.message):e.message,M=TWe(d,P,{oneWay:!1}),w=await je({tool:T.tool,sessionId:e.to,message:D,context:s,canUseTool:u,assistantMessage:o}),x=w.blockedWait?{blockedWait:!0}:void 0,U=w.attachments.length>0?w.attachments:void 0;switch(w.kind){case\"sent\":return r(\"desktop_host\",void 0,x),{data:{success:!0,message:`Forwarded to Claude Desktop's session messaging: ${w.detail||\"sent.\"}${M.message}${h?Bs:\"\"}`},...U&&{newMessages:U}};case\"refused\":return r(\"desktop_host\",\"desktop_refused\",x),{data:{success:!1,message:`Not delivered to Claude Desktop session ${e.to}: ${w.message}`},...U&&{newMessages:U}}}}let B=d?Ce(s,d):void 0,R=B?.from;if(typeof e.message===\"string\"){let h=fp(e.to),T=!1;if(h.scheme===\"bridge\"&&s.toolUseId){let D=s.toolState.get(ge);T=D.take(s.toolUseId,$e(e))!==void 0,D.dropToolUse(s.toolUseId)}if((h.scheme===\"bridge\"||h.scheme===\"uds\")&&!Yo())return{data:{success:!1,message:U5e}};let P=jKe(h.scheme===\"bridge\"?\"bridge\":\"uds\");if(h.scheme===\"bridge\"){if(gB(h.target))return r(\"bridge\",\"invalid_target\"),{data:{success:!1,message:k$(e.to,IS(s)),display:Ohe(e.to)}};if(!os())return{data:{success:!1,message:ns}};let{postInterClaudeMessage:D,isLikelyStaleBridgeError:M,classifyBridgeSendError:w}",
+      "sha": "da11cec9026af3b2",
+      "len": 2500
+    },
+    "callForward": {
+      "off": 196619400,
+      "text": " Claude Desktop sessions ${T.forwards} times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.`}}}let P=d?Ce(s,d).from:void 0,D=d!==void 0&&P!==void 0?Afe(P,e.message):e.message,M=TWe(d,P,{oneWay:!1}),w=await je({tool:T.tool,sessionId:e.to,message:D,context:s,canUseTool:u,assistantMessage:o}),x=w.blockedWait?{blockedWait:!0}:void 0,U=w.attachments.length>0?w.attachments:void 0;switch(w.kind){case\"sent\":return r(\"desktop_host\",void 0,x),{data:{success:!0,message:`Forwarded to Claude Desktop's session messaging: ${w.detail||\"sent.\"}${M.message}${h?Bs:\"\"}`},...U&&{newMessages:U}};case\"refused\":return r(\"desktop_host\",\"desktop_refused\",x),{data:{success:!1,message:`Not delivered to Claude Desktop session ${e.to}: ${w.message}`},...U&&{newMessages:U}}}}let B=d?Ce(s,d):void 0,R=B?.from;if(typeof",
+      "sha": "ff3babb8abc443f8",
+      "len": 900
+    },
+    "Ve": {
+      "off": 185450781,
+      "text": "function V_e(e,t,r){try{let o=Xt()?.accessToken;if(!o)return n(\"checkGithubAppInstalled: No access token found, assuming app not installed\"),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:\"inconclusive\",httpStatus:null};let u=await t0();if(!u){let A=zd();return n(A?\"checkGithubAppInstalled: No org UUID found (profile fetch null \\u2014 possibly transient), assuming app not installed\":\"checkGithubAppInstalled: No org UUID found (token lacks user:profile scope \\u2014 deterministic), assuming app not installed\"),{appInstalled:!1,defaultBranch:null,transient:A,linkedAccountAccess:\"inconclusive\",httpStatus:null}}let d=`${Vt().BASE_API_URL}/api/oauth/organizations/${u}/code/repos/${e}/${t}`,y={...Zb(o),\"x-organization-uuid\":u};n(`Checking GitHub app installation for ${e}/${t}`);let k=await st.get(d,{headers:y,timeout:15000,signal:r});if(k.status===200){let A=k.data.repo?.default_branch||null;if(k.data.status){let x=k.data.status.app_installed;return n(`GitHub app ${x?\"is\":\"is not\"} installed on ${e}/${t}`),{appInstalled:x,defaultBranch:A,transient:!1,linkedAccountAccess:\"ok\",httpStatus:k.status}}return n(`GitHub app is not installed on ${e}/${t} (status is null)`),{appInstalled:!1,defaultBranch:A,transient:!1,linkedAccountAccess:\"ok\",httpStatus:k.status}}return n(`checkGithubAppInstalled: Unexpected response status ${k.status}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:\"inconclusive\",httpStatus:k.status}}catch(o){if(st.isAxiosError(o)){let u=o.response?.status,d=o.response?.headers??{},y=o.response?.data,k=vyn(u,o.response?.data),A=u===403&&(d[\"x-ratelimit-remaining\"]===\"0\"||d[\"retry-after\"]!==void 0||[y?.error,y?.message].some((x)=>typeof x===\"string\"&&/rate limit/i.test(x)));if(u&&u>=400&&u<500&&u!==408&&u!==429&&u!==401&&!A)return n(`checkGithubAppInstalled: Got ${u} error, app likely not installed on ${e}/${t} (linked-account access: ${k})`),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:k,httpStatus:u};return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:k,httpStatus:u??null}}return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:\"inconclusive\",httpStatus:null}}}var wyn=m(()=>p({error:p({details:p({error_code:i().optional(),type:i().optional()})})}));function vyn(e,t){if(e!==401&&e!==404)return\"inconclusive\";let r=wyn().safeParse(t),o=r.success?r.data.error.",
+      "sha": "1097b04320ef8143",
+      "len": 2500
+    },
+    "ghRetry": {
+      "off": 185753620,
+      "text": ".host)):null,En=Hn===\"gitlab\"?\"GitLab\":Hn===\"bitbucket\"?\"Bitbucket\":null;if(!Pe&&!nn&&e.explicitRef){let Xn=lt?\"CCR_FORCE_BUNDLE is set\":We?nt?\"the GitHub App preflight failed transiently (network or service hiccup)\":\"the GitHub App is not set up for this repository\":\"no GitHub remote was detected in this directory\",oo=ut?\"be seeded from your local working tree\":\"start with an empty sandbox\";return e.onCreateFail?.(`${Pt} ${e.explicitRef} cannot be honored: ${Xn}, so the session would ${oo} instead. `+(!We?\"\":nt?\"Retry in a moment, or \":En?`Cloud sessions can't clone from ${En} yet \\u2014 `:\"Set up the GitHub integration at https://claude.ai/code, or \")+(ut?`drop ${Pt} to seed from local HEAD.`:`drop ${Pt} to start with an empty sandbox.`),e.reuseOutcomeBranch?\"on_branch_no_git_source\":\"explicit_ref_no_git_source\",{preflightTransient:nt}),null}if(r.aborted)throw new Ze;if(!Pe&&ut){n(\"[teleport] phase: bundle-upload\"),n(`[teleportToRemote] Bundling (reason: ${mt})`),",
+      "sha": "5727f95dd8d9bcc9",
+      "len": 980
+    },
+    "ghSetup": {
+      "off": 185755880,
+      "text": "CreateFail?.(gs.message,gs.reason),null}else{n(`Bundle upload failed: ${zr}`,{level:\"error\"});let gs=!We?\"\":nt?\". The GitHub App preflight failed transiently (network or service hiccup) \\u2014 retry in a moment to start from GitHub instead\":En?`. Cloud sessions can't clone from ${En} yet, so the bundle is the only way to start one from this repository`:\". Please set up GitHub on https://claude.ai/code\",qi;switch(Vn){case\"empty_repo\":qi=`${zr} \\u2014 run \\`git add . && git commit -m \"initial\"\\` then retry`;break;case\"too_large\":qi=`Repo is too large to teleport${gs}`;break;case\"git_error\":qi=`Failed to create git bundle (${zr})${gs}`;break;case\"stash_failed\":case\"no_changes\":case\"unsupported_layout\":case\"refused\":qi=zr;break;case\"not_a_repo\":qi=zr;break;case\"upload_faile",
+      "sha": "fe53ae13e7839f5c",
+      "len": 780
+    },
+    "yGt": {
+      "off": 182518308,
+      "text": "async function yGt(){if(u())return null;if(!g2())return L();if(eA())return\"Remote Control is not available inside a cloud session.\";if(wve())return\"Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).\";if(!c())return\"Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.\";if(!i())return _Gt({prefix:\"Remote Control requires claude.ai subscription auth.\",suffix:\"to use Remote Control.\"});if(!d())return\"Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth",
+      "sha": "982f28e8bd937a50",
+      "len": 700
+    },
+    "oe": {
+      "off": 209384187,
+      "text": "async function oe(l){let b=await yGt();if(b)return{kind:\"error\",message:b};let _=await cst();if(_)return{kind:\"error\",message:_};if(!(M()&&l!==void 0?await ck(l):_y()))return{kind:\"error\",message:zSe};if(await WGt(l),await _bt()){if(R6())return{kind:\"error\",message:xve};return{kind:\"unenrolled-trusted-device\"}}return n(\"[bridge] Prerequisites passed, enabling bridge\"),null}asyn",
+      "sha": "1697218f3ccf2483",
+      "len": 380
+    },
+    "yit": {
+      "off": 185877803,
+      "text": "function yit({querySource:e,agentId:t,messages:r,getMessageHashes:o}){try{let u=tee(e,t),d=u?nT().previousStateBySource.get(u):void 0;if(!d)return;let y=o();d.baselineMessageHashes??=d.messageHashes;let{baselineMessageHashes:k,content:A}=d,{model:x,system:O,tools:F}=A(),U=void 0;d.messageHashes=y,d.content=()=>({model:x,system:O,tools:F,messages:U});let B=_it(k,y),W=d.pendingChanges;if(W){let V={...W,messagesHistoryChanged:B!==-1,firstChangedMessageIndex:B};d.pendingChanges=YEn.some((me)=>V[me])?V:null}else if(B!==-1)d.pendingChanges={systemPromptChanged:!1,toolSchemasChanged:!1,modelChanged:!1,fastModeChanged:!1,cacheControlChanged:!1,globalCacheStrategyChanged:!1,betasChanged:!1,autoModeChanged:!1,overageChanged:!1,cacheDiagnosisChanged:!1,effortChanged:!1,extraBodyChanged:!1,deferLoadingPresenceChanged:!1,messagesHistoryChanged:!0,firstChangedMessageIndex:B,prevMessageCount:k.length,a",
+      "sha": "69d864c89d8a2fc7",
+      "len": 900
+    },
+    "XEn": {
+      "off": 185879240,
+      "text": "function XEn(e,t){let r=[];if(e.modelChanged)r.push(`model changed (${t?\"hydrated baseline\":e.previousModel} \\u2192 ${e.newModel})`);if(e.systemPromptChanged){let o=e.systemCharDelta,u=o===0?\"\":o>0?` (+${o} chars)`:` (${o} chars)`;r.push(`system prompt changed${u}`)}if(e.toolSchemasChanged){let o=e.addedToolCount>0||e.removedToolCount>0?` (+${e.addedToolCount}/-${e.removedToolCount} tools)`:\" (tool prompt/schema changed, same tool set)\";r.push(`tools changed${o}`)}if(e.fastModeChanged)r.push(\"fast mode toggled\");if(e.globalCacheStrategyChanged)r.push(`global cache strategy changed (${e.prevGlobalCacheStrategy||\"none\"} \\u2192 ${e.newGlobalCacheStrategy||\"none\"})`);if(e.cacheControlChanged&&!e",
+      "sha": "6a2351324bedd72c",
+      "len": 700
+    },
+    "An": {
+      "off": 204219850,
+      "text": "ion\nit aborts (tunnel to the egress proxy lost, or an upload the tunnel stopped\naccepting) reaches the tool as a bare reset. recentRelayFailures in the status\noutput names the host and reason; check it before concluding the remote\nservice refused the operation.\n\n### Tool ignores the proxy entirely (timeouts with no proxy error)\n\nSome clients do not read HTTPS_PROXY: Node's built-in fetch (run that command\nwith NODE_USE_ENV_PROXY=1 on Node >= 22.21), aiohttp (pass trust_env=True),\nRuby bundler (reads only HTTP_PROXY, which this proxy does not serve),\nhand-rolled Go dialers. ",
+      "sha": "cb08489ecb0da958",
+      "len": 580
+    },
+    "Nt": {
+      "off": 182396200,
+      "text": "e\"fullscreen\":return!0;case\"default\":return!1}if(S(e))return!0;if(p(e))return!0;if(e.gbGateCached===void 0){let r=Um(\"tengu_pewter_brook\",!1);e.gbGateCached=r.value,e.gbGateSource=r.source}return e.gbGateCached}function p(e=DP){return e.downsellGateCached??=I(\"tengu_amber_creek\",!1),e.downsellGateCached}function xEe(e=DP){if(mg())return!1;if(s())return!1;if(a.CLAUDE_CODE_NO_FLICKER===!0)return!0;if(e.crashAutoOff||w5e())return!1;if(u())return!1;if(nV(e))return!1;switch(Je().t",
+      "sha": "d1683021af312381",
+      "len": 480
+    },
+    "It": {
+      "off": 199299300,
+      "text": "age billing\"})]}),value:\"console\"},p[6]=le;else le=p[6];let ae;if(p[7]===d)ae=[se,le,{label:r(t,{children:[\"3rd-party platform \\xB7\",\" \",e(t,{dimColor:!0,children:\"Amazon Bedrock, Microsoft Foundry, or Vertex AI\"})]}),value:\"platform\"}],p[7]=ae;else ae=p[7];let ue;if(p[8]!==Lt||p[9]!==we||p[10]!==Te||p[11]!==T)ue=e(o,{children:e(ke,{options:ae,onChange:(xo)=>{if(xo===\"platform\")s(\"tengu_oauth_platform_selected\",{}),T({state:\"platform_setup\"});else if(xo===\"claudeai\")s(\"tengu_",
+      "sha": "0a8318abd4d3fa29",
+      "len": 480
+    },
+    "footer": {
+      "off": 180879480,
+      "text": ".optional().describe(`@internal The terminal's server-configured \"\\u25C6 <text>\" footer pill \\u2014 see SDKFooterIndicator. Absent when nothing is configured.`),effort:ie([\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]).nullable().optional().describe(\"The effort level the session will send on its next request \\u2014 after env ov",
+      "sha": "287dd0f6025b73fb",
+      "len": 320
+    },
+    "fromAddr": {
+      "off": 181642560,
+      "text": "ting your current task, decide whether/how to respond (reply via SendMessage to the `from=` address).\",ue=\" After completing your current task, decide whether/how to respond. This message was delivered by your host application, and its `from=` is a host session id that SendMessage cannot reach: reply through the host's",
+      "sha": "d5894ccd1a587d4b",
+      "len": 320
+    }
+  }
+}

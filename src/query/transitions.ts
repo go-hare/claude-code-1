@@ -31,4 +31,5 @@ export type Continue =
   | { reason: 'stop_hook_blocking' }
   | { reason: 'token_budget_continuation' }
   | { reason: 'thinking_only_retry' }
+  | { reason: 'malformed_tool_use_retry' }
   | { reason: 'next_turn' }

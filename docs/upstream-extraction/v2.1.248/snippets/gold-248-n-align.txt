@@ -1,0 +1,78 @@
+# gold-248-n-align
+
+## function eo( hits=24 178210379,178494985,180034610,181604084,182039881,187878079,189619344,190026250,193928402,194279355,194618068,196650935
+@178210379 sha=cf0439a343a53719 function eo(){if(typeof Deno<"u"&&Deno.build!=null)return"deno";if(typeof EdgeRuntime<"u")return"edge";if(Object.prototype.toString.call(typeof globalThis.process<"u"?globalThis.process:0)==="[object process]")return"node";return"unknown"}
+@178494985 sha=6ca6907b53976e4d function eo(e){return e}
+@180034610 sha=fd0c098796129f26 function eo(e){return!zi(e)&&!Fi(e)&&!FC(e)&&typeof e==="object"}
+@181604084 function eo(e,t=!1){let r=wi(),o=fb(),u=t?He({skipIndex:t,file:"memory to its own file in the chosen directory (private or team, per the type's scope guidance)"}):["## How to save memories","","Saving
+@182039881 sha=300f6abe7cb742cf function eo(e,t){var a;for(a=this.t-1;a>=0;--a)t.data[a+e]=this.data[a];for(a=e-1;a>=0;--a)t.data[a]=0;t.t=this.t+e,t.s=this.s}
+@187878079 sha=c83c5a811491c393 function eo(e){let t=new Map;for(let n of e){let r=hr(n.repo),i=t.get(r)??[];for(let d of n.branches??[])if(d&&Bb(d)&&!i.includes(d))i.push(d);if(i.length>0)t.set(r,i)}return t}
+@189619344 sha=a9e0c9450cff705b function eo(){return{imark:!0,terminal:a.terminal,mux:a.TMUX?"tmux":process.env.ZELLIJ!=null?"zellij":a.STY?"screen":null,ssh:a.isSSH(),wheelFlood:eZt(),hyperlinks:Yp(),progressReporting:ohe(),wtSession:!!a.WT_SESSION,isVscodeTerm:a.TERM_PROGRAM==="vscode",browser:a.BROWSER??null,colorLevel:ae.level,syncOutput:aNn(),editor:a.VISUAL||a.EDITOR||null,systemTheme:fNn()}}
+@190026250 function eo(e,t,r,s,o,u,d,g,p,k,E,T){let v={page_bytes:u.pageBytes,lane:c(u.lane),forced:u.forced,template:c(u.template)};try{let P=o,O=s,N=()=>si(()=>td.post(k??"/api/frame/deploy/direct",{...jr(t),.
+
+## function avt( hits=1 178495998
+@178495998 sha=9a39cc0b3ca7bb29 function avt(){let e=process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim();return e?i7(e,Z):null}
+
+## function Iq( hits=4 183642600,200243365,202616292,217243035
+@183642600 sha=fb0477d62fc28669 function Iq(){return De()?"The PDF file was not valid. Try converting it to text first (e.g., pdftotext).":"The PDF file was not valid. Double press esc to go back and try again with a different file."}
+@200243365 sha=31d4a6950c769e6b function Iq(){for(let e of Object.keys(co.DISCRIMINATORS))if(Sa.has(e))throw Error(`flat schema drift: discriminator "${e}" is also a canonical leaf`);for(let[e,t]of Object.entries(wO)){let n=(0,Ie.fieldMetaForNode)(t);if((n===null||n===void 0?void 0:n.flatKey)!==e)throw Error(`flat schema drift: "${e}" flatKey is "${n===null||n===void 0?void 0:n.flatKey}"`)}}
+@202616292 sha=211bd87ac112db48 function Iq(){let d=pT();if(d.probeEventLogged)return;d.probeEventLogged=!0;let C=$T();UEn(cft(C)),s("tengu_terminal_probe",XUe(C))}
+@217243035 sha=c793a65d369a74fe function Iq(e){return wr(e,"tokenTypeIdx")}
+
+## function Zt( hits=34 68597584,178484572,183479227,189152572,189982175,190732516,192068114,192390555,194284411,194493056,196874664,197107465
+@68597584 sha=12f1bb85f6aa89d5 function Zt(e,t){return t?parseInt(e,8):parseFloat(e.replace(/_/g,""))}
+@178484572 sha=fcff7fe0c16eb52d function Zt(t,e){var r=F(t,e);return z(r)?r:void 0}
+@183479227 sha=0329aae88f0bfdef function Zt(e){return e===105||e===109||e===115}
+@189152572 sha=6952fcc2ccc2b3ae function Zt(t){if(/[\u2018\u2019\u201A\u201B]/.test(t))throw Error("unsupported Unicode single-quote in command line");return`'${t.replaceAll("'","''")}'`}
+@189982175 sha=07b49ce4502b69b9 len=1842 function Zt(e,t){let r=vr(e),s=r.length>kt;if(s)y("artifact_publish",`${t.feature}_structure_scan_skipped`);let o=s?null:wr(r),u=o?.token,d=o&&u?.type==="heading"?{token:u,offset:o.offset}:null,g=Ks(d?d.token.text:zs(r),t.fallbackTitle),p=Xs(g,t.fallbackTitle),k;try{k=t.loadTempl
+@190732516 sha=0713dff6881d4bdf function Zt(e,t,r=Jt){for(let s of r){if(await ne(s,void 0,{unref:!0}),me().durable.registrySink!==null)return!0;let o;try{o=await e()}catch(l){n(`[artifact] worker-state re-read threw: ${String(l)}`);continue}if(o===null||o.readFailed)continue;try{Ke(o,t)}catch(l){return _(l),!1}return b("artifact_durable_subscribe",{registry_reread:!0}),!0}return y("artifact_durable_subscribe","registry_reread_failed"),!1}
+@192068114 sha=6035eaee45d24e3b function Zt(n,s){if(n.ctrl&&(n.key==="k"||n.key==="u"||n.key==="w"))return!0;if((n.meta||n.ctrl)&&n.key==="backspace")return!0;if(s&&n.meta&&!n.ctrl&&n.key.toLowerCase()==="d")return!0;return!1}
+@192390555 sha=87a4d58ae2731d5b function Zt(e){return Oe.lastIndex=0,Oe.test(e)}
+
+## markScrollActivity hits=5 99401896,101894052,178527585,178556524,192782608
+@99401896 markScrollActivity..........waitForScrollIdle.......eY..sidecarIoSettled......Z.mainAgentId.....&...replaceProjectDir...	....5D.isGranted.......YC7.replaceIsInteractive.....u..printOutputFormat.......
+@101894052 markScrollActivitymarkStrictPrefixLockStoodDownmarkSyncedPluginLaneOpenedneedsAutoModeExitAttachmentneedsPlanModeExitAttachmentnoteSystemPromptSectionInvalidationonAttacherCapsChangeonHookStoresChange
+@178527585 sha=1cf32378883387ab markScrollActivity(){if(this.#o=!0,this.#r)clearTimeout(this.#r);this.#r=setTimeout(()=>{this.#o=!1,this.#r=void 0},Zt),this.#r.unref?.()}
+@178556524 sha=68cdea1f69f7c7b7 markScrollActivity()}function mde(){return n().userPresence.scrollDraining()}
+@192782608 markScrollActivity,HEr as markStrictPrefixLockStoodDown,gkn as markSyncedPluginLaneOpened,Hkn as needsAutoModeExitAttachment,Ikn as needsPlanModeExitAttachment,Ivt as noteSystemPromptSectionInvalidati
+
+## scrollDraining() hits=2 178527553,178556584
+@178527553 sha=f4ec048a263df8af scrollDraining(){return this.#o}
+@178556584 sha=6974152d1611c75b scrollDraining()}async function JYe(){return n().userPresence.waitForScrollIdle()}
+
+## waitForScrollIdle hits=5 99401924,101898475,178527729,178556646,192788550
+@99401924 waitForScrollIdle.......eY..sidecarIoSettled......Z.mainAgentId.....&...replaceProjectDir...	....5D.isGranted.......YC7.replaceIsInteractive.....u..printOutputFormat...........replacePrintOutputFormat
+@101898475 waitForScrollIdleclearBundledSkillsextractAdditionalSkillFilesgetBundledSkillExtractDirgetBundledSkillsgetRegisteredBundledSkillsIgnoringKillSwitchregisterBundledSkillregisterBundledSkillSessionResetr
+@178527729 sha=2c56aa0a83f46fe9 waitForScrollIdle(){while(this.#o)await new Promise((e)=>setTimeout(e,Zt))}
+@178556646 sha=273fc786cbadffb5 waitForScrollIdle()}function Gm(){return n().costLedger.modelUsage()}
+@192788550 sha=16e109152af4203e waitForScrollIdle};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{WYn,idr,ehn,thn,jg,rSr,nhn,oSr,l8e,ZT,rhn,iSr,sSr,aSr,JN,sdr,GYn,Eb,ijt,um,R,zce,vC,Np,DW,mMe,adr,ohn,hMe,Vgt,ldr,ihn,shn,c8e,lSr,cSr,LP,$h}
+
+## var Zt= near-host 178527118
+@178527118 var Zt=150;class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;terminal
+
+## Zt= near-host 178527122
+@178527122 Zt=150;class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;terminalFocu
+
+## const Zt= near-host 
+
+## let Zt= near-host 
+
+## ye.mainAgentId @178529589
+class ye{#e=null;#t=null;mainAgentId(e){return this.#e??=eo(e),this.#e}projectDir(){return this.#t}replaceProjectDir(e){this.#t=e}}class Ce{granted=!1;isGranted(){return this.granted}grant(){this.gran
+
+## Se.scroll @178527129
+class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;terminalFocusFired=$e();#o=!1;#r;lastInteractionTime(){return this.#e}recordInteraction(e){if(e)this.#i();else this.#t=!0}flushIfDirty(){if(this.#t)this.#i()}#i(){this.#e=Date.now(),this.#t=!1,this.interactionFired.emit()}resetBaseline(){this.#e=Date.now(),this.#t=!1}terminalFocus(){return this.#n}updateTerminalFocus(e){this.#n=e,this.terminalFocusFired.emit()}scrollDraining(){return this.#o}markScrollActivity(){if(this.#o=!0,this.#r)clearTimeout(this.#r);this.#r=setTimeout(()=>{this.#o=!1,this.#r=void 0},Zt),this.#r.unref?.()}async waitForScrollIdle(){while(this.#o)await new Promise((e)=>setTimeout(e,Zt))}reset(){this.#e=Date.now(),this.#n=void 0,this.interactionFired.clear(),this.terminalFocusFired.clear()}}var wi=["sdk_single_prompt_gate","subagent_estimate","subagent_final_turn"];class be{byAgent=new Map;attemptsByAgent=new
+
+## un.avt @178548313
+function un(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof ln==="function"){let t=Ri();try{e=dn(ln(t))}catch{e=dn(t)}}return yGt({host:sn(),id:avt()??Iq(),project:{originalCwd:e,projectRoot:e,cwd:e}})}var v=un();function z(){return n()}function n(){retu

@@ -1,0 +1,106 @@
+# gold-248-state-dead-audit-now
+fields=98 dead=79 gKeep=4 live=15
+
+## DEAD candidates (0 STATE.field)
+- originalCwd
+- projectRoot
+- cwd
+- mainLoopModelOverride
+- initialMainLoopModel
+- resolvedOrgDefault
+- initialEnvDefaultModel
+- fableSessionFallbackConsented
+- refusalFallbackOccurred
+- refusalFallbackModelLatch
+- modelStrings
+- isInteractive
+- attacherCaps
+- strictToolResultPairing
+- sdkAgentProgressSummariesEnabled
+- userMsgOptIn
+- todoToolsOptIn
+- restrictedSession
+- clientType
+- questionPreviewFormat
+- flagSettingsPath
+- flagSettingsInline
+- parentManagedSettings
+- allowedSettingSources
+- sessionIngressToken
+- oauthTokenFromFd
+- apiKeyFromFd
+- meter
+- sessionCounter
+- locCounter
+- prCounter
+- commitCounter
+- costCounter
+- tokenCounter
+- codeEditToolDecisionCounter
+- activeTimeCounter
+- statsStore
+- sessionId
+- mainAgentId
+- parentSessionId
+- loggerProvider
+- eventLogger
+- meterProvider
+- tracerProvider
+- agentColorMap
+- agentColorIndex
+- lastAPIRequest
+- lastAPIRequestMessages
+- lastClassifierRequests
+- inlinePlugins
+- inlinePluginsNoMcp
+- inlinePluginUrls
+- syncedPluginDirs
+- chromeFlagOverride
+- useCoworkPlugins
+- sessionBypassPermissionsMode
+- scheduledTasksEnabled
+- sessionCreatedTeams
+- sessionTrustAccepted
+- sessionPersistenceDisabled
+- hasExitedPlanMode
+- needsPlanModeExitAttachment
+- needsAutoModeExitAttachment
+- memoryToggledOff
+- lspRecommendationShownThisSession
+- initJsonSchema
+- planSlugCache
+- invokedSkills
+- sdkBetas
+- sdkSupportedDialogKinds
+- sdkSupportedDialogKindsSource
+- sdkDialogHostActive
+- additionalDirectoriesForClaudeMd
+- allowedChannels
+- hasDevChannels
+- sessionProjectDir
+- promptId
+- pendingPrLinks
+- pendingBranchLinks
+
+## KEEP g() type residual
+- cachedClaudeMdContent
+- sessionCronTasks
+- registeredHooks
+- mainThreadAgentType
+
+## LIVE / KEEP STATE
+- turnHookDurationMs KEEP_STATE
+- turnToolDurationMs KEEP_STATE
+- turnClassifierDurationMs KEEP_STATE
+- turnToolCount KEEP_STATE
+- turnHookCount KEEP_STATE
+- turnClassifierCount KEEP_STATE
+- kairosActive KEEP_STATE
+- claudeInChromeSessionPromptActive KEEP_STATE
+- teleportedSessionIds KEEP_STATE
+- replBridgeSessionId KEEP_STATE
+- promptCache1hEligible KEEP_STATE
+- pinnedFeatureValues KEEP_STATE
+- afkModeHeaderLatched KEEP_STATE
+- fastModeHeaderLatched KEEP_STATE
+- cacheEditingHeaderLatched KEEP_STATE

@@ -43,6 +43,8 @@ function convertPluginHooksToMatchers(
     SubagentStop: [],
     PreCompact: [],
     PostCompact: [],
+    PreModelSwitch: [],
+    PostModelSwitch: [],
     PermissionRequest: [],
     Setup: [],
     TeammateIdle: [],
@@ -88,9 +90,32 @@ function convertPluginHooksToMatchers(
 }
 
 /**
- * Load and register hooks from all enabled plugins
+ * densable 2.1.251 gold-i `se()` hookRegistration* on the existing plugin
+ * hook loader (local `fY`). Not a second registry.
  */
-export const loadPluginHooks = memoize(async (): Promise<void> => {
+export type PluginHookRegistration = {
+  hookRegistration: Promise<void> | undefined
+  hookRegistrationInFlight: Promise<void> | undefined
+  hookRegistrationFailed: boolean
+  hookRegistrationRetried: boolean
+  hookRegistrationArgs:
+    | { storageV5?: unknown; credentials?: unknown }
+    | undefined
+}
+
+const pluginHookRegistration: PluginHookRegistration = {
+  hookRegistration: undefined,
+  hookRegistrationInFlight: undefined,
+  hookRegistrationFailed: false,
+  hookRegistrationRetried: false,
+  hookRegistrationArgs: undefined,
+}
+
+export function getPluginHookRegistration(): PluginHookRegistration {
+  return pluginHookRegistration
+}
+
+async function registerPluginHooksOnce(): Promise<void> {
   const { enabled } = await loadAllPluginsCacheOnly()
   const allPluginHooks: Record<HookEvent, PluginHookMatcher[]> = {
     PreToolUse: [],
@@ -107,6 +132,8 @@ export const loadPluginHooks = memoize(async (): Promise<void> => {
     SubagentStop: [],
     PreCompact: [],
     PostCompact: [],
+    PreModelSwitch: [],
+    PostModelSwitch: [],
     PermissionRequest: [],
     Setup: [],
     TeammateIdle: [],
@@ -158,7 +185,41 @@ export const loadPluginHooks = memoize(async (): Promise<void> => {
   logForDebugging(
     `Registered ${totalHooks} hooks from ${enabled.length} plugins`,
   )
+}
+
+/**
+ * Load and register hooks from all enabled plugins.
+ * Tracks gold-i `hookRegistrationInFlight` / `hookRegistrationFailed` on the
+ * existing registration object so Osn/Lsn can await and retry once.
+ */
+export const loadPluginHooks = memoize(async (): Promise<void> => {
+  const reg = pluginHookRegistration
+  const flight = registerPluginHooksOnce()
+    .then(() => {
+      reg.hookRegistrationFailed = false
+    })
+    .catch((err: unknown) => {
+      reg.hookRegistrationFailed = true
+      throw err
+    })
+    .finally(() => {
+      if (reg.hookRegistrationInFlight === flight) {
+        reg.hookRegistrationInFlight = undefined
+      }
+    })
+  reg.hookRegistration = flight
+  reg.hookRegistrationInFlight = flight
+  return flight
 })
+
+export function resetPluginHookRegistrationForTests(): void {
+  pluginHookRegistration.hookRegistration = undefined
+  pluginHookRegistration.hookRegistrationInFlight = undefined
+  pluginHookRegistration.hookRegistrationFailed = false
+  pluginHookRegistration.hookRegistrationRetried = false
+  pluginHookRegistration.hookRegistrationArgs = undefined
+  loadPluginHooks.cache?.clear?.()
+}
 
 export function clearPluginHookCache(): void {
   // Only invalidate the memoize — do NOT wipe STATE.registeredHooks here.

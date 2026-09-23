@@ -129,6 +129,7 @@ import {
   isInstallationRelevantToCurrentProject,
 } from './installedPluginsManager.js'
 import { getManagedPluginNames } from './managedPlugins.js'
+import { rereadMarketplaceCatalogIfNull } from './marketplaceCatalogReread.js'
 import {
   formatSourceForDisplay,
   getBlockedMarketplaces,
@@ -155,10 +156,10 @@ import {
   parsePluginIdentifier,
   SYNCED_MARKETPLACE_NAME,
 } from './pluginIdentifier.js'
+import { applyPluginCommandSources } from './pluginCommandPaths.js'
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
 import { calculatePluginVersion } from './pluginVersioning.js'
 import {
-  type CommandMetadata,
   PluginHooksSchema,
   PluginIdSchema,
   PluginManifestSchema,
@@ -1822,140 +1823,16 @@ export async function createPluginFromPath(
     plugin.commandsPath = commandsPath
   }
 
-  // Step 3a: Process additional command paths from manifest
+  // Step 3a: densable VHt — manifest command sources
   if (manifest.commands) {
-    // Check if it's an object mapping (record of command name → metadata)
-    const firstValue = Object.values(manifest.commands)[0]
-    if (
-      typeof manifest.commands === 'object' &&
-      !Array.isArray(manifest.commands) &&
-      firstValue &&
-      typeof firstValue === 'object' &&
-      ('source' in firstValue || 'content' in firstValue)
-    ) {
-      // Object mapping format: { "about": { "source": "./README.md", ... } }
-      const commandsMetadata: Record<string, CommandMetadata> = {}
-      const validPaths: string[] = []
-
-      // Parallelize pathExists checks; process results in order to keep
-      // error/log ordering deterministic.
-      const entries = Object.entries(manifest.commands)
-      const checks = await Promise.all(
-        entries.map(async ([commandName, metadata]) => {
-          if (!metadata || typeof metadata !== 'object') {
-            return { commandName, metadata, kind: 'skip' as const }
-          }
-          if (metadata.source) {
-            const fullPath = join(pluginPath, metadata.source)
-            return {
-              commandName,
-              metadata,
-              kind: 'source' as const,
-              fullPath,
-              exists: await pathExists(fullPath),
-            }
-          }
-          if (metadata.content) {
-            return { commandName, metadata, kind: 'content' as const }
-          }
-          return { commandName, metadata, kind: 'skip' as const }
-        }),
-      )
-      for (const check of checks) {
-        if (check.kind === 'skip') continue
-        if (check.kind === 'content') {
-          // For inline content commands, add metadata without path
-          commandsMetadata[check.commandName] = check.metadata
-          continue
-        }
-        // kind === 'source'
-        if (check.exists) {
-          validPaths.push(check.fullPath)
-          commandsMetadata[check.commandName] = check.metadata
-        } else {
-          logForDebugging(
-            `Command ${check.commandName} path ${check.metadata.source} specified in manifest but not found at ${check.fullPath} for ${manifest.name}`,
-            { level: 'warn' },
-          )
-          logError(
-            new Error(
-              `Plugin component file not found: ${check.fullPath} for ${manifest.name}`,
-            ),
-          )
-          errors.push({
-            type: 'path-not-found',
-            source,
-            plugin: manifest.name,
-            path: check.fullPath,
-            component: 'commands',
-          })
-        }
-      }
-
-      // Set commandsPaths if there are file-based commands
-      if (validPaths.length > 0) {
-        plugin.commandsPaths = validPaths
-      }
-      // Set commandsMetadata if there are any commands (file-based or inline)
-      if (Object.keys(commandsMetadata).length > 0) {
-        plugin.commandsMetadata = commandsMetadata
-      }
-    } else {
-      // Path or array of paths format
-      const commandPaths = Array.isArray(manifest.commands)
-        ? manifest.commands
-        : [manifest.commands]
-
-      // Parallelize pathExists checks; process results in order.
-      const checks = await Promise.all(
-        commandPaths.map(async cmdPath => {
-          if (typeof cmdPath !== 'string') {
-            return { cmdPath, kind: 'invalid' as const }
-          }
-          const fullPath = join(pluginPath, cmdPath)
-          return {
-            cmdPath,
-            kind: 'path' as const,
-            fullPath,
-            exists: await pathExists(fullPath),
-          }
-        }),
-      )
-      const validPaths: string[] = []
-      for (const check of checks) {
-        if (check.kind === 'invalid') {
-          logForDebugging(
-            `Unexpected command format in manifest for ${manifest.name}`,
-            { level: 'error' },
-          )
-          continue
-        }
-        if (check.exists) {
-          validPaths.push(check.fullPath)
-        } else {
-          logForDebugging(
-            `Command path ${check.cmdPath} specified in manifest but not found at ${check.fullPath} for ${manifest.name}`,
-            { level: 'warn' },
-          )
-          logError(
-            new Error(
-              `Plugin component file not found: ${check.fullPath} for ${manifest.name}`,
-            ),
-          )
-          errors.push({
-            type: 'path-not-found',
-            source,
-            plugin: manifest.name,
-            path: check.fullPath,
-            component: 'commands',
-          })
-        }
-      }
-
-      if (validPaths.length > 0) {
-        plugin.commandsPaths = validPaths
-      }
-    }
+    await applyPluginCommandSources(plugin, manifest.commands, {
+      pluginPath,
+      pluginName: manifest.name,
+      errorSource: source,
+      mode: 'replace',
+      origin: 'manifest',
+      errors,
+    })
   }
 
   // Step 4: Register agents directory if detected
@@ -2390,7 +2267,19 @@ async function loadPluginsFromMarketplaces({
   >()
   await Promise.all(
     [...uniqueMarketplaces].map(async name => {
-      marketplaceCatalogs.set(name, await getMarketplaceCacheOnly(name))
+      const registryEntry = Object.hasOwn(knownMarketplaces, name)
+        ? knownMarketplaces[name]
+        : undefined
+      const first = await getMarketplaceCacheOnly(name)
+      // Skill-catalog load only: re-read a null marketplace catalog.
+      // Command path traversal stays in pluginCommandPaths.ts.
+      const catalog = await rereadMarketplaceCatalogIfNull({
+        name,
+        catalog: first,
+        hasRegistryEntry: registryEntry !== undefined,
+        read: () => getMarketplaceCacheOnly(name),
+      })
+      marketplaceCatalogs.set(name, catalog)
     }),
   )
 
@@ -2963,123 +2852,16 @@ async function finishLoadingPluginFromPath(
     } as PluginManifest
     plugin.name = plugin.manifest.name
 
-    // Process commands from marketplace entry
+    // Process commands from marketplace entry (densable VHt)
     if (entry.commands) {
-      // Check if it's an object mapping
-      const firstValue = Object.values(entry.commands)[0]
-      if (
-        typeof entry.commands === 'object' &&
-        !Array.isArray(entry.commands) &&
-        firstValue &&
-        typeof firstValue === 'object' &&
-        ('source' in firstValue || 'content' in firstValue)
-      ) {
-        // Object mapping format
-        const commandsMetadata: Record<string, CommandMetadata> = {}
-        const validPaths: string[] = []
-
-        // Parallelize pathExists checks; process results in order.
-        const entries = Object.entries(entry.commands)
-        const checks = await Promise.all(
-          entries.map(async ([commandName, metadata]) => {
-            if (!metadata || typeof metadata !== 'object' || !metadata.source) {
-              return { commandName, metadata, skip: true as const }
-            }
-            const fullPath = join(pluginPath, metadata.source)
-            return {
-              commandName,
-              metadata,
-              skip: false as const,
-              fullPath,
-              exists: await pathExists(fullPath),
-            }
-          }),
-        )
-        for (const check of checks) {
-          if (check.skip) continue
-          if (check.exists) {
-            validPaths.push(check.fullPath)
-            commandsMetadata[check.commandName] = check.metadata
-          } else {
-            logForDebugging(
-              `Command ${check.commandName} path ${check.metadata.source} from marketplace entry not found at ${check.fullPath} for ${entry.name}`,
-              { level: 'warn' },
-            )
-            logError(
-              new Error(
-                `Plugin component file not found: ${check.fullPath} for ${entry.name}`,
-              ),
-            )
-            errors.push({
-              type: 'path-not-found',
-              source: pluginId,
-              plugin: entry.name,
-              path: check.fullPath,
-              component: 'commands',
-            })
-          }
-        }
-
-        if (validPaths.length > 0) {
-          plugin.commandsPaths = validPaths
-          plugin.commandsMetadata = commandsMetadata
-        }
-      } else {
-        // Path or array of paths format
-        const commandPaths = Array.isArray(entry.commands)
-          ? entry.commands
-          : [entry.commands]
-
-        // Parallelize pathExists checks; process results in order.
-        const checks = await Promise.all(
-          commandPaths.map(async cmdPath => {
-            if (typeof cmdPath !== 'string') {
-              return { cmdPath, kind: 'invalid' as const }
-            }
-            const fullPath = join(pluginPath, cmdPath)
-            return {
-              cmdPath,
-              kind: 'path' as const,
-              fullPath,
-              exists: await pathExists(fullPath),
-            }
-          }),
-        )
-        const validPaths: string[] = []
-        for (const check of checks) {
-          if (check.kind === 'invalid') {
-            logForDebugging(
-              `Unexpected command format in marketplace entry for ${entry.name}`,
-              { level: 'error' },
-            )
-            continue
-          }
-          if (check.exists) {
-            validPaths.push(check.fullPath)
-          } else {
-            logForDebugging(
-              `Command path ${check.cmdPath} from marketplace entry not found at ${check.fullPath} for ${entry.name}`,
-              { level: 'warn' },
-            )
-            logError(
-              new Error(
-                `Plugin component file not found: ${check.fullPath} for ${entry.name}`,
-              ),
-            )
-            errors.push({
-              type: 'path-not-found',
-              source: pluginId,
-              plugin: entry.name,
-              path: check.fullPath,
-              component: 'commands',
-            })
-          }
-        }
-
-        if (validPaths.length > 0) {
-          plugin.commandsPaths = validPaths
-        }
-      }
+      await applyPluginCommandSources(plugin, entry.commands, {
+        pluginPath,
+        pluginName: entry.name,
+        errorSource: pluginId,
+        mode: 'replace',
+        origin: 'marketplace',
+        errors,
+      })
     }
 
     // Process agents from marketplace entry
@@ -3212,131 +2994,16 @@ async function finishLoadingPluginFromPath(
   } else if (hasManifest) {
     // Has plugin.json - marketplace can supplement commands/agents/skills/hooks/outputStyles
 
-    // Supplement commands from marketplace entry
+    // Supplement commands from marketplace entry (densable VHt)
     if (entry.commands) {
-      // Check if it's an object mapping
-      const firstValue = Object.values(entry.commands)[0]
-      if (
-        typeof entry.commands === 'object' &&
-        !Array.isArray(entry.commands) &&
-        firstValue &&
-        typeof firstValue === 'object' &&
-        ('source' in firstValue || 'content' in firstValue)
-      ) {
-        // Object mapping format - merge metadata
-        const commandsMetadata: Record<string, CommandMetadata> = {
-          ...(plugin.commandsMetadata || {}),
-        }
-        const validPaths: string[] = []
-
-        // Parallelize pathExists checks; process results in order.
-        const entries = Object.entries(entry.commands)
-        const checks = await Promise.all(
-          entries.map(async ([commandName, metadata]) => {
-            if (!metadata || typeof metadata !== 'object' || !metadata.source) {
-              return { commandName, metadata, skip: true as const }
-            }
-            const fullPath = join(pluginPath, metadata.source)
-            return {
-              commandName,
-              metadata,
-              skip: false as const,
-              fullPath,
-              exists: await pathExists(fullPath),
-            }
-          }),
-        )
-        for (const check of checks) {
-          if (check.skip) continue
-          if (check.exists) {
-            validPaths.push(check.fullPath)
-            commandsMetadata[check.commandName] = check.metadata
-          } else {
-            logForDebugging(
-              `Command ${check.commandName} path ${check.metadata.source} from marketplace entry not found at ${check.fullPath} for ${entry.name}`,
-              { level: 'warn' },
-            )
-            logError(
-              new Error(
-                `Plugin component file not found: ${check.fullPath} for ${entry.name}`,
-              ),
-            )
-            errors.push({
-              type: 'path-not-found',
-              source: pluginId,
-              plugin: entry.name,
-              path: check.fullPath,
-              component: 'commands',
-            })
-          }
-        }
-
-        if (validPaths.length > 0) {
-          plugin.commandsPaths = [
-            ...(plugin.commandsPaths || []),
-            ...validPaths,
-          ]
-          plugin.commandsMetadata = commandsMetadata
-        }
-      } else {
-        // Path or array of paths format
-        const commandPaths = Array.isArray(entry.commands)
-          ? entry.commands
-          : [entry.commands]
-
-        // Parallelize pathExists checks; process results in order.
-        const checks = await Promise.all(
-          commandPaths.map(async cmdPath => {
-            if (typeof cmdPath !== 'string') {
-              return { cmdPath, kind: 'invalid' as const }
-            }
-            const fullPath = join(pluginPath, cmdPath)
-            return {
-              cmdPath,
-              kind: 'path' as const,
-              fullPath,
-              exists: await pathExists(fullPath),
-            }
-          }),
-        )
-        const validPaths: string[] = []
-        for (const check of checks) {
-          if (check.kind === 'invalid') {
-            logForDebugging(
-              `Unexpected command format in marketplace entry for ${entry.name}`,
-              { level: 'error' },
-            )
-            continue
-          }
-          if (check.exists) {
-            validPaths.push(check.fullPath)
-          } else {
-            logForDebugging(
-              `Command path ${check.cmdPath} from marketplace entry not found at ${check.fullPath} for ${entry.name}`,
-              { level: 'warn' },
-            )
-            logError(
-              new Error(
-                `Plugin component file not found: ${check.fullPath} for ${entry.name}`,
-              ),
-            )
-            errors.push({
-              type: 'path-not-found',
-              source: pluginId,
-              plugin: entry.name,
-              path: check.fullPath,
-              component: 'commands',
-            })
-          }
-        }
-
-        if (validPaths.length > 0) {
-          plugin.commandsPaths = [
-            ...(plugin.commandsPaths || []),
-            ...validPaths,
-          ]
-        }
-      }
+      await applyPluginCommandSources(plugin, entry.commands, {
+        pluginPath,
+        pluginName: entry.name,
+        errorSource: pluginId,
+        mode: 'append',
+        origin: 'marketplace',
+        errors,
+      })
     }
 
     // Supplement agents from marketplace entry

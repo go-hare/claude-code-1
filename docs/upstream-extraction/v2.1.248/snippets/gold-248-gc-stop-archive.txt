@@ -1,0 +1,41 @@
+# gold-248-gc-stop-archive
+when=2026-09-20T14:43:33.750Z
+
+## needle "async stopRemote(" hits=1
+@192140769 sha=e6ceb644d1007258 async stopRemote(i){let d=i.state.sessionId;this.#S.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.map((w)=>w.id===i.id&&!Di(w.state)?{...w,state:{...w.state,state:"stopped",tempo:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}
+
+## needle "async archiveRemote(" hits=1
+@192141350 sha=de30126b02b75c82 async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`),this.#w.delete(i.id),this.loadRemote(),m}}
+
+## needle "Q.stopRemote(" hits=0
+
+## needle "Q.archiveRemote(" hits=0
+
+## needle ".stopRemote(" hits=0
+
+## needle ".archiveRemote(" hits=0
+
+## needle "function Di(" hits=18
+@181201526 sha=351e2e895597b271 function Di(e,t){return t.emptyStr()?e:e.emptyStr()?t:Sr`${e}${t}`}
+@182667585 sha=3194961f5cf70a2e function Di(e,t,r){if(!r)return!1;if((r["*"]??[]).some((u)=>e.includes(u)))return!0;if(t===void 0)return!1;for(let[u,p]of Object.entries(r))if(u!=="*"&&t.includes(u)&&p.some((E)=>e.includes(E)))return!0;return!1}
+@182998174 sha=6fe33187b62b1153 function Di(e){return Nw(e.state)&&e.tempo!=="active"}
+@183686328 sha=7ae27eaba36d646a function Di(wn,Jn,Zn={}){if(o.length===0)return;let zn=wn==="",qn=o.filter((io)=>Hhe(io,zn));if(qn.length===0)return;let Wn=qn.every((io)=>io.mode==="bash")?"bash":"prompt",to=Wn==="bash"?qn:qn.filter((io)=>io.mode!=="bash"),Io=po(to,wn,Zn),is=Io.map((io)=>io.text),Cr=[...is,wn].filter(Boolean).join(`
+`),_o=is.join(`
+`).length+1+Jn,Tn=[],Qr=Date.now();for(let[io,ls]of to.entries()){Tn.push(...Io[io].entries);let Fi=DLe(ls.value,Qr);Tn.push(...Fi),Qr+=Fi.length}for(let io of to){if(io.unlogged)continue;r("popAll",typeof io.value==="string"?io.value:void 0)}let kr=new Set(to),fo=o.filter((io)=>!kr.has(io));return o.length=0,o.push(...fo),C(),bI.emit(to),{text:Cr,cursorOffset:_o,images:Tn,mode:Wn}}
+@189350069 sha=c3f774d55db587b5 function Di(t){return Number.isFinite(t)&&Math.abs(t)<=2147483647}
+@189941727 sha= {"i":189941727,"missEnd":true,"preview":"function Di(e,t){if(t===void 0)return;let r=/([^\\t\\n\\f\\r /=>]+)(?:[\\t\\n\\f\\r ]*=[\\t\\n\\f\\r ]*(?:\"[^\"]*\"|'[^']*'|[^\\t\\n\\f\\r >]*))?/y;r.lastIndex=t.startOffset;let s=r.exec(e);if(s===null||s[1].toLowerCase()!==\"id\")return;let o=t.startOffset+s[0].length;return o<t.endOffset?void 0:{s"}
+
+## needle "isArchiving(" hits=2
+@192132869
+ngs,remoteJobs:d,remoteListLoaded:!1,overlaidLoadLanded:!1},this.#a.emit()}get jobs(){return this.#t.jobs}isDeleting(i){return this.#m.has(i)}isDeletingSession(i){return this.#g.has(i)}isHolding(i){return this.#c.has(i)}isArchiving(i){return this.#w.has(i)}liveStatus(i){let{sessionId:d,resumeSessionId:m}=i.state;if(sS(i.state))return i.state.tempo==="active"?"busy":void 0;if(i.state.backend==="remote")return i.state.tempo==="active"?"busy":i.state.tempo==="blocked"?"waiting":void 0;if(this.#b.has(m??d))retu
+@192149527
+Set;for(let T of[m,w,S,h])for(let P of T)x.add(P.id);let A=J(h,(T)=>!T.id.startsWith("remote-pending-")),F=!C||A===0||A>=lRt;i.sweepReplyDrafts({now:Date.now(),isGuarded:(T)=>x.has(T)||d.isDeleting(T)||d.isHolding(T)||d.isArchiving(T)||(T.startsWith("remote-")?F:T.startsWith("peer-")?S.length===0:m.length===0)})}var Hh=30000,Gh=["query","cursorOffset","mode","sessionModel","error","hint","replyError","expandHintPasteId"];function Vh(i,d){return Math.max(0,Math.min(i.length,d))}class Ec{#n=$e();#e;#a=0;#t=nu
+
+## stopRemote-192140740 @192140740
+remoteListLoaded",()=>!0)})};async stopRemote(i){let d=i.state.sessionId;this.#S.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.map((w)=>w.id===i.id&&!Di(w.state)?{...w,state:{...w.state,state:"stopped",tempo:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive")
+
+## archiveRemote-192141329 @192141329
+ailed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`),this.#w.delete(i.id),this.loadRemote(),m}}}function xr(i,d){if(i.roster){if(!i.roster.usesStorage(d))_(Error("[fleet:roster] ensureFleetRoster called with a different storageV5 than the 
+
+## pc-fc-Ah-Th @192129961
+{return[...i].sort((d,m)=>Hi(d.state)-Hi(m.state))}var pc=120000,fc=2000,Ah=500,Th=30000;var mc=30000;function Dh(){return{listJobs:(i)=>Rg(void 0,i),listAliveD

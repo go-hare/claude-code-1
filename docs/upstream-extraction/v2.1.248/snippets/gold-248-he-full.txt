@@ -1,0 +1,41 @@
+# gold-248-he-full
+DIG official Diagnostics (class He) + wrappers
+when=2026-09-21
+exe=official-248/package/claude.exe
+
+## EXACT class He @178540219 sha=ab8fc93c26df2235 len=531
+class He{#e=[];#t=[];#n=void 0;errorLog(){return this.#e}recordError(e){if(this.#e.length>=100)this.#e.shift();this.#e.push(e)}recordSlowOperation(e,t){return}slowOperations(){if(this.#t.length===0)return nn;let e=Date.now();if(this.#t.some((t)=>e-t.timestamp>=1e4)){if(this.#t=this.#t.filter((t)=>e-t.timestamp<1e4),this.#t.length===0)return nn}return this.#t}recordDevBarAlert(e){return}devBarAlert(){let e=this.#n;if(e&&Date.now()-e.timestamp>=60000){this.#n=void 0;return}return e}reset(){this.#e=[],this.#t=[],this.#n=void 0}}
+
+## nn empty sentinel (immediately before He)
+@178540242 var nn=[];class He{...
+
+## Host bag slot
+sn(): diagnostics:new He  →  Ke.diagnostics  (host.diagnostics)
+
+## EXACT wrappers @178569873 / @178579251
+function yEr(e){n().host.diagnostics.recordError(e)}
+function xEr(e,t){n().host.diagnostics.recordSlowOperation(e,t)}
+function CEr(){return n().host.diagnostics.slowOperations()}
+function REr(e){n().host.diagnostics.recordDevBarAlert(e)}
+function IEr(){return n().host.diagnostics.devBarAlert()}
+
+## Field write analysis
+- #e: written by recordError (cap 100 + shift); read by errorLog(); reset clears
+- #t: init []; reset clears; slowOperations may filter TTL (<1e4ms); NEVER .push — recordSlowOperation is empty `return`
+- #n: init void 0; reset clears; recordDevBarAlert is empty `return`; devBarAlert may clear on 60s TTL
+- #t ever written with payload: NO (only init/reset/TTL-filter self-assign)
+- recordSlowOperation(e,t){return} — CONFIRMED empty
+- recordDevBarAlert(e){return} — CONFIRMED empty
+
+## SEA string hit counts
+- recordSlowOperation: 3 (proto name table + class body + xEr wrapper)
+- slowOperations: 3
+- recordDevBarAlert: 3
+- devBarAlert: 3
+- recordError: 3 (incl yEr)
+- diagnostics.errorLog(): 0 wrapper call sites (method exists; no n().host.diagnostics.errorLog() wrapper)
+
+## VERDICT
+- He bag + wrappers: 补 land leftover Diagnostics API onto host.diagnostics / yEr·xEr·CEr·REr·IEr
+- STATE.slowOperations write path: keep residual (official recordSlowOperation noop — do NOT invent #t writes); ant-only leftover OK
+- #t population: 砍 any invent of push into bag; official never writes #t payloads

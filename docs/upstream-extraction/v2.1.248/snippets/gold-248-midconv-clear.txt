@@ -1,0 +1,29 @@
+# gold-248-midconv-clear
+
+## cTn() hits=2
+@178582397 n lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockStoodDown()}function HEr(){n().host.requestLatches.markStrictPrefixLockS
+
+@186474100 fort:so}),"retry:mid-conv-system"}if(bn&&!AE(ct,Fht)&&Xde(cr))return Kk(ct,Fht),cTn(),n("[mid-conv-system] proxy rejected cache_control on the api_system tail \u2014 demoting the breakpoint to the trailing message for this conversation",{level:"warn"}),y("api_midconv_cache_proxy"
+
+## lTn() hits=2
+@178582319 as(e)}function s3t(e){n().host.requestLatches.markEffortUnsupported(e)}function lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPref
+
+@186469597 rs)}let Wr=zn=QWn(xvt(Ht,ju),Eb,Bn,p.skipCacheWrite,p.forkPointUuid,AE(ct,Fht)||lTn(),so,xk!==null,!jh&&vk!==null||Ma.cache_control!=null),rm=(rs)=>Array.isArray(rs.content)&&rs.content.some((sa)=>typeof sa==="object"&&sa!==null&&("cache_control"in sa)&&sa.cache_control!=null);bn
+
+## function cTn hits=1
+@178582388 )}function lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockStoodDown()}function HEr(){n().host.requestLatches.markStrictPr
+
+## function lTn hits=1
+@178582310 odels().has(e)}function s3t(e){n().host.requestLatches.markEffortUnsupported(e)}function lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.s
+
+## markMidConvCachePromotionRejected() hits=2
+@178545930 ortUnsupported(e){this.#o.add(e)}midConvCachePromotionRejected(){return this.#r}markMidConvCachePromotionRejected(){this.#r=!0}strictPrefixLockStoodDown(){return this.#i}markStrictPrefixLockStoodDown(){this.#i=!0}perTurnEffortOkEmitted(){return this.#a}markPerTurnEffortOkEmitted(
+
+@178582427 tLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockStoodDown()}function HEr(){n().host.requestLatches.markStrictPrefixLockStoodDown()}function dTn(){retu
+
+## host.requestLatches.reset hits=0
+## call-near @178545930
+nkingTypeOverrides(){return this.#t}recordThinkingTypeOverride(e,t){this.#t.set(e,t)}servedModelsByRequestedModel(){return this.#n}recordServedModels(e,t){this.#n.set(e,t)}effortUnsupportedModels(){return this.#o}markEffortUnsupported(e){this.#o.add(e)}midConvCachePromotionRejected(){return this.#r}markMidConvCachePromotionRejected(){this.#r=!0}strictPrefixLockStoodDown(){return this.#i}markStrict
+
+## call-near @178582427
+nversationLatches.perTurnEffortPins()}function Hvt(e){return n().host.requestLatches.effortUnsupportedModels().has(e)}function s3t(e){n().host.requestLatches.markEffortUnsupported(e)}function lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockSt

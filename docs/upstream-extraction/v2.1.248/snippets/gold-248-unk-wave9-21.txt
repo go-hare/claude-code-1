@@ -1,0 +1,32 @@
+# gold-248-unk-wave9-21  densable 2.1.248 #21
+# hook-invalid-answer — unique Swt is hook parse, not agents-list row
+# SEA 226708128 · 247 present
+# stay UNKNOWN. invent-ban. no fleet-row host.
+
+extracted? YES unique Swt/Owt schema copy. NO unique agents-list row
+landed? no
+stay UNKNOWN? YES
+
+## unique 248 (wrong surface)
+Swt @186235528 len=1134 sha=7cd25b6ba6d5958a exact247=0
+Owt @186253739 len=189 sha=8c431a9ef22b837b → {validationError:Swt(t,r.error)}
+PermissionRequest decision must be 248=2 247=0
+top-level decision is the legacy 248=4 247=0
+
+247 Swt @214703876 is unrelated frontmatter helper (sha=61cf65c80df60c4f)
+247 validate is n1r @218250587 inline Eve (no PermissionRequest decision copy)
+
+## waitingFor / row
+UFe @202584294 sha=777e1663cee655c2 — no hook/schema (247 t5e same shape sha=338c797d240daf0c)
+lq @202584101 waitingFor:C from UFe only
+waitingFor:` 248=0 lastMessage:` 248=0
+schema error 248=0 hook schema 248=0 invalid answer 248=0
+
+## _P Expected schema
+_P @201448189 sha=53fb0e6c00002e9e = 247 nW @231508463 sha=fc2533a8b4bff44d
+callers: AttachmentMessage teammate + hookName," hook error" transcript
+NOT claude agents list row. leftover AgentView only displays waitingFor/lastMessage
+no unique 248 setter that puts hook+schema on the fleet row
+
+leftover validateHookJson can host Swt but that is parse text, not the agents row.
+do not invent row copy. stay UNKNOWN.

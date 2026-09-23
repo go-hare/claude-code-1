@@ -1,0 +1,312 @@
+# gold-248-fork-restricted-host
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T08:47:55.105Z
+
+## methods-178537404 @178537404
+EventIngressWired(){this.#b=!0}sdkAgentProgressSummariesEnabled(){return this.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCommands(){return this.#y}replaceDisableSlashCommands(e){this.#y=e}mayForwardHomeSettings(){return this.#x}replaceMayForwardHomeSettings(e){this.#x=e}homeSettingsHostConsent(){return this.#A}replaceHomeSettingsHostConsent(e){this.#A=e}scheduledTasksEnabled(){return this.#T}replaceScheduledTasksEnabled(e){this.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,this.#n=!1,this.#o=void 0,this.#r=!1,this.#i=!1,this.#a=!1,this.#s=void 0,this.#d=!1,this.#l=!1,this.#c="cli",this.#p="fresh",this.#u=void 0,this.#g=[],this.#h=!1,this.#m=!1,this.#f=!1,this.#v=!1,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e}flagSettingsExpectedContent(){return this.#t}replaceFlagSettingsExpectedContent(e){this.#t=e}flagSettingsFilePinned
+
+## wrappers-178553301 @178553301
+ngContextCompacted()}function Twn(){n().sessionFlags.forgetPendingContextCompacted()}function TL(){return n().host.mcpProcessWiring.strictConfig()}function Awn(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n().host.launchOptions.forkReplayLaunchConfig()}function Rwn(e){n().host.launchOptions.replaceForkReplayLaunchConfig(e)}function KYe(){return n().mcpSessionWiring.approvedServers()}function dvt(e,t){n().mcpSessionWiring.approveServers(e,t)}function tEr(){return n().sessionFlags.activeRoutine()}function nEr(e){n().sessionFlags.replaceActiveRoutine(e)}function Iwn(e,t){n().costLedger.recordApiDuration(e,t)}function rEr(){n().costLedger.zeroDurationsAndCostForTests()}funct
+
+## export-192785069 @192785069
+s setFableCreditsRequired,JEn as setFlagSettingsExpectedContent,QEn as setFlagSettingsFilePinnedContent,AEe as setFlagSettingsInline,XEn as setFlagSettingsPath,Rwn as setForkReplayLaunchConfig,Cwn as setForkRestrictedLaunchConfig,u7 as setGatewayAuth,jGt as setGatewayRefreshInFlight,ikn as setGatewayServerProcess,o3t as setHasDevChannels,gD as setHasExitedPlanMode,DEn as setHasStreamingInput,Mwn a
+
+## function GC( hits=2 @178553257,217226509
+## function GC(178553257 @178553257
+len=73 sha=c75e51a6d6ddf107
+function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}
+
+## function GC(217226509 @217226509
+len=1298 sha=16d1f119803ffb7a
+function GC(e){function t(r){return hr(r,GC)}if(o(t,"convertDefinition"),E(t,"convertDefinition"),e instanceof Gs){let r={type:"NonTerminal",name:e.nonTerminalName,idx:e.idx};return To(e.label)&&(r.label=e.label),r}else{if(e instanceof Co)return{type:"Alternative",definition:t(e.definition)};if(e instanceof Ua)return{type:"Option",idx:e.idx,definition:t(e.definition)};if(e instanceof Zo)return{type:"RepetitionMandatory",idx:e.idx,definition:t(e.definition)};if(e instanceof Qo)return{type:"RepetitionMandatoryWithSeparator",idx:e.idx,separator:GC(new ci({terminalType:e.separator})),definition:t(e.definition)};if(e instanceof wo)return{type:"RepetitionWithSeparator",idx:e.idx,separator:GC(new ci({terminalType:e.separator})),definition:t(e.definition)};if(e instanceof Mi)return{type:"Repetition",idx:e.idx,definition:t(e.definition)};if(e instanceof ko)return{type:"Alternation",idx:e.idx,definition:t(e.definition)};if(e instanceof ci){let r={type:"Terminal",name:e.terminalType.name,label:T3e(e.terminalType),idx:e.idx};To(e.label)&&(r.terminalLabel=e.label);let n=e.terminalType.PATTERN;return e.terminalType.PATTERN&&(r.pattern=Kh(n)?n.source:n),r}else{if(e instanceof Pv)return{type:"Rule",name:e.name,orgText:e.orgText,definition:t(e.definition)};throw Error("non exhaustive match")}}}
+
+## function Cwn( hits=1 @178553330
+## function Cwn(178553330 @178553330
+len=76 sha=c836daccafc6bb62
+function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}
+
+## function Hei( hits=0 @
+## function xei( hits=0 @
+## forkRestrictedLaunchConfig() needle="forkRestrictedLaunchConfig()" hits=2
+- #0 @178537404 is.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#
+- #1 @178553301 st.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n().host.launchOptions.forkReplayLaunchConfig()}function Rwn(e
+
+## replaceForkRestrictedLaunchConfig needle="replaceForkRestrictedLaunchConfig" hits=3
+- #0 @99403656 JsonSchema......lf..replaceInitJsonSchema...........cliSessionConfigCarried.........replaceCliSessionConfigCarried..........forkRestrictedLaunchConfig..!.......replaceForkRestrictedLaunchConfig.......7qV.forkReplayLaunchConfig......N.l.replaceForkReplayLaunchConfig.......t.t.replaceFlagSettingsPath.....?.i.flagSettingsExpectedContent."...'...replaceFl
+- #1 @178537448 aceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,this.#n=!1,this.#o=void 0,this.
+- #2 @178553369 launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n().host.launchOptions.forkReplayLaunchConfig()}function Rwn(e){n().host.launchOptions.replaceForkReplayLaunchConfig(e)}function KYe(){
+
+## Cwn( needle="Cwn(" hits=2
+- #0 @178553339 ed()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n().host.launchOptions.forkReplayLaunchConfig()}function Rwn(e){n().host.lau
+- #1 @191374601 II(Pe)}),n(`[Claude in Chrome] Error: ${Ge}`),_(Ge),gn("Error: Failed to run with Claude in Chrome.")}}let Tr=C,ko=C.strictMcpConfig||!1;if(Awn(ko),qYe(dae(C)),Cwn(Win(C)),Rwn({...typeof C.appendSystemPrompt==="string"&&C.appendSystemPrompt!==""&&{appendSystemPrompt:C.appendSystemPrompt},...typeof C.agent==="string"&&C.age
+
+## GC() needle="GC()" hits=12
+- #0 @178553266 fig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n()
+- #1 @180042924 !0,get:function(){return pc.unsuppressTracing}});var iq=oc();Object.defineProperty(ue,"TraceState",{enumerable:!0,get:function(){return iq.TraceState}});var sq=GC();Object.defineProperty(ue,"merge",{enumerable:!0,get:function(){return sq.merge}});var hv=YC();Object.defineProperty(ue,"TimeoutError",{enumerable:!0,get:functi
+- #2 @192086231 y again.":"Can't restart while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then try again."},g=(e)=>{let r=wU(he(t),GC());if(r.length===0)return h(e);let u=c();s("tengu_update_refused",{uncarriable:!0,comment_monitor:u});let p=Sc()?"":" (add --continue to return to this conversat
+- #3 @201904780 ullscreen",B=Q===Lt();if(B&&qe().tui===m)return await hwt(n.storageV5),i(`Already using the ${m} renderer.`,{display:"system"}),null;let Y=(d)=>{let b=wU(he(n),GC());if(b.length>0)return s("tengu_tui_refused",{uncarriable:!0}),tnr(m,b);let h=R();if(h!==void 0)return s("tengu_tui_refused",{active_tasks:h.activeTasks,comment
+- #4 @201907946 ached===!0,revert_kind:c(J),downsell_seen_count:oe().fullscreenDownsellSeenCount??0}).catch(_)}if(await ne(uT*2),Ce){return}let Se=wU(O().toolPermissionContext,GC());if(Se.length>0){s("tengu_tui_refused",{uncarriable:!0}),A(vxn(Se),{display:"system"});return}let ve=K();if(ve!==void 0){te("default",ve,A);return}Ake("default
+- #5 @202592038 vironment?",onCancel:gq,children:[iUe,yq]}),Qh[18]=gq,Qh[19]=yq,Qh[20]=aUe;else aUe=Qh[20];return aUe}N();function PUe(xUe){return wU(xUe.toolPermissionContext,GC()).length>0||hoe(xUe.tasks)!==void 0}function tae(){if(_t())return!1;if(On())return!1;if(hg()!==null)return!1;if(a.CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL)return!0;i
+- #6 @202592341 EEN_UPSELL)return!0;if(Lt())return!1;if(Om())return!1;if(qe().tui!==void 0)return!1;if(GHe()==="fullscreen")return!1;if(uft($T()))return!1;if(gqn())return!1;if(GC())return!1;if((oe().fullscreenUpsellSeenCount??0)>=VHe)return!1;if(mwt())return!1;return!0}function lD(FIt){let lv=g(19),{onDone:yb,getMessages:Jse,getIsResponse
+- #7 @205714430 torageV5),wo())return;if(_t())return d("a background session cannot restart itself (sign in from a session started directly with `claude`)");let c=he(o),m=wU(c,GC());if(m.length>0)return d(`this session has restrictions a restart can't carry over (${m.join("; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermi
+- #8 @209796532 istence is off, so the new session would have nothing to start from. Run the task here, or fork from a session that saves its transcript."),null;if(wr()||No()||GC())return i(`Can't fork: this session was started with launch flags (safe or bare mode, ${CGe}) that the copy wouldn't inherit, so it would run with fewer restric
+- #9 @222841759 pX,{store:w,parentContext:b?.store.context,isDrawer:p}),typeof n=="function"?n({payload:C}):n]})})}var hX,Uw,pL=K(()=>{"use client";hX=_(ie(),1);i1();mX();Dc();GC();Uw=_(he(),1)});function gX(e){return WC(e,"alert-dialog")}var bX=K(()=>{"use client";pL()});var vX,Ibe,KC,mL=K(()=>{"use client";vX=_(ie(),1);Dc();pn();Ca();dl
+- #10 @222847576 ibutesMapping:zbe,props:[{role:"presentation",hidden:!m,style:{pointerEvents:u?void 0:"none"},children:a},s]})})});function MX(){return new Xm}var Xm,kL=K(()=>{GC();kr();Sr();Xm=class{constructor(t){this.store=t??new tp}open(t){let n=t?this.store.context.triggerElements.getById(t):void 0;this.store.setOpen(!0,rt(Fe.imperat
+- #11 @222848041 .store.setOpen(!1,rt(Fe.imperativeAction,void 0,void 0))}get isOpen(){return this.store.select("open")}}});function LX(){return new jw}var OX,jw,IX=K(()=>{kL();GC();OX={modal:!0,disablePointerDismissal:!0,role:"alertdialog"},jw=class extends Xm{constructor(t){let n=t??new tp(OX);super(n),t&&this.store.update(OX)}}});var np
+
+## Cwn as setForkRestrictedLaunchConfig needle="Cwn as setForkRestrictedLaunchConfig" hits=1
+- #0 @192785062 setFlagSettingsExpectedContent,QEn as setFlagSettingsFilePinnedContent,AEe as setFlagSettingsInline,XEn as setFlagSettingsPath,Rwn as setForkReplayLaunchConfig,Cwn as setForkRestrictedLaunchConfig,u7 as setGatewayAuth,jGt as setGatewayRefreshInFlight,ikn as setGatewayServerProcess,o3t as setHasDevChannels,gD as setHasExitedPlanMode,DEn as setHasStreaming
+
+## GC as  needle="GC as " hits=1
+- #0 @192776753 as getFlagSettingsExpectedContent,vde as getFlagSettingsFilePinnedContent,x2 as getFlagSettingsInline,xL as getFlagSettingsPath,AL as getForkReplayLaunchConfig,GC as getForkRestrictedLaunchConfig,yvt as getFoundryDeploymentCapabilities,ei as getGatewayAuth,JLe as getGatewayRefreshInFlight,R7e as getHasDevChannels,s7e as getH
+
+## this.#w needle="this.#w" hits=245
+- #0 @66949366  listener !== "function")
+      listener = () => {};
+    this.#ignoreMatcher = createIgnoreMatcher(options?.ignore), this.#listener = listener;
+    try {
+      this.#watcher = fs.watch(path, options || {}, this.#onEvent.bind(this));
+    } catch (e) {
+      if (e.path = path, e.filename = path, options?.throwIfNoEntry !== @und
+- #1 @67366611 (cwd) ?? process.cwd(), followSymlinks != null)
+      validateBoolean(followSymlinks, "options.followSymlinks"), this.#followSymlinks = followSymlinks;
+    if (this.#withFileTypes = !!withFileTypes, exclude != null)
+      if (validateStringArrayOrFunction(exclude, "options.exclude"), @isArray(exclude)) {
+        let matchers 
+- #2 @67368061  this.#subpatterns)
+        this.#queue.push({ __proto__: null, path, patterns });
+      this.#subpatterns.clear();
+    }
+    return @Array.from(this.#results, this.#withFileTypes ? statForFileTypes.bind(null, this.#cache, this.#root) : @undefined);
+  }
+  #isDirectorySync(path, stat, pattern) {
+    if (stat?.isDirectory())
+  
+- #3 @67370067 e(this.#root, path);
+    if (this.#isExcluded(`${fullpath}/`) && this.#cache.statSync(fullpath).isDirectory())
+      return;
+    if (this.#exclude) {
+      if (this.#withFileTypes) {
+        let stat = this.#cache.statSync(fullpath);
+        if (stat !== null) {
+          if (this.#exclude(stat))
+            return;
+        }
+- #4 @67373701 obIndex++;
+          let matchesDot = isDot && pattern.test(nextNonGlobIndex, entry.name);
+          if (isDot && !matchesDot || this.#exclude && this.#exclude(this.#withFileTypes ? entry : entry.name))
+            continue;
+          if (!fromSymlink && entryIsDirectory)
+            subPatterns.add(index);
+          else if 
+- #5 @67377998  (p || isDirectory)) {
+        let result = join(path, p);
+        if (!this.#results.has(result)) {
+          if (this.#results.add(result))
+            yield this.#withFileTypes ? stat2 : result;
+        }
+      }
+      if (pattern.indexes.size === 1 && pattern.indexes.has(last))
+        return;
+    } else if (isLast && pat
+- #6 @67378365  && (path !== "." || pattern.at(0) === "." || last === 0 && stat)) {
+      if (!this.#results.has(path)) {
+        if (this.#results.add(path))
+          yield this.#withFileTypes ? stat : path;
+      }
+    }
+    if (!isDirectory || await this.#isCyclic(fullpath, isDirectory, pattern))
+      return;
+    let nextRealpaths = aw
+- #7 @67380206 obIndex++;
+          let matchesDot = isDot && pattern.test(nextNonGlobIndex, entry.name);
+          if (isDot && !matchesDot || this.#exclude && this.#exclude(this.#withFileTypes ? entry : entry.name))
+            continue;
+          if (!fromSymlink && entryIsDirectory)
+            subPatterns.add(index);
+          else if 
+- #8 @67380507 index);
+          else if (!fromSymlink && index === last) {
+            if (!this.#results.has(entryPath) && this.#results.add(entryPath))
+              yield this.#withFileTypes ? entry : entryPath;
+          }
+          if (nextMatches && nextIndex === last && !isLast) {
+            if (!this.#results.has(entryPath) && thi
+- #9 @67380721          if (nextMatches && nextIndex === last && !isLast) {
+            if (!this.#results.has(entryPath) && this.#results.add(entryPath))
+              yield this.#withFileTypes ? entry : entryPath;
+          } else if (nextMatches && entryIsDirectory)
+            subPatterns.add(index + 2);
+          if ((nextMatches || pa
+- #10 @67381954 attern.child((/* @__PURE__ */ new Set()).add(nextIndex))), !this.#results.has(path)) {
+                  if (this.#results.add(path))
+                    yield this.#withFileTypes ? this.#cache.statSync(fullpath) : path;
+                }
+              }
+              if (!this.#cache.seen(path, pattern, nextIndex) || !this.#
+- #11 @67382372 rn.child((/* @__PURE__ */ new Set()).add(nextIndex))), !this.#results.has(parent)) {
+                  if (this.#results.add(parent))
+                    yield this.#withFileTypes ? this.#cache.statSync(join(this.#root, parent)) : parent;
+                }
+              }
+            }
+          }
+        }
+        if (typeof
+- #12 @67382907          if (nextIndex === last) {
+              if (!this.#results.has(entryPath)) {
+                if (this.#results.add(entryPath))
+                  yield this.#withFileTypes ? entry : entryPath;
+              }
+            } else
+              subPatterns.add(nextIndex + 1);
+        }
+        if (typeof current === "obj
+- #13 @67383268 name)) {
+          if (index === last) {
+            if (!this.#results.has(entryPath)) {
+              if (this.#results.add(entryPath))
+                yield this.#withFileTypes ? entry : entryPath;
+            }
+          } else if (entryIsDirectory)
+            subPatterns.add(nextIndex);
+        }
+      }
+      if (subPa
+- #14 @67445367 tions.contentMode", [kContentModeBuffer, kContentModeUtf8]);
+    let boundRelease = this.#release.bind(this);
+    if (contentMode === kContentModeBuffer)
+      this.#writingBuf = kEmptyBuffer, this.#write = this.#writeBuffer.bind(this), this.#flush = this.#flushBuffer.bind(this), this.#flushSync = this.#flushBufferSync.bind(t
+- #15 @67445400 Buffer, kContentModeUtf8]);
+    let boundRelease = this.#release.bind(this);
+    if (contentMode === kContentModeBuffer)
+      this.#writingBuf = kEmptyBuffer, this.#write = this.#writeBuffer.bind(this), this.#flush = this.#flushBuffer.bind(this), this.#flushSync = this.#flushBufferSync.bind(this), this.#actualWrite = this.#a
+- #16 @67445414 ntModeUtf8]);
+    let boundRelease = this.#release.bind(this);
+    if (contentMode === kContentModeBuffer)
+      this.#writingBuf = kEmptyBuffer, this.#write = this.#writeBuffer.bind(this), this.#flush = this.#flushBuffer.bind(this), this.#flushSync = this.#flushBufferSync.bind(this), this.#actualWrite = this.#actualWriteBuff
+- #17 @67445691 d(this), this.#actualWrite = this.#actualWriteBuffer.bind(this), this.#fsWriteSync = function fsWriteSyncBuffer() {
+        return this.#fs.writeSync(this.#fd, this.#writingBuf);
+      }.bind(this), this.#fsWrite = function fsWriteBuffer() {
+        return this.#fs.write(this.#fd, this.#writingBuf, boundRelease);
+      }.bind
+- #18 @67445813   return this.#fs.writeSync(this.#fd, this.#writingBuf);
+      }.bind(this), this.#fsWrite = function fsWriteBuffer() {
+        return this.#fs.write(this.#fd, this.#writingBuf, boundRelease);
+      }.bind(this);
+    else
+      this.#writingBuf = "", this.#write = this.#writeUtf8.bind(this), this.#flush = this.#flushUtf8.bind
+- #19 @67445881 d(this), this.#fsWrite = function fsWriteBuffer() {
+        return this.#fs.write(this.#fd, this.#writingBuf, boundRelease);
+      }.bind(this);
+    else
+      this.#writingBuf = "", this.#write = this.#writeUtf8.bind(this), this.#flush = this.#flushUtf8.bind(this), this.#flushSync = this.#flushSyncUtf8.bind(this), this.#actu
+- … +225 more
+
+## #w= needle="#w=" hits=16
+- #0 @177284581 d....e4........f......FS....g5&...h.... ...... ...i......kj.H.-...!l6....m7....n8&...o.....p9.....q.............r:...s..R........."t;H........"u<...v.V...\z...#w=....x>..............y.....z?...${@....|A!......"}B&...~.&.....
+.%......".C&.....&.....
+.&....................".D.....R......'.EH........'.F.....V...\z...'.G&..
+- #1 @178535191 1;#i=!1;#a=!1;#s=void 0;#d=!1;#l=!1;#c="cli";#p="fresh";#u=void 0;#g=[];#h=!1;#m=!1;#f=!1;#v=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrintOutputFormat(e){this.#t=e}thinkingDispl
+- #2 @178537490 onfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,this.#n=!1,this.#o=void 0,this.#r=!1,this.#
+- #3 @178537925 s.#h=!1,this.#m=!1,this.#f=!1,this.#v=!1,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e
+- #4 @178803469  0),this.#a=new b(e),this.#u=new b(e),this.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteOnFetchRejectio
+- #5 @178803495 #u=new b(e),this.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteOnFetchRejection=!!p,this.allowStaleOnFet
+- #6 @192131066 Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();#k=null;constructor(i){this.#n=i?.storageV5,this.#e={...Dh(),...i?.client}}getSnapshot=()=>this.#t;usesStorage(
+- #7 @192142465 state":"directory"}:${m}`))}class wc{#n;#e;#a=$e();#t;#i=0;#r=null;#d=null;#s=null;#o=null;#f=[];#u=!1;#m=new Map;#l=new Map;#g=null;#c=[];#y=0;#R=null;#v=null;#w=null;#S=!1;constructor(i){this.#n=i.roster,this.#e=i.storageV5,this.#t=hc(i.collapsed&&i.collapsed.length>0?Lh(i.collapsed):bc)}getSnapshot=()=>this.#t;subscrib
+- #8 @192143191 ,this.#p().finally(()=>{for(let d of i)d()}),this.#r=null,this.#d=null,this.#s=null,this.#o=null,this.#f=[],this.#u=!1,this.#y=0,this.#R=null,this.#v=null,this.#w=null,this.#S=!1,this.#t=hc(this.#t.collapsed)}focus(i){this.#h({focusedIdx:i})}navigateTo(i,d){this.#_(d),this.#h({focusedIdx:i,hoverFocusIdx:null})}hoverTo(i,d
+- #9 @192146029 CountedJobs(i){this.#R=i}get savedFocusJobId(){return this.#v}set savedFocusJobId(i){this.#v=i}get linkMatchFollow(){return this.#w}set linkMatchFollow(i){this.#w=i}isFirstQueryOfLook(){if(this.#S)return!1;return this.#S=!0,!0}}function Wi(i,d,m,w){return i.selection??=new wc({roster:d,storageV5:m,collapsed:w})}var yc=new
+- #10 @205569023 nsumption.","UnboundedCacheWarning","LRU_CACHE_UNBOUNDED",Ls)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ne(this.#e),e=new Ne(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[n]=o,i?.[n])clearTimeout(i[n]),i[n]=void
+- #11 @205633504 nsumption.","UnboundedCacheWarning","LRU_CACHE_UNBOUNDED",ur)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ve(this.#e),e=new Ve(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[n]=o,i?.[n])clearTimeout(i[n]),i[n]=void
+- #12 @205648604 urn this.parentPath}constructor(t,e=it,i,s,r,n,o){if(this.name=t,this.#_=r?$i(t):Ze(t),this.#i=e&Ep,this.nocase=r,this.roots=s,this.root=i||this,this.#N=n,this.#w=o.fullpath,this.#E=o.relative,this.#A=o.relativePosix,this.parent=o.parent,this.parent)this.#e=this.parent.#e;else this.#e=ra(o.fs)}depth(){if(this.#x!==void 0)
+- #13 @205650063 Posix();let i=e.relativePosix();return i+(!i||!e.parent?"":"/")+t}fullpath(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.#y;if(this.sep==="/")return this.#y=this
+- #14 @205650133 path(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.#y;if(this.sep==="/")return this.#y=this.fullpath();if(!this.parent){let s=this.fullpath().replace(/\\/g,"/");
+- #15 @205749382 =0;#u=0;#F=!1;#f=[];#R=!1;#T=0;#$=0;#k=!1;#B=!1;#x=null;#M=[];constructor(e){this.#y=e.host,this.#m=e.clock,this.#n=e.voiceStore,this.#L=e.loadVoiceModule,this.#w=e.connectVoiceStream,this.#V=e.credentials,this.#O=e.isVoiceStreamAvailable,this.#z=e.probeVoiceConnectivity,this.#I=e.getVoiceKeyterms,this.#h=z.of(e.host),thi
+
+## this.#w= needle="this.#w=" hits=12
+- #0 @178537485 sionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,this.#n=!1,this.#o=void 0,this.#r=!1,this.#
+- #1 @178537920 ],this.#h=!1,this.#m=!1,this.#f=!1,this.#v=!1,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e
+- #2 @178803464 (void 0),this.#a=new b(e),this.#u=new b(e),this.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteOnFetchRejectio
+- #3 @178803490 this.#u=new b(e),this.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteOnFetchRejection=!!p,this.allowStaleOnFet
+- #4 @192143186 #c=[],this.#p().finally(()=>{for(let d of i)d()}),this.#r=null,this.#d=null,this.#s=null,this.#o=null,this.#f=[],this.#u=!1,this.#y=0,this.#R=null,this.#v=null,this.#w=null,this.#S=!1,this.#t=hc(this.#t.collapsed)}focus(i){this.#h({focusedIdx:i})}navigateTo(i,d){this.#_(d),this.#h({focusedIdx:i,hoverFocusIdx:null})}hoverTo(i,d
+- #5 @192146024 storeCountedJobs(i){this.#R=i}get savedFocusJobId(){return this.#v}set savedFocusJobId(i){this.#v=i}get linkMatchFollow(){return this.#w}set linkMatchFollow(i){this.#w=i}isFirstQueryOfLook(){if(this.#S)return!1;return this.#S=!0,!0}}function Wi(i,d,m,w){return i.selection??=new wc({roster:d,storageV5:m,collapsed:w})}var yc=new
+- #6 @205569018 ry consumption.","UnboundedCacheWarning","LRU_CACHE_UNBOUNDED",Ls)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ne(this.#e),e=new Ne(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[n]=o,i?.[n])clearTimeout(i[n]),i[n]=void
+- #7 @205633499 ry consumption.","UnboundedCacheWarning","LRU_CACHE_UNBOUNDED",ur)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ve(this.#e),e=new Ve(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[n]=o,i?.[n])clearTimeout(i[n]),i[n]=void
+- #8 @205648599 ){return this.parentPath}constructor(t,e=it,i,s,r,n,o){if(this.name=t,this.#_=r?$i(t):Ze(t),this.#i=e&Ep,this.nocase=r,this.roots=s,this.root=i||this,this.#N=n,this.#w=o.fullpath,this.#E=o.relative,this.#A=o.relativePosix,this.parent=o.parent,this.parent)this.#e=this.parent.#e;else this.#e=ra(o.fs)}depth(){if(this.#x!==void 0)
+- #9 @205650058 lpathPosix();let i=e.relativePosix();return i+(!i||!e.parent?"":"/")+t}fullpath(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.#y;if(this.sep==="/")return this.#y=this
+- #10 @205650128 }fullpath(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.#y;if(this.sep==="/")return this.#y=this.fullpath();if(!this.parent){let s=this.fullpath().replace(/\\/g,"/");
+- #11 @205749377 =0;#G=0;#u=0;#F=!1;#f=[];#R=!1;#T=0;#$=0;#k=!1;#B=!1;#x=null;#M=[];constructor(e){this.#y=e.host,this.#m=e.clock,this.#n=e.voiceStore,this.#L=e.loadVoiceModule,this.#w=e.connectVoiceStream,this.#V=e.credentials,this.#O=e.isVoiceStreamAvailable,this.#z=e.probeVoiceConnectivity,this.#I=e.getVoiceKeyterms,this.#h=z.of(e.host),thi
+
+## Hei() needle="Hei()" hits=0
+
+## xei( needle="xei(" hits=0
+
+## lastFn before methods name=en @178531824
+## fn-before-methods @178531824
+len=2944 sha=379ff8dd5d0d4188
+function en(e,t){let o=jn(t.originalCwd),r=jn(t.projectRoot),i=jn(t.cwd),s=$e(),a=e.kind==="fork"?e.root.observers:new ne,l=e.kind==="fork"?e.root.autonomousLoopPreamble:new Pe,p=e.kind==="fork"?e.root.precompute:new be,u={get originalCwd(){return o},get projectRoot(){return r},get cwd(){return i}},S={host:e.kind==="fork"?e.root.host:e.host,get id(){return e.kind==="fork"?e.root.id:e.id},get parentId(){return e.kind==="fork"?e.root.parentId:e.parentId},get root(){return e.kind==="fork"?e.root:S},project:u,observers:a,autonomousLoopPreamble:l,btwHistory:e.kind==="fork"?e.root.btwHistory:new Me,ccrRecap:e.kind==="fork"?e.root.ccrRecap:new ke,conversationLatches:e.kind==="fork"?e.root.conversationLatches:new oe,costLedger:e.kind==="fork"?e.root.costLedger:new re,fableConsentSlots:e.kind==="fork"?e.root.fableConsentSlots:new ie,hookRegistry:e.kind==="fork"?e.root.hookRegistry:new se,identity:e.kind==="fork"?e.root.identity:new ye,invokedSkills:e.kind==="fork"?e.root.invokedSkills:new ae,mcpSessionWiring:e.kind==="fork"?e.root.mcpSessionWiring:new le,modelSelection:e.kind==="fork"?e.root.modelSelection:new de,promptAssembly:e.kind==="fork"?e.root.promptAssembly:new ue,promptSuggestion:e.kind==="fork"?e.root.promptSuggestion:new Ae,pendingHint:e.kind==="fork"?e.root.pendingHint:new we,pluginsSync:e.kind==="fork"?e.root.pluginsSync:new xe,precompute:p,requestJournal:e.kind==="fork"?e.root.requestJournal:new ce,sessionCron:e.kind==="fork"?e.root.sessionCron:new pe,sessionFlags:e.kind==="fork"?e.root.sessionFlags:new ge,sessionRefsGate:e.kind==="fork"?e.root.sessionRefsGate:new Te,sessionScratch:e.kind==="fork"?e.root.sessionScratch:new fe,surfaceCapabilities:e.kind==="fork"?e.root.surfaceCapabilities:new he,toolProgressThrottle:e.kind==="fork"?e.root.toolProgressThrottle:new Le,turnBudget:e.kind==="fork"?e.root.turnBudget:new me,userPresence:e.kind==="fork"?e.root.userPresence:new Se,workflowUsageConsent:e.kind==="fork"?e.root.workflowUsageConsent:new Ce,writePermissionStash:e.kind==="fork"?e.root.writePermissionStash:new Re,subscribe(d){let c=s.subscribe(d);if(e.kind!=="fork")return c;let f=e.root,m=f.id,b=f.parentId,y=f.subscribe(()=>{if(f.id===m&&f.parentId===b)return;m=f.id,b=f.parentId,d()});return()=>{c(),y()}},setCwd(d){S.update({project:{cwd:d}})},withProject(d){return en({kind:"fork",root:S.root},{originalCwd:d.originalCwd??o,projectRoot:d.projectRoot??r,cwd:d.cwd??i})},update(d){let c=!1;if(d.id!==void 0||"parentId"in d){if(e.kind==="fork")throw Error("A withProject fork cannot re-identify the session \u2014 update the root session instead");if(d.id!==void 0&&d.id!==e.id)e.id=d.id,c=!0;if("parentId"in d&&d.parentId!==e.parentId)e.parentId=d.parentId,c=!0}let f=d.project;if(f){if(f.originalCwd!==void 0){let m=jn(f.originalCwd);if(m!==o)o=m,c=!0}if(f.projectRoot!==void 0){let m=jn(f.projectRoot);if(m!==r)r=m,c=!0}if(f.cwd!==void 0){let m=jn(f.cwd);if(m!==i)i=m,c=!0}}if(c)s.emit()}};return S}
+
+## class-win-before-methods @178537404
+ionRefsGate:new Te,sessionScratch:e.kind==="fork"?e.root.sessionScratch:new fe,surfaceCapabilities:e.kind==="fork"?e.root.surfaceCapabilities:new he,toolProgressThrottle:e.kind==="fork"?e.root.toolProgressThrottle:new Le,turnBudget:e.kind==="fork"?e.root.turnBudget:new me,userPresence:e.kind==="fork"?e.root.userPresence:new Se,workflowUsageConsent:e.kind==="fork"?e.root.workflowUsageConsent:new Ce,writePermissionStash:e.kind==="fork"?e.root.writePermissionStash:new Re,subscribe(d){let c=s.subscribe(d);if(e.kind!=="fork")return c;let f=e.root,m=f.id,b=f.parentId,y=f.subscribe(()=>{if(f.id===m&&f.parentId===b)return;m=f.id,b=f.parentId,d()});return()=>{c(),y()}},setCwd(d){S.update({project:{cwd:d}})},withProject(d){return en({kind:"fork",root:S.root},{originalCwd:d.originalCwd??o,projectRoot:d.projectRoot??r,cwd:d.cwd??i})},update(d){let c=!1;if(d.id!==void 0||"parentId"in d){if(e.kind==="fork")throw Error("A withProject fork cannot re-identify the session \u2014 update the root session instead");if(d.id!==void 0&&d.id!==e.id)e.id=d.id,c=!0;if("parentId"in d&&d.parentId!==e.parentId)e.parentId=d.parentId,c=!0}let f=d.project;if(f){if(f.originalCwd!==void 0){let m=jn(f.originalCwd);if(m!==o)o=m,c=!0}if(f.projectRoot!==void 0){let m=jn(f.projectRoot);if(m!==r)r=m,c=!0}if(f.cwd!==void 0){let m=jn(f.cwd);if(m!==i)i=m,c=!0}}if(c)s.emit()}};return S}class $n{#e;#t=new WeakMap;constructor(e){this.#e=e}peek(e){return this.#t.get(e.root)}of(e){let t=e.root,o=this.#t.get(t);if(o!==void 0)return o;let r=this.#e();return this.#t.set(t,r),r}drop(e){this.#t.delete(e.root)}}class Ie{#e=!1;#t=null;#n=!1;#o=void 0;#r=!1;#i=!1;#a=!1;#s=void 0;#d=!1;#l=!1;#c="cli";#p="fresh";#u=void 0;#g=[];#h=!1;#m=!1;#f=!1;#v=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrintOutputFormat(e){this.#t=e}thinkingDisplayExplicit(){return this.#n}replaceThinkingDisplayExplicit(e){this.#n=e}permissionPromptToolName(){return this.#o}replacePermissionPromptToolName(e){this.#o=e}hasStreamingInput(){return this.#r}replaceHasStreamingInput(e){this.#r=e}singleShotPrintSession(){return this.#i}replaceSingleShotPrintSession(e){this.#i=e}modelOverrideOptOutForSession(){return this.#a}replaceModelOverrideOptOutForSession(e){this.#a=e}rendererMode(){return this.#s}replaceRendererMode(e){this.#s=e}strictToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e}wizardOperatorToolsEnabled(){return this.#v}replaceWizardOperatorToolsEnabled(e){this.#v=e}pollEventIngressWired(){return this.#b}markPollEventIngressWired(){this.#b=!0}sdkAgentProgressSummariesEnabled(){return this.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCommands(){return this.#y}replaceDisableSlashCommands(e){this.#y=e}mayForwardHomeSettings(){return this.#x}replaceMayForwardHomeSettings(e){this.#x=e}homeSettingsHostConsent(){return this.#A}replaceHomeSettingsHostConsent(e){this.#A=e}scheduledTasksEnabled(){return this.#T}replaceScheduledTasksEnabled(e){this.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t
+
+## hunt class Yt needle="class Yt" hits=3
+- #0 @178300624 les immediate resumption of the task.
+Wrap your summary in <summary></summary> tags.`;var Xt,tt,Fe,H,q,X,de,Se,Gt,Bi,Vs;class Yt{constructor(e,t,r){Xt.add(this),this.client=e,tt.set(this,!1),Fe.set(this,!1),H.set(this,void 0),q.set(this,void 0),X.s
+- #1 @196922926 xtends O{constructor(e){super(e,4)}}fr.RequestType4=Qt;class Gt extends O{constructor(e){super(e,5)}}fr.RequestType5=Gt;class Yt extends O{constructor(e){super(e,6)}}fr.RequestType6=Yt;class Xt extends O{constructor(e){super(e,7)}}fr.RequestType7=X
+- #2 @211038299 allCredentials=void 0;var tn=ue();function wm(e){return"getRequestHeaders"in e&&typeof e.getRequestHeaders==="function"}class Yt{static createFromMetadataGenerator(e){return new rn(e)}static createFromGoogleCredential(e){return Yt.createFromMetadat
+
+## hunt Yt=class needle="Yt=class" hits=0
+
+## hunt #w= needle="#w=" hits=16
+- #0 @177284581  ...... ...i......kj.H.-...!l6....m7....n8&...o.....p9.....q.............r:...s..R........."t;H........"u<...v.V...\z...#w=....x>..............y.....z?...${@....|A!......"}B&...~.&.....
+.%......".C&.....&.....
+.&....................".D.....R.
+- #1 @178535191 cli";#p="fresh";#u=void 0;#g=[];#h=!1;#m=!1;#f=!1;#v=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrin
+- #2 @178537490 SessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,thi
+- #3 @178537925 ,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this
+- #4 @178803469 is.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUp
+- #5 @178803495 T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteO
+- #6 @192131066 e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();#k=null;constructor(i){this.#n=i?.storageV5,this.#e={...Dh(),...i?.clie
+- #7 @192142465 #e;#a=$e();#t;#i=0;#r=null;#d=null;#s=null;#o=null;#f=[];#u=!1;#m=new Map;#l=new Map;#g=null;#c=[];#y=0;#R=null;#v=null;#w=null;#S=!1;constructor(i){this.#n=i.roster,this.#e=i.storageV5,this.#t=hc(i.collapsed&&i.collapsed.length>0?Lh(i.collaps
+- #8 @192143191 ()}),this.#r=null,this.#d=null,this.#s=null,this.#o=null,this.#f=[],this.#u=!1,this.#y=0,this.#R=null,this.#v=null,this.#w=null,this.#S=!1,this.#t=hc(this.#t.collapsed)}focus(i){this.#h({focusedIdx:i})}navigateTo(i,d){this.#_(d),this.#h({focus
+- #9 @192146029 obId(){return this.#v}set savedFocusJobId(i){this.#v=i}get linkMatchFollow(){return this.#w}set linkMatchFollow(i){this.#w=i}isFirstQueryOfLook(){if(this.#S)return!1;return this.#S=!0,!0}}function Wi(i,d,m,w){return i.selection??=new wc({roste
+- #10 @205569023 _CACHE_UNBOUNDED",Ls)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ne(this.#e),e=new Ne(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[
+- #11 @205633504 _CACHE_UNBOUNDED",ur)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ve(this.#e),e=new Ve(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[
+- … +4 more
+
+## hunt #w; needle="#w;" hits=7
+- #0 @75051520 ........7....+._.....,nW.....g0...._..kM.B!.v.)..i+........:.;.t.P$.i..t.......g...":?..\.n......D@.w..q.].4P;w;..K.R..#w;..y.S....4....k0.]).....^....inP...wE(..........Q.R..@.......0..'..wm............^M..,..E..h|(.L,.;}.
+..z...ZD.|.5v.....
+- #1 @178801294 heap=new e(t),this.length=0}push(t){this.heap[this.length++]=t}pop(){return this.heap[--this.length]}}class Du{#l;#c;#p;#w;#R;#W;ttl;ttlResolution;ttlAutopurge;updateAgeOnGet;updateAgeOnHas;allowStale;noDisposeOnSet;noUpdateTTL;maxEntrySize;si
+- #2 @205565653 eteOnStaleGet;allowStaleOnFetchAbort;allowStaleOnFetchRejection;ignoreFetchAbort;#a;#g;#c;#l;#t;#p;#b;#m;#f;#T;#u;#_;#x;#w;#y;#E;#A;#i;#N;static unsafeExposeInternals(t){return{starts:t.#x,ttls:t.#w,autopurgeTimers:t.#y,sizes:t.#_,keyMap:t.#c,
+- #3 @205630134 eteOnStaleGet;allowStaleOnFetchAbort;allowStaleOnFetchRejection;ignoreFetchAbort;#a;#g;#c;#l;#t;#p;#b;#m;#f;#T;#u;#_;#x;#w;#y;#E;#A;#i;#N;static unsafeExposeInternals(t){return{starts:t.#x,ttls:t.#w,autopurgeTimers:t.#y,sizes:t.#_,keyMap:t.#c,
+- #4 @205648352 me(){return this.#m}#f;get mtime(){return this.#f}#T;get ctime(){return this.#T}#u;get birthtime(){return this.#u}#_;#x;#w;#y;#E;#A;#i;#N;#z;#F;get parentPath(){return(this.parent||this).fullpath()}get path(){return this.parentPath}constructor
+- #5 @205650012 is.fullpathPosix();let i=e.relativePosix();return i+(!i||!e.parent?"":"/")+t}fullpath(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w
+- #6 @205749068 connection_failed"};return{message:"No speech detected.",errorCode:"voice_transcription_no_speech"}}class A{#y;#m;#n;#L;#w;#V;#O;#z;#I;#h;#j=$e();#t;#N=!1;#E=!1;#P={state:"idle"};#e="idle";#s=null;#o="";#d=null;#b=!1;#c=null;#i=!1;#p=!1;#v=nul
+
+## hunt this.#w= needle="this.#w=" hits=12
+- #0 @178537485 ceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,thi
+- #1 @178537920 #v=!1,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this
+- #2 @178803464 e),this.#r=0,this.#h=0,this.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUp
+- #3 @178803490 s.#S=T.create(e),this.#n=0,this.#_=0,typeof d==="function")this.#p=d;if(typeof S==="function")this.#w=S,this.#o=[];else this.#w=void 0,this.#o=void 0;if(this.#y=!!this.#p,this.#f=!!this.#w,this.noDisposeOnSet=!!a,this.noUpdateTTL=!!c,this.noDeleteO
+- #4 @192143186 f i)d()}),this.#r=null,this.#d=null,this.#s=null,this.#o=null,this.#f=[],this.#u=!1,this.#y=0,this.#R=null,this.#v=null,this.#w=null,this.#S=!1,this.#t=hc(this.#t.collapsed)}focus(i){this.#h({focusedIdx:i})}navigateTo(i,d){this.#_(d),this.#h({focus
+- #5 @192146024 ocusJobId(){return this.#v}set savedFocusJobId(i){this.#v=i}get linkMatchFollow(){return this.#w}set linkMatchFollow(i){this.#w=i}isFirstQueryOfLook(){if(this.#S)return!1;return this.#S=!0,!0}}function Wi(i,d,m,w){return i.selection??=new wc({roste
+- #6 @205569018 ,"LRU_CACHE_UNBOUNDED",Ls)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ne(this.#e),e=new Ne(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[
+- #7 @205633499 ,"LRU_CACHE_UNBOUNDED",ur)}}getRemainingTTL(t){return this.#c.has(t)?1/0:0}#z(){let t=new Ve(this.#e),e=new Ve(this.#e);this.#w=t,this.#x=e;let i=this.ttlAutopurge?Array(this.#e):void 0;this.#y=i,this.#L=(n,o,h=this.#d.now())=>{if(e[n]=o!==0?h:0,t[
+- #8 @205648599 =it,i,s,r,n,o){if(this.name=t,this.#_=r?$i(t):Ze(t),this.#i=e&Ep,this.nocase=r,this.roots=s,this.root=i||this,this.#N=n,this.#w=o.fullpath,this.#E=o.relative,this.#A=o.relativePosix,this.parent=o.parent,this.parent)this.#e=this.parent.#e;else this.
+- #9 @205650058 urn i+(!i||!e.parent?"":"/")+t}fullpath(){if(this.#w!==void 0)return this.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.
+- #10 @205650128 his.#w;let t=this.name,e=this.parent;if(!e)return this.#w=this.name;let s=e.fullpath()+(!e.parent?"":this.sep)+t;return this.#w=s}fullpathPosix(){if(this.#y!==void 0)return this.#y;if(this.sep==="/")return this.#y=this.fullpath();if(!this.parent){l
+- #11 @205749377 ;#k=!1;#B=!1;#x=null;#M=[];constructor(e){this.#y=e.host,this.#m=e.clock,this.#n=e.voiceStore,this.#L=e.loadVoiceModule,this.#w=e.connectVoiceStream,this.#V=e.credentials,this.#O=e.isVoiceStreamAvailable,this.#z=e.probeVoiceConnectivity,this.#I=e.g
+
+## hunt new Yt needle="new Yt" hits=10
+- #0 @178308210 unting-2024-11-01"].toString(),...n!=null?{"anthropic-user-profile-id":n}:void 0},t?.headers])})}toolRunner(e,t){return new Yt(this._client,e,t)}}function ji(e){if(!e.output_format)return e;if(e.output_config?.format)throw new mn("Both output_for
+- #1 @205682015  Bp=br();Object.defineProperty(Kt,"Ignore",{enumerable:!0,get:function(){return Bp.Ignore}});function ti(t,e={}){return new Yt.Glob(t,e).streamSync()}function Tr(t,e={}){return new Yt.Glob(t,e).stream()}function Or(t,e={}){return new Yt.Glob(t,e)
+- #2 @205682072 ,get:function(){return Bp.Ignore}});function ti(t,e={}){return new Yt.Glob(t,e).streamSync()}function Tr(t,e={}){return new Yt.Glob(t,e).stream()}function Or(t,e={}){return new Yt.Glob(t,e).walkSync()}async function ja(t,e={}){return new Yt.Glob(
+- #3 @205682125 }){return new Yt.Glob(t,e).streamSync()}function Tr(t,e={}){return new Yt.Glob(t,e).stream()}function Or(t,e={}){return new Yt.Glob(t,e).walkSync()}async function ja(t,e={}){return new Yt.Glob(t,e).walk()}function ei(t,e={}){return new Yt.Glob(t,
+- #4 @205682186 eturn new Yt.Glob(t,e).stream()}function Or(t,e={}){return new Yt.Glob(t,e).walkSync()}async function ja(t,e={}){return new Yt.Glob(t,e).walk()}function ei(t,e={}){return new Yt.Glob(t,e).iterateSync()}function Rr(t,e={}){return new Yt.Glob(t,e).
+- #5 @205682237 {return new Yt.Glob(t,e).walkSync()}async function ja(t,e={}){return new Yt.Glob(t,e).walk()}function ei(t,e={}){return new Yt.Glob(t,e).iterateSync()}function Rr(t,e={}){return new Yt.Glob(t,e).iterate()}Kt.streamSync=ti;Kt.stream=Object.assign(
+- #6 @205682295 {}){return new Yt.Glob(t,e).walk()}function ei(t,e={}){return new Yt.Glob(t,e).iterateSync()}function Rr(t,e={}){return new Yt.Glob(t,e).iterate()}Kt.streamSync=ti;Kt.stream=Object.assign(Tr,{sync:ti});Kt.iterateSync=ei;Kt.iterate=Object.assign(R
+- #7 @211017021 c.MeterSelector=void 0;var Yt=Qe();class Uc{_nameFilter;_versionFilter;_schemaUrlFilter;constructor(e){this._nameFilter=new Yt.ExactPredicate(e?.name),this._versionFilter=new Yt.ExactPredicate(e?.version),this._schemaUrlFilter=new Yt.ExactPredica
+- #8 @211017072 lter;_versionFilter;_schemaUrlFilter;constructor(e){this._nameFilter=new Yt.ExactPredicate(e?.name),this._versionFilter=new Yt.ExactPredicate(e?.version),this._schemaUrlFilter=new Yt.ExactPredicate(e?.schemaUrl)}getNameFilter(){return this._nameF
+- #9 @211017128 ._nameFilter=new Yt.ExactPredicate(e?.name),this._versionFilter=new Yt.ExactPredicate(e?.version),this._schemaUrlFilter=new Yt.ExactPredicate(e?.schemaUrl)}getNameFilter(){return this._nameFilter}getVersionFilter(){return this._versionFilter}getS

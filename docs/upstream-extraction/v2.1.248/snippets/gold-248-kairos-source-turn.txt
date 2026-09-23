@@ -1,0 +1,79 @@
+# gold-248-kairos-source-turn
+
+## needle="kairosActive" hits=0
+## needle="sessionSource" hits=0
+## needle="replaceKairos" hits=0
+## needle="isKairos" hits=5
+@100098252 IdleStatus........I.enqueueIdleNoticesForModel......|t#.registerReplyYieldHolder......R.notifyModelOfReplyYield.........isKairosCronEnabled......t..createCronScheduler.....6...getCronJitterConfig.........parked_tool_use_sha12...........parked_request_sha12....F... is not connected...D....... is not plugin-sourced; channel_enable requires a marketplace plugin........tengu_mcp_channel_enable3...t...Channel 
+
+@101804969 DescriptionbuildCronCreatePromptbuildCronDeletePromptbuildCronListPromptbuildDurableParamDescriptionisDurableCronEnabledisKairosCronEnabledstartHostedWorkerVitalsEmittercontainerGitSwitchproductionGitEngineproductionLaneVerdictDepsstartWorkerDirSync0c30af20d0d75c1cC00000038MidTurnSyncSYNC_FILES_DEVICE_TOOLaskMachineToSyncclearForwardToMachineheardSyncAnswerhostSyncsMidTurnmidTurnSyncsregisterWorkerDirSync
+
+@200981261 e((ae)=>{L(ae==="idle",ae==="running")}));let j=t.sessionState.getState();L(j==="idle",j==="running")}let Aa=null;if(dm.isKairosCronEnabled()){let u=(r,L)=>{x.enqueue({mode:"prompt",agentId:rt(),value:r,uuid:Kn(),priority:"later",isMeta:!0,skipSlashCommands:!0,modelScheduledOrigin:!0,wakeupSource:L,workload:kB}),vi("cron_fire"),Ur()},M=Promise.resolve(),U=(r,L)=>{if(lt)return;let ie=C.storageV5;if(ie){M=M
+
+@200981998 akeup"),onFireTask:(r)=>U(r.prompt,Uat(r)),isLoading:()=>je||lt,getJitterConfig:rg.getCronJitterConfig,isKilled:()=>!dm.isKairosCronEnabled()}),Aa.start()}let tt=function(u,M){et.enqueue(c6(u.request_id,M))},Kr=function(u,M){if(Fw(e))n(`${u}: ${M}`,{level:"error"})},Je=function(u,M){et.enqueue(Q$(u.request_id,M))},jn=function(u,M,U){_(ut(Ee(U),`${M}: handler failed`)),Je(u,U instanceof us?vt(l(U)):XR(e,l(
+
+@207995116 s buildCronDeletePrompt,Fln as buildCronListPrompt,Mln as buildDurableParamDescription,H5 as isDurableCronEnabled,dk as isKairosCronEnabled};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under An
+
+## needle="kairos" hits=27
+@92287070 ..1^..tips_rc_long_turn_show......8...rcPermissionNudgeSeenCount........p.tips_rc_permission_nudge_show.......'...tengu_kairos_ready_nudge....%. .remoteControlReadyPushKey........-..remoteControlReadyPushCount......VQ.tips_rc_ready_push_send.........android........web_claude_ai.........T.desktop_app.....U.w.remoteControlSurfacesSeen...W...f*..Cannot destructure property 'allowNetworkFallbackForOldGh' f
+
+@93438110 nnot destructure property 'origin' from null or undefined value...........Prompt from the ........ plugin....../..tengu_kairos_brief..'.......No content found in user prompt message......~..update:.c.......<mcp-resource-update\s+server="([^"]+)"\s+uri="([^"]+)"[^>]*>(?:[\s\S]*?<reason>([^<]+)<\/reason>)?.t.......<mcp-polling-update\s+type="([^"]+)"\s+server="([^"]+)"\s+tool="([^"]+)"[^>]*>(?:[\s\S]*?<re
+
+@97711190 t.h.r.o.p.i.c. .c.o.n.t.a.c.t.....(...-.Y.file:///B:/%7EBUN/root/chunk-m46vh510.js....$.K.tengu_loop_ended.....w..tengu_kairos_loop_keepalive.......+.CLAUDE_CODE_LOOP_KEEPALIVE......[.W.viaKeepaliveT...`.>.[.l.o.o.p.]. .k.e.e.p.a.l.i.v.e. .b.u.d.g.e.t. .e.x.h.a.u.s.t.e.d. .(.m.o.d.e.l. .d.e.c.l.i.n.e.d. .t.o. .r.e.s.c.h.e.d.u.l.e. .t.w.i.c.e.). ..  .e.n.d.i.n.g. .l.o.o.p.....t7.model_stopped..........
+
+@97712974 flight).......tl..loop_cancel_all......SG.loops_cancelled.(....^..file:///B:/%7EBUN/root/chunk-wcjfabjc.js....+...tengu_kairos_cron_config....]..recurringFrac........<y.recurringCapMs........<.oneShotMaxMs....Q5..oneShotFloorMs......c;C.oneShotMinuteMod(....UJ.file:///B:/%7EBUN/root/chunk-z7fj1yd9.js........github_resource_not_found........F..fetchRemoteEnvironmentsForEligibility failed: ........m.--is
+
+@97884686 lly asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu_........2.CLAUDE_CODE_PEWTER_OWL..........pewter_owl_tool.....Y...CLAUDE_CODE_PEWTER_OWL_TOOL......F..pewter_owl_brief(.......file:///B:/%
+
+@97983842 /%7EBUN/root/chunk-v0h7mbh7.js!....27.Cancel a scheduled cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .a. .f.u.t.u.r.e. .t.i.m.e. ..  .e.i.t.h.e.r. .r.e.c.u.r.r.i.n.g. .o.n. .a. .c.r.o.n. .s.c.h.e.d.u.l.e.,. .o.r. .o.n.c.e. .a.t. .a. .s.p.e.c.
+
+@97983902 n job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .a. .f.u.t.u.r.e. .t.i.m.e. ..  .e.i.t.h.e.r. .r.e.c.u.r.r.i.n.g. .o.n. .a. .c.r.o.n. .s.c.h.e.d.u.l.e.,. .o.r. .o.n.c.e. .a.t. .a. .s.p.e.c.i.f.i.c. .t.i.m.e... .P.a.s.s. .d.u.r.a.b.l.e.:. .t.r.u.e. .
+
+@98008642 n. ...Y...TZ. tags: the first sentence becomes the phone banner, the full text becomes the email body............tengu_kairos_push_notifications.......*.tengu_kairos_input_needed_push..(...%...file:///B:/%7EBUN/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/chunk-9nz4npf8.js9....]z.Cross-session messaging is not available in this session........I...tengu_harbor_kite_win...........tengu_harbor_kit
+
+## needle="outputTokensAtTurnStart" hits=3
+@99401656 aceSdkBetas.....
+...replaceCaps.
+...Ck..markRemote..........replaceReplBridgeActive.........replaceMainLoopBusy......u..outputTokensAtTurnStart......{..continuationCount........w..snapshotForTurn.....p...incrementContinuation...........recordInteraction...........flushIfDirty...D...resetBaseline........fF.updateTerminalFocus.....G...scrollDraining......nG..markScrollActivity..........waitForScrollIdle.......eY..sidecar
+
+@178526891 this.#l=!1,this.#i=!1,this.attacherCapsChanged.clear(),this.rvSupervisorLinkChanged.clear()}}class me{#e=0;#t=null;#n=0;outputTokensAtTurnStart(){return this.#e}budget(){return this.#t}continuationCount(){return this.#n}snapshotForTurn(e,t){this.#e=e,this.#t=t,this.#n=0}incrementContinuation(){this.#n++}reset(){this.#e=0,this.#t=null,this.#n=0}}var Zt=150;class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;term
+
+@178555144 onInputTokens()}function Dwn(){return n().costLedger.totalWebSearchRequests()}function FLe(){return Zc()-n().turnBudget.outputTokensAtTurnStart()}function ULe(){return n().turnBudget.budget()}function oEr(e){n().turnBudget.snapshotForTurn(Zc(),e)}function iEr(){return n().turnBudget.continuationCount()}function sEr(){n().turnBudget.incrementContinuation()}function Mwn(){n().costLedger.markUnknownModelCost()}function TGt
+
+## needle="snapshotForTurn" hits=3
+@99401716 replaceReplBridgeActive.........replaceMainLoopBusy......u..outputTokensAtTurnStart......{..continuationCount........w..snapshotForTurn.....p...incrementContinuation...........recordInteraction...........flushIfDirty...D...resetBaseline........fF.updateTerminalFocus.....G...scrollDraining......nG..markScrollActivity..........waitForScrollIdle.......eY..sidecarIoSettled......Z.mainAgentId.....&...replaceProjectD
+
+@178526991 e{#e=0;#t=null;#n=0;outputTokensAtTurnStart(){return this.#e}budget(){return this.#t}continuationCount(){return this.#n}snapshotForTurn(e,t){this.#e=e,this.#t=t,this.#n=0}incrementContinuation(){this.#n++}reset(){this.#e=0,this.#t=null,this.#n=0}}var Zt=150;class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;terminalFocusFired=$e();#o=!1;#r;lastInteractionTime(){return this.#e}recordInteraction(e){if(e)
+
+@178555247 )-n().turnBudget.outputTokensAtTurnStart()}function ULe(){return n().turnBudget.budget()}function oEr(e){n().turnBudget.snapshotForTurn(Zc(),e)}function iEr(){return n().turnBudget.continuationCount()}function sEr(){n().turnBudget.incrementContinuation()}function Mwn(){n().costLedger.markUnknownModelCost()}function TGt(){return n().costLedger.hasUnknownModelCost()}function EEe(){return n().requestJournal.lastMai
+
+## needle="continuationCount" hits=3
+@99401688 
+...Ck..markRemote..........replaceReplBridgeActive.........replaceMainLoopBusy......u..outputTokensAtTurnStart......{..continuationCount........w..snapshotForTurn.....p...incrementContinuation...........recordInteraction...........flushIfDirty...D...resetBaseline........fF.updateTerminalFocus.....G...scrollDraining......nG..markScrollActivity..........waitForScrollIdle.......eY..sidecarIoSettled......Z.mainAgent
+
+@178526956 ervisorLinkChanged.clear()}}class me{#e=0;#t=null;#n=0;outputTokensAtTurnStart(){return this.#e}budget(){return this.#t}continuationCount(){return this.#n}snapshotForTurn(e,t){this.#e=e,this.#t=t,this.#n=0}incrementContinuation(){this.#n++}reset(){this.#e=0,this.#t=null,this.#n=0}}var Zt=150;class Se{#e=Date.now();#t=!1;interactionFired=$e();#n=void 0;terminalFocusFired=$e();#o=!1;#r;lastInteractionTime(){return t
+
+@178555308 urn n().turnBudget.budget()}function oEr(e){n().turnBudget.snapshotForTurn(Zc(),e)}function iEr(){return n().turnBudget.continuationCount()}function sEr(){n().turnBudget.incrementContinuation()}function Mwn(){n().costLedger.markUnknownModelCost()}function TGt(){return n().costLedger.hasUnknownModelCost()}function EEe(){return n().requestJournal.lastMainRequestId()}function Own(e){n().requestJournal.replaceLastMain
+
+## needle="budgetContinuation" hits=0
+## needle="recordSlowOperation" hits=3
+@99405092 ngs......%1.admin3PSteeringSnapshot...... F.recordAdmin3PSteeringSnapshot.......3...errorLog........recordError.....K...recordSlowOperation.....Vo?.slowOperations........+.recordDevBarAlert........e_.devBarAlert......c[.installMeter.....|..sessionCounter..
+...(.[.locCounter..	.....l.prCounter......_.h.commitCounter.........O.costCounter.......N.tokenCounter....w...codeEditToolDecisionCounter......+..activeTimeCount
+
+@178540346 e{#e=[];#t=[];#n=void 0;errorLog(){return this.#e}recordError(e){if(this.#e.length>=100)this.#e.shift();this.#e.push(e)}recordSlowOperation(e,t){return}slowOperations(){if(this.#t.length===0)return nn;let e=Date.now();if(this.#t.some((t)=>e-t.timestamp>=1e4)){if(this.#t=this.#t.filter((t)=>e-t.timestamp<1e4),this.#t.length===0)return nn}return this.#t}recordDevBarAlert(e){return}devBarAlert(){let e=this.#n;if(e&&Dat
+
+@178579251 r(let[o,r]of t.invokedSkills.skills())if(r.agentId===e)t.invokedSkills.forget(o)}function xEr(e,t){n().host.diagnostics.recordSlowOperation(e,t)}function CEr(){return n().host.diagnostics.slowOperations()}function REr(e){n().host.diagnostics.recordDevBarAlert(e)}function IEr(){return n().host.diagnostics.devBarAlert()}function jy(){let e=g();return e?e.mainThreadAgentType:n().hookRegistry.mainThreadAgentType()}funct
+
+## needle="slowOperations()" hits=2
+@178540378 (){return this.#e}recordError(e){if(this.#e.length>=100)this.#e.shift();this.#e.push(e)}recordSlowOperation(e,t){return}slowOperations(){if(this.#t.length===0)return nn;let e=Date.now();if(this.#t.some((t)=>e-t.timestamp>=1e4)){if(this.#t=this.#t.filter((t)=>e-t.timestamp<1e4),this.#t.length===0)return nn}return this.#t}recordDevBarAlert(e){return}devBarAlert(){let e=this.#n;if(e&&Date.now()-e.timestamp>=60000){t
+
+@178579319 ls.forget(o)}function xEr(e,t){n().host.diagnostics.recordSlowOperation(e,t)}function CEr(){return n().host.diagnostics.slowOperations()}function REr(e){n().host.diagnostics.recordDevBarAlert(e)}function IEr(){return n().host.diagnostics.devBarAlert()}function jy(){let e=g();return e?e.mainThreadAgentType:n().hookRegistry.mainThreadAgentType()}function H2(e){let t=g();if(t)t.mainThreadAgentType=e;else n().hookReg
+
+## needle="addSlowOperation" hits=2
+@101887891 cpClientsAccessoracquireMcpServerToolsSwapperaddDevBarAlertaddInvokedSkilladdSessionApprovedMcpServersaddSessionCronTaskaddSlowOperationaddToInMemoryErrorLogaddToToolDurationaddToTotalCostStateaddToTotalDurationStateaddToTotalLinesChangedanchorSessionLogicalStartTimearmPendingContextCompactedbufferPendingOTelEventclaimCostLedgerForCurrentSessionclearBetaHeaderLatchesclearInvokedSkillsclearInvokedSkillsForAgentcle
+
+@192774339 Swapper,REr as addDevBarAlert,K$ as addInvokedSkill,dvt as addSessionApprovedMcpServers,Uq as addSessionCronTask,xEr as addSlowOperation,yEr as addToInMemoryErrorLog,EGt as addToToolDuration,Hwn as addToTotalCostState,Iwn as addToTotalDurationState,kGt as addToTotalLinesChanged,Zwr as anchorSessionLogicalStartTime,uvt as armPendingContextCompacted,_En as bufferPendingOTelEvent,lEn as claimCostLedgerForCurrentSess

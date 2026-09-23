@@ -1,0 +1,242 @@
+# gold-248-feat-7  SendMessage/ListAgents Bedrock/Vertex/Foundry + telemetry off
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:40.949Z
+
+## #7 SendMessage  needle="SendMessage"  hits=120
+- #0 @88528524 nvalidKind.clusterRawBind.FunctionBind.extend.toExtend.Grapheme_Extend.frontend.SendMessageToFrontend.Inspector.evaluateForTestInFrontend.udp_send.append.prepend.weekend.U
+- #1 @88528669 d.append.prepend.weekend.Unrecognized node in FTL backend.jsWatcherHasOsBackend.SendMessageToBackend.host_end.JSGlobalObject_regExpGlobalData_cachedResult_result_end.__%s_
+- #2 @92632951 .t.i.f.i.c.a.t.i.o.n. .w.i.l.l. .a.r.r.i.v.e... .5...6...Send it a message with SendMessage to get its report....E...A..Read its output file (and check its worktree, if a
+- #3 @92633245  ..P....r... Its transcript may still be resumable by sending it a message with SendMessage*......., which is the only way to get its report...M...-.:.; check its worktree
+- #4 @92633535 ntent and have...U.......Resume any of them by sending a message to its id with SendMessage to get its report..........R.Resume any of them by sending a message to its id 
+- #5 @92633631 et its report..........R.Resume any of them by sending a message to its id with SendMessage, or check its worktree/output for partial work before assuming the task landed.
+- #6 @92633830 r.e.e. .o.r. .o.u.t.p.u.t. .t.o. .c.h.e.c.k. ..  .r.e.s.u.m.e. ........-.. with SendMessage only..4....*..Launch them again if their reports are still needed.U....nk.Check
+- #7 @92641205 .o.d.e. .p.r.o.c.e.s.s. .e.x.i.t.e.d... ...j...."6.Send it another message with SendMessage to resume it and get its report before assuming the fetch landed...K.......Chec
+- #8 @92641815 .s. .i.s. .n.o.t. .l.o.s.t... ...E.......Resume it by sending it a message with SendMessage to get its report.........1..Resume it by sending it a message with SendMessage
+- #9 @92641895 SendMessage to get its report.........1..Resume it by sending it a message with SendMessage, or check its worktree/output for partial work before assuming the task landed.
+- #10 @93721196 braicComponentInstances.....>...SemidefiniteOptimization.....d..SendMail....o.x.SendMessage......M..Sequence....Qsi.SequenceAlignment........ZZ.SequenceAttentionLayer....
+- #11 @94795824 withOnReceiveMessage........withOnReceiveStatus.	.....*.withStart...........withSendMessage....%f..withHalfClose...
+..."...withCancel......T.d.cancelWithStatus....uO..pro
+- … +108 more
+
+## #7 ListAgents  needle="ListAgents"  hits=21
+- #0 @96325388 ...L.?.ConnectGitHub...........propose_skills........;.RefreshMcpTools.
+...R.Z.ListAgents..	.....;.ListPeers........./.mcp__github__merge_pull_request. .....7.mcp__githu
+- #1 @96552196 ectsTool.....n'.EndConversationTool.........PollTool......2.ArtifactTool........ListAgentsTool.......%..ShareOnboardingGuideTool......].failedClosed....._l.minHours......
+- #2 @101858647 omTopicTagbuildSubagentExtrasdescribeSelfformatForModelformatForUserlistAllPeersListAgentsToolShareOnboardingGuideToolinitBundledWorkflowsARTIFACT_NOT_FOUND_ADVICEARTIFAC
+- #3 @179009045 utTool:"TaskOutput",AgentOutput:"TaskOutput",BashOutput:"TaskOutput",ListPeers:"ListAgents",Brief:"SendUserMessage",ListMcpResources:"ListMcpResourcesTool",ReadMcpResourc
+- #4 @181140565 ce.
+
+// Version: 2.1.248
+import{ko}from"B:/~BUN/root/chunk-6znqw5fd.js";var Ds="ListAgents",c5n="ListPeers";function e(){return""}var s=`Lists agents you can ${ko} to \u2
+- #5 @183367673  ask its user to enable it (listings refresh within a few minutes \u2014 re-run ListAgents after they do).`}catch(r){n(`[agents:cloud] warm cannot-receive lookup failed (
+- #6 @184613063 s","SuggestPluginInstall","SuggestConnectors","SuggestSkills","ListConnectors","ListAgents","ListPeers","SearchMcpRegistry","ListPlugins","ListSkills","SearchPlugins","Se
+- #7 @185790187 s"),Yht=null,Qht=null,Zht=import.meta.require("B:/~BUN/root/chunk-rdfgtn8s.js").ListAgentsTool,eyt=import.meta.require("B:/~BUN/root/chunk-tsd7th00.js").ShareOnboardingGu
+- #8 @189811023 rts with `/` being unaddressable by `SendMessage` and shown as "(untitled)" in `ListAgents`\n- Fixed Ctrl+W, Ctrl+U, Ctrl+K, Option+Backspace, Option+D and vim `df`/`dt` 
+- #9 @189812138 ng a session from the `claude --resume` picker now restores its active goal\n- `ListAgents` now tells a session its own name (the one peers use to message it), and `SendM
+- #10 @189812300 d `SendMessage` to your own name says so instead of "no agent named \u2026"\n- `ListAgents` and `/list-agents` now list your live teammates (previously only subagents and
+- #11 @189813590 ur machines can message each other with `SendMessage` and find each other with `ListAgents`, as on macOS and Linux\n- [VSCode] "View usage" in the usage-limit banner now 
+- … +9 more
+
+## #7 Cross-session messaging  needle="Cross-session messaging"  hits=9
+- #0 @93411172  . run /mcp.........socket_dir_refused..........lastStartFailureCause...........Cross-session messaging is off:.(...!8..its socket directory could not be set up-...Ae,.run with --debu
+- #1 @98008812 N/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/chunk-9nz4npf8.js9....]z.Cross-session messaging is not available in this session........I...tengu_harbor_kite_win...........ten
+- #2 @99639992 ly (manage with `claude agents`)........--messaging-socket-path <path>......
+`..Cross-session messaging server path: a Unix domain socket on Mac/Linux, a \\.\pipe\ name on Windows (de
+- #3 @180993385 ngu_harbor_kite",!0)}function v5e(){return R("tengu_cuddly_willow",!0)}var xpt="Cross-session messaging is not available in this session.";
+export{Po,v5e,xpt};
+.// @bun @bytecode
+// C
+- #4 @189817807  for your next background session; it now appears only once a task claims it\n- Cross-session messaging: sending to a session on this machine that refuses inbound messages (e.g. `cros
+- #5 @189818005 : "refuse"`) now reports "refused" to the sender instead of a silent success\n- Cross-session messaging: a session whose inbox drops your messages (rate limit or full queue) now tells
+- #6 @191592701 (manage with `claude agents`)"));{let k=new F("--messaging-socket-path <path>","Cross-session messaging server path: a Unix domain socket on Mac/Linux, a \\\\.\\pipe\\ name on Windows
+- #7 @201567134 ilureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be se
+- #8 @206071186 l,agentType:t.agentType,status:t.status,startTime:t.startTime})}return s}var E="Cross-session messaging is switched off in this session right now \u2014 no sessions were listed, and t
+
+## #7 cross-session messaging  needle="cross-session messaging"  hits=15
+- #0 @95452645 .d.]. .g.a.t.e. .o.f.f. ..  .d.r.o.p.p.e.d. ...:....1.. parked peer message(s) (cross-session messaging disabled).. ...o	,.[cross-session-inbound] dropped ,....j.. .h.e.l.d. .p.e.e.r.
+- #1 @100802529  Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-mes
+- #2 @100802649 ate-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_ud
+- #3 @180316851 ).describe("Kernel-verified pid of the process that connected to this session's cross-session messaging socket, read from the connection (SO_PEERCRED / LOCAL_PEERPID) \u2014 never fro
+- #4 @189798393 ation re-sent as the prompt instead of the normal continuation message\n- Fixed cross-session messaging silently turning off inside user namespaces and rootless containers after the 2
+- #5 @189804448 , for Team and Enterprise members without an admin or owner role\n- Changed the cross-session messaging inbox socket to close connections that send no complete line within 30 seconds;
+- #6 @189813435 doctor` wording when Remote Control isn\'t enabled for your account\n- Windows: cross-session messaging is now available, so Claude Code sessions across your machines can message each
+- #7 @189832242 top inter-session messages being silently dropped by the recipient session when cross-session messaging read as disabled, which left the sender\'s query "thinking" for many minutes\n-
+- #8 @189845504  external @-imports from user-scope memory files\n- Hardened the auto-generated cross-session messaging socket directory on shared `/tmp`: a pre-planted symlink or another user\'s dir
+- #9 @189851064 n earlier model when `/model` had been changed since the last response\n- Fixed cross-session messaging sometimes starting without an inbox in the first session after install or upgra
+- #10 @196200571 =="kill-switch"){n(`[cross-session-inbound] refused inbound peer message \u2014 cross-session messaging disabled (kill switch) (${e})`),y("peer_inbound_gate","kill_switch");return}n(`
+- #11 @196201486 d?`[cross-session-inbound] gate off \u2014 dropped ${d} parked peer message(s) (cross-session messaging disabled)`:`[cross-session-inbound] dropped ${d} held peer message(s) \u2014 po
+- … +3 more
+
+## #7 telemetry is disabled  needle="telemetry is disabled"  hits=2
+- #0 @189804066 nstead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` exiting and stranding attached Remote Control 
+- #1 @189823026 commands are\n- Improved auto mode on Bedrock, Vertex AI, and Foundry, and when telemetry is disabled: the classifier now uses the same defaults as on the Claude API, including seve
+
+## #7 telemetry disabled  needle="telemetry disabled"  hits=4
+- #0 @98656150  .o.n. .o.l.d.e.r. .C.L.I.s.......T
+..@internal True when the CLI has analytics/telemetry disabled (privacy level, DO_NOT_TRACK, or 3P provider). IDE clients use this to hide per
+- #1 @180351888 ics_disabled:W().optional().describe("@internal True when the CLI has analytics/telemetry disabled (privacy level, DO_NOT_TRACK, or 3P provider). IDE clients use this to hide per
+- #2 @180417871 ics_disabled:W().optional().describe("@internal True when the CLI has analytics/telemetry disabled for this session (privacy level, DISABLE_TELEMETRY / DO_NOT_TRACK from any sett
+- #3 @189784924  is escape-safe\n- Improved Bedrock, Vertex, and Foundry sessions (and any with telemetry disabled): Claude is now told when a configured MCP server failed to connect, instead of
+
+## #7 when telemetry  needle="when telemetry"  hits=3
+- #0 @189794914 ts own on Bedrock, Vertex AI, and Foundry, through the Claude apps gateway, and when telemetry or non-essential traffic is disabled\n- `/goal`: Changed idle sessions to start
+- #1 @189804061 ely instead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` exiting and stranding attached Rem
+- #2 @189823021 Bash commands are\n- Improved auto mode on Bedrock, Vertex AI, and Foundry, and when telemetry is disabled: the classifier now uses the same defaults as on the Claude API, in
+
+## #7 same machine  needle="same machine"  hits=3
+- #0 @100217349 a different Claude Code cloud session (usually another session started from the same machine), so it cannot run device tools for this session and nothing was run. Tell the 
+- #1 @189844792 on no longer silently takes Remote Control away from another Claude Code on the same machine that still has it; run `/remote-control` there to move it\n- Updated agent pane
+- #2 @207433163 a different Claude Code cloud session (usually another session started from the same machine), so it cannot run device tools for this session and nothing was run. Tell the 
+
+## #7 on the same machine  needle="on the same machine"  hits=1
+- #0 @189844785 versation no longer silently takes Remote Control away from another Claude Code on the same machine that still has it; run `/remote-control` there to move it\n- Updated agent pane
+
+## #7 Cross-machine messaging is unavailable  needle="Cross-machine messaging is unavailable"  hits=2
+- #0 @101079636 es (it is a background observer, or its status could not be verified).........k.Cross-machine messaging is unavailable: it sends the message through Anthropic servers, which is not allowed on a thir
+- #1 @196282480 ge:`Plan rejected for ${t} with feedback: "${Qn(o,50)}"`,request_id:u}}}var We="Cross-machine messaging is unavailable: it sends the message through Anthropic servers, which is not allowed on a thir
+
+## #7 third-party provider or with nonessential  needle="third-party provider or with nonessential"  hits=2
+- #0 @101079750 able: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work... ...k.0.sen
+- #1 @196282594 able: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work.";function Ye
+
+## #7 Bedrock, Vertex, and Foundry  needle="Bedrock, Vertex, and Foundry"  hits=2
+- #0 @189784872 upplied text in `/plugin` and `claude plugin` output is escape-safe\n- Improved Bedrock, Vertex, and Foundry sessions (and any with telemetry disabled): Claude is now told when a configure
+- #1 @189804028 nd `/effort` to also run immediately instead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` exiting and str
+
+## #7 Bedrock, Vertex  needle="Bedrock, Vertex"  hits=25
+- #0 @93334130 ...g..Channels are not currently available9....i/.Channels are not available on Bedrock, Vertex, or Foundry...k.....\.Channels are not enabled for your org . have an administr
+- #1 @98974297 hour on a Claude subscription within its usage limits, 5 minutes on an API key, Bedrock, Vertex or Foundry. 1-hour cache writes are billed at a higher rate; the cache stays wa
+- #2 @101130260 nc is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers.......!.DesignSync is unavailable while nonesse
+- #3 @101142255 gn is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers..M...RY..Claude Design is disabled because none
+- #4 @101168490 ts is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers...{....s..Projects is unavailable while nonesse
+- #5 @179119080 hour on a Claude subscription within its usage limits, 5 minutes on an API key, Bedrock, Vertex or Foundry. 1-hour cache writes are billed at a higher rate; the cache stays wa
+- #6 @180433890 mits_available:W().describe("False when plan rate limits do not apply (API key, Bedrock, Vertex, or missing profile scope) \u2014 rate_limits will be null."),rate_limits:m({fi
+- #7 @184669272 tputs
+  - MCP connector for remote MCP servers
+  - Cloud provider integrations (Bedrock, Vertex AI, Foundry)
+
+- **Claude Tag / Claude in Slack docs** (${xin}): Fetch this inde
+- #8 @189784872 upplied text in `/plugin` and `claude plugin` output is escape-safe\n- Improved Bedrock, Vertex, and Foundry sessions (and any with telemetry disabled): Claude is now told whe
+- #9 @189794844  while idle\n- Changed `/code-review` so Claude can also start it on its own on Bedrock, Vertex AI, and Foundry, through the Claude apps gateway, and when telemetry or non-ess
+- #10 @189804028 nd `/effort` to also run immediately instead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` ex
+- #11 @189805440 or data-residency workspaces\n- Added the one-time fullscreen renderer offer on Bedrock, Vertex, Foundry and other previously excluded setups; new installs there now start in 
+- … +13 more
+
+## #7 isEssentialTrafficOnly  needle="isEssentialTrafficOnly"  hits=0
+
+## #7 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC  needle="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"  hits=21
+- #0 @92267280 BLE_BUG_COMMAND environment variablea....D../feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable...........allow_product_feedback..9...Y.../feedback has be
+- #1 @98929956  ....mK.MCP_SERVER_CONNECTION_BATCH_SIZE....`...API_FORCE_IDLE_TIMEOUT..(.....3.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.....*..DISABLE_TELEMETRY........C..DO_NOT_TRACK....|is.T.h.e. .c.o.m.m.a.n.d. .
+- #2 @101130392 ..!.DesignSync is unavailable while nonessential network traffic is restricted (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set). Unset it to use /design-sync.......+.. requires ".....C...Design API .
+- #3 @101168622 ...s..Projects is unavailable while nonessential network traffic is restricted (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set).......&..Projects is disabled for this organization by compliance polic
+- #4 @178721381 \n?/g;function Rer(t){return t.replace(F,"").trim()}function x(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"essential-traffic";if(process.env.DISABLE_TELEMETRY)return"no-telemetry"
+- #5 @178721685 ial-traffic"}function S2(){return x()!=="default"}function lEe(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";return null}function Z4t(){if(
+- #6 @178721733 "}function lEe(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";return null}function Z4t(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRA
+- #7 @178721817 DE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";return null}function Z4t(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";if(process.env.DISABLE_TELEMET
+- #8 @178721865 l}function Z4t(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";if(process.env.DISABLE_TELEMETRY)return"DISABLE_TELEMETRY";if(Me(process.env.D
+- #9 @178749761 _DISABLE_NESTED_CHAIN_IDLE:()=>B_,CLAUDE_CODE_DISABLE_NESTED_USER_REPAIR:()=>b_,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:()=>G_,CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK:()=>H_,CLAUDE_CODE_DISABLE_NOT
+- #10 @179035506 EDROCK","CLAUDE_ENABLE_STREAM_WATCHDOG"]),mn=new Set(["API_FORCE_IDLE_TIMEOUT","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC","DISABLE_ERROR_REPORTING","DISABLE_TELEMETRY","DO_NOT_TRACK"]);function zMe(e,
+- #11 @187852390 E_TELEMETRY:process.env.DISABLE_TELEMETRY,DO_NOT_TRACK:process.env.DO_NOT_TRACK,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,DISABLE_ERROR_REPORTING:pr
+- … +9 more
+
+## #7 DISABLE_TELEMETRY  needle="DISABLE_TELEMETRY"  hits=11
+- #0 @98930004 API_FORCE_IDLE_TIMEOUT..(.....3.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.....*..DISABLE_TELEMETRY........C..DO_NOT_TRACK....|is.T.h.e. .c.o.m.m.a.n.d. .c.o.n.t.a.i.n.s. .n.o.n.-
+- #1 @178721463 AUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"essential-traffic";if(process.env.DISABLE_TELEMETRY)return"no-telemetry";if(Me(process.env.DO_NOT_TRACK))return"no-telemetry";retur
+- #2 @178721922 SENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";if(process.env.DISABLE_TELEMETRY)return"DISABLE_TELEMETRY";if(Me(process.env.DO_NOT_TRACK))return"DO_NOT_TRACK";
+- #3 @178721947 AUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";if(process.env.DISABLE_TELEMETRY)return"DISABLE_TELEMETRY";if(Me(process.env.DO_NOT_TRACK))return"DO_NOT_TRACK";return null}function cEe(
+- #4 @178755564 :()=>Ke,DISABLE_PROMPT_CACHING_OPUS:()=>de,DISABLE_PROMPT_CACHING_SONNET:()=>fe,DISABLE_TELEMETRY:()=>ve,DISABLE_UPDATES:()=>We,DISABLE_UPGRADE_COMMAND:()=>Ye,EMBEDDED_SEARCH_TO
+- #5 @179035575 _TIMEOUT","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC","DISABLE_ERROR_REPORTING","DISABLE_TELEMETRY","DO_NOT_TRACK"]);function zMe(e,t){let o=e.toUpperCase();return fn.has(o)||mn.
+- #6 @180417923  when the CLI has analytics/telemetry disabled for this session (privacy level, DISABLE_TELEMETRY / DO_NOT_TRACK from any settings tier, third-party provider, gateway) \u2014 th
+- #7 @187852304 oc",CLAUDE_CODE_BYOC_ENABLE_DATADOG:process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG,DISABLE_TELEMETRY:process.env.DISABLE_TELEMETRY,DO_NOT_TRACK:process.env.DO_NOT_TRACK,CLAUDE_CODE
+- #8 @187852334 TADOG:process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG,DISABLE_TELEMETRY:process.env.DISABLE_TELEMETRY,DO_NOT_TRACK:process.env.DO_NOT_TRACK,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:
+- #9 @196719497 _CODE_PROVIDER_MANAGED_BY_HOST","DISABLE_ERROR_REPORTING","DISABLE_GROWTHBOOK","DISABLE_TELEMETRY","DO_NOT_TRACK"];function G(){let t=["CLAUDECODE=1","CLAUDE_CODE_EXPERIMENTAL_A
+- #10 @211736045 Vertex/Foundry, LLM gateways / custom `ANTHROPIC_BASE_URL`, or any client with `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, or `DISABLE_GROWT
+
+## #7 win telemetry is disabled#0 @189804066
+desktop, Dock, or a Finder window requires granting Finder via the access dialog, like any other app\n- Changed `/model`, `/fast`, and `/effort` to also run immediately instead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` exiting and stranding attached Remote Control sessions when the server drops its environment mid-session; it now recovers\n- Fixed Remote Control sessions served by `claude remote-control` sometimes getting stuck after it was stopped and restarted, for Team and Enterprise members without an admin or owner role\n- Changed the cross-session messaging inbox socket to close connections that send 
+
+## #7 win telemetry is disabled#1 @189823026
+ow written in the background\n- Improved auto mode: `Monitor` allow rules are now set aside while auto mode is active, so Monitor commands are reviewed the same way Bash commands are\n- Improved auto mode on Bedrock, Vertex AI, and Foundry, and when telemetry is disabled: the classifier now uses the same defaults as on the Claude API, including severity-scored classification\n- Improved auto mode: the git status check can no longer be fooled by a repo\'s `status.showUntrackedFiles=no` setting into reporting a clean tree\n- Changed the `/model` picker to highlight only the newest model\'s name, so the highlight marks the new release rather than an arbitrary subset of the list\n- `/goal`: an i
+
+## #7 win telemetry disabled#0 @98656150
+ .r.e.a.d.s. .t.h.i.s. .f.r.o.m. .t.h.e. .p.e.r.s.i.s.t.e.d. .i.n.i.t. .e.v.e.n.t. .t.o. .d.e.c.i.d.e. .w.h.e.t.h.e.r. .i.t. .m.a.y. .s.e.n.d. .t.h.e.m.)... .A.b.s.e.n.t. .o.n. .o.l.d.e.r. .C.L.I.s.......T
+..@internal True when the CLI has analytics/telemetry disabled (privacy level, DO_NOT_TRACK, or 3P provider). IDE clients use this to hide per-message thumbs feedback UI since the rating event would be a no-op.........@internal True when the org's allow_product_feedback policy is false (ZDR/HIPAA). IDE clients use this to hide feedback surfaces (thumbs, session survey) whose events the CLI would drop at the proxy boundary anyway........N.@internal Absolute directory paths for the auto-memo
+
+## #7 win telemetry disabled#1 @180351888
+ drains them via ReadNotifications (the cloud session backend reads this from the persisted init event to decide whether it may send them). Absent on older CLIs."),analytics_disabled:W().optional().describe("@internal True when the CLI has analytics/telemetry disabled (privacy level, DO_NOT_TRACK, or 3P provider). IDE clients use this to hide per-message thumbs feedback UI since the rating event would be a no-op."),product_feedback_disabled:W().optional().describe("@internal True when the org's allow_product_feedback policy is false (ZDR/HIPAA). IDE clients use this to hide feedback surfaces (thumbs, session survey) whose events the CLI would drop at the proxy boundary anyway."),memory_paths
+
+## #7 win telemetry disabled#2 @180417871
+e feedback-survey surface is enabled for this host (GrowthBook gate, privacy level, and org policy all allow it). Absent means the host must not show the survey."),analytics_disabled:W().optional().describe("@internal True when the CLI has analytics/telemetry disabled for this session (privacy level, DISABLE_TELEMETRY / DO_NOT_TRACK from any settings tier, third-party provider, gateway) \u2014 the same verdict the system/init message carries. IDE hosts fold it into the gate for their own direct telemetry. Absent (older CLI) \u2192 unknown."),remote_control_auto_enable:W().optional().describe("@internal Whether the CLI resolver says Remote Control should auto-enable at session start (explicit
+
+## #7 win telemetry disabled#3 @189784924
+mproved plugin marketplace hardening: names containing control or invisible characters are rejected, and marketplace-supplied text in `/plugin` and `claude plugin` output is escape-safe\n- Improved Bedrock, Vertex, and Foundry sessions (and any with telemetry disabled): Claude is now told when a configured MCP server failed to connect, instead of concluding its tools don\'t exist\n- Changed Sonnet 5\'s default auto-compact window to its full 1M context, so sessions on the 1M window now auto-compact at about 967K tokens instead of about 934K\n- Changed cross-session peer messages to collapse by default to a one-line `Message from @<sender>: <first line>` preview; Ctrl+O expands the full body\
+
+## #7 win on the same machine#0 @189844785
+ote Control now keeps reconnecting for about 30 minutes after a network blip and no longer drops after a few blips spread across an hour\n- Remote Control: resuming a conversation no longer silently takes Remote Control away from another Claude Code on the same machine that still has it; run `/remote-control` there to move it\n- Updated agent panel: completed subagents hide immediately with a `/tasks` footer hint, and the "\u2193 N more" overflow indicator moved left for visibility\n- Remote Control: the terminal now says whether a session was taken over by another device, ended from another app, or deleted, and stops suggesting a reconnect that would undo it\n- Bash input redirections (`< f
+
+## #7 win Bedrock, Vertex, and Foundry#0 @189784872
+4 the resumed session now reports the lost work\n- Improved plugin marketplace hardening: names containing control or invisible characters are rejected, and marketplace-supplied text in `/plugin` and `claude plugin` output is escape-safe\n- Improved Bedrock, Vertex, and Foundry sessions (and any with telemetry disabled): Claude is now told when a configured MCP server failed to connect, instead of concluding its tools don\'t exist\n- Changed Sonnet 5\'s default auto-compact window to its full 1M context, so sessions on the 1M window now auto-compact at about 967K tokens instead of about 934K\n- Changed cross-session peer messages to collapse by default to a one-line `Message from @<sender>: 
+
+## #7 win Bedrock, Vertex, and Foundry#1 @189804028
+computer use on macOS so clicking the desktop, Dock, or a Finder window requires granting Finder via the access dialog, like any other app\n- Changed `/model`, `/fast`, and `/effort` to also run immediately instead of queueing until the turn ends on Bedrock, Vertex, and Foundry and when telemetry is disabled\n- Fixed `claude remote-control` exiting and stranding attached Remote Control sessions when the server drops its environment mid-session; it now recovers\n- Fixed Remote Control sessions served by `claude remote-control` sometimes getting stuck after it was stopped and restarted, for Team and Enterprise members without an admin or owner role\n- Changed the cross-session messaging inbox 
+
+## #7 win Cross-session messaging#0 @93411172
+~......... tokens):....[+.. ask Claude to trim agent descriptions in .claude/agents/.......&i. MCP........authentication..........server needs....w.?.servers need........ . run /mcp.........socket_dir_refused..........lastStartFailureCause...........Cross-session messaging is off:.(...!8..its socket directory could not be set up-...Ae,.run with --debug-file <path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.le
+
+## #7 win Cross-session messaging#1 @98008812
+becomes the phone banner, the full text becomes the email body............tengu_kairos_push_notifications.......*.tengu_kairos_input_needed_push..(...%...file:///B:/%7EBUN/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/chunk-9nz4npf8.js9....]z.Cross-session messaging is not available in this session........I...tengu_harbor_kite_win...........tengu_harbor_kite...........CLAUDE_CODE_HARBOR_KITE...... ..tengu_cuddly_willow.(.....0.file:///B:/%7EBUN/root/chunk-yydj8m7e.js....4...comms...(.....{.file:///B:/%7EBUN/root/chunk-679tda11.js(.....p.file:///B:/%7EBUN/root/chunk-tyha4ryj.js:.....f.S.e.n.d.i.n.g. .t.h.i.s. .m.a.c.h.i.n.e.'.s. .s.e.t.t.i.n.g.s. ..  .E.s.c. .c.a.n.c.e.l.s. .t.h.e. .m.
+
+## #7 win Cross-session messaging#2 @99639992
+n.s.).....4.#.--enable-auto-mode.. .....~.(deprecated) Opt in to auto mode....N]..--bg, --background..\...	...Start the session as a background agent and return immediately (manage with `claude agents`)........--messaging-socket-path <path>......
+`..Cross-session messaging server path: a Unix domain socket on Mac/Linux, a \\.\pipe\ name on Windows (defaults to an auto-generated path);.....=.Enable SendUserMessage tool for agent-to-user communication.V...+c..Render screen-reader friendly output (flat text, no decorative borders or animations)...........--channels <servers...>.r.......MCP servers whose channel notifications (inbound push) should register this session. Space-separated server na
+
+## #7 win Cross-session messaging#3 @180993385
+/root/chunk-m0p20t24.js";function Po(){let e=a.CLAUDE_CODE_HARBOR_KITE;if(e!==void 0)return Me(e);if(B()==="windows"&&!R("tengu_harbor_kite_win",!0))return!1;return R("tengu_harbor_kite",!0)}function v5e(){return R("tengu_cuddly_willow",!0)}var xpt="Cross-session messaging is not available in this session.";
+export{Po,v5e,xpt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training model
+
+## #7 fn-before Cross-session messaging#3 @180993326
+len=50 sha=42f355346e037999
+function v5e(){return R("tengu_cuddly_willow",!0)}
+
+## #7 win Cross-session messaging#4 @189817807
+er mode) or Desktop/IDE hosts; they now list and reach Remote Control peers\n- Fixed `ListAgents` and `SendMessage` exposing the idle worker that the agent view pre-warms for your next background session; it now appears only once a task claims it\n- Cross-session messaging: sending to a session on this machine that refuses inbound messages (e.g. `crossSessionInbound: "refuse"`) now reports "refused" to the sender instead of a silent success\n- Cross-session messaging: a session whose inbox drops your messages (rate limit or full queue) now tells your session, instead of the messages vanishing silently\n- Improved startup: bare `claude` starts sooner on macOS\n- Improved Bash tool permission 
+
+## #7 win Cross-session messaging#5 @189818005
+ssion; it now appears only once a task claims it\n- Cross-session messaging: sending to a session on this machine that refuses inbound messages (e.g. `crossSessionInbound: "refuse"`) now reports "refused" to the sender instead of a silent success\n- Cross-session messaging: a session whose inbox drops your messages (rate limit or full queue) now tells your session, instead of the messages vanishing silently\n- Improved startup: bare `claude` starts sooner on macOS\n- Improved Bash tool permission checking for zsh-specific syntax in shell conditionals\n- Improved Remote Control connection resilience: brief HTTP 403 refusals from a network edge, VPN, or proxy are now tolerated for up to 3 minu
+
+## #7 win cross-session messaging#0 @95452645
+.d. .(.k.i.l.l. .s.w.i.t.c.h.). .(........OS.kill_switch.6...pk..[cross-session-inbound] refused inbound peer message (..+....JG.[.c.r.o.s.s.-.s.e.s.s.i.o.n.-.i.n.b.o.u.n.d.]. .g.a.t.e. .o.f.f. ..  .d.r.o.p.p.e.d. ...:....1.. parked peer message(s) (cross-session messaging disabled).. ...o	,.[cross-session-inbound] dropped ,....j.. .h.e.l.d. .p.e.e.r. .m.e.s.s.a.g.e.(.s.). ..  .p.o.l.i.c.y. .i.s. .n.o.w. .r.e.f.u.s.e.!.......[cross-session-inbound] released ........~.. held peer message(s) (. ....Fk. admitted by the ingress guard; ....3F.. still held.M...Ar..[cross-session-inbound] held peer message approved but policy is now refuse (...........kill switch.......\.). ..  .d.r.o.p.p.e.d...^..
+
+## #7 win cross-session messaging#1 @100802529
+oot: not adopting .......r.V.[worktree] bg boot: adopted (....?<. but no worktree lock names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/root/chunk-0z77aj1d.js..Q... p..Cannot destructure property 'installObserve
+
+## #7 win cross-session messaging#2 @100802649
+tarted...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/root/chunk-0z77aj1d.js..Q... p..Cannot destructure property 'installObserverSpawner' from null or undefined value.......dL..Detected an interrupted iTerm2 setup. Your original settings have been 
+
+## #7 win cross-session messaging#3 @180316851
+when the turn is exactly one harness-formed envelope (or an in-process agent message); render this instead of re-parsing the message text."),verifiedPeerPid:A().optional().describe("Kernel-verified pid of the process that connected to this session's cross-session messaging socket, read from the connection (SO_PEERCRED / LOCAL_PEERPID) \u2014 never from the payload. This identifies the CONNECTING process, which for relayed traffic (e.g. a daemon forwarding on another session's behalf) is the relay, not the message's author. Key sender identity on this, never on `from`: `from` is sender-authored and kept only for reply routing, so it is forgeable by any same-user process. Absent when unverifia
+
+## #7 win cross-session messaging#4 @189798393
+ 50 most recent sessions; the picker now loads more as you scroll\n- Fixed cloud sessions resuming after a mid-turn restart with a pending hook or background-task notification re-sent as the prompt instead of the normal continuation message\n- Fixed cross-session messaging silently turning off inside user namespaces and rootless containers after the 2.1.232 socket-directory hardening\n- Fixed text that hangs outside its container (for example the sign-in URL in `/login`) losing its leading columns when another part of the screen repaints\n- Fixed `spellcheck` not underlining a misspelled word typed directly after an emoji\n- Fixed background subagents not waking when their last background Ba
+
+## #7 win cross-session messaging#5 @189804448
+its environment mid-session; it now recovers\n- Fixed Remote Control sessions served by `claude remote-control` sometimes getting stuck after it was stopped and restarted, for Team and Enterprise members without an admin or owner role\n- Changed the cross-session messaging inbox socket to close connections that send no complete line within 30 seconds; scripts posting to it should connect once their data is ready\n- Improved the notice when resuming a conversation whose Remote Control is held by another terminal: it now says sessions on other machines can\'t be seen from, or reach, this one\n- [VSCode] Improved history trimming in long sessions: older tool-activity rows are dropped first so y
+
+## #7 win Cross-machine messaging is unavailable#0 @101079636
+r removed notify_when_idle from this call.N....V..No idle subscription was made (a permission handler removed it from the call)...f...o...That agent cannot receive messages (it is a background observer, or its status could not be verified).........k.Cross-machine messaging is unavailable: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work... ...k.0.send messages to agent teammatesK.....2.Cannot destructure property 'resumableAgentId' from null or undefined value. ...y.j.
+| `"worker"` | Any agent from `........`. ..  .s.u.b.a.g.e.n.t.,. .a.n.o.t.h.e.r. .l.o.c.a.l.
+
+## #7 win Cross-machine messaging is unavailable#1 @196282480
+id 0)return{data:{success:!1,message:`Failed to write the plan rejection to ${t}'s inbox \u2014 nothing was sent. Try again.`,request_id:u}};return{data:{success:!0,message:`Plan rejected for ${t} with feedback: "${Qn(o,50)}"`,request_id:u}}}var We="Cross-machine messaging is unavailable: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work.";function Ye(){return Le()==="firstParty"&&!Tt()}function ze(){if(zbe()?.live)return;if(a.CLAUDE_CODE_REMOTE===!0)return g5()===void 0?"no-container-address":void 0;return"rc-disconnected"}function Ke(e){return e==="rc-disconne
+
+## #7 fn-before Cross-machine messaging is unavailable#1 @196281838
+len=634 sha=365da62c0b8d7313
+function Ls(e,t,u,o,d){let p=d.getAppState(),r=p.teamContext?.teamName;if(!Dk(p.teamContext))throw new Ce("Only the team lead can reject plans. Teammates cannot reject their own or other plans.");let v={type:"plan_approval_response",requestId:u,approved:!1,feedback:o,timestamp:new Date().toISOString()};if(await ph(e,{from:bs,text:S(v),timestamp:new Date().toISOString()},r,d.storageV5)===void 0)return{data:{success:!1,message:`Failed to write the plan rejection to ${t}'s inbox \u2014 nothing was sent. Try again.`,request_id:u}};return{data:{success:!0,message:`Plan rejected for ${t} with feedback: "${Qn(o,50)}"`,request_id:u}}}

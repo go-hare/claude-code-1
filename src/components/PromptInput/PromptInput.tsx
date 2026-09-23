@@ -74,7 +74,7 @@ import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { abortPromptSuggestion, logSuggestionSuppressed } from '../../services/PromptSuggestion/promptSuggestion.js';
 import { type ActiveSpeculationState, abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
 import { getStaleQuotaWaitPrompt } from '../../services/quotaAutoResume.js';
-import { getActiveAgentForInput, getViewedTeammateTask } from '../../state/selectors.js';
+import { getActiveAgentForInput } from '../../state/selectors.js';
 import { enterTeammateView, exitTeammateView, stopOrDismissAgent } from '../../state/teammateViewHelpers.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import { getRunningTeammatesSorted } from '../../tasks/InProcessTeammateTask/InProcessTeammateTask.js';
@@ -204,6 +204,7 @@ import {
   useSwarmBanner,
 } from './useSwarmBanner.js';
 import { isNonSpacePrintable, isVimModeEnabled } from './utils.js';
+import { resolveViewedTask, viewedAgentNameForPlaceholder } from './viewedAgent.js';
 
 type Props = {
   debug: boolean;
@@ -555,8 +556,18 @@ function PromptInput({
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
   const effortValue = useAppState(s => s.effortValue);
   const ultracode = useAppState(s => s.ultracode);
-  const viewedTeammate = getViewedTeammateTask(store.getState());
-  const viewingAgentName = viewedTeammate?.identity.agentName;
+  const agentNameRegistry = useAppState(s => s.agentNameRegistry);
+  // densable Iln — viewed-task envelope. No second transcript store: pass
+  // the existing bag (empty here; REPL keeps messages on the task / loop).
+  const viewed = resolveViewedTask({
+    viewingAgentTaskId,
+    tasks,
+    transcripts: {},
+    mainIsBusy: isLoading,
+    mainConversationId: undefined,
+  });
+  const viewedTeammate = viewed.isTeammate ? viewed.task : undefined;
+  const viewingAgentName = viewedAgentNameForPlaceholder(viewingAgentTaskId, tasks, agentNameRegistry);
   // identity.color is typed as `string | undefined` (not AgentColorName) because
   // teammate identity comes from file-based config. Validate before casting to
   // ensure we only use valid color names (falls back to cyan if invalid).

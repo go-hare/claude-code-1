@@ -1,0 +1,6 @@
+# gold-248-na-30-ar  *.tfvars
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=183210234
+
+len=63 sha=a525019b7323fc5f
+function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}

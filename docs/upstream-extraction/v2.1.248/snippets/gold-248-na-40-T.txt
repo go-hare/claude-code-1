@@ -1,0 +1,8 @@
+# gold-248-na-40-T  getWorkflowAuthoringAutoloadMessages
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=204709919
+
+len=717 sha=f82d5e8668094904
+async function T(t,o,i){let r=t.some((e)=>m(e,o,(a)=>a.type==="workflow_keyword_request"))?"keyword":t.some((e)=>m(e,o,(a)=>a.type==="ultra_effort_enter"&&a.reminderType==="full"))?"ultracode":void 0;if(r===void 0||!eJ(i))return[];let l=gTt(),n=l.filter((e)=>e.type==="text").map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(Ll([...o??[]]),n)!==null){if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B:/~BUN/root/chunk-eb9hsjf5.js");return[He({content:d($w),isMeta:!0,turnCompanion:!0}),He({content:l,isMeta:!0,turnCompanion:!0})]}

@@ -1,0 +1,119 @@
+# gold-248-21-hook-row3
+when=2026-09-20T03:39:02.469Z
+
+## _P-sig 248=1 247=0
+## 247 _P-sig  hits=0
+
+## 247 Expected schema _P-ish  hits=1
+- #0 @231508542 1]=pw,lp[12]=x9;else x9=lp[12];return x9}function nW(e,r){let n=e?.trim()?e:r?.trim()?r:"";if(!n)return"";let i=ar(n,`
+
+Expected schema:`).trim(),l=0,c=i.indexOf(`
+`);while(c!==-1){let d=i.slice(l,c).trim();if(d)return d.length>200?d.slice(0,200)+"\u2026":d
+
+## 247 hookName hook error children  hits=0
+
+## 248 waitingFor=  hits=8
+- #0 @181016933 ionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypo
+- #1 @181016977 bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint==="string"?o.entrypoint:void 0,...typeof
+- #2 @202584167 .of(z().host)}function sq(){Rse().acquire()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.wor
+- #3 @202584251 q(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed"
+- #4 @202588471 tive:Hse}),av[0]=Hse,av[1]=Dse,av[2]=Bse,av[3]=Ose,av[4]=Fse,av[5]=Lse,av[6]=Nse,av[7]=Use,av[8]=Ese,av[9]=iBe;else iBe=av[9];let{status:hb,waitingFor:mq,working:pq}=iBe,sBe,aBe;if(av[10]!==pq)sBe=()=>{Xtt(pq)},aBe=[pq],av[10]=pq,av[11]=sBe,av[12]=aBe;else sBe=av[11],aBe=av[12];k(sBe,aBe);l
+- #5 @202588956 hb,av[15]=uBe,av[16]=cBe;else uBe=av[15],cBe=av[16];k(uBe,cBe);let dBe,mBe;if(av[17]!==oD||av[18]!==dq||av[19]!==mq)dBe=()=>{tMe({status:oD,waitingFor:mq},dq).catch(WBe)},mBe=[oD,mq,dq],av[17]=oD,av[18]=dq,av[19]=mq,av[20]=dBe,av[21]=mBe;else dBe=av[20],mBe=av[21];k(dBe,mBe),uq(yMt,oD,SMt);
+- #6 @207448570 tedAt),sessionId:e?.sessionId??t.state.sessionId,...m&&{name:m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||l.has(t.pid))continue;if(t.kind==="bg"&&t.jobId)continue;i
+- #7 @207449031 .startedAt,...t.sessionId&&{sessionId:t.sessionId},...e&&{name:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),b("cli_agents_json")}function p(i){return i==="idle"?"idle"
+
+## 248 waitingFor=  hits=1
+- #0 @181016953 eSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint==="string"?o.ent
+
+## 248 lastMessage=  hits=1
+- #0 @218205848 function(){return this.actors[this.actors.length-1]},"lastActor"),lastLoop:o(function(){return this.loops[this.loops.length-1]},"lastLoop"),lastMessage:o(function(){return this.messages[this.messages.length-1]},"lastMessage"),lastNote:o(function(){return this.notes[this.notes.length-1]},"las
+
+## 248 updateSessionActivity  hits=6
+- #0 @100810408 .@..updateSessionCount......l.Q.setSpawnModeDisplay.
+...#8..addSession.......7..updateSessionActivity...........setSessionTitle........removeSession.......V* .refreshDisplay..>....
+- #1 @101862652 eapKeysOfReapedRecordregisterSessionsessionRegistryStatestouchFleetViewHeartbeatupdateSessionActivityupdateSessionBridgeIdupdateSessionMessagingSocketPathupdateSessionNameupdateSess
+- #2 @205338529 deDisplay(g){if(ee===g)return;if(ee=g,g)R=g},addSession(g,N){We.set(g,{url:N})},updateSessionActivity(g,N){let oe=We.get(g);if(!oe)return;oe.activity=N},setSessionTitle(g,N){let oe=
+- #3 @205345494 .maxSessions,e.spawnMode);for(let[re,ke]of R){let Ne=ke.currentActivity;if(Ne)i.updateSessionActivity(pe.get(re)??re,Ne)}if(R.size===0){if(!Ze)Ze=!0,i.updateIdleStatus();return}Ze=!
+- #4 @205398548 ched ${r}`),updateIdleStatus:t,updateReconnectingStatus:t,updateSessionStatus:t,updateSessionActivity:t,updateSessionCount:t,updateFailedStatus:t,setSpawnModeDisplay:t,setRepoInfo:t
+- #5 @206139465 isterSession,jur as sessionRegistryStates,kmn as touchFleetViewHeartbeat,tMe as updateSessionActivity,Tgt as updateSessionBridgeId,D_r as updateSessionMessagingSocketPath,AO as upda
+
+## 248 waitingFor hook  hits=1
+- #0 @207448570 :m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||
+
+## 248 waitingFor t.  hits=2
+- #0 @181016933 void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statu
+- #1 @207449031 me:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),
+
+- "hookName+\" hook error\"" 248=0 247=0
+- "hook error: ${" 248=11 247=11
+## hook error: ${  hits=11
+- #0 @186219598 ut",{hookEvent:c(r),timeoutMs:Fe,durationMs:xe})}return{hook:e,outcome:"cancelled",timedOut:Te}}throw Ie}}catch(L){let N=l(L);return n(`Hooks: Prompt hook error: ${N}`),Nx(e,{hookName:t,toolUseID:C,hookEvent:r,stderr:`Error executing prompt hook: ${N}`,stdout:""})}}var iwt=0.5;function eNn(e){for(let t=e.length-1
+- #1 @186228022 tch(xe){if(we.removeEventListener("abort",Ie),Pe(),Te.aborted)return{hook:e,outcome:"cancelled"};throw xe}}catch(j){let G=l(j);return n(`Hooks: Agent hook error: ${G}`),s("tengu_agent_stop_hook_error",{durationMs:Date.now()-N,errorType:2,hookEvent:c(r),agentName:U}),Nx(e,{hookName:t,toolUseID:E,hookEvent:r,stderr
+- #2 @186232836 k:N.status>=200&&N.status<300,statusCode:N.status,body:U}}catch(C){if(E(),k.aborted)return{ok:!1,body:"",aborted:!0};let M=l(C);return n(`Hooks: HTTP hook error: ${M}`,{level:"error"}),{ok:!1,body:"",error:M}}}function TNn(e,t){let r=(u)=>{let p=t;for(let g of u.split(".")){if(p==null||typeof p!=="object")return;
+- #3 @186234599 G||"MCP tool returned an error"};return{ok:!0,body:G}}catch(N){if(L(),M.aborted)return{ok:!1,body:"",aborted:!0};let U=l(N);return n(`Hooks: mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);f
+- … +7 more
+
+- "`${e.hookName} hook error" 248=0 247=0
+- "`${t.hookName} hook error" 248=0 247=0
+- "hookName} hook error: ${" 248=0 247=0
+- "validationError}" 248=7 247=7
+## validationError}  hits=7
+- #0 @181404232 load-failed":return`Marketplace ${e.marketplace} failed to load: ${e.reason}`;case"mcp-config-invalid":return`MCP server ${e.serverName} invalid: ${e.validationError}`;case"hook-load-failed":return`Hook load failed: ${e.reason}`;case"component-load-failed":return`${e.component} load failed from ${e.path}: ${e.reaso
+- #1 @181404651 ract-failed":return`Failed to extract MCPB ${e.mcpbPath}: ${e.reason}`;case"mcpb-invalid-manifest":return`MCPB manifest invalid at ${e.mcpbPath}: ${e.validationError}`;case"lsp-config-invalid":return`Plugin "${e.plugin}" has invalid LSP server config for "${e.serverName}": ${e.validationError}`;case"lsp-server-star
+- #2 @181404779 at ${e.mcpbPath}: ${e.validationError}`;case"lsp-config-invalid":return`Plugin "${e.plugin}" has invalid LSP server config for "${e.serverName}": ${e.validationError}`;case"lsp-server-start-failed":return`Plugin "${e.plugin}" failed to start LSP server "${e.serverName}": ${e.reason}`;case"lsp-server-crashed":if(e.s
+- #3 @186254655 ut does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a
+- … +3 more
+
+- "validationError," 248=0 247=0
+- "stderr: `JSON validation failed" 248=0 247=0
+## Swt 248=2 247=1
+## 248-Swt @186235528
+len=1134 sha=7cd25b6ba6d5958a
+function Swt(e,t){let r=Dz(e)?e.hookSpecificOutput:void 0,o=t.issues.map((k)=>bwt(k,[])),u=o[0],p=u?`${_wt(u.path)}: ${u.message}`:"unknown error";if(Dz(r)&&!("hookEventName"in r))p='hookSpecificOutput is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision==="ask"))p+=e.decision==="ask"?' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)':` (top-level decision is the legacy approve|block field; for "${e.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.decision}"} in a PermissionRequest hook)`;let g=o.slice(1).map((k)=>`  - ${_wt(k.path)}: ${k.message}`).join(`
+`);return`${Eve}${p}${g?`
+`+g:""}
+
+The hook's output was: ${S(e,null,2)}`}
+
+## 247-Swt @214703876
+len=121 sha=61cf65c80df60c4f
+function Swt(e){if(!e||typeof e!=="object")return!1;let t=e;return QFn.some((n)=>n==="experimental"?Fzo(t[n]):eUn(t[n]))}
+
+## 248 Eve  hits=1
+- #0 @186234668 : mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);function ywt(e){let 
+
+## 247 Eve  hits=1
+- #0 @218251204 ${a.path.join(".")||"(root)"}: ${a.message}`).join(`
+`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}async functi
+
+- UNIQUE? "PermissionRequest decision must be" 248=2 247=0
+## PermissionRequest decision must be  hits=2
+- #0 @96921178 ][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*).........m.^Invalid input: ........expected one of .....(4. .|. .& <...q.(.hookSpecificOutput is missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecis
+- #1 @186235908 t is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision
+
+- UNIQUE? "top-level decision is the legacy" 248=4 247=0
+## top-level decision is the legacy  hits=4
+- #0 @96921290 okSpecificOutput is missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field; for "...p...~.r." 
+- #1 @96921430  "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field; for "...p...~.r." use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."} in a PermissionRequ
+- … +2 more
+
+- UNIQUE? "hookSpecificOutput is missing required field" 248=2 247=2
+## hookSpecificOutput is missing required field  hits=2
+- #0 @96921108 wedUrls.......?.allowedEnvVars..
+....+..[\r\n\x00]..-.....z.\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*).........m.^Invalid input: ........expected one of .....(4. .|. .& <...q.(.hookSpecificOutput is missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|b
+- #1 @186235711 ction Swt(e,t){let r=Dz(e)?e.hookSpecificOutput:void 0,o=t.issues.map((k)=>bwt(k,[])),u=o[0],p=u?`${_wt(u.path)}: ${u.message}`:"unknown error";if(Dz(r)&&!("hookEventName"in r))p='hookSpecificOutput is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision 
+
+## 248 session.waitingFor  hits=0
+
+## 248 .waitingFor ??  hits=1
+- #0 @192120438 i.updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,o
+
+## 248 .waitingFor ??  hits=0

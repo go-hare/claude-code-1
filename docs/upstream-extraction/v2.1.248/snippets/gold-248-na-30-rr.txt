@@ -1,0 +1,6 @@
+# gold-248-na-30-rr  credential leaf (or+ar new)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=183209926
+
+len=155 sha=767a227a812950d5
+function rr(e){return Yn.includes(e)||zn.test(e)||e===ke||e.startsWith(`${Vn}.`)||e.startsWith(`${ke}.`)&&!kt.includes(e.slice(ke.length+1))||or(e)||ar(e)}

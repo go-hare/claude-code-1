@@ -1,0 +1,51 @@
+# gold-248-21-hook-row5
+when=2026-09-20T03:40:30.386Z
+
+## Swt( hits=5
+- #0 @186235537  one of ${E}${k.length>6?" | \u2026":""}`}}function _wt(e){return e.map(String).join(".")||"(root)"}function Dz(e){return typeof e==="object"&&e!==null&&!Array.isArray(e)}function Swt(e,t){let r=Dz(e)?e.hookSpecificOutput:void 0,o=t.issues.map((k)=>bwt(k,[])),u=o[0],p=u?`${_wt(u.path)}: ${u.message}`:"unknown error";if(Dz(r)&&!("hookEventName"in r))p='hookSpecif
+- #1 @186253912 ort:k}}function Owt(e){let t=q(e),r=cz().safeParse(t);if(r.success)return n("Successfully parsed and validated hook JSON output"),b4(t,r.data),{json:r.data};return{validationError:Swt(t,r.error)}}async function Jse(e,t,r,{threshold:o=U3n,storageV5:u}={}){if(e.length<=o)return e;let p=await xz(e,`hook-${t}-${r}`,Wg(),u);if(Cz(p))return s("tengu_hook_output_persis
+- #2 @191284674 +/);for(let w of C){if(/^[A-Za-z_]\w*=/.test(w))continue;if(Jf.has(w))continue;return w}return}function HXe(d,C){return{readFileState:C,bashTools:bwt(d),bashHosts:_wt(d)}}function Swt(d,C){let w=C;if(!w?.signals||!w.signals.cli?.length&&!w.signals.filesRead?.length&&!w.signals.manifestDeps?.length&&!w.signals.hosts?.length&&!w.signals.cwd?.length)return null;let
+- #3 @191328943 in managed settings (extraKnownMarketplaces or strictKnownMarketplaces)`);continue}let W=await ST(j,w).catch(()=>null);if(!W)continue;for(let G of W.plugins){let re=G.relevance,ee=Swt(G.name,re);if(!ee)continue;if(j===Rm&&Xd.some((me)=>me.id===`${G.name}-plugin`))continue;let ie=re?.topic??G.name.split("-").map((me)=>me?me.charAt(0).toUpperCase()+me.slice(1):me)
+- #4 @208888110 ());for(let ne of Oe){if(!bt.has(ne.marketplaceName))continue;if(ne.marketplaceName!==Rm){let xe=Lt[ne.marketplaceName]?.source;if(!xe||!hVe(ne.marketplaceName,xe))continue}let Ae=Swt(ne.entry.name,ne.entry.relevance);if(!Ae)continue;if(pHn(ne.pluginId)>0&&!w?.has(ne.pluginId))continue;let he=await vwt(Ae,De);if(he)At.set(ne.pluginId,he)}}catch(De){n(`Failed to 
+
+## validationError:Swt hits=1
+- #0 @186253896 agent_type:u,effort:k}}function Owt(e){let t=q(e),r=cz().safeParse(t);if(r.success)return n("Successfully parsed and validated hook JSON output"),b4(t,r.data),{json:r.data};return{validationError:Swt(t,r.error)}}async function Jse(e,t,r,{threshold:o=U3n,storageV5:u}={}){if(e.length<=o)return e;let p=await xz(e,`hook-${t}-${r}`,Wg(),u);if(Cz(p))return s("tengu_hook_output_persi
+
+## lastMessage= hits=0
+
+## lastMessage: hits=1
+- #0 @218205848 s.notes.push(e)},"addNote"),lastActor:o(function(){return this.actors[this.actors.length-1]},"lastActor"),lastLoop:o(function(){return this.loops[this.loops.length-1]},"lastLoop"),lastMessage:o(function(){return this.messages[this.messages.length-1]},"lastMessage"),lastNote:o(function(){return this.notes[this.notes.length-1]},"lastNote"),actors:[],boxes:[],loops:[],mess
+
+## hookName," hook error" hits=1
+- #0 @201440634 =A.stderr||z[182]!==A.stdout)F=_P(A.stderr,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookName,z[185]=Y;else Y=z[185];let X;if(z[186]!==$h)X=$h?e(ne,{color:"error",children:$h}):null,z[186]=$h,z[187]=X;else X=z[187];let Te;if(z[188]!==Y||z[189]!==X)Te=r
+
+## 247 hookName hook error hits=1
+- #0 @231500911 ==g.stderr||w[181]!==g.stdout)_=nW(g.stderr,g.stdout),w[180]=g.stderr,w[181]=g.stdout,w[182]=_;else _=w[182];let lw=_;let N;if(w[183]!==g.hookName)N=s(j,{color:"error",children:[g.hookName," hook error"]}),w[183]=g.hookName,w[184]=N;else N=w[184];let D;if(w[185]!==lw)D=lw?o(j,{color:"error",children:lw}):null,w[185]=lw,w[186]=D;else D=w[186];let ee;if(w[187]!==N||w[188]!==D)ee=s(
+
+## 247 hook error children alt hits=1
+- #0 @231500919 rr||w[181]!==g.stdout)_=nW(g.stderr,g.stdout),w[180]=g.stderr,w[181]=g.stdout,w[182]=_;else _=w[182];let lw=_;let N;if(w[183]!==g.hookName)N=s(j,{color:"error",children:[g.hookName," hook error"]}),w[183]=g.hookName,w[184]=N;else N=w[184];let D;if(w[185]!==lw)D=lw?o(j,{color:"error",children:lw}):null,w[185]=lw,w[186]=D;else D=w[186];let ee;if(w[187]!==N||w[188]!==D)ee=s(S
+
+## 248 ," hook error"] hits=1
+- #0 @201440642 r||z[182]!==A.stdout)F=_P(A.stderr,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookName,z[185]=Y;else Y=z[185];let X;if(z[186]!==$h)X=$h?e(ne,{color:"error",children:$h}):null,z[186]=$h,z[187]=X;else X=z[187];let Te;if(z[188]!==Y||z[189]!==X)Te=r(
+
+## _P( hits=1
+- #0 @201440485 [180]=Te;else Te=z[180];return Te}case"hook_non_blocking_error":{if(A.hookEvent==="Stop"||A.hookEvent==="SubagentStop"){return null}let F;if(z[181]!==A.stderr||z[182]!==A.stdout)F=_P(A.stderr,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookNam
+
+## 247 nW( hits=17
+- #0 @84655830 ..RegCreateKeyExW(..): ..OpenProcessToken(ADJUST_PRIVILEGES)..: WIN32_ERROR=0x. ..i...broker IsolatedDesk........E....	......... .. runner.broker...runner job.CreateProcessWithLogonW(..): .> ... ensure the Secondary Logon service (seclogon) is running...CreateProcessWithLogonW(....): logon failure ... the sandbox user's password is wrong or the account is disab
+- #1 @84655925 olatedDesk........E....	......... .. runner.broker...runner job.CreateProcessWithLogonW(..): .> ... ensure the Secondary Logon service (seclogon) is running...CreateProcessWithLogonW(....): logon failure ... the sandbox user's password is wrong or the account is disabled. Re-run `srt-win install` (one UAC prompt) to rotate the credential..$srt-win: spawn_runner
+- #2 @84657993 -win: runner: egress probe ..: BLOCKED (..)
+..srt-win: runner: egress probe ..: UNREACHABLE: .. (kind=.., os=..)
+.GetUserObjectInformationW sizing returned 0GetUserObjectInformationW(UOI_NAME)ProcessIdToSessionId(broker)
+\Sessions\..\BaseNamedObjects. ... broker lacks WRITE_DAC on the session BNO (not the interactive user?).NtOpenDirectoryObject(.&, READ_CONTRO
+- #3 @218860277 "hex").slice(0,32)}.json`}function Mw(e){let t=`${e}-`,n=Ap().filePathMemo;for(let r of n.keys()){if(!r.startsWith(t))continue;if(E4s.test(r.slice(t.length)))n.delete(r)}}function nW(e,t){return wr(e,RZr(t))}async function xZr(e,t){return(await X0(e,t))?.path}async function Pv(e,t){if(!ks())return;try{return(await X0(e,t))?.legToken}catch{return}}async function
+- #4 @218860475 e,RZr(t))}async function xZr(e,t){return(await X0(e,t))?.path}async function Pv(e,t){if(!ks())return;try{return(await X0(e,t))?.legToken}catch{return}}async function X0(e,t){let n=nW(e,t),r=p4s(),o=f4s(),s=`${n}\x00${o}\x00era:${r}`,i=Ap().filePathMemo,a=i.get(s);if(a)return a;let l=(async()=>{let u=await T4s(e,t);if(u===void 0)return;return{path:lve(yY(),aKt(n
+- #5 @218863895 ==void 0)return{kind:"miss",reason:"absent"};let l=cve().safeParse(yu(a,!1));if(!l.success)return se(e,"discovery-cache: corrupt entry, deleting"),i();let c=l.data;if(c.cacheKey!==nW(e,t))return se(e,"discovery-cache: entry keyed for another server, deleting"),i();if(c.consecutiveRefreshFailures>=TZr())return s(),{kind:"miss",reason:"strike-threshold"};let u=CZ
+- #6 @218869299 ){Fre(),await q4s(e,t)}function Fre(){if(!ks())return;let e=Ap();if(e.flushCleanup)return;e.flushCleanup=ca(()=>e.drain(ihr))}async function zZe(e,t,n,r){let o=r.now??Date.now(),s=nW(e,t),i=pve(s);if(!p_(r.identityEpoch))return"superseded";if(r.grantLeg===void 0)return"superseded";if(!qM(t))return"superseded";Fre();let a;try{a=await X0(e,t)}catch{return mY({ver
+- #7 @218870846 et n=cve().safeParse(yu(t,!1));if(!n.success){await OZe(e,zM());return}return n.data}async function HZe(e,t,n,r){if(!p_(r.identityEpoch))return;if(r.grantLeg===void 0)return;let o=nW(e,t),s=pve(o);if(Fre(),!qM(t))return;let i;try{i=await X0(e,t)}catch{mY({verdict:"transient",code:"transient"});return}if(i===void 0)return;if(i.legToken!==r.grantLeg){se(e,"Discov
+
+## for PermissionRequest hits=2
+- #0 @96922304 ntStop".a...R.X.string (optional) - Feedback for the model; the conversation continues so the model can act on it.......noA.for PreToolUse.......9..to allow....p)..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. 
+- #1 @186237167 e"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) -
+
+## 247 for PermissionRequest hits=0

@@ -1,0 +1,874 @@
+# gold-248-na-extract
+bytes248=226708128 bytes247=253204128
+
+## #10 schema-desc needle="Retention ceiling in days for session" hits248=1 hits247=0
+- #0 @179088733 ipt writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are o
+
+## #10 $te needle="$te=[\"cleanupPeriodDays\",\"desktopSessionCleanupPeriodDays\"]" hits248=1 hits247=0
+- #0 @179440935 Jve(t,"remote managed settings");return{settings:r,errors:Jjt(o)}}var lyn="parent managed settings",$te=["cleanupPeriodDays","desktopSessionCleanupPeriodDays"];function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return{settings:null,errors:
+
+## #10 filesRetainedFresh needle="filesRetainedFresh" hits248=13 hits247=12
+- #0 @95984228 
+........json.tmp.......Mm..^[0-9A-Za-z_-]{1,64}$.......:...desktopSessionCleanupPeriodDays.........filesRetainedFresh.......x..filesPastCutoff.!.......T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z......E...T$1:$2:$3.$4Z...N...C.
+- #1 @181785261 nFilesDeleted)},...e.artifactsDeleted!==void 0&&{artifacts_deleted:String(e.artifactsDeleted)},...e.filesRetainedFresh!==void 0&&{files_retained_fresh:String(e.filesRetainedFresh)},...e.filesPastCutoff!==void 0&&{files
+- #2 @181785321 eleted:String(e.artifactsDeleted)},...e.filesRetainedFresh!==void 0&&{files_retained_fresh:String(e.filesRetainedFresh)},...e.filesPastCutoff!==void 0&&{files_past_cutoff:String(e.filesPastCutoff)},...e.errorCount!==vo
+- #3 @191903989 rning"))}function fe(){return xe()||Fh("hipaa")||Fh("zdr")}function av(){return{messages:0,errors:0,filesRetainedFresh:0,filesPastCutoff:0}}function wH(e,t){return{messages:e.messages+t.messages,errors:e.errors+t.error
+- #4 @191904109 ,filesPastCutoff:0}}function wH(e,t){return{messages:e.messages+t.messages,errors:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}func
+- #5 @191904130 unction wH(e,t){return{messages:e.messages+t.messages,errors:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(
+- #6 @191904151 n{messages:e.messages+t.messages,errors:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(e,".").replace(/T(\d{
+- #7 @191905275 t,r,a,o=t,u){let p;try{p=await r.stat(e)}catch(w){if(Q(w))return!1;throw w}if(!(p.mtime<t))return a.filesRetainedFresh++,!1;if(u!==void 0&&await u(e,p))return!1;try{await r.unlink(e)}catch(w){if(Q(w))return!1;if(p.mtim
+- … +5 more
+
+## #10 filesPastCutoff needle="filesPastCutoff" hits248=13 hits247=12
+- #0 @95984256 ^[0-9A-Za-z_-]{1,64}$.......:...desktopSessionCleanupPeriodDays.........filesRetainedFresh.......x..filesPastCutoff.!.......T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z......E...T$1:$2:$3.$4Z...N...C.B.Cannot destructure prop
+- #1 @181785347 eleted)},...e.filesRetainedFresh!==void 0&&{files_retained_fresh:String(e.filesRetainedFresh)},...e.filesPastCutoff!==void 0&&{files_past_cutoff:String(e.filesPastCutoff)},...e.errorCount!==void 0&&{error_count:Stri
+- #2 @181785401 ined_fresh:String(e.filesRetainedFresh)},...e.filesPastCutoff!==void 0&&{files_past_cutoff:String(e.filesPastCutoff)},...e.errorCount!==void 0&&{error_count:String(e.errorCount)}})}var E=!1;function g3n(e){if(E)retu
+- #3 @191904010 ){return xe()||Fh("hipaa")||Fh("zdr")}function av(){return{messages:0,errors:0,filesRetainedFresh:0,filesPastCutoff:0}}function wH(e,t){return{messages:e.messages+t.messages,errors:e.errors+t.errors,filesRetainedFre
+- #4 @191904170 es+t.messages,errors:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(e,".").replace(/T(\d{2})-(\d{2})-(\d{
+- #5 @191904188 rs:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(e,".").replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/,"T$1
+- #6 @191904206 rs,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(e,".").replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/,"T$1:$2:$3.$4Z");retur
+- #7 @191905399 if(u!==void 0&&await u(e,p))return!1;try{await r.unlink(e)}catch(w){if(Q(w))return!1;if(p.mtime<o)a.filesPastCutoff++;throw w}return!0}async function b(e,t){try{await t.rmdir(e)}catch{}}var J=[sZn,M_t];async functio
+- … +5 more
+
+## #10 presenceSources desktop needle="presenceSources:[\"userSettings\",\"flagSettings\"]" hits248=1 hits247=0
+- #0 @191902455 !=="warning").length>0)for(let r of $te){let a=await OMe(r,e,r==="desktopSessionCleanupPeriodDays"?{presenceSources:["userSettings","flagSettings"]}:void 0);if(a==="unknowable")return n(`Skipping cleanup: a settings file could not be read or parse
+
+## #10 Ae @191903586
+len=130 sha=3e20bf3910e15834
+function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}
+
+## #10 xe-after-Ae @191903716
+len=182 sha=98f172dfd19a7e7f
+function xe(){if(be("policySettings")?.cleanupPeriodDays!==void 0)return!0;if(Vgn())return!0;return UW().some((e)=>e.file!==lyn&&($te.some((t)=>t===e.path)||e.severity!=="warning"))}
+
+## #10 Ae-win @191903586
+ta.reason:void 0}catch{return"none"}if(o==="delete")return"release-now";if(o==="archive")return a.stats.mtime<r?"release-now":"grace";return"none"}function Fe(e){return/^[0-9A-Za-z_-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}function xe(){if(be("policySettings")?.cleanupPeriodDays!==void 0)return!0;if(Vgn())return!0;return UW().some((e)=>e.file!==lyn&&($te.some((t)=>t===e.path)||e.severity!=="warning"))}function fe(){return xe()||Fh("hipaa")||Fh("zdr")}function av(){return{messages:0,errors:0,filesRetainedFresh:0,filesPastCutoff:0}}function wH(e,t){return{messages:e.messages+t.messages,errors:e.errors+t.errors,filesRetainedFresh:e.filesRetainedFresh+t.filesRetainedFresh,filesPastCutoff:e.filesPastCutoff+t.filesPastCutoff}}function Cor(e){let t=gt(e,".").replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/,"T$1:$2:$3.$4Z");return new Date(t)}function Rme(e){return kt(e)||mp(e)}async function oe(e,t,r){let a=av();try{let o=await ce().readdir(e);for(let u of o)try{if(Cor(u.name)<t)if(await ce().unlink(f(e,u.name)),r)a.messages++;else a.errors++}catch(p){n(`Failed to clean up file ${u.name} in ${e}: ${p}`,{level:"error"})}}catch(o){if(Q(o));else if(Rme(o))n(`cleanup readdir ${e} failed: ${o.code}`,{level:"error"});else _(o)}return a}async function Ror(){let e=ce(),t=V_();if(t===null)return av();let r=Zue.errors(),a=Zue.baseLogs(),o=await oe(r,t,!1);try{let u;try{u=await e.readdir(a)}catch{return o}let p=u.filter((w)=>w.isDirectory()&&w.name.startsWith("mcp-logs-")).map((w)=>f(a,w.name));for(let w of p)o=wH(o,await oe(w,t,!0)),await b(w,e)}catch(u){if(Q(u));else if(Rme(u))n(`cleanup mcp-logs scan failed: ${u.code}`,{level:"error"});else _(u)}return o}async function F(e,t,r,a,o=t,u){let p;try{p=await r.stat(e)}catch(w){if(Q(w))return!1;throw w}if(!(p.mtime<t))return a.filesRetainedFresh++,!1;if(u!==void 0&&await u(e,p))return!1;try{await r.unlink(e)}catch(w){if(Q(w))return!1;if(p.mtime<o)a.filesPastCutoff++;throw w}return!0}async function b(e,t){try{await t.rmdir(e)}catch{}}var J=[sZn,M_t];async function Me(e,t,r,a){try{for(let d of J)await pe(f(e,d),t,r,a);let o=(await r.readdir(e)).filter((d)=>!J.includes(d.name)),u=null;for(let d of o){let y=f(e,d.name),g=await V(d,y,r)==="directory"?await G(y,r,{requireCompleteWalk:!0}):(await r.lstat(y)).mtimeMs;if(g!==null)u=Math.max(u??-1/0,g)}if(!((u??await de(e,r))<t.getTime()))return;if((await Promise.all(J.map((d)=>r.lstat(f(e,d)).then((y)=>y.isDirectory(),(y)=>{if(Q(y))return!1;throw y})))).includes(!0)){for(let d of o)await r.rm(f(e,d.name),{recursive:!0,force:!0});if(o.length>0)a.messages++;return}await r.rm(e,{recur
+
+## #10 Y8e @179440995
+len=121 sha=1c893ceda4a39af2
+function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return{settings:null,errors:[]};return Jve(t,lyn)}
+
+## #10 desktop source cleanup needle="desktop" hits248=456 hits247=423
+- #0 @82284685 lyepisodeplayinggrowingobviousoverlaypresentactions</ul>
+wrapperalreadycertainrealitystorageanotherdesktopofferedpatternunusualDigitalcapitalWebsitefailureconnectreducedAndroiddecadesregular &amp; animalsre
+- #1 @84172915 and+xmlapplication/vnd.doremir.scorecloud-binary-documentapplication/vnd.llamagraphics.life-balance.desktopapplication/vnd.radisys.msml-dialog-fax-detect+xmlapplication/vnd.3gpp.mcdata-affiliation-command+xm
+- #2 @84188738 d.kde.kwordapplication/vnd.las.las+xmlapplication/x-latexapplication/vnd.llamagraphics.life-balance.desktopapplication/vnd.llamagraphics.life-balance.exchange+xmlapplication/vnd.hhe.lesson-playertext/lessapp
+- #3 @84961926 bject(BasicUIRestrictions)AssignProcessToJobObjectread caller's window-station nameBCryptGenRandom (desktop name suffix).srt-sb-..-. ..i...S-1-5-18..\..UOI_NAME on new desktop.FwpmEngineOpen0 failed: 0x. ..i
+- #4 @84961994 ow-station nameBCryptGenRandom (desktop name suffix).srt-sb-..-. ..i...S-1-5-18..\..UOI_NAME on new desktop.FwpmEngineOpen0 failed: 0x. ..i...FwpmEngineOpen0UpdateProcThreadAttribute(HANDLE_LIST)UpdateProcTh
+- #5 @84973220 +resumed (prev_suspend=..); waiting
+.(srt-win: WaitForSingleObject returned 0x..
+.GetExitCodeProcessdesktop isolation required: runner is on Default ... broker IsolatedDesk creation or WinSta0 grant failedru
+- #6 @84985174 cts, assigns the child to a kill-on-close job with full UI lockdown, places it on a non-interactive desktop, applies process-mitigation policies + an explicit handle whitelist, and waits for it to exit. Prop
+- #7 @92252960 y. ..  .c.o.n.t.i.n.u.e. .f.r.o.m. .y.o.u.r. .p.h.o.n.e. .a.n.y.t.i.m.e...........i.mobile........M.desktop.	....r..provision...........clone...........setup_script....W...start_cc....C.%.CLAUDE_CODE_MESSAGI
+- … +448 more
+
+## #10 cowork cleanup needle="cowork" hits248=193 hits247=195
+- #0 @93022711 you typed last time..5....vm.. Type a level like `/code-review high` to change it...........remote_cowork...
+... ;..daemon-log......W.[.#.#. .D.a.e.m.o.n.
+.
+.N.o. .d.a.e.m.o.n. .l.o.c.k. .o.r. .s.t.a.t.u.s
+- #1 @93398524 .....l..read_truncation_notice.......%_.bash_output_audience_note...........dir_sync_notice.....S...cowork_memory_context...........team_context...!P!.todo_reminder.........|.context_efficiency........L.de
+- #2 @94772192  not be read, so the device identity is not carried across the wipe......r..readAsyncStrict.....uW4.coworkRemoteDevice..G...	...Cannot destructure property 'refreshToken' from null or undefined value.....I)
+- #3 @95038004 .<..&  .[.t.r.u.n.c.a.t.e.d. ..  ......=... bytes total].......%]M.(unserializable payload)....c.A.cowork_no_surface...
+..."\..no_surface.......1j.not an artifact URL: .........1.invalid_url.A....2..Cannot
+- #4 @96094912 ched device id: (...E...file:///B:/%7EBUN/root/chunk-gdwp3mdn.js1...C
+../api/organizations/:orgUUID/cowork/remote_devices..."...LU..cowork_remote_device_limit_reached........|.account_session_invalid.......
+- #5 @96094944 B:/%7EBUN/root/chunk-gdwp3mdn.js1...C
+../api/organizations/:orgUUID/cowork/remote_devices..."...LU..cowork_remote_device_limit_reached........|.account_session_invalid.........pkcs8...
+.......prime256v1....
+- #6 @96250796 d_code_integration......C...unverifiable_deletion_scope......R..unverifiable_deletion_target......9.cowork_delete_grant.....H./.cowork_folder_access.....?..cowork_run_routine_now........k.cowork_scheduled_t
+- #7 @96250824 unverifiable_deletion_scope......R..unverifiable_deletion_target......9.cowork_delete_grant.....H./.cowork_folder_access.....?..cowork_run_routine_now........k.cowork_scheduled_task_delete....+)..cowork_sch
+- … +185 more
+
+## #10 cleanupPeriodDays needle="cleanupPeriodDays" hits248=25 hits247=23
+- #0 @92254012 workflowKeywordTriggerEnabled...........respondToBashCommands...........autoCompactWindow........+..cleanupPeriodDays...........forceLoginMethod.....0..keybindingFlavor.....[..^(?:session|cse)_[A-Za-z0-9_]+$......=...
+- #1 @93556130 id_key_set.....($.Transcript retention cleanup is paused until the settings errors above are fixed (cleanupPeriodDays cannot be determined reliably)..%...NL..No write permissions for auto-updates.......r...hasUpdatePe
+- #2 @95985071 tention cleanup: userSettings source is disabled (--setting-sources) and no enabled source provides cleanupPeriodDays........&.A.user_source_disabledB...<...Skipping cleanup: a settings file could not be read or parse
+- #3 @98919520  stdout. The script should output only the API key. Example: "/bin/generate_temp_api_key.sh"......[.cleanupPeriodDays must be at least 1. To keep transcripts for a long time, set a large number (e.g. 3650 for ~10 year
+- #4 @179088395 hows a single soft nudge per session while inside the configured local-time window. Never blocks."),cleanupPeriodDays:A().int().positive().optional().describe("Number of days to retain chat transcripts before automati
+- #5 @179088895 ast written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays sweep. 0 (the default) means no ceiling: such transcripts are kept until deleted another way. Unlik
+- #6 @179089014 weep. 0 (the default) means no ceiling: such transcripts are kept until deleted another way. Unlike cleanupPeriodDays, 0 is allowed because this setting never disables writes \u2014 it only bounds an exemption from de
+- #7 @179089295 ive grace, so the grace window of a release marker never keeps files past the ceiling. Ignored when cleanupPeriodDays is managed by org policy. A ceiling at or below cleanupPeriodDays effectively disables the exemptio
+- … +17 more
+
+## #30 sr-tfvars needle="/^(.*)\\.tfvars(?:\\.json)?$/" hits248=1 hits247=0
+- #0 @183210206 =gt||e.startsWith(`${gt}.`)}function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}var sr=/^(.*)\.tfvars(?:\.json)?$/;function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}function St(e){return kt.includes(e.
+
+## #30 ar-fn needle="function ar(e){let t=sr.exec(e)" hits248=1 hits247=0
+- #0 @183210234 function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}var sr=/^(.*)\.tfvars(?:\.json)?$/;function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}function St(e){return kt.includes(e.split(".").at(-1)??"")}function 
+
+## #30 ar @183210234
+len=63 sha=a525019b7323fc5f
+function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}
+
+## #30 ar-win @183210234
+ery((u,o)=>e[d+o]?.includes(u)===!0))}function tr(e,{leadingDot:t=!0}={}){let r=t?[ht,yt,nr]:[ht,yt],d=(u,o)=>{if(o.length===0||u.size>bt)return u;let g=se(o.flatMap((k)=>r.map((p)=>p(k)))).filter((k)=>!u.has(k));return d(new Set([...u,...g]),g)};return[...d(new Set([e]),[e])]}function ht(e){let t=Xn.exec(e);return t===null||t.index===0?e:e.slice(0,t.index)}function yt(e){return e.length>2&&e.startsWith("#")&&e.endsWith("#")?e.slice(1,-1):e}function nr(e){return e.replace(/^\.(?=.)/,"")}function rr(e){return Yn.includes(e)||zn.test(e)||e===ke||e.startsWith(`${Vn}.`)||e.startsWith(`${ke}.`)&&!kt.includes(e.slice(ke.length+1))||or(e)||ar(e)}function ir(e){return e===gt||e.startsWith(`${gt}.`)}function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}var sr=/^(.*)\.tfvars(?:\.json)?$/;function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}function St(e){return kt.includes(e.split(".").at(-1)??"")}function Bz(e){return e.normalize("NFC").toLowerCase().normalize("NFC")}var lr=/[\u017f\u212a\ufb00-\ufb06]/,cr=/[\u0131\u017f]/,dr=/[\u0131\u017f\u212a\u00df\u1e9e\ufb00-\ufb06]/;function ur(){switch(B()){case"windows":case"wsl":return cr;case"macos":return dr;default:return null}}function Opt(e){return ur()?.test(e)??!1}var fr=/^\/mnt\/[a-z](?:\/|$)/i,pr=/^\/mnt(?:\/[a-z])?\/?$/i;function icn(e){return B()==="wsl"&&pr.test(e)}function Lpt(e){switch(B()){case"macos":case"windows":return!0;case"wsl":return e!==void 0&&fr.test(e);default:return!1}}function o_e(e){return lr.test(e)}var wt=/\p{Default_Ignorable_Code_Point}/gu,gr=/^[\x00-\x7f]*$/;function M5(e){return e.replace(wt,"").normalize("NFKD").toLowerCase().toUpperCase().toLowerCase().replace(/i\u0307/g,"i").replace(/\u03c2/g,"\u03C3").normalize("NFC")}function jz(e){return gr.test(e)?e:e.replace(wt,"").normalize("NFKC")}function mr(e,t){if(t(e))return!0;let r=M5(e);return r!==e&&t(r)}function b9(e){return mr(e,dI)}function Ct(e){return e?.aborted===!0}function Npt(e){return new Promise((t)=>{if(e===void 0)
+
+## #30 St needle="function St(e)" hits248=14 hits247=14
+- #0 @178932708 es.clear()}}function j(e){return!Array.isArray?Te(e)==="[object Array]":Array.isArray(e)}var _t=1/0;function St(e){if(typeof e=="string")return e;let t=e+"";return t=="0"&&1/e==-_t?"-0":t}function kt(e){return e==n
+- #1 @179422707 we(e):LS(),r=m2(t,{unrepresentable:"any"});return zyt(r,!1),S(r,null,2)}var eo=/^@internal(?:\b|$)/;function St(e){return typeof e==="string"&&eo.test(e)}function zyt(e,t){if(Array.isArray(e)){for(let i of e)zyt(i,
+- #2 @179514787 rray.isArray(e))return!0;if(e===null||typeof e!=="object")return!1;return Object.values(e).some(Pt)}function St(e){try{ra().changed.emit(e)}catch(t){for(let r of t instanceof AggregateError?t.errors:[t])_(r)}}async
+- #3 @183210297 )}var sr=/^(.*)\.tfvars(?:\.json)?$/;function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}function St(e){return kt.includes(e.split(".").at(-1)??"")}function Bz(e){return e.normalize("NFC").toLowerCase().
+- #4 @192390775 e)&&e<=Tt&&e>=vt}function wt(e){return Number.isInteger(e)}function je(){return!0}var Mt=/[^\\]\\Z/;function St(e){if(Mt.test(e))return!1;try{return new RegExp(e),!0}catch(t){return!1}}});var Je=d(function(Ve){Obje
+- #5 @194425868 new Set(o.flatMap((s)=>s===null?[]:[...s]))}var Pt=/^refs\/claude(?:\/(?!\.)[A-Za-z0-9._-]+)+\/\*$/;function St(e){return Pt.test(e)&&!e.includes("..")}var Be=1024,ve=20000;async function Se(e,t,r,i={}){let o=se(t)
+- #6 @194524187 if(s!==null)o(s)}for(let{reason:d}of t)o(d);for(let d of r.values())o(St(d)??"unreadable");return a}function St(e){if(wt.has(e))return"credential_name";if(kt.has(e))return"read_denied";if(Et.has(e)||e==="hard_link"
+- #7 @197032632 (let t of Be(e)){let r=xt(me(t));if(St(r))return!0;let o=Tt(t);if(o!==null&&St(o))return!0}return!1}function St(e){if(e===".git"||e.startsWith(".git/"))return!0;return/^git~\d+($|\/)/.test(e)}function ze(e){if(!e.i
+- … +6 more
+
+## #30 env-style needle=".env" hits248=2081 hits247=2144
+- #0 @12324979 |...u.L....A.o.f....A.oX.f...f...f.8..u.A..H........@I..A.......I.p.H....!...I.x.H..H...I.elopmentI..env.dev1.fI.n.fI.n.f.l.f.o..<...f..........H...H9.t`H.|...u.L....A.o.f....A.oX.f...f...f.8..u.A..H....
+- #1 @12325133 H.|...u.L....A.o.f....A.oX.f...f...f.8..u.A..H........@I..E1.M.......f..........H...4..M..L..D..1.I..env.loc..f........H...H9.tYH.|..
+u.L...M..M1.E..R.I..al..M	.u.A..H........@I..A..M...Y...f..........H..
+- #2 @12325262 .|..
+u.L...M..M1.E..R.I..al..M	.u.A..H........@I..A..M...Y...f..........H...4..M..L..D......4...1.H..env.proI.oduction..f...........@.H...H9...v...H.|...u.L...M..I1.M.R.M1.M	.u.H........@H..A...'...I.p.H.
+- #3 @12325386 ........@.H...H9...v...H.|...u.L...M..I1.M.R.M1.M	.u.H........@H..A...'...I.p.H........I.x.H..H...I..env.tes1.H.st.local.	H...H9.tNH.|...u.L...M..M1.M.@.I1.M	.u.H........@I..A..M...a...f..........H..'3..M
+- #4 @12325578 ....H..'3..M..L..1.....D..H...H9.......H.|..	u.H...L..M1...R.H..tL	.u.H........@H..A...YH.elopmentH..env.devE1...f........I...L9.tJJ.|...u.N...M.Z.I1.M..I1.M	.u.H........@H..A..M.......f...u\.H..k2..M..H.
+- #5 @12325719 ..M.Z.I1.M..I1.M	.u.H........@H..A..M.......f...u\.H..k2..M..H..H...1.....D..H...H9.t4H.|...u.H....:.envu.H........@A...Q...f...u..H...2..f...H.. [_^A\A^A_].UAWAVATVWSH..@H.l$@L..M..H..H..H.E.....H.M....,
+- #6 @66704021 tion(stream) {
+        let color = this[kColorMode];
+        if (color === "auto")
+          if (Bun.env.FORCE_COLOR !== @undefined)
+            color = Bun.enableANSIColors;
+          else
+            co
+- #7 @66706708 {args[0]}`}`, this.warn.@apply(this, args);
+    },
+    clear() {
+      if (this._stdout.isTTY && Bun.env.TERM !== "dumb")
+        this._stdout.write("\x1B[2J\x1B[3J\x1B[H");
+    },
+    count(label = "defa
+- … +2073 more
+
+## #30 swap-suffix needle=".swp" hits248=5 hits247=5
+- #0 @82852522 o create node_modules in global dir due to error ...failed to read "{s}" for linking: {s}CHANGELOG.*.swp._*.DS_Store.hg.npmrc.lock-wscript.svn.wafpickle-*CVSnpm-debug.log.env.productionfailed to open dire
+- #1 @92249380 E68\uFF0E\uFF0F\uFF1A\uFF3C\uFF61\u3002]|(?!\u0020)\p{Zs}.......U.h.^\p{M}........O.dirname.....@.a..swp......`..tmp	...	iV.claude_md...........rule.....QD.output_style	...[.9.normalize.......tC9.destinat
+- #2 @183179142 es("..")}function wA(e){for(let t of e.split(we))if(t.startsWith(".")||t.endsWith("~")||t.endsWith(".swp")||t.endsWith(".tmp"))return!0;return!1}var Mpt="synced_file_limit_exceeded",I5e="synced_file_lane_
+- #3 @183193640 nction Oe(e,t){return t.split(e.path.sep).some((r)=>r.startsWith(".")||r.endsWith("~")||r.endsWith(".swp")||r.endsWith(".tmp"))}function gn(e,t,r){let{isAbsolute:d,normalize:u,relative:o}=e.path;if(!d(t))
+- #4 @200735661 .startsWith(".")&&!Gw(n)&&!n.includes("\\")&&!M.test(n)&&!A.test(n)&&!n.endsWith("~")&&!n.endsWith(".swp")&&!n.endsWith(".tmp")}function l(n){return n.length>c.length&&n.endsWith(c)}function M3t(n){return
+
+## #30 swo-suffix needle=".swo" hits248=0 hits247=0
+
+## #30 tmp-suffix needle=".tmp" hits248=147 hits247=142
+- #0 @82538245 t/stderr.................................k@......j@....{
+  "version": 1,
+  "files": {}
+}
+
+  }
+}
+.....tmp.Failed to write --timings file {}
+{}..
+    ..: ..files.error: --timings file .C must look like { "v
+- #1 @82549928 2m|.[0m % Lines .[2m|.[0m Uncovered Line #s
+failed to write whole buffer....p..D.....................tmp. |
+.[0m.[2m |.[0m
+Failed to save lcov.info fileFailed to create lcov file.[0m.[2m..[0m.[0m.[32m..[0
+- #2 @83758530 kfile: ..1failed to print valid json from binary lockfile: ..node_modules/.bun.....!.D...............tmp-...././node_modules.. ..: .. .. ..: ....: ..,
+.#!/usr/bin/env bun
+bun-npm-manifest-cache-v0.0.7
+no
+- #3 @83819290  exists.Package name is also declared herevalidated above: a dependency group is an object..lockb-...tmp....lock-...tmp..Failed to replace old lockfile with new lockfile on diskfailed to write lockfilefai
+- #4 @83819305  name is also declared herevalidated above: a dependency group is an object..lockb-...tmp....lock-...tmp..Failed to replace old lockfile with new lockfile on diskfailed to write lockfilefailed to create t
+- #5 @83926734 der setting $BUN_INSTALL_CACHE_DIR to a local folder...Failed to read temporary directory path: '{}'.tmp&info: cannot move files from tempdir: .., using fallback..2.[0m.[2minfo.[0m: cannot move files from
+- #6 @89043262 ad.argument(i) || block->variablesAtHead.argument(i)->accessesStack(m_graph).!block->variablesAtTail.tmp(i) || block->variablesAtTail.tmp(i)->accessesStack(m_graph).!block->variablesAtHead.tmp(i) || block
+- #7 @89043295 sAtHead.argument(i)->accessesStack(m_graph).!block->variablesAtTail.tmp(i) || block->variablesAtTail.tmp(i)->accessesStack(m_graph).!block->variablesAtHead.tmp(i) || block->variablesAtHead.tmp(i)->accesse
+- … +139 more
+
+## #30 backup-save needle=".save." hits248=0 hits247=0
+
+## #30 prod.env-dot needle="prod.env" hits248=0 hits247=0
+
+## #30 env.prod needle=".env.prod" hits248=8 hits247=8
+- #0 @82517376 [0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# 
+- #1 @82852592 }" for linking: {s}CHANGELOG.*.swp._*.DS_Store.hg.npmrc.lock-wscript.svn.wafpickle-*CVSnpm-debug.log.env.productionfailed to open directory "{}" for packingfailed to read package.json: "{}".ignore [..:..] ....
+- #2 @83371072 y...H....}...}...}...}......`..."......./.......F...................................production.local.env.production.evelopment.local................nth-last-of-type..................................b..z5...b..
+- #3 @83372166 .........................@.......@...............................@.......@.....env.development.local.env.production.local.env.test.local.env.local.env.development.env.test.env.. error loading .. file..	.[0m.[3
+- #4 @98354344 .env.development.........env.development.local..	...b)E..env.test........<C..env.test.local.....&.-..env.production......'...env.production.local.......j...scrubEnabledLatched......EJ.scrubSandboxAvailableLatc
+- #5 @98354368 .env.development.local..	...b)E..env.test........<C..env.test.local.....&.-..env.production......'...env.production.local.......j...scrubEnabledLatched......EJ.scrubSandboxAvailableLatched.....jG.scrubPathsLat
+- #6 @180911825 r g=[".env",".env.local",".env.development",".env.development.local",".env.test",".env.test.local",".env.production",".env.production.local"],S=["home","root","tmp","var","opt","run","mnt"].map((e)=>`/${e}`),O
+- #7 @180911843 local",".env.development",".env.development.local",".env.test",".env.test.local",".env.production",".env.production.local"],S=["home","root","tmp","var","opt","run","mnt"].map((e)=>`/${e}`),O=".";function D(e)
+
+## #30 SECRET-like needle="secrets?.(?:ya?ml|json|toml)" hits248=0 hits247=0
+
+## #30 ar-247 @-1
+MISS
+
+## #30 sr-tfvars-247 hits=0
+
+## #31 permission prompt needle="permission prompt" hits248=106 hits247=105
+- #0 @92315398 ture property 'permissionPromptTool' from null or undefined value.l.......--permission-prompt-tool (permission prompts reach the host over stdio; an MCP tool cannot answer them here)@.......Cannot destructure property
+- #1 @92391140 eExecution..........suppressesAllPermissionUpdates......6.-.suppressesAlwaysAllowRule...+...!...SDK permission prompt deny+interrupt: tool=.	....... message=........$..ask-path......9.permissionPromptToolName
+.......t
+- #2 @92433129 currentMode' from null or undefined value..
+.......impression......j.o.Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executin
+- #3 @92447273 red automatically..\....;..The sender did not attest its permission mode, and this session bypasses permission prompts.-....gd.Your "crossSessionInbound" setting is "hold"....I.....>.Your organization's managed settin
+- #4 @92452908 	.......yes-exact...	....`..substring...........yes-dont-ask-again-domain.......|.{.inline......l[..permission prompt...
+.......waitingFor..........delegatedActive.....N4.isQueryActive........rD.worker request......!
+- #5 @92812186 nt | Matcher | Purpose |
+|-------|---------|---------|
+| PermissionRequest | Tool name | Run before permission prompt |
+| PreToolUse | Tool name | Run before tool, can block |
+| PostToolUse | Tool name | Run after suc
+- #6 @92976236 ash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts..........Context.....pg1.Description.....f.N.Action.......UZ.Default Key(s).......r..chat:cyclePro
+- #7 @94944857  time. The Chrome extension is connected but the page may be loading, unresponsive, or waiting on a permission prompt in the extension side panel. Try a lighter operation (e.g., "get_page_text" instead of a screenshot
+- … +98 more
+
+## #31 PermissionRequest reconnect needle="PermissionRequest" hits248=151 hits247=133
+- #0 @92388842 ushSessionState...........prependUserMessage......+.I.isLocallyPrependedMessage.........e.getPendingPermissionRequests........getPendingUserDialogRequests.....]..retireSdkHostHookCallbacks.......$..republishSurvivingP
+- #1 @92394480 ....1.S.notificationType ....t..write queue drain timeout (exit).....&..scaleBudgetToQueue..........PermissionRequest...+.......Permission denied by PermissionRequest hook.....{V..permissionRequestResult.....^...hookU
+- #2 @92394529  timeout (exit).....&..scaleBudgetToQueue..........PermissionRequest...+.......Permission denied by PermissionRequest hook.....{V..permissionRequestResult.....^...hookUpdatedInput	.......permanent...........userModifi
+- #3 @92410261 ileTracking........seedMemoryFile......%.D.routeInboundFrame.......{...sendMessage......c..respondToPermissionRequest.......F.sendInterrupt.........V.sendErrorResponse...	...].J.setInputs.......p.a.onInputJsonDelta..
+- #4 @92463912 isPromptInputActive.....F...hasBlockingToolProgress......{$.hasLocalJsxPanel!.......hasWorkerSandboxPermissionRequest.......u9..hasElicitationRequest...........hasUltraplanPendingChoice.......xC..hasUltraplanLaunchPen
+- #5 @92517102 ] Unsupported control request subtype: ...%....24.Unsupported control request subtype: ...........onPermissionRequest.	.......onMessage..........not connected...).......the connection is still being established......
+- #6 @92650406 ..postEvent.........z.isRevivable.....@...reviveAfterExhaustion.......q...authHeaders....../..retirePermissionRequest.....#...recordSeenControlResponseId.....}.b.recordSettledForwardedHookId........handleControlReques
+- #7 @92651663 ingPastBudget........connectedSince..........eventSigner.........onLivenessTimeout.......1...pendingPermissionRequests..........undeliveredResponses....vb..undeliveredHookIds......\.:.hookGiveUpsTold.........pendingD
+- … +143 more
+
+## #31 tengu_bridge_reconnected needle="tengu_bridge_reconnected" hits248=2 hits247=2
+- #0 @100815700 ....,... environmentId=.........bridge_loop_started. .......[bridge:poll] Reconnected after ....*9|.tengu_bridge_reconnected#....n..tengu_bridge_heartbeat_mode_entered.........capacity_changed....Bw..poll_due........config_d
+- #1 @205348548 ate.now()-(ue??Oe??Date.now());i.logReconnected(A),n(`[bridge:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1,s("tengu_bridge_env
+
+## #31 replay after reconnect needle="replay" hits248=257 hits247=251
+- #0 @82593999 ss `verbose: true` in the second argument to fetch().Request body is a ReadableStream and cannot be replayed for this redirect/.well-known/appspecific/com.chrome.devtools.json Failed to start server. Is por
+- #1 @83767203 ss/kendo-licensing
+@pulumi/aws-native
+@pulumi/awsx
+@pulumi/command
+@pulumi/kubernetes
+@railway/cli
+@replayio/cypress
+@replayio/playwright
+@roots/bud-framework
+@sap/hana-client
+@sap/hana-performance-tools
+@s
+- #2 @83767221 
+@pulumi/aws-native
+@pulumi/awsx
+@pulumi/command
+@pulumi/kubernetes
+@railway/cli
+@replayio/cypress
+@replayio/playwright
+@roots/bud-framework
+@sap/hana-client
+@sap/hana-performance-tools
+@sap/hana-theme-vsco
+- #3 @84565289 rollbar-corner-webkit-resizerview-transitionhoveractivefocusfocus-visiblefocus-withincurrentpastfutureplayingseekingbufferingstalledmutedvolume-lockedfullscreen-webkit-full-screen-moz-full-screen-ms-fullscr
+- #4 @92225852 CLAUDE_CODE_EXTRA_BODY........w.ANTHROPIC_CUSTOM_HEADERS....O.l.CLAUDE_CODE_HOST_CREDS_FILE.......<.replayInteractiveMarksTo.....?..getPhase.....<t.transitionTo........shutdownWorker........(.noteDowngradeR
+- #5 @92264604 ..j.debugToStderr...........inputFormat.........outputFormat........includePartialMessages..........replayUserMessages........J.settingSources......Rr/.permissionPromptTool...'R+.fallbackModel.......|...ma
+- #6 @92294161 .......pathname........flags.........f.^[^\S\n]*(?:#|\/\/).*$..Q...P...Cannot destructure property 'replayUserMessagesFlag' from null or undefined value......./8>.stream-json.....rK..replayUserMessagesFlag.
+- #7 @92294244 ucture property 'replayUserMessagesFlag' from null or undefined value......./8>.stream-json.....rK..replayUserMessagesFlag..........explicitSocketPath.......t..socketBound........./build-ant/.....J.../build
+- … +249 more
+
+## #31 flushGate needle="flushGate" hits248=0 hits247=0
+
+## #31 connected device needle="connected device" hits248=0 hits247=0
+
+## #31 on the connected needle="on the connected" hits248=0 hits247=0
+
+## #32 readable needle="readable" hits248=1722 hits247=1686
+- #0 @66712899 server);
+      });
+      return;
+    }
+    case "net.Socket": {
+      let socket = new net.Socket({ readable: !0, writable: !0 });
+      socket.connect({ fd, fdIsRawSocket: !0 }), emit(target, serialized.msg,
+- #1 @66724768 chedEof = !1;
+  if (stream.addListener = stream.on = function(event, listener) {
+    if (event === "readable")
+      own();
+    return originalOn.@call(this, event, listener);
+  }, stream.fd = fd, isTTY || fd
+- #2 @66726467 ream.isPaused())
+      return;
+    own(), stream._undestroy(), stream_destroyed = !1;
+  }), stream._readableState.reading = !1, stream.on("pause", () => {
+    process.nextTick(() => {
+      if (!stream.readab
+- #3 @66726569 adableState.reading = !1, stream.on("pause", () => {
+    process.nextTick(() => {
+      if (!stream.readableFlowing)
+        stream._readableState.reading = !1, disown();
+    });
+  }), stream.on("end", () => 
+- #4 @66726602 on("pause", () => {
+    process.nextTick(() => {
+      if (!stream.readableFlowing)
+        stream._readableState.reading = !1, disown();
+    });
+  }), stream.on("end", () => {
+    if (!stream_destroyed)
+    
+- #5 @66727179 ernalField(@internalModuleRegistry, 182) || @createInternalModuleById(182)).WriteStream(fd), stream.readable = !0, process.on("SIGWINCH", () => {
+      stream._refreshSize();
+    }), stream._type = "tty";
+  e
+- #6 @66727456  || @createInternalModuleById(154)).WriteStream(null, { autoClose: !1, fd, @fastPath: !0 }), stream.readable = !1, stream._type = "fs", fdType === 1 /* pipe */ || fdType === 2 /* socket */)
+    stream[Symbol.
+- #7 @66859382 estroyed"), kIsErrored = SymbolFor("nodejs.stream.errored"), kIsReadable = SymbolFor("nodejs.stream.readable"), kIsWritable = SymbolFor("nodejs.stream.writable"), kIsDisturbed = SymbolFor("nodejs.stream.distu
+- … +1714 more
+
+## #32 EAGAIN cred needle="EAGAIN" hits248=50 hits247=48
+- #0 @66884755 n use",
+  EADDRNOTAVAIL: "address not available",
+  EAFNOSUPPORT: "address family not supported",
+  EAGAIN: "resource temporarily unavailable",
+  EAI_ADDRFAMILY: "address family not supported",
+  EAI_AGAIN:
+- #1 @67288801  this[kFs].write(this.fd, data, 0, size, pos, (er, bytesWritten, buffer) => {
+    if (er?.code === "EAGAIN")
+      er = null, bytesWritten = 0;
+    if (this.destroyed || er)
+      return cb(er || @makeError
+- #2 @67289426  this[kFs].writev(this.fd, chunks, this.pos, (er, bytesWritten, buffers) => {
+    if (er?.code === "EAGAIN")
+      er = null, bytesWritten = 0;
+    if (this.destroyed || er)
+      return cb(er || @makeError
+- #3 @67443222 ;
+  #periodicFlushTimer = @undefined;
+  #sync = !1;
+  #fsync = !1;
+  #append = !0;
+  #mode;
+  #retryEAGAIN = () => !0;
+  #mkdir = !1;
+  #writingBuf = "";
+  #write;
+  #flush;
+  #flushSync;
+  #actualWrite;
+  
+- #4 @67443609 Length,
+      maxWrite,
+      periodicFlush,
+      sync,
+      append = !0,
+      mkdir,
+      retryEAGAIN,
+      fsync,
+      contentMode = kContentModeUtf8,
+      mode,
+      fs: overrideFs = {}
+    } = o
+- #5 @67444602 = sync || !1, this.#fsync = fsync || !1, this.#append = append || !1, this.#mode = mode, this.#retryEAGAIN = retryEAGAIN || (() => !0), this.#mkdir = mkdir || !1, validateUint32(this.#hwm, "options.hwm"), v
+- #6 @67444616 this.#fsync = fsync || !1, this.#append = append || !1, this.#mode = mode, this.#retryEAGAIN = retryEAGAIN || (() => !0), this.#mkdir = mkdir || !1, validateUint32(this.#hwm, "options.hwm"), validateUint32(
+- #7 @67445145 pend, "options.append"), validateBoolean(this.#mkdir, "options.mkdir"), validateFunction(this.#retryEAGAIN, "options.retryEAGAIN"), validateOneOf(contentMode, "options.contentMode", [kContentModeBuffer, kCo
+- … +42 more
+
+## #32 ENOENT session needle="ENOENT" hits248=532 hits247=525
+- #0 @7479290 H.E.H..}lw......H......H.E.H..x9`.H.E.H...Zw.H.E.H....H.H.E.H..;kw...........H...l.w.....N.H.. H	.H.ENOENT..H9.uUH......H.............t>...............H..|f..H......H..~.H.H......H..|.y.L...........H......H
+- #1 @66886380 NFILE: "file table overflow",
+  ENOBUFS: "no buffer space available",
+  ENODEV: "no such device",
+  ENOENT: "no such file or directory",
+  ENOMEM: "not enough memory",
+  ENONET: "machine is not on the netwo
+- #2 @66949582 e.filename = path, options?.throwIfNoEntry !== @undefined && !options.throwIfNoEntry && e.code === "ENOENT") {
+        this._handle = new FSEvent(this);
+        return;
+      }
+      throw e;
+    }
+    this
+- #3 @66958177 tat = statFunc(src);
+  try {
+    destStat = statFunc(dest);
+  } catch (err) {
+    if (err.code === "ENOENT")
+      return { srcStat, destStat: null };
+    throw err;
+  }
+  return { srcStat, destStat };
+}
+fu
+- #4 @66958613  try {
+    destStat = statSync(destParent, { bigint: !0 });
+  } catch (err) {
+    if (err.code === "ENOENT")
+      return;
+    throw err;
+  }
+  if (areIdentical(srcStat, destStat))
+    throw fsCpEinvalError
+- #5 @66967373 src),
+    PromisePrototypeThen.@call(statFunc(dest), @undefined, (err) => {
+      if (err.code === "ENOENT")
+        return null;
+      throw err;
+    })
+  ]);
+}
+async function checkParentPaths(src, srcStat
+- #6 @66967771 ry {
+    destStat = await stat(destParent, { bigint: !0 });
+  } catch (err) {
+    if (err.code === "ENOENT")
+      return;
+    throw err;
+  }
+  if (areIdentical(srcStat, destStat))
+    throw fsCpEinvalError
+- #7 @66969330 on pathExistsFulfilled() {
+  return !0;
+}
+function pathExistsRejected(err) {
+  return err.code === "ENOENT" ? !1 : PromiseReject(err);
+}
+function pathExists(dest) {
+  return PromisePrototypeThen.@call(stat(
+- … +524 more
+
+## #32 wait for credentials needle="wait for credentials" hits248=0 hits247=0
+
+## #32 session cred file needle="session.json" hits248=0 hits247=0
+
+## #33 rc-allowUnknown @191608867
+e which model is used").action(w(async(M,H,L)=>{let[{autoModeCritiqueHandler:j},{createSubcommandRoot:N}]=await Promise.all([import("B:/~BUN/root/chunk-qayf38z1.js"),import("B:/~BUN/root/chunk-db3pkd2p.js")]);await j(await N(),L,H),process.exit()}))}u.command("remote-control",{hidden:!0}).alias("rc").description("Control local sessions from claude.ai/code or the Claude mobile app").helpOption(!1).allowUnknownOption().allowExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BUN/root/chunk-2dr7g7p2.js"),re=U(Y(L));if(re.length>0)return gn(N(re));await j(L.args,P,M)})),u.command("doctor").description("Check the health of your Claude Code installation. Reads settings files in the current directory without a trust prompt. For a full checkup that can also fix issues, run /doctor in a session.").action(g(async(P)=>{let{doctorHandler:M}=await import("B:/~BUN/root/chunk-db3pkd2p.js");await M(P)}));let I=u.command("sandbox",{hidden:!0});return I.command("install").description('Install the Windows sandbox user and network filters. Self-elevates (one UAC prompt). Prints a J
+
+## #33 lastFn before allowUnknown name= @-1
+## #33 enterRemoteControl needle="enterRemoteControl" hits248=5 hits247=0
+- #0 @99687449  from null or undefined value..........autoModeCritiqueHandler.M.......Cannot destructure property 'enterRemoteControl' from null or undefined value.......5.N.enterRemoteControl.......aO.rootOptionsRefusedMessage......
+- #1 @99687508 ler.M.......Cannot destructure property 'enterRemoteControl' from null or undefined value.......5.N.enterRemoteControl.......aO.rootOptionsRefusedMessage........iv.rootOptionsRemoteControlRefuses.....H...suppliedRootOp
+- #2 @101797393 E_OWNER_CHANGED_HINTBRIDGE_REATTACH_UNAVAILABLE_HINTREMOTE_CONTROL_DISCONNECTED_MSGWORK_STATE_QUEUEDenterRemoteControlrefuseRemoteControlIneligiblerefuseRemoteControlLocallyrootOptionsRefusedMessagerootOptionsRemoteCon
+- #3 @191608943 le app").helpOption(!1).allowUnknownOption().allowExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import
+- #4 @191866655  Remote Control's own options after the verb (see \`claude remote-control --help\`).`+o}export{R as enterRemoteControl,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C
+
+## #33 remote-control allowUnknown needle="Control local sessions from claude.ai/code" hits248=4 hits247=4
+- #0 @99665348 ....n...Get AI feedback on your custom auto mode rules......<.n.Override which model is usedC...}E..Control local sessions from claude.ai/code or the Claude mobile app.....	...Check the health of your Claude Code installation. Reads settings 
+- #1 @100820386 tructure property 'EXTERNAL_PERMISSION_MODES' from null or undefined values.....	.
+Remote Control - Control local sessions from claude.ai/code or the Claude mobile app
+
+USAGE
+  claude remote-control [options]
+OPTIONS
+  --name <name>          
+- #2 @191608782 j(await N(),L,H),process.exit()}))}u.command("remote-control",{hidden:!0}).alias("rc").description("Control local sessions from claude.ai/code or the Claude mobile app").helpOption(!1).allowUnknownOption().allowExcessArguments(!0).action(w(as
+- #3 @205369335 et{EXTERNAL_PERMISSION_MODES:e}=await import("B:/~BUN/root/chunk-97f1r27s.js"),r=`
+Remote Control - Control local sessions from claude.ai/code or the Claude mobile app
+
+USAGE
+  claude remote-control [options]
+OPTIONS
+  --name <name>          
+
+## #33 rc-allowUnknown-247 @-1
+
+## #39 vscode conversation needle="vscode" hits248=228 hits247=225
+- #0 @7162965 .x...............H9.....................H..h...Hc..H.........f.>vi....................D..N.I.. I	.H.vscode..1.I9.A....
+...I.neovim..M9...A...D...LR......>....,.......V.H.. H	.....I.emacs...L9..............
+- #1 @83767323 playio/playwright
+@roots/bud-framework
+@sap/hana-client
+@sap/hana-performance-tools
+@sap/hana-theme-vscode
+@scarf/scarf
+@sematext/gc-stats
+@sentry/capacitor
+@sentry/profiling-node
+@serialport/bindings
+@seri
+- #2 @83767792 
+@trufflesuite/bigint-buffer
+@typescript-tools/rust-implementation
+@vaadin/vaadin-usage-statistics
+@vscode/ripgrep
+@vscode/sqlite3
+abstract-socket
+admin-lte
+appdynamics
+appium-chromedriver
+appium-windows-dr
+- #3 @83767808 igint-buffer
+@typescript-tools/rust-implementation
+@vaadin/vaadin-usage-statistics
+@vscode/ripgrep
+@vscode/sqlite3
+abstract-socket
+admin-lte
+appdynamics
+appium-chromedriver
+appium-windows-driver
+application
+- #4 @84824171 :
+\fBdefault\fP, \fBnone\fP, \fBfile\fP, \fBgrep+\fP, \fBkitty\fP, \fBmacvim\fP,
+\fBtextmate\fP, \fBvscode\fP, \fBvscode-insiders\fP, \fBvscodium\fP. The
+alias will be replaced with a format string that is 
+- #5 @84824185 P, \fBnone\fP, \fBfile\fP, \fBgrep+\fP, \fBkitty\fP, \fBmacvim\fP,
+\fBtextmate\fP, \fBvscode\fP, \fBvscode-insiders\fP, \fBvscodium\fP. The
+alias will be replaced with a format string that is intended to wo
+- #6 @86423158 /{path}&line={line}&column={column}textmatetxmt://open?url=file://{path}&line={line}&column={column}vscodevscode://file{path}:{line}:{column}vscode-insidersvscode-insiders://file{path}:{line}:{column}vscodi
+- #7 @86423164 }&line={line}&column={column}textmatetxmt://open?url=file://{path}&line={line}&column={column}vscodevscode://file{path}:{line}:{column}vscode-insidersvscode-insiders://file{path}:{line}:{column}vscodiumvsco
+- … +220 more
+
+## #39 VSCode needle="[VSCode]" hits248=16 hits247=16
+- #0 @97327304 ved....+...tengu_vscode_.......R...onFeedbackSurveyEvent.........Q.onAutoDefaultNudgeEvent.7...#...[VSCode] Failed to send experiment_gates notification: .....&lm.terminalEmitted.........flushPendingReceipts
+- #1 @183672697 let g="unreadable error value";try{let k=p?.message;g=typeof k==="string"?k:String(p)}catch{}try{n(`[VSCode] Failed to send experiment_gates notification: ${g}`)}catch{}})}}var xLt=["dangerouslyDisableSandbox
+- #2 @189801668 up the version it was set up with; the native host now launches via the stable `claude` launcher\n- [VSCode] Fixed sessions started before feature flags were first fetched (for example right after install) op
+- #3 @189801869 all) opening in the default permission mode instead of auto mode or your configured default mode\n- [VSCode] Fixed Focus view sections you expanded collapsing on their own during subagent tool activity\n- Imp
+- #4 @189804798 another terminal: it now says sessions on other machines can\'t be seen from, or reach, this one\n- [VSCode] Improved history trimming in long sessions: older tool-activity rows are dropped first so your mess
+- #5 @189804949 : older tool-activity rows are dropped first so your messages and Claude\'s replies stay visible\n- [VSCode] Improved attribution of the extension\'s own usage telemetry to your organization when you are sign
+- #6 @189813628 ssage each other with `SendMessage` and find each other with `ListAgents`, as on macOS and Linux\n- [VSCode] "View usage" in the usage-limit banner now sits inline with the warning text instead of floating mi
+- #7 @189824700 atus) and truncated notices now share a consistent right margin with the rest of the prompt area\n- [VSCode] Added screen reader support for the transcript: live announcements for replies, permission requests
+- … +8 more
+
+## #39 No conversation found when needle="No conversation found when" hits248=0 hits247=0
+
+## #40 $w needle="$w=\"workflow-authoring\"" hits248=1 hits247=0
+- #0 @183512376 "simplify",FGe="commit",UGe="pr",Jin="commit-push-pr",but="cowork-plugin",_ut="loop",JWn="schedule",$w="workflow-authoring";
+export{NGe,hut,PT,gut,KWn,YWn,yut,oP,XWn,q1,$Ge,FGe,UGe,Jin,but,_ut,JWn,$w};
+.// @bun @bytecode
+//
+
+## #40 K$ needle="K$($w," hits248=2 hits247=0
+- #0 @204710295 map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(Ll([...o??[]]),n)!==null){if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_aut
+- #1 @204710334 if(IWe(Ll([...o??[]]),n)!==null){if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_auth
+
+## #40 tengu_workflow_authoring needle="tengu_workflow_authoring_skill_autoload" hits248=2 hits247=0
+- #0 @100624860 r.e.s.h. .t.h.e. .l.i.s.t...(.......file:///B:/%7EBUN/root/chunk-xhhb2t5v.js.... 	k.bundled:'...`...tengu_workflow_authoring_skill_autoload.........workflow_authoring_autoload.(...`...file:///B:/%7EBUN/root/chunk-hf670ewa.js.....Q..^\/\S+.
+- #1 @204710367 if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B
+
+## #40 workflow_authoring_autoload needle="workflow_authoring_autoload" hits248=2 hits247=0
+- #0 @100624908 7EBUN/root/chunk-xhhb2t5v.js.... 	k.bundled:'...`...tengu_workflow_authoring_skill_autoload.........workflow_authoring_autoload.(...`...file:///B:/%7EBUN/root/chunk-hf670ewa.js.....Q..^\/\S+......I.K.unavailable_over_remote_con
+- #1 @204710427 turn[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B:/~BUN/root/chunk-eb9hsjf5.js");return[He({conte
+
+## #40 bundled:workflow needle="bundled:workflow-authoring" hits248=0 hits247=0
+
+## #40 SKILL.md authoring needle="name: workflow-authoring" hits248=0 hits247=0
+
+## #40 You are writing needle="You are writing a workflow" hits248=0 hits247=0
+
+## #40 script primitives needle="agent()/parallel()" hits248=3 hits247=3
+- #0 @101195965 { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase()..i....w..Name of a predefined workflow (built-in or from .claude/workflows/). Re
+- #1 @196770064 le: 'Fix', detail: 'one agent per flaky test' },
+    ],
+  }
+  // script body starts here \u2014 use agent()/parallel()/pipeline()/phase()/log()
+  phase('Scan')
+  const flaky = await agent('grep CI logs for retry marker
+- #2 @196821515 { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase()."),name:i().optional().describe("Name of a predefined workflow (built-in or from
+
+## #40 K$-call @204710295
+l"))?"ultracode":void 0;if(r===void 0||!eJ(i))return[];let l=gTt(),n=l.filter((e)=>e.type==="text").map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(Ll([...o??[]]),n)!==null){if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B:/~BUN/root/chunk-eb9hsjf5.js");return[He({content:d($w),isMeta:!0,turnCompanion:!0}),He({content:l,isMeta:!0,turnCompanion:!0})]}function m(t,o,i){return t.type==="attachment"&&i(t.attachment)&&!o?.some((r)=>r.uuid===t.uuid)}export{T as getWorkflowAuthoringAutoloadMessages};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing an
+
+## #40 autoload-fn @204709919
+len=717 sha=f82d5e8668094904
+async function T(t,o,i){let r=t.some((e)=>m(e,o,(a)=>a.type==="workflow_keyword_request"))?"keyword":t.some((e)=>m(e,o,(a)=>a.type==="ultra_effort_enter"&&a.reminderType==="full"))?"ultracode":void 0;if(r===void 0||!eJ(i))return[];let l=gTt(),n=l.filter((e)=>e.type==="text").map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(Ll([...o??[]]),n)!==null){if(Wq().get(u)?.content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B:/~BUN/root/chunk-eb9hsjf5.js");return[He({content:d($w),isMeta:!0,turnCompanion:!0}),He({content:l,isMeta:!0,turnCompanion:!0})]}
+
+## #41 fetchPrStatus needle="fetchPrStatus" hits248=10 hits247=10
+- #0 @92551904 ~s..preserveOutputOnError.......E...[useBgSessionPr] .......[useBgSessionPr] watch skipped: ....c..fetchPrStatus..........prUrlTemplate.......J...viewSelectionMode.......^...attentionBudget.........voiceWarmingU
+- #1 @92720196 iveRemoteSession....`.E.readLogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........t
+- #2 @92720224 LogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat......
+- #3 @192130470 )),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persistPrStatusCache:
+- #4 @192130501 robeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persistPrStatusCache:(i,d)=>q$n(i,d),touchFleetViewH
+- #5 @192137568 h>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatu
+- #6 @192137669 etchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)]
+- #7 @192137760  this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.ti
+- … +2 more
+
+## #41 prStatusFooter needle="prStatusFooter" hits248=7 hits247=7
+- #0 @92485420 k_..overflow.....T..parens..........copyOnSelect......H.lastPressHadAlt.........toggle-tasks........prStatusFooterEnabled...?....Ot.Cannot destructure property 'link' from null or undefined value.	...<1..underline.
+- #1 @180605994 Response","copyOnSelect","leftArrowOpensAgents","defaultToAgentsView","permissionExplainerEnabled","prStatusFooterEnabled","remoteControlAtStartup","autoUploadSessions","autoAddRemoteControlDaemonWorker","remoteDia
+- #2 @193635825 xt_changed",{enabled:e})}},{id:"prStatus",label:T("Show PR status footer","Show PR status"),value:i.prStatusFooterEnabled??!0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,p
+- #3 @193635891 footer","Show PR status"),value:i.prStatusFooterEnabled??!0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e}))
+- #4 @193635938 rEnabled??!0,type:"boolean",onChange(e){S((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e})),s("tengu_pr_status_footer_setting_changed",{en
+- #5 @193635979 ((o)=>{if(o.prStatusFooterEnabled===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e})),s("tengu_pr_status_footer_setting_changed",{enabled:e})}},{id:"model",label:"Model",val
+- #6 @203037384 eyCase:"lower"}})},"toggle-tasks")]:[]]}function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}function NY(nmo){let w0=g(17),{link:pl}=nmo,MY;if(w0[0]!==pl.prefix)MY=pl.prefix!==void 
+
+## #41 lastFetch needle="lastFetch" hits248=12 hits247=12
+- #0 @92289084 r.e.v.i.e.w. .c.a.r.e.f.u.l.l.y. .b.e.f.o.r.e. .p.r.e.s.s.i.n.g. .E.n.t.e.r.............repo	.......lastFetch.......=i..getTime....'...prefillLength.......H%..CLAUDE_CODE_
+...o{H.ANTHROPIC_......+...sort.....
+- #1 @100141144 repo=...........--deep-link-last-fetch=.....T...--deep-link-cwd-b64=....7r..--prefill-b64=........+.lastFetchMs.8..._r#.Internal error: shell-safe args contain metacharacters: .....zh.^[A-Za-z0-9/._-]+$..	....
+- #2 @191298106 0n(d){let C=[`This session was opened by an external deep link in ${Sg(d.cwd)}`];if(d.repo){let w=d.lastFetch?Dy(d.lastFetch):"never",F=!d.lastFetch||Date.now()-d.lastFetch.getTime()>hg;C.push(`Resolved ${d.re
+- #3 @191298121 his session was opened by an external deep link in ${Sg(d.cwd)}`];if(d.repo){let w=d.lastFetch?Dy(d.lastFetch):"never",F=!d.lastFetch||Date.now()-d.lastFetch.getTime()>hg;C.push(`Resolved ${d.repo} from local 
+- #4 @191298145 y an external deep link in ${Sg(d.cwd)}`];if(d.repo){let w=d.lastFetch?Dy(d.lastFetch):"never",F=!d.lastFetch||Date.now()-d.lastFetch.getTime()>hg;C.push(`Resolved ${d.repo} from local clones \xB7 last fetched
+- #5 @191298169 in ${Sg(d.cwd)}`];if(d.repo){let w=d.lastFetch?Dy(d.lastFetch):"never",F=!d.lastFetch||Date.now()-d.lastFetch.getTime()>hg;C.push(`Resolved ${d.repo} from local clones \xB7 last fetched ${w}${F?" \u2014 CLAUDE
+- #6 @191616290 _repo:Boolean(t.deepLinkRepo)}),n(C0n({cwd:te(),prefillLength:t.prefill?.length,repo:t.deepLinkRepo,lastFetch:t.deepLinkLastFetch!==void 0?new Date(t.deepLinkLastFetch):void 0}),{level:"info"}),t.prefill)UJt({
+- #7 @201127999  (${e.command})`);let s=["--deep-link-origin"];if(t.repo){if(s.push(`--deep-link-repo=${t.repo}`),t.lastFetchMs!==void 0)s.push(`--deep-link-last-fetch=${t.lastFetchMs}`)}if(t.query)s.push(`--prefill=${t.query
+- … +4 more
+
+## #41 gh pr view --json needle="pr view --json" hits248=6 hits247=6
+- #0 @97062839 `: !`git branch --show-current`
+- `git diff ......A.....HEAD`: !`git diff ...)...y......HEAD`
+- `gh pr view --json number`: !`...,....BW.gh pr view --json number 2>/dev/null || true5....$I.gh pr view --json number 
+- #1 @97062879 iff ......A.....HEAD`: !`git diff ...)...y......HEAD`
+- `gh pr view --json number`: !`...,....BW.gh pr view --json number 2>/dev/null || true5....$I.gh pr view --json number 2>$null; if (-not $?) { "" }........U..
+
+- #2 @97062931 `
+- `gh pr view --json number`: !`...,....BW.gh pr view --json number 2>/dev/null || true5....$I.gh pr view --json number 2>$null; if (-not $?) { "" }........U..
+
+## Git Safety Protocol
+
+- NEVER update the git conf
+- #3 @186673260 rent\`: !\`git branch --show-current\`
+- \`git diff ${e}...HEAD\`: !\`git diff ${e}...HEAD\`
+- \`gh pr view --json number\`: !\`${Gi()?"gh pr view --json number 2>/dev/null || true":'gh pr view --json number 2>$nul
+- #4 @186673299 - \`git diff ${e}...HEAD\`: !\`git diff ${e}...HEAD\`
+- \`gh pr view --json number\`: !\`${Gi()?"gh pr view --json number 2>/dev/null || true":'gh pr view --json number 2>$null; if (-not $?) { "" }'}\`${G}
+
+## Git 
+- #5 @186673346 HEAD\`
+- \`gh pr view --json number\`: !\`${Gi()?"gh pr view --json number 2>/dev/null || true":'gh pr view --json number 2>$null; if (-not $?) { "" }'}\`${G}
+
+## Git Safety Protocol
+
+- NEVER update the git config
+
+
+## #41 tengu_pr_status needle="tengu_pr_status" hits248=2 hits247=2
+- #0 @94913228 hanged....../...tengu_editor_mode_changed...%...k.&.tengu_external_editor_context_changed...&....F1.tengu_pr_status_footer_setting_changed........;.config_shorthand_blocked....h.	.n.e.e.d.s. .u.s.a.g.e.-.c.r.e.d.i.t
+- #1 @193636009 led===e)return o;return{...o,prStatusFooterEnabled:e}}),g((o)=>({...o,prStatusFooterEnabled:e})),s("tengu_pr_status_footer_setting_changed",{enabled:e})}},{id:"model",label:"Model",value:U===null?"Default (recommend
+
+## #41 pr_badge needle="pr_badge" hits248=0 hits247=0
+
+## #41 prStatus needle="prStatus" hits248=50 hits247=50
+- #0 @92416124  long.......?W.permission denied...
+.......tokenUsage.......1..vimMode.....q^y.effortValue.........prStatus1....$..\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)........W..cursorOffset...T.).stashedPromp
+- #1 @92485420 k_..overflow.....T..parens..........copyOnSelect......H.lastPressHadAlt.........toggle-tasks........prStatusFooterEnabled...?....Ot.Cannot destructure property 'link' from null or undefined value.	...<1..unde
+- #2 @92720516 remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.
+- #3 @92728225 cture property 'attachingJobId' from null or undefined value...E...,...Cannot destructure property 'prStatuses' from null or undefined value...I.......Cannot destructure property 'toggleCollapse' from null or
+- #4 @96556616 resultsByHost........^..directState.........lastLoggedGhAuthState......{...baseRepoCache......l8Z.prStatusByUrl........ ..ghBackoffUntil......T.d.lastPersistedCacheBody......+...backoffUntil........activity
+- #5 @180605994 Response","copyOnSelect","leftArrowOpensAgents","defaultToAgentsView","permissionExplainerEnabled","prStatusFooterEnabled","remoteControlAtStartup","autoUploadSessions","autoAddRemoteControlDaemonWorker","rem
+- #6 @184546548 Streak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.direc
+- #7 @184547585 hAuthState=null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.of(z().host)}function nst(e
+- … +42 more
+
+## #41 headRefOid needle="headRefOid" hits248=10 hits247=10
+- #0 @95400415 A-Za-z0-9._-]{1,100})\/pull\/(\d{1,10})$.	.......rawTarget...	.......\.\d{3}Z$.........S.number,url,headRefOid...
+....&;.headRefOid..........n.o. .a.r.t.i.f.a.c.t.-.p.r.-.r.e.v.i.e.w. .i.n.v.o.c.a.t.i.o.n. .i.s
+- #1 @95400436 \/pull\/(\d{1,10})$.	.......rawTarget...	.......\.\d{3}Z$.........S.number,url,headRefOid...
+....&;.headRefOid..........n.o. .a.r.t.i.f.a.c.t.-.p.r.-.r.e.v.i.e.w. .i.n.v.o.c.a.t.i.o.n. .i.s. .r.e.c.o.r.d.e.d. .
+- #2 @190846429 ){if(n===null)return null;let{code:o,stdout:a}=await We("gh",["pr","view",...n,"--json","number,url,headRefOid"],{cwd:e});if(o!==0)return null;let s;try{s=q(a)}catch{return null}if(typeof s!=="object"||s===null
+- #3 @190846571 ;let s;try{s=q(a)}catch{return null}if(typeof s!=="object"||s===null)return null;let{number:i,url:u,headRefOid:t}=s;if(typeof u!=="string"||typeof t!=="string")return null;let r=d(u),l=t.toLowerCase();if(r===nu
+- #4 @214456650 selector).
+
+```bash
+gh pr view <target> --json number,title,body,author,url,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,labels,statusCheckRollup,reviewDecision,mergeable
+gh api --paginat
+- #5 @214457019  diff <target>
+gh pr view <target> --comments   # review activity - context for concerns only
+```
+
+`headRefOid` is the head commit SHA this briefing reviews - step 3b embeds
+it as the page's staleness anchor, s
+- #6 @214471673 R URL (`github.com/<owner>/<repo>/pull/<n>`),
+`number` = `<n>` as an integer, `headSha` = step 1's `headRefOid`
+lowercased, `publishedAt` = now in UTC as `YYYY-MM-DDTHH:MM:SSZ`.
+Validate before writing: owner `
+- #7 @214497864 selector).
+
+```bash
+gh pr view <target> --json number,title,body,author,url,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,labels,statusCheckRollup,reviewDecision,mergeable
+gh api --paginat
+- … +2 more
+
+## #41 reviewDecision needle="reviewDecision" hits248=31 hits247=28
+- #0 @96310748 2022-11-28..........fragment pr on PullRequest {
+  number title state isDraft additions deletions
+  reviewDecision
+  commits(last:1){nodes{commit{statusCheckRollup{
+    state
+    contexts(first:0){
+      checkRunCo
+- #1 @96677380 ollup........=..contexts....2...checkRunCountsByState.......BB\.statusContextCountsByState..........reviewDecision......%&..loadPrStatusCache: dropped ......... malformed cache entries,.......\bgit(?:\s+-[cC]\s+\S+
+- #2 @97377171 ...u.GITLAB_ACCESS_TOKEN......~..OAUTH_TOKEN.
+...p./.--hostname......>`..no-token3.......number,url,reviewDecision,isDraft,headRefName,state......a..headRefName.
+.......gh_missing.........token_present........g../
+- #3 @97377633 d..j...w...query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision}}}..	.....L.forOrigin.......!..remote.upstream.url.O....e..number,title,state,isDraft,statusCheckR
+- #4 @97377753 .....L.forOrigin.......!..remote.upstream.url.O....e..number,title,state,isDraft,statusCheckRollup,reviewDecision,additions,deletions.........\/pull\/\d+.	.......rateLimit.......".".persistPrStatusCache: ......2.
+
+- #5 @184546720 irectStateForBranch(e){if(this.directState?.branch!==e)this.directState={branch:e,etag:null,pr:null,reviewDecision:"",lastReviewFetchAt:0,redirectedListUrl:null};return this.directState}logAuthState(e){if(e===this.
+- #6 @184548279 ism",!1)}async function sJt(e){let{stdout:t,code:r}=await Ue("gh",["pr","view","--json","number,url,reviewDecision,isDraft,headRefName,state"],{timeout:mH,preserveOutputOnError:!1});if(r!==0||!t.trim())return null;
+- #7 @184548606 ERGED"||o.state==="CLOSED")return null;return{number:o.number,url:o.url,reviewState:pXe(o.isDraft,o.reviewDecision)}}catch{return null}}var iJt=300000,mXe="2022-11-28",aJt=new Set([301,302,307,308]),lJt=h(()=>w.arr
+- … +23 more
+
+## #41 POLL_INTERVAL needle="60000" hits248=456 hits247=450
+- #0 @68053569 headersTimeout", 0), this.headersTimeout = headersTimeout;
+  else
+    this.headersTimeout = MathMin(60000, this.requestTimeout);
+  if (this.requestTimeout > 0 && this.headersTimeout > 0 && this.headersTime
+- #1 @68779502 ction formatTime(ms) {
+  let hours = 0, minutes = 0, seconds = 0;
+  if (ms >= 1000) {
+    if (ms >= 60000) {
+      if (ms >= 3600000)
+        hours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minut
+- #2 @68779528 et hours = 0, minutes = 0, seconds = 0;
+  if (ms >= 1000) {
+    if (ms >= 60000) {
+      if (ms >= 3600000)
+        hours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minutes = MathFloor(ms / 60000)
+- #3 @68779568   if (ms >= 1000) {
+    if (ms >= 60000) {
+      if (ms >= 3600000)
+        hours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minutes = MathFloor(ms / 60000), ms = ms % 60000;
+    }
+    seconds = m
+- #4 @68779588     if (ms >= 60000) {
+      if (ms >= 3600000)
+        hours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minutes = MathFloor(ms / 60000), ms = ms % 60000;
+    }
+    seconds = ms / 1000;
+  }
+  if (
+- #5 @68779627 3600000)
+        hours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minutes = MathFloor(ms / 60000), ms = ms % 60000;
+    }
+    seconds = ms / 1000;
+  }
+  if (hours !== 0 || minutes !== 0)
+    retur
+- #6 @68779645 ours = MathFloor(ms / 3600000), ms = ms % 3600000;
+      minutes = MathFloor(ms / 60000), ms = ms % 60000;
+    }
+    seconds = ms / 1000;
+  }
+  if (hours !== 0 || minutes !== 0)
+    return { 0: seconds, 1:
+- #7 @69022991 meout = http1Options.keepAliveTimeout ?? 5000, this.headersTimeout = http1Options.headersTimeout ?? 60000, this.requestTimeout = http1Options.requestTimeout ?? 300000, this.maxHeadersCount = http1Options.m
+- … +448 more
+
+## #43 github_not_connected needle="github_not_connected" hits248=4 hits247=0
+- #0 @94751228 areview: linked GitHub account access to ...'...bD..tengu_review_remote_github_access_probe.........github_not_connected........github_repo_not_found........}S./code/onboarding?step=alt-auth..........run /web-setup......
+- #1 @183083831 s?s.data.error.details:void 0;if(e===401&&o?.error_code==="auth_required"&&o.type==="github")return"github_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"incon
+- #2 @193377613 mote_github_access_probe",{verdict:c(L.verdict),http_status:L.httpStatus??void 0})}if(L?.verdict==="github_not_connected"||L?.verdict==="github_repo_not_found"){s("tengu_review_remote_precondition_failed",{reason:c(L.ver
+- #3 @193378148 H=`install the app at ${use}`,oe=x&&Y===0?`${x}, or ${H}`:`${H}${x?`, or ${x}`:""}`,se=L.verdict==="github_not_connected"?`Ultrareview clones ${O} in the cloud with the GitHub account connected to your Claude account, an
+
+## #43 github_no_access needle="github_no_access" hits248=0 hits247=0
+
+## #43 repo_inaccessible needle="repo_inaccessible" hits248=0 hits247=0
+
+## #43 install the app at needle="install the app at" hits248=2 hits247=0
+- #0 @94751436 -setup......NK8. in Claude Code.....\.Z. to reuse your GitHub CLI login.........then re-run .....
+7.install the app at ....../w.Ultrareview clones ......... in the cloud with the GitHub account connected to your Claude
+- #1 @193378051 artsWith("/")?"":" in Claude Code"} to reuse your GitHub CLI login`:"",W=`then re-run ${t} ${m}`,H=`install the app at ${use}`,oe=x&&Y===0?`${x}, or ${H}`:`${H}${x?`, or ${x}`:""}`,se=L.verdict==="github_not_connected"
+
+## #43 none is connected needle="none is connected" hits248=2 hits247=0
+- #0 @94751568 areview clones ......... in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ........., or connect....>.-. an account at .#....... (allow a
+- #1 @193378270 `Ultrareview clones ${O} in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ${x?`${x}, or connect`:"connect"} an account at ${j} \u2014 ${
+
+## #43 github_not_connected-win @94751228
+a.u.t.o.m.a.t.i.c.a.l.l.y. .b.y. .b.u.g.h.u.n.t.e.r... .R.e.-.t.r.i.g.g.e.r. .i.t. .f.r.o.m. .t.h.e. .P.R. .c.h.e.c.k.s. .p.a.g.e.,. .o.r. .r.u.n. ./.b.u.g.h.u.n.t.e.r. .h.e.r.e. .f.o.r. .a. .l.o.c.a.l. .h.u.n.t.............--repo..........--json.. .......additions,deletions,changedFiles-....`n.ultrareview: linked GitHub account access to ...'...bD..tengu_review_remote_github_access_probe.........github_not_connected........github_repo_not_found........}S./code/onboarding?step=alt-auth..........run /web-setup......NK8. in Claude Code.....\.Z. to reuse your GitHub CLI login.........then re-run .....
+7.install the app at ....../w.Ultrareview clones ......... in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ........., or connect....>.-. an account at .#....... (allow a minute after connecting)..(....61.Your connected GitHub account can't see 4....O.. ..  .u.s.u.a.l.l.y. .t.h.e. .C.l.a.u.d.e. .G.i.t.H.u.b. .a.p.p. .i.s.n.'.t. .i.n.s.t.a.l.l.e.d. .o.n. ......P:. or wasn't granted this repo (web-connected accounts need it for private repos), or a different GitHub account is connected. To fix: ...C.....+.Cannot destructure property 'maxFiles' from null or undefined value.....8...pr_diff_too_large........... is too large for ultrareview (.....N... files, ,....@G. lines). Split it into smaller PRs, or run `......>.` on a narrower local diff..........repo_too_large_to_bundle0...G...Repo is too large to bundle. Push a PR and use `....L.O. <PR#>` instead.........origin/.....n.^.https:\/\/\S*\/pull\/\d+\b..
+
+## #46 tengu_kairos_loop_dynamic needle="tengu_kairos_loop_dynamic" hits248=0 hits247=2
+
+## #46 tengu_kairos_loop_prompt needle="tengu_kairos_loop_prompt" hits248=0 hits247=2
+
+## #46 tengu_kairos_loop needle="tengu_kairos_loop" hits248=6 hits247=10
+- #0 @97711184  .c.o.n.t.a.c.t.....(...-.Y.file:///B:/%7EBUN/root/chunk-m46vh510.js....$.K.tengu_loop_ended.....w..tengu_kairos_loop_keepalive.......+.CLAUDE_CODE_LOOP_KEEPALIVE......[.W.viaKeepaliveT...`.>.[.l.o.o.p.]. .k.e.e.p.a.l
+- #1 @101185768  context).......%C..__autonomous_preamble__.....oK[.<<loop.md>>.....H...<<loop.md-dynamic>>.........tengu_kairos_loop_persistent&...$I..tengu_kairos_loop_persistent_activated..H....7h.newly blocked on a decision you w
+- #2 @101185804 amble__.....oK[.<<loop.md>>.....H...<<loop.md-dynamic>>.........tengu_kairos_loop_persistent&...$I..tengu_kairos_loop_persistent_activated..H....7h.newly blocked on a decision you won't make alone, you're ending the l
+- #3 @183306557 &{keepalive:!0}}}function TWn(){let e=a.CLAUDE_CODE_LOOP_KEEPALIVE;if(e!==void 0)return e;return R("tengu_kairos_loop_keepalive",!0)}function AWn(e,o,t){return E(e,o,{viaKeepalive:!1,reason:t})}function xWn(e){if(GGt(
+- #4 @198226149 ePersistent-2y5ccy21.md");var se=g;function m(){if(a.CLAUDE_CODE_LOOP_PERSISTENT)return!0;return R("tengu_kairos_loop_persistent",!1)}function v(){return m()?y:g}function w(){s("tengu_kairos_loop_persistent_activated"
+- #5 @198226227 NT)return!0;return R("tengu_kairos_loop_persistent",!1)}function v(){return m()?y:g}function w(){s("tengu_kairos_loop_persistent_activated",{variant:m()})}function h(e=!1){if(!g9())return"";let o=!e&&m()?"newly blocke
+
+## #46 jKe needle="jKe" hits248=27 hits247=22
+- #0 @80609707 y....E..."k.7......=....a<..r..$...X.%..<.......s....M9...-.....g..GG.P.}l.N..s^G.w..fv../I.S3.3...:jKe...,b:..S......6...s....|b.....&.f..=.$.wf..29;.Y..XlGdf.x..h$...r.....r.z.....`.mmK.....o.........
+- #1 @101716783 c1cC00000967XIFlHuBteqXnebtKXnYXnXXnJXnmLz_tW_tu2$9e$YWotxBWVveu$kXnTXnq8emYeKPIyNSCCo0$KeUKe$k_lBKejKembnVOvJntOeqOhuegEVWcbtvKetqPbt$rQo0c30af20d0d75c1cC00000876ztFPbteuEQgtPOtshaMITbS8exveDk0c30af20d0
+- #2 @104236473 ...QMe....dJn	..vbt....mbnI..hJn...DKeI...Cbt	...MKeI...ubn....	m$.	...fJnI...	o0.....jKe....pJn....	zg.I...NKe	...bwe.....s..	...	pr.....cJnI....t......Ebt....HKe	...lbnI.......	...
+- #3 @104237501 gwe	YW.mJnFKelbnhJngJnkbtUKeTbtywecbnubn	zg.	uf.	Hy.dbn	$k.	_l.AbtyJnfbn	WI.xbtBKejKembnbweCbt.a..Re..Ve..Ze..^e..	Nm.bJnj....C..............	Rb..h.._JnRbt.2..
+...n ...2..vd...#..
+- #4 @104238465 ...UKe....xbt....Cbt....MKe....ibn....ubn....	m$.....fJn....	o0.....hwe....Tbt...._Jn....jKe....pJn....NKe....	zg.....	Iy.....	pr.....Gte....LKe....-...H...	$f......!......$..	...
+........
+- #5 @116071105 ...Sne	...IEnI...	aq.....a0t....	Sp.I...	c2.....FSn....Gkn	...MOe....FTt...._We....Xcn	...jKe....h1e....Pse....Ztn....ZGtI...RYn....	EQ.	...pStI...hlt	...wmt....Vqe...._Xe	...	SM.I...
+- #6 @116159237 RKeLKeNXt	cs.N....2..B#..jXtFKeNKeGXt	d3.UKeBKe	j8.VpeMPtE$n	Uj.	kR.Kxe	FJ.	BF.	IB.	jF.jKeWKe	zF.zKeGKe	X0.Ype	Bj.D$nizeqKeVKeXpe	FB.qXtVH..ZH..^H...2..	$z.	Bw.	jw.	Lz.	zw.	xv.	gy.
+- #7 @116221737 ...ODn....der....IEn....SMt....a0t....Ovn....wSn....R0n....FSn....Gkn....OLn....r6t....jKe....K9e....M8e....Pse....	mH.....OZn....ZGt....d9e....RYn....m7t....pSt....l6t....	Iz.....
+- … +19 more
+
+## #46 qAs needle="qAs" hits248=4 hits247=10
+- #0 @67858326 et requests = this.requests[name];
+    if (requests?.length) {
+      let req2 = requests.shift(), reqAsyncRes = req2[kRequestAsyncResource];
+      if (reqAsyncRes)
+        reqAsyncRes.runInAsyncScope(set
+- #1 @67858379 length) {
+      let req2 = requests.shift(), reqAsyncRes = req2[kRequestAsyncResource];
+      if (reqAsyncRes)
+        reqAsyncRes.runInAsyncScope(setRequestSocket, @undefined, this, req2, socket), req2[
+- #2 @67858400 eq2 = requests.shift(), reqAsyncRes = req2[kRequestAsyncResource];
+      if (reqAsyncRes)
+        reqAsyncRes.runInAsyncScope(setRequestSocket, @undefined, this, req2, socket), req2[kRequestAsyncResource
+- #3 @88961058 
+RLyTPWGrTs0NvvAgJ1gORH8EGoel15YUNpDQSXuhdfsaa3Ox+M6pCSzyU9XDFES4hqX2iys5
+2qMzVNn6chr3IhUciJFrf2blw2qAsCTz34ZFiP0Zf3WHHx+xGwpzJFu5ZeAsVMhg02YXP+HM
+VDNzkQI6pn97djmiH5a2OK61yJN0HZ65tOVgnS9W0eDrXltMEnAMbEQg
+
+## #46 firstParty loop needle="firstParty" hits248=245 hits247=245
+- #0 @92241724 (...=...file:///B:/%7EBUN/root/chunk-k0qn8jjz.js........promise......4'.telemetryInitialized
+...K.E.firstParty........\.gateway.
+...N.;./api/hello......(...HEAD....r..providerCache........._.preconnectFired...
+- #1 @95568183  'isFirstPartyProvider' from null or undefined value.:...*hE.[bridge] Session create skipped on non-firstParty provider..........bridge_session_create...!....)].bridge_session_create_3p_provider...-....Y;.[brid
+- #2 @96554668 tFileDiagnosticsState.......q...consecutiveBaselineTimeouts.....j...workspaceFetchInFlight..........firstPartyPlugins.......(.A.loggableMcpServers..........pendingUsage........exitFlushesInFlight.....OA).flushS
+- #3 @96586097 arketplace.name........mcp_server.name....Dv3.mcp_tool.name...L...F=y.Cannot destructure property 'firstPartyPlugins' from null or undefined valueG...n.K.Cannot destructure property 'pendingUsage' from null or
+- #4 @98195596 url=".......F..., baseURL=".......U.) does not resolve to the public CDN (downloads.claude.ai). Use firstPartyApi for api.anthropic.com (residency-gated) or externalHttp for non-Anthropic hosts......... .plugin
+- #5 @98520172 .....wo.wifMintRetryAt..
+.......finalFlush......T...signalFinalFlush.....Z(.finalFlushSignal.....)..firstPartyEventLogger.......4...firstPartyEventLoggerProvider...........firstPartyEventExporter.....H...lastBa
+- #6 @98520204 finalFlush......T...signalFinalFlush.....Z(.finalFlushSignal.....)..firstPartyEventLogger.......4...firstPartyEventLoggerProvider...........firstPartyEventExporter.....H...lastBatchConfig.......8.retainedStorag
+- #7 @98520244 .Z(.finalFlushSignal.....)..firstPartyEventLogger.......4...firstPartyEventLoggerProvider...........firstPartyEventExporter.....H...lastBatchConfig.......8.retainedStorageV5.......$...preInitQueue.....Do.reinit
+- … +237 more
+
+## #46 247 tengu_kairos_loop_dynamic hits=2
+## #46 247 tengu_kairos_loop_prompt hits=2
+
+## #47 Oht @180153365
+len=110 sha=e61ec892e0459922
+var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}
+
+## #47 Oht-win @180153365
+down(){}}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e){if(this.count++,this.last=e,this.count===1)n(`${xP} ${this.pipeline} export failed (${e}). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures are counted and summarised at shutdown.`)}logSummary(){if(this.count===this.reportedCount)return;this.reportedCount=this.count,n(`${xP} ${this.pipeline} export: ${this.count} failure(s) this session (last: ${this.last})`)}}function QO(e,t){let r=e.export.bind(e),o=e.forceFlush?.bind(e),u=e.shutdown.bind(e);if(e.export=(p,g)=>r(p,(E)=>{if(E.code!==Ic.ExportResultCode.SUCCESS)t.record(E.error?.message??"unknown error");g({code:Ic.ExportResultCode.SUCCESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()};return e.shutdown=async()=>{await u(),t.logSummary()},e}function xc(){return zO(DS())&&be("policySettings")?.forceLoginMethod==="gateway"}function MBt(){return xc()||BO().length>0}function V2(){if(a.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)return!1;return!ar()}function JO(){return a.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!a.CLAUDE_CODE_BYOC_ENABLE_DATADOG}function G2(){return a.CLAUDE_CODE_CUSTOM_OAUTH_URL!==void 0||MBt()}function pg(){return V2()||ei()!==null||S2()||G2()}function NN(){return a.CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL}function UA(){if(NN())return!1;return S2()}var bn=Z(pu(),1);import{createHash as e9,randomUUID as t9}from"crypto";import{appendFile as n9,mkdir as $M,readdir as qM,unlink as XM,writeFile as r9}from"fs/promises";import*as Vo from"path";function K2(){return{seconds:0,nanos:0}}var _o={fromJSON(e){return{seconds:ZO(e.seconds)?globalThis.Number(e.seconds):0,nanos:ZO(e.nanos)?globalThis.Number(e.nanos):0}},toJSON(e){let t={};if(e.seconds!==void 0)t.seconds=Math.round(e.seconds);if(e.nanos!==void 0)t.nanos=Math.round(e.nanos);return t},create(e){return _o.fromPartial(e??{})},fromPartial(e){let t=K2();return t.seconds=e.seconds??0,t.nanos=e.nanos??0,t}};function ZO(e){return e!==null&&e!==void 0}function j2(){return{account_id:0,organization_uuid:"",account_uuid:""}}var en={fromJSON(e){return{account_id:mo(e.account_id)?globalThis.Number(e.account_id):0,organization_uuid:mo(e.organization_uuid)?globalThis.String(e.organization_uuid):"",account_uuid:mo(e.account_uuid)?globalThis.String(e.account_uuid):""}},toJSON(e){let t={};if(e.account_id!==void 0)t.account_id=Math.round(e.account_id);if(e.organization_uuid!==void 0)t.organization_uuid=e.or
+
+## #47 xP needle="var xP=\"[Anthropic telemetry]\"" hits248=1 hits247=0
+- #0 @180153365 ce extends Nc{onShutdown(){}}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e){if(this.co
+
+## #47 logSummary needle="logSummary" hits248=5 hits247=0
+- #0 @98488240 _flushOneBatch.......!.._maybeStartTimer....~c<._clearTimer.........[Anthropic telemetry]...
+.......logSummary..
+.......^[a-z]+-\d......3#..)\.(anthropic\..+)$......q..^[A-Za-z][A-Za-z0-9_]{0,127}$...=.....?.^(
+- #1 @180153704 metry pipeline, not your OTel collector; further failures are counted and summarised at shutdown.`)}logSummary(){if(this.count===this.reportedCount)return;this.reportedCount=this.count,n(`${xP} ${this.pipeline}
+- #2 @180154160 sage??"unknown error");g({code:Ic.ExportResultCode.SUCCESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()};return e.shutdown=async()=>{await u(),t.logSummary()},e}function xc(){return zO(DS())&&be("polic
+- #3 @180154214 CESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()};return e.shutdown=async()=>{await u(),t.logSummary()},e}function xc(){return zO(DS())&&be("policySettings")?.forceLoginMethod==="gateway"}function MBt
+- #4 @205167813 lure("pending_at_shutdown")}async forceFlush(){await Promise.all(this.pendingExports),this.failures.logSummary(),n(`${xP} BigQuery metrics exporter flush complete`)}convertAttributes(e){let t={};if(e){for(let[r
+
+## #47 anthropic. prefix needle=")\\.(anthropic\\..+)$" hits248=1 hits247=1
+- #0 @98488280 ....~c<._clearTimer.........[Anthropic telemetry]...
+.......logSummary..
+.......^[a-z]+-\d......3#..)\.(anthropic\..+)$......q..^[A-Za-z][A-Za-z0-9_]{0,127}$...=.....?.^(session|cse)(_(local|staging))?_01[1-9A-HJ-NP-Za-

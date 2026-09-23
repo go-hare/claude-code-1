@@ -1,0 +1,281 @@
+# gold-248-restricted-unt
+bytes=226708128
+when=2026-09-20T04:58:15.763Z
+
+## function Unt needle="function Unt(" hits=3
+- #0 @185790549 flowTool))(),jwe=()=>{if(!SA())return null;return import.meta.require("B:/~BUN/root/chunk-02chc6x7.js").PowerShellTool};function Unt(){return new Set([...sA().filter((e)=>e.enablesCodeExecution).map((e)=>e.name),Nt])}function xSe(){let e=sA(),t=e.map((r
+- #1 @193541899 x");return`plan_${t}_${n}`}function sv(e){return e.replace(/\\/g,"/").split("/").filter((t)=>t!==""&&t!==".").join("/")}function Unt(e){let t=sv(e).toLowerCase();return t==="claude.md"||t.startsWith("claude.md/")||t===".claude"||t.startsWith(".claude/")
+- #2 @216358318 return jde;case znt:return qde;case Gnt:return Hde;case Vnt:return Ude;case Wnt:return Yde}return t},"getTag"));Vo=Om});function Unt(e){var t=e.length,r=new e.constructor(t);return t&&typeof e[0]=="string"&&Hnt.call(e,"index")&&(r.index=e.index,r.input=
+
+## Unt() needle="Unt()" hits=2
+- #0 @185218825 &&Ze.has(Ht))});if(!N){for(let gn of[Nt,Xo,Yo])if(!Ze.has(gn)&&!sn.includes(gn))sn.push(gn)}G=sn}if(o)G=se([...G,...Nnt(Unt(),Fnt(U))]);let ue=new Map,pe=a.PWD;if(pe&&pe!==ve()&&ybn({originalCwd:ve(),processPwd:pe}))ue.set(pe,{path:pe,source:"se
+- #1 @185790558 )(),jwe=()=>{if(!SA())return null;return import.meta.require("B:/~BUN/root/chunk-02chc6x7.js").PowerShellTool};function Unt(){return new Set([...sA().filter((e)=>e.enablesCodeExecution).map((e)=>e.name),Nt])}function xSe(){let e=sA(),t=e.map((r)
+
+## var Yr= needle="var Yr=" hits=13
+- #0 @178453510 lassic */
+/** @jsx h */
+/** @jsxFrag Fragment */
+`;var mt={".ts":"ts",".tsx":"tsx",".jsx":"jsx",".js":"js",".mjs":"js"};var Yr=Object.keys(mt);var Jr=(e)=>mt[Yr.find((t)=>e.endsWith(t))??""]??"js";function Bi(e,t){let r=Jr(e);return r==="js"?t:new
+- #1 @178511650 =e||Et(o,e,t)}}var Ht=zr;var $r="[object Symbol]";function Xr(e){return typeof e=="symbol"||zC(e)&&L2(e)==$r}var yEe=Xr;var Yr=/\.|\[(?:[^[\]]*|(["'])(?:(?!\1)[^\\]|\\.)*?\1)\]/,Zr=/^\w*$/;function Qr(e,t){if(Wm(e))return!1;var o=typeof e;if(o=="n
+- #2 @180786192 let u=a.join(" || "),h=typeof r.raw==="string"?r.raw:String(r);return u.length<h.length?u:r}});var Zr=d(function(jn,Kr){var Yr=S(),ae=F(),{ANY:le}=ae,_=j(),ue=T(),ci=(e,r,t={})=>{if(e===r)return!0;e=new Yr(e,t),r=new Yr(r,t);let s=!1;e:for(let i o
+- #3 @181196575 bject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Yr="WebFetch",z$t="Fetch",p_e="allow_web_fetch";
+export{Yr,z$t,p_e};
+.// @bun @bytecode
+// Claude Code is a Beta product pe
+- #4 @182153965 es()};return Nt.pem.encode(a,{maxline:t})}});var qa=d(function(Pf,Un){var R=Y();ot();Yt();Rr();Ut();Ua();$e();Zt();ie();var Yr=function(e,t,a,r){var i=R.util.createBuffer(),s=e.length>>1,n=s+(e.length&1),o=e.substr(0,n),f=e.substr(s,n),u=R.util.cr
+- #5 @195236525 eof e.size==="number")return e.size;throw Error(`Body Length computation failed for ${e}`)};sf.calculateBodyLength=rf});var Yr=d(function(If){var At=Rue(),Fi=Xu(),Qe=Iue(),of=u_t(),af=Li(),Pe=pf(),cf=H_(),Bi=$_n(),Tt=0,Nt=1,Re=2,ge=3,Ke=4,wt=5,Vi=
+- #6 @197423874 rn Zl.JWT}});var ed=gr();Object.defineProperty(S,"Impersonated",{enumerable:!0,get:function(){return ed.Impersonated}});var Yr=qe();Object.defineProperty(S,"CodeChallengeMethod",{enumerable:!0,get:function(){return Yr.CodeChallengeMethod}});Object
+- #7 @198426557 (e,t).compare(new Xr(r,t));Vr.exports=vn});var De=d(function(il,Qr){var yn=Y(),Pn=(e,r,t)=>yn(e,r,t)>=0;Qr.exports=Pn});var Yr=d(function(nl,Kr){class Jr{constructor(){this.max=1000,this.map=new Map}get(e){let r=this.map.get(e);if(r===void 0)retur
+- … +5 more
+
+## Yr=" needle="Yr=\"" hits=3
+- #0 @181196579 t to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Yr="WebFetch",z$t="Fetch",p_e="allow_web_fetch";
+export{Yr,z$t,p_e};
+.// @bun @bytecode
+// Claude Code is a Beta product per
+- #1 @197851846 d_client_credential",Gt="token_refresh_required",Go="user_timeout_reached",Kr="token_claims_cnf_required_for_signedjwt",Yr="authorization_code_missing_from_server_response",jo="binding_key_not_removed",Wr="end_session_endpoint_not_supported",Qr
+- #2 @201784716 amountCents:le.cents,currency:ge,onConfirm:()=>Ps(de.cents,le.cents),onBack:ke});break bb0}Vr=pe;Sr="Auto-reload";Kr=Nr;Yr="suggestion";jr=yr;qr=1;Xr=Ms;let ke;if(K[51]!==ze)ke=ze&&e(t,{color:"success",children:" \xB7 Currently on"}),K[51]=ze,K
+
+## var Xe= needle="var Xe=" hits=34
+- #0 @178396785 numerable:!0},event:{value:o,enumerable:!0},origin:{value:n,enumerable:!0}}),Object.freeze(s)}var vs=(e)=>e?.at(-1)??Ir;var Xe={};je(Xe,{default:()=>Xe,hopHandler:()=>Ot,hops:()=>Po,runsOfNeighbours:()=>Rt});var Ot=(e,t)=>({name:t.map((r)=>r.name)
+- #1 @178496487 ssUrl:t.href,isUrl:!0,jsonlFile:null,isJsonlFile:!1}}catch{}return null}function kn(){this.__data__=new GEe,this.size=0}var Xe=kn;function xn(e){var t=this.__data__,o=t.delete(e);return this.size=t.size,o}var Ye=xn;function An(e){return this.__dat
+- #2 @178606282 unknown";if(je.has(e))return"permission";if(Ke.has(e))return"resource";if(Ye.has(e))return"environment";return"unknown"}var Xe=new Set(["InvalidArgument","NotFound","AlreadyExists","PreconditionFailed","LeaseHeld","Unavailable","Failed","ScopeNotF
+- #3 @179418756 ir}var Ye=sr;var Ze=Nne&&Nne.isMap,ar=Ze?jYe(Ze):Ye,qe=ar;var lr="[object Set]";function cr(e){return zC(e)&&lde(e)==lr}var Xe=cr;var Qe=Nne&&Nne.isSet,dr=Qe?jYe(Qe):Xe,et=dr;var ur=1,fr=2,gr=4,tt="[object Arguments]",pr="[object Array]",mr="[obje
+- #4 @179492007 s",message:u,severity:"warning",statusOnly:!0}),M(),n(u,{level:"warn"})}function me(){g.remoteNoticeSubject=null,Qe(Ye)}var Xe="policyHelpers is configured but has no entry for platform ";function Qe(e){let t=g.selectionWarnings.filter((r)=>!r.mes
+- #5 @179907635 bject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Xe="Bash";var Nt="PowerShell";
+export{Xe,Nt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercia
+- #6 @182033351 l]=s[l];Ae.random.createInstance=i,ya.exports=Ae.random})(typeof jQuery<"u"?jQuery:null)})()});var Ca=d(function(Sf,Ki){var Xe=Y();ie();var ga=[217,120,249,196,25,221,181,237,40,233,253,121,74,160,216,157,198,126,55,131,43,118,83,142,98,76,100,136
+- #7 @183114205 typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.resolvedPromptRequestIds.has(r)}var Xe=60000,se=10;function oe(e,t){let r=Qo().attestation;if(r.dropNotifier===void 0&&r.senderDropWriter===void 0)return;if(r.
+- … +26 more
+
+## Xe=" needle="Xe=\"" hits=17
+- #0 @179492011 essage:u,severity:"warning",statusOnly:!0}),M(),n(u,{level:"warn"})}function me(){g.remoteNoticeSubject=null,Qe(Ye)}var Xe="policyHelpers is configured but has no entry for platform ";function Qe(e){let t=g.selectionWarnings.filter((r)=>!r.mess
+- #1 @179907639 t to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Xe="Bash";var Nt="PowerShell";
+export{Xe,Nt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial
+- #2 @184548658 n null;return{number:o.number,url:o.url,reviewState:pXe(o.isDraft,o.reviewDecision)}}catch{return null}}var iJt=300000,mXe="2022-11-28",aJt=new Set([301,302,307,308]),lJt=h(()=>w.array(w.object({number:w.number(),html_url:w.string(),draft:w.boo
+- #3 @184607389 x-organization-uuid"]=t;if(r!==void 0)o["X-Trusted-Device-Token"]=r;return o}import{randomUUID as WXe}from"crypto";var BXe="tengu_review_bughunter_config";function dse(){return R(BXe,null)}function lK(){let e=dse()?.cost_note;return typeof e===
+- #4 @184609456  claude.ai account \u2014 sign in to claude.ai to use it; see https://code.claude.com/docs/en/ultrareview."}}var zXe=6,GXe="claude-code-ultrareview-post",$Zt=61440,UZt=90000;function BZt(){return`You are the posting step of Claude Code's /ultra
+- #5 @187522085 ,connect as Xe}from"net";import{connect as Ge}from"tls";var ge=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"],fXe="SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_COMMAND",mXe="SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_FILE",Ke="claude-self-hosted
+- #6 @187522138 s";var ge=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"],fXe="SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_COMMAND",mXe="SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_FILE",Ke="claude-self-hosted-runner";class V extends Error{constructor(e){super(e
+- #7 @187548626 as|Updating files|Checking out files|Filtering content):\s+(\d+)%(?:\s+\((\d+)\/(\d+)\))?(?:, ([\d.]+) (KiB|MiB|GiB))?/,Xe="Receiving objects",Ze={KiB:1024,MiB:1048576,GiB:1073741824},qe=5000,Je=500,Gxt=600000,Qe=new Set(["worktree"]);function 
+- … +9 more
+
+## var Nt= needle="var Nt=" hits=25
+- #0 @68552022 on(e){return e},f.parseParenArrowList=function(e,t,i,s){return this.parseArrowExpression(this.startNodeAt(e,t),i,!1,s)};var Nt=[];f.parseNew=function(){this.containsEsc&&this.raiseRecoverable(this.start,"Escape sequence in keyword new");var e=this
+- #1 @178403995 :{output:re},Spinner:{message:["a string","null"]},InfoNotice:{command:["a string","null"]}};var Ye="PermissionRequest";var Nt=["surface","component","requestId"];function _t(e,t){let r=Nt.find((o)=>e[o]!==t[o]);return r===void 0?void 0:`a changed
+- #2 @178513096 gi(e,t,o){var r=e==null?void 0:cde(e,t);return r===void 0?o:r}var Gt=gi;function fi(e,t){return e!=null&&t in Object(e)}var Nt=fi;function hi(e,t,o){t=T4(t,e);var r=-1,i=t.length,s=!1;while(++r<i){var a=k2(t[r]);if(!(s=e!=null&&o(e,a)))break;e=e[a
+- #3 @179459209 s).length>0)return[i.settings]}return r}var jt=["apiKeyHelper","awsAuthRefresh","awsCredentialExport","gcpAuthRefresh"];var Nt=[...jt,"otelHeadersHelper","proxyAuthHelper","forceLoginOrgUUID","forceLoginMethod","forceLoginGatewayUrl","parentSettin
+- #4 @179633722 data=Qe.call(e,e.transformResponse,n.response),n.response.headers=C.from(n.response.headers)}return Promise.reject(n)})}var Nt={};["object","boolean","number","function","string","symbol"].forEach((e,t)=>{Nt[e]=function(n){return typeof n===e||"a"
+- #5 @179907649 egal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Xe="Bash";var Nt="PowerShell";
+export{Xe,Nt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Ser
+- #6 @180772052 anceof Oe)return e;try{return new Oe(e,r)}catch(s){if(!t)return null;throw s}};Ae.exports=Lt});var Te=d(function(en,de){var Nt=g(),Ot=(e,r)=>{let t=Nt(e,r);return t?t.version:null};de.exports=Ot});var qe=d(function(rn,Se){var At=g(),dt=(e,r)=>{let
+- #7 @180985068 yteArmedRequestIds.set(e,!0)}function yr(e){if(e===void 0)return!1;return vp().streamFirstByteArmedRequestIds.delete(e)}var Nt="/invoke-with-response-stream";function hr({clientRequestId:e,provider:t,routedProvider:r,method:o,url:u,body:l}){if(!(y
+- … +17 more
+
+## Nt=" needle="Nt=\"" hits=23
+- #0 @179479981 ="CLAUDE_CODE_POLICY_HELPER_PSMODULEPATH",de="CLAUDE_CODE_POLICY_HELPER_PS1_PATH",kt=`$env:PSModulePath = $env:${ue}; `,Nt="if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { [Console]::OutputEncoding = [System.Text.UTF
+- #1 @179907653  Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Xe="Bash";var Nt="PowerShell";
+export{Xe,Nt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Serv
+- #2 @180816807 s f}from"fs/promises";import{join as c,sep as L,dirname as h}from"path";var W=y.O_NOFOLLOW??0,S=8388608,RIe=5368709120,hNt="5GB",cbe=67108864;function d3e(){return Cp()}function IIe(){let t=hg()?.adoptShellOutputRoot;if(t!==void 0)return c(t,V(
+- #3 @180835588 status=${typeof t==="number"?t:"none"}`)}var u="Failed to resolve AWS credentials from the credential provider chain.",ZNt="Failed to acquire Google OAuth credentials.";function uh(e){if(!e||typeof e!=="object")return null;let t=e,r=5,n=0;while
+- #4 @180960063 Ak(t))}var ysn="https://support.claude.com/en/articles/16049681",bsn="https://support.claude.com/en/articles/15363606",aNt="https://support.claude.com/en/articles/8106465";function xn(e){let t=Ye(e);return JGe(t)||l3e(e)||TI(e)||!1}function Dn(
+- #5 @180985072 rmedRequestIds.set(e,!0)}function yr(e){if(e===void 0)return!1;return vp().streamFirstByteArmedRequestIds.delete(e)}var Nt="/invoke-with-response-stream";function hr({clientRequestId:e,provider:t,routedProvider:r,method:o,url:u,body:l}){if(!(yr
+- #6 @183361204 ion||"(no description)")} (task ${zt(i.task_id)})`).join(`
+`)}
+Re-create them if still needed.
+</system-reminder>`}var MNt="Remote Control";function ban(e){return sve(e)?"cloud":MNt}function WGn(e){return AW(e)??"(untitled)"}var M=300000;class 
+- #7 @183526856 artsWith(" ")&&e.endsWith(" ")&&e.trim()!=="";return t(s?e.slice(1,-1):e)})}var i9="Set model to ",SZ="Kept model as ",wNt="Current model: ",ENt="No response from the cloud session \u2014 the switch to ",kNt="Cloud session couldn't switch to ",
+- … +15 more
+
+## var Xo= needle="var Xo=" hits=12
+- #0 @178402426 oid 0:"no { turnId }";var ue={};je(ue,{ENGINE_CREATE:()=>Xo,PROMPT_SECTION:()=>Yo,PROMPT_SUBMIT:()=>Jo,default:()=>ue});var Xo={event:"engine.create"};var Yo={event:"prompt.section",checkArgument:(e,t)=>typeof e.name==="string"?e.name===t.name?e.t
+- #1 @179568683  be booleans");if(_t&&(n||!wu(t,_t)))if(Wo)Wo(t,_t,{configurable:!o,enumerable:!1,value:r,writable:!1});else t[_t]=r}});var Xo=d(function(fl,Ko){var _u=Function.prototype.call,xu=Object.prototype.hasOwnProperty,Au=ge();Ko.exports=Au.call(_u,xu)});
+- #2 @181095652 qn02gme.js";import{Ru}from"B:/~BUN/root/chunk-cv8apf60.js";import{ft}from"B:/~BUN/root/chunk-280yeq4g.js";var Ms="REPL";var Xo="Glob";function qdn(e){if(Ru(e))return'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts
+- #3 @187903674 RETIRE_AT;if(e===void 0||e==="")return 0;let t=Number(e);if(!Number.isSafeInteger(t)||t<Ps||t>Ms)return 0;return t*1000}var Xo=1000,Yo=5000,Os=2000,Vo=$n,qo=S3t+2000,Zo=5000,Jo=1e4,Ds="/workspace",xs=8080,St=10080,vr=604800,Ps=1e9,Ms=100000000000,
+- #4 @192523565 (Math.round(e.w),Math.round(e.h),zrt),[r,i]=et([t,o],n??1);return n!==void 0&&n<1?{w:r,h:i,frameW:t,frameH:o}:{w:r,h:i}}var Xo=new Set(["AXButton","AXTextField","AXTextArea","AXComboBox","AXSearchField","AXLink","AXRadioButton","AXCheckBox","AXPop
+- #5 @195341447 zeKeys:!0,flattenLists:!0,serializeEmptyLists:!1};Object.assign(this.serializer.settings,t)}useNestedResult(){return!1}}var Xo=(e,t)=>Uo(e,t).then((r)=>{if(r.length){let s;try{s=se.parseXML(r)}catch(l){if(l&&typeof l==="object")Object.defineProper
+- #6 @195496761 s("AmazonBedrockFrontendService","ApplyGuardrail",{}).n("BedrockRuntimeClient","ApplyGuardrailCommand").sc(Oo).build(){}var Xo=Z(Sn(),1);class Lbn extends Uk.classBuilder().ep(l).m(function(e,t,o,r){return[Xo.getEndpointPlugin(o,e.getEndpointParam
+- #7 @205600230 r",r):super.emit("end")},s=this[Uo](i);if(s&&s.then)s.then(()=>i(),(r)=>i(r))}}Ko.exports=Yo});var eh=d(function(og,er){var Xo=ee("events"),Du=re(),Be=ee("fs/promises"),{moveFile:Fu}=wi(),{Minipass:Pu}=pt(),Jo=Re(),Mu=Zs(),Qs=ee("path"),tr=se(),Nu
+- … +4 more
+
+## Xo=" needle="Xo=\"" hits=4
+- #0 @178501073 bject Float64Array]",Vo="[object Int8Array]",Jo="[object Int16Array]",zo="[object Int32Array]",$o="[object Uint8Array]",Xo="[object Uint8ClampedArray]",Yo="[object Uint16Array]",Zo="[object Uint32Array]",h={};h[Go]=h[No]=h[Vo]=h[Jo]=h[zo]=h[$o]
+- #1 @181095656 gme.js";import{Ru}from"B:/~BUN/root/chunk-cv8apf60.js";import{ft}from"B:/~BUN/root/chunk-280yeq4g.js";var Ms="REPL";var Xo="Glob";function qdn(e){if(Ru(e))return'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- #2 @197861465 ="empty_url_error",en="empty_input_scopes_error",gr="invalid_claims",tn="token_request_empty",rn="logout_request_empty",Xo="invalid_code_challenge_method",nn="pkce_params_missing",yr="invalid_cloud_discovery_metadata",on="invalid_authority_meta
+- #3 @207293737 on",yt="DurationSeconds",Bo="Expiration",Qo="ExternalId",Yo="ExpiredTokenException",Jo="IDPCommunicationErrorException",Xo="IDPRejectedClaimException",Zo="InvalidIdentityTokenException",en="Key",tn="MalformedPolicyDocumentException",Ct="Policy"
+
+## var Yo= needle="var Yo=" hits=12
+- #0 @178402457 ;je(ue,{ENGINE_CREATE:()=>Xo,PROMPT_SECTION:()=>Yo,PROMPT_SUBMIT:()=>Jo,default:()=>ue});var Xo={event:"engine.create"};var Yo={event:"prompt.section",checkArgument:(e,t)=>typeof e.name==="string"?e.name===t.name?e.text===null?void 0:typeof e.text
+- #1 @181135031 oot/chunk-gkt791cj.js";import{ft}from"B:/~BUN/root/chunk-280yeq4g.js";import{Xe,Nt}from"B:/~BUN/root/chunk-ad87jkx5.js";var Yo="Grep";function Eln(e){if(Ru(e))return`Content search built on ripgrep. Prefer this over \`grep\`/\`rg\` via ${Xe} \u201
+- #2 @181301422 ype.Str};if(N===!1)Object.assign(S,{compositeRule:!0,createErrors:!1,allErrors:!1});e.subschema(S,_)}}};Wo.default=bp});var Yo=d(function(Xo){Object.defineProperty(Xo,"__esModule",{value:!0});var Sp=pYe(),Bo=z(),gr=dp(),Qo=_r(),Pp={keyword:"proper
+- #3 @181676711 ment value \u2014 bash may expand at assignment time",nodeType:"variable_assignment"};return{name:u,value:d,isAppend:p}}var Yo=new Set(["_","RANDOM","SECONDS","LINENO","BASH_COMMAND","FUNCNAME","EPOCHSECONDS","EPOCHREALTIME","SRANDOM","BASHPID","R
+- #4 @188877277 :/\b0[bB][01_]+[Lln]?/},{match:/\b[0-9][0-9_]*([Lln]|(\.[0-9_]*)?([eE][-+]?[0-9_]+)?)/}],relevance:0}]}}Fo.exports=xp});var Yo=d(function(PT,Go){function Pp(e){return{name:"RenderMan RIB",keywords:"ArchiveRecord AreaLightSource Atmosphere Attribut
+- #5 @189448832 {let c=u.pop();if(o++,"childNodes"in c){let h=c.childNodes;for(let m=0;m<h.length;m++)u.push(h[m])}}return u.length=0,o}var Yo={type:"carriageReturn"},Su={type:"stdout",content:`
+`},hE={type:"stdout",content:$Ut()};class Od{options;state;construct
+- #6 @195497576 ))]}).s("AmazonBedrockFrontendService","CountTokens",{}).n("BedrockRuntimeClient","CountTokensCommand").sc(Uo).build(){}var Yo=Z(Sn(),1);class Fbn extends Uk.classBuilder().ep(l).m(function(e,t,o,r){return[Yo.getEndpointPlugin(o,e.getEndpointParam
+- #7 @197425353 gableAuthClient}});Object.defineProperty(S,"ExecutableError",{enumerable:!0,get:function(){return Vo.ExecutableError}});var Yo=$r();Object.defineProperty(S,"EXTERNAL_ACCOUNT_AUTHORIZED_USER_TYPE",{enumerable:!0,get:function(){return Yo.EXTERNAL_AC
+- … +4 more
+
+## Yo=" needle="Yo=\"" hits=4
+- #0 @178501105  Int8Array]",Jo="[object Int16Array]",zo="[object Int32Array]",$o="[object Uint8Array]",Xo="[object Uint8ClampedArray]",Yo="[object Uint16Array]",Zo="[object Uint32Array]",h={};h[Go]=h[No]=h[Vo]=h[Jo]=h[zo]=h[$o]=h[Xo]=h[Yo]=h[Zo]=!0;h[wo]=h[Lo
+- #1 @181135035 chunk-gkt791cj.js";import{ft}from"B:/~BUN/root/chunk-280yeq4g.js";import{Xe,Nt}from"B:/~BUN/root/chunk-ad87jkx5.js";var Yo="Grep";function Eln(e){if(Ru(e))return`Content search built on ripgrep. Prefer this over \`grep\`/\`rg\` via ${Xe} \u2014
+- #2 @197852036 ot_removed",Wr="end_session_endpoint_not_supported",Qr="key_id_missing",Vo="no_network_connectivity",Ko="user_canceled",Yo="missing_tenant_id_error",F="method_not_implemented",Wo="nested_app_auth_bridge_disabled";/*! @azure/msal-common v15.13.1
+- #3 @207293674 tityResponse",zo="Audience",re="Credentials",Vo="ContextAssertion",yt="DurationSeconds",Bo="Expiration",Qo="ExternalId",Yo="ExpiredTokenException",Jo="IDPCommunicationErrorException",Xo="IDPRejectedClaimException",Zo="InvalidIdentityTokenExcept
+
+## var v2e= needle="var v2e=" hits=0
+
+## v2e=[ needle="v2e=[" hits=1
+- #0 @202984399 "truncate",children:Spe})}),$a[53]=Au,$a[54]=Spe,$a[55]=Rl,$a[56]=N2;else N2=$a[56];let v2e;if($a[57]!==Cy||$a[58]!==vy)v2e=[Cy,vy].filter(Boolean),$a[57]=Cy,$a[58]=vy,$a[59]=v2e;else v2e=$a[59];const Tpe=v2e.join(" \xB7 ");let L2;if($a[60]!==Cy
+
+## var A2e= needle="var A2e=" hits=0
+
+## A2e=[ needle="A2e=[" hits=1
+- #0 @184229952 =new Set([...T2e,...w2e]),B6t="remote-devices",E2e=["Claude_Browser__"],C2e=["claude-in-chrome__","Claude_in_Chrome__"],A2e=[...E2e,...C2e];function R2e(e,t){if(e?.serverName!==B6t)return!1;let r=on(e.toolName);return t.some((o)=>r.startsWith(o)
+
+## var bgt= needle="var bgt=" hits=0
+
+## bgt= needle="bgt=" hits=2
+- #0 @180513181 :!1,url_count:0,duration_ms:Date.now()-o})}}function rM(e){return $t().officialUrls?.has(e)??!1}var bb="remote-devices",bgt="mcp__remote-devices__device_bash";var P9n="mcp__ide__executeCode",D9n=["mcp__remote-devices__device_bash","mcp__remote-
+- #1 @216983832 &&(this.texture.deleteTexture(),this.texture=null),this.canvas=null,this.scratch=null,this.locked=!0},"dispose")}])})(),bgt=(function(){function e(t,r,n,i){jf(this,e),this.r=t,this.texSize=r,this.texRows=n,this.createTextureCanvas=i,this.atlase
+
+## var P9n= needle="var P9n=" hits=1
+- #0 @180513220 o})}}function rM(e){return $t().officialUrls?.has(e)??!1}var bb="remote-devices",bgt="mcp__remote-devices__device_bash";var P9n="mcp__ide__executeCode",D9n=["mcp__remote-devices__device_bash","mcp__remote-devices__device_list_dir","mcp__remote-devi
+
+## P9n= needle="P9n=" hits=1
+- #0 @180513224 }function rM(e){return $t().officialUrls?.has(e)??!1}var bb="remote-devices",bgt="mcp__remote-devices__device_bash";var P9n="mcp__ide__executeCode",D9n=["mcp__remote-devices__device_bash","mcp__remote-devices__device_list_dir","mcp__remote-devi
+
+## u2t= needle="u2t=" hits=2
+- #0 @180516601 ",destination:"session"}],metadata:{command:{name:r,chrome:{hostHandlesOriginConsent:!0}}}}}}}var Gu="claude-in-chrome",u2t="javascript_tool";function yC(e){return on(e)===Gu}var L9n=["file_upload","browser_batch"],aM=[u2t,"read_page","find","f
+- #1 @217508574 object Map]",a2t="[object Number]",s2t="[object RegExp]",o2t="[object Set]",l2t="[object String]",c2t="[object Symbol]",u2t="[object ArrayBuffer]",h2t="[object DataView]",dCe=Ll?Ll.prototype:void 0,iz=dCe?dCe.valueOf:void 0;o(a4e,"equalByTag");
+
+## var bb= needle="var bb=" hits=2
+- #0 @180513157 fetch",{source:t,success:!1,url_count:0,duration_ms:Date.now()-o})}}function rM(e){return $t().officialUrls?.has(e)??!1}var bb="remote-devices",bgt="mcp__remote-devices__device_bash";var P9n="mcp__ide__executeCode",D9n=["mcp__remote-devices__devic
+- #1 @223274690 e) and fills for PNG too.
+    if(frame){
+      var hb=getComputedStyle(document.documentElement).backgroundColor;
+      var bb=document.body?getComputedStyle(document.body).backgroundColor:'';
+      selBg=!xp(hb)?hb:!xp(bb)?bb:'#fff';
+    }else{
+ 
+
+## Unt @185790549
+len=97 sha=77200da7ab18eb11
+function Unt(){return new Set([...sA().filter((e)=>e.enablesCodeExecution).map((e)=>e.name),Nt])}
+
+## Nnt @185211740
+len=209 sha=662e0b7aeda8a62a
+function Nnt(e,t){let r=[...e,Yr].filter((p)=>!t.has(p)),o=[...t.has(Xe)?[]:[gue],...t.has(Yr)?[]:[Hbt]],u=[...[...v2e].map((p)=>Xl(p,u2t)),...A2e.map((p)=>Xl(bb,`${p}${u2t}`))];return[...r,...o,bgt,P9n,...u]}
+
+## Fnt @185211661
+len=79 sha=e146f11b3d2d8ec3
+function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new Set(e)}
+
+## Bash PowerShell REPL list needle="[\"Bash\"" hits=8
+- #0 @100422500 s.i.t.o.r.y.".:. .{.".u.r.l.".:. .".........https://github.com/ORG/REPO.......M."}}
+        ],
+        "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+      },
+      "events": [
+        {"data": {
+          "uuid": "<lowercase v
+- #1 @179066075 .toolName))}var jte={filePatternTools:["Read","Write","Edit","Glob","NotebookRead","NotebookEdit","Cd"],bashPrefixTools:["Bash"],customValidation:{WebSearch:(e)=>{if(e.includes("*")||e.includes("?"))return{valid:!1,error:"WebSearch does not suppor
+- #2 @184612262 ywhere in the pull request. If the payload is missing or unreadable, end with "Not posted: no review payload."`}var HZt=["Bash","BashOutput","KillShell","PowerShell","Tmux","Monitor","REPL","Read","Edit","MultiEdit","Write","NotebookEdit","Glob","
+- #3 @185231044 th, JWT, etc.), use ${Oi} first, then use exit plan mode tool after clarifying the approach.
+`;var vbn=h(()=>m({tool:le(["Bash"]).describe("The tool this prompt applies to"),prompt:i().describe('Semantic description of the action, e.g. "run tests"
+- #4 @187643204 ol. If asked, explain the k8s/compose pattern and Write a sample manifest; the operator owns their orchestrator.`}var f=["Bash","Read","Write","TodoWrite","TaskCreate","TaskGet","TaskList","TaskUpdate","self_hosted_runner_get_pool","self_hosted_ru
+- #5 @187667796 red Slack Connect channel or account team.
+
+**Never auto-upload customer logs.** The operator reviews and sends.`}var g=["Bash","Read","Write","TodoWrite","TaskCreate","TaskGet","TaskList","TaskUpdate","self_hosted_runner_get_pool","self_hosted_ru
+- #6 @200203166 me folder) is enforced in Cowork only \u2014 configure narrower folders for Code coverage.")}})});XS.BUILTIN_TOOL_NAMES=["Bash","Read","Write","Edit","Glob","Grep","NotebookEdit","WebFetch","WebSearch","Task","TodoWrite","TaskCreate","TaskUpdate",
+- #7 @204839996 es": [
+          {"git_repository": {"url": "${s||"https://github.com/ORG/REPO"}"}}
+        ],
+        "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+      },
+      "events": [
+        {"data": {
+          "uuid": "<lowercase v
+
+## BASH_TOOL_NAME restricted needle="BASH_TOOL_NAME" hits=0
+
+## PowerShellTool restricted needle="PowerShell" hits=247
+- #0 @82526990 cess -Name bun | Where-Object { $_.Path -eq "${PSScriptRoot}\bin\bun.exe" } | Stop-Process -Force
+  } catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
+    # ignore
+  } catch {
+    Write-Host "There are open instances of bun.exe tha
+- #1 @82528849 sion\Uninstall\Bun" -Recurse
+  }
+} catch {
+  # unlucky tbh
+}
+.b.u.n.x...c.m.d.b.u.n.x...e.x.e...@%~dp0bun.exe x %*
+PowerShell completions are not yet written for Bun.See https://github.com/oven-sh/bun/issues/8939.error: Could not get current wor
+- #2 @82555998 $global:ProgressPreference='SilentlyContinue';Expand-Archive -Path ".." ".." -Force.powershellC:\WindowsSystem32\WindowsPowerShell\v1.0\powershell.exe.error: Failed to unzip .' due to PowerShell not being installed...$.[0m.[31merror:.[0m Failed to un
+- #3 @82556062 th ".." ".." -Force.powershellC:\WindowsSystem32\WindowsPowerShell\v1.0\powershell.exe.error: Failed to unzip .' due to PowerShell not being installed...$.[0m.[31merror:.[0m Failed to unzip .' due to PowerShell not being installed...-NoProfile-Execut
+- #4 @82556142 ll.exe.error: Failed to unzip .' due to PowerShell not being installed...$.[0m.[31merror:.[0m Failed to unzip .' due to PowerShell not being installed...-NoProfile-ExecutionPolicyBypass-Command'error: Failed to run Expand-Archive on .. due to error .
+- #5 @84721588 se\fP flag.
+.
+.
+.SH SHELL COMPLETION
+Shell completion files are included in the release tarball for Bash, Fish, Zsh
+and PowerShell.
+.sp
+For \fBbash\fP, move \fBrg.bash\fP to \fB$XDG_CONFIG_HOME/bash_completion\fP or
+\fB/etc/bash_completion.d/\fP.
+.sp
+- #6 @84732707 ompletions for zsh"
+      complete-fish\:"shell completions for fish"
+      complete-powershell\:"shell completions for PowerShell"
+    ))'
+
+    + glob # File-glob options
+    '*'{-g+,--glob=}'[include/exclude files matching specified glob]:glob'
+   
+- #7 @84799536 0\fP, then it has no effect.
+Omit lines longer than this limit.max-columnsManCompleteBashCompleteZshCompleteFishCompletePowerShellno-max-columns-preview
+Prints a preview for lines exceeding the configured max column limit.
+.sp
+When the \flag{max-colu
+- … +239 more
+
+## REPL_TOOL_NAME needle="REPL_TOOL_NAME" hits=0
+
+## run commands or code needle="run commands or code" hits=2
+- #0 @99631901 use all tools, or specify tool names (e.g. "Bash,Edit,Read")...........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, pro
+- #1 @191582689 r specify tool names (e.g. "Bash,Edit,Read").').option("--restricted","Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, pro
+
+## code-running tools needle="code-running tools" hits=2
+- #0 @99631960 )...........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --set
+- #1 @191582748 estricted","Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --set
+
+## Nnt-Unt-call @185218821
+1ToolName])),sn=vt.filter((gn)=>{if(Ze.has(gn))return!1;let Ht=pn.get(gn);return!(Ht&&Ze.has(Ht))});if(!N){for(let gn of[Nt,Xo,Yo])if(!Ze.has(gn)&&!sn.includes(gn))sn.push(gn)}G=sn}if(o)G=se([...G,...Nnt(Unt(),Fnt(U))]);let ue=new Map,pe=a.PWD;if(pe&&pe!==ve()&&ybn({originalCwd:v
+
+### caller=rrn @185217858

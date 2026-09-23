@@ -1,0 +1,74 @@
+# gold-248-ie-wrappers2
+when=2026-09-20T09:59:28.491Z
+
+## function a7e( hits=2
+@178564582 sha=2f8bbb80e1ffd52a function a7e(){return n().host.launchOptions.clientType()}
+@203232839 sha=fa419c8538c6dcb7 function a7e(n7e){s("tengu_post_compact_survey_event",{event_type:v("appeared"),appearance_id:ke(n7e)}),So("feedback_survey",{event_type:"appeared",appearance_id:n7e,survey_type:"post_compact"})}
+
+## function $En( hits=2
+@178564640 sha=7785748c61755ff3 function $En(e){n().host.launchOptions.replaceClientType(e)}
+@185498425 sha=58cb31cf6556c8ed function $En(e){switch(e.output_type){case"stream":return{output_type:e.output_type,text:Dke(e.text)};case"execute_result":case"display_data":return{output_type:e.output_type,text:Dke(e.data?.["text/plain"]),image:e.data&&FEn(e.data)};case"error":return{output_type:e.output_type,text:Dke(`${e.ename}: ${e.evalue}
+${e.traceback.join(`
+`)}`)}}}
+
+## function _de( hits=2
+@178564700 sha=e6cf26bd0be95d4d function _de(){return n().host.launchOptions.sdkAgentProgressSummariesEnabled()}
+@222524860 sha=728fcc606d0a2de2 function _de(e,t){if(!t)return e;for(let n in t){let r=t[n];switch(n){case"style":{e[n]=wx(e.style,r);break}case"className":{e[n]=_N(e.className,r);break}default:TU(n,r)?e[n]=Dde(e[n],r):e[n]=r}}return e}
+
+## function FEn( hits=2
+@178564780 sha=6d323909ce362264 function FEn(e){n().host.launchOptions.replaceSdkAgentProgressSummariesEnabled(e)}
+@185498214 sha=5cac4cf7c1888798 function FEn(e){for(let t of["image/png","image/jpeg"]){let r=e[t];if(typeof r!=="string")continue;let o=r.replace(/\s/g,"");if(eI(Buffer.from(o,"base64"))===null)return;return{image_data:o,media_type:t}}return}
+
+## function H4( hits=4
+@178572284 sha=21fd15a79f014c6f function H4(){return n().host.launchOptions.sessionBypassPermissionsMode()}
+@182573385 sha= {"i":182573385,"missEnd":true,"preview":"function H4(e,t){let r=Uw.get(e);if(r===void 0)r=new V4.Planner(e.funcs,e.registry,e.namespace),Uw.set(e,r);let o;if((0,Up.isMessage)(t,$4.CheckedExprSchema))o=t.expr;else if((0,Up.isMessage)(t,Dw.ParsedExprSchema))o=t.expr;else o=t;let u=r.plan(o??(0,Up.create)(Dw.ExprSchema)),p"}
+@216296460 sha=7cd71357d710d22f function H4(e,t){if(e===void 0||t===void 0)return{angle:0,deltaX:0,deltaY:0};e=di(e),t=di(t);let[r,n]=[e.x,e.y],[i,a]=[t.x,t.y],s=i-r,l=a-n;return{angle:Math.atan(l/s),deltaX:s,deltaY:l}}
+@222339238 sha=329def9b2bf34a00 function H4(e){e.tag===22?(lo(li,li.current),lo(ll,e),Fl===null&&(Fl=e)):Zd(e)}
+
+## function Tkn( hits=1
+@178572206 sha=d4220a054ab217f8 function Tkn(e){n().host.launchOptions.replaceSessionBypassPermissionsMode(e)}
+
+## function b7e( hits=1
+@178572429 sha=c7d35a518554ada9 function b7e(){return n().host.launchOptions.scheduledTasksEnabled()}
+
+## function V$( hits=6
+@178572359 sha=6283865dd6f83685 function V$(e){n().host.launchOptions.replaceScheduledTasksEnabled(e)}
+@180034824 sha=c053d24de68cff36 function V$(e,t){if(!(0,LC.isPlainObject)(e)||!(0,LC.isPlainObject)(t))return!1;return!0}
+@182426818 sha=0a1088a2986801d1 function V$(e=0n,t=0n){let r=e*wa+BigInt(t),o=r%wa<0n?1n:0n,u=r/wa-o,p=Number(r%wa+o*wa);if(u>B$||u<$$)throw Error("timestamp out of range");return(0,F$.create)(M$.TimestampSchema,{seconds:u,nanos:p})}
+@183806568 sha=39f1a1ef852f4248 function V$(e,t){if(t.isSymbolicLink())return!0;if(!t.isDirectory())return!1;try{return!await r_(s$e(e),o$e(e))}catch(r){return!vm(r)}}
+
+## function qC( hits=4
+@178573926 sha=d11e4c26440cc7fc function qC(){return n().host.launchOptions.sessionPersistenceDisabled()}
+@199838021 sha=975db09a825a36ca function qC(){return{localeError:KC()}}
+@208618820 sha= {"i":208618820,"missEnd":true,"preview":"function qC(i){let{files:m,mtimeMsByFile:h}=await mg(i);if(m.length===0)return fg();let w=await ag(async()=>{let x=await lg(i),W=sr(),P=cg(),Y=x.lastComputedDate!==null&&x.lastComputedDate>=W&&x.lastComputedDate<=Ru(W,zC);if(Y)n(`Stats watermark ${x.lastComputedDate} is ahead of "}
+@217288583 sha=97d2fc14079248c5 function qC(e){switch(e){case"error":return 1;case"warning":return 2;case"info":return 3;case"hint":return 4;default:throw new Error("Invalid diagnostic severity: "+e)}}
+
+## function Rkn( hits=1
+@178573850 sha=faa245bb728c3110 function Rkn(e){n().host.launchOptions.replaceSessionPersistenceDisabled(e)}
+
+## function xvt( hits=2
+@178575479 sha=39d7b198486e4839 function xvt(){return n().host.launchOptions.initJsonSchema()}
+@187263896 sha=f0490ff97296c9fb function xvt(e,t){if(!oG(e))return e;return e.map((r)=>{if(r.type!=="assistant"||!Array.isArray(r.message.content)||!r.message.content.some(vR))return r;let o=r.message.content.flatMap((u)=>{if(!vR(u))return[u];let p=t?lZn(u):void 0;return p!==void 0?[p]:[]});return{...r,message:{...r.message,content:o.length>0?o:[{type:"text",text:Hp,citations:[]}]}}})}
+
+## function Dkn( hits=2
+@178575415 sha=f0b5ffbd9842d8ea function Dkn(e){n().host.launchOptions.replaceInitJsonSchema(e)}
+@185386059 sha=6934d69ee4cf2538 function Dkn(e,t){let r=await e.statMeta(t);if(r.ok)return{present:!0};return r.error.code==="NotFound"?{present:!1}:{present:!0,...ike(r.error)}}
+
+## function f7e( hits=1
+@178570030 sha=8c25954fc4115dac function f7e(){return De()&&n().host.launchOptions.clientType()!=="claude-vscode"}
+
+## function De( hits=64
+@178467997 sha=7f6561c9463ecbda function De(e,t){let r=e.environments.get(t);if(r===void 0)throw new Ae.HooksError(`environment ${t} is not loaded`);return r}
+@178562998 sha=24d56d9e8d939b15 function De(){return!n().host.launchOptions.isInteractive()}
+@178933801 sha=79492cf01c543f08 function De(e){let t=null,s=null,r=null,o=1,a=null;if(N(e)||j(e))r=e,t=ve(e),s=oe(e);else{if(!xe.call(e,"name"))throw Error(It("name"));let l=e.name;if(r=l,xe.call(e,"weight")){if(o=e.weight,o<=0)throw Error(Ct(l))}t=ve(l),s=oe(l),a=e.getFn}return{path:t,id:s,weight:o,src:r,getFn:a}}
+@179271285 sha=d8e42dbe67f688af function De(e){return w.join(e.dir,e.v2?"memory.events":"memory.oom_control")}
+
+## function vu( hits=15
+@178563058 sha=d1703532effe70e3 function vu(){return n().host.launchOptions.isInteractive()}
+@181240002 sha=0b1825c4a8a7cfe3 function vu(e){return e.replace(/~/g,"~0").replace(/\//g,"~1")}
+@182599945 sha= {"i":182599945,"missEnd":true,"preview":"function vu(e,t){let r=e.leafCerts.get(t);if(r)return r;let o=sc.rsa.generateKeyPair(2048),u=sc.createCertificate();u.publicKey=o.publicKey,u.serialNumber=Iu();let p=Uo(-1);u.validity.notBefore=p,u.validity.notAfter=Bv(e.cert,p),u.setSubject([{name:\"commonName\",value:t}]),u.setIs"}
+@190608863 sha=c7ebf6870a16dbd2 function vu(){return""}
+
+## function AEn( hits=2
+@178563118 sha=14e588a7fc2b68bb function AEn(e){n().host.launchOptions.replaceIsInteractive(e)}
+@185492820 sha=6dd5e2b323a39c6e function AEn(e,t){let r=hEn(e)?e:_En(t||ce().cwd(),e);try{return ce().realpathSync(r)}catch(o){if(Q(o))throw Error(`Path "${r}" does not exist`);return r}}

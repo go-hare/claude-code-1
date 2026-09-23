@@ -1,0 +1,193 @@
+# gold-248-gc-stop-callers
+when=2026-09-20T14:44:04.044Z
+
+## "stopRemote" hits=2
+@92714332
+updateAdoptedPeers........l.updateRemoteJobs.....vW.updatePendings......C.i.seedJobs........settleLandedPendings.....u..kick....."..watchPendingJobDir..
+....O<.stopRemote......I..archiveRemote...
+.....i.navigateTo.......,..hoverTo.....'.^.setHoverFocusIdx
+...Ie~.clampFocus........+.syncRows
+.....r.focusedRow.......6=.beginReorder........queueOrderWrites....,u..toggle
+
+@192140775
+p("remoteListLoaded",()=>!0)}).catch((d)=>{if(n(`[fleet:remote] poll mapper threw: ${l(d)}`),i===this.#v&&this.#r>0)this.#p("remoteListLoaded",()=>!0)})};async stopRemote(i){let d=i.state.sessionId;this.#S.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.map((w)=>w.id===i.id&&!Di(w.state)?{...w,state:{...w.state,state:"stopped",tempo:"idle",needs:void 0},activity:
+
+## "archiveRemote" hits=15
+@92714352
+......l.updateRemoteJobs.....vW.updatePendings......C.i.seedJobs........settleLandedPendings.....u..kick....."..watchPendingJobDir..
+....O<.stopRemote......I..archiveRemote...
+.....i.navigateTo.......,..hoverTo.....'.^.setHoverFocusIdx
+...Ie~.clampFocus........+.syncRows
+.....r.focusedRow.......6=.beginReorder........queueOrderWrites....,u..toggleCollapsed.
+....k..uncol
+
+@92720092
+listJobs....A...listAliveDaemonJobs.........adoptRosterOrphans......V#G.listAllLiveSessions....._...listRemoteSessions........`.interruptRemoteSession........".archiveRemoteSession....`.E.readLogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache.....
+
+@98819293
+ession events: ........Failed to fetch session events..........Invalid events response.".......teleport: failed to fetch session ........1. metadata: .......\.[archiveRemoteSession] . ....Bh.[archiveRemoteSession] archived 1.......frameTunnel requires host 'frame' and auth 'none'.........[.No OAuth token in keychain......2...:orgUUID......o.No session access token.......
+
+@98819325
+ fetch session events..........Invalid events response.".......teleport: failed to fetch session ........1. metadata: .......\.[archiveRemoteSession] . ....Bh.[archiveRemoteSession] archived 1.......frameTunnel requires host 'frame' and auth 'none'.........[.No OAuth token in keychain......2...:orgUUID......o.No session access token.......@.no claude.ai login..$.....E.fi
+
+@101817627
+unk-2gj2yw1j.jsRUN_EXAMPLE_FILESSKILL_MDregisterRunSkillTEMPLATE_MDregisterRunSkillGeneratorSkillRESTRICTED_SESSION_CLOUD_REFUSALSESSION_TITLE_AND_BRANCH_PROMPTarchiveRemoteSessionawaitRemoteSessionResultcheckOutTeleportedSessionBranchformatRepoMismatchDisplayhandleTeleportPrerequisitesinterruptRemoteSessionpollRemoteSessionEventsprocessMessagesForTeleportResumequeryTitl
+
+@180505099
+,{level:"warn"})}return{newEvents:E,controlFrames:C,lastEventId:O,branch:k,sessionStatus:M,metadataFetchError:L}}async function Rk(e,t=1e4){if(!ar())return n(`[archiveRemoteSession] ${e} skipped: non-first-party provider`),!1;let r=tte();if(!r)return!1;let o=`${Vt().BASE_API_URL}/v1/code/sessions/${e}/archive`;try{let u=await nt.post(o,{},{headers:await VDe(r),timeout:t,
+
+@180505385
+de/sessions/${e}/archive`;try{let u=await nt.post(o,{},{headers:await VDe(r),timeout:t,validateStatus:(p)=>p<500});if(u.status===200||u.status===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{wa
+
+@180505437
+{},{headers:await VDe(r),timeout:t,validateStatus:(p)=>p<500});if(u.status===200||u.status===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{warned=!1;claim(){if(this.warned)return!1;return this.
+
+@180505522
+tatus===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{warned=!1;claim(){if(this.warned)return!1;return this.warned=!0,!0}}var t8=new K(()=>new YP);function n8(){return t8.of(z().host)}function 
+
+@192130269
+LiveSessions:(i)=>tN(i),listRemoteSessions:()=>Hu(),interruptRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatu
+
+@192130348
+>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i)
+
+@192141356
+tch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("flee
+
+## "interruptRemoteSession" hits=12
+@92720060
+obId........linkMatchId.....@...listJobs....A...listAliveDaemonJobs.........adoptRosterOrphans......V#G.listAllLiveSessions....._...listRemoteSessions........`.interruptRemoteSession........".archiveRemoteSession....`.E.readLogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".pe
+
+@97428621
+ync_digested.......X...dir_sync_not_armed..........dir_sync_pinned......r..dir_sync_engine_reason..
+.......seedSignal..........withheldInitialMessage........u.[interruptRemoteSession] ..."...s.H. skipped: non-first-party provider.......z..^session_[A-Za-z0-9_-]+$%.......[interruptRemoteSession] interrupted ...........-heartbeat-.L...V...Cannot destructure property 'isConcurrencyS
+
+@97428733
+ignal..........withheldInitialMessage........u.[interruptRemoteSession] ..."...s.H. skipped: non-first-party provider.......z..^session_[A-Za-z0-9_-]+$%.......[interruptRemoteSession] interrupted ...........-heartbeat-.L...V...Cannot destructure property 'isConcurrencySafe' from null or undefined value....k.J.layers..
+...;...newContext..........is_meta....6N..tool_use_meta......
+
+@101817754
+ALSESSION_TITLE_AND_BRANCH_PROMPTarchiveRemoteSessionawaitRemoteSessionResultcheckOutTeleportedSessionBranchformatRepoMismatchDisplayhandleTeleportPrerequisitesinterruptRemoteSessionpollRemoteSessionEventsprocessMessagesForTeleportResumequeryTitleAndBranchsubscribeRemoteSessionToPRteleportFromSessionsAPIteleportResumeCodeSessionteleportToRemoteteleportToRemoteWithErrorHandlingtoS
+
+@185074176
+led"));return e.onCreateFail?.(`Cloud session create failed: ${E.message}`,C?"network_error":"exception"),null}}async function kyr(e,t=1e4){if(!ar())return n(`[interruptRemoteSession] ${e} skipped: non-first-party provider`),!1;let r=tte();if(!r)return!1;try{let o=Ku(e);if(!/^session_[A-Za-z0-9_-]+$/.test(o))return!1;let u=await SC();if(!u)return!1;let{url:p,body:g}=PCe(Vt().BASE
+
+@185074694
+anthropic-beta":a2t,"x-organization-uuid":u,...k&&{"X-Trusted-Device-Token":k}},timeout:t,validateStatus:(C)=>C<500});if(E.status>=200&&E.status<300)return n(`[interruptRemoteSession] interrupted ${e}`),!0;return n(`[interruptRemoteSession] ${e} failed ${E.status}: ${S(E.data)}`),!1}catch(o){return n(`[interruptRemoteSession] ${e} failed: ${l(o)}`,{level:"error"}),!1}}function cn
+
+@185074751
+sted-Device-Token":k}},timeout:t,validateStatus:(C)=>C<500});if(E.status>=200&&E.status<300)return n(`[interruptRemoteSession] interrupted ${e}`),!0;return n(`[interruptRemoteSession] ${e} failed ${E.status}: ${S(E.data)}`),!1}catch(o){return n(`[interruptRemoteSession] ${e} failed: ${l(o)}`,{level:"error"}),!1}}function cnn(e,t,r){return sat("subscribe",{sessionId:e,repo:t,prNum
+
+@185074838
+<300)return n(`[interruptRemoteSession] interrupted ${e}`),!0;return n(`[interruptRemoteSession] ${e} failed ${E.status}: ${S(E.data)}`),!1}catch(o){return n(`[interruptRemoteSession] ${e} failed: ${l(o)}`,{level:"error"}),!1}}function cnn(e,t,r){return sat("subscribe",{sessionId:e,repo:t,prNumber:r,baseUrl:Vt().BASE_API_URL,getAccessToken:()=>Bt()?.accessToken,getTrustedDeviceTo
+
+@192130161
+rn{listJobs:(i)=>Rg(void 0,i),listAliveDaemonJobs:(i)=>l$e(i),adoptRosterOrphans:(i,d,m)=>Bin(i,d,m),listAllLiveSessions:(i)=>tN(i),listRemoteSessions:()=>Hu(),interruptRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTai
+
+@192130242
+(i,d,m)=>Bin(i,d,m),listAllLiveSessions:(i)=>tN(i),listRemoteSessions:()=>Hu(),interruptRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec
+
+@192141022
+Jobs((m)=>m.map((w)=>w.id===i.id&&!Di(w.state)?{...w,state:{...w.state,state:"stopped",tempo:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interr
+
+@205705834
+RemoteSession,lnn as awaitRemoteSessionResult,SWe as checkOutTeleportedSessionBranch,PMt as formatRepoMismatchDisplay,DMt as handleTeleportPrerequisites,kyr as interruptRemoteSession,OV as pollRemoteSessionEvents,_We as processMessagesForTeleportResume,Iar as queryTitleAndBranch,cnn as subscribeRemoteSessionToPR,Har as teleportFromSessionsAPI,gQ as teleportResumeCodeSession,TT as
+
+## "archiveRemoteSession" hits=13
+@92720092
+listJobs....A...listAliveDaemonJobs.........adoptRosterOrphans......V#G.listAllLiveSessions....._...listRemoteSessions........`.interruptRemoteSession........".archiveRemoteSession....`.E.readLogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touc
+
+@98819293
+ession events: ........Failed to fetch session events..........Invalid events response.".......teleport: failed to fetch session ........1. metadata: .......\.[archiveRemoteSession] . ....Bh.[archiveRemoteSession] archived 1.......frameTunnel requires host 'frame' and auth 'none'.........[.No OAuth token in keychain......2...:orgUUID......o.No session access token.......@.no cl
+
+@98819325
+ fetch session events..........Invalid events response.".......teleport: failed to fetch session ........1. metadata: .......\.[archiveRemoteSession] . ....Bh.[archiveRemoteSession] archived 1.......frameTunnel requires host 'frame' and auth 'none'.........[.No OAuth token in keychain......2...:orgUUID......o.No session access token.......@.no claude.ai login..$.....E.firstPart
+
+@101817627
+unk-2gj2yw1j.jsRUN_EXAMPLE_FILESSKILL_MDregisterRunSkillTEMPLATE_MDregisterRunSkillGeneratorSkillRESTRICTED_SESSION_CLOUD_REFUSALSESSION_TITLE_AND_BRANCH_PROMPTarchiveRemoteSessionawaitRemoteSessionResultcheckOutTeleportedSessionBranchformatRepoMismatchDisplayhandleTeleportPrerequisitesinterruptRemoteSessionpollRemoteSessionEventsprocessMessagesForTeleportResumequeryTitleAndBra
+
+@180505099
+,{level:"warn"})}return{newEvents:E,controlFrames:C,lastEventId:O,branch:k,sessionStatus:M,metadataFetchError:L}}async function Rk(e,t=1e4){if(!ar())return n(`[archiveRemoteSession] ${e} skipped: non-first-party provider`),!1;let r=tte();if(!r)return!1;let o=`${Vt().BASE_API_URL}/v1/code/sessions/${e}/archive`;try{let u=await nt.post(o,{},{headers:await VDe(r),timeout:t,validat
+
+@180505385
+de/sessions/${e}/archive`;try{let u=await nt.post(o,{},{headers:await VDe(r),timeout:t,validateStatus:(p)=>p<500});if(u.status===200||u.status===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{warned=!1
+
+@180505437
+{},{headers:await VDe(r),timeout:t,validateStatus:(p)=>p<500});if(u.status===200||u.status===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{warned=!1;claim(){if(this.warned)return!1;return this.warned=
+
+@180505522
+tatus===409)return n(`[archiveRemoteSession] archived ${e}`),!0;return n(`[archiveRemoteSession] ${e} failed ${u.status}: ${S(u.data)}`),!1}catch(u){return n(`[archiveRemoteSession] ${e} failed: ${l(u)}`,{level:"error"}),!1}}class YP{warned=!1;claim(){if(this.warned)return!1;return this.warned=!0,!0}}var t8=new K(()=>new YP);function n8(){return t8.of(z().host)}function ygt(){r
+
+@192130269
+LiveSessions:(i)=>tN(i),listRemoteSessions:()=>Hu(),interruptRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:
+
+@192130348
+>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.archiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persis
+
+@192141506
+,m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session",
+
+@194561651
+oot/chunk-7qev109b.js";import"B:/~BUN/root/chunk-4hkt7f9w.js";import"B:/~BUN/root/chunk-h5e2qvst.js";export{a2t as CCR_BYOC_BETA,R_r as CodeSessionSchema,Rk as archiveRemoteSession,C9n as axiosGetWithRetry,Uur as ccrSessionToResource,lmn as fetchCodeSessionsFromSessionsAPI,RB as fetchSession,tte as getAccessTokenWithCcrFallback,l2t as getBranchFromSession,yb as getOAuthHeaders,
+
+## "fleet_view_stop_session" hits=3
+@92740704
+AuthBoundary.....+..attachShort......Z..SET_TITLE_AND_ICON..........orphaned.......notResponding...........attachDurationMs........interrupt rejected......fM .fleet_view_stop_session.......o.interrupt_failed......N.[fleet:remote] interrupt .......!9..archive rejected....k...fleet_view_archive_session........M.archive_failed..........[fleet:remote] archive .......$.fleet_view_reor
+
+@192141085
+w.state,state:"stopped",tempo:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),
+
+@192141212
+w Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.u
+
+## "fleet_view_archive_session" hits=3
+@92740820
+rationMs........interrupt rejected......fM .fleet_view_stop_session.......o.interrupt_failed......N.[fleet:remote] interrupt .......!9..archive rejected....k...fleet_view_archive_session........M.archive_failed..........[fleet:remote] archive .......$.fleet_view_reorder_job......p.}.C.o.u.l.d.n.'.t. .s.a.v.e. .o.r.d.e.r. ..  .........write_sort_order_failed.....6.".sessionKind.......
+
+@192141565
+set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`
+
+@192141698
+ror("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`),this.#w.delete(i.id),this.loadRemote(),m}}}function xr(i,d){if(i.roster){if(!i.roster.usesStorage(d))_(Error("[fleet:roster] ensure
+
+## "tengu_bg_agent_action" hits=15
+@92726068
+y........x.respawnResult...	.......gestureT0...........deadEpochReapedAt...
+.......knownState......x...forceRefusalRetry........+..forceUnresponsive.......i. .tengu_bg_agent_action.......2u..jobState........bands...H...]az.Cannot destructure property 'compactHeader' from null or undefined valueB.....n.Cannot destructure property 'version' from null or undefined value..
+....s.. 
+
+@180650617
+","tengu_voice_recording_started","tengu_voice_toggled","tengu_vscode_sdk_stream_ended_no_result","tengu_team_mem_sync_started","tengu_timer","tengu_bg_adopt","tengu_bg_agent_action","tengu_bg_agent_dispatch","tengu_bg_agent_notification","tengu_bg_agent_terminal","tengu_bg_attach","tengu_bg_attach_first_frame","tengu_bg_attach_legacy_autorespawn","tengu_bg_attach_outcome","teng
+
+@189653265
+void 0,inFlight:void 0,updatedAt:p,firstTerminalAt:m.firstTerminalAt??p},t).catch((k)=>n(`bg stop terminal write failed: ${l(k)}`,{level:"warn"}))}if(await ns("tengu_bg_agent_action",{action:v("stop"),source:v("cli"),jobSessionId:ke(m?.sessionId)??v("")}),m?.worktreePath)process.stdout.write(ae.dim(`  worktree retained at ${m.worktreePath}
+  run 'claude rm ${o}' to remove worktr
+
+@189655457
+ss.stderr.write(`couldn't remove ${i} \u2014 ${m??"the background service may be restarting. Try again in a moment."}
+`),process.exitCode=1;return}if(await ns("tengu_bg_agent_action",{action:v("delete"),source:v("cli"),jobSessionId:ke(d?.sessionId)??v("")}),g)await Ql("cli_bg_rm","worktree_left_in_place");else await Ns("cli_bg_rm");process.stdout.write(`removed ${i}`+(g?`
+  work
+
+@189677208
+ailed");let J=!ue.alive&&t?.initialPrompt?await pt(r,g,t.initialPrompt,o):!1;return{ok:!1,error:ue.error,alive:ue.alive??!1,short:ue.short,state:u,queued:J}}s("tengu_bg_agent_action",{action:v("respawn"),agent:u.template,wasSettled:Di(u),jobSessionId:ke(g.sessionId)}),Uu(r);let De=await nr(r,o)??g;if(De.state==="failed"&&De.updatedAt>g.updatedAt){if(y("job_respawn","crashed_duri
+
+@189683153
+)await ne(200),g=await A()}}if(g.ok){if(k&&!r){Uu(p);let C=await nr(p,d)??k,N=qke(C,t);if(N.queuedPrompt===t)N.queuedPrompt=void 0;ps(p,N,d).catch(ea)}if(!r)s("tengu_bg_agent_action",{action:v("reply"),agent:k?.template??"unknown",wasTerminal:k?Nw(k.state):!1,daemon:!0,jobSessionId:ke(o?.sessionId??k?.sessionId),...i?.()}),b("job_reply"),m("ok");return null}if(g.code==="ENOJOB")
+
+@192141114
+:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.l
+
+@192141597
+ateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`),this.#w.delete(i.id),this
+
+@192191245
+)}`)}},(T)=>{if(!F())return;S.endNewSession(),_(T),f("fleet_view_new_session","threw"),C(`Couldn't start a new session \u2014 ${l(T)}`)})}function Lr(i,d,m){s("tengu_bg_agent_action",{action:c(i),source:v("fleet"),jobSessionId:ke(d.sessionId),agent:d.template,jobState:d.state,tempo:c(d.tempo),...m,...!1})}class Fr extends Error{constructor(i){super(i);this.name="FleetActionUncon
+
+@192191979
+);try{let A=await K7(h.id,h.state,void 0,S);if(!A.confirmed)throw f("fleet_view_stop_job","kill_unconfirmed"),new Fr(A.error??"worker may still be running");s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)}),b("fleet_view_stop_job");let F=Kn(h.id),T=await nr(F,S);if(T&&!Di(T))await ps(F,{...T,state:"stopped",detail:"stopped",tempo:
+
+@192192869
+ally{C?.(),i()}if(x){if(P)y("fleet_view_delete_job","worktree_left_in_place");else b("fleet_view_delete_job");if(h.state.pinned)sut(h.id,!1,S).catch(()=>{});s("tengu_bg_agent_action",{action:v("delete"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)})}if(A){let V=F??"remove_failed";y("fleet_view_delete_job",`worktree_kept_${V}`);let K=AQe(V,T);return w(h.id,`worktree ${K}`
+
+@192262677
+(d.ctrl&&d.key,d.key==="?"&&m.getSnapshot().query===""&&m.getSnapshot().mode==="prompt"){Je();let Re=h.getSnapshot().helpOpen;if(!Re)Ut();h.setHelpOpen(!Re),s("tengu_bg_agent_action",{action:v("help_toggled")});return}if(Zi(d)&&!We){Je(),es((Re)=>Qt(Re.base64,{mediaType:Re.mediaType,dimensions:Re.dimensions}),Jt);return}if(d$e()&&!We&&rxe(d.key)&&!m.getSnapshot().query&&m.getSna

@@ -1,0 +1,112 @@
+# gold-248-feat-1-pass2  pass2 unique restricted fns
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:13.213Z
+
+## function D2n  needle="function D2n("  hits=1
+- #0 @185211537 {return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerou
+
+## function O2  needle="function O2("  hits=3
+- #0 @178589351 ")}function wr(){return Me(process.env.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-m
+- #1 @200413389 t,v.subs,s,i);return Response.json({data:E,next_page:v.nextToken},{headers:Ci})}function O2(e){let t=e.getAll("period[]");if(t.length===0)return $o;let n=[];for(let i of t)
+- #2 @216164854 data:[e+Cr(h[m],l),t+Cr(h[m],l),r+Cr(h[m],l),n+Cr(h[m],l),d[0],d[1]]});return u}function O2(e){return[...e]}function Jse(e,t=0){let r=e.length;if(r<3)throw new Error("A cur
+
+## function Yk(  needle="function Yk("  hits=6
+- #0 @178565128 ring()}function hEr(e){n().host.launchOptions.replaceStrictToolResultPairing(e)}function Yk(){return n().host.launchOptions.restrictedSession()}function c7e(e){n().host.lau
+- #1 @182287081 {if((0,Zb.isMessage)(t,e))return t;let r=Jk(e);if(t!==void 0)Yk(e,r,t);return r}function Yk(e,t,r){for(let o of e.members){let u=r[o.localName];if(u==null)continue;let p;if
+- #2 @200416393 ations/spend_limits";function Tp(e){return e===ui||e.startsWith(`${ui}/`)}async function Yk(e,t,n,i,r,o,s="min"){if(!Tp(t.pathname))return null;let u=`req_${crypto.randomUU
+- #3 @201371929 ren:e(t,{children:l.role!==void 0?`Role: ${l.role}`:"Role picker dismissed"})})}function Yk(l){return e(t,{children:`Shown ${l.proposalCount} ${I(l.proposalCount,"skill pro
+- #4 @222586110 ===0)return;let o=Wo(Qt(e)),i=n.indexOf(o),a=i===-1?t===1?0:r-1:i+t;return n[a]}function Yk(e){return kj(Qt(e).body,1)||e}function Xk(e){return kj(Qt(e).body,-1)||e}functio
+- #5 @223096007 a=a.alternate)&&Xi(a,b)}function Xk(a){a=Bg(a);return null===a?null:a.stateNode}function Yk(a){return null}function Xf(a){this._internalRoot=a}function Ud(a){this._internal
+
+## Yk as isRestrictedSession  needle="Yk as isRestrictedSession"  hits=1
+- #0 @192782084 sPerTurnEffortOkEmitted,WEn as isPollEventIngressWired,Pl as isReplBridgeActive,Yk as isRestrictedSession,$q as isSdkDialogHostActive,qC as isSessionPersistenceDisabled,NEn as isSingleS
+
+## isRestrictedSession  needle="isRestrictedSession"  hits=2
+- #0 @101893659 nFromBgSnapshotisPerTurnEffortOkEmittedisPollEventIngressWiredisReplBridgeActiveisRestrictedSessionisSdkDialogHostActiveisSessionPersistenceDisabledisSingleShotPrintSessionisStric
+- #1 @192782090 rnEffortOkEmitted,WEn as isPollEventIngressWired,Pl as isReplBridgeActive,Yk as isRestrictedSession,$q as isSdkDialogHostActive,qC as isSessionPersistenceDisabled,NEn as isSingleS
+
+## bypassPermissions not supported in restricted mode  needle="bypassPermissions not supported in restricted mode"  hits=2
+- #0 @96361452 ressable via ...........# Scratchpad Directory......".h.tengu_rosy_wren.2....&..bypassPermissions not supported in restricted mode......{&-.Use this tool when you are in plan mode and have finished writing your
+- #1 @185211485 LS===!0)return!0;return R(ubn,!1)===!0}function Zj(){return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||
+
+## ignores user, project and local settings files  needle="ignores user, project and local settings files"  hits=2
+- #0 @99632024 L and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip M
+- #1 @191582812 L and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip M
+
+## removes the built-in tools that run commands or code  needle="removes the built-in tools that run commands or code"  hits=2
+- #0 @99631869 tools, or specify tool names (e.g. "Bash,Edit,Read")...........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless -
+- #1 @191582657 y tool names (e.g. "Bash,Edit,Read").').option("--restricted","Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless -
+
+## confines the file tools  needle="confines the file tools"  hits=4
+- #0 @98326311 ile......
+<..resolvedWorkingDirPaths.......P. is outside @....%..; --restricted confines the file tools to the working directory."....f8.tengu_auto_mode_worktree_fast_path..C....?..Ca
+- #1 @99632172  --settings still apply; add --strict-mcp-config to skip MCP servers too). Also confines the file tools to the working directories (--add-dir included), refuses bypassPermissions, and
+- #2 @181746142 ).join(", ");return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`,decisionReason:{type:"other",reason:HKe}}}function i
+- #3 @191582960  --settings still apply; add --strict-mcp-config to skip MCP servers too). Also confines the file tools to the working directories (--add-dir included), refuses bypassPermissions, and
+
+## userSettings  needle="restricted&&"  hits=8
+- #0 @181760545 }))return ue(t,"Plan files for current session are allowed for writing");if(!o?.restricted&&ml(u))return ue(t,"Workflow script files for current session are allowed for wri
+- #1 @181760824 n ue(t,"Job tmp/ subtree for current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writin
+- #2 @181760952 t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve()
+- #3 @181761021  hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allow
+- #4 @181761523 ",decisionReason:{type:"safetyCheck",reason:di,classifierApprovable:!1}};if(!o?.restricted&&fl(u))return ue(t,"Project directory files are allowed for reading");if(mi(u,{in
+- #5 @183550511 t o of e){if(p(o))continue;let l=Fan(o);if(l!==void 0)return l;let s=ht(o);if(n.restricted&&!mb(s,n))return{result:!1,message:`Attachment "${o}" is outside the working dire
+- #6 @184530568 tion hP(e,t,{depth:r=0,allowedAgentTypes:o,activeAgents:u}={}){return GX()&&!(t.restricted&&_s(t,{name:Yr}))&&(u===void 0||bfe(u))&&e.some((p)=>Xt(p,ft))&&!_s(t,{name:ft})&
+- #7 @185211562 e="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:
+
+## settingSources restricted  needle="restricted?[\"--restricted\"]"  hits=1
+- #0 @178162276 p((i)=>["--mcp-config",i]),...n.strictMcpConfig?["--strict-mcp-config"]:[],...n.restricted?["--restricted"]:[]]}function rer(n){let i=0;while(n[i]==="--dangerously-skip-permissions"||n[i]
+
+## function VUn  needle="function VUn("  hits=1
+- #0 @185034208 ions cannot be created from a --restricted session: they would not enforce it.";function VUn(e){if(typeof e!=="string"||e==="")return;switch(e){case"authentication_error":ca
+
+## MMt=  needle="var MMt="  hits=1
+- #0 @185034109 eEnvironment)_e((p)=>p.hasRemoteEnvironment?p:{...p,hasRemoteEnvironment:!0},u)}var MMt="Cloud sessions cannot be created from a --restricted session: they would not en
+
+## function D2n( @185211537
+len=124 sha=cc7c00c15a722c6a
+function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:void 0}
+
+## function O2( @178589351
+len=60 sha=9555f7c727a5a06d
+function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}
+
+## function O2( @200413389
+len=186 sha=d4de54e1b88a1df8
+function O2(e){let t=e.getAll("period[]");if(t.length===0)return $o;let n=[];for(let i of t){if(i!=="daily"&&i!=="weekly"&&i!=="monthly")return null;if(!n.includes(i))n.push(i)}return n}
+
+## function O2( @216164854
+len=28 sha=8fbc1e5711d7c310
+function O2(e){return[...e]}
+
+## function VUn( @185034208
+len=302 sha=a36c1d8b282f1b77
+function VUn(e){if(typeof e!=="string"||e==="")return;switch(e){case"authentication_error":case"invalid_request_error":case"permission_error":case"api_error":case"not_found_error":case"rate_limit_error":case"billing_error":case"overloaded_error":case"request_too_large":return e;default:return"other"}}
+
+## bypassPermissions not supported in restricted mode @96361452
+et by the Remote Control spawner).......R..4001....K..MonitorWsTask...5.......Other agents active in this session, addressable via ...........# Scratchpad Directory......".h.tengu_rosy_wren.2....&..bypassPermissions not supported in restricted mode......{&-.Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
+
+## How This Tool Works
+- You should have already written your plan to the plan file specified in the plan mode system message
+- This tool does NOT take the plan content as a parameter - it will read the plan from 
+
+## bypassPermissions not supported in restricted mode @185211485
+e,cbn)}function uM(){if(Ha()||KEn())return!0;let e=DDe();if(e===void 0||dbn(e))return!0;if(a.CLAUDE_CODE_ENABLE_TODO_TOOLS===!0)return!0;return R(ubn,!1)===!0}function Zj(){return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:void 0}function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new Set(e)}function Nnt(e,t){let r=[...e,Yr].filter((p)=>!t.has(p)),o=[...t.has(Xe)?[]:[gue],...t.has(Yr)?[]:[Hbt]],u=[...[...v2e].map((p)=>Xl(p,u2t)),...A2
+
+## Yk defs mentioning restricted (6 total)
+## Yk-restricted @178565128 @178565128
+len=64 sha=004e8eb906e6711a
+function Yk(){return n().host.launchOptions.restrictedSession()}
+
+ykKept=1
+
+## commander-restricted-help @99631852
+--tools <tools...>......%>..Specify the list of available tools from the built-in set. Use "" to disable all tools, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read")...........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip MCP servers too). Also confines the file tools to the working directories (--add-dir included), refuses bypassPermissions, and lets only a person or the configured permission handler approve writes to settings, git and tool-configuration files....0...U...--disallowedTools, --disallowed-tools <tools...>M.....%.Comma or space-separated list of tool names to deny (e.g. "Bash(git *) Edit")...........--mcp-config <configs...>...=...S.s.Load MCP servers from JSON files or strings (space-separated)...........--permission-prompt-tool <tool>.@...-v&.MCP tool to use for permission prompts (only works with 
+
+## managed settings and --settings still apply  needle="managed settings and --settings still apply"  hits=2
+- #0 @99632072  unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip MCP servers too). Also confines the file tools
+- #1 @191582860  unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip MCP servers too). Also confines the file tools
+
+## ignore-settings-codeish @99632024
+L and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings 

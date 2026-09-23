@@ -8,9 +8,9 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { getOauthConfig } from '../../constants/oauth.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { setClipboard } from '@anthropic/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow menu navigation
 import { Box, color, Link, Text, useInput, useTheme } from '@anthropic/ink';
+import type { ClipboardPath } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import {
   AuthenticationCancelledError,
@@ -41,8 +41,30 @@ import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { Spinner } from '../Spinner.js';
 import TextInput from '../TextInput.js';
 import { CapabilitiesSection } from './CapabilitiesSection.js';
+import { MCP_COPIED_NATIVE, mcpCopiedViaDetail, mcpCopyShortcutKind, useMcpCopiedVia } from './mcpCopiedVia.js';
 import type { ClaudeAIServerInfo, HTTPServerInfo, SSEServerInfo } from './types.js';
 import { handleReconnectError, handleReconnectResult } from './utils/reconnectHelpers.js';
+
+function McpUrlCopyInline({ via }: { via: ClipboardPath | null }): React.ReactNode {
+  const kind = mcpCopyShortcutKind(via);
+  if (kind === 'native') {
+    return <Text color="success">{MCP_COPIED_NATIVE}</Text>;
+  }
+  if (kind === 'hint') {
+    return (
+      <Text dimColor>
+        <KeyboardShortcutHint shortcut="c" action="copy" parens />
+      </Text>
+    );
+  }
+  return null;
+}
+
+function McpUrlCopyDetail({ via }: { via: ClipboardPath | null }): React.ReactNode {
+  const detail = mcpCopiedViaDetail(via);
+  if (detail === null) return null;
+  return <Text dimColor>{detail}</Text>;
+}
 
 type Props = {
   server: SSEServerInfo | HTTPServerInfo | ClaudeAIServerInfo;
@@ -76,8 +98,7 @@ export function MCPRemoteServerMenu({
   const [isClaudeAIClearingAuth, setIsClaudeAIClearingAuth] = useState(false);
   const [claudeAIClearAuthUrl, setClaudeAIClearAuthUrl] = useState<string | null>(null);
   const [claudeAIClearAuthBrowserOpened, setClaudeAIClearAuthBrowserOpened] = useState(false);
-  const [urlCopied, setUrlCopied] = useState(false);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { copiedVia, copy: copyViaClipboard } = useMcpCopiedVia();
   const unmountedRef = useRef(false);
   const [callbackUrlInput, setCallbackUrlInput] = useState('');
   const [callbackUrlCursorOffset, setCallbackUrlCursorOffset] = useState(0);
@@ -86,16 +107,11 @@ export function MCPRemoteServerMenu({
   // If the component unmounts mid-auth (e.g. a parent component's Esc handler
   // navigates away before ours fires), abort the OAuth flow so the callback
   // server is closed. Without this, the server stays bound and the process
-  // can outlive the terminal. Also clear the copy-feedback timer and mark
-  // unmounted so the async setClipboard callback doesn't setUrlCopied /
-  // schedule a new timer after unmount.
+  // can outlive the terminal. Copy-via timers live in ZW / useMcpCopiedVia.
   useEffect(
     () => () => {
       unmountedRef.current = true;
       authAbortControllerRef.current?.abort();
-      if (copyTimeoutRef.current !== undefined) {
-        clearTimeout(copyTimeoutRef.current);
-      }
     },
     [],
   );
@@ -226,18 +242,10 @@ export function MCPRemoteServerMenu({
         void openBrowser(connectorsUrl);
       }
     }
-    if (input === 'c' && !urlCopied) {
+    if (input === 'c') {
       const urlToCopy = authorizationUrl || claudeAIAuthUrl || claudeAIClearAuthUrl;
       if (urlToCopy) {
-        void setClipboard(urlToCopy).then(raw => {
-          if (unmountedRef.current) return;
-          if (raw) process.stdout.write(raw);
-          setUrlCopied(true);
-          if (copyTimeoutRef.current !== undefined) {
-            clearTimeout(copyTimeoutRef.current);
-          }
-          copyTimeoutRef.current = setTimeout(setUrlCopied, 2000, false);
-        });
+        copyViaClipboard(urlToCopy);
       }
     }
   });
@@ -435,14 +443,9 @@ export function MCPRemoteServerMenu({
           <Box flexDirection="column">
             <Box>
               <Text dimColor>If your browser doesn&apos;t open automatically, copy this URL manually </Text>
-              {urlCopied ? (
-                <Text color="success">(Copied!)</Text>
-              ) : (
-                <Text dimColor>
-                  <KeyboardShortcutHint shortcut="c" action="copy" parens />
-                </Text>
-              )}
+              <McpUrlCopyInline via={copiedVia} />
             </Box>
+            <McpUrlCopyDetail via={copiedVia} />
             <Link url={authorizationUrl} />
           </Box>
         )}
@@ -486,14 +489,9 @@ export function MCPRemoteServerMenu({
           <Box flexDirection="column">
             <Box>
               <Text dimColor>If your browser doesn&apos;t open automatically, copy this URL manually </Text>
-              {urlCopied ? (
-                <Text color="success">(Copied!)</Text>
-              ) : (
-                <Text dimColor>
-                  <KeyboardShortcutHint shortcut="c" action="copy" parens />
-                </Text>
-              )}
+              <McpUrlCopyInline via={copiedVia} />
             </Box>
+            <McpUrlCopyDetail via={copiedVia} />
             <Link url={claudeAIAuthUrl} />
           </Box>
         )}
@@ -520,14 +518,9 @@ export function MCPRemoteServerMenu({
               <Box flexDirection="column">
                 <Box>
                   <Text dimColor>If your browser didn&apos;t open automatically, copy this URL manually </Text>
-                  {urlCopied ? (
-                    <Text color="success">(Copied!)</Text>
-                  ) : (
-                    <Text dimColor>
-                      <KeyboardShortcutHint shortcut="c" action="copy" parens />
-                    </Text>
-                  )}
+                  <McpUrlCopyInline via={copiedVia} />
                 </Box>
+                <McpUrlCopyDetail via={copiedVia} />
                 <Link url={claudeAIClearAuthUrl} />
               </Box>
             )}

@@ -1,0 +1,10 @@
+# gold-248-41-eDt  footer fetch: Wen()?uJt:sJt  (304 only on harbor_prism)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+eDt @184547975 len=164 sha=dc853b208d991cdc
+Wen @184548139 len=49 sha=1b70b9fc6406a2cf
+sJt @184548188 len=454 — gh pr view, NO 304 (leftover ghPrStatus stays)
+uJt @184548939 — REST status===304 empty-ok
+JE @184547641 — oJt.of(host) → new dXe (A$ / pollerNotModifiedStreak)
+
+async function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}
+function Wen(){return R("tengu_harbor_prism",!1)}

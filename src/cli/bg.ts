@@ -1,3 +1,4 @@
+import { feature } from 'bun:bundle'
 import { readdir, readFile, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -20,6 +21,7 @@ import {
   sanitizeDaemonControlError,
   subscribeJobStreamTail,
 } from './bg/logsSubscribe.js'
+import { backgroundServiceLabel } from '../bridge/remoteControlServers.js'
 
 export type { SessionEntry } from './bg/engine.js'
 
@@ -127,6 +129,8 @@ const CLI_BG_LOGS =
   'cli_bg_logs' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 const CLI_BG_LOGS_READ_FAILED =
   'read_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+const CLI_BG_RESPAWN =
+  'cli_bg_respawn' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 
 const LOGS_USAGE = 'claude logs <id>'
 const LOGS_DESCRIPTION =
@@ -587,3 +591,139 @@ export async function handleBgStart(args: string[]): Promise<void> {
 }
 
 // densable t6_/r2o peel moved to daemon/uqArgvPeel.ts (full Uq_ 1:1).
+
+function respawnStatusHint(): string {
+  if (feature('DAEMON')) {
+    return " \u2014 run 'claude daemon status'"
+  }
+  if (feature('BG_SESSIONS')) {
+    return " \u2014 run 'claude daemon status'"
+  }
+  return ''
+}
+
+async function logRespawnBad(errorCode: string): Promise<void> {
+  await logEventAsync('tengu_feature_bad', {
+    feature_name: CLI_BG_RESPAWN,
+    error_code:
+      errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+}
+
+async function logRespawnOk(): Promise<void> {
+  await logEventAsync('tengu_feature_ok', { feature_name: CLI_BG_RESPAWN })
+}
+
+/**
+ * densable cEr — `claude respawn <id>|--all`.
+ * Restarts background jobs onto the current binary. Does not attach.
+ */
+export async function respawnHandler(
+  target: string | undefined,
+): Promise<void> {
+  if (target === '--help' || target === '-h') {
+    process.stdout.write(
+      'Usage: claude respawn <id>|--all\n\n  Restart a background session (or all of them) so it picks up the current Claude binary.\n',
+    )
+    process.exitCode = 0
+    return
+  }
+  if (target?.startsWith('-') && target !== '--all') {
+    process.stderr.write(
+      `unknown option '${target}'\nUsage: claude respawn <id>|--all\n`,
+    )
+    process.exitCode = 1
+    return
+  }
+  if (!target) {
+    process.stderr.write('usage: claude respawn <id>|--all\n')
+    process.exitCode = 1
+    return
+  }
+
+  const { ensureDaemonRunning } = await import('../daemon/installPrompt.js')
+  const daemon = await ensureDaemonRunning({
+    forceTransient: true,
+    mayPromptInstall: false,
+  })
+  if (!daemon.ok) {
+    const reason = daemon.reason ?? 'not running'
+    process.stderr.write(
+      `Couldn't respawn — ${backgroundServiceLabel()} is unavailable (${reason})${respawnStatusHint()}\n`,
+    )
+    await logRespawnBad('daemon_unavailable')
+    process.exitCode = 1
+    return
+  }
+
+  const { forceRespawnJob } = await import('../daemon/forceRespawnJob.js')
+  if (target === '--all') {
+    const { isTerminalState, listAllJobs } = await import(
+      '../daemon/jobState.js'
+    )
+    const jobs = (await listAllJobs()).filter(
+      job => !isTerminalState(job.state),
+    )
+    if (jobs.length === 0) {
+      process.stdout.write('no live jobs to respawn\n')
+      return
+    }
+    let restarted = 0
+    let stillAlive = 0
+    for (const job of jobs) {
+      const result = await forceRespawnJob(job.short)
+      if (result.ok) {
+        restarted++
+        const arrow =
+          result.short !== job.short ? ` \u2192 ${result.short}` : ''
+        process.stdout.write(`respawned ${job.short}${arrow}\n`)
+      } else if ('alive' in result && result.alive) {
+        stillAlive++
+        process.exitCode = 1
+        process.stderr.write(
+          `${job.short}: still running — couldn't confirm restart, retry in a moment\n`,
+        )
+      } else {
+        process.exitCode = 1
+        process.stderr.write(`${job.short}: ${result.error}\n`)
+      }
+    }
+    if (restarted === jobs.length) await logRespawnOk()
+    else if (restarted > 0 || stillAlive > 0) {
+      await logRespawnBad(stillAlive > 0 ? 'still_alive' : 'partial')
+    } else await logRespawnBad('spawn_failed')
+    return
+  }
+
+  const { resolveJobShortByPrefix } = await import('../daemon/deleteJob.js')
+  const resolved = await resolveJobShortByPrefix(target)
+  if (!resolved.ok) {
+    process.stderr.write(
+      resolved.kind === 'none'
+        ? `No job matching '${target}'\n`
+        : `Ambiguous prefix '${target}', matches: ${resolved.matches.join(', ')}\n`,
+    )
+    await logRespawnBad(resolved.kind === 'none' ? 'no_match' : 'ambiguous')
+    process.exitCode = 1
+    return
+  }
+
+  const result = await forceRespawnJob(resolved.short)
+  if (!result.ok && 'alive' in result && result.alive) {
+    process.stderr.write(
+      `${resolved.short}: still running — couldn't confirm restart, retry in a moment\n`,
+    )
+    await logRespawnBad('still_alive')
+    process.exitCode = 1
+    return
+  }
+  if (!result.ok) {
+    process.stderr.write(`${result.error}\n`)
+    await logRespawnBad('spawn_failed')
+    process.exitCode = 1
+    return
+  }
+  await logRespawnOk()
+  const arrow = result.short !== resolved.short ? ` \u2192 ${result.short}` : ''
+  process.stdout.write(`respawned ${resolved.short}${arrow}\n`)
+}

@@ -1,0 +1,32 @@
+# gold-248-yt-caps — official Yt constant for he.#s (SurfaceCapabilities)
+
+SEA: official-248/package/claude.exe (226708128)
+Yt is a CONSTANT object, not a class. Leftover name: DEFAULT_SURFACE_CAPS.
+
+## Yt @178525553
+
+```
+var Yt={renderTarget:"ink",workspace:"local",canDrive:!0,transcriptSource:"local-jsonl",remote:null};class he{#e=!1;#t=void 0;#n=void 0;#o=void 0;#r=null;#i=!1;#a=void 0;#s=Yt;...}
+```
+
+## he.reset restores #s=Yt @178526749
+
+```
+reset(){this.#e=!1,this.#t=void 0,this.#n=void 0,this.#o=void 0,this.#r=null,this.#a=void 0,this.#s=Yt,this.#d=!1,this.#l=!1,this.#i=!1,...}
+```
+
+## nn sentinel for He.slowOperations @178540213
+
+```
+var nn=[];class He{#e=[];#t=[];#n=void 0;...slowOperations(){if(this.#t.length===0)return nn;...}}
+```
+
+## class Yt
+
+hits=0 (confirmed not a class)
+
+## peel log
+
+See `_peel-248-yt-caps.mjs` output (full scan retained below for audit).
+
+---

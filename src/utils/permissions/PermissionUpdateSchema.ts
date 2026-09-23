@@ -66,7 +66,25 @@ export const permissionUpdateSchema = lazySchema(() =>
     }),
     z.object({
       type: z.literal('addDirectories'),
-      directories: z.array(z.string()),
+      // densable lr addDirectories: drop non-array / non-string / trim-empty / \0
+      directories: z.array(z.string()).superRefine((directories, ctx) => {
+        for (const directory of directories) {
+          if (directory.trim() === '') {
+            ctx.addIssue({
+              code: 'custom',
+              message: `addDirectories carries a trim-empty directory: ${JSON.stringify(directory)}`,
+            })
+            return
+          }
+          if (directory.includes('\0')) {
+            ctx.addIssue({
+              code: 'custom',
+              message: `addDirectories carries a directory containing a null byte: ${JSON.stringify(directory)}`,
+            })
+            return
+          }
+        }
+      }),
       destination: permissionUpdateDestinationSchema(),
     }),
     z.object({

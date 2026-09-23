@@ -1,0 +1,38 @@
+# gold-248-unk-wave10-28  densable 2.1.248 #28
+# trust-emoji-trunc — unique d/de vs 247 H.slice
+# SEA 226708128 · 247 present
+# leftover host: src/commands/cd/cdDisclosures.ts safeDisclosureEntry
+# TrustDialog.tsx still has no rule-list host (do not invent Go list).
+
+extracted? YES unique 248 d @203817670
+landed? YES on leftover Cd safeDisclosureEntry (Je/cTe share d)
+stay UNKNOWN? no — HAVE leftover-as-HAVE caller (247 H ≠)
+
+## unique 248 body
+d @203817670 len=86 sha=e137c834f6a4d04d exact247=0
+function d(t){let e=bt(t).replace(R,"").trim();return e.length>a?`${de(e,a)}\u2026`:e}
+R=/[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu  a=60
+
+de @178357416 sha=f011568b495723cc leftover truncateCodeUnitsSafe / Jd
+function de(t,n){if(n<=0)return"";if(t.length<=n)return t;let e=t.slice(0,n),r=e.charCodeAt(n-1);return f(r>=55296&&r<=56319?e.slice(0,-1):e)}
+f @178357829 utf16le roundtrip (not Intl.Segmenter)
+
+## 247 ≠
+H @233414045 sha=c86892e8d2e56e61
+function H(t){let e=P(t).replace(B,"").trim();return e.length>f?`${e.slice(0,f)}\u2026`:e}
+B=same R  f=60  — naive slice (mid-emoji garbled)
+
+cTe @203817988 uses d($r(o.ruleValue))
+247 Q @233414366 uses H(b(r.ruleValue))
+
+Go @203835504 lists $_.rules — leftover TrustDialog has no list. Cd Je @210235989 calls cTe/uTe.
+
+## not
+cut off mid-emoji @189843154 old changelog (247=1)
+Intl.Segmenter / granularity:"grapheme" 248=247 (R sanitizer, not d)
+Go has no Segmenter/slice — join only ($_/formatEnglishSourceList)
+
+## leftover
+src/commands/cd/cdDisclosures.ts safeDisclosureEntry
+src/utils/stringUtils.ts truncateCodeUnitsSafe
+src/commands/cd/__tests__/cdDisclosures.248.test.ts

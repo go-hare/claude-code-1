@@ -1,0 +1,300 @@
+# gold-248-restricted-pass3
+bytes=226708128
+when=2026-09-20T04:55:40.508Z
+
+## cwd-181746129 @181746129
+ed it yet.`,classifierApprovable:!0}}else if(dl(g))return{safe:!1,message:`Claude requested permissions to write to ${e}, but you haven't granted it yet.`,classifierApprovable:!0};for(let g of p)if(yl(g,d,u))return{safe:!1,message:`Claude requested permissions to edit ${e} which is a sensitive file.`,classifierApprovable:!0};return{safe:!0}}function Dv(e){return new Set([ve(),...e.additionalWorkingDirectories.keys()])}function oUt(e){let t=EN(),r=t.resolvedWorkingDirPaths.get(e);if(r!==void 0)return r;let o=Ri(e);return t.resolvedWorkingDirPaths.set(e,o),o}function mb(e,t,r){let o=r??Ri(e),u=Array.from(Dv(t)).flatMap((d)=>oUt(d));return o.every((d)=>u.some((p)=>im(d,p,{caseFold:!1,uncShapeParity:!0})))}function vi(e,t,r,o){if(!r.restricted)return null;if(mb(e,r,t)||o().behavior==="allow")return null;let u=Array.from(Dv(r)).join(", ");return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`,decisionReason:{type:"other",reason:HKe}}}function iUt(){return R("tengu_auto_mode_worktree_fast_path",!1)}async function Tdn(e){if(!iUt())return[];let t=new Set,r=new Set;for(let o of D
+
+### cwd fn name=vi @181745941
+## cwd-fn-181746129 @181745941
+len=294 sha=678e7e7e4314c521
+function vi(e,t,r,o){if(!r.restricted)return null;if(mb(e,r,t)||o().behavior==="allow")return null;let u=Array.from(Dv(r)).join(", ");return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`,decisionReason:{type:"other",reason:HKe}}}
+
+## att-183550610 @183550610
+,n){let i=te();for(let o of e){if(p(o))continue;let l=Fan(o);if(l!==void 0)return l;let s=ht(o);if(n.restricted&&!mb(s,n))return{result:!1,message:`Attachment "${o}" is outside the working directory; --restricted only sends files from inside it.`,errorCode:1};try{if(!(await c(s)).isFile())return{result:!1,message:`Attachment "${o}" is not a regular file.`,errorCode:1}}catch(d){let t=T(d);if(t==="E
+
+## V-apply @178181358
+/~BUN/root/chunk-p7sewg72.js"),import("B:/~BUN/root/chunk-01nx0z2f.js"),import("B:/~BUN/root/chunk-8nbttbxp.js")]);G=p(l),b(G),N(l),await z(G),await E(l)}import("B:/~BUN/root/chunk-tfra1egp.js").then(({resolveSetting:p})=>{let{value:b}=p("theme","dark");if(b.startsWith("custom:"))import("B:/~BUN/root/chunk-byss47cg.js").then((N)=>N.loadCustomThemes(l))});let pt=R();W(!0),j(ct({...d.config,...u})),V(d.config.restricted),nt("agents_view");let K=()=>{};process.on("unhandledRejection",K);let q=Promise.resolve(),J=()=>{},dt=new Promise((p)=>{J=p});setImmediate(async()=>{if(D()&&l!==void 0)try{let[{
+
+## function V( needle="function V(e){" hits=21
+- #0 @178844742 ray.isArray(e)}var Ze=H(()=>{if(typeof navigator<"u"&&navigator?.userAgent?.includes("Cloudflare"))return!1;try{return new Function(""),!0}catch(e){return!1}});function V(e){if(B(e)===!1)return!1;let t=e.constructor;if(t===void 0)return!0;let r=t.prototype;if(B(r)===!1)return!1;if(Object.prototype.hasOwnProperty.call(r,"isPrototypeO
+- #1 @180864317 }function _(e){return e===void 0?void 0:cf(e)}var F="Permission mode downgraded to default \u2014 bypass requires accepting the disclaimer interactively first";function V(e){if(!_t())return!1;if(e==="bypassPermissions")return!hE()&&!oe().bypassPermissionsModeAccepted;return!1}
+export{Oqn,Lqn,Nqn,$qn,$ft,TVe,Fft,Uft,Fqn,Uqn,lg,xFt,Bq
+- #2 @181117253 {let t=[],n=0;for(let r of e){let s=r.pollEvent?.envelope??"",o=Buffer.byteLength(s,"utf8");if(t.length>0&&(t.length>=xln||n+o>L))break;t.push(r),n+=o}return t}function V(e){return`<system>delivery chunked: ${e} more queued event(s) follow in the next delivery, oldest first; nothing was dropped.</system>`}var U=6;function y5n(){retu
+- #3 @181335320 he fact that it arrived through this tool; do not wait for a human if none is present. Verify anything surprising against primary sources before acting on it.`;function V(e){return new Set([jM,Gc,Ww,...y8n,Oi,Uz,hHe,I5,Nz,$z,...e!=="ant"?[md]:[],Ks,OZ,wpt,f_])}var Vbe=V("external"),vln=new Set([...Vbe]);function X(e){return new Set(
+- #4 @183545641 if|webp)$/i;function G(e){if(e.startsWith('"')&&e.endsWith('"')||e.startsWith("'")&&e.endsWith("'"))return e.slice(1,-1);return e}var q=/^(?:[A-Za-z]:\\|\\\\)/;function V(e){return e}function u3n(e){let t=G(e.trim()),i=V(t);return tHe.test(i)}function ue(e){let t=G(e.trim()),i=V(t);if(tHe.test(i))return i;return null}async function 
+- #5 @189902255 e"),["DELETE /{slug}"]),...[]].sort((e,t)=>V(e)-V(t));function F(e,t){return t.map((r)=>{let[l,u]=r.split(" ");return{method:l,pattern:u.split("/"),family:e}})}function V(e){return J(e.pattern,(t)=>t.startsWith("{"))}function gJt(e,t){let r=t.slice(10).replace(/[?#].*$/s,"").split("/");return ye.find((u)=>u.method===e&&u.pattern.len
+- #6 @190066455 .startsWith(t+x)||e===s||e.startsWith(s+x)}function $Xt(e,t,s){let r=V(P(t));if(r===s)return e;if(e===r)return s;return e.startsWith(r+x)?s+e.slice(r.length):e}function V(e){let t=e.replace(/[\\/]+$/,"");return t===""?e:t}function vrt(e,t){if(H(e))return null;if(e==="~"||e.startsWith(`~${x}`)||e.startsWith("~/"))return null;if(D(e))
+- #7 @190347272 =e.length;return i?e[v(0,i-1)]:void 0}var d=z;function w(e,i){return Fne(i,function(o){return e[o]})}var C=w;function B(e){return e==null?[]:C(e,E4(e))}var b=B;function V(e){return d(b(e))}var y=V;function F(e){var i=Wm(e)?d:y;return i(e)}var nT=F;N();function FTe(){let i=qe().spinnerVerbs;if(!i)return h;if(i.mode==="replace")return
+- … +13 more
+
+## c7e( needle="c7e(" hits=4
+- #0 @178565201 sultPairing()}function hEr(e){n().host.launchOptions.replaceStrictToolResultPairing(e)}function Yk(){return n().host.launchOptions.restrictedSession()}function c7e(e){n().host.launchOptions.replaceRestrictedSession(e)}function By(){return n().sessionFlags.memoryToggledOff()}function Sde(e){n().sessionFlags.replaceMemoryTog
+- #1 @189721069 t t=xjt("--settings");if(t)wtr(t);let a=xjt("--managed-settings");if(a)c(a);let s=xjt("--setting-sources");if(s!==void 0)g(s);if(t0("--restricted")||O2())g(""),c7e(!0);xr("eagerLoadSettings_end"),Bi("settings_load_ms",performance.now()-e,e)}
+export{wtr,k3t};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic
+- #2 @191363865 e,addDir:Bt=[],fallbackModel:Ht,betas:on=[],ide:Rn=!1,sessionId:xt,includeHookEvents:mn,includePartialMessages:fn,forwardSubagentText:wn,sessionMirror:tn}=C;if(c7e(xe),C.prefill)Hje(C.prefill);let zt,cn=C.agents;if(typeof cn==="string"&&cn!==""&&!ho("agents",{explicitlyRequested:!0})&&!C.resume&&!C.continue&&!a.CLAUDE_BG_P
+- #3 @203233470 _event",{event_type:v("abandoned"),appearance_id:ke(s7e)}),So("feedback_survey",{event_type:"abandoned",appearance_id:s7e,survey_type:"post_compact"})}function c7e(VNo){return Qp(VNo)}function d7e(GNo){return GNo.uuid}var QCe=5000,zCe="tengu_post_compact_survey",YCe=0.2;function JCe(d,C){let x=d.findIndex((H)=>H.uuid===C);
+
+## replaceRestrictedSession(e) needle="replaceRestrictedSession(" hits=2
+- #0 @178535949 his.#s}replaceRendererMode(e){this.#s=e}strictToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFo
+- #1 @178565231 n().host.launchOptions.replaceStrictToolResultPairing(e)}function Yk(){return n().host.launchOptions.restrictedSession()}function c7e(e){n().host.launchOptions.replaceRestrictedSession(e)}function By(){return n().sessionFlags.memoryToggledOff()}function Sde(e){n().sessionFlags.replaceMemoryToggledOff(e)}function jEn(e){if(e===!1)throw Error("s
+
+## launchOptions-restricted @178535914
+;#f=!1;#v=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrintOutputFormat(e){this.#t=e}thinkingDisplayExplicit(){return this.#n}replaceThinkingDisplayExplicit(e){this.#n=e}permissionPromptToolName(){return this.#o}replacePermissionPromptToolName(e){this.#o=e}hasStreamingInput(){return this.#r}replaceHasStreamingInput(e){this.#r=e}singleShotPrintSession(){return this.#i}replaceSingleShotPrintSession(e){this.#i=e}modelOverrideOptOutForSession(){return this.#a}replaceModelOverrideOptOutForSession(e){this.#a=e}rendererMode(){return this.#s}replaceRendererMode(e){this.#s=e}strictToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p
+
+## restricted tools default needle="restricted" hits=317
+- #0 @67032089 dyCallback(null, this[kContext]);
+    if (!this[kHasWritePermission]())
+      return ReplHistory[kWriteToOutput](this[kContext], `
+Access to FileSystemWrite is restricted.
+REPL session history will not be persisted.
+`), onReadyCallback(null, this[kContext]);
+    this[kContext].pause(), this[kInitializeHistory](onReadyCallback).c
+- #1 @82322604 looking atbeneficialare in themonitoringreportedlythe modernworking onallowed towhere the innovative</a></div>soundtracksearchFormtend to beinput id="opening ofrestrictedadopted byaddressingtheologianmethods ofvariant ofChristian very largeautomotiveby far therange frompursuit offollow thebrought toin Englandagree thataccused of
+- #2 @82353205 usedreturn to thealthough thischange in theseveral otherbut there areunprecedentedis similar toespecially inweight: bold;is called thecomputationalindicate thatrestricted to	<meta name="are typicallyconflict withHowever, the An example ofcompared withquantities ofrather than aconstellationnecessary forreported thatspecificationp
+- #3 @82417821 ... ..@....p..@.......@.......@.......@....	Archive (..) {
+.<r>files<d>:<r> latest.{"_id":".
+","name":".."..,"dist-tags":{..:".."}..,"versions":{"..":..}.publicrestricted.,"access":".."..,"_attachments":{".5":{"content_type":"application/octet-stream","data":"..","length":..}}}.???authUrldoneUrl.
+Authenticate your account at:
+..
+- #4 @82545478 d to create temp XML fileOut of memoryThis cron expression requires too many triggers for Windows Task Scheduler (max 48). Simplify the expression or use fewer restricted fields.Failed to build task XMLnew Archive() requires an argumentExpected an object, Blob, TypedArray, or ArrayBuffer.. ..: ...error: Failed to start process..
+- #5 @84743341    '(-q --quiet)'{-q,--quiet}'[suppress normal output]'
+    '--regex-size-limit=[specify upper size limit of compiled regex]:regex size (bytes)'
+    '*'{-u,--unrestricted}'[reduce level of "smart" searching]'
+    '--stop-on-nonmatch[stop on first non-matching line after a matching one]'
+
+    + operand # Operands
+    '(--files --
+- #6 @84768355 o be used when searching a file
+explicitly or when searching stdin. That is, it is only applicable when
+recursively searching a directory.
+.sp
+When the \flag{unrestricted} flag is provided for a third time, then this flag
+is automatically enabled.
+.sp
+This flag overrides the \flag{text} flag.
+Search binary files.--pcre2-version 
+- #7 @84785622 nted on its own line, followed by a \fB:\fP and then a comma-delimited list
+of globs for that type on the same line.
+Show all supported file types.type-list--unrestricted has no negationflag can only be repeated up to 3 times
+This flag reduces the level of "smart" filtering. Repeated uses (up to 3) reduces
+the filtering even mor
+- … +309 more
+
+## codeRunningTools needle="codeRunning" hits=0
+
+## CODE_RUNNING needle="CODE_RUNNING" hits=0
+
+## restrictedBuiltins needle="restrictedBuilt" hits=0
+
+## dropTools needle="dropTools" hits=0
+
+## filterTools restricted needle="restricted&&" hits=8
+- #0 @181760545 ,void 0,o),t)}let u=we(e);if(mi(u,{includeWorkshopDoc:o?.permissionMode==="plan"}))return ue(t,"Plan files for current session are allowed for writing");if(!o?.restricted&&ml(u))return ue(t,"Workflow script files for current session are allowed for writing");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed f
+- #1 @181760824 t,"Scratchpad files for current session are allowed for writing");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u)
+- #2 @181760952 is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writ
+- #3 @181761021 )return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writing");if(pi(u))return gi;if(ur(u))return fr;if(dr(u))return mr;return
+- #4 @181761523 :"Cannot read memory while it is paused. Run /pause-memory to resume automemory.",decisionReason:{type:"safetyCheck",reason:di,classifierApprovable:!1}};if(!o?.restricted&&fl(u))return ue(t,"Project directory files are allowed for reading");if(mi(u,{includeWorkshopDoc:!0}))return ue(t,"Plan files for current session are allowed fo
+- #5 @183550511 is not supported.`,errorCode:1};return}async function Wdt(e,n){let i=te();for(let o of e){if(p(o))continue;let l=Fan(o);if(l!==void 0)return l;let s=ht(o);if(n.restricted&&!mb(s,n))return{result:!1,message:`Attachment "${o}" is outside the working directory; --restricted only sends files from inside it.`,errorCode:1};try{if(!(awai
+- #6 @184530568 nitions;return{depth:Xc(e.agentContext),allowedAgentTypes:r,activeAgents:t}}function hP(e,t,{depth:r=0,allowedAgentTypes:o,activeAgents:u}={}){return GX()&&!(t.restricted&&_s(t,{name:Yr}))&&(u===void 0||bfe(u))&&e.some((p)=>Xt(p,ft))&&!_s(t,{name:ft})&&!z9(t,ft,iu)&&r<i_()&&(o===void 0||o.includes(iu))}function E3e(e,t,r,o,u){let 
+- #7 @185211562 TOOLS===!0)return!0;return R(ubn,!1)===!0}function Zj(){return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:void 0}function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new S
+
+## O2() tools needle="O2()" hits=7
+- #0 @178589360 s(e)}function No(){return Me(process.env.CLAUDE_CODE_SIMPLE)||a("--bare")}function wr(){return Me(process.env.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-mode")?"restart without --safe-mode":"unset CLAUDE_CODE_SAFE_MODE"}function sXe(){
+- #1 @182966345 ersion: 2.1.248
+import{wr,O2}from"B:/~BUN/root/chunk-4hkt7f9w.js";function zin(n,e){return e&&!n.restricted?{...n,restricted:!0}:n}function dae(n){return wr()||O2()||[n.permissionMode,n.model,n.fallbackModel,n.effort,n.agent,n.agents,n.settings,n.appendSystemPrompt,n.appendSystemPromptFile,n.systemPrompt,n.systemPromptFile
+- #2 @189637913 cess.stderr.write(`${Z.error}
+`),process.exitCode=1;return}await Ns("cli_bg_dispatch_exec"),process.stdout.write(Epe(Z.short,void 0,g||E)+`
+`);return}let u=XCn(O2()?["--restricted",...e]:e),m=await wnr(),p=await $L(m?Enr(u,m):u,void 0,"shell",void 0,void 0,void 0,void 0,t);if(!p.ok){await(p.reason==="gate_blocked"?Ql:En)("
+- #3 @189721058 _start");let t=xjt("--settings");if(t)wtr(t);let a=xjt("--managed-settings");if(a)c(a);let s=xjt("--setting-sources");if(s!==void 0)g(s);if(t0("--restricted")||O2())g(""),c7e(!0);xr("eagerLoadSettings_end"),Bi("settings_load_ms",performance.now()-e,e)}
+export{wtr,k3t};
+.// @bun @bytecode
+// Claude Code is a Beta product pe
+- #4 @199399035 ess.stdout.isTTY){if(await yDe(),Ug()){let n=jpn();s("tengu_fleetview",{viaCommander:!0,relaunch:n});let{config:t}=MSt(process.argv.slice(2));if(t.restricted||=O2(),t.pluginDir.length>0||t.pluginDirNoMcp.length>0)m7e(t.pluginDir),h7e(t.pluginDirNoMcp),Xf("claude agents --plugin-dir (commander action)");qYe(dae({...u,...t})
+- #5 @222788406 t)}):null}var tq,nq,O2=K(()=>{"use client";tq=_(ie(),1);ri();M2();nq=_(he(),1)});var RC,L2,rq,oq=K(()=>{"use client";RC=_(ie(),1);qo();Jn();pn();ri();$b();la();O2();dk();Ui();L2=_(he(),1),rq=RC.forwardRef(function(t,n){var r;let{render:o,className:i,style:a,children:s,...c}=t,l=or(),u=Zf(),f=!!Qf(!0),{filteredItems:d,hasIt
+- #6 @222808954 er:()=>w9,useFilteredItems:()=>bY});var yY=K(()=>{N9();L9();H9();j9();K9();$9();oq();sq();dq();mq();Cq();Tq();_q();Mq();Iq();Hq();Gq();qq();Xq();eY();rY();sY();O2();uY();pY();gY();k2();vY()});var xY=K(()=>{yY()});function AY(e,t){if(!(e===void 0||!(e>0)))return{"--cds-popup-max-h":"var(--available-height)","--cds-popup-lis
+
+## Yk() tools needle="Yk()" hits=9
+- #0 @178565137 ode(e)}function BEn(){return n().host.launchOptions.strictToolResultPairing()}function hEr(e){n().host.launchOptions.replaceStrictToolResultPairing(e)}function Yk(){return n().host.launchOptions.restrictedSession()}function c7e(e){n().host.launchOptions.replaceRestrictedSession(e)}function By(){return n().sessionFlags.memo
+- #1 @180592348 p++){let g=xl(o[p]);if(u8e.has(g))return!0;if(p===u&&r?.has(g))return!0}return!1}function zs(){if(By())return!1;return qgt()}function qgt(){if(wr())return!1;if(Yk())return!1;let e=process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY;if(Me(e))return!1;if(Eo(e))return!0;if(a.CLAUDE_CODE_SIMPLE)return!1;if(a.CLAUDE_CODE_REMOTE&&!proce
+- #2 @185045586 :r}=e,o=e.cwd??te(),u,p=()=>u??=Kl().catch(()=>!1),g=ky("allow_remote_sessions","Cloud sessions","are");if(g)return e.onCreateFail?.(g,"policy_denied"),null;if(Yk())return e.onCreateFail?.(MMt,"restricted_session"),null;if(!ar())return e.onCreateFail?.("Cloud sessions are only available on the first-party Anthropic API pro
+- #3 @189666511 s(t)]);for(let r of o){let i=r;if(e[i]!==t[i])return!1}return!0}class sr{spare=null;ensuring=null;discarded=!1;#e=[];#t=["--restricted"];get extraArgs(){return Yk()?this.#t:this.#e}setExtraArgs(e){this.#e=e,this.#t=e.includes("--restricted")?e:["--restricted",...e]}markReady(e){if(this.spare?.sessionId===e)this.spare.ready
+- #4 @191590925 le resources to download at startup. Format: file_id:relative_path (e.g., --file file_abc:doc.txt file_def:img.png)"),O=()=>p;C.action(async(k,E)=>{let x=zin(E,Yk()),I=await L0n(k,x,o,O,t.pendingConnect,t.pendingSSH,t,u,g);if(I.kind==="exited")return;if(I.kind==="prepared-headless")return Hn(I,x);if(!t.runInteractiveSessio
+- #5 @192190424 etError,x=S.getSnapshot();if(x.newSessionOpening||x.attachingJobId!==null)return;let A=S.beginNewSession();C(null);let F=()=>S.isCurrentNewSessionAttempt(A);$L(Yk()?["--restricted"]:[],void 0,"shell",d,void 0,void 0,void 0,h).then(async(T)=>{try{if(!T.ok){if(!F())return;S.endNewSession(),f("fleet_view_new_session",T.reason
+- #6 @202357369 tch),Zze(me.sessionScratch);ee.removeByFilter(Sbe),xmn(Jt,ge).catch(()=>{});let Xo=lRe(x);if(R("tengu_bg_leftarrow_inprocess",!0))try{return await V9(Jt,Ae,{...Yk()&&{dispatchExtraArgs:["--restricted"]},dispatchDefaults:Xo,...me?.autoOpenJobId!==void 0&&{autoOpenJobId:me.autoOpenJobId},originSpawn:Ro,storageV5:ge,credentia
+- #7 @202357696 xe,fleetNudgeStore:me?.fleetNudgeStore})}catch(uo){_(uo)}let wo=await _G({args:["agents",...xQe(Xo)],env:{CLAUDE_AGENTS_SELECT:me?.autoOpenJobId??Jt,...$B(),...Yk()&&{CLAUDE_CODE_RESTRICTED:"1"}}});return w2t(ge).catch(()=>{}),wo})();return WL(Pe,Re)}catch(Pe){return _(Pe),w2t(ge).catch(()=>{}),WL("Couldn't background this
+- … +1 more
+
+## n.restricted tools needle=".restricted" hits=46
+- #0 @178161340 };for(let e=0;e<n.length;e++){let s=n[e];if(s==="agents"&&!i){i=!0;continue}if(s==="--strict-mcp-config"){t.strictMcpConfig=!0;continue}if(s==="--restricted"){t.restricted=!0;continue}let o=s.indexOf("="),p=o===-1?s:s.slice(0,o),l=Object.hasOwn(a,p)?a[p]:void 0;if(l){if(o!==-1)l(s.slice(o+1));else if(e+1<n.length)l(n[++e]);else g
+- #1 @178161946 oMcp:n.pluginDirNoMcp.map((t)=>r(t,!1)),addDir:n.addDir.map((t)=>r(t,!1)),mcpConfig:n.mcpConfig.map((t)=>r(t,!0)),strictMcpConfig:n.strictMcpConfig,restricted:n.restricted}}function Qwe(n){return[...n.settings?["--settings",n.settings]:[],...n.pluginDir.flatMap((i)=>["--plugin-dir",i]),...n.pluginDirNoMcp.flatMap((i)=>["--plugin-
+- #2 @178162275 n-dir-no-mcp",i]),...n.addDir.flatMap((i)=>["--add-dir",i]),...n.mcpConfig.flatMap((i)=>["--mcp-config",i]),...n.strictMcpConfig?["--strict-mcp-config"]:[],...n.restricted?["--restricted"]:[]]}function rer(n){let i=0;while(n[i]==="--dangerously-skip-permissions"||n[i]==="--allow-dangerously-skip-permissions")i++;return n[i]==="da
+- #3 @178178402 eBgFlag(t,a),await Promise.race([Promise.all([c(),C()]),A(500,void 0,{unref:!0})]).catch(()=>{}),process.exit(process.exitCode??0)}}return}let d=MSt(t);d.config.restricted||=["1","true","yes","on"].includes((process.env.CLAUDE_CODE_RESTRICTED??"").toLowerCase().trim());let{dispatchDefaults:u,rest:M}=Dt(d.rest),k=d.hasAgentsPositi
+- #4 @178181368 k");if(b.startsWith("custom:"))import("B:/~BUN/root/chunk-byss47cg.js").then((N)=>N.loadCustomThemes(l))});let pt=R();W(!0),j(ct({...d.config,...u})),V(d.config.restricted),nt("agents_view");let K=()=>{};process.on("unhandledRejection",K);let q=Promise.resolve(),J=()=>{},dt=new Promise((p)=>{J=p});setImmediate(async()=>{if(D()&&l
+- #5 @178565171 ost.launchOptions.strictToolResultPairing()}function hEr(e){n().host.launchOptions.replaceStrictToolResultPairing(e)}function Yk(){return n().host.launchOptions.restrictedSession()}function c7e(e){n().host.launchOptions.replaceRestrictedSession(e)}function By(){return n().sessionFlags.memoryToggledOff()}function Sde(e){n().sessio
+- #6 @181745967 ,r){let o=r??Ri(e),u=Array.from(Dv(t)).flatMap((d)=>oUt(d));return o.every((d)=>u.some((p)=>im(d,p,{caseFold:!1,uncShapeParity:!0})))}function vi(e,t,r,o){if(!r.restricted)return null;if(mb(e,r,t)||o().behavior==="allow")return null;let u=Array.from(Dv(r)).join(", ");return{behavior:"deny",message:`${e} is outside ${u}; --restric
+- #7 @181757852 equested permissions to write to ${u}, but you haven't granted it yet.`,decisionReason:{type:"rule",rule:N}}}let k=uqe(p,t,d,{permissionMode:r.mode,restricted:r.restricted});if(k.behavior!=="passthrough"&&cqe(k,r))return k;let E=F9(u,d,void 0,r.isRemoteMode&&!r.restricted,r.trustedNetworkDirectories);if(!E.safe){let O=r.restricte
+- … +38 more
+
+## settingSources empty restricted needle="settingSources" hits=13
+- #0 @92264632 treat...	...E...debugFile........j.debugToStderr...........inputFormat.........outputFormat........includePartialMessages..........replayUserMessages........J.settingSources......Rr/.permissionPromptTool...'R+.fallbackModel.......|...maxBudgetUsd....z...allowedTools....#.Z.systemPromptFile....^.+.appendSystemPromptFile..........th
+- #1 @92315161 ..........B:/~BUN/root/chunk-n248zmaf.js..........B:/~BUN/root/chunk-rtshtmb7.js.......h..B:/~BUN/root/chunk-apxvf9nt.js..I...&.=.Cannot destructure property 'settingSources' from null or undefined value...<...D
+U.the cloud session loads the repository's settings regardlessO...g>..Cannot destructure property 'permissionPromptTool' 
+- #2 @182966551 l,n.effort,n.agent,n.agents,n.settings,n.appendSystemPrompt,n.appendSystemPromptFile,n.systemPrompt,n.systemPromptFile,n.replyOnResume,n.permissionPromptTool,n.settingSources,n.managedSettings].some((e)=>e!==void 0)||Boolean(n.disableSlashCommands)||n.sessionPersistence===!1||Boolean(n.dangerouslySkipPermissions)||Boolean(n.allowDan
+- #3 @182967151 inDir??[]).length>0||(n.pluginDirNoMcp??[]).length>0}function Win(n){return[n.systemPrompt,n.systemPromptFile,n.appendSystemPromptFile,n.permissionPromptTool,n.settingSources,n.managedSettings].some((e)=>e!==void 0)||(n.tools??[]).some((e)=>e!=="default")}var CGe="a custom system prompt, a tool allowlist, or restricted settings";
+ex
+- #4 @191416482 r _a=xn("bypass","bypass"),mu={debug:Po,debugFile:Po,debugToStderr:Po,verbose:Po,inputFormat:Po,outputFormat:Po,includePartialMessages:Po,replayUserMessages:Po,settingSources:({settingSources:d})=>tS(d)?Po:Br("the cloud session loads the repository's settings regardless"),permissionPromptTool:({permissionPromptTool:d})=>d==="stdio"?
+- #5 @191416499 "bypass"),mu={debug:Po,debugFile:Po,debugToStderr:Po,verbose:Po,inputFormat:Po,outputFormat:Po,includePartialMessages:Po,replayUserMessages:Po,settingSources:({settingSources:d})=>tS(d)?Po:Br("the cloud session loads the repository's settings regardless"),permissionPromptTool:({permissionPromptTool:d})=>d==="stdio"?Po:xn("unsupporte
+- #6 @191423922 "sdk_mcp",gu(w));return C.length>0?In:Cn}function fS(d,C){return Object.keys(mu).flatMap((w)=>{if(!(Zs(d[w])||w==="mcpConfig"&&Zs(C.mcpConfigFlagServers)||w==="settingSources"&&d.settingSources!==void 0))return[];let j=mu[w],H=typeof j==="function"?j(d,C):j;return[{key:w,treatment:H.treat==="create"&&C.entry==="attach"?Wh:H}]})}func
+- #7 @191423941 turn C.length>0?In:Cn}function fS(d,C){return Object.keys(mu).flatMap((w)=>{if(!(Zs(d[w])||w==="mcpConfig"&&Zs(C.mcpConfigFlagServers)||w==="settingSources"&&d.settingSources!==void 0))return[];let j=mu[w],H=typeof j==="function"?j(d,C):j;return[{key:w,treatment:H.treat==="create"&&C.entry==="attach"?Wh:H}]})}function V0n(d,C={}){le
+- … +5 more
+
+## userSettings filter needle="userSettings" hits=286
+- #0 @92245864 S from config to process.env: ......z...NODE_EXTRA_CA_CERTS.S...$...CA certs: skipping settings-sourced NODE_EXTRA_CA_CERTS under host-managed provider.....L...userSettings,....$..CA certs: Config fallback - globalEnv keys: .....C.., settingsEnv keys: 8....`..CA certs: Found NODE_EXTRA_CA_CERTS in config/settings: "....c`.CA certs
+- #1 @95984988 ctory at the marker path stays and the marker write will keep failing.........S.could not remove it (...	.......#throttle.........8.Skipping retention cleanup: userSettings source is disabled (--setting-sources) and no enabled source provides cleanupPeriodDays........&.A.user_source_disabledB...<...Skipping cleanup: a settings fil
+- #2 @98061952 t.h.e. .m.a.s.k. .i.s. .k.e.p.t. .(.s.e.n.t.i.n.e.l. .b.i.n.d. .o.n. .t.h.e. .r.e.a.l. .f.i.l.e.). .W.I.T.H.O.U.T. .i.n.j.e.c.t.i.o.n........rm.' from disabled userSettings degrades to deny (a disabled source cannot grant proxy injection; its restrictive half still applies).......F..' degrades to deny on ..F....... (file masking i
+- #3 @98633008 "mcp__linear__create_issue".B....B[.Display label of the memory-file source, e.g. "Project" or "User"........v..Raw source identifier, e.g. 'projectSettings', 'userSettings', 'plugin'. Built-in agents are excluded by the producer. Display labels are the renderer's concern....E......Raw source identifier, e.g. 'userSettings', 'plu
+- #4 @98633161 ngs', 'userSettings', 'plugin'. Built-in agents are excluded by the producer. Display labels are the renderer's concern....E......Raw source identifier, e.g. 'userSettings', 'plugin', 'syncedSkills'....)....|..Omitted when no skills contribute tokens.........)..S.t.r.u.c.t.u.r.e.d. .t.w.i.n. .o.f. .t.h.e. ./.c.o.n.t.e.x.t. .r.e.p
+- #5 @99554956 enabled. ....ps.sandbox.allowUnsandboxedCommands.....<..sandbox.failIfUnavailable........z..negates the operator's ......... posture (projectSettings overrides userSettings in the merged read). Remove it from the repo settings; operator posture belongs in the user-level settings.json*...r...permissions.allow (sandbox-arm projectio
+- #6 @178538819 rkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=null,this.#r=null,this.#i=!1,this.#a=tn(),this.#s=!1}}function tn(){return["userSettings","projectSettings","localSettings","flagSettings","policySettings"]}class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inline
+- #7 @178789280 a}),history:()=>({namespace:"history"}),log:d,globalConfig:()=>({namespace:"globalConfig"}),globalConfigCopy:(e,n)=>({namespace:"globalConfig",kind:e,stamp:n}),userSettings:()=>({namespace:"settings",layer:"user"}),projectSettings:(e)=>({namespace:"settings",layer:"project",projectKey:e}),localSettings:(e)=>({namespace:"settings",
+- … +278 more
+
+## setAllowedSettingSources([ needle="setAllowedSettingSources" hits=2
+- #0 @101895236 hedSignalssetAccountPluginsSyncEnabledsetAccountSkillsSyncEnabledsetActiveRoutinesetAdditionalDirectoriesForClaudeMdsetAdmin3PSteeringSnapshotsetAllowedChannelssetAllowedSettingSourcessetApiKeyFromFdsetAttacherCapssetAuthenticatedAccountsetBackgroundAutoModeSetupInFlightsetCachedClaudeMdContentsetCachedOtlpHttpAgentFactorysetCachedTelemetryRe
+- #1 @192784176 setAccountSkillsSyncEnabled,nEr as setActiveRoutine,D4 as setAdditionalDirectoriesForClaudeMd,pEn as setAdmin3PSteeringSnapshot,p7 as setAllowedChannels,mkn as setAllowedSettingSources,BGt as setApiKeyFromFd,IEn as setAttacherCaps,Fq as setAuthenticatedAccount,SGt as setBackgroundAutoModeSetupInFlight,pkn as setCachedClaudeMdContent,TEn as se
+
+## allowedSettingSources restricted needle="allowedSettingSources" hits=3
+- #0 @99404152 e........"..parentManagedSettings.......1,..replaceParentManagedSettings....Y...parentManagedSettingsInvalid#...K.:.replaceParentManagedSettingsInvalid......>..allowedSettingSources.......A.`.replaceAllowedSettingSources....p...useCoworkPlugins....S(a.replaceUseCoworkPlugins....H.1.inlinePlugins........'g.replaceInlinePlugins........inlin
+- #1 @178538530 tings(){return this.#r}replaceParentManagedSettings(e){this.#r=e}parentManagedSettingsInvalid(){return this.#i}replaceParentManagedSettingsInvalid(e){this.#i=e}allowedSettingSources(){return this.#a}replaceAllowedSettingSources(e){this.#a=e}useCoworkPlugins(){return this.#s}replaceUseCoworkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#
+- #2 @178569934 achedClaudeMdContent:n().sessionFlags.cachedClaudeMdContent()}function yEr(e){n().host.diagnostics.recordError(e)}function kde(){return n().host.settingsSource.allowedSettingSources()}function mkn(e){n().host.settingsSource.replaceAllowedSettingSources(e)}function f7e(){return De()&&n().host.launchOptions.clientType()!=="claude-vscode"}fun
+
+## restricted sources=[] needle="restricted?[]" hits=0
+
+## restricted sources 2 needle="restricted?[" hits=1
+- #0 @178162276 -dir-no-mcp",i]),...n.addDir.flatMap((i)=>["--add-dir",i]),...n.mcpConfig.flatMap((i)=>["--mcp-config",i]),...n.strictMcpConfig?["--strict-mcp-config"]:[],...n.restricted?["--restricted"]:[]]}function rer(n){let i=0;while(n[i]==="--dangerously-skip-permissions"||n[i]==="--allow-dangerously-skip-permissions")i++;return n[i]==="daem
+
+## ignore user project needle="userSettings\",\"projectSettings\",\"localSettings\"" hits=8
+- #0 @178538819 rkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=null,this.#r=null,this.#i=!1,this.#a=tn(),this.#s=!1}}function tn(){return["userSettings","projectSettings","localSettings","flagSettings","policySettings"]}class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInl
+- #1 @179414342 Settings":return"user";case"projectSettings":case"localSettings":return"project";case"policySettings":return"managed";case"flagSettings":return"flag"}}var ms=["userSettings","projectSettings","localSettings","flagSettings","policySettings"];function MS(e){switch(e){case"userSettings":return"user";case"projectSettings":return"project";case"localSettings":return"proj
+- #2 @179416135 ettings"),r.add("policySettings");let o=ms.filter((i)=>r.has(i));return t.enabledSources={allowed:e,result:o},o}function yo(e){return yi().includes(e)}var TC=["userSettings","projectSettings","localSettings"],AC=new Set(["projectSettings","localSettings"]),Yve=["localSettings","projectSettings","userSettings"];import{join as On}from"path";class Ne{managedFilePath=v
+- #3 @180285521 i(),i()).describe("Map of server names to error messages for servers that failed to connect")}).describe("Result of a setMcpServers operation.")),vr=h(()=>le(["userSettings","projectSettings","localSettings","session","cliArg"])),Su=h(()=>le(["allow","deny","ask"])),J3=h(()=>le(["allow","deny","ask","defer"])),Tu=h(()=>m({toolName:i(),ruleContent:i().optional()})),
+- #4 @180477622 et_settings")}).describe("Returns the effective merged settings and the raw per-source settings.")),H5=h(()=>m({effective:Oe(i(),ye()),sources:x(m({source:le(["userSettings","projectSettings","localSettings","flagSettings","policySettings"]),settings:Oe(i(),ye())})).describe("Ordered low-to-high priority \u2014 later entries override earlier ones."),applied:m({mode
+- #5 @183933966 ter((o)=>o.ts>e);return t.recentActivity=[],r}var l4=h(()=>le(["allow","deny","ask"])),c4=h(()=>m({toolName:i(),ruleContent:i().optional()}));var LO=h(()=>le(["userSettings","projectSettings","localSettings","session","cliArg"])),bM=h(()=>Ss("type",[m({type:F("addRules"),rules:x(c4()),behavior:l4(),destination:LO()}),m({type:F("replaceRules"),rules:x(c4()),behavior
+- #6 @191134200 s";import{jr}from"B:/~BUN/root/chunk-stcjdms0.js";import{SUt,vUt}from"B:/~BUN/root/chunk-2xerz234.js";import{Xe,Nt}from"B:/~BUN/root/chunk-ad87jkx5.js";var p=["userSettings","projectSettings","localSettings","flagSettings","cliArg","session"];function i(l){if(l===Xe)return Xe;if(l===Nt)return Nt;return null}function m(l,e){let o=i(l);if(o===null)return null;if(e===
+- #7 @201254636 !1,{answer:u,given:!1};return{answer:u,given:a}}function ee(e){try{e?.()}catch(t){n(`cloud-plugins consent: callback failed (${l(t)})`,{level:"warn"})}}var L=["userSettings","projectSettings","localSettings","flagSettings"],ne=new Set(["userSettings","flagSettings"]),te=ms.toReversed(),re=200,oe=32,C=2000,ie=256,ae=1024,ce=140,de=128,ue=256,pe=16,fe=128,_e=262144,m
+
+## sources user project local needle="[\"userSettings\",\"projectSettings\",\"localSettings\"]" hits=1
+- #0 @179416133 gSettings"),r.add("policySettings");let o=ms.filter((i)=>r.has(i));return t.enabledSources={allowed:e,result:o},o}function yo(e){return yi().includes(e)}var TC=["userSettings","projectSettings","localSettings"],AC=new Set(["projectSettings","localSettings"]),Yve=["localSettings","projectSettings","userSettings"];import{join as On}from"path";class Ne{managedFilePath=vo
+
+## tools names needle="tools names" hits=2
+- #0 @99632002 ..........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip MCP servers too). Also c
+- #1 @191582790 tricted","Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-config to skip MCP servers too). Also c
+
+## explicitTools needle="explicitTools" hits=0
+
+## named in --tools needle="named in" hits=19
+- #0 @96052152 ctory of ours..........O_DIRECTORY.....mx...stale......=6..unsupported object format ......^...[\r\n]......]...^["#]...;....	..the objects directory cannot be named in an alternates file.
+.......alternates......B.a.gitdir..W...Us..the side repository could not be inspected (its object directories could not be listed)...... y.
+- #1 @96686351 son if any step was refused.
+
+Rules that override everything else: add_issue_comment is the only write you may make, exactly once, and only to the pull request named in the payload; never post a review of any kind and never approve or request changes; do not merge, push, edit files, change the pull request's title/body/branch,
+- #2 @97569138 })$...)...C...resolveVersionRange: rejected unsafe URL ...........--tags..*...@u..resolveVersionRange: ls-remote failed for .........maxSatisfying...;...7oN.Renamed installed_plugins_v2.json to installed_plugins.json.7...o.e.Converted installed_plugins.json from V1 to V2 format (.	...\... plugins)... .....G.Failed to migrate 
+- #3 @98719404 t back to its function..6...z~..Configuration for matching and routing hook callbacks........H..hookCallbackIds.8.......Settings for the SDK-hosted MCP servers named in sdkMcpServers, keyed by server name. Sent as a separate field so a CLI that predates it ignores it; entries whose name is not in sdkMcpServers, and values that
+- #4 @98785935 unced host.epoch)....7.......@internal Success payload answering remote_tools_probe.......`..Carries one MCP JSON-RPC message for an SDK-hosted MCP server (one named in initialize.sdkMcpServers or added later with mcp_set_servers). Flows in both directions: the CLI sends it to the client to reach the in-process server, and the
+- #5 @100177024  latest changes were not applied in the cloud session: its checkout still has a branch whose name cannot coexist in git with the branch you are on now (.....v..named in the sessiond.....a.); Claude was asked to rename or delete that branch in the cloud checkout, after which sync resumes.	.....z.D.i.r.e.c.t.o.r.y. .s.y.n.c.:. .
+- #6 @180410055 ptional(),sdkMcpServers:x(i()).optional(),sdkMcpServerConfigs:Oe(i(),bu().omit({type:!0,name:!0})).optional().describe("Settings for the SDK-hosted MCP servers named in sdkMcpServers, keyed by server name. Sent as a separate field so a CLI that predates it ignores it; entries whose name is not in sdkMcpServers, and values that
+- #7 @180468777 ools_probe.")),Sd=h(()=>m({subtype:F("mcp_message"),server_name:i(),message:kP()}).describe("Carries one MCP JSON-RPC message for an SDK-hosted MCP server (one named in initialize.sdkMcpServers or added later with mcp_set_servers). Flows in both directions: the CLI sends it to the client to reach the in-process server, and the
+- … +11 more
+
+## tools??[] needle="tools??" hits=12
+- #0 @178274918 wait u.setupSkills(o)}catch(b){n.warn("skill setup failed",{session_id:a,work_id:t.id,error:String(b)})}let _=typeof this.tools==="function"?this.tools(o):this.tools??u.betaAgentToolset20260401(o),h=new AbortController,l=Te(s,h),m=da(i,t,h,n,this.requestOptions).catch((b)=>{if(!h.signal.aborted)n.error("heartbeat loop failed"
+- #1 @179064361 cKe(e){let t={always_allow:0,always_ask:1,always_deny:2},o=new Map;for(let[g,c]of Object.entries(e)){if(c.type!=="http"&&c.type!=="sse")continue;for(let E of c.tools??[]){let _=E.permission_policy;if(_===void 0)continue;let b=t[_];if(b===void 0)continue;let P=Xl(g,E.name),O=o.get(P);if(O===void 0||b>(t[O]??-1))o.set(P,_)}}let
+- #2 @181754658 eturn!1;if(t.mode!=="bypassPermissions")return!1;let o=r.decisionReason;return!(o?.type==="rule"&&o.rule.ruleBehavior==="ask")}function Rl(e,t){let r=t.options.tools??[];return r.some((o)=>Xt(o,e))&&!r.some((o)=>Xt(o,wt))&&!r.some((o)=>Xt(o,Ms))}function eSe(e,t,r,o){return!Rl(e,r)&&mur(t,o)}function Pl(){return R("tengu_play
+- #3 @182966910 |Boolean(n.allowBypass)||Boolean(n.restricted)||Boolean(n.ide)||Boolean(n.strictMcpConfig)||(n.allowedTools??[]).length>0||(n.disallowedTools??[]).length>0||(n.tools??[]).length>0||(n.mcpConfig??[]).length>0||(n.addDir??[]).length>0||(n.pluginDir??[]).length>0||(n.pluginDirNoMcp??[]).length>0}function Win(n){return[n.systemPr
+- #4 @182967211 n Win(n){return[n.systemPrompt,n.systemPromptFile,n.appendSystemPromptFile,n.permissionPromptTool,n.settingSources,n.managedSettings].some((e)=>e!==void 0)||(n.tools??[]).some((e)=>e!=="default")}var CGe="a custom system prompt, a tool allowlist, or restricted settings";
+export{zin,dae,Win,CGe};
+.// @bun @bytecode
+// Claude C
+- #5 @193159635 agents: ${be.map((qe)=>qe.agentType).join(", ")}`)}let Ne=[...j.disallowedTools??[],...$t.disallowedTools??[]],Z=D.schema?Fn:Dn,pe=D.schema&&!jJ(j.tools)?[...j.tools??[],As]:j.tools;ze=Ta(j)?{...j,disallowedTools:Ne,tools:pe,getSystemPrompt:(ee)=>j.getSystemPrompt(ee)+Z}:{...j,disallowedTools:Ne,tools:pe,getSystemPrompt:(ee)=
+- #6 @201087470 !km(lt,Ie,gt)),ee=ee.filter((lt)=>lt.name!==Ie),le.includes(Ie))be.push(Ie)}let ct=[...Z,...Oe],je=[YE,nk].some((Ie)=>Fe.some((Ge)=>Xt(Ge,Ie.name))||(d?.().mcp.tools??[]).some((Ge)=>Xt(Ge,Ie.name))),St=(Ie,Ge,_t,gt)=>{if(gt.type==="connected")Ht().detachAndCloseConnection(gt).catch(()=>{});let lt=Km;return{name:Ie,added:!0,cl
+- #7 @201092026 ot delivered (the identity boundary owns the row)"),Qe.type==="connected")Ht().detachAndCloseConnection(Qe).catch(()=>{});return}if(Rwt(Cn,{client:Qe,tools:an?.tools??[],commands:an?.fetched?.cmds??[]}),an?.fetched){let An=an.fetched.res;Cn.applyMcpUpdate((Sn)=>{if(Sn.clients.find((kr)=>kr.name===Nt)!==Qe)return Sn;return{...
+- … +4 more
+
+## has(Xe) needle="t.has(Xe)" hits=1
+- #0 @185211803 sions)?RSe:void 0}function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new Set(e)}function Nnt(e,t){let r=[...e,Yr].filter((p)=>!t.has(p)),o=[...t.has(Xe)?[]:[gue],...t.has(Yr)?[]:[Hbt]],u=[...[...v2e].map((p)=>Xl(p,u2t)),...A2e.map((p)=>Xl(bb,`${p}${u2t}`))];return[...r,...o,bgt,P9n,...u]}function mOt(e){if(!/^[
+
+## function Fnt needle="function Fnt(" hits=2
+- #0 @185211661 s not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:void 0}function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new Set(e)}function Nnt(e,t){let r=[...e,Yr].filter((p)=>!t.has(p)),o=[...t.has(Xe)?[]:[gue],...t.has(Yr)
+- #1 @193561307 _oauth_refresh_lock_contention");else _(o),f("oauth_token_refresh","design_oauth_refresh_lock_error");return{ok:!1,reason:"design_refresh_failed",detail:l(o)}}}function Fnt(){return a.CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID??Vt().DESIGN_CLIENT_ID}function vAe(){return!Fnt().startsWith("00000000-")}async function pRt(r,t){let o=ZY.filter
+
+## D2n-caller @191370694
+ Ge=eV(be(Pe)?.env,Pe);if(Object.keys(Ge).length>0)return!0}return!1},jo=!1;if(De()&&HI()&&Object.keys(oe().cachedGrowthBookFeatures??{}).length===0&&!tr())jo=!0,await kr("gb-before-mode","growthbook_init_ms",{before:"before_growthbook_init",after:"after_growthbook_init"});let $o=um("tengu_auto_mode_config",{});if(De()&&$o.value?.enabled==="disabled"&&$o.source==="disk"&&HI()&&!tr())await kr("gb-killswitch-recheck","growthbook_killswitch_recheck_ms",{before:"before_gb_killswitch_recheck",after:"after_gb_killswitch_recheck"});let ur=vGe,Ho,Ko=!1,{mode:Vn,notification:Cr,proactivity:Wo,modeSuppliedOnInvocation:Gr}=nrn({permissionModeCli:Ze,dangerouslySkipPermissions:me,allowDangerouslySkipPermissions:le,bypassPermissionsBlockedByHost:Ko,agentPermissionMode:br,proactivityLevel:Ho?.level}),vr=D2n({restricted:xe,permissionMode:Vn,allowDangerouslySkipPermissions:le});if(vr)return gn(`Error: ${vr}`);if(Tkn(Vn==="bypassPermissions"),C.enableAutoMode||Ze==="auto"||br==="auto"||Vn==="auto"&&!mB()||!Ze&&srn())Hdn(!0);await xD({hasDynamicMcpConfig:Boolean(gt&&gt.length>0)||Rn,pluginStateReliable:F(),storageV5:G});let hn={},Wr={};if(gt&&gt.length>0){let Pe=gt.map((_n)=>_n.trim()).filter((_n)=>_
+
+### D2n caller fn name= @-1
+## function mb( hits=5
+## mb@181745792 @181745792
+len=149 sha=bb3fe4967f5c114b
+function mb(e,t,r){let o=r??Ri(e),u=Array.from(Dv(t)).flatMap((d)=>oUt(d));return o.every((d)=>u.some((p)=>im(d,p,{caseFold:!1,uncShapeParity:!0})))}
+
+## mb@182271477 @182271477
+len=73 sha=b9f683e0dd8d04a8
+function mb(e){if(!/^-?[0-9]+$/.test(e))throw Error("invalid int64: "+e)}
+
+## mb@192172740 @192172740
+len=686 sha=cccf661cb96b517b
+function mb(i){if(i.state==="MERGED")return[{text:"merged",color:"merged"}];if(i.state==="CLOSED")return[{text:"closed",color:"inactive"}];let d=[],{failed:m,pending:w,passed:S}=i.checks,h=m+w+S;if(m>0)d.push({text:`${O.cross} ${m}/${h}`,color:"error"});else if(w>0)d.push({text:`${S}/${h}`,color:"warning"});else if(h>0)d.push({text:O.tick,color:"success"});switch(i.review){case"APPROVED":d.push({text:"approved",color:"success"});break;case"CHANGES_REQUESTED":d.push({text:O.cross,color:"error"});break;case"REVIEW_REQUIRED":d.push({text:"needs review",color:void 0});break;case null:break}if(d.length===0&&i.state!=="DRAFT")d.push({text:i.state.toLowerCase(),color:Zc(i)});return d}
+
+## mb@201645061 @201645061
+len=44 sha=d3538d08beffd4f7
+function mb(uN){return uN.placeholderOrigin}
+
+## mb@222994736 @222994736
+len=43 sha=0fe8f91624900b86
+function mb(a,b){Ab(a,b);Ab(a+"Capture",b)}
+
+## function lV( hits=1
+## lV@181761229 @181761229
+len=1452 sha=07366a75c56ff74b
+function lV(e,t,r,o){if(r&&r.length>0)return Ai(r,(I,C)=>lV(I,C,void 0,o),t);let u=we(e);if(HO(u)&&By())return{behavior:"deny",message:"Cannot read memory while it is paused. Run /pause-memory to resume automemory.",decisionReason:{type:"safetyCheck",reason:di,classifierApprovable:!1}};if(!o?.restricted&&fl(u))return ue(t,"Project directory files are allowed for reading");if(mi(u,{includeWorkshopDoc:!0}))return ue(t,"Plan files for current session are allowed for reading");let d=Wg(),p=d.endsWith(ee)?d:d+ee;if(u===d||u.startsWith(p))return ue(t,"Tool result files are allowed for reading");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for reading");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for reading");let g=uC();if(u.startsWith(g))return ue(t,"Project temp directory files are allowed for reading");let w=o?.remoteSurface||o?.restricted;if(!w&&RPe(u))return ue(t,"Agent memory files are allowed for reading");if(!w&&mte(u))return ue(t,"auto memory files are allowed for reading");let M=me(ge(),"tasks")+ee;if(!w&&(u===M.slice(0,-1)||u.startsWith(M)))return ue(t,"Task files are allowed for reading");let k=me(ge(),"teams")+ee;if(!w&&(u===k.slice(0,-1)||u.startsWith(k)))return ue(t,"Team files are allowed for reading");let E=rUt()+ee;if(!o?.remoteSurface&&u.startsWith(E))return ue(t,"Bundled skill reference files are allowed for reading");return{behavior:"passthrough",message:""}}
+
+## function uqe( hits=3
+## uqe@181760271 @181760271
+len=958 sha=3a2f9087a7da88c3
+function uqe(e,t,r,o){if(r&&r.length>0){if(r.some(dr))return mr;if(r.some(ur))return fr;return Ai(r,(d,p)=>uqe(d,p,void 0,o),t)}let u=we(e);if(mi(u,{includeWorkshopDoc:o?.permissionMode==="plan"}))return ue(t,"Plan files for current session are allowed for writing");if(!o?.restricted&&ml(u))return ue(t,"Workflow script files for current session are allowed for writing");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for writing");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writing");if(pi(u))return gi;if(ur(u))return fr;if(dr(u))return mr;return{behavior:"passthrough",message:""}}
+
+## uqe@184193065 @184193065
+len=436 sha=e0398030b400eb86
+function uqe({input:e,signal:t,origin:r}){let o=H$.ledger(),u=await dD.runChain({e,handlers:[...Yf.moduleHandlersFor(rw,r),w6(o)],site:lpe,signal:t,origin:Ny.originName(r)}),p=VU.validateTree(u,e.component);if(p!==void 0)return n(`ui.render (${e.component}): a hook returned a tree that does not validate (${p}); drawing the engine's own`,{level:"warn"}),G8.releaseRefused(u,e),va.RENDER_ENGINE_FALLBACK;return iM.heldByTree.set(u,o),u}
+
+## uqe@215885955 @215885955
+len=337 sha=230d4cee04375e65
+function uqe(e,t,r,n,i,a,s){var l,u,h=new Map,d=t.length,f=a.length,p=new Array(d),m;for(l=0;l<d;++l)(u=t[l])&&(p[l]=m=s.call(u,u.__data__,l,t)+"",h.has(m)?i[l]=u:h.set(m,u));for(l=0;l<f;++l)m=s.call(e,a[l],l,a)+"",(u=h.get(m))?(n[l]=u,u.__data__=a[l],h.delete(m)):r[l]=new bb(e,a[l]);for(l=0;l<d;++l)(u=t[l])&&h.get(p[l])===u&&(i[l]=u)}
+
+## perm-set-restricted @185215803
+!1),eH(!0),r=gK(r);if(e==="plan"&&t!=="plan"&&r.prePlanMode)return{...r,prePlanMode:void 0};return r}function dRe(e,t){let r=cf(e);if(r===void 0)return{ok:!1,error:Wte};if(r==="bypassPermissions"){if(t.restricted)return{ok:!1,error:RSe};if(_y())return{ok:!1,error:"Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration"};if(!t.isBypassPermissionsModeAvailable)return{ok:!1,error:"Cannot set permission mode to bypassPermissions because the session was no
+
+## eager-restricted-flag @92224972
+ .......Invalid --setting-sources flag: $....
+[.Error processing --setting-sources: ....J.U.eagerLoadSettings_start.
+...?...--settings........*.--managed-settings.......R^.--setting-sources.......r...--restricted....=o..eagerLoadSettings_end.......n.A.settings_load_ms..../V..performance.
+...._..charCodeAt......s+..toUpperCase.....{n..padStart(...M...file:///B:/%7EBUN/root/chunk-tnj0mqmq.js
+.......
+
+## eagerParse restricted needle="--restricted" hits=32
+- #0 @92224972 $....
+[.Error processing --setting-sources: ....J.U.eagerLoadSettings_start.
+...?...--settings........*.--managed-settings.......R^.--setting-sources.......r...--restricted....=o..eagerLoadSettings_end.......n.A.settings_load_ms..../V..performance.
+...._..charCodeAt......s+..toUpperCase.....{n..padStart(...M...file:///B:/%7EBUN/ro
+- #1 @92346183 ent-id, --agent-name, and --team-name must all be provided together..C....r..Cannot destructure property 'teleport' from null or undefined value.}...u^{.Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its tools on another machine...l....	..E.r.r.o.r.:. .-.-.w.a.t.c.h.-.a.r.t.i.f.a.c
+- #2 @92348946  Skipping chrome wiring: blocked by enterprise MCP config or managed deniedMcpServers policy..F...:...[Claude in Chrome] Skipping chrome wiring: --safe-mode or --restricted..<.......[Claude in Chrome] MCP server blocked by enterprise policy: 2.......Warning: MCP server blocked by enterprise policy: .......R..tengu_claude_in_chrome
+- #3 @96359976  .t.h.e. .b.r.a.n.c.h. .n.a.m.e. .i.n. .E.n.g.l.i.s.h.......4...Background task.....1	..claude/background-task..X...Q.P.Cloud sessions cannot be created from a --restricted session: they would not enforce it......_n.bind_attestation_stale.......	..bound_session_unattested_write..........CLAUDE_PLUGIN_DATA..
+...._..zzwildcard..	...
+- #4 @97620017 kground: true in its definition.........l..[web-fetch agent] isolation:'...D....v..' ignored; the built-in web-fetch agent always runs as a local agent....x...(--restricted)..(....3W.(no claude.ai login or feature gate off)1...^...[remote agent] isolation:'remote' is unavailable ...8....R..(already inside a CCR session); running a
+- #5 @97651828 lared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled, or the session is --restricted); keeping parent mode '......p.] Failed to compute skill listing attachment: ..#...b[v.bg-subagent progress write failed: .*...L.k.bg-subagent nested progress 
+- #6 @97859940 ...." is a UNC network path, which is not supported.7......." is a /net autofs -hosts path, which is not supported..Q.....m." is outside the working directory; --restricted only sends files from inside it........U..." is not a regular file.-...Mp.." does not exist. Current working directory: .......x.Q. Did you mean ".....i.e." is
+- #7 @98326298 WindowsPath...%....m..Claude requested permissions to edit .......+.S. which is a sensitive file......
+<..resolvedWorkingDirPaths.......P. is outside @....%..; --restricted confines the file tools to the working directory."....f8.tengu_auto_mode_worktree_fast_path..C....?..Cannot destructure property 'caseFold' from null or undefi
+- … +24 more

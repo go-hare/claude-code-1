@@ -1,15 +1,15 @@
-import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { z } from 'zod/v4'
 import { WORKFLOW_DIR_NAME, WORKFLOW_TOOL_NAME } from '../constants.js'
 import { resolveNamedWorkflow } from '../engine/namedWorkflows.js'
 import { runWorkflow } from '../engine/runWorkflow.js'
 import { parseScript } from '../engine/script.js'
+import { sanitizeWorkflowName } from '../engine/paths.js'
 import {
-  containsPath,
-  isForbiddenWorkflowScriptPath,
-  sanitizeWorkflowName,
-} from '../engine/paths.js'
+  readAllowedWorkflowScript,
+  resolveWorkflowScriptReadableSet,
+  type WorkflowScriptReadableSet,
+} from '../engine/workflowScriptRead.js'
 import type { WorkflowPorts } from '../ports.js'
 import type { WorkflowRunResult } from '../types.js'
 import { workflowInputSchema, type WorkflowInput } from './schema.js'
@@ -79,8 +79,14 @@ export function createWorkflowTool(
       // Resolve the script source
       let script: string
       let workflowFile: string | undefined
+      const readableSet = resolveWorkflowScriptReadableSet(host, context)
       try {
-        const resolved = await resolveScriptSource(input, host.cwd)
+        const resolved = await resolveScriptSource(
+          input,
+          host.cwd,
+          host.readableRoots,
+          readableSet,
+        )
         script = resolved.script
         workflowFile = resolved.workflowFile
       } catch (e) {
@@ -139,6 +145,8 @@ export function createWorkflowTool(
         host: host.handle,
         signal,
         cwd: host.cwd,
+        ...(host.readableRoots ? { readableRoots: host.readableRoots } : {}),
+        readableSet,
         budgetTotal: host.budgetTotal,
         ...(input.maxConcurrency !== undefined
           ? { maxConcurrency: input.maxConcurrency }
@@ -218,28 +226,19 @@ function normalizeArgs(raw: unknown): unknown {
 async function resolveScriptSource(
   input: WorkflowInput,
   cwd: string,
+  readableRoots?: readonly string[],
+  readableSet?: WorkflowScriptReadableSet,
 ): Promise<{ script: string; workflowFile?: string }> {
   if (input.script) return { script: input.script }
   if (input.scriptPath) {
-    // densable s7t: su(e)||Jw(e)||bu(e)||bu(resolved) before read
-    if (
-      isForbiddenWorkflowScriptPath(input.scriptPath) ||
-      isForbiddenWorkflowScriptPath(resolve(cwd, input.scriptPath))
-    ) {
-      throw new Error(
-        `Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ${input.scriptPath}`,
-      )
-    }
-    const resolved = resolve(cwd, input.scriptPath)
-    if (!containsPath(cwd, resolved)) {
-      throw new Error(
-        `scriptPath "${input.scriptPath}" is out of bounds (after resolve, ${resolved} is not within cwd ${cwd})`,
-      )
-    }
-    return {
-      script: await readFile(resolved, 'utf-8'),
-      workflowFile: resolved,
-    }
+    // densable htn before open, then Rst. It() quotes the caller path.
+    const read = await readAllowedWorkflowScript(
+      input.scriptPath,
+      cwd,
+      readableRoots,
+      readableSet,
+    )
+    return { script: read.script, workflowFile: read.path }
   }
   if (input.name) {
     if (sanitizeWorkflowName(input.name) === null) {

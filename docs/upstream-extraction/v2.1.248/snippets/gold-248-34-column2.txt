@@ -1,0 +1,49 @@
+# gold-248-34-column2
+
+## 247 warnings-wrap exact @231860543
+,jx=At.slot?.showAccentBar?.()??!0;const kp=_o,Ep=at,Ip=!_p&&!$x&&!Gx?null:l(d,{flexDirection:"column",paddingLeft:1,children:[At.warnings.map((rN)=>r(ne,{children:rN.render(hl)})),At.slot===null?null:l(d,{flexDirection:"column",marginTop:_p?1:0,children:[r(d,{flexDirection:"column",paddingLeft:jx?1:2,borderStyle:jx?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:At.slot.tier==="announcement"?"claude":void 0,borderDimColor:At.slot.tier!=="announcement",children:At.slot.render(hl)}),At.slotOverflowCount>0&&r(d,{paddingLeft:2,children:l(It,{command:"/st
+
+## 248 still-has-247-wrap @-1
+
+## 248 warnings-wrap no-pad @201577012
+,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:qt.slot.tier==="announcement"?"claude":void 0,borderDimColor:qt.slot.tier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:
+
+## 247 mcpNeedsAuthCount ctx @231860321
+DeprecationWarning:Cp?.modelDeprecationWarning??null,modelRestrictedWarning:fl,existingClaudeSubscription:Cp?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:JI??!1,replBridgeSessionUrl:QI,mcpNeedsAuthCount:tN,storageV5:Ux},At=(cn?ml:Is)(cl(hl),XI,{suppressPromos:ul()}),_p=At.warnings.length>0,$x=At.slot!==null,Gx=At.ant.length>0,jx=At.slot?.showAccentBar?.()??!0;const kp=_o,Ep=at,Ip=!_p&&!$x&&!Gx?null:l(d,{flexDirection:"column",paddingLeft:1,children:[At.warnings.map((rN)=>r(ne,{children:rN.render(hl)})),At.slot===null?null:l(d,{flexDirection:"column",marginTop:_p?1:0,children:[r(d,{flexDirection:"column",paddingLeft:jx?1:2,borderStyle:jx?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:At.slot.tier==="announcement"?"claude":void 0,borderDimColor:At.slot.tier!=="announcement",children:At.slot.render(hl)}),At.slotOverflowCount>0&&r(d,{paddingLeft:2,children:l(It,{command:"/status",children:["+",At.slotOverflowCount," more"]})})]}),Gx&&r(d,{flexDirection:"column",paddingLeft:2,marginTop:_p||$x?1:0,children:At.ant.map((sN)=>r(ne,{children:sN.render(hl)
+
+## 247 fn before mcpNeedsAuthCount {"i":231859373,"name":"Ds"}
+## 247 Fr-equiv @231859373
+len=2120 sha=582c619653911cdc
+function Ds(dl){let pl=w(11),Px;if(pl[0]!==dl)Px=dl===void 0?{}:dl,pl[0]=dl,pl[1]=Px;else Px=pl[1];let{latchAnnouncementSlot:Ox}=Px,cn=Ox===void 0?!0:Ox,{storageV5:Ux,credentials:KI}=ge(),{columns:YI}=Ye(),XI=_l(YI),Lx=yt(),Cp=Dt(Yx),JI=Dt(Xx),QI=Dt(Jx),Bx;if(pl[2]!==cn)Bx=(ZI)=>cn?ZI.agentDefinitions:void 0,pl[2]=cn,pl[3]=Bx;else Bx=pl[3];let eN=Dt(Bx),tN=Dt(Qx)??0;ta(),et(Tl);let oN=El(Lx,Ux,KI);const nN=pe();let fl;bb0:{let gl=Cp?.modelRestrictedWarning;if(!gl){fl=null;break bb0}let Hx=bl();let Fx=Sl(gl.requested.trim().toLowerCase());if(!xl(Fx)&&Fx!=="best"&&en(gl.requested).toLowerCase()===Hx.toLowerCase()){fl=null;break bb0}fl={requested:gl.requested,effective:Hx}}let hl={session:Lx,config:nN,agentDefinitions:eN,memoryFiles:oN,modelDeprecationWarning:Cp?.modelDeprecationWarning??null,modelRestrictedWarning:fl,existingClaudeSubscription:Cp?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:JI??!1,replBridgeSessionUrl:QI,mcpNeedsAuthCount:tN,storageV5:Ux},At=(cn?ml:Is)(cl(hl),XI,{suppressPromos:ul()}),_p=At.warnings.length>0,$x=At.slot!==null,Gx=At.ant.length>0,jx=At.slot?.showAccentBar?.()??!0;const kp=_o,Ep=at,Ip=!_p&&!$x&&!Gx?null:l(d,{flexDirection:"column",paddingLeft:1,children:[At.warnings.map((rN)=>r(ne,{children:rN.render(hl)})),At.slot===null?null:l(d,{flexDirection:"column",marginTop:_p?1:0,children:[r(d,{flexDirection:"column",paddingLeft:jx?1:2,borderStyle:jx?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:At.slot.tier==="announcement"?"claude":void 0,borderDimColor:At.slot.tier!=="announcement",children:At.slot.render(hl)}),At.slotOverflowCount>0&&r(d,{paddingLeft:2,children:l(It,{command:"/status",children:["+",At.slotOverflowCount," more"]})})]}),Gx&&r(d,{flexDirection:"column",paddingLeft:2,marginTop:_p||$x?1:0,children:At.ant.map((sN)=>r(ne,{children:sN.render(hl)}))})]});let yl;if(pl[4]!==Ep||pl[5]!==Ip)yl=r(Ep,{children:Ip}),pl[4]=Ep,pl[5]=Ip,pl[6]=yl;else yl=pl[6];let Wx;if(pl[7]!==cn||pl[8]!==kp.Provider||pl[9]!==yl)Wx=r(kp.Provider,{value:cn,children:yl}),pl[7]=cn,pl[8]=kp.Provider,pl[9]=yl,pl[10]=Wx;else Wx=pl[10];return Wx}
+
+## 247 last generic before Uf {"i":231847544,"name":"_x"}
+## 247 function Je( hits=56
+- @207987366 function Je(e,t){let n=0;for(let o=0;o<e.length;o++)if(e[o]===t&&!Qe(e,o))n++;return n}function ts(e){for(let t=0;t<e.length-1;t++)if(e[t]==="("&&e[t+1]===")"){if(!Qe(e,t))return!0}return!1}function o
+
+## 247 function Je(m) react-cache @-1
+MISS {"miss":true}
+
+## 247 function Je({status @-1
+MISS {"miss":true}
+
+## 247 width:2 icon first @214838838
+dStudio"]}});function yI(BYa){let R1o=LZ(4),{children:uzn,color:dzn}=BYa,A1o;if(R1o[0]===zR)A1o=$c(dE,{"aria-hidden":!0,width:2,flexShrink:0,children:$c(Xc,{children:ud.bullet})}),R1o[0]=A1o;else A1o=R1o[0];let P1o;if(R1o[1]!==uzn||R1o[2]!==dzn)P1o=_c(dE,{flexDirection:"row",children:[A1o,$c(dE,{flexGrow:1,flexShrink:1,children:$c(Xc,{color:dzn,children:uzn})})]}),R1o[1]=uzn,R1o[2]=dzn,R1o[3]=P1o;else P1o=R1o[3];return P1o}var pzn=w(()=>{Wfe();jkt();DZ();$Z()});function PBe(GYa){let fzn=LZ(10),{added:Bme,removed:jm
+
+## 248 Gp-icon-pattern hits=1
+- @201528948  Gp(m){let l=g(9),{status:c,children:p}=m,{color:a}=lZe[c],s;if(l[0]!==c)s=e(o,{width:2,flexShrink:0,children:e(Qe,{status:c})}),l[0]=c,l[1]=s;else s=l[1];const x=!a;let f;if(l[2]!==p||l[3]!==a||l[4]!
+
+## 247 width:2,flexShrink:0 hits=2
+- @231808867 ();k();u();R();function I(C){let S=h(9),{status:r,children:x}=C,{color:e}=i[r],c;if(S[0]!==r)c=t(o,{width:2,flexShrink:0,children:t(n,{status:r})}),S[0]=r,S[1]=c;else c=S[1];const d=!e;let a;if(S[2]!==x||S[3]!==e||S[4]!==d)a=t(o,{flexGrow:1,flexShrink:1,childr
+
+## needle "flexDirection:\"column\",paddingLeft:1,children:[At.warnings.map" hits248=0 hits247=1 @248=-1 @247=231860543
+## needle "flexDirection:\"column\",paddingLeft:1,children:[qt.warnings.map" hits248=0 hits247=0 @248=-1 @247=-1
+## needle "flexDirection:\"column\",children:[qt.warnings.map" hits248=1 hits247=0 @248=201577012 @247=-1
+## needle "flexDirection:\"column\",children:[At.warnings.map" hits248=0 hits247=0 @248=-1 @247=-1
+## needle "paddingLeft:Cg?1:2" hits248=1 hits247=0 @248=201577201 @247=-1
+## needle "paddingLeft:1,children:[At.warnings" hits248=0 hits247=1 @248=-1 @247=231860566
+
+## 248 L-wrap notice @201577045
+:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{fl
+
+## 247 ne-wrap notice @231860590
+ingLeft:1,children:[At.warnings.map((rN)=>r(ne,{children:rN.render(hl)})),At.slot===null?null:l(d,{f

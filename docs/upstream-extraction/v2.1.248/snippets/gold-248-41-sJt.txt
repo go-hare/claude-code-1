@@ -1,0 +1,23 @@
+# gold-248-41-sJt
+
+## #41 eDt @184547975
+len=164 sha=dc853b208d991cdc
+async function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}
+
+## #41 Wen @184548139
+len=49 sha=1b70b9fc6406a2cf
+function Wen(){return R("tengu_harbor_prism",!1)}
+
+## #41 sJt @184548188
+len=454 sha=7b3d2bcb9feff129
+async function sJt(e){let{stdout:t,code:r}=await Ue("gh",["pr","view","--json","number,url,reviewDecision,isDraft,headRefName,state"],{timeout:mH,preserveOutputOnError:!1});if(r!==0||!t.trim())return null;try{let o=q(t);if(o.headRefName===e||o.headRefName==="main"||o.headRefName==="master")return null;if(o.state==="MERGED"||o.state==="CLOSED")return null;return{number:o.number,url:o.url,reviewState:pXe(o.isDraft,o.reviewDecision)}}catch{return null}}
+
+## #41 sJt-after @184548188
+async function sJt(e){let{stdout:t,code:r}=await Ue("gh",["pr","view","--json","number,url,reviewDecision,isDraft,headRefName,state"],{timeout:mH,preserveOutputOnError:!1});if(r!==0||!t.trim())return null;try{let o=q(t);if(o.headRefName===e||o.headRefName==="main"||o.headRefName==="master")return null;if(o.state==="MERGED"||o.state==="CLOSED")return null;return{number:o.number,url:o.url,reviewState:pXe(o.isDraft,o.reviewDecision)}}catch{return null}}var iJt=300000,mXe="2022-11-28",aJt=new Set([301,302,307,308]),lJt=h(()=>w.array(w.object({number:w.number(),html_url:w.string(),draft:w.boolean()}))),cJt=h(()=>w.object({data:w.object({repository:w.object({pullRequest:w.object({reviewDecision:w.string().nullable()}).nullable()}).nullable()})}));async function uJt(e){let t=Date.now();if(Tt()||KX())return null;if(e==="main"||e==="master")return null;let r=await pJt();if(!r)return null;let o=await Rfe(r.host);if(o.kind!=="token"){if(!Mo(r.host)&&!i2(process.env.GH_HOST,r.host))return null;return JE().logAuthState(o.kind==="gh-missing"?"gh_missing":"needs_auth"),Pfe(r.host),o.kind==="gh-missing"?"gh-missing":"needs-auth"}JE().logAuthState("token_present");let u=o.token,p=await fJt(r,u),g=JE().directStateForBranch(e),k=g.pr&&{...g.pr,reviewDecision:g.reviewDecision},E=s_t(r.host),C=new URL(E).origin,M=`${E}/repos/${p.owner}/${p.repo}/pulls?head=${encodeURIComponent(r.owner)}:${encodeURIComponent(e)}&state=open&per_page=1`,L=!1,N;try{let we=AbortSignal.timeout(mH),Pe={Authorization:`Bearer ${u}`,Accept:"application/vnd.github+json","X-GitHub-Api-Version":mXe,"User-Agent":Sa(),...g.etag&&{"If-None-Match":g.etag}},Ie=(Be)=>fetch(Be,{...fi({url:Be}),keepalive:!1,method:"GET",headers:Pe,redirect:"manual",signal:we}),Te=await Ie(g.redirectedListUrl??M),xe=aJt.has(Te.status)?Te.headers.get("location"):null,Fe=xe?new URL(xe,M):null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let 
+
+## #41 G$n @184554691
+len=104 sha=4051104a04f2a54b
+function G$n(e){if(Tt()||KX())return Promise.resolve(null);return JE().prStatusByUrl(e).catch(()=>null)}
+
+## #41 after-sJt @184548988
+X())return null;if(e==="main"||e==="master")return null;let r=await pJt();if(!r)return null;let o=await Rfe(r.host);if(o.kind!=="token"){if(!Mo(r.host)&&!i2(process.env.GH_HOST,r.host))return null;return JE().logAuthState(o.kind==="gh-missing"?"gh_missing":"needs_auth"),Pfe(r.host),o.kind==="gh-missing"?"gh-missing":"needs-auth"}JE().logAuthState("token_present");let u=o.token,p=await fJt(r,u),g=JE().directStateForBranch(e),k=g.pr&&{...g.pr,reviewDecision:g.reviewDecision},E=s_t(r.host),C=new URL(E).origin,M=`${E}/repos/${p.owner}/${p.repo}/pulls?head=${encodeURIComponent(r.owner)}:${encodeURIComponent(e)}&state=open&per_page=1`,L=!1,N;try{let we=AbortSignal.timeout(mH),Pe={Authorization:`Bearer ${u}`,Accept:"application/vnd.github+json","X-GitHub-Api-Version":mXe,"User-Agent":Sa(),...g.etag&&{"If-None-Match":g.etag}},Ie=(Be)=>fetch(Be,{...fi({url:Be}),keepalive:!1,method:"GET",headers:Pe,redirect:"manual",signal:we}),Te=await Ie(g.redirectedListUrl??M),xe=aJt.has(Te.status)?Te.headers.get("location"):null,Fe=xe?new URL(xe,M):null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()),Ne=Be.success?Be.data[0]:void 0;if(Ne&&g.pr?.number!==Ne.number)g.reviewDecision="";g.pr=Ne?{number:Ne.number,url:Ne.html_url,isDraft:Ne.draft}:null}else{if(Te.status===401)Pfe(r.host);else if(Te.status===403||Te.status===429)JE().backOffFromResponse(Te);return f(

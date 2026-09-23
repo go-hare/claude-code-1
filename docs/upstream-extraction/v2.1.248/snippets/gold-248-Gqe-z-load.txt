@@ -1,0 +1,106 @@
+# gold-248-Gqe-z-load
+
+Official densable 2.1.248 SEA. Settings load under backendReadResetTail + retain.
+Leftover names: loadSettingsUnderPrime / resetSettingsCacheWithBackendRead ≈ Gqe;
+inner z; Yl → invalidateAll; export from chunk-qapedxb8.
+
+## CALL SITES (official — wire these; do not invent)
+
+## Gqe @179527369
+sha=1dcf73a10dc5265c len=150
+async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;try{return await z(t,e)}finally{i()}}
+
+## z @179527519
+sha=052ebd6db660008d len=297
+async function z(t,e){if(await e.primer?.whenIdle(),e.primer!==void 0)await L(t,e);let s=e.primer===void 0?[]:(await Promise.all([...kur(t).map((i)=>Dgn(e,i)),N(t,e)])).flat().filter((i)=>i!==void 0);if(Yl(s.length>0?{userLayer:"retain"}:void 0),s.length===0)return;return()=>{for(let i of s)i()}}
+
+## kur @179527816
+sha=f752f7a072f99b7c len=70
+function kur(t){let e=k();return[...e===void 0?[]:[Mgn(t,e)],...R(t)]}
+
+## async L (ownership ahead) @179522914
+sha=6526d55a73f95c2c len=176
+async function L(t,e){try{await Tur(t,e)}catch(s){n(`settingsPrime: ownership read-ahead for the local settings root failed: ${l(s)}; the probe runs as today`,{level:"warn"})}}
+
+## async Dgn @179502701
+sha=f642e096a8de651a len=666
+async function Dgn(e,t){if(!D())return;let r=e.epoch;try{let o=await t.read(),u=o.kind==="seeded"?o.parsed:o.kind==="absent"&&t.whenAbsent==="seedAbsence"?Fte():void 0;if(u===void 0){n(`settings: ${t.label} not re-seeded (${Nyt(o)}); the file read serves`);return}if(t.source!=="userSettings"&&e.walkReadDiffers(t.path,u)){n(`settings: ${t.label} not re-seeded (the file read already saw different content this generation); the file read serves`);return}if(o.kind==="absent")Qve(t.path);return e.seedParsedFile(t.path,t.source,u,r)?e.retainLayer(t.path,u):void 0}catch(o){n(`settings: ${t.label} not re-seeded: ${l(o)}; the file read serves`,{level:"warn"});return}}
+
+## async N (managed re-seed) @179533672
+sha=6bfb2611560cb5ab len=584
+async function N(t,e){if(!D())return[];let s=e.epoch;try{let i=v(t,e,s);if(i!==void 0)return[...i.listings.map(({dir:g,names:d})=>e.retainFolderListing(g,d)),...i.layers.map(({path:g,parsed:d})=>e.retainLayer(g,d))];let r=await vKn(t,e);if(r===void 0)return M(e,s),[];let a=await r.reads;if(e.epoch!==s)return[];let o=A(e,r,s);return[...o.kept.map(({dir:g,names:d})=>e.retainFolderListing(g,d)),...B(e,r,a,o.verdicts,s).map(({layer:g,parsed:d})=>e.retainLayer(g.path,d))]}catch(i){return n(`settings: managed settings not re-seeded: ${l(i)}; the file reads serve`,{level:"warn"}),[]}}
+
+## Yl → invalidateAll @179035765
+sha=852ec0672fa3d7b1 len=37
+function Yl(e){ra().invalidateAll(e)}
+
+## Mgn @179503367
+sha=c13473bec238c693 len=120
+function Mgn(e,t){return{source:"userSettings",path:t,read:()=>Vjt(e,t),label:"user settings",whenAbsent:"seedAbsence"}}
+
+## Ogn @179505056
+sha=630d98f447eb67b1 len=106
+function Ogn(e,t,r,o){return{source:t,path:r,read:()=>En(e.hostFiles,r),label:o,whenAbsent:"seedAbsence"}}
+
+## $pn settingsPrime @179527115
+sha=6e91860bc34fc69a len=254
+async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}
+
+## await Gqe( hits=2
+### call @180749986
+ctx: .disableAllHooks===!0}function qdt(){return OT()||Abe()}function zan(){Yl(),a().store(l()),bD()}function Tbr(){a().store(l()),bD()}function uP(o){Yl(o),a().store(l()),bD()}async function nHe(o){let t=await Gqe(o);try{a().store(l()),bD()}finally{t?.()}}function*Wan(){for(let o of KS(m3n).snapshotsBySessionId.values())if(o.initialHooksConfig!==null)yield o.initialHooksConfig}function c9(){let o=a().current();if(o.initi
+lastFn={"i":180749964,"name":"function "} gen={"i":180749958,"name":"nHe"}
+## owning function  @180749964 sha=cc2ea87a7fd48e32 len=74
+function nHe(o){let t=await Gqe(o);try{a().store(l()),bD()}finally{t?.()}}
+
+### call @191362506
+ctx: pLinkCwdB64),bu(C.deepLinkCwdB64),nc(C.deepLinkCwdB64),Nb(te()),dde(te()),hte(),m8e(),Q8(),Yl(),Xf("deeplink: originalCwd changed");let Pe;using Ge={[Symbol.dispose]:()=>Pe?.()};if(D()&&G!==void 0)Pe=await Gqe(G);if(F())tse(G,"deeplink");if(u_n(),Pe!==void 0)uP({userLayer:"retain"});else uP();na.cache.clear?.(),Hh(G)}catch(Pe){n(`Ignoring invalid --deep-link-cwd-b64: ${Pe instanceof Error?Pe.message:Pe}`,{level:"erro
+lastFn={"i":191361978,"name":"function "} gen={"i":191361972,"name":"L0n"}
+EXTRACT_PARTIAL owning function  @191361978
+function L0n(d,C,w,F,j,H,W,G,re){if(xr("action_handler_start"),rnn(),IGn(G),C.deepLinkOrigin&&C.prefillB64!==void 0&&C.prefill===void 0)try{C.prefill=c6t(C.prefillB64)}catch(Pe){n(`Ignoring invalid --prefill-b64: ${Pe instanceof Error?Pe.message:Pe}`,{level:"error"})}if(C.deepLinkOrigin&&C.deepLinkCwdB64!==void 0)try{l6t(C.deepLinkCwdB64),bu(C.deepLinkCwdB64),nc(C.deepLinkCwdB64),Nb(te()),dde(te()),hte(),m8e(),Q8(),Yl(),Xf("deeplink: originalCwd changed");let Pe;using Ge={[Symbol.dispose]:()=>Pe?.()};if(D()&&G!==void 0)Pe=await Gqe(G);if(F())tse(G,"deeplink");if(u_n(),Pe!==void 0)uP({userLayer:"retain"});else uP();na.cache.clear?.(),Hh(G)}catch(Pe){n(`Ignoring invalid --deep-link-cwd-b64: ${Pe instanceof Error?Pe.message:Pe}`,{level:"error"})}if(C.bare)process.env.CLAUDE_CODE_SIMPLE="1";if(wr())process.env.CLAUDE_CODE_SAFE_MODE="1",process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS="1",b("startup_safe_mode");let ee;try{ee=dtr(C.maxTurns)}catch(Pe){return gn(l(Pe))}if(d==="code")s("tengu_code_prompt_ignored",{}),Wb("Tip: You can launch Claude Code with just `claude`"),d=void 0;if(d&&typeof d==="string"&&!/\s/.test(d)&&d.length>0){if(s("tengu_single_word_prompt",{length:d.length}),!C.print&&!C.continue&&!C.resume&&/^[a-zA-Z][a-zA-Z-]*$/.test(d))await eh(d,w)}let ie;if(Kr()&&!De()&&!C.agentId)try{let{initializeSessionTeam:Pe}=await import("B:/~BUN/root/chunk-2ba19bds.js");ie=await Pe(void 0,G)}catch(Pe){_(Pe)}if(!pg()){let Pe=Jc(C,(Ge)=>w.getOptionValueSource(Ge));s("tengu_cli_flags",{flag_count:Pe.length,flags:Pe.join(",")})}let{debug:we=!1,dangerouslySkipPermissions:me,allowDangerouslySkipPermissions:le=!1,tools:Ae=[],restricted:xe=!1,allowedTools:Ke=[],disallowedTools:Qe=[],mcpConfig:gt=[],permissionMode:Ze,addDir:Bt=[],fallbackModel:Ht,betas:on=[],ide:Rn=!1,sessionId:xt,includeHookEvents:mn,includePartialMessages:fn,forwardSubagentText:wn,sessionMirror:tn}=C;if(c7e(xe),C.prefill)Hje(C.prefill);let zt,cn=C.agents;if(typeof cn==="string"&&cn!==""&&!ho("agents",{explicitlyRequested:!0})&&!C.resume&&!C.continue&&!a.CLAUDE_BG_POST_CLEAR_RESPAWN){let Pe=rtn(cn);if(Pe)return gn(`Error: Invalid --agents configuration:
+${Pe}`)}let dn=C.agent;if(dn)process.env.CLAUDE_CODE_AGENT=dn;let{outputFormat:Ct,inputFormat:Ve}=C,et=qe().viewMode,wt=Dle(),Je=C.verbose??(et?et==="verbose":wt?!1:go("verbose",!1).value),Yt=C.print,Xt=C.init??!1,Qt=C.initOnly??!1,rn=C.maintenance??!1;if(!Yt&&process.stdout.isTTY&&Om()){let Pe=DYn();if(Pe!==null)console.log(Pe),MYn()}let Mn=C.disableSlashCommands||!1;kkn(Mn);let rt=sBn(C.autocompact,qe().autoCompactWindow),en=fIe()?C.worktree:void 0,lt=typeof en==="string"?en:void 0,nt=en!==void 0,Oe;if(lt){let Pe=g1t(lt);if(Pe!==null)Oe=Pe,lt=void 0}let Fe=fIe()&&C.tmux===!0;if(Fe){if(!nt)return gn("Error: --tmux requires --worktree");if(B()==="windows")return gn("Error: --tmux is not supported on Windows");if(!await gin())return gn(`Error: tmux is not installed.
+${yin()}`)}let ze=Zy(C);if(ze.parentSessionId)kwt().setCliParentSessionId?.(ze.parentSessionId);vkn(ze.agentId);let At;if(Kr()){At=ze;let Pe=ze.agentId||ze.agentName||ze.teamName,Ge=ze.agentId&&ze.agentName&&ze.teamName;if(Pe&&!Ge)return gn("Error: --agent-id, --agent-name, and --team-name must all be provided together");if(ze.agentId&&ze.agentName&&ze.teamName)kwt().setDynamicTeamContext?.({agentId:ze.agentId,agentName:ze.agentName,teamName:ze.teamName,color:ze.agentColor,planModeRequired:ze.planModeRequired??!1,parentSessionId:ze.parentSessionId});if(ze.teammateMode)Jy().setCliTeammateModeOverride?.(ze.teammateMode)}let sn=C.sdkUrl??void 0,Fn=fn||a.CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES,uo=wn||a.CLAUDE_CODE_FORWARD_SUBAGENT_TEXT;if(mn||a.CLAUDE_CODE_REMOTE)Ajn(!0);if(sn){if(!Ve)Ve="stream-json";if(!Ct)Ct="stream-json";if(C.verbose===void 0)Je=!0;if(!C.print)Yt=!0}let no=await ld(C,{prompt:typeof d==="string"?d:void 0,sessionId:xt,outputFormat:Ct,inputFormat:Ve,hasSdkUrl:Boolean(sn),nonInteractive:De(),isViolinWoodEnabled:Kl,hasConnect:Boolean(j?.url),hasSSH:Boolean(H?.host),rcProjectGateEnabled:!1});if(!no.ok)return no.flushAnalytics?is(no.error):gn(no.error);let{teleport:fr,cloudAttachId:Fo,poolId:yo,poolPromotedRemote:Zo,poolRef:jr,poolOnBranch:er,forwardHomeSettings:lr,homeSettingsConsent:Lo,projectFlag:$r,projectBrowse:gr,projectForRemoteControl:os,correlationId:ti,headlessCloud:_o}=no.value,{remote:Ro}=no.value;if(xe&&(Ro!==null||Fo!==null||yo!==null||Zo||gr!==null||Boolean(j?.url)||Boolean(H?.host)))return gn("Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its tools on another machine");z().host.launchOptions.replaceMayForwardHomeSettings(lr),z().host.launchOptions.replaceHomeSettingsHostConsent(Lo);let Io=De()&&(_o||Fo!==null||yo!==null),Hr,rs=!1,Ie=C.watchArtifact??C.watchArtifactNoAutoreact;if(Ie!==void 0){if(a.CLAUDE_CODE_REMOTE)return gn("Error: --watch-artifact isn't supported yet from remote sessions \u2014 run it in Claude Code on your own machine");if(De())return gn("Error: --watch-artifact requires an interactive session (not print mode, --sdk-url, --init-only, or redirected output)");if(Fo!==null||Ro!==null||Zo||Boolean(j?.url)||Boolean(H?.host))return gn("Error: --watch-artifact is not available in sessions attached to a remote environment \u2014 run it in a plain local session");let Pe=FDn(Ie);if("error"in Pe)return gn(Pe.error);let Ge=typeof C.watchArtifactNoAutoreact==="string";UDn(Ge?{...Pe,autoReactDisarmed:!0}:Pe),Hr=Pe.slug,rs=Ge}let Ne=null,yt=C.remoteControl??C.rc,pt=!1,Ot=typeof yt==="string"&&yt.length>0?yt:void 0,bn=C.remoteControlSessionNamePrefix;if(bn)process.env.CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX=bn;let Pn=cd({sessionId:xt,continue:C.continue,resume:C.resume,forkSession:C.forkSession,sdkUrl:sn});if(!Pn.ok)return gn(Pn.error);if(xt){if(!sn){let Pe=Vr(xt);if(!Pe)return gn("Error: Invalid session ID. Must be a valid UUID.");if(!(C.forkSession&&C.resume===Pe)&&bct(Pe))return gn(`Error: Session ID ${Pe} is already in use.`,NYe)}}let Gn=C.file;if(Gn&&Gn.length>0){let Pe=Pa();if(!Pe)return gn("Error: Session token required for file downloads. CLAUDE_CODE_SESSION_ACCESS_TOKEN must be set.");let Ge=process.env.CLAUDE_CODE_REMOTE_SESSION_ID||V(),at=LUn(Gn);if(at.length>0){let Ut={baseUrl:process.env.ANTHROPIC_BASE_URL||Vt().BASE_API_URL,oauthToken:Pe,sessionId:Ge};zt=OUn(at,Ut)}}let Zt=De(),yr=Ht===C.model?void 0:Ht,cr=C.systemPrompt;if(C.systemPromptFile){if(C.systemPrompt)return gn("Error: Cannot use both --system-prompt and --system-prompt-file. Please use only one.");try{let Pe=Or(C.systemPromptFile);cr=await ou(Pe,"utf8")}catch(Pe){if(T(Pe)==="ENOENT")return gn(`Error: System prompt file not found: ${Or(C.systemPromptFile)}`);return gn(`Error reading system prompt file: ${l(Pe)}`)}}let hr=C.appendSystemPrompt;if(C.appendSystemPromptFile){if(C.appendSystemPrompt)return gn("Error: Cannot use both --append-system-prompt and --append-system-prompt-file. Please use only one.");try{let Pe=Or(C.appendSystemPromptFile);hr=onn(await ou(Pe))}catch(Pe){if(T(Pe)==="ENOENT")return gn(`Error: Append system prompt file not found: ${Or(C.appendSystemPromptFile)}`);return gn(`Error reading append system prompt file: ${l(Pe)}`)}}rd(C.appendSubagentSystemPrompt);let{systemPrompt:Sr,appendSystemPrompt:to}=$qn({cli:{systemPrompt:cr,appendSystemPrompt:hr},env:process.env,settings:qe()});if(Kr()&&At?.agentId&&At?.agentName&&At?.teamName){let Pe=Vy().TEAMMATE_SYSTEM_PROMPT_ADDENDUM;to=to?`${to}
+
+${Pe}`:Pe}let br=dn?ZJ().find((Pe)=>Pe.agentType===dn)?.permissionMode:void 0,dr=Qc({remote:Ro,isNonInteractiveSession:Zt,headlessCloud:_o,isContinue:Boolean(C.continue),pendingAssistantChat:void 0,pendingConnectUrl:j?.url,pendingSSHHost:H?.host}),kr=async(Pe,Ge,at)=>{xr(at.before);let Ut=performance.now();await qt(Eb(),1500,Pe).catch(()=>{}),Bi(Ge,performance.now()-Ut,Ut),xr(at.after)},tr=()=>{if(_P()&&!WW())return!0;if(nt)return!0;for(let Pe of AC){let Ge=eV(be(Pe)?.env,Pe);if(Object.keys(Ge).length>0)return!0}return!1},jo=!1;if(De()&
+
+## export alias hits=1
+@198834505 s";export{SKn as SettingsPrimer,kur as backendSettingsLayers,vKn as managedFileSettingsTier,Tur as primeLocalSettingsStoreRootOwnership,$pn as primeSettings,wKn as readLocalSettingsStoreRootOwnership,Gqe as resetSettingsCacheWithBackendRead,Npn as seedUserSettings};
+.// @bun @bytecode
+// Claude Code is a Beta product p
+
+## chunk export hits=1
+@179536084 export{Npn,SKn,$pn,Gqe,kur,vKn,Tur,wKn};
+.// @bun @bytecode
+// Claude Code is a 
+
+## Gqe( all hits=5 (classified)
+@179527384 [DEF] }_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;tr
+
+@180749992 [CALL] bD()}function uP(o){Yl(o),a().store(l()),bD()}async function nHe(o){let t=await Gqe(o);try{a().store(l()),bD()}finally{t?.()}}function*Wan(){for(let o of KS(m3n).snapshotsBySession
+
+@191362512 [CALL] ged");let Pe;using Ge={[Symbol.dispose]:()=>Pe?.()};if(D()&&G!==void 0)Pe=await Gqe(G);if(F())tse(G,"deeplink");if(u_n(),Pe!==void 0)uP({userLayer:"retain"});else uP();na.cache.cle
+
+@215894974 [DEF] ,e):this.node().__data__}var pee=F(()=>{"use strict";o(EI,"default")});function Gqe(e){return function(t){e.call(this,t,this.__data__)}}function Vqe(e){return e.trim().split(/^|\s+
+
+@215895482 [D3_OTHER] =n:delete this.__on}}}function qqe(e,t,r){return function(){var n=this.__on,i,a=Gqe(t);if(n){for(var s=0,l=n.length;s<l;++s)if((i=n[s]).type===e.type&&i.name===e.name){this.removeE
+
+## await $pn( hits=1
+@191443858 nfo","init_safe_env_vars_applied",{duration_ms:Date.now()-p}),xr("init_safe_env_vars_applied");let i=rT(e),m=vS(i);if(D()&&i!==void 0)await nBt(i);if(await $pn(i,ra()),D()&&i!==void 0)await xJn(i);if(qpn({storageV5:i,credentials:m}),ehn(m),thn(i),D()&&m!==void 0){if(await mDe(m),Wgt())await Bgt(m)}if(await Gpn(i),e0(i),X$n(i),wen({storageV5:i,crede
+  gen={"i":191442651,"name":"b"}
+  ## owning b @191442651 sha=64f4b08741b36fd8 len=4168
+async function b(t={}){let r=Date.now();Y("info","init_started"),xr("init_function_start");let e=t.storageV5EnvPin;if(e?.backend!==void 0&&!Dde(e.configHome))n(`CLAUDE_CONFIG_DIR no longer names ${e.configHome}, where the v5 storage backend was built at start-up; init() loads its config without it`,{level:"warn"}),e={...e,backend:void 0};e??=qSn();try{let s=Date.now();if(D()&&e?.backend!==void 0)await nBt(e.backend),await Promise.all([vve(e.backend),Npn(e.backend,ra())]);else await vve();if(Y("info","init_configs_enabled",{duration_ms:Date.now()-s}),xr("init_configs_enabled"),D()&&e?.backend!==void 0)Agn(oe().cachedGrowthBookFeatures?.tengu_windows_credman===!0);if(D()&&e?.backend!==void 0)await _Ke(e.backend),xr("init_remote_settings_primed");let d=vS(e?.backend);if(D()&&d!==void 0)await mDe(d),xr("init_fd_credentials_primed"),await qmn(d),xr("init_stored_login_primed");let p=Date.now();if(yee(),await ipn(),_Xe(),await Promise.all([Zte(),JW(),fer(),der()]),await iBn(),await J6e(e?.backend!==void 0&&Dde(e.configHome)?d:void 0),ei())tV();Y("info","init_safe_env_vars_applied",{duration_ms:Date.now()-p}),xr("init_safe_env_vars_applied");let i=rT(e),m=vS(i);if(D()&&i!==void 0)await nBt(i);if(await $pn(i,ra()),D()&&i!==void 0)await xJn(i);if(qpn({storageV5:i,credentials:m}),ehn(m),thn(i),D()&&m!==void 0){if(await mDe(m),Wgt())await Bgt(m)}if(await Gpn(i),e0(i),X$n(i),wen({storageV5:i,credentials:m}),xr("init_after_graceful_shutdown"),Promise.all([import("B:/~BUN/root/chunk-a6q7kf96.js"),import("B:/~BUN/root/chunk-01nx0z2f.js")]).then(([o,c])=>{o.initialize1PEventLogging(i),c.onGrowthBookRefresh(()=>{o.reinitialize1PEventLoggingIfConfigChanged()})}),xr("init_after_1p_event_logging"),Lmn(m,i).catch(_),xr("init_after_oauth_populate"),Hh(i),Jbn({trustProbe:Jo}),_ue(),OKt())MKt();if(vk())Kpn();if(xr("init_after_remote_settings_check"),yhn(i),Eve(i),D()&&i!==void 0)XA(i);let g=Date.now();n("[init] configureGlobalMTLS starting"),Abn(),Y("info","init_mtls_configured",{duration_ms:Date.now()-g}),n("[init] configureGlobalMTLS complete");let f=Kte();if(f&&!Xte(f.value))throw new nH(Fzt(f.source,f.value));let E=Date.now();if(n("[init] configureGlobalAgents starting"),yE(),Y("info","init_proxy_configured",{duration_ms:Date.now()-E}),n("[init] configureGlobalAgents complete"),xr("init_network_configured"),w(),Me(process.env.CLAUDE_CODE_REMOTE))try{let{initAgentProxy:o,getAgentProxyEnv:c}=await import("B:/~BUN/root/chunk-xv8zavfv.js"),{registerAgentProxyEnvFn:P}=await import("B:/~BUN/root/chunk-2148xkwj.js");P(c),await o()}catch(o){n(`[init] agent proxy init failed: ${o instanceof Error?o.message:String(o)}; continuing without proxy`,{level:"warn"})}if(j_t(),B()==="windows"&&!Gi()){if(!SA())console.error(`Claude Code on Windows requires a shell tool. Git Bash was not found and the PowerShell tool is disabled (CLAUDE_CODE_USE_POWERSHELL_TOOL=0).
+  - Install Git for Windows: https://git-scm.com/downloads/win, or
+  - Remove CLAUDE_CODE_USE_POWERSHELL_TOOL from your environment or settings.`),process.exit(1);if(await mT()===null)console.error(`Claude Code on Windows requires either Git for Windows (for bash) or PowerShell. Install one of:
+  - Git for Windows: https://git-scm.com/downloads/win
+  - PowerShell 7: https://aka.ms/powershell
+Or set CLAUDE_CODE_GIT_BASH_PATH to your bash.exe location.`),process.exit(1)}if(Et(oUn),Et(async()=>{let{cleanupSessionTeams:o}=await import("B:/~BUN/root/chunk-t2b8vj4a.js");await o(i)}),cC()){let o=Date.now();try{let c=await NPe();Y("info",c===null?"init_scratchpad_unavailable":"init_scratchpad_created",{duration_ms:Date.now()-o})}catch(c){n(`init: ensureScratchpadDir failed: ${c}`,{level:"error"})}}return Ou(()=>{if(cC())NPe().catch((o)=>n(`onSessionSwitch: ensureScratchpadDir failed: ${o}`,{level:"error"}))}),d4n(),Y("info","init_completed",{duration_ms:Date.now()-r}),xr("init_function_end"),i}catch(s){if(s instanceof nH){process.stderr.write(`${s.message}
+`),Lr(1);return}if(s instanceof S0){if(!De()&&t.showInvalidConfigDialog){await t.showInvalidConfigDialog({error:s});return}process.stderr.write(`Configuration error in ${s.filePath}: ${s.message}
+`),Lr(1);return}else throw s}}
+
+## ra() for Gqe (settings owner — NOT jobs.clear)
+@178262950 function ra(e){return e instanceof nu?e.content:`Error: ${e instanceof Error?e.message:String(e)}`}
+@179035686 function ra(){return mGt.of(z().host)}
+@179553167 function ra(e){Object.keys(e.jobs).forEach(na.bind(e)),e.jobs={}}
+import-site @179522136 import{ra,Yl,_Ke}from"B:/~BUN/root/chunk-h5378ehg.js";import{nyn,$Me,Qve,Fte,jW}from"B:/~BUN/root/chunk-6t8yhsxa.js";import{nx}from"B:/~BUN/root/chunk-qwjk0yd0.js";import{Vjt,Dgn,Mgn,_Xn,Nyt,Ogn,Lgn,N
+function ra(){ hits=1
+@179035686 function ra(){return mGt.of(z().host)}

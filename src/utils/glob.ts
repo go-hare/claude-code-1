@@ -1,10 +1,8 @@
 import { basename, dirname, isAbsolute, join, sep } from 'path'
 import type { ToolPermissionContext } from '../Tool.js'
 import { isEnvTruthy } from './envUtils.js'
-import {
-  getFileReadIgnorePatterns,
-  normalizePatternsToPath,
-} from './permissions/filesystem.js'
+import { takeApprovedFileToolPath } from './fileToolApprovedOpen.js'
+import { compileReadDenyRgGlobs, openSearchRoot } from './searchRootGuard.js'
 import { getPlatform } from './platform.js'
 import { getGlobExclusionsForPluginCache } from './plugins/orphanedPluginFilter.js'
 import { ripGrep } from './ripgrep.js'
@@ -83,11 +81,6 @@ export async function glob(
     }
   }
 
-  const ignorePatterns = normalizePatternsToPath(
-    getFileReadIgnorePatterns(toolPermissionContext),
-    searchDir,
-  )
-
   // Use ripgrep for better memory performance
   // --files: list files instead of searching content
   // --glob: filter by pattern
@@ -106,24 +99,32 @@ export async function glob(
     ...(hidden ? ['--hidden'] : []),
   ]
 
-  // Add ignore patterns
-  for (const pattern of ignorePatterns) {
-    args.push('--glob', `!${pattern}`)
+  const approved = takeApprovedFileToolPath(searchDir)
+  const root = await openSearchRoot(searchDir, approved)
+  if (!root) return { files: [], truncated: false }
+
+  let absolutePaths: string[]
+  try {
+    await root.recheckBeforeSpawn()
+    for (const pattern of compileReadDenyRgGlobs(toolPermissionContext, root)) {
+      args.push('--glob', pattern)
+    }
+
+    for (const exclusion of await getGlobExclusionsForPluginCache(searchDir)) {
+      args.push('--glob', exclusion)
+    }
+
+    const allPaths = await ripGrep(args, root.target, abortSignal, {
+      rejectOnInputError: true,
+      cwd: root.spawnCwd,
+    })
+
+    absolutePaths = allPaths.map(p =>
+      isAbsolute(p) ? p : join(root.canonical, p),
+    )
+  } finally {
+    await root.close()
   }
-
-  // Exclude orphaned plugin version directories
-  for (const exclusion of await getGlobExclusionsForPluginCache(searchDir)) {
-    args.push('--glob', exclusion)
-  }
-
-  const allPaths = await ripGrep(args, searchDir, abortSignal, {
-    rejectOnInputError: true,
-  })
-
-  // ripgrep returns relative paths, convert to absolute
-  const absolutePaths = allPaths.map(p =>
-    isAbsolute(p) ? p : join(searchDir, p),
-  )
 
   const truncated = absolutePaths.length > offset + limit
   const files = absolutePaths.slice(offset, offset + limit)

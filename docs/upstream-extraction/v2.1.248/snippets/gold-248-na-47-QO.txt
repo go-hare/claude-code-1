@@ -1,0 +1,6 @@
+# gold-248-na-47-QO  wrap exporter; swallow fail; logSummary
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=180153885
+
+len=345 sha=d5637050d60c2311
+function QO(e,t){let r=e.export.bind(e),o=e.forceFlush?.bind(e),u=e.shutdown.bind(e);if(e.export=(p,g)=>r(p,(E)=>{if(E.code!==Ic.ExportResultCode.SUCCESS)t.record(E.error?.message??"unknown error");g({code:Ic.ExportResultCode.SUCCESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()};return e.shutdown=async()=>{await u(),t.logSummary()},e}

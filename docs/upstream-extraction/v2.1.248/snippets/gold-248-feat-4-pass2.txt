@@ -1,0 +1,151 @@
+# gold-248-feat-4-pass2  pass2 managed-settings diag UI
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:14.267Z
+
+## Remote managed settings failed to load (  needle="Remote managed settings failed to load ("  hits=2
+- #0 @93411412 tures are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using
+- #1 @201568440 ailure.errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using cached polic
+
+## /status for details  needle="/status for details"  hits=5
+- #0 @92602842 r parked..........compliance-taint-...5....u]. . some features are restricted . /status for details...........LSP error: .....a.}.lsp-manager.........not-started.....'..getAllSer
+- #1 @93411363 path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. .
+- #2 @201568085 ren:["HIPAA \xB7 some features are restricted",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})},Gf={id:"remote-managed-settings-failed",tier:"warning",type:"warning",is
+- #3 @201568690 ached policy":" \xB7 no remote policy applied",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})}},jf={id:"monitoring-notice",tier:"warning",type:"info",isActive:()=>xSe(
+- #4 @203245801 ate",requeueOnPreempt:!0,text:`${xpe(Z)} \xB7 some features are restricted \xB7 /status for details`})}return x($W()),Qce(x)}}},Mve={id:"monitoring-notice",deps:(d)=>[d.addNotific
+
+## no remote policy applied  needle="no remote policy applied"  hits=2
+- #0 @93411559 icy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn more........u.Debug mode enabled . lo
+- #1 @201568631 hed policy (proxy/CA/provider env withheld)":" \xB7 using cached policy":" \xB7 no remote policy applied",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})}},jf={id:"monitorin
+
+## using cached policy  needle="using cached policy"  hits=4
+- #0 @93411463 .......8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no 
+- #1 @93411527 oad (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn 
+- #2 @201568542 s failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using cached policy (proxy/CA/provider env withheld)":" \xB7 using cached policy":" \xB7 no remote 
+- #3 @201568603 EnvWithheld?" \xB7 using cached policy (proxy/CA/provider env withheld)":" \xB7 using cached policy":" \xB7 no remote policy applied",e(t,{dimColor:!0,children:" \xB7 /status for 
+
+## Managed settings (remote):  needle="Managed settings (remote):"  hits=3
+- #0 @94508032 anager........%.Auto-update channel: .......Z...Last update attempt: .........O.Managed settings (remote): .L.......M.a.n.a.g.e.d. .s.e.t.t.i.n.g.s. .(.r.e.m.o.t.e.).:. .c.h.e.c.k.i.n.g.
+- #1 @199442232 slow":f}`,`Last update attempt: ${S(n.lastUpdateResult)}`],m=zre();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 
+- #2 @199442296 ();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 (fetch in progress; re-run in a moment)");let{statusNotices:p,in
+
+## third_party_provider  needle="third_party_provider"  hits=9
+- #0 @94513728 r Team subscription.,....-..no usable credentials for the settings fetch.....;..third_party_provider........unsupported_subscription....@'..no_auth.......A.sandboxed_entrypoint....
+- #1 @180756351 ion vk(){return ISe()===void 0}function ISe(e={}){if(Le()!=="firstParty")return"third_party_provider";if(!e.skipBaseUrlCheck&&!Uo())return"custom_base_url";try{let{key:t}=gh({skipR
+- #2 @180919006 );return TY(e,e?void 0:"unpinned_gateway")}if(Le()!=="firstParty")return TY(!1,"third_party_provider");if(!Uo())return TY(!1,"custom_base_url");let t=a.CLAUDE_CODE_ENTRYPOINT;if(t=
+- #3 @184608237 onfig_unavailable";if(e.value?.enabled!==!0)return"kill_switch";if(!ar())return"third_party_provider";if(_k())return"remote_environment";if(!bW())return"non_first_party_base_url";r
+- #4 @185114169 Disabled on third-party provider"),s("tengu_claudeai_mcp_eligibility",{state:v("third_party_provider")}),{};if(!St()){if(n("[claudeai-mcp] Disabled: API-key auth precedence active"
+- #5 @193500578 ile:!0,custom_credentials_path:!0,api_key_env_nondispatching:!0,wif_env_quad:!1,third_party_provider:!1,api_key_env:!1,env_credential_shadow:!1,other_deployment_profile:!1,federati
+- #6 @193502065 on uses a third-party provider, which does not use Anthropic Console sign-in.","third_party_provider");let o=a.ANTHROPIC_API_KEY;if(o){let c=await Z2t({skipRetrievingKeyFromApiKeyH
+- #7 @199434817 n}function oIn(){return KMe()===!0&&YMe()===void 0}function r(e){switch(e){case"third_party_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base
+- #8 @199436202 ase"stale_cache":return!0;case"ok":return!1;case"ineligible":return e.reason==="third_party_provider"||e.reason==="custom_base_url"||e.reason==="unpinned_gateway"}}function cZe(e){
+
+## custom_base_url  needle="custom_base_url"  hits=8
+- #0 @94513856 tion....@'..no_auth.......A.sandboxed_entrypoint........unpinned_gateway....U.*.custom_base_url.....<.M.no credentials available....y...authentication rejected (401)........]_
+- #1 @98460832 56:.....P.:.api_key......6..restrictions........compliance_taints........S..has_custom_base_url......fg.has_auth_token.......%=.has_api_key_helper..........api_key_prefix.....
+- #2 @180756410 ="firstParty")return"third_party_provider";if(!e.skipBaseUrlCheck&&!Uo())return"custom_base_url";try{let{key:t}=gh({skipRetrievingKeyFromApiKeyHelper:!0});if(t)return}catch{}i
+- #3 @180919052 Le()!=="firstParty")return TY(!1,"third_party_provider");if(!Uo())return TY(!1,"custom_base_url");let t=a.CLAUDE_CODE_ENTRYPOINT;if(t==="local-agent"||t==="remote_cowork"||t?.
+- #4 @189544747 on/json","json"],["text/json","json"],["text/","text"]];function w(){return{has_custom_base_url:!s$(),has_auth_token:Boolean(HW()),has_api_key_helper:Boolean(wb()),api_key_pre
+- #5 @189550151 ateLogged)return;this.firstPromptStateLogged=!0;let e=ISe(),t=e===void 0,i=e==="custom_base_url"?ISe({skipBaseUrlCheck:!0})===void 0:t,r=wS()!==null,a=t?L():void 0,d=this.star
+- #6 @199434906 ty_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base_url":return"not available with a custom ANTHROPIC_BASE_URL";case"sandboxed_entrypoi
+- #7 @199436237 return!1;case"ineligible":return e.reason==="third_party_provider"||e.reason==="custom_base_url"||e.reason==="unpinned_gateway"}}function cZe(e){switch(e.state){case"ok":retur
+
+## function oIn  needle="function oIn("  hits=1
+- #0 @199434739 rn e;if(KMe()===!1){let t=yKe();if(t)return{state:"ineligible",reason:t}}return}function oIn(){return KMe()===!0&&YMe()===void 0}function r(e){switch(e){case"third_party_pro
+
+## function WTt  needle="function WTt("  hits=2
+- #0 @186438999 unction FEe(e){return e.type!=="thinking"&&e.type!=="redacted_thinking"&&!vR(e)}function WTt({messages:e,enablePromptCaching:t,skipCacheWrite:r,forkPointUuid:o,canMarkApiSys
+- #1 @199435288 bscription";case"no_auth":return"no usable credentials for the settings fetch"}}function WTt(e,t){switch(e){case"no_auth_available":return"no credentials available";case"htt
+
+## ineligible  needle="state:\"ineligible\""  hits=2
+- #0 @190483421 ull,fetchSucceeded:!1,failure:a}}}function x(e){if(!_P()){let t=yKe();if(t)sbt({state:"ineligible",reason:t});return}if(e.fetchSucceeded){sbt({state:"ok",hasSettings:e.settings!=
+- #1 @199434703 function zre(){let e=YMe();if(e)return e;if(KMe()===!1){let t=yKe();if(t)return{state:"ineligible",reason:t}}return}function oIn(){return KMe()===!0&&YMe()===void 0}function r(e)
+
+## Remote managed settings failed to load (#0 @93411412
+n with --debug-file <path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix twice - Claude uses ...!.......CLAUDE_CODE_TMUX_PREFIX_CONFLICTS........'..CLAUDE_CODE_TMUX_PREFIX......!..Prompt caching off ((...9.q.
+
+## Remote managed settings failed to load (#1 @201568440
+?.state!=="failed"&&i?.state!=="stale_cache")return null;let l=WTt(i.failure.errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using cached policy (proxy/CA/provider env withheld)":" \xB7 using cached policy":" \xB7 no remote policy applied",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})}},jf={id:"monitoring-notice",tier:"warning",type:"info",isActive:()=>xSe()!==null,render:()=>{let i=xSe();if(!i)return null;return r(Gp,{status:"info",children:[i.text,i.url?r(t,{dimColor:!0,children:[" \xB7 ",e(it,{url:i.ur
+
+## fn Remote managed settings failed to load (#1 @201563353
+len=74 sha=b66410194146af3e
+function ug(){return s("tengu_powerup_discovery_shown",{arm:c("banner")})}
+
+## Managed settings (remote):#0 @94508032
+..i...Not working.....b|..Auto-updates: ..........Managed by package manager........%.Auto-update channel: .......Z...Last update attempt: .........O.Managed settings (remote): .L.......M.a.n.a.g.e.d. .s.e.t.t.i.n.g.s. .(.r.e.m.o.t.e.).:. .c.h.e.c.k.i.n.g.&  .(.f.e.t.c.h. .i.n. .p.r.o.g.r.e.s.s.;. .r.e.-.r.u.n. .i.n. .a. .m.o.m.e.n.t.).....E'..Invalid settings....
+(.. .:  .......?Fe.
+  Suggested fix: ........g.BASH_MAX_OUTPUT_LENGTH.......|..TASK_MAX_OUTPUT_LENGTH......aw..CLAUDE_CODE_MAX_OUTPUT_TOKENS....... .m.claude-opus-4-6......6s.Environment variables.......G[U.Multiple installations foundc...l.\.I.n.s.i.d.e. .a. .c.l.o.u.d. .s.e.s.s.i.
+
+## Managed settings (remote):#1 @199442232
+package manager":c(n.autoUpdates)}`,`Auto-update channel: ${f==="rc"?"slow":f}`,`Last update attempt: ${S(n.lastUpdateResult)}`],m=zre();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 (fetch in progress; re-run in a moment)");let{statusNotices:p,invalidEntries:g}=Fde(KG().errors);if(g.length>0){l.push("",ae.yellow("Invalid settings"));for(let i of g){let _=[i.file,i.path].flatMap((w)=>w?[c(w)]:[]).join(" \u203A ");l.push(`- ${_?`${_}: `:""}${c(i.message)}${i.suggestion?`
+  Suggested fix: ${c(i.suggestion)}`:""}`)}}if(p.length>0){l.push("");for(let i of p)l.push(`- ${c(i.m
+
+## fn Managed settings (remote):#1 @199440466
+len=3938 sha=d92b2e1661fd5e88
+function Gmr(u){s("tengu_doctor_command",{});let d;try{let n=await Dme({probeKeychain:!0,storageV5:u}),f=dH(),l=["Claude Code doctor","",`Running: ${n.installationType} (${n.version})`,...{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.GIT_SHA?[`Commit: ${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.GIT_SHA.slice(0,12)}`]:[],"Platform: win32-x64",...n.packageManager?[`Package manager: ${c(n.packageManager)}`]:[],`Path: ${c(n.installationPath)}`,...n.invokedBinary!==n.installationPath?[`Invoked: ${c(n.invokedBinary)}`]:[],`Config install method: ${c(n.configInstallMethod)}`,`Search: ${n.ripgrepStatus.working?"OK":"Not working"} (${n.ripgrepStatus.mode==="embedded"?"bundled":c(n.ripgrepStatus.systemPath||"system")})`,`Auto-updates: ${n.packageManager?"Managed by package manager":c(n.autoUpdates)}`,`Auto-update channel: ${f==="rc"?"slow":f}`,`Last update attempt: ${S(n.lastUpdateResult)}`],m=zre();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 (fetch in progress; re-run in a moment)");let{statusNotices:p,invalidEntries:g}=Fde(KG().errors);if(g.length>0){l.push("",ae.yellow("Invalid settings"));for(let i of g){let _=[i.file,i.path].flatMap((w)=>w?[c(w)]:[]).join(" \u203A ");l.push(`- ${_?`${_}: `:""}${c(i.message)}${i.suggestion?`
+  Suggested fix: ${c(i.suggestion)}`:""}`)}}if(p.length>0){l.push("");for(let i of p)l.push(`- ${c(i.message)}`)}let h=[{name:"BASH_MAX_OUTPUT_LENGTH",default:men,upperLimit:fen},{name:"TASK_MAX_OUTPUT_LENGTH",default:frn,upperLimit:prn},{name:"CLAUDE_CODE_MAX_OUTPUT_TOKENS",...Tce("claude-opus-4-6")}].map((i)=>({name:i.name,...IJ(i.name,process.env[i.name],i.default,i.upperLimit)})).filter((i)=>i.status!=="valid");if(h.length>0){l.push("",ae.yellow("Environment variables"));for(let i of h)l.push(`- ${i.name}: ${c(i.message??i.status)}`)}if(n.multipleInstallations.length>1){l.push("",ae.yellow("Multiple installations found"));for(let i of n.multipleInstallations)l.push(`- ${c(`${i.type} at ${i.path}`)}`)}try{let i=await Apn();if(l.push("","Remote Control"),i.inRemoteSession)l.push("Inside a cloud session \u2014 Remote Control is unavailable here. Use it from the local session instead.");else{l.push(c(i.disabledReason??"Control this session from claude.ai/code or the Claude mobile app"));for(let _ of i.checks.filter((w)=>!w.ok))l.push(c(`- ${_.label}${_.detail?` (${_.detail})`:""}`))}}catch{await Ql("cli_doctor","bridge_info_unavailable")}if(n.warnings.length>0){l.push("",ae.yellow(`${n.warnings.length} ${I(n.warnings.length,"warning")} found`));for(let i of n.warnings)l.push(`- ${c(i.issue)}`,`  Fix: ${c(i.fix)}`)}else l.push("","No installation issues found.");l.push("","For a full setup checkup that can also fix issues, run /doctor in a Claude Code session."),Bn(l.join(`
+`)+`
+`),d={warnings:n.warnings.length,settings_errors:g.length,env_var_issues:h.length,multiple_installs:n.multipleInstallations.length>1,ripgrep_working:n.ripgrepStatus.working}}catch(n){throw await En("cli_doctor","diagnostic_failed"),n}await Ns("cli_doctor",d),await Pi(0)}
+
+## Managed settings (remote):#2 @199442296
+"rc"?"slow":f}`,`Last update attempt: ${S(n.lastUpdateResult)}`],m=zre();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 (fetch in progress; re-run in a moment)");let{statusNotices:p,invalidEntries:g}=Fde(KG().errors);if(g.length>0){l.push("",ae.yellow("Invalid settings"));for(let i of g){let _=[i.file,i.path].flatMap((w)=>w?[c(w)]:[]).join(" \u203A ");l.push(`- ${_?`${_}: `:""}${c(i.message)}${i.suggestion?`
+  Suggested fix: ${c(i.suggestion)}`:""}`)}}if(p.length>0){l.push("");for(let i of p)l.push(`- ${c(i.message)}`)}let h=[{name:"BASH_MAX_OUTPUT_LENGTH",default:men,upp
+
+## fn Managed settings (remote):#2 @199440466
+len=3938 sha=d92b2e1661fd5e88
+function Gmr(u){s("tengu_doctor_command",{});let d;try{let n=await Dme({probeKeychain:!0,storageV5:u}),f=dH(),l=["Claude Code doctor","",`Running: ${n.installationType} (${n.version})`,...{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.GIT_SHA?[`Commit: ${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.GIT_SHA.slice(0,12)}`]:[],"Platform: win32-x64",...n.packageManager?[`Package manager: ${c(n.packageManager)}`]:[],`Path: ${c(n.installationPath)}`,...n.invokedBinary!==n.installationPath?[`Invoked: ${c(n.invokedBinary)}`]:[],`Config install method: ${c(n.configInstallMethod)}`,`Search: ${n.ripgrepStatus.working?"OK":"Not working"} (${n.ripgrepStatus.mode==="embedded"?"bundled":c(n.ripgrepStatus.systemPath||"system")})`,`Auto-updates: ${n.packageManager?"Managed by package manager":c(n.autoUpdates)}`,`Auto-update channel: ${f==="rc"?"slow":f}`,`Last update attempt: ${S(n.lastUpdateResult)}`],m=zre();if(m)l.push(`Managed settings (remote): ${c(cZe(m))}`);else if(oIn())l.push("Managed settings (remote): checking\u2026 (fetch in progress; re-run in a moment)");let{statusNotices:p,invalidEntries:g}=Fde(KG().errors);if(g.length>0){l.push("",ae.yellow("Invalid settings"));for(let i of g){let _=[i.file,i.path].flatMap((w)=>w?[c(w)]:[]).join(" \u203A ");l.push(`- ${_?`${_}: `:""}${c(i.message)}${i.suggestion?`
+  Suggested fix: ${c(i.suggestion)}`:""}`)}}if(p.length>0){l.push("");for(let i of p)l.push(`- ${c(i.message)}`)}let h=[{name:"BASH_MAX_OUTPUT_LENGTH",default:men,upperLimit:fen},{name:"TASK_MAX_OUTPUT_LENGTH",default:frn,upperLimit:prn},{name:"CLAUDE_CODE_MAX_OUTPUT_TOKENS",...Tce("claude-opus-4-6")}].map((i)=>({name:i.name,...IJ(i.name,process.env[i.name],i.default,i.upperLimit)})).filter((i)=>i.status!=="valid");if(h.length>0){l.push("",ae.yellow("Environment variables"));for(let i of h)l.push(`- ${i.name}: ${c(i.message??i.status)}`)}if(n.multipleInstallations.length>1){l.push("",ae.yellow("Multiple installations found"));for(let i of n.multipleInstallations)l.push(`- ${c(`${i.type} at ${i.path}`)}`)}try{let i=await Apn();if(l.push("","Remote Control"),i.inRemoteSession)l.push("Inside a cloud session \u2014 Remote Control is unavailable here. Use it from the local session instead.");else{l.push(c(i.disabledReason??"Control this session from claude.ai/code or the Claude mobile app"));for(let _ of i.checks.filter((w)=>!w.ok))l.push(c(`- ${_.label}${_.detail?` (${_.detail})`:""}`))}}catch{await Ql("cli_doctor","bridge_info_unavailable")}if(n.warnings.length>0){l.push("",ae.yellow(`${n.warnings.length} ${I(n.warnings.length,"warning")} found`));for(let i of n.warnings)l.push(`- ${c(i.issue)}`,`  Fix: ${c(i.fix)}`)}else l.push("","No installation issues found.");l.push("","For a full setup checkup that can also fix issues, run /doctor in a Claude Code session."),Bn(l.join(`
+`)+`
+`),d={warnings:n.warnings.length,settings_errors:g.length,env_var_issues:h.length,multiple_installs:n.multipleInstallations.length>1,ripgrep_working:n.ripgrepStatus.working}}catch(n){throw await En("cli_doctor","diagnostic_failed"),n}await Ns("cli_doctor",d),await Pi(0)}
+
+## function oIn(#0 @199434739
+m"B:/~BUN/root/chunk-h5378ehg.js";function zre(){let e=YMe();if(e)return e;if(KMe()===!1){let t=yKe();if(t)return{state:"ineligible",reason:t}}return}function oIn(){return KMe()===!0&&YMe()===void 0}function r(e){switch(e){case"third_party_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base_url":return"not available with a custom ANTHROPIC_BASE_URL";case"sandboxed_entrypoint":return"not available in sandboxed sessions";case"unpinned_gateway":return"gateway auth is unpinned; run `claude auth login` to pin";case"unsupported_subscription":return"requires an Enterprise or Team subscription";case"no_auth":retur
+
+## function oIn( @199434739
+len=49 sha=76517dfc55b341cf
+function oIn(){return KMe()===!0&&YMe()===void 0}
+
+## function WTt(#0 @186438999
+PT_CACHING_1H_BEDROCK)return{ttl:"1h",reason:"enable_1h_env"};return}function FEe(e){return e.type!=="thinking"&&e.type!=="redacted_thinking"&&!vR(e)}function WTt({messages:e,enablePromptCaching:t,skipCacheWrite:r,forkPointUuid:o,canMarkApiSystem:u,forkCachePin:p,topLevelCacheControl:g,isForkPinStepBackEnabled:k}){let E=(fe)=>{if(fe.type!=="assistant")return!0;let we=fe.message.content;if(typeof we==="string")return!0;let Pe=we.at(-1);return Pe!==void 0&&FEe(Pe)},C=(fe)=>fe.type==="api_system"||fe.type==="user"&&fe.ephemeral===!0||!E(fe),M=(fe)=>{let we=fe;while(we>=0&&C(e[we]))we--;return we},L=M(e.length-1);if(r)L=M(L-1);let N=e.length-1,U=
+
+## function WTt( @186438999
+len=1000 sha=15e5f237b60ecae2
+function WTt({messages:e,enablePromptCaching:t,skipCacheWrite:r,forkPointUuid:o,canMarkApiSystem:u,forkCachePin:p,topLevelCacheControl:g,isForkPinStepBackEnabled:k}){let E=(fe)=>{if(fe.type!=="assistant")return!0;let we=fe.message.content;if(typeof we==="string")return!0;let Pe=we.at(-1);return Pe!==void 0&&FEe(Pe)},C=(fe)=>fe.type==="api_system"||fe.type==="user"&&fe.ephemeral===!0||!E(fe),M=(fe)=>{let we=fe;while(we>=0&&C(e[we]))we--;return we},L=M(e.length-1);if(r)L=M(L-1);let N=e.length-1,U=e[N],j=U!==void 0&&U.type==="api_system"&&!U.ephemeral&&!e.slice(L+1,N).some((fe)=>fe.type==="user"&&fe.ephemeral===!0)&&typeof U.message.content==="string"&&U.message.content.trim()!=="",G=u&&t&&!r&&L>=0&&j?N:L,ue=new Set;if(G>=0)ue.add(G);let pe=!1;if(p&&!g){if(o){let fe=e.findLastIndex((we)=>we.uuid===o);if(fe>=0&&fe<=L){let we=r&&fe===L&&k()?M(fe-1):E(e[fe])?fe:M(fe-1);if(we>=0)ue.add(we),pe=!0}}else if(!r){let fe=M(L-1);if(fe>=0)ue.add(fe),pe=!0}}return{markerIndices:ue,forkPointPinned:pe}}
+
+## function WTt(#1 @199435288
+ase"unsupported_subscription":return"requires an Enterprise or Team subscription";case"no_auth":return"no usable credentials for the settings fetch"}}function WTt(e,t){switch(e){case"no_auth_available":return"no credentials available";case"http_401":return"authentication rejected (401)";case"http_403":return"access denied (403)";case"http_4xx":return`client error${t?` (${t})`:""}`;case"http_5xx":return`server error${t?` (${t})`:""}`;case"timeout":return"request timed out";case"network_error":return"network error";case"gateway_cert_mismatch":return"gateway certificate mismatch";case"gateway_pin_refused":return"gateway TLS pin is in a symlinked
+
+## function WTt( @199435288
+len=788 sha=0705ad499f3c7c4b
+function WTt(e,t){switch(e){case"no_auth_available":return"no credentials available";case"http_401":return"authentication rejected (401)";case"http_403":return"access denied (403)";case"http_4xx":return`client error${t?` (${t})`:""}`;case"http_5xx":return`server error${t?` (${t})`:""}`;case"timeout":return"request timed out";case"network_error":return"network error";case"gateway_cert_mismatch":return"gateway certificate mismatch";case"gateway_pin_refused":return"gateway TLS pin is in a symlinked credentials file";case"gateway_pin_unreadable":return"gateway TLS pin could not be read from the credentials file";case"parse_error":return"server response could not be parsed";case"invalid_settings":return"server returned invalid settings";case"unknown_error":return"unexpected error"}}
+
+## function qgn(#0 @179511241
+t;let r=(p)=>p!=null&&BI(p),o=H(),d=wY(o).composes==="tier"||r(ZV(o).settings)||r(JB().settings)||r($yt().settings);return e.policy.adminSurvivor=d,d}function qgn(){let e=UW();if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain invalid entries (remaining valid policies are still enforced):",o=e.map((u)=>`  ${u.file??"managed settings"}${u.path?` (${u.path})`:""}: ${u.message}`);process.stderr.write(`${r}
+${o.join(`
+`)}
+`),s("tengu_managed_settings_validation_errors",{error_count:e.length,remote_error_count:J(e,(u)=>
+
+## function qgn( @179511241
+len=546 sha=31f356edf9841e1f
+function qgn(){let e=UW();if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain invalid entries (remaining valid policies are still enforced):",o=e.map((u)=>`  ${u.file??"managed settings"}${u.path?` (${u.path})`:""}: ${u.message}`);process.stderr.write(`${r}
+${o.join(`
+`)}
+`),s("tengu_managed_settings_validation_errors",{error_count:e.length,remote_error_count:J(e,(u)=>u.file==="remote managed settings"),fatal:t})}
+
+## function qgn(#1 @184975402
+()==="windows"?"\\\\.\\NUL\\no-grafts":"/dev/null/no-grafts",NL={GIT_GRAFT_FILE:Wgn,GIT_NO_REPLACE_OBJECTS:"1"},_tt=64,zgn=65536,Ggn=(_tt+1)*65;async function qgn(e){try{if(!(await gtt(e)).isFile())return null;let t=await Fgn(e,js());try{let r=await t.stat();if(!r.isFile()||r.size>Ggn)return null;let o=Buffer.allocUnsafe(r.size),{bytesRead:u}=await t.read(o,0,r.size,0);if(u!==r.size)return null;let p=o.toString("utf8").split(/\r?\n/).filter((g)=>g!=="");return p.length>_tt||p.some((g)=>!/^[0-9a-f]{40,64}$/.test(g))?null:p}finally{await t.close()}}catch{return null}}var Kgn=(e)=>gt(e,`
+
+`).split(`
+`).some((t)=>t.startsWith("parent ")),Vgn={com
+
+## function qgn( @184975402
+len=422 sha=ab703b23a0d6e501
+function qgn(e){try{if(!(await gtt(e)).isFile())return null;let t=await Fgn(e,js());try{let r=await t.stat();if(!r.isFile()||r.size>Ggn)return null;let o=Buffer.allocUnsafe(r.size),{bytesRead:u}=await t.read(o,0,r.size,0);if(u!==r.size)return null;let p=o.toString("utf8").split(/\r?\n/).filter((g)=>g!=="");return p.length>_tt||p.some((g)=>!/^[0-9a-f]{40,64}$/.test(g))?null:p}finally{await t.close()}}catch{return null}}

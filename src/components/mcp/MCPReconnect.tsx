@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Text, useTheme } from '@anthropic/ink';
 import { useMcpReconnect } from '../../services/mcp/MCPConnectionManager.js';
+import { isMcpServerDisabled } from '../../services/mcp/config.js';
+import { reconnectDisabledElsewhereResult } from '../../services/mcp/mcpReconnectRemedy.js';
 import { useAppStateStore } from '../../state/AppState.js';
 import { Spinner } from '../Spinner.js';
 
@@ -29,6 +31,24 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
           setError(`MCP server "${serverName}" not found`);
           setIsReconnecting(false);
           onComplete(`MCP server "${serverName}" not found`);
+          return;
+        }
+
+        const driftedRemedy = reconnectDisabledElsewhereResult(
+          [
+            {
+              name: server.name,
+              type: server.type,
+              ...(server.type === 'failed' && server.errorCode !== undefined ? { errorCode: server.errorCode } : {}),
+            },
+          ],
+          serverName,
+          isMcpServerDisabled,
+        );
+        if (driftedRemedy !== null) {
+          setError(driftedRemedy);
+          setIsReconnecting(false);
+          onComplete(driftedRemedy);
           return;
         }
 

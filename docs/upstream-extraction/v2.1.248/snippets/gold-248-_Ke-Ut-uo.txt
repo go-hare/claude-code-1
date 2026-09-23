@@ -1,0 +1,260 @@
+# gold-248-_Ke-Ut-uo
+
+Official densable 2.1.248 SEA. Remote-settings storage view prime chain.
+`_Ke(storageV5)` → `new Ut(e)` + `uo(view, storageV5, sessionBag)`.
+`w()` owns `backendView`; `Yv()` is CLAUDE_CODE_REMOTE_SETTINGS_PATH stub (empty).
+Do NOT invent cloud helper attestation — sidecar is just storageV5 key read.
+
+## _Ke @179162866
+sha=ef03c9b1fcd4958e len=314
+async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}
+
+## async uo @179163180
+sha=5def7e8f177fc77d len=611
+async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subscriptions.push(r.value)}if(!await e.settled()||!await e.readUnobserved())return;if(e.stoodDown)return;e.ready=!0,n(`Remote settings: primed from storage (${zt(e.content)}; helper consent ${e.attestation===void 0?"not attested":"attested"}${o.sessionCache!==null?"; cache already loaded, serving later loads":""})`)}catch(s){e.standDown(`prime failed: ${l(s)}`)}}
+
+## class Ut{ hits near-prime=1: 179163791
+
+## class Ut @179163791
+sha=960bdef83d78a58e len=3131
+class Ut{storageV5;content=null;attestation=void 0;ready=!1;priming=Promise.resolve();stoodDown=!1;configHome=ge();subscriptions=[];cache=vt(Pe,"cache file");sidecar=vt(Ne,"helper consent sidecar");work=Promise.resolve(!0);steps=0;lastCacheStep=0;constructor(e){this.storageV5=e}onEvent(e){if(this.stoodDown)return;if(!e.ok){this.standDown(`watch ended: ${Ge(e.error)}`);return}let t=this.heldOf(e.value.key);if(t===void 0)return;if(e.value.kind==="snapshot"&&t.begun)return;this.take(t,po(e.value))}settled(){return this.work.then((e)=>e&&!this.stoodDown)}readUnobserved(){for(let e of[this.cache,this.sidecar])if(!e.observed)this.take(e);return this.settled()}written(e,t){let o=this.stoodDown?void 0:this.heldOf(e);if(o===void 0)return;if(o.begun=!0,o.generation++,o===this.cache)this.sidecar.generation++;if(this.advance(o),t!==null&&Buffer.byteLength(t,"utf8")>ce){this.standDown(`oversize ${o.label}`);return}this.install(o,t),this.follow(o,t===null)}heldOf(e){let t=Pu(e);return t===this.cache.id?this.cache:t===this.sidecar.id?this.sidecar:void 0}take(e,t){if(e.begun=!0,t!==void 0){e.pendingRead=void 0;let o=e.generation;this.queue(e,()=>e.generation===o?this.fill(e,t):!this.stoodDown)}return this.follow(e,t===void 0)}follow(e,t){if(t&&e.pendingRead===void 0){let o=this.queue(e,()=>{if(e.pendingRead===o)e.pendingRead=void 0;return this.read(e)});e.pendingRead=o}if(e===this.cache&&(this.sidecar.pendingRead??0)<this.lastCacheStep)return this.sidecar.pendingRead=void 0,this.take(this.sidecar);return this.work}queue(e,t){let o=this.advance(e);return this.work=this.work.then(t).catch((s)=>(this.standDown(`refresh failed: ${l(s)}`),!1)),o}advance(e){let t=++this.steps;if(e===this.cache)this.lastCacheStep=t;return t}async read(e){if(this.stoodDown)return!1;let t=e.generation;try{let o=await this.storageV5.read([{key:e.key,offset:0,length:ce+1}]);if(e.generation!==t){if(!o.ok)n(`Remote settings: a superseded read of the ${e.label} failed (${Ge(o.error)}); ignored`);return!this.stoodDown}if(!o.ok){if(Hc(o.error)==="ELOOP")return n(`Remote settings: the ${e.label} is a symlink; not read with the storage flag on (strict rule for files only Claude Code writes)`,{level:"warn"}),this.fill(e,null);return this.standDown(`read failed: ${Ge(o.error)}`),!1}let s=o.value.items[0];if(s.found&&s.totalBytes>ce)return this.standDown(`oversize ${e.label}`),!1;return this.fill(e,s.found?s.value:null)}catch(o){return this.standDown(`read failed: ${l(o)}`),!1}}fill(e,t){if(this.stoodDown)return!1;if(t!==null&&t.byteLength>ce)return this.standDown(`oversize ${e.label}`),!1;return this.install(e,t===null?null:$ue(t)),!0}install(e,t){if(e===this.cache){if(e.observed&&this.ready)n(`Remote settings: storage view refreshed (${zt(t)})`);this.content=t,this.attestation=void 0}else this.attestation=t?.trim()||void 0;e.observed=!0}standDown(e,t="debug"){let o=w();if(o.backendView===this)o.backendView=void 0;if(this.stoodDown)return;this.stoodDown=!0,this.content=null,this.attestation=void 0;for(let s of this.subscriptions.splice(0))Ht(s);n(`Remote settings: storage view stood down (${e}); disk probe serves`,{level:t})}}
+## class Ut method-ish names (35): resolve, ge, vt, constructor, onEvent, standDown, Ge, heldOf, take, po, settled, then, readUnobserved, written, advance, byteLength, install, follow, Pu, queue, fill, read, l, n, failed, Hc, on, $ue, refreshed, zt, trim, w, splice, Ht, down
+
+## backendView=void 0 hits=2
+@179159818 ctx=0;eligibilityMemo=void 0;ineligibleReason=void 0;lastLoadStatus=void 0;lastLoadStatusChanged=$e();policySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)t
+  lastFnStart={"i":179159577,"name":"class "} gen={"i":179159508,"name":"hzt"}
+  ## owning class  @179159577 sha=98e846a5ffcdbe85 len=343
+class xt{sessionCache=null;eligible=void 0;eligibilityMemo=void 0;ineligibleReason=void 0;lastLoadStatus=void 0;lastLoadStatusChanged=$e();policySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)this.verifiedPayload=e}
+
+@179166687 ctx=e settings: storage view refreshed (${zt(t)})`);this.content=t,this.attestation=void 0}else this.attestation=t?.trim()||void 0;e.observed=!0}standDown(e,t="debug"){let o=w();if(o.backendView===this)o.backendView=void 0;if(this.stoodDown)return;this.stoodDown=!0,this.content=null,
+  lastFnStart={"i":179163791,"name":"class "} gen={"i":179163180,"name":"uo"}
+  ## owning class  @179163791 sha=bb2e6b61a68234f3 len=279
+class Ut{storageV5;content=null;attestation=void 0;ready=!1;priming=Promise.resolve();stoodDown=!1;configHome=ge();subscriptions=[];cache=vt(Pe,"cache file");sidecar=vt(Ne,"helper consent sidecar");work=Promise.resolve(!0);steps=0;lastCacheStep=0;constructor(e){this.storageV5=e}
+
+## function w( near-prime hits=11
+@179160929 sha=4bddec68e72f2949 len=37 no-backendView preview=function w(){return Ndr.of(z().host)}
+
+@179188050 sha=7e21ac65a96e1a96 len=22 no-backendView preview=function w(){return!0}
+
+@179212609 sha=c2d334fd4bf61275 len=210 no-backendView preview=function w(e,n,t,r){let a=r-t;if(a<=0)return;if(e.len+a>e.buf.length){let i=Buffer.allocUnsafe(Math.min(Math.max(e.buf.l
+
+@179473821 sha=2a03ecff891f1c04 len=307 no-backendView preview=function w(t,e){try{if(await y(u(t,"managed-settings.json"),e))return!0}catch{}try{let i=u(t,"managed-settings.d"),o=awa
+
+@179536005 sha=f88ad40a9b688fc2 len=78 no-backendView preview=function w(t){return t.code==="Failed"?t.telemetryCode??t.failureClass:t.code}
+
+@179626108 sha=7860b2cc8fb89122 len=283 no-backendView preview=function w(){if(!y)return;let T=C.from("getAllResponseHeaders"in y&&y.getAllResponseHeaders()),F={data:!a||a==="text"||a
+
+@179664450 sha=5a36a45d0fca8f7b len=756 no-backendView preview=function w(l){o.push(l),n+=l.length;let a=Buffer.concat(o,n),x=a.indexOf(`\r
+\r
+`);if(x===-1){P("have not received end o
+
+@179763145 sha=965df7fada0745a4 len=856 no-backendView preview=function w(){let e=KLe();if(e!==void 0)return e;let s=process.env.CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR;if(!s){let 
+
+@179803487 sha=d709791065dc278a len=723 no-backendView preview=function w(e,t){let n=globalThis.Bun?.secrets;if(!n||typeof n.get!=="function")return s=!1,Promise.resolve();let a=new P
+
+@179853308 sha=1d4aa7c7f944d3c0 len=312 no-backendView preview=function w(e){let t;try{t=new URL(e)}catch{return}let r=XY(t.hostname),u;switch(t.protocol){case"https:":case"wss:":u="h
+
+@179903360 sha=373dcc994b383189 len=596 no-backendView preview=function w(e,t){let r=E(t);if(!r){n(`[${c}:token] Could not decode JWT expiry for sessionId=${e}, token prefix=${t.slice
+
+## function Yv( near-prime hits=1
+@179161925 sha=ad38cf772cfcd9ef len=21
+function Yv(){return}
+
+## function Ie( near-prime hits=6
+@178849527 sha=edce4bc0fb57143f len=114
+function Ie(...e){let[t,r,o]=e;if(typeof t==="string")return{message:t,code:"custom",input:r,inst:o};return{...t}}
+
+@178932876 sha=29203986ff3322cf len=42
+function Ie(e){return typeof e==="number"}
+
+@179162567 sha=496940c5937957ce len=175
+function Ie(){let e=w().backendView;if(!D()||e===void 0||!e.ready||e.stoodDown||Yv()!==void 0)return;if(!Dde(e.configHome)){e.standDown("config home changed");return}return e}
+
+@179481143 sha=1421b01e261139f5 len=116
+function Ie(e,t,r,o){for(let u of Object.keys(e)){let d=o(u);if(t.has(d)||r.some((p)=>d.startsWith(p)))delete e[u]}}
+
+## function lo( near-prime hits=2
+@179162491 sha=7901237cc4badefd len=76
+function lo(){let e=Ie();if(e!==void 0)return e.content;return a0(awe(),Mt)}
+
+@179845950 sha=816364f69971f237 len=78
+function lo(u){return zt(u).replaceAll('"',"&quot;").replaceAll("'","&apos;")}
+
+## function fue( near-prime hits=1
+@179162802 sha=6b3528e101e2f00f len=64
+function fue(e,t){w().backendView?.written(e==="cache"?Pe:Ne,t)}
+
+## function vt( near-prime hits=7
+@178850079 sha=6f8c7fe26b2ea6f8 len=194
+function vt(e,t=(r)=>r.message){let r={},o=[];for(let n of e.issues)if(n.path.length>0)r[n.path[0]]=r[n.path[0]]||[],r[n.path[0]].push(t(n));else o.push(t(n));return{formErrors:o,fieldErrors:r}}
+
+@178933031 sha=2086ad4b8af7a00e len=38
+function vt(e){return Ce(e)&&e!==null}
+
+@179166922 sha=17ecfb04540b7b83 len=101
+function vt(e,t){return{key:e,id:Pu(e),label:t,observed:!1,begun:!1,pendingRead:void 0,generation:0}}
+
+@179243744 sha=5baad0e2f84cac0f len=108
+function vt(e,t,r){let o=pe(e,t,r),i=Ot.spawn(o.command,o.args,o.options);return me.hookChildProcess(i,o),i}
+
+## function ge( near-prime hits=4
+@178887258 sha=17869ad1b619ea91 len=73
+function ge(e,t){return new or({check:"length_equals",...g(t),length:e})}
+
+@179244727 sha=b7613aa1cc9d8aa6 len=190
+function ge(e){let t=typeof e==="string"?`
+`:`
+`.charCodeAt(),r=typeof e==="string"?"\r":"\r".charCodeAt();if(e[e.length-1]===t)e=e.slice(0,-1);if(e[e.length-1]===r)e=e.slice(0,-1);return e}
+
+@179303411 sha=4e85d970f599a1f3 len=176
+function ge(e,n,t){switch(n.namespace){case"memory":return u(t)===r(e.configHome,"projects");case"agentMemory":return n.layer!=="user"&&t===P(e.configHome,n);default:return!1}}
+
+@179482589 sha=51c18a600a0815f8 len=74
+function ge(e,t){return`cannot stat path (timed out after ${t} ms): ${e}`}
+
+## function Dde( near-prime hits=0
+## function po( near-prime hits=2
+@179167141 sha=eee7ea2cd305da54 len=124
+function po(e){switch(e.kind){case"snapshot":return"absent"in e?void 0:e.value;case"updated":return e.value;default:return}}
+
+@179434142 sha=879b11cd7bee26ef len=1101
+function po(e,t){if(!e||typeof e!=="object")return[];let r=e,o="modelPicker";if(!(o in r))return[];let i=r[o];if(!Re(i)||!Array.isArray(i.options)){let d=Re(i)?`options: ${O(i.options)}`:O(i);return delete r[o],[{file:t,path:o,message:`"${o}" must be an object with an "options" array of { model, label?, description? } rows; received ${d}. This field was ignored.`,severity:"warning",invalidValue:d}]}let s=[];if("replaceBuiltInOptions"in i&&typeof i.replaceBuiltInOptions!=="boolean"){let d=O(i.replaceBuiltInOptions);delete i.replaceBuiltInOptions,s.push({file:t,path:`${o}.replaceBuiltInOptions`,message:`"replaceBuiltInOptions" must be true or false; received ${d}. This entry was ignored (the rows are added to the built-in lineup).`,severity:"warning",invalidValue:d})}let l=i.options,c=[];for(let d=0;d<l.length;d++){let u=vyn().safeParse(l[d]);if(u.success){c.push(l[d]);continue}s.push({file:t,path:`${o}.options.${d}`,message:`${So(u.error.issues[0])}. This row was ignored; the other rows still apply.`,severity:"warning",invalidValue:O(l[d])})}if(c.length!==l.length)i.options=c;return s}
+
+## function $ue( near-prime hits=1
+@179013697 sha=3690b64dc00d1dcf len=135
+function $ue(e){let r=t4t(e.subarray(0,4096));return Buffer.from(e.buffer,e.byteOffset,e.byteLength).toString(r).replaceAll(`\r
+`,`
+`)}
+
+## function zt( near-prime hits=6
+@178850273 sha=12d849b032fca206 len=518
+function zt(e,t){let r=t||function(c){return c.message},o={_errors:[]},n=(c)=>{for(let s of c.issues)if(s.code==="invalid_union"&&s.errors.length)s.errors.map((a)=>n({issues:a}));else if(s.code==="invalid_key")n({issues:s.issues});else if(s.code==="invalid_element")n({issues:s.issues});else if(s.path.length===0)o._errors.push(r(s));else{let a=o,f=0;while(f<s.path.length){let p=s.path[f];if(f!==s.path.length-1)a[p]=a[p]||{_errors:[]};else a[p]=a[p]||{_errors:[]},a[p]._errors.push(r(s));a=a[p],f++}}};return n(e),o}
+
+@179167265 sha=4e9da873a6e2636d len=60
+function zt(e){return e===null?"absent":`${e.length} chars`}
+
+@179369759 sha=53ee686de95dd98a len=288
+function zt(){let{stdout:e,code:t}=await Ue(tt(),[...Zt,"remote"],{preserveOutputOnError:!1,useCwd:!0});if(t!==0)return null;let r=e.split(`
+`).map((i)=>i.trim()).filter(Boolean),o=await Jbt("remote.pushDefault");if(o&&r.includes(o))return o;if(r.length===1)return r[0]??null;return null}
+
+@179408322 sha=0651880d35be0e53 len=96
+function zt(e,t){var r=t?x(e.buffer):e.buffer;return new e.constructor(r,e.byteOffset,e.length)}
+
+## function Pu( near-prime hits=0
+## function Ht( near-prime hits=4
+@178937246 sha=53d259f61842a414 len=1304
+function Ht(e,t,s,{location:r=f.location,distance:o=f.distance,threshold:a=f.threshold,findAllMatches:l=f.findAllMatches,minMatchCharLength:u=f.minMatchCharLength,includeMatches:p=f.includeMatches,ignoreLocation:c=f.ignoreLocation}={}){if(t.length>q)throw Error(Mt(q));let d=t.length,g=e.length,y=Math.max(0,Math.min(r,g)),S=a,I=y,T=u>1||p,z=T?Array(g):[],H;while((H=e.indexOf(t,I))>-1){let v=X(t,{currentLocation:H,expectedLocation:y,distance:o,ignoreLocation:c});if(S=Math.min(v,S),I=H+d,T){let P=0;while(P<d)z[H+P]=1,P+=1}}I=-1;let U=[],b=1,M=d+g,k=1<<d-1;for(let v=0;v<d;v+=1){let P=0,C=M;while(P<C){if(X(t,{errors:v,currentLocation:y+C,expectedLocation:y,distance:o,ignoreLocation:c})<=S)P=C;else M=C;C=Math.floor((M-P)/2+P)}M=C;let L=Math.max(1,y-C+1),w=l?g:Math.min(y+C,g)+d,_=Array(w+2);_[w+1]=(1<<v)-1;for(let D=w;D>=L;D-=1){let Q=D-1,ke=s[e.charAt(Q)];if(T)z[Q]=+!!ke;if(_[D]=(_[D+1]<<1|1)&ke,v)_[D]|=(U[D+1]|U[D])<<1|1|U[D+1];if(_[D]&k){if(b=X(t,{errors:v,currentLocation:Q,expectedLocation:y,distance:o,ignoreLocation:c}),b<=S){if(S=b,I=Q,I<=y)break;L=Math.max(1,2*y-I)}}}if(X(t,{errors:v+1,currentLocation:y,expectedLocation:y,distance:o,ignoreLocation:c})>S)break;U=_}let R={isMatch:I>=0,score:Math.max(0.001,b)};if(T){let v=Kt(z,u);if(!v.length)R.isMatch=!1;else if(p)R.indices=v}return R}
+
+@179167023 sha=768ef4b87ad49bad len=118
+function Ht(e){try{e.unsubscribe()}catch(t){n(`Remote settings: storage unsubscribe failed: ${l(t)}`,{level:"warn"})}}
+
+@179407827 sha=06b2ba432997d037 len=79
+function Ht(e,t,r){if(r!==void 0&&!Jq(e[t],r)||r===void 0&&!(t in e))Pq(e,t,r)}
+
+@179477247 sha=6063c78890a63984 len=342
+function Ht(e){let{stdout:t,code:r}=await We("git",["config","--global","--get","core.excludesfile"],{preserveOutputOnError:!1,cwd:e}),o=r===0?t.trim():"";if(o){if(o==="~"||o.startsWith("~/"))return ae(we(),o.slice(2));if(Ae(o))return o}let u=a.XDG_CONFIG_HOME;if(u&&Ae(u))return ae(u,"git","ignore");return ae(we(),".config","git","ignore")}
+
+## var Pe= near-prime hits=4
+@178846990 var Pe={safeint:[Number.MIN_SAFE_INTEGER,Number.MAX_SAFE_INTEGER],int32:[-2147483648,2147483647],uint32:[0,4294967295],float32:[-340282346638528860000000000000000000000,3402823466385288600000000000000
+
+@179162742 var Pe=Se.state("remote-settings"),Ne=Se.state(gKe),co=2000;function fue(e,t){w().backendView?.written(e==="cache"?Pe:Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!
+
+@179374089 var Pe=1048576,Ce=52428800,Ie=200,Vt=65536;async function epr(){let{stdout:e,code:t}=await Ue(tt(),[...Zt,"rev-parse","--abbrev-ref","--symbolic-full-name","@{u}"],{preserveOutputOnError:!1});if(t===0
+
+@179410287 var Pe=dn;var _e=Math.max;function un(e,t,r){return t=_e(t===void 0?e.length-1:t,0),function(){var o=arguments,i=-1,s=_e(o.length-t,0),l=Array(s);while(++i<s)l[i]=o[t+i];i=-1;var c=Array(t+1);while(++
+
+## var Ne= near-prime hits=2
+@179266058 var Ne="claude-code-bash",wo="claude-code-keeper",bn=1073741824,To=bn,je=["mcp","lsp","hooks","plugin","tmux","helper","agent"];class xn{reader=null;subscribeRefresh=null;register(e){let t=this.reader
+
+@179380821 var Ne=65536,nr=4096,N=10,or=32,He=94,ir=35,sr=/^[0-9a-f]+$/;async function Le(e,t){let r=Buffer.from(t,"utf-8"),o=r.length,i=Buffer.allocUnsafe(Ne+1),s,a=0,u=0,h=0,m=0,g=0,p=0,c=0,d=0,R=0,w=0,x=0,k=0
+
+## gKe near-prime hits=4
+@179159232 gKe="remote-settings-helper-consent";function obt(){return kt(ge(),gKe)}function mzt(e){if(e.policyHelpers===void 0&&e.extraKnownMarketplaces===void 0&&!Q.some(({alias:o,canonical:s})=>s==="extraKnown
+
+@179159299 gKe)}function mzt(e){if(e.policyHelpers===void 0&&e.extraKnownMarketplaces===void 0&&!Q.some(({alias:o,canonical:s})=>s==="extraKnownMarketplaces"&&e[o]!==void 0))return;let t=zW(e);return Tt(t)?rbt(t
+
+@179162789 gKe),co=2000;function fue(e,t){w().backendView?.written(e==="cache"?Pe:Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!=
+
+@179170185 gKe,obt,mzt,hzt,Ndr,kY,ibt,gzt,VMe,WW,qMe,Myn,Oyn,Lyn,Nyn,_vr,TY,KMe,yKe,sbt,YMe,$yn,Yv,awe,yzt,bKe,fue,_Ke,$dr,bzt,GW};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial 
+
+## needle "_Ke as " hits=1
+@198839318 tified,gzt as markRemoteManagedSettingsConsented,$yn as onLastLoadStatusChanged,_Ke as primeRemoteManagedSettingsCache,Myn as registerSyncCacheResetListener,TY as rememberEligibility,Ndr as remoteManagedSettingsSyncStates,fue as remoteSettingsFileWritten,Oyn as resetSyncCache,_vr
+
+## needle "export{_Ke" hits=0
+## needle ",_Ke," hits=3
+@179170288 ibt,gzt,VMe,WW,qMe,Myn,Oyn,Lyn,Nyn,_vr,TY,KMe,yKe,sbt,YMe,$yn,Yv,awe,yzt,bKe,fue,_Ke,$dr,bzt,GW};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions yo
+
+@198837392 ibt,gzt,VMe,WW,qMe,Myn,Oyn,Lyn,Nyn,_vr,TY,KMe,yKe,sbt,YMe,$yn,Yv,awe,yzt,bKe,fue,_Ke,$dr,bzt,GW}from"B:/~BUN/root/chunk-h5378ehg.js";import"B:/~BUN/root/chunk-ymw4ehj9.js";import"B:/~BUN/root/chunk-j4689pzn.js";import"B:/~BUN/root/chunk-wvmrr7rd.js";import"B:/~BUN/root/chunk-wkk6
+
+@216087106 ,TP,iKe,bae,aKe,sKe,oKe,Vae,Wae,Hae,Uae,xm,wae,SKe,EKe,Xae,Kae,Zae,LP,AKe,S2,RKe,_Ke,LKe,DKe,wP,IKe,MKe,NKe,PKe,Qae,OKe,g4,BKe,$Ke,FKe,zKe,Jae,ese,GKe,tse,VKe,rse,is,WKe,qKe,YKe,E2,ise,SP,ase,sse,Py,oZe,lZe,Qd,Jd,fir,pir,mir,gir,yir,R2=F(()=>{"use strict";o(Nae,"isNothing");o(Vje
+
+## needle ",_Ke}" hits=2
+@179522148 ot/chunk-21hv5ssy.js";import{_}from"B:/~BUN/root/chunk-t9vggba1.js";import{ra,Yl,_Ke}from"B:/~BUN/root/chunk-h5378ehg.js";import{nyn,$Me,Qve,Fte,jW}from"B:/~BUN/root/chunk-6t8yhsxa.js";import{nx}from"B:/~BUN/root/chunk-qwjk0yd0.js";import{Vjt,Dgn,Mgn,_Xn,Nyt,Ogn,Lgn,Ngn,To,kC,Kv,
+
+@191440470 e,ehn,thn,Jo,e0,oe,vve,XA,Eve,yhn}from"B:/~BUN/root/chunk-0qn02gme.js";import{ra,_Ke}from"B:/~BUN/root/chunk-h5378ehg.js";import{j_t}from"B:/~BUN/root/chunk-128wfaky.js";import{Y}from"B:/~BUN/root/chunk-38rgcxr4.js";import{be}from"B:/~BUN/root/chunk-5tjjc1xb.js";import{Zte}from"B
+
+## needle "{_Ke," hits=0
+## Ut → storageV5 API surface (from body)
+- mentions storageV5.read: true
+- mentions t.subscribe: false
+- mentions subscribe(: false
+- mentions .read([: true
+- mentions written(: true
+- method decls: constructor, onEvent, if, settled, readUnobserved, written, heldOf, take, follow, queue, advance, read, catch, fill, install, standDown
+
+---
+
+## OWNING BAG: class xt + accessor w()
+
+### w @179160929 — returns remote-managed-settings sync state bag
+sha=4bddec68e72f2949 len=37
+function w(){return Ndr.of(z().host)}
+
+### class xt @179159577 sha=e7fea55fc58b9acd len=1326
+class xt{sessionCache=null;eligible=void 0;eligibilityMemo=void 0;ineligibleReason=void 0;lastLoadStatus=void 0;lastLoadStatusChanged=$e();policySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)this.verifiedPayload=e}seedFromDisk(e){this.sessionCache=e;let t=mzt(e);if(t===void 0||t===ao())this.consentedPayload??=e}markConsented(e){this.consentedPayload=e}markPolicySettingsNotified(){this.policySettingsNotified=!0}recordEligibility(e,t){if(this.eligible=e,t.memoize)this.eligibilityMemo=e,this.ineligibleReason=e?void 0:t.ineligibleReason}resetListener=null;registerResetListener(e){if(this.resetListener!==null)throw Error("registerSyncCacheResetListener: a listener is already registered; a second one would unhook the first");this.resetListener=e}reset(){this.sessionCache=null,this.eligible=void 0,this.eligibilityMemo=void 0,this.ineligibleReason=void 0,this.lastLoadStatus=void 0,this.policySettingsNotified=!1,this.verifiedPayload=null,this.unverifiedView=null,this.consentedPayload=null,this.resetEpoch++,this.emitLoadStatusChanged(void 0)}emitLoadStatusChanged(e){try{this.lastLoadStatusChanged.emit(e)}catch(t){n(`Remote settings: load-status listener threw: ${l(t)}`,{level:"error"})}}}
+
+# gold-248-_Ke-Ut-uo APPEND: class xt + w/Ndr
+
+## class xt{ hits=1: 179159577
+@179159577 sha=e7fea55fc58b9acd len=1326
+class xt{sessionCache=null;eligible=void 0;eligibilityMemo=void 0;ineligibleReason=void 0;lastLoadStatus=void 0;lastLoadStatusChanged=$e();policySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)this.verifiedPayload=e}seedFromDisk(e){this.sessionCache=e;let t=mzt(e);if(t===void 0||t===ao())this.consentedPayload??=e}markConsented(e){this.consentedPayload=e}markPolicySettingsNotified(){this.policySettingsNotified=!0}recordEligibility(e,t){if(this.eligible=e,t.memoize)this.eligibilityMemo=e,this.ineligibleReason=e?void 0:t.ineligibleReason}resetListener=null;registerResetListener(e){if(this.resetListener!==null)throw Error("registerSyncCacheResetListener: a listener is already registered; a second one would unhook the first");this.resetListener=e}reset(){this.sessionCache=null,this.eligible=void 0,this.eligibilityMemo=void 0,this.ineligibleReason=void 0,this.lastLoadStatus=void 0,this.policySettingsNotified=!1,this.verifiedPayload=null,this.unverifiedView=null,this.consentedPayload=null,this.resetEpoch++,this.emitLoadStatusChanged(void 0)}emitLoadStatusChanged(e){try{this.lastLoadStatusChanged.emit(e)}catch(t){n(`Remote settings: load-status listener threw: ${l(t)}`,{level:"error"})}}}
+methods: replaceSessionCache, seedFromDisk, markConsented, markPolicySettingsNotified, recordEligibility, registerResetListener, reset, emitLoadStatusChanged
+
+## w @179160929 sha=4bddec68e72f2949 len=37
+function w(){return Ndr.of(z().host)}
+
+## "var Ndr=" hits=1
+@179160903 ener threw: ${l(t)}`,{level:"error"})}}}var Ndr=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){le
+
+## "Ndr=new" hits=1
+@179160907  threw: ${l(t)}`,{level:"error"})}}}var Ndr=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){let{se
+
+## "class Ndr" hits=0
+## "function hzt(" hits=1
+@179159508 len=69
+function hzt(e){return Fl(e,(t,o)=>o.startsWith("$")&&o!=="$schema")}
+
+## "var hzt=" hits=0
+## "Ndr.of" hits=1
+@179160949 r=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){let{sessionCache:e,verifiedPayload:t}=w();return
+
+## configHome=ge() hits=1
+@179163890 0;ready=!1;priming=Promise.resolve();stoodDown=!1;configHome=ge();subscriptions=[];cache=vt(Pe,"cache file");sidecar=vt(Ne,"helper
+## function ge() in Ut band hits=0
+
+## function Dde( all hits=3
+@178588201 function Dde(e){return t(ge())===t(e)}
+
+@184079464 function Dde(e){if(e?.type==="assistant"&&"id"in e.message&&e.message.model!==Wu)return e.message.id;return}
+
+@222525299 function Dde(e,t){return t?e?(...n)=>{let r=n[0];if(_U(r)){let i=r;Sx(i);let a=t(...n);return i.baseUIHandlerPrevented||e?.(...n),a}let o=t(...n);return e?.(...n),o}:AU(t):e}
+
+## function Pu( Ut-band hits=0
+
+## var ce= Ut-band hits=0
+@179159220 ,ce=2097152,gKe="remote-settings-helper-consent";function obt(){return kt(ge(),g

@@ -1,0 +1,67 @@
+# gold-248-16-why2
+
+## aF=ir @189661661
+.agentType,description:e.whenToUse,initialPrompt:e.initialPrompt,color:e.color}}var aF=ir(Mie);function c$e(e,t){if(!e?.agent)return aF;let o=e.agent,r=o.toLowerCase(),i=t?.find((u)=>u.name.toLowerCase()===r)??t?.find((u)=>u.name.toLowerCase().endsWith(`:${r}`));if(i)return i;let d=ZJ().find((u)=>u.agentType.toLowerCase()===r);if(d)return{...aF,name:d.agentType};if(o.includes(":"))return{...aF,name:o};return t?aF:{...aF,name:o}}async function u$e(e,t){let{activeAgents:o}=awai
+
+## ir @189661553 len=108
+function ir(e){return{name:e.agentType,description:e.whenToUse,initialPrompt:e.initialPrompt,color:e.color}}
+
+## Mie @189579762
+lse: keep working.`,Mie={agentType:"claude",whenToUse:"Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed.",tools:["*"],source:"built-in",baseDir:"built-in",app
+
+## Mie2 @-1
+MZx.....................@...................................x.........	.!..L.!This program cannot be run in DOS mode.$..PE..d.../..j.........."......h.....	...............@...........................
+
+## Cf @182998017 len=122
+function Cf(e){if(e==="done")return"success";if(e==="failed")return"failure";if(e==="stopped")return"stopped";return null}
+
+## rP @182998742 len=116
+function rP(e){return e.routine!==void 0||e.selfWake===!0||(e.inFlight?.kinds.includes("session_cron")??!1)||$ye(e)}
+
+## tst @184546199 len=115
+function tst(e){let t=e.match(eJt);if(!t)return null;return{url:e,host:t[1],owner:t[2],repo:t[3],num:Number(t[4])}}
+
+## eJt @184546135
+ken"}}var eJt=/^https:\/\/([\w.-]+)\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)\b/;function tst(e){let t=e.match(eJt);if(!t)return null;return{url:e,host:t[1],owner:t[2],repo:t[3],num:Number(t[4])}}var xfe=60000;class d
+
+## iXe @184556238 len=112
+function iXe(e,t){let r=new Map;for(let o of e){let u=t(o),p=r.get(u);if(p)p.push(o);else r.set(u,[o])}return r}
+
+## wJt @184556035 len=135
+function wJt(e){return e!==null&&typeof e==="object"&&"number"in e&&typeof e.number==="number"&&"state"in e&&typeof e.state==="string"}
+
+## kJt @184555569 len=466
+function kJt(e){let t=e.commits.nodes[0]?.commit.statusCheckRollup??null;return{number:e.number,title:e.title,state:e.state==="MERGED"?"MERGED":e.state==="CLOSED"?"CLOSED":e.isDraft?"DRAFT":"OPEN",checks:SJt(t?.contexts?.checkRunCountsByState,t?.contexts?.statusContextCountsByState),review:e.reviewDecision==="APPROVED"||e.reviewDecision==="CHANGES_REQUESTED"||e.reviewDecision==="REVIEW_REQUIRED"?e.reviewDecision:null,additions:e.additions,deletions:e.deletions}}
+
+## TJt @184556170 len=68
+function TJt(e){return e!==null&&typeof e==="object"&&!("cost"in e)}
+
+## vJt @184556350
+var vJt=`fragment pr on PullRequest {
+  number title state isDraft additions deletions
+  reviewDecision
+  commits(last:1){nodes{commit{statusCheckRollup{
+    state
+    contexts(first:0){
+      checkRunCountsByState{state count}
+      statusContextCountsByState{state count}
+    }
+  }}}}
+}`,aXe=20,EJt=6,CJt=15000,AJt="30s",lXe=/rate limit/i;function KX(){return Date.now()<JE().ghBackoffUntil}async function V$n(e){let t=new Map,r=[],o=null;if(e.length===0||Tt()||KX()){for(let k of e)t.set(k,null);r
+
+## consts @184556640
+tate{state count}
+      statusContextCountsByState{state count}
+    }
+  }}}}
+}`,aXe=20,EJt=6,CJt=15000,AJt="30s",lXe=/rate limit/i;function KX(){return Date.now
+
+## Tt( @181216501
+function Tt(e){return e instanceof P.Name?e:P._`(${e})`}});var dp=d(function(Yr){Object.defineProperty(Yr,"__esModule",{
+
+## fleet-import-KC @192112900
+,aF,c$e,u$e,zCn,zkt,WCn,GCn,gqt,d$e,VCn,yqt,Wkt,qCn,CQe,KCn,Gkt,p$e,f$e,$L}from"B:/~BUN/root/chunk-fndp5rxp.js";import{_G}from"B:/~BUN/root/chunk-22293z36.js";import{X2e,AIt,qJt,KJt,BLn,Zrt}from"B:/~BUN/root/chunk-j2hdyj1b.js";import{lRt}from"B:/~BUN/root/chunk-9qpzxzf7.js";import{hre,wJe}from"B:/~BUN/root/chunk-ag7hcpcr.js";import{nv}from"B:/~BUN/root/chunk-q41r7ccn.js";import{ZZt,JHt}from"B:/~BU
+
+## Wo-import @192124700
+it Qu(Mi(i.state),16384,d),w=m.split(`
+`).map(Ih).filter((h)=>h!==null);return(w.filter((h,C)=>h!==w[C-1]).at(-1)??"").trim()}catch{return""}}function Li(i,d){let m;for(let w of i.keys())if(!d.has(w))(m??=new Map(i)).delete(w);return m??i}function Wo(i){return i?.filter((d)=>!KC.

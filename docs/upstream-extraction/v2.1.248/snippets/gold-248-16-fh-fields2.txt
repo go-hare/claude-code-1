@@ -1,0 +1,86 @@
+# gold-248-16-fh-fields2
+when=2026-09-20T08:49:46.682Z
+
+## lo fleet @192125206
+len=177 sha=72f4ba846f919452
+function lo(i,d){if(d==="busy")return"active";if(Di(i)&&!(Cf(i.state)==="success"&&rP(i)))return"completed";if(i.tempo==="blocked"||d==="waiting")return"blocked";return"active"}
+
+## ac fleet @192126408
+len=91 sha=15780d654e07a551
+function ac(i,d){return i.get(d.state.resumeSessionId??d.state.sessionId)??i.get(Ir(d.id))}
+
+## Ir fleet @192126376
+len=32 sha=acbf1a0747eafb14
+function Ir(i){return`job:${i}`}
+
+## Ji fleet @192125844
+len=447 sha=f3e967d1effefdc9
+function Ji(i,d,m){if(m==="busy")return"working";if(i.activity==="failure")return"done";if(i.activity==="stopped")return"done";if(m==="waiting")return"blocked";if(!rP(i.state)&&Wo(i.state.children).some((S)=>{let h=d?.get(S.href);if(h?.state!=="OPEN")return!1;let C=rst(h);return C==="error"||C==="warning"&&h.review!=="APPROVED"}))return"review";if(i.activity==="success")return"done";if(i.state.tempo==="blocked")return"blocked";return"working"}
+
+## zu fleet @192120270
+len=550 sha=d1620f579244bb5a
+function zu(i){let d=new Date(i.startedAt).toISOString(),m=new Date(i.updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,output:null,children:null,linkScanOffset:0,template:i.agent??i.entrypoint??"interactive",respawnFlags:[],name:i.name,intent:i.name??"",sessionId:i.sessionId??"",cwd:i.cwd,originCwd:i.cwd,createdAt:d,updatedAt:m,firstTerminalAt:null,backend:"peer",sock:i.sock,pid:i.pid}}
+
+## zc fleet @192171330
+len=285 sha=8958139eb93764b3
+function zc(i,d,m,w){let S=Math.max(ab,...i.map((A)=>ie(Hn(A,d(A))))),h=Math.min(Math.max(40,Math.floor(w/3)),Math.max(12,...i.map((A)=>ie(vo(A.state,A.id===m))))),C=Math.max(0,...i.map((A)=>db(A.state))),x=Math.max(8,w-(h+2)-2-(C+2)-(S+2)-2);return{age:S,label:h,artifact:C,detail:x}}
+
+## Ih fleet @192123625
+len=534 sha=67d81691783fb673
+function Ih(i){try{let d=q(i);if(d.type==="assistant"){let w=(d.message?.content??[]).find((S)=>S.type==="text")?.text;if(w)return w}if(d.type==="user"){let m=d.message?.content,w=typeof m==="string"?m:m?.find((h)=>h.type==="text")?.text,S=w?rc(w).split(`
+`).find((h)=>h.trim())?.trim():void 0;if(S)return`> ${S}`;if(Array.isArray(m)){let h=m.find((C)=>C.type==="tool_result"&&C.is_error);if(h){let C=typeof h.content==="string"?h.content:h.content?.find((x)=>x.type==="text")?.text;if(C)return`\u2717 ${ur(C)}`}}}}catch{}return null}
+
+## Xu fleet @192121946
+len=63 sha=a1f328690294d6f1
+function Xu(){return{scanStates:new Map,inFlightScans:new Set}}
+
+## nc fleet @192123510
+len=86 sha=dada9f9553f00429
+function nc(i,d){for(let m of i.scanStates.keys())if(!d.has(m))i.scanStates.delete(m)}
+
+## Li fleet @192124642
+len=97 sha=c6865ec70c2be5da
+function Li(i,d){let m;for(let w of i.keys())if(!d.has(w))(m??=new Map(i)).delete(w);return m??i}
+
+## Cf job-state @182998017
+len=122 sha=6619da67a8d506a5
+function Cf(e){if(e==="done")return"success";if(e==="failed")return"failure";if(e==="stopped")return"stopped";return null}
+
+## hn near fleet 192129867
+## hn fleet @192129867
+len=65 sha=dc1be6b97cb5ff89
+function hn(i){return[...i].sort((d,m)=>Hi(d.state)-Hi(m.state))}
+
+## Ss caller logTail @192213296
+ity,at.state.tempo,ql,$l,Xt,at.state.pinned===!0)})},at.id)}let EC=En?.kind==="assign"&&En.jobId===at.id;let CC=e(o,{ref:Xt?In:void 0,width:"100%",paddingLeft:Co,backgroundColor:On,onMouseEnter:Mo||nn?void 0:si,onClick:(Yl)=>{if(Yl.hyperlinkUrl){return Yl.allowDefault()}if(Yl.isWindowActivation){return Yl.dropAsStray()}ai(),Hl(at)},children:e(Ss,{job:at,isFocused:Xt,focusFg:ii,isOrigin:at.id===Al,logTail:nf[at.id],cols:ei,status:xs(at),heldInTerminal:or.terminalHolderOf(at)!==void 0,showVerb:!Cn,loopKickCount:Is.has(at.id)?Cs.get(at.state.sessionId)?.count:void 0,age:Hn(at,Is.has(at.id)?Cs.get(at.state.sessionId)?.nextAt:void 0),childRows:at.state.children?Gn(at.state.children,of):[],renaming:Gl===at.id?{draft:Fl,cursor:Ml}:void 0,groupEditing:En?.kind==="assign"&&En.jobId===at.id?{draft:ni,cursor:Ll,selected:on,reserved:!on&&Jl,isNew:!on&&Bl&&go<0,ungroup:!on&&ni.trim()===""&&go<0&&!!at
+
+## overlaid de after Ze @192267120
+ses:Te,loopKicks:ge,overlaidLoadLanded:de}=Ze(Q),[re]=u(()=>Wi(X,Q,T)),{focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt}=Ze(re),Me=!1,[he]=u(()=>og(X,Me)),{groupMode:et,activeTab:ut,groupEdit:Ie,resumePicker:Fe,renaming:Ve,previewOpen:We,helpOpen:ze,debugOpen:lt}=Ze(he),[yt]=u(()=>Ui(X)),{attachingJobId:Ft,autoOpened:Ct}=Ze(yt),[Ne]=u(()=>ji(X)),{mode:Mt,expandHintPasteId:Ht}=Ze(Ne),[Lt]=u(()=>Zm(X,{onArm:()=>Dr(yt,Ne)})),{pending:zt}=Ze(Lt);tr(()=>Lt.disarm(),zt?2000:null,[zt]);let[De]=u(()=>({roster:Q,selection:re,view:he,attach:yt,editor:Ne,deleteConfirm:Lt,earlier:X.earlier})),Ue=Ne.setError,je=Ne.setHint,ct=Ve?.jobId??null,nt=Z?xe:Oy;k(()=>{Q.setRemoteWanted(Z)},[Q,Z]),k(()=>Q.attachView(P),[Q,P]);let dt=te(),Wt=Vi({cwd:dt}),[At,St]=u(dt);k(()=>{let H=!1;return jl(dt,Au(T)).then((Pe)=>{if(!H&&Pe!==dt)St(Pe)}),()=>{H=!0}},[dt,T]);let It=S&&!xGe({cwd:At},S)?S:At,[mt,Qt]=u(dt),[Tt]=u(()=>pg(X)),{templates:vt,skills:Jt,routines:Ut,childRepos:Je,repoWorktrees:eo}=Ze(Tt);k(()=>{Tt.loadLauncher(dt)},[Tt,dt]);let io=Je.get(dt)??tu,Re=eo.get(dt)??ou,Oe=se([...le??[],...ye].map((H)=>EU(H.state))).sort().join("\x00"),{allRepos:Se,worktreeBranches:Ye}=G(()=>{let H={...io};for(let Ae of Oe?Oe.split("\x00"):[]){let Vt=Py(Ae);if(Vt&&!/\s/.test(Vt)&&H[Vt]===void 0)H[Vt]=Ae}let Pe={};for(let[Ae,Vt]of Object.entries(Re)){if(H[Ae]===void 0)H[Ae]=Vt.path;if(H[Ae]===Vt.path)Pe[Ae]=Vt.branch}return{allRepos:H,worktreeBranches:Pe}},[io,Oe,Re]),pt=()=>i({type:"done"}),Gt=TH((H)=>{if(H)lu();he.setExitPending(H)},pt),ce=()=>{he.clearRename(),du("")},rt=(H,Pe)=>Ko(Pe??he.getSnapshot().groupMode,H),Yt=(H)=>`header:${he.getSnapshot().groupMode}:${H}`,so=Ze(X.earlier,(H)=>H.entries);k(()=>{if(S||!qi()){if(!S)X.earlier.clear();return}let H=!1,Pe=X.earlier.beginLoad();return zi(new Set,!1,T).finally(()=>{X.earlier.endLoad(Pe)}).then((Ae)=>{if(Ae===null)f("fleet_view_earlier_load","load_failed");else b("fleet_view_earlier_load");if(!H&&(Ae===null||Ae.length===0)&&!d&&re.restoreAttempts===1)re.restoreAttempts=2;if(Ae===null)return;if(X.earlier.setEntries(Ae),!H&&Ae.length>0)s("tengu_fleetview_earlier_loaded",{count:Ae.length})}),()=>{H=!0}},[]);let Ee=(H)=>re.toggleCollapsed(rt(H),he.getSnapshot().groupMode==="state"?H:null),Rt=ca();k(()=>{if(Rt)Q.resetPrFetchGate()},[Q,Rt]);let Qe=j((H)=>H.autoUpdaterResult?.status==="success"),{columns:to,rows:wo}=we(),[pe]=u(()=>Date.now()),ft=E(null),Pt=E(null);Qd(Pt,le!==null&&!We);let $t=E0(),Bt=j((H)=>H.settings.voice?.mode??"hold"),Be=iX(),xo=()=>{let 
+
+## function _c( near 192149126
+## _c @192149126
+len=495 sha=039ade73fa3a9a45
+function _c(i,d,{jobs:m,pendings:w,adoptedPeers:S,remoteJobs:h,remoteListLoaded:C}){if(!m||!i.hasReplyDrafts()){i.sweepReplyDrafts({now:Date.now(),isGuarded:null});return}let x=new Set;for(let T of[m,w,S,h])for(let P of T)x.add(P.id);let A=J(h,(T)=>!T.id.startsWith("remote-pending-")),F=!C||A===0||A>=lRt;i.sweepReplyDrafts({now:Date.now(),isGuarded:(T)=>x.has(T)||d.isDeleting(T)||d.isHolding(T)||d.isArchiving(T)||(T.startsWith("remote-")?F:T.startsWith("peer-")?S.length===0:m.length===0)})}
+
+## _c use 192273612
+## _c via use @192149126
+len=495 sha=039ade73fa3a9a45
+function _c(i,d,{jobs:m,pendings:w,adoptedPeers:S,remoteJobs:h,remoteListLoaded:C}){if(!m||!i.hasReplyDrafts()){i.sweepReplyDrafts({now:Date.now(),isGuarded:null});return}let x=new Set;for(let T of[m,w,S,h])for(let P of T)x.add(P.id);let A=J(h,(T)=>!T.id.startsWith("remote-pending-")),F=!C||A===0||A>=lRt;i.sweepReplyDrafts({now:Date.now(),isGuarded:(T)=>x.has(T)||d.isDeleting(T)||d.isHolding(T)||d.isArchiving(T)||(T.startsWith("remote-")?F:T.startsWith("peer-")?S.length===0:m.length===0)})}
+
+## cp noteDeleteRefusal 192273504
+## cp use @192273504
+ath.min(mu,Go.length-1)],Wg=G(()=>cp(Q.reload,(H)=>{re.followId=H},Q.optimistic,Q.noteDeleteRefusal,T),[Q,re,T]);k(()=>{n("[PERF:bg-remount-end]"),b("screen_fleet_view")},[]);let Qs=U(()=>_c(Ne,Q,{jobs:le,pendings:be,adoptedPeers:ye,remoteJobs:nt,remoteListLoaded:me}),[Ne,Q,le,be
+
+## function cp( near 192191480
+## cp @192191480
+len=1785 sha=f4a59f8803ec9858
+function cp(i,d,m,w,S){return[{key:"x",label:"stop",bands:["active","blocked"],run:async(h)=>{d(h.id);let C=new Date().toISOString(),x=m((A)=>A.map((F)=>F.id===h.id&&!Di(F.state)?{...F,state:{...F.state,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:F.state.firstTerminalAt??C},activity:"stopped"}:F),void 0,h.id);try{let A=await K7(h.id,h.state,void 0,S);if(!A.confirmed)throw f("fleet_view_stop_job","kill_unconfirmed"),new Fr(A.error??"worker may still be running");s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)}),b("fleet_view_stop_job");let F=Kn(h.id),T=await nr(F,S);if(T&&!Di(T))await ps(F,{...T,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:T.firstTerminalAt??C},S)}finally{x?.(),i()}}},{key:"x",label:"delete",bands:["completed"],run:async(h)=>{w(h.id,null);let C=m((V)=>V.filter((K)=>K.id!==h.id),h.id),x=!1,A,F,T,P;try{let V=await oG(h.id,{force:!0},S);if(x=V.removed,A=V.keptWorktree,F=V.keptReason,T=V.keptErrorSummary,P=V.leftWorktreeDir,!x&&!A)throw f("fleet_view_delete_job",V.errorCode??"delete_unconfirmed"),w(h.id,V.error??"worker may still be running"),new Fr(V.error??"worker may still be running")}finally{C?.(),i()}if(x){if(P)y("fleet_view_delete_job","worktree_left_in_place");else b("fleet_view_delete_job");if(h.state.pinned)sut(h.id,!1,S).catch(()=>{});s("tengu_bg_agent_action",{action:v("delete"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)})}if(A){let V=F??"remove_failed";y("fleet_view_delete_job",`worktree_kept_${V}`);let K=AQe(V,T);return w(h.id,`worktree ${K}`),`Worktree kept at ${A} \u2014 ${K}; the session was not deleted`}if(P)return`Worktree directory left at ${P} \u2014 git no longer recognized it; the session was deleted`}}]}
+
+## logTails:nf 192204979
+## needle logTail:nf 192213296
+## needle logTail:nf. 
+## needle nf[ht 
+## needle Tl.get 192212863,192214052
+## needle deleteRefusals:Tl 192204991
+## loopKickCount caller @192213397
+rn Yl.dropAsStray()}ai(),Hl(at)},children:e(Ss,{job:at,isFocused:Xt,focusFg:ii,isOrigin:at.id===Al,logTail:nf[at.id],cols:ei,status:xs(at),heldInTerminal:or.terminalHolderOf(at)!==void 0,showVerb:!Cn,loopKickCount:Is.has(at.id)?Cs.get(at.state.sessionId)?.count:void 0,age:Hn(at,I

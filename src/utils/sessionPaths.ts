@@ -72,19 +72,23 @@ export function isChainParticipant(m: Pick<Message, 'type'>): boolean {
 
 // ── EPHEMERAL_PROGRESS_TYPES / isEphemeralToolProgress ──
 /**
- * High-frequency tool progress ticks (1/sec for Sleep, per-chunk for Bash).
- * These are UI-only: not sent to the API, not rendered after the tool
- * completes. Used by REPL.tsx to replace-in-place instead of appending, and
- * by loadTranscriptFile to skip legacy entries from old transcripts.
+ * densable `XVt` / `mcn` — high-frequency ticks (bash/powershell/mcp,
+ * tool_heartbeat, agent_api_retry, artifact_publish_retry) plus feature-gated
+ * `sleep_progress`. Not ephemeral: agent_progress / hook_progress /
+ * skill_progress. REPL replace-in-place; loadTranscriptFile skips legacy rows.
  */
 const EPHEMERAL_PROGRESS_TYPES = new Set([
   'bash_progress',
   'powershell_progress',
   'mcp_progress',
+  'tool_heartbeat',
+  'agent_api_retry',
+  'artifact_publish_retry',
   ...(feature('PROACTIVE') || feature('KAIROS')
     ? (['sleep_progress'] as const)
     : []),
 ])
+/** densable `mcn` */
 export function isEphemeralToolProgress(dataType: unknown): boolean {
   return typeof dataType === 'string' && EPHEMERAL_PROGRESS_TYPES.has(dataType)
 }

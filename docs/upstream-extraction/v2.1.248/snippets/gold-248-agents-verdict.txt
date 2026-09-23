@@ -1,0 +1,60 @@
+# gold-248-agents-verdict
+when=2026-09-20
+SEA=official-248 claude.exe 226708128
+helpers=247 _peel-1-ye-Ht-Jt-DE.mjs
+peels=_peel-248-agents-needles.mjs + _peel-248-agents-bodies.mjs + _peel-248-agents-pass2.mjs + _peel-248-agents-leftover.mjs
+gold=gold-248-agents-needles.txt + gold-248-agents-bodies.txt + gold-248-agents-pass2.txt + gold-248-agents-leftover.txt
+contract=changelog is index only. NEVER HAVE. no src edits.
+
+## Compact table
+
+| # | key | SEA unique / extractable body | local leftover file:line | missing | bucket |
+| - | --- | ----------------------------- | ------------------------ | ------- | ------ |
+| 12 | win-kb | WIN32_INPUT_MODE:9001 @187972832; Yot=Hj(wf.WIN32_INPUT_MODE) disable @187973247; export gmr as applyFleetViewHostWindowsEnv @191970549. applyFleet fn body not uniquely extracted (name minified). | leftover-looking: AgentView.tsx:3528 comment + :3530 CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT; :3606–3608 handoffRawMode. ink.tsx:1520 handoffRawMode. | WIN32_INPUT_MODE const; applyFleetViewHostWindowsEnv body | leftover-looking |
+| 14 | model-code | JKt @193082880 Fast mode ON/OFF toast string; Dv(kt) bold wrap @202783798 / @203097575. No `sonnet[1m]` backticks. No "render as code". | leftover-looking: ModelPicker.tsx:442–447 notice Text (not code); fastMode.ts:354–380 Fast mode ON/OFF; PromptInput.tsx:2753 fast-mode-toggled; model.ts [1m] suffix leftover | model name as markdown/code so [1m] is not a link | UNKNOWN |
+| 15 | agents-ci-trust | EXTRACTED T @191847905 sha=cf8fc01922dce784 `function T(){if(Me(!1)||Boolean(a.IS_DEMO)||a.CLAUBBIT)return"skip";return Jo()&&!cre()?"trusted":"ask"}`. EXTRACTED B @191848009 sha=40bf3c4bd095535d ask→TrustDialog. process.env.CI not in T (Me(!1) only). | leftover-looking OLD skip: agentsTrust.tsx:76 isEnvTruthy(process.env.CI); agents.ts:171–180 ensureAgentsWorkspaceTrust | SEA Me(!1) (CI no longer skip) | leftover-looking |
+| 16 | pr-cache | EXTRACTED uXe @184559295 sha=47077b3550afa3f2 drop malformed via RJt().safeParse. EXTRACTED K$n @184559595 sha=d5f332dda9cbcad7 load+uXe. persist q$n @184558619 sha=bfeb4eac3fbfa629. | leftover-looking path only: createLocalFsBackend.ts:708 gh-pr-status-cache.json | loadPrStatusCache / persistPrStatusCache / "malformed cache entries" | leftover-looking |
+| 17 | stale-resurrect | Unique strings: "ended while the background service was off" @92716655/@189646403; "saved conversation is no longer on disk" @192184216; dead_epoch_transcript_gone @189672901. No "weeks-old" / "ask before resume" literal. Ask overlay body not uniquely extracted. | MISSING all unique strings | deadEpochReapedAt; ask-before-resume overlay | UNKNOWN |
+| 18 | old-conv | ye(X.origin) on newsession @192261457; openNewSessionRow minified ye/lt/Du. willInsertNewline @192073232/@192269870. Typed-prompt-drop body not uniquely extracted. | leftover-looking: AgentView.tsx:2100/2572/2693 openNewSessionRow (idle shell spawn) | willInsertNewline; drop typed prompt on new session | leftover-looking |
+| 19 | already-open | "Open in a terminal" + "continue it there" @192201067 Wr row. terminalHolderOf @192133382. resume_session_live_elsewhere @189673732 + error string. | leftover-looking conflict only: AgentView.tsx:3403/3411; xyrRespawn.ts:230 | Open in a terminal row; terminalHolderOf; continue it there | leftover-looking |
+| 20 | rm-merged | unpushed phrase @189689981. No "merged into your" / "checked-out default" / local-main unique. --merged / is-ancestor hits are other git paths, not deleteJob unpushed gate. | leftover-looking OLD gate: deleteJob.ts:81 phrase; :154–164 rev-list --all --not --remotes (no local-default merge) | merge-into-local-default exemption | leftover-looking |
+| 21 | hook-schema-row | No "schema error" / "invalid answer" / "hook schema". PermissionRequest hook + "failed schema validation" exist (tool/hook parse), not uniquely agents-row. | leftover-looking: hooks.ts / permissions.ts PermissionRequest hook | agents row names hook+schema | leftover-looking |
+| 27 | logs-modes | EXTRACTED Pmr @189642272 sha=90e236fb25f3e1ac claude logs replay then ov+Pi(0). No cleanupTerminalModes inside Pmr. Nj() @187437306 sha=fec2d507c605d60f is generic cleanup, not proven logs-exit. | leftover-looking: bg.ts:122 logsHandler (readFile, no replay/cleanup); gracefulShutdown.ts:65 cleanupTerminalModes | cli_bg_logs; Pmr; logs-exit mode reset | leftover-looking |
+| 28 | trust-emoji | "cut off mid-emoji" @189843154 is bundled older changelog text (shell/agent preview), not TrustDialog. toWellFormed zy @178358575 exists; TrustDialog rule-trunc body not uniquely extracted. | leftover-looking grapheme elsewhere: displaySanitize.ts / dontAskAgainLabel.ts. TrustDialog/utils.ts no grapheme cut. | trust-dialog mid-emoji truncate | UNKNOWN |
+| 29 | perm-ctrlc | "Press Ctrl-C again to exit" @192217064 is FleetView footer (agents list), not REPL perm-mode. exitArmed minified (SEA 0 hits for that ident). chat:cycleMode exists. REPL shift+tab-after-ctrl+c body not uniquely extracted. | leftover-looking agents footer: fleetView/helpers.ts:1750; AgentView.tsx:638 exitArmed | REPL perm-mode vs Ctrl-C hint | leftover-looking |
+| 34 | warn-column | Uf mcp-needs-auth render @201566839 Gp status warning + "server needs/servers need authentication". Column-offset (one column right) not uniquely extracted. | leftover-looking notice: useMcpConnectivityStatus.tsx:61/101/134. LogoV2.tsx:120 paddingLeft={2} | one-column-right transcript align | leftover-looking |
+| 35 | wt-lock | EXTRACTED pGe lock --reason @186343973. EXTRACTED Gct create+pGe @186344789 sha=d323c220d4b74f7e. bg boot @204223417 pGe + "no worktree lock names this process" + U() pid check. | leftover-looking 246 lock: worktree.ts:1526/2873–2893 lockClaudeWorktree | "no worktree lock names this process"; bg-boot hold | leftover-looking |
+| 36 | mention-ime | "non-Latin" @189782108 is older changelog (Ctrl shortcuts / kitty), not @-mention IME. mentionQuery 0. toLocaleLowerCase hits are AWS/metadata, not mentions. KEe NFC path-fold @178493159 is path compare. | leftover-looking path NFC: sessionStoragePortable.ts / commandProducerDirs.ts foldCase. AgentView.tsx:3205 "@ mention" hint only | IME / non-Latin session @-mention match | UNKNOWN |
+| 45 | shift-enter | EXTRACTED Fs @192220123 sha=3623b53aea0f1119: ctrl+j for newline; canDispatchAndOpen $f → "ctrl+enter to start and open". canDispatchAndOpen @192237352 cm==="local"&&EHt(). | leftover-looking newline only: AgentView.tsx:2586–2590 shift+enter/ctrl+j insert \\n; :3205 / helpers.ts:1773 ctrl+j for newline. Enter still dispatches. | canDispatchAndOpen; ctrl+enter dispatch+attach | leftover-looking |
+
+## Bucket counts (this peel only)
+
+| bucket | # |
+| ------ | - |
+| HAVE | 0 (forbidden) |
+| leftover-looking | #12 #15 #16 #18 #19 #20 #21 #27 #29 #34 #35 #45 |
+| UNKNOWN | #14 #17 #28 #36 |
+| N/A | none of these 16 |
+
+## Extractable SEA bodies (sha)
+
+| tag | @ | sha | ident |
+| --- | - | --- | ----- |
+| #15 T | 191847905 | cf8fc01922dce784 | agentsTrustDecision Me(!1) |
+| #15 B | 191848009 | 40bf3c4bd095535d | ensureAgentsWorkspaceTrust |
+| #16 uXe | 184559295 | 47077b3550afa3f2 | drop malformed PR cache |
+| #16 K$n | 184559595 | d5f332dda9cbcad7 | loadPrStatusCache |
+| #16 q$n | 184558619 | bfeb4eac3fbfa629 | persistPrStatusCache |
+| #27 Pmr | 189642272 | 90e236fb25f3e1ac | claude logs |
+| #27 Nj | 187437306 | fec2d507c605d60f | cleanupTerminalModes wrapper (not proven logs) |
+| #35 Gct | 186344789 | d323c220d4b74f7e | worktree create + pGe lock |
+| #45 Fs | 192220123 | 3623b53aea0f1119 | fleet help: ctrl+enter to start and open |
+
+## Do not invent
+
+- #15 local CI skip is leftover of 225, not the 248 Me(!1) contract.
+- #19 leftover "already open in another running Claude session" is spawn-refuse, not the row "Open in a terminal".
+- #20 leftover unpushed remote-only check is not "merged into local default".
+- #28 bundled "mid-emoji" changelog line is not TrustDialog 248 body.
+- #29 fleet "Press Ctrl-C again" leftover is not proven REPL perm-mode fix.
+- No HAVE. No src edits.

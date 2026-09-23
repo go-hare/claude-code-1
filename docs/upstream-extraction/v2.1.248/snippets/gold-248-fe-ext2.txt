@@ -1,0 +1,92 @@
+# gold-248-fe-ext2
+when=2026-09-21T00:45:58.128Z
+
+## class Oe{ hits=5 178538900,179932859,197938633,203414037,205168850
+## class Oe @178538900 @178538900
+class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this.#a}replaceHasDevChannels(e){this.#a=e}sessionSkillAllowlist(){return this.#s}replaceSessionSkillAllowlist(e){this.#s=e}chromeFlagOverride(){return this.#d}replaceChromeFlagOverride(e){this.#d=e}teammateAgentId(){return this.#l}replaceTeammateAgentId(e){this.#l=e}reset(){this.#e=[],this.#t=[],this.#n=[],this.clearSyncedPluginDirs(),this.#r=[],this.#i=[],this.#a=!1,this.#s=void 0,this.#d=void 0,this.#l=void 0}}class Ee{#e=null;#t=null;modelStrings(){return this.#e}replaceModelStrings(e){this.#e=e}invalidate(){this.#e=null}admin3PSteeringSnapshot(){return this.#t}recordAdmin3PSteeringSnapshot(e){this.#t=e}reset(){this.#e=null,this.#t=null}}var nn=[];class He{#e=[];#t=[];#n=void 0;errorLog(){return this.#e}recordError(e){if(this.#e.length>=100)this.#e.shift();this.#e.push(e)}recordSlowOperation(e,t){return}slowOperations(){if(this.#t.length===0)return nn;let e=Date.now();if(this.#t.some((t)=>e-t.timestamp>=1e4)){if(this.#t=this.#t.filter((t)=>e-t.timestamp<1e4),this.#t.length===0)return nn}return this.#t}recordDevBarAlert(e){return}devBarAlert(){let e=this.#n;if(e&&Date.now()-e.timestamp>=60000){this.#n=void 0;return}return e}reset(){this.#e=[],this.#t=[],this.#n=void 0}}function on(){return{rateTokens:null,rateLastRefillMs:null,featureOkLogged:!1,reportedDropReasons:new Set}}class Be{#e=null;#t=null;#n=null;#o=null;#r=null;#i=null;#a=null;#s=null;#d=null;#l=null;#c=null;#p=null;#u=null;#g=[];#h=null;#m=on();#f=null;#v=null;#b=null;#S={direct:null,proxied:null};installMeter(e,t,{omitUnits:o=!1}={}){this.#e=e;let r=
+
+## class Oe @179932859 @179932859
+class Oe{getMeter(e,t,r){return pa.NOOP_METER}}wr.NoopMeterProvider=Oe;wr.NOOP_METER_PROVIDER=new Oe});var Kr=d(function(Ur){Object.defineProperty(Ur,"__esModule",{value:!0});Ur.MetricsAPI=void 0;var da=Gr(),xe=O(),Br=x(),ve="metrics";class be{constructor(){}static getInstance(){if(!this._instance)this._instance=new be;return this._instance}setGlobalMeterProvider(e){return(0,xe.registerGlobal)(ve,e,Br.DiagAPI.instance())}getMeterProvider(){return(0,xe.getGlobal)(ve)||da.NOOP_METER_PROVIDER}getMeter(e,t,r){return this.getMeterProvider().getMeter(e,t,r)}disable(){(0,xe.unregisterGlobal)(ve,Br.DiagAPI.instance())}}Ur.MetricsAPI=be});var kr=d(function($r){Object.defineProperty($r,"__esModule",{value:!0});$r.metrics=void 0;var fa=Kr();$r.metrics=fa.MetricsAPI.getInstance()});var Hr=d(function(Yr){Object.defineProperty(Yr,"__esModule",{value:!0});Yr.NoopTextMapPropagator=void 0;class Wr{inject(e,t){}extract(e,t){return e}fields(){return[]}}Yr.NoopTextMapPropagator=Wr});var en=d(function(Jr){Object.defineProperty(Jr,"__esModule",{value:!0});Jr.deleteBaggage=Jr.setBaggage=Jr.getActiveBaggage=Jr.getBaggage=void 0;var Oa=I(),xa=M(),Pe=(0,xa.createContextKey)("OpenTelemetry Baggage Key");function Qr(e){return e.getValue(Pe)||void 0}Jr.getBaggage=Qr;function va(){return Qr(Oa.ContextAPI.getInstance().active())}Jr.getActiveBaggage=va;function ba(e,t){return e.setValue(Pe,t)}Jr.setBaggage=ba;function Pa(e){return e.deleteValue(Pe)}Jr.deleteBaggage=Pa});var an=d(function(nn){Object.defineProperty(nn,"__esModule",{value:!0});nn.PropagationAPI=void 0;var Ee=O(),Sa=Hr(),tn=Q(),L=en(),Ma=q(),rn=x(),Te="propagation",ya=new Sa.NoopTextMapPropagator;class Ne{constructor(){this.createBaggage=Ma.createBaggage,this.getBaggage=L.getBaggage,this.getActiveBaggage=L.getActiveBaggage,this.setBaggage=L.setBaggage,this.deleteBaggage=L.deleteBaggage}static getInstance(){if(!this._instance)this._instance=new Ne;return this._instance}setGlobalPropagator(e){return(0,Ee.registerGlobal)(Te,e,rn.DiagAPI.instance())}inject(e,t,r=tn.defaultTextMapSetter){return this._getGlobalPropagator().inject(e,t,r)}extract(e,t,r=tn.defaultTextMapGetter){return this._getGlobalPropagator().extract(e,t,r)}fields(){ret
+
+## class Oe @197938633 @197938633
+class Oe{constructor(e,t){this.config=Sf(e),this.logger=new Ve(this.config.loggerOptions,ks,Wn),this.cryptoUtils=this.config.cryptoInterface,this.cacheManager=this.config.storageInterface,this.networkClient=this.config.networkInterface,this.serverTelemetryManager=this.config.serverTelemetryManager,this.authority=this.config.authOptions.authority,this.performanceClient=t}createTokenRequestHeaders(e){let t={};if(t[re.CONTENT_TYPE]=g.URL_FORM_CONTENT_TYPE,!this.config.systemOptions.preventCorsPreflight&&e)switch(e.type){case De.HOME_ACCOUNT_ID:try{let r=Ot(e.credential);t[re.CCS_HEADER]=`Oid:${r.uid}@${r.utid}`}catch(r){this.logger.verbose("Could not parse home account ID for CCS Header: "+r)}break;case De.UPN:t[re.CCS_HEADER]=`UPN: ${e.credential}`;break}return t}async executePostToTokenEndpoint(e,t,r,n,o,i){if(i)this.performanceClient?.addQueueMeasurement(i,o);let s=await this.sendPostRequest(n,e,{body:t,headers:r},o);if(this.config.serverTelemetryManager&&s.status<500&&s.status!==429)this.config.serverTelemetryManager.clearTelemetryCache();return s}async sendPostRequest(e,t,r,n){Xt.preProcess(this.cacheManager,e,n);let o;try{o=await V(this.networkClient.sendPostRequestAsync.bind(this.networkClient),m.NetworkClientSendPostRequestAsync,this.logger,this.performanceClient,n)(t,r);let i=o.headers||{};this.performanceClient?.addFields({refreshTokenSize:o.body.refresh_token?.length||0,httpVerToken:i[re.X_MS_HTTP_VERSION]||"",requestId:i[re.X_MS_REQUEST_ID]||""},n)}catch(i){if(i instanceof Vs){let s=i.responseHeaders;if(s)this.performanceClient?.addFields({httpVerToken:s[re.X_MS_HTTP_VERSION]||"",requestId:s[re.X_MS_REQUEST_ID]||"",contentTypeHeader:s[re.CONTENT_TYPE]||void 0,contentLengthHeader:s[re.CONTENT_LENGTH]||void 0,httpStatus:i.httpStatus},n);throw i.error}if(i instanceof M)throw i;else throw y(Ur)}return Xt.postProcess(this.cacheManager,e,o,n),o}async updateAuthority(e,t){this.performanceClient?.addQueueMeasurement(m.UpdateTokenEndpointAuthority,t);let r=`https://${e}/${this.authority.tenant}/`,n=await td(r,this.networkClient,this.cacheManager,this.authority.options,this.logger,t,this.performanceClient);this.authority=n}createTokenQueryParameters(e){let t=new 
+
+## Oe-after-tn @178538860
+tings","flagSettings","policySettings"]}class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this.#a}replaceHasDevChannels(e){this.#a=e}sessionSkillAllowlist(){return this.#s}replaceSessionSkillAllowlist(e){this.#s=e}chromeFlagOverride(){return this.#d}replaceChromeFlagOverride(e){this.#d=e}teammateAgentId(){return this.#l}replaceTeammateAgentId(e){this.#l=e}reset(){this.#e=[],this.#t=[],this.#n=[],this.clearSyncedPluginDirs(),this.#r=[],this.#i=[],this.#a=!1,this.#s=void 0,this.#d=void 0,this.#l=void 0}}class Ee{#e=null;#t=null;modelStrings(){return this.#e}replaceModelStrings(e){this.#e=e}invalidate(){this.#e=null}admin3PSteeringSnapshot(){return this.#t}recordAdmin3PSteeringSnapshot(e){this.#t=e}reset(){this.#e=null,this.#t=null}}var nn=[];class He{#e=[];#t=[];#n=void 0;errorLog(){return this.#e}recordError(e){if(this.#e.length>=100)this.#e.shift();this.#e.push(e)}recordSlowOperation(e,t){return}slowOperations(){if(this.#t.length===0)return nn;let e=Date.now();if(this.#t.some((t)=>e-t.timestamp>=1e4)){if(this.#t=this.#t.filter((t)=>e-t.timestamp<1e4),this.#t.length===0)return nn}return this.#t}recordDevBarAlert(e){return}devBarAlert(){let e=this.#n;if(e&&Date.now()-e.timestamp>=60000){this.#n=void 0;return}return e}reset(){this.#e=[],this.#t=[],this.#n=void 0}}function on(){return{rateTokens:null,rateLastRefillMs:null,featureOkLogged:!1,reportedDropReasons:new Set}}class Be{#e=null;#t=null;#n=null;#o=null;#r=null;#i=null;#a=null;#s=null;#d=null;#l=null;#c=null;#p=null;#u=null;#g=[];#h=null;#m=on();#f=null;#v=null;#b=null;#S={direct:null,proxied:null};installMeter(e
+
+## function G$( hits=3
+@178571899 sha=7510de2679e5128a function G$(e){let t=n();t.host.settingsSource.replaceUseCoworkPlugins(e),mGt.of(t.host).invalidateAll()}
+@180035138 sha=a922f6a19056f14f function G$(e,t){let r,o=new Promise(function(p,g){r=setTimeout(function(){g(new Bi("Operation timed out."))},t)});return Promise.race([e,o]).then((u)=>(clearTimeout(r),u),(u)=>{throw clearTimeout(r),u})}
+@183787446 sha= {"i":183787446,"missEnd":true,"preview":"function G$(e,t,r={}){let o=performance.now(),u=r.budget??zV(),p=r.mode??\"install\",g={vouched:!1,materialized:0,removed:0,failed:0,readOnly:!1};if(!(await Lc(e)).isDirectory())throw new P(`Plugin path is not a directory: ${e}`,\"plugin path is not a directory\");let k=await nR(e),E"}
+
+## function y7e( hits=2
+@178572004 sha=debaad53d2b4c710 function y7e(){return n().host.settingsSource.useCoworkPlugins()}
+@184786267 sha= {"i":184786267,"missEnd":true,"preview":"function y7e(e=Date.now){let t=new Map;return{submit:(r,o,u)=>{let p=t.get(o)??{count:0,lastAt:Number.NEGATIVE_INFINITY};if(p.count>=hw.PROMPT_SESSION_COUNT)return n(`$.prompt.submit (${o}): past budget; refused`),Promise.reject(new Ae.HooksError(`${o}: $.prompt.submit refused: $"}
+
+## function Tde( hits=2
+@178570516 sha=19533a129f85d650 function Tde(e){n().host.extensionsConfig.replaceSyncedPluginDirs(e)}
+@222522970 sha=a238c8672d2b3bdc function Tde(e,t){return e.refs.length!==t.length||e.refs.some((n,r)=>n!==t[r])}
+
+## function xEe( hits=2
+@178570914 sha=fd08c415b0ad3587 function xEe(){return n().host.extensionsConfig.syncedPluginDirs()}
+@217214350 sha=f3c875b2f53f111c function xEe(e,t){var r=this.__data__;if(r instanceof GR){var n=r.__data__;if(!JC||n.length<fxt-1)return n.push([e,t]),this.size=++r.size,this;r=this.__data__=new WR(n)}return r.set(e,t),this.size=r.size,this}
+
+## function Skn( hits=1
+@178571487 sha=45d67edaf40e0af6 function Skn(e){n().host.extensionsConfig.replaceChromeFlagOverride(e)}
+
+## function qkn( hits=1
+@178578918 sha=aa849fcb4307d666 function qkn(e){let t=n();if(!e||e.size===0){t.invokedSkills.forgetAll();return}for(let[o,r]of t.invokedSkills.skills())if(r.agentId===null||!e.has(r.agentId))t.invokedSkills.forget(o)}
+
+## function R7e( hits=1
+@178581238 sha=a58ab8848a3ee024 function R7e(){return n().host.extensionsConfig.hasDevChannels()}
+
+## function s7e( hits=1
+@178564184 sha=ff82b7610114e372 function s7e(){return n().host.launchOptions.hasStreamingInput()}
+
+## function p7( hits=3
+@178581171 sha=0ec0fb0d6194dea5 function p7(e){n().host.extensionsConfig.replaceAllowedChannels(e)}
+@184768944 sha= {"i":184768944,"missEnd":true,"preview":"function p7(e,t,{realRoot:r,refused:o}){let u=await e.stat();if(!u.isFile())throw o(`the open landed on ${QD(u)}; $.fs opens regular files only`);if(u.nlink>1)throw o(`the open landed on ${i7(u.nlink)}`);let p=await $P(e7(e,t));if(p===void 0)throw o(\"after the open, the kernel ha"}
+@222618589 sha=9af5e1e9f6fca766 function p7(e,t){let n=xc(e);return n===t||!sn(n)||Ec(n)?!1:_i(n).position==="fixed"||p7(n,t)}
+
+## function Bp( hits=9
+@178581106 sha=d2fd1b015c09a08d function Bp(){return n().host.extensionsConfig.allowedChannels()}
+@180060105 sha= {"i":180060105,"missEnd":true,"preview":"function Bp(){let{BedrockClient:e}=await import(\"B:/~BUN/root/chunk-2k1peyzk.js\"),t=await dE(),r=a.CLAUDE_CODE_SKIP_BEDROCK_AUTH,o={region:t,...a.ANTHROPIC_BEDROCK_BASE_URL&&{endpoint:a.ANTHROPIC_BEDROCK_BASE_URL},...await Qte({url:a.ANTHROPIC_BEDROCK_BASE_URL||`https://bedrock.$"}
+@188887369 sha= {"i":188887369,"missEnd":true,"preview":"function Bp(e){return{name:\"Oracle Rules Language\",keywords:{keyword:\"BILL_PERIOD BILL_START BILL_STOP RS_EFFECTIVE_START RS_EFFECTIVE_STOP RS_JURIS_CODE RS_OPCO_CODE INTDADDATTRIBUTE|5 INTDADDVMSG|5 INTDBLOCKOP|5 INTDBLOCKOPNA|5 INTDCLOSE|5 INTDCOUNT|5 INTDCOUNTSTATUSCODE|5 INTD"}
+
+## function Ykn( hits=2
+@178579993 sha=6256a2a8e5a34b67 function Ykn(e){n().host.extensionsConfig.replaceSessionSkillAllowlist(e)}
+@185393890 sha=f0f5e04480116020 function Ykn(){return qe().skillListingBudgetFraction??zkn}
+
+## alias "G$ as setUseCoworkPlugins" hits=1
+YEn as setTodoToolsOptIn,LGt as setTracerProvider,G$ as setUseCoworkPlugins,c7 as setUserMsgOptIn,Swn as setVerifySkillRollou
+
+## alias "y7e as getUseCoworkPlugins" hits=1
+ getUnsupportedThreadKeys,jwn as getUsageForModel,y7e as getUseCoworkPlugins,_x as getUserMsgOptIn,_wn as getVerifySkillRollou
+
+## alias "Tde as setSyncedPluginDirs" hits=1
+StrictMcpConfig,hEr as setStrictToolResultPairing,Tde as setSyncedPluginDirs,Jkn as setSystemPromptSectionCacheEntry,vkn as se
+
+## alias " as getSyncedPluginDirs" hits=1
+ultPairing,$kn as getSurfacedHookSpawnFailures,xEe as getSyncedPluginDirs,HEe as getSystemPromptSectionCache,r3t as getSyst
+
+## alias "Skn as setChromeFlagOverride" hits=1
+,EEn as setCachedTelemetryResource,Xkn as setCaps,Skn as setChromeFlagOverride,qYe as setCliSessionConfigCarried,$En as setClien
+
+## alias " as getChromeFlagOverride" hits=1
+horMs,jkn as getChromeAvailabilityStagesLogged,Ade as getChromeFlagOverride,xwn as getCliSessionConfigCarried,TEr as getClien
+
+## alias " as getAdditionalDirectoriesForClaudeMd" hits=1
+as getActiveRoutine,bEn as getActiveTimeCounter,_m as getAdditionalDirectoriesForClaudeMd,fEn as getAdmin3PSteeringSnapshot,FGt as getAgent
+
+## alias " as setAdditionalDirectoriesForClaudeMd" hits=1
+ccountSkillsSyncEnabled,nEr as setActiveRoutine,D4 as setAdditionalDirectoriesForClaudeMd,pEn as setAdmin3PSteeringSnapshot,p7 as setAllowe
+
+## alias "Bp as getAllowedChannels" hits=1
+etAdmin3PSteeringSnapshot,FGt as getAgentColorMap,Bp as getAllowedChannels,kde as getAllowedSettingSources,UGt as getApiKeyF
+
+## alias "p7 as setAllowedChannels" hits=1
+riesForClaudeMd,pEn as setAdmin3PSteeringSnapshot,p7 as setAllowedChannels,mkn as setAllowedSettingSources,BGt as setApiKeyF
+
+## alias "s7e as getHasDevChannels" hits=0
+
+## alias "R7e as setHasDevChannels" hits=0

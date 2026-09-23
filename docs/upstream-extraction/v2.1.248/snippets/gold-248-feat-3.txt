@@ -1,0 +1,131 @@
+# gold-248-feat-3  self-hosted-runner --client-label
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:38.787Z
+
+## #3 --client-label  needle="--client-label"  hits=4
+- #0 @99535904 .i..--retire-at.....M...--lock-to-account..........--debug-token-dir.......KB..--client-label..........--kill-session-after-min......*.--git-host-rewrite..........--configur
+- #1 @99558089 gned.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Show
+- #2 @187911322 String(m);break}case"--lock-to-account":if(o)n.lockToAccountId=o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"
+- #3 @187914694 gned.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Show
+
+## #3 SELF_HOSTED_RUNNER_CLIENT_LABEL  needle="SELF_HOSTED_RUNNER_CLIENT_LABEL"  hits=4
+- #0 @99535152 r..."......SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT.......l_.lockToAccountId.....)...SELF_HOSTED_RUNNER_CLIENT_LABEL.....idr.gitSshRewriteHosts.......F..gitHostRewrites......%..CLAUDE_RUNNER_USE_G
+- #1 @99558472 meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              
+- #2 @187904951 ccountId:process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,clientLabel:process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim()||void 0,gitSshRewriteHosts:[],gitHostRewrites:[],useAnthropicGitProxy:M
+- #3 @187915077 meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              
+
+## #3 client-label  needle="client-label"  hits=4
+- #0 @99535906 ..--retire-at.....M...--lock-to-account..........--debug-token-dir.......KB..--client-label..........--kill-session-after-min......*.--git-host-rewrite..........--configur
+- #1 @99558091 ed.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Show
+- #2 @187911324 ring(m);break}case"--lock-to-account":if(o)n.lockToAccountId=o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"
+- #3 @187914696 ed.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Show
+
+## #3 client_label  needle="client_label"  hits=5
+- #0 @92197070 a-zA-Z0-9_]........al.^[0-9].......Bo.runner_id="......]X.",version=".....l._.",client_label="........# HELP .I...B..._info Self-hosted runner identity (info-style gauge; v
+- #1 @92210868 ner:api] RegisterRunner -> ......... runner_id=......B\.runner_version......d...client_label.....-..lock_to_account_id......%.Y.post....tm..baseUrl.
+....TT.poolSecret......
+- #2 @187504802 1/code/runners/self-hosted/runners/register");let s={runner_version:ore};if(r)s.client_label=r;if(t)s.lock_to_account_id=t;let a=await nt.post(`${e.baseUrl}/v1/code/runners
+- #3 @187513328 .lastPollAt)/1000:0,u=`runner_id="${J$(e.runnerId)}",version="${J$(e.version)}",client_label="${J$(e.clientLabel)}"`,r=ke,t="";t+=`# HELP ${r}_info Self-hosted runner ident
+- #4 @187639958 runner_list_runners({pool_id})\` once to show the runner row (lease_expires_at, client_label). Tell the operator to refresh the Cloud environments page and open the environ
+
+## #3 clientLabel  needle="clientLabel"  hits=6
+- #0 @92201256 tform="......W..Date
+....t+.lastPollAt......W...runnerId.....H..version.........clientLabel.....Em+.capacity......`.activeSessions.......i..sessionsStarted.....R.Z.session
+- #1 @187513349 =`runner_id="${J$(e.runnerId)}",version="${J$(e.version)}",client_label="${J$(e.clientLabel)}"`,r=ke,t="";t+=`# HELP ${r}_info Self-hosted runner identity (info-style gaug
+- #2 @187904927 _DEBUG_TOKEN_DIR,lockToAccountId:process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,clientLabel:process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim()||void 0,gitSshRewriteHosts:
+- #3 @187911387 i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"--debug-token-dir":if(o)n.debugTokenDir=o,i++;break;case"--pro
+- #4 @187936085  m(),process.exit(1)}let ce=pXe({baseUrl:t.apiUrl,poolSecret:n,onDebug:p}),ye=t.clientLabel??Go();if(t.lockToAccountId)s(`Registering locked to account: ${t.lockToAccountI
+- #5 @187943677 functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION,clientLabel:ye,capacity:t.capacity,claimVisibility:new Map,lockedAccountEmail:null,initiali
+
+## #3 override the label  needle="override the label"  hits=0
+
+## #3 registers with  needle="registers with"  hits=1
+- #0 @209842916 ot registered yet \u2014 the cloud session has not answered (it may be asleep); registers with your next message",Ao={dormant:"idle \u2014 nothing has used the session for a 
+
+## #3 win --client-label#0 @99535904
+tionCommand.......Su..proxyAuthorizationFile..........--drain-grace-sec.......Y0n.--post-session-hook-timeout-sec.
+....O..--base-dir.......+..--sigkill-timeout-sec........i..--retire-at.....M...--lock-to-account..........--debug-token-dir.......KB..--client-label..........--kill-session-after-min......*.--git-host-rewrite..........--configure-git.........--trust-workspace...........--git-ssh-rewrite...........--exit-if-unused-min....?s..--release-idle-session-min......}./.--use-anthropic-git-proxy.........$.--push-outcome-on-release........g..--drain-wait-sec.....*l.--session-stop-grace-sec....2[..--defer-shutdown-max-min
+.....L.--log-file..
+.....g.--capacity..........--startup-timeout-min........b'.--confine-repo-settings.....r...[runner:
+
+## #3 win --client-label#1 @99558089
+to-account <id>      Lock runner to a single account at registration (webhook-driven on-demand
+                              spawn). Only that account's sessions are assigned.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Shown
+                              beside the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              For eg
+
+## #3 win --client-label#2 @187911322
+SECONDS (e.g. the output of 'date +%s' plus the runner's intended lifetime \u2014 not milliseconds, not a duration), got: ${u}`);process.env.SELF_HOSTED_RUNNER_RETIRE_AT=String(m);break}case"--lock-to-account":if(o)n.lockToAccountId=o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"--debug-token-dir":if(o)n.debugTokenDir=o,i++;break;case"--proxy-authorization-command":case"--proxy-authorization-file":if(o===void 0||o.startsWith("--"))throw Error("--proxy-authorization-command / --proxy-authorization-file requires a value");if(d==="--proxy-authorization-command")n.proxyAuthorizationCommand=o;else n.proxyAuthorizationFile=o;i++;break;default:if(d?.startsWith("--"))throw Error(`unkno
+
+## #3 win --client-label#3 @187914694
+to-account <id>      Lock runner to a single account at registration (webhook-driven on-demand
+                              spawn). Only that account's sessions are assigned.
+                              [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Shown
+                              beside the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              For eg
+
+## #3 fn-before --client-label#3 @187913996
+MISS {"i":187913996,"missEnd":true,"preview":"function yd(e){if(e.includes(\"--help\")||e.includes(\"-h\")){console.log(`Usage: claude self-hosted-runner [options]\n\nConnection:\n  --api-url <url>             API base URL (default: ${Cs})\n  --environment-secret-file <path>\n                              Path to environment secret f"}
+
+## #3 win SELF_HOSTED_RUNNER_CLIENT_LABEL#0 @99535152
+^.baseDirSource.........p.SELF_HOSTED_RUNNER_EXEC_PATH........SELF_HOSTED_RUNNER_LOG_FILE.....r.H.logFile."...Wg..SELF_HOSTED_RUNNER_DEBUG_TOKEN_DIR.........debugTokenDir..."......SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT.......l_.lockToAccountId.....)...SELF_HOSTED_RUNNER_CLIENT_LABEL.....idr.gitSshRewriteHosts.......F..gitHostRewrites......%..CLAUDE_RUNNER_USE_GIT_PROXY.........useAnthropicGitProxy ...YG>.SELF_HOSTED_RUNNER_CONFIGURE_GIT......^.configureGit*.......SELF_HOSTED_RUNNER_PUSH_OUTCOME_ON_RELEASE.."...O[..SELF_HOSTED_RUNNER_TRUST_WORKSPACE........@.trustWorkspace..(..."...SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS......I.confineRepoSettings.........envSetByFlag/....v..SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS.....29..proxyAuthori
+
+## #3 win SELF_HOSTED_RUNNER_CLIENT_LABEL#1 @99558472
+the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              For egress proxies that require a Proxy-Authorization header (for
+                              example a short-lived bearer token) on every CONNECT. The command's
+                              stdout is the full header value (e.g. "Bearer <token>"); it is run
+                              afresh for each new connection to the proxy, so rotating tokens stay
+                             
+
+## #3 win SELF_HOSTED_RUNNER_CLIENT_LABEL#2 @187904951
+.env.SELF_HOSTED_RUNNER_LOG_FILE||void 0,healthPort:ea(process.env.SELF_HOSTED_RUNNER_HEALTH_PORT,xs),debugTokenDir:process.env.SELF_HOSTED_RUNNER_DEBUG_TOKEN_DIR,lockToAccountId:process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,clientLabel:process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim()||void 0,gitSshRewriteHosts:[],gitHostRewrites:[],useAnthropicGitProxy:Me(process.env.CLAUDE_RUNNER_USE_GIT_PROXY),configureGit:Me(process.env.SELF_HOSTED_RUNNER_CONFIGURE_GIT),pushOutcomeOnRelease:Me(process.env.SELF_HOSTED_RUNNER_PUSH_OUTCOME_ON_RELEASE),trustWorkspace:ta(process.env.SELF_HOSTED_RUNNER_TRUST_WORKSPACE),confineRepoSettings:na(process.env.SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS),envSetByFlag:new Set};if(process.env.SELF_HOSTED_RUNNER_HOOKS
+
+## #3 fn-before SELF_HOSTED_RUNNER_CLIENT_LABEL#2 @187904467
+len=7862 sha=3327bbea2101bc29
+function ra(e){let t=process.env.SELF_HOSTED_RUNNER_BASE_DIR||void 0,n={apiUrl:Cs,capacity:Ns,baseDir:Zn(t??Ds),baseDirSource:t===void 0?"default":"env",execPath:process.env.SELF_HOSTED_RUNNER_EXEC_PATH,logLevel:"info",logFile:process.env.SELF_HOSTED_RUNNER_LOG_FILE||void 0,healthPort:ea(process.env.SELF_HOSTED_RUNNER_HEALTH_PORT,xs),debugTokenDir:process.env.SELF_HOSTED_RUNNER_DEBUG_TOKEN_DIR,lockToAccountId:process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,clientLabel:process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim()||void 0,gitSshRewriteHosts:[],gitHostRewrites:[],useAnthropicGitProxy:Me(process.env.CLAUDE_RUNNER_USE_GIT_PROXY),configureGit:Me(process.env.SELF_HOSTED_RUNNER_CONFIGURE_GIT),pushOutcomeOnRelease:Me(process.env.SELF_HOSTED_RUNNER_PUSH_OUTCOME_ON_RELEASE),trustWorkspace:ta(process.env.SELF_HOSTED_RUNNER_TRUST_WORKSPACE),confineRepoSettings:na(process.env.SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS),envSetByFlag:new Set};if(process.env.SELF_HOSTED_RUNNER_HOOKS_DIR)process.env.SELF_HOSTED_RUNNER_HOOKS_DIR=Zn(process.env.SELF_HOSTED_RUNNER_HOOKS_DIR);for(let i=0;i<e.length;i++){let d=e[i],o=e[i+1];switch(d){case"--api-url":if(o)n.apiUrl=o,i++;break;case"--pool-secret-file":case"--environment-secret-file":if(d==="--pool-secret-file")console.error("[runner:warn] --pool-secret-file is deprecated; use --environment-secret-file");if(o)n.poolSecretFile=o,i++;break;case"--capacity":if(o){let u=Da(o);if(Number.isNaN(u)||u<1)throw Error(`--capacity must be a positive integer, got: ${o}`);n.capacity=u,i++}break;case"--base-dir":if(o)n.baseDir=Zn(o),n.baseDirSource="flag",i++;break;case"--exec-path":if(o)n.execPath=o,i++;break;case"--hooks-dir":if(o)process.env.SELF_HOSTED_RUNNER_HOOKS_DIR=Zn(o),i++;break;case"--git-ssh-rewrite":if(!o)throw Error("--git-ssh-rewrite requires a hostname");n.gitSshRewriteHosts.push(o),i++;break;case"--git-host-rewrite":{if(!o)throw Error("--git-host-rewrite requires <from>=<to>");let u=o.indexOf("=");if(u<=0||u===o.length-1)throw Error(`--git-host-rewrite requires <from>=<to>, got: ${o}`);let m=o.slice(0,u).toLowerCase(),p=o.slice(u+1);if(m.includes("://")||m.includes("/")||p.includes("://")||p.includes("/"))throw Error(`--git-host-rewrite expects bare hostnames (e.g. ext.example.com=int.example.com), not URLs. Got: ${o}`);if(n.gitHostRewrites.some(([s])=>s===m))throw Error(`duplicate --git-host-rewrite for '${m}'`);n.gitHostRewrites.push([m,p]),i++;break}case"--use-anthropic-git-proxy":n.useAnthropicGitProxy=!0;break;case"--configure-git":n.configureGit=!0;break;case"--push-outcome-on-release":n.pushOutcomeOnRelease=!0;break;case"--trust-workspace":if(o==="false"||o==="0")n.trustWorkspace=!1,i++;else if(o==="true"||o==="1")n.trustWorkspace=!0,i++;else n.trustWorkspace=!0;break;case"--confine-repo-settings":if(o==="enforce"||o==="warn"||o==="off")n.confineRepoSettings=o,i++;else throw Error(`--confine-repo-settings requires one of enforce/warn/off (got: ${S(o)})`);break;case"--log-level":if(o)n.logLevel=o,i++;break;case"--log-file":if(o)n.logFile=o,i++;break;case"--health-port":if(o){let u=Da(o);if(Number.isNaN(u)||u<0||u>65535)throw Error(`--health-port must be an integer in [0, 65535] (0 disables), got: ${o}`);n.healthPort=u,i++}break;case"--kill-session-after-min":{if(o){let u=Number(o);if(!Number.isFinite(u)||u<0||u>St)throw Error(`--kill-session-after-min must be a non-negative number of minutes (0 disables, max ${St}), got: ${o}`);process.env.SELF_HOSTED_RUNNER_MAX_LIFETIME_MS=String(u*60*1000),n.envSetByFlag.add("SELF_HOSTED_RUNNER_MAX_LIFETIME_MS"),i++}break}case"--exit-if-unused-min":{if(o){let u=Number(o);if(!Number.isFinite(u)||u<0||u>St)throw Error(`--exit-if-unused-min must be a non-negative number of minutes (0 disables, max ${St}), got: ${o}`);process.env.SELF_HOSTED_RUNNER_IDLE_SHUTDOWN_MS=String(u*60*1000),n.envSetByFlag.add("SELF_HOSTED_RUNNER_IDLE_SHUTDOWN_MS"),i++}break}case"--session-stop-grace-sec":{let u=e[++i],m=Number(u);if(!u||!Number.isFinite(m)||m<=0)throw Error(`--session-stop-grace-sec must be a positive number of seconds, got: ${u}`);process.env.SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS=String(m*1000);break}case"--sigkill-timeout-sec":throw Error("--sigkill-timeout-sec was renamed to --session-stop-grace-sec. It controls how long to wait for the Claude process to exit cleanly after a session ends, before force-killing it. The post-session hook runs after this.");case"--post-session-hook-timeout-sec":{let u=e[++i],m=Number(u);if(!u||!Number.isFinite(m)||m<=0)throw Error(`--post-session-hook-timeout-sec must be a positive number of seconds, got: ${u}`);process.env.SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS=String(m*1000);break}case"--drain-wait-bg-tasks-sec":case"--drain-wait-sec":{if(d==="--drain-wait-bg-tasks-sec")console.error("[runner:warn] --drain-wait-bg-tasks-sec is deprecated; use --drain-wait-sec (it now also waits for an in-flight foreground turn, not only background tasks)");let u=e[++i],m=Number(u);if(!u||!Number.isFinite(m)||m<0||m>86400)throw Error(`${d} must be a non-negative number of seconds (max 86400), got: ${u}`);process.env.SELF_HOSTED_RUNNER_DRAIN_WAIT_MS=String(m*1000);break}case"--drain-grace-sec":{if(o){let u=Number(o);if(!Number.isFinite(u)||u<0||u>vr)throw Error(`--drain-grace-sec must be a non-negative number of seconds (0 = immediate, max ${vr}), got: ${o}`);process.env.SELF_HOSTED_RUNNER_DRAIN_GRACE_MS=String(u*1000),i++}break}case"--release-idle-session-min":{if(o){let u=Number(o);if(!Number.isFinite(u)||u<0||u>St)throw Error(`--release-idle-session-min must be a non-negative number of minutes (0 disables, max ${St}), got: ${o}`);process.env.SELF_HOSTED_RUNNER_SESSION_IDLE_MS=String(u*60*1000),n.envSetByFlag.add("SELF_HOSTED_RUNNER_SESSION_IDLE_MS"),i++}break}case"--startup-timeout-min":{if(o){let u=Number(o);if(!Number.isFinite(u)||u<0||u>St)throw Error(`--startup-timeout-min must be a non-negative number of minutes (0 disables, max ${St}), got: ${o}`);process.env.SELF_HOSTED_RUNNER_STARTUP_TIMEOUT_MS=String(u*60*1000),n.envSetByFlag.add("SELF_HOSTED_RUNNER_STARTUP_TIMEOUT_MS"),i++}break}case"--defer-shutdown-max-min":{let u=e[++i],m=Number(u);if(u===void 0||u.trim()===""||!Number.isFinite(m)||m<0||m>St)throw Error(`${d} must be a non-negative number of minutes (0 disables, max ${St}), got: ${u}`);process.env.SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS=String(m*60*1000),n.envSetByFlag.add("SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS");break}case"--retire-at":{let u=e[++i],m=Number(u);if(!u||!Number.isSafeInteger(m)||m<Ps||m>Ms)throw Error(`--retire-at must be an absolute Unix timestamp in whole SECONDS (e.g. the output of 'date +%s' plus the runner's intended lifetime \u2014 not milliseconds, not a duration), got: ${u}`);process.env.SELF_HOSTED_RUNNER_RETIRE_AT=String(m);break}case"--lock-to-account":if(o)n.lockToAccountId=o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"--debug-token-dir":if(o)n.debugTokenDir=o,i++;break;case"--proxy-authorization-command":case"--proxy-authorization-file":if(o===void 0||o.startsWith("--"))throw Error("--proxy-authorization-command / --proxy-authorization-file requires a value");if(d==="--proxy-authorization-command")n.proxyAuthorizationCommand=o;else n.proxyAuthorizationFile=o;i++;break;default:if(d?.startsWith("--"))throw Error(`unknown flag ${d}`);if(d==="")throw Error("empty argument \u2014 a flag value may be unset (failed env/K8s substitution?)");if(d!==void 0)throw Error(`unexpected argument '${d}' \u2014 this command takes no positional arguments`);break}}let r=new Set(n.gitSshRewriteHosts.map((i)=>i.toLowerCase()));for(let[i,d]of n.gitHostRewrites)if(r.has(i))console.error(`[runner:warn] --git-ssh-rewrite '${i}' will not match: --git-host-rewrite rewrites it to '${d}' first. Did you mean --git-ssh-rewrite '${d}'?`);return n}
+
+## #3 win SELF_HOSTED_RUNNER_CLIENT_LABEL#3 @187915077
+the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+                              [env: SELF_HOSTED_RUNNER_CLIENT_LABEL]
+  --proxy-authorization-command <shell command>
+                              For egress proxies that require a Proxy-Authorization header (for
+                              example a short-lived bearer token) on every CONNECT. The command's
+                              stdout is the full header value (e.g. "Bearer <token>"); it is run
+                              afresh for each new connection to the proxy, so rotating tokens stay
+                             
+
+## #3 fn-before SELF_HOSTED_RUNNER_CLIENT_LABEL#3 @187913996
+MISS {"i":187913996,"missEnd":true,"preview":"function yd(e){if(e.includes(\"--help\")||e.includes(\"-h\")){console.log(`Usage: claude self-hosted-runner [options]\n\nConnection:\n  --api-url <url>             API base URL (default: ${Cs})\n  --environment-secret-file <path>\n                              Path to environment secret f"}

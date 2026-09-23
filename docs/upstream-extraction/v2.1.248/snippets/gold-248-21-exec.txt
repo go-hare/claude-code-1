@@ -1,0 +1,77 @@
+# gold-248-21-exec
+when=2026-09-20T05:58:33.030Z
+
+## "JSON validation failed" hits=2
+- #0 @97508120 ng with (.....6.Hooks: prompt-hook evaluator API error: ........Hook evaluator API error: ......p...Hooks: Model response: .'...H...Hooks: error parsing response as JSON: ......o..JSON validation failed..;...&...Hooks: model response does not conform to expected schema: .........Schema validation failed: ..0...9<..Hooks: Prompt hook condition judged impossible: *.....6.Hooks: Pro
+- #1 @186218211 ent).trim();n(`Hooks: Model response: ${Ne}`);let Ke=Ft(cx(Ne),!1);if(!Ke)return n(`Hooks: error parsing response as JSON: ${Ne}`),Nx(e,{hookName:t,toolUseID:C,hookEvent:r,stderr:"JSON validation failed",stdout:Ne});let ze=Iz().safeParse(Ke);if(!ze.success)return n(`Hooks: model response does not conform to expected schema: ${ze.error.message}`),Nx(e,{hookName:t,toolUseID:C,hookE
+
+## "stderr:validationError" hits=0
+
+## "stderr:r.validationError" hits=0
+
+## "stderr:o" hits=9
+- #0 @179283783 =void 0){let i=`stdin write failed: ${y.truncatedBy}`;return n(`execFileNoThrow ${i}`,{level:"error"}),{stdout:"",stderr:"",code:1,error:i}}if(!o.failed)return{stdout:o.stdout||"",stderr:o.stderr||"",code:0,exitCode:0};let b=W(o)?{maxBufferExceeded:!0}:{};if(!d)return{stdout:"",stderr:"",code:o.exitCode??1,exitCode:o.exitCode,...b};let I=o.exitCode??1;return{stdout:
+- #1 @179283984 ode:0,exitCode:0};let b=W(o)?{maxBufferExceeded:!0}:{};if(!d)return{stdout:"",stderr:"",code:o.exitCode??1,exitCode:o.exitCode,...b};let I=o.exitCode??1;return{stdout:o.stdout||"",stderr:o.stderr||"",code:I,error:G(o,I),exitCode:o.exitCode,...b}}
+export{p9e,Ue,We};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By
+- #2 @182690776  be verified \u2014 probe to "+`${u.target} was '${u.egress_probe}' (exit ${o.status}). The fence may be absent. Re-run \`srt-win install\`. (${o.stderr})`);return{target:u.target,stderr:o.stderr}}finally{r?.close()}}function gcn(e={}){return xc(od(["user","status"],{srtWin:e.srtWin}))}async function Tc(e={}){return xc(await ad(["user","status"],{srtWin:e.srtWin}))}
+- #3 @183142368 }});let r=t.probes??N5(),o=t.reach??(t.layout?.bound===!0?EVn(e,t.layout):void 0),s=YM(o,r),a=o===void 0&&Pv()===void 0?tt():Wpt(s,r);if(a===null)return Promise.resolve({stdout:"",stderr:o===void 0||Wpt(YM(void 0,r),r)===null?ne:Yn,code:127});return We(a,[...Zt,...ot,...n],{cwd:t.layout?.workTree??e,abortSignal:t.signal,maxBuffer:st,...i,...t.stripFinalNewline===!1&
+- #4 @186268706 ook_spawn_started",{hook_event_name:t,index:C});await Promise.race([Sr,Fn]);let En=await Promise.race([Ir,or,Fn]);return Pe=En.status,Ie=En.aborted??!1,{...En,stdout:o4(En.stdout),stderr:o4(En.stderr),output:o4(En.output)}}catch(En){let Ur=T(En);if(Pe=1,Ur==="EPIPE"){n("EPIPE error while writing to hook stdin (hook command likely closed early)");let xr="Hook command
+- #5 @186342703 eturn"tmux is not natively available on Windows. Consider using WSL or Cygwin.";default:return"Install tmux using your system package manager."}}async function bin(e,t){let{code:r,stderr:o}=await Ue("tmux",["new-session","-d","-s",e,"-c",t],{useCwd:!0,useToolMemoryCgroup:!1});if(r!==0)return{created:!1,error:o};return{created:!0}}async function KK(e){let{code:t}=awa
+
+## "validationError:o" hits=3
+- #0 @186254725 ain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is seve
+- #1 @186255246 t the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}function $Nn(e){let t=e.split(`
+`).filter((o)=>o.trim()!=="");if(t.length<2)return!1;using r=xd`parseHookOutput: json lines (${t.length})`;return t.every((o)=>{try{let u=cz().sa
+- #2 @186256280 ,{validationError:r}}try{let r=Owt(t);if("json"in r)return r;return n(r.validationError),r}catch(r){let o=`HTTP hook must return valid JSON, but parsing failed: ${r}`;return n(o),{validationError:o}}}var Zlr=new K(()=>new Set);function UNn(e){let t=e?"true":"false",r=Zlr.of(z().host);if(r.has(t))return;r.add(t),s("tengu_dead_probe_hook_updated_mcp_tool_output",{with_new_fiel
+
+## "outcome:\"non_blocking_error\"" hits=15
+- #0 @186213786 et o=Ri(e);if(!mb(e,t,o)&&lV(e,{},o,{restricted:!0}).behavior!=="allow")return!0}return Adn(e,t,"read")!==null}import{randomUUID as ZLn}from"crypto";function Nx(e,t){return{hook:e,outcome:"non_blocking_error",message:Nn({type:"hook_non_blocking_error",...t,exitCode:1})}}var Iz=h(()=>m({ok:W().describe("Whether the condition was met"),reason:i().describe("Reason, if the condition was no
+- #1 @186294834 eturn}if(fn.type==="function"){if(!C){yield{message:Nn({type:"hook_error_during_execution",hookName:pe,toolUseID:o,hookEvent:ue,content:"Messages not provided for function hook"}),outcome:"non_blocking_error",hook:fn};return}yield u0n({hook:fn,messages:C,hookName:pe,toolUseID:o,hookEvent:ue,timeoutMs:g,signal:p});return}let Xn=fn.timeout?fn.timeout*1000:g,{signal:Bn,cleanup:pr}=Za(p,{t
+- #2 @186295465 ld{message:Nn({type:"hook_error_during_execution",hookName:pe,toolUseID:o,hookEvent:ue,content:`Failed to prepare hook input: ${l(En.error)}`,command:Sr,durationMs:Date.now()-Tr}),outcome:"non_blocking_error",hook:fn},pr();return}let Ur=En.value;if(fn.type==="prompt"){if(!k)throw Error(`prompt-type hooks are not supported for ${ue} events (no conversation context is available). Use a c
+- #3 @186297381 r:zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:zn,stdout:"",exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};return}let{json:Jn,validationError:Zn}=Bct(wn.body);if(Zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:Zn,exitCode:wn.statusCode,outcome:"
+- #4 @186297737 exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:Zn,stdout:wn.body,exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};return}if(Jn&&S_(Jn)){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:"",exitCode:wn.statusCode,outcome:"success"}),yield{outcome:"success",ho
+- #5 @186299650 n,stdout:wn.body,stderr:qn,exitCode:1,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:qn,stdout:wn.body,exitCode:1}),outcome:"non_blocking_error",hook:fn};return}let{json:Zn,validationError:zn}=lIe(wn.body);if(zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:zn,exitCode:1,outcome:"error"}),yie
+
+## "outcome:\"error\"" hits=16
+- #0 @186297229 fn};return}if(wn.error||!wn.ok){let zn=wn.error||`HTTP ${wn.statusCode} from ${fn.url}`;du({hookId:ir,hookName:pe,hookEvent:ue,output:zn,stdout:"",stderr:zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:zn,stdout:"",exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};retur
+- #1 @186297580 ng_error",hook:fn};return}let{json:Jn,validationError:Zn}=Bct(wn.body);if(Zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:Zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:Zn,stdout:wn.body,exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};
+- #2 @186298942 er}/${fn.tool}) refused (${Jn})${wn.error?` \u2014 ${wn.error}`:""}`,{level:"warn"}),du({hookId:ir,hookName:pe,hookEvent:ue,output:qn,stdout:wn.body,stderr:wn.error||qn,exitCode:2,outcome:"error"}),yield{blockingError:{blockingError:qn,command:or},outcome:"blocking",hook:fn};return}if(wn.aborted){du({hookId:ir,hookName:pe,hookEvent:ue,output:"Hook cancelled",stdout:"",stde
+- #3 @186299508 "cancelled",hook:fn};return}if(wn.error||!wn.ok){let qn=wn.error||"MCP tool returned an error";du({hookId:ir,hookName:pe,hookEvent:ue,output:qn,stdout:wn.body,stderr:qn,exitCode:1,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:qn,stdout:wn.body,exitCode:1}),outcome:"non_blocking_error",hook:fn};return}let{json
+- #4 @186299837 :"non_blocking_error",hook:fn};return}let{json:Zn,validationError:zn}=lIe(wn.body);if(zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:zn,exitCode:1,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:zn,stdout:wn.body,exitCode:1}),outcome:"non_blocking_error",hook:fn};return}if(du({h
+- #5 @186301429 r:Rs}=lIe(Pn.stdout);if(Rs&&Pn.status!==2){let wn=Uct(Rs,Pn.status,Pn.stderr);du({hookId:ir,hookName:pe,hookEvent:ue,output:Pn.output,stdout:Pn.stdout,stderr:wn,exitCode:Pn.status,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:wn,stdout:Pn.stdout,exitCode:Pn.status,command:Sr,durationMs:po}),outcome:"non_block
+
+## "var np=" hits=5
+- #0 @178456925 ksError(`${s} ${no(o,g)}`);a.push(f.cause===void 0?g:`${g} (${String(f.cause)})`)}}throw new Ae.HooksError(`${s} no such file under ${r}`,a.length===0?void 0:{cause:a.join("; ")})}var np=(e,t)=>new Ae.HooksError(`${e}: ${t} is past the ${EE.MAX_HOOKS_MODULE_FILES} files a hooks module may link and was not read`);import{resolve as sp}from"path";var rr=({modulePath:e
+- #1 @189343781 de}throw Error("Node is not in a tree with a FocusManager")}function DF(t){return wxe(t).focusManager}function nl(t){return{flexGrow:0,flexShrink:1,flexDirection:"row",textWrap:t}}var np={wrap:nl("wrap"),"wrap-trim":nl("wrap-trim"),"wrap-stream":nl("wrap-stream"),end:nl("end"),middle:nl("middle"),"truncate-end":nl("truncate-end"),truncate:nl("truncate"),"truncate-m
+- #2 @197739852 eI(e,r,n);case">":return tI(e,r,n);case">=":return rI(e,r,n);case"<":return nI(e,r,n);case"<=":return oI(e,r,n);default:throw TypeError(`Invalid operator: ${t}`)}};tp.exports=iI});var np=d(function(NG,rp){var sI=Ne(),aI=Cn(),{safeRe:wa,t:va}=so(),cI=(e,t)=>{if(e instanceof sI)return e;if(typeof e==="number")e=String(e);if(typeof e!=="string")return null;t=t||{};let
+- #3 @200804571 o}=e,d=Dzt(o),g=tp(t);return{...d,...g&&{toolPermissions:g},scope:"dynamic"}}return{...e,scope:"dynamic"}}import{randomUUID as bo}from"crypto";import{randomUUID as Xa}from"crypto";var np={onStreamEvent:()=>[],onTombstone:()=>[],onRefusalFallbackBanner:()=>[],takePendingClose:()=>[]};function Ui(e){if(!e)return np;let t=null,o=null,d=!1,g=null;function w(){if(g===nu
+- #4 @222848199  OX,jw,IX=K(()=>{kL();GC();OX={modal:!0,disablePointerDismissal:!0,role:"alertdialog"},jw=class extends Xm{constructor(t){let n=t??new tp(OX);super(n),t&&this.store.update(OX)}}});var np={};Ia(np,{Backdrop:()=>KC,Close:()=>qC,Description:()=>YC,Handle:()=>jw,Popup:()=>JC,Portal:()=>QC,Root:()=>gX,Title:()=>eR,Trigger:()=>AX,Viewport:()=>rR,createHandle:()=>LX});var
+
+## "np=80" hits=1
+- #0 @183000670  framed; distinct from blocked (user can unblock) and done (succeeded)"},nt={result:"one short sentence naming the finished deliverable \u2014 no sub-clauses or bullet summaries"},np=800,$Wn=2000,it=new Set(["done","failed","stopped"]);function za(e,t){if(e.length<=t)return e;let r=t-1,o=e.charCodeAt(r-1);if(o>=55296&&o<=56319)r--;return e.slice(0,r)+"\u2026"}fun
+
+## "np=120" hits=0
+
+## "np=200" hits=0
+
+## "np=240" hits=0
+
+## "np=800" hits=1
+- #0 @183000670  framed; distinct from blocked (user can unblock) and done (succeeded)"},nt={result:"one short sentence naming the finished deliverable \u2014 no sub-clauses or bullet summaries"},np=800,$Wn=2000,it=new Set(["done","failed","stopped"]);function za(e,t){if(e.length<=t)return e;let r=t-1,o=e.charCodeAt(r-1);if(o>=55296&&o<=56319)r--;return e.slice(0,r)+"\u2026"}func
+
+## caller window @186308200
+:"none",classifierContexts:[{value:mn,hostPrincipal:Ve.hook.type==="callback"&&Ze.get(Ve.hook)===void 0&&(()=>{let Sn=vt.get(Ve.hook);return Sn!==void 0&&Sn.pluginRoot===void 0&&Sn.skillRoot===void 0})()}]}}if(Ve.preventContinuation)n(`Hook ${ue} (${Kx(Ve.hook)}) requested preventContinuation`),yield{preventContinuation:!0,stopReason:Ve.stopReason};let bn=Ve.hook?.type==="prompt"?{hook:Ve.hook,stopReason:Ve.stopReason,impossible:Ve.impossible}:{};if(Ve.blockingError)yield{blockingError:Ve.blockingError,suppressOriginalPrompt:Ve.suppressOriginalPrompt,...bn},Ht="deny";if(Ve.message)yield{message:Ve.message,...bn};if((ue==="PreToolUse"||ue==="PermissionRequest")&&Ve.outcome==="non_blocking_error"&&o)rA.noteHookFailure(o,wwt(ue,Ve.message?.type==="attachment"&&Ve.message.attachment.type==="hook_non_blocking_error"?Ve.message.attachment.stderr:""));if(Ve.timedOut&&Ve.hook.type==="prompt"&&ue==="Stop")yield{hook:Ve.hook,timedOut:!0};if(gn++,Ve.systemMessage){it.systemMessageChars+=Ve.systemMessage.length,sn(Ve.hook,"systemMessageChars",Ve.systemMessage.length);let mn=await Jse(Ve.systemMessage,`${o}-${gn}`,"systemMessage",{storageV5:fe});yield{message:Nn({type:"hook_system_message",content:mn,hookName:pe,toolUseID:o,hookEvent:ue,...Ve.heldForServedCall&&{heldForServedCall:!0}})}}if(Ve.terminalSequence)hue(Ve.terminalSequence);if(Ve.additionalContext)it.additionalContextChars+=Ve.add
+
+## leftover lIe+Owt callers of validationError as stderr
+- @186297438 ode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};return}let{json:Jn,validationError:Zn}=Bct(wn.body);if(Zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:Zn,exitCode:wn.statusCode,outcome:"error"}),
+- @186299707 t:wn.body,exitCode:1}),outcome:"non_blocking_error",hook:fn};return}let{json:Zn,validationError:zn}=lIe(wn.body);if(zn){du({hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:zn,exitCode:1,outcome:"error"}),yield{messag
+- @186301235 ted,timeoutMs:Xn}),outcome:"cancelled",hook:fn};return}let{json:Di,plainText:ai,validationError:Rs}=lIe(Pn.stdout);if(Rs&&Pn.status!==2){let wn=Uct(Rs,Pn.status,Pn.stderr);du({hookId:ir,hookName:pe,hookEvent:ue,output:Pn.output,stdout:Pn.st
+- @186318904 cancelled:!0}};n(`${M} [${Be}] completed with status ${ze.status}`);let{json:Qe,validationError:xt}=lIe(ze.stdout);if(xt&&ze.status!==2)throw Error(Uct(xt,ze.status,ze.stderr));if(Qe&&!S_(Qe))n(`Parsed JSON output from hook: ${S(Qe)}`,{leve
+
+## np= in 186.2-186.25M count=0

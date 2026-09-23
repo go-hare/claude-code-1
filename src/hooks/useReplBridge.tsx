@@ -46,6 +46,7 @@ import {
 } from '../utils/sessionStorage.js';
 import { registerCleanup } from '../utils/cleanupRegistry.js';
 import { isEligibleBridgeMessage } from '../bridge/bridgeMessaging.js';
+import { forwardAgentProgressSdkFrames } from '../bridge/subagentSdkFrames.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
 import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
@@ -1790,7 +1791,12 @@ export function useReplBridge(
         const pendingUpload: Message[] = [];
         for (let qt = ce; qt < messages.length; qt++) {
           const Lt = messages[qt];
-          if (!Lt || !isEligibleBridgeMessage(Lt)) continue;
+          if (!Lt || !isEligibleBridgeMessage(Lt)) {
+            if (Lt) {
+              forwardAgentProgressSdkFrames(handle, Lt, ke, ge);
+            }
+            continue;
+          }
           Fe = { index: qt, uuid: Lt.uuid };
           if (ke.has(Lt.uuid)) continue;
           if (ge) {

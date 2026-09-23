@@ -1,0 +1,103 @@
+# gold-248-feat-6  /usage-credits Enterprise AWS Marketplace / self-serve / trial
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:40.311Z
+
+## #6 AWS Marketplace  needle="AWS Marketplace"  hits=1
+- #0 @224970917  through AWS infrastructure - SigV4 authentication, AWS IAM access control, and AWS Marketplace billing. Because Anthropic operates it, **the API surface matches first-party w
+
+## #6 billed through AWS  needle="billed through AWS"  hits=0
+
+## #6 self-serve Enterprise  needle="self-serve Enterprise"  hits=0
+
+## #6 self-serve  needle="self-serve"  hits=0
+
+## #6 Enterprise trial  needle="Enterprise trial"  hits=0
+
+## #6 enterprise trial  needle="enterprise trial"  hits=0
+
+## #6 /usage-credits  needle="/usage-credits"  hits=52
+- #0 @93281168 t have usage credits yet.......\T..Starts with a...,...c.2.monthly limit . run /usage-credits to adjust........whole...G....R..By continuing, you agree to turn on usage cred
+- #1 @93282092 admin_request_failed......k.filed...@.......Couldn't turn on usage credits. Run /usage-credits to try again.3..._...Contact your admin to manage usage credit settings........
+- #2 @93343193 ation.......h?. to manage usage credits....V......Starting new login following /usage-credits. Exit with Ctrl-C to use existing account...(....0..file:///B:/%7EBUN/root/chun
+- #3 @93429576  or undefined value......R!.O.p.e.n.i.n.g. .y.o.u.r. .o.p.t.i.o.n.s.& ..2......./usage-credits to adjust your monthly spend limit...0.....E./.u.s.a.g.e.-.c.r.e.d.i.t.s. .t.o.
+- #4 @93429872 .R..Your admin can enable extra usage at claude.ai/admin-settings/usage.5.....2./usage-credits to request more usage from your admin....&...OUc./upgrade to increase your usag
+- #5 @93462444 led.<...b...Automatic continue cancelled . /rate-limit-options to re-arm....I.../usage-credits to continue now......{qc.shortly./.....k.Usage limit reached . continuing autom
+- #6 @93541992 n.g.& ........f.fetchedAtMs......y..cinder_cove.6.......Usage credits are off . /usage-credits to turn them on..H.......Cannot destructure property 'terminalWidth' from null 
+- #7 @94715364  credits notifies your organization admins. To review and send the request, run /usage-credits in an interactive Claude Code session.........H\.api_admin_request_create.....5
+- #8 @94716896 ty: (.......file:///B:/%7EBUN/root/chunk-r7fnedkf.js"...ds../extra-usage is now /usage-credits.......ZG.B:/~BUN/root/chunk-nxz78vkn.js..?....6..Cannot destructure property 'c
+- #9 @94717052 ucture property 'call' from null or undefined value.$....../extra-usage is now /usage-credits
+
+(.....<.file:///B:/%7EBUN/root/chunk-acaxbqse.js........tengu_lowpri_offer_cap
+- #10 @96507215  credits or request them from your admin when you hit a limit.....]..Renamed to /usage-credits...;...x4..Options shown when the Pro plan Claude Code trial has ended.'...1.u.S
+- #11 @96619287 r ...$....9.. . contact your admin to increase it....	... . your J....... . run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..3....... . visit claude.a
+- … +40 more
+
+## #6 usage-credits  needle="usage-credits"  hits=64
+- #0 @92419698 ...+t.prompt-queue-use-count..........pro-trial-expired-auto-open.........fable-usage-credits......|.limit-reached...........rate-limit-warning........@.rc-long-turn-nudge.
+- #1 @92421060 ll-speed.......setup-bedrock...........setup-vertex....q.R.skill-doctor.....	.usage-credits.......~*..denied..
+....^..filesystem.......>..system_settings......it.topLeft..
+- #2 @93281169  have usage credits yet.......\T..Starts with a...,...c.2.monthly limit . run /usage-credits to adjust........whole...G....R..By continuing, you agree to turn on usage cred
+- #3 @93282093 dmin_request_failed......k.filed...@.......Couldn't turn on usage credits. Run /usage-credits to try again.3..._...Contact your admin to manage usage credit settings........
+- #4 @93343194 tion.......h?. to manage usage credits....V......Starting new login following /usage-credits. Exit with Ctrl-C to use existing account...(....0..file:///B:/%7EBUN/root/chun
+- #5 @93429577 or undefined value......R!.O.p.e.n.i.n.g. .y.o.u.r. .o.p.t.i.o.n.s.& ..2......./usage-credits to adjust your monthly spend limit...0.....E./.u.s.a.g.e.-.c.r.e.d.i.t.s. .t.o.
+- #6 @93429873 R..Your admin can enable extra usage at claude.ai/admin-settings/usage.5.....2./usage-credits to request more usage from your admin....&...OUc./upgrade to increase your usag
+- #7 @93462445 ed.<...b...Automatic continue cancelled . /rate-limit-options to re-arm....I.../usage-credits to continue now......{qc.shortly./.....k.Usage limit reached . continuing autom
+- #8 @93541993 .g.& ........f.fetchedAtMs......y..cinder_cove.6.......Usage credits are off . /usage-credits to turn them on..H.......Cannot destructure property 'terminalWidth' from null 
+- #9 @94715365 credits notifies your organization admins. To review and send the request, run /usage-credits in an interactive Claude Code session.........H\.api_admin_request_create.....5
+- #10 @94716897 y: (.......file:///B:/%7EBUN/root/chunk-r7fnedkf.js"...ds../extra-usage is now /usage-credits.......ZG.B:/~BUN/root/chunk-nxz78vkn.js..?....6..Cannot destructure property 'c
+- #11 @94717053 cture property 'call' from null or undefined value.$....../extra-usage is now /usage-credits
+
+(.....<.file:///B:/%7EBUN/root/chunk-acaxbqse.js........tengu_lowpri_offer_cap
+- … +52 more
+
+## #6 ask your admin  needle="ask your admin"  hits=39
+- #0 @92461977 ssSessionInbound" to "hold" (your own "accept" cannot override managed policy); ask your admin to change it.........H .This repository's settings set "crossSessionInbound" to
+- #1 @93270581 p the sandbox user and network filters. If you don't have administrator rights, ask your administrator to install the network filters..........cannot-read.*.....V.Sandbox use
+- #2 @96284569 aude subscription access for Claude Code . Use an Anthropic API key instead, or ask your admin to enable access6...?.4.cannot be used as an advisor when the request model is.
+- #3 @96619515 ly spend limit........z..monthly spend limit......... . raise it at .!....... . ask your admin to raise it at ...0...e?[.Your org is out of usage . add funds to continue-....
+- #4 @96620354 sage-credits to turn on extra usage for your org..-....V;.Run /usage-credits to ask your admin for more...#...K...Run /usage-credits to raise the cap./.......Raise the cap at
+- #5 @96620985 .....K.Now using ..........You're now using ...:.....}. . run /usage-credits to ask your admin for a higher limit..$....+>. . ask your admin for a higher limit........You've 
+- #6 @96621031 .:.....}. . run /usage-credits to ask your admin for a higher limit..$....+>. . ask your admin for a higher limit........You've hit your !....v..anthropic-ratelimit-unified-r
+- #7 @96629389  .......Y. deployment. ...........Try ....`...Try switching to ...)...2rK., or ask your admin to enable this model....*.......There's an issue with the selected model (..5..
+- #8 @97566758 managed (.`....K..) and its content is controlled by the seed image. To update: ask your admin to update the seed.......3.plugin marketplace remove...#.....y.' has a corrupte
+- #9 @97567938 lace: d.....U.) and auto-update is always disabled for seed content. To update: ask your admin to update the seed.........Auto-update for '.........m.' is set by W....... and
+- #10 @97568088 ' is set by W....... and can't be changed here. Update that settings source (or ask your admin to) instead......(.<.Failed to persist autoUpdate=........... for marketplace .
+- #11 @97671390 ..tengu_known_marketplaces_fallback_write.e...k...). To use a different source, ask your admin to update the seed, or use a different marketplace name....,...a...'. .e.x.i.s.
+- … +27 more
+
+## #6 request a higher usage  needle="request a higher usage"  hits=0
+
+## #6 higher usage limit  needle="higher usage limit"  hits=0
+
+## #6 ask their admin  needle="ask their admin"  hits=0
+
+## #6 from their admin  needle="from their admin"  hits=0
+
+## #6 marketplace  needle="marketplace"  hits=2110
+- #0 @92266012 edPolicySkips.......<...lastEmittedPayload......{.8.knownMarketplaces........5..marketplacePluginTips...........sessionCountInFlight........desktopInstalled......	.ghAuthS
+- #1 @92294901 ...n.W.fromEntries.......(.hook_registered.F.....=.Cannot destructure property 'marketplace' from null or undefined value..
+.....:.pluginHook..
+...8.E.hook_event..	.......
+- #2 @92295108 ._K.safe_mode.......-...matcher.......G.hook_matcher....2=@.hooksConfig.....6.g.marketplace......O..plugin.name.........plugin_id_hash..R.....j.Cannot destructure property
+- #3 @92332333 --config KEY=VALUE......<..link6....3.." is installed by running a command from marketplace ".......4.." on this machine...M....... ..  .a.n.d. .t.h.a.t. .c.o.m.m.a.n.d. .
+- #4 @92333464 CLAUDECODE......K
+Z.resolvedMarketplace.,......." is already installed, and its marketplace Z....>..entry now installs it by running a command on this machine that has not
+- #5 @92360596 ring reload......j..AggregateError..1.....7.Skipping plugin suggestion tips for marketplace "...p...ZI..": its registered source is not declared in managed settings (extra
+- #6 @92360740  in managed settings (extraKnownMarketplaces or strictKnownMarketplaces)....T...marketplace-plugin:.	...I...relevance.........k.topic.......0z..leftArrowOpensAgents.......
+- #7 @92418228 ..%.oauth-expiry-warning.....%=.no_permissions.......]..sudo-npm-install....S.g.marketplace-plugin-suggestion.......3.U.advisor-tool....ft'.ant-org-auth-check......1>..aut
+- #8 @92419569 |what you)\b...
+......issue-flag......f,..lsp-initialization......~.-.official-marketplace-check..........plugin-autoupdate........+t.prompt-queue-use-count..........pro-
+- #9 @92455864 ....synced..
+.....<.skills-dir.......bJ.inline_count........synced_count........marketplace_count.......@5I.onBatch.....@...armedMonitorKeys.....C..chrome_permission_sync.
+- #10 @92467992 ....2{_.onChoice........tips_startup_show...........tips_spinner_show..."....t9.marketplace-plugin:org-marketplace........W.org-tip.........tengu_tip_shown.........tipIdLe
+- #11 @92468015 .tips_startup_show...........tips_spinner_show..."....t9.marketplace-plugin:org-marketplace........W.org-tip.........tengu_tip_shown.........tipIdLength.....K"f.tengu_jigg
+- … +2098 more
+
+## #6 win AWS Marketplace#0 @224970917
+point flags), WebFetch the **Anthropic CLI** URL in `shared/live-sources.md`.
+.# Claude Platform on AWS
+
+**Anthropic-operated** access to the Claude Developer Platform through AWS infrastructure - SigV4 authentication, AWS IAM access control, and AWS Marketplace billing. Because Anthropic operates it, **the API surface matches first-party with same-day parity** - for per-feature exceptions, see `shared/platform-availability.md` (the single source of truth; do not rely on an inline exception list here). Model IDs are the bare first-party strings (`{{OPUS_ID}}`, `{{SONNET_ID}}`) - **no provider prefix**.
+
+> **Not the same as Amazon Bedrock.** Bedrock is partner-operated (AWS runs the serv

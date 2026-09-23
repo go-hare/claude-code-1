@@ -1,0 +1,195 @@
+size 217360032
+"wrap-stream" hits 8 93550856,189563932,189569072,189569089,189615345,189708495,189710931,201454934
+"\\u23FA" hits 8 92647903,95333762,97968025,179638539,190194189,195245911,202012245,210724084
+"鈴? hits 0 
+"ambiguousIsNarrow" hits 5 88164880,92643569,92643700,180070866,202025057
+"hideTrailingLine" hits 6 93373256,201454088,201776941,201777506,201866665,201867066
+"needsWidthCompensation" hits 0 
+"==\"macos\"" hits 91 179638528,179922950,180132052,180136469,181058416,181058534,181058912,181058965,181074558,181082387,182179935,182184967
+"===\"macos\"" hits 79 179638527,179922949,180132051,180136468,181058415,181058533,181058911,181082386,182179934,182186126,182189042,182189127
+"Wt()===\"macos\"" hits 0 
+
+==== wrap-stream hits 8
+--- @ 93550856
+roperty 'markdownTokens' from null or undefined value.......9g..markdownTokens..........^\n+....h'..frozenSource....n.i.gapAfterChunks.......E0.stablePrefix	....E..openFence........}..^`+|^~+.......a.wrap-stream.....+.>. ..%........,%........s.4%..........ordered.....8i[.prose.........s.screenReader(....4..file:///B:/%7EBUN/root/chunk-6c4srcd4.js(.......file:///B:/%7EBUN/root/chunk-vj3yrt24.js....M.8.(?:^|[^......
+..])([.....<=.]*)$3.....	.\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\).;....v..(^|[^\w./-])([A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w.-]*)#(\d+)\b.
+....OV.gitlab.com..
+.......bitbucket.org...........codeberg.org	...i.I.gitea.com...	....H..git.sr.ht...
+....Oo.dev.azure.com...........^[a-z][a-z0-9+.-]*:.	.......tokenizer...........emStrong....J...lheading.....S..autolink....9....]8;
+--- @ 189563932
+:Ls(t,0,m),tail:Ls(t,c-(o-m)+1,c)}}return{head:Ls(t,0,o-1),tail:""}}function ES(t,o,u){if(o<1)return"";let c=Fc(t,o,u);return c===null?t:c.head+Pc+c.tail}function uy(t,o,u="wrap"){if(u==="wrap"||u==="wrap-stream")return Lp(t,o,{trim:!1,hard:!0});if(u==="wrap-trim")return Lp(t,o,{trim:!0,hard:!0});if(u==="end"||u==="middle"||u.startsWith("truncate")){let c="end";if(u==="truncate-middle"||u==="middle")c="middle";if(u==="truncate-start")c="start";return ES(t,o,c)}return t}class H9 extends JZ{type;timeStamp;bubbles;cancelable;_target=null;_currentTarget=null;_eventPhase="none";_propagationStopped=!1;_defaultPrevented=!1;constructor(t,o){super();this.type=t,this.timeStamp=performance.now(),this.bubbles=o?.bubbles??!0,this.cancelable=o?.cancelable??!0}get target(){return this._target}get current
+--- @ 189569072
+tree with a FocusManager")}function kB(t){return pIe(t).focusManager}function tl(t){return{flexGrow:0,flexShrink:1,flexDirection:"row",textWrap:t}}var Jm={wrap:tl("wrap"),"wrap-trim":tl("wrap-trim"),"wrap-stream":tl("wrap-stream"),end:tl("end"),middle:tl("middle"),"truncate-end":tl("truncate-end"),truncate:tl("truncate"),"truncate-middle":tl("truncate-middle"),"truncate-start":tl("truncate-start")};function ca(Sx){let Ni=y(36),{color:kc,backgroundColor:Kc,bold:Gc,dim:jc,italic:CS,underline:MS,strikethrough:RS,inverse:TS,wrap:AS,children:Us,"aria-hidden":Vm,"aria-label":Wm,"aria-role":Xm,"aria-state":qm,"aria-preserve-whitespace":Qm}=Sx,Vc=CS===void 0?!1:CS,Wc=MS===void 0?!1:MS,Xc=RS===void 0?!1:RS,qc=TS===void 0?!1:TS,Ex=AS===void 0?"wrap":AS;if(Us===void 0||Us===null){return null}let Qc;i
+--- @ 189569089
+Manager")}function kB(t){return pIe(t).focusManager}function tl(t){return{flexGrow:0,flexShrink:1,flexDirection:"row",textWrap:t}}var Jm={wrap:tl("wrap"),"wrap-trim":tl("wrap-trim"),"wrap-stream":tl("wrap-stream"),end:tl("end"),middle:tl("middle"),"truncate-end":tl("truncate-end"),truncate:tl("truncate"),"truncate-middle":tl("truncate-middle"),"truncate-start":tl("truncate-start")};function ca(Sx){let Ni=y(36),{color:kc,backgroundColor:Kc,bold:Gc,dim:jc,italic:CS,underline:MS,strikethrough:RS,inverse:TS,wrap:AS,children:Us,"aria-hidden":Vm,"aria-label":Wm,"aria-role":Xm,"aria-state":qm,"aria-preserve-whitespace":Qm}=Sx,Vc=CS===void 0?!1:CS,Wc=MS===void 0?!1:MS,Xc=RS===void 0?!1:RS,qc=TS===void 0?!1:TS,Ex=AS===void 0?"wrap":AS;if(Us===void 0||Us===null){return null}let Qc;if(Ni[0]!==kc)Qc=k
+--- @ 189615345
+nodeName:"#text",nodeValue:t,yogaNode:void 0,parentNode:void 0,style:{}};return Lr(o,t),o},K1=function(t,o,u){let c=t.nodeName==="#text"?t.nodeValue:fy(t),m=D_t(c),p=t.style?.textWrap??"wrap";if(p==="wrap-stream"){let x=hGe(uy(m,o,"wrap"),o);return{width:x.width,height:Math.max(0,x.height-1)}}let S=hGe(m,o);if(u===0||S.width<=o)return S;if(S.width>=1&&o>0&&o<1)return S;let E=uy(m,o,p);return hGe(E,o)},G1=function(t){return{width:t.attributes.rawWidth,height:t.attributes.rawHeight}},LA=(t)=>{let o=t,u=!1;while(o){if(o.nodeName!=="#text"){if(o.dirty=!0,!u&&(o.nodeName==="ink-text"||o.nodeName==="ink-raw-ansi")&&o.yogaNode)o.yogaNode.markDirty(),u=!0}o=o.parentNode}},eon=(t)=>{let o=t;while(o?.parentNode)o=o.parentNode;if(o&&o.nodeName!=="#text")o.onRender?.()};function ton(t){let o=t;while(o
+--- @ 189708495
+<c.length&&c[x]===" ")x++;if(m&&M<S.length-1){let B=S[M+1],P=B.length>0?B[0]:null;while(x<c.length&&/\s/.test(c[x])){if(P!==null&&c[x]===P)break;x++}}}return E.join(`
+`)}function qv(t,o,u){let c=u==="wrap-stream";if(u!=="wrap"&&u!=="wrap-trim"&&!c)return{wrapped:uy(t,o,u),softWrap:void 0};let m=c?"wrap":u,p=t.replace(/\r\n?/g,`
+`).split(`
+`),S=[],E=[];for(let x of p){let M=uy(x,o,m).split(`
+`);for(let R=0;R<M.length;R++){if(R===0){S.push(M[R]),E.push(di.HardBreak);continue}let _=M[R],N=_.startsWith(" ")?_.slice(1):_,A=Wr(N)>0?N:_;S.push(A),E.push(A.length<_.length?di.ContinuationElidedSep:di.Continuation)}}if(c)S.pop(),E.pop();return{wrapped:S.join(`
+`),softWrap:E}}function _E(t,o,u){let c=t.childNodes[0]?.yogaNode;if(c){let m=c.getComputedLeft(),p=c.getComputedTop();if(o=`
+`.repeat(p)+Od(
+
+==== u23FA-escape hits 8
+--- @ 92647903
+..q..onlyFirst...?.......ConsentRow may only be constructed by the consentRows factories.....Gg..freeze..+.......NO_DISPLAYED_UPDATES: empty intake rejected..2...u].[#*0-9]\uFE0F?\u20E3|[\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23ED-\u23EF\u23F1\u23F2\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB\u25FC\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692\u2694-\u2697\u2699\u269B\u269C\u26A0\u26A7\u26AA\u26B0\u26B1\u26BD\u26BE\u26C4\u26C8\u26CF\u26D1\u26E9\u26F0-\u26F5\u26F7\u26F8\u26FA\u2702\u2708\u2709\u270F\u271
+--- @ 95333762
+s.1970-01-01T00:00:00Z
+....F..prr-decisions...@...o...89c4f81c0c1c87c2c7b9672006de5e7eb9af82f4366c6d089658555a713e8f0e....{?..^[a-z0-9-]{1,24}$...	...1...prr-stamp...@.......a8b6abcc8650343e067901dc560ace5e9095b4ffd106118e718d7566566dfd22	...V...staleness...	...	...decisions...........[\u20DD-\u20E4\u23FA\u25C9\u25CB\u25CE\u25CF\u25EF\u26AA\u26AB\u26AC\u29BE\u29BF\u2B24\u2B55\u2B58\u{1F534}\u{1F535}\u{1F785}-\u{1F78B}\u{1F7E0}-\u{1F7E4}].(....o_.[\p{Default_Ignorable_Code_Point}\u2800]%.....G.^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf} ]+$...U.......^(?![\p{Default_Ignorable_Code_Point}\u2800])[\p{L}\p{N}\p{P}\p{S}](?:.*[^\p{Cf} ])?$.......c...\p{Bidi_Control}........\p{M}{9}Q.....(.[ \u2800\p{Mn}\p{M
+--- @ 97968025
+4-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])|(?:[#\*0-9\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u261D\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692-\u2697\u2699\u269B\u269C\u26A0\u26A1\u26AA\u26AB\u26B0\u26B1\u26BD\u26BE\u26C4\u26C5\u26C8\u26CE\u26CF\u26D1\u26D3\u26D4\u26E9\u26EA\u26F0-\u26F5\u26F7-\u26FA\u2
+--- @ 179638539
+ion result",poe="tool permission request failed",eJe="tool permission request aborted",gAn={type:"other",reason:e$e},tJe={type:"other",reason:foe},hAn={type:"other",reason:"permission prompt tool no longer connected"},yAn={type:"other",reason:poe},ske={type:"other",reason:eJe};var Tr=D()==="macos"?"\u23FA":"\u25CF",qJ="\u2219",iir="\u2315",Ew="\u273B",nJe="\u2234",sir="\u25CC",Ux="\u2191",uC="\u2193",rJe="\u21B3",u0="\u2190",air="\u2192",ake="\u23CE",QV="\u21AF",lir="\u25CB",oJe="\u25D0",_An="\u25CF",cir="\u25C9",uir="\u25C8",EEt="\u2726",iJe="\u25CE",vEt="\u23F8",lke="\u23F5\u23F5",bAn="\u21BB",SAn="\u2190",Hy="\u2442",Mp="\u25C7",y_="\u25C6",wAn="\u203B",Ik="\u26A0",Bl="\u29C9";function EA
+
+==== literal-23FA hits 0
+
+==== ambiguousIsNarrow hits 5
+--- @ 88164880
+narrow.day-format-except-narrow.month-format-except-narrow.day-standalone-except-narrow.month-standalone-except-narrow.unit-narrow.or-narrow.month-narrow. unit-width-narrow.standard-narrow.era-narrow.ambiguousIsNarrow.VectorNarrow.onAsyncIterableSourceErrorRethrow.op_throw.**throw.setPrototypeDirectOrThrow.toThrow.JSC_breakOnThrow.crossRealmThrow.GeneratorResumeModeThrow.table.grow.implies_nonnull_row.TableGrow.connection %s marked busy: it's had %u immediate ticks in a row.op_pow.**pow.there can at most be one Memory section for now.should reoptimize from loop now.should reoptimize now.DataIC get_by_val_with_this_slow.DataIC get_by_id_with_this_slow.js_trampoline_op_call_direct_eval_slow.Da
+--- @ 92643569
+combined updates exceed the display intake cap.3.......combineRows: schema rejected already-minted updates.....U.e.Expected a `string`, got `..	.....t.TypeError...L.....3.Cannot destructure property 'ambiguousIsNarrow' from null or undefined valueB...F...Cannot destructure property 'segment' from null or undefined value......
+!,.ambiguousIsNarrow......... .countAnsiEscapeCodes....v.<.ambiguousAsWide.....9...segment.K...4.M.Cannot destructure property 'permissionResult' from null or undefined value.........second..5...!<Y. Claude Code will automatically deny this request in ...5......., to avoid blocking progress on an unattended session.......z...deadlineEpochMs.....]...clockAt......k1.epoch
+--- @ 92643700
+ng`, got `..	.....t.TypeError...L.....3.Cannot destructure property 'ambiguousIsNarrow' from null or undefined valueB...F...Cannot destructure property 'segment' from null or undefined value......
+!,.ambiguousIsNarrow......... .countAnsiEscapeCodes....v.<.ambiguousAsWide.....9...segment.K...4.M.Cannot destructure property 'permissionResult' from null or undefined value.........second..5...!<Y. Claude Code will automatically deny this request in ...5......., to avoid blocking progress on an unattended session.......z...deadlineEpochMs.....]...clockAt......k1.epochAt......|..plugin hooks.json.........;.reasons.4....	w.Auto mode classifier requires confirmation for this ....9.F.Classifier . ...
+
+==== hideTrailingLine hits 6
+--- @ 93373256
+...._suspendedRows..
+.......contentHeight........z..starts......0.:.chainAt.
+...p...lastWalked..........RECENT..........PRUNE_PENDING_AT.....
+k.byRow........)W.transformed.	...G)..displayed.......F~..hideTrailingLine....g...displayedHasNewline.
+...)...getDerived..........showStreamingText........d..styleId.	.......hyperlink...
+.......transition..E....v..Cannot destructure property 'scrollable' from null or undefined value........2..pushUp..
+...6%..childNodes.......)..scrollHeight....\...getCharPool.....
+.e.getHyperlinkPool	...B%..stylePool.......
+.V.clip........offsetX.....jX..offsetY.
+....BM.prevScreen........#.unclip..........rgb(8....Z...%.% .s.c.r.o.l.l. .t.e.s.t. ..  .d.i.s.a.p.p.e.a.r.
+--- @ 201454088
+=1536;function ft(s){let i=s.lastIndexOf(`
+`);if(i<ce/2)i=s.lastIndexOf(" ",s.length-ct);if(i<ce/2){i=s.length-ct;let l=s.charCodeAt(i+1);if(l>=56320&&l<=57343)i--}return i+1}function eXt({children:s,hideTrailingLine:i=!1}){QCe();let l=fte(s),a=k(at()).current;if(!l.startsWith(a.frozenSource))Object.assign(a,at());let f=l.substring(a.frozenSource.length);if(!f.startsWith(a.stablePrefix))a.stablePrefix="";if(a.openFence!==null){let P=Ot(f,a.openFence);if(P>=0)f=xe(a,f,P,!0);else if(f.length>ce)f=xe(a,f,ft(f),!1)}if(a.openFence===null){let P=a.stablePrefix.length,B=We(hu,f.substring(P)),N=B.length-1;while(N>=0&&B[N].type==="space")N--;let w=0;for(let d=0;d<N;d++)w+=B[d].raw.length;if(w>0)a.sta
+--- @ 201776941
+ort{d,pn}from"B:/~BUN/root/chunk-v4td87fj.js";F();var nYt=1,ms=2,ds=4;function od(i){let{raw:l,transformed:m,salvage:p,exact:f}=i,g=m??(l||null),b=(p!==null?umt(p,g??"",f):g)||null;return{displayed:b,hideTrailingLine:m===null&&!!l,displayedHasNewline:b!==null&&b.includes(`
+`)}}function VMn(){let i=Oa({raw:null,transformed:null,salvage:null,exact:!1}),l=null,m=null;function p(){let g=i.getState();if(m===null||l!==g)l=g,m=od(g);return m}function f(g,S){i.setState((b)=>b[g]===S?b:{...b,[g]:S})}return{setRaw:(g)=>f("raw",g),setTransformed:(g)=>f("transformed",g),setSalvage:(g,S)=>i.setState((b)=>{let x=S??b.exact;if(b.salvage===g&&b.exact===x)return b;return{...b,salvage:g,exact:x}}),getState:i.
+--- @ 201777506
+setSalvage:(g,S)=>i.setState((b)=>{let x=S??b.exact;if(b.salvage===g&&b.exact===x)return b;return{...b,salvage:g,exact:x}}),getState:i.getState,getDerived:p,getFlags(){let g=i.getState(),{displayed:S,hideTrailingLine:b,displayedHasNewline:x}=p();return(g.raw!==null?nYt:0)|(S!==null?ms:0)|(S!==null&&b&&!x?ds:0)},subscribe:i.subscribe}}var nd=()=>0;function dHt(i,l){return!(i??!1)&&!l}function L1e({turn:i,messages:l,screen:m}){let p=dHt(W((M)=>M.settings.prefersReducedMotion),EGe()),f=W((M)=>M.briefTranscript),g=Ye(i,(M)=>M.isLoading)??!1,S=Ye(i?.stream,(M)=>M.streamingToolUses.length)??0,b=i?.stream.previewStore,x=Lt(b?b.subscribe:RJt,b?b.getFlags:nd),T=(x&ds)!==0,R=V(()=>g&&f&&m!=="transcrip
+
+POP "s.pop(),a.pop()" hits 0
+
+POP ".pop()," hits 118
+  @ 66774893 fnDist -1
+ = null;
+      result.hostname = relativeHostname;
+    }
+    result.search = relative.search, result.query = relative.query, srcPath = relPath;
+  } else if (relPath.length)
+    srcPath ||= [], srcPath.pop(), srcPath = srcPath.concat(relPath), result.search = relative.search, result.query = relative.query;
+  else {
+    let relativeSearch = relative.search;
+    if (relativeSearch != null && relative
+  @ 66822020 fnDist -1
+ {
+    if (err instanceof RangeError && err.message === ERROR_STACK_OVERFLOW_MSG) {
+      let constructorName = StringPrototypeSlice(getCtxStyle(value, constructor, tag), 0, -1);
+      return ctx.seen.pop(), ctx.indentationLvl = indentationLvl, ctx.stylize(`[${constructorName}: Inspection interrupted prematurely. Maximum call stack size exceeded.]`, "special");
+    }
+    throw new AssertionError("
+  @ 67385690 fnDist -1
+ i + 1);
+            else if (begs.length === 1) {
+              let r = begs.pop();
+              if (r !== void 0)
+                result = [r, bi];
+            } else {
+              if (beg = begs.pop(), beg !== void 0 && beg < left)
+                left = beg, right = bi;
+              bi = str.indexOf(b, i + 1);
+            }
+            i = ai < bi && ai >= 0 ? ai : bi;
+          }
+        
+  @ 67424519 fnDist -1
+];
+          if (part === "**" && prev === "**")
+            return set;
+          if (part === "..") {
+            if (prev && prev !== ".." && prev !== "." && prev !== "**")
+              return set.pop(), set;
+          }
+          return set.push(part), set;
+        }, []), parts.length === 0 ? [""] : parts;
+      });
+    }
+    levelTwoFileOptimize(parts) {
+      if (!@Array.isArray(parts))
+  
+  @ 67861899 fnDist 679
+  FN undefined len 1360 sha 56cec88f5942908e
+function addRequest(req, options, port, localAddress) {
+  if (typeof options === "string")
+    options = {
+      __proto__: null,
+      host: options,
+      port,
+      localAddress
+    };
+  options = { __proto__: null, ...options, ...this.options };
+  let socketPath = options.socketPath;
+  if (socketPath)
+    options.path = socketPath;
+  normalizeServerName(options, req);
+  let name = this.getName(options);
+  this.sockets[name] ||= [];
+  let freeSockets = this.freeSockets[name], socket;
+  if (freeSockets) {
+    while (freeSockets.length && freeSockets[0].destroyed)
+      freeSockets.shift();
+    if (socket = this.scheduling === "fifo" ? freeSockets.shift() : freeSockets.pop(), !freeSockets.length)
+      delete this.freeSockets[name];
+  }
+  let sockLen = (freeSockets ? freeSockets.length : 0) + this.sockets[name].length;
+  if (socket)
+    this.reuseSocket(socket, req), setRequestSocket(this, req, socket), this.sockets[name].push(socket);
+  else if (sockLen < this.maxSockets && this.totalSocketCount < this.maxTotalSockets)
+    this.createSocket(req, options, onSocketCreated.bind(this, req));
+  else
+    this.requests[name] ||= [], req[kRequestOptions] = options, req[kRequestAsyncReso
+
+POP "===\"wrap-stream\"" hits 4
+  @ 189563928 fnDist 42
+  FN undefined len 320 sha 076fdf1bc44a6294
+function uy(t,o,u="wrap"){if(u==="wrap"||u==="wrap-stream")return Lp(t,o,{trim:!1,hard:!0});if(u==="wrap-trim")return Lp(t,o,{trim:!0,hard:!0});if(u==="end"||u==="middle"||u.startsWith("truncate")){let c="end";if(u==="truncate-middle"||u==="middle")c="middle";if(u==="truncate-start")c="start";return ES(t,o,c)}return t}
+  @ 189615341 fnDist 425
+  FN undefined len 209 sha a8932acd47f846d0
+function my(t,o){if(t===o)return!0;if(t===void 0||o===void 0)return!1;let u=Object.keys(t),c=Object.keys(o);if(u.length!==c.length)return!1;for(let m of u)if(!Object.hasOwn(o,m)||t[m]!==o[m])return!1;return!0}
+  @ 189708491 fnDist 26
+  FN undefined len 504 sha 532404dea2f0d848
+function qv(t,o,u){let c=u==="wrap-stream";if(u!=="wrap"&&u!=="wrap-trim"&&!c)return{wrapped:uy(t,o,u),softWrap:void 0};let m=c?"wrap":u,p=t.replace(/\r\n?/g,`
+`).split(`
+`),S=[],E=[];for(let x of p){let M=uy(x,o,m).split(`
+`);for(let R=0;R<M.length;R++){if(R===0){S.push(M[R]),E.push(di.HardBreak);continue}let _=M[R],N=_.startsWith(" ")?_.slice(1):_,A=Wr(N)>0?N:_;S.push(A),E.push(A.length<_.length?di.ContinuationElidedSep:di.Continuation)}}if(c)S.pop(),E.pop();return{wrapped:S.join(`
+`),softWrap:E}}
+  @ 189710927 fnDist -1
+,E?zE(u,t,H,E):H)}else if(t.nodeName==="ink-text"){let H=nu(t,E?{backgroundColor:E}:void 0),U=H.map((W)=>W.text).join("");if(U.length>0){let W=Math.min(Pv(M),o.width-R),Z=t.style.textWrap??"wrap",ie=Z==="wrap-stream"||Wr(U)>W,K,ce;if(ie&&H.length===1){let te=H[0],ne=qv(U,W,Z);ce=ne.softWrap,K=ne.wrapped.split(`
+`).map((fe)=>{let re=jMe(fe,te.styles);if(te.hyperlink)re=Xr(re,te.hyperlink);return re
+
+POP "==\"wrap-stream\"" hits 4
+  @ 189563929 fnDist 43
+  FN undefined len 320 sha 076fdf1bc44a6294
+function uy(t,o,u="wrap"){if(u==="wrap"||u==="wrap-stream")return Lp(t,o,{trim:!1,hard:!0});if(u==="wrap-trim")return Lp(t,o,{trim:!0,hard:!0});if(u==="end"||u==="middle"||u.startsWith("truncate")){let c="end";if(u==="truncate-middle"||u==="middle")c="middle";if(u==="truncate-start")c="start";return ES(t,o,c)}return t}
+  @ 189615342 fnDist 426
+  FN undefined len 209 sha a8932acd47f846d0
+function my(t,o){if(t===o)return!0;if(t===void 0||o===void 0)return!1;let u=Object.keys(t),c=Object.keys(o);if(u.length!==c.length)return!1;for(let m of u)if(!Object.hasOwn(o,m)||t[m]!==o[m])return!1;return!0}
+  @ 189708492 fnDist 27
+  FN undefined len 504 sha 532404dea2f0d848
+function qv(t,o,u){let c=u==="wrap-stream";if(u!=="wrap"&&u!=="wrap-trim"&&!c)return{wrapped:uy(t,o,u),softWrap:void 0};let m=c?"wrap":u,p=t.replace(/\r\n?/g,`
+`).split(`
+`),S=[],E=[];for(let x of p){let M=uy(x,o,m).split(`
+`);for(let R=0;R<M.length;R++){if(R===0){S.push(M[R]),E.push(di.HardBreak);continue}let _=M[R],N=_.startsWith(" ")?_.slice(1):_,A=Wr(N)>0?N:_;S.push(A),E.push(A.length<_.length?di.ContinuationElidedSep:di.Continuation)}}if(c)S.pop(),E.pop();return{wrapped:S.join(`
+`),softWrap:E}}
+  @ 189710928 fnDist -1
+E?zE(u,t,H,E):H)}else if(t.nodeName==="ink-text"){let H=nu(t,E?{backgroundColor:E}:void 0),U=H.map((W)=>W.text).join("");if(U.length>0){let W=Math.min(Pv(M),o.width-R),Z=t.style.textWrap??"wrap",ie=Z==="wrap-stream"||Wr(U)>W,K,ce;if(ie&&H.length===1){let te=H[0],ne=qv(U,W,Z);ce=ne.softWrap,K=ne.wrapped.split(`
+`).map((fe)=>{let re=jMe(fe,te.styles);if(te.hyperlink)re=Xr(re,te.hyperlink);return re}

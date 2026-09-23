@@ -204,7 +204,8 @@ export const SAFE_ENV_VARS = new Set([
   // densable 2.1.224 #4 — prefer cross-region inference profile prefix over AWS_REGION-derived
   'ANTHROPIC_BEDROCK_REGION_PREFIX',
   'ANTHROPIC_BEDROCK_SERVICE_TIER',
-  'ANTHROPIC_CUSTOM_HEADERS',
+  // ANTHROPIC_CUSTOM_HEADERS is not always-safe. zNe allows it only when Tn
+  // is false (see isSafeManagedEnv / customHeadersRequireApproval).
   'ANTHROPIC_CUSTOM_MODEL_OPTION',
   'ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION',
   'ANTHROPIC_CUSTOM_MODEL_OPTION_NAME',
@@ -455,8 +456,87 @@ export const SAFE_ENV_VARS = new Set([
 ])
 
 /**
- * densable B7t — env key is safe for managed-settings (skips approval) when
- * in LEh (SAFE_ENV_VARS) OR (in MEh AND value is truthy).
+ * densable Rn — HTTP header-name token grammar.
+ */
+export const HEADER_NAME_TOKEN_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
+
+/**
+ * densable Cn — header-name fragments that make ANTHROPIC_CUSTOM_HEADERS
+ * sensitive. `authorization` matches `auth`. `host` matches `host`.
+ */
+const SENSITIVE_CUSTOM_HEADER_NAME_RE =
+  /auth|key|token|cookie|secret|credential|session|signature|passw|jwt|assertion|cert|oidc|org|tenant|account|project|workspace|user|email|identity|principal|consumer|client|host|url|base|target|upstream|endpoint|proxy|forward|route|fallback|override|apigw|x-goog-|l5d-|bypass|guardrail|amz|x-ms-|azureml|extra-parameters|envoy|helicone|litellm|cf-aig|cf-access|beta|version/
+
+/** densable Ke — HTTP OWS (space / tab) for $Kt trim. */
+function isHeaderValueOws(code: number): boolean {
+  return code === 0x20 || code === 0x09
+}
+
+/** densable je — first CR/LF in a header value slice. */
+function findHeaderValueLineBreak(value: string): number {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code === 0x0a || code === 0x0d) return i
+  }
+  return -1
+}
+
+export type HeaderValueReject =
+  | { kind: 'line_break'; index: number }
+  | { kind: 'nul'; index: number }
+  | { kind: 'non_ascii'; index: number; codePoint: number }
+
+/**
+ * densable $Kt — reject header values with a line break, NUL, or non-ASCII.
+ */
+export function inspectCustomHeaderValue(
+  value: string,
+): HeaderValueReject | null {
+  let start = 0
+  let end = value.length
+  while (start < end && isHeaderValueOws(value.charCodeAt(start))) start++
+  while (end > start && isHeaderValueOws(value.charCodeAt(end - 1))) end--
+  const lineBreak = findHeaderValueLineBreak(value.slice(start, end))
+  if (lineBreak !== -1) {
+    return { kind: 'line_break', index: start + lineBreak }
+  }
+  for (let i = start; i < end; i++) {
+    const code = value.charCodeAt(i)
+    if (code === 0) return { kind: 'nul', index: i }
+    if (code > 255) {
+      return {
+        kind: 'non_ascii',
+        index: i,
+        codePoint: value.codePointAt(i) ?? code,
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * densable Tn — true when a custom-header block needs approval.
+ * Bare CR is sensitive. A line with no colon is not.
+ * Gold: !Rn.test(name) || $Kt(value) !== null || Cn.test(name.toLowerCase()).
+ */
+export function customHeadersRequireApproval(block: string): boolean {
+  if (/\r(?!\n)/.test(block)) return true
+  return block.split(/\n|\r\n/).some(line => {
+    const colon = line.indexOf(':')
+    if (colon === -1) return false
+    const name = line.slice(0, colon).trim()
+    return (
+      !HEADER_NAME_TOKEN_RE.test(name) ||
+      inspectCustomHeaderValue(line.slice(colon + 1)) !== null ||
+      SENSITIVE_CUSTOM_HEADER_NAME_RE.test(name.toLowerCase())
+    )
+  })
+}
+
+/**
+ * densable B7t / zNe — env key is safe (skips approval) when it is in LEh
+ * (SAFE_ENV_VARS), or in MEh and truthy, or ANTHROPIC_CUSTOM_HEADERS whose
+ * block is not sensitive (`!Tn`).
  */
 export function isSafeManagedEnv(key: string, value: string): boolean {
   const upper = key.toUpperCase()
@@ -464,6 +544,9 @@ export function isSafeManagedEnv(key: string, value: string): boolean {
   if (SAFE_WHEN_TRUTHY_ENV_VARS.has(upper)) {
     const normalized = value.toLowerCase().trim()
     return ['1', 'true', 'yes', 'on'].includes(normalized)
+  }
+  if (upper === 'ANTHROPIC_CUSTOM_HEADERS') {
+    return !customHeadersRequireApproval(value)
   }
   return false
 }

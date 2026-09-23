@@ -1,0 +1,106 @@
+# gold-248-unk-pass4
+# when=2026-09-20T03:42:33.071Z
+
+# ---- #9 NAn zce FAn Ivt ----
+## #9 NAn @185604567 len=34 sha=77e65efa3fdb5b46 otherHits=0
+function NAn(){return zce(FAn,!0)}
+
+## function zce( hits=2 180589886,202844607
+## #9 zce @180589886 len=104 sha=21601b2204427c03 otherHits=0
+function zce(e,t){let r=rl().pinnedFeatureValues??=new Map;if(!r.has(e))r.set(e,R(e,t));return r.get(e)}
+
+## #9 zce @202844607 len=150 sha=b5cc538b07e6e156 otherHits=0
+function zce(d){(d?Promise.resolve(0):xMn()).then((C)=>{if(C>=2)f("bridge_repl","multi_session_crash",{concurrent_bridge_sessions:C})}).catch(()=>{})}
+
+## #9 FAn-near-NAn @185604500
+Seconds:A().describe("Actual delay used after clamping to runtime bounds"),wasClamped:W().describe("True if the requested delaySeconds was outside [60, 3600]"),stopped:W().optional().describe("True when the model ended the loop via `stop: true`"),cancelledWakeups:A().optional().describe("How many pending dynamic-loop wakeups stop:true cancelled. 0 means nothing was pending \u2014 a recurring /loop cron is not cancelled by stop:true.")})),FAn="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or 
+
+## FAn hits=22
+## #9 FAn @185604542
+ a recurring /loop cron is not cancelled by stop:true.")})),FAn="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: 
+
+## #9 FAn @185604593
+ue.")})),FAn="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/canc
+
+## function Ivt( hits=2
+## #9 Ivt @178580468 len=53 sha=c6ed76189c0c3515 otherHits=0
+function Ivt(){n().promptAssembly.noteInvalidation()}
+
+## #9 Ivt @186445321 len=365 sha=aa889df2f042f9e9 otherHits=0
+function Ivt(e,{agentCacheTtlOverride:t,ignoreOverage:r=!1}={}){let o=St(),u=o&&!r&&id().isUsingOverage===!0,p=jTt(e,t,u);if(p!==void 0)return p;if(!o||u)return{ttl:"5m",reason:"default"};let g=nTn();if(g===null)g=R("tengu_prompt_cache_1h_config",{allowlist:[...DEe]}).allowlist??[],rTn(g);return LEe(e,g)?{ttl:"1h",reason:"subscriber"}:{ttl:"5m",reason:"default"}}
+
+## #9 jTt @186438394 len=524 sha=8c2f45592d05d248 otherHits=0
+function jTt(e,t,r=!1){if(a.FORCE_PROMPT_CACHING_5M)return{ttl:"5m",reason:"force_5m_env"};let o=WHn(e),u=o?a.CLAUDE_CODE_PROMPT_CACHE_TTL:a.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL;if(u!==void 0)return{ttl:u,reason:"env"};let p=qe(),g=o?p.promptCacheTtl:p.subagentPromptCacheTtl;if(g!==void 0)return{ttl:g,reason:"setting"};if(t!==void 0&&!(t==="1h"&&r))return{ttl:t,reason:"agent_frontmatter"};if(a.ENABLE_PROMPT_CACHING_1H||Le()==="bedrock"&&a.ENABLE_PROMPT_CACHING_1H_BEDROCK)return{ttl:"1h",reason:"enable_1h_env"};return}
+
+## #9 jTt @190578614 len=37 sha=68cd69881d99a079 otherHits=0
+function jTt(e){return ny(e/360)*360}
+
+## #9 zce(FAn 248=1 247=0
+## #9 zce(FAn @185604589
+p:true.")})),FAn="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /lo
+
+## #9 var FAn 248=0 247=1
+## #9 FAn= 248=2 247=1
+## #9 FAn= @185604542
+ a recurring /loop cron is not cancelled by stop:true.")})),FAn="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dy
+
+## #9 247 PR prompt @216445531
+p:true (a fixed-interval /loop is a recurring cron \u2014 cancel it with ${_P})`,maxResultSizeChars:1000,async description(){return w3t},async prompt(){let e=PR("repl_main_thread"),t=PR("sdk");return S3t(e===t?e:void 0)},get inputSchema(){return Jds()},get outputSchema(){return Qds()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.stop===!0)return"stop the /loop \u2014 can
+
+## 247 function PR( hits=6
+## #9 247 PR @210280885 len=889 sha=5b02028c8d48f72d otherHits=NA
+function PR(u){let o=[],c=u,g=c.match(/^(([\t\n\f\r ])+)?(\/\/([^\r\n])*([\r\n])+)?(([\t\n\f\r ])+)?/g);if(o.push({expectation:et,remainder:c},{expectation:tt,remainder:c}),g?.length!==1)return{success:!1,remainder:c,failedExpectations:o};c=c.slice(g[0].length);let h=ho(c);if(o.push(...h.failedExpectations),h.success===!1)return{success:!1,remainder:h.remainder,failedExpectations:o};c=h.remainder;let E=c.match(/^(([\t\n\f\r ])+)?(\/\/([^\r\n])*([\r\n])+)?(([\t\n\f\r ])+)?:/g);if(o.push({expectation:et,remainder:c},{expectation:tt,remainder:c},{expectation:Mp,remainder:c}),E?.length!==1)return{success:!1,remainder:c,failedExpectations:o};c=c.slice(E[0].length);let ye=ce(c);if(o.push(...ye.failedExpectations),ye.success===!1)return{success:!1,remainder:ye.remainder,failedExpectations:o};return c=ye.remainder,{success:!0,value:[h.value,ye.value],remainder:c,failedExpectations:o}}
+
+## #9 247 PR @211078063 len=1001 sha=4235d687504857be otherHits=NA
+function PR(t,n,r){var a=n.pendingProps,c=(n.flags&128)!==0;if(n.flags&=-129,t===null){if(_e){if(a.mode==="hidden")return t=nc(n,a),n.lanes=536870912,xs(null,t);if(cs(n),(t=pt)?(t=lA(t,Wn),t!==null&&(n.memoizedState={dehydrated:t,treeContext:Wi!==null?{id:Fo,overflow:Ho}:null,retryLane:536870912,hydrationErrors:null},r=Xv(t),r.return=n,n.child=r,Vt=n,pt=null)):t=null,t===null)throw tt(n);return n.lanes=536870912,null}return nc(n,a)}var d=t.memoizedState;if(d!==null){var g=d.dehydrated;if(cs(n),c)if(n.flags&256)n.flags&=-257,n=Q0(t,n,r);else if(n.memoizedState!==null)n.child=t.child,n.flags|=128,n=null;else throw Error(l(558));else if(Mt||de(t,n,r,!1),c=(r&t.childLanes)!==0,Mt||c){if(a=Ze,a!==null&&(g=D(a,r),g!==0&&g!==d.retryLane))throw d.retryLane=g,No(t,g),Sn(a,t,g),km;cc(),n=Q0(t,n,r)}else t=d.treeContext,tn&&(pt=tA(g),Vt=n,_e=!0,Ii=null,Wn=!1,t!==null&&Et(n,t)),n=nc(n,a),n.flags|=4096;return n}return t=si(t.child,{mode:a.mode,children:a.children}),t.ref=n.ref,n.child=t,t.return=n,t}
+
+## #9 247 PR @218449698 len=40 sha=8e85199111e2c526 otherHits=NA
+function PR(e){return hVr(e).ttl==="1h"}
+
+# ---- #23 MCP grouping body ----
+## #23 group lastFn Pt @209647809
+## #23 group-start @209647809
+ qo=Yt[7];return qo}function Pt({servers:s,suppressedClaudeAiConnectors:i=[],toolCountsByServer:l={},agentServers:f,onSelectServer:d,onSelectAgentServer:m,onComplete:x,showUnusedConnectors:y,onToggleUnusedConnectors:F}){
+
+## #23 grouping 4k
+eturn qo}function Pt({servers:s,suppressedClaudeAiConnectors:i=[],toolCountsByServer:l={},agentServers:f,onSelectServer:d,onSelectAgentServer:m,onComplete:x,showUnusedConnectors:y,onToggleUnusedConnectors:F}){let[P,Y,A]=ty(0),{rows:oe}=ki(we()),a=aa(),v=G(()=>{let c=new Set(s.filter((b)=>b.scope==="agent").map((b)=>b.name));if(c.size===0)return f;return f.filter((b)=>!c.has(b.name))},[s,f]),V=G(()=>{let c=s.filter((b)=>!ebn(b.client.config));return pn(c)},[s]),{claudeAiServers:w,unusedClaudeAiServers:R}=G(()=>{let c=Eat(),b=[],le=[];for(let h of s){if(!ebn(h.client.config))continue;if((h.client.type==="needs-auth"||h.client.type==="failed")&&!c.has(h.name))le.push(h);else b.push(h)}return b.sort((h,W)=>h.name.localeCompare(W.name)),le.sort((h,W)=>h.name.localeCompare(W.name)),{claudeAiServers:b,unusedClaudeAiServers:le}},[s]),te=G(()=>(V.get("dynamic")??[]).sort((c,b)=>c.name.localeCompare(b.name)),[V]),Me=G(()=>{let c=[];for(let b of vo){let le=V.get(b)??[];for(let h of le)c.push({type:"server",server:h})}for(let b of w)c.push({type:"server",server:b});if(R.length>0){if(c.push({type:"unused-connectors-fold"}),y)for(let b of R)c.push({type:"server",server:b})}for(let b of v)c.push({type:"agent-server",agentServer:b});for(let b of te)c.push({type:"server",server:b});return c},[V,w,R,y,v,te]),qe=U(()=>{x("MCP dialog dismissed",{display:"system"})},[x]),et=U(()=>{let c=Me[A()];if(!c)return;if(c.type==="server")d(c.server);else if(c.type==="agent-server")m(c.agentServer);else if(c.type==="unused-connectors-fold")F()},[Me,A,d,m,F]);dt({"confirm:previous":()=>Y((c)=>c===0?Me.length-1:c-1),"confirm:next":()=>Y((c)=>c===Me.length-1?0:c+1),"confirm:yes":et,"confirm:no":qe},{context:"Confirmation"}),k(()=>{Y((c)=>Math.min(c,Math.max(0,Me.length-1)))},[Me.length,Y]);let tt=F$(),Ht=G(()=>{let c=y?void 0:new Set(R.map((b)=>b.name));return s.some((b)=>b.client.type==="failed"&&!lS(b.client)&&!c?.has(b.name))},[s,R,y]),_e=G(()=>{let c=[],b=0;function le(h,W){let ae=b++;c.push({key:W,selectableIndex:ae,node:e(Mo,{server:h,isSelected:P===ae,toolCount:l[h.name]})})}for(let h of vo){let W=V.get(h);if(!W||W.length===0)continue;let ae=bo(h);c.push({key:`heading-${h}`,node:e(je,{label:ae.label,path:ae.path})});for(let Re of W)le(Re,`${h}-${Re.name}`);c.push({key:`spacer-${h}`,node:e(t,{children:" "})})}if(w.length>0||R.length>0||i.length>0){c.push({key:"heading-claudeai",node:e(je,{label:"claude.ai"})});for(let h of w)le(h,`claudeai-${h.name}`);if(R.length>0){let h=b++;if(c.push({key:"claudeai-unused-fold",selectableIndex:h,node:e(xo,{isSelected:P===h,expanded:y,count:R.length})}),y)for(let W of R)le(W,`claudeai-${W.name}`)}for(let h of i)c.push({key:`suppressed-${h.name}`,node:r(o,{children:[e(t,{children:"  "}),e(t,{children:h.name}),r(t,{dimColor:!0,children:[" ","\xB7 ",O.radioOff," hidden \u2014 same URL as your server '",h.duplicateOf,"'"]})]})}),c.push({key:`suppressed-hint-${h.name}`,node:e(o,{paddingLeft:4,children:e(So,{s:h})})});c.push({key:"spacer-claudeai",node:e(t,{children:" "})})}if(v.length>0){c.push({key:"heading-agent-mcps",node:e(je,{label:"Agent MCPs"})});let h=b;for(let W of se(v.flatMap((ae)=>ae.sourceAgents))){c.push({key:`spacer-agent-${W}`,node:e(t,{children:" "})}),c.push({key:`subheading-agent-${W}`,node:e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:["@",W]})})});for(let ae of v.filter((Re)=>Re.sourceAgents.includes(W))){let Re=h+v.indexOf(ae);c.push({key:`agent-${W}-${ae.name}`,selectableIndex:Re,node:e(Ro,{agentServer:ae,isSelected:P===Re})})}}b=h+v.length,c.push({key:"spacer-agent-mcps",node:e(t,{children:" "})})}if(te.length>0){let h=bo("dynamic");c.push({key:"heading-dynamic",node:e(je,{label:h.label,path:h.path})});for(let W of te)le(W,`dynamic-${W.name}`);c.push({key:"spacer-dynamic",node:e(t,{children:" "})})}if(c.at(-1)?.key.startsWith("spacer-"))c.pop();return c},[V,w,R,y,i,v,te,P,l]);if(s.length===0&&v.length===0&&i.length===0)return null;let Vt=s.length+v.length,ot=Math.max(ln,oe-(a?cn:an)-(Ht?1:0)),Wt=_e.length>ot,nt=Wt?Math.max(1,ot-2):ot,Go=Math.max(0,_e.findIndex((c)=>c.selectableIndex===P)),Ke=la(Go-Math.floor(nt/2),0,Math.max(0,_e.length-nt)),Xt=_e.slice(Ke,Ke+nt),Gt=Ke,Jt=_e.length-(Ke+Xt.length);return r(o,{flexDirection:"column",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,{flexDirection:"column",chi
+
+## #23 Project MCPs @209645536
+ser","enterprise","agent"];function bo(s){switch(s){case"project":return{label:"Project MCPs",path:gv(s)};case"user":return{label:"User MCPs",path:gv(s)};case"local":return{label:"Local MCPs",path:gv(s)};case"enterprise":return{label:"Enterprise MCPs"};case"agent":{let i=jy();return{label:"Active agent MCPs",path:i?`@${i} frontmatter`:"agent frontmatter"}}case"dynamic":return{l
+
+## 247 function ebn( hits=1
+## #23 247 ebn @214033228 len=160 sha=feabae3160985dda otherHits=NA
+function ebn(e){let t=[];for(let{message:n}of e)if(n!==void 0&&!(n.type==="attachment"&&n.attachment.type==="hook_blocking_error"))t.push({message:n});return t}
+
+## #23 247 group leftover @236549574
+e+it),So=qe,xo=Oe.length-(qe+bo.length);return r(y,{flexDirection:"column",children:[e(Pn,{}),e(Ke,{title:"Manage MCP servers",subtitle:`${vo} ${Ze(vo,"server")}`,onCancel:Ge,hideInputGuide:!0,children:r(y,{flexDirection:"column",children:[So>0&&e(y,{paddingLeft:2,children:r(n,{dimColor:!0,children:[gn," ",So," more above"]})}),bo.map((s)=>e(yn,{children:s.node},s.key)),xo>0&&e(y,{paddingLeft:2,children:r(n,{dimColor:!0,children:[hn," ",xo," more below"]})}),r(y,{flexDirection:"column",marginTop:Co?0:1,children:[yo&&e(n,{dimColor:!0,children:rt?"\u203B Error logs shown inline with --debug":"\u
+
+# ---- #25 login_handoff dialog ----
+## #25 dialog reveal @201101704
+n Oe}function X(wo){let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:re}=wo,s=yo==="login_handoff",y,b,O,Ye;if(n[0]!==f){let qe=zW(f);let{commandRows:ie,envRows:Be,categoryRows:Ge}=Dyn(qe);let ae=FL-Ge.length;let Je=ie.length+Be.length;let We=Je<=ae?ae:ae-1;let Y=ie.slice(0,Math.max(0,We));let je=Be.slice(0,Math.max(0,We-Y.length));O=[...Y,...je,...Ge];y=ie.length-Y.length;b=Je-Y.length-je.length;Ye=Hyn(qe,f)?be:ye;n[0]=f,n[1]=y,n[2]=b,n[3]=O,n[4]=Ye}else y=n[1],b=n[2],O=n[3],Ye=n[4];let a=Ye,[ce,bo]=u(null),le=Is(c),{refusedWithin:de,noteRefused:he,epoch:vo}=Hi(),fe=qf(),[Co,xo]=u(0),Ne;if(n[5]===p)Ne=()=>{xo(De)},n[5]=Ne;else Ne=n[5];let Ue;if(n[6]!==f)Ue=[f],n[6]=f,n[7]=Ue;else Ue=n[7];k(Ne,Ue);let Ro=Hs(`${vo}:${Co}`,c),Ke;if(n[8]!==s||n[9]!==le||n[10]!==he||n[11]!==de)Ke=function d(){if(!s){return!1}if(le()||de(c)){return he(),!0}return!1},n[8]=s,n[9]=le,n[10]=he,n[11]=de,n[12]=Ke;else Ke=n[12];let d=Ke,Qe;if(n[13]!==re||n[14]!==d)Qe=function C(){if(d()){return!0}return re?.()===!1},n[13]=re,n[14]=d,n[15]=Qe;else Qe=n[15];let C=Qe,Ve;if(n[16]!==d)Ve=function i(ko,To){if(d()){return}if(ko()===!1)bo((Lo)=>({epoch:(Lo?.epoch??0)+1,focus:To}))},n[16]=d,n[17]=Ve;else Ve=n[17];let i=Ve,Xe;if(n[18]!==w||n[19]!==i)Xe=()=>i(w,"cancel"),n[18]=w,n[19]=i,n[20]=Xe;else Xe
+
+## #25 dialog lastFn X @201101609
+## #25 dialogFn @201101609 len=3364 sha=4a838213a8ac7203 otherHits=0
+function X(wo){let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:re}=wo,s=yo==="login_handoff",y,b,O,Ye;if(n[0]!==f){let qe=zW(f);let{commandRows:ie,envRows:Be,categoryRows:Ge}=Dyn(qe);let ae=FL-Ge.length;let Je=ie.length+Be.length;let We=Je<=ae?ae:ae-1;let Y=ie.slice(0,Math.max(0,We));let je=Be.slice(0,Math.max(0,We-Y.length));O=[...Y,...je,...Ge];y=ie.length-Y.length;b=Je-Y.length-je.length;Ye=Hyn(qe,f)?be:ye;n[0]=f,n[1]=y,n[2]=b,n[3]=O,n[4]=Ye}else y=n[1],b=n[2],O=n[3],Ye=n[4];let a=Ye,[ce,bo]=u(null),le=Is(c),{refusedWithin:de,noteRefused:he,epoch:vo}=Hi(),fe=qf(),[Co,xo]=u(0),Ne;if(n[5]===p)Ne=()=>{xo(De)},n[5]=Ne;else Ne=n[5];let Ue;if(n[6]!==f)Ue=[f],n[6]=f,n[7]=Ue;else Ue=n[7];k(Ne,Ue);let Ro=Hs(`${vo}:${Co}`,c),Ke;if(n[8]!==s||n[9]!==le||n[10]!==he||n[11]!==de)Ke=function d(){if(!s){return!1}if(le()||de(c)){return he(),!0}return!1},n[8]=s,n[9]=le,n[10]=he,n[11]=de,n[12]=Ke;else Ke=n[12];let d=Ke,Qe;if(n[13]!==re||n[14]!==d)Qe=function C(){if(d()){return!0}return re?.()===!1},n[13]=re,n[14]=d,n[15]=Qe;else Qe=n[15];let C=Qe,Ve;if(n[16]!==d)Ve=function i(ko,To){if(d()){return}if(ko()===!1)bo((Lo)=>({epoch:(Lo?.epoch??0)+1,focus:To}))},n[16]=d,n[17]=Ve;else Ve=n[17];let i=Ve,Xe;if(n[18]!==w||n[19]!==i)Xe=()=>i(w,"cancel"),n[18]=w,n[19]=i,n[20]=Xe;else Xe=n[20];let Ze;if(n[21]===p)Ze={context:"Confirmation"},n[21]=Ze;else Ze=n[21];Fe("confirm:no",Xe,Ze);let q;if(n[22]!==a.intro)q=e(t,{children:a.intro}),n[22]=a.intro,n[23]=q;else q=n[23];let B;if(n[24]!==a.listLabel)B=e(t,{dimColor:!0,children:a.listLabel}),n[24]=a.listLabel,n[25]=B;else B=n[25];let F;if(n[26]!==O)F=O.map(eo),n[26]=O,n[27]=F;else F=n[27];let G;if(n[28]!==y||n[29]!==b)G=b>0?r(t,{bold:!0,children:["  ","\u2026 +",b," more"," ",I(b,"setting")," not shown",y>0?`, ${y} executing ${I(y,"a command","commands")}.`:"."]}):null,n[28]=y,n[29]=b,n[30]=G;else G=n[30];let J;if(n[31]!==B||n[32]!==F||n[33]!==G)J=r(o,{flexDirection:"column",children:[B,F,G]}),n[31]=B,n[32]=F,n[33]=G,n[34]=J;else J=n[34];let W;if(n[35]!==a.advice)W=e(t,{children:a.advice}),n[35]=a.advice,n[36]=W;else W=n[36];const me=s?`${ce?.epoch??0}:${Ro.remountKey}`:`${ce?.epoch??0}`,pe=s?c:void 0,ge=s?"cancel":ce?.focus??"confirm";let j;if(n[37]!==se||n[38]!==i)j=()=>i(se,"confirm"),n[37]=se,n[38]=i,n[39]=j;else j=n[39];let U;if(n[40]!==w||n[41]!==i)U=()=>i(w,"cancel"),n[40]=w,n[41]=i,n[42]=U;else U=n[42];let K;if(n[43]!==s||n[44]!==C||n[45]!==fe||n[46]!==me||n[47]!==pe||n[48]!==ge||n[49]!==j||n[50]!==U)K=e(hn,{windowAnchorMs:fe,windowMs:pe,refuseInput:C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me,n[47]=pe,n[48]=ge,n[49]=j,n[50]=U,n[51]=K;else K=n[51];const we=s?"select":"confirm";let Q;if(n[52]!==we)Q=e(M,{chord:"enter",action:we}),n[52]=we,n[53]=Q;else Q=n[53];let _e;if(n[54]===p)_e=e(M,{chord:"escape",action:"exit"}),n[54]=_e;else _e=n[54];let V;if(n[55]!==Q)V=e(gs,{children:r(ue,{children:[Q,_e]})}),n[55]=Q,n[56]=V;else V=n[56];let He;if(n[57]!==J||n[58]!==W||n[59]!==K||n[60]!==V||n[61]!==q)He=e(Zo,{color:"warning",titleColor:"warning",title:"Managed settings require approval",children:r(o,{flexDirection:"column",gap:1,paddingTop:1,children:[q,J,W,K,V]})}),n[57]=J,n[58]=W,n[59]=K,n[60]=V,n[61]=q,n[62]=He;else He=n[62];return He}
+
+## consentHandoffRevealActive 248=6 247=0
+## #25 handoff @190465501
+dedRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){l
+
+## #25 handoff @190466148
+}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRele
+
+## #25 handoff @190466937
+{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally
+
+## #25 handoff @190467044
+!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)retur
+
+## #25 handoff @190467140
+vealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=aw
+
+## #25 nie-real @202549952 len=81 sha=1805be608bd2f346 otherHits=0
+function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}
+
+## #25 pOe-full @202549952
+function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-sugges

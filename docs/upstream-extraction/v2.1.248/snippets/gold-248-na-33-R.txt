@@ -1,0 +1,6 @@
+# gold-248-na-33-R  enterRemoteControl
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191864989
+
+len=70 sha=00fd7cafee15239a
+async function R(t,e,r){let n=await m(),o=await g(n);await y(o,t,e,r)}

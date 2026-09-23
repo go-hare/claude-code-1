@@ -1,5 +1,9 @@
 import type { AgentAdapterRegistry } from './agentAdapter.js'
 import type {
+  WorkflowScriptReadableSet,
+  WorkflowScriptToolRef,
+} from './engine/workflowScriptRead.js'
+import type {
   AgentRunParams,
   AgentRunResult,
   JournalEntry,
@@ -126,6 +130,15 @@ export type WorkflowHostContext = {
   /** Opaque handle passed through to the AgentRunner (contains toolUseContext/canUseTool/parentMessage). */
   handle: HostHandle
   cwd: string
+  /**
+   * Directories the session may already read, besides cwd.
+   * densable additional directories for Workflow `scriptPath`.
+   */
+  readableRoots?: readonly string[]
+  /** densable `i.options.tools` when the host already sliced the list. */
+  tools?: readonly WorkflowScriptToolRef[]
+  /** densable `Oo` / `iJ` / `zl` / `Ryr` fields. Wins over `tools`. */
+  readableSet?: WorkflowScriptReadableSet
   /** Token budget cap; null means unlimited. */
   budgetTotal: number | null
   /** Core-side tool-use id (passed through to task registration). */

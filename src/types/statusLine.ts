@@ -44,10 +44,30 @@ export type StatusLineCommandInput = {
     remaining_percentage: number | null // 剩余占比
   }
   exceeds_200k_tokens: boolean // 是否超过 200k 输入警戒
+  /**
+   * densable 2.1.251 `oqe`. Absent when the session tracker has no requests
+   * (`c$t` returns requests===0 or lastRequest===null).
+   */
+  prompt_cache?: {
+    warm: boolean
+    caching_observed: boolean
+    ttl: string
+    expires_at: number | null
+    requests: number
+    misses: number
+    expected_rebuilds: number
+    hit_ratio: number | null
+    cache_write_tokens: number
+    miss_recache_tokens: number
+    last_miss_at: number | null
+    recache_tokens_if_cold: number | null
+  }
   rate_limits?: {
     // densable 2.1.243: present only while the API reports the window and resets_at has not passed
     five_hour?: { used_percentage: number; resets_at: number } // 5 小时窗口用量与重置时间戳
     seven_day?: { used_percentage: number; resets_at: number } // 7 天窗口
+    // densable 2.1.251 X1e — gateway + jL().overage only
+    spend_limit?: { used_percentage: number; resets_at: number }
   }
   vim?: {
     mode: string // 当前 Vim 模式标签（如 INSERT）

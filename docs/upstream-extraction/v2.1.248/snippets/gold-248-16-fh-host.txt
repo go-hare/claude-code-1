@@ -1,0 +1,84 @@
+# gold-248-16-fh-host
+when=2026-09-20T08:55:00.000Z
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+rule=Fh fields land on leftover AgentView / fleetView helpers. Do not invent function Fh / class gc / function rp / function Xw.
+
+## Fh() @192130704 sha=c0ff7312c4a8c947
+function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}
+
+## leftover hosts (already exist)
+jobs            → AgentView sessions
+terminalHolders → AgentView terminalHolders + helpers.buildTerminalHolders
+prStatuses      → fleetView/prStatuses.ts fleetPrStatuses (Xw = .prStatuses)
+rp              → AgentView SessionRow / list render
+Xw              → fleetPrStatuses.prStatuses
+logTails        → AgentView logTails + fhFields.readFleetLogTail / ic
+deleteRefusals  → AgentView deleteRefusals + noteDeleteRefusal / cp
+loopKicks       → AgentView loopKicks + refreshLoopKicks / $ye / Fi / ec
+overlaidLoadLanded → AgentView overlaidLoadLanded (load true / #P reset / empty-state)
+statuses        → AgentView statuses + buildFleetStatuses / fleetLiveStatus
+pendings        → AgentView pendings + settleLandedPendings (no invented rows)
+adoptedPeers    → AgentView adoptedPeers + buildAdoptedPeers (peerProtocol gate)
+remoteJobs / remoteListLoaded → AgentView fields + #P (no loadRemote / remote UI)
+
+## official-used leftover-missing (248 gc.load / #O / #P / rp / Ss)
+
+### logTails
+write: gc.load @192136466 — lo(state)!=="completed" then ic/readLogTail, #p identity
+read:  Ss logTail:nf[at.id] @192213296 — tempo==="active" detail slot
+ic @192124455 sha=de2bf03ceb9ad8e4
+Ih @192123625 sha=67d81691783fb673
+lo @192125206 sha=72f4ba846f919452
+
+### deleteRefusals
+write: noteDeleteRefusal @192134203; load Li prune @192138356
+read:  Ss deleteRefused:Tl.get(at.id) @192214038
+       zn=qn&&tempo!=="active"?wE — "not deleted · "+reason @192200861
+       cp @192191480 — start null; fail error; kept `worktree ${K}`
+
+### loopKicks
+write: load $ye jobs @182998628; Fi probe; ec scan; Li prune to sessionIds
+read:  rp loopKicks:A @192178323; Ss loopKickCount:Cs.get(sessionId)?.count @192213397
+$ye: intent||initialPrompt startsWith /loop
+ec @192122009 — scheduled_task_fire timestamps → {count,nextAt}
+
+### overlaidLoadLanded
+write: load #r>0 → true @192135847
+reset: #P → false @192132577
+read:  Gd Ze(Q) destructure @192267120 — unused for extra UI in 248 slice
+leftover: gate empty-state until first attached load
+
+### statuses
+write: #O @192139136 from listAllLiveSessions status / Ir(jobId)=`job:${id}`
+read:  liveStatus @192132906 via ac @192126408 / Ir @192126376
+       rp liveStatus:h; Ss status:xs(at)
+leftover listAllLiveSessions has no status/jobId → map stays empty unless records grow
+
+### pendings
+write: updatePendings / settleLandedPendings @192135058; #P clear
+read:  rp prepend Lt; liveStatus busy if sessionId matches
+leftover: land field + settle/clear; do not invent pending SessionEntry rows
+
+### adoptedPeers
+write: #O only if Po()&&R("tengu_fleetview_peers",!1) @192139200
+       filter interactive, pid!==self, not in jobs, peerProtocol>=_2t(=1), age<86400000
+       zu @192120270 → {id:`peer-${pid}`, state, activity:Oo}
+read:  rp Ct=[...jobs,...ge?adoptedPeers:[]]
+leftover: land field + gate; leftover PeerSession has no peerProtocol → write stays []
+          do not invent peer rows
+
+### remoteJobs / remoteListLoaded
+write: loadRemote / #I; #P drops remote-pending-* and remoteListLoaded=!1
+read:  rp remote tab / simpleWantsRemote; _c @192149126
+leftover: official gg `Zs=!1` stubs remote tabs. Land fields + #P reset.
+          do not invent loadRemote / remote UI
+
+## unused-in-248-slice
+Xw is only prStatuses (already landed). Fh() itself is not a leftover file.
+
+## re-verify 2026-09-21 (see gold-248-16-fh-verdict.txt)
+leftover-thin notes above are historical. Current leftover:
+- listAllLiveSessions mapper + register stamp status/jobId/peerProtocol → statuses/adoptedPeers KEEP (no drop when data exists)
+- official Hu()=[] + gg Zs=!1 → KEEP invent-ban (no second cloud list / remote tabs)
+- no LAND this pass

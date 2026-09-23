@@ -1,0 +1,259 @@
+# gold-248-cache-3  densable 2.1.248 pass3
+# bytes248=226708128 247=253204128
+# when=2026-09-20T02:09:14.152Z
+# NEVER HAVE — peel only
+
+## #11 OAuthRefreshLockTimeoutError  needle="OAuthRefreshLockTimeoutError"  hits248=2  hits247=0
+- #0 @97804940  could not be refreshed: another Claude Code process is holding the refresh lock..........OAuthRefreshLockTimeoutError1...P.H.No response from API within the first-byte window...........StreamNoResponseError.
+- #1 @180967635 ld not be refreshed: another Claude Code process is holding the refresh lock");this.name="OAuthRefreshLockTimeoutError"}}var Nn="tengu_atomic_ocean",Hn="tengu_gzip_request_bodies",zn="tengu_gentle_hammock",qn
+
+## #11 OAuthRefreshDeadError  needle="OAuthRefreshDeadError"  hits248=2  hits247=2
+- #0 @97804800 ..E.......OAuth refresh token is no longer valid; run /login to re-authenticate...........OAuthRefreshDeadError...b...K*..OAuth access token could not be refreshed: another Claude Code process is holdi
+- #1 @180967454 super("OAuth refresh token is no longer valid; run /login to re-authenticate");this.name="OAuthRefreshDeadError"}}class Zye extends Error{constructor(){super("OAuth access token could not be refreshed:
+
+## #11 Could not refresh your login because another  needle="Could not refresh your login because another Claude Code process"  hits248=2  hits247=0
+- #0 @96283220 uth token revoked . Please run /login.!...D...Login expired . Please run /login.......	yU.Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) . Try again in a minute; if it keeps happening, 
+- #1 @184124564 uth token revoked \xB7 Please run /login",g5t="Login expired \xB7 Please run /login",h5t="Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) \xB7 Try again in a minute; if it keeps happenin
+
+## #11 Failed to refresh OAuth token: another  needle="Failed to refresh OAuth token: another Claude Code process"  hits248=2  hits247=0
+- #0 @96628208 ..H......Failed to authenticate: OAuth session expired and could not be refreshed.....sP.Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and
+- #1 @184140967 not be refreshed":g5t});if(e instanceof Zye)return Ho({error:"server_error",content:De()?"Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and
+
+## #11 holding the refresh lock  needle="holding the refresh lock"  hits248=4  hits247=2
+- #0 @95581437 IGN_CLIENT_ID	...b.B.00000000-...I....o..Design OAuth lock contention: another process is holding the refresh lock........s.DesignOauthLockContendedError...$.......Failed to read design OAuth tokens: $..
+- #1 @97804906 Error...b...K*..OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock..........OAuthRefreshLockTimeoutError1...P.H.No response from API within the first-byte w
+- #2 @180967597 ructor(){super("OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock");this.name="OAuthRefreshLockTimeoutError"}}var Nn="tengu_atomic_ocean",Hn="tengu_gzip_re
+- #3 @193558012 ass m extends Error{constructor(){super("Design OAuth lock contention: another process is holding the refresh lock");this.name="DesignOauthLockContendedError"}}async function w(r){let t=qv();await ce().mk
+
+## #11 Try again in a minute  needle="Try again in a minute"  hits248=2  hits247=0
+- #0 @96283328 your login because another Claude Code process is refreshing it (or exited mid-refresh) . Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login..H..
+- #1 @184124675 r login because another Claude Code process is refreshing it (or exited mid-refresh) \xB7 Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login",y5t
+
+## #22 not valid JSON —  needle="not valid JSON —"  hits248=0  hits247=0
+
+## #22 Hook output looks like a JSON object  needle="Hook output looks like a JSON object"  hits248=1  hits247=0
+- #0 @186254988 n n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo
+
+## #37 invalidSetting  needle="invalidSetting"  hits248=3  hits247=0
+- #0 @95450568 BUN/root/chunk-v2kkae8f.js....4.-.tengu_harbor_kite_mode_emit.........repoSettings.....a.invalidSetting..	....2S.decidedBy...........shuttingDown
+....E..onPeerHeld..........sendPeerReceipt.....
+- #1 @196193899 case"policySettings":return"managed-setting";case"repoSettings":return"repo-setting";case"invalidSetting":return"invalid-setting";case"flagSettings":case"userSettings":case void 0:return"explici
+- #2 @196196061 ]===p[e]&&o!=="policySettings")o="repoSettings"}if(p[e??"accept"]<p.hold&&N())e="hold",o="invalidSetting";return{value:e,decidedBy:o}}function N(){return k_().errors.some((e)=>e.path===Zjt&&e.se
+
+## #37 decidedBy  needle="decidedBy"  hits248=9  hits247=7
+- #0 @95450592 js....4.-.tengu_harbor_kite_mode_emit.........repoSettings.....a.invalidSetting..	....2S.decidedBy...........shuttingDown
+....E..onPeerHeld..........sendPeerReceipt.....h.*.publishAvailabi
+- #1 @98223824 ons mode is disabled by settings......A(|.tengu_moss_anchor.......]...baselineMode.....uC.decidedByProactivityLevel...	....(..mode_hash........W..meadow_lantern..A...ae..Cannot destructure 
+- #2 @180857771 ;return{mode:"default",notification:d?h:void 0,fromAutoFallback:!1,baselineMode:"default",decidedByProactivityLevel:!1,modeSuppliedOnInvocation:!0}}let E=r.permissions?.disableBypassPermiss
+- #3 @180860631 ode,C=!1;return{mode:M.mode,notification:M.notification,fromAutoFallback:y,baselineMode:b,decidedByProactivityLevel:C,modeSuppliedOnInvocation:g}}function Lqn(e){let o=e.cli.fallbackModel?.
+- #4 @181185051 ngs"||r.layer==="projectSettings");return{enabled:t.length===0&&(e.defaultOn||n!==void 0),decidedBy:t[0]?.layer??n??"default",offSources:t,lockedAboveUser:i,userControllable:!i&&!o&&yo("use
+- #5 @196193798 77v.js";function eAe(){return R("tengu_harbor_kite_mode_emit",!0)}function O(){switch(w().decidedBy){case"policySettings":return"managed-setting";case"repoSettings":return"repo-setting";cas
+- #6 @196196092 o="repoSettings"}if(p[e??"accept"]<p.hold&&N())e="hold",o="invalidSetting";return{value:e,decidedBy:o}}function N(){return k_().errors.some((e)=>e.path===Zjt&&e.severity==="warning"&&!e.sta
+- #7 @204988613 ength>0&&{permission_updates:H.permissionUpdates.slice(0,zt)}},rn=H.decision==="allow"&&H.decidedBy==="classifier";if(H.decision==="deny")return Y(Ae),{requestBytes:L,approval:H.insteadOfRe
+- … +1 more
+
+## #38 function Nde  needle="function Nde()"  hits248=1  hits247=0
+- #0 @184100558 tion Ude(){let e=An();return e==="pro"||e==="enterprise"?Zk.seven_day:Zk.seven_day_sonnet}function Nde(){return v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask yo
+
+## #42 SAFE STREAM_WATCHDOG window  needle="CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK\"],\"CLAUDE_ENABLE_STREAM_WATCHDOG\""  hits248=0  hits247=0
+
+## #23 Text bold claude.ai  needle="claude.ai</Text>"  hits248=0  hits247=0
+
+## #23 heading.label  needle="heading.label"  hits248=0  hits247=0
+
+## #23 getScopeHeading  needle="getScopeHeading"  hits248=0  hits247=0
+
+## #23 Manage MCP servers  needle="Manage MCP servers"  hits248=4  hits247=4
+- #0 @96491556 t up Claude GitHub Actions for a repository.........Z.Install the Claude Slack app....16..Manage MCP servers..).....?.[reconnect|enable|disable [<server>|all]]...2....s	.[reconnect <server>|enable|d
+- #1 @186707889 n:!0,name:"stub"};var Jre={type:"local",name:"mcp",supportsNonInteractive:!0,description:"Manage MCP servers",argumentHint:"[reconnect|enable|disable [<server>|all]]",thinClientDispatch:"post-text",
+- #2 @186708141 =>import("B:/~BUN/root/chunk-q6d1zv8w.js")},SVn={type:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]",thinClien
+- #3 @209652075 length-(Ke+Xt.length);return r(o,{flexDirection:"column",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,{flexDirec
+
+## #44 socket directory  needle="socket directory"  hits248=11  hits247=8
+- #0 @93411216 used..........lastStartFailureCause...........Cross-session messaging is off:.(...!8..its socket directory could not be set up-...Ae,.run with --debug-file <path> for the full log...$...b...HIPAA 
+- #1 @94539884 ..2.~.file:///B:/%7EBUN/root/chunk-3prdfzqb.js....h...lastStartFailureDetail..*....~z.its socket directory could not be set up: ..-...Y...its socket path is not a usable local address.......K.F.it
+- #2 @94948811 r, forcing reconnect and retrying: .....g+.claude-mcp-browser-bridge-..).....U.] Insecure socket directory permissions: ...8.....Y. (expected 0700). Directory may have been tampered with.1.......S
+- #3 @100861206 Failed to set socket permissions:...........Cleaned up socket file.......r..Removed empty socket directory..'...).3.Invalid message length from MCP client .(...	.=.Forwarding tool request from MCP
+- #4 @189845528 ports from user-scope memory files\n- Hardened the auto-generated cross-session messaging socket directory on shared `/tmp`: a pre-planted symlink or another user\'s directory is now refused inste
+- #5 @191684759 h?oe(h).catch(()=>{}):void 0]);if(this.record.outcome)return;if(T(y)===U1t){let L=`worker socket directory is not owned by this user \u2014 ${l(y)}`;this.patch({state:"crashed",detail:L});let U=th
+- #6 @192357558 cket file")}catch{}try{let e=c3e();if((await C(e)).length===0)await B(e),n("Removed empty socket directory")}catch{}}this.running=!1}async isRunning(){return this.running}async handleMessage(e){le
+- #7 @192675931 it x.stat(o);if(a.isDirectory()){let d=a.mode&511;if(d!==448)throw Error(`[${t}] Insecure socket directory permissions: ${d.toString(8)} (expected 0700). Directory may have been tampered with.`);l
+- … +3 more
+
+## #44 cannot be used  needle="cannot be used"  hits248=153  hits247=153
+- #0 @66699667 undefined)
+          throw @makeErrorWithCode(110, 'Option "options.inspectOptions.color" cannot be used in combination with option "colorMode"');
+      optionsMap.set(this, inspectOptions);
+   
+- #1 @66955771  options.verbatimSymlinks === !0)
+    throw @makeErrorWithCode(110, 'Option "dereference" cannot be used in combination with option "verbatimSymlinks"');
+  let { filter } = options;
+  if (filter
+- #2 @67941510 undefined)
+      throw @makeErrorWithCode(113, "options.httpValidation", httpValidation, "cannot be used together with options.insecureHTTPParser");
+  }
+  this.httpValidation = httpValidation;
+ 
+- #3 @68052911 undefined)
+      throw @makeErrorWithCode(113, "options.httpValidation", httpValidation, "cannot be used with options.insecureHTTPParser");
+    this.httpValidation = httpValidation;
+  }
+  this[k
+- #4 @68525561 LocalExport(r.local),r.local.type==="Literal"&&this.raise(r.local.start,"A string literal cannot be used as an exported binding without `from`.")}e.source=null,this.options.ecmaVersion>=16&&(e.a
+- #5 @68661025 ?.replServer)
+        throw new ERR_INVALID_REPL_INPUT("Listeners for `uncaughtException` cannot be used in the REPL");
+    }
+  }
+  let processNewListenerUseCount = 0;
+  function addProcessNewLi
+- #6 @68786555 thCode(139);
+        else
+          throw makeCodedError(Error, "ERR_IPC_SYNC_FORK", "IPC cannot be used with synchronous forks");
+      ipc = { close() {} }, ipcFd = i, acc.push({ type: "pipe",
+- #7 @69109575 times"), setter && getter)
+      throw @makeErrorWithCode(113, "options.setter", setter, "cannot be used with 'options.getter'");
+    let target = objectOrFunction, descriptor;
+    while (target
+- … +145 more
+
+## #44 /status  needle="/status"  hits248=62  hits247=61
+- #0 @92308492 nable the PowerShell tool (preview).......`.Z.CLAUDE_CODE_USE_POWERSHELL_TOOL.V.......Use /statusline to set up a custom status line that will display beneath the input box..
+.......statu
+- #1 @92580114 u_cost_threshold_reached...X;.. disconnected...3....._.IDE extension install failed (see /status for info).M.......Cannot destructure property 'queuedCommandCount' from null or undefined
+- #2 @92602842  the worker parked..........compliance-taint-...5....u]. . some features are restricted . /status for details...........LSP error: .....a.}.lsp-manager.........not-started.....'..getAllS
+- #3 @93406044 y 'latchAnnouncementSlot' from null or undefined value........best......V.quote.......}.../status.......S.modelRestrictedWarning.......N&.memoryFiles......oz.modelDeprecationWarning......
+- #4 @93411363 bug-file <path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+.
+- #5 @94617931 ications/initialized... ...w.i.notifications/roots/list_changed.....,..notifications/tasks/status.......w..notifications/resources/updated.$...;D..notifications/resources/list_changed ...
+- #6 @96284098 ript is failing . This usually means you need to re-authenticate with your provider . Run /status to see the script's error output......!bV.https://status.claude.com........U..Repeated 52
+- #7 @96284155 nticate with your provider . Run /status to see the script's error output......!bV.https://status.claude.com........U..Repeated 529 Overloaded errors..E....L..Opus is experiencing high lo
+- … +54 more
+
+## #48 overflowuid  needle="overflowuid"  hits248=2  hits247=0
+- #0 @97792901 oo large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U
+- #1 @182940121 art===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Num
+
+## #48 65534  needle="65534"  hits248=7  hits247=4
+- #0 @182060814 i.digestLength;for(var O=i.digestLength;O<g.length;O++){var k=g.charCodeAt(O),L=k&1^1,Q=_?65534:0;T|=k&Q,_=_&L,N+=_}if(T||g.charCodeAt(N)!==1)throw Error("Invalid RSAES-OAEP padding.");
+- #1 @182939595 from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];f
+- #2 @195701850 ointAt(0)??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=6552
+- #3 @195701859 ??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=65528||r>=917
+- #4 @199615314 1440:12,63488:11,64512:10,65024:9,65280:8,65408:7,65472:6,65504:5,65520:4,65528:3,65532:2,65534:1,65535:0},p=0,v=!1;for(m=_=7;_>=0;m=_+=-1)if(b=this.parts[m],b in I){if(E=I[b],v&&E!==0)
+- #5 @204274961 ance.
+
+// Version: 2.1.248
+import{je}from"B:/~BUN/root/chunk-n4vhwd20.js";var Nt=new Set([65534,65535,131070,131071,196606,196607,262142,262143,327678,327679,393214,393215,458750,458751
+- #6 @222929077 t[i++]=128|n>>>12&63,t[i++]=128|n>>>6&63,t[i++]=128|n&63);return t};function cQ(e,t){if(t<65534&&(e.subarray&&lQ||!e.subarray&&sQ))return String.fromCharCode.apply(null,YR.shrinkBuf(e,t
+
+## #48 nobody  needle="nobody"  hits248=20  hits247=20
+- #0 @95918262  the background app_* tools.....Q...Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running g
+- #1 @96718344 ..engine.create: ......M..no plugin-provided interfaces.......&'T.; $ built for ......o|\.nobody......A...hooks worker respawn: .........., which withheld $..3......, did not come back;
+- #2 @101481417 ureredirect..........-allowunencryptedauthentication.........-disablekeepalive........Ve.-nobodyprogress."...X.d.-preservefileauthorizationmetadata..........-resume.........-skipcertific
+- #3 @180357768 ing session keeps what it was created with) or `preference` (a display or host preference nobody would miss \u2014 the informational notice names these two), so a host may show them itse
+- #4 @184845535 ; ")}${g.length===0?"":`; ${g.join("; ")}`}; $ built for ${u.map((k)=>k.name).join(",")||"nobody"}`)}function uZe(e,t,r){for(let[o,u]of Object.entries(e??{})){let p=Object.hasOwn(t,o)?t[
+- #5 @184854048 aredArgs(e.state);n(`hooks worker: respawning for ${u.map((E)=>E.pluginName).join(", ")||"nobody"} (${t})`);let p=[];for(let E of u)try{p.push(await Oc.loadEnvironment(e,E)),vl.bumpGener
+- #6 @192617022 or activating an app takes over the screen, "+"which needs the user's approval \u2014 and nobody is present "+"to answer (unattended session). Only already-running granted apps are reach
+- #7 @192617212 , via the background app_* tools.":"Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running g
+- … +12 more
+
+## #48 F1t  needle="function F1t("  hits248=2  hits247=0
+- #0 @182940345 r(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createH
+- #1 @183796022 ;if(r)return ble(td(e,t));return await iv(nO(td(e,t),{recursive:!0,force:!0}))!==Hk}async function F1t(e){return(await rO(e).catch(()=>[])).some((r)=>{let o=gg(r);return!C1t.has(o)&&!OC(o,iC)})
+
+## #25 noConsentSurface  needle="noConsentSurface"  hits248=6  hits247=6
+- #0 @94775240 n, or contact your administrator......$J.replRequester.......K...requesterWaiters...... .noConsentSurface.....".pendingReview.......C.u.startupConsentRelease.......,...consentNeededRelease......
+- #1 @190464273 ttle(e){this.updates.done(),this.owner(e)}}class G{replRequester=null;requesterWaiters=[];noConsentSurface=!1;pendingReview=null;registerRequester(e){if(this.replRequester=e,e&&this.requesterWaite
+- #2 @190466377 ease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise(
+- #3 @190466421 consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"
+- #4 @190467222 nally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentReleas
+- #5 @190467391 {o.fireStartupConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});
+
+## #25 forceLoginGatewayUrl  needle="forceLoginGatewayUrl"  hits248=10  hits247=10
+- #0 @94463900 H_TOKEN=<token>...........tokenOutput.........onAccountOnHold.	.......expiresIn...........forceLoginGatewayUrl........forceLoginOrgUUID.......t...toRetry.....5...marginX........oauthStatus......[X.fo
+- #1 @98970747 ce that sets one owns it whole) and the auth pins forceLoginOrgUUID, forceLoginMethod and forceLoginGatewayUrl (highest source only). Honored only from the highest-priority source present; enable it o
+- #2 @179112919 ro/Max, "console" for Console billing, "gateway" for the Cloud gateway OIDC device flow'),forceLoginGatewayUrl:i().url().optional().catch(void 0).describe('Cloud gateway URL to pre-fill and auto-conne
+- #3 @179114430 ce that sets one owns it whole) and the auth pins forceLoginOrgUUID, forceLoginMethod and forceLoginGatewayUrl (highest source only). Honored only from the highest-priority source present; enable it o
+- #4 @179459301 r Nt=[...jt,"otelHeadersHelper","proxyAuthHelper","forceLoginOrgUUID","forceLoginMethod","forceLoginGatewayUrl","parentSettingsBehavior","env","modelPicker",...It];function Ko(e){return zXn.some((t)=>
+- #5 @180738861 return!1;let e=be("policySettings");if(e?.forceLoginMethod==="gateway")return!0;return e?.forceLoginGatewayUrl!==void 0&&e?.forceLoginMethod===void 0}function a8e(){return BO().length>0}function Ggt()
+- #6 @199063888 t),pe=(P?jE:0)+te,ie=yn()||{},z=be("policySettings"),q=zO(DS()),V=WV()==="gateway",G=q?z?.forceLoginGatewayUrl:void 0,K=ie.forceLoginMethod==="gateway"&&!V?void 0:ie.forceLoginMethod,C=H??K,X=s8e(),oe
+- #7 @199071576 thStatus:x,mode:R,startingMessage:W,forcedMethodMessage:oe,gatewayUnsupportedWarning:null,forceLoginGatewayUrl:G,gatewayScreenLocked:C==="gateway",keyMintFallbackReason:Ht,showPastePrompt:xe,pastedCod
+- … +2 more
+
+## #24 ye headersHelper Authorization  needle="headersHelper"  hits248=186  hits247=181
+- #0 @92399760 ...claude/settings.json.......`n...claude/settings.local.json.........^https:\/\/....A.i.headersHelper.........X.archive.(...*...file:///B:/%7EBUN/root/chunk-kvwcsd42.js....!.W.self_hosted_run
+- #1 @94442622 ..u.].metadata..........Duplicate plugin name "......O9." found in marketplace.......4..].headersHelper.#....Ji." sets headersHelper but is not "strict": false. An entry with headersHelper must
+- #2 @94442651 cate plugin name "......O9." found in marketplace.......4..].headersHelper.#....Ji." sets headersHelper but is not "strict": false. An entry with headersHelper must inline its full manifest (st
+- #3 @94442707 4..].headersHelper.#....Ji." sets headersHelper but is not "strict": false. An entry with headersHelper must inline its full manifest (strict: false, with commands/agents/hooks/mcpServers decla
+- #4 @94442959 the command runs; Claude Code refuses to run the helper otherwise..g......." sets headers/headersHelper, which only apply to "archive" sources; they have no effect on this entry..........].sour
+- #5 @94443109 ave no effect on this entry..........].source.sha256.....3.P." fetches its archive with a headersHelper but sets no sha256 pin. Consider pinning the digest so the bytes users install are exactl
+- #6 @94445723 e sends helper-minted headers to ..	.....M.WARNING: .......B.b.the local command it runs (headersHelper) is: ......`...byFold......*.g.atRequested.....cp.decidingScope.......C.O. via its legac
+- #7 @94453576 N.plugin update.........l.S.k.i.p.p.e.d. ..  ."...r...<N.." fetches its archive through a headersHelper, which only runs when you update it yourself. Update it from /plugin.......&.. (or `..I..
+- … +178 more
+
+## #11 OAuthRefreshLockTimeoutError class @180967500
+len=165 sha=423d726efcf099bf
+r{constructor(){super("OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock");this.name="OAuthRefreshLockTimeoutError"}
+
+## #11 locktimeout-win @180967500
+n to re-authenticate");this.name="OAuthRefreshDeadError"}}class Zye extends Error{constructor(){super("OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock");this.name="OAuthRefreshLockTimeoutError"}}var Nn="tengu_atomic_ocean",Hn="tengu_gzip_request_bodies",zn="tengu_gentle_hammock",qn=4096,Kn=1024,Wn=604800000,Yn=8192;function jn(e){if(e==="ccr_worker")return R(zn,!1);return R(Nn,!1)||R(Hn,!1)}function wt(e){return e==="ccr_work
+
+## #11 failed-refresh-oauth @96628208
+Failed to authenticate: OAuth session expired and could not be refreshed.....sP.Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again........^.oauth_org_not_allowed..."...=...api key authentication is disabled..E....... . if credentials are current, check AWS permissions and model access.......... . run `....D...` an
+
+## #11 could-not-refresh-login @96283220
+revoked . Please run /login.!...D...Login expired . Please run /login.......	yU.Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) . Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login..H.......Anthropic profile login expired . Re-authenticate your Anthropic profiler...?"..Anthropic profile login expired . Run /login to use your claude.ai account instead, or re-authen
+
+## #37 O decidedBy @196193850
+len=498 sha=84314504638b8c86
+ng";case"repoSettings":return"repo-setting";case"invalidSetting":return"invalid-setting";case"flagSettings":case"userSettings":case void 0:return"explicit-setting"}}var p={accept:0,hold:1,refuse:2},Q=100,P=new Set(Iy);function wBe(e){if(e!==null)gi().inbound.shuttingDown=!1,I(),gi().inbound.modeAtUnwire=void 0;else{let o=gi().inbound.getCurrentMode;if(o!==null)try{gi().inbound.modeAtUnwire=o()}catch{gi().inbound.modeAtUnwire=void 0}}if(gi().inbound.getCurrentMode=e,e!==null)LX("mode-changed")}
+
+## #37 O-win @196193850
+return"managed-setting";case"repoSettings":return"repo-setting";case"invalidSetting":return"invalid-setting";case"flagSettings":case"userSettings":case void 0:return"explicit-setting"}}var p={accept:0,hold:1,refuse:2},Q=100,P=new Set(Iy);function wBe(e){if(e!==null)gi().inbound.shuttingDown=!1,I(),gi().inbound.modeAtUnwire=void 0;else{let o=gi().inbound.getCurrentMode;if(o!==null)try{gi().inbound.modeAtUnwire=o()}catch{gi().inbound.modeAtUnwire=void 0}}if(gi().inbound.getCurrentMode=e,e!==null)LX("mode-changed")}fu
+
+## #38 Nde @184100558
+len=133 sha=c8ad9d2a1a2d348e
+function Nde(){return v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask your admin for a higher limit"}
+
+## #38 Nde-win @184100558
+Zk.seven_day_sonnet}function Nde(){return v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask your admin for a higher limit"}function qb(e,t,r,o){let u=o?.progressSavedSuffix?" \xB7 progress saved":"";return`You've hit your ${e}${t}${u}`}var 
+
+## #42 safe-set @179035300
+SLASH_COMMAND_TOOL_CHAR_BUDGET","TASK_MAX_OUTPUT_LENGTH","MCP_CONNECTION_NONBLOCKING","CLAUDE_ENABLE_BYTE_WATCHDOG","CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK","CLAUDE_ENABLE_STREAM_WATCHDOG"]),mn=new Set(["API_FORCE_IDLE_TIMEOUT","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC","DISABLE_ERROR_REPORTING","DISABLE_TELEMETRY","DO_NOT_TRACK"]);function zMe(e,t){let o=e.toUpperCase();return fn.has(o)||mn.has(o)&&Me(t)}function ra(){return mGt.of(z().host)}function OS(){return ra().mergedSettings}function Yl(e){ra().invalidateAll(e
+
+## #23 mcp-list#1 @186707889
+NonInteractive:!1,load:()=>import("B:/~BUN/root/chunk-ksagpte2.js")},PCt=bVn;var xCt={isEnabled:()=>!1,isHidden:!0,name:"stub"};var Jre={type:"local",name:"mcp",supportsNonInteractive:!0,description:"Manage MCP servers",argumentHint:"[reconnect|enable|disable [<server>|all]]",thinClientDispatch:"post-text",isEnabled:()=>De(),get isHidden(){return!De()},load:()=>import("B:/~BUN/root/chunk-q6d1zv8w.js")},SVn={type:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]",thinClientDispatch:"twin"},NAe=SVn;var kVn={type:
+
+## #23 mcp-list#2 @186708141
+disable [<server>|all]]",thinClientDispatch:"post-text",isEnabled:()=>De(),get isHidden(){return!De()},load:()=>import("B:/~BUN/root/chunk-q6d1zv8w.js")},SVn={type:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]",thinClientDispatch:"twin"},NAe=SVn;var kVn={type:"local-jsx",name:"mobile",aliases:["ios","android"],description:"Show QR code to download the Claude mobile app",requires:{ink:!0}},$Ae=kVn;var MCt={isEnabled:()=>!1,isHidden:!0,name:"stub"};var vVn={type:"local",name:"voice",description:"Toggle voice 
+
+## #23 mcp-list#3 @209652075
+selectableIndex===P)),Ke=la(Go-Math.floor(nt/2),0,Math.max(0,_e.length-nt)),Xt=_e.slice(Ke,Ke+nt),Gt=Ke,Jt=_e.length-(Ke+Xt.length);return r(o,{flexDirection:"column",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,{flexDirection:"column",children:[Gt>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:[CC," ",Gt," more above"]})}),Xt.map((c)=>e(Ma,{children:c.node},c.key)),Jt>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:[o0," ",Jt," more below"]})}),r(o,{flexDirection:"column",marginTop:Wt?0:1,
+
+## #44 sock#4 @189845528
+the message shown when resuming a completed background agent\n- Cowork sessions no longer inline external @-imports from user-scope memory files\n- Hardened the auto-generated cross-session messaging socket directory on shared `/tmp`: a pre-planted symlink or another user\'s directory is now refused instead of used\n- Hardened the Linux filesystem sandbox against a protected-path bypass\n- Changed `sandbox.ripgrep` to be honored only from user, managed, and `--settings` settings; project setting
+
+## #44 sock#5 @191684759
+als.discardSpentCredentialFile(h).catch(()=>{}):void 0]);else await Promise.all([o?oe(o).catch(()=>{}):void 0,h?oe(h).catch(()=>{}):void 0]);if(this.record.outcome)return;if(T(y)===U1t){let L=`worker socket directory is not owned by this user \u2014 ${l(y)}`;this.patch({state:"crashed",detail:L});let U=this.dimNotice(L);return this.pushRing(U),this.onStream.emit(U),this.settle("crashed")}return this.scheduleRespawn(l(y))}await oe(og(this.ptySockPath??xh(i.short))).catch(()=>{});let d=i.launch.mo
+
+## #44 sock#6 @192357558
+e(()=>e())}),this.server=null;if(g()!=="win32"&&this.socketPath){try{await m(this.socketPath),n("Cleaned up socket file")}catch{}try{let e=c3e();if((await C(e)).length===0)await B(e),n("Removed empty socket directory")}catch{}}this.running=!1}async isRunning(){return this.running}async handleMessage(e){let t;try{t=q(e)}catch(i){n("Invalid JSON from Chrome:",i.message),a(S({type:"error",error:"Invalid message format"}));return}let s=F().safeParse(t);if(!s.success){n("Invalid message from Chrome:"
+
+## #44 sock#7 @192675931
+in32")return;try{let o=j(e);if((o.split("/").pop()||"").startsWith("claude-mcp-browser-bridge-"))try{let a=await x.stat(o);if(a.isDirectory()){let d=a.mode&511;if(d!==448)throw Error(`[${t}] Insecure socket directory permissions: ${d.toString(8)} (expected 0700). Directory may have been tampered with.`);let u=process.getuid?.();if(u!==void 0&&a.uid!==u)throw Error(`Socket directory not owned by current user (uid: ${u}, dir uid: ${a.uid}). Potential security risk.`)}}catch(a){if(a.code!=="ENOENT"
+
+## #44 sock#8 @201218895
+this.peerDirOwnerUids=[]}}function wZe(e){if(e.startInFlight||e.activeSocketPath!==void 0)return;switch(e.lastStartFailureCause){case"socket_dir_refused":return e.lastStartFailureDetail!==void 0?`its socket directory could not be set up: ${e.lastStartFailureDetail}`:"its socket directory could not be set up";case"path_refused":return"its socket path is not a usable local address";case"bind_failed":return"it could not be started";case"key_publish_failed":return"its peer key could not be published
+
+## #44 sock#9 @201218967
+cketPath!==void 0)return;switch(e.lastStartFailureCause){case"socket_dir_refused":return e.lastStartFailureDetail!==void 0?`its socket directory could not be set up: ${e.lastStartFailureDetail}`:"its socket directory could not be set up";case"path_refused":return"its socket path is not a usable local address";case"bind_failed":return"it could not be started";case"key_publish_failed":return"its peer key could not be published";case"post_bind_setup_failed":return"setting it up after bind failed";c
+
+## #44 sock#10 @201567205
+,isActive:(i)=>uFe.of(i.session.host).lastStartFailureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be set up",r(t,{dimColor:!0,children:[" \xB7 ","run with --debug-file <path> for the full log"]})]})},Hf={id:"model-deprecation",tier:"warning",type:"warning",isActive:(i)=>i.modelDeprecationWarning!==null,render:(i)=>i.modelDeprecationWarning===null?null:r(Gp,{status:"war
+
+## #48 F1t#0 @182940345
+len=66 sha=d19d877b6f6b43f0
+function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}
+
+## #48 F1t#1 @183796022
+len=104 sha=794d6e871e1f8b6c
+function F1t(e){return(await rO(e).catch(()=>[])).some((r)=>{let o=gg(r);return!C1t.has(o)&&!OC(o,iC)})}

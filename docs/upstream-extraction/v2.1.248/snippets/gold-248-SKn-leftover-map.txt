@@ -1,0 +1,97 @@
+# gold-248-SKn-leftover-map
+
+Official SEA densable 2.1.248. Leftover names: `SettingsPrimer` (never `class SKn`),
+`settingsPrime` (≈ `$pn`). SettingsOwner = fGt. D() = `isHoverRestOn`.
+
+Peel sources: `gold-248-SKn-primer.txt`, `gold-248-settings-prime-path.txt`,
+`gold-248-SKn-chunk-fns.txt`, `gold-248-SKn-callee-map.txt`,
+`gold-248-Vjt-T-O-seed.txt`, `gold-248-_Ke-Gqe-parent.txt`,
+`gold-248-Gqe-z-load.txt`, `gold-248-_Ke-Ut-uo.txt`.
+
+## Verdict (2026-09-21)
+
+LAND class shell + `$pn` entry + free callees **Vjt / T / O / k_ / k / wKn / v /
+Ngn / Tur / _Ke / Gqe / z / kC / Zve** (and helpers Pc/S/W/y/w/cyn/$Me/T_/F/Fte/kur/Dgn/
+Mgn/N/Ogn/Ut/uo/QB/xC). Retain path on SettingsOwner already correct once `primer`
+is assigned. No SettingsPrimer UNKNOWN remain.
+
+## Callee → leftover path | UNKNOWN
+
+| official | role | leftover | status |
+|----------|------|----------|--------|
+| `D()` | hover-rest gate | `isHoverRestOn` (`storageV5/hoverRestPin.ts`) / `settingsPrimerGate` | LAND |
+| `ra()` | settings owner | `getSettingsOwner` (`settingsCache.ts`) | LAND |
+| `store` / fGt | primer host | `SettingsOwner` — `onInvalidate`, `seedParsedFile`, `managedFileReads`, `epoch`, `localStoreProbes`, `primer` | LAND |
+| `storageV5.hostFiles` | host file space | `StorageV5.hostFiles` (`createLocalHostFiles.ts` `serves`/`serving`/`stat`/`readBytes`/`listFolder`) | LAND type |
+| `P=3` | consecutive-fail dispose cap | const in `settingsPrimer.ts` | LAND |
+| `E=8` | log-set message cap | const in `settingsPrimer.ts` | LAND |
+| `n` | debug log | `logForDebugging` | LAND |
+| `_` | error log | `logError` | LAND |
+| `l` | error stringify | `errorMessage` | LAND |
+| `Fte()` @179442060 | empty parsed | `emptyParsedSettings()` → `{settings:null,errors:[]}` | LAND |
+| `Qve(path)` @179441964 | broken symlink warn | `logBrokenSettingsSymlink` | LAND |
+| `U(t,e)` @179535049 | apply ownership probe | `applyOwnershipProbe` → `localStoreProbes.primeCanonicalRootOwnerUids` | LAND |
+| `k()` @179522501 | default userSettings path | `userSettingsPrimePath` → `getSettingsFilePathForSource` + basename `settings.json` (dyn import) | LAND |
+| `Tur` @179534256 | `U(e,await wKn…)` | `primeLocalSettingsStoreRootOwnership` | LAND |
+| `wKn` @179534300 | ownership read-ahead | `ownershipProbeAhead` + hostFiles.stat/serves + S/W/Pc | LAND |
+| `v` @179529582 | seedAttestedTier host system space | `seedAttestedSystemTier` + serving/walk/seed + managedSettingsRoots | LAND |
+| `nyn` @179416890 | explicit managed path | densable stub `undefined` (leftover env gate lives in getManagedFilePath) | LAND stub |
+| `$Me`/`nx`/`T_` | managed settings roots | `managedSettingsRoots` → `[getManagedFilePath()]` (WSL inherit not leftover) | LAND |
+| `Pc` | host path ctor | `hostPath(space, path)` | LAND |
+| `S` | allSettled unwrap | `unwrapSettled` | LAND |
+| `W`/`y`/`w` | uid fold / uid / err code | `ownershipUidsFromStats` / `ownerUidFromStat` / `hostFilesErrorCode` | LAND |
+| `cyn`/`H`/`Mo`/`A` | decide local root | `decideCanonicalLocalRoot` + getCwd/findCanonicalGitRoot/getOriginalCwd/resolve | LAND |
+| `Vjt` @179502007 | backend user-settings read | `readUserSettingsFromBackend` + `Se.userSettings`/`A_`/`Mn`/`FMe`/`$ue`/`Pn` | LAND |
+| `T` @179529407 | seedLogged project/local | `seedProjectLocalLayers` + R/Ogn/En/wn/gt/x (+ kC/Zve legacy) | LAND |
+| `O` @179531012 | seedLogged managed tier | `seedManagedSettingsTier` + vKn/A/B/M (`v` LAND) | LAND |
+| `k_` @179508981 | post-seed loadSettingsFromDisk | `reloadMergedSettingsAfterPrime` → `getSettingsWithErrors` | LAND |
+| `_Ke` @179162866 | storage backendView prime | `primeRemoteSettingsBackendView` + `RemoteSettingsBackendView`(Ut)/`runRemoteSettingsBackendPrime`(uo) | LAND |
+| `Ngn` @179506113 | canonical local root | `canonicalLocalSettingsRoot` | LAND |
+| `$pn` @179527115 | settingsPrime assigner | `settingsPrime` / `primeSettings` | LAND |
+| `Npn` @179522585 | start-up seed | `seedUserSettings` (+ j/b) | LAND |
+| `Gqe` @179527369 | load under reset tail | `loadSettingsUnderPrime` / `resetSettingsCacheWithBackendRead` | LAND |
+| `z` @179527519 | settings load + retain | `loadSettingsUnderPrimeInner` + kur/Dgn/N/Yl | LAND |
+| `kur` @179527816 | layer roster | `backendSettingsLayers` | LAND |
+| `Dgn` @179502701 | re-seed + retain layer | `reseedAndRetainLayer` | LAND |
+| `Mgn` @179503367 | user layer reader | `userSettingsLayerReader` | LAND |
+| `N` @179533672 | managed re-seed retain | `reseedManagedSettingsForRetain` | LAND |
+| `Yv` @179161925 | REMOTE_SETTINGS_PATH stub | tip SEA empty `return` (1:1) | LAND |
+| `kC` @179506276 | legacy local path | `legacyLocalSettingsPathFromHost` → `Zve(H())` | LAND |
+| `Zve` @179445024 | cwd vs QB legacy local | `legacyLocalSettingsPath` + QB/`xC` | LAND |
+
+## SettingsPrimer method surface (1:1 official SKn)
+
+LANDED control: `constructor`, `schedule`, `run`,
+`seedAttestedTier` (`v` LAND), `seedLogged`, `seedFromBackend` (Vjt LAND),
+`transition`, `onThrow`, `logThrowOnce`, `primes`, `whenIdle`, `dispose`.
+
+## Callers
+
+| official | leftover wire | status |
+|----------|---------------|--------|
+| `$pn(storageV5, store)` @191443858 init `b()` after safe env | `settingsPrime` in `entrypoints/init.ts` | LAND |
+| `Npn(backend, ra())` @ init configs enable | `seedUserSettings` in `entrypoints/init.ts` | LAND |
+| early `_Ke(backend)` @ init_remote_settings_primed | `primeRemoteSettingsBackendView` in `entrypoints/init.ts` | LAND |
+| `nHe` @180749992 setup_hooks_snapshot | `updateHooksConfigSnapshotUnderPrime` in `setup.ts` | LAND |
+| `nHe` @ setup_worktree | `updateHooksConfigSnapshotUnderPrime` in `setup.ts` worktree block | LAND |
+| `nHe` @ ExitWorktree restore cwd | `updateHooksConfigSnapshotUnderPrime` in `ExitWorktreeTool.ts` | LAND |
+| `L0n` deeplink Gqe @191362512 | invent-ban — leftover has no `--deep-link-cwd-b64` host | BAN |
+| pluginMonitors `nHe(d, credentials)` | different symbol (≠ Gqe); invent-ban | BAN |
+| fGt retain `primer!==void 0` | already wired via `settingsPrimerGate` | LAND |
+| `ra()` / `OS()`=`ra().mergedSettings` / `Yl` | `getSettingsOwner` / `getSessionSettingsCache` / `resetSettingsCache` | LAND |
+
+## Gold offsets (UNKNOWN remain)
+
+(none for SettingsPrimer)
+
+## Gold offsets (LANDED this pass)
+
+- `_Ke` @179162866 → `primeRemoteSettingsBackendView` + Ut/uo
+- `Gqe`/`z` @179527369 / @179527519 → `loadSettingsUnderPrime`
+- `v` seedAttestedTier @179529582 → `seedAttestedSystemTier`
+- `wKn` @179534300 → `ownershipProbeAhead`
+- `Tur` @179534256 → `primeLocalSettingsStoreRootOwnership`
+- `Ngn` @179506113 → `canonicalLocalSettingsRoot`
+- `Npn` @179522585 → `seedUserSettings` (+ j/b start-up seed)
+- helpers: gold-248-wKn-v-seed.txt / gold-248-_Ke-Ut-uo.txt / gold-248-Gqe-z-load.txt
+- call-site glue: init `$pn`/`Npn`/`_Ke`; setup+ExitWorktree `nHe`; deeplink L0n BAN

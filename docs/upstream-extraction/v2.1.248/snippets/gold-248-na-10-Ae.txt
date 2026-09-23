@@ -1,0 +1,6 @@
+# gold-248-na-10-Ae  desktopSessionCleanupPeriodDays cutoff (unique)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191903586
+
+len=130 sha=3e20bf3910e15834
+function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}

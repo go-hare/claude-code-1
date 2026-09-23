@@ -62,9 +62,12 @@ describe('raw utilization reset 243', () => {
       join(import.meta.dir, '../../components/StatusLine.tsx'),
       'utf8',
     )
-    expect(src).toContain('getRawUtilization()')
-    expect(src).toContain(
-      'used_percentage: rawUtil.five_hour.utilization * 100',
+    const limits = readFileSync(
+      join(import.meta.dir, '../../components/statusLineRateLimits.ts'),
+      'utf8',
     )
+    expect(src).toContain('getRawUtilization()')
+    expect(src).toContain('statusLineRateLimits(rawUtil, getAPIProvider())')
+    expect(limits).toContain('used_percentage: raw.five_hour.utilization * 100')
   })
 })

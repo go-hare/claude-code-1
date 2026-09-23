@@ -1,0 +1,112 @@
+# gold-248-48-linux3
+
+## "eGn()" hits=2
+- @178758764
+y.js";var m=65534,M=new Set(["/","/dev","/dev/shm","/run","/run/user","/tmp","/var","/var/tmp","/var/run","/home","/var/home","/root","/var/roothome","/mnt","/mnt/wslg"]);function eGn(){return M}import{readFile as P}from"fs/promises";async function D(){try{return F(await P("/proc/self/uid_map","utf8"))}catch{return}}function F(e){let t=[];for(let n of e.split(`
+`)){if(n.trim()==="")continue;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeIn
+
+- @198269713
+s the kernel overflow uid (user namespace without a uid mapping) \u2014 ownership cannot be verified; refusing to use the sockets directory"));s=(c)=>c===t&&!r?.uidCollapses;let _=eGn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await se(U(c)),Ie(c)):await se(c),M=await G(v);return M.dev===O.dev&&M.ino===O.ino?v:void 0}catch{return}},d=(c)=>r!==void 0&&(r.unmappedOwnerUid!==void 0&&c===r.unmappedOwnerUid||c===0&&r.rootUidAmbiguous),w=d,g=(c)=>c!==void 0&&_.has(c),p=(c,O,v)=>t===void 0||s(c)||
+
+## "unmappedOwnerUid" hits=5
+- @90232812
+ctory exists but is not a directory.?....;..s.o.c.k.e.t.s. .d.i.r.e.c.t.o.r.y. .i.s. .o.w.n.e.d. .b.y. .a.n.o.t.h.e.r. .u.s.e.r. ..  .r.e.f.u.s.i.n.g. .t.o. .u.s.e. .i.t...........unmappedOwnerUid.....]V.rootUidAmbiguoush...f,..a. .s.o.c.k.e.t.s.-.d.i.r.e.c.t.o.r.y. .c.o.m.p.o.n.e.n.t. .a.p.p.e.a.r.e.d. .w.h.i.l.e. .b.e.i.n.g. .c.r.e.a.t.e.d. .a.n.d. .i.s. .n.o.t. .o.u.r. .d.i.r.e.c.t.o.r.y. ..  .r.e.f.u.s.i.n.g. .t.o. .u.s.e. .i.t. ...kka.[uds-messaging] Client connected.....pl.[uds-messaging] 
+
+- @178759731
+turn;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=aw
+
+- @178759883
+=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.co
+
+- @198269894
+Gn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await se(U(c)),Ie(c)):await se(c),M=await G(v);return M.dev===O.dev&&M.ino===O.ino?v:void 0}catch{return}},d=(c)=>r!==void 0&&(r.unmappedOwnerUid!==void 0&&c===r.unmappedOwnerUid||c===0&&r.rootUidAmbiguous),w=d,g=(c)=>c!==void 0&&_.has(c),p=(c,O,v)=>t===void 0||s(c)||!O&&(d(c)?g(v):c===0),S=(c,O,v)=>{if(!p(c.uid,O,v))return!1;if((c.mode&512)!==0)return!0;if((c.mode&2)!==0)return!1;if((c.mode&16)!==0)return s(c.uid)&&u!==void 0&&c.gid===u&&u===t;
+
+- @198269927
+sSymbolicLink()?x(await se(U(c)),Ie(c)):await se(c),M=await G(v);return M.dev===O.dev&&M.ino===O.ino?v:void 0}catch{return}},d=(c)=>r!==void 0&&(r.unmappedOwnerUid!==void 0&&c===r.unmappedOwnerUid||c===0&&r.rootUidAmbiguous),w=d,g=(c)=>c!==void 0&&_.has(c),p=(c,O,v)=>t===void 0||s(c)||!O&&(d(c)?g(v):c===0),S=(c,O,v)=>{if(!p(c.uid,O,v))return!1;if((c.mode&512)!==0)return!0;if((c.mode&2)!==0)return!1;if((c.mode&16)!==0)return s(c.uid)&&u!==void 0&&c.gid===u&&u===t;return!0},E=a.TERMUX_VERSION&&a.P
+
+## "uidCollapses" hits=5
+- @90230008
+ .v.e.r.i.f.i.e.d.;. .r.e.f.u.s.i.n.g. .t.o. .u.s.e. .t.h.e. .s.o.c.k.e.t.s. .d.i.r.e.c.t.o.r.y.2...K...sockets base directory vanished while being set up......Y@8.getgid........4.uidCollapses........startExists.....B...deepestExisting.
+.......sawSymlink.....B>Z.startInFlight........T..bind_failed.'.......[.u.d.s.-.m.e.s.s.a.g.i.n.g.]. .R.e.f.u.s.i.n.g. .s.o.c.k.e.t. .p.a.t.h. ..  ...q....)f.not a usable local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing d
+
+- @178759755
+t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)re
+
+- @178759907
+=n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=
+
+- @198269470
+d 0&&!s(c.uid))throw T("foreign_owner",Error("sockets directory is owned by another user \u2014 refusing to use it"),L(e,c))},s=(c)=>c===t,u=process.getgid?.(),r=await tGn();if(r?.uidCollapses)throw T("uid_collapse",Error("this process reads as the kernel overflow uid (user namespace without a uid mapping) \u2014 ownership cannot be verified; refusing to use the sockets directory"));s=(c)=>c===t&&!r?.uidCollapses;let _=eGn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await se(U(c)),Ie(c)):awa
+
+- @198269694
+his process reads as the kernel overflow uid (user namespace without a uid mapping) \u2014 ownership cannot be verified; refusing to use the sockets directory"));s=(c)=>c===t&&!r?.uidCollapses;let _=eGn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await se(U(c)),Ie(c)):await se(c),M=await G(v);return M.dev===O.dev&&M.ino===O.ino?v:void 0}catch{return}},d=(c)=>r!==void 0&&(r.unmappedOwnerUid!==void 0&&c===r.unmappedOwnerUid||c===0&&r.rootUidAmbiguous),w=d,g=(c)=>c!==void 0&&_.has(c),p=(c,O,v)=
+
+## "rootUidAmbiguous" hits=4
+- @90232836
+a directory.?....;..s.o.c.k.e.t.s. .d.i.r.e.c.t.o.r.y. .i.s. .o.w.n.e.d. .b.y. .a.n.o.t.h.e.r. .u.s.e.r. ..  .r.e.f.u.s.i.n.g. .t.o. .u.s.e. .i.t...........unmappedOwnerUid.....]V.rootUidAmbiguoush...f,..a. .s.o.c.k.e.t.s.-.d.i.r.e.c.t.o.r.y. .c.o.m.p.o.n.e.n.t. .a.p.p.e.a.r.e.d. .w.h.i.l.e. .b.e.i.n.g. .c.r.e.a.t.e.d. .a.n.d. .i.s. .n.o.t. .o.u.r. .d.i.r.e.c.t.o.r.y. ..  .r.e.f.u.s.i.n.g. .t.o. .u.s.e. .i.t. ...kka.[uds-messaging] Client connected.....pl.[uds-messaging] Server error: .......5.
+
+- @178759771
+&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))ret
+
+- @178759952
+ootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s
+
+- @198269954
+U(c)),Ie(c)):await se(c),M=await G(v);return M.dev===O.dev&&M.ino===O.ino?v:void 0}catch{return}},d=(c)=>r!==void 0&&(r.unmappedOwnerUid!==void 0&&c===r.unmappedOwnerUid||c===0&&r.rootUidAmbiguous),w=d,g=(c)=>c!==void 0&&_.has(c),p=(c,O,v)=>t===void 0||s(c)||!O&&(d(c)?g(v):c===0),S=(c,O,v)=>{if(!p(c.uid,O,v))return!1;if((c.mode&512)!==0)return!0;if((c.mode&2)!==0)return!1;if((c.mode&16)!==0)return s(c.uid)&&u!==void 0&&c.gid===u&&u===t;return!0},E=a.TERMUX_VERSION&&a.PREFIX?U(U(a.PREFIX)):void 0
+
+## "/var/roothome" hits=2
+- @93487192
+ .o.n.e.%...P...file:///$bunfs/root/chunk-nr1qjajm.js.........V./dev.....Ly./dev/shm	......./run/user.........../var/tmp....On^./var/run.....-H./home...	.....V./var/home.......z;./var/roothome......... ./mnt	...Xu../mnt/wslg.......<XY.^[a-f0-9]{16}$..	....t.ENOTOWNED.......<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+...
+
+- @178758719
+js";import{Ko}from"/$bunfs/root/chunk-m145c8ey.js";var m=65534,M=new Set(["/","/dev","/dev/shm","/run","/run/user","/tmp","/var","/var/tmp","/var/run","/home","/var/home","/root","/var/roothome","/mnt","/mnt/wslg"]);function eGn(){return M}import{readFile as P}from"fs/promises";async function D(){try{return F(await P("/proc/self/uid_map","utf8"))}catch{return}}function F(e){let t=[];for(let n of e.split(`
+`)){if(n.trim()==="")continue;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=N
+
+## "/mnt/wslg" hits=2
+- @93487228
+chunk-nr1qjajm.js.........V./dev.....Ly./dev/shm	......./run/user.........../var/tmp....On^./var/run.....-H./home...	.....V./var/home.......z;./var/roothome......... ./mnt	...Xu../mnt/wslg.......<XY.^[a-f0-9]{16}$..	....t.ENOTOWNED.......<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart...
+
+- @178758742
+nfs/root/chunk-m145c8ey.js";var m=65534,M=new Set(["/","/dev","/dev/shm","/run","/run/user","/tmp","/var","/var/tmp","/var/run","/home","/var/home","/root","/var/roothome","/mnt","/mnt/wslg"]);function eGn(){return M}import{readFile as P}from"fs/promises";async function D(){try{return F(await P("/proc/self/uid_map","utf8"))}catch{return}}function F(e){let t=[];for(let n of e.split(`
+`)){if(n.trim()==="")continue;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length
+
+## "tGn()" hits=2
+- @178759640
+r(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidA
+
+- @198269458
+);if(t!==void 0&&!s(c.uid))throw T("foreign_owner",Error("sockets directory is owned by another user \u2014 refusing to use it"),L(e,c))},s=(c)=>c===t,u=process.getgid?.(),r=await tGn();if(r?.uidCollapses)throw T("uid_collapse",Error("this process reads as the kernel overflow uid (user namespace without a uid mapping) \u2014 ownership cannot be verified; refusing to use the sockets directory"));s=(c)=>c===t&&!r?.uidCollapses;let _=eGn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await se(U(c)
+
+## "GWe()" hits=4
+- @178759991
+eturn;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s.count);return o===void 0?void 0:o.host
+
+- @198273243
+e(u,448)}catch(d){return oe(u,d,"Choose a different --messaging-socket-path whose directory you own and can make private (0700).")}}else try{await Ce(u)}catch(d){let w=an(d)?await GWe():void 0,g=w===void 0?void 0:ce(aIn(w)),p=g===void 0?void 0:x(g,"..");if(g===void 0||p===void 0||p===u)return oe(u,d,Re(d));let S=Oe(d);n(`[uds-messaging] sockets directory ${u} refused (${l(d)}${S?`; refused component: ${S}`:""}); trying the per-uid fallback ${p}`,{level:"warn"});try{await Ce(p)}catch(E){return oe
+
+- @198274346
+n();o().activeTokens=m;try{if(i.isExplicit){if(!await J(r,e))throw Error("listen EADDRINUSE on the requested socket path")}else e=await tn(r,e),o().activeSocketPath=e;{let p=await GWe(),S=process.getuid?.();o().peerDirOwnerUids=[...S!==void 0?[S]:[],...p!==void 0&&p!==S?[p]:[]]}r.unref();let d=Et(async()=>{n("[uds-messaging] Shutting down"),await Q(r,e,t)});_=d,await de(e,384);try{o().activeKeyFile=await jKn(e,m.peerToken,t,{sweepPermitted:await nte()}),gn()}catch(p){if(o().authRequired){n(`[uds
+
+- @202125324
+e):S(r,s),display:I(e,r)}}catch(i){_(i);let n=r.ok?"Idle subscription sent.":"The idle subscription could not be set up.";return{model:n,display:n}}}async function x(){let e=await GWe()??process.getuid?.();return e===void 0?[]:[e]}export{g as idleSelfTargetMessage,I as idleSubscribeDisplayLine,S as idleSubscribeFailedLine,m as idleSubscribedLine,N as idleSubscriptionLines,K as subscribeToPeerIdle};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+/
+
+## "await tGn" hits=1
+- @198269452
+L(e,c));if(t!==void 0&&!s(c.uid))throw T("foreign_owner",Error("sockets directory is owned by another user \u2014 refusing to use it"),L(e,c))},s=(c)=>c===t,u=process.getgid?.(),r=await tGn();if(r?.uidCollapses)throw T("uid_collapse",Error("this process reads as the kernel overflow uid (user namespace without a uid mapping) \u2014 ownership cannot be verified; refusing to use the sockets directory"));s=(c)=>c===t&&!r?.uidCollapses;let _=eGn(),m=async(c,O)=>{try{let v=O.isSymbolicLink()?x(await s
+
+## "await GWe" hits=3
+- @198273237
+wait de(u,448)}catch(d){return oe(u,d,"Choose a different --messaging-socket-path whose directory you own and can make private (0700).")}}else try{await Ce(u)}catch(d){let w=an(d)?await GWe():void 0,g=w===void 0?void 0:ce(aIn(w)),p=g===void 0?void 0:x(g,"..");if(g===void 0||p===void 0||p===u)return oe(u,d,Re(d));let S=Oe(d);n(`[uds-messaging] sockets directory ${u} refused (${l(d)}${S?`; refused component: ${S}`:""}); trying the per-uid fallback ${p}`,{level:"warn"});try{await Ce(p)}catch(E){ret
+
+- @198274340
+t m=UKn();o().activeTokens=m;try{if(i.isExplicit){if(!await J(r,e))throw Error("listen EADDRINUSE on the requested socket path")}else e=await tn(r,e),o().activeSocketPath=e;{let p=await GWe(),S=process.getuid?.();o().peerDirOwnerUids=[...S!==void 0?[S]:[],...p!==void 0&&p!==S?[p]:[]]}r.unref();let d=Et(async()=>{n("[uds-messaging] Shutting down"),await Q(r,e,t)});_=d,await de(e,384);try{o().activeKeyFile=await jKn(e,m.peerToken,t,{sweepPermitted:await nte()}),gn()}catch(p){if(o().authRequired){n
+
+- @202125318
+Capable):S(r,s),display:I(e,r)}}catch(i){_(i);let n=r.ok?"Idle subscription sent.":"The idle subscription could not be set up.";return{model:n,display:n}}}async function x(){let e=await GWe()??process.getuid?.();return e===void 0?[]:[e]}export{g as idleSelfTargetMessage,I as idleSubscribeDisplayLine,S as idleSubscribeFailedLine,m as idleSubscribedLine,N as idleSubscriptionLines,K as subscribeToPeerIdle};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Serv

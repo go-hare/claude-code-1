@@ -271,6 +271,7 @@ import sandboxToggle from './commands/sandbox-toggle/index.js'
 import tui, { tuiNonInteractive } from './commands/tui/index.js'
 import chrome from './commands/chrome/index.js'
 import stickers from './commands/stickers/index.js'
+import radio from './commands/radio/index.js'
 import advisor from './commands/advisor/index.js'
 import autocompact from './commands/autocompact/index.js'
 import autonomy from './commands/autonomy.js'
@@ -435,6 +436,7 @@ const COMMANDS = memoize((): Command[] => [
   status,
   statusline,
   stickers,
+  radio,
   tag,
   theme,
   feedback,

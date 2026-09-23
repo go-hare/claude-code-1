@@ -1,0 +1,82 @@
+# gold-248-fGt-D-primer
+
+## call "&&D()&&this.primer" hits=1
+@178505949 ),this.policy={},e?.userLayer==="retain"&&D()&&this.primer!==void 0){for(let[t,o]of this.retained)this.parsedFiles.set(t,o.parsed),this.prim
+
+## call "return D()?this.folderListings" hits=1
+@178507118 ")this.policy={}}primedFolderListing(e){return D()?this.folderListings.get(e):void 0}folderListingForPolicyWalk(e){if(!D())return;this.polic
+
+## call "if(!D())return" hits=9
+@178507193 e):void 0}folderListingForPolicyWalk(e){if(!D())return;this.policyWalks++;let t=this.folderListings.get(e);if(!this.walkedFolders.has(e)||t!
+@178507366 ,t??null);return t}noteWalkListing(e,t){if(!D())return;this.walkedFolders.set(e,t)}get policyWalkCount(){return this.policyWalks}policyInsta
+@179502725 t"}:ne(r.error)}async function Dgn(e,t){if(!D())return;let r=e.epoch;try{let o=await t.read(),u=o.kind==="seeded"?o.parsed:o.kind==="absent"
+@179522609 efault?t:void 0}async function Npn(t,e){if(!D())return;let s=e.epoch;await Promise.all([j(t,e),L(t,e),b("managed-settings file tier",()=>O(t
+@179533694 le read serves`)}}async function N(t,e){if(!D())return[];let s=e.epoch;try{let i=v(t,e,s);if(i!==void 0)return[...i.listings.map(({dir:g,nam
+
+## call "D()?this." hits=1
+@178507125 policy={}}primedFolderListing(e){return D()?this.folderListings.get(e):void 0}folderListingForPolicyWalk(e){if(!D())return;this.policyWalks+
+
+## def "function D(){" total=16 near=0
+@178167129 function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"conflict"} export{D,rtr}; .// @bun @bytecode // Claude Code is a Beta product per An
+
+## def "function D(){return" total=4 near=0
+@178167129 function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"conflict"} export{D,rtr}; .// @bun @bytecode // Claude Code is a Beta product per An
+
+## def "var D=" total=101 near=0
+@178367424 var D={};je(D,{checkLeaf:()=>bt,checkPattern:()=>kt,default:()=>D,nestedQuantifier:()=>ht,patternOf:()=>we,refuseProtoKey:()=>Et,statefulFlag:()=>ve,testsFromStart:()=>ho});var Y={};je(Y,{MATCH_DEPTH_
+
+## def "let D=" total=267 near=0
+
+## def "const D=" total=2 near=0
+
+## def "D=()=>" total=26 near=0
+
+## def "D=function" total=8 near=0
+
+## def ",D=()=>" total=5 near=0
+
+## def ";D=()=>{" total=0 near=0
+
+## def "export{D}" total=0 near=0
+
+## def "export function D" total=0 near=0
+
+## primer assignment hunt
+### ".primer=" bandHits=4
+@179527038 is.inFlight=null,this.followUpQueued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}async function $pn(t,e){if(!D()||t===void 0
+@179527063 lowUpQueued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==voi
+@179527322 d; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendRead
+@179527609 .whenIdle(),e.primer!==void 0)await L(t,e);let s=e.primer===void 0?[]:(await Promise.all([...kur(t).map((i)=>Dgn(e,i)),N(t,e)])).flat().filter((i)=>i!==void 0);if(Yl(s.le
+
+### "primer=" bandHits=4
+@179527039 s.inFlight=null,this.followUpQueued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}async function $pn(t,e){if(!D()||t===void 0)
+@179527064 owUpQueued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void
+@179527323 ; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadR
+@179527610 whenIdle(),e.primer!==void 0)await L(t,e);let s=e.primer===void 0?[]:(await Promise.all([...kur(t).map((i)=>Dgn(e,i)),N(t,e)])).flat().filter((i)=>i!==void 0);if(Yl(s.len
+
+### "this.primer=" bandHits=0
+
+### ".primer =" bandHits=0
+
+### "ra().primer" bandHits=0
+
+### "fGt).primer" bandHits=0
+
+### "primer:" bandHits=0
+
+## ALL function D(){ count=16
+@178167129 len=27 function D(){return e===!0}
+@193690936 len=90 function D(){let e;try{e=Be().homedir}catch{return!0}if(!e)return!0;return K(Ke())!==K(e)}
+@200707999 len=35 function D(){return Rw().storageV5}
+@201869446 len=21 function D(){k(),b()}
+@202068930 len=94 function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}
+@204889308 len=76 function D(){return pO()==="container"?"in the container":"on this machine"}
+@210003763 len=34 function D(){if(d)q(d());else S()}
+@218057258 len=24 function D(){this.yy={}}
+
+## import {D} near fGt lookback 2k
+t,e);var y=a;while(++d<p){c=l[d];var k=e[c],x=t[c];if(r)var Ve=a?r(x,k,c,t,e,s):r(k,x,c,e,t,s);if(!(Ve===void 0?k===x||i(k,x,o,r,s):Ve)){b=!1;break}y||(y=c=="constructor")}if(b&&!y){var I=e.constructor,F=t.constructor;if(I!=F&&(("constructor"in e)&&("constructor"in t))&&!(typeof I=="function"&&I instanceof I&&typeof F=="function"&&F instanceof F))b=!1}return s.delete(e),s.delete(t),b}var yt=yr;var Cr=N2(aw,"DataView"),j=Cr;var kr=N2(aw,"Promise"),q=kr;var xr=N2(aw,"Set"),gEe=xr;var Ar=N2(aw,"WeakMap"),W=Ar;var Ct="[object Map]",Tr="[object Object]",kt="[object Promise]",xt="[object Set]",At="[object WeakMap]",Tt="[object DataView]",Pr=Lde(j),Mr=Lde(VEe),wr=Lde(q),Lr=Lde(gEe),Rr=Lde(W),A=L2;if(j&&A(new j(new ArrayBuffer(1)))!=Tt||VEe&&A(new VEe)!=Ct||q&&A(q.resolve())!=kt||gEe&&A(new gEe)!=xt||W&&A(new W)!=At)A=function(e){var t=L2(e),o=t==Tr?e.constructor:void 0,r=o?Lde(o):"";if(r)switch(r){case Pr:return Tt;case Mr:return Ct;case wr:return kt;case Lr:return xt;case Rr:return At}return t};var lde=A;var Ir=1,Pt="[object Arguments]",Mt="[object Array]",G="[object Object]",Fr=Object.prototype,wt=Fr.hasOwnProperty;function Or(e,t,o,r,i,s){var a=Wm(e),l=Wm(t),p=a?Mt:lde(e),u=l?Mt:lde(t);p=p==Pt?G:p,u=u==Pt?G:u;var S=p==G,d=u==G,c=p==u;if(c&&Lne(e)){if(!Lne(t))return!1;a=!0,S=!1}if(c&&!S)return s||(s=new One),a||zYe(e)?E(e,t,o,r,i,s):at(e,t,p,o,r,i,s);if(!(o&Ir)){var f=S&&wt.call(e,"__wrapped__"),m=d&&wt.call(t,"__wrapped__");if(f||m){var b=f?e.value():e,y=m?t.value():t;return s||(s=new One),i(b,y,o,r,s)}}if(!c)return!1;return s||(s=new One),yt(e,t,o,r,i,s)}var Lt=Or;function Rt(e,t,o,r,i){if(e===t)return!0;if(e==null||t==null||!zC(e)&&!zC(t))return e!==e&&t!==t;return Lt(e,t,o,r,Rt,i)}var M=Rt;function Er(e,t){return M(e,t)}var ws=Er;import{basename as Dr,dirname as It}from"path";class K{#e;#t=new WeakMap;constructor(e){this.#e=e}of(e){let t=this.#t.get(e);if(t!==void 0)return t;let o=this.#e();return this.#t.set(e,o),o}}function qk(e){return{subscribe(t){return e().subscribe(t)},emit(...t){e().emit(...t)},clear(){e().clear()}}}class fGt{mergedSettings=null;perSource=n
+
+## tiny bool functions ending before fGt (last 30 function X(){return
+@178499447 function ao(){return[]}
+@178500115 function bo(){return!1}

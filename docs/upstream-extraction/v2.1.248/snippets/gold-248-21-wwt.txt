@@ -1,0 +1,162 @@
+# gold-248-21-wwt
+when=2026-09-20T05:53:33.126Z
+contract=wwt unique 248 hook+schema row copy; find callers + leftover host
+
+## wwt near@186237955 fn=kwt @186236662
+len=1293 sha=4bd07c15dae1a0e4
+exact247=0
+function kwt(){return S({continue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) - Permission updates"},"to deny":{behavior:'"deny"',message:"string (optional)",interrupt:"boolean (optional)"}}},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalContext:"string (optional)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}
+
+## 248 wwt( hits=7
+- #0 @133941665 ...........-.......	Qi......!....	..#..............-...\...L1e.....!....	..q..............-.......x0n.....!....	.................-.......	ug.x....!....	.................-...`...	s6.P....!@...	.................-...P...wwt(....!....	.................-.......DXe.....!@...	.................-.......	mg......!P...	.................-.......Q3t.....!@...	.................-.......	E7......!....	.................-.......MXe`....!....	..c.......
+- #1 @186237964 g (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(
+- #2 @186308528 suppressOriginalPrompt:Ve.suppressOriginalPrompt,...bn},Ht="deny";if(Ve.message)yield{message:Ve.message,...bn};if((ue==="PreToolUse"||ue==="PermissionRequest")&&Ve.outcome==="non_blocking_error"&&o)rA.noteHookFailure(o,wwt(ue,Ve.message?.type==="attachment"&&Ve.message.attachment.type==="hook_non_blocking_error"?Ve.message.attachment.stderr:""));if(Ve.timedOut&&Ve.hook.type==="prompt"&&ue==="Stop")yield{hook:Ve.hook,timedOut:!0};if(gn++,Ve
+- #3 @191294192 bs(C-j)<=cg&&j>=w-dg}function s6(d){return{steps:zc.map((C)=>({id:C,status:"pending"})),sessionMode:null,startedAt:d,hasStructuredSteps:!1,terminal:!1,dismissed:!1,sawLiveFrame:!1,hadLiveCycle:!1,queuedCount:0}}function wwt(d){let C=d.data?.extra;return{stepId:typeof C?.step_id==="string"?Qi(C.step_id):null,stepStatus:typeof C?.step_status==="string"?C.step_status:null}}function DXe(d,C,w,F,j){let H=C.data?.extra,{stepId:W,stepStatus:G}=wwt
+- #4 @191294413 wt(d){let C=d.data?.extra;return{stepId:typeof C?.step_id==="string"?Qi(C.step_id):null,stepStatus:typeof C?.step_status==="string"?C.step_status:null}}function DXe(d,C,w,F,j){let H=C.data?.extra,{stepId:W,stepStatus:G}=wwt(C),re=d.terminal&&W!==null&&G!==null?{...s6(F),dismissed:d.hadLiveCycle,hadLiveCycle:d.hadLiveCycle}:d;if(W!==null&&G!==null&&!re.sawLiveFrame&&ug(C,F,j))re={...re,sawLiveFrame:!0};if(typeof H?.session_mode==="string"){l
+- #5 @203409543 id)===null?null:e.session_id.toLowerCase();if(t===null||t===this.stamped.toLowerCase())return;this.sessionIdChangeCount+=1,this.stamped=t,this.ports.onWorkerSessionId(t)}reduceBootstrap(e){let t=this.ports.clock.now(),o=wwt(e);if(o.stepId==="start_cc"&&o.stepStatus==="completed"&&!L1e(e,t)){let w=this.bootCountedByFrameAt!==null&&t-this.bootCountedByFrameAt<dt;if(this.bootCountedByFrameAt=null,!w&&this.startCcCountsAsWorkerUp(t))this.lastWo
+- #6 @203410441 (u,e,"",t,this.connectEpoch);if(this.bootstrap=p,this.ports.onProvisioning?.(p,d?u:null),p.terminal||p.steps.some((w)=>w.status==="failed"))this.narrateAfterReady=!1;if(this.workerReady)return;let{stepId:g,stepStatus:S}=wwt(e);if(g!==null&&S==="failed"){this.releaseHeld(),this.ports.outbound.failQueued("the cloud container failed to start","step_failed"),this.signalWorkerReady("step_failed");return}if(g==="start_cc"&&S==="completed")this.si
+
+## 248 wwt(e hits=3
+- #0 @186237964 g (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e
+- #1 @203409543 id)===null?null:e.session_id.toLowerCase();if(t===null||t===this.stamped.toLowerCase())return;this.sessionIdChangeCount+=1,this.stamped=t,this.ports.onWorkerSessionId(t)}reduceBootstrap(e){let t=this.ports.clock.now(),o=wwt(e);if(o.stepId==="start_cc"&&o.stepStatus==="completed"&&!L1e(e,t)){let w=this.bootCountedByFrameAt!==null&&t-this.bootCountedByFrameAt<dt;if(this.bootCountedByFrameAt=null,!w&&this.startCcCountsAsWorkerUp(t))this.lastWor
+- #2 @203410441 (u,e,"",t,this.connectEpoch);if(this.bootstrap=p,this.ports.onProvisioning?.(p,d?u:null),p.terminal||p.steps.some((w)=>w.status==="failed"))this.narrateAfterReady=!1;if(this.workerReady)return;let{stepId:g,stepStatus:S}=wwt(e);if(g!==null&&S==="failed"){this.releaseHeld(),this.ports.outbound.failQueued("the cloud container failed to start","step_failed"),this.signalWorkerReady("step_failed");return}if(g==="start_cc"&&S==="completed")this.sig
+
+## 248 function wwt hits=2
+- #0 @186237955 xt:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt
+- #1 @191294183 )&&Math.abs(C-j)<=cg&&j>=w-dg}function s6(d){return{steps:zc.map((C)=>({id:C,status:"pending"})),sessionMode:null,startedAt:d,hasStructuredSteps:!1,terminal:!1,dismissed:!1,sawLiveFrame:!1,hadLiveCycle:!1,queuedCount:0}}function wwt(d){let C=d.data?.extra;return{stepId:typeof C?.step_id==="string"?Qi(C.step_id):null,stepStatus:typeof C?.step_status==="string"?C.step_status:null}}function DXe(d,C,w,F,j){let H=C.data?.extra,{stepId:W,stepStatus:G}=ww
+
+## 248 hook output invalid:  hits=2
+- #0 @96922449 ct on it.......noA.for PreToolUse.......9..to allow....p)..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. hook failed to run.........answer: ........answer question.......s.old_cwd......E..new_cwd.'...E...CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS......k.rewakeMessage...	....,..skipSpill.....
+- #1 @186238070 g (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="";for(let k of r){let 
+
+## 248 hook failed to run hits=2
+- #0 @96922505 )..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. hook failed to run.........answer: ........answer question.......s.old_cwd......E..new_cwd.'...E...CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS......k.rewakeMessage...	....,..skipSpill.......+.y.served:.
+...$Tg.remoteCall......e...callerSessi
+- #1 @186238155 t on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="";for(let k of r){let E=k;if(typeof E?.question!=="string")continue;u||=E.question;let C=Array.isArray(E
+
+## 248 function olt hits=2
+- #0 @186238175 function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="";for(let k of r){let E=k;if(typeof E?.question!=="string")continue;u||=E.question;let C=Array.isArray(E.options)?E.op
+- #1 @216402098 .v===a?u.w:u.v,d=i.edge(h,a),f=Fn(d)?0:d.weight;i.setEdge(h,a,{weight:e.edge(u).weight+f})}),Object.prototype.hasOwnProperty.call(s,"minRank")&&i.setNode(a,{borderLeft:s.borderLeft[t],borderRight:s.borderRight[t]}))}),i}function olt(e){for(var t;e.hasNode(t=Gm("_root")););return t}var $ge=F(()=>{"use strict";Ln();qo();o(Bge,"buildLayerGraph");o(olt,"createRootNode")});function Fge(e,t){for(var r=0,n=1;n<t.length;++n)r+=llt(e,t[n-1],t[n]);return r}f
+
+## 248 Eve.length hits=1
+- #0 @186238101  model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="";for(let k of r){let E=k;if(typeof E?.que
+
+## 248 startsWith(Eve) hits=1
+- #0 @186238042 p"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions
+
+## caller wwt( near@133941665 fn= @-1
+NO_FN
+
+## caller wwt( near@186237964 fn=kwt @186236662
+len=1293 sha=4bd07c15dae1a0e4
+exact247=0
+function kwt(){return S({continue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) - Permission updates"},"to deny":{behavior:'"deny"',message:"string (optional)",interrupt:"boolean (optional)"}}},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalContext:"string (optional)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}
+
+## caller wwt( near@186308528 fn=sn @186306476
+len=239 sha=7143373479cb01ea
+exact247=0
+function sn(fn,Ve,bn){let mn=Ze.get(fn);if(!mn||bn===0)return;let Sn=pn.get(mn);if(!Sn)Sn={additionalContextChars:0,classifierContextChars:0,systemMessageChars:0,initialUserMessageChars:0,hookSuccessStdoutChars:0},pn.set(mn,Sn);Sn[Ve]+=bn}
+
+## caller wwt( near@191294192 fn=s6 @191293993
+len=190 sha=85b8e3a8dc8d59ff
+exact247=0
+function s6(d){return{steps:zc.map((C)=>({id:C,status:"pending"})),sessionMode:null,startedAt:d,hasStructuredSteps:!1,terminal:!1,dismissed:!1,sawLiveFrame:!1,hadLiveCycle:!1,queuedCount:0}}
+
+## caller wwt( near@191294413 fn=DXe @191294345
+len=1049 sha=aebbfc60c676eb69
+exact247=0
+function DXe(d,C,w,F,j){let H=C.data?.extra,{stepId:W,stepStatus:G}=wwt(C),re=d.terminal&&W!==null&&G!==null?{...s6(F),dismissed:d.hadLiveCycle,hadLiveCycle:d.hadLiveCycle}:d;if(W!==null&&G!==null&&!re.sawLiveFrame&&ug(C,F,j))re={...re,sawLiveFrame:!0};if(typeof H?.session_mode==="string"){let ee=H.session_mode;if((ee==="new"||ee==="resume"||ee==="resume-cached"||ee==="setup-only")&&re.sessionMode!==ee)re={...re,sessionMode:ee}}if(typeof H?.expected_steps==="string"){let ee=se(H.expected_steps.split(",").map((ie)=>Qi(ie)).filter((ie)=>ie!=="")).slice(0,Wc);if(ee.length>0){let ie=new Map(re.steps.map((le)=>[le.id,le])),we=ee.map((le)=>ie.get(le)??{id:le,status:"pending"}),me=re.steps.filter((le)=>!ee.includes(le.id)&&le.status!=="pending");re={...re,steps:[...me,...we]}}}if(W!==null&&G!==null)re=mg(re,{stepId:W,stepStatus:G,extra:H,line:w,now:F});else if(w!==""){let ee=re.steps.findIndex((ie)=>ie.status==="running");if(ee!==-1&&re.steps[ee].detail!==w){let ie=re.steps.slice();ie[ee]={...ie[ee],detail:w},re={...re,steps:ie}}}return re}
+
+## caller wwt( near@203409543 fn=Ee @203402639
+len=96 sha=bdda1151c78129c5
+exact247=0
+function Ee(e){return e.type==="stream_event"||e.type==="system"&&e.subtype==="thinking_tokens"}
+
+## caller wwt( near@203410441 fn=Ee @203402639
+len=96 sha=bdda1151c78129c5
+exact247=0
+function Ee(e){return e.type==="stream_event"||e.type==="system"&&e.subtype==="thinking_tokens"}
+
+## caller function olt near@186238175 fn=wwt @186237955
+len=220 sha=fba5d4f0b9ee6440
+exact247=0
+function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}
+
+## caller function olt near@216402098 fn=Bge @216401583
+len=515 sha=d2ebcb4176c9c586
+exact247=0
+function Bge(e,t,r){var n=olt(e),i=new on({compound:!0}).setGraph({root:n}).setDefaultNodeLabel(function(a){return e.node(a)});return st(e.nodes(),function(a){var s=e.node(a),l=e.parent(a);(s.rank===t||s.minRank<=t&&t<=s.maxRank)&&(i.setNode(a),i.setParent(a,l||n),st(e[r](a),function(u){var h=u.v===a?u.w:u.v,d=i.edge(h,a),f=Fn(d)?0:d.weight;i.setEdge(h,a,{weight:e.edge(u).weight+f})}),Object.prototype.hasOwnProperty.call(s,"minRank")&&i.setNode(a,{borderLeft:s.borderLeft[t],borderRight:s.borderRight[t]}))}),i}
+
+## caller hook output invalid:  near@96922449 fn= @-1
+NO_FN
+
+## caller hook output invalid:  near@186238070 fn=wwt @186237955
+len=220 sha=fba5d4f0b9ee6440
+exact247=0
+function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}
+
+# window after kwt / wwt / olt
+function kwt(){return S({continue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) - Permission updates"},"to deny":{behavior:'"deny"',message:"string (optional)",interrupt:"boolean (optional)"}}},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalContext:"string (optional)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="";for(let k of r){let E=k;if(typeof E?.question!=="string")continue;u||=E.question;let C=Array.isArray(E.options)?E.options.flatMap((M)=>{let L=M;return typeof L?.label==="string"?[{label:L.label,description:typeof L.description==="string"?L.description:""}]:[]}):[];if(C.length>0)o.push({question:E.question,options:C})}let p=o[0]?.options.map((k)=>k.label).join(" \xB7 ");return{text:u?mK(`answer: ${u}${p?` (${p})`:""}`):"answer question",questions:o.length>0?o:void 0}}function mK(e){return za(e.replace(/\s+/g," ").trim(),np)}var ENn=["worker-sandbox","elicitation","sandbox","managed-settings","permission","dialog"],rA=(()=>{let e=$e(),t={sandbox:null,permission:null,"worker-sandbox":null,elicitation:null,"managed-settings":null,dialog:null},r=null,o=8,u=240,p=new Map;function g(C){return za(C.replace(/[^\x20-\x7e]/g," ").replace(/ {2,}/g," ").trim(),u)}function k(C){let M=C.toolUseID===void 0?void 0:p.get(C.toolUseID);return M===void 0?C:{...C,text:mK(`${g(M)} \xB7 ${C.text}`)}}function E(){let C=null;for(let M of ENn){let L=t[M];if(L){C=k(L);break}}if(C?.text===r?.text)return;r=C,e.emit(C)}return{subscribe:e.subscribe,emit(C,M="permission"){let L=C===null?null:typeof C==="string"?{text:C}:C;if(t[M]?.text===L?.text)return;t[M]=L,E()},noteHookFailure(C,M){if(p.delete(C),p.set(C,M),p.size>o){let L=t.permission?.toolUseID;for(let N of p.keys())if(N!==L){p.delete(N);break}}E()},clearHookFailure(C){p.delete(C)}}})();async function n5(e,t,r,o,u=Pi){let p=_a(r.agentContext),g={...Aa(e,te()),hook_event_name:"PreCompact",trigger:t.trigger,custom_instructions:t.customInstructions},k=await Mw({session:e,hookInput:g,matchQuery:t.trigger,signal:o,timeoutMs:u,storageV5:r.storageV5,credentials:r.credentials});if(k.length===0)return{};let E=k.filter((N)=>N.succeeded&&!N.blocked&&N.output.trim().length>0).map((N)=>N.output.trim()),C=[];for(let N of k){if(N.cancelled)continue;if(N.succeeded&&!N.blocked)if(N.output.trim())C.push(`PreCompact [${N.command}] completed successfully: ${N.output.trim()}`);else C.push(`PreCompact [${N.command}] completed successfully`);else if(N.output.trim())C.push(`PreCompact [${N.command}] failed: ${N.output.trim()}`);else C.push(`PreCompact [${N.command}] failed`)}let M=k.filter((N)=>N.blocked),L=M.length>0?M.map((N)=>{let U=N.output.trim();return`[${N.command}]${U?`: ${U}`:""}`}).join(`
+`):void 0;if(p)return{...L!==void 0&&{blockedBy:L}};return{newCustomInstructions:E.length>0?E.join(`
+
+`):void 0,userDisplayMessage:C.length>0?C.join(`
+`):void 0,...L!==void 0&&{blockedBy:L}}}async function sIe(e,t,r,o,u=Pi){if(_a(r.agentContext))return{};let p={...Aa(e,te()),hook_event_name:"PostCompact",trigger:t.trigger,compact_summary:t.compactSummary},g=await Mw({session:e,hookInput:p,matchQuery:t.trigger,signal:o,timeoutMs:u,storageV5:r.storageV5,credentials:r.credentials});if(g.length===0)return{};let k=[];for(let E of g
+
+## 247 hook output invalid hits=0
+
+## 247 hook failed to run hits=0
+
+## 247 function wwt hits=0
+
+## 247 startsWith(Eve) hits=0
+
+## 247 Hook JSON output validation failed hits=1
+- #0 @218251204 utput is missing required field "hookEventName"';let i=r.slice(1).map((a)=>`  - ${a.path.join(".")||"(root)"}: ${a.message}`).join(`
+`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=awa
+
+## 248 lastEmittedDetail hits=7
+- #0 @97478108 stop-hook-error.......e.Stop hook error occurred . ...../... to see.....y...Stop hook cancelled (abort or stream teardown)..........tengu_stop_hook_error.......K...Stop hook failed: ........l.watchedForSurfaces......M...lastEmittedDetail.........h.onClassified......;.Brief mode enforcement failed: ......... You MUST call the .3.....$. tool to complete this request. Call this tool now..%.......StructuredOutput enforcement failed: ...:... .N.[.g.o.a.l.]. 
+- #1 @185894354 !e||Cc(u)!=="main"||o.agentId||wo()&&!o.abortController.signal.aborted)return;let p=YMn,g=p.detectSurfaces(D()&&o.storageV5?await p.watchedForSurfaces(o.storageV5):void 0),k=p.sinksFor(g),E=p.engineFor(k);if(!E)return;e.lastEmittedDetail="";let C=o.getAppState().postTurnSummary;if(k.has("summary"))yield{type:"post_turn_summary",value:null};e.onClassified=(G,ue)=>{if(ue||!k.has("summary"))return;if(G.source==="no-text-turn"&&G.detail===""){if(C)o.setAppS
+- #2 @185969761 Xa=ec?K1().sinksFor(ec):null,Xd=Xa?K1().engineFor(Xa):null,yp=eT(Ve);if(Mh&&yp&&Xd&&Cc(E)==="main"&&!Ve.agentId){let Cn=Xa.has("summary"),ao=Xa.has("headline");yp.onClassified=(os,Ti)=>{if(!Ti||!(Cn||ao)||os.detail===yp.lastEmittedDetail)return;if(yp.lastEmittedDetail=os.detail,Cn)Ve.sessionState?.notifyMetadataChanged({task_summary:os.detail});if(ao){let gs=os.detail?{text:os.detail,at:Date.now()}:null;Ve.setAppState((mi)=>mi.taskSummary?.text===gs?.te
+- #3 @185969792 =Xa?K1().engineFor(Xa):null,yp=eT(Ve);if(Mh&&yp&&Xd&&Cc(E)==="main"&&!Ve.agentId){let Cn=Xa.has("summary"),ao=Xa.has("headline");yp.onClassified=(os,Ti)=>{if(!Ti||!(Cn||ao)||os.detail===yp.lastEmittedDetail)return;if(yp.lastEmittedDetail=os.detail,Cn)Ve.sessionState?.notifyMetadataChanged({task_summary:os.detail});if(ao){let gs=os.detail?{text:os.detail,at:Date.now()}:null;Ve.setAppState((mi)=>mi.taskSummary?.text===gs?.text?mi:{...mi,taskSummary:gs})}}
+- #4 @196875031 Date.now(),accumulatedOutputs:{},lastClassifyAt:0,capturedIntent:"",inFlight:null,nameInFlight:!1,dispatchEmitted:!1,latestAsk:"",kicked:!1,lastMsgCount:0,permissionBridgeSubscribed:!1,bridgeWriteChain:Promise.resolve(),lastEmittedDetail:"",lastMidturnLlmAt:0,lastMidturnLlmDetail:"",midturnLlmIntervalMs:0,midturnLlmEpoch:0,lastResult:null}}var be=15000,De=5000,Be=8000,xe=240000,pe=2048;function oe(){return R("tengu_bg_classifier_config",{useSmallFastMod
+- #5 @196879912  Ee(t,e.children??null,l,i);return{transcriptPath:t,prevOffset:l,scan:r}}function ce(e){e.midturnLlmEpoch++,e.lastMidturnLlmAt=0,e.lastMidturnLlmDetail="",e.midturnLlmIntervalMs=0}function an(e,i){if(e.kicked=!1,ce(e),e.lastEmittedDetail="",e.lastClassifyAt=0,!Ha())return;let t=Kn(i);e.bridgeWriteChain=e.bridgeWriteChain.then(()=>e.inFlight??void 0).catch(()=>{}).then(async()=>{let l=await nr(t,e.storageV5);if(!l)return;let{transcriptPath:r,prevOffset:o
+- #6 @196881603 rminalAt?I:A.firstTerminalAt},{state:o.state,detail:m,tempo:T,needs:C??""},e.storageV5),le(e.storageV5,i,{at:I,state:o.state,detail:m,text:m})}).catch(ea),await e.bridgeWriteChain,e.prevState=o.state,e.kicked=!1,ce(e),e.lastEmittedDetail="",e.lastClassifyAt=0}var je=3,$e=/^(unspecified|untitled|unnamed)\b|^(unknown|no) (request|task|job|input)\b/,qe=/^(i|i['\u2019]m|i['\u2019]ve|i['\u2019]ll|i['\u2019]d|sorry|unfortunately|unable|please|cannot|can['\u20
+
+## 248 onClassified hits=7
+- #0 @97471819 e .....	.tengu_dead_probe_tool_alias_exec........tool_isolation_denied...%...f}..tengu_tool_use_isolation_latch_denied.........t.runToolUse error........tool_unexpected_error.......;D..Error calling tool.........isolationClassifiedAs...
+.....Y.runToolUse......S5..tengu_tool_use_progress.I....c.. was called with input that could not be parsed as JSON.
+You sent (first .......|...
+Common causes: unescaped backslashes in file paths (use / or \\), unes
+- #1 @97478136  hook error occurred . ...../... to see.....y...Stop hook cancelled (abort or stream teardown)..........tengu_stop_hook_error.......K...Stop hook failed: ........l.watchedForSurfaces......M...lastEmittedDetail.........h.onClassified......;.Brief mode enforcement failed: ......... You MUST call the .3.....$. tool to complete this request. Call this tool now..%.......StructuredOutput enforcement failed: ...:... .N.[.g.o.a.l.]. .e.v.a.l.u.a.t.i.o.n. .
+- #2 @185555409 f(rn)Jt+=`
+
+${rn}`;return U(Jt)}let fe=pe.data,we=oF(e,t,fe);if(we.denyMessage)return s("tengu_tool_use_isolation_latch_denied",{toolName:Rn(e.name),toolUseID:L,isMcp:e.isMcp??!1,isolationLatch:Ce(we.activeLatch),isolationClassifiedAs:Ce(we.classifiedAs),replInnerCall:!0}),U(we.denyMessage);let Pe=fe,Ie,Te;if(wo()&&!t.abortController.signal.aborted)await If();let xe={...t,options:{...t.options,tools:p},messages:[...t.messages,...u.map((Jt)=>_c({con
+- #3 @185816022 return}let we=oF(g,o,e.input);if(we.denyMessage){y(pe,"tool_isolation_denied"),s("tengu_tool_use_isolation_latch_denied",{toolName:Rn(g.name),toolUseID:ke(e.id),isMcp:g.isMcp??!1,isolationLatch:Ce(we.activeLatch),isolationClassifiedAs:Ce(we.classifiedAs),queryChainId:ke(o.queryTracking?.chainId),queryDepth:o.queryTracking?.depth,...N&&{mcpServerType:c(N)},...U&&{mcpServerBaseUrl:wf(U)},...E&&{requestId:ke(E)},...DB(g.name,ue),...g.mcpInfo?.pluginTe
+- #4 @185894478 await p.watchedForSurfaces(o.storageV5):void 0),k=p.sinksFor(g),E=p.engineFor(k);if(!E)return;e.lastEmittedDetail="";let C=o.getAppState().postTurnSummary;if(k.has("summary"))yield{type:"post_turn_summary",value:null};e.onClassified=(G,ue)=>{if(ue||!k.has("summary"))return;if(G.source==="no-text-turn"&&G.detail===""){if(C)o.setAppState((fe)=>fe.postTurnSummary===C?fe:{...fe,postTurnSummary:C}),o.sessionState?.notifyMetadataChanged({post_turn_summar
+- #5 @185969704 await K1().watchedForSurfaces(Ve.storageV5):void 0):null,Xa=ec?K1().sinksFor(ec):null,Xd=Xa?K1().engineFor(Xa):null,yp=eT(Ve);if(Mh&&yp&&Xd&&Cc(E)==="main"&&!Ve.agentId){let Cn=Xa.has("summary"),ao=Xa.has("headline");yp.onClassified=(os,Ti)=>{if(!Ti||!(Cn||ao)||os.detail===yp.lastEmittedDetail)return;if(yp.lastEmittedDetail=os.detail,Cn)Ve.sessionState?.notifyMetadataChanged({task_summary:os.detail});if(ao){let gs=os.detail?{text:os.detail,at:Date.
+- #6 @196886871 "idle"||f.tempo==="blocked")f.tempo="active"}else if(!m&&f.tempo==="active"&&f.state==="working")f.tempo="idle";if(f.state!==e.prevState)e.prevState=f.state,e.prevStateSince=Date.now();if(e.accumulatedOutputs=f.output,e.onClassified?.(f,m),!Ha()){if(!m)e.lastMsgCount=k;if(I??L6e())await tMe({state:f.state,detail:f.detail,tempo:Nw(f.state)?"idle":f.tempo,needs:f.tempo==="blocked"?f.needs:void 0},e.storageV5);return}let T=l||e.capturedIntent,C=await 
+
+## 247 lastEmittedDetail hits=7
+- #0 @200499288 accumulatedOutputs......!C].lastClassifyAt......\.).capturedIntent......<...nameInFlight........dispatchEmitted.	...5.&.latestAsk.......
+Tp.lastMsgCount........permissionBridgeSubscribed..........bridgeWriteChain....M...lastEmittedDetail...........lastMidturnLlmAt....F...lastMidturnLlmDetail....'...midturnLlmIntervalMs........midturnLlmEpoch.......-.tengu_bg_classifier_config......3...useSmallFastModel.......C...disableThinking.....!...midTurnLlmDebounc
+- #1 @215691713 Date.now(),accumulatedOutputs:{},lastClassifyAt:0,capturedIntent:"",inFlight:null,nameInFlight:!1,dispatchEmitted:!1,latestAsk:"",kicked:!1,lastMsgCount:0,permissionBridgeSubscribed:!1,bridgeWriteChain:Promise.resolve(),lastEmittedDetail:"",lastMidturnLlmAt:0,lastMidturnLlmDetail:"",midturnLlmIntervalMs:0,midturnLlmEpoch:0,lastResult:null}}function Xxt(){return we("tengu_bg_classifier_config",{useSmallFastModel:!0,disableThinking:!0,midTurnLlmDebounceMs
+- #2 @215696602 (n,e.children??null,r,t);return{transcriptPath:n,prevOffset:r,scan:o}}function Qxt(e){e.midturnLlmEpoch++,e.lastMidturnLlmAt=0,e.lastMidturnLlmDetail="",e.midturnLlmIntervalMs=0}function mts(e,t){if(e.kicked=!1,Qxt(e),e.lastEmittedDetail="",e.lastClassifyAt=0,!Om())return;let n=bA(t);e.bridgeWriteChain=e.bridgeWriteChain.then(()=>e.inFlight??void 0).catch(()=>{}).then(async()=>{let r=await zd(n,e.storageV5);if(!r)return;let{transcriptPath:o,prevOffset:s
+- #3 @215698302 inalAt?g:m.firstTerminalAt},{state:s.state,detail:l,tempo:h,needs:y??""},e.storageV5),Mqe(e.storageV5,t,{at:g,state:s.state,detail:l,text:l})}).catch(of),await e.bridgeWriteChain,e.prevState=s.state,e.kicked=!1,Qxt(e),e.lastEmittedDetail="",e.lastClassifyAt=0}async function bts(e,t,n,r){let o=await ZQn(void 0,e.storageV5).catch(()=>[]),s=new Set(o.filter((a)=>!ev(a.state.state)&&a.state.name).map((a)=>a.state.name)),i="";for(let a=0;a<hts;a++){let l=s.s
+- #4 @215718545 e||Ba(o)!=="main"||r.agentId||ap()&&!r.abortController.signal.aborted)return;let s=Fts,i=s.detectSurfaces(Ne()&&r.storageV5?await s.watchedForSurfaces(r.storageV5):void 0),a=s.sinksFor(i),l=s.engineFor(a);if(!l)return;e.lastEmittedDetail="";let c=r.getAppState().postTurnSummary;if(a.has("summary"))yield{type:"post_turn_summary",value:null};e.onClassified=(g,h)=>{if(h||!a.has("summary"))return;if(g.source==="no-text-turn"&&g.detail===""){if(c)r.setAppSta
+- #5 @215798356 Mr=Ao?hye().sinksFor(Ao):null,lo=Mr?hye().engineFor(Mr):null,_o=FL(W);if(uw&&_o&&lo&&Ba(l)==="main"&&!W.agentId){let ct=Mr.has("summary"),Ln=Mr.has("headline");_o.onClassified=(gr,er)=>{if(!er||!(ct||Ln)||gr.detail===_o.lastEmittedDetail)return;if(_o.lastEmittedDetail=gr.detail,ct)W.sessionState?.notifyMetadataChanged({task_summary:gr.detail});if(Ln){let Fr=gr.detail?{text:gr.detail,at:Date.now()}:null;W.setAppState((Wr)=>Wr.taskSummary?.text===Fr?.text
+- #6 @215798387 o=Mr?hye().engineFor(Mr):null,_o=FL(W);if(uw&&_o&&lo&&Ba(l)==="main"&&!W.agentId){let ct=Mr.has("summary"),Ln=Mr.has("headline");_o.onClassified=(gr,er)=>{if(!er||!(ct||Ln)||gr.detail===_o.lastEmittedDetail)return;if(_o.lastEmittedDetail=gr.detail,ct)W.sessionState?.notifyMetadataChanged({task_summary:gr.detail});if(Ln){let Fr=gr.detail?{text:gr.detail,at:Date.now()}:null;W.setAppState((Wr)=>Wr.taskSummary?.text===Fr?.text?Wr:{...Wr,taskSummary:Fr})}},_

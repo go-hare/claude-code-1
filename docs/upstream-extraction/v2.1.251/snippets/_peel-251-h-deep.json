@@ -1,0 +1,839 @@
+{
+  "hitTable": {
+    "desktop_session_id": {
+      "hits": 2,
+      "offs": [
+        100827420,
+        196618994
+      ]
+    },
+    "No agent named": {
+      "hits": 4,
+      "offs": [
+        100821596,
+        196600322,
+        196619042,
+        196627569
+      ]
+    },
+    "shape of a Claude Desk": {
+      "hits": 2,
+      "offs": [
+        100827475,
+        196619092
+      ]
+    },
+    "Held message from another session": {
+      "hits": 2,
+      "offs": [
+        92476648,
+        203267986
+      ]
+    },
+    "not reachable": {
+      "hits": 25,
+      "offs": [
+        88504974,
+        94080908,
+        94976408,
+        94998347,
+        95710103,
+        99359746,
+        99844366,
+        99866632,
+        99986018,
+        99996662,
+        178857648,
+        178859870,
+        183655854,
+        190547503,
+        192110369,
+        193995168,
+        196754624,
+        196763531,
+        202239172,
+        205437420
+      ]
+    },
+    "github_preflight_failed": {
+      "hits": 4,
+      "offs": [
+        96951920,
+        185749078,
+        185759412,
+        185765915
+      ]
+    },
+    "github_preflight_ok": {
+      "hits": 2,
+      "offs": [
+        96951892,
+        185749056
+      ]
+    },
+    "transient": {
+      "hits": 289,
+      "offs": [
+        68493313,
+        88847470,
+        89033381,
+        92210501,
+        92318860,
+        92324881,
+        92558581,
+        92558604,
+        93368321,
+        93424969,
+        93429292,
+        93441795,
+        93452184,
+        93452566,
+        93455083,
+        93617087,
+        94118965,
+        94119029,
+        94414008,
+        94552084
+      ]
+    },
+    "recentRelayFailures": {
+      "hits": 3,
+      "offs": [
+        93946044,
+        204183409,
+        204219895
+      ]
+    },
+    "names the host and reason": {
+      "hits": 1,
+      "offs": [
+        204219936
+      ]
+    },
+    "host-set initial": {
+      "hits": 0,
+      "offs": []
+    },
+    "hostSetInitial": {
+      "hits": 0,
+      "offs": []
+    },
+    "hostInitialModel": {
+      "hits": 0,
+      "offs": []
+    },
+    "initialModelOnly": {
+      "hits": 0,
+      "offs": []
+    },
+    "skipModelChanged": {
+      "hits": 0,
+      "offs": []
+    },
+    "modelChanged:false": {
+      "hits": 0,
+      "offs": []
+    },
+    "modelChanged:!0": {
+      "hits": 0,
+      "offs": []
+    },
+    "modelChanged:!1": {
+      "hits": 1,
+      "offs": [
+        185878389
+      ]
+    },
+    "VSCode": {
+      "hits": 42,
+      "offs": [
+        94057484,
+        95397774,
+        95397802,
+        96851849,
+        97636817,
+        101538736,
+        101538818,
+        180439318,
+        182428402,
+        182428644,
+        182434087,
+        182434117,
+        182434164,
+        184274270,
+        190014326,
+        190037179,
+        190037380,
+        190040309,
+        190040460,
+        190049139
+      ]
+    },
+    "[VSCode]": {
+      "hits": 16,
+      "offs": [
+        96851848,
+        184274269,
+        190014325,
+        190037178,
+        190037379,
+        190040308,
+        190040459,
+        190049138,
+        190060210,
+        190062984,
+        190085789,
+        190085902,
+        190086026,
+        190091133,
+        190096147,
+        190096386
+      ]
+    },
+    "Bedrock, Foundry, or Vertex": {
+      "hits": 0,
+      "offs": []
+    },
+    "Amazon Bedrock, Microsoft Foundry, or Vertex AI": {
+      "hits": 2,
+      "offs": [
+        94024612,
+        199299384
+      ]
+    },
+    "third-party provider setup": {
+      "hits": 0,
+      "offs": []
+    },
+    "footer pill": {
+      "hits": 2,
+      "offs": [
+        180879521,
+        180947091
+      ]
+    },
+    "Remote Control banner": {
+      "hits": 0,
+      "offs": []
+    },
+    "SDKFooterIndicator": {
+      "hits": 2,
+      "offs": [
+        180879544,
+        180947130
+      ]
+    },
+    "kind:\"error\"": {
+      "hits": 202,
+      "offs": [
+        178983929,
+        183707656,
+        183708490,
+        183709070,
+        183857307,
+        184531391,
+        186262399,
+        186262547,
+        187285149,
+        187397128,
+        187399832,
+        187400252,
+        187401350,
+        189910149,
+        189910330,
+        189910661,
+        189910857,
+        189912194,
+        189913044,
+        189914119
+      ]
+    },
+    "Remote Control is disabled by your organization": {
+      "hits": 11,
+      "offs": [
+        92316935,
+        98038272,
+        98042240,
+        99398511,
+        182518013,
+        182518456,
+        191665475,
+        192154140,
+        192154957,
+        205841911,
+        205842745
+      ]
+    },
+    "quiet notice": {
+      "hits": 0,
+      "offs": []
+    },
+    "from was the agent type": {
+      "hits": 0,
+      "offs": []
+    },
+    "from:e.agentType": {
+      "hits": 0,
+      "offs": []
+    },
+    "from:t.agentType": {
+      "hits": 0,
+      "offs": []
+    },
+    "from:e.type": {
+      "hits": 0,
+      "offs": []
+    },
+    "agentType as from": {
+      "hits": 0,
+      "offs": []
+    },
+    "retry after": {
+      "hits": 7,
+      "offs": [
+        99789052,
+        100718866,
+        180987134,
+        190981421,
+        196406567,
+        201107932,
+        207381282
+      ]
+    },
+    "try again": {
+      "hits": 327,
+      "offs": [
+        82437184,
+        82437340,
+        82527608,
+        82550548,
+        82550792,
+        82550941,
+        82551108,
+        82596509,
+        82596581,
+        82596655,
+        82853310,
+        84463953
+      ]
+    },
+    "GitHub is temporarily": {
+      "hits": 0,
+      "offs": []
+    },
+    "transient failure": {
+      "hits": 13,
+      "offs": [
+        97121945,
+        98464610,
+        99259777,
+        100544139,
+        181217925,
+        181358244,
+        187779904,
+        188555588,
+        188556528,
+        188558222,
+        188558630,
+        188670454
+      ]
+    },
+    "connection to GitHub": {
+      "hits": 0,
+      "offs": []
+    },
+    "could not reach GitHub": {
+      "hits": 0,
+      "offs": []
+    },
+    "GitHub is unreachable": {
+      "hits": 0,
+      "offs": []
+    },
+    "set up the GitHub": {
+      "hits": 0,
+      "offs": []
+    },
+    "install the GitHub app": {
+      "hits": 0,
+      "offs": []
+    },
+    "GitHub App": {
+      "hits": 48,
+      "offs": [
+        96953800,
+        96953880,
+        100095435,
+        100126565,
+        100127529,
+        100127715,
+        100217356,
+        100219919,
+        100221152,
+        100221195,
+        100221436,
+        100221706
+      ]
+    }
+  },
+  "dumps": [
+    {
+      "tag": "#14 desktop_session_id",
+      "off": 196618994,
+      "text": "ain-text message, not a structured ${e.message.type}.`}};if(e.message.trim().length===0){if(Ss(e,o,s.toolUseId))return r(\"desktop_host\",\"handler_rewrite\"),h?ks:Oe;return r(\"desktop_host\",h?\"not_reachable\":\"empty_message\"),{data:{success:!1,message:h?`Nothing was subscribed: ${ue}`:\"Not sent: the message is empty.\"}}}let T=qe(s);if(\"kind\"in T)switch(T.kind){case\"unavailable\":return r(\"unresolved\",\"desktop_session_id\"),{data:{success:!1,message:`No agent named '${e.to}' is reachable. It has the shape of a Claude Desktop session id, but Claude Desktop's session messaging tool is not available in this session, so SendMessage cannot deliver to it.`}};case\"loop-paused\":return r(\"desktop_host\",void 0,{degradedClass:\"hop_loop\"}),{data:{success:!1,message:`Not delivered: this session has already messaged Claude Desktop sessions ${T.forwards} times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.`}}}let P=d?Ce(s,d).from:void 0,D=d!==void 0&&P!==void 0?Afe(P,e.message):e.message,M=TWe(d,P,{oneWay:!1}),w=await je({tool:T.tool,sessionId:e.to,message:D,context:s,canUseTool:u,assistantMessage:o}),x=w.blockedWait?{blockedWait:!0}:void 0,U=w.attachments.length>0?w.attachments:void 0;switch(w.kind){case\"sent\":return r(\"desktop_host\",void 0,x),{data:{success:!0,message:`Forwarded to Claude Desktop's session messaging: ${w.detail||\"sent.\"}${M.message}${h?Bs:\"\"}`},...U&&{newMessages:U}};case\"refused\":return r(\"desktop_host\",\"desktop_refused\",x),{data:{success:!1,message:`Not delivered to Claude ",
+      "fns": []
+    },
+    {
+      "tag": "#14 shape",
+      "off": 196619092,
+      "text": "sktop_host\",\"invalid_target\"),{data:{success:!1,message:`Not sent: a Claude Desktop session takes a plain-text message, not a structured ${e.message.type}.`}};if(e.message.trim().length===0){if(Ss(e,o,s.toolUseId))return r(\"desktop_host\",\"handler_rewrite\"),h?ks:Oe;return r(\"desktop_host\",h?\"not_reachable\":\"empty_message\"),{data:{success:!1,message:h?`Nothing was subscribed: ${ue}`:\"Not sent: the message is empty.\"}}}let T=qe(s);if(\"kind\"in T)switch(T.kind){case\"unavailable\":return r(\"unresolved\",\"desktop_session_id\"),{data:{success:!1,message:`No agent named '${e.to}' is reachable. It has the shape of a Claude Desktop session id, but Claude Desktop's session messaging tool is not available in this session, so SendMessage cannot deliver to it.`}};case\"loop-paused\":return r(\"desktop_host\",void 0,{degradedClass:\"hop_loop\"}),{data:{success:!1,message:`Not delivered: this session has already messaged Claude Desktop sessions ${T.forwards} times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.`}}}let P=d?Ce(s,d).from:void 0,D=d!==void 0&&P!==void 0?Afe(P,e.message):e.message,M=TWe(d,P,{oneWay:!1}),w=await je({tool:T.tool,sessionId:e.to,message:D,context:s,canUseTool:u,assistantMessage:o}),x=w.blockedWait?{blockedWait:!0}:void 0,U=w.attachments.length>0?w.attachments:void 0;switch(w.kind){case\"sent\":return r(\"desktop_host\",void 0,x),{data:{success:!0,message:`Forwarded to Claude Desktop's session messaging: ${w.detail||\"sent.\"}${M.message}${h?Bs:\"\"}`},...U&&{newMessages:U}};case\"refused\":return r(\"desktop_host\",\"desktop_refused\",x),{data:{success:!1,message:`Not delivered to Claude Desktop session ${e.to}: ${w.message}`},...U&&{newMessages:U}}}}let B=d?Ce(s,d):void 0,R=B?.from;i",
+      "fns": []
+    },
+    {
+      "tag": "#14 held",
+      "off": 203267986,
+      "text": "ancel:w3},Wke.remountKey)}),DS[19]=Wke.remountKey,DS[20]=NS,DS[21]=v3,DS[22]=w3,DS[23]=T3;else T3=DS[23];let a8e;if(DS[24]!==y3||DS[25]!==k3||DS[26]!==C3||DS[27]!==T3)a8e=e(ui,{color:\"warning\",title:\"Held message from another session\",children:r(o,{flexDirection:\"column\",marginTop:1,paddingX:1,children:[y3,k3,C3,T3]})}),DS[24]=y3,DS[25]=k3,DS[26]=C3,DS[27]=T3,DS[28]=a8e;else a8e=DS[28];return a8e}F();var R3={value:\"skip\",label:\"Continue without browser tools\",description:\"Finish setup later with /chrome\"};function zke({payload:b,answer:R}){let{phase:x,installPageOpened:P}=b,j=k(x),Z=k(Date.now()),{refusedWithin:re,noteRefused:ue}=di();if(j.current!==x)j.current=x,Z.current=Date.now();function de(){if(Sc(Z.current,$i)||re($i))return ue(),!0;return!1}function fe(Me){if(de())return;R(Me)}let ",
+      "fns": [
+        {
+          "name": "_3",
+          "i": 203266031,
+          "len": 2155,
+          "sha": "d56ec1752dfa35ce",
+          "body": "function _3(_ko){let DS=y(29),{payload:Np,answer:h3}=_ko,i8e;if(DS[0]===d)i8e=[{value:\"deny\",label:\"Deny \\u2014 drop it and tell the sender it was declined\"},{value:\"approve\",label:\"Deliver this message to Claude\"}],DS[0]=i8e;else i8e=DS[0];let Rko=i8e,Uke=hs(),{refusedWithin:Hke,noteRefused:$ke,epoch:xko}=di(),Wke=qs(xko),s8e;if(DS[1]!==Uke||DS[2]!==$ke||DS[3]!==Hke)s8e=function NS(){if(Uke()||Hke()){return $ke(),!0}return!1},DS[1]=Uke,DS[2]=$ke,DS[3]=Hke,DS[4]=s8e;else s8e=DS[4];let NS=s8e,qke=Np.fromAddress??\"an unidentified session\",Vke=Np.verifiedPeerPid!==void 0?` [verified pid ${Np.verifiedPeerPid}]`:\"\",Gke=Np.claimedName?` (peer claims name: ${Np.claimedName})`:\"\",y3;if(DS[5]!==Gke||DS[6]!==qke||DS[7]!==Vke)y3=r(t,{children:[\"Another Claude session sent a message: from \",qke,Vke,Gke]}),DS[5]=Gke,DS[6]=qke,DS[7]=Vke,DS[8]=y3;else y3=DS[8];let b3;if(DS[9]!==Np.holdCause)b3=Qke(Np.holdCause),DS[9]=Np.holdCause,DS[10]=b3;else b3=DS[10];let k3;if(DS[11]!==b3)k3=e(o,{marginTop:1,children:e(t,{color:\"inactive\",children:b3})}),DS[11]=b3,DS[12]=k3;else k3=DS[12];let C3;if(DS[13]!==Np.preview)C3=Np.preview!==\"\"&&r(o,{marginTop:1,flexDirection:\"column\",children:[e(t,{color:\"inactive\",children:\"Message body (this is what will be delivered):\"}),r(t,{children:[\"\\xAB\",Np.preview,\"\\xBB\"]})]}),DS[13]=Np.preview,DS[14]=C3;else C3=DS[14];let v3,w3;if(DS[15]!==h3||DS[16]!==NS)v3=(Pko)=>{if(NS()){return}h3({behavior:Pko})},w3=()=>{if(NS()){return}h3({behavior:\"cancelled\"})},DS[15]=h3,DS[16]=NS,DS[17]=v3,DS[18]=w3;else v3=DS[17],w3=DS[18];let T3;if(DS[19]!==Wke.remountKey||DS[20]!==NS||DS[21]!==v3||DS[22]!==w3)T3=e(o,{marginTop:1,children:e(ke,{selectedValue:vi,options:Rko,defaultFocusValue:Kke,hideIndexes:!0,refuseInput:NS,onChange:v3,onCancel:w3},Wke.remountKey)}),DS[19]=Wke.remountKey,DS[20]=NS,DS[21]=v3,DS[22]=w3,DS[23]=T3;else T3=DS[23];let a8e;if(DS[24]!==y3||DS[25]!==k3||DS[26]!==C3||DS[27]!==T3)a8e=e(ui,{color:\"warning\",title:\"Held message from another session\",children:r(o,{flexDirection:\"column\",marginTop:1,paddingX:1,children:[y3,k3,C3,T3]})}),DS[24]=y3,DS[25]=k3,DS[26]=C3,DS[27]=T3,DS[28]=a8e;else a8e=DS[28];return a8e}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 178857648,
+      "text": "r(Boolean)) {\n      Object.freeze(C);\n      Object.freeze(C.prototype);\n    }\n    // %AsyncFunction%, %GeneratorFunction%, %AsyncGeneratorFunction% and\n    // their .prototype are not reachable as globals \\u2014 walk from instances.\n    for (const f of [async()=>{}, function*(){}, async function*(){}]) {\n      Object.freeze(f.constructor);\n      Object.freeze(f.constructor.prototype);\n    }\n    for (const C of [globalThis.DisposableStack, globalThis.AsyncDisposableStack,\n                     globalThis.Intl].filter(Boolean)) {\n      Object.freeze(C);\n      if (C.prototype) Object.freeze(C.prot",
+      "fns": [
+        {
+          "name": "Yoe",
+          "i": 178853305,
+          "len": 7158,
+          "sha": "4e278dbb501582f8",
+          "body": "function Yoe(e){F.runInContext(`(() => {\n    Object.defineProperty(Error, 'prepareStackTrace', {\n      value: (err, sites) => String(err.stack ?? err),\n      writable: false, configurable: false,\n    });\n    // Delete globals with no REPL use case that either run callbacks on the\n    // host event loop outside any try/catch (FinalizationRegistry \\u2014 same\n    // DoS shape as a throwing setTimeout callback) or expose shared-memory\n    // primitives (Atomics/SharedArrayBuffer \\u2014 no cross-realm use, pure\n    // attack-surface reduction).\n    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',\n                     'WeakRef', 'Atomics', 'SharedArrayBuffer',\n                     'queueMicrotask',\n                     // eval is NOT deleted here \\u2014 hardenVMIntrinsics is\n                     // shared with REPLTool (codeGeneration:{strings:true}).\n                     // WorkflowTool blocks eval via codeGeneration:false.\n                     // JSC debug/shell globals \\u2014 present only if\n                     // JSC_useDollarVM=1 or similar, but $vm is a full\n                     // escape (createGlobalObject, addressOf, runScript).\n                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',\n                     'Loader']) {\n      delete globalThis[g];\n    }\n    // SES-style enable-property-override: convert common shadowed data props\n    // to accessors whose setter defineProperty's onto the receiver. Otherwise\n    // freezing makes them non-writable, and [[Set]] on an instance (e.g.\n    // \"this.name='X'\" in an Error subclass ctor) throws in strict / no-ops in\n    // sloppy \\u2014 the TC39 \"override mistake\".\n    function enableOverride(proto, key) {\n      const d = Object.getOwnPropertyDescriptor(proto, key);\n      if (!d || 'get' in d) return;\n      const v = d.value;\n      Object.defineProperty(proto, key, {\n        get() { return v },\n        set(nv) {\n          if (this === proto) return;\n          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });\n        },\n        enumerable: d.enumerable, configurable: true,\n      });\n    }\n    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);\n    const errorProtos = errorCtors.map(C => C.prototype);\n    for (const [proto, keys] of [\n      // All Object.prototype data props \\u2014 Object.assign({}, {propertyIsEnume"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 178859870,
+      "text": " Iterator.from ? [\n        [].values().map(x=>x),\n        // %WrapForValidIteratorPrototype% \\u2014 Iterator.from(non-Iterator) wraps\n        // via a distinct intrinsic prototype not reachable from any other path.\n        Iterator.from({next:()=>({done:true})}),\n      ] : []),\n      (function*(){})(),\n      (async function*(){})(),\n      // %SegmentsPrototype% + %SegmentIteratorPrototype% \\u2014 host for..of on a\n      // VM Segments object would otherwise see a writable .then on the chain.\n      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Seg",
+      "fns": [
+        {
+          "name": "Yoe",
+          "i": 178853305,
+          "len": 7158,
+          "sha": "4e278dbb501582f8",
+          "body": "function Yoe(e){F.runInContext(`(() => {\n    Object.defineProperty(Error, 'prepareStackTrace', {\n      value: (err, sites) => String(err.stack ?? err),\n      writable: false, configurable: false,\n    });\n    // Delete globals with no REPL use case that either run callbacks on the\n    // host event loop outside any try/catch (FinalizationRegistry \\u2014 same\n    // DoS shape as a throwing setTimeout callback) or expose shared-memory\n    // primitives (Atomics/SharedArrayBuffer \\u2014 no cross-realm use, pure\n    // attack-surface reduction).\n    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',\n                     'WeakRef', 'Atomics', 'SharedArrayBuffer',\n                     'queueMicrotask',\n                     // eval is NOT deleted here \\u2014 hardenVMIntrinsics is\n                     // shared with REPLTool (codeGeneration:{strings:true}).\n                     // WorkflowTool blocks eval via codeGeneration:false.\n                     // JSC debug/shell globals \\u2014 present only if\n                     // JSC_useDollarVM=1 or similar, but $vm is a full\n                     // escape (createGlobalObject, addressOf, runScript).\n                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',\n                     'Loader']) {\n      delete globalThis[g];\n    }\n    // SES-style enable-property-override: convert common shadowed data props\n    // to accessors whose setter defineProperty's onto the receiver. Otherwise\n    // freezing makes them non-writable, and [[Set]] on an instance (e.g.\n    // \"this.name='X'\" in an Error subclass ctor) throws in strict / no-ops in\n    // sloppy \\u2014 the TC39 \"override mistake\".\n    function enableOverride(proto, key) {\n      const d = Object.getOwnPropertyDescriptor(proto, key);\n      if (!d || 'get' in d) return;\n      const v = d.value;\n      Object.defineProperty(proto, key, {\n        get() { return v },\n        set(nv) {\n          if (this === proto) return;\n          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });\n        },\n        enumerable: d.enumerable, configurable: true,\n      });\n    }\n    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);\n    const errorProtos = errorCtors.map(C => C.prototype);\n    for (const [proto, keys] of [\n      // All Object.prototype data props \\u2014 Object.assign({}, {propertyIsEnume"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 183655854,
+      "text": "PolicyAllowed(u)}function BGt(){if(!I(m,!1))return!1;return g().isPolicyEnforced(u)}function nCr(){return a.CLAUDE_CODE_REMOTE===!0&&!a.CLAUDE_TRUSTED_DEVICE_TOKEN&&BGt()}var jGt=\"not reachable from a cloud session \\u2014 that session requires a trusted device, which a cloud session never has; message it from one of your own machines instead\";function rCr(e){return`Nothing was sent: Remote Control session '${e}' is ${jGt}.`}function Ode(){if(!I(\"tengu_bridge_attestation_enforce\",!1))return YGt;if(!BGt())return YGt;let t=I(\"tengu_bridge_attestation_enforce_config\",{});return per(t)}function b9e",
+      "fns": []
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 190547503,
+      "text": "nfirm it there)\";case\"remote\":return\"remote sessions do not hold the watch\";case\"cp_override\":return\"the artifact control plane is overridden to a local stack, so the live edge is not reachable\";case\"egress_denied\":return\"network egress to the claude.ai edge is denied by policy, so you will not be notified here when this artifact is republished elsewhere\";case\"not_found\":return\"no such artifact for this account (it was deleted, or it has not been shared with the user)\";case\"other_org\":return Cae;case\"not_editor\":return\"a restored publish decision does not carry for an artifact this account can",
+      "fns": [
+        {
+          "name": "oae",
+          "i": 190546758,
+          "len": 2115,
+          "sha": "99b5884bb0ec8fef",
+          "body": "function oae(e){switch(e){case\"flag_off\":return\"the live-subscribe feature flag is off in this session's cached config, so you will not be notified here when this artifact is republished elsewhere\";case\"publish_context\":return\"only an interactive or SDK main-loop session holds the watch (not a subagent, teammate, background, or print session)\";case\"stop_latched\":return\"watching this artifact was stopped earlier in this session; do not retry on your own. If the user asks you to resume watching it, call the watch action (in permission modes that prompt, they confirm it there)\";case\"remote\":return\"remote sessions do not hold the watch\";case\"cp_override\":return\"the artifact control plane is overridden to a local stack, so the live edge is not reachable\";case\"egress_denied\":return\"network egress to the claude.ai edge is denied by policy, so you will not be notified here when this artifact is republished elsewhere\";case\"not_found\":return\"no such artifact for this account (it was deleted, or it has not been shared with the user)\";case\"other_org\":return Cae;case\"not_editor\":return\"a restored publish decision does not carry for an artifact this account cannot publish to\";case\"no_subscription_token\":return\"the control plane minted no live-channel credential for this artifact\";case\"boot_failed\":return\"the artifact could not be read right now (network or auth); try again later\";case\"watch_cap\":return`this session already holds its maximum of ${Wh} artifact watches and none could make room (each is a watch you requested, one auto-replying to comments, or the artifact you most recently published, or watch slots are still connecting); unwatch one first`;case\"watch_cap_reconnect\":return`this session was already holding its maximum of ${Wh} artifact watches when this one tried to reconnect, and none of the other watches could make room`;case\"invalid_slug\":return\"that is not an artifact this session can name\";case\"cancelled\":return\"the request was cancelled before the connection opened\";case\"ws_open_error\":return\"the live connection could not be opened from this environment\";default:return null}}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 192110369,
+      "text": "t,e){return`${t} refused: ${rnt(e)}. Stop it (\\`claude daemon stop\\`) and retry.`}function Tt(t){return`warning: the service manager accepted the ${t}, but the installed daemon is not reachable after ${C0/1000}s \\u2014 the first start after an update can be slow. Check \\`claude daemon status\\` and \\`claude daemon logs\\`; if the service file points at a binary or launcher that no longer exists, \\`claude daemon install\\` rewrites it from the current settings.`}async function ae(t){await Promise.race([Promise.all([TJ(),MJ()]),ne(500,void 0,{unref:!0})]).catch(()=>{}),process.exit(t)}async functio",
+      "fns": [
+        {
+          "name": "Tt",
+          "i": 192110271,
+          "len": 381,
+          "sha": "c9ed3d8171b040e7",
+          "body": "function Tt(t){return`warning: the service manager accepted the ${t}, but the installed daemon is not reachable after ${C0/1000}s \\u2014 the first start after an update can be slow. Check \\`claude daemon status\\` and \\`claude daemon logs\\`; if the service file points at a binary or launcher that no longer exists, \\`claude daemon install\\` rewrites it from the current settings.`}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 193995168,
+      "text": "m iTerm2, or change teammateMode in settings.');if(!await QMe(e))throw f(\"swarm_backend_detect\",\"iterm2_explicit_no_it2\"),Error('teammateMode is set to \"iterm2\" but the it2 CLI is not reachable. Install it with `pip install it2` and enable the Python API in iTerm2 (Preferences > General > Magic > Enable Python API).');n(\"[BackendRegistry] Selected: iterm2 (explicit teammateMode)\");let i=u(e);return e.cachedDetectionResult={backend:i,isNative:!0,needsIt2Setup:!1},_(\"swarm_backend_detect\"),e.cachedDetectionResult}let t=await Yj(),a=MO(e);if(n(`[BackendRegistry] Environment: insideTmux=${t}, inIT",
+      "fns": [
+        {
+          "name": "klt",
+          "i": 193994556,
+          "len": 2610,
+          "sha": "2dc886f16a3c46b8",
+          "body": "async function klt(e=Z3){if(await pOt(e),e.cachedDetectionResult)return n(`[BackendRegistry] Using cached backend: ${e.cachedDetectionResult.backend.type}`),e.cachedDetectionResult;if(n(\"[BackendRegistry] Starting backend detection...\"),eOe()===\"iterm2\"){if(!MO(e))throw f(\"swarm_backend_detect\",\"iterm2_explicit_not_in_iterm2\"),Error('teammateMode is set to \"iterm2\" but this session is not running inside iTerm2. Launch Claude from iTerm2, or change teammateMode in settings.');if(!await QMe(e))throw f(\"swarm_backend_detect\",\"iterm2_explicit_no_it2\"),Error('teammateMode is set to \"iterm2\" but the it2 CLI is not reachable. Install it with `pip install it2` and enable the Python API in iTerm2 (Preferences > General > Magic > Enable Python API).');n(\"[BackendRegistry] Selected: iterm2 (explicit teammateMode)\");let i=u(e);return e.cachedDetectionResult={backend:i,isNative:!0,needsIt2Setup:!1},_(\"swarm_backend_detect\"),e.cachedDetectionResult}let t=await Yj(),a=MO(e);if(n(`[BackendRegistry] Environment: insideTmux=${t}, inITerm2=${a}`),t){n(\"[BackendRegistry] Selected: tmux (running inside tmux session)\");let i=c(e);return e.cachedDetectionResult={backend:i,isNative:!0,needsIt2Setup:!1},_(\"swarm_backend_detect\"),e.cachedDetectionResult}if(a){let i=d();if(i)n(\"[BackendRegistry] User prefers tmux over iTerm2, skipping iTerm2 detection\");else{let r=await QMe(e);if(n(`[BackendRegistry] iTerm2 detected, it2 CLI available: ${r}`),r){n(\"[BackendRegistry] Selected: iterm2 (native iTerm2 with it2 CLI)\");let m=u(e);return e.cachedDetectionResult={backend:m,isNative:!0,needsIt2Setup:!1},_(\"swarm_backend_detect\"),e.cachedDetectionResult}}let l=await Ine();if(n(`[BackendRegistry] it2 not available, tmux available: ${l}`),l){n(\"[BackendRegistry] Selected: tmux (fallback in iTerm2, it2 setup recommended)\");let r=c(e);return e.cachedDetectionResult={backend:r,isNative:!1,needsIt2Setup:!i},g(\"swarm_backend_detect\",i?\"fallback_to_tmux\":\"needs_it2_setup\"),e.cachedDetectionResult}throw n(\"[BackendRegistry] ERROR: iTerm2 detected but no it2 CLI and no tmux\"),f(\"swarm_backend_detect\",\"iterm2_no_it2_no_tmux\"),Error(\"iTerm2 detected but it2 CLI not installed. Install it2 with: pip install it2\")}let s=await Ine();if(n(`[BackendRegistry] Not in tmux or iTerm2, tmux available: ${s}`),s){n(\"[BackendRegistry] Selected: tmux (external session mode)\");let i=c(e);return e.cachedDetectionResult={backend:i,isNative:!1,needsIt2Setup:!1},_(\"swarm_backend_detect\"),e.cachedDetectionResult}throw n(\"[Ba"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 196754624,
+      "text": "e Claude Code session on this machine \\u2014 non-interactive runs here then reuse that authorization. (CI runners and hosted sessions have no interactive session; Claude Design is not reachable from those without a stored /design login credential.)\":\"Claude Design rejected this session's claude.ai credential (HTTP 403): it does not carry Claude Design access. Run /design login to authorize Claude Design, then retry.\",\"design_tool_needs_design_scopes\");this.name=\"DesignNeedsScopesError\"}}var Le=64;function we(e,t,n){if(e.servedCatalogHashes.delete(t),e.servedCatalogHashes.set(t,n),e.servedCatal",
+      "fns": []
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 196763531,
+      "text": "e Claude Code session on this machine \\u2014 non-interactive runs here then reuse that authorization. (CI runners and hosted sessions have no interactive session; Claude Design is not reachable from those without a stored /design login credential.)\";return`No design-capable credential${n}. Run /design login to authorize Claude Design.`;case\"design_refresh_failed\":return`Design token refresh failed${n}. Retry shortly${t?.isNonInteractiveSession?\"\":\", or run /design login\"}.`;case\"wrong_provider\":return\"Claude Design is only available with claude.ai authentication. It is not supported through Be",
+      "fns": [
+        {
+          "name": "Ve",
+          "i": 196763057,
+          "len": 1058,
+          "sha": "52cf3e854c343a75",
+          "body": "function Ve(e,t){let n=e.detail?` (${e.detail})`:\"\";switch(e.reason){case\"needs_design_login\":if(t?.isNonInteractiveSession)return\"Claude Design needs a claude.ai credential, and /design login cannot run in this non-interactive session. Ask the user to run /design login once from an interactive Claude Code session on this machine \\u2014 non-interactive runs here then reuse that authorization. (CI runners and hosted sessions have no interactive session; Claude Design is not reachable from those without a stored /design login credential.)\";return`No design-capable credential${n}. Run /design login to authorize Claude Design.`;case\"design_refresh_failed\":return`Design token refresh failed${n}. Retry shortly${t?.isNonInteractiveSession?\"\":\", or run /design login\"}.`;case\"wrong_provider\":return\"Claude Design is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers.\";case\"essential_traffic_only\":return\"Claude Design is disabled because nonessential network traffic is restricted.\"}}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 202239172,
+      "text": "d-receipt send failed to ${Lu(h)}: ${bP(String(y))}`))}),n(`[uds-messaging] Listening: ${e}`,{level:\"info\"}),n(`[uds-messaging] Inject messages (auth line REQUIRED here; a pipe is not reachable via socat/AF_UNIX): node -e \"const c=require('net').connect(process.argv[1],()=>{c.write(JSON.stringify({type:'auth',token:process.env.CLAUDE_CODE_MESSAGING_TOKEN})+'\\\\n'+JSON.stringify({type:'user',message:{role:'user',content:'hello'}})+'\\\\n');c.end()})\" \"${e}\"`,{level:\"info\"});let k=\"nc -N -U\";return n(`[uds-messaging] Connect when the data is ready (run the command first, then connect and write its ",
+      "fns": [
+        {
+          "name": "De",
+          "i": 202235508,
+          "len": 5346,
+          "sha": "d0da53a2c9e01113",
+          "body": "async function De(e,t,i={}){if(o().lastStartFailureCause=\"bind_failed\",o().lastStartDegradedCause=void 0,!Tx(e)){if(n(`[uds-messaging] Refusing socket path \\u2014 ${\"not a usable local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing dot/space)\"}: ${e}`,{level:\"error\"}),R(),o().lastStartFailureCause=\"path_refused\",i.isExplicit)throw new Hd(`--messaging-socket-path ${e} is not a usable local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing dot/space).`);return}if(i.isExplicit,i.isExplicit){if(e=await jur(e),await Ee(e)===\"live\")throw new Hd(`--messaging-socket-path points to a live socket: ${e}. Another process is listening there. Remove it or choose a different path.`)}if(i.isExplicit)try{await j(e)}catch{}o().activeSocketPath=e;let u,s;try{u=ue({allowHalfOpen:!0},(r)=>{o().connectedClients.add(r),n(\"[uds-messaging] Client connected\"),ke(r),r.on(\"close\",()=>{o().connectedClients.delete(r),n(\"[uds-messaging] Client disconnected\")})})}catch(r){U(),n(`[uds-messaging] Failed to create server: ${String(r)}`,{level:\"error\"}),R();return}u.on(\"error\",(r)=>{n(`[uds-messaging] Server error: ${r.message}`,{level:\"error\"})}),o().authRequired=i.requireAuth??kSt(),o().firstLineDeadlineMs=i.firstLineDeadlineMs??Axt;let p=Atr();o().activeTokens=p;try{if(i.isExplicit,!await ve(u,e))throw Error(\"listen EADDRINUSE on the requested socket path\");u.unref();let r=Tt(async()=>{n(\"[uds-messaging] Shutting down\"),await C(u,e,t)});s=r;try{o().activeKeyFile=await ktr(e,p.peerToken,t,{sweepPermitted:await Tre()}),Ce()}catch(l){if(o().authRequired){if(n(`[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${l}`,{level:\"error\"}),o().lastStartFailureCause=\"key_publish_failed\",await C(u,e,t,{settleHeld:!1}),r(),R(),i.isExplicit)throw new Hd(`--messaging-socket-path: bound ${e} but could not publish its auth key (${v(l)??l}); peers could not authenticate, so the inbox was closed. Check that the session registry directory is writable by you.`);return}n(`[uds-messaging] Failed to publish the inbox auth key; peers will send unauthenticated (accepted: auth is optional on this platform): ${l}`,{level:\"warn\"}),pe(\"key_publish_failed\")}process.env.CLAUDE_CODE_MESSAGING_SOCKET=e,yS.set(\"CLAUDE_CODE_MESSAGING_TOKEN\",p.childToken),Cpn(wU(e));let m=wU(e);Aen(Q),sh().senderMode=tNn,aDt((l,w,b,d,h)=>UG(l,{action:\"peer_idle_notice\",...w,from:m,...d?Re():{}},{...b!==void 0&&{exp"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 205437420,
+      "text": "e_bridge.listing\",Co=new Set([\"not_connected\",\"send_failed\",\"contested\",\"unsupported_on_bound\"]),Mo=new Set([\"disconnected\",\"cancelled\"]),Oo=new Set([\"timeout\"]),Po=/not connected|not reachable|offline/i,Lo=/disconnected before responding|connection may be closing/i,No=/did not respond within/i,Io=200;function pn(e,o){return{kind:\"bridge\",limits:Ro,call:(t,r,i,d)=>$o(e,o,t,r,i,d),callPlumbing:(t,r,i)=>Ho(e,o,t,r,i)}}async function Ho(e,o,t,r,i){if(!q4.has(t))throw Error(\"callPlumbing: not a bridge plumbing tool\");let d=Date.now(),u=w8(i.deadlineMs),m=await de(e,{deadlineAt:d+u,recovery:o,signa",
+      "fns": []
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 205461167,
+      "text": "}function St(e,o,t,r){let i=V(e.name);if(e.status===\"offline\")return e.source===\"session\"?`- ${i}: did not answer a liveness check; the next call naming it checks again.`:`- ${i}: not reachable right now; calls naming it will fail until it reconnects.`;if(e.protocol.kind===\"incompatible\"){let y=(e.passthroughTools?.size??0)>0?\", and its own MCP tools will not run from here,\":\"\";return`- ${i}: attached, but its Claude Code and this session's share no remote-tool protocol version; calls to it will fail${y} until the older side is updated.`}let d=e===t?o:\"unknown\",u=r!==null&&e===t&&e.description",
+      "fns": [
+        {
+          "name": "St",
+          "i": 205460988,
+          "len": 806,
+          "sha": "10275606e361d393",
+          "body": "function St(e,o,t,r){let i=V(e.name);if(e.status===\"offline\")return e.source===\"session\"?`- ${i}: did not answer a liveness check; the next call naming it checks again.`:`- ${i}: not reachable right now; calls naming it will fail until it reconnects.`;if(e.protocol.kind===\"incompatible\"){let y=(e.passthroughTools?.size??0)>0?\", and its own MCP tools will not run from here,\":\"\";return`- ${i}: attached, but its Claude Code and this session's share no remote-tool protocol version; calls to it will fail${y} until the older side is updated.`}let d=e===t?o:\"unknown\",u=r!==null&&e===t&&e.description!==void 0?{...e.description,project_sync:\"off\"}:e.description,m=u===void 0?\"attached (no details reported).\":Ct(u,d,Nt(e));return`- ${e===t&&o===\"machine\"?`${i} (where the project lives)`:i}: ${m} ${At(e)}`}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 206525128,
+      "text": "import{gB}from\"B:/~BUN/root/chunk-591bnx78.js\";import{Tp}from\"B:/~BUN/root/chunk-9yh2scct.js\";import{yf}from\"B:/~BUN/root/chunk-4zbh5vtv.js\";import{basename as v}from\"path\";var k=\"not reachable from this cloud session\",A=\"(session list too long to fetch completely \\u2014 sessions beyond the first pages are missing from this listing)\";async function DZt(e,n,i){let s=!1,t=Yo();if(t)await ywe({refresh:!0,credentials:i});let l=t?Ymt(e,i):Promise.resolve({rows:[],failed:!1,identityKey:null}),p=Promise.resolve({peers:[],warnings:[]}),u=!1,[g,c,r,o]=await Promise.all([t?Lpn().catch((d)=>{if(d instanc",
+      "fns": []
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 206528941,
+      "text": "tType,status:t.status,startTime:t.startTime})}return s}var E=\"Cross-session messaging is switched off in this session right now \\u2014 no sessions were listed, and this session is not reachable by name until it is switched back on.\",D=\"(the session list on this machine could not be read just now \\u2014 other local sessions may be missing from this listing; a later listing retries)\";function N(e,n,i){let s=e.teamContext;if(!s&&!n)return[];let t=i===null?void 0:i??(s?s.selfAgentId??(s.isLeader===!1?void 0:s.leadAgentId):iS()),l=new Map;for(let o of Object.values(e.tasks))if(o.type===\"in_process_",
+      "fns": []
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 208102402,
+      "text": "scratch work that needs none of the project's files, do not recreate project files here, and stop any background command you started here that uses the project. If that machine is not reachable for tools, tell the user plainly that you cannot reach their files until it reconnects.${y} Tell the user in one or two sentences that file sync stopped and why, and that you are continuing directly on their machine.`}function Sd(e){return`# File sync stopped for this session\n\nThis directory held the cloud session's synced copy of the user's project.\nThe user's machine ended file sync for the session:\n\n",
+      "fns": [
+        {
+          "name": "ps",
+          "i": 208100194,
+          "len": 2440,
+          "sha": "d826d34142d6c4db",
+          "body": "function ps(e,t,r,o){let l=Mu(e),d=r.kind===\"cleared\"?r.left.length===0?`this session's synced copy of the project at ${l} has been EMPTIED (git history included); only ${Gr} is left.`:`this session's synced copy of the project at ${l} has been emptied (git history included) except for ${r.left.length} ${r.left.length===1?\"entry\":\"entries\"} that could not be moved and ${r.left.length===1?\"is\":\"are\"} still there \\u2014 stale, leave ${r.left.length===1?\"it\":\"them\"} alone: ${r.left.map(ei).join(\", \")}.`:r.kind===\"not_cleared\"?`this session's copy of the project at ${l} could NOT be emptied (the directory could not be listed, its trash made, or nothing in it moved) \\u2014 everything in it is STALE from now on: do not read, run or edit anything there.`:`this environment holds no synced copy of the project to empty (the working directory ${l} is not the session's checkout); nothing here was touched.`,u=r.kind===\"cleared\"?` \\u2014 the set-aside copy under ${Mu(r.setAsideIn)} still holds them; redo those changes on the user's machine if they still matter, and say so`:\" \\u2014 redo those changes on the user's machine if they still matter, and say so\",y=o===null||o.count===0?\"\":` These files had changed here and had NOT reached the user's machine when sync ended: ${o.names.map(ei).join(\", \")}${o.count>o.names.length?` and ${o.count-o.names.length} more`:\"\"}${u}.`;return`Directory sync has STOPPED for this session and will not resume in it \\u2014 the user's machine reported: \"${ti(t)}\". So that you and the user never work on two different versions of the project, ${d} Nothing was changed on the user's machine \\u2014 it has all of the user's files and everything of yours that reached it. From now on the project's files live ONLY on the user's machine: run commands there and read, edit and write files there by adding \"${Pi}\": \"<that machine>\" to Bash, Read, Edit and Write calls (the attached-machines note names the machine and its project directory; use absolute paths there); use this environment only for scratch work that needs none of the project's files, do not recreate project files here, and stop any background command you started here that uses the project. If that machine is not reachable for tools, tell the user plainly that you cannot reach their files until it reconnects.${y} Tell the user in one or two sentences that file sync stopped and why, and that you are continuing directly on their machine.`}"
+        }
+      ]
+    },
+    {
+      "tag": "#14 not reachable js",
+      "off": 208110353,
+      "text": ", run commands and read, edit and write files there by adding \"${Pi}\": \"<that machine>\" to Bash, Read, Edit and Write calls; do not recreate project files here. If that machine is not reachable for tools, say that you cannot reach their files from this session.`),Tn=os(h.reason===\"directory_not_empty\"?`its working directory was not empty \\u2014 found ${Od(h.found,h.count??h.found.length)}`:h.reason===\"first_object_unreadable\"?\"it runs a version of Claude Code that cannot read what this machine sent\":h.reason===\"first_bundle_refused\"?\"what arrived there did not verify\":h.reason===\"container_rec",
+      "fns": [
+        {
+          "name": "Ns",
+          "i": 208109161,
+          "len": 1745,
+          "sha": "47fdbebd31a1da0c",
+          "body": "function Ns(h){if(E={kind:\"disarmed\",reason:\"empty_start_failed\"},qn(\"untouched\"),h.reason===\"directory_not_empty\")F=!1,ys(r.emptyAtStartPath??null);let b=h.reason===\"directory_not_empty\"?`the working directory was not empty (found: ${h.found.map(ei).join(\", \")})`:h.reason===\"first_object_unreadable\"?\"the user's first upload was sent in a form this build cannot read\":h.reason===\"first_bundle_refused\"?`the user's first upload did not verify (${h.detail})`:h.reason===\"container_recreated\"?\"this environment was recreated empty and the user's machine only sends changes on top of what the earlier one had\":`git could not write the checkout (${h.step})`;r.notify(`Directory sync is OFF for this session and the working directory does NOT hold the user's files: ${b}. Tell the user plainly; their terminal is being told too, and it ends the session's file sync there. The project's files live only on the user's machine: if it is attached for tools (the attached-machines note names it and its project directory), run commands and read, edit and write files there by adding \"${Pi}\": \"<that machine>\" to Bash, Read, Edit and Write calls; do not recreate project files here. If that machine is not reachable for tools, say that you cannot reach their files from this session.`),Tn=os(h.reason===\"directory_not_empty\"?`its working directory was not empty \\u2014 found ${Od(h.found,h.count??h.found.length)}`:h.reason===\"first_object_unreadable\"?\"it runs a version of Claude Code that cannot read what this machine sent\":h.reason===\"first_bundle_refused\"?\"what arrived there did not verify\":h.reason===\"container_recreated\"?\"its environment was recreated empty and can only be refilled by a new session\":\"git could not write the files there\",r.now)}"
+        }
+      ]
+    },
+    {
+      "tag": "#21 XEn",
+      "off": 185879240,
+      "text": "function XEn(e,t){let r=[];if(e.modelChanged)r.push(`model changed (${t?\"hydrated baseline\":e.previousModel} \\u2192 ${e.newModel})`);if(e.systemPromptChanged){let o=e.systemCharDelta,u=o===0?\"\":o>0?` (+${o} chars)`:` (${o} chars)`;r.push(`system prompt changed${u}`)}if(e.toolSchemasChanged){let o=e.addedToolCount>0||e.removedToolCount>0?` (+${e.addedToolCount}/-${e.removedToolCount} tools)`:\" (tool prompt/schema changed, same tool set)\";r.push(`tools changed${o}`)}if(e.fastModeChanged)r.push(\"fast mode toggled\");if(e.globalCacheStrategyChanged)r.push(`global cache strategy changed (${e.prevGlobalCacheStrategy||\"none\"} \\u2192 ${e.newGlobalCacheStrategy||\"none\"})`);if(e.cacheControlChanged&&!e.globalCacheStrategyChanged&&!e.systemPromptChanged)r.push(\"cache_control changed (scope or TTL)\");if(e.betasChanged){let o=e.addedBetas.length?`+${e.addedBetas.join(\",\")}`:\"\",u=e.removedBetas.length?",
+      "fns": [
+        {
+          "name": "XEn",
+          "i": 185879240,
+          "len": 1654,
+          "sha": "b7ded582ae400326",
+          "body": "function XEn(e,t){let r=[];if(e.modelChanged)r.push(`model changed (${t?\"hydrated baseline\":e.previousModel} \\u2192 ${e.newModel})`);if(e.systemPromptChanged){let o=e.systemCharDelta,u=o===0?\"\":o>0?` (+${o} chars)`:` (${o} chars)`;r.push(`system prompt changed${u}`)}if(e.toolSchemasChanged){let o=e.addedToolCount>0||e.removedToolCount>0?` (+${e.addedToolCount}/-${e.removedToolCount} tools)`:\" (tool prompt/schema changed, same tool set)\";r.push(`tools changed${o}`)}if(e.fastModeChanged)r.push(\"fast mode toggled\");if(e.globalCacheStrategyChanged)r.push(`global cache strategy changed (${e.prevGlobalCacheStrategy||\"none\"} \\u2192 ${e.newGlobalCacheStrategy||\"none\"})`);if(e.cacheControlChanged&&!e.globalCacheStrategyChanged&&!e.systemPromptChanged)r.push(\"cache_control changed (scope or TTL)\");if(e.betasChanged){let o=e.addedBetas.length?`+${e.addedBetas.join(\",\")}`:\"\",u=e.removedBetas.length?`-${t?\"hydrated baseline\":e.removedBetas.join(\",\")}`:\"\",d=[o,u].filter(Boolean).join(\" \");r.push(`betas changed${d?` (${d})`:\"\"}`)}if(e.autoModeChanged)r.push(\"auto mode toggled\");if(e.overageChanged)r.push(\"overage state changed (TTL flip expected)\");if(e.cacheDiagnosisChanged)r.push(\"cache diagnosis toggled\");if(e.effortChanged)r.push(`effort changed (${t?\"hydrated baseline\":e.prevEffortValue||\"default\"} \\u2192 ${e.newEffortValue||\"default\"})`);if(e.extraBodyChanged)r.push(\"extra body params changed\");if(e.deferLoadingPresenceChanged)r.push(\"defer_loading presence flipped (deferred-tool hint section, inc-5316)\");if(e.messagesHistoryChanged)r.push(`message history mutated at index ${e.firstChangedMessageIndex}/${e.prevMessageCount}`);return r}"
+        }
+      ]
+    },
+    {
+      "tag": "#21 qie",
+      "off": 202756141,
+      "text": "licedMessages.filter(Wie),x=R.at(-1);if(!x)return;let P=x.fallbackModel,j=(()=>{if(!b.firstParty)return{action:\"keep\",reason:\"not_first_party\"};if(!qLe(b.currentOverride,P))return{action:\"keep\",reason:\"writer_mismatch\"};let Z=n9t(b.keptMessages,b.initialModel);if(Z!=null)return{action:\"restore\",value:Z,restoredFrom:\"transcript\"};if(b.initialModel!=null)return{action:\"restore\",value:b.initialModel,restoredFrom:\"initial_model\"};return{action:\"restore\",value:null,restoredFrom:\"settings_fallthrough\"}})();return{bannersSliced:R.length,clearLatch:b.latchActive&&!b.keptMessages.some(Wie),model:j,lastSlicedFallbackModel:P}}var OD=new Ln(()=>Fe());function R$(b,R,x){let P=()=>{try{return R(b.getState())}catch{return!1}};if(P())return Promise.resolve(!0);return new Promise((j)=>{let Z=setTimeout(()=",
+      "fns": [
+        {
+          "name": "qie",
+          "i": 202755716,
+          "len": 648,
+          "sha": "351ff2e1d5173d38",
+          "body": "function qie(b){let R=b.slicedMessages.filter(Wie),x=R.at(-1);if(!x)return;let P=x.fallbackModel,j=(()=>{if(!b.firstParty)return{action:\"keep\",reason:\"not_first_party\"};if(!qLe(b.currentOverride,P))return{action:\"keep\",reason:\"writer_mismatch\"};let Z=n9t(b.keptMessages,b.initialModel);if(Z!=null)return{action:\"restore\",value:Z,restoredFrom:\"transcript\"};if(b.initialModel!=null)return{action:\"restore\",value:b.initialModel,restoredFrom:\"initial_model\"};return{action:\"restore\",value:null,restoredFrom:\"settings_fallthrough\"}})();return{bannersSliced:R.length,clearLatch:b.latchActive&&!b.keptMessages.some(Wie),model:j,lastSlicedFallbackModel:P}}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 preflight_failed",
+      "off": 185749078,
+      "text": "oteName:Xn.name,revision:oo,deadlineMs:Vn,signal:r})).catch((Wr)=>(h(Wr),null))}if(r.aborted)throw new Ze;if(We&&!lt)if(nn)Ke=!0,mt=\"byoc_env_skip_preflight\";else if(zo(We.host)){let Xn=await V_e(We.owner,We.name,r);Ke=Xn.appInstalled,At=Xn.defaultBranch,nt=Xn.transient,mt=Ke?\"github_preflight_ok\":\"github_preflight_failed\"}else Ke=!0,mt=\"ghes_optimistic\";else if(lt)mt=\"forced_bundle\";else if(en&&!e.agentId)mt=\"no_github_remote\";if(r.aborted)throw new Ze;let dn=not({optedIn:Ye||Ve!==null,isMonorepo:()=>{let Xn=en===null?null:qr(en);return Xn!==null&&Wyn(Xn)},gitRoot:en,gitUsable:!0}),Lt=null,pn=null,bn=null,Sn=null,_n=null,mn=null,hn=We&&!zo(We.host)?{reason:\"other_host\"}:e.explicitRef!==void 0?{reason:\"explicit_ref\",flag:Pt}:null;if(Ye&&Ke&&We&&xt!==null){let Xn=await xt;if(hn===null)bn=Xn?.verdict.reason===\"clean\"?Xn.verdict.remote.commit:Xn?.verdict.reason===\"head_behind_remote\"?Xn.verdict.head.commit:null;if(Xn?.verdict.diverged===!0&&bn===null){let oo=Xn.verdict.reason===\"head_not_at_remote\"?Xn.verdict.remote.placement===\"unknown\"?\"head_placement_unknown\":\"head_ahead_of_remote\":Xn.verdict.reason;if(Xn.verdict.reason!==\"tracked_changes\"&&Xn.verdict.reason!==\"head_not_at_remote\")",
+      "fns": []
+    },
+    {
+      "tag": "#45 preflight_failed",
+      "off": 185759412,
+      "text": "routed:mt===\"dir_sync_local_changes\",...pn!==null&&{cause:pn},uploadOnly:e.dirSyncConsent===\"upload_only\"}:Jn!==null&&ht!==void 0?{source:\"github_fallback\",revision:ht,fallback:Jn}:Pe!==null&&ht!==void 0?{source:\"github\",revision:ht,pin:$r?{pinned:!0}:{pinned:!1,unpinnable:hn},preflightFailed:mt===\"github_preflight_failed\",divergence:Sr,...Sn!==null&&{overlay:{bundle:Sn.bundle===null?null:{sha256:Sn.bundle.sha256,size:Sn.bundle.sizeBytes},uploadOnly:e.dirSyncConsent===\"upload_only\"}},kept:Lt===null?null:Lt===\"explicit_ref\"?{reason:Lt,flag:Pt}:{reason:Lt}}:{source:\"empty\"}),wn=_n,Qn=mn;if(s(\"tengu_teleport_source_decision\",{reason:c(mt),path:w(Pe?\"github\":Be?\"bundle\":\"empty\"),...Sn!==null&&{dir_sync_overlay:w(\"chosen\"),dir_sync_overlay_commits:Sn.bundle?.aheadCount??0,dir_sync_overlay_bytes:Sn.bundle?.sizeBytes??0},...wn!==null&&{dir_sync_overlay:c(wn)},...Qn!==null&&{dir_sync_overlay_refusal:c(Qn)},...e.dirSyncConsent!==void 0&&{dir_sync_host_consent:c(e.dirSyncConsent)},...Lr!==null&&{dir_sync_probe:He(Sr?.verdict.reason),dir_sync_probe_failure:He(Sr?.verdict.reason===\"probe_failed\"?Sr.verdict.failure:void 0),...Sr!==null&&{dir_sync_probe_ms:Sr.durationMs,dir_sync_placement:He(Sr.",
+      "fns": []
+    },
+    {
+      "tag": "#45 preflight_failed",
+      "off": 185765915,
+      "text": ": ${S(Bn.data)}`),\"CreateSession response missing session id\")),e.onCreateFail?.(\"Server returned a malformed session response (no session id)\",\"malformed_response\"),null;n(`Successfully created remote session: ${Ms.id}`),e.onProgress?.({kind:\"created\"}),tst(Ms.id,e.source,{project:Pe!==null&&mt!==\"github_preflight_failed\",global:Be===null},{endpoint:k,grouped:e.sessionGroupingId!=null,effortLevel:Ar},e.storageV5);let Pr=ps&&Cr,Uo=async(Xn)=>{if(Pr&&rr?.ok===!0&&!Xn)await lvn({sessionId:Ms.id,v2:k===\"v1alpha2\",orgUUID:x})};if(Lr!==null&&en!==null)switch(Lr.kind){case\"seed\":Jrt({sessionId:Ms.id,gitRoot:en,containerOrigin:Lr.containerOrigin,signal:e.seedSignal,boundToThisMachine:rr?.ok===!0&&e.dirSyncConsent!==\"upload_only\",hostConsent:e.dirSyncConsent,preface:Lr.preface,createFacts:{...Lr.createFacts,plannedEngine:dn},credentials:e.credentials,reconcile:(Xn)=>Uo(Xn.kind===\"git_engine\"||Xn.kind===\"skipped\"&&Xn.why===\"aborted\"),storageV5:e.storageV5});break;case\"not_armed\":Vrt({sessionId:Ms.id,gitRoot:en,...Lr});break;default:{let Xn=Lr}}if(Ve!==null&&zn!==null)Yrt({sessionId:Ms.id,folder:Ve,seed:zn,signal:e.seedSignal,boundToThisMachine:rr?.ok===!0&&e.dirSyncConsent!==\"upload_only\",h",
+      "fns": []
+    },
+    {
+      "tag": "#45 Xn.transient",
+      "off": 185749036,
+      "text": "t=Xn===null?null:import(\"B:/~BUN/root/chunk-0wrmeh5y.js\").then(({probeLocalDivergence:Wr,LOCAL_DIVERGENCE_DEADLINE_MS:Vn})=>Wr({gitRoot:en,remoteName:Xn.name,revision:oo,deadlineMs:Vn,signal:r})).catch((Wr)=>(h(Wr),null))}if(r.aborted)throw new Ze;if(We&&!lt)if(nn)Ke=!0,mt=\"byoc_env_skip_preflight\";else if(zo(We.host)){let Xn=await V_e(We.owner,We.name,r);Ke=Xn.appInstalled,At=Xn.defaultBranch,nt=Xn.transient,mt=Ke?\"github_preflight_ok\":\"github_preflight_failed\"}else Ke=!0,mt=\"ghes_optimistic\";else if(lt)mt=\"forced_bundle\";else if(en&&!e.agentId)mt=\"no_github_remote\";if(r.aborted)throw new Ze;let dn=not({optedIn:Ye||Ve!==null,isMonorepo:()=>{let Xn=en===null?null:qr(en);return Xn!==null&&Wyn(Xn)},gitRoot:en,gitUsable:!0}),Lt=null,pn=null,bn=null,Sn=null,_n=null,mn=null,hn=We&&!zo(We.host)?{reason:\"other_host\"}:e.explicitRef!==void 0?{reason:\"explicit_ref\",flag:Pt}:null;if(Ye&&Ke&&We&&xt!==null){let Xn=await xt;if(hn===null)bn=Xn?.verdict.reason===\"clean\"?Xn.verdict.remote.commit:Xn?.verdict.reason===\"head_behind_remote\"?Xn.verdict.head.commit:null;if(Xn?.verdict.diverged===!0&&bn===null){let oo=Xn.verdict.reason===\"head_not_at_remote\"?Xn.verdict.remote.placement===\"unknown\"?\"head_p",
+      "fns": []
+    },
+    {
+      "tag": "#45 extra retry after",
+      "off": 180987134,
+      "text": "a message that starts with a code token and a colon: hook_forwarding_disabled (off for this session; not retryable, nothing stored), hook_forwarding_not_ready (retry after a short backoff), invalid_registration, or stale_worker_epoch (re-read the worker epoch and re-send). A worker that predates the request answers with the usual unsupported-subtype error.\")),lP=m(()=>p({template:i().regex(Lt),status:ie([\"installed\",\"awaiting_upload\",\"interpreter_unavailable\",\"install_failed\",\"unknown_template\",\"version_mismatch\",\"event_not_allowed\",\"disabled\"])}).descri",
+      "fns": []
+    },
+    {
+      "tag": "#45 extra retry after",
+      "off": 190981421,
+      "text": "\"this organization has reached its limit on artifact databases; retrying won't help\";case\"active_leases\":return\"this database has too many active leases \\u2014 retry after some expire or are released\";case\"rate_limited\":return\"rate-limited \\u2014 retry shortly\";case\"write_capacity\":return\"too many concurrent writes to this database \\u2014 retry shortly\";case\"scan_budget\":return\"the query scans too many documents \\u2014 narrow the query or add filters; retrying won't help\";case\"response_budget\":return\"the query's result is too large \\u2014 request fewer d",
+      "fns": [
+        {
+          "name": "Y",
+          "i": 190980887,
+          "len": 985,
+          "sha": "caebe144068b6666",
+          "body": "function Y(e,t){let r=t===void 0?\"document limit\":`limit of ${t} documents`;switch(e){case\"docs_per_collection\":return`this collection has reached its ${r} \\u2014 delete documents; retrying won't help`;case\"docs_per_database\":return`this artifact's database has reached its ${r} \\u2014 delete documents before adding more; retrying won't help`;case\"databases_per_org\":return\"this organization has reached its limit on artifact databases; retrying won't help\";case\"active_leases\":return\"this database has too many active leases \\u2014 retry after some expire or are released\";case\"rate_limited\":return\"rate-limited \\u2014 retry shortly\";case\"write_capacity\":return\"too many concurrent writes to this database \\u2014 retry shortly\";case\"scan_budget\":return\"the query scans too many documents \\u2014 narrow the query or add filters; retrying won't help\";case\"response_budget\":return\"the query's result is too large \\u2014 request fewer documents; retrying won't help\";case void 0:return}}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra retry after",
+      "off": 196406567,
+      "text": "f(dn){if(!bhn())throw new qe(One()?\"composed review publishing was turned off by an operator during this session \\u2014 this gate re-checks the live switch, so retry after a few minutes, or start a new session once it is restored. Do not retry in a tight loop.\":\"composed review publishing is not enabled in this session \\u2014 do not retry here; a new session is required once it is enabled.\",\"pr_review_compose_disabled\");let O;try{O=Xu(vt)}catch(Ae){throw f(\"pr_review_publish\",\"payload_invalid\"),new qe(`the pr_review payload failed validation: ${Ae instan",
+      "fns": []
+    },
+    {
+      "tag": "#45 extra try again",
+      "off": 180377219,
+      "text": "o enable ${t===\"are\"?\"them\":\"it\"}.`}function SNe(e){return`Couldn't verify your organization's policy for ${e.toLowerCase()}. Check your network connection and try again.`}function _rr(e){return`Couldn't verify your organization's policy for ${e.toLowerCase()}. Check your network connection, then restart Claude Code and try again.`}function brr(e){return`/${e} is available for your organization but wasn't when this session started. Restart Claude Code to use it.`}function Srr(e,t){let r=RAe(e);if(r.length>0)return`not available for your organization due ",
+      "fns": [
+        {
+          "name": "SNe",
+          "i": 180377095,
+          "len": 136,
+          "sha": "d0816fe6bd8a5dd8",
+          "body": "function SNe(e){return`Couldn't verify your organization's policy for ${e.toLowerCase()}. Check your network connection and try again.`}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra try again",
+      "off": 180377381,
+      "text": "y again.`}function _rr(e){return`Couldn't verify your organization's policy for ${e.toLowerCase()}. Check your network connection, then restart Claude Code and try again.`}function brr(e){return`/${e} is available for your organization but wasn't when this session started. Restart Claude Code to use it.`}function Srr(e,t){let r=RAe(e);if(r.length>0)return`not available for your organization due to its compliance policy (${r.map(B2).join(\", \")})`;return t??\"disabled by your organization's policy\"}function wrr(){return\"couldn't verify your organization's p",
+      "fns": [
+        {
+          "name": "_rr",
+          "i": 180377231,
+          "len": 162,
+          "sha": "19fbbd17b6f9c179",
+          "body": "function _rr(e){return`Couldn't verify your organization's policy for ${e.toLowerCase()}. Check your network connection, then restart Claude Code and try again.`}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra try again",
+      "off": 180377828,
+      "text": ")`;return t??\"disabled by your organization's policy\"}function wrr(){return\"couldn't verify your organization's policy \\u2014 check your network connection and try again\"}var wNe=\"\\u02F9-\\u02FC\\u230C-\\u230F\\u231C-\\u231F\\u239B-\\u23CC\\u23DC-\\u23E1\\u2E00-\\u2E0D\\u2E1C\\u2E1D\\u2500-\\u257F\";var Si=\"Artifact\",Trr=\" \\u2014 live version; raw HTML follows]\",KYe=\"You hadn't viewed the live version of this artifact, so the publish was refused.\",aEn=\"This session hadn't viewed the live version of this artifact, so the publish was refused.\",lEn=(e)=>`[Artifact ${e}${Tr",
+      "fns": [
+        {
+          "name": "wrr",
+          "i": 180377722,
+          "len": 117,
+          "sha": "5c4e067c8318749f",
+          "body": "function wrr(){return\"couldn't verify your organization's policy \\u2014 check your network connection and try again\"}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra transient failure",
+      "off": 181217925,
+      "text": "it cN(e,t,(u)=>({...u,idpRefreshToken:void 0}),r)}catch(u){n(`[gateway-refresh] secureStorage write failed: ${l(u)}`,{level:\"warn\"})}}else n(`[gateway-refresh] transient failure: ${l(o)}`)}}async function cN(e,t,r,o){let u=r(e);try{await Tn().mutate((d)=>{let A=d?.enterpriseGateway;if(A&&A.idpRefreshToken!==t)return u=A,d;if(gi()!==e)return d;return u=r(A??e),{...d,enterpriseGateway:u}},o)}catch(d){n(`[gateway-refresh] secureStorage write failed; applying refreshed credential in-memory only: ${l(d)}`,{level:\"warn\"})}if(gi()!==e){n(\"[gateway-refresh] auth",
+      "fns": [
+        {
+          "name": "Wee",
+          "i": 181216843,
+          "len": 1112,
+          "sha": "d76adc2c43088d0d",
+          "body": "async function Wee(e,t,r){try{let{data:o}=await Pl.post(e.tokenEndpoint??`${e.url}/oauth/token`,new URLSearchParams({grant_type:\"refresh_token\",refresh_token:t}).toString(),{headers:{\"Content-Type\":\"application/x-www-form-urlencoded\",\"User-Agent\":Va()},timeout:1e4}),u=qSn().safeParse(o);if(!u.success){n(\"[gateway-refresh] malformed response; will retry later\");return}if(gi()!==e){n(\"[gateway-refresh] auth changed mid-refresh; discarding\");return}await cN(e,t,()=>({url:e.url,jwt:u.data.access_token,expiresAt:Date.now()+u.data.expires_in*1000,idpRefreshToken:u.data.refresh_token??e.idpRefreshToken,...e.tokenEndpoint&&{tokenEndpoint:e.tokenEndpoint}}),r),n(\"[gateway-refresh] refreshed gateway JWT\")}catch(o){if(KSn(o)===\"invalid_grant\"){if(gi()!==e){n(\"[gateway-refresh] auth changed mid-refresh; discarding invalid_grant\");return}n(\"[gateway-refresh] IdP rejected refresh token; clearing it\",{level:\"warn\"});try{await cN(e,t,(u)=>({...u,idpRefreshToken:void 0}),r)}catch(u){n(`[gateway-refresh] secureStorage write failed: ${l(u)}`,{level:\"warn\"})}}else n(`[gateway-refresh] transient failure: ${l(o)}`)}}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra transient failure",
+      "off": 181358244,
+      "text": "eeds \\`fflush()\\`. \\`head\\` cannot flush at all \\u2014 \\`| head -N\\` delivers nothing until N matches accumulate, then ends the stream.\n- In poll loops, handle transient failures (\\`curl ... || true\\`) \\u2014 one failed request shouldn't kill the monitor.\n- Poll intervals: 30s+ for remote APIs (rate limits), 0.5-1s for local checks.\n- Write a specific \\`description\\` \\u2014 it appears in every notification (\"errors in deploy.log\" not \"watching logs\").\n- Only stdout is the event stream. Stderr goes to the output file (readable via Read) but does not trigg",
+      "fns": [
+        {
+          "name": "Ymn",
+          "i": 181355128,
+          "len": 5655,
+          "sha": "29395517b0e53df0",
+          "body": "function Ymn(){let e=Ud();return`Start a background monitor that streams events from a long-running script. Each stdout line is an event \\u2014 you keep working and notifications arrive in the chat. Events arrive on their own schedule and are not replies from the user, even if one lands while you're waiting for the user to answer a question.\n\nPick by how many notifications you need:\n${'- **One** (\"tell me when the server is ready / the build finishes\") \\u2192 '+(e?'run the command in the **foreground with Bash**, exiting when the condition is true, e.g. `until grep -q \"Ready in\" dev.log; do sleep 0.5; done`.':'use **Bash with `run_in_background`** and a command that exits when the condition is true, e.g. `until grep -q \"Ready in\" dev.log; do sleep 0.5; done`. You get a single completion notification when it exits.')}\n- **One per occurrence, indefinitely** (\"tell me every time an ERROR line appears\") \\u2192 Monitor with an unbounded command (\\`tail -f\\`, \\`inotifywait -m\\`, \\`while true\\`).\n- **One per occurrence, until a known end** (\"emit each CI step result, stop when the run completes\") \\u2192 Monitor with a command that emits lines and then exits.\n\nYour script's stdout is the event stream. Each line becomes a notification. Exit ends the watch.\n\n  # Each matching log line is an event\n  tail -f /var/log/app.log | grep --line-buffered \"ERROR\"\n\n  # Each file change is an event\n  inotifywait -m --format '%e %f' /watched/dir\n\n  # Poll GitHub for new PR comments and emit one line per new comment\n  last=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n  while true; do\n    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n    gh api \"repos/owner/repo/issues/123/comments?since=$last\" --jq '.[] | \"\\\\(.user.login): \\\\(.body)\"'\n    last=$now; sleep 30\n  done\n\n  # Node script that emits events as they arrive (e.g. WebSocket listener)\n  node watch-for-events.js\n\n  # Per-occurrence with a natural end: emit each CI check as it lands, exit when the run completes\n  prev=\"\"\n  while true; do\n    s=$(gh pr checks 123 --json name,bucket)\n    cur=$(jq -r '.[] | select(.bucket!=\"pending\") | \"\\\\(.name): \\\\(.bucket)\"' <<<\"$s\" | sort)\n    comm -13 <(echo \"$prev\") <(echo \"$cur\")\n    prev=$cur\n    jq -e 'all(.bucket!=\"pending\")' <<<\"$s\" >/dev/null && break\n    sleep 30\n  done\n\n**Don't use an unbounded command for a single notification.** \\`tail -f\\`, \\`inotifywait -m\\`, and \\`while true\\` never exit on their own, so the monitor stays armed until timeout even after the event has fired. For \"tell me when X is ready,"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra transient failure",
+      "off": 187779904,
+      "text": "or(;;)try{return await r()}catch(u){let d=u instanceof Gp&&u.code===\"asset_transient\",y=e[o]??0;if(!d||o>=e.length||performance.now()+y>=t)throw u;o++,n(`${WT} transient failure fetching asset (attempt ${o}); retrying in ${y}ms`,{level:\"warn\"}),await ne(y)}}async function Msr(e,t,r){if(M()&&t!==void 0&&r!==null)return;await pHt(e,{recursive:!0,mode:448})}async function _Ht(e,t,r){let o=await St.get(`/api/organizations/:orgUUID/marketplace/plugin-assets/${e}`,{auth:\"teleport-org\",responseType:\"stream\",timeout:t,validateStatus:()=>!0,credentials:r,headers:",
+      "fns": [
+        {
+          "name": "yHt",
+          "i": 187779709,
+          "len": 293,
+          "sha": "2dbdddde091972d8",
+          "body": "async function yHt(e,t,r){let o=0;for(;;)try{return await r()}catch(u){let d=u instanceof Gp&&u.code===\"asset_transient\",y=e[o]??0;if(!d||o>=e.length||performance.now()+y>=t)throw u;o++,n(`${WT} transient failure fetching asset (attempt ${o}); retrying in ${y}ms`,{level:\"warn\"}),await ne(y)}}"
+        }
+      ]
+    },
+    {
+      "tag": "#45 extra GitHub App",
+      "off": 185753688,
+      "text": "=We?X3(Ax(We.host)):null,En=Hn===\"gitlab\"?\"GitLab\":Hn===\"bitbucket\"?\"Bitbucket\":null;if(!Pe&&!nn&&e.explicitRef){let Xn=lt?\"CCR_FORCE_BUNDLE is set\":We?nt?\"the GitHub App preflight failed transiently (network or service hiccup)\":\"the GitHub App is not set up for this repository\":\"no GitHub remote was detected in this directory\",oo=ut?\"be seeded from your local working tree\":\"start with an empty sandbox\";return e.onCreateFail?.(`${Pt} ${e.explicitRef} cannot be honored: ${Xn}, so the session would ${oo} instead. `+(!We?\"\":nt?\"Retry in a moment, or \":En?`C",
+      "fns": []
+    },
+    {
+      "tag": "#45 extra GitHub App",
+      "off": 185753762,
+      "text": "cket\":null;if(!Pe&&!nn&&e.explicitRef){let Xn=lt?\"CCR_FORCE_BUNDLE is set\":We?nt?\"the GitHub App preflight failed transiently (network or service hiccup)\":\"the GitHub App is not set up for this repository\":\"no GitHub remote was detected in this directory\",oo=ut?\"be seeded from your local working tree\":\"start with an empty sandbox\";return e.onCreateFail?.(`${Pt} ${e.explicitRef} cannot be honored: ${Xn}, so the session would ${oo} instead. `+(!We?\"\":nt?\"Retry in a moment, or \":En?`Cloud sessions can't clone from ${En} yet \\u2014 `:\"Set up the GitHub integ",
+      "fns": []
+    },
+    {
+      "tag": "#45 extra GitHub App",
+      "off": 185755918,
+      "text": "r\"}),f(\"ccr_dir_sync_seed\",gs.reason),e.onCreateFail?.(gs.message,gs.reason),null}else{n(`Bundle upload failed: ${zr}`,{level:\"error\"});let gs=!We?\"\":nt?\". The GitHub App preflight failed transiently (network or service hiccup) \\u2014 retry in a moment to start from GitHub instead\":En?`. Cloud sessions can't clone from ${En} yet, so the bundle is the only way to start one from this repository`:\". Please set up GitHub on https://claude.ai/code\",qi;switch(Vn){case\"empty_repo\":qi=`${zr} \\u2014 run \\`git add . && git commit -m \"initial\"\\` then retry`;break;c",
+      "fns": []
+    },
+    {
+      "tag": "#48 recentRelayFailures",
+      "off": 204183409,
+      "text": "\n`),d=u.match(/^CONNECT\\s+(\\S+)\\s+HTTP\\/1\\.[01]$/i);if(!d){if(/^GET\\s+\\/__agentproxy\\/status(\\?\\S*)?\\s+HTTP\\/1\\.[01]$/i.test(u)){let A={...e.ctx.statusProvider?.()??{},startupError:e.ctx.startupError,recentRelayFailures:e.ctx.failures,downloadQueuedBytes:e.ctx.downloadQueuedBytes,downloadQueuedPeakBytes:e.ctx.downloadQueuedPeakBytes,downloadReceivePauseSupported:Mt(),downloadReceiveGateEnabled:Number.isFinite(e.limits.receiveHighWater),uploadPausedClients:e.ctx.uploadPausedClients,uploadPauses:e.ctx.uploadPauses,uploadPauseSupported:e.clientRead!==void 0,uploadGateEnabled:Number.isFinite(e.limits.sendPauseAfterPendingBytes),bufferedAmountTrusted:e.ctx.bufferedAmountTrusted??null};Fe(t,200,\"O",
+      "fns": [
+        {
+          "name": "Ft",
+          "i": 204182385,
+          "len": 3017,
+          "sha": "20de114b2137e8b6",
+          "body": "function Ft(t,e,o,r,i){if(!e.ws&&!e.directUpstream&&!e.directDialing){if(e.connectBuf=Buffer.concat([e.connectBuf,o]),e.connectBuf[0]===22){n(\"[agent-proxy] client sent TLS to the relay port (HTTPS_PROXY must be an http:// URL)\",{level:\"warn\"}),f(\"agent_proxy_request\",\"agent_proxy_request_tls_to_relay\"),x(e.ctx,\"tls_to_relay\",\"client opened TLS to the relay port; HTTPS_PROXY must be an http:// URL pointing at this port\"),e.closed=!0,t.end();return}let p=e.connectBuf.indexOf(`\\r\n\\r\n`);if(p===-1){if(e.connectBuf.length>8192)e.closed=!0,P(t,400,\"Bad Request\",\"request headers exceeded 8 KiB before the end of the CONNECT request\"),t.end(),f(\"agent_proxy_request\",\"agent_proxy_request_header_too_long\"),x(e.ctx,\"header_too_long\",\"headers exceeded 8 KiB\");return}let c=e.connectBuf.subarray(0,p).toString(\"utf8\"),u=bt(c,`\\r\n`),d=u.match(/^CONNECT\\s+(\\S+)\\s+HTTP\\/1\\.[01]$/i);if(!d){if(/^GET\\s+\\/__agentproxy\\/status(\\?\\S*)?\\s+HTTP\\/1\\.[01]$/i.test(u)){let A={...e.ctx.statusProvider?.()??{},startupError:e.ctx.startupError,recentRelayFailures:e.ctx.failures,downloadQueuedBytes:e.ctx.downloadQueuedBytes,downloadQueuedPeakBytes:e.ctx.downloadQueuedPeakBytes,downloadReceivePauseSupported:Mt(),downloadReceiveGateEnabled:Number.isFinite(e.limits.receiveHighWater),uploadPausedClients:e.ctx.uploadPausedClients,uploadPauses:e.ctx.uploadPauses,uploadPauseSupported:e.clientRead!==void 0,uploadGateEnabled:Number.isFinite(e.limits.sendPauseAfterPendingBytes),bufferedAmountTrusted:e.ctx.bufferedAmountTrusted??null};Fe(t,200,\"OK\",\"application/json\",S(A,null,2)+`\n`),e.closed=!0,t.end();return}e.closed=!0,P(t,405,\"Method Not Allowed\",\"this proxy only accepts HTTPS CONNECT tunnels. Plain-HTTP/absolute-form requests are not supported \\u2014 common causes are axios releases before 1.16.1 (broken HTTPS proxy handling) or a tool configured with HTTP_PROXY pointing at this relay.\"),t.end(),f(\"agent_proxy_request\",\"agent_proxy_request_not_connect\");let[w=\"\",E=\"\"]=u.split(/\\s+/),y=w;try{let A=new URL(E);y=`${w} ${A.protocol}//${A.host}`}catch{}x(e.ctx,\"not_connect\",`non-CONNECT request: ${y.slice(0,120)}`);return}e.connectLine=u,e.connectAuthority=d[1]??\"\";let m=e.connectBuf.subarray(p+4);if(m.length>0){if(se(t,e,Buffer.from(m)),e.closed)return}if(e.connectBuf=Buffer.alloc(0),e.ctx.startupError){e.closed=!0,P(t,502,\"Bad Gateway\",e.ctx.startupError),t.end(),x(e.ctx,\"startup_probe\",e.ctx.startupError,C(e));return}let h=e.ctx.selective,b=e.connectAuthority;if(h&&b){let w=b.lastIndexOf(\":\"),E=w>0?b"
+        }
+      ]
+    },
+    {
+      "tag": "#48 recentRelayFailures",
+      "off": 204219895,
+      "text": "\n\nOnce a tunnel is up the proxy cannot send an error response, so a connection\nit aborts (tunnel to the egress proxy lost, or an upload the tunnel stopped\naccepting) reaches the tool as a bare reset. recentRelayFailures in the status\noutput names the host and reason; check it before concluding the remote\nservice refused the operation.\n\n### Tool ignores the proxy entirely (timeouts with no proxy error)\n\nSome clients do not read HTTPS_PROXY: Node's built-in fetch (run that command\nwith NODE_USE_ENV_PROXY=1 on Node >= 22.21), aiohttp (pass trust_env=True),\nRuby bundler (reads only HTTP_PROXY, which this proxy does not serve),\nhand-rolled Go dialers. Prefer the tool's own proxy option where one ",
+      "fns": [
+        {
+          "name": "An",
+          "i": 204216547,
+          "len": 5008,
+          "sha": "0b480da53b81b366",
+          "body": "function An(t,e){let o=O(e,\"..\"),r=`http://127.0.0.1:${t}`;return`# Claude Code agent proxy\n\nOutbound HTTPS from this session goes through a local proxy at ${r}\n(set via HTTPS_PROXY) which tunnels to a policy-enforcing egress proxy. TLS is\nre-terminated there, so every tool must trust the CA bundle at\n${e}. The standard CA environment variables, the system trust\nstore (where possible), a JVM truststore, the Bazel system bazelrc, the\nbrowser NSS store, and gsutil's boto config are already set up.\n\n## Quick diagnosis\n\n1. Run: curl -sS ${r}/__agentproxy/status\n   It reports proxy state, which trust and git accommodations are active\n   (javaTrustStorePath, toolTrustFailureCodes, gitSshRewrite,\n   gitConfigConflicts), and the most recent proxy-side failures.\n2. Find the failure class below and apply the matching fix; gitConfigConflicts\n   codes map to the git section, toolTrustFailureCodes to the JVM section.\n3. Never disable TLS verification, never unset HTTPS_PROXY, and do not retry\n   organization policy denials (403/407) \\u2014 report them instead.\n\n## Failure classes and fixes\n\n### \"certificate verify failed\" / \"self-signed certificate in chain\" / PKIX errors\n\nThe failing tool is not reading the pre-set CA configuration. In order:\n\n- If the tool has a CA flag or env var, point it at ${e}\n  (examples: --cacert, SSL_CERT_FILE, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE,\n  AWS_CA_BUNDLE, DENO_CERT, CARGO_HTTP_CAINFO, PIP_CERT, GIT_SSL_CAINFO,\n  BUNDLE_SSL_CA_CERT, HEX_CACERTS_PATH, NIX_SSL_CERT_FILE).\n- Tool config files override environment variables. If one of these sets its\n  own CA or disables verification, point it at the bundle instead:\n  pip.conf \"cert\", npm \"cafile\" (npm config get cafile), ~/.curlrc \"cacert\",\n  .wgetrc \"ca_certificate\", conda \"ssl_verify\", git \"http.sslCAInfo\",\n  gradle.properties / MAVEN_OPTS \"-Djavax.net.ssl.trustStore\".\n- JVM tools (Maven, Gradle, plain Java): when a JDK is present, a truststore\n  is built at ${o}/java-truststore.p12 (password \"changeit\") and\n  injected via JAVA_TOOL_OPTIONS \\u2014 confirm javaTrustStorePath is set in the\n  status output before pointing a build at it (toolTrustFailureCodes explains\n  why it is missing). If the image or the build sets its own trustStore, that\n  one wins \\u2014 import the proxy CA into it with\n  keytool -importcert -noprompt -alias ccr-agent-proxy -file ${o}/agent-proxy-ca.crt -keystore <their store>\n  or point the build at the ready-made one. Bazel reads the managed block in\n  /etc/ba"
+        }
+      ]
+    },
+    {
+      "tag": "#22 yGt",
+      "off": 182518440,
+      "text": "r details.\";function v_n(){return bNe(\"Remote Control\",\"is\",cC(),y)}async function yGt(){if(u())return null;if(!g2())return L();if(eA())return\"Remote Control is not available inside a cloud session.\";if(wve())return\"Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).\";if(!c())return\"Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.\";if(!i())return _Gt({prefix:\"Remote Control requires claude.ai subscription auth.\",suffix:\"to use Remote Control.\"});if(!d())return\"Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) ",
+      "fns": [
+        {
+          "name": "yGt",
+          "i": 182518308,
+          "len": 1998,
+          "sha": "2bb7b69ab1c7a2a6",
+          "body": "async function yGt(){if(u())return null;if(!g2())return L();if(eA())return\"Remote Control is not available inside a cloud session.\";if(wve())return\"Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).\";if(!c())return\"Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.\";if(!i())return _Gt({prefix:\"Remote Control requires claude.ai subscription auth.\",suffix:\"to use Remote Control.\"});if(!d())return\"Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth login` to use Remote Control.\";if(!_()?.organizationUuid)return\"Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information.\";await O();let e=lbt();if(e===\"unavailable\")return P;if(e===\"denied\")return nd(\"allow_remote_control\",\"Remote Control\",\"is\",y);if(!RU()){let o=k6t();if(o)return`Remote Control requires feature-flag evaluation, which is disabled because ${o} is set. Unset it (or run in a shell without it) to use Remote Control.`;if(a.DISABLE_GROWTHBOOK)return\"Remote Control requires feature-flag evaluation, which is disabled because DISABLE_GROWTHBOOK is set. Unset it (or run in a shell without it) to use Remote Control.\";return\"Remote Control requires feature-flag evaluation, which is unavailable in this environment.\"}if(!await Of(\"tengu_ccr_bridge\")){if(!oA()){if(UV(),await Of(\"tengu_ccr_bridge\"))return null;if(!oA())return\"Couldn't verify Remote Control eligibility \\u2014 the feature-flag service was unreachable (offline or blocked). Retry, or run with `--debug` / `claude doctor` for details.\"}return\"Remote Control isn't enabled for this account. If you recently changed plans, run `claude auth logout` then `claude auth login` to refresh your entitlements, or `claude doctor` for details.\"}return null}"
+        }
+      ]
+    },
+    {
+      "tag": "#22 oe",
+      "off": 209384187,
+      "text": "async function oe(l){let b=await yGt();if(b)return{kind:\"error\",message:b};let _=await cst();if(_)return{kind:\"error\",message:_};if(!(M()&&l!==void 0?await ck(l):_y()))return{kind:\"error\",message:zSe};if(await WGt(l),await _bt()){if(R6())return{kind:\"error\",message:xve};return{kind:\"unenrolled-trusted-device\"}}return n",
+      "fns": [
+        {
+          "name": "oe",
+          "i": 209384187,
+          "len": 376,
+          "sha": "be997a078ce5d8ba",
+          "body": "async function oe(l){let b=await yGt();if(b)return{kind:\"error\",message:b};let _=await cst();if(_)return{kind:\"error\",message:_};if(!(M()&&l!==void 0?await ck(l):_y()))return{kind:\"error\",message:zSe};if(await WGt(l),await _bt()){if(R6())return{kind:\"error\",message:xve};return{kind:\"unenrolled-trusted-device\"}}return n(\"[bridge] Prerequisites passed, enabling bridge\"),null}"
+        }
+      ]
+    },
+    {
+      "tag": "#70 login label",
+      "off": 199299384,
+      "text": " \",e(t,{dimColor:!0,children:\"API usage billing\"})]}),value:\"console\"},p[6]=le;else le=p[6];let ae;if(p[7]===d)ae=[se,le,{label:r(t,{children:[\"3rd-party platform \\xB7\",\" \",e(t,{dimColor:!0,children:\"Amazon Bedrock, Microsoft Foundry, or Vertex AI\"})]}),value:\"platform\"}],p[7]=ae;else ae=p[7];let ue;if(p[8]!==Lt||p[9]!==we||p[10]!==Te||p[11]!==T)ue=e(o,{children:e(ke,{options:ae,onChange:(xo)=>{if(xo===\"platform\")s(\"tengu_oauth_platform_selected\",{}),T({state:\"platform_setup\"});else if(xo===\"claudeai\")s(\"tengu_oauth_claudeai_selected\",{}),Te(!0),we(!1),T({state:\"ready_to_start\"});else if(Lt)s(",
+      "fns": [
+        {
+          "name": "It",
+          "i": 199298081,
+          "len": 10118,
+          "sha": "19f71286493f472f",
+          "body": "function It(Jr){let p=y(114),{oauthStatus:V,mode:Ee,startingMessage:vo,forcedMethodMessage:Ze,gatewayUnsupportedWarning:qe,forceLoginGatewayUrl:At,gatewayScreenLocked:Tt,keyMintFallbackReason:ye,showPastePrompt:Se,pastedCode:Et,setPastedCode:St,cursorOffset:Ot,setCursorOffset:Pt,textInputColumns:Rt,handleSubmitCode:Dt,setOAuthStatus:T,setLoginWithClaudeAi:Te,setConsoleProfileLogin:we,consoleProfileLoginAllowed:Lt,onAuthSuccess:Ut}=Jr;switch(V.state){case\"idle\":{const i=vo?vo:\"Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.\";let C;if(p[0]!==i)C=e(t,{bold:!0,children:i}),p[0]=i,p[1]=C;else C=p[1];let O;if(p[2]!==qe)O=qe&&e(t,{color:\"warning\",children:qe}),p[2]=qe,p[3]=O;else O=p[3];let q;if(p[4]===d)q=e(t,{children:\"Select login method:\"}),p[4]=q;else q=p[4];let se;if(p[5]===d)se={label:r(t,{children:[\"Claude account with subscription \\xB7\",\" \",e(t,{dimColor:!0,children:\"Pro, Max, Team, or Enterprise\"}),!1]}),value:\"claudeai\"},p[5]=se;else se=p[5];let le;if(p[6]===d)le={label:r(t,{children:[\"Anthropic Console account \\xB7\",\" \",e(t,{dimColor:!0,children:\"API usage billing\"})]}),value:\"console\"},p[6]=le;else le=p[6];let ae;if(p[7]===d)ae=[se,le,{label:r(t,{children:[\"3rd-party platform \\xB7\",\" \",e(t,{dimColor:!0,children:\"Amazon Bedrock, Microsoft Foundry, or Vertex AI\"})]}),value:\"platform\"}],p[7]=ae;else ae=p[7];let ue;if(p[8]!==Lt||p[9]!==we||p[10]!==Te||p[11]!==T)ue=e(o,{children:e(ke,{options:ae,onChange:(xo)=>{if(xo===\"platform\")s(\"tengu_oauth_platform_selected\",{}),T({state:\"platform_setup\"});else if(xo===\"claudeai\")s(\"tengu_oauth_claudeai_selected\",{}),Te(!0),we(!1),T({state:\"ready_to_start\"});else if(Lt)s(\"tengu_oauth_console_selected\",{}),T({state:\"console_method\"});else s(\"tengu_oauth_console_selected\",{}),Te(!1),we(!1),T({state:\"ready_to_start\"})}})}),p[8]=Lt,p[9]=we,p[10]=Te,p[11]=T,p[12]=ue;else ue=p[12];let Ue;if(p[13]!==C||p[14]!==O||p[15]!==ue)Ue=r(o,{flexDirection:\"column\",gap:1,children:[C,O,q,ue]}),p[13]=C,p[14]=O,p[15]=ue,p[16]=Ue;else Ue=p[16];return Ue}case\"gateway_setup\":{let i;if(p[17]!==Ut||p[18]!==T)i=()=>{Ut?.(),T({state:\"gateway_done\"})},p[17]=Ut,p[18]=T,p[19]=i;else i=p[19];let C;if(p[20]!==T)C=()=>T({state:\"idle\"}),p[20]=T,p[21]=C;else C=p[21];let O;if(p[22]!==At||p[23]!==Tt||p[24]!==i||p[25]!==C)O=e(Ke,{initialUrl:At,screenLocked:Tt,onDone:i,onCancel:C}),p[22]=At,p[23]=Tt,p[24]=i,p[25]=C,p[26]=O;else O=p[26];return O}case\"gateway_done\":{let i;if(p[27]===d)i=e(t,{co"
+        }
+      ]
+    },
+    {
+      "tag": "#71 footer pill",
+      "off": 180879521,
+      "text": "Io().optional(),fast_mode_disabled_reason:xo().optional(),footer_indicator:qu().optional().describe(`@internal The terminal's server-configured \"\\u25C6 <text>\" footer pill \\u2014 see SDKFooterIndicator. Absent when nothing is configured.`),effort:ie([\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]).nullable().optional().describe(\"The effort level the session will send on its next request \\u2014 after env overrides, session state, org caps and model-support downgrades; the same value get_settings reports as applied.effort. nul",
+      "fns": []
+    },
+    {
+      "tag": "#71 footer pill",
+      "off": 180947091,
+      "text": "Io().optional(),fast_mode_disabled_reason:xo().optional(),footer_indicator:qu().optional().describe(`@internal The terminal's server-configured \"\\u25C6 <text>\" footer pill at connect time \\u2014 see SDKFooterIndicator. Absent when nothing is configured.`),feedback_survey_config:X5().optional().describe(\"@internal Present only when the feedback-survey surface is enabled for this host (GrowthBook gate, privacy level, and org policy all allow it). Absent means the host must not show the survey.\"),analytics_disabled:z(",
+      "fns": []
+    }
+  ]
+}

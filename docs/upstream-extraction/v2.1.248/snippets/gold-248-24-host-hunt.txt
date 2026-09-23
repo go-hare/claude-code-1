@@ -1,0 +1,48 @@
+# gold-248-24-host-hunt  densable 2.1.248 #24
+# headersHelper-401 — leftover HOST exists; 248===247; stay UNKNOWN
+# SEA 226708128 · 247 present
+# parent hunt after agent 82724c05 auth-fail. do not elevate HAVE.
+
+extracted? no unique 248 body
+landed? no (already leftover-from-247)
+stay UNKNOWN? YES
+
+## leftover host (found)
+
+src/services/mcp/authReconnect.ts classifyAuthReconnectKind
+  transport + headersHelper → mcp_headers_helper
+  http/sse + !headersHelper + refresh_token → mcp_oauth_refresh
+  leftover test: headersHelper takes precedence over oauth
+
+src/services/mcp/client.ts:2741-2792
+  Tool 401 → classifyAuthReconnectKind →
+  `re-running headersHelper and retrying once`
+
+src/services/mcp/__tests__/oauthReauthRetry.test.ts
+  same gate; helper wins even if refresh_token exists
+
+## 248 vs 247
+
+re-running headersHelper     248=3  247=3
+headersHelper and retry      248=3  247=3
+mcp_headers_helper           248=8  247=8
+OAuth discovery              248=0  247=0
+falling into OAuth           248=0  247=0
+tengu_mcp_headers_helper_retry 248=0 247=0  (leftover event name only)
+Authorization header         248=20 247=17
+  extra hits = proxy/SigV4/schema copy, not MCP 401 helper vs discovery
+
+248 @207115285 ye? re-running headersHelper
+247 @219081420 same string window (gold-248-unk-verdict)
+
+## not unique 248
+
+changelog "OAuth discovery" is product copy. SEA has no that sentence.
+leftover already skips oauth refresh when headersHelper is set.
+248-only pack: do not backfill 247. do not invent discovery skip.
+
+## rejected invent
+
+- treat leftover 247 host as 248 HAVE
+- add Authorization-already-set gate beyond classifyAuthReconnectKind
+- markMcpHeadersHelperConfig / oKn toast (216 leftover, not 248)

@@ -1,0 +1,411 @@
+# gold-248-20-unpushed
+when=2026-09-20T03:36:59.535Z
+bytes248=226708128 bytes247=253204128
+rule=gate next to unpushed phrase / deleteJob logs. generic git tables ignored.
+
+## #20 phrase needle="has commits that are not pushed anywhere" hits248=2 hits247=2
+- #0 @93482728 d. .a.n.d. .w.i.l.l. .b.e. .d.e.l.i.v.e.r.e.d. .w.h.e.n. .t.h.e. .s.e.s.s.i.o.n. .r.e.s.t.a.r.t.s.......7...has uncommitted changes.(...k&..has commits that are not pushed anywhere!.......is claimed by another running job...=....5..i.s. .l.o.c.k.e.d. ..  .i.n. .u.s.e. .b.y. .a.n.o.t.h.e.r. .l.i.v.e. .s.e.s.s.i.o.n.,. .
+- #1 @189689960 Wye.test(p.msg))return{kind:"detached",msg:p.msg.replace(Wye,"")};return{kind:"detached"}}var ei={dirty:"has uncommitted changes",unpushed:"has commits that are not pushed anywhere",in_use:"is claimed by another running job",live_lock:"is locked \u2014 in use by another live session, or locked by hand",occupied:"is the
+
+## #20 on no remote needle="has commits that are on no remote" hits248=2 hits247=2
+- #0 @93506017 .......pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn
+- #1 @189693353 d changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.originCwd):null)??void 0,ge=await bz(k,r.worktreeBranch,
+
+## #20 deleteJob: prefix needle="deleteJob:" hits248=16 hits247=16
+- #0 @93504820 s.t.a.r.t.i.n.g. ..  .t.r.y. .a.g.a.i.n. .i.n. .a. .m.o.m.e.n.t.....R.".Couldn't attach to that session.......U.job_attach_failed... .....N.deleteJob: kill unconfirmed for D...:.*. ..  .s.k.i.p.p.i.n.g. .j.o.b.d.i.r./.w.o.r.k.t.r.e.e. .r.e.m.o.v.a.l. .t.o. .a.v.o.i.d. .s.t.r.a.n.d.i.n.g. .
+- #1 @93505096 a.n.d.i.n.g. .a. .l.i.v.e. .w.o.r.k.e.r.
+.......job_delete..@...:Uo.Cannot destructure property 'dirty' from null or undefined value....V...deleteJob: .D...%... .i.s. .c.l.a.i.m.e.d. .b.y. .a.n.o.t.h.e.r. .r.u.n.n.i.n.g. .j.o.b.'.s. .s.t.a.t.e...j.s.o.n. ..  .n.o.t. .o.u.r.s. .t.o. .r.e.m.
+- #2 @93505456  .s.e.t.t.l.e.d. .j.o.b.'.s. .s.t.a.t.e...j.s.o.n. ..  .n.o.t. .r.e.m.o.v.i.n.g. .a.n.o.t.h.e.r. .s.e.s.s.i.o.n.'.s. .o.u.t.p.u.t........p..deleteJob: could not verify >....yM. .a.g.a.i.n.s.t. .s.i.b.l.i.n.g. .r.e.c.o.r.d.s. ..  .r.e.f.u.s.i.n.g. .u.n.t.i.l. .r.e.c.o.r.d.s. .a.r.e. .r.e.a.
+- #3 @93505956 is window, pid .......u.background session ........., pid ..........pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(.
+- #4 @93506112 ree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn't remove the session's state directory (.........gitError
+.....K.lockRe
+- #5 @93507796 a./.bg stop terminal write failed: .....t~..pasted-.......E.fleet_view_dispatch_exec..... ..--agent=........tengu_bg_reply_outcome..).......deleteJob: removeAgentWorktree threw for ............cleared
+....#..streamTail..........[bg-spare] claim miss (.......w.tengu_bg_spare_claim_fail.....
+- #6 @189691201 )d.add(k.pid);let u=await K7(e,r??void 0,{knownGone:t.knownGone,evict:!0},o).catch((k)=>({confirmed:!1,error:l(k)}));if(!u.confirmed){if(n(`deleteJob: kill unconfirmed for ${e} \u2014 skipping jobdir/worktree removal to avoid stranding a live worker`,{level:"warn"}),!t.internal)f("job_dele
+- #7 @189691874  X??[])if(await un(pe.worktreePath).catch(()=>pe.worktreePath)===Z){H=pe;break}let xe=uGe(H?.lockReason);if(await ti(e,Z,k,o))E="in_use",n(`deleteJob: ${k} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await o9e(k)===null&&(g=await ur(k))
+- #8 @189692164 !=="gone"&&(A=g==="unreadable"?"unreadable":await ri(e,Z,k,o))!==null)E=A==="claimed"?"shared_record":"records_unreadable",n(A==="claimed"?`deleteJob: ${k} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} a
+- #9 @189692280 dable",n(A==="claimed"?`deleteJob: ${k} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} against sibling records \u2014 refusing until records are readable`,{level:"warn"});else if(!await eae(H?.lockReason)
+- #10 @189692473 rds \u2014 refusing until records are readable`,{level:"warn"});else if(!await eae(H?.lockReason)&&!(xe!==null&&d.has(xe)))E="live_lock",n(`deleteJob: ${k} is locked by a live Claude Code process, or with a reason we did not write (${H?.lockReason}) \u2014 not ours to remove`,{level:"warn"
+- #11 @189693014 pid}`:R.kind==="bg"&&typeof R.jobId==="string"&&W1.test(R.jobId)?`background session ${R.jobId}, pid ${R.pid}`:`pid ${R.pid}, ${R.kind}`,n(`deleteJob: ${k} is the working directory of a live session (pid ${R.pid}, ${R.kind}) \u2014 not ours to remove`,{level:"warn"});else if(M&&!C&&!t.forc
+- … +4 more
+
+## #20 unpushed kept log needle="has commits that are on no remote, kept" hits248=2 hits247=2
+- #0 @93506017 .......pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn't rem
+- #1 @189693353 d changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.originCwd):null)??void 0,ge=await bz(k,r.worktreeBranch,pe,r.w
+
+## #20 keptReason unpushed needle="=\"unpushed\"" hits248=1 hits247=1
+- #0 @189693322 eteJob: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.ori
+
+## #20 :"unpushed" needle=":\"unpushed\"" hits248=1 hits247=1
+- #0 @211612698 -git"};let[a,d,h,m]=await Promise.all([Fa(),rne({ignoreUntracked:!0}),c9e(),gWt()]);if(!d)return{kind:"dirty",branch:a};if(h||!m)return{kind:"unpushed",branch:a};return{kind:"ready",outcomeBranch:`claude/teleport-${i.slice(-8)}`}}async function A(i){if(Yk())return f("teleport_to_cloud","res
+
+## #20 ,unpushed, needle=",unpushed," hits248=0 hits247=0
+
+## #20 needle rev-list needle="rev-list" hits248=35 hits247=35
+- #0 @93476116 .5.. .i.s. .n.o. .l.o.n.g.e.r. .a.c.c.e.s.s.i.b.l.e. ..  .e.x.i.t.i.n.g.........rev-list....."..--count...........HEAD..........asking......F...originalHeadCommit......
+- #1 @97518973  remote` failed (.......0c. but rev-parse on ..	.......--remotes.......>3Y. but rev-list on .......~.e. but branch U.....}. .h.a.s. .u.n.p.u.s.h.e.d. .c.o.m.m.i.t.s. ..
+- #2 @98275388 .e..git rev-parse..........--min-parents..........--max-parents.......n...git rev-list........--match.....A!..--always
+...6...--contains.......D.--first-match......
+- #3 @179372536 or:!1});return e===0},c9e=async(e)=>{let{stdout:t,code:r}=await We(tt(),[...Zt,"rev-list","--count","@{u}..HEAD"],{cwd:e,preserveOutputOnError:!1});return r===0&&parseI
+- #4 @181706899 w-repository":"none","--is-shallow-update":"none","--path-prefix":"none"}},"git rev-list":{safeFlags:{...Et,...Zt,...en,...or,"--count":"none","--reverse":"none","--fir
+- #5 @184972983 (e,t){let[r,o]=await Promise.all([e(["symbolic-ref","-q","--short","HEAD"]),e(["rev-list","--max-count=1","--format=%h %s",t])]),u=r.code===0?r.stdout.trim():"(no branc
+- … +29 more
+
+## #20 needle --not","--remotes needle="--not\",\"--remotes" hits248=3 hits247=3
+- #0 @186331525 .length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} bu
+- #1 @186369494 e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim()
+- #2 @207713522 ef:E,tip:g,count:w.length,reason:L,conflictPaths:M},restored:e}),I=await An(t,["--not","--remotes","--not","--end-of-options",g,`^${d}`,...l.laptopHeads.map((L)=>`^${L}`)]);if(I
+
+## #20 needle "--not","--remotes" needle="\"--not\",\"--remotes\"" hits248=3 hits247=3
+- #0 @186331524 ).length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} but
+- #1 @186369493 (e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().
+- #2 @207713521 ref:E,tip:g,count:w.length,reason:L,conflictPaths:M},restored:e}),I=await An(t,["--not","--remotes","--not","--end-of-options",g,`^${d}`,...l.laptopHeads.map((L)=>`^${L}`)]);if(I=
+
+## #20 needle --all","--not needle="--all\",\"--not" hits248=0 hits247=0
+
+## #20 needle "--all","--not" needle="\"--all\",\"--not\"" hits248=0 hits247=0
+
+## #20 needle HEAD","--not","--remotes needle="HEAD\",\"--not\",\"--remotes" hits248=1 hits247=1
+- #0 @186369487 on b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim()
+
+## #20 needle "HEAD","--not","--remotes" needle="\"HEAD\",\"--not\",\"--remotes\"" hits248=1 hits247=1
+- #0 @186369486 ion b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().
+
+## #20 needle --max-count=1","HEAD","--not needle="--max-count=1\",\"HEAD\",\"--not" hits248=1 hits247=1
+- #0 @186369471 ull}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.s
+
+## #20 needle merge-base","--is-ancestor needle="merge-base\",\"--is-ancestor" hits248=6 hits247=6
+- #0 @184977137 /tags/"]);if(G.exitCode===0&&G.stdout.trim()==="")continue}else{let G=await E(["merge-base","--is-ancestor",U,"HEAD"]);if(G.exitCode===1)continue;if(G.exitCode!==0)return L}let j=await E
+- #1 @185431677 o)return null;if(!u||o===u)return o;let{code:p}=await t(["--no-optional-locks","merge-base","--is-ancestor",o,u]);return p===0?u:o}async function Qwn(e){let t=UOe(e),r=(t!==void 0?$Oe().
+- #2 @194429847 t[m,p]=await Promise.all([q_(l,["rev-list","--count",`${r}..${a}`,"--"]),q_(l,["merge-base","--is-ancestor",r,a])]);if(Ct(t))return{ok:!1,reason:"aborted"};if(p.exitCode===1)return{ok:!1
+- #3 @194631583 ;let dt={gitDir:Ee,commonDir:Ee,signal:A,timeoutMs:t.timeoutMs},Ve=await Jt(t,["merge-base","--is-ancestor",Se,oe]);if(Ve.exitCode===1)return q("not_descendant","the cloud session's comm
+- #4 @194663831 nction cu(e,t,r){if(!Yt.test(t)||!Yt.test(r))return"unknown";let o=await Jt(e,["merge-base","--is-ancestor",t,r]);return o.exitCode===0?!0:o.exitCode===1?!1:"unknown"}async function fu(e
+- #5 @207714566 dout.split(`
+`).filter((o)=>o!=="")}async function Dt(e,t,r){let o=await Jt(e,["merge-base","--is-ancestor","--end-of-options",t,r],{answerExitCodes:[1]});return o.exitCode===0?!0:o.exit
+
+## #20 needle "--is-ancestor" needle="\"--is-ancestor\"" hits248=7 hits247=7
+- #0 @181706292 ack:(e,t)=>t.some((r)=>r!=="-v"&&r!=="--verbose")},"git merge-base":{safeFlags:{"--is-ancestor":"none","--fork-point":"none","--octopus":"none","--independent":"none","--all":
+- #1 @184977149 (G.exitCode===0&&G.stdout.trim()==="")continue}else{let G=await E(["merge-base","--is-ancestor",U,"HEAD"]);if(G.exitCode===1)continue;if(G.exitCode!==0)return L}let j=await E(
+- #2 @185431689 l;if(!u||o===u)return o;let{code:p}=await t(["--no-optional-locks","merge-base","--is-ancestor",o,u]);return p===0?u:o}async function Qwn(e){let t=UOe(e),r=(t!==void 0?$Oe().g
+- #3 @194429859  Promise.all([q_(l,["rev-list","--count",`${r}..${a}`,"--"]),q_(l,["merge-base","--is-ancestor",r,a])]);if(Ct(t))return{ok:!1,reason:"aborted"};if(p.exitCode===1)return{ok:!1,
+- #4 @194631595 Dir:Ee,commonDir:Ee,signal:A,timeoutMs:t.timeoutMs},Ve=await Jt(t,["merge-base","--is-ancestor",Se,oe]);if(Ve.exitCode===1)return q("not_descendant","the cloud session's commi
+- #5 @194663843 t,r){if(!Yt.test(t)||!Yt.test(r))return"unknown";let o=await Jt(e,["merge-base","--is-ancestor",t,r]);return o.exitCode===0?!0:o.exitCode===1?!1:"unknown"}async function fu(e,
+- … +1 more
+
+## #20 needle is-ancestor needle="is-ancestor" hits248=8 hits247=8
+- #0 @95991558 ..maxBytes is not a positive number...........HEAD does not resolve.......j..--is-ancestor...	.......--objects........a..--disk-usage.....f..ccr-overlay......:^..bundle.
+- #1 @181706295 :(e,t)=>t.some((r)=>r!=="-v"&&r!=="--verbose")},"git merge-base":{safeFlags:{"--is-ancestor":"none","--fork-point":"none","--octopus":"none","--independent":"none","--all"
+- #2 @184977152 exitCode===0&&G.stdout.trim()==="")continue}else{let G=await E(["merge-base","--is-ancestor",U,"HEAD"]);if(G.exitCode===1)continue;if(G.exitCode!==0)return L}let j=await E
+- #3 @185431692 f(!u||o===u)return o;let{code:p}=await t(["--no-optional-locks","merge-base","--is-ancestor",o,u]);return p===0?u:o}async function Qwn(e){let t=UOe(e),r=(t!==void 0?$Oe().
+- #4 @194429862 omise.all([q_(l,["rev-list","--count",`${r}..${a}`,"--"]),q_(l,["merge-base","--is-ancestor",r,a])]);if(Ct(t))return{ok:!1,reason:"aborted"};if(p.exitCode===1)return{ok:!1
+- #5 @194631598 :Ee,commonDir:Ee,signal:A,timeoutMs:t.timeoutMs},Ve=await Jt(t,["merge-base","--is-ancestor",Se,oe]);if(Ve.exitCode===1)return q("not_descendant","the cloud session's comm
+- … +2 more
+
+## #20 needle --merged","HEAD needle="--merged\",\"HEAD" hits248=0 hits247=0
+
+## #20 needle "--merged","HEAD" needle="\"--merged\",\"HEAD\"" hits248=0 hits247=0
+
+## #20 needle --merged needle="--merged" hits248=9 hits247=9
+- #0 @98275656 --allow-undetermined-type.......%...git cat-file....ql.--no-contains...........--merged....o|q.--no-merged.....".>.--points-at.........git for-each-ref	...	Uq.--headin
+- #1 @98277388 actions......*|.--team-mentions.....w%..gh search issues.....9?.--checks.....i..--merged-at.....=...--review....L.#.--review-requested......qZ.--reviewed-by.......Ii.
+- #2 @181708040 rt":"string","--count":"number","--contains":"string","--no-contains":"string","--merged":"string","--no-merged":"string","--points-at":"string"},additionalCommandIsDan
+- #3 @181709439 ","--list":"none","-n":"number","--contains":"string","--no-contains":"string","--merged":"string","--no-merged":"string","--sort":"string","--format":"string","--point
+- #4 @181709725 Callback:(e,t)=>{if(Fe(t))return!0;let r=new Set(["--contains","--no-contains","--merged","--no-merged","--points-at","--sort","--format","-n"]),o=0,u=!1,d=!1;while(o<t
+- #5 @181710447 ":"number","--no-abbrev":"none","--contains":"string","--no-contains":"string","--merged":"none","--no-merged":"none","--points-at":"string","--sort":"string","--show-c
+- … +3 more
+
+## #20 needle refs/heads/main needle="refs/heads/main" hits248=6 hits247=6
+- #0 @93060161 en/changelog...U...Y_..https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md.........q.plugin init <name>..`...Bg;.Scaffold a new plugin at ~/.
+- #1 @96052401 \tobjectformat = sha256$...........config.worktree.........grafts.......k`.ref: refs/heads/main
+...........init.defaultRefFormat=files......2..--bare..........--template=.....
+- #2 @189778860 e(/^https:\/\//,""),b="https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md";function u(){return C(ge(),"cache","changelog.md")}function p(){r
+- #3 @194596833 0,force:!0}))),!E)await an(de(e,"HEAD"),{force:!0}),await Xr(de(e,"HEAD"),`ref: refs/heads/main
+`,{mode:384,flag:"wx"})}else{await an(e,{recursive:!0,force:!0}),await On(e,{re
+- #4 @204031435 ait bt(G.join(u,"refs","heads"),{recursive:!0}),await vt(G.join(u,"HEAD"),`ref: refs/heads/main
+`),await vt(G.join(u,"config"),`[core]
+	repositoryformatversion = 0
+	bare = fal
+- #5 @224934535     issuer_id=issuer.id,
+    match={"subject_prefix": "repo:my-org/my-repo:ref:refs/heads/main",
+           "claims": {"repository_owner": "my-org"}},
+    target={"type": "
+
+## #20 needle refs/heads/master needle="refs/heads/master" hits248=0 hits247=0
+
+## #20 needle symbolic-ref","--short","HEAD needle="symbolic-ref\",\"--short\",\"HEAD" hits248=0 hits247=0
+
+## #20 needle "symbolic-ref","--short" needle="\"symbolic-ref\",\"--short\"" hits248=5 hits247=5
+- #0 @179369219 return r;return"main"},hWt=async(e)=>{let{stdout:t,code:r}=await We(tt(),[...Zt,"symbolic-ref","--short","refs/remotes/origin/HEAD"],{cwd:e??te(),preserveOutputOnError:!1});if(r!==0)re
+- #1 @179374358 });if(t===0&&e.trim())return e.trim();let{stdout:r,code:o}=await Ue(tt(),[...Zt,"symbolic-ref","--short","refs/remotes/origin/HEAD"],{preserveOutputOnError:!1}),i=["origin/main","origi
+- #2 @186329824 /remotes/origin/${k}`):null;if(!E||E===o)return null;let C=await We(tt(),[...Zt,"symbolic-ref","--short","-q","HEAD"],{cwd:t,env:Vo()});if(C.code!==0||C.stdout.trim()!==r)return null;l
+- #3 @186365929 outcome:"failed",errorSummary:tTt};let j=null;if(t){let pe=await We(tt(),[...Zt,"symbolic-ref","--short","-q","HEAD"],{cwd:e,env:Vo()});j=pe.code===0?pe.stdout.trim():null}let{code:G,s
+- #4 @193903620 `))}async function Or(e){let[t,r,o,s]=await Promise.all([pe(e,["remote"]),pe(e,["symbolic-ref","--short","refs/remotes/origin/HEAD"]),$r(e,["ls-files"]),pe(e,["remote","get-url","origi
+
+## #20 needle origin/HEAD needle="origin/HEAD" hits248=21 hits247=21
+- #0 @94757024 ).........].--count=2000
+....{*.refs/heads........S.refs/remotes/origin.....yJ..origin/HEAD.......C.master..1....qy.Ultrareview is unavailable for your organization......
+- #1 @94986233 kills|rules|agents)\/..........symbolic-ref.....3..--short.......O.refs/remotes/origin/HEAD.....;7.(.u.n.k.n.o.w.n. ..  .o.r.i.g.i.n./.H.E.A.D. .u.n.s.e.t.)...........^[\w
+- #2 @95010125 :git] Could not normalize remote.origin.fetch: &...Q.&.[byoc:git] Could not set origin/HEAD: ..
+.......--no-deref......u...core.checkStat=minimal......F...core.trustctime=
+- #3 @96493039 GIT STATUS:
+
+```
+!`git status`
+```
+
+FILES MODIFIED:
+
+```
+!`git diff --name-only origin/HEAD...`
+```
+
+COMMITS:
+
+```
+!`git log --no-decorate origin/HEAD...`
+```
+
+DIFF CONTEN
+- #4 @96493098 git diff --name-only origin/HEAD...`
+```
+
+COMMITS:
+
+```
+!`git log --no-decorate origin/HEAD...`
+```
+
+DIFF CONTENT:
+
+```
+!`git diff origin/HEAD...`
+```
+
+Review the complete
+- #5 @96493149 
+```
+!`git log --no-decorate origin/HEAD...`
+```
+
+DIFF CONTENT:
+
+```
+!`git diff origin/HEAD...`
+```
+
+Review the complete diff above. This contains all code changes in the 
+- … +15 more
+
+## #20 needle checked-out needle="checked-out" hits248=7 hits247=7
+- #0 @96347548  the repository.,....._.the uncommitted changes could not be stashed%....?5.the checked-out branch has no commits...%.....(.there were no local changes to bundle...?.....T
+- #1 @96678368 --dry-run(?=\s|$)...........\bgh\s+\S+(?:\s+\S+)?...
+.....Q.^\u2713.*$......A...checked-out.....;8..\bglab\s+mr\s+create\b........d.-X\s*POST\b.......R.--request\s*=?\s*PO
+- #2 @180397092 "reopened","ready","draft","auto-merge-enabled","auto-merge-disabled","pushed","checked-out","started"]).optional().describe("What the session did that produced this annou
+- #3 @180397326  'auto-merge-enabled', \u2026), 'pushed' for a push to a branch that has a PR, 'checked-out' for gh pr checkout, or 'started' for the open change on the branch the session
+- #4 @184567981 f("pr_contribute_link","gh_view_failed")))}}let C=e.match(OJt);if(C?.[1])mw(fH("checked-out",C[1]));else if(gH.test(e)&&!p){let N=Nfe(e),U=N.match(/\S+/g)?.filter((Pe)=>!P
+- #5 @184934343 ry",stash_failed:"the uncommitted changes could not be stashed",empty_repo:"the checked-out branch has no commits",no_changes:"there were no local changes to bundle",unsup
+- … +1 more
+
+## #20 needle default branch needle="default branch" hits248=32 hits247=32
+- #0 @95712631 .|We.' is not pushed to origin; remote agents will run against the repository's default branch...
+.......[Circular]..	....=q.parallel[...	.......pipeline[...........agentCont
+- #1 @97100748 e.,. .p.e.r. .t.h.e. .p.r.e.-.s.h.i.p. .g.a.t.e. .b.e.l.o.w.).....@.. If on the default branch, branch first........a. .`cat`, `head`, `tail`, `sed`, `awk`, or `echo`..>...B.
+- #2 @97422385 uard_observe...r...[...[teleportToRemote] reuse-outcome-branch collision guard: default branch unknown (no preflight answer, origin/HEAD .. .......u.n.r.e.s.o.l.v.e.d.). ..  
+- #3 @97423293 ...).4.' is ........X..The requested outcome branch '......]\..the repository's default branch, which this environment's runner cannot reuse as its work branch (its git check
+- #4 @97423722 om a self-hosted (BYOC) default environment, whose runner tolerates reusing the default branch........O...Use a non-default branch........_Dc.outcome_branch_is_default.......
+- #5 @97423758 ronment, whose runner tolerates reusing the default branch........O...Use a non-default branch........_Dc.outcome_branch_is_default...........[teleportToRemote] Git source: .
+- … +26 more
+
+## #20 needle merged into needle="merged into" hits248=9 hits247=9
+- #0 @95775555 .connector_as_host........].. manifest entries resolve to .........i." and were merged into one (....?./.). A viewer with more than one ......LA. named "R...B..." gets ser
+- #1 @98623435  is appended to the transcript without triggering an assistant turn. It will be merged into the next user message that does query........y.t.ISO timestamp when the message
+- #2 @100205892 the stored copy could not be fetched/.......the settings file here could not be merged into.....N...they could not be written here..........ready_unreadable....[c..rules_u
+- #3 @180320409  is appended to the transcript without triggering an assistant turn. It will be merged into the next user message that does query."),timestamp:i().optional().describe("ISO
+- #4 @189967875 h(N),K=qe(N);v.push(`${C.from} manifest entries resolve to ${K} "${z}" and were merged into one (${D} ${I(D,"tool")}). A viewer with more than one ${K} named "${z}" gets s
+- #5 @207917076 py could not be fetched",settings_unusable:"the settings file here could not be merged into",nothing_applied:"they could not be written here"};function qa(e){if(e.kind==="
+- … +3 more
+
+## covering-fns for deleteJob: hits=16
+- log@93504820 fn= @-1 sha=MISS len=0
+- log@189691201 fn=oG @189690878 sha=d681e71d77055909 len=3947
+  keys=unpushed
+
+## #20-deleteJob-log @93504820
+n.t.....R.".Couldn't attach to that session.......U.job_attach_failed... .....N.deleteJob: kill unconfirmed for D...:.*. ..  .s.k.i.p.p.i.n.g. .j.o.b.d.i.r./.w.o.r.k.t.r.e.e. .r.e.m.o.v.a.l. .t.o. .a.v.o.i.d. .s.t.r.a.n.d.i.n.g. .a. .l.i.v.e. .w.o.r.k.e.r.
+.......job_delete..@...:Uo.Cannot destructu
+
+## #20-deleteJob-log @93505096
+@...:Uo.Cannot destructure property 'dirty' from null or undefined value....V...deleteJob: .D...%... .i.s. .c.l.a.i.m.e.d. .b.y. .a.n.o.t.h.e.r. .r.u.n.n.i.n.g. .j.o.b.'.s. .s.t.a.t.e...j.s.o.n. ..  .n.o.t. .o.u.r.s. .t.o. .r.e.m.o.v.e.]....._. .i.s. .a.l.s.o. .r.e.c.o.r.d.e.d. .b.y. .a.n.o.t.h.e.r.
+
+## #20-deleteJob-log @93505456
+t. .r.e.m.o.v.i.n.g. .a.n.o.t.h.e.r. .s.e.s.s.i.o.n.'.s. .o.u.t.p.u.t........p..deleteJob: could not verify >....yM. .a.g.a.i.n.s.t. .s.i.b.l.i.n.g. .r.e.c.o.r.d.s. ..  .r.e.f.u.s.i.n.g. .u.n.t.i.l. .r.e.c.o.r.d.s. .a.r.e. .r.e.a.d.a.b.l.e.M....... is locked by a live Claude Code process, or with a 
+
+## #20-deleteJob-log @93505956
+........pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed
+
+## #20-deleteJob-log @93506112
+t are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn't remove the session's state directory (.........gitError
+.....K.lockReason.......p..primaryCheckoutVouches..
+...O.A.needsForce........%.erro
+
+## #20-deleteJob-log @93507796
+fleet_view_dispatch_exec..... ..--agent=........tengu_bg_reply_outcome..).......deleteJob: removeAgentWorktree threw for ............cleared
+....#..streamTail..........[bg-spare] claim miss (.......w.tengu_bg_spare_claim_fail.......?>q.job_claim_spare_delete_failed..."...~...[bg-spare] deleteJob unc
+
+## #20-deleteJob-log @189691201
+one,evict:!0},o).catch((k)=>({confirmed:!1,error:l(k)}));if(!u.confirmed){if(n(`deleteJob: kill unconfirmed for ${e} \u2014 skipping jobdir/worktree removal to avoid stranding a live worker`,{level:"warn"}),!t.internal)f("job_delete","kill_unconfirmed",{had_worktree:Boolean(r?.worktreePath)});return
+
+## #20-deleteJob-log @189691874
+h)===Z){H=pe;break}let xe=uGe(H?.lockReason);if(await ti(e,Z,k,o))E="in_use",n(`deleteJob: ${k} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await o9e(k)===null&&(g=await ur(k))!=="gone"&&(A=g==="unreadable"?"unreadable":await ri(e,Z,k,o))!==null)
+
+## #20-deleteJob-log @189692164
+))!==null)E=A==="claimed"?"shared_record":"records_unreadable",n(A==="claimed"?`deleteJob: ${k} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} against sibling records \u2014 refusing until records are readable`,{le
+
+## #20-deleteJob-log @189692280
+another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} against sibling records \u2014 refusing until records are readable`,{level:"warn"});else if(!await eae(H?.lockReason)&&!(xe!==null&&d.has(xe)))E="live_lock",n(`deleteJob: ${k} is locked b
+
+## #20-deleteJob-log @189692473
+"});else if(!await eae(H?.lockReason)&&!(xe!==null&&d.has(xe)))E="live_lock",n(`deleteJob: ${k} is locked by a live Claude Code process, or with a reason we did not write (${H?.lockReason}) \u2014 not ours to remove`,{level:"warn"});else if((R=await ni(i,e,d,Z,k))!==void 0&&await ur(k)!=="gone")E="o
+
+## #20-deleteJob-log @189693014
+bId)?`background session ${R.jobId}, pid ${R.pid}`:`pid ${R.pid}, ${R.kind}`,n(`deleteJob: ${k} is the working directory of a live session (pid ${R.pid}, ${R.kind}) \u2014 not ours to remove`,{level:"warn"});else if(M&&!C&&!t.force)E="dirty",n(`deleteJob: worktree has uncommitted changes, kept ${k}`
+
+## #20-deleteJob-log @189693179
+\u2014 not ours to remove`,{level:"warn"});else if(M&&!C&&!t.force)E="dirty",n(`deleteJob: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{leve
+
+## #20-deleteJob-log @189693337
+f(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.originCwd):null)??void 0,ge=await bz(k,r.worktreeBranch,pe,r.worktreeHookBased,t.force?
+
+## #20-deleteJob-log @189693625
+sed,t.force?"job_delete_force":"job_delete",Z,Ae,{storageV5:o}).catch(($e)=>(n(`deleteJob: removeAgentWorktree threw for ${k}: ${l($e)}`,{level:"error"}),{outcome:"failed",errorSummary:l($e)}));if(ge.outcome==="failed")E=ge.needsForce?"unverified":ge.errorSummary===nae?"identity_changed":"remove_fai
+
+## #20-deleteJob-log @189694266
+p?4000:0});try{await zo(Kn(e),{recursive:!0,force:!0})}catch(k){if(Uu(Kn(e)),n(`deleteJob: failed to remove job dir for ${e}: ${l(k)}`,{level:"warn"}),!t.internal)f("job_delete","jobdir_rm_failed",{had_worktree:Boolean(r?.worktreePath)});return{removed:!1,error:`couldn't remove the session's state d
+
+## #20-deleteJob-unpushed-fn  @-1
+MISS {"miss":true}
+
+## #20-deleteJob-unpushed-fn oG @189690878
+len=3947 sha=d681e71d77055909
+async function oG(e,t={},o){let r=await nr(Kn(e),o),i=r?.worktreePath?await tN(o).catch(()=>[]):[],d=new Set;for(let k of i)if(k.kind==="bg"&&(k.jobId===e||k.sessionId?.startsWith(e)))d.add(k.pid);let u=await K7(e,r??void 0,{knownGone:t.knownGone,evict:!0},o).catch((k)=>({confirmed:!1,error:l(k)}));if(!u.confirmed){if(n(`deleteJob: kill unconfirmed for ${e} \u2014 skipping jobdir/worktree removal to avoid stranding a live worker`,{level:"warn"}),!t.internal)f("job_delete","kill_unconfirmed",{had_worktree:Boolean(r?.worktreePath)});return{removed:!1,error:u.error,errorCode:"kill_unconfirmed"}}let m;if(r?.worktreePath){let k=r.worktreePath,E,A=null,g="present",x,R,{dirty:M,gitError:C}=await uIe(k,void 0,{hookBased:r.worktreeHookBased}),N=zct(k,r.originCwd)??void 0,Z=await un(k).catch(()=>k),X=!C&&N?await YK(N).catch(()=>null):null,H;for(let pe of X??[])if(await un(pe.worktreePath).catch(()=>pe.worktreePath)===Z){H=pe;break}let xe=uGe(H?.lockReason);if(await ti(e,Z,k,o))E="in_use",n(`deleteJob: ${k} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await o9e(k)===null&&(g=await ur(k))!=="gone"&&(A=g==="unreadable"?"unreadable":await ri(e,Z,k,o))!==null)E=A==="claimed"?"shared_record":"records_unreadable",n(A==="claimed"?`deleteJob: ${k} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} against sibling records \u2014 refusing until records are readable`,{level:"warn"});else if(!await eae(H?.lockReason)&&!(xe!==null&&d.has(xe)))E="live_lock",n(`deleteJob: ${k} is locked by a live Claude Code process, or with a reason we did not write (${H?.lockReason}) \u2014 not ours to remove`,{level:"warn"});else if((R=await ni(i,e,d,Z,k))!==void 0&&await ur(k)!=="gone")E="occupied",x=R.pid===process.pid?`${typeof R.parkedJobId==="string"&&W1.test(R.parkedJobId)?`session ${R.parkedJobId},`:"a session"} moved to the background from this window, pid ${R.pid}`:R.kind==="bg"&&typeof R.jobId==="string"&&W1.test(R.jobId)?`background session ${R.jobId}, pid ${R.pid}`:`pid ${R.pid}, ${R.kind}`,n(`deleteJob: ${k} is the working directory of a live session (pid ${R.pid}, ${R.kind}) \u2014 not ours to remove`,{level:"warn"});else if(M&&!C&&!t.force)E="dirty",n(`deleteJob: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.originCwd):null)??void 0,ge=await bz(k,r.worktreeBranch,pe,r.worktreeHookBased,t.force?"job_delete_force":"job_delete",Z,Ae,{storageV5:o}).catch(($e)=>(n(`deleteJob: removeAgentWorktree threw for ${k}: ${l($e)}`,{level:"error"}),{outcome:"failed",errorSummary:l($e)}));if(ge.outcome==="failed")E=ge.needsForce?"unverified":ge.errorSummary===nae?"identity_changed":"remove_failed",x=ge.needsForce?void 0:ge.errorSummary;else if(ge.outcome==="left_in_place")m=Ro(k)}if(E){if(!t.internal)y("job_delete",`worktree_kept_${E}`,{had_worktree:!0});return{removed:!1,keptWorktree:Ro(k),keptReason:E,...x!==void 0&&{keptErrorSummary:x}}}}let p=r?.fan?.some((k)=>k.kind==="shell"&&k.doneAt===void 0)??!1;await Sn(Kn(e),{waitMs:p?4000:0});try{await zo(Kn(e),{recursive:!0,force:!0})}catch(k){if(Uu(Kn(e)),n(`deleteJob: failed to remove job dir for ${e}: ${l(k)}`,{level:"warn"}),!t.internal)f("job_delete","jobdir_rm_failed",{had_worktree:Boolean(r?.worktreePath)});return{removed:!1,error:`couldn't remove the session's state directory (${Ro(l(k))})`,errorCode:"jobdir_rm_failed"}}if(D()&&o!==void 0&&Ln(Ykt(e))===void 0)await h$e(o,e);else await Xo(ZK(e)).catch(()=>{});if(Uu(Kn(e)),!t.internal)if(m)y("job_delete","worktree_left_in_place",{had_worktree:!0});else b("job_delete",{had_worktree:Boolean(r?.worktreePath)});return{removed:!0,...m&&{leftWorktreeDir:m}}}
+
+## #20-deleteJob-unpushed-fn oG @189690878
+len=3947 sha=d681e71d77055909
+async function oG(e,t={},o){let r=await nr(Kn(e),o),i=r?.worktreePath?await tN(o).catch(()=>[]):[],d=new Set;for(let k of i)if(k.kind==="bg"&&(k.jobId===e||k.sessionId?.startsWith(e)))d.add(k.pid);let u=await K7(e,r??void 0,{knownGone:t.knownGone,evict:!0},o).catch((k)=>({confirmed:!1,error:l(k)}));if(!u.confirmed){if(n(`deleteJob: kill unconfirmed for ${e} \u2014 skipping jobdir/worktree removal to avoid stranding a live worker`,{level:"warn"}),!t.internal)f("job_delete","kill_unconfirmed",{had_worktree:Boolean(r?.worktreePath)});return{removed:!1,error:u.error,errorCode:"kill_unconfirmed"}}let m;if(r?.worktreePath){let k=r.worktreePath,E,A=null,g="present",x,R,{dirty:M,gitError:C}=await uIe(k,void 0,{hookBased:r.worktreeHookBased}),N=zct(k,r.originCwd)??void 0,Z=await un(k).catch(()=>k),X=!C&&N?await YK(N).catch(()=>null):null,H;for(let pe of X??[])if(await un(pe.worktreePath).catch(()=>pe.worktreePath)===Z){H=pe;break}let xe=uGe(H?.lockReason);if(await ti(e,Z,k,o))E="in_use",n(`deleteJob: ${k} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await o9e(k)===null&&(g=await ur(k))!=="gone"&&(A=g==="unreadable"?"unreadable":await ri(e,Z,k,o))!==null)E=A==="claimed"?"shared_record":"records_unreadable",n(A==="claimed"?`deleteJob: ${k} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${k} against sibling records \u2014 refusing until records are readable`,{level:"warn"});else if(!await eae(H?.lockReason)&&!(xe!==null&&d.has(xe)))E="live_lock",n(`deleteJob: ${k} is locked by a live Claude Code process, or with a reason we did not write (${H?.lockReason}) \u2014 not ours to remove`,{level:"warn"});else if((R=await ni(i,e,d,Z,k))!==void 0&&await ur(k)!=="gone")E="occupied",x=R.pid===process.pid?`${typeof R.parkedJobId==="string"&&W1.test(R.parkedJobId)?`session ${R.parkedJobId},`:"a session"} moved to the background from this window, pid ${R.pid}`:R.kind==="bg"&&typeof R.jobId==="string"&&W1.test(R.jobId)?`background session ${R.jobId}, pid ${R.pid}`:`pid ${R.pid}, ${R.kind}`,n(`deleteJob: ${k} is the working directory of a live session (pid ${R.pid}, ${R.kind}) \u2014 not ours to remove`,{level:"warn"});else if(M&&!C&&!t.force)E="dirty",n(`deleteJob: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.originCwd)??void 0,Ae=(r.originCwd?vn(r.originCwd):null)??void 0,ge=await bz(k,r.worktreeBranch,pe,r.worktreeHookBased,t.force?"job_delete_force":"job_delete",Z,Ae,{storageV5:o}).catch(($e)=>(n(`deleteJob: removeAgentWorktree threw for ${k}: ${l($e)}`,{level:"error"}),{outcome:"failed",errorSummary:l($e)}));if(ge.outcome==="failed")E=ge.needsForce?"unverified":ge.errorSummary===nae?"identity_changed":"remove_failed",x=ge.needsForce?void 0:ge.errorSummary;else if(ge.outcome==="left_in_place")m=Ro(k)}if(E){if(!t.internal)y("job_delete",`worktree_kept_${E}`,{had_worktree:!0});return{removed:!1,keptWorktree:Ro(k),keptReason:E,...x!==void 0&&{keptErrorSummary:x}}}}let p=r?.fan?.some((k)=>k.kind==="shell"&&k.doneAt===void 0)??!1;await Sn(Kn(e),{waitMs:p?4000:0});try{await zo(Kn(e),{recursive:!0,force:!0})}catch(k){if(Uu(Kn(e)),n(`deleteJob: failed to remove job dir for ${e}: ${l(k)}`,{level:"warn"}),!t.internal)f("job_delete","jobdir_rm_failed",{had_worktree:Boolean(r?.worktreePath)});return{removed:!1,error:`couldn't remove the session's state directory (${Ro(l(k))})`,errorCode:"jobdir_rm_failed"}}if(D()&&o!==void 0&&Ln(Ykt(e))===void 0)await h$e(o,e);else await Xo(ZK(e)).catch(()=>{});if(Uu(Kn(e)),!t.internal)if(m)y("job_delete","worktree_left_in_place",{had_worktree:!0});else b("job_delete",{had_worktree:Boolean(r?.worktreePath)});return{removed:!0,...m&&{leftWorktreeDir:m}}}
+
+## #20-phrase-map @189689950
+eplace(Wye,"")};return{kind:"detached"}}var ei={dirty:"has uncommitted changes",unpushed:"has commits that are not pushed anywhere",in_use:"is claimed by another running job",live_lock:"is locked \u2014 in use by another live session, or locked by hand",occupied:"is the working directory of a live Claude Code session",remove_failed:"could not be removed",unverified:`${Vct} \u2014 remove the directory manually, or delete from the agents view to discard it`,shared_record:"is al
+
+## #20 forward-from-phrase function names (80k)
+- AQe @189690730 function AQe(e,t){let o=ei[e??"remove_failed"],r=t?Ro(t):"";if(!r)return o;let i=r.length<=120?r:`${de(r,40)}\u2026${qm(r,79)}`;return`${o} (${i})`}async functi
+- oG @189690878 async function oG(e,t={},o){let r=await nr(Kn(e),o),i=r?.worktreePath?await tN(o).catch(()=>[]):[],d=new Set;for(let k of i)if(k.kind==="bg"&&(k.jobId===e||k.se
+- ti @189694825 async function ti(e,t,o,r){for(let i of await Rg(void 0,r).catch(()=>[])){if(i.id===e||!i.state.worktreePath||Di(i.state))continue;let d=mr(i.state.worktreePath
+- mr @189695114 function mr(e,t,o){if(gt(e,o)||gt(e,t))return"match";if(!Wp(e))return"no_match";let r=Qo(e);if(gt(r,o)||gt(r,t))return"match";return Jt(e)&&!Vn(e)&&!_i(e)?"unve
+- gt @189695295 function gt(e,t){return Ht(e)===Ht(t)}function Ht(e){return Dm(jn(e))}function lr(e,t){let o=Vo(Ht(t),Ht(e));return o.split(/[/\\]/,1)[0]!==".."&&!Jt(o)}async f
+- Ht @189695333 function Ht(e){return Dm(jn(e))}function lr(e,t){let o=Vo(Ht(t),Ht(e));return o.split(/[/\\]/,1)[0]!==".."&&!Jt(o)}async function ur(e){return fr(e).then(()=>"p
+- lr @189695365 function lr(e,t){let o=Vo(Ht(t),Ht(e));return o.split(/[/\\]/,1)[0]!==".."&&!Jt(o)}async function ur(e){return fr(e).then(()=>"present",(t)=>Q(t)||T(t)==="ENOTD
+- ur @189695448 async function ur(e){return fr(e).then(()=>"present",(t)=>Q(t)||T(t)==="ENOTDIR"?"gone":"unreadable")}async function ni(e,t,o,r,i){for(let d of e){if(d.kind!=="
+- ni @189695550 async function ni(e,t,o,r,i){for(let d of e){if(d.kind!=="interactive"&&d.kind!=="bg")continue;if(o.has(d.pid)||d.parkedJobId===t)continue;if(d.pid===process.pi
+- pr @189695978 function pr(e,t){let o=te();if(!Jt(e)||Wp(e)||Wl(e,o)&&Wl(e,t))return e;let r=jC(ce(),e,{surfaceNetworkRaw:!0,anchors:[o,t]});if(r===xq)return e;if(r!==void 0&&
+- gr @189696199 async function gr(e){return fr(fn(e,"state.json")).then(()=>"present",(t)=>Q(t)?"missing":"unreadable")}async function ri(e,t,o,r){let i;try{i=await Yo(iS(),{wi
+- ri @189696303 async function ri(e,t,o,r){let i;try{i=await Yo(iS(),{withFileTypes:!0})}catch(d){return Q(d)?null:"unreadable"}for(let d of i){if(!d.isDirectory()||d.name===e)
+- d @189698840 function d(r){let e;try{e=new URL(r)}catch(o){throw Error(`Invalid URL format: ${r}`)}if(e.protocol!=="http:"&&e.protocol!=="https:")throw Error(`Invalid URL pr
+- Aje @189699058 async function Aje(r){try{return await Ue("explorer",[r]),!0}catch(e){return!1}}async function m(r){try{return await Ue("explorer",[`/select,${r}`]),!0}catch(e)
+- m @189699138 async function m(r){try{return await Ue("explorer",[`/select,${r}`]),!0}catch(e){return!1}}async function xje(r){let e;try{e=new URL(r)}catch{return!1}let o=e.p
+- xje @189699229 async function xje(r){let e;try{e=new URL(r)}catch{return!1}let o=e.protocol;if(o==="file:"){if(e.host!=="")return!1;try{let t=p(r);if(ou(t)||ahe(t))return!1;re
+- o3 @189699567 function o3(){if(!process.stdout.isTTY)return!0;if(a.BROWSER&&a.BROWSER!=="true")return!1;if(a.SSH_CONNECTION)return!0;return l()}function l(){return B()==="lin
+- l @189699697 function l(){return B()==="linux"&&!a.DISPLAY&&!a.WAYLAND_DISPLAY}async function lZt(r){try{d(r)}catch(e){return{ok:!1,reason:"invalid_url",detail:e instanceof 
+- lZt @189699763 async function lZt(r){try{d(r)}catch(e){return{ok:!1,reason:"invalid_url",detail:e instanceof Error?e.message:String(e)}}return c(r)}async function Tr(r){return
+- Tr @189699896 async function Tr(r){return(await lZt(r)).ok}async function c(r){try{let e=ll()?.browser,o=e!==void 0?e??void 0:a.BROWSER,t="win32";if(!o&&l())return{ok:!1,reas
+- c @189699941 async function c(r){try{let e=ll()?.browser,o=e!==void 0?e??void 0:a.BROWSER,t="win32";if(!o&&l())return{ok:!1,reason:"no_display"};if(o)return s(await Ue(o,[r]
+- s @189700243 function s(r){if(r.code===0)return{ok:!0};let e=r.error??"",o=r.stderr||e||`exit ${r.code}`;if(r.code===127||e.includes("ENOENT"))return{ok:!1,reason:"opener_mi
+- wtr @189719664 function wtr(e){try{let t=e.trim(),a=t.startsWith("{")&&t.endsWith("}"),s;if(a){let r=Ft(t);if(!r)return gn("Error: Invalid JSON provided to --settings");let i=
+- c @189720468 function c(e){let t=Ft(e.trim(),!1);if(!t||typeof t!=="object"||Array.isArray(t)){n("--managed-settings ignored: invalid JSON object",{level:"warn"}),tkn(!0);re
+- g @189720645 function g(e){try{let t=xXn(e);mkn(t),Yl()}catch(t){if(t instanceof Error)n(`Invalid --setting-sources flag: ${l(t)}`,{level:"error"});return gn(`Error processi
+- k3t @189720838 function k3t(){let e=performance.now();xr("eagerLoadSettings_start");let t=xjt("--settings");if(t)wtr(t);let a=xjt("--managed-settings");if(a)c(a);let s=xjt("--
+- DN @189733304 async function DN(){try{let t=_Kn.of(z().host).tasks;if(t.length>0)await Promise.race([Promise.allSettled(t),ne(200)]),t.length=0;let[{settle1PEventLoggingBefor
+- kpn @189733818 function kpn(t){_Kn.of(z().host).tasks.push(t.catch(()=>{}))} export{DN,bKn,_Kn,kpn}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commer
+- goe @189734729 async function goe(){let t=qe(),i=[],r=Kie();for(let[e,o]of Object.entries(r)){if(Xb(e))continue;if(e.includes("@")&&o)i.push(e)}if(t.enabledPlugins)for(let[e,o
+- GL @189735056 function GL(){let t=new Map,i=Kie();for(let[e,o]of Object.entries(i)){if(!e.includes("@"))continue;if(Xb(e))continue;if(o===!0)t.set(e,"flag");else if(o===!1)t.
+- dUe @189735880 function dUe(t,i){let r=t.get(i);if(r!==void 0||!pbe(i))return r;let e=Zf(i);for(let[o,c]of t)if(Zf(o)===e)return c;return}function Bhr(t){return OIe[t]} export
+- Bhr @189736003 function Bhr(t){return OIe[t]} export{goe,GL,dUe,Bhr}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By us
+- wF @189737122 async function wF(a,r){let t=new Map;for(let e of a){if(e.type!=="dependency-unsatisfied"||e.reason!=="not-found")continue;let c=t.get(e.dependency);if(!c)c=new
+- _Kt @189738999 async function _Kt(a,r){let{errors:t}=await Yi(r);return t.filter(hSe).filter((s)=>s.source===a)}async function A0e(a,r){let t=await _Kt(a,r);if(t.length===0)re
+- A0e @189739096 async function A0e(a,r){let t=await _Kt(a,r);if(t.length===0)return null;let{installed:s,marketplaceMissing:f}=await wF(t,r),g=new Set(s),i=se(t.map((d)=>d.depe
+- v @189739344 function v(a,r){for(let[t,s]of r)for(let f of a)if(s.has(f))return t;return} export{wF,_Kt,A0e}; .// @bun @bytecode // Claude Code is a Beta product per Anthrop
+- WRn @189741831 async function WRn(e,t,s){if(LW())return"ineligible";if(!t?.source||!ip(t.source))return"ineligible";if(!tq(e,t,eA()[e]?.autoUpdate))return"ineligible";try{retu
+- Nre @189742208 function Nre(e){if(e==="refreshed")b("plugin_install_refresh_first");else if(e==="refresh-failed")f("plugin_install_refresh_first","refresh_failed");else y("plu
+- gTe @189742409 async function gTe(e,t,s){if(Tt())return{outcome:"ineligible"};if(!t?.source||!ip(t.source))return{outcome:"ineligible"};if(t.installLocation&&Z_(t.installLocat
+- He @189743110 function He(e,t){let s={install:"installed",update:"updated",uninstall:"uninstalled"}[t];switch(e){case lh:return`This plugin is loaded via --plugin-dir for thi
+count=63
+
+## #20-phrase-covering hqt @189685168
+len=4742 sha=15fb878459cfb8e1
+async function hqt(e,t={}){vnr(e,t.storageV5),n("[PERF:bg-attach-start]"),Exe();let o=PGe,r=HGe,i={holdScreenOnDisconnect:!0,alreadyInAlt:t.alreadyInAlt,gateStdinUntilFirstFrame:t.gateStdinUntilFirstFrame},d={...i,holdingFrame:!0,gateStdinUntilFirstFrame:!1},u=t.gesture??{gestureId:qo(),attempt:0,interactive:{}},m=!t.alreadyInAlt,p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}}),k;if(p.outcome==="error"&&p.msg&&o.test(p.msg)){if(k=await RD({forceTransient:!0},t.storageV5),k.ok)p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}})}for(let A=0;p.msg&&r.test(p.msg)&&A<20;A++)await ne(500),p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});let E=async()=>{if(m)process.stdout.write(WE());let A=await dr(e,u,t.storageV5);if(A)return A;return y("job_attach","job_attach_crashed"),{kind:"error",orphaned:!0,msg:"Session crashed \u2014 press Enter to respawn"}};while(p.outcome==="disconnected"){let g=Math.max(1,(process.stdout.columns??80)-15);process.stdout.write(`\x1B7${SI(1,g)}\x1B[2;7m${" Reconnecting\u2026 "}\x1B[0m\x1B8`);let x;if(process.stdin.isTTY){let C="isRaw"in process.stdin?Boolean(process.stdin.isRaw):!1;if(!C)cv(process.stdin,!0);let N=Yn(process.stdin);try{x=await Promise.race([RD({forceTransient:!0},t.storageV5),N.promise.then(()=>"detach")])}finally{if(N.cancel(),!C)cv(process.stdin,!1)}}else x=await RD({forceTransient:!0},t.storageV5);if(x==="detach"){if(m)process.stdout.write(WE());return n("[PERF:bg-attach-end]"),b("job_attach"),Ee(u,"detached"),{kind:"detached"}}let R=x;if(!R.ok){if(m)process.stdout.write(WE());return f("job_attach",`job_attach_daemon_start_failed_${R.causeCode}`),Ee(u,"error"),{kind:"error",msg:`Couldn't restart the ${xc()} \u2014 ${R.reason}`}}let M=Exe();if(M&&At(M)){if(m)process.stdout.write(WE());return n("[PERF:bg-attach-end]"),b("job_attach"),Ee(u,"detached"),{kind:"detached"}}if(await vt(e))return n(`[bg-attach] worker gone on reconnect probe short=${e} \u2014 settled while attached`),E();p=await Qe(e,{...d,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});for(let C=0;p.msg&&r.test(p.msg)&&C<10;C++)await ne(200),p=await Qe(e,{...d,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});if(p.msg?.includes("ENOJOB"))return n(`[bg-attach] ENOJOB on reconnect short=${e} \u2014 daemon has no handle (or it's killing/settled)`),E();if(p.outcome==="error"&&m)process.stdout.write(WE())}if(p.outcome==="detached"&&p.msg&&(OGe.test(p.msg)||r.test(p.msg))){if(m)process.stdout.write(WE());return f("job_attach","job_attach_stalled"),{kind:"error",msg:p.msg.replace(/^E(STALLED|RESPAWNING|STARTING):\s*/,"")}}if(p.outcome==="error"){if(p.msg?.startsWith(`${MGe}:`)){f("job_attach","job_attach_host_dead");let g=await nr(Kn(e),t.storageV5).catch(()=>null),x=p.msg.slice(MGe.length+1).trim();return{kind:"error",msg:g!==null&&sS(g)?x:`${x} \u2014 press Enter to restart it`}}if(p.msg?.startsWith(`${Et}:`)){f("job_attach","job_attach_no_response");let g=await nr(Kn(e),t.storageV5).catch(()=>null);if(g!==null&&sS(g))return{kind:"error",msg:`${st} \u2014 it runs a shell command, which is never run again for you; ctrl+x stops it`};return{kind:"error",notResponding:!0,msg:`${st} \u2014 press Enter again to restart it (the conversation is saved)`}}if(p.msg?.includes("ENOJOB")){n(`[bg-attach] ENOJOB on first attach short=${e} \u2014 daemon has no handle (or it's killing/settled)`);let g=await dr(e,void 0,t.storageV5);if(g)return g;return y("job_attach","job_attach_orphaned"),{kind:"error",orphaned:!0,msg:`${SV()} lost track of this job \u2014 press Enter to respawn it`}}if(k&&!k.ok)return f("job_attach",`job_attach_daemon_start_failed_${k.causeCode}`),Ee(u,"error"),{kind:"error",msg:`Couldn't start the ${xc()} \u2014 ${k.reason}`};let A=p.msg&&r.test(p.msg)?`${SV()} is still starting \u2014 try again in a moment`:p.msg&&o.test(p.msg)?`${SV()} didn't respond after starting \u2014 try again in a moment`:p.msg?`Couldn't attach \u2014 ${p.msg}`:"Couldn't attach to that session";return f("job_attach","job_attach_failed"),{kind:"error",msg:A}}if(n("[PERF:bg-attach-end]"),b("job_attach"),p.msg&&Wye.test(p.msg))return{kind:"detached",msg:p.msg.replace(Wye,"")};return{kind:"detached"}}
+
+## #20 revExact ["rev-list","--all","--not","--remotes" needle="[\"rev-list\",\"--all\",\"--not\",\"--remotes\"" hits248=0 hits247=0
+
+## #20 revExact ['rev-list','--all','--not','--remotes' needle="['rev-list','--all','--not','--remotes'" hits248=0 hits247=0
+
+## #20 revExact ["rev-list","--max-count=1","HEAD","--not","--remotes" needle="[\"rev-list\",\"--max-count=1\",\"HEAD\",\"--not\",\"--remotes\"" hits248=0 hits247=0
+
+## #20 revExact ["rev-list","--max-count=1","--all","--not","--remotes" needle="[\"rev-list\",\"--max-count=1\",\"--all\",\"--not\",\"--remotes\"" hits248=0 hits247=0
+
+## #20 revExact "rev-list","--all","--not","--remotes","--max-count=1" needle="\"rev-list\",\"--all\",\"--not\",\"--remotes\",\"--max-count=1\"" hits248=0 hits247=0
+
+## #20 revExact "rev-list","--max-count=1","HEAD","--not","--remotes" needle="\"rev-list\",\"--max-count=1\",\"HEAD\",\"--not\",\"--remotes\"" hits248=1 hits247=1
+- #0 @186369459 "origin/main","origin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&
+
+## #20 revExact ...go,"rev-list","--all","--not","--remotes" needle="...go,\"rev-list\",\"--all\",\"--not\",\"--remotes\"" hits248=0 hits247=0
+
+## #20 revExact ...go,"rev-list","--max-count=1","HEAD","--not","--remotes" needle="...go,\"rev-list\",\"--max-count=1\",\"HEAD\",\"--not\",\"--remotes\"" hits248=0 hits247=0
+
+## #20 revExact "rev-list","--max-count=1","HEAD","--not" needle="\"rev-list\",\"--max-count=1\",\"HEAD\",\"--not\"" hits248=1 hits247=1
+- #0 @186369459 "origin/main","origin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(
+
+## #20 revExact "rev-list","--all","--not" needle="\"rev-list\",\"--all\",\"--not\"" hits248=0 hits247=0
+
+## #20 js-rev-list band 184000000-190000000 needle="rev-list" jsHits=7
+- #0 @184972983 (e,t){let[r,o]=await Promise.all([e(["symbolic-ref","-q","--short","HEAD"]),e(["rev-list","--max-count=1","--format=%h %s",t])]),u=r.code===0?r.stdout.trim():"(no branch)",p=o.code===0?o.stdout.trim().split(`
+`).at(-1)??"":"";return`${u}: ${p}`}async function Lgn(e,t,r,o,u){let p
+- #1 @184978010 ignal.timeout(itt):AbortSignal.any([o,AbortSignal.timeout(itt)]),U=await Ap(e,["rev-list","--disk-usage","--objects","--missing=allow-any","--all"],{hardened:t,layout:r,signal:N,probes:p,...!t&&{env:{GIT_NO_LAZY_FETCH:"1"}}}),j=U.code===0&&/^\d+\s*$/.test(U.stdout)?Number(U.stdou
+- #2 @185766663 t(`
+`),(g)=>g.trim()!=="");if(!t)return null;let u=await Ue(tt(),[...Zt,"-C",e,"rev-list","--count",`${t}..HEAD`],{env:Vo()});if(u.code!==0)return null;let p=parseInt(u.stdout.trim(),10)||0;return{changedFiles:o,commits:p}}async function mht(e,t,r,o,u,p,g){let k=t,E=!1,C=QI(t);tr
+- #3 @186331496 to keep.`);if(g.stdout.trim().length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} but rev-list on ${r} failed (${E.stderr.trim()}) \u2014 refusing to self-hea
+- #4 @186359279 rim().length>0;if(!t)return{dirty:p,commitsAhead:0};let g=await We(tt(),[...Zt,"rev-list","--count",`${t}..HEAD`],{cwd:e,env:Vo()});if(g.code!==0)return{dirty:!0,commitsAhead:0,gitError:!0};return{dirty:p,commitsAhead:parseInt(g.stdout.trim(),10)||0}}async function _U(e,t){await 
+- #5 @186368917 });if(u.code!==0||u.stdout.trim()!=="gone")return!1;let p=await We(tt(),[...Zt,"rev-list","--cherry-pick","--right-only","--no-merges","--max-count=1",`${t}...HEAD`],{cwd:e,env:Vo()});return p.code===0&&p.stdout.trim().length===0}async function mGe(e){let t=await We(tt(),[...Zt,"
+- #6 @186369460  r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(
+
+## #20 js-rev-list band 214000000-222000000 needle="rev-list" jsHits=0
+
+## #20 js-rev-list band 186000000-187000000 needle="rev-list" jsHits=4
+- #0 @186331496 to keep.`);if(g.stdout.trim().length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} but rev-list on ${r} failed (${E.stderr.trim()}) \u2014 refusing to self-hea
+- #1 @186359279 rim().length>0;if(!t)return{dirty:p,commitsAhead:0};let g=await We(tt(),[...Zt,"rev-list","--count",`${t}..HEAD`],{cwd:e,env:Vo()});if(g.code!==0)return{dirty:!0,commitsAhead:0,gitError:!0};return{dirty:p,commitsAhead:parseInt(g.stdout.trim(),10)||0}}async function _U(e,t){await 
+- #2 @186368917 });if(u.code!==0||u.stdout.trim()!=="gone")return!1;let p=await We(tt(),[...Zt,"rev-list","--cherry-pick","--right-only","--no-merges","--max-count=1",`${t}...HEAD`],{cwd:e,env:Vo()});return p.code===0&&p.stdout.trim().length===0}async function mGe(e){let t=await We(tt(),[...Zt,"
+- #3 @186369460  r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(
+
+## #20 rev-list covering classification
+- rev@184972983 fn=qtn @184972885 sha=9fb8a144d1c47e7e len=263 flags={"unpushed":false,"deleteJob":false,"remotes":false,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":true,"dirty":false}
+- rev@184978010 fn=btt @184977373 sha=992c25f1b6f847fa len=1028 flags={"unpushed":false,"deleteJob":false,"remotes":false,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":false,"dirty":false}
+- rev@185766663 fn=pht @185766442 sha=08e5848195ea30c3 len=364 flags={"unpushed":false,"deleteJob":false,"remotes":false,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":false,"dirty":false}
+- rev@186331496 fn=v0n @186330421 sha=7d5e0c8f40f631dc len=1729 flags={"unpushed":true,"deleteJob":false,"remotes":true,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":false,"dirty":false}
+BODY_START
+async function v0n(e,t,r){let o=await RF(t);if(!o)return;let u=!1;try{await Qz(o)}catch(E){u=Q(E)}if(!u)return;let p=await US(e);if(p){let E=jn(sp(Ky(o))),C=jn(sp(Ul(p,"worktrees"))),M=await Ba(p).then((L)=>jn(Ul(L,"worktrees")),()=>null);if(E!==C&&E!==M)throw new Fc(`Orphaned worktree dir at ${t} is registered to a different repository (under ${Ky(o)}, expected under ${Ul(p,"worktrees")}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`)}let g=await We(tt(),[...Zt,"remote"],{cwd:e,env:Vo()});if(g.code!==0)throw Error(`Orphaned worktree dir at ${t} but \`git remote\` failed (${g.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);let k=await We(tt(),[...Zt,"rev-parse","--verify","--quiet",r],{cwd:e,env:Vo()});if(k.code!==0&&k.stderr.trim().length>0)throw Error(`Orphaned worktree dir at ${t} but rev-parse on ${r} failed (${k.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);if(g.stdout.trim().length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} but rev-list on ${r} failed (${E.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);if(E.stdout.trim().length>0)throw Error(`Orphaned worktree dir at ${t} but branch ${r} has unpushed commits \u2014 refusing to self-heal. Push or delete the branch, then retry.`)}await jve(e,t);try{await Kwt(t,{recursive:!0,force:!0}),n(`[worktree] removed orphaned worktree directory at ${t}`)}catch(E){throw Error(`Cannot self-heal orphaned worktree at ${t}: ${l(E)}. Remove manually to proceed.`)}}
+BODY_END
+- rev@186359279 fn=uIe @186358865 sha=071d4e46f006790b len=585 flags={"unpushed":false,"deleteJob":false,"remotes":false,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":false,"dirty":false}
+- rev@186368917 fn=iTt @186368596 sha=fffc272be5252c0f len=471 flags={"unpushed":false,"deleteJob":false,"remotes":false,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":true,"dirty":false}
+- rev@186369460 fn=b1t @186369395 sha=a6321b76b8763900 len=520 flags={"unpushed":false,"deleteJob":false,"remotes":true,"ancestor":false,"merged":false,"headsMain":false,"headsMaster":false,"symbolic":false,"dirty":false}
+
+## #20 247-vs-248 hit counts
+- "has commits that are on no remote" 247=2 248=2
+- "has commits that are not pushed anywhere" 247=2 248=2
+- "deleteJob:" 247=16 248=16
+- "\"--all\",\"--not\",\"--remotes\"" 247=0 248=0
+- "\"HEAD\",\"--not\",\"--remotes\"" 247=1 248=1
+
+## #20-247-on-no-remote-fn  @-1
+MISS {"miss":true}
+
+## #20-247 first deleteJob: @198120424
+deleteJob: kill unconfirmed for D...:.*. ..  .s.k.i.p.p.i.n.g. .j.o.b.d.i.r./.w.o.r.k.t.r.e.e. .r.e.m.o.v.a.l. .t.o. .a.v.o.i.d. .s.t.r.a.n.d.i.n.g. .a. .l.i.v.e. .w.o.r.k.e.r.
+.......job_delete..@...

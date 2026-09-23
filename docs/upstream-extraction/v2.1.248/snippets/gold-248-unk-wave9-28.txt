@@ -1,0 +1,29 @@
+# gold-248-unk-wave9-28  densable 2.1.248 #28
+# trust-emoji-trunc — no unique TrustDialog grapheme cut
+# SEA 226708128 · 247 present
+# stay UNKNOWN. invent-ban.
+
+extracted? no unique TrustDialog grapheme-truncate body
+landed? no
+stay UNKNOWN? YES
+
+## mid-emoji
+cut off mid-emoji 248=1 247=1 @189843154 old changelog
+  "long shell-command or agent-description preview was cut off mid-emoji"
+
+## TrustDialog Go
+Go @203835504 len=6215 sha=20a8dc730a25725d
+lists $_.rules via $_(_.rules,8) — $_ @203818896 is English item-count join
+(leftover formatEnglishSourceList 1:1). NOT grapheme/width cut.
+leftover TrustDialog.tsx has no rule list host (no pre-approves / $_.rules).
+
+$_(_.rules 248=1 247=0 — unique list UI, leftover has no host. do not invent list.
+
+## grapheme APIs
+Intl.Segmenter 248=14 247=14
+granularity:"grapheme" 248=2 247=2
+toWellFormed 248=5 247=5
+R grapheme-len trunc @181104839 sha=b06882312f502180 — sanitizer neighbors P/_/W, not TrustDialog Go
+247 R-shape miss (minify); counts equal. no TrustDialog call of R on rules.
+
+no unique 248 TrustDialog grapheme host. stay UNKNOWN.

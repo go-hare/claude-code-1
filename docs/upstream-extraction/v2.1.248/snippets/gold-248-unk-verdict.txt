@@ -1,0 +1,23 @@
+# gold-248-unk-verdict  densable 2.1.248
+# peel remaining UNKNOWN invent-ban / no-body items
+# SEA 226708128 · 247 SEA 253204128 present
+# NEVER HAVE — no checklist/board edit · no commit · no precheck
+# peels: _peel-248-unk{,2,3,4}.mjs + _peel-248-unk-land.mjs + _peel-248-unk-8{,b,c}.mjs
+# landed: #9 (gold-248-unk-9-slate.txt) · #23 (gold-248-unk-23-ebn.txt)
+# proven-stay-UNKNOWN: #8 (gold-248-unk-8-ip.txt)
+
+| # | key | extracted? | landed? | stay UNKNOWN? | offsets / note |
+| - | --- | ---------- | ------- | ------------- | -------------- |
+| 8 | oauth-refresh-tool-cache | YES unique Ip/r_/s_ tengu_still_kestrel | no | YES | Ip @180712775 sha=043f2d44f49faba4 247exact=0. G2t @180708774 `lY(),Ip()` vs 247 yx `Pi(),no(),ki()`. lY===Pi host clear. Ip=`jN()+(!s_()?IW:o_)` keepAcross 248=5 247=0. IW≈clearToolSchemaCache. leftover save already always-clears; no r_/dropInFlight. invent-ban. gold-248-unk-8-ip.txt |
+| 9 | wakeup-resume-cache | YES unique Ivt/B1+NAn/zce | YES | no | ignoreOverage 248=4 247=0. NAn @185604567 sha=77e65efa3fdb5b46. zce @180589886 sha=21601b2204427c03. Ivt @186445321 sha=aa889df2f042f9e9. B1 @186445686 sha=eed8334d62f460c7. prompt @185604930. 247 PR @216445531 no ignoreOverage. leftover prompt.ts + Ivt ignoreOverage skip latch |
+| 14 | model-name-code | no code wrap | no | YES | JKt @193082880 Fast ON/OFF bold only. Dv @202783798 bold. no extracted backtick / render-as-code. do not wrap |
+| 23 | mcp-fake-claude-ai | YES unique ebn/_bt | YES | no | _bt @178923695 sha=9f5bb188b63da77f. ebn @178923743 sha=9bc2689a12631d73. 247 ebn unrelated. leftover MCPListPanel type=== forced claude.ai. no new heading. unused-fold not landed |
+| 24 | headershelper-401 | CONFIRM leftover | no | YES | re-running headersHelper 3=3. 248 @207115285 === 247 @219081420. Do NOT implement. Do NOT elevate HAVE |
+| 25 | login-gateway-hang | unique strings, no leftover land | no | YES | login_handoff 248=6 247=0. DKt @190466122. nie @202549952. pOe @202550070. dialog X @201101609 sha=4a838213a8ac7203. leftover dialog/Select has no reveal; leftover s_A no pOe. invent-ban on leftover hn rewrite |
+| 28 | trust-emoji-trunc | no grapheme cut | no | YES | mid-emoji @189843154 old changelog (247=1). TrustDialog Go @203835504 no grapheme/truncate |
+| 31 | rc-reconnect-prompt | no unique reconnect-repaint | no | YES not N/A | changelog sentence in 247. tengu_bridge_reconnected 248 code=1 247=2. dt @205347718 env-cleanup. leftover replBridge |
+| 36 | mention-ime | no IME fold | no | YES | non-Latin @189782108 old kitty changelog. tengu_at_mention_peer_ 2=2. dr @180525410 === leftover NFKC |
+
+## bun tests
+- packages/builtin-tools/src/tools/ScheduleWakeupTool/__tests__/wakeupResumeCache.248.test.ts
+- src/services/mcp/__tests__/officialClaudeAiConnector.248.test.ts

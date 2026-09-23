@@ -1,0 +1,102 @@
+# gold-248-24-official-host  densable 2.1.248 #24
+# headersHelper-401 — official host extracted; leftover ALIGNED
+# SEA248=226708128  SEA247=253204128
+# when=2026-09-20
+# landed? yes
+# recommend HAVE (parent verifies production wiring)
+
+## official fn names + offsets
+
+| fn | offset | role |
+|----|--------|------|
+| `fo` | 207108758 (401 @207115285) | tool-call host: ye helper / we session / Ve oauth refresh |
+| `Lt` | 207253132 (401 @207256960) | fo compat copy |
+| `ko` | 207025228 | **248 unique connect classifier** |
+| `Yt` | 207179083 | ko compat copy |
+| `x6e` | 180515237 | any header key === authorization |
+| `gC` | 180515320 | x6e(config.headers) static Authorization |
+| `YDe` | 180515517 | skip oauth stub if helper/headers/xaa |
+| `XDe` | 180515731 | stored refresh_token |
+| `Tt` | 207023263 | failed result + tengu_mcp_server_connection_failed |
+| `Yo` | 207022246 | OAuth needs-auth (only if ko returns void) |
+
+247 compare:
+- `re-running headersHelper` 248=3 247=3 (fo/Lt === 247 lQe/UQe structurally)
+- `disabled when headers.Authorization is set` 248=3 247=3 (static AUTH_HEADER)
+- `helperMintsAuthHeader` 248=7 **247=0 UNIQUE**
+- `HEADERS_HELPER_AUTH_REJECTED` 248=10 **247=0 UNIQUE**
+- `minted by the configured headersHelper` 248=3 **247=0 UNIQUE**
+- `OAuth discovery` string: **0** (changelog copy). Official sentence is
+  `OAuth fallback is disabled when the helper supplies Authorization`.
+
+## official `ko` @207025228 sha=3996a3a2bfbfa866
+
+async function ko({name:e,serverRef:t,transportType:o,error:r,statusCode:d,sawAuthChallenge:u,hasUserAuthHeader:p,helperMintsAuthHeader:g,cliOwnedBearer:T,useFirstPartyAuth:w,negotiation:j,roundEpoch:H,storageV5:q}){
+  if(!(r instanceof DE||r instanceof Gk&&u||d===401||d===403))return;
+  if(p) return Tt({errorCode:"AUTH_HEADER_REJECTED",
+    message:`Server rejected the configured Authorization header (HTTP ${d??401}). `+
+      "Check that the token is valid for this MCP endpoint — OAuth fallback is "+
+      "disabled when headers.Authorization is set."});
+  if(g) return Tt({errorCode:"HEADERS_HELPER_AUTH_REJECTED",
+    message:`Server rejected the Authorization header minted by the configured headersHelper (HTTP ${d??401}). `+
+      "Check that the helper command returns a valid credential for this MCP endpoint — OAuth fallback is "+
+      "disabled when the helper supplies Authorization."});
+  if(T) return Tt({errorCode:"CLI_OWNED_BEARER_REJECTED",...});
+  if(w) return ur(...); // first-party
+  return Yo(...); // OAuth discovery
+}
+
+247 `MQr` @219020064: same AUTH_HEADER / CLI_OWNED / Yo. **No `g` / HEADERS_HELPER arm.**
+
+## official flags + skip authProvider @207040674 / @207041053
+
+me=Ste(t)
+ce=(t.type==="sse"||t.type==="http")&&gC(t)
+G=t.type==="sse"||t.type==="http"||t.type==="ws"?await $Ze(e,t):{}
+re=(t.type==="sse"||t.type==="http")&&!!t.headersHelper&&x6e(G)
+L=...first-party auto-auth...
+k=ce||re||L||me?void 0:new EFe(e,t)   // NO ClaudeAuthProvider → SDK cannot OAuth-discover
+ie={authProvider:k,...headers:{...G}}
+
+Connect catch: await ko({hasUserAuthHeader:ce,helperMintsAuthHeader:re,...}); if(fe)return fe
+
+## official `fo` 401 @207115285 (===247 structurally)
+
+ye=(ee.type==="http"||sse||ws)&&!!ee.headersHelper
+we=Ste(ee)
+Le=oe===401||DE||HTTP 40[13] msg||(oe===403&&ye)
+Ie=(http||sse)&&!ee.headersHelper&&!gC(ee)?ee:void 0
+Ve=!q&&Le&&!ye&&Ie&&await XDe(N,Ie)
+log: ye? re-running headersHelper : we? session credential rejected : refresh token stored
+retry once isAuthRetry; else needs-auth
+
+## leftover host
+
+src/services/mcp/connectAuthClassify.ts  — x6e / ce / re / ko Authorization arms
+src/services/mcp/client.ts
+  resolveRemoteConnectAuth → skip ClaudeAuthProvider when ce||re
+  sse/http/pinned-legacy catch → maybeConnectAuthHeaderRejection before handleRemoteAuthFailure
+  tool 401 classifyAuthReconnectKind (helper first; gC skips oauth refresh)
+src/services/mcp/authReconnect.ts  classifyAuthReconnectKind !hasUserAuthHeader
+src/services/mcp/mcpConnectionIssue.ts  HIDDEN includes HEADERS_HELPER_AUTH_REJECTED
+
+## leftover vs official — every official branch
+
+| official branch | leftover before | leftover after |
+|-----------------|-----------------|----------------|
+| skip authProvider when helper minted Authorization (`re`) | MISSING (always new ClaudeAuthProvider) | LANDED |
+| skip authProvider when static Authorization (`ce`) | MISSING | LANDED |
+| ko helper → HEADERS_HELPER_AUTH_REJECTED (no Yo) | MISSING / invented `!!headersHelper` | LANDED (x6e(G), not !!helper) |
+| ko static → AUTH_HEADER_REJECTED | hidden code only | LANDED |
+| helper retry once (fo ye) | HAVE classifyAuthReconnectKind | HAVE |
+| gC skips oauth refresh (`Ie=!gC`) | leftover lacked pass-through | LANDED hasUserAuthHeader |
+| toast | SEA none | not invented |
+| "OAuth discovery" sentence | SEA none | not invented |
+| cliOwned / first-party `L`/`me` skip | leftover invent-ban (no Ste host) | NOT invented |
+| fo session-credential `we` / epoch / stale_refused | leftover thinner 206 host | NOT invented (247===248; not #24 unique) |
+
+## not invented
+
+- skip OAuth on truthy headersHelper string
+- oKn / markMcpHeadersHelperConfig toast
+- full fo epoch / stale_refused / session-credential third log

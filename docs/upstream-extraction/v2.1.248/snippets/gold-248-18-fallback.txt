@@ -1,0 +1,27 @@
+when=2026-09-20T03:42:36.476Z
+np hits=180554665,188793442,192175475,201546461,206438944,211350786,213474006
+## np @192175475 sha=43d814b6e37061f6 len=1089
+function np(i,{statusFor:d,now:m,fallbackOrigin:w,showFinishedEarlier:S,terminalRows:h}){let C=[],x=[],A=[],F=[],T=0,P=0,V=0;for(let me of i){let be=d(me),Te=jn(me.state,be);if(Te==="needs")T++;else if(Te==="live"){if(P++,be==="busy"||be==="shell")V++}if(me.state.pinned){C.push(me);continue}switch(Te){case"needs":x.push(me);break;case"live":A.push(me);break;case"done":F.push(me);break}}F.sort((me,be)=>Ha(be.state)-Ha(me.state));let K=[{kind:"newsession",origin:w,group:Rb}],W=(me,be)=>{for(let Te of be)K.push({kind:"job",job:Te,origin:EU(Te.state),group:me})};W($n,C),W(Un.needs,x),W(Un.live,A);let Z=1+(A.length*yb+(C.length+x.length)*wb)+(T+P===0?kb:0)+(F.length>0?1+vb:0),ee=_b(h,Z),X=J(F,(me)=>m-Ha(me.state)>hb),Q=Math.max(0,F.length-X-ee),le=S?0:X+Q,ye=le>=Sb?le:0,xe=J(F.slice(F.length-ye),(me)=>Cf(me.state.state)==="failure");if(W(Un.done,F.slice(0,F.length-ye)),ye>0)K.push({kind:"fold",origin:w,group:Zo,hidden:ye});return{rows:K,doneCount:F.length,doneFoldHidden:ye,doneFoldHiddenFailed:xe,doneCap:ee,foldGroup:Zo,runningCount:T+P,needsCount:T,workingCount:V,liveCount:P}}
+
+## "np(" count=2
+-- @192175484 roup}function _b(i,d){return Math.max(0,i-bb-ka-d)}function np(i,{statusFor:d,now:m,fallbackOrigin:w,showFinishedEarlier:S,terminalRows:h}){let C=[],x=[],A=[],F=[],T=0,P=0,V=0;for(let me of i){let be=d(me),Te=jn(me.state,be
+-- @192181548 >pe.id===me),vt=!be&&De&&!Y&&Tt&&!nt[0]?.state.pinned,Jt=be?np(zt,{statusFor:h,now:Me,fallbackOrigin:tt,showFinishedEarlier:V.has(Zo),terminalRows:Ge}):null;if(Jt!==null){let pe=1+Jt.needsCount+Jt.liveCount;At=Gi(Ge,pe).com
+
+## "fallbackOrigin" count=2
+-- @192175508 turn Math.max(0,i-bb-ka-d)}function np(i,{statusFor:d,now:m,fallbackOrigin:w,showFinishedEarlier:S,terminalRows:h}){let C=[],x=[],A=[],F=[],T=0,P=0,V=0;for(let me of i){let be=d(me),Te=jn(me.state,be);if(Te==="needs")T++;else if(Te===
+-- @192181574 Y&&Tt&&!nt[0]?.state.pinned,Jt=be?np(zt,{statusFor:h,now:Me,fallbackOrigin:tt,showFinishedEarlier:V.has(Zo),terminalRows:Ge}):null;if(Jt!==null){let pe=1+Jt.needsCount+Jt.liveCount;At=Gi(Ge,pe).compactHeader}let Ut=Jt??lc(nt,je,{bySta
+
+## "group:Rb" count=1
+-- @192175942 (be.state)-Ha(me.state));let K=[{kind:"newsession",origin:w,group:Rb}],W=(me,be)=>{for(let Te of be)K.push({kind:"job",job:Te,origin:EU(Te.state),group:me})};W($n,C),W(Un.needs,x),W(Un.live,A);let Z=1+(A.length*yb+(C.length+x.le
+
+## "var Rb=" count=0
+
+## "Rb=\"" count=1
+-- @192174826 )%sb.length]}var hb=172800000,bb=3,wb=3,yb=2,Sb=2,kb=4,vb=1,Rb="simple:new-session",$n="simple:pinned",Zo="simple:finished",Un={needs:"simple:needs",live:"simple:live",done:"simple:done"};function jn(i,d){if(d==="busy")retur
+
+## 247 kind===newsession count=4
+-- @223728743 n_count:N.hidden,ms_since_mount:Date.now()-ve});else if(N?.kind==="header"){if(me)return;r.followOrigin=N.group,r.followId=null,te(N.group)}else if(N?.kind==="earlier")j(N.entry,"section");else if(N?.kind==="newsession")We(N.origin);else Be(U)}function qm(e,t){let{editor:o,dispatchInputActive:n,insertAtCursor:r}=e,i=t.replace(/\r\n|\r/g,`
+`),l=o.lastMintedPasteId??-1,d=o.pastes[l];if(n&&d?.type==="text"&&d.content===
+-- @223772421 ,Ho-1):"",re.group===Zo?`\u2026 show all (${re.hidden} more${br!==null&&br.doneFoldHiddenFailed>0?` \xB7 ${br.doneFoldHiddenFailed} failed`:""})`:`\u2026 ${re.hidden} more`]})},`f:${re.group}`)}if(re.kind==="newsession"){return c(R,{flexDirection:"column",children:[c(R,{ref:Ct?Tn:void 0,paddingLeft:po,backgroundColor:Fn,onMouseEnter:vo||nn?void 0:Ai,onClick:()=>{Oi(),jh(re.origin)},children:[c(a,{color:Pi??"suggestio
+-- @223780244 b?s(Ji,{}):Ea&&Du!=="idle"?s(Li,{voiceState:Du}):Ou?s(a,{dimColor:!0,wrap:"truncate-end",children:Ou}):Ti&&!Pu&&Co===""?s(a,{dimColor:!0,wrap:"truncate-end",children:c(et,{children:[s(a,{children:Vo?.kind==="newsession"?`${De.arrowRight} or enter to start`:`${De.arrowRight} or enter to open`}),sn&&!Fi&&s(a,{children:pt(sn.state)?"ctrl+x to delete":"ctrl+x to stop"}),s(a,{children:"? for shortcuts"}),null]})}):!nb&&!P
+-- @223823486 h>0)Me((T)=>!T);else if(b.length>0)k(y());return}if(t.key==="right"&&!t.shift&&!o.getSnapshot().query&&o.getSnapshot().mode==="prompt"&&!ee){if(Q(),v?.kind==="earlier")x(v.entry,"section");else if(v?.kind==="newsession")F(v.origin);else H(w);return}if((t.meta||t.superKey)&&t.key>="1"&&t.key<="9"){Q();let T=Number(t.key),K=D.find((J)=>J.kind==="job"&&J.origin===O&&--T===0);if(K?.kind==="job")H(K.job);return}if(t.key==

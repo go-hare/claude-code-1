@@ -1,0 +1,126 @@
+# gold-248-SKn-primer
+
+Official SEA: `official-248/package/claude.exe` (densable 2.1.248).
+Leftover name would be `Primer` (never mint `class SKn`). SettingsOwner is fGt.
+
+## Verdict: shell + Vjt/T/O/k_/k/wKn/v/_Ke/Gqe/z/kC/Zve LANDED
+
+Full class body peels cleanly (`sha=435524f56ab1199e` len=3367 @179523748).
+Leftover `SettingsPrimer` + `settingsPrime` land the public surface
+(constructor/primes/whenIdle/dispose/schedule/run control-flow) plus free
+callees Vjt/T/O/k_/k/wKn/v/_Ke/Gqe/z/kC/Zve — see gold-248-SKn-leftover-map.txt.
+SettingsPrimer UNKNOWN 清零（kC/Zve → `legacyLocalSettingsPath` + R() push）。
+
+## Offsets
+
+| site | offset | note |
+|------|--------|------|
+| `class SKn{` | @179523748 | full body below |
+| `dispose` clears `store.primer` | @179527038 | `this.store.primer===this` → `void 0` |
+| `async function $pn` (settingsPrime) | ~@179527063 | gate `D()` + assign |
+| `e.primer=new SKn(t,e)` | @179527321 | only construct site |
+| `await e.primer.whenIdle()` | @179527340 | after construct |
+| `e.primer?.whenIdle()` / retain path via `Yl` | @179527609 `z()` | load path |
+| fGt retain gate `this.primer!==void 0` | @178505956 | inside `invalidateAll` |
+
+## Construct / use (retain path)
+
+```
+$pn(t,e)                              // settingsPrime
+  if (!D() || t===void 0) return
+  if (e.primer!==void 0) {
+    if (!e.primer.primes(t)) /* warn second prime */; return
+  }
+  _Ke(t).catch(_)
+  e.primer = new SKn(t, e)            // @179527321
+  await e.primer.whenIdle()
+
+z(t,e)                                // settings load under primer
+  await e.primer?.whenIdle()
+  if (e.primer!==void 0) await L(t,e)
+  s = e.primer===void 0 ? [] : await Promise.all([kur…Dgn, N]).flat()…
+  Yl(s.length>0 ? {userLayer:"retain"} : void 0)   // → fGt.invalidateAll retain branch
+
+fGt.invalidateAll(e)
+  if (e?.userLayer==="retain" && D() && this.primer!==void 0) {
+    // restore retained → parsedFiles/primedFiles + folderListings
+  } else clear retained*
+```
+
+SKn methods used by construct/load (NOT by fGt retain restore itself):
+`primes`, `whenIdle`, `dispose` (clears store.primer), plus internal schedule/run/seed*.
+
+## Diff vs leftover SettingsOwner.primer
+
+| | official SKn | leftover SettingsOwner |
+|--|--------------|------------------------|
+| field | `primer;` (uninitialized) | `primer: unknown` (undefined) |
+| construct | `$pn` → `new SKn(storageV5, store)` | none — never assigned by leftover |
+| retain gate | `D() && this.primer!==void 0` | `settingsPrimerGate() && this.primer!==undefined` (wired) |
+| class body | full async primer runner | **missing** — UNKNOWN |
+| dispose clears primer | yes | n/a |
+
+Missing to land: entire Primer class + `$pn`/`_Ke`/storageV5 seed callees. Retain branch
+already correct once any object is assigned to `primer` under D-on (tests use a stub).
+
+## FULL class SKn @179523748
+
+sha=435524f56ab1199e len=3367
+
+```
+class SKn{storageV5;store;inFlight=null;followUpQueued=!1;disposed=!1;state={kind:"unprimed"};consecutiveThrows=0;runsInState=0;loggedThrowMessages=new Set;loggedOwnershipThrowMessages=new Set;loggedHostFilesThrowMessages=new Set;unsubscribe;constructor(t,e){this.storageV5=t;this.store=e;this.unsubscribe=e.onInvalidate(()=>{if(!this.disposed)this.seedAttestedTier(),this.schedule()}),this.seedAttestedTier(),this.schedule()}seedAttestedTier(){try{v(this.storageV5,this.store,this.store.epoch)}catch(t){this.logThrowOnce(t,this.loggedHostFilesThrowMessages)}}schedule(){if(this.inFlight!==null){this.followUpQueued=!0;return}this.inFlight=this.run().finally(()=>{if(this.disposed)return;if(this.inFlight=null,this.followUpQueued)this.followUpQueued=!1,this.schedule()})}async run(){let t=wKn(this.storageV5,this.store).then((e)=>(this.loggedOwnershipThrowMessages.clear(),e),(e)=>{if(!this.disposed)this.logThrowOnce(e,this.loggedOwnershipThrowMessages);return});try{let e=this.store.epoch;try{let r=k();if(r!==void 0){if(!await this.seedFromBackend(r,e))return}}catch(r){if(!this.disposed)this.onThrow(r);return}let s=await t;if(this.disposed)return;if(U(this.store,s),(await Promise.all([this.seedLogged(e,T),this.seedLogged(e,O)])).includes(!1))return;this.consecutiveThrows=0;try{k_(),this.loggedThrowMessages.clear()}catch(r){if(!this.disposed)this.logThrowOnce(r)}}finally{await t}}async seedLogged(t,e){try{return await e(this.storageV5,this.store,t)}catch(s){if(!this.disposed)this.logThrowOnce(s,this.loggedHostFilesThrowMessages);return this.store.epoch===t&&!this.disposed}}async seedFromBackend(t,e){let s=this.state,i=await Vjt(this.storageV5,t,s.kind==="seeded"?s:void 0);if(this.store.epoch!==e||this.disposed)return!1;if(i.kind==="seeded"){if(this.store.seedParsedFile(t,"userSettings",i.parsed,e),s.kind==="seeded"&&s.contentHash===i.contentHash)return!0}else if(i.kind==="absent")Qve(t),this.store.seedParsedFile(t,"userSettings",Fte(),e);return this.transition(i),!0}transition(t){let e=this.state;if(this.state=t,e.kind===t.kind&&(t.kind!=="failing"||e.kind==="failing"&&e.code===t.code)){this.runsInState++;return}if(e.kind==="failing"&&t.kind==="seeded")n(`settingsPrime: backend read recovered after ${this.runsInState} failing run(s)`);switch(this.runsInState=1,t.kind){case"seeded":n(`settingsPrime: user settings seeded (${t.size} bytes)`);return;case"absent":n("settingsPrime: user settings absent; served as none");return;case"oversize":n("settingsPrime: user settings not seeded (oversize); raw path serves");return;case"failing":n(`settingsPrime: backend read failed: ${t.code}${t.failureClass?` (${t.failureClass})`:""}; raw path serves`,{level:"warn"});return;case"unprimed":case"broken":return}}onThrow(t){if(this.consecutiveThrows++,this.state={kind:"broken"},this.logThrowOnce(t),this.consecutiveThrows>=P)n(`settingsPrime: disabled after ${P} consecutive failures; raw path serves`,{level:"warn"}),this.dispose()}logThrowOnce(t,e=this.loggedThrowMessages){let s=l(t);if(e.has(s)||e.size>=E)return;e.add(s),_(t)}primes(t){return this.storageV5===t}async whenIdle(){while(this.inFlight!==null||this.followUpQueued)await(this.inFlight??Promise.resolve())}dispose(){if(this.disposed=!0,this.unsubscribe(),this.inFlight=null,this.followUpQueued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}
+```
+
+## Method / field roster
+
+FIELDS: storageV5, store, inFlight, followUpQueued, disposed, state, consecutiveThrows,
+runsInState, loggedThrowMessages, loggedOwnershipThrowMessages, loggedHostFilesThrowMessages,
+unsubscribe
+
+METHODS: constructor, seedAttestedTier, schedule, run, seedLogged, seedFromBackend,
+transition, onThrow, logThrowOnce, primes, whenIdle, dispose
+
+## Entanglement (free callees — block LAND)
+
+| callee | role |
+|--------|------|
+| `v` | seedAttestedTier → host-files tier into store |
+| `wKn` | ownership probe async |
+| `U` | apply ownership into store |
+| `T`, `O` | seedLogged host-file seeders |
+| `k_` | post-seed clear |
+| `k` | user-settings path |
+| `Vjt` | backend read/seed |
+| `Qve` | absent path cleanup |
+| `Fte` | empty parsed settings |
+| `P`, `E` | consecutive-fail / log-set caps |
+| `n`, `_`, `l` | logging / error stringify |
+| `_Ke` | called from `$pn` before `new SKn` |
+| `$pn` | settingsPrime — sole assigner of `e.primer` |
+
+## $pn body (settingsPrime) @~179527063
+
+```
+async function $pn(t,e){
+  if(!D()||t===void 0)return;
+  if(e.primer!==void 0){
+    if(!e.primer.primes(t))
+      n("settingsPrime: store already primed through another backend; second prime ignored");
+    return
+  }
+  _Ke(t).catch(_),
+  e.primer=new SKn(t,e),
+  await e.primer.whenIdle()
+}
+```
+
+## Leftover status (2026-09-21)
+
+- SettingsOwner.primer field: `SettingsPrimer | undefined`
+- D()/isHoverRestOn: landed
+- SettingsPrimer class + settingsPrime ($pn): **LANDED** shell
+  (`src/utils/settings/settingsPrimer.ts`) — primes/whenIdle/dispose/schedule/run
+- Free callees **LANDED**: Vjt/T/O/k_/k/v/wKn/_Ke/Gqe/z/kC/Zve
+  (`legacyLocalSettingsPath` / `legacyLocalSettingsPathFromHost` + R()
+  `"legacy local settings"`; gold-248-SKn-leftover-map.txt)
+- SettingsPrimer UNKNOWN 清零

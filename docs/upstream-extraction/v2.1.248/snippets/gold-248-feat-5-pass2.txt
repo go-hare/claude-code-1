@@ -1,0 +1,35 @@
+# gold-248-feat-5-pass2  pass2 web-setup workflow token check
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:14.675Z
+
+## doesn't have the workflow scope  needle="doesn't have the workflow scope"  hits=2
+- #0 @100461694 uldn't reach the server. Check your connection....@.....+.Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, a
+- #1 @208680873 e(o,{marginTop:1,children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, a
+
+## gh auth token  needle="gh auth token"  hits=9
+- #0 @92335689 ....SS.manifestDep scan...bY..not_installed......2.Y.authenticated.......Z...`gh auth token` timed out........,_.not logged in|no oauth token.....
+3.not_authenticated.....
+- #1 @92335844 authenticated.......,=..unknown command.......F.this GitHub CLI version has no `gh auth token`.......^U.`gh auth status` timed out.......L..logged in to...%.M.not logged in
+- #2 @92335989 d in to...%.M.not logged in...........`gh auth status` failed to run......f...`gh auth token` failed to run...........supportsAuthTokenCommandR.......[Reconnection] compute
+- #3 @100463582 ..8.@.GitHub CLI is logged in, but this version is too old to share its login (`gh auth token` needs GitHub CLI 2.17.0 or newer). Update it via https://cli.github.com/, or c
+- #4 @189801434 `/web-setup` repeatedly asking you to log in when an older GitHub CLI (without `gh auth token`) was already authenticated\n- Fixed Claude in Chrome losing its connection to 
+- #5 @191291399 ted",supportsAuthTokenCommand:!0};if(w.timedOut)return{status:"unknown",error:"`gh auth token` timed out"};if(/not logged in|no oauth token/i.test(w.stderr))return{status:"n
+- #6 @191291670 im()===""){if(!d)return{status:"unknown",error:"this GitHub CLI version has no `gh auth token`"};let j=await pm("gh",["auth","status"],{stdout:"ignore",stderr:"pipe",timeout
+- #7 @191292225 h auth status` failed to run"}}return{status:"unknown",error:w.stderr.trim()||"`gh auth token` failed to run"}}catch{return{status:"not_installed"}}}async function T0n(d){le
+- #8 @208682358 ),_(`GitHub CLI is logged in, but this version is too old to share its login (\`gh auth token\` needs GitHub CLI 2.17.0 or newer). Update it via https://cli.github.com/, or 
+
+## scopes.includes("workflow")  needle="scopes.includes(\"workflow\")"  hits=0
+
+## includes("workflow")  needle="includes(\"workflow\")"  hits=2
+- #0 @208679556 copes","no_scopes_header"),"unknown";return b("remote_setup_gh_token_scopes"),i.includes("workflow")?"present":"missing"}function at(a){let i=bt(a).split(/\r?\n\r?\n/,1)[0]??"",x=/
+- #1 @209581487 m);if(Jn){let Zn=Jn[0];let At=[];if(!Zn.includes("repo"))At.push("repo");if(!Zn.includes("workflow"))At.push("workflow");if(At.length>0){T((sm)=>({...sm,step:"error",error:`GitHub 
+
+## has_workflow  needle="has_workflow"  hits=0
+
+## workflowScope  needle="workflowScope"  hits=0
+
+## missingWorkflow  needle="missingWorkflow"  hits=0
+
+## workflow-warn-code @100461694
+/chunk-wx5k9hwe.js(....Vj.file:///B:/%7EBUN/root/chunk-5pppgvyb.js....h>f.^x-oauth-scopes:[ \t]*(.*)$......o..Login failed. Please visit ....._... and login using the GitHub App.>....w5.GitHub rejected that token. Run `gh auth login` and try again...........Server error (......?...). Try again in a moment....1....,..Couldn't reach the server. Check your connection....@.....+.Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You ca

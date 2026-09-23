@@ -1,0 +1,62 @@
+# gold-248-16-fh-verdict
+when=2026-09-21T05:45:00.000Z
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+task=re-verify #16 Fh field write/read vs leftover thin notes in gold-248-16-fh-host.txt
+
+## official peel (this pass)
+
+| needle | offset | body |
+|--------|--------|------|
+| `async function Hu(){return[]}` | 192115663 | empty stub |
+| `listRemoteSessions:()=>Hu()` | 192130133 | wires Hu |
+| `let Zs=!1` | 192274709 | remote tabs hard-off in gg |
+| live mapper `jobId` / `status:je(o.status)` / `peerProtocol` | 181016652 / 181016699 / 181017447 | real reads |
+| `#O` statuses | 192138682 | `if(!h.status)continue;` sessionId + `Ir(h.jobId)` |
+| `#O` adoptedPeers | 192139200 | `(A.peerProtocol??0)>=_2t` |
+
+Gold dumps: `gold-248-16-hu-zs-live.txt` · prior `gold-248-ie-remote*.txt` · `gold-248-16-fh-host.txt`
+
+## field → LAND|KEEP
+
+| field | verdict | reason |
+|-------|---------|--------|
+| jobs | KEEP | leftover AgentView sessions host; no second Fh() |
+| terminalHolders | KEEP | AgentView + helpers.buildTerminalHolders already |
+| prStatuses | KEEP | fleetView/prStatuses.ts already (Xw=.prStatuses) |
+| logTails | KEEP | AgentView logTails + fhFields.readFleetLogTail / ic aligned |
+| deleteRefusals | KEEP | noteDeleteRefusal / cp / Ss deleteRefused aligned |
+| loopKicks | KEEP | refreshLoopKicks / $ye / Fi / ec aligned |
+| overlaidLoadLanded | KEEP | load `#r>0` → true; #P reset; empty-state gate |
+| statuses | KEEP | leftover no longer drops: udsClient mapper + concurrentSessions stamp status/jobId; buildFleetStatuses writes sessionId + `job:${id}` when present. Empty map only when registry has no status (same as official `if(!h.status)continue`) |
+| pendings | KEEP | field + settle/clear landed; no invented SessionEntry rows |
+| adoptedPeers | KEEP | leftover PeerSession now has peerProtocol; register stamps `_2t`; buildAdoptedPeers gates `>=1`. Stays [] only when GB/Po off or peers lack protocol (official same) |
+| remoteJobs / remoteListLoaded | KEEP | fields + #P reset on AgentView; loadRemote path calls Hu |
+| Hu() cloud list | KEEP invent-ban | official `async function Hu(){return[]}` — leftover `listRemoteSessions` returns `[]`. Do not invent second cloud list |
+| Zs remote tabs | KEEP invent-ban | official gg `let Zs=!1` — leftover `showRemoteTabs: false`. Do not invent remote UI tabs |
+| Fh() / gc / rp / Xw | KEEP invent-ban | leftover hosts only; no second constructors |
+
+## leftover-thin notes in gold-248-16-fh-host.txt
+
+Those bullets (`statuses` empty without jobId; PeerSession no peerProtocol; remote Zs; Hu=[]) described the **pre-land** gap. Re-check against current leftover:
+
+- `src/utils/udsClient.ts` — `peerSessionFromRegistry` @181016699 reads status/jobId/peerProtocol
+- `src/utils/concurrentSessions.ts` — register stamps `peerProtocol: PEER_PROTOCOL` + jobId; status write stamps statusUpdatedAt
+- `src/screens/fleetView/fhFields.ts` — buildFleetStatuses / buildAdoptedPeers / listRemoteSessions→[] / rp merge showRemoteTabs
+- `src/screens/AgentView.tsx` — refresh #O writes; showRemoteTabs:false; loadRemote via Hu
+
+**No LAND this pass** — official writes that have local data are not dropped; official empty stubs stay empty.
+
+## files touched this pass
+
+- `docs/upstream-extraction/v2.1.248/snippets/gold-248-16-fh-verdict.txt` (this)
+- `docs/upstream-extraction/v2.1.248/snippets/gold-248-16-hu-zs-live.txt` (Hu/Zs/live peel)
+- `docs/upstream-extraction/v2.1.248/snippets/_peel-248-16-hu-zs-live.mjs`
+
+No production code changes.
+
+## tests
+
+- `src/screens/fleetView/__tests__/fhFields.248.test.ts`
+- `src/screens/fleetView/__tests__/loadRemote.248.test.ts`
+- `src/utils/__tests__/udsLiveFields.248.test.ts`

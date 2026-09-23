@@ -19,6 +19,11 @@ import {
   fetchEnvironments,
 } from '../../utils/teleport/environments.js'
 import { registerBundledSkill } from '../bundledSkills.js'
+import {
+  countClaudeCodeConfiguredMcpServers,
+  formatScheduleConnectorsInfo,
+  formatScheduleNoConnectorNote,
+} from './scheduleConnectorsCopy.js'
 
 // Base58 alphabet (Bitcoin-style) used by the tagged ID system
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -94,18 +99,15 @@ function sanitizeConnectorName(name: string): string {
     .replace(/^-|-$/g, '')
 }
 
-function formatConnectorsInfo(connectors: ConnectorInfo[]): string {
-  if (connectors.length === 0) {
-    return 'No connected MCP connectors found. The user may need to connect servers at https://claude.ai/settings/connectors'
-  }
-  const lines = ['Connected connectors (available for triggers):']
-  for (const c of connectors) {
-    const safeName = sanitizeConnectorName(c.name)
-    lines.push(
-      `- ${c.name} (connector_uuid: ${c.uuid}, name: ${safeName}, url: ${c.url})`,
-    )
-  }
-  return lines.join('\n')
+function formatConnectorsInfo(
+  connectors: ConnectorInfo[],
+  localOnlyServerCount: number,
+): string {
+  return formatScheduleConnectorsInfo(
+    connectors,
+    localOnlyServerCount,
+    sanitizeConnectorName,
+  )
 }
 
 const BASE_QUESTION = 'What would you like to do with scheduled remote agents?'
@@ -233,7 +235,7 @@ ${connectorsInfo}
 
 When attaching connectors to a trigger, use the \`connector_uuid\` and \`name\` shown above (the name is already sanitized to only contain letters, numbers, hyphens, and underscores), and the connector's URL. The \`name\` field in \`mcp_connections\` must only contain \`[a-zA-Z0-9_-]\` — dots and spaces are NOT allowed.
 
-**Important:** Infer what services the agent needs from the user's description. For example, if they say "check Datadog and Slack me errors," the agent needs both Datadog and Slack connectors. Cross-reference against the list above and warn if any required service isn't connected. If a needed connector is missing, direct the user to https://claude.ai/settings/connectors to connect it first.
+**Important:** Infer what services the agent needs from the user's description. For example, if they say "check Datadog and Slack me errors," the agent needs both Datadog and Slack connectors. Cross-reference against the list above and warn if any required service isn't connected. If a needed connector is missing, direct the user to https://claude.ai/customize/connectors to connect it first.
 
 ## Environments
 
@@ -287,7 +289,7 @@ Minimum interval is 1 hour. \`*/30 * * * *\` will be rejected.
    - Explicit about what actions to take (open PRs, commit, just analyze, etc.)
 3. **Set the schedule** — Ask when and how often. The user's timezone is ${userTimezone}. When they say a time (e.g., "every morning at 9am"), assume they mean their local time and convert to UTC for the cron expression. Always confirm the conversion: "9am ${userTimezone} = Xam UTC."
 4. **Choose the model** — Default to \`claude-sonnet-4-6\`. Tell the user which model you're defaulting to and ask if they want a different one.
-5. **Validate connections** — Infer what services the agent will need from the user's description. For example, if they say "check Datadog and Slack me errors," the agent needs both Datadog and Slack MCP connectors. Cross-reference with the connectors list above. If any are missing, warn the user and link them to https://claude.ai/settings/connectors to connect first.${gitRepoUrl ? ` The default git repo is already set to \`${gitRepoUrl}\`. Ask the user if this is the right repo or if they need a different one.` : ' Ask which git repos the remote agent needs cloned into its environment.'}
+5. **Validate connections** — Infer what services the agent will need from the user's description. For example, if they say "check Datadog and Slack me errors," the agent needs both Datadog and Slack MCP connectors. Cross-reference with the connectors list above. If any are missing, warn the user and link them to https://claude.ai/customize/connectors to connect first.${gitRepoUrl ? ` The default git repo is already set to \`${gitRepoUrl}\`. Ask the user if this is the right repo or if they need a different one.` : ' Ask which git repos the remote agent needs cloned into its environment.'}
 6. **Review and confirm** — Show the full configuration before creating. Let them adjust.
 7. **Create it** \u2014 Call \`${REMOTE_TRIGGER_TOOL_NAME}\` with \`action: "create"\` and show the result. The response includes the trigger ID. Always output a link at the end: \`https://claude.ai/code/scheduled/{TRIGGER_ID}\`
 
@@ -415,14 +417,18 @@ export function registerScheduleRemoteAgentsSkill(): void {
       const connectors = getConnectedClaudeAIConnectors(
         context.options.mcpClients,
       )
+      const localOnlyServerCount = countClaudeCodeConfiguredMcpServers(
+        context.options.mcpClients,
+      )
       if (connectors.length === 0) {
-        setupNotes.push(
-          `No MCP connectors — connect at https://claude.ai/settings/connectors if needed.`,
-        )
+        setupNotes.push(formatScheduleNoConnectorNote(localOnlyServerCount))
       }
 
       const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-      const connectorsInfo = formatConnectorsInfo(connectors)
+      const connectorsInfo = formatConnectorsInfo(
+        connectors,
+        localOnlyServerCount,
+      )
       const gitRepoUrl = await getCurrentRepoHttpsUrl()
       const lines = ['Available environments:']
       for (const env of environments) {

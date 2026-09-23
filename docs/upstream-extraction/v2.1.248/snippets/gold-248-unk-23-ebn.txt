@@ -1,0 +1,11 @@
+# gold-248-unk-23-ebn  densable 2.1.248 #23
+# mcp-fake-claude-ai — unique ebn/_bt heading/scope split (no new heading)
+
+## _bt @178923695 len=48 sha=9f5bb188b63da77f hits=1
+function _bt(e){return e?.pluginSource!==void 0}
+
+## ebn @178923743 len=112 sha=9bc2689a12631d73 hits=1
+function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}
+
+## ebn( 248=3 247=1
+## scope==="claudeai"|| 248=1 247=0

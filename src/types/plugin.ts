@@ -120,6 +120,13 @@ export type PluginComponent =
  */
 export type PluginError =
   | {
+      type: 'path-traversal'
+      source: string
+      plugin?: string
+      path: string
+      component: PluginComponent
+    }
+  | {
       type: 'path-not-found'
       source: string
       plugin?: string
@@ -367,6 +374,8 @@ export function getPluginErrorMessage(error: PluginError): string {
       return error.error
     case 'synced-plugin-shadowed':
       return formatSyncedPluginShadowedMessage(error.source, error.shadowedBy)
+    case 'path-traversal':
+      return `Path escapes plugin directory: ${error.path} (${error.component})`
     case 'path-not-found':
       return `Path not found: ${error.path} (${error.component})`
     case 'git-auth-failed':

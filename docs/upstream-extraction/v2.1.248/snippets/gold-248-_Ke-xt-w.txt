@@ -1,0 +1,40 @@
+# gold-248-_Ke-Ut-uo APPEND: class xt + w/Ndr
+
+## class xt{ hits=1: 179159577
+@179159577 sha=e7fea55fc58b9acd len=1326
+class xt{sessionCache=null;eligible=void 0;eligibilityMemo=void 0;ineligibleReason=void 0;lastLoadStatus=void 0;lastLoadStatusChanged=$e();policySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)this.verifiedPayload=e}seedFromDisk(e){this.sessionCache=e;let t=mzt(e);if(t===void 0||t===ao())this.consentedPayload??=e}markConsented(e){this.consentedPayload=e}markPolicySettingsNotified(){this.policySettingsNotified=!0}recordEligibility(e,t){if(this.eligible=e,t.memoize)this.eligibilityMemo=e,this.ineligibleReason=e?void 0:t.ineligibleReason}resetListener=null;registerResetListener(e){if(this.resetListener!==null)throw Error("registerSyncCacheResetListener: a listener is already registered; a second one would unhook the first");this.resetListener=e}reset(){this.sessionCache=null,this.eligible=void 0,this.eligibilityMemo=void 0,this.ineligibleReason=void 0,this.lastLoadStatus=void 0,this.policySettingsNotified=!1,this.verifiedPayload=null,this.unverifiedView=null,this.consentedPayload=null,this.resetEpoch++,this.emitLoadStatusChanged(void 0)}emitLoadStatusChanged(e){try{this.lastLoadStatusChanged.emit(e)}catch(t){n(`Remote settings: load-status listener threw: ${l(t)}`,{level:"error"})}}}
+methods: replaceSessionCache, seedFromDisk, markConsented, markPolicySettingsNotified, recordEligibility, registerResetListener, reset, emitLoadStatusChanged
+
+## w @179160929 sha=4bddec68e72f2949 len=37
+function w(){return Ndr.of(z().host)}
+
+## "var Ndr=" hits=1
+@179160903 ener threw: ${l(t)}`,{level:"error"})}}}var Ndr=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){le
+
+## "Ndr=new" hits=1
+@179160907  threw: ${l(t)}`,{level:"error"})}}}var Ndr=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){let{se
+
+## "class Ndr" hits=0
+## "function hzt(" hits=1
+@179159508 len=69
+function hzt(e){return Fl(e,(t,o)=>o.startsWith("$")&&o!=="$schema")}
+
+## "var hzt=" hits=0
+## "Ndr.of" hits=1
+@179160949 r=new K(()=>new xt);function w(){return Ndr.of(z().host)}function kY(){return w().resetEpoch}function ibt(){return w().consentedPayload}function gzt(e){w().markConsented(e)}function VMe(e,t,o){w().replaceSessionCache(e,t),Yl(o)}function WW(){let{sessionCache:e,verifiedPayload:t}=w();return
+
+## configHome=ge() hits=1
+@179163890 0;ready=!1;priming=Promise.resolve();stoodDown=!1;configHome=ge();subscriptions=[];cache=vt(Pe,"cache file");sidecar=vt(Ne,"helper
+## function ge() in Ut band hits=0
+
+## function Dde( all hits=3
+@178588201 function Dde(e){return t(ge())===t(e)}
+
+@184079464 function Dde(e){if(e?.type==="assistant"&&"id"in e.message&&e.message.model!==Wu)return e.message.id;return}
+
+@222525299 function Dde(e,t){return t?e?(...n)=>{let r=n[0];if(_U(r)){let i=r;Sx(i);let a=t(...n);return i.baseUIHandlerPrevented||e?.(...n),a}let o=t(...n);return e?.(...n),o}:AU(t):e}
+
+## function Pu( Ut-band hits=0
+
+## var ce= Ut-band hits=0
+@179159220 ,ce=2097152,gKe="remote-settings-helper-consent";function obt(){return kt(ge(),g

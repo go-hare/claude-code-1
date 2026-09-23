@@ -1,0 +1,43 @@
+# gold-248-n-root2
+
+## function C( total=161 near=0 
+
+## function v( total=138 near=0 
+
+## var v= total=213 near=1 178548541
+@178548541 var v=un();function z(){return n()}function n(){return C()?.session??v}function KS(e){return e.of(v.host)}function g(){let e=C();return e?.session?void 0:e}var C=()=>{return};function Qwr(e){C=e}function V(){return g()?.sessionId??n().id}function rt(){let e=g()?.sessionId;if(e)re
+
+## let v= total=519 near=0 
+
+## host:Xi( total=0 near=0 
+
+## new Ie total=9 near=1 178548074
+@178548074 new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,telemetryHandles:new Be,credentialSlots:new _e,mcpProcessWiring:new Ue,requestLatches:new qe,accountCreditLatches:new We,proactivity:new Ge})}function un(){let e="";if(typeof process<
+
+## new Zt total=9 near=0 
+
+## launchOptions:new total=1 near=1 178548060
+@178548060 launchOptions:new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,telemetryHandles:new Be,credentialSlots:new _e,mcpProcessWiring:new Ue,requestLatches:new qe,accountCreditLatches:new We,proactivity:new Ge})}function un(){let e="";if(t
+
+## function jn( total=33 near=0 
+
+## function $e( total=59 near=0 
+
+## function X( total=92 near=1 178514175
+@178514175 function X(e){let t=Object.create(null);return Object.assign(t,e)}
+
+## function k4( total=4 near=1 178509700
+@178509700 function k4(){return{sent:new Set,rejected:new Set}}
+
+## function eo( total=24 near=0 
+
+## function Li( total=22 near=0 
+
+## ?.session?? total=2 near=1 178548599
+@178548599 ?.session??v}function KS(e){return e.of(v.host)}function g(){let e=C();return e?.session?void 0:e}var C=()=>{return};function Qwr(e){C=e}function V(){return g()?.sessionId??n().id}function rt(){let e=g()?.sessionId;if(e)return eo(e);let t=n();return t.identity.mainAgentId(t.id)}f
+
+## around n() @178548500
+n==="function"){let t=Ri();try{e=dn(ln(t))}catch{e=dn(t)}}return yGt({host:sn(),id:avt()??Iq(),project:{originalCwd:e,projectRoot:e,cwd:e}})}var v=un();function z(){return n()}function n(){return C()?.session??v}function KS(e){return e.of(v.host)}function g(){let e=C();return e?.session?void 0:e}var C=()=>{return};function Qwr(e){C=e}function V(){return g()?.sessionId??n().id}function rt(){let e=g()?.sessionId;if(e)return eo(e);let t=n();return t.identity.mainAgentId(t.id)}function cn(){let e=n();return e.requestJournal.promptIndex()>0||e.sessionScratch.chromeAvailabilityStagesLogged().size>0}function uwn(e={}){let t=n(),o=t.id;t.sessionScratch.forgetPlanSlug(o),t.identity.replaceProjectDir(null);let r=cn();t.requestJournal.replacePromptIndex(0),t.requestJournal.replaceLastCancelledAPIMess
+
+## before class re @178513800
+unction xi(e){return w(e)?Jt(k2(e)):zt(e)}var $t=xi;function Ai(e){if(typeof e=="function")return e;if(e==null)return GYe;if(typeof e=="object")return Wm(e)?Vt(e[0],e[1]):Ht(e);return $t(e)}var WC=Ai;function Ti(e,t){var o={};return t=WC(t,3),$Le(e,function(r,i,s){Pq(o,i,t(r,i,s))}),o}var Ji=Ti;function Pi(e,t){var o,r=-1,i=e.length;while(++r<i){var s=t(e[r]);if(s!==void 0)o=o===void 0?s:o+s}return o}var Xt=Pi;function Mi(e,t){return e&&e.length?Xt(e,WC(t,2)):0}var L=Mi;function X(e){let t=Object.create(null);return Object.assign(t,e)}class re{#e=0;#t=0;

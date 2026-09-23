@@ -1,0 +1,6 @@
+# gold-248-na-33-w  rootOptionsRefusedMessage
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191866145
+
+len=498 sha=a3e6392b62969892
+function w(t){let e=t.map((i)=>`\`${i}\``).join(", "),[r,n]=t.length===1?["it","is"]:["them","are"],o=t.includes("--permission-mode")?" Set the permission mode with `claude remote-control --permission-mode <mode>`.":"";return`Error: ${e} before \`remote-control\` ${n} not carried over to the sessions Remote Control starts, so Remote Control refuses to start rather than drop ${r} \u2014 remove ${r}, and give Remote Control's own options after the verb (see \`claude remote-control --help\`).`+o}

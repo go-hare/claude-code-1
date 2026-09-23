@@ -21,6 +21,7 @@ import {
   clampEffortForModel,
   convertEffortValueToLevel,
   type EffortLevel,
+  effortModelSettingsPatch,
   getDefaultEffortForModel,
   getSupportedEffortLevels,
   getUltracodeEffortForModel,
@@ -326,7 +327,10 @@ export function ModelPicker({
       );
       const persistable = toPersistableEffort(effortLevel);
       if (persistable !== undefined) {
-        updateSettingsForSource('userSettings', { effortLevel: persistable });
+        // densable Dan / K — per-model like /effort, not top-level effortLevel.
+        const model = selectedModel ?? '';
+        const patch = model.length > 0 ? effortModelSettingsPatch(model, persistable) : { effortLevel: persistable };
+        updateSettingsForSource('userSettings', patch);
       }
       // densable: non-ultracode confirm clears ultracode flag.
       unpinAllEffortLaunchPins();

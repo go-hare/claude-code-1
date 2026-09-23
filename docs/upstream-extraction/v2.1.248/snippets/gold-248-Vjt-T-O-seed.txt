@@ -1,0 +1,83 @@
+# gold-248-Vjt-T-O-seed
+
+Official densable 2.1.248 SEA peels for SettingsPrimer free callees
+Vjt / T / O / k_ / k and helpers. Leftover names only.
+
+## async Vjt @179502007 sha=2ae5c09e6affc368 len=454
+async function Vjt(e,t,r){let o=await e.read([{key:Se.userSettings(),offset:0,length:A_+1}]);if(!o.ok)return{kind:"failing",code:o.error.code,failureClass:"failureClass"in o.error?o.error.failureClass:void 0};let u=o.value.items[0];if(!u.found)return Pn(e.hostFiles,t);if(u.totalBytes>A_)return{kind:"oversize"};let d=Mn(u.value),p=r!==void 0&&r.contentHash===d?r.parsed:FMe($ue(u.value),t);return{kind:"seeded",contentHash:d,size:u.totalBytes,parsed:p}}
+
+## async Pn (hostFiles absent) @179502461 sha=85871383ee2663c8 len=240
+async function Pn(e,t){let r;try{r=await e.stat(Pc.home(t))}catch(o){return{kind:"failing",code:l(o)}}if(r.ok)return r.value.kind==="absent"?{kind:"absent"}:{kind:"failing",code:r.value.kind};return dEe(r.error)?{kind:"absent"}:ne(r.error)}
+
+## async T @179529407 sha=bc1c732ec44de27e len=151
+async function T(t,e,s){let i=R(t);if(i.length===0)return!0;let r=await Promise.all(i.map((a)=>a.read()));if(e.epoch!==s)return!1;return x(e,i,r,s),!0}
+
+## async O @179531012 sha=f23bba39b0b41ed5 len=208
+async function O(t,e,s){if(v(t,e,s)!==void 0)return e.epoch===s;let i=await vKn(t,e);if(i===void 0)return M(e,s),!0;let r=await i.reads;if(e.epoch!==s)return!1;let{verdicts:a}=A(e,i,s);return B(e,i,r,a,s),!0}
+
+## function k_ @179508981 sha=edb015dcb180720a len=172
+function k_(){let e=ra(),t=e.mergedSettings;if(t!==null)return t;xr("loadSettingsFromDisk_start");let r=dyn(H());return xr("loadSettingsFromDisk_end"),e.mergedSettings=r,r}
+
+## function k @179522501 sha=002b4d030ca4f878 len=84
+function k(){let t=To("userSettings");return t!==void 0&&H(t)===jW.default?t:void 0}
+
+## Helpers
+
+### A_ @179441371
+var A_=2097152;
+
+### Se.userSettings @178789320
+userSettings:()=>({namespace:"settings",layer:"user"})
+
+### Mn @179296998
+function Mn(t){return r("sha256").update(t).digest("hex")}
+
+### $ue @179013697 + t4t @179013505
+function t4t(e){if(e.byteLength===0)return"utf8";if(e.byteLength>=2){if(e[0]===255&&e[1]===254)return"utf16le"}if(e.byteLength>=3&&e[0]===239&&e[1]===187&&e[2]===191)return"utf8";return"utf8"}
+function $ue(e){let r=t4t(e.subarray(0,4096));return Buffer.from(e.buffer,e.byteOffset,e.byteLength).toString(r).replaceAll(`\r\n`,`\n`)}
+
+### FMe @179441524
+function FMe(e,t,r){if(e.trim()==="")return{settings:{},errors:[]};let o=Up(Ft(e,!1));… SettingsSchema.safeParse …}
+Leftover: `parseSettingsFileContent` in settings.ts (same content path as parseSettingsFile).
+
+### Pc @178607517
+Pc={home:(e)=>({space:"home",path:e}),workspace:(e)=>({space:"workspace",path:e}),system:(e)=>({space:"system",path:e}),userNamed:(e)=>({space:"userNamed",path:e})}
+
+### jW @179444507
+jW={default:"settings.json",cowork:"cowork_settings.json"}
+
+### R @179527886
+function R(t){let e=[];for(let s of["projectSettings","localSettings"]){if(s==="projectSettings"&&Kv())continue;let i=To(s);if(i!==void 0)e.push(Ogn(t,s,i,…));if(s==="localSettings"){let r=kC();if(r!==void 0&&r!==i)e.push(Ogn(…legacy…))}}return e}
+Leftover: Kv=`projectSettingsAliasesUserSettings`, To=`getSettingsFilePathForSource`. Legacy kC/Zve omitted (UNKNOWN).
+
+### Ogn @179505056 / En @179503487 / wn @179503828 / gt @179503993
+Ogn → En(hostFiles,path) via userNamed; wn/gt = stat+readBytes+FMe.
+
+### x @179533151
+seedParsedFile / walkReadDiffers / Qve / Fte install loop.
+
+### vKn @179528210 / Lgn @179505162 / On @179503602 / _Xn @179504453
+system space managed-settings.json + managed-settings.d listing.
+$Me(nx()) @179438431 → `[T_()]` when wslInherits unset; T_=`getManagedFilePath`.
+Gyt @179438486: `e.endsWith(".json")&&!e.startsWith(".")`.
+
+### A @179532476 / B @179531220 / M @179532274
+SettingsOwner folderInstallVerdict / policyInstallVerdict / seedFolderListing /
+managedFileReads / unseedParsedFile / clearFolderListing.
+
+### dEe @178605274 / ne @179504961 / ZSt @178605173
+dEe: Failed+Unsupported → absent; ZSt=`"Unsupported"`.
+
+## Leftover land map
+
+| official | leftover | status |
+|----------|----------|--------|
+| `k` | `userSettingsPrimePath` → getSettingsFilePathForSource + basename settings.json | LAND |
+| `k_` | `reloadMergedSettingsAfterPrime` → getSettingsWithErrors | LAND |
+| `Vjt` | `readUserSettingsFromBackend` | LAND |
+| `Pn` | `probeUserSettingsAbsentOnHost` | LAND |
+| `T`+`R`+`x` | `seedProjectLocalLayers` (+ readers) | LAND (no legacy Zve) |
+| `O`+`vKn`+`A`+`B`+`M` | `seedManagedSettingsTier` | LAND (`v` still UNKNOWN gated) |
+| `_Ke` / `Gqe` / `z` | — | UNKNOWN |
+| `v` / `wKn` | sibling / gated | UNKNOWN |
+| `kC`/`Zve` legacy local | — | UNKNOWN (omit branch) |

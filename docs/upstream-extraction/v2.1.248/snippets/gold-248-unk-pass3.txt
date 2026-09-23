@@ -1,0 +1,143 @@
+# gold-248-unk-pass3
+# when=2026-09-20T03:41:13.490Z
+
+# ---- #9 B1 ignoreOverage ----
+## ignoreOverage 248=4 247=0
+## #9 ignoreOverage @96968184
+alue........tengu_prompt_cache_1h_config
+....R..subscriber......>...agentCacheTtlOverride..........ignoreOverage...!...!...tengu_thinking_disabled_sanitized.......vM..[thinking] stripped >....`. extra key(s) from {type:'disabled'} thinking param (gh-68567)..
+....L..hadDisplay......l..extraKeyCount...........querySou
+
+## #9 ignoreOverage @185604930
+tSizeChars:1000,async description(){return T5n},async prompt(){let e=NAn(),t=B1("repl_main_thread",{ignoreOverage:e}),r=B1("sdk",{ignoreOverage:e});return k5n(t===r?t:void 0)},get inputSchema(){return DAn()},get outputSchema(){return LAn()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.stop===
+
+## #9 ignoreOverage @185604960
+ion(){return T5n},async prompt(){let e=NAn(),t=B1("repl_main_thread",{ignoreOverage:e}),r=B1("sdk",{ignoreOverage:e});return k5n(t===r?t:void 0)},get inputSchema(){return DAn()},get outputSchema(){return LAn()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.stop===!0)return"stop the /loop \u201
+
+## #9 ignoreOverage @186445361
+{type:"ephemeral",...t&&{ttl:t},...e==="global"&&{scope:e}}}function Ivt(e,{agentCacheTtlOverride:t,ignoreOverage:r=!1}={}){let o=St(),u=o&&!r&&id().isUsingOverage===!0,p=jTt(e,t,u);if(p!==void 0)return p;if(!o||u)return{ttl:"5m",reason:"default"};let g=nTn();if(g===null)g=R("tengu_prompt_cache_1h_config",{allowlist:[.
+
+## function B1( hits=3 186445686,189378916,200002549
+## #9 B1 @186445686 len=44 sha=eed8334d62f460c7 otherHits=0
+function B1(e,t){return Ivt(e,t).ttl==="1h"}
+
+## #9 B1 @189378916 len=51 sha=7b0476202d712793 otherHits=0
+function B1(t){return t>32&&t<127||t>=160&&t<55296}
+
+## #9 B1 @200002549 len=85 sha=2a7f0b1f3ae293a9 otherHits=0
+function B1(e){return O._stringFormat(g.ZodCustomStringFormat,"hex",O.regexes.hex,e)}
+
+## #9 prompt() caller @185604985
+urn zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop with stop:true (a fixed-interval /loop is a recurring cron \u2014 cancel it with ${o_})`,maxResultSizeChars:1000,async description(){return T5n},async prompt(){let e=NAn(),t=B1("repl_main_thread",{ignoreOverage:e}),r=B1("sdk",{ignoreOverage:e});return k5n(t===r?t:void 0)},get inputSchema(){return DAn()},get outputSchema(){return LAn()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.stop===!0)return"stop the /loop \u2014 cancel pending wakeups, schedule nothing";if(e.delaySeconds==null||e.prompt==null)return`malformed ${Ks} call missing delaySeconds/prompt \u2014 the tool will reject it`;return`wake in ${e.delaySeconds}s
+
+## #9 lastFn NAn @185604567
+## #9 caller NAn @185604567 len=34 sha=77e65efa3fdb5b46 otherHits=0
+function NAn(){return zce(FAn,!0)}
+
+## #9 DAn @204887271 len=113 sha=c1e7d08cf05b47ac otherHits=0
+function DAn(e,t){return`${O(e,t)}, and ${e} reports it never received it: it did not run. It is safe to retry.`}
+
+## #9 247 B1("repl_main_thread" hits=0
+## #9 247 guidance @212904752
+n't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Matc
+
+## #9 247 S3t( hits=3
+## #9 247 S3t-call @212903754
+he plan until you call ${Jm} for approval.
+`});var eg="CronCreate",_P="CronDelete",YY="CronList";var IW=()=>{};function S3t(e){return`${pco}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and there\'s nothing to report ("no change", "still waiting", "quiet hold"). Set
+
+## #9 247 S3t-call @216445531
+,maxResultSizeChars:1000,async description(){return w3t},async prompt(){let e=PR("repl_main_thread"),t=PR("sdk");return S3t(e===t?e:void 0)},get inputSchema(){return Jds()},get outputSchema(){return Qds()},userFacingName(){return""},shouldDefer:!0,toAutoClassifierInput(e){if(e.st
+
+## #9 247 S3t-call @244313951
+Node(t.indent?parseInt(t.indent):0,t.name))},"populate"),nRe={parse:o(async e=>{let t=await bn("treeView",e);Z.debug(t),S3t(t)},"parse")}});var E3t,sRe,A3t,_3t,D3t,oRe,lRe=z(()=>{"use strict";St();ps();Di();E3t=o((e,t,r,i,n)=>{let a=i.append("text").text(r.name).attr("dominant-ba
+
+# ---- #8 mE / 247 trio ----
+## function mE( hits=4 179800735,184450722,188546726,189454979
+## #8 clear-cluster 180712150
+n e.value=t,t}function lY(){yve.of(z().host).clear()}function r8e(){let e=RN();if(typeof e==="string")return e;let t=_n().read()?.claudeAiOauth?.accessToken;return CN(e,t)}async function Bv(e){let t=RN();if(typeof t==="string")return t;let r=(await _n().readAsync(e))?.claudeAiOauth?.accessToken;return CN(t,r)}function RN(){let e=Bt();if(!e?.accessToken)return"none";if(a.CLAUDE_CODE_OAUTH_TOKEN)return"env";let t=l$();if(t&&(!Gne()||lc()))return"fd";return{bearer:e.accessToken,fdToken:t}}function CN({bearer:e,fdToken:t},r){if(r&&r===e)return"store";if(t&&e===t)return"fd";return"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yve.of(z().host),o;try{let g=await e.probeCredentials();o=g.state==="present"?g.version:void 0}catch(g){n(`Credential
+
+## #8 247 clear-cluster around Pi @208859995
+ion D(){let e=tr.of(C().host);if(e.value!==void 0)return e.value;let t=t$();return e.value=t,t}function Pi(){tr.of(C().host).clear()}function n$(){let e=Cx();if(typeof e==="string")return e;let t=ne().read()?.claudeAiOauth?.accessToken;return Ax(e,t)}async function r$(e){let t=Cx();if(typeof t==="string")return t;let n=(await ne().readAsync(e))?.claudeAiOauth?.accessToken;return Ax(t,n)}function Cx(){let e=D();if(!e?.accessToken)return"none";if(c.CLAUDE_CODE_OAUTH_TOKEN)return"env";let t=ft();if(t&&(!xi()||Ee()))return"fd";return{bearer:e.accessToken,fdToken:t}}function Ax({bearer:e,fdToken:t},n){if(n&&n===e)return"store";if(t&&e===t)return"fd";return"none"}function kx(){if(Pi(),Sm(),F())va()}function Tx(){Pi(),Sm(),no(),ki()}function wt(){if(Tx(),F())va()}function o$(){if(Pi(),Aa.cache?.clear?.(),ka.cache?.clear?.(),ix(),ux(),lx(),px(),no(),ki(),F())va()}function i$(){tr.of(C().host).resetChangeCheck()}async function Dm(e,t){if(!Fm())return;let n=tr.of(C().host),r;try{let s=await e.probeCredentials();r=s.state==="present"?s.version:void 0}catch(s){p(`Credentials version prime failed: ${M(s)}`,{level:"error"})}if(await t?.catch(()=>null),await n.promise?.catch(()=>null),n.promise=null,r!==void 0)n.lastCredentialsVersion=r;let o=s$(e);if(n.promise=o,await o===null){if(r!==void 0)n
+
+## #8 247 win function no( idx=-1
+## #8 247 win function ki( idx=-1
+## #8 247 win function Pi( idx=9995
+## #8 247 win function wt( idx=10636
+## #8 247 save fn yx @208856754
+## #8 247 save @208856754 len=958 sha=f704632816904f8d otherHits=0
+async function yx(e,t){if(!en(e.scopes))return E("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return E("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,clientId:a}=e,u=ne(),l=_x();try{let d=await u.mutate((g)=>({...g,claudeAiOauth:mx(g.claudeAiOauth,{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:a})}),t);if(d.success)E("tengu_oauth_tokens_saved",{storageBackend:l});else E("tengu_oauth_tokens_save_failed",{storageBackend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OAuth tokens: ${M(d)}`,{level:"error"}),E("tengu_oauth_tokens_save_exception",{storageBackend:l,...Ar(d)}),{success:!1,warning:"Failed to save OAuth tokens"}}}
+
+# ---- #23 ebn callers ----
+## ebn( hits=3
+## #23 ebn-call @178923752
+),Jyn(),Qyn(),Zyn()]));function _bt(e){return e?.pluginSource!==void 0}function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}var y=h(()=>m({mcpServers:Oe(i(),AY())}));function zo(e){
+
+## #23 ebn-call @209648224
+rn f;return f.filter((b)=>!c.has(b.name))},[s,f]),V=G(()=>{let c=s.filter((b)=>!ebn(b.client.config));return pn(c)},[s]),{claudeAiServers:w,unusedClaudeAiServers:R}=G(()=>{let c=Eat(),b=[],le=[];for(let h of s){if(!ebn(h.client.config))cont
+
+## #23 ebn-call @209648359
+rs:w,unusedClaudeAiServers:R}=G(()=>{let c=Eat(),b=[],le=[];for(let h of s){if(!ebn(h.client.config))continue;if((h.client.type==="needs-auth"||h.client.type==="failed")&&!c.has(h.name))le.push(h);else b.push(h)}return b.sort((h,W)=>h.name.
+
+## #23 unusedClaudeAi 248=3 247=3
+## #23 claudeAiServers 248=4 247=4
+## #23 Project MCPs 248=2 247=2
+## #23 children:"claude.ai" 248=1 247=1
+## #23 bold:!0,children:"claude.ai" 248=0 247=0
+## #23 ebn( 248=3 247=1
+## #23 panel lastFn le @209649761 title@209652068
+## #23 panelFn @209649761 len=123 sha=db396691d07b6a6a otherHits=0
+function le(h,W){let ae=b++;c.push({key:W,selectableIndex:ae,node:e(Mo,{server:h,isSelected:P===ae,toolCount:l[h.name]})})}
+
+## #23 panel-20k needles
+- ebn(: true idx=16291
+- claudeai-proxy: false idx=-1
+- claude.ai: true idx=18142
+- Project MCPs: true idx=13468
+- scope==="claudeai": false idx=-1
+- unusedClaude: true idx=16538
+--- ebn ---
+ilter((b)=>!c.has(b.name))},[s,f]),V=G(()=>{let c=s.filter((b)=>!ebn(b.client.config));return pn(c)},[s]),{claudeAiServers:w,unusedClaudeAiServers:R}=G(()=>{let c=Eat(),b=[],le=[];for(let h of s){if(!ebn(h.client.config))continue;if((h.client.type==="needs-auth"||h.client.type==="failed")&&!c.has(h.name))le.push(h);else b.push(h)}return b.sort((h,W)=>h.name.localeCompare(W.name)),le.sort((h,W)=>h.name.localeCompare(W.name)),{claudeAiServers:b,unusedClaudeAiServers:le}},[s]),te=G(()=>(V.get("dyna
+
+# ---- #25 login_handoff ----
+## login_handoff 248=6 247=0
+## #25 login_handoff @92515604
+....A...leftArrowConfirm........acknowledged....n.P.installationStatus.........login_handoff.......0...reveal.......e..persistToSettings...
+...U...persistRow..J...[.C.Cannot destructure property 'forwardToBridge' from null or undefined value......S...forwardToBridge......g..onReject........dialog-.
+
+## #25 login_handoff @201101704
+let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:re}=wo,s=yo==="login_handoff",y,b,O,Ye;if(n[0]!==f){let qe=zW(f);let{commandRows:ie,envRows:Be,categoryRows:Ge}=Dyn(qe);let ae=FL-Ge.length;let Je=ie.length+Be.length;let We=Je<=ae?ae:ae-1;let Y=ie.slice(0,Math.max(0,We));let je=Be.sli
+
+## #25 login_handoff @202549792
+y",payload:h(()=>m({settings:Bm((d)=>typeof d==="object"&&d!==null),reveal:le(["login_handoff","default"])})),result:h(()=>le(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind
+
+## #25 login_handoff @202550070
+,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",
+
+## #25 login_handoff @202550152
+gin_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-suggestions":{if(x===null|
+
+## #25 login_handoff @202550177
+eld{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-suggestions":{if(x===null||!Gf(x))return{behavior:"
+
+## #25 pOe @187409813 len=376 sha=fe28e443874b0d4d otherHits=0
+function pOe(e,t,r){if(D()&&r!==void 0)if(t===void 0){let p=await Ger(e,r);if(p!==void 0){let g=await zK(p.path,{storageV5:{backend:r,key:p.key}});return Object.assign(g,{sessionFile:p.path})}}else{let p=oc(t,r);if(p!==void 0){let g=await zK(t,{storageV5:p});return Object.assign(g,{sessionFile:t})}}let o=t??await qer(e),u=await zK(o);return Object.assign(u,{sessionFile:o})}
+
+## #25 nie @202549952 len=81 sha=1805be608bd2f346 otherHits=0
+function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}
+
+## #25 nie @215987962 len=48 sha=a193ed698f9cc242 otherHits=0
+function nie(e,t){this._context=e,this._alpha=t}
+
+## #25 nie @223955431 len=570 sha=a1e8ccbdb8134db0 otherHits=1
+function nie(e,t,n){if(t.length===0)return{targetTid:null,position:"root-end"};let r=[...new Set(t.map(l=>Iu(e,l)))],o=Math.max(...r),i={targetTid:o,position:"after"},a=r.length===1?e.element(o):null;if(!a)return i;let s=e.tagName(o)??"";if(/^(x-import|dc-import|helmet|sc-for|sc-if)$/.test(s))return i;for(let l=a;l;l=l.parentElement)if(l.tagName.toLowerCase()==="svg")return i;if(e.isUneditable(o)||e.isTextEditable(o))return i;let c=e.topLevelTags(n);return c.length===0||!c.every(l=>q0(s,l))||n.trim()===(e.subtreeHtml(o)??"").trim()?i:{targetTid:o,position:"into"}}
+
+## #25 DKt @190466122 len=53 sha=454151d2310e485e otherHits=0
+function DKt(){return P().consentHandoffRevealActive}
+
+## #25 pOe site @202549862
+els:!0});var gb=oi({kind:"managed_settings_security",payload:h(()=>m({settings:Bm((d)=>typeof d==="object"&&d!==null),reveal:le(["login_handoff","default"])})),result:h(()=>le(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-suggestions":{if(x===null||!Gf(x))return{behavior:"allow",updatedInput:C.input};return{behavior:"allow",updatedInput:C.input,permissionUpdates:x.applies}}case"no":return{behavior:"deny",...H&&{feedback:H}}}}function kOe(d){let C=d.filter((X)=>X.type==="addRules").flatMap((X)=>X.rules);if(C.length===0||C.length>g6)r

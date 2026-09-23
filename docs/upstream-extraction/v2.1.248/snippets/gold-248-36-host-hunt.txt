@@ -1,0 +1,239 @@
+# gold-248-36-host-hunt
+when=2026-09-20T07:35:56.852Z
+job=leftover mention match sites that skip dr / IME fold
+
+## Ejn-def @186136100
+len=295 sha=6df1bd33805752be exactOther=0
+function Ejn(e,t,r=Date.now()){if(t==="")return[];let o=[];for(let u of e.candidates){if(o.length>=IDn)break;let p=dr(u.name);if(e.inProcess.has(p)||fkt(e,u)||!p.startsWith(t)||!ckt(u.name))continue;o.push({id:`dm-peer-${u.kind}-${u.ref}-${p}`,displayText:LDn(u),description:FDn(u,r)})}return o}
+
+## Ejn-call-wide @202924708
+);return()=>{clearImmediate(Mo),$t()}},[Mn,mo]);let Hn=AH(Mn,50),Yn=U(async(Mo)=>{ar.current=Mo;let $t=await ome(Co,oo.getState().mcp.clients,Mo);if(ar.current!==Mo)return;nt((lo)=>({commandArgumentHint:void 0,suggestions:$t,selectedSuggestion:RN(lo,$t,"slack-channel"),suggestionType:$t.length>0?"slack-channel":"none"})),Bt(void 0)},[Co,nt]),gr=AH(Yn,150),Pi=U(async(Mo,$t,lo)=>{Ln.current=Mo,En.current="slash-template";let dn=await _N(Mo,{[$t]:lo},oo.getState().mcp.clients,"/",cn.current);if(Ln.current!==Mo)return;let Ko=dn??[];nt((jn)=>({commandArgumentHint:void 0,suggestions:Ko,selectedSuggestion:RN(jn,Ko,"command"),suggestionType:Ko.length>0?"command":"none"})),Bt(void 0)},[nt]),vr=AH(Pi,150),Wr=U(async(Mo,$t,lo)=>{if(Rr.current!==Mo)Rr.current=null;Oo.current=Mo,Vo.current+=1;let dn=Vo.current,Ko=$t??d.cursorOffset;if(Z){Hn.cancel(),vr.cancel(),Oo.current=null,er();return}if(xe==="prompt"){let Bn=SN(Mo,Ko);if(Bn){if(hQ(Co,Bn.partialCommand,C)){nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0);return}}}if(xe==="bash"&&Mo.trim()){let Bn=Mo.slice(0,Ko).lastIndexOf(" ")+1,io=Mo.slice(Bn,Ko);if(io&&(Xqt(io)||io.includes("/"))){Lo.current=io;let Sn=await Jqt(Co,io,{maxResults:10,keepDotPrefix:!0});if(Lo.current!==io)return;if(Sn.length>0){Xo(void 0),nt((_n)=>({suggestions:Sn,selectedSuggestion:Hb(_n.suggestions,_n.selectedSuggestion,Sn),commandArgumentHint:void 0,suggestionType:"directory"})),Yo.current="bash-path";return}}if(Ve==="directory"&&Yo.current==="bash-path")er();mn.current=Mo;let Do=await zde(Co,Mo,mo);if(mn.current!==Mo)return;if(Do){Xo({text:Do.suffix,fullCommand:Do.fullCommand,insertPosition:Mo.length}),nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0);return}else Xo(void 0)}let jn=xe!=="bash"?Mo.substring(0,Ko).match(bP):null;if(jn){let Bn=dr(jn[2]??""),io=oo.getState(),Do=[],Sn=new Set;if(Kr()&&io.teamContext)for(let _n of Object.values(io.teamContext.teammates??{})){if(_n.name===bs)continue;if(!dr(_n.name).startsWith(Bn))continue;Sn.add(_n.name),Do.push({id:`dm-${_n.name}`,displayText:`@${_n.name}`,description:"send message"})}for(let[_n,lr]of io.agentNameRegistry){if(Sn.has(_n))continue;if(!dr(_n).startsWith(Bn))continue;let Ur=io.tasks[lr]?.status;Do.push({id:`dm-${_n}`,displayText:`@${_n}`,description:Ur?`send message \xB7 ${Ur}`:"send message"})}if(Po()&&!Kt()){let _n=cr.current,lr=_n?.value===Mo&&_n.partial===Bn?_n.rows:Ejn(gn.current.roster,Bn);if(cr.current={value:Mo,partial:Bn,rows:lr},Do.push(...lr),Bn!=="")Vr()}if(Do.length>0){Hn.cancel(),vr.cancel(),Ln.current=null,Lo.current="",ar.current="",gr.cancel();let _n=Rr.current===Mo;nt((lr)=>({commandArgumentHint:void 0,suggestions:Do,selectedSuggestion:_n?lr.suggestions.length===Do.length&&lr.suggestions.every((Ur,ei)=>Ur.id===Do[ei].id)?lr.selectedSuggestion:-1
+
+## Ejn-caller-fn name=gme i=202918553
+## Ejn-caller gme @202918553
+MISS {"i":202918553,"missEnd":true,"preview":"function gme({draft:d,commands:C,onSubmit:x,agents:H,suggestionsStore:X,suppressSuggestions:Z,markAccepted:ee,sessionEnvVars:re}){let me=Ze(d,KGe),ge=Ze(d,QGe),xe=Ze(d,zGe),Re=d.setValue,Pe=d.setCursorOffset,Ie=d.setMode,{suggestions:Ae,selectedSuggestion:Ne,suggestionType:Ve,hov"}
+
+## assign let Bn=  needle="let Bn="  248=35@182757487,182776572,184452940,184454008,184645399,184646779,184647196,184648269  247=1@231254085
+## assign Bn=  needle="Bn="  248=141@178459936,178498055,178763181,179082312,179417872,179917515,180052033,180052140  247=86@206332747,206509467,206662210,206775970,207191792,207398534,207457862,207887292
+## assign ,Bn=  needle=",Bn="  248=48@178763180,179082311,179417871,181634261,182769906,184328141,184962928,185490297  247=34@206662209,206775969,207191791,207887291,210597567,211139600,211970666,223135907
+## assign Bn=Mo  needle="Bn=Mo"  248=4@202923319,202925220,202925473,202934633  247=0@
+## assign partial===Bn  needle="partial===Bn"  248=1@202924687  247=0@
+## assign Ejn(gn.current.roster,Bn)  needle="Ejn(gn.current.roster,Bn)"  248=1@202924708  247=0@
+## assign Ejn(gn.current.roster,dr(  needle="Ejn(gn.current.roster,dr("  248=0@  247=0@
+## assign dcu(  needle="dcu("  248=0@  247=1@218150953
+## 247 dcu-calls besides def 
+## re (^|\s)@([\w-]*)$  needle="(^|\\s)@([\\w-]*)$"  248=0@  247=0@
+## re (^|\s)@[\w-]*$  needle="(^|\\s)@[\\w-]*$"  248=0@  247=0@
+## re @([\w-]*)$  needle="@([\\w-]*)$"  248=0@  247=2@197077772,232523516
+## re @([\w-]+)  needle="@([\\w-]+)"  248=4@92474925,92564818,202940766,203072499  247=4@197130769,197307262,232546829,232673750
+## re (?:^|\s)@(\S*)$  needle="(?:^|\\s)@(\\S*)$"  248=2@92721576,192156228  247=2@197462536,223719874
+## re DM_MEMBER_RE  needle="DM_MEMBER_RE"  248=0@  247=0@
+## re @([\p{L}  needle="@([\\p{L}"  248=5@92414804,92415040,202915340,202917073,217683805  247=3@197077576,232521839,243537579
+## re @([\p{L}\p{N}_-]*)  needle="@([\\p{L}\\p{N}_-]*)"  248=0@  247=0@
+## re partialName  needle="partialName"  248=0@  247=0@
+## re .toLowerCase().startsWith(partialName)  needle=".toLowerCase().startsWith(partialName)"  248=0@  247=0@
+## re .toLowerCase().startsWith(  needle=".toLowerCase().startsWith("  248=47@178965773,178965944,181885752,182317598,182919946,182998664,183876969,183927873  247=49@207872162,207872331,208992020,210075316,210945206,211441978,211814580,213581045
+## re normalize("NFKC")  needle="normalize(\"NFKC\")"  248=23@178797376,179688169,179688239,179850687,180525434,181598000,181628676,182914061  247=22@207249794,207277038,207707168,207707239,208638049,209347979,209401339,210586418
+## ui send message  needle="send message"  248=21@67779069,67779175,92592928,92592948,92667581,94584930,94861421,95597452  247=21@67462524,67462630,197329716,197329736,197438981,199534285,199958680,201393460
+## ui send message \xB7  needle="send message \\xB7"  248=1@202924589  247=1@232530811
+## ui teamContext.teammates  needle="teamContext.teammates"  248=8@185514116,200977011,200977278,200977333,202924212,203153952,203154255,203154309  247=8@216275991,230536709,230536974,230537029,232530414,232933523,232933819,232933869
+## ui agentNameRegistry  needle="agentNameRegistry"  248=30@92434400,180526011,185196188,185518098,185518611,185518776,185519667,190423712  247=30@197113280,208638538,215897286,216296064,216361411,216361924,216362138,216362925
+## ui processPeerMentionsTypeahead  needle="processPeerMentionsTypeahead"  248=0@  247=0@
+## ui dm-peer-  needle="dm-peer-"  248=4@92593208,186136311,202930489,202934743  247=4@197329952,218151155,232536633,232540751
+## ui gn.current.roster  needle="gn.current.roster"  248=1@202924712  247=0@
+## isComposing 248 hits=11
+## isComposing-win @223213063
+m-text-tertiary",n)})});function qve(e,{submitOnEnter:t,onSubmit:n,onPlainEnter:r}){if(e.key==="Enter"&&!(e.nativeEvent.isComposing||e.keyCode===229)){if(e.metaKey||e.ctrlKey){e.preventDefault(),n?.("mod-enter");return}e.shiftKey||e.altKey||(t?(e.preventDefault(),n?.("enter")):r?.())}}var Yve=op.def
+
+## isComposing-fn name=qve i=223212967
+## isComposing-win @223388045
+.defaultPrevented||h.key==="Escape"&&(h.preventDefault(),l.current())},m=h=>{if(h.key!=="Escape"||h.defaultPrevented||h.isComposing)return;let b=h.target;b&&i.current?.contains(b)&&(b.tagName==="INPUT"||b.tagName==="TEXTAREA"||b.isContentEditable)||(h.preventDefault(),l.current())},g=h=>{i.current&&
+
+## isComposing-fn name=rc i=223387086
+## isComposing-win @223671383
+ert it ourselves; the #933 click guard still absorbs any synthetic
+    // click from keyup.
+    if (e.key === ' ' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey && editing.el.contains(e.target) && editing.el.closest('button, summary')) {
+      e.preventDefault(); e.stopPropagation();
+   
+
+## isComposing-fn name= i=-1
+## isComposing-win @223672563
+ item) is correct and a <br> would trap every line in
+    // one bullet.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.ctrlKey && !e.metaKey) {
+      var s = getSelection && getSelection();
+      var anchor = s && s.anchorNode;
+      var inLi = anchor && anchor.nodeType ? (anchor.
+
+## isComposing-fn name= i=-1
+## isComposing-win @223867291
+(c)&&r(o?Math.trunc(c):c)},onKeyDown:a=>{if(a.key!=="ArrowUp"&&a.key!=="ArrowDown"||a.metaKey||a.ctrlKey||a.nativeEvent.isComposing||!a.shiftKey&&!(a.altKey&&!o))return;a.preventDefault();let s=a.currentTarget.value,c=s!==""&&Number.isFinite(Number(s))?Number(s):0,l=a.altKey&&!o?Math.min(.1,i):i*10,
+
+## isComposing-fn name=m1e i=223866324
+## isComposing-win @223889033
+rrent=!0,d(u)),g.target.blur();return}if(g.key==="ArrowUp"||g.key==="ArrowDown"){if(g.metaKey||g.ctrlKey||g.nativeEvent.isComposing)return;let v=ro(f.trim());if(f.trim()&&!v)return;g.preventDefault();let h=v?.value??(Number.isFinite(t)?t:0),b=Jv(h,g.key==="ArrowUp"?1:-1,g,{unit:a,min:o,max:i});d(Str
+
+## isComposing-fn name=rE i=223887772
+## isComposing-win @223897216
+t=!0,l(n??"")),T.target.blur();return}if(T.key==="ArrowUp"||T.key==="ArrowDown"){if(T.metaKey||T.ctrlKey||T.nativeEvent.isComposing||i)return;let C=ro(c.trim());if(c.trim()&&!C)return;let A=ro(n||r||""),D=C?.value??(A?Math.round(A.value):0),L=C?.unit||A?.unit||"px";T.preventDefault();let M=Oh(L,void
+
+## isComposing-fn name=Roe i=223895953
+## isComposing-win @223899766
+=!0,l(e)),p.target.blur();return}if(s&&(p.key==="ArrowUp"||p.key==="ArrowDown")){if(p.metaKey||p.ctrlKey||p.nativeEvent.isComposing)return;let m=s(c,p.key==="ArrowUp"?1:-1,p);if(m==null)return;let{text:g,commit:v}=typeof m=="string"?{text:m,commit:m}:m;p.preventDefault(),d.current=g,l(g),a(v);let h=
+
+## isComposing-fn name=iE i=223899034
+## isComposing-win @224142920
+,onChange:c=>r(c.currentTarget.value),onFocus:c=>c.currentTarget.select(),onKeyDown:c=>{c.key==="Enter"&&(c.nativeEvent.isComposing||c.keyCode===229||(c.preventDefault(),a()))}})]})}function oae(){let[e,t]=(0,mE.useState)(Fu);return(0,mE.useEffect)(()=>(pE.add(t),()=>{pE.delete(t),pE.size===0&&tae()
+
+## isComposing-fn name=PRe i=224142054
+## isComposing-win @224146844
+("textarea")?.focus()},[t,o]),(0,ac.useEffect)(()=>{if(!t)return;let f=p=>{if(p.key==="Escape"&&!p.defaultPrevented&&!p.isComposing){let m=p.target;if((m instanceof HTMLTextAreaElement||m instanceof HTMLInputElement)&&m.value.length>0){p.preventDefault(),p.stopPropagation(),m.blur();return}p.prevent
+
+## isComposing-fn name=dae i=224146105
+## isComposing-win @224148355
+de look at or change?",value:a,onChange:f=>s(f.target.value),onKeyDown:f=>{f.key==="Enter"&&!f.shiftKey&&!f.nativeEvent.isComposing&&(f.preventDefault(),u())}}),(0,Vc.jsxs)("div",{className:"mt-2 flex items-center justify-end gap-2",children:[(0,Vc.jsx)(Bs,{variant:"ghost",size:"sm",onClick:n,childr
+
+## isComposing-fn name=u i=224147325
+## isComposing 247 hits=11
+## 247 isComposing-win @249768609
+submitOnEnter:t,onSubmit:n,onPlainEnter:r}){if(e.key==="Enter"&&!(e.nativeEvent.isComposing||e.keyCode===229)){if(e.metaKey||e.ctrlKey){e.preventDefault(),n?.("mod-enter");return}e.shiftKey||e.altKey|
+
+## 247 isComposing-win @249943591
+preventDefault(),l.current())},m=h=>{if(h.key!=="Escape"||h.defaultPrevented||h.isComposing)return;let b=h.target;b&&i.current?.contains(b)&&(b.tagName==="INPUT"||b.tagName==="TEXTAREA"||b.isContentEd
+
+## 247 isComposing-win @250226929
+till absorbs any synthetic
+    // click from keyup.
+    if (e.key === ' ' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey && editing.el.contains(e.target) && editing.el.closest('button, sum
+
+## 247 isComposing-win @250228109
+every line in
+    // one bullet.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.ctrlKey && !e.metaKey) {
+      var s = getSelection && getSelection();
+      var anchor = s && s.ancho
+
+## 247 isComposing-win @250422837
+{if(a.key!=="ArrowUp"&&a.key!=="ArrowDown"||a.metaKey||a.ctrlKey||a.nativeEvent.isComposing||!a.shiftKey&&!(a.altKey&&!o))return;a.preventDefault();let s=a.currentTarget.value,c=s!==""&&Number.isFinit
+
+## 247 isComposing-win @250444579
+(g.key==="ArrowUp"||g.key==="ArrowDown"){if(g.metaKey||g.ctrlKey||g.nativeEvent.isComposing)return;let v=ro(f.trim());if(f.trim()&&!v)return;g.preventDefault();let h=v?.value??(Number.isFinite(t)?t:0)
+
+## 247 isComposing-win @250452762
+(T.key==="ArrowUp"||T.key==="ArrowDown"){if(T.metaKey||T.ctrlKey||T.nativeEvent.isComposing||i)return;let C=ro(c.trim());if(c.trim()&&!C)return;let A=ro(n||r||""),D=C?.value??(A?Math.round(A.value):0)
+
+## 247 isComposing-win @250455312
+p.key==="ArrowUp"||p.key==="ArrowDown")){if(p.metaKey||p.ctrlKey||p.nativeEvent.isComposing)return;let m=s(c,p.key==="ArrowUp"?1:-1,p);if(m==null)return;let{text:g,commit:v}=typeof m=="string"?{text:m
+
+## 247 isComposing-win @250698466
+Focus:c=>c.currentTarget.select(),onKeyDown:c=>{c.key==="Enter"&&(c.nativeEvent.isComposing||c.keyCode===229||(c.preventDefault(),a()))}})]})}function oae(){let[e,t]=(0,mE.useState)(Fu);return(0,mE.us
+
+## 247 isComposing-win @250702390
+ffect)(()=>{if(!t)return;let f=p=>{if(p.key==="Escape"&&!p.defaultPrevented&&!p.isComposing){let m=p.target;if((m instanceof HTMLTextAreaElement||m instanceof HTMLInputElement)&&m.value.length>0){p.pr
+
+## 247 isComposing-win @250703901
+f=>s(f.target.value),onKeyDown:f=>{f.key==="Enter"&&!f.shiftKey&&!f.nativeEvent.isComposing&&(f.preventDefault(),u())}}),(0,Vc.jsxs)("div",{className:"mt-2 flex items-center justify-end gap-2",childre
+
+## ime compositionend  needle="compositionend"  248=18@222313199,222313386,222313665,222418892,222418964,222424418,222456139,222456988  247=18@248868745,248868932,248869211,248974438,248974510,248979964,249011685,249012534
+## ime compositionstart  needle="compositionstart"  248=9@222419059,222424360,222456116,222457003,222607230,223012883,223024509,223104138  247=9@248974605,248979906,249011662,249012549,249162776,249568429,249580055,249659684
+## ime compositionupdate  needle="compositionupdate"  248=6@222419157,222424468,222456160,223012929,223024621,223109963  247=6@248974703,248980014,249011706,249568475,249580167,249665509
+## before-Ejn-regex-scan @202924708
+,bn=E(null);bn.current=null;let mn=E(""),ar=E(""),Io=E(null),Oo=E(null),gn=E({roster:{candidates:[],inProcess:new Set,defaultNamed:new Set},at:0,loading:!1}),cr=E(null),Rr=E(null),[xr,Un]=u(0),Vr=U(()=>{let Mo=gn.current;if(Mo.loading||Date.now()-Mo.at<YGe)return;Mo.loading=!0,nLt(Co,oo.getState(),{storageV5:mo}).then(($t)=>{gn.current={roster:$t,at:Date.now(),loading:!1},Un((lo)=>lo+1)},()=>{gn.current={...gn.current,at:Date.now(),loading:!1}})},[Co,oo,mo]),er=U(()=>{nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0),Xo(void 0)},[nt]),Mn=U(async(Mo,$t=!1)=>{Ln.current=Mo,En.current=$t?"at":"file";let lo=Kt(),dn=null,Ko=$t&&!lo?oo.getState().mcp.resourceTemplates:Zt;if($t&&!lo){if(Uo(),dn=await _N(Mo,Ko,oo.getState().mcp.clients,"@",cn.current),Ln.current!==Mo)return}if(!dn)dn=await vQ(TG,Mo,{mcpResources:lo?{}:At,agents:lo?[]:H,showOnEmpty:$t,mcpResourceTemplates:lo?{}:Ko},mo);if(Ln.current!==Mo)return;if(dn.length===0){nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0);return}nt((jn)=>({commandArgumentHint:void 0,suggestions:dn,selectedSuggestion:RN(jn,dn,"file"),suggestionType:dn.length>0?"file":"none"})),Bt(void 0)},[At,Zt,oo,Uo,nt,Bt,H,mo]);k(()=>{let Mo=setImmediate((lo)=>{if(!Kt())btt(TG,lo)},mo),$t=TG.indexBuildComplete.subscribe(()=>{let lo=Ln.current;if(lo===null)return;let dn=En.current;if(dn==="slash-template")return;Ln.current=null,Mn(lo,dn==="at")});return()=>{clearImmediate(Mo),$t()}},[Mn,mo]);let Hn=AH(Mn,50),Yn=U(async(Mo)=>{ar.current=Mo;let $t=await ome(Co,oo.getState().mcp.clients,Mo);if(ar.current!==Mo)return;nt((lo)=>({commandArgumentHint:void 0,suggestions:$t,selectedSuggestion:RN(lo,$t,"slack-channel"),suggestionType:$t.length>0?"slack-channel":"none"})),Bt(void 0)},[Co,nt]),gr=AH(Yn,150),Pi=U(async(Mo,$t,lo)=>{Ln.current=Mo,En.current="slash-template";let dn=await _N(Mo,{[$t]:lo},oo.getState().mcp.clients,"/",cn.current);if(Ln.current!==Mo)return;let Ko=dn??[];nt((jn)=>({commandArgumentHint:void 0,suggestions:Ko,selectedSuggestion:RN(jn,Ko,"command"),suggestionType:Ko.length>0?"command":"none"})),Bt(void 0)},[nt]),vr=AH(Pi,150),Wr=U(async(Mo,$t,lo)=>{if(Rr.current!==Mo)Rr.current=null;Oo.current=Mo,Vo.current+=1;let dn=Vo.current,Ko=$t??d.cursorOffset;if(Z){Hn.cancel(),vr.cancel(),Oo.current=null,er();return}if(xe==="prompt"){let Bn=SN(Mo,Ko);if(Bn){if(hQ(Co,Bn.partialCommand,C)){nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0);return}}}if(xe==="bash"&&Mo.trim()){let Bn=Mo.slice(0,Ko).lastIndexOf(" ")+1,io=Mo.slice(Bn,Ko);if(io&&(Xqt(io)||io.includes("/"))){Lo.current=io;let Sn=await Jqt(Co,io,{maxResults:10,keepDotPrefix:!0});if(Lo.current!==io)return;if(Sn.length>0){Xo(void 0),nt((_n)=>({suggestions:Sn,selectedSuggestion:Hb(_n.suggestions,_n.selectedSuggestion,Sn),commandArgumentHint:void 0,suggestionType:"directory"})),Yo.current="bash-path";return}}if(Ve==="directory"&&Yo.current==="bash-path")er();mn.current=Mo;let Do=await zde(Co,Mo,mo);if(mn.current!==Mo)return;if(Do){Xo({text:Do.suffix,fullCommand:Do.fullCommand,insertPosition:Mo.length}),nt(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),Bt(void 0);return}else Xo(void 0)}let jn=xe!=="bash"?Mo.substring(0,Ko).match(bP):null;if(jn){let Bn=dr(jn[2]??""),io=oo.getState(),Do=[],Sn=new Set;if(Kr()&&io.teamContext)for(let _n of Object.values(io.teamContext.teammates??{})){if(_n.name===bs)continue;if(!dr(_n.name).startsWith(Bn))continue;Sn.add(_n.name),Do.push({id:`dm-${_n.name}`,displayText:`@${_n.name}`,description:"send message"})}for(let[_n,lr]of io.agentNameRegistry){if(Sn.has(_n))continue;if(!dr(_n).startsWith(Bn))continue;let Ur=io.tasks[lr]?.status;Do.push({id:`dm-${_n}`,displayText:`@${_n}`,description:Ur?`send message \xB7 ${Ur}`:"send message"})}if(Po()&&!Kt()){let _n=cr.current,lr=_n?.value===Mo&&_n.partial===Bn?_n.rows:Ejn(gn.current.roster,Bn);if(cr.current={value:Mo,
+
+# ---- pass2 bP + 247 caller ----
+when=2026-09-20T07:36:31.515Z
+
+## var bP=  needle="var bP="  248=3@184542749,202917033,223847042  247=1@250402588
+## bP=  needle="bP="  248=5@180457318,184542753,201448567,202917037,223847046  247=6@208472202,227977041,231411604,231411801,242502513,250402592
+## ,bP=  needle=",bP="  248=2@180457317,201448566  247=4@208472201,227977040,231411800,242502512
+## match(bP)  needle="match(bP)"  248=2@202924080,202928832  247=0@
+## bP=  needle="bP="  248=5@180457318,184542753,201448567,202917037,223847046  247=6@208472202,227977041,231411604,231411801,242502513,250402592
+## pL-202915340 @202915340
+\]~:]+/u,HGe=/(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$/u,jGe=/[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$/u,$Ge=/[\s\u3002\u3001\uFF1F\uFF01]/u,qGe=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$/u,wQ=/(^|\s)#([a-z0-9][a-z0-9_-]*)$/,TQ=/(^|\s):([a-z0-9_+-]{2,})$/,VGe=/(^|\s):([a-z0-9_+-]+):$/;function GGe(d,C,x){if(C===void 0)return!1;let H=d.length-C.length,X=x-H;return H>0&&X>=0&&d.slice(0,X)+d.slice(x)===C&&/^[a-z0-9_+-]*:$/.test(d.slice(X,x))}var SP=import.meta.require("B:/~BUN/root/chunk-eth9zzn8.js");function Ub(d){return typeof d==="obje
+
+## pL-202917073 @202917073
+=="variable")ge="$"+d.displayText+" ";else if(Z==="command")ge=d.displayText+" ";else ge=d.displayText;let xe=C.slice(0,me)+ge+C.slice(x);H(xe),X(me+ge.length)}var bP=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}\u200C\u200D_-]*)$/u,YGe=5000;function tw(d,C,x,H,X,Z){let ee=C.slice(0,x).match(H);if(!ee||ee.index===void 0)return!1;let re=ee.index+(ee[1]?.length??0),me=C.slice(0,re),ge=me+d.displayText+" "+C.slice(x);return X(ge),Z(me.length+d.displayText.length+1),!0}async function JGe(d,C,x,H,X){if(Kt())return[];try{d.current?.abort();let Z=new AbortController;return d.current=Z,await $de
+
+## pL-92414804 @92414804
+$...........[\s\u3002\u3001\uFF1F\uFF01]M....@K.(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$.......[.!.(^|\s)#([a-z0-9][a-z0-9_-]*)$...........(^|\s):([a-z0-9_+-]{2,})$...........(^|\s):([a-z0-9_+-]+):$.........B:/~BUN/root/chunk-eth9zzn8.js..D...:{..(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}\u200C\u200D_-]*)$
+.....".[\s\p{Cc}]......5.r.
+
+## pL-92415040 @92415040
+........B:/~BUN/root/chunk-eth9zzn8.js..D...:{..(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}\u200C\u200D_-]*)$
+.....".[\s\p{Cc}]......5.r.isMisspelled-...[.2.\p{L}[\p{L}\p{M}]*(?:['\u2019][\p{L}\p{M}]+)*...(.....m.(``+)[\s\S]*?(?:\1|$)|`[^`\n]*(?:`|\n|$)O.....(.[\s.,;:!?"'\u2018\u2019\u201c\u201d\u00ab\u00bb()[\]{}<>\u2014\u2013\u2026*_~-]. ...y.x.[.s...,.;.:.!.?.".'.. . 
+
+## gme-start @202918553
+C+1)}}return null}function pme(d,C){return!d&&C.includes(" ")&&!C.endsWith(" ")}function gme({draft:d,commands:C,onSubmit:x,agents:H,suggestionsStore:X,suppressSuggestions:Z,markAccepted:ee,sessionEnvVars:re}){let me=Ze(d,KGe),ge=Ze(d,QGe),xe=Ze(d,zGe),Re=d.setValue,Pe=d.setCursorOffset,Ie=d.setMode,{suggestions:Ae,selectedSuggestion:Ne,suggestionType:Ve,hoveredSuggestionId:et,commandArgumentHint:tt,suggestionsEmptyMessage:Ke}=Ze(X),nt=X.setState,{addNotification:ft}=kr(),Yt=
+
+## before-gme-consts @202918553
+{d}${C}`}var UGe=/^@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*/u,ime=/^[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+/u,HGe=/(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$/u,jGe=/[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$/u,$Ge=/[\s\u3002\u3001\uFF1F\uFF01]/u,qGe=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$/u,wQ=/(^|\s)#([a-z0-9][a-z0-9_-]*)$/,TQ=/(^|\s):([a-z0-9_+-]{2,})$/,VGe=/(^|\s):([a-z0-9_+-]+):$/;function GGe(d,C,x){if(C===void 0)return!1;let H=d.length-C.length,X=x-H;return H>0&&X>=0&&d.slice(0,X)+d.slice(x)===C&&/^[a-z0-9_+-]*:$/.test(d.slice(X,x))}var SP=import.meta.require("B:/~BUN/root/chunk-eth9zzn8.js");function Ub(d){return typeof d==="object"&&d!==null&&"type"in d&&(d.type==="directory"||d.type==="file")}function Hb(d,C,x){if(x.length===0)return-1;if(C<0)return 0;let H=d[C];if(!H)return 0;let X=x.findIndex((Z)=>Z.id===H.id);return X>=0?X:0}function ume(d){let C=d.metadata;return C?.sessionId?`/resume ${C.sessionId}`:`/resume ${d.displayText}`}function RN(d,C,x){if(d.suggestionType!==x||d.selectedSuggestion<0)return-1;let H=d.suggestions[d.selectedSuggestion]?.id;return H===void 0?-1:C.findIndex((X)=>X.id===H)}function fme(){return Ra({suggestions:[],selectedSuggestion:-1,suggestionType:"none",hoveredSuggestionId:null,commandArgumentHint:void 0})}var KGe=(d)=>d.value,QGe=(d)=>d.cursorOffset,zGe=(d)=>d.mode;function RQ(d){if(d.isQuoted)return d.token.slice(2).replace(/"$/,"");else if(d.token.startsWith("@"))return d.token.substring(1);else return d.token}function xQ(d){let{displayText:C,mode:x,hasAtPrefix:H,needsQuotes:X,isQuoted:Z,isComplete:ee}=d,re=ee?" ":"";if(Z||X)return x==="bash"?`"${C}"${re}`:`@"${C}"${re}`;else if(H)return x==="bash"?`${C}${re}`:`@${C}${re}`;else return C}function AQ(d,C,x,H,X,Z){let me=C.slice(0,x).lastIndexOf(" ")+1,ge;if(Z==="variable")ge="$"+d.displayText+" ";else if(Z==="command")ge=d.displayText+" ";else ge=d.displayText;let xe=C.slice(0,me)+ge+C.slice(x);H(xe),X(me+ge.length)}var bP=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}\u200C\u200D_-]*)$/u,YGe=5000;function tw(d,C,x,H,X,Z){let ee=C.slice(0,x).match(H);if(!ee||ee.index===void 0)return!1;let re=ee.index+(ee[1]?.length??0),me=C.slice(0,re),ge=me+d.displayText+" "+C.slice(x);return X(ge),Z(me.length+d.displayText.length+1),!0}async function JGe(d,C,x,H,X){if(Kt())return[];try{d.current?.abort();let Z=new AbortController;return d.current=Z,await $de(C,x,H,Z.signal,X)}catch{return s("tengu_shell_completion_failed",{}),[]}}function dme(d,C,x,H,X){let Z=X?"/":" ",ee=d.slice(0,x),re=d.slice(x+H),me="@"+C+Z;return{newInput:ee+me+re,cursorPos:ee.length+me.length}}function ug(d,C,x=!1){if(!d)return null;let H=d.substring(0,C);if(x){let ge=/@"([^"]*)"?$/,xe=H.match(ge);if(xe&&xe.index!==void 0){let Pe=d.substring(C).match(/^[^"]*"?/),Ie=Pe?Pe[0]:"";return{token:xe[0]+Ie,startPos:xe.index,isQuoted:!0}}}if(x){let ge=H.lastIndexOf("@");if(ge>=0&&(ge===0||$Ge.test(H[ge-1]))){let xe=H.substring(ge),Re=xe.match(UGe);if(Re&&Re[0].length===xe.length){let Ie=d.substring(C).match(ime),Ae=Ie?Ie[0]:"";return{token:Re[0]+Ae,startPos:ge,isQuoted:!1}}}}let X=x?HGe:jGe,Z=H.match(X);if(!Z||Z.index===void 0)return null;let re=d.substring(C).match(ime),me=re?re[0]:"";return{token:Z[0]+me,startPos:Z.index,isQuoted:!1}}function mme(d){if(Bb(d)){let C=d.indexOf(" ");if(C===-1)return{commandName:d.slice(1),args:""};return{commandName:d.slice(1,C),args:d.slice(C+1)}}return null}function pme(d,C){return!d&&C.includes(" ")&&!C.endsWith(" ")}function gme({draft:d,commands:C,onSubmit:x,agents:H,suggestionsStore:X,suppress
+
+## lit /(^|\s)@  needle="/(^|\\s)@"  248=1@203072492  247=1@232673743
+## lit new RegExp  needle="new RegExp"  248=618@68493789,68493815,68496867,68497442,68596723,68665929,94641508,99283236,99298802,178370231  247=613@68177186,68177212,68180264,68180839,68280120,68349326,202020420,204351540,204367106,206477697
+## lit [\w-]*)$  needle="[\\w-]*)$"  248=3@223798008,223798117,223798239  247=5@197077774,232523518,250353554,250353663,250353785
+## lit [\p{L}\p{N}  needle="[\\p{L}\\p{N}"  248=52@92414526,92414569,92414614,92414647,92414692,92414806,92415042,93563664,94495745,94495772  247=50@197077298,197077341,197077386,197077419,197077464,197077578,198202308,199335177,199335204,199335216
+## lit [\p{L}\p{M}  needle="[\\p{L}\\p{M}"  248=8@92415129,92415154,100866245,101012716,192636765,193848489,202948512,202948537  247=8@197077837,197077862,205810201,205915380,224156928,225359203,232554809,232554834
+## lit \p{L}\p{N}_-  needle="\\p{L}\\p{N}_-"  248=0@  247=0@
+## lit \p{L}  needle="\\p{L}"  248=106@67392068,67392119,67392570,92414527,92414570,92414615,92414648,92414693,92414807,92415043  247=104@67075565,67075616,67076067,197077299,197077342,197077387,197077420,197077465,197077579,197077832
+## 247 send-message-dot @232530811
+!==ue)return;if(Ve){be({text:Ve.suffix,fullCommand:Ve.fullCommand,insertPosition:ue.length}),v(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1,suggestionType:"none"})),D(void 0);return}else be(void 0)}let qe=m!=="bash"?ue.substring(0,le).match(xD):null;if(qe){let Ne=(qe[2]??"").toLowerCase(),Oe=z.getState(),Ve=[],ae=new Set;if(hr()&&Oe.teamContext)for(let Te of Object.values(Oe.teamContext.teammates??{})){if(Te.name===jm)continue;if(!Te.name.toLowerCase().startsWith(Ne))continue;ae.add(Te.name),Ve.push({id:`dm-${Te.name}`,displayText:`@${Te.name}`,description:"send message"})}for(let[Te,at]of Oe.agentNameRegistry){if(ae.has(Te))continue;if(!Te.toLowerCase().startsWith(Ne))continue;let Ut=Oe.tasks[at]?.status;Ve.push({id:`dm-${Te}`,displayText:`@${Te}`,description:Ut?`send message \xB7 ${Ut}`:"send message"})}if(cN()&&!jt()){let Te=vt.current,at=Te?.value===ue&&Te.partial===Ne?Te.rows:Vwe(Be.current.roster,Ne);if(vt.current={value:ue,partial:Ne,rows:at},Ve.push(...at),Ne!=="")Qt()}if(Ve.length>0){ot.cancel(),tt.cancel(),Ee.current=null,ce.current="",it.current="",xt.cancel();let Te=ze.current===ue;v((at)=>({commandArgumentHint:void 0,suggestions:Ve,selectedSugg
+
+## 247 typeahead-fn name=Jwe i=232524914
+## 247 typeahead-fn-start @232524914
+(e)){let t=e.indexOf(" ");if(t===-1)return{commandName:e.slice(1),args:""};return{commandName:e.slice(1,t),args:e.slice(t+1)}}return null}function Bwe(e,t){return!e&&t.includes(" ")&&!t.endsWith(" ")}function Jwe({draft:e,commands:t,onSubmit:o,agents:n,suggestionsStore:r,suppressSuggestions:s,markAccepted:a,sessionEnvVars:l}){let u=Ot(e,qrt),c=Ot(e,Vrt),m=Ot(e,Grt),d=e.setValue,g=e.setCursorOffset
+
+## 247 at-re-197077772 @197077772
+2,})$...........(^|\s):([a-z0-9_+-]+):$.*....7..(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$..
+.....".[\s\p{Cc}]......5.r.isMisspelled-...[.2.\p{L}[\p{L}\p{M}]*(?:['\u2019][\p{L}\p{M}]+)*...(.....m.(``+)[\s\S]*?(?:\1|$)|`[^`\n]*(?:`|\n|$)O.....(.[\s.,;:!?"'\u2018\u2019\u201c\u201d\u00ab\u00bb()[\]{}<>\u2014\u2013\u2026*_~-]. ...y.
+
+## 247 at-re-232523516 @232523516
+1,c;if(s==="variable")c="$"+e.displayText+" ";else if(s==="command")c=e.displayText+" ";else c=e.displayText;let m=t.slice(0,u)+c+t.slice(o);n(m),r(u+c.length)}var xD=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/,Krt=5000;function iC(e,t,o,n,r,s){let a=t.slice(0,o).match(n);if(!a||a.index===void 0)return!1;let l=a.index+(a[1]?.length??0),u=t.slice(0,l),c=u+e.displayText+" "+t.slice(o);return r(c),s(u.length+e.displayText.length+1),!0}async function Qrt(e,t,o,n,r){if(jt())return[];try{e.current?.abort();let s=new AbortController;return e.current=s,await owe(t,o,n,s.signal,r)}catch{return U("teng
+
+## 247 pL-197077576 @197077576
+$...........[\s\u3002\u3001\uFF1F\uFF01]M....@K.(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$.......[.!.(^|\s)#([a-z0-9][a-z0-9_-]*)$...........(^|\s):([a-z0-9_+-]{2,})$...........(^|\s):([a-z0-9_+-]+):$.*....7..(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$..
+.....".[\s\p{Cc}]......5.r.isMisspelled-...[.2.\p{L}[\p{L}\p{M}]*(?:['\u2019][\p{L}\p{M}]+)
+
+## 247 pL-232521839 @232521839
+\]~:]+/u,Brt=/(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$/u,Urt=/[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$/u,Hrt=/[\s\u3002\u3001\uFF1F\uFF01]/u,jrt=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$/u,hQ=/(^|\s)#([a-z0-9][a-z0-9_-]*)$/,yQ=/(^|\s):([a-z0-9_+-]{2,})$/,$rt=/(^|\s):([a-z0-9_+-]+):$/;function Wrt(e,t,o){if(t===void 0)return!1;let n=e.length-t.length,r=o-n;return n>0&&r>=0&&e.slice(0,r)+e.slice(o)===t&&/^[a-z0-9_+-]*:$/.test(e.slice(r,o))}var TD=(Mwe(),Nr(Ewe));function qy(e){return typeof e==="object"&&e!==null&&"type"in e&&(e.type==="
+
+## fold Dr(jn[2]  needle="Dr(jn[2]"  248=0@  247=0@
+## fold dr(jn[2]  needle="dr(jn[2]"  248=1@202924109  247=0@
+## fold Bn=dr(  needle="Bn=dr("  248=1@202924106  247=0@
+## fold Bn=Dr(  needle="Bn=Dr("  248=0@  247=0@
+## fold .toLowerCase().startsWith(  needle=".toLowerCase().startsWith("  248=47@178965773,178965944,181885752,182317598,182919946,182998664,183876969,183927873,187417702,187417887  247=49@207872162,207872331,208992020,210075316,210945206,211441978,211814580,213581045,213613665,215420395
+## fold Dr(_n.name)  needle="Dr(_n.name)"  248=0@  247=0@
+## fold dr(_n.name)  needle="dr(_n.name)"  248=1@202924269  247=0@
+
+# ---- leftover sites + LAND ----
+when=2026-09-20T07:40:00Z
+verdict=LAND
+host=src/hooks/useTypeahead.tsx + src/utils/dmAtMention.ts
+test=src/utils/__tests__/dmAtMention.248.test.ts
+
+## official unique vs 247
+248 bP @202917073  /(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}\u200C\u200D_-]*)$/u
+247 xD @232523516  /(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/
+248 caller Bn=dr(jn[2]??"") @202924106 ; dr(_n.name).startsWith(Bn) @202924269
+247 caller Ne=(qe[2]??"").toLowerCase() ; name.toLowerCase().startsWith(Ne)
+Ejn @186136100 p=dr(u.name); p.startsWith(t) — t is already-folded Bn (not dr(Bn) at call)
+no isComposing gate on mention list: 248=11 247=11 all web-UI Enter/Escape, not Ink typeahead
+
+## leftover sites checked
+- src/utils/peerAtMention.ts buildPeerMentionTypeahead — ALREADY folds query+name via normalizeSessionNameKey (Ejn+prefolded Bn). PEER_AT_MENTION_RE / isValidPeerMentionName 1:1 NDn/ckt. NOT the 248 unique hole.
+- src/hooks/useTypeahead.tsx DM typeahead — WAS HOST: /(^|\s)@([\w-]*)$/ + toLowerCase. LAND: official bP + dr fold.
+- src/hooks/useTypeahead.tsx hasAt clear + DM_MEMBER_RE apply — same ASCII regex. LAND: share DM_AT_MENTION_RE.
+- src/hooks/useTypeahead.tsx HAS_AT_SYMBOL_RE / AT_TOKEN_HEAD_RE — file-@ unicode (qGe/UGe). leftover already \p{L}. Official qGe CJK punct ===247. not #36 unique. not landed.
+- src/hooks/useTypeahead.tsx extractCompletionToken — leftover /\s/ before @; official $Ge CJK punct ===247. not landed.
+- src/components/PromptInput/PromptInput.tsx:923 highlight /(^|\s)@([\w-]+)/g + exact t.name===name — highlight only, not roster filter.
+- src/screens/fleetView/helpers.ts:811 — fleet templates/routines @(\S*) + toLowerCase. not other-session roster.
+- src/utils/directMemberMessage.ts — /^@([\w-]+)\s/ team DM parse. not typeahead.
+- src/utils/attachments.ts atMentionRegex — file @path:line, not sessions.
+- packages/@ant/ink FuzzyPicker — no mention match.
+- src/ isComposing — 0 hits. official 11 ===247 web UI. Ink typeahead updates every value (official gme same). no composition skip to land.
+- no Hangul/jamo engine invented.
+
+## landed
+src/utils/dmAtMention.ts  DM_AT_MENTION_RE === official bP ; foldDmAtMentionQuery === Bn=dr ; mentionNameMatchesFoldedQuery === dr(name).startsWith(Bn)
+src/hooks/useTypeahead.tsx  match(DM_AT_MENTION_RE); partialName=normalizeSessionNameKey(atMatch[2]); teammate/agent via mentionNameMatchesFoldedQuery; apply/clear same regex
+src/utils/__tests__/dmAtMention.248.test.ts  CJK / combining / NFKC / ZWJ / CJK punct

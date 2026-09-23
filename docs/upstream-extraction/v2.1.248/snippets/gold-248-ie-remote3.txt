@@ -1,0 +1,52 @@
+# gold-248-ie-remote3
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+when=2026-09-20T09:38:30.473Z
+
+## Gu-192115692 @192115692
+function Gu(i){let{state:d,tempo:m}=hh(i.worker_status),w=i.config?.sources?.find((x)=>x.type==="git_repository")?.url,S=i.title??"",h=i.worker_status==="requires_action"?i.external_metadata?.pending_action:void 0,C=i.worker_status==="requires_action"?h?.tool_name===Oi?olt(h.input).text:h?.tool_name===ug?"approve plan":typeof h?.tool_name==="string"&&typeof h.action_description==="string"&&h.action_description!==""?mK(`approve ${typeof h.display_tool_name==="string"&&h.display_tool_name!==""?h.display_tool_name:h.tool_name}: ${h.action_description}`):"awaiting input":void 0;return{state:d,detail:S,tempo:m,needs:C,output:null,children:null,linkScanOffset:0,template:"remote",respawnFlags:[],name:S||void 0,intent:S||i.id,sessionId:i.id,cwd:w??"remote",originCwd:w??"remote",createdAt:i.created_at,updatedAt:i.last_event_at??i.created_at,firstTerminalAt:null,backend:"remote"}}function Vu(i,d){let m=new Set(d.map((h)=>mr(h.state.sessionId))),w=i.filter((h)=>h.id.startsWith("remote-pending-")&&!m.has(mr(h.state.sessionId))),S=[...d,...w];return i.length===S.length&&i.every((h,C)=>h.id===S[C].id&&h.activity===S[C].activity&&gh(h.state,S[C].state))?i:S}function gh(i,d){let m=Object.keys(i);if(m.length!==Object.keys(d).length)return!1;return m.every((w)=>{let S=i[w],h=d[w];if(S===h)return!0;return typeof S==="object"&&typeof h==="object"&&S!==null&&h!==null&&Bun.deepEquals(S,h)})}function
+
+## Vu-192116575 @192116575
+function Vu(i,d){let m=new Set(d.map((h)=>mr(h.state.sessionId))),w=i.filter((h)=>h.id.startsWith("remote-pending-")&&!m.has(mr(h.state.sessionId))),S=[...d,...w];return i.length===S.length&&i.every((h,C)=>h.id===S[C].id&&h.activity===S[C].activity&&gh(h.state,S[C].state))?i:S}function gh(i,d){let m=Object.keys(i);if(m.length!==Object.keys(d).length)return!1;return m.every((w)=>{let S=i[w],h=d[w];if(S===h)return!0;return typeof S==="object"&&typeof h==="object"&&S!==null&&h!==null&&Bun.deepEquals(S,h)})}function hh(i){switch(i){case"requires_action":return{state:"blocked",tempo:"blocked"};case"idle":return{state:"done",tempo:"idle"};default:return{state:"working",tempo:"active"}}}var bh=200;
+
+## Hu-192115650 @192115620
+ve as Ty}from"path";function Nu(){return!1}async function Hu(){return[]}function Gu(i){let{state:d,tempo:m}=hh(i.worker_status),w=i.config?.sources?.find((x)=>x.type==="git_repository")?.url,S=i.title
+
+## hh-near-Gu @192115200
+m"B:/~BUN/root/chunk-pb5fay4v.js";import{Xi,QO,n4}from"B:/~BUN/root/chunk-zeddfnwe.js";import{ie}from"B:/~BUN/root/chunk-ye4jj2gn.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{$i,Ym}from"B:/~BUN/root/chunk-36v26nmg.js";import{p}from"B:/~BUN/root/chunk-n4vhwd20.js";import{randomUUID as ru}from"crypto";import{resolve as Ty}from"path";function Nu(){return!1}async function Hu(){return[]}function
+
+## Hu @192115650
+len=13 sha=8fcbf31de3b584b5
+u(){return!1}
+
+## Gu @192115692
+len=883 sha=48de2b5e188bbd80
+function Gu(i){let{state:d,tempo:m}=hh(i.worker_status),w=i.config?.sources?.find((x)=>x.type==="git_repository")?.url,S=i.title??"",h=i.worker_status==="requires_action"?i.external_metadata?.pending_action:void 0,C=i.worker_status==="requires_action"?h?.tool_name===Oi?olt(h.input).text:h?.tool_name===ug?"approve plan":typeof h?.tool_name==="string"&&typeof h.action_description==="string"&&h.action_description!==""?mK(`approve ${typeof h.display_tool_name==="string"&&h.display_tool_name!==""?h.display_tool_name:h.tool_name}: ${h.action_description}`):"awaiting input":void 0;return{state:d,detail:S,tempo:m,needs:C,output:null,children:null,linkScanOffset:0,template:"remote",respawnFlags:[],name:S||void 0,intent:S||i.id,sessionId:i.id,cwd:w??"remote",originCwd:w??"remote",createdAt:i.created_at,updatedAt:i.last_event_at??i.created_at,firstTerminalAt:null,backend:"remote"}}
+
+## Vu @192116575
+len=278 sha=f8e4d1413d50f705
+function Vu(i,d){let m=new Set(d.map((h)=>mr(h.state.sessionId))),w=i.filter((h)=>h.id.startsWith("remote-pending-")&&!m.has(mr(h.state.sessionId))),S=[...d,...w];return i.length===S.length&&i.every((h,C)=>h.id===S[C].id&&h.activity===S[C].activity&&gh(h.state,S[C].state))?i:S}
+
+## WKe @179877053
+len=46 sha=6c0dd6b25bc80e00
+function WKe(e){return`remote-${e.slice(-8)}`}
+
+## Nu @192115620
+len=43 sha=5eef8157497272a6
+ve as Ty}from"path";function Nu(){return!1}
+
+## function w8( hits=3 @184741407,190519785,222357761
+## w8 @184741407
+len=68 sha=54b14b4d8ef60074
+function w8(e){return typeof e?.key==="string"?void 0:"takes a key"}
+
+## w8 @190519785
+len=135 sha=d6f7a264a06acaed
+function w8(r,i,l){let d=!1,f,h=()=>{if(d)return;try{i()}finally{if(!d)f=r.setTimeout(h,l)}};return f=r.setTimeout(h,l),()=>{d=!0,f()}}
+
+## w8 @222357761
+len=40 sha=e0605a31bb2ac6f5
+function w8(e){return e=sf(e),e.tag=3,e}
+
+## Th=30000 @192129961
+## Th-window @192129961
+{return[...i].sort((d,m)=>Hi(d.state)-Hi(m.state))}var pc=120000,fc=2000,Ah=500,Th=30000;var mc=30000;function Dh(){return{listJobs:(i)=>Rg(void 0,i),listAliveD

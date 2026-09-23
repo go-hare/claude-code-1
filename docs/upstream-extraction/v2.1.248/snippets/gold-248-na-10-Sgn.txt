@@ -1,0 +1,14 @@
+# gold-248-na-10-Sgn  desktop-host entrypoint set (unique in cleanup import)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+set=179726935
+start=179727060
+
+len=64 sha=e573c35252c6e6e4
+var r=new Set(["claude-desktop","claude-desktop-3p","local-agent"]);
+function Sgn(e){return r.has(e==="local_agent"?"local-agent":e)}
+
+# callers in Ior skipIf @191908789
+S=BY(C,"entrypoint"),O=i4t(T,"entrypoint");if(!(S!==void 0&&Sgn(S)||O!==void 0&&Sgn(O)))return!1
+
+# sibling _d (env, not the jsonl reader)
+function _d(){let e=a.CLAUDE_CODE_ENTRYPOINT;return e!==void 0&&r.has(e)}

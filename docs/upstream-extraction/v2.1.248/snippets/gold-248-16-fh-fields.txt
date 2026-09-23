@@ -1,0 +1,268 @@
+# gold-248-16-fh-fields
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T08:49:03.841Z
+
+Official Fh leftover-missing fields: how gc.load / #O / #P / rp / Ss use them.
+
+## hits function lo(
+all=31 nearFleet=182042637,182555693,187893462,190949143,192125206
+## function lo( @182042637
+len=24 sha=e5936366d70c7b74
+function lo(e){return e}
+
+## hits function ac(
+all=12 nearFleet=182609247,189104248,191242578,192126408
+## function ac( @182609247
+len=65 sha=c977332f340024aa
+function ac(e,t){return Um("sha256",e).update(t,"utf8").digest()}
+
+## hits function Ir(
+all=27 nearFleet=183220530,183683662,186904016,187807675,189253799,189466976,190749970,192126376
+## function Ir( @183220530
+len=788 sha=bb137b361db1fb7a
+function Ir(e,t,r){let d=(k)=>typeof k==="string",u=new Set(e.filter(d)),o=[],g=[...u];for(let k=0;g.length>0;k+=1){if(k===Pt||u.size>Ft)return{unbounded:!0};if(g.some((O)=>O.includes("\uFFFD")))return{notText:!0};let p=await r(g);if(p!==void 0)return p===null?null:{contributes:p};let E=await Promise.all(g.map((O)=>yr(O).then((N)=>N.isFile()?O:null,(N)=>{let I=T(N);return I==="ENOENT"||I==="ENOTDIR"?null:void 0})));if(E.includes(void 0))return null;let w=await Promise.all(E.filter(d).map(t));if(w.some((O)=>O===null))return null;if(w.some((O)=>O!==null&&("unexpandable"in O)))return{unexpandable:!0};let R=w.filter((O)=>O!==null&&("keys"in O));o.push(...R.flatMap((O)=>O.keys)),g=se(R.flatMap((O)=>O.targets).filter(d)).filter((O)=>!u.has(O)),g.forEach((O)=>u.add(O))}return{keys:o}}
+
+## hits function Ji(
+all=14 nearFleet=182401619,187877806,191014826,192125844
+## function Ji( @182401619
+len=830 sha=257fd6c23ace2ce7
+function Ji(e,t,r){var o;if(FM(e,t,r))return;if(t==null||Array.isArray(t)||typeof t!="object")throw Error(`cannot decode ${e.desc} from JSON: ${(0,fr.formatVal)(t)}`);let u=new Map;for(let[p,E]of Object.entries(t)){let I=CM(e.desc,p);if(I){if(I.oneof){if(E===null&&I.fieldKind=="scalar")continue;let v=u.get(I.oneof);if(v!==void 0)throw new hs.FieldError(I.oneof,`oneof set multiple times by ${v.name} and ${I.name}`);u.set(I.oneof,I)}yE(e,I,E,r)}else{let v=void 0;if(p.startsWith("[")&&p.endsWith("]")&&(v=(o=r.registry)===null||o===void 0?void 0:o.getExtension(p.substring(1,p.length-1)))&&v.extendee.typeName===e.desc.typeName){let[N,O,C]=(0,gE.createExtensionContainer)(v);yE(N,O,E,r),(0,gE.setExtension)(e.message,v,C())}if(!v&&!r.ignoreUnknownFields)throw Error(`cannot decode ${e.desc} from JSON: key "${p}" is unknown`)}}}
+
+## hits function $ye(
+all=3 nearFleet=182998628,184749994
+## function $ye( @182998628
+len=114 sha=3e7b9a4993a8c170
+function $ye(e){let t=(r)=>r?.trim().toLowerCase().startsWith("/loop")??!1;return t(e.intent)||t(e.initialPrompt)}
+
+## hits function sS(
+all=4 nearFleet=182998228,184212853
+## function sS( @182998228
+len=69 sha=ed50611b3cf052f2
+function sS(e){return e.template==="exec"&&e.respawnFlags.length===0}
+
+## hits function zu(
+all=15 nearFleet=182209258,182668681,189268864,192120270
+## function zu( @182209258
+len=389 sha=db1368201bdab764
+function zu(e,t){var a=H(),r=H(),i=H(),s=H(),n=H(),o=H(),f=H();if(Lt(e[2],Xr),Yu(e[1],t),Mt(i,e[1]),fe(s,i,Fu),ar(i,i,e[2]),rr(s,e[2],s),Mt(n,s),Mt(o,n),fe(f,o,n),fe(a,f,i),fe(a,a,s),Xu(a,a),fe(a,a,i),fe(a,a,s),fe(a,a,s),fe(e[0],a,s),Mt(r,e[0]),fe(r,r,s),Yn(r,i))fe(e[0],e[0],qu);if(Mt(r,e[0]),fe(r,r,s),Yn(r,i))return-1;if(Zn(e[0])===t[31]>>7)ar(e[0],Xa,e[0]);return fe(e[3],e[0],e[1]),0}
+
+## hits function hn(
+all=41 nearFleet=183141246,183195360,183681217,187866957,189245283,189612903,190059306,190436768
+## function hn( @183141246
+len=146 sha=cb6ab9a0becea105
+function hn(e){let n={};for(let t of e)try{let i=be(t)?.env;if(i){for(let[r,o]of Object.entries(i))if(typeof o==="string")n[r]=o}}catch{}return n}
+
+## hits function zc(
+all=14 nearFleet=182360805,182880908,192171330
+## function zc( @182360805
+len=304 sha=62871131de637687
+function zc(e,t,r){var o;for(let u of r.sortedFields){if(!r.isSet(u)){if(u.presence==LL)throw Error(`cannot encode ${u} to binary: required field not set`);continue}M_(e,t,r,u)}if(t.writeUnknownFields)for(let{no:u,wireType:p,data:E}of(o=r.getUnknown())!==null&&o!==void 0?o:[])e.tag(u,p).raw(E);return e}
+
+## hits function Cf(
+all=8 nearFleet=182409207,182998017,185647268
+## function Cf( @182409207
+len=581 sha=66b896cd0c6c6c18
+function Cf(e,t){switch(typeof t){case"number":e.kind={case:"numberValue",value:t};break;case"string":e.kind={case:"stringValue",value:t};break;case"boolean":e.kind={case:"boolValue",value:t};break;case"object":if(t===null)e.kind={case:"nullValue",value:Ws.NullValue.NULL_VALUE};else if(Array.isArray(t)){let r=(0,ul.create)(Ws.ListValueSchema);vE(r,t),e.kind={case:"listValue",value:r}}else{let r=(0,ul.create)(Ws.StructSchema);AE(r,t),e.kind={case:"structValue",value:r}}break;default:throw Error(`cannot decode message ${e.$typeName} from JSON ${(0,fr.formatVal)(t)}`)}return e}
+
+## hits function Ih(
+all=6 nearFleet=182663643,189315358,192123625
+## function Ih( @182663643
+MISS {"i":182663643,"missEnd":true,"preview":"function Ih(e){let{command:t,commandId:r,needsNetworkRestriction:o,httpSocketPath:u,socksSocketPath:p,httpProxyPort:E,socksProxyPort:I,proxyAuthToken:v,caCertPath:N,readConfig:O,writeConfig:C,unsetEnvVars:U,setEnvVars:F,maskedFileBinds:V,maskedFileStoreDir:q,enableWeakerNestedSan"}
+
+## hits async function ic(
+all=2 nearFleet=192124455
+## async function ic( @192124455
+len=187 sha=de2bf03ceb9ad8e4
+async function ic(i,d){try{let{content:m}=await Qu(Mi(i.state),16384,d),w=m.split(`
+`).map(Ih).filter((h)=>h!==null);return(w.filter((h,C)=>h!==w[C-1]).at(-1)??"").trim()}catch{return""}}
+
+## hits async function Fi(
+all=3 nearFleet=192121034
+## async function Fi( @192121034
+len=387 sha=0dca3a02c2c15dc3
+async function Fi(i,d){let m=oc(i,d);if(m!==void 0){let S=await m.backend.statMeta(m.key);if(S.ok)return{kind:"present",mtimeMs:S.value.mtimeMs};let h=S.error;if(h.code==="NotFound")return{kind:"absent"};let C="telemetryCode"in h?h.telemetryCode:void 0;return C==="ELOOP"||C==="ENXIO"?{kind:"refused"}:{kind:"unreadable",code:h.code}}return{kind:"present",mtimeMs:(await Sh(i)).mtimeMs}}
+
+## hits async function ec(
+all=2 nearFleet=192122009
+## async function ec( @192122009
+len=1501 sha=15710cad5f27b728
+async function ec(i,d){let{scanStates:m,inFlightScans:w}=i;if(w.has(d))return null;w.add(d);try{let S=await kh(d,"r");try{let{size:h,ino:C}=await S.stat(),x=m.get(d);if(x&&(x.ino!==C||x.offset>h))x=void 0;if(x&&x.tail.length>0){let K=Buffer.alloc(x.tail.length),{bytesRead:W}=await S.read(K,0,K.length,x.offset-K.length);if(W!==K.length||!K.equals(x.tail))x=void 0}if(!x)x={ino:C,offset:0,tail:Buffer.alloc(0),count:0,recent:[]},m.set(d,x);if(h>x.offset){let K=x.count,W=x.recent.slice(),Y=Buffer.alloc(Math.min(Rh,h-x.offset)),Z=null,ee=x.offset,X=x.offset,Q=x.tail;while(ee<h){let{bytesRead:le}=await S.read(Y,0,Math.min(Y.length,h-ee),ee);if(le<=0)break;let ye=Y.subarray(0,le),xe=Z?Z.length:0,me=Z?Buffer.concat([Z,ye]):ye,be=0,Te=me.indexOf(10,xe);while(Te!==-1){let ge=me.toString("utf-8",be,Te);if(ge.includes(_h)){let de=ge.match(Eh),re=de?Date.parse(de[1]):NaN;if(Number.isFinite(re)){if(K++,W.push(re),W.length>vh)W.shift()}}be=Te+1,Te=me.indexOf(10,be)}if(X+=be,ee+=le,be>=ba)Q=Buffer.from(me.subarray(be-ba,be));else if(be>0){let ge=Buffer.concat([Q,me.subarray(0,be)]);Q=ge.subarray(Math.max(0,ge.length-ba))}Z=be<me.length?Buffer.from(me.subarray(be)):null}if(X>x.offset)x.offset=X,x.count=K,x.recent=W,x.tail=Q}let{count:A,recent:F}=x;if(F.length<2)return{count:A,nextAt:null};let T=[];for(let K=1;K<F.length;K++)T.push(F[K]-F[K-1]);T.sort((K,W)=>K-W);let P=T[Math.floor(T.length/2)],V=F.at(-1)+P;return{count:A,nextAt:V>Date.now()?V:null}}finally{await S.close()}}finally{w.delete(d)}}
+
+## hits function Xu(
+all=14 nearFleet=182209726,189301149,192121946
+## function Xu( @182209726
+len=129 sha=c1dec7f2eb35b392
+function Xu(e,t){var a=H(),r;for(r=0;r<16;++r)a[r]=t[r];for(r=250;r>=0;--r)if(Mt(a,a),r!==1)fe(a,a,t);for(r=0;r<16;++r)e[r]=a[r]}
+
+## hits function nc(
+all=13 nearFleet=182597156,185492975,189100352,189317128,192123510
+## function nc( @182597156
+len=864 sha=d63a02989c121f6c
+function nc(e,t,r,o,u,p){let E=t.method??"GET",I,v=t,N=Boolean(t.headers["content-length"]||t.headers["transfer-encoding"]),O=Au.has(E);if(!O||N){let F=new Cv;F.on("error",()=>{}),t.pipe(F);let V=wm.toWeb(F),[q,j]=V.tee();I=q,v=wm.fromWeb(j);let ee=v;ee.on("error",()=>{}),t.on("error",(ie)=>{F.end(),ee.destroy(ie)})}let C;try{let F=I&&!O?{body:I,duplex:"half"}:{};C=new Request(o,{method:E,headers:Ov(t),signal:u,...F})}catch(F){let V=`malformed request: ${F.message}`;if(p?.(E,o,V),Am(r,{action:"deny",reason:V}),I?.cancel().catch(()=>{}),v.destroy(),v!==t)Im(t,r);return null}let U;try{U=await e(C)}catch(F){U={action:"deny",reason:`sandbox policy check failed: ${F.message}`}}if(I&&!C.bodyUsed)I.cancel().catch(()=>{});if(U.action==="allow")return G(`[request-filter] allow ${E} ${o}`),v;if(p?.(E,o,U.reason??vm),Am(r,U),v.destroy(),v!==t)Im(t,r);return null}
+
+## hits function Li(
+all=22 nearFleet=182027602,182686326,187862390,189238537,189941394,190189833,190939300,191246307
+## function Li( @182027602
+len=627 sha=3957b1f5698077fb
+function Li(e,t,a){var r,i,s,n,o,f,u,l,c,y,m,g,S,T,A,_=a.length();while(_>=64){for(u=0;u<16;++u)t[u]=a.getInt32();for(;u<64;++u)r=t[u-2],r=(r>>>17|r<<15)^(r>>>19|r<<13)^r>>>10,i=t[u-15],i=(i>>>7|i<<25)^(i>>>18|i<<14)^i>>>3,t[u]=r+t[u-7]+i+t[u-16]|0;l=e.h0,c=e.h1,y=e.h2,m=e.h3,g=e.h4,S=e.h5,T=e.h6,A=e.h7;for(u=0;u<64;++u)n=(g>>>6|g<<26)^(g>>>11|g<<21)^(g>>>25|g<<7),o=T^g&(S^T),s=(l>>>2|l<<30)^(l>>>13|l<<19)^(l>>>22|l<<10),f=l&c|y&(l^c),r=A+n+o+Ui[u]+t[u],i=s+f,A=T,T=S,S=g,g=m+r>>>0,m=y,y=c,c=l,l=r+i>>>0;e.h0=e.h0+l|0,e.h1=e.h1+c|0,e.h2=e.h2+y|0,e.h3=e.h3+m|0,e.h4=e.h4+g|0,e.h5=e.h5+S|0,e.h6=e.h6+T|0,e.h7=e.h7+A|0,_-=64}}
+
+## noteDeleteRefusal hits=3
+## noteDeleteRefusal @92718324
+Id......`...resumePickerRefusedAt........v..holdJob.
+.......optimistic......F...noteDeleteRefusal.......b...reload..
+....Ne.loadRemote......p...setError....3...setHint.......9.noteMintedPaste.......s.pruneOrphanedPastes.........setExitPending..........approve plan...."9..awaiting input......[...exte
+
+## noteDeleteRefusal @192134203
+(let S of this.#l.get(d)??[])this.#g.delete(S);this.#l.delete(d)}w?.()}:void 0};noteDeleteRefusal=(i,d)=>{this.#p("deleteRefusals",(m)=>{if((m.get(i)??null)===d)return m;let w=new Map(m);if(d===null)w.delete(i);else w.set(i,d);return w})};updateJobs(i){this.#p("jobs",i)}updateAdoptedPeers(i){this.#p
+
+## noteDeleteRefusal @192273506
+h.min(mu,Go.length-1)],Wg=G(()=>cp(Q.reload,(H)=>{re.followId=H},Q.optimistic,Q.noteDeleteRefusal,T),[Q,re,T]);k(()=>{n("[PERF:bg-remount-end]"),b("screen_fleet_view")},[]);let Qs=U(()=>_c(Ne,Q,{jobs:le,pendings:be,adoptedPeers:ye,remoteJobs:nt,remoteListLoaded:me}),[Ne,Q,le,be,ye,nt,me]);k(()=>{Qs(
+
+## deleteRefusals hits=5 offs=92720572,192130887,192134238,192138356,192204991
+## deleteRefusals @92720572
+.]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the original
+.....).focusedIdx.......i.hoverFocusIdx...	...`.[.collapsed.......
+
+## deleteRefusals @192130887
+rs:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();#k=null;c
+
+## deleteRefusals @192134238
+delete(d)}w?.()}:void 0};noteDeleteRefusal=(i,d)=>{this.#p("deleteRefusals",(m)=>{if((m.get(i)??null)===d)return m;let w=new Map(m);if(d===null)w.delete(i);else w.set(i,d);return w})};updateJobs(i){this.#p("jobs",i)}updateAdoptedPeers(i){this.#p("adoptedPeers",i)}updateRemoteJobs(i){this.#p("remoteJ
+
+## deleteRefusals @192138356
+ks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.listAllLiveSessions(this.#n).then((i)=>{let d=new Map,m=new Map;for(let h of i){if(h.kind==="interactive"&&
+
+## deleteRefusals @192204991
+nOpening:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTargetGroup:sf,hasMultipleOrigins:af,focusedGroup:lf,groupCounts:df,earlierVis
+
+## overlaidLoadLanded hits=6 offs=92720596,192130910,192132577,192132686,192135847,192267120
+## overlaidLoadLanded @92720596
+prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the original
+.....).focusedIdx.......i.hoverFocusIdx...	...`.[.collapsed...........capExpanded.........attachingJobId......e.".newSessionOpenin
+
+## overlaidLoadLanded @192130910
+new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();#k=null;constructor(i){this.#n=i?.storageV5,this.#e={...Dh(),...i?.clien
+
+## overlaidLoadLanded @192132577
+)):i.remoteJobs;if(i.pendings.length>0||d!==i.remoteJobs||i.remoteListLoaded||i.overlaidLoadLanded)this.#t={...i,pendings:i.pendings.length>0?[]:i.pendings,remoteJobs:d,remoteListLoaded:!1,overlaidLoadLanded:!1},this.#a.emit()}get jobs(){return this.#t.jobs}isDeleting(i){return this.#m.has(i)}isDeletingSession(i){return this.#g.has(i)}isHolding(i){return thi
+
+## overlaidLoadLanded @192132686
+..i,pendings:i.pendings.length>0?[]:i.pendings,remoteJobs:d,remoteListLoaded:!1,overlaidLoadLanded:!1},this.#a.emit()}get jobs(){return this.#t.jobs}isDeleting(i){return this.#m.has(i)}isDeletingSession(i){return this.#g.has(i)}isHolding(i){return this.#c.has(i)}isArchiving(i){return this.#w.has(i)}liveStatus(i){let{sessionId:d,resumeSessionId:m}=i.state;if(
+
+## overlaidLoadLanded @192135847
+ate,this.#t.prStatuses)}));if(i<=this.#u)return;if(this.#u=i,this.#r>0)this.#p("overlaidLoadLanded",()=>!0);this.updateJobs((P)=>{let V=P&&this.#c.size>0?new Map(P.filter((W)=>this.#c.has(W.id)).map((W)=>[W.id,W])):null,K=hn(V?w.map((W)=>V.get(W.id)??W):w);if(P&&P.length===K.length&&P.every((W,Y)=>W.id===K[Y].id&&W.state.updatedAt===K[Y].state.updatedAt&&W.s
+
+## overlaidLoadLanded @192267120
+ers:ye,remoteJobs:xe,remoteListLoaded:me,pendings:be,prStatuses:Te,loopKicks:ge,overlaidLoadLanded:de}=Ze(Q),[re]=u(()=>Wi(X,Q,T)),{focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt}=Ze(re),Me=!1,[he]=u(()=>og(X,Me)),{groupMode:et,activeTab:ut,groupEdit:Ie,resumePicker:Fe,renaming:Ve,previewOpen:We,helpOpen:ze,debugOpen:lt}=Ze(he),[yt]=u(()=>Ui(X)),
+
+## logTails hits=4 offs=92720556,192130875,192136466,192204979
+## logTails @92720556
+prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the original
+.....).focu
+
+## logTails @192130875
+ap,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Ma
+
+## logTails @192136466
+s.#e.readLogTail(P,this.#n)]));this.#p("logTails",(P)=>{let V=Object.fromEntries(h),K=Object.keys(P);if(K.length===h.length&&K.every((W)=>P[W]===V[W]))return P;return V});let C=w.filter((P)=>$ye(P.state));if(C.length>0){let V=(await Promise
+
+## logTails @192204979
+:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTargetGroup:sf,hasMultiple
+
+## loopKicks hits=9 offs=92720536,192130857,192136901,192137129,192138289,192178323,192204966,192267107,192274896
+## loopKicks @92720536
+inalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the 
+
+## loopKicks @192130857
+minalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#
+
+## loopKicks @192136901
+!==null).filter(([K,W])=>{let Y=this.#t.loopKicks.get(K);return!Y||Y.mtimeMs!==W});if(V.length>0){let K=await Promise.all(V.map(async([W,Y,Z])=>{try{let ee=await this.#e.scanLoopTranscript(this.#_,Z);return ee?[W,{mtimeMs:Y,...ee}]:null}cat
+
+## loopKicks @192137129
+e}]:null}catch{return null}}));this.#p("loopKicks",(W)=>{let Y=!1,Z=new Map(W);for(let ee of K)if(ee)Z.set(ee[0],ee[1]),Y=!0;return Y?Z:W})}}let x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.f
+
+## loopKicks @192138289
+te.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.
+
+## loopKicks @192178323
+eStatus:h,heldInTerminal:C,loopJobIds:x,loopKicks:A,focusedIdx:F,hoverFocusIdx:T,collapsed:P,capExpanded:V,groupMode:K,activeTab:W,query:Y,mode:Z,dispatch:ee,linkMatchId:X,dispatchRepoCwd:Q,pendingDelete:le,earlierEntries:ye,cwdFilter:xe,in
+
+## loopKicks @192204966
+essionOpening:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTargetGroup:s
+
+## loopKicks @192267107
+ListLoaded:me,pendings:be,prStatuses:Te,loopKicks:ge,overlaidLoadLanded:de}=Ze(Q),[re]=u(()=>Wi(X,Q,T)),{focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt}=Ze(re),Me=!1,[he]=u(()=>og(X,Me)),{groupMode:et,activeTab:ut,groupEdit:Ie,r
+
+## loopKicks @192274896
+minalHolderOf(H)!==void 0,loopJobIds:ku,loopKicks:ge,focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt,groupMode:et,activeTab:ut,query:Xe,mode:Mt,dispatch:Tn,linkMatchId:Xo,dispatchRepoCwd:An,pendingDelete:zt,earlierEntries:so,cwdF
+
+## updatePendings hits=7
+## updatePendings @92714224
+dPeers........l.updateRemoteJobs.....vW.updatePendings......C.i.seedJobs........settleLandedPendings.....u..kick....."..watchPendingJobDir..
+....O<.stopRemote......I..archiveRemote...
+.....i.navigateTo.......,..hoverTo.
+
+## updatePendings @192134486
+teRemoteJobs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}se
+
+## updatePendings @192135058
+,this.#C(()=>this.#h.delete(w),mc)}this.updatePendings((m)=>m.filter((w)=>!d.has(w.id)))}kick(i,d){let m={kickedAt:Date.now(),jobId:d};return this.#b.set(i,m),this.#C(()=>{if(this.#b.get(i)===m)this.#b.delete(i),this.#p(
+
+## updatePendings @192163434
+je,originCwd:je}),activity:"flowing"};w.updatePendings((Se)=>[...Se,Ut]);let Je=Lt,eo=m.getSnapshot().mode,io=S.savedFocusJobId,Re=S.followOrigin;S.savedFocusJobId=null,S.followOrigin=null,m.setQuery(""),m.setMode("promp
+
+## updatePendings @192163766
+s({pruneTextPastes:!0});let Oe=(Se)=>{w.updatePendings((Ye)=>{let pt=Ye.filter((Gt)=>Gt.id!==mt);if(!m.getSnapshot().query&&pt.length===0)m.mergeRestoredPastes(vt),S.savedFocusJobId=io,S.followOrigin=Re,m.setMode(eo),Ct(
+
+## updatePendings @192164445
+{...Ut.state,sessionId:Se.sessionId}},w.updatePendings((Ye)=>Ye.map((pt)=>pt.id===mt?Ut:pt));if(St)w.kick(Se.sessionId,Se.jobId);if(Qt){let Ye=!1;if(_e((pt)=>{let Gt=Date.now(),ce=pt.agentLastUsed?.[Qt];if(ce!==void 0&&G
+
+## updatePendings @192187466
+,state:Y,activity:Oo(Y)};h.followId=K,S.updatePendings((ee)=>[...ee,Z]),cs(i,Z)}function cs(i,d){let{editor:m,roster:w,view:S,attach:h,deleteConfirm:C,storageV5:x,onAction:A,pendings:F}=i,T=m.setError,P=performance.now()
+
+## liveStatus( hits=4
+## liveStatus( @192132906
+turn this.#w.has(i)}liveStatus(i){let{sessionId:d,resumeSessionId:m}=i.state;if(sS(i.state))return i.state.tempo==="active"?"busy":void 0;if(i.state.backend==="remote")return i.state.tempo==="active"?"busy":i.state.tempo
+
+## liveStatus( @192205557
+0]!==or)qb=(gC)=>or.liveStatus(gC),ho[0]=or,ho[1]=qb;else qb=ho[1];let xs=qb,gf=jb.setError,zb;if(ho[2]!==qr)zb=(hC)=>Ko(qr,hC),ho[2]=qr,ho[3]=zb;else zb=ho[3];let hf=zb,Yb;if(ho[4]!==qr)Yb=(bC)=>`header:${qr}:${bC}`,ho[
+
+## liveStatus( @192235129
+0]!==lr)Ww=(zx)=>lr.liveStatus(zx),pr[0]=lr,pr[1]=Ww;else Ww=pr[1];let wm=Ww,ym=Kx,Uw;if(pr[2]!==Dt||pr[3]!==pm)Uw=Dt?.state.children?Gn(Dt.state.children,pm):[],pr[2]=Dt,pr[3]=pm,pr[4]=Uw;else Uw=pr[4];let Sm=Uw,Kw;if(p
+
+## liveStatus( @192273933
+Remote()},Su=(H)=>Q.liveStatus(H),Ug=Po()&&R("tengu_fleetview_peers",!1),[,Kg]=u(0),Xs=Date.now(),ku=G(()=>new Set((le??[]).filter((H)=>$ye(H.state)).map((H)=>H.id)),[le]),$g=(le??[]).some((H)=>{if(!ku.has(H.id))return!1
+
+## needle "logTail:" all=2 fleet=192197050,192213296
+## logTail: @192197050
+x})]})}function Ss(mE){let oo=g(66),{job:ht,isFocused:co,focusFg:rl,isOrigin:po,logTail:bE,status:il,cols:Ao,showVerb:wp,loopKickCount:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,il,qn),{color:l
+
+## needle "deleteRefused:" all=2 fleet=192197171,192214038
+## deleteRefused: @192197171
+loopKickCount:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,il,qn),{color:ll,dim:yE}=Ur,$r=il==="busy"?ll:Na(ll,Sp),SE=$r===ll&&yE,vp=$o==="armed"?void 0:To?.justKilled?xY:$o?void 0:Wn(ht.state,qn
+
+## needle "loopKickCount:" all=2 fleet=192197091,192213397
+## loopKickCount: @192197091
+ht,isFocused:co,focusFg:rl,isOrigin:po,logTail:bE,status:il,cols:Ao,showVerb:wp,loopKickCount:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,il,qn),{color:ll,dim:yE}=Ur,$r=il==="busy"?ll:Na(ll,Sp),
+
+## needle "not deleted" all=5 fleet=192193144,192200861
+## not deleted @192193144
+urn w(h.id,`worktree ${K}`),`Worktree kept at ${A} \u2014 ${K}; the session was not deleted`}if(P)return`Worktree directory left at ${P} \u2014 git no longer recognized it; the session was deleted`}}]}N();import{basename as Py}from"path";N();function pp(i){let[d,m]=u([]);k(()=>{if(Kt()||_t())return;if(!cle())return;let w=!1;return Q$t().then(async(S)=>{if(w||!S)return;let h={type:S.url.startsWith(
+
+## needle "remoteListLoaded" all=9 fleet=192130765,192132557,192132666,192140618,192140740,192149189,192267061,192273671
+## remoteListLoaded @192130765
+e:(i,d)=>Din(i,d)}}function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new M
+
+## needle "adoptedPeers" all=8 fleet=192130735,192134425,192149161,192178228,192267031,192273641,192274761
+## adoptedPeers @192130735
+eat:(i)=>Tmn(i),watchJobDirOnce:(i,d)=>Din(i,d)}}function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0
+
+## #p("statuses" hits=2
+## #p statuses @192135235
+is.#b.get(i)===m)this.#b.delete(i),this.#p("statuses",(w)=>new Map(w))},mc),()=>{if(this.#b.get(i)===m)this.#b.delete(i)}}watchPendingJobDir(i){this.#k?.(),this.#k=this.#e.watchJobDirOnce(i,()=>void this.load())}reload=()=>{this.load()};loa
+
+## #p statuses @192139136
+kickedAt)this.#b.delete(h),S=!0}if(this.#p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_peers

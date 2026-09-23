@@ -1,0 +1,284 @@
+# gold-248-wKn-v-seed helpers pass2
+
+## window before W
+rimeCanonicalRootOwnerUids(e.root,e.uids))n("settingsPrime: ownership of the local settings root read ahead through the backend")}function S(t){if(t.status==="rejected")throw t.reason;return t.value}function W(t,e,s){if(
+
+## "function S(" hits=120
+@179535230 dist=69
+sha=f281bde93050545b len=69
+function S(t){if(t.status==="rejected")throw t.reason;return t.value}
+
+@179472558 dist=62741
+sha=e420215c7772bd20 len=76
+function S(t,e){if(D()&&e!==void 0)return(await Kg(t)).content;return a0(t)}
+
+@179646137 dist=110838
+sha=348878ab75d3284e len=163
+function S(e,r,t){let o=e.indexOf(r);if(o===-1)return e;let n=r.length,i=0,c="";do c+=e.slice(i,o)+r+t,i=o+n,o=e.indexOf(r,i);while(o!==-1);return c+=e.slice(i),c}
+
+@179652656 dist=117357
+sha=35a7d32e3be7f33d len=365
+function S(e){let{X509Certificate:r}=ee("crypto"),t=Date.now(),s=0,d=e.filter((l)=>{try{let C=new r(l),o=new Date(C.validTo).getTime();if(Number.isNaN(o)||o>t)return!0;return s++,!1}catch{return!0}});if(s>0){if(n(`CA certs: Dropped ${s} expired certificate(s) from system store`),c("expired_dropped"))y("ca_certs_load","expired_dropped",{dropped_count:s})}return d}
+
+@179656342 dist=121043
+sha=d54307897f8b4e31 len=146
+function S(e,t){if(!e.isFile()||e.size>m)return n(`mTLS: Ignoring ${t} \u2014 not a regular file or over ${m} bytes`,{level:"error"}),!1;return!0}
+
+@179701620 dist=166321
+sha=60765300f2cc4b31 len=70
+function S(){return a.CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS??60000}
+
+@179721708 dist=186409
+sha=e58d0051aca9a621 len=233
+function S(){let e={};for(let[t,o]of Object.entries(L)){let n=dc(t);if(!n)throw new P(`model catalog missing entry for '${t}' (CATALOG_ID_TO_KEY key '${o}')`,"model catalog missing entry for CATALOG_ID_TO_KEY id");e[o]=M(n)}return e}
+
+@179314321 dist=220978
+sha=58c20ce8f5cd1f70 len=54
+function S(e,n){return typeof n==="string"&&e.test(n)}
+
+## "function y(" hits=128
+@179535953 dist=654
+sha=9cca3763609e88bd len=52
+function y(t){return t.kind==="absent"?void 0:t.uid}
+
+@179472805 dist=62494
+sha=e306f9cf077b7321 len=150
+function y(t,e){let i=Up(Ft(await S(t,e),!1));if(!i||typeof i!=="object")return!1;return Xve(i,t,{skipMcpServerEntryFilter:!0,policySource:!0}),BI(i)}
+
+@179343891 dist=191408
+sha=74e30166211137b0 len=49
+function y(e){return e===ue||e.endsWith(".lock")}
+
+@179760777 dist=225478
+function y(){let e=process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH;if(!e)return;delete process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH;try{let t=ce().readFileSync(e,{encoding:"utf8"});D(e).catch(()=>{});let r=JSON.parse(t);if(typeof r?.accessToken!=="string"||!r.accessToken){n("bg auth snapshot missing accessToken",{level:"warn"});return}if(VC(r.accessToken),YLe(!0),Array.isArray(r.scopes))XLe(r.scopes);if(r.subscriptionType)process.env.CLAUDE_CODE_SUBSCRIPTION_TYPE=r.subscriptionType;if(r.rateLimitTier)proce
+
+@179779238 dist=243939
+sha=64fe7aaf9315ea29 len=103
+function y(t){if(!t)return t;return function(c,i){try{return t.call(e,c,i)}catch(n){if(!j(n))throw n}}}
+
+@179783593 dist=248294
+sha=daf5b6f92757db81 len=269
+function y(r,f,a,F){if(typeof a==="function")F=a,a=null;return _(r,f,a,F);function _(O,S,w,p,b){return N(O,S,w,function(s){if(s&&(s.code==="EMFILE"||s.code==="ENFILE"))W([_,[O,S,w,p],s,b||Date.now(),Date.now()]);else if(typeof p==="function")p.apply(this,arguments)})}}
+
+@179177487 dist=357812
+sha=589007f55f5d7e32 len=79
+function y(e,u,r){s("tengu_feature_sad",{...r,feature_name:c(e),error_code:u})}
+
+@179903968 dist=368669
+sha=3b12da882bb4e5ee len=157
+function y(e,t,r){m.delete(e);function a(){if(h.get(e)!==r)return;let o=t-Date.now();if(o<=0){b(e,r);return}let d=setTimeout(a,Math.min(o,F));f.set(e,d)}a()}
+
+## "function w(" hits=143
+@179536005 dist=706
+sha=f88ad40a9b688fc2 len=78
+function w(t){return t.code==="Failed"?t.telemetryCode??t.failureClass:t.code}
+
+@179473821 dist=61478
+sha=2a03ecff891f1c04 len=307
+function w(t,e){try{if(await y(u(t,"managed-settings.json"),e))return!0}catch{}try{let i=u(t,"managed-settings.d"),o=await E(i,e);for(let r of o){if(!(r.isFile()||r.isSymbolicLink())||!r.name.endsWith(".json")||r.name.startsWith("."))continue;try{if(await y(u(i,r.name),e))return!0}catch{}}}catch{}return!1}
+
+@179626108 dist=90809
+sha=7860b2cc8fb89122 len=283
+function w(){if(!y)return;let T=C.from("getAllResponseHeaders"in y&&y.getAllResponseHeaders()),F={data:!a||a==="text"||a==="json"?y.responseText:y.response,status:y.status,statusText:y.statusText,headers:T,config:e,request:y};ue(function(P){r(P),E()},function(P){n(P),E()},F),y=null}
+
+@179664450 dist=129151
+function w(l){o.push(l),n+=l.length;let a=Buffer.concat(o,n),x=a.indexOf(`\r
+\r
+`);if(x===-1){P("have not received end of HTTP headers yet..."),u();return}let M=a.slice(0,x).toString("ascii").split(`\r
+`),j=M.shift();if(!j)return e.destroy(),r(Error("No header received from proxy CONNECT response"));let q=j.split(" "),K=+q[1],W=q.slice(2).join(" "),g={};for(let b of M){if(!b)continue;let C=b.indexOf(":");if(C===-1)return e.destroy(),r(Error(`Invalid header from proxy CONNECT response: "${b}"`));
+
+@179763145 dist=227846
+function w(){let e=KLe();if(e!==void 0)return e;let s=process.env.CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR;if(!s){let r=process.env.CLAUDE_SESSION_INGRESS_TOKEN_FILE??XB,o=g(r,"session ingress token");return C2(o),o}let t=parseInt(s,10);if(Number.isNaN(t))return n(`CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR must be a valid file descriptor number, got: ${s}`,{level:"error"}),C2(null),null;try{let r=`/proc/self/fd/${t}`,o=Nue(r,{maxBytes:Cte}).trim();if(!o)return n("File descriptor contained emp
+
+@179803487 dist=268188
+function w(e,t){let n=globalThis.Bun?.secrets;if(!n||typeof n.get!=="function")return s=!1,Promise.resolve();let a=new Promise((o,l)=>{setTimeout((c)=>c(Error("probe timeout")),y,l).unref()}),r={service:YB(xte),name:FO()},u=(o)=>Promise.race([o,a]);return u(Promise.resolve().then(()=>n.get(r))).then(async(o)=>{if(s=!0,o===null){let l=await u(n.get(Ok(r,"m"))).catch(()=>null);if(l)try{let c=$jt(JSON.parse(l));if(!c)return;let f=await u(Promise.all(Array.from({length:c.n},(p,d)=>n.get(Ok(r,d))))),
+
+@179853308 dist=318009
+sha=1d4aa7c7f944d3c0 len=312
+function w(e){let t;try{t=new URL(e)}catch{return}let r=XY(t.hostname),u;switch(t.protocol){case"https:":case"wss:":u="https:";break;case"http:":case"ws:":if(!r)return;u="http:";break;default:return}if(t.username!==""||t.password!==""||t.pathname!=="/"||t.search!==""||t.hash!=="")return;return`${u}//${t.host}`}
+
+@179212609 dist=322690
+sha=c2d334fd4bf61275 len=210
+function w(e,n,t,r){let a=r-t;if(a<=0)return;if(e.len+a>e.buf.length){let i=Buffer.allocUnsafe(Math.min(Math.max(e.buf.length*2,e.len+a),e.cap));e.buf.copy(i,0,0,e.len),e.buf=i}n.copy(e.buf,e.len,t,r),e.len+=a}
+
+## "Pc={" hits=3
+@178607517 dist=926783
+sha=5bb89081f0416589 len=36
+Pc={home:(e)=>({space:"home",path:e}
+
+@181229103 dist=1694803
+sha=12e2e9bb90919860 len=39
+Pc={message:({schema:e})=>`must be ${e}
+
+@222690706 dist=43156406
+sha=c240cba316b9bcf6 len=225
+Pc={};Ia(Pc,{Arrow:()=>tW,Handle:()=>cw,Popup:()=>JG,Portal:()=>zG,Positioner:()=>XG,Provider:()=>rW,Root:()=>EG,Trigger:()=>_G,Viewport:()=>wW,createHandle:()=>SW});var CW=K(()=>{SG();DG();HG();$G();QG();nW();oW();EW();kW()}
+
+## "var Pc=" hits=5
+@181229099 dist=1694799
+sha=2e60ff5366936248 len=43
+var Pc={message:({schema:e})=>`must be ${e}
+
+@182267556 dist=2733256
+var Pc=d(function(pb){Object.defineProperty(pb,"__esModule",{value:!0});pb.varint64read=CO;pb.varint64write=OO;pb.int64FromString=kO;pb.int64ToString=DO;pb.uInt64ToString=db;pb.varint32write=LO;pb.varint32read=UO;function CO(){let e=0,t=0;for(let o=0;o<28;o+=7){let u=this.buf[this.pos++];if(e|=(u&127)<<o,(u&128)==0)return this.assertBounds(),[e,t]}let r=this.buf[this.pos++];if(e|=(r&15)<<28,t=(r&112)>>4,(r&128)==0)return this.assertBounds(),[e,t];for(let o=3;o<=31;o+=7){let u=this.buf[this.pos++
+
+@189338213 dist=9803913
+sha=374579a23e274a28 len=97
+var Pc="\u2026";function Ls(t,o,u){let c=Iv(t,o,u);while(ie(c)>u-o&&u>o)u--,c=Iv(t,o,u);return c}
+
+@197350289 dist=17815989
+sha=4bfa04c1daac4c17 len=635
+var Pc=qe();class In extends Pc.OAuth2Client{targetAudience;idTokenProvider;constructor(e){super(e);this.targetAudience=e.targetAudience,this.idTokenProvider=e.idTokenProvider}async getRequestMetadataAsync(){if(!this.credentials.id_token||!this.credentials.expiry_date||this.isTokenExpiring()){let t=await this.idTokenProvider.fetchIdToken(this.targetAudience);this.credentials={id_token:t,expiry_date:this.getIdTokenExpiryDate(t)}}return{headers:new Headers({authorization:"Bearer "+this.credentials.id_token})}}getIdTokenExpiryDate(e){let t=e.split(".")[1];if(t)return JSON.parse(Buffer.from(t,"base64").toString("ascii")).exp*1000}}
+
+@222690702 dist=43156402
+sha=dd14cc34134aa6e5 len=229
+var Pc={};Ia(Pc,{Arrow:()=>tW,Handle:()=>cw,Popup:()=>JG,Portal:()=>zG,Positioner:()=>XG,Provider:()=>rW,Root:()=>EG,Trigger:()=>_G,Viewport:()=>wW,createHandle:()=>SW});var CW=K(()=>{SG();DG();HG();$G();QG();nW();oW();EW();kW()}
+
+## "Pc={home(" hits=0
+## "home(e){return{space:\"home\"" hits=0
+## "space:\"workspace\"" hits=3
+@178607572 dist=926728
+sha=d53f5e7270829bcd len=63
+space:"workspace",path:e}),system:(e)=>({space:"system",path:e}
+
+@186801395 dist=7267095
+sha=0885b51fd064b1a3 len=86
+space:"workspace"};let o=yG(e,t,r)??c6n(e,t,r);return o===null?null:{kind:"key",key:o}
+
+@186842088 dist=7307788
+sha=a1b71d3799065f0c len=221
+space:"workspace"}:null);else throw Error("Unsupported marketplace source type for refresh");if(await gxe(e,t),g)y("plugin_official_marketplace_fetch","gcs_failed_git_fallback");n(`Successfully refreshed marketplace: ${e}
+
+## "space:\"system\"" hits=3
+@178607613 dist=926687
+sha=8ea72db20cfce396 len=66
+space:"system",path:e}),userNamed:(e)=>({space:"userNamed",path:e}
+
+@186801333 dist=7267033
+sha=453fdffc1a7d7697 len=80
+space:"system"};if(t!==void 0&&x_(t))return{kind:"hostFolder",space:"workspace"}
+
+@186808618 dist=7274318
+sha=9db990d159ae10bb len=141
+space:"system"}:null),p}catch{}return null}function Z_(e){let t=Ih(e);return LA().find((r)=>{let o=Ih(r);return t===o||t.startsWith(o+moe)})}
+
+## "function nyn(" hits=2
+@179416890 dist=112692
+sha=63760ef57c20418e len=22
+function nyn(){return}
+
+@185089463 dist=5559881
+function nyn(e,{includeOverageInUse:t=!0,unifiedWindows:r}={}){if(!e)return;return{status:e.status,...e.resetsAt!==void 0&&{resetsAt:e.resetsAt},...e.rateLimitType!==void 0&&{rateLimitType:e.rateLimitType},...e.utilization!==void 0&&{utilization:e.utilization},...e.overageStatus!==void 0&&{overageStatus:e.overageStatus},...e.overageResetsAt!==void 0&&{overageResetsAt:e.overageResetsAt},...e.overageDisabledReason!==void 0&&{overageDisabledReason:e.overageDisabledReason==="org_spend_cap_reached"?"
+
+## "CLAUDE_CODE_MANAGED_SETTINGS_PATH" hits=8
+@179529906 dist=324
+sha=78cbb7eb5d268058 len=191
+CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself");return}let i=$Me(nx()).map((r)=>({dropInDir:f(r,"managed-settings.d"),basePath:f(r,"managed-settings.json")}
+
+@179168824 dist=360758
+CLAUDE_CODE_MANAGED_SETTINGS_PATH","CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION","CLAUDE_CODE_MOCK_REMOTE_SETTINGS","USE_LOCAL_OAUTH","USE_STAGING_OAUTH","CLAUDE_LOCAL_OAUTH_API_BASE","CLAUDE_LOCAL_OAUTH_APPS_BASE","CLAUDE_LOCAL_OAUTH_CONSOLE_BASE","CLAUDE_BRIDGE_BASE_URL","CLAUDE_BRIDGE_OAUTH_TOKEN","CLAUDE_BRIDGE_SESSION_INGRESS_URL","CLAUDE_REMOTE_TOOLS_BRIDGE_URL"].map((e)=>e.toUpperCase()));function fo(e){if(!e?.env)return e;let t=Fl(e.env,(o,s)=>$dr.has(s.toUpperCase()));return{...e,env:t}}functio
+
+@178769204 dist=760378
+CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>gD,CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:()=>Gc,CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH:()=>Hc,CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION:()=>mc,CLAUDE_CODE_MCP_ALLOWLIST_ENV:()=>YD,CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS:()=>Sp,CLAUDE_CODE_MCP_MEMORY_CGROUP:()=>Cc,CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:()=>Rp,CLAUDE_CODE_MOCK_REMOTE_SETTINGS:()=>BL,CLAUDE_CODE_MOCK_TRIAL:()=>bL,CLAUDE_CODE_OVERRIDE_DATE:()=>VD,CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS:()=>wL,CLAUDE_CODE_PARKED
+
+## env context @98230292
+Cannot destructure property 'room' from null or undefined value.........reviving(.......file:///B:/%7EBUN/root/chunk-vtrk6nnc.js....."y.CLAUDE_CODE_PLUGIN_SEED_DIR.....a;..CLAUDE_CODE_PLUGIN_ATTRIBUTION.. ...V"..CLAUDE_CODE_FEDERATION_CACHE_DIR....i...ANTHROPIC_CONFIG_DIR....gz..CLAUDE_CODE_HARBOR_KITE_CLOUD........[R.CLAUDE_CODE_ARTIFACT_ROOM...#...x...CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION.!....SJ.CLAUDE_CODE_MANAGED_SETTINGS_PATH...........CLAUDE_CODE_DIR_SYNC_STREAM.....R...
+
+## env context @98416707
+......^@.followUpQueued.......`..consecutiveThrows.......	...runsInState.....8s..loggedThrowMessages......_..loggedOwnershipThrowMessages....9C..loggedHostFilesThrowMessages....."..project settings....8kS.local settings.......6$.legacy local settings.......0ld.settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself
+
+## env context @178769204
+ARKED_PERMISSION:()=>ZL,CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS:()=>FD,CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS:()=>KD,CLAUDE_CODE_HOST_PLATFORM:()=>vD,CLAUDE_CODE_IDE_HOST_OVERRIDE:()=>WD,CLAUDE_CODE_IDLE_THRESHOLD_MINUTES:()=>Bc,CLAUDE_CODE_IDLE_TOKEN_THRESHOLD:()=>bc,CLAUDE_CODE_IS_COWORK:()=>ML,CLAUDE_CODE_LEGACY_BUNDLE:()=>ID,CLAUDE_CODE_LOOP_KEEPALIVE:()=>uL,CLAUDE_CODE_LOOP_PERSISTENT:()=>aL,CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>gD,CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:()
+
+## env context @179168824
+KEN","ANTHROPIC_IDENTITY_TOKEN_FILE","ANTHROPIC_SCOPE","ANTHROPIC_PROFILE","ANTHROPIC_CONFIG_DIR","CLAUDE_CODE_FEDERATION_CACHE_DIR","HOME","XDG_CONFIG_HOME","APPDATA","USERPROFILE","ANTHROPIC_CUSTOM_HEADERS","CLAUDE_CODE_HOST_CREDS_FILE","CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST","CLAUDE_CODE_HOST_AUTH_ENV_VAR","CLAUDE_CONFIG_DIR","CLAUDE_SECURESTORAGE_CONFIG_DIR","CLAUDE_CODE_REMOTE_SETTINGS_PATH","CLAUDE_CODE_MANAGED_SETTINGS_PATH","CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION","CLAUDE
+
+## env context @179529906
+ad()));if(e.epoch!==s)return!1;return x(e,i,r,s),!0}var F=Object.freeze([]);function v(t,e,s){if(t.hostFiles.serving("system")!=="absent"||e.systemAttestationContradicted)return;if(nyn()!==void 0){if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself
+
+## env context @180922359
+LE","CLAUDE_CODE_SAFE_MODE","CLAUDE_CODE_SIMPLE","CLAUDE_CODE_HARBOR_KITE","CLAUDE_CODE_HARBOR_KITE_CLOUD","CLAUDE_CODE_HARBOR_KITE_PACING_OFF","CLAUDE_CODE_SILENT_TURN_REMINDER","CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS","CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT","CLAUDE_CODE_ARTIFACT_ROOM","USER_TYPE","CLAUDE_CODE_MESSAGING_SOCKET","CLAUDE_CODE_MESSAGING_TOKEN","CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION","CLAUDE_CODE_MANAGED_SETTINGS_PATH","CLAUDE_CODE_TOASTY_THIMBLE","CLAUDE_CODE_DIR
+
+## "function T_()" hits=1
+@179416638 dist=21793
+sha=a5e7d0a7899e7c69 len=45
+function T_(){return Le.getManagedFilePath()}
+
+## "function T_(" hits=4
+@179416638 dist=21793
+sha=a5e7d0a7899e7c69 len=45
+function T_(){return Le.getManagedFilePath()}
+
+@188186340 dist=8747909
+function T_(e){let n="[eE][-+]?\\d(_|\\d)*",a="\\d(_|\\d)*(\\.\\d(_|\\d)*)?("+n+")?",o="\\w+",r="\\b("+("\\d(_|\\d)*#\\w+(\\.\\w+)?#("+n+")?")+"|"+a+")",i="[A-Za-z](_?[A-Za-z0-9.])*",l=`[]\\{\\}%#'"`,c=e.COMMENT("--","$"),_={begin:"\\s+:\\s+",end:"\\s*(:=|;|\\)|=>|$)",illegal:`[]\\{\\}%#'"`,contains:[{beginKeywords:"loop for declare others",endsParent:!0},{className:"keyword",beginKeywords:"not null constant access function procedure in out aliased exception"},{className:"type",begin:"[A-Za-z](_
+
+@201084012 dist=21645581
+sha=bcc27d6ebce1560d len=249
+function T_(e,t){let o=Fw(e),d=Object.create(null);for(let[g,w]of Object.entries(t)){let E=o?vt(g):g;if(o&&Object.hasOwn(d,E)){let A=2;while(Object.hasOwn(d,`${E}#${A}`))A++;E=`${E}#${A}`}d[E]=zm.has(w)?w:Qm(w)??XR(e,w,"connection failed")}return d}
+
+## "T_=()" hits=0
+## ",T_=()" hits=0
+## "function rx(" hits=3
+@180089022 dist=650591
+sha=31007f3882d30cf2 len=192
+function rx(){if(typeof document>"u")return;if(!kl)kl=new MutationObserver(function(){mf()});mf(),kl.observe(document.documentElement,{childList:!0,subtree:!0,attributes:!1,characterData:!1})}
+
+@189539018 dist=10100587
+sha=383325e5878ad39e len=94
+function rx(t){let o=t;while(o){if(o._eventHandlers?.onWheel)return!0;o=o.parentNode}return!1}
+
+@199897046 dist=20458615
+sha=d721fecfd53f0857 len=39
+function rx(){return{localeError:tx()}}
+
+## "rx=" hits=31
+@179405952 dist=32479
+sha=60b5fa3a760c392d len=61
+rx="/mnt/c/Program Files/ClaudeCode";function UMe(){return!1}
+
+@184843814 dist=5405383
+rx={};je(rx,{default:()=>rx,foldStep:()=>lZe,logBuild:()=>cZe,logLifted:()=>uZe});function lZe(e){let{loaded:t,index:r,hooking:o,beneath:u,withheld:p,owners:g}=e;return{name:t.name,async run(k,E){let C,M=await Vb.dispatchHop({members:[t],event:"engine.create",e:k,call:async(j)=>{let G=await E(j);return C=ty.asTable(G),G},signal:E.signal,origin:void 0});if(M===void 0)return M;let L=ty.asTable(M);if(C===void 0&&r<o.length-1)p.end(t.name);let N=C??u,U=Object.assign(Object.create(null),L);for(let[j,
+
+@194150927 dist=14712496
+sha=4e46c2102f9d88aa len=36
+rx=mn();function ia(){Us.call(this)}
+
+@201385043 dist=21946612
+rx=fo.toolResultByToolUseID.get(ge.id);let j0=rx?.type==="user"?rx.toolUseResult:void 0;if(tx){let F0=bm({param:ge,isQueued:es,isResolved:xr,isError:fo.erroredToolUseIDs.has(ge.id),shouldAnimate:Vs,shouldShowDot:br,addMargin:Xr,progressMessagesForMessage:mt,resultMsg:rx});if(F0!==null){os=F0;break bb1}if(xr){os=null;break bb1}let ki;if(Do[142]!==Co||Do[143]!==jt||Do[144]!==dt||Do[145]!==fo||Do[146]!==ge.id||Do[147]!==mt||Do[148]!==ct||Do[149]!==Tt||Do[150]!==wo||Do[151]!==zo)ki=Fm(Tt,wo,fo,ge.id
+
+@201539986 dist=22101555
+sha=64aa8f0fac168fb5 len=75
+rx=hs?ys-1-ie(hs)-3:ys,fl=sl?bd:j7(bd,Math.max(rx,10));const gl=hs&&`@${hs}
+
+## "var F=[]" hits=1
+@197254070 dist=17724488
+var F=[],c=[],p=typeof Uint8Array<"u"?Uint8Array:Array,s="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";for(f=0,u=s.length;f<u;++f)F[f]=s[f],c[s.charCodeAt(f)]=f;var f,u;c[45]=62;c[95]=63;function A(r){var e=r.length;if(e%4>0)throw Error("Invalid string. Length must be a multiple of 4");var t=r.indexOf("=");if(t===-1)t=e;var o=t===e?0:4-t%4;return[t,o]}function l(r){var e=A(r),t=e[0],o=e[1];return(t+o)*3/4-o}function y(r,e,t){return(e+t)*3/4-t}function C(r){var e,t=A(r),o=t[0
+
+## "F=[]" hits=23
+@182717587 dist=3188005
+F=[];if(!C?.disabled){if(C?.allowRead?.length||C?.allowWrite?.length)throw Error("Per-exec filesystem.allowRead/allowWrite is not supported "+"on Windows \u2014 `srt-win exec` only exposes per-exec "+"denies. Set them at the session level (initialize()).");let V=[...C?.denyRead??[],...Cc(r?.credentials)],q=C?.denyWrite??[];if(V.length>0||q.length>0){let j=new Set(Mi?.denyRead??[]),ee=new Set(Mi?.denyWrite??[]),ie=ld;U=ie(V,{mode:"deny"}).filter((ae)=>!j.has(ae)),F=ie(q,{mode:"deny"}).filter((ae)
+
+@189177425 dist=9647843
+sha=3e8b907ab4341040 len=22
+F=[],M=0,V="",j=()=>{}
+
+@189515931 dist=9986349
+F=[];for(let he of L)if(he.type==="clearTerminal"){if(F.push({desiredHeight:x.screen.height,availableHeight:x.viewport.height,reason:he.reason}),this.rootNode.debugRepaints&&he.debug){let ge=Sy(this.rootNode,he.debug.triggerY);n(`[REPAINT] full reset \xB7 ${he.reason} \xB7 row ${he.debug.triggerY}
+  prev: "${he.debug.prevLine}"
+  next: "${he.debug.nextLine}"
+  culprit: ${ge.length?ge.join(" < "):"(no owner chain captured)"}`,{level:"warn"})}}let V=performance.now(),H=Hd(L),Y=performance.now()-V,
+
+@190547003 dist=11017421
+F=[],J=P===null?null:GOe(P,F,{allowTrailingComma:!0});if(P===null||F.length>0||!Array.isArray(J)||!J.some(vt))return{message:`${ct("warning",e)("Couldn't update your Zed keymap, so it was left unchanged.")}${h}${l}${h}`,installed:!1};return await Hn(i,P),{message:m,installed:!0}}catch(x){throw n(`Failed to install Zed Shift+Enter key binding: ${x instanceof Error?x.message:String(x)}`,{level:"error"}),Error("Failed to install Zed Shift+Enter key binding")}}N();function Gr(){return _o.get(process
+
+@191166761 dist=11637179
+F=[],j=[];for(let G of C)if(w===void 0||G.timestamp<w)F.push(G);else j.push(G);if(j.length===0)return[...F,...d];let H=d.findLastIndex((G)=>G.type==="user"&&G.isCompactSummary===!0),W=H===-1?d.length:H;return[...F,...d.slice(0,W),...j,...d.slice(W)]}async function zm(){let d=ide();if(!d)return null;try{await Rq();let{content:C,bytesRead:w,bytesTotal:F}=await bm(d,jm),j=C;if(w<F)j=j.slice(j.indexOf(`
+`)+1),j=`[debug log truncated to last ${w} of ${F} bytes]
+${j}`;return Xr(j)}catch{return null}}a
+
+## v preamble window
+naged settings drop-in",e))}return d.layers.push(...u),{...d,reads:Promise.all(u.map((c)=>c.read())).then((c)=>[...g,...c])}}async function T(t,e,s){let i=R(t);if(i.length===0)return!0;let r=await Promise.all(i.map((a)=>a.read()));if(e.epoch!==s)return!1;return x(e,i,r,s),!0}var F=Object.freeze([]);function v(t,e,s){if(t.hostFiles.serving("system")!=="absent"||e.systemAttestationContradicted)return;if(nyn()!==void 0){if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests no OS policy folder ('system' abs
+
+## function v @179529582
+sha=c30b0ae5a654d16b len=1430
+function v(t,e,s){if(t.hostFiles.serving("system")!=="absent"||e.systemAttestationContradicted)return;if(nyn()!==void 0){if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself");return}let i=$Me(nx()).map((r)=>({dropInDir:f(r,"managed-settings.d"),basePath:f(r,"managed-settings.json")}));if(i.some(({basePath:r,dropInDir:a})=>e.walkReadManagedFileIn(r,a))){e.systemAttestationContradicted=!0;for(let{basePath:r,dropInDir:a}of i)e.clearFolderListing(a,s),e.unseedParsedFile(r,"policySettings",s);_(Error("settings: a managed-settings file was read from a folder the host attested absent ('system' space); the attestation is ignored for the rest of this process and the policy walk reads the host's files itself"));return}if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests this machine has no OS policy folder ('system' absent); the policy walk is served an empty managed-settings file tier without reading the host");for(let{basePath:r,dropInDir:a}of i)if(e.seedFolderListing(a,F,s),!e.walkRead(r))e.seedParsedFile(r,"policySettings",Fte(),s);return{listings:i.map(({dropInDir:r})=>({dir:r,names:F})),layers:i.map(({basePath:r})=>({path:r,parsed:Fte()}))}}

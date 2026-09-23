@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, sep } from 'path'
+import { isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -45,6 +45,13 @@ import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { logError } from 'src/utils/log.js'
 import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
+import {
+  noteApprovedFileToolPath,
+  openApprovedRead,
+  openApprovedWrite,
+  takeApprovedFileToolPath,
+  type ApprovedRead,
+} from 'src/utils/fileToolApprovedOpen.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkWritePermissionForTool,
@@ -150,6 +157,7 @@ export const FileEditTool = buildTool({
     return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
+    noteApprovedFileToolPath(input.file_path)
     const appState = context.getAppState()
     return checkWritePermissionForTool(
       FileEditTool,
@@ -483,8 +491,6 @@ export const FileEditTool = buildTool({
     } = toolUseContext
     const { file_path, old_string, new_string, replace_all = false } = input
 
-    // 1. Get current state
-    const fs = getFsImplementation()
     const absoluteFilePath = expandPath(file_path)
 
     // Discover skills from this file's path (fire-and-forget, non-blocking)
@@ -510,90 +516,98 @@ export const FileEditTool = buildTool({
 
     await diagnosticTracker.beforeFileEdited(absoluteFilePath)
 
-    // Ensure parent directory exists before the atomic read-modify-write section.
-    // These awaits must stay OUTSIDE the critical section below — a yield between
-    // the staleness check and writeTextContent lets concurrent edits interleave.
-    await fs.mkdir(dirname(absoluteFilePath))
-    if (fileHistoryEnabled()) {
-      // Backup captures pre-edit content — safe to call before the staleness
-      // check (idempotent v1 backup keyed on content hash; if staleness fails
-      // later we just have an unused backup, not corrupt state).
-      await fileHistoryTrackEdit(
-        updateFileHistoryState,
-        absoluteFilePath,
-        parentMessage.uuid,
-      )
-    }
+    const approved = takeApprovedFileToolPath(absoluteFilePath)
+    const openedWrite = await openApprovedWrite(absoluteFilePath, approved, {
+      createParents: true,
+    })
+    let openedRead: ApprovedRead | null = null
+    let originalFileContents = ''
+    let fileExists = false
+    let encoding: BufferEncoding = 'utf8'
+    let endings: LineEndingType = 'LF'
+    let actualOldString = old_string
+    let patchForDisplay: ReturnType<typeof getPatchForDisplay> = []
+    let updatedFile = ''
+    try {
+      if (fileHistoryEnabled()) {
+        await fileHistoryTrackEdit(
+          updateFileHistoryState,
+          absoluteFilePath,
+          parentMessage.uuid,
+        )
+      }
 
-    // 2. Load current state and confirm no changes since last read
-    // Please avoid async operations between here and writing to disk to preserve atomicity
-    const {
-      content: originalFileContents,
-      fileExists,
-      encoding,
-      lineEndings: endings,
-    } = readFileForEdit(absoluteFilePath)
+      try {
+        openedRead = await openApprovedRead(absoluteFilePath, approved)
+        const loaded = readFileForEdit(openedRead.ioPath)
+        originalFileContents = loaded.content
+        fileExists = loaded.fileExists
+        encoding = loaded.encoding
+        endings = loaded.lineEndings
+      } catch (e) {
+        if (!isENOENT(e)) throw e
+      }
 
-    if (fileExists) {
-      const lastWriteTime = getFileModificationTime(absoluteFilePath)
-      const lastRead = readFileState.get(absoluteFilePath)
-      // densable 2.1.228 #17 call-path: missing/partial may pass when the same
-      // guardSkipped as validateInput would; true staleness still throws.
-      if (!lastRead || lastRead.isPartialView) {
-        if (
-          !shouldAllowCallDespiteMissingOrPartialRead(
-            'edit',
-            absoluteFilePath,
-            toolUseContext,
-            lastRead,
+      if (fileExists) {
+        const lastWriteTime = getFileModificationTime(absoluteFilePath)
+        const lastRead = readFileState.get(absoluteFilePath)
+        // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+        // guardSkipped as validateInput would; true staleness still throws.
+        if (!lastRead || lastRead.isPartialView) {
+          if (
+            !shouldAllowCallDespiteMissingOrPartialRead(
+              'edit',
+              absoluteFilePath,
+              toolUseContext,
+              lastRead,
+            )
+          ) {
+            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          }
+        } else if (
+          lastWriteTime > lastRead.timestamp &&
+          !(
+            isFullEnoughFileRead(lastRead) &&
+            fileStateContentMatches(lastRead, originalFileContents)
           )
         ) {
           throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
         }
-      } else if (
-        lastWriteTime > lastRead.timestamp &&
-        !(
-          isFullEnoughFileRead(lastRead) &&
-          fileStateContentMatches(lastRead, originalFileContents)
-        )
-      ) {
-        throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }
+
+      actualOldString =
+        findActualString(originalFileContents, old_string) || old_string
+
+      const { patch, updatedFile: editedFile } = getPatchForEdit({
+        filePath: absoluteFilePath,
+        fileContents: originalFileContents,
+        oldString: actualOldString,
+        newString: new_string,
+        replaceAll: replace_all,
+      })
+
+      updatedFile = stampNewMemoryContent(absoluteFilePath, editedFile)
+      const memdirStamped = updatedFile !== editedFile
+      patchForDisplay = !memdirStamped
+        ? patch
+        : getPatchForDisplay({
+            filePath: absoluteFilePath,
+            fileContents: originalFileContents,
+            edits: [
+              {
+                old_string: originalFileContents,
+                new_string: updatedFile,
+                replace_all: false,
+              },
+            ],
+          })
+
+      await openedWrite.recheckBeforeWrite()
+      writeTextContent(openedWrite.ioPath, updatedFile, encoding, endings)
+    } finally {
+      await openedRead?.close()
+      await openedWrite.close()
     }
-
-    // 3. Find the exact string in file content
-    const actualOldString =
-      findActualString(originalFileContents, old_string) || old_string
-
-    // 4. Generate patch
-    const { patch, updatedFile: editedFile } = getPatchForEdit({
-      filePath: absoluteFilePath,
-      fileContents: originalFileContents,
-      oldString: actualOldString,
-      newString: new_string,
-      replaceAll: replace_all,
-    })
-
-    // densable Zto after edit — stamp memdir .md modified/provenance
-    const updatedFile = stampNewMemoryContent(absoluteFilePath, editedFile)
-    const memdirStamped = updatedFile !== editedFile
-    // densable: when stamped, recompute patch from oldContent→stamped (Ast)
-    const patchForDisplay = !memdirStamped
-      ? patch
-      : getPatchForDisplay({
-          filePath: absoluteFilePath,
-          fileContents: originalFileContents,
-          edits: [
-            {
-              old_string: originalFileContents,
-              new_string: updatedFile,
-              replace_all: false,
-            },
-          ],
-        })
-
-    // 5. Write to disk
-    writeTextContent(absoluteFilePath, updatedFile, encoding, endings)
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()

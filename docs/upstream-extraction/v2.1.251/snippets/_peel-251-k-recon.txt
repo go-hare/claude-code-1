@@ -1,0 +1,272 @@
+SEA 217360032 C:/Users/Administrator/AppData/Local/Temp/official-251/package/claude.exe
+
+#25 function dpe( hits=2
+  @179978903 lastFn=r7@179978400 | function dpe(e){return e.namespace==="pluginCache"&&e.version===void 0}function 
+  @184388260 lastFn=ikr@184388196 | function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o)
+
+#25 async function dpe( hits=1
+  @184388254 lastFn=ikr@184388196 | async function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}ca
+
+#25 function DVt( hits=0
+
+#25 async function DVt( hits=0
+
+#25 function HA( hits=2
+  @183134332 lastFn=GA@183133650 | function HA(w){let y=[],x=[],L=w;while(!0){let P=L;if(y.length>0){let et=KA(P);i
+  @199869761 lastFn=PA@199862676 | function HA(){return new RegExp(qA,"u")}A.ipv4=/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9
+
+#25 async function HA( hits=0
+
+#25 refresh the set-aside hits=2
+  @97203609 lastFn=@-1 | refresh the set-aside's mtime at ......U... (it ages from its old clock): .C....
+  @184388547 lastFn=dpe@184388254 | refresh the set-aside's mtime at ${t} (it ages from its old clock): ${u}`,{level
+
+#25 existing destination set aside hits=2
+  @96859139 lastFn=@-1 | existing destination set aside at .......0...isRetentionExemptionDisabled=.... .
+  @184388676 lastFn=dpe@184388254 | existing destination set aside at ${t}`,{level:"warn"}),t}async function fYt(e,t
+
+#25 .superseded- hits=5
+  @95565458 lastFn=@-1 | .superseded-.. .......remote-agents........X..transcriptsExemptedDesktop.. .....
+  @96858996 lastFn=@-1 | .superseded-W...x)..Cannot destructure property 'isRetentionExemptionDisabled' f
+  @184388287 lastFn=dpe@184388254 | .superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let
+  @184389040 lastFn=u@184388826 | .superseded-${Date.now()}`}:void 0;if(d===void 0)throw u();let y=await e.moveSco
+  @192200562 lastFn=Ufr@192198564 | .superseded-"))continue;let v=f(_,k.name);try{if(await T(v,e,a,t,void 0,k.name.e
+
+#25 restore set-aside destination after ENOENT hits=2
+  @97203417 lastFn=@-1 | restore set-aside destination after ENOENT move: ..V.......relocateSessionTransc
+  @184387138 lastFn=S0e@184385987 | restore set-aside destination after ENOENT move: ${pe}`,{level:"warn"})}),fe;n(`
+
+#27 function $Y( hits=2
+  @183359192 lastFn=aht@183359136 | function $Y(){return[...m_(),_e("flagSettings"),yo("userSettings")?_e("userSetti
+  @187729104 lastFn=Ibe@187726704 | function $Y(e,t){if(!goe.has(e.toLowerCase()))return null;if(typeof t.installLoc
+
+#27 $Y(ke,Pe) hits=1
+  @187868585 lastFn=qFe@187868067 | $Y(ke,Pe)===null;for(let $e of _gr){if(Me!==null||!Be)break;if(await ne($e),Me=a
+
+#33 function rNt( hits=1
+  @184311051 lastFn=ZGe@184310991 | function rNt(){zy().markOwnsControllingTerminal()}function Oin(e){zy().markStart
+
+#33 rNt() hits=3
+  @184311060 lastFn=ZGe@184310991 | rNt(){zy().markOwnsControllingTerminal()}function Oin(e){zy().markStartupActionS
+  @204655734 lastFn=uo@204655316 | rNt(),_("bg_worker_ctty");break;case"already":rNt();break;case"failed":g("bg_wor
+  @204655780 lastFn=uo@204655316 | rNt();break;case"failed":g("bg_worker_ctty",t);break;case"ffi_unavailable":case"
+
+#33 bg_worker_ctty hits=7
+  @100448026 lastFn=@-1 | bg_worker_ctty.....:..bg_worker_ctty..m.......[uds-messaging] Skipped: cross-ses
+  @100448048 lastFn=@-1 | bg_worker_ctty..m.......[uds-messaging] Skipped: cross-session messaging gate of
+  @204655605 lastFn=uo@204655316 | bg_worker_ctty",!0)?await z():await L()?"already":"switched_off";switch(J("info"
+  @204655687 lastFn=uo@204655316 | bg_worker_ctty",{outcome:t}),t){case"acquired":rNt(),_("bg_worker_ctty");break;c
+  @204655743 lastFn=uo@204655316 | bg_worker_ctty");break;case"already":rNt();break;case"failed":g("bg_worker_ctty"
+  @204655808 lastFn=uo@204655316 | bg_worker_ctty",t);break;case"ffi_unavailable":case"not_a_tty":g("bg_worker_ctty
+  @204655874 lastFn=uo@204655316 | bg_worker_ctty",t);break;case"unsupported":case"switched_off":break}}if(S)Gf(zu(
+
+#34 addDirectories carries a directory containing a null byte hits=2
+  @97903968 lastFn=@-1 | addDirectories carries a directory containing a null byte: .9....G..removeDirect
+  @182109082 lastFn=lr@182107056 | addDirectories carries a directory containing a null byte: ${ke(b)}`}}return{act
+
+#34 containsNullByte hits=3
+  @96341520 lastFn=@-1 | containsNullByte....P! .isExactMatch ...A...isOriginalCwd....... ~..alreadyInWor
+  @186039336 lastFn=mbe@186039090 | containsNullByte:y}}try{if(!(await mPn(r)).isDirectory())return{resultType:"notA
+  @186040014 lastFn=gbe@186039858 | containsNullByte?`Path ${t} contains a null character, so it can't be used as a 
+
+#34 Path contains null bytes hits=3
+  @96992468 lastFn=@-1 | Path contains null bytes/....cX.validateDirectoryForWorkspace: expandPath threw.
+  @179911537 lastFn=gt@179911257 | Path contains null bytes");let i=e.trim();if(!i)return tr(I(r));if(i==="~")retur
+  @186039195 lastFn=mbe@186039090 | Path contains null bytes");if(!y)h(Error("validateDirectoryForWorkspace: expandP
+
+#34 additionalDirectories hits=41
+  @93923644 lastFn=@-1 | additionalDirectories...........prevCwd......v..invalidateAllRenders....&...CLAU
+  @97902980 lastFn=@-1 | additionalDirectories.........I. project-scoped .....[.. entr.......?.R. .. .w.
+  @98421969 lastFn=@-1 | additionalDirectories option. A directory that is already a registered working d
+  @99067204 lastFn=@-1 | additionalDirectoriesForClaudeMd'...m...replaceAdditionalDirectoriesForClaudeMd.
+  @100562809 lastFn=@-1 | additionalDirectories' from null or undefined valueG....Qi.Cannot destructure pr
+  @179032542 lastFn=tn@179031976 | additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesFo
+  @179075217 lastFn=Ym@179075170 | additionalDirectoriesForClaudeMd()}function Fq(e){n().host.extensionsConfig.repl
+  @179798053 lastFn=bt@179797465 | additionalDirectories:R(i()).optional().describe("Additional directories to incl
+  @180105105 lastFn=Jwt@180101227 | additionalDirectories"&&e.code==="invalid_type",tip:{suggestion:'Must be an arra
+  @180129080 lastFn=xo@180127697 | additionalDirectories:l}=e.permissions;if(s&&t.sandbox?.network?.allowManagedDom
+  @180129191 lastFn=xo@180127697 | additionalDirectories=l}if(Object.keys(i).length>0)r.permissions=i}if(e.sandbox)
+  @181001053 lastFn=@-1 | additionalDirectories option. A directory that is already a registered working d
+
+#35 function ZW( hits=1
+  @199184593 lastFn=br@199183316 | function ZW(r){let s=xt(),[P,a]=u(null),n=k(null),l=k(null),o=k(null),p=k(0),f=k
+
+#35 export{ZW hits=1
+  @199185980 lastFn=uL@199185607 | export{ZW,cL,uL}; .// @bun @bytecode // Claude Code is a Beta product per Anthro
+
+#36 function jJn( hits=2
+  @183518215 lastFn=BJn@183517941 | function jJn(r){for(let i of r)if(i.endCode===h)return s_.rendersItalicAsStandou
+  @187505928 lastFn=BJn@187505791 | function jJn(){return WJn().value}function WJn(){let t=zl()?.unavailableOuterRet
+
+#36 rendersItalicAsStandout hits=3
+  @97776424 lastFn=@-1 | rendersItalicAsStandout.$...j...^\x1b\[([34]8);2;(\d+);(\d+);(\d+)m$.....D...[23
+  @183517458 lastFn=t8n@183514842 | rendersItalicAsStandout(){return(this.proc.env.TERM??"").startsWith("screen")}}f
+  @183518273 lastFn=jJn@183518215 | rendersItalicAsStandout()?r.filter((e)=>e.endCode!==h):r;return r}var m=[0,95,13
+
+#41 function awn( hits=2
+  @181264770 lastFn=Yp@181264685 | function awn(){if(!wl())return{subscriptionType:null,rateLimitTier:null};let e=X
+  @185630066 lastFn=HZ@185629881 | function awn(e,t,r,o){switch(e.reason){case"explicit_ref":return`This directory 
+
+#41 async function awn( hits=0
+
+#41 function Yp( hits=7
+  @178948928 lastFn=Xp@178948689 | function Yp(e){let t=`${e.plugin}: `,{message:r}=e;return`${e.plugin}: $.${e.op}
+  @181264685 lastFn=oI@181264494 | function Yp(){if(ko()||a.CLAUDE_CODE_OAUTH_TOKEN||Cc())return!1;return!(D7()&&!M
+  @183167448 lastFn=jp@183166111 | function Yp(e){let t=(0,Ft.create)(rt.ListValueSchema);for(let r of e)t.values.p
+  @185964615 lastFn=eF@185964528 | function Yp(e){if(e.status!=="running"&&e.status!=="pending")return!1;if("isBack
+  @189129986 lastFn=Wp@189129295 | function Yp(e){let t={keyword:"and case default else elsif false if in import en
+  @189602145 lastFn=_1@189602081 | function Yp(t,o,u){return{kind:"key",name:String.fromCodePoint(o),fn:!1,ctrl:!1,
+  @204479814 lastFn=Pl@204479740 | function Yp(e,t,r,s,o,c,u,d,h){let w=!1,b=(N)=>{if(w)return;w=!0,em(r,h,N)},y=aw
+
+#41 urr(awn()) hits=1
+  @189860553 lastFn=So@189856700 | urr(awn())},worktree:r?.worktree?{path:r.worktree.path,ownershipToken:p}:void 0,
+
+#42 function oc( hits=13
+  @179077773 lastFn=ITe@179077718 | function oc(){return n().surfaceCapabilities.replBridgeActive()}function yie(e){
+  @179351006 lastFn=we@179350874 | function oc(e){try{return new URL(e)}catch{return null}}function ys(e){var t=(ty
+  @179634971 lastFn=rc@179634939 | function oc(e){return Qo(zn,e)}function nc(e){return cn(yn,e)}var g1={invalid_ty
+  @181475045 lastFn=Qa@181474462 | function oc(e){let{gen:t,schema:r,validateName:s}=e;if(r===!1)is(e,!1);else if(t
+  @183105280 lastFn=Cu@183105079 | function oc(w){let y=[],x=w,L=x.match(/^(?!""")/g);if(y.push(),L?.length!==1)ret
+  @191502548 lastFn=Tf@191501982 | function oc(b,P){let E=P.stickyStrikes??wf,x={...b.fullscreenBootPending},N=b.fu
+  @192417152 lastFn=Ir@192417120 | function oc(i,p){return i.get(p.state.resumeSessionId??p.state.sessionId)??i.get
+  @194578136 lastFn=G@194578000 | function oc(e){return G(e,Ec)}function uc(e){if(G(e,_c))return!0;if(e.namespaceU
+  @195023833 lastFn=rc@195023362 | function oc(e,t,r){let o=new Set,i=await ic(e,t),a=new Set(i.unexamined),d=new S
+  @195326936 lastFn=ke@195326776 | function oc(){if(ce.platform!=="win32")return ce.env.TERM!=="linux";return Boole
+  @197658198 lastFn=un@197658122 | function oc(e){function t(r){let s=e||{};return s[r]??s[un(r)]}return{get:t}}cla
+  @198934039 lastFn=Da@198933972 | function oc(e,r,t,i){if(i.dev!==r.dev)return re("distinct");if(!Vm(r.ino)||!Vm(i
+
+#42 oc()||wt() hits=1
+  @181075198 lastFn=f_@181075177 | oc()||wt()||pie()!==void 0}function pm(){return wt()&&!Al()}function tl(){return
+
+#44 TG("/bug") hits=0
+
+#44 TG("/feedback") hits=0
+
+#44 gRt hits=1
+  @210459733 lastFn=n@210459690 | m==="share"?"/share":"/bug")}export{n as call}; .// @bun @bytecode // Claude Cod
+
+#51 function dKe( hits=2
+  @187092580 lastFn=DPt@187088969 | function dKe(e,t){let r=e?t[e]:void 0,o=Ld(r)?r:void 0,u=!o&&kr(r)?r:void 0;retu
+  @203038252 lastFn=qP@203038106 | function dKe(b9t){return b9t.debug}function mKe(k9t){return k9t.ideSelection}fun
+
+#51 function wCe( hits=2
+  @186299386 lastFn=cDn@186299112 | function wCe(e,t,r=[],o=[]){let u=r.length>0?`${r.join(" ")} \${1+"$@"}`:'${1+"$
+  @202541044 lastFn=uQ@202540979 | function wCe(s){let{teammate:n,localAgent:m}=dKe(s.viewingAgentTaskId,s.tasks);i
+
+#51 localAgent hits=4
+  @93322172 lastFn=@-1 | localAgent..C....d..Cannot destructure property 'dimColor' from null or undefine
+  @187092674 lastFn=dKe@187092580 | localAgent:u}}function Iln({viewingAgentTaskId:e,tasks:t,transcripts:r,mainIsBus
+  @187092796 lastFn=Iln@187092688 | localAgent:y}=dKe(e,t),k=d??y;if(!k||!e){let x=r[tt()];return{task:void 0,isMain
+  @202541075 lastFn=wCe@202541044 | localAgent:m}=dKe(s.viewingAgentTaskId,s.tasks);if(n)return{type:"viewed",task:n
+
+=== named extracts ===
+dpe decls=3
+  async function dpe( @184388254 miss=false len=480 sha=2c2127c68e29d31d | async function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.require("B:/~BUN/root/
+  function dpe( @179978903 miss=false len=71 sha=9271ae4a9922f400 | function dpe(e){return e.namespace==="pluginCache"&&e.version===void 0}
+  function dpe( @184388260 miss=false len=474 sha=53ce5764a5b7a817 | function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.require("B:/~BUN/root/chunk-
+
+DVt decls=0
+
+HA decls=2
+  function HA( @183134332 miss=false len=310 sha=6159aeb96c552991 | function HA(w){let y=[],x=[],L=w;while(!0){let P=L;if(y.length>0){let et=KA(P);if(x.push(...et.failedExpectations),et.success===!1)break;P=et.remainder}let W=jA(P);if(x.push(...W.f
+  function HA( @199869761 miss=false len=40 sha=3bb78ae13f66afee | function HA(){return new RegExp(qA,"u")}
+
+$Y decls=2
+  function $Y( @183359192 miss=false len=222 sha=1b084d8f99ab95af | function $Y(){return[...m_(),_e("flagSettings"),yo("userSettings")?_e("userSettings"):null,yo("projectSettings")?_e("projectSettings"):null,yo("localSettings")?_e("localSettings"):
+  function $Y( @187729104 miss=false len=315 sha=4c4768ec1baaba7f | function $Y(e,t){if(!goe.has(e.toLowerCase()))return null;if(typeof t.installLocation==="string"&&zS(t.installLocation))return null;let r=t.source;if(typeof r!=="object"||r===null)
+
+rNt decls=1
+  function rNt( @184311051 miss=false len=50 sha=cbfa59a5189ab8a3 | function rNt(){zy().markOwnsControllingTerminal()}
+
+ZW decls=1
+  function ZW( @199184593 miss=false len=727 sha=5e7f25e03173395a | function ZW(r){let s=xt(),[P,a]=u(null),n=k(null),l=k(null),o=k(null),p=k(0),f=k(!0),C=B(()=>{p.current+=1,o.current?.(),o.current=null,l.current=null,n.current?.(),n.current=null,
+
+jJn decls=2
+  function jJn( @183518215 miss=false len=124 sha=70c605e54f801cec | function jJn(r){for(let i of r)if(i.endCode===h)return s_.rendersItalicAsStandout()?r.filter((e)=>e.endCode!==h):r;return r}
+  function jJn( @187505928 miss=false len=34 sha=7c3da5fc290e7b05 | function jJn(){return WJn().value}
+
+awn decls=2
+  function awn( @181264770 miss=false len=232 sha=4493deaecb3786ee | function awn(){if(!wl())return{subscriptionType:null,rateLimitTier:null};let e=Xt();if(!e||!Yp())return{subscriptionType:null,rateLimitTier:null};return{subscriptionType:e.subscrip
+  function awn( @185630066 miss=false len=609 sha=5581cc9ba5bb3f8a | function awn(e,t,r,o){switch(e.reason){case"explicit_ref":return`This directory ${eot(t,r,o)}, so file sync is off for this session; run without ${e.flag} to start from your ${r===
+
+Yp decls=8
+  async function Yp( @204479808 miss=false len=6541 sha=294b535888fc15e0 | async function Yp(e,t,r,s,o,c,u,d,h){let w=!1,b=(N)=>{if(w)return;w=!0,em(r,h,N)},y=await Bs(),O=!1,P=null,x=0;try{if(e.context.scaffold_script&&!s.noScaffold){let fe=await Kr(e,e.
+  function Yp( @178948928 miss=false len=136 sha=44d3e0ea1fa92b68 | function Yp(e){let t=`${e.plugin}: `,{message:r}=e;return`${e.plugin}: $.${e.op} (not awaited): ${r.startsWith(t)?r.slice(t.length):r}`}
+  function Yp( @181264685 miss=false len=85 sha=00efbf346b217ad6 | function Yp(){if(ko()||a.CLAUDE_CODE_OAUTH_TOKEN||Cc())return!1;return!(D7()&&!M7())}
+  function Yp( @183167448 miss=false len=100 sha=c5d0691dcb2fe183 | function Yp(e){let t=(0,Ft.create)(rt.ListValueSchema);for(let r of e)t.values.push(jp(r));return t}
+  function Yp( @185964615 miss=false len=135 sha=5dd792cc69861152 | function Yp(e){if(e.status!=="running"&&e.status!=="pending")return!1;if("isBackgrounded"in e&&e.isBackgrounded===!1)return!1;return!0}
+  function Yp( @189129986 miss=false len=4111 sha=db26beff6e512c92 | function Yp(e){let t={keyword:"and case default else elsif false if in import enherits node or true undef unless main settings $string ",literal:"alias audit before loglevel noop r
+  function Yp( @189602145 miss=false len=179 sha=2daee5c1286d7228 | function Yp(t,o,u){return{kind:"key",name:String.fromCodePoint(o),fn:!1,ctrl:!1,meta:!1,shift:u,option:!1,super:!1,sequence:t,raw:t,isPasted:!1,code:void 0,col:void 0,row:void 0}}
+  function Yp( @204479814 miss=false len=6535 sha=ae94ec4d939266a1 | function Yp(e,t,r,s,o,c,u,d,h){let w=!1,b=(N)=>{if(w)return;w=!0,em(r,h,N)},y=await Bs(),O=!1,P=null,x=0;try{if(e.context.scaffold_script&&!s.noScaffold){let fe=await Kr(e,e.contex
+
+oc decls=15
+  async function oc( @195023827 miss=false len=757 sha=32dd1b47198633ae | async function oc(e,t,r){let o=new Set,i=await ic(e,t),a=new Set(i.unexamined),d=new Set(i.beyond),f=0,p=async(_)=>{if(_.length===0)return;if(r?.aborted===!0||f>=Au){for(let P of _
+  async function oc( @198934033 miss=false len=780 sha=65d1e390f532d154 | async function oc(e,r,t,i){if(i.dev!==r.dev)return re("distinct");if(!Vm(r.ino)||!Vm(i.ino))return re("unverifiable");if(i.ino!==r.ino)return re("distinct");if(i.nlink<2n)return re
+  function oc( @179077773 miss=false len=64 sha=aecdf37202398f48 | function oc(){return n().surfaceCapabilities.replBridgeActive()}
+  function oc( @179351006 miss=false len=56 sha=4a59716a02b28a65 | function oc(e){try{return new URL(e)}catch{return null}}
+  function oc( @179634971 miss=false len=31 sha=84bc0e5a3ed9b051 | function oc(e){return Qo(zn,e)}
+  function oc( @181475045 miss=false len=190 sha=2718e330450455ee | function oc(e){let{gen:t,schema:r,validateName:s}=e;if(r===!1)is(e,!1);else if(typeof r=="object"&&r.$async===!0)t.return(sc.default.data);else t.assign(rc._`${s}.errors`,null),t.r
+  function oc( @183105280 miss=false len=2923 sha=668ed45aa164b54c | function oc(w){let y=[],x=w,L=x.match(/^(?!""")/g);if(y.push(),L?.length!==1)return{success:!1,remainder:x,failedExpectations:y};x=x.slice(L[0].length);let P=Bo(x);if(y.push(...P.f
+  function oc( @191502548 miss=false len=1135 sha=7ee9b2c6f02be33e | function oc(b,P){let E=P.stickyStrikes??wf,x={...b.fullscreenBootPending},N=b.fullscreenAutoDisabled,W=b.fullscreenBootStrikes?.version===P.version?b.fullscreenBootStrikes.count:0;
+  function oc( @192417152 miss=false len=91 sha=3629568d006d29dc | function oc(i,p){return i.get(p.state.resumeSessionId??p.state.sessionId)??i.get(Ir(p.id))}
+  function oc( @194578136 miss=false len=30 sha=7f6a5abffba35301 | function oc(e){return G(e,Ec)}
+
+dKe decls=2
+  function dKe( @187092580 miss=false len=108 sha=329d1655410060a4 | function dKe(e,t){let r=e?t[e]:void 0,o=Ld(r)?r:void 0,u=!o&&kr(r)?r:void 0;return{teammate:o,localAgent:u}}
+  function dKe( @203038252 miss=false len=35 sha=18405a9a5bbfe9a0 | function dKe(b9t){return b9t.debug}
+
+lr decls=31
+  async function lr( @180616682 miss=false len=46 sha=f734fad99d107c95 | async function lr(e){try{await e()}catch(t){}}
+  async function lr( @188540401 miss=false len=298 sha=746db8bb8691b0f2 | async function lr(e={}){let t=e.dir??hn,[n,r,s]=await Promise.all([an(en(t,fi)),an(en(t,pi)),an(en(t,hi))]),d=or(n),o=or(r),u=or(s);return{prewarm_vda_outcome:d.outcome,prewarm_vda
+  async function lr( @198803226 miss=false len=329 sha=d08c13ed141b9a26 | async function lr(e,r,t,i=!1,o=t?.chunkBytes??fr){let a=Math.max(1,o),s=r;while(s<e.size){let d=Math.min(a,e.size-s),u=Buffer.allocUnsafe(d),l=await ot(e,u,d,s,i&&s===r,t);if(!l.ok
+  function lr( @178948373 miss=false len=236 sha=e0f07c91969a3933 | function lr(e){if(e===null)return"a rejection that is not an Error";if(Vp(e))return"a rejection that is not plain data";let t=Object.getOwnPropertyDescriptor(e,"message")?.value;re
+  function lr( @178994166 miss=false len=52 sha=63bfa2c3ae401f45 | function lr(e,t){return function(o){return e(t(o))}}
+  function lr( @179350707 miss=false len=91 sha=ef5f04667b7ce4d8 | function lr(e){if(typeof e!=="string")return!1;return/^([a-z][a-z\d+\-.]*:)?\/\//i.test(e)}
+  function lr( @180058457 miss=false len=32 sha=54cc2c60481d3a70 | function lr(e,t){return bc(e,t)}
+  function lr( @180616688 miss=false len=40 sha=27480b5e0523455d | function lr(e){try{await e()}catch(t){}}
+  function lr( @182107056 miss=false len=2693 sha=d1b12448fc337888 | function lr(e){if(e===null||typeof e!=="object")return{action:"drop",reason:`non-object permission update: ${ke(e)}`};let{type:t,destination:r}=e;if(typeof r!=="string"||!ml.has(r)
+  function lr( @183876096 miss=false len=32 sha=9d08dabd0c44f7cb | function lr(e){return B(qS(),e)}
+
+mbe decls=2
+  async function mbe( @186039090 miss=false len=768 sha=235235a336fa2520 | async function mbe(e,t){if(!e)return{resultType:"emptyPath"};let r;try{r=Lat(gt(e))}catch(d){let y=zk(d,"Path contains null bytes");if(!y)h(Error("validateDirectoryForWorkspace: ex
+  function mbe( @186039096 miss=false len=762 sha=11689b94bdfc93a1 | function mbe(e,t){if(!e)return{resultType:"emptyPath"};let r;try{r=Lat(gt(e))}catch(d){let y=zk(d,"Path contains null bytes");if(!y)h(Error("validateDirectoryForWorkspace: expandPa
+
+zk decls=5
+  async function zk( @200618675 miss=false len=462 sha=fd011a5f395723a9 | async function zk(e,t,n){if(e.headers.delete("anthropic-organization-id"),e.status<300||e.headers.get("x-gateway-upstream")===null)return e;let i=Pp.get(e);if(i){if(e.status===400|
+  function zk( @178831583 miss=false len=58 sha=e762e225f805e0f2 | function zk(n,e){return n instanceof Error&&n.message===e}
+  function zk( @182892095 miss=false len=610 sha=d71af04f050a8654 | function zk(e){switch(e){case mt.ScalarType.STRING:return"string";case mt.ScalarType.BOOL:return"boolean";case mt.ScalarType.INT64:case mt.ScalarType.SINT64:case mt.ScalarType.SFIX
+  function zk( @200618681 miss=false len=456 sha=24a51d91e9f64f95 | function zk(e,t,n){if(e.headers.delete("anthropic-organization-id"),e.status<300||e.headers.get("x-gateway-upstream")===null)return e;let i=Pp.get(e);if(i){if(e.status===400||e.sta
+  function zk( @201600227 miss=false len=138 sha=0566067b9cb569d2 | function zk(l,f){let g=l.at(-1)?.data;return e(Pe,{children:e(t,{dimColor:!0,children:g?`Running ${g.toolName}\u2026`:"Working\u2026"})})}
+
+=== methods ===
+rendersItalicAsStandout @183517458 miss=false len=78 sha=686a0acb1a69af82 | rendersItalicAsStandout(){return(this.proc.env.TERM??"").startsWith("screen")}
+
+=== caller lastFn ===
+caller "await DVt(" n=1
+  caller@184388478 -> dpe@184388254 miss=false len=480 sha=2c2127c68e29d31d | async function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.re
+
+caller "await HA(x,y)" n=2
+  caller@184387071 -> S0e@184385987 miss=false len=2007 sha=9f5297a99d486061 | async function S0e(e){let t=M()&&e!==void 0?e:void 0,r=K(),o=_l(be()),u=Zr(),d=u.sessionFile;if(d===null||Yc()){u.currentSessionRelocatedCwd=be(),Gf(r,"cd",o);r
+  caller@184387295 -> S0e@184385987 miss=false len=2007 sha=9f5297a99d486061 | async function S0e(e){let t=M()&&e!==void 0?e:void 0,r=K(),o=_l(be()),u=Zr(),d=u.sessionFile;if(d===null||Yc()){u.currentSessionRelocatedCwd=be(),Gf(r,"cd",o);r
+
+caller "$Y(ke,Pe)" n=1
+  caller@187868585 -> qFe@187868067 miss=false len=7202 sha=8f876ab141125a4c | async function qFe({cacheOnly:e,preview:t=!1,storageV5:r,credentials:o}){let u=vn(),d={...gle(),...u.enabledPlugins||{}},y=[],k=[],A=[],x=Object.entries(d).filt
+
+caller "urr(awn())" n=1
+  caller@189860553 -> So@189856700 miss=false len=5855 sha=dffa0b942906b5ef | async function So(e,t,o,r,i,d,u){let{sessionId:p,short:b,jobDir:y,freshDir:A}=d,R=ft(e),k=R>=0?e.slice(0,R):e,x=jt(k,"--agent"),T=void 0,N=jt(k,"--name","-n"),P
+
+caller "if(!Yp())" n=2
+  caller@181264508 -> oI@181264494 miss=false len=191 sha=e7d504d767f2f2eb | function oI(){if(!Yp())return null;switch(oEn().subscriptionType){case"max":return"max";case"pro":return"pro";case"team":return"team";case"enterprise":return"en
+  caller@181265472 -> iI@181265458 miss=false len=99 sha=0c656d845c85ebbe | function iI(){if(!Yp())return null;let e=oEn().rateLimitTier;return e!==void 0&&kte.test(e)?e:null}
+
+caller "return oc()||wt()" n=1
+  caller@181075191 -> f_@181075177 miss=false len=48 sha=75721126dac5149a | function f_(){return oc()||wt()||pie()!==void 0}
+
+caller "TG(\"/bug\")" n=0
+
+caller "dKe(s.viewingAgentTaskId" n=2
+  caller@202541001 -> uQ@202540979 miss=false len=65 sha=c4821c48ecb01461 | function uQ(s){return dKe(s.viewingAgentTaskId,s.tasks).teammate}
+  caller@202541089 -> wCe@202541044 miss=false len=174 sha=d9298b63153b864d | function wCe(s){let{teammate:n,localAgent:m}=dKe(s.viewingAgentTaskId,s.tasks);if(n)return{type:"viewed",task:n};if(m)return{type:"named_agent",task:m};return{t
+
+caller "copiedVia:ft,copy:se}=ZW(" n=1
+  caller@209162175 -> cp@209161753 miss=true len=0 sha=- | function cp({server:a,serverToolsCount:b,onViewTools:S,onCancel:x,onComplete:v,borderless:T=!1,hasClaudeAiToken:N,designCredential:K}){let P=B((ee,...Le)=>v(typ

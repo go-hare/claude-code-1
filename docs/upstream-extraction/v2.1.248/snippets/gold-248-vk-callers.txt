@@ -1,0 +1,75 @@
+# gold-248-vk-callers
+# when=2026-09-22T02:20:00.000Z
+# SEA248=226708128
+# Vk def = function Vk(e){return L().preExitFlush.register(e)} @178613451
+# Exclude unrelated Vk: pricing @180199924, SQL @200415080, React FiberRoot @223093892
+
+## Real preExitFlush Vk call sites (5)
+
+### 1. X$n @183765544 — pluginUsage storageV5 register
+```
+function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}
+async function CNe(e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}
+```
+Registers: flush pending pluginUsage via CNe (Aln) on cleanup bag + preExitFlush bag.
+Leftover: `registerPluginUsageStorageV5` in `src/utils/plugins/pluginUsagePending.ts`
+→ `registerCleanup` + `registerPreExitFlush` → `flushPendingPluginUsageToStorageV5`
+
+### 2. wt @190429035 — StatsProvider lastSessionMetrics
+```
+Va=D()&&kt!==void 0?Vk(async()=>{
+  let Br=Ie.getAll();
+  if(Object.keys(Br).length>0)await cc((Ga)=>({...Ga,lastSessionMetrics:Br}),kt);
+  jr=!0
+}):void 0
+```
+Registers: async save lastSessionMetrics via storageV5; sync process.on('exit') fallback if Vk did not run.
+Leftover: `src/context/stats.tsx` StatsProvider
+→ `registerPreExitFlush` when `isHoverRestOn() && storageV5`
+
+### 3. be @190739086 — durable artifact pendingOps drain
+```
+function be(e){let{pendingOps:t}=me().durable;t.add(e);e.then(r,r),Vk(wr)}
+async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}
+```
+Registers: wr drains durable.pendingOps (Promise set) with 10s timeout.
+Leftover: invent-ban SKIP — `artifactAutoReact/store` has `pendingOps: Set<string>` (different shape); no `be()`/`wr()` host that tracks Promise ops.
+
+### 4. qd @192241903 — editor draftForDisk / fleetview launcher
+```
+uy=()=>D()&&Io!==void 0?Vk(async()=>{
+  let py=No.draftForDisk();
+  let my=[...Ho.getSnapshot().collapsed];
+  dy.current=py||my.length?await AIt(ro,{q:py,collapsed:my},Io):!0
+}):void 0
+```
+Registers: persist prompt draft + collapsed selection to storageV5.
+Leftover: invent-ban SKIP — VSCode/fleetview/agents-launcher editor host; do not invent.
+
+### 5. TIn.writerFor @192334800 — error/MCP log sink
+```
+this.writers.set(e,r),
+Et(async()=>{r?.dispose(),await this.pendingWrites.settle()}),
+Vk(this.flushBeforeExit)
+flushBeforeExit=()=>this.flush()
+```
+Registers: flush all buffered writers before exit; Et disposes writer + settles pendingWrites.
+Leftover: `src/utils/errorLogSink.ts` getLogWriter
+→ `registerPreExitFlush(flushAllLogWriters)`; pendingWrites.fm() invent-ban (leftover sync appendFileSync)
+
+### 6. Aye @203114499 — useCostSummary session cost persist
+```
+ee=D()&&x!==void 0?Vk(async()=>{await ZFn(d?.(),x),Z=!0}):void 0
+// exit: if(!Z)eUn(d?.())
+async function ZFn(e,t){await cc(zfe(e),t)}
+function eUn(e){vMe(zfe(e))}
+```
+Registers: async save session costs (zfe) via storageV5; sync exit fallback.
+Leftover: `src/costHook.ts` useCostSummary
+→ `registerPreExitFlush` when `isHoverRestOn() && storageV5`
+(lastGracefulShutdown / Jhe invent-ban — leftover has no those fields)
+
+## False-positive Vk( hits excluded
+- @180200712 J4 pricing Vk(t.id,r)
+- @200413042 / @200413306 Gk SQL await Vk(t,subs,...)
+- @223094464 Vf React `new Vk(...)`

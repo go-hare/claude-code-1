@@ -1,6 +1,11 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import chalk from 'chalk'
-import { getInitialSettings } from './settings/settings.js'
+import { getEnabledSettingSources } from './settings/constants.js'
+import {
+  getInitialSettings,
+  getSettingsForSource,
+} from './settings/settings.js'
+import type { SettingsJson } from './settings/types.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
@@ -744,10 +749,172 @@ export function toPersistableEffort(
   return undefined
 }
 
-export function getInitialEffortSetting(): EffortLevel | undefined {
+export type EffortSettingsSlice = {
+  effortLevel?: unknown
+  modelSettings?: Record<
+    string,
+    { effortLevel?: unknown } | null | undefined
+  > | null
+  ultracode?: unknown
+}
+
+/** densable p5e — canonical model id used as the modelSettings key. */
+export function canonicalEffortModelKey(model: string): string {
+  const { getCanonicalName } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+  return getCanonicalName(model)
+}
+
+/**
+ * densable G3 — persisted effort tokens. low|medium|high|xhigh only; no max.
+ */
+export function parsePersistedEffortLevel(
+  value: unknown,
+): EffortLevel | undefined {
+  if (
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
+  ) {
+    return value
+  }
+  return undefined
+}
+
+function normalizeStoredEffort(value: unknown): EffortLevel | undefined {
+  if (typeof value !== 'string') return undefined
+  return toPersistableEffort(parseEffortLevelString(value))
+}
+
+function normalizeGoldEffort(value: unknown): EffortLevel | undefined {
+  if (typeof value !== 'string') return undefined
+  return parsePersistedEffortLevel(parseEffortLevelString(value))
+}
+
+/**
+ * densable J (2.1.251 #61).
+ * Sources are low-to-high (Ii / getEnabledSettingSources). The walk is reversed so the
+ * highest-priority source wins. Per-model effortLevel is read into byModel.
+ * When a source has no entry for a key already seen, that source's
+ * effortLevel is copied onto the key. ultracode clears byModel.
+ */
+export function resolveEffortByModel(input: {
+  merged: EffortSettingsSlice
+  sourcesLowToHigh: Array<EffortSettingsSlice | null | undefined>
+}): { default: EffortLevel | undefined; byModel: Record<string, EffortLevel> } {
+  const defaultLevel = normalizeStoredEffort(input.merged.effortLevel)
+  if (input.merged.ultracode === true) {
+    return { default: defaultLevel, byModel: {} }
+  }
+
+  const sources = input.sourcesLowToHigh.filter(
+    (source): source is EffortSettingsSlice => source != null,
+  )
+  const highToLow = [...sources].reverse()
+  const maps = highToLow.map(source => {
+    const perModel = new Map<string, unknown>()
+    const entries = source.modelSettings
+    if (entries && typeof entries === 'object') {
+      for (const [raw, value] of Object.entries(entries)) {
+        const level = value?.effortLevel
+        if (level === undefined) continue
+        const canonical = canonicalEffortModelKey(raw)
+        if (raw === canonical || !perModel.has(canonical)) {
+          perModel.set(canonical, level)
+        }
+      }
+    }
+    return perModel
+  })
+
+  const keys = new Set<string>()
+  for (const map of maps) {
+    for (const key of map.keys()) keys.add(key)
+  }
+
+  const byModel: Record<string, EffortLevel> = {}
+  for (const key of keys) {
+    for (let index = 0; index < highToLow.length; index++) {
+      const perModel = maps[index]!.get(key)
+      if (perModel !== undefined) {
+        const normalized = normalizeGoldEffort(perModel)
+        if (normalized !== undefined) byModel[key] = normalized
+        break
+      }
+      const sourceLevel = highToLow[index]!.effortLevel
+      if (sourceLevel !== undefined) {
+        const normalized = normalizeGoldEffort(sourceLevel)
+        if (normalized !== undefined) byModel[key] = normalized
+        break
+      }
+    }
+  }
+  return { default: defaultLevel, byModel }
+}
+
+/** densable K — persist effort on the canonical model, or top-level for prototype keys. */
+export function effortModelSettingsPatch(
+  model: string,
+  level: EffortLevel,
+): SettingsJson {
+  const key = canonicalEffortModelKey(model)
+  if (Object.hasOwn(Object.prototype, key)) {
+    return { effortLevel: level }
+  }
+  return { modelSettings: { [key]: { effortLevel: level } } }
+}
+
+/** /effort auto clears the per-model entry and the legacy top-level effortLevel. */
+export function effortModelClearPatch(model: string): SettingsJson {
+  const key = canonicalEffortModelKey(model)
+  if (Object.hasOwn(Object.prototype, key)) {
+    return { effortLevel: undefined }
+  }
+  return {
+    effortLevel: undefined,
+    modelSettings: { [key]: undefined },
+  }
+}
+
+function readEffortSourcesLowToHigh(): Array<SettingsJson | null> {
+  return getEnabledSettingSources().map(source => getSettingsForSource(source))
+}
+
+export function readPersistedEffortByModel(): {
+  default: EffortLevel | undefined
+  byModel: Record<string, EffortLevel>
+} {
+  return resolveEffortByModel({
+    merged: getInitialSettings(),
+    sourcesLowToHigh: readEffortSourcesLowToHigh(),
+  })
+}
+
+export function getInitialEffortSetting(
+  model?: string,
+): EffortLevel | undefined {
   // toPersistableEffort filters 'max' for non-ants on read, so a manually
   // edited settings.json doesn't leak session-scoped max into a fresh session.
-  return toPersistableEffort(getInitialSettings().effortLevel)
+  const resolved = readPersistedEffortByModel()
+  const target = model ?? currentMainLoopModelForEffort()
+  if (target) {
+    const perModel = resolved.byModel[canonicalEffortModelKey(target)]
+    if (perModel !== undefined) return perModel
+  }
+  return resolved.default
+}
+
+function currentMainLoopModelForEffort(): string | undefined {
+  try {
+    const { getMainLoopModel } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/model.js') as typeof import('./model/model.js')
+    return getMainLoopModel()
+  } catch {
+    return undefined
+  }
 }
 
 /**

@@ -415,6 +415,9 @@ export const HOOK_EVENTS = [
   'SubagentStop',
   'PreCompact',
   'PostCompact',
+  // densable 2.1.251 #1 — mBn registry keys, after PostCompact
+  'PreModelSwitch',
+  'PostModelSwitch',
   'PermissionRequest',
   'PermissionDenied',
   'Setup',
@@ -550,6 +553,32 @@ export const SessionStartHookInputSchema = lazySchema(() =>
       source: z.enum(['startup', 'resume', 'clear', 'compact', 'fork']),
       agent_type: z.string().optional(),
       model: z.string().optional(),
+      // densable 2.1.251 SessionStart schema (arrow @180817935)
+      session_title: z.string().optional(),
+      seconds_since_last_response: z
+        .number()
+        .optional()
+        .describe(
+          "resume/fork: seconds since the resumed transcript's last assistant response",
+        ),
+      context_tokens: z
+        .number()
+        .optional()
+        .describe(
+          "resume/fork: the resumed transcript's last response input + cache_read + cache_creation + output tokens (for a server-side tool loop, its last iteration's window, not the summed totals)",
+        ),
+      prompt_cache_likely_expired: z
+        .boolean()
+        .optional()
+        .describe(
+          'resume/fork: seconds_since_last_response exceeds the prompt-cache TTL, so the first request re-caches context_tokens',
+        ),
+      estimated_cache_write_usd: z
+        .number()
+        .optional()
+        .describe(
+          'resume/fork: estimated cost of re-caching context_tokens on the session model — the managed modelPricing when set, otherwise list price; excludes the response',
+        ),
     }),
   ),
 )
@@ -637,6 +666,68 @@ export const PostCompactHookInputSchema = lazySchema(() =>
       compact_summary: z
         .string()
         .describe('The conversation summary produced by compaction'),
+    }),
+  ),
+)
+
+/**
+ * densable 2.1.251 `jw` — shared PreModelSwitch / PostModelSwitch input.
+ * `source` is `z.enum(e)` where `e` and the `kQ` descriptions are arguments
+ * to `jw`, not present in the locked body, so this field stays a string.
+ */
+function modelSwitchHookFields() {
+  return {
+    from_model: z
+      .string()
+      .describe('Resolved model id the session was running before the switch'),
+    to_model: z
+      .string()
+      .describe('Resolved model id the session runs after the switch'),
+    requested_model: z
+      .string()
+      .nullable()
+      .describe(
+        'What was asked for (alias such as "opus", a full id, or null for "default")',
+      ),
+    source: z.string(),
+    context_tokens: z
+      .number()
+      .describe(
+        "Prompt tokens the next request re-sends: the last main-thread response's input + cache_read + cache_creation + output tokens (0 before the first response; for a server-side tool loop, its last iteration's window, not the summed totals)",
+      ),
+    prompt_cache_warm: z
+      .boolean()
+      .describe(
+        "Whether the current model's prompt cache is likely still warm (a switch then forfeits it)",
+      ),
+    cache_ttl: z.enum(['5m', '1h']),
+    estimated_cache_write_usd: z
+      .number()
+      .describe(
+        'Estimated cost of re-caching context_tokens on to_model at its cache-write rate — the managed modelPricing when set, otherwise list price; excludes the response',
+      ),
+    pricing: z
+      .enum(['configured', 'catalog', 'default'])
+      .describe(
+        'configured: priced at the managed modelPricing setting; catalog: list price; default: to_model unknown, the default tier was assumed',
+      ),
+  }
+}
+
+export const PreModelSwitchHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema().and(
+    z.object({
+      hook_event_name: z.literal('PreModelSwitch'),
+      ...modelSwitchHookFields(),
+    }),
+  ),
+)
+
+export const PostModelSwitchHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema().and(
+    z.object({
+      hook_event_name: z.literal('PostModelSwitch'),
+      ...modelSwitchHookFields(),
     }),
   ),
 )
@@ -864,6 +955,8 @@ export const HookInputSchema = lazySchema(() =>
     SubagentStopHookInputSchema(),
     PreCompactHookInputSchema(),
     PostCompactHookInputSchema(),
+    PreModelSwitchHookInputSchema(),
+    PostModelSwitchHookInputSchema(),
     PermissionRequestHookInputSchema(),
     SetupHookInputSchema(),
     TeammateIdleHookInputSchema(),

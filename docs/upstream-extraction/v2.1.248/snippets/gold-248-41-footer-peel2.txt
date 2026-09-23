@@ -1,0 +1,94 @@
+# gold-248-41-footer-peel2
+
+## #41 y5e-interval @203023444
+len=200 sha=1affed348b6a1158
+y5e(d,C,x,H){let X=C<30000?90000:C<300000?180000:C<1800000?600000:1800000,Z=x<=0?90000:x===1?300000:x===2?900000:1800000,ee=H<=0?90000:H===1?120000:H===2?240000:300000;return Math.max(X,Z,ee,d?0:g5e)}
+
+## #41 nge-usePrStatus @203023644
+len=368 sha=37babc555f753f44
+function nge(d,C=!0){let x=xt(),{host:H}=pt(),X=ca(),[Z]=u(()=>new wY({setTimeout:(ee,re)=>x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,enabled:C,focused:X})},[Z,d,C,X]),Ht(Z.subscribe,Z.getSnapshot)}
+
+## #41 function eDt needle="function eDt" hits=1
+- #0 @184547981 pproved";case"CHANGES_REQUESTED":return"changes_requested";default:return"pending"}}async function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return nul
+
+## #41 async function eDt needle="async function eDt" hits=1
+- #0 @184547975 turn"approved";case"CHANGES_REQUESTED":return"changes_requested";default:return"pending"}}async function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return nul
+
+## #41 eDt( needle="eDt(" hits=3
+- #0 @184547990 case"CHANGES_REQUESTED":return"changes_requested";default:return"pending"}}async function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return null
+- #1 @184569113 )))return Promise.resolve();let t=ZJt(e);return mw(t),t}async function ZJt(e){let t=await eDt(e);if(t==="fetch-failed"){f("pr_started_announce","lookup_failed");return}if(t===null||typ
+- #2 @203023824 >x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(
+
+## eDt lastFn near nge {"i":-1,"name":""}
+## #41 eDt@184547981 @184547981
+len=158 sha=2617400c6de8944b
+function eDt(e){if(!await _h())return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}
+
+## #41 function Wen needle="function Wen" hits=1
+- #0 @184548139 l([Fa(),BS()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}function Wen(){return R("tengu_harbor_prism",!1)}async function sJt(e){let{stdout:t,code:r}=await Ue("
+
+## #41 Wen() needle="Wen()" hits=3
+- #0 @184548102 return null;let[r,o]=await Promise.all([Fa(),BS()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}function Wen(){return R("tengu_harbor_prism",!1)}async fun
+- #1 @184548148 S()]);if(r===o)return null;return await(()=>Wen()?uJt(r):sJt(o))()??await tXe(e)}function Wen(){return R("tengu_harbor_prism",!1)}async function sJt(e){let{stdout:t,code:r}=await Ue("gh
+- #2 @203023854 ate.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,e
+
+## #41 Wen@184548139 @184548139
+len=49 sha=1b70b9fc6406a2cf
+function Wen(){return R("tengu_harbor_prism",!1)}
+
+## #41 uJt @184548939
+len=2623 sha=2a8b0a3af589489d
+async function uJt(e){let t=Date.now();if(Tt()||KX())return null;if(e==="main"||e==="master")return null;let r=await pJt();if(!r)return null;let o=await Rfe(r.host);if(o.kind!=="token"){if(!Mo(r.host)&&!i2(process.env.GH_HOST,r.host))return null;return JE().logAuthState(o.kind==="gh-missing"?"gh_missing":"needs_auth"),Pfe(r.host),o.kind==="gh-missing"?"gh-missing":"needs-auth"}JE().logAuthState("token_present");let u=o.token,p=await fJt(r,u),g=JE().directStateForBranch(e),k=g.pr&&{...g.pr,reviewDecision:g.reviewDecision},E=s_t(r.host),C=new URL(E).origin,M=`${E}/repos/${p.owner}/${p.repo}/pulls?head=${encodeURIComponent(r.owner)}:${encodeURIComponent(e)}&state=open&per_page=1`,L=!1,N;try{let we=AbortSignal.timeout(mH),Pe={Authorization:`Bearer ${u}`,Accept:"application/vnd.github+json","X-GitHub-Api-Version":mXe,"User-Agent":Sa(),...g.etag&&{"If-None-Match":g.etag}},Ie=(Be)=>fetch(Be,{...fi({url:Be}),keepalive:!1,method:"GET",headers:Pe,redirect:"manual",signal:we}),Te=await Ie(g.redirectedListUrl??M),xe=aJt.has(Te.status)?Te.headers.get("location"):null,Fe=xe?new URL(xe,M):null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()),Ne=Be.success?Be.data[0]:void 0;if(Ne&&g.pr?.number!==Ne.number)g.reviewDecision="";g.pr=Ne?{number:Ne.number,url:Ne.html_url,isDraft:Ne.draft}:null}else{if(Te.status===401)Pfe(r.host);else if(Te.status===403||Te.status===429)JE().backOffFromResponse(Te);return f("github_pr_status_direct",Te.status===401?"unauthorized":Te.status===403||Te.status===429?"rate_limited":"http_error",{http_status:si(Te.status)}),n(`[ghPrStatus] REST list ${Te.status} on ${r.host}`,{level:"debug"}),"fetch-failed"}}catch(we){return f("github_pr_status_direct","fetch_threw",{error_name:JC(we)??v("unknown"),errno_code:oo(we)??oo(we?.cause)??v("")}),"fetch-failed"}let U=g.pr;if(!U)return b("github_pr_status_direct",{http_status:si(N),pr_found:!1,review_fetched:!1}),null;let j=g.reviewDecision,G=!1,ue=L||Date.now()-g.lastReviewFetchAt>=iJt;if(ue){let we=await dJt({host:r.host,owner:p.owner,repo:p.repo},u,U.number);if(we!==null){if(j=we,g.pr?.number===U.number)g.reviewDecision=we,g.lastReviewFetchAt=t}else G=!0}let pe={http_status:si(N),pr_found:!0,review_fetched:ue};if(G)y("github_pr_status_direct","review_decision_unavailable",pe);else b("github_pr_status_direct",pe);let fe=!G&&k?.number===U.number&&k.url===U.url&&k.isDraft===U.isDraft&&k.reviewDecision===j;return{number:U.number,url:U.url,reviewState:pXe(U.isDraft,j),...fe&&{notModified:!0}}}
+
+## #41 uJt-win @184548939
+:w.number(),html_url:w.string(),draft:w.boolean()}))),cJt=h(()=>w.object({data:w.object({repository:w.object({pullRequest:w.object({reviewDecision:w.string().nullable()}).nullable()}).nullable()})}));async function uJt(e){let t=Date.now();if(Tt()||KX())return null;if(e==="main"||e==="master")return null;let r=await pJt();if(!r)return null;let o=await Rfe(r.host);if(o.kind!=="token"){if(!Mo(r.host)&&!i2(process.env.GH_HOST,r.host))return null;return JE().logAuthState(o.kind==="gh-missing"?"gh_missing":"needs_auth"),Pfe(r.host),o.kind==="gh-missing"?"gh-missing":"needs-auth"}JE().logAuthState("token_present");let u=o.token,p=await fJt(r,u),g=JE().directStateForBranch(e),k=g.pr&&{...g.pr,reviewDecision:g.reviewDecision},E=s_t(r.host),C=new URL(E).origin,M=`${E}/repos/${p.owner}/${p.repo}/pulls?head=${encodeURIComponent(r.owner)}:${encodeURIComponent(e)}&state=open&per_page=1`,L=!1,N;try{let we=AbortSignal.timeout(mH),Pe={Authorization:`Bearer ${u}`,Accept:"application/vnd.github+json","X-GitHub-Api-Version":mXe,"User-Agent":Sa(),...g.etag&&{"If-None-Match":g.etag}},Ie=(Be)=>fetch(Be,{...fi({url:Be}),keepalive:!1,method:"GET",headers:Pe,redirect:"manual",signal:we}),Te=await Ie(g.redirectedListUrl??M),xe=aJt.has(Te.status)?Te.headers.get("location"):null,Fe=xe?new URL(xe,M):null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()),Ne=Be.success?Be.data[0]:void 0;if(Ne&&g.pr?.number!==Ne.number)g.reviewDecision="";g.pr=Ne?{number:Ne.number,url:Ne.html_url,isDraft:Ne.draft}:null}else{if(Te.status===401)Pfe(r.host);else if(Te.status===403||Te.status===429)JE().backOffFromResponse(Te);return f("github_pr_status_direct",Te.status===401?"unauthorized":Te.status===403||Te.status===429?"rate_limited":"http_error",{http_status:si(Te.status)}),n(`[ghPrStatus] REST list ${Te.status} on ${r.host}`,{level:"debug"}),"fetch-failed"}}catch(we){return f("github_pr_status_direct","fetch_threw",{error_name:JC(we)??v("unknown"),errno_code:oo(we)??oo(we?.cause)??v("")}),"fetch-failed"}let U=g.pr;if(!U)return b("github_pr_status_direct",{http_status:si(N),pr_found:!1,review_fetched:!1}),null;let j=g.reviewDecision,G=!1,ue=L||Date.now()-g.lastReviewFetchAt>=iJt;if(ue){let we=await dJt({host:r.host,owner:p.owner,repo:p.repo},u,U.number);if(we!==null){if(j=we,g.pr?.number===U.number)g.reviewDecision=we,g.lastReviewFetchAt=t}else G=!0}let pe={http_status:si(N),pr_found:!0,review_fetched:ue};if(G)y("github_pr_status_direct","review_decision_unavailable",pe);else b("github_pr_status_direct",pe);let fe=!G&&k?.number===U.number&&k.url===U.url&&k.isDraf
+
+## #41 function JE needle="function JE()" hits=1
+- #0 @184547641 is.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.of(z().host)}function nst(e){switch(e){case"needs-auth":return"gh auth login f
+
+## #41 new dXe needle="new dXe" hits=1
+- #0 @184547632 ntil=0,this.lastPersistedCacheBody="",this.prStatusByUrl.cache.clear()}}var oJt=new K(()=>new dXe);function JE(){return oJt.of(z().host)}function nst(e){switch(e){case"needs-auth":return"
+
+## #41 JE @184547641
+len=38 sha=7ba9de4939aa2f4c
+function JE(){return oJt.of(z().host)}
+
+## #41 function ege needle="function ege" hits=4
+- #0 @184446846 lice(0,-1);if(t.endsWith(`
+`))t=t.slice(0,-1)}return super.equals(e,t,r)}}var t5e=new e5e;function ege(e,t,r){return t5e.diff(e,t,r)}function N9t(e,t){if(t.stripTrailingCr)e=e.replace(/\r\n/g,
+- #1 @203019803 10]=vY,bY[11]=r5e;else r5e=bY[11];return r5e}var Zfe=Xfe;N();import{watch as s5e}from"fs";function ege(){let[d,C]=u(null),x=fe().storageV5;return k(()=>{if(!_t()||Kt())return;let H=Uc(),X=Kn(H
+- #2 @216392316 e(e,t){var r={lhs:[],rhs:[]};return st(e,function(n){t(n)?r.lhs.push(n):r.rhs.push(n)}),r}function ege(e,t){var r=Y3();try{return t()}finally{console.log(e+" time: "+(Y3()-r)+"ms")}}function t
+- #3 @222696557 col gap-0.5 ${HV}`;GO={Tooltip:WO,DisabledReasonTooltip:PW};AW=(0,rr.createContext)(!1)});function ege(e){return Object.hasOwn(NW,e)}function tge(e){return typeof e=="string"}var zb,Rd,NW,Zhe,
+
+## #41 ege@184446846 @184446846
+len=43 sha=c6d734a5e10a15da
+function ege(e,t,r){return t5e.diff(e,t,r)}
+
+## #41 ege@203019803 @203019803
+len=636 sha=63a105e5d449c594
+function ege(){let[d,C]=u(null),x=fe().storageV5;return k(()=>{if(!_t()||Kt())return;let H=Uc(),X=Kn(H),Z,ee=async()=>{let me=(await nr(X,x))?.children?.find((xe)=>xe.kind!=="frame"&&!KC.test(xe.href)),ge=me?Number(me.id):NaN;if(!me||!Number.isFinite(ge))return;C((xe)=>xe?.number===ge&&xe.url===me.href?xe:{number:ge,url:me.href})};if(x&&Gt(H))return vD(x,H,ee,"[useBgSessionPr]");try{Z=s5e(X,(re,me)=>{if(me&&!me.startsWith("state.json"))return;ee()}),Z.on("error",(re)=>n(`[useBgSessionPr] watcher error: ${l(re)}`,{level:"warn"})),Z.unref()}catch(re){n(`[useBgSessionPr] watch skipped: ${l(re)}`)}return ee(),()=>Z?.close()},[x]),d}
+
+## #41 ege@216392316 @216392316
+len=92 sha=07d0a136d8d6392a
+function ege(e,t){var r=Y3();try{return t()}finally{console.log(e+" time: "+(Y3()-r)+"ms")}}
+
+## #41 ege@222696557 @222696557
+len=43 sha=cb8d4a9d83cd1cc9
+function ege(e){return Object.hasOwn(NW,e)}
+
+## #41 FY-nge-call @203025150
+ted:Pe,isPasting:Ie,showExpandPasteHint:Ae,isSearching:Ne,historyQuery:Ve,setHistoryQuery:et,historyFailedMatch:tt,onOpenTasksDialog:Ke,onOpenSessionMemories:nt}){Qfe();let ft=rhe(),Yt=N5e(ft)&&!Kt(),Ct=nge(ge,Yt),Jt=ege(),Ut=Yt&&Ct.pr?Ct.pr:Jt?{number:Jt.number,url:Jt.url,reviewState:void 0,kind:est(Jt.url)?"mr":void 0}:null,Bt=!Ut&&Yt&&Ct.needsAuth,At=j((Ro)=>Ro.settings?.prUrlTemplate);DCn(Ut?VF(Ut.url,At):void 0,Ut?.url,Ut?.kind);let Zt=yt(),oo=Ut?.number,ro=Ut?.url,bo=Ut?.reviewState,ko=Ut?.kind,Co=Ct.lastUpdated>0||JE().pollerDisabled;k(()=>{Zt((Ro)=>{let Xo=!Co&&Ro.prStatus!==null&&(oo=
+
+## #41 .bump.emit needle=".bump.emit" hits=5
+- #0 @184566913 _amend")});gEn()?.add(1)}if(gH.test(e))s("tengu_git_operation",{operation:v("push")}),JE().bump.emit();let p=Ofe.find((N)=>N.re.test(e)),g=Dfe(e),k=LJt(e);if(p)s("tengu_git_operation",{opera
+- #1 @184567032 N)=>N.re.test(e)),g=Dfe(e),k=LJt(e);if(p)s("tengu_git_operation",{operation:c(p.op)}),JE().bump.emit();let E=NJt(e);if(E!==null){if(s("tengu_git_operation",{operation:v("pr_review")}),/--app
+- #2 @184567378 (?=\s|$)/.test(E))s("tengu_git_operation",{operation:v("pr_review_request_changes")});JE().bump.emit()}if(g==="merged"||g==="closed")u=!0;if(p?.action==="created"){TEe()?.add(1);let N=e.repl
+- #3 @184568457 b\s+mr\s+create\b/))s("tengu_git_operation",{operation:v("pr_create")}),TEe()?.add(1),JE().bump.emit(),Mfe(r);let M=e.match(/\bcurl\b/)&&(e.match(/-X\s*POST\b/i)||e.match(/--request\s*=?\s*P
+- #4 @184568747 (?!\/\d)/i);if(M&&L)s("tengu_git_operation",{operation:v("pr_create")}),TEe()?.add(1),JE().bump.emit(),Mfe(r);return QJt(e),{prResolved:u}}function mw(e){let t=QGt(),r=e.catch(()=>{return});
+
+## #41 bump.emit() needle="bump.emit()" hits=5
+- #0 @184566914 amend")});gEn()?.add(1)}if(gH.test(e))s("tengu_git_operation",{operation:v("push")}),JE().bump.emit();let p=Ofe.find((N)=>N.re.test(e)),g=Dfe(e),k=LJt(e);if(p)s("tengu_git_operation",{operati
+- #1 @184567033 )=>N.re.test(e)),g=Dfe(e),k=LJt(e);if(p)s("tengu_git_operation",{operation:c(p.op)}),JE().bump.emit();let E=NJt(e);if(E!==null){if(s("tengu_git_operation",{operation:v("pr_review")}),/--appro
+- #2 @184567379 ?=\s|$)/.test(E))s("tengu_git_operation",{operation:v("pr_review_request_changes")});JE().bump.emit()}if(g==="merged"||g==="closed")u=!0;if(p?.action==="created"){TEe()?.add(1);let N=e.replac
+- #3 @184568458 \s+mr\s+create\b/))s("tengu_git_operation",{operation:v("pr_create")}),TEe()?.add(1),JE().bump.emit(),Mfe(r);let M=e.match(/\bcurl\b/)&&(e.match(/-X\s*POST\b/i)||e.match(/--request\s*=?\s*POS
+- #4 @184568748 ?!\/\d)/i);if(M&&L)s("tengu_git_operation",{operation:v("pr_create")}),TEe()?.add(1),JE().bump.emit(),Mfe(r);return QJt(e),{prResolved:u}}function mw(e){let t=QGt(),r=e.catch(()=>{return});t.

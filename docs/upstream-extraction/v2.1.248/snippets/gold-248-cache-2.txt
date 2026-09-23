@@ -1,0 +1,619 @@
+# gold-248-cache-2  densable 2.1.248 pass2
+# bytes248=226708128 247=253204128
+# when=2026-09-20T02:08:01.055Z
+# NEVER HAVE — peel only
+
+## #8 toolSchemasChanged  needle="toolSchemasChanged"  hits248=5  hits247=5
+- #0 @96663824 A.L.perBlockHashes......*u..perBlockLengths.....?.5.systemPromptChanged.........toolSchemasChanged.......%..modelChanged.....f=.fastModeChanged.....Z...cacheControlChanged.....m
+
+- #1 @184454584 rBlockHashes=zr,it.perBlockLengths=Pn}it.pendingChanges={systemPromptChanged:Ze,toolSchemasChanged:vt,modelChanged:pn,fastModeChanged:sn,cacheControlChanged:gn,globalCacheStrateg
+- #2 @184456094 ":o>0?` (+${o} chars)`:` (${o} chars)`;r.push(`system prompt changed${u}`)}if(e.toolSchemasChanged){let o=e.addedToolCount>0||e.removedToolCount>0?` (+${e.addedToolCount}/-${e.re
+- #3 @184458494 e";s("tengu_prompt_cache_break",{systemPromptChanged:U?.systemPromptChanged??!1,toolSchemasChanged:U?.toolSchemasChanged??!1,modelChanged:U?.modelChanged??!1,fastModeChanged:U?.f
+- #4 @184458516 he_break",{systemPromptChanged:U?.systemPromptChanged??!1,toolSchemasChanged:U?.toolSchemasChanged??!1,modelChanged:U?.modelChanged??!1,fastModeChanged:U?.fastModeChanged??!1,cac
+
+## #8 overageChanged  needle="overageChanged"  hits248=5  hits247=5
+- #0 @96664004 globalCacheStrategyChanged........'.betasChanged.....
+..autoModeChanged.....lZ/.overageChanged......0...cacheDiagnosisChanged.......&..effortChanged...........extraBodyChang
+- #1 @184454729 trolChanged:gn,globalCacheStrategyChanged:Ht,betasChanged:hn,autoModeChanged:fn,overageChanged:Ve,cacheDiagnosisChanged:bn,effortChanged:mn,extraBodyChanged:Sn,deferLoadingPr
+- #2 @184456907 hanged${p?` (${p})`:""}`)}if(e.autoModeChanged)r.push("auto mode toggled");if(e.overageChanged)r.push("overage state changed (TTL flip expected)");if(e.cacheDiagnosisChanged)
+- #3 @184458791 ged??!1,betasChanged:U?.betasChanged??!1,autoModeChanged:U?.autoModeChanged??!1,overageChanged:U?.overageChanged??!1,cacheDiagnosisChanged:U?.cacheDiagnosisChanged??!1,effort
+- #4 @184458809 ed:U?.betasChanged??!1,autoModeChanged:U?.autoModeChanged??!1,overageChanged:U?.overageChanged??!1,cacheDiagnosisChanged:U?.cacheDiagnosisChanged??!1,effortChanged:U?.effortC
+
+## #8 isUsingOverage  needle="isUsingOverage"  hits248=39  hits247=39
+- #0 @92470604 ng......*...onChangeIsUpdating........*.isInputWrapped......I...hasStash.....{..isUsingOverage..	....=..overflowX........Sc.isInOverageMode......M:.isTeamOrEnterprise........
+- #1 @180327312 ice_level_disabled","no_limits_configured","fetch_error","unknown"]).optional(),isUsingOverage:W().optional(),overageInUse:W().optional(),surpassedThreshold:A().optional(),ra
+- #2 @184094135 se"overage":case void 0:return null;default:return null}}function mje(e,t){if(e.isUsingOverage){if(e.overageStatus==="allowed_warning")return{message:`You're close to your ${
+- #3 @184101462 t&&!r)return null;let o={status:"rejected",unifiedRateLimitFallbackAvailable:!1,isUsingOverage:!1},u=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(u)o.resetsAt=Mat
+- #4 @184103262 er(k)):void 0,rateLimitType:u,utilization:E,unifiedRateLimitFallbackAvailable:t,isUsingOverage:!1,surpassedThreshold:Number(p)}}}return null}function n5t(e,t,r){let{rateLimit
+- #5 @184103769 g",resetsAt:M,rateLimitType:o,utilization:C,unifiedRateLimitFallbackAvailable:r,isUsingOverage:!1}}function r5t(e,t){let r=HM(),o=t5t(e,t,r);if(o)return o;for(let u of X4t){i
+- … +33 more
+
+## #8 tengu_prompt_cache_break  needle="tengu_prompt_cache_break"  hits248=2  hits247=2
+- #0 @96665544 likely server-side (prompt unchanged, <5min gap)...Y.\.unknown cause...........tengu_prompt_cache_break........, diff: .....)..[PROMPT CACHE BREAK] ...	.....K. [source=.........O., ca
+- #1 @184458420 e="likely server-side (prompt unchanged, <5min gap)";else fe="unknown cause";s("tengu_prompt_cache_break",{systemPromptChanged:U?.systemPromptChanged??!1,toolSchemasChanged:U?.toolSche
+
+## #8 tools changed  needle="tools changed"  hits248=4  hits247=4
+- #0 @96664820 d.......C... tools).,....... (tool prompt/schema changed, same tool set)...y.t.tools changed........7..fast mode toggled.........~.global cache strategy changed (.$.....).c
+- #1 @97840521 ults to return (default: 5):.......ToolSearchTool: cache invalidated - deferred tools changed.. ...y...No matching deferred tools found)....Z|.. Some MCP servers are still c
+- #2 @182918996 sort().join(",");if(this.#t!==t)n("ToolSearchTool: cache invalidated - deferred tools changed"),this.#e.clear(),this.#t=t}}function q(o,t,e,f,S=[]){return{data:{matches:o,qu
+- #3 @184456271 emovedToolCount} tools)`:" (tool prompt/schema changed, same tool set)";r.push(`tools changed${o}`)}if(e.fastModeChanged)r.push("fast mode toggled");if(e.globalCacheStrategy
+
+## #8 oauth refresh tools  needle="oauth refresh"  hits248=2  hits247=2
+- #0 @98481064  refresh-token cleanup write failed: ...3.....x.WIF: failed to clear stale user_oauth refresh_token.......z.wif_token_exchange..(...
+...file:///B:/%7EBUN/root/chunk-pet4rr8v
+- #1 @180899165 n cleanup write failed: ${p}`);else _(ut(Ee(p),"WIF: failed to clear stale user_oauth refresh_token"))}throw d}}}function W(e){if(uOe(e))return"no_refresh_available";if(bue(
+
+## #8 after refresh  needle="after refresh"  hits248=2  hits247=2
+- #0 @100833640 mpting token refresh#.......: Token refreshed, retrying request."...S.=.: Retry after refresh also got 401..........: Token refresh failed..
+....>C./work/poll..".....8.[brid
+- #1 @205314096 );let O=i(),Q=await o(O);if(Q.status!==401)return Q;t(`[bridge:api] ${p}: Retry after refresh also got 401`)}else t(`[bridge:api] ${p}: Token refresh failed`);return m}retur
+
+## #8 rebuild tools  needle="rebuild tools"  hits248=0  hits247=0
+
+## #8 tool schema  needle="tool schema"  hits248=15  hits247=15
+- #0 @97140412 n.E.r.r.o.r... .U.s.e. .R...l... with query "select:<name>[,<name>...]" to load tool schemas before calling them:
+.......k?. deferred tool..Z...1ig. .a.v.a.i.l.a.b.l.e. .a
+- #1 @97259546 ve source=........CLAUDE_CODE_ACT_DONT_REDERIVE...%.......[betas] Stripped from tool schemas: [.......{U..] (experimental betas disabled).....C...nextFetchAt.........B:/~B
+- #2 @99908533 tomodeenabled..........Enable tool search..
+.......3b6nGnLx6b..\....4e.Load MCP tool schemas on demand (tool search) instead of inlining every schema into context.
+....!7.
+- #3 @100631627 .n.e.s.s.-.o.n.l.y. ..  .n.o. .m.o.d.e.l. .c.o.n.t.e.x.t. .c.o.s.t.).1.....`.  (tool schemas resolved at runtime; not counted).......9...LSP servers.1....p..  (out-of-proc
+- #4 @180329319 e compaction reserve (autocompact or manual); 'deferred' rows are out-of-window tool schemas \u2014 listed for awareness, excluded from usage math.")}).describe("One row o
+- #5 @185854899 6A0\uFE0F  git status";if(t.includes("tool_schema")&&e>50)return" \u26A0\uFE0F  tool schemas";if(t.includes("client_creation")&&e>50)return" \u26A0\uFE0F  client creation"
+- … +9 more
+
+## #9 5-minute TTL  needle="5-minute TTL"  hits248=2  hits247=2
+- #0 @181123848 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u2014 the guidance here stays the same.)
+
+
+- #1 @181127153 201330 min) \u2014 the user can always interrupt if they need you sooner.
+
+On a 5-minute TTL only, two refinements: under 300s (60s\u2013270s) the cache stays warm, so pref
+
+## #9 dropping to 5 minutes  needle="dropping to 5 minutes"  hits248=1  hits247=1
+- #0 @181126525 ends on how the session is billed: Claude subscriber sessions get a 1-hour TTL (dropping to 5 minutes during usage overage), while API-key, Bedrock, and Vertex sessions default to 5
+
+## #9 during usage overage  needle="during usage overage"  hits248=1  hits247=1
+- #0 @181126547 n is billed: Claude subscriber sessions get a 1-hour TTL (dropping to 5 minutes during usage overage), while API-key, Bedrock, and Vertex sessions default to 5 minutes.
+
+In either 
+
+## #9 function k5n  needle="function k5n("  hits248=1  hits247=0
+- #0 @181122899 ery other field) \u2014 the loop ends immediately and no further wakeups fire.`;function k5n(e){return`${t}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and th
+
+## #11 proceeding without lock  needle="proceeding without lock"  hits248=0  hits247=0
+
+## #11 skipping refresh  needle="skipping refresh"  hits248=10  hits247=10
+- #0 @94573894 er process, waiting (attempt . ...~>`.Failed to acquire refresh lock: ....|.[.; skipping refresh..%...t...Could not acquire refresh lock after ........=.. retries; skipping ref
+- #1 @94573978 ping refresh..%...t...Could not acquire refresh lock after ........=.. retries; skipping refresh..5...V...Another process already refreshed tokens (expires in ...8...#%M.Anothe
+- #2 @94689875 rupt_entry...........corrupt.=.......discovery-cache: refresh lock compromised, skipping refresh: ...;.....@.Discovery cache write deferred: existing entry unreadable (.....7.C
+- #3 @98480830 lved..X.....K.wif: adopting sibling-rotated access token from credentials file; skipping refresh grant*...+(u.wif: rotated-token adoption check failed: ......u...fromEnum*....#
+- #4 @180898313 ode:g(r)}),n("wif: adopting sibling-rotated access token from credentials file; skipping refresh grant"),{token:p,expiresAt:typeof m==="number"?m:null}}}catch(u){n(`wif: rotate
+- #5 @200722775 ,stale:60000,onCompromised:(o)=>X(e,`discovery-cache: refresh lock compromised, skipping refresh: ${o}`)})}catch(o){let s=o instanceof Error?o.message:String(o);if(o?.code==="E
+- … +4 more
+
+## #11 retryable error  needle="retryable error"  hits248=3  hits247=3
+- #0 @98672301  on data loss......5%..subpath.......|.Emitted when an API request fails with a retryable error and will be retried after a delay. error_status is null for connection errors (
+- #1 @180366873 (),uuid:X(),session_id:i()}).describe("Emitted when an API request fails with a retryable error and will be retried after a delay. error_status is null for connection errors (
+- #2 @180372377 loaded": repeated 529s; "server_error": retryable 5xx pivot; "last_resort": non-retryable error on the primary; "model_blocked": primary disabled by the per-model kill switch)
+
+## #11 token refresh lock  needle="token refresh lock"  hits248=0  hits247=0
+
+## #11 oauth-refresh-  needle="oauth-refresh-"  hits248=0  hits247=0
+
+## #11 mcp-refresh-  needle="mcp-refresh-"  hits248=3  hits247=3
+- #0 @94573680 covery state (authServer: ..........resourceMetadata........[^a-zA-Z0-9]........mcp-refresh-.....v,..lock... ...vJz.Acquiring refresh lock (attempt .....\4.Acquired refresh
+- #1 @206798668 Config),r=qv();await ce().mkdir(r);let n=t.replace(/[^a-zA-Z0-9]/g,"_"),d=qe(r,`mcp-refresh-${n}.lock`),u;for(let o=0;o<fe;o++)try{X(this.serverName,`Acquiring refresh lock
+- #2 @206981965 Config),n=qv();await ce().mkdir(n);let r=t.replace(/[^a-zA-Z0-9]/g,"_"),d=tt(n,`mcp-refresh-${r}.lock`),u;for(let o=0;o<ge;o++)try{X(this.serverName,`Acquiring refresh lock
+
+## #11 forceLogin  needle="forceLogin"  hits248=76  hits247=76
+- #0 @92254040 oBashCommands...........autoCompactWindow........+..cleanupPeriodDays...........forceLoginMethod.....0..keybindingFlavor.....[..^(?:session|cse)_[A-Za-z0-9_]+$......=...l
+- #1 @94463900 oken>...........tokenOutput.........onAccountOnHold.	.......expiresIn...........forceLoginGatewayUrl........forceLoginOrgUUID.......t...toRetry.....5...marginX........oa
+- #2 @94463928 ........onAccountOnHold.	.......expiresIn...........forceLoginGatewayUrl........forceLoginOrgUUID.......t...toRetry.....5...marginX........oauthStatus......[X.forcedMeth
+- #3 @98550964 _MS.....}T..auth_force_login_org .......managed_by_host_under_method_pink...d6(.forceLoginMethod is 'gateway' in managed settings; run /login from an interactive terminal
+- #4 @98551080 aged settings; run /login from an interactive terminal to authenticate.."...J...forceLoginMethod is 'claudeai' in ..7.... ..; log in with a Claude.ai subscription account
+- #5 @98551188 i' in ..7.... ..; log in with a Claude.ai subscription account instead..!...$%..forceLoginMethod is 'console' in ...3...f\..; log in with an Anthropic Console account ins
+- … +70 more
+
+## #11 needsOAuthRefresh  needle="needsOAuthRefresh"  hits248=8  hits247=8
+- #0 @95535368 ostic...........fetchFailure	.......remintCap..........recoveredCode.........G.needsOAuthRefresh.........=.connect_timeout_ms..........has_initial_messages....a.
+.expires_in_s.
+- #1 @198359247 ed",fetchFailure:"terminal",remintCap:void 0,recoveredCode:"recovered_auth_401",needsOAuthRefresh:!0},4091:{reconnectingDetail:"CCR init failed \u2014 retrying",cause:"init_4091
+- #2 @198359488 d",fetchFailure:"terminal",remintCap:void 0,recoveredCode:"recovered_init_4091",needsOAuthRefresh:!1},4093:{reconnectingDetail:"presence heartbeats failing \u2014 reconnecting",
+- #3 @198359748 led",fetchFailure:"retry",remintCap:An,recoveredCode:"recovered_heartbeat_4093",needsOAuthRefresh:!1},4094:{reconnectingDetail:"worker credential expired \u2014 re-minting",caus
+- #4 @198360001 d",fetchFailure:"terminal",remintCap:void 0,recoveredCode:"recovered_cred_4094",needsOAuthRefresh:!0}};function gn(e){if(e===4094)return dDe();return e===401||e===4091||e===4093
+- #5 @198360846 {if(await fr("owner_changed_recovery",o))return;let t=Q(),a=!0,d=Jgt();if(he[e].needsOAuthRefresh&&z)try{a=await z(t??"")}catch(j){a=!1,n(`[remote-bridge] ${e} recovery OAuth re
+- … +2 more
+
+## #11 another Claude Code process  needle="another Claude Code process"  hits248=9  hits247=3
+- #0 @96283257 ogin expired . Please run /login.......	yU.Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) . Try again in a minute; if it keeps h
+- #1 @96628239 ession expired and could not be refreshed.....sP.Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a m
+- #2 @97609894 ilable: output file ........Y. could not be read (i...b.u.). This usually means another Claude Code process in the same project deleted it during startup cleanup.>...%.......Command kille
+- #3 @97804875 .....OAuthRefreshDeadError...b...K*..OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock..........OAuthRefreshLockTimeoutError1...P.H.No res
+- #4 @180967566 e extends Error{constructor(){super("OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock");this.name="OAuthRefreshLockTimeoutError"}}var Nn=
+- #5 @183609226 vailable: output file ${this.path} could not be read (${r}). This usually means another Claude Code process in the same project deleted it during startup cleanup.>`}}getStderr(){if(this.#
+- … +3 more
+
+## #13 Keyless Console sign-in unavailable here  needle="Keyless Console sign-in unavailable here"  hits248=2  hits247=0
+- #0 @94468736 vailable here...........Claude Code login successful....-...auth_successO....F7.Keyless Console sign-in unavailable here, continuing with the API-key sign-in: .......5.tengu_oauth_error..........infe
+- #1 @199068144 =Li(l(D));st({cause:D.causeSummary!==null?Li(D.causeSummary):se,message:se}),n(`Keyless Console sign-in unavailable here, continuing with the API-key sign-in: ${se}`,{level:"warn"})}}let Y=await ve.st
+
+## #13 continuing with the API-key sign-in  needle="continuing with the API-key sign-in"  hits248=2  hits247=0
+- #0 @94468778 successful....-...auth_successO....F7.Keyless Console sign-in unavailable here, continuing with the API-key sign-in: .......5.tengu_oauth_error..........inferenceOnly.......@...errorUri	...M.y.s
+- #1 @199068186 Li(D.causeSummary):se,message:se}),n(`Keyless Console sign-in unavailable here, continuing with the API-key sign-in: ${se}`,{level:"warn"})}}let Y=await ve.startOAuthFlow(async(D)=>Z(D),{loginWit
+
+## #13 tengu_oauth_error  needle="tengu_oauth_error"  hits248=5  hits247=5
+- #0 @94468824 Console sign-in unavailable here, continuing with the API-key sign-in: .......5.tengu_oauth_error..........inferenceOnly.......@...errorUri	...M.y.ssl_error...........Token exc
+- #1 @180648840 traction_truncation_harvest","tengu_refusal_retraction_unauthenticated_signal","tengu_oauth_error","tengu_oauth_success","tengu_oauth_token_refresh_failure","tengu_oauth_token_r
+- #2 @199069184 tch(Y){if(Lbt(Y)){ee({state:"account_on_hold",message:Obt(ene(Y.errorUri))}),s("tengu_oauth_error",{account_on_hold:!0});return}let D=Y instanceof KO?Y.displayMessage:l(Y),se=Dz
+- #3 @199069380 r",message:se??D,toRetry:{state:R==="setup-token"?"ready_to_start":"idle"}}),s("tengu_oauth_error",{...Lf(Y),ssl_error:se!==null})}},[ve,ye,at,Be,R,S,He,me,ae,c,F,Q]),Ve=E(!1);r
+- #4 @209562467 ting"}}),n(`OAuth flow failed in install-github-app: ${ln}`,{level:"error"}),s("tengu_oauth_error",{...Lf(an)})}},ne[8]=Ce,ne[9]=Pe,ne[10]=Ms,ne[11]=Lo;else Lo=ne[11];let Fo=Lo,
+
+## #13 pin the login method  needle="pin the login method"  hits248=2  hits247=2
+- #0 @94468577 rdingVersion.......!...tengu_oauth_flow_start..v...5...Settings on this machine pin the login method or organization, so signing in without an API key is not available here........
+- #1 @199067717 audeAi:ye}),at&&R!=="setup-token"){if(!Be)throw Error("Settings on this machine pin the login method or organization, so signing in without an API key is not available here.");try{
+
+## #22 treating as plain text  needle="treating as plain text"  hits248=6  hits247=2
+- #0 @96922927 reshold' from null or undefined value9...a...Hook output does not start with {, treating as plain text.......]...
+
+Expected schema:
+.L.......Hook output starts with { but is not a JS
+- #1 @96923040 
+
+Expected schema:
+.L.......Hook output starts with { but is not a JSON object, treating as plain text: =...WZQ.Hook output is several JSON documents, treating as plain text...=.....
+- #2 @96923111  object, treating as plain text: =...WZQ.Hook output is several JSON documents, treating as plain text...=.......H.o.o.k. .o.u.t.p.u.t. .l.o.o.k.s. .l.i.k.e. .a. .J.S.O.N. .o.b.j.e.c
+- #3 @186254531 t t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in 
+- #4 @186254835 (!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON docume
+- #5 @186254942 (r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JS
+
+## #22 Failed to parse hook output as JSON  needle="Failed to parse hook output as JSON"  hits248=0  hits247=2
+
+## #22 Hook JSON output validation failed  needle="Hook JSON output validation failed"  hits248=1  hits247=1
+- #0 @186234668 : mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);function ywt(e){let 
+
+## #22 Hook output does not start with  needle="Hook output does not start with"  hits248=2  hits247=2
+- #0 @96922892 .c5.Cannot destructure property 'threshold' from null or undefined value9...a...Hook output does not start with {, treating as plain text.......]...
+
+Expected schema:
+.L.......Hook output sta
+- #1 @186254496 dFallback:!1}),g}function lIe(e){let t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try
+
+## #22 parseHookOutput  needle="parseHookOutput"  hits248=4  hits247=2
+- #0 @96923444 ng concatenation so backslashes and quotes inside strings are escaped.......D.q.parseHookOutput: json lines (.........O.
+
+Hook exited .......\.. with stderr:
+..<.....q.HTTP ho
+- #1 @101911080 esisBareMcpServerMatcherisPluginEligibleForCredentialsparseElicitationHookOutputparseHookOutputparseHttpHookOutputpendingAsyncRewakeCompletionSetspersistHookOutputpreToolUseMa
+- #2 @186255362 let t=e.split(`
+`).filter((o)=>o.trim()!=="");if(t.length<2)return!1;using r=xd`parseHookOutput: json lines (${t.length})`;return t.every((o)=>{try{let u=cz().safeParse($s(o.t
+- #3 @195065492 ,ncr as isPluginEligibleForCredentials,din as parseElicitationHookOutput,lIe as parseHookOutput,Bct as parseHttpHookOutput,Jlr as pendingAsyncRewakeCompletionSets,Jse as persi
+
+## #23 trusted heading  needle="trusted heading"  hits248=0  hits247=0
+
+## #23 claude.ai"  needle="claude.ai\""  hits248=44  hits247=43
+- #0 @178592876 UTHORIZE_URL:"https://claude.com/cai/oauth/authorize",CLAUDE_AI_ORIGIN:"https://claude.ai",TOKEN_URL:"https://platform.claude.com/v1/oauth/token",API_KEY_URL:"https://api
+- #1 @179732092 |t.username||t.password||t.port||t.hash)return cOe;let r=t.hostname;return(r==="claude.ai"||r.endsWith(".claude.ai")||r==="anthropic.com"||r.endsWith(".anthropic.com"))&&
+- #2 @179732117 t.port||t.hash)return cOe;let r=t.hostname;return(r==="claude.ai"||r.endsWith(".claude.ai")||r==="anthropic.com"||r.endsWith(".anthropic.com"))&&t.href.length<=R&&W.test(
+- #3 @180208966 OAuth token file descriptor",CCR_OAUTH_TOKEN_FILE:" from the OAuth token file","claude.ai":" from the saved claude.ai login",ANTHROPIC_CUSTOM_HEADERS:" from ANTHROPIC_CUS
+- #4 @180688555 TOR,E=(o||p)&&!Y6e()||(r||g)&&!tr();return!(e||E)}function UV(e){switch(e){case"claude.ai":return"claude /logout to sign out of claude.ai.";case"profile":return"Run `ant 
+- #5 @180689602 rofile",hasToken:!0};let r=Bt();if(VA(r?.scopes)&&r?.accessToken)return{source:"claude.ai",hasToken:!0};return{source:"none",hasToken:!1}}function PW(){let{key:e}=gh();re
+- … +38 more
+
+## #23 type:"claudeai-proxy"  needle="type:\"claudeai-proxy\""  hits248=4  hits247=4
+- #0 @185116429 collision on distinct upstreams: "${ue}" (${j.id}, ${j.url})`);U.add(pe),N[ue]={type:"claudeai-proxy",url:j.url,id:j.id,displayName:j.display_name,iconUrl:j.icon_url,scope:"claudeai
+- #1 @191176908 onfig.url,headers:C.config.headers};else if(C.config.type==="claudeai-proxy")w={type:"claudeai-proxy",url:C.config.url,id:C.config.id};else if(C.config.type==="stdio"||C.config.type
+- #2 @200950418 nfig.headers,oauth:L.config.oauth};else if(L.config.type==="claudeai-proxy")ie={type:"claudeai-proxy",url:L.config.url,id:L.config.id};else if(L.config.type==="stdio"||L.config.type
+- #3 @202861966 or.config.type,url:or.config.url};else if(or.config.type==="claudeai-proxy")Gr={type:"claudeai-proxy",url:or.config.url,id:or.config.id};else if(or.config.type==="stdio"||or.config.
+
+## #23 project mcp  needle="project .mcp.json"  hits248=0  hits247=0
+
+## #23 scope project  needle="scope:\"project\""  hits248=16  hits247=16
+- #0 @101149554 a.t.h.-.s.c.o.p.e.d. .p.l.a.n.s. .a.n.d. .d.e.l.e.t.e.s...R.......finalize_plan scope:"project" is superseded by the durable per-project write grant.......P..C.l.a.u.d.e.D.e.s
+- #1 @185141787 rse()){let C=SW(E,".mcp.json"),{config:M,errors:L}=yWe({filePath:C,expandVars:t,scope:"project"});if(!M){let N=L.filter((U)=>!U.message.startsWith("MCP config file not found")
+- #2 @185144775 n j.add(xt),!0;return!1});return t.purpose==="deviceBridge"?Ji(ze,(Qe)=>({...Qe,scope:"project"})):ze}));for(let Ne of pe)if(Ne)Object.assign(C,Ne);if(L.length>0)for(let Ne of
+- #3 @185354309 ls"),p=(g)=>KSn(g).catch(()=>g);if(u!==r&&await p(u)!==await p(r))t.push({dir:u,scope:"project"})}let o=[];for(let{dir:u,scope:p}of t)try{if(p==="user")if(D()&&e!==void 0){let
+- #4 @189735313 {scope:"managed",source:"policySettings"},{scope:"user",source:"userSettings"},{scope:"project",source:"projectSettings"},{scope:"local",source:"localSettings"},{scope:"flag",
+- #5 @193706707 ct:instructions",src:b(t,"AGENTS.md"),target:b(t,"CLAUDE.md"),label:"AGENTS.md",scope:"project",containIn:t},{id:"codex:project:override",src:b(t,"AGENTS.override.md"),target:
+- … +10 more
+
+## #23 heading claude  needle="\"claude.ai\""  hits248=29  hits247=28
+- #0 @179732091 ||t.username||t.password||t.port||t.hash)return cOe;let r=t.hostname;return(r==="claude.ai"||r.endsWith(".claude.ai")||r==="anthropic.com"||r.endsWith(".anthropic.com"))&&
+- #1 @180208965  OAuth token file descriptor",CCR_OAUTH_TOKEN_FILE:" from the OAuth token file","claude.ai":" from the saved claude.ai login",ANTHROPIC_CUSTOM_HEADERS:" from ANTHROPIC_CUS
+- #2 @180688554 PTOR,E=(o||p)&&!Y6e()||(r||g)&&!tr();return!(e||E)}function UV(e){switch(e){case"claude.ai":return"claude /logout to sign out of claude.ai.";case"profile":return"Run `ant 
+- #3 @180689601 profile",hasToken:!0};let r=Bt();if(VA(r?.scopes)&&r?.accessToken)return{source:"claude.ai",hasToken:!0};return{source:"none",hasToken:!1}}function PW(){let{key:e}=gh();re
+- #4 @180730296 "profile")r.tokenSource=t;let{key:o,source:u}=xy();if(o)r.apiKeySource=u;if(t==="claude.ai"||u==="/login managed key"){let g=In()?.organizationName;if(g)r.organization=g}l
+- #5 @180730419 g=In()?.organizationName;if(g)r.organization=g}let p=In()?.emailAddress;if((t==="claude.ai"||u==="/login managed key")&&p)r.email=p;return r}function i8e(){let e=dY();retu
+- … +23 more
+
+## #24 classifyAuthReconnectKind  needle="classifyAuthReconnectKind"  hits248=0  hits247=0
+
+## #24 mcp_headers_helper  needle="mcp_headers_helper"  hits248=8  hits247=8
+- #0 @94585176 rs..........Successfully retrieved .......y. headers from headersHelper......`..mcp_headers_helper.......	.missing_trust...........not available to a session rooted at the home 
+- #1 @206932141 ully retrieved ${Object.keys(i.headers).length} headers from headersHelper`),b("mcp_headers_helper"),i.headers;if(i.reason==="missing_trust"){let o=g0()?"not available to a sessi
+- #2 @206932847 rsisted trust; ${o}.
+`);return s("tengu_mcp_headersHelper_missing_trust",{}),y("mcp_headers_helper","missing_trust"),null}throw f("mcp_headers_helper",i.reason),Error(Br(e,i.reas
+- #3 @206932898 Helper_missing_trust",{}),y("mcp_headers_helper","missing_trust"),null}throw f("mcp_headers_helper",i.reason),Error(Br(e,i.reason))}catch(a){return Fr(e,`Error getting headers fr
+- #4 @207115537 oe??401}; refresh token stored \u2014 reconnecting and retrying once`),Se)y(ye?"mcp_headers_helper":"mcp_oauth_refresh","collateral_rejoin");if(!ae){y(ye?"mcp_headers_helper":"mc
+- #5 @207115612 (ye?"mcp_headers_helper":"mcp_oauth_refresh","collateral_rejoin");if(!ae){y(ye?"mcp_headers_helper":"mcp_oauth_refresh","reauth_retry"),_.onclose=void 0;let ue=ce;ae=(async()=>(a
+- … +2 more
+
+## #24 tengu_mcp_headers_helper_retry  needle="tengu_mcp_headers_helper_retry"  hits248=0  hits247=0
+
+## #24 Authorization header  needle="Authorization header"  hits248=20  hits247=17
+- #0 @97806478 PI:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: .......7..., has Authorization header: !......x-anthropic-additional-protection.........=.provider_route..G.....G.C.
+- #1 @98131519  masked placeholder).r...a|5.AWS SigV4 request uses a masked credential but its Authorization header is malformed; the proxy cannot re-sign it...i...&...AWS SigV4 request uses a ma
+- #2 @98531224 : the HTTP runtime does not accept it (........ header value..."....w..Invalid Authorization header value........1.Invalid value for .......... header value: ......]..Invalid requ
+- #3 @98937995 t that outputs authentication values.C...k2..Shell command that outputs a Proxy-Authorization header value (EAP).-....4~.Path to a script that exports AWS credentials...2....}7.Pat
+- #4 @99001568 .w .Policy for presigned URLs (X-Amz-Algorithm/X-Amz-Signature in the query, no Authorization header): the signature lives in the URL itself. `deny` (default) or `passthrough`.....
+- #5 @99558623  command>
+                              For egress proxies that require a Proxy-Authorization header (for
+                              example a short-lived bearer token) on every
+- … +14 more
+
+## #24 hasAuthorization  needle="hasAuthorization"  hits248=0  hits247=0
+
+## #24 startOAuth  needle="startOAuth"  hits248=9  hits247=9
+- #0 @94466444 res_in........B.oauth_console_profile_login.......+.refused_fell_back...........startOAuthFlow......xCm.loginWithClaudeAi........\..oauthClient.....S...tokenAccount....7F
+- #1 @193553431 port=null;manualAuthCodeResolver=null;constructor(){this.codeVerifier=C()}async startOAuthFlow(e,t){this.authCodeListener=new u,this.port=await this.authCodeListener.star
+- #2 @193562744 the authorization code manually."};let t=Fnt(),o=new O0,s=!1,e=!1,c;try{let u=o.startOAuthFlow(async()=>{},{loginWithClaudeAi:!0,oauthClient:{clientId:t,scopes:ZY},skipPr
+- #3 @199052039 backCures:!0,causeSummary:ue,cause:F}:{fallbackCures:!1,cause:F})}let S=await a.startOAuthFlow(c,{loginWithClaudeAi:!1,oauthClient:{clientId:C0e,scopes:SHn},loginHint:B,l
+- #4 @199068262 re, continuing with the API-key sign-in: ${se}`,{level:"warn"})}}let Y=await ve.startOAuthFlow(async(D)=>Z(D),{loginWithClaudeAi:ye,inferenceOnly:R==="setup-token",expire
+- #5 @200534486 state:r})});try{s("tengu_oauth_flow_start",{loginWithClaudeAi:v});let o=await A.startOAuthFlow(async(r)=>{process.stdout.write(`Opening browser to sign in\u2026
+`),proces
+- … +3 more
+
+## #25 [gateway-login]  needle="[gateway-login]"  hits248=8  hits247=8
+- #0 @94461336 .NODE_EXTRA_CA_CERTS` in your user settings (~/.claude/settings.json)...-....8..[gateway-login] ignoring advertised endpoint .......h... (not same-origin with .	....+..); usin
+- #1 @94468368 >....nX. changed during sign-in. Aborting without storing credentials...,....j..[gateway-login] secureStorage write failed: .....x..access_token.......refresh_token..........
+- #2 @98829020 .M..[gateway-refresh] auth changed during persist; discarding outcome...M...aJ..[gateway-login] could not remove the discarded credential from secure storage...O.....<.[gatewa
+- #3 @98829108 -login] could not remove the discarded credential from secure storage...O.....<.[gateway-login] could not remove the discarded credential from secure storage: .$.......Failed 
+- #4 @180681827 )return u;let p={...u};return delete p.enterpriseGateway,p},t);if(!o.success)n(`[gateway-login] could not remove the discarded credential from secure storage${o.warning?`: ${o
+- #5 @180681966 rom secure storage${o.warning?`: ${o.warning}`:""}`,{level:"warn"})}catch(o){n(`[gateway-login] could not remove the discarded credential from secure storage: ${l(o)}`,{level:
+- … +2 more
+
+## #25 Managed-settings consent dialog exited without an answer  needle="Managed-settings consent dialog exited without an answer"  hits248=2  hits247=2
+- #0 @93348584 .g..Cannot destructure property 'rerender' from null or undefined value.8...Az.Managed-settings consent dialog exited without an answer........rerender(...U...file:///B:/%7EBUN/root/chunk-e99eknq1.js.....Jz.claimAut
+- #1 @201106418 "managed-settings-security"),nv(!1));if(n=Date.now(),await m(),!o){let u=Error("Managed-settings consent dialog exited without an answer");_(u),s(u)}})().catch((t)=>{_(t),s(t)})});
+export{qEt};
+.// @bun @bytecode
+// 
+
+## #25 managed-settings-security  needle="managed-settings-security"  hits248=2  hits247=2
+- #0 @93348472 ........structuredClone.(.......file:///B:/%7EBUN/root/chunk-5pp1trz7.js....R5..managed-settings-security...C....g..Cannot destructure property 'rerender' from null or undefined value.8
+- #1 @201106339 )},onReject:()=>{if(!a())return!1;if(o=!0,i("rejected"),r)t(null);else l()}})},"managed-settings-security"),nv(!1));if(n=Date.now(),await m(),!o){let u=Error("Managed-settings consent d
+
+## #25 showManagedSettingsSecurityDialog  needle="showManagedSettingsSecurityDialog"  hits248=0  hits247=0
+
+## #25 deferred_no_consent_surface  needle="deferred_no_consent_surface"  hits248=11  hits247=10
+- #0 @92406496  shell tool)....n.s.ide_onboarding......Zy..managed_settings_security.......Y...deferred_no_consent_surface....R.k.resume_return...........sandbox_network_access......}C..B:/~BUN/root/ch
+- #1 @190464828 _security_dialog_shown",{});let d;try{d=e(t,o.updates)}catch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))}
+- #2 @190464904 ve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_sett
+- #3 @190467101 wait W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequ
+- #4 @190467246 =!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)
+- #5 @190467415  u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdo
+- … +5 more
+
+## #26 skipped: no credential  needle="[gatewayDiscovery] skipped: no credential"  hits248=2  hits247=0
+- #0 @98815848 set.<....S..[gatewayDiscovery] skipped: nonessential traffic is disabledZ...hvF.[gatewayDiscovery] skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)..A.......[gatewayDiscovery] sk
+- #1 @180226366 r||!o?void 0:(await Oce(De()))?.trim(),p=r||u,g=S_()?.trim()||u;if(!p&&!g){n(o?"[gatewayDiscovery] skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)":"[gatewayDiscovery] skipped: 
+
+## #26 apiKeyHelper requires workspace trust  needle="apiKeyHelper requires workspace trust"  hits248=2  hits247=0
+- #0 @98815976 OPIC_AUTH_TOKEN, apiKeyHelper, or API key)..A.......[gatewayDiscovery] skipped: apiKeyHelper requires workspace trust.......kF|./v1/models?limit=1000...!.....C.[gatewayDiscovery] non-OK status ...2
+- #1 @180226487  (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)":"[gatewayDiscovery] skipped: apiKeyHelper requires workspace trust");return}let E={};for(let J of(a.ANTHROPIC_CUSTOM_HEADERS??"").split(/\r?\n/)){
+
+## #26 function su()  needle="function su(){if(!a.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)"  hits248=1  hits247=0
+- #0 @180224462 ).optional()}).strip()),J6=h(()=>m({baseUrl:i(),fetchedAt:A(),models:x(Aw())}));function su(){if(!a.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)return!1;if(Le()!=="firstParty")return!1;if(Uo())return!1;if(!a.ANTHROPIC_BASE_U
+
+## #26 async function c9n  needle="async function c9n(e){if(!su())"  hits248=1  hits247=0
+- #0 @180225763 .display_name??"")||p0(o.id),description:"From gateway"}));return Sw.set(e,r),r}async function c9n(e){if(!su()){if(a.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY){let t=Le();n(`[gatewayDiscover
+
+## #37 invalid-setting  needle="invalid-setting"  hits248=4  hits247=0
+- #0 @92447856 sion's permission mode could not be determined.....!...mode-mismatch...........invalid-setting.....]. .mode-unknown....Du..bypass-default........\.no-mode-asserted....#Z`.rep
+- #1 @196193922 ed-setting";case"repoSettings":return"repo-setting";case"invalidSetting":return"invalid-setting";case"flagSettings":case"userSettings":case void 0:return"explicit-setting"}}va
+- #2 @202504706 Inbound" to "hold" (your own "accept" cannot override a repo tightening).`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (see th
+- #3 @202716769 erride it); remove the repo setting or exclude it with --setting-sources.`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (the se
+
+## #37 managed-setting  needle="managed-setting"  hits248=123  hits247=122
+- #0 @92224714 ng settings: ......F..contentHash.....K.3.resolvedPath....7)_.level.../....![.--managed-settings ignored: invalid JSON object.....S...warn .......Invalid --setting-sources fla
+- #1 @92224918 -setting-sources: ....J.U.eagerLoadSettings_start.
+...?...--settings........*.--managed-settings.......R^.--setting-sources.......r...--restricted....=o..eagerLoadSettings_end
+- #2 @92303164 gn..........narrowingDefaultMode
+...Z.7.unloadable..
+....k..unreadable......._M.managed-settings....^.M.its &....... are not enforced in the cloud session........4. (its .....
+- #3 @92327954 =.stats.......C}+.keybindings.?.......[mcp-policy-cold-start] waiting on remote managed-settings load.>...^.$.[.m.c.p.-.p.o.l.i.c.y.-.c.o.l.d.-.s.t.a.r.t.]. .s.k.i.p.p.e.d. ..
+- #4 @92447968 nown....Du..bypass-default........\.no-mode-asserted....#Z`.repo-setting........managed-setting.........explicit-setting!.......tengu_chrome_install_upsell_shown........1..leg
+- #5 @93348472 ........structuredClone.(.......file:///B:/%7EBUN/root/chunk-5pp1trz7.js....R5..managed-settings-security...C....g..Cannot destructure property 'rerender' from null or undefin
+- … +117 more
+
+## #37 repo-setting  needle="repo-setting"  hits248=9  hits247=9
+- #0 @92447948 ing.....]. .mode-unknown....Du..bypass-default........\.no-mode-asserted....#Z`.repo-setting........managed-setting.........explicit-setting!.......tengu_chrome_install_ups
+- #1 @99532594 not URLs. Got: ...".......duplicate --git-host-rewrite for '..?....K..--confine-repo-settings requires one of enforce/warn/off (got: .S.....$.--kill-session-after-min must 
+- #2 @99536374 log-file..
+.....g.--capacity..........--startup-timeout-min........b'.--confine-repo-settings.....r...[runner:warn] --capacity ........gb. has no effect on a session-bound 
+- #3 @187907237 ||o==="1")n.trustWorkspace=!0,i++;else n.trustWorkspace=!0;break;case"--confine-repo-settings":if(o==="enforce"||o==="warn"||o==="off")n.confineRepoSettings=o,i++;else thro
+- #4 @187907348 ||o==="warn"||o==="off")n.confineRepoSettings=o,i++;else throw Error(`--confine-repo-settings requires one of enforce/warn/off (got: ${S(o)})`);break;case"--log-level":if(o
+- #5 @187922446              [env: SELF_HOSTED_RUNNER_TRUST_WORKSPACE=0 to disable]
+  --confine-repo-settings <mode>
+                              Repo-committed-settings confine guard mod
+- … +3 more
+
+## #37 settings warning names the file  needle="settings warning names the file"  hits248=1  hits247=0
+- #0 @202716862 ng":return'A settings file has an unrecognized "crossSessionInbound" value (the settings warning names the file); messages are held while it is present \u2014 set it to "accept", "hold", or "
+
+## #38 function v_()  needle="function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)"  hits248=1  hits247=0
+- #0 @180726858 );function Zur(){let e=In()?.billingType;if(!St()||!e)return!1;return DN.has(e)}function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}function U_r(){let e=An();return e
+
+## #38 run /usage-credits to ask  needle="run /usage-credits to ask"  hits248=2  hits247=6
+- #0 @96620963 r usage allocation...
+.....K.Now using ..........You're now using ...:.....}. . run /usage-credits to ask your admin for a higher limit..$....+>. . ask your admin for a higher limit....
+- #1 @184100592 "enterprise"?Zk.seven_day:Zk.seven_day_sonnet}function Nde(){return v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask your admin for a higher limit"}functi
+
+## #38 run /usage-credits to raise  needle="run /usage-credits to raise"  hits248=2  hits247=2
+- #0 @96619283  your ...$....9.. . contact your admin to increase it....	... . your J....... . run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..3....... . visit claude.ai/admin-s
+- #1 @184095697 \xB7 your ${pe.limitName} resets ${pe.resetTime}`:"";if(G){let Ie=o?v_()?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 visit claude.ai/admin-setti
+
+## #38 run /usage-credits to adjust  needle="run /usage-credits to adjust"  hits248=2  hits247=2
+- #0 @93281164 don't have usage credits yet.......\T..Starts with a...,...c.2.monthly limit . run /usage-credits to adjust........whole...G....R..By continuing, you agree to turn on usage credits per ou
+- #1 @201806197 :!0,children:["Starts with a"," ",Ai(hnn,"USD","whole")," ","monthly limit \xB7 run /usage-credits to adjust"]}),r(t,{dimColor:!0,children:["By continuing, you agree to turn on usage credi
+
+## #42 CLAUDE_ENABLE_STREAM_WATCHDOG in set  needle="\"CLAUDE_ENABLE_STREAM_WATCHDOG\""  hits248=1  hits247=0
+- #0 @179035434 ONBLOCKING","CLAUDE_ENABLE_BYTE_WATCHDOG","CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK","CLAUDE_ENABLE_STREAM_WATCHDOG"]),mn=new Set(["API_FORCE_IDLE_TIMEOUT","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFI
+
+## #42 MCP_STARTUP_MODE  needle="MCP_STARTUP_MODE"  hits248=0  hits247=0
+
+## #42 CLAUDE_CODE_MCP_STARTUP  needle="CLAUDE_CODE_MCP_STARTUP"  hits248=0  hits247=0
+
+## #42 startup_mode  needle="startup_mode"  hits248=0  hits247=0
+
+## #42 CLAUDE_STREAM_IDLE_TIMEOUT_MS  needle="CLAUDE_STREAM_IDLE_TIMEOUT_MS"  hits248=5  hits247=5
+- #0 @97803672 s.com...%...#...ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION.........C.\n|\r\n.....#...CLAUDE_STREAM_IDLE_TIMEOUT_MS...!.....o.tengu_byte_stream_idle_timeout_ms..."...yR5.CLAUDE_BYTE_STREAM_IDLE_T
+- #1 @178781316 >hR,CLAUDE_SLOW_FIRST_BYTE_MS:()=>gR,CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS:()=>WR,CLAUDE_STREAM_IDLE_TIMEOUT_MS:()=>KR,HTTPS_PROXY:()=>_R,HTTP_PROXY:()=>ER,MAX_MCP_OUTPUT_TOKENS:()=>BR,MAX_ST
+- #2 @179035139 CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT","CLAUDE_CODE_TEAM_TEARDOWN_PARK_TIMEOUT_MS","CLAUDE_STREAM_IDLE_TIMEOUT_MS","MAX_STRUCTURED_OUTPUT_RETRIES","MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE","MCP
+- #3 @180984041 n e}var AIe="x-client-request-id";function msn(){return Math.max(v0(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS)||0,300000)}var Ue=1e4,Mt=1800000,dr=180000;function cr(e){let t=msn(),r=e==="f
+- #4 @180984240 ?dr:t,o=t,u=v0(process.env.CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS),l=v0(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS)>0;if(Number.isFinite(u)&&u>0)o=u;else if(!l){o=r;let d=R("tengu_byte_stream_id
+
+## #42 API_TIMEOUT_MS  needle="API_TIMEOUT_MS"  hits248=11  hits247=11
+- #0 @93431373 lance too low . Add funds: https://platform.claude.com/settings/billing....\`..(API_TIMEOUT_MS=.....@9.ms, try increasing it)..+.......We are experiencing high demand for Opu
+- #1 @93431672  demand for Fable 5.....?.". . /clear to start fresh
+.....d.isApiError......CE..API_TIMEOUT_MS..%.....f.: Please wait a moment and try again..........[.error:..C...F._.Cannot
+- #2 @178780233 OPIC_BETAS:()=>pR,ANTHROPIC_CUSTOM_HEADERS:()=>RR,API_FORCE_IDLE_TIMEOUT:()=>GR,API_TIMEOUT_MS:()=>bR,CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS:()=>vR,CLAUDE_CODE_ATTRIBUTION_HEADER
+- #3 @179034693 UDE_CODE_NO_FLICKER","CLAUDE_CODE_SCROLL_SPEED","CLAUDE_CODE_SYNTAX_HIGHLIGHT","API_TIMEOUT_MS","CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS","CLAUDE_CODE_COORDINATOR_WORKER_CHECKIN_
+- #4 @180975507 tle"?await dE():void 0,D={defaultHeaders:w,maxRetries:t,timeout:Ode(process.env.API_TIMEOUT_MS,600000),dangerouslyAllowBrowser:!0,fetchOptions:fi({forAnthropicAPI:!0,hasBodyI
+- #5 @180984635 if(t!==void 0)return Math.min(Math.max(t,Ue),Mt);let r=nNt(e),o=Ode(process.env.API_TIMEOUT_MS,0);return o-1000>r?o-1000:r}var fr=32768,gr=1000,mr=5000;class Ft extends Error
+- … +5 more
+
+## #44 CLAUDE_CODE_TMPDIR  needle="CLAUDE_CODE_TMPDIR"  hits248=30  hits247=30
+- #0 @93547960 tem.Drawing.Image]::FromFile(...;.....!.the screenshot temp path (override with CLAUDE_CODE_TMPDIR).....TY..-Command,.....F.Screenshot to clipboard is not supported on ........st
+- #1 @94531125 ....z..file:///B:/%7EBUN/root/chunk-0dax9fvw.jsn....v,.Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location...S...b...A c
+- #2 @94538984 ..z. bytes, max ~104): .n........ Try a shorter --messaging-socket-path, or set CLAUDE_CODE_TMPDIR or $XDG_RUNTIME_DIR to a shorter directory...!....S..[uds-messaging] Failed to 
+- #3 @96289284 \])(?:\\\\)*\\$.....:GA.AI_AGENT
+...Hc}.CLAUDE_PID......o@..TRACEPARENT.....`Y..CLAUDE_CODE_TMPDIR..	.......TMPPREFIX...........BUN_OPTIONS......h.CLAUDE_EFFORT...........CLAUDE
+- #4 @97323521 rt: ...	...i0..<unknown>...........Cleanup timeout.Q...f.X.Free up space or set CLAUDE_CODE_TMPDIR to a directory on a filesystem with room....0...9i..Command output was lost: th
+- #5 @97323760 e child process's stdout/stderr writes failed with ENOSPC. Free up space or set CLAUDE_CODE_TMPDIR to a directory on a filesystem with room......fQ. is out of inodes (....."?A. f
+- … +24 more
+
+## #44 Point XDG_RUNTIME_DIR  needle="Point XDG_RUNTIME_DIR"  hits248=2  hits247=2
+- #0 @94531100 N/root/chunk-xxp43apj.js(....z..file:///B:/%7EBUN/root/chunk-0dax9fvw.jsn....v,.Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different 
+- #1 @202069031 ("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different 
+
+## #44 inbox directory  needle="inbox directory"  hits248=2  hits247=2
+- #0 @98215150 ..[TeammateMailbox] pruneInvalidMailboxEntries+......[TeammateMailbox] Ensured inbox directory: .'...B...[TeammateMailbox] inbox update failed: .$...p...teammate inbox storag
+- #1 @181078739 s=Hv(t),r=E(Mde(),s,"inboxes");await Qt().mkdir(r),n(`[TeammateMailbox] Ensured inbox directory: ${r}`)}function x(e,t){let s=Hv(t||ts()||"default"),r=Hv(e);return Gt(s)&&Gt(r
+
+## #44 messaging directory  needle="messaging directory"  hits248=0  hits247=0
+
+## #44 socket directory  needle="socket directory"  hits248=11  hits247=8
+- #0 @93411216 ....lastStartFailureCause...........Cross-session messaging is off:.(...!8..its socket directory could not be set up-...Ae,.run with --debug-file <path> for the full log...$...
+- #1 @94539884 :///B:/%7EBUN/root/chunk-3prdfzqb.js....h...lastStartFailureDetail..*....~z.its socket directory could not be set up: ..-...Y...its socket path is not a usable local address...
+- #2 @94948811  reconnect and retrying: .....g+.claude-mcp-browser-bridge-..).....U.] Insecure socket directory permissions: ...8.....Y. (expected 0700). Directory may have been tampered with
+- #3 @100861206 set socket permissions:...........Cleaned up socket file.......r..Removed empty socket directory..'...).3.Invalid message length from MCP client .(...	.=.Forwarding tool reques
+- #4 @189845528  user-scope memory files\n- Hardened the auto-generated cross-session messaging socket directory on shared `/tmp`: a pre-planted symlink or another user\'s directory is now ref
+- #5 @191684759 tch(()=>{}):void 0]);if(this.record.outcome)return;if(T(y)===U1t){let L=`worker socket directory is not owned by this user \u2014 ${l(y)}`;this.patch({state:"crashed",detail:L}
+- … +5 more
+
+## #44 /tmp/claude  needle="/tmp/claude"  hits248=9  hits247=9
+- #0 @97816316 n_failed_or_killed.......|..exec_exit_code......=.U.exec_failure_kind.......2ht./tmp/claude-mcp-browser-bridge-.....K...\System32\reg.exe...........[Claude in Chrome] ....
+- #1 @98031656 ....(.h.^[a-z]:.......%./dev/dtracehelper.......%.../dev/autofs_nowait.......4../tmp/claude........./private/tmp/claude.
+...|...npm/_logs.....*.b..claude/debug.......(..
+- #2 @98031684 /dtracehelper.......%.../dev/autofs_nowait.......4../tmp/claude........./private/tmp/claude.
+...|...npm/_logs.....*.b..claude/debug.......(...SANDBOX_RUNTIME=1..........
+- #3 @182587081 ,"/dev/stderr","/dev/null","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",An.join(e,".npm/_logs"),An.join(e,".claude/debug")]}var 
+- #4 @182587103 ull","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",An.join(e,".npm/_logs"),An.join(e,".claude/debug")]}var mv=["NODE_EXTRA_CA_CER
+- #5 @182587573 ME=1"];if(!u){let U=process.env.CLAUDE_CODE_TMPDIR||process.env.CLAUDE_TMPDIR||"/tmp/claude";N.push(`TMPDIR=${U}`)}if(r)for(let U of mv)N.push(`${U}=${r}`);if(!e&&!t)retur
+- … +3 more
+
+## #44 private (0700)  needle="private (0700)"  hits248=2  hits247=2
+- #0 @94531149 /root/chunk-0dax9fvw.jsn....v,.Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location...S...b...A component of the sock
+- #1 @202069080 _CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location.",Tn=`A component of the sockets 
+
+## #48 without a uid mapping  needle="without a uid mapping"  hits248=2  hits247=0
+- #0 @97792249 ...<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e
+- #1 @182943107 r tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e
+
+## #48 user namespace without  needle="user namespace without"  hits248=2  hits247=0
+- #0 @97792234 t.ENOTOWNED.......<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it wit
+- #1 @182943092 it x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it wit
+
+## #48 unshar  needle="unshar"  hits248=19  hits247=17
+- #0 @88437434 JSC_maxB3TailDupBlockSize.JSC_maxRegExpStackSize.JSC_maximumDirectCallStackSize.unsharedStackSize.PhantomNewButterflyWithSize.newArrayWithSize.NewArrayWithSize.JSC_sh
+- #1 @88437848 aximumRegExpJITCodeSize.JSC_dumpFTLCodeSize.wordSize.desiredSize.ZSTD_c_jobSize.unsharedDataSize.JSC_forceRAMSize.JSWebAssemblyInstance_cachedMemory0Size.Unable to pr
+- #2 @96293040 ....chrt.....Z!.setsid........j.taskset.......&.strace......DCF.ltrace......!...unshare.........nsenter......p..pkexec......7.F.runuser.....u...GOEXPERIMENT......9.GO
+- #3 @97792354  directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.
+- #4 @98134778 ..'...&.u.continuing without violation monitoring.
+.......--unsetenv.......J.--unshare-net...)....|@.Linux HTTP bridge socket does not exist: ...C........ The bridge
+- #5 @98135094 ..{...CLAUDE_CODE_HOST_SOCKS_PROXY_PORT.........(.--dev.........V./dev.......--unshare-pid.......U.L.--unshare-user..
+.....V.--cap-drop......q.	.--proc......Q./pro
+- … +13 more
+
+## #48 userns  needle="userns"  hits248=0  hits247=0
+
+## #48 uid===0  needle="uid===0"  hits248=0  hits247=0
+
+## #48 process.getuid  needle="process.getuid"  hits248=52  hits247=48
+- #0 @179443169 ntryUid:t.lstatSync(_(e,".git")).uid,claudeEntryUid:r}}function _o(e){if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return n(`localSettings: not 
+- #1 @179443533 ,{level:"warn"}),!1;let t=typeof process.geteuid==="function"?process.geteuid():process.getuid?.();try{let{rootUid:r,gitEntryUid:o,claudeEntryUid:i}=Ao(e);if(r===t&&o===t&&(i
+- #2 @179534349 n Tur(t,e){U(e,await wKn(t,e))}async function wKn(t,e){if(!D())return;if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return;let s=Ngn();if(s===voi
+- #3 @179780044 296}return n}}function j(t){if(!t)return!0;if(t.code==="ENOSYS")return!0;var c=!process.getuid||process.getuid()!==0;if(c){if(t.code==="EINVAL"||t.code==="EPERM")return!0}ret
+- #4 @179780060 nction j(t){if(!t)return!0;if(t.code==="ENOSYS")return!0;var c=!process.getuid||process.getuid()!==0;if(c){if(t.code==="EINVAL"||t.code==="EPERM")return!0}return!1}}});var ne
+- #5 @180181620 E_BUBBLEWRAP,isSandboxEnvSet:()=>process.env.IS_SANDBOX==="1",getuid:()=>typeof process.getuid==="function"?process.getuid():void 0,hasInternetAccess:()=>a.hasInternetAccess(
+- … +46 more
+
+## #48 canonical system directories  needle="canonical system directories"  hits248=0  hits247=0
+
+## #49 parent session's conversation  needle="parent session's conversation"  hits248=1  hits247=0
+- #0 @196264383 goes out under your parent session's address, and any reply is delivered to the parent session's conversation, not to you.
+
+To hear when a session ON THIS MACHINE finishes what it is doing,
+
+## #49 if you are a subagent  needle="if you are a subagent"  hits248=1  hits247=0
+- #0 @196264270 m\` attribute as your \`to\`.** Cross-session messages travel between SESSIONS: if you are a subagent, your send goes out under your parent session's address, and any reply is deliv
+
+## #26 su @180224462
+len=164 sha=7e88b956741cffee
+function su(){if(!a.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)return!1;if(Le()!=="firstParty")return!1;if(Uo())return!1;if(!a.ANTHROPIC_BASE_URL)return!1;return!0}
+
+## #26 c9n @180225763
+len=3231 sha=9ee3edae130850e4
+async function c9n(e){if(!su()){if(a.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY){let t=Le();n(`[gatewayDiscovery] skipped: ${t!=="firstParty"?`provider is ${t}`:a._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL?"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL is set":a.ANTHROPIC_BASE_URL?"ANTHROPIC_BASE_URL is a first-party host":"ANTHROPIC_BASE_URL is unset"}`)}return}if(Tt()){n("[gatewayDiscovery] skipped: nonessential traffic is disabled");return}try{let t=a.ANTHROPIC_BASE_URL;if(!t)return;let r=a.ANTHROPIC_AUTH_TOKEN,o=Bmn(),u=r||!o?void 0:(await Oce(De()))?.trim(),p=r||u,g=S_()?.trim()||u;if(!p&&!g){n(o?"[gatewayDiscovery] skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)":"[gatewayDiscovery] skipped: apiKeyHelper requires workspace trust");return}let E={};for(let J of(a.ANTHROPIC_CUSTOM_HEADERS??"").split(/\r?\n/)){let pe=J.indexOf(":");if(pe<=0)continue;let he=J.slice(0,pe).trim(),Re=J.slice(pe+1).trim();if(he&&Re)E[he]=Re}let C={...p&&{Authorization:`Bearer ${p}`},...g&&{"x-api-key":g},"anthropic-version":"2023-06-01","User-Agent":Sa()};for(let[J,pe]of Object.entries(E)){for(let he of Object.keys(C))if(he.toLowerCase()===J.toLowerCase())delete C[he];C[J]=pe}let O=Object.keys(E),k=new Set(O.map((J)=>J.toLowerCase()));WBt({apiKey:k.has("x-api-key")?null:g||null,getApiKeySource:()=>{let{source:J}=xy({skipRetrievingKeyFromApiKeyHelper:!0});return J!=="none"?J:u?"apiKeyHelper":"unknown"},authToken:null,getAuthTokenSource:()=>"unknown",defaultHeaders:C,authorizationSource:!p||k.has("authorization")?null:r?"ANTHROPIC_AUTH_TOKEN":"apiKeyHelper",customHeaderNames:O,envSuppliedHeaderNames:new Set});let M=`${t.replace(/\/+$/,"")}/v1/models?limit=1000`,L=await fetch(M,{method:"GET",headers:C,redirect:"error",signal:AbortSignal.timeout(Q6),...fi({url:M})});if(!L.ok){n(`[gatewayDiscovery] non-OK status ${L.status}`);return}let N=await L.json(),U=m({data:x(Aw())}).safeParse(N);if(!U.success){n("[gatewayDiscovery] response body failed validation");return}let G=U.data.data.filter((J)=>/(claude|anthropic)/i.test(J.id));if(G.length===0){n("[gatewayDiscovery] 0 usable models after filter");return}let j=au();if(D()&&e!==void 0){let J=await e.read([iu()]),pe=J.ok&&J.value.items[0]?.found?Cs(Buffer.from(J.value.items[0].value).toString("utf-8")):null;if(!J.ok)n(`[gatewayDiscovery] cache read failed: ${J.error.code}`);else bo().set(j,pe);if(pe&&pe.baseUrl===t&&ws(pe.models,G))return;let he=S({baseUrl:t,fetchedAt:Date.now(),models:G});try{await Ew(ru(),{recursive:!0})}catch(Ie){n(`[gatewayDiscovery] cache folder could not be made: ${Ie instanceof Error?Ie.message:"unknown"}`);return}let Re=await e.write(iu(),he,{publishDiscipline:"inPlace",mode:384});if(!Re.ok){n(`[gatewayDiscovery] cache write failed: ${Re.error.code}`);return}bo().set(j,Cs(he)),n(`[gatewayDiscovery] cached ${G.length} models`);return}let ie=bw(j);if(ie&&ie.baseUrl===t&&ws(ie.models,G))return;await Ew(ru(),{recursive:!0}),await X6(j,S({baseUrl:t,fetchedAt:Date.now(),models:G}),{encoding:"utf-8",mode:384}),bo().delete(j),n(`[gatewayDiscovery] cached ${G.length} models`)}catch(t){n(t instanceof RP?`[gatewayDiscovery] skipped: ${t.message}`:`[gatewayDiscovery] failed: ${t instanceof Error?Zc(t.message):"unknown"}`)}}
+
+## #38 Zur @180726780
+len=78 sha=68bdfbfabfda6aaa
+function Zur(){let e=In()?.billingType;if(!St()||!e)return!1;return DN.has(e)}
+
+## #38 v_ @180726877
+len=168 sha=8ced58107bd89beb
+DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}function U_r(){let e=An();return e==="max"||e==="enterprise"||e==="team"||e==="pro"||e===null}
+
+## #13 kxt @193501380
+len=3355 sha=0c86012344382869
+function kxt(){if(!F(a.ANTHROPIC_PROFILE)&&a.ANTHROPIC_FEDERATION_RULE_ID&&a.ANTHROPIC_ORGANIZATION_ID)throw new P("Workload identity federation is configured in this environment (ANTHROPIC_FEDERATION_RULE_ID and ANTHROPIC_ORGANIZATION_ID), and it takes precedence over the default profile. Set ANTHROPIC_PROFILE to a profile name to sign in with a profile that outranks it.","Console profile login refused: env-quad federation outranks the implicit profile","wif_env_quad");let e=Le();if(e!=="firstParty")throw new P(`This session uses ${fE[e]}, which does not use Anthropic Console sign-in.`,"This session uses a third-party provider, which does not use Anthropic Console sign-in.","third_party_provider");let o=a.ANTHROPIC_API_KEY;if(o){let c=await Z2t({skipRetrievingKeyFromApiKeyHelper:!0});if(c.source==="ANTHROPIC_API_KEY"&&c.key===o)throw new P("ANTHROPIC_API_KEY is set in this environment and takes precedence over a profile, so a profile sign-in would not be used. Unset it to sign in this way.","Console profile login refused: env credential shadows the profile","api_key_env")}if(U2t())throw new P("Something in this environment \u2014 an API key helper, an injected token, or a third-party provider setting \u2014 takes precedence over a profile sign-in, so it would not be used here.","Console profile login refused: env credential shadows the profile","env_credential_shadow");let t=RY();if(t===null)throw new P("Cannot locate the Anthropic config directory. Set ANTHROPIC_CONFIG_DIR (or HOME) and try again.","Console profile login refused: no config directory","no_config_dir");let s=A(t),f=await R(m(t,"configs",`${s}.json`));if(f!==null){if(f.base_url&&!Vv(f.base_url))throw new P("This profile is bound to a different Anthropic deployment, so Claude Code will not replace it here. Sign out of it with the tool that created it, then try again.","Console profile login refused: profile bound to another deployment","other_deployment_profile");if(f.authentication.type==="oidc_federation")throw new P("This machine is set up for workload identity federation, which signs in on its own. If you need a different sign-in, ask whoever configured it.","Console profile login refused: federation profile","federation_profile");if(f.authentication.type!=="user_oauth")throw new P("Claude Code cannot read the existing sign-in on this machine, so it will not overwrite it. Check the permissions on your Anthropic config directory, then try again.","Console profile login refused: unreadable or unrecognized profile config","unreadable_profile");if(f.authentication.client_id!==C0e)throw new P("This machine already has a sign-in from another tool that Claude Code cannot replace. Sign out with that tool, then try again.","Console profile login refused: profile is not a same-client login","foreign_profile");if(f.authentication.credentials_path)throw new P("This profile keeps its sign-in somewhere custom, so Claude Code cannot replace it. Sign out of it with the tool that created it, then try again.","Console profile login refused: custom credentials_path","custom_credentials_path")}if(o)throw new P("ANTHROPIC_API_KEY is set in this environment. Unset it to sign in without an API key.","Console profile login refused: non-dispatching env API key present","api_key_env_nondispatching");return{profile:s,configDir:t,isNewProfile:f===null}}
+
+## #37 sne @202504085
+len=940 sha=b0c1910677b8a7c6
+function sne(d){switch(d){case"mode-mismatch":return"The sending session's permission mode class doesn't match this session's, so it wasn't delivered automatically.";case"no-mode-asserted":return"The sender did not attest its permission mode, and this session bypasses permission prompts.";case"explicit-setting":return'Your "crossSessionInbound" setting is "hold".';case"managed-setting":return`Your organization's managed settings set "crossSessionInbound" to "hold".`;case"repo-setting":return`This repository's settings set "crossSessionInbound" to "hold" (your own "accept" cannot override a repo tightening).`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (see the settings warning), so messages are held while it is present.';case"bypass-default":return"This session is not prompting for permissions.";case"mode-unknown":return"This session's permission mode could not be determined."}}
+
+## #37 Qje @202716145
+len=1258 sha=26618e9fe671cbf0
+function Qje(d){switch(d){case"bypass-default":return"It is being reviewed before delivery.";case"explicit-setting":return'Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages.';case"managed-setting":return`Your organization's managed settings set "crossSessionInbound" to "hold" (your own "accept" cannot override managed policy); ask your admin to change it.`;case"repo-setting":return`This repository's settings set "crossSessionInbound" to "hold" (a repo may only tighten, so your own "accept" cannot override it); remove the repo setting or exclude it with --setting-sources.`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (the settings warning names the file); messages are held while it is present \u2014 set it to "accept", "hold", or "refuse".';case"mode-unknown":return"It will be delivered once the session finishes starting up.";case"mode-mismatch":return`The sending session's permission mode class doesn't match this session's. Review it below, or set "crossSessionInbound" to "accept".`;case"no-mode-asserted":return'The sender did not attest its permission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".'}}
+
+## #49 Pe @196262799
+len=4341 sha=ceb9246a40b27ef7
+function Pe(e){let t=Po()?`
+| \`"worker"\` | Any agent from \`${Ds}\` \u2014 subagent, another local Claude session |
+| \`"worker [3fa9c1]"\` | Same, plus its \`[ref]\` \u2014 only when a listing or an error shows one |`:"",u="",o=Po()?`
+
+## Cross-session
+
+Use \`${Ds}\` to discover targets. Every row leads with the agent's \`name [ref]\` \u2014 the name IS the address; there is no separate address syntax.
+
+\`\`\`json
+{"to": "worker", "message": "check if tests pass over there"}
+{"to": "worker [3fa9c1]", "message": "you, specifically"}
+\`\`\`
+
+Send the bare name \u2014 a name that exactly matches one live agent or session (on this machine, on another machine, or in the cloud) delivers directly. Append the \` [ref]\` only when the bare name is not enough \u2014 \`${Ds}\` shows two rows with it, or an error asks you to disambiguate (you typed only a prefix, or a session list could not be checked). A ref you did not just read from a listing or an error will not resolve, and if the same name also names an in-process agent, the bare name always wins \u2014 use the in-process one.
+
+A listed peer is alive and will process your message; messages enqueue and drain at the receiver's next tool round (its \`${Ds}\` row says whether it is busy or idle right now). Your message arrives wrapped as \`<cross-session-message from="...">\`. **To reply to an incoming message, copy its \`from\` attribute as your \`to\`.** Cross-session messages travel between SESSIONS: if you are a subagent, your send goes out under your parent session's address, and any reply is delivered to the parent session's conversation, not to you.
+
+To hear when a session ON THIS MACHINE finishes what it is doing, pass \`notify_when_idle: true\` (from the main conversation only) \u2014 one-shot and opt-in: exactly one \`[Cross-session idle notice]\` arrives when it next goes idle (or exits) \u2014 shown to you, or only to your user when this session holds peer messages for approval (the tool result says which); if it never signals within the subscription's lifetime (it may still be busy, may refuse inbound requests, or may have ended abruptly) the notice says the subscription expired instead. Omit \`message\` for a pure subscription that costs that session nothing; include one to deliver it now AND subscribe. Never poll \`${Ds}\` in a loop or send "are you done?" messages instead.
+
+Permission boundaries are per-session: NEVER ask a peer to perform an action that was denied or blocked in your session, or that you expect your own permission settings would block \u2014 a peer doing it for you bypasses the user's permission decision (cross-session permission laundering). Route blocked work back to your user instead.`:"";return`
+# SendMessage
+
+Send a message to another agent.
+
+\`\`\`json
+{"to": "researcher", "summary": "assign task 1", "message": "start on task #1"}
+\`\`\`
+
+| \`to\` | |
+|---|---|
+| \`"researcher"\` | Teammate by name |
+| \`"main"\` | The main conversation (background subagents only) |${t}${""}
+
+Your plain text output is NOT visible to other agents \u2014 to communicate, you MUST call this tool. Messages from teammates are delivered automatically; you don't check an inbox. Refer to agents by name \u2014 names keep working after an agent completes (a send resumes it from its transcript). Use the raw \`agentId\` (format \`a...-...\`) from its spawn result only when the agent has no name, or when a newer agent took the name (latest wins). When relaying, don't quote the original \u2014 it's already rendered to the user.${o}${e?'\n\n## Protocol responses (legacy)\n\nIf you receive a JSON message with `type: "shutdown_request"` or `type: "plan_approval_request"`, respond with the matching `_response` type \u2014 echo the `request_id`, set `approve` true/false:\n\n```json\n{"to": "team-lead", "message": {"type": "shutdown_response", "request_id": "...", "approve": true}}\n{"to": "researcher", "message": {"type": "plan_approval_response", "request_id": "...", "approve": false, "feedback": "add error handling"}}\n```\n\nApproving shutdown terminates your process. Rejecting plan sends the teammate back to revise. Don\'t originate `shutdown_request` unless asked. Don\'t send structured JSON status messages \u2014 report progress through your task tools if you have them, otherwise in plain prose.':""}
+`.trim()}
+
+## #8 d5e @184452118
+len=661 sha=813186689758d416
+toolSchemas:r,anyDeferLoading:o=!1,querySource:u,model:p,agentId:g,fastMode:k,globalCacheStrategy:E="",betas:C=[],autoModeActive:M=!1,isUsingOverage:L=!1,is1hCacheTTL:N=!1,queryDepth:U,cacheDiagnosis:j=!1,effortValue:G,extraBodyParams:ue,getMessageHashes:pe,messages:fe}=e,we=Hme(u,g);if(!we)return;let Pe=pe(),Ie=o5e(t).filter((Bn)=>!q5(Bn)),Te=o5e(r),xe=Yv(Ie),Fe=Yv(Te),Be=Yv(t.filter((Bn)=>!q5(Bn)).map((Bn)=>("cache_control"in Bn)?Bn.cache_control:null)),Ne=r.map((Bn)=>("name"in Bn)?Bn.name:"unknown"),Ke=()=>Y9t(Te,Ne),ze=()=>Ie.map((Bn)=>Yv(Bn)),Qe=()=>Ie.map((Bn)=>c5e(Bn)?.length??0),xt=X9t(Ie),ct=void 0,Jt=()=>({model:p,system:t,tools:r,messages:ct}
+
+## #9 k5n @181122899
+MISS {"i":181122899,"missEnd":true,"preview":"function k5n(e){return`${t}\n\n${'Set `noop: true` if nothing changed \\u2014 you checked and there\\'s nothing to report (\"no change\", \"still waiting\", \"quiet hold\"). Set `noop: false` if something happened worth keeping \\u2014 you edited a file, posted a message, advanced state, or"}
+
+## #13 Keyless-win#0 @94468736
+r...
+.......grant_type.......m..TLS certificate for >....nX. changed during sign-in. Aborting without storing credentials...,....j..[gateway-login] secureStorage write failed: .....x..access_token.......refresh_token...........idpRefreshToken.....:.Y.lastOnboardingVersion.......!...tengu_oauth_flow_start..v...5...Settings on this machine pin the login method or organization, so signing in without an API key is not available here...........Claude Code login successful....-...auth_successO....F7.Keyless Console sign-in unavailable here, continuing with the API-key sign-in: .......5.tengu_oauth_error..........inferenceOnly.......@...errorUri	...M.y.ssl_error...........Token exchange failed...I.....*.Failed to exchange authorization code for access token. Please try again.... ....,..tengu_oauth_token_exchange_error(...[.r.file:///B:/%7EBUN/root/chunk-1stngqqg.js....."..preserveQuotaAutoResume......`..incomingIdentity........api_first_token_date_fetch........../api/organization/claude_code_first_token_date..7...+E..Failed to get auth headers for first-token-date fetch: .....H.P.request_failed..,...v.).Received invalid first_token_date from API: ....R.p.invalid_date".......Failed to fe
+
+## #13 Keyless-win#1 @199068144
+ye}),at&&R!=="setup-token"){if(!Be)throw Error("Settings on this machine pin the login method or organization, so signing in without an API key is not available here.");try{await pt(ve,async(D)=>Z(D),{orgUUID:He}),ee({state:"success"}),c?.(),C0({message:"Claude Code login successful",notificationType:"auth_success"},me,{storageV5:F,credentials:Q});return}catch(D){if(!(D instanceof Ae)||!D.fallbackCures)throw D;let se=Li(l(D));st({cause:D.causeSummary!==null?Li(D.causeSummary):se,message:se}),n(`Keyless Console sign-in unavailable here, continuing with the API-key sign-in: ${se}`,{level:"warn"})}}let Y=await ve.startOAuthFlow(async(D)=>Z(D),{loginWithClaudeAi:ye,inferenceOnly:R==="setup-token",expiresIn:R==="setup-token"?S??O$:void 0,orgUUID:He}).catch((D)=>{if(D instanceof KO)throw D;let se=D.message.includes("Token exchange failed"),ft=Dz(D);throw ee({state:"error",message:ft??(se?"Failed to exchange authorization code for access token. Please try again.":D.message),toRetry:R==="setup-token"?{state:"ready_to_start"}:{state:"idle"}}),s("tengu_oauth_token_exchange_error",{...Lf(D),ssl_error:ft!==null}),D});if(R==="setup-token")ee({state:"success",token:Y.accessToken,expiresAt:Y.expi
+
+## #13 Keyless-fn#1 @199067019
+len=395 sha=346eb4adc96d2d49
+function jt(Z,Y){if(!Z.trim())return;try{let[D,se]=Z.split("#");if(!D||!se){ee({state:"error",message:"Invalid code. Please make sure the full code was copied",toRetry:{state:"waiting_for_login",url:Y}});return}s("tengu_oauth_manual_entry",{}),ve.handleManualAuthCodeInput({authorizationCode:D,state:se})}catch(D){_(D),ee({state:"error",message:l(D),toRetry:{state:"waiting_for_login",url:Y}})}}
+
+## #11 lock-code @206982305
+ale:60000,update:5000,onCompromised:()=>{X(this.serverName,"Refresh lock was compromised")}}),X(this.serverName,"Acquired refresh lock");break}catch(_){let p=T(_);if(p==="ELOCKED"){X(this.serverName,`Refresh lock held by another process, waiting (attempt ${o+1}/${ge})`),await ne(1000+Math.random()*1000);continue}X(this.serverName,`Failed to acquire refresh lock: ${p}; skipping refresh`);return}if(!u){X(this.serverName,`Could not acquire refresh lock after ${ge} retries; skipping refresh`);return}try{mE();let p=(await _n().readAsync())?.mcpOAuth?.[t];if(p){let g=p.expiresAt!=null?(p.expiresAt-Date.now())/1000:void 0;if(p.accessToken&&(g==null||g>300))return X(this.serverName,g!=null?`Another process already refreshed tokens (expires in ${Math.floor(g)}s)`:"Another process already refreshed tokens (no expiration)"),{access_token:p.accessToken,refresh_token:p.refreshToken,expires_in:g,scope:p.scope,token_type:"Bearer"};if(p.refreshToken)e=p.refreshToken,this._lastServedRefreshToken=p.refreshToken}return await this._doRefresh(e)}finally{if(u)try{await u(),X(this.serverName,"Released refresh lock")}catch{X(this.serverName,"Failed to release refresh lock")}}}async readConcurrentRefreshWinner(){mE();let t=(await _n().readAsync())?.mcpOAuth?.[Ys(this.serverName,this.serverConfig)],n=t?.expiresAt!=null?(t.expiresAt-Date.now())/1000:void 0;if(t?.accessToken&&(n==null||n>300)){X(this.serverName,"Another process landed fresh tokens; using those");let r={access_token:t.accessToken,refresh_token:t.refreshToken,expires_in:n,scope:t.scope,token_type:"Bearer"};return{tokenData:t,freshTokens:r}}return{tokenData:t,freshTokens:void 0}}async _doRefresh(e){let n=oh(this.serverConfig),r=(d,u)=>{s(d==="success"?"tengu_mcp_oauth_refresh_success":"tengu_mcp_oauth_refresh_failure",{transportType:c(this.serverConfig.type),...n&&{mcpServerBaseUrl:n},...u&&{reason:c(u)}})};for(let d=1;d<=3;d++){let u;try{X(this.serverName,"Starting token refresh");let o=v0t(),_=ue()?"enforce":"observe",p=this._metadataEchoMode===_?this._metadata:void 0;if(!p){let k=await this.discoveryState();if(k?.authorizationServerMetadata)p=k.authorizationServerMetadata;else if(k?.authorizationServerUrl){X(this.serverName,`Re-discovering metadata from persisted auth server URL: ${k.authorizationServerUrl}`);let E=k.authorizationServerUrl;if(p=await QTe(E,{fetchFn:o,skipIssuerValidation:!0}),p)BZe({serverName:this.ser
+
+## #24 headersHelper-401-code @207115285
+d before reauth");let Ae=or().reauthInFlight,be=$t(),_e=Ae.get(Pe),ae=_e!==void 0&&_e.epoch===ce?_e.promise:void 0;be.reauthDecisionSinkForTest?.(ae!==void 0?"joined":_e!==void 0?"stale_refused":"started");let Se=ae!==void 0&&(L instanceof Co&&L.code===uo.ConnectionClosed||L instanceof Qs&&L.code===-32000);if((Se||Le&&ye||Le&&we||Ve)&&!ni(N)&&!ss(N,ee)){if(X(N,ye?`Tool '${t}' returned ${oe??401}; re-running headersHelper and retrying once`:we?`Tool '${t}' returned ${oe??401}; session credential rejected \u2014 reconnecting and retrying once`:`Tool '${t}' returned ${oe??401}; refresh token stored \u2014 reconnecting and retrying once`),Se)y(ye?"mcp_headers_helper":"mcp_oauth_refresh","collateral_rejoin");if(!ae){y(ye?"mcp_headers_helper":"mcp_oauth_refresh","reauth_retry"),_.onclose=void 0;let ue=ce;ae=(async()=>(await mt(N,ee),qe(N,ee,void 0,void 0,W)))();let Oe={promise:ae,epoch:ue};Ae.set(Pe,Oe),ae.then((Fe)=>{if(Fe.type==="connected"&&qn()===ue)mfe.emit(N,ee)}).finally(()=>{if(Ae.get(Pe)===Oe&&!be.holdStaleReauthEntryForTest)Ae.delete(Pe)}).catch(()=>{})}let pe=await ae;if(qn()!==ce){if(pe.type==="connected")await et(pe);throw new P(`MCP tool call to server "${N}" was aborted: t
+
+## #48 uid-win#1 @182943107
+);let n=new Date;await W(e,n,n).catch(()=>{}),await I([R(e),e])}var U1t="ENOTOWNED";async function I(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n!==void 0&&r.uid!==n)throw Object.assign(Error(`refusing to bind: ${t} is owned by uid ${r.uid}`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)";function b(){if(F1t())throw Object.assign(Error(tsn),{code:U1t})}async function s4n(e){if(B()==="windows"){await d(e,{recursive:!0}).catch(()=>{});return}await GGe();let n=[Xye(),B1t()];for(let t of n)await d(t,{recursive:!0,mode:448});if(!n.includes(e)){if(await d(e,{recursive:!0,mode:448}).then(()=>!0,()=>!1))n.push(e)}await I(n)}function a4n(){if(B()==="windows")return;let e=QK(),n=R(e),t=H(e);w(n,{withFileTypes:!0}).then(async(r)=>{for(let o of r){if(!o.isDirectory()||o.na
+
+## #48 uid-fn#1 @182942797
+len=228 sha=7bd65ec80739ca81
+function I(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n!==void 0&&r.uid!==n)throw Object.assign(Error(`refusing to bind: ${t} is owned by uid ${r.uid}`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}
+
+## #22 plain-win#3 @186254531
+ chars \u2014 persist-to-disk failed: ${p.error}]`;let g=Nae(p);return s("tengu_hook_output_persisted",{source:c(r),originalSizeBytes:p.originalSize,persistedSizeBytes:g.length,truncatedFallback:!1}),g}function lIe(e){let t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is
+
+## #22 plain-fn#3 @186254433
+len=833 sha=b5614ce00cf5c225
+function lIe(e){let t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}
+
+## #22 plain-win#4 @186254835
+ting as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}function $Nn(e){let t=e.split(`
+`).filter((o)=>o.trim()!=="");if(t.le
+
+## #22 plain-fn#4 @186254433
+len=833 sha=b5614ce00cf5c225
+function lIe(e){let t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}
+
+## #22 plain-win#5 @186254942
+r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}function $Nn(e){let t=e.split(`
+`).filter((o)=>o.trim()!=="");if(t.length<2)return!1;using r=xd`parseHookOutput: json lines (${t.length})`;return t.every((o)=>{try{let u=cz().s
+
+## #22 plain-fn#5 @186254433
+len=833 sha=b5614ce00cf5c225
+function lIe(e){let t=e.trim();if(!t.startsWith("{"))return n("Hook output does not start with {, treating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON object, treating as plain text: ${l(r)}`),{plainText:e};if($Nn(t))return n("Hook output is several JSON documents, treating as plain text"),{plainText:e};let o=`Hook output looks like a JSON object but is not valid JSON \u2014 ${l(r)}. Emit the payload with a JSON encoder (jq, ConvertTo-Json, json.dumps) rather than string concatenation so backslashes and quotes inside strings are escaped.`;return n(o),{plainText:e,validationError:o}}}
+
+## #37 invalid-win#1 @196193922
+ort{du}from"B:/~BUN/root/chunk-h5b0f77v.js";function eAe(){return R("tengu_harbor_kite_mode_emit",!0)}function O(){switch(w().decidedBy){case"policySettings":return"managed-setting";case"repoSettings":return"repo-setting";case"invalidSetting":return"invalid-setting";case"flagSettings":case"userSettings":case void 0:return"explicit-setting"}}var p={accept:0,hold:1,refuse:2},Q=100,P=new Set(Iy);function wBe(e){if(e!==null)gi().inbound.shuttingDown=!1,I(),gi().inbound.modeAtUnwire=void 0;else{let o
+
+## #37 invalid-win#2 @202504706
+"managed-setting":return`Your organization's managed settings set "crossSessionInbound" to "hold".`;case"repo-setting":return`This repository's settings set "crossSessionInbound" to "hold" (your own "accept" cannot override a repo tightening).`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (see the settings warning), so messages are held while it is present.';case"bypass-default":return"This session is not prompting for permissions.";case"mode-unkno
+
+## #37 invalid-win#3 @202716769
+our admin to change it.`;case"repo-setting":return`This repository's settings set "crossSessionInbound" to "hold" (a repo may only tighten, so your own "accept" cannot override it); remove the repo setting or exclude it with --setting-sources.`;case"invalid-setting":return'A settings file has an unrecognized "crossSessionInbound" value (the settings warning names the file); messages are held while it is present \u2014 set it to "accept", "hold", or "refuse".';case"mode-unknown":return"It will be

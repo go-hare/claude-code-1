@@ -1,0 +1,23 @@
+# gold-248-fe-ext3
+
+## function o3t( hits=2
+@178581303 sha=3b9864cc162f6f6c function o3t(e){n().host.extensionsConfig.replaceHasDevChannels(e)}
+@184239077 sha=76ffac3fd6b7a5c2 function o3t(e){let t=pu(e);if(t[0]!=="sed")return!1;let r=t.slice(1),o=0,u=!1;for(let p=0;p<r.length;p++){let g=r[p];if((g==="-e"||g==="--expression")&&p+1<r.length){u=!0,p++;continue}if(g.startsWith("--expression=")){u=!0;continue}if(g.startsWith("-e=")){u=!0;continue}if(g.startsWith("-"))continue;if(o++,u)return!0;if(o>1)return!0}return!1}
+
+## function Ade( hits=3
+@178571558 sha=60311b7a51c6b5e6 function Ade(){return n().host.extensionsConfig.chromeFlagOverride()}
+@184077341 sha=c09ca2e25987a487 function Ade(){let e=R("tengu_amber_rokovoko",o5);return typeof e==="number"&&Number.isFinite(e)&&e>=0&&e<1?e:o5}
+@222524773 sha=0d8d47de6b89b6dd function Ade(e){let t={...e};for(let n in t){let r=t[n];TU(n,r)&&(t[n]=AU(r))}return t}
+
+## function _m( hits=6
+@178580940 sha=41b8506aa8b530d5 function _m(){return n().host.extensionsConfig.additionalDirectoriesForClaudeMd()}
+@195788086 sha=49b02fd19e549047 function _m(e){try{let t=new URL(e);return t.protocol==="http:"||t.protocol==="https:"?Rt(t.origin,80):t.protocol==="about:"?Rt(t.href,40):`a ${Rt(t.protocol,20)} URL`}catch{return e===""?"about:blank":"an unparseable URL"}}
+@205685695 sha= {"i":205685695,"missEnd":true,"preview":"function _m(t,e){e.log.silly(\"verify\",\"rebuilding index\");let{default:i}=await import(\"B:/~BUN/root/chunk-rt9812hv.js\"),s=await be.ls(t),r={missingContent:0,rejectedEntries:0,totalEntries:0},n={};for(let o in s)if(pm(s,o)){let h=be.hashKey(o),a=s[o],l=e.filter&&!e.filter(a);if(l&"}
+
+## function D4( hits=7
+@178581022 sha=51805e3e12b764db function D4(e){n().host.extensionsConfig.replaceAdditionalDirectoriesForClaudeMd(e)}
+@180180160 sha=5b4e2fca80695304 function D4(e){return Vv(`https://${e}`)||_Le.some((t)=>us(t)===e)}
+@182558353 sha= {"i":182558353,"missEnd":true,"preview":"function D4(e){switch(typeof e){case\"string\":return(0,tt.anyPack)(tt.StringValueSchema,(0,Ft.create)(tt.StringValueSchema,{value:e}));case\"boolean\":return(0,tt.anyPack)(tt.BoolValueSchema,(0,Ft.create)(tt.BoolValueSchema,{value:e}));case\"bigint\":return(0,tt.anyPack)(tt.Int64Value"}
+
+## function R7e( hits=1
+@178581238 sha=a58ab8848a3ee024 function R7e(){return n().host.extensionsConfig.hasDevChannels()}

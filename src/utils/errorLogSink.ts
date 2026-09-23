@@ -21,6 +21,7 @@ import { getFsImplementation } from './fsOperations.js'
 import { attachErrorLogSink, dateToFilename } from './log.js'
 import { jsonStringify } from './slowOperations.js'
 import { captureException } from './sentry.js'
+import { formatMcpErrorString } from '../services/mcp/formatMcpServerLabel.js'
 
 const DATE = dateToFilename(new Date())
 
@@ -193,8 +194,9 @@ function logErrorImpl(error: Error): void {
  * Implementation for logMCPError - writes MCP error to debug log and file.
  */
 function logMCPErrorImpl(serverName: string, error: unknown): void {
-  // Not themed, to avoid having to pipe theme all the way down
-  logForDebugging(`MCP server "${serverName}" ${error}`, { level: 'error' })
+  // densable Qt — error strings wrap fr
+  const label = formatMcpErrorString(serverName)
+  logForDebugging(`MCP server "${label}" ${error}`, { level: 'error' })
 
   const logFile = getMCPLogsPath(serverName)
   const errorStr =
@@ -214,7 +216,8 @@ function logMCPErrorImpl(serverName: string, error: unknown): void {
  * Implementation for logMCPDebug - writes MCP debug message to log file.
  */
 function logMCPDebugImpl(serverName: string, message: string): void {
-  logForDebugging(`MCP server "${serverName}": ${message}`)
+  const label = formatMcpErrorString(serverName)
+  logForDebugging(`MCP server "${label}": ${message}`)
 
   const logFile = getMCPLogsPath(serverName)
 

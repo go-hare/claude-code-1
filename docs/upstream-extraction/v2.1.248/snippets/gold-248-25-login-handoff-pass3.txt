@@ -1,0 +1,115 @@
+# gold-248-25-login-handoff-pass3
+# when=2026-09-20T04:57:14.663Z
+
+## #25 login-onDone @205716642
+t i=s.bridgeDisconnected?`Login successful. ${rZ}`:"Login successful";return s.includeEnvTokenWarning?`${i}
+
+${Mxn}`:i}async function Smr(o,s){let i=cnr(),d=i!==void 0,c=In(),m=c&&{accountUuid:c.accountUuid,organizationUuid:c.organizationUuid},h=ei(),y={delivered:!1};return e(Y4,{startingMessage:i,onDone:async(w,A,S)=>{let b=!1,T=await b6(s,w,{setAppState:S,previousAccount:m,previousGatewayAuth:h,onConsentNeeded:()=>(b=!0,o(lnr(),{display:"system"}),zI())}),D=Hke(s,w,T,{envTokenWasSet:d,envWarningOnce:y});if(b){let[L]=D;if(L)s.applyMessageOp({type:"append",messages:[It(L,"notice")]});return}o(...D)}})}function Y4(M){let v=g(23),X=Mc(),J=yt(),pt=aa(),[P,ht]=u(!1),te;if(v[0]===p)te=()=>ht(!0),v[0]=te;else te=v[0];let wt=te,ne=E(!1),oe;if(v[1]!==X||v[2]!==M||v[3]!==J)oe=(St)=>{if(ne.current){return}ne.current=!0,M.onDone(St,X,J)},v[1]=X,v[2]=M,v[3]=J,v[4]=oe;else oe=v[4];let O=oe,re;if(v[5]!==P||v[6]!==O)re=()=>O(P),v[5]=P,v[6]=O,v[7]=re;else re=v[7];let F=re,ie;if(v[8]===p)ie={context:"Settings"},v[8]=ie;else ie=v[8];Fe("confirm:no",F,ie);let R=hi();const z=P&&!R.pending;let I;if(v[9]!==R.keyName||v[10]!==R.pending)I=R.pending?r(t,{children:["Press ",R.keyName," again to exit"]}):e(B
+
+## function lnr 248=1 247=1
+## function lnr @205715658
+new `claude` sessions will keep using the old token until you remove it there.";function lnr(){return"Signed in. Review your organization's managed settings to continue."}function cnr(){return a.CLAUDE_CODE_OAUTH_TOKEN?`Warning: CLAUDE_CODE_OAUTH_TOKEN is set in your environment. This session will switch to your new credentials 
+
+## function zI 248=10 247=7
+## function zI @194644154
+pported_characters"||zU()&&Gw(e)}var nu={maxPaths:Gd,maxBytes:Hd,maxDeletes:Md};function zIt({gitRoot:e,realRoot:t,sessionId:r,objects:o,checkout:i,deps:a}){let d=new Map;return async({workerNote:u,content:m,record:g,signal:p})=>{let b=g.start.kind==="seed"?g.start:null,k=g.received.filter((R)=>R.worktreeCommit!==u.worktreeCommi
+
+## function zI @199627419
+;i<e;i++)n+="abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random()*26)];return n}function zI(e){return JSON.stringify(e)}function UI(e){return e.toLowerCase().trim().replace(/[^\w\s-]/g,"").replace(/[\s_-]+/g,"-").replace(/^-+|-+$/g,"")}Dh.captureStackTrace="captureStackTrace"in Error?Error.captureStackTrace:(...e)=>{};function e
+
+## lnr() 248=2 247=0
+## lnr() @205715667
+de` sessions will keep using the old token until you remove it there.";function lnr(){return"Signed in. Review your organization's managed settings to continue."}function cnr(){return a.CLAUDE_CODE_OAUTH_TOKEN?`Warning: CLAUDE_CODE_OAUTH_TOKEN is set in your environment. This session will switch to your new credentials after log
+
+## lnr() @205716670
+tAppState:S,previousAccount:m,previousGatewayAuth:h,onConsentNeeded:()=>(b=!0,o(lnr(),{display:"system"}),zI())}),D=Hke(s,w,T,{envTokenWasSet:d,envWarningOnce:y});if(b){let[L]=D;if(L)s.applyMessageOp({type:"append",messages:[It(L,"notice")]});return}o(...D)}})}function Y4(M){let v=g(23),X=Mc(),J=yt(),pt=aa(),[P,ht]=u(!1),te;if(v
+
+## zI() 248=10 247=5
+## zI() @190402807
+remove(I.taskId);for(let I of d)I.abortController.abort(Vc("background"));await zI(),await ja().catch((I)=>{y("task_local_agent","adopt_checkpoint_flush_failed"),n(`[adopt] checkpoint flush: ${I}`,{level:"warn"})})},stopCarriedWatches:j,disown:(R)=>{j(R);for(let I of A)R.remove(I.taskId);for(let I of x)R.remove(I.agentId);for(le
+
+## zI() @190443263
+round"));let C=(async()=>{let W=[];if(r.length>0){try{await qt((async()=>{await zI(),await ja()})(),vi,An)}catch(R){let I=R instanceof Error&&R.message===An;y("task_local_agent_exit_handoff",I?"flush_timeout":"flush_failed"),n(`exit handoff: agent transcript flush failed: ${R}`,{level:"warn"})}W=await Promise.all(r.map((R)=>C6t(
+
+## zI() @193753262
+in(t,e[o]);if(r[o]=m.relative(i,g),(o&255)===255&&performance.now()-a>wKe)await zI(),a=performance.now()}return r}async function R(e,t){if(t.length===0)return;if(!e.fileIndex)return;let i=await qHn(t),r=[...e.cachedTrackedFiles,...e.cachedConfigFiles,...e.cachedTrackedDirs,...t,...i],a=WHn(r);if(a===e.loadedMergedSignature){n("[
+
+## zI() @193754480
+lid(o)||!e.ignores(o))i.push(o);if((a&255)===255&&performance.now()-r>wKe)await zI(),r=performance.now()}return i}async function D(e,t,i){let r=Date.now(),a=e.cacheGeneration;n("[FileIndex] getFilesUsingGit called");let o=vn(te());if(!o)return n("[FileIndex] not a git repo, returning null"),null;try{let g=te(),c=Date.now(),u=awa
+
+## zI() @193756193
+r=0;r<e.length;r++)if(C(e,r,r+1,t),(r&255)===255&&performance.now()-i>wKe)await zI(),i=performance.now();return[...t].map((r)=>r+m.sep)}function C(e,t,i,r){for(let a=t;a<i;a++){let o=m.dirname(e[a]);while(o!=="."&&!r.has(o)){let g=m.dirname(o);if(g===o)break;r.add(o),o=g}}}async function M(e,t){return(await Promise.all(T$n.map((
+
+## H0e( 248=12 247=4
+## H0e( @190484291
+CompleteResolve&&t.loadingCompleteResolve===e)t.releaseBarrier()}async function H0e(e,t,r){return(await LKt(e,t,r)).fetchSucceeded}var Qe=5000;async function IHn(e,t,r){let o,d=new Promise((a)=>{o=X(()=>a("consent_pending"))}),c=H0e(e,t,r).then((a)=>a?"refreshed":"failed",(a)=>(_(a),"failed"));try{let a=await un(Promise.race([c,
+
+## H0e( @190484440
+function IHn(e,t,r){let o,d=new Promise((a)=>{o=X(()=>a("consent_pending"))}),c=H0e(e,t,r).then((a)=>a?"refreshed":"failed",(a)=>(_(a),"failed"));try{let a=await un(Promise.race([c,d]),Qe);if(a===void 0)return y("remote_managed_settings_startup_await","deadline_expired"),"timed_out";return a}finally{o?.()}}async function LKt(e,t
+
+## H0e( @191614171
+){if(be("policySettings")?.forceRemoteSettingsRefresh){let Q=await Hxt(async()=>H0e(await Do(),ne,fe));if(!Q.valid)return await Pe(Be,Q.message)}else if(Le()==="gateway"){if(!await H0e(await Do(),ne,fe))return await Pe(Be,`Couldn't load settings from Cloud gateway ${ei()?.url??""}. Check your network connection, or run \`claude 
+
+## H0e( @191614272
+);if(!Q.valid)return await Pe(Be,Q.message)}else if(Le()==="gateway"){if(!await H0e(await Do(),ne,fe))return await Pe(Be,`Couldn't load settings from Cloud gateway ${ei()?.url??""}. Check your network connection, or run \`claude auth login\` to re-authenticate.`)}else switch(await IHn(await Do(),ne,fe)){case"refreshed":break;cas
+
+## H0e( @205709695
+if(wo())return G;UJe("gateway"),jT(),Scn()}finally{if(!wo())V.release?.()}}else H0e(qEt,o.storageV5,o.credentials);yde(),Xqe(),LN(),DW();let{setAppState:m}=i,h=()=>{m((f)=>({...f,authChangeGeneration:f.authChangeGeneration+1}))},y=i.previousAccount,w=In(),A=xS(y,w),{replBridgeEnabled:S,replBridgeOutboundOnly:b}=o.getAppState(),T
+
+## function H0e 248=3 247=1
+## function H0e @190484282
+t.loadingCompleteResolve&&t.loadingCompleteResolve===e)t.releaseBarrier()}async function H0e(e,t,r){return(await LKt(e,t,r)).fetchSucceeded}var Qe=5000;async function IHn(e,t,r){let o,d=new Promise((a)=>{o=X(()=>a("consent_pending"))}),c=H0e(e,t,r).then((a)=>a?"refreshed":"failed",(a)=>(_(a),"failed"));try{let a=await un(Promise
+
+## function LKt 248=1 247=0
+## function LKt @190484674
+gs_startup_await","deadline_expired"),"timed_out";return a}finally{o?.()}}async function LKt(e,t,r){_e(),tV();let o=kY(),d=T(),c=d.detachBarrier();if(!_P())return c?.(),x({settings:null,fetchSucceeded:!0}),H(),{fetchSucceeded:!0};MKt();let a=d.loadingCompleteResolve;if(c)if(d.loadingCompletePromise)d.loadingCompletePromise.then(
+
+## qEt 248=34 247=29
+## qEt @201105981
+/~BUN/root/chunk-9v3a1efe.js";import{e}from"B:/~BUN/root/chunk-8ap061gk.js";var qEt=(p,r)=>new Promise((i,s)=>{let o=!1,n=null;function a(){return n!==null&&!ed(n)}(async()=>{let{rerender:t,unmount:l,waitUntilExit:m}=await bR(e(Zd,{session:z(),children:e(NNe,{settings:p,reveal:"default",onAccept:()=>{if(!a())return!1;if(o=!0,i("
+
+## qEt @201106526
+log exited without an answer");_(u),s(u)}})().catch((t)=>{_(t),s(t)})});
+export{qEt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, consti
+
+## qEt @201107155
+tps://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{qEt}from"B:/~BUN/root/chunk-5pp1trz7.js";import"B:/~BUN/root/chunk-9v3a1efe.js";import"B:/~BUN/root/chunk-ncymer7j.js";import"B:/~BUN/root/chunk-xp3fs5hr.js";import"B:/~BUN/root/chunk-1t7qf5w9.js";import"B:/~BUN/root/chunk-zjmyxdw3.js";import"B:/~BUN
+
+## qEt @201121009
+t"B:/~BUN/root/chunk-4hkt7f9w.js";import"B:/~BUN/root/chunk-h5e2qvst.js";export{qEt as showStandaloneSecurityDialog};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated 
+
+## qEt @205708407
+N/root/chunk-3q80tyw5.js";import{H6}from"B:/~BUN/root/chunk-ad41j772.js";import{qEt}from"B:/~BUN/root/chunk-5pp1trz7.js";import{Mc}from"B:/~BUN/root/chunk-t73t9gt5.js";import{LNe}from"B:/~BUN/root/chunk-48t9wr2p.js";import{Pke,jJe}from"B:/~BUN/root/chunk-e99eknq1.js";import{lR,_G}from"B:/~BUN/root/chunk-22293z36.js";import{UJe}f
+
+## #25 lnr @205715658 len=91 sha=114d79c5f03c131f bodyHits247=0
+function lnr(){return"Signed in. Review your organization's managed settings to continue."}
+
+## #25 H0e @183891195 len=79 sha=adb3210528a440f3 bodyHits247=0
+function H0e(e){return e.includes("this operation must be run in a work tree")}
+
+## #25 H0e @190484282 len=60 sha=3bf2c60391bdb420 bodyHits247=0
+function H0e(e,t,r){return(await LKt(e,t,r)).fetchSucceeded}
+
+## #25 H0e @216447485 len=115 sha=249ceef39cc00d91 bodyHits247=0
+function H0e(e){if(e.isGroup)return;let t=q0e(e);return t?{id:String(e.id??""),cx:t.cx,cy:t.cy,rect:t.rect}:void 0}
+
+## #25 LKt @190484674 len=606 sha=c0d2a1f46e5af3ca bodyHits247=0
+function LKt(e,t,r){_e(),tV();let o=kY(),d=T(),c=d.detachBarrier();if(!_P())return c?.(),x({settings:null,fetchSucceeded:!0}),H(),{fetchSucceeded:!0};MKt();let a=d.loadingCompleteResolve;if(c)if(d.loadingCompletePromise)d.loadingCompletePromise.then(c);else c();let u,p;try{p=await J({showSecurityDialog:e,storageV5:t,credentials:r}),u={fetchSucceeded:p.fetchSucceeded,...p.failure&&{failure:p.failure}}}finally{he(a)}if(n("Remote settings: Refreshed after auth change"),kY()!==o)return n("Remote settings: Refresh superseded by a login/logout reset; not notifying"),u;if(x(p),!Yv())Re(e,t,r);return H(),u}
+
+## #25 ITt @190618668 len=151 sha=4337697b02c6632e bodyHits247=0
+refuseInput:wt,windowAnchorMs:ld,windowMs:ud}=sd,[ad,Ei,En]=Fn(),[No,Hl]=u(null),ql=E(null);Qd(ql,!0),os("select",!0);let{refuse:Vi,refuseCharacter:Ai}
+
+## 247 refreshRemoteManagedSettings hits=0
+## 247 onConsentNeeded hits=0
+## 247 H0e( hits=4

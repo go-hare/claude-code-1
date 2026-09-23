@@ -1,0 +1,94 @@
+# gold-248-feat-2  experimental.cacheTtl agent frontmatter
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:38.218Z
+
+## #2 experimental.cacheTtl  needle="experimental.cacheTtl"  hits=0
+
+## #2 experimental:{cacheTtl  needle="experimental:{cacheTtl"  hits=0
+
+## #2 "cacheTtl"  needle="\"cacheTtl\""  hits=0
+
+## #2 cacheTtl:  needle="cacheTtl:"  hits=4
+- #0 @184576834 s agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or "
+- #1 @184661581 :Ke},...Qe!==void 0&&{effort:Qe},...ct!==void 0&&{maxTurns:ct},...Jt!==void 0&&{cacheTtl:Jt}}}catch(C){return n(`Failed to load agent from ${e}: ${C}`,{level:"error"}),n
+- #2 @184701249 t:we},...Ie&&{permissionMode:Pe},...xe!==void 0&&{maxTurns:xe},...Fe!==void 0&&{cacheTtl:Fe},...L&&{background:L},...j&&{memory:j},...pe&&{isolation:pe},...rn!==void 0&&
+- #3 @186463023 if(it)Nwn(Bn==="1h"?vge:Gat);let pr=JWn(t,Ir,{skipGlobalCacheForSystemPrompt:ze,cacheTtl:Bn}),ir=U.length>0,Tr=[...p.extraToolSchemas??[]];if(fe)Tr.push({type:"advisor_2
+
+## #2 cacheTtl  needle="cacheTtl"  hits=8
+- #0 @96708404 ....'. Must be a positive integer...........Error parsing agent from ........N..cacheTtl.....Q.servesDefault...U...;K..Cannot destructure property 'getCoordinatorSyste
+- #1 @184576834 s agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or 
+- #2 @184661581 :Ke},...Qe!==void 0&&{effort:Qe},...ct!==void 0&&{maxTurns:ct},...Jt!==void 0&&{cacheTtl:Jt}}}catch(C){return n(`Failed to load agent from ${e}: ${C}`,{level:"error"}),
+- #3 @184701249 t:we},...Ie&&{permissionMode:Pe},...xe!==void 0&&{maxTurns:xe},...Fe!==void 0&&{cacheTtl:Fe},...L&&{background:L},...j&&{memory:j},...pe&&{isolation:pe},...rn!==void 0&
+- #4 @185198866 toolUseContext:la,forkContextMessages:Sn,stickyBetas:yu,agentCacheTtlOverride:e.cacheTtl},()=>lr)}let Ui=Sn,qa=null;if(it!==void 0){let lr=Sn.findLastIndex((li)=>it.has
+- #5 @185200775 ns.fallbackModel,stickyBetas:yu,evictCacheOnComplete:xc,agentCacheTtlOverride:e.cacheTtl})){if(rn?.(),DA(lr)){ASe(lr,Hl,Ka),yield*ns,ns.length=0;continue}if(lr.type==="
+- #6 @186463023 if(it)Nwn(Bn==="1h"?vge:Gat);let pr=JWn(t,Ir,{skipGlobalCacheForSystemPrompt:ze,cacheTtl:Bn}),ir=U.length>0,Tr=[...p.extraToolSchemas??[]];if(fe)Tr.push({type:"advisor_
+- #7 @186527330 :o.text,...t&&o.cacheScope!==null&&{cache_control:U1({scope:o.cacheScope,ttl:r?.cacheTtl})}}))}async function fA({systemPrompt:e=di([]),userPrompt:t,outputFormat:r,sign
+
+## #2 experimental:  needle="experimental:"  hits=17
+- #0 @92283157 ey registers the channel notification
+      // listener on Claude's side.
+      experimental: { 'claude/channel': {} },
+    },
+    instructions:
+      "Events from ........~
+- #1 @178983512  is enabled. Only the documented allowlisted keys are applied.")})),js=h(()=>m({experimental:oa((e)=>Re(e)?e:void 0,m({...ut().partial().shape,...zs().partial().shape,...pt(
+- #2 @180284850 ibe("Tools provided by this server (available when connected)"),capabilities:m({experimental:Oe(i(),ye()).optional()}).optional().describe("@internal Server capabilities (av
+- #3 @184574295 al().describe("@internal"),defaultEnabled:ye().optional().describe("@internal"),experimental:ye().optional().describe("@internal"),dependencies:ye().optional().describe("@in
+- #4 @184576818 e, subagents this agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s request
+- #5 @191276557 ey registers the channel notification
+      // listener on Claude's side.
+      experimental: { 'claude/channel': {} },
+    },
+    instructions:
+      "Events from ${d} arri
+- #6 @192371103 l(),requests:nn({tools:nn({call:e.optional()}).optional()}).optional()}),lpr=m({experimental:Oe(i(),e).optional(),sampling:m({context:e.optional(),tools:e.optional()}).optio
+- #7 @192371491 d({method:F("initialize"),params:cpr}),_4t=(t)=>iSt.safeParse(t).success,S4t=m({experimental:Oe(i(),e).optional(),logging:e.optional(),completions:e.optional(),prompts:m({li
+- #8 @200951096 ocolEra==="modern"))delete fe["claude/channel"];if(Object.keys(fe).length>0)ae={experimental:fe}}return{name:L.name,status:Bde(L.type),serverInfo:zo(L)?L.serverInfo:void 0,e
+- #9 @206281882 al(),requests:A({tools:A({call:ME.optional()}).optional()}).optional()}),O0t=f({experimental:I(a(),ME).optional(),sampling:f({context:ME.optional(),tools:ME.optional()}).opt
+- #10 @206282240 :O0t,clientInfo:soe}),eet=OE.extend({method:h("initialize"),params:L0t}),nfe=f({experimental:I(a(),ME).optional(),logging:ME.optional(),completions:ME.optional(),prompts:f({
+- #11 @206400259 nal(),requests:de({tools:de({call:t.optional()}).optional()}).optional()}),x=N({experimental:Q(P(),t).optional(),sampling:N({context:t.optional(),tools:t.optional()}).option
+- … +5 more
+
+## #2 "5m"|"1h" cache  needle="cacheTtl:\"5m\""  hits=0
+
+## #2 cacheTtl:"1h"  needle="cacheTtl:\"1h\""  hits=0
+
+## #2 prompt cache TTL  needle="prompt cache TTL"  hits=0
+
+## #2 per-agent prompt cache  needle="per-agent prompt cache"  hits=0
+
+## #2 subagent TTL  needle="subagent TTL"  hits=0
+
+## #2 experimental.cache  needle="experimental.cache"  hits=0
+
+## cacheTtl total hits=8
+
+## #2 cacheTtl:#0 @184576834
+al postamble appended (after the harness-owned default) to each activity digest sent to the observer."),observeSubagents:wE().optional().describe("If false, subagents this agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or "1h") when no `subagentPromptCacheTtl` setting or env var is set. "1h" is ignored while a Claude subscription is in overage.')}).loose().nullable().optional().describe("Experimental per-agent options; unknown keys are ignored.")})),iZt=h(()=>m({name:Pu().optional().describe("Style name used in the Output style 
+
+## #2 cacheTtl:#1 @184661581
+imedAgentMemory);return xe+`
+
+`+yt}return xe},source:"plugin",color:fe,model:Pe,filename:N,filePath:e,plugin:o,...Te&&{background:Te},...Be&&{memory:Be},...Ke&&{isolation:Ke},...Qe!==void 0&&{effort:Qe},...ct!==void 0&&{maxTurns:ct},...Jt!==void 0&&{cacheTtl:Jt}}}catch(C){return n(`Failed to load agent from ${e}: ${C}`,{level:"error"}),null}}function SDt(e,t){let r=en();return r.agents??=(async()=>{let{enabled:o,errors:u}=await Yi(e);if(u.length>0)n(`Plugin loading errors: ${u.map((E)=>dg(E)).join(", ")}`);let p=null,k=(await Promise.all(o.map(async(E)=>{let C=new Set,M=[];if(E.agentsPath)try{let L=await R8e(E.agentsPath,E.name,E.source,E.pat
+
+## #2 fn-before cacheTtl:#1 @184659477
+len=2198 sha=e9b1fea2a75d3825
+function x8e(e,t,r,o,u,p,g,k){let E=ce();if(Cq(E,e,g))return null;try{let C=await lE(E,e,C8e);if(C===null)return n(`Skipping plugin agent ${e}: not a regular file or exceeds ${C8e} byte limit`,{level:"warn"}),null;let{frontmatter:M,content:L}=Fo(C,e,{normalizeKeys:!0}),N=(M.name!=null?String(M.name):void 0)||Rin(e).replace(/\.md$/,""),j=[t,...r,N].join(":"),G=kN(M.description,j)??kN(M.when_to_use,j)??kN(M["when-to-use"],j)??`Agent from ${t} plugin`,ue=RE(M.tools),pe=rM(M.skills),fe=M.color,we=M.model,Pe;if(typeof we==="string"&&we.trim().length>0){let cn=we.trim();Pe=cn.toLowerCase()==="inherit"?"inherit":cn}let Ie=M.background,Te=Ie==="true"||Ie===!0?!0:void 0,xe=a3(L.trim(),{path:u,source:o});if(p.userConfig)xe=v2(xe,await hT(o,k),p.userConfig);let Fe=M.memory,Be;if(Fe!==void 0)if(A8e.includes(Fe))Be=Fe;else n(`Plugin agent file ${e} has invalid memory value '${Fe}'. Valid options: ${A8e.join(", ")}`);let Ke=M.isolation==="worktree"?"worktree":void 0,ze=M.effort,Qe=ze!==void 0?RA(ze):void 0;if(ze!==void 0&&Qe===void 0)n(`Plugin agent file ${e} has invalid effort '${ze}'. Valid options: ${lg.join(", ")} or an integer`);for(let cn of["permissionMode","hooks","mcpServers"])if(M[cn]!==void 0)n(`Plugin agent file ${e} sets ${cn}, which is ignored for plugin agents. Use .claude/agents/ for this level of control.`,{level:"warn"});let xt=M.maxTurns,ct=fUt(xt);if(xt!==void 0&&ct===void 0)n(`Plugin agent file ${e} has invalid maxTurns '${xt}'. Must be a positive integer.`);let Jt=mUt(M),rn=M.disallowedTools!==void 0?RE(M.disallowedTools):void 0;if(zs()&&Be&&ue!==void 0){let cn=new Set(ue);for(let yt of[er,tn,wt])if(!cn.has(yt))ue=[...ue,yt]}return{agentType:j,whenToUse:G,tools:ue,...rn!==void 0&&{disallowedTools:rn},...pe!==void 0&&{skills:pe},getSystemPrompt:(cn)=>{if(zs()&&Be){let yt=rmt(j,Be,cn?.toolUseContext?.storageV5,cn?.primedAgentMemory);return xe+`
+
+`+yt}return xe},source:"plugin",color:fe,model:Pe,filename:N,filePath:e,plugin:o,...Te&&{background:Te},...Be&&{memory:Be},...Ke&&{isolation:Ke},...Qe!==void 0&&{effort:Qe},...ct!==void 0&&{maxTurns:ct},...Jt!==void 0&&{cacheTtl:Jt}}}catch(C){return n(`Failed to load agent from ${e}: ${C}`,{level:"error"}),null}}
+
+## #2 cacheTtl:#2 @184701249
+tMemory);return pn+`
+
+`+Ht}return pn},source:u,filename:Be,filePath:e,...k&&typeof k==="string"&&Fd.includes(k)&&{color:k},...C!==void 0&&{model:C},...we!==void 0&&{effort:we},...Ie&&{permissionMode:Pe},...xe!==void 0&&{maxTurns:xe},...Fe!==void 0&&{cacheTtl:Fe},...L&&{background:L},...j&&{memory:j},...pe&&{isolation:pe},...rn!==void 0&&{observer:rn},...yt!==void 0&&{observerMessage:yt},...pt!==void 0&&{observeSubagents:pt}}}catch(p){let g=p instanceof Error?p.message:String(p);return n(`Error parsing agent from ${e}: ${g}`,{level:"error"}),null}}function UH(e){let{prompt:t,servesDefault:r}=Gin(e);if(!r&&!e.analysisOnly)eW(!1);return t}functi
+
+## #2 fn-before cacheTtl:#2 @184698233
+len=3319 sha=bd671041fb05f8b3
+function dar(e,t,r,o,u){try{let{name:p,description:g}=r;if(!p||typeof p!=="string")return null;if(p.startsWith("-"))return n(`Agent file ${Dy(e)} has invalid name '${Dy(p)}': names must not start with '-'`,{level:"error"}),null;if(p.normalize("NFKC").includes(":"))return n(`Agent file ${Dy(e)} has invalid name '${Dy(p)}': names must not contain ':' (reserved for plugin namespacing)`,{level:"error"}),null;if(TE("agent",r),!g||typeof g!=="string")return n(`Agent file ${e} is missing required 'description' in frontmatter`),null;g=g.replaceAll("\\n",`
+`);let{color:k,model:E}=r,C;if(typeof E==="string"&&E.trim().length>0){let gn=E.trim();C=gn.toLowerCase()==="inherit"?"inherit":gn}let M=r.background;if(M!==void 0&&M!=="true"&&M!=="false"&&M!==!0&&M!==!1)n(`Agent file ${e} has invalid background value '${M}'. Must be 'true', 'false', or omitted.`);let L=M==="true"||M===!0?!0:void 0,N=["user","project","local"],U=r.memory,j;if(U!==void 0)if(N.includes(U))j=U;else n(`Agent file ${e} has invalid memory value '${U}'. Valid options: ${N.join(", ")}`);let G=["worktree","remote"],ue=r.isolation,pe;if(ue!==void 0)if(G.includes(ue))pe=ue;else n(`Agent file ${e} has invalid isolation value '${ue}'. Valid options: ${G.join(", ")}`);let fe=r.effort,we=fe!==void 0?RA(fe):void 0;if(fe!==void 0&&we===void 0)n(`Agent file ${e} has invalid effort '${fe}'. Valid options: ${lg.join(", ")} or an integer`);let Pe=$f(r.permissionMode),Ie=Pe&&Iy.includes(Pe);if(Pe&&!Ie){let gn=`Agent file ${e} has invalid permissionMode '${Pe}'. Valid options: ${Iy.join(", ")}`;n(gn)}let Te=r.maxTurns,xe=fUt(Te);if(Te!==void 0&&xe===void 0)n(`Agent file ${e} has invalid maxTurns '${Te}'. Must be a positive integer.`);let Fe=mUt(r),Be=Bin(e,".md"),Ne=RE(r.tools);if(zs()&&j&&Ne!==void 0){let gn=new Set(Ne);for(let Ht of[er,tn,wt])if(!gn.has(Ht))Ne=[...Ne,Ht]}let Ke=r.disallowedTools,ze=Ke!==void 0?RE(Ke):void 0,Qe=rM(r.skills),xt=r.initialPrompt,ct=typeof xt==="string"&&xt.trim()?xt:void 0,Jt=r.observer,rn=typeof Jt==="string"&&Jt.trim()?Jt.trim():void 0,cn=r.observerMessage,yt=typeof cn==="string"&&cn.trim()?cn:void 0,dt=r.observeSubagents,pt=dt==="false"||dt===!1?!1:void 0,it=r.mcpServers,Ze;if(Array.isArray(it))Ze=it.map((gn)=>{let Ht=N8e().safeParse(gn);if(Ht.success)return Ht.data;return n(`Agent file ${e} has invalid mcpServers item: ${S(gn)}. Error: ${Ht.error.message}`),null}).filter((gn)=>gn!==null);let vt=Win(r,p),pn=o.trim();return{baseDir:t,agentType:p,whenToUse:g,...Ne!==void 0&&{tools:Ne},...ze!==void 0&&{disallowedTools:ze},...Qe!==void 0&&{skills:Qe},...ct!==void 0&&{initialPrompt:ct},...Ze!==void 0&&Ze.length>0&&{mcpServers:Ze},...vt!==void 0&&{hooks:vt},getSystemPrompt:(gn)=>{if(zs()&&j){let Ht=rmt(p,j,gn?.toolUseContext?.storageV5,gn?.primedAgentMemory);return pn+`
+
+`+Ht}return pn},source:u,filename:Be,filePath:e,...k&&typeof k==="string"&&Fd.includes(k)&&{color:k},...C!==void 0&&{model:C},...we!==void 0&&{effort:we},...Ie&&{permissionMode:Pe},...xe!==void 0&&{maxTurns:xe},...Fe!==void 0&&{cacheTtl:Fe},...L&&{background:L},...j&&{memory:j},...pe&&{isolation:pe},...rn!==void 0&&{observer:rn},...yt!==void 0&&{observerMessage:yt},...pt!==void 0&&{observeSubagents:pt}}}catch(p){let g=p instanceof Error?p.message:String(p);return n(`Error parsing agent from ${e}: ${g}`,{level:"error"}),null}}
+
+## #2 cacheTtl:#3 @186463023
+ADe]:[]].filter(Boolean)),vTt(t);let Ir=p.enablePromptCaching??dIe(pe),Xn=Ivt(p.querySource,{agentCacheTtlOverride:p.agentCacheTtlOverride}),Bn=Xn.ttl==="1h"?"1h":void 0;if(it)Nwn(Bn==="1h"?vge:Gat);let pr=JWn(t,Ir,{skipGlobalCacheForSystemPrompt:ze,cacheTtl:Bn}),ir=U.length>0,Tr=[...p.extraToolSchemas??[]];if(fe)Tr.push({type:"advisor_20260301",name:"advisor",model:fe});let Sr=[...xt,...Tr],Fn=Ar()&&Ty()&&!vW()&&Yc(pe)&&!!p.fastMode;if(YT&&N&&nmn()&&SS())s7(ct,YT);let yr=YT?$ne(ct,YT):!1;if(Fn)s7(ct,i6e);let or=$ne(ct,i6e),En=!1;if(FWn())s7(ct,bce);En=$ne(ct,bce);let Ur=!1,xr=!1;if(p.evictCacheOnComplete&&p.stickyBetas!==void 0&&NWn())s7(ct,

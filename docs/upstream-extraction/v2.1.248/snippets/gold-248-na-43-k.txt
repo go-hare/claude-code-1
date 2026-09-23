@@ -1,0 +1,6 @@
+# gold-248-na-43-k  map 401/404 → github_not_connected
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=183083641
+
+len=319 sha=90015c4a333867a5
+function k(e,t){if(e!==401&&e!==404)return"inconclusive";let s=g().safeParse(t),o=s.success?s.data.error.details:void 0;if(e===401&&o?.error_code==="auth_required"&&o.type==="github")return"github_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"inconclusive"}

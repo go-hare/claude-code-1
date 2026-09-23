@@ -1,0 +1,47 @@
+=== densable 2.1.248 official E / C for _G ===
+when=2026-09-22T02:15:00Z
+sea=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+## imports (chunk containing E + _G)
+import{Xet}from"B:/~BUN/root/chunk-w2fg0nqd.js";
+import{B}from"B:/~BUN/root/chunk-m0p20t24.js";
+import{spawnSync as C}from"child_process";
+import{dirname as T}from"path";
+import{isAbsolute as A}from"path";
+
+## E @189573358 len=315 sha=53dc05aa7befcb81
+function E(e,t,o,r){if(B()==="windows"||!A(e))return;let a;try{if(r)a=process.cwd(),bu(r);process.execve(e,t,Xet(o)),n(`execve(${e}) returned \u2014 falling back to spawn`,{level:"warn"})}catch(i){n(`execReplaceProcess: ${l(i)} \u2014 falling back to spawn`,{level:"warn"})}finally{if(a!==void 0)try{bu(a)}catch{}}}
+
+## C = spawnSync alias (NOT a custom function)
+import{spawnSync as C}from"child_process";
+// prior peel that found function C(@189565600) was WRONG (quota auto-resume emitter).
+
+## Xet @189571454 len=201 sha=3215d2db461f694e (execve env only; NOT applied to C)
+function Xet(t){let e={};for(let[n,r]of Object.entries(t)){if(r===void 0)continue;if(n==="__proto__")Object.defineProperty(e,n,{value:r,writable:!0,enumerable:!0,configurable:!0});else e[n]=r}return e}
+
+## bu @178624609 (chdir used by E)
+function bu(e){process.chdir(e);try{process.cwd()}catch{}}
+
+## B() platform — returns "windows" | "macos" | "linux" (not win32)
+## A = path.isAbsolute
+
+## _G @189575531 call shape (sha=26daf068024fec1e excerpt)
+let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());
+...
+let m=gKt();
+await g(),E(o,[o,...r,...i],s,m);
+for(let u of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});
+await g();
+let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});
+if(process.removeAllListeners("beforeExit"),process.removeAllListeners("exit"),c.error)
+  process.stderr.write(`Failed to relaunch Claude Code: ${c.error.message}\n`),
+  pp("relaunch_spawn_error"),process.exit(1);
+c.signal,process.exit(c.status??(c.signal?1:0))
+
+## semantic notes for leftover
+- E: windows no-op; non-absolute cmd no-op; chdir+restore via bu; execve argv0=cmd; env via Xet; warn+fallback
+- C: raw spawnSync — options ONLY {stdio:"inherit",env:s,cwd:m} — NO windowsHide
+- Xet applies to E env only, not C
+- argv: E gets [cmd,...prefix,...cli]; C gets [...prefix,...cli] (Node spawnSync convention)
+- leftover buildCliLaunch → execPath/args already matches that shape when used as
+  execve(execPath,[execPath,...args],Xet(env)) / spawnSync(execPath,args,{stdio,env,cwd})

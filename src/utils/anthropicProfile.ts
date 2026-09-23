@@ -10,9 +10,15 @@ import { readFileSync } from 'fs'
 import { rename, unlink, writeFile } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
-import { getOauthConfig, OAUTH_BETA_HEADER } from 'src/constants/oauth.js'
+import {
+  CLAUDE_AI_INFERENCE_SCOPE,
+  getOauthConfig,
+  OAUTH_BETA_HEADER,
+} from 'src/constants/oauth.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
+import { isBareMode, isEnvTruthy } from './envUtils.js'
+import { getAPIProvider } from './model/providers.js'
 import {
   type WifTokenProvider,
   isWifFailedAccessToken,
@@ -21,7 +27,6 @@ import {
   wrapWifInvalidGrantRefreshCleanup,
   wrapWifSiblingRotatedTokenAdoption,
 } from './wifCredentialRace.js'
-import { isBareMode, isEnvTruthy } from './envUtils.js'
 
 export type AnthropicProfileSource =
   | 'profile-explicit'
@@ -323,9 +328,25 @@ const infoUsingProfileAuth = memoize((): void => {
 })
 
 /**
- * densable uD — profile auth is the active API credential source.
- * Lets API key / OAuth env / Bedrock / Vertex / Mantle / bare win.
- * Implicit user_oauth + stored claude.ai login → Vmd skip.
+ * densable Aqt — `qH(e?.scopes)&&!!e?.accessToken`.
+ * qH is `Array.isArray(e)&&e.includes(Ny)` (user:inference).
+ */
+export function isUsableStoredClaudeAiLogin(
+  tokens: { scopes?: unknown; accessToken?: unknown } | null | undefined,
+): boolean {
+  return (
+    Array.isArray(tokens?.scopes) &&
+    tokens.scopes.includes(CLAUDE_AI_INFERENCE_SCOPE) &&
+    Boolean(tokens?.accessToken)
+  )
+}
+
+/**
+ * densable Wd / leftover 251 #20.
+ * okn = hasAnthropicProfileAuth. hqt: ko = isBareMode;
+ * Cc = CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST; dr = firstParty;
+ * Xt is getClaudeAIOAuthTokens (caller passes Aqt(Xt())).
+ * Implicit profile + Aqt + vJe → IN skip.
  */
 export function isProfileAuthActive(opts?: {
   storedClaudeAiLogin?: boolean
@@ -335,9 +356,11 @@ export function isProfileAuthActive(opts?: {
   if (!hasAnthropicProfileAuth(env)) return false
   if (isBareMode()) return false
   if (env.ANTHROPIC_UNIX_SOCKET) return false
+  if (env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) return false
   if (env.ANTHROPIC_AUTH_TOKEN) return false
   if (env.ANTHROPIC_API_KEY) return false
   if (env.CLAUDE_CODE_OAUTH_TOKEN) return false
+  if (getAPIProvider() !== 'firstParty') return false
   if (
     isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(env.CLAUDE_CODE_USE_VERTEX) ||

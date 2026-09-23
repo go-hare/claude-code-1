@@ -1,0 +1,97 @@
+# gold-248-unk-31e  leftover-name peel
+when=2026-09-20T07:36:59.330Z
+
+# ==== leftover-name counts ====
+- "Local-only retract of a declined dialog" 248=2 247=0 **NEW248**
+- "declined dialog forward" 248=2 247=0 **NEW248**
+- "permission_details" 248=0 247=0
+- "request_user_dialog" 248=54 247=51
+- "Sent control_request" 248=0 247=2
+- "Sent control_cancel_request" 248=0 247=2
+- "Dropping control_cancel_request" 248=0 247=2
+- "pendingForwards" 248=0 247=0
+- "pending_forwards" 248=0 247=0
+- "locallyShown" 248=0 247=0
+- "shownLocally" 248=0 247=0
+- "forwardedIds" 248=0 247=0
+- "dialogForward" 248=0 247=0
+- "pendingControlRequests" 248=17 247=15
+- "Hht(" 248=5 247=3
+- "hkr(" 248=0 247=1
+- "Cnt(" 248=4 247=3
+
+# -- "pe.set(e.request_id,{request:e})" js=198368815
+## 248 pe.set(e.request_id,{request:e}) @198368815
+t,session_id:p}));C.writeBatch(o)},sendControlRequest(e){Iht(e.request_id,{automated:!Xfe(e)});let r=e.request;if(r.subtype==="can_use_tool"||r.subtype==="request_user_dialog")pe.delete(e.request_id),pe.set(e.request_id,{request:e}),Ze.delete(e.request_id);if(r.subtype==="request_user_dialog"&&(de.active||ce))return Ze.add(e.request_id),n(`[remote-bridge] Not forwarding request_user_dialog while writes are gated / transport recovering (local-only): ${e.request_id}`),!1;let o={...e,session_id:p};if(r.subtype==="can_use_tool"){let t;if(R("tengu_bridge_requires_action_details",!1)){let a=r.tool_n
+
+# -- "pe.set(e.request_id,{request:e,details:t})" js=198370042,198370269
+## 248 pe.set(e.request_id,{request:e,details:t}) @198370042
+body??Xr(r.description||w||S&&Qn(S,120)||""),raw_command:d?void 0:S,tool_use_id:r.tool_use_id,request_id:d?"":e.request_id,...d&&e.request_id&&{suppressed_request_id:e.request_id},input:r.input}}if(t)pe.set(e.request_id,{request:e,details:t});ye("requires_action",t)}else if(r.subtype==="request_user_dialog"){let t;if(R("tengu_bridge_requires_action_details",!1))t=Cnt(r.dialog_kind,r.payload,e.request_id,r.tool_use_id);if(t)pe.set(e.request_id,{request:e,details:t});ye("requires_action",t)}return Fr(o,`control_request request_id=${e.request_id}`),!0},sendControlResponse(e,r){if(!r?.skipStateRep
+
+## 248 pe.set(e.request_id,{request:e,details:t}) @198370269
+t:e,details:t});ye("requires_action",t)}else if(r.subtype==="request_user_dialog"){let t;if(R("tengu_bridge_requires_action_details",!1))t=Cnt(r.dialog_kind,r.payload,e.request_id,r.tool_use_id);if(t)pe.set(e.request_id,{request:e,details:t});ye("requires_action",t)}return Fr(o,`control_request request_id=${e.request_id}`),!0},sendControlResponse(e,r){if(!r?.skipStateReport)ot(e.response.request_id,!0);let o={...e,session_id:p};if(!r?.skipStateReport)ye("running");Fr(o,"control_response")},sendControlCancelRequest(e){if(Ze.delete(e)){pe.delete(e),n(`[remote-bridge] Local-only retract of a decl
+
+# -- "Local-only retract of a declined dialog" js=198370641
+## 248 Local-only retract of a declined dialog @198370641
+port)ot(e.response.request_id,!0);let o={...e,session_id:p};if(!r?.skipStateReport)ye("running");Fr(o,"control_response")},sendControlCancelRequest(e){if(Ze.delete(e)){pe.delete(e),n(`[remote-bridge] Local-only retract of a declined dialog forward request_id=${e}`);return}ot(e,!0);let r={type:"control_cancel_request",request_id:e,session_id:p};ye("running"),Fr(r,`control_cancel_request request_id=${e}`)},sendResult(e){Le=!1,ye("idle"),Fr(pfn(p,e),`result${e?` user_message_uuid=${e}`:""}`)},async subscribePR(e,r,o){if(x)return{ok:!1,reason:"owner_changed"};let t=`${e}#${r}`,a=er.get(t);if(o)er.
+
+# -- "function Hht(" js=183113975,216565687
+## 248 function Hht( @183113975
+boundRequestIds,re,e)}function ze(e){let t=e.payload?.response;if(typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.automatedOutboundRequestIds.has(r)}var He=200;function Hht(e){w(Qo().attestation.resolvedPromptRequestIds,He,e)}function Ye(e){let t=e.payload?.response;if(typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.resolvedPromptRequestIds.has(r)}var Xe=60000,se=10;function oe(e,t){let r=Qo().attestation;if(r.dropNotifier===void 0&&r.senderDropWriter===void 0)return;if(r.recentDropEventIds.has(t))return;w(r.recent
+
+## 248 function Hht( @216565687
+:-y.x});f.push(v)}for(var x=f.map(function(S,R){var L=r(h[R],i(S,t)),N=r(h[(R+1)%d],i(S,t));return{p1:L,p2:N}}),b=[],T=0;T<d;T++){var k=x[(T-1+d)%d],C=x[T],w=u(k.p1,k.p2,C.p1,C.p2);b.push(w)}return b}function Hht(e,t,r,n,i,a){var s=edt(e,t,r,n,i),l=qht(s,a),u=Ns();return l.forEach(function(h){return Ebe(u,h.x,h.y)}),u}function GB(e,t){function r(f){for(var p=[],m=0;m<f.length;m++){var g=f[m],y=f[(m+1)%f.length],v={x:y.x-g.x,y:y.y-g.y},x={x:-v.y,y:v.x},b=Math.sqrt(x.x*x.x+x.y*x.y);p.push({x:x.x/b,y:x.y/b})}return p}o(r,"getAxes");function n(f,p){var m=1/0,g=-1/0,y=yo(f),v;try{for(y.s();!(v=y.n(
+
+# -- "function hkr(" js=
+- enclosing pe.set fn=zi @198365453
+## 248 enclosing pe.set @198365453
+len=1711 sha=cc554240bfbaa238 exactOther=0
+async function zi(){Qt("teardown");let e=Re??ze;if(e!==void 0){if(!lb(p)){let k=Re===void 0?rn():void 0;if(k!==void 0&&Fe&&eBt())Se(k);else X(e)}Re=void 0,ze=void 0,Oe=void 0}else if(!V&&W?.code===403&&!lb(p))tt(W.detail);else if(!V&&(We>0&&(Me!==void 0||ce)||W!==void 0&&W.code!==4090)&&!lb(p))X("recovery_abandoned_at_teardown");if(Ir?.(),dn(),ur?.(),ur=void 0,vr?.(),Er(),Qr?.stop(),tr.cancelAll(),clearTimeout(rr),Ke(),Mr(),ye("idle"),nr!==void 0)C.write(ffn(p,nr));if(C.write(pfn(p)),ut||Cr&&nr!=="remote_control_disabled"){let k=T?"skipped_host_owned":ut?"skipped_teleport":"skipped_remint_loop";if(nr!==void 0)await Promise.race([C.flush(),ne(bt)]);C.close(),await C.flushGoodbye(),n(`[remote-bridge] Teardown complete (skipArchive): session=${p}`),Y("info","bridge_repl_v2_teardown"),s("tengu_bridge_repl_teardown",{v2:!0,archive_status:c(k),archive_ok:!1}),mn();return}let r=O.teardown_archive_timeout_ms,o=Date.now(),t=sn(),a=t===void 0?it():void 0,d=a?.token,S=await Ue(p,u,d,g,r,t,me),w=r-(Date.now()-o);if(S===401&&a?.source==="current"&&z&&w>=200)try{await Promise.race([z(d??""),ne(w)]),a=it(),d=a.token,S=await Ue(p,u,d,g,Math.max(1,r-(Date.now()-o)),t,me)}catch(k){n(`[remote-bridge] Teardown 401 retry threw: ${l(k)}`,{level:"error"})}if(nr!==void 0)await Promise.race([C.flush(),ne(bt)]);C.close(),await C.flushGoodbye();let E=Un(S,te);n(`[remote-bridge] Torn down (archive=${S})`),Y("info","bridge_repl_v2_teardown"),s("tengu_bridge_repl_teardown",{v2:!0,archive_status:c(E),archive_credential:Ce(a?.source),archive_ok:typeof S==="number"&&S<400,archive_http_status:typeof S==="number"?S:S==="untrusted_device"?403:void 0,archive_timeout:S==="timeout",archive_no_token:S==="no_token"}),mn()}
+
+"function Hht(" 248=183113975,216565687 247=
+## 248 function Hht( @183113975
+turn r!==void 0&&Qo().attestation.automatedOutboundRequestIds.has(r)}var He=200;function Hht(e){w(Qo().attestation.resolvedPromptRequestIds,He,e)}function Ye(e){let t=e.payload?.response;if(typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.re
+
+## 248 function Hht( @216565687
+;T<d;T++){var k=x[(T-1+d)%d],C=x[T],w=u(k.p1,k.p2,C.p1,C.p2);b.push(w)}return b}function Hht(e,t,r,n,i,a){var s=edt(e,t,r,n,i),l=qht(s,a),u=Ns();return l.forEach(function(h){return Ebe(u,h.x,h.y)}),u}function GB(e,t){function r(f){for(var p=[],m=0;m<f.length;m++){var g=f[m],y=f[(
+
+"function hkr(" 248= 247=
+"Hht(e)" 248=183113984,198343567 247=243067300
+## 248 Hht(e) @183113984
+void 0&&Qo().attestation.automatedOutboundRequestIds.has(r)}var He=200;function Hht(e){w(Qo().attestation.resolvedPromptRequestIds,He,e)}function Ye(e){let t=e.payload?.response;if(typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.resolvedPro
+
+## 248 Hht(e) @198343567
+et Pr=ie,pe=new Map,Ze=new Set;function ot(e,r){if(Ze.delete(e),pe.delete(e)&&r)Hht(e)}let ye=(e,r)=>{if(wt&&!x&&(e==="requires_action"||e==="idle"))wt();if(C.reportState(e,r),e==="requires_action"&&r){Pr=!0;let o=[...pe.values()].flatMap((t)=>t.details?[t.details]:[]).reverse();
+
+## 247 Hht(e) @243067300
+be(e){return e==null?"":pct(e)}function Mbe(e,t){return Kr(e)?e:vz(e,t)?[e]:Uht(Hht(e))}function Nbe(e){if(typeof e=="string"||lA(e))return e;var t=e+"";return t=="0"&&1/e==-Yht?"-0":t}function Ibe(e,t){t=xA(t,e);for(var r=0,i=t.length;e!=null&&r<i;)e=e[NT(t[r++])];return r&&r==i
+
+"hkr(Ue)" 248= 247=216860218
+## 247 hkr(Ue) @216860218
+,source:"current"}}let ds=st,ma=new Map;function Xg(Ue,Tt){if(ma.delete(Ue)&&Tt)hkr(Ue)}let kl=(Ue,Tt)=>{if(x&&!qs&&(Ue==="requires_action"||Ue==="idle"))x();if(zt.reportState(Ue,Tt),Ue==="requires_action"&&Tt){ds=!0;let Nt=[...ma.values()].flatMap((on)=>on.details?[on.details]:[
+
+247 "ma.set(" n=8 208871930,216885575,216886722,216886962,242282910,242283319
+## 247 ma.set( @208871930
+sh_race_recovered",{}),"refreshed";if(aa(g)&&f)await bx(f,r);if(Pc(g)&&f)return ma.set(f,Dw(g)),E("tengu_oauth_refresh_token_account_on_hold",{}),"account_on_hold";return aa(g)?"known_dead_refresh_token":"refresh_failed"}finally{E("tengu_oauth_token_refresh_lo
+
+## 247 ma.set( @216885575
+e==="can_use_tool"||Tt.subtype==="request_user_dialog")ma.delete(Ue.request_id),ma.set(Ue.request_id,{request:Ue});if(zn)return _(`[remote-bridge] Dropping control_request during 401 recovery: ${Ue.request_id}`),!1;let Nt={...Ue,session_id:Kt};if(Tt.subtype===
+
+247 "ma.delete(" n=2 216860200,216885550
+## 247 ma.delete( @216860200
+};return{token:g(),source:"current"}}let ds=st,ma=new Map;function Xg(Ue,Tt){if(ma.delete(Ue)&&Tt)hkr(Ue)}let kl=(Ue,Tt)=>{if(x&&!qs&&(Ue==="requires_action"||Ue==="idle"))x();if(zt.reportState(Ue,Tt),Ue==="requires_action"&&Tt){ds=!0;let Nt=[...ma.values()].f
+
+## 247 ma.delete( @216885550
+t=Ue.request;if(Tt.subtype==="can_use_tool"||Tt.subtype==="request_user_dialog")ma.delete(Ue.request_id),ma.set(Ue.request_id,{request:Ue});if(zn)return _(`[remote-bridge] Dropping control_request during 401 recovery: ${Ue.request_id}`),!1;let Nt={...Ue,sessio
+
+247 "function dP()" n=1 216860599
+## 247 function dP() @216860599
+else if(ds)ds=!1,zt.reportMetadata({pending_action:null,pending_actions:null})};function dP(){return[...ma.values()].map((Ue)=>Ue.request)}let YM,pC,pP;if(ge)(async()=>{let{parseGitRemote:Ue,parseGitHubRepository:Tt}=await import("B:/~BUN/root/chunk-y52yhms1.j
+
+247 "function Xg(" n=5 209953851,216860178,226989577,241084253,249575423
+## 247 function Xg( @209953851
+ttys")'),S.push(")");return S.join(`
+`)}function Jn(e){return JSON.stringify(e)}function Xg(e){let{command:t,commandId:n,needsNetworkRestriction:r,httpProxyPort:s,socksProxyPort:i,proxyAuthToken:a,caCertPath:l,allowUnixSockets:d,allowAllUnixSockets:f,allowLoca
+
+## 247 function Xg( @216860178
+,source:"pinned_owner"};return{token:g(),source:"current"}}let ds=st,ma=new Map;function Xg(Ue,Tt){if(ma.delete(Ue)&&Tt)hkr(Ue)}let kl=(Ue,Tt)=>{if(x&&!qs&&(Ue==="requires_action"||Ue==="idle"))x();if(zt.reportState(Ue,Tt),Ue==="requires_action"&&Tt){ds=!0;let

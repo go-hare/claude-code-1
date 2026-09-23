@@ -1,0 +1,236 @@
+# gold-248-state-dead-classify
+
+## originalCwd verdict=KEEP_g nameHits=102 gHits=1 hostHits=13
+host:e.host,id:e.id,parentId:e.parentId},e.project)}function en(e,t){let o=jn(t.originalCwd),r=jn(t.projectRoot),i=jn(t.cwd),s=$e(),a=e.kind==="fork"?e.root.observers:new ne,l=e.kind==="fork"?e.root.autonomousLoopPreamble:new Pe,p=e.kind==="fork"?e.root.precompute:new be,u={get o
+
+## projectRoot verdict=KEEP_g nameHits=54 gHits=1 hostHits=10
+parentId:e.parentId},e.project)}function en(e,t){let o=jn(t.originalCwd),r=jn(t.projectRoot),i=jn(t.cwd),s=$e(),a=e.kind==="fork"?e.root.observers:new ne,l=e.kind==="fork"?e.root.autonomousLoopPreamble:new Pe,p=e.kind==="fork"?e.root.precompute:new be,u={get originalCwd(){return 
+
+## cwd verdict=PEEL nameHits=2044 gHits=0 hostHits=11
+,e.project)}function en(e,t){let o=jn(t.originalCwd),r=jn(t.projectRoot),i=jn(t.cwd),s=$e(),a=e.kind==="fork"?e.root.observers:new ne,l=e.kind==="fork"?e.root.autonomousLoopPreamble:new Pe,p=e.kind==="fork"?e.root.precompute:new be,u={get originalCwd(){return o},get projectRoot()
+
+## mainLoopModelOverride verdict=PEEL nameHits=5 gHits=0 hostHits=4
+lass de{#e=void 0;#t=void 0;#n=void 0;#o=void 0;#r=!1;#i=!1;#a=void 0;#s=void 0;mainLoopModelOverride(){return this.#e}overrideMainLoopModel(e){this.#e=e}initialMainLoopModel(){return this.#t}replaceInitialMainLoopModel(e){this.#t=e}resolvedOrgDefault(){return this.#n}replaceReso
+
+## initialMainLoopModel verdict=PEEL nameHits=14 gHits=0 hostHits=2
+oid 0;mainLoopModelOverride(){return this.#e}overrideMainLoopModel(e){this.#e=e}initialMainLoopModel(){return this.#t}replaceInitialMainLoopModel(e){this.#t=e}resolvedOrgDefault(){return this.#n}replaceResolvedOrgDefault(e){this.#n=e}initialEnvDefaultModel(){return this.#o}replac
+
+## resolvedOrgDefault verdict=PEEL nameHits=3 gHits=0 hostHits=2
+}initialMainLoopModel(){return this.#t}replaceInitialMainLoopModel(e){this.#t=e}resolvedOrgDefault(){return this.#n}replaceResolvedOrgDefault(e){this.#n=e}initialEnvDefaultModel(){return this.#o}replaceInitialEnvDefaultModel(e){this.#o=e}refusalFallbackOccurred(){return this.#r}m
+
+## initialEnvDefaultModel verdict=PEEL nameHits=3 gHits=0 hostHits=2
+#t=e}resolvedOrgDefault(){return this.#n}replaceResolvedOrgDefault(e){this.#n=e}initialEnvDefaultModel(){return this.#o}replaceInitialEnvDefaultModel(e){this.#o=e}refusalFallbackOccurred(){return this.#r}markRefusalFallbackOccurred(e){this.#r=!0,this.#a??=e}refusalFallbackHeaderA
+
+## fableSessionFallbackConsented verdict=KEEP_SEA0 nameHits=0 gHits=0 hostHits=0
+
+## refusalFallbackOccurred verdict=PEEL nameHits=3 gHits=0 hostHits=2
+tialEnvDefaultModel(){return this.#o}replaceInitialEnvDefaultModel(e){this.#o=e}refusalFallbackOccurred(){return this.#r}markRefusalFallbackOccurred(e){this.#r=!0,this.#a??=e}refusalFallbackHeaderArmed(){return this.#i}armRefusalFallbackHeader(e){this.#i=!0,this.#a??=e}refusalFal
+
+## refusalFallbackModelLatch verdict=PEEL nameHits=6 gHits=0 hostHits=5
+rn this.#a}forgetRefusalFallbackOccurred(){this.#r=!1,this.#i=!1,this.#a=void 0}refusalFallbackModelLatch(){return this.#s}replaceRefusalFallbackModelLatch(e){this.#s=e}unlatchRefusalFallbackModel(){this.#s=void 0}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=void 
+
+## modelStrings verdict=PEEL nameHits=16 gHits=0 hostHits=12
+is.#a=!1,this.#s=void 0,this.#d=void 0,this.#l=void 0}}class Ee{#e=null;#t=null;modelStrings(){return this.#e}replaceModelStrings(e){this.#e=e}invalidate(){this.#e=null}admin3PSteeringSnapshot(){return this.#t}recordAdmin3PSteeringSnapshot(e){this.#t=e}reset(){this.#e=null,this.#
+
+## isInteractive verdict=PEEL nameHits=8 gHits=0 hostHits=3
+=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrintOutputFormat(e){this.#t=e}thinkingDisplayExplicit(){return this.#n}replaceThinkingDispla
+
+## attacherCaps verdict=PEEL nameHits=8 gHits=0 hostHits=6
+e{#e=!1;#t=void 0;#n=void 0;#o=void 0;#r=null;#i=!1;#a=void 0;#s=Yt;#d=!1;#l=!1;attacherCapsChanged=$e();rvSupervisorLinkChanged=$e();sdkDialogHostActive(){return this.#e}markSdkDialogHostActive(e){this.#e=e}sdkSupportedDialogKinds(){return this.#t}sdkSupportedDialogKindsSource()
+
+## strictToolResultPairing verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ion(e){this.#a=e}rendererMode(){return this.#s}replaceRendererMode(e){this.#s=e}strictToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientT
+
+## sdkAgentProgressSummariesEnabled verdict=PEEL nameHits=3 gHits=0 hostHits=2
+e}pollEventIngressWired(){return this.#b}markPollEventIngressWired(){this.#b=!0}sdkAgentProgressSummariesEnabled(){return this.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessio
+
+## userMsgOptIn verdict=PEEL nameHits=3 gHits=0 hostHits=2
+e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e
+
+## todoToolsOptIn verdict=PEEL nameHits=3 gHits=0 hostHits=2
+his.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e}wizardOperatorToolsEnabled(){return this.#v}replaceWizardOperatorToolsEnabled(e){this.#v=e}pollEventIngressWired(){return this.#b}mar
+
+## restrictedSession verdict=PEEL nameHits=3 gHits=0 hostHits=2
+tToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p
+
+## clientType verdict=PEEL nameHits=14 gHits=0 hostHits=3
+s.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e)
+
+## questionPreviewFormat verdict=PEEL nameHits=3 gHits=0 hostHits=2
+his.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e)
+
+## flagSettingsPath verdict=PEEL nameHits=6 gHits=0 hostHits=2
+={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e}flagSettingsExpectedContent(){return this.#t}replaceFlagSettingsExpectedContent(e){this.#t=e}flagSettingsFilePinnedContent(){retu
+
+## flagSettingsInline verdict=PEEL nameHits=6 gHits=0 hostHits=2
+innedContent(){return this.#n}replaceFlagSettingsFilePinnedContent(e){this.#n=e}flagSettingsInline(){return this.#o}replaceFlagSettingsInline(e){this.#o=e}parentManagedSettings(){return this.#r}replaceParentManagedSettings(e){this.#r=e}parentManagedSettingsInvalid(){return this.#
+
+## parentManagedSettings verdict=PEEL nameHits=6 gHits=0 hostHits=4
+#n=e}flagSettingsInline(){return this.#o}replaceFlagSettingsInline(e){this.#o=e}parentManagedSettings(){return this.#r}replaceParentManagedSettings(e){this.#r=e}parentManagedSettingsInvalid(){return this.#i}replaceParentManagedSettingsInvalid(e){this.#i=e}allowedSettingSources(){
+
+## allowedSettingSources verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ttingsInvalid(){return this.#i}replaceParentManagedSettingsInvalid(e){this.#i=e}allowedSettingSources(){return this.#a}replaceAllowedSettingSources(e){this.#a=e}useCoworkPlugins(){return this.#s}replaceUseCoworkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=vo
+
+## sessionIngressToken verdict=PEEL nameHits=13 gHits=0 hostHits=4
+o=void 0;#r=void 0;#i=null;#a=null;#s=0;#d=!1;#l=null;#c=void 0;#p=null;#u=null;sessionIngressToken(){return this.#e}replaceSessionIngressToken(e){this.#e=e}oauthTokenFromFd(){return this.#t}replaceOauthTokenFromFd(e){this.#t=e}oauthTokenFromBgSnapshot(){return this.#n}replaceOau
+
+## oauthTokenFromFd verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ll;sessionIngressToken(){return this.#e}replaceSessionIngressToken(e){this.#e=e}oauthTokenFromFd(){return this.#t}replaceOauthTokenFromFd(e){this.#t=e}oauthTokenFromBgSnapshot(){return this.#n}replaceOauthTokenFromBgSnapshot(e){this.#n=e}oauthScopesFromFd(){return this.#o}replace
+
+## apiKeyFromFd verdict=PEEL nameHits=3 gHits=0 hostHits=2
+s.#n=e}oauthScopesFromFd(){return this.#o}replaceOauthScopesFromFd(e){this.#o=e}apiKeyFromFd(){return this.#r}replaceApiKeyFromFd(e){this.#r=e}resetFdCredentialState(){this.#e=void 0,this.#t=void 0,this.#n=!1,this.#o=void 0,this.#r=void 0}gatewayAuth(){return this.#i}replaceGatew
+
+## meter verdict=PEEL nameHits=2350 gHits=0 hostHits=4
+de.active_time.total",{description:"Total active time in seconds",unit:r("s")})}meter(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}
+
+## sessionCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+description:"Total active time in seconds",unit:r("s")})}meter(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCou
+
+## locCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+n seconds",unit:r("s")})}meter(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTime
+
+## prCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+er(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}sta
+
+## commitCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+Counter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}re
+
+## costCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+nter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}lo
+
+## tokenCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+er(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c
+
+## codeEditToolDecisionCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this
+
+## activeTimeCounter verdict=PEEL nameHits=3 gHits=0 hostHits=2
+s.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLogge
+
+## statsStore verdict=PEEL nameHits=3 gHits=0 hostHits=2
+codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLoggerOwner(){return this.#u}attachEvent
+
+## sessionId verdict=KEEP_g nameHits=1630 gHits=2 hostHits=4
+ession?void 0:e}var C=()=>{return};function Qwr(e){C=e}function V(){return g()?.sessionId??n().id}function rt(){let e=g()?.sessionId;if(e)return eo(e);let t=n();return t.identity.mainAgentId(t.id)}function cn(){let e=n();return e.requestJournal.promptIndex()>0||e.sessionScratch.c
+
+## mainAgentId verdict=PEEL nameHits=5 gHits=0 hostHits=2
+ t of wi)this.armGateEventEmitted.delete(`${e}:${t}`)}}class ye{#e=null;#t=null;mainAgentId(e){return this.#e??=eo(e),this.#e}projectDir(){return this.#t}replaceProjectDir(e){this.#t=e}}class Ce{granted=!1;isGranted(){return this.granted}grant(){this.granted=!0}}class ke{inFlight
+
+## parentSessionId verdict=LAND_bag nameHits=44 gHits=0 hostHits=1
+gn(e){ttr.of(e).emit(e.project.originalCwd)}function ude(){let e=g();return e?e.parentSessionId:n().parentId}function fp(e,t,o=null,r){let i=n(),s,a=i.parentId;if(i.id!==e)i.sessionScratch.forgetPlanSlug(i.id),i.requestJournal.replaceLastCancelledAPIMessageId(null),i.requestJourn
+
+## loggerProvider verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLoggerOwner(){return this.#u}attachEventLogger(e,t){if(this.#p=e,this.#u=e?t:null,!e)return;let o=t
+
+## eventLogger verdict=PEEL nameHits=15 gHits=0 hostHits=4
+e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLoggerOwner(){return this.#u}attachEventLogger(e,t){if(this.#p=e,this.#u=e?t:null,!e)return;let o=this.#g;if(this.#g=null,o)for(let r of o)e.emit(r)}bufferPendingEven
+
+## meterProvider verdict=PEEL nameHits=14 gHits=0 hostHits=2
+){return this.#h}isWindowOpen(){return this.#g!==null}hostOtel(){return this.#m}meterProvider(){return this.#f}replaceMeterProvider(e){this.#f=e}tracerProvider(){return this.#v}replaceTracerProvider(e){this.#v=e}cachedTelemetryResource(){return this.#b}replaceCachedTelemetryResou
+
+## tracerProvider verdict=PEEL nameHits=3 gHits=0 hostHits=2
+return this.#m}meterProvider(){return this.#f}replaceMeterProvider(e){this.#f=e}tracerProvider(){return this.#v}replaceTracerProvider(e){this.#v=e}cachedTelemetryResource(){return this.#b}replaceCachedTelemetryResource(e){this.#b=e}cachedOtlpHttpAgentFactory(e){return this.#S[e?"
+
+## agentColorMap verdict=PEEL nameHits=3 gHits=0 hostHits=2
+s.#t=new Map}vimSharedState(){return this.#n}replaceVimSharedState(e){this.#n=e}agentColorMap(){return this.#o}sessionCreatedTeams(){return this.#r}surfacedHookSpawnFailures(){return this.#i}bareMcpServerMatchersWarned(){return this.#a}pendingConversationEditKinds(){return this.#
+
+## agentColorIndex verdict=KEEP_SEA0 nameHits=0 gHits=0 hostHits=0
+
+## lastAPIRequest verdict=PEEL nameHits=6 gHits=0 hostHits=4
+ll;#t=null;#n=null;#o=null;#r=null;#i=0;#a=void 0;#s=null;#d=null;#l=null;#c=!1;lastAPIRequest(){return this.#e}replaceLastAPIRequest(e){this.#e=e}lastCancelledAPIMessageId(){return this.#t}replaceLastCancelledAPIMessageId(e){this.#t=e}lastAPIRequestMessages(){return this.#n}repl
+
+## lastAPIRequestMessages verdict=PEEL nameHits=3 gHits=0 hostHits=2
+lledAPIMessageId(){return this.#t}replaceLastCancelledAPIMessageId(e){this.#t=e}lastAPIRequestMessages(){return this.#n}replaceLastAPIRequestMessages(e){this.#n=e}lastClassifierRequests(){return this.#o}replaceLastClassifierRequests(e){this.#o=e}promptId(){return this.#r}replaceP
+
+## lastClassifierRequests verdict=PEEL nameHits=3 gHits=0 hostHits=2
+tAPIRequestMessages(){return this.#n}replaceLastAPIRequestMessages(e){this.#n=e}lastClassifierRequests(){return this.#o}replaceLastClassifierRequests(e){this.#o=e}promptId(){return this.#r}replacePromptId(e){this.#r=e}promptIndex(){return this.#i}replacePromptIndex(e){this.#i=e}i
+
+## inlinePlugins verdict=PEEL nameHits=6 gHits=0 hostHits=4
+ Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e)
+
+## inlinePluginsNoMcp verdict=PEEL nameHits=3 gHits=0 hostHits=2
+id 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirs
+
+## inlinePluginUrls verdict=PEEL nameHits=3 gHits=0 hostHits=2
+#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}c
+
+## syncedPluginDirs verdict=PEEL nameHits=6 gHits=0 hostHits=4
+his.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(
+
+## chromeFlagOverride verdict=PEEL nameHits=3 gHits=0 hostHits=2
+essionSkillAllowlist(){return this.#s}replaceSessionSkillAllowlist(e){this.#s=e}chromeFlagOverride(){return this.#d}replaceChromeFlagOverride(e){this.#d=e}teammateAgentId(){return this.#l}replaceTeammateAgentId(e){this.#l=e}reset(){this.#e=[],this.#t=[],this.#n=[],this.clearSynce
+
+## useCoworkPlugins verdict=PEEL nameHits=3 gHits=0 hostHits=2
+llowedSettingSources(){return this.#a}replaceAllowedSettingSources(e){this.#a=e}useCoworkPlugins(){return this.#s}replaceUseCoworkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=null,this.#r=null,this.#i=!1,this.#a=tn(),this.#s=!1}}function tn(){
+
+## sessionBypassPermissionsMode verdict=PEEL nameHits=3 gHits=0 hostHits=2
+istenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCommands(){return this.#y}replaceDisableSlashCommands(e){this.#y=e}mayForwardHomeSettings(){r
+
+## scheduledTasksEnabled verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ettingsHostConsent(){return this.#A}replaceHomeSettingsHostConsent(e){this.#A=e}scheduledTasksEnabled(){return this.#T}replaceScheduledTasksEnabled(e){this.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliS
+
+## sessionCreatedTeams verdict=KEEP_g nameHits=4 gHits=1 hostHits=3
+eturn this.#n}replaceVimSharedState(e){this.#n=e}agentColorMap(){return this.#o}sessionCreatedTeams(){return this.#r}surfacedHookSpawnFailures(){return this.#i}bareMcpServerMatchersWarned(){return this.#a}pendingConversationEditKinds(){return this.#s}clientTruncatedAssistantIds()
+
+## sessionTrustAccepted verdict=PEEL nameHits=3 gHits=0 hostHits=2
+sSession(){return this.#t}replaceLspRecommendationShownThisSession(e){this.#t=e}sessionTrustAccepted(){return this.#n}replaceSessionTrustAccepted(e){this.#n=e}homeTrustDialogAccepted(){return this.#o}replaceHomeTrustDialogAccepted(e){this.#o=e}hasExitedPlanMode(){return this.#r}r
+
+## sessionPersistenceDisabled verdict=PEEL nameHits=3 gHits=0 hostHits=2
+esEnabled(){return this.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCo
+
+## hasExitedPlanMode verdict=PEEL nameHits=7 gHits=0 hostHits=2
+rustDialogAccepted(){return this.#o}replaceHomeTrustDialogAccepted(e){this.#o=e}hasExitedPlanMode(){return this.#r}replaceHasExitedPlanMode(e){this.#r=e}needsPlanModeExitAttachment(){return this.#i}replaceNeedsPlanModeExitAttachment(e){this.#i=e}needsAutoModeExitAttachment(){retu
+
+## needsPlanModeExitAttachment verdict=PEEL nameHits=5 gHits=0 hostHits=2
+s.#o=e}hasExitedPlanMode(){return this.#r}replaceHasExitedPlanMode(e){this.#r=e}needsPlanModeExitAttachment(){return this.#i}replaceNeedsPlanModeExitAttachment(e){this.#i=e}needsAutoModeExitAttachment(){return this.#a}replaceNeedsAutoModeExitAttachment(e){this.#a=e}memoryToggledO
+
+## needsAutoModeExitAttachment verdict=PEEL nameHits=5 gHits=0 hostHits=2
+ExitAttachment(){return this.#i}replaceNeedsPlanModeExitAttachment(e){this.#i=e}needsAutoModeExitAttachment(){return this.#a}replaceNeedsAutoModeExitAttachment(e){this.#a=e}memoryToggledOff(){return this.#s}replaceMemoryToggledOff(e){this.#s=e}teardownUnwindRequested(){return thi
+
+## memoryToggledOff verdict=PEEL nameHits=16 gHits=0 hostHits=2
+ExitAttachment(){return this.#a}replaceNeedsAutoModeExitAttachment(e){this.#a=e}memoryToggledOff(){return this.#s}replaceMemoryToggledOff(e){this.#s=e}teardownUnwindRequested(){return this.#u}replaceTeardownUnwindRequested(e){this.#u=e}backgroundAutoModeSetupInFlight(){return thi
+
+## lspRecommendationShownThisSession verdict=PEEL nameHits=3 gHits=0 hostHits=2
+hownThisSession(){return this.#e}replaceOnboardingShownThisSession(e){this.#e=e}lspRecommendationShownThisSession(){return this.#t}replaceLspRecommendationShownThisSession(e){this.#t=e}sessionTrustAccepted(){return this.#n}replaceSessionTrustAccepted(e){this.#n=e}homeTrustDialogA
+
+## initJsonSchema verdict=PEEL nameHits=3 gHits=0 hostHits=2
+cheduledTasksEnabled(){return this.#T}replaceScheduledTasksEnabled(e){this.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}repl
+
+## planSlugCache verdict=PEEL nameHits=3 gHits=0 hostHits=2
+w Set;#c=new Set;#p=new Set;#u=new Map;#g=new Set;#h=void 0;#m=void 0;#f=void 0;planSlugCache(){return this.#e}forgetPlanSlug(e){this.#e.delete(e)}pendingBranchLinks(){return this.#t}replacePendingBranchLinks(){this.#t=new Map}vimSharedState(){return this.#n}replaceVimSharedState
+
+## invokedSkills verdict=PEEL nameHits=13 gHits=0 hostHits=12
+ork"?e.root.hookRegistry:new se,identity:e.kind==="fork"?e.root.identity:new ye,invokedSkills:e.kind==="fork"?e.root.invokedSkills:new ae,mcpSessionWiring:e.kind==="fork"?e.root.mcpSessionWiring:new le,modelSelection:e.kind==="fork"?e.root.modelSelection:new de,promptAssembly:e.k
+
+## sdkBetas verdict=KEEP_g nameHits=6 gHits=1 hostHits=3
+LinkLive(e){if(this.#i===e)return;this.#i=e,this.rvSupervisorLinkChanged.emit()}sdkBetas(){return this.#a}replaceSdkBetas(e){this.#a=e}caps(){return this.#s}replaceCaps(e){this.#s=e}markRemote(e){this.#s={...this.#s,workspace:e?"remote":"local"}}replBridgeActive(){return this.#d}
+
+## sdkSupportedDialogKinds verdict=PEEL nameHits=7 gHits=0 hostHits=5
+=$e();sdkDialogHostActive(){return this.#e}markSdkDialogHostActive(e){this.#e=e}sdkSupportedDialogKinds(){return this.#t}sdkSupportedDialogKindsSource(){return this.#n}declareDialogKinds(e,t){this.#t=e,this.#n=e===void 0?void 0:t}sdkPerTaskStopAffordance(){return this.#o}declareP
+
+## sdkSupportedDialogKindsSource verdict=PEEL nameHits=3 gHits=0 hostHits=2
+e}markSdkDialogHostActive(e){this.#e=e}sdkSupportedDialogKinds(){return this.#t}sdkSupportedDialogKindsSource(){return this.#n}declareDialogKinds(e,t){this.#t=e,this.#n=e===void 0?void 0:t}sdkPerTaskStopAffordance(){return this.#o}declarePerTaskStopAffordance(e){this.#o=e}attache
+
+## sdkDialogHostActive verdict=PEEL nameHits=3 gHits=0 hostHits=2
+=void 0;#s=Yt;#d=!1;#l=!1;attacherCapsChanged=$e();rvSupervisorLinkChanged=$e();sdkDialogHostActive(){return this.#e}markSdkDialogHostActive(e){this.#e=e}sdkSupportedDialogKinds(){return this.#t}sdkSupportedDialogKindsSource(){return this.#n}declareDialogKinds(e,t){this.#t=e,this
+
+## additionalDirectoriesForClaudeMd verdict=PEEL nameHits=3 gHits=0 hostHits=2
+d 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this
+
+## allowedChannels verdict=PEEL nameHits=3 gHits=0 hostHits=2
+rClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this.#a}replaceHasDevChannels(e){this.#a=e}sessionSkillAllowlist(){return this.#s}replaceSessionSkillAllowl
+
+## hasDevChannels verdict=PEEL nameHits=3 gHits=0 hostHits=2
+{this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this.#a}replaceHasDevChannels(e){this.#a=e}sessionSkillAllowlist(){return this.#s}replaceSessionSkillAllowlist(e){this.#s=e}chromeFlagOverride(){return this.#d}replaceChromeFla
+
+## sessionProjectDir verdict=LAND_bag nameHits=2 gHits=0 hostHits=1
+ n().sessionScratch.humanAttachmentDigests()}function Uy(){let e=g();return e?e.sessionProjectDir:n().identity.projectDir()}function ve(){return g()?.originalCwd??n().project.originalCwd}function g0(){return ve()===Li()}function an(){return g()?.projectRoot??n().project.projectRo
+
+## promptId verdict=PEEL nameHits=36 gHits=0 hostHits=2
+tClassifierRequests(){return this.#o}replaceLastClassifierRequests(e){this.#o=e}promptId(){return this.#r}replacePromptId(e){this.#r=e}promptIndex(){return this.#i}replacePromptIndex(e){this.#i=e}incrementPromptIndex(){return this.#i++,this.#i}lastMainRequestId(){return this.#a}r
+
+## pendingPrLinks verdict=PEEL nameHits=3 gHits=0 hostHits=2
+ntTruncatedAssistantIds(){return this.#d}unsupportedThreadKeys(){return this.#l}pendingPrLinks(){return this.#c}policyPredicateTelemetryEmitted(){return this.#p}humanAttachmentDigests(){return this.#u}chromeAvailabilityStagesLogged(){return this.#g}replaceChromeAvailabilityStages
+
+## pendingBranchLinks verdict=KEEP_g nameHits=4 gHits=1 hostHits=3
+ 0;#f=void 0;planSlugCache(){return this.#e}forgetPlanSlug(e){this.#e.delete(e)}pendingBranchLinks(){return this.#t}replacePendingBranchLinks(){this.#t=new Map}vimSharedState(){return this.#n}replaceVimSharedState(e){this.#n=e}agentColorMap(){return this.#o}sessionCreatedTeams(){

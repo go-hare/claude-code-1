@@ -1,0 +1,137 @@
+# gold-248-kC-Zve
+
+Official densable 2.1.248 SEA peels for kC / Zve legacy local settings path.
+Leftover names only in map section.
+
+## "function kC(" hits=4
+@179506276 sha=83bb61b6dca4662f len=30
+function kC(){return Zve(H())}
+
+@197965918 sha=e20e2db4d1a003c8 len=57
+function kC(e,t){if(Pf(e,t),!e.code)throw y(Yr);return e}
+
+@202396524 sha=fd61bab64dd18954 len=28
+function kC(d){return th(d)}
+
+@211216221 sha=32da3bd19994f6d4 len=76
+function kC(e,t){let r=(0,da.loadProtosWithOptionsSync)(e,t);return ls(r,t)}
+
+## "function Zve(" hits=1
+@179445024 sha=1c947a36288d2ed3 len=105
+function Zve(e){if(QB(e.cwd,e.canonicalGitRoot)===A(e.cwd))return;return _(A(e.cwd),xC("localSettings"))}
+
+## "function QB(" hits=2
+@179442546 sha=8f64f0abf07bc155 len=121
+function QB(e,t){let r=cyn(e,t);if(r.decided!==void 0)return r.decided;if(!_o(r.root))return r.cwdResolved;return r.root}
+
+@222348365 sha=cc939f634e77956d len=35
+function QB(e,t){YE(8390656,8,e,t)}
+
+## "function xC(" hits=5
+@179444878 sha=666dd3af759eb701 len=146
+function xC(e){switch(e){case"projectSettings":return _(".claude","settings.json");case"localSettings":return _(".claude","settings.local.json")}}
+
+@197967141 sha=011acd3be9340a36 len=104
+function xC(e){let{skuArr:t,index:r,skuName:n,skuVersion:o}=e;if(r>=t.length)return;t[r]=[n,o].join(Mf)}
+
+@199828285 sha=1d28711071a75aab len=37
+function xC(){return(0,DC.default)()}
+
+@208587931 sha=aaaefe08ed06b530 len=73
+function xC(Yf){return Yf.enrichError===null?Yf:{...Yf,enrichError:null}}
+
+@211216134 sha=80603911241e6c96 len=76
+function xC(e,t){return(0,da.loadProtosWithOptions)(e,t).then((r)=>ls(r,t))}
+
+## context around Zve @179445024 (±1200)
+d by the current user (uid ${t}); the store stays at the session cwd (the pre-canonicalization behavior). If you own this repo, chown it (including .git and .claude) or run from a directory you own.`,{level:"warn"}),!1}catch(r){return n(`localSettings: not canonicalizing the consent store to ${e} \u2014 its ownership could not be verified (${r instanceof Error?r.message:String(r)}); the store stays at the session cwd`,{level:"warn"}),!1}}function Mo(){return ra().localStoreProbes.normalizedRealHomeDir(Ro)}function Ro(){let e=Ub(bo());if(e===null)throw Error("home directory realpath unavailable");return jn(e)}function CXn(e,t){return e==="localSettings"?A(t.cwd):qyt(e,t)}var jW={default:"settings.json",cowork:"cowork_settings.json"};function Co(e){if(e.coworkPlugins||a.CLAUDE_CODE_USE_COWORK_PLUGINS)return jW.cowork;return jW.default}function vY(e,t){switch(e){case"userSettings":return _(qyt(e,t),Co(t));case"projectSettings":case"localSettings":return _(qyt(e,t),xC(e));case"policySettings":return Eo();case"flagSettings":return t.flagPath}}function xC(e){switch(e){case"projectSettings":return _(".claude","settings.json");case"localSettings":return _(".claude","settings.local.json")}}function Zve(e){if(QB(e.cwd,e.canonicalGitRoot)===A(e.cwd))return;return _(A(e.cwd),xC("localSettings"))}function Kyt(e,t){let r=t.store.perSource.get(e);if(r!==void 0)return r;let o=nzt(e,t);return t.store.perSource.set(e,o),o}function Rt(e){return!e||e.parentSettingsBehavior==="merge"}var Ct=[{path:["allowManagedPermissionRulesOnly"],restrictive:!0},{path:["allowManagedHooksOnly"],restrictive:!0},{path:["allowManagedMcpServersOnly"],restrictive:!0},{path:["enforceAvailableModels"],restrictive:
+
+## near-Zve "function A(e){" count_near=2
+@179288423 sha=34896914ee677b9d len=53
+function A(e){let r=T(e);return r!==void 0&&P.has(r)}
+
+@179301385 sha=da07a85ec528e45e len=793
+function A(e){switch(e.namespace){case"cache":case"feedbackDraft":case"fileHistory":case"jobsRoot":case"mailbox":case"marketplaceCache":case"memory":case"paste":case"plan":case"pluginRegistry":case"task":case"team":return bne;case"pluginCache":return e.relPath?.[0]==="bin"?wZn:bne;case"agentMemory":return"layer"in e&&e.layer==="user"?bne:a4;case"globalConfig":return"kind"in e?bne:a4;case"log":return"channel"in e&&e.channel!==void 0?bne:a4;case"userConfigDir":return fe.has(e.dir)?bne:a4;case"bridgePointer":case"bridgeSpawn":case"daemon":case"history":case"identity":case"job":case"jobTimeline":case"pluginAssetCache":case"recording":case"scratch":case"session":case"sessionAliases":case"dirSyncRecord":case"sessionLog":case"settings":case"sidecar":case"state":case"transcript":return a4}}
+
+## near-Zve "function A(t){" count_near=0
+## near-Zve "function _(e,t){" count_near=0
+## near-Zve "function _(t,e){" count_near=0
+## near-Zve "function H(){" count_near=2
+@179505605 sha=3f9b0725419f6102 len=474
+function H(){let e={store:ra(),cwd:ve(),allowedSources:kde(),onLegacyLocalSettingsRead:(t)=>Ddr.of(z().host).fire(t),parentManaged:ZEn(),hostManagedProvider:a.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,flagInline:x2(),flagPath:xL(),flagExpectedContent:b0()??vde(),coworkPlugins:y7e(),canonicalGitRoot:Mr,mdm:()=>JB(),hkcu:()=>Nte(),helper:()=>nt(),helperArmedFromRemote:()=>it(),helperMergesOutput:()=>ot(),helperWarnings:()=>at(),wslInherits:()=>nx()};return e.file=()=>NMe(e),e}
+
+@179736202 sha=492527c34cb0bbf7 len=57
+function H(){return L.every((e)=>process.env[e]?.trim())}
+
+## near-Zve "function vY(" count_near=1
+@179444669 sha=283311a4f14ea8a3 len=209
+function vY(e,t){switch(e){case"userSettings":return _(qyt(e,t),Co(t));case"projectSettings":case"localSettings":return _(qyt(e,t),xC(e));case"policySettings":return Eo();case"flagSettings":return t.flagPath}}
+
+## near-Zve "function CXn(" count_near=1
+@179444440 sha=6fd4de62c3ef2fa8 len=63
+function CXn(e,t){return e==="localSettings"?A(t.cwd):qyt(e,t)}
+
+## near-Zve "function cyn(" count_near=1
+@179442667 sha=cc3e0acf3c03c089 len=215
+function cyn(e,t){let r=t?.(e);if(!r)return{decided:A(e)};let o=A(r),i=A(e);if(o===i)return{decided:o};let s;try{s=Mo()}catch{return{decided:i}}if(o===s)return{decided:i};return{decided:void 0,root:o,cwdResolved:i}}
+
+## "function R(t){let e=[];for(let s of[\"projectSettings\",\"localSettings\"]" hits=1
+@179527886 sha=71ac16e3ce95c23a len=324
+function R(t){let e=[];for(let s of["projectSettings","localSettings"]){if(s==="projectSettings"&&Kv())continue;let i=To(s);if(i!==void 0)e.push(Ogn(t,s,i,s==="projectSettings"?"project settings":"local settings"));if(s==="localSettings"){let r=kC();if(r!==void 0&&r!==i)e.push(Ogn(t,s,r,"legacy local settings"))}}return e}
+
+## kC() call-site windows
+@179506285
+(){let e=H(),t=cyn(e.cwd,e.canonicalGitRoot);return t.decided===void 0?t.root:void 0}function To(e){return vY(e,H())}function PMe(e){return CXn(e,H())}function kC(){return Zve(H())}function Kv(){let e=To("projectSettings"),t=To("userSettings");return!!e&&!!t&&ft(e)===ft(t)}function Ite(){let e=To("localSettings");if(!e)return[];return Lk(e).errors}function mvr(){return ZV(H())}function $yt(){return NMe(H())}function be(e){return Kyt(e,H())}function Hte(){return RXn(H())}funct
+
+@179528131
+ctSettings"&&Kv())continue;let i=To(s);if(i!==void 0)e.push(Ogn(t,s,i,s==="projectSettings"?"project settings":"local settings"));if(s==="localSettings"){let r=kC();if(r!==void 0&&r!==i)e.push(Ogn(t,s,r,"legacy local settings"))}}return e}async function vKn(t,e){let s=t.hostFiles;if(!s.serves("system")){if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the managed-settings file tier is not read ahead (the backend does not serve 'system'); the poli
+
+@181725523
+)}var Ya=TC;async function y6n(e,t){if(!Ya.includes(e.source))return!1;let r=$r(e.ruleValue),o=(u)=>$r(jr(u));try{let u=!1;if(e.source==="localSettings"){let g=kC();if(g)u=!!Lk(g).settings?.permissions?.[e.ruleBehavior]?.some((M)=>o(M)===r)}let d=!1,{error:p}=await fs(e.source,(g)=>{let w=g?.permissions?.[e.ruleBehavior];if(!w||!w.some((M)=>o(M)===r))return null;return d=!0,{permissions:{[e.ruleBehavior]:w.filter((M)=>o(M)!==r)}}},void 0,t);if(p)return!1;if(!d&&u){let g=kC();
+
+@181725838
+havior];if(!w||!w.some((M)=>o(M)===r))return null;return d=!0,{permissions:{[e.ruleBehavior]:w.filter((M)=>o(M)!==r)}}},void 0,t);if(p)return!1;if(!d&&u){let g=kC();if(g)return!Lk(g).settings?.permissions?.[e.ruleBehavior]?.some((M)=>o(M)===r)}return d||u}catch(u){return _(u),!1}}async function ai({ruleValues:e,ruleBehavior:t},r,o){if(gN())return!1;if(e.length<1)return!0;let u=e.map($r);try{let d=await fs(r,(p)=>{let g=p?.permissions?.[t]||[],w=new Set(g.map((k)=>$r(jr(k)))),
+
+@182731045
+w Map,r=new Set,o=new Map,u=new Set,p=[],E=D3(e);for(let F of ms){if(F==="flagSettings")continue;let V=To(F);if(E!==void 0&&V===E)continue;if(V)p.push(V)}let I=kC();if(I)p.push(I);for(let F of p){let V=hn.dirname(F);if(!t.has(V))t.set(V,new Set);if(t.get(V).add(F),!r.has(V))try{if((await Wp(V)).isDirectory())r.add(V)}catch{}try{let q=await p0(F);if(q===F)continue;let j=await p0(V),ee=hn.dirname(q);if(hn.join(j,hn.basename(F))===q)continue;let ie=ee===j,ae=ie?hn.join(V,hn.base
+
+@182732335
+licy_settings"}}function La(e){let t=hn.normalize(e),r=jyt();if(t.startsWith(r+hn.sep))return"policySettings";let o=ms.find((p)=>To(p)===t);if(o)return o;let u=kC();if(u&&hn.normalize(u)===t)return"localSettings";return}function PHe(){return[...PS(),...b0()]}function b0(){return[be("flagSettings"),yo("userSettings")?be("userSettings"):null]}function Gp(e){if(j8e()!==null)return ezt(be("policySettings")?.sandbox,e);return PS().map((t)=>ezt(t.sandbox,e)).find((t)=>t!==void 0)}f
+
+@182754300
+t(re)}if(he)U(M,H,J)},q=[],j=[];t.symlinkedDenyScrubPaths.length=0,t.denyLiteralSymlinkCandidates.length=0;let ee=ms.map((M)=>To(M)).filter((M)=>M!==void 0),ie=kC();if(ie)ee.push(ie);if(C.push(...ee.map(Fn)),C.push(Es(jyt())),B()==="wsl")C.push(nn(rx,"managed-settings.json")),C.push(nn(rx,"managed-settings.d"));let ae=YS(),me=ve();if(ae!==me)C.push(Fn(Ce(ae,".claude","settings.json"))),C.push(Fn(Ce(ae,".claude","settings.local.json")));if(U(Ce(me,".claude","skills"),!0,!0),ae
+
+@183140913
+ludes(n))}function wVn(e){let n=vde(),t=A$t().includes("flagSettings")?xL():void 0;if(t!==void 0&&n!==void 0&&Ie(t,n))return!0;return se([...le.map((r)=>To(r)),kC(),ce(e.workTree,".claude","settings.json"),ce(e.workTree,".claude","settings.local.json"),...n===void 0?[t]:[]].filter((r)=>r!==void 0)).some((r)=>{try{if(!mn(r).isFile())return!0}catch(o){return T(o)!=="ENOENT"}return Ie(r)})}function Ie(e,n){let{settings:t,errors:i}=Lk(e,n);return t===null||i.some((r)=>r.severity!
+
+@183809652
+","localSettings","flagSettings"].some((o)=>{let u=To(o);if(u===void 0)return!1;switch(o){case"flagSettings":return t(u,b0()??vde());case"localSettings":{let p=kC();return t(u)||p!==void 0&&p!==u&&t(p)}case"userSettings":return t(u)}});return!Fyt(e.settingKey)||BO().length>0&&DS()!=="helper"||r||Ugn(e.settingKey)||wde()&&tue()||Uve(e.policyKey)==="org_denied"||Uve(e.policyKey)==="unregistered"}function ZV(e){if(!Fyt(e.settingKey))return!1;if(!e.isTierInPlay())return!1;if(Le()
+
+## Zve( call-site windows
+@179445033
+ctSettings":return _(".claude","settings.json");case"localSettings":return _(".claude","settings.local.json")}}function Zve(e){if(QB(e.cwd,e.canonicalGitRoot)===A(e.cwd))return;return _(A(e.cwd),xC("localSettings"))}function Kyt(e,t){let r=t.store.perSource.get(e);if(r!==void 0)return r;let o=nzt(e,t);return t.store.perSource.set(e,o),o}function Rt(e){return
+
+@179463021
+ettings:null};if(e==="flagSettings"){let{settings:s}=Vyt(t);if(s)return UI(i||{},s,eq)}if(e==="localSettings"&&r){let s=Zve(t);if(s){let{settings:l}=QV(s,t.store);if(l)return t.onLegacyLocalSettingsRead?.("per_source"),UI(l,i||{},eq)}}return i}function Q8e(e,t){return{...e,...t}}function eq(e,t,r){if(r==="modelPicker"&&t!==void 0)return Ut(t);if(Array.isArra
+
+@179464015
+(u==="policySettings"){let{settings:g,errors:m}=Dt(e);if(d=g,g)o=UI(o,g,eq);c(m);continue}if(u==="localSettings"){let g=Zve(e);if(g&&!l.has(A(g))){l.add(A(g));let{settings:m,errors:y}=QV(g,e.store);if(c(y),m)e.onLegacyLocalSettingsRead?.("cascade"),o=UI(o,m,eq)}}let f=vY(u,e);if(f){let g=A(f),m=u==="flagSettings"&&e.flagExpectedContent!==void 0;if(!l.has(g)|
+
+@179506297
+t.decided===void 0?t.root:void 0}function To(e){return vY(e,H())}function PMe(e){return CXn(e,H())}function kC(){return Zve(H())}function Kv(){let e=To("projectSettings"),t=To("userSettings");return!!e&&!!t&&ft(e)===ft(t)}function Ite(){let e=To("localSettings");if(!e)return[];return Lk(e).errors}function mvr(){return ZV(H())}function $yt(){return NMe(H())}f
+
+@179508315
+kind:"empty"};let u=Ft(o,!1);if(!Re(u))return{kind:"non-object"};return{kind:"object",raw:u}}function bvr(){let e=H(),t=Zve(e);if(!t)return!1;let r=QV(t,e.store);if(r.settings!==null)return!1;if(r.errors.length===0)return!1;return Pe(t)}function Kjt(){let e=H(),t=Zve(e);if(!t)return null;return QV(t,e.store).settings??null}function PS(){return tzt(H())}funct
+
+@179508459
+t r=QV(t,e.store);if(r.settings!==null)return!1;if(r.errors.length===0)return!1;return Pe(t)}function Kjt(){let e=H(),t=Zve(e);if(!t)return null;return QV(t,e.store).settings??null}function PS(){return tzt(H())}function DMe(e){return OXn(H(),e)}function jgn(){return ra().lastPolicyEnvComposition}function MMe(){return MXn(H())}function qe(){return k_().settin
+
+@179514923
+ry{ra().changed.emit(e)}catch(t){for(let r of t instanceof AggregateError?t.errors:[t])_(r)}}async function mt(e){let t=Zve(H());if(!t)return{changed:!1,error:null};let r;try{r=(await Kg(t,A_)).content}catch(A){if(Q(A))return{changed:!1,error:null};let v=new P(`Failed to read legacy settings.local.json at ${t}: ${A}`,"Failed to read legacy settings.local.jso
+
+@179520294
+continue;if(D()&&t!==void 0&&O==="projectSettings"&&u.includes("userSettings")&&Kv())continue;let v=O==="localSettings"?Zve(o):void 0,C=v?[A,v]:[A],k=D()&&t!==void 0&&ie(O,A);for(let N of C){if(k){let w=await ht(t);switch(w.kind){case"unreadable":n(`rawSettingsKeyPresence: v5 user-settings read failed: ${w.code}`),p=!0;break;case"oversize":case"non-object":p
+
+## localSettings rule-removal caller
+@181725486
+DialogAccepted: true in ${vs()}.`)}function W_e(e){let t=be(e);return $Ft(t,e)}var Ya=TC;async function y6n(e,t){if(!Ya.includes(e.source))return!1;let r=$r(e.ruleValue),o=(u)=>$r(jr(u));try{let u=!1;if(e.source==="localSettings"){let g=kC();if(g)u=!!Lk(g).settings?.permissions?.[e.ruleBehavior]?.some((M)=>o(M)===r)}let d=!1,{error:p}=await fs(e.source,(g)=>{let w=g?.permissions?.[e.ruleBehavior];if(!w||!w.some((M)=>o(M)===r))return null;return d=!0,{permissions:{[e.ruleBehavior]:w.filter((M)=>o(M)!==r)}}},void 0,t);if(p)return!1;if(!d&&u){let g=kC();if(g)return!Lk(g).settings?.permissions?.[e.ruleBehavior]?.some((M)=>o(M)===r)}return d||u}catch(u){return _(u),!1}}async function ai({ruleValues:e,ruleBehavior:t},r,o){if(gN())return!1;if(e.length<1)return!0;let u=e.map($r);try{let d=await fs

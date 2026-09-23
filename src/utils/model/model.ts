@@ -21,6 +21,10 @@ import {
 } from '../context.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { resolveCatalogFamilyModelString } from './catalogFamilyDefault.js'
+import {
+  isEnterpriseOpusDefault,
+  isSonnetOnlyUnenforcedCatalog,
+} from './enterpriseDefaultModel.js'
 import { getModelStrings, resolveOverriddenModel } from './modelStrings.js'
 import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
@@ -359,8 +363,9 @@ export function getRuntimeMainLoopModel(params: {
  * Get the default main loop model setting.
  *
  * This handles the built-in default:
- * - Opus for Max and Team Premium users
- * - Sonnet 4.6 for all other users (including Team Standard, Pro, Enterprise)
+ * - Opus for Max, Team Premium, and Enterprise (opus5 via getDefaultOpusModel)
+ * - Sonnet for Team Standard, Pro, and PAYG
+ * - Enterprise with a sonnet-only catalog and enforcement off stays on Sonnet
  *
  * @returns The default model setting to use
  */
@@ -397,8 +402,26 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
   }
 
-  // PAYG (1P and 3P), Enterprise, Team Standard, and Pro get Sonnet as default
-  // Note that PAYG (3P) may default to an older Sonnet model
+  // densable 2.1.251 Xbt: non-max enterprise uses the same opus default as Max
+  // (ANTHROPIC_DEFAULT_OPUS_MODEL or catalog opus, else opus5) unless the
+  // catalog is sonnet-only and available-models enforcement is off.
+  // Usage-based enterprise (enterprise_usage_based) is included.
+  if (isEnterpriseOpusDefault()) {
+    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+  }
+
+  // densable aw — Bedrock/Vertex default opus unless rw() (sonnet-only
+  // catalog and enforcement inactive). Foundry is not in gold aw.
+  const provider = getAPIProvider()
+  if (provider === 'bedrock' || provider === 'vertex') {
+    if (isSonnetOnlyUnenforcedCatalog()) {
+      return getDefaultSonnetModel()
+    }
+    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+  }
+
+  // PAYG (1P and 3P), Team Standard, and Pro get Sonnet as default.
+  // Note that PAYG (3P) may default to an older Sonnet model.
   return getDefaultSonnetModel()
 }
 
@@ -516,14 +539,19 @@ export function getCanonicalName(fullModelName: ModelName): ModelShortName {
 // @[MODEL LAUNCH]: Update the default model description strings shown to users.
 /**
  * densable C7n(e) — Default row marketing for Claude.ai tier users.
- * Max/Team Premium: marketing(defaultOpus) + "Best for everyday, complex tasks"
+ * Max/Team Premium/Enterprise opus default: marketing(defaultOpus) +
+ * "Best for everyday, complex tasks"
  * (+ optional bGr when e && pv(o) — fastMode and model supports fast).
  * Org/enforced attribution is handled by getDefaultOptionForUser (badge arm).
  */
 export function getClaudeAiUserDefaultModelDescription(
   fastMode = false,
 ): string {
-  if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
+  if (
+    isMaxSubscriber() ||
+    isTeamPremiumSubscriber() ||
+    isEnterpriseOpusDefault()
+  ) {
     // densable o=bE() default opus; i=mb(Gu(o))??"Opus"; slogan always everyday.
     const defaultOpus = getDefaultOpusModel()
     const marketing =

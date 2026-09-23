@@ -1,0 +1,484 @@
+# gold-248-21-hook-row6
+when=2026-09-20T05:53:00.714Z
+sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+contract=unique 248 agents/fleet ROW that names hook + schema
+rule=Swt parse is not a row. invent-ban. else stay UNKNOWN.
+
+# count 248 vs 247
+- "schema error"  248=0  247=0
+- "invalid answer"  248=0  247=0
+- "hook schema"  248=0  247=0
+- "names the hook"  248=0  247=0
+- "hook and the schema"  248=0  247=0
+- "hook output invalid"  248=2  247=0  UNIQUE248
+- " hook output invalid"  248=2  247=0  UNIQUE248
+- "hook failed:"  248=29  247=27
+- " hook failed:"  248=27  247=25
+- "PermissionRequest decision must be"  248=2  247=0  UNIQUE248
+- "top-level decision is the legacy"  248=4  247=0  UNIQUE248
+- "for PermissionRequest"  248=2  247=0  UNIQUE248
+- "waiting silently"  248=0  247=0
+- "invalid hook"  248=1  247=1
+- "invalidAnswer"  248=0  247=0
+- "hookAnswer"  248=0  247=0
+- "hook_answer"  248=0  247=0
+- "schemaError"  248=9  247=9
+- "hookSchema"  248=0  247=0
+- "hook_schema"  248=0  247=0
+- "lastMessage:"  248=1  247=1
+- "lastMessage="  248=0  247=0
+- "waitingFor:"  248=8  247=8
+- "waitingFor="  248=1  247=1
+- "job.detail"  248=0  247=0
+- "job.needs"  248=0  247=0
+- "hookName+\" hook"  248=0  247=0
+- "hookName, \" hook"  248=0  247=0
+- "${e.hookName} hook"  248=4  247=4
+- "${t.hookName} hook"  248=0  247=0
+- "${r.hookName} hook"  248=0  247=0
+- "${o.hookName} hook"  248=0  247=0
+- "${d.hookName} hook"  248=0  247=0
+- "${C.hookName} hook"  248=0  247=0
+- "${A.hookName} hook"  248=0  247=0
+- "hookName} hook:"  248=0  247=0
+- "hookName} :"  248=0  247=0
+- "hook + schema"  248=0  247=0
+- "hook+schema"  248=0  247=0
+- "Expected schema:`"  248=1  247=1
+- "JSON validation failed: ${"  248=0  247=0
+- "validationError}"  248=7  247=7
+- "validationError:"  248=26  247=25
+- "tMe({status"  248=1  247=0  UNIQUE248
+- "updateSessionActivity"  248=6  247=7
+- "UFe("  248=3  247=5
+- "function UFe"  248=1  247=1
+- "function lq"  248=9  247=7
+- "topDialogWaitingFor"  248=4  247=4
+- "hook_non_blocking_error"  248=29  247=27
+- "Open in a terminal"  248=2  247=0  UNIQUE248
+- "heldInTerminal"  248=5  247=0  UNIQUE248
+
+## 248 hook output invalid hits=2
+- #0 @96922449 or PreToolUse.......9..to allow....p)..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. hook failed to run.........answer: ........answer question.......s.old_cwd......E..new_cwd.'...E...CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS......k.rewakeMessage...
+- #1 @186238070 ack for the model; the conversation continues so the model can act on it"}}},null,2)}function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}function olt(e){let t=typeof e==="object"&&e!==null?e:void 0,r=Array.isArray(t?.questions)?t.questions:[],o=[],u="
+
+## 248-fn hook output invalid near@186238070 fn=wwt @186237955
+len=220 sha=fba5d4f0b9ee6440
+exact247=0
+function wwt(e,t){let r=t.split(`
+`).map((o)=>o.trim()).find((o)=>o.length>0)??"";if(r.startsWith(Eve))return`${e} hook output invalid: ${r.slice(Eve.length)}`;return r?`${e} hook failed: ${r}`:`${e} hook failed to run`}
+
+## 248  hook failed: hits=27
+- #0 @96922480 ....p)..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. hook failed to run.........answer: ........answer question.......s.old_cwd......E..new_cwd.'...E...CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS......k.rewakeMessage...	....,..skipSpill.......+
+- #1 @97478056 , no model re-invoke): .........stop-hook-error.......e.Stop hook error occurred . ...../... to see.....y...Stop hook cancelled (abort or stream teardown)..........tengu_stop_hook_error.......K...Stop hook failed: ........l.watchedForSurfaces......M...lastEmittedDetail.........h.onClassified......;.Brief mode enforcement failed: ......... You MUST call the .3.....$. tool to complete this request. Call this too
+- #2 @97511982 details.......L...last_assistant_message......w..session_crons........n".stop_hook_active...J.3.teammate_name........nR.task_subject....+...expansion_type......9...command_argsj...q.{.WorktreeCreate hook failed: hook is configured but did not run (workspace not trusted or matcher mismatch)......]...WorktreeCreate hook failed: hook succeeded but returned no worktree path (command: echo the path to stdout; htt
+- #3 @97512098 ...nR.task_subject....+...expansion_type......9...command_argsj...q.{.WorktreeCreate hook failed: hook is configured but did not run (workspace not trusted or matcher mismatch)......]...WorktreeCreate hook failed: hook succeeded but returned no worktree path (command: echo the path to stdout; http/callback: return hookSpecificOutput.worktreePath).......e..WorktreeCreate hook failed: ,.....c.WorktreeCreate hook
+- #4 @97512270 tch)......]...WorktreeCreate hook failed: hook succeeded but returned no worktree path (command: echo the path to stdout; http/callback: return hookSpecificOutput.worktreePath).......e..WorktreeCreate hook failed: ,.....c.WorktreeCreate hook failed (stderr redacted).....E..WorktreeRemove hook failed [....);.worktree_path.........s.tengu_hook_output_persisted.........
+
+[Hook !.....3. .c.h.a.r.s. ..  .p.e.r.s.i
+- #5 @97517210 fy_failed.D...E...Skipping StatusLine command execution - workspace trust not accepted........StatusLine [
+.....T.] stderr: ..........status_line_command.....U...] completed with status ........Status hook failed: 
+...:u..exec_error..H....A..Skipping FileSuggestion command execution - workspace trust not accepted.....d=.File suggestion helper failed: .........Function hook cancelled......@K.Function hook execu
+- #6 @97678059 .fs_error......C.FileChanged: watcher error: B.....@.Cannot destructure property 'results' from null or undefined value........5.file_watcher_change_detected.....6..hook_exec_failed....z.p.FileChanged hook failed: .........Z.tengu_c4e_slash_upsell_shown^.....z. .i.s. .a.v.a.i.l.a.b.l.e. .w.i.t.h. .C.l.a.u.d.e. .f.o.r. .E.n.t.e.r.p.r.i.s.e. ..  .a.s.k. .y.o.u.r. .a.d.m.i.n. .a.b.o.u.t. .m.i.g.r.a.t.i.n.g. .f.r.
+- #7 @97688221 ooks...........plugin_hooks_file_load_failed...........plugin_hooks_path_invalid.......	0L.plugin_hooks_register_failed.....a..hook_error_count........registered_hooks'....K..resume: onSessionResolved hook failed: ........./file?........../synced_file/uploads....P.../synced_file/uploads/commit.....z.S./synced_file/download?..........B:/~BUN/root/chunk-66t3dgzn.js..H....0..Cannot destructure property 'readGitLa
+- #8 @97701150 agentType.A.....G./resume: worktree path not resolved through the storage backend (...........); using it as registered...........Failed to stat session file: ...	.......birthtime.......9r>.CwdChanged hook failed: #....~..Hook-based agent worktree kept at: .....J...Agent worktree kept at .5.....U.: backgrounded owner awaits keepalive, resume pending...
+.......agent_tool.......J0.Agent worktree kept at: V......
+- #9 @98191094 ..!...onVarint........onBytes.(....
+..file:///B:/%7EBUN/root/chunk-3krsxj5s.js,.....}.bundled file path escapes its extraction dir........bundledSkillSessionResetHooks...$...2ol.[skills] session-reset hook failed: ......3.bundledSkillKillSwitchSurvivors.....+...verify-content......V.$.skill_bundled_extract...!.......Failed to extract bundled skill '..."...."..skill_bundled_extract_write_failed..........tolerat
+- … +17 more
+
+## 248-fn  hook failed: near@97512098 fn= @-1
+NO_FN
+
+## 248 PermissionRequest decision must be hits=2
+- #0 @96921178 ..-.....z.\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*).........m.^Invalid input: ........expected one of .....(4. .|. .& <...q.(.hookSpecificOutput is missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse 
+- #1 @186235908 p='hookSpecificOutput is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision==="ask"))p+=e.decis
+
+## 248 for PermissionRequest hits=2
+- #0 @96922304 .i.."Stop" | "SubagentStop".a...R.X.string (optional) - Feedback for the model; the conversation continues so the model can act on it.......noA.for PreToolUse.......9..to allow....p)..to deny.....;.P.for PermissionRequest.......S"..for UserPromptSubmit......B.for PostToolUse.........for PostToolBatch.........$.for Stop / SubagentStop.....Lo.. hook output invalid: ......{... hook failed: ......8\.. hook failed to run..
+- #1 @186237167 ventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) - Permission updates"
+
+## 248 JSON validation failed: ${ hits=0
+
+## 248 tMe({status hits=1
+- #0 @202588941 ;if(av[14]!==hb)uBe=()=>{if(hb==="busy"){return sq(),$Be}},cBe=[hb],av[14]=hb,av[15]=uBe,av[16]=cBe;else uBe=av[15],cBe=av[16];k(uBe,cBe);let dBe,mBe;if(av[17]!==oD||av[18]!==dq||av[19]!==mq)dBe=()=>{tMe({status:oD,waitingFor:mq},dq).catch(WBe)},mBe=[oD,mq,dq],av[17]=oD,av[18]=dq,av[19]=mq,av[20]=dBe,av[21]=mBe;else dBe=av[20],mBe=av[21];k(dBe,mBe),uq(yMt,oD,SMt);let pBe;if(av[22]===p){let vMt=R("tengu_termi
+
+## 248-fn tMe({status near@202588941 fn=fq @202587753
+len=1695 sha=6a6d2a496fc71b2e
+exact247=0
+function fq(hMt){let av=g(26),{turn:rBe,titles:cq,transcript:yMt,isSessionWorking:SMt}=hMt,{storageV5:dq}=fe(),Ese=j(CBe),Dse=j(TBe),Nse=j(_Be),Lse=j(PBe),bMt=j(MBe),Ose=Ze(rBe,DBe),Fse=Ze(rBe,NBe),kMt=Ze(cq,LBe),Bse=UL(z_.kind),Use=Wre(),Hse=j(OBe),iBe;if(av[0]!==Hse||av[1]!==Dse||av[2]!==Bse||av[3]!==Ose||av[4]!==Fse||av[5]!==Lse||av[6]!==Nse||av[7]!==Use||av[8]!==Ese)iBe=lq({topDialogWaitingFor:nq(Use),workerSandboxPrompt:Ese,elicitationPrompt:Dse,pendingWorkerRequest:Nse,pendingSandboxRequest:Lse,isShowingLocalJSXCommand:Bse,isLoading:Ose,isQueryActive:Fse,delegatedActive:Hse}),av[0]=Hse,av[1]=Dse,av[2]=Bse,av[3]=Ose,av[4]=Fse,av[5]=Lse,av[6]=Nse,av[7]=Use,av[8]=Ese,av[9]=iBe;else iBe=av[9];let{status:hb,waitingFor:mq,working:pq}=iBe,sBe,aBe;if(av[10]!==pq)sBe=()=>{Xtt(pq)},aBe=[pq],av[10]=pq,av[11]=sBe,av[12]=aBe;else sBe=av[11],aBe=av[12];k(sBe,aBe);let lBe;if(av[13]===p)lBe=[],av[13]=lBe;else lBe=av[13];k(UBe,lBe);let CMt=j(jBe),oD=hb==="idle"&&CMt?"shell":hb,uBe,cBe;if(av[14]!==hb)uBe=()=>{if(hb==="busy"){return sq(),$Be}},cBe=[hb],av[14]=hb,av[15]=uBe,av[16]=cBe;else uBe=av[15],cBe=av[16];k(uBe,cBe);let dBe,mBe;if(av[17]!==oD||av[18]!==dq||av[19]!==mq)dBe=()=>{tMe({status:oD,waitingFor:mq},dq).catch(WBe)},mBe=[oD,mq,dq],av[17]=oD,av[18]=dq,av[19]=mq,av[20]=dBe,av[21]=mBe;else dBe=av[20],mBe=av[21];k(dBe,mBe),uq(yMt,oD,SMt);let pBe;if(av[22]===p){let vMt=R("tengu_terminal_sidebar",!1);pBe=vMt&&(oe().showStatusInTerminalTab??!1);av[22]=pBe}else pBe=av[22];let gBe=pBe;Mot(kMt||!gBe?null:hb,bMt);const jse=hb==="busy";let hBe;if(av[23]!==jse||av[24]!==cq)hBe=e(tD,{titles:cq,isAnimating:jse,noPrefix:gBe}),av[23]=jse,av[24]=cq,av[25]=hBe;else hBe=av[25];return hBe}
+
+## 248 function UFe hits=1
+- #0 @202584294 ease()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker 
+
+## 248-fn function UFe near@202584294 fn=lq @202584101
+len=193 sha=8787aabc8d36fa38
+exact247=0
+function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}
+
+## 248 function lq hits=9
+- #0 @178787599 ments outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{Ne}from"B:/~BUN/root/chunk-21hv5ssy.js";var l=String.fromCharCode(0),p=/^\.[0-9a-f]{16}\.aside$/;function lq(e){if(e.charCodeAt(0)!==46)return!1;return Mb(e).some((n)=>p.test(n))}var g=/(^\.[0-9a-f]{16}\.tmp~?$)|(\.tmp[.~][0-9a-f]{8}$)|(\.purge\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.
+- #1 @181759084 uested permissions to write to ${u}, but you haven't granted it yet.`,suggestions:lqe(u,"write",r,d),decisionReason:!I?{type:"workingDir",reason:"Path is outside allowed working directories"}:void 0}}function lqe(e,t,r,o){let u=!mb(e,r,o);if(t==="read"&&u){let g=hL(e);return Ri(g).map((w)=>Q_e(w,"session")).filter((w)=>w!==void 0)}let d=r.mode==="plan"&&(r.prePlanMode==="auto"||r.prePlanMode==="bypassPermiss
+- #2 @183572752 i.terminalFocusGainedAt=Date.now();vi.terminalFocus=e?"focused":"blurred",Fwn(e),vi.terminalFocusChanged.emit()}function ZZ(){return vi.terminalFocus!=="blurred"}function lN(){return vi.terminalFocus}function lqn(){return vi.terminalFocusGainedAt}function T9(e){return vi.terminalFocusChanged.subscribe(e)}
+export{Ocn,ZZ,lN,lqn,T9};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial
+- #3 @183876181 obs:v("claudemd_rule_globs"),skill_paths:v("skill_paths"),file_suggestions_ignore:v("file_suggestions_ignore"),worktreeinclude:v("worktreeinclude"),dir_sync_folder_ignore:v("dir_sync_folder_ignore")};function lqt(e,t){if(xce.hasWarnedDroppedPattern(e,t))return;n(`[${e}] gitignore-style pattern failed to compile (${git(t)}); treating it as matching nothing: ${t}`,{level:"warn"}),s("tengu_uncompilable_ignore_p
+- #4 @184189777 eft","border-color","border-style","border-width","border-radius","display","flex-direction","gap","align-items","justify-content","width","min-width","max-width","height","min-height","max-height"]);function lqe(e){if(typeof e!=="string")return"style is not a string";if(e.length>2000)return"style is longer than 2000 characters";if(/[{}<>]|\/\*|\\|@|javascript:|expression\s*\(/i.test(e))return"style carries 
+- #5 @201185978 _e((i)=>({...i,diffSidebarOpen:f}),n);return b("repl_tab_switch",{tab:c(r)}),r}function Cre(e,t){MCn(e),t((o)=>o.replTab==="convo"&&o.panelFileView===null?o:{...o,replTab:"convo",panelFileView:null})}function lqt(e,t,o){if(Cre(e,t),oe().diffSidebarOpen!==!1)_e((n)=>({...n,diffSidebarOpen:!1}),o);b("repl_tab_switch",{tab:c("convo")})}var a=["session","uncommitted","branch"];function cqt(){let e=Go().diffSideb
+- #6 @202584101 {d.kill("SIGKILL"),n("Stopped sleep inhibitor, allowing sleep")}catch{}}}}var BFe=new K(()=>new _se);function Rse(){return BFe.of(z().host)}function sq(){Rse().acquire()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if
+- #7 @215884399 qe(typeof e=="function"?e:NS(e)))}var nqe,BJ=F(()=>{"use strict";vb();nqe=Array.prototype.find;o(iqe,"childFind");o(aqe,"childFirst");o(U8,"default")});function oqe(){return Array.from(this.children)}function lqe(e){return function(){return sqe.call(this.children,e)}}function Y8(e){return this.selectAll(e==null?oqe:lqe(typeof e=="function"?e:NS(e)))}var sqe,$J=F(()=>{"use strict";vb();sqe=Array.prototype.fil
+- #8 @222790396 aq=iq.forwardRef(function(t,n){let{render:r,className:o,style:i,children:a,...s}=t,c=PC();return at("div",t,{ref:[n,c],props:[{children:a,role:"status","aria-live":"polite","aria-atomic":!0},s]})})});function lq(){let e=AC.useContext(F2);if(e===void 0)throw new Error(Sn(20));return e}var AC,F2,z2=K(()=>{"use client";Mo();AC=_(ie(),1),F2=AC.createContext(void 0)});var cq,H2,uq,dq=K(()=>{"use client";cq=_(ie()
+
+## 248-fn function lq near@178787599 fn=rC @178786748
+len=115 sha=0e78f9070a9c7008
+exact247=0
+function rC(){return Boolean(a.CLAUDE_CODE_DISABLE_CLAUDE_MDS||ho("claudeMd",{explicitlyRequested:_m().length>0}))}
+
+## 248-fn function lq near@181759084 fn=WT @181756705
+len=2379 sha=690fc874112dcafb
+exact247=0
+function WT(e,t,r,o){if(typeof e.getPath!=="function")return{behavior:"ask",message:`Claude requested permissions to use ${e.name}, but you haven't granted it yet.`};let u=e.getPath(t),d=o??Ri(u);for(let O of d){let N=La(O,r,"edit","deny");if(N)return{behavior:"deny",message:`Permission to edit ${u} has been denied.`,decisionReason:{type:"rule",rule:N}}}let p=ht(u),g=vi(u,d,r,()=>uqe(p,t,d,{permissionMode:r.mode,restricted:!0}));if(g)return g;if(HO(p)&&By())return hi;if(d.some(pi))return gi;if(d.some(ur))return fr;if(d.some(dr))return mr;let w=(r.alwaysAllowRules.session??[]).filter((O)=>{let N=jr(O).ruleContent;return vl(N)&&!d.some((F)=>gl(F,N??""))}),M=w.length>0?aqe(d,{...r,alwaysAllowRules:{session:w}},"edit"):null;if(M&&r.mode!=="plan"&&!d.some((O)=>dO(O,r.trustedNetworkDirectories))&&!d.some((O)=>li(O)>1))return{behavior:"allow",updatedInput:t,decisionReason:{type:"rule",rule:M}};for(let O of d){let N=La(O,r,"edit","ask");if(N)return{behavior:"ask",message:`Claude requested permissions to write to ${u}, but you haven't granted it yet.`,decisionReason:{type:"rule",rule:N}}}let k=uqe(p,t,d,{permissionMode:r.mode,restricted:r.restricted});if(k.behavior!=="passthrough"&&cqe(k,r))return k;let E=F9(u,d,void 0,r.isRemoteMode&&!r.restricted,r.trustedNetworkDirectories);if(!E.safe){let O=r.restricted||d.some((F)=>li(F)>1||dO(F,r.trustedNetworkDirectories))?null:fur(u),N=O?[{type:"addRules",rules:[{toolName:tn,ruleContent:O.pattern}],behavior:"allow",destination:"session"}]:lqe(u,"write",r,d);return{behavior:"ask",message:E.message,suggestions:N,decisionReason:{type:"safetyCheck",reason:E.message,...r.restricted?{classifierApprovable:!1,circuitBreaker:"restrictedMode"}:{classifierApprovable:E.classifierApprovable,circuitBreaker:E.circuitBreaker}}}}if(r.mode==="plan")return{behavior:"ask",message:`Cannot write to ${u} while in plan mode.`,decisionReason:{type:"mode",mode:"plan"}};let I=mb(u,r,d);if(r.mode==="acceptEdits"&&I)return{behavior:"allow",updatedInput:t,decisionReason:{type:"mode",mode:r.mode}};let C=aqe(d,r,"edit");if(C)return{behavior:"allow",updatedInput:t,decisionReason:{type:"rule",rule:C}};return{behavior:"ask",message:`Claude requested permissions to write to ${u}, but you haven't granted it yet.`,suggestions:lqe(u,"write",r,d),decisionReason:!I?{type:"workingDir",reason:"Path is outside allowed working directories"}:void 0}}
+
+## 248-fn function lq near@183572752 fn=lN @183572714
+len=38 sha=ef672f047bec1987
+exact247=0
+function lN(){return vi.terminalFocus}
+
+## 248-fn function lq near@183876181 fn=iqt @183875370
+len=125 sha=bcc698af23eda2e7
+exact247=0
+function iqt(e){try{return k0e.default().add([e]).test("probe"),null}catch(t){return t instanceof Error?t.message:String(t)}}
+
+## 248 topDialogWaitingFor hits=4
+- #0 @92453084 ....|.{.inline......l[..permission prompt...
+.......waitingFor..........delegatedActive.....N4.isQueryActive........rD.worker request......!.-.workerSandboxPrompt......Q&.elicitationPrompt...........topDialogWaitingFor.........pendingWorkerRequest......q.pendingSandboxRequest.......Q...isShowingLocalJSXCommandA....U..Cannot destructure property 'titles' from null or undefined value........v..tengu_static_title_unde
+- #1 @202584408 isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}N();
+- #2 @202584446 dle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}N();function KFe(DAt){return DAt.terminalT
+- #3 @202588134 ,Fse=Ze(rBe,NBe),kMt=Ze(cq,LBe),Bse=UL(z_.kind),Use=Wre(),Hse=j(OBe),iBe;if(av[0]!==Hse||av[1]!==Dse||av[2]!==Bse||av[3]!==Ose||av[4]!==Fse||av[5]!==Lse||av[6]!==Nse||av[7]!==Use||av[8]!==Ese)iBe=lq({topDialogWaitingFor:nq(Use),workerSandboxPrompt:Ese,elicitationPrompt:Dse,pendingWorkerRequest:Nse,pendingSandboxRequest:Lse,isShowingLocalJSXCommand:Bse,isLoading:Ose,isQueryActive:Fse,delegatedActive:Hse}),av[0]=Hse,a
+
+## 248-fn topDialogWaitingFor near@202584408 fn=UFe @202584294
+len=329 sha=777e1663cee655c2
+exact247=0
+function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}
+
+## 248-fn topDialogWaitingFor near@202584446 fn=UFe @202584294
+len=329 sha=777e1663cee655c2
+exact247=0
+function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}
+
+## 248 lastMessage: hits=1
+- #0 @218205848 te:o(function(e){this.notes.push(e)},"addNote"),lastActor:o(function(){return this.actors[this.actors.length-1]},"lastActor"),lastLoop:o(function(){return this.loops[this.loops.length-1]},"lastLoop"),lastMessage:o(function(){return this.messages[this.messages.length-1]},"lastMessage"),lastNote:o(function(){return this.notes[this.notes.length-1]},"lastNote"),actors:[],boxes:[],loops:[],messages:[],notes:[]},in
+
+## 248-fn lastMessage: near@218205848 fn=B6t @218203560
+len=1095 sha=8cc9e5ccfc30daef
+exact247=0
+async function B6t(e,t,r){let n=0;for(let a of e.keys()){let s=e.get(a);s.wrap&&(s.description=Zt.wrapLabel(s.description,je.width-2*je.wrapPadding,hY(je)));let l=ni(s.description)?await Hp(s.description,Ae()):Zt.calculateTextDimensions(s.description,hY(je));s.width=s.wrap?je.width:xt.getMax(je.width,l.width+2*je.wrapPadding),s.height=s.wrap?xt.getMax(l.height,je.height):je.height,n=xt.getMax(n,s.height)}for(let a in t){let s=e.get(a);if(!s)continue;let l=e.get(s.nextActor);if(!l){let f=t[a]+je.actorMargin-s.width/2;s.margin=xt.getMax(f,je.actorMargin);continue}let h=t[a]+je.actorMargin-s.width/2-l.width/2;s.margin=xt.getMax(h,je.actorMargin)}let i=0;return r.forEach(a=>{let s=A0(je),l=a.actorKeys.reduce((f,p)=>f+=e.get(p).width+(e.get(p).margin||0),0),u=je.boxMargin*8;l+=u,l-=2*je.boxTextMargin,a.wrap&&(a.name=Zt.wrapLabel(a.name,l-2*je.wrapPadding,s));let h=Zt.calculateTextDimensions(a.name,s);i=xt.getMax(h.height,i);let d=xt.getMax(l,h.width+2*je.wrapPadding);if(a.margin=je.boxTextMargin,l<d){let f=(d-l)/2;a.margin+=f}}),r.forEach(a=>a.textMaxHeight=i),xt.getMax(n,je.height)}
+
+## 248 waitingFor: hits=8
+- #0 @181016933 ="string"?o.parkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint==="string"?o.entrypoint:void 0,...typeof o.pidDomain==="
+- #1 @181016977 ===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint==="string"?o.entrypoint:void 0,...typeof o.pidDomain==="string"&&{pidDomain:o.pidDomain},agent:typeo
+- #2 @202584167 tch{}}}}var BFe=new K(()=>new _se);function Rse(){return BFe.of(z().host)}function sq(){Rse().acquire()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPro
+- #3 @202584251 q(){Rse().acquire()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaiting
+- #4 @202588471 alJSXCommand:Bse,isLoading:Ose,isQueryActive:Fse,delegatedActive:Hse}),av[0]=Hse,av[1]=Dse,av[2]=Bse,av[3]=Ose,av[4]=Fse,av[5]=Lse,av[6]=Nse,av[7]=Use,av[8]=Ese,av[9]=iBe;else iBe=av[9];let{status:hb,waitingFor:mq,working:pq}=iBe,sBe,aBe;if(av[10]!==pq)sBe=()=>{Xtt(pq)},aBe=[pq],av[10]=pq,av[11]=sBe,av[12]=aBe;else sBe=av[11],aBe=av[12];k(sBe,aBe);let lBe;if(av[13]===p)lBe=[],av[13]=lBe;else lBe=av[13];k(UBe
+- #5 @202588956 )uBe=()=>{if(hb==="busy"){return sq(),$Be}},cBe=[hb],av[14]=hb,av[15]=uBe,av[16]=cBe;else uBe=av[15],cBe=av[16];k(uBe,cBe);let dBe,mBe;if(av[17]!==oD||av[18]!==dq||av[19]!==mq)dBe=()=>{tMe({status:oD,waitingFor:mq},dq).catch(WBe)},mBe=[oD,mq,dq],av[17]=oD,av[18]=dq,av[19]=mq,av[20]=dBe,av[21]=mBe;else dBe=av[20],mBe=av[21];k(dBe,mBe),uq(yMt,oD,SMt);let pBe;if(av[22]===p){let vMt=R("tengu_terminal_sidebar",!1
+- #6 @207448570 "background",startedAt:e?.startedAt??Date.parse(t.state.createdAt),sessionId:e?.sessionId??t.state.sessionId,...m&&{name:m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||l.has(t.pid))continue;if(t.kind==="bg"&&t.jobId)continue;if(t.parkedJobId!==void 0)continue;if(!c(t.cwd))continue;let 
+- #7 @207449031 wd,kind:t.kind==="bg"?"background":"interactive",startedAt:t.startedAt,...t.sessionId&&{sessionId:t.sessionId},...e&&{name:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),b("cli_agents_json")}function p(i){return i==="idle"?"idle":i==="waiting"?"waiting":"busy"}function A(i,s){if(s==="busy
+
+## 248-fn waitingFor: near@202584167 fn=lq @202584101
+len=193 sha=8787aabc8d36fa38
+exact247=0
+function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}
+
+## 248-fn waitingFor: near@202584251 fn=lq @202584101
+len=193 sha=8787aabc8d36fa38
+exact247=0
+function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}
+
+# 247 same needles
+## 247 hook output invalid hits=0
+
+## 247  hook failed: hits=25
+- #0 @201746888  hook error occurred . ...../... to see.....y...Stop hook cancelled (abort or stream teardown)..........tengu_stop_hook_error.......K...Stop hook failed: ........;.Brief mode enforcement failed: ......... You MUST call the .3.....$. tool to complete this request. Call this tool now..%.......S
+- #1 @201928538 ons........n".stop_hook_active...J.3.teammate_name........nR.task_subject....+...expansion_type......9...command_argsj...q.{.WorktreeCreate hook failed: hook is configured but did not run (workspace not trusted or matcher mismatch)......]...WorktreeCreate hook failed: hook succeeded but retu
+- #2 @201928654 gsj...q.{.WorktreeCreate hook failed: hook is configured but did not run (workspace not trusted or matcher mismatch)......]...WorktreeCreate hook failed: hook succeeded but returned no worktree path (command: echo the path to stdout; http/callback: return hookSpecificOutput.worktreePath).....
+- #3 @201928826  returned no worktree path (command: echo the path to stdout; http/callback: return hookSpecificOutput.worktreePath).......e..WorktreeCreate hook failed: ,.....c.WorktreeCreate hook failed (stderr redacted).....E..WorktreeRemove hook failed [....);.worktree_path.........s.tengu_hook_output_p
+- … +21 more
+
+## 247 PermissionRequest decision must be hits=0
+
+## 247 for PermissionRequest hits=0
+
+## 247 JSON validation failed: ${ hits=0
+
+## 247 topDialogWaitingFor hits=4
+- #0 @197109276 or..........delegatedActive.....N4.isQueryActive........rD.worker request......!.-.workerSandboxPrompt......Q&.elicitationPrompt...........topDialogWaitingFor.........pendingWorkerRequest......q.pendingSandboxRequest.......Q...isShowingLocalJSXCommandF....4..Cannot destructure property 'isAnimatin
+- #1 @232237971 ,working:e.isQueryActive}}function t5e(e){if(e.workerSandboxPrompt)return"sandbox request";if(e.elicitationPrompt)return"input needed";if(e.topDialogWaitingFor!==void 0)return e.topDialogWaitingFor;if(e.pendingWorkerRequest)return"worker request";if(e.pendingSandboxRequest)return"sandbox request";i
+- #2 @232238009 (e){if(e.workerSandboxPrompt)return"sandbox request";if(e.elicitationPrompt)return"input needed";if(e.topDialogWaitingFor!==void 0)return e.topDialogWaitingFor;if(e.pendingWorkerRequest)return"worker request";if(e.pendingSandboxRequest)return"sandbox request";if(e.isShowingLocalJSXCommand)return"di
+- #3 @233125220 ,eT=om??lb??vM??ro??"Claude Code",nm=Mh(),tT=Ad(),ks=zB(),Tc=Fte(),ub=K(()=>Bse(he),[he]),cb=LL(),{status:rm,waitingFor:TM,working:fr}=yue({topDialogWaitingFor:Dje(cb),workerSandboxPrompt:Me.queue.length>0,elicitationPrompt:ve.queue.length>0,pendingWorkerRequest:xe!==null,pendingSandboxRequest:we!=
+
+## 247 function UFe hits=1
+- #0 @214530629 pth","1"],{cwd:e,timeout:N$(),stdin:"ignore",env:n});if(a.code!==0)_(`git submodule update failed (non-fatal): ${a.stderr}`,{level:"warn"})}function UFe(e){if(e.code===0)return e;if(e.error?.includes("timed out")){let t=Math.round(N$()/1000);return{...e,stderr:`Git pull timed out after ${t}s
+
+# combo windows unique-ish
+- combo "waitingFor"+"hook"  248=0  247=0
+- combo "waitingFor"+"schema"  248=0  247=0
+- combo "waitingFor"+"PermissionRequest"  248=0  247=0
+- combo "waitingFor"+"PreToolUse"  248=0  247=0
+- combo "waitingFor"+"validation"  248=0  247=0
+- combo "lastMessage"+"hook"  248=2  247=2
+  248@97608740 ession file: ..........daemon-worker........B%."prNumber":.....@B.isLoopSession.......g...customTitleFromTail.........lastMessageAtMs.........ownWorktreesX....... filtered from /resume: recorded cwd is a different directory with the same project slug	.......(session)...(...R.~. filtered from /resu
+  248@200679493 ll;setProbe(e){this.probe=e}}var Ua=new K(()=>new Tt);function lke(e){return{messageCount:J(e,(t)=>t.type!=="progress"),lastMessageUuid:e.findLast((t)=>t.type!=="progress")?.uuid}}class qde{verdicts=new Map;getOrClassify(e,t,o,r){let i=`${e}:${t??"*"}`,u=this.verdicts.get(i);if(u&&(u.reuse==="always
+- combo "lastMessage"+"schema"  248=0  247=0
+- combo "lastMessage"+"PermissionRequest"  248=0  247=0
+- combo "lastMessage"+"validationError"  248=0  247=0
+- combo "detail"+"hookName"  248=0  247=0
+- combo "needs"+"hookName"  248=1  247=1
+  248@92394323 .instanceId..........served_call......m.Stream closed.......QP).sent......!.instance_id.....q...WeakSet.$.....9.Claude needs your permission to use ....2...permission_prompt.......1.S.notificationType ....t..write queue drain timeout (exit).....&..scaleBudgetToQueue..........PermissionRequest...+..
+- combo "needs"+"schema"  248=34  247=31
+- combo "tMe("+"hook"  248=0  247=0
+- combo "tMe("+"schema"  248=0  247=0
+- combo "tMe("+"validation"  248=0  247=0
+- combo "updateSessionActivity"+"hook"  248=0  247=0
+- combo "hookName"+"waitingFor"  248=0  247=0
+- combo "hookName"+"lastMessage"  248=0  247=0
+- combo "hookName"+"detail"  248=0  247=0
+- combo "validationError"+"waitingFor"  248=0  247=0
+- combo "validationError"+"lastMessage"  248=0  247=0
+- combo "validationError"+"tMe"  248=0  247=0
+- combo "Swt("+"waitingFor"  248=0  247=0
+- combo "Swt("+"lastMessage"  248=0  247=0
+- combo "Swt("+"tMe"  248=0  247=0
+- combo "Owt("+"waitingFor"  248=0  247=0
+- combo "Owt("+"lastMessage"  248=0  247=0
+- combo "_P("+"waitingFor"  248=0  247=0
+- combo "_P("+"lastMessage"  248=0  247=0
+- combo "hook error"+"waitingFor"  248=0  247=0
+- combo "hook error"+"lastMessage"  248=0  247=0
+- combo "Expected schema"+"waitingFor"  248=0  247=0
+- combo "Expected schema"+"lastMessage"  248=0  247=0
+- combo "Expected schema"+"tMe"  248=0  247=0
+
+# row-host needles
+- "waitingFor??"  248=1  247=1
+  248@192120439 .updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,output:null,children:null,linkScanOffset:
+- "waitingFor ??"  248=0  247=0
+- ".waitingFor??"  248=1  247=1
+  248@192120438 i.updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,output:null,children:null,linkScanOffset:
+- ".waitingFor??session.lastMessage"  248=0  247=0
+- "session.waitingFor"  248=0  247=0
+- "d.waitingFor"  248=0  247=0
+- "e.waitingFor"  248=4  247=4
+  248@195795455 argetInfo).type);if(!(we==="worker"||we==="shared_worker"||we==="service_worker"||we==="worklet")||ue.waitingForDebugger!==!0){U.fail(new Fn("part of the page started outside the preview sandbox; preview stopped")),N.kill().catch(()=>{});return}(async(
+  248@207448555 onId??t.state.sessionId,...m&&{name:m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||l.has(t.pid))continue;if(t.kind==="bg"&&t.jo
+  248@207448581 .m&&{name:m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||l.has(t.pid))continue;if(t.kind==="bg"&&t.jobId)continue;if(t.parkedJo
+  248@222451411 e.unsuspend=null,i()}},6e4+t);0<e.imgBytes&&y_===0&&(y_=62500*jce());var o=setTimeout(function(){if(e.waitingForImages=!1,e.count===0&&(e.stylesheets&&eS(e,e.stylesheets),e.unsuspend)){var i=e.unsuspend;e.unsuspend=null,i()}},(e.imgBytes>y_?50:800)+t);
+- "t.waitingFor"  248=2  247=2
+  248@207449016 &&{sessionId:t.sessionId},...e&&{name:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),b("cli_agents_json")}function p(i){return i==
+  248@207449042 ...e&&{name:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),b("cli_agents_json")}function p(i){return i==="idle"?"idle":i==="waitin
+- "heldInTerminal"  248=5  247=0
+  248@92724820 ...._Fn.nextAt..C...+...Cannot destructure property 'template' from null or undefined value.........heldInTerminal..
+.......loopJobIds..........dispatchRepoCwd....'...pendingDelete.......C1..earlierEntries..
+...,K..simpleView......../.simpleWantsRemote.
+  248@192178293 xec!==void 0))}function rp({jobs:i,adoptedPeers:d,remoteJobs:m,pendings:w,prStatuses:S,liveStatus:h,heldInTerminal:C,loopJobIds:x,loopKicks:A,focusedIdx:F,hoverFocusIdx:T,collapsed:P,capExpanded:V,groupMode:K,activeTab:W,query:Y,mode:Z,dispatch:ee,linkMa
+  248@192197201 unt:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,
+  248@192213336 en:e(Ss,{job:at,isFocused:Xt,focusFg:ii,isOrigin:at.id===Al,logTail:nf[at.id],cols:ei,status:xs(at),heldInTerminal:or.terminalHolderOf(at)!==void 0,showVerb:!Cn,loopKickCount:Is.has(at.id)?Cs.get(at.state.sessionId)?.count:void 0,age:Hn(at,Is.has(at.id)?
+  248@192274831 ).hasToken,[]),Fn=rp({jobs:le,adoptedPeers:ye,remoteJobs:nt,pendings:be,prStatuses:Te,liveStatus:Su,heldInTerminal:(H)=>Q.terminalHolderOf(H)!==void 0,loopJobIds:ku,loopKicks:ge,focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt,groupMode:et,acti
+- "ctrl+x again to delete"  248=8  247=8
+- "→ to return"  248=0  247=0
+- "\\u2192 to return"  248=0  247=0
+- "to return"  248=48  247=48
+
+## rowish ctrl+x again to delete near@92727162 fn= @-1
+NO_FN
+
+## rowish ctrl+x again to delete near@92727192 fn= @-1
+NO_FN
+
+## rowish to return near@68104968 fn=expectedException @68102523
+len=2889 sha=1cf0d1ecc70ae9b8
+exact247=1
+function expectedException(actual, expected, message, fn) {
+  let generatedMessage = !1, throwError = !1;
+  if (typeof expected !== "function")
+    if (isRegExp(expected)) {
+      let str = @String(actual);
+      if (RegExpPrototypeExec.@call(expected, str) !== null)
+        return;
+      let inspect = lazyInspect();
+      if (!message)
+        generatedMessage = !0, message = `The input did not match the regular expression ${inspect(expected)}. Input:
+
+${inspect(str)}
+`;
+      throwError = !0;
+    } else if (typeof actual !== "object" || actual === null) {
+      if (AssertionError === @undefined)
+        loadAssertionError();
+      let err = new AssertionError({
+        actual,
+        expected,
+        message,
+        operator: "deepStrictEqual",
+        stackStartFn: fn
+      });
+      throw err.operator = fn.name, err;
+    } else {
+      let keys = ObjectKeys(expected);
+      if (expected instanceof Error)
+        ArrayPrototypePush.@call(keys, "name", "message");
+      else if (keys.length === 0)
+        throw @makeErrorWithCode(113, "error", expected, "may not be an empty object");
+      for (let key of keys) {
+        if (typeof actual[key] === "string" && isRegExp(expected[key]) && RegExpPrototypeExec.@call(expected[key], actual[key]) !== null)
+          continue;
+        compareExceptionKey(actual, expected, key, message, keys, fn);
+      }
+      return;
+    }
+  else if (expected.prototype !== @undefined && actual instanceof expected)
+    return;
+  else if (ObjectPrototypeIsPrototypeOf.@call(Error, expected)) {
+    if (!message)
+      if (generatedMessage = !0, message = `The error is expected to be an instance of "${expected.name}". Received `, Error.isError(actual)) {
+        let name = actual.constructor?.name || actual.name;
+        if (expected.name === name)
+          message += "an error with identical name but a different prototype.";
+        else
+          message += `"${name}"`;
+        let actualMessage = actual.message;
+        if (actualMessage)
+          message += `
+
+Error message:
+
+${actualMessage}`;
+      } else
+        message += `"${lazyInspect()(actual, { depth: -1 })}"`;
+    throwError = !0;
+  } else {
+    let res = expected.@apply({}, [actual]);
+    if (res !== !0) {
+      if (!message) {
+        generatedMessage = !0;
+        let name = expected.name ? `"${expected.name}" ` : "", inspect = lazyInspect();
+        if (message = `The ${name}validation function is expected to return "true". Received ${inspect(res)}`, Error.isError(actual))
+          message += `
+
+Caught error:
+
+${actual}`;
+      }
+      throwError = !0;
+    }
+  }
+  if (throwError) {
+    if (AssertionError === @undefined)
+      loadAssertionError();
+    let err = new AssertionError({
+      actual,
+      expected,
+      message,
+      operator: fn.name,
+      stackStartFn: fn
+    });
+    throw err.generatedMessage = generatedMessage, err;
+  }
+}
+
+## rowish to return near@82612311 fn=prerender @82610869
+len=1590 sha=1fe2398eb911c66e
+exact247=1
+async function prerender(meta: Bake.RouteMetadata) {
+  const page = getPage(meta, meta.styles);
+
+  const rscPayload = renderToPipeableStream(page, serverManifest)
+    // TODO: write a lightweight version of PassThrough
+    .pipe(new PassThrough());
+
+  const int = new Uint32Array(1);
+  int[0] = meta.styles.length;
+  let rscChunks: Array<BlobPart> = [int.buffer as ArrayBuffer, meta.styles.join("\n")];
+  rscPayload.on("data", chunk => rscChunks.push(chunk));
+
+  let html;
+  try {
+    html = await renderToStaticHtml(rscPayload, meta.modules);
+  } catch (err) {
+    //console.error("ah fuck");
+    return undefined;
+  }
+  const rsc = new Blob(rscChunks, { type: "text/x-component" });
+
+  return {
+    // Each route generates a directory with framework-provided files. Keys are
+    // files relative to the route path, and values are anything `Bun.write`
+    // supports. Streams may result in lower memory usage.
+    files: {
+      // Directories like `blog/index.html` are preferred over `blog.html` because
+      // certain static hosts do not support this conversion. By using `index.html`,
+      // the static build is more portable.
+      "/index.html": html,
+
+      // The RSC payload is provided so client-side can use this file for seamless
+      // client-side navigation. This is equivalent to 'Accept: text/x-component'
+      // for the non-static build.s
+      "/index.rsc": rsc,
+    },
+
+    // In the future, it will be possible to return data for a partially
+    // pre-rendered page instead of a fully rendered route. Bun might also
+    // expose caching options here.
+  };
+}
+
+## rowish heldInTerminal near@92724820 fn= @-1
+NO_FN
+
+## rowish heldInTerminal near@192178293 fn=rp @192178208
+len=5561 sha=002f900409b2fb55
+exact247=0
+function rp({jobs:i,adoptedPeers:d,remoteJobs:m,pendings:w,prStatuses:S,liveStatus:h,heldInTerminal:C,loopJobIds:x,loopKicks:A,focusedIdx:F,hoverFocusIdx:T,collapsed:P,capExpanded:V,groupMode:K,activeTab:W,query:Y,mode:Z,dispatch:ee,linkMatchId:X,dispatchRepoCwd:Q,pendingDelete:le,earlierEntries:ye,cwdFilter:xe,initialJobId:me,simpleView:be,simpleWantsRemote:Te,peersEnabled:ge,showRemoteTabs:de,launcherCwd:re,launcherGroup:He,scopedFallbackOrigin:tt,termRows:Ge,columns:wt,now:Me}){let he=(pe)=>Ko(K,pe),et=Z==="bash"||ee?.exec!==void 0,ut=Ib(ee),Ie=xb(ee),{template:Fe,state:Ve,output:We,pr:ze,url:lt,text:yt}=Bc(ee?"":Y),Ft=ze?os(ze):void 0,Ct=[...i??[],...ge?d:[]],Ne=xe?Ct.filter((pe)=>xGe(pe.state,xe)):Ct,Mt=de?W==="remote"?m:Ne:Te?[...Ne,...m]:Ne,Ht=Mt.filter((pe)=>{if(Fe&&!pe.state.template.toLowerCase().startsWith(Fe))return!1;if(ze&&!Aa(pe.state,ze,Ft))return!1;if(lt&&!Ta(pe.state,lt))return!1;if(We!==void 0&&!Object.values(pe.state.output??{}).some((ft)=>ft.toLowerCase().includes(We)))return!1;if(Ve&&!pe.state.state.toLowerCase().startsWith(Ve)&&!lo(pe.state).startsWith(Ve)&&!uo[Ji(pe,S,h(pe))].toLowerCase().startsWith(Ve))return!1;if(yt){if(![pe.state.name,pe.state.intent,pe.state.detail,...Object.values(pe.state.output??{})].join(" ").toLowerCase().includes(yt))return!1}return!0}),Lt=w.filter((pe)=>!Ht.some((ft)=>ft.id===pe.id)),zt=Lt.length>0?hn([...Lt,...Ht]):Ht,De=K==="state",Ue=K==="group",je=new Map(zt.map((pe)=>[pe.id,pe.state.pinned?"pinned":le?.id===pe.id&&le.group?le.group:De?Ji(pe,S,h(pe)):Ue?pe.state.group??Lw:Vi(pe.state)])),ct=(pe)=>pe==="pinned"?-1:pe===Lw?1:0,nt=[...zt].sort((pe,ft)=>{let Pt=je.get(pe.id),$t=je.get(ft.id);if(Pt==="pinned"||$t==="pinned")return(Pt==="pinned"?0:1)-($t==="pinned"?0:1);if(Ue){let Bt=(Be)=>le?.id===Be.id&&le.sortKey!==void 0?le.sortKey:Date.parse(Be.state.updatedAt);return ct(Pt)-ct($t)||Pt.localeCompare($t)||Bt(ft)-Bt(pe)}if(De){let Bt=gn.indexOf(Pt)-gn.indexOf($t),Be=(xo)=>le?.id===xo.id&&le.sortKey!==void 0?le.sortKey:Jn(xo.state,Pt);return Bt!==0?Bt:Be(ft)-Be(pe)||ft.state.createdAt.localeCompare(pe.state.createdAt)}if(Pt===He&&$t!==He)return-1;if($t===He&&Pt!==He)return 1;return Pt.localeCompare($t)}),dt=1/0,Wt=Sa,At=!1,St=new Set;for(let pe of[...i??[],...w,...ge?d:[]]){if(pe.state.sessionId)St.add(pe.state.sessionId);if(pe.state.resumeSessionId)St.add(pe.state.resumeSessionId)}let mt=Boolean(Fe||ze||lt||Ve)||We!==void 0||ye.length===0||W==="remote"||Boolean(xe)?[]:ye.filter((pe)=>!St.has(pe.sessionId)&&(!yt||pe.title.toLowerCase().includes(yt)));if(De&&!be){let pe=nt.filter((Bt)=>je.get(Bt.id)==="done"),ft=new Set(nt.map((Bt)=>je.get(Bt.id))).size,Pt=nt.reduce((Bt,Be)=>{let xo=je.get(Be.id);return xo!=="done"&&!P.has(he(xo))?Bt+1:Bt},0),$t=Gi(Ge,Pt+Math.max(0,ft*2-1));if(Wt=$t.doneCap,At=$t.compactHeader,!V.has("done"))dt=uc({done:pe,earlier:mt,doneCap:Wt,initialJobId:me,linkMatchId:X})}else if(!be&&W!=="remote"&&mt.length>0){let pe=new Set(nt.map((Pt)=>je.get(Pt.id))).size,ft=Gi(Ge,nt.length+Math.max(0,pe*2-1));if(Wt=ft.doneCap,At=ft.compactHeader,!V.has(fy))dt=mt.length>=Wt+Ni?Wt:1/0}let Qt={blocked:J(Mt,(pe)=>lo(pe.state,h(pe))==="blocked"),active:J(Mt,(pe)=>lo(pe.state,h(pe))==="active"),completed:J(Mt,(pe)=>lo(pe.state,h(pe))==="completed")},Tt=nt.every((pe)=>pe.id===me),vt=!be&&De&&!Y&&Tt&&!nt[0]?.state.pinned,Jt=be?np(zt,{statusFor:h,now:Me,fallbackOrigin:tt,showFinishedEarlier:V.has(Zo),terminalRows:Ge}):null;if(Jt!==null){let pe=1+Jt.needsCount+Jt.liveCount;At=Gi(Ge,pe).compactHeader}let Ut=Jt??lc(nt,je,{byState:De,byGroup:Ue,onRemoteTab:W==="remote",launcherGroup:He,scopedFallbackOrigin:tt,doneFoldAt:dt,emptyBucketHint:vt,earlier:mt}),Je=Ut.rows,eo=new Map;for(let pe of nt){let ft=je.get(pe.id);eo.set(ft,(eo.get(ft)??0)+1)}if(mt.length>0&&W!=="remote"){let pe=De?"done":fy;eo.set(pe,(eo.get(pe)??0)+mt.length)}if(P.size>0)Je=Je.filter((pe)=>pe.kind==="header"||!P.has(he(pe.group)));let io=be?0:dc(Je,re),Re=new Set(Je.filter((pe)=>pe.kind==="header").map((pe)=>pe.group)).size>1,Oe=Je[F],Se=Oe?.kind==="job"?Oe.job:void 0,Ye=Oe?.kind==="job"&&Oe.job.state.backend!=="daemon"?tt:Oe?.origin??tt,pt=Oe?.group??He,Gt=De&&!be?tt:Ye,ce=F===T,rt=zc(nt,(pe)=>x.has(pe.id)?A.get(pe.state.sessionId)?.nextAt:null,me,wt),Yt=(()=>{if(!Ie||X)return null;if(De)return"working";if(Q)return Je.find((Pt)=>Pt.kind==="header"&&Pt.origin===Q&&Pt.group!=="pinned")?.group??null;let pe=Je[F];if(pe?.kind==="job"){if(pe.group==="pinned")return Je.find((Pt)=>Pt.kind==="header"&&Pt.origin===pe.origin&&Pt.group!=="pinned")?.group??null;return pe.group}if(pe?.kind==="header")return pe.group==="pinned"?null:pe.group;return null})(),so=!ut&&ee?.cwd!==void 0,Ee=!!Se&&w.some((pe)=>pe.id===Se.id),Rt=!!Se&&Se.id===me,Qe=J(Te?[...Ct,...m]:Ct,(pe)=>{let ft=Ji(pe,S,h(pe));return ft==="blocked"||ft==="working"}),to=ut?"create":Rt?"return":Se&&Bi(Se.state)&&!C(Se)?"resume":"open",wo=Oe?.kind==="header"?nt.filter((pe)=>je.get(pe.id)===Oe.group):[];return{byState:De,byGroup:Ue,hasDispatch:ut,hasComposedDispatch:Ie,isBashDispatch:et,enterIsNoop:so,queryIsFilter:ee===null,loopJobIds:x,localJobs:Ct,scopedLocalJobs:Ne,scopedJobs:Mt,filtered:nt,groupOf:je,jobSessionIds:St,earlierVisible:mt,doneCap:Wt,compactHeader:At,simpleBuilt:Jt,built:Ut,rows:Je,homeIdx:io,hasMultipleOrigins:Re,groupCounts:eo,bandCounts:Qt,onlyOrigin:Tt,isOnboarding:vt,focusedRow:Oe,focused:Se,focusedOrigin:Ye,focusedGroup:pt,dispatchOrigin:Gt,focusIsFromHover:ce,cols:rt,dispatchTargetGroup:Yt,headerJobs:wo,runningCount:Qe,enterLabel:to,focusedIsPending:Ee,focusedIsOrigin:Rt}}
+
+## rowish Open in a terminal near@92727268 fn= @-1
+NO_FN
+
+## rowish Open in a terminal near@192201067 fn=Ss @192196977
+len=5883 sha=9f63297eaf19a153
+exact247=0
+function Ss(mE){let oo=g(66),{job:ht,isFocused:co,focusFg:rl,isOrigin:po,logTail:bE,status:il,cols:Ao,showVerb:wp,loopKickCount:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,il,qn),{color:ll,dim:yE}=Ur,$r=il==="busy"?ll:Na(ll,Sp),SE=$r===ll&&yE,vp=$o==="armed"?void 0:To?.justKilled?xY:$o?void 0:Wn(ht.state,qn,il),hs=ht.state.output?.result,Nb;if(oo[0]!==hs)Nb=hs?Ea(hs):null,oo[0]=hs,oo[1]=Nb;else Nb=oo[1];let Yn=Nb,kE=Yn?void 0:hs,vE=qn!=="success"?bE||void 0:void 0,Rp=po&&co?ht.state.tempo==="blocked"?ht.state.needs:qn==="failure"?ht.state.detail:void 0:void 0,Hb;if(oo[2]!==ht.state.detail)Hb=Cr(ht.state.detail),oo[2]=ht.state.detail,oo[3]=Hb;else Hb=oo[3];let Gb=Hb,_p=po&&ht.state.tempo==="blocked"&&ht.state.needs===sh&&ht.state.detail&&!Gb?ht.state.detail:void 0,bs=po&&co?Rp?Rp===sh?_p?Nt(_p):Mp(ht.state.cwd)||ht.state.cwd:Nt(Rp):Nt(ht.state.detail??""):qn==="success"?Nt(kE||ht.state.detail):Nt(_p||!po&&co&&ht.state.tempo==="blocked"&&ht.state.needs===sh&&"space to send it a prompt"||ht.state.tempo==="blocked"&&ht.state.needs||!Gb&&ht.state.detail||"")||ht.state.tempo==="active"&&Nt(vE??"")||Nt(ht.state.detail),Vb;if(oo[4]!==po||oo[5]!==ht.state)Vb=vo(ht.state,po),oo[4]=po,oo[5]=ht.state,oo[6]=Vb;else Vb=oo[6];let Xn=Vb,dl=fN(ht.state.color)?FT[ht.state.color]:void 0,er=as(Xn,!!ht.state.name),Cp=Sp.filter(Uo),ws=Sp.filter(Ub),en=ws.find(Kb)??ws.at(-1)??Cp.at(-1),Ip=co?"selected, ":"",xp=$o?`${Ip}opening:`:To?.justKilled?`${Ip}stopped:`:$r!==ll?`${Ip}needs attention:`:Vn(ht.activity,ht.state.tempo,il,qn,co);const Pp=o,Op=Ao.label+2,Ap=!co&&!po,Tp=SE||$r===void 0&&!co;let ul;if(oo[7]!==vp)ul=vp??e(Sn,{}),oo[7]=vp,oo[8]=ul;else ul=oo[8];let cl;if(oo[9]!==$r||oo[10]!==xp||oo[11]!==Tp||oo[12]!==ul)cl=e(t,{"aria-label":xp,color:$r,dimColor:Tp,children:ul}),oo[9]=$r,oo[10]=xp,oo[11]=Tp,oo[12]=ul,oo[13]=cl;else cl=oo[13];let pl;if(oo[14]!==Ao.label||oo[15]!==Yn||oo[16]!==co||oo[17]!==po||oo[18]!==Xn||oo[19]!==Vr||oo[20]!==er||oo[21]!==dl)pl=dl&&!Vr?e(tc,{color:dl,bold:co,children:Yn?e(it,{url:Yn,children:Xn}):Xn}):Vr?Do(Vr.draft,Vr.cursor,Ao.label):er?r(L,{children:[e(t,{dimColor:!co&&!po,children:er.display.slice(0,er.newLen)}),e(t,{dimColor:!0,children:er.display.slice(er.newLen)})]}):Yn?e(it,{url:Yn,children:Xn}):Xn,oo[14]=Ao.label,oo[15]=Yn,oo[16]=co,oo[17]=po,oo[18]=Xn,oo[19]=Vr,oo[20]=er,oo[21]=dl,oo[22]=pl;else pl=oo[22];let fl;if(oo[23]!==po||oo[24]!==pl)fl=e(t,{bold:po,children:pl}),oo[23]=po,oo[24]=pl,oo[25]=fl;else fl=oo[25];let gl;if(oo[26]!==rl||oo[27]!==fl||oo[28]!==Ap||oo[29]!==cl)gl=r(t,{color:rl,dimColor:Ap,wrap:"truncate",children:[cl," ",fl]}),oo[26]=rl,oo[27]=fl,oo[28]=Ap,oo[29]=cl,oo[30]=gl;else gl=oo[30];let hl;if(oo[31]!==gl||oo[32]!==Op)hl=e(o,{width:Op,flexShrink:0,children:gl}),oo[31]=gl,oo[32]=Op,oo[33]=hl;else hl=oo[33];let bl;if(oo[34]!==$o||oo[35]!==Ao.detail||oo[36]!==To||oo[37]!==zn||oo[38]!==mo||oo[39]!==al||oo[40]!==Wr||oo[41]!==bs||oo[42]!==wp||oo[43]!==Ur)bl=mo?r(t,{wrap:"truncate",children:[e(t,{dimColor:!0,children:"group: "}),Do(mo.draft,mo.cursor,Math.max(Ao.detail-ie("group: ")-(al?ys:0),8),mo.selected),mo.reserved?e(t,{color:"error",children:" (reserved name)"}):!al?null:mo.isNew?e(t,{dimColor:!0,children:" (new group)"}):mo.ungroup?e(t,{dimColor:!0,children:" (ungroup)"}):mo.addTo?r(t,{dimColor:!0,children:[" (add to ",mo.addTo,")"]}):null]}):$o==="armed"?e(t,{dimColor:!0,wrap:"truncate",children:"opening\u2026 \xB7 esc to cancel"}):To?e(t,{color:To.ungroup?"warning":"error",wrap:"truncate",children:To.ungroup?"ctrl+x again to ungroup":To.justKilled?"stopped \xB7 ctrl+x again to delete":"ctrl+x again to delete"}):zn?r(t,{wrap:"truncate",children:[e(t,{color:"error",children:"not deleted"}),r(t,{dimColor:!0,children:[" \xB7 ",zn]})]}):$o?e(t,{dimColor:!0,wrap:"truncate",children:"opening\u2026"}):Wr?e(t,{wrap:"truncate",children:r(ue,{children:[e(t,{color:"suggestion",children:"Open in a terminal"}),e(t,{dimColor:!0,children:"continue it there"})]})}):wp?e(t,{wrap:"truncate",children:r(ue,{children:[e(t,{color:Ur.color,dimColor:Ur.dim,children:Ur.word}),bs&&e(t,{dimColor:!0,children:bs})]})}):e(t,{dimColor:!0,wrap:"truncate",children:bs}),oo[34]=$o,oo[35]=Ao.detail,oo[36]=To,oo[37]=zn,oo[38]=mo,oo[39]=al,oo[40]=Wr,oo[41]=bs,oo[42]=wp,oo[43]=Ur,oo[44]=bl;else bl=oo[44];let wl;if(oo[45]!==$o||oo[46]!==To||oo[47]!==zn||oo[48]!==mo||oo[49]!==Wr||oo[50]!==sl)wl=sl&&!mo&&!To&&!zn&&!$o&&!Wr?e(o,{flexShrink:0,paddingLeft:1,children:r(t,{dimColor:!0,children:["\xD7",sl]})}):null,oo[45]=$o,oo[46]=To,oo[47]=zn,oo[48]=mo,oo[49]=Wr,oo[50]=sl,oo[51]=wl;else wl=oo[51];let yl;if(oo[52]!==bl||oo[53]!==wl)yl=r(o,{flexGrow:1,width:0,paddingLeft:2,children:[bl,wl]}),oo[52]=bl,oo[53]=wl,oo[54]=yl;else yl=oo[54];const Dp=Ao.artifact>0?e(o,{width:Ao.artifact+2,flexShrink:0,paddingLeft:2,justifyContent:"flex-end",children:ws.length>1?r(t,{color:en?.color,dimColor:!co||!en?.color,children:[ws.length," PRs"]}):ws.length===1?en?.prNumber!==void 0?e(q2,{number:en.prNumber,url:en.row.href,kind:Ar(en.row),color:en.color,dimColor:!co,underline:!1,hidePrefix:!0}):e(t,{color:rl,dimColor:!co,children:"PR"}):en?e(it,{url:en.row.href,children:r(t,{color:"claude",children:[Cp.length>1&&`${Cp.length} `,_l]})}):null}):null,Fp=Ao.age+2;let Sl;if(oo[55]!==yp)Sl=e(t,{dimColor:!0,children:yp}),oo[55]=yp,oo[56]=Sl;else Sl=oo[56];let kl;if(oo[57]!==Fp||oo[58]!==Sl)kl=e(o,{width:Fp,flexShrink:0,paddingLeft:2,justifyContent:"flex-end",children:Sl}),oo[57]=Fp,oo[58]=Sl,oo[59]=kl;else kl=oo[59];let Wb;if(oo[60]!==Pp||oo[61]!==hl||oo[62]!==yl||oo[63]!==Dp||oo[64]!==kl)Wb=r(Pp,{children:[hl,yl,Dp,kl]}),oo[60]=Pp,oo[61]=hl,oo[62]=yl,oo[63]=Dp,oo[64]=kl,oo[65]=Wb;else Wb=oo[65];return Wb}
+
+## 247 UFe-shape sandbox request hits=1
+- #0 @232237873 status:"waiting",waitingFor:t,working:!1};return{status:e.isLoading||e.delegatedActive?"busy":"idle",waitingFor:void 0,working:e.isQueryActive}}function t5e(e){if(e.workerSandboxPrompt)return"sandbox request";if(e.elicitationPrompt)return"input needed";if(e.topDialogWaitingFor!==void 0)return e.topDialogWaitingFor;if(e.pendingWorkerRequest)return"worker request";if(
+
+## 248 UFe-shape sandbox request hits=1
+- #0 @202584310 status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(
+
+## 248 lastMessage: job hits=0
+
+## 248 lastMessage:job hits=0
+
+## 248 waitingFor: job hits=0
+
+## 248 waitingFor:C hits=1
+- #0 @202584167 ion Rse(){return BFe.of(z().host)}function sq(){Rse().acquire()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}function UFe(d){if(d.workerSandboxPrompt)retu
+
+## 248 waitingFor: C hits=0
+
+- " hook · "  248=0  247=0
+- " hook — "  248=0  247=0
+- " hook: "  248=42  247=42
+- "` hook `"  248=0  247=0
+- "schema error"  248=0  247=0
+- "invalid JSON output"  248=2  247=2
+- "invalid hook output"  248=0  247=0
+- "hook printed"  248=0  247=0
+- "prints an invalid"  248=0  247=0

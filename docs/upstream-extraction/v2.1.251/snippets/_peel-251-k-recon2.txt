@@ -1,0 +1,346 @@
+=== DVt / HA forms ===
+"DVt" hits=20
+  @75077469 lastFn=@-1 | .l`..........m.Z..OnDVt:.|{.;.h......h.I".8......}...`.....1...F-14"/.h;.g....F._.oZ..v.R.
+  @88897936 lastFn=@-1 | Q7GPAJtSzVXNUzltYkyLDVt8LkS/gxCP81OCgMNPOsduET/m4xaRhPtthH80 dK2Jp86519efhGSSvpWhrQlTM93uC
+  @101461686 lastFn=@-1 | unk-3zx07dvs.jsCWrmeDVtJveAkH0eYKeJcnKftI0ex1tJftQftrunI1tiunI$eqVLfeKVtoe07b9c169bc909fc5
+  @106796465 lastFn=@-1 | ... Dw. ... YM.I... DVt.... xo.I... rAeI... Nx..... m6. ... Zs.I... YO..... Oo. ... xE.I..
+  @106810741 lastFn=@-1 | jQ. WQ. YQ. $Q. qQ. DVt XQ. QQ. JQ. ZQ. eJ. tJ. nJ. rJ. oJ. iJ. sJ. aJ. lJ. cJ. uJ. dJ. pJ
+  @106824633 lastFn=@-1 | ... Pee.... pf..... DVt.... S3..... Fl..... xo..... Nx..... KO..... m6..... Zs..... YO....
+  @107651769 lastFn=@-1 | p...N...#...i..r\.. DVt.....5..FN...T.. intb....[..z\..V...~\...".....!....F......V.......
+  @116409825 lastFn=@-1 | MEn Dw. ijt Kqt YM. DVt HJn xo. $we Nx. eHe xQt Z_t m6. YO. Oo..w.. xE. her zhn q2t nht ws
+" DVt" hits=2
+  @184277699 lastFn=tsn@184277369 | ile as Iv,lutimes as DVt,realpath as QBe,rename as HA,rm as vBe,stat as ly,unlink as JBe,u
+  @184388483 lastFn=dpe@184388254 | let o=new Date;await DVt(t,o,o).catch((u)=>{n(`relocateSessionTranscript: could not refres
+"DVt=" hits=1
+  @180827777 lastFn=jw@180822483 | d"),reason:$Q()}))),DVt=m(()=>dt([uQ(),pQ(),fQ(),mQ(),gQ(),hQ(),EQ(),SQ(),TQ(),qQ(),bQ(),y
+"DVt =" hits=0
+"var DVt" hits=0
+"let DVt" hits=0
+"const DVt" hits=0
+"async function DVt" hits=0
+"function DVt" hits=0
+"HA=" hits=7
+  @88987874 lastFn=@-1 | 9AzqVN/Ssq+xIvEg37xEHA== -----END CERTIFICATE-----.-----BEGIN CERTIFICATE----- MIIB8jCCAXi
+  @179257309 lastFn=@-1 | =x.str(),bA=x.str(),HA=x.str(),mA=x.str(),dA=x.str(),FA=x.str(),fA=x.str(),KA=x.str(),vA=x
+  @180521159 lastFn=@-1 | "container.runtime",HA="container.image.name",VA="container.image.tag",GA="deployment.envi
+  @182797608 lastFn=@-1 | A_WITH_AES_128_CBC_SHA={id:[0,47],name:"TLS_RSA_WITH_AES_128_CBC_SHA",initSecurityParamete
+  @182798004 lastFn=@-1 | A_WITH_AES_256_CBC_SHA={id:[0,53],name:"TLS_RSA_WITH_AES_256_CBC_SHA",initSecurityParamete
+  @201633658 lastFn=cP@201633174 | 5]!==mP||zg[6]!==Kg)HA=e(o,{flexDirection:"column",marginY:1,children:r(Ei,{color:"subtle"
+  @201633791 lastFn=cP@201633174 | 6]=Kg,zg[7]=HA;else HA=zg[7];return HA}function pP(l,f){let g=q_(hWt(),l);if(g)return e(dP
+"var HA" hits=0
+"let HA" hits=1
+  @201633625 lastFn=cP@201633174 | 4]=$A;else $A=zg[4];let HA;if(zg[5]!==mP||zg[6]!==Kg)HA=e(o,{flexDirection:"column",margin
+"const HA" hits=0
+"async function HA" hits=1
+  @185583190 lastFn=vmr@185582891 | .names);else m4n()}}async function HAr(e){let{messages:t,leafUuids:r,endedSessions:o}=awai
+"{HA as" hits=0
+"HA as " hits=0
+"HA," hits=16
+  @97120223 lastFn=@-1 | .e....... is a git SHA, no manifest version), recording without a version so the loader re
+  @99550112 lastFn=@-1 | mj..D....iY.Commit SHA, branch, or tag. Leave empty to track the default branch. ...h ^.pM
+  @179253703 lastFn=@-1 | RADLE_USER_HOME:()=>HA,GRPC_DEFAULT_SSL_ROOTS_FILE_PATH:()=>LC,HEX_CACERTS_PATH:()=>pC,HIS
+  @180525469 lastFn=@-1 | A,xA,LA,UA,zA,FA,BA,HA,VA,GA,KA,jA,WA,YA,$A,qA,XA,QA,JA,ZA,eb,ab,lb,cb,pb,fb,gb,hb,Eb,Sb,T
+  @184277730 lastFn=tsn@184277369 | th as QBe,rename as HA,rm as vBe,stat as ly,unlink as JBe,utimes as ZBe,writeFile as eHe}f
+  @187767365 lastFn=ssr@187761093 | dir ${en} is a git SHA, no manifest version), recording without a version so the loader re
+  @200403815 lastFn=df@200397781 | ultMessage:"Commit SHA, branch, or tag. Leave empty to track the default branch.",id:"pMkt
+  @205119091 lastFn=y@205106584 | {ANn as EMPTY_TREE_SHA,Mxt as POST_DISABLED_NOTE,Dxt as POST_IGNORED_NOTE,Oxt as checkOver
+
+=== window around dpe HA/DVt ===
+async function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.require("B:/~BUN/root/chunk-kstgrp55.js");if(!r()){let o=new Date;await DVt(t,o,o).catch((u)=>{n(`relocateSessionTranscript: could not refresh the set-aside's mtime at ${t} (it ages from its old clock): ${u}`,{level:"warn"})})}return n(`relocateSessionTranscript: existing destination set aside at ${t}`,{level:"warn"}),t}async function fYt(e,t,r){let o=await e.
+
+=== window around S0e HA restore ===
+{if(Y(fe)){if(x!==void 0)throw await HA(x,y).catch((pe)=>{n(`relocateSessionTranscript: could not restore set-aside destination after ENOENT move: ${pe}`,{level:"warn"})}),fe;n(`relocateSessionTranscript: old file missing: ${fe}`),B=!1}else{if(x!==void 0)await HA(x,y).catch((pe)=>{n(`relocateSessionTranscript: could no
+
+=== search HA(e,t) and utimes-like ===
+"await HA(" hits=7
+  @184387071 lastFn=S0e@184385987 | if(x!==void 0)throw await HA(x,y).catch((pe)=>{n(`relocateSessionTranscript: could not restore set-a
+  @184387295 lastFn=S0e@184385987 | }else{if(x!==void 0)await HA(x,y).catch((pe)=>{n(`relocateSessionTranscript: could not restore set-a
+  @184388318 lastFn=dpe@184388254 | -${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r
+  @184390359 lastFn=u@184390157 | ),ka(y,k.name))}try{await HA(e,t);return}catch(d){let y=v(d);if(y==="EEXIST"||y==="EPERM"||y==="EBUS
+  @184390503 lastFn=u@184390157 | h(()=>{return});try{await HA(e,t)}catch(A){if(k!==void 0)await HA(k,t).catch(()=>{});throw A}return}
+  @184390540 lastFn=u@184390157 | ch(A){if(k!==void 0)await HA(k,t).catch(()=>{});throw A}return}if(y==="EXDEV"){try{await TBe(e,t)}ca
+  @184390793 lastFn=u@184390157 | :!0}).catch(()=>{}),await HA(x,t).catch(()=>{});throw O}}else throw k}await vBe(e,{recursive:!0,forc
+"function HA(e,t)" hits=0
+"async function HA(e" hits=0
+"HA=async" hits=0
+"utimes" hits=128
+  @66952192 lastFn=watch@66951664 | nc, unlinkSync, utimesSync } = @getInternalField(@internalModuleRegistry, 154) || @createInterna
+  @66962367 lastFn=setDestTimestamps@66962280 | Sync(src); return utimesSync(dest, updatedSrcStat.atime, updatedSrcStat.mtime); } function onDir(s
+  @66965467 lastFn=copyLink@66964468 | ymlink, unlink, utimes } = @getInternalField(@internalModuleRegistry, 153) || @createInternalMod
+  @66972140 lastFn=setDestTimestamps@66972045 | stat(src); return utimes(dest, updatedSrcStat.atime, updatedSrcStat.mtime); } function onDir(srcSt
+  @67321495 lastFn=exists@67321020 | e, "ftruncate"), futimes: asyncWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK 
+  @67321517 lastFn=exists@67321020 | imes: asyncWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK !== @undefined ? async
+  @67321527 lastFn=exists@67321020 | cWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK !== @undefined ? asyncWrap(fs.lc
+  @67323653 lastFn=remove@67322153 | nlink, "unlink"), utimes: asyncWrap(fs.utimes, "utimes"), lutimes: asyncWrap(fs.lutimes, "lutime
+  @67323674 lastFn=remove@67322153 | times: asyncWrap(fs.utimes, "utimes"), lutimes: asyncWrap(fs.lutimes, "lutimes"), rm: async func
+  @67323683 lastFn=remove@67322153 | yncWrap(fs.utimes, "utimes"), lutimes: asyncWrap(fs.lutimes, "lutimes"), rm: async function rm(p
+"futimes" hits=35
+  @67321494 lastFn=exists@67321020 | te, "ftruncate"), futimes: asyncWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK
+  @67321516 lastFn=exists@67321020 | times: asyncWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK !== @undefined ? asyn
+  @67321526 lastFn=exists@67321020 | ncWrap(fs.futimes, "futimes"), glob, lchmod: constants.O_SYMLINK !== @undefined ? asyncWrap(fs.l
+  @67325292 lastFn=asyncWrap@67324901 |  ftruncate, futimes, write, writev, close } = exports, isArrayBufferView; c
+  @67329775 lastFn=asyncWrap@67324901 | owEBADFIfNecessary("futimes", fd); try { return this[kRef](), await futimes(fd, atime,
+  @67329837 lastFn=asyncWrap@67324901 | this[kRef](), await futimes(fd, atime, mtime); } finally { this[kUnref](); } 
+  @67463924 lastFn=ftruncate2@67463722 | ack), callback); }, futimes = function futimes2(fd, atime, mtime, callback) { callback = ensureCal
+  @67463943 lastFn=ftruncate2@67463722 |  futimes = function futimes2(fd, atime, mtime, callback) { callback = ensureCallback(callback), fs
+  @67464024 lastFn=futimes2@67463934 | lback(callback), fs.futimes(fd, atime, mtime).then(nullcallback(callback), callback); }, lchmod = co
+  @67471543 lastFn=existsSync2@67471166 | ncateSync.bind(fs), futimesSync = fs.futimesSync.bind(fs), lchmodSync = constants.O_SYMLINK !== @und
+"refresh the set-aside" hits=2
+  @97203609 lastFn=@-1 | anscript: could not refresh the set-aside's mtime at ......U... (it ages from its old clock): .C....
+  @184388547 lastFn=dpe@184388254 | anscript: could not refresh the set-aside's mtime at ${t} (it ages from its old clock): ${u}`,{level
+"isRetentionExemptionDisabled" hits=5
+  @96859045 lastFn=@-1 | structure property 'isRetentionExemptionDisabled' from null or undefined value.=...0.-.relocateSessi
+  @96859184 lastFn=@-1 | aside at .......0...isRetentionExemptionDisabled=.... ..renameWithFallbacks: existing destination sc
+  @101596920 lastFn=@-1 | RetentionCleanupSafeisRetentionExemptionDisabledreapStaleHousekeepingStagingFilesretentionCleanupSki
+  @184388368 lastFn=dpe@184388254 | )return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.require("B:/~BUN/root/chunk-kstgrp55
+  @197234969 lastFn=@-1 | nCleanupSafe,Vjn as isRetentionExemptionDisabled,urn as reapStaleHousekeepingStagingFiles,Cat as ret
+
+=== #33 _ g J near uo ===
+chunk window before uo (imports):
+";import"B:/~BUN/root/chunk-n2fd38kh.js";import"B:/~BUN/root/chunk-1zh6vzg4.js";import"B:/~BUN/root/chunk-00gc8s2j.js";import"B:/~BUN/root/chunk-wvfd6fw2.js";import"B:/~BUN/root/chunk-728661yn.js";import"B:/~BUN/root/chunk-4zbh5vtv.js";import"B:/~BUN/root/chunk-qygwxrxc.js";import"B:/~BUN/root/chunk-ktnbymgr.js";import"B:/~BUN/root/chunk-1xmt29c8.js";import"B:/~BUN/root/chunk-bwfypqg6.js";import"B:/~BUN/root/chunk-31egn0de.js";import"B:/~BUN/root/chunk-7fpqwjvq.js";import{D}from"B:/~BUN/root/chunk-ndv01gk0.js";import{M}from"B:/~BUN/root/chunk-9ank8rah.js";import"B:/~BUN/root/chunk-we6ncc7k.js";import"B:/~BUN/root/chunk-fj0w4gja.js";import{ue}from"B:/~BUN/root/chunk-v4td87fj.js";function Y(e,o){let r=!1,m=Qh(()=>{if(r||Rs()||Fn()||!Yo())return;return r=!0,m(),re(e,o)});return Tt(async()=>m()),m}async function re(e,o){let r=await import("B:/~BUN/root/chunk-e5sy8zs2.js"),m;try{m=await r.sta
+--- switch site ---
+"daemon"){let t=I("tengu_bg_worker_ctty",!0)?await z():await L()?"already":"switched_off";switch(J("info","bg_worker_ctty",{outcome:t}),t){case"acquired":rNt(),_("bg_worker_ctty");break;case"already":rNt();break;case"failed":g("bg_worker_ctty",t);break;case"ffi_unavailable":case"not_a_tty":g("bg_worker_ctty",t);break;case"unsupported":case"switched_off":break}}if(S)Gf(zu(S),"st
+"function _(e)" hits=16
+  @180257523 lastFn=E@180257035 | ,e?"sdk-cli":"cli")}function _(e){let t=e.indexOf("--");return t===-1?e:e.slice(0,t)}function jrr(e)
+  @180263400 lastFn=AJe@180262874 | }`}return"inactive"}function _(e){return e.length<=6?e:`\u2026${e.slice(-6)}`}function VEt(e){return
+  @182407168 lastFn=L@182406985 | h(c);return a}async function _(e){let n=[],o,t=0;try{do{let r=await e.backend.listEntries({namespace
+  @183840819 lastFn=Y4e@183840638 | t="ENOTOWNED";async function _(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n
+  @190352305 lastFn=W@190352096 | s)return t;return e}function _(e){return Object.fromEntries([...e.bySlug.entries()].sort(([,t],[,n])
+  @191391027 lastFn=qjn@191390812 |  a});return o}async function _(e){if(e.type!=="image")return null;try{await V();let t=E(e.id,e.media
+  @193654877 lastFn=srt@193654081 | void 0}}}var Fxt=10;function _(e){return{request_count:e.requestCount,session_count:e.sessionCount,b
+  @194480495 lastFn=bx@194480084 | eturn new a(e,t,r)};function _(e){return _x(e,y,Xe,mr)}function te(e){return{get:function(){var t=th
+  @194703554 lastFn=B@194703457 | l:"warn"}),_("git")}function _(e){return{reason:"probe_failed",diverged:!1,remote:null,failure:e}}fu
+  @197528783 lastFn=P$e@197520202 | t(),1),p=j(cTn(),1);function _(e){return new C.HttpRequest({protocol:e.protocol,hostname:e.hostname,
+  @204226992 lastFn=$On@204225665 | }${d}`),t.join(` `)}function _(e){return`${e>0?"+":""}${e.toFixed(2)}`}function S(e){let t=null;for(
+  @205294067 lastFn=y@205293709 | s|d|day|days)\s*$/i;function _(e){let o=e[1],t=e[2].toLowerCase();if(t.startsWith("s"))return`${o}s`
+"function _(t)" hits=5
+  @181304364 lastFn=P@181304235 | o:"\uFFFD"}return n}function _(t){let n=t;for(let r=0;r<16;r++){if(b(n))return n;let e=P(n);if(e===n
+  @188402729 lastFn=Dwr@188401635 | r(o,u,t.onStatus),i}function _(t){return`#!/bin/sh BIN="$CLAUDE_RUNNER_CLAUDE_BIN" [ -n "$BIN" ] || 
+  @191735345 lastFn=T@191735051 | {start_type:BQe()})}function _(t){return(t||"").trim().split(",").filter(Boolean).map((r)=>r.trim())
+  @205749908 lastFn=F@205749822 | y=!1,t.suppressed=0}function _(t){if(t.retryTimer)clearTimeout(t.retryTimer),t.retryTimer=void 0}fun
+  @209075183 lastFn=P@209075083 | (Object.keys)}async function _(t){try{let e=await O(t,".mcp.json");if(e===null)return[];let s=await 
+"function _(" hits=111
+  @178982346 lastFn=It@178982295 | :(?![\\/])/.test(t)}function _(t,e,r,n,{trustedStart:o=!1,trustedRoot:i=t}={}){let s=i.endsWith(g)?i
+  @179082548 lastFn=gme@179082510 | urn i(we(),"teams")}function _(){return process.env.CLAUDE_CODE_PROJECT_DIR_NAME}var D=/^[A-Za-z0-9_
+  @179133161 lastFn=We@179124171 | =new X(()=>new jlr);function _(){return Pwr.of(G().host)}function oe(e,t){return new Blr({argv:proce
+  @179407606 lastFn=wpe@179407569 | eturn`hook_${n(e)}`}function _(e,u){s("tengu_feature_ok",{feature_name:c(e),...u})}function f(e,u,r)
+  @179553652 lastFn=ne@179551136 | of type ${f.type}`)}function _(e,i,r){if(!r.formattingOptions)return[i];let t=D(e,i),l=i.offset,s=i.
+  @179943884 lastFn=I@179943250 | en+i,e.carryLen=0,i}function _(e,n,t){let r=n.indexOf(t),a=0,i=0,o=-1,c=-1,u=n.indexOf(P);while(u!==
+  @179953353 lastFn=f@179953255 | [o]=void 0;return t}function _(e,n){if(e[n]!==void 0||D()!=="windows")return e[n];for(let[t,o]of Obj
+  @180257523 lastFn=E@180257035 | ,e?"sdk-cli":"cli")}function _(e){let t=e.indexOf("--");return t===-1?e:e.slice(0,t)}function jrr(e)
+  @180263400 lastFn=AJe@180262874 | }`}return"inactive"}function _(e){return e.length<=6?e:`\u2026${e.slice(-6)}`}function VEt(e){return
+  @180421165 lastFn=h@180421116 | id 0||t===e||_(e,t)}function _(e,t){if(!f())return!1;let r=Number(e),i=Number(t);return Number.isFin
+  @181304364 lastFn=P@181304235 | o:"\uFFFD"}return n}function _(t){let n=t;for(let r=0;r<16;r++){if(b(n))return n;let e=P(n);if(e===n
+  @181388588 lastFn=cw@181388440 | he(o),o;return null}function _(){return cw()?.restrictions??null} export{Tve,ZZn,Z_n,$Gt,ebn,eer,ter
+"function g(e,t)" hits=4
+  @180418936 lastFn=GV@180418886 | RM"){return!1}async function g(e,t){let r=await Ure(e);if(r!==void 0)return GYe(t,r)?"same":"other";
+  @192985039 lastFn=Z@192983753 | rn T(i,ee(a,n,e))}};function g(e,t){return{content:[{type:"text",text:e}],isError:!0,...t&&{_meta:t}
+  @197151580 lastFn=y@197149003 | (?:n['\u2019]t)?\b/;function g(e,t){return e.replace(S,(n,u,i,r,s)=>O.has(r)&&!v.test(e.slice(s+n.le
+  @198123047 lastFn=lc@198115133 | this,nr.prototype)}}function g(e,t){return new nr(e,t)}/*! @azure/msal-common v15.13.1 2025-10-29 */
+"function g(e," hits=15
+  @179407748 lastFn=f@179407669 | c(e),error_code:u})}function g(e,u,r){s("tengu_feature_sad",{...r,feature_name:c(e),error_code:u})}a
+  @179737577 lastFn=E@179737148 | e.size,maxBytes:r})}function g(e,t,r){if(r===void 0)return;if(e>r)throw Object.assign(Error("File ex
+  @180280846 lastFn=C@180280487 | `,{level:"error"})}}function g(e,s){return RNe(e,s).token}function RNe(e,s){try{let r=le().readFileS
+  @180418936 lastFn=GV@180418886 | RM"){return!1}async function g(e,t){let r=await Ure(e);if(r!==void 0)return GYe(t,r)?"same":"other";
+  @181433355 lastFn=k@181433243 | isableKey]!==void 0}function g(e,t,n,o){if(n.some((l)=>l?.[o.enableKey]===!1))e.push({layer:t,via:"e
+  @181827278 lastFn=F@181827001 | rn e.src.slice(l,o)}function g(e,L,t){return u(e,L,t.start,t.end,[])}function Fe(e){let L=[];m(e.L);
+  @182466302 lastFn=ug@182466184 | ise.resolve()}async function g(e,o){let r=await b(e);try{process.kill(-e,o)}catch(t){try{process.kil
+  @191391341 lastFn=_@191391021 | image: ${t}`),null}}function g(e,t,o){if(e.get(t)===o)return e;let r=new Map(e);if(!r.has(t))while(r
+  @192985039 lastFn=Z@192983753 | rn T(i,ee(a,n,e))}};function g(e,t){return{content:[{type:"text",text:e}],isError:!0,...t&&{_meta:t}
+  @193641133 lastFn=Dje@193638924 | 34,hn=92,F=48,ce=57;function g(e,t,o,s){let r=e.subarray(o,s).indexOf(t);return r<0?-1:o+r}function 
+  @194656824 lastFn=_9@194655383 | sion_invalid";async function g(e,i){return(await Tn().readAsync(i))?.coworkRemoteDevice?.[e]}async f
+  @195510055 lastFn=u@195499707 | nceMetadata"),a(e)};function g(e,o){let r=v(e),n,a,t,d=async(s)=>{if(s?.forceRefresh)return await r(
+"function J(e,t,r)" hits=1
+  @183504031 lastFn=z@183503833 | _length:r.length}})}function J(e,t,r){if(!$b()||!ZOe())return;let{content:s,truncated:o}=Nb(`[TOOL R
+"function J(" hits=89
+  @179120326 lastFn=SS@179112876 | ence:"high"}],Nt=64;function J(e,t){let r=/-----BEGIN[ A-Z0-9_-]{0,100}?PRIVATE KEY(?: BLOCK)?-----/
+  @179542231 lastFn=H@179542196 | eturn e===32||e===9}function J(e){return e===10||e===13}function x(e){return e>=48&&e<=57}var K;(fun
+  @179564419 lastFn=V@179564204 | atch(e){return!1}});function J(e){if(V(e)===!1)return!1;let t=e.constructor;if(t===void 0)return!0;l
+  @179913092 lastFn=M@179913056 | urn $e.of(G().host)}function J(e){return H(e)}function mar(e,t,r,i){M().record(e,t,r,i)}function T(e
+  @179930730 lastFn=fCn@179930659 | slice(n+1):""}async function J(e){let{backend:n,key:t}=e;try{let r=await n.read([{key:t,offset:0,len
+  @179949342 lastFn=c@179949307 | turn f.of(G().host)}function J(n,t,i){let r=m();if(!r)return;let o;try{o=e(n,t,l(i))}catch{o=e(n,t,{
+  @179971011 lastFn=q@179970876 | [2].toLowerCase()}`}function J(e,r){if(r===void 0)return!1;let t=e.replace(/\\/g,"/").toLowerCase();
+  @180477397 lastFn=Z@180477311 | Uint8Array(o)}async function J(e){let t=[],o=e.getReader(),r=!1,s=0;while(!r){let{done:f,value:u}=aw
+  @181629203 lastFn=Z@181628730 | ailed`),null}}async function J(e,t){let r={namespace:"task",listId:SE(t)},c=[],o;try{o=await Ao((s)=
+  @181689542 lastFn=tV@181689438 | &e.value===o.value)}function J(){let e=Je(),o=D({cli:{effort:void 0},env:process.env,settings:e});if
+  @181706171 lastFn=d3@181706084 | rn Le().includes(e)}function J(){return I("tengu_saffron_picker_dim",!1)}var xe=m(()=>E.object({subl
+  @181740233 lastFn=cZn@181739747 | ed",{enabled:e}),!0}function J(){k().clearGrant()}function A(e,t){try{e.emit()}catch(r){n(`org-memor
+"zy().markOwnsControllingTerminal" hits=1
+  @184311066 lastFn=rNt@184311051 | ed()}function rNt(){zy().markOwnsControllingTerminal()}function Oin(e){zy().markStartupActionStarted
+"function zy(" hits=8
+  @182925755 lastFn=kP@182925644 | ==void 0?t:e.file})}function zy(e,t){if(e.type==ya)return!0;return yP==xi("messageEncoding",{proto:e
+  @184310921 lastFn=Nde@184310766 | =new X(()=>new ozn);function zy(){return nNt.of(G().host)}function Lin(e){zy().install(e)}function Z
+  @189634662 lastFn=ld@189634165 | t=u,t.damage=void 0}function zy(t,o,u,c){let{charPool:m,hyperlinkPool:p}=t,S=m!==o,E=p!==u;if(!S&&!E
+  @189814478 lastFn=kae@189814407 | `;default:return t}}function zy(t){if(t.startsWith("!"))return"bash";return"prompt"}function MR(t){i
+  @191595994 lastFn=Wy@191595830 | t:return"cli_flag"}}function zy(){switch(F6().attribution){case"org":return"org_default";case"enforc
+  @198231404 lastFn=$y@198228873 | zn)))ni(i);return i}function zy(e,t,r,n){let o=Et(t,r,n);return D.appendQueryString(e.authorizationE
+  @200099691 lastFn=CD@200098880 | t=LD;var ou=MD(X());function zy(e,t,n,i){let r=Math.abs(e),o=r%10,s=r%100;if(s>=11&&s<=19)return i;i
+  @201865584 lastFn=Vy@201865232 | ;return!m||l.has(m)}function zy(i,l){if(i.message!==l.message)return!1;if(i.screen!==l.screen)return
+
+=== last function _( before uo ===
+last function _( before uo: 204226992
+function _(e){return`${e>0?"+":""}${e.toFixed(2)}`}function S(e){let t=null;for(let n of e.runs){for(let s of n.graders)if(!s.passed&&(!t||s.weight>t.weight))t=s;if(n.error)return An(n.error)}if(t!==n
+extract @204226992 miss=false len=51 sha=11e51238811fa34c
+function _(e){return`${e>0?"+":""}${e.toFixed(2)}`}
+---
+
+=== last function g( before uo ===
+function g( in last 200k before uo: 0 last=undefined
+
+=== last function J( before uo ===
+function J( in last 200k before uo: 0 last=undefined
+
+=== #44 TG call sites ===
+"TG(\"/bug\")" hits=0
+"TG('/bug')" hits=0
+"TG(\"/share\")" hits=0
+"TG(\"/feedback\")" hits=0
+"function gRt" hits=1
+  @210227265 lastFn=qe@210227142 | dFileState,p)}async function gRt(m,s,f,p="/feedback"){let v=f?.trim()==="public"?"":f||"";return qe(m,s,v,p)}f
+"async function gRt" hits=1
+  @210227259 lastFn=qe@210227142 | ,s.readFileState,p)}async function gRt(m,s,f,p="/feedback"){let v=f?.trim()==="public"?"":f||"";return qe(m,s,
+"function TG(" hits=2
+  @182281410 lastFn=rt@182280170 | )O.abort();return H}function TG(e="/feedback"){if(a.DISABLE_FEEDBACK_COMMAND)return`${e} has been disabled via
+  @202993346 lastFn=X1e@202991096 | nabled","prStatus"];function TG(b){let R=b?.refreshInterval;return R===void 0?null:Math.max(1,R)*1000}function
+"TG()" hits=3
+  @182281830 lastFn=DT@182281809 | unction DT(){return TG()===null}function Dte(e){if(_h(e,"fable_5_mitigations")||e==="claude-mythos-5")return!0
+  @186530888 lastFn=uln@186530870 | "}function uln(){if(TG()!==null)return!1;if(Nrr())return!1;if(a0())return!1;if(Ne()!=="firstParty")return!1;le
+  @202563324 lastFn=gge@202560727 | rn{success:!1,error:TG()??"Feedback is disabled by your organization's policy."};return{success:!1,error:`Coul
+"name:\"bug\"" hits=1
+  @187510911 lastFn=gOt@187510157 | "],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",i
+"name: \"bug\"" hits=0
+"\"bug\"" hits=9
+  @84723684 lastFn=@-1 | ously fall into the "bug" or "feature request" category, then they are welcome in the Discussions section of t
+  @180911600 lastFn=@-1 | t."),draft_type:ie(["bug","idea","missing_capability"]),title:i().describe("Sanitized one-line summary from th
+  @181012620 lastFn=@-1 | w form)."),type:ie(["bug","idea","missing_capability"]).optional(),title:i().optional(),area:i().optional(),at
+  @186521768 lastFn=Ebe@186521710 | lice(-w$n)}var eft=["bug","idea","missing_capability"],C$n=["tool_error","user_frustration","missing_capabilit
+  @187510916 lastFn=gOt@187510157 | pe:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",immedi
+  @203105011 lastFn=Wt@203104871 | d",{type:c(j?.type??"bug"),via:c(No)});Ie.current=!1,Me("idle"),$e(null),dln()}function co(){if(Wt("dismiss"),
+  @203106044 lastFn=uo@203105591 | d",{type:c(j?.type??"bug"),success:wi(Ro.success?1:0)}),qe.current!==No)return;if(!Ro.success){Ie.current=!1,$
+  @210198375 lastFn=@-1 | 7fj.js";F();var Te=["bug","idea","missing_capability"],We={bug:"bug",idea:"idea",missing_capability:"missing c
+  @210198418 lastFn=@-1 | apability"],We={bug:"bug",idea:"idea",missing_capability:"missing capability"},ze=[void 0,...Qqe],Qe=[void 0,.
+
+=== #34 other null-byte paths ===
+"includes(\"\\x00\")" hits=64
+  @68163864 lastFn=parseOptions@68161857 | }`; if (key.includes("\x00") || value.includes("\x00")) throw @makeErrorWithCode(1
+  @68163890 lastFn=parseOptions@68161857 | es("\x00") || value.includes("\x00")) throw @makeErrorWithCode(113, `options.${key}`, quer
+  @68167117 lastFn=parseOptions@68161857 | }`; if (key.includes("\x00") || value.includes("\x00")) throw @makeErrorWithCode(1
+  @68167143 lastFn=parseOptions@68161857 | es("\x00") || value.includes("\x00")) throw @makeErrorWithCode(113, `options.connection.${
+  @68180890 lastFn=onRejectPostgresQuery@68179496 | (str) { if (str.includes("\x00")) throw @makeErrorWithCode(113, "name", str, "must not con
+  @68194762 lastFn=onRejectMySQLQuery@68193320 | (str) { if (str.includes("\x00")) throw @makeErrorWithCode(113, "name", str, "must not con
+  @68219865 lastFn=parseSQLQuery@68212825 | (str) { if (str.includes("\x00")) throw @makeErrorWithCode(113, "name", str, "must not con
+  @68230230 lastFn=validateChannel@68230030 | "); if (channel.includes("\x00")) throw @makeErrorWithCode(113, "channel", channel, "must 
+"includes(\"\\0\")" hits=0
+"includes(\"\u0000\")" hits=0
+"addDirectories" hits=37
+  @92455692 lastFn=@-1 | de-folder.......r&..addDirectories........6.yes-session.......$.directories.C.....v.Cannot destructu
+  @97903792 lastFn=@-1 | pe-invalid..6...5...addDirectories whose directories field is not an array../...F...addDirectories c
+  @97903856 lastFn=@-1 | t an array../...F...addDirectories carries a non-string directory: ./....Zv.addDirectories carries a
+  @97903912 lastFn=@-1 | directory: ./....Zv.addDirectories carries a trim-empty directory: .;...M1..addDirectories carries a
+  @97903968 lastFn=@-1 | directory: .;...M1..addDirectories carries a directory containing a null byte: .9....G..removeDirect
+  @180811960 lastFn=sSt@180803307 | n:Pr()}),p({type:N("addDirectories"),directories:R(i()),destination:Pr()}),p({type:N("removeDirector
+  @182108644 lastFn=lr@182107056 | on:o,rules:k}}}case"addDirectories":{let u=e.directories;if(!Array.isArray(u))return{action:"drop",r
+  @182108731 lastFn=lr@182107056 | tion:"drop",reason:"addDirectories whose directories field is not an array"};let d=[...u];for(let b 
+"function gbe(" hits=1
+  @186039858 lastFn=mbe@186039090 | ss",absolutePath:r}}function gbe(e){switch(e.resultType){case"emptyPath":return"Please provide a dir
+"async function gbe(" hits=0
+"alreadyInWorkspace" hits=0
+"validateDirectoryForWorkspace" hits=4
+  @96992500 lastFn=@-1 | s null bytes/....cX.validateDirectoryForWorkspace: expandPath threw.4....=..validateDirectoryForWork
+  @96992556 lastFn=@-1 | dPath threw.4....=..validateDirectoryForWorkspace: unexpected stat errno....oh..preset:.$.......teng
+  @186039237 lastFn=mbe@186039090 | es");if(!y)h(Error("validateDirectoryForWorkspace: expandPath threw"));return{resultType:"invalidPat
+  @186039501 lastFn=mbe@186039090 | bject.assign(Error("validateDirectoryForWorkspace: unexpected stat errno"),{code:v(d)}));return{resu
+
+=== #51 Ld kr ===
+"function Ld(" hits=9
+  @183321004 lastFn=Pd@183320965 | n wr?.httpProxyPort}function Ld(){return wr?.socksProxyPort}function $g(){return wr?.linuxBridge?.ht
+  @185963190 lastFn=y@185962944 | n{onData:y,flush:d}}function Ld(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type==="in_pr
+  @189724940 lastFn=$v@189724682 | .styleId))}return!0}function Ld(t,o){let u,c=bGe();return(m)=>{let{frontFrame:p,backFrame:S,isTTY:E,
+  @191587935 lastFn=Fd@191587600 | (N){P={...P,...N}}}}function Ld(b,P,E){try{if(!eN()||!Xp())return null;if(cre(b))return null;let x=Z
+  @194972434 lastFn=Nd@194972175 | atch(()=>{})}}async function Ld(e){let t=await yd(e).catch(()=>[]),r=Date.now()-Cd;await Promise.all
+  @195314316 lastFn=Md@195314056 | File:Nd}=Yt();async function Ld(e,t,r={}){let n=Rd(t,r);await Nd(e,n,r)}Qs.exports=Ld});var ra=b(fun
+  @200305108 lastFn=Fu@200305019 | ()===""?void 0:t,e)}function Ld(e,t,n,i){return(Array.isArray(e)?e:[]).filter((o)=>!t(o)).slice(0,5)
+  @204397701 lastFn=Nd@204396202 | }return null}}async function Ld(e,t){let r=Array.isArray(e.mcp_servers)?e.mcp_servers:[];for(let u o
+  @209098201 lastFn=ba@209097975 | ce.repo;return null}function Ld(a,b){let S=[{label:"Install for you (user scope)",action:"install-us
+"function kr(" hits=22
+  @181915038 lastFn=xr@181915004 | return ne(qi)}async function kr(e,t,r,o){await Ir(e,{fetchedAt:Date.now(),account:t,stores:r.stores,
+  @185970495 lastFn=DAn@185969747 | taskEvicted.emit(d)}function kr(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type==="local
+  @189384578 lastFn=xr@189384473 | >Rr?"":`\x1B[${e}m`}function kr(t,e){if(se(t)<=e)return[t];let o=[],a="",u=0,i=new Map;for(let p of 
+  @190799719 lastFn=_Jt@190799401 | ll,recommended:Pe}}}function kr(){switch(a.terminal){case"vscode":return"VSCode";case"cursor":return
+  @191074616 lastFn=SZt@191074513 | =null,Sr=!1;ct(chn);function kr(e,t,r,s,o,c,u,d,b,p){let l=["publish","list","read"];if(u)l.push("li
+  @192894715 lastFn=Te@192893147 | E("Clicked.")}async function kr(e,n,t,o){let r=G(n,"text");if(r instanceof Error)return p(r.message,
+  @194590061 lastFn=$t@194589355 | }if(n){h=S;return}}}function kr(n,i){D(n,i),l=Zt,Pe=h,h=Ur}function to(n,i){D(n,i),l=at,Pe=h,h=Ur}fu
+  @195610495 lastFn=Pr@195610355 | &l!==":@")return l}}function kr(n,i,u){let l="";if(n&&!i.ignoreAttributes)for(let p in n){if(!Object
+  @196126766 lastFn=Je@196126719 | f e==="string"?e:""}function kr(e,t=1e6){return typeof e==="number"&&Number.isFinite(e)?Math.min(Mat
+  @198702832 lastFn=jr@198702641 | er",jr);return this}function kr(e){if(!l.defined(e))this.options.erodeWidth=1;else if(l.integer(e)&&
+"Ld(r)?r" hits=1
+  @187092620 lastFn=dKe@187092580 | t r=e?t[e]:void 0,o=Ld(r)?r:void 0,u=!o&&kr(r)?r:void 0;return{teammate:o,localAgent:u}}function Iln
+"kr(r)?r" hits=1
+  @187092641 lastFn=dKe@187092580 | d(r)?r:void 0,u=!o&&kr(r)?r:void 0;return{teammate:o,localAgent:u}}function Iln({viewingAgentTaskId:
+
+=== full extracts of known ===
+
+######## dpe @184388254
+extract @184388254 miss=false len=480 sha=2c2127c68e29d31d
+async function dpe(e){let t=`${e}.superseded-${Date.now()}`;try{await HA(e,t)}catch(o){if(Y(o))return;throw o}let{isRetentionExemptionDisabled:r}=import.meta.require("B:/~BUN/root/chunk-kstgrp55.js");if(!r()){let o=new Date;await DVt(t,o,o).catch((u)=>{n(`relocateSessionTranscript: could not refresh the set-aside's mtime at ${t} (it ages from its old clock): ${u}`,{level:"warn"})})}return n(`relocateSessionTranscript: existing destination set aside at ${t}`,{level:"warn"}),t}
+---
+
+######## $Y @187729104
+extract @187729104 miss=false len=315 sha=4c4768ec1baaba7f
+function $Y(e,t){if(!goe.has(e.toLowerCase()))return null;if(typeof t.installLocation==="string"&&zS(t.installLocation))return null;let r=t.source;if(typeof r!=="object"||r===null)return`The name '${e}' is reserved for official Anthropic marketplaces and its registered source is malformed.`;return fke(e,t.source)}
+---
+
+######## rNt @184311051
+extract @184311051 miss=false len=50 sha=cbfa59a5189ab8a3
+function rNt(){zy().markOwnsControllingTerminal()}
+---
+
+######## ZW @199184593
+extract @199184593 miss=false len=727 sha=5e7f25e03173395a
+function ZW(r){let s=xt(),[P,a]=u(null),n=k(null),l=k(null),o=k(null),p=k(0),f=k(!0),C=B(()=>{p.current+=1,o.current?.(),o.current=null,l.current=null,n.current?.(),n.current=null,a(null)},[]);A(()=>{if(C(),r!==null)Xht()},[r,C]),A(()=>(f.current=!0,()=>{f.current=!1,o.current?.(),o.current=null,l.current=null,n.current?.(),n.current=null}),[]);let v=B((m)=>{if(l.current===m)return;l.current=m,o.current?.(),o.current=s.setTimeout(()=>{o.current=null,l.current=null},g);let b=zue(),R=p.current;yy(m).then((h)=>{if(!f.current||R!==p.current)return;if(h)process.stdout.write(h);if(n.current?.(),n.current=null,a(b),b==="native")n.current=s.setTimeout(()=>{n.current=null,a(null)},x)})},[s]);return{copiedVia:P,copy:v,reset:C}}
+---
+
+######## jJn @183518215
+extract @183518215 miss=false len=124 sha=70c605e54f801cec
+function jJn(r){for(let i of r)if(i.endCode===h)return s_.rendersItalicAsStandout()?r.filter((e)=>e.endCode!==h):r;return r}
+---
+
+######## awn @181264770
+extract @181264770 miss=false len=232 sha=4493deaecb3786ee
+function awn(){if(!wl())return{subscriptionType:null,rateLimitTier:null};let e=Xt();if(!e||!Yp())return{subscriptionType:null,rateLimitTier:null};return{subscriptionType:e.subscriptionType??null,rateLimitTier:e.rateLimitTier??null}}
+---
+
+######## Yp @181264685
+extract @181264685 miss=false len=85 sha=00efbf346b217ad6
+function Yp(){if(ko()||a.CLAUDE_CODE_OAUTH_TOKEN||Cc())return!1;return!(D7()&&!M7())}
+---
+
+######## oc-bridge @179077773
+extract @179077773 miss=false len=64 sha=aecdf37202398f48
+function oc(){return n().surfaceCapabilities.replBridgeActive()}
+---
+
+######## dKe @187092580
+extract @187092580 miss=false len=108 sha=329d1655410060a4
+function dKe(e,t){let r=e?t[e]:void 0,o=Ld(r)?r:void 0,u=!o&&kr(r)?r:void 0;return{teammate:o,localAgent:u}}
+---
+
+######## lr @182107056
+extract @182107056 miss=false len=2693 sha=d1b12448fc337888
+function lr(e){if(e===null||typeof e!=="object")return{action:"drop",reason:`non-object permission update: ${ke(e)}`};let{type:t,destination:r}=e;if(typeof r!=="string"||!ml.has(r))return{action:"drop",reason:`${typeof t==="string"?ke(t):"permission update"} with out-of-enum destination: ${ke(r)}`};let o=r;switch(t){case"addRules":case"replaceRules":case"removeRules":{let u=e.behavior;if(typeof u!=="string"||!Object.hasOwn(tn,u))return{action:"drop",reason:`${t} with out-of-enum behavior: ${ke(u)}`};let d=u,b=e.rules;if(!Array.isArray(b))return{action:"drop",reason:`${t} (${d}) whose rules field is not an array`};let y=[...b],x=y.map((P)=>{if(P===null||typeof P!=="object")return P;let{toolName:A,ruleContent:O}=P;return O===void 0?{toolName:A}:{toolName:A,ruleContent:O}});if(!(t==="removeRules"?d==="allow":d==="deny"||d==="ask")){let P=[];for(let A of x){if(!ar(A))return{action:"drop",reason:`widening ${t} (${d}) carries a shape-invalid rule: ${ke(A)}`};if(!o_t(A)){let O=t==="removeRules"?null:ul(A);if(O!==null){P.push(O);continue}return{action:"drop",reason:`widening ${t} (${d}) carries a rule that does not survive the store round-trip: ${ke(A)}`}}P.push(A)}return{action:"apply",update:{type:t,behavior:d,destination:o,rules:P}}}let k=[];for(let P of x){if(!ar(P))continue;let A=Ur(eo(P));if(A.toolName!==P.toolName||A.ruleContent!==P.ruleContent)k.push(A);else k.push(P)}if(k.length===0&&y.length>0)return{action:"drop",reason:`restrictive ${t} (${d}) in which every rule is shape-invalid`};return{action:"apply",update:{type:t,behavior:d,destination:o,rules:k}}}case"addDirectories":{let u=e.directories;if(!Array.isArray(u))return{action:"drop",reason:"addDirectories whose directories field is not an array"};let d=[...u];for(let b of d){if(typeof b!=="string")return{action:"drop",reason:`addDirectories carries a non-string directory: ${ke(b)}`};if(b.trim()==="")return{action:"drop",reason:`addDirectories carries a trim-empty directory: ${ke(b)}`};if(b.includes("\x00"))return{action:"drop",reason:`addDirectories carries a directory containing a null byte: ${ke(b)}`}}return{action:"apply",update:{type:t,destination:o,directories:d}}}case"removeDirectories":{let u=e.directories;if(!Array.isArray(u))return{action:"drop",reason:"removeDirectories whose directories field is not an array"};let d=[...u].filter((b)=>typeof b==="string");return{action:"apply",update:{type:t,destination:o,directories:d}}}case"setMode":{let u=e.mode;if(typeof u!=="string")return{action:"drop",reason:`setMode with non-string mode: ${ke(u)}`};return{action:"apply",update:{type:t,destination:o,mode:u}}}default:return{action:"drop",reason:`unknown permission update type: ${ke(t)}`}}}
+---
+
+######## mbe @186039090
+extract @186039090 miss=false len=768 sha=235235a336fa2520
+async function mbe(e,t){if(!e)return{resultType:"emptyPath"};let r;try{r=Lat(gt(e))}catch(d){let y=zk(d,"Path contains null bytes");if(!y)h(Error("validateDirectoryForWorkspace: expandPath threw"));return{resultType:"invalidPath",directoryPath:e,containsNullByte:y}}try{if(!(await mPn(r)).isDirectory())return{resultType:"notADirectory",directoryPath:e,absolutePath:r}}catch(d){if(!Rt(d))h(Object.assign(Error("validateDirectoryForWorkspace: unexpected stat errno"),{code:v(d)}));return{resultType:"pathNotFound",directoryPath:e,absolutePath:r}}let o=EE(t),u=be();for(let d of o)if(np(r,d,{caseFold:!1}))return{resultType:"alreadyInWorkingDirectory",directoryPath:e,workingDir:d,isExactMatch:Lat(d)===r,isOriginalCwd:d===u};return{resultType:"success",absolutePath:r}}
+---
+
+######## gbe @186039858
+extract @186039858 miss=false len=1145 sha=01cfd9ea9537843e
+function gbe(e){switch(e.resultType){case"emptyPath":return"Please provide a directory path.";case"invalidPath":{let t=ae.bold(S(e.directoryPath));return e.containsNullByte?`Path ${t} contains a null character, so it can't be used as a working directory. Remove the null character from the path or from the settings entry that lists it.`:`Path ${t} couldn't be resolved, so it can't be used as a working directory. Check the path or the settings entry that lists it.`}case"pathNotFound":return`Path ${ae.bold(e.absolutePath)} was not found.`;case"notADirectory":{let t=fPn(e.absolutePath);return`${ae.bold(e.directoryPath)} is not a directory. Did you mean to add the parent directory ${ae.bold(t)}?`}case"alreadyInWorkingDirectory":{let t=ae.bold(e.directoryPath);if(e.isExactMatch)return e.isOriginalCwd?`${t} is already the current working directory.`:`${t} is already added as a working directory.`;let r=e.isOriginalCwd?"the current working directory":"the additional working directory";return`${t} is already accessible within ${r} ${ae.bold(e.workingDir)}.`}case"success":return`Added ${ae.bold(e.absolutePath)} as a working directory.`}}
+---
+
+######## zk @178831583
+extract @178831583 miss=false len=58 sha=e762e225f805e0f2
+function zk(n,e){return n instanceof Error&&n.message===e}
+---

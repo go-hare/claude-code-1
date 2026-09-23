@@ -1,0 +1,52 @@
+# gold-248-_Ke-Gqe-parent
+
+## _Ke @179162866
+sha=ef03c9b1fcd4958e len=314
+async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}
+
+## Gqe @179527369
+sha=1dcf73a10dc5265c len=150
+async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;try{return await z(t,e)}finally{i()}}
+
+## z @179527519
+sha=052ebd6db660008d len=297
+async function z(t,e){if(await e.primer?.whenIdle(),e.primer!==void 0)await L(t,e);let s=e.primer===void 0?[]:(await Promise.all([...kur(t).map((i)=>Dgn(e,i)),N(t,e)])).flat().filter((i)=>i!==void 0);if(Yl(s.length>0?{userLayer:"retain"}:void 0),s.length===0)return;return()=>{for(let i of s)i()}}
+
+## $pn @179527115
+sha=6e91860bc34fc69a len=254
+async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}
+
+## class Ut{ near-prime hits=1
+@179163791 sha=960bdef83d78a58e len=3131
+class Ut{storageV5;content=null;attestation=void 0;ready=!1;priming=Promise.resolve();stoodDown=!1;configHome=ge();subscriptions=[];cache=vt(Pe,"cache file");sidecar=vt(Ne,"helper consent sidecar");work=Promise.resolve(!0);steps=0;lastCacheStep=0;constructor(e){this.storageV5=e}onEvent(e){if(this.stoodDown)return;if(!e.ok){this.standDown(`watch ended: ${Ge(e.error)}`);return}let t=this.heldOf(e.value.key);if(t===void 0)return;if(e.value.kind==="snapshot"&&t.begun)return;this.take(t,po(e.value))}settled(){return this.work.then((e)=>e&&!this.stoodDown)}readUnobserved(){for(let e of[this.cache,this.sidecar])if(!e.observed)this.take(e);return this.settled()}written(e,t){let o=this.stoodDown?void 0:this.heldOf(e);if(o===void 0)return;if(o.begun=!0,o.generation++,o===this.cache)this.sidecar.generation++;if(this.advance(o),t!==null&&Buffer.byteLength(t,"utf8")>ce){this.standDown(`oversize ${o.label}`);return}this.install(o,t),this.follow(o,t===null)}heldOf(e){let t=Pu(e);return t===this.cache.id?this.cache:t===this.sidecar.id?this.sidecar:void 0}take(e,t){if(e.begun=!0,t!==void 0){e.pendingRead=void 0;let o=e.generation;this.queue(e,()=>e.generation===o?this.fill(e,t):!this.stoodDown)}return this.follow(e,t===void 0)}follow(e,t){if(t&&e.pendingRead===void 0){let o=this.queue(e,()=>{if(e.pendingRead===o)e.pendingRead=void 0;return this.read(e)});e.pendingRead=o}if(e===this.cache&&(this.sidecar.pendingRead??0)<this.lastCacheStep)return this.sidecar.pendingRead=void 0,this.take(this.sidecar);return this.work}queue(e,t){let o=this.advance(e);return this.work=this.work.then(t).catch((s)=>(this.standDown(`refresh failed: ${l(s)}`),!1)),o}advance(e){let t=++this.steps;if(e===this.cache)this.lastCacheStep=t;return t}async read(e){if(this.stoodDown)return!1;let t=e.generation;try{let o=await this.storageV5.read([{key:e.key,offset:0,length:ce+1}]);if(e.generation!==t){if(!o.ok)n(`Remote settings: a superseded read of the ${e.label} failed (${Ge(o.error)}); ignored`);return!this.stoodDown}if(!o.ok){if(Hc(o.error)==="ELOOP")return n(`Remote settings: the ${e.label} is a symlink; not read with the storage flag on (strict rule for files only Claude Code writes)`,{level:"warn"}),this.fill(e,null);return this.standDown(`read failed: ${Ge(o.error)}`),!1}let s=o.value.items[0];if(s.found&&s.totalBytes>ce)return this.standDown(`oversize ${e.label}`),!1;return this.fill(e,s.found?s.value:null)}catch(o){return this.standDown(`read failed: ${l(o)}`),!1}}fill(e,t){if(this.stoodDown)return!1;if(t!==null&&t.byteLength>ce)return this.standDown(`oversize ${e.label}`),!1;return this.install(e,t===null?null:$ue(t)),!0}install(e,t){if(e===this.cache){if(e.observed&&this.ready)n(`Remote settings: storage view refreshed (${zt(t)})`);this.content=t,this.attestation=void 0}else this.attestation=t?.trim()||void 0;e.observed=!0}standDown(e,t="debug"){let o=w();if(o.backendView===this)o.backendView=void 0;if(this.stoodDown)return;this.stoodDown=!0,this.content=null,this.attestation=void 0;for(let s of this.subscriptions.splice(0))Ht(s);n(`Remote settings: storage view stood down (${e}); disk probe serves`,{level:t})}}
+
+## function uo( near-prime hits=2
+@179163186 sha=738fcac5dfee6899 len=605
+function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subscriptions.push(r.value)}if(!await e.settled()||!await e.readUnobserved())return;if(e.stoodDown)return;e.ready=!0,n(`Remote settings: primed from storage (${zt(e.content)}; helper consent ${e.attestation===void 0?"not attested":"attested"}${o.sessionCache!==null?"; cache already loaded, serving later loads":""})`)}catch(s){e.standDown(`prime failed: ${l(s)}`)}}
+
+@179433004 sha=874c8114e0b64e7d len=149
+function uo(e){if(!e||typeof e!=="object")return;let t=e.source;if(!t||typeof t!=="object")return;let r=t.source;return typeof r==="string"?r:void 0}
+
+## async function uo( near-prime hits=1
+@179163180 sha=5def7e8f177fc77d len=611
+async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subscriptions.push(r.value)}if(!await e.settled()||!await e.readUnobserved())return;if(e.stoodDown)return;e.ready=!0,n(`Remote settings: primed from storage (${zt(e.content)}; helper consent ${e.attestation===void 0?"not attested":"attested"}${o.sessionCache!==null?"; cache already loaded, serving later loads":""})`)}catch(s){e.standDown(`prime failed: ${l(s)}`)}}
+
+## backendView near-prime hits=8
+@179159818 licySettingsNotified=!1;verifiedPayload=null;unverifiedView=null;consentedPayload=null;resetEpoch=0;backendView=void 0;replaceSessionCache(e,t){if(this.sessionCache=e,t?.verified)this.verifiedPayload=e}seedFromDisk(e){this.sessionCache=e;let t=mzt(e);if(t===void 0||t===ao())this.consentedPayload??=e}markConsented(e){this.consentedPayload=e}markPolicySettingsNotified(){this.policySettingsNotified=!0}recordEligibility(e,t){if(this.eligible=e,t.memoize)this.eligibilityMemo=e,this.ineligibleReason=e?void 0:t.ineligibleReason}resetListener=null;registerResetListener(e){if(this.resetListener!==null)
+
+@179162591 function lo(){let e=Ie();if(e!==void 0)return e.content;return a0(awe(),Mt)}function Ie(){let e=w().backendView;if(!D()||e===void 0||!e.ready||e.stoodDown||Yv()!==void 0)return;if(!Dde(e.configHome)){e.standDown("config home changed");return}return e}var Pe=Se.state("remote-settings"),Ne=Se.state(gKe),co=2000;function fue(e,t){w().backendView?.written(e==="cache"?Pe:Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk p
+
+@179162824 );return}return e}var Pe=Se.state("remote-settings"),Ne=Se.state(gKe),co=2000;function fue(e,t){w().backendView?.written(e==="cache"?Pe:Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r
+
+@179162930 dView?.written(e==="cache"?Pe:Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subsc
+
+@179162960 Ne,t)}async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subscriptions.push(r.value)}if(!awa
+
+@179163136 ped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}async function uo(e,t,o){try{for(let s of[Ne,Pe]){let r=await t.subscribe({target:"key",key:s},(p)=>e.onEvent(p),{maxObservationLagMs:co});if(!r.ok){e.standDown(`watch refused: ${Ge(r.error)}`,"warn");return}if(e.stoodDown){Ht(r.value);return}e.subscriptions.push(r.value)}if(!await e.settled()||!await e.readUnobserved())return;if(e.stoodDown)return;e.ready=!0,n(`Remote settings: primed from storage (${zt(e.content)}; helper consent ${e.attestation===vo
+
+## function Yv( near-prime hits=1
+@179161925 sha=ad38cf772cfcd9ef len=21
+function Yv(){return}
+
+## Gqe( callers near prime 1
+@179527384 rimer=new SKn(t,e),await e.primer.whenIdle()}async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;try{return await z(t,e

@@ -63,3 +63,21 @@ describe('planHarborWillowAutoFallback', () => {
     ).toEqual({ mode: 'default', fromAutoFallback: false })
   })
 })
+
+describe('kgn Uht wiring (251 #12)', () => {
+  test('no-mode fallback uses isAutoDefaultLaunchEnabled (harbor || meadow_lantern)', () => {
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { join } = require('path') as typeof import('path')
+    const src = readFileSync(
+      join(import.meta.dir, '../permissionSetup.ts'),
+      'utf8',
+    )
+    expect(src).toContain(
+      "import { isAutoDefaultLaunchEnabled } from '../../services/mcp/vscodeIdeBridgeCallbacks.js'",
+    )
+    const start = src.indexOf('export function initialPermissionModeFromCLI')
+    const end = src.indexOf('export function parseToolListFromCLI')
+    const body = src.slice(start, end)
+    expect(body).toContain('harborWillow: isAutoDefaultLaunchEnabled()')
+  })
+})

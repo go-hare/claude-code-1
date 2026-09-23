@@ -1,0 +1,158 @@
+# gold-248-16-host-hunt
+when=2026-09-20
+verdict=PARTIAL
+host=NONE
+invent-ban=do not create class gc / Fh() roster store
+
+Official knives already leftover: uXe parsePrStatusCache, K$n loadPrStatusCache,
+q$n persistPrStatusCache, JE().notePersistedCacheBody. Missing is the official
+roster that CALLS them.
+
+Official host (claude.exe 226708128) — do not invent:
+- class gc @192130933 `#t=Fh()` snapshot includes
+  jobs/adoptedPeers/remoteJobs/pendings/statuses/terminalHolders/prStatuses/
+  loopKicks/logTails/deleteRefusals/overlaidLoadLanded
+- attachView → #x @192131709: if prStatuses.size===0 then
+  loadPrStatusCache(storageV5).then(d => d.size && #E(m => m.size ? merge : d))
+- #E @192134546: #p("prStatuses") then persistPrStatusCache when Map identity changes
+- #p @192131287: snapshot field set + emit
+- prStatuses keys are PR child hrefs (not job ids):
+  this.#t.prStatuses.get(href)?.state skips MERGED/CLOSED before V$n/G$n batch
+- writers: #x load-merge; fetchPrStatusBatch/V$n @184556749 + fetchPrStatusByUrl;
+  prune via #E(K => Li(K, hrefSet))
+- readers: gc.load activity Oo(state, prStatuses); FleetView rp()/Xw()/Ze(or)
+
+Leftover src/ (not docs/upstream-extraction) grep this hunt:
+prStatuses, persistPrStatusCache, loadPrStatusCache, prStatusCache,
+notePersistedCacheBody, fleet store, FleetView store, attachView, seedJobs,
+settleLandedPendings, terminalHolders, adoptedPeers, remoteJobs, loopKicks,
+deleteRefusals, overlaidLoadLanded.
+
+## REJECTED leftover candidates
+
+### src/utils/prStatusCache.ts
+Helpers only (uXe/K$n/q$n + RJt). No Map owner, no attach, no #E.
+Cannot call itself. Not a host.
+
+### src/screens/AgentView.tsx — sessions useState (~596)
+Closest fleet job list. Official jobs live on gc.#t; leftover is
+React `SessionEntry[]` filled by refresh() ← listAllJobs().
+refresh() is this.load() analog, NOT attachView/#x.
+No prStatuses Map. No #p snapshot. No persist-on-change.
+Adding useState prStatuses + K$n/q$n here would invent the roster field
+and still lack official V$n writer + rp() reader. Not 1:1. Not a host.
+
+### src/screens/AgentView.tsx — prViewCache (~262)
+wave10: NOT prStatuses.
+Module LRU Map<repo#prNum, {at, prReviewState?}>.
+Not RJt {number,title,state,checks,review,additions,deletions}.
+Keys are not hrefs. No loadPrStatusCache / persistPrStatusCache.
+Cannot q$n this Map 1:1.
+
+### src/screens/AgentView.tsx — prCheckCache (~254)
+Map<pid, lastCheckMs>. Throttle for fetchPrStatus() (current-branch).
+Not RJt. Not a host.
+
+### src/screens/AgentView.tsx — terminalHolders useState (~598)
+#17/#19 #O analog: Map<sessionId, pid> from listAllLiveSessions.
+Sibling of official Fh() but #O only. No #x/#E. Not PR cache.
+
+### src/screens/AgentView.tsx — refresh() PR probe (~1029-1115)
+Per-refresh `gh pr view` into prViewCache. Official batch is
+href-keyed prStatuses via V$n/G$n then #E.
+Leftover has no fetchPrStatusBatch, no tengu_fleetview_pr_batch,
+no #E persist. Local Map entryReviewStates is per-pass scratch.
+Not a host.
+
+### src/screens/fleetView/helpers.ts
+Pure classify/sort/label + buildTerminalHolders.
+Reads session.prReviewState. No store, no Map of RJt, no load/persist.
+
+### src/hooks/usePrStatus.ts
+Footer nge → new wY({fetchPrStatus:eDt, shared:JE()}).
+PromptInputFooterLeftSide caller. Not fleet roster. Not a host.
+
+### src/utils/prStatusPoller.ts — PrStatusShared (JE/dXe) + PrStatusPoller (wY)
+Has notePersistedCacheBody (q$n dedup) and prStatusByUrl = A$(_Jt,30000).
+Official JE() is NOT the prStatuses owner; gc is.
+prStatusByUrl is TTL cache, not persisted href→RJt Map.
+Wiring K$n/q$n onto JE() invents a different host. Reject.
+
+### src/utils/ghPrStatus.ts — fetchPrStatus
+Current-branch footer/glab badge. Returns PrStatus {number,url,reviewState}.
+Not fleet cache. AgentView detectPrForSession uses this once/min/pid.
+Not a host.
+
+### src/utils/prStatusPoller.ts — fetchPrStatusByUrl (G$n leftover)
+Returns PrStatusCacheEntry (RJt). Only consumed by JE().prStatusByUrl TTL.
+No leftover V$n / fetchPrStatusBatch. No writer into a persisted Map.
+Knife without roster. Not a host.
+
+### src/daemon/jobState.ts — listAllJobs / BgJobState
+Disk ~/.claude/jobs/<short>/state.json. children[] may include /pull/ hrefs.
+No in-memory prStatuses. No K$n/q$n. File list is not Fh().
+
+### src/jobs/state.ts
+Template-job files (created/running/completed). Not FleetView roster.
+
+### src/jobs/templates.ts / src/jobs/routines.ts
+Composer mention lists. No PR map.
+
+### src/daemon/bgWorker.ts — RosterEntry / daemon/roster.json (~1138)
+Worker PID/sock adopt on restart. wave10: not PR-status Map.
+
+### src/daemon/bgManager.ts
+Supervisor adopt/dispatch. No prStatuses / load / persist.
+
+### src/utils/fleetNeedsInputNudge.ts — FleetNeedsInputNudgeStore
+Polls listAllJobs for footer {needsInput,done,succeeded}.
+hasOpenPrChild is href string check only. No RJt Map.
+
+### src/state/AppState.tsx / AppStateStore.ts / store.ts
+No prStatuses, no fleet jobs snapshot, no listAllJobs.
+
+### src/utils/storageV5/createLocalFsBackend.ts
+STATE_ENTRY_FILENAMES maps gh-pr-status-cache → gh-pr-status-cache.json.
+I/O alias. Official gc.#n (storageV5) is the argument to K$n/q$n, not the owner.
+
+### src/components/PromptInput/PromptInputFooterLeftSide.tsx
+prStatusFooterEnabled + usePrStatus. #41 footer. Not #16 roster.
+
+### src/components/Settings/Config.tsx / src/utils/config.ts
+prStatusFooterEnabled setting only.
+
+### src/cli/agents.ts / mountFleetView
+Mounts AgentView. No roster store, no cache load.
+
+### src/cli/bg/engine.ts SessionEntry
+Row type (prReviewState/prUrl/prNumber). Not a store.
+
+### packages/**
+Zero hits for prStatuses / loadPrStatusCache / persistPrStatusCache /
+gh-pr-status-cache.
+
+### leftover names that do not exist in src/
+attachView, seedJobs, settleLandedPendings, adoptedPeers, remoteJobs,
+loopKicks, deleteRefusals, overlaidLoadLanded, remoteListLoaded, logTails,
+ensureFleetRoster, fetchPrStatusBatch, class gc, function Fh, FleetStore,
+useFleet, useFleetJobs.
+
+## Why AgentView is still not a host
+
+Official #16 is not "any UI that lists jobs". It is:
+1. a subscribe/getSnapshot store field prStatuses: Map<href, RJt>
+2. load on first attachView when size===0
+3. persist when that field identity changes
+4. fetch batch writes + FleetView rp() reads the same Map
+
+Leftover AgentView already split #O (terminalHolders) and a different PR
+probe (prViewCache). It does not already hold an RJt Map and has no
+natural leftover store object next to jobs (no Fh() snapshot).
+Inventing class gc or a fake prStatuses useState that nothing official-shaped
+reads/writes is banned.
+
+## Stay PARTIAL
+
+Helpers swallow malformed JSON/entries (no throw). Startup crash cannot
+reproduce in leftover because nothing calls K$n on attach.
+Do not invent class gc. Do not bump version.

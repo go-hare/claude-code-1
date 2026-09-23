@@ -24,6 +24,12 @@ import { parseJSONL } from './json.js'
 import { logError } from './log.js'
 import { getAttributionEmail } from './attributionEmail.js'
 import { getRealModelName } from './attributionModel.js'
+import { getDensableCatalogModel } from './model/modelCatalogCapabilities.js'
+import {
+  getCanonicalName,
+  getMarketingNameForModel,
+  getPublicModelDisplayName,
+} from './model/model.js'
 import { shouldSuppressSessionAttribution } from './residualMoreEnvGates.js'
 import { isMemoryFileAccess } from './sessionFileAccessHooks.js'
 import { getTranscriptPath } from './sessionPaths.js'
@@ -34,6 +40,86 @@ import { isUndercover } from './undercover.js'
 export type AttributionTexts = {
   commit: string
   pr: string
+}
+
+/**
+ * densable AVt — `Claude ${VP(id)}` else `Claude (${id})`.
+ * VP is the marketing / public display label.
+ */
+export function formatKnownModelTrailerName(model: string): string {
+  const label =
+    getMarketingNameForModel(model) ?? getPublicModelDisplayName(model)
+  if (label) return `Claude ${label}`
+  return `Claude (${model})`
+}
+
+/** densable fn — strip a trailing `[1m]` before DOe membership. */
+function stripTrailing1mSuffix(id: string): string {
+  return id.replace(/\[1m\]$/i, '')
+}
+
+/**
+ * densable Xe then fn — canonicalize, then strip `[1m]`.
+ * Xe/_k is local `getCanonicalName`.
+ */
+function canonicalKnownModelId(model: string): string {
+  return stripTrailing1mSuffix(getCanonicalName(model))
+}
+
+/**
+ * densable rDt gate used here: VP label or baked catalog (`Zl` / `Aw`).
+ * Family aliases stay AVt (local known path; BZn does not resolve `jm`).
+ */
+function isKnownCommitTrailerModel(model: string): boolean {
+  const id = model.trim().toLowerCase()
+  if (!id) return false
+  if (/^(opus|sonnet|haiku|fable)(\[1m\])?$/.test(id)) return true
+  if (
+    getMarketingNameForModel(model) !== undefined ||
+    getPublicModelDisplayName(model) !== null
+  ) {
+    return true
+  }
+  return getDensableCatalogModel(canonicalKnownModelId(model)) !== undefined
+}
+
+/** densable lw / `_3` — old Claude 3 ids still canonical-known. */
+const CANONICAL_KNOWN_CLAUDE3 = new Set([
+  'claude-3-opus',
+  'claude-3-sonnet',
+  'claude-3-haiku',
+])
+
+/** densable aKt */
+const MYTHOS_PREVIEW_ID = 'claude-mythos-preview'
+
+/**
+ * densable ZO = DOe(Xe(e)).
+ * DOe: `Zl(fn(id))` or `_3.has` or `id === aKt`.
+ */
+function isCanonicalKnownModel(model: string): boolean {
+  const t = canonicalKnownModelId(model)
+  return (
+    getDensableCatalogModel(t) !== undefined ||
+    CANONICAL_KNOWN_CLAUDE3.has(t) ||
+    t === MYTHOS_PREVIEW_ID
+  )
+}
+
+/**
+ * densable `BZn` — known catalog / family ids use AVt, not the raw parsed id.
+ * Else ZO → `Claude`. Unrecognized leftovers stay `Claude Code`.
+ */
+export function commitTrailerModelName(model: string): string {
+  const trimmed = model.trim()
+  if (!trimmed) return 'Claude Code'
+  if (isKnownCommitTrailerModel(trimmed)) {
+    return formatKnownModelTrailerName(trimmed)
+  }
+  if (isCanonicalKnownModel(trimmed)) {
+    return 'Claude'
+  }
+  return 'Claude Code'
 }
 
 /**
@@ -70,7 +156,7 @@ export function getAttributionTexts(): AttributionTexts {
   const modelName = getRealModelName()
   const email = getAttributionEmail(modelName)
   const defaultAttribution = `🤖 Generated with [Claude Code](${PRODUCT_URL})`
-  const defaultCommit = `Co-Authored-By: ${modelName} <${email}>`
+  const defaultCommit = `Co-Authored-By: ${commitTrailerModelName(modelName)} <${email}>`
 
   const settings = getInitialSettings()
 

@@ -12,6 +12,7 @@ import {
 import { getRemoteManagedSettingsSyncFromCache } from '../../services/remoteManagedSettings/syncCacheState.js'
 import { uniq } from '../array.js'
 import { logForDebugging } from '../debug.js'
+import { stripProjectScopedTracingSettings } from '../projectScopedTracingStrip.js'
 import { logForDiagnosticsNoPII } from '../diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
@@ -42,6 +43,7 @@ import {
   getCachedSettingsForSource,
   getPluginSettingsBase,
   getSessionSettingsCache,
+  getSettingsOwner,
   resetSettingsCache,
   setCachedParsedFile,
   setCachedSettingsForSource,
@@ -625,17 +627,78 @@ export function getSettingsForSourceUncached(
     }
   }
 
+  if (
+    fileSettings &&
+    (source === 'projectSettings' || source === 'localSettings')
+  ) {
+    return stripProjectScopedTracingSettings(fileSettings, source)
+  }
+
   return fileSettings
 }
 
 /**
- * densable 2.1.247 J$ / pm — admin managed (file + MDM) load errors only.
- * HKCU / host are not sufficient when admin policy cannot be read.
+ * densable 2.1.251 `ui` / 2.1.247 `Hs` — admin managed (file + MDM) load
+ * errors only. Cached on SettingsOwner.policy.adminLoadErrors.
+ * Official also folds helper `s5(L())`; leftover has no helper loader.
  */
 export function getAdminManagedPolicyLoadErrors(): ValidationError[] {
+  const owner = getSettingsOwner()
+  const cached = owner.policy.adminLoadErrors
+  if (cached !== undefined) {
+    return cached as ValidationError[]
+  }
   const { errors: fileErrors } = loadManagedFileSettings()
-  const mdmErrors = getMdmSettings().errors
-  return [...fileErrors, ...mdmErrors]
+  const errors = [...fileErrors, ...getMdmSettings().errors]
+  owner.policy.adminLoadErrors = errors
+  return errors
+}
+
+/**
+ * densable `hM` = `toe(ui())` — drop `severity === "warning"`.
+ */
+export function getNonWarningAdminPolicyLoadErrors(): ValidationError[] {
+  return getAdminManagedPolicyLoadErrors().filter(
+    error => error.severity !== 'warning',
+  )
+}
+
+/**
+ * densable `c0` on an admin settings bag — present and non-empty.
+ */
+function adminSettingsSurvived(
+  settings: SettingsJson | null | undefined,
+): boolean {
+  return settings != null && Object.keys(settings).length > 0
+}
+
+/**
+ * densable `o5` — a surviving admin tier exists (MDM or managed file).
+ * Official also treats helper `WJ(o).composes==="tier"` as survivor;
+ * leftover has no helper composer.
+ */
+export function hasAdminPolicySurvivor(): boolean {
+  const owner = getSettingsOwner()
+  const cached = owner.policy.adminSurvivor
+  if (cached !== undefined) {
+    return cached as boolean
+  }
+  const survivor =
+    adminSettingsSurvived(getMdmSettings().settings) ||
+    adminSettingsSurvived(loadManagedFileSettings().settings)
+  owner.policy.adminSurvivor = survivor
+  return survivor
+}
+
+/**
+ * densable iJt `hM().length===0||o5()` — refuse cascade-trust when a
+ * policy source failed and nothing admin-side survived.
+ */
+export function canTrustAdminPolicyCascade(): boolean {
+  return (
+    getNonWarningAdminPolicyLoadErrors().length === 0 ||
+    hasAdminPolicySurvivor()
+  )
 }
 
 export function getAdminManagedPolicyUnreadableError(): ValidationError | null {
@@ -1209,9 +1272,13 @@ function loadSettingsFromDisk(): SettingsWithErrors {
           }
 
           if (settings) {
+            const layer =
+              source === 'projectSettings' || source === 'localSettings'
+                ? stripProjectScopedTracingSettings(settings, source)
+                : settings
             mergedSettings = mergeWith(
               mergedSettings,
-              settings,
+              layer,
               settingsMergeCustomizer,
             )
           }

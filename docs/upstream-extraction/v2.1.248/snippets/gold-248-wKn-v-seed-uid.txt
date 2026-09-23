@@ -1,0 +1,24 @@
+## y+W @179535953
+===void 0)return{skipped:e.value.kind==="absent"?"no .git entry (left to the probe's per-call throw)":"no owner uid for .git"};let a=null;if(s.value.kind!=="absent"){let o=y(s.value);if(o===void 0)return{skipped:"no owner uid for .claude"};a=o}return{uids:{rootUid:i,gitEntryUid:r,claudeEntryUid:a}}}function y(t){return t.kind==="absent"?void 0:t.uid}function w(t){return t.code==="Failed"?t.telemetryCode??t.failureClass:t.code}
+export{Npn,SKn,$pn,Gqe,kur,vKn,Tur,wKn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you ag
+
+## hits uid:Number( []
+## hits uid:Number(e.uid) []
+## hits uid:Number(t.uid) []
+## hits uid:Number(r.uid) []
+## hits ,uid: []
+## hits uid: [178888646]
+## uid: @178888646
+"throw",this.override=e?.override??(()=>{}),this.io=e?.io??"output",this.seen=new Map}process(e,t={path:[],schemaPath:[]}){var r;let o=e._zod.def,n={guid:"uuid",url:"uri",datetime:"date-time",json_string:"json-string",regex:""},c=this.seen.get(e);if(c){if(c.count++,t.schemaPath.includes(e))c.cycle=t
+
+## kind:e.isFile() 
+## kind:t.isFile() 
+## isSymbolicLink()?"symlink" 188008204,194475718,203967682
+## isSymbolicLink()?"symlink" @188008204
+Link()}async function g(e){let r=ev(),t=await l(r).catch(()=>{return});if(t===void 0||t.isFile())return;let o=t.isDirectory()?"directory":t.isFIFO()?"fifo":t.isSocket()?"socket":t.isSymbolicLink()?"symlink":"other non-regular node";if(L().markLogged())n(`[DaemonLock] ${o} at the lock path (${e}) \u2014 removing it as the legacy path does`,{level:"warn"});awa
+
+## isSymbolicLink()?"symlink" @194475718
+rn"symlink";if(n.isDirectory())return"directory";if(n.isFile()||n.isFIFO()||n.isSocket()||n.isBlockDevice()||n.isCharacterDevice())return"other";try{let r=await A(p(e,t));return r.isSymbolicLink()?"symlink":r.isDirectory()?"directory":"other"}catch{return"unknown"}}function Se(e,t,n){switch(t){case"directory":return n.ignoresDirectory(e);case"other":return n

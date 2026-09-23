@@ -1,0 +1,390 @@
+# gold-248-na-extract2
+
+## #10 desktop-host surface needle="desktop-host surface" hits248=1 hits247=0
+- #0 @179088812 "Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays
+
+## #10 last written by needle="last written by" hits248=1 hits247=0
+- #0 @179088794 tional().describe("Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt fro
+
+## #10 created or last written needle="created or last written" hits248=1 hits247=0
+- #0 @179088783 gative().optional().describe("Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt 
+
+## #10 otherwise exempt needle="otherwise exempt" hits248=1 hits247=0
+- #0 @179088869 d or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays sweep. 0 (the default) means no ceiling: such transc
+
+## #10 host surface needle="host surface" hits248=2 hits247=1
+- #0 @179088820 on ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays
+- #1 @223564826 {
+      e.preventDefault();
+      e.stopPropagation();
+      // Parity with the host surface: the same
+      // non-pixel delta normalization canvas-gestures applies (LINE 
+
+## #10 writtenByDesktop needle="writtenByDesktop" hits248=0 hits247=0
+
+## #10 desktopHost needle="desktopHost" hits248=6 hits247=6
+- #0 @98231464 elFamilyDominance......3...managedByHost.......Tr=.managedByHostFlag.........c.desktopHost.......9.hostOrchestrated....u@..providerStripContext......6.projectScopeDropWar
+- #1 @180921297 e()))o[t]=r;return o}var A=Object.freeze({managedByHost:!1,managedByHostFlag:!1,desktopHost:!1,hostOrchestrated:!1});function f(){let e=Me(process.env.CLAUDE_CODE_PROVIDER
+- #2 @180921544 anagedByHost:e||!!process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR,managedByHostFlag:e,desktopHost:o,hostOrchestrated:o||t==="byoc"}}var P=new Set(["policySettings","projectSetti
+- #3 @180924130 y.`,{level:"warn"})}function N(e,o,t,r){if(!e)return{};let s=t.managedByHost||t.desktopHost&&P.has(o),E={};for(let[i,S]of Object.entries(e)){if(m.has(i.toUpperCase()))cont
+- #4 @180924437 e()==="ANTHROPIC_CUSTOM_HEADERS"){p(r,i,o);continue}if(t.managedByHostFlag&&(!t.desktopHost||U.has(o))&&(Qyt(i)||twe(i))){p(r,i,o,t.desktopHost);continue}E[i]=S}return E}f
+- #5 @180924489 if(t.managedByHostFlag&&(!t.desktopHost||U.has(o))&&(Qyt(i)||twe(i))){p(r,i,o,t.desktopHost);continue}E[i]=S}return E}function L(e,o){if(!e||!o)return e||{};let t={};for(l
+
+## #10 sessionHost needle="sessionHost" hits248=22 hits247=20
+- #0 @96745272 our phone later, run /remote-control in this session...........:\d+$........n..sessionHost......rf.currentHost.........sessionDisplay........J.currentRepo.........current
+- #1 @185030114 L.toLowerCase()===p.toLowerCase())return{status:"host_unverified",sessionRepo:p,sessionHost:u?.host,currentRepo:L,rawRemoteUrl:M};return{status:"mismatch",sessionRepo:p,cu
+- #2 @185030217 rentRepo:L,rawRemoteUrl:M};return{status:"mismatch",sessionRepo:p,currentRepo:L,sessionHost:u?.host,rawRemoteUrl:M}}if(M)return{status:"not_in_repo",sessionRepo:p,sessionH
+- #3 @185030300 sionHost:u?.host,rawRemoteUrl:M}}if(M)return{status:"not_in_repo",sessionRepo:p,sessionHost:u?.host,currentRepo:null,rawRemoteUrl:M}}return{status:"not_in_repo",sessionRep
+- #4 @185030395 host,currentRepo:null,rawRemoteUrl:M}}return{status:"not_in_repo",sessionRepo:p,sessionHost:u?.host,currentRepo:null}}let g=r.toLowerCase()===p.toLowerCase(),k=!t||!u||$L(
+- #5 @185030876 po:`${C.owner}/${C.name}`}}return{status:"mismatch",sessionRepo:p,currentRepo:r,sessionHost:u?.host,currentHost:t?.host}}function PMt(e){let t=e.sessionHost&&e.currentHost
+- … +16 more
+
+## #10 hostKind needle="hostKind" hits248=0 hits247=0
+
+## #10 Ce default desktop needle="??Ce" hits248=14 hits247=26
+- #0 @182748613 :e,resolved:r,hopDirectories:ru(e,r),danglingBaseline:!1}),r}catch{let o=su(e,t)??Ce(Tt(e),t);for(let u=0;u<8;u++){let p;try{p=xs(o)}catch{break}o=Ce(Tt(o),p)}retur
+- #1 @182750611  st().denyLiteralSymlinkCandidates.push(e),[e]}let r;try{r=On(e)}catch{r=su(e,t)??Ce(Tt(e),t);for(let o=0;o<8;o++){let u;try{u=xs(r)}catch{break}r=Ce(Tt(r),u)}}retu
+- #2 @182791806 s(p))continue;let E;try{E=xs(p)}catch{continue}let I;try{I=On(p)}catch{I=su(p,E)??Ce(Tt(p),E);for(let v=0;v<8;v++){let N;try{N=xs(I)}catch{break}I=Ce(Tt(I),N)}}r.se
+- #3 @191903646 _-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}function xe(){
+- #4 @194424056  te(e,{recursive:r.recursive===!0})}catch{return}let o=Date.now()-(r.olderThanMs??Ce);await Promise.all(i.filter((s)=>t(it(s))).map(async(s)=>{let a=C(e,s);try{let 
+- #5 @198566959 e.scanCountCache.delete(i.value)}}async function td(e,r,t,i){let o=i?.chunkBytes??Ce,a=i?.maxRecords??Ye,s=Buffer.alloc(Math.max(1,Math.min(o,e.size-r))),d=0,u=r,l=
+- … +8 more
+
+## #10 schema-full @179088656
+etention; use --no-session-persistence to disable transcript writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays sweep. 0 (the default) means no ceiling: such transcripts are kept until deleted another way. Unlike cleanupPeriodDays, 0 is allowed because this setting never disables writes \u2014 it only bounds an exemption from deletion. The ceiling is a hard cap: it also bounds an active archive grace, so the grace window of a release marker never keeps files past the ceiling. Ignored when cleanupPeriodDays is managed by org policy. A ceiling at or below cleanupPeriodDays effectively disables the exemption: those transcripts age out on the regular cleanupPeriodDays schedule, so the effective retention is whichever of the two periods is longer."),
+
+## #10 isDesktopWritten needle="isDesktop" hits248=10 hits247=10
+- #0 @96665880 stantMsgOver5minAgo.....tq..lastAssistantMsgOver1hAgo.......Tq..isCowork	...b...isDesktop........]..previousMessageId...%...}...tengu_prompt_cache_diagnosis_received...
+- #1 @99874580 hed to the conversation and has no network access...
+.......nb2FlN/G2m.......a..isDesktopExtensionEnabled........e..Allow desktop extensions
+...C.H.knHnvzpkOf......)...i
+- #2 @99874992 xtensions; local install additionally requires an org policy backend...."....T..isDesktopExtensionDirectoryEnabled......!...Show extension directory
+.....6.bqOLf0vLQm...
+- #3 @99875224 installable extensions. Hide to allow sideload only.
+...LV..g8s4jWgsLf..#....r..isDesktopExtensionSignatureRequired.........Require signed extensions...
+....f..bmP92ZCba
+- #4 @101833526 romptOnLateSettlereconnectOrgMemoryselectedGrantedStore0c30af20d0d75c1cC00000290isDesktopEntrypointExemptedisRemoteCoworkEntrypointExemptedmaybePrewarmRecallIndexrecallP
+- #5 @184460182 MsgOver5minAgo:ue,lastAssistantMsgOver1hAgo:pe,isCowork:a.CLAUDE_CODE_IS_COWORK,isDesktop:Ume(),baselineFromDisk:M,requestId:ke(p)??v(""),previousMessageId:ke(g)??v("")}
+- … +4 more
+
+## #10 desktopWrittenAt needle="desktopWritten" hits248=0 hits247=0
+
+## #10 source desktop needle="source===\"desktop\"" hits248=0 hits247=0
+
+## #10 cowork source needle="\"cowork\"" hits248=3 hits247=3
+- #0 @180481398 :F("submit_feedback"),description:i(),surface:le(["cli","ccd","ccr","ide","sdk","cowork"]).optional().describe("Where the feedback flow was initiated. Stamped into the 
+- #1 @180513652 computer_use","framebuffer","plugins","skills","mcp_registry","scheduled_tasks","cowork","session_info","dispatch","remote_devices","ccd_directory"],_8=new Set(["worksp
+- #2 @185550811 ;return{current:e,onLatch:t}}function LCn(){return R(kpt,!1)&&nfn(DCn)}var Fte=["cowork","workspace","session-info","mcp-registry","plugins","scheduled-tasks","dispatch
+
+## #10 CLAUDE_CODE_ENTRYPOINT desktop needle="entrypoint" hits248=167 hits247=162
+- #0 @66686108  initialOptions: {
+      ...config,
+      bundle: !0,
+      entryPoints: config.entrypoints ?? config.entryPoints ?? [],
+      minify: typeof config.minify === "boolean" 
+- #1 @82489397  heap profiling (default: 524288)heap-prof-intervalExit without an error if the entrypoint does not existif-presentDisable auto install in the Bun runtimeno-installConfig
+- #2 @82505904 -refresh@experimental"react refresh runtimeserver components runtimeclient side entrypointserver side entrypointAinternal error: entered unreachable code: invalid Handsha
+- #3 @82505926 react refresh runtimeserver components runtimeclient side entrypointserver side entrypointAinternal error: entered unreachable code: invalid HandshakeState ..MissingGener
+- #4 @82580547 whitespacesyntaxidentifierskeepNamesExpected minify to be a boolean or an objectentrypointsentryPointsemitDCEAnnotationsignoreDCEAnnotationstreeShakingExpected conditions
+- #5 @82581625 o get full root directory path: ...!: failed to open root directory: ..Expected entrypoints to be an array of strings create   .[32mcreate.[0m  cssbuild.   ....   .[2m...
+- … +161 more
+
+## #30 rr @183209926
+len=155 sha=767a227a812950d5
+function rr(e){return Yn.includes(e)||zn.test(e)||e===ke||e.startsWith(`${Vn}.`)||e.startsWith(`${ke}.`)&&!kt.includes(e.slice(ke.length+1))||or(e)||ar(e)}
+
+## #30 or @183210134
+len=65 sha=6df6c632fdd8df6a
+function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}
+
+## #30 ke-Yn-zn @183209926
+ e.split(B()==="windows"?/[\\/]/:"/").filter((t)=>t!=="").map(xl)}function er(e,t){return e.some((r,d)=>t.every((u,o)=>e[d+o]?.includes(u)===!0))}function tr(e,{leadingDot:t=!0}={}){let r=t?[ht,yt,nr]:[ht,yt],d=(u,o)=>{if(o.length===0||u.size>bt)return u;let g=se(o.flatMap((k)=>r.map((p)=>p(k)))).filter((k)=>!u.has(k));return d(new Set([...u,...g]),g)};return[...d(new Set([e]),[e])]}function ht(e){let t=Xn.exec(e);return t===null||t.index===0?e:e.slice(0,t.index)}function yt(e){return e.length>2&&e.startsWith("#")&&e.endsWith("#")?e.slice(1,-1):e}function nr(e){return e.replace(/^\.(?=.)/,"")}function rr(e){return Yn.includes(e)||zn.test(e)||e===ke||e.startsWith(`${Vn}.`)||e.startsWith(`${ke}.`)&&!kt.includes(e.slice(ke.length+1))||or(e)||ar(e)}function ir(e){return e===gt||e.startsWith(`$
+
+## #30 var ke needle="var ke=\".env\"" hits248=0 hits247=0
+
+## #30 ke=".env" needle="ke=\".env\"" hits248=1 hits247=0
+- #0 @183208419 rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml))$/,ke=".env",Vn=".claude.json",kt=["example","sample","template","dist"],Xn=new RegExp(`(?:$
+
+## #30 Xn backup needle="Xn.exec" hits248=1 hits247=0
+- #0 @183209733  d(new Set([...u,...g]),g)};return[...d(new Set([e]),[e])]}function ht(e){let t=Xn.exec(e);return t===null||t.index===0?e:e.slice(0,t.index)}function yt(e){return e.le
+
+## #30 ht-backup @183209712
+len=82 sha=04510d47e8f14d4c
+function ht(e){let t=Xn.exec(e);return t===null||t.index===0?e:e.slice(0,t.index)}
+
+## #30 Xn-def @183209712
+r=t?[ht,yt,nr]:[ht,yt],d=(u,o)=>{if(o.length===0||u.size>bt)return u;let g=se(o.flatMap((k)=>r.map((p)=>p(k)))).filter((k)=>!u.has(k));return d(new Set([...u,...g]),g)};return[...d(new Set([e]),[e])]}function ht(e){let t=Xn.exec(e);return t===null||t.index===0?e:e.slice(0,t.index
+
+## #31 republishSurviving needle="republishSurviving" hits248=4 hits247=4
+- #0 @92388940 ........getPendingUserDialogRequests.....]..retireSdkHostHookCallbacks.......$..republishSurvivingPendingAction.....(..cancelPendingUserDialogs....x.r.cancelDialogByMachine.....
+- #1 @200588651 enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.
+- #2 @200604941 ess?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j)}}}createHookCallback(t,e){let o
+- #3 @200609485 if(!this.timedOutUserDialogs.has(r))this.sessionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(t,e,o){let r=new Map,u=async(l)=>{try
+
+## #31 getPendingPermissionRequests needle="getPendingPermissionRequests" hits248=9 hits247=9
+- #0 @92388832 State...........prependUserMessage......+.I.isLocallyPrependedMessage.........e.getPendingPermissionRequests........getPendingUserDialogRequests.....]..retireSdkHostHookCallbacks.......$..
+- #1 @200587966 nue;d.reject(new Ua("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((
+- #2 @200588977 e.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}c
+- #3 @200604706 yNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!wo())this.ses
+- #4 @200609262 ingActionDetails.delete(r),this.getPendingUserDialogRequests().length===0&&this.getPendingPermissionRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLivene
+- #5 @200793948 ?.external?.pending_action,...t?.external?.pending_actions??[]],g=new Set([...e.getPendingPermissionRequests(),...e.getPendingUserDialogRequests()].map((A)=>A.request_id)),w=new Set,E=new 
+- … +3 more
+
+## #31 flushPendingReceipts needle="flushPendingReceipts" hits248=3 hits247=3
+- #0 @97327392  Failed to send experiment_gates notification: .....&lm.terminalEmitted.........flushPendingReceipts....T...from:........w..pid:......t.peer_loop_guard........checkHopChain.......
+- #1 @181004821 r!==void 0)clearTimeout(f.timer);t.clear()}return{report:_,noteDropForReceipt:p,flushPendingReceipts:E,dispose:w}}var Te=50,X={...K,maxQueuedPeerMessages:Te},L=X,Le=h(()=>m({bucket
+- #2 @183679620 ;function Ze(){dt=xan({},F3e),it.dispose(),it=Han(pt)}function vt(wn){return it.flushPendingReceipts(wn)}function pn(){return J(o,(wn)=>dae(wn.origin))}function sn(wn,Jn="coalesced
+
+## #31 after silent needle="after silent" hits248=0 hits247=0
+
+## #31 silent WS needle="silent" hits248=485 hits247=482
+- #0 @7410234 ?-u.M.B.I..
+......Nc..I..A..D...A..-b........A..-p........A..-v.........O...I.--silentL9...............0...D.G.L..I.--no-insM1.I..tallM	...................I..
+......I
+- #1 @66948777  FSWatcher extends EventEmitter {
+  #watcher;
+  #listener;
+  #ignoreMatcher;
+  #silentClose = !1;
+  _handle;
+  constructor(path, options, listener) {
+    super();
+   
+- #2 @66949828 nameOrError, fromAbort = !1) {
+    if (eventType === "close") {
+      if (this.#silentClose)
+        return;
+      queueMicrotask(() => {
+        this.emit("close", f
+- #3 @66951385 thoutEvent = function closeNativeWatcherWithoutEvent2(watcher) {
+      watcher.#silentClose = !0, watcher.#watcher?.close(), watcher.#watcher = null;
+    }, refNative
+- #4 @67636218 rocess.argv, 2),
+    exec: process.argv[1],
+    execArgv: process.execArgv,
+    silent: !1,
+    ...cluster.settings,
+    ...options
+  };
+  if (cluster.settings = sett
+- #5 @67637183 cwd,
+    env: workerEnv,
+    serialization: cluster.settings.serialization,
+    silent: cluster.settings.silent,
+    windowsHide: cluster.settings.windowsHide,
+    ex
+- … +479 more
+
+## #31 permission after reconnect needle="permission after" hits248=0 hits247=0
+
+## #31 latest messages needle="latest messages" hits248=1 hits247=1
+- #0 @189810016 slash-command panels (e.g. `/config`, `/model`) in fullscreen mode covering the latest messages; the conversation now stays pinned above the panel\n- Fixed the `/workflows` de
+
+## #31 undeliveredResponses needle="undeliveredResponses" hits248=17 hits247=17
+- #0 @92651692 tSigner.........onLivenessTimeout.......1...pendingPermissionRequests..........undeliveredResponses....vb..undeliveredHookIds......\.:.hookGiveUpsTold.........pendingDialogRequest
+- #1 @201942554  it."}}class rNe{config;callbacks;client=null;pendingPermissionRequests=new Map;undeliveredResponses=new Map;undeliveredHookIds=new Set;hookGiveUpsTold=new Set;pendingDialogRequest
+- #2 @201943803 Manager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null
+- #3 @201945529 uest(e);return}if(e.type==="control_cancel_request"){let{request_id:r}=e,a=this.undeliveredResponses.get(r);if(a?.kind==="hook"||a?.kind==="tool")this.giveUp(a,"overtaken");else if
+- #4 @201947150 e"){let{request_id:r}=e.response;this.recordSeenControlResponseId(r);let a=this.undeliveredResponses.get(r);if(a!==void 0&&"uuid"in e&&e.uuid===a.uuid&&a.giveUpOnSettle!=="overtake
+- #5 @201950269 serDialogCancelled?.(r);this.pendingDialogRequests.clear();for(let r of[...this.undeliveredResponses.values()])if(r.kind==="permission"||r.kind==="dialog")this.dropKept(r)}this.cal
+- … +11 more
+
+## #32 CLAUDE_CODE_ENVIRONMENT_KIND needle="CLAUDE_CODE_ENVIRONMENT_KIND" hits248=28 hits247=27
+- #0 @95923812 x2njm.js........remote_desktop.........remote_mobile...........watched.........CLAUDE_CODE_ENVIRONMENT_KIND....8z..fanout......o.k.byoc".....8.tengu_classifier_disabled_surfaces..........
+- #1 @178768227 ()=>IL,CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES:()=>UL,CLAUDE_CODE_ENTRYPOINT:()=>bD,CLAUDE_CODE_ENVIRONMENT_KIND:()=>GD,CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION:()=>HD,CLAUDE_CODE_EXIT_AFTER_FIR
+- #2 @179168225 ENT_ID","CLAUDE_CODE_SESSION_ACCESS_TOKEN","CLAUDE_SESSION_INGRESS_TOKEN_FILE","CLAUDE_CODE_ENVIRONMENT_KIND","CLAUDE_CODE_REMOTE_SESSION_ID","ANTHROPIC_FEDERATION_RULE_ID","ANTHROPIC_ORGA
+- #3 @179821583 E_CODE_BRIDGE_MCP_CARRIER;if(e==="1"||!e)return e?"child":void 0;if(process.env.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&Me(process.env.CLAUDE_CODE_REMOTE)){delete process.env.CLAUDE_CODE_BR
+- #4 @180154454 LAUDE_CODE_PROVIDER_MANAGED_BY_HOST)return!1;return!ar()}function JO(){return a.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!a.CLAUDE_CODE_BYOC_ENABLE_DATADOG}function G2(){return a.CLAUDE_CODE
+- #5 @180921427 let e=Me(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST),o=_d(),t=process.env.CLAUDE_CODE_ENVIRONMENT_KIND;return{managedByHost:e||!!process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR,managedByHo
+- … +22 more
+
+## #32 container session needle="container session" hits248=0 hits247=0
+
+## #32 session cred not needle="credentials not" hits248=0 hits247=0
+
+## #33 rootOptionsRemoteControlRefuses needle="rootOptionsRemoteControlRefuses" hits248=4 hits247=0
+- #0 @99687572 value.......5.N.enterRemoteControl.......aO.rootOptionsRefusedMessage........iv.rootOptionsRemoteControlRefuses.....H...suppliedRootOptions.H...M[..Cannot destructure property 'doctorHandler'
+- #1 @101797491 refuseRemoteControlIneligiblerefuseRemoteControlLocallyrootOptionsRefusedMessagerootOptionsRemoteControlRefusesstartRemoteControlsuppliedRootOptionsCompactEncryptCompactSignEmbeddedJWKEncrypt
+- #2 @191608992 .action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BUN/root/chunk-2dr7g7p2.js"),re=U(Y(
+- #3 @191866777 lIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppliedRootOptions};
+.// @bun @bytecode
+// Claude
+
+## #33 rootOptionsRefusedMessage needle="rootOptionsRefusedMessage" hits248=4 hits247=0
+- #0 @99687536 moteControl' from null or undefined value.......5.N.enterRemoteControl.......aO.rootOptionsRefusedMessage........iv.rootOptionsRemoteControlRefuses.....H...suppliedRootOptions.H...M[..C
+- #1 @101797466 _QUEUEDenterRemoteControlrefuseRemoteControlIneligiblerefuseRemoteControlLocallyrootOptionsRefusedMessagerootOptionsRemoteControlRefusesstartRemoteControlsuppliedRootOptionsCompactEncry
+- #2 @191608964 n().allowExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BU
+- #3 @191866746 Control,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppliedRootO
+
+## #33 suppliedRootOptions needle="suppliedRootOptions" hits248=4 hits247=0
+- #0 @99687612 .aO.rootOptionsRefusedMessage........iv.rootOptionsRemoteControlRefuses.....H...suppliedRootOptions.H...M[..Cannot destructure property 'doctorHandler' from null or undefined valu
+- #1 @101797540 ocallyrootOptionsRefusedMessagerootOptionsRemoteControlRefusesstartRemoteControlsuppliedRootOptionsCompactEncryptCompactSignEmbeddedJWKEncryptJWTFlattenedEncryptFlattenedSignGener
+- #2 @191609026 erRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BUN/root/chunk-2dr7g7p2.js"),re=U(Y(L));if(re.length>0)ret
+- #3 @191866838 efusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppliedRootOptions};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercia
+
+## #33 enterRemoteControl export needle="export{R as enterRemoteControl" hits248=1 hits247=0
+- #0 @191866643 Control's own options after the verb (see \`claude remote-control --help\`).`+o}export{R as enterRemoteControl,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOpt
+
+## #33 enterRemoteControl-export @191866643
+Control's own options after the verb (see \`claude remote-control --help\`).`+o}export{R as enterRemoteControl,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppl
+
+## #33 lastFn before export name=w @191866145
+## #33 enterRemoteControl-near @191866145
+len=498 sha=a3e6392b62969892
+function w(t){let e=t.map((i)=>`\`${i}\``).join(", "),[r,n]=t.length===1?["it","is"]:["them","are"],o=t.includes("--permission-mode")?" Set the permission mode with `claude remote-control --permission-mode <mode>`.":"";return`Error: ${e} before \`remote-control\` ${n} not carried over to the sessions Remote Control starts, so Remote Control refuses to start rather than drop ${r} \u2014 remove ${r}, and give Remote Control's own options after the verb (see \`claude remote-control --help\`).`+o}
+
+## #33 refuses-first-js @191608992
+wExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BUN/root/chunk-2dr7g7p2.js"),re=U(Y(L));if(re.length>0)return gn(N(re));await j(L.args,P,M)})),u.command("doctor").description("Check the health of your Claude Code installation. Reads settings files in the current directory without a trust prompt. For a full checkup that can also fix issues, run /doctor in a session.").action(g(async(P)=>{let{doctorHandler:M}=await import("B:/~BUN/root/chunk-db3pkd2p.js");await M(P)}));let I=u.command("sandbox",{hidden:!0});return I.command("install").description('Install the Windows sandbox user and network filters. Self-elevates (one UAC prompt). Prints a JSON {status, message} result and exits 0 only when status is "ok".').action(async()=>{let{sandboxInstallHandler:P}=await impo
+
+## #40 gTt needle="gTt()" hits248=3 hits247=0
+- #0 @204697516 root/chunk-tf92vf82.js";import{$w}from"B:/~BUN/root/chunk-79exvfay.js";function gTt(){return[{type:"text",text:pXt}]}function Fmr(){Wr({name:$w,description:`Referenc
+- #1 @204697972 ,userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}
+export{gTt,Fmr};
+.// @bun @bytecode
+// Claude Code is a Beta product per An
+- #2 @204710156 reminderType==="full"))?"ultracode":void 0;if(r===void 0||!eJ(i))return[];let l=gTt(),n=l.filter((e)=>e.type==="text").map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(
+
+## #40 function gTt needle="function gTt" hits248=1 hits247=0
+- #0 @204697507 "B:/~BUN/root/chunk-tf92vf82.js";import{$w}from"B:/~BUN/root/chunk-79exvfay.js";function gTt(){return[{type:"text",text:pXt}]}function Fmr(){Wr({name:$w,description:`Refere
+
+## #40 gTt @204697507
+len=46 sha=e47620cfe95c7df8
+function gTt(){return[{type:"text",text:pXt}]}
+
+## #40 workflow-authoring.md needle="workflow-authoring.md" hits248=0 hits247=0
+
+## #40 workflow-authoring/ needle="workflow-authoring/" hits248=0 hits247=0
+
+## #40 SKILL workflow needle="workflow-authoring" hits248=2 hits247=0
+- #0 @97789180 ....artifact-pr-review.......o..commit-push-pr.....Bl..cowork-plugin...........workflow-authoring..(.......file:///B:/%7EBUN/root/chunk-qrr5hhg8.js........readResolve.
+...G.I.re
+- #1 @183512380 UGe="pr",Jin="commit-push-pr",but="cowork-plugin",_ut="loop",JWn="schedule",$w="workflow-authoring";
+export{NGe,hut,PT,gut,KWn,YWn,yut,oP,XWn,q1,$Ge,FGe,UGe,Jin,but,_ut,JWn,$w};
+
+
+## #41 lastReviewFetchAt needle="lastReviewFetchAt" hits248=4 hits247=4
+- #0 @97174912 tration: ........%#.glab.....R/.detailed_merge_status........q2.web_url.....!...lastReviewFetchAt........,..redirectedListUrl.......JD..tengu_gh_pr_status_auth_state...
+.......a
+- #1 @184546738 tate?.branch!==e)this.directState={branch:e,etag:null,pr:null,reviewDecision:"",lastReviewFetchAt:0,redirectedListUrl:null};return this.directState}logAuthState(e){if(e===this.l
+- #2 @184551025 ound:!1,review_fetched:!1}),null;let j=g.reviewDecision,G=!1,ue=L||Date.now()-g.lastReviewFetchAt>=iJt;if(ue){let we=await dJt({host:r.host,owner:p.owner,repo:p.repo},u,U.number
+- #3 @184551192 u,U.number);if(we!==null){if(j=we,g.pr?.number===U.number)g.reviewDecision=we,g.lastReviewFetchAt=t}else G=!0}let pe={http_status:si(N),pr_found:!0,review_fetched:ue};if(G)y("gi
+
+## #41 prStatusByUrl=A$ needle="prStatusByUrl=A$" hits248=1 hits247=0
+- #0 @184546548 difiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){i
+
+## #41 _Jt,30000 needle="_Jt,30000" hits248=1 hits247=0
+- #0 @184546565 rectState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.dir
+
+## #41 iJt=300000 needle="iJt=300000" hits248=1 hits247=0
+- #0 @184548646 r,url:o.url,reviewState:pXe(o.isDraft,o.reviewDecision)}}catch{return null}}var iJt=300000,mXe="2022-11-28",aJt=new Set([301,302,307,308]),lJt=h(()=>w.array(w.object({num
+
+## #41 pollerNotModifiedStreak needle="pollerNotModifiedStreak" hits248=9 hits247=0
+- #0 @92523720 logEvent.....le.isTrustAccepted......T..onTrustBlocked........t.shared.......4`.pollerNotModifiedStreak.........bump.....L..queueMicrotask........b.isDirectApiEnabled........'.getLast
+- #1 @184546378 m:Number(t[4])}}var xfe=60000;class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=
+- #2 @184546457 .pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUr
+- #3 @184547421 sistedCacheBody=e,!0}reset(){this.pollerDisabled=!1,this.pollerBadStreak=0,this.pollerNotModifiedStreak=0,this.directState=null,this.lastLoggedGhAuthState=null,this.baseRepoCache=void
+- #4 @203021124 ;if(this.#t=d,!this.#r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#e.shared.pollerNotModifiedStreak=0;if(d.focused!==C.focused&&this.#b()||d.isLoading!==C.isLoading||d.enabled!==C
+- #5 @203021705 his.#e.shared.pollerDisabled)return!1;if(this.#d===0)return!1;if(this.#e.shared.pollerNotModifiedStreak=0,this.#e.now()-this.#d>=p5e)this.#u=0,this.#d=0;return!0}#k(){if(this.#a++,thi
+- … +3 more
+
+## #41 304 Not Modified needle="304" hits248=272 hits247=278
+- #0 @48751401 H.P..........H...H......H.4...H....H..-.d.H........*4....@.....H...H.P.H9.v
+H...304...H.........]....H...H.H...@...H9.v,f...........D..H..../4...@.....H...H.P.H9.w
+- #1 @67156748 llNoop = 524288, kOnFinished = 1048576, kHasWritable = 2097152, kWritable = 4194304, kCorked = 8388608, kDefaultUTF8Encoding = 16777216, kWriteCb = 33554432, kExpe
+- #2 @67207731 d = 524288, kDefaultUTF8Encoding = 1048576, kDecoder = 2097152, kEncoding = 4194304, kHasFlowing = 8388608, kFlowing = 16777216, kHasPaused = 33554432, kPaused = 6
+- #3 @67794720 ple Choices",
+  301: "Moved Permanently",
+  302: "Found",
+  303: "See Other",
+  304: "Not Modified",
+  305: "Use Proxy",
+  307: "Temporary Redirect",
+  308: "Perma
+- #4 @67820816 e: "pkcs8", format: "pem" });
+  });
+}
+var SSL_OP_CIPHER_SERVER_PREFERENCE = 4194304;
+function newNativeSecureContext(options, cached = !1) {
+  maybeWarnAboutExtraC
+- #5 @67906599 ;
+  if (this.chunkedEncoding && (this.statusCode === 204 || this.statusCode === 304))
+    this.chunkedEncoding = !1, this.shouldKeepAlive = !1;
+  if (this._removed
+- … +266 more
+
+## #41 247 lastReviewFetchAt hits=4
+## #41 247 pollerNotModifiedStreak hits=0
+
+## #43 map-verdict @183083641
+len=319 sha=90015c4a333867a5
+function k(e,t){if(e!==401&&e!==404)return"inconclusive";let s=g().safeParse(t),o=s.success?s.data.error.details:void 0;if(e===401&&o?.error_code==="auth_required"&&o.type==="github")return"github_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"inconclusive"}
+
+## #43 map-win @183083824
+Installed error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:"inconclusive",httpStatus:null}}}var g=h(()=>m({error:m({details:m({error_code:i().optional(),type:i().optional()})})}));function k(e,t){if(e!==401&&e!==404)return"inconclusive";let s=g().safeParse(t),o=s.success?s.data.error.details:void 0;if(e===401&&o?.error_code==="auth_required"&&o.type==="github")return"github_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"inconclusive"}async function IWn(e,t,s){return(await oae(e,t,s)).appInstalled}async function b(){try{let e=Bt()?.accessToken;if(!e)return n("checkGithubTokenSynced: No access token found"),!1;let t=await SC();if(!t)return n("checkGithubTokenSynced: No org UUID found"),!1;let s=
+
+## #43 precheck lastFn name=bxt @193375043
+## #43 precheck @193375043
+MISS {"i":193375043,"missEnd":true,"preview":"async function bxt(r,t=\"/code-review ultra\",d){if(!await mIe())return s(\"tengu_review_remote_precondition_failed\",{reason:v(\"not_git_repo\"),cwd_is_home:N()}),{ok:!1,reason:\"not_git_repo\",error:`${t} needs a git repository so it can clone your code into a cloud sandbox, but ${te()"}
+
+## #43 tengu_review_remote_github_access_probe needle="tengu_review_remote_github_access_probe" hits248=2 hits247=0
+- #0 @94751180 ons,changedFiles-....`n.ultrareview: linked GitHub account access to ...'...bD..tengu_review_remote_github_access_probe.........github_not_connected........github_repo_not_found........}S./code/onboa
+- #1 @193377498 L.verdict} (HTTP ${L.httpStatus??"none"})`),!d?.suppressOfferedRecoveryEvent)s("tengu_review_remote_github_access_probe",{verdict:c(L.verdict),http_status:L.httpStatus??void 0})}if(L?.verdict==="gith
+
+## #43 tengu_review_remote_precondition_failed needle="tengu_review_remote_precondition_failed" hits248=19 hits247=18
+- #0 @94749908 Preflight failed: ..).....}.CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE...'...F...tengu_review_remote_precondition_failed.......b.not_git_repoL....d.. needs a git repository so it can clone your code i
+- #1 @193375116 oid 0}}async function bxt(r,t="/code-review ultra",d){if(!await mIe())return s("tengu_review_remote_precondition_failed",{reason:v("not_git_repo"),cwd_is_home:N()}),{ok:!1,reason:"not_git_repo",error
+- #2 @193375848 e()!==u?.owner.toLowerCase()||o.repo.toLowerCase()!==u?.name.toLowerCase())){s("tengu_review_remote_precondition_failed",{reason:v("pr_url_wrong_repo"),has_remote:!!u,cwd_is_home:N()}),i("failed");le
+- #3 @193376259 nto a checkout of that repo and run ${t} ${o.num} from there.`}}if(!u)return s("tengu_review_remote_precondition_failed",{reason:v("no_github_remote"),cwd_is_home:N()}),i("failed"),{ok:!1,reason:"no_
+- #4 @193376729 } with no argument to review your current branch instead.`};if(iht(u))return s("tengu_review_remote_precondition_failed",{reason:v("monorepo_blocked"),cwd_is_home:N()}),i("failed"),{ok:!1,reason:"mon
+- #5 @193377677 f(L?.verdict==="github_not_connected"||L?.verdict==="github_repo_not_found"){s("tengu_review_remote_precondition_failed",{reason:c(L.verdict),cwd_is_home:N()}),i("failed");let O=`${u.owner}/${u.name}
+- … +13 more
+
+## #43 github_repo_not_found needle="github_repo_not_found" hits248=3 hits247=0
+- #0 @94751256 bD..tengu_review_remote_github_access_probe.........github_not_connected........github_repo_not_found........}S./code/onboarding?step=alt-auth..........run /web-setup......NK8. in C
+- #1 @183083916 b_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"inconclusive"}async function IWn(e,t,s){return(await oae(e,t,s)).appIns
+- #2 @193377650 us:L.httpStatus??void 0})}if(L?.verdict==="github_not_connected"||L?.verdict==="github_repo_not_found"){s("tengu_review_remote_precondition_failed",{reason:c(L.verdict),cwd_is_home:
+
+## #46 function g9 needle="function g9" hits248=7 hits247=3
+- #0 @180264245 n dc(t)?.context?.native_1m===!0||t===Mjt}function egt(e){return Kw(e)!==void 0}function g9n(e){if(Me(process.env.DISABLE_COMPACT))return!0;return!Ye(Pt(e)).startsWith("cl
+- #1 @181151640 notifications",!1)}function S5e(){return R("tengu_kairos_input_needed_push",!1)}function g9(){return FU()&&go("agentPushNotifEnabled",!1).value}var C5n="Send a notificatio
+- #2 @184424059 t(e){if(!(e instanceof Qu))return!1;let t=uh(e);return t!==null&&Qx.has(t.code)}function g9t(e){if(!(e instanceof Qu))return!1;let t=uh(e);if(t===null)return!1;let{code:r}
+- #3 @184735620 add(u)},minted:(o)=>r.has(o),forget:(o)=>{e.delete(o),t.delete(o)}}}var FS=m8();function g9e(e){let t=FS.serverKey(e);if(FS.forget(e),t!==void 0)Z0.sessionBinding()?.remov
+- #4 @193746453 ere: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+function g9t(){return{view:void 0,logs:[],unreadErrors:0,unreadWarnings:0,cleanupRegistered
+- #5 @203092241 0&&qs>ul){ds((kt)=>kt-1);return}if(Wy&&ns>0){Cr((kt)=>kt-1);return}af(Xi,-1,!0)}function g9(){if(l_){if(Xa>0)Bu("tasks"),ds(0);else Bu("workflows");return}if(yl&&Xa>0){if(
+- … +1 more
+
+## #46 isKairosLoopDynamicEnabled leftover name needle="loop_dynamic" hits248=6 hits247=8
+- #0 @97485954 HOOK_BLOCK_CAP to raise this limit........;...stop_hook_blocking..#...u...tengu_loop_dynamic_wakeup_ends_turn......u..tengu_post_autocompact_turn......3..tengu_query_before
+- #1 @97712022  destructure property 'viaKeepalive' from null or undefined value."....<..tengu_loop_dynamic_wakeup_aged_out..........aged_out.....;..loop_wakeup_aged_outB.....F.Cannot des
+- #2 @97712414 ...!5.[loop] dynamic wakeup scheduled: .......YxV. (clamped from .#....B$.tengu_loop_dynamic_wakeup_scheduled......Mu.lastScheduledFor..../.Z.agedOut.........loop_age_ms.
+.
+- #3 @183307695 .agedOut)WGt(o,{startedAt:u,lastScheduledFor:r-(k-_)*1000,agedOut:!0}),s("tengu_loop_dynamic_wakeup_aged_out",{loop_age_ms:r-u,max_age_ms:f}),L("aged_out",{via_keepalive:l}
+- #4 @183308534  ${p}s${g?` (clamped from ${e}s)`:""}${i!==void 0?` \u2014 ${i}`:""}`),s("tengu_loop_dynamic_wakeup_scheduled",{chosen_delay_seconds:Number.isFinite(e)?e:0,clamped_delay_se
+- #5 @185972933 put.prompt;if(Vm().some((ao)=>ao.kind==="loop"&&ao.prompt===Cn))return s("tengu_loop_dynamic_wakeup_ends_turn",{queryChainId:or,queryDepth:yr.depth}),JS(Ve,E),yield*mTe(En,
+
+## #46 Omit the interval to let the model self-pace needle="Omit the interval to let the model self-pace" hits248=2 hits247=2
+- #0 @100409544 ..U.Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace..........h.When the user wants to set up a recurring task, poll for status, or 
+- #1 @204828749 on:"Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.",whenToUse:'When the user wants to set up a recurring task, poll for status, o
+
+## #46 247-dynamic-gate-win @200194348
+pConfig=gf.z.object({managedServers:(0,Dn.field)((0,Dn.annotate)(so.ManagedMcpServers.optional(),{redact:"presence"}),{flatKey:"managedMcpServers",groupOverride:"nameSubset",support:{enabled:[{scopes:["3p"],availableInVersion:"1.2581.0"},{scopes:["1p"],availableInVersion:"1.24012
+
+## #46 self-pace-desc @100409544
+i.n.t.e.r.v.a.l.).
+.
+...........
+
+## Input
+
+>.......Repeat a prompt or command on an interval (e.g. /loop 5m /foo)..y.....U.Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace..........h.When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minu
+
+## #47 QO @180153885
+len=345 sha=d5637050d60c2311
+function QO(e,t){let r=e.export.bind(e),o=e.forceFlush?.bind(e),u=e.shutdown.bind(e);if(e.export=(p,g)=>r(p,(E)=>{if(E.code!==Ic.ExportResultCode.SUCCESS)t.record(E.error?.message??"unknown error");g({code:Ic.ExportResultCode.SUCCESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()};return e.shutdown=async()=>{await u(),t.logSummary()},e}

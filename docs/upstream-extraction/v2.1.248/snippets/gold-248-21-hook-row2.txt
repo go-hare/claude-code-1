@@ -1,0 +1,187 @@
+# gold-248-21-hook-row2
+when=2026-09-20T03:37:49.191Z
+
+## NEW-WINDOW "PermissionRequest hook" 248=11 freshWindows=10
+- #0 @92394529 &..scaleBudgetToQueue..........PermissionRequest...+.......Permission denied by PermissionRequest hook.....{V..permissionRequestResult.....^...hookUpdatedInput	.......permanent......
+- #1 @95604300 atch....&^Z.watcher_stopped.!.....].Server-approval watcher stopped (...9...\1..PermissionRequest hooks cancelled (control stream closed)...........buildDescriptor.....d.b.Dialog tea
+- #2 @96921628  PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."} in a PermissionRequest hook).....}.".
+
+The hook's output was: ........./.boolean (optional)......Y.
+.string
+- #3 @97362072 ]\d+$.......Q.T.nodeType
+...^...nodeTypeId......f...subcommandPrefixes..2.....Y.PermissionRequest hook failed for headless agent: ..%.....w.tengu_mcp_server_policy_bypass_exempt.....
+- #4 @184355276 ,ft,o)}function Xxe(e,t){if(e?.behavior==="deny"||e?.behavior==="ask")return n(`PermissionRequest hook allowed ${t} with updatedInput, but ${e.behavior} rule overrides: ${e.message}`
+- #5 @184356451 ason:{type:"hook",hookName:"PermissionRequest",reason:k.message}}}}}catch(g){n(`PermissionRequest hook failed for headless agent: ${Ee(g).message}`,{level:"error"})}return null}funct
+- #6 @185832006 n: ${Vie(e.name,fn)}
+This is a configuration issue in your canUseTool callback, PermissionRequest hook, or permission-prompt tool \u2014 updatedInput must satisfy the tool's input sc
+- #7 @186236494 oolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.decision}"} in a PermissionRequest hook)`;let g=o.slice(1).map((k)=>`  - ${_wt(k.path)}: ${k.message}`).join(`
+`);retur
+- #8 @196663765 D&&R)D.cancelRequest(R);I?.(),E?.(),d(T)})().catch((T)=>{if(T instanceof Ua){n("PermissionRequest hooks cancelled (control stream closed)");return}_(T)});return{notifyBridgeAndTeardo
+- #9 @200613299 }else return{decision:{behavior:"deny",message:f.message||"Permission denied by PermissionRequest hook",decisionReason:{type:"hook",hookName:"PermissionRequest"},decideLocation:"ask-
+
+## NEW-WINDOW "PreToolUse hook" 248=34 freshWindows=18
+- #0 @96304492 heck_crashed4....9K.\n\n\.\.\. \[(\d+) characters truncated\] \.\.\.\n\n.....c..PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool c
+- #1 @96921401 y approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field; for "...p...
+- #2 @96921549 e|block field; for "...p...~.r." use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."} in a PermissionReques
+- #3 @184379813 the following ${g.length>1?"issues":"issue"}:
+${g.join(`
+`)}`;return p}var w8t="PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool c
+- #4 @184379983 ool call was not executed; other configured hooks may not have completed.",eYe="PreToolUse hook failed with an unexpected error. The tool call was not executed; other configur
+- #5 @184387135 e.code!=="unrecognized_keys");if(!G.success&&ue.length>0){let pe=new Gk(ue),fe=`PreToolUse hook for ${t.name} returned updatedInput that failed schema validation: ${Vie(t.name
+- #6 @184389974 ",stopReason:U??eYe}}}}catch(j){if(Mt(j))if(e.abortController.signal.aborted)n("PreToolUse hook cancelled (parent abort)");else if(j instanceof Ua)n("PreToolUse hook cancelled
+- #7 @184390044 borted)n("PreToolUse hook cancelled (parent abort)");else if(j instanceof Ua)n("PreToolUse hook cancelled (control stream closed)");else{if(n("PreToolUse hook timed out (per-h
+- #8 @184390107 instanceof Ua)n("PreToolUse hook cancelled (control stream closed)");else{if(n("PreToolUse hook timed out (per-hook abort)"),s("tengu_sdk_hook_callback_timeout",{hookEvent:v("
+- #9 @184390402 er",hookName:C};yield{type:"stop",stopReason:U??w8t}}return}else{if(_(ut(Ee(j),"PreToolUse hook dispatch failed")),M)yield{type:"hookPermissionResult",hookPermissionResult:M};
+- #10 @185556525 n")Te=Jt.stopReason;if(Jt.type==="stop")return U(Jt.stopReason??Te??"Blocked by PreToolUse hook")}let Be=await dX(Ie,e,Pe,xe,r,o,L),Ne=Be.decision;if(Pe=Be.input,Ne.behavior!=
+- #11 @185825506 ext))Pe.push(hn.message);break;case"defer":{if(o.remoteCall!==void 0){let bn=`A PreToolUse hook (${hn.hookName}) deferred this call; deferral is not supported for calls served
+
+## NEW-WINDOW "hook_non_blocking_error" 248=29 freshWindows=25
+- #0 @92589260 .!..stop_hook_summary.........P.hook_success........hook_blocking_error......L..hook_non_blocking_error.........hook_error_during_execution........hook_cancelled..$....s..Failed to r
+- #1 @184890796 ;if(t.type==="hook_success"&&t.content!=="")return[O_e(t.content)];if(t.type==="hook_non_blocking_error")return[`${t.command??""}\x00${t.exitCode}\x00${t.stderr}`];return[]}function O
+- #2 @185893190 nt"in we&&(we.hookEvent==="Stop"||we.hookEvent==="SubagentStop")){if(we.type==="hook_non_blocking_error")pe.push(we.stderr||`Exit code ${we.exitCode}`);else if(we.type==="hook_error_d
+- #3 @185899042 hookEvent==="SubagentStop")){if(xe&&Ze.hook?.prompt===xe.condition&&(vt.type==="hook_non_blocking_error"||vt.type==="hook_error_during_execution"))Fe="error",y("goal_met","evaluator_e
+- #4 @185899166 ror_during_execution"))Fe="error",y("goal_met","evaluator_error");if(vt.type==="hook_non_blocking_error")dt.push(vt.stderr||`Exit code ${vt.exitCode}`),yt=!0;else if(vt.type==="hook_e
+- #5 @186213833 ";function Nx(e,t){return{hook:e,outcome:"non_blocking_error",message:Nn({type:"hook_non_blocking_error",...t,exitCode:1})}}var Iz=h(()=>m({ok:W().describe("Whether the condition was 
+- #6 @186288070 turn jN("TaskCompleted",e.blockingError)}function jct(e,t,r=e){return Nn({type:"hook_non_blocking_error",hookName:r,toolUseID:rT(),hookEvent:e,stderr:t.blockingError,stdout:"",exitCod
+- #7 @186295999 tachment"){let Jn=wn.message.attachment;if(Jn.type==="hook_success"||Jn.type==="hook_non_blocking_error")Jn.command=Sr,Jn.durationMs=Date.now()-Tr}yield wn,pr?.();return}if(fn.type===
+- #8 @186296587 tachment"){let Jn=wn.message.attachment;if(Jn.type==="hook_success"||Jn.type==="hook_non_blocking_error")Jn.command=Sr,Jn.durationMs=Date.now()-Tr}yield wn,pr?.();return}if(fn.type===
+- #9 @186297271 t:"",stderr:zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:zn,stdout:"",exitCode:wn.statusCod
+- #10 @186297622 body,stderr:Zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:Zn,stdout:wn.body,exitCode:wn.stat
+- #11 @186299550 n,stdout:wn.body,stderr:qn,exitCode:1,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:qn,stdout:wn.body,exitCode:1}),out
+
+## NEW-WINDOW "Expected schema:" 248=4 freshWindows=3
+- #0 @96922962 ue9...a...Hook output does not start with {, treating as plain text.......]...
+
+Expected schema:
+.L.......Hook output starts with { but is not a JSON object, treating as plain 
+- #1 @186254673 async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("
+- #2 @201448268 }function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+Expected schema:`).trim(),y=0,b=T.indexOf(`
+`);while(b!==-1){let C=T.slice(y,b).trim();if(C)retu
+
+## NEW-WINDOW "Hook JSON output validation failed" 248=1 freshWindows=1
+- #0 @186234668 : mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);function ywt(e){let 
+
+## NEW-WINDOW "JSON validation failed" 248=2 freshWindows=1
+- #0 @186218211 sing response as JSON: ${Ne}`),Nx(e,{hookName:t,toolUseID:C,hookEvent:r,stderr:"JSON validation failed",stdout:Ne});let ze=Iz().safeParse(Ke);if(!ze.success)return n(`Hooks: model re
+
+## fleet-schema @191890856
+)}catch(s){return n(`mcpSkillCache: meta.json for ${t} is not valid JSON: ${s}`,{level:"warn"}),null}let c=k().nullable().safeParse(a);if(!c.success)return n(`mcpSkillCache: meta.json for ${t} failed schema validation: ${c.error.message}`,{level:"warn"}),null;return c.data}async function B(e,t,o){let r=await e.write(C(t),S(o),{publishDiscipline:"atomic",mode:438&~process.umask()});if(!r.ok)throw new P(`meta.json write failed: ${Ge(r.error)}`,"MCP
+
+## fleet-schema @191902797
+parsed, so ${r} may be set to a value that cannot be seen. Fix the settings file (see /doctor) to re-enable cleanup.`),"settings_unknowable";if(a==="present")return n(`Skipping cleanup: settings have validation errors but ${r} was explicitly set. Fix settings errors to enable cleanup.`),"settings_invalid_key_set"}return null}async function Egr(e){return await Jrt(e)===null}function V_(e){let r=(yn()||{}).cleanupPeriodDays??H;if(r===0)return null;
+
+## fleet-schema @192391229
+,ok:S.LTE,fail:S.GT},formatMinimum:{okStr:">=",ok:S.GTE,fail:S.LT},formatExclusiveMaximum:{okStr:"<",ok:S.LT,fail:S.GTE},formatExclusiveMinimum:{okStr:">",ok:S.GT,fail:S.LTE}},At={message:({keyword:e,schemaCode:t})=>b.str`should be ${j[e].okStr} ${t}`,params:({keyword:e,schemaCode:t})=>b._`{comparison: ${j[e].okStr}, limit: ${t}}`};Ve.formatLimitDefinition={keyword:Object.keys(j),type:"string",schemaType:"string",$data:!0,error:At,code(e){let{gen
+
+## fleet-schema @192391300
+atExclusiveMaximum:{okStr:"<",ok:S.LT,fail:S.GTE},formatExclusiveMinimum:{okStr:">",ok:S.GT,fail:S.LTE}},At={message:({keyword:e,schemaCode:t})=>b.str`should be ${j[e].okStr} ${t}`,params:({keyword:e,schemaCode:t})=>b._`{comparison: ${j[e].okStr}, limit: ${t}}`};Ve.formatLimitDefinition={keyword:Object.keys(j),type:"string",schemaType:"string",$data:!0,error:At,code(e){let{gen:t,data:r,schemaCode:n,keyword:o,it:a}=e,{opts:i,self:c}=a;if(!i.valida
+
+## fleet-schema @192391426
+:e,schemaCode:t})=>b.str`should be ${j[e].okStr} ${t}`,params:({keyword:e,schemaCode:t})=>b._`{comparison: ${j[e].okStr}, limit: ${t}}`};Ve.formatLimitDefinition={keyword:Object.keys(j),type:"string",schemaType:"string",$data:!0,error:At,code(e){let{gen:t,data:r,schemaCode:n,keyword:o,it:a}=e,{opts:i,self:c}=a;if(!i.validateFormats)return;let s=new Dt.KeywordCxt(a,c.RULES.all.format.definition,"format");if(s.$data)p();else f();function p(){let h=
+
+## fleet-schema @192391489
+{keyword:e,schemaCode:t})=>b._`{comparison: ${j[e].okStr}, limit: ${t}}`};Ve.formatLimitDefinition={keyword:Object.keys(j),type:"string",schemaType:"string",$data:!0,error:At,code(e){let{gen:t,data:r,schemaCode:n,keyword:o,it:a}=e,{opts:i,self:c}=a;if(!i.validateFormats)return;let s=new Dt.KeywordCxt(a,c.RULES.all.format.definition,"format");if(s.$data)p();else f();function p(){let h=t.scopeValue("formats",{ref:c.formats,code:i.code.formats}),y=t
+
+## fleet-schema @192391765
+n;let s=new Dt.KeywordCxt(a,c.RULES.all.format.definition,"format");if(s.$data)p();else f();function p(){let h=t.scopeValue("formats",{ref:c.formats,code:i.code.formats}),y=t.const("fmt",b._`${h}[${s.schemaCode}]`);e.fail$data((0,b.or)(b._`typeof ${y} != "object"`,b._`${y} instanceof RegExp`,b._`typeof ${y}.compare != "function"`,m(y)))}function f(){let h=s.schema,y=c.formats[h];if(!y||y===!0)return;if(typeof y!="object"||y instanceof RegExp||typ
+
+## fleet-waitingFor @192120439
+=>{if(h.id===i.id)return!1;let C=Ln(h.state.createdAt);if(C===null)return!1;let x=Ln(h.state.firstTerminalAt)??m;return w<x&&C<S})}function zu(i){let d=new Date(i.startedAt).toISOString(),m=new Date(i.updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,output:null,children:null,linkScanOffset:0,template:i.agent??i.entrypoint??"interactive",respawnFlags:[],name:i.name,intent:i.name??"",sessionId:i.sessionId??"",cwd:i.cwd,originCwd:i.cwd,createdAt:d,updatedAt:m,firstTerminalAt:null,backend:"peer",sock:i.sock,pid:i.pid}}function Yu(i,d){if
+
+## _P-schema-first-line @201448189
+len=312 sha=53fb0e6c00002e9e
+function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+Expected schema:`).trim(),y=0,b=T.indexOf(`
+`);while(b!==-1){let C=T.slice(y,b).trim();if(C)return C.length>200?C.slice(0,200)+"\u2026":C;y=b+1,b=T.indexOf(`
+`,y)}let P=T.slice(y).trim();return P.length>200?P.slice(0,200)+"\u2026":P}
+
+## _P-callers-before @201448189
+f(Yi?.type!=="in_process_teammate"){let Dd;if(au[2]!==gn)Dd=e(lu,{attachment:gn}),au[2]=gn,au[3]=Dd;else Dd=au[3];return Dd}let Dd;if(au[4]!==Yi.identity.color)Dd=zb(Yi.identity.color),au[4]=Yi.identity.color,au[5]=Dd;else Dd=au[5];let hP=Dd,RP=gn.status==="completed"?"shut down gracefully":gn.status,lO;if(au[6]===p)lO=r(t,{"aria-hidden":!0,dimColor:!0,children:[pr," "]}),au[6]=lO;else lO=au[6];let Kh;if(au[7]!==hP||au[8]!==Yi.identity.agentName)Kh=r(t,{color:hP,bold:!0,dimColor:!1,children:["@",Yi.identity.agentName]}),au[7]=hP,au[8]=Yi.identity.agentName,au[9]=Kh;else Kh=au[9];let uO;if(au[10]!==RP||au[11]!==Kh)uO=r(o,{flexDirection:"row",width:"100%",marginTop:1,children:[lO,r(t,{dimColor:!0,children:["Teammate"," ",Kh," ",RP]})]}),au[10]=RP,au[11]=Kh,au[12]=uO;else uO=au[12];return uO}function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+E
+
+## _P(A.stderr,A.stdout) hits=1
+## _P-call @201440485
+if(z[178]!==Y||z[179]!==X)Te=r(L,{children:[Y,X]}),z[178]=Y,z[179]=X,z[180]=Te;else Te=z[180];return Te}case"hook_non_blocking_error":{if(A.hookEvent==="Stop"||A.hookEvent==="SubagentStop"){return null}let F;if(z[181]!==A.stderr||z[182]!==A.stdout)F=_P(A.stderr,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookName,z[185]=
+
+## "children:[A.hookName,\" hook error\"]" hits=1 @201440622
+## "children:[A.hookName,\" hook returned blocking error\"]" hits=1 @201440033
+## "Expected schema:`" hits=1 @201448268
+## "gt(f,`" hits=1 @201448260
+## fleet-wide 191.5-192.8M
+- "schema" 31 @191533373,191579067,191579075,191678270,191750510,191750553,191750602,191751342,191754353,191754375
+- "PermissionRequest" 20 @192564992,192565914,192568826,192577913,192578418,192580334,192611742,192611789,192612021,192612073
+- "waitingFor" 1 @192120439
+- "detail" 64 @191522230,191531016,191531048,191649223,191673275,191676048,191678548,191682589,191684086,191684846
+
+## fleet-PermissionRequest @192564992
+m and left-click, but you cannot type, press keys, or paste into them. To run shell commands, use the Bash tool instead."+yn;async function hr(e,n,t,o){if(!t.onPermissionRequest)return p("This session was not wired with a permission handler. Computer control is not available here.","feature_unavailable");if(t.getTeachModeActive?.())return
+
+## fleet-PermissionRequest @192565914
+approver");if(o){let T={requestId:We(),reason:r,apps:[],requestedFlags:{},screenshotFiltering:e.executor.capabilities.screenshotFiltering,tccState:o};await t.onPermissionRequest(T);let P=await e.ensureOsPermissions();if(P.granted)return p("macOS Accessibility and Screen Recording are now both granted. "+"Call request_access again immediat
+
+## fleet-PermissionRequest @192568826
+apabilities.screenshotFiltering,...u.length>0&&{willHide:u,autoUnhideEnabled:e.getAutoUnhideEnabled()},preferredModeDefault:e.getPreferredMode?.()},P=await t.onPermissionRequest(T);if(b=P.granted,_=P.denied,P.preferredMode)e.setPreferredMode?.(P.preferredMode)}let S=[...a,...b],R=new Set(S.map((T)=>T.bundleId)),D=d.filter((T)=>R.has(T.bun
+
+## fleet-PermissionRequest @192577913
+gth,t=e.filter((o)=>o.tier==="click").length;return{...n>0&&{denied_browser_count:n},...t>0&&{denied_terminal_count:t}}}async function yr(e,n,t,o){if(!t.onTeachPermissionRequest)return p("Teach mode is not available in this session.","feature_unavailable");if(t.getTeachModeActive?.())return p("Teach mode is already active. To add more app
+
+## fleet-PermissionRequest @192578418
+p(r.message,"bad_args");if(o){let k={requestId:We(),reason:r,apps:[],screenshotFiltering:e.executor.capabilities.screenshotFiltering,tccState:o};await t.onTeachPermissionRequest(k);let T=await e.ensureOsPermissions();if(T.granted)return p("macOS Accessibility and Screen Recording are now both granted. "+"Call request_teach_access again im
+
+## fleet-PermissionRequest @192580334
+apps:c,screenshotFiltering:e.executor.capabilities.screenshotFiltering,...a.length>0&&{willHide:a,autoUnhideEnabled:e.getAutoUnhideEnabled()}},b=await t.onTeachPermissionRequest(m),_=[...l,...b.granted];if(b.userConsented!==!0)return p("The user declined to start the guided walkthrough (teach mode). Do not call request_teach_access again 
+
+## combo counts 248/247
+- "hookName+\" hook error\"" 248=0 247=0
+- " hook error · " 248=0 247=0
+- " hook: " 248=42 247=42
+- "schema:" 248=308 247=306
+- "failed schema" 248=35 247=35
+- "invalid JSON" 248=27 247=27
+- "validation failed" 248=69 247=69
+
+## Eve-ywt @186234668
+: mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);function ywt(e){let t=e.path.at(-1);return e.code==="invalid_value"&&typeof t==="string"&&vNn.has(t)}function bwt(e,t){let r=[...t,...e.path];if(e.code!=="invalid_union"||e.errors.length===0)return{path:r,message:e.message.replace(/^Invalid input: /,"")};let u=e.errors.find((C)=>C.length>0&&!C.some(ywt))?.[0];if(u)return bwt(u,r);let p=e.errors.flatMap((C)=>C.filter(ywt)),g=p[0];if(g?.code!=="invalid_va
+
+## PR-hook-js @184355276
+filter((u)=>u.isEnabled?.(o)!==!1),t,r),t)}function Kit(e,t,r,o){return FPt(t?e.filter((u)=>t.includes(u.agentType)):e,r,ft,o)}function Xxe(e,t){if(e?.behavior==="deny"||e?.behavior==="ask")return n(`PermissionRequest hook allowed ${t} with updatedInput, but ${e.behavior} rule overrides: ${e.message}`),e;return null}async function m8t(e,t,r,o,u,p){try{for await(let g of XJ(e.name,r,t,o,u,p,o.abortController.signal)){if(!g.permissionRequestResult)
+
+## PR-hook-fn-Xxe @184355203
+len=191 sha=fae36a3923ff2351
+function Xxe(e,t){if(e?.behavior==="deny"||e?.behavior==="ask")return n(`PermissionRequest hook allowed ${t} with updatedInput, but ${e.behavior} rule overrides: ${e.message}`),e;return null}
+
+## PR-hook-js @184356451
+{k.message}`),o.abortController.abort();return{behavior:"deny",message:k.message||"Permission denied by hook",decisionReason:{type:"hook",hookName:"PermissionRequest",reason:k.message}}}}}catch(g){n(`PermissionRequest hook failed for headless agent: ${Ee(g).message}`,{level:"error"})}return null}function $B(e){return{behavior:"deny",message:CLt(e),decisionReason:{type:"asyncAgent",reason:"Action requires interactive approval and permission prompt
+
+## PR-hook-fn-m8t @184355394
+len=1154 sha=4cdf384572ad9b05
+async function m8t(e,t,r,o,u,p){try{for await(let g of XJ(e.name,r,t,o,u,p,o.abortController.signal)){if(!g.permissionRequestResult)continue;let k=g.permissionRequestResult;if(k.behavior==="allow"){let E=k.updatedInput??t;if(k.updatedInput||e.requiresUserInteraction?.()){let M=Xxe(await oM(e,E,{...o,toolUseId:r},{hookUpdatedInput:k.updatedInput}),e.name);if(M)return M.behavior==="ask"?{behavior:"deny",message:M.message,decisionReason:M.decisionReason??(k.updatedInput?MKe:rbn)}:M}let C=e.suppressesAllPermissionUpdates?.(t)===!0?OH(k.updatedPermissions??[]):k.updatedPermissions??[];if(C.length>0)o.setSessionToolPermissionContext((M)=>lC(M,C)),await cO(C,o.storageV5);return{behavior:"allow",updatedInput:E,decisionReason:{type:"hook",hookName:"PermissionRequest"}}}if(k.behavior==="deny"){if(k.interrupt)n(`Hook interrupt: tool=${e.name} hookMessage=${k.message}`),o.abortController.abort();return{behavior:"deny",message:k.message||"Permission denied by hook",decisionReason:{type:"hook",hookName:"PermissionRequest",reason:k.message}}}}}catch(g){n(`PermissionRequest hook failed for headless agent: ${Ee(g).message}`,{level:"error"})}return null}
+
+## PR-hook-js @186236494
+evel decision is the legacy approve|block field; for "${e.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.decision}"} in a PermissionRequest hook)`;let g=o.slice(1).map((k)=>`  - ${_wt(k.path)}: ${k.message}`).join(`
+`);return`${Eve}${p}${g?`
+`+g:""}
+
+The hook's output was: ${S(e,null,2)}`}function kwt(){return S({continue:"boolean (optional)",suppressOutput:"boolean (op
+
+## PR-hook-fn-Swt @186235528
+len=1134 sha=7cd25b6ba6d5958a
+function Swt(e,t){let r=Dz(e)?e.hookSpecificOutput:void 0,o=t.issues.map((k)=>bwt(k,[])),u=o[0],p=u?`${_wt(u.path)}: ${u.message}`:"unknown error";if(Dz(r)&&!("hookEventName"in r))p='hookSpecificOutput is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision==="ask"))p+=e.decision==="ask"?' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)':` (top-level decision is the legacy approve|block field; for "${e.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.decision}"} in a PermissionRequest hook)`;let g=o.slice(1).map((k)=>`  - ${_wt(k.path)}: ${k.message}`).join(`
+`);return`${Eve}${p}${g?`
+`+g:""}
+
+The hook's output was: ${S(e,null,2)}`}
+
+## PR-hook-js @196663765
+est(R),R=void 0;I?.(),E?.(),F?.(),u(T.finalInput,T.reprompted.decisionReason,T.reprompted);return}if(!T||!g())return;if(D&&R)D.cancelRequest(R);I?.(),E?.(),d(T)})().catch((T)=>{if(T instanceof Ua){n("PermissionRequest hooks cancelled (control stream closed)");return}_(T)});return{notifyBridgeAndTeardown:N}}var ao=null,mo=null,ge=import.meta.require("B:/~BUN/root/chunk-dx717e69.js").WorkflowTool,co=import.meta.require("B:/~BUN/root/chunk-8jnspd30.
+
+## PR-hook-fn-N @196660005
+len=79 sha=264032d7753f036c
+function N(T){if(D&&R){if(T)D.sendResponse(R,T);D.cancelRequest(R)}I?.(),E?.()}

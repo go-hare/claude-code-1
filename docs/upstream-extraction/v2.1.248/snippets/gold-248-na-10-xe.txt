@@ -1,0 +1,6 @@
+# gold-248-na-10-xe  policy/settings block cleanup (unique, after Ae)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191903716
+
+len=182 sha=98f172dfd19a7e7f
+function xe(){if(be("policySettings")?.cleanupPeriodDays!==void 0)return!0;if(Vgn())return!0;return UW().some((e)=>e.file!==lyn&&($te.some((t)=>t===e.path)||e.severity!=="warning"))}

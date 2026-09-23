@@ -1025,47 +1025,45 @@ function sanitizePeerOriginName(name: string): string {
 }
 
 /**
- * Resolve human-readable sender label for peer origin.
+ * densable Ce (2.1.251 #17): sender address + display label.
  *
  * Order:
- *   1. ALS agentContext teammate + agentName (teammates under runWithAgentContext)
- *   2. agentNameRegistry reverse lookup
- *   3. local_agent task.agentType
- *   4. in-process teammate task.identity.agentName
- *   5. raw agent id
+ *   1. teammate agentContext.agentName → from and displayName = name
+ *   2. agentNameRegistry id match → from and displayName = name
+ *   3. in_process_teammate task → from and displayName = identity.agentName
+ *   4. else from = agent id; displayName = local_agent ? agentType : id
+ *
+ * `from` is name or id — never agentType. agentType is only displayName
+ * when the task is local_agent.
  *
  * Exported for unit tests.
  */
 export function resolveSenderDisplayName(
   context: ToolUseContext,
   senderAgentId: string,
-): string {
+): { from: string; displayName: string } {
   // Prefer ALS when the running agent is a teammate (SendMessage from
   // in-process/tmux teammate loop). Live identity even when registry/task lag.
   const agentCtx = getAgentContext()
-  if (
-    agentCtx?.agentType === 'teammate' &&
-    typeof agentCtx.agentName === 'string' &&
-    agentCtx.agentName.length > 0
-  ) {
-    return agentCtx.agentName
+  if (agentCtx?.agentType === 'teammate' && agentCtx.agentName) {
+    return { from: agentCtx.agentName, displayName: agentCtx.agentName }
   }
 
   const appState = context.getAppState()
   for (const [name, id] of appState.agentNameRegistry) {
-    if (id === senderAgentId) return name
+    if (id === senderAgentId) return { from: name, displayName: name }
   }
   const task = appState.tasks[senderAgentId]
-  if (isLocalAgentTask(task) && typeof task.agentType === 'string') {
-    return task.agentType
+  if (isInProcessTeammateTask(task) && task.identity.agentName) {
+    return {
+      from: task.identity.agentName,
+      displayName: task.identity.agentName,
+    }
   }
-  if (
-    isInProcessTeammateTask(task) &&
-    typeof task.identity?.agentName === 'string'
-  ) {
-    return task.identity.agentName
+  return {
+    from: senderAgentId,
+    displayName: isLocalAgentTask(task) ? task.agentType : senderAgentId,
   }
-  return senderAgentId
 }
 
 /**
@@ -1092,6 +1090,7 @@ function resolveSendMessageOriginAndBody(
         senderTaskId: string
         name?: string
         body: string
+        lineage: 'descendant'
       }
   body: string
 } {
@@ -1099,8 +1098,8 @@ function resolveSendMessageOriginAndBody(
   if (!senderTaskId) {
     return { origin: { kind: 'coordinator' }, body: message }
   }
-  const from = resolveSenderDisplayName(context, senderTaskId)
-  const name = sanitizePeerOriginName(from)
+  const { from, displayName } = resolveSenderDisplayName(context, senderTaskId)
+  const name = sanitizePeerOriginName(displayName)
   const bodyEscaped = escapeAgentMessageBody(message)
   return {
     origin: {
@@ -1109,6 +1108,7 @@ function resolveSendMessageOriginAndBody(
       senderTaskId,
       ...(name ? { name } : {}),
       body: bodyEscaped,
+      lineage: 'descendant',
     },
     body: wrapAgentMessageEnvelope(from, message),
   }

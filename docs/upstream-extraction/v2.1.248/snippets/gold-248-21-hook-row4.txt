@@ -1,0 +1,78 @@
+# gold-248-21-hook-row4
+when=2026-09-20T03:39:36.131Z
+
+## 248-UFe @202584294
+len=329 sha=777e1663cee655c2
+function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}
+
+## 248-lq @202584101
+len=193 sha=8787aabc8d36fa38
+function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.isQueryActive}}
+
+## 247 UFe hits=1 sandbox-waiting=1
+## 247-waitingFor-t5e @232237857
+len=329 sha=338c797d240daf0c
+function t5e(e){if(e.workerSandboxPrompt)return"sandbox request";if(e.elicitationPrompt)return"input needed";if(e.topDialogWaitingFor!==void 0)return e.topDialogWaitingFor;if(e.pendingWorkerRequest)return"worker request";if(e.pendingSandboxRequest)return"sandbox request";if(e.isShowingLocalJSXCommand)return"dialog open";return}
+
+## 248-Owt @186253739
+len=189 sha=8c431a9ef22b837b
+function Owt(e){let t=q(e),r=cz().safeParse(t);if(r.success)return n("Successfully parsed and validated hook JSON output"),b4(t,r.data),{json:r.data};return{validationError:Swt(t,r.error)}}
+
+## 248-kwt @186236662
+len=1293 sha=4bd07c15dae1a0e4
+function kwt(){return S({continue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for PermissionRequest":{hookEventName:'"PermissionRequest"',decision:{"to allow":{behavior:'"allow"',updatedInput:"object (optional) - Modified tool input to use",updatedPermissions:"array (optional) - Permission updates"},"to deny":{behavior:'"deny"',message:"string (optional)",interrupt:"boolean (optional)"}}},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalContext:"string (optional)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}
+
+## 248-ywt @186234762
+len=101 sha=a6779f9857ac9218
+function ywt(e){let t=e.path.at(-1);return e.code==="invalid_value"&&typeof t==="string"&&vNn.has(t)}
+
+## 248-bwt @186234863
+len=537 sha=769881e4bb8f3b4d
+function bwt(e,t){let r=[...t,...e.path];if(e.code!=="invalid_union"||e.errors.length===0)return{path:r,message:e.message.replace(/^Invalid input: /,"")};let u=e.errors.find((C)=>C.length>0&&!C.some(ywt))?.[0];if(u)return bwt(u,r);let p=e.errors.flatMap((C)=>C.filter(ywt)),g=p[0];if(g?.code!=="invalid_value")return{path:r,message:e.message};let k=se(p.flatMap((C)=>C.code==="invalid_value"?C.values.map((M)=>S(M)):[])),E=k.slice(0,6).join(" | ");return{path:[...r,...g.path],message:`expected one of ${E}${k.length>6?" | \u2026":""}`}}
+
+## 248-_wt @186235400
+len=57 sha=30a618eddeb2b576
+function _wt(e){return e.map(String).join(".")||"(root)"}
+
+## 247-Eve-raw @218251204
+ge}`).join(`
+`);return{validationError:`Hook JSON output val
+
+## 247-Eve @218251204
+n t.hookSpecificOutput))s='hookSpecificOutput is missing required field "hookEventName"';let i=r.slice(1).map((a)=>`  - ${a.path.join(".")||"(root)"}: ${a.message}`).join(`
+`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}async function lre(e,t,n,{threshold:r=JWr,storageV5:o}={}){if(e.length<=r)return e;let s=await VP(e,`hook-${t}-${n}`,Cv(),o);if(KP(s))return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:e.length,persistedSizeBytes:0,truncatedFallback:!0}),`${e.slice(0,r)}
+
+[Hook ${n} truncated at ${r} chars \u2014 persist-to-disk failed: ${s.error}]`;let i=TF(s);return D("tengu_hook_output_persisted",{source:X(n),originalSizeBytes:s.originalSize,persistedSizeBytes:i.length,truncatedFallback:!
+
+## 247-validate-n1r @218250587
+len=719 sha=bb70c5ac495a6ec0
+function n1r(e){let t=ut(e),n=y3().safeParse(t);if(n.success)return _("Successfully parsed and validated hook JSON output"),xPe(t,n.data),{json:n.data};let r=n.error.issues,o=r[0],s=o?`${o.path.join(".")||"(root)"}: ${o.message}`:"unknown error";if(t&&typeof t==="object"&&"hookSpecificOutput"in t&&t.hookSpecificOutput&&typeof t.hookSpecificOutput==="object"&&!Array.isArray(t.hookSpecificOutput)&&!("hookEventName"in t.hookSpecificOutput))s='hookSpecificOutput is missing required field "hookEventName"';let i=r.slice(1).map((a)=>`  - ${a.path.join(".")||"(root)"}: ${a.message}`).join(`
+`);return{validationError:`Hook JSON output validation failed \u2014 ${s}${i?`
+`+i:""}
+
+The hook's output was: ${le(t,null,2)}`}}
+
+## 247-hook-error-children @198052945
+essionStart.....0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e.d
+
+## 247-nW @231508463
+len=312 sha=fc2533a8b4bff44d
+function nW(e,r){let n=e?.trim()?e:r?.trim()?r:"";if(!n)return"";let i=ar(n,`
+
+Expected schema:`).trim(),l=0,c=i.indexOf(`
+`);while(c!==-1){let d=i.slice(l,c).trim();if(d)return d.length>200?d.slice(0,200)+"\u2026":d;l=c+1,c=i.indexOf(`
+`,l)}let m=i.slice(l).trim();return m.length>200?m.slice(0,200)+"\u2026":m}
+
+## 247-nW-callers @231508463
+ity.color,lp[5]=gh;else gh=lp[5];let Jj=gh,Zj=ga.status==="completed"?"shut down gracefully":ga.status,b9;if(lp[6]===y)b9=s(t,{"aria-hidden":!0,dimColor:!0,children:[L," "]}),lp[6]=b9;else b9=lp[6];let pw;if(lp[7]!==Jj||lp[8]!==kc.identity.agentName)pw=s(t,{color:Jj,bold:!0,dimColor:!1,children:["@",kc.identity.agentName]}),lp[7]=Jj,lp[8]=kc.identity.agentName,lp[9]=pw;else pw=lp[9];let x9;if(lp[10]!==Zj||lp[11]!==pw)x9=s(a,{flexDirection:"row",width:"100%",marginTop:1,children:[b9,s(t,{dimColor:!0,children:["Teammate"," ",pw," ",Zj]})]}),lp[10]=Zj,lp[11]=pw,lp[12]=x9;else x9=lp[12];return x9}function nW(e,r){let n=e?.trim()?e:r?.tr
+
+## UFe contains
+- hook: false
+- schema: false
+- Permission: false
+- PreTool: false
+- validation: false
+- error: false

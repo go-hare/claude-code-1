@@ -1,0 +1,63 @@
+when=2026-09-22T01:31:18.280Z
+
+## dtt object needle="var dtt={" hits=1
+- @189561724 reason:c(t)});if(v(e,t),n&&he(t))e.events.emit("cancelled")}var dtt={background_handoff:"Automatic continue cancelled \xB7 this session moved to the background, so the task will not resume on its own when the usage limit resets",relaunch:"Automatic continue cancelled \xB7 Claude Code relaunched during the wait, so the task will not resume
+
+## Yet( needle="function Yet(" hits=2
+- @189570459 k-yj0qewn4.js";var k0e="CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE";function Yet(){let{columns:r,rows:e}=process.stdout;if(!r||!e)return{};return{[k0e]:`${r}x${e}`}}function rHn(){let r=a.CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE;if(delete process.env[k0e],r===void 0||!process.stdout.isTTY)return;let e=/^([1-9]\d{0,3})x([1-9]\d{0,3})$/.exec(r);if(!e)ret
+- @216341100 e&&t!==t}var vl,Nm=F(()=>{"use strict";o(qet,"eq");vl=qet});function Yet(e,t,r){var n=e[t];(!(Uet.call(e,t)&&vl(n,r))||r===void 0&&!(t in e))&&uf(e,t,r)}var Het,Uet,hf,j2=F(()=>{"use strict";Y2();Nm();Het=Object.prototype,Uet=Het.hasOwnProperty;o(Yet,"assignValue");hf=Yet});function jet(e,t,r,n){var i=!r;r||(r={});for(var a=-1,s=t.length;
+
+## Yet(); needle="Yet()" hits=6
+- @189570468 4.js";var k0e="CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE";function Yet(){let{columns:r,rows:e}=process.stdout;if(!r||!e)return{};return{[k0e]:`${r}x${e}`}}function rHn(){let r=a.CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE;if(delete process.env[k0e],r===void 0||!process.stdout.isTTY)return;let e=/^([1-9]\d{0,3})x([1-9]\d{0,3})$/.exec(r);if(!e)return;proce
+- @189576430 env);for(let u of e.dropEnv??[])delete s[u];Object.assign(s,Yet());let m=gKt();await g(),E(o,[o,...r,...i],s,m);for(let u of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});await g();let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});if(process.removeAllListeners("beforeExit"),process.removeAllListeners("
+- @201958575 [...this.heldSends].filter((o)=>o.messageUuid===e&&!o.issuedYet());return t.forEach((o)=>o.withdraw()),t.length>0}heldSendUuids(){return[...this.heldSends].flatMap((e)=>e.messageUuid!==void 0&&!e.issuedYet()?[e.messageUuid]:[])}leaveChain(e,t){this.chainedSends--,this.heldSends.delete(e),t()}async releaseHeldSends(e=_t,{exiting:t=!1,final
+- @201958717 is.heldSends].flatMap((e)=>e.messageUuid!==void 0&&!e.issuedYet()?[e.messageUuid]:[])}leaveChain(e,t){this.chainedSends--,this.heldSends.delete(e),t()}async releaseHeldSends(e=_t,{exiting:t=!1,final:o=!1,keepWithheld:r=!1}={}){if(t)this.exitFlushRequested=!0;let a=[...this.heldSends].filter((d)=>!(r&&d.withheldOnRelease()));a.forEach((d)=
+- @201959299 forEach((d,p)=>{if(u[p]?.kind!=="waiting")return;if(d.issuedYet())u[p]={kind:"unconfirmed"};else if(o)d.withdraw(),u[p]={kind:"unsent"}}),{unsent:J(u,(d)=>d.kind==="unsent"),refused:u.flatMap((d)=>d.kind==="refused"?[d.reason]:[]),unconfirmed:J(u,(d)=>d.kind==="unconfirmed"),stillHeld:J(u,(d)=>d.kind==="waiting")}}async sendBashCommand(e,
+- @204175312 v.slice(2),t={...process.env};delete t[k0e],Object.assign(t,Yet());let i=E(n,[...a,...c],{stdio:"inherit",env:t});d();let s=["SIGINT","SIGTERM","SIGHUP"];for(let e of s)process.on(e,()=>{try{i.kill(e)}catch{}});return new Promise(()=>{i.on("close",(e,o)=>{let l=o?128+(p.signals[o]??0):0;process.exit(e??l)}),i.on("error",(e)=>{process.stde
+
+## function WL( needle="function WL(" hits=2
+- @189574748 n t.includes(p)||t.includes(d)||t.includes(R)?`${e} ${d}`:e}function WL(e,t,{as:o="sentence",exitsAfterward:r=!1}={}){if(RX(),!t)return e;if(o==="clause")return`${e} \u2014 ${p}`;return`${e} ${r?R:d}`}function Ket(e,t,o){return _G(t,o).catch((r)=>{if(r instanceof Error)r.message=WL(r.message,e,{as:"clause"});else RX();throw r})}async func
+- @199961428 i.abort=!0),new e({type:"custom",check:"custom",fn:t,...i})}function WL(e,t,n){return new e({type:"custom",check:"custom",fn:t,...z.normalizeParams(n)})}function JL(e,t){let n=_b((i)=>(i.addIssue=(r)=>{if(typeof r==="string")i.issues.push(z.issue(r,i.value,n._zod.def));else{let o=r;if(o.fatal)o.continue=!1;o.code??(o.code="custom"),o.inpu
+
+## var Wu= needle="var Wu=" hits=2
+- @206389544 Wt(e,t){return new vm({type:"intersection",left:e,right:t})}var Wu=M("ZodRecord",(e,t)=>{yc.init(e,t),ye.init(e,t),e._zod.processJSONSchema=(r,o,n)=>cs(e,r,o,n),e.keyType=t.keyType,e.valueType=t.valueType});function Q(e,t,r){if(!t||!t._zod)return new Wu({type:"record",keyType:P(),valueType:e,...pe.normalizeParams(t)});return new Wu({type:
+- @210928164 merable:!0,get:function(){return Re.getStringListFromEnv}});var Wu=jr();Object.defineProperty(P,"_globalThis",{enumerable:!0,get:function(){return Wu._globalThis}});var Xu=Kr();Object.defineProperty(P,"SDK_INFO",{enumerable:!0,get:function(){return Xu.SDK_INFO}});P.otperformance=performance});var lt=d(function(S){Object.defineProperty(S,"
+
+## Wu, needle="model:Wu" hits=4
+- @183109182 "assistant",message:{diagnostics:null,id:A(),container:null,model:Wu,role:"assistant",stop_details:null,stop_reason:"tool_use",stop_sequence:null,type:"message",usage:{...Pp},content:[{type:"tool_use",id:A(),name:Ue,input:{message:e,status:"proactive"}}],context_management:null},parent_tool_use_id:null,is_meta:!0,session_id:t,uuid:A()}}fu
+- @183109550 "assistant",message:{diagnostics:null,id:A(),container:null,model:Wu,role:"assistant",stop_details:null,stop_reason:"stop_sequence",stop_sequence:"",type:"message",usage:{...Pp},content:[{type:"text",text:e,citations:null}],context_management:null},parent_tool_use_id:null,session_id:t,uuid:A(),timestamp:new Date().toISOString()}}class DSe
+- @187155828 mestamp:M(),message:{diagnostics:null,id:L(),container:null,model:Wu,role:"assistant",stop_details:null,stop_reason:"stop_sequence",stop_sequence:"",type:"message",usage:C,content:e,context_management:null},requestId:void 0,apiError:r,apiErrorIsTransient:o,quotaLimits:u,error:p,errorDetails:g,truncatedAfterOutput:k,isApiErrorMessage:t,isV
+- @187900492 let o={type:"assistant",uuid:Kn(),message:{role:"assistant",model:Wu,content:[{type:"text",text:d}],stop_reason:"stop_sequence",usage:{input_tokens:0,output_tokens:0}},parent_tool_use_id:null,isApiErrorMessage:!0},u={type:"result",uuid:Kn(),subtype:"error_during_execution",is_error:!0,duration_ms:0,duration_api_ms:0,num_turns:0,total_cost
+
+## proactivityLevel needle="proactivityLevel:" hits=47
+- @185216951 ns:r,bypassPermissionsBlockedByHost:o,agentPermissionMode:u,proactivityLevel:p}){let g=$f(e),k=void 0,E=void 0;if(qc()){let L=t||g&&g!=="default"||u&&u!=="default",N="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_
+- @185217667 tings:yn()||{},agentFrontmatter:u?{permissionMode:u}:void 0,proactivityLevel:p});Ddn(C.fromAutoFallback);let M;if(C.mode==="auto")nE(!0);return{mode:C.mode,notification:C.notification,proactivity:M,modeSuppliedOnInvocation:C.modeSuppliedOnInvocation}}async function rrn({allowedToolsCli:e,disallowedToolsCli:t,baseToolsCli:r,restricted:o=!1
+- @185548426 pendSystemPrompt:!1,mcpTools:[],agentContext:t.agentContext,proactivityLevel:zH(t),credentials:t.credentials}}),U=Nr(N.message.content);if(N.isApiErrorMessage||QH(U))throw Error(U);let j=L?q(cx(U)):U;return r?.({type:"progress",toolUseID:C,data:{type:"repl_tool_call",toolName:p,toolInput:M,toolUseId:C,phase:"complete",result:j}}),j}catch(
+- @185620724 ls:t.credentials,storageV5:t.storageV5,stickyBetas:L_(Yd()),proactivityLevel:zH(t),effortValue:kc(t)}}),j=[],G=null,ue="",pe=0,fe=new Map,we=null;for await(let xe of U){if(xe.type==="assistant"){if(xe.isApiErrorMessage){we=Nr(xe.message.content);continue}j.push(...xe.message.content);continue}if(xe.type!=="stream_event")continue;if(xe.eve
+- @185940046 te:N,agentCacheTtlOverride:U,forkPointUuid:j,stickyBetas:Ht,proactivityLevel:zH(Ve),agentId:Ve.agentId,agentContext:Ve.agentContext,credentials:Ve.credentials,storageV5:Ve.storageV5,isBackgroundAgent:Ve.isBackgroundAgent,onRetryStatus:Ve.onRetryStatus,subscribeRetryWake:Ve.subscribeRetryWake,onWireMessagesBuilt:Ve.options.onWireMessagesBu
+- @185983160 l:e,messagesLength:t,temperature:r,betas:o,permissionMode:u,proactivityLevel:p,querySource:g,messageClientPlatform:k,queryTracking:E,thinkingType:C,effortValue:M,fastMode:L,previousRequestId:N}){s("tengu_api_query",{model:e,messagesLength:t,temperature:r,provider:$I(),buildAgeMins:Mbt(),...o?.length&&{betas:o.join(",")},permissionMode:Ce(
+
+## sessionEffort needle="sessionEffort:" hits=20
+- @180855834 urn}function fPe(e,o){let t=P(e);if(t!==void 0)Sy(o);return{sessionEffort:H(t),settingsEffortTable:Y()}}function hS(e,o){let t=BT(e,o)??"high";return iO(t)}function gS(e,o){return Hm(e)?hS(e,o):void 0}function RVe(e,o){if(o===void 0)return"";let t=BT(e,o);if(t===void 0)return"";return` with ${rO(iO(t))} effort`}function w(e){return Number
+- @190425579 mpty"},taskSummary:null,policyVersion:0,initialMessage:null,sessionEffort:{kind:"inherit"},settingsEffortTable:{default:void 0,byModel:{}},ultracode:void 0,cacheMissAckedAtOutputTokens:-1,fastMode:!1,storedImagePaths:new Map,imageDescriptions:new Map,classifierApprovals:{approvals:new Map,checking:new Set},teammateColors:{assignments:new 
+- @191130308 let t=s;if(l){let g=X5(a);if(!J5(t.sessionEffort,g))t={...t,sessionEffort:g}}if(i===void 0){if(d){if(!t.ultracode)t={...t,ultracode:!0}}else if(l&&t.ultracode)t={...t,ultracode:!1}}else if(i){if(!t.ultracode||fl(t)!=="xhigh")t={...t,ultracode:!0,sessionEffort:tB("xhigh")}}else if(t.ultracode)t={...t,ultracode:!1};return t});let u=o();retu
+- @191130494 if(i){if(!t.ultracode||fl(t)!=="xhigh")t={...t,ultracode:!0,sessionEffort:tB("xhigh")}}else if(t.ultracode)t={...t,ultracode:!1};return t});let u=o();return n(`[bridge] apply_flag_settings applied effort=${fl(u)??"auto"} ultracode=${u.ultracode===!0}`),{ok:!0}}function p(e){let r=c();if(!r||!QUt())return;let o=Qo();if(o.lastKnownEffort=e,
+- @193038056 =>{f=!0;let u=X5(i.value),c=i.ultracode??!1;r((d)=>{if(e??={sessionEffort:d.sessionEffort,ultracode:d.ultracode??!1},J5(d.sessionEffort,u)&&(d.ultracode??!1)===c)return d;return{...d,sessionEffort:u,ultracode:c}})},o);if(f&&!l.effortUpdate)r((i)=>{if(e===null)return i;if(J5(i.sessionEffort,e.sessionEffort)&&(i.ultracode??!1)===e.ultracode
+- @193038179 essionEffort,u)&&(d.ultracode??!1)===c)return d;return{...d,sessionEffort:u,ultracode:c}})},o);if(f&&!l.effortUpdate)r((i)=>{if(e===null)return i;if(J5(i.sessionEffort,e.sessionEffort)&&(i.ultracode??!1)===e.ultracode)return i;return{...i,sessionEffort:e.sessionEffort,ultracode:e.ultracode}});return l} export{Vet,pKt,aUe,moe}; .// @bun @b
+
+## dtt-window @189561724
+vents.emit("cancelled")}var dtt={background_handoff:"Automatic continue cancelled \xB7 this session moved to the background, so the task will not resume on its own when the usage limit resets",relaunch:"Automatic continue cancelled \xB7 Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue)",desktop_handoff:"Automatic continue cancelled \xB7 this session moved to Claude Desktop, so the task will not resume on it
+
+## _G-Yet window
+@189576414 ;for(let u of e.dropEnv??[])delete s[u];Object.assign(s,Yet());let m=gKt();await g(),E(o,[o,...r,...i],s,m);for(let u of
+
+## fn Yet near "Object.assign(s,Yet())" hits=1
+- hit @189576414 start=function Yet(@189570459
+len=97 sha=441dc78a3358239b
+function Yet(){let{columns:r,rows:e}=process.stdout;if(!r||!e)return{};return{[k0e]:`${r}x${e}`}}
+
+## fn WL near "WL(r.message,e,{as:\"clause\"})" hits=1
+- hit @189574968 start=function WL(@189574748
+len=141 sha=6613212711c97e49
+function WL(e,t,{as:o="sentence",exitsAfterward:r=!1}={}){if(RX(),!t)return e;if(o==="clause")return`${e} \u2014 ${p}`;return`${e}
+${r?R:d}`}

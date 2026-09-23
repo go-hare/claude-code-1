@@ -1,0 +1,89 @@
+# gold-248-unk-8-ip  densable 2.1.248 #8
+# oauth-refresh-tool-cache — Ip proven ≠ leftover clearToolSchemaCache
+# SEA 226708128 · 247 SEA 253204128 present
+# stay UNKNOWN · invent-ban · no leftover land · no checklist/board
+# peels: _peel-248-unk-8.mjs · _peel-248-unk-8b.mjs · _peel-248-unk-8c.mjs
+
+keepAcrossTokenChanges 248=5 247=0
+dropInFlightComposes 248=3 247=0
+tengu_still_kestrel 248=2 247=0
+toolsHash 248=7 247=7
+clearToolSchemaCache 248=0 247=0
+Ip body 247exact=0
+folded if(jN(),!s_())IW();else o_() 248=1 247=0
+
+## verdict
+Ip is the unique 248 fold of 247 `no(),ki()` with a NEW `tengu_still_kestrel` gate.
+It is NOT leftover `clearToolSchemaCache` (Map.clear). Leftover oauth-save already
+always-clears. Leftover has no `r_`/`keepAcrossTokenChanges`/`dropInFlightComposes`.
+Do not invent the gate. Do not add a second clear. stay UNKNOWN.
+
+## G2t @180708774 len=950 sha=cc44d2bb74242102 otherHits=0
+function G2t(e,t){if(!VA(e.scopes))return s("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return s("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,clientId:E}=e,C=_n(),O=TN();try{let k=await C.mutate((N)=>({...N,claudeAiOauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf(k)}),{success:!1,warning:"Failed to save OAuth tokens"}}}
+
+## 247 yx @208856754 len=958 sha=f704632816904f8d otherHits=0
+async function yx(e,t){...;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}...}
+
+## cluster map
+248 lY @180712164 === 247 Pi @208859995  host oauth cache clear
+248 jN @180274814 === 247 no @208606096  Bd().betas=al() / De().betas=Xc()
+248 IW @180125586 === 247 ki @208828664  kn()/pa().invalidateAll()
+248 Ip @180712775 NEW fold: jN + (!s_() ? IW : o_)
+248 ON @180712818 === 247 Tx  lY(),mE(),Ip() vs Pi(),Sm(),no(),ki()
+248 Hk @180712847 === 247 wt  if(ON(),D())_Y()
+248 Vmn @180712878 === 247 o$  full logout clear (lMe/J2t.cache?.clear + jN,IW)
+248 tN keychain-token-change: Ip()   vs 247 vR: no(),ki()
+
+## lY @180712164 len=39 sha=3611e9129dcf8433 leftover=host oauth cache clear (NOT getClaudeAIOAuthTokens.memoize)
+function lY(){yve.of(z().host).clear()}
+
+## 247 Pi @208859995 len=38 sha=52f67032b298ecdf
+function Pi(){tr.of(C().host).clear()}
+
+## Ip @180712775 len=43 sha=043f2d44f49faba4 otherHits=0
+function Ip(){if(jN(),!s_())IW();else o_()}
+
+## jN @180274814 len=30 sha=0a2d32fc2c27739b
+function jN(){Bd().betas=al()}
+
+## 247 no @208606096 len=30 sha=4cce828164005f44
+function no(){De().betas=Xc()}
+
+## s_ @180125738 len=171 sha=4fb6f117e0cecea6  247=ABSENT
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## Gx
+var Gx="tengu_still_kestrel"
+
+## IW @180125586 len=35 sha=a2343b0146ed09ed leftover≈clearToolSchemaCache / byKey.clear
+function IW(){kn().invalidateAll()}
+
+## o_ @180125621 len=42 sha=7a1425b27219fa53 leftover=ABSENT
+function o_(){kn().dropInFlightComposes()}
+
+## 247 ki @208828664 len=35 sha=ea9d7ec564467d4c
+function ki(){pa().invalidateAll()}
+
+## ON @180712818 len=29 sha=f37fdd844f70491a
+function ON(){lY(),mE(),Ip()}
+
+## Hk @180712847 len=31 sha=d406634b0df40921
+function Hk(){if(ON(),D())_Y()}
+
+## Vmn @180712878 len=107 sha=930566aff607d6b4
+function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}
+
+## r_ @180125072 (248) vs 247 mR @208828572
+class r_{byKey=new Map;keepAcrossTokenChanges=void 0;generation=0;get(e){return this.byKey.get(e)}stamp(){return this.generation}register(e,t,r){if(r===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}dropInFlightComposes(){this.generation+=1}}
+247 class mR{byKey=new Map;generation=0;get/stamp/register;invalidateAll(){this.byKey.clear(),this.generation+=1}}
+247 mR has NO keepAcrossTokenChanges / NO dropInFlightComposes
+
+## Ip() production callers (248)
+- G2t @180709491 after oauth save  lY(),Ip()
+- ON @180712818
+- tN @180714235 lastKeychainAccessToken change
+- (def) @180712784
+NOT leftover clearToolSchemaCache. leftover save already:
+  getClaudeAIOAuthTokens.cache?.clear?.(); clearBetasCaches(); clearToolSchemaCache();
+leftover src/utils/toolSchemaCache.ts has no generation / stamp / register / dropInFlight
+leftover has no tengu_still_kestrel / keepAcrossTokenChanges / createToolDescribeSlot

@@ -1,0 +1,206 @@
+# gold-248-na-extract3
+
+## #30 Xn-ke-zn @183208419
+,".python_history",".node_repl_history",".psql_history",".mysql_history"],zn=/(?:\.(?:pem|key|p12|pfx|keystore|jks)|_(?:rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml))$/,ke=".env",Vn=".claude.json",kt=["example","sample","template","dist"],Xn=new RegExp(`(?:${Ke})$`,"i"),bt=64,Jn=".git",gt="config";function ocn(e){let t=Qn(e),r=t.map((u,o)=>tr(u,{leadingDot:o===t.length-1})),d=r.at(-1)??[];return r.some((u)=>u.length>bt)||r.some((u)=>u.some((o)=>Kn.includes(o)))||$n.some((u)=>er(r,u))||d.some(rr)||d.some(ir)&&r.slice(0,-1).some((u)=>u.some((o)=>o.endsWith(Jn)))}va
+
+## #30 zn.test needle="zn.test" hits=6
+- #0 @181658610 ||g.type==="number"){if(g.children.length>0)return H(g);if(Un.test(g.text))return H(g);if(zn.test(g.text))return H(g);if(Bn.test(g.text))return H(g);if(/(?:^|[^\\])(?:\\\\)*[`$]/.test(g.t
+- #1 @181669102 omplex",reason:"Word contains brace expansion syntax",nodeType:"word",differential:!0};if(zn.test(e.text)||Bn.test(e.text))return{kind:"too-complex",reason:"Brace body contains backslash-
+- #2 @181669964 {kind:"too-complex",reason:"Brace expansion",nodeType:"concatenation",differential:!0};if(zn.test(e.text)||Bn.test(e.text))return{kind:"too-complex",reason:"Brace body contains backslash-
+- #3 @183209964 1):e}function nr(e){return e.replace(/^\.(?=.)/,"")}function rr(e){return Yn.includes(e)||zn.test(e)||e===ke||e.startsWith(`${Vn}.`)||e.startsWith(`${ke}.`)&&!kt.includes(e.slice(ke.lengt
+- #4 @189944312 if(C===void 0?u===1/0:C<u)p.add(N);else if(C===void 0)k.push(N)}if(k.some((O)=>!p.has(O)&&zn.test(O)))return y("artifact_publish","block_ids_unplaced_id"),[];let E=Ui(o),T=new Map,v=[],P=
+- #5 @189944706 ,P>Fi)return null;let L=$i(N,K,p,T);p.add(L);let U=O.sourceCodeLocation;if(!U?.startTag||!zn.test(L))continue;let Y=Di(e,U.attrs?.id);if(D!==void 0&&Y!==void 0)v.push({start:Y.start,end:Y
+
+## #30 var zn needle="var zn=" hits=13
+- #0 @178912354  vn=cn("ZodISODateTime",(e,t)=>{Nr.init(e,t),P.init(e,t)});function st(e){return Do(vn,e)}var zn=cn("ZodISODate",(e,t)=>{Ar.init(e,t),P.init(e,t)});function ut(e){return Uo(zn,e)}var $n=c
+- #1 @179082072 var rr=h(()=>_t("linux",due()));function Te(e,t=due()){return e==="default"?due():_t(e,t)}var zn=h(()=>m(Object.fromEntries(De.map((e)=>[e,oa((t)=>{if(t===null)return;if(e!=="default"&&mt
+- #2 @180040783 rseKeyPairsIntoRecord",{enumerable:!0,get:function(){return nq.parseKeyPairsIntoRecord}});var zn=Ql();Object.defineProperty(ue,"SDK_INFO",{enumerable:!0,get:function(){return zn.SDK_INFO}
+- #3 @183160598 )}function Kn(e){try{let n=Tn(e);if(x(n))return n;return m(Ce(S(e)),n)}catch{return null}}var zn=B()==="windows"?["git","powershell.exe"]:["git","ps"];class u_e{#e=new Map;#n=new Map;path
+- #4 @189941657 !r.has(o))return o;let u=s.get(o)||2;while(r.has(o+"-"+u))u++;return s.set(o,u+1),o+"-"+u}var zn=/^b-[0-9a-z]{1,7}(-[0-9]+)?$/,Wn="<!doctype html>",Fi=33554432;function Di(e,t){if(t===voi
+- #5 @193187556 ilures(),durationMs:Date.now()-g,error:Qxe({name:re,message:ce,stack:T})}}finally{le?.()}}var zn=16,Kn=250,Gn=1e4;function qn(r){let i=[],p,m=0,g=(w)=>{if(p=void 0,i.length===0)return;if(
+
+## #30 var Yn needle="var Yn=" hits=11
+- #0 @181661905 e;let d=Te(u,t,r,o);if(typeof d!=="string")return d;if(Yt.test(d))return H(u)}return null}var Yn=new Set(["command","builtin","noglob","nocorrect","time"]),zo=new Set(["declare","typeset"
+- #1 @189463444 =Si){Vl.push(Ot=yn[Wl]);break}var li=[];for(var Xl=0;Xl<Vl.length;Xl++){var Oa=Vl[Xl];for(var Yn=Oa._start;Yn<=Oa._end;Yn++)li.push(Yn)}var Ei=_e[li[0]],ul=Ne.level;for(var cl=li[0]-1;cl>
+- #2 @190897285 er tools are now available in this session. Continue the user's task using them.
+
+${_4e}`}var Yn="The user started installing the Claude in Chrome extension but chose to continue without 
+- #3 @193188050 on Jo(r,i){if(i)return r;return Va()?r:"custom"}function zt(r,i){return r==="built-in"&&i}var Yn=200;function hrt(r,i,p){if(zt(i,p)&&r)return Lo(r);return v("custom")}function grt(r,i,p){
+- #4 @193885998 ath";function Qe(e){return e.includes("*")}function dt(e){return e.replace(/[\s:*]+$/,"")}var Yn=new Set(["-u","-g","-c","-d","-h","-p","-r","-t"]);function Jn(e){let t=e.split(/\s+/).fil
+- #5 @195481013 ,["message"],[0]];_.TypeRegistry.for("com.amazonaws.bedrockruntime").registerError(Q,pOe);var Yn=[3,"com.amazonaws.bedrockruntime","InvokeModelRequest",0,["body","contentType","accept","m
+
+## #33 function C supplied needle="function C(" hits=161
+- #0 @68606477 m(r,s,o,u,f),e(s,o)))throw new E(o,u)})(t,a)}catch(f){if(f instanceof E)return f;throw f}}function C(t,n,e,r,a){e=y(e),r||(r=i);try{(function f(o,u,p){if(!(o.end<n)){var s=p||o.type;if(o.star
+- #1 @83081645 xports={};if(e.cjs=null,i)$(e);return e.state=2,e}catch(t){throw e.state=3,e.failure=t,t}}function C(e,r,o){let t=0,i=[],s=!1,{length:p}=r;while(t<p){let n=r[t],l=t+2+r[t+1],a=o(n,!1,e);i.pus
+- #2 @178491676 function it(t,e){if(!t.startsWith(C(e)+l))return!1;return t.split(l).some((r)=>De.has(r))}function C(t){return t.endsWith(l)?t.slice(0,-1):t}var S;function at(t,e,r){let n=ct(),o=(process.env
+- #3 @178616744 nction j(e){return Zq(e)&&!_i(e)}function F(e,t){return t===void 0||t.every((r)=>w0(e,r))}function C(e,t){return t===void 0||t.every((r)=>_1e(e,r))}function Ae(e){if(e?.anchors!==void 0&&e.an
+- #4 @178698353 turn this._def.value}}tXe.create=(e,t)=>new tXe({value:e,typeName:qr.ZodLiteral,...d(t)});function C(e,t){return new jEe({values:e,typeName:qr.ZodEnum,...d(t)})}class jEe extends Xd{_parse(e)
+- #5 @178720573 )}function xer(t,e){return Bun.hash(e,Bun.hash(t)).toString()}var v=m("claude-cli"),I=200;function C(t){let e=t.replace(/[^a-zA-Z0-9]/g,"-");if(e.length<=I)return e;return`${e.slice(0,I)}-${M
+
+## #33 export-table @191866772
+import("B:/~BUN/root/chunk-f077m4h5.js");if(await l(),!s("allow_remote_control"))o("Error: Remote Control is disabled by your organization's policy.");return p}async function y(t,e,r,n){let[{preflightTrustedDeviceBlocking:o},{shutdown1PEventLogging:i},{shutdownDatadog:a},{sleep:l},{exitWithError:s},{bridgeMain:d}]=await Promise.all([import("B:/~BUN/root/chunk-grq6v7c9.js"),import("B:/~BUN/root/chunk-a6q7kf96.js"),import("B:/~BUN/root/chunk-n9cphkwp.js"),import("B:/~BUN/root/chunk-d2127z51.js"),import("B:/~BUN/root/chunk-k2p8eem1.js"),import("B:/~BUN/root/chunk-myxmh790.js")]),u=await o(n);if(u)await Promise.race([Promise.all([i(),a()]),l(500,void 0,{unref:!0})]).catch(()=>{}),s(`Error: ${u}`);await d(e,r,n)}async function R(t,e,r){let n=await m(),o=await g(n);await y(o,t,e,r)}var f=new Map([["verbose",()=>!0],["debug",()=>!0],["debugToStderr",()=>!0],["debugFile",()=>!0],["axScreenReader",()=>!0],["workload",()=>!0],["sessionId",()=>!0],["name",()=>!0],["remoteControlSessionNamePrefix",()=>!0],["pluginDir",()=>!0],["pluginDirNoMcp",()=>!0],["pluginUrl",()=>!0],["addDir",()=>!0],["ide",()=>!0],["chrome",(t)=>t===!0],["model",()=>!0],["effort",()=>!0],["fallbackModel",()=>!0],["betas",()=>!0],["thinking",()=>!0],["thinkingDisplay",()=>!0],["maxThinkingTokens",()=>!0],["autocompact",()=>!0],["allowedTools",()=>!0],["dangerouslySkipPermissions",()=>!0],["allowDangerouslySkipPermissions",()=>!0],["enableAutoMode",()=>!0],["bare",()=>!0]]);function b(t){let e=t.parent;if(e===null)return[];let r=new Map;for(let n of e.options){let o=n.attributeName();if(r.has(o)||e.getOptionValueSource(o)!=="cli")continue;let i=e.getOptionValue(o),a=e.options.find((l)=>l.attributeName()===o&&l.negate===(i===!1))??n;r.set(o,{flag:a.long??a.flags,key:o,value:i})}return[...r.values()]}function C(t){return t.filter(({key:e,value:r})=>!f.get(e)?.(r)).map(({flag:e})=>e)}function w(t){let e=t.map((i)=>`\`${i}\``).join(", "),[r,n]=t.length===1?["it","is"]:["them","are"],o=t.includes("--permission-mode")?" Set the permission mode with `claude remote-control --permission-mode <mode>`.":"";return`Error: ${e} before \`remote-control\` ${n} not carried over to the sessions Remote Control starts, so Remote Control refuses to start rather than drop ${r} \u2014 remove ${r}, and give Remote Control's own options after the verb (see \`claude remote-control --help\`).`+o}export{R as enterRemoteControl,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppliedRootOptions};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Cla
+
+## probe lastFn function C( generic=w@191866145
+## probe lastFn function b( generic=w@191866145
+## probe lastFn function R( generic=w@191866145
+## probe lastFn async function R( generic=w@191866145
+## probe lastFn function y( generic=w@191866145
+## #33 C-last-before-export @191866061
+len=84 sha=7166a69a224a57e7
+function C(t){return t.filter(({key:e,value:r})=>!f.get(e)?.(r)).map(({flag:e})=>e)}
+
+## #33 C-win @191866061
+s,key:o,value:i})}return[...r.values()]}function C(t){return t.filter(({key:e,value:r})=>!f.get(e)?.(r)).map(({flag:e})=>e)}function w(t){let e=t.map((i)=>`\`${i}\``).join(", "),[r,n]=t.length===1?["it","is"]:["them","are"],o=t.includes("--permission-mode")?" Set the permission mode with `claude remote-control --permission-mode <mode>`.":"";return`Error: ${e} before \`remote-control\` ${n} not carried over to the sessions Remote Control starts, so Remote Control refuses to start rather than drop ${r} \u2014 remove ${r}, and give Remote Control's own options after the verb (see \`claude remote-control --help\`).`+o}export{R as enterRemoteControl,g as refuseRemoteControlIneligible,m as refuseRemoteControlLocally,w as rootOptionsRefusedMessage,C as rootOptionsRemoteControlRefuses,y as startRemoteControl,b as suppliedRootOptions};
+.
+
+## #33 b-suppliedRootOptions @191865730
+len=331 sha=a6d9361589f43587
+function b(t){let e=t.parent;if(e===null)return[];let r=new Map;for(let n of e.options){let o=n.attributeName();if(r.has(o)||e.getOptionValueSource(o)!=="cli")continue;let i=e.getOptionValue(o),a=e.options.find((l)=>l.attributeName()===o&&l.negate===(i===!1))??n;r.set(o,{flag:a.long??a.flags,key:o,value:i})}return[...r.values()]}
+
+## #33 R-enterRemoteControl @191864995
+len=64 sha=4490d0791f59cfbd
+function R(t,e,r){let n=await m(),o=await g(n);await y(o,t,e,r)}
+
+## #40 pXt needle="pXt" hits=18
+- #0 @101751572 tBreBTtLpeiZeeTntTnUotBotSjedJnURnBRnTweJOS6tvxeQQepTexGtzEzQtWQt0c30af20d0d75c1cC00000498pXt0c30af20d0d75c1cC00000508gme$wgTtFmrB:/~BUN/root/chunk-bn1jfwfy.jsB:/~BUN/root/chunk-tf92v
+- #1 @116076985 .eer....sfe....K8nI...uOt....W7e....NQe	...	Y1.I...	Z$.....ZYt	...	fC.....e9t....pXt....zneI...	xK.....Y9e	...rxeI...	Q_.	...ffn....g1t	...U3t....CMt....knnI...eqn..
+- #2 @116319133 .-...4
+..oze.....!....,.......V.........-.......dXt.....!....,.......X.........-...0..pXt.....!....,......X......-...p..	ZR.`....!....,......X.	....-......	cw.<....!....,......X
+- #3 @117313849 ...i......................................+..ask.....+..0.......:...9...	iX..7..hKeF]..pXtozev....[......d.......<...............................................................K.
+- #4 @146398325 .FE..bweJE..	Fy.NE..RE..	$w.VE...........................o......fXt	.......	....e..I...pXt.........r.....starNamespace...............	ft..e..bwe	Fy.pXt	$w..o......|.............
+- #5 @146398389 .fXt	.......	....e..I...pXt.........r.....starNamespace...............	ft..e..bwe	Fy.pXt	$w..o......|...........................4..............@........ ..................
+	.0.
+.
+
+## #40 var pXt needle="var pXt=" hits=0
+
+## #40 pXt= needle="pXt=" hits=1
+- #0 @196766972  'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.`,pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \u2014 to b
+
+## #40 Fmr @204697553
+len=428 sha=ffb0cd26d4123e4f
+function Fmr(){Wr({name:$w,description:`Reference for writing a ${md} tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize running one.`,menuDescription:"Load the reference for writing Workflow tool scripts",userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}
+
+## #40 Fmr-win @204697553
+c2qepky.js";import{Wr}from"B:/~BUN/root/chunk-3krsxj5s.js";import{gme}from"B:/~BUN/root/chunk-tf92vf82.js";import{$w}from"B:/~BUN/root/chunk-79exvfay.js";function gTt(){return[{type:"text",text:pXt}]}function Fmr(){Wr({name:$w,description:`Reference for writing a ${md} tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize running one.`,menuDescription:"Load the reference for writing Workflow tool scripts",userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}
+export{gTt,Fmr};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{K$,Wq}from"B:/~BUN/root/chunk-2q4zpwx4.js";import"B:/~BUN/root/chunk-h5e2qvst.js";import{s}from"B:/~BUN/root/chunk-a8z8y32v.js";import{c}from"B:/~BUN/root/chunk-s74r2b92.js";import{b}from"B:/~BUN/root/chunk-x52rjnmc.js";import"B:/~BUN/root/chunk-d3825ed1.js";import"B:/~BUN/root/chunk-a9xn9c6g.js";import"B:/~BUN/root/chunk-mw2w72bj.js";import"B:/~BUN/root/chunk-21hv5ssy.js";import"B:/~BUN/root/chunk-4hkt7f9w.js";import"B:/~BUN/r
+
+## #40 pXt-import @204697507
+t to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{md}from"B:/~BUN/root/chunk-d3825ed1.js";import{pXt}from"B:/~BUN/root/chunk-bn1jfwfy.js";import{xu}from"B:/~BUN/root/chunk-yc2qepky.js";import{Wr}from"B:/~BUN/root/chunk-3krsxj5s.js";import{gme}from"B:/~BUN/root/chunk-tf92vf82.js";import{$w}from"B:/~BUN/root/chunk-79exvfay.js";function gTt(){return[{type:"text",text:pXt}]}function Fmr(){Wr({name:$w,descrip
+
+## #41 function A$ needle="function A$" hits=7
+- #0 @178817076 t{S,n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{Du}from"B:/~BUN/root/chunk-376dy8w3.js";function A$(i,u=300000,l){let o=(c)=>typeof u==="function"?u(c):u,e=new Map,t=new Map,a=async(...c)=>
+- #1 @183140622 _PATH","DYLD_FRAMEWORK_PATH","DYLD_FALLBACK_LIBRARY_PATH","DYLD_FALLBACK_FRAMEWORK_PATH"];function A$t(){return b0()===void 0&&xL()!==void 0?[...le,"flagSettings"]:le}function wn(){let e=A$t(
+- #2 @184212808 =e.length>1e4?e.slice(0,1e4):e;for(let r of b6t)if(r.pattern.test(t))return r;return null}function A$n(e){return f2e(e)?.warning??null}function sS(e){return f2e(e)?.category??null}var S6t=/(?
+- #3 @200340324 l;n++){if(n===Dl/2)t+="-";t+=Hg[e[n]%Hg.length]}return t}function Gg(){return Zi.random()}function A$(e){return e.toUpperCase().replace(/[^A-Z0-9]/g,"")}function zl(e,t){return Rl("device_gra
+- #4 @201671444 (b,r,u,t),p.push(...Z(b,t,!0,l))}return p}}function ee(e){return{theme:ce(e),source:null}}function A$e(){if(Eo(a.CLAUDE_CODE_SYNTAX_HIGHLIGHT))return"env";return null}function TRn(){return A$
+- #5 @202511982 Focus.getState().focus!==null}function gNe(){return Ht(vi.legacyDialogFocus.subscribe,TE)}function A$(d){vi.dialogHostlessScreen.setState((C)=>C.screen===d?C:{screen:d})}function gne(){return
+
+## #41 A$-near @184546199
+len=115 sha=ac49a720f0f63f65
+function tst(e){let t=e.match(eJt);if(!t)return null;return{url:e,host:t[1],owner:t[2],repo:t[3],num:Number(t[4])}}
+
+## #41 poller-class-head @184546328
+[4])}}var xfe=60000;class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.directState?.branch!==e)this.directState={branch:e,etag:null,pr:null,reviewDecision:"",lastReviewFetchAt:0,redirectedListUrl:null};return this.directState}logAuthState(e){if(e===this.lastLoggedGhAuthState)return;this.lastLoggedGhAuthState=e,s("tengu_gh_pr_status_auth_state",{auth_state:c(e)})}rememberBaseRepo(e){return this.baseRepoCache=e,e}backOffUntil(e){this.ghBackoffUntil=e}backOffFromResponse(e){let t=Number(e.headers.get("retry-after")),r=Number(e.headers.get("x-ratelimit-reset"));this.ghBackoffUntil=Number.isFinite(t)&&t>0?Date.now()+t*1000:Number.isFinite(r)&&r>
+
+## #41 notModified-use @184546378
+m:Number(t[4])}}var xfe=60000;class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.directState?.branch!==e)this.directState={branch:e,etag:null,pr:null,reviewDecision:"",lastReviewFetchAt:0,redirectedListUrl:null};return this.directState}logAuthState(e){if(e===this.lastLoggedGhAuthState)return;this.lastLoggedGhAuthState=e,s("tengu_gh_pr_status_auth_state",{auth_state:c(e)})}rememberBaseRepo(e){return this.baseRepoCache=e,e}backOffUntil(e){this.ghBackoffUntil=e}backOffFromResponse(e){let t=Number(e.headers.get("retry-after")),r=Number(e.headers.get("x-ratelimit-reset"));this.ghBackoffUntil=Number.isFinite(t)&&t>0?Date.now()+t*1000:Number.isFinite(r)&&r>0?r*1000:Date.now()+xfe}notePersistedCacheBody(e){if(e===this.lastPersistedCacheBody)return!1;return this.lastPersistedCacheBody=e,!0}reset(){this.pollerDisabled=!1,this.pollerBadStreak=0,this.pollerNotModifiedStreak=0,this.directState=null,this.lastLoggedGhAuthState=null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPersistedCacheBody="
+
+## #41 pollerNotModifiedStreak++ needle="pollerNotModifiedStreak++" hits=0
+
+## #41 Not Modified needle="Not Modified" hits=7
+- #0 @67794726 ultiple Choices",
+  301: "Moved Permanently",
+  302: "Found",
+  303: "See Other",
+  304: "Not Modified",
+  305: "Use Proxy",
+  307: "Temporary Redirect",
+  308: "Permanent Redirect",
+  400: "B
+- #1 @83120354 ady Reported226 IM Used300 Multiple Choices301 Moved Permanently302 Found303 See Other304 Not Modified305 Use Proxy306 Switch Proxy307 Temporary Redirect308 Permanent Redirect401 Unauthorized4
+- #2 @88559492 tribute-modified.subtree-modified.table %s may not be modified.lastModified.Last-Modified.Not Modified.unspecified.Unspecified.-%s: overriding compiler action already specified.packets_out cal
+- #3 @94779012  failed (.........) and no cached settings5...U...Remote settings: Cache still valid (304 Not Modified)...........not_modified
+......org_record......b...consented_payload..._...Y...Remote set
+- #4 @98463062  after fetch failure....g#..stale_cache_used3.....S.Policy limits: Cache still valid (304 Not Modified).4...I...Policy limits: Applied new restrictions successfully-....k..Policy limits: No re
+- #5 @189549394 ?"request_failed"),null}if(o.response===null&&r){n("Policy limits: Cache still valid (304 Not Modified)"),CSe(r);try{if(D()&&this.storageV5!==void 0)await this.storageV5.touch(C());else{let _=
+
+## #41 not_modified needle="not_modified" hits=2
+- #0 @94779036 no cached settings5...U...Remote settings: Cache still valid (304 Not Modified)...........not_modified
+......org_record......b...consented_payload..._...Y...Remote settings: A newer fetch too
+- #1 @190480725 turn{settings:null,fetchSucceeded:!1}}}return b("remote_managed_settings_pull",{status:v("not_modified")}),{settings:r,fetchSucceeded:!0}}let u=a.settings??r??{};if(Object.keys(u).length>0){le
+
+## #41 304 skip needle="===304" hits=5
+- #0 @184550126 f(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()
+- #1 @189543253 -Match"]=`"${e}"`;let u=await nt.get(a,{headers:d,timeout:M,validateStatus:(o)=>o===200||o===304||o===404});if(u.status===304)return n("Policy limits: Using cached restrictions (304)"),{
+- #2 @189543282  nt.get(a,{headers:d,timeout:M,validateStatus:(o)=>o===200||o===304||o===404});if(u.status===304)return n("Policy limits: Using cached restrictions (304)"),{success:!0,response:null,etag
+- #3 @190475820 t.get(u,{headers:p,timeout:Le,...g&&{httpsAgent:g},validateStatus:(C)=>C===200||C===204||C===304||C===404});if(R.status===304)return n("Remote settings: Using cached settings (304)"),{su
+- #4 @190475849 ,...g&&{httpsAgent:g},validateStatus:(C)=>C===200||C===204||C===304||C===404});if(R.status===304)return n("Remote settings: Using cached settings (304)"),{success:!0,settings:null,checks
+
+## #41 status===304 needle="status===304" hits=3
+- #0 @184550120 null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()
+- #1 @189543276 =await nt.get(a,{headers:d,timeout:M,validateStatus:(o)=>o===200||o===304||o===404});if(u.status===304)return n("Policy limits: Using cached restrictions (304)"),{success:!0,response:null,etag
+- #2 @190475843 out:Le,...g&&{httpsAgent:g},validateStatus:(C)=>C===200||C===204||C===304||C===404});if(R.status===304)return n("Remote settings: Using cached settings (304)"),{success:!0,settings:null,checks
+
+## #43 probe-in-bxt @193377498
+hropic monorepo \u2014 monorepo PRs are reviewed automatically by bughunter. Re-trigger it from the PR checks page, or run /bughunter here for a local hunt.`};let G,M,[{stdout:C,code:Y},L]=await Promise.all([Ue("gh",["pr","view",m,"--repo",`${u.host}/${u.owner}/${u.name}`,"--json","additions,deletions,changedFiles"],{timeout:5000,preserveOutputOnError:!1}),Mo(u.host)&&TUn()&&!Tt()?be(u.owner,u.name,d?.accessProbeBudgetMs??5000):null]);if(L){if(n(`ultrareview: linked GitHub account access to ${u.owner}/${u.name}: ${L.verdict} (HTTP ${L.httpStatus??"none"})`),!d?.suppressOfferedRecoveryEvent)s("tengu_review_remote_github_access_probe",{verdict:c(L.verdict),http_status:L.httpStatus??void 0})}if(L?.verdict==="github_not_connected"||L?.verdict==="github_repo_not_found"){s("tengu_review_remote_precondition_failed",{reason:c(L.verdict),cwd_is_home:N()}),i("failed");let O=`${u.owner}/${u.name}`,j=`${Vt().CLAUDE_AI_ORIGIN}/code/onboarding?step=alt-auth`,x=!_d()&&!Tt()&&Rt("allow_remote_sessions")&&Rt("allow_quick_web_setup")?`run /web-setup${t.startsWith("/")?"":" in Claude Code"} to reuse your GitHub CLI login`:"",W=`then re-run ${t} ${m}`,H=`install the app at ${use}`,oe=x&&Y===0?`${x}, or ${H}`:`${H}${x?`, or ${x}`:""}`,se=L.verdict==="github_not_connected"?`Ultrareview clones ${O} in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ${x?`${x}, or connect`:"connect"} an account at ${j} \u2014 ${W} (allow a minute after connecting).`:`Your connected GitHub account can't see ${O} \u2014 usually the Claude GitHub app isn't installed on ${u.owner} or wasn't granted this repo (web-connected accounts need it for private repos), or a different GitHub account is connected. To fix: ${oe} \u2014 ${W}.`;return{ok:!1,reason:L.verdict,error:se}}if(Y===0&&C.trim())try{let O=q(C),{maxFiles:j,maxLines:x}=sMt(),W=O.additions+O.deletions;if(Number.isFinite(O.changedFiles)&&Number.isFinite(W))G=O.changedFiles,M=W;if(O.changedFiles>j||W>x)return s("tengu_review_remote_precondition_failed",{reason:v("pr_diff_too_large"),files:O.changedFiles,lines:W,max_files:j,max_lines:x,cwd_is_home:N()}),i("failed"),{ok:!1,reas
+
+## #43 k-verdict @183083641
+len=319 sha=90015c4a333867a5
+function k(e,t){if(e!==401&&e!==404)return"inconclusive";let s=g().safeParse(t),o=s.success?s.data.error.details:void 0;if(e===401&&o?.error_code==="auth_required"&&o.type==="github")return"github_not_connected";if(e===404&&o?.error_code==="github_resource_not_found")return"github_repo_not_found";return"inconclusive"}
+
+## #43 oae needle="function oae" hits=3
+- #0 @183081254 ...Zt,"rev-parse","--is-inside-work-tree"],{cwd:t});return o===0&&s.trim()==="true"}async function oae(e,t,s){try{let o=Bt()?.accessToken;if(!o)return n("checkGithubAppInstalled: No access tok
+- #1 @202596054 lPermissionContext.mode==="auto"&&Sq());return()=>{this.#s=!0,Z()}}}var MUe="Claude Code";function oae(d){return d.getState().settings.terminalTitleFromRename!==!1}var IUe=["disabled","session
+- #2 @224142982 y==="Enter"&&(c.nativeEvent.isComposing||c.keyCode===229||(c.preventDefault(),a()))}})]})}function oae(){let[e,t]=(0,mE.useState)(Fu);return(0,mE.useEffect)(()=>(pE.add(t),()=>{pE.delete(t),pE
+
+## #43 oae @183081248
+len=2305 sha=e0791b7434b049e7
+async function oae(e,t,s){try{let o=Bt()?.accessToken;if(!o)return n("checkGithubAppInstalled: No access token found, assuming app not installed"),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:"inconclusive",httpStatus:null};let r=await SC();if(!r){let u=yd();return n(u?"checkGithubAppInstalled: No org UUID found (profile fetch null \u2014 possibly transient), assuming app not installed":"checkGithubAppInstalled: No org UUID found (token lacks user:profile scope \u2014 deterministic), assuming app not installed"),{appInstalled:!1,defaultBranch:null,transient:u,linkedAccountAccess:"inconclusive",httpStatus:null}}let c=`${Vt().BASE_API_URL}/api/oauth/organizations/${r}/code/repos/${e}/${t}`,p={...yb(o),"x-organization-uuid":r};n(`Checking GitHub app installation for ${e}/${t}`);let a=await nt.get(c,{headers:p,timeout:15000,signal:s});if(a.status===200){let u=a.data.repo?.default_branch||null;if(a.data.status){let d=a.data.status.app_installed;return n(`GitHub app ${d?"is":"is not"} installed on ${e}/${t}`),{appInstalled:d,defaultBranch:u,transient:!1,linkedAccountAccess:"ok",httpStatus:a.status}}return n(`GitHub app is not installed on ${e}/${t} (status is null)`),{appInstalled:!1,defaultBranch:u,transient:!1,linkedAccountAccess:"ok",httpStatus:a.status}}return n(`checkGithubAppInstalled: Unexpected response status ${a.status}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:"inconclusive",httpStatus:a.status}}catch(o){if(nt.isAxiosError(o)){let r=o.response?.status,c=o.response?.headers??{},p=o.response?.data,a=k(r,o.response?.data),u=r===403&&(c["x-ratelimit-remaining"]==="0"||c["retry-after"]!==void 0||[p?.error,p?.message].some((d)=>typeof d==="string"&&/rate limit/i.test(d)));if(r&&r>=400&&r<500&&r!==408&&r!==429&&r!==401&&!u)return n(`checkGithubAppInstalled: Got ${r} error, app likely not installed on ${e}/${t} (linked-account access: ${a})`),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:a,httpStatus:r};return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:a,httpStatus:r??null}}return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:"inconclusive",httpStatus:null}}}
+
+## #46 loop-register @204828749
+ - \`recurring\`: \`true\`
+3. Briefly confirm: ${w}
+4. **Then immediately run ${h} now**, following the instructions inlined below. Don't wait for the first cron fire.
+
+${i}
+
+${n}`};function G(){Wr({name:_ut,menuDescription:"Repeat a prompt or command on an interval (e.g. /loop 5m /foo)",aliases:["proactive"],description:"Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.",whenToUse:'When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.',get argumentHint(){return"[interval] [prompt]"},userInvocable:!0,argsMayContainSlashCommands:!0,isEnabled:dk,async getPromptForCommand(e,o){let t=e.trim();if(!o.options?.isSkillPreload&&!o.options?.modelScheduledOrigin)s("tengu_loop_command",{has_args:t.length>0,is_interval_only:p.test(t)||m.test(t)});{let i=t.match(m),n=!t,h=p.test(t)||i!==null;if(n||h){let l=i?b(i):t||_,u=await r.readLoopFileAsync(o.storageV5);if(n){if(!o.options?.isSkillPreload&&!o.options?.modelScheduledOrigin)Tin();return[{type:"text",text:f(u,!0,l)}]
+
+## #46 isEnabled loop needle="isEnabled:()=>xu()" hits=3
+- #0 @195615386 cal-jsx",name:"workflows",aliases:[],description:"Browse running and completed workflows",isEnabled:()=>xu(),immediate:!0},m=o;export{m as default};
+.// @bun @bytecode
+// Claude Code is a Beta produ
+- #1 @196825594 ts with deterministic JavaScript workflow",enablesCodeExecution:!0,maxResultSizeChars:1e5,isEnabled:()=>xu(),async prompt(e){let r=cr();if(r!==void 0)return r;return fXt(eJ(e?.tools))+Rin(oe().workf
+- #2 @204697910 `,menuDescription:"Load the reference for writing Workflow tool scripts",userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}
+export{gTt,Fmr};
+.// @bun @bytecode
+
+
+## #46 xu loop needle="function xu" hits=18
+- #0 @178925844 ;n=n.slice(i.length)}let r=n.search(/[/?#]/);return(r===-1?n:n.slice(0,r)).includes("\\")}function xue(t){if(t.includes("://")){if(Aue(t))return!0;try{let r=new URL(t);if(r.protocol==="http:"
+- #1 @180846747 ed!==void 0)return this.cached;return this.cached=i(),this.cached}}var n=new K(()=>new t);function xu(){if(O_e())return!1;if(!zft())return!1;let{available:r,defaultOn:e}=o();if(!r)return!1;re
+- #2 @181187787 void 0)return i;return t||n?"admin_managed":null}function I(){return h()!==null&&_()&&L()}function xun(){let e=me();if(e.artifactDisabledSessionEvaluated)return;if(OS()===null)return;if(e.art
+- #3 @182592065 date(o)}function xm(e,t){return bv("sha256",Buffer.from(e,"binary"),t).toString("binary")}function xu(e){if(e.caCertPem&&e.caKeyPem){let t=tc(e.caCertPem,e.caKeyPem);if(!t.ok)throw Error(`tls
+- #4 @183248753 ()}}function sBt(e){return e!==null&&typeof e==="object"&&"terminal"in e&&e.terminal===!0}function xur(e){if(e===null||typeof e!=="object"||!("error"in e)||e.error===null||typeof e.error!=="o
+- #5 @183513841 1.248
+function bae(e,n){return{...e,endedByModel:n}}function aZ(e){return e?.endedByModel}function xut(){return!1}function rsn(){return""}function gA(e){let n=rsn();return n===""?e:`${e} ${n}

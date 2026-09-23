@@ -2,6 +2,7 @@ import {
   listNamedWorkflows,
   parseScript,
   persistInlineScript,
+  readAllowedWorkflowScript,
   resolveNamedWorkflow,
   runWorkflow,
   WORKFLOW_DIR_NAME,
@@ -9,13 +10,13 @@ import {
   type WorkflowInput,
   type WorkflowPorts,
 } from '@claude-code/workflow-engine'
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { logForDebugging } from '../utils/debug.js'
 import { initBundledWorkflows } from './bundled/init.js'
 import { buildHostBundle, makeHostHandle } from './hostHandle.js'
 import { installWorkflowNotifications } from './notifications.js'
+import { workflowReadableRoots } from './readableRoots.js'
 import {
   attachRunStatePersistence,
   getRunsDir,
@@ -167,9 +168,14 @@ export function makeService(
       return { script: input.script, workflowName }
     }
     if (input.scriptPath) {
+      const read = await readAllowedWorkflowScript(
+        input.scriptPath,
+        getProjectRoot(),
+        workflowReadableRoots(),
+      )
       return {
-        script: await readFile(input.scriptPath, 'utf-8'),
-        workflowFile: input.scriptPath,
+        script: read.script,
+        workflowFile: read.path,
         workflowName,
       }
     }

@@ -1,0 +1,141 @@
+# gold-248-44-start
+
+## setup_uds  hits=2  "setup_uds"
+- @100802744 ables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/root/chunk-0z77aj1d.js..Q... p..Cannot destructure property 'installObserverSpawner' from null or undefined value.......
+- @204224742 "agents_cross_session_inbox")}else f("agents_cross_session_inbox",u.getUdsStartFailureCause()??"bind_failed");let k=performance.now()-t;Bi("setup_uds_messaging_ms",k,t),s("tengu_uds_startup_bind",{durationMs:Math.round(k),bound:!!I})}if(process.env.CLAUDE_BG_BACKEND==="daemon"){let{startRendezvousServer:t}=await import("B:/~BUN/root/chunk-d56wrn15.js");t(i)}await Ein();{let{installObserverSpawner:t}=await import("B:/
+
+## Failed to start messaging  hits=0  "Failed to start messaging"
+
+## Failed to start messaging socket  hits=0  "Failed to start messaging socket"
+
+## Skipped: cross-session  hits=4  "[uds-messaging] Skipped: cross-session messaging gate off"
+- @100802504 k names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_ud
+- @100802624 r higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/
+- @204224150 rtup_custom_id");if(D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN"),!No()||E!==void 0)if(!Po())if(!On())n("[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messaging] Skipped: cross-session messaging gate off");else if(On())n("[uds-messaging] Skipped: remote thin client");else{let t=performance.now(),u=
+- @204224277 )if(!On())n("[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messaging] Skipped: cross-session messaging gate off");else if(On())n("[uds-messaging] Skipped: remote thin client");else{let t=performance.now(),u=await import("B:/~BUN/root/chunk-6bdsxrx9.js"),I=await u.startCrossSessionInbox(E,i);if(I){let S=u.getUdsStartDegradedCause();i
+
+## Zmr(  hits=1  "Zmr("
+- @202068874 ,d)=>{function l(r){if(T(r)==="EADDRINUSE")i(!1);else d(r)}e.once("error",l),e.listen(t,()=>{e.removeListener("error",l),i(!0)})})}function Zmr(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location.",Tn=`A compo
+
+## Wnr(  hits=2  "Wnr("
+- @202068890 (r){if(T(r)==="EADDRINUSE")i(!1);else d(r)}e.once("error",l),e.listen(t,()=>{e.removeListener("error",l),i(!0)})})}function Zmr(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location.",Tn=`A component of the sock
+- @202069307 ockets path is not a directory (a regular file is in the way). ${X}`,Un=`The sockets path runs through a symlink loop. ${X}`;async function Wnr(e,t,i={}){s().startInFlight=!0;try{return await ye(e,t,i)}finally{s().startInFlight=!1}}async function ye(e,t,i={}){if(s().lastStartFailureCause="bind_failed",s().lastStartDegradedCause=void 0,!HB(e)){if(n(`[uds-messaging] Refusing socket path \u2014 ${"not a usable local soc
+
+## lastStartFailureCause=  hits=8  "lastStartFailureCause="
+- @201218060 ctiveTokens=void 0;activeKeyFile=void 0;authRequired=!1;authOkReported=!1;authDropReported=!1;firstLineDeadlineMs=a0t;silentDropReported=!1;lastStartFailureCause=void 0;lastStartDegradedCause=void 0;lastStartFailureDetail=void 0;startInFlight=!1;peerDirOwnerUids=[];reset(){this.onEnqueue=null,this.onRename=null,this.onEnableRemoteControl=null,this.onPeerMessageStatus=null,this.activeSocketPath=void 0,this.connectedCl
+- @201218574 le=void 0,this.authRequired=!1,this.authOkReported=!1,this.authDropReported=!1,this.firstLineDeadlineMs=a0t,this.silentDropReported=!1,this.lastStartFailureCause=void 0,this.lastStartDegradedCause=void 0,this.lastStartFailureDetail=void 0,this.startInFlight=!1,this.peerDirOwnerUids=[]}}function wZe(e){if(e.startInFlight||e.activeSocketPath!==void 0)return;switch(e.lastStartFailureCause){case"socket_dir_refused":retur
+- @201567043 :!0,children:" \xB7 run /mcp"})]})},Bf={id:"cross-session-messaging-off",tier:"warning",type:"warning",isActive:(i)=>uFe.of(i.session.host).lastStartFailureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be set up",r(t,{dimColor:!0,children:[" \xB7 ","run with --debug-file <path> for the full l
+- @202069434 ync function Wnr(e,t,i={}){s().startInFlight=!0;try{return await ye(e,t,i)}finally{s().startInFlight=!1}}async function ye(e,t,i={}){if(s().lastStartFailureCause="bind_failed",s().lastStartDegradedCause=void 0,!HB(e)){if(n(`[uds-messaging] Refusing socket path \u2014 ${"not a usable local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing dot/space)"}: ${e}`,{level:"error"}),D(),s().l
+- @202069713 able local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing dot/space)"}: ${e}`,{level:"error"}),D(),s().lastStartFailureCause="path_refused",i.isExplicit)throw new nH(`--messaging-socket-path ${e} is not a usable local socket address (a remote/UNC path, or a pipe name with extra segments or a trailing dot/space).`);return}i.isExplicit;let l=C(e,"..");if(i.isExplicit){if(await he(e)
+- @202071155 {n(`[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${p}`,{level:"error"}),s().lastStartFailureCause="key_publish_failed",await R(r,e,t,{settleHeld:!1}),o(),D();return}n(`[uds-messaging] Failed to publish the inbox auth key; peers will send unauthenticated (accepted: auth is optional on this platform): ${p}`,{level:"warn"}),ae("key_publish_failed")}process.
+- @202073409  as in the node recipe above): a connection that sends no complete line within ${s().firstLineDeadlineMs} ms is closed`,{level:"info"}),s().lastStartFailureCause=void 0,pe(r,e,t,o)}catch(o){if(c!==void 0)await R(r,e,t,{settleHeld:!1}),c(),s().lastStartFailureCause="post_bind_setup_failed";if(T(o)==="ENAMETOOLONG")n(`[uds-messaging] Socket path too long (${e.length} bytes, max ~104): ${e}. Try a shorter --messaging-so
+- @202073512 s} ms is closed`,{level:"info"}),s().lastStartFailureCause=void 0,pe(r,e,t,o)}catch(o){if(c!==void 0)await R(r,e,t,{settleHeld:!1}),c(),s().lastStartFailureCause="post_bind_setup_failed";if(T(o)==="ENAMETOOLONG")n(`[uds-messaging] Socket path too long (${e.length} bytes, max ~104): ${e}. Try a shorter --messaging-socket-path, or set CLAUDE_CODE_TMPDIR or $XDG_RUNTIME_DIR to a shorter directory.`,{level:"error"});else
+
+## socket_dir_refused"  hits=2  "\"socket_dir_refused\""
+- @201218828 ght=!1,this.peerDirOwnerUids=[]}}function wZe(e){if(e.startInFlight||e.activeSocketPath!==void 0)return;switch(e.lastStartFailureCause){case"socket_dir_refused":return e.lastStartFailureDetail!==void 0?`its socket directory could not be set up: ${e.lastStartFailureDetail}`:"its socket directory could not be set up";case"path_refused":return"its socket path is not a usable local address";case"bind_failed":return"it co
+- @201567067 /mcp"})]})},Bf={id:"cross-session-messaging-off",tier:"warning",type:"warning",isActive:(i)=>uFe.of(i.session.host).lastStartFailureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be set up",r(t,{dimColor:!0,children:[" \xB7 ","run with --debug-file <path> for the full log"]})]})},Hf={id:"model
+
+## primary_dir_refused_fell_back"  hits=1  "\"primary_dir_refused_fell_back\""
+- @202057563 lureCause}function Ymr(){return s().lastStartDegradedCause}function ae(e){let t=s();if(e==="key_publish_failed"&&t.lastStartDegradedCause==="primary_dir_refused_fell_back")return;t.lastStartDegradedCause=e}function r0t(){return wZe(s())}function U(e){if(typeof e!=="object"||e===null)return!1;if(!("type"in e))return!1;return typeof e.type==="string"}function o0t(e){s().onRename=e}function Xmr(e){s().onEnableRemoteCont
+
+## Failed to set up sockets  hits=0  "Failed to set up sockets"
+
+## refusing to bind  hits=2  "refusing to bind"
+- @97792736 Start........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.....
+- @182942925 WNED";async function I(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n!==void 0&&r.uid!==n)throw Object.assign(Error(`refusing to bind: ${t} is owned by uid ${r.uid}`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping
+
+## mkdir recursive 0700 uds  hits=82  "recursive:!0,mode:448"
+- @178208343 nthropic-sdk: ${r}`)){return}async function ere(e,t){let r=await import("fs"),n=(await import("path")).dirname(e);await r.promises.mkdir(n,{recursive:!0,mode:448});let i=`${e}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;try{let a=await r.promises.open(i,"w",384);try{await a.writeFile(JSON.stringify(t,null,2)),await a.sync()}finally{await a.close()}await r.promises.rename(i,e)}catch(a){throw await r.pro
+- @179757985 ewOrigin:r=!1}={}){if(!a.CLAUDE_CODE_REMOTE)return;if(r&&SY()){n(`Skipping ${t} disk persistence in review-origin session`);return}try{k(S,{recursive:!0,mode:448}),I(e,s,{encoding:"utf8",mode:384}),n(`Persisted ${t} to ${e} for subprocess access`)}catch(o){n(`Failed to persist ${t} to disk (non-fatal): ${l(o)}`,{level:"error"})}}function g(e,s){return IMe(e,s).token}function IMe(e,s){try{let r=ce().readFileSync(e,{en
+- @180532665 socket path");return`${e}.${r}.key`}async function G9n(e,t,r,{sweepPermitted:o}){if(D()&&r!==void 0)return _Z(r,e,t);let u=xW();await cZ(u,{recursive:!0,mode:448}),await mZ(u,o);let p=Or(u,kM(process.pid,e));try{await Jd(p)}catch{}return await Hn(p,S({peerToken:t,...UP(await cE()),pidDomain:await hY()}),384),p}async function _Z(e,t,r){let o=kM(process.pid,t),u=await e.ensureScope({namespace:"session"});if(!u.ok)throw
+- @180540158 =>{try{EZ(E)}catch{}}),Et(async()=>{if(t){try{await t.delete(da())}catch{}return}try{await Fo(E)}catch{}});try{let C=await NZ();await AZ(g,{recursive:!0,mode:448}),await SZ(g,448);let O=p?{name:p,source:"user"}:o==="interactive"?{name:bM(ve()),source:"derived"}:void 0,k=S({pid:process.pid,sessionId:V(),cwd:ve(),startedAt:Date.now(),procStart:await Ka(process.pid),version:{ISSUES_EXPLAINER:"report the issue at https:/
+- @180812850 l);function tl(){return h(g.of(z().host))}function h(e){let t=c(p_(),"claude");if(t!==e.ensured){if(typeof process.getuid==="function")s(t,{recursive:!0,mode:448}),q9(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}function ySe(){let e=tl();s(e,{recursive:!0,mode:448}),q9(e);let r=c(e,"plugin-tool-staging");return s(r,{recursive:!0,mode:448}),q9(r),r}function K9(){let e=g.of(z().host),r=h(e)
+- @180812894 nction h(e){let t=c(p_(),"claude");if(t!==e.ensured){if(typeof process.getuid==="function")s(t,{recursive:!0,mode:448}),q9(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}function ySe(){let e=tl();s(e,{recursive:!0,mode:448}),q9(e);let r=c(e,"plugin-tool-staging");return s(r,{recursive:!0,mode:448}),q9(r),r}function K9(){let e=g.of(z().host),r=h(e);return r}function Y9(e="claude-prompt",r=".
+- @180812982 n")s(t,{recursive:!0,mode:448}),q9(t);else try{s(t,{recursive:!0,mode:448})}catch{}e.markEnsured(t)}return t}function ySe(){let e=tl();s(e,{recursive:!0,mode:448}),q9(e);let r=c(e,"plugin-tool-staging");return s(r,{recursive:!0,mode:448}),q9(r),r}function K9(){let e=g.of(z().host),r=h(e);return r}function Y9(e="claude-prompt",r=".md",t){let i=t?.contentHash?D("sha256").update(t.contentHash).digest("hex").slice(0,16):
+- @180813057 }catch{}e.markEnsured(t)}return t}function ySe(){let e=tl();s(e,{recursive:!0,mode:448}),q9(e);let r=c(e,"plugin-tool-staging");return s(r,{recursive:!0,mode:448}),q9(r),r}function K9(){let e=g.of(z().host),r=h(e);return r}function Y9(e="claude-prompt",r=".md",t){let i=t?.contentHash?D("sha256").update(t.contentHash).digest("hex").slice(0,16):y();return c(tl(),`${e}-${i}${r}`)}
+export{p_,q9,tl,ySe,K9,Y9};
+.// @bun @b
+
+## Zmr( @202068874 lastFn=l @202068740
+i.connect({path:e})})}function _e(e,t){return new Promise((i,d)=>{function l(r){if(T(r)==="EADDRINUSE")i(!1);else d(r)}e.once("error",l),e.listen(t,()=>{e.removeListener("error",l),i(!0)})})}function Zmr(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR
+extract l len=53 sha=a45026380b0fd650
+function l(r){if(T(r)==="EADDRINUSE")i(!1);else d(r)}
+
+## Wnr( @202068890 lastFn=Zmr @202068865
+e})})}function _e(e,t){return new Promise((i,d)=>{function l(r){if(T(r)==="EADDRINUSE")i(!1);else d(r)}e.once("error",l),e.listen(t,()=>{e.removeListener("error",l),i(!0)})})}function Zmr(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0
+extract Zmr len=65 sha=4b7a317d11f472d4
+function Zmr(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}
+
+## Wnr( @202069307 lastFn=D @202068930
+u own to use a different location.",Tn=`A component of the sockets path is not a directory (a regular file is in the way). ${X}`,Un=`The sockets path runs through a symlink loop. ${X}`;async function Wnr(e,t,i={}){s().startInFlight=!0;try{return await ye(e,t,i)}finally{s().startInFlight=!1}}async function ye(e,t,i={}){if(s().lastStartFailureCause="bind_failed",s().lastStartDegradedCause=void 0,!HB
+extract D len=94 sha=f718a26a6ffe1413
+function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}
+
+## window @202073800 after ye
+-messaging] Failed to start: ${o}`,{level:"error"});I(),D();return}}function we(e){switch(e){case"held":return"Your message is held for the recipient user's approval before it reaches their Claude session (permission-mode parity).";case"denied":return"The recipient user declined your message; it was not delivered to their Claude session.";case"expired":return"Your held message expired without approval and was not delivered to the recipient's Claude session.";case"delivered":return"Your previously-held message was approved and released to the recipient's Claude session.";case"refused":return"The recipient session is not accepting cross-session messages (the feature is off there, or a setting or policy there refuses them); your message was not delivered to its Claude.";case"dropped":return"The recipient's session dropped your message at its inbox (rate limit, duplicate, relay loop, or full queue); it was not delivered and will not be."}}function Se(){let e=fIn();return e===void 0?{}:{from_mode:e}}function fIn(){if(!eAe())return;let e=gi().inbound.getCurrentMode;if(e)try{return nAe(e())}catch{return}let t=gi().inbound.modeAtUnwire;return t!==void 0?nAe(t):void 0}function L(e){return N9n(e)?e:void 0}function P(e,t,i){return x({selfSentAncestry:t,verifiedPeerPid:e,childTokenPresented:i==="child",needsVerdict:a7t(),platform:B()})}function ke(){if(!process.listeners("exit").includes(mIn))process.on("exit",mIn)}function mIn(){try{let e=s().activeKeyFile;if(e===void 0)return;ie(e)}catch{}}
+export{Kmr,Ymr,r0t,o0t,Xmr,i0t,Jmr,s0t,Qmr,jnr,znr,Zmr,Wnr,fIn,mIn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{hl,_e,oe}from"B:/~BUN/root/chunk-0qn02gme.js";import{Mh}from"B:/~BUN/root/chunk-v8bnxh6j.js";import{g}from"B:/~BUN/root/chunk-3pydakxf.js";import{fe}from"B:/~BUN/root/chunk-82ac1fr1.js";import{o,t}from"
+
+## export Zmr  hits=2  "Zmr,"
+- @202075357 xit",mIn)}function mIn(){try{let e=s().activeKeyFile;if(e===void 0)return;ie(e)}catch{}}
+export{Kmr,Ymr,r0t,o0t,Xmr,i0t,Jmr,s0t,Qmr,jnr,znr,Zmr,Wnr,fIn,mIn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback unde
+- @204711450 utlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{Kmr,Ymr,r0t,o0t,Xmr,i0t,Jmr,s0t,Qmr,jnr,znr,Zmr,Wnr,fIn,mIn}from"B:/~BUN/root/chunk-0dax9fvw.js";import"B:/~BUN/root/chunk-3prdfzqb.js";import"B:/~BUN/root/chunk-eqzpcteb.js";import"B:/~BUN/root/chunk-v2kkae8f.js";import"B:/~BUN/root/chunk-y734qxgv.js";import"B:/~BUN/root/chunk-c8mebxcv.js";import"B:/~BUN/root/chunk-4sxpe0
+
+## export r0t  hits=4  "r0t,"
+- @183616964 open as KC,lstat as UZn,mkdir as QC,readdir as VC,readFile as ZC,realpath as t0t,rename as g$t,rm as h$t,stat as eb,unlink as n0t,utimes as r0t,writeFile as o0t}from"fs/promises";import{constants as BZn}from"os";import{basename as EN,dirname as oy,isAbsolute as s0t,join as Ya,relative as jZn,sep as _$t}from"path";import{createInterface as WZn}from"readline";import{StringDecoder as i0t}from"string_decoder";import{sep 
+- @202075321 ("exit").includes(mIn))process.on("exit",mIn)}function mIn(){try{let e=s().activeKeyFile;if(e===void 0)return;ie(e)}catch{}}
+export{Kmr,Ymr,r0t,o0t,Xmr,i0t,Jmr,s0t,Qmr,jnr,znr,Zmr,Wnr,fIn,mIn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations 
+- @204711414 is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{Kmr,Ymr,r0t,o0t,Xmr,i0t,Jmr,s0t,Qmr,jnr,znr,Zmr,Wnr,fIn,mIn}from"B:/~BUN/root/chunk-0dax9fvw.js";import"B:/~BUN/root/chunk-3prdfzqb.js";import"B:/~BUN/root/chunk-eqzpcteb.js";import"B:/~BUN/root/chunk-v2kkae8f.js";import"B:/~BUN/root/chunk-y734qxgv.js";import"B:/~BUN/root/chunk-c8mebxcv.
+- @217157256 125em;
+  }
+  
+  .node .label-icon path {
+    fill: currentColor;
+    stroke: revert;
+    stroke-width: revert;
+  }
+`,"getIconStyles")});var r0t,n0t,RA,QF=F(()=>{"use strict";zi();X1();r0t=o((e,t)=>{let r=Fp,n=r(e,"r"),i=r(e,"g"),a=r(e,"b");return Oi(n,i,a,t)},"fade"),n0t=o(e=>`.label {
+    font-family: ${e.fontFamily};
+    color: ${e.nodeTextColor||e.textColor};
+  }
+  .cluster-label text {
+    fill: ${e.titleColor};
+
+
+## export wZe comma  hits=6  "wZe,"
+- @184731924 =>YJe,resolveHop:()=>PGe,respawnSharedWorker:()=>wJ,restore:()=>XJe,restoredProvenance:()=>RZe,retireEnvironmentHost:()=>Hdn,retireHost:()=>wZe,routeCall:()=>eJ,routeInterfaceCall:()=>Ndn,runHostOp:()=>Udn,runOp:()=>xJe,sameDescriptor:()=>sZe,sameList:()=>Rj,sameThreadOp:()=>aJ,send:()=>Id,settleIdle:()=>ny,snapshot:()=>QJe,spellingOf:()=>oJ,standingBase:()=>JJe,standingOver:()=>iZe,storeIdOf:()=>JP,storeSetArgs:()=>
+- @201219323 be published";case"post_bind_setup_failed":return"setting it up after bind failed";case void 0:return}}var uFe=new K(()=>new t);
+export{a0t,wZe,uFe};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthro
+- @201534538 om"B:/~BUN/root/chunk-hmr1nj39.js";import{Zy}from"B:/~BUN/root/chunk-qg0tmh43.js";import{Fi,Lqt}from"B:/~BUN/root/chunk-bmvy4w36.js";import{wZe,uFe}from"B:/~BUN/root/chunk-3prdfzqb.js";import{F_}from"B:/~BUN/root/chunk-68j48vdc.js";import{po}from"B:/~BUN/root/chunk-jych8k44.js";import{Qqt}from"B:/~BUN/root/chunk-s5637m38.js";import{UL}from"B:/~BUN/root/chunk-1wh0pw80.js";import{z_}from"B:/~BUN/root/chunk-2egfp52n.js"
+- @202055256 ort{BYt,jYt,zYt,OCt,_Be,VYt,$Ct,UCt,YYt,rnt}from"B:/~BUN/root/chunk-eqzpcteb.js";import{lxe}from"B:/~BUN/root/chunk-c8mebxcv.js";import{a0t,wZe,uFe}from"B:/~BUN/root/chunk-3prdfzqb.js";import{C_e}from"B:/~BUN/root/chunk-28bf6qjr.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{randomBytes as ee,randomUUID as te}from"crypto";import{unlinkSync as ie}from"fs";import{chmod as Me,lstat as xe,mkdir as Fe,readdir as
+- @216098971  Sn(e,t){return Tm.parse(e,t)}var Cm,I2,_s,cZe,uZe,hZe,M2,dZe,OP,fse,pse,fZe,BP,pZe,$P,mZe,gZe,k4,FP,yZe,mse,vZe,zP,ose,xZe,bZe,TZe,CZe,gse,wZe,S4,GP,yse,kZe,vse,SZe,EZe,AZe,xse,RZe,_Ze,bse,LZe,DZe,IZe,MZe,NZe,PZe,OZe,T4,BZe,Tse,Cse,$Ze,VP,FZe,IP,zZe,b4,_2,GZe,lse,C4,Th,w4,WP,Ch,D2,qZe,Tm,xir,bir,Tir,Cir,wir,kir,Sir,wse=F(()=>{"use strict";o(PP,"L");Cm=PP();o(dse,"G");I2={exec:o(()=>null,"exec")};o(_n,"h");_s={codeRe
+- @216109084 m:RZe,emStrongRDelimAst:LZe,emStrongRDelimUnd:IZe,escape:TZe,link:BZe,nolink:Cse,punctuation:kZe,reflink:Tse,reflinkSearch:$Ze,tag:OZe,text:wZe,url:I2},FZe={...VP,link:_n(/^!?\[(label)\]\((.*?)\)/).replace("label",T4).getRegex(),reflink:_n(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label",T4).getRegex()},IP={...VP,emStrongRDelimAst:DZe,emStrongLDelim:_Ze,url:_n(/^((?:ftp|https?):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]

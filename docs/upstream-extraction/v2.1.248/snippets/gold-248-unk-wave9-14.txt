@@ -1,0 +1,45 @@
+# gold-248-unk-wave9-14  densable 2.1.248 #14
+# model-name-code — unique em/c/cGn/Dv. leftover Markdown + /model /fast hosts.
+# SEA 226708128 · 247 present
+# peels: _peel-248-unk-wave9.mjs + wave9b + wave9c
+
+extracted? YES unique em/c/a/d/cGn/Dv
+landed? YES leftover UserLocalCommandOutputMessage Markdown + model.tsx/fast.tsx/messages.ts/PromptInput toast
+stay UNKNOWN? no
+
+## counts
+function cGn( 248=1 247=0
+em(wm( 248=10 247=0
+Set model to ` 248=0 247=1 (247 is XML tag prefix aQs=`<${fO}>Set model to ` NOT wrap)
+render as code 248=0 247=0
+JKt @193082880 Fast ON/OFF bold-only, no wrap
+
+## em @183526444 sha from export window (extractFnAt missEnd: nested ` in templates)
+function em(n){let t=n.replace(/\r\n?|\n/g," ");if(t==="")return"` `";let r=t.match(/`+/g)?.reduce((s,i)=>Math.max(s,i.length),0)??0,o="`".repeat(r+1),e=t.startsWith("`")||t.endsWith("`")?" ":"";return`${o}${e}${t}${e}${o}`}
+
+## c @183526668 len=483 sha=f0466ba60fccefca exact247=0
+function c(n,t){return n.replace(/(`+)(.+?)\1/g,(r,o,e)=>{let s=e.startsWith(" ")&&e.endsWith(" ")&&e.trim()!=="";return t(s?e.slice(1,-1):e)})}var i9="Set model to ",SZ="Kept model as ",wNt="Current model: ",ENt="No response from the cloud session \u2014 the switch to ",kNt="Cloud session couldn't switch to ",$Ie="Fast mode ON",FIe=" \xB7 model set to ",_=[i9,SZ,wNt,ENt,kNt],E=/\x1b\[[0-9;]*m/g,p=4;function a(n){let t=n.replace(E,"").indexOf(`${$Ie}${FIe}\``);return t>=0&&t<=p}
+
+## a @183527071 len=80 sha=4e24e4c0781f0baa exact247=0
+function a(n){let t=n.replace(E,"").indexOf(`${$Ie}${FIe}\``);return t>=0&&t<=p}
+
+## d @183527151 len=56 sha=ab5b7c31d5507607 exact247=0
+function d(n){return _.some((t)=>n.startsWith(t))||a(n)}
+
+## cGn @183527207 len=39 sha=9366451a0055bd03 exact247=0
+function cGn(n,t){return d(n)?c(n,t):n}
+
+## Dv @202783798 len=45 sha=173112c5dbb75313 exact247=0
+function Dv(d){return cGn(d,(C)=>ae.bold(C))}
+
+## producers
+BUe @193088105 `${i9}${em(wm(e))}`
+zUe @193090125 `${wNt}${em(wm(...))}`
+A @209297093 picker same + `with ${em(ue)} effort`
+
+## leftover hosts (production call)
+src/components/messages/UserLocalCommandOutputMessage.tsx Markdown on local-command-stdout
+src/commands/model/model.tsx Set/Kept/Current
+src/commands/fast/fast.tsx Fast mode ON · model set to
+src/utils/messages.ts createModelSwitchBreadcrumbs
+src/components/PromptInput/PromptInput.tsx fast-mode-toggled toast → Dv

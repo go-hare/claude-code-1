@@ -17,6 +17,11 @@ import { LayoutEdge } from './layout/node.js'
 import { nodeCache } from './node-cache.js'
 import type { Screen, StylePool } from './screen.js'
 import { CellWidth, cellAt, cellAtIndex, setCellStyleId } from './screen.js'
+import {
+  hasElidedSep,
+  isSoftWrapContinuation,
+  softWrapContentEnd,
+} from './softWrap.js'
 
 type Point = { col: number; row: number }
 
@@ -811,9 +816,9 @@ export function isCellSelected(
 }
 
 /** Extract text from one screen row. When the next row is a soft-wrap
- *  continuation (screen.softWrap[row+1]>0), clamp to that content-end
- *  column and skip the trailing trim so the word-separator space survives
- *  the join. See Screen.softWrap for why the clamp is necessary. */
+ *  continuation (screen.softWrap[row+1] packed ≠ 0), clamp to that row's
+ *  content-end (high 16 bits) and skip the trailing trim so the
+ *  word-separator space survives the join. densable `iv`. */
 function extractRowText(
   screen: Screen,
   row: number,
@@ -822,7 +827,8 @@ function extractRowText(
 ): string {
   const noSelect = screen.noSelect
   const rowOff = row * screen.width
-  const contentEnd = row + 1 < screen.height ? screen.softWrap[row + 1]! : 0
+  const nextPacked = row + 1 < screen.height ? screen.softWrap[row + 1]! : 0
+  const contentEnd = softWrapContentEnd(nextPacked)
   const lastCol = contentEnd > 0 ? Math.min(colEnd, contentEnd - 1) : colEnd
   let line = ''
   for (let col = colStart; col <= lastCol; col++) {
@@ -885,7 +891,15 @@ export function getSelectedText(s: SelectionState, screen: Screen): string {
   for (let row = start.row; row <= end.row; row++) {
     const rowStart = row === start.row ? start.col : 0
     const rowEnd = row === end.row ? end.col : screen.width - 1
-    joinRows(lines, extractRowText(screen, row, rowStart, rowEnd), sw[row]! > 0)
+    const packed = sw[row]!
+    const isCont = isSoftWrapContinuation(packed)
+    // densable iv: reinsert elided leading space at soft-wrap joins
+    const prefix = isCont && hasElidedSep(packed) ? ' ' : ''
+    joinRows(
+      lines,
+      prefix + extractRowText(screen, row, rowStart, rowEnd),
+      isCont,
+    )
   }
 
   for (let i = 0; i < s.scrolledOffBelow.length; i++) {
@@ -935,7 +949,7 @@ export function captureScrolledRows(
     const colStart = row === start.row ? start.col : 0
     const colEnd = row === end.row ? end.col : width - 1
     captured.push(extractRowText(screen, row, colStart, colEnd))
-    capturedSW.push(sw[row]! > 0)
+    capturedSW.push(isSoftWrapContinuation(sw[row]!))
   }
 
   if (side === 'above') {

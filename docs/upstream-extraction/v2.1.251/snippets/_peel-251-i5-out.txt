@@ -1,0 +1,154 @@
+--- Xxt / W6n / xo / dm / DOe / nVn ---
+"async function*Xxt" hits=1 187242390
+"function*Xxt" hits=1 187242396
+"function Xxt" hits=0 
+"async function Xxt" hits=0 
+"var W6n=" hits=2 183854408,187241944
+"W6n=new Set" hits=1 187241948
+"function xo(" hits=22 178724968,180127697,182011013,182208695,182650750,188631956,190366336,190766949
+"function xo()" hits=6 182011013,182208695,182650750,191294660,202391468,205572375
+"async function dm" hits=2 184538378,204510875
+"function dm(" hits=9 182208784,183365631,189169652,191696447,201118587,204510881,209211673,209862062
+"function DOe" hits=2 180780145,202826256
+"function nVn" hits=1 186758371
+"function se(" hits=90 83085061,178688539,179285069,179432457,179556984,179745859,179913181,179991406
+Xxt starts [ 187242390, 187242396 ]
+
+## Xxt @187242390 miss=false len=964 sha=1e4a309bbb9390bf
+HEAD m();throw r}if(t())await dm()}async function*Xxt(e){if(!Ha(e.agentContext)&&!Ha(
+FULL
+async function*Xxt(e){if(!Ha(e.agentContext)&&!Ha(e.toolUseContext?.agentContext)){yield*Qxt(e);return}let t=e.hookInput.hook_event_name==="PreToolUse";for await(let r of Qxt(e)){let o={...r.permissionBehavior!==void 0&&{permissionBehavior:r.permissionBehavior},...r.hookPermissionDecisionReason!==void 0&&{hookPermissionDecisionReason:r.hookPermissionDecisionReason},...r.heldForServedCall&&{heldForServedCall:!0},...r.updatedInput!==void 0&&{updatedInput:r.updatedInput},...r.preventContinuation!==void 0&&{preventContinuation:r.preventContinuation},...r.stopReason!==void 0&&{stopReason:r.stopReason},...r.impossible!==void 0&&{impossible:r.impossible},...r.hookSource!==void 0&&{hookSource:r.hookSource},...r.updatedToolOutput!==void 0&&{updatedToolOutput:r.updatedToolOutput},...r.updatedMCPToolOutput!==void 0&&{updatedMCPToolOutput:r.updatedMCPToolOutput},...t&&r.blockingError!==void 0&&{blockingError:r.blockingError}};if(Object.keys(o).length>0)yield o}}
+
+## Xxt @187242396 miss=false len=958 sha=e39eec3777c4003c
+HEAD row r}if(t())await dm()}async function*Xxt(e){if(!Ha(e.agentContext)&&!Ha(e.tool
+FULL
+function*Xxt(e){if(!Ha(e.agentContext)&&!Ha(e.toolUseContext?.agentContext)){yield*Qxt(e);return}let t=e.hookInput.hook_event_name==="PreToolUse";for await(let r of Qxt(e)){let o={...r.permissionBehavior!==void 0&&{permissionBehavior:r.permissionBehavior},...r.hookPermissionDecisionReason!==void 0&&{hookPermissionDecisionReason:r.hookPermissionDecisionReason},...r.heldForServedCall&&{heldForServedCall:!0},...r.updatedInput!==void 0&&{updatedInput:r.updatedInput},...r.preventContinuation!==void 0&&{preventContinuation:r.preventContinuation},...r.stopReason!==void 0&&{stopReason:r.stopReason},...r.impossible!==void 0&&{impossible:r.impossible},...r.hookSource!==void 0&&{hookSource:r.hookSource},...r.updatedToolOutput!==void 0&&{updatedToolOutput:r.updatedToolOutput},...r.updatedMCPToolOutput!==void 0&&{updatedMCPToolOutput:r.updatedMCPToolOutput},...t&&r.blockingError!==void 0&&{blockingError:r.blockingError}};if(Object.keys(o).length>0)yield o}}
+W6n @ 183854408 var W6n=m(()=>un({pid:T(),procStart:i().optional(),sessionId:i().transform(wb),rendezvousSock:B(),ptySock:B().optional(),messagingSock:B().optional(),cliVersion:i().optional(),startedAt:T(),attempt:T(),cwd:i().transform(wb),worktreePath:i().transform(wb).optional(),dispatch:zpt(),pendingRespawn:N("upgrade").optional(),decModes:R(T()).optional(),firedInteractiveMarks:R(ye()).transform((e)=>{let t=[
+W6n @ 187241944 var W6n=new Set(["PreToolUse","PermissionRequest","UserPromptSubmit","UserPromptExpansion","TaskCompleted","TeammateIdle"]);function Yxt(e,t){return e!=="SessionEnd"&&xo()&&!t?.aborted}async function*z_(e){let t=()=>xo()&&!e.signal?.aborted;if(!W6n.has(e.hookInput.hook_event_name)){if(t())return;yield*Xxt(e);return}if(t())await dm();try{for await(let r of Xxt(e)){if(t())await dm();yield r}}catch(r
+W6n=new @ 187241948 :"),qn(t)):c(e)}var W6n=new Set(["PreToolUse","PermissionRequest","UserPromptSubmit","UserPromptExpansion","TaskCompleted","TeammateIdle"]);function Yxt(e,t){return e!=="SessionEnd"&&xo()&&!t?.aborted}async function*z_(e){let t=()=>xo()&&!e.signal?.aborted;if(!W6n.has(e.hookInput.hook_event_name)){if(t())return;yield*Xxt(e);return}if(t())await dm();try{for await(let r of Xxt(e)){if(t())await dm();yield r}}catch(r){if
+
+## class Ln @179027862 220 5c466000a2e3b768
+class Ln{#e;#t=new WeakMap;constructor(e){this.#e=e}peek(e){return this.#t.get(e.root)}of(e){let t=e.root,o=this.#t.get(t);if(o!==void 0)return o;let r=this.#e();return this.#t.set(t,r),r}drop(e){this.#t.delete(e.root)}}
+
+## class gEt @186762671 52 8d9ffb89c4d8d170
+class gEt{pending=[];landedOn=null;inFlight=new Set}
+
+## nVn @186758371 miss=false len=95 sha=409cd46e03f5d642
+HEAD rationInFlight?.catch(()=>{})}function nVn(){let e=Jt();return e.hookRegistratio
+FULL
+function nVn(){let e=Jt();return e.hookRegistrationInFlight!==void 0||e.hookRegistrationFailed}
+
+## se-hookinit @181784689 miss=false len=1654 sha=1585fa90ebda943e
+HEAD 5t(e,t.walkRoot,t.distroDir))}function se(){return{pluginLoad:void 0,pluginLoadA
+FULL
+function se(){return{pluginLoad:void 0,pluginLoadArm:void 0,pluginLoadCacheOnly:void 0,pluginLoadCacheOnlyArm:void 0,commands:void 0,skills:void 0,skillsV5:void 0,agents:void 0,outputStyles:void 0,workflows:void 0,hookRegistration:void 0,hookRegistrationInFlight:void 0,hookRegistrationFailed:!1,hookRegistrationRetried:!1,hookRegistrationArgs:void 0,hookHotReloadUnsubscribe:void 0,hookHotReloadSettingsSnapshot:void 0,loadedModules:[],notices:Oa(new Map),openCalls:new Map,spawnProvenance:new Map,renderVersions:Oa(new Map),uiLogSink:null,pendingUiLog:[],armedMonitorKeys:new Set,marketplaces:new Map,marketplaceRefreshesInFlight:new Map,marketplaceHelperMemo:new Map,addDirMarketplacesMemo:void 0,headlessInstallPass:void 0,installedPluginsMigrated:!1,installedPluginsFile:null,installedPluginsEpoch:0,installedPluginsSnapshot:null,optionValues:new Map,flaggedPlugins:null,orphanedVersionGlobExclusions:null,recentActivity:[],pluginActivityFeatures:new Map,autoUpdateListener:null,commandSourceReresolve:null,pendingAutoUpdateNotification:null,ownInUseMarkerPaths:new Set,ownInUseMarkerHandles:new Map,commandProducerDirsDenied:new Set,commandProducerDirsScannedAt:0,commandProducerDirsComparable:null,commandProducerDirsNeedCanonicalCandidate:!1,commandProducerDirsWslProviderUndeterminable:!1,commandProducerDirsChanged:Fe(),inUseMarkerCleanup:void 0,hintedPluginIds:new Set,gitAvailable:void 0,operatorDeclaredMemo:void 0,marketplaceAdmissionVerdicts:new Map,hiddenRegistryEntries:{raw:new Map,v5:new Map},releasedRegistryEntries:{raw:new Set,v5:new Set},cacheRootComparableMemo:void 0,provenLocalRoots:new Map,wslProviderOfPluginsRootMemo:void 0}}
+
+## Jt-registry @181786426 miss=false len=35 sha=4866e46d5f708fda
+HEAD n ae(){return oe.of(G().host)}function Jt(){return ae().registry}function F_t(){
+FULL
+function Jt(){return ae().registry}
+
+## DOe @180780145 miss=false len=70 sha=da81fe6303149f7e
+HEAD -haiku"]}var _3=new Set(lw());function DOe(e){let t=fn(e);return Zl(t)!==void 0|
+FULL
+function DOe(e){let t=fn(e);return Zl(t)!==void 0||_3.has(t)||t===aKt}
+
+## DOe @202826256 miss=false len=1437 sha=325c208e78c56838
+HEAD R);return x>=0?EOe(b)[x]??R:R}function DOe(b){if(hm(b)){let[R,...x]=xy(b);if(!R)
+FULL
+function DOe(b){if(hm(b)){let[R,...x]=xy(b);if(!R)return VAt();return ie([R,...x])}if(b.type==="string"){let R=i();if(b.minLength!==void 0)R=R.min(b.minLength,{message:`Must be at least ${b.minLength} ${H(b.minLength,"character")}`});if(b.maxLength!==void 0)R=R.max(b.maxLength,{message:`Must be at most ${b.maxLength} ${H(b.maxLength,"character")}`});switch(b.format){case"email":R=R.email({message:"Must be a valid email address, e.g. user@example.com"});break;case"uri":R=R.url({message:"Must be a valid URI, e.g. https://example.com"});break;case"date":R=R.date("Must be a valid date, e.g. 2024-03-15, today, next Monday");break;case"date-time":R=R.datetime({offset:!0,message:"Must be a valid date-time, e.g. 2024-03-15T14:30:00Z, tomorrow at 3pm"});break;default:break}return R}if(b.type==="number"||b.type==="integer"){let R=b.type==="integer"?"an integer":"a number",x=b.type==="integer",P=(re)=>Number.isInteger(re)&&!x?`${re}.0`:String(re),j=b.minimum!==void 0&&b.maximum!==void 0?`Must be ${R} between ${P(b.minimum)} and ${P(b.maximum)}`:b.minimum!==void 0?`Must be ${R} >= ${P(b.minimum)}`:b.maximum!==void 0?`Must be ${R} <= ${P(b.maximum)}`:`Must be ${R}`,Z=Nk.number({error:j});if(b.type==="integer")Z=Z.int({message:j});if(b.minimum!==void 0)Z=Z.min(b.minimum,{message:j});if(b.maximum!==void 0)Z=Z.max(b.maximum,{message:j});return Z}if(b.type==="boolean")return Nk.boolean();throw Error(`Unsupported schema: ${S(b)}`)}
+
+## xo @182011013 miss=false len=23 sha=9d0a6f6a80900ed2
+HEAD calRootByRoot.delete(e),qr(e)}function xo(){return!0}function vt(e,t){let r=xo()
+FULL
+function xo(){return!0}
+
+## xo @182208695 miss=false len=33 sha=c069c2593a7c9396
+HEAD ss t{committed=!1}var e=new t;function xo(){return e.committed}function v9e(){e.
+FULL
+function xo(){return e.committed}
+
+## xo @182650750 miss=false len=56 sha=dae12ab29e2117fc
+HEAD ulTo=Eo;Vt.prototype.sqrTo=mo;function xo(){return(this.t>0?this.data[0]&1:this.
+FULL
+function xo(){return(this.t>0?this.data[0]&1:this.s)==0}
+
+## xo @191294660 miss=false len=62 sha=39291b2a676dd899
+HEAD ext",text:fs().join(`
+`)}]}})}function xo(){return import("B:/~BUN/root/chunk-vf
+FULL
+function xo(){return import("B:/~BUN/root/chunk-vfrwkvfd.js")}
+
+## xo @202391468 miss=false len=27 sha=c879aa5e49a08d57
+HEAD xt:bn,stats:yn}=yYt(i,Tl,W,D);function xo(){ft(0),fo(!1)}function Pl(w){X((pt)=>
+FULL
+function xo(){ft(0),fo(!1)}
+
+## xo @205572375 miss=false len=24 sha=c3fe226638d6fba3
+HEAD es.has(i))r[i]=e[i];return r}}function xo(){return wo}Oi.createNoopAttributesPro
+FULL
+function xo(){return wo}
+
+## dm @204510875 miss=false len=1021 sha=83923b63a7923214
+HEAD ),Me(`Error: ${l(L)}`),Vi(1)}}async function dm(e,t,r){let s=ws(e,t,{evalDir:r.d
+FULL
+async function dm(e,t,r){let s=ws(e,t,{evalDir:r.dir,evalDirFlag:Vn(r)}),o=process.execPath,u=[...jl()||!process.argv[1]?[]:[process.argv[1]],"--append-system-prompt",s,...nh()?[]:["--strict-mcp-config"],"--",ys];if($$(),process.stdin.isTTY)try{process.stdin.setRawMode(!1)}catch{}for(let h of["SIGINT","SIGTERM","SIGHUP","SIGBREAK"])process.removeAllListeners(h),process.on(h,()=>{});a.set("CLAUDE_CODE_EVAL_INTERVIEW_SESSION",!0);let d=sm(o,u,{cwd:e,stdio:"inherit",env:process.env});if(d.error)return await In("cli_plugin_eval_init_interactive","spawn_failed"),process.stderr.write(`${An(`Failed to start interview session: ${d.error.message}`)}
+`),1;if(d.status===0)return await Zs("cli_plugin_eval_init_interactive"),0;if(d.status===null&&d.signal!==null)return await(d.signal==="SIGINT"?Ic("cli_plugin_eval_init_interactive","interrupted"):In("cli_plugin_eval_init_interactive","signal_killed")),128+(lm.constants.signals[d.signal]??1);return await In("cli_plugin_eval_init_interactive","nonzero_exit"),d.status??1}
+
+## dm-sync @182208784 miss=false len=23 sha=19468f48a7a50e4b
+HEAD =!0}var n=new Promise(()=>{});function dm(){return n}
+export{xo,v9e,dm};
+.// @bu
+FULL
+function dm(){return n}
+
+## dm-sync @183365631 miss=false len=70 sha=12508c483fc45af0
+HEAD dd(zt(It(r),i1));return[...t]}function dm(e){Co(It(e),{recursive:!0}),Co(e,{recu
+FULL
+function dm(e){Co(It(e),{recursive:!0}),Co(e,{recursive:!0,mode:448})}
+
+## dm-sync @189169652 miss=false len=5469 sha=cdda68047cb979ce
+HEAD lm});var ks=b(function(Wg,xs){function dm(e){let t=e.regex,n={className:"meta",b
+FULL
+function dm(e){let t=e.regex,n={className:"meta",begin:"@[A-Za-z]+"},a={className:"subst",variants:[{begin:"\\$[A-Za-z0-9_]+"},{begin:/\$\{/,end:/\}/}]},s={className:"string",variants:[{begin:'"""',end:'"""'},{begin:'"',end:'"',illegal:"\\n",contains:[e.BACKSLASH_ESCAPE]},{begin:'[a-z]+"',end:'"',illegal:"\\n",contains:[e.BACKSLASH_ESCAPE,a]},{className:"string",begin:'[a-z]+"""',end:'"""',contains:[a],relevance:10}]},o={className:"type",begin:"\\b[A-Z][A-Za-z0-9_]*",relevance:0},r={className:"title",begin:/[^0-9\n\t "'(),.`{}\[\]:;][^\n\t "'(),.`{}\[\]:;]+|[^0-9\n\t "'(),.`{}\[\]:;=]/,relevance:0},i={className:"class",beginKeywords:"class object trait type",end:/[:={\[\n;]/,excludeEnd:!0,contains:[e.C_LINE_COMMENT_MODE,e.C_BLOCK_COMMENT_MODE,{beginKeywords:"extends with",relevance:10},{begin:/\[/,end:/\]/,excludeBegin:!0,excludeEnd:!0,relevance:0,contains:[o,e.C_LINE_COMMENT_MODE,e.C_BLOCK_COMMENT_MODE]},{className:"params",begin:/\(/,end:/\)/,excludeBegin:!0,excludeEnd:!0,relevance:0,contains:[o,e.C_LINE_COMMENT_MODE,e.C_BLOCK_COMMENT_MODE]},r]},c={className:"function",beginKeywords:"def",end:t.lookahead(/[:={\[(\n;]/),contains:[r]},l={begin:[/^\s*/,"extension",/\s+(?=[[(])/],beginScope:{2:"keyword"}},d={begin:[/^\s*/,/end/,/\s+/,/(extension\b)?/],beginScope:{2:"keyword",4:"keyword"}},m=[{match:/\.inline\b/},{begin:/\binline(?=\s)/,keywords:"inline"}],p={begin:[/\(\s*/,/using/,/\s+(?!\))/],beginScope:{2:"keyword"}};return{name:"Scala",keywords:{literal:"true false null",keyword:"type yield lazy override def with val var sealed abstract private trait object if then forSome for while do throw finally protected extends import final return else break new catch super class case package default try this match continue throws implicit export enum given transparent"},contains:[{begin:["//>",/\s+/,/using/,/\s+/,/\S+/],beginScope:{1:"comment",3:"keyword",5:"type"},end:/$/,contains:[{className:"string",begin:/\S+/}]},e.C_LINE_COMMENT_MODE,e.C_BLOCK_COMMENT_MODE,s,o,c,i,e.C_NUMBER_MODE,l,d,...m,p,n]}}xs.exports=dm});var Us=b(function(Yg,Ps){function pm(e){let a="(-|\\+)?\\d+([./]\\d+)?[+\\-](-|\\+)?\\d+([./]\\d+)?i",s={$pattern:"[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+",built_in:"case-lambda call/cc class define-class exit-handler field import inherit init-field interface let*-values let-values let/ec mixin opt-lambda override protect provide public rename require require-for-syntax syntax syntax-case syntax-error unit/sig unless when with-syntax and begin call-with-current-continuation call-with-input-file call-with-output-file case cond define define-syntax delay do dynamic-wind else for-each if lambda let let* let-syntax letrec letrec-syntax map or syntax-rules ' * + , ,@ - ... / ; < <= = => > >= ` abs acos angle append apply asin assoc assq assv atan boolean? caar cadr call-with-input-file call-with-output-file call-with-values car cdddar cddddr cdr ceiling char->integer char-alphabetic? char-ci<=? char-ci<? char-ci=? char-ci>=? char-ci>? char-downcase char-lower-case? char-numeric? char-ready? char-upcase char-upper-case? char-whitespace? char<=? char<? char=? char>=? char>? char? close-input-port close-output-port complex? cons cos current-input-port current-output-port denominator display eof-object? eq? equal? eqv? eval even? exact->inexact exact? exp expt floor force gcd imag-part inexact->exact inexact? input-port? integer->char integer? interaction-environment lcm length list list->string list->vector list-ref list-tail list? load log magnitude make-polar make-rectangular make-string make-vector max member memq memv min modulo negative? newline not null-environment null? number->string number? numerator odd? open-input-file open-output-file output-port? pair? peek-char port? positive? procedure? quasiquote quote quotient rational? rationalize read read-char real-part real? remainder reverse round scheme-report-environment set! set-car! set-cdr! sin sqrt string string->list string->number string->symbol string-append string-ci<=? string-ci<? string-ci=? string-ci>=? string-ci>? string-copy string-fill! string-length string-ref string-set! string<=? string<? string=? string>=? string>? string? substring symbol->string symbol? tan transcript-off transcript-on truncate values vector vector->list vector-fill! vector-length vector-ref vector-set! with-input-from-file with-output-to-file write write-char zero?"},o={className:"literal",begin:"(#t|#f|#\\\\[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+|#\\\\.)"},r={className:"number",variants:[{begin:"(-|\\+)?\\d+([./]\\d+)?",relevance:0},{begin:a,relevance:0},{begin:"#b[0-1]+(/[0-1]+)?"},{begin:"#o[0-7]+(/[0-7]+)?"},{begin:"#x[0-9a-f]+(/[0-9a-f]+)?"}]},i=e.QUOTE_STRING_MODE,c=[e.COMMENT(";","$",{relevance:0}),e.COMMENT("#\\|","\\|#")],l={begin:"[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+",relevance:0},d={className:"symbol",begin:"'[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+"},m={endsWithParent:!0,relevance:0},p={variants:[{begin:/'/},{begin:"`"}],contains:[{begin:"\\(",end:"\\)",contains:["self",o,i,r,l,d]}]},_={className:"name",relevance:0,begin:"[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+",keywords:s},u={variants:[{begin:"\\(",end:"\\)"},{begin:"\\[",end:"\\]"}],contains:[{begin:/lambda/,endsWithParent:!0,returnBegin:!0,contains:[_,{endsParent:!0,variants:[{begin:/\(/,end:/\)/},{begin:/\[/,end:/\]/}],contains:[l]}]},_,m]};return m.contains=[o,r,i,l,d,p,u].concat(c),{name:"Scheme",aliases:["scm"],illegal:/\S/,contains:[e.SHEBANG(),r,i,d,p,u].concat(c)}}
+
+## dm-sync @191696447 miss=false len=134 sha=7cc464abf50d2fee
+HEAD rySubtype:b.subtype}}var Da=8;function dm(b){let P=b.slice(0,Da).map((E)=>ce(P_(
+FULL
+function dm(b){let P=b.slice(0,Da).map((E)=>ce(P_(E),64));return b.length>Da?`${P.join(", ")} (and ${b.length-Da} more)`:P.join(", ")}
+
+## dm-sync @201118587 miss=false len=503 sha=8ef7a1d5a2b9b7a1
+HEAD nse above may be incomplete.";function dm(e,t){if(t.type==="system"&&t.subtype==
+FULL
+function dm(e,t){if(t.type==="system"&&t.subtype==="compact_boundary"){Dl(e);return}if(t.type==="assistant"&&t.parent_tool_use_id===null){if(t.supersedes?.length)Dl(e);let r=t.message?.content;if(!Array.isArray(r))return;let o=Vr(r.filter((y)=>y!=null),`
+`);if(o)e.priorAssistantText=e.lastAssistantText,e.lastAssistantText=o;return}if(t.type!=="result")return;e.partialForResult=t.subtype==="success"&&t.is_error&&t.result.endsWith(l_)&&e.lastAssistantText===t.result?e.priorAssistantText:void 0,Dl(e)}
+
+## dm-sync @204510881 miss=false len=1015 sha=c979898a24b1b853
+HEAD Error: ${l(L)}`),Vi(1)}}async function dm(e,t,r){let s=ws(e,t,{evalDir:r.dir,eva
+FULL
+function dm(e,t,r){let s=ws(e,t,{evalDir:r.dir,evalDirFlag:Vn(r)}),o=process.execPath,u=[...jl()||!process.argv[1]?[]:[process.argv[1]],"--append-system-prompt",s,...nh()?[]:["--strict-mcp-config"],"--",ys];if($$(),process.stdin.isTTY)try{process.stdin.setRawMode(!1)}catch{}for(let h of["SIGINT","SIGTERM","SIGHUP","SIGBREAK"])process.removeAllListeners(h),process.on(h,()=>{});a.set("CLAUDE_CODE_EVAL_INTERVIEW_SESSION",!0);let d=sm(o,u,{cwd:e,stdio:"inherit",env:process.env});if(d.error)return await In("cli_plugin_eval_init_interactive","spawn_failed"),process.stderr.write(`${An(`Failed to start interview session: ${d.error.message}`)}
+`),1;if(d.status===0)return await Zs("cli_plugin_eval_init_interactive"),0;if(d.status===null&&d.signal!==null)return await(d.signal==="SIGINT"?Ic("cli_plugin_eval_init_interactive","interrupted"):In("cli_plugin_eval_init_interactive","signal_killed")),128+(lm.constants.signals[d.signal]??1);return await In("cli_plugin_eval_init_interactive","nonzero_exit"),d.status??1}
+
+## dm-sync @209211673 miss=false len=980 sha=f325e6abad7e9ff5
+HEAD urn"Skills";default:return a}}function dm(am){let Ma=y(11),{plugin:fc,marketplac
+FULL
+function dm(am){let Ma=y(11),{plugin:fc,marketplace:yc}=am,[hc,tD]=u(null),[kc,nD]=u(null),ck,uk;if(Ma[0]!==yc||Ma[1]!==fc)ck=()=>{let lm=!1;return MRt(fc,yc).then((oD)=>{if(!lm)tD(oD)}).catch((dk)=>{if(!lm)nD(dk instanceof Error?dk.message:"Failed to load components")}),()=>{lm=!0}},uk=[fc,yc],Ma[0]=yc,Ma[1]=fc,Ma[2]=ck,Ma[3]=uk;else ck=Ma[2],uk=Ma[3];if(A(ck,uk),kc){let $a;if(Ma[4]===d)$a=e(t,{bold:!0,children:"Components:"}),Ma[4]=$a;else $a=Ma[4];let Fr;if(Ma[5]!==kc)Fr=r(o,{flexDirection:"column",marginBottom:1,children:[$a,r(t,{dimColor:!0,children:["Error: ",kc]})]}),Ma[5]=kc,Ma[6]=Fr;else Fr=Ma[6];return Fr}if(!hc){return null}let $a,Fr;if(Ma[7]!==hc){Fr=pn;bb0:{let pk=Ci(hc);if(pk.length===0){Fr=null;break bb0}let mk;if(Ma[10]===d)mk=e(t,{bold:!0,children:"Installed components:"}),Ma[10]=mk;else mk=Ma[10];$a=r(o,{flexDirection:"column",marginBottom:1,children:[mk,pk.map(Sk)]})}Ma[7]=hc,Ma[8]=$a,Ma[9]=Fr}else $a=Ma[8],Fr=Ma[9];if(Fr!==pn)return Fr;return $a}
+
+## dm-sync @209862062 miss=false len=66 sha=411709a7df697842
+HEAD d}`.padEnd(Se-pa.length)})]})}function dm(Jd){return Jd?` \xB7 ${Jd}`.padEnd(Se)
+FULL
+function dm(Jd){return Jd?` \xB7 ${Jd}`.padEnd(Se):" ".repeat(Se)}
+
+## dm-sync @211303767 miss=false len=76 sha=eaaf254b68ba4f15
+HEAD Message=dm;Io.getErrorCode=hm;function dm(e){if(e instanceof Error)return e.mess
+FULL
+function dm(e){if(e instanceof Error)return e.message;else return String(e)}
+
+--- Jt() no-arg near hook cluster ---
+Jt() @180204504 len=234 function Jt(){if(I.remoteArmGeneration++,we(),I.state?.armedFromRemote!==!0)return;I.stopRefreshTimer(),I.retireState(),I.initializeAttempted=!1,n("policyHelper
+Jt() @181786426 len=35 function Jt(){return ae().registry}
+Jt() @197647112 len=28 function Jt(){return new Hs}
+Jt() @202286026 len=212 function Jt(){let n=$l()?.model_notices;if(typeof n!=="object"||n===null||Array.isArray(n))return{};let l={};for(let[m,p]of Object.entries(n))if(m.trim().length
+
+se neighborhood:
+?void 0:j5t(e,t.walkRoot,t.distroDir))}function se(){return{pluginLoad:void 0,pluginLoadArm:void 0,pluginLoadCacheOnly:void 0,pluginLoadCacheOnlyArm:void 0,commands:void 0,skills:void 0,skillsV5:void 0,agents:void 0,outputStyles:void 0,workflows:void 0,hookRegistration:void 0,hookRegistrationInFlight:void 0,hookRegistrationFailed:!1,hookRegistrationRetried:!1,hookRegistrationArgs:void 0,hookHotReloadUnsubscribe:void 0,hookHotReloadSettingsSnapshot:void 0,loadedModules:[],notices:Oa(new Map),openCalls:new Map,spawnProvenance:new Map,renderVersions:Oa(new Map),uiLogSink:null,pendingUiLog:[],armedMonitorKeys:new Set,marketplaces:new Map,marketplaceRefreshesInFlight:new Map,marketplaceHelperMemo:new Map,addDirMarketplacesMemo:void 0,headlessInstallPass:void 0,installedPluginsMigrated:!1,installedPluginsFile:null,installedPluginsEpoch:0,installedPluginsSnapshot:null,optionValues:new Map,flaggedPlugins:null,orphanedVersionGlobExclusions:null,recentActivity:[],pluginActivityFeatures:new Map,autoUpdateListener:null,commandSourceReresolve:null,pendingAutoUpdateNotification:null,ownInUseMarkerPaths:new Set,ownInUseMarkerHandles:new Map,commandProducerDirsDenied:new Set,commandProducerDirsScannedAt:0,commandProducerDirsComparable:null,commandProducerDirsNeedCanonicalCandidate:!1,commandProducerDirsWslProviderUndeterminable:!1,commandProducerDirsChanged:Fe(),inUseMarkerCleanup:void 0,hintedPluginIds:new Set,gitAvailable:void 0,operatorDeclaredMemo:void 0,marketplaceAdmissionVerdicts:new Map,hiddenRegistryEntries:{raw:new Map,v5:new Map},releasedRegistryEntries:{raw:new Set,v5:new Set},cacheRootComparableMemo:void 0,provenLocalRoots:new Map,wslProviderOfPluginsRootMemo:void 0}}class E{registry=se()}var oe=new X(()=>new E);function ae(){return oe.of(G().host)}function Jt(){return ae().registry}function F_t(){Jt().workflows=void 0}im

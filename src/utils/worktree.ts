@@ -1271,7 +1271,7 @@ export function codeChangeProviderFromUrl(url: string): CodeChangeProvider {
   if (url.includes('/pull-requests/')) return 'bitbucket'
   try {
     const host = new URL(url).hostname.toLowerCase()
-    if (host === 'github.com' || host.endsWith('.github.com')) return 'github'
+    if (host === 'github.com' || host === 'www.github.com') return 'github'
   } catch {
     return 'github-enterprise'
   }
@@ -1307,10 +1307,10 @@ export function codeChangeProviderFromHostname(
   if (!hostname) return 'other'
   let t = hostname.toLowerCase()
   while (t.startsWith('www.')) t = t.slice(4)
-  // densable dm(e) — github.com and common GH enterprise-looking hosts treated as github for fetch ref
-  if (t === 'github.com' || t.endsWith('.github.com')) return 'github'
-  if (t === 'gitlab.com' || t.endsWith('.gitlab.com')) return 'gitlab'
-  if (t === 'bitbucket.org' || t.endsWith('.bitbucket.org')) return 'bitbucket'
+  // densable X3 — after www-strip, exact gold hosts only (var G/B).
+  if (t === 'github.com') return 'github'
+  if (t === 'gitlab.com') return 'gitlab'
+  if (t === 'bitbucket.org') return 'bitbucket'
   // many self-hosted still use github-style pull/ refs; densable "other" tries both
   return 'other'
 }

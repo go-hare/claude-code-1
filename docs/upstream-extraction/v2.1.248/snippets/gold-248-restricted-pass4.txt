@@ -1,0 +1,325 @@
+# gold-248-restricted-pass4
+bytes=226708128
+when=2026-09-20T04:57:30.980Z
+
+## D2n-caller-191370694 @191370694
+ance.now()-Ut,Ut),xr(at.after)},tr=()=>{if(_P()&&!WW())return!0;if(nt)return!0;for(let Pe of AC){let Ge=eV(be(Pe)?.env,Pe);if(Object.keys(Ge).length>0)return!0}return!1},jo=!1;if(De()&&HI()&&Object.keys(oe().cachedGrowthBookFeatures??{}).length===0&&!tr())jo=!0,await kr("gb-before-mode","growthbook_init_ms",{before:"before_growthbook_init",after:"after_growthbook_init"});let $o=um("tengu_auto_mode_config",{});if(De()&&$o.value?.enabled==="disabled"&&$o.source==="disk"&&HI()&&!tr())await kr("gb-killswitch-recheck","growthbook_killswitch_recheck_ms",{before:"before_gb_killswitch_recheck",after:"after_gb_killswitch_recheck"});let ur=vGe,Ho,Ko=!1,{mode:Vn,notification:Cr,proactivity:Wo,modeSuppliedOnInvocation:Gr}=nrn({permissionModeCli:Ze,dangerouslySkipPermissions:me,allowDangerouslySkipPermissions:le,bypassPermissionsBlockedByHost:Ko,agentPermissionMode:br,proactivityLevel:Ho?.level}),vr=D2n({restricted:xe,permissionMode:Vn,allowDangerouslySkipPermissions:le});if(vr)return gn(`Error: ${vr}`);if(Tkn(Vn==="bypassPermissions"),C.enableAutoMode||Ze==="auto"||br==="auto"||Vn==="auto"&&!mB()||!Ze&&srn())Hdn(!0);await xD({hasDynamicMcpConfi
+
+## cloud-191366444 @191366444
+ 0)Je=!0;if(!C.print)Yt=!0}let no=await ld(C,{prompt:typeof d==="string"?d:void 0,sessionId:xt,outputFormat:Ct,inputFormat:Ve,hasSdkUrl:Boolean(sn),nonInteractive:De(),isViolinWoodEnabled:Kl,hasConnect:Boolean(j?.url),hasSSH:Boolean(H?.host),rcProjectGateEnabled:!1});if(!no.ok)return no.flushAnalytics?is(no.error):gn(no.error);let{teleport:fr,cloudAttachId:Fo,poolId:yo,poolPromotedRemote:Zo,poolRef:jr,poolOnBranch:er,forwardHomeSettings:lr,homeSettingsConsent:Lo,projectFlag:$r,projectBrowse:gr,projectForRemoteControl:os,correlationId:ti,headlessCloud:_o}=no.value,{remote:Ro}=no.value;if(xe&&(Ro!==null||Fo!==null||yo!==null||Zo||gr!==null||Boolean(j?.url)||Boolean(H?.host)))return gn("Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its tools on another machine");z().host.launchOptions.replaceMayForwardHomeSettings(lr),z().host.launchOptions
+
+## c7e-xe-191363865 @191363865
+s:Qe=[],mcpConfig:gt=[],permissionMode:Ze,addDir:Bt=[],fallbackModel:Ht,betas:on=[],ide:Rn=!1,sessionId:xt,includeHookEvents:mn,includePartialMessages:fn,forwardSubagentText:wn,sessionMirror:tn}=C;if(c7e(xe),C.prefill)Hje(C.prefill);let zt,cn=C.agents;if(typeof cn==="string"&&cn!==""&&!ho("agents",{explicitlyRequested:!0})&&!C.resume&&!C.continue&&!a.CLAUDE_BG_POST_CLEAR_RESPAWN){let Pe=rtn(cn);if
+
+## eager-189721058 @189721058
+{try{let t=xXn(e);mkn(t),Yl()}catch(t){if(t instanceof Error)n(`Invalid --setting-sources flag: ${l(t)}`,{level:"error"});return gn(`Error processing --setting-sources: ${l(t)}`)}}function k3t(){let e=performance.now();xr("eagerLoadSettings_start");let t=xjt("--settings");if(t)wtr(t);let a=xjt("--managed-settings");if(a)c(a);let s=xjt("--setting-sources");if(s!==void 0)g(s);if(t0("--restricted")||O2())g(""),c7e(!0);xr("eagerLoadSettings_end"),Bi("settings_load_ms",performance.now()-e,e)}
+export{wtr,k3t};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Se
+
+### eager fn name=k3t @189720838
+## eager-fn @189720838
+len=312 sha=6782825300e6103d
+function k3t(){let e=performance.now();xr("eagerLoadSettings_start");let t=xjt("--settings");if(t)wtr(t);let a=xjt("--managed-settings");if(a)c(a);let s=xjt("--setting-sources");if(s!==void 0)g(s);if(t0("--restricted")||O2())g(""),c7e(!0);xr("eagerLoadSettings_end"),Bi("settings_load_ms",performance.now()-e,e)}
+
+## restricted tools strip needle="restricted&&" hits=8
+- #0 @181760545  Ai(r,(d,p)=>uqe(d,p,void 0,o),t)}let u=we(e);if(mi(u,{includeWorkshopDoc:o?.permissionMode==="plan"}))return ue(t,"Plan files for current session are allowed for writing");if(!o?.restricted&&ml(u))return ue(t,"Workflow script files for current session are allowed for writing");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for writing");if(bi(u
+- #1 @181760824 if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for writing");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if
+- #2 @181760952  current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writing");if(pi(u))retur
+- #3 @181761021 sWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writing");if(pi(u))return gi;if(ur(u))return fr;if(dr(u))return mr;return{behavior:"passthrou
+- #4 @181761523 avior:"deny",message:"Cannot read memory while it is paused. Run /pause-memory to resume automemory.",decisionReason:{type:"safetyCheck",reason:di,classifierApprovable:!1}};if(!o?.restricted&&fl(u))return ue(t,"Project directory files are allowed for reading");if(mi(u,{includeWorkshopDoc:!0}))return ue(t,"Plan files for current session are allowed for reading");let d=Wg
+- #5 @183550511  -hosts path, which is not supported.`,errorCode:1};return}async function Wdt(e,n){let i=te();for(let o of e){if(p(o))continue;let l=Fan(o);if(l!==void 0)return l;let s=ht(o);if(n.restricted&&!mb(s,n))return{result:!1,message:`Attachment "${o}" is outside the working directory; --restricted only sends files from inside it.`,errorCode:1};try{if(!(await c(s)).isFile())ret
+- #6 @184530568 =e.options.agentDefinitions;return{depth:Xc(e.agentContext),allowedAgentTypes:r,activeAgents:t}}function hP(e,t,{depth:r=0,allowedAgentTypes:o,activeAgents:u}={}){return GX()&&!(t.restricted&&_s(t,{name:Yr}))&&(u===void 0||bfe(u))&&e.some((p)=>Xt(p,ft))&&!_s(t,{name:ft})&&!z9(t,ft,iu)&&r<i_()&&(o===void 0||o.includes(iu))}function E3e(e,t,r,o,u){let p=typeof t==="object
+- #7 @185211562 DE_CODE_ENABLE_TODO_TOOLS===!0)return!0;return R(ubn,!1)===!0}function Zj(){return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||e.allowDangerouslySkipPermissions)?RSe:void 0}function Fnt(e){return e.some((t)=>t.startsWith("preset:"))?new Set:new Set(e)}function Nnt(e
+
+## disallow Bash needle="Bash\")" hits=4
+- #0 @98920838 shell string: {"type": "command", "command": "echo hi"}.........../hooks#exec-form-and-shell-form......@..Hooks use a matcher + hooks array. The matcher is a string: a tool name ("Bash"), pipe-separated list ("Edit|Write"), or empty to match all. Example: {"PostToolUse": [{"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "echo Done"}]}]}..F...7NJ.
+- #1 @179425797 c-form-and-shell-form`}},{matches:(e)=>e.path.includes("hooks")&&e.code==="invalid_type",tip:{suggestion:'Hooks use a matcher + hooks array. The matcher is a string: a tool name ("Bash"), pipe-separated list ("Edit|Write"), or empty to match all. Example: {"PostToolUse": [{"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "echo Done"}]}]}'}},{match
+- #2 @184165442 in("|"));return typeof u==="bigint"?Number(u&0xffffffffn):u})}function $1e(e,t,r){return}function U1e(e){}function Tse(e,t){}function B1e(e){return{}}var wLr=new Map([[Xe,v("tools:Bash")],[Ks,v("tools:ScheduleWakeup")],[ft,v("tools:Agent")],[vo,v("tools:Skill")],[Tl,v("tools:ToolSearch")],[ii,v("tools:Artifact")],[ko,v("tools:SendMessage")],[JA,v("tools:SendUserFi
+- #3 @184353045 rule '${o}' from ${u} requires approval for this ${e} command`}case"subcommandResults":{let o=[];for(let[u,p]of t.reasons)if(p.behavior==="ask"||p.behavior==="passthrough")if(e==="Bash"){let{commandWithoutRedirections:g,redirections:k}=UJ(u),E=k.length>0?g:u;o.push(E)}else o.push(u);if(o.length>0){let u=o.length;return`This ${e} command contains multiple operation
+
+## code running set needle="REPL" hits=510
+- #0 @66982297 unning asynchronously"));
+}
+function ERR_INSPECTOR_NOT_AVAILABLE() {
+  return decorateNodeErrorStack(@makeErrorWithCode(340, "Inspector is not available"));
+}
+function ERR_INVALID_REPL_EVAL_CONFIG() {
+  return decorateNodeErrorStack(@makeErrorWithCode(341, 'Cannot specify both "breakEvalOnSigint" and "eval" for REPL'));
+}
+function ERR_INVALID_REPL_INPUT(message)
+- #1 @66982430 or is not available"));
+}
+function ERR_INVALID_REPL_EVAL_CONFIG() {
+  return decorateNodeErrorStack(@makeErrorWithCode(341, 'Cannot specify both "breakEvalOnSigint" and "eval" for REPL'));
+}
+function ERR_INVALID_REPL_INPUT(message) {
+  return decorateNodeErrorStack(@makeErrorWithCode(342, message));
+}
+function AbortError(message = "The operation was aborted", op
+- #2 @66982462 on ERR_INVALID_REPL_EVAL_CONFIG() {
+  return decorateNodeErrorStack(@makeErrorWithCode(341, 'Cannot specify both "breakEvalOnSigint" and "eval" for REPL'));
+}
+function ERR_INVALID_REPL_INPUT(message) {
+  return decorateNodeErrorStack(@makeErrorWithCode(342, message));
+}
+function AbortError(message = "The operation was aborted", options = @undefined) {
+  return @
+- #3 @66982946 ,
+  ERR_USE_AFTER_CLOSE,
+  ERR_INVALID_CURSOR_POS,
+  ERR_SCRIPT_EXECUTION_INTERRUPTED,
+  ERR_INVALID_STATE,
+  ERR_CANNOT_WATCH_SIGINT,
+  ERR_INSPECTOR_NOT_AVAILABLE,
+  ERR_INVALID_REPL_EVAL_CONFIG,
+  ERR_INVALID_REPL_INPUT
+])
+  Object.defineProperty(fn, Symbol.hasInstance, {
+    __proto__: null,
+    value: (e) => typeof e === "object" && e !== null && e.code ===
+- #4 @66982978 NVALID_CURSOR_POS,
+  ERR_SCRIPT_EXECUTION_INTERRUPTED,
+  ERR_INVALID_STATE,
+  ERR_CANNOT_WATCH_SIGINT,
+  ERR_INSPECTOR_NOT_AVAILABLE,
+  ERR_INVALID_REPL_EVAL_CONFIG,
+  ERR_INVALID_REPL_INPUT
+])
+  Object.defineProperty(fn, Symbol.hasInstance, {
+    __proto__: null,
+    value: (e) => typeof e === "object" && e !== null && e.code === fn.name
+  });
+function isErrorS
+- #5 @66983769 AFTER_CLOSE,
+    ERR_INVALID_CURSOR_POS,
+    ERR_SCRIPT_EXECUTION_INTERRUPTED,
+    ERR_INVALID_STATE,
+    ERR_CANNOT_WATCH_SIGINT,
+    ERR_INSPECTOR_NOT_AVAILABLE,
+    ERR_INVALID_REPL_EVAL_CONFIG,
+    ERR_INVALID_REPL_INPUT
+  }
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/readline/utils.ts
+var $, primordials = @getInternalFiel
+- #6 @66983803 R_POS,
+    ERR_SCRIPT_EXECUTION_INTERRUPTED,
+    ERR_INVALID_STATE,
+    ERR_CANNOT_WATCH_SIGINT,
+    ERR_INSPECTOR_NOT_AVAILABLE,
+    ERR_INVALID_REPL_EVAL_CONFIG,
+    ERR_INVALID_REPL_INPUT
+  }
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/readline/utils.ts
+var $, primordials = @getInternalField(@internalModuleRegistry, 63) || 
+- #7 @67015786  (l) => RegExpPrototypeSymbolReplace(/^(\s+at )<anonymous> \((.+)\)$/, l, "$1$2"));
+  let anonIdx = -1;
+  for (let i = 0;i < lines.length; i++)
+    if (RegExpPrototypeExec(/^\s+at REPL\d*:\d+:\d+$/, lines[i]) !== null)
+      anonIdx = i;
+  if (anonIdx !== -1)
+    lines = ArrayPrototypeSlice(lines, 0, anonIdx);
+  let newStack = ArrayPrototypeJoin(lines, `
+`);
+  i
+- … +502 more
+
+## strip WebFetch needle="WebFetch" hits=138
+- #0 @92295876 ction...........hasInitialPrompt....2...hasStdin......e.numAllowedTools......X..numDisallowedTools..........mcpClientCount..
+.....G.mcpConfigs..........worktreeEnabled......i..skipWebFetchPreflight.......?...githubActionInputs.. .......dangerouslySkipPermissionsPassed......H.proactivityLevel........modeIsBypass%.......allowDangerouslySkipPermissionsPassed...#....t..
+- #1 @92572386 I.scriptSha256......*.argsJson.....]..continueInterruptedTurn.b....F..[orphan-resume] deferred auto-resume skipped: takeover released or replaced during MCP-settle wait.......HY.isWebFetchLaunch....:[..B:/~BUN/root/chunk-h1znnzmy.js......s.y.artifactCommentsPromptGateOpen..B....._.Cannot destructure property 'entries' from null or undefined value..........take......
+- #2 @92752894 ed installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. If they finish installing later, /chrome completes the connection, and the next Clau
+- #3 @92753300 automatically.......E...The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next 
+- #4 @92754437 .t.o.m.a.t.i.c.a.l.l.y.....f...$.z.Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the
+- #5 @92754870 lable: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again............Browser tools were not enabled: the se
+- #6 @92755277 ws tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection..........P.Brows
+- #7 @92755685 on: the Claude in Chrome extension is not set up. The user can install or connect it from .....3... and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.....!...The user declined to inst
+- … +130 more
+
+## restricted default tools needle="restricted?" hits=6
+- #0 @178162276 tMap((i)=>["--plugin-dir-no-mcp",i]),...n.addDir.flatMap((i)=>["--add-dir",i]),...n.mcpConfig.flatMap((i)=>["--mcp-config",i]),...n.strictMcpConfig?["--strict-mcp-config"]:[],...n.restricted?["--restricted"]:[]]}function rer(n){let i=0;while(n[i]==="--dangerously-skip-permissions"||n[i]==="--allow-dangerously-skip-permissions")i++;return n[i]==="daemon"?n.slice(i+1):nu
+- #1 @181758331 attern}],behavior:"allow",destination:"session"}]:lqe(u,"write",r,d);return{behavior:"ask",message:E.message,suggestions:N,decisionReason:{type:"safetyCheck",reason:E.message,...r.restricted?{classifierApprovable:!1,circuitBreaker:"restrictedMode"}:{classifierApprovable:E.classifierApprovable,circuitBreaker:E.circuitBreaker}}}}if(r.mode==="plan")return{behavior:"ask",m
+- #2 @182827964 if(i!=="read"){let r=F9(t,l,void 0,e.isRemoteMode&&!e.restricted,e.trustedNetworkDirectories);if(!r.safe)return{allowed:!1,decisionReason:{type:"safetyCheck",reason:r.message,...e.restricted?{classifierApprovable:!1,circuitBreaker:"restrictedMode"}:{classifierApprovable:r.classifierApprovable,circuitBreaker:r.circuitBreaker}}}}let c=mb(t,e,l);if(c){if(i==="read"||e.mod
+- #3 @182966282 reements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{wr,O2}from"B:/~BUN/root/chunk-4hkt7f9w.js";function zin(n,e){return e&&!n.restricted?{...n,restricted:!0}:n}function dae(n){return wr()||O2()||[n.permissionMode,n.model,n.fallbackModel,n.effort,n.agent,n.agents,n.settings,n.appendSystemPrompt,n.appendSystemPromptFi
+- #4 @184261566 pprovable){let Te=F9(Pe.path,Ie);if(!Te.safe&&(j===void 0||!Te.classifierApprovable))j={behavior:"ask",message:Te.message,decisionReason:{type:"safetyCheck",reason:Te.message,...r.restricted?{classifierApprovable:!1,circuitBreaker:"restrictedMode"}:{classifierApprovable:Te.classifierApprovable,circuitBreaker:Te.circuitBreaker}}}}}}}if(j!==void 0)return j;let G=C==="net
+- #5 @185315380 gnored; the built-in web-fetch agent always runs as a local agent`),pt=void 0;if(pt==="remote"&&(!xW()||pe.restricted)){pt=a.CLAUDE_CODE_REMOTE||!XSe()?void 0:"worktree";let Cr=pe.restricted?"(--restricted)":"(no claude.ai login or feature gate off)";n("[remote agent] isolation:'remote' is unavailable "+(a.CLAUDE_CODE_REMOTE?"(already inside a CCR session); running as 
+
+## toolsToDisallow restricted needle="toolsToDisallow" hits=0
+
+## baseTools restricted needle="baseTools" hits=8
+- #0 @92337368 ecNamesSelfHostedRunnerTool' from null or undefined value...C.......Cannot destructure property 'warnings' from null or undefined value......v.CLAUDE_BG_MEMORY_TOGGLED_OFF	....3..baseTools..."...2.f.toolsSpecNamesSelfHostedRunnerTool..........allowedToolsCli.........disallowedToolsCli..........baseToolsCli........addDirs.........bgSessionPermissionRules........warni
+- #1 @92337484  or undefined value......v.CLAUDE_BG_MEMORY_TOGGLED_OFF	....3..baseTools..."...2.f.toolsSpecNamesSelfHostedRunnerTool..........allowedToolsCli.........disallowedToolsCli..........baseToolsCli........addDirs.........bgSessionPermissionRules........warnings......?.dangerousPermissions.... ...overlyBroadBashPermissions..........prePlanMode......Y..B:/~BUN/root/chunk-pf
+- #2 @185217917 nE(!0);return{mode:C.mode,notification:C.notification,proactivity:M,modeSuppliedOnInvocation:C.modeSuppliedOnInvocation}}async function rrn({allowedToolsCli:e,disallowedToolsCli:t,baseToolsCli:r,restricted:o=!1,permissionMode:u,allowDangerouslySkipPermissions:p,addDirs:g,bgSessionPermissionRules:k,storageV5:E}){let C=[],M=vd(e).map((it)=>$r(jr(it))).filter((it)=>{let
+- #3 @191302132 Array.isArray(C.deny)?{allow:C.allow,deny:C.deny}:void 0}catch{return}}async function ed(d){if(a.CLAUDE_BG_MEMORY_TOGGLED_OFF==="1"&&a.CLAUDE_CODE_SESSION_KIND==="bg")Sde(!0);if(d.baseTools&&!a.CLAUDE_CODE_REMOTE&&a.CLAUDE_CODE_SESSION_KIND!=="bg"){let{toolsSpecNamesSelfHostedRunnerTool:W}=import.meta.require("B:/~BUN/root/chunk-k5t9wf4v.js");if(W(d.baseTools))mjn()}
+- #4 @191302304 0);if(d.baseTools&&!a.CLAUDE_CODE_REMOTE&&a.CLAUDE_CODE_SESSION_KIND!=="bg"){let{toolsSpecNamesSelfHostedRunnerTool:W}=import.meta.require("B:/~BUN/root/chunk-k5t9wf4v.js");if(W(d.baseTools))mjn()}let C=await rrn({allowedToolsCli:d.allowedTools,disallowedToolsCli:d.disallowedTools,baseToolsCli:d.baseTools,restricted:d.restricted,permissionMode:d.permissionMode,allowD
+- #5 @191302406 tedRunnerTool:W}=import.meta.require("B:/~BUN/root/chunk-k5t9wf4v.js");if(W(d.baseTools))mjn()}let C=await rrn({allowedToolsCli:d.allowedTools,disallowedToolsCli:d.disallowedTools,baseToolsCli:d.baseTools,restricted:d.restricted,permissionMode:d.permissionMode,allowDangerouslySkipPermissions:d.allowDangerouslySkipPermissions,addDirs:d.addDirs,bgSessionPermissionRules
+- #6 @191302421 }=import.meta.require("B:/~BUN/root/chunk-k5t9wf4v.js");if(W(d.baseTools))mjn()}let C=await rrn({allowedToolsCli:d.allowedTools,disallowedToolsCli:d.disallowedTools,baseToolsCli:d.baseTools,restricted:d.restricted,permissionMode:d.permissionMode,allowDangerouslySkipPermissions:d.allowDangerouslySkipPermissions,addDirs:d.addDirs,bgSessionPermissionRules:wg(),storageV5
+- #7 @191377171 ;if(Sx(!0),!Pe)import("B:/~BUN/root/chunk-yxahsd3w.js").then((Ge)=>{Ge.detectCurrentRepositoryWithHost()})}let ro=performance.now(),Tn=await ed({allowedTools:Ke,disallowedTools:Qe,baseTools:Ae,restricted:xe,permissionMode:Vn,allowDangerouslySkipPermissions:le,addDirs:Bt,storageV5:G}),qo=Tn.toolPermissionContext;if(Wo)qo={...qo,...Wo};let{warnings:Ra,overlyBroadBashPe
+
+## parseBaseTools needle="parseBaseTools" hits=2
+- #0 @101872711 sTaskPermissionisDefaultPermissionModeAutoisOverlyBroadBashAllowRuleisOverlyBroadPowerShellAllowRuleisYoloEquivStripEnabledForEntrypointoverlyBroadShellAllowsStrippedByEverySessionparseBaseToolsFromCLIprepareContextForPlanModeremoveDangerousPermissionsrestoreDangerousPermissionssetPermissionModeWithGuardsshouldPlanUseAutoModestripDangerousPermissionsForAutoModetransitionP
+- #1 @194071601 to,O2n as isOverlyBroadBashAllowRule,L2n as isOverlyBroadPowerShellAllowRule,Far as isYoloEquivStripEnabledForEntrypoint,xyr as overlyBroadShellAllowsStrippedByEverySession,Bar as parseBaseToolsFromCLI,YWe as prepareContextForPlanMode,Uar as removeDangerousPermissions,gK as restoreDangerousPermissions,Gx as setPermissionModeWithGuards,arn as shouldPlanUseAutoMode,vM as st
+
+## unless named needle="unless" hits=373
+- #0 @82292035 sy to windowstrong  simple}catch(seventhinfoboxwent topaintedcitizenI don'tretreat. Some ww.");
+bombingmailto:made in. Many carries||{};wiwork ofsynonymdefeatsfavoredopticalpageTraunless sendingleft"><comScorAll thejQuery.touristClassicfalse" Wilhelmsuburbsgenuinebishops.split(global followsbody ofnominalContactsecularleft tochiefly-hidden-banner</li>
+
+. When in b
+- #1 @82321714 afterwardscurrently across thescientificcommunity.capitalismin Germanyright-wingthe systemSociety ofpoliticiandirection:went on toremoval of New York apartmentsindicationduring theunless thehistoricalhad been adefinitiveingredientattendanceCenter forprominencereadyStatestrategiesbut in theas part ofconstituteclaim thatlaboratorycompatiblefailure of, such as began 
+- #2 @82568676 on has completedexpect.assertions() must be called within a testUnreachableErrorreached unreachable code...
+
+Matcher error: Inline snapshot creation is disabled in CI environments unless --update-snapshots is used.
+To override, set the environment variable CI=false.
+
+Received: .....
+
+.[1mMatcher error.[0m: Inline snapshot creation is disabled in CI environments un
+- #3 @82568860 ss --update-snapshots is used.
+To override, set the environment variable CI=false.
+
+Received: .....
+
+.[1mMatcher error.[0m: Inline snapshot creation is disabled in CI environments unless --update-snapshots is used.
+To override, set the environment variable CI=false.
+
+Received: ..p
+
+Matcher error: Inline snapshot matchers must be called from the test file:
+  Expect
+- #4 @82570281 n object containing matchers
+1Failed to make snapshot directory for test file: ..,Failed to open snapshot file for test file: .....Snapshot creation is disabled in CI environments unless --update-snapshots is used
+To override, set the environment variable CI=false.
+
+Snapshot name: ".."
+Received: .....Snapshot creation is disabled in CI environments unless --update
+- #5 @82570452 ronments unless --update-snapshots is used
+To override, set the environment variable CI=false.
+
+Snapshot name: ".."
+Received: .....Snapshot creation is disabled in CI environments unless --update-snapshots is used
+To override, set the environment variable CI=false.
+
+Received: ...Failed write to snapshot file: ..Snapshot matchers are not supported after the test ha
+- #6 @82722467 alue value,
+                      uint32_t initial_refcount,
+                      napi_ref* result);
+
+// Deletes a reference. The referenced value is released, and may
+// be GC'd unless there are other references to it.
+NAPI_EXTERN napi_status NAPI_CDECL napi_delete_reference(node_api_basic_env env,
+                                                         napi_re
+- #7 @82738462 onment, and
+// the definition of basic finalizer function pointer types below, which
+// receive a basic environment as their first parameter, and can thus only call
+// basic APIs (unless the user explicitly casts the environment), we achieve
+// the ability to ensure at compile time that we do not call APIs that affect
+// the state of the JS engine from a synchrono
+- … +365 more
+
+## codeRunningToolNames needle="codeRunning" hits=0
+
+## SHELL_TOOLS needle="SHELL_TOOLS" hits=0
+
+## CODE_TOOLS needle="CODE_TOOLS" hits=0
+
+## restrictedDenyTools needle="restrictedDeny" hits=0
+
+## restrictedDefaultDeny needle="restrictedDefault" hits=0
+
+## Yr= needle="var Yr=" hits=13
+- #0 @178453510 i,default:()=>EE,loaderOf:()=>Jr});var Xr=`/** @jsxRuntime classic */
+/** @jsx h */
+/** @jsxFrag Fragment */
+`;var mt={".ts":"ts",".tsx":"tsx",".jsx":"jsx",".js":"js",".mjs":"js"};var Yr=Object.keys(mt);var Jr=(e)=>mt[Yr.find((t)=>e.endsWith(t))??""]??"js";function Bi(e,t){let r=Jr(e);return r==="js"?t:new Bun.Transpiler({loader:r}).transformSync(r==="ts"?t:`${Xr}$
+- #1 @178511650 ][2])return J(t[0][0],t[0][1]);return function(o){return o===e||Et(o,e,t)}}var Ht=zr;var $r="[object Symbol]";function Xr(e){return typeof e=="symbol"||zC(e)&&L2(e)==$r}var yEe=Xr;var Yr=/\.|\[(?:[^[\]]*|(["'])(?:(?!\1)[^\\]|\\.)*?\1)\]/,Zr=/^\w*$/;function Qr(e,t){if(Wm(e))return!1;var o=typeof e;if(o=="number"||o=="symbol"||o=="boolean"||e==null||yEe(e))return!0;
+- #2 @180786192 lse if(E===o[0])a.push(`<=${R}`);else a.push(`${E} - ${R}`);let u=a.join(" || "),h=typeof r.raw==="string"?r.raw:String(r);return u.length<h.length?u:r}});var Zr=d(function(jn,Kr){var Yr=S(),ae=F(),{ANY:le}=ae,_=j(),ue=T(),ci=(e,r,t={})=>{if(e===r)return!0;e=new Yr(e,t),r=new Yr(r,t);let s=!1;e:for(let i of e.set){for(let n of r.set){let o=ai(i,n,t);if(s=s||o!==nul
+- #3 @181196575 e use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Yr="WebFetch",z$t="Fetch",p_e="allow_web_fetch";
+export{Yr,z$t,p_e};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claud
+- #4 @182153965 ction(e,t){var a={type:"PRIVATE KEY",body:ka.toDer(e).getBytes()};return Nt.pem.encode(a,{maxline:t})}});var qa=d(function(Pf,Un){var R=Y();ot();Yt();Rr();Ut();Ua();$e();Zt();ie();var Yr=function(e,t,a,r){var i=R.util.createBuffer(),s=e.length>>1,n=s+(e.length&1),o=e.substr(0,n),f=e.substr(s,n),u=R.util.createBuffer(),l=R.hmac.create();a=t+a;var c=Math.ceil(r/16),y
+- #5 @195236525 peof e.byteLength==="number")return e.byteLength;else if(typeof e.size==="number")return e.size;throw Error(`Body Length computation failed for ${e}`)};sf.calculateBodyLength=rf});var Yr=d(function(If){var At=Rue(),Fi=Xu(),Qe=Iue(),of=u_t(),af=Li(),Pe=pf(),cf=H_(),Bi=$_n(),Tt=0,Nt=1,Re=2,ge=3,Ke=4,wt=5,Vi=6,kr=7,ji=20,$r=21,qi=22,uf=23,Ur=24,Ie=25,Oe=26,ye=27,Fr=31
+- #6 @197423874 ct.defineProperty(S,"JWT",{enumerable:!0,get:function(){return Zl.JWT}});var ed=gr();Object.defineProperty(S,"Impersonated",{enumerable:!0,get:function(){return ed.Impersonated}});var Yr=qe();Object.defineProperty(S,"CodeChallengeMethod",{enumerable:!0,get:function(){return Yr.CodeChallengeMethod}});Object.defineProperty(S,"OAuth2Client",{enumerable:!0,get:function
+- #7 @198426557 =En});var Y=d(function(tl,Vr){var Xr=ae(),vn=(e,r,t)=>new Xr(e,t).compare(new Xr(r,t));Vr.exports=vn});var De=d(function(il,Qr){var yn=Y(),Pn=(e,r,t)=>yn(e,r,t)>=0;Qr.exports=Pn});var Yr=d(function(nl,Kr){class Jr{constructor(){this.max=1000,this.map=new Map}get(e){let r=this.map.get(e);if(r===void 0)return;else return this.map.delete(e),this.map.set(e,r),r}delete(
+- … +5 more
+
+## Xe= needle="var Xe=" hits=34
+- #0 @178396785 roperties(s,{signal:{value:r,enumerable:!0},is:{value:e.is,enumerable:!0},event:{value:o,enumerable:!0},origin:{value:n,enumerable:!0}}),Object.freeze(s)}var vs=(e)=>e?.at(-1)??Ir;var Xe={};je(Xe,{default:()=>Xe,hopHandler:()=>Ot,hops:()=>Po,runsOfNeighbours:()=>Rt});var Ot=(e,t)=>({name:t.map((r)=>r.name).join("+"),budgetMs:0,run:(r,o,n)=>e.run({members:t,e:r,call
+- #1 @178496487 {let t=new URL(e);return{sessionId:avt()??i7(t.href,Z),ingressUrl:t.href,isUrl:!0,jsonlFile:null,isJsonlFile:!1}}catch{}return null}function kn(){this.__data__=new GEe,this.size=0}var Xe=kn;function xn(e){var t=this.__data__,o=t.delete(e);return this.size=t.size,o}var Ye=xn;function An(e){return this.__data__.get(e)}var Ze=An;function Tn(e){return this.__data__.has
+- #2 @178606282 zf,uEe,"ENAMETOOLONG"]);function sw(e){if(e===void 0)return"unknown";if(je.has(e))return"permission";if(Ke.has(e))return"resource";if(Ye.has(e))return"environment";return"unknown"}var Xe=new Set(["InvalidArgument","NotFound","AlreadyExists","PreconditionFailed","LeaseHeld","Unavailable","Failed","ScopeNotFound"]);function Pne(e){return typeof e==="object"&&e!==null
+- #3 @179418756 ;var ir="[object Map]";function sr(e){return zC(e)&&lde(e)==ir}var Ye=sr;var Ze=Nne&&Nne.isMap,ar=Ze?jYe(Ze):Ye,qe=ar;var lr="[object Set]";function cr(e){return zC(e)&&lde(e)==lr}var Xe=cr;var Qe=Nne&&Nne.isSet,dr=Qe?jYe(Qe):Xe,et=dr;var ur=1,fr=2,gr=4,tt="[object Arguments]",pr="[object Array]",mr="[object Boolean]",yr="[object Date]",Sr="[object Error]",nt="[obj
+- #4 @179492007 lectionWarnings.push({file:"policyHelper",path:"policyHelpers",message:u,severity:"warning",statusOnly:!0}),M(),n(u,{level:"warn"})}function me(){g.remoteNoticeSubject=null,Qe(Ye)}var Xe="policyHelpers is configured but has no entry for platform ";function Qe(e){let t=g.selectionWarnings.filter((r)=>!r.message.startsWith(e));if(t.length===g.selectionWarnings.length
+- #5 @179907635 e use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Xe="Bash";var Nt="PowerShell";
+export{Xe,Nt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that 
+- #6 @182033351 )})}if(!Ae.random)Ae.random=s;else for(var l in s)Ae.random[l]=s[l];Ae.random.createInstance=i,ya.exports=Ae.random})(typeof jQuery<"u"?jQuery:null)})()});var Ca=d(function(Sf,Ki){var Xe=Y();ie();var ga=[217,120,249,196,25,221,181,237,40,233,253,121,74,160,216,157,198,126,55,131,43,118,83,142,98,76,100,136,68,139,251,162,23,154,89,245,135,179,79,19,97,69,109,141,9,
+- #7 @183114205 equestIds,He,e)}function Ye(e){let t=e.payload?.response;if(typeof t!=="object"||t===null)return!1;let r=TDe(t);return r!==void 0&&Qo().attestation.resolvedPromptRequestIds.has(r)}var Xe=60000,se=10;function oe(e,t){let r=Qo().attestation;if(r.dropNotifier===void 0&&r.senderDropWriter===void 0)return;if(r.recentDropEventIds.has(t))return;w(r.recentDropEventIds,We,t
+- … +26 more
+
+## action-restricted-tools @191363865
+:fn,forwardSubagentText:wn,sessionMirror:tn}=C;if(c7e(xe),C.prefill)Hje(C.prefill);let zt,cn=C.agents;if(typeof cn==="string"&&cn!==""&&!ho("agents",{explicitlyRequested:!0})&&!C.resume&&!C.continue&&!a.CLAUDE_BG_POST_CLEAR_RESPAWN){let Pe=rtn(cn);if(Pe)return gn(`Error: Invalid --agents configuration:
+${Pe}`)}let dn=C.agent;if(dn)process.env.CLAUDE_CODE_AGENT=dn;let{outputFormat:Ct,inputFormat:Ve}=C,et=qe().viewMode,wt=Dle(),Je=C.verbose??(et?et==="verbose":wt?!1:go("verbose",!1).value),Yt=C.print,Xt=C.init??!1,Qt=C.initOnly??!1,rn=C.maintenance??!1;if(!Yt&&process.stdout.isTTY&&Om()){let Pe=DYn();if(Pe!==null)console.log(Pe),MYn()}let Mn=C.disableSlashCommands||!1;kkn(Mn);let rt=sBn(C.autocompact,qe().autoCompactWindow),en=fIe()?C.worktree:void 0,lt=typeof en==="string"?en:void 0,nt=en!==void 0,Oe;if(lt){let Pe=g1t(lt);if(Pe!==null)Oe=Pe,lt=void 0}let Fe=fIe()&&C.tmux===!0;if(Fe){if(!nt)return gn("Error: --tmux requires --worktree");if(B()==="windows")return gn("Error: --tmux is not supported on Windows");if(!await gin())return gn(`Error: tmux is not installed.
+${yin()}`)}let ze=Zy(C);if(ze.parentSessionId)kwt().setCliParentSessionId?.(ze.parentSessionId);vkn(ze.agentId);let At;if(Kr()){At=ze;let Pe=ze.agentId||ze.agentName||ze.teamName,Ge=ze.agentId&&ze.agentName&&ze.teamName;if(Pe&&!Ge)return gn("Error: --agent-id, --agent-name, and --team-name must all be provided together");if(ze.agentId&&ze.agentName&&ze.teamName)kwt().setDynamicTeamContext?.({agentId:ze.agentId,agentName:ze.agentName,teamName:ze.teamName,color:ze.agentColor,planModeRequired:ze.planModeRequired??!1,parentSessionId:ze.parentSessionId});if(ze.teammateMode)Jy().setCliTeammateModeOverride?.(ze.teammateMode)}let sn=C.sdkUrl??void 0,Fn=fn||a.CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES,uo=wn||a.CLAUDE_CODE_FORWARD_SUBAGENT_TEXT;if(mn||a.CLAUDE_CODE_REMOTE)Ajn(!0);if(sn){if(!Ve)Ve="stream-json";if(!Ct)Ct="stream-json";if(C.verbose===void 0)Je=!0;if(!C.print)Yt=!0}let no=await ld(C,{prompt:typeof d==="string"?d:void 0,sessionId:xt,outputFormat:Ct,inputFormat:Ve,hasSdkUrl:Boolean(sn),nonInteractive:De(),isViolinWoodEnabled:Kl,hasConnect:Boolean(j?.url),hasSSH:Boolean(H?.host),rcProjectGateEnabled:!1});if(!no.ok)return no.flushAnalytics?is(no.error):gn(no.error);let{teleport:fr,cloudAttachId:Fo,poolId:yo,poolPromotedRemote:Zo,poolRef:jr,poolOnBranch:er,forwardHomeSettings:lr,homeSettingsConsent:Lo,projectFlag:$r,projectBrowse:gr,projectForRemoteControl:os,correlationId:ti,headlessCloud:_o}=no.value,{remote:Ro}=no.value;if(xe&&(Ro!==null||Fo!==null||
+
+## uqe @181760271
+len=958 sha=3a2f9087a7da88c3
+function uqe(e,t,r,o){if(r&&r.length>0){if(r.some(dr))return mr;if(r.some(ur))return fr;return Ai(r,(d,p)=>uqe(d,p,void 0,o),t)}let u=we(e);if(mi(u,{includeWorkshopDoc:o?.permissionMode==="plan"}))return ue(t,"Plan files for current session are allowed for writing");if(!o?.restricted&&ml(u))return ue(t,"Workflow script files for current session are allowed for writing");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for writing");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for writing");if(!o?.restricted&&u.endsWith(".md")&&RPe(u))return ue(t,"Agent memory files are allowed for writing");if(HO(u)&&By())return hi;if(!o?.restricted&&!pY()&&u.endsWith(".md")&&mte(u))return ue(t,f8e);if(!o?.restricted&&u===me(ve(),".claude","launch.json"))return ue(t,"Preview launch config is allowed for writing");if(pi(u))return gi;if(ur(u))return fr;if(dr(u))return mr;return{behavior:"passthrough",message:""}}
+
+## lV @181761229
+len=1452 sha=07366a75c56ff74b
+function lV(e,t,r,o){if(r&&r.length>0)return Ai(r,(I,C)=>lV(I,C,void 0,o),t);let u=we(e);if(HO(u)&&By())return{behavior:"deny",message:"Cannot read memory while it is paused. Run /pause-memory to resume automemory.",decisionReason:{type:"safetyCheck",reason:di,classifierApprovable:!1}};if(!o?.restricted&&fl(u))return ue(t,"Project directory files are allowed for reading");if(mi(u,{includeWorkshopDoc:!0}))return ue(t,"Plan files for current session are allowed for reading");let d=Wg(),p=d.endsWith(ee)?d:d+ee;if(u===d||u.startsWith(p))return ue(t,"Tool result files are allowed for reading");if(sqe(u))return ue(t,"Scratchpad files for current session are allowed for reading");if(bi(u))return ue(t,"Job tmp/ subtree for current bg session is allowed for reading");let g=uC();if(u.startsWith(g))return ue(t,"Project temp directory files are allowed for reading");let w=o?.remoteSurface||o?.restricted;if(!w&&RPe(u))return ue(t,"Agent memory files are allowed for reading");if(!w&&mte(u))return ue(t,"auto memory files are allowed for reading");let M=me(ge(),"tasks")+ee;if(!w&&(u===M.slice(0,-1)||u.startsWith(M)))return ue(t,"Task files are allowed for reading");let k=me(ge(),"teams")+ee;if(!w&&(u===k.slice(0,-1)||u.startsWith(k)))return ue(t,"Team files are allowed for reading");let E=rUt()+ee;if(!o?.remoteSurface&&u.startsWith(E))return ue(t,"Bundled skill reference files are allowed for reading");return{behavior:"passthrough",message:""}}
+
+## mb @181745792
+len=149 sha=bb3fe4967f5c114b
+function mb(e,t,r){let o=r??Ri(e),u=Array.from(Dv(t)).flatMap((d)=>oUt(d));return o.every((d)=>u.some((p)=>im(d,p,{caseFold:!1,uncShapeParity:!0})))}
+
+## Dv @181745572
+len=79 sha=487430265dbc3724
+function Dv(e){return new Set([ve(),...e.additionalWorkingDirectories.keys()])}
+
+## HKe= needle="HKe=" hits=1
+- #0 @178914719 Agent","sandboxOverride","workingDir","safetyCheck","classifier","other"];var QMe="Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)",wbt="Read-only command is allowed",HKe="--restricted: path outside the working directory",ZMe="bashCommandClamp: no clamp rule matches this command",PKe="bashCommandClamp fail-closed: permission check crashed",Gte="Clas
+
+## HKe const needle="HKe=\"" hits=1
+- #0 @178914719 Agent","sandboxOverride","workingDir","safetyCheck","classifier","other"];var QMe="Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)",wbt="Read-only command is allowed",HKe="--restricted: path outside the working directory",ZMe="bashCommandClamp: no clamp rule matches this command",PKe="bashCommandClamp fail-closed: permission check crashed",Gte="Class
+
+## $B() needle="$B()" hits=6
+- #0 @180120503 t t=Math.min(a.CLAUDE_AX_STARTUP_QUIET_MS??Px,Mx),r=e+t-Date.now();return r>0?r:0}return 0}var Dx=50,Nx=5000;function LYn(){return Math.min(a.CLAUDE_AX_PREPARK_MS??Dx,Nx)}function $B(){if(Dt().isEnabled())return{CLAUDE_AX_SCREEN_READER:"1"};return{}}function NYn(){{let e=Dt();if(e.isEnabled())return{screenReaderMode:!0,screenReaderActivationSource:Ce(e.activatio
+- #1 @192088570 reconnecting",V())]),await qt(n.flush(),2000,"bridge flush").catch(()=>{}),await n.teardown({skipArchive:!0});let m={};if(b)m.CLAUDE_INTERNAL_ASSISTANT_TEAM_NAME=b;Object.assign(m,$B()),Object.assign(m,s5(S,E,I,T,kGe(n,$1()))??{});let B=await qet(),C=await zL(t.messages,"relaunch",{},t.storageV5);try{return await Ket(C,{launcher:B,freshIfNoTranscript:!0,extraArg
+- #2 @192263541 ).then((w)=>{if(i==="auto"&&Date.now()-Zg()<Hs)return;return _G({launcher:w,args:["agents",...d?["--cwd",d]:[],...GCn()],env:{[yht]:"1",...i==="auto"&&{[eu]:String(Date.now())},...$B()},preSpawn:()=>process.stdout.write(ae.dim(`
+Switching from ${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/cl
+- #3 @201901998 await zL(y,"relaunch",{responseStreaming:m},C);return Ket(L,{freshIfNoTranscript:!0,extraArgs:n,proactivity:w,env:{CLAUDE_CODE_TUI_JUST_SWITCHED:i,...v&&i==="fullscreen"?p0n:{},...$B()},dropEnv:["CLAUDE_CODE_NO_FLICKER","CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN","CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL"]},C)}function xke(i){return`Couldn't switch renderers \u2014 ${i in
+- #4 @202357688 Ro,storageV5:ge,credentials:xe,fleetNudgeStore:me?.fleetNudgeStore})}catch(uo){_(uo)}let wo=await _G({args:["agents",...xQe(Xo)],env:{CLAUDE_AGENTS_SELECT:me?.autoOpenJobId??Jt,...$B(),...Yk()&&{CLAUDE_CODE_RESTRICTED:"1"}}});return w2t(ge).catch(()=>{}),wo})();return WL(Pe,Re)}catch(Pe){return _(Pe),w2t(ge).catch(()=>{}),WL("Couldn't background this session (an
+- #5 @205714707 "; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermissionContext:c};try{await _G({freshIfNoTranscript:!0,extraArgs:[...o5(c,wle(o)),...i5(c,AL())],proactivity:h,env:$B(),preSpawn:()=>process.stdout.write(`
+${s}
+`)},o.storageV5)}catch(y){return _(Ee(y)),d(`it could not restart itself (${l(y)})`)}}function Hke(o,s,i,{envTokenWasSet:d=!1,envWarningOn
+
+## CLAUDE_CODE_RESTRICTED:"1" needle="CLAUDE_CODE_RESTRICTED:\"1\"" hits=1
+- #0 @202357703 ,credentials:xe,fleetNudgeStore:me?.fleetNudgeStore})}catch(uo){_(uo)}let wo=await _G({args:["agents",...xQe(Xo)],env:{CLAUDE_AGENTS_SELECT:me?.autoOpenJobId??Jt,...$B(),...Yk()&&{CLAUDE_CODE_RESTRICTED:"1"}}});return w2t(ge).catch(()=>{}),wo})();return WL(Pe,Re)}catch(Pe){return _(Pe),w2t(ge).catch(()=>{}),WL("Couldn't background this session (an internal error was logged)",Re)}}var
+
+## XCn(O2() needle="XCn(O2()" hits=1
+- #0 @189637909 son??"spawn_failed"),process.stderr.write(`${Z.error}
+`),process.exitCode=1;return}await Ns("cli_bg_dispatch_exec"),process.stdout.write(Epe(Z.short,void 0,g||E)+`
+`);return}let u=XCn(O2()?["--restricted",...e]:e),m=await wnr(),p=await $L(m?Enr(u,m):u,void 0,"shell",void 0,void 0,void 0,void 0,t);if(!p.ok){await(p.reason==="gate_blocked"?Ql:En)("cli_bg_dispatch",p.r

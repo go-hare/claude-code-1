@@ -1,0 +1,131 @@
+# gold-248-unk-wave10-28-36c
+when=2026-09-20T05:55:30.919Z
+
+## #28 247 before-Z @233414784
+e or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.247
+import{qbb as V}from"B:/~BUN/root/_492.js";import{DMb as a,FMb as N,zMb as C}from"B:/~BUN/root/_585.js";import{Lxc as v,dwc as w}from"B:/~BUN/root/_675.js";import{ZCc as g,_Cc as J}from"B:/~BUN/root/_698.js";import{BHc as D,vGc as o}from"B:/~BUN/root/_705.js";import{vOc as A,wOc as O}from"B:/~BUN/root/_714.js";import{fRc as b,hRc as _}from"B:/~BUN/root/_720.js";import{k0c as P}from"B:/~BUN/root/_749.js";D();V();J();v();O();_();N();import{isAbsolute as k}from"path";function E(){return{sources:T(),read:o,rules:a}}var T=()=>{let{gateProject:t}=C(),e=w({onIndeterminate:"tracked"});return[...t?[["projectSettings",".claude/settings.json"]]:[],...e?[["localSettings",".claude/settings.local.json"]]:[]]};function W(t){if(t===null)return!1;if(t.statusLine)return!0;if(t.fileSuggestion)return!0;if(t.subagentStatusLine)return!0;if(!t.hooks)return!1;for(let e of Object.values(t.hooks))if(e.length>0)return!0;return!1}function q(t={sources:[["projectSettings",".claude/settings.json"],["localSettings",".claude/settings.local.json"]],read:o,rules:a}){let e=[];for(let[s,i]of t.sources)if(W(t.read(s)))e.push(i);return e}function p(t){return t.some((e)=>e.ruleBehavior==="allow"&&(e.ruleValue.toolName===g||e.ruleValue.toolName.startsWith(g+"(")))}var B=/[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu,f=60;function H(t){let e=P(t).replace(B,"").trim();return e.length>f?`${e.slice(0,f)}\u2026`:e}var M=new Set([g,"PowerShell","Write","Edit","MultiEdit","NotebookEdit","WebFetch","WebSearch"]);function S(t){let{toolName:e,ruleContent:s}=t.ruleValue,i=M.has(e)||e.startsWith("mcp__"),c=s===void 0;if(i)return c?0:1;return c?2:3}function Q(t=E()){let e=[],s=[];for(let[r,n]of t.sources){let l=t.rules(r).filter((L)=>L.ruleBehavior==="allow");if(l.length>0)e.push(n),s.push(...l)}let i=s.length;s.sort((r,n)=>S(r)-S(n));let c=new Set,u=[];for(let r of s){let n=H(b(r.ruleValue));if(n.length>0&&!c.has(n))c.add(n),u.push(n)}return{rules:u,sources:e,rawCount:i}}function d(t){if(k(t)||t.startsWith("~"))return 0;if(t.includes(".."))return 1;return 2}function Z(t=E()){let e=[],s=[];for(let[r,n]of t.sources){let l=t.read(r)?.permi
+
+## #28 247 fns-before-Z
+- E @233413214
+- W @233413450
+- q @233413661
+- p @233413863
+- H @233414045
+- S @233414232
+- Q @233414366
+- d @233414696
+- Z @233414784
+
+## #28 247 E @233413214
+len=48 sha=f4682488daf205c9 exactOther=0
+function E(){return{sources:T(),read:o,rules:a}}
+
+## #28 247 W @233413450
+len=211 sha=94a87331eddaec85 exactOther=0
+function W(t){if(t===null)return!1;if(t.statusLine)return!0;if(t.fileSuggestion)return!0;if(t.subagentStatusLine)return!0;if(!t.hooks)return!1;for(let e of Object.values(t.hooks))if(e.length>0)return!0;return!1}
+
+## #28 247 q @233413661
+len=202 sha=840e7b7464f5098d exactOther=0
+function q(t={sources:[["projectSettings",".claude/settings.json"],["localSettings",".claude/settings.local.json"]],read:o,rules:a}){let e=[];for(let[s,i]of t.sources)if(W(t.read(s)))e.push(i);return e}
+
+## #28 247 p @233413863
+len=127 sha=4166893924e2cda7 exactOther=0
+function p(t){return t.some((e)=>e.ruleBehavior==="allow"&&(e.ruleValue.toolName===g||e.ruleValue.toolName.startsWith(g+"(")))}
+
+## #28 247 H @233414045
+len=90 sha=c86892e8d2e56e61 exactOther=0
+function H(t){let e=P(t).replace(B,"").trim();return e.length>f?`${e.slice(0,f)}\u2026`:e}
+
+## #28 247 S @233414232
+len=134 sha=0ea7bb6f1d1520b4 exactOther=0
+function S(t){let{toolName:e,ruleContent:s}=t.ruleValue,i=M.has(e)||e.startsWith("mcp__"),c=s===void 0;if(i)return c?0:1;return c?2:3}
+
+## #28 247 Q @233414366
+len=330 sha=16f04ca9eb2623d9 exactOther=0
+function Q(t=E()){let e=[],s=[];for(let[r,n]of t.sources){let l=t.rules(r).filter((L)=>L.ruleBehavior==="allow");if(l.length>0)e.push(n),s.push(...l)}let i=s.length;s.sort((r,n)=>S(r)-S(n));let c=new Set,u=[];for(let r of s){let n=H(b(r.ruleValue));if(n.length>0&&!c.has(n))c.add(n),u.push(n)}return{rules:u,sources:e,rawCount:i}}
+
+## #28 247 d @233414696
+len=88 sha=067ec5198ff7f9fa exactOther=0
+function d(t){if(k(t)||t.startsWith("~"))return 0;if(t.includes(".."))return 1;return 2}
+
+## #28 247 Z @233414784
+len=314 sha=ade0b320c1c390df exactOther=0
+function Z(t=E()){let e=[],s=[];for(let[r,n]of t.sources){let l=t.read(r)?.permissions?.additionalDirectories??[];if(l.length>0)e.push(n),s.push(...l)}let i=s.length,c=new Set,u=[];for(let r of s){let n=H(r);if(n.length>0&&!c.has(n))c.add(n),u.push(n)}return u.sort((r,n)=>d(r)-d(n)),{dirs:u,sources:e,rawCount:i}}
+
+## d-body-exact 248=203817670 247=
+## "e.length>a?`${de(e,a)}" 248=203817724 247=
+## #28 248 e.length>a?`${de(e,a)} @203817724
+028\u2029]|\p{Cf}/gu,a=60;function d(t){let e=bt(t).replace(R,"").trim();return e.length>a?`${de(e,a)}\u2026`:e}var x=new Set([Xe,"PowerShell","Write","Edit","MultiEdit","NotebookEdit","WebFetch","Web
+
+## "e.length>a?`${" 248=203817724 247=
+## #28 248 e.length>a?`${ @203817724
+028\u2029]|\p{Cf}/gu,a=60;function d(t){let e=bt(t).replace(R,"").trim();return e.length>a?`${de(e,a)}\u2026`:e}var x=new Set([Xe,"PowerShell","Write","Edit","MultiEdit","NotebookEdit","WebFetch","Web
+
+## "var a=60" 248= 247=
+## "a=60" 248=178263331,203817665 247=230800513,232262491
+## #28 248 a=60 @178263331
+,Lr,Ti,xi,ki,Ei,Fs,vi,Hr,Dr,Ls,Ri,Ii;var Ai=500,sa=1e4,na=120000,oa=30000,Pi=3,aa=60000;function Oi(e){return e.type==="session.status_idle"&&e.stop_reason?.type==="end_turn"}class Mi{constructor(e,t)
+
+## #28 248 a=60 @203817665
+toolName.startsWith(Xe+"(")))}var R=/[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu,a=60;function d(t){let e=bt(t).replace(R,"").trim();return e.length>a?`${de(e,a)}\u2026`:e}var x=new Set([Xe,"PowerShell
+
+## #28 247 a=60 @230800513
+turn{located:u,digest:f}})();return o?.set(e,a),a}var Vn=128,ni=Ln,zn=8,Da=512,Ha=600,Ca=["gh-api-readonly","ruff-autofix"],Pe={user:"your user settings",local:"this checkout's settings.local.json",fl
+
+## #28 247 a=60 @232262491
+nt:"+k+":"+_,()=>H5e(k,_,t,o,c,g,h))}))}return n}async function H5e(e,t,o,n,r,s,a=60000){let l;if(o!==void 0){let u=await o.read([{key:Ru.job(e,["adopt.json"]),offset:0,length:wW+1}]);if(!u.ok)return!
+
+## "/[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]|\\p{Cf}/gu" 248=203817621 247=233413996
+## #28 248 /[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu @203817621
+w"&&(e.ruleValue.toolName===Xe||e.ruleValue.toolName.startsWith(Xe+"(")))}var R=/[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu,a=60;function d(t){let e=bt(t).replace(R,"").trim();return e.length>a?`${de(
+
+## #28 247 /[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu @233413996
+low"&&(e.ruleValue.toolName===g||e.ruleValue.toolName.startsWith(g+"(")))}var B=/[\x00-\x1f\x7f-\x9f\u2028\u2029]|\p{Cf}/gu,f=60;function H(t){let e=P(t).replace(B,"").trim();return e.length>f?`${e.sl
+
+## #28 de-import-chunk @178357416
+laude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+function ti(t,n){return t.repeat(Number.isFinite(n)&&n>0?n:0)}function wu(t){return t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}function yf(t){return t.charAt(0).toUpperCase()+t.slice(1)}function I(t,n,e=n+"s"){return t===1?n:e}function Ki(t,n){if(t.length<=n)return t;let e=[];for(let r of t){if(e.length>=n)break;e.push(r)}return e.join("")}function de(t,n){if(n<=0)return"";if(t.length<=n)return t;let e=t.slice(0,n),r=e.charCodeAt(n-1);return f(r>=55296&&r<=56319?e.slice(0,-1):e)}function qm(t,n){if(n<=0)return"";if(t.length<=n)return t;
+
+## #28 de-full @178357416
+len=142 sha=f011568b495723cc exactOther=0
+function de(t,n){if(n<=0)return"";if(t.length<=n)return t;let e=t.slice(0,n),r=e.charCodeAt(n-1);return f(r>=55296&&r<=56319?e.slice(0,-1):e)}
+
+## #28 around-de-chunk
+ducts, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+function ti(t,n){return t.repeat(Number.isFinite(n)&&n>0?n:0)}function wu(t){return t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}function yf(t){return t.charAt(0).toUpperCase()+t.slice(1)}function I(t,n,e=n+"s"){return t===1?n:e}function Ki(t,n){if(t.length<=n)return t;let e=[];for(let r of t){if(e.length>=n)break;e.push(r)}return e.join("")}function de(t,n){if(n<=0)return"";if(t.length<=n)return t;let e=t.slice(0,n),r=e.charCodeAt(n-1);return f(r>=55296&&r<=56319?e.slice(0,-1):e)}function qm(t,n){if(n<=0)return"";if(t.len
+
+## leftover-de-shape 248=178357416 247=
+## r>=55296&&r<=56319 248=7 247=6
+## charCodeAt(n-1) 248=4 247=7
+## function truncateSessionNamePrefix 248=0 247=0
+## #28 247 Cr-start @233430346
+809.js";import"B:/~BUN/root/_810.js";import"B:/~BUN/root/_811.js";import"B:/~BUN/root/_812.js";import"B:/~BUN/root/_813.js";import"B:/~BUN/root/_814.js";import"B:/~BUN/root/_815.js";import"B:/~BUN/root/_816.js";import"B:/~BUN/root/_817.js";import"B:/~BUN/root/_818.js";import"B:/~BUN/root/_819.js";import"B:/~BUN/root/_820.js";import"B:/~BUN/root/_821.js";import"B:/~BUN/root/_822.js";import{Afd as ae,Bfd as T,Ifd as tr}from"B:/~BUN/root/_823.js";import"B:/~BUN/root/_824.js";import"B:/~BUN/root/_825.js";import"B:/~BUN/root/_826.js";import{Hgd as D,Jgd as er}from"B:/~BUN/root/_827.js";import"B:/~BUN/root/_828.js";import"B:/~BUN/root/_829.js";import"B:/~BUN/root/_830.js";import"B:/~BUN/root/_831.js";import"B:/~BUN/root/_832.js";import{Ckd as ce,Ikd as or}from"B:/~BUN/root/_833.js";import"B:/~BUN/root/_834.js";import"B:/~BUN/root/_835.js";import"B:/~BUN/root/_836.js";import"B:/~BUN/root/_837.js";import"B:/~BUN/root/_838.js";import{Kod as _,Nud as ne,Pud as ie,bxd as Oo}from"B:/~BUN/root/_839.js";import"B:/~BUN/root/_840.js";import"B:/~BUN/root/_841.js";import"B:/~BUN/root/_842.js";import"B:/~BUN/root/_843.js";import"B:/~BUN/root/_844.js";import{Ezd as j,eAd as rr}from"B:/~BUN/root/_845.js";import"B:/~BUN/root/_846.js";import"B:/~BUN/root/_847.js";import"B:/~BUN/root/_848.js";import"B:/~BUN/root/_849.js";import{GBd as n}from"B:/~BUN/root/_850.js";cr();er();Oo();mr();lr();pr();tr();fr();ar();sr();nr();or();ir();ur();rr();gr();hr();yr();dr();wr();kr();ro();to();function Hr(Wo){return Wo===l||Wo.startsWith(l+"(")}function xr(V){return V.type==="prompt"&&V.loadedFrom==="commands_DEPRECATED"&&(V.source==="projectSettings"||V.source==="localSettings")&&V.allowedTools?.some(Hr)}function _r(Lo){return Lo===l||Lo.startsWith(l+"(")}function br(w){return w.type==="prompt"&&(w.loadedFrom==="skills"||w.loadedFrom==="plugin")&&(w.source==="projectSettings"||w.source==="localSettings"||w.source==="plugin")&&w.allowedTools?.some(_r)}function Sr(ut){return{...ut,hasTrustDialogAccepted:!0}}function Cr($r){let o=no(50),{onDone:A,commands:x}=$r,{storageV5:Ne}=he(),So;if(
+
+## call Ejn( 248=186136109,202924708 247=
+## call dcu( 248= 247=218150953
+## call function Ejn( 248=186136100 247=
+## call dr(t) 248=179697179,180529296,181022685,181023433,187386187,191794303 247=221603874,235472842
+## call Dr(t) 248=189351851,189351934 247=206908292,212891966,212894426,212895598,216912092,216917391,217462394,217463229
+## #36 Ejn-call @202924708
+`send message \xB7 ${Ur}`:"send message"})}if(Po()&&!Kt()){let _n=cr.current,lr=_n?.value===Mo&&_n.partial===Bn?_n.rows:Ejn(gn.current.roster,Bn);if(cr.current={value:Mo,partial:Bn,rows:lr},Do.push(..
+
+## #36 247 dcu-call @218150953
+Ym(Math.max(0,t-e.lastActive),{mostSignificantOnly:!0})} ago`;return`message session \xB7 ${h1t(e.where)}${n}`}function dcu(e,t,n=Date.now()){if(t==="")return[];let r=[];for(let o of e.candidates){if(
+
+## Ejn(e,dr( 248=
+## Ejn( 248=186136109,202924708
+## buildPeerMentionTypeahead 248=

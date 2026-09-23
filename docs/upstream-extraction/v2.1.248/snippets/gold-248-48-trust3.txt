@@ -1,0 +1,95 @@
+# gold-248-48-trust3
+
+chunkStart=182939186 nextHeader=182947165 yOff=182939595
+chunkLen=7979
+
+## chunk ascii len=7979 sha=95f1a4376a72ceeb
+
+## export
+export{r4n,F1t,QK,Ig,TIe,o4n,oZ,i4n,GGe,U1t,tsn,s4n,a4n,iZ,nsn,K1,Eut,_z,B1t,kut,Kye,VGe,ZK,Yye,qGe,Xye,xh,TU,l4n,c4n,yae,Sz,og,Ev,IM,jR,Jye,Tut,KGe,YGe,e9,XGe,ck,Aut};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+
+
+## first 8000 of chunk
+// Version: 2.1.248
+import{T,Q}from"B:/~BUN/root/chunk-mw2w72bj.js";import{S,q,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir as d,readdir as w,readFile as D,rm as F,utimes as W}from"fs/promises";import{connect as X}from"net";import{basename as H,dirname as R,join as i,resolve as G}from"path";function c(){return i(ge(),"daemon")}function Y(){return A("sha256").update(G(ge())).digest("hex").slice(0,8)}function QK(){let e=process.getuid?.()??0,n=a.TERMUX_VERSION&&a.PREFIX?i(a.PREFIX,"tmp"):"/tmp";return i(n,`cc-daemon-${e}`,Y())}var J=/^[a-f0-9]{16}$/,Z=Ko(()=>{let e=i(c(),"pipe.key");for(let n=0;n<8;n++){let t;try{let o=L(e);if(!o.isFile()||o.size>4096){try{z(e,{recursive:!0,force:!0})}catch{}t="invalid"}else t=K(e,"utf8").trim()}catch(o){if(!Q(o))throw o}if(t!==void 0){if(J.test(t))return t;if(t===""&&n<3)continue;let o=h(8).toString("hex");return LC(e,o,384),o}let r=h(8).toString("hex");j(c(),{recursive:!0,mode:448});try{return V(e,r,{flag:"wx",mode:384}),r}catch(o){if(T(o)!=="EEXIST")throw o}}throw Error("daemon pipe.key is not a valid nonce")},()=>ge());function U(e){return`\\\\.\\pipe\\cc-daemon-${Z()}-${e}`}function Ig(e){return e.replace(/cc-daemon-[0-9a-f]{16}/g,"cc-daemon-*")}function TIe(e){if(e instanceof Error){if(e.message=Ig(e.message),typeof e.stack==="string")e.stack=Ig(e.stack)}return e}function E(){return i(c(),"control.key")}async function o4n(){let e=E();try{let t=await m(e);if(t.isFile()&&t.size<=4096){let r=(await D(e,"utf8")).trim();if(r)return r}else await F(e,{recursive:!0,force:!0}).catch(()=>{})}catch(t){if(!Q(t))throw t}let n=h(16).toString("hex");return await d(c(),{recursive:!0,mode:448}),await Hn(e,n,384),n}async function oZ(){try{let e=await m(E());if(!e.isFile()||e.size>4096)return;return(await D(E(),"utf8")).trim()||void 0}catch{return}}async function i4n(){let e=c();if(B()==="windows"){await d(e,{recursive:!0}),await x(e,448).catch(()=>{});return}await d(e,{recursive:!0,mode:448}),b();let n=process.getuid?.(),t=await m(e);if(n!==void 0&&t.uid!==n)throw Error(`refusing to use daemon dir: ${e} is owned by uid ${t.uid}`);if((t.mode&511)!==448)await x(e,448)}async function GGe(){if(B()==="windows")return;let e=QK();await d(e,{recursive:!0,mode:448});let n=new Date;await W(e,n,n).catch(()=>{}),await I([R(e),e])}var U1t="ENOTOWNED";async function I(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n!==void 0&&r.uid!==n)throw Object.assign(Error(`refusing to bind: ${t} is owned by uid ${r.uid}`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)";function b(){if(F1t())throw Object.assign(Error(tsn),{code:U1t})}async function s4n(e){if(B()==="windows"){await d(e,{recursive:!0}).catch(()=>{});return}await GGe();let n=[Xye(),B1t()];for(let t of n)await d(t,{recursive:!0,mode:448});if(!n.includes(e)){if(await d(e,{recursive:!0,mode:448}).then(()=>!0,()=>!1))n.push(e)}await I(n)}function a4n(){if(B()==="windows")return;let e=QK(),n=R(e),t=H(e);w(n,{withFileTypes:!0}).then(async(r)=>{for(let o of r){if(!o.isDirectory()||o.name===t)continue;let s=i(n,o.name);if(!await ee(i(s,"control.sock")))continue;let u=await m(s).catch(()=>null);if(!u||Date.now()-u.mtimeMs<1e4)continue;let p=await w(i(s,"rv")).catch(()=>[]),l=await w(i(s,"pty")).catch(()=>[]),g=await w(i(s,"spare")).catch(()=>[]);if(p.length||l.length||g.length)continue;await F(s,{recursive:!0,force:!0}).catch(()=>{})}}).catch(()=>{})}function ee(e){let n,t=new Promise((o)=>{n=o}),r=X(e);return r.setTimeout(1000,()=>{r.destroy(),n(!1)}),r.on("error",(o)=>{let s=T(o);n(s==="ENOENT"||s==="ECONNREFUSED"||s==="ENOTSOCK")}),r.once("connect",()=>{r.end(`{"op":"ping"}
+`),n(!1)}),t}function iZ(){return i(c(),"dispatch")}function nsn(){return i(c(),"dispatch","rejected")}function K1(){return i(c(),"roster.json")}var Eut="attach-journal";function _z(){return i(c(),Eut)}function B1t(){return i(QK(),"rv")}function kut(){return i(c(),"auth")}function Kye(e){return i(kut(),`${e}.json`)}function VGe(){return i(c(),"host-managed")}function ZK(e){return i(VGe(),e)}function Yye(e){return i(kut(),`${e}.tokens.json`)}function qGe(e){if(B()==="windows")return U(`rv-${e}`);return i(B1t(),`${e}.sock`)}function Xye(){return i(QK(),"pty")}function xh(e){if(B()==="windows")return U(`pty-${e}`);return i(Xye(),`${e}.sock`)}function TU(){return i(QK(),"spare")}function l4n(e){return i(TU(),`${e}.pty.sock`)}function c4n(e){return i(TU(),`${e}.claim.sock`)}function yae(){return i(c(),"pty-pids")}function Sz(e){return i(yae(),`${e}.pid`)}function og(e){return O(e,"err")}function Ev(e){return O(e,"late")}function O(e,n){if(B()==="windows")return i(yae(),`${e.split("\\").pop()}.${n}`);return`${e}.${n}`}function IM(e){if(B()==="windows")return i(yae(),`${e.split("\\").pop()}.exec-exit`);return`${e}.exec-exit`}function jR(){if(B()==="windows")return U("control");return b(),i(QK(),"control.sock")}var Jye=0,Tut=1,KGe=262144,f=5,YGe=1048576,e9=1e4;function XGe(e){let n=typeof e==="string"?Buffer.from(e,"utf8"):e,t=Buffer.allocUnsafe(f+n.length);return t.writeUInt32BE(n.length,0),t.writeUInt8(Jye,4),n.copy(t,f),t}function ck(e){let n=Buffer.from(S(e),"utf8"),t=Buffer.allocUnsafe(f+n.length);return t.writeUInt32BE(n.length,0),t.writeUInt8(Tut,4),n.copy(t,f),t}function Aut(e,n){let t=Buffer.alloc(0),r=!1;return(o)=>{if(r)return;t=t.length===0?o:Buffer.concat([t,o]);while(t.length>=f){let s=t.readUInt32BE(0);if(s>YGe){r=!0,n(`frame too large (${s} > ${YGe})`);return}let u=f+s;if(t.length<u)return;let p=t.readUInt8(4),l=t.subarray(f,u);if(t=t.subarray(u),p===Jye)e({kind:Jye,payload:Buffer.from(l)});else if(p===Tut){let g;try{g=q(l.toString("utf8"))}catch{r=!0,n("bad ctrl json");return}e({kind:Tut,ctrl:g})}else{r=!0,n(`unknown frame kind ${p}`);return}}}}
+export{r4n,F1t,QK,Ig,TIe,o4n,oZ,i4n,GGe,U1t,tsn,s4n,a4n,iZ,nsn,K1,Eut,_z,B1t,kut,Kye,VGe,ZK,Yye,qGe,Xye,xh,TU,l4n,c4n,yae,Sz,og,Ev,IM,jR,Jye,Tut,KGe,YGe,e9,XGe,ck,Aut};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+
+
+## chunk-local needles
+### "C()" count=1 offs=892
+&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.
+---
+### "P(" count=2 offs=907,980
+t===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;
+---
+roc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4
+---
+### "v(" count=2 offs=489,6028
+e as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`\n`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r
+---
+ae(),`${e}.pid`)}function og(e){return O(e,"err")}function Ev(e){return O(e,"late")}function O(e,n){if(B()==="windows")return i(yae(),`${e.split("\\").pop()}.${n}`);return`${e}.${n
+---
+### "N(" count=1 offs=807
+.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys
+---
+### "_(" count=1 offs=469
+65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`\n`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Num
+---
+### "r4n()" count=1 offs=1098
+r(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCo
+---
+### "hostStart" count=1 offs=767
+|!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async func
+---
+### "innerStart" count=2 offs=754,838
+eger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=42949672
+---
+,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}c
+---
+### "overflowuid" count=1 offs=935
+5}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Numbe
+---
+### "/tmp" count=1 offs=1799
+tuid?.()??0,n=a.TERMUX_VERSION&&a.PREFIX?i(a.PREFIX,"tmp"):"/tmp";return i(n,`cc-daemon-${e}`,Y())}var J=/^[a-f0-9]{16}$/,Z=Ko(()=>{let e=i(c(),"pipe.key");for(let n=0;n<8;n++){let
+---
+### "/proc" count=1 offs=918
+.count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Numbe
+---
+### "root" count=8 offs=44,95,142,190,240,286
+// Version: 2.1.248\nimport{T,Q}from"B:/~BUN/root/chunk-mw2w72bj.js";import{S,q,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js
+---
+"B:/~BUN/root/chunk-mw2w72bj.js";import{S,q,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";i
+---
+from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js
+---
+rom"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";
+---
+m"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";impo
+---
+}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var
+---
+## sourcemap around overflowuid string @97792901
+.fG.frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.........browser-sdk.js.......A..agentSdk.js....._V..^chunk-[0-9a-z]+\.js$...>...&.	.^(?:\/(?:\$bunfs|~BUN)|\/?[A-Za-z]:[\\/](?:\$bunfs|~BUN))[\\/]........h.src/	.......packages/.......$mb.bun:	...m...internal:.........*.undici..
+...4.=.node-fetch.......+|.isomorphic-fetch....e.>.vercel_fetch......].utf-8-validate..........claude-code-error-tracking......3Q..claude-opus-4-0.........claude-sonnet-4-0...........claude-3-7-sonnet.......JQ..claude-3-5-sonnet........:..claude-3-5-haiku...
+
+## exports list: r4n,F1t,QK,Ig,TIe,o4n,oZ,i4n,GGe,U1t,tsn,s4n,a4n,iZ,nsn,K1,Eut,_z,B1t,kut,Kye,VGe,ZK,Yye,qGe,Xye,xh,TU,l4n,c4n,yae,Sz,og,Ev,IM,jR,Jye,Tut,KGe,YGe,e9,XGe,ck,Aut

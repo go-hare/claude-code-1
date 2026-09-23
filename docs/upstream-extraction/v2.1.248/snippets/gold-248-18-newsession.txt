@@ -1,0 +1,218 @@
+when=2026-09-20T03:37:06.107Z
+seaLen=226708128
+
+## ye(X.origin) gold @192261457
+et Re=be[S.getSnapshot().focusedIdx],Oe=Re?.kind==="job"?Re.job:void 0;if(me.pending!==null&&Oe!==void 0&&me.pending.id!==Oe.id)me.disarm();Yd(i,"x",Oe);return}if(Ge)return;if(d.key==="tab"){if(Je(),We)return;if(!m.getSnapshot().query&&m.getSnapshot().mode==="prompt"&&K.length>0)St((Re)=>!Re);else if(W.length>0)Z(Y());return}if(d.key==="right"&&!d.shift&&!m.getSnapshot().query&&m.getSnapshot().mode==="prompt"&&!Ge){if(Je(),X?.kind==="earlier")le(X.entry,"section");else if(X?.kind==="newsession")ye(X.origin);else xe(Q);return}if((d.meta||d.superKey)&&d.key>="1"&&d.key<="9"){Je();let Re=Number(d.key),Oe=be.find((Se)=>Se.kind==="job"&&Se.origin===ge&&--Re===0);if(Oe?.kind==="job")xe(Oe.job);return}if(d.name==="return"){Lc(i.submit,d);return}if(d.ctrl&&d.key==="x"){if(Je(),W.length>0)return;if(!re&&de&&X?.kind==="header"){if(X.group==="pinned"||X.group===Lw||X.group===fy){vt(`${X.group==="pinned"?"Pinned":X.group===Lw?"Ungrouped":"Past"} is reserved \u2014 can't ungroup`);return}if(S.followOrigin=X.group,S.followId=null,me.pending?.id!==Wt(X.group)){me.arm(Wt(X.group));return}me.disarm(),Ey(i,X.group);return}if(!re&&X?.kind==="header"&&He.length>0){if(S.followOrigin=X.group,S.followId=null,me.pending?.id!==Wt(X.group)){me.arm(Wt(X.group));return}me.disarm();for(let Se of He){if(Ve.some((Ye)=>Ye.id===Se.id))continue;Yd(i,"x",Se,!0)}return}if(Q&&Ve.some((Se)=>Se.id===Q.id))return;let
+
+## willInsertNewline @192073232 @192073232
+t:P,length:J}=T;D.dispatch({type:"yankPop"});let ye=j.slice(0,P),he=j.slice(P+J),Oe=ye+I+he,wt=P+I.length;D.dispatch({type:"updateYankLength",length:I.length}),F(Oe),k(wt)}return}}return}if(y.name==="tab"){if(y.preventDefault(),O&&j==="")O();return}if(S&&y.key===" "&&j===""){y.preventDefault(),S();return}if(y.key.length>=1&&!tn.has(y.name)){y.preventDefault();let T=w.insert(y.key);F(T.text),k(T.offset)}},C=V&&pw(),g=qe({value:ee,onChange:F,columns:Y,onHistoryUp:l,onHistoryDown:f}),R={handleKeyDown:p,offset:B,setOffset:k};return{query:ee,queryRef:re,setQuery:Ke,cursorOffset:B,cursorOffsetRef:Z,willInsertNewline:xe,setCursorOffset:k,handleKeyDown:(y)=>{if(!C){p(y);return}if(!n)return;if(y.name==="escape"&&g.mode==="NORMAL"){g.handleKeyDown(y,R),p(y);return}g.handleKeyDown(y,R)},handlePaste:(y)=>{if(!n||y.text.length===0)return;y.preventDefault(),g.cancelPendingRemap();let j=h?y.text.replace(/\r\n|\r/g,`
+`):y.text.split(/\r\n|\r|\n/,2)[0]??"";if(j.length===0)return;let w=ci.fromText(re.current,Y,Z.current).insert(j);F(w.text),k(w.offset)},vimMode:C?g.mode:void 0}}N();function Lu({query:n,placeholder:s="Search\u2026",isFocused:i,isTerminalFocused:l,prefix:f=dJn,width:c,cursorOffset:d,borderless:m=!1,highlights:x=[],dimRange:v,cursorChar:h,prefixDim:S=!1,prefixColor:O,onCursorOffsetChange:V,onFocus:D,wrapColumns:H}){let Q=d??n.length,Y=m?0:2,X=m?0:1,q=`${f} ${n}`,z=f.length+1,le=G(()=>j$e(q,H??0),[q,H]),fe=G(Rj,[]),ce=a.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT&&a.CLAUDE_CODE_SESSION_KIND!=="bg",ee=URn(le,z+Q),B=vf({line:X+ee.line,column:Y+ee.column,active:i,visible:h===void 0&&!ce}),te=l&&!(fe&&!ce&&h===void 0);return e(o,{ref:B,flexShrink:0,borderStyle:m?void 0:"round",borderColor:i?"suggestion":void 0,borderDimColor:!i,paddingX:m?0:1,width:c,onClick:V||D?(re)=>{if(!i){D?.();ret
+
+## willInsertNewline @192269870 @192269870
+wo}=we(),[pe]=u(()=>Date.now()),ft=E(null),Pt=E(null);Qd(Pt,le!==null&&!We);let $t=E0(),Bt=j((H)=>H.settings.voice?.mode??"hold"),Be=iX(),xo=()=>{let H=re.focusedRow(),Pe=H?.kind==="job"?H.job:void 0;if(!Pe)return;Sr(!1);let Ae=he.getSnapshot().previewOpen;if(!Ae)re.followId=Pe.id,lu();he.setPreviewOpen(!Ae)},un=!Y&&!We&&ct===null&&Ie===null&&Ft===null&&Fe===null,{query:Xe,queryRef:Yo,setQuery:yo,willInsertNewline:iu,setCursorOffset:Gs,handleKeyDown:hr,handlePaste:cn,vimMode:hg}=Zu({buffer:Ne,isActive:un,multiline:!0,honorEditorMode:!0,onExit:()=>{},onCancel:le===null?Gt:void 0,onSpaceOnEmpty:()=>{if(Ne.getSnapshot().mode==="bash")return;if($t&&Bt!=="tap")he.schedulePeekTap((H)=>P.setTimeout(H,Ad),()=>{let H=Be();if(H.voiceState!=="idle"||H.voiceWarmingUp)return;if(Yo.current.trim()!=="")return;xo()});else xo()}});pp((H)=>{let{query:Pe,cursorOffset:Ae}=Ne.getSnapshot();Ne.insertText(kJe(H,Pe[Ae-1]))});let su=Ki(()=>Ne.pastes,cn,{onMinted:Ne.noteMintedPaste});k(()=>{Ne.pruneOrphanedPastes()},[Ne,Xe]),tr(()=>Ne.setExpandHintPasteId(null),Ht===null?null:8000,[Ht]);let[au]=u(()=>({get value(){return Ne.getSnapshot().query},get cursorOffset(){return Ne.getSnapshot().cursorOffset},setValueWithCursor:(H,Pe)=>Ne.setQueryAndCursor(H,Pe)})),br=kke({composer:au,isActive:un}),Vs=ep((H)=>H.vo
+
+## openNewSessionRow:lt @192159479 @192159479
+ggestions:He,pickSuggestion:tt,applySuggestion:Ge,closeAgentBrowse:wt,jobSessionIds:Me,builtRows:he,bumpSuggGen:et,mountAt:ut,focusedRow:Ie,focused:Fe,isOnboarding:Ve,toggleCollapse:We,openEarlier:ze,openNewSessionRow:lt,openOrRespawn:yt}=i,Ft=()=>{d.preventDefault(),d.stopImmediatePropagation()},Ct=(Ue)=>{m.beginProgrammaticChange(),m.setQuery(Ue),h.setHelpOpen(!1)},Ne=d.ctrl;if(!Ne&&K(d)){V(d);return}Ft();let Mt=m.getSnapshot().mode==="bash"?"!":m.getSnapshot().query.trim().toLowerCase(),Ht=()=>{m.beginProgrammaticChange(),m.setQuery(""),X2e(W,{q:"",collapsed:[...S.getSnapshot().collapsed]},
+
+## openNewSessionRow:ye @192252775 @192252775
+ach:C,storageV5:x,onAction:A,exit:F,searchKeyDown:T,vimMode:P,dispatchInputActive:V,templates:K,suggestions:W,pickSuggestion:Y,applySuggestion:Z,jobSessionIds:ee,focusedRow:X,focused:Q,openEarlier:le,openNewSessionRow:ye,openOrRespawn:xe}=i.submit,{deleteConfirm:me,rows:be,focusedIdx:Te,focusedOrigin:ge,byGroup:de,hasComposedDispatch:re,headerJobs:He,groupSuggestions:tt,previewOpen:Ge,helpOpen:wt,debugOpen:Me,groupEdit:he,renamingJobId:et,attachingJobId:ut,showAllAgents:Ie,jobs:Fe,pendings:Ve,simpleView:We,groupsEnabled:ze,hasCredentials:lt,termRows:yt,canGoBack:Ft,originJobId:Ct,originSpawn:N
+
+## openNewSessionRow:Du @192280375 @192280375
+)=>H.id===d);k(()=>{if(!Mu||!he.firstImpression("empty"))return;s("tengu_fleetview_empty_state_shown",{skeleton:oa,has_origin:Ju})},[Mu,oa,Ju]);let ia=()=>({submit:{editor:Ne,roster:Q,selection:re,view:he,attach:yt,storageV5:T,credentials:W,onAction:i,exit:pt,relaunchForUpdate:fu,searchKeyDown:hr,willInsertNewline:iu,vimMode:hg,dispatchInputActive:un,canonicalLauncherCwd:At,launcherCwd:dt,effectiveCwd:mt,scopedFallbackOrigin:It,cwdFilter:S,dispatchDefaults:h,query:Xe,dispatch:Tn,templates:mn,allRepos:Se,routines:Qo,templateCache:vt,suggestions:Go,skills:$s,modelArgMatch:Ys,modelSuggestions:Ws,pickSuggestion:Vg,applySuggestion:bu,closeAgentBrowse:()=>Sr(!1),jobSessionIds:Cu,builtRows:vi.rows,bumpSuggGen:hu,mountAt:pe,focusedRow:Rr,focused:Iu,isOnboarding:oa,toggleCollapse:Ee,openEarlier:Tu,openNewSessionRow:Du,openOrRespawn:Ri},deleteConfirm:Lt,actions:Wg,rows:ao,focusedIdx:He,focusedOrigin:oh,byGroup:qg,byState:ea,hasComposedDispatch:ta,dispatchRepoCwd:An,headerJobs:nh,groupOf:Qg,groupSuggestions:pn,previewOpen:We,helpOpen:ze,debugOpen:lt,groupEdit:Ie,renamingJobId:ct,attachingJobId:Ft,showAllAgents:Si,jobs:le,pendings:be,simpleView:Y,groupsEnabled:Me,hasCredentials:Ru,termRows:wo,canGoBack:C,originJobId:m,originSpawn:w,renameKeyDown:_g,groupKeyDown:xg,setQuery:yo,setRenameDraft:du,setGroupDraft:Us,readRenameDraft:()=>kg.current,readGroupDraft:()=>Cg.current,handleCtrlC:Gt,switchTab:wu,clearRename:ce,clearGroupEdit:uu,headerArmId:Yt,ck:rt,setShowAllAgents:Sr,setSelectedSuggestion:gu,setHoveredSuggestionId:qs,attachPastedImage:su}),lh=(H)=>ag(ia(),H),{handleKeyDown:dh,handlePaste:uh}=RTe({handleKeyDown:lh,onPaste:(H)=>Jc({editor:Ne,dispatchInputActive:un,insertAtCursor:(Pe)=>cn(new Iie(Pe))},H),onImagePaste:su}),Bu=(H)=>{let Pe=he.getSnapshot();if(Pe.resumePicker!==null)return;if(ct!==null||Pe.renaming!==null){Eg(H);return}if(Ie!==null){if(he.setGroupPickIdx(-1),Pe.groupPristine)Us(""),he.setGroupPristine(!1);Pg(H);return}if(ze)he.setHelpOpen(!1);uh(H)};if(le===null|
+
+## lt(Ie.origin) @192165261 @192165261
+!1,Q,Te.get(ee),x);Oe(l(Se))})}else if(!De?.cwd&&De?.exec===void 0)if(Ie?.kind==="fold")S.followOrigin=null,S.followId=null,S.expandCap(Ie.group),s("tengu_fleetview_fold_expand",{hidden_count:Ie.hidden,ms_since_mount:Date.now()-ut});else if(Ie?.kind==="header"){if(Ve)return;S.followOrigin=Ie.group,S.followId=null,We(Ie.group)}else if(Ie?.kind==="earlier")ze(Ie.entry,"section");else if(Ie?.kind==="newsession")lt(Ie.origin);else yt(Fe)}function Jc(i,d){let{editor:m,dispatchInputActive:w,insertAtCursor:S}=i,h=d.replace(/\r\n|\r/g,`
+`),C=m.lastMintedPasteId??-1,x=m.pastes[C];if(w&&x?.type==="text"&&x.content===h){let F=wdt(m.getSnapshot().query,m.pastes);if(F?.id===C){delete m.pastes[C],m.setQueryAndCursor(F.expanded,F.cursorOffset),m.setExpandHintPasteId(null);return}}let A=kZ(h);if(w&&(h.length>Oae||A>2)){let F=m.mintTextPaste(h);if(S(gbe(F,A)),h.length<=BIe)m.setExpandHintPasteId(F);return}S(h)}async function Pa(i,d,m){let{editor:w,roster:S,attach:h,awayLoop:C,storageV5:x}=i;if(d.id.sta
+
+## fleetHits "let Du=" count=0 
+
+## fleetHits "Du=(" count=1 192279362
+-- @192279362 {templates:mn,allRepos:Se,routines:Qo}},Tu=(H,Pe)=>dp(ra,H,Pe),Ri=(H)=>cs(ra,H),Du=(H)=>up(ra,H),Fu=x!==void 0&&(!Ct||Ft!==null);k(()=>{if(yt.getSnapshot().autoOpened||!x||le===null)return;yt.markAutoOpened(),Ri(le.find((H)=>H.id===x))},[x,le]);let Mu=le!==null&&!Fu&&th&&!Xe&&!Y,Ju=_u.some((H)=>H.id===d
+
+## fleetHits "Du=async" count=0 
+
+## fleetHits "const Du=" count=0 
+
+## fleetHits "Du=useCallback" count=0 
+
+## fleetHits "Du=Q.useCallback" count=0 
+
+## fleetHits "Du=Cf.useCallback" count=0 
+
+## fleetHits "function Du(" count=0 
+
+## fleetHits "async function Du(" count=0 
+
+## fleetHits "let ye=" count=4 192063805,192072677,192122666,192284976
+-- @192063805 {_(),b("vim_insert_remap"),B(C,{claimEmptyInsert:!0}),p.preventDefault();return}let ye=P?JO(K):"";if(ye)fe(A,ye,C.offset+K.length,[...p.key].length===1)}C.handleKeyDown(p);return}if(g.mode==="VISUAL"){let A={...ne(R,C,!1),onUndo:d,onDotRepeat:()=>F(C)},K=g.command.type==="idle"||g.command.type==="count",T=
+-- @192072677 =Bot(D.state);if(T){let{text:I,start:P,length:J}=T;D.dispatch({type:"yankPop"});let ye=j.slice(0,P),he=j.slice(P+J),Oe=ye+I+he,wt=P+I.length;D.dispatch({type:"updateYankLength",length:I.length}),F(Oe),k(wt)}return}}return}if(y.name==="tab"){if(y.preventDefault(),O&&j==="")O();return}if(S&&y.key===" "&&j===
+-- @192122666 ){let{bytesRead:le}=await S.read(Y,0,Math.min(Y.length,h-ee),ee);if(le<=0)break;let ye=Y.subarray(0,le),xe=Z?Z.length:0,me=Z?Buffer.concat([Z,ye]):ye,be=0,Te=me.indexOf(10,xe);while(Te!==-1){let ge=me.toString("utf-8",be,Te);if(ge.includes(_h)){let de=ge.match(Eh),re=de?Date.parse(de[1]):NaN;if(Number.isFi
+-- @192284976 ,re},Q=d?.originJobId,le=d?.originSpawn;delete process.env.CLAUDE_AGENTS_SELECT;let ye=await BLn(await jl(te(),Au(d?.storageV5)),d?.storageV5),xe=xr(h,d?.storageV5);Wi(h,xe,d?.storageV5,ye?.collapsed);let me=ji(h,{query:ye?.q||void 0}),be=Ui(h);Zrt();let Te;process.stdin.off("readable",x);while(C.length)pr
+
+## fleetHits "ye=async" count=0 
+
+## fleetHits "function ye(" count=2 191922537,192332468
+-- @191922537  I(f(ge(),"startup-perf"),".json");return wH(wH(e,t),r)}var Qrt=86400000,he=Zsn;function ye(e){if(e===void 0)return v("none");if(!he.has(e))return v("other");return e==="ELOOP"?v("ELOOP"):e==="EISDIR"?v("EISDIR"):v("ENXIO")}function De(e){return e.code==="Failed"&&e.telemetryCode!==void 0&&he.has(e.telemetryCod
+-- @192332468 c),o-=c,h+=c;if(n[t].length>0||n.length-t===1)break;t++}}if(t>=n.length-t)l()}}}function ye(r,n,t){if(!r)return;let o=process.hrtime.bigint(),l;try{l=ie(r,{flags:"w"})}catch{return}l.on("error",()=>{l?.destroy(),l=void 0});let u=Buffer.allocUnsafe(8);return u.writeUInt32BE(n,0),u.writeUInt32BE(t,4),l.write(u),{
+
+## fleetHits "let lt=" count=0 
+
+## fleetHits "lt=async" count=0 
+
+## fleetHits "function lt(" count=1 192047302
+-- @192047302 )}function ut(n,s,i,l){let{from:f,to:c}=ge(l,s,i);if(f===c)return;it(n,f,c,l,i)}function lt(n,s,i,l){let{from:f,to:c}=ge(l,n,s);if(f===c&&!s)return;let d=l.text.slice(f,c),m=d;if(s&&!m.endsWith(`
+`))m+=`
+`;l.setRegister(m,s);let x=l.text.slice(c),v=s&&(x!==""||d.endsWith(`
+`))?`
+`+x:x,h=l.text.slice(0,f)+i+v;l.
+
+## fleetHits "openNewSessionRow" count=5 192159479,192205484,192252775,192280375,192283039
+-- @192159479 At:ut,focusedRow:Ie,focused:Fe,isOnboarding:Ve,toggleCollapse:We,openEarlier:ze,openNewSessionRow:lt,openOrRespawn:yt}=i,Ft=()=>{d.preventDefault(),d.stopImmediatePropagation()},Ct=(Ue)=>{m.beginProgrammaticChange(),m.setQuery(Ue),h.setHelpOpen(!1)},Ne=d.ctrl;if(!Ne&&K(d)){V(d);return}Ft();let Mt=m.getSnapshot().mod
+-- @192205484 Existing:Nl,panelOpen:rn}=lC,{toggleCollapse:pf,openOrRespawn:Hl,openEarlier:ff,openNewSessionRow:mf}=dC,Gl=mC?.jobId??null,qb;if(ho[0]!==or)qb=(gC)=>or.liveStatus(gC),ho[0]=or,ho[1]=qb;else qb=ho[1];let xs=qb,gf=jb.setError,zb;if(ho[2]!==qr)zb=(hC)=>Ko(qr,hC),ho[2]=qr,ho[3]=zb;else zb=ho[3];let hf=zb,Yb;if(ho[4]!==
+-- @192252775 tion:Y,applySuggestion:Z,jobSessionIds:ee,focusedRow:X,focused:Q,openEarlier:le,openNewSessionRow:ye,openOrRespawn:xe}=i.submit,{deleteConfirm:me,rows:be,focusedIdx:Te,focusedOrigin:ge,byGroup:de,hasComposedDispatch:re,headerJobs:He,groupSuggestions:tt,previewOpen:Ge,helpOpen:wt,debugOpen:Me,groupEdit:he,renamingJob
+-- @192280375 At:pe,focusedRow:Rr,focused:Iu,isOnboarding:oa,toggleCollapse:Ee,openEarlier:Tu,openNewSessionRow:Du,openOrRespawn:Ri},deleteConfirm:Lt,actions:Wg,rows:ao,focusedIdx:He,focusedOrigin:oh,byGroup:qg,byState:ea,hasComposedDispatch:ta,dispatchRepoCwd:An,headerJobs:nh,groupOf:Qg,groupSuggestions:pn,previewOpen:We,helpOpe
+-- @192283039 ntials:Ru,mountAt:pe,actions:{toggleCollapse:Ee,openOrRespawn:Ri,openEarlier:Tu,openNewSessionRow:Du}}),e(jd,{owners:De,layout:Fn,onCursorOffsetChange:Gs,highlights:fh,voice:{interimRange:br.interimRange,showCursor:yg},isTerminalFocused:Rt,simpleView:Y,showRemoteTabs:Zs,switchTab:wu,remoteJobs:nt,hasGroups:yi.size>0
+
+## fleetHits "beginNewSession" count=2 192147971,192190353
+-- @192147971 delete(i)}releasePromoted(i){for(let d of this.#l)if(i.has(d))this.#l.delete(d)}beginNewSession(){return this.#g({newSessionOpening:!0}),++this.#d}isCurrentNewSessionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoO
+-- @192190353 =S.getSnapshot();if(x.newSessionOpening||x.attachingJobId!==null)return;let A=S.beginNewSession();C(null);let F=()=>S.isCurrentNewSessionAttempt(A);$L(Yk()?["--restricted"]:[],void 0,"shell",d,void 0,void 0,void 0,h).then(async(T)=>{try{if(!T.ok){if(!F())return;S.endNewSession(),f("fleet_view_new_session",T.reason
+
+## fleetHits "newSessionOpening" count=9 192146238,192146539,192146561,192148005,192148112,192148174,192190295,192204922,192256207
+-- @192146238 orageV5:m,collapsed:w})}var yc=new Set;function Sc(){return{attachingJobId:null,newSessionOpening:!1,autoOpened:!1}}class kc{#n=$e();#e={...Sc(),warmingJobIds:yc};#a=0;#t=new Map;#i=null;#r=0;#d=0;#s=null;#o=null;#f=null;#u=0;#m=null;#l=new Set;getSnapshot=()=>this.#e;subscribe=(i)=>this.#n.subscribe(i);#g(i){let d=
+-- @192146539 (i);#g(i){let d=this.#e,m={...d,...i};if(m.attachingJobId===d.attachingJobId&&m.newSessionOpening===d.newSessionOpening&&m.warmingJobIds===d.warmingJobIds&&m.autoOpened===d.autoOpened)return;this.#e=m,this.#n.emit()}attachView(){this.#a++;let i=!1;return()=>{if(i)return;if(i=!0,this.#a--,this.#a===0)this.#i=null,thi
+-- @192146561 e,m={...d,...i};if(m.attachingJobId===d.attachingJobId&&m.newSessionOpening===d.newSessionOpening&&m.warmingJobIds===d.warmingJobIds&&m.autoOpened===d.autoOpened)return;this.#e=m,this.#n.emit()}attachView(){this.#a++;let i=!1;return()=>{if(i)return;if(i=!0,this.#a--,this.#a===0)this.#i=null,this.#r++,this.#d++,this.
+-- @192148005 et d of this.#l)if(i.has(d))this.#l.delete(d)}beginNewSession(){return this.#g({newSessionOpening:!0}),++this.#d}isCurrentNewSessionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoOpened(){this.#g({autoOpened:!0})}}fu
+-- @192148112 is.#d}isCurrentNewSessionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoOpened(){this.#g({autoOpened:!0})}}function Ui(i){return i.attach??=new kc}function vc(i,d,{pruneTextPastes:m=!1}={}){let w=Object.values(i);fun
+-- @192148174 ession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoOpened(){this.#g({autoOpened:!0})}}function Ui(i){return i.attach??=new kc}function vc(i,d,{pruneTextPastes:m=!1}={}){let w=Object.values(i);function S(C){return m||C.type==="image"||C.type==="audio"}if(!w.
+-- @192190295 t{editor:m,roster:w,attach:S,storageV5:h}=i,C=m.setError,x=S.getSnapshot();if(x.newSessionOpening||x.attachingJobId!==null)return;let A=S.beginNewSession();C(null);let F=()=>S.isCurrentNewSessionAttempt(A);$L(Yk()?["--restricted"]:[],void 0,"shell",d,void 0,void 0,void 0,h).then(async(T)=>{try{if(!T.ok){if(!F())retu
+-- @192204922 stine:on,renaming:mC,previewOpen:nn}=Ze(uC),{attachingJobId:Zp,warmingJobIds:ef,newSessionOpening:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTarget
+
+## extractNear caller-of-ye(X.origin) before=@192261457 found=function Fs(@192220123
+sha=3623b53aea0f1119 len=1177
+function Fs(bI){let wI=g(12),{focusedPinned:Hf,canReorder:Gf,canRename:Vf,canGroup:Wf,canPin:Uf,canMention:Kf,canSwitchViews:ud,canDispatchAndOpen:$f,altOpenCount:Ds,canDelete:cd,canGoBack:jf}=bI,vw;if(wI[0]!==Ds||wI[1]!==cd||wI[2]!==$f||wI[3]!==jf||wI[4]!==Wf||wI[5]!==Kf||wI[6]!==Uf||wI[7]!==Vf||wI[8]!==Gf||wI[9]!==ud||wI[10]!==Hf){let no=[];if(Gf)no.push(`shift+${O.arrowUp+O.arrowDown} to reorder`);if(Vf)no.push("ctrl+r to rename");if(Wf)no.push("ctrl+e to set group");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if(Uf)no.push(`ctrl+t to ${Hf?"unpin":"pin to top"}`);if(Ds>0)no.push(`alt+1${Ds>1?`-${Ds}`:""} to open`);if(cd)no.push(`ctrl+x to ${cd}`);if(jf)no.push(`${O.arrowLeft} to go back`);no.push(ud?"esc to quit":"esc to close \xB7 esc again quits");no.push("? to close");let Rw=[];for(let pi=0;pi<no.length;pi=pi+2,pi)Rw.push(no.slice(pi,pi+2));vw=e(o,{flexShrink:0,paddingX:2,flexDirection:"row",gap:4,children:Rw.map(Bw)});wI[0]=Ds,wI[1]=cd,wI[2]=$f,wI[3]=jf,wI[4]=Wf,wI[5]=Kf,wI[6]=Uf,wI[7]=Vf,wI[8]=Gf,wI[9]=ud,wI[10]=Hf,wI[11]=vw}else vw=wI[11];return vw}
+
+## extractNear caller-of-Du-alias before=@192280375 found=function @192266512
+{"missEnd":true,"preview":"function gg({onAction:i,initialJobId:d,originJobId:m,originSpawn:w,cwdFilter:S,dispatchDefaults:h,canGoBack:C,autoOpenJobId:x,awayLoop:A,host:F,storageV5:T}){let P=xt(),{stdin:V,isRawModeSupported:K}=B0(),{credentials:W}=fe(),Y=a.CLAUDE_CODE_FLEETVIEW_SIMPLE||R(\"tengu_fleetview_s"}
+
+## preview-caller-of-Du-alias @192266512
+function gg({onAction:i,initialJobId:d,originJobId:m,originSpawn:w,cwdFilter:S,dispatchDefaults:h,canGoBack:C,autoOpenJobId:x,awayLoop:A,host:F,storageV5:T}){let P=xt(),{stdin:V,isRawModeSupported:K}=B0(),{credentials:W}=fe(),Y=a.CLAUDE_CODE_FLEETVIEW_SIMPLE||R("tengu_fleetview_simple",!1),Z=!Y||!!d?.startsWith("remote-");tr(()=>{if(!K)return;let H=V.listenerCount("readable");if(H>1)s("tengu_fleetview_stdin_contention",{listeners:H})},1500,[]);let[ee]=u(()=>A??_i()),[X]=u(()=>F??epe()),[Q]=u(()=>xr(X,T)),{jobs:le,adoptedPeers:ye,remoteJobs:xe,remoteListLoaded:me,pendings:be,prStatuses:Te,loopK
+
+## Du= in 192240000-192285000
+@192279362 Du=(H)=>up(ra,H),Fu=x!==void 0&&(!Ct||Ft!==null);k(()=>{if(yt.getSnapshot().autoOpened||!x||le===null)return;yt.markAutoOpened(),Ri(le.find((H)=>H.id===x))},[x,le]);let Mu=le!==null&&!Fu&&th&&!Xe&&!Y,Ju=_u.some((H)=>H.id===d);k(()=>{if(!Mu||!he.firstImpression("empty"))return;s("tengu_fleetview_empty_state_shown",{skeleton:oa,has_origin:Ju})},[Mu,oa,Ju]);let ia=()=>({submit:{editor:Ne,roster:Q,sel
+
+## ye= in 192240000-192285000
+@192251997 ye=Q(Z.state),xe=new Map;if(le===ye){let be=new Set(C.map((de)=>de.id)),Te=0;for(let de of h)if(de.kind==="job"&&de.group===V.group&&!be.has(de.job.id))xe.set(de.job.id,Te++);let ge=xe.get(Y.id);xe.set(Y.id,xe.get(Z.id)),xe.set(Z.id,ge)}else xe.set(Y.id,ye),xe.set(Z.id,le);w.beginReorder(Y.id,K),m.bumpGen();let me=X?"stateSortOrder":"sortOrder";m.u
+@192284980 ye=await BLn(await jl(te(),Au(d?.storageV5)),d?.storageV5),xe=xr(h,d?.storageV5);Wi(h,xe,d?.storageV5,ye?.collapsed);let me=ji(h,{query:ye?.q||void 0}),be=Ui(h);Zrt();let Te;process.stdin.off("readable",x);while(C.length)process.stdin.unshift(C.pop());let ge;if(K!==void 0){if(xe.jobs===null)xe.seedJobs(await Rg(void 0,d?.storageV5));let de=xe.jobs?
+
+## lt= in 192240000-192285000
+
+## mf= in 192240000-192285000
+
+## #18 setQuery("") needle="setQuery(\"\")" hits=3
+- #0 @192150943 :m+i.length})}setMode(i){this.#l({mode:i})}dropDraft(){this.setQuery(""),this.setMode("prompt"),this.pruneOrphanedPastes({pruneTextPastes:!0})}draftForDisk(){let{query:i,mode:d}=this.#e;return d==="bash"?`!${i}`:i}beginProgrammaticChange(){this.#i=!0}t
+- #1 @192159812 .trim().toLowerCase(),Ht=()=>{m.beginProgrammaticChange(),m.setQuery(""),X2e(W,{q:"",collapsed:[...S.getSnapshot().collapsed]},x)};if(rct.includes(Mt)){Ht(),T();return}if(Mt.startsWith("/")){let[Ue="",je=""]=m.getSnapshot().query.trim().slice(1).split(
+- #2 @192163585 S.followOrigin;S.savedFocusJobId=null,S.followOrigin=null,m.setQuery(""),m.setMode("prompt"),X2e(W,{q:"",collapsed:[...S.getSnapshot().collapsed]},x),m.replacePastes({...m.pastes}),m.pruneOrphanedPastes({pruneTextPastes:!0});let Oe=(Se)=>{w.updatePendi
+
+## #18 setQuery('') needle="setQuery('')" hits=0
+
+## #18 setQuery(``) needle="setQuery(``)" hits=0
+
+## #18 yo("") needle="yo(\"\")" hits=0
+
+## #18 yo('') needle="yo('')" hits=0
+
+## #18 Ke("") needle="Ke(\"\")" hits=0
+
+## #18 Ke('') needle="Ke('')" hits=0
+
+## #18 setQueryAndCursor needle="setQueryAndCursor" hits=8
+- #0 @92715120 ed..
+...]"c.replyError.......Pc.expandHintPasteId.........T.setQueryAndCursor...	...^p..dropDraft...........draftForDisk....(;>.beginProgrammaticChange......#5.takeProgrammaticChange..........setSessionModel.....1..setReplyError.......PH..setExpandHintPast
+- #1 @192068986 et current(){return x.getSnapshot().query},set current(y){x.setQueryAndCursor(y,x.getSnapshot().cursorOffset)}}:te,[x]),Z=G(()=>x?{get current(){return x.getSnapshot().cursorOffset},set current(y){x.setQueryAndCursor(x.getSnapshot().query,y)}}:ne,[x]),F=U((
+- #2 @192069125 ent(){return x.getSnapshot().cursorOffset},set current(y){x.setQueryAndCursor(x.getSnapshot().query,y)}}:ne,[x]),F=U((y)=>{if(x){x.setQueryAndCursor(y,x.getSnapshot().cursorOffset);return}te.current=y,q(y)},[x]),k=U((y)=>{if(x){x.setQueryAndCursor(x.getSnap
+- #3 @192069196 Cursor(x.getSnapshot().query,y)}}:ne,[x]),F=U((y)=>{if(x){x.setQueryAndCursor(y,x.getSnapshot().cursorOffset);return}te.current=y,q(y)},[x]),k=U((y)=>{if(x){x.setQueryAndCursor(x.getSnapshot().query,y);return}ne.current=y,le(y)},[x]),Ke=U((y)=>{F(y),k(y.len
+- #4 @192069295 sorOffset);return}te.current=y,q(y)},[x]),k=U((y)=>{if(x){x.setQueryAndCursor(x.getSnapshot().query,y);return}ne.current=y,le(y)},[x]),Ke=U((y)=>{F(y),k(y.length)},[F,k]),xe=U((y)=>{if(!n||!h||y.name!=="return")return!1;let j=Z.current;return j>0&&re.curren
+- #5 @192150717 null}}}setQuery(i){this.#l({query:i,cursorOffset:i.length})}setQueryAndCursor(i,d){this.#l({query:i,cursorOffset:Vh(i,d)})}insertText(i){let{query:d,cursorOffset:m}=this.#e;this.#l({query:d.slice(0,m)+i+d.slice(m),cursorOffset:m+i.length})}setMode(i){this.#
+- #6 @192165555 apshot().query,m.pastes);if(F?.id===C){delete m.pastes[C],m.setQueryAndCursor(F.expanded,F.cursorOffset),m.setExpandHintPasteId(null);return}}let A=kZ(h);if(w&&(h.length>Oae||A>2)){let F=m.mintTextPaste(h);if(S(gbe(F,A)),h.length<=BIe)m.setExpandHintPasteId
+- #7 @192270694 e.getSnapshot().cursorOffset},setValueWithCursor:(H,Pe)=>Ne.setQueryAndCursor(H,Pe)})),br=kke({composer:au,isActive:un}),Vs=ep((H)=>H.voiceState);k(()=>{if(Vs!=="idle")he.cancelPeekTap()},[he,Vs]);let{handleKeyDown:bg}=Jde({voiceHandleKeyEvent:br.handleKeyE
+
+## #18 clearQuery needle="clearQuery" hits=1
+- #0 @68207422 .delete(this), SQL.close(this.#handle, throwOnError);
+  }
+  clearQueryCache() {
+    this.#queryCache.@forEach((stmt) => stmt.finalize()), this.#queryCache.@clear();
+  }
+  run(query, ...params) {
+    if (params.length === 0)
+      return SQL.run(this.
+
+## #18 dropQuery needle="dropQuery" hits=0
+
+## #18 typed prompt needle="typed prompt" hits=1
+- #0 @200154503 ta never reaches Anthropic):
+`+"- `userPrompts` \u2014 user-typed prompt text\n"+"- `assistantResponses` \u2014 assistant message text\n"+"- `toolDetails` \u2014 tool input arguments, e.g. the web-search query string\n"+"- `toolContent` \u2014 tool out
+
+## #18 Couldn't start a new session needle="Couldn't start a new session" hits=2
+- #0 @192191044 endNewSession(),_(P),f("fleet_view_new_session","threw"),C(`Couldn't start a new session \u2014 ${l(P)}`)}},(T)=>{if(!F())return;S.endNewSession(),_(T),f("fleet_view_new_session","threw"),C(`Couldn't start a new session \u2014 ${l(T)}`)})}function Lr(i,d,m){s("tengu_b
+- #1 @192191175 endNewSession(),_(T),f("fleet_view_new_session","threw"),C(`Couldn't start a new session \u2014 ${l(T)}`)})}function Lr(i,d,m){s("tengu_bg_agent_action",{action:c(i),source:v("fleet"),jobSessionId:ke(d.sessionId),agent:d.template,jobState:d.state,tempo:c(d.tempo),...m
+
+## #18 newSessionOpening needle="newSessionOpening" hits=10
+- #0 @92720860 apsed...........capExpanded.........attachingJobId......e.".newSessionOpening...
+....cL.autoOpened..J.......Cannot destructure property 'pruneTextPastes' from null or undefined value..........pruneTextPastes.C....:W.Cannot destructure property 'onMinted' fr
+- #1 @192146238 w})}var yc=new Set;function Sc(){return{attachingJobId:null,newSessionOpening:!1,autoOpened:!1}}class kc{#n=$e();#e={...Sc(),warmingJobIds:yc};#a=0;#t=new Map;#i=null;#r=0;#d=0;#s=null;#o=null;#f=null;#u=0;#m=null;#l=new Set;getSnapshot=()=>this.#e;subscrib
+- #2 @192146539 .#e,m={...d,...i};if(m.attachingJobId===d.attachingJobId&&m.newSessionOpening===d.newSessionOpening&&m.warmingJobIds===d.warmingJobIds&&m.autoOpened===d.autoOpened)return;this.#e=m,this.#n.emit()}attachView(){this.#a++;let i=!1;return()=>{if(i)return;if(i=!
+- #3 @192146561 .attachingJobId===d.attachingJobId&&m.newSessionOpening===d.newSessionOpening&&m.warmingJobIds===d.warmingJobIds&&m.autoOpened===d.autoOpened)return;this.#e=m,this.#n.emit()}attachView(){this.#a++;let i=!1;return()=>{if(i)return;if(i=!0,this.#a--,this.#a===
+- #4 @192148005 .has(d))this.#l.delete(d)}beginNewSession(){return this.#g({newSessionOpening:!0}),++this.#d}isCurrentNewSessionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markA
+- #5 @192148112 ssionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoOpened(){this.#g({autoOpened:!0})}}function Ui(i){return i.attach??=new kc}function vc(i,d,{pruneTextPas
+- #6 @192148174 wSessionOpening:!1})}abandonNewSession(){this.#d++,this.#g({newSessionOpening:!1})}markAutoOpened(){this.#g({autoOpened:!0})}}function Ui(i){return i.attach??=new kc}function vc(i,d,{pruneTextPastes:m=!1}={}){let w=Object.values(i);function S(C){return m||C
+- #7 @192190295 attach:S,storageV5:h}=i,C=m.setError,x=S.getSnapshot();if(x.newSessionOpening||x.attachingJobId!==null)return;let A=S.beginNewSession();C(null);let F=()=>S.isCurrentNewSessionAttempt(A);$L(Yk()?["--restricted"]:[],void 0,"shell",d,void 0,void 0,void 0,h).th
+- … +2 more
+
+## #18 beginNewSession needle="beginNewSession" hits=3
+- #0 @92714936 nPromote
+....n..endPromote......-...releasePromoted......(..beginNewSession.......A.isCurrentNewSessionAttempt......J.endNewSession.......l...abandonNewSession........>..markAutoOpened..
+...]"c.replyError.......Pc.expandHintPasteId.........T.setQueryAnd
+- #1 @192147971 moted(i){for(let d of this.#l)if(i.has(d))this.#l.delete(d)}beginNewSession(){return this.#g({newSessionOpening:!0}),++this.#d}isCurrentNewSessionAttempt(i){return this.#d===i}endNewSession(){this.#g({newSessionOpening:!1})}abandonNewSession(){this.#d++,t
+- #2 @192190353 x.newSessionOpening||x.attachingJobId!==null)return;let A=S.beginNewSession();C(null);let F=()=>S.isCurrentNewSessionAttempt(A);$L(Yk()?["--restricted"]:[],void 0,"shell",d,void 0,void 0,void 0,h).then(async(T)=>{try{if(!T.ok){if(!F())return;S.endNewSessi
+
+## #18 xAe( needle="xAe(" hits=5
+- #0 @196642476 De(e.input.ws,"url"),m=aXt(e.input.ws),v=w!==void 0?{url:nh(xAe(w),{maxUnits:Kf}),protocols:m?.map((d,u)=>u<lXt?$o(MJ(de(d,nM))):"")}:void 0,g=typeof e.input.interval_ms==="number"?e.input.interval_ms:30000,A=typeof e.input.description==="strin
+- #1 @196642980 urn;let o=e[t];return typeof o==="string"?o:void 0}function xAe(e){try{return new URL(e).href}catch{return e}}function Qe(e){let t=L0(e),o=typeof e.input.runId==="string"&&typeof e.input.script!=="string",i=typeof e.input.script==="string"?e.in
+- #2 @202410249 p,Ui[1]=oAe;else oAe=Ui[1];let Ts=oAe,nAe;if(Ui[2]!==cp)nAe=xAe(cp),Ui[2]=cp,Ui[3]=nAe;else nAe=Ui[3];let Pa=nAe,sAe;if(Ui[4]!==Pa)sAe=nh(Pa,{maxUnits:Kf,softWrap:!0}),Ui[4]=Pa,Ui[5]=sAe;else sAe=Ui[5];let Zl=sAe,aAe;if(Ui[6]!==gB||Ui[7]!==FZ)a
+- #3 @202573455 1;if(Tl[0]!==ia.input.url)M1=typeof ia.input.url==="string"?xAe(ia.input.url):ia.input.url,Tl[0]=ia.input.url,Tl[1]=M1;else M1=Tl[1];let WOe;if(Tl[2]!==M1)WOe=nh(M1,{maxUnits:Kf}),Tl[2]=M1,Tl[3]=WOe;else WOe=Tl[3];let Gd=WOe,zie=Gd.kind==="with
+- #4 @217260579 size,r}function vAe(e){return this.__data__.get(e)}function xAe(e){return this.__data__.has(e)}function CAe(e){var t=ACt.call(e,hC),r=e[hC];try{e[hC]=void 0;var n=!0}catch{}var i=RCt.call(e);return n&&(t?e[hC]=r:delete e[hC]),i}function wAe(e){
+
+## #18 kind:"newsession" needle="kind:\"newsession\"" hits=1
+- #0 @192175915 );break}}F.sort((me,be)=>Ha(be.state)-Ha(me.state));let K=[{kind:"newsession",origin:w,group:Rb}],W=(me,be)=>{for(let Te of be)K.push({kind:"job",job:Te,origin:EU(Te.state),group:me})};W($n,C),W(Un.needs,x),W(Un.live,A);let Z=1+(A.length*yb+(C.length+x.leng
+
+## #18 kind==="newsession" needle="kind===\"newsession\"" hits=4
+- #0 @192165253  if(Ie?.kind==="earlier")ze(Ie.entry,"section");else if(Ie?.kind==="newsession")lt(Ie.origin);else yt(Fe)}function Jc(i,d){let{editor:m,dispatchInputActive:w,insertAtCursor:S}=i,h=d.replace(/\r\n|\r/g,`
+`),C=m.lastMintedPasteId??-1,x=m.pastes[C];if(w&&x?.type
+- #1 @192210213 ""})`:`\u2026 ${Ke.hidden} more`]})},`f:${Ke.group}`)}if(Ke.kind==="newsession"){return r(o,{flexDirection:"column",children:[r(o,{ref:Xt?In:void 0,paddingLeft:Co,backgroundColor:On,onMouseEnter:Mo||nn?void 0:si,onClick:()=>{ai(),mf(Ke.origin)},children:[r(t,
+- #2 @192218030 p:"truncate-end",children:r(ue,{children:[e(t,{children:zo?.kind==="newsession"?`${O.arrowRight} or enter to start`:`${O.arrowRight} or enter to open`}),sn&&!ui&&e(t,{children:Di(sn.state)?"ctrl+x to delete":"ctrl+x to stop"}),e(t,{children:"? for shortcuts"}
+- #3 @192261437 f(Je(),X?.kind==="earlier")le(X.entry,"section");else if(X?.kind==="newsession")ye(X.origin);else xe(Q);return}if((d.meta||d.superKey)&&d.key>="1"&&d.key<="9"){Je();let Re=Number(d.key),Oe=be.find((Se)=>Se.kind==="job"&&Se.origin===ge&&--Re===0);if(Oe?.kind==
+
+## extractNear willInsertNewline-return before=@192073232 found=function @192069653
+sha=f9dccd07b1821191 len=52
+function K(){return H?w.backwardWord():w.prevWord()}
+
+## fleetFn function JIy( count=0 
+
+## fleetFn function Lc( count=1 192158881
+@192158881 sha=052d7449b7f1db98 len=6418
+keys=newsession,openNewSession,willInsertNewline,setQuery,lt(
+function Lc(i,d){let{editor:m,roster:w,selection:S,view:h,attach:C,storageV5:x,credentials:A,onAction:F,exit:T,relaunchForUpdate:P,searchKeyDown:V,willInsertNewline:K,canonicalLauncherCwd:W,launcherCwd:Y,effectiveCwd:Z,scopedFallbackOrigin:ee,cwdFilter:X,dispatchDefaults:Q,query:le,dispatch:ye,templates:xe,allRepos:me,routines:be,templateCache:Te,suggestions:ge,skills:de,modelArgMatch:re,modelSuggestions:He,pickSuggestion:tt,applySuggestion:Ge,closeAgentBrowse:wt,jobSessionIds:Me,builtRows:he,bumpSuggGen:et,mountAt:ut,focusedRow:Ie,focused:Fe,isOnboarding:Ve,toggleCollapse:We,openEarlier:ze,openNewSessionRow:lt,openOrRespawn:yt}=i,Ft=()=>{d.preventDefault(),d.stopImmediatePropagation()},Ct=(Ue)=>{m.beginProgrammaticChange(),m.setQuery(Ue),h.setHelpOpen(!1)},Ne=d.ctrl;if(!Ne&&K(d)){V(d);return}Ft();let Mt=m.getSnapshot().mode==="bash"?"!":m.getSnapshot().query.trim().toLowerCase(),Ht=()=>{m.beginProgrammaticChange(),m.setQuery(""),X2e(W,{q:"",collapsed:[...S.getSnapshot().collapsed]},x)};if(rct.includes(Mt)){Ht(),T();return}if(Mt.startsWith("/")){let[Ue="",je=""]=m.getSnapshot().query.trim().slice(1).split(/\s+(.*)/,2),ct=ua(Ue.toLowerCase(),ORe());if(ct&&Ep(ct)&&R4e(ct)){if(ct.fleetHostCall){Ht(),ct.fleetHostCall({exit:T,relaunch:()=>P("manual"),login:()=>F({type:"login"}),setError:m.setError,setInfo:m.setHint,storageV5:x},je).catch((nt)=>{_(nt),m.setError(l(nt))});return}if(ct.type!=="prompt"&&ct.name!=="model"){let nt=Ue.toLowerCase(),dt=tt();if(!de.some((At)=>At.kind!=="command"&&(At.name===nt||At.aliases?.includes(nt)))&&(!dt||dt.name===ct.name)){if(ct.name==="resume"&&!je.trim()&&h.getSnapshot().activeTab!=="remote"&&!X&&Ra()){Ht(),m.setError(null),m.setHint(null);let It=h.openResumePicker(),mt=new Set(Me);if(qi()){for(let Tt of he)if(Tt.kind==="earlier")mt.add(Tt.entry.sessionId)}zi(mt,!0,x).then((Tt)=>{if(It!==h.resumePickerGen)return;if(Tt===null){f("fleet_view_resume_picker","load_failed"),h.setResumePicker({entries:[],failed:!0});return}let vt=Tt.filter((Jt)=>!w.isDeleting(Jt.sessionId.slice(0,8))&&!w.isDeletingSession(Jt.sessionId));b("fleet_view_resume_picker",{count:vt.length}),h.setResumePicker({entries:vt,failed:!1})});return}m.setError(null);let{sanitizedName:At,skillNameHash:St}=S1({rawName:ct.name,canonicalName:ct.name,isMcp:!1,isBuiltIn:LR().has(ct.name),isBundled:!1,isOfficial:!1});s("tengu_slash_command_unavailable",{command_name:At,...St,surface:h.getSnapshot().activeTab==="remote"?v("fleet-cloud"):v("fleet-local"),reason:v("unavailable_in_agent_view")}),m.setHint(`/${ct.name} isn't available in agent view \u2014 attach to a session to run it`);return}}}}if(Mt==="/model"||Mt.startsWith("/model ")){let Ue=tt();if(!re&&Ue&&Ue.kind!=="model");else{let je=m.getSnapshot().query.trim().slice(6).trim(),ct=je.toLowerCase(),nt=He.map((It)=>It.name),dt=nt.find((It)=>It.toLowerCase()===ct),Wt=nt.filter((It)=>It.toLowerCase().startsWith(ct)),At=re?Ue?.name:void 0,St=dt??(Wt.length===1?Wt[0]:void 0)??At;if(St==="default")Ht(),m.setSessionModel(void 0),m.setHint("Model reset to default for this session");else if(St)Ht(),m.setSessionModel(St),m.setHint(`Model set to ${St} (session-scoped, not persisted)`);else if(!je)m.setHint("Usage: /model <name> \u2014 session-scoped, not persisted");else m.setHint(`Unknown model '${je}' \u2014 type /model  to see options`);return}}if(ge.length>0){Ge(tt()),wt();return}let Lt=m.getSnapshot().query,zt=m.getSnapshot().mode==="bash",De=Lt===le&&!zt?ye:Yi(zt?`!${Lt}`:Lt,xe,me,be);if(De?.intent||De?.routine||De?.matched){let Ue=m5(De.intent,m.pastes);if(!De.routine&&!De.matched&&Ue.trim().length<qh){m.setError(null),m.setHint("Too short \u2014 describe the task");return}let je=De.cwd??Z,ct=Te.get(je);if(De.matched&&!De.exec&&!(De.template.name.includes(":")&&je!==Z)){if(ct&&!ct.some((Se)=>Se.name===De.template.name||Se.name.endsWith(`:${De.template.name}`))){m.setError(`@${De.template.name} isn't available in ${jh(je)}`);return}}let nt=m.getSnapshot().sessionModel,dt=Wkt(),At=!kp(Ue).some(
+…TRUNC…
+
+## fleetFn function Fs( count=1 192220123
+@192220123 sha=3623b53aea0f1119 len=1177
+keys=
+
+## fleetFn function Zu( count=1 192068515
+@192068515 sha=7cb694d14a3cf860 len=5194
+keys=willInsertNewline,setQuery,lt(
+function Zu({isActive:n,onExit:s,onCancel:i,onExitUp:l,onExitDown:f,columns:c,passthroughCtrlKeys:d=[],initialQuery:m="",buffer:x,backspaceExitsOnEmpty:v=!0,multiline:h=!1,onSpaceOnEmpty:S,onTabOnEmpty:O,honorEditorMode:V=!1}){let D=Sje(),H=UTt()==="readline",{columns:Q}=we(),Y=c??Q,[X,q]=u(m),[z,le]=u(m.length),fe=Ze(x,(y)=>y.query),ce=Ze(x,(y)=>y.cursorOffset),ee=fe??X,B=ce??z,te=E(X),ne=E(z),re=G(()=>x?{get current(){return x.getSnapshot().query},set current(y){x.setQueryAndCursor(y,x.getSnapshot().cursorOffset)}}:te,[x]),Z=G(()=>x?{get current(){return x.getSnapshot().cursorOffset},set current(y){x.setQueryAndCursor(x.getSnapshot().query,y)}}:ne,[x]),F=U((y)=>{if(x){x.setQueryAndCursor(y,x.getSnapshot().cursorOffset);return}te.current=y,q(y)},[x]),k=U((y)=>{if(x){x.setQueryAndCursor(x.getSnapshot().query,y);return}ne.current=y,le(y)},[x]),Ke=U((y)=>{F(y),k(y.length)},[F,k]),xe=U((y)=>{if(!n||!h||y.name!=="return")return!1;let j=Z.current;return j>0&&re.current[j-1]==="\\"||y.shift||y.meta},[n,h]),p=(y)=>{if(!n)return;let j=re.current,M=Z.current,w=ci.fromText(j,Y,M);function A(){return H?w.forwardWord():w.nextWord()}function K(){return H?w.backwardWord():w.prevWord()}if(!Zt(y,H)&&!en(y))D.dispatch({type:"interrupt"});if(y.ctrl&&d.includes(y.key.toLowerCase()))return;if(y.name==="return"){if(y.preventDefault(),xe(y)){if(j[M-1]==="\\"){F(j.slice(0,M-1)+`
+`+j.slice(M));return}F(j.slice(0,M)+`
+`+j.slice(M)),k(M+1);return}s();return}if(h&&(y.name==="enter"||y.ctrl&&!y.shift&&!y.meta&&y.name==="j")){y.preventDefault();let T=w.insert(`
+`);F(T.text),k(T.offset);return}if(y.name==="down"){if(y.preventDefault(),h){let T=w.down();if(!T.equals(w)){k(T.offset);return}}if(f)f();else if(!h)s();return}if(y.name==="up"){if(y.preventDefault(),h){let T=w.up();if(!T.equals(w)){k(T.offset);return}}if(l)l();return}if(y.name==="escape"){if(y.preventDefault(),i)i();else if(j.length>0)F(""),k(0);else s();return}if(y.name==="backspace"){if(y.preventDefault(),y.meta||y.ctrl){let{cursor:I,killed:P}=H?w.backwardKillWord():w.deleteWordBefore();D.dispatch({type:"kill",text:P,direction:"prepend"}),F(I.text),k(I.offset);return}if(j.length===0){if(v)(i??s)();return}let T=w.backspace();F(T.text),k(T.offset);return}if(y.name==="delete"){y.preventDefault();let T=w.del();F(T.text),k(T.offset);return}if(y.name==="left"&&(y.ctrl||y.meta||y.fn)){y.preventDefault(),k(K().offset);return}if(y.name==="right"&&(y.ctrl||y.meta||y.fn)){y.preventDefault(),k(A().offset);return}if(y.name==="left"){y.preventDefault();let T=w.left();k(T.offset);return}if(y.name==="right"){y.preventDefault();let T=w.right();k(T.offset);return}if(y.name==="home"){y.preventDefault(),k(w.startOfLine().offset);return}if(y.name==="end"){y.preventDefault(),k(w.endOfLine().offset);return}if(y.ctrl){switch(y.preventDefault(),y.key.toLowerCase()){case"a":k(w.startOfLogicalLine().offset);return;case"e":k(w.endOfLogicalLine().offset);return;case"b":k(w.left().offset);return;case"f":k(w.right().offset);return;case"d":{if(j.length===0){(i??s)();return}let T=w.del();F(T.text),k(T.offset);return}case"h":{if(j.length===0){if(v)(i??s)();return}let T=w.backspace();F(T.text),k(T.offset);return}case"k":{let{cursor:T,killed:I}=w.deleteToLineEnd();D.dispatch({type:"kill",text:I,direction:"append"}),F(T.text),k(T.offset);return}case"u":{let{cursor:T,killed:I}=w.deleteToLineStart();D.dispatch({type:"kill",text:I,direction:"prepend"}),F(T.text),k(T.offset);return}case"w":{let{cursor:T,killed:I}=H?w.deleteWORDBefore():w.deleteWordBefore();D.dispatch({type:"kill",text:I,direction:"prepend"}),F(T.text),k(T.offset);return}case"y":{let T=Uot(D.state);if(T.length>0){let I=w.offset,P=w.insert(T);D.dispatch({type:"yank",start:I,length:T.length}),F(P.text),k(P.offset)}return}case"g":case"c":if(i){i();return}}return}if(y.meta){switch(y.preventDefault(),y.key.toLowerCase()){case"b":k(K().offset);return;case"f":k(A().offset);return;case"d":{let T;if(H){let I=w.killWord();D.dispatch({type:"kill",text:I.killed,direction:"append"})
+…TRUNC…

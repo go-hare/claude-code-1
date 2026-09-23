@@ -1,0 +1,151 @@
+when=2026-09-22T02:00:16.816Z
+
+## function Qbt needle="function Qbt(" hits=1
+- @179233427 payload_failed:!0}}}function e(n,t,i){let r={timestamp:new Date().toISOString(),level:n,event:t,data:i};return S(r)+` `}function Qbt(){return c().flush()}function m(){return a.CLAUDE_CODE_DIAGNOSTICS_FILE}async function TOe(n,t,i){let r=Date.now();Y("info",`${n}_started`);try{let o=await t(),d=i?i(o):{};return Y("info",`${n}_completed`,{d
+
+## async function Qbt needle="async function Qbt(" hits=0
+
+## Qbt() needle="Qbt()" hits=3
+- @179233436 ailed:!0}}}function e(n,t,i){let r={timestamp:new Date().toISOString(),level:n,event:t,data:i};return S(r)+` `}function Qbt(){return c().flush()}function m(){return a.CLAUDE_CODE_DIAGNOSTICS_FILE}async function TOe(n,t,i){let r=Date.now();Y("info",`${n}_started`);try{let o=await t(),d=i?i(o):{};return Y("info",`${n}_completed`,{duration_m
+- @187445979 n_end"),last_request_id:ke(k)});if(await EC(),await $ie(),r?.finalMessage)try{zG(2,r.finalMessage+` `)}catch{}try{await Qbt()}catch{}try{await Rq()}catch{}try{await svt()}catch{}await this.armFailsafeAndDrainStdout(e),this.forceExit(e)}async armFailsafeAndDrainStdout(e){this.armShutdownFailsafe(oGt()+str,e),await MLe()}}function U0t(e){le
+- @189577067 urn t;return an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>{}),qt(svt(),2000,"pre-exit flush timeout (relaunch)").catch(()=>{}),qt(EC(),2000,"write queue drain timeout (relaunch)").catch(()=>{})])} export{zL,hKt,lj,vF,WL,Ket,
+
+## diag flush timeout needle="diag flush timeout (relaunch)" hits=2
+- @94729140 DE_BRIDGE_REATTACH_OWNER_ORG".....m.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL......N...debug flush timeout (relaunch)......:z..diag flush timeout (relaunch)...!....R..pre-exit flush timeout (relaunch)...$...44H.write queue drain timeout (relaunch)........analytics flush timeout.(.......file:///B:/%7EBUN/root/chunk-sne8sbfe.js.....SG.^([1-9]\d{0,
+- @189577079  an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>{}),qt(svt(),2000,"pre-exit flush timeout (relaunch)").catch(()=>{}),qt(EC(),2000,"write queue drain timeout (relaunch)").catch(()=>{})])} export{zL,hKt,lj,vF,WL,Ket,lR,lUe,_G,gK
+
+## pre-exit flush timeout needle="pre-exit flush timeout (relaunch)" hits=2
+- @94729180 DE_BRIDGE_REATTACH_NO_BACKFILL......N...debug flush timeout (relaunch)......:z..diag flush timeout (relaunch)...!....R..pre-exit flush timeout (relaunch)...$...44H.write queue drain timeout (relaunch)........analytics flush timeout.(.......file:///B:/%7EBUN/root/chunk-sne8sbfe.js.....SG.^([1-9]\d{0,3})x([1-9]\d{0,3})$.(....L..file:///B:/%
+- @189577140 ug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>{}),qt(svt(),2000,"pre-exit flush timeout (relaunch)").catch(()=>{}),qt(EC(),2000,"write queue drain timeout (relaunch)").catch(()=>{})])} export{zL,hKt,lj,vF,WL,Ket,lR,lUe,_G,gKt}; .// @bun @bytecode // Claude Code is a Beta product per A
+
+## function svt needle="async function svt(" hits=1
+- @178613502 t L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L().preExitFlush.drain()}class he{parsed=new Map;lookup(e){return this.parsed.get(e)}remember(e,t){this.parsed.set(e,t)}reset(){this.parsed.clear()}}var pe=new he;function me(e){let t=pe.lookup
+
+## function Vk needle="function Vk(" hits=4
+- @178613451 n L().cleanup.register(e)}async function mEe(){await L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L().preExitFlush.drain()}class he{parsed=new Map;lookup(e){return this.parsed.get(e)}remember(e,t){this.parsed.set(e,t)}reset(){this.parsed.cl
+- @180199924 opus-5")return gs;return zk}function Bk(e){let t=dc(e),r=t===void 0?void 0:ygn(t);return r===void 0?void 0:Yee(Vk(e,r))}function Vk(e,t){let{input:r,output:o,cache_write_5m:u,cache_write_1h:p,cache_read:g,web_search:E}=t;if(u===void 0||g===void 0||E===void 0)throw new P(`model catalog entry '${e}' has incomplete pricing \u2014 baked entri
+- @200415080 1);return{subs:s,nextToken:u&&c!==void 0?Wk({p:c}):null}}function T2(e){return e.replace(/[\\%_]/g,(t)=>`\\${t}`)}async function Vk(e,t,n,i){if(t.length===0)return[];return(await e`     WITH p AS (       SELECT principal, ordinality AS ord       FROM unnest(${e.array(t,"TEXT")}) WITH ORDINALITY AS t(principal)     ),     per AS (${Ip(e,n)
+- @223093892 ,b);b.lanes=c;b.stateNode={containerInfo:a.containerInfo,pendingChildren:null,implementation:a.implementation};return b}function Vk(a,b,c,d,e){this.tag=b;this.containerInfo=a;this.finishedWork=this.pingCache=this.current=this.pendingChildren=null;this.timeoutHandle=-1;this.callbackNode=this.pendingContext=this.context=null;this.callbackPr
+
+## function gKt needle="function gKt(" hits=1
+- @189576892  Code: ${c.error.message} `),pp("relaunch_spawn_error"),process.exit(1);c.signal,process.exit(c.status??(c.signal?1:0))}function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").c
+
+## gKt() needle="gKt()" hits=3
+- @189576443 CH_NO_BACKFILL,delete s[k0e],Object.assign(s,e.env);for(let u of e.dropEnv??[])delete s[u];Object.assign(s,Yet());let m=gKt();await g(),E(o,[o,...r,...i],s,m);for(let u of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});await g();let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});if(process.removeAllListe
+- @189576901 c.error.message} `),pp("relaunch_spawn_error"),process.exit(1);c.signal,process.exit(c.status??(c.signal?1:0))}function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>
+- @192085275 t it on the latest build (the id is in the agents view)."}}let c=()=>fKt(t.taskRegistry.all());if(!i){let e=Zs(),r=D(Wa(gKt()),`${V()}.jsonl`);if(e&&e!==r){let u=c();return s("tengu_update_refused",{transcript_path_drift:!0,comment_monitor:u}),{type:"text",value:`Cannot /update \u2014 this session was resumed from a different project dire
+
+## class fe needle="class fe{cleanup=new W" hits=1
+- @178613195 ;if(r!==void 0)throw r.reason}async[Symbol.asyncDispose](){await this.drain()}get sizeForTesting(){return this.#e.size}}class fe{cleanup=new W;preExitFlush=new W}var ot=new K(()=>new fe);function L(){return ot.of(z().host)}var tde=2000;function Et(e){return L().cleanup.register(e)}async function mEe(){await L().cleanup.drain()}function DY
+
+## class W needle="class W{" hits=8
+- @178612748 of e==="function")return e;if(Symbol.asyncDispose in e)return()=>e[Symbol.asyncDispose]();return()=>e[Symbol.dispose]()}class W{#e=new Set;#t=!1;get drainStarted(){return this.#t}register(e){let t=it(e);this.#e.add(t);let r=()=>{this.#e.delete(t)};return Object.assign(r,{[Symbol.dispose]:r})}async drain(){this.#t=!0;let e=Array.from(this.
+- @179672004 tConfig(t,o)},httpHandlerConfigs(){return e.httpHandler.httpHandlerConfigs()}}),Ee=(e)=>({httpHandler:e.httpHandler()});class W{name;kind;values;constructor({name:e,kind:t=ge.FieldPosition.HEADER,values:o=[]}){this.name=e,this.kind=t,this.values=o}add(e){this.values.push(e)}set(e){this.values=e}remove(e){this.values=this.values.filter((t)
+- @181801554 e(r,r+L)))return!0;return!1}import{createHash as he}from"crypto";import{join as w}from"path";var Ce="paste-cache",N=1e7;class W{inFlight=new Map;retainedFailed=new Map;retainedFailedChars=0;retainedCap=N;markInFlight(e,t){this.inFlight.set(e,t)}settle(e){this.inFlight.delete(e);let t=this.retainedFailed.get(e);if(t!==void 0)this.retainedF
+- @195127841 eField(e){delete this.entries[e.toLowerCase()]}getByType(e){return Object.values(this.entries).filter((t)=>t.kind===e)}}class W{method;protocol;hostname;port;path;query;headers;username;password;fragment;body;constructor(e){this.method=e.method||"GET",this.hostname=e.hostname||"localhost",this.port=e.port,this.query=e.query||{},this.heade
+- @196921917 Json(){let e={code:this.code,message:this.message};if(this.data!==void 0)e.data=this.data;return e}}fr.ResponseError=Ze;class W{constructor(e){this.kind=e}static is(e){return e===W.auto||e===W.byName||e===W.byPosition}toString(){return this.kind}}fr.ParameterStructures=W;W.auto=new W("auto");W.byPosition=new W("byPosition");W.byName=new W
+- @205147266 M{shouldSample(){return{decision:I.RECORD_AND_SAMPLED}}toString(){return"AlwaysOnSampler"}}var F=Z(fr(),1),Ce=Z(pu(),1);class W{_root;_remoteParentSampled;_remoteParentNotSampled;_localParentSampled;_localParentNotSampled;constructor(e){if(this._root=e.root,!this._root)Ce.globalErrorHandler(Error("ParentBasedSampler must have a root sampl
+- @206042136 oString(){return this.values.map((e)=>e.includes(",")||e.includes(" ")?`"${e}"`:e).join(", ")}get(){return this.values}}class W{entries={};encoding;constructor({fields:e=[],encoding:t="utf-8"}){e.forEach(this.setField.bind(this)),this.encoding=t}setField(e){this.entries[e.name.toLowerCase()]=e}getField(e){return this.entries[e.toLowerCase
+- @207302652 1),tt=Z(nL(),1),b=Z(tD(),1),ot=Z(Fm(),1),h=Z(Vs(),1),nt=Z(pf(),1),rt=Z(rL(),1),it=Z(Sn(),1),w=Z(Jv(),1);var Q=Z(IC(),1);class W{config;middlewareStack=Q.constructStack();initConfig;handlers;constructor(e){this.config=e}send(e,t,o){let n=typeof t!=="function"?t:void 0,r=typeof t==="function"?t:o,s=n===void 0&&this.config.cacheMiddleware===
+
+## function Zs needle="function Zs(" hits=18
+- @180510740 5})}catch(t){n(`firstPartyApi: refreshOAuth failed (${t instanceof Error?t.message:t}); proceeding with cached token`)}}function Zs(e){if(e instanceof o8)e.destroy()}async function XP(e,t,r){if(await Nf(e,t,r))return"retry";if(await qA(t))return{ok:!1,reason:"no-auth",detail:"OAuth refresh token is no longer valid; run /login to re-authen
+- @181244583 (e,t)}function Ys({schema:e,self:t}){if(typeof e=="boolean")return!e;for(let r in e)if(t.RULES.all[r])return!0;return!1}function Zs(e){return typeof e.schema!="boolean"}function Lu(e,t){let{schema:r,gen:s,opts:n}=e;if(n.$comment&&r.$comment)rn(e);Ju(e),Wu(e);let o=s.const("_errs",w.default.errors);tn(e,o),s.var(t,v._`${o} === ${w.default.
+- @182039411 &a,o<=0)o+=this.DB,--n;if(r>0)i=!0;if(i)s+=Hi(r)}}return i?s:"0"}function js(){var e=re();return b.ZERO.subTo(this,e),e}function Zs(){return this.s<0?this.negate():this}function Js(e){var t=this.s-e.s;if(t!=0)return t;var a=this.t;if(t=a-e.t,t!=0)return this.s<0?-t:t;while(--a>=0)if((t=this.data[a]-e.data[a])!=0)return t;return 0}function
+- @182734547 s.#e=null}reset(){this.config=void 0,this.roundedFileCounts.clear(),this.firstUseProbe=void 0}}var $3=new K(()=>new E0);function Zs(){return $3.of(z().host)}function Jl(){return Zs().getConfig()}function V3(){if(Eo(a.USE_BUILTIN_RIPGREP)){let{cmd:r}=Xl("rg",[]);if(r!=="rg")return{mode:"system",command:r,args:[]}}if(Sl()){let r={mode:"embe
+- @187286961 l","tool_heartbeat","agent_api_retry","artifact_publish_retry"]);function yon(e){return typeof e==="string"&&VZn.has(e)}function Zs(){return Si().project?.sessionFile??null}function bon(){return Si().project?.currentSessionLastPrompt!==void 0}function Am(e){if(e===V())return Zs()??pa();let t=Wa(ve());return Ya(t,`${e}.jsonl`)}var Uyr=5242
+- @189213043 )E<h&&0>Zs(x,S)?(t[c]=x,t[E]=u,c=E):(t[c]=S,t[b]=u,c=b);else if(E<h&&0>Zs(x,u))t[c]=x,t[E]=u,c=E;else break e}}return o}function Zs(t,o){var u=t.sortIndex-o.sortIndex;return u!==0?u:t.id-o.id}function Is(t){for(var o=wi(Yl);o!==null;){if(o.callback===null)eu(Yl);else if(o.startTime<=t)eu(Yl),o.sortIndex=o.expirationTime,Rf(ol,o);else brea
+- @189984269 t);if(t.length>0&&s===null)y("workshop_decisions","island_belt_stop");return e.slice(0,r)+(s??"")+e.slice(r+TJt.length)}function Zs(e,t){let r=e,s=r.indexOf(AJt);if(s===-1)y("workshop_decisions","banner_slot_missing");else r=r.slice(0,s)+RLn(t)+r.slice(s+AJt.length);let o=t.find(Brt),u=r.lastIndexOf(xJt);if(u===-1){if(o!==void 0)y("worksh
+- @191426829 u(d){let C=d.slice(0,Sa).map((w)=>Do(w,64));return d.length>Sa?`${C.join(", ")} (and ${d.length-Sa} more)`:C.join(", ")}function Zs(d){if(Array.isArray(d))return d.length>0;return typeof d==="object"&&d!==null?Object.keys(d).length>0:Boolean(d)}function Wde(d){let C=d?$S(d):void 0;return C&&GO(C)&&C!=="bypassPermissions"?C:void 0}function
+
+## function ve needle="function ve(" hits=56
+- @178486777 tion _e(t){var e=p(this,t).delete(t);return this.size-=e?1:0,e}var X=_e;function be(t){return p(this,t).get(t)}var Q=be;function ve(t){return p(this,t).has(t)}var tt=ve;function Ce(t,e){var r=p(this,t),n=r.size;return r.set(t,e),this.size+=r.size==n?0:1,this}var et=Ce;function d(t){var e=-1,r=t==null?0:t.length;this.clear();while(++e<r){v
+- @178550997 .sessionScratch.humanAttachmentDigests()}function Uy(){let e=g();return e?e.sessionProjectDir:n().identity.projectDir()}function ve(){return g()?.originalCwd??n().project.originalCwd}function g0(){return ve()===Li()}function an(){return g()?.projectRoot??n().project.projectRoot}function dn(e){return e}function hn(e){return e}function VYe(
+- @178620512 sename(s)),s=c.dirname(s);continue}try{let g=e.realpathSync(s);if(g!==s)return l(g)}catch(g){if(u)throw g}return}return}function ve(e){return Vn(e)&&!Ea(e)||_i(e)||TD(e)}function Qvn(e){return Re(e,!1)??e}function qer(e){return Re(e,!0)}function Re(e,t){if(ve(e))return e;let r=e,i="";for(;;){if(!Wp(r)){let s=qEe(r);if(s!==null){let a=i===
+- @178934085 e,"weight")){if(o=e.weight,o<=0)throw Error(Ct(l))}t=ve(l),s=oe(l),a=e.getFn}return{path:t,id:s,weight:o,src:r,getFn:a}}function ve(e){return j(e)?e:e.split(".")}function oe(e){return j(e)?e.join("."):e}function Tt(e,t){let s=[],r=!1,o=(a,l,u)=>{if(!E(a))return;if(!l[u])s.push(a);else{let p=l[u],c=a[p];if(!E(c))return;if(u===l.length-1&&(
+- @179177086 a7(e),u=r?void 0:u,u===void 0)return p(e)?w(e):g(e);return e.match(u)||[]}var M=Ce;var Fe="['\u2019]",Te=RegExp(Fe,"g");function ve(e){return function(u){return i(M(_(u).replace(Te,"")),e,"")}}var H=ve;var ye=H(function(e,u,r){return e+(r?"_":"")+u.toLowerCase()}),n=ye;function iLe(e){return`tool_${n(e)}`}function f4(e){return`cmd_${n(e)}
+- @179312015 ==="local"}var z="must be debug, telemetry or apiDump";function Z(e){return e==="debug"||e==="telemetry"||e==="apiDump"}function ve(e){if(!Z(e.channel))return Ne("key.channel",z);if(e.channel!=="apiDump")return;for(let n of["agentId","runId"])if(n in e&&e[n]!==void 0)return Ne(`key.${n}`,"an apiDump key names its dump by one id \u2014 the
+- @179543626 ber.parseInt(c.FORCE_COLOR,10),3)}}function we(e){if(e===0)return!1;return{level:e,hasBasic:!0,has256:e>=2,has16m:e>=3}}function ve(e,{streamIsTTY:t,sniffFlags:r=!0}={}){let s=Oe();if(s!==void 0)T=s;let u=r?T:s;if(u===0)return 0;if(r){if(p("color=16m")||p("color=full")||p("color=truecolor"))return 3;if(p("color=256"))return 2}if(e&&!t&&u=
+- @180951383 ase void 0:case"unrecognized":case"active":case"not_needed":return t&&r?"wall":null}}function X1(e,t){return`${e}@${t}`}function ve(e){return e.replace(/%|[^\x20-\x7e]/gu,(t)=>encodeURIComponent(t))}function Nut(e,t){let r=Date.now();return`${e}-${r}@${t}`}import{randomUUID as ar}from"crypto";function eNt(e,t,r,o,u){let l=Le();if(!(u?.ign
+
+## function an( needle="function an()" hits=2
+- @178551093 ).identity.projectDir()}function ve(){return g()?.originalCwd??n().project.originalCwd}function g0(){return ve()===Li()}function an(){return g()?.projectRoot??n().project.projectRoot}function dn(e){return e}function hn(e){return e}function VYe(e){let t=n();if(t.update({project:hn(e)}),e.originalCwd!==void 0)gn(t)}function Nb(e){VYe({origi
+- @197326775 serCrypto=an;var ec=tn(),tc=on();Za(zt(),Se);function rc(){if(an())return new ec.BrowserCrypto;return new tc.NodeCrypto}function an(){return typeof window<"u"&&typeof window.crypto<"u"&&typeof window.crypto.subtle<"u"}});var we=d(function(dn){Object.defineProperty(dn,"__esModule",{value:!0});dn.LRUCache=void 0;dn.snakeToCamel=un;dn.origin
+
+## function Wa needle="function Wa(" hits=18
+- @180652784 ver_reason","server_type","source","subscriptionType","toolName","userBucket","userType","version","versionBase",...[]];function Wa(e){return e.replace(/[A-Z]/g,(t)=>`_${t.toLowerCase()}`)}var _7=["mcpServerName","mcpServerBaseUrl","toolUseContentLengths","errorMessageHash","mcpServerKeyHash","mcpToolName","attributionMcpServer","attribut
+- @181223038 rn O._`{}`;return Ja(e,t,r)}function Ja(e,t,r={}){let{gen:s,it:n}=e,o=[Wa(n,r),Ba(e,r)];return Qa(e,t,o),s.object(...o)}function Wa({errorPath:e},{instancePath:t}){let r=t?O.str`${e}${(0,rt.getErrorPath)(t,rt.Type.Str)}`:e;return[T.default.instancePath,(0,O.strConcat)(T.default.instancePath,r)]}function Ba({keyword:e,it:{errSchemaPath:t}}
+- @181437871 tTranscriptSubdirs.set(t,e)}clearAgentTranscriptSubdir(t){this.agentTranscriptSubdirs.delete(t)}}var g=new K(()=>new c);function Wa(t){let e=g.of(z().host),n=e.projectDirCache.get(t);if(n!==void 0)return n;let r=o(ql(),Bf(t));return e.cacheProjectDir(t,r),r}function pa(){let t=Uy()??Wa(ve());return o(t,`${V()}.jsonl`)}function Q6n(t,e){g.
+- @182208411 ]+=a-(t[31]>>4)*mr[i],a=t[i]>>8,t[i]&=255;for(i=0;i<32;++i)t[i]-=a*mr[i];for(r=0;r<32;++r)t[r+1]+=t[r]>>8,e[r]=t[r]&255}function Wa(e){var t=new Float64Array(64);for(var a=0;a<64;++a)t[a]=e[a],e[a]=0;Wn(e,t)}function ja(e,t){var a=H(),r=H(),i=H(),s=H(),n=H(),o=H(),f=H(),u=H(),l=H();ar(a,e[1],e[0]),ar(l,t[1],t[0]),fe(a,a,l),rr(r,e[0],e[1])
+- @182493537 nder:A.slice(1),failedExpectations:[]};return{success:!1,remainder:A,failedExpectations:[{expectation:ej,remainder:A}]}}function Wa(A){let g=xo(A);if(g.success===!0)return g;return{success:!0,value:null,remainder:A,failedExpectations:g.failedExpectations}}function Ga(A){let g=[Ts,ZI,eA,pA,hA,gA,yA],w=[];for(let L=g.shift();L!==void 0;L=g.
+- @189254686 urn Li(i,l,y,0),ct===null&&Fn(),!1}catch(te){}finally{}if(s=Vl(i,l,y,f),s!==null)return Cn(s,i,f),Kd(s,l,f),!0}return!1}function Wa(i,l,s,f){if(f={lane:2,revertLane:gt(),gesture:null,action:f,hasEagerState:!1,eagerState:null,next:null},$r(i)){if(l)throw Error(c(479))}else l=Vl(i,s,f,2),l!==null&&Cn(l,i,2)}function $r(i){var l=i.alternate;
+- @190008245 ]*)"/)?.[1];return{body:e.slice(k,T),...v!==void 0&&U2e(v)&&{lang:v},...E.commentsDropped&&{hoistedCommentsDropped:!0}}}function Wa(e,t){let r=!1,s=e.length,o=!1;for(;;){while(s>t&&`	 \f\r `.includes(e[s-1]))s--;if(e.endsWith("-->",s)){let u=e.lastIndexOf("<!--",s-7);if(u<t||!C2e(e.slice(u,s)))return null;r=!0,s=u}else if(!o&&s-t>=7&&e.en
+- @192177272 }:{word:"Idle",color:void 0,dim:!0}}function Va(i,d,m){return Hn(i,d.has(i.id)?m.get(i.state.sessionId)?.nextAt:void 0)}function Wa(i,d){return Cb(i.state.tokens,d.word===uo.working)}function Ua(i,d,m,w){let S=Om()?1/0:Math.max(24,Math.min(72,Math.floor(w*0.55))),h=(T)=>S===1/0?T:ot(T,S);if(jn(i.state,m)==="done")return;let x=i.state.need
+
+## fn Qbt near "qt(Qbt(),2000" hits=1
+- hit @189577064 start=function Qbt(@179233427
+
+## Qbt-body @179233427
+len=34 sha=5ce48d153002deb4
+function Qbt(){return c().flush()}
+
+## fn svt near "qt(svt(),2000" hits=1
+- hit @189577125 start=async function svt(@178613502
+
+## svt-body @178613502
+len=52 sha=71ac387f7de64747
+async function svt(){await L().preExitFlush.drain()}
+
+## fn gKt near "function gKt(){let e=Zs()" hits=1
+- hit @189576892 start=_G@189575531
+
+## gKt-body @189575531
+len=1361 sha=26daf068024fec1e
+async function _G(e={},t){let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());await lUe();let a=e.extraArgs??[],i;if(e.args)i=e.args;else if(e.freshIfNoTranscript&&!await h(t))i=a;else i=["--resume",V(),...a];qje(),Nj(),hPt(),await Promise.all([qt(ja(),30000,"flush timeout (relaunch)").catch(()=>{}),qt(mEe(),tde,"cleanup timeout").catch(()=>{}).then(()=>qt($ie(),1000,"analytics flush timeout").catch(()=>{}))]),e.preSpawn?.();let s={...process.env};delete s.CLAUDE_CODE_TUI_JUST_SWITCHED,delete s.CLAUDE_CODE_TUI_TRIAL,delete s.CLAUDE_BRIDGE_REATTACH_SESSION,delete s.CLAUDE_BRIDGE_REATTACH_SEQ,delete s.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY,delete s.CLAUDE_BRIDGE_REATTACH_GROUPING,delete s.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT,delete s.CLAUDE_BRIDGE_REATTACH_OWNER_ORG,delete s.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL,delete s[k0e],Object.assign(s,e.env);for(let u of e.dropEnv??[])delete s[u];Object.assign(s,Yet());let m=gKt();await g(),E(o,[o,...r,...i],s,m);for(let u of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});await g();let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});if(process.removeAllListeners("beforeExit"),process.removeAllListeners("exit"),c.error)process.stderr.write(`Failed to relaunch Claude Code: ${c.error.message}
+`),pp("relaunch_spawn_error"),process.exit(1);c.signal,process.exit(c.status??(c.signal?1:0))}
+
+## fn Zs near "function gKt(){let e=Zs(),t=ve()" hits=1
+- hit @189576892 start=function Zs(@189213043
+
+## Zs-body @189213043
+len=72 sha=8ec9f8b9053e0150
+function Zs(t,o){var u=t.sortIndex-o.sortIndex;return u!==0?u:t.id-o.id}
+
+## fn ve near "function gKt(){let e=Zs(),t=ve()" hits=1
+- hit @189576892 start=function ve(@189565794
+
+## ve-body @189565794
+len=73 sha=39c7d767dfba745e
+function ve(e,t){return e.episodeArmOrigin==="auto"&&t*1000-Date.now()>W}
+
+## fn an near "function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}" hits=1
+- hit @189576892 start=function an(@189291082
+
+## an-body @189291082
+len=504 sha=9fac2c946511be07
+function an(i,l){var s=l.deletions;if(s!==null)for(var f=0;f<s.length;f++){var y=s[f],v=i,M=l;if(on){var U=M;e:for(;U!==null;){switch(U.tag){case 27:if(Yt){if($a(U.type)){Pt=U.stateNode,Rn=!1;break e}break}case 5:Pt=U.stateNode,Rn=!1;break e;case 3:case 4:Pt=U.stateNode.containerInfo,Rn=!0;break e}U=U.return}if(Pt===null)throw Error(c(160));Gu(v,M,y),Pt=null,Rn=!1}else Gu(v,M,y);v=y.alternate,v!==null&&(v.return=null),y.return=null}if(l.subtreeFlags&13886)for(l=l.child;l!==null;)xh(l,i),l=l.sibling}
+
+## fn Wa near "T(e)===Wa(t)" hits=1
+- hit @189576931 start=function Wa(@189254686
+
+## Wa-body @189254686
+len=187 sha=e0b1499dbf418837
+function Wa(i,l,s,f){if(f={lane:2,revertLane:gt(),gesture:null,action:f,hasEagerState:!1,eagerState:null,next:null},$r(i)){if(l)throw Error(c(479))}else l=Vl(i,s,f,2),l!==null&&Cn(l,i,2)}
+
+## fe hits=178613195
+not hold under symlinks 'through'"):void 0);if(a!==void 0||o.stagingFolder===void 0)return a;let u=tGt(o.stagingFolder,"opts.stagingFolder");if(u!==void 0)return u;return i===void 0||o.stagingFolder.space===i?void 0:Ne("opts.stagingFolder","the staging folder must be in the same space as the path")}function Ber(e){let t=e??{};return O(e)??de(t.mode,"opts")??A(t.recursive,"opts","recursive")}function jer(e){let t=e??{};return O(e)??(t.mode===void 0||t.mode==="exists"||t.mode==="read"||t.mode==="write"||t.mode==="execute"?void 0:Ne("opts","mode must be 'exists', 'read', 'write' or 'execute'"))}function zer(e){let t=e??{};return O(e)??A(t.missingOk,"opts","missingOk")}function Wer(e,t){let r=tGt(t,"to");if(r!==void 0)return r;let i=typeof e==="object"&&e!==null?e.space:void 0;return t.space===i?void 0:Ne("to","a rename stays within one space")}function Ger(e){let t=e??{};return O(e)??A(t.follow,"opts","follow")}function Ver(e){let t=e??{};return O(e)??A(t.native,"opts","native")}var B=globalThis.process?.getBuiltinModule?.("async_hooks"),le=B!==void 0,U=B?new B.AsyncLocalStorage:{run:(e,t)=>t(),getStore:()=>{return}};function M({writeBatch:e,sizeOf:t,flushIntervalMs:r=1000,maxBufferSize:i=100,maxBufferBytes:o=1/0,immediateMode:s=!1}){let a=[],u=0,l=null,d=null;function p(){if(l)clearTimeout(l),l=null}function g(y){try{e(y)}catch{}}function h(){if(d)g(d),d=null;if(a.length===0)return;g(a),a=[],u=0,p()}function E(){if(!l)l=setTimeout(h,r)}function m(){if(d){d.push(...a),a=[],u=0,p();return}let y=a;a=[],u=0,p(),d=y,setImmediate(()=>{let b=d;if(d=null,b)g(b)})}return{write(y){if(s){g([y]);return}if(a.push(y),u+=t(y),E(),a.length>=i||u>=o)m()},flush:h,dispose(){h()}}}function ivt({writeFn:e,flushIntervalMs:t,maxBufferSize:r,maxBufferBytes:i,immediateMode:o}){return M({writeBatch:(s)=>e(s.join("")),sizeOf:(s)=>s.length,flushIntervalMs:t,maxBufferSize:r,maxBufferBytes:i,immediateMode:o})}function it(e){if(typeof e==="function")return e;if(Symbol.asyncDispose in e)return()=>e[Symbol.asyncDispose]();return()=>e[Symbol.dispose]()}class W{#e=new Set;#t=!1;get drainStarted(){return this.#t}register(e){let t=it(e);this.#e.add(t);let r=()=>{this.#e.delete(t)};return Object.assign(r,{[Symbol.dispose]:r})}async drain(){this.#t=!0;let e=Array.from(this.#e);this.#e.clear();let r=(await Promise.allSettled(e.map(async(i)=>i()))).find((i)=>i.status==="rejected");if(r!==void 0)throw r.reason}async[Symbol.asyncDispose](){await this.drain()}get sizeForTesting(){return this.#e.size}}class fe{cleanup=new W;preExitFlush=new W}var ot=new K(()=>new fe);function L(){return ot.of(z().host)}var tde=2000;function Et(e){return L().cleanup.register(e)}async function mEe(){await L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L().preExitFlush.drain()}class he{parsed=new Map;lookup(e){return this.parsed.get(e)}remember(e,t){this.parsed.set(e,t)}reset(){this.parsed.clear()}}var pe=new he;function me(e){let t=pe.lookup(e);if(t!==void 0)return t;let r=st(e);return pe.remember(e,r),r}function
+
+## gKt raw hits=189576892
+
+## gKt-raw @189576892
+len=73 sha=09fe69b70e9e9eac
+function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}
+of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});await g();let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});if(process.removeAllListeners("beforeExit"),process.removeAllListeners("exit"),c.error)process.stderr.write(`Failed to relaunch Claude Code: ${c.error.message}
+`),pp("relaunch_spawn_error"),process.exit(1);c.signal,process.exit(c.status??(c.signal?1:0))}function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>{}),qt(svt(),2000,"pre-exit flush timeout (relaunch)").catch(()=>{}),qt(EC(),2000,"write queue drain timeout (relaunch)").catch(()=>{})])}
+export{zL,hKt,lj,vF,WL,Ket,lR,lUe,_G,gKt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are respo

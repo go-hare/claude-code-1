@@ -455,6 +455,59 @@ export function inheritParentEndpointEnv(
   return out.ANTHROPIC_BASE_URL ? out : {}
 }
 
+/**
+ * densable Ffe — endpoint + SKIP_* + CUSTOM_HEADERS.
+ * Gold excerpt names Bedrock / Vertex / Foundry / AWS; do not invent extra clouds.
+ */
+export const BG_PROVIDER_GATEWAY_ENV_PAIRS = [
+  {
+    endpoint: 'ANTHROPIC_BEDROCK_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_BEDROCK',
+    companions: ['CLAUDE_CODE_SKIP_BEDROCK_AUTH', 'ANTHROPIC_CUSTOM_HEADERS'],
+  },
+  {
+    endpoint: 'ANTHROPIC_VERTEX_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_VERTEX',
+    companions: ['CLAUDE_CODE_SKIP_VERTEX_AUTH', 'ANTHROPIC_CUSTOM_HEADERS'],
+  },
+  {
+    endpoint: 'ANTHROPIC_FOUNDRY_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_FOUNDRY',
+    companions: ['CLAUDE_CODE_SKIP_FOUNDRY_AUTH', 'ANTHROPIC_CUSTOM_HEADERS'],
+  },
+  {
+    endpoint: 'ANTHROPIC_AWS_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+    companions: [
+      'CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH',
+      'ANTHROPIC_CUSTOM_HEADERS',
+    ],
+  },
+] as const
+
+/**
+ * densable Oo — copy endpoint + companions from parent when the endpoint is
+ * set and the selection flag on `ge` is truthy. WNe → {}.
+ */
+export function copyProviderGatewayEnv(
+  selectionEnv: NodeJS.ProcessEnv | Record<string, string | undefined>,
+  parentEnv:
+    | NodeJS.ProcessEnv
+    | Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  if (isExternallyManagedProviderEnv(parentEnv)) return {}
+  const out: Record<string, string> = {}
+  for (const pair of BG_PROVIDER_GATEWAY_ENV_PAIRS) {
+    if (!parentEnv[pair.endpoint]) continue
+    if (!isEnvTruthy(selectionEnv[pair.selection])) continue
+    for (const key of [pair.endpoint, ...pair.companions]) {
+      const value = parentEnv[key]
+      if (value) out[key] = value
+    }
+  }
+  return out
+}
+
 export function shouldInheritParentEndpointEnv(opts: {
   exec?: string
   source?: string
@@ -495,6 +548,7 @@ export function buildDispatchProviderEnv(opts: {
   }
   if (shouldInheritParentEndpointEnv(opts)) {
     Object.assign(out, inheritParentEndpointEnv(parent))
+    Object.assign(out, copyProviderGatewayEnv(out, parent))
   }
   return out
 }

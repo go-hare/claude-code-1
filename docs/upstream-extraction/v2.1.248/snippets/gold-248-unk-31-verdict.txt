@@ -1,0 +1,53 @@
+# gold-248-unk-31-verdict  densable 2.1.248 #31
+# rc-reconnect-prompt — unique sliver, no leftover host
+# SEA 226708128 · 247 present
+# leftover remoteBridgeCore + replBridge. stay UNKNOWN. not N/A.
+
+extracted? unique 248 Ze.clear-on-reconnect + Local-only retract
+landed? no
+stay UNKNOWN? YES
+
+## unique 248 (not in 247)
+
+248 `fn` setOnConnect @198351726 sha=6639d1c05696f53b
+  if(pe.size>0){ findLast details; ye("requires_action",o?.details); Ze.clear() }
+
+247 `Pu` setOnConnect @216868713 sha=1c3c7f77d42b0c20
+  if(ma.size>0){ findLast details; kl("requires_action",Nt?.details) }
+  — no Ze, no .clear()
+
+248 pe/Ze @198343498
+  let Pr=ie, pe=new Map, Ze=new Set
+  function ot(e,r){ Ze.delete(e); pe.delete(e)&&r && Hht(e) }
+  function xi(){ return Ze.clear(), [...pe.values()].map(e=>e.request) }  @198343948
+247 twin: ma=new Map only; dP() returns ma requests, no Set, no clear
+
+248 sendControlCancelRequest @198370641
+  if(Ze.delete(e)){ pe.delete(e); log "Local-only retract of a declined dialog forward" }
+  **NEW248** "Local-only retract of a declined dialog" 248=2 247=0
+  "declined dialog forward" 248=2 247=0
+
+## not this item (247=248 or leftover-only)
+
+dNe @204894232 afterReconnect = 247 SendMessage mapper (dirSync on xe only)
+dt @205347718 tengu_bridge_reconnected = env-cleanup log
+RemoteSessionManager onConnected resendUndeliveredResponses @201943709 === 247 @230866446
+structuredIO getPendingPermissionRequests / republishSurviving === 247
+useReplBridge forceTaskStatePublish = 207 leftover, not 248
+
+## leftover host
+
+src/bridge/remoteBridgeCore.ts setOnConnect — no pe/Ze, no getPendingPrompts, no
+  requires_action re-emit (247 predecessor also unlanded), no Local-only retract
+src/bridge/replBridge.ts — same; leftover log strings not in official
+src/remote/RemoteSessionManager.ts — missing 247+ cloud undelivered stack; not 248-unique
+
+Cannot land Ze.clear() 1:1 without inventing 247 pe/ma map + xi/dP + onConnect
+requires_action re-emit. Invent-ban. stay UNKNOWN.
+
+## peels
+
+_peel-248-unk-31.mjs → gold-248-unk-31.txt
+_peel-248-unk-31b.mjs → gold-248-unk-31b.txt
+_peel-248-unk-31c.mjs → gold-248-unk-31c.txt
+_peel-248-unk-31d.mjs → gold-248-unk-31d.txt

@@ -1,0 +1,92 @@
+# gold-248-16-why
+when=2026-09-20T08:24:36.350Z
+
+## aF near Oo
+.isNaN(d)?null:d}function yh(i,d,m){let w=Ln(i.state.createdAt);if(w===null)return!1;let S=Ln(i.state.firstTerminalAt)??m;return d.some((h)=>{if(h.id===i.id)return!1;let C=Ln(h.state.createdAt);if(C===null)return!1;let x=Ln(h.state.firstTerminalAt)??m;return w<x&&C<S})}function zu(i){let d=new Date(i.startedAt).toISOString(),m=new Date(i.updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs,output:null,children:null,linkScanOffset:0,template:i.agent??i.entrypoint??"interactive",respawnFlags:[],name:i.name,intent:i.name??"",sessionId:i.sessionId??"",cwd:i.cwd,originCwd:i.cwd,createdAt:d,updatedAt:m,firstTerminalAt:null,backend:"peer",sock:i.sock,pid:i.pid}}function Yu(i,d){if(i){if(d<30000)return 15000;if(d<300000)return 60000;return 180000}if(d<30000)return 60000;if(d<600000)return 300000;if(d<3600000)return 900000;return 1800000}import{stat as Sh}from"fs/promises";async function Fi(i,d){let m=oc(i,d);if(m!==void 0){let S=await m.backend.statMeta(m.key);if(S.ok)return{kind:"present",mtimeMs:S.value.mtimeMs};let h=S.error;if(h.code==="NotFound")return{kind:"absent"};let C="telemetryCode"in h?h.telemetryCode:void 0;return C==="ELOOP"||C==="ENXIO"?{kind:"refused"}:{kind:"unreadable",code:h.code}}return{kind:"present",mtimeMs:(await Sh(i)).mtimeMs}}async function Qu(i,d,m){let w=oc(i,m);if(w!==void 0){let S=await w.backend.read([{key:w.key,tail:d}]);if(!S.ok)throw Error("fleet view transcript tail read failed",{cause:S.error});let h=S.value.items[0];if(!h.found)throw Error("fleet view transcript tail: stream not found");return{content:Buffer.from(h.value).toString("utf8"),bytesRead:h.value.byteLength,bytesTotal:h.totalBytes}}return bm(i,d)}import{open as kh}from"fs/promises";var vh=7,Rh=1048576,ba=16,_h='"subtype":"scheduled_task_fire"',Eh=/"timestamp":"([^"]+)"/;function Xu(){return{scanStates:new Map,inFlightScans:new Set}}async function ec(i,d){let{scanStates:m,inFlightScans:w}=i;if(w.has(d))return null;w.add(d);try{let S=await kh(d,"r");try{let{size:h,ino:C}=await S.stat(),x=m.get(d);if(x&&(x.ino!==C||x.offset>h))x=void 0;if(x&&x.tail.length>0){let K=Buffer.alloc(x.tail.length),{bytesRead:W}=await S.read(K,0,K.length,x.offset-K.length);if(W!==K.length||!K.equals(x.tail))x=void 0}if(!x)x={ino:C,offset:0,tail:Buffer.alloc(0),count:0,recent:[]},m.set(d,x);if(h>x.offset){let K=x.count,W=x.recent.slice(),Y=Buffer.alloc(Math.min(Rh,h-x.offset)),Z=null,ee=x.offset,X=x.offset,Q=x.tail;while(ee<h){let{bytesRead:le}=await S.read(Y,0,Math.min(Y.length,h-ee),ee);if(le<=0)break;let ye=Y.subarray(0,le),xe=Z?Z.length:0,me=Z?Buffer.concat([Z,ye]):ye,be=0,Te=me.indexOf(10,xe);while(Te!==-1){let ge=me.toString("utf-8",be,Te);if(ge.includes(_h)){let de=ge.match(Eh),re=de?Date.parse(de[1]):NaN;if(Number.isFinite(re)){if(K++,W.push(re),W.length>vh)W.shift()}}be=Te+1,Te=me.indexOf(10,be)}if(X+=be,ee+=le,be>=ba)Q=Buffer.from(me.subarray(be-ba,be));else if(be>0){let ge=Buffer.concat([Q,me.subarray(0,be)]);Q=ge.subarray(Math.max(0,ge.length-ba))}Z=be<me.length?Buffer.from(me.subarray(be)):null}if(X>x.offset)x.offset=X,x.count=K,x.recent=W,x.tail=Q}let{count:A,recent:F}=x;if(F.length<2)return{count:A,nextAt:null};let T=[];for(let K=1;K<F.length;K++)T.push(F[K]-F[K-1]);T.sort((K,W)=>K-W);let P=T[Math.floor(T.length/2)],V=F.at(-1)+P;return{count:A,nextAt:V>Date.now()?V:null}}finally{await S.close()}}finally{w.delete(d)}}function nc(i,d){for(let m of i.scanStates.keys())if(!d.has(m))i.scanStates.delete(m)}import{join as Ch}from"path";function Ih(i){try{let d=q(i);if(d.type==="assistant"){let w=(d.message?.content??[]).find((S)=>S.type==="text")?.text;if(w)return w}if(d.type==="user"){let m=d.message?.content,w=typeof m==="string"?m:m?.find((h)=>h.type==="text")?.text,S=w?rc(w).split(`
+`).find((h)=>h.trim())?.trim():void 0;if(S)return`> ${S}`;if(Array.isArray(m)){let h=m.find((C)=>C.type==="tool_result"&&C.is_error);if(h){let C=typeof h.content==="string"?h.content:h.content?.find((x)=>x.type==="text")?.text;if(C)return`\u2717 ${ur(C)}`}}}}catch{}return null}function rc(i){return i.replace(/<(system-reminder|task-notification)>[\s\S]*?(<\/\1>|$)/g," ")}function Cr(i){return i===Oye||i===Lye}function Nt(i){return rc(bt(i)).replace(/<\/?[\w-]+>/g," ").replace(m7,"").replace(/\s+/g," ").trim()}function Mi(i){return Ch(yu(i.cwd),`${i.sessionId}.jsonl`)}async function ic(i,d){try{let{content:m}=await Qu(Mi(i.state),16384,d),w=m.split(`
+`).map(Ih).filter((h)=>h!==null);return(w.filter((h,C)=>h!==w[C-1]).at(-1)??"").trim()}catch{return""}}function Li(i,d){let m;for(let w of i.keys())if(!d.has(w))(m??=new Map(i)).delete(w);return m??i}function Wo(i){return i?.filter((d)=>!KC.test(d.href))??[]}function Oo(i,d){let m=Cf(i.state);if(m&&i.tempo!=="active"&&!(m==="success"&&rP(i)))return m;let w=Wo(i.children).filter((C)=>C.kind!=="frame");if(d&&i.tempo!=="active"&&i.template===aF.name&&w.length&&w.every((C)=>d.get(C.href)?.state==="MERGED"))return"success";let S=i.tempo==="active"?1:5,h=Date.now()-Date.parse(i.updatedAt);if(h<S*3*60000)return"flowing";if(h<S*15*60000)return"slowing";return"s
+
+## hits aF= n=6
+@189661665 aF=ir(Mie);function c$e(e,t){if(!e?.agent)return aF;let o=e.agent,r=o.toLowerCase(),i=t?.find((u)=>u.name.toLowerCase()===r)??t?.find((u)=>u
+@200073578 aF=/["%\r\n\u0000]/,sF=/[. ]$/;function uF(e){if(e!==e.trim()||e.startsWith("~"))return!1;if(aF.test(e)||sF.test(e))return!1;let t=e.replace
+@202373297 aF=e(YF,{status:aI,searchBadge:eF}),sS[11]=eF,sS[12]=aI,sS[13]=aF;else aF=sS[13];let bxe;if(sS[14]!==sF||sS[15]!==aF)bxe=r(o,{noSelect:!0,al
+@202373368 aF=sS[13];let bxe;if(sS[14]!==sF||sS[15]!==aF)bxe=r(o,{noSelect:!0,alignItems:"center",alignSelf:"center",borderTopDimColor:!0,borderBottom:
+@216684030 aF=[{selector:":selected",matches:o(function(t){return t.selected()},"matches")},{selector:":unselected",matches:o(function(t){return!t.sele
+@223397249 aF=new Set;function Dte(){for(let e of aF)e(Ch)}function Hv(e,t=4e3){Ch=[...Ch,{id:XEe++,text:e,durationMs:t}],Dte()}function $Ee(e){Ch.some
+
+## hits var aF n=2
+@189661661 var aF=ir(Mie);function c$e(e,t){if(!e?.agent)return aF;let o=e.agent,r=o.toLowerCase(),i=t?.find((u)=>u.name.toLowerCase()===r)??t?.find((u
+@200073574 var aF=/["%\r\n\u0000]/,sF=/[. ]$/;function uF(e){if(e!==e.trim()||e.startsWith("~"))return!1;if(aF.test(e)||sF.test(e))return!1;let t=e.rep
+
+## hits aF={name n=0
+
+## hits name:"pr" n=0
+
+## hits name:"code-review" n=0
+
+## hits template===aF n=4
+@192124971 template===aF.name&&w.length&&w.every((C)=>d.get(C.href)?.state==="MERGED"))return"success";let S=i.tempo==="active"?1:5,h=Date.now()-Date.p
+@192158416 template===aF.name)continue;if(S[C.state.template]!==void 0)continue;let x=Date.parse(C.state.createdAt);if(Number.isNaN(x))continue;if(x>(h
+@192169564 template===aF.name)&&i.state==="working")return m?"untitled session":"new session";if(m&&(i.template==="bg"||i.template===aF.name))return"un
+@192169675 template===aF.name))return"untitled session";return Ro(i.template)}let h=S.length>3?`${S.slice(0,3).join(" ")}\u2026`:S.join(" ");if(ie(h)<=
+
+## hits function Cf( n=8
+@180091546 function Cf(e){let t=Object.keys(e);return t.length>0&&t.filter((r)=>r[0]==="$").length===t.length}function ux(e){if(e===null)return"null";i
+@182409207 function Cf(e,t){switch(typeof t){case"number":e.kind={case:"numberValue",value:t};break;case"string":e.kind={case:"stringValue",value:t};br
+@182998017 function Cf(e){if(e==="done")return"success";if(e==="failed")return"failure";if(e==="stopped")return"stopped";return null}function Nw(e){ret
+@185647268 function Cf(e,t,r){y("memory_tools",t,{verb:c(e),...r===void 0?{}:{store_kind:c(r)}})}function cwe(e){y("memory_tools",e,{verb:c("write")}),
+@194964169 function Cf(e,t,r){let n;try{n=oe.lstatSync(t)}catch{}if(n&&n.isSymbolicLink()){let s=oe.statSync(e),a=oe.statSync(t);if($o(s,a))return}let 
+@197878379 function Cf(e){return ci(Xc.metadata,e)}function ci(e,t){for(let r=0;r<e.length;r++){let n=e[r];if(n.aliases.includes(t))return n}return nul
+@201344803 function Cf(l){let d=l.at(-1);if(!d?.data)return e(Ie,{height:1,children:e(t,{dimColor:!0,children:"Running\u2026"})});let{progress:f,total:
+@205561774 function Cf(t,e,i={}){if(!i.removeFully)return oo(t,e,null,i);let s=Me(t,e);return no(s,{recursive:!0,force:!0})}Pf.lsStream=ho;function ho(
+
+## hits function rP( n=3
+@182998742 function rP(e){return e.routine!==void 0||e.selfWake===!0||(e.inFlight?.kinds.includes("session_cron")??!1)||$ye(e)}function uae(e,t,r,o,d){
+@216029475 function rP(e){return Pie(e)}var Bie=F(()=>{"use strict";Oie();o(rP,"cloneDeep")});function x2(e){return e!==null&&typeof e=="object"&&xh(e)
+@223791979 function rP(e,t){if(t===void 0)return;let n=Xa(e);if(n==null)return;let r;try{r=JSON.parse(n)}catch{return}if(r==null||typeof r!="object"||A
+
+## hits function tst( n=2
+@184546199 function tst(e){let t=e.match(eJt);if(!t)return null;return{url:e,host:t[1],owner:t[2],repo:t[3],num:Number(t[4])}}var xfe=60000;class dXe{#
+@216370159 function tst(e,t){return function(r,n){if(r==null)return r;if(!ka(r))return e(r,n);for(var i=r.length,a=t?i:-1,s=Object(r);(t?a--:++a<i)&&n(
+
+## hits function iXe( n=2
+@184556238 function iXe(e,t){let r=new Map;for(let o of e){let u=t(o),p=r.get(u);if(p)p.push(o);else r.set(u,[o])}return r}var vJt=`fragment pr on Pull
+@216055733 function iXe(e,t){if(t=t||{},Object.keys(t).forEach(function(r){if(tXe.indexOf(r)===-1)throw new to('Unknown option "'+r+'" is met in defini
+
+## hits function wJt( n=2
+@184556035 function wJt(e){return e!==null&&typeof e==="object"&&"number"in e&&typeof e.number==="number"&&"state"in e&&typeof e.state==="string"}funct
+@189922518 function wJt(t){return n.test(t)?Lo(t):v("nonconforming")}
+export{Tme,wJt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropi
+
+## hits function kJt( n=2
+@184555569 function kJt(e){let t=e.commits.nodes[0]?.commit.statusCheckRollup??null;return{number:e.number,title:e.title,state:e.state==="MERGED"?"MERG
+@189912671 function kJt(e){let n=D(e),t=n?"resolved":"open",s=e.resolved===void 0?void 0:e.options.find((d)=>d.token===e.resolved),a=e.custom===void 0?
+
+## hits function TJt( n=1
+@184556170 function TJt(e){return e!==null&&typeof e==="object"&&!("cost"in e)}function iXe(e,t){let r=new Map;for(let o of e){let u=t(o),p=r.get(u);if
+
+## hits function KX( n=2
+@184556691 function KX(){return Date.now()<JE().ghBackoffUntil}async function V$n(e){let t=new Map,r=[],o=null;if(e.length===0||Tt()||KX()){for(let k o
+@187625084 function KX(t){return{ui:t}}async function YX(t,e,o,s,l){c();let d=await m(l),n=await nt.request({method:t,url:`${Voe()}${e}`,data:o,headers
+
+## hits const aXe= n=0
+
+## hits var aXe= n=0
+
+## hits aXe=20 n=1
+@184556640 aXe=20,EJt=6,CJt=15000,AJt="30s",lXe=/rate limit/i;function KX(){return Date.now()<JE().ghBackoffUntil}async function V$n(e){let t=new Map,r
+
+## hits const vJt= n=0
+
+## hits var vJt= n=1
+@184556350 var vJt=`fragment pr on PullRequest {
+  number title state isDraft additions deletions
+  reviewDecision
+  commits(last:1){nodes{commit{statu
+
+## last KC=/ before Wo 178361263
+var m7=/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g,KC=/[\x00-\x1F\x7F-\x9F]/;function Ro(t){return t.replace(m7,"").replace(/\s+/g,
+## all KC=/
+@178361263 KC=/[\x00-\x1F\x7F-\x9F]/;function Ro(t){return t.replace(m7,"").replace(/\s+/g," ").trim()}var d=/[\u001B\u009B][[\]()#;?]*(?:(?:(?:(?:;[-a

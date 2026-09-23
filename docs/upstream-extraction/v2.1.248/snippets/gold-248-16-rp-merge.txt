@@ -1,0 +1,33 @@
+# gold-248-16-rp-merge
+# leftover-missing official rp Ct/Mt/Lt + updatePendings + uds live fields
+# exe official-248/package/claude.exe 226708128
+
+## official rp Ct/Mt/Lt @192178293
+Ct=[...i??[],...ge?d:[]]
+Ne=xe?Ct.filter((pe)=>xGe(pe.state,xe)):Ct
+Mt=de?W==="remote"?m:Ne:Te?[...Ne,...m]:Ne
+Lt=w.filter((pe)=>!Ht.some((ft)=>ft.id===pe.id))
+zt=Lt.length>0?hn([...Lt,...Ht]):Ht
+
+## official gg showRemoteTabs
+Zs=!1
+
+## official updatePendings @192163434
+w.updatePendings((Se)=>[...Se,Ut])
+activity:"flowing"
+
+## official updatePendings patch @192164445
+{...Ut.state,sessionId:Se.sessionId}
+
+## official updatePendings @192187466 (up)
+S.updatePendings((ee)=>[...ee,Z]),cs(i,Z)
+
+## official register peerProtocol:_2t @180540912
+peerProtocol:_2t
+
+## official tMe statusUpdatedAt @180542998
+...e.status!==void 0&&{statusUpdatedAt:r}
+
+## official live mapper jobId/status @181016699
+jobId:typeof o.jobId==="string"?o.jobId:void 0
+status:je(o.status)

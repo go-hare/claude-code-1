@@ -183,6 +183,8 @@ export {
   setClipboard,
   getClipboardPath,
   probeLinuxClipboardTool,
+  setClipboardAttacherCapsGetter,
+  type ClipboardAttacherCaps,
   type ClipboardPath,
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,

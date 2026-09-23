@@ -208,6 +208,70 @@ function* yieldMissingToolResultBlocks(
  */
 const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
 
+/** densable `Blt` — inserted meta user text on the first malformed tool_use. */
+export const MALFORMED_TOOL_USE_RETRY_PROMPT =
+  'The previous response failed to produce a valid tool call. Please retry the tool call now.'
+
+/** Second failure. densable does not insert the neighbor `bin` prompt here. */
+export const MALFORMED_TOOL_USE_EXHAUSTED_TEXT =
+  "The model's tool call could not be parsed (retry also failed)."
+
+/** densable `jlt` @184252339 — thinking-only visible-output nudge. */
+export const THINKING_ONLY_RETRY_PROMPT =
+  '[Your previous response had no visible output. Please continue and produce a user-visible response.]'
+
+/** densable `bjn` @186859505 — leaked `<antml:invoke` in last assistant text. */
+export const LEAKED_INVOKE_RE = /<antml:invoke\b/
+
+export type MalformedToolUseRetryAction =
+  | { action: 'retry'; prompt: typeof MALFORMED_TOOL_USE_RETRY_PROMPT }
+  | { action: 'exhausted'; text: typeof MALFORMED_TOOL_USE_EXHAUSTED_TEXT }
+  | { action: 'continue' }
+
+/**
+ * densable `CAt` @186859544 — last assistant text vs `bjn`.
+ * Not a line-match of the gold function (typed, no invent 3P branch).
+ */
+export function assistantTextHasLeakedInvoke(
+  messages: readonly AssistantMessage[],
+): boolean {
+  const lastText =
+    messages
+      .flatMap(message =>
+        Array.isArray(message.message.content) ? message.message.content : [],
+      )
+      .findLast(
+        (block): block is { type: 'text'; text: string } =>
+          block.type === 'text' &&
+          'text' in block &&
+          typeof block.text === 'string',
+      )?.text ?? ''
+  return LEAKED_INVOKE_RE.test(lastText)
+}
+
+/**
+ * densable query loop: stop_reason tool_use, zero parsed tool uses, not an
+ * API error. One retry, then exhausted.
+ */
+export function malformedToolUseRetryAction(input: {
+  stopReason: string | null | undefined
+  parsedToolUseCount: number
+  isApiErrorMessage: boolean
+  previousReason: string | undefined
+}): MalformedToolUseRetryAction {
+  if (
+    input.stopReason !== 'tool_use' ||
+    input.parsedToolUseCount !== 0 ||
+    input.isApiErrorMessage
+  ) {
+    return { action: 'continue' }
+  }
+  if (input.previousReason !== 'malformed_tool_use_retry') {
+    return { action: 'retry', prompt: MALFORMED_TOOL_USE_RETRY_PROMPT }
+  }
+  return { action: 'exhausted', text: MALFORMED_TOOL_USE_EXHAUSTED_TEXT }
+}
+
 /**
  * Is this a max_output_tokens error message? If so, the streaming loop should
  * withhold it from SDK callers until we know whether the recovery loop can
@@ -2869,6 +2933,65 @@ async function* queryLoop(
         // withheld, and was already yielded when the stream produced it.
       }
 
+      // densable: stop_reason tool_use with zero parsed tool uses. Tombstone
+      // the assistant turn and retry once with prior messages plus Blt.
+      // Exhausted: qo (api-error) + x0e (StopFailure). Gold OS
+      // (Jh().markApiFailure) has no local tracker — not invented.
+      const rawStopReason = lastMessage?.message.stop_reason
+      const malformedToolUse = malformedToolUseRetryAction({
+        stopReason:
+          typeof rawStopReason === 'string' ? rawStopReason : undefined,
+        parsedToolUseCount: toolUseBlocks.length,
+        isApiErrorMessage: lastMessage?.isApiErrorMessage === true,
+        previousReason: state.transition?.reason,
+      })
+      const leakedInvoke = assistantTextHasLeakedInvoke(assistantMessages)
+      if (malformedToolUse.action === 'retry') {
+        logEvent('tengu_malformed_tool_use_response', {
+          will_retry: true,
+          model:
+            currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          text_has_leaked_invoke: leakedInvoke,
+        })
+        for (const msg of assistantMessages) {
+          yield { type: 'tombstone' as const, message: msg }
+        }
+        const retryMessage = createUserMessage({
+          content: malformedToolUse.prompt,
+          isMeta: true,
+          turnCompanion: true,
+        })
+        yield retryMessage
+        state = {
+          messages: [...messagesForQuery, retryMessage],
+          toolUseContext,
+          autoCompactTracking: tracking,
+          maxOutputTokensRecoveryCount: 0,
+          hasAttemptedReactiveCompact: false,
+          maxOutputTokensOverride: undefined,
+          pendingToolUseSummary: undefined,
+          stopHookActive,
+          stopHookBlockCount: 0,
+          turnCount,
+          transition: { reason: 'malformed_tool_use_retry' },
+        }
+        continue
+      }
+      if (malformedToolUse.action === 'exhausted') {
+        logEvent('tengu_malformed_tool_use_response', {
+          will_retry: false,
+          model:
+            currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          text_has_leaked_invoke: leakedInvoke,
+        })
+        const exhaustedMessage = createAssistantAPIErrorMessage({
+          content: malformedToolUse.text,
+        })
+        yield exhaustedMessage
+        void executeStopFailureHooks(exhaustedMessage, toolUseContext)
+        return { reason: 'malformed_tool_use_exhausted' }
+      }
+
       // Skip stop hooks when the last message is an API error (rate limit,
       // prompt-too-long, auth failure, etc.). The model never produced a
       // real response — hooks evaluating it create a death spiral:
@@ -2921,10 +3044,11 @@ async function* queryLoop(
             thinkingOnlyNudged = true
             logForDebugging('query_thinking_only_response: nudged')
             const nudgeMessage = createUserMessage({
-              content:
-                '[Your previous response had no visible output. Please continue and produce a user-visible response.]',
+              content: THINKING_ONLY_RETRY_PROMPT,
               isMeta: true,
+              turnCompanion: true,
             })
+            yield nudgeMessage
             state = {
               messages: [...messagesForQuery, nudgeMessage],
               toolUseContext,

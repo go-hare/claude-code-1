@@ -27,9 +27,13 @@ import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
 import { checkOpus1mAccess, checkSonnet1mAccess } from '../../utils/model/check1mAccess.js';
+import { executePostModelSwitchHooks, executePreModelSwitchHooks } from '../../utils/hooks.js';
 import {
+  getDefaultMainLoopModel,
   getDefaultMainLoopModelSetting,
+  getMainLoopModel,
   isOpus1mMergeEnabled,
+  parseUserSpecifiedModel,
   renderDefaultModelSetting,
 } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
@@ -62,7 +66,22 @@ function ModelPickerWrapper({
     });
   }
 
-  function commitModel(model: string | null, effort: EffortLevel | undefined): void {
+  async function commitModel(model: string | null, effort: EffortLevel | undefined): Promise<void> {
+    const fromModel = mainLoopModel ? parseUserSpecifiedModel(mainLoopModel) : getMainLoopModel();
+    const toModel = model ? parseUserSpecifiedModel(model) : getDefaultMainLoopModel();
+    const pre = await executePreModelSwitchHooks({
+      fromModel,
+      toModel,
+      requestedModel: model,
+      source: 'picker',
+    });
+    if (pre.decision === 'block' || pre.decision === 'ask') {
+      const extra = pre.messages.length > 0 ? `\n${pre.messages.join('\n')}` : '';
+      onDone(`${pre.reason ?? 'PreModelSwitch hooks blocked the switch'}${extra}`, {
+        display: 'system',
+      });
+      return;
+    }
     logEvent('tengu_model_command_menu', {
       action: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       from_model: mainLoopModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -102,6 +121,15 @@ function ModelPickerWrapper({
       }));
     }
     message += applied.suffix;
+    if (pre.messages.length > 0) {
+      message += `\n${pre.messages.join('\n')}`;
+    }
+    executePostModelSwitchHooks({
+      fromModel,
+      toModel,
+      requestedModel: model,
+      source: 'picker',
+    });
 
     onDone(message);
   }
@@ -125,7 +153,7 @@ function ModelPickerWrapper({
     if (shouldApplyDeferredEffortCommit({ consentRequired: false })) {
       commitEffort?.();
     }
-    commitModel(model, effort);
+    void commitModel(model, effort);
   }
 
   if (pendingFable) {
@@ -143,7 +171,7 @@ function ModelPickerWrapper({
           if (shouldApplyDeferredEffortCommit({ consentRequired: true, accepted: true })) {
             commitEffort?.();
           }
-          commitModel(model, effort);
+          void commitModel(model, effort);
         }}
         onDecline={() => {
           // Decline: drop deferred commitEffort (no N9 / no effort sticky).
@@ -209,13 +237,13 @@ function SetModelAndClose({
 
       // Skip validation for default model
       if (!model) {
-        setModel(null);
+        await setModel(null);
         return;
       }
 
       // Skip validation for known aliases - they're predefined and should work
       if (isKnownAlias(model)) {
-        setModel(model);
+        await setModel(model);
         return;
       }
 
@@ -226,7 +254,7 @@ function SetModelAndClose({
         const { valid, error } = await validateModel(model);
 
         if (valid) {
-          setModel(model);
+          await setModel(model);
         } else {
           onDone(error || `Model '${model}' not found`, {
             display: 'system',
@@ -239,7 +267,22 @@ function SetModelAndClose({
       }
     }
 
-    function setModel(modelValue: string | null): void {
+    async function setModel(modelValue: string | null): Promise<void> {
+      const fromModel = getMainLoopModel();
+      const toModel = modelValue ? parseUserSpecifiedModel(modelValue) : getDefaultMainLoopModel();
+      const pre = await executePreModelSwitchHooks({
+        fromModel,
+        toModel,
+        requestedModel: modelValue,
+        source: 'command',
+      });
+      if (pre.decision === 'block' || pre.decision === 'ask') {
+        const extra = pre.messages.length > 0 ? `\n${pre.messages.join('\n')}` : '';
+        onDone(`${pre.reason ?? 'PreModelSwitch hooks blocked the switch'}${extra}`, {
+          display: 'system',
+        });
+        return;
+      }
       // densable 2.1.218 #31 — Rft/uU/dU on `/model <name>` non-interactive set
       if (isFastModeEnabled()) {
         clearFastModeCooldown();
@@ -257,6 +300,15 @@ function SetModelAndClose({
       }));
       let message = `Set model to ${em(renderModelLabel(modelValue))}`;
       message += applied.suffix;
+      if (pre.messages.length > 0) {
+        message += `\n${pre.messages.join('\n')}`;
+      }
+      executePostModelSwitchHooks({
+        fromModel,
+        toModel,
+        requestedModel: modelValue,
+        source: 'command',
+      });
       onDone(message);
     }
 

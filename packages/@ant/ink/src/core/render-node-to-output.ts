@@ -23,6 +23,11 @@ import {
 } from './squash-text-nodes.js'
 import type { Color } from './styles.js'
 import { isXtermJs } from './terminal.js'
+import {
+  SoftWrapKind,
+  type SoftWrapKind as SoftWrapKindValue,
+} from './softWrap.js'
+import { stringWidth } from './stringWidth.js'
 import { widestLine } from './widest-line.js'
 import wrapText from './wrap-text.js'
 
@@ -234,12 +239,13 @@ function buildCharToSegmentMap(segments: StyledSegment[]): number[] {
 }
 
 /**
- * Apply styles to wrapped text by mapping each character back to its original segment.
- * This preserves per-segment styles even when text wraps across lines.
+ * densable `Bd` — apply styles to wrapped text by mapping each character
+ * back to its original segment. Preserves per-segment styles across wraps.
  *
- * @param trimEnabled - Whether whitespace trimming is enabled (wrap-trim mode).
- *   When true, we skip whitespace in the original that was trimmed from the output.
- *   When false (wrap mode), all whitespace is preserved so no skipping is needed.
+ * @param softWrapKinds densable `p` — per visual line SoftWrapKind. When the
+ *   next line is ContinuationElidedSep, skip the leading space still present
+ *   in originalPlain (elided from the wrapped piece).
+ * @param trimEnabled wrap-trim: also skip whitespace trimmed from output.
  */
 function applyStylesToWrappedText(
   wrappedPlain: string,
@@ -247,6 +253,7 @@ function applyStylesToWrappedText(
   charToSegment: number[],
   originalPlain: string,
   trimEnabled: boolean = false,
+  softWrapKinds?: readonly SoftWrapKindValue[],
 ): string {
   const lines = wrappedPlain.split('\n')
   const resultLines: string[] = []
@@ -322,7 +329,20 @@ function applyStylesToWrappedText(
     // wrapping-inserted newlines). Without this, charIndex gets out of sync
     // because the newline is in originalPlain/charToSegment but not in the
     // split lines.
+    if (charIndex < originalPlain.length && originalPlain[charIndex] === '\r') {
+      charIndex++
+    }
     if (charIndex < originalPlain.length && originalPlain[charIndex] === '\n') {
+      charIndex++
+    }
+
+    // densable Bd: next visual line elided a leading space — advance past it
+    // in originalPlain so segment indices stay aligned.
+    if (
+      softWrapKinds?.[lineIdx + 1] === SoftWrapKind.ContinuationElidedSep &&
+      charIndex < originalPlain.length &&
+      originalPlain[charIndex] === ' '
+    ) {
       charIndex++
     }
 
@@ -356,21 +376,16 @@ function applyStylesToWrappedText(
 }
 
 /**
- * Wrap text and record which output lines are soft-wrap continuations
- * (i.e. the `\n` before them was inserted by word-wrap, not in the
- * source). wrapAnsi already processes each input line independently, so
- * wrapping per-input-line here gives identical output to a single
- * whole-string wrap while letting us mark per-piece provenance.
- * Truncate modes never add newlines (cli-truncate is whole-string) so
- * they fall through with softWrap undefined — no tracking, no behavior
- * change from the pre-softWrap path.
+ * densable `qv` — wrap text and record SoftWrapKind per visual line.
+ * Truncate modes never add newlines (cli-truncate is whole-string) so they
+ * fall through with softWrap undefined.
  */
 function wrapWithSoftWrap(
   plainText: string,
   maxWidth: number,
   textWrap: Parameters<typeof wrapText>[2],
-): { wrapped: string; softWrap: boolean[] | undefined } {
-  // densable dtd: wrap-stream uses wrap path then drops the incomplete last visual line
+): { wrapped: string; softWrap: SoftWrapKindValue[] | undefined } {
+  // densable dtd/qv: wrap-stream uses wrap path then drops the incomplete last visual line
   const isStream = textWrap === 'wrap-stream'
   if (textWrap !== 'wrap' && textWrap !== 'wrap-trim' && !isStream) {
     return {
@@ -381,18 +396,26 @@ function wrapWithSoftWrap(
   const wrapMode = isStream ? 'wrap' : textWrap
   const origLines = plainText.replace(/\r\n?/g, '\n').split('\n')
   const outLines: string[] = []
-  const softWrap: boolean[] = []
+  const softWrap: SoftWrapKindValue[] = []
   for (const orig of origLines) {
     const pieces = wrapText(orig, maxWidth, wrapMode).split('\n')
     for (let i = 0; i < pieces.length; i++) {
-      let piece = pieces[i]!
-      // densable: soft-wrap continuations may elide a leading space
-      if (i > 0 && piece.startsWith(' ')) {
-        const without = piece.slice(1)
-        piece = without.length > 0 ? without : piece
+      if (i === 0) {
+        outLines.push(pieces[i]!)
+        softWrap.push(SoftWrapKind.HardBreak)
+        continue
       }
+      // densable qv: elide leading space on soft continuations; mark ElidedSep
+      const raw = pieces[i]!
+      const stripped = raw.startsWith(' ') ? raw.slice(1) : raw
+      // densable Wr(N)>0 — keep raw if stripped has zero display width
+      const piece = stringWidth(stripped) > 0 ? stripped : raw
       outLines.push(piece)
-      softWrap.push(i > 0)
+      softWrap.push(
+        piece.length < raw.length
+          ? SoftWrapKind.ContinuationElidedSep
+          : SoftWrapKind.Continuation,
+      )
     }
   }
   if (isStream) {
@@ -411,7 +434,7 @@ function wrapWithSoftWrap(
 function applyPaddingToText(
   node: DOMElement,
   text: string,
-  softWrap?: boolean[],
+  softWrap?: SoftWrapKindValue[],
 ): string {
   const yogaNode = node.childNodes[0]?.yogaNode
 
@@ -420,9 +443,10 @@ function applyPaddingToText(
     const offsetY = yogaNode.getComputedTop()
     text = '\n'.repeat(offsetY) + indentString(text, offsetX)
     if (softWrap && offsetY > 0) {
-      // Prepend `false` for each padding line so indices stay aligned
-      // with text.split('\n'). Mutate in place — caller owns the array.
-      softWrap.unshift(...Array<boolean>(offsetY).fill(false))
+      // densable _E: prepend HardBreak for each padding line
+      softWrap.unshift(
+        ...Array<SoftWrapKindValue>(offsetY).fill(SoftWrapKind.HardBreak),
+      )
     }
   }
 
@@ -628,7 +652,7 @@ function renderNodeToOutput(
           textWrap === 'wrap-stream' || widestLine(plainText) > maxWidth
 
         let text: string
-        let softWrap: boolean[] | undefined
+        let softWrap: SoftWrapKindValue[] | undefined
         if (needsWrapping && segments.length === 1) {
           // Single segment: wrap plain text first, then apply styles to each line
           const segment = segments[0]!
@@ -661,6 +685,7 @@ function renderNodeToOutput(
             charToSegment,
             plainText,
             textWrap === 'wrap-trim',
+            w.softWrap,
           )
           // Hyperlinks are handled per-run in applyStylesToWrappedText via
           // wrapWithOsc8Link, similar to how styles are applied per-run.

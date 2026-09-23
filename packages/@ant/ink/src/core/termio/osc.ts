@@ -7,6 +7,28 @@ import { spawn } from 'child_process'
 import { readFileSync } from 'fs'
 import { BEL, ESC, ESC_TYPE, SEP } from './ansi.js'
 
+/** densable Al() snapshot — injected; ink cannot import src/bootstrap. */
+export type ClipboardAttacherCaps = {
+  mux?: unknown
+  tmuxSocket?: unknown
+  ssh?: unknown
+}
+
+let attacherCapsGetter:
+  | (() => ClipboardAttacherCaps | null | undefined)
+  | null = null
+
+/** Inject attacher caps (opened bg session) for h()/zue/p(). */
+export function setClipboardAttacherCapsGetter(
+  getter: (() => ClipboardAttacherCaps | null | undefined) | null,
+): void {
+  attacherCapsGetter = getter
+}
+
+function attacherCaps(): ClipboardAttacherCaps | null {
+  return attacherCapsGetter?.() ?? null
+}
+
 /**
  * densable yn / lo — fire-and-capture subprocess without throwing.
  *
@@ -159,9 +181,26 @@ const POWERSHELL_SET_CLIPBOARD =
 const POWERSHELL_GET_CLIPBOARD =
   '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw'
 
-/** densable Wsn — SSH session: skip native clipboard (OSC 52 only) */
+/** densable p — attacher.ssh, else SSH_CONNECTION */
 function isSshSession(): boolean {
+  const attacher = attacherCaps()
+  if (attacher) return Boolean(attacher.ssh)
   return Boolean(process.env['SSH_CONNECTION'])
+}
+
+/**
+ * densable h — attacher tmux socket (`-S`) or `$TMUX` (empty prefix).
+ * When Al() is set, do not fall through to `$TMUX`.
+ */
+function tmuxLoadBufferArgs(): string[] | null {
+  const attacher = attacherCaps()
+  if (attacher) {
+    if (attacher.mux !== 'tmux') return null
+    const socket = attacher.tmuxSocket
+    if (typeof socket !== 'string' || socket.length === 0) return null
+    return ['-S', socket]
+  }
+  return process.env['TMUX'] ? [] : null
 }
 
 /** @internal test-only — clear densable Wt cache for clipboard host */
@@ -232,9 +271,8 @@ export function wrapForMultiplexer(sequence: string): string {
 export type ClipboardPath = 'native' | 'tmux-buffer' | 'osc52'
 
 export function getClipboardPath(): ClipboardPath {
-  // densable dt / XZb — native only when !SSH and a host tool will run.
-  // linux waits for Xws probe (`linuxCopy` string); unprobed/none → tmux/osc52.
-  if (!process.env['SSH_CONNECTION']) {
+  // densable zue — native when !p(); else attacher/$TMUX → tmux-buffer; else osc52.
+  if (!isSshSession()) {
     const host = getClipboardHostPlatform()
     if (host === 'macos' || host === 'windows' || host === 'wsl') {
       return 'native'
@@ -243,7 +281,7 @@ export function getClipboardPath(): ClipboardPath {
       return 'native'
     }
   }
-  if (process.env['TMUX']) return 'tmux-buffer'
+  if (tmuxLoadBufferArgs()) return 'tmux-buffer'
   return 'osc52'
 }
 
@@ -266,17 +304,22 @@ function tmuxPassthrough(payload: string): string {
  * Returns true if the buffer was loaded successfully.
  */
 export async function tmuxLoadBuffer(text: string): Promise<boolean> {
-  if (!process.env['TMUX']) return false
-  const args =
-    process.env['LC_TERMINAL'] === 'iTerm2'
-      ? ['load-buffer', '-']
-      : ['load-buffer', '-w', '-']
-  const { code } = await execFileNoThrow('tmux', args, {
-    input: text,
-    useCwd: false,
-    timeout: 2000,
-  })
-  return code === 0
+  const prefix = tmuxLoadBufferArgs()
+  if (!prefix) return false
+  const opts = { input: text, useCwd: false, timeout: 2000 }
+  // densable W — try load-buffer -w, then retry without -w.
+  const first = await execFileNoThrow(
+    'tmux',
+    [...prefix, 'load-buffer', '-w', '-'],
+    opts,
+  )
+  if (first.code === 0) return true
+  const retry = await execFileNoThrow(
+    'tmux',
+    [...prefix, 'load-buffer', '-'],
+    opts,
+  )
+  return retry.code === 0
 }
 
 /**
@@ -348,7 +391,7 @@ export async function setClipboard(text: string): Promise<string> {
   // Gated on SSH_CONNECTION (not SSH_TTY) since tmux panes inherit SSH_TTY
   // forever but SSH_CONNECTION is in tmux's default update-environment and
   // clears on local attach. Fire-and-forget.
-  if (!process.env['SSH_CONNECTION']) copyNative(text)
+  if (!isSshSession()) copyNative(text)
 
   const tmuxBufferLoaded = await tmuxLoadBuffer(text)
 
@@ -540,6 +583,7 @@ export async function readNativeClipboard(
 export function _resetLinuxCopyCache(): void {
   linuxCopy = undefined
   waylandCopyGen = 0
+  attacherCapsGetter = null
   _resetClipboardHostPlatformCache()
 }
 

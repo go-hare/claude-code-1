@@ -152,6 +152,16 @@ export const getHookEventMetadata = memoize(
           values: ['manual', 'auto'],
         },
       },
+      PreModelSwitch: {
+        summary: 'Before a model switch',
+        description:
+          'Input is JSON with from_model, to_model, and requested_model.\nExit code 0 - continue the switch\nExit code 2 - block the switch\nOther exit codes - show stderr to user only',
+      },
+      PostModelSwitch: {
+        summary: 'After a model switch',
+        description:
+          'Input is JSON with from_model, to_model, and requested_model.\nExit code 0 - stdout may be shown\nOther exit codes - show stderr to user only',
+      },
       SessionEnd: {
         summary: 'When a session is ending',
         description:
@@ -298,6 +308,8 @@ export function groupHooksByEventAndMatcher(
     SubagentStop: {},
     PreCompact: {},
     PostCompact: {},
+    PreModelSwitch: {},
+    PostModelSwitch: {},
     PermissionRequest: {},
     Setup: {},
     TeammateIdle: {},

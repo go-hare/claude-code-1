@@ -1,0 +1,322 @@
+# gold-248-34-column
+bytes248=226708128 bytes247=253204128
+exe247=YES
+
+## 248 Uf mcp-needs-auth @201566654
+)=>i.modelRestrictedWarning===null&&(Zht()!==""||kr()),render:()=>e(Nl,{})},Uf={id:"mcp-needs-auth",tier:"warning",type:"warning",isActive:(i)=>i.mcpNeedsAuthCount>0,render:(i)=>r(Gp,{status:"warning",children:[i.mcpNeedsAuthCount," MCP"," ",I(i.mcpNeedsAuthCount,"server needs","servers need")," ","authentication",e(t,{dimColor:!0,children:" \xB7 run /mcp"})]})},Bf={id:"cross-session-messaging-off",tier:"warning",type:"warning",isActive:(i)=>uFe.of(i.session.host).lastStartFa
+
+## 247 Uf mcp-needs-auth @231850844
+e)=>e.modelRestrictedWarning===null&&(fs()!==""||us()),render:()=>r(Lm,{})},tx={id:"mcp-needs-auth",tier:"warning",type:"warning",isActive:(e)=>e.mcpNeedsAuthCount>0,render:(e)=>l(Je,{status:"warning",children:[e.mcpNeedsAuthCount," MCP"," ",tt(e.mcpNeedsAuthCount,"server needs","servers need")," ","authentication",r(c,{dimColor:!0,children:" \xB7 run /mcp"})]})},ox={id:"cross-session-messaging-off",tier:"warning",type:"warning",isActive:(e)=>hp.of(e.session.host).lastStartFa
+
+## 248 r(Gp,{status:"warning" needle="r(Gp,{status:\"warning\"" hits=12
+- #0 @201563574 mode",tier:"warning",type:"warning",isActive:()=>wr(),render:()=>r(L,{children:[r(Gp,{status:"warning",children:["Safe mode: all customizations are disabled (CLAUDE.md, skills, plugi
+- #1 @201564207 hildren:l.map((d)=>{let f=d.path.startsWith(te())?Ef(te(),d.path):d.path;return r(Gp,{status:"warning",children:[e(t,{bold:!0,children:f})," is over the"," ",Bo(m),"-char limit (",Bo
+- #2 @201564639 urce==="apiKeyHelper")},render:()=>{let i=ml();return e(o,{marginTop:1,children:r(Gp,{status:"warning",children:[i.source," overriding Claude subscription login",e(t,{dimColor:!0,chi
+- #3 @201565090 :i}=xy({skipRetrievingKeyFromApiKeyHelper:!0});return e(o,{marginTop:1,children:r(Gp,{status:"warning",children:[i," overriding saved Console key",e(t,{dimColor:!0,children:" \xB7 un
+- #4 @201565599 iKeyHelper:!0}),l=ml();return r(o,{flexDirection:"column",marginTop:1,children:[r(Gp,{status:"warning",children:["Both ",l.source," and ",i," set \xB7 auth may not work as expected"]
+- #5 @201566301 (i)=>Ps(i.agentDefinitions)>Ds,render:(i)=>{let l=Ps(i.agentDefinitions);return r(Gp,{status:"warning",children:["Agent descriptions are over the"," ",Bo(Ds),"-token limit (~",Bo(l),
+- #6 @201566752 ",tier:"warning",type:"warning",isActive:(i)=>i.mcpNeedsAuthCount>0,render:(i)=>r(Gp,{status:"warning",children:[i.mcpNeedsAuthCount," MCP"," ",I(i.mcpNeedsAuthCount,"server needs","
+- #7 @201567100 uFe.of(i.session.host).lastStartFailureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"i
+- #8 @201567488 odelDeprecationWarning!==null,render:(i)=>i.modelDeprecationWarning===null?null:r(Gp,{status:"warning",children:[i.modelDeprecationWarning.message,r(t,{dimColor:!0,children:[" \xB7 "
+- #9 @201568406 e_cache")return null;let l=WTt(i.failure.errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cac
+- #10 @201570139 g);let Tf,wc;if(mv[0]===p){wc=rn;bb0:{let Mc=zNe();if(!Mc){wc=null;break bb0}Tf=r(Gp,{status:"warning",children:["Your login expires in ",Mc.daysLeft," ",I(Mc.daysLeft,"day"),e(t,{di
+- #11 @201571950 arning",type:"warning",isActive:()=>kc().length>0,render:()=>{let i=kc();return r(Gp,{status:"warning",children:["Prompt caching off (",i.join(", "),"), requests will be slower and c
+
+## 247 r(Gp,{status:"warning" needle="r(Gp,{status:\"warning\"" hits=0
+
+## lastFnStart Gp before Uf {"i":201528860,"name":"function Gp("}
+## 248 last-Gp-before-Uf @201528860
+len=445 sha=6e481d45db19ae3a
+function Gp(m){let l=g(9),{status:c,children:p}=m,{color:a}=lZe[c],s;if(l[0]!==c)s=e(o,{width:2,flexShrink:0,children:e(Qe,{status:c})}),l[0]=c,l[1]=s;else s=l[1];const x=!a;let f;if(l[2]!==p||l[3]!==a||l[4]!==x)f=e(o,{flexGrow:1,flexShrink:1,children:e(t,{color:a,dimColor:x,children:p})}),l[2]=p,l[3]=a,l[4]=x,l[5]=f;else f=l[5];let d;if(l[6]!==s||l[7]!==f)d=r(o,{flexDirection:"row",children:[s,f]}),l[6]=s,l[7]=f,l[8]=d;else d=l[8];return d}
+
+## function Gp( hits248=7
+- @182732518 function Gp(e){if(j8e()!==null)return ezt(be("policySettings")?.sandbox,e);return PS().map((t)=>ezt(t.sandbox,e)).find((t)=>t!==void 0)}function y0(e){let t=Gp(e);if(t!==void 0)return t;return b0().map((r)=>ezt(r?.sandbo
+- @188891201 function Gp(e){let t=e.regex,n=/(r#)?/,a=t.concat(n,e.UNDERSCORE_IDENT_RE),o=t.concat(n,e.IDENT_RE),s={className:"title.function.invoke",relevance:0,begin:t.concat(/\b/,/(?!let|for|while|if|else|match\b)/,o,t.lookahead(/
+- @189377495 function Gp(t){return{kind:"key",name:"",fn:!1,ctrl:!1,meta:!1,shift:!1,option:!1,super:!1,sequence:t,raw:t,isPasted:!0,code:void 0,col:void 0,row:void 0}}function jp(t){if(t.startsWith("\x1B[")){let o;if(o=S1.exec(t))re
+- @200888706 function Gp(e){let t=Object.keys(e.settings),o=e.settings[k6];if(t.length!==1||!Re(o)||Object.keys(o).some((E)=>!HCn.includes(E)))return{apply:!1,reason:"malformed"};if(e.admission===void 0)return{apply:!1,reason:"not_ad
+- @201528860 function Gp(m){let l=g(9),{status:c,children:p}=m,{color:a}=lZe[c],s;if(l[0]!==c)s=e(o,{width:2,flexShrink:0,children:e(Qe,{status:c})}),l[0]=c,l[1]=s;else s=l[1];const x=!a;let f;if(l[2]!==p||l[3]!==a||l[4]!==x)f=e(o,{f
+- @206465197 function Gp(e){let t=e.inputRequests!==void 0&&Object.keys(e.inputRequests).length>0,r=typeof e.requestState==="string";if(!t&&!r)throw TypeError("inputRequired() requires at least one of inputRequests (with at least one
+- @213601593 function Gp(e){return{name:"BASIC",case_insensitive:!0,illegal:"^.",keywords:{$pattern:"[a-zA-Z][a-zA-Z0-9_$%!#]*",keyword:["ABS","ASC","AND","ATN","AUTO|0","BEEP","BLOAD|10","BSAVE|10","CALL","CALLS","CDBL","CHAIN","CHD
+
+## 248 Gp=function needle="Gp=function" hits=0
+
+## 248 function Gp({ needle="function Gp({" hits=0
+
+## 248 var Gp= needle="var Gp=" hits=4
+- #0 @180064768 rn e}if(!t)return e;for(let[r,o]of Object.entries(t))if(o===e)return r;return e}var Gp=c0(async()=>{if(GLe()!==null)return;try{let e=await sI();if(Le()!=="bedrock")ret
+- #1 @191241652 /promises";import{basename as wo,join as Zn,relative as oc,sep as Hp}from"path";var Gp=600000,Wl=15;function WTn(){let d=a.CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS;retu
+- #2 @199538896 .captureStackTrace(this,this.constructor)}}qp.exports={OPError:Bp,RPError:Kp}});var Gp=d(function(I3,Vp){var wP=ee("crypto"),[Hp,SP]=process.version.substring(1).split
+- #3 @211398070 }function bb(){(0,kp.registerResolver)(co,ho),(0,kp.registerResolver)(uo,ho)}});var Gp=d(function(Wp){Object.defineProperty(Wp,"__esModule",{value:!0});Wp.RoundRobinLo
+
+## 248 StatusNotices needle="StatusNotices" hits=2
+- #0 @98927082  destructure property 'helper' from null or undefined value.......h=..helperBaseStatusNotices......d..forceRemoteSettingsRefresh..U....x..Cannot destructure property 'includ
+- #1 @179460932 vailableModels!==void 0?p.modelOverrides:void 0};let E=e.store.policy.helperBaseStatusNotices??=[...e.helperMergesOutput?.()===!0?zo(e).filter((w)=>!w.statusOnly):[],...R(e)
+
+## 248 getActiveNotices needle="getActiveNotices" hits=0
+
+## 248 warnings.length needle="warnings.length" hits=27
+- #0 @183337304 ())return;let t=await G(e,r,{suppressFeatureEvents:!0});if(e.warmAttempted=!0,t.warnings.length>0)return t.bindings;if(!e.bindings)e.bindings=t.bindings,e.warnings=[],e.warmed
+- #1 @183338974 =[...r,...g],F(e,g.length);let d=C(a);if(e.warnings=[...d,...P(o,e.bindings)],e.warnings.length>0)n(`[keybindings] Found ${e.warnings.length} validation issue(s)`),I(e.warning
+- #2 @183339019 rnings=[...d,...P(o,e.bindings)],e.warnings.length>0)n(`[keybindings] Found ${e.warnings.length} validation issue(s)`),I(e.warnings);return b("keybinding_load_user_config"),{b
+- #3 @190430829 eybindings] KeybindingSetup initialized with ${R.bindings.length} bindings, ${R.warnings.length} warnings`),R}),i=xt(),d=E(null),[m,l]=u(null),A=E(null),x=E(new Map),F=E(new S
+- #4 @190431337 scribe((I)=>{r(I),n(`[keybindings] Reloaded: ${I.bindings.length} bindings, ${I.warnings.length} warnings`)});return()=>{R(),B()}},[B]),e(fje,{bindings:o,pendingChordRef:d,pen
+- #5 @199209121 pe===e.type?" (currently running)":"";Bn(`- ${e.type} at ${e.path}${t}
+`)}}if(r.warnings.length>0){Bn(`
+`);for(let e of r.warnings)n(`update: Warning detected: ${e.issue}`),n(
+- #6 @199443791 _.detail})`:""}`))}}catch{await Ql("cli_doctor","bridge_info_unavailable")}if(n.warnings.length>0){l.push("",ae.yellow(`${n.warnings.length} ${I(n.warnings.length,"warning")} 
+- #7 @199443835 or","bridge_info_unavailable")}if(n.warnings.length>0){l.push("",ae.yellow(`${n.warnings.length} ${I(n.warnings.length,"warning")} found`));for(let i of n.warnings)l.push(`- $
+- #8 @199443858 lable")}if(n.warnings.length>0){l.push("",ae.yellow(`${n.warnings.length} ${I(n.warnings.length,"warning")} found`));for(let i of n.warnings)l.push(`- ${c(i.issue)}`,`  Fix: $
+- #9 @199444150 sues, run /doctor in a Claude Code session."),Bn(l.join(`
+`)+`
+`),d={warnings:n.warnings.length,settings_errors:g.length,env_var_issues:h.length,multiple_installs:n.multipleIn
+- #10 @201576878 uthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0;const 
+- #11 @203870518 Highlighting"]);function zRn(e,t){let s=e.every((r)=>r.success),a=e.some((r)=>r.warnings.length>0);return{noErrors:s,hasWarnings:a,allSuccess:t.strict?s&&!a:s}}function Ne(e){
+- … +15 more
+
+## 248 qt.warnings needle="qt.warnings" hits=2
+- #0 @201576875 dsAuthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0
+- #1 @201577045 0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection
+
+## 248 Uf-back-2k @201566654
+arning",children:[i.source," overriding Claude subscription login",e(t,{dimColor:!0,children:" \xB7 unset it or /logout to sign it out"})]})})}},Df={id:"api-key-conflict",tier:"warning",type:"warning",isActive:()=>{let{source:i}=xy({skipRetrievingKeyFromApiKeyHelper:!0});return!!lMe()&&(i==="ANTHROPIC_API_KEY"||i==="apiKeyHelper")},render:()=>{let{source:i}=xy({skipRetrievingKeyFromApiKeyHelper:!0});return e(o,{marginTop:1,children:r(Gp,{status:"warning",children:[i," overriding saved Console key",e(t,{dimColor:!0,children:" \xB7 unset it or /logout to clear the saved key"})]})})}},Pf={id:"both-auth-methods",tier:"warning",type:"warning",isActive:()=>{let{source:i}=xy({skipRetrievingKeyFromApiKeyHelper:!0}),l=ml();return i!=="none"&&l.source!=="none"&&!(i==="apiKeyHelper"&&l.source==="apiKeyHelper")},render:()=>{let{source:i}=xy({skipRetrievingKeyFromApiKeyHelper:!0}),l=ml();return r(o,{flexDirection:"column",marginTop:1,children:[r(Gp,{status:"warning",children:["Both ",l.source," and ",i," set \xB7 auth may not work as expected"]}),r(o,{flexDirection:"column",paddingLeft:2,children:[r(t,{dimColor:!0,children:["\xB7 to use"," ",l.source==="claude.ai"?"claude.ai":l.source,":"," ",i==="ANTHROPIC_API_KEY"?'Unset the ANTHROPIC_API_KEY environment variable, or claude /logout then say "No" to the API key approval before login.':i==="apiKeyHelper"?"Unset the apiKeyHelper setting.":"claude /logout"]}),r(t,{dimColor:!0,children:["\xB7 to use ",i,":"," ",UV(l.source)]})]})]})}},Of={id:"large-agent-descriptions",tier:"warning",type:"warning",isActive:(i)=>Ps(i.agentDefinitions)>Ds,render:(i)=>{let l=Ps(i.agentDefinitions);return r(Gp,{status:"warning",children:["Agent descriptions are over the"," ",Bo(Ds),"-token limit (~",Bo(l)," tokens)",r(t,{dimColor:!0,children:[" ","\xB7 ask Claude to trim agent descriptions in .claude/agents/"]})]})}},Lf={id:"model-source",tier:"info",type:"info",isActive:(i)=>i.modelRestrictedWarning===null&&(Zht()!==""||kr()),render:()=>e(Nl,{})},Uf={id:"mcp-needs-auth",tier:"warning",type:"warning",isActive:(i)=>i.mcpNeedsAuthCo
+
+## 248 Uf-fwd-2k @201566654
+)=>i.modelRestrictedWarning===null&&(Zht()!==""||kr()),render:()=>e(Nl,{})},Uf={id:"mcp-needs-auth",tier:"warning",type:"warning",isActive:(i)=>i.mcpNeedsAuthCount>0,render:(i)=>r(Gp,{status:"warning",children:[i.mcpNeedsAuthCount," MCP"," ",I(i.mcpNeedsAuthCount,"server needs","servers need")," ","authentication",e(t,{dimColor:!0,children:" \xB7 run /mcp"})]})},Bf={id:"cross-session-messaging-off",tier:"warning",type:"warning",isActive:(i)=>uFe.of(i.session.host).lastStartFailureCause==="socket_dir_refused",render:(i)=>r(Gp,{status:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be set up",r(t,{dimColor:!0,children:[" \xB7 ","run with --debug-file <path> for the full log"]})]})},Hf={id:"model-deprecation",tier:"warning",type:"warning",isActive:(i)=>i.modelDeprecationWarning!==null,render:(i)=>i.modelDeprecationWarning===null?null:r(Gp,{status:"warning",children:[i.modelDeprecationWarning.message,r(t,{dimColor:!0,children:[" \xB7 ",i.modelDeprecationWarning.action]})]})},Ff={id:"model-restricted",tier:"warning",type:"warning",isActive:(i)=>i.modelRestrictedWarning!==null,render:(i)=>i.modelRestrictedWarning===null?null:e(Gp,{status:"warning",children:ih(i.modelRestrictedWarning.requested,i.modelRestrictedWarning.effective)})},$f={id:"hipaa-compliance",tier:"warning",type:"info",isActive:()=>Fh("hipaa"),render:()=>r(Gp,{status:"info",children:["HIPAA \xB7 some features are restricted",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})},Gf={id:"remote-managed-settings-failed",tier:"warning",type:"warning",isActive:()=>{let i=zre();return i?.state==="failed"||i?.state==="stale_cache"},render:()=>{let i=zre();if(i?.state!=="failed"&&i?.state!=="stale_cache")return null;let l=WTt(i.failure.errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using cached policy (proxy/CA/provider env withheld)":" \xB7 using cached policy":" \xB7 no remote policy applied",e(t,{dimColor:!0,children:" \xB7 /status for details"})]})}},jf={id:"monitoring-notice",tier:"warning",type:"info",isActive:()=>xSe()!==null,render:()=>{let i=xSe();if(!i)return null;return r(Gp,{status:"info",children:[i.text,i.url?r(t,{dimColor:!0,children:[" \xB7 ",e(it,{url:i.url,fallback:i.url,children:"learn more"})]}):null]})}},Wf={id:"debug-mode",tier:"info",type:"info",isActive:()=>F$(),render:()=>r(Vt,{children:["Debug mode enabled \xB7 logging to"," ",mD()?"stderr":ide()]})},Vf={id
+
+## 248 notice-region paddingLeft in [201550000,201590000] count=6
+- @201551221 wnEmergencyTip:l.tip}},i)},[d,l.tip,l.persistent,i]),!d)return null;return e(o,{paddingLeft:2,flexDirection:"column",children:e(t,{...l.color==="warning"?{color
+- @201563884 l apply; managed plugins, skills, CLAUDE.md, and MCP servers do not"]})]}),e(o,{paddingLeft:2,children:e(t,{dimColor:!0,children:`${yf(hp())} to re-enable`})})]
+- @201565732 nd ",i," set \xB7 auth may not work as expected"]}),r(o,{flexDirection:"column",paddingLeft:2,children:[r(t,{dimColor:!0,children:["\xB7 to use"," ",l.source===
+- @201577201 ,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,bo
+- @201577456 ier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCoun
+- @201577586 ldren:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.re
+
+## 248 Uf±15k paddingLeft in [201551654,201581654] count=5
+- @201563884 l apply; managed plugins, skills, CLAUDE.md, and MCP servers do not"]})]}),e(o,{paddingLeft:2,children:e(t,{dimColor:!0,children:`${yf(hp())} to re-enable`})})]
+- @201565732 nd ",i," set \xB7 auth may not work as expected"]}),r(o,{flexDirection:"column",paddingLeft:2,children:[r(t,{dimColor:!0,children:["\xB7 to use"," ",l.source===
+- @201577201 ,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,bo
+- @201577456 ier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCoun
+- @201577586 ldren:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.re
+
+## 248 flexDir column paddingLeft:1 needle="flexDirection:\"column\",paddingLeft:1" hits=2
+- #0 @202762029  want to restore"," ",!oo&&"the conversation ","to the point before you sent this message:"]}),r(o,{flexDirection:"column",paddingLeft:1,borderStyle:"single",borderRight:!1,borderTop:!1,borderBottom:!1,borderLeft:!0,borderLeftDimColor:!
+- #1 @209519374 tomatically.`;let V;if(i[37]!==a)V=a.map($t),i[37]=a,i[38]=V;else V=i[38];let P;if(i[39]!==V)P=e(o,{flexDirection:"column",paddingLeft:1,children:V}),i[39]=V,i[40]=P;else P=i[40];let ce,Z;if(i[41]===p)ce=[{label:"Generate /import-to-cla
+
+## 248 flexDir column paddingLeft:2 needle="flexDirection:\"column\",paddingLeft:2" hits=9
+- #0 @199085447 ildren:[e(t,{children:"Teleport will switch git branches. The following changes were found:"}),e(o,{flexDirection:"column",paddingLeft:2,children:h.length>0?R?r(t,{children:[h.length," files changed"]}):h.map((a,i)=>e(t,{children:a},i))
+- #1 @201418140 l,Zt[17]=ho,Zt[18]=$l,Zt[19]=us,Zt[20]=yh;else yh=Zt[20];let bA;if(Zt[21]!==Rh||Zt[22]!==yh)bA=r(o,{flexDirection:"column",paddingLeft:2,children:[Rh,yh]}),Zt[21]=Rh,Zt[22]=yh,Zt[23]=bA;else bA=Zt[23];return bA}let I_=3+(ln?.paddingWidt
+- #2 @201565709 us:"warning",children:["Both ",l.source," and ",i," set \xB7 auth may not work as expected"]}),r(o,{flexDirection:"column",paddingLeft:2,children:[r(t,{dimColor:!0,children:["\xB7 to use"," ",l.source==="claude.ai"?"claude.ai":l.source,
+- #3 @201577563 Left:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.render(ki)}))})]});let Ei;if(Mi[4]!
+- #4 @202450318 f(yp[8]===p)pIe=e(t,{children:"Make sure:"}),yp[8]=pIe;else pIe=yp[8];let fIe;if(yp[9]===p)fIe=r(o,{flexDirection:"column",paddingLeft:2,children:[e(t,{children:"\xB7 Python API is enabled in iTerm2 preferences"}),e(t,{children:"\xB7 Yo
+- #5 @202541938 u[41]!==Hre||Qu[42]!==Rp||Qu[43]!==hW||Qu[44]!==Wd||Qu[45]!==Pp||Qu[46]!==Bre)xW=Rp==="delete"?e(o,{flexDirection:"column",paddingLeft:2,children:e(wg,{code:Hre,filePath:Wd})}):Rp==="insert"?e(o,{flexDirection:"column",paddingLeft:2,chi
+- #6 @202542034 (o,{flexDirection:"column",paddingLeft:2,children:e(wg,{code:Hre,filePath:Wd})}):Rp==="insert"?e(o,{flexDirection:"column",paddingLeft:2,children:e(wg,{code:yW,filePath:fx==="markdown"?"file.md":Wd})}):hW?Gq(hW.map((GLe)=>e(nR,{patch:GL
+- #7 @203739526  \u2014 research and propose, never touch files"]}),_[4]=So;else So=_[4];let et;if(_[5]===p)et=r(o,{flexDirection:"column",paddingLeft:2,children:[Zo,Ho,So,r(t,{children:[e(t,{color:"warning",children:"auto"})," \u2014 Claude decides wh
+- #8 @208092652 if(d){u=r(o,{flexDirection:"column",children:[r(t,{children:[n.description," (",Y," lines)"]}),r(o,{flexDirection:"column",paddingLeft:2,marginTop:1,children:[n.prompt&&e(ype,{prompt:n.prompt,theme:C,dim:!0}),n.harnessHead&&e(o,{marginT
+
+## 248 flexDir column paddingLeft:0 needle="flexDirection:\"column\",paddingLeft:0" hits=0
+
+## 248 paddingLeft:2 flexDir needle="paddingLeft:2,flexDirection:\"column\"" hits=5
+- #0 @201541136 ),Mt[27]=al,Mt[28]=Ms,Mt[29]=vs;else vs=Mt[29];let Ed;if(Mt[30]===p)Ed=nx&&e(o,{paddingLeft:2,flexDirection:"column",marginTop:1,children:e(vr,{})}),Mt[30]=Ed;else Ed=Mt[30];let Id;if(Mt[31]!==vs)
+- #1 @201545124 llowed:Tl}),En[9]=Tl,En[10]=Es;else Es=En[10];let Is;if(En[11]!==ks)Is=ks&&r(o,{paddingLeft:2,flexDirection:"column",children:[e(t,{bold:!0,children:ks}),r(t,{dimColor:!0,children:[e(it,{url:REt,c
+- #2 @201551221 wnEmergencyTip:l.tip}},i)},[d,l.tip,l.persistent,i]),!d)return null;return e(o,{paddingLeft:2,flexDirection:"column",children:e(t,{...l.color==="warning"?{color:"warning"}:l.color==="error"?{color
+- #3 @201696617 ions found.":"No conversations found in this project."})}),_==="rename"&&D?r(o,{paddingLeft:2,flexDirection:"column",children:[e(t,{bold:!0,children:"Rename session:"}),e(o,{paddingTop:1,children:
+- #4 @203183275 e,h3[3]=S3,h3[4]=k3;else k3=h3[4];let C3;if(h3[5]!==Wbe||h3[6]!==f3)C3=f3&&e(o,{paddingLeft:2,flexDirection:"column",children:e(R3,{buttonFocus:Wbe})}),h3[5]=Wbe,h3[6]=f3,h3[7]=C3;else C3=h3[7];le
+
+## 247 flexDir column paddingLeft:1 needle="flexDirection:\"column\",paddingLeft:1" hits=3
+- #0 @231860543 l,Gx=At.ant.length>0,jx=At.slot?.showAccentBar?.()??!0;const kp=_o,Ep=at,Ip=!_p&&!$x&&!Gx?null:l(d,{flexDirection:"column",paddingLeft:1,children:[At.warnings.map((rN)=>r(ne,{children:rN.render(hl)})),At.slot===null?null:l(d,{flexDirect
+- #1 @232341202 u want to restore"," ",!z&&"the conversation ","to the point before you sent this message:"]}),f(y,{flexDirection:"column",paddingLeft:1,borderStyle:"single",borderRight:!1,borderTop:!1,borderBottom:!1,borderLeft:!0,borderLeftDimColor:!
+- #2 @236890512 tomatically.`;let C;if(t[37]!==n)C=n.map(Pt),t[37]=n,t[38]=C;else C=t[38];let V;if(t[39]!==C)V=o(_,{flexDirection:"column",paddingLeft:1,children:C}),t[39]=C,t[40]=V;else V=t[40];let pe,O;if(t[41]===j)pe=[{label:"Generate /import-to-cla
+
+## 247 flexDir column paddingLeft:2 needle="flexDirection:\"column\",paddingLeft:2" hits=9
+- #0 @228804384 ildren:[e(o,{children:"Teleport will switch git branches. The following changes were found:"}),e(n,{flexDirection:"column",paddingLeft:2,children:g.length>0?k?t(o,{children:[g.length," files changed"]}):g.map((a,r)=>e(o,{children:a},r))
+- #1 @231324916 m,Dr[17]=Co,Dr[18]=vm,Dr[19]=ln,Dr[20]=sb;else sb=Dr[20];let cK;if(Dr[21]!==rb||Dr[22]!==sb)cK=s(a,{flexDirection:"column",paddingLeft:2,children:[rb,sb]}),Dr[21]=rb,Dr[22]=sb,Dr[23]=cK;else cK=Dr[23];return cK}let zv=3+(Ai?.paddingWidt
+- #2 @231455717 ){zr=s(a,{flexDirection:"column",children:[s(t,{children:[Oe.description," (",BMe," lines)"]}),s(a,{flexDirection:"column",paddingLeft:2,marginTop:1,children:[Oe.prompt&&o(En,{prompt:Oe.prompt,theme:VC,dim:!0}),Oe.harnessHead&&o(a,{marg
+- #3 @231849900 us:"warning",children:["Both ",t.source," and ",e," set \xB7 auth may not work as expected"]}),l(d,{flexDirection:"column",paddingLeft:2,children:[l(c,{dimColor:!0,children:["\xB7 to use"," ",t.source==="claude.ai"?"claude.ai":t.source,
+- #4 @231861109 Left:2,children:l(It,{command:"/status",children:["+",At.slotOverflowCount," more"]})})]}),Gx&&r(d,{flexDirection:"column",paddingLeft:2,marginTop:_p||$x?1:0,children:At.ant.map((sN)=>r(ne,{children:sN.render(hl)}))})]});let yl;if(pl[4]
+- #5 @232810658 f(Nd[8]===H)kht=i(p,{children:"Make sure:"}),Nd[8]=kht;else kht=Nd[8];let _ht;if(Nd[9]===H)_ht=f(y,{flexDirection:"column",paddingLeft:2,children:[i(p,{children:"\xB7 Python API is enabled in iTerm2 preferences"}),i(p,{children:"\xB7 Yo
+- #6 @232883148 a[41]!==EBe||ma[42]!==jd||ma[43]!==LJ||ma[44]!==fu||ma[45]!==$d||ma[46]!==PBe)qJ=jd==="delete"?i(y,{flexDirection:"column",paddingLeft:2,children:i($a,{code:EBe,filePath:fu})}):jd==="insert"?i(y,{flexDirection:"column",paddingLeft:2,chi
+- #7 @232883244 (y,{flexDirection:"column",paddingLeft:2,children:i($a,{code:EBe,filePath:fu})}):jd==="insert"?i(y,{flexDirection:"column",paddingLeft:2,children:i($a,{code:NJ,filePath:WA==="markdown"?"file.md":fu})}):LJ?Jw(LJ.map((m_t)=>i(ev,{patch:m_
+- #8 @233307824  \u2014 research and propose, never touch files"]}),N[4]=Rt;else Rt=N[4];let Pt;if(N[5]===d)Pt=t(n,{flexDirection:"column",paddingLeft:2,children:[Tt,vt,Rt,t(o,{children:[e(o,{color:"warning",children:"auto"})," \u2014 Claude decides wh
+
+## 247 paddingLeft:2 flexDir needle="paddingLeft:2,flexDirection:\"column\"" hits=5
+- #0 @231824615 ),st[27]=Xu,st[28]=ki,st[29]=Ei;else Ei=st[29];let Ay;if(st[30]===D)Ay=SC&&r(d,{paddingLeft:2,flexDirection:"column",marginTop:1,children:r(ts,{})}),st[30]=Ay;else Ay=st[30];let Dy;if(st[31]!==Ei)
+- #1 @231828664 llowed:ym}),Wn[9]=ym,Wn[10]=qi;else qi=Wn[10];let Ki;if(Wn[11]!==zi)Ki=zi&&l(d,{paddingLeft:2,flexDirection:"column",children:[r(c,{bold:!0,children:zi}),l(c,{dimColor:!0,children:[r(gt,{url:Ji,ch
+- #2 @231835031 wnEmergencyTip:t.tip}},e)},[n,t.tip,t.persistent,e]),!n)return null;return r(d,{paddingLeft:2,flexDirection:"column",children:r(c,{...t.color==="warning"?{color:"warning"}:t.color==="error"?{color
+- #3 @232979850 ,gne[4]=yne;else yne=gne[4];let Sne;if(gne[5]!==X1e||gne[6]!==fne)Sne=fne&&i(y,{paddingLeft:2,flexDirection:"column",children:i(wne,{buttonFocus:X1e})}),gne[5]=X1e,gne[6]=fne,gne[7]=Sne;else Sne=g
+- #4 @233169186 ions found.":"No conversations found in this project."})}),S==="rename"&&w?y(x,{paddingLeft:2,flexDirection:"column",children:[r(T,{bold:!0,children:"Rename session:"}),r(x,{paddingTop:1,children:
+
+## lastFnStartGeneric before Uf {"i":201563353,"name":"ug"}
+## 248 fn-before-Uf @201563353
+len=74 sha=b66410194146af3e
+function ug(){return s("tengu_powerup_discovery_shown",{arm:c("banner")})}
+
+## 248 warnings.map needle="warnings.map" hits=8
+- #0 @179493680  payload (${d.error}); Claude Code will not start until it is fixed`;if(u.onChain&&!o)o={settings:d.settings,warnings:d.warnings.map((p)=>({...p,statusOnly:!0})),sourceField:u.field,mergesOutput:u.mergesOutput}}return g.defaultFallback=o,null}function 
+- #1 @182793346 turn E}var X0="sandbox configuration unavailable";function J0(e){return{...e,errors:e.errors.map((t)=>VU(t)),warnings:e.warnings.map((t)=>VU(t))}}function z0(){try{_o(Jpt(yn()??{}))}catch(e){n(`checkDependencies: settings unavailable, re-seeding SRT co
+- #2 @201577048 th>0,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{fl
+- #3 @202264524 ugins,errors:[...ne.plugins.errors,...h]}}})}function Ye(w,Q){if(Q.length===0)return;w((ne)=>{let re=new Set(ne.plugins.warnings.map((F)=>Re(F))),h=Q.filter((F)=>!re.has(Re(F)));if(h.length===0)return ne;return{...ne,plugins:{...ne.plugins,warnings:[..
+- #4 @203887566 }function G(e){return{...e,errors:e.errors.map((t)=>({...t,path:x0(t.path,200),message:x0(t.message,1000)})),warnings:e.warnings.map((t)=>({path:x0(t.path,200),message:x0(t.message,1000)})),...e.notes!==void 0&&{notes:e.notes.map((t)=>x0(t,1000))}}}fun
+- #5 @208760743 if(Eo[0]===p){let ae=at.checkDependencies();le=ae.warnings.length>0?e(o,{marginTop:1,flexDirection:"column",children:ae.warnings.map(me)}):null;Eo[0]=le}else le=Eo[0];let de=le;if(!En){let M;if(Eo[1]===p)M=r(o,{flexDirection:"column",children:[e(t,{col
+- #6 @209018951 "||Yi==="-h"?qa:`${O.cross} Unexpected argument "${Yi}".
+
+${qa}`);return}let Gc=await W$e(qc??".",{force:Qi});let oo=Gc.warnings.map(Hk);if(!Gc.ok){oo.push(`${O.cross} ${Gc.error}`),gi(oo.join(`
+`));return}let{plan:Ln}=Gc;if(oo.push(`Plugin:  ${Ln.plug
+- #7 @210520165 Called but not mocked: ${e.mocks.calls.unmocked.map((d)=>`${r(d.tool)} \xD7${d.count}`).join(", ")}</div>`:""}${e.mocks.warnings.map((d)=>`<div class="note">${r(d)}</div>`).join("")}</details>`:"";return`<div class="run">
+<div class="run-head">
+<span c
+
+## 248 .warnings needle=".warnings" hits=109
+- #0 @179488771 t={managedSettings:this.defaultFallback.settings},this.state.warnings=this.defaultFallback.warnings,this.announceTierChange();ret
+- #1 @179488801 tFallback.settings},this.state.warnings=this.defaultFallback.warnings,this.announceTierChange();return}n(`policyHelper refresh fa
+- #2 @179489285 tputBehavior==="merge",this.state.output=E.output,this.state.warnings=E.warnings,this.announceTierChange()}).catch((E)=>{_(E)}).f
+- #3 @179489296 r==="merge",this.state.output=E.output,this.state.warnings=E.warnings,this.announceTierChange()}).catch((E)=>{_(E)}).finally(()=>
+- #4 @179492383 tings payload (no recursion)`,{level:"warn"});for(let o of r.warnings)n(`${t}: ${o.message}`,{level:"warn"});return r}function pn
+- #5 @179493679 is fixed`;if(u.onChain&&!o)o={settings:d.settings,warnings:d.warnings.map((p)=>({...p,statusOnly:!0})),sourceField:u.field,merges
+- #6 @179494087 ergesOutput:t,output:{managedSettings:r.settings},warnings:r.warnings}),n(`${r.sourceField} static settings payload applied (keys
+- #7 @179496485 Output:e.outputBehavior==="merge",output:d.output,warnings:d.warnings}),n(`policyHelper applied (keys: ${Object.keys(d.output).jo
+- … +101 more
+
+## 248 notice.render needle="notice.render" hits=0
+
+## 248 render(context) needle="render(context)" hits=0
+
+## 248 mcpNeedsAuthCount:Yv needle="mcpNeedsAuthCount:Yv" hits=1
+- #0 @201576789 DeprecationWarning:Fc?.modelDeprecationWarning??null,modelRestrictedWarning:Ci,existingClaudeSubscription:Fc?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:Vv??!1,replBridgeSessionUrl:zv,mcpNeedsAuthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(
+
+## 248 Debug mode enabled needle="Debug mode enabled" hits=2
+- #0 @93411640 .... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix t
+- #1 @201569084 n:"learn more"})]}):null]})}},Wf={id:"debug-mode",tier:"info",type:"info",isActive:()=>F$(),render:()=>r(Vt,{children:["Debug mode enabled \xB7 logging to"," ",mD()?"stderr":ide()]})},Vf={id:"tmux-session",tier:"info",type:"info",isActive:()=>!!a.CLAUDE_CODE
+
+## 248 Logging to: needle="Logging to:" hits=0
+
+## 247 Debug mode enabled needle="Debug mode enabled" hits=2
+- #0 @198023296 ath> to see why.$...b...HIPAA . some features are restricted......!. . /status for details..
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix t
+- #1 @231852624 n:"learn more"})]}):null]})}},ax={id:"debug-mode",tier:"info",type:"info",isActive:()=>op(),render:()=>l(It,{children:["Debug mode enabled \xB7 logging to"," ",np()?"stderr":rp()]})},lx={id:"tmux-session",tier:"info",type:"info",isActive:()=>!!Me.CLAUDE_CODE
+
+## 248 run /mcp needle="run /mcp" hits=22
+- #0 @93411095 . MCP........authentication..........server needs....w.?.servers need........ . run /mcp.........socket_dir_refused..........lastStartFailureCause...........Cross-sessi
+- #1 @93416436 ase.CLAUDE_CODE_HIDE_CWD(...Y#W.file:///B:/%7EBUN/root/chunk-qbk3dk3a.js.....[..run /mcp for details........run /plugin for details.......j.run /sandbox for details....
+- #2 @94590391 iscovery_cache_enableH.......This is a claude.ai MCP connector. Ask the user to run /mcp and select "......i." to authenticate...........Server "........" uses .k...shk
+- #3 @94590552 k...shk. transport which does not support OAuth from this tool. Ask the user to run /mcp and authenticate manually..M.......
+
+This session is remote, so after authorizi
+- #4 @94591502 ilently for ......t...Failed to start OAuth flow for .5....k@.. Ask the user to run /mcp and authenticate manually....G.......Cannot destructure property 'callback_url'
+- #5 @97250314 try again or proceed without): ...1.......Needs authentication (ask the user to run /mcp): ...,...h...Disabled (ask the user to enable via /mcp): `...:...N.o.t. .c.o.n.
+- #6 @100527943 ings while no terminal is attached to this background session. Attach to it and run /mcp again, or use `/mcp enable|disable|reconnect <server>` to steer without the pan
+- #7 @100532240 authentication needed...I...mu.. requires authentication. Open this session and run /mcp to authenticate....*....... It now shows "needs input" in agent view...3....8..
+- … +14 more
+
+## 248 · run /mcp needle=" · run /mcp" hits=0
+
+## 248 status==="warning" needle="status===\"warning\"" hits=0
+
+## 248 status:"warning",children needle="status:\"warning\",children" hits=17
+- #0 @201563580 )=>wr(),render:()=>r(L,{children:[r(Gp,{status:"warning",children:["Safe mode: all customizations are dis
+- #1 @201564213 ())?Ef(te(),d.path):d.path;return r(Gp,{status:"warning",children:[e(t,{bold:!0,children:f})," is over th
+- #2 @201564645 ;return e(o,{marginTop:1,children:r(Gp,{status:"warning",children:[i.source," overriding Claude subscript
+- #3 @201565096 ;return e(o,{marginTop:1,children:r(Gp,{status:"warning",children:[i," overriding saved Console key",e(t,
+- #4 @201565605 on:"column",marginTop:1,children:[r(Gp,{status:"warning",children:["Both ",l.source," and ",i," set \xB7 
+- #5 @201566307 t l=Ps(i.agentDefinitions);return r(Gp,{status:"warning",children:["Agent descriptions are over the"," ",
+- … +11 more
+
+## 248 function Gp({status @-1
+MISS {"miss":true}
+
+## 248 function Gp(e){let{status @-1
+MISS {"miss":true}
+
+## 248 function Gp({status: @-1
+MISS {"miss":true}
+
+## 248 Gp=({status needle="Gp=({status" hits=0
+
+## 248 Gp=e=> needle="Gp=(" hits=2
+- #0 @197753319 ==0)return!1;if(p||h)return!1;return!0},Gp=(e,t,r)=>{if(!e)return t;let n=xd(e.semve
+- #1 @224210642 inally{xs(!1)}}},[$s,_o,O.artboards,r]),Gp=(0,fe.useCallback)(async()=>{if(_o)return
+
+## 248 function wZe needle="function wZe" hits=3
+- #0 @184866057 ol.call"&&("ref"in t)&&typeof t.ref==="number"?{ref:t.ref,result:void 0}:void 0;function wZe(e){e.state.environmentHost?.terminate(),e.state.environmentHost=void 0}var TZe=
+- #1 @201218721 s.lastStartFailureDetail=void 0,this.startInFlight=!1,this.peerDirOwnerUids=[]}}function wZe(e){if(e.startInFlight||e.activeSocketPath!==void 0)return;switch(e.lastStartFai
+- #2 @203276367 tion CZe(d){return d.isLoading}function vZe(d){return d.lastQueryCompletionTime}function wZe(d){return d.submitCount}N();import{unlink as TZe}from"fs/promises";import{join 
+
+## 248 wZe( needle="wZe(" hits=5
+- #0 @184866066  t.ref==="number"?{ref:t.ref,result:void 0}:void 0;function wZe(e){e.state.environmentHost?.terminate(),e.state.environmentH
+- #1 @201218730  0,this.startInFlight=!1,this.peerDirOwnerUids=[]}}function wZe(e){if(e.startInFlight||e.activeSocketPath!==void 0)return;sw
+- #2 @201567171 s:"warning",children:["Cross-session messaging is off:"," ",wZe(uFe.of(i.session.host))??"its socket directory could not be 
+- #3 @202057651 ck")return;t.lastStartDegradedCause=e}function r0t(){return wZe(s())}function U(e){if(typeof e!=="object"||e===null)return!1
+- #4 @203276376 g}function vZe(d){return d.lastQueryCompletionTime}function wZe(d){return d.submitCount}N();import{unlink as TZe}from"fs/pro
+
+## CMP paddingLeft:1 around notices phrase needle="paddingLeft:1" hits248=44 hits247=45
+## CMP column paddingLeft:1 needle="flexDirection:\"column\",paddingLeft:1" hits248=2 hits247=3
+## CMP column paddingLeft:2 needle="flexDirection:\"column\",paddingLeft:2" hits248=9 hits247=9
+## 248 qt.warnings slot @201576872
+tingClaudeSubscription:Fc?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:Vv??!1,replBridgeSessionUrl:zv,mcpNeedsAuthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:qt.slot.tier==="announcement"?"claude":void 0,borderDimColor:qt.slot.tier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.render(k
+
+## 247 warnings.length>0 first @212277876
+json: ${y(i)}`}]}}}async function Et(e,t){if(e.bindings)return e.bindings;if(e.warmAttempted)return;if(_e())return;if(J())return;let n=await Ce(e,t,{suppressFeatureEvents:!0});if(e.warmAttempted=!0,n.warnings.length>0)return n.bindings;if(!e.bindings)e.bindings=n.bindings,e.warnings=[],e.warmedFromBackend=!0,b("keybinding_load_user_config");return e.bindings}function Pe(e){if(!e.warmedFromBackend)return!1;if(J())return e.bindings=null,e.warnings=[],e.warmedFromBackend=!1,!0;return e.warmedFromBackend=!1,!1}function Ie(e){if(e.bindings&&!Pe(e))return e.bindings;return Fn(e).bindings}function Fn
+
+## 248 qt.warnings.map needle="qt.warnings.map" hits=1
+- #0 @201577045 showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1
+
+## 248 warnings.map(( needle="warnings.map((" hits=6
+- #0 @179493680 ); Claude Code will not start until it is fixed`;if(u.onChain&&!o)o={settings:d.settings,warnings:d.warnings.map((p)=>({...p,statusOnly:!0})),sourceField:u.field,mergesOutput:u.mergesOutput}}return g.defaultFallbac
+- #1 @182793346 ox configuration unavailable";function J0(e){return{...e,errors:e.errors.map((t)=>VU(t)),warnings:e.warnings.map((t)=>VU(t))}}function z0(){try{_o(Jpt(yn()??{}))}catch(e){n(`checkDependencies: settings unavailable,
+- #2 @201577048 wAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0
+- #3 @202264524 plugins.errors,...h]}}})}function Ye(w,Q){if(Q.length===0)return;w((ne)=>{let re=new Set(ne.plugins.warnings.map((F)=>Re(F))),h=Q.filter((F)=>!re.has(Re(F)));if(h.length===0)return ne;return{...ne,plugins:{...ne.pl
+- #4 @203887566 n{...e,errors:e.errors.map((t)=>({...t,path:x0(t.path,200),message:x0(t.message,1000)})),warnings:e.warnings.map((t)=>({path:x0(t.path,200),message:x0(t.message,1000)})),...e.notes!==void 0&&{notes:e.notes.map((t)=
+- #5 @210520165 d: ${e.mocks.calls.unmocked.map((d)=>`${r(d.tool)} \xD7${d.count}`).join(", ")}</div>`:""}${e.mocks.warnings.map((d)=>`<div class="note">${r(d)}</div>`).join("")}</details>`:"";return`<div class="run">
+<div class="
+
+## 248 .map((notice needle=".map((notice" hits=0
+
+## 248 paddingLeft:1,children: needle="paddingLeft:1,children:" hits=31
+- #0 @192201601 oo[47]!==zn||oo[48]!==mo||oo[49]!==Wr||oo[50]!==sl)wl=sl&&!mo&&!To&&!zn&&!$o&&!Wr?e(o,{flexShrink:0,paddingLeft:1,children:r(t,{dimColor:!0,children:["\xD7",sl]})}):null,oo[45]=$o,oo[46]=To,oo[47]=zn,oo[48]=mo,oo[49]=Wr,oo[
+- #1 @192209485 children:"\xB7 looking for past sessions\u2026"})]})]}),Qr&&!(Ke.group==="done"&&uf.length>0)&&e(o,{paddingLeft:1,children:e(t,{dimColor:!0,children:wa[Ke.group]})})]},`h:${Ke.group}`)}if(Ke.kind==="fold"){return e(o,{ref:X
+- #2 @192225644 d})}),mi[2]=Rd,mi[3]=_d;else _d=mi[3];let Cd;if(mi[4]!==Ls.length)Cd=Ls.length>1&&e(o,{flexShrink:0,paddingLeft:1,children:r(t,{dimColor:!0,children:["+",Ls.length-1," more \xB7 enter to open"]})}),mi[4]=Ls.length,mi[5]=Cd;
+- #3 @192232628 :""]})})]}):null]})}),ce.diffStat&&ce.diffStat.additions+ce.diffStat.deletions>0&&e(o,{flexShrink:0,paddingLeft:1,children:e(it,{url:`${ce.row.href}/files`,children:e(Jh,{added:ce.diffStat.additions,removed:ce.diffStat.dele
+- #4 @192232781 s`,children:e(Jh,{added:ce.diffStat.additions,removed:ce.diffStat.deletions})})}),e(o,{flexShrink:0,paddingLeft:1,children:ce.status.map((rt,Yt)=>r(Ma,{children:[Yt>0&&e(t,{children:" "}),e(t,{color:rt.color,dimColor:!rt.co
+- #5 @199059577 organization's gateway URL (set by managed settings):"}),e(o,{borderDimColor:!0,borderStyle:"round",paddingLeft:1,children:e(t,{children:te})}),r(t,{dimColor:!0,children:["Press Enter to connect",W?"":" \xB7 Esc to cancel"]
+- #6 @201214675 [12]!==it)be=e(o,{borderStyle:"quote",borderTop:!1,borderBottom:!1,borderRight:!1,borderDimColor:!0,paddingLeft:1,children:e(zr,{dimColor:ot,children:it})}),st[11]=ot,st[12]=it,st[13]=be;else be=st[13];return be}var ce=4096
+- #7 @201433395 rderStyle:"quote",borderTop:!1,borderBottom:!1,borderRight:!1,borderLeftColor:"claude",marginLeft:5,paddingLeft:1,children:r(t,{dimColor:!0,wrap:"wrap",children:[Bh,tu?null:r(L,{children:["\u2026 ",e(hc,{})]})]})}):null,z[6
+- … +23 more
+
+## 248 paddingLeft:2,children: needle="paddingLeft:2,children:" hits=62
+- #0 @190622747 o,Qo,Zo]}),an[29]=Yo,an[30]=Qo,an[31]=Zo,an[32]=er;else er=an[32];let nr;if(an[33]!==Ho)nr=Ho&&e(o,{paddingLeft:2,children:e(t,{color:"inactive",children:Ho})}),an[33]=Ho,an[34]=nr;else nr=an[34];let wu;if(an[35]!==ji||an[3
+- #1 @190647077 Arrow:_a&&Wa,onClick:fn(oe),children:e(t,{dimColor:Ns,color:za,children:ja})}),oe.description&&e(o,{paddingLeft:2,children:e(t,{dimColor:Ns||oe.dimDescription!==!1,color:za,children:e(zr,{children:oe.description})})}),e(t,{
+- #2 @192201818 Wr,oo[50]=sl,oo[51]=wl;else wl=oo[51];let yl;if(oo[52]!==bl||oo[53]!==wl)yl=r(o,{flexGrow:1,width:0,paddingLeft:2,children:[bl,wl]}),oo[52]=bl,oo[53]=wl,oo[54]=yl;else yl=oo[54];const Dp=Ao.artifact>0?e(o,{width:Ao.artifact
+- #3 @192214862 e Wl=ho[88];let Ql;if(ho[89]!==rf.length||ho[90]!==Mo||ho[91]!==cf)Ql=rf.length===0&&!!Mo&&cf&&e(o,{paddingLeft:2,children:e(t,{dimColor:!0,children:"no sessions match"})}),ho[89]=rf.length,ho[90]=Mo,ho[91]=cf,ho[92]=Ql;els
+- #4 @192215184 Xl=Yr&&!Rn&&zr!=="remote"&&!jr&&!Lo.some((uw)=>uw.kind==="header"&&uw.group===(Cn?"done":fy))&&e(o,{paddingLeft:2,children:e(t,{dimColor:!0,children:"\xB7 looking for past sessions\u2026"})}),ho[93]=zr,ho[94]=Cn,ho[95]=jr,h
+- #5 @192225014 vd]}),jt[40]=hd,jt[41]=vd,jt[42]=Jw;else Jw=jt[42];return Jw}N();N();function Vw(Pd,OI){return r(o,{paddingLeft:2,children:[e(o,{width:3,flexShrink:0,children:r(t,{dimColor:!0,children:[OI+1,"."]})}),e(o,{flexGrow:1,width:0
+- #6 @192232963 " "}),e(t,{color:rt.color,dimColor:!rt.color,children:rt.text})]},Yt))})]},ce.row.href)),Se>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:["\u2026 ",Se," more"]})})]}),mt>0&&e(o,{paddingLeft:2,children:e(t,{wrap:
+- #7 @192233053 e>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:["\u2026 ",Se," more"]})})]}),mt>0&&e(o,{paddingLeft:2,children:e(t,{wrap:"truncate",children:r(ue,{children:[be&&r(t,{color:Gt,children:["waiting ",Te]}),It!==""&&
+- … +54 more
+
+## 248 paddingLeft:0,children: needle="paddingLeft:0,children:" hits=0
+
+## 248 Debug-mode-win @93411640
+ot be set up-...Ae,.run with --debug-file <path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix twice - Claude uses ...!.......CLAUDE_CODE_TMUX_PREFIX_CONFLICT
+
+## 248 last-paddingLeft-before-Debug @92429852
+.....1..confirmHint.......:.isBg.....J..paddingLeft.
+.....].getMinutes..
+.......getSeconds..	....v	.operation...
+.......
+
+## 247 Debug-mode-win @198023296
+de/agents/.......&i. MCP........authentication..........server needs....w.?.servers need........ . run /mcp.........socket_dir_refused..........lastStartFailureCause...H....U..Cross-session messaging is off: its socket directory could not be set up'...5.5.run with --debug-file <path> to see why.$...b...HIPAA . some features are restricted......!. . /status for details..
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix twice - Claude uses ...!.......CLAUDE_CODE_TMUX_PREFIX_CONFLICT
+
+## 247 last-paddingLeft-before-Debug @197101696
+erBottom.....mf.borderDimColor.......J..paddingLeft.B....._.Cannot destructure property 'entries' from null or undefined
+
+## 248 mcpNeedsAuthCount:Yv ctx @201576789
+ted:_i.requested,effective:Rg}}let ki={session:xg,config:Jv,agentDefinitions:Kv,memoryFiles:Xv,modelDeprecationWarning:Fc?.modelDeprecationWarning??null,modelRestrictedWarning:Ci,existingClaudeSubscription:Fc?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:Vv??!1,replBridgeSessionUrl:zv,mcpNeedsAuthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:qt.slot.tier==="announcement"?"claude":void 0,borderDimColor:qt.slot.tier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.render(ki)}))})]});let Ei
+
+## fn before mcpNeedsAuthCount:Yv {"i":201575834,"name":"Fr"}
+## 248 fn-mcpNeedsAuthCount-Yv @201575834
+len=2112 sha=0fa3ee49235f4963
+function Fr(wi){let Mi=g(11),yg;if(Mi[0]!==wi)yg=wi===void 0?{}:wi,Mi[0]=wi,Mi[1]=yg;else yg=Mi[1];let{latchAnnouncementSlot:Sg}=yg,Qo=Sg===void 0?!0:Sg,{storageV5:bg,credentials:Gv}=fe(),{columns:jv}=we(),Wv=jVt(jv),xg=pt(),Fc=mi(Ig),Vv=mi(Ng),zv=mi(Dg),Tg;if(Mi[2]!==Qo)Tg=(qv)=>Qo?qv.agentDefinitions:void 0,Mi[2]=Qo,Mi[3]=Tg;else Tg=Mi[3];let Kv=mi(Tg),Yv=mi(Pg)??0;Ns(),Ze(Zpn),As();let Xv=Ii(xg,bg,Gv);const Jv=oe();let Ci;bb0:{let _i=Fc?.modelRestrictedWarning;if(!_i){Ci=null;break bb0}let Rg=st();let wg=ln(_i.requested.trim().toLowerCase());if(!kk(wg)&&wg!=="best"&&Pt(_i.requested).toLowerCase()===Rg.toLowerCase()){Ci=null;break bb0}Ci={requested:_i.requested,effective:Rg}}let ki={session:xg,config:Jv,agentDefinitions:Kv,memoryFiles:Xv,modelDeprecationWarning:Fc?.modelDeprecationWarning??null,modelRestrictedWarning:Ci,existingClaudeSubscription:Fc?.existingClaudeSubscription??null,replBridgeAutoOnByDefault:Vv??!1,replBridgeSessionUrl:zv,mcpNeedsAuthCount:Yv,storageV5:bg},qt=(Qo?Ri:Ur)(xi(ki),Wv,{suppressPromos:sQe()}),$c=qt.warnings.length>0,Mg=qt.slot!==null,vg=qt.ant.length>0,Cg=qt.slot?.showAccentBar?.()??!0;const Gc=Po,jc=ey,Wc=!$c&&!Mg&&!vg?null:r(o,{flexDirection:"column",children:[qt.warnings.map((Qv)=>e(L,{children:Qv.render(ki)})),qt.slot===null?null:r(o,{flexDirection:"column",marginTop:$c?1:0,children:[e(o,{flexDirection:"column",paddingLeft:Cg?1:2,borderStyle:Cg?"quote":void 0,borderTop:!1,borderBottom:!1,borderRight:!1,borderColor:qt.slot.tier==="announcement"?"claude":void 0,borderDimColor:qt.slot.tier!=="announcement",children:qt.slot.render(ki)}),qt.slotOverflowCount>0&&e(o,{paddingLeft:2,children:r(Vt,{command:"/status",children:["+",qt.slotOverflowCount," more"]})})]}),vg&&e(o,{flexDirection:"column",paddingLeft:2,marginTop:$c||Mg?1:0,children:qt.ant.map((Zv)=>e(L,{children:Zv.render(ki)}))})]});let Ei;if(Mi[4]!==jc||Mi[5]!==Wc)Ei=e(jc,{children:Wc}),Mi[4]=jc,Mi[5]=Wc,Mi[6]=Ei;else Ei=Mi[6];let _g;if(Mi[7]!==Qo||Mi[8]!==Gc.Provider||Mi[9]!==Ei)_g=e(Gc.Provider,{value:Qo,children:Ei}),Mi[7]=Qo,Mi[8]=Gc.Provider,Mi[9]=Ei,Mi[10]=_g;else _g=Mi[10];return _g}

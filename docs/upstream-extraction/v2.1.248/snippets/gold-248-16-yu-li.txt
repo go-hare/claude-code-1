@@ -1,0 +1,65 @@
+# gold-248-16-yu-li3
+when=2026-09-20T08:16:14.078Z
+
+## catalog function Yu( count<=14
+@192120820 function Yu(i,d){if(i){if(d<30000)return 15000;if(d<300000)return 60000;return 180000}if(d<30000)return 60000;if(d<60000
+@201752159 function Yu(_d){return Math.max(0,_d-1)}function mi(d){if(Df(st())&&xU()&&!c5())mZ(d)}var z=fdt,fi="https://www.anthropi
+
+## catalog function ZZ( count<=5
+@180562485 function ZZ(e){let{memPeaks:t}=e;try{let r=process.memoryUsage();if(r.rss>t.rss)t.rss=r.rss;if(r.heapUsed>t.heapUsed)t.h
+@183572664 function ZZ(){return vi.terminalFocus!=="blurred"}function lN(){return vi.terminalFocus}function lqn(){return vi.termina
+@186419053 function ZZ(){if(!cC())return null;if(a.CLAUDE_CODE_SESSION_KIND==="bg")return null;let e=wN();if(e===null)return null;r
+@215551605 function ZZ(e){for(var t=0;t<Hk.length;t+=2)if(e>=Hk[t]&&e<=Hk[t+1])return!0;return!1}function OGe(e){if(e instanceof ws
+@223232404 function ZZ(e){let t=e.getElementById(FI),n=e.getElementById(zI);if(!t||!n)throw new Error("page anatomy missing (#"+FI+
+
+## catalog function Zg( count<=10
+@178556158 function Zg(){return n().userPresence.lastInteractionTime()}var AGt=60000;function Fwn(e){n().userPresence.updateTermina
+@182263699 function Zg(e,t,r=!1){if(t&&(t.windows===null||t.windows===void 0))t={...t,windows:eO.isWindows()};return Kg(e,t,r)}Obje
+@195882403 function Zg(e,t){if(e==="durable_refused")return qu;let r=sT(),o=Tn(t)?.slug,d=o!==void 0?oBe(o):void 0;if(d)r=d.events.
+@198052472 function Zg(e){return{localAccountId:e.homeAccountId,environment:e.authority,username:e.username,homeAccountId:e.homeAcc
+@200339115 function Zg(e,t){return(n)=>{let i=n.kid===void 0?e[0]:e.find((r)=>r.kid===n.kid);if(!i)throw Error("unknown kid");retur
+@200921114 function Zg(e,t,o,d,g,w,E,A,p,k,H,W,C,me,le,Z,re,Oe,be,Ue){let x=C.messageQueue,ee=xd.of(e),Fe=Id.of(e),ct=new Set,je=!1
+@211011947 function Zg(){return rm}mc.createNoopAttributesProcessor=Zg;function Qg(e){return new dc(e)}mc.createMultiAttributesProc
+@214232885 function Zg(e){return{name:"RenderMan RIB",keywords:"ArchiveRecord AreaLightSource Atmosphere Attribute AttributeBegin A
+@222326580 function Zg(e,t,n,r){e=null;for(var o=t,i=!1;o!==null;){if(!i){if((o.flags&524288)!==0)i=!0;else if((o.flags&262144)!==0
+@223016342 function Zg(a){if("value"===a.propertyName&&fd(pc)){var b=[];Wg(b,pc,a,re(a));wg(Mj,b)}}function Oj(a,b,c){"focusin"===a
+
+## catalog function Li( count<=22
+@189941394 function Li(e){let t=2166136261;for(let r=0;r<e.length;r++)t=Math.imul(t^e.charCodeAt(r),16777619);return(t>>>0).toStrin
+@192124642 function Li(i,d){let m;for(let w of i.keys())if(!d.has(w))(m??=new Map(i)).delete(w);return m??i}function Wo(i){return i
+@194610872 function Li(e){return{dev:e.dev,ino:e.ino,size:e.size,mtimeNs:e.mtimeNs}}var Di="index.claude-",Kl=600000,ql=/^filter\.(
+@200807877 function Li(e){return e.filter((t)=>t.type==="user"&&!t.toolUseResult&&(!t.isMeta&&dU(t)||xzn(t.origin))||t.type==="syst
+
+## catalog function se( count<=76
+@178209263 function se(){return Math.floor(Date.now()/1000)}class c1e{constructor(e,t){this.cached=null,this.pendingRefresh=null,th
+@178364304 function se(n){return[...new Set(n)]}function i1e(n,e){return n.map((t,o)=>e(t,o))}function DEe(n,e){if(e.length!==n.len
+@181061903 function se(e,t,r,c){return await j(e,t,r,(u)=>{if(!u)return{result:null};let s=te(u,c,r);return{write:s,result:s}})??nu
+@182062669 function se(oe){if(X)return;--Q;var le=oe.data;if(le.found){for(var de=0;de<k.length;++de)k[de].terminate();return X=!0,
+@189609793 function se(L,F,O){if(Te)return;let{viaApc:j,failureClass:I}=O??{};Te=!0,clearTimeout(J),clearTimeout(Ae),clearTimeout(H
+@199460424 function se(o,i){let s=To("userSettings");if(!s)return await En("cli_auto_mode_reset","no_user_settings_path"),is("Could
+@200583021 function se(t,e){try{return t.getToolUseSummary?.(e)??t.getActivityDescription?.(e)??""}catch(o){return n(`describeToolU
+@206759046 function se(e){try{return new URL(e).href.replace(/\/$/,"")}catch{return e.replace(/\/$/,"")}}class G extends Error{shou
+@207595116 function se(t){let n=performance.now(),e=()=>Math.round(performance.now()-n),r=await R();if(!r.ok)return r;let{filestore
+@208260973 function se({cell_id:s,new_source:i,error:l}){if(l)return e(Ie,{children:e(t,{color:"error",children:Es(l)})});return e(
+@208453034 function se(ls){return Math.max(0,ls-1)}function ne(cs){return cs.task.status==="running"}function lo(i){return{id:i.tas
+@224235384 function se(oe){let ae=u.get(oe),Te=ae?.server??q(oe,ae);if(ae===void 0)return Te;let $e=ae.removedSeen&&ae.server===voi
+
+## catalog function Wo( count<=28
+@180613014 function Wo(e){if(delete e.showSpinnerTree,e.installMethod!==void 0)return e;let t=e,r="unknown",o=e.autoUpdates??!0;swi
+@182048336 function Wo(){var e=0,t=this.s&this.DM;for(var a=0;a<this.t;++a)e+=Xo(this.data[a]^t);return e}function jo(e){var t=Math
+@182713219 function Wo(e,t){if(e.length!==t.length)return!1;let r=new Set(e);return t.every((o)=>r.has(o))}function zR(e,t){return 
+@192124739 function Wo(i){return i?.filter((d)=>!KC.test(d.href))??[]}function Oo(i,d){let m=Cf(i.state);if(m&&i.tempo!=="active"&&
+@192517628 function Wo(e,n,t){let{platform:o}=e.executor.capabilities;if(o!=="win32"||!e.executor.focusedControl)return null;if(n!=
+@203725670 function Wo(Jt){return(Jt+1)%Q.length}var J=3000,q=48,X=3;function V(Nt){let Ve=g(10),{live:Oe,boxRef:ze,children:Ke}=Nt
+
+## Yu-cand @192120820 len=178
+function Yu(i,d){if(i){if(d<30000)return 15000;if(d<300000)return 60000;return 180000}if(d<30000)return 60000;if(d<600000)return 300000;if(d<3600000)return 900000;return 1800000}
+
+## Yu-cand @201752159 len=40
+function Yu(_d){return Math.max(0,_d-1)}
+
+## Li-cand @189941394 len=126
+function Li(e){let t=2166136261;for(let r=0;r<e.length;r++)t=Math.imul(t^e.charCodeAt(r),16777619);return(t>>>0).toString(36)}
+
+## Li-cand @192124642 len=97
+function Li(i,d){let m;for(let w of i.keys())if(!d.has(w))(m??=new Map(i)).delete(w);return m??i}

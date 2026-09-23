@@ -1,0 +1,148 @@
+# gold-248-fGt-full
+
+## class fGt{ hits=1
+@178505059
+
+## EXTRACT class fGt @178505059
+sha=4bef1721daf3cebc len=4065 start=178505059
+
+### BODY
+class fGt{mergedSettings=null;perSource=new Map;parsedFiles=new Map;folderListings=new Map;managedFileReads=new Map;primedFiles=new Set;policyWalks=0;walkedFolders=new Map;policy={};lastPolicyEnvComposition=null;isLoadingFromDisk=!1;autoModeUntrustedSourceWarned=!1;changed=$e();internalWrites=new Map;enabledSources;pluginBase;epoch=0;systemSpaceServingLogged=!1;systemAttestationContradicted=!1;backendReadResetTail=Promise.resolve();invalidated=$e();pluginBaseLoaded=!1;primer;localStoreProbes=new Ft;retained=new Map;retainedListings=new Map;setPluginBase(e){this.pluginBase=e,this.pluginBaseLoaded=!0}clearPluginBase(){this.pluginBase=void 0}invalidateAll(e){if(this.epoch++,this.mergedSettings=null,this.perSource.clear(),this.parsedFiles.clear(),this.primedFiles.clear(),this.policyWalks=0,this.walkedFolders.clear(),this.folderListings.clear(),this.policy={},e?.userLayer==="retain"&&D()&&this.primer!==void 0){for(let[t,o]of this.retained)this.parsedFiles.set(t,o.parsed),this.primedFiles.add(t);for(let[t,o]of this.retainedListings)this.folderListings.set(t,o.names)}else this.retained.clear(),this.retainedListings.clear();this.invalidated.emit()}invalidatePolicyLayer(){this.mergedSettings=null,this.perSource.delete("policySettings"),this.policy={}}onInvalidate(e){return this.invalidated.subscribe(e)}seedParsedFile(e,t,o,r){if(r!==this.epoch)return!1;let i=this.parsedFiles.get(e),s=i===void 0||!ws(i,o);if(this.parsedFiles.set(e,o),s||this.primedFiles.has(e))this.primedFiles.add(e);let a=this.retained.get(e);if(a!==void 0)a.parsed=o;if(s)this.dropDerivedCaches(t);return!0}walkReadDiffers(e,t){let o=this.parsedFiles.get(e);return o!==void 0&&!this.primedFiles.has(e)&&!ws(o,t)}unseedParsedFile(e,t,o){if(o!==this.epoch)return;if(this.retained.delete(e),!this.primedFiles.has(e)||t==="policySettings"&&this.policyWalks>0)return;this.primedFiles.delete(e),this.parsedFiles.delete(e),this.dropDerivedCaches(t)}dropDerivedCaches(e){if(this.perSource.delete(e),this.mergedSettings=null,e==="policySettings")this.policy={}}primedFolderListing(e){return D()?this.folderListings.get(e):void 0}folderListingForPolicyWalk(e){if(!D())return;this.policyWalks++;let t=this.folderListings.get(e);if(!this.walkedFolders.has(e)||t!==void 0)this.walkedFolders.set(e,t??null);return t}noteWalkListing(e,t){if(!D())return;this.walkedFolders.set(e,t)}get policyWalkCount(){return this.policyWalks}policyInstallVerdict(e,t,o){let r=this.parsedFiles.get(e);if(r===void 0||ws(r,t))return"install";if(!this.primedFiles.has(e))return"raced";if(this.policyWalks===0)return"install";return this.policyWalks>o?"raced":"deferred"}folderInstallVerdict(e,t,o){if(!this.walkedFolders.has(e))return this.hasParsedDropInOutside(e,t)?"raced":"install";let r=this.walkedFolders.get(e);if(r!==null&&r!==void 0&&ws(r,t))return"install";return this.policyWalks>o?"raced":"deferred"}seedFolderListing(e,t,o){if(o!==this.epoch)return!1;let r=this.folderListings.get(e);this.folderListings.set(e,t);let i=this.retainedListings.get(e);if(i!==void 0)i.names=t;if(r!==void 0&&!ws(r,t))this.dropDerivedCaches("policySettings");return!0}walkReadManagedFileIn(e,t){for(let[o,r]of this.parsedFiles)if(!o.includes("\x00")&&!this.primedFiles.has(o)&&(r.settings!==null||r.errors.length>0)&&(o===e||It(o)===t))return!0;return!1}walkRead(e){return this.parsedFiles.has(e)&&!this.primedFiles.has(e)}hasParsedDropInOutside(e,t){for(let o of this.parsedFiles.keys())if(!o.includes("\x00")&&!this.primedFiles.has(o)&&It(o)===e&&!t.includes(Dr(o)))return!0;return!1}clearFolderListing(e,t){if(t!==this.epoch)return;if(this.retainedListings.delete(e),!this.folderListings.has(e)||this.walkedFolders.has(e))return;this.folderListings.delete(e),this.dropDerivedCaches("policySettings")}retainLayer(e,t){let o={parsed:t};return this.retained.set(e,o),()=>{if(this.retained.get(e)===o)this.retained.delete(e)}}dropRetainedLayer(e){this.retained.delete(e)}retainFolderListing(e,t){let o={names:t};return this.retainedListings.set(e,o),()=>{if(this.retainedListings.get(e)===o)this.retainedListings.delete(e)}}}
+
+### FIELDS
+mergedSettings
+perSource
+parsedFiles
+folderListings
+managedFileReads
+primedFiles
+policyWalks
+walkedFolders
+policy
+lastPolicyEnvComposition
+isLoadingFromDisk
+autoModeUntrustedSourceWarned
+changed
+internalWrites
+epoch
+systemSpaceServingLogged
+systemAttestationContradicted
+backendReadResetTail
+invalidated
+pluginBaseLoaded
+localStoreProbes
+retained
+retainedListings
+pluginBase
+userLayer
+i
+s
+a
+parsed
+o
+t
+e
+r
+names
+
+### METHODS
+$e
+resolve
+setPluginBase
+clearPluginBase
+invalidateAll
+clear
+D
+set
+add
+emit
+invalidatePolicyLayer
+delete
+onInvalidate
+subscribe
+seedParsedFile
+get
+ws
+has
+dropDerivedCaches
+walkReadDiffers
+unseedParsedFile
+primedFolderListing
+folderListingForPolicyWalk
+noteWalkListing
+policyWalkCount
+policyInstallVerdict
+folderInstallVerdict
+hasParsedDropInOutside
+seedFolderListing
+walkReadManagedFileIn
+includes
+It
+walkRead
+keys
+Dr
+clearFolderListing
+retainLayer
+dropRetainedLayer
+retainFolderListing
+
+## invalidateAll @178505706 window
+nBaseLoaded=!0}clearPluginBase(){this.pluginBase=void 0}invalidateAll(e){if(this.epoch++,this.mergedSettings=null,this.perSource.clear(),this.parsedFiles.clear(),this.primedFiles.clear(),this.policyWalks=0,this.walkedFolders.clear(),this.folderListings.clear(),this.policy={},e?.userLayer==="retain"&&D()&&this.primer!==void 0){for(let[t,o]of this.retained)this.parsedFiles.set(t,o.parsed),this.primedFiles.add(t);for(let[t,o]of this.retainedListings)this.folderListings.set(t,o.names)}else this.retained.clear(),this.retainedListings.clear();this.invalidated.emit()}invalidatePolicyLayer(){this.mergedSettings=null,this.perSource.delete("policySettings"),this.policy={}}onInvalidate(e){return this.invalidated.subscribe(e)}seedParsedFile(e,t,o,r){if(r!==this.epoch)return!1;let i=this.parsedFiles.get(e),s=i===void 0||!ws(i,o);if(this.parsedFiles.set(e,o),s||this.primedFiles.has(e))this.primedFiles.add(e);let a=this.retained.get(e);if(a!==void 0)a.parsed=o;if(s)this.dropDerivedCaches(t);return!0}walkReadDiffers(e,t){let o=this.parsedFiles.get(e);return o!==void 0&&!this.primedFiles.has(e)&&!ws(o,t)}unseedParsedFile(e,t,o){if(o!==this.epoch)return;if(this.retained.delete(e),!this.primedFiles.has(e)||t==="policySettings"&&this.policyWalks>0)return;this.primedFiles.delete(e),this.parsedFiles.delete(e),this.dropDerivedCaches(t)}dropDerivedCaches(e){if(this.perSource.delete(e),this.mergedSettings=null,e==="policySettings")this.policy={}}primedFolderListing(e){return D()?this.folderListings.get(e):void 0}folderListingForPolicyWalk(e){if(!D())return;this.policyWalks++;let t=this.folderListings.get(e);if(!this.walkedFolders.has(e)||t!==void 0)this.walkedFolders.set(e,t??null);return t}noteWalkListing(e,t){if(!D())return;this.walkedFolders.set(e,t)}get policyWalkCount(){return this.policyWalks}policyInstallVerdict(e,t,o){let r=this.parsedFiles.get(e);if(r===void 0||ws(r,t))return"install";if(!this.primedFiles.has(e))return"raced";if(this.policyWalks===0)return"install";return this.policyWalks>o?"raced":"deferred"}folderInstallVerdict(e,t,o){if(!this.walkedFolders.has(e))return this.hasParsedDropInOutside(e,t)?"raced":"install";let r=this.walkedFolders.get(e);if(r!==null&&r!==void 0&&ws(r,t))return"install";return this.policyWalks>o?"raced":"deferred"}seedFolderListing(e,t,o){if(o!==this.epoch)return!1;let r=this.folderListings.get(e);this.folderListings.set(e,t);let i=this.retainedListings.get(e);if(i!==void 0)i.names=t;if(r!==void 0&&!ws(r,t))this.dropDerivedCaches("policySettings");return!0}walkReadManagedFileIn(e,t){for(let[o,r]of this.parsedFiles)if(!o.includes("\x00")&&!this.primedFiles.has(o)&&(r.settings!==null||r.errors.length>0)&&(o===e||It(o)===t))return!0;return!1}walkRead(e){return this.parsedFiles.has(e)&&!this.primedFiles.has(e)}hasParsedDropInOutside(e,t){for(let o of this.parsedFiles.keys())if(!o.includes("\x00")&&!this.primedFiles.has(o)&&It(o)===e&&!t.includes(Dr(o)))return!0;return!1}clearFolderListing(e,t){if(t!==this.epoch)return;if(this.retainedListings.delete(e),!this.folderListings.has(e)||this.walkedFolders.has(e))return;this.folderListings.delete(e),this.dropDerivedCaches("policySettings")}retainLayer(e,t){let o={parsed:t};return this.retained.set(e,o),()=>{if(this.retained.get(e)===o)this.retained.delete(e)}}dropRetainedLayer(e){this.retained.delete(e)}retainFolderListing(e,t){let o={names:t};return this.retainedListings.set(e,o),()=>{if(this.retainedListings.get(e)===o)this.retainedListings.delete(e)}}}class Ft{ownerUidsByRoot=new Map;realHomeDir=void 0;canonicalRootOwnerUids(e,t){let o=this.ownerUidsByRoot.get(e);if(o!==void 0)return o;let r=t(e);return this.ownerUidsByRoot.set(e,r),r}hasCanonicalRootOwnerUids(e){return this.ownerUidsByRoot.has(e)}primeCanonicalRootOwnerUids(e,t){if(this.ownerUidsByRoot.has(e))return!1;return this.ownerUidsByRoot.set(e,t),!0}clearCanonicalRootOwnerUids(){this.ownerUidsByRoot.clear()}normalizedRealHomeDir(e){return this.realHomeDir??=e(),this.realHomeDir}clearNormalizedRealHomeDir(){this.realHomeDir=void 0}}var mGt=new K(()=>new fGt);
+
+## D() hunt in settings band 178500000-178520000
+hits_in_band=0
+
+## this.primer hits near fGt
+hits=1
+@178505956 stings.clear(),this.policy={},e?.userLayer==="retain"&&D()&&this.primer!==void 0){for(let[t,o]of this.retained)this.parsedFiles.set(t,o.parsed),this.primedFiles.add(t);for(let[t,o]
+
+## D()&&this.primer
+hits=1
+@178505951 ers.clear(),this.folderListings.clear(),this.policy={},e?.userLayer==="retain"&&D()&&this.primer!==void 0){for(let[t,o]of this.retained)this.parsedFiles.set(t,o.parsed),this.primedFiles.add(t);for(let[t,o]of this.retainedListings)this.folderListings.set(t,o.names)}else this.retai
+
+## method offset map (near class)
+setPluginBase(e){ → 178505605
+clearPluginBase(){ → 178505665
+invalidateAll(e){ → 178505706
+invalidatePolicyLayer(){ → 178506217
+onInvalidate(e){ → 178506321
+seedParsedFile(e,t,o,r){ → 178506374
+walkReadDiffers(e,t){ → 178506650
+unseedParsedFile(e,t,o){ → 178506755
+dropDerivedCaches(e){ → 178506985
+primedFolderListing(e){ → 178507095
+folderListingForPolicyWalk(e){ → 178507163
+noteWalkListing(e,t){ → 178507345
+get policyWalkCount() → 178507409
+policyInstallVerdict(e,t,o){ → 178507455
+folderInstallVerdict(e,t,o){ → 178507679
+seedFolderListing(e,t,o){ → 178507921
+walkReadManagedFileIn(e,t){ → 178508168
+walkRead(e){ → 178508354
+hasParsedDropInOutside(e,t){ → 178508423
+clearFolderListing(e,t){ → 178508586
+retainLayer(e,t){ → 178508803
+dropRetainedLayer(e){ → 178508925
+retainFolderListing(e,t){ → 178508970
+
+## post-class tail (after expected end)
+class_end=178509124
+class Ft{ownerUidsByRoot=new Map;realHomeDir=void 0;canonicalRootOwnerUids(e,t){let o=this.ownerUidsByRoot.get(e);if(o!==void 0)return o;let r=t(e);return this.ownerUidsByRoot.set(e,r),r}hasCanonicalRootOwnerUids(e){return this.ownerUidsByRoot.has(e)}primeCanonicalRootOwnerUids(e,t){if(this.ownerUidsByRoot.has(e))return!1;return this.ownerUidsByRoot.set(e,t),!0}clearCanonicalRootOwnerUids(){this.ownerUidsByRoot.clear()}normalizedRealHomeDir(e){return this.realHomeDir??=e(),this.realHomeDir}clearNormalizedRealHomeDir(){this.realHomeDir=void 0}}var mGt=new K(()=>new fGt);function k4(){return{sent:new Set,rejected:new Set}}function L_(e){return{sent:new Set(e.sent),rejected:new Set(e.rejected)}}function s7(e,t){if(!e.rejected.has(t))e.sent.add(t)}function $ne(e,t){return e.sent.has(t)&&!e.rej
+
+## D() def candidates via backrefs from invalidateAll retain
+retain_gate_hits=1
+@178505929
+no function D() within 50k lookback
+
+## primedFolderListing / folderListingForPolicyWalk bodies
+### primedFolderListing(e){ @178507095
+{"i":178507095,"body":"primedFolderListing(e){return D()?this.folderListings.get(e):void 0}","sha":"b7444493917cbe69","len":68}
+### folderListingForPolicyWalk(e){ @178507163
+{"i":178507163,"body":"folderListingForPolicyWalk(e){if(!D())return;this.policyWalks++;let t=this.folderListings.get(e);if(!this.walkedFolders.has(e)||t!==void 0)this.walkedFolders.set(e,t??null);return t}","sha":"04382913344e2a82","len":182}
+### noteWalkListing(e,t){ @178507345
+{"i":178507345,"body":"noteWalkListing(e,t){if(!D())return;this.walkedFolders.set(e,t)}","sha":"2702d2077e496ce7","len":64}
+## UNKNOWN residuals (after full peel)
+- D() @178167129 — PEELABLE; leftover isHoverRestOn / settingsPrimerGate wires it (sha D=394b34757d9d45d8, rtr @178167156 sha=701bf9660a0067b0).
+- primer / SKn @179523748 sha=435524f56ab1199e len=3367 — FULL body peeled in gold-248-SKn-primer.txt; LAND blocked (storageV5-entangled: v/wKn/Vjt/T/O/_Ke/$pn). assign e.primer=new SKn(t,e) @179527321 via settingsPrime ($pn). Retain gate @178505956 only needs primer!==void 0.
+- Retain gate call @178505949: userLayer==="retain"&&D()&&this.primer!==void 0
+- primedFolderListing D() call @178507118; folderListingForPolicyWalk @178507193; noteWalkListing @178507366

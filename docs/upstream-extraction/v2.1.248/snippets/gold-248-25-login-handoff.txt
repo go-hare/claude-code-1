@@ -1,0 +1,416 @@
+# gold-248-25-login-handoff
+# densable 2.1.248 #25 login-gateway-hang
+# SEA 226708128 · 247 present
+# when=2026-09-20T04:55:11.993Z
+
+## #25 login_handoff needle="login_handoff" 248=6 247=0
+## #25 login_handoff @201101704
+let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:re}=wo,s=yo==="login_handoff",y,b,O,Ye;if(n[0]!==f){let qe=zW(f);let{commandRows:ie,envRows:Be,categoryRows:Ge}=Dyn(qe);let ae=FL-Ge.length;let Je=ie.length+Be.length;let We=Je<=ae?ae:ae-1;let Y=ie.slice(0,Math.max(0,We));let je=Be.sli
+
+## #25 login_handoff @202549792
+y",payload:h(()=>m({settings:Bm((d)=>typeof d==="object"&&d!==null),reveal:le(["login_handoff","default"])})),result:h(()=>le(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind
+
+## #25 login_handoff @202550070
+,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",
+
+## #25 login_handoff @202550152
+gin_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-suggestions":{if(x===null|
+
+## #25 login_handoff @202550177
+eld{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(d){case"yes":return{behavior:"allow",updatedInput:C.input,...H&&{feedback:H}};case"yes-apply-suggestions":{if(x===null||!Gf(x))return{behavior:"
+
+## #25 consentHandoffRevealActive needle="consentHandoffRevealActive" 248=6 247=0
+## #25 consentHandoffRevealActive @190465501
+dedRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.st
+
+## #25 consentHandoffRevealActive @190466148
+}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function R
+
+## #25 consentHandoffRevealActive @190466937
+{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRev
+
+## #25 consentHandoffRevealActive @190467044
+!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consen
+
+## #25 consentHandoffRevealActive @190467140
+vealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)return 
+
+## #25 consentHandoffHolds needle="consentHandoffHolds" 248=7 247=0
+## #25 consentHandoffHolds @190465447
+){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().re
+
+## #25 consentHandoffHolds @190465872
+entRelease=null}}function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P
+
+## #25 consentHandoffHolds @190465901
+(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0
+
+## #25 consentHandoffHolds @190465976
+t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){retur
+
+## #25 consentHandoffHolds @190466009
+)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscr
+
+## #25 consentHandoffHolds @190466095
+tHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeed
+
+## #25 consentHandoffSignal needle="consentHandoffSignal" 248=5 247=0
+## #25 consentHandoffSignal @190465475
+lease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function 
+
+## #25 consentHandoffSignal @190465932
+handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().cons
+
+## #25 consentHandoffSignal @190466040
+return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P(
+
+## #25 consentHandoffSignal @190466202
+function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().n
+
+## #25 fireConsentNeededRelease needle="fireConsentNeededRelease" 248=3 247=0
+## #25 fireConsentNeededRelease @190465342
+elease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);functio
+
+## #25 fireConsentNeededRelease @190466874
+();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}
+
+## #25 PKt() needle="PKt()" 248=3 247=2
+## #25 PKt() @190465818
+se=e,()=>{if(t.startupConsentRelease===e)t.startupConsentRelease=null}}function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)
+
+## #25 PKt() @190466860
+ctive";let o=P();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await 
+
+## #25 PKt() @205709258
+==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatew
+
+## #25 function PKt needle="function PKt" 248=1 247=0
+## #25 function PKt @190465809
+sentRelease=e,()=>{if(t.startupConsentRelease===e)t.startupConsentRelease=null}}function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.
+
+## #25 function Ixt needle="function Ixt" 248=2 247=0
+## #25 function Ixt @186967362
+=>({type:"hook-load-failed",source:t,plugin:r,hookPath:o,reason:`${u}: ${p}`}))}function Ixt(e,t){if(!e)return t;let r={...e};for(let[o,u]of Object.entries(t))if(!r[o])r[o]=u;else r[o]=[...r[o]||[],...u];return r}async function _Me({cacheOnly:e,preview:t=!1,storageV5:r,credentials:o}){let u=yn(),p={
+
+## #25 function Ixt @190466069
+fHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelea
+
+## #25 function DKt needle="function DKt" 248=1 247=0
+## #25 function DKt @190466122
+nsentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeed
+
+## #25 function nie needle="function nie" 248=3 247=1
+## #25 function nie @202549952
+o_consent_surface"])),default:"deferred_no_consent_surface",yieldsToPanels:!0});function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt(
+
+## #25 function nie @215987962
+}return o(r,"catmullRom"),r.alpha=function(n){return e(+n)},r}),"custom")(.5)});function nie(e,t){this._context=e,this._alpha=t}var UN,iie=F(()=>{"use strict";qN();NE();o(nie,"CatmullRomOpen");nie.prototype={areaStart:o(function(){this._line=0},"areaStart"),areaEnd:o(function(){this._line=NaN},"area
+
+## #25 function nie @223955431
+ap(r=>e.subtreeHtml(r)).filter(r=>r!=null);return n.length===0?null:n.join(`
+`)}function nie(e,t,n){if(t.length===0)return{targetTid:null,position:"root-end"};let r=[...new Set(t.map(l=>Iu(e,l)))],o=Math.max(...r),i={targetTid:o,position:"after"},a=r.length===1?e.element(o):null;if(!a)return i;let s
+
+## #25 async function*pOe needle="async function*pOe" 248=1 247=0
+## #25 async function*pOe @202550033
+unction nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}N();function gie(d,C,x,H){switch(
+
+## #25 refuseInput needle="refuseInput" 248=47 247=0
+## #25 refuseInput @190609982
+nge:vo,onFocus:ct,onCancel:Bn,isDisabled:ul,disableSelection:al,defaultValue:ft,refuseInput:Zr}=Hc,Sn=ul===void 0?!1:ul,hn=al===void 0?!1:al,[bo,pt,Ze]=Fn(),[xo,ho]=u(null),[mt,ei]=u(null),Pe=mt!==null&&ke[mt-1]?.type==="input"?ke[mt-1]:null,cl=E(null);Qd(cl,!Sn),os("select",!!Bn&&!Sn);let dl;if(un[
+
+## #25 refuseInput @190613299
+nChange:ui,onSubmit:ai,onFocus:yt,onCancel:zn,isDisabled:Tl,submitButtonText:Io,refuseInput:gt}=Yc,Sl;if(Me[0]!==Oo)Sl=Oo===void 0?[]:Oo,Me[0]=Oo,Me[1]=Sl;else Sl=Me[1];let yn=Sl,On=Tl===void 0?!1:Tl,[wo,Bt,De]=Fn(),[Co,Gn]=u(null),[Hn,Ol]=u(null),ko=E(!1),Mo=E(!1),Il;if(Me[2]!==ai||Me[3]!==Hn)Il=()
+
+## #25 refuseInput @190618668
+n ITt(sd){let He=g(43),{confirmLabel:Ci,cancelLabel:Mi,onConfirm:Di,onCancel:It,refuseInput:wt,windowAnchorMs:ld,windowMs:ud}=sd,[ad,Ei,En]=Fn(),[No,Hl]=u(null),ql=E(null);Qd(ql,!0),os("select",!0);let{refuse:Vi,refuseCharacter:Ai}=zo(ld,ud),Jl;if(He[0]!==wt||He[1]!==Vi)Jl=function Vn(){return(wt?.(
+
+## #25 refuseInput @190641534
+Y.onCancel||ma[3]!==Y.onChange||ma[4]!==Y.onFocus||ma[5]!==Y.options||ma[6]!==Y.refuseInput||ma[7]!==Wt)va=e(P6,{options:Y.options,onChange:Y.onChange,onFocus:Y.onFocus,onCancel:Y.onCancel,isDisabled:Y.isDisabled,disableSelection:Y.disableSelection,refuseInput:Y.refuseInput,defaultValue:Wt}),ma[0]=Y
+
+## #25 refuseInput @190641703
+onCancel:Y.onCancel,isDisabled:Y.isDisabled,disableSelection:Y.disableSelection,refuseInput:Y.refuseInput,defaultValue:Wt}),ma[0]=Y.disableSelection,ma[1]=Y.isDisabled,ma[2]=Y.onCancel,ma[3]=Y.onChange,ma[4]=Y.onFocus,ma[5]=Y.options,ma[6]=Y.refuseInput,ma[7]=Wt,ma[8]=va;else va=ma[8];return va}let 
+
+## #25 refuseInput @190641717
+ancel,isDisabled:Y.isDisabled,disableSelection:Y.disableSelection,refuseInput:Y.refuseInput,defaultValue:Wt}),ma[0]=Y.disableSelection,ma[1]=Y.isDisabled,ma[2]=Y.onCancel,ma[3]=Y.onChange,ma[4]=Y.onFocus,ma[5]=Y.options,ma[6]=Y.refuseInput,ma[7]=Wt,ma[8]=va;else va=ma[8];return va}let Wt;if(ma[9]!==
+
+## #25 refuseInput @190641865
+abled,ma[2]=Y.onCancel,ma[3]=Y.onChange,ma[4]=Y.onFocus,ma[5]=Y.options,ma[6]=Y.refuseInput,ma[7]=Wt,ma[8]=va;else va=ma[8];return va}let Wt;if(ma[9]!==Y)Wt=e(Hr,{...Y}),ma[9]=Y,ma[10]=Wt;else Wt=ma[10];return Wt}function Hr(mp){let Ve=g(97),{isDisabled:ba,hideIndexes:xa,visibleOptionCount:ha,highli
+
+## #25 refuseInput @190659745
+i.onChange||Re[4]!==i.onFocus||Re[5]!==i.onSubmit||Re[6]!==i.options||Re[7]!==i.refuseInput||Re[8]!==i.submitButtonText)Q=e(RTt,{options:i.options,defaultValue:i.defaultValue,onChange:i.onChange,onSubmit:i.onSubmit,onFocus:i.onFocus,onCancel:i.onCancel,isDisabled:i.isDisabled,submitButtonText:i.subm
+
+## #25 cancelFirst needle="cancelFirst" 248=16 247=11
+## #25 cancelFirst @198978718
+function hn(J){let s=g(25),{onConfirm:n,onCancel:o,confirmLabel:P,cancelLabel:V,cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r|
+
+## #25 cancelFirst @199013594
+L[32]=Re;else Re=L[32];let je;if(L[33]!==po||L[34]!==mo)je=e(hn,{hideIndexes:!0,cancelFirst:!0,focus:"cancel",confirmLabel:"Save anyway (skip verification)",cancelLabel:"Go back and fix",onConfirm:mo,onCancel:po}),L[33]=po,L[34]=mo,L[35]=je;else je=L[35];let Xe;if(L[36]!==Re||L[37]!==je)Xe=e(ds,{sub
+
+## #25 cancelFirst @199042779
+L[28]=Ue;else Ue=L[28];let ve;if(L[29]!==ot||L[30]!==rt)ve=e(hn,{hideIndexes:!0,cancelFirst:!0,focus:"cancel",confirmLabel:"Save anyway (skip verification)",cancelLabel:"Go back and fix",onConfirm:rt,onCancel:ot}),L[29]=ot,L[30]=rt,L[31]=ve;else ve=L[31];let We;if(L[32]!==Ue||L[33]!==ve)We=e(ds,{sub
+
+## #25 cancelFirst @199238052
+let H;if(a[15]===p)H=()=>qe(!1),a[15]=H;else H=a[15];let j;if(a[16]!==A)j=e(hn,{cancelFirst:!0,focus:"cancel",confirmLabel:"Yes, remove",cancelLabel:"No, cancel",onConfirm:A,onCancel:H}),a[16]=A,a[17]=j;else j=a[17];let K;if(a[18]!==R||a[19]!==j)K=e(pe,{title:"Remove task?",subtitle:R,onCancel:V,col
+
+## #25 cancelFirst @201104227
+C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me,n[47]=pe,n[48]=ge,n[49]=j,n[50]=U,n[51]=K;else K=n[51];const we=s?"select":"confirm";let Q;if(n[52]!==we)Q=e(M,{chord:"en
+
+## #25 cancelFirst @202549034
+wAnchorMs:Xre,confirmLabel:"Set this goal",cancelLabel:"Not now",hideIndexes:!0,cancelFirst:!0,focus:"cancel",onConfirm:OW,onCancel:FW,windowMs:sa},Zre.remountKey),Ap[20]=Zre.remountKey,Ap[21]=$E,Ap[22]=Xre,Ap[23]=OW,Ap[24]=FW,Ap[25]=UW;else UW=Ap[25];let dOe;if(Ap[26]!==UW||Ap[27]!==EW||Ap[28]!==DW
+
+## #25 cancelFirst @203567302
+]!==I||i[42]!==P||i[43]!==T)n=e(v,{refuseInput:C,windowAnchorMs:S,hideIndexes:A,cancelFirst:D,focus:I,onConfirm:P,onCancel:T},x),i[35]=v,i[36]=x,i[37]=C,i[38]=S,i[39]=A,i[40]=D,i[41]=I,i[42]=P,i[43]=T,i[44]=n;else n=i[44];let s;if(i[45]!==y||i[46]!==b||i[47]!==R||i[48]!==k||i[49]!==h||i[50]!==n)s=r(
+
+## #25 cancelFirst @203664418
+==O||n[22]!==d||n[23]!==h)w=e(hn,{refuseInput:a,windowAnchorMs:O,hideIndexes:!0,cancelFirst:!0,focus:"cancel",confirmLabel:"Yes, use my browser",cancelLabel:"No, keep browser tools off",onConfirm:d,onCancel:h},R.remountKey),n[19]=R.remountKey,n[20]=a,n[21]=O,n[22]=d,n[23]=h,n[24]=w;else w=n[24];let 
+
+## #25 hideIndexes needle="hideIndexes" 248=64 247=32
+## #25 hideIndexes @190642042
+,ma[10]=Wt;else Wt=ma[10];return Wt}function Hr(mp){let Ve=g(97),{isDisabled:ba,hideIndexes:xa,visibleOptionCount:ha,highlightText:me,options:X,defaultValue:ys,selectedValue:gs,onCancel:dn,onChange:Wn,onFocus:Ts,defaultFocusValue:Ss,layout:ya,disableSelection:ga,inlineDescriptions:Ta,onUpFromFirstIt
+
+## #25 hideIndexes @190657140
+hange:A,onCancel:G,onFocus:Z,submitButtonText:k,onSubmit:m,onDownFromLastItem:M,hideIndexes:ee=!1,refuseSubmitFocus:j}){let[te,H,I]=ty(q),[ne,D,oe]=ty(!1),[c,X]=u(f);if(f!==c&&!Pe(f,c))H(q),X(f);let[ie,B]=u(()=>{let n=new Map;return f.forEach((l)=>{if(l.type==="input"&&l.initialValue)n.set(l.value,l
+
+## #25 hideIndexes @190660473
+,onFocus:Te,submitButtonText:R,onSubmit:W,onDownFromLastItem:ke,onOpenEditor:Oe,hideIndexes:Ae,canPasteImage:Se,onImagePaste:Ie,pastedContents:Ve,onRemoveImage:xe,refuseSubmitFocus:De}=gt,p=We===void 0?!1:We,ht=Ke===void 0?5:Ke,Ne;if(F[0]!==se)Ne=se===void 0?[]:se,F[0]=se,F[1]=Ne;else Ne=F[1];let we
+
+## #25 hideIndexes @190661070
+ge:be,onCancel:z,onFocus:Te,submitButtonText:R,onSubmit:W,onDownFromLastItem:ke,hideIndexes:L,refuseSubmitFocus:De},F[2]=we,F[3]=L,F[4]=p,F[5]=z,F[6]=be,F[7]=ke,F[8]=Te,F[9]=W,F[10]=C,F[11]=De,F[12]=R,F[13]=Ce,F[14]=je;else je=F[14];let a=re(je),He=E(null);Qd(He,!p);let[Fe,ze]=u(!1),_=Z$e(),Le;if(F[
+
+## #25 hideIndexes @191238065
+ MCP server",value:"no"}],onChange:(me)=>void we(me),onCancel:()=>void we("no"),hideIndexes:!0,refuseInput:ie,defaultFocusValue:"no",selectedValue:li},ee.remountKey)]})}N();function kXe({serverNames:d,pluginServerNames:C,onDone:w}){let{storageV5:F}=fe(),j=E(!1),H=Is(sa),{refusedWithin:W,noteRefused:
+
+## #25 hideIndexes @191239477
+defaultValue:re?[]:d,submitButtonText:"Enable selected",onSubmit:ie,onCancel:we,hideIndexes:!0,refuseInput:ee,refuseSubmitFocus:ee})]}),e(o,{paddingX:1,children:e(t,{dimColor:!0,italic:!0,children:r(ue,{children:[e(M,{chord:"space",action:"select"}),e(Be,{action:"confirm:no",context:"Confirmation",f
+
+## #25 hideIndexes @198978740
+(25),{onConfirm:n,onCancel:o,confirmLabel:P,cancelLabel:V,cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r||s[2]!==o||s[3]!==n||s
+
+## #25 hideIndexes @198979621
+||s[20]!==A||s[21]!==o||s[22]!==f||s[23]!==d)k=e(Te,{options:f,selectedValue:li,hideIndexes:A,defaultFocusValue:C,onChange:d,onCancel:o}),s[19]=C,s[20]=A,s[21]=o,s[22]=f,s[23]=d,s[24]=k;else k=s[24];return k}
+export{hn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial 
+
+## #25 windowAnchorMs needle="windowAnchorMs" 248=13 247=0
+## #25 windowAnchorMs @190618683
+e=g(43),{confirmLabel:Ci,cancelLabel:Mi,onConfirm:Di,onCancel:It,refuseInput:wt,windowAnchorMs:ld,windowMs:ud}=sd,[ad,Ei,En]=Fn(),[No,Hl]=u(null),ql=E(null);Qd(ql,!0),os("select",!0);let{refuse:Vi,refuseCharacter:Ai}=zo(ld,ud),Jl;if(He[0]!==wt||He[1]!==Vi)Jl=function Vn(){return(wt?.()??!1)||Vi()},H
+
+## #25 windowAnchorMs @198978768
+,confirmLabel:P,cancelLabel:V,cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r||s[2]!==o||s[3]!==n||s[4]!==b||s[5]!==R||s[6]!==N)
+
+## #25 windowAnchorMs @198979063
+!==N)a=e(ITt,{confirmLabel:r,cancelLabel:c,onConfirm:n,onCancel:o,refuseInput:b,windowAnchorMs:R,windowMs:N}),s[0]=c,s[1]=r,s[2]=o,s[3]=n,s[4]=b,s[5]=R,s[6]=N,s[7]=a;else a=s[7];return a}let a;if(s[8]!==r)a={label:r,value:"confirm"},s[8]=r,s[9]=a;else a=s[9];let i=a,Y;if(s[10]!==c)Y={label:c,value:"
+
+## #25 windowAnchorMs @201104105
+C||n[45]!==fe||n[46]!==me||n[47]!==pe||n[48]!==ge||n[49]!==j||n[50]!==U)K=e(hn,{windowAnchorMs:fe,windowMs:pe,refuseInput:C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me
+
+## #25 windowAnchorMs @201764213
+=pt||Ve[45]!==bt||Ve[46]!==_t||Ve[47]!==yt||Ve[48]!==ht)Le=e(nt,{refuseInput:ft,windowAnchorMs:gt,hideIndexes:pt,confirmLabel:bt,cancelLabel:_t,focus:yt,onConfirm:ht,onCancel:rt},mt),Ve[39]=nt,Ve[40]=rt,Ve[41]=mt,Ve[42]=ft,Ve[43]=gt,Ve[44]=pt,Ve[45]=bt,Ve[46]=_t,Ve[47]=yt,Ve[48]=ht,Ve[49]=Le;else Le
+
+## #25 windowAnchorMs @201799267
+=z.remountKey||a[25]!==l||a[26]!==x||a[27]!==C||a[28]!==j)O=e(hn,{refuseInput:C,windowAnchorMs:j,hideIndexes:!0,confirmLabel:"Send request",cancelLabel:"Cancel",focus:"cancel",onConfirm:x,onCancel:l},z.remountKey),a[24]=z.remountKey,a[25]=l,a[26]=x,a[27]=C,a[28]=j,a[29]=O;else O=a[29];let W;if(a[30]
+
+## #25 windowAnchorMs @202514948
+paddingX:1,children:[TNe,_Ne,RNe,e(o,{marginTop:1,children:e(hn,{refuseInput:RE,windowAnchorMs:vne,hideIndexes:!0,confirmLabel:I$!==null?I$.node:"Yes, enter plan mode",cancelLabel:"No, start implementing now",onConfirm:D$,onCancel:N$},wne.remountKey)})]}),xh[18]=wne.remountKey,xh[19]=RE,xh[20]=vne,x
+
+## #25 windowAnchorMs @202548949
+ey||Ap[21]!==$E||Ap[22]!==Xre||Ap[23]!==OW||Ap[24]!==FW)UW=e(hn,{refuseInput:$E,windowAnchorMs:Xre,confirmLabel:"Set this goal",cancelLabel:"Not now",hideIndexes:!0,cancelFirst:!0,focus:"cancel",onConfirm:OW,onCancel:FW,windowMs:sa},Zre.remountKey),Ap[20]=Zre.remountKey,Ap[21]=$E,Ap[22]=Xre,Ap[23]=O
+
+## #25 windowMs needle="windowMs" 248=9 247=3
+## #25 windowMs @190618701
+bel:Ci,cancelLabel:Mi,onConfirm:Di,onCancel:It,refuseInput:wt,windowAnchorMs:ld,windowMs:ud}=sd,[ad,Ei,En]=Fn(),[No,Hl]=u(null),ql=E(null);Qd(ql,!0),os("select",!0);let{refuse:Vi,refuseCharacter:Ai}=zo(ld,ud),Jl;if(He[0]!==wt||He[1]!==Vi)Jl=function Vn(){return(wt?.()??!1)||Vi()},He[0]=wt,He[1]=Vi,H
+
+## #25 windowMs @198254573
+E=R!==null&&this.nonOriginPolicy!==void 0&&k-R.startedAtMs<this.nonOriginPolicy.windowMs,A=ge.has(u.status)&&!E;if(n(`SSETransport: HTTP ${u.status}${A?" (permanent)":""}${g?` source=${g}`:""}${E?` (not origin \u2014 retrying; attempt ${R?.attempts})`:""}`,{level:"error"}),Y("error","cli_sse_connect
+
+## #25 windowMs @198324093
+je=(i.nonOrigin403Retry??!1)&&se,ee=je&&be;if(je)K.setNonOriginRejectionPolicy({windowMs:ht,maxGapMs:so,onRecovered:i.onNonOriginRejectionRecovered});let pr,Q=!1;function z(M,re,Ae){if(Q)return;Q=!0;try{U.close({goodbye:!1,retainUndeliveredClientEvents:i.retainUndeliveredOnClose===!0}),K.close()}cat
+
+## #25 windowMs @198978785
+ancelLabel:V,cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r||s[2]!==o||s[3]!==n||s[4]!==b||s[5]!==R||s[6]!==N)a=e(ITt,{confirmL
+
+## #25 windowMs @198979080
+firmLabel:r,cancelLabel:c,onConfirm:n,onCancel:o,refuseInput:b,windowAnchorMs:R,windowMs:N}),s[0]=c,s[1]=r,s[2]=o,s[3]=n,s[4]=b,s[5]=R,s[6]=N,s[7]=a;else a=s[7];return a}let a;if(s[8]!==r)a={label:r,value:"confirm"},s[8]=r,s[9]=a;else a=s[9];let i=a,Y;if(s[10]!==c)Y={label:c,value:"cancel"},s[10]=c,
+
+## #25 windowMs @201104123
+6]!==me||n[47]!==pe||n[48]!==ge||n[49]!==j||n[50]!==U)K=e(hn,{windowAnchorMs:fe,windowMs:pe,refuseInput:C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me,n[47]=pe,n[48]=ge
+
+## #25 windowMs @202549089
+"Not now",hideIndexes:!0,cancelFirst:!0,focus:"cancel",onConfirm:OW,onCancel:FW,windowMs:sa},Zre.remountKey),Ap[20]=Zre.remountKey,Ap[21]=$E,Ap[22]=Xre,Ap[23]=OW,Ap[24]=FW,Ap[25]=UW;else UW=Ap[25];let dOe;if(Ap[26]!==UW||Ap[27]!==EW||Ap[28]!==DW||Ap[29]!==NW)dOe=e(to,{color:"permission",children:r(o
+
+## #25 windowMs @210239502
+First:!0,focus:"cancel",confirmLabel:Be,cancelLabel:Ue,onConfirm:je,onCancel:Re,windowMs:sa}),j[18]=Be,j[19]=Ue,j[20]=je,j[21]=Re,j[22]=Me;else Me=j[22];let yo;if(j[23]===p)yo=e(t,{dimColor:!0,children:r(ue,{children:[e(M,{chord:"enter",action:"confirm"}),e(M,{chord:"escape",action:"cancel"})]})}),j
+
+## #25 Yes, I trust these settings needle="Yes, I trust these settings" 248=2 247=2
+## #25 Yes, I trust these settings @201104163
+=j||n[50]!==U)K=e(hn,{windowAnchorMs:fe,windowMs:pe,refuseInput:C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me,n[47]=pe,n[48]=ge,n[49]=j,n[50]=U,n[51]=K;else K=n[51];co
+
+## #25 DKt @190466122 len=53 sha=454151d2310e485e bodyHits247=0
+function DKt(){return P().consentHandoffRevealActive}
+
+## #25 Ixt @190466069 len=53 sha=c42da064025718f5 bodyHits247=0
+function Ixt(){return P().consentHandoffHolds.size>0}
+
+## #25 nie @202549952 len=81 sha=1805be608bd2f346 bodyHits247=0
+function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}
+
+## #25 pOe @202550033 len=187 sha=225b6414455f0d62 bodyHits247=0
+async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}
+
+## #25 X @201101609 len=3364 sha=4a838213a8ac7203 bodyHits247=0
+function X(wo){let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:re}=wo,s=yo==="login_handoff",y,b,O,Ye;if(n[0]!==f){let qe=zW(f);let{commandRows:ie,envRows:Be,categoryRows:Ge}=Dyn(qe);let ae=FL-Ge.length;let Je=ie.length+Be.length;let We=Je<=ae?ae:ae-1;let Y=ie.slice(0,Math.max(0,We));let je=Be.slice(0,Math.max(0,We-Y.length));O=[...Y,...je,...Ge];y=ie.length-Y.length;b=Je-Y.length-je.length;Ye=Hyn(qe,f)?be:ye;n[0]=f,n[1]=y,n[2]=b,n[3]=O,n[4]=Ye}else y=n[1],b=n[2],O=n[3],Ye=n[4];let a=Ye,[ce,bo]=u(null),le=Is(c),{refusedWithin:de,noteRefused:he,epoch:vo}=Hi(),fe=qf(),[Co,xo]=u(0),Ne;if(n[5]===p)Ne=()=>{xo(De)},n[5]=Ne;else Ne=n[5];let Ue;if(n[6]!==f)Ue=[f],n[6]=f,n[7]=Ue;else Ue=n[7];k(Ne,Ue);let Ro=Hs(`${vo}:${Co}`,c),Ke;if(n[8]!==s||n[9]!==le||n[10]!==he||n[11]!==de)Ke=function d(){if(!s){return!1}if(le()||de(c)){return he(),!0}return!1},n[8]=s,n[9]=le,n[10]=he,n[11]=de,n[12]=Ke;else Ke=n[12];let d=Ke,Qe;if(n[13]!==re||n[14]!==d)Qe=function C(){if(d()){return!0}return re?.()===!1},n[13]=re,n[14]=d,n[15]=Qe;else Qe=n[15];let C=Qe,Ve;if(n[16]!==d)Ve=function i(ko,To){if(d()){return}if(ko()===!1)bo((Lo)=>({epoch:(Lo?.epoch??0)+1,focus:To}))},n[16]=d,n[17]=Ve;else Ve=n[17];let i=Ve,Xe;if(n[18]!==w||n[19]!==i)Xe=()=>i(w,"cancel"),n[18]=w,n[19]=i,n[20]=Xe;else Xe=n[20];let Ze;if(n[21]===p)Ze={context:"Confirmation"},n[21]=Ze;else Ze=n[21];Fe("confirm:no",Xe,Ze);let q;if(n[22]!==a.intro)q=e(t,{children:a.intro}),n[22]=a.intro,n[23]=q;else q=n[23];let B;if(n[24]!==a.listLabel)B=e(t,{dimColor:!0,children:a.listLabel}),n[24]=a.listLabel,n[25]=B;else B=n[25];let F;if(n[26]!==O)F=O.map(eo),n[26]=O,n[27]=F;else F=n[27];let G;if(n[28]!==y||n[29]!==b)G=b>0?r(t,{bold:!0,children:["  ","\u2026 +",b," more"," ",I(b,"setting")," not shown",y>0?`, ${y} executing ${I(y,"a command","commands")}.`:"."]}):null,n[28]=y,n[29]=b,n[30]=G;else G=n[30];let J;if(n[31]!==B||n[32]!==F||n[33]!==G)J=r(o,{flexDirection:"column",children:[B,F,G]}),n[31]=B,n[32]=F,n[33]=G,n[34]=J;else J=n[34];let W;if(n[35]!==a.advice)W=e(t,{children:a.advice}),n[35]=a.advice,n[36]=W;else W=n[36];const me=s?`${ce?.epoch??0}:${Ro.remountKey}`:`${ce?.epoch??0}`,pe=s?c:void 0,ge=s?"cancel":ce?.focus??"confirm";let j;if(n[37]!==se||n[38]!==i)j=()=>i(se,"confirm"),n[37]=se,n[38]=i,n[39]=j;else j=n[39];let U;if(n[40]!==w||n[41]!==i)U=()=>i(w,"cancel"),n[40]=w,n[41]=i,n[42]=U;else U=n[42];let K;if(n[43]!==s||n[44]!==C||n[45]!==fe||n[46]!==me||n[47]!==pe||n[48]!==ge||n[49]!==j||n[50]!==U)K=e(hn,{windowAnchorMs:fe,windowMs:pe,refuseInput:C,confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",cancelFirst:s,focus:ge,hideIndexes:s,onConfirm:j,onCancel:U},me),n[43]=s,n[44]=C,n[45]=fe,n[46]=me,n[47]=pe,n[48]=ge,n[49]=j,n[50]=U,n[51]=K;else K=n[51];const we=s?"select":"confirm";let Q;if(n[52]!==we)Q=e(M,{chord:"enter",action:we}),n[52]=we,n[53]=Q;else Q=n[53];let _e;if(n[54]===p)_e=e(M,{chord:"escape",action:"exit"}),n[54]=_e;else _e=n[54];let V;if(n[55]!==Q)V=e(gs,{children:r(ue,{children:[Q,_e]})}),n[55]=Q,n[56]=V;else V=n[56];let He;if(n[57]!==J||n[58]!==W||n[59]!==K||n[60]!==V||n[61]!==q)He=e(Zo,{color:"warning",titleColor:"warning",title:"Managed settings require approval",children:r(o,{flexDirection:"column",gap:1,paddingTop:1,children:[q,J,W,K,V]})}),n[57]=J,n[58]=W,n[59]=K,n[60]=V,n[61]=q,n[62]=He;else He=n[62];return He}
+
+## #25 X-before @201101609
+=v||x[12]!==S||x[13]!==T)O=r(o,{flexDirection:"column",borderStyle:"round",borderColor:v,borderLeft:!1,borderRight:!1,borderBottom:!1,marginTop:1,children:[S,T]}),x[11]=v,x[12]=S,x[13]=T,x[14]=O;else O=x[14];return O}
+export{lG,Zo};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{sa,Is,qf,Hs,Hi}from"B:/~BUN/root/chunk-zjmyxdw3.js";import{I}from"B:/~BUN/root/chunk-3yhm9tnn.js";import{g}from"B:/~BUN/root/chunk-3pydakxf.js";import{zW,Hyn,Dyn}from"B:/~BUN/root/chunk-h5378ehg.js";import{o,t}from"B:/~BUN/root/chunk-6s1fd9rm.js";import{Fe}from"B:/~BUN/root/chunk-jhq0fw6a.js";import{ue}from"B:/~BUN/root/chunk-k7h4w77r.js";import{M}from"B:/~BUN/root/chunk-6k6x82d7.js";import{FL}from"B:/~BUN/root/chunk-b5tr74sm.js";import{Zo}from"B:/~BUN/root/chunk-ncymer7j.js";import{hn}from"B:/~BUN/root/chunk-xp3fs5hr.js";import{gs}from"B:/~BUN/root/chunk-1t7qf5w9.js";import{e,r}from"B:/~BUN/root/chunk-8ap061gk.js";import{k,u,N}from"B:/~BUN/root/chunk-pg7xwnzs.js";import{p}from"B:/~BUN/root/chunk-n4vhwd20.js";N();function De(Po){return Po+1}function eo($o,zo){return r(o,{paddingLeft:2,flexDirection:"row",children:[e(t,{dimColor:!0,children:"\xB7 "}),e(t,{children:$o})]},zo)}var ye={intro:"Your organization has configured managed settings that could allow execution of arbitrary code or interception of your prompts and responses.",listLabel:"Settings requiring approval:",advice:"Only accept if you trust your organization's IT administration and expect these settings to be configured."},be={intro:"Your organization has configured Claude Code to send telemetry to the destination below. Depending on your organization's settings, this can include the content of your prompts and responses.",listLabel:"Telemetry destination:",advice:"Only accept if you recognize this as your organization's telemetry collector."},c=sa;function NNe(S){let go=g(2),Oe;if(go[0]!==S)Oe=e(X,{...S},S.reveal),go[0]=S,go[1]=Oe;else Oe=go[1];return Oe}function X(wo){let n=g(63),{settings:f,reveal:yo,onAccept:se,onReject:w,accepts:
+
+## #25 X-after @201104973
+ He=n[62];return He}
+export{NNe};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{z}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{ed}from"B:/~BUN/root/chunk-zjmyxdw3.js";import{_}from"B:/~BUN/root/chunk-t9vggba1.js";import{bR}from"B:/~BUN/root/chu
+
+## function hn( hits=41 178551180,179268885,179498470,180950906,181255935,181534924,183141246,183195360,183681217,187866957,189245283,189612903
+## #25 hn @190059306 len=1052 sha=60ce609c5eb6a7c9 bodyHits247=0
+function hn(e,t,r,s,o=!1){let u=mo(e,t,o);if(u!==void 0)return u;if(e===422&&ci(t))return{code:"type_locked",msg:`deploy 422: ${Jy(t)}${me().frozenArtifactTypes?.typesOn?go:""}`};if(e===422&&s!==void 0)return{code:"contract_echo_rejected",extra:{echo_declared_caps:s.declaredCaps},msg:`deploy ${e}: ${Jy(t)} \u2014 this republish echoed the artifact's stored `+`contract pin (${s.pin}). If the reason above says the pin was yanked, pass contract: 'latest' to move the artifact to the current contract (this changes the page's runtime semantics). If the reason concerns the capability declaration `+"itself, fix the declaration instead \u2014 upgrading will not "+"resolve it."};if(e===403){let d=jG(t);if(d){let g=ho.find((k)=>k===d.reason),p=g?c(g):void 0;return{code:"publish_denied",...p&&{extra:{deny_reason:p}},msg:Frt+VB(d.error,300)}}}if(e===404&&r&&zG(t))return{code:"slug_gone",msg:j2e};if(e===429){let d=st(t);if(d)return{code:"publish_cap_reached",extra:{cap_type:c(d.capType)},msg:`${d.message} \u2014 try again after the reset.`}}return{}}
+
+## #25 hn @190436768 len=141 sha=6ce4e1ea1483106a bodyHits247=0
+function hn(t){let o=[],r=dt(t);while(r){let i=r.attributes.keybindingScope;if(typeof i==="string"&&DGn(i))o.push(i);r=r.parentNode}return o}
+
+## #25 hn @190781690 len=53 sha=4aa19e6fbba561cc bodyHits247=0
+function hn(){return R("tengu_cobalt_plinth_yew",!1)}
+
+## #25 hn @191556437 len=97 sha=c5d8f5265ae1693e bodyHits247=0
+function hn(t){if(!cs.includes(t))throw new Ot(`Allowed choices are ${or.join(", ")}.`);return t}
+
+## #25 hn @192021350 len=310 sha=786fa9d2c4b5bcbc bodyHits247=0
+function hn(a,l){switch(a){case"homebrew":return["brew","upgrade","--cask",l??"claude-code"];case"winget":{let R=process.env.LOCALAPPDATA;return[R?$o(R,"Microsoft","WindowsApps","winget.exe"):"winget","upgrade","--id","Anthropic.ClaudeCode","--exact","--silent","--disable-interactivity"]}default:return null}}
+
+## #25 hn @192129867 len=65 sha=dc1be6b97cb5ff89 bodyHits247=0
+function hn(i){return[...i].sort((d,m)=>Hi(d.state)-Hi(m.state))}
+
+## function Hi( hits=15 178299229,178441152,182037851,187869864,190219366,190608109,192129069,194621269
+## #25 function Hi( @182037851 len=35 sha=4fbbfda178f4aa27 bodyHits247=1
+function Hi(e){return Gs.charAt(e)}
+
+## #25 function Hi( @187869864 len=749 sha=0a12751b8d01e349 bodyHits247=0
+function Hi(e,t,n){let r=e.match(/^https:\/\/([^/@:]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);if(!r){if(e.startsWith("https://"))n?.(`[runner:git] governed git: could not parse host/owner/repo from ${e}`);return}let i=r[1].toLowerCase(),d=r[2],o=r[3];if(!/^(?!\.{1,2}$)[a-z0-9.-]+$/.test(i)||i.length>255){n?.(`[runner:git] governed git: rejecting unsafe host in ${e}; falling back to legacy handling for this source`);return}if(!jn.test(d)||!jn.test(o)){n?.(`[runner:git] governed git: rejecting unsafe owner/repo in ${e}; falling back to legacy handling for this source`);return}let u=`${t}/${i}/${d}/${o}`;return n?.(`[runner:git] rewrote ${e} -> git mount /${i}/${d}/${o} (governed git)`),{url:u,owner:d,repo:o,upstreamUrl:`https://${i}/${d}/${o}`}}
+
+## #25 function Hi( @190219366 len=1643 sha=1066803a9fc9e293 bodyHits247=0
+function Hi(e){try{let{anchorPath:t,...n}=e.thread,{framedThread:r}=await ht({...e,thread:n,silentElisionTelemetry:!0}),o=`${r}
+
+You are about to start working on the newest comment sent to you in this thread; your full reply will follow separately. Write ONE short acknowledgement sentence (under 160 characters) telling the commenter their comment was received and what happens next, matched to what it is: for a change request, say you are working on it now; for a question, say you are finding the answer and will reply here. Do not answer the question or describe the change yet. ${en} Output only the sentence \u2014 no quotes, no code fences, no preamble, ${Zt}.`,s=await XK({messages:[He({content:o})],systemPrompt:di([Ci]),thinkingConfig:{type:"disabled",mechanical:!0},tools:[],signal:e.context.abortController.signal,options:{model:Hf(),querySource:"artifact_comment_fast_ack",isNonInteractiveSession:!0,agents:[],hasAppendSystemPrompt:!1,mcpTools:[],enablePromptCaching:!1,maxOutputTokensOverride:96,stickyBetas:L_(Yd()),proactivityLevel:zH(e.context),agentContext:ma(),async getToolPermissionContext(){return hh()}}});if(s.isApiErrorMessage)return y("artifact_comments_autoreact","fast_ack_compose_error"),Ee;if(s.message.stop_reason==="max_tokens")return y("artifact_comments_autoreact","fast_ack_compose_truncated"),Ee;let d=ze(s);if(!d||d.trim()==="")return y("artifact_comments_autoreact","fast_ack_compose_empty"),Ee;if(Gfe(d))return y("artifact_comments_autoreact","fast_ack_hidden_codepoints"),Ee;let u=d.replace(/\s+/g," ").trim();return pt(u,$i)}catch{return y("artifact_comments_autoreact","fast_ack_compose_threw"),Ee}}
+
+## #25 function Hi( @190608109 len=194 sha=43c8ba88c00fd8c3 bodyHits247=0
+function Hi(){let i=E(null),{epoch:l,noteAttempt:a}=Q$e(),c=U((f=Ky)=>i.current!==null&&ed(i.current,f),[]),d=U(()=>{i.current=Date.now(),a()},[a]);return{refusedWithin:c,noteRefused:d,epoch:l}}
+
+## function Is( hits=19 178253923,180236445,181623196,187944527,189213115,189978936,190607829,191037378
+## #25 function Is( @180236445 len=42 sha=261c3e3e7aab9c5c bodyHits247=0
+function Is(e,t){return dc(e)?.family===t}
+
+## #25 function Is( @181623196 len=221 sha=50807571d0b05fc5 bodyHits247=0
+function Is(e){if(process.env.CLAUDE_CODE_REMOTE_MEMORY_DIR)return Ee(process.env.CLAUDE_CODE_REMOTE_MEMORY_DIR,"projects",tw(Mr(an())??an()),"agent-memory-local",e)+ke;return Ee(te(),".claude","agent-memory-local",e)+ke}
+
+## #25 function Is( @187944527 len=84 sha=34e83d304fcd2cd4 bodyHits247=0
+function Is(e){return e instanceof Error&&"isAuthFailure"in e&&e.isAuthFailure===!0}
+
+## #25 function Is( @189213115 len=160 sha=cb395f7e323f6579 bodyHits247=0
+function Is(t){for(var o=wi(Yl);o!==null;){if(o.callback===null)eu(Yl);else if(o.startTime<=t)eu(Yl),o.sortIndex=o.expirationTime,Rf(ol,o);else break;o=wi(Yl)}}
+
+## function Hs( hits=10 181628339,182036864,189979849,190607944,195788022,198507975,200943896,203424553
+## #25 function Hs( @181628339 len=152 sha=5c668151f662c480 bodyHits247=0
+function Hs(e,t){let r=Pe(t,e),o=Us(t,r);if(!o||Ws(o)||o===".."||o.startsWith(`..${js}`))throw Error("synced item name escapes the sync root");return r}
+
+## #25 function Hs( @182036864 len=231 sha=8a1d47bf3b216505 bodyHits247=1
+function Hs(e,t,a,r,i,s){var n=t&32767,o=t>>15;while(--s>=0){var f=this.data[e]&32767,u=this.data[e++]>>15,l=o*f+u*n;f=n*f+((l&32767)<<15)+a.data[r]+(i&1073741823),i=(f>>>30)+(l>>>15)+o*u+(i>>>30),a.data[r++]=f&1073741823}return i}
+
+## #25 function Hs( @189979849 len=191 sha=2f35951306265d15 bodyHits247=0
+function Hs(e){let t=e.match(Ds);if(!t)return e;let r=e.slice(t[0].length),s=r.match(Bs);if(!s)return e;let o=r.match(js);if(o&&o.index<s.index)return e;return r.slice(s.index+s[0].length+1)}
+
+## #25 function Hs( @190607944 len=82 sha=e77ec2518055910a bodyHits247=0
+function Hs(i,l=Ky){let a=tr(l,i);return{remountKey:a?"settled":"held",settled:a}}
+
+## function qf( hits=6 180121446,190607901,191283392,194326983,200777660,223045812
+## #25 function qf( @180121446 len=44 sha=c54a0d0cbc872960 bodyHits247=0
+function qf(e){return ki.registerFeature(e)}
+
+## #25 function qf( @190607901 len=43 sha=a4f2941390e6ffc0 bodyHits247=0
+function qf(){return E(Date.now()).current}
+
+## #25 function qf( @191283392 len=61 sha=0a4dfedb3a230a72 bodyHits247=0
+function qf(d,C){var w=Wm(d)?cGt:Lc;return w(d,azt(WC(C,3)))}
+
+## #25 function qf( @194326983 len=31 sha=e7487551271c08e8 bodyHits247=0
+function qf(e){return Gc(e,jc)}
+
+## #25 DKt-class-before @190466122
+sed to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{K,z,vu,ei}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{$e}from"B:/~BUN/root/chunk-h5e2qvst.js";import{_o}from"B:/~BUN/root/chunk-ntybayn9.js";import{Lr,GBn}from"B:/~BUN/root/chunk-4sxpe00h.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{h}from"B:/~BUN/root/chunk-7qev109b.js";import{Mu,Vt}from"B:/~BUN/root/chunk-fj4mqt1j.js";import{v}from"B:/~BUN/root/chunk-s74r2b92.js";import{l,Q,hs}from"B:/~BUN/root/chunk-mw2w72bj.js";import{Ge,Et,S,q,n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ne,qt,un}from"B:/~BUN/root/chunk-kan6wdpm.js";import{_}from"B:/~BUN/root/chunk-t9vggba1.js";import{s}from"B:/~BUN/root/chunk-a8z8y32v.js";import{Se}from"B:/~BUN/root/chunk-2p789q45.js";import{G6e,sMe,V6e,Mgt,bYn,_Yn,iY,gh,Bt,Bv,Nf,es,jv}from"B:/~BUN/root/chunk-0qn02gme.js";import{b,f,y}from"B:/~BUN/root/chunk-x52rjnmc.js";import{Qt}from"B:/~BUN/root/chunk-z5mq6kpt.js";import{Yl,nbt,zW,swe,rbt,tJn,gKe,obt,mzt,hzt,kY,ibt,gzt,VMe,WW,Lyn,yKe,sbt,Yv,awe,yzt,bKe,fue,bzt,GW}from"B:/~BUN/root/chunk-h5378ehg.js";import{fXn}from"B:/~BUN/root/chunk-5tjjc1xb.js";import{Jve,ZV,$te}from"B:/~BUN/root/chunk-6t8yhsxa.js";import{nt}from"B:/~BUN/root/chunk-2w19r5j8.js";import{Uh}from"B:/~BUN/root/chunk-mzhkaen7.js";import{el}from"B:/~BUN/root/chunk-vqjtrda6.js";import{my}from"B:/~BUN/root/chunk-qrr5hhg8.js";import{tV,_P}from"B:/~BUN/root/chunk-apwsqrz4.js";import{dBt}from"B:/~BUN/root/chunk-kc30ccp1.js";import{wV}from"B:/~BUN/root/chunk-j1pp05xr.js";import{i,A,ye,m,Oe,F}from"B:/~BUN/root/chunk-fcf7hr11.js";import{Sa}from"B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var ve=5000;class V{updates=new my;owner;constructor(e){this.owner=e}supersede(e,t){let r=this.owner;this.owner=t,this.updates.enqueue(e),r("superseded")}settle(e){this.updates.done(),this.owner(e)}}class G{replRequester=null;requesterWaiters=[];noConsentSurface=!1;pendingReview=null;registerRequester(e){if(this.replRequester=e,e&&this.requesterWaiters.length>0){let t=this.requesterWaiters;this.requesterWaiters=[];for(let r of t)r(e)}}addWaiter(e){this.requesterWaiters.push(e)}dropWaiter(e){this.requesterWaiters=this.requesterWaiters.filter((t)=>t!==e)}review(e,t){return new Promise((r)=>{if(this.pendingReview){this.pendingReview.supersede(t,r);return}let o=new V(r);this.pendingReview=o,s("tengu_managed_settings_security_dialog_shown",{});let d;try{d=e(t,o.updates)}catch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_settings_security_dialog_accepted",{}),b("remote_managed_settings_security_check");else if(t==="rejected")s("tengu_managed_settings_security_dialog_rejected",{});e.settle(t)}startupConsentRelease=null;fireStartupConsentRelease(){let e=this.startupConsentRelease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.startupConsentRelease=e,()=>{if(t.startupConsentRelease===e)t.startupConsentRelease=null}}function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}function Ixt(){return P().consentHandoffHolds.size>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().
+
+## #25 review lastFn ee @190466640
+## #25 review-or-check @190466640 len=1226 sha=475455ca063863db bodyHits247=0
+async function ee(e,t,r){if(!t||!swe(zW(t)))return"no_check_needed";if(!tJn(e,t))return"no_check_needed";if(!vu())return"deferred_non_interactive";let o=P();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdout),c=r(t,d);if(!d)_o.claimForStandaloneRender(c);let a;try{a=await c}catch(u){throw f("remote_managed_settings_security_check","dialog_unavailable"),u}if(s(a==="approved"?"tengu_managed_settings_security_dialog_accepted":"tengu_managed_settings_security_dialog_rejected",{}),a==="approved")b("remote_managed_settings_security_check");return a}
+
+## #25 PKt @190465809 len=260 sha=04fd5b407977f065 bodyHits247=0
+function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}
+
+## #25 fireConsentNeededRelease-site @190465342
+urity_dialog_rejected",{});e.settle(t)}startupConsentRelease=null;fireStartupConsentRelease(){let e=this.startupConsentRelease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.startupConsentRelease=e
+
+## fireConsent lastFn S0t @190461757
+## #25 fireConsent-fn @190461757 len=38 sha=10effc863e3e46a4 bodyHits247=0
+function S0t(o){return n().publish(o)}
+
+## #25 fireConsentNeededRelease-site @190466874
+we(zW(t)))return"no_check_needed";if(!tJn(e,t))return"no_check_needed";if(!vu())return"deferred_non_interactive";let o=P();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface"
+
+## fireConsent lastFn ee @190466640
+## #25 fireConsent-fn @190466640 len=1226 sha=475455ca063863db bodyHits247=0
+async function ee(e,t,r){if(!t||!swe(zW(t)))return"no_check_needed";if(!tJn(e,t))return"no_check_needed";if(!vu())return"deferred_non_interactive";let o=P();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdout),c=r(t,d);if(!d)_o.claimForStandaloneRender(c);let a;try{a=await c}catch(u){throw f("remote_managed_settings_security_check","dialog_unavailable"),u}if(s(a==="approved"?"tengu_managed_settings_security_dialog_accepted":"tengu_managed_settings_security_dialog_rejected",{}),a==="approved")b("remote_managed_settings_security_check");return a}
+
+## #25 class-G-fields @190465447
+m"B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var ve=5000;class V{updates=new my;owner;constructor(e){this.owner=e}supersede(e,t){let r=this.owner;this.owner=t,this.updates.enqueue(e),r("superseded")}settle(e){this.updates.done(),this.owner(e)}}class G{replRequester=null;requesterWaiters=[];noConsentSurface=!1;pendingReview=null;registerRequester(e){if(this.replRequester=e,e&&this.requesterWaiters.length>0){let t=this.requesterWaiters;this.requesterWaiters=[];for(let r of t)r(e)}}addWaiter(e){this.requesterWaiters.push(e)}dropWaiter(e){this.requesterWaiters=this.requesterWaiters.filter((t)=>t!==e)}review(e,t){return new Promise((r)=>{if(this.pendingReview){this.pendingReview.supersede(t,r);return}let o=new V(r);this.pendingReview=o,s("tengu_managed_settings_security_dialog_shown",{});let d;try{d=e(t,o.updates)}catch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_settings_security_dialog_accepted",{}),b("remote_managed_settings_security_check");else if(t==="rejected")s("tengu_managed_settings_security_dialog_rejected",{});e.settle(t)}startupConsentRelease=null;fireStartupConsentRelease(){let e=this.startupConsentRelease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.startupConsentRelease=e,()=>{if(t.startupConsentRelease===e)t.startupConsentRelease=null}}function PKt(){let e=P(),t=Symbol("con
+
+## class lastFn S0t @190461757
+## #25 class-or-ctor @190461757 len=38 sha=10effc863e3e46a4 bodyHits247=0
+function S0t(o){return n().publish(o)}
+
+## #25 247 login_handoff needle="login_handoff" 248=0 247=NA
+## #25 247 consentHandoffRevealActive needle="consentHandoffRevealActive" 248=0 247=NA
+## #25 247 Yes, I trust needle="Yes, I trust these settings" 248=2 247=NA
+## #25 247 Yes, I trust @198091404
+listLabel...........advice..!.......Managed settings require approval.......}-y.Yes, I trust these settings....."N,.No, exit Claude Code
+.....+.titleColor........U.file:///B:/%7EBUN/root/_137.js......*.=.CLAUDE_CODE_FORCE_FIRST_LAUNCH.......D..lastClawdEntranceVersion....S.k.pose.....=..poofC...D...
+
+## #25 247 Yes, I trust @230652146
+.advice,n[10]=m;else m=n[10];let g;if(n[11]!==I||n[12]!==c)g=o(z,{confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",onConfirm:I,onCancel:c}),n[11]=I,n[12]=c,n[13]=g;else g=n[13];let Q;if(n[14]===u)Q=o(b,{children:e(v,{children:[o(s,{chord:"enter",action:"confirm"}),o(s,{c
+
+## 247 dialog lastFn to @230651385
+## #25 247 dialog @230651385 len=1357 sha=3f813670fdf981b4 bodyHits247=NA
+function to(go){let n=S(24),{settings:j,onAccept:I,onReject:c}=go,E=y(j),fo=x(E),i=h(E,j)?O:N,F;if(n[0]===u)F={context:"Confirmation"},n[0]=F;else F=n[0];C("confirm:no",c,F);const P=L,uo="warning",yo="warning",ho="Managed settings require approval",R=r,xo="column",Co=1,vo=1;let l;if(n[1]!==i.intro)l=o(t,{children:i.intro}),n[1]=i.intro,n[2]=l;else l=n[2];const Y=r,Lo="column";let p;if(n[3]!==i.listLabel)p=o(t,{dimColor:!0,children:i.listLabel}),n[3]=i.listLabel,n[4]=p;else p=n[4];const q=fo.map(eo);let d;if(n[5]!==Y||n[6]!==p||n[7]!==q)d=e(Y,{flexDirection:Lo,children:[p,q]}),n[5]=Y,n[6]=p,n[7]=q,n[8]=d;else d=n[8];let m;if(n[9]!==i.advice)m=o(t,{children:i.advice}),n[9]=i.advice,n[10]=m;else m=n[10];let g;if(n[11]!==I||n[12]!==c)g=o(z,{confirmLabel:"Yes, I trust these settings",cancelLabel:"No, exit Claude Code",onConfirm:I,onCancel:c}),n[11]=I,n[12]=c,n[13]=g;else g=n[13];let Q;if(n[14]===u)Q=o(b,{children:e(v,{children:[o(s,{chord:"enter",action:"confirm"}),o(s,{chord:"escape",action:"exit"})]})}),n[14]=Q;else Q=n[14];let f;if(n[15]!==R||n[16]!==d||n[17]!==m||n[18]!==g||n[19]!==l)f=e(R,{flexDirection:xo,gap:Co,paddingTop:vo,children:[l,d,m,g,Q]}),n[15]=R,n[16]=d,n[17]=m,n[18]=g,n[19]=l,n[20]=f;else f=n[20];let U;if(n[21]!==P||n[22]!==f)U=o(P,{color:uo,titleColor:yo,title:ho,children:f}),n[21]=P,n[22]=f,n[23]=U;else U=n[23];return U}

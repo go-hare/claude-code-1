@@ -1,0 +1,6 @@
+# gold-248-na-33-b  suppliedRootOptions
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191865730
+
+len=331 sha=a6d9361589f43587
+function b(t){let e=t.parent;if(e===null)return[];let r=new Map;for(let n of e.options){let o=n.attributeName();if(r.has(o)||e.getOptionValueSource(o)!=="cli")continue;let i=e.getOptionValue(o),a=e.options.find((l)=>l.attributeName()===o&&l.negate===(i===!1))??n;r.set(o,{flag:a.long??a.flags,key:o,value:i})}return[...r.values()]}

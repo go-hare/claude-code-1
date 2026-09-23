@@ -56,6 +56,11 @@ import {
   mapNotebookCellsToToolResult,
   readNotebook,
 } from 'src/utils/notebook.js'
+import {
+  noteApprovedFileToolPath,
+  openApprovedRead,
+  takeApprovedFileToolPath,
+} from 'src/utils/fileToolApprovedOpen.js'
 import { expandPath, isNtObjectNamespacePath } from 'src/utils/path.js'
 import { extractPDFPages, getPDFPageCount, readPDF } from 'src/utils/pdf.js'
 import {
@@ -427,6 +432,8 @@ export const FileReadTool = buildTool({
     return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
+    // densable UWt — snapshot ancestors before the permission check.
+    noteApprovedFileToolPath(input.file_path)
     const appState = context.getAppState()
     return checkReadPermissionForTool(
       FileReadTool,
@@ -577,6 +584,7 @@ export const FileReadTool = buildTool({
     // Use expandPath for consistent path normalization with FileEditTool/FileWriteTool
     // (especially handles whitespace trimming and Windows path separators)
     const fullFilePath = expandPath(file_path)
+    const approvedReadPaths = takeApprovedFileToolPath(fullFilePath)
 
     // Dedup: if we've already read this exact range and the file hasn't
     // changed on disk, return a stub instead of re-sending the full content.
@@ -649,20 +657,31 @@ export const FileReadTool = buildTool({
     }
 
     try {
-      return await callInner(
-        file_path,
-        fullFilePath,
-        fullFilePath,
-        ext,
-        offset,
-        limit,
-        pages,
-        maxSizeBytes,
-        maxTokens,
-        readFileState,
-        context,
-        parentMessage?.message.id,
-      )
+      let opened: Awaited<ReturnType<typeof openApprovedRead>> | null = null
+      try {
+        opened = await openApprovedRead(fullFilePath, approvedReadPaths)
+      } catch (error) {
+        // ENOENT stays on the similar-file path; a swapped symlink does not.
+        if (!isENOENT(error)) throw error
+      }
+      try {
+        return await callInner(
+          file_path,
+          fullFilePath,
+          opened?.ioPath ?? fullFilePath,
+          ext,
+          offset,
+          limit,
+          pages,
+          maxSizeBytes,
+          maxTokens,
+          readFileState,
+          context,
+          parentMessage?.message.id,
+        )
+      } finally {
+        await opened?.close()
+      }
     } catch (error) {
       // Handle file-not-found: suggest similar files
       const code = getErrnoCode(error)

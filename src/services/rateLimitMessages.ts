@@ -267,6 +267,18 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     return formatLimitReachedText(limit, `${suffix}${sessionWeeklyHint}`, model)
   }
 
+  // densable uen — $0 / admin-disabled allocation. mhe() is the ask-admin hint.
+  // Separate from the spend-cap branch above.
+  if (
+    disabledReason === 'member_level_disabled' ||
+    disabledReason === 'member_zero_credit_limit'
+  ) {
+    return `Your usage allocation has been disabled by your admin${getUsageCreditsAskAdminHint()}`
+  }
+  if (disabledReason === 'group_zero_credit_limit') {
+    return `Your group's usage limit is set to $0${getUsageCreditsAskAdminHint()}`
+  }
+
   // if BOTH subscription (checked before this method) and overage are exhausted
   if (limits.overageStatus === 'rejected') {
     // Show the earliest reset time to indicate when user can resume

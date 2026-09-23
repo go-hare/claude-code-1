@@ -1,0 +1,53 @@
+# gold-248-kairos-source-verdict
+when=2026-09-21
+exe=official-248/package/claude.exe
+contract=official SEA — do NOT invent n() sibling bags
+
+## Dig summary
+Prior gold-248-kairos-source.txt / gold-248-kairos-source-turn.txt:
+  kairosActive SEA string hits=0
+  sessionSource SEA string hits=0
+  isKairos* hits = isKairosCronEnabled feature gates only (NOT host bag)
+
+### ge sessionFlags @178521439 sha=bfce3f24c93d8e3f
+Full body (gold-248-n-root.txt): onboarding/trust/plan/autoMode/memory/teardown/
+deferredToolStub/skillRollout/proposeGoal/activeRoutine/inheritedTeamName/
+teleportedSessionInfo/cachedClaudeMd/accountSkillsSync/pluginsSync/pendingContextCompact.
+NO kairos* / sessionSource* / clientType / origin / attachSource / desktop / sdk / cli.
+
+### Ie LaunchOptions @178534988 (gold-248-ie-remote.txt @178535191)
+Slots: isInteractive, printOutputFormat, thinkingDisplayExplicit,
+permissionPromptToolName, hasStreamingInput, singleShotPrintSession,
+modelOverrideOptOutForSession, rendererMode, strictToolResultPairing,
+restrictedSession, clientType (#c default "cli"), sessionStartType (#p default "fresh"),
+questionPreviewFormat, replConfigArgv, userMsgOptIn, searchToolsOptIn, todoToolsOptIn,
+wizardOperatorToolsEnabled, pollEventIngressWired, sdkAgentProgressSummariesEnabled,
+sessionPersistenceDisabled, sessionBypassPermissionsMode, disableSlashCommands,
+mayForwardHomeSettings, homeSettingsHostConsent, scheduledTasksEnabled,
+initJsonSchema, cliSessionConfigCarried, forkRestrictedLaunchConfig, forkReplayLaunchConfig.
+NO sessionSource / kairosActive / attachSource / launchSource.
+clientType ≠ sessionSource (cli/sdk/desktop/vscode vs "remote-control" tag).
+sessionStartType ≠ sessionSource (fresh/… start kind, not bridge tag).
+
+### Alternate-name hunt (SEA)
+isKairos / kairos_ready / session_source / attachSource near host/ge/Ie: no bag slot.
+tengu_kairos_ready_nudge / isKairosCronEnabled: GrowthBook/cron gates only.
+
+## Leftover callers (product behavior)
+### kairosActive — LIVE
+get/setKairosActive used by: main.tsx (gate + brief), /assistant, analytics
+metadata (is_assistant_mode), fastMode, autoDream, attachments, memdir,
+StatusLine, Spinner, UserPromptMessage, brief.ts, assistant/index.ts.
+Product: KAIROS assistant / brief mode latch. Official has no equivalent bag.
+
+### sessionSource — DEAD write-only
+Only setSessionSource('remote-control') in main.tsx when
+CLAUDE_CODE_ENVIRONMENT_KIND==='bridge'. NO getSessionSource. STATE.sessionSource
+never read anywhere. Bridge API createSession already sends body.source='remote-control'
+independently — not via STATE.
+
+## VERDICT
+- kairosActive: KEEP STATE residual — gold ge@178521439 / Ie@178534988 / SEA hits=0;
+  product live; do NOT invent bag.
+- sessionSource: CUT — official missing + leftover unused (write-only dead);
+  do NOT rewire onto clientType/sessionStartType (different semantics).

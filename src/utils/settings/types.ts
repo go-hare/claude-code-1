@@ -71,6 +71,7 @@ export const PermissionsSchema = lazySchema(() =>
         : {}),
       additionalDirectories: z
         .array(z.string())
+        .transform(dirs => dirs.filter(dir => !dir.includes('\0')))
         .optional()
         .describe('Additional directories to include in the permission scope'),
     })
@@ -1225,6 +1226,29 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
+      modelSettings: z
+        .record(
+          z.string(),
+          z
+            .object({
+              effortLevel: z
+                .enum(
+                  process.env.USER_TYPE === 'ant'
+                    ? ['low', 'medium', 'high', 'xhigh', 'max']
+                    : ['low', 'medium', 'high', 'xhigh'],
+                )
+                .optional()
+                .catch(undefined),
+            })
+            .optional()
+            .catch(undefined),
+        )
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Per-model settings. modelSettings[canonicalModel].effortLevel ' +
+            'is the saved effort for that model.',
+        ),
       // densable settings.ultracode — session-scoped via --settings / apply_flag_settings.
       // Interactive /effort ultracode never persists this; bootstrap maps it to wire
       // effort (catalog top tier; densable hardcodes xhigh) + AppState.ultracode.

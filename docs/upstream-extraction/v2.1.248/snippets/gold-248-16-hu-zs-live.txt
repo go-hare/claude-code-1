@@ -1,0 +1,49 @@
+# gold-248-16-hu-zs-live
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-21T05:37:38.052Z
+
+Re-verify official Hu/Zs stubs + listAllLiveSessions status/jobId/peerProtocol.
+
+## "async function Hu(){return[]}" hits=1
+@192115663
+async function Hu(){return[]}function Gu(i){let{state:d,tempo:m}=hh(i.worker_status),w=i.config?.sources?.find((x)=>x.type==="git_repository")?.url,S=i.title??"",h=i.worker_status==="requir
+
+## "listRemoteSessions:()=>Hu()" hits=1
+@192130133
+listRemoteSessions:()=>Hu(),interruptRemoteSession:(i)=>import("B:/~BUN/root/chunk-nggg7zsx.js").then((d)=>d.interruptRemoteSession(i)),archiveRemoteSession:(i)=>import("B:/~BUN/root/chun
+
+## "let Zs=!1" hits=1
+@192274709
+let Zs=!1,Ru=G(()=>ml().hasToken,[]),Fn=rp({jobs:le,adoptedPeers:ye,remoteJobs:nt,pendings:be,prStatuses:Te,liveStatus:Su,heldInTerminal:(H)=>Q.terminalHolderOf(H)!==voi
+
+## "peerProtocol:typeof o.peerProtocol" hits=1
+@181017447
+peerProtocol:typeof o.peerProtocol==="number"?o.peerProtocol:void 0,...Array.isArray(o.peerFeatures)&&{peerFeatures:Je(o.peerFeatures)},...{},tmux:typeof o.tmux==="string"?o.tmux:void 0,pid:i,fi
+
+## "jobId:typeof o.jobId" hits=1
+@181016652
+jobId:typeof o.jobId==="string"?o.jobId:void 0,parkedJobId:typeof o.parkedJobId==="string"?o.parkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="strin
+
+## "status:typeof o.status" hits=0
+MISS
+
+## live-mapper window @181017447
+rkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint==="string"?o.entrypoint:void 0,...typeof o.pidDomain==="string"&&{pidDomain:o.pidDomain},agent:typeof o.agent==="string"?o.agent:void 0,state:typeof o.state==="string"?o.state:void 0,detail:typeof o.detail==="string"?o.detail:void 0,tempo:o.tempo==="active"||o.tempo==="idle"||o.tempo==="blocked"?o.tempo:void 0,needs:typeof o.needs==="string"?o.needs:void 0,peerProtocol:typeof o.peerProtocol==="number"?o.peerProtocol:void 0,...Array.isArray(o.peerFeatures)&&{peerFeatures:Je(o.peerFeatures)},...{},tmux:typeof o.tmux==="string"?o.tmux:void 0,pid:i,file:s}}catch{return null}}async function j3e(){return(await O({rejectUnreadable:!0})).map(({file:e,...t})=>t)}function _e(e,t,r,i){if(D()&&i!==void 0){i.delete(Se.session(He(e))).then((s)=>s.ok&&s.value.existed?E2t(ce(e),t,r,i):void 0).catch(()=>{});return}pe(e).then(()=>E2t(ce(e),t,r,i)).catch(()=>{})}asy
+
+## #p("statuses" hits=2
+@192135230
+this.#p("statuses",(w)=>new Map(w))},mc),()=>{if(this.#b.get(i)===m)this.#b.delete(i)}}watchPendingJobDir(i){this.#k?.(),this.#k=this.#e.watchJobDirOnce(i,()=>void this.load())}reload=()=>{this.load()};load=async()=>{if(Po()&&R("tengu_fleetview_peers",!1))this.#e.touchFleetViewHeartbeat(this.#n);let i=++this.#f,[d,m]=await Promise.all([this.#e.listJobs(this.#n),this.#e.listAliveDaemonJobs(this.#n)]),w=Mye(await this.
+
+@192139131
+this.#p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_peers",!1)){let h=new Set((this.#t.jobs??[]).map((A)=>A.state.sessionId)),C=Date.now(),x=i.filter((A)=>A.kind==="interactive"&&A.pid!==process.pid&&A.sessionId&&!h.has(A.sessionId)&&(A.peerProtocol??0)>=_2t&&C-(A.updated
+
+## adoptedPeers peerProtocol gate
+MISS — try alternate
+
+## peerProtocol>= hits
+none in fleet band
+
+## statuses jobId write
+@192138754
+id);if(!h.status)continue;if(h.sessionId)d.set(h.sessionId,h.status);if(h.jobId)d.set(Ir(h.jobId),h.status)}for(let h of d.keys())this.#h.delete(h);let w=Wkt();if(w&&i.some((h)=>h.sessionId===w.sessionId))qCn(w.sessionId);let S=!1;for(let[h,C]of this.#b){let x=i.find((A)=>A.sessi

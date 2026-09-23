@@ -1,0 +1,226 @@
+# gold-248-21-hook-row
+when=2026-09-20T03:37:16.101Z
+sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+contract=extract unique fleet/agents-row that names hook + schema on invalid PermissionRequest/PreToolUse answer
+rule=if no unique row body: stay UNKNOWN. do not invent.
+
+# 247 vs 248 needle counts
+- "schema error"  248=0  247=0
+- "invalid answer"  248=0  247=0
+- "hook schema"  248=0  247=0
+- "hook and the schema"  248=0  247=0
+- "names the hook"  248=0  247=0
+- "JSON validation failed"  248=2  247=2
+- "Hook JSON output validation failed"  248=1  247=1
+- "Expected schema:"  248=4  247=4
+- "failed schema validation"  248=31  247=31
+- "async hook JSON output failed schema validation"  248=2  247=2
+- "hook returned blocking error"  248=2  247=2
+- " hook error:"  248=23  247=23
+- "hook error: "  248=21  247=21
+- "PermissionRequest hook"  248=11  247=9
+- "PreToolUse hook"  248=34  247=30
+- "updatedInput that failed schema validation"  248=2  247=2
+- "waiting silently"  248=0  247=0
+- "invalid hook answer"  248=0  247=0
+- "hookName+\" hook"  248=0  247=0
+- "hookName, \" hook"  248=0  247=0
+- ".hookName,\" hook"  248=5  247=5
+- "hookName,\" hook error"  248=1  247=1
+- "hook_non_blocking_error"  248=29  247=27
+- "hook_error_during_execution"  248=19  247=19
+- "JSON validation failed: "  248=0  247=0
+- "schema validation: "  248=15  247=15
+- "waitingFor:"  248=8  247=8
+- "lastMessage:"  248=1  247=1
+
+## #21 JSON validation failed  needle="JSON validation failed"  hits=2
+- #0 @97508120 ator API error: ........Hook evaluator API error: ......p...Hooks: Model response: .'...H...Hooks: error parsing response as JSON: ......o..JSON validation failed..;...&...Hooks: model response does not conform to expected schema: .........Schema validation failed: ..0...9<..Hooks: Prompt hook conditi
+- #1 @186218211 Ne}`);let Ke=Ft(cx(Ne),!1);if(!Ke)return n(`Hooks: error parsing response as JSON: ${Ne}`),Nx(e,{hookName:t,toolUseID:C,hookEvent:r,stderr:"JSON validation failed",stdout:Ne});let ze=Iz().safeParse(Ke);if(!ze.success)return n(`Hooks: model response does not conform to expected schema: ${ze.error.messa
+
+## #21 Hook JSON output validation failed  needle="Hook JSON output validation failed"  hits=1
+- #0 @186234668 )return{ok:!1,body:"",aborted:!0};let U=l(N);return n(`Hooks: mcp_tool hook error: ${U}`,{level:"error"}),{ok:!1,body:"",error:U}}}var Eve="Hook JSON output validation failed \u2014 ",vNn=new Set(["async","hookEventName","behavior"]);function ywt(e){let t=e.path.at(-1);return e.code==="invalid_value"&&typeof t===
+
+## #21 Expected schema  needle="Expected schema:"  hits=4
+- #0 @93440814 ync_hook_response.......a.completed in background......K..still running in background.........Task "......6...shut down gracefully....1~`.
+
+Expected schema:.......m..teamMemorySearchCount.......Fi..teamMemoryReadCount......Wu.teamMemoryWriteCount	.......Recalling...	.......recalling...........Re
+- #1 @96922962  destructure property 'threshold' from null or undefined value9...a...Hook output does not start with {, treating as plain text.......]...
+
+Expected schema:
+.L.......Hook output starts with { but is not a JSON object, treating as plain text: =...WZQ.Hook output is several JSON documents, treatin
+- #2 @186254673 eating as plain text"),{plainText:e};if(l1t(e))return{json:{async:!0}};try{let r=Owt(t);if("json"in r)return r;let o=`${r.validationError}
+
+Expected schema:
+${kwt()}`;return n(o),{plainText:e,validationError:o}}catch(r){if(!t.endsWith("}"))return n(`Hook output starts with { but is not a JSON ob
+- #3 @201448268 })]}),au[10]=RP,au[11]=Kh,au[12]=uO;else uO=au[12];return uO}function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+Expected schema:`).trim(),y=0,b=T.indexOf(`
+`);while(b!==-1){let C=T.slice(y,b).trim();if(C)return C.length>200?C.slice(0,200)+"\u2026":C;y=b+1,b=T.indexOf(
+
+## #21 updatedInput failed schema  needle="updatedInput that failed schema validation"  hits=2
+- #0 @97364010 g permission prompt...
+.......agentMsgId..........hookAllowVouched....k.:.hookPermissionResult....W.=.PreToolUse hook for 6....... returned updatedInput that failed schema validation: ..#...N.Q.Hook result has permissionBehavior=.........Hook PreToolUse:
+....Z.. this tool......x...tengu_pre_tool_hooks_cancelled..........
+- #1 @184387174 issues.filter((pe)=>pe.code!=="unrecognized_keys");if(!G.success&&ue.length>0){let pe=new Gk(ue),fe=`PreToolUse hook for ${t.name} returned updatedInput that failed schema validation: ${Vie(t.name,pe)}`;n(fe,{level:"warn"}),M={behavior:"deny",message:fe,decisionReason:{type:"hook",hookName:`PreToolUse:${t.name}`,hookSour
+
+## #21 async hook JSON schema  needle="async hook JSON output failed schema validation"  hits=2
+- #0 @96610389 t.additionalContext (..........hookSpecificOutput (......r.(root)..8...;/e.async-marker response where a sync response was expected2....r_. async hook JSON output failed schema validation (..........; ignored malformed field(s): ..$.......; delivering recognized fields as-isD.......Cannot destructure property 'processId' from
+- #1 @183960850 error.issues[0],g=p?`${p.path.join(".")||"(root)"}: ${p.message}`:"async-marker response where a sync response was expected";return n(`${t} async hook JSON output failed schema validation (${g})`+(o.length>0?`; ignored malformed field(s): ${o.join(", ")}`:"; delivering recognized fields as-is"),{level:o.length>0?"error":"debu
+
+## #21 hook error colon  needle=" hook error:"  hits=23
+- #0 @93449960 ). ..  .w.r.a.p.p.e.d. .i.n. .<.T.e.x.t.>...........comma-......!l..hook-...........^claude\.ai ....Cj..hint-...........isInProgress.....5. hook error: ........Z..summary-	.......startUuid.......g0.. (one-shot).....I... [session-only]......l..failure_scenario(....v..file:///B:/%7EBUN/root/c
+- #1 @94559983 .........lastElicitationClosedAt.N.......Cannot destructure property 'elicitationResponse' from null or undefined value......@...Elicitation hook error: ........elicitationResponse.T...`...Cannot destructure property 'elicitationResultResponse' from null or undefined value!...h...Elicitation
+- #2 @94560233 null or undefined value!...h...Elicitation response for server "...
+....H..": decline......8...elicitation_response........ElicitationResult hook error: .......37.elicitationResultResponse...........Skip confirmation...(....*1.file:///B:/%7EBUN/root/chunk-w6w5pcf2.js*.....r.Server returned 4
+- #3 @95639612 !.......Removing one-shot hook for event ........... in skill '.........goal_met....o...evaluator_timeout...
+.....\.Exit code ......}.5.Stop hook error: ...".......Forked command Stop hooks failed: ......._..additionalContexts......a...requestQuery.....@..tengu_slash_command_forked..
+...R...
+- #4 @95642364 t: .......3.Operation stopped by hook: .....D._.Operation stopped by hook.......#Z..cmd_prompt_submit_hook_stopped.......r..UserPromptSubmit hook error: ...........cmd_prompt_aborted......L...cmd_prompt_threw....e.9.Stacked skill /.$...;c.. blocked by UserPromptExpansion hook%....B..stacked 
+- #5 @97508537 met: ..........Hooks: prompt hook (....r...) timed out after ..
+.......ms (limit ......]M..tengu_hook_prompt_timeout........?..Hooks: Prompt hook error: ......)V..Error executing prompt hook: .......	7..continueOnBlock.....e+..^&\s*........0..[<>;&)].*.......Hooks: Processing agent hook with
+- #6 @97510100 Agent hook condition was not met: ..#...p...Hooks: Agent hook condition was met......#..tengu_agent_stop_hook_success.......for.Hooks: Agent hook error: .......?...Error executing agent hook: b....k..A hook agent evaluating a call served for a cloud session may not run a destructive command 
+- #7 @97510863 . (via sandbox proxy :........... (via env-var proxy)!...]w}.Hooks: HTTP hook response status .........., body length ........`.Hooks: HTTP hook error: .....!^.\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}.*.....f.mcp_tool hooks are not available for the '..$.......' hook event (no MCP client context)...
+- #8 @97511239 onnected......6V.Hooks: mcp_tool calling ........ arg(s)........mcp_tool hook...........MCP tool returned an error........t.Hooks: mcp_tool hook error: .....~F.PreCompact [.....l..] completed successfully: ........4.] completed successfully........] failed....sM..custom_instructions.....!.
+- #9 @100690648 d.,. .o.r. .t.h.e. .c.a.l.l. .l.o.g. .w.a.s. .a.l.t.e.r.e.d.;. .t.h.e. .r.u.n. .i.s. .n.o.t. .g.r.a.d.e.d......0...deniedByChild........v.. hook error:(...6...^MCP server "[^"\n]*" is not connected\b&...S.5.^MCP error -32000: Connection closed\b......\Z..case "..........case directory......
+- #10 @186219597 Event:c(r),timeoutMs:Fe,durationMs:xe})}return{hook:e,outcome:"cancelled",timedOut:Te}}throw Ie}}catch(L){let N=l(L);return n(`Hooks: Prompt hook error: ${N}`),Nx(e,{hookName:t,toolUseID:C,hookEvent:r,stderr:`Error executing prompt hook: ${N}`,stdout:""})}}var iwt=0.5;function eNn(e){for(let
+- #11 @186228021 f(we.removeEventListener("abort",Ie),Pe(),Te.aborted)return{hook:e,outcome:"cancelled"};throw xe}}catch(j){let G=l(j);return n(`Hooks: Agent hook error: ${G}`),s("tengu_agent_stop_hook_error",{durationMs:Date.now()-N,errorType:2,hookEvent:c(r),agentName:U}),Nx(e,{hookName:t,toolUseID:E,hookE
+- … +11 more
+
+## #21 hookName hook error  needle=".hookName,\" hook"  hits=5
+- #0 @201440044 r.trim(),z[172]=A.blockingError.blockingError,z[173]=F;else F=z[173];let Wh=F;let Y;if(z[174]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook returned blocking error"]}),z[174]=A.hookName,z[175]=Y;else Y=z[175];let X;if(z[176]!==Wh)X=Wh?e(ne,{color:"error",children:Wh}):null,z[176
+- #1 @201440633 err,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookName,z[185]=Y;else Y=z[185];let X;if(z[186]!==$h)X=$h?e(ne,{color:"error",children:$h}):null,z[186]=$h,z[187]=X;else
+- #2 @201441291 z[192];let VA=F;const Y=VA!==void 0?` after ${VA}`:"";let X;if(z[193]!==A.hookName||z[194]!==Y)X=r(ne,{color:"error",dimColor:!1,children:[A.hookName," hook timed out",Y,` \u2014 output discarded. Raise the hook's "timeout" to allow more time.`]}),z[193]=A.hookName,z[194]=Y,z[195]=X;else X=z[195
+- #3 @201441608 error_during_execution":{if(A.hookEvent==="Stop"||A.hookEvent==="SubagentStop"){return null}let F;if(z[196]!==A.hookName)F=r(ne,{children:[A.hookName," hook warning"]}),z[196]=A.hookName,z[197]=F;else F=z[197];return F}case"hook_success":{return null}case"hook_stopped_continuation":{if(A.hookEve
+- #4 @201441903 ent==="Stop"||A.hookEvent==="SubagentStop"){return null}let F;if(z[198]!==A.hookName||z[199]!==A.message)F=r(ne,{color:"warning",children:[A.hookName," hook stopped continuation: ",A.message]}),z[198]=A.hookName,z[199]=A.message,z[200]=F;else F=z[200];return F}case"hook_deferred_tool":{let F;if(
+
+## #21 hookName hook returned  needle="hook returned blocking error"  hits=2
+- #0 @93439497 agent .........Plan file referenced (.......o..Skills restored (........s..Read MCP resource ......>[.. from........0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e.d... .R.a.i.s.e. .t.h.e. .h.o.o.k.'.s. .".t.i.m.e
+- #1 @201440056 72]=A.blockingError.blockingError,z[173]=F;else F=z[173];let Wh=F;let Y;if(z[174]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook returned blocking error"]}),z[174]=A.hookName,z[175]=Y;else Y=z[175];let X;if(z[176]!==Wh)X=Wh?e(ne,{color:"error",children:Wh}):null,z[176]=Wh,z[177]=X;else X=z[1
+
+## #21 hook_non_blocking_error  needle="hook_non_blocking_error"  hits=29
+- #0 @92589260 e another process wrote to this job.
+.......nameSource.......!..stop_hook_summary.........P.hook_success........hook_blocking_error......L..hook_non_blocking_error.........hook_error_during_execution........hook_cancelled..$....s..Failed to restore the conversation:
+........tengu_message_selector_sele
+- #1 @184890796 t.type==="hook_additional_context")return t.content.map(O_e);if(t.type==="hook_success"&&t.content!=="")return[O_e(t.content)];if(t.type==="hook_non_blocking_error")return[`${t.command??""}\x00${t.exitCode}\x00${t.stderr}`];return[]}function O_e(e){if(!e.startsWith(RZ))return e;return e.replace(/(Full 
+- #2 @185893190 ype==="attachment"){let we=fe.message.attachment;if("hookEvent"in we&&(we.hookEvent==="Stop"||we.hookEvent==="SubagentStop")){if(we.type==="hook_non_blocking_error")pe.push(we.stderr||`Exit code ${we.exitCode}`);else if(we.type==="hook_error_during_execution")pe.push(we.content)}}}if(fe.blockingError||
+- #3 @185899042 .attachment;if("hookEvent"in vt&&(vt.hookEvent==="Stop"||vt.hookEvent==="SubagentStop")){if(xe&&Ze.hook?.prompt===xe.condition&&(vt.type==="hook_non_blocking_error"||vt.type==="hook_error_during_execution"))Fe="error",y("goal_met","evaluator_error");if(vt.type==="hook_non_blocking_error")dt.push(vt.std
+- #4 @185899166 on&&(vt.type==="hook_non_blocking_error"||vt.type==="hook_error_during_execution"))Fe="error",y("goal_met","evaluator_error");if(vt.type==="hook_non_blocking_error")dt.push(vt.stderr||`Exit code ${vt.exitCode}`),yt=!0;else if(vt.type==="hook_error_during_execution")dt.push(vt.content),yt=!0;else if(vt.
+- #5 @186213833  Adn(e,t,"read")!==null}import{randomUUID as ZLn}from"crypto";function Nx(e,t){return{hook:e,outcome:"non_blocking_error",message:Nn({type:"hook_non_blocking_error",...t,exitCode:1})}}var Iz=h(()=>m({ok:W().describe("Whether the condition was met"),reason:i().describe("Reason, if the condition was not 
+- #6 @186288070 {return jN("TaskCreated",e.blockingError)}function p1t(e){return jN("TaskCompleted",e.blockingError)}function jct(e,t,r=e){return Nn({type:"hook_non_blocking_error",hookName:r,toolUseID:rT(),hookEvent:e,stderr:t.blockingError,stdout:"",exitCode:2,command:t.command})}function qK(e){return`UserPromptSubm
+- #7 @186295999 await swt(fn,pe,ue,Ur,Bn,k,C,o,Xn);if(wn.message?.type==="attachment"){let Jn=wn.message.attachment;if(Jn.type==="hook_success"||Jn.type==="hook_non_blocking_error")Jn.command=Sr,Jn.durationMs=Date.now()-Tr}yield wn,pr?.();return}if(fn.type==="agent"){if(!k)throw Error(`agent-type hooks are not support
+- #8 @186296587 ent_type"in t?t.agent_type:void 0);if(wn.message?.type==="attachment"){let Jn=wn.message.attachment;if(Jn.type==="hook_success"||Jn.type==="hook_non_blocking_error")Jn.command=Sr,Jn.durationMs=Date.now()-Tr}yield wn,pr?.();return}if(fn.type==="http"){g4(ir,pe,ue);let wn=await Nct(fn,ue,Ur,p,g);if(pr?.(
+- #9 @186297271 url}`;du({hookId:ir,hookName:pe,hookEvent:ue,output:zn,stdout:"",stderr:zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:zn,stdout:"",exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};return}let{json
+- #10 @186297622 hookId:ir,hookName:pe,hookEvent:ue,output:wn.body,stdout:wn.body,stderr:Zn,exitCode:wn.statusCode,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:Zn,stdout:wn.body,exitCode:wn.statusCode??0}),outcome:"non_blocking_error",hook:fn};return}if(
+- #11 @186299550 ed an error";du({hookId:ir,hookName:pe,hookEvent:ue,output:qn,stdout:wn.body,stderr:qn,exitCode:1,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookName:pe,toolUseID:o,hookEvent:ue,stderr:qn,stdout:wn.body,exitCode:1}),outcome:"non_blocking_error",hook:fn};return}let{json:Zn,valida
+- … +17 more
+
+## #21 combo ${A.hookName} hook  needle="${A.hookName} hook"  hits=0
+
+## #21 combo ${e.hookName} hook  needle="${e.hookName} hook"  hits=4
+- #0 @187223682 t)}`:Bo(e.turn);return[He({content:Qa(`Output tokens \u2014 turn: ${t} \xB7 session: ${Bo(e.session)}`),isMeta:!0})]},hook_blocking_error:(e)=>[He({content:Qa(`${e.hookName} hook blocking error from command: "${e.blockingError.command}": ${e.blockingError.blockingError}`),isMeta:!0})],hook_additional_context:(e)=>{if(e.content.length===
+- #1 @187223894 .blockingError.command}": ${e.blockingError.blockingError}`),isMeta:!0})],hook_additional_context:(e)=>{if(e.content.length===0)return[];return[He({content:Qa(`${e.hookName} hook additional context: ${e.content.join(`
+`)}`),isMeta:!0})]},inlined_image_paths:(e)=>{let t=Array.isArray(e.paths)?e.paths.filter((r)=>typeof r==="string"):[];i
+- #2 @187224188 .paths.filter((r)=>typeof r==="string"):[];if(t.length===0)return[];return[He({content:Qa(zNt(t)),isMeta:!0})]},hook_stopped_continuation:(e)=>[He({content:Qa(`${e.hookName} hook stopped continuation: ${e.message}`),isMeta:!0})],date_change:(e)=>Ns([He({content:`The date has changed. Today's date is now ${e.newDate}. No need to announce
+- #3 @187239651 (e.hookEvent!=="SessionStart"&&e.hookEvent!=="UserPromptSubmit"&&e.hookEvent!=="UserPromptExpansion")return[];if(e.content==="")return[];return[He({content:Qa(`${e.hookName} hook success: ${e.content}`),isMeta:!0})];case"context_efficiency":return[];case"deferred_tools_delta":{let o=Dc(e.addedLines),u=Dc(e.addedNames),p=Dc(e.removedName
+
+## #21 combo ${t.hookName} hook  needle="${t.hookName} hook"  hits=0
+
+## #21 combo hookName} hook error  needle="hookName} hook error"  hits=0
+
+## #21 combo hookName," hook error  needle="hookName,\" hook error"  hits=1
+- #0 @201440634 A.stdout)F=_P(A.stderr,A.stdout),z[181]=A.stderr,z[182]=A.stdout,z[183]=F;else F=z[183];let $h=F;let Y;if(z[184]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook error"]}),z[184]=A.hookName,z[185]=Y;else Y=z[185];let X;if(z[186]!==$h)X=$h?e(ne,{color:"error",children:$h}):null,z[186]=$h,z[187]=X;else X=z[187];let Te;if(z[188]
+
+## #21 combo hookName," hook returned  needle="hookName,\" hook returned"  hits=1
+- #0 @201440045 gError.blockingError.trim(),z[172]=A.blockingError.blockingError,z[173]=F;else F=z[173];let Wh=F;let Y;if(z[174]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook returned blocking error"]}),z[174]=A.hookName,z[175]=Y;else Y=z[175];let X;if(z[176]!==Wh)X=Wh?e(ne,{color:"error",children:Wh}):null,z[176]=Wh,z[177]=X;else X=z[177];l
+
+## #21 combo hookName} schema  needle="hookName} schema"  hits=0
+
+## #21 combo schema error:  needle="schema error:"  hits=0
+
+## #21 combo schemaError  needle="schemaError"  hits=9
+- #0 @99441152 ..S.isBase64url.....G>..strictCreate
+.....9.lazycreate..
+.......optionsMap........(.createWithPreprocess	.......issueData.........p.contextualErrorMap.......L..schemaErrorMap..	...B...errorMaps...C.......Cannot destructure property 'errorMap' from null or undefined value.X...p.a.Can't use "invalid_type_error" or "required_error" 
+- #1 @178655007 .message;return{...s,path:i,message:c}},bfr=[];function ai(e,t){let r=V7e(),a=Fvt({issueData:t,data:e.data,path:e.path,errorMaps:[e.common.contextualErrorMap,e.schemaErrorMap,r,r===Hde?void 0:Hde].filter((s)=>!!s)});e.common.issues.push(a)}class wD{constructor(){this.value="valid"}dirty(){if(this.value==="valid")this.value="dirty
+- #2 @178657523 ription(){return this._def.description}_getType(e){return tre(e.data)}_getOrReturnCtx(e,t){return t||{common:e.parent.common,data:e.data,parsedType:tre(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}_processInputParams(e){return{status:new wD,ctx:{common:e.parent.common,data:e.data,parsedType:tre(e.data),s
+- #3 @178657693 rMap:this._def.errorMap,path:e.path,parent:e.parent}}_processInputParams(e){return{status:new wD,ctx:{common:e.parent.common,data:e.data,parsedType:tre(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}}_parseSync(e){let t=this._parse(e);if(q7e(t))throw Error("Synchronous parse encountered promise.");return t
+- #4 @178658113 Parse(e,t);if(r.success)return r.data;throw r.error}safeParse(e,t){let r={common:{issues:[],async:t?.async??!1,contextualErrorMap:t?.errorMap},path:t?.path||[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:tre(e)},a=this._parseSync({data:e,path:r.path,parent:r});return k(r,a)}"~validate"(e){let t={common:{issues
+- #5 @178658329 sedType:tre(e)},a=this._parseSync({data:e,path:r.path,parent:r});return k(r,a)}"~validate"(e){let t={common:{issues:[],async:!!this["~standard"].async},path:[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:tre(e)};if(!this["~standard"].async)try{let r=this._parseSync({data:e,path:[],parent:t});return $Ee(r)?{val
+- … +3 more
+
+## #21 combo hookSchema  needle="hookSchema"  hits=0
+
+## #21 combo hook_schema  needle="hook_schema"  hits=0
+
+## #21 combo invalidAnswer  needle="invalidAnswer"  hits=0
+
+## #21 combo invalid_answer  needle="invalid_answer"  hits=0
+
+## #21 combo hookAnswer  needle="hookAnswer"  hits=0
+
+## #21 combo hook_answer  needle="hook_answer"  hits=0
+
+## region fleet~191.8-192.4M [191800000,192400000)
+- "hook" hits=57 @191804249,191804262,191806561,191806574,191832998,191833011
+- "schema" hits=9 @191890856,192391229,192391300,192391426,192391489,192391765
+- "waitingFor" hits=1 @192120439
+- "validation" hits=2 @191890863,191902797
+
+## region ui~201.3-201.6M [201300000,201600000)
+- "hookName" hits=21 @201440002,201440045,201440098,201440591,201440634,201440669
+- "hook error" hits=2 @201440645,201485345
+- "schema" hits=1 @201448277
+- "PreToolUse" hits=5 @201343078,201390749,201464139,201469317,201470441
+
+## hit updatedInput-schema#0 @97364010 jsish=false
+ouched....k.:.hookPermissionResult....W.=.PreToolUse hook for 6....... returned updatedInput that failed schema validation: ..#...N.Q.Hook result has permissionBehavior=.........Hook PreToolUse:
+....Z.. this tool......x...tengu_pre_tool_hooks_cancelled..........tengu_pre_tool_hoo
+
+## hit updatedInput-schema#1 @184387174 jsish=true
+cess&&ue.length>0){let pe=new Gk(ue),fe=`PreToolUse hook for ${t.name} returned updatedInput that failed schema validation: ${Vie(t.name,pe)}`;n(fe,{level:"warn"}),M={behavior:"deny",message:fe,decisionReason:{type:"hook",hookName:`PreToolUse:${t.name}`,hookSource:j.hookSource,re
+
+## updatedInput-schema#1 near@184387174 fn=T8t @184384510
+len=1866 sha=cd10a753a415cab4
+async function T8t(e,t,r,o,u,p,g){if(hqe(t))return{decision:{behavior:"allow",updatedInput:r},input:r};let k=o.requireCanUseTool;if(e?.behavior==="deny")return n(`Hook denied tool use for ${t.name}`),{decision:e,input:r};if(e?.behavior!=="allow"&&e?.behavior!=="ask")return{decision:await u(t,r,o,p,g),input:r};let E=e.behavior,C=e.updatedInput??r,M=await oM(t,C,{...o,toolUseId:g},{hookUpdatedInput:e.updatedInput});if(M?.behavior==="deny")return n(`Hook returned '${E}' for ${t.name}, but deny rule overrides: ${M.message}`),{decision:M,input:C};if(M?.behavior==="ask"){let L=E==="ask";if(L)o.toolDecisions??={};return n(`Hook returned '${E}' for ${t.name}, but ask rule/safety check requires full permission pipeline${L?" (hookAskFloor \u2014 a classifier allow re-surfaces as this ask)":""}`),{decision:await u(t,C,L?{...o,hookAskFloor:!0}:o,p,g),input:C}}if(E==="allow"){if(k)return n(`Hook approved tool use for ${t.name}, but canUseTool is required`),{decision:await u(t,C,o,p,g),input:C};if(!t.requiresUserInteraction?.()&&TR(t,he(o))==="auto"&&R("tengu_virtual_knuth",!1)){let N=(e.decisionReason?.type==="hook"?e.decisionReason:void 0)?.hookSource,U=N===void 0?void 0:N==="settings"?"settings":N==="plugin"||N.startsWith("plugin:")?"plugin":N==="skill"||N.startsWith("skill:")?"skill":"other";return s("tengu_auto_mode_hook_allow_funneled",{toolName:Rn(t.name),isMcp:t.isMcp??!1,hookSource:Ce(U),agentMsgId:ke(p.message.id),toolUseId:ke(g)}),n(`Hook approved tool use for ${t.name}, but auto mode requires classifier adjudication`),o.toolDecisions??={},{decision:await u(t,C,{...o,hookAllowVouched:!0},p,g),input:C}}return n(t.requiresUserInteraction?.()?`Hook satisfied user interaction for ${t.name} via updatedInput`:`Hook approved tool use for ${t.name}, bypassing permission prompt`),{decision:e,input:C}}return{decision:await u(t,C,o,p,g,e),input:C}}
+
+## hit async-hook-schema#0 @96610389 jsish=false
+root)..8...;/e.async-marker response where a sync response was expected2....r_. async hook JSON output failed schema validation (..........; ignored malformed field(s): ..$.......; delivering recognized fields as-isD.......Cannot destructure property 'processId' from null or unde
+
+## hit async-hook-schema#1 @183960850 jsish=true
+age}`:"async-marker response where a sync response was expected";return n(`${t} async hook JSON output failed schema validation (${g})`+(o.length>0?`; ignored malformed field(s): ${o.join(", ")}`:"; delivering recognized fields as-is"),{level:o.length>0?"error":"debug"}),u}functi
+
+## async-hook-schema#1 near@183960850 fn=GUe @183959797
+len=1247 sha=2857485b751180cb
+function GUe(e,t){if(!Re(e))return n(`${t} async hook JSON output must be an object, got ${x0(e)} \u2014 ignored`,{level:"error"}),{};let r=cz().safeParse(e);if(r.success&&ep(r.data))return b4(e,r.data),r.data;let o=[],u={};if("systemMessage"in e)if(typeof e.systemMessage==="string")u.systemMessage=e.systemMessage;else o.push(`systemMessage (${x0(e.systemMessage)})`);if("metrics"in e)if(Re(e.metrics)){let k=Object.entries(e.metrics).filter((E)=>typeof E[1]==="boolean"||typeof E[1]==="number");u.metrics=Object.fromEntries(k)}else o.push(`metrics (${x0(e.metrics)})`);if("hookSpecificOutput"in e)if(Re(e.hookSpecificOutput)){let{additionalContext:k,...E}=e.hookSpecificOutput,C=typeof k==="string";if(!C&&k!==void 0)o.push(`hookSpecificOutput.additionalContext (${x0(k)})`);u.hookSpecificOutput=C?e.hookSpecificOutput:E}else o.push(`hookSpecificOutput (${x0(e.hookSpecificOutput)})`);let p=r.success?void 0:r.error.issues[0],g=p?`${p.path.join(".")||"(root)"}: ${p.message}`:"async-marker response where a sync response was expected";return n(`${t} async hook JSON output failed schema validation (${g})`+(o.length>0?`; ignored malformed field(s): ${o.join(", ")}`:"; delivering recognized fields as-is"),{level:o.length>0?"error":"debug"}),u}
+
+## hit hook-error-ui#0 @93439496 jsish=false
+red (........s..Read MCP resource ......>[.. from........0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e.d... .R.a.i.s.e. .t.h.e. .h.o.o.k.'.s. .".t.i.m.e.o.u.t.". .t.o. .a.l.l.o.w. .m.
+
+## hit hook-error-ui#1 @201440055 jsish=true
+t Wh=F;let Y;if(z[174]!==A.hookName)Y=r(ne,{color:"error",children:[A.hookName," hook returned blocking error"]}),z[174]=A.hookName,z[175]=Y;else Y=z[175];let X;if(z[176]!==Wh)X=Wh?e(ne,{color:"error",children:Wh}):null,z[176]=Wh,z[177]=X;else X=z[177];let Te;if(z[178]!==Y||z[179
+
+## hook-error-ui#1 near@201440055 fn= @-1
+NO_FN
+
+## hit hook-error-colon#0 @93449960 jsish=false
+....!l..hook-...........^claude\.ai ....Cj..hint-...........isInProgress.....5. hook error: ........Z..summary-	.......startUuid.......g0.. (one-shot).....I... [session-only]......l..failure_scenario(....v..file:///B:/%7EBUN/root/chunk-85p1j361.js......A.Cloud session active....
+
+## hit hook-error-colon#1 @94559983 jsish=false
+property 'elicitationResponse' from null or undefined value......@...Elicitation hook error: ........elicitationResponse.T...`...Cannot destructure property 'elicitationResultResponse' from null or undefined value!...h...Elicitation response for server "...
+....H..": decline.....
+
+## hit hook-error-colon#2 @94560233 jsish=false
+er "...
+....H..": decline......8...elicitation_response........ElicitationResult hook error: .......37.elicitationResultResponse...........Skip confirmation...(....*1.file:///B:/%7EBUN/root/chunk-w6w5pcf2.js*.....r.Server returned 403 after trying upscoping..3....i..Server return
+
+## hit hook-error-colon#3 @95639612 jsish=false
+l '.........goal_met....o...evaluator_timeout...
+.....\.Exit code ......}.5.Stop hook error: ...".......Forked command Stop hooks failed: ......._..additionalContexts......a...requestQuery.....@..tengu_slash_command_forked..
+...R...user-slash..G.......Cannot destructure property 
+
+- rowish "hook validation" 248=2 247=2
+## rowish hook validation  needle="hook validation"  hits=2
+- #0 @100567895 . not running.........V..When hooks are disabled:.....q .. No hook commands will execute."........ StatusLine will not be displayed..6.....5.. Tool operations will proceed without hook validation..N...R...To re-enable hooks, remove "disableAllHooks" from settings.json or ask Claude.........Q.Hook configuration . disabled..........tengu_hooks_command......!. (older copy).
+- #1 @209888189 xB7 No hook commands will execute"}),Di=e(t,{dimColor:!0,children:"\xB7 StatusLine will not be displayed"}),Ai=e(t,{dimColor:!0,children:"\xB7 Tool operations will proceed without hook validation"}),m[64]=Ni,m[65]=Pi,m[66]=Di,m[67]=Ai;else Ni=m[64],Pi=m[65],Di=m[66],Ai=m[67];let on;if(m[68]!==en)on=r(o,{flexDirection:"column",children:[en,Ni,Pi,Di,Ai]}),m[68]=en,m[69]=on;e

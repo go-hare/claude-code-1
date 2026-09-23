@@ -1,0 +1,169 @@
+# gold-248-feat-7-pass2  pass2 same-machine SendMessage/ListAgents gate
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:15.643Z
+
+## function Po(  needle="function Po("  hits=29
+- #0 @178884239 n new e({type:"string",format:"nanoid",check:"string_format",abort:!1,...g(t)})}function Po(e,t){return new e({type:"string",format:"cuid",check:"string_format",abort:!1,..
+- #1 @179267885 function aQn(e){return typeof KS(E).dir==="string"&&(e==="shell"||!wn().has(e))}function Po(e,t={exists:Oo,mkdirSync:Le,writeFileSync:ie,rmdirSync:Sn}){if(e.dir===void 0||e
+- #2 @179442955 ved:i}}function Ao(e){return ra().localStoreProbes.canonicalRootOwnerUids(e,Po)}function Po(e){let t=ce(),r=null;try{r=t.lstatSync(_(e,".claude")).uid}catch(o){if(!Q(o))thr
+- #3 @180993160 m"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";function Po(){let e=a.CLAUDE_CODE_HARBOR_KITE;if(e!==void 0)return Me(e);if(B()==="windows"&
+- #4 @182047009 e){return this.compareTo(e)==0}function Uo(e){return this.compareTo(e)<0?this:e}function Po(e){return this.compareTo(e)>0?this:e}function Vo(e,t,a){var r,i,s=Math.min(e.t,t
+- #5 @182590266 Qa(e){if(!e||!e.startsWith(`${rs}.`))return;return e.slice(rs.length+1)||void 0}function Po(e){return"^"+e.replace(/[.^$+{}()|\\]/g,"\\$&").replace(/\[([^\]]*?)$/g,"\\[$1")
+- #6 @187902714 .random()*k);await ne(w,o)}o.removeEventListener("abort",h)})(),{close:h}}async function Po(e,t,n){let r=e.getReader(),i=new TextDecoder,d="",o=!1,u,m=()=>{if(u!==void 0)cl
+- #7 @189446279 isible:!0}}}function jr(t){return t.screen.height>=t.viewport.height}var Gl=256;function Po(t,o){if(!Al().claim(`ink_tree_depth_cap:${t}`))return;_(new P(`${t}: ink tree de
+- #8 @189639718 )return t;if(Co.test(e))return"timeout";return e.includes(Cde)?"exited":"other"}function Po(e){switch(e){case"daemon-unreachable":return"not running";case"ack-timeout":retu
+- #9 @191022095 er","system","program","set","run","value","name","type","state","end","start"];function Po(e){let t=0,o="";while(t<e){let i=10+Math.floor(Math.random()*11),r=0;for(let d=0
+- … +19 more
+
+## tengu_harbor_kite  needle="tengu_harbor_kite"  hits=14
+- #0 @95450512 not read the screening: (.....6.file:///B:/%7EBUN/root/chunk-v2kkae8f.js....4.-.tengu_harbor_kite_mode_emit.........repoSettings.....a.invalidSetting..	....2S.decidedBy........
+- #1 @97854840 ....Cannot destructure property 'trailMs' from null or undefined value..........tengu_harbor_kite_limitsF....#..[peer-guard] tengu_harbor_kite_limits is not an object; using def
+- #2 @97854885 m null or undefined value..........tengu_harbor_kite_limitsF....#..[peer-guard] tengu_harbor_kite_limits is not an object; using defaults........m.debit...,....U..(redacted: fra
+- #3 @97855996 l.e... .C.a.l.l. ........... to get the current address.....	.`.pacer.........b.tengu_harbor_kite_pacing_off".......CLAUDE_CODE_HARBOR_KITE_PACING_OFF..H.......Cannot destructur
+- #4 @98008880 8.js9....]z.Cross-session messaging is not available in this session........I...tengu_harbor_kite_win...........tengu_harbor_kite...........CLAUDE_CODE_HARBOR_KITE...... ..tengu
+- #5 @98008912 ing is not available in this session........I...tengu_harbor_kite_win...........tengu_harbor_kite...........CLAUDE_CODE_HARBOR_KITE...... ..tengu_cuddly_willow.(.....0.file:///B
+- #6 @101431204 N/root/chunk-64479rgf.js(.......file:///B:/%7EBUN/root/chunk-7v64hd77.js......r.tengu_harbor_kite_cloud.(.......file:///B:/%7EBUN/root/chunk-d2127z51.js(.....>.file:///B:/%7EBUN
+- #7 @180993257  e=a.CLAUDE_CODE_HARBOR_KITE;if(e!==void 0)return Me(e);if(B()==="windows"&&!R("tengu_harbor_kite_win",!0))return!1;return R("tengu_harbor_kite",!0)}function v5e(){return R("ten
+- #8 @180993303 urn Me(e);if(B()==="windows"&&!R("tengu_harbor_kite_win",!0))return!1;return R("tengu_harbor_kite",!0)}function v5e(){return R("tengu_cuddly_willow",!0)}var xpt="Cross-session m
+- #9 @181005420 .max(5000).catch(L.maxQueuedPeerMessages)})),Oe=300000;function F3e(){let e=vC("tengu_harbor_kite_limits",X,Oe),t=Le().safeParse(e);if(!t.success)return n("[peer-guard] tengu_ha
+- … +4 more
+
+## [uds-messaging] Skipped: cross-session messaging gate off  needle="[uds-messaging] Skipped: cross-session messaging gate off"  hits=4
+- #0 @100802504 ....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] S
+- #1 @100802624 essaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messagi
+- #2 @204224150 ,D_.unset("CLAUDE_CODE_MESSAGING_TOKEN"),!No()||E!==void 0)if(!Po())if(!On())n("[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messa
+- #3 @204224277 g gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messaging] Skipped: cross-session messaging gate off");else if(On())n("[uds-messaging] Skipped: remote thin client");else{let t=perf
+
+## Cross-session messaging is not available in this session  needle="Cross-session messaging is not available in this session"  hits=2
+- #0 @98008812 N/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/chunk-9nz4npf8.js9....]z.Cross-session messaging is not available in this session........I...tengu_harbor_kite_win...........tengu_harbor_kite...........CLAUDE_C
+- #1 @180993385 ngu_harbor_kite",!0)}function v5e(){return R("tengu_cuddly_willow",!0)}var xpt="Cross-session messaging is not available in this session.";
+export{Po,v5e,xpt};
+.// @bun @bytecode
+// Claude Code is a Beta product per 
+
+## function Ye()  needle="function Ye()"  hits=7
+- #0 @189197579 ER` or `claude daemon install` to keep it alive across logout.",{level:"warn"})}function Ye(){return`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 r
+- #1 @189773074 id 0)throw i;return}function ye(e,t,s){return Qe(be(MT(e))?.enabledPlugins,t,s)}function Ye(){let e=new Map;return(t)=>{let s=e.get(t);if(s===void 0)s=Ksn(t),e.set(t,s);retu
+- #2 @190530891 2",WezTerm:"WezTerm",WarpTerminal:"Warp","windows-terminal":"Windows Terminal"};function Ye(){let e=a.VSCODE_GIT_ASKPASS_MAIN??"",t=a.PATH??"";return e.includes(".vscode-ser
+- #3 @196282704 onessential traffic disabled. Messages to sessions on this machine still work.";function Ye(){return Le()==="firstParty"&&!Tt()}function ze(){if(zbe()?.live)return;if(a.CLAU
+- #4 @198339850 end",{has_terminal_bookend:a,has_level:d})}let W,te,Fe=!1,ze,Oe,Re,V=!1,x=!1,ur;function Ye(){return!0}function Se(e,r,o=!0){if(o)ze=void 0,Oe=void 0;if(!Fe||!Ye())return!1;
+- #5 @205168273 .SUCCESS};function je(e){return{code:Te.ExportResultCode.FAILED,error:Error(e)}}function Ye(){}class ge{delegate;buffer=[];shutDown=!1;setDelegate(e){if(this.shutDown){e.shu
+- #6 @208515124 N/root/chunk-n4vhwd20.js";N();function Qe(){return!oe().hasSeenUltrareviewTerms}function Ye(){return null}function je(ke){return ke.hasSeenUltrareviewTerms?ke:{...ke,hasSeen
+
+## Le()==="firstParty"  needle="Le()===\"firstParty\""  hits=23
+- #0 @179724102 _VERTEX?"vertex":"firstParty"}function $I(){return c(Le())}function ar(){return Le()==="firstParty"}function jve(){if(Le()==="bedrock"&&a.CLAUDE_CODE_USE_MANTLE)return"mantle";ret
+- #1 @179724698 eturn e==="firstParty"||wC(e)||e==="foundry"||e==="mantle"}function xb(){return Le()==="firstParty"&&Uo()}function Uo(){if(a._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0;retu
+- #2 @180232790 rstParty"&&e!=="gateway")return new Set;return Ufn(Q6e())}function YSe(){return Le()==="firstParty"&&hl()&&!yd()&&S_()===null&&Q6e().length===0}function XSe(){if(Le()!=="firstPart
+- #3 @180237768 able-5")}function h6e(e){return e.includes("claude-mythos-5")}function QSe(){if(Le()==="firstParty"&&Uo()&&cte().some((t)=>t.disabled===!0&&typeof t.value==="string"&&Xee(t.value)
+- #4 @180238577 (e){let t=a.ANTHROPIC_DEFAULT_OPUS_MODEL;if(t===void 0){let r=$l();if(t=r.opus5,Le()==="firstParty")t=bgn.map((o)=>r[o]).find((o)=>br(o))??r.opus5}return Iw(m_(t),e)}function Iw(e
+- #5 @180273806 NG&&ngt(e))t.push(yr);if(p&&ngt(e)&&!De()&&!tgt())t.push($ht);if(fs&&p&&ngt(e)&&Le()==="firstParty")t.push(fs);let g=a.USE_API_CONTEXT_MANAGEMENT&&!1,E=P3(e);if(ex(gl(e))&&!IV()&&
+- #6 @180735420 PIC_AUTH_TOKEN||!!a.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR||!!wb())return!0;return Le()==="firstParty"&&!gd()&&!nl()}var xN=["EACCES","EPERM","EBUSY","EIO","EISDIR","ELOOP"],Oee=new 
+- #7 @181133315 {a.ENABLE_TOOL_SEARCH}, result=false`);return!1}if(!a.ENABLE_TOOL_SEARCH&&!u()&&Le()==="firstParty"&&!Uo()){if(Al().claim("tool_search_optimistic_decision"))n(`[ToolSearch:optimis
+- #8 @183384774 maxHeight,maxBase64Size:a,targetRawSize:n.targetRawSize??a*3/4}}function f(){if(Le()==="firstParty"&&Uo()&&R("tengu_crimson_vector",!1))return LJn;return bE.maxBase64Size}
+export{
+- #9 @184140032 est",content:k?lLt:cLt})}}if(e instanceof Ut&&(e.status===401||e.status===403)&&Le()==="firstParty"&&lte()){if(Ngt())return Ho({error:"invalid_request",content:b5t})}if(e instance
+- … +13 more
+
+## Messages to sessions on this machine still work  needle="Messages to sessions on this machine still work"  hits=2
+- #0 @101079810 is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work... ...k.0.send messages to agent teammatesK.....2.Cannot destructure property '
+- #1 @196282654 is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work.";function Ye(){return Le()==="firstParty"&&!Tt()}function ze(){if(zbe()?.live)
+
+## UDS_INBOX  needle="UDS_INBOX"  hits=0
+
+## isEnabled(){return true}  needle="isEnabled(){return!0}"  hits=5
+- #0 @181329179 .text:void 0;return typeof o==="string"&&o.length>0?o:null}var _ln=At({isMcp:!1,isEnabled(){return!0},isConcurrencySafe(){return!0},isReadOnly(){return!0},isOpenWorld(){return!1},na
+- #1 @185544798 sync description(){return e.description},inputSchema:r,inputJSONSchema:e.schema,isEnabled(){return!0},isConcurrencySafe(){return!1},isReadOnly(){return!1},toAutoClassifierInput(u){l
+- #2 @185611217 nt tool result directly"},isConcurrencySafe(e){return this.isReadOnly?.(e)??!1},isEnabled(){return!0},isReadOnly(e){return!0},toAutoClassifierInput(e){return e.task_id},async prompt
+- #3 @196207084 async prompt(){return Ie},get inputSchema(){return ut()},isReadOnly(){return!1},isEnabled(){return!0},async checkPermissions(e,u){return{behavior:"allow",updatedInput:e}},async call
+- #4 @197111341 and)return"Running command";return`Running ${e.description??Qn(e.command,Tv)}`},isEnabled(){return!0},async validateInput(e){let t=Zt(Ye(e),e.command);if(t!==null)return y("sandbox_
+
+## function Po(#0 @178884239
+emoji",check:"string_format",abort:!1,...g(t)})}function wo(e,t){return new e({type:"string",format:"nanoid",check:"string_format",abort:!1,...g(t)})}function Po(e,t){return new e({type:"string",format:"cuid",check:"string_format",abort:!1,...g(t)})}function Io(e,t){return new e({type:"string",format:"cuid2",check:"string_format",abort:!1,...g(t)})}function So(e,t){return new e({type:"string",format:"ulid",check:"string_format",abort:!1,...g(t)})}function To(e,t){return new e({type:"string",format:"xid",check:"string_format",abort:!1,...g(t)})}
+
+## function Po( @178884239
+len=100 sha=869b5e98d77f894b
+function Po(e,t){return new e({type:"string",format:"cuid",check:"string_format",abort:!1,...g(t)})}
+
+## function Po(#1 @179267885
+("tengu_tool_cgroup",{status:v("class_enabled"),class:c(e)});return r}function aQn(e){return typeof KS(E).dir==="string"&&(e==="shell"||!wn().has(e))}function Po(e,t={exists:Oo,mkdirSync:Le,writeFileSync:ie,rmdirSync:Sn}){if(e.dir===void 0||e.dir===null)return;try{if(t.exists(e.dir))return e.dir;if(e.layout===void 0||e.layout.reuse)throw Error("enclosing tool cgroup is gone");return vn(e.layout,e.limit,t),n(`tool cgroup: ${e.dir} vanished; re-created`),s("tengu_tool_cgroup",{status:v("recreated")}),e.dir}catch(r){e.dir=null,n(`tool cgroup: disa
+
+## function Po( @179267885
+len=488 sha=479c43da226231aa
+function Po(e,t={exists:Oo,mkdirSync:Le,writeFileSync:ie,rmdirSync:Sn}){if(e.dir===void 0||e.dir===null)return;try{if(t.exists(e.dir))return e.dir;if(e.layout===void 0||e.layout.reuse)throw Error("enclosing tool cgroup is gone");return vn(e.layout,e.limit,t),n(`tool cgroup: ${e.dir} vanished; re-created`),s("tengu_tool_cgroup",{status:v("recreated")}),e.dir}catch(r){e.dir=null,n(`tool cgroup: disabled (dir vanished: ${T(r)??r})`),s("tengu_tool_cgroup",{status:v("vanished")});return}}
+
+## function Po(#2 @179442955
+ed:i}}if(o===s)return{decided:i};return{decided:void 0,root:o,cwdResolved:i}}function Ao(e){return ra().localStoreProbes.canonicalRootOwnerUids(e,Po)}function Po(e){let t=ce(),r=null;try{r=t.lstatSync(_(e,".claude")).uid}catch(o){if(!Q(o))throw o}return{rootUid:t.statSync(e).uid,gitEntryUid:t.lstatSync(_(e,".git")).uid,claudeEntryUid:r}}function _o(e){if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return n(`localSettings: not canonicalizing the consent store to ${e} \u2014 this platform has no uid semantics to verify
+
+## function Po( @179442955
+len=189 sha=76d7af047c5ccdbf
+function Po(e){let t=ce(),r=null;try{r=t.lstatSync(_(e,".claude")).uid}catch(o){if(!Q(o))throw o}return{rootUid:t.statSync(e).uid,gitEntryUid:t.lstatSync(_(e,".git")).uid,claudeEntryUid:r}}
+
+## function Po(#3 @180993160
+n02gme.js";import{Me}from"B:/~BUN/root/chunk-h5e2qvst.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";function Po(){let e=a.CLAUDE_CODE_HARBOR_KITE;if(e!==void 0)return Me(e);if(B()==="windows"&&!R("tengu_harbor_kite_win",!0))return!1;return R("tengu_harbor_kite",!0)}function v5e(){return R("tengu_cuddly_willow",!0)}var xpt="Cross-session messaging is not available in this session.";
+export{Po,v5e,xpt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service
+
+## function Po( @180993160
+len=166 sha=2458d5c4fc055ea1
+function Po(){let e=a.CLAUDE_CODE_HARBOR_KITE;if(e!==void 0)return Me(e);if(B()==="windows"&&!R("tengu_harbor_kite_win",!0))return!1;return R("tengu_harbor_kite",!0)}
+
+## [uds-messaging] Skipped: cross-session messaging gate off#0 @100802504
+rktree lock names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/
+
+## [uds-messaging] Skipped: cross-session messaging gate off#1 @100802624
+rsion 22 or higher....m.......[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)...9..."...[uds-messaging] Skipped: cross-session messaging gate off...+...\U..[uds-messaging] Skipped: remote thin client......Yc.setup_uds_messaging_ms......3...tengu_uds_startup_bind..P...y.;.Cannot destructure property 'startRendezvousServer' from null or undefined value.....|C.B:/~BUN/root/chunk-0z77aj1d.js..Q... p..Cannot destructure property 'installObserverSpawner' from null or undefined value.......
+
+## [uds-messaging] Skipped: cross-session messaging gate off#2 @204224150
+_u(w),"startup_custom_id");if(D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN"),!No()||E!==void 0)if(!Po())if(!On())n("[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messaging] Skipped: cross-session messaging gate off");else if(On())n("[uds-messaging] Skipped: remote thin client");else{let t=performance.now(),u=await import("B:/~BUN/root/chunk-6bdsxrx9.js"),I=await u.startCrossSessionInbox(E,i);if(I){let S=u.getUdsStartDegradedCa
+
+## fn [uds-messaging] Skipped: cross-session messaging gate off#2 @204223759
+MISS {"i":204223759,"missEnd":true,"preview":"function Xt(e,o,r,p,m,g,w,h,E,i,v){Y(\"info\",\"setup_started\");let O=process.version.match(/^v(\\d+)\\./)?.[1];if(!O||parseInt(O)<22)console.error(ae.bold.red(\"Error: Claude Code requires Node.js version 22 or higher.\")),process.exit(1);if(w)fp(_u(w),\"startup_custom_id\");if(D_.unset("}
+
+## [uds-messaging] Skipped: cross-session messaging gate off#3 @204224277
+0)if(!Po())if(!On())n("[uds-messaging] Skipped: cross-session messaging gate off (will late-bind if a GrowthBook refresh enables it)"),L(E,i);else n("[uds-messaging] Skipped: cross-session messaging gate off");else if(On())n("[uds-messaging] Skipped: remote thin client");else{let t=performance.now(),u=await import("B:/~BUN/root/chunk-6bdsxrx9.js"),I=await u.startCrossSessionInbox(E,i);if(I){let S=u.getUdsStartDegradedCause();if(S)y("agents_cross_session_inbox",S);else b("agents_cross_session_inbox")}else f("agents_cross_session_inbox",u.getUdsS
+
+## fn [uds-messaging] Skipped: cross-session messaging gate off#3 @204223759
+MISS {"i":204223759,"missEnd":true,"preview":"function Xt(e,o,r,p,m,g,w,h,E,i,v){Y(\"info\",\"setup_started\");let O=process.version.match(/^v(\\d+)\\./)?.[1];if(!O||parseInt(O)<22)console.error(ae.bold.red(\"Error: Claude Code requires Node.js version 22 or higher.\")),process.exit(1);if(w)fp(_u(w),\"startup_custom_id\");if(D_.unset("}
+
+## function Ye()#0 @189197579
+nsient daemon and its background jobs. Run `loginctl enable-linger $USER` or `claude daemon install` to keep it alive across logout.",{level:"warn"})}function Ye(){return`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting); background sessions are not started unwrapped`}function It(t){let e=DA();if(e===""||!t)return;if(t===e)b("agent_launcher");else y("agent_launcher","served_by_skewed_wrapper")}async function Dt(){return ace()&&await Y7()&&!process.env.CLAUDE_CONFIG_DIR&&TSe()}function Ykt(t){
+
+## function Ye() @189197579
+len=172 sha=2a6a7d5706372bf2
+function Ye(){return`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting); background sessions are not started unwrapped`}
+
+## function Ye()#1 @189773074
+hile searching for plugin "${e}": ${l(d)}`,{level:"error"})}}if(i!==void 0)throw i;return}function ye(e,t,s){return Qe(be(MT(e))?.enabledPlugins,t,s)}function Ye(){let e=new Map;return(t)=>{let s=e.get(t);if(s===void 0)s=Ksn(t),e.set(t,s);return s}}function Qe(e,t,s){if(!e)return;let i=pbe(t)?s(e).byFold.get(Zf(t))?.key:iP(Object.keys(e),t);return i===void 0?void 0:{key:i,value:e[i]}}function Xe(e,t,s){let i;for(let k of Ze){let a=ye(k,e,s);if(a!==void 0){i={scope:k,...a};break}}let r=oFn(e),o=fbe(e,r.map(({record:k})=>k===void 0?void 0:s(k))),
+
+## function Ye() @189773074
+len=99 sha=dca8aacf0fab6275
+function Ye(){let e=new Map;return(t)=>{let s=e.get(t);if(s===void 0)s=Ksn(t),e.set(t,s);return s}}
+
+## function Ye()#2 @190530891
+ile])}var h=`
+`,Me={ghostty:"Ghostty",kitty:"Kitty","iTerm.app":"iTerm2",WezTerm:"WezTerm",WarpTerminal:"Warp","windows-terminal":"Windows Terminal"};function Ye(){let e=a.VSCODE_GIT_ASKPASS_MAIN??"",t=a.PATH??"";return e.includes(".vscode-server")||e.includes(".cursor-server")||e.includes(".windsurf-server")||e.includes(".devin-server")||t.includes(".vscode-server")||t.includes(".cursor-server")||t.includes(".windsurf-server")||t.includes(".devin-server")}function _6t(){if(!a.terminal||!(a.terminal in Me))return null;return Me[a.terminal]??nul
+
+## function Ye() @190530891
+len=311 sha=33d5c717384f4228
+function Ye(){let e=a.VSCODE_GIT_ASKPASS_MAIN??"",t=a.PATH??"";return e.includes(".vscode-server")||e.includes(".cursor-server")||e.includes(".windsurf-server")||e.includes(".devin-server")||t.includes(".vscode-server")||t.includes(".cursor-server")||t.includes(".windsurf-server")||t.includes(".devin-server")}
+
+## function Ye()#3 @196282704
+opic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work.";function Ye(){return Le()==="firstParty"&&!Tt()}function ze(){if(zbe()?.live)return;if(a.CLAUDE_CODE_REMOTE===!0)return g5()===void 0?"no-container-address":void 0;return"rc-disconnected"}function Ke(e){return e==="rc-disconnected"?"Remote Control is not connected":"this session has no reply address"}function Qe(e){return a.CLAUDE_CODE_REMOTE===!0&&!e&&g5()!==void 0?"; note: this session has no na
+
+## function Ye() @196282704
+len=48 sha=02a9fdfbd34e8aa8
+function Ye(){return Le()==="firstParty"&&!Tt()}
+
+## Messages to sessions on this machine still work#0 @101079810
+is unavailable: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work... ...k.0.send messages to agent teammatesK.....2.Cannot destructure property 'resumableAgentId' from null or undefined value. ...y.j.
+| `"worker"` | Any agent from `........`. ..  .s.u.b.a.g.e.n.t.,. .a.n.o.t.h.e.r. .l.o.c.a.l. .C.l.a.u.d.e. .s.e.s.s.i.o.n. .|.
+.|. .`.".w.o.r.k.e.r. .[.3.f.a.9.c.1.].".`. .|. .S.a.m.e.,. .p.l.u.s. .i.t.s. .`.[.r.e.f.
+
+## Messages to sessions on this machine still work#1 @196282654
+is unavailable: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work.";function Ye(){return Le()==="firstParty"&&!Tt()}function ze(){if(zbe()?.live)return;if(a.CLAUDE_CODE_REMOTE===!0)return g5()===void 0?"no-container-address":void 0;return"rc-disconnected"}function Ke(e){return e==="rc-disconnected"?"Remote Control is not connected":"this session has no reply address"}function Qe(e){return a.CLAUDE_CODE_REMOTE===!0&
+
+## fn Messages to sessions on this machine still work#1 @196281838
+len=634 sha=365da62c0b8d7313
+function Ls(e,t,u,o,d){let p=d.getAppState(),r=p.teamContext?.teamName;if(!Dk(p.teamContext))throw new Ce("Only the team lead can reject plans. Teammates cannot reject their own or other plans.");let v={type:"plan_approval_response",requestId:u,approved:!1,feedback:o,timestamp:new Date().toISOString()};if(await ph(e,{from:bs,text:S(v),timestamp:new Date().toISOString()},r,d.storageV5)===void 0)return{data:{success:!1,message:`Failed to write the plan rejection to ${t}'s inbox \u2014 nothing was sent. Try again.`,request_id:u}};return{data:{success:!0,message:`Plan rejected for ${t} with feedback: "${Qn(o,50)}"`,request_id:u}}}
