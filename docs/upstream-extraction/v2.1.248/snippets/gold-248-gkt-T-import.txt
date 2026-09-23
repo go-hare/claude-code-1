@@ -1,0 +1,28 @@
+when=2026-09-22T02:05:48.472Z
+gkt=189576892
+
+## _G chunk lookback imports
+,t={},o){await hKt(e,t,o),await kn(0,"prompt_input_exit")}var p="the automatic continue at the usage-limit reset was cancelled (/rate-limit-options to wait again)",d=`${p.charAt(0).toUpperCase()}${p.slice(1)}.`,R="Automatic continue at the usage-limit reset was cancelled.";function vF(e,t){return t.includes(p)||t.includes(d)||t.includes(R)?`${e} ${d}`:e}function WL(e,t,{as:o="sentence",exitsAfterward:r=!1}={}){if(RX(),!t)return e;if(o==="clause")return`${e} \u2014 ${p}`;return`${e}
+${r?R:d}`}function Ket(e,t,o){return _G(t,o).catch((r)=>{if(r instanceof Error)r.message=WL(r.message,e,{as:"clause"});else RX();throw r})}async function lR(e,t){let o=e.findLast((r)=>(r.type==="user"||r.type==="assistant")&&F1(r))?.uuid;try{if(o)await mye(o,void 0,t);else if(bon()&&await h(t))await mye(null,void 0,t)}catch(r){_(r)}}async function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting), then retry; this session was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}async function _G(e={},t){let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());await lUe();let a=e.extraArgs??[],i;if(e.args)i=e.args;else if(e.freshIfNoTranscript&&!await h(t))i=a;else i=["--resume",V(),...a];qje(),Nj(),hPt(),await Promise.all([qt(ja(),30000,"flush timeout (relaunch)").catch(()=>{}),qt(mEe(),tde,"cleanup timeout").catch(()=>{}).then(()=>qt($ie(),1000,"analytics flush timeout").catch(()=>{}))]),e.preSpawn?.();let s={...process.env};delete s.CLAUDE_CODE_TUI_JUST_SWITCHED,delete s.CLAUDE_CODE_TUI_TRIAL,delete s.CLAUDE_BRIDGE_REATTACH_SESSION,delete s.CLAUDE_BRIDGE_REATTACH_SEQ,delete s.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY,delete s.CLAUDE_BRIDGE_REATTACH_GROUPING,delete s.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT,delete s.CLAUDE_BRIDGE_REATTACH_OWNER_ORG,delete s.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL,delete s[k0e],Object.assign(s,e.env);for(let u of e.dropEnv??[])delete s[u];Object.assign(s,Yet());let m=gKt();await g(),E(o,[o,...r,...i],s,m);for(let u of["SIGINT","SIGTERM","SIGHUP"])process.removeAllListeners(u),process.on(u,()=>{});await g();let c=C(o,[...r,...i],{stdio:"inherit",env:s,cwd:m});if(process.removeAllListeners("beforeExit"),process.removeAllListeners("exit"),c.error)process.stderr.write(`Failed to relaunch Claude Code: ${c.error.message}
+`),pp("relaunch_spawn_error"),process.exit(1);c.signal,process.exit(c.status??(c.signal?1:0))}
+
+## "import{dirname as T}" hits=1
+- @189573293 as C}from"child_process";import{stat as I}from"fs/promises";import{dirname as T}from"path";import{isAbsolute as A}from"path";function E(e,t,o,r){if(B()==="windows"||!A(e))return;let a;try{if(r)a=process.cwd(),bu(r);process.execve(e,t,Xet(o)
+
+## "import{dirname as T," hits=0
+
+## "dirname as T}" hits=1
+- @189573300 om"child_process";import{stat as I}from"fs/promises";import{dirname as T}from"path";import{isAbsolute as A}from"path";function E(e,t,o,r){if(B()==="windows"||!A(e))return;let a;try{if(r)a=process.cwd(),bu(r);process.execve(e,t,Xet(o)),n(`ex
+
+## "dirname as T," hits=0
+
+## "function T(e){return u(e)}" hits=0
+
+## "function T(e){return dirname(e)}" hits=0
+
+## "function T(e){return e.replace" hits=0
+
+## Wa projectDir hits=181437871
+tDirCache(){this.projectDirCache.clear()}setAgentTranscriptSubdir(t,e){this.agentTranscriptSubdirs.set(t,e)}clearAgentTranscriptSubdir(t){this.agentTranscriptSubdirs.delete(t)}}var g=new K(()=>new c);function Wa(t){let e=g.of(z().host),n=e.projectDirCache.get(t);if(n!==void 0)return n;let r=o(ql(),Bf(t));return e.cacheProjectDir(t,r),r}function pa(){let t=Uy()??Wa(ve());return o(t,`${V()}.jsonl`)}function Q6n(t,e){g.of(z().host).setAgentTranscriptSubdir(t,e)}function Cdn(t){g.of(z().host).clearAgentTranscriptSubdir(t)}function Rmt(){let t=Uy()??Wa(ve());return o(t,V(),"subagents")}function Ud(t){let e=g.of(z().host).agentTranscriptSubdirs.get(t),n=e?o(Rmt(),e):Rmt();return o(n,`agent-${t}.js
+
+## T(e)===Wa hits=189576931

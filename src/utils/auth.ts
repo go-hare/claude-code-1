@@ -69,6 +69,11 @@ import {
 } from './aws.js'
 import { AwsAuthStatusManager } from './awsAuthStatusManager.js'
 import {
+  type DispatcherAccount,
+  rateLimitTierFromTokenOrDispatcher,
+  subscriptionFromTokenOrDispatcher,
+} from './bgDispatcherAccount.js'
+import {
   type AccountInfo,
   checkHasTrustDialogAccepted,
   getGlobalConfig,
@@ -2377,7 +2382,11 @@ export function getSubscriptionType(): SubscriptionType | null {
     return null
   }
 
-  return oauthTokens.subscriptionType ?? null
+  return subscriptionFromTokenOrDispatcher(
+    oauthTokens.subscriptionType,
+    process.env,
+    canTrustOauthSubscriptionFields(),
+  )
 }
 
 export function isMaxSubscriber(): boolean {
@@ -2412,7 +2421,47 @@ export function getRateLimitTier(): string | null {
     return null
   }
 
-  return oauthTokens.rateLimitTier ?? null
+  return rateLimitTierFromTokenOrDispatcher(
+    oauthTokens.rateLimitTier,
+    process.env,
+    canTrustOauthSubscriptionFields(),
+  )
+}
+
+/**
+ * densable Yp — dispatcher env and awn token fields are trusted only for
+ * first-party subscriber oauth, not 3P / env token / bare / env API key.
+ * ko = isUsing3PServices; Cc = isBareMode; D7 = hasAnthropicApiKeyAuth;
+ * M7 = isClaudeAISubscriber.
+ */
+export function canTrustOauthSubscriptionFields(): boolean {
+  if (
+    isUsing3PServices() ||
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    isBareMode()
+  ) {
+    return false
+  }
+  return !(hasAnthropicApiKeyAuth() && !isClaudeAISubscriber())
+}
+
+/**
+ * densable awn — token subscription/tier only when wl() and Yp().
+ * wl = isAnthropicAuthEnabled; Xt = getClaudeAIOAuthTokens.
+ * urr(awn()) is left on the spawn caller (not in this leftover's edit list).
+ */
+export function getDispatcherAccountFromOauthToken(): DispatcherAccount {
+  if (!isAnthropicAuthEnabled()) {
+    return { subscriptionType: null, rateLimitTier: null }
+  }
+  const token = getClaudeAIOAuthTokens()
+  if (!token || !canTrustOauthSubscriptionFields()) {
+    return { subscriptionType: null, rateLimitTier: null }
+  }
+  return {
+    subscriptionType: token.subscriptionType ?? null,
+    rateLimitTier: token.rateLimitTier ?? null,
+  }
 }
 
 export function getSubscriptionName(): string {

@@ -1,0 +1,6 @@
+# gold-248-na-33-C  rootOptionsRemoteControlRefuses
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=191866061
+
+len=84 sha=7166a69a224a57e7
+function C(t){return t.filter(({key:e,value:r})=>!f.get(e)?.(r)).map(({flag:e})=>e)}

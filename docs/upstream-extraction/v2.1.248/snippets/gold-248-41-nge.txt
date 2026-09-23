@@ -1,0 +1,5 @@
+# gold-248-41-nge  official usePrStatus (footer hook)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+nge @203023644 len=368 sha=37babc555f753f44
+
+function nge(d,C=!0){let x=xt(),{host:H}=pt(),X=ca(),[Z]=u(()=>new wY({setTimeout:(ee,re)=>x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,enabled:C,focused:X})},[Z,d,C,X]),Ht(Z.subscribe,Z.getSnapshot)}

@@ -1,0 +1,4 @@
+# gold-248-na-41-304  REST list 304 empty-ok (PR unchanged)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+=C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()),Ne=Be.success?Be.data[0]:void 0;if(Ne&&g.pr?.number!==Ne.number)g.reviewDecision="";g.pr=Ne?{number:Ne.number,url:Ne.html_url,isDraft:Ne.draft}:null}else{if(Te.status===401)Pfe(r.host);else if(Te.status===403||Te.status===429)JE().backOffFromResp

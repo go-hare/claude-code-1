@@ -1,0 +1,171 @@
+# gold-248-fGt-D-rtr
+
+## full chunk around D/rtr @178167129
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var e;function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"confl
+
+sha_body=a5d24163539c611a
+
+## rtr( call sites
+@178167165 -and-compliance.  // Version: 2.1.248 var e;function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"conflict"} export{D,
+@187619975  served a ${typeof e}, not a boolean; treating it as off`,{level:"warn"});let o=rtr(e);if(o==="conflict")n(`tengu_hover_rest read ${String(e)} at a second pin in this process; keep
+
+## import{rtr} / import{D,rtr} / import{rtr,
+"import{rtr}" hits=0
+"import{rtr," hits=0
+"import{D,rtr}" hits=1
+@187619226 import{D,rtr}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{resolve as l}from"path";function qSn(e=d4t){let o=a.CLAUDE_CODE
+"import{D,rtr," hits=0
+",rtr}" hits=2
+@178167264 ,rtr}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Commercial Terms of Service. // By using Clau
+@187619234 ,rtr}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{resolve as l}from"path";function qSn(e=d4t){let o=a.CLAUDE_CODE_HOVER_R
+",rtr," hits=0
+"{rtr}" hits=0
+
+## chunk-4qdmbxwt string refs
+@99410839 .s.s.i.o.n. .i.n.s.t.e.a.d...(....(M.file:///B:/%7EBUN/root/chunk-4qdmbxwt.js(....w..file:///B:/%7EBUN/root/chunk-4n8335pp.js(.....-.file://
+@101700812 chunk-j5qsqrpb.jsB:/~BUN/root/chunk-m0p20t24.jsB:/~BUN/root/chunk-4qdmbxwt.jsB:/~BUN/root/chunk-36v26nmg.js_ufpVYepwnrknbutwnLNVmnmMem8ehtej
+@178168119 "B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";function Z(){try{process.cwd();return}catch(n){let t=n instan
+@178494578 "B:/~BUN/root/chunk-h5e2qvst.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Jq,GEe,b3t,aw,ZC,L2,Wf,y1e,Lde,N2,VEe,b1e,Ko,jn}from"B
+@178603309 "B:/~BUN/root/chunk-3yhm9tnn.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{jn,Vn,Wp,TD,_1e,w0,Er,_i,Zq,Ea,$i,oH,qEe}from"B:/~BUN/
+@179020255 "B:/~BUN/root/chunk-pj1k8faa.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{Jq,Wf,TD
+@179348159 "B:/~BUN/root/chunk-c8673rw0.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{jn,Vn,w0,Wl,Er}from"B:/~BUN/root/chunk-36v26nmg.js";im
+@179469249 "B:/~BUN/root/chunk-09bt7t2s.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{join as u}from"path";var d=Object.freeze({settings:{},
+@179476541 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{qEe}f
+@179522415 "B:/~BUN/root/chunk-5tjjc1xb.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as H,dirname as I,join as f}from"path";var P=
+@179805745 "B:/~BUN/root/chunk-46aq2234.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{existsSync as ie,readFileSync as ue}from"fs";import{ho
+@179961034 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}from"
+@180754572 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readFileSync as f}from"fs";import{join as y}from"path"
+@180999011 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se,Dc}from"B:/~BUN/root/chunk-4n8335pp.js";function G(
+@181054150 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readdir as z,readFile as K,unlink as Q,writeFile as N}
+@181070065 "B:/~BUN/root/chunk-pj1k8faa.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{join as 
+@181414544 "B:/~BUN/root/chunk-gmgvkzz4.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Ub}from"B:/~BUN/root/chunk-36v26nmg.js";import{posix a
+@181437348 "B:/~BUN/root/chunk-gmgvkzz4.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readdir as d}from"fs/promises";import{basename as p,di
+@181513322 "B:/~BUN/root/chunk-bk8db6yj.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Vn,ru,Er}from"B:/~BUN/root/chunk-36v26nmg.js";import{m
+@181528974 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{jn,Vn
+@181799284 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";function Z1(e)
+@182239054 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{Ko,Wl,o
+@182969361 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}from"B
+@183033105 "B:/~BUN/root/chunk-c8673rw0.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{STATUS_
+@183051005 "B:/~BUN/root/chunk-c8673rw0.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var CZ="https://claude.com/claude-code";function k(t,e){retur
+@183080672 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";async function Ain(e){if(D()&&e!==void 0){if(!await pte(e))re
+@183278890 "B:/~BUN/root/chunk-21hv5ssy.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{isAbsolute as o,sep as t}from"path";function n(r){let 
+@183280041 "B:/~BUN/root/chunk-ybavrk19.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as u,dirname as c,isAbsolute as p,join as f,r
+@183282428 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";class my{returned;queue=[];readResolve;readReject;isDone=!1;h
+@183303114 "B:/~BUN/root/chunk-7vtvsc2r.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{hostname as n}from"os";function iI(){return}function O
+@183314853 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{readFil
+@183515926 "B:/~BUN/root/chunk-3qr7wfe9.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{lstat as g,readFile as _,unlink as a,writeFile as C}fr
+@183601545 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se,Dc}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}
+@187486149 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readdir as A,readFile as I,stat as F}from"fs/promises"
+@187619257 ~BUN/root/chunk-yj0qewn4.js";import{D,rtr}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{resolve as l}from"path";function qSn(e=d4t){let o=a.CL
+@187622970 "B:/~BUN/root/chunk-55rptpfn.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";function rT(e){if(X_t(a.CLAUDE_CODE_HOVER_REST??R("tengu_hove
+@187624101 "B:/~BUN/root/chunk-m553zk3b.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var p=" \u2014 run `claude login` to refresh your session, or
+@187630491 "B:/~BUN/root/chunk-8wcfsp34.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";class s{settingsLoaded=!1;helperResult=null;claimSettingsLoad
+@187636933 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{spawnSync as m}
+@187650515 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{spawnSync as f}
+@187693967 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Z}from"B:/~BUN/root/chunk-n4vhwd20.js";import{access a
+@187721336 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{w}from"B:/~BUN/root/chunk-gedm3st0.js";import{join as 
+@187803127 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~B
+@188007277 "B:/~BUN/root/chunk-jwtbqhf8.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{lstat as l,readFile as f,rename as m,rm as p,unlink as
+@189541666 "B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{createHash as F}from"crypto";import{statSync as O}from
+@189587329 "B:/~BUN/root/chunk-ygp7anbg.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{mkdir as i}from"fs/promises";import{join as a}from"pat
+@189594994 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{w}from"B:/~BUN/root/chunk-gedm3st0.js";import{jn,Vn,Wp
+@189741669 "B:/~BUN/root/chunk-2fssgaa6.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{Vn,_i}f
+@189778521 "B:/~BUN/root/chunk-2fssgaa6.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Z}from"B:/~BUN/root/chunk-n4vhwd20.js";var c=Z(Oh(),1)
+@190335502 "B:/~BUN/root/chunk-54r1fawt.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{constants as d}from"fs";import{lstat as y,mkdir as H,o
+@190355827 "B:/~BUN/root/chunk-4sxpe00h.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";N();import{watch as m}from"fs";var b=5000,g=50,d=5000;class Z
+@190367219 "B:/~BUN/root/chunk-c1d19yya.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var u=new Set(["remote","remote_cowork","remote_desktop","rem
+@190374315 "B:/~BUN/root/chunk-gmgvkzz4.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{w}from"B:/~BUN/root/chunk-gedm3st0.js";import{dirname 
+@190385054 "B:/~BUN/root/chunk-kkztd933.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{mkdir as g,readdir as k,readFile as h,writeFile as y}f
+@190392328 "B:/~BUN/root/chunk-kzeqfm20.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}from"B
+@190464008 "B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var ve=5000;class V{updates=new my;owner;constructor(e){this.
+@190849607 "B:/~BUN/root/chunk-jwtbqhf8.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{join as u}from"path";function RJe(){return u(ge(),"dae
+@191069128 "B:/~BUN/root/chunk-gmgvkzz4.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{Vn,ru,E
+@191152842 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{jn,ru
+@191442085 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";function w(){let t=Bd().providerCache;if(t.preconnectFired)re
+@191474530 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~B
+@191648562 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Fb}from"B:/~BUN/root/chunk-36v26nmg.js";import{randomB
+@191731565 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var Xre=1048576;async function VTe(o){let t;try{t=await V(o)}
+@191740596 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{randomUUID as oe}from"crypto";import{join as V}from"pa
+@191754107 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{stat as y}from"fs/promises";import{basename as p,dirna
+@191770411 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~BUN/
+@191886933 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{createHash as y}from"crypto";import{mkdir as w,readdir
+@191889651 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readFile as I,stat as _}from"fs/promises";import{join 
+@191901270 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import*as x from"fs/promises";import{homedir as Ee}from"os";i
+@191932096 "B:/~BUN/root/chunk-qv30v1p1.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{promises as a}from"fs";import*as g from"os";import*as 
+@191937762 "B:/~BUN/root/chunk-1vgb5znn.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";var O=600000
+@191947385 "B:/~BUN/root/chunk-jts2jqdx.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{stat as p,writeFile as m}from"fs/promises";import{join
+@192115407 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{$i,Ym
+@192367755 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";async function t(e){if
+@192635829 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{homedir as C}fr
+@192738205 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{format as h}fro
+@192898253 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{mkdir as ye,rea
+@193500015 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{mkdir as k,readFile as S,unlink as K,writeFile as M}fr
+@193564997 "B:/~BUN/root/chunk-8772txqa.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";var u=["agent_design_projects"];function t2e(e){return typeof
+@193617665 "B:/~BUN/root/chunk-zeddfnwe.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";function T(d,i){return OQ()?i:d}function Oxt(d){switch(d){cas
+@193642438 "B:/~BUN/root/chunk-zjajc1w5.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";function OUe(r)
+@194340674 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{dirname as f,join as p}from"path";var mir=50,g=h(()=>m
+@194563499 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import{lstat a
+@194580068 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{lstat
+@194796551 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{readdir as N}fr
+@195653426 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}fro
+@196443410 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";function F(e){return B
+@196499713 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{constants as X}
+@196797002 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{randomUUID as L
+@196874089 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{appendFile as v
+@197020977 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{Vn,X$}from"B:/~
+@198233961 "B:/~BUN/root/chunk-vjfhpbcv.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";async function ogr({environmentId:s,title:e,events:i,gitRepoU
+@198406154 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{randomUUID as v
+@199044782 "B:/~BUN/root/chunk-k03s4pqz.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";async function m(e,o){try{if(oe().claudeCodeFirstTokenDate!==
+@199088784 "B:/~BUN/root/chunk-etr900fc.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{join as v}from"path";var p="active-time.json";var M=31
+@200508534 "B:/~BUN/root/chunk-nm3rsk89.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";function E$e(i
+@200552257 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{createReadStrea
+@200627029 "B:/~BUN/root/chunk-5wr748qr.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{readFile as p}from"fs/promises";import{join as y}from"
+@200633240 "B:/~BUN/root/chunk-280yeq4g.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";function W1e(e,
+@200691065 "B:/~BUN/root/chunk-mx2ajkt3.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{randomUUID as C}from"crypto";import{mkdir as T,realpat
+@200726529 "B:/~BUN/root/chunk-fcf7hr11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{join as E}from"path";function Zre(){return E(ge(),"mcp
+@200761647 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~B
+@201705458 "B:/~BUN/root/chunk-679tda11.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{p}from"B:/~BUN/root/chunk-n4vhwd20.js";import{randomUU
+@202342478 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Gq,J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{w}
+@203359050 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{p}from"B:/~BUN/
+@203861490 "B:/~BUN/root/chunk-pj1k8faa.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{Z}from"B
+@203919995 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";N();import{join as le,
+@203966390 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~B
+@204202310 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{createInterface
+@204220790 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";function L(e,o){let r=
+@205312921 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~BUN/
+@205405633 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{D2}from"B:/~BUN
+@205735975 "B:/~BUN/root/chunk-52nvj67d.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import m from"ws";var V='{"type":"KeepAlive"}',M='{"type":"Cl
+@205747875 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";N();var L=1e4,w=3;clas
+@207004205 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~BUN/
+@207149247 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~BUN/
+@207863592 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~B
+@207947325 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{Vn,Ea}from"B:/~
+@208024588 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{randomBytes as 
+@208531197 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{Z,d,p,rn}from"B:/~BUN/root/chunk-n4vhwd20.js";var eg=d
+@208840501 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";import{p,rn}
+@209216630 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{p}from"B:/~BUN/
+@210332335 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{se}from"B:/~BUN/root/chunk-4n8335pp.js";import"B:/~BUN
+@210396227 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";N();import{randomUUID 
+@211451671 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";import{mkdir as y,read
+@211610655 "B:/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import"B:/~BUN/root/chunk-90xxmjzx.js";N();async function U(i
+@226472493 unk-52nvj67d.js.B:/~BUN/root/chunk-52nvj67d.js.B:/~BUN/root/chunk-4qdmbxwt.js.B:/~BUN/root/chunk-4qdmbxwt.js.B:/~BUN/root/cli.B:/~BUN/root/s
+@226472524 unk-52nvj67d.js.B:/~BUN/root/chunk-4qdmbxwt.js.B:/~BUN/root/chunk-4qdmbxwt.js.B:/~BUN/root/cli.B:/~BUN/root/src/entrypoints/cli.js.B:/~BUN/r
+
+## extractFn D and rtr
+{"i":178167129,"body":"function D(){return e===!0}","sha":"394b34757d9d45d8","len":27}
+function rtr(t){ → 178167156
+{"i":178167156,"body":"function rtr(t){let n=t===!0;if(e===void 0)return e=n,\"pinned\";return e===n?\"unchanged\":\"conflict\"}","sha":"701bf9660a0067b0","len":99}
+
+## rtr literal calls
+rtr(!0) → NONE
+rtr(!1) → NONE
+rtr(true) → NONE
+rtr(false) → NONE
+rtr(e) → 187619975
+@187619975 )n(`tengu_hover_rest served a ${typeof e}, not a boolean; treating it as off`,{level:"warn"});let o=rtr(e);if(o==="conflict")n(`tengu_hover_rest read ${String(e)} at a second pin i
+rtr(t) → 178167165
+@178167165 de.com/docs/en/legal-and-compliance.  // Version: 2.1.248 var e;function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"

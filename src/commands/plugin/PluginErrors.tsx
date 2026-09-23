@@ -7,6 +7,8 @@ import {
 
 export function formatErrorMessage(error: PluginError): string {
   switch (error.type) {
+    case 'path-traversal':
+      return `${error.component} path escapes the plugin directory: ${error.path}`;
     case 'path-not-found':
       return `${error.component} path not found: ${error.path}`;
     case 'git-auth-failed':
@@ -76,6 +78,8 @@ export function formatErrorMessage(error: PluginError): string {
 
 export function getErrorGuidance(error: PluginError): string | null {
   switch (error.type) {
+    case 'path-traversal':
+      return 'Keep command paths inside the plugin directory';
     case 'path-not-found':
       return 'Check that the path in your manifest or marketplace config is correct';
     case 'git-auth-failed':

@@ -79,7 +79,7 @@ export const cliCommandGraph = [
   command(
     'mcp.add-json',
     ['mcp', 'add-json'],
-    'Add an MCP server (stdio or SSE) with a JSON string',
+    'Add an MCP server (stdio, SSE, HTTP, or WebSocket) with a JSON string',
     {
       ownership: 'runtime-capability',
       reuse: 'reuse-with-isolation',

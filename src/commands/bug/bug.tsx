@@ -8,5 +8,5 @@ export async function call(
   context: LocalJSXCommandContext,
   args?: string,
 ): Promise<React.ReactNode> {
-  return callLegacyFeedbackDialog(onDone, context, args);
+  return callLegacyFeedbackDialog(onDone, context, args, '/bug');
 }

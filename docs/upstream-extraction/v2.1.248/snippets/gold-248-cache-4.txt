@@ -1,0 +1,36 @@
+# gold-248-cache-4  densable 2.1.248 pass4
+# 247=253204128
+# when=2026-09-20T02:09:51.309Z
+# NEVER HAVE
+
+## #48 overflowuid-C @182940121
+trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir as d,readdir as w,readFile as D,rm as F,utimes as W}from"fs/promises";import{connect as X}from"net";impo
+
+## #48 C overflowuid @182940100
+len=56 sha=1c3d925efc2067c0
+ k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}
+
+## #48 P parse @182940157
+len=112 sha=f0e48cdda0d992f1
+function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}
+
+## #48 y=65534 @182939595
+UN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r
+
+## #48 F1t#1 @183796022
+len=104 sha=794d6e871e1f8b6c
+function F1t(e){return(await rO(e).catch(()=>[])).some((r)=>{let o=gg(r);return!C1t.has(o)&&!OC(o,iC)})}
+
+## #48 F1t#1-win @183796022
+timeMs)){u=!1,n(`materializeLinks: ${e}: ${g} may belong to a pass in progress; not stamping this time`);continue}let L=await Sle(t,g);if(L===null)continue;if(L){if(await ble(k)!==!0)u=!1;continue}if(!await N1t(e,t,k)){u=!1;continue}}let E=await Sle(t,g);if(E===null)continue;if(E){if(await ble(k)!==!0)u=!1;continue}if(await iv(nO(k,{recursive:!0,force:!0}))===Hk)u=!1}return u}async function ble(e){let t=await iv(zh(e));return t!==Hk&&t!=="directory"}async function Sle(e,t){if(B()!=="windows")return!1;let r=await r_(e,t).catch((o)=>{let u=T(o);if(u==="ENOENT")return null;if(u!==void 0&&av.has(u))return!1;throw o});return r===null?null:!r}async function kle(e,t){let r=await Sle(e,t);if(r===null)return!0;if(r)return ble(td(e,t));return await iv(nO(td(e,t),{recursive:!0,force:!0}))!==Hk}async function F1t(e){return(await rO(e).catch(()=>[])).some((r)=>{let o=gg(r);return!C1t.has(o)&&!OC(o,iC)})}async function QNe(e,t){let r=await rO(e).catch((o)=>T(o)==="ENOENT"?[]:null);if(r===null)return!0;return r.some((o)=>OC(gg(o),iC)&&td(e,o)!==t)}async function N1t(e,t,r){let o=!0,u=z$(t),p=await iv(rO(r).catch((g)=>{if(T(g)==="ENOENT")return[];throw g}));if(p===Hk)return!1;for(let g of p){if(!g.endsWith(jV))continue;let k=td(r,g.slice(0,-jV.length)+I$);try{let E=td(r,g),C=await Qae(E,P1t,{throwTransient:!0});if(C===null)continue;let M=td(t,C),L=Uk(t,M).split(rR)[0]??"";if(wle(C)||M===t||!cg(M,t)||gg(L)==="node_modules"||OC(gg(L),iC)||!(await Lc(k)).isSymbolicLink()||await D1t(t,Uk(t,O$(M)),u,{trustedRoot:t})!=="clean"||!cg(await nR(O$(M)),t))continue;let N=await Lc(M).then(()=>"present"
+
+## #37 N-invalidSetting @196196061
+ings","userSettings"]){if(!yo(s))continue;let t=be(s)?.crossSessionInbound;if(t!==void 0){e=t,o=s;break}}for(let s of["localSettings","projectSettings"]){if(!yo(s))continue;let t=be(s)?.crossSessionInbound;if(t===void 0)continue;if(p[t]>p[e??"accept"])e=t,o="repoSettings";else if(t!=="accept"&&e!==void 0&&p[t]===p[e]&&o!=="policySettings")o="repoSettings"}if(p[e??"accept"]<p.hold&&N())e="hold",o="invalidSetting";return{value:e,decidedBy:o}}function N(){return k_().errors.some((e)=>e.path===Zjt&&e.severity==="warning"&&!e.statusOnly)}function h(e){switch(e){case"accept":return{policy:"accept"};case"hold":return{policy:"hold",holdCause:O()};case"refuse":return{policy:"refuse",refuseCause:"opt-out"}}}function _(){return Po()?void 0:{policy:"refuse",refuseCause:"kill-switch"}}function H(){let 
+
+## #37 N() @196196105
+len=95 sha=8852096933c85ace
+function N(){return k_().errors.some((e)=>e.path===Zjt&&e.severity==="warning"&&!e.statusOnly)}
+
+## #42 fn.has STREAM @179035200
+TURED_OUTPUT_RETRIES","MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE","MCP_SERVER_CONNECTION_BATCH_SIZE","SLASH_COMMAND_TOOL_CHAR_BUDGET","TASK_MAX_OUTPUT_LENGTH","MCP_CONNECTION_NONBLOCKING","CLAUDE_ENABLE_BYTE_WATCHDOG","CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK","CLAUDE_ENABLE_STREAM_WATCHDOG"]),mn=new Set(["API_FORCE_IDLE_TIMEOUT","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC","DISABLE_ERROR_REPORTING","DISABLE_TELEMETRY","DO_NO

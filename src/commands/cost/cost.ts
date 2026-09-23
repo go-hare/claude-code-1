@@ -2,6 +2,12 @@ import { formatTotalCost } from '../../cost-tracker.js'
 import { currentLimits } from '../../services/claudeAiLimits.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import { isClaudeAISubscriber } from '../../utils/auth.js'
+import { formatPromptCacheCostLine } from './promptCacheStatus.js'
+
+function appendPromptCacheLine(value: string): string {
+  const line = formatPromptCacheCostLine()
+  return line === null ? value : `${value}\n${line}`
+}
 
 export const call: LocalCommandCall = async () => {
   if (isClaudeAISubscriber()) {
@@ -18,7 +24,7 @@ export const call: LocalCommandCall = async () => {
     if (process.env.USER_TYPE === 'ant') {
       value += `\n\n[ANT-ONLY] Showing cost anyway:\n ${formatTotalCost()}`
     }
-    return { type: 'text', value }
+    return { type: 'text', value: appendPromptCacheLine(value) }
   }
-  return { type: 'text', value: formatTotalCost() }
+  return { type: 'text', value: appendPromptCacheLine(formatTotalCost()) }
 }

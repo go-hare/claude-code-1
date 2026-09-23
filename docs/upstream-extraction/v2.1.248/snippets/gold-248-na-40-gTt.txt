@@ -1,0 +1,6 @@
+# gold-248-na-40-gTt
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=204697507
+
+len=46 sha=e47620cfe95c7df8
+function gTt(){return[{type:"text",text:pXt}]}

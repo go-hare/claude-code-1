@@ -19,6 +19,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
+import { getFeedbackCommandDisabledReason } from '../../utils/feedbackDrafts/gates.js'
 
 import * as childProcess from 'node:child_process'
 import { promisify } from 'node:util'
@@ -278,6 +279,11 @@ const share: Command = {
             '  --allow-public-fallback  Fall back to 0x0.st if gh gist fails',
           ].join('\n'),
         }
+      }
+
+      const disabled = getFeedbackCommandDisabledReason('/share')
+      if (disabled !== null) {
+        return { type: 'text', value: disabled }
       }
 
       const sessionId = getSessionId()

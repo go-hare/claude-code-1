@@ -102,10 +102,11 @@ function resolveWhenNotAllowed(
 /**
  * Get the effective model string for an agent.
  *
- * densable coe/Rdp (2.1.222 #8):
- * - CLAUDE_CODE_SUBAGENT_MODEL env (if set and not inherit)
- * - tool-specified model
- * - agent frontmatter model (default inherit)
+ * densable `jR` (2.1.251 #58), still using 2.1.222 family step-down:
+ * - per-spawn / tool model
+ * - agent frontmatter model
+ * - explicit `inherit` stays on the parent
+ * - `CLAUDE_CODE_SUBAGENT_MODEL` only when neither spawn nor agent set a model
  * - bare family alias matching parent → parent exact IF allowlisted
  * - else resolve alias; if not allowlisted → newest in family (a$) else parent
  *
@@ -118,17 +119,6 @@ export function getAgentModel(
   toolSpecifiedModel?: ModelAlias,
   permissionMode?: PermissionMode,
 ): string {
-  if (process.env.CLAUDE_CODE_SUBAGENT_MODEL) {
-    const envSpec = process.env.CLAUDE_CODE_SUBAGENT_MODEL
-    if (envSpec !== 'inherit') {
-      const resolved = parseUserSpecifiedModel(envSpec)
-      if (!isModelAllowed(resolved)) {
-        return resolveWhenNotAllowed(envSpec, parentModel, permissionMode)
-      }
-      return resolved
-    }
-  }
-
   // Extract Bedrock region prefix from parent model to inherit for subagents.
   const parentRegionPrefix = getBedrockRegionPrefix(parentModel)
 
@@ -177,13 +167,18 @@ export function getAgentModel(
     return withRegion
   }
 
-  // Prioritize tool-specified model if provided
+  // densable jR: spawn model, then agent model, then env default.
   if (toolSpecifiedModel) {
     return resolveSpec(toolSpecifiedModel)
   }
-
-  const agentModelWithExp = agentModel ?? getDefaultSubagentModel()
-  return resolveSpec(agentModelWithExp)
+  if (agentModel !== undefined) {
+    return resolveSpec(agentModel)
+  }
+  const envSpec = process.env.CLAUDE_CODE_SUBAGENT_MODEL
+  if (envSpec && envSpec !== 'inherit') {
+    return resolveSpec(envSpec)
+  }
+  return resolveSpec(getDefaultSubagentModel())
 }
 
 export function getAgentModelDisplay(model: string | undefined): string {

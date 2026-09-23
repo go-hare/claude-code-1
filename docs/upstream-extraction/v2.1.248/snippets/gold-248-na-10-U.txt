@@ -1,0 +1,16 @@
+# gold-248-na-10-U
+i4t@179198279
+
+(i,o);if(c<0)break;let u=c+i.length,s=u;while(s<e.length){if(e[s]==="\\"){s+=2;continue}if(e[s]==='"'){if(c>a)r=TZn(e.slice(u,s)),a=c;break}s++}o=s+1}}return r}function _ne(e,n,t){return U(e,t,n)}function U(e,n,t){let r=t===void 0?void 0:`"type":"${t}"`,a=`"${n}":`,i=e.length;while(i>0){let o=e.lastIndexOf(`
+`,i-1),c=e.slice(o+1,i);if(i=o,c.includes(a)&&(r===void 0||c.includes(r)))try{let u=JSON.parse(c);if(typeof u==="object"&&u!==null&&(t===void 0||u.type===t)){let s=u[n];if(typeof s==="string")return s}}catch{}if(o<0)break}return}function BY(e,n){let t=`"${n}":`,r=0;while(r<e.length){let a=e.indexOf(`
+`,r),i=a<0?e.slice(r):e.slice(r,a);if(r=a<0?e.length:a+1,i.includes(t))try{let o=JSON.parse(i);if(typeof o==="object"&&o!==null){let c=o[n];if(typeof c==="string")return c}}catch{}}return}function i4t(e,n){return U(e,n)}function z9e(e,n){return e?.realWorkspacePath===void 0?void 0:{hoverRestOn:n,realPath:e.realWorkspacePath}}async function jY(e,n,t){return V(e,n,"w",t)}async function N
+
+## last function U( before i4t @179197675
+len=343 sha=f0b076b191926501
+function U(e,n,t){let r=t===void 0?void 0:`"type":"${t}"`,a=`"${n}":`,i=e.length;while(i>0){let o=e.lastIndexOf(`
+`,i-1),c=e.slice(o+1,i);if(i=o,c.includes(a)&&(r===void 0||c.includes(r)))try{let u=JSON.parse(c);if(typeof u==="object"&&u!==null&&(t===void 0||u.type===t)){let s=u[n];if(typeof s==="string")return s}}catch{}if(o<0)break}return}
+
+## lastFnGeneric name=BY @179198018
+len=261 sha=e7faf9fda7c63344
+function BY(e,n){let t=`"${n}":`,r=0;while(r<e.length){let a=e.indexOf(`
+`,r),i=a<0?e.slice(r):e.slice(r,a);if(r=a<0?e.length:a+1,i.includes(t))try{let o=JSON.parse(i);if(typeof o==="object"&&o!==null){let c=o[n];if(typeof c==="string")return c}}catch{}}return}

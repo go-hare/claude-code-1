@@ -1,0 +1,161 @@
+when=2026-09-22T01:29:12.029Z
+
+## zL relaunch needle="zL(t.messages,\"relaunch\"" hits=1
+- @192088647 (m,$B()),Object.assign(m,s5(S,E,I,T,kGe(n,$1()))??{});let B=await qet(),C=await zL(t.messages,"relaunch",{},t.storageV5);try{return await Ket(C,{launcher:B,freshIfNoTranscript:!0,extraArgs:A,proactivity:{proactivityLevel:t.getProactivityLev
+
+## zL relaunch2 needle="await zL(" hits=6
+- @189574307 ){throw RX(),i}return!0}async function hKt(e,{responseStreaming:t=!1}={},o){try{await zL(e,"process_exit",{responseStreaming:t},o)}catch(r){_(r)}}async function lj(e,t={},o){await hKt(e,t,o),await kn(0,"prompt_input_exit")}var p="the automa
+- @192088641 assign(m,$B()),Object.assign(m,s5(S,E,I,T,kGe(n,$1()))??{});let B=await qet(),C=await zL(t.messages,"relaunch",{},t.storageV5);try{return await Ket(C,{launcher:B,freshIfNoTranscript:!0,extraArgs:A,proactivity:{proactivityLevel:t.getProactiv
+- @201717048 cribe",C?"consent_carry_checkpoint_failed":"consent_carry_write_failed")}}let m=await zL(r.messages,"background_handoff",{responseStreaming:r.responseStreaming??r.isMidTurn},r.storageV5),d=await Nkt(r.seed,r.storageV5),w=d.name!==r.seed.nam
+- @201901818 ];async function Ake(i,n,y,w,C,{responseStreaming:m,trial:v}){await lUe();let L=await zL(y,"relaunch",{responseStreaming:m},C);return Ket(L,{freshIfNoTranscript:!0,extraArgs:n,proactivity:w,env:{CLAUDE_CODE_TUI_JUST_SWITCHED:i,...v&&i==="fu
+- @202354070 turn`Cannot open agents \u2014 ${uo instanceof Error?uo.message:String(uo)}`}Re=await zL(d,"background_handoff",{responseStreaming:me?.abortAfterFlush!==void 0},ge);let Bt=null;if(me?.taskRegistry)Bt=await aFe(me.taskRegistry.all(),ee);let 
+- @209952046 e Desktop needs to be updated (found v${a.version}, need v${ywt}+).`});return}c=await zL(H(),"desktop_handoff",{},M),s({state:"flushing"}),await ja(),s({state:"opening"});let i=await f0n();if(!i.success){s({state:"error",error:WL(i.error,c)
+
+## EBt switching needle="Switching to latest Claude Code" hits=1
+- @192088352 SkipNextArchive?e:{...e,replBridgeSkipNextArchive:!0}),n.writeSdkMessages([EBt("Switching to latest Claude Code\u2026 reconnecting",V())]),await qt(n.flush(),2000,"bridge flush").catch(()=>{}),await n.teardown({skipArchive:!0});let m={};if(
+
+## EBt( needle="EBt(\"" hits=1
+- @192088347 ridgeSkipNextArchive?e:{...e,replBridgeSkipNextArchive:!0}),n.writeSdkMessages([EBt("Switching to latest Claude Code\u2026 reconnecting",V())]),await qt(n.flush(),2000,"bridge flush").catch(()=>{}),await n.teardown({skipArchive:!0});let m={
+
+## lUe needle="await lUe()" hits=3
+- @189575602 nnable")}async function _G(e={},t){let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());await lUe();let a=e.extraArgs??[],i;if(e.args)i=e.args;else if(e.freshIfNoTranscript&&!await h(t))i=a;else i=["--resume",V(),...a];qje(),Nj(),hPt(),await Promis
+- @192088071 o5(w,wle(t)),...i5(w,AL())],b=ha()?void 0:t.getAppState().teamContext?.teamName;await lUe();let R=g(!0);if(R!==void 0)return{type:"text",value:R};let n=da(),S=n?.bridgeSessionId,E=n?.getLastSequenceNum(),I=n?.outboundOnly,T=n?.sessionGroupi
+- @201901800 ault","fullscreen"];async function Ake(i,n,y,w,C,{responseStreaming:m,trial:v}){await lUe();let L=await zL(y,"relaunch",{responseStreaming:m},C);return Ket(L,{freshIfNoTranscript:!0,extraArgs:n,proactivity:w,env:{CLAUDE_CODE_TUI_JUST_SWITCH
+
+## ha team needle="ha()?void 0:t.getAppState()" hits=1
+- @192088021 d 0)return{type:"text",value:y};let w=he(t),A=[...o5(w,wle(t)),...i5(w,AL())],b=ha()?void 0:t.getAppState().teamContext?.teamName;await lUe();let R=g(!0);if(R!==void 0)return{type:"text",value:R};let n=da(),S=n?.bridgeSessionId,E=n?.getLast
+
+## getProactivityLevel needle="getProactivityLevel()" hits=9
+- @190937131 nction Ai(e){if(e.options?.isSkillPreload)return"";if(!fMe())return"";if(!sae(e.getProactivityLevel()))return"";let t=e.options?.tools;if(t&&!f9()&&!t.some((i)=>Xt(i,vo)))return"";return(await Dge(an(),e.storageV5)).some((i)=>i.name===q1)?T
+- @190949705 ommand(e,t){let o=await Dge(an(),t.storageV5),i=BRe(URe(o),"commit_skill",sae(t.getProactivityLevel())),r=Fi(e,i);return[{type:"text",text:await z3(r,{...t,permissionLayers:[...t.permissionLayers??[],{kind:"allowed_tools",allowedTools:ao}]}
+- @191032121 n(),t.storageV5),pLt(t.getAppState,t.storageV5)]),r=BRe(URe(o),"pr_skill",sae(t.getProactivityLevel())),d=await BS(),u=/^[A-Za-z0-9._/+][A-Za-z0-9._/+-]*$/.test(d)?d:"main",p=Ss(e,u,r,o,i);return[{type:"text",text:await z3(p,{...t,permissio
+- @192088790 ,{launcher:B,freshIfNoTranscript:!0,extraArgs:A,proactivity:{proactivityLevel:t.getProactivityLevel(),toolPermissionContext:w},env:Object.keys(m).length>0?m:void 0,preSpawn:()=>process.stdout.write(ae.dim(` Switching from ${{ISSUES_EXPLAINE
+- @201903659 >{let d=he(n);return[...o5(d,wle(n)),...i5(d,AL())]},L=()=>({proactivityLevel:n.getProactivityLevel(),toolPermissionContext:he(n)}),P=()=>Z1(n),z=()=>Aae(n),R=()=>hoe(n.taskRegistry.all());if(_t()){let d=$T(),{error:b}=await Wt("userSetting
+- @204994534 ing ran there.`,host:t}}function lr(e,o){let t=he(e),r=t.mode==="auto"&&khe(o,e.getProactivityLevel())?"default":t.mode;return{permissionMode:XAn(r),isBypassAvailable:t.isBypassPermissionsModeAvailable}}function cr(e,o){if(e.isMcp!==!0)retu
+- @205007621 et u=he(t);if(!so(u.mode)||!o.classifierEligible||!Vn.has(e.name)||khe(e.name,t.getProactivityLevel()))return{kind:"no_verdict"};let m=de(`${o.message}${o.decisionReason===void 0?"":` [${o.decisionReason}]`}`,Lr),p=`runs on ${o.host.name} (
+- @205008744 t.agentId,sessionId:P,...Or(o,d)}),()=>{}),I=he(t),D=!so(I.mode),j=khe(e.name,t.getProactivityLevel()),G=D||j||S.unavailable||S.transcriptTooLong||S.refusedBySafeguard||S.failureMode!==void 0?"no_verdict":S.shouldBlock?"block":The()?"no_ver
+- @205714563 ctions a restart can't carry over (${m.join("; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermissionContext:c};try{await _G({freshIfNoTranscript:!0,extraArgs:[...o5(c,wle(o)),...i5(c,AL())],proactivity:h,env:$B(),preSpawn:()
+
+## Ket( needle="await Ket(" hits=1
+- @192088699 );let B=await qet(),C=await zL(t.messages,"relaunch",{},t.storageV5);try{return await Ket(C,{launcher:B,freshIfNoTranscript:!0,extraArgs:A,proactivity:{proactivityLevel:t.getProactivityLevel(),toolPermissionContext:w},env:Object.keys(m).len
+
+## wle( needle="wle(t)" hits=1
+- @192087996 5);let y=g(!0);if(y!==void 0)return{type:"text",value:y};let w=he(t),A=[...o5(w,wle(t)),...i5(w,AL())],b=ha()?void 0:t.getAppState().teamContext?.teamName;await lUe();let R=g(!0);if(R!==void 0)return{type:"text",value:R};let n=da(),S=n?.bri
+
+## function zL needle="function zL(" hits=2
+- @189574045 d: ${a.error.code}`);return a.ok&&a.value.size>0}catch(a){return _(a),!1}}async function zL(e,t,{responseStreaming:o=!1}={},r){let a=ptt(t);if(!a||o)return a;try{if(await rS([...e,It(dtt[t],"warning")],void 0,void 0,void 0,r),t==="relaunch"
+- @199960475 malizeParams(t)})}function ML(e,t){return new e({type:"transform",transform:t})}function zL(e,t){return new e({type:"optional",innerType:t})}function LL(e,t){return new e({type:"nullable",innerType:t})}function UL(e,t,n){return new e({type:
+
+## async function zL needle="async function zL(" hits=1
+- @189574039  failed: ${a.error.code}`);return a.ok&&a.value.size>0}catch(a){return _(a),!1}}async function zL(e,t,{responseStreaming:o=!1}={},r){let a=ptt(t);if(!a||o)return a;try{if(await rS([...e,It(dtt[t],"warning")],void 0,void 0,void 0,r),t==="rel
+
+## function EBt needle="function EBt(" hits=1
+- @183109460 text_management:null},parent_tool_use_id:null,is_meta:!0,session_id:t,uuid:A()}}function EBt(e,t){return{type:"assistant",message:{diagnostics:null,id:A(),container:null,model:Wu,role:"assistant",stop_details:null,stop_reason:"stop_sequence
+
+## async function EBt needle="async function EBt(" hits=0
+
+## function lUe needle="function lUe(" hits=3
+- @183902105 t=new K(()=>new Set);function aUe(){return KS(Hqt)}function jqt(e){Lce(aUe(),e)}function lUe(){let e=[];for(let t of QY(aUe()))for(let r of t.values())for(let o of Ry)for(let u of r.hooks[o]??[])for(let{hook:p}of u.hooks)if(p.type!=="functi
+- @189575220 id 0,t);else if(bon()&&await h(t))await mye(null,void 0,t)}catch(r){_(r)}}async function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or is not
+- @215942051 tion sUe(e){return e.children}function oUe(e){return Array.isArray(e)?e[1]:null}function lUe(e){e.data.value!==void 0&&(e.value=e.data.value),e.data=e.data.data}function cUe(e){var t=0;do e.height=t;while((e=e.parent)&&e.height<++t)}functio
+
+## async function lUe needle="async function lUe(" hits=1
+- @189575214 e(o,void 0,t);else if(bon()&&await h(t))await mye(null,void 0,t)}catch(r){_(r)}}async function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or 
+
+## function ha needle="function ha(" hits=11
+- @178275510 :a,work_id:t.id,error:String(b)})}),await ha(i,t,n,this.requestOptions)}};async function ha(e,t,r,s){try{await e.beta.environments.work.stop(t.id,{environment_id:t.environment_id,force:!0},{...s,headers:c([s?.headers])})}catch(n){if(!me(n,4
+- @179554143 .results)}});var yn=d(function(_f,mn){var la=Ft(),pa=It(),da=kt();mn.exports=ha;function ha(e,t,r){var n=pa(e);while(n.index<(n.keyedList||e).length)la(e,t,n,function(o,s){if(o){r(o,s);return}if(Object.keys(n.jobs).length===0){r(null,n.resu
+- @179897504 t{dynamicTeamContext:o}=n();if(o?.teamName)return o.teamName;return e?.teamName}function ha(){if(kb())return!0;return Tdr()}function Tdr(){let{dynamicTeamContext:e}=n();return!!(e?.agentId&&e?.teamName)}function MI(e){return e!==void 0||ha(
+- @181635301  `||p===";"||p==="|"||p==="&"||p==="("||p===")"||p==="<"||p===">",d++}}return!1}function ha(e){if(!e.includes("{"))return e;let t=[],r=!1,o=!1,u=!1,d=!0,p=0;while(p<e.length){let g=e[p];if(u)if(g==="\\"&&(e[p+1]==="`"||e[p+1]==="\\"||e[p+1]
+- @192118187 h)return;return{permissionMode:S,model:i?.model,effort:C,agent:d,allowBypass:h}}function ha(i){return!!i.permissionMode&&i.permissionMode!=="default"||!!i.model||!!i.effort||!!i.agent||!!i.allowBypass}function Ai(rS){let Er=g(17),{defaults:
+- @194773478 -ref","--verify","-q",t.stdout.trim()]);return r.code!==0&&r.exitCode===1}async function ha(e,t,r,o,i){let a=t===null?o:`${t}..${o}`,d=await Pf(e,a,i);if(d===null)return null;return{denied:J(d,(u)=>ba(u,r(u,!0))),credentialNamed:d.filter((u
+- @198707479 ||f.value.ino!==u.inode)return re({atomic:!0,sourceKept:!0});return Va(e)}async function ha(e,r,t,i,o,a,s="copy"){let d=await xe(X(r));if(d.ok)return H(une(r,d.value,i));if(d.error.kind!=="absent")return d;if(!o())return H({kind:"suspect"})
+- @204051879 s||o.data.is_error===!0||!t.has(o.data.tool_use_id))continue;yield{message:r}}}}function ha(e){let t=new Set,r=[];for(let{message:s}of _o(e)){let o=Eo().safeParse(s);if(!o.success)continue;let u=o.data.tool_use_result.url,c=Tn(u);if(!c||t.h
+- @204444202 ts.popUntilTagNamePopped(u.TABLE),e._resetInsertionMode(),e._processStartTag(t)}function ha(e,t){if(ut(t))e._appendElement(t,d.HTML);else q(e,t);t.ackSelfClosing=!0}function la(e,t){if(!e.formElement&&e.openElements.tmplCount===0)e._insertE
+- @207696690 ===""&&u.password===""&&!d.includes("=")&&!/[\s'"\\]/.test(d)?d:"refused"}async function ha(e,t){let r=await Jt(e,["config","--list","-z","--name-only"]);if(r.exitCode!==0)return null;let o="remote."+t+".";return r.stdout.split("\x00").some
+- @213434078 e,"x");if(!(!l||a&&r))if(a)s.unshift(l);else if(t.push(l),!r)break}t.push(...s)}function ha(t,e,i){const s=t.interpolate(e,i);if(!s)return{};const n=s[i],o=t.segments,a=t.points;let r=!1,l=!1;for(let t=0;t<o.length;t++){const e=o[t],s=a[e.s
+
+## function Ket needle="function Ket(" hits=3
+- @184956240 o.copy.ctimeNs&&Number(u.size)===o.copy.size}catch{return!1}}))).every(Boolean)}function Ket(e){return e.dev===0n||e.ino===0n?null:`${e.dev}:${e.ino}`}async function Qfn(e,t,r){let o=zet("sha256"),u=Buffer.allocUnsafe(Math.min(t+1,qet)),p=0
+- @189574889 RX(),!t)return e;if(o==="clause")return`${e} \u2014 ${p}`;return`${e} ${r?R:d}`}function Ket(e,t,o){return _G(t,o).catch((r)=>{if(r instanceof Error)r.message=WL(r.message,e,{as:"clause"});else RX();throw r})}async function lR(e,t){let o=e.
+- @216341851 var Xue,o3,_O=F(()=>{"use strict";Nue();Xue=Math.max;o(Xet,"overRest");o3=Xet});function Ket(e,t){return i3(o3(e,t,ao),e+"")}var df,X2=F(()=>{"use strict";of();_O();EO();o(Ket,"baseRest");df=Ket});function Qet(e){return typeof e=="number"&&
+
+## async function Ket needle="async function Ket(" hits=0
+
+## function _G needle="function _G(" hits=2
+- @186832936 nc function Z6n(e,t){let r=await hG(e,t);if(r===null)throw _xe();return r}async function _G(e,t,r=null){let o=jc(e,".claude-plugin","marketplace.json"),u=r?.kind==="key"?r.key:null;if(D()&&t!==void 0&&r?.kind==="hostFolder"){let p;try{p=awa
+- @189575537 was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}async function _G(e={},t){let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());await lUe();let a=e.extraArgs??[],i;if(e.args)i=e.args;else if(e.freshIfNoTranscript&&!await h(
+
+## async function _G needle="async function _G(" hits=2
+- @186832930 })}async function Z6n(e,t){let r=await hG(e,t);if(r===null)throw _xe();return r}async function _G(e,t,r=null){let o=jc(e,".claude-plugin","marketplace.json"),u=r?.kind==="key"?r.key:null;if(D()&&t!==void 0&&r?.kind==="hostFolder"){let p;try
+- @189575531 ssion was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}async function _G(e={},t){let{cmd:o,prefixArgs:r}=SH(e.launcher??Pd());await lUe();let a=e.extraArgs??[],i;if(e.args)i=e.args;else if(e.freshIfNoTranscript&&!aw
+
+## function wle needle="function wle(" hits=3
+- @182933042 (let t of e.permissionLayers??[])if(t.kind==="model")o=t.mainLoopModel;return o}function wle(e){return e.getAppState().sessionEffort}function Rh(e){return c(e)??e.options.mainLoopModel}function cPe(e){let o=e.options.thinkingConfig;for(let 
+- @202725522 Re()}catch(Pe){if(!Mt(Pe))_(Pe)}})}function Cle({store:d,queue:C}){return()=>{}}function wle({store:d,setAppState:C,storageV5:x}){return Kd([d],()=>{let{viewingAgentTaskId:H,tasks:X}=d.getState(),Z=H?X[H]:void 0,ee=hr(Z)&&Z.retain&&!Z.diskL
+- @216219641 )},u}var Cle=F(()=>{"use strict";Kt();Jt();tr();nr();o(Tle,"multiRect")});async function wle(e,t){let{labelStyles:r,nodeStyles:n}=ct(t);t.labelStyle=r;let{shapeSvg:i,bbox:a,label:s}=await It(e,t,Dt(t)),l=t.padding??0,u=t.look==="neo"?16:l,h
+
+## fn zL near "zL(t.messages,\"relaunch\"" hits=1
+- hit @192088647 start=function zL(@189574045
+len=206 sha=d21de28ae2f5877a
+function zL(e,t,{responseStreaming:o=!1}={},r){let a=ptt(t);if(!a||o)return a;try{if(await rS([...e,It(dtt[t],"warning")],void 0,void 0,void 0,r),t==="relaunch")await lR(e,r)}catch(i){throw RX(),i}return!0}
+
+## fn zL2 near "await zL(y,\"relaunch\"" hits=1
+- hit @201901818 start=function zL(@199960475
+len=61 sha=26bb47bf641124cc
+function zL(e,t){return new e({type:"optional",innerType:t})}
+
+## fn EBt near "EBt(\"Switching to latest Claude Code" hits=1
+- hit @192088347 start=function EBt(@183109460
+len=361 sha=dbe4742c9132586f
+function EBt(e,t){return{type:"assistant",message:{diagnostics:null,id:A(),container:null,model:Wu,role:"assistant",stop_details:null,stop_reason:"stop_sequence",stop_sequence:"",type:"message",usage:{...Pp},content:[{type:"text",text:e,citations:null}],context_management:null},parent_tool_use_id:null,session_id:t,uuid:A(),timestamp:new Date().toISOString()}}
+
+## fn lUe near "await lUe()" hits=3
+- hit @189575602 start=function lUe(@189575220
+len=311 sha=ae2ab5b06aa33fef
+function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting), then retry; this session was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}
+- hit @192088071 start=function lUe(@189575220
+len=311 sha=ae2ab5b06aa33fef
+function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting), then retry; this session was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}
+- hit @201901800 start=function lUe(@189575220
+len=311 sha=ae2ab5b06aa33fef
+function lUe(){if(await Qw())return;throw f("agent_launcher","relaunch_launcher_not_runnable"),new P(Tc()??`${l_}: launcher \`${El()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting), then retry; this session was left running`,"CLAUDE_CODE_PROCESS_WRAPPER launcher is not runnable")}
+
+## fn ha near "ha()?void 0:t.getAppState()" hits=1
+- hit @192088021 start=function ha(@181635301
+len=814 sha=bc680d19a73df5e4
+function ha(e){if(!e.includes("{"))return e;let t=[],r=!1,o=!1,u=!1,d=!0,p=0;while(p<e.length){let g=e[p];if(u)if(g==="\\"&&(e[p+1]==="`"||e[p+1]==="\\"||e[p+1]==="$"))t.push(g,e[p+1]),p+=2;else{if(g==="`")u=!1;t.push(g==="{"?" ":g),p++}else if(r){if(g==="'")r=!1;t.push(g==="{"?" ":g),p++}else if(o)if(g==="\\"&&(e[p+1]==='"'||e[p+1]==="\\"||e[p+1]==="`"))t.push(g,e[p+1]),p+=2;else if(g==="`")u=!0,t.push(g),p++;else{if(g==='"')o=!1;t.push(g==="{"?" ":g),p++}else if(g==="\\"&&p+1<e.length){if(t.push(g,e[p+1]),e[p+1]!==`
+`)d=!1;p+=2}else if(g==="#"&&d){while(p<e.length&&e[p]!==`
+`)t.push(e[p]),p++;d=!0}else if(g==="`")u=!0,d=!1,t.push(g),p++;else{if(g==="'")r=!0;else if(g==='"')o=!0;d=g===" "||g==="\t"||g===`
+`||g===";"||g==="|"||g==="&"||g==="("||g===")"||g==="<"||g===">",t.push(g),p++}}return t.join("")}
+
+## fn Ket near "await Ket(C,{launcher:B,freshIfNoTranscript" hits=1
+- hit @192088699 start=function Ket(@189574889
+len=129 sha=481adc8d23db0e53
+function Ket(e,t,o){return _G(t,o).catch((r)=>{if(r instanceof Error)r.message=WL(r.message,e,{as:"clause"});else RX();throw r})}
+
+## fn wle near "o5(w,wle(t))" hits=1
+- hit @192087991 start=function wle(@182933042
+len=53 sha=35440dc95c68f864
+function wle(e){return e.getAppState().sessionEffort}
+
+## fn getProactivity near "getProactivityLevel()" hits=9
+- hit @190937131 start=Ai@190937043
+len=253 sha=1b541478745791bb
+async function Ai(e){if(e.options?.isSkillPreload)return"";if(!fMe())return"";if(!sae(e.getProactivityLevel()))return"";let t=e.options?.tools;if(t&&!f9()&&!t.some((i)=>Xt(i,vo)))return"";return(await Dge(an(),e.storageV5)).some((i)=>i.name===q1)?Ti:""}
+- hit @190949705 start=getProactivityLevel()@190937131
+len=230 sha=fa624f245ec3c640
+getProactivityLevel()))return"";let t=e.options?.tools;if(t&&!f9()&&!t.some((i)=>Xt(i,vo)))return"";return(await Dge(an(),e.storageV5)).some((i)=>i.name===q1)?Ti:""}var ce=lg,xi=new RegExp(`^(${ce.map((e)=>e.slice(0,3)).join("|")}
+- hit @191032121 start=getProactivityLevel()@190949705
+len=172 sha=6b541f33cacc0302
+getProactivityLevel())),r=Fi(e,i);return[{type:"text",text:await z3(r,{...t,permissionLayers:[...t.permissionLayers??[],{kind:"allowed_tools",allowedTools:ao}]},`/${FGe}`)}
+- hit @192088790 start=getProactivityLevel()@191032121
+len=247 sha=f0fd1c740cf02331
+getProactivityLevel())),d=await BS(),u=/^[A-Za-z0-9._/+][A-Za-z0-9._/+-]*$/.test(d)?d:"main",p=Ss(e,u,r,o,i);return[{type:"text",text:await z3(p,{...t,permissionLayers:[...t.permissionLayers??[],{kind:"allowed_tools",allowedTools:Bo}]},`/${UGe}`)}
+- hit @201903659 start=getProactivityLevel()@192088790
+len=621 sha=1344286bc0c4535c
+getProactivityLevel(),toolPermissionContext:w},env:Object.keys(m).length>0?m:void 0,preSpawn:()=>process.stdout.write(ae.dim(`
+Switching from ${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS_WORKER_URL:"B:/~BUN/root/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION}
+- hit @204994534 start=getProactivityLevel()@201903659
+len=799 sha=1b3eaeac002f42fb
+getProactivityLevel(),toolPermissionContext:he(n)}),P=()=>Z1(n),z=()=>Aae(n),R=()=>hoe(n.taskRegistry.all());if(_t()){let d=$T(),{error:b}=await Wt("userSettings",{tui:m},void 0,n.storageV5);if(b)return i(no(n.session)?"Failed to save setting (detail withheld on this connection).":`Failed to save setting: ${b.message}`,{display:"system"}),null;await hwt(n.storageV5);let h=j0();return s("tengu_tui_command",{fullscreen:m==="fullscreen",from:c(C),to:c(m),from_entry_path:c(d),session_age_ms:Math.round(process.uptime()*1000),bounce:!1,scroll_decay_curve:h.useDecayCurve,scroll_base:h.base,scroll_xtermjs:h.xtermJs}),i(`Saved. Background sessions always use the fullscreen renderer while attached; the ${m} renderer will apply to sessions started directly with \`claude\`.`,{display:"system"}),null}

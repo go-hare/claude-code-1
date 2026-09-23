@@ -1,0 +1,6 @@
+# gold-248-na-41-A$  TTL cache (prStatusByUrl=A$(_Jt,30000))
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=178817076
+
+len=814 sha=e64adecbbf14ad90
+function A$(i,u=300000,l){let o=(c)=>typeof u==="function"?u(c):u,e=new Map,t=new Map,a=async(...c)=>{let s=S(c),r=e.get(s);if(r&&l&&!l(r.value,r.timestamp)){if(r.refreshPromise)return r.refreshPromise;e.delete(s),r=void 0}let h=Date.now();if(!r){let f=t.get(s);if(f)return f;let g=i(...c);t.set(s,g);try{let m=await g;if(t.get(s)===g)e.set(s,{value:m,timestamp:Date.now(),refreshing:!1,lifetimeMs:o(m)});return m}finally{if(t.get(s)===g)t.delete(s)}}if(r&&h-r.timestamp>r.lifetimeMs&&!r.refreshing){r.refreshing=!0;let f=r,g=i(...c);return f.refreshPromise=g,g.then((m)=>{if(e.get(s)===f)e.set(s,{value:m,timestamp:Date.now(),refreshing:!1,lifetimeMs:o(m)})}).catch((m)=>{if(n(String(m),{level:"error"}),e.get(s)===f)e.delete(s)}),r.value}return e.get(s).value};return a.cache={clear:()=>{e.clear(),t.clear()}},a}

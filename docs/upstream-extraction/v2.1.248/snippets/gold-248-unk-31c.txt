@@ -1,0 +1,64 @@
+# gold-248-unk-31c
+when=2026-09-20T05:55:56.824Z
+
+## 248 fn preamble @198351726
+oactive refresh suppressed for teleported session ${e}`);return}let o=Gt(),t=V,a=!1,d,S,w,E,k=!1;function j(P,L,ae="refresh_credentials_rejected",le){if(m)return;if(Re!==void 0&&W===void 0)X(Re),Re=void 0;else if(!t)ze=ae,Oe=le===void 0?void 0:{code:le,generation:Jgt()};d=P,S="refresh_credentials_rejected",w=L}async function q(){if(!await fr("owner_changed_refresh",o))return!1;if(x)E={leg:"sad",code:"owner_changed"};return!0}try{if(await q())return;let P=un(r);if(!P)dt();let L=await ir(()=>{if(P)return Promise.resolve({terminal:!1,reason:"oauth_rejected"});if(m||te!==void 0||N!==o)return Promise.resolve(null);return qr(e,u,r,O.http_timeout_ms,void 0,sr).then((le)=>m||N!==o?le:Yr(le))},"fetchRemoteCredentials (proactive)",O);if(m||N!==o)return;if(TP(L)){if(n(P?"[remote-bridge] Proactive cycle: bearer already rejected by /bridge \u2014 retrying the forced OAuth refresh without re-registering":"[remote-bridge] Proactive /bridge re-mint rejected (oauth_rejected) \u2014 attempting forced OAuth refresh"),!P)Y("error","bridge_repl_v2_proactive_oauth_rejected");if(await q())return;let le=Jgt(),Te=await Ui(r),ke=Q()??r;if(await q())return;if(Te==="unreachable"){if(n("[remote-bridge] Proactive forced OAuth refresh got no verdict (token endpoint unreachable); keeping transport, a later cycle retries the refresh"),!P)E={leg:"sad",code:"refresh_deferred_transient"};at=r;let Z=Br<Hi;if(lb(e))Z=!1;if(Z)Br++,tr.scheduleFromExpiresIn(e,0);Y("info","bridge_repl_v2_proactive_refresh_unreachable",{early_retry:Br,rearmed:Z});return}let Pe=Te==="recovered";if(Pe)dt();let we=Pe?await ir(()=>{if(m||te!==void 0||N!==o)return Promise.resolve(null);return qr(e,u,ke,O.http_timeout_ms,void 0,sr).then((Z)=>m||N!==o?Z:Yr(Z))},"fetchRemoteCredentials (proactive post-refresh)",O):null;if(m||N!==o)return;if(Pe&&we===null){if(n("[remote-bridge] Proactive post-refresh re-mint failed (transient); fallback refresh will retry"),te===void 0)E={leg:"sad",code:"post_refresh_remint_null"};return}if(vV(we)){E={leg:"bad",code:`post_refresh_credentials_${De(we)}`},j(a8(we),De(we),Hr("refresh",we));return}if(we===null||TP(we)){let Z=Pe?void 0:Zt(le);if(Z!==void 0){E={leg:"sad",code:Z},Y("info","bridge_repl_v2_proactive_host_declined"),j(tn(Z),nn(Z),"refresh_credentials_rejected",Z);return}E={leg:"bad",code:Pe?"oauth_rejected_after_refresh":z?"oauth_rejected_refresh_failed":"oauth_rejected_no_refresh_path"},j(vi,"auth");return}ee?.noteAcceptedToken(ke);let xe=await ct(we,"proactive_refresh",0);if(xe==="suppressed_teleported")k=!0;if(xe==="rebuilt")a=!0,E={leg:"sad",code:"oauth_rejected_recovered"},n("[remote-bridge] Transport rebuilt (proactive refresh after forced OAuth refresh)");return}if(!L){if(n("[remote-bridge] Proactive /bridge re-mint failed (transient); fallback refresh will retry"),Y("warn","bridge_repl_v2_proactive_remint_null"),te===void 0)E={leg:"sad",code:"remint_null"};return}if(vV(L)){E={leg:"bad",code:`credentials_${De(L)}`},j(a8(L),De(L),Hr("refresh",L));return}ee?.noteAcceptedToken(r);let ae=await ct(L,"proactive_refresh",0);if(ae==="suppressed_teleported")k=!0;if(ae==="rebuilt")a=!0,E={leg:"ok"},n("[remote-bridge] Transport rebuilt (proactive refresh)")}catch(P){if(n(`[remote-bridge] Proactive refresh rebuild failed: ${l(P)}`,{level:"error"}),Y("error","bridge_repl_v2_proactive_refresh_failed"),!m&&!x)d=`Refresh failed: ${l(P)}`,S="refresh_rebuild_failed",w="terminal",E={leg:"bad",code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void 0;let L=k;if(lb(e))L=!0;if(L){if(P!==void 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else if(P!==void 0&&a&&!m){if(gn(P.code)&&!t)Se(he[P.code].recoveredCode)}else if(d!==void 0&&!m){if(G(d,w),S!==void 0&&S!=="refresh_credentials_rejected"&&!t)X(S)}}})()},label:"remote"});if(tr.scheduleFromExpiresIn(p,H.expires_in),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("r
+
+## 247 Pu preamble @216868713
+return;if(xp!==void 0&&Ia===void 0)Bi(xp),xp=void 0;else if(!on)Iv=Xh,Kg=k_===void 0?void 0:{code:k_,generation:wbe()};go=Js,Xs="refresh_credentials_rejected",ps=xu}async function Ma(){if(!await ko("owner_changed_refresh",Nt))return!1;if(qs)Ds={leg:"sad",code:"owner_changed"};return!0}try{if(await Ma())return;let Js=JM(Tt);if(!Js)ZM();let xu=await ate(()=>{if(Js)return Promise.resolve({terminal:!1,reason:"oauth_rejected"});if(Dn||ou!==void 0||er!==Nt)return Promise.resolve(null);return G4e(Ue,t,Tt,Lt.http_timeout_ms,void 0,fe).then((k_)=>Dn||er!==Nt?k_:Gr(k_))},"fetchRemoteCredentials (proactive)",Lt);if(Dn||er!==Nt)return;if(t_(xu)){if(_(Js?"[remote-bridge] Proactive cycle: bearer already rejected by /bridge \u2014 retrying the forced OAuth refresh without re-registering":"[remote-bridge] Proactive /bridge re-mint rejected (oauth_rejected) \u2014 attempting forced OAuth refresh"),!Js)Ke("error","bridge_repl_v2_proactive_oauth_rejected");if(await Ma())return;let k_=wbe(),tO=await XM(Tt),nO=g()??Tt;if(await Ma())return;if(tO==="unreachable"){if(_("[remote-bridge] Proactive forced OAuth refresh got no verdict (token endpoint unreachable); keeping transport, a later cycle retries the refresh"),!Js)Ds={leg:"sad",code:"refresh_deferred_transient"};S_=Tt;let hf=w_<fP;if(Bg(Ue))hf=!1;if(hf)w_++,or.scheduleFromExpiresIn(Ue,0);Ke("info","bridge_repl_v2_proactive_refresh_unreachable",{early_retry:w_,rearmed:hf});return}let uN=tO==="recovered";if(uN)ZM();let mC=uN?await ate(()=>{if(Dn||ou!==void 0||er!==Nt)return Promise.resolve(null);return G4e(Ue,t,nO,Lt.http_timeout_ms,void 0,fe).then((hf)=>Dn||er!==Nt?hf:Gr(hf))},"fetchRemoteCredentials (proactive post-refresh)",Lt):null;if(Dn||er!==Nt)return;if(uN&&mC===null){if(_("[remote-bridge] Proactive post-refresh re-mint failed (transient); fallback refresh will retry"),ou===void 0)Ds={leg:"sad",code:"post_refresh_remint_null"};return}if($A(mC)){Ds={leg:"bad",code:`post_refresh_credentials_${Wz(mC)}`},Tl(qz(mC),Wz(mC),q4e("refresh",mC));return}if(mC===null||t_(mC)){let hf=uN?void 0:et(k_);if(hf!==void 0){Ds={leg:"sad",code:hf},Ke("info","bridge_repl_v2_proactive_host_declined"),Tl(Hn(hf),sn(hf),"refresh_credentials_rejected",hf);return}Ds={leg:"bad",code:uN?"oauth_rejected_after_refresh":h?"oauth_rejected_refresh_failed":"oauth_rejected_no_refresh_path"},Tl(dt,"auth");return}f?.noteAcceptedToken(nO);let kW=await to(mC,"proactive_refresh",0);if(kW==="suppressed_teleported")Zs=!0;if(kW==="rebuilt")Yr=!0,Ds={leg:"sad",code:"oauth_rejected_recovered"},_("[remote-bridge] Transport rebuilt (proactive refresh after forced OAuth refresh)");return}if(!xu){if(_("[remote-bridge] Proactive /bridge re-mint failed (transient); fallback refresh will retry"),Ke("warn","bridge_repl_v2_proactive_remint_null"),ou===void 0)Ds={leg:"sad",code:"remint_null"};return}if($A(xu)){Ds={leg:"bad",code:`credentials_${Wz(xu)}`},Tl(qz(xu),Wz(xu),q4e("refresh",xu));return}f?.noteAcceptedToken(Tt);let Xh=await to(xu,"proactive_refresh",0);if(Xh==="suppressed_teleported")Zs=!0;if(Xh==="rebuilt")Yr=!0,Ds={leg:"ok"},_("[remote-bridge] Transport rebuilt (proactive refresh)")}catch(Js){if(_(`[remote-bridge] Proactive refresh rebuild failed: ${Y(Js)}`,{level:"error"}),Ke("error","bridge_repl_v2_proactive_refresh_failed"),!Dn&&!qs)go=`Refresh failed: ${Y(Js)}`,Xs="refresh_rebuild_failed",ps="terminal",Ds={leg:"bad",code:"rebuild_threw"}}finally{if(Ds!==void 0&&!on&&!Dn)ht(Ds);if(!Wr(Nt))return;let Js=Ia;Ia=void 0;let xu=Zs;if(Bg(Ue))xu=!0;if(xu){if(Js!==void 0&&!Dn)ll("Session teleported to cloud")}else if(Js!==void 0&&!Yr&&!Dn&&!uc){let Xh=Mn(Js.code,Js.cause,Js.detail,!0);if(go!==void 0&&!Xh&&!Dn&&!zn)ll(go,ps)}else if(Js!==void 0&&Yr&&!Dn){if(Ts(Js.code)&&!on)Uc(Bo[Js.code].recoveredCode)}else if(go!==void 0&&!Dn){if(ll(go,ps),Xs!==void 0&&Xs!=="refresh_credentials_rejected"&&!on)Bi(Xs)}}})()},label:"remote"});if(or.scheduleFromExpiresIn(Kt,kr.expires_in),Xt=f?.subscribe(()=>{vo("owner_changed")}),Kn())vo("owner_changed");let vl;function Pu(){zt.setOnConnect(()=>{if(qs)return;if(clearTimeout(Ov),xi=0,xp=void 0,uc=!1,Iv=void 0,Kg=void 0,Ru=!1,qr(),ou=void 0,ma.size>0){let Nt=[...ma.values()].findLast((on)=>on.details!==void 0)
+
+Ze.clear() js248=2 js247=1 198343948,198351954
+## 248 Ze.clear @198343948
+lter((t)=>t!==r))})}else if(Pr)Pr=!1,C.reportMetadata({pending_action:null,pending_actions:null})};function xi(){return Ze.clear(),[...pe.values()].map((e)=>e.request)}let Ir,an,Dr;if(Be)(async()=>{le
+
+## 248 Ze.clear @198351954
+=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_
+
+near-fn "let Ze=" 248= 247=
+near-fn "Ze=new" 248=198343507 247=
+## 248 near-fn Ze=new @198343507
+,source:"pinned_owner"};return{token:Q(),source:"current"}}let Pr=ie,pe=new Map,Ze=new Set;function ot(e,r){if(Ze.delete(e),pe.delete(e)&&r)Hht(e)}let ye=(e,r)=>{if(wt&&!x&&(e==="requires_action"||e==
+
+near-fn "Ze.clear" 248=198343948,198351954 247=
+## 248 near-fn Ze.clear @198343948
+eportMetadata({pending_action:null,pending_actions:null})};function xi(){return Ze.clear(),[...pe.values()].map((e)=>e.request)}let Ir,an,Dr;if(Be)(async()=>{let{parseGitRemote:e,parseGitHubRepository
+
+## 248 near-fn Ze.clear @198351954
+pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.get
+
+near-fn ",Ze=" 248=198343506 247=
+## 248 near-fn ,Ze= @198343506
+),source:"pinned_owner"};return{token:Q(),source:"current"}}let Pr=ie,pe=new Map,Ze=new Set;function ot(e,r){if(Ze.delete(e),pe.delete(e)&&r)Hht(e)}let ye=(e,r)=>{if(wt&&!x&&(e==="requires_action"||e=
+
+near-fn "pe=new" 248=198343496 247=
+## 248 near-fn pe=new @198343496
+wnerToken(),source:"pinned_owner"};return{token:Q(),source:"current"}}let Pr=ie,pe=new Map,Ze=new Set;function ot(e,r){if(Ze.delete(e),pe.delete(e)&&r)Hht(e)}let ye=(e,r)=>{if(wt&&!x&&(e==="requires_a
+
+near-fn "let pe=" 248= 247=
+near-fn "pe.set(" 248=198368815,198370042,198370269 247=
+## 248 near-fn pe.set( @198368815
+ype==="can_use_tool"||r.subtype==="request_user_dialog")pe.delete(e.request_id),pe.set(e.request_id,{request:e}),Ze.delete(e.request_id);if(r.subtype==="request_user_dialog"&&(de.active||ce))return Ze
+
+## 248 near-fn pe.set( @198370042
+id,...d&&e.request_id&&{suppressed_request_id:e.request_id},input:r.input}}if(t)pe.set(e.request_id,{request:e,details:t});ye("requires_action",t)}else if(r.subtype==="request_user_dialog"){let t;if(R
+
+## 248 near-fn pe.set( @198370269
+ion_details",!1))t=Cnt(r.dialog_kind,r.payload,e.request_id,r.tool_use_id);if(t)pe.set(e.request_id,{request:e,details:t});ye("requires_action",t)}return Fr(o,`control_request request_id=${e.request_i
+
+near-fn "pe.delete(" 248=198343551,198368791,198370609 247=
+## 248 near-fn pe.delete( @198343551
+rce:"current"}}let Pr=ie,pe=new Map,Ze=new Set;function ot(e,r){if(Ze.delete(e),pe.delete(e)&&r)Hht(e)}let ye=(e,r)=>{if(wt&&!x&&(e==="requires_action"||e==="idle"))wt();if(C.reportState(e,r),e==="req
+
+## 248 near-fn pe.delete( @198368791
+et r=e.request;if(r.subtype==="can_use_tool"||r.subtype==="request_user_dialog")pe.delete(e.request_id),pe.set(e.request_id,{request:e}),Ze.delete(e.request_id);if(r.subtype==="request_user_dialog"&&(
+
+## 248 near-fn pe.delete( @198370609
+unning");Fr(o,"control_response")},sendControlCancelRequest(e){if(Ze.delete(e)){pe.delete(e),n(`[remote-bridge] Local-only retract of a declined dialog forward request_id=${e}`);return}ot(e,!0);let r=
+
+near-fn "pendingPrompts" 248= 247=
+near-fn "pendingPermission" 248= 247=
+## 248 requires_action block @198351853
+f(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connec
+
+## 247 requires_action block @216868840
+;if(clearTimeout(Ov),xi=0,xp=void 0,uc=!1,Iv=void 0,Kg=void 0,Ru=!1,qr(),ou=void 0,ma.size>0){let Nt=[...ma.values()].findLast((on)=>on.details!==void 0);kl("requires_action",Nt?.details)}if(_("[remote-bridge] v2 transport connected"),Ke("info","bridge_repl_v2_transport_connected

@@ -1,0 +1,144 @@
+# gold-248-ie-wrappers
+when=2026-09-20T09:59:00.117Z
+
+## isInteractive-wrappers @178563058
+function vu(){return n().host.launchOptions.isInteractive()}function AEn(e){n().host.launchOptions.replaceIsInteractive(e)}function xEn(){return n().host.launchOptions.printOutputFormat()}function CEn(e){n().host.launchOptions.replacePrintOutputFormat(e)}function bvt(){return n().host.launchOptions.thinkingDisplayExplicit()}function qLe(e){n().host.launchOptions.replaceThinkingDisplayExplicit(e)}f
+
+## clientType-hunt @178569934
+allowedSettingSources()}function mkn(e){n().host.settingsSource.replaceAllowedSettingSources(e)}function f7e(){return De()&&n().host.launchOptions.clientType()!=="claude-vscode"}function m7e(e){n().host.extensionsConfig.replaceInlinePlugins(e)}function C4(){return n().host.extensionsConfig.inlinePlugins()}function h7e(e){n().host.extensionsConfig.replaceInlinePluginsNoMcp(e)}function R4(){return n().host.extensionsConfig.inlinePluginsNoMcp()}function hkn(e){n().host.extensionsConfig.replaceInlin
+
+## export-get-192776700 @192776700
+ getFlagSettingsPath,AL as getForkReplayLaunchConfig,GC as getForkRestrictedLaunchConfig,yvt as getFoundryDeploymentCapabilities,ei as getGatewayAuth,JLe as getGatewayRefreshInFlight,R7e as getHasDevChannels,s7e as getHasStreamingInput,Ckn as getHomeTrustDialogAccepted,e7e as getHostAuthTokenRefreshCallback,VLe as getHostOtelState,Xne as getInferenceProfileBackingModelCached,ZGt as getInheritedTeamName,xvt as getInitJsonSchema,Jwn as getInitialEnvDefaultModel,y0 as getInitialMainLoopModel,Vne as getInlinePluginUrls,C4 as getInlinePlugins,R4 as getInlinePluginsNoMcp,Wq as getInvokedSkills,Vkn as getInvokedSkillsForAgent,vu as getIsInteractive,De as getIsNonInteractiveSession,On as getIsRemoteMode,mde as getIsScrollDraining,p7e as getLastAPIRequest,gEr as getLastAPIRequestMessages,l7 as getLastApiCompletionTimestamp,d7 as getLastCancelledAPIMessageId,zGt as getLastClassifierRequests,Zkn as
+
+## export-set-192787000 @192787000
+poseGoalAvailabilityLogged,$Gt as setQuestionPreviewFormat,UEn as setRendererModeForAnalytics,Qne as setReplBridgeActive,zne as setReplConfigArgv,gde as setResolvedOrgDefault,c7e as setRestrictedSession,i7e as setRvSupervisorLinkLive,V$ as setScheduledTasksEnabled,FEn as setSdkAgentProgressSummariesEnabled,Zwn as setSdkBetas,qwn as setSdkDialogHostActive,WLe as setSdkOAuthTokenRefreshCallback,Ywn as setSdkPerTaskStopAffordance,CGt as setSdkSupportedDialogKinds,qEn as setSearchToolsOptIn,Tkn as setSessionBypassPermissionsMode,C2 as setSessionIngressToken,Qwr as setSessionOverridesGetter,Rkn as setSessionPersistenceDisabled,VYe as setSessionProject,Ykn as setSessionSkillAllowlist,d7e as setSessionStartType,Sx as setSessionTrustAccepted,LEn as setSingleShotPrintSession,Evt as setSkillsSyncVetoed,ckn as setStartupPolicySnapshot,Pwn as setStatsStore,Awn as setStrictMcpConfig,hEr as setStrictT
+
+## function De( hits=64
+@178467997 sha=7f6561c9463ecbda function De(e,t){let r=e.environments.get(t);if(r===void 0)throw new Ae.HooksError(`environment ${t} is not loaded`);return r}
+@178562998 sha=24d56d9e8d939b15 function De(){return!n().host.launchOptions.isInteractive()}
+
+## function vu( hits=15
+@178563058 sha=d1703532effe70e3 function vu(){return n().host.launchOptions.isInteractive()}
+@181240002 sha=0b1825c4a8a7cfe3 function vu(e){return e.replace(/~/g,"~0").replace(/\//g,"~1")}
+
+## function AEn( hits=2
+@178563118 sha=14e588a7fc2b68bb function AEn(e){n().host.launchOptions.replaceIsInteractive(e)}
+@185492820 sha=6dd5e2b323a39c6e function AEn(e,t){let r=hEn(e)?e:_En(t||ce().cwd(),e);try{return ce().realpathSync(r)}catch(o){if(Q(o))throw Error(`Path "${r}" does not exist`);return r}}
+
+## function BEn( hits=1
+@178564984 sha=fb757c8b36edec71 function BEn(){return n().host.launchOptions.strictToolResultPairing()}
+
+## function hEr( hits=1
+@178565055 sha=485aa9835cb72f8c function hEr(e){n().host.launchOptions.replaceStrictToolResultPairing(e)}
+
+## function _x( hits=3
+@178565779 sha=c390e1eab3ea545b function _x(){return n().host.launchOptions.userMsgOptIn()}
+@199915396 sha=08ff855a2f1fe0b8 function _x(){return{localeError:hx()}}
+
+## function c7( hits=2
+@178565838 sha=6a1148ff6d34ee9e function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}
+@222619926 sha=8b596feeed395c25 function c7(e,t){if(!qn(e)||_i(e).position==="fixed")return null;if(t)return t(e);let n=e.offsetParent;return wc(e)===n&&(n=n.ownerDocument.body),n}
+
+## function NGt( hits=1
+@178566285 sha=6dec09ff225b5afe function NGt(){return n().host.launchOptions.questionPreviewFormat()}
+
+## function $Gt( hits=1
+@178566354 sha=d4d32e9f74d592d4 function $Gt(e){n().host.launchOptions.replaceQuestionPreviewFormat(e)}
+
+## function qC( hits=4
+@178573926 sha=d11e4c26440cc7fc function qC(){return n().host.launchOptions.sessionPersistenceDisabled()}
+@199838021 sha=975db09a825a36ca function qC(){return{localeError:KC()}}
+
+## function V$( hits=6
+@178572359 sha=6283865dd6f83685 function V$(e){n().host.launchOptions.replaceScheduledTasksEnabled(e)}
+@180034824 sha=c053d24de68cff36 function V$(e,t){if(!(0,LC.isPlainObject)(e)||!(0,LC.isPlainObject)(t))return!1;return!0}
+
+## function FEn( hits=2
+@178564780 sha=6d323909ce362264 function FEn(e){n().host.launchOptions.replaceSdkAgentProgressSummariesEnabled(e)}
+@185498214 sha=5cac4cf7c1888798 function FEn(e){for(let t of["image/png","image/jpeg"]){let r=e[t];if(typeof r!=="string")continue;let o=r.replace(/\s/g,"");if(eI(Buffer.from(o,"base64"))===null)return;return{image_data:o,media_type:t}}return}
+
+## function NEn( hits=1
+@178564512 sha=e84db354ee3682be function NEn(){return n().host.launchOptions.singleShotPrintSession()}
+
+## function WEn( hits=2
+@178565644 sha=c33de4f025e14564 function WEn(){return n().host.launchOptions.pollEventIngressWired()}
+@185499931 sha=cc3a6153d71a6a7b function WEn(e){let t=UEn(e),r=e.outputs?.flatMap(HEn);return[t,...r??[]]}
+
+## function GEn( hits=2
+@178565713 sha=a6fc7bd3515ccfe9 function GEn(){n().host.launchOptions.markPollEventIngressWired()}
+@185501007 sha=d1ebad1b88f4fa94 function GEn(){let e=Un.CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL;if(e!==void 0)return{value:e,src:"env"};let t=gc();return typeof t?.editRemovalVisibility==="boolean"?{value:t.editRemovalVisibility,src:"gb"}:{value:!1,src:"default"}}
+
+## alias "vu as getIsInteractive" hits=1
+as getInlinePluginsNoMcp,Wq as getInvokedSkills,Vkn as getInvokedSkillsForAgent,vu as getIsInteractive,De as getIsNonInteractiveSession,On as getIsRemoteMode,mde as getIsScrollDraini
+
+## alias "De as getIsNonInteractiveSession" hits=1
+p,Wq as getInvokedSkills,Vkn as getInvokedSkillsForAgent,vu as getIsInteractive,De as getIsNonInteractiveSession,On as getIsRemoteMode,mde as getIsScrollDraining,p7e as getLastAPIRequest,gEr a
+
+## alias "AEn as setIsInteractive" hits=1
+hkn as setInlinePluginUrls,m7e as setInlinePlugins,h7e as setInlinePluginsNoMcp,AEn as setIsInteractive,P4 as setIsRemoteMode,ukn as setLastAPIRequest,dkn as setLastAPIRequestMessages
+
+## alias "as getClientType" hits=1
+ide,xwn as getCliSessionConfigCarried,TEr as getClientTruncatedAssistantIds,a7e as getClientType,hvt as getCodeEditToolDecisionCounter,gEn as getCommitCounter,vwn as getCommitS
+
+## alias "as setClientType" hits=1
+n as setCaps,Skn as setChromeFlagOverride,qYe as setCliSessionConfigCarried,$En as setClientType,wwn as setCommitSkillRolloutGateLatch,REe as setConnectedClientWiring,Jne as se
+
+## alias "as getSdkAgentProgressSummariesEnabled" hits=1
+tRootSession,HEn as getRvSupervisorLinkLive,b7e as getScheduledTasksEnabled,_de as getSdkAgentProgressSummariesEnabled,gf as getSdkBetas,Kwn as getSdkDialogCapabilitySource,kEe as getSdkOAuthTokenRe
+
+## alias "FEn as setSdkAgentProgressSummariesEnabled" hits=1
+RestrictedSession,i7e as setRvSupervisorLinkLive,V$ as setScheduledTasksEnabled,FEn as setSdkAgentProgressSummariesEnabled,Zwn as setSdkBetas,qwn as setSdkDialogHostActive,WLe as setSdkOAuthTokenRefresh
+
+## alias "BEn as getStrictToolResultPairing" hits=1
+licySnapshot,_Ee as getStatsStore,Yd as getStickyBetas,TL as getStrictMcpConfig,BEn as getStrictToolResultPairing,$kn as getSurfacedHookSpawnFailures,xEe as getSyncedPluginDirs,HEe as getSystem
+
+## alias "hEr as setStrictToolResultPairing" hits=1
+,ckn as setStartupPolicySnapshot,Pwn as setStatsStore,Awn as setStrictMcpConfig,hEr as setStrictToolResultPairing,Tde as setSyncedPluginDirs,Jkn as setSystemPromptSectionCacheEntry,vkn as setTe
+
+## alias "_x as getUserMsgOptIn" hits=1
+ as getUnsupportedThreadKeys,jwn as getUsageForModel,y7e as getUseCoworkPlugins,_x as getUserMsgOptIn,_wn as getVerifySkillRolloutGateLatch,eTn as getVimSharedState,zEn as getWizard
+
+## alias "c7 as setUserMsgOptIn" hits=1
+ide,YEn as setTodoToolsOptIn,LGt as setTracerProvider,G$ as setUseCoworkPlugins,c7 as setUserMsgOptIn,Swn as setVerifySkillRolloutGateLatch,tTn as setVimSharedState,jEn as setWizard
+
+## alias "NGt as getQuestionPreviewFormat" hits=1
+f7 as getPromptId,Dvt as getPromptIndex,Wkn as getProposeGoalAvailabilityLogged,NGt as getQuestionPreviewFormat,Wwn as getRefusalFallbackLatchOriginRequestId,x4 as getRefusalFallbackModelLatc
+
+## alias "$Gt as setQuestionPreviewFormat" hits=1
+omptCache1hAllowlist,o1e as setPromptId,Gkn as setProposeGoalAvailabilityLogged,$Gt as setQuestionPreviewFormat,UEn as setRendererModeForAnalytics,Qne as setReplBridgeActive,zne as setReplCon
+
+## alias "as getSessionBypassPermissionsMode" hits=1
+,sTn as getServedModelsForRequestedModel,KYe as getSessionApprovedMcpServers,H4 as getSessionBypassPermissionsMode,hEn as getSessionCounter,JGt as getSessionCreatedTeams,Vm as getSessionCronTask
+
+## alias "as setSessionBypassPermissionsMode" hits=1
+StopAffordance,CGt as setSdkSupportedDialogKinds,qEn as setSearchToolsOptIn,Tkn as setSessionBypassPermissionsMode,C2 as setSessionIngressToken,Qwr as setSessionOverridesGetter,Rkn as setSession
+
+## alias "as getScheduledTasksEnabled" hits=1
+s getRootRegisteredHooks,z as getRootSession,HEn as getRvSupervisorLinkLive,b7e as getScheduledTasksEnabled,_de as getSdkAgentProgressSummariesEnabled,gf as getSdkBetas,Kwn as getSdkDialo
+
+## alias "V$ as setScheduledTasksEnabled" hits=1
+etResolvedOrgDefault,c7e as setRestrictedSession,i7e as setRvSupervisorLinkLive,V$ as setScheduledTasksEnabled,FEn as setSdkAgentProgressSummariesEnabled,Zwn as setSdkBetas,qwn as setSdkDial
+
+## alias "qC as isSessionPersistenceDisabled" hits=1
+,Pl as isReplBridgeActive,Yk as isRestrictedSession,$q as isSdkDialogHostActive,qC as isSessionPersistenceDisabled,NEn as isSingleShotPrintSession,uTn as isStrictPrefixLockStoodDown,Bwn as isUse
+
+## alias "as setSessionPersistenceDisabled" hits=1
+rmissionsMode,C2 as setSessionIngressToken,Qwr as setSessionOverridesGetter,Rkn as setSessionPersistenceDisabled,VYe as setSessionProject,Ykn as setSessionSkillAllowlist,d7e as setSessionStart
+
+## alias "as getInitJsonSchema" hits=1
+te,Xne as getInferenceProfileBackingModelCached,ZGt as getInheritedTeamName,xvt as getInitJsonSchema,Jwn as getInitialEnvDefaultModel,y0 as getInitialMainLoopModel,Vne as getInline
+
+## alias "as setInitJsonSchema" hits=1
+Callback,fTn as setInferenceProfileBackingModel,e3t as setInheritedTeamName,Dkn as setInitJsonSchema,Qwn as setInitialEnvDefaultModel,Xwn as setInitialMainLoopModel,hkn as setInlin
+
+## alias "as getThinkingDisplayExplicit" hits=1
+downUnwindRequested,r1e as getTeleportedSessionInfo,Bne as getTerminalFocus,bvt as getThinkingDisplayExplicit,oTn as getThinkingTypeOverride,KEn as getTodoToolsOptIn,n7e as getTokenCounter,
+
+## alias "qLe as setThinkingDisplayExplicit" hits=1
+UnwindRequested,n1e as setTeleportedSessionInfo,Fwn as setTerminalFocusForState,qLe as setThinkingDisplayExplicit,iTn as setThinkingTypeOverride,YEn as setTodoToolsOptIn,LGt as setTracerProvide
+
+## alias "WEn as isPollEventIngressWired" hits=1
+elInitPending,Gne as isOauthTokenFromBgSnapshot,dTn as isPerTurnEffortOkEmitted,WEn as isPollEventIngressWired,Pl as isReplBridgeActive,Yk as isRestrictedSession,$q as isSdkDialogHostActive,
+
+## alias "NEn as isSingleShotPrintSession" hits=1
+estrictedSession,$q as isSdkDialogHostActive,qC as isSessionPersistenceDisabled,NEn as isSingleShotPrintSession,uTn as isStrictPrefixLockStoodDown,Bwn as isUserActiveForNotifications,jLe as l

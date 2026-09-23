@@ -1,0 +1,26 @@
+# gold-248-yt-caps
+DIG official Yt CONSTANT used as he.#s default — NOT class Yt
+when=2026-09-21
+exe=official-248/package/claude.exe
+near=class he @178525654
+
+## EXACT assignment @178525553
+var Yt={renderTarget:"ink",workspace:"local",canDrive:!0,transcriptSource:"local-jsonl",remote:null};
+
+## EXACT object literal sha=2e9cdaeb959d966f len=93
+{renderTarget:"ink",workspace:"local",canDrive:!0,transcriptSource:"local-jsonl",remote:null}
+
+## Consumers (class he / SurfaceCapabilities)
+#s=Yt                          @178525723  (field init)
+this.#s=Yt                     @178526749  (reset())
+caps(){return this.#s}
+replaceCaps(e){this.#s=e}
+markRemote(e){this.#s={...this.#s,workspace:e?"remote":"local"}}
+
+## False positives (do NOT use)
+- class Yt / lodash Yt / zod Yt / otel Yt — many `var Yt=` elsewhere
+- needle `Yt={workspace` hits=0 (workspace is 2nd key after renderTarget)
+
+## VERDICT
+- Yt caps default: 补 land as shared CONSTANT (leftover createDefaultSurfaceCapabilities already matches 1:1)
+- do NOT invent a leftover class named Yt

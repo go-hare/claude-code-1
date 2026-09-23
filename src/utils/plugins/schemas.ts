@@ -155,6 +155,15 @@ export function isBlockedOfficialName(name: string): boolean {
  */
 export const OFFICIAL_GITHUB_ORG = 'anthropics'
 
+/** densable `Is` — reserved-name git URL must be github.com/anthropics/. */
+export function isOfficialAnthropicsGitUrl(url: string): boolean {
+  const normalized = url.toLowerCase()
+  return (
+    normalized.includes(`github.com/${OFFICIAL_GITHUB_ORG}/`) ||
+    normalized.includes(`git@github.com:${OFFICIAL_GITHUB_ORG}/`)
+  )
+}
+
 /**
  * Validate that a marketplace with a reserved name comes from the official source.
  *
@@ -178,23 +187,21 @@ export function validateOfficialNameSource(
 
   // Check for GitHub source type
   if (source.source === 'github') {
-    // Verify the repo is from the official org
+    // Verify the repo is from the official org. `..` is refused the same as
+    // a foreign org — densable fke.
     const repo = source.repo || ''
-    if (!repo.toLowerCase().startsWith(`${OFFICIAL_GITHUB_ORG}/`)) {
+    if (
+      !repo.toLowerCase().startsWith(`${OFFICIAL_GITHUB_ORG}/`) ||
+      repo.split('/').includes('..')
+    ) {
       return `The name '${name}' is reserved for official Anthropic marketplaces. Only repositories from 'github.com/${OFFICIAL_GITHUB_ORG}/' can use this name.`
     }
     return null // Valid: reserved name from official GitHub source
   }
 
-  // Check for git URL source type
+  // Check for git URL source type. densable Is(url).
   if (source.source === 'git' && source.url) {
-    const url = source.url.toLowerCase()
-    // Check for HTTPS URL format: https://github.com/anthropics/...
-    // or SSH format: git@github.com:anthropics/...
-    const isHttpsAnthropics = url.includes('github.com/anthropics/')
-    const isSshAnthropics = url.includes('git@github.com:anthropics/')
-
-    if (isHttpsAnthropics || isSshAnthropics) {
+    if (isOfficialAnthropicsGitUrl(source.url)) {
       return null // Valid: reserved name from official git URL
     }
 

@@ -1,0 +1,132 @@
+# gold-248-host-missing
+
+## function MHs( hits=0
+## function TL( hits=4
+@178552986 onFlags.forgetPendingContextCompacted()}function TL(){return n().host.mcpProcessWiring.strictConfig()}function Awn(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestri
+
+@199959742 rest:r?n:null,...z.normalizeParams(o)})}function TL(e,t,n,i){return new e({type:"record",keyType:t,valueType:n,...z.normalizeParams(i)})}function AL(e,t,n,i){return new e({type:"map",keyType:t,valueType:n,...z.normalizeParams(i)})}function RL(e,t,n){return new e({type:"set",valueType:t,...z.normalizeParams(n)})}function jL(e,t,n){let i=Array.isArray(t)?Object.fromEntries(t.map((r)=>[r,r])):t;return new e({type:"enum",entries:i,...z.norm
+
+@201514563 k8.data)}function gL(x8){return x8.data}function TL(sL){if(!bo(sL.data)){return!1}let nL=sL.data.message;if(nL.type==="user"&&nL.toolUseResult===void 0){return!1}return!0}var QS=3;function bo(l){if(!("message"in l))return!1;let d=l.message;return d!=null&&typeof d==="object"&&"type"in d}function ZS(l){let d=l.data.message.message.content[0];return d?.type==="tool_use"||d?.type==="tool_result"}function eU(l,d,f){if(!bo(l.data))return nul
+
+@222849268 r,tooltip:!1,className:Pe(n&&nve,t)})})}function TL({actions:e,description:t,showClose:n=!0,closeLabel:r,className:o,children:i}){let a=(0,uo.useContext)(iR);return(0,Ir.jsxs)("div",{className:Pe("mb-pad-md flex items-start gap-2",o),children:[(0,Ir.jsxs)("div",{className:Pe(a?Qbe:eve,"flex min-w-0 flex-1 flex-col gap-1"),children:[(0,Ir.jsx)(aR,{className:"break-words",children:i}),t&&(0,Ir.jsx)(Ls.Description,{className:"text-body tex
+
+## function Awn( hits=2
+@178553048 ().host.mcpProcessWiring.strictConfig()}function Awn(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}function AL(){return n().host.launchOption
+
+@185421665 SKILL\.md|commands[/\\]([^/\\]+)\.md)$/;function Awn(e,t=Swn()){let r=Cwn.exec(e);if(r?.index===void 0)return{};let o=r[1]??r[2];if(o===void 0)return{};let u=e.slice(0,r.index);return{skill_file_name:Lo(Ewn.has(o)?o:"custom"),skill_file_scope:c(t.length>0&&u===t?"user":"project")}}function H_(e){let t={operation:c(e.operation),tool:c(e.tool),filePathHash:wwn(e.filePath)};if(e.content!==void 0&&e.content.length<=vwn)t.contentHash=Twn(e.c
+
+## accountCreditLatches.fableCreditsRequired hits=1
+@178559306 ocked(e)}function tEn(){return n().host.accountCreditLatches.fableCreditsRequired()}function fvt(e){n().host.accountCreditLatches.replaceFableCreditsRequired(e)}function RGt(){return n().fableConsentSlots.fableConsentSessionFallback()}function nEn(e){n().fableConsentSlots.replaceFableConsentSessionFallback(e)}function kEe(){return n().host.credentialSlots.sdkOAuthTokenRefreshCallback()}function WLe(e){n().host.credentialSlots.replaceSdk
+
+## accountCreditLatches.longContext1m hits=1
+@178559140 Betas(e)}function zLe(){return n().host.accountCreditLatches.longContext1mCreditsBlocked()}function eEn(e){n().host.accountCreditLatches.replaceLongContext1mCreditsBlocked(e)}function tEn(){return n().host.accountCreditLatches.fableCreditsRequired()}function fvt(e){n().host.accountCreditLatches.replaceFableCreditsRequired(e)}function RGt(){return n().fableConsentSlots.fableConsentSessionFallback()}function nEn(e){n().fableConsentSlots.r
+
+## proactivity.selectorGate hits=2
+@178574149 nMode(e)}function bEr(){return n().host.proactivity.selectorGate()}function _Er(){return n().host.proactivity.selectorGateEverOn()}function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHost
+
+@178574207 orGate()}function _Er(){return n().host.proactivity.selectorGateEverOn()}function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHostGateSubscription(e)}function Ikn(){return n().sessionFlags
+
+## replaceSelectorGate hits=3
+@99407792 Gate....z...selectorGateEverOn..........replaceSelectorGate.....R.m.inheritSelectorGateEverOn.......`...resampleSelectorGate....8s1.subscribeSelectorGateChanged.....=X.replaceHostGateSubscription.......M.dropHostGateSubscription.....8..renderTarget......-.canDrive....	P..folderListings........B.policyWalks....PU..walkedFolders.........1.retainedListings......,.ownerUidsByRoot.........realHomeDir.......k.attacherCapsChanged.....1f..rvSu
+
+@178546754 .#e}selectorGateEverOn(){return this.#t}replaceSelectorGate(e){this.#e=e,this.#t||=e}inheritSelectorGateEverOn(){this.#t=!0}resampleSelectorGate(e){let t=this.#e;if(this.#e=e,this.#t||=e,t!==e)this.#o.emit(e)}subscribeSelectorGateChanged(e){return this.#o.subscribe(e)}replaceHostGateSubscription(e){let t=this.#n;this.#n=e,t()}dropHostGateSubscription(){this.replaceHostGateSubscription(rn)}}function rn(){}class Ne{started=!1;stagingReape
+
+@178574341 ()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHostGateSubscription(e)}function Ikn(){return n().sessionFlags.needsPlanModeExitAttachment()}function R2(e){n().sessionFlags.replaceNeedsPlanModeExitAttachment(e)}function jq(e,t){if(t==="plan"&&e
+
+## function Gri( hits=0
+## function Vri( hits=0
+## class Be{ hits=1
+@178540857 kLogged:!1,reportedDropReasons:new Set}}class Be{#e=null;#t=null;#n=null;#o=null;#r=null;#i=null;#a=null;#s=null;#d=null;#l=null;#c=null;#p=null;#u=null;#g=[];#h=null;#m=on();#f=null;#v=null;#b=null;#S={direct:null,proxied:null};installMeter(e,t,{omitUnits:o=!1}={}){this.#e=e;let r=(i)=>o?void 0:i;this.#t=t("claude_code.session.count",{description:"Count of CLI sessions started"}),this.#n=t("claude_code.lines_of_code.count",{description
+
+## class mGt hits=0
+## mGt.of( hits=2
+@178571973 ttingsSource.replaceUseCoworkPlugins(e),mGt.of(t.host).invalidateAll()}function y7e(){return n().host.settingsSource.useCoworkPlugins()}function kkn(e){n().host.launchOptions.replaceDisableSlashCommands(e)}function vg(){return n().host.launchOptions.disableSlashCommands()}function Tkn(e){n().host.launchOptions.replaceSessionBypassPermissionsMode(e)}function H4(){return n().host.launchOptions.sessionBypassPermissionsMode()}function V$(e)
+
+@179035707 ||mn.has(o)&&Me(t)}function ra(){return mGt.of(z().host)}function OS(){return ra().mergedSettings}function Yl(e){ra().invalidateAll(e)}function FXn(){return ra().pluginBase}function UXn(e){ra().setPluginBase(e)}function BXn(){ra().clearPluginBase()}import{createHash as Ct}from"crypto";function bo(e){return qwe(e," ",{keepEmojiJoiners:!0})}function lf(e){return qwe(e," ",{keepNewlines:!0})}function Ke(e){return qwe(e,"",{keepEmojiJoiners
+
+## function ra() hits=4
+@179035686 se();return fn.has(o)||mn.has(o)&&Me(t)}function ra(){return mGt.of(z().host)}function OS(){return ra().mergedSettings}function Yl(e){ra().invalidateAll(e)}function FXn(){return ra().pluginBase}function UXn(e){ra().setPluginBase(e)}function BXn(){ra().clearPluginBase()}import{createHash as Ct}from"crypto";function bo(e){return qwe(e," ",{keepEmojiJoiners:!0})}function lf(e){return qwe(e," ",{keepNewlines:!0})}function Ke(e){return qwe(e
+
+@189986557 eturn R("tengu_slate_lantern_ember",!1)}function ra(){return R("tengu_amber_quill_moth",!1)}var ia=h(()=>m({version:i().regex(FG),capabilities:x(i().regex(d8)).max(256),claude:W().optional().catch(void 0),features:Oe(i().regex(d8),Oe(i().regex(d8),lt([Oe(i(),ye()),F(!0).transform(()=>({}))]))).optional().catch(void 0)})),sa="/api/frame/contract/latest",aa=262144,oa=65536,la="x-contract-missing-caps",ca=16384;async function gn(e,t,r){let
+
+@208542771 by);let Sy;if(Jn[1]!==ol||Jn[2]!==tp)Sy=function ra(){let I0=ol?.trim();tp(I0||void 0)},Jn[1]=ol,Jn[2]=tp,Jn[3]=Sy;else Sy=Jn[3];let ra=Sy,Cy;if(Jn[4]===p)Cy=e(t,{children:"Enter your preferred response and voice language:"}),Jn[4]=Cy;else Cy=Jn[4];let wy;if(Jn[5]===p)wy=e(t,{children:O.pointer}),Jn[5]=wy;else wy=Jn[5];const np=ol??"";let nl;if(Jn[6]!==op||Jn[7]!==ra||Jn[8]!==np)nl=r(o,{flexDirection:"row",gap:1,children:[wy,e(wn,{value
+
+@208849394 ]!==Kn||Zo[2]!==Uo||Zo[3]!==rl)Ug=async function ra(){let Bu=[];let Vg=await Bxe(Kn,rr);if(Object.keys(Vg).length>0)Bu.push({key:"top-level",title:`Configure ${Hu(Kn)}`,subtitle:"Plugin options",schema:Vg,load:()=>hT(Uo,rr),save:(ES)=>mhe(Uo,ES,Kn.manifest.userConfig,rl)});let $S=await wMt(Kn,rr);for(const ar of $S)Bu.push({key:`channel:${ar.server}`,title:`Configure ${ar.displayName}`,subtitle:`Plugin: ${Hu(Kn)}`,schema:ar.configSchema
+
+## connectNonBlocking() hits=2
+@178545188 laceDirectConnectServerUrl(e){this.#e=e}connectNonBlocking(){return this.#t}replaceConnectNonBlocking(e){this.#t=e}strictConfig(){return this.#n}replaceStrictConfig(e){this.#n=e}registerEnsureConnectedClient(e){this.#o=e}ensureConnectedClient(){return this.#o}reset(){this.#e=void 0,this.#t=!1,this.#n=!1}}class qe{#e=null;#t=new Map;#n=new Map;#o=new Set;#r=!1;#i=!1;#a=!1;#s=new Map;#d=new Map;promptCache1hAllowlist(){return this.#e}repl
+
+@178551871  pde(){return n().host.mcpProcessWiring.connectNonBlocking()}function mwn(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}function hwn(){return n().sessionFlags.teardownUnwindRequested()}function _Gt(e){n().sessionFlags.replaceTeardownUnwindRequested(e)}function gwn(){return n().sessionFlags.backgroundAutoModeSetupInFlight()}function SGt(e){n().sessionFlags.replaceBackgroundAutoModeSetupInFlight(e)}function ywn(){return n().se
+
+## EXTRACT class Be{ band=178540857
+{"body":"class Be{#e=null;#t=null;#n=null;#o=null;#r=null;#i=null;#a=null;#s=null;#d=null;#l=null;#c=null;#p=null;#u=null;#g=[];#h=null;#m=on();#f=null;#v=null;#b=null;#S={direct:null,proxied:null};installMeter(e,t,{omitUnits:o=!1}={}){this.#e=e;let r=(i)=>o?void 0:i;this.#t=t(\"claude_code.session.count\",{description:\"Count of CLI sessions started\"}),this.#n=t(\"claude_code.lines_of_code.count\",{description:\"Count of lines of code modified, with the 'type' attribute indicating whether lines were added or removed and the 'model' attribute indicating which model made the change\"}),this.#o=t(\"claude_code.pull_request.count\",{description:\"Number of pull requests created\"}),this.#r=t(\"claude_code.commit.count\",{description:\"Number of git commits created\"}),this.#i=t(\"claude_code.cost.usage\",{description:\"Cost of the Claude Code session\",unit:r(\"USD\")}),this.#a=t(\"claude_code.token.usage\",{description:\"Number of tokens used\",unit:r(\"tokens\")}),this.#s=t(\"claude_code.code_edit_tool.decision\",{description:\"Count of code editing tool permission decisions (accept/reject) for Edit, Write, and NotebookEdit tools\"}),this.#d=t(\"claude_code.active_time.total\",{description:\"Total active time in seconds\",unit:r(\"s\")})}meter(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#n}prCounter(){return this.#o}commitCounter(){return this.#r}costCounter(){return this.#i}tokenCounter(){return this.#a}codeEditToolDecisionCounter(){return this.#s}activeTimeCounter(){return this.#d}statsStore(){return this.#l}replaceStatsStore(e){this.#l=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLoggerOwner(){return this.#u}attachEventLogger(e,t){if(this.#p=e,this.#u=e?t:null,!e)return;let o=this.#g;if(this.#g=null,o)for(let r of o)e.emit(r)}bufferPendingEvent(e){if(this.#g===null||this.#g.length>=100)return!1;return this.#g.push(e),!0}closeWindow(e){this.#g=null,this.#h=e}windowCloseCause(){return this.#h}isWindowOpen(){return this.#g!==null}hostOtel(){return this.#m}meterProvider(){return this.#f}replaceMeterProvider(e){this.#f=e}tracerProvider(){return this.#v}replaceTracerProvider(e){this.#v=e}cachedTelemetryResource(){return this.#b}replaceCachedTelemetryResource(e){this.#b=e}cachedOtlpHttpAgentFactory(e){return this.#S[e?\"proxied\":\"direct\"]}replaceCachedOtlpHttpAgentFactory(e,t){this.#S[e?\"proxied\":\"direct\"]=t}reset(){this.#e=null,this.#t=null,this.#n=null,this.#o=null,this.#r=null,this.#i=null,this.#a=null,this.#s=null,this.#d=null,this.#l=null,this.#c=null,this.#p=null,this.#u=null,this.#g=[],this.#h=null,this.#m=on(),this.#f=null,this.#v=null,this.#b=null,this.#S={direct:null,proxied:null}}}","sha":"08a0c2551f39cfac","len":2675}
+
+## EXTRACT class mGt{ band=undefined
+
+## EXTRACT class mGt  band=undefined
+
+## n().host.accountCreditLatches hits=4
+@178559131 unction Zwn(e){n().surfaceCapabilities.replaceSdkBetas(e)}function zLe(){return n().host.accountCreditLatches.longContext1mCreditsBlocked()}function eEn(e){n().host.accountCreditLatches.replaceLongContext1mCreditsBlocked(e)}function tEn(){return n().host.accountCreditLatches.fabl
+
+@178559207 urn n().host.accountCreditLatches.longContext1mCreditsBlocked()}function eEn(e){n().host.accountCreditLatches.replaceLongContext1mCreditsBlocked(e)}function tEn(){return n().host.accountCreditLatches.fableCreditsRequired()}function fvt(e){n().host.accountCreditLatches.replaceFabl
+
+@178559297 ccountCreditLatches.replaceLongContext1mCreditsBlocked(e)}function tEn(){return n().host.accountCreditLatches.fableCreditsRequired()}function fvt(e){n().host.accountCreditLatches.replaceFableCreditsRequired(e)}function RGt(){return n().fableConsentSlots.fableConsentSessionFallbac
+
+@178559366 n(){return n().host.accountCreditLatches.fableCreditsRequired()}function fvt(e){n().host.accountCreditLatches.replaceFableCreditsRequired(e)}function RGt(){return n().fableConsentSlots.fableConsentSessionFallback()}function nEn(e){n().fableConsentSlots.replaceFableConsentSessionF
+
+## n().host.proactivity hits=7
+@178574140 nction gD(e){n().sessionFlags.replaceHasExitedPlanMode(e)}function bEr(){return n().host.proactivity.selectorGate()}function _Er(){return n().host.proactivity.selectorGateEverOn()}function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity
+
+@178574198 function bEr(){return n().host.proactivity.selectorGate()}function _Er(){return n().host.proactivity.selectorGateEverOn()}function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivi
+
+@178574255 }function _Er(){return n().host.proactivity.selectorGateEverOn()}function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().hos
+
+@178574320 function SEr(){n().host.proactivity.inheritSelectorGateEverOn()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n()
+
+@178574380 n()}function vEr(e){n().host.proactivity.replaceSelectorGate(e)}function wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHostGateSubscription(e)}function Ik
+
+@178574448 tion wEr(e){n().host.proactivity.resampleSelectorGate(e)}function EEr(e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHostGateSubscription(e)}function Ikn(){return n().sessionFlags.needsPlanModeExitAttachment()}function R
+
+@178574517 (e){return n().host.proactivity.subscribeSelectorGateChanged(e)}function kEr(e){n().host.proactivity.replaceHostGateSubscription(e)}function Ikn(){return n().sessionFlags.needsPlanModeExitAttachment()}function R2(e){n().sessionFlags.replaceNeedsPlanModeExitAttachment(e)}function 
+
+## n().host.mcpProcessWiring hits=8
+@178551697 let t=bEe();return n().costLedger.anchorLogicalStart(e),t}function fwn(){return n().host.mcpProcessWiring.directConnectServerUrl()}function eEr(e){n().host.mcpProcessWiring.replaceDirectConnectServerUrl(e)}function pde(){return n().host.mcpProcessWiring.connectNonBlocking()}funct
+
+@178551764 fwn(){return n().host.mcpProcessWiring.directConnectServerUrl()}function eEr(e){n().host.mcpProcessWiring.replaceDirectConnectServerUrl(e)}function pde(){return n().host.mcpProcessWiring.connectNonBlocking()}function mwn(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}f
+
+@178551845 ().host.mcpProcessWiring.replaceDirectConnectServerUrl(e)}function pde(){return n().host.mcpProcessWiring.connectNonBlocking()}function mwn(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}function hwn(){return n().sessionFlags.teardownUnwindRequested()}function _Gt(e){n
+
+@178551908 ion pde(){return n().host.mcpProcessWiring.connectNonBlocking()}function mwn(e){n().host.mcpProcessWiring.replaceConnectNonBlocking(e)}function hwn(){return n().sessionFlags.teardownUnwindRequested()}function _Gt(e){n().sessionFlags.replaceTeardownUnwindRequested(e)}function gwn(
+
+@178553007 ion Twn(){n().sessionFlags.forgetPendingContextCompacted()}function TL(){return n().host.mcpProcessWiring.strictConfig()}function Awn(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().hos
+
+@178553064 )}function TL(){return n().host.mcpProcessWiring.strictConfig()}function Awn(e){n().host.mcpProcessWiring.replaceStrictConfig(e)}function xwn(){return n().host.launchOptions.cliSessionConfigCarried()}function qYe(e){n().host.launchOptions.replaceCliSessionConfigCarried(e)}functio
+
+@178575755 function I2(){return n().mcpSessionWiring.clientsFromAccessor()}function w7e(e){n().host.mcpProcessWiring.registerEnsureConnectedClient(e)}function vx(){return n().host.mcpProcessWiring.ensureConnectedClient()}function REe(e){n().mcpSessionWiring.registerConnectedClientWiring(e)}
+
+@178575835 n().host.mcpProcessWiring.registerEnsureConnectedClient(e)}function vx(){return n().host.mcpProcessWiring.ensureConnectedClient()}function REe(e){n().mcpSessionWiring.registerConnectedClientWiring(e)}function E7e(){return n().mcpSessionWiring.connectedClientWiring()}function Okn(
+
+## n().host.telemetryHandles hits=30
+@178554309 on()}function EGt(e){n().costLedger.recordToolDuration(e)}function _Ee(){return n().host.telemetryHandles.statsStore()}function Pwn(e){n().host.telemetryHandles.replaceStatsStore(e)}function Dq(e){n().userPresence.recordInteraction(e)}function Mq(){n().userPresence.flushIfDirty()
+
+@178554364 e)}function _Ee(){return n().host.telemetryHandles.statsStore()}function Pwn(e){n().host.telemetryHandles.replaceStatsStore(e)}function Dq(e){n().userPresence.recordInteraction(e)}function Mq(){n().userPresence.flushIfDirty()}function A4(e){return n().userPresence.interactionFire
+
+@178561072 shot()}function dEr(){n().host.modelStringsCache.reset()}function mEn(e,t,o={}){n().host.telemetryHandles.installMeter(e,t,o)}function pEr(){return n().host.telemetryHandles.meter()}function hEn(){return n().host.telemetryHandles.sessionCounter()}function IGt(){return n().host.te
+
+@178561140 n(e,t,o={}){n().host.telemetryHandles.installMeter(e,t,o)}function pEr(){return n().host.telemetryHandles.meter()}function hEn(){return n().host.telemetryHandles.sessionCounter()}function IGt(){return n().host.telemetryHandles.locCounter()}function TEe(){return n().host.telemetry
+
+@178561196 )}function pEr(){return n().host.telemetryHandles.meter()}function hEn(){return n().host.telemetryHandles.sessionCounter()}function IGt(){return n().host.telemetryHandles.locCounter()}function TEe(){return n().host.telemetryHandles.prCounter()}function gEn(){return n().host.telem
+
+@178561261 n hEn(){return n().host.telemetryHandles.sessionCounter()}function IGt(){return n().host.telemetryHandles.locCounter()}function TEe(){return n().host.telemetryHandles.prCounter()}function gEn(){return n().host.telemetryHandles.commitCounter()}function yEn(){return n().host.teleme
+
+@178561322 ction IGt(){return n().host.telemetryHandles.locCounter()}function TEe(){return n().host.telemetryHandles.prCounter()}function gEn(){return n().host.telemetryHandles.commitCounter()}function yEn(){return n().host.telemetryHandles.costCounter()}function n7e(){return n().host.telem
+
+@178561382 nction TEe(){return n().host.telemetryHandles.prCounter()}function gEn(){return n().host.telemetryHandles.commitCounter()}function yEn(){return n().host.telemetryHandles.costCounter()}function n7e(){return n().host.telemetryHandles.tokenCounter()}function hvt(){return n().host.te
+
+@178561446 on gEn(){return n().host.telemetryHandles.commitCounter()}function yEn(){return n().host.telemetryHandles.costCounter()}function n7e(){return n().host.telemetryHandles.tokenCounter()}function hvt(){return n().host.telemetryHandles.codeEditToolDecisionCounter()}function bEn(){retu
+
+@178561508 tion yEn(){return n().host.telemetryHandles.costCounter()}function n7e(){return n().host.telemetryHandles.tokenCounter()}function hvt(){return n().host.telemetryHandles.codeEditToolDecisionCounter()}function bEn(){return n().host.telemetryHandles.activeTimeCounter()}function gvt(
+
+@178561571 ion n7e(){return n().host.telemetryHandles.tokenCounter()}function hvt(){return n().host.telemetryHandles.codeEditToolDecisionCounter()}function bEn(){return n().host.telemetryHandles.activeTimeCounter()}function gvt(){return n().host.telemetryHandles.loggerProvider()}function HG
+
+@178561649 n n().host.telemetryHandles.codeEditToolDecisionCounter()}function bEn(){return n().host.telemetryHandles.activeTimeCounter()}function gvt(){return n().host.telemetryHandles.loggerProvider()}function HGt(e){n().host.telemetryHandles.replaceLoggerProvider(e)}function r7e(){return 

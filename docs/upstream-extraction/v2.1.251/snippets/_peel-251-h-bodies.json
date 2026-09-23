@@ -1,0 +1,283 @@
+{
+  "out": {
+    "sendDesktop": {
+      "off": 100827464,
+      "win": "nknown whether this name is a Claude session on another machine (isolatePeerMachines is enabled)....4...\\U..Message to another agent requires classifier review.d...S...Observers report via ObserverReport, not SendMessage. SendMessage is not available from an observer......6_.desktop_hostP...../.Not sent: a Claude Desktop session takes a plain-text message, not a structured ........Nothing was subscribed: ....0.V.Not sent: the message is empty......M.[.desktop_session_id......J.(.' is reachable. It has the shape of a Claude Desktop session id, but Claude Desktop's session messaging tool is not available in this session, so SendMessage cannot deliver to it......x...hop_loopI.......Not delivered: this session has already messaged Claude Desktop sessions ........0.. times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.1...J...Forwarded to Claude Desktop's session messaging: .......E...sent........5.k.desktop_refused.(...*]&.Not delivered to Claude Desktop session Q.....p.Cannot destructure property 'postInterClaudeMessage' from null or undefined value.......C.2.Remote Control session '.........  ..! .......z. (one-way: .9......., so the receiver cannot address a reply to this session)...R....)1. ..  .t.h.e. .p.e.e.r. .s.e.s.s.i.o.n. .m.a.y. .h.a.v.e. .e.n.d.e.d. .o.r. .r.e.s.t.a.r.",
+      "walked": []
+    },
+    "not_reachable_class": {
+      "off": 196618767,
+      "win": "t, not SendMessage. SendMessage is not available from an observer.\"}};if(Ke(e.to)){if(!Yo())return r(\"desktop_host\",\"not_reachable\"),{data:{success:!1,message:U5e}};let h=!1;if(h=ne(e),typeof e.message!==\"string\")return r(\"desktop_host\",\"invalid_target\"),{data:{success:!1,message:`Not sent: a Claude Desktop session takes a plain-text message, not a structured ${e.message.type}.`}};if(e.message.trim().length===0){if(Ss(e,o,s.toolUseId))return r(\"desktop_host\",\"handler_rewrite\"),h?ks:Oe;return r(\"desktop_host\",h?\"not_reachable\":\"empty_message\"),{data:{success:!1,message:h?`Nothing was subscribed: ${ue}`:\"Not sent: the message is empty.\"}}}let T=qe(s);if(\"kind\"in T)switch(T.kind){case\"unavailable\":return r(\"unresolved\",\"desktop_session_id\"),{data:{success:!1,message:`No agent named '${e.to}' is reachable. It has the shape of a Claude Desktop session id, but Claude Desktop's session messaging tool is not available in this session, so SendMessage cannot deliver to it.`}};case\"loop-paused\":return r(\"desktop_host\",void 0,{degradedClass:\"hop_loop\"}),{data:{success:!1,message:`Not delivered: this session has already messaged Claude Desktop sessions ${T.forwards} times since your user last typed here, which looks like sessions messaging each other automatically. Paused until your user's next message in this session.`}}}let P=d?Ce(s,d).from:void 0,D=d!==void 0&&P!==void 0?Afe(P,e.message)",
+      "walked": []
+    },
+    "ghTransient": {
+      "off": 96953796,
+      "win": "n. .o.n. .i.t. .a.n.d. .l.e.t. .i.t. .p.u.s.h. .t.o. .a. .f.r.e.s.h. .c.l.a.u.d.e./.&  .b.r.a.n.c.h.....}...'...Autofix can monitor this PR from a self-hosted (BYOC) default environment, whose runner tolerates reusing the default branch........O...Use a non-default branch........_Dc.outcome_branch_is_default...........[teleportToRemote] Git source: ......,.., revision: ........ pinned at .......A.dir_sync_local_changes.......KD.GitLab..\t.....-.Bitbucket...........CCR_FORCE_BUNDLE is set.G....Ag.the GitHub App preflight failed transiently (network or service hiccup).0.....,.the GitHub App is not set up for this repository/.....6.no GitHub remote was detected in this directory.&...#1..be seeded from your local working tree.......:..start with an empty sandbox.....bqN. cannot be honored: ........, so the session would .\n.....o. instead. .......5{.Retry in a moment, or .. .....P.Cloud sessions can't clone from ....P... .y.e.t. ..  ...<...r...Set up the GitHub integration at https://claude.ai/code, or ....M%.. to seed from local HEAD.... ....... to start with an empty sandbox.....u...on_branch_no_git_source.......0.explicit_ref_no_git_source.......6..[teleport] phase: bundle-upload.%.... ..[teleportToRemote] Bundling (reason: ......../..tengu_teleport_bundle_started...E....A'.Cannot destructure property 'failReason' from null or undefined value......._...Bundle refused: +.....2.[tel",
+      "walked": []
+    },
+    "retryMoment": {
+      "off": 96954152,
+      "win": ".,.., revision: ........ pinned at .......A.dir_sync_local_changes.......KD.GitLab..\t.....-.Bitbucket...........CCR_FORCE_BUNDLE is set.G....Ag.the GitHub App preflight failed transiently (network or service hiccup).0.....,.the GitHub App is not set up for this repository/.....6.no GitHub remote was detected in this directory.&...#1..be seeded from your local working tree.......:..start with an empty sandbox.....bqN. cannot be honored: ........, so the session would .\n.....o. instead. .......5{.Retry in a moment, or .. .....P.Cloud sessions can't clone from ....P... .y.e.t. ..  ...<...r...Set up the GitHub integration at https://claude.ai/code, or ....M%.. to seed from local HEAD.... ....... to start with an empty sandbox.....u...on_branch_no_git_source.......0.explicit_ref_no_git_source.......6..[teleport] phase: bundle-upload.%.... ..[teleportToRemote] Bundling (reason: ......../..tengu_teleport_bundle_started...E....A'.Cannot destructure property 'failReason' from null or undefined value......._...Bundle refused: +.....2.[teleportToRemote] Rerouted bundle failed (.:....Nx.); starting from GitHub at the tip this checkout is behind..\"....C..^Not uploading this working tree: ..(.......; not starting without the local changesz....dp... .T.h.e. .G.i.t.H.u.b. .A.p.p. .p.r.e.f.l.i.g.h.t. .f.a.i.l.e.d. .t.r.a.n.s.i.e.n.t.l.y. .(.n.e.t.w.o.r.k. .o.r. .s.e.r.v.i.c.e. .h.i.c.c.u.p.). .",
+      "walked": []
+    },
+    "setUpGithub": {
+      "off": 96933943,
+      "win": ".i.p.p.i.n.g. .t.h.e. .a.l.l.-.b.r.a.n.c.h.e.s. .a.n.d. .H.E.A.D. .t.i.e.r.s......|..[gitBundle] size-pack .......l..MB vs ......MR..MB cap; ....@.-.skipping the branch tier........trying the branch tier.........., skipping squashed.........MB > .........@.MB cap; skipping all-branches...\t...la.. and HEAD...\r....:.. and squashed...........--symbolic-full-name%.......The current branch has no commits yet........L?.git rev-parse HEAD failed (.\"...k...Repo is too large to bundle (pack ..1....\t..). Please set up GitHub on https://claude.ai/code...6.......git rev-parse HEAD^{tree} failed: HEAD names no commit..........HEAD^{tree}.m....S..It doesn't look like you have any new commits or changes to review: the only uncommitted changes here are to .......f!.. that ..2... .c. on this machine (named like credentials or keys, ..f....*..hard-linked to another file, kept by a git filter such as LFS, or still being written while read) and ..4.../... not uploaded. Stage or commit any other work first._.......It doesn't look like you have any new commits or changes to review. Stage or commit them first?.\t.......seed-base...(.......[gitBundle] baseRef commit-tree failed (....4f..), squashing without parent: .......kr{.git commit-tree failed (........Bundle upload aborted...........This partial clone does not hold every file of its working tree locally (a sparse checkout, or blobs never download",
+      "walked": []
+    },
+    "modelChangedFalse": {
+      "off": 185878389,
+      "win": "t),d=u?nT().previousStateBySource.get(u):void 0;if(!d)return;let y=o();d.baselineMessageHashes??=d.messageHashes;let{baselineMessageHashes:k,content:A}=d,{model:x,system:O,tools:F}=A(),U=void 0;d.messageHashes=y,d.content=()=>({model:x,system:O,tools:F,messages:U});let B=_it(k,y),W=d.pendingChanges;if(W){let V={...W,messagesHistoryChanged:B!==-1,firstChangedMessageIndex:B};d.pendingChanges=YEn.some((me)=>V[me])?V:null}else if(B!==-1)d.pendingChanges={systemPromptChanged:!1,toolSchemasChanged:!1,modelChanged:!1,fastModeChanged:!1,cacheControlChanged:!1,globalCacheStrategyChanged:!1,betasChanged:!1,autoModeChanged:!1,overageChanged:!1,cacheDiagnosisChanged:!1,effortChanged:!1,extraBodyChanged:!1,deferLoadingPresenceChanged:!1,messagesHistoryChanged:!0,firstChangedMessageIndex:B,prevMessageCount:k.length,addedToolCount:0,removedToolCount:0,systemCharDelta:0,addedTools:[],removedTools:[],changedToolSchemas:[],prevBlockCount:d.perBlockHashes.length,newBlockCount:d.perBlockHashes.length,changedBlockIndices:[],changedBlockLengthDeltas:[],previousModel:x,newModel:x,prevGlobalCacheStrategy:d.globalCacheStrategy,newGlobalCacheStrategy:d.globalCacheStrategy,addedBetas:[],removedBetas:[],prevEffortValue:d.effortValue,newEffortValue:d.effortValue,prevContent:A};tT()}catch(u){h(u)}}function _it(e,t){return e.findIndex((r,o)=>r!==y8&&t[o]!==r)}function XEn(e,t){let r=[];if(e.modelChanged)r.pu",
+      "walked": [
+        {
+          "name": "yit",
+          "i": 185877803,
+          "len": 1375,
+          "sha": "8e33469b0b9eeb61",
+          "body": "function yit({querySource:e,agentId:t,messages:r,getMessageHashes:o}){try{let u=tee(e,t),d=u?nT().previousStateBySource.get(u):void 0;if(!d)return;let y=o();d.baselineMessageHashes??=d.messageHashes;let{baselineMessageHashes:k,content:A}=d,{model:x,system:O,tools:F}=A(),U=void 0;d.messageHashes=y,d.content=()=>({model:x,system:O,tools:F,messages:U});let B=_it(k,y),W=d.pendingChanges;if(W){let V={...W,messagesHistoryChanged:B!==-1,firstChangedMessageIndex:B};d.pendingChanges=YEn.some((me)=>V[me])?V:null}else if(B!==-1)d.pendingChanges={systemPromptChanged:!1,toolSchemasChanged:!1,modelChanged:!1,fastModeChanged:!1,cacheControlChanged:!1,globalCacheStrategyChanged:!1,betasChanged:!1,autoModeChanged:!1,overageChanged:!1,cacheDiagnosisChanged:!1,effortChanged:!1,extraBodyChanged:!1,deferLoadingPresenceChanged:!1,messagesHistoryChanged:!0,firstChangedMessageIndex:B,prevMessageCount:k.length,addedToolCount:0,removedToolCount:0,systemCharDelta:0,addedTools:[],removedTools:[],changedToolSchemas:[],prevBlockCount:d.perBlockHashes.length,newBlockCount:d.perBlockHashes.length,changedBlockIndices:[],changedBlockLengthDeltas:[],previousModel:x,newModel:x,prevGlobalCacheStrategy:d.globalCacheStrategy,newGlobalCacheStrategy:d.globalCacheStrategy,addedBetas:[],removedBetas:[],prevEffortValue:d.effortValue,newEffortValue:d.effortValue,prevContent:A};tT()}catch(u){h(u)}}"
+        }
+      ]
+    },
+    "V_e": {
+      "i": 185450781,
+      "body": "function V_e(e,t,r){try{let o=Xt()?.accessToken;if(!o)return n(\"checkGithubAppInstalled: No access token found, assuming app not installed\"),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:\"inconclusive\",httpStatus:null};let u=await t0();if(!u){let A=zd();return n(A?\"checkGithubAppInstalled: No org UUID found (profile fetch null \\u2014 possibly transient), assuming app not installed\":\"checkGithubAppInstalled: No org UUID found (token lacks user:profile scope \\u2014 deterministic), assuming app not installed\"),{appInstalled:!1,defaultBranch:null,transient:A,linkedAccountAccess:\"inconclusive\",httpStatus:null}}let d=`${Vt().BASE_API_URL}/api/oauth/organizations/${u}/code/repos/${e}/${t}`,y={...Zb(o),\"x-organization-uuid\":u};n(`Checking GitHub app installation for ${e}/${t}`);let k=await st.get(d,{headers:y,timeout:15000,signal:r});if(k.status===200){let A=k.data.repo?.default_branch||null;if(k.data.status){let x=k.data.status.app_installed;return n(`GitHub app ${x?\"is\":\"is not\"} installed on ${e}/${t}`),{appInstalled:x,defaultBranch:A,transient:!1,linkedAccountAccess:\"ok\",httpStatus:k.status}}return n(`GitHub app is not installed on ${e}/${t} (status is null)`),{appInstalled:!1,defaultBranch:A,transient:!1,linkedAccountAccess:\"ok\",httpStatus:k.status}}return n(`checkGithubAppInstalled: Unexpected response status ${k.status}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:\"inconclusive\",httpStatus:k.status}}catch(o){if(st.isAxiosError(o)){let u=o.response?.status,d=o.response?.headers??{},y=o.response?.data,k=vyn(u,o.response?.data),A=u===403&&(d[\"x-ratelimit-remaining\"]===\"0\"||d[\"retry-after\"]!==void 0||[y?.error,y?.message].some((x)=>typeof x===\"string\"&&/rate limit/i.test(x)));if(u&&u>=400&&u<500&&u!==408&&u!==429&&u!==401&&!A)return n(`checkGithubAppInstalled: Got ${u} error, app likely not installed on ${e}/${t} (linked-account access: ${k})`),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:k,httpStatus:u};return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:k,httpStatus:u??null}}return n(`checkGithubAppInstalled error: ${l(o)}`),{appInstalled:!1,defaultBranch:null,transient:!0,linkedAccountAccess:\"inconclusive\",httpStatus:null}}}",
+      "sha": "4a316def4d3d3074",
+      "len": 2301
+    },
+    "modelChangedFalseWin": "={...W,messagesHistoryChanged:B!==-1,firstChangedMessageIndex:B};d.pendingChanges=YEn.some((me)=>V[me])?V:null}else if(B!==-1)d.pendingChanges={systemPromptChanged:!1,toolSchemasChanged:!1,modelChanged:!1,fastModeChanged:!1,cacheControlChanged:!1,globalCacheStrategyChanged:!1,betasChanged:!1,autoModeChanged:!1,overageChanged:!1,cacheDiagnosisChanged:!1,effortChanged:!1,extraBodyChanged:!1,deferLoa"
+  },
+  "table14": {
+    "desktop_host": {
+      "hits": 8,
+      "offs": [
+        196618369,
+        196618490,
+        196618716,
+        196618767,
+        196619276,
+        196619916,
+        196620108
+      ]
+    },
+    "session messaging tool": {
+      "hits": 2,
+      "offs": [
+        196619151
+      ]
+    },
+    "deliver to it": {
+      "hits": 2,
+      "offs": [
+        196619230
+      ]
+    },
+    "Delivered via Claude Desktop": {
+      "hits": 0,
+      "offs": []
+    },
+    "via Claude Desktop": {
+      "hits": 0,
+      "offs": []
+    },
+    "desktop messaging": {
+      "hits": 0,
+      "offs": []
+    },
+    "handler_rewrite": {
+      "hits": 7,
+      "offs": [
+        196596302,
+        196618731,
+        196621417,
+        196621591,
+        196644396,
+        196644562
+      ]
+    },
+    "hop_loop": {
+      "hits": 2,
+      "offs": [
+        196619313
+      ]
+    }
+  },
+  "table21": {
+    "model changed (": {
+      "hits": 2,
+      "offs": [
+        96319856,
+        185879293
+      ]
+    },
+    "hydrated baseline": {
+      "hits": 4,
+      "offs": [
+        96319880,
+        185879313,
+        185880147,
+        185880501
+      ]
+    },
+    "host model": {
+      "hits": 1,
+      "offs": [
+        190101550
+      ]
+    },
+    "hostModel": {
+      "hits": 4,
+      "offs": [
+        98580824,
+        180132296,
+        180134009,
+        180139598
+      ]
+    },
+    "sessionModel": {
+      "hits": 20,
+      "offs": [
+        92536144,
+        98450904,
+        180588030,
+        186945754,
+        186946049,
+        186946164,
+        186946266,
+        186946432
+      ]
+    },
+    "initial session model": {
+      "hits": 0,
+      "offs": []
+    },
+    "only setting": {
+      "hits": 2,
+      "offs": [
+        96903529,
+        185247975
+      ]
+    },
+    "setModel": {
+      "hits": 17,
+      "offs": [
+        92234864,
+        98104716,
+        101618286,
+        101618303,
+        101620453,
+        101620485,
+        183636976,
+        191487649
+      ]
+    },
+    "model switch announced": {
+      "hits": 0,
+      "offs": []
+    },
+    "announceModel": {
+      "hits": 0,
+      "offs": []
+    },
+    "notifyModelChange": {
+      "hits": 0,
+      "offs": []
+    },
+    "told Claude": {
+      "hits": 2,
+      "offs": [
+        100584398,
+        193183076
+      ]
+    }
+  },
+  "table48": {
+    "connection reset": {
+      "hits": 12,
+      "offs": [
+        204215215,
+        204215755,
+        204219624,
+        213251810,
+        215088420
+      ]
+    },
+    "relay failure": {
+      "hits": 0,
+      "offs": []
+    },
+    "relayFailure": {
+      "hits": 0,
+      "offs": []
+    },
+    "proxy aborted": {
+      "hits": 0,
+      "offs": []
+    },
+    "bare reset": {
+      "hits": 1,
+      "offs": [
+        204219883
+      ]
+    },
+    "ECONNRESET": {
+      "hits": 53,
+      "offs": [
+        178833461,
+        179086221,
+        179478304,
+        179958175,
+        180744473,
+        181678046,
+        181681953,
+        182471193,
+        182513975,
+        183221137
+      ]
+    },
+    "agent-proxy": {
+      "hits": 168,
+      "offs": [
+        181619452,
+        184187748,
+        184187942,
+        204176624,
+        204179154,
+        204179238,
+        204179552,
+        204179727,
+        204179935,
+        204180042
+      ]
+    },
+    "agent_proxy": {
+      "hits": 85,
+      "offs": [
+        181619834,
+        204179604,
+        204179623,
+        204179858,
+        204179877,
+        204180313,
+        204180496,
+        204182633,
+        204182655,
+        204183030
+      ]
+    },
+    "egress proxy": {
+      "hits": 30,
+      "offs": [
+        181617694,
+        181618012,
+        181618130,
+        181618220,
+        181618276,
+        181618345,
+        185992395,
+        188269672,
+        188678492,
+        190327792
+      ]
+    }
+  }
+}

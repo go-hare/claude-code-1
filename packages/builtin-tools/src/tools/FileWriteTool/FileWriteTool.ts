@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, sep } from 'path'
+import { basename, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -32,6 +32,13 @@ import {
 } from 'src/utils/fileHistory.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
 import { readFileSyncWithMetadata } from 'src/utils/fileRead.js'
+import {
+  noteApprovedFileToolPath,
+  openApprovedRead,
+  openApprovedWrite,
+  takeApprovedFileToolPath,
+  type ApprovedRead,
+} from 'src/utils/fileToolApprovedOpen.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -221,6 +228,7 @@ export const FileWriteTool = buildTool({
     return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
+    noteApprovedFileToolPath(input.file_path)
     const appState = context.getAppState()
     return checkWritePermissionForTool(
       FileWriteTool,
@@ -418,7 +426,6 @@ export const FileWriteTool = buildTool({
       userModified,
     } = toolUseContext
     const fullFilePath = expandPath(file_path)
-    const dir = dirname(fullFilePath)
 
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     const cwd = getCwd()
@@ -437,77 +444,74 @@ export const FileWriteTool = buildTool({
 
     await diagnosticTracker.beforeFileEdited(fullFilePath)
 
-    // Ensure parent directory exists before the atomic read-modify-write section.
-    // Must stay OUTSIDE the critical section below (a yield between the staleness
-    // check and writeTextContent lets concurrent edits interleave), and BEFORE the
-    // write (lazy-mkdir-on-ENOENT would fire a spurious tengu_atomic_write_error
-    // inside writeFileSyncAndFlush_DEPRECATED before ENOENT propagates back).
-    await getFsImplementation().mkdir(dir)
-    if (fileHistoryEnabled()) {
-      // Backup captures pre-edit content — safe to call before the staleness
-      // check (idempotent v1 backup keyed on content hash; if staleness fails
-      // later we just have an unused backup, not corrupt state).
-      await fileHistoryTrackEdit(
-        updateFileHistoryState,
-        fullFilePath,
-        parentMessage.uuid,
-      )
-    }
-
-    // Load current state and confirm no changes since last read.
-    // Please avoid async operations between here and writing to disk to preserve atomicity.
-    let meta: ReturnType<typeof readFileSyncWithMetadata> | null
+    const approved = takeApprovedFileToolPath(fullFilePath)
+    const openedWrite = await openApprovedWrite(fullFilePath, approved, {
+      createParents: true,
+    })
+    let openedRead: ApprovedRead | null = null
+    let meta: ReturnType<typeof readFileSyncWithMetadata> | null = null
+    let oldContent: string | null = null
+    let contentToWrite = content
+    let memdirStamped = false
     try {
-      meta = readFileSyncWithMetadata(fullFilePath)
-    } catch (e) {
-      if (isENOENT(e)) {
-        meta = null
-      } else {
-        throw e
+      if (fileHistoryEnabled()) {
+        await fileHistoryTrackEdit(
+          updateFileHistoryState,
+          fullFilePath,
+          parentMessage.uuid,
+        )
       }
-    }
 
-    if (meta !== null) {
-      const lastWriteTime = getFileModificationTime(fullFilePath)
-      const lastRead = readFileState.get(fullFilePath)
-      // densable 2.1.228 #17 call-path: missing/partial may pass when the same
-      // guardSkipped as validateInput would; true staleness still throws.
-      if (!lastRead || lastRead.isPartialView) {
-        if (
-          !shouldAllowCallDespiteMissingOrPartialRead(
-            'write',
-            fullFilePath,
-            toolUseContext,
-            lastRead,
+      try {
+        openedRead = await openApprovedRead(fullFilePath, approved)
+        meta = readFileSyncWithMetadata(openedRead.ioPath)
+      } catch (e) {
+        if (isENOENT(e)) {
+          meta = null
+        } else {
+          throw e
+        }
+      }
+
+      if (meta !== null) {
+        const lastWriteTime = getFileModificationTime(fullFilePath)
+        const lastRead = readFileState.get(fullFilePath)
+        // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+        // guardSkipped as validateInput would; true staleness still throws.
+        if (!lastRead || lastRead.isPartialView) {
+          if (
+            !shouldAllowCallDespiteMissingOrPartialRead(
+              'write',
+              fullFilePath,
+              toolUseContext,
+              lastRead,
+            )
+          ) {
+            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          }
+        } else if (
+          lastWriteTime > lastRead.timestamp &&
+          !(
+            isFullEnoughFileRead(lastRead) &&
+            fileStateContentMatches(lastRead, meta.content)
           )
         ) {
           throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
         }
-      } else if (
-        lastWriteTime > lastRead.timestamp &&
-        !(
-          isFullEnoughFileRead(lastRead) &&
-          fileStateContentMatches(lastRead, meta.content)
-        )
-      ) {
-        throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }
+
+      const enc = meta?.encoding ?? 'utf8'
+      oldContent = meta?.content ?? null
+
+      contentToWrite = stampNewMemoryContent(fullFilePath, content)
+      memdirStamped = contentToWrite !== content
+
+      await openedWrite.recheckBeforeWrite()
+      writeTextContent(openedWrite.ioPath, contentToWrite, enc, 'LF')
+    } finally {
+      await openedRead?.close()
+      await openedWrite.close()
     }
-
-    const enc = meta?.encoding ?? 'utf8'
-    const oldContent = meta?.content ?? null
-
-    // densable Zto: stamp auto-memory .md with originSessionId + ISO modified
-    // before disk (preserves inline # via quoteLossyValues / hRg).
-    const contentToWrite = stampNewMemoryContent(fullFilePath, content)
-    const memdirStamped = contentToWrite !== content
-
-    // Write is a full content replacement — the model sent explicit line endings
-    // in `content` and meant them. Do not rewrite them. Previously we preserved
-    // the old file's line endings (or sampled the repo via ripgrep for new
-    // files), which silently corrupted e.g. bash scripts with \r on Linux when
-    // overwriting a CRLF file or when binaries in cwd poisoned the repo sample.
-    writeTextContent(fullFilePath, contentToWrite, enc, 'LF')
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()

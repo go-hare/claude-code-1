@@ -20,7 +20,7 @@ export function isCustomOAuthAnalyticsOff(
 
 /**
  * densable 2.1.247 Gd — managed settings forceLoginMethod==="gateway".
- * Io(Un()) not locked 1:1; admin-managed origin is the existing 212 contract.
+ * 2.1.251 `Kh` does not call this. Analytics use `gatewayAuth()` instead.
  */
 export function isManagedGatewayAnalyticsOff(
   origin:
@@ -41,52 +41,43 @@ export function isManagedGatewayAnalyticsOff(
 }
 
 /**
- * Check if analytics operations should be disabled
- *
- * Analytics is disabled in the following cases:
- * - Test environment (NODE_ENV === 'test')
- * - Third-party cloud providers (Bedrock/Vertex)
- * - Privacy level is no-telemetry or essential-traffic
+ * densable Zq — non-firstParty analytics off unless the host owns routing.
+ * firstParty stays on. Do not list a fourth cloud here; Zq is !dr().
+ */
+export function isNonFirstPartyAnalyticsOff(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) return false
+  try {
+    const { getAPIProvider } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/model/providers.js') as typeof import('../../utils/model/providers.js')
+    return getAPIProvider() !== 'firstParty'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Kh: Zq() || gi()!==null || bW() || e2().
+ * Gold Zq has no NODE_ENV==='test' arm — bun test still reaches later gates.
  */
 export function isAnalyticsDisabled(): boolean {
-  // Official USE_* densables — analytics off for 3P cloud providers.
-  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
-  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
-  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  // densable gi() !== null — the credential slot, not the managed login pin.
+  let gatewayAuthSet = false
   try {
-    const {
-      isUseBedrockEnvEnabled,
-      isUseVertexEnvEnabled,
-      isUseFoundryEnvEnabled,
-    } =
+    const { getGatewayAuth } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-    useBedrock = isUseBedrockEnvEnabled()
-    useVertex = isUseVertexEnvEnabled()
-    useFoundry = isUseFoundryEnvEnabled()
+      require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+    gatewayAuthSet = getGatewayAuth() != null
   } catch {
-    // keep raw env fallback
-  }
-  let managedGateway = false
-  try {
-    const { getPolicySettingsOrigin, getSettingsForSource } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../utils/settings/settings.js') as typeof import('../../utils/settings/settings.js')
-    managedGateway = isManagedGatewayAnalyticsOff(
-      getPolicySettingsOrigin(),
-      getSettingsForSource('policySettings')?.forceLoginMethod,
-    )
-  } catch {
-    managedGateway = false
+    gatewayAuthSet = false
   }
   return (
-    process.env.NODE_ENV === 'test' ||
-    useBedrock ||
-    useVertex ||
-    useFoundry ||
+    isNonFirstPartyAnalyticsOff() ||
     isTelemetryDisabled() ||
     isCustomOAuthAnalyticsOff() ||
-    managedGateway
+    gatewayAuthSet
   )
 }
 

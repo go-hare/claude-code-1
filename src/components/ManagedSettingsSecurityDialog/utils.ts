@@ -5,6 +5,7 @@ import {
 import { SETTINGS_KEY_ALIASES } from '../../utils/settings/settingsAliases.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
+import { plural } from '../../utils/stringUtils.js'
 
 /**
  * densable sJc — sandbox binary / ripgrep overrides that require managed-settings
@@ -306,6 +307,108 @@ export function hasDangerousSettings(dangerous: DangerousSettings): boolean {
     dangerous.hasHooks ||
     dangerous.hasClaudeMd
   )
+}
+
+export type DangerousApprovalDiff = {
+  changed: DangerousSettings
+  unchangedCount: number
+  removedCount: number
+}
+
+/**
+ * densable eAn. Baseline settings are projected with extractDangerousSettings
+ * (local VU). Sandbox binaries already live in shellSettings, so there is no
+ * separate sandboxSettings bag. inlineHelperScriptSizes is not on the local
+ * projection.
+ */
+export function diffDangerousApproval(
+  baseline: SettingsJson | null | undefined,
+  current: DangerousSettings,
+): DangerousApprovalDiff {
+  const previous = extractDangerousSettings(baseline)
+  let unchangedCount = 0
+  let removedCount = 0
+  const shellSettings: Record<string, string> = {}
+  for (const [key, value] of Object.entries(current.shellSettings)) {
+    if (previous.shellSettings[key] === value) unchangedCount++
+    else shellSettings[key] = value
+  }
+  for (const key of Object.keys(previous.shellSettings)) {
+    if (!Object.hasOwn(current.shellSettings, key)) removedCount++
+  }
+  const envVars: Record<string, string> = {}
+  for (const [key, value] of Object.entries(current.envVars)) {
+    if (
+      Object.hasOwn(previous.envVars, key) &&
+      previous.envVars[key] === value
+    ) {
+      unchangedCount++
+    } else {
+      envVars[key] = value
+    }
+  }
+  for (const key of Object.keys(previous.envVars)) {
+    if (!Object.hasOwn(current.envVars, key)) removedCount++
+  }
+  if (previous.hasHooks && !current.hasHooks) removedCount++
+  if (previous.hasClaudeMd && !current.hasClaudeMd) removedCount++
+  const hooksChanged =
+    current.hasHooks &&
+    !(
+      previous.hasHooks &&
+      jsonStringify(previous.hooks) === jsonStringify(current.hooks)
+    )
+  const claudeMdChanged =
+    current.hasClaudeMd && previous.claudeMd !== current.claudeMd
+  if (current.hasHooks && !hooksChanged) unchangedCount++
+  if (current.hasClaudeMd && !claudeMdChanged) unchangedCount++
+  return {
+    changed: {
+      shellSettings,
+      envVars,
+      hasHooks: hooksChanged,
+      hooks: hooksChanged ? current.hooks : undefined,
+      hasClaudeMd: claudeMdChanged,
+      claudeMd: claudeMdChanged ? current.claudeMd : undefined,
+    },
+    unchangedCount,
+    removedCount,
+  }
+}
+
+/** densable Oe unchanged line. Shown only when the changed set is listed. */
+export function formatUnchangedApprovalCount(count: number): string | null {
+  if (count <= 0) return null
+  return `\uFF0B ${count} other active ${plural(count, 'setting')} unchanged since your last approval`
+}
+
+/** densable Oe removed line. */
+export function formatRemovedApprovalCount(count: number): string | null {
+  if (count <= 0) return null
+  const verb = count === 1 ? 'requires' : 'require'
+  return `\u2212 ${count} previously approved ${plural(count, 'setting')} no longer ${verb} approval`
+}
+
+/**
+ * densable Oe: list the changed set when it is non-empty, otherwise the full
+ * bag. Unchanged count is suppressed when the full bag is listed.
+ */
+export function listManagedSettingsForApproval(
+  baseline: SettingsJson | null | undefined,
+  current: DangerousSettings,
+): {
+  items: string[]
+  unchangedCount: number
+  removedCount: number
+} {
+  const diff = diffDangerousApproval(baseline, current)
+  const listingChanged = hasDangerousSettings(diff.changed)
+  const listed = listingChanged ? diff.changed : current
+  return {
+    items: formatDangerousSettingsList(listed),
+    unchangedCount: listingChanged ? diff.unchangedCount : 0,
+    removedCount: diff.removedCount,
+  }
 }
 
 /**

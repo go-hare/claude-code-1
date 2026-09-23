@@ -383,10 +383,16 @@ async function main(): Promise<void> {
   // Also keep deprecated ps/logs/attach/kill → daemon <sub>.
   if (
     feature('BG_SESSIONS') &&
-    (args[0] === 'ps' || args[0] === 'logs' || args[0] === 'attach' || args[0] === 'kill' || args[0] === 'rm')
+    (args[0] === 'ps' ||
+      args[0] === 'logs' ||
+      args[0] === 'attach' ||
+      args[0] === 'kill' ||
+      args[0] === 'rm' ||
+      args[0] === 'respawn')
   ) {
     const isRm = args[0] === 'rm';
-    if (!isRm) {
+    const isRespawn = args[0] === 'respawn';
+    if (!isRm && !isRespawn) {
       const mapped = args[0] === 'ps' ? 'status' : args[0];
       console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
     }
@@ -395,7 +401,8 @@ async function main(): Promise<void> {
     const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
     {
       const policyErr = await loadFastPathPolicy();
-      const warnOnly = args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps' || args[0] === 'rm';
+      const warnOnly =
+        args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps' || args[0] === 'rm' || args[0] === 'respawn';
       if (policyErr) {
         if (warnOnly) {
           process.stderr.write(`${policyErr}\n`);
@@ -414,6 +421,12 @@ async function main(): Promise<void> {
       const bg = await import('../cli/bg.js');
       await bg.rmHandler(args[1]);
       // densable process.exit after analytics drain; exitCode already set by handler
+      process.exit(process.exitCode ?? 0);
+    }
+    if (isRespawn) {
+      // densable cEr — top-level `claude respawn <id>|--all` (not a second attach)
+      const bg = await import('../cli/bg.js');
+      await bg.respawnHandler(args[1]);
       process.exit(process.exitCode ?? 0);
     }
     const { daemonMain } = await import('../daemon/main.js');

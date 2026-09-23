@@ -1,0 +1,71 @@
+# gold-248-SKn-callee-map
+
+## function wKn( hits=1
+@179534306 sha=45d8a07f7d505f90 len=743
+function wKn(t,e){if(!D())return;if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return;let s=Ngn();if(s===void 0||e.localStoreProbes.hasCanonicalRootOwnerUids(s))return;let i=t.hostFiles;if(!i.serves("workspace")){n("settingsPrime: ownership of the local settings root not read ahead (the backend does not serve the workspace); the probe runs as today");return}let[r,a,o]=await Promise.allSettled([i.stat(Pc.workspace(s)),i.stat(Pc.workspace(f(s,".git")),{follow:!1}),i.stat(Pc.workspace(f(s,".claude")),{follow:!1})]),g=S(r),d=S(a),u=S(o),c=W(g,d,u);if("skipped"in c){n(`settingsPrime: ownership of the local settings root not read ahead (${c.skipped}); the probe runs as today`);return}return{root:s,uids:c.uids}}
+
+## async function wKn( hits=1
+@179534300 sha=a1b1a114202e041a len=749
+async function wKn(t,e){if(!D())return;if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return;let s=Ngn();if(s===void 0||e.localStoreProbes.hasCanonicalRootOwnerUids(s))return;let i=t.hostFiles;if(!i.serves("workspace")){n("settingsPrime: ownership of the local settings root not read ahead (the backend does not serve the workspace); the probe runs as today");return}let[r,a,o]=await Promise.allSettled([i.stat(Pc.workspace(s)),i.stat(Pc.workspace(f(s,".git")),{follow:!1}),i.stat(Pc.workspace(f(s,".claude")),{follow:!1})]),g=S(r),d=S(a),u=S(o),c=W(g,d,u);if("skipped"in c){n(`settingsPrime: ownership of the local settings root not read ahead (${c.skipped}); the probe runs as today`);return}return{root:s,uids:c.uids}}
+
+## function Vjt( hits=1
+@179502013 sha=9dcc9022d209e217 len=448
+function Vjt(e,t,r){let o=await e.read([{key:Se.userSettings(),offset:0,length:A_+1}]);if(!o.ok)return{kind:"failing",code:o.error.code,failureClass:"failureClass"in o.error?o.error.failureClass:void 0};let u=o.value.items[0];if(!u.found)return Pn(e.hostFiles,t);if(u.totalBytes>A_)return{kind:"oversize"};let d=Mn(u.value),p=r!==void 0&&r.contentHash===d?r.parsed:FMe($ue(u.value),t);return{kind:"seeded",contentHash:d,size:u.totalBytes,parsed:p}}
+
+## async function Vjt( hits=1
+@179502007 sha=2ae5c09e6affc368 len=454
+async function Vjt(e,t,r){let o=await e.read([{key:Se.userSettings(),offset:0,length:A_+1}]);if(!o.ok)return{kind:"failing",code:o.error.code,failureClass:"failureClass"in o.error?o.error.failureClass:void 0};let u=o.value.items[0];if(!u.found)return Pn(e.hostFiles,t);if(u.totalBytes>A_)return{kind:"oversize"};let d=Mn(u.value),p=r!==void 0&&r.contentHash===d?r.parsed:FMe($ue(u.value),t);return{kind:"seeded",contentHash:d,size:u.totalBytes,parsed:p}}
+
+## function Qve( hits=2
+@179441964 sha=3fe9add7640c1fb7 len=96
+function Qve(e){n(`Broken symlink or missing file encountered for settings.json at path: ${e}`)}
+
+@186353634 sha=788e060b07b2b5de len=57
+function Qve(e,t){if(!QI(e))return e;return N4(t)??f0n()}
+
+## function Fte( hits=1
+@179442060 sha=fb2cdb2ec004d91d len=47
+function Fte(){return{settings:null,errors:[]}}
+
+## async function $pn( hits=1
+@179527115 sha=6e91860bc34fc69a len=254
+async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}
+
+## async function _Ke( hits=1
+@179162866 sha=ef03c9b1fcd4958e len=314
+async function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}
+
+## function _Ke( hits=2
+@179162872 sha=8f12f5cc99f54759 len=308
+function _Ke(e){if(!D()||e===void 0)return;let t=w();if(t.backendView!==void 0)return t.backendView.priming;if(Yv()!==void 0){n("Remote settings: storage prime skipped (CLAUDE_CODE_REMOTE_SETTINGS_PATH override); disk probe stays");return}let o=new Ut(e);return t.backendView=o,o.priming=uo(o,e,t),o.priming}
+
+@184318671 sha=1d7e6927032a44ea len=89
+function _Ke(e){return AB(e)||e.startsWith("./")||e.startsWith("../")||e==="."||e===".."}
+
+## function Ngn( hits=1
+@179506113 sha=1e96de935dade74e len=97
+function Ngn(){let e=H(),t=cyn(e.cwd,e.canonicalGitRoot);return t.decided===void 0?t.root:void 0}
+
+## function Pn( hits=32
+@178216953 sha=c9f1d7bbe37abbeb len=126
+function Pn(e){if(!e||typeof e!=="object")return!1;return!!(e.constructor&&e.constructor.isBuffer&&e.constructor.isBuffer(e))}
+
+@178843011 sha=55a3b718ff87b8d4 len=16
+function Pn(e){}
+
+## async function Pn( hits=8
+@179502461 sha=85871383ee2663c8 len=240
+async function Pn(e,t){let r;try{r=await e.stat(Pc.home(t))}catch(o){return{kind:"failing",code:l(o)}}if(r.ok)return r.value.kind==="absent"?{kind:"absent"}:{kind:"failing",code:r.value.kind};return dEe(r.error)?{kind:"absent"}:ne(r.error)}
+
+@183198956 sha=d8ff722350c81199 len=530
+async function Pn(e,t){let{fs:r}=e,d=await r.realpath(t).catch(()=>null);if(d===null)return null;let u=await r.open(d,ye).catch(()=>null);if(u===null)return null;try{let[k,p]=await Promise.all([u.stat({bigint:!0}),r.lstat(d,{bigint:!0})]);if(!k.isDirectory()||!p.isDirectory()||k.ino===0n||k.dev!==p.dev||k.ino!==p.ino)return await u.close().catch(()=>{}),null}catch{return await u.close().catch(()=>{}),null}let o=null,g=()=>o??=u.close();return{realPath:d,handle:u,get closed(){return o!==null},close:g,[Symbol.asyncDispose]:g}}
+
+## seedLogged hits=4
+@98416220 :///B:/%7EBUN/root/chunk-dfkzqtkj.js......U.Invalid SemVer: <redacted>..&...}ZH.^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$..(.......file:///B:/%7EBUN/root/chunk-qapedxb8.js......n.seedAttestedTier
+...z.E.seedLogged......=cr.seedFromBackend.........onThrow......h\.logThrowOnce....'...primes.......^@.followUpQueued.......`..consecutiveThrows.......	...runsInState.....8s..loggedThrowMessages......_..loggedOwnershipThrowMessages....9C..loggedHostFilesThrowMessages....."..project settings....8kS.local se
+
+@179524944 et r=k();if(r!==void 0){if(!await this.seedFromBackend(r,e))return}}catch(r){if(!this.disposed)this.onThrow(r);return}let s=await t;if(this.disposed)return;if(U(this.store,s),(await Promise.all([this.seedLogged(e,T),this.seedLogged(e,O)])).includes(!1))return;this.consecutiveThrows=0;try{k_(),this.loggedThrowMessages.clear()}catch(r){if(!this.disposed)this.logThrowOnce(r)}}finally{await t}}async seedLogged(t,e){try{return await e(this.storageV5,this.store,t)}catch(s){if(!this.disposed)this.logTh
+
+@179524965 0){if(!await this.seedFromBackend(r,e))return}}catch(r){if(!this.disposed)this.onThrow(r);return}let s=await t;if(this.disposed)return;if(U(this.store,s),(await Promise.all([this.seedLogged(e,T),this.seedLogged(e,O)])).includes(!1))return;this.consecutiveThrows=0;try{k_(),this.loggedThrowMessages.clear()}catch(r){if(!this.disposed)this.logThrowOnce(r)}}finally{await t}}async seedLogged(t,e){try{return await e(this.storageV5,this.store,t)}catch(s){if(!this.disposed)this.logThrowOnce(s,this.logged
+
+@179525143 .seedLogged(e,T),this.seedLogged(e,O)])).includes(!1))return;this.consecutiveThrows=0;try{k_(),this.loggedThrowMessages.clear()}catch(r){if(!this.disposed)this.logThrowOnce(r)}}finally{await t}}async seedLogged(t,e){try{return await e(this.storageV5,this.store,t)}catch(s){if(!this.disposed)this.logThrowOnce(s,this.loggedHostFilesThrowMessages);return this.store.epoch===t&&!this.disposed}}async seedFromBackend(t,e){let s=this.state,i=await Vjt(this.storageV5,t,s.kind==="seeded"?s:void 0);if(this.

@@ -9,6 +9,7 @@ import {
   getFeedbackCommandAvailability,
   isFeedbackCallHt,
   isSendFeedbackEnabled,
+  type FeedbackCommandName,
 } from '../../utils/feedbackDrafts/gates.js';
 
 type FeedbackBackgroundTasks = {
@@ -35,8 +36,9 @@ export function renderFeedbackComponent(
   messages: Message[],
   initialDescription: string = '',
   backgroundTasks: FeedbackBackgroundTasks = {},
+  command: FeedbackCommandName = '/feedback',
 ): React.ReactNode {
-  const availability = getFeedbackCommandAvailability();
+  const availability = getFeedbackCommandAvailability(command);
   if (availability.kind === 'disabled') {
     onDone(availability.reason);
     return null;
@@ -57,6 +59,7 @@ function openLegacyFeedback(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,
   description: string,
+  command: FeedbackCommandName = '/feedback',
 ): React.ReactNode {
   return renderFeedbackComponent(
     onDone,
@@ -64,6 +67,7 @@ function openLegacyFeedback(
     context.messages,
     description,
     taskRegistrySnapshot(context),
+    command,
   );
 }
 
@@ -72,9 +76,10 @@ export async function callLegacyFeedbackDialog(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,
   args?: string,
+  command: FeedbackCommandName = '/feedback',
 ): Promise<React.ReactNode> {
   const description = args?.trim() === 'public' ? '' : args || '';
-  return openLegacyFeedback(onDone, context, description);
+  return openLegacyFeedback(onDone, context, description, command);
 }
 
 function FeedbackDraftsHost({

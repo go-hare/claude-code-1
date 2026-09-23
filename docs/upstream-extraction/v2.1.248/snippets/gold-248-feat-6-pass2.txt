@@ -1,0 +1,105 @@
+# gold-248-feat-6-pass2  pass2 usage-credits enterprise billing
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:14.876Z
+
+## request more usage from your admin  needle="request more usage from your admin"  hits=2
+- #0 @93429890  enable extra usage at claude.ai/admin-settings/usage.5.....2./usage-credits to request more usage from your admin....&...OUc./upgrade to increase your usage limit...<...;.../.u.p.g.r.a.d.e. .o.
+- #1 @201323387 /usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from your admin."}if(P){if(D)return"/usage-credits to finish what you\u2019re working on.";retu
+
+## aws_marketplace  needle="aws_marketplace"  hits=2
+- #0 @98516004 ription_contracted..)....U..stripe_subscription_enterprise_self_serve........F..aws_marketplace......k..c4e_consumption_trial........3..apple_subscription.......#..google_play
+- #1 @180726689 ","stripe_subscription_contracted","stripe_subscription_enterprise_self_serve","aws_marketplace","c4e_consumption_trial","apple_subscription","google_play_subscription"]);func
+
+## AWS_MARKETPLACE  needle="AWS_MARKETPLACE"  hits=0
+
+## enterprise_trial  needle="enterprise_trial"  hits=0
+
+## self_serve  needle="self_serve"  hits=2
+- #0 @98515983 .........stripe_subscription_contracted..)....U..stripe_subscription_enterprise_self_serve........F..aws_marketplace......k..c4e_consumption_trial........3..apple_subscri
+- #1 @180726676 _subscription","stripe_subscription_contracted","stripe_subscription_enterprise_self_serve","aws_marketplace","c4e_consumption_trial","apple_subscription","google_play_su
+
+## self-serve  needle="self-serve"  hits=0
+
+## marketplace_billing  needle="marketplace_billing"  hits=0
+
+## billing_type  needle="billing_type"  hits=4
+- #0 @94469852 unt.	...Q...full_name.........Y.fullName........has_extra_usage_enabled.....x...billing_type........subscription_created_at......R..subscriptionCreatedAt...........accountC
+- #1 @180666880 led:t?.organization?.has_extra_usage_enabled??null,billingType:t?.organization?.billing_type??null,ccOnboardingFlags:t?.organization?.cc_onboarding_flags??{},claudeCodeTria
+- #2 @180668748 geEnabled:k.organization.has_extra_usage_enabled??!1,billingType:k.organization.billing_type??void 0,accountCreatedAt:k.account.created_at,subscriptionCreatedAt:k.organizat
+- #3 @199047211 abled:a.organization.has_extra_usage_enabled??void 0,billingType:a.organization.billing_type??void 0,subscriptionCreatedAt:a.organization.subscription_created_at??void 0,ac
+
+## organization_type  needle="organization_type"  hits=5
+- #0 @93276720 ade......lz.subscriptionType.......rateLimitTier......./=..organization......\.organization_type.......J6..rate_limit_tier.....,.W.previousAccount.........previousGatewayAuth.(
+- #1 @180666614 ude_team","team"]]);async function L2t(e){let t=await Dce(e),r=t?.organization?.organization_type,u={subscriptionType:(r!==void 0?w7.get(r):void 0)??null,rateLimitTier:t?.organi
+- #2 @190684203 ),organization_uuid:w.string().nullish(),organization_name:w.string().nullish(),organization_type:w.string().nullish(),organization_rate_limit_tier:w.string().nullish(),user_rat
+- #3 @190685811 t_uuid!=null&&e.account_uuid!==t.accountUuid)return t;let l={organizationType:e.organization_type??null,organizationRateLimitTier:e.organization_rate_limit_tier??null,userRateLi
+- #4 @209118502 _20x";else if(o?.accessToken){let i=await Dce(o.accessToken);n=i?.organization?.organization_type==="claude_max"&&i?.organization?.rate_limit_tier==="default_claude_max_20x"}if(
+
+## disabled_reason  needle="disabled_reason"  hits=40
+- #0 @92269682 ate...........fast_mode_state.........fastModeDisabledReason..........fast_mode_disabled_reason........9..powershell_path......>..init_emit_ms........startup_timing......W...u
+- #1 @93419380 ....[g8.used_credits...:.`.monthly_limit...........auto_reload_settings......H.disabled_reason......23.C.u.s.t.o.m. .a.m.o.u.n.t.& 	.......Payment: ...K....=..By confirming, 
+- #2 @98529052 edits rejection already surfaced this turn, suppressing repeat.......\8.overage_disabled_reason......^r.penguinModeOrgEnabled...........guess...;....n..Fast mode prefetch in p
+- #3 @179719138 m({section:le(["main","overflow","deprecated"]).optional(),badge:i().optional(),disabled_reason:i().optional(),tiers:x(i()).optional()}).loose().optional(),deprecation:m({reti
+- #4 @180195391 on: ${e??"unknown"} \u2014 ${r}`),s("tengu_fast_mode_overage_rejected",{overage_disabled_reason:e??"unknown"}),l6e(e)){if(!me.claimCreditsExhaustedNotice()){n("Fast mode credi
+- #5 @180198422 odeOrgEnabled;if(Vc(E.enabled?{status:"enabled"}:{status:"disabled",reason:W4(E.disabled_reason),source:"server"}),C!==E.enabled){if(!E.enabled)await Wt("userSettings",{fastMo
+- #6 @180198651 rgEnabled:E.enabled}),e)}n(`Org fast mode: ${E.enabled?"enabled":`disabled (${E.disabled_reason??"preference"})`}`)}catch(E){let O=oe().penguinModeOrgEnabled===!0;if(!jBt())Vc
+- #7 @180343863 nal(),terminal_reason:pP().optional(),fast_mode_state:wo().optional(),fast_mode_disabled_reason:Po().optional(),origin:Pu().optional(),uuid:X(),session_id:i()})),EJ=h(()=>m({t
+- #8 @180345171 rs."),terminal_reason:pP().optional(),fast_mode_state:wo().optional(),fast_mode_disabled_reason:Po().optional(),origin:Pu().optional(),uuid:X(),session_id:i()})),SJ=h(()=>lt([
+- #9 @180349742 s NOT assert every entry validated."),fast_mode_state:wo().optional(),fast_mode_disabled_reason:Po().optional(),footer_indicator:Hu().optional().describe(`@internal The termin
+- … +30 more
+
+## limit_increase  needle="limit_increase"  hits=4
+- #0 @94715560 st..........api_admin_request_eligibility........@N.tengu_ember_latch.........O.limit_increase..-.../...Request sent to your admin for usage credits....?...y3..Request sent t
+- #1 @192982368 Claude Code session.";async function cKt(t,r){try{return await d({request_type:"limit_increase",details:null},r),{type:"message",filed:!0,value:t==null?"Request sent to your 
+- #2 @192983758 tion already has unlimited usage credits. No request needed."};try{if((await p("limit_increase",r))?.is_allowed===!1)return{type:"message",value:"Contact your admin to manage
+- #3 @192983970 Extra usage eligibility check failed: ${u}`,{level:"error"})}try{let u=await m("limit_increase",["pending"],r);if(u&&u.length>0)return{type:"message",value:"You've already se
+
+## is_allowed  needle="is_allowed"  hits=2
+- #0 @94716488 Failed to open browser for ."....D..Couldn't open your browser. Visit ..
+.....'.is_allowed......i...org_spend_cap_reached...0....X../api/oauth/organizations/:orgUUID/admi
+- #1 @192983779 mited usage credits. No request needed."};try{if((await p("limit_increase",r))?.is_allowed===!1)return{type:"message",value:"Contact your admin to manage usage credit set
+
+## Enterprise organizations  needle="Enterprise organizations"  hits=0
+
+## billed through  needle="billed through"  hits=0
+
+## your admin for a higher limit  needle="your admin for a higher limit"  hits=4
+- #0 @96620989 .K.Now using ..........You're now using ...:.....}. . run /usage-credits to ask your admin for a higher limit..$....+>. . ask your admin for a higher limit........You've hit your !....v..an
+- #1 @96621035 ...}. . run /usage-credits to ask your admin for a higher limit..$....+>. . ask your admin for a higher limit........You've hit your !....v..anthropic-ratelimit-unified-reset...)...jQ}.anth
+- #2 @184100618 Zk.seven_day_sonnet}function Nde(){return v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask your admin for a higher limit"}function qb(e,t,r,o){let u=o?.progre
+- #3 @184100660 v_()?" \xB7 run /usage-credits to ask your admin for a higher limit":" \xB7 ask your admin for a higher limit"}function qb(e,t,r,o){let u=o?.progressSavedSuffix?" \xB7 progress saved":"";re
+
+## to request more usage from your admin  needle="to request more usage from your admin"  hits=2
+- #0 @93429887 can enable extra usage at claude.ai/admin-settings/usage.5.....2./usage-credits to request more usage from your admin....&...OUc./upgrade to increase your usage limit...<...;.../.u.p.g.r.a.d.e. .o.
+- #1 @201323384 rn"/usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from your admin."}if(P){if(D)return"/usage-credits to finish what you\u2019re working on.";retu
+
+## request more usage from your admin#0 @93429890
+a.t. .y.o.u.. r.e. .w.o.r.k.i.n.g. .o.n...0......./login to switch to an API usage-billed account.D....R..Your admin can enable extra usage at claude.ai/admin-settings/usage.5.....2./usage-credits to request more usage from your admin....&...OUc./upgrade to increase your usage limit...<...;.../.u.p.g.r.a.d.e. .o.r. ./.u.s.a.g.e.-.c.r.e.d.i.t.s. .t.o. .f.i.n.i.s.h. .w.h.a.t. .y.o.u.. r.e. .w.o.r.k.i.n.g. .o.n...........shouldShowUpsell........isMax20x........isExtraUsageCommandEnabled.."...~Q..shouldAutoOpenRateLimitOptionsMenu.........serverHi
+
+## request more usage from your admin#1 @201323387
+e-billed account."}if(y){if(!D)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(b)return"/usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from your admin."}if(P){if(D)return"/usage-credits to finish what you\u2019re working on.";return null}if(!D)return"/upgrade to increase your usage limit.";return"/upgrade or /usage-credits to finish what you\u2019re working on."}function hm(lB){let qe=g(67),{text:uB,onOpenRateLimitOptions:am,onRateLimitAutoQueueContinue:lm}=lB,k
+
+## fn request more usage from your admin#1 @201322727
+len=909 sha=48816c32c4d8698f
+function HM({shouldShowUpsell:l,isMax20x:d,isExtraUsageCommandEnabled:f,shouldAutoOpenRateLimitOptionsMenu:T,isTeamOrEnterprise:y,hasBillingAccess:b,serverHidesUpgrade:P,serverHidesOverage:C,spendLimitNudgePath:v}){if(!l)return null;if(T)return"Opening your options\u2026";if(v)return"/usage-credits to adjust your monthly spend limit.";let D=f&&!C;if(d){if(D)return"/usage-credits to finish what you\u2019re working on.";return"/login to switch to an API usage-billed account."}if(y){if(!D)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(b)return"/usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from your admin."}if(P){if(D)return"/usage-credits to finish what you\u2019re working on.";return null}if(!D)return"/upgrade to increase your usage limit.";return"/upgrade or /usage-credits to finish what you\u2019re working on."}
+
+## aws_marketplace#0 @98516004
+z.9.user:ccr_inference......o..user:file_upload....Z...resetChangeCheck....y...stripe_subscription.........stripe_subscription_contracted..)....U..stripe_subscription_enterprise_self_serve........F..aws_marketplace......k..c4e_consumption_trial........3..apple_subscription.......#..google_play_subscription....L...SubtleCrypto........EventSource.........staleTTL....a...backgroundSync........V.disableIdleStreams......XJ..idleStreamInterval......`...disableCache....	.E.fetchFeaturesCall...........fetchRemoteEvalCall.........eventSourceCall.......
+
+## aws_marketplace#1 @180726689
+on RO(){if(!nl())return;return akn()??void 0}function jv(){return oe().oauthAccount}var DN=new Set(["stripe_subscription","stripe_subscription_contracted","stripe_subscription_enterprise_self_serve","aws_marketplace","c4e_consumption_trial","apple_subscription","google_play_subscription"]);function Zur(){let e=In()?.billingType;if(!St()||!e)return!1;return DN.has(e)}function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}function U_r(){let e=An();return e==="max"||e==="enterprise"||e==="team"||e==="pro"||e==
+
+## fn aws_marketplace#1 @180726534
+len=39 sha=cd1b1f100d8eb91c
+function jv(){return oe().oauthAccount}
+
+## self_serve#0 @98515983
+.user:inference......z.9.user:ccr_inference......o..user:file_upload....Z...resetChangeCheck....y...stripe_subscription.........stripe_subscription_contracted..)....U..stripe_subscription_enterprise_self_serve........F..aws_marketplace......k..c4e_consumption_trial........3..apple_subscription.......#..google_play_subscription....L...SubtleCrypto........EventSource.........staleTTL....a...backgroundSync........V.disableIdleStreams......XJ..idleStreamInterval......`...disableCache....	.E.fetchFeaturesCall...........fetchRemoteEvalCall.........e
+
+## self_serve#1 @180726676
+void 0}function RO(){if(!nl())return;return akn()??void 0}function jv(){return oe().oauthAccount}var DN=new Set(["stripe_subscription","stripe_subscription_contracted","stripe_subscription_enterprise_self_serve","aws_marketplace","c4e_consumption_trial","apple_subscription","google_play_subscription"]);function Zur(){let e=In()?.billingType;if(!St()||!e)return!1;return DN.has(e)}function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}function U_r(){let e=An();return e==="max"||e==="enterprise"||e==="team"||e
+
+## fn self_serve#1 @180726534
+len=39 sha=cd1b1f100d8eb91c
+function jv(){return oe().oauthAccount}

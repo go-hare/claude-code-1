@@ -87,6 +87,8 @@ import type {
   PermissionDeniedHookInput,
   PreCompactHookInput,
   PostCompactHookInput,
+  PreModelSwitchHookInput,
+  PostModelSwitchHookInput,
   PreToolUseHookInput,
   SessionStartHookInput,
   SessionEndHookInput,
@@ -170,7 +172,28 @@ import { getMainThreadAgentHooks } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import { jsonStringify, jsonParse, slowLogging } from './slowOperations.js'
 import { isEnvTruthy } from './envUtils.js'
-import { errorMessage, getErrnoCode } from './errors.js'
+import {
+  ControlStreamClosedError,
+  errorMessage,
+  getErrnoCode,
+} from './errors.js'
+import {
+  cre,
+  Ewe,
+  Hye,
+  Kle,
+  LOe,
+  Lsn,
+  contextTokensAfterCompact,
+  getModelSwitchSession,
+  hJ,
+  modelSwitchToolUseId,
+  nVn,
+  Osn,
+  yBn,
+  yEt,
+  type ModelSwitchRequest,
+} from './hooks/modelSwitchHooks.js'
 import { resolveSessionEndHooksTimeoutMs } from './residualMsEnvGates.js'
 
 const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
@@ -2218,6 +2241,10 @@ export async function getMatchingHooks(
       case 'PreCompact':
       case 'PostCompact':
         matchQuery = hookInput.trigger as string
+        break
+      case 'PreModelSwitch':
+      case 'PostModelSwitch':
+        matchQuery = LOe(hookInput.to_model) ? hookInput.to_model : undefined
         break
       case 'Notification':
         matchQuery = hookInput.notification_type as string
@@ -4651,6 +4678,202 @@ export async function* executeSessionStartHooks(
   } finally {
     stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
   }
+}
+
+export type PreModelSwitchDecision =
+  | { decision: 'block'; reason: string; messages: string[] }
+  | { decision: 'ask'; reason: string | undefined; messages: string[] }
+  | { decision: 'proceed'; skipConfirm: boolean; messages: string[] }
+
+/** densable dD */
+function hasPreModelSwitchHooks(session: { id: string }): boolean {
+  if (nVn()) return true
+  return hasHookForEvent('PreModelSwitch', undefined, session.id)
+}
+
+/**
+ * densable hdt — PreModelSwitch. yield* executeHooks (local z_).
+ * Block / ask / proceed+skipConfirm per gold-a.
+ */
+export async function executePreModelSwitchHooks(
+  switchTo: ModelSwitchRequest,
+  messages: Message[] = [],
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<PreModelSwitchDecision> {
+  const session = getModelSwitchSession()
+  const collected: string[] = []
+  await Osn()
+  if (await Lsn(true)) {
+    return {
+      decision: 'block',
+      reason:
+        'plugin hooks could not be loaded, so PreModelSwitch hooks could not be checked; see the debug log',
+      messages: collected,
+    }
+  }
+  if (!hasPreModelSwitchHooks(session)) {
+    return { decision: 'proceed', skipConfirm: false, messages: collected }
+  }
+  if (cre(switchTo.toModel)) await hJ(switchTo.toModel)
+  const contextTokens = contextTokensAfterCompact(messages)
+  const hookInput: PreModelSwitchHookInput = {
+    ...createBaseHookInput(undefined, session.id),
+    hook_event_name: 'PreModelSwitch',
+    from_model: switchTo.fromModel,
+    to_model: switchTo.toModel,
+    requested_model: switchTo.requestedModel,
+    source: switchTo.source,
+    ...Ewe(switchTo.toModel, contextTokens),
+  }
+  const matchQuery = LOe(switchTo.toModel) ? switchTo.toModel : undefined
+  let blockReason: string | undefined
+  let askReason: string | undefined
+  let asked = false
+  let skipConfirm = false
+  void Kle.of(session)
+  try {
+    for await (const result of executeHooks({
+      hookInput,
+      toolUseID: modelSwitchToolUseId(),
+      matchQuery,
+      signal: opts.signal,
+      timeoutMs: opts.timeoutMs ?? Hye,
+    })) {
+      yBn(result.message, collected)
+      const attachment =
+        result.message?.type === 'attachment'
+          ? result.message.attachment
+          : undefined
+      if (
+        attachment?.type === 'hook_cancelled' &&
+        !opts.signal?.aborted &&
+        attachment.hookName
+      ) {
+        blockReason ??= `PreModelSwitch hook ${attachment.hookName} did not respond before its timeout`
+      }
+      if (result.blockingError) {
+        blockReason ??= result.blockingError.blockingError
+      } else if (result.permissionBehavior === 'ask') {
+        asked = true
+        askReason ??= result.hookPermissionDecisionReason
+      } else if (result.permissionBehavior === 'allow') {
+        skipConfirm = true
+      }
+    }
+  } catch (err) {
+    const closed = err instanceof ControlStreamClosedError
+    logError(
+      new Error(
+        `PreModelSwitch hooks did not complete: ${closed ? 'control stream closed' : String(err)}`,
+      ),
+    )
+    blockReason ??= closed
+      ? 'PreModelSwitch hooks were cancelled (the control stream closed) before answering'
+      : 'a PreModelSwitch hook failed before answering'
+  }
+  if (blockReason !== undefined) {
+    return { decision: 'block', reason: blockReason, messages: collected }
+  }
+  if (asked) {
+    return { decision: 'ask', reason: askReason, messages: collected }
+  }
+  return { decision: 'proceed', skipConfirm, messages: collected }
+}
+
+/**
+ * densable ydt — PostModelSwitch. Fire-and-forget; stores pending on yEt.
+ */
+export function executePostModelSwitchHooks(
+  switchTo: ModelSwitchRequest,
+  messages: Message[] = [],
+  opts: { timeoutMs?: number } = {},
+): Promise<void> {
+  const session = getModelSwitchSession()
+  const store = yEt.of(session)
+  const sessionId = session.id
+  store.landedOn = { sessionId, toModel: switchTo.toModel }
+  const run = (async () => {
+    await Osn()
+    if (await Lsn(false)) {
+      logError(
+        new Error(
+          'PostModelSwitch: plugin hooks could not be loaded; plugin-delivered hooks are missing from this run',
+        ),
+      )
+    }
+    if (cre(switchTo.toModel)) await hJ(switchTo.toModel)
+    const contextTokens = contextTokensAfterCompact(messages)
+    const hookInput: PostModelSwitchHookInput = {
+      ...createBaseHookInput(undefined, sessionId),
+      hook_event_name: 'PostModelSwitch',
+      from_model: switchTo.fromModel,
+      to_model: switchTo.toModel,
+      requested_model: switchTo.requestedModel,
+      source: switchTo.source,
+      ...Ewe(switchTo.toModel, contextTokens),
+    }
+    const matchQuery = LOe(switchTo.toModel) ? switchTo.toModel : undefined
+    const contexts: string[] = []
+    const hookMessages: HookResultMessage[] = []
+    try {
+      for await (const result of executeHooks({
+        hookInput,
+        toolUseID: modelSwitchToolUseId(),
+        matchQuery,
+        timeoutMs: opts.timeoutMs ?? Hye,
+      })) {
+        if (result.additionalContexts) {
+          contexts.push(...result.additionalContexts)
+        }
+        if (result.message?.type === 'attachment') {
+          const att = result.message.attachment
+          if (att?.type === 'hook_success' && 'content' in att && att.content) {
+            if (typeof att.content === 'string') contexts.push(att.content)
+          }
+          if (att?.type !== 'hook_blocking_error') {
+            hookMessages.push(result.message)
+          }
+        }
+        if (result.blockingError) {
+          hookMessages.push(
+            createAttachmentMessage({
+              type: 'hook_blocking_error',
+              hookName: 'PostModelSwitch',
+              toolUseID: `PostModelSwitch:${switchTo.toModel}`,
+              hookEvent: 'PostModelSwitch',
+              blockingError: result.blockingError,
+            }),
+          )
+        }
+      }
+    } catch (err) {
+      const closed = err instanceof ControlStreamClosedError
+      if (closed) {
+        logForDebugging(
+          'PostModelSwitch hooks cancelled (control stream closed)',
+          { level: 'debug' },
+        )
+      } else {
+        logError(new Error(`PostModelSwitch hooks failed: ${String(err)}`))
+      }
+    }
+    if (contexts.length > 0 || hookMessages.length > 0) {
+      store.pending.push({
+        sessionId,
+        toModel: switchTo.toModel,
+        contexts,
+        messages: hookMessages,
+      })
+    }
+  })()
+    .catch(err => {
+      logError(new Error(`PostModelSwitch hooks failed: ${String(err)}`))
+    })
+    .finally(() => {
+      store.inFlight.delete(run)
+    })
+  store.inFlight.add(run)
+  return run
 }
 
 /**

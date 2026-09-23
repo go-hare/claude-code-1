@@ -1,0 +1,58 @@
+# gold-248-feat-2-pass2  pass2 cacheTtl mUt Ivt
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:13.820Z
+
+## function mUt  needle="function mUt("  hits=1
+- #0 @181389497 typeof e==="number"?e:Da(String(e));if(Number.isInteger(t)&&t>0)return t;return}function mUt(e){let t=e.experimental;if(typeof t!=="object"||t===null)return;let r=Object.ent
+
+## mUt(M)  needle="mUt(M)"  hits=1
+- #0 @184660974 nt file ${e} has invalid maxTurns '${xt}'. Must be a positive integer.`);let Jt=mUt(M),rn=M.disallowedTools!==void 0?RE(M.disallowedTools):void 0;if(zs()&&Be&&ue!==vo
+
+## mUt(r)  needle="mUt(r)"  hits=1
+- #0 @184699941 nt file ${e} has invalid maxTurns '${Te}'. Must be a positive integer.`);let Fe=mUt(r),Be=Bin(e,".md"),Ne=RE(r.tools);if(zs()&&j&&Ne!==void 0){let gn=new Set(Ne);for(
+
+## function Ivt  needle="function Ivt("  hits=2
+- #0 @178580468 .recordSection(e,t)}function A7e(){n().promptAssembly.forgetAllSections(),Ivt()}function Ivt(){n().promptAssembly.noteInvalidation()}function r3t(){return n().promptAssembly
+- #1 @186445321 :e,ttl:t}={}){return{type:"ephemeral",...t&&{ttl:t},...e==="global"&&{scope:e}}}function Ivt(e,{agentCacheTtlOverride:t,ignoreOverage:r=!1}={}){let o=St(),u=o&&!r&&id().isUs
+
+## agentCacheTtlOverride  needle="agentCacheTtlOverride"  hits=15
+- #0 @96968037 id.....>...DISABLE_PROMPT_CACHING_MYTHOS...P....O..Cannot destructure property 'agentCacheTtlOverride' from null or undefined value........tengu_prompt_cache_1h_config
+....R..subscr
+- #1 @96968152  undefined value........tengu_prompt_cache_1h_config
+....R..subscriber......>...agentCacheTtlOverride..........ignoreOverage...!...!...tengu_thinking_disabled_sanitized.......vM..[
+- #2 @185198842 ext:Sr,systemContext:or,toolUseContext:la,forkContextMessages:Sn,stickyBetas:yu,agentCacheTtlOverride:e.cacheTtl},()=>lr)}let Ui=Sn,qa=null;if(it!==void 0){let lr=Sn.findLastIndex((
+- #3 @185200751 r,fallbackModel:la.options.fallbackModel,stickyBetas:yu,evictCacheOnComplete:xc,agentCacheTtlOverride:e.cacheTtl})){if(rn?.(),DA(lr)){ASe(lr,Hl,Ka),yield*ns,ns.length=0;continue}if(
+- #4 @185921143 erySource:E,spawnedBySkill:C,maxTurns:M,skipCacheWrite:L,evictCacheOnComplete:N,agentCacheTtlOverride:U,forkPointUuid:j}=e,G=e.deps??E_t(),ue=E.startsWith("repl_main_thread")||E==="
+- #5 @185926590 ntext:u,systemContext:p,toolUseContext:Ve,forkContextMessages:En,stickyBetas:Ht,agentCacheTtlOverride:U},E,xr,po,STe);if(rc("query_autocompact_end"),ai.kind==="rapid_refill_breaker_
+- #6 @185928866 ntext:u,systemContext:p,toolUseContext:Ve,forkContextMessages:En,stickyBetas:Ht,agentCacheTtlOverride:U},...E==="sdk"&&{promptScan:wTe(En)}});if(Cc(E)==="main"&&!Ve.agentId&&!Fn&&zY
+- #7 @185939991 g:yr,effortValue:kc(Ve),advisorModel:Cn,skipCacheWrite:L,evictCacheOnComplete:N,agentCacheTtlOverride:U,forkPointUuid:j,stickyBetas:Ht,proactivityLevel:zH(Ve),agentId:Ve.agentId,age
+- #8 @185956039 ntext:u,systemContext:p,toolUseContext:Ve,forkContextMessages:En,stickyBetas:Ht,agentCacheTtlOverride:U},armTrigger:"api_response",estimateGapTokens:NT-_b,...E==="sdk"&&{promptScan:
+- #9 @185962914 ntext:u,systemContext:p,toolUseContext:df,forkContextMessages:En,stickyBetas:Ht,agentCacheTtlOverride:U},precomputed:tc,precomputeOutcome:cl,userWaitStartedAt:El,initialTokenGap:hi}
+- … +5 more
+
+## subagentPromptCacheTtl  needle="subagentPromptCacheTtl"  hits=6
+- #0 @96966948 DE_CODE_PROMPT_CACHE_TTL%.....b.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL.......Z.6.subagentPromptCacheTtl......n@..ENABLE_PROMPT_CACHING_1H ....#..ENABLE_PROMPT_CACHING_1H_BEDROCK....X
+- #1 @97179587 true.....`...Prompt cache TTL for this agent's requests ("5m" or "1h") when no `subagentPromptCacheTtl` setting or env var is set. "1h" is ignored while a Claude subscription is in o
+- #2 @179119274 eaks. The CLAUDE_CODE_PROMPT_CACHE_TTL environment variable takes precedence.'),subagentPromptCacheTtl:le(["5m","1h"]).optional().catch(void 0).describe("Prompt cache TTL for everyth
+- #3 @184576937 ).describe('Prompt cache TTL for this agent\'s requests ("5m" or "1h") when no `subagentPromptCacheTtl` setting or env var is set. "1h" is ignored while a Claude subscription is in o
+- #4 @186438648 _TTL;if(u!==void 0)return{ttl:u,reason:"env"};let p=qe(),g=o?p.promptCacheTtl:p.subagentPromptCacheTtl;if(g!==void 0)return{ttl:g,reason:"setting"};if(t!==void 0&&!(t==="1h"&&r))retu
+- #5 @189796101 s), appended to or replacing the built-in lineup\n- Added `promptCacheTtl` and `subagentPromptCacheTtl` settings so API-key and cloud-provider users can keep a 1-hour prompt cache on
+
+## Pu().optional().describe('Prompt cache TTL  needle="Pu().optional().describe('Prompt cache TTL"  hits=1
+- #0 @184576843 pawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or "1h") when no `subagentPromptCacheTtl` sett
+
+## function mUt(#0 @181389497
+len=172 sha=a46adf6ed60e8e24
+function mUt(e){let t=e.experimental;if(typeof t!=="object"||t===null)return;let r=Object.entries(t).find(([i])=>h(i)==="cachettl")?.[1];return r==="5m"||r==="1h"?r:void 0}
+
+## function Ivt(#0 @178580468
+len=53 sha=c6ed76189c0c3515
+function Ivt(){n().promptAssembly.noteInvalidation()}
+
+## function Ivt(#1 @186445321
+len=365 sha=aa889df2f042f9e9
+function Ivt(e,{agentCacheTtlOverride:t,ignoreOverage:r=!1}={}){let o=St(),u=o&&!r&&id().isUsingOverage===!0,p=jTt(e,t,u);if(p!==void 0)return p;if(!o||u)return{ttl:"5m",reason:"default"};let g=nTn();if(g===null)g=R("tengu_prompt_cache_1h_config",{allowlist:[...DEe]}).allowlist??[],rTn(g);return LEe(e,g)?{ttl:"1h",reason:"subscriber"}:{ttl:"5m",reason:"default"}}
+
+## agent-schema-experimental @184576818
+arness-owned default) to each activity digest sent to the observer."),observeSubagents:wE().optional().describe("If false, subagents this agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or "1h") when no `subagentPromptCacheTtl` setting or env var is set. "1h" is ignored while a Claude subscription is in overage.')}).loose().nullable().optional().describe("Experimental per-agent options; unknown keys are ignored.")})),iZt=h(()=>m({name:Pu().optional().describe("Style name used in the Output style picker in `/config` and in settings. Defaults to the filename."),description:Pu().optional().describe("Shown in the Output style picker in `/config`."),"keep-coding-instructions":wE().optional().describe("If true, the default coding instructions stay in the system prompt alongside th

@@ -1,0 +1,49 @@
+# gold-248-SKn-chunk-fns
+chunkMark=179521995
+
+## roster
+k@179522501
+Npn@179522585
+b@179522769
+L@179522914
+j@179523090
+$pn@179527115
+Gqe@179527369
+z@179527519
+kur@179527816
+R@179527886
+vKn@179528210
+T@179529407
+v@179529582
+O@179531012
+B@179531220
+
+## k @179522501 len=84 sha=002b4d030ca4f878
+function k(){let t=To("userSettings");return t!==void 0&&H(t)===jW.default?t:void 0}
+
+## Npn @179522585 len=184 sha=11941bde30b0d658
+async function Npn(t,e){if(!D())return;let s=e.epoch;await Promise.all([j(t,e),L(t,e),b("managed-settings file tier",()=>O(t,e,s))]),await b("project/local layers",()=>T(t,e,e.epoch))}
+
+## b @179522769 len=145 sha=1bb34773be83f0be
+async function b(t,e){try{await e()}catch(s){n(`settingsPrime: start-up seed of the ${t} failed: ${l(s)}; the file reads serve`,{level:"warn"})}}
+
+## L @179522914 len=176 sha=6526d55a73f95c2c
+async function L(t,e){try{await Tur(t,e)}catch(s){n(`settingsPrime: ownership read-ahead for the local settings root failed: ${l(s)}; the probe runs as today`,{level:"warn"})}}
+
+## j @179523090 len=658 sha=e7f4f15712c433b1
+async function j(t,e){try{let s=k();if(s===void 0)return;if(e.parsedFiles.has(s)){n("settingsPrime: user settings already read before start-up; seed skipped");return}let i=e.epoch,r=await Vjt(t,s);if(r.kind==="absent"){if(Qve(s),e.seedParsedFile(s,"userSettings",Fte(),i))n("settingsPrime: user settings absent; seeded as none");return}if(r.kind!=="seeded"){n(`settingsPrime: start-up seed skipped (${Nyt(r)}); the file read serves`);return}if(e.seedParsedFile(s,"userSettings",r.parsed,i))n(`settingsPrime: user settings seeded at start-up (${r.size} bytes)`)}catch(s){n(`settingsPrime: start-up seed failed: ${l(s)}; the file read serves`,{level:"warn"})}}
+
+## v @179529582 len=1430 sha=c30b0ae5a654d16b
+function v(t,e,s){if(t.hostFiles.serving("system")!=="absent"||e.systemAttestationContradicted)return;if(nyn()!==void 0){if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself");return}let i=$Me(nx()).map((r)=>({dropInDir:f(r,"managed-settings.d"),basePath:f(r,"managed-settings.json")}));if(i.some(({basePath:r,dropInDir:a})=>e.walkReadManagedFileIn(r,a))){e.systemAttestationContradicted=!0;for(let{basePath:r,dropInDir:a}of i)e.clearFolderListing(a,s),e.unseedParsedFile(r,"policySettings",s);_(Error("settings: a managed-settings file was read from a folder the host attested absent ('system' space); the attestation is ignored for the rest of this process and the policy walk reads the host's files itself"));return}if(!e.systemSpaceServingLogged)e.systemSpaceServingLogged=!0,n("settingsPrime: the host attests this machine has no OS policy folder ('system' absent); the policy walk is served an empty managed-settings file tier without reading the host");for(let{basePath:r,dropInDir:a}of i)if(e.seedFolderListing(a,F,s),!e.walkRead(r))e.seedParsedFile(r,"policySettings",Fte(),s);return{listings:i.map(({dropInDir:r})=>({dir:r,names:F})),layers:i.map(({basePath:r})=>({path:r,parsed:Fte()}))}}
+
+## T @179529407 len=151 sha=bc1c732ec44de27e
+async function T(t,e,s){let i=R(t);if(i.length===0)return!0;let r=await Promise.all(i.map((a)=>a.read()));if(e.epoch!==s)return!1;return x(e,i,r,s),!0}
+
+## O @179531012 len=208 sha=f23bba39b0b41ed5
+async function O(t,e,s){if(v(t,e,s)!==void 0)return e.epoch===s;let i=await vKn(t,e);if(i===void 0)return M(e,s),!0;let r=await i.reads;if(e.epoch!==s)return!1;let{verdicts:a}=A(e,i,s);return B(e,i,r,a,s),!0}
+
+## U MISSING
+## Tur MISSING
+## wKn MISSING
+## preamble
+import{l}from"B:/~BUN/root/chunk-mw2w72bj.js";import{Pc,n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{_}from"B:/~BUN/root/chunk-t9vggba1.js";import{ra,Yl,_Ke}from"B:/~BUN/root/chunk-h5378ehg.js";import{nyn,$Me,Qve,Fte,jW}from"B:/~BUN/root/chunk-6t8yhsxa.js";import{nx}from"B:/~BUN/root/chunk-qwjk0yd0.js";import{Vjt,Dgn,Mgn,_Xn,Nyt,Ogn,Lgn,Ngn,To,kC,Kv,k_}from"B:/~BUN/root/chunk-5tjjc1xb.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as H,dirname as I,join as f}from"path";var P=3,E=8;function k(){let t=To("userSettings");return t!==void 0&&H(t)===jW.default?t:void 0}async function Npn(t,e){if(!D())return;let s=e.epoch;await Promise.all([j(t,e),L(t,e),b("managed-settings file tier",()=>O(t,e,s))]),await b("project/local layers",()=>T(t,e,e.epoch))}async function b(t,e){try{await e()}catch(s){n(`settingsPrime: start-up seed of the ${t} failed: ${l(s)}; the file reads serve`,{level:"warn"})}}async function L(t,e){try{await Tur(t,e)}catch(s){n(`settingsPrime: ownership read-ahead for the local settings root failed: ${l(s)}; the probe runs as today`,{level:"warn"})}}async function j(t,e){try{let s=k();if(s===void 0)return;if(e.parsedFiles.has(s)){n("settingsPrime: user 

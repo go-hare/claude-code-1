@@ -7,6 +7,7 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getProjectRoot } from '../../bootstrap/state.js'
 import { makeService, __resetWorkflowServiceForTests } from '../service.js'
 import { createProgressBus } from '../progress/bus.js'
 import {
@@ -237,7 +238,7 @@ test('launch inline script with title → workflowName comes from title (not the
 
 test('launch scriptPath with title → workflowName still honors title', async () => {
   __resetWorkflowServiceForTests()
-  const dir = await mkdtemp(join(tmpdir(), 'wf-svc-'))
+  const dir = await mkdtemp(join(getProjectRoot(), 'wf-svc-'))
   try {
     const file = join(dir, 'wf.js')
     await writeFile(file, `return agent('x')`)
@@ -346,7 +347,7 @@ test('scriptPath reads file content and validates', async () => {
   __resetWorkflowServiceForTests()
   const { ports, store } = fakePorts()
   const svc = makeService(ports, store)
-  const dir = await mkdtemp(join(tmpdir(), 'wf-path-'))
+  const dir = await mkdtemp(join(getProjectRoot(), 'wf-path-'))
   const file = join(dir, 's.ts')
   try {
     await writeFile(file, `return agent('from-file')`)

@@ -1,0 +1,294 @@
+when=2026-09-22T02:14:38.037Z
+
+## summary (audit)
+- Et = L().cleanup.register; mEe = cleanup.drain; DYe = cleanup.drainStarted; tde=2000
+- W.drain = allSettled then throw first rejection; register returns Object.assign(r,{[Symbol.dispose]:r})
+- mEe callers: gracefulShutdown race w/ tde; _G qt(mEe(),tde,"cleanup timeout"); job-dir exit push
+- DYe callers (3 live): Ma / kD config freshness storage-watch; planFile onPlanFileEvent resubscribe gate
+- Et callers sample: Qbt Et(()=>this.flush()); git watch; session activity; config cache; MCP; asciicast; OTEL; etc. (~50 real)
+- Leftover: Ma/kD DYe on watchFile host (`ensureGlobalConfigFreshnessMa` / `handleGlobalConfigFreshnessWatchEnded`); planFile watch still no host (invent-ban)
+- Vk/svt owned by other agent — audit only here
+
+## Et def hits=1 @178613311
+## W+fe gold snippet
+class W{#e=new Set;#t=!1;get drainStarted(){return this.#t}register(e){let t=it(e);this.#e.add(t);let r=()=>{this.#e.delete(t)};return Object.assign(r,{[Symbol.dispose]:r})}async drain(){this.#t=!0;let e=Array.from(this.#e);this.#e.clear();let r=(await Promise.allSettled(e.map(async(i)=>i()))).find((i)=>i.status==="rejected");if(r!==void 0)throw r.reason}async[Symbol.asyncDispose](){await this.drain()}get sizeForTesting(){return this.#e.size}}class fe{cleanup=new W;preExitFlush=new W}var ot=new K(()=>new fe);function L(){return ot.of(z().host)}var tde=2000;function Et(e){return L().cleanup.register(e)}async function mEe(){await L().cleanup
+
+## mEe() needle="mEe()" hits=5
+- @178613372 host)}var tde=2000;function Et(e){return L().cleanup.register(e)}async function mEe(){await L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L()
+- @187445319 000,p+5000),e),Nj(),this.printResumeHint();let g;try{let E=(async()=>{try{await mEe()}catch{}})();await Promise.race([E,new Promise((C,M)=>{g=setTimeout((L)=>L(new H0t),tde,M)})]),clearTimeout(g)}catch{clearTimeout(g)}if(COe())this.armShutd
+- @189575828 ),await Promise.all([qt(ja(),30000,"flush timeout (relaunch)").catch(()=>{}),qt(mEe(),tde,"cleanup timeout").catch(()=>{}).then(()=>qt($ie(),1000,"analytics flush timeout").catch(()=>{}))]),e.preSpawn?.();let s={...process.env};delete s.CLA
+- @196859177 (()=>{});let s=a.CLAUDE_JOB_DIR;if(s&&i>0)r.push(U(s,i,e).catch(()=>{}))}r.push(mEe()),Promise.race([Promise.all(r),ne(5000)]).finally(()=>{process.exit(0)})}function C(){if(ll()!==null)mZt(Date.now());if(!_o.get(process.stdout)?.forceRedra
+- @217214147 ==null?0:e.length;for(n&&a&&(r=e[++i]);++i<a;)r=t(r,e[i],i,e);return r}function mEe(){this.__data__=new GR,this.size=0}function gEe(e){var t=this.__data__,r=t.delete(e);return this.size=t.size,r}function yEe(e){return this.__data__.get(e)}f
+
+## qt(mEe() needle="qt(mEe()" hits=1
+- @189575825 Pt(),await Promise.all([qt(ja(),30000,"flush timeout (relaunch)").catch(()=>{}),qt(mEe(),tde,"cleanup timeout").catch(()=>{}).then(()=>qt($ie(),1000,"analytics flush timeout").catch(()=>{}))]),e.preSpawn?.();let s={...process.env};delete s.
+
+## DYe() needle="DYe()" hits=4
+- @178613413 L().cleanup.register(e)}async function mEe(){await L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L().preExitFlush.drain()}class he{parsed=new
+- @180616880 the storage interface failed${r}: ${t}`,{level:"warn"});return}function Ma(){if(DYe())return;if(Nr()){if(G9(),I.freshnessBackend!==void 0)wa();return}I.setFreshnessBackend(void 0),CD(),wa()}function kD(e){let t=I.freshnessBackend;if(!D()||t
+- @180617070 function kD(e){let t=I.freshnessBackend;if(!D()||t===void 0)return;if(!e.ok){if(DYe())return;if(n(`Watching ~/.claude.json through the storage interface ended: ${Ge(e.error)}`,{level:"warn"}),I.setFreshnessSubscription(void 0),I.claimFreshn
+- @181420279 ueMicrotask(()=>void this.refreshPlanFile(t,e));return}if(e.subscription=void 0,DYe())return;n(`plans: the watch on ${t} ended: ${Ge(r.error)}`);let o=this.planFileBackend;if(o!==null&&!e.resubscribed)e.resubscribed=!0,this.subscribePlanFil
+
+## !DYe() needle="!DYe()" hits=0
+
+## tde needle="tde" hits=1919
+- @5383362 &fA.z.du.fA.z.ou.fA.z.uu.A. ...fA.z ttHD.I.I..A.........M........H.........I!..stdeA3.A..H...rr.. .......A.8...C.<&...F....E. .&.H.E.....H.E.....H.E......W...E.K.D&...HX..A..6...K.L&.H.U..n. ......@...........+.......H...}}..H....".........
+- @18681715 $...1.1..+...H=..........H........H......H.B.H........H..H.J..B.H......f.@.rr..stde.....H.M0H.E8H.M@.....H. uy..Hc..H....H=..........H........H......H.B.H........H..H.J..B.H.......@.n..stdi.....H.M0H.E8H.M@.....H. .y..Hc..H......v......H...
+- @18683193  .t..Hc..H....H..t.H....?.H...H....5...1...........E1.E1..)0..H........f.@.rr..stdeH.}0H.E8H.}@.....H. .s..Hc..H....H..t.H....?.H...H....;...1...........E1.E1.../..H....Q....@.n..stdiH.}0H.E8H.}@.....H. Ps..Hc..H......v...H.. H....?....P...
+- @66697898 GroupIndent"), kGroupIndentationWidth = Symbol("kGroupIndentWidth"), kFormatForStderr = Symbol("kFormatForStderr"), kFormatForStdout = Symbol("kFormatForStdout"), kGetInspectOptions = Symbol("kGetInspectOptions"), kColorMode = Symbol("kColo
+- @66697925 ationWidth = Symbol("kGroupIndentWidth"), kFormatForStderr = Symbol("kFormatForStderr"), kFormatForStdout = Symbol("kFormatForStdout"), kGetInspectOptions = Symbol("kGetInspectOptions"), kColorMode = Symbol("kColorMode"), kIsConsole = Symbo
+- @66698328 reamsLazy = Symbol("kBindStreamsLazy"), kUseStdout = Symbol("kUseStdout"), kUseStderr = Symbol("kUseStderr"), optionsMap = /* @__PURE__ */ new WeakMap; function Console(options) { if (new.target === @undefined) return new Consol
+- @66698349 BindStreamsLazy"), kUseStdout = Symbol("kUseStdout"), kUseStderr = Symbol("kUseStderr"), optionsMap = /* @__PURE__ */ new WeakMap; function Console(options) { if (new.target === @undefined) return new Console(...arguments); 
+- @66698614 tions.write === "function") options = { stdout: options, stderr: arguments[1], ignoreErrors: arguments[2] }; let { stdout, stderr = stdout, ignoreErrors = !0, colorMode = "auto
+- @66698710 [1], ignoreErrors: arguments[2] }; let { stdout, stderr = stdout, ignoreErrors = !0, colorMode = "auto", inspectOptions, groupIndentation } = options; if (!stdout || typeof stdou
+- @66698975  throw @makeErrorWithCode(16, "stdout is not a writable stream"); if (!stderr || typeof stderr.write !== "function") throw @makeErrorWithCode(16, "stderr is not a writable stream"); if (validateOneOf(colorMode, "colorMode"
+- @66698992 rrorWithCode(16, "stdout is not a writable stream"); if (!stderr || typeof stderr.write !== "function") throw @makeErrorWithCode(16, "stderr is not a writable stream"); if (validateOneOf(colorMode, "colorMode", ["auto", !0, !1
+- @66699057 err || typeof stderr.write !== "function") throw @makeErrorWithCode(16, "stderr is not a writable stream"); if (validateOneOf(colorMode, "colorMode", ["auto", !0, !1]), groupIndentation !== @undefined) validateInteger(groupI
+
+## cleanup.drainStarted needle="cleanup.drainStarted" hits=1
+- @178613430 ter(e)}async function mEe(){await L().cleanup.drain()}function DYe(){return L().cleanup.drainStarted}function Vk(e){return L().preExitFlush.register(e)}async function svt(){await L().preExitFlush.drain()}class he{parsed=new Map;lookup(e){re
+
+## Et( candidate call sites filtered=58
+
+## unique parent fns=53
+### parent=? count=2 first@178320147
+- @178320147 needle=Et(this.
+  01"].toString()},r?.headers])})}}ot.Credentials=rr;class Vh extends y{constructor(){super(...arguments);this.models=new Et(this._client),this.messages=new xe(this._client),this.agents=new We(this._client),this.environments=new Ye(this._client),this.sessions=new ke(this._client),t
+- @191391956 needle=Et(async()
+  oot/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION,is_native_binary:Sl()}),Et(async()=>{Y("info","exited")}),Qy({host:io.host,storageV5:G,credentials:re,onAntSandboxDetection:Vu.updateContext,hasInitialPrompt:Boolean(d),hasStdin:Boolea
+
+### parent=p count=1 first@179232983
+- @179232983 needle=Et(()=>
+  f(this.pendingWrite=this.pendingWrite.then(p.bind(null,n,t)).catch(s),!this.cleanupRegistered)this.cleanupRegistered=!0,Et(()=>this.flush())}flush(){return this.pendingWrite}}var f=new K(()=>new g);function c(){return f.of(z().host)}function Y(n,t,i){let r=m();if(!r)return;let o;
+
+### parent=VJn count=1 first@179385640
+- @179385640 needle=Et(async()
+   t=await US();if(e!==this.generation)return;if(this.gitDir=t,this.initialized=!0,!this.cleanupHandle)this.cleanupHandle=Et(async()=>{this.stopWatching()});if(!this.gitDir)return;let r=await XP(this.gitDir);if(e!==this.generation)return;this.commonDir=r,this.watchPath(S(this.gitDi
+
+### parent=Yhn count=1 first@179750550
+- @179750550 needle=Et(()=>
+  this.buildSummary(t()))}catch{}}installExitSummary(t){if(this.installed)return;this.installed=!0,this.unregisterCleanup=Et(()=>this.emitSummaryOnce(t))}reset(){this.installed=!1,this.emitted=!1,this.unregisterCleanup?.(),this.unregisterCleanup=void 0,this.attributors.clear(),this
+
+### parent=wZ count=1 first@180540041
+- @180540041 needle=Et(async()
+  LAUDE_CODE_SESSION_NAME)||void 0:void 0,g=xW(),E=ht(g,`${process.pid}.json`);process.on("exit",()=>{try{EZ(E)}catch{}}),Et(async()=>{if(t){try{await t.delete(da())}catch{}return}try{await Fo(E)}catch{}});try{let C=await NZ();await AZ(g,{recursive:!0,mode:448}),await SZ(g,448);let
+
+### parent=V9 count=1 first@180612994
+- @180612994 needle=Et(async()
+  ts:e,misses:t}=I.takeCacheStats(),r=e+t;if(r>0)s("tengu_config_cache_stats",{cache_hits:e,cache_misses:t,hit_rate:e/r})}Et(async()=>{V9()});function Wo(e){if(delete e.showSpinnerTree,e.installMethod!==void 0)return e;let t=e,r="unknown",o=e.autoUpdates??!0;switch(t.autoUpdaterSta
+
+### parent=CD count=1 first@180614654
+- @180614654 needle=Et(async()
+  tent:!1},(t)=>{if(t.mtimeMs<=I.cache.mtime)return;if(I.pendingWriteCount(e)>0){I.deferExternalRefresh(t);return}yD(t)}),Et(async()=>{dp(e),I.setFreshnessWatcherStarted(!1),I.setFreshnessBackend(void 0)})}function Nr(){return D()&&!I.fileWatchFallback}function G9(){n("Not watching
+
+### parent=De count=1 first@181816596
+- @181816596 needle=Et(()=>
+  ddEntry(e,t,r?.submitMode,r?.armUndo).catch(_)}registerExitFlush(e){if(this.exitFlushHandle)return;this.exitFlushHandle=Et(()=>this.flushOnExit(e))}registerSensitiveCommands(e){this.getSensitiveCommands=e}getGeneration(){return this.storedEntryGeneration}clearPending(){this.pendi
+
+### parent=xe count=1 first@181871946
+- @181871946 needle=Et(async()
+  (e,[],{shell:!0,cwd:r,env:t,stdio:["ignore","pipe","pipe"],detached:B()!=="windows",windowsHide:!0,...zi("plugin")}),de=Et(async()=>{if(!C&&S.pid!==void 0)await Im(S.pid,"SIGKILL")});function x(A){if(C)return;if(C=!0,de(),clearTimeout(me),v)clearTimeout(v);S.stdout?.removeAllList
+
+### parent=at count=1 first@181899734
+- @181899734 needle=Et(()=>
+  ugins-scope] unexpected ensure error: ${p}`),{ok:!1,reason:"expand_failed",detail:p}}).then((g)=>(t.settle(o),d(),g)),d=Et(()=>un(o,st));return t.begin(o),o}var lt=1e4;async function dFt(e,r,t,u=lt){if(r?.aborted)return;let o=at(e,t);if(!r){await un(o,u);return}let d,g=new Promis
+
+### parent=t count=1 first@183172098
+- @183172098 needle=Et(()=>
+  l(e),r=this.#e.get(t);return this.#e.delete(t),r}hold(e,t){this.retire(e.sessionId),this.#t.set(e.sessionId,{unregister:Et(()=>e.sync.shutdown(t)),sync:e.sync})}retire(e){let t=Jl(e),r=this.#t.get(t);if(r===void 0)return;this.#t.delete(t),r.unregister(),r.sync.shutdown(0)}stateOf
+
+### parent=k count=1 first@183517334
+- @183517334 needle=Et(async()
+  ch(r){if(T(r)==="EEXIST")return!1;throw r}}function k(e){let t=Tp();t.unregisterLockCleanup?.(),t.unregisterLockCleanup=Et(async()=>{await R(e)})}async function tGn(e){let t=await u(e);if(!t)return{kind:"free"};if(c())return{kind:"held_by_self"};if(t.sessionId===V())return{kind:"
+
+### parent=X$n count=1 first@183765586
+- @183765586 needle=Et(()=>
+  sync function CNe(e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e
+
+### parent=LNe count=1 first@183778928
+- @183778928 needle=Et(()=>
+  s.add(t),r)e.ownInUseMarkerHandles.set(t,r);else e.ownInUseMarkerHandles.delete(t);if(e.inUseMarkerCleanup)return;let o=Et(()=>WWt(e)),u=()=>zWt(e);process.on("exit",u),e.inUseMarkerCleanup=()=>{o(),process.off("exit",u)}}function FNe(e,t){e.ownInUseMarkerPaths.delete(t),e.ownInU
+
+### parent=lFn count=1 first@183812842
+- @183812842 needle=Et(async()
+  get(e);if(t)return t;let r={path:null,promise:null,cleanupHandle:null};return this.statesByKey.set(e,r),r.cleanupHandle=Et(async()=>{if(r.path)try{await f$e(r.path,{recursive:!0,force:!0}),n(`Cleaned up session plugin cache at ${r.path}`)}catch(o){n(`Failed to clean up session pl
+
+### parent=TP count=1 first@184657162
+- @184657162 needle=Et(async()
+  ctivityCallback!==null&&o.heartbeatTimer===null)y8e(o)}if(o.cleanupHandle===null){let u=r.activityKey();o.cleanupHandle=Et(async()=>{Y("info","session_activity_at_shutdown",{owner_key:u,refcount:o.refcount,active:Object.fromEntries(o.activeReasons),oldest_activity_ms:o.refcount>0
+
+### parent=r count=1 first@184871636
+- @184871636 needle=Et(()=>
+  ){if(t===void 0){let o={port:0,secret:Zdn()},u=Bun.serve({hostname:"127.0.0.1",port:0,fetch:(p)=>x_e(p,o,e)});u.unref(),Et(()=>u.stop(!0)),o.port=u.port??0,t=o,n(`$.tool.register: loopback MCP server listening on 127.0.0.1:${t.port}`)}return t}return(o,u)=>{let p=(e.get(o)??0)+1;
+
+### parent=Ivn count=1 first@185475462
+- @185475462 needle=Et(async()
+  void 0)}else{let G;try{G=(await kvn(M)).size}catch{}if(G!==void 0)n(`Shell snapshot created successfully (${G} bytes)`),Et(async()=>{try{await ce().unlink(M),n(`Cleaned up session snapshot: ${M}`)}catch(ue){n(`Error cleaning up session snapshot: ${ue}`)}}),o(M);else{n(`Shell snap
+
+### parent=hlr count=1 first@186645195
+- @186645195 needle=Et(async()
+  s("tengu_team_mem_multistore_config_invalid",{...Lf(g)}),f("team_memory_sync_watcher_start","config_invalid");return}if(Et(async()=>this.stop()),r===null)return;let o=r.filter((g)=>g.scope==="team"),u=r.filter((g)=>g.scope==="user");if(o.length>0)this.multiStoreState=j4(FFt(o),o.
+
+### parent=SYn count=1 first@186736583
+- @186736583 needle=Et(async()
+  oller:new AbortController,taskRegistry:ab(u,p),storageV5:C,credentials:M},isUltraplan:!0});hYn(Pe,fe.id,we,u,p,k,E,C,M),Et(async()=>{if(u().ultraplanSessionUrl===we)await Rk(fe.id,1500)})}catch(N){if(_(N),s("tengu_ultraplan_create_failed",{reason:v("unexpected_error"),error_name:
+
+### parent=YG count=1 first@187770703
+- @187770703 needle=Et(async()
+  u_version_lock_acquired",{is_pid_based:!1,is_lifetime_lock:!0}),n(`Acquired mtime-based lock on running version: ${t}`),Et(async()=>{try{await i?.()}catch{}})}catch(u){if(Q(u)){n(`Cannot lock current version - file does not exist: ${t}`,{level:"info"});return}s("tengu_version_loc
+
+### parent=Gpn count=1 first@189551914
+- @189551914 needle=Et(()=>
+  if(!vk())return;if(this.poller=dBt(()=>void this.poll(),U,{unref:!0}),!this.cleanupRegistered)this.cleanupRegistered=!0,Et(()=>this.stopBackgroundPolling())}stopBackgroundPolling(){this.poller?.[Symbol.dispose](),this.poller=null}}class EKn{client=void 0}var Hur=new K(()=>new EKn
+
+### parent=_ count=1 first@191073011
+- @191073011 needle=Et(async()
+  )=>{}),await p},async dispose(){k.dispose(),await m,process.stdout.removeListener("resize",_),process.stdout.write=g}}),Et(async()=>{await r.recorder?.dispose(),r.setRecorder(null)}),n(`[asciicast] Recording to ${t}`)}import{dirname as Y,resolve as ue,win32 as X}from"path";import
+
+### parent=Nl count=1 first@191231638
+- @191231638 needle=Et(()=>
+  t/src/plugins/functionHooks/hooks-worker/hooks-worker.js",DD_SOURCEMAP_GROUP:"win32"}.VERSION,host:Ol(),platform:B()},H=Et(()=>Bl(w,w.canary.status==="armed"&&w.canary.firstFrameAt!==void 0&&(process.exitCode===void 0||process.exitCode===0)&&!awn()?"healthy":"withdrawn"));Fp(w),w
+
+### parent=Pd count=1 first@191318193
+- @191318193 needle=Et(()=>
+  ,{event:v("plugins_init"),durationMs:Math.round(performance.now()-w),headless:d}),await HFn(C),qze(void 0,C)}),d)return Et(()=>F);return}import{readFile as ou}from"fs/promises";import{resolve as Or}from"path";import{lstat as Rd,readdir as Td,realpath as Gg}from"fs/promises";impor
+
+### parent=b count=1 first@191446012
+- @191446012 needle=Et(async()
+  l 7: https://aka.ms/powershell Or set CLAUDE_CODE_GIT_BASH_PATH to your bash.exe location.`),process.exit(1)}if(Et(oUn),Et(async()=>{let{cleanupSessionTeams:o}=await import("B:/~BUN/root/chunk-t2b8vj4a.js");await o(i)}),cC()){let o=Date.now();try{let c=await NPe();Y("info",c===nu
+
+### parent=Hn count=1 first@191571006
+- @191571006 needle=Et(()=>
+  Tt.teamContext,teammateColors:Tt.teammateColors}},Qt=new I3e,Xe=Ra(uo,(we)=>ewt(we,ht,Qt,t.storageV5,t.credentials));if(Et(()=>pZe(Xe.getState().tasks,t.storageV5)),fZe(Xe.setState),KWe(co,Xe.getState().fastMode).then(({updateContext:we})=>{Xe.setState((Oe)=>{let Ge=we(Oe.toolPer
+
+### parent=Et count=1 first@191664391
+- @191664391 needle=Et(this.
+  his.record.pid===0}get isDetached(){return this.phase.kind==="retiring"&&this.phase.reason==="stop"}transitionTo(e){if(!Et(this.phase,e))return n(`[bg] illegal worker-phase transition ${Je(this.phase)} \u2192 ${Je(e)} for ${this.record.short}`,{level:"warn"}),s("tengu_bg_phase_il
+
+### parent=l count=1 first@192334822
+- @192334822 needle=Et(async()
+  for ${e}: ${s instanceof Error?s.message:String(s)}`)}})},flushIntervalMs:1000,maxBufferSize:50}),this.writers.set(e,r),Et(async()=>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await
+
+### parent=Fi count=1 first@194612622
+- @194612622 needle=Et(async()
+   examined":"the index lock name does not lead to the file just created")}let ce=!1,Z=!1,V,he=new Promise((G)=>{V=G}),oe=Et(async()=>{if(await he,Z){let G=await Vn(b,{bigint:!0}).catch(()=>null);if(G!==null&&G.isFile()&&G.nlink===1n&&Lr(Li(x),G))await Xn(b).catch(()=>{})}await Xn(
+
+### parent=z count=1 first@200717489
+- @200717489 needle=Et(()=>
+  function sj(e,t=1500){z(),await st(e,t)}function z(){if(!mo())return;let e=Rw();if(e.flushCleanup)return;e.flushCleanup=Et(()=>e.drain(djn))}async function xet(e,t,r,o){let s=o.now??Date.now(),c=P(e,t),p=U(c);if(!hw(o.identityEpoch))return"superseded";if(o.grantLeg===void 0)retur
+
+### parent=qf count=1 first@200785091
+- @200785091 needle=Et(async()
+  :"keep_alive"}).catch((ue)=>{n(`[remote-io] keep_alive write failed: ${l(ue)}`)})},pn),this.keepAliveTimer.unref?.();if(Et(async()=>this.close()),t)(async()=>{for await(let ue of t){let it=qf(String(ue).replace(/\n$/,""));if(it!==void 0)this.writeInbound(it+` `,"stdin")}})()}drop
+
+### parent=gc count=1 first@200793450
+- @200793450 needle=Et(async()
+  ice(0,200)}`)}let k=typeof g==="function"?g:w;if(p.length>0)return k?t(p,k):t(p);if(k)queueMicrotask(()=>k());return!0},Et(async()=>{if(this.buffer+=e.decode(),this.buffer.length>0){if(this.originalWrite&&gc(this.buffer))this.originalWrite(this.buffer+` `);else process.stderr.wri
+
+### parent=Gt count=1 first@200924738
+- @200924738 needle=Et(async()
+  RM",Zn),Vje(),t.setOnStreamClosedWithParkedQuestion(()=>{if(aa(),or(),Qe&&!Qe.signal.aborted)Qe.abort(Vc("shutdown"))}),Et(async()=>{if(Yt)bn.persist(Yt);if(ue)clearTimeout(ue),ue=void 0;if(re&&wt&&!$e()&&!dt)t.write({type:"control_cancel_request",request_id:re.request_id}).catch
+
+### parent=ef count=1 first@200941387
+- @200941387 needle=Et(async()
+  eadlessConnectorMountInFlight=void 0,j.headlessMcpTeardown===L)j.headlessMcpTeardown=null};$t().headlessMcpTeardown=L,r=Et(async()=>L());let ie=p().mcp.clients.filter((j)=>j.type==="cached");if(ie.length>0)(async()=>{let j=Ht();for(let ae of ie){let fe=j.takeSettledCachedDialFail
+
+### parent=vpe count=1 first@201714485
+- @201714485 needle=Et(()=>
+  out(So),{credentials:i?.credentials}).then((_e)=>_e?RM(T,_e,"auto",i?.storageV5):void 0).catch(()=>{});if(h==="command")Et(()=>He)}return{ok:!0,short:J.short,sessionId:J.sessionId??ye,handedOff:te,hadWorktree:v!==null,relocatedTo:Ve,relocatedFrom:Y?.from,name:L.name,rosterName:L.
+
+### parent=Lxn count=1 first@202019821
+- @202019821 needle=Et(()=>
+  o,release:r,onLine:l,trustAccepted:v=UB}){let w=()=>null,m=Bxn(jxn(),()=>[...w()?.cloudWritableRoots??[e],...c_e(e)]),T=Et(()=>m.dispose()),R=e;V(e).then((h)=>{R=h},()=>{});let k={...Ia()};FNe(t);let D=t.senderFor(e),W=()=>QEt({attached:k,beforeSettings:Pv(),ownEnv:JEt(D,FNe(t))}
+
+### parent=ye count=1 first@202070834
+- @202070834 needle=Et(async()
+  kens=u;try{if(i.isExplicit,!await _e(r,e))throw Error("listen EADDRINUSE on the requested socket path");r.unref();let o=Et(async()=>{n("[uds-messaging] Shutting down"),await R(r,e,t)});c=o;try{s().activeKeyFile=await G9n(e,u.peerToken,t,{sweepPermitted:await ite()}),ke()}catch(p)
+
+### parent=Rs count=1 first@202583402
+- @202583402 needle=Et(async()
+  wnArgs();if(d===null)return;if(this.inhibitorProcess!==null)return;if(!this.cleanupRegistered)this.cleanupRegistered=!0,Et(async()=>{this.forceStop()});try{let[C,x]=d,H=NFe(C,x,{stdio:"ignore",windowsHide:!0});this.inhibitorProcess=H,H.unref(),H.on("error",(X)=>{if(n(`sleep inhib
+
+### parent=ei count=2 first@202662455
+- @202662455 needle=Et(()=>
+  return null;try{let Eo=QXe({sessionId:d.sessionId,manager:()=>Bi,...d.servedTools});ft.current=Eo.heldServedCall;let Sr=Et(()=>Eo.close());return{...Eo,close:()=>{Sr();let fi=Eo.close(),Xi=Et(()=>fi);return fi.finally(Xi),fi}}}catch(Eo){return _(Eo),null}})(),ya=(()=>{if(yu===nul
+- @202662524 needle=Et(()=>
+  .servedTools});ft.current=Eo.heldServedCall;let Sr=Et(()=>Eo.close());return{...Eo,close:()=>{Sr();let fi=Eo.close(),Xi=Et(()=>fi);return fi.finally(Xi),fi}}}catch(Eo){return _(Eo),null}})(),ya=(()=>{if(yu===null||d.viewerOnly||!VJe())return null;try{return JXe({launchDir:ve(),cl
+
+### parent=Cme count=1 first@202944661
+- @202944661 needle=Et(()=>
+  "idle"},this.#v(`spawn failed: ${l(H)}`,"checker_failed_to_start");return}this.#t={status:"starting",process:x},this.#f=Et(()=>this.dispose()),x.unref();for(let H of[x.stdin,x.stdout,x.stderr])mKe(H);x.stdout?.setEncoding("utf8"),x.stdout?.on("data",(H)=>{if(this.#S(x))this.#T(H)
+
+### parent=yt count=1 first@203443364
+- @203443364 needle=Et(()=>
+  .noteInterrupt()}}),this.installOAuthBridge(),this.drained=this.drainOutbound(),this.readInput(),this.unregisterCleanup=Et(()=>this.closeFromSignal())}async closeFromSignal(){this.signalled=!0,this.logEnded("signal",this.endingWith?.exitCode??0,this.phase,this.endingWith?.disconn
+
+### parent=Pn count=1 first@203479451
+- @203479451 needle=Et(()=>
+  ("remote_headless_session","bind_unavailable",{reason:c(E)}),{kind:"failed",message:X0n(E)};let R=new AbortController,k=Et(()=>R.abort()),M=Za(R.signal,{signalB:r.signal}),C=await Ct({dialogs:r.dialogs,explicitRef:e.poolOnBranch?{revision:e.poolOnBranch,flag:"--on-branch"}:e.pool
+
+### parent=Mn count=1 first@203487479
+- @203487479 needle=Et(()=>
+  f5t)({sessionId:w,getAccessToken:E.getAccessToken,orgUuid:e.orgUUID,binding:C,storageV5:r,servedSettingsChanged:jt(u)});Et(()=>F.stop());let[D,H,Q]=await Promise.all([C,(S.attachDirSync??xn)(w,p5t(C),d,r,u),(S.settingsToCloudEnabled??AP)().catch(()=>!1)]),P=H.handle;zt(P,t.dialog
+
+### parent=L count=2 first@204220946
+- @204220946 needle=Et(async()
+  ot/chunk-90xxmjzx.js";function L(e,o){let r=!1,p=jg(()=>{if(r||ys()||On()||!Po())return;return r=!0,p(),X(e,o)});return Et(async()=>p()),p}async function X(e,o){let r=await import("B:/~BUN/root/chunk-6bdsxrx9.js"),p;try{p=await r.startCrossSessionInbox(e,o)}catch(h){if(h instance
+- @207409375 needle=Et(()=>
+  ,w=40;function L(){let e=Qo();if(e.historySpoolDir===null)e.historySpoolDir=M(j(),`cc-history-prefetch-${process.pid}`),Et(()=>e.historySpoolDir===null?void 0:N(e.historySpoolDir,{recursive:!0,force:!0}).catch(()=>{}));return e.historySpoolDir}function v(e,s,r){if(Le()!=="firstPa
+
+### parent=Ur count=2 first@205053630
+- @205053630 needle=Et(async()
+  dStallTimeoutMs:1/0}},statusProvider:()=>({...e.state,readmePath:G,gitConfigInjection:Ce(),gitSshRewrite:Ce()&&ve()})});Et(async()=>D.stop());let N={enabled:!0,port:D.port,caBundlePath:h,hasSystemCa:P!=="",noProxy:Y?hn:r?mn:be,selective:Boolean(Y),standalone:Boolean(r),toolScoped
+- @205055230 needle=Et(()=>
+  e!==N)return;if(_.javaTrustStorePath)N.javaTrustStorePath=_.javaTrustStorePath;if(_.profileDPath){let oe=_.profileDPath;Et(()=>xe(oe).catch(()=>{}))}if(_.failureCodes.length>0)N.toolTrustFailureCodes=_.failureCodes}).catch((_)=>{n(`[agent-proxy] tool trust setup failed: ${_ insta
+
+### parent=xt count=1 first@205175939
+- @205175939 needle=Et(()=>
+  "))}function yt(){return Me(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)}function xt(e){let t=new Ee({storageV5:e});return Et(()=>t.armShutdownReport()),new U.PeriodicExportingMetricReader({exporter:t,exportIntervalMillis:300000})}function vt(){if(S2())return!1;if(MBt())return!1;let
+
+### parent=ns count=2 first@205176931
+- @205176931 needle=Et(async()
+  push(xt(e));let o=et();if(e_()){if(!bde())tt();let p=new U.MeterProvider({resource:o,views:[],readers:t});return OGt(p),Et(async()=>{let d=a.CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS??2000;try{p5();let m=gvt(),O=bde(),h=[p.shutdown()];if(m)h.push(m.forceFlush().then(()=>m.shutdown()))
+- @205179107 needle=Et(async()
+  ocessors:u});y.trace.setGlobalTracerProvider(d),LGt(d),process.on("beforeExit",async()=>{await d.forceFlush()})}}return Et(async()=>{let p=a.CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS??2000;try{p5();let u=[i.shutdown()],d=gvt();if(d)u.push(d.shutdown());let m=bde();if(m)u.push(m.shutdo
+
+### parent=At count=1 first@205788394
+- @205788394 needle=Et(this.
+  e(e))this.documentElement=e},importNode:function(e,t){return qa(this,e,t)},getElementById:function(e){var t=null;return Et(this.documentElement,function(i){if(i.nodeType==ue){if(i.getAttribute("id")==e)return t=i,!0}}),t},createElement:function(e){var t=new de(Z);if(t.ownerDocume
+
+### parent=ee count=1 first@205943072
+- @205943072 needle=Et(()=>
+  SessionSwitch=Ou((c,l)=>{if(c===o)return;let r=o;o=c,E({sessionId:r,onlyIfEmpty:!0}).catch(_)}),e.unregisterExitCleanup=Et(()=>{if(!wo())return;let c=Array.from(e.closesInFlight.values(),(l)=>l.promise);return qt(Promise.allSettled([...c,E({sessionId:z().id,onlyIfEmpty:!0})]),G,"
+
+### parent=d count=1 first@207666151
+- @207666151 needle=Et(()=>
+  n}let r=await SXe({sessionId:o,apiBaseUrl:wte(new URL(i)).origin,tokenFilePath:t,binaryResolution:"search",log:n});if(r)Et(()=>r.stop())}catch(t){n(`[vitals] not started: ${l(t)}`)}}export{d as startHostedWorkerVitalsEmitter}; .// @bun @bytecode // Claude Code is a Beta product p
+
+### parent=X count=1 first@208010804
+- @208010804 needle=Et(async()
+  ),!0}catch(u){if(T(u)==="EEXIST")return!1;throw u}}throw d}}function X(r,t){r.unregisterCleanup?.(),r.unregisterCleanup=Et(async()=>{await j(r,t)})}async function Y(r,t){let a=t?.dir;await ie(a??an());let g=t?.lockIdentity??V(),d={sessionId:g,pid:process.pid,procStart:zB(),acquir
+
+### parent=je count=1 first@210565218
+- @210565218 needle=Et(()=>
+  e,properties:d,required:T}}async function je(e,m,d,T,a){nc(e);let L=G(m,d,z(),"stdio",T,a),A=new X9e;await L.connect(A),Et(()=>L.close())}class D extends I0{#e;constructor(e){super();this.#e=e}get(e){return e===zM?super.get(e):this.#e.get(e)}}function G(e,m,d,T,a,L="raw"){let A=v
+
+## high-signal needles
+### Qbt Et flush "Et(()=>this.flush())" hits=1
+- @179232983 this.pendingWrite.then(p.bind(null,n,t)).catch(s),!this.cleanupRegistered)this.cleanupRegistered=!0,Et(()=>this.flush())}flush(){return this.pendingWrite}}var f=new K(()=>new g);function c(){return f.of(z().host)}function Y(n,t,i){let r=m();if(!r)return;let o;try{o=e(n,t,l(i))}ca
+
+### Et dispose-style "Et({[Symbol.dispose]" hits=0
+
+### Et asyncDispose "Et({[Symbol.asyncDispose]" hits=0
+
+### DYe gate "if(DYe())" hits=2
+- @180616877 ~/.claude.json through the storage interface failed${r}: ${t}`,{level:"warn"});return}function Ma(){if(DYe())return;if(Nr()){if(G9(),I.freshnessBackend!==void 0)wa();return}I.setFreshnessBackend(void 0),CD(),wa()}function kD(e){let t=I.freshnessBackend;if(!D()||t===void 0)return;
+- @180617067 kend(void 0),CD(),wa()}function kD(e){let t=I.freshnessBackend;if(!D()||t===void 0)return;if(!e.ok){if(DYe())return;if(n(`Watching ~/.claude.json through the storage interface ended: ${Ge(e.error)}`,{level:"warn"}),I.setFreshnessSubscription(void 0),I.claimFreshnessResubscribe())
+
+### !DYe gate "if(!DYe())" hits=0
+
+### mEe race "qt(mEe(),tde" hits=1
+- @189575825 ),...a];qje(),Nj(),hPt(),await Promise.all([qt(ja(),30000,"flush timeout (relaunch)").catch(()=>{}),qt(mEe(),tde,"cleanup timeout").catch(()=>{}).then(()=>qt($ie(),1000,"analytics flush timeout").catch(()=>{}))]),e.preSpawn?.();let s={...process.env};delete s.CLAUDE_CODE_TUI_JUST
+
+### await mEe "await mEe()" hits=1
+- @187445313 hutdownFailsafe(Math.max(5000,p+5000),e),Nj(),this.printResumeHint();let g;try{let E=(async()=>{try{await mEe()}catch{}})();await Promise.race([E,new Promise((C,M)=>{g=setTimeout((L)=>L(new H0t),tde,M)})]),clearTimeout(g)}catch{clearTimeout(g)}if(COe())this.armShutdownFailsafe(Ma

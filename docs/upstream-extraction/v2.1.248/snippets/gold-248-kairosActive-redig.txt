@@ -1,0 +1,385 @@
+# gold-248-kairosActive-redig
+when=2026-09-21T05:27:56.211Z
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+contract=official SEA — do NOT invent n() sibling bags
+
+## 1) SEA string needles
+### needle="kairosActive" hits=0
+### needle="getKairosActive" hits=0
+### needle="setKairosActive" hits=0
+### needle="replaceKairosActive" hits=0
+### needle="is_assistant_mode" hits=0
+### needle="assistant_mode" hits=0
+### needle="isAssistantMode" hits=0
+### needle="setKairos" hits=0
+### needle="markAssistantForced" hits=0
+### needle="assistantForced" hits=0
+### needle="tengu_kairos" hits=27
+@92287064 rcLongTurnNudgeSeenCount....1^..tips_rc_long_turn_show......8...rcPermissionNudgeSeenCount........p.tips_rc_permission_nudge_show.......'...tengu_kairos_ready_nudge....%. .remoteControlReadyPushKey........-..remoteControlReadyPushCount......VQ.tips_rc_ready_push_send.........android........
+
+@93438104 ....UserMessage.A.......Cannot destructure property 'origin' from null or undefined value...........Prompt from the ........ plugin....../..tengu_kairos_brief..'.......No content found in user prompt message......~..update:.c.......<mcp-resource-update\s+server="([^"]+)"\s+uri="([^"]+)"[^>]*
+
+@97711184 f.r.o.m. .t.h.e.i.r. .A.n.t.h.r.o.p.i.c. .c.o.n.t.a.c.t.....(...-.Y.file:///B:/%7EBUN/root/chunk-m46vh510.js....$.K.tengu_loop_ended.....w..tengu_kairos_loop_keepalive.......+.CLAUDE_CODE_LOOP_KEEPALIVE......[.W.viaKeepaliveT...`.>.[.l.o.o.p.]. .k.e.e.p.a.l.i.v.e. .b.u.d.g.e.t. .e.x.h.a.u.s.
+
+@97712968 abort........v?. (tick in flight).......tl..loop_cancel_all......SG.loops_cancelled.(....^..file:///B:/%7EBUN/root/chunk-wcjfabjc.js....+...tengu_kairos_cron_config....]..recurringFrac........<y.recurringCapMs........<.oneShotMaxMs....Q5..oneShotFloorMs......c;C.oneShotMinuteMod(....UJ.file
+
+@97884680 g only what the user actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.teng
+
+@97983836 f.i.c...(....`..file:///B:/%7EBUN/root/chunk-v0h7mbh7.js!....27.Cancel a scheduled cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .
+
+@97983896 .27.Cancel a scheduled cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .a. .f.u.t.u.r.e. .t.i.m.e. ..  .e.i.t.h.e.r. .r.e.c.u.r.r.i.
+
+@98008636 t.h.e. .m.e.s.s.a.g.e. .i.n. ...Y...TZ. tags: the first sentence becomes the phone banner, the full text becomes the email body............tengu_kairos_push_notifications.......*.tengu_kairos_input_needed_push..(...%...file:///B:/%7EBUN/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/c
+
+### needle="tengu_kairos_assistant" hits=0
+### needle="tengu_kairos_brief" hits=8
+@93438104 ....UserMessage.A.......Cannot destructure property 'origin' from null or undefined value...........Prompt from the ........ plugin....../..tengu_kairos_brief..'.......No content found in user prompt message......~..update:.c.......<mcp-resource-update\s+server="([^"]+)"\s+uri="([^"]+)"[^>]*>(?:[\
+
+@97884680 g only what the user actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu_....
+
+@100977884 effort <.....D..|auto>..(.......file:///B:/%7EBUN/root/chunk-reyfea04.js....RB\.Toggle brief-only mode......x. .enable_slash_command....|.a.tengu_kairos_brief_config...*.......Brief tool is not enabled for your account..#....@..Brief mode is now enabled. Use the .X...T.U. .t.o.o.l. .f.o.r. .a.l.l.
+
+@183301646 BUN/root/chunk-7gekvenf.js";import{Uae,Zan}from"B:/~BUN/root/chunk-2ha4bfwk.js";var t=300000;function Jdt(){return a.CLAUDE_CODE_BRIEF||vC("tengu_kairos_brief",!1,t)}function Abr(e){if(!e.includes(Cb)&&!e.includes(O8e))return!1;if(Uae())return!1;return Jdt()}function Hbe(){return _x()&&Jdt()||Zan(
+
+@183302212 er actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.`;function xbr(){let e=R("tengu_kairos_brief_stop_hook_text","");return typeof e==="string"&&e.length>0?e:r}
+export{Jdt,Abr,Hbe,xbr};
+.// @bun @bytecode
+// Claude Code is a Beta produc
+
+@195624421 t24.js";import"B:/~BUN/root/chunk-90xxmjzx.js";var a=h(()=>m({enable_slash_command:W()})),n={enable_slash_command:!1};function i(){let t=R("tengu_kairos_brief_config",n),o=a().safeParse(t);return o.success?o.data:n}var l={type:"local-jsx",name:"brief",description:"Toggle brief-only mode",isEnabled
+
+@198950838 Et.agentId,Qn[4]=Qo,Qn[5]=Zo;else Qo=Qn[4],Zo=Qn[5];let Cs=Wi.useRenderInput("Spinner",Qo,Zo),tr;if(Qn[6]!==Yn||Qn[7]!==Jn)tr=_x()&&(Ms||R("tengu_kairos_brief",!1))&&Yn&&!Jn,Qn[6]=Yn,Qn[7]=Jn,Qn[8]=tr;else tr=Qn[8];let Zn=tr,er;if(Qn[9]!==Zn||Qn[10]!==Fn||Qn[11]!==Un||Qn[12]!==Kn||Qn[13]!==Bt||Qn[
+
+@201421362 iptMode:H_,timestamp:_V}=bV,{text:Pr}=xV,q_=j(IA),G_=j(BA),PV=a.CLAUDE_CODE_BRIEF,DA;if(Kl[0]!==q_||Kl[1]!==H_||Kl[2]!==G_)DA=_x()&&(PV||R("tengu_kairos_brief",!1))&&q_&&!H_&&!G_,Kl[0]=q_,Kl[1]=H_,Kl[2]=G_,Kl[3]=DA;else DA=Kl[3];let Yl=DA,z_;bb0:{if(Pr.length<=Q_){z_=Pr;break bb0}let Vl;if(Kl[4]!=
+
+### needle="tengu_kairos_ready" hits=2
+@92287064 rcLongTurnNudgeSeenCount....1^..tips_rc_long_turn_show......8...rcPermissionNudgeSeenCount........p.tips_rc_permission_nudge_show.......'...tengu_kairos_ready_nudge....%. .remoteControlReadyPushKey........-..remoteControlReadyPushCount......VQ.tips_rc_ready_push_send.........android........web_cl
+
+@191289396 sionNudgeSeenCount:(C.rcPermissionNudgeSeenCount??0)+1}),d),b("tips_rc_permission_nudge_show")}function Y3t(){if(!FU())return null;let d=R("tengu_kairos_ready_nudge",null);if(d===!0)return{probability:1,maxImpressions:5,impressionKey:""};if(d===null||typeof d!=="object")return null;let C=typeof d.
+
+### needle="userMsgOptIn" hits=3
+@99402800 artType......Jh.questionPreviewFormat.........*.replaceQuestionPreviewFormat....2...replConfigArgv........U.replaceReplConfigArgv........d..userMsgOptIn....?...replaceUserMsgOptIn....._...searchToolsOptIn....L=..replaceSearchToolsOptIn.....Z...todoToolsOptIn.......b..replaceTodoToolsOptIn...
+
+@178536265 PreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){r
+
+@178565823 tions.pollEventIngressWired()}function GEn(){n().host.launchOptions.markPollEventIngressWired()}function _x(){return n().host.launchOptions.userMsgOptIn()}function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}function VEn(){return n().host.launchOptions.searchToolsOptIn()}function qEn
+
+### needle="replaceUserMsgOptIn" hits=3
+@99402820 tionPreviewFormat.........*.replaceQuestionPreviewFormat....2...replConfigArgv........U.replaceReplConfigArgv........d..userMsgOptIn....?...replaceUserMsgOptIn....._...searchToolsOptIn....L=..replaceSearchToolsOptIn.....Z...todoToolsOptIn.......b..replaceTodoToolsOptIn..........wizardOperatorTools
+
+@178536295 }replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e
+
+@178565876 .launchOptions.markPollEventIngressWired()}function _x(){return n().host.launchOptions.userMsgOptIn()}function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}function VEn(){return n().host.launchOptions.searchToolsOptIn()}function qEn(e){n().host.launchOptions.replaceSearchToolsOptIn(e)}functi
+
+### needle="brief mode" hits=1
+@183301816 tion Abr(e){if(!e.includes(Cb)&&!e.includes(O8e))return!1;if(Uae())return!1;return Jdt()}function Hbe(){return _x()&&Jdt()||Zan()}var r=`In brief mode, plain assistant text is hidden from the user \u2014 only ${Cb} reaches them. Call it now with your substantive reply for this turn. Do not
+
+### needle="Brief mode" hits=6
+@97478156 ....tengu_stop_hook_error.......K...Stop hook failed: ........l.watchedForSurfaces......M...lastEmittedDetail.........h.onClassified......;.Brief mode enforcement failed: ......... You MUST call the .3.....$. tool to complete this request. Call this tool now..%.......StructuredOutput enfor
+
+@100977972 rief-only mode......x. .enable_slash_command....|.a.tengu_kairos_brief_config...*.......Brief tool is not enabled for your account..#....@..Brief mode is now enabled. Use the .X...T.U. .t.o.o.l. .f.o.r. .a.l.l. .u.s.e.r.-.f.a.c.i.n.g. .o.u.t.p.u.t. ..  .p.l.a.i.n. .t.e.x.t. .o.u.t.s.i.d.e.
+
+@100978200 i.n.g. .o.u.t.p.u.t. ..  .p.l.a.i.n. .t.e.x.t. .o.u.t.s.i.d.e. .i.t. .i.s. .h.i.d.d.e.n. .f.r.o.m. .t.h.e. .u.s.e.r.'.s. .v.i.e.w... .......Brief mode is now disabled. The 5....... .t.o.o.l. .i.s. .n.o. .l.o.n.g.e.r. .a.v.a.i.l.a.b.l.e. ..  .r.e.p.l.y. .w.i.t.h. .p.l.a.i.n. .t.e.x.t.......
+
+@185896853 F_ENFORCE_SENTINEL));if(!ze&&!Qe)N=He({content:`${G1.BRIEF_ENFORCE_SENTINEL} ${f_t.getBriefEnforceText()}`,isMeta:!0}),yield N}catch(Ne){n(`Brief mode enforcement failed: ${l(Ne)}`,{level:"error"})}let U=null,j=null;if(p.options.requiresStructuredOutput&&Cc(g)!=="auxiliary")try{let Ne=g_t(
+
+@195625055 ngs",settings:{isBriefOnly:e}}),s("tengu_brief_mode_toggled",{enabled:e,gated:!1,source:v("slash_command")});let r=[`<system-reminder>
+${e?`Brief mode is now enabled. Use the ${Cb} tool for all user-facing output \u2014 plain text outside it is hidden from the user's view.`:`Brief mode is 
+
+@195625191 {e?`Brief mode is now enabled. Use the ${Cb} tool for all user-facing output \u2014 plain text outside it is hidden from the user's view.`:`Brief mode is now disabled. The ${Cb} tool is no longer available \u2014 reply with plain text.`}
+</system-reminder>`];return t(e?"Brief-only mode ena
+
+### needle="--assistant" hits=0
+### needle="assistant mode" hits=2
+@99046047 e config dialog title (e.g., "Telegram"). Defaults to the server name.........p..Fields to prompt the user for when enabling this plugin in assistant mode. Saved values are substituted into ${user_config.KEY} references in the mcpServers env............Channels this plugin provides. Each entry
+
+@178978445 m"). Defaults to the server name.'),userConfig:Oe(i(),ct()).optional().describe("Fields to prompt the user for when enabling this plugin in assistant mode. Saved values are substituted into ${user_config.KEY} references in the mcpServers env.")}).strict()).describe("Channels this plugin provid
+
+### needle="isKairosActive" hits=0
+### needle="kairos_active" hits=0
+### needle="KairosActive" hits=0
+## 2) Export alias hunt (get/set Kairos / assistant)
+### needle="as getKairosActive" hits=0
+### needle="as setKairosActive" hits=0
+### needle="as isAssistantMode" hits=0
+### needle="as getIsAssistantMode" hits=0
+### needle="as setIsAssistantMode" hits=0
+### needle="as markAssistantForced" hits=0
+### needle="KairosActive" hits=0
+### needle="getKairos" hits=0
+### needle="setKairos" hits=0
+## 3) is_assistant_mode call sites (peel nearby fns)
+hits=0
+## 4) Ie LaunchOptions method roster @178534988
+@178534988 sha=cbdcfee7074ecb4d len=4500
+class Ie{#e=!1;#t=null;#n=!1;#o=void 0;#r=!1;#i=!1;#a=!1;#s=void 0;#d=!1;#l=!1;#c="cli";#p="fresh";#u=void 0;#g=[];#h=!1;#m=!1;#f=!1;#v=!1;#b=!1;#S=!1;#C=!1;#k=!1;#y=!1;#x=!0;#A=null;#T=!1;#P=null;#M=!1;#w=!1;#L={};isInteractive(){return this.#e}replaceIsInteractive(e){this.#e=e}printOutputFormat(){return this.#t}replacePrintOutputFormat(e){this.#t=e}thinkingDisplayExplicit(){return this.#n}replaceThinkingDisplayExplicit(e){this.#n=e}permissionPromptToolName(){return this.#o}replacePermissionPromptToolName(e){this.#o=e}hasStreamingInput(){return this.#r}replaceHasStreamingInput(e){this.#r=e}singleShotPrintSession(){return this.#i}replaceSingleShotPrintSession(e){this.#i=e}modelOverrideOptOutForSession(){return this.#a}replaceModelOverrideOptOutForSession(e){this.#a=e}rendererMode(){return this.#s}replaceRendererMode(e){this.#s=e}strictToolResultPairing(){return this.#d}replaceStrictToolResultPairing(e){this.#d=e}restrictedSession(){return this.#l}replaceRestrictedSession(e){this.#l=e}clientType(){return this.#c}replaceClientType(e){this.#c=e}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e}wizardOperatorToolsEnabled(){return this.#v}replaceWizardOperatorToolsEnabled(e){this.#v=e}pollEventIngressWired(){return this.#b}markPollEventIngressWired(){this.#b=!0}sdkAgentProgressSummariesEnabled(){return this.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCommands(){return this.#y}replaceDisableSlashCommands(e){this.#y=e}mayForwardHomeSettings(){return this.#x}replaceMayForwardHomeSettings(e){this.#x=e}homeSettingsHostConsent(){return this.#A}replaceHomeSettingsHostConsent(e){this.#A=e}scheduledTasksEnabled(){return this.#T}replaceScheduledTasksEnabled(e){this.#T=e}initJsonSchema(){return this.#P}replaceInitJsonSchema(e){this.#P=e}cliSessionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunchConfig(){return this.#L}replaceForkReplayLaunchConfig(e){this.#L=e}reset(){this.#e=!1,this.#t=null,this.#n=!1,this.#o=void 0,this.#r=!1,this.#i=!1,this.#a=!1,this.#s=void 0,this.#d=!1,this.#l=!1,this.#c="cli",this.#p="fresh",this.#u=void 0,this.#g=[],this.#h=!1,this.#m=!1,this.#f=!1,this.#v=!1,this.#b=!1,this.#S=!1,this.#C=!1,this.#k=!1,this.#y=!1,this.#x=!0,this.#A=null,this.#T=!1,this.#P=null,this.#M=!1,this.#w=!1,this.#L={}}}class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e}flagSettingsExpectedContent(){return this.#t}replaceFlagSettingsExpectedContent(e){this.#t=e}flagSettingsFilePinnedContent(){return this.#n}replaceFlagSettingsFilePinnedContent(e){this.#n=e}flagSettingsInline(){return this.#o}replaceFlagSettingsInline(e){this.#o=e}parentManagedSettings(){return this.#r}replaceParentManagedSettings(e){this.#r=e}parentManagedSettingsInvalid(){return this.#i}replaceParentManagedSettingsInvalid(e){this.#i=e}allowedSettingSources(){return this.#a}replaceAllowedSettingSources(e){this.#a=e}useCoworkPlugins(){return this.#s}replaceUseCoworkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=null,this.#r=null,this.#i=!1,this.#a=tn(),this.#s=!1}}function tn(){return["userSettings","projectSettings","localSettings","flagSettings","policySettings"]}class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){retu
+
+Ie zero-arg methods (49): isInteractive, printOutputFormat, thinkingDisplayExplicit, permissionPromptToolName, hasStreamingInput, singleShotPrintSession, modelOverrideOptOutForSession, rendererMode, strictToolResultPairing, restrictedSession, clientType, sessionStartType, questionPreviewFormat, replConfigArgv, userMsgOptIn, searchToolsOptIn, todoToolsOptIn, wizardOperatorToolsEnabled, pollEventIngressWired, markPollEventIngressWired, sdkAgentProgressSummariesEnabled, sessionPersistenceDisabled, sessionBypassPermissionsMode, disableSlashCommands, mayForwardHomeSettings, homeSettingsHostConsent, scheduledTasksEnabled, initJsonSchema, cliSessionConfigCarried, forkRestrictedLaunchConfig, forkReplayLaunchConfig, reset, tn, flagSettingsPath, flagSettingsExpectedContent, flagSettingsFilePinnedContent, flagSettingsInline, parentManagedSettings, parentManagedSettingsInvalid, allowedSettingSources, useCoworkPlugins, inlinePlugins, inlinePluginsNoMcp, inlinePluginUrls, syncedPluginDirs, syncedPluginDirsRegistered, clearSyncedPluginDirs, additionalDirectoriesForClaudeMd, allowedChannels
+kairos/assistant/brief/optIn/latch/active-ish: isInteractive, userMsgOptIn, searchToolsOptIn, todoToolsOptIn
+
+## 5) ge sessionFlags method roster @178521439
+@178521439 sha=301f0c5001f3a7d0
+class ge{#e=!1;#t=!1;#n=!1;#o=!1;#r=!1;#i=!1;#a=!1;#s=!1;#d=!1;#l=null;#c=null;#p=null;#u=!1;#g=null;#h=!1;#m=!1;#f=!1;#v=!1;#b=!1;#S=void 0;#C=void 0;#k=void 0;#y=null;#x=null;onboardingShownThisSession(){return this.#e}replaceOnboardingShownThisSession(e){this.#e=e}lspRecommendationShownThisSession(){return this.#t}replaceLspRecommendationShownThisSession(e){this.#t=e}sessionTrustAccepted(){return this.#n}replaceSessionTrustAccepted(e){this.#n=e}homeTrustDialogAccepted(){return this.#o}replaceHomeTrustDialogAccepted(e){this.#o=e}hasExitedPlanMode(){return this.#r}replaceHasExitedPlanMode(e){this.#r=e}needsPlanModeExitAttachment(){return this.#i}replaceNeedsPlanModeExitAttachment(e){this.#i=e}needsAutoModeExitAttachment(){return this.#a}replaceNeedsAutoModeExitAttachment(e){this.#a=e}memoryToggledOff(){return this.#s}replaceMemoryToggledOff(e){this.#s=e}teardownUnwindRequested(){return this.#u}replaceTeardownUnwindRequested(e){this.#u=e}backgroundAutoModeSetupInFlight(){return this.#d}replaceBackgroundAutoModeSetupInFlight(e){this.#d=e}deferredToolStubGateLatch(){return this.#l}replaceDeferredToolStubGateLatch(e){this.#l=e}verifySkillRolloutGateLatch(){return this.#c}replaceVerifySkillRolloutGateLatch(e){this.#c=e}commitSkillRolloutGateLatch(){return this.#p}replaceCommitSkillRolloutGateLatch(e){this.#p=e}memoryToolsShapeLatch(){return this.#g}replaceMemoryToolsShapeLatch(e){this.#g=e}proposeGoalAvailabilityLogged(){return this.#h}markProposeGoalAvailabilityLogged(){this.#h=!0}activeRoutine(){return this.#C}replaceActiveRoutine(e){this.#C=e}inheritedTeamName(){return this.#k}replaceInheritedTeamName(e){this.#k=e}teleportedSessionInfo(){return this.#y}replaceTeleportedSessionInfo(e){this.#y=e}markFirstTeleportMessageLogged(){if(this.#y)this.#y.hasLoggedFirstMessage=!0}cachedClaudeMdContent(){return this.#x}replaceCachedClaudeMdContent(e){this.#x=e}accountSkillsSyncEnabled(){return this.#m}replaceAccountSkillsSyncEnabled(e){this.#m=e}skillsSyncVetoed(){return this.#f}replaceSkillsSyncVetoed(e){this.#f=e}accountPluginsSyncEnabled(){return this.#v}replaceAccountPluginsSyncEnabled(e){this.#v=e}pluginsSyncVetoed(){return this.#b}replacePluginsSyncVetoed(e){this.#b=e}armPendingContextCompacted(e){this.#S=e}consumePendingContextCompacted(){let e=this.#S;return this.#S=void 0,e}forgetPendingContextCompacted(){this.#S=void 0}reset(){this.#m=!1,this.#f=!1,this.#v=!1,this.#b=!1,this.#e=!1,this.#t=!1,this.#n=!1,this.#o=!1,this.#r=!1,this.#i=!1,this.#a=!1,this.#s=!1,this.#u=!1,this.#d=!1,this.#l=null,this.#c=null,this.#p=null,this.#g=null,this.#h=!1,this.#C=void 0,this.#k=void 0,this.#y=null,this.#x=null,this.#S=void 0}}class fe{#e=new Map;#t=new Map;#n=null;#o=new Map;#r=new Set;#i=new Set;#a=new Set;#s=new Set;#d=new Set;#l=new Set;#c=new Set;#p=new Set;#u=new 
+
+ge zero-arg methods (43): onboardingShownThisSession, lspRecommendationShownThisSession, sessionTrustAccepted, homeTrustDialogAccepted, hasExitedPlanMode, needsPlanModeExitAttachment, needsAutoModeExitAttachment, memoryToggledOff, teardownUnwindRequested, backgroundAutoModeSetupInFlight, deferredToolStubGateLatch, verifySkillRolloutGateLatch, commitSkillRolloutGateLatch, memoryToolsShapeLatch, proposeGoalAvailabilityLogged, markProposeGoalAvailabilityLogged, activeRoutine, inheritedTeamName, teleportedSessionInfo, markFirstTeleportMessageLogged, cachedClaudeMdContent, accountSkillsSyncEnabled, skillsSyncVetoed, accountPluginsSyncEnabled, pluginsSyncVetoed, consumePendingContextCompacted, forgetPendingContextCompacted, reset, planSlugCache, pendingBranchLinks, replacePendingBranchLinks, vimSharedState, agentColorMap, sessionCreatedTeams, surfacedHookSpawnFailures, bareMcpServerMatchersWarned, pendingConversationEditKinds, clientTruncatedAssistantIds, unsupportedThreadKeys, pendingPrLinks, policyPredicateTelemetryEmitted, humanAttachmentDigests, chromeAvailabilityStagesLogged
+kairos/assistant/brief-ish: deferredToolStubGateLatch, verifySkillRolloutGateLatch, commitSkillRolloutGateLatch, memoryToolsShapeLatch, activeRoutine, clientTruncatedAssistantIds
+
+## 6) host bag field names near launchOptions/sessionFlags
+### needle="launchOptions:" hits=1
+@178548060 tLatches,this.proactivity=e.proactivity}}function sn(){return new Ke({backgroundHousekeeping:new Ne,launchOptions:new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,tel
+
+### needle="sessionFlags:" hits=2
+@178533305 :e.kind==="fork"?e.root.requestJournal:new ce,sessionCron:e.kind==="fork"?e.root.sessionCron:new pe,sessionFlags:e.kind==="fork"?e.root.sessionFlags:new ge,sessionRefsGate:e.kind==="fork"?e.root.sessionRefsGate:ne
+
+@178533341 al:new ce,sessionCron:e.kind==="fork"?e.root.sessionCron:new pe,sessionFlags:e.kind==="fork"?e.root.sessionFlags:new ge,sessionRefsGate:e.kind==="fork"?e.root.sessionRefsGate:new Te,sessionScratch:e.kind==="fork"?
+
+### needle="surfaceCapabilities:" hits=2
+@178533483 ==="fork"?e.root.sessionRefsGate:new Te,sessionScratch:e.kind==="fork"?e.root.sessionScratch:new fe,surfaceCapabilities:e.kind==="fork"?e.root.surfaceCapabilities:new he,toolProgressThrottle:e.kind==="fork"?e.root.toolPr
+
+@178533526 sionScratch:e.kind==="fork"?e.root.sessionScratch:new fe,surfaceCapabilities:e.kind==="fork"?e.root.surfaceCapabilities:new he,toolProgressThrottle:e.kind==="fork"?e.root.toolProgressThrottle:new Le,turnBudget:e.kind==="
+
+### needle="new Ie" hits=9
+@178273257 er.run: environmentId and environmentKey are required to poll for work");let s=e??Pe(this,$t,"f"),n=new Ie({client:this.client,environmentId:t,environmentKey:r,...this.workerId!==void 0?{workerId:this.worke
+
+@178278535 "anthropic-beta":[...n??[],"managed-agents-2026-04-01"].toString()},r?.headers])})}poller(e){return new Ie({...e,client:this._client})}worker(e){return new Ft({...e,client:this._client})}}Ce.WorkPoller=Ie;C
+
+@178548074 proactivity=e.proactivity}}function sn(){return new Ke({backgroundHousekeeping:new Ne,launchOptions:new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,telemetry
+
+@178723095 ailMode}reset(){this.recentErrors=[],this.queue=[],this.sink=null,this.hardFailMode=void 0}}var RYe=new Ier;function Bvn(t){RYe.attachSink(t)}function _(t){let e=Ee(t);try{if(Me(process.env.CLAUDE_CODE_USE_
+
+### needle="new ge" hits=6
+@178533354 sionCron:e.kind==="fork"?e.root.sessionCron:new pe,sessionFlags:e.kind==="fork"?e.root.sessionFlags:new ge,sessionRefsGate:e.kind==="fork"?e.root.sessionRefsGate:new Te,sessionScratch:e.kind==="fork"?e.root
+
+@196811164 ures=0;reopen;constructor(e,r,t){this.runId=e;this.vmScript=r;this.world=t}static lost(e,r,t){let o=new ge(e,void 0,r);return o.scope=t,o.lostOnResume=!0,o}lostOnResume=!1;get isLost(){return this.lostOnRes
+
+@205099308 LAST_VALUE_AGGREGATION;case g.InstrumentType.HISTOGRAM:{if(e.advice.explicitBucketBoundaries)return new ge(e.advice.explicitBucketBoundaries);return Lt.HISTOGRAM_AGGREGATION}}return xn.diag.warn(`Unable to 
+
+@205170860 (o).merge(p).merge(O).merge(A.resourceFromAttributes(u));return EEn(h),h}function tt(){let e=et(),t=new ge,r=new X(t,{scheduledDelayMillis:Ze}),s=new J({resource:e,spanProcessors:[r]});y.trace.setGlobalTrac
+
+### needle="kairos" hits=27
+@92287070 urn_show......8...rcPermissionNudgeSeenCount........p.tips_rc_permission_nudge_show.......'...tengu_kairos_ready_nudge....%. .remoteControlReadyPushKey........-..remoteControlReadyPushCount......VQ.tips_rc_
+
+@93438110 perty 'origin' from null or undefined value...........Prompt from the ........ plugin....../..tengu_kairos_brief..'.......No content found in user prompt message......~..update:.c.......<mcp-resource-update
+
+@97711190 n.t.a.c.t.....(...-.Y.file:///B:/%7EBUN/root/chunk-m46vh510.js....$.K.tengu_loop_ended.....w..tengu_kairos_loop_keepalive.......+.CLAUDE_CODE_LOOP_KEEPALIVE......[.W.viaKeepaliveT...`.>.[.l.o.o.p.]. .k.e.e.
+
+@97712974 op_cancel_all......SG.loops_cancelled.(....^..file:///B:/%7EBUN/root/chunk-wcjfabjc.js....+...tengu_kairos_cron_config....]..recurringFrac........<y.recurringCapMs........<.oneShotMaxMs....Q5..oneShotFloor
+
+### needle="assistantMode" hits=5
+@92400588 ucture property 'onFire' from null or undefined value.......E...onFire..	...._$.isLoading......`.@.assistantMode...
+...Y5..onFireTask........@.onMissed....@...lockIdentity....iz_.getJitterConfig......_d.isKilled
+
+@203328083 ncomingPrompt,requestDialog:Ga}),lSe(io);let f_=G(()=>a.CLAUDE_CODE_PROACTIVE,[]);Ftt({isLoading:_i,assistantMode:f_,transcript:Do,storageV5:mo}),rqt({isLoading:_i,transcript:Do}),rSe(),aJ({transcript:Do});let Fg=
+
+@208012127 eturn Boolean(r.recurring&&!r.permanent&&t-r.createdAt>=a)}function h5t(r){let{onFire:t,isLoading:a,assistantMode:g=!1,onFireTask:d,onMissed:l,dir:u,lockIdentity:F,getJitterConfig:fe,isKilled:ke,filter:H,getExtraT
+
+@210398972 )/1000)}var T=import.meta.require("B:/~BUN/root/chunk-9jf22638.js"),A=null;function ke({isLoading:o,assistantMode:r,transcript:s,storageV5:p}){let m=Ol(),a=ir(()=>o),e=E(null),i=pt(),d=Xn(),h=yt(),_=Jd();k(()=>{if
+
+### needle="briefActive" hits=0
+### needle="briefOptIn" hits=0
+## 7) userMsgOptIn callers + nearby kairos/brief/assistant
+userMsgOptIn hits=3
+@99402800 kairosNear=false ......*.replaceQuestionPreviewFormat....2...replConfigArgv........U.replaceReplConfigArgv........d..userMsgOptIn....?...replaceUserMsgOptIn....._...searchToolsOptIn....L=..replaceSearchToolsOptIn.....Z...todoToolsOptIn.......b..replaceTodoToolsOptIn..........wizardOperatorToolsEnabled..!....b..repl
+
+@178536265 kairosNear=false estionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e
+
+@178565823 kairosNear=false En(){n().host.launchOptions.markPollEventIngressWired()}function _x(){return n().host.launchOptions.userMsgOptIn()}function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}function VEn(){return n().host.launchOptions.searchToolsOptIn()}function qEn(e){n().host.launchOptions.replaceSearchToolsOpt
+
+## 8) tengu_kairos* GrowthBook / gate strings
+tengu_kairos* prefix hits=27
+unique names: tengu_kairos_brief, tengu_kairos_brief_config, tengu_kairos_brief_stop_hook_text, tengu_kairos_cron, tengu_kairos_cron_config, tengu_kairos_cron_durable, tengu_kairos_input_needed_push, tengu_kairos_loop_keepalive, tengu_kairos_loop_persistent, tengu_kairos_loop_persistent_activated, tengu_kairos_push_notifications, tengu_kairos_ready_nudge
+### needle="tengu_kairos_brief" hits=8
+@93438104 ....Cannot destructure property 'origin' from null or undefined value...........Prompt from the ........ plugin....../..tengu_kairos_brief..'.......No content found in user prompt message......~..update:.c.......<mcp-resource-update\s+server="([^"]+)"\s+uri=
+
+@97884680  actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_mod
+
+@100977884 o>..(.......file:///B:/%7EBUN/root/chunk-reyfea04.js....RB\.Toggle brief-only mode......x. .enable_slash_command....|.a.tengu_kairos_brief_config...*.......Brief tool is not enabled for your account..#....@..Brief mode is now enabled. Use the .X...T.U. .t.o.
+
+### needle="tengu_kairos_brief_config" hits=2
+@100977884 o>..(.......file:///B:/%7EBUN/root/chunk-reyfea04.js....RB\.Toggle brief-only mode......x. .enable_slash_command....|.a.tengu_kairos_brief_config...*.......Brief tool is not enabled for your account..#....@..Brief mode is now enabled. Use the .X...T.U. .t.o.o.l. .f
+
+@195624421 UN/root/chunk-90xxmjzx.js";var a=h(()=>m({enable_slash_command:W()})),n={enable_slash_command:!1};function i(){let t=R("tengu_kairos_brief_config",n),o=a().safeParse(t);return o.success?o.data:n}var l={type:"local-jsx",name:"brief",description:"Toggle brief-only mo
+
+### needle="tengu_kairos_brief_stop_hook_text" hits=2
+@97884680  actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu
+
+@183302212 f you genuinely have nothing useful to tell the user, you may end the turn without calling it.`;function xbr(){let e=R("tengu_kairos_brief_stop_hook_text","");return typeof e==="string"&&e.length>0?e:r}
+export{Jdt,Abr,Hbe,xbr};
+.// @bun @bytecode
+// Claude Code is a Beta p
+
+### needle="tengu_kairos_cron" hits=6
+@97712968 ck in flight).......tl..loop_cancel_all......SG.loops_cancelled.(....^..file:///B:/%7EBUN/root/chunk-wcjfabjc.js....+...tengu_kairos_cron_config....]..recurringFrac........<y.recurringCapMs........<.oneShotMaxMs....Q5..oneShotFloorMs......c;C.oneShotMinute
+
+@97983836 :///B:/%7EBUN/root/chunk-v0h7mbh7.js!....27.Cancel a scheduled cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. 
+
+@97983896 ed cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .a. .f.u.t.u.r.e. .t.i.m.e. ..  .e.i.t.h.e.r. 
+
+### needle="tengu_kairos_cron_config" hits=2
+@97712968 ck in flight).......tl..loop_cancel_all......SG.loops_cancelled.(....^..file:///B:/%7EBUN/root/chunk-wcjfabjc.js....+...tengu_kairos_cron_config....]..recurringFrac........<y.recurringCapMs........<.oneShotMaxMs....Q5..oneShotFloorMs......c;C.oneShotMinuteMod(...
+
+@183304981 nt().min(0).max(60000).default(VM.cacheLeadMs)}).refine((n)=>n.oneShotFloorMs<=n.oneShotMaxMs));function ZQ(){let n=vC("tengu_kairos_cron_config",VM,o),e=i().safeParse(n);return e.success?e.data:VM}
+export{ZQ};
+.// @bun @bytecode
+// Claude Code is a Beta product p
+
+### needle="tengu_kairos_cron_durable" hits=2
+@97983896 ed cron job by ID.......G.2.List scheduled cron jobs....w...tengu_kairos_cron...........CLAUDE_CODE_DISABLE_CRON......I.tengu_kairos_cron_durable.........l.S.c.h.e.d.u.l.e. .a. .p.r.o.m.p.t. .t.o. .r.u.n. .a.t. .a. .f.u.t.u.r.e. .t.i.m.e. ..  .e.i.t.h.e.r. .r.e.c.u
+
+@181163013 axAgeMs/86400000;function dk(){return!a.CLAUDE_CODE_DISABLE_CRON&&vC("tengu_kairos_cron",!0,t)}function H5(){return vC("tengu_kairos_cron_durable",!0,t)}function Dln(e){return e?"Schedule a prompt to run at a future time \u2014 either recurring on a cron schedule, 
+
+### needle="tengu_kairos_input_needed_push" hits=2
+@98008676 tence becomes the phone banner, the full text becomes the email body............tengu_kairos_push_notifications.......*.tengu_kairos_input_needed_push..(...%...file:///B:/%7EBUN/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/chunk-9nz4npf8.js9....]z.Cross-session 
+
+@181151604 0fc.js";var t="<routine_summary>";function FU(){return R("tengu_kairos_push_notifications",!1)}function S5e(){return R("tengu_kairos_input_needed_push",!1)}function g9(){return FU()&&go("agentPushNotifEnabled",!1).value}var C5n="Send a notification to the user via their
+
+### needle="tengu_kairos_loop_keepalive" hits=2
+@97711184  .A.n.t.h.r.o.p.i.c. .c.o.n.t.a.c.t.....(...-.Y.file:///B:/%7EBUN/root/chunk-m46vh510.js....$.K.tengu_loop_ended.....w..tengu_kairos_loop_keepalive.......+.CLAUDE_CODE_LOOP_KEEPALIVE......[.W.viaKeepaliveT...`.>.[.l.o.o.p.]. .k.e.e.p.a.l.i.v.e. .b.u.d.g.e.t. .e.x.h.a
+
+@183306557 Le(),...e.keepalive&&{keepalive:!0}}}function TWn(){let e=a.CLAUDE_CODE_LOOP_KEEPALIVE;if(e!==void 0)return e;return R("tengu_kairos_loop_keepalive",!0)}function AWn(e,o,t){return E(e,o,{viaKeepalive:!1,reason:t})}function xWn(e){if(GGt()>=D)return n("[loop] keepaliv
+
+### needle="tengu_kairos_loop_persistent" hits=4
+@101185768 k ID if no longer in context).......%C..__autonomous_preamble__.....oK[.<<loop.md>>.....H...<<loop.md-dynamic>>.........tengu_kairos_loop_persistent&...$I..tengu_kairos_loop_persistent_activated..H....7h.newly blocked on a decision you won't make alone, you're ending 
+
+@101185804 %C..__autonomous_preamble__.....oK[.<<loop.md>>.....H...<<loop.md-dynamic>>.........tengu_kairos_loop_persistent&...$I..tengu_kairos_loop_persistent_activated..H....7h.newly blocked on a decision you won't make alone, you're ending the loopp...s&..newly blocked on a d
+
+@198226149 oopAutonomousPreamblePersistent-2y5ccy21.md");var se=g;function m(){if(a.CLAUDE_CODE_LOOP_PERSISTENT)return!0;return R("tengu_kairos_loop_persistent",!1)}function v(){return m()?y:g}function w(){s("tengu_kairos_loop_persistent_activated",{variant:m()})}function h(e=!1
+
+### needle="tengu_kairos_loop_persistent_activated" hits=2
+@101185804 %C..__autonomous_preamble__.....oK[.<<loop.md>>.....H...<<loop.md-dynamic>>.........tengu_kairos_loop_persistent&...$I..tengu_kairos_loop_persistent_activated..H....7h.newly blocked on a decision you won't make alone, you're ending the loopp...s&..newly blocked on a decision yo
+
+@198226227 E_CODE_LOOP_PERSISTENT)return!0;return R("tengu_kairos_loop_persistent",!1)}function v(){return m()?y:g}function w(){s("tengu_kairos_loop_persistent_activated",{variant:m()})}function h(e=!1){if(!g9())return"";let o=!e&&m()?"newly blocked on a decision you won't make alone, you
+
+### needle="tengu_kairos_push_notifications" hits=3
+@98008636 e. .i.n. ...Y...TZ. tags: the first sentence becomes the phone banner, the full text becomes the email body............tengu_kairos_push_notifications.......*.tengu_kairos_input_needed_push..(...%...file:///B:/%7EBUN/root/chunk-fhh8jcv6.js(.....@.file:///B:/%7EBUN/root/
+
+@181151542 oot/chunk-dgksvdqc.js";import{go}from"B:/~BUN/root/chunk-etr900fc.js";var t="<routine_summary>";function FU(){return R("tengu_kairos_push_notifications",!1)}function S5e(){return R("tengu_kairos_input_needed_push",!1)}function g9(){return FU()&&go("agentPushNotifEnabled"
+
+@196398839 =>"PushNotification",get inputSchema(){return _()},get outputSchema(){return b()},shouldDefer:!0,isEnabled(){return vC("tengu_kairos_push_notifications",!1,R)},isConcurrencySafe(){return!0},isReadOnly(){return!0},toAutoClassifierInput(e){return e.message},async descripti
+
+### needle="tengu_kairos_ready_nudge" hits=2
+@92287064 ount....1^..tips_rc_long_turn_show......8...rcPermissionNudgeSeenCount........p.tips_rc_permission_nudge_show.......'...tengu_kairos_ready_nudge....%. .remoteControlReadyPushKey........-..remoteControlReadyPushCount......VQ.tips_rc_ready_push_send.........android.
+
+@191289396 C.rcPermissionNudgeSeenCount??0)+1}),d),b("tips_rc_permission_nudge_show")}function Y3t(){if(!FU())return null;let d=R("tengu_kairos_ready_nudge",null);if(d===!0)return{probability:1,maxImpressions:5,impressionKey:""};if(d===null||typeof d!=="object")return null;l
+
+## 9) --assistant / feature(KAIROS) launch path
+### needle="--assistant" hits=0
+### needle="assistantForced" hits=0
+### needle="markAssistant" hits=0
+### needle="KAIROS" hits=0
+### needle="feature(\"KAIROS\")" hits=0
+### needle="feature('KAIROS')" hits=0
+### needle="tengu_kairos_assistant" hits=0
+## 10) Brief entitlement / isBriefEnabled patterns
+### needle="isBriefEntitled" hits=8
+@92296257 mptFlag....y.).appendSystemPromptFlag......s.S.thinkingConfig......q...B:/~BUN/root/chunk-ekdxnhh3.js..J...{T..Cannot destructure property 'isBriefEntitled' from null or undefined value......-u..tengu_brief_mode_enabled.....e..flag......Z.brief.......].#.CLAUDE_CODE_BRIEF........b..isBriefEntit
+
+@92296400 riefEntitled' from null or undefined value......-u..tengu_brief_mode_enabled.....e..flag......Z.brief.......].#.CLAUDE_CODE_BRIEF........b..isBriefEntitled.......C.enabled......s..gated........4..tmux......\.iterm2..
+...!w..in-process..........teammateMode	.......agentName.........f.teamName
+..
+
+@101871059 onStringvalidateUuidworkspaceV5OfwriteEntriesToJsonlFilefilterToolsByDenyRulesparseToolPresetCronCreateToolgetBriefEnforceTextisBriefEnabledisBriefEntitledshouldToolsListOptInToBriefCHECKPOINT_REF_PREFIXMAX_CHECKPOINT_FILE_COUNTMAX_CHECKPOINT_TOTAL_BYTESRESUME_MD_REPO_PATHclearLastCheckpointRes
+
+@191359041 t.os_locked_toolchain)},...{}};s("tengu_init",Je)}catch(tn){_(tn)}}function NXe(d){let C=d.brief,w=a.CLAUDE_CODE_BRIEF;if(!C&&!w)return;let{isBriefEntitled:F}=import.meta.require("B:/~BUN/root/chunk-ekdxnhh3.js"),j=F();if(j)c7(!0);s("tengu_brief_mode_enabled",{enabled:j,gated:!j,source:c(w?"env
+
+@191386653 .CLAUDE_CODE_SESSION_KIND!=="bg")Wb(at);else n(`[autocompact] ${at}`,{level:"warn"})}if(NXe(C),!De()&&!_x()&&qe().defaultView==="chat"){let{isBriefEntitled:Pe}=import.meta.require("B:/~BUN/root/chunk-ekdxnhh3.js");if(Pe())c7(!0)}let qr,Ja=null,$u=hE();if(!Zt){let Pe=await W.runOnboarding?.({ses
+
+### needle="isBriefEnabled" hits=12
+@92526985 wb.getSandboxViolationStore.....\..tengu_toggle_todos.......y:.todo_toggle_panel........`..is_expanded.I......Cannot destructure property 'isBriefEnabled' from null or undefined value.........T.isBriefEnabled.......;..tengu_toggle_transcript......td.is_entering.....2.?.show_all........open_di
+
+@92527040 .....y:.todo_toggle_panel........`..is_expanded.I......Cannot destructure property 'isBriefEnabled' from null or undefined value.........T.isBriefEnabled.......;..tengu_toggle_transcript......td.is_entering.....2.?.show_all........open_dialog_count........ec.tengu_brief_mode_toggled
+....X\.ke
+
+@101871045 tateunescapeJsonStringvalidateUuidworkspaceV5OfwriteEntriesToJsonlFilefilterToolsByDenyRulesparseToolPresetCronCreateToolgetBriefEnforceTextisBriefEnabledisBriefEntitledshouldToolsListOptInToBriefCHECKPOINT_REF_PREFIXMAX_CHECKPOINT_FILE_COUNTMAX_CHECKPOINT_TOTAL_BYTESRESUME_MD_REPO_PATHclearLa
+
+@185896265 .agentId)p_t(L,p.appendSystemMessage)}if(!p.agentId)try{yield*bE(p)}catch{}let N=null;if((g.startsWith("repl_main_thread")||g==="sdk")&&f_t.isBriefEnabled()&&!a.DISABLE_BRIEF_MODE_STOP_HOOK&&!p.agentId&&p.options.tools.some((Ne)=>Xt(Ne,G1.BRIEF_TOOL_NAME)))try{let Ne=g_t(e),Ke=e.slice(Ne+1),ze
+
+@186376787 most capable Claude models.`}var U0n=[cZ,_8n,v8n];function B0n(e){return U0n.some((t)=>t(e))}function H0n(e){if(!cZ(e))return!1;return!(rEe.isBriefEnabled()||Uae())}var j0n="Before you start, say in a line what you're about to do; brief updates while you work help the user follow along. Close 
+
+### needle="BriefTool" hits=0
+### needle="SendUserMessage" hits=16
+@96325136 ....TaskOutput......c...Snip
+....Nj.CronCreate..
+...x...CronDelete......g\1.CronList.....,..ScheduleWakeup.......O.RemoteTrigger...........SendUserMessage.......h.Brief........|..PushNotification........SendFeedback....2.4.SendUserFile.....Ac.SubscribePR.
+.......DesignSync......|.-.ClaudeDesig
+
+@98898183 UDE_CODE_HIDE_SETTINGS_HINT..
+...".B.--from-pr=..(...;.:.file:///B:/%7EBUN/root/chunk-7gekvenf.js3....h0.You ended the turn without calling SendUserMessage......../.Send a message to the user......
+..S.e.n.d. .a. .m.e.s.s.a.g.e. .t.h.e. .u.s.e.r. .w.i.l.l. .r.e.a.d... .T.e.x.t. .o.u.t.s.i.d.e.
+
+@99007767 cli:// protocol handler registration with the OS.*.......Enable voice mode (hold-to-talk dictation)..U...s.4.Default transcript view: chat (SendUserMessage checkpoints only) or transcript (full)...........Render screen-reader friendly output (flat text, no decorative borders or animations). Ove
+
+@99640143 on messaging server path: a Unix domain socket on Mac/Linux, a \\.\pipe\ name on Windows (defaults to an auto-generated path);.....=.Enable SendUserMessage tool for agent-to-user communication.V...+c..Render screen-reader friendly output (flat text, no decorative borders or animations).........
+
+@179009064 op",AgentOutputTool:"TaskOutput",BashOutputTool:"TaskOutput",AgentOutput:"TaskOutput",BashOutput:"TaskOutput",ListPeers:"ListAgents",Brief:"SendUserMessage",ListMcpResources:"ListMcpResourcesTool",ReadMcpResource:"ReadMcpResourceTool",ReadMcpResourceDir:"ReadMcpResourceDirTool"};function Sd(e){
+
+### needle="pewter_owl" hits=8
+@97884778 y end the turn without calling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu_........2.CLAUDE_CODE_PEWTER_OWL..........pewter_owl_tool.....Y...CLAUDE_CODE_PEWTER_OWL_TOOL.
+
+@97884804 ling it.!....\..tengu_kairos_brief_stop_hook_text...(.......file:///B:/%7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu_........2.CLAUDE_CODE_PEWTER_OWL..........pewter_owl_tool.....Y...CLAUDE_CODE_PEWTER_OWL_TOOL......F..pewter_owl_brief(.
+
+@97884876 7EBUN/root/chunk-2ha4bfwk.js.....)6.tengu_pewter_owl_model......~u..pewter_owl_model......c.tengu_........2.CLAUDE_CODE_PEWTER_OWL..........pewter_owl_tool.....Y...CLAUDE_CODE_PEWTER_OWL_TOOL......F..pewter_owl_brief(.......file:///B:/%7EBUN/root/chunk-xbg52ekr.js.....T..MCP_TIMEOUT.....$`
+
+@97884936 ....~u..pewter_owl_model......c.tengu_........2.CLAUDE_CODE_PEWTER_OWL..........pewter_owl_tool.....Y...CLAUDE_CODE_PEWTER_OWL_TOOL......F..pewter_owl_brief(.......file:///B:/%7EBUN/root/chunk-xbg52ekr.js.....T..MCP_TIMEOUT.....$`].MCP_CONNECT_TIMEOUT_MS..(...X.Q.file:///B:/%7EBUN/root/chu
+
+@183294648 -2q4zpwx4.js";import{st,Ye,R,uc}from"B:/~BUN/root/chunk-0qn02gme.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";function o(){let e=uc()?.pewter_owl_model;if(typeof e==="string"&&e!=="")return e;return R("tengu_pewter_owl_model","")}function r(e){if(a.CLAUDE_CODE_PEWTER_OWL!==void 0)retu
+
+### needle="getUserMsgOptIn" hits=2
+@101892861 getTotalToolDurationgetTotalWebSearchRequestsgetTracerProvidergetTurnOutputTokensgetUnsupportedThreadKeysgetUsageForModelgetUseCoworkPluginsgetUserMsgOptIngetVerifySkillRolloutGateLatchgetVimSharedStategetWizardOperatorToolsEnabledhandleAutoModeTransitionhandlePlanModeTransitionhasExitedPlanMod
+
+@192781042 de as getTracerProvider,FLe as getTurnOutputTokens,AEr as getUnsupportedThreadKeys,jwn as getUsageForModel,y7e as getUseCoworkPlugins,_x as getUserMsgOptIn,_wn as getVerifySkillRolloutGateLatch,eTn as getVimSharedState,zEn as getWizardOperatorToolsEnabled,Pkn as handleAutoModeTransition,jq as h
+
+### needle="as getUserMsgOptIn" hits=1
+@192781039 s,bde as getTracerProvider,FLe as getTurnOutputTokens,AEr as getUnsupportedThreadKeys,jwn as getUsageForModel,y7e as getUseCoworkPlugins,_x as getUserMsgOptIn,_wn as getVerifySkillRolloutGateLatch,eTn as getVimSharedState,zEn as getWizardOperatorToolsEnabled,Pkn as handleAutoModeTransition,jq as h
+
+### needle="as setUserMsgOptIn" hits=1
+@192788252 as setThinkingDisplayExplicit,iTn as setThinkingTypeOverride,YEn as setTodoToolsOptIn,LGt as setTracerProvider,G$ as setUseCoworkPlugins,c7 as setUserMsgOptIn,Swn as setVerifySkillRolloutGateLatch,tTn as setVimSharedState,jEn as setWizardOperatorToolsEnabled,lEr as snapshotCostLedger,oEr as snapsh
+
+## 11) replaceUserMsgOptIn wrapper + sibling wrappers window
+exact c7 wrapper hits=1
+@178565838 WINDOW±600:
+RestrictedSession(e)}function By(){return n().sessionFlags.memoryToggledOff()}function Sde(e){n().sessionFlags.replaceMemoryToggledOff(e)}function jEn(e){if(e===!1)throw Error("setWizardOperatorToolsEnabled(false) is test-only: the wizard latch is one-way in production");n().host.launchOptions.replaceWizardOperatorToolsEnabled(e)}function zEn(){return n().host.launchOptions.wizardOperatorToolsEnabled()}function WEn(){return n().host.launchOptions.pollEventIngressWired()}function GEn(){n().host.launchOptions.markPollEventIngressWired()}function _x(){return n().host.launchOptions.userMsgOptIn()}function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}function VEn(){return n().host.launchOptions.searchToolsOptIn()}function qEn(e){n().host.launchOptions.replaceSearchToolsOptIn(e)}function KEn(){return n().host.launchOptions.todoToolsOptIn()}function YEn(e){n().host.launchOptions.replaceTodoToolsOptIn(e)}function u7e(){return n().host.launchOptions.sessionStartType()}function d7e(e){n().host.launchOptions.replaceSessionStartType(e)}function NGt(){return n().host.launchOptions.questionPreviewFormat()}function $Gt(e){n().host.launchOptions.replaceQuestionPreviewFormat(e)}function FGt(
+
+@99402820 dualCtx=trictedSession.....|..replaceClientType.......dt..sessionStartType........replaceSessionStartType......Jh.questionPreviewFormat.........*.replaceQuestionPreviewFormat....2...replConfigArgv........U.replaceReplConfigArgv........d..userMsgOptIn....?...replaceUserMsgOptIn....._...searchToolsOptIn....L=..replaceSearchToolsOptIn.....Z...todoToolsOptIn.......b..replaceTodoToolsOptIn..........wizardOperatorToolsEnabled..!....b..replaceWizardOperatorToolsEnabled.......\...pollEventIngressWired.........
+
+@178536295 dualCtx=}sessionStartType(){return this.#p}replaceSessionStartType(e){this.#p=e}questionPreviewFormat(){return this.#u}replaceQuestionPreviewFormat(e){this.#u=e}replConfigArgv(){return this.#g}replaceReplConfigArgv(e){this.#g=e}userMsgOptIn(){return this.#h}replaceUserMsgOptIn(e){this.#h=e}searchToolsOptIn(){return this.#m}replaceSearchToolsOptIn(e){this.#m=e}todoToolsOptIn(){return this.#f}replaceTodoToolsOptIn(e){this.#f=e}wizardOperatorToolsEnabled(){return this.#v}replaceWizardOperatorToolsEnabled(e
+
+@178565876 dualCtx=torToolsEnabled()}function WEn(){return n().host.launchOptions.pollEventIngressWired()}function GEn(){n().host.launchOptions.markPollEventIngressWired()}function _x(){return n().host.launchOptions.userMsgOptIn()}function c7(e){n().host.launchOptions.replaceUserMsgOptIn(e)}function VEn(){return n().host.launchOptions.searchToolsOptIn()}function qEn(e){n().host.launchOptions.replaceSearchToolsOptIn(e)}function KEn(){return n().host.launchOptions.todoToolsOptIn()}function YEn(e){n().host.launchOpti
+
+## 12) Export table substrings around getUserMsgOptIn
+@192781039 exportWindow:
+onInputTokens,vEe as getTotalCacheReadInputTokens,al as getTotalCostUSD,T2 as getTotalDuration,SEe as getTotalInputTokens,Oq as getTotalLinesAdded,Lq as getTotalLinesRemoved,Zc as getTotalOutputTokens,wGt as getTotalToolDuration,Dwn as getTotalWebSearchRequests,bde as getTracerProvider,FLe as getTurnOutputTokens,AEr as getUnsupportedThreadKeys,jwn as getUsageForModel,y7e as getUseCoworkPlugins,_x as getUserMsgOptIn,_wn as getVerifySkillRolloutGateLatch,eTn as getVimSharedState,zEn as getWizardOperatorToolsEnabled,Pkn as handleAutoModeTransition,jq as handlePlanModeTransition,Avt as hasExitedPlanModeInSession,RGt as hasFableConsentSessionFallback,jne as hasRefusalFallbackHeaderArmed,j$ as hasRefusalFallbackOccurred,vvt as hasRegisteredSyncedPluginDirs,VGt as hasShownLspRecommendationThisSes
+
+@192788252 setExportWindow:
+tore,Awn as setStrictMcpConfig,hEr as setStrictToolResultPairing,Tde as setSyncedPluginDirs,Jkn as setSystemPromptSectionCacheEntry,vkn as setTeammateAgentId,_Gt as setTeardownUnwindRequested,n1e as setTeleportedSessionInfo,Fwn as setTerminalFocusForState,qLe as setThinkingDisplayExplicit,iTn as setThinkingTypeOverride,YEn as setTodoToolsOptIn,LGt as setTracerProvider,G$ as setUseCoworkPlugins,c7 as setUserMsgOptIn,Swn as setVerifySkillRolloutGateLatch,tTn as setVimSharedState,jEn as setWizardOperatorToolsEnabled,lEr as snapshotCostLedger,oEr as snapshotOutputTokensForTurn,k7e as swapMcpServerTools,fp as switchSession,n3t as updateInvokedSkillContent,Dq as updateLastInteractionTime,JYe as waitForScrollIdle};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Ter
+
+## VERDICT
+KEEP STATE residual — do NOT invent n() bag; do NOT collapse onto userMsgOptIn.
+
+### Proof (official SEA = contract)
+1. String/export hits=0: kairosActive, get/setKairosActive, isAssistantMode,
+   is_assistant_mode, --assistant, tengu_kairos_assistant, as get/setKairosActive.
+2. Ie launchOptions @178534988 — roster has userMsgOptIn (#h) + search/todo opt-ins;
+   NO kairos*/assistant*/briefActive latch (Ie_has_kairos=false).
+3. ge sessionFlags @178521439 — NO kairos*/assistant*/sessionSource latch.
+4. Export table neighbors of getUserMsgOptIn / setUserMsgOptIn: no Kairos/AssistantMode
+   alias either side (_x as getUserMsgOptIn; c7 as setUserMsgOptIn only).
+5. Behavioral substitute is NOT a second latch:
+   - Official Hbe @183301765: `return _x()&&Jdt()||Zan()`
+     = (userMsgOptIn && tengu_kairos_brief entitlement) || pewter_owl
+   - Brief activation sites only call `c7(!0)` (replaceUserMsgOptIn(true)) —
+     never a parallel setKairos*.
+6. tengu_kairos_* names are GrowthBook/cron/brief/push gates only — not host bags.
+7. Leftover kairosActive is LIVE product (main --assistant / brief, isAssistantMode,
+   analytics is_assistant_mode, StatusLine/Spinner/memdir/autoDream/Bash/…).
+   Official has no assistant daemon surface → no bag to land on.
+8. Collapsing leftover kairosActive → userMsgOptIn would INVENT semantics:
+   leftover Brief uses `(kairosActive||userMsgOptIn)&&entitled`; official uses
+   `userMsgOptIn&&entitled` only. Different predicates — do not merge.
+
+### Action
+KEEP STATE.kairosActive + get/setKairosActive wrappers.
+Strengthen residual comments; point at this gold.
+No bag rewire. No test rewiring onto Ie/ge/n().

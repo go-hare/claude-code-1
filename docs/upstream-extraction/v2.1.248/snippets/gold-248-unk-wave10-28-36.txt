@@ -1,0 +1,515 @@
+# gold-248-unk-wave10-28-36
+when=2026-09-20T05:53:16.756Z
+sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+items=#28 #36
+rule=unique 248 body AND leftover host, else stay UNKNOWN
+
+# ==== #28 trust-emoji-trunc ====
+- count "This folder pre-approves" 248=2 247=2
+- count "This directory pre-approves" 248=2 247=2
+- count "rule names contain unprintable" 248=2 247=2
+- count "directory names contain unprintable" 248=2 247=2
+- count "<unprintable entry>" 248=0 247=0
+- count "unprintable entry" 248=0 247=0
+- count "hasProjectAllowRules" 248=3 247=3
+- count "$_(_.rules" 248=1 247=0 **NEW248**
+- count "cTe()" 248=3 247=0 **NEW248**
+- count "uTe()" 248=2 247=0 **NEW248**
+- count "slice(0,200)" 248=58 247=56
+- count "slice(0, 200)" 248=1 247=1
+- count ".slice(0,200)+\"\\u2026\"" 248=3 247=3
+- count ".slice(0,200)+\"…\"" 248=0 247=0
+- count "function cTe(" 248=2 247=3
+- count "function uTe(" 248=2 247=1
+- count "MAX_DISCLOSURE" 248=0 247=0
+
+## #28 leftover-slice-shape  needle="slice(0,200)"  248=58 247=56
+- #0 @179281149 pipe","pipe"],useToolMemoryCgroup:c}=s;d?.throwIfAborted();using f=xd`exec: ${r.slice(0,200)}`;try{let E=dQn(r,{env:process.env,maxBuffer:1e6,timeout:p,cwd:te(),stdio:l,rej
+- #1 @183123870 &s.status!==201){n(`[trusted-device] Enrollment failed ${s.status}: ${S(s.data).slice(0,200)}`),f("bridge_trusted_device_enroll","http_error",d);return}let p=s.data?.device
+- #2 @183250706 With("cse_"))return n(`[code-session] No session.id (cse_*) in response: ${S(_).slice(0,200)}`),{terminal:!0,reason:"malformed_response",status:a.status,detail:void 0};retu
+- #3 @183252419 nse malformed (need worker_jwt, expires_in, api_base_url, worker_epoch): ${S(t).slice(0,200)}`),{terminal:!0,reason:"malformed_response",status:200};let g=t.worker_epoch,d=
+- #4 @183925115 =q(U);return O2t(j)}catch{return n(`PowerShell parser: invalid JSON output: ${U.slice(0,200)}`),wv(e,"Invalid JSON from PowerShell parser","InvalidJson")}}var L2t=new Set([
+- #5 @184479519 put: ${N}`}).join(`
+
+`),k=o?`User's intent (from assistant's last message): ${o.slice(0,200)}
+
+`:"",E=await fA({systemPrompt:di([bQt]),userPrompt:`${k}Tools completed:
+
+${g
+- #6 @184507620 :()=>new Je});continue}}let fe=typeof N.data?.message==="string"?N.data.message.slice(0,200):void 0,we=U>1?` after ${U} attempts with backoff`:"",Pe=N.status===429&&pe!==vo
+- #7 @184638661 ote_task_type:v("ultrareview"),reason:c(t)});let g=o?`: ${o.replace(/[<>]/g,"").slice(0,200)}`:"",k=Qfe[t]+g;ya({value:lu({taskId:e,taskType:"remote_agent",status:"failed",
+- #8 @184693299 ction Dy(e){return e.replace(/[\p{Cc}\p{Cf}]/gu," ").replace(/\s+/g," ").trim().slice(0,200)}function lar(e){if(e.filePath)return e.filePath;if(J8(e))return`plugin '${e.plu
+- #9 @184994035 h-t;return o>0?`${r} and ${o} more`:r}function HS(e,t){return t?jp(dn(e),200):e.slice(0,200)}var fhn={git_file:"whose .git file does not hold the single pointer git writes 
+- #10 @185004084 ="failed"){n(`[gitBundle] could not read the checkout's git layout: ${pe.detail.slice(0,200)}`);let yt=pe.why==="git_not_found";return s("tengu_ccr_bundle_upload",{...k,out
+- #11 @185006547 e("admin_dir");n(`[gitBundle] could not set up the private git dir: ${xe.detail.slice(0,200)}`),s("tengu_ccr_bundle_upload",{...k,outcome:v("admin_dir_failed")}),f("telepor
+- … +46 more
+
+## #28 leftover-slice-shape-sp  needle="slice(0, 200)"  248=1 247=1
+- #0 @220980126 tContent ?? '').trim();
+      return { caught: t.startsWith('\u26A0'), text: t.slice(0, 200) };
+    }).catch(() => ({ caught: false, text: '' }));
+    const file = `${c.g
+
+## #28 unprintable-entry  needle="<unprintable entry>"  248=0 247=0
+
+## #28 unprintable-entry-bare  needle="unprintable entry"  248=0 247=0
+
+## 247 #28 unprintable-entry  needle="<unprintable entry>"  247=0
+
+## 247 #28 leftover-slice-shape  needle="slice(0,200)"  247=56
+- #0 @207521473 "pipe","pipe"],useToolMemoryCgroup:a}=i;u?.throwIfAborted();using f=W`exec: ${r.slice(0,200)}`;try{let l=F(r,{env:process.env,maxBuffer:1e6,timeout:_,cwd:c(),stdio:d,reject
+- #1 @210617552 With("cse_"))return l(`[code-session] No session.id (cse_*) in response: ${S(m).slice(0,200)}`),{terminal:!0,reason:"malformed_response",status:u.status,detail:void 0};retu
+- #2 @210619256 nse malformed (need worker_jwt, expires_in, api_base_url, worker_epoch): ${S(t).slice(0,200)}`),{terminal:!0,reason:"malformed_response",status:200};let p=t.worker_epoch,c=
+- #3 @210704050 &s.status!==201){t(`[trusted-device] Enrollment failed ${s.status}: ${H(s.data).slice(0,200)}`),d("bridge_trusted_device_enroll","http_error",u);return}let k=s.data?.device
+- #4 @211776802 nc function Bt(){let e=D();try{let i=await Xe(e),t=Date.now()-Je;for(let r of i.slice(0,200)){let o=w(e,r);try{let a=await pe(o);if(a.isFile()&&a.mtimeMs<t)await ue(o)}catc
+- #5 @212210209 et y=e.getSubGates(),f=fr(t);r.silly(`[${i}] tool=${n} args=${JSON.stringify(f).slice(0,200)}`);try{if(n==="request_access")return await Xr(e,f,l,u);if(n==="request_teach_a
+- #6 @213257334 eof e.$schema==="string"&&!_yo.has(e.$schema.replace(/#$/,""))){let r=e.$schema.slice(0,200);throw Error(`JSON Schema declares an unsupported dialect ("$schema": "${r}"). T
+- #7 @213480011  0||o.ok)return;let l=o.compileError,c=(l instanceof Error?l.message:String(l)).slice(0,200);throw new gs(Kr.InvalidParams,`Tool '${e.name}' has an invalid outputSchema: ${
+
+## #28 248 This folder pre-approves @203839555
+]=le,n[42]=pe;else ie=n[40],le=n[41],pe=n[42];const Ve=(R||B||F)&&r(o,{flexDirection:"column",children:[R&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder pre-approves ",_.rawCount," ",I(_.rawCount,"tool permission")," in"," ",$_(_.sources),":"]}),r(t,{children:["  ",_.rules.length>0?$_(_.rules,8):"(rule names contain unprintable characters)"]})]}),B&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"directory","directories")," ","to the workspace 
+
+## #28 248 This folder pre-approves-fn near@203839555 fn=c @203837632
+## #28 248 This folder pre-approves-fn c @203837632
+len=665 sha=8b37a65f7f105670 exactOther=0
+function c(Tt){if(V.current||ys()){return}if(l()||u()){d();return}if(V.current=!0,Tt==="exit"){if(y){f("onboarding_trust_dialog","gated_grants_backstop_declined"),P();return}f("onboarding_trust_dialog","onboarding_trust_denied"),Lr(1);return}let Po=g0();if(b("onboarding_trust_dialog"),s("tengu_trust_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re}),Po)Sx(!0),t1e(!0);else cc(qo,xe);P()}
+
+## #28 247 This folder pre-approves @205304492
+ode, a well-known open source project, or work from your team). If not, take a moment to review what....."..s in this folder first..1.......ll be able to read, edit, and execute files here........z...This folder pre-approves ...........tool permission.+....!..(rule names contain unprintable characters).......`.This folder adds .......X[..to the workspace in.0.......(directory names contain unprintable characters)L...c...This folder runs commands to mint HTTP headers (headersHelper), declared in N....~..These will apply without asking. Only proceed if you trust this configuration........(+.Secu
+
+## #28 247 This folder pre-approves-fn near@205304492 fn= @-1
+## #28 247 This folder pre-approves-fn  @-1
+MISS
+
+## #28 247 This folder pre-approves @233433969
+31]=ee,o[32]=oe;else O=o[30],ee=o[31],oe=o[32];const oo=(E||M||G)&&e(P,{flexDirection:"column",children:[E&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder pre-approves ",b.rawCount," ",j(b.rawCount,"tool permission")," in"," ",c(b.sources),":"]}),e(t,{children:["  ",b.rules.length>0?c(b.rules,8):"(rule names contain unprintable characters)"]})]}),M&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder adds ",S.rawCount," ",j(S.rawCount,"directory","directories")," ","to the workspace in"
+
+## #28 247 This folder pre-approves-fn near@233433969 fn=a @233432211
+## #28 247 This folder pre-approves-fn a @233432211
+len=639 sha=00afa46b25dbff4f exactOther=0
+function a(st){if(L.current||ue()){return}if(L.current=!0,st==="exit"){if(f){T("onboarding_trust_dialog","gated_grants_backstop_declined"),A();return}T("onboarding_trust_dialog","onboarding_trust_denied"),p(1);return}let zo=_();if(ae("onboarding_trust_dialog"),D("tengu_trust_dialog_accept",{isHomeDir:zo,hasMcpServers:Qe,hasHooks:Ye,hasBashExecution:g,hasProjectAllowRules:E,hasProjectAddDirs:M,hasApiKeyHelper:ze,hasAwsCommands:Je,hasGcpCommands:Ue,hasOtelHeadersHelper:Xe,hasProxyAuthHelper:Ze,hasMarketplaceHeadersHelper:$e,hasRepoHeadersHelpers:G,hasDangerousEnvVars:We,hasAutoMemoryDirectory:Le}),zo)ne(!0),ie(!0);else pe(Sr,Ne);A()}
+
+## #28 248 This directory pre-approves @210240417
+okSources:Pe,commandHelperSources:De}=Ct,Te;if(Y[0]!==P.rawCount||Y[1]!==P.rules||Y[2]!==P.sources)Te=P.sources.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory pre-approves ",P.rawCount," ",I(P.rawCount,"tool permission","tool permissions")," ","in ",$_(P.sources),":"," ",$_(P.rules,8)]}),Y[0]=P.rawCount,Y[1]=P.rules,Y[2]=P.sources,Y[3]=Te;else Te=Y[3];let Ge;if(Y[4]!==D.dirs||Y[5]!==D.rawCount||Y[6]!==D.sources)Ge=D.sources.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory grants access
+
+## #28 248 This directory pre-approves-fn near@210240417 fn=_e @210240118
+## #28 248 This directory pre-approves-fn _e @210240118
+len=1918 sha=d45732890fdecdd7 exactOther=0
+function _e(vt){let Y=g(22),{disclosures:Ct,backstop:F}=vt,{allowRules:P,additionalDirectories:D,hookSources:Pe,commandHelperSources:De}=Ct,Te;if(Y[0]!==P.rawCount||Y[1]!==P.rules||Y[2]!==P.sources)Te=P.sources.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory pre-approves ",P.rawCount," ",I(P.rawCount,"tool permission","tool permissions")," ","in ",$_(P.sources),":"," ",$_(P.rules,8)]}),Y[0]=P.rawCount,Y[1]=P.rules,Y[2]=P.sources,Y[3]=Te;else Te=Y[3];let Ge;if(Y[4]!==D.dirs||Y[5]!==D.rawCount||Y[6]!==D.sources)Ge=D.sources.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory grants access to ",D.rawCount," ","additional"," ",I(D.rawCount,"directory","directories")," ","in ",$_(D.sources),":"," ",$_(D.dirs,6)]}),Y[4]=D.dirs,Y[5]=D.rawCount,Y[6]=D.sources,Y[7]=Ge;else Ge=Y[7];let xe;if(Y[8]!==F||Y[9]!==Pe)xe=!F&&Pe.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory configures hooks that run commands, declared in"," ",$_(Pe)]}),Y[8]=F,Y[9]=Pe,Y[10]=xe;else xe=Y[10];let Ne;if(Y[11]!==F||Y[12]!==De)Ne=!F&&De.length>0&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This directory runs commands on the session","'","s behalf (auth / header helpers), declared in"," ",$_(De)]}),Y[11]=F,Y[12]=De,Y[13]=Ne;else Ne=Y[13];const Ee=F?"These apply to this session only if you trust it. Only proceed if you trust this configuration.":"These will apply to this session as soon as you move. Only proceed if you trust this configuration.";let ke;if(Y[14]!==Ee)ke=e(t,{dimColor:!0,children:Ee}),Y[14]=Ee,Y[15]=ke;else ke=Y[15];let Co;if(Y[16]!==Te||Y[17]!==Ge||Y[18]!==xe||Y[19]!==Ne||Y[20]!==ke)Co=r(o,{flexDirection:"column",children:[Te,Ge,xe,Ne,ke]}),Y[16]=Te,Y[17]=Ge,Y[18]=xe,Y[19]=Ne,Y[20]=ke,Y[21]=Co;else Co=Y[21];return Co}
+
+## #28 247 This directory pre-approves @205533060
+ them off........&..No, stay putF...J...Cannot destructure property 'disclosures' from null or undefined value..E....8..Cannot destructure property 'allowRules' from null or undefined value...........This directory pre-approves ........tool permissions .......This directory grants access to >... ...This directory configures hooks that run commands, declared in..+...._q.This directory runs commands on the session.-...{.W.s behalf (auth / header helpers), declared in..._...L.d.These apply to this session only if you trust it. Only proceed if you trust this configuration..c....|G.These will apply
+
+## #28 247 This directory pre-approves-fn near@205533060 fn= @-1
+## #28 247 This directory pre-approves-fn  @-1
+MISS
+
+## #28 247 This directory pre-approves @237268113
+ookSources:Te,commandHelperSources:Ge}=fr,Ne;if(B[0]!==R.rawCount||B[1]!==R.rules||B[2]!==R.sources)Ne=R.sources.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory pre-approves ",R.rawCount," ",Z(R.rawCount,"tool permission","tool permissions")," ","in ",v(R.sources),":"," ",v(R.rules,8)]}),B[0]=R.rawCount,B[1]=R.rules,B[2]=R.sources,B[3]=Ne;else Ne=B[3];let $e;if(B[4]!==M.dirs||B[5]!==M.rawCount||B[6]!==M.sources)$e=M.sources.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory grants access to
+
+## #28 247 This directory pre-approves-fn near@237268113 fn=Ze @237267815
+## #28 247 This directory pre-approves-fn Ze @237267815
+len=1908 sha=fd282ed9dd7288c6 exactOther=0
+function Ze(mr){let B=_(22),{disclosures:fr,backstop:O}=mr,{allowRules:R,additionalDirectories:M,hookSources:Te,commandHelperSources:Ge}=fr,Ne;if(B[0]!==R.rawCount||B[1]!==R.rules||B[2]!==R.sources)Ne=R.sources.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory pre-approves ",R.rawCount," ",Z(R.rawCount,"tool permission","tool permissions")," ","in ",v(R.sources),":"," ",v(R.rules,8)]}),B[0]=R.rawCount,B[1]=R.rules,B[2]=R.sources,B[3]=Ne;else Ne=B[3];let $e;if(B[4]!==M.dirs||B[5]!==M.rawCount||B[6]!==M.sources)$e=M.sources.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory grants access to ",M.rawCount," ","additional"," ",Z(M.rawCount,"directory","directories")," ","in ",v(M.sources),":"," ",v(M.dirs,6)]}),B[4]=M.dirs,B[5]=M.rawCount,B[6]=M.sources,B[7]=$e;else $e=B[7];let xe;if(B[8]!==O||B[9]!==Te)xe=!O&&Te.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory configures hooks that run commands, declared in"," ",v(Te)]}),B[8]=O,B[9]=Te,B[10]=xe;else xe=B[10];let ke;if(B[11]!==O||B[12]!==Ge)ke=!O&&Ge.length>0&&n(s,{bold:!0,color:"warning",children:[e(N,{status:"warning",withSpace:!0}),"This directory runs commands on the session","'","s behalf (auth / header helpers), declared in"," ",v(Ge)]}),B[11]=O,B[12]=Ge,B[13]=ke;else ke=B[13];const fo=O?"These apply to this session only if you trust it. Only proceed if you trust this configuration.":"These will apply to this session as soon as you move. Only proceed if you trust this configuration.";let _e;if(B[14]!==fo)_e=e(s,{dimColor:!0,children:fo}),B[14]=fo,B[15]=_e;else _e=B[15];let Wo;if(B[16]!==Ne||B[17]!==$e||B[18]!==xe||B[19]!==ke||B[20]!==_e)Wo=n(k,{flexDirection:"column",children:[Ne,$e,xe,ke,_e]}),B[16]=Ne,B[17]=$e,B[18]=xe,B[19]=ke,B[20]=_e,B[21]=Wo;else Wo=B[21];return Wo}
+
+## #28 248 rule names contain unprintable @203839713
+n:[e(Qe,{status:"warning",withSpace:!0}),"This folder pre-approves ",_.rawCount," ",I(_.rawCount,"tool permission")," in"," ",$_(_.sources),":"]}),r(t,{children:["  ",_.rules.length>0?$_(_.rules,8):"(rule names contain unprintable characters)"]})]}),B&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"directory","directories")," ","to the workspace in"," ",$_(T.sources),":"]}),r(t,{children:["  ",T.dirs.length>0?$_(T.dirs,6):"(directory names contain unprintable characters)"]})]}),F&&r(t,{bold:!0,color:"
+
+## #28 248 rule names contain unprintable-fn near@203839713 fn=c @203837632
+## #28 248 rule names contain unprintable-fn c @203837632
+len=665 sha=8b37a65f7f105670 exactOther=0
+function c(Tt){if(V.current||ys()){return}if(l()||u()){d();return}if(V.current=!0,Tt==="exit"){if(y){f("onboarding_trust_dialog","gated_grants_backstop_declined"),P();return}f("onboarding_trust_dialog","onboarding_trust_denied"),Lr(1);return}let Po=g0();if(b("onboarding_trust_dialog"),s("tengu_trust_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re}),Po)Sx(!0),t1e(!0);else cc(qo,xe);P()}
+
+## #28 247 rule names contain unprintable @205304553
+). If not, take a moment to review what....."..s in this folder first..1.......ll be able to read, edit, and execute files here........z...This folder pre-approves ...........tool permission.+....!..(rule names contain unprintable characters).......`.This folder adds .......X[..to the workspace in.0.......(directory names contain unprintable characters)L...c...This folder runs commands to mint HTTP headers (headersHelper), declared in N....~..These will apply without asking. Only proceed if you trust this configuration........(+.Security guide......`3..Yes, I trust this folder&...P.z.No, conti
+
+## #28 247 rule names contain unprintable-fn near@205304553 fn= @-1
+## #28 247 rule names contain unprintable-fn  @-1
+MISS
+
+## #28 247 rule names contain unprintable @233434125
+dren:[r(m,{status:"warning",withSpace:!0}),"This folder pre-approves ",b.rawCount," ",j(b.rawCount,"tool permission")," in"," ",c(b.sources),":"]}),e(t,{children:["  ",b.rules.length>0?c(b.rules,8):"(rule names contain unprintable characters)"]})]}),M&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder adds ",S.rawCount," ",j(S.rawCount,"directory","directories")," ","to the workspace in"," ",c(S.sources),":"]}),e(t,{children:["  ",S.dirs.length>0?c(S.dirs,6):"(directory names contain unprintable characters)"]})]}),G&&e(t,{bold:!0,color:"war
+
+## #28 247 rule names contain unprintable-fn near@233434125 fn=a @233432211
+## #28 247 rule names contain unprintable-fn a @233432211
+len=639 sha=00afa46b25dbff4f exactOther=0
+function a(st){if(L.current||ue()){return}if(L.current=!0,st==="exit"){if(f){T("onboarding_trust_dialog","gated_grants_backstop_declined"),A();return}T("onboarding_trust_dialog","onboarding_trust_denied"),p(1);return}let zo=_();if(ae("onboarding_trust_dialog"),D("tengu_trust_dialog_accept",{isHomeDir:zo,hasMcpServers:Qe,hasHooks:Ye,hasBashExecution:g,hasProjectAllowRules:E,hasProjectAddDirs:M,hasApiKeyHelper:ze,hasAwsCommands:Je,hasGcpCommands:Ue,hasOtelHeadersHelper:Xe,hasProxyAuthHelper:Ze,hasMarketplaceHeadersHelper:$e,hasRepoHeadersHelpers:G,hasDangerousEnvVars:We,hasAutoMemoryDirectory:Le}),zo)ne(!0),ie(!0);else pe(Sr,Ne);A()}
+
+## #28 function cTe( @203817988
+len=333 sha=8a9982435363ca73 exactOther=0
+function cTe(t=S()){let e=[],s=[];for(let[o,n]of t.sources){let u=t.rules(o).filter((h)=>h.ruleBehavior==="allow");if(u.length>0)e.push(n),s.push(...u)}let r=s.length;s.sort((o,n)=>g(o)-g(n));let i=new Set,c=[];for(let o of s){let n=d($r(o.ruleValue));if(n.length>0&&!i.has(n))i.add(n),c.push(n)}return{rules:c,sources:e,rawCount:r}}
+
+## #28 function cTe( @224160803
+len=669 sha=8c35da05e047528d exactOther=250716349
+function cTe(e,t,n){let r=e.slice(0,e.indexOf("/")),o=Kh(t);if(r===Xh&&o>XRe){let i=ly(t.path)??sy(e);return"Artboard \u201C"+(ly(t.title)??i.replace(/\.dc\.html$/,""))+"\u201D is too large to sync ("+AH(o)+" KB > 200 KB). Split it or move images to assets."}if(r===fA&&o>$Re)return"\u201C"+(ly(t.path)??sy(e))+"\u201D is too large to sync ("+AH(o)+" KB > 180 KB). Upload images as assets instead.";if(o>ZRe)return"This change is too large to sync ("+AH(o)+" KB).";if(TH(t)>JRe)return"This change is nested too deeply to sync.";if(n>QRe)return"This canvas\u2019s "+(r===qh?"comments":r)+" are over the 2 MB live-sync budget. Move images to assets or split the canvas."}
+
+## #28 function uTe( @185878343
+len=83 sha=8549fcd4ea163370 exactOther=0
+function uTe(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type==="dream"}
+
+## #28 function uTe( @203818409
+len=316 sha=f83a9aa5478f0aa7 exactOther=0
+function uTe(t=S()){let e=[],s=[];for(let[o,n]of t.sources){let u=t.read(o)?.permissions?.additionalDirectories??[];if(u.length>0)e.push(n),s.push(...u)}let r=s.length,i=new Set,c=[];for(let o of s){let n=d(o);if(n.length>0&&!i.has(n))i.add(n),c.push(n)}return c.sort((o,n)=>p(o)-p(n)),{dirs:c,sources:e,rawCount:r}}
+
+## #28 rules-join  needle="$_(_.rules"  248=1 247=0  **NEW248**
+- #0 @203839697 warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder pre-approves ",_.rawCount," ",I(_.rawCount,"tool permission")," in"," ",$_(_.sources),":"]}),r(t,{children:["  ",_.rules.length>0?$_(_.rules,8):"(rule names contain unprintable characters)"]})]}),B&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"
+
+## #28 dirs-join  needle="$_(T.dirs"  248=1 247=0  **NEW248**
+- #0 @203840020 e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"directory","directories")," ","to the workspace in"," ",$_(T.sources),":"]}),r(t,{children:["  ",T.dirs.length>0?$_(T.dirs,6):"(directory names contain unprintable characters)"]})]}),F&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder runs commands to mint HTTP headers (headersHel
+
+## 247 #28 .rules,8  needle=".rules,8"  247=2
+- #0 @233434113 withSpace:!0}),"This folder pre-approves ",b.rawCount," ",j(b.rawCount,"tool permission")," in"," ",c(b.sources),":"]}),e(t,{children:["  ",b.rules.length>0?c(b.rules,8):"(rule names contain unprintable characters)"]})]}),M&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder
+- #1 @237268243 tus:"warning",withSpace:!0}),"This directory pre-approves ",R.rawCount," ",Z(R.rawCount,"tool permission","tool permissions")," ","in ",v(R.sources),":"," ",v(R.rules,8)]}),B[0]=R.rawCount,B[1]=R.rules,B[2]=R.sources,B[3]=Ne;else Ne=B[3];let $e;if(B[4]!==M.dirs||B[5]!==M.rawCount||B[6]!==M.sources)$e=M.sources.length>0&&n(s,{b
+
+## 247 #28 .rules  needle="rules,8"  247=2
+- #0 @233434114 ",b.rawCount," ",j(b.rawCount,"tool permission")," in"," ",c(b.sources),":"]}),e(t,{children:["  ",b.rules.length>0?c(b.rules,8):"(rule names contain unprintable characters)"]})]}),M&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{stat
+- #1 @237268244 ory pre-approves ",R.rawCount," ",Z(R.rawCount,"tool permission","tool permissions")," ","in ",v(R.sources),":"," ",v(R.rules,8)]}),B[0]=R.rawCount,B[1]=R.rules,B[2]=R.sources,B[3]=Ne;else Ne=B[3];let $e;if(B[4]!==M.dirs||B[5]!==M.rawCount||B[6]!=
+
+## #28 Go-trust-cands 203835504
+## #28 Go @203835504
+len=6215 sha=20a8dc730a25725d exactOther=0
+function Go(yt){let n=g(67),{onDone:P,commands:v}=yt,{storageV5:xe}=fe(),io;if(n[0]===p)io=tp("project"),n[0]=io;else io=n[0];let{servers:kt}=io,co;if(n[1]===p)co=Object.keys(kt),n[1]=co;else co=n[1];let Se=co.length>0,lo;if(n[2]===p)lo=Bqt(),n[2]=lo;else lo=n[2];let De=lo.length>0,uo;if(n[3]===p)uo=jqt(),n[3]=uo;else uo=n[3];let Ct=uo,_=cTe(),R=_.sources.length>0,T=uTe(),B=T.sources.length>0,po;if(n[4]===p)po=Gqt(),n[4]=po;else po=n[4];let He=po.length>0,ho;if(n[5]===p)ho=Vqt(),n[5]=ho;else ho=n[5];let ve=ho.length>0,fo;if(n[6]===p)fo=qqt(),n[6]=fo;else fo=n[6];let _e=fo.length>0,mo;if(n[7]===p)mo=zqt(),n[7]=mo;else mo=n[7];let Te=mo.length>0,go;if(n[8]===p)go=Kqt(),n[8]=go;else go=n[8];let je=go.length>0,wo;if(n[9]===p){let bo=Fwt();let yo=$wt(bo);wo={marketplaceHelperSources:bo,repoHelperSources:yo,offerBackstop:cre(yo)};n[9]=wo}else wo=n[9];let{marketplaceHelperSources:xt,repoHelperSources:ko,offerBackstop:St}=wo,Ae=xt.length>0,F=ko.length>0,Co;if(n[10]===p)Co=Yqt(),n[10]=Co;else Co=n[10];let Pe=Co.length>0,xo;if(n[11]===p)xo=Wqt(),n[11]=xo;else xo=n[11];let Re=xo.length>0,So;if(n[12]!==v)So=v?.some(No)??!1,n[12]=v,n[13]=So;else So=n[13];let Dt=So,Do;if(n[14]!==v)Do=v?.some(Ko)??!1,n[14]=v,n[15]=Do;else Do=n[15];let Ht=Do,w=Ct.length>0||Dt||Ht,Ho;if(n[16]===p)Ho=Jo(),n[16]=Ho;else Ho=n[16];let vo=Ho,y=vo,_o,To;if(n[17]!==w)_o=()=>{let vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De,w,R,B,He,ve,_e,Te,je,Ae,F,Pe,Re],n[17]=w,n[18]=_o,n[19]=To;else _o=n[18],To=n[19];k(_o,To);let V=E(!1),l=Is(),{refusedWithin:u,noteRefused:d,epoch:_t}=Hi(),jo;if(n[20]!==l||n[21]!==d||n[22]!==u)jo=function K(){if(l()||u()){return d(),!0}return!1},n[20]=l,n[21]=d,n[22]=u,n[23]=jo;else jo=n[23];let K=jo,Ee=qf(),Ie=Hs(_t),Ao;if(n[24]!==w||n[25]!==y||n[26]!==l||n[27]!==d||n[28]!==P||n[29]!==u||n[30]!==xe)Ao=function c(Tt){if(V.current||ys()){return}if(l()||u()){d();return}if(V.current=!0,Tt==="exit"){if(y){f("onboarding_trust_dialog","gated_grants_backstop_declined"),P();return}f("onboarding_trust_dialog","onboarding_trust_denied"),Lr(1);return}let Po=g0();if(b("onboarding_trust_dialog"),s("tengu_trust_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re}),Po)Sx(!0),t1e(!0);else cc(qo,xe);P()},n[24]=w,n[25]=y,n[26]=l,n[27]=d,n[28]=P,n[29]=u,n[30]=xe,n[31]=Ao;else Ao=n[31];let c=Ao,Ro;if(n[32]===p)Ro=()=>{V.current=!0,Lr(1)},n[32]=Ro;else Ro=n[32];let j=hi(Ro),Eo;if(n[33]!==y||n[34]!==l||n[35]!==d||n[36]!==c||n[37]!==u)Eo=()=>{if(cT()){c("exit");return}if(y){c("exit");return}if(l()||u()){d();return}if(V.current||ys()){return}V.current=!0,Lr(0)},n[33]=y,n[34]=l,n[35]=d,n[36]=c,n[37]=u,n[38]=Eo;else Eo=n[38];let Io;if(n[39]===p)Io={context:"Confirmation"},n[39]=Io;else Io=n[39];if(Fe("confirm:no",Eo,Io),vo&&!St){return queueMicrotask(P),null}const Be=Zo,jt="warning",At="warning",Pt="Accessing workspace:",Me=o,Rt="column",Et=1,It=1;let ie,le,pe;if(n[40]===p)ie=e(t,{bold:!0,children:Jn(ce().cwd())}),le=r(t,{children:["Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what","'","s in this folder first."]}),pe=r(t,{children:["Claude Code","'","ll be able to read, edit, and execute files here."]}),n[40]=ie,n[41]=le,n[42]=pe;else ie=n[40],le=n[41],pe=n[42];const Ve=(R||B||F)&&r(o,{flexDirection:"column",children:[R&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder pre-approves ",_.rawCount," ",I(_.rawCount,"tool permission")," in"," ",$_(_.sources),":"]}),r(t,{children:["  ",_.rules.length>0?$_(_.rules,8):"(rule names contain unprintable characters)"]})]}),B&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"directory","directories")," ","to the workspace in"," ",$_(T.sources),":"]}),r(t,{children:["  ",T.dirs.length>0?$_(T.dirs,6):"(directory names contain unprintable characters)"]})]}),F&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder runs commands to mint HTTP headers (headersHelper), declared in ",$_(ko)]}),e(t,{dimColor:!0,children:"These will apply without asking. Only proceed if you trust this configuration."})]});let Bo;if(n[43]===p)Bo=e(t,{dimColor:!0,children:e(it,{url:"https://code.claude.com/docs/en/security",children:"Security guide"})}),n[43]=Bo;else Bo=n[43];let de,he;if(n[44]!==c)de=()=>c("enable_all"),he=()=>c("exit"),n[44]=c,n[45]=de,n[46]=he;else de=n[45],he=n[46];let me;if(n[47]!==Ie.remountKey||n[48]!==K||n[49]!==Ee||n[50]!==de||n[51]!==he)me=e(hn,{refuseInput:K,windowAnchorMs:Ee,hideIndexes:!0,cancelFirst:!0,focus:"cancel",confirmLabel:"Yes, I trust this folder",cancelLabel:y?"No, continue without these permissions":"No, exit",onConfirm:de,onCancel:he},Ie.remountKey),n[47]=Ie.remountKey,n[48]=K,n[49]=Ee,n[50]=de,n[51]=he,n[52]=me;else me=n[52];let ge;if(n[53]!==j.keyName||n[54]!==j.pending)ge=e(t,{dimColor:!0,children:j.pending?r(L,{children:["Press ",j.keyName," again to exit"]}):r(ue,{children:[e(M,{chord:"enter",action:"confirm"}),e(M,{chord:"escape",action:"cancel"})]})}),n[53]=j.keyName,n[54]=j.pending,n[55]=ge;else ge=n[55];let we;if(n[56]!==Me||n[57]!==ie||n[58]!==le||n[59]!==pe||n[60]!==Ve||n[61]!==me||n[62]!==ge)we=r(Me,{flexDirection:Rt,gap:Et,paddingTop:It,children:[ie,le,pe,Ve,Bo,me,ge]}),n[56]=Me,n[57]=ie,n[58]=le,n[59]=pe,n[60]=Ve,n[61]=me,n[62]=ge,n[63]=we;else we=n[63];let Mo;if(n[64]!==Be||n[65]!==we)Mo=e(Be,{color:jt,titleColor:At,title:Pt,children:we}),n[64]=Be,n[65]=we,n[66]=Mo;else Mo=n[66];return Mo}
+
+- Go has "slice(": false
+- Go has "Segmenter": false
+- Go has "grapheme": false
+- Go has "toWellFormed": false
+- Go has "Xi()": false
+- Go has "R(": false
+- Go has "W(": false
+- Go has "_.rules": true
+- Go has "cTe": true
+- Go has "uTe": true
+## #28 247 trust-shown near@205305076 fn= @-1
+## #28 247 trust-shown  @-1
+MISS
+
+## #28 247 trust-shown near@233431704 fn=Cr @233430346
+## #28 247 trust-shown Cr @233430346
+len=5496 sha=71ae82a03dab5211 exactOther=0
+function Cr($r){let o=no(50),{onDone:A,commands:x}=$r,{storageV5:Ne}=he(),So;if(o[0]===n)So=xe("project"),o[0]=So;else So=o[0];let{servers:Wr}=So,Ho;if(o[1]===n)Ho=Object.keys(Wr),o[1]=Ho;else Ho=o[1];let Qe=Ho.length>0,_o;if(o[2]===n)_o=He(),o[2]=_o;else _o=o[2];let Ye=_o.length>0,Do;if(o[3]===n)Do=je(),o[3]=Do;else Do=o[3];let Lr=Do,b=_e(),E=b.sources.length>0,S=De(),M=S.sources.length>0,jo;if(o[4]===n)jo=ve(),o[4]=jo;else jo=o[4];let ze=jo.length>0,To;if(o[5]===n)To=Re(),o[5]=To;else To=o[5];let Je=To.length>0,Po;if(o[6]===n)Po=Be(),o[6]=Po;else Po=o[6];let Ue=Po.length>0,vo;if(o[7]===n)vo=Te(),o[7]=vo;else vo=o[7];let Xe=vo.length>0,Ro;if(o[8]===n)Ro=Ae(),o[8]=Ro;else Ro=o[8];let Ze=Ro.length>0,Bo;if(o[9]===n){let Ao=Ve();let Eo=Ge(Ao);Bo={marketplaceHelperSources:Ao,repoHelperSources:Eo,offerBackstop:Me(Eo)};o[9]=Bo}else Bo=o[9];let{marketplaceHelperSources:Or,repoHelperSources:Mo,offerBackstop:et}=Bo,$e=Or.length>0,G=Mo.length>0,Go;if(o[10]===n)Go=Ee(),o[10]=Go;else Go=o[10];let We=Go.length>0,Vo;if(o[11]===n)Vo=Pe(),o[11]=Vo;else Vo=o[11];let Le=Vo.length>0,Fo;if(o[12]!==x)Fo=x?.some(xr)??!1,o[12]=x,o[13]=Fo;else Fo=o[13];let ot=Fo,qo;if(o[14]!==x)qo=x?.some(br)??!1,o[14]=x,o[15]=qo;else qo=o[15];let rt=qo,g=Lr.length>0||ot||rt,Io;if(o[16]===n)Io=le(),o[16]=Io;else Io=o[16];let Ko=Io,f=Ko,No,Qo;if(o[17]!==g)No=()=>{let tt=_();D("tengu_trust_dialog_shown",{isHomeDir:tt,hasMcpServers:Qe,hasHooks:Ye,hasBashExecution:g,hasProjectAllowRules:E,hasProjectAddDirs:M,hasApiKeyHelper:ze,hasAwsCommands:Je,hasGcpCommands:Ue,hasOtelHeadersHelper:Xe,hasProxyAuthHelper:Ze,hasMarketplaceHeadersHelper:$e,hasRepoHeadersHelpers:G,hasDangerousEnvVars:We,hasAutoMemoryDirectory:Le})},Qo=[Qe,Ye,g,E,M,ze,Je,Ue,Xe,Ze,$e,G,We,Le],o[17]=g,o[18]=No,o[19]=Qo;else No=o[18],Qo=o[19];me(No,Qo);let L=de(!1),Yo;if(o[20]!==g||o[21]!==f||o[22]!==A||o[23]!==Ne)Yo=function a(st){if(L.current||ue()){return}if(L.current=!0,st==="exit"){if(f){T("onboarding_trust_dialog","gated_grants_backstop_declined"),A();return}T("onboarding_trust_dialog","onboarding_trust_denied"),p(1);return}let zo=_();if(ae("onboarding_trust_dialog"),D("tengu_trust_dialog_accept",{isHomeDir:zo,hasMcpServers:Qe,hasHooks:Ye,hasBashExecution:g,hasProjectAllowRules:E,hasProjectAddDirs:M,hasApiKeyHelper:ze,hasAwsCommands:Je,hasGcpCommands:Ue,hasOtelHeadersHelper:Xe,hasProxyAuthHelper:Ze,hasMarketplaceHeadersHelper:$e,hasRepoHeadersHelpers:G,hasDangerousEnvVars:We,hasAutoMemoryDirectory:Le}),zo)ne(!0),ie(!0);else pe(Sr,Ne);A()},o[20]=g,o[21]=f,o[22]=A,o[23]=Ne,o[24]=Yo;else Yo=o[24];let a=Yo,Jo;if(o[25]===n)Jo=()=>{L.current=!0,p(1)},o[25]=Jo;else Jo=o[25];let H=ke(Jo),Uo;if(o[26]!==f||o[27]!==a)Uo=()=>{if(we()){a("exit");return}if(f){a("exit");return}L.current=!0,p(0)},o[26]=f,o[27]=a,o[28]=Uo;else Uo=o[28];let Xo;if(o[29]===n)Xo={context:"Confirmation"},o[29]=Xo;else Xo=o[29];if(fe("confirm:no",Uo,Xo),Ko&&!et){return queueMicrotask(A),null}const Oe=be,nt="warning",it="warning",ct="Accessing workspace:",eo=P,at="column",lt=1,pt=1;let O,ee,oe;if(o[30]===n)O=r(t,{bold:!0,children:Ce(ce().cwd())}),ee=e(t,{children:["Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what","'","s in this folder first."]}),oe=e(t,{children:["Claude Code","'","ll be able to read, edit, and execute files here."]}),o[30]=O,o[31]=ee,o[32]=oe;else O=o[30],ee=o[31],oe=o[32];const oo=(E||M||G)&&e(P,{flexDirection:"column",children:[E&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder pre-approves ",b.rawCount," ",j(b.rawCount,"tool permission")," in"," ",c(b.sources),":"]}),e(t,{children:["  ",b.rules.length>0?c(b.rules,8):"(rule names contain unprintable characters)"]})]}),M&&e(u,{children:[e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder adds ",S.rawCount," ",j(S.rawCount,"directory","directories")," ","to the workspace in"," ",c(S.sources),":"]}),e(t,{children:["  ",S.dirs.length>0?c(S.dirs,6):"(directory names contain unprintable characters)"]})]}),G&&e(t,{bold:!0,color:"warning",children:[r(m,{status:"warning",withSpace:!0}),"This folder runs commands to mint HTTP headers (headersHelper), declared in ",c(Mo)]}),r(t,{dimColor:!0,children:"These will apply without asking. Only proceed if you trust this configuration."})]});let Zo;if(o[33]===n)Zo=r(t,{dimColor:!0,children:r(ge,{url:"https://code.claude.com/docs/en/security",children:"Security guide"})}),o[33]=Zo;else Zo=o[33];let re;if(o[34]!==a)re=r(Se,{confirmLabel:"Yes, I trust this folder",cancelLabel:f?"No, continue without these permissions":"No, exit",onConfirm:()=>a("enable_all"),onCancel:()=>a("exit")}),o[34]=a,o[35]=re;else re=o[35];let te;if(o[36]!==H.keyName||o[37]!==H.pending)te=r(t,{dimColor:!0,children:H.pending?e(u,{children:["Press ",H.keyName," again to exit"]}):e(ye,{children:[r(v,{chord:"enter",action:"confirm"}),r(v,{chord:"escape",action:"cancel"})]})}),o[36]=H.keyName,o[37]=H.pending,o[38]=te;else te=o[38];let se;if(o[39]!==eo||o[40]!==O||o[41]!==ee||o[42]!==oe||o[43]!==oo||o[44]!==re||o[45]!==te)se=e(eo,{flexDirection:at,gap:lt,paddingTop:pt,children:[O,ee,oe,oo,Zo,re,te]}),o[39]=eo,o[40]=O,o[41]=ee,o[42]=oe,o[43]=oo,o[44]=re,o[45]=te,o[46]=se;else se=o[46];let $o;if(o[47]!==Oe||o[48]!==se)$o=r(Oe,{color:nt,titleColor:it,title:ct,children:se}),o[47]=Oe,o[48]=se,o[49]=$o;else $o=o[49];return $o}
+
+## #28 trunc R(e,200)  needle="R(e,200)"  248=0 247=0
+
+## #28 trunc R(t,200)  needle="R(t,200)"  248=0 247=0
+
+## #28 trunc R(e, 200)  needle="R(e, 200)"  248=0 247=0
+
+## #28 trunc bp(e,200)  needle="bp(e,200)"  248=0 247=0
+
+## #28 trunc sliceGrapheme  needle="sliceGrapheme"  248=0 247=0
+
+## #28 trunc truncateGrapheme  needle="truncateGrapheme"  248=0 247=0
+
+## #28 trunc ,"\u2026"  needle=",\"\\u2026\""  248=20 247=20
+- #0 @199060554 lor:!0,children:["Certificate fingerprint (SHA-256): ",S.fingerprint.slice(0,16),"\u2026"]}),e(hn,{hideIndexes:!0,confirmLabel:"Yes, trust this gateway",cancelLabel:W?"N
+- #1 @201163010 1]=c.sessionMode,D[2]=F;else F=D[2];let G;if(D[3]!==F)G=r(t,{bold:!0,children:[F,"\u2026"]}),D[3]=F,D[4]=G;else G=D[4];let H;if(D[5]!==Y||D[6]!==k||D[7]!==c.sessionMode|
+- #2 @201165696 n;else n=d[12];let f;if(d[13]!==y||d[14]!==n)f=r(o,{children:[l,r(t,{children:[y,"\u2026",n]})]}),d[13]=y,d[14]=n,d[15]=f;else f=d[15];let h;if(d[16]!==R)h=R!==void 0&&R
+- #3 @201525107 ildren:["Running ",e(t,{bold:!0,children:l.length})," ",B?`${B} agents`:"agents","\u2026"]})," "]}),!W&&e(hc,{})]}),b.map((H,ee)=>e(rp,{agentType:H.agentType,description
+- #4 @201668335 th}if(m>0)u.push([g,f.slice(0,m)])}let p=u.at(-1)?.[0]??i[0][0];return u.push([p,"\u2026"]),u}),e.marker&&e.marker!==" "){let i=N(e.marker,t),d={foreground:t.foreground,
+- #5 @202145768 List.length){let be;if(Tt[4]!==he.status)be=r(t,{dimColor:!0,children:[he.status,"\u2026"]}),Tt[4]=he.status,Tt[5]=be;else be=Tt[5];return be}let be;if(Tt[6]!==he.todoLi
+- … +14 more
+
+## #28 trunc +"\u2026"  needle="+\"\\u2026\""  248=56 247=55
+- #0 @178360951 vt(t,n){let e=t.split(`
+`);if(e.length<=n)return t;return e.slice(0,n).join(`
+`)+"\u2026"}function jp(t,n){if(t.length<=n)return t;let e=de(t,n);return`${e}\u2026 [+${t.
+- #1 @178927660 urn`! ${u[1].trim()}`;if(jSn.test(e))continue;if(e.length>200)e=de(e,200).trim()+"\u2026";return e}return}
+export{jSn,Uue};
+.// @bun @bytecode
+// Claude Code is a Beta p
+- #2 @179942487 t>=0?r.slice(0,t):"",o=ie(i);if(o>=n-1)return zS(r,n);let l=n-1-o;return _$(s,l)+"\u2026"+i}function ot(r,n){if(ie(r)<=n)return r;if(n<=1)return"\u2026";let e=0,t="";for
+- #3 @179942658 et{segment:i}of Xi().segment(r)){let s=ie(i);if(e+s>n-1)break;t+=i,e+=s}return t+"\u2026"}function zS(r,n){if(ie(r)<=n)return r;if(n<=1)return"\u2026";let e=n-1,t=[...Xi
+- #4 @179943573 (t.length<=e)return t.join(`
+`);let i=t.slice(0,e);return i[e-1]=ot((i[e-1]??"")+"\u2026",n),i.join(`
+`)}
+export{df,Ul,ot,zS,_$,Qn,v_n,Zbt};
+.// @bun @bytecode
+// Claude
+- #5 @181075066 )r=l,o.push("derive_summary")}if(typeof r==="string"&&r.length>M_e)r=de(r,M_e-1)+"\u2026",o.push("truncate_summary");let[p]=o,u=a?.unrepaired!==void 0?`split_slipped_sum
+- … +50 more
+
+## #28 len>200  needle=".length>200"  248=15 247=15
+- #0 @178361678  t.replace(d,"").replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu,"")}function YC(t){let n=l3t(ur(t));return n.length>200?`${de(n,200)}\u2026`:n}function s1e(t,n){return de(l3t(Ro(t.replace(d,""))).trim(),n)}function itr(
+- #1 @178927630 h-input>([\s\S]*?)<\/bash-input>/.exec(e);if(u)return`! ${u[1].trim()}`;if(jSn.test(e))continue;if(e.length>200)e=de(e,200).trim()+"\u2026";return e}return}
+export{jSn,Uue};
+.// @bun @bytecode
+// Claude Code is 
+- #2 @181727211 "string")}function $e(e){let t;try{t=ir(e)?$r(e):String(S(e))}catch{t="(unprintable value)"}return t.length>200?`${de(t,200)}\u2026`:t}function sr(e){if(e===null||typeof e!=="object")return{action:"drop",reason:
+- #3 @184189850 min-height","max-height"]);function lqe(e){if(typeof e!=="string")return"style is not a string";if(e.length>2000)return"style is longer than 2000 characters";if(/[{}<>]|\/\*|\\|@|javascript:|expression\s*\(/i.te
+- #4 @184213342 rsive","remove_item_recursive_force"]);function zJ(e,t,r){if(r===null||!T6t.has(r))return"none";if(e.length>2000)return"unknown";try{let o=v6t(e,t),u=E6t(e),p=C6t(e);if(u===null&&p===null)return"unknown";if(u===
+- #5 @184217505 ranch_force_delete","git_commit_amend"]);function GR(e,t){if(t===null||!P6t.has(t))return"none";if(e.length>2000)return"unknown";try{switch(t){case"git_force_push":return x6t(e);case"git_reset_hard":return M6t(e
+- #6 @186256049 .data}}if(!t.startsWith("{")){let r=`HTTP hook must return JSON, but got non-JSON response body: ${t.length>200?t.slice(0,200)+"\u2026":t}`;return n(r),{validationError:r}}try{let r=Owt(t);if("json"in r)return r
+- #7 @187309142 reMirror(k.sessionFile,k.entries)}normalizeLastPrompt(e){let t=e.replaceAll(`
+`," ").trim();return t.length>200?de(t,200).trim()+"\u2026":t}planReAppendSessionMetadata(e,t,r,o){if(!this.sessionFile)return null;l
+- #8 @187357020 hydrate_ccr_v2_fail"),!1}}function sOe(e){let t=Act(e);if(t){let r=t.replaceAll(`
+`," ").trim();if(r.length>200)r=de(r,200).trim()+"\u2026";return r}return"No prompt"}function Act(e){for(let t of e){if(t.type!==
+- #9 @187433843 Or(L,"bash-input");if(U)return`! ${U}`;if(a0t.test(L)){if(L.startsWith(`<${JI}>`))r=!0;continue}if(L.length>200)L=de(L,200).trim()+"\u2026";return L}}catch{continue}}if(o)return o;if(r)return"Proactive session";
+- … +5 more
+
+## 247 #28 len>200  needle=".length>200"  247=15
+- #0 @206471230 turn t.replace(m,"").replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu,"")}function Z(t){let n=F(R(t));return n.length>200?`${u(n,200)}\u2026`:n}function q(t,n){return u(F(B(t.replace(m,""))).trim(),n)}function V(t,n){if(t
+- #1 @207765347 ash-input>([\s\S]*?)<\/bash-input>/.exec(e);if(u)return`! ${u[1].trim()}`;if(m.test(e))continue;if(e.length>200)e=a(e,200).trim()+"\u2026";return e}return}var m,p;var l=f(()=>{d();m=/^(?:\s*<[a-z][\w-]*[\s>]|\[R
+- #2 @209527286 "string")}function Ce(e){let t;try{t=Js(e)?B(e):String(xe(e))}catch{t="(unprintable value)"}return t.length>200?`${Sd(t,200)}\u2026`:t}function Qs(e){if(e===null||typeof e!=="object")return{action:"drop",reason:
+- #3 @213743170 on JP(e){return Wun(e)?.category??null}function QP(e,t,n){if(n===null||!oTo.has(n))return"none";if(e.length>2000)return"unknown";try{let r=sTo(e,t),o=iTo(e),s=aTo(e);if(o===null&&s===null)return"unknown";if(o===
+- #4 @213746957 f(jun(e))return"tmp";return"outside_cwd"}function uq(e,t){if(t===null||!uTo.has(t))return"none";if(e.length>2000)return"unknown";try{switch(t){case"git_force_push":return dTo(e);case"git_reset_hard":return pTo(e
+- #5 @213984532 n-height","max-height"])});function uhn(e){if(typeof e!=="string")return"style is not a string";if(e.length>2000)return"style is longer than 2000 characters";if(/[{}<>]|\/\*|\\|@|javascript:|expression\s*\(/i.te
+- #6 @216702267 :"||!p.pathname.endsWith(`/p/${t}`)||p.username!==""||p.password!==""||p.search!==""||p.hash!==""||c.length>200||/\s/.test(c)||Fbr.test(c)||Lbr.test(c)||Nbr.test(c)||/[\u200C\u200D\uFE0F]/.test(c))return null;le
+- #7 @218253433 .data}}if(!t.startsWith("{")){let n=`HTTP hook must return JSON, but got non-JSON response body: ${t.length>200?t.slice(0,200)+"\u2026":t}`;return _(n),{validationError:n}}try{let n=n1r(t);if("json"in n)return n
+- #8 @219539560 reMirror(a.sessionFile,a.entries)}normalizeLastPrompt(e){let t=e.replaceAll(`
+`," ").trim();return t.length>200?tn(t,200).trim()+"\u2026":t}planReAppendSessionMetadata(e,t,n,r){if(!this.sessionFile)return null;l
+- #9 @219584896 hydrate_ccr_v2_fail"),!1}}function Y6t(e){let t=X6t(e);if(t){let n=t.replaceAll(`
+`," ").trim();if(n.length>200)n=tn(n,200).trim()+"\u2026";return n}return"No prompt"}function X6t(e){for(let t of e){if(t.type!==
+
+## #28 leftover-safe-src  needle="value.length > MAX_DISCLOSURE_ENTRY_LENGTH"  248=0 247=0
+
+## #28 200-ellipsis  needle="slice(0,200)+"  248=3 247=3
+- #0 @186256063 r=`HTTP hook must return JSON, but got non-JSON response body: ${t.length>200?t.slice(0,200)+"\u2026":t}`;return n(r),{validationError:r}}try{let r=Owt(t);if("json"in r)retu
+- #1 @201448382 indexOf(`
+`);while(b!==-1){let C=T.slice(y,b).trim();if(C)return C.length>200?C.slice(0,200)+"\u2026":C;y=b+1,b=T.indexOf(`
+`,y)}let P=T.slice(y).trim();return P.length>200?
+- #2 @201448477 u2026":C;y=b+1,b=T.indexOf(`
+`,y)}let P=T.slice(y).trim();return P.length>200?P.slice(0,200)+"\u2026":P}function ne(aX){let lX=g(4),{dimColor:mO,children:yP,color:MP}=aX,bP=
+
+## #28 200-ellipsis2  needle=".slice(0,200)+`"  248=0 247=0
+
+## #28 .rules.map(  needle=".rules.map("  248=9 247=5
+- #0 @181730880 mode)"),e;return n(`Applying permission update: Setting mode to '${t.mode}'`),{...e,mode:t.mode};case"addRules":{let r=t.rules.map((u)=>$r(u));n(`Applying permission update: Adding ${t.rules.length} ${t.behavior} rule(s) to destination '${t.destinatio
+- #1 @181731151 =on[t.behavior];return{...e,[o]:{...e[o],[t.destination]:[...e[o][t.destination]||[],...r]}}}case"replaceRules":{let r=t.rules.map((u)=>$r(u));n(`Replacing all ${t.behavior} rules for destination '${t.destination}' with ${t.rules.length} rule(s): ${S(
+- #2 @181731610 with destination '${t.destination}': ${S(t.directories)}`),kdn(e,t.directories,t.destination);case"removeRules":{let r=t.rules.map((g)=>$r(g));n(`Applying permission update: Removing ${t.rules.length} ${t.behavior} rule(s) from source '${t.destination
+- #3 @181733856 ,t);break}case"removeRules":{n(`Removing ${e.rules.length} ${e.behavior} rule(s) from ${e.destination}`);let r=new Set(e.rules.map($r)),o=e.behavior;await fs(e.destination,(u)=>{let p=(u?.permissions?.[o]||[]).filter((g)=>{let w=$r(jr(g));return!r.has
+- #4 @181734608 ak}case"replaceRules":{n(`Replacing all ${e.behavior} rules in ${e.destination} with ${e.rules.length} rule(s)`);let r=e.rules.map($r),o=e.behavior;await fs(e.destination,()=>({permissions:{[o]:r}}),void 0,t);break}}}async function cO(e,t){for(let r o
+- #5 @218824372 LNt=o(e=>({name:e.name,definition:Sx(e.definition)}),"transformRule"),DNt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(LNt(t)))},"populateDb"),V$e={parse:o(e=>{sn.clear(),Z.debug("[Railroad Parser] Starting Langium parse");le
+- #6 @218840719 YNt=o(e=>({name:e.name,definition:yD(e.definition)}),"transformRule"),jNt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(YNt(t)))},"populateDb"),eFe={parse:o(e=>{sn.clear(),Z.debug("[EBNF Parser] Starting Langium parse");let t=
+- #7 @218842460 nPt=o(e=>({name:e.name,definition:MX(e.definition)}),"transformRule"),iPt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(nPt(t)))},"populateDb"),sFe={parse:o(e=>{sn.clear(),Z.debug("[ABNF Parser] Starting Langium parse");let t=
+- … +1 more
+
+## #28 rules.map(  needle="rules.map("  248=10 247=6
+- #0 @181730881 ode)"),e;return n(`Applying permission update: Setting mode to '${t.mode}'`),{...e,mode:t.mode};case"addRules":{let r=t.rules.map((u)=>$r(u));n(`Applying permission update: Adding ${t.rules.length} ${t.behavior} rule(s) to destination '${t.destinatio
+- #1 @181731152 on[t.behavior];return{...e,[o]:{...e[o],[t.destination]:[...e[o][t.destination]||[],...r]}}}case"replaceRules":{let r=t.rules.map((u)=>$r(u));n(`Replacing all ${t.behavior} rules for destination '${t.destination}' with ${t.rules.length} rule(s): ${S(
+- #2 @181731611 ith destination '${t.destination}': ${S(t.directories)}`),kdn(e,t.directories,t.destination);case"removeRules":{let r=t.rules.map((g)=>$r(g));n(`Applying permission update: Removing ${t.rules.length} ${t.behavior} rule(s) from source '${t.destination
+- #3 @181733857 t);break}case"removeRules":{n(`Removing ${e.rules.length} ${e.behavior} rule(s) from ${e.destination}`);let r=new Set(e.rules.map($r)),o=e.behavior;await fs(e.destination,(u)=>{let p=(u?.permissions?.[o]||[]).filter((g)=>{let w=$r(jr(g));return!r.has
+- #4 @181734609 k}case"replaceRules":{n(`Replacing all ${e.behavior} rules in ${e.destination} with ${e.rules.length} rule(s)`);let r=e.rules.map($r),o=e.behavior;await fs(e.destination,()=>({permissions:{[o]:r}}),void 0,t);break}}}async function cO(e,t){for(let r o
+- #5 @218824373 Nt=o(e=>({name:e.name,definition:Sx(e.definition)}),"transformRule"),DNt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(LNt(t)))},"populateDb"),V$e={parse:o(e=>{sn.clear(),Z.debug("[Railroad Parser] Starting Langium parse");le
+- #6 @218840720 Nt=o(e=>({name:e.name,definition:yD(e.definition)}),"transformRule"),jNt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(YNt(t)))},"populateDb"),eFe={parse:o(e=>{sn.clear(),Z.debug("[EBNF Parser] Starting Langium parse");let t=
+- #7 @218842461 Pt=o(e=>({name:e.name,definition:MX(e.definition)}),"transformRule"),iPt=o(e=>{Gn(e,sn),e.title&&sn.setTitle(e.title),e.rules.map(t=>sn.addRule(nPt(t)))},"populateDb"),sFe={parse:o(e=>{sn.clear(),Z.debug("[ABNF Parser] Starting Langium parse");let t=
+- … +2 more
+
+## #28 allow.map(  needle="allow.map("  248=0 247=0
+
+## #28 .allow.map(  needle=".allow.map("  248=0 247=0
+
+# ==== #36 mention-ime ====
+- count "tengu_at_mention_peer_" 248=2 247=2
+- count "function dr(" 248=28 247=32
+- count "normalize(\"NFKC\")" 248=23 247=22
+- count "isComposing" 248=11 247=11
+- count "Hangul" 248=21 247=21
+- count "hangul" 248=4 247=4
+- count "\\p{L}" 248=106 247=104
+- count "\\p{Letter}" 248=0 247=0
+- count "\\p{Script=Hangul}" 248=2 247=2
+- count "toLocaleLowerCase" 248=5 247=5
+- count "localeCompare" 248=138 247=116
+- count "[w-]" 248=1 247=1
+- count "[\\w-]" 248=162 247=154
+- count "[\\p{L}" 248=74 247=72
+- count "\\p{XID_Continue}" 248=3 247=3
+- count "compositionend" 248=18 247=18
+- count "compositionstart" 248=9 247=9
+
+## leftover-dr-exact 248=180525410 247=
+
+## #36 248 mention-analytics @186137683
+`)}function YTe(e){return{token:GN(e),where:g2t(e.where)}}function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}import{readdir as Ykt,sta
+
+## #36 248 mention-fn near@186137683 fn=XTe @186137661
+## #36 248 mention-fn XTe @186137661
+len=237 sha=f84eba9be38fdf82 exactOther=0
+function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}
+
+## #36 247 mention-analytics @200885760
+ctive ......SUu.message session . ..
+.......lastActive......A...mention.....K...tengu_at_mention_peer_..........input_peer_at_mention..........mentionType......R..... and !...r-.. more (truncated for prompt size)........Q7.Filesystem: 	....B&.Network: ...........Ignored violations: ........You should always default to
+
+## #36 247 mention-fn near@200885760 fn= @-1
+## #36 247 mention-fn  @-1
+MISS
+
+## #36 247 mention-analytics @218152310
+`)}function m1t(e){return{token:zE(e),where:h1t(e.where)}}function g1t(e){if(D(`tengu_at_mention_peer_${e}`,{}),df({mentionType:"peer",success:e==="success"}),e==="success")ce("input_peer_at_mention");else if(e==="ask")te("input_peer_at_mention","ask");else J("input_peer_at_mention","not_found")}var jLs=20,zLs=3,gzr,yz
+
+## #36 247 mention-fn near@218152310 fn=g1t @218152288
+## #36 247 mention-fn g1t @218152288
+len=239 sha=f08d7e9b562df5db exactOther=0
+function g1t(e){if(D(`tengu_at_mention_peer_${e}`,{}),df({mentionType:"peer",success:e==="success"}),e==="success")ce("input_peer_at_mention");else if(e==="ask")te("input_peer_at_mention","ask");else J("input_peer_at_mention","not_found")}
+
+## #36 re [。、？！])@  needle="[。、？！])@"  248=0 247=0
+
+## #36 re @(?:"([^"\n]{1,200})"  needle="@(?:\"([^\"\\n]{1,200})\""  248=0 247=0
+
+## #36 re ([\w-]{1,128})  needle="([\\w-]{1,128})"  248=0 247=0
+
+## #36 re [\w-]{1,128}  needle="[\\w-]{1,128}"  248=2 247=2
+- #0 @99395385 p..file:///B:/%7EBUN/root/chunk-kan6wdpm.js(.......file:///B:/%7EBUN/root/chunk-2q4zpwx4.js....o...[\w-]{1,63}.........^[\w-]{1,128}$........4.^a(?:........c..-)?[0-9a-f]{16}$$.....o.3ab19d7e-9f35-45c2-926e-75e271cc60b3.....{k.__lodash_hash_undefined__
+- #1 @178495211 _-]*$/.test(e)&&!/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(e)}var Je="[\\w-]{1,63}",ze=new RegExp(`^${Je}$`),mn=/^[\w-]{1,128}$/;function iGt(e){return mn.test(e)}var Sn=new RegExp(`^a(?:${Je}-)?[0-9a-f]{16}$`);function h0(e){return Sn.test(e)?e:
+
+## #36 re [\p{L}\p{N}_-]{1,128}  needle="[\\p{L}\\p{N}_-]{1,128}"  248=0 247=0
+
+## #36 re [\p{L}  needle="[\\p{L}"  248=74 247=72
+- #0 @92414526 aseline-pending........V5.B:/~BUN/root/chunk-mycpcm5t.js......F.R.command-arg-....q.L.slack_search_channels..."....ke.^@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*..!...9X0.^[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+...E...2...(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L
+- #1 @92414569 k-mycpcm5t.js......F.R.command-arg-....q.L.slack_search_channels..."....ke.^@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*..!...9X0.^[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+...E...2...(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$...!....`..[\p
+- #2 @92414614 ack_search_channels..."....ke.^@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*..!...9X0.^[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+...E...2...(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$...!....`..[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$...........[\s\
+- #3 @92414647 \p{L}\p{N}\p{M}_\-./\\()[\]~:]*..!...9X0.^[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+...E...2...(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$...!....`..[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$...........[\s\u3002\u3001\uFF1F\uFF01]M....@K.(
+- #4 @92414692 {L}\p{N}\p{M}_\-./\\()[\]~:]+...E...2...(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+)$...!....`..[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$...........[\s\u3002\u3001\uFF1F\uFF01]M....@K.(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\
+- #5 @92414806 ...`..[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$...........[\s\u3002\u3001\uFF1F\uFF01]M....@K.(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$.......[.!.(^|\s)#([a-z0-9][a-z0-9_-]*)$...........(^|\s):([a-z0-9_+-]{2,})$.......
+- … +68 more
+
+## #36 re \p{XID_Start}  needle="\\p{XID_Start}"  248=3 247=3
+- #0 @94244025 eFile XOr..$.......\b(Procedure|Declare)(C|CDLL|DLL)?\b ....+..(Procedure|Declare)(C|CDLL|DLL)?....y...\.\w*...!...|...[\p{XID_Start}_]\p{XID_Continue}*.........q.lambda..........nonlocal|10.....[...[A-Za-z]\w+|__\w+__.
+...l...__import__..	....,W.bytear
+- #1 @188865094 in:"\\.\\w*"},e.UNDERSCORE_TITLE_MODE]},t,n]}}Ao.exports=yp});var Do=d(function(vT,vo){function vp(e){let t=e.regex,n=/[\p{XID_Start}_]\p{XID_Continue}*/u,a=["and","as","assert","async","await","break","case","class","continue","def","del","elif","else"
+- #2 @214220713 e",begin:"\\.\\w*"},e.UNDERSCORE_TITLE_MODE]},t,r]}}t_.exports=$g});var i_=d((Sy,a_)=>{function Fg(e){let t=e.regex,r=/[\p{XID_Start}_]\p{XID_Continue}*/u,a=["and","as","assert","async","await","break","case","class","continue","def","del","elif","else"
+
+## #36 re message session  needle="message session"  248=2 247=2
+- #0 @96912700 on failed (.....wX..pdf unknown (site=.......hP., exit=........., category=.........(agent).
+...v.h. . active ......SUu.message session . ......A...mention.....K...tengu_at_mention_peer_..........input_peer_at_mention..........mentionType......R..... and
+- #1 @186136058 ,t){let r=e.lastActive===void 0?"":` \xB7 active ${Ot(Math.max(0,t-e.lastActive),{mostSignificantOnly:!0})} ago`;return`message session \xB7 ${g2t(e.where)}${r}`}function Ejn(e,t,r=Date.now()){if(t==="")return[];let o=[];for(let u of e.candidates){if(o.le
+
+## #36 re dm-peer-  needle="dm-peer-"  248=4 247=4
+- #0 @92593208 x.......E...completesHashChannels...........getEmoji.....n..getEmojiSuggestions.......c.getArgumentCompletions..........dm-peer-
+.......viaSymlink..+...S.\.memorySurveyRating: backend update failed: .....*|Z.atime...
+...+fo.updateText........o.writ
+- #1 @186136311 length>=IDn)break;let p=dr(u.name);if(e.inProcess.has(p)||fkt(e,u)||!p.startsWith(t)||!ckt(u.name))continue;o.push({id:`dm-peer-${u.kind}-${u.ref}-${p}`,displayText:LDn(u),description:FDn(u,r)})}return o}var NDn=new RegExp(String.raw`(?:^|[\s\u3002
+- #2 @202930489 ===Ct.current):-1,$t=X.getState().selectedSuggestion;if(Mo<0&&$t===-1&&Rr.current===me&&Ae.some((Ko)=>Ko.id.startsWith("dm-peer-")))return;let lo=Mo>=0?Mo:$t===-1?0:$t,dn=Ae[lo];if(Ve==="command"&&lo<Ae.length){if(dn){let Ko=CN({suggestion:dn,shoul
+- #3 @202934743 rrent):-1,Bn=Mo??(fr>=0?fr:Ko);if(Bn<0||dn.length===0){if(dn.length>0&&Rr.current===$t&&dn.some((Do)=>Do.id.startsWith("dm-peer-")))Io.current=$t,er();else if(dn.length>0&&(jn==="command"||jn==="custom-title"||jn==="file"||jn==="slack-channel"))Hn.
+
+## #36 re function XTe(  needle="function XTe("  248=2 247=2
+- #0 @186137661 turn e.defaultNamed.has(`${t.kind}\x00${t.id}\x00${dr(t.name)}`)}function YTe(e){return{token:GN(e),where:g2t(e.where)}}function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_m
+- #1 @190365123 c)=>c.name===t&&c.type==="connected"))return e;let r=bl(t);return{...e,tools:[...e.tools.filter((c)=>!km(c,t,r)),...s]}}function XTe(e,t,s){if(!e.mcp.clients.some((c)=>c.name===t&&c.type==="connected"))return e;let r=bl(t);return{...e,mcp:{...e.mcp,tool
+
+## #36 leftover-re  needle="(?:^|[\\s。、？！])@(?:\"([^\"\\n]{1,200})\"|([\\w-]{1,128})"  248=0 247=0
+
+## 247 #36 leftover-re  needle="(?:^|[\\s。、？！])@(?:\"([^\"\\n]{1,200})\"|([\\w-]{1,128})"  247=0
+
+## #36 dr-home @180525410
+et t=typeof e==="string"?e.trim():"",r=TW(t);return!t||!r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function sve(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}var aa=6,Smn=12,NV=`[0-9a-f]{${aa},${Smn}}`,Z8=new RegExp(`^(.*\\S)\\s*\\[(${NV})\\]$`);function DP(e){let t=Z8.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function TO(e,t){let r=[];r.push({name:Mf,id:rt(),kind:"main",where:"in-process",lastActive:void 0,sock:
+
+## #36 around-dr mention needles
+- around-dr has "tengu_at_mention": false
+- around-dr has "dm-peer": false
+- around-dr has "message session": false
+- around-dr has "@(?:\"": false
+- around-dr has "normalize(\"NFKC\")": true
+- around-dr has "isComposing": false
+- around-dr has "\\p{L}": true
+- around-dr has "Hangul": false
+- around-dr has "toLocaleLowerCase": false
+
+## #36 after-dr window start @180525410
+len=134 sha=cdbd73e6c8d8fd63 exactOther=0
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+
+## #36 fns-after-dr-248
+- dr @180525410
+- DP @180525632
+- TO @180525706
+- ave @180528043
+- GN @180528255
+- g2t @180528299
+- y2t @180528371
+- P6e @180528555
+- TW @180528911
+- Egt @180529100
+- AW @180529178
+- D6e @180529244
+- Xd @180529314
+- ZDe @180529377
+- tZ @180529473
+- AM @180529839
+- sa @180529919
+- lve @180529967
+- vmn @180530012
+- eMe @180530075
+
+## #36 post-dr dr @180525410
+len=134 sha=cdbd73e6c8d8fd63 exactOther=0
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+
+## #36 post-dr DP @180525632
+len=74 sha=72041bc34dd3de03 exactOther=0
+function DP(e){let t=Z8.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}
+
+## #36 post-dr TO @180525706
+len=2337 sha=e750dca9e9aa14a1 exactOther=0
+function TO(e,t){let r=[];r.push({name:Mf,id:rt(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let o=new Set;for(let[N,U]of Object.entries(e.teamContext?.teammates??{}))o.add(N),r.push({name:U.name,id:N,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[N,U]of e.agentNameRegistry){let G=e.tasks[U],j=G?.type==="local_agent"?G:void 0;r.push({name:N,id:U,kind:"subagent",where:"in-process",lastActive:j?.startTime,sock:void 0})}for(let N of t.teamFile?.members??[]){if(o.has(N.agentId))continue;o.add(N.agentId),r.push({name:N.name,id:N.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let N of t.sessions)r.push({name:N.name||J8(N.cwd),id:N.sock,kind:"session",where:"this-machine",lastActive:N.statusUpdatedAt,sock:N.sock});let u=new Map;for(let N of t.sessions)if(N.bridgeSessionId!==void 0){let U=mr(N.bridgeSessionId);u.set(U,[...u.get(U)??[],N.sock])}let p=[];for(let N of t.cloud??[]){if(M6e(t.sessions,N.id)){p.push({rawName:N.title||"untitled",socks:u.get(mr(N.id))??[]});continue}r.push({name:N.title||"untitled",id:N.id,kind:"cloud-session",...h2t(N.title)&&{derivedName:!0},...N.acceptsPeerMessages===!0&&{reportsInbound:!0},where:N.remoteControl?"remote":"cloud",lastActive:N.lastActive,sock:void 0})}let g=new Set((t.cloud??[]).map((N)=>mr(N.id))),E=eMe(t.sessions);for(let N of t.bridge??[]){let U=mr(N.id);if(g.has(U))continue;if(E.has(U)){p.push({rawName:N.title||"untitled",socks:u.get(U)??[]});continue}let G=Date.parse(N.updated_at);r.push({name:N.title||"untitled",id:N.id,kind:"bridge-session",...h2t(N.title)&&{derivedName:!0},...N.acceptsPeerMessages===!0&&{reportsInbound:!0},...N.inboundReportUnavailable&&{inboundReportUnavailable:!0},where:sve(N)?"cloud":"remote",lastActive:Number.isNaN(G)?void 0:G,sock:void 0})}let C=r.flatMap((N)=>{let U=TW(N.name);return U!==null&&Xd(U)?[{...N,name:U}]:[]}),O=new Set,k=tZ(C.filter((N)=>{if(N.kind!=="session")return!0;let U=`${dr(N.name)}\x00${N.id}`;if(O.has(U))return!1;return O.add(U),!0})),M=new Map;for(let N of k){let U=dr(N.name),G=M.get(U);if(G)G.push(N);else M.set(U,[N])}let L=new Map;for(let{rawName:N,socks:U}of p){let G=TW(N);if(G===null||!Xd(G))continue;let j=dr(G),ie=L.get(j)??new Set;for(let J of U)ie.add(J);L.set(j,ie)}return{candidates:k,byName:M,remoteNamesClaimedLocally:L}}
+
+## #36 post-dr ave @180528043
+len=212 sha=97d4854db6c2c3c4 exactOther=0
+function ave(e,t,r){let o=e.get(t);if(!o||o.length===0)return;let u=r===void 0?[]:o.filter((E)=>E.name===r),g=(u.length>0?u:o)[0];if(g.where==="in-process")return{kind:"one",candidate:g};return{kind:"ambiguous"}}
+
+## #36 post-dr GN @180528255
+len=44 sha=353348c6070a21f1 exactOther=0
+function GN(e){return`${e.name} [${e.ref}]`}
+
+## #36 post-dr g2t @180528299
+len=72 sha=736128b68dee71a4 exactOther=0
+function g2t(e){return e==="remote"?`${y2t(e)} (Remote Control)`:y2t(e)}
+
+## #36 post-dr y2t @180528371
+len=184 sha=d725b9a5290335e0 exactOther=0
+function y2t(e){switch(e){case"in-process":return"in this session";case"cloud":return"in the cloud";case"remote":return"on another machine";case"this-machine":return"on this machine"}}
+
+## #36 post-dr P6e @180528555
+len=346 sha=17de75ea54a79961 exactOther=0
+function P6e(e,t){let r=e.kind==="main"?"main conversation":e.kind==="session"||e.kind==="cloud-session"||e.kind==="bridge-session"?"Claude session":e.kind,o=g2t(e.where),u=e.lastActive===void 0?"":`, ${e.kind==="subagent"?"started":"active"} ${Ot(Math.max(0,t-e.lastActive),{mostSignificantOnly:!0})} ago`;return`${GN(e)} \u2014 ${r}, ${o}${u}`}
+
+## #36 post-dr TW @180528911
+len=189 sha=99ae6871e3e18443 exactOther=0
+function TW(e){if(typeof e!=="string")return null;return[...e.replace(/[\p{Cc}\p{Cf}]/gu,(r)=>/\s/.test(r)?r:"").replace(/\s+/g," ").trim()].slice(0,eZ).join("").trim()||"untitled session"}
+
+## #36 post-dr Egt @180529100
+len=78 sha=b1bcc90ee27439d9 exactOther=0
+function Egt(e,t){return e.find((r)=>r.name===t)??e.find((r)=>TW(r.name)===t)}
+
+## #36 extra IME  needle="IME"  248=1022 247=1544
+- #0 @178163787 248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS
+- #1 @178164945 248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS
+- #2 @178166082 248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS
+- #3 @178170095 248",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-27T19:29:54Z",GIT_SHA:"8c9482ad0510ad5e3c88f0ebe6f035ec148f73e2",HOOKS
+- … +1018 more
+
+## #36 extra ime  needle="ime"  248=15599 247=21895
+- #0 @178174447 BookCredentials:f,setGrowthBookStorageBackend:I},{composePolicyLimitsClient:H,primePolicyLimitsCache:j},{primeFastPathCredentials:W}]=await Promise.all([import("B:
+- #1 @178174474 BookStorageBackend:I},{composePolicyLimitsClient:H,primePolicyLimitsCache:j},{primeFastPathCredentials:W}]=await Promise.all([import("B:/~BUN/root/chunk-p7sewg72.j
+- #2 @178176732 BookCredentials:g,setGrowthBookStorageBackend:c},{composePolicyLimitsClient:C,primePolicyLimitsCache:P},{primeFastPathCredentials:A}]=await Promise.all([import("B:
+- #3 @178176759 BookStorageBackend:c},{composePolicyLimitsClient:C,primePolicyLimitsCache:P},{primeFastPathCredentials:A}]=await Promise.all([import("B:/~BUN/root/chunk-p7sewg72.j
+- … +15595 more
+
+## #36 extra composing  needle="composing"  248=6 247=9
+- #0 @190195779 he session's configuration \u2014 recent attempts were refused or dropped after composing. Affected threads are paused; a successful auto-reply anywhere on this artifact
+- #1 @190237405 ler, specific change and send it to Claude again.",timed_out:"I ran out of time composing a change for this comment, so the artifact was not changed. A smaller, more spe
+- #2 @190238078 anged. Read the thread and make the change yourself if appropriate.",timed_out:"composing a requested automatic edit ran past its time limit and was abandoned, so the ar
+- #3 @190241592 erseded:"I could not apply the requested edit: the artifact changed while I was composing, so my edit was based on an outdated version. The artifact was not changed \u20
+- … +2 more
+
+## #36 extra jamo  needle="jamo"  248=0 247=8
+
+## #36 extra NFKD  needle="NFKD"  248=5 247=12
+- #0 @179850740 >d[c]??c);return e(I(e(u)).normalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdefghijklmnopqrstuvwxyz";function kyt(u){if(
+- #1 @183211057 Point}/gu,gr=/^[\x00-\x7f]*$/;function M5(e){return e.replace(wt,"").normalize("NFKD").toLowerCase().toUpperCase().toLowerCase().replace(/i\u0307/g,"i").replace(/\u
+- #2 @192501791 01f\u007f-\u009f\u2028\u2029]/.test(e))return null;if(/[<>"]/.test(e.normalize("NFKD")))return null;if(/\udb40[\udc00-\udc7f]/.test(e))return null;return e}function
+- #3 @193848871 e(r))t.push(e.slice(n,o)),n=o}return t.push(e.slice(n)),t},de=(e)=>e.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase(),Ge=(e)=>/^[a-z]+$/.test(e),Qe=(e
+- … +1 more
+
+## #36 extra normalize("NFKD")  needle="normalize(\"NFKD\")"  248=5 247=5
+- #0 @179850729 lace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdefghijklmnopqrstuvwxyz";function kyt(u){if(!/
+- #1 @183211046 rable_Code_Point}/gu,gr=/^[\x00-\x7f]*$/;function M5(e){return e.replace(wt,"").normalize("NFKD").toLowerCase().toUpperCase().toLowerCase().replace(/i\u0307/g,"i").replace(/\u03
+- #2 @192501780 [\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(e))return null;if(/[<>"]/.test(e.normalize("NFKD")))return null;if(/\udb40[\udc00-\udc7f]/.test(e))return null;return e}function I
+- #3 @193848860 )||Se(s)&&He(r))t.push(e.slice(n,o)),n=o}return t.push(e.slice(n)),t},de=(e)=>e.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase(),Ge=(e)=>/^[a-z]+$/.test(e),Qe=(e)=
+- … +1 more
+
+## #36 extra startsWith(prefix)  needle="startsWith(prefix)"  248=0 247=1
+
+## #36 extra startsWith(dr(  needle="startsWith(dr("  248=0 247=0

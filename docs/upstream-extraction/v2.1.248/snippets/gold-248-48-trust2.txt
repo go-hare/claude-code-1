@@ -1,0 +1,780 @@
+# gold-248-48-trust2
+
+## chunk start before y=65534
+().escHotkeyRegistered)return;try{Zx().hotkey.unregister()}finally{l(),Tp().escHotkeyRegistered=!1,n("[cu-esc] unregistered")}}function hln(){if(!Tp().escHotkeyRegistered)return;Zx().hotkey.notifyExpectedEscape()}
+export{Tp,Zx,A5,B3n,j3n,hln};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{K,z}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{$e}from"B:/~BUN/root/chunk-h5e2qvst.js";class t{inFlightSnapshot={tasks:0,queued:0,kinds:[],items:[]};inFlightSnapshotChanged=$e();pendingStructuredResult=void 0;relocatedCwd=void 0;ownStateWriteDepth=0;warnedUnknownDisabledSurface=!1;publishInFlightSnapshot(n){this.inFlightSnapshot=n;try{this.inFlightSnapshotChanged.emit()}catch{}}reset(){this.pendingStructuredResult=void 0,this.relocatedCwd=void 0,this.warnedUnknownDisabledSurface=!1,this.publishInFlightSnapshot({tasks:0,queued:0,kinds:[],items:[]})}}var e=new K(()=>new t);function oI(){return e.of(z().host)}
+export{oI};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{T,Q}from"B:/~BUN/root/chunk-mw2w72bj.js";import{S,q,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function 
+
+## 5000 before y
+/chunk-2q4zpwx4.js";import{n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{b,y}from"B:/~BUN/root/chunk-x52rjnmc.js";import{d,ee}from"B:/~BUN/root/chunk-n4vhwd20.js";var p=d(function(x,u){var __dirname="D:\\a\\claude-cli-internal\\claude-cli-internal\\node_modules\\@ant\\computer-use-swift\\js",g=ee("path");throw Error("@ant/computer-use-swift is only available on macOS");var P=ee(process.env.COMPUTER_USE_SWIFT_NODE_PATH??g.resolve(__dirname,"../prebuilds/computer_use.node"));u.exports=P.computerUse});class s{binding=void 0;currentToolUseContext=void 0;currentOnProgress=void 0;callsInFlight=0;unregisterLockCleanup=void 0;activeThisTurn=!1;runLoopPump=void 0;runLoopPumpRetainCount=0;escHotkeyRegistered=!1;frozenCoordinateMode=void 0;hostAdapter=void 0;swiftModule=void 0;inputModule=void 0;reset(){if(this.unregisterLockCleanup!==void 0||this.escHotkeyRegistered||this.runLoopPump!==void 0)throw Error("ComputerUseSession.reset() called while the lock cleanup, Esc hotkey, or run-loop pump is still registered");this.binding=void 0,this.currentToolUseContext=void 0,this.currentOnProgress=void 0,this.callsInFlight=0,this.activeThisTurn=!1,this.runLoopPumpRetainCount=0,this.frozenCoordinateMode=void 0,this.hostAdapter=void 0,this.swiftModule=void 0,this.inputModule=void 0}}var C=new K(()=>new s);function Tp(){return C.of(z().host)}function Zx(){throw Error("@ant/computer-use-swift is macOS-only")}function U(e){e._drainMainRunLoop()}function m(){let e=Tp();if(e.runLoopPumpRetainCount++,e.runLoopPump===void 0)e.runLoopPump=setInterval(U,1,Zx()),n("[drainRunLoop] pump started",{level:"verbose"})}function c(){let e=Tp();if(e.runLoopPumpRetainCount--,e.runLoopPumpRetainCount<=0&&e.runLoopPump!==void 0)clearInterval(e.runLoopPump),e.runLoopPump=void 0,n("[drainRunLoop] pump stopped",{level:"verbose"}),e.runLoopPumpRetainCount=0}var h=30000;class f extends Error{constructor(e){super(`computer-use native call exceeded ${e}ms`)}}function T(e,o){e(new f(o))}var a=m,l=c;async function A5(e,o=h){m();let t;try{let r=e();r.catch(()=>{});let i=Promise.withResolvers();return t=setTimeout(T,o,i.reject,o),await Promise.race([r,i.promise])}finally{clearTimeout(t),c()}}function B3n(e){if(Tp().escHotkeyRegistered)return!0;if(!Zx().hotkey.registerEscape(e))return n("[cu-esc] registerEscape returned false",{level:"warn"}),y("computeruse_esc_register","tap_create_failed"),!1;return a(),Tp().escHotkeyRegistered=!0,n("[cu-esc] registered"),b("computeruse_esc_register"),!0}function j3n(){if(!Tp().escHotkeyRegistered)return;try{Zx().hotkey.unregister()}finally{l(),Tp().escHotkeyRegistered=!1,n("[cu-esc] unregistered")}}function hln(){if(!Tp().escHotkeyRegistered)return;Zx().hotkey.notifyExpectedEscape()}
+export{Tp,Zx,A5,B3n,j3n,hln};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{K,z}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{$e}from"B:/~BUN/root/chunk-h5e2qvst.js";class t{inFlightSnapshot={tasks:0,queued:0,kinds:[],items:[]};inFlightSnapshotChanged=$e();pendingStructuredResult=void 0;relocatedCwd=void 0;ownStateWriteDepth=0;warnedUnknownDisabledSurface=!1;publishInFlightSnapshot(n){this.inFlightSnapshot=n;try{this.inFlightSnapshotChanged.emit()}catch{}}reset(){this.pendingStructuredResult=void 0,this.relocatedCwd=void 0,this.warnedUnknownDisabledSurface=!1,this.publishInFlightSnapshot({tasks:0,queued:0,kinds:[],items:[]})}}var e=new K(()=>new t);function oI(){return e.of(z().host)}
+export{oI};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{T,Q}from"B:/~BUN/root/chunk-mw2w72bj.js";import{S,q,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{ge}from"B:/~BUN/root/chunk-4hkt7f9w.js";import{qce}from"B:/~BUN/root/chunk-m3dt8438.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=
+
+## 248 "overflowuid" hits=2
+- @97792901
+"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.........browser-sdk.js.......A..agentSdk.js....._V..^chunk-[0-9a-z]+\.js$...>...&.	.^(?:\/(?:\$bunfs|~BUN)|\/
+
+- @182940121
+urn e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;retur
+
+## 248 "innerStart" hits=7
+- @97792572
+aemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"
+
+- @182939940
+length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}fun
+
+- @182940024
+SafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.i
+
+- @213393300
+ength-1));return Math.max(s,n,o)/2}}});function Xn(t,e,i,s){const n=vi(t.options.borderRadius,["outerStart","outerEnd","innerStart","innerEnd"]);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerE
+
+- @213393483
+t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.
+
+- @213393498
+Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i
+
+- @213393910
+0?d-s:0))/2;f=(g-(0!==t?g*t/(t+s):g))/2}const p=(g-Math.max(.001,g*d-i/C)/d)/2,m=l+p+f,x=n-p-f,{outerStart:b,outerEnd:_,innerStart:y,innerEnd:v}=Xn(e,u,d,x-m),M=d-b,w=d-_,k=m+b/M,S=x-_/w,P=u+y,D=u+v,O=m+y/P,A=x-v/D;if(t.beginPath(),o){const e=(k+S)/2;if(t.arc(a,r,d,k,e),t.arc(a,r,d,e,S),_>0){const e=qn(w,S,a,r);t.arc(e.x,e.y,_,S,x+E)}cons
+
+## 248 "hostStart" hits=2
+- @97792592
+......Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame to
+
+- @182939953
+Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){le
+
+## 248 "await C()" hits=17
+- @183987695
+orage; publishing it`);let N=await g.backend.write(g.key,r,{mode:438&~process.umask()});if(!N.ok)E(N.error)};if(Mue(e)){await C();return}let M=await g.backend.write(g.key,r,{precondition:{type:"ifAbsent"},publishDiscipline:"atomic",mode:438&~process.umask()});if(!M.ok){if(M.error.code!=="AlreadyExists"&&!bNt(M.error))E(M.error);await C();
+
+- @183987905
+shDiscipline:"atomic",mode:438&~process.umask()});if(!M.ok){if(M.error.code!=="AlreadyExists"&&!bNt(M.error))E(M.error);await C();return}}else await Fue(NKt(p),{recursive:!0});if(g===void 0)try{await Aue(p,r,{encoding:"utf8",flag:"wx"})}catch(E){if(T(E)!=="EEXIST")throw E;await Aue(p,r,"utf8");return}if(Mue(e))return;let k=new Date(o);if(
+
+- @185280653
+{...Ur,result:{...Ur.result,content:xr,harnessNoteCount:(Ur.result.harnessNoteCount??0)+1,harnessSectionHash:nv(xr)}}})}await C();return}let Sr=iDt(he(p).mode);if(Sr)s("tengu_auto_mode_decision",{decision:c("skipped_enveloped_handback"),toolName:c(nf),isHandoff:!0,toolUseCount:pr.totalToolUseCount});let Fn=Sr?null:await Tr();if(Fn)ir=`${F
+
+- @185280899
+c(nf),isHandoff:!0,toolUseCount:pr.totalToolUseCount});let Fn=Sr?null:await Tr();if(Fn)ir=`${Fn.warning}
+
+${ir}`;let yr=await C();bx({taskId:e,description:u,status:"completed",taskRegistry:g,finalMessage:ir,maxTurnsReached:Ne,usage:{totalTokens:hee(Ve),toolUses:pr.totalToolUseCount,durationMs:pr.totalDurationMs},toolUseId:p.toolUseId,owne
+
+- @185281897
+,g,"user",o.persistedToolResultFiles);let Sn=g.get(e),tr=hr(Sn)?Sn.killedBy:void 0;o.spawnedSubagent?.killed(tr);let Ir=await C();if(!G())throw Ve;s("tengu_agent_tool_terminated",{agent_type:o.agentType,model:rr(o.resolvedAgentModel),final_model:rr(we.at(-1)??o.resolvedAgentModel),model_swapped:we.length>1,duration_ms:Date.now()-o.startTi
+
+- @185282636
+e(bn,80)}`:"unknown"}),U?.(),gee(e,bn,g,{summary:bn},o.persistedToolResultFiles),G())o.spawnedSubagent?.failed();let mn=await C();if(!G())throw Ve;f("subagent_complete","subagent_async_errored"),o.spawnedSubagent?.failed(),bx({taskId:e,description:u,status:"failed",error:bn,taskRegistry:g,toolUseId:p.toolUseId,finalMessage:KL(fe),ownerAge
+
+- @191522665
+UN/root/chunk-axa5vv3c.js"),import("B:/~BUN/root/chunk-db3pkd2p.js"),import("B:/~BUN/root/chunk-p7sewg72.js")]);await A(await C(),w,g,O(g))})),p.command("login <name>").description("Authenticate with an MCP server (HTTP, SSE, or claude.ai connector)").option("--no-browser","Print the authorization URL instead of opening a browser (for SSH
+
+- @191742089
+ndRefreshOAuthTokenIfNeeded({credentials:u,storageV5:s}))a="auth: token refreshed via keychain re-check retry";if(a){if(await C(),n&&k)clearInterval(k),k=null,t(a)}}).catch((T)=>t(`auth: keychain re-check error: ${T}`))},ce),k.unref()}function x(r){if(c)clearTimeout(c),c=null;if(!r||e.aborted)return;let o=Math.min(Math.max(r-Date.now()-z,
+
+## 248 "await C(" hits=109
+- @179198696
+.length>0))return fe(r.source,n,t);let a=ie(e,{mode:384,flags:t});try{for(let i of n)if(!a.write(JSON.stringify(i)+`
+`))await C(a,"drain");a.end(),await C(a,"finish")}catch(i){throw a.destroy(),i}}async function fe(e,n,t){let{backend:r,key:a}=e,i=n.map((c)=>({data:JSON.stringify(c)+`
+`}));if(t==="w"){let c=await r.replaceRecords(a,i,{publ
+
+- @179198723
+ce,n,t);let a=ie(e,{mode:384,flags:t});try{for(let i of n)if(!a.write(JSON.stringify(i)+`
+`))await C(a,"drain");a.end(),await C(a,"finish")}catch(i){throw a.destroy(),i}}async function fe(e,n,t){let{backend:r,key:a}=e,i=n.map((c)=>({data:JSON.stringify(c)+`
+`}));if(t==="w"){let c=await r.replaceRecords(a,i,{publishDiscipline:"inPlace",mod
+
+- @179293128
+de:G_t})}):i;if(!mm(i.value.ino))return H({kind:"classified",error:Hl("unknown",{telemetryCode:G_t})});if(p(i.value,r)||await C(t,r))return re(void 0);let a={device:i.value.dev,inode:i.value.ino},[f,u]=await Promise.all([xe(l(e,{bigint:!0})),xe(U(e,{bigint:!0}))]),c=f.ok&&p(f.value,a)||u.ok&&p(u.value,a);if(n(`storage: a link publish land
+
+- @179764078
+o,"session ingress token");return C2(i),i}}async function oXn(e){if(process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN)return;await C({envVar:"CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",wellKnownPath:XB,readPath:process.env.CLAUDE_SESSION_INGRESS_TOKEN_FILE??XB,label:"token",fileLabel:"session ingress token",getCached:KLe,setCached:C2,credenti
+
+- @180500884
+`);let E=await o2t(o,e,t),C=(M)=>nt.post(p,{events:[E]},{headers:M,validateStatus:(L)=>L<500,timeout:30000}),O=await J5(await C(g),g["X-Trusted-Device-Token"],async(M)=>C({...yb((await XT()).accessToken),"X-Trusted-Device-Token":M}));if(O.status===200||O.status===201)return n(`${r} Successfully sent event to session ${e}`),O.data?.results
+
+- @180534646
+ata:void 0}catch{return}};if(E.length===1){let k=E[0];if(r?.requireLiveOwner&&yh(k.pid))return{kind:"dead-owner"};let M=await C(k.file);if(M===void 0)return{kind:"unusable"};if(r?.requireLiveOwner){let L=uE(M);if(L!==void 0){let N=await Ka(k.pid,{skipCache:!0});if(N!==void 0&&!ryt(L,N))return{kind:"dead-owner"}}}return{kind:"token",token:
+
+- @180534918
+d 0&&!ryt(L,N))return{kind:"dead-owner"}}}return{kind:"token",token:M.peerToken}}let O;for(let{file:k,pid:M}of E){let L=await C(k);if(L===void 0)continue;let N=0;if(!yh(M)){let U=uE(L),G=U===void 0?void 0:await Ka(M,{skipCache:!0});if(U===void 0||G===void 0)N=1;else N=ryt(U,G)?2:0}if(O===void 0||N>O.rank)O={rank:N,peerToken:L.peerToken}}i
+
+- @180628659
+epairingFromCache:Ct}},...U===void 0&&{missing:!0}}}},{publishDiscipline:"followAtomic",mode:384,acquireTimeoutMs:0}),O=await C(0);for(let N=1;O.ok;N++){let U=O.value.result?.restart;if(U===void 0)break;await $9(e,t,U.corrupt,U.repairingFromCache),E=U.version,O=await C(N)}let k=Date.now()-g;if(!O.ok){if(O.error.code==="Unavailable"&&(O.er
+
+## 248 "function C(" hits=161
+- @68606477
+pe;if(!(o.start>n||o.end<n)&&(m(r,s,o,u,f),e(s,o)))throw new E(o,u)})(t,a)}catch(f){if(f instanceof E)return f;throw f}}function C(t,n,e,r,a){e=y(e),r||(r=i);try{(function f(o,u,p){if(!(o.end<n)){var s=p||o.type;if(o.start>=n&&e(s,o))throw new E(o,u);m(r,s,o,u,f)}})(t,a)}catch(f){if(f instanceof E)return f;throw f}}function F(t,n,e,r,a){e
+
+- @83081645
+eturn e});if(e.exports===t)e.exports={};if(e.cjs=null,i)$(e);return e.state=2,e}catch(t){throw e.state=3,e.failure=t,t}}function C(e,r,o){let t=0,i=[],s=!1,{length:p}=r;while(t<p){let n=r[t],l=t+2+r[t+1],a=o(n,!1,e);i.push(a);let f=w[n];if(!f)T(n,!1);if(typeof f!=="function"){let c=f[1];t+=2;while(t<l){let u=r[t];t++}s||=a instanceof Prom
+
+- @178491676
+,".direnv","__pypackages__"]);function it(t,e){if(!t.startsWith(C(e)+l))return!1;return t.split(l).some((r)=>De.has(r))}function C(t){return t.endsWith(l)?t.slice(0,-1):t}var S;function at(t,e,r){let n=ct(),o=(process.env.LOCALAPPDATA??"").trim();if(r==="lexical")return A(st(n,o,(h)=>u(h).toLowerCase()),t,e);let i=n+"\x00"+o;if(S?.key===i
+
+- @178616744
+T"||r==="ENOTDIR"?void 0:xq}function j(e){return Zq(e)&&!_i(e)}function F(e,t){return t===void 0||t.every((r)=>w0(e,r))}function C(e,t){return t===void 0||t.every((r)=>_1e(e,r))}function Ae(e){if(e?.anchors!==void 0&&e.anchors.length>0)return e.anchors;return e?.anchor!==void 0?[e.anchor]:void 0}function QI(e){return $i(e)||_i(e)||Sh(TE,e
+
+- @178698353
+",value:e.data}}get value(){return this._def.value}}tXe.create=(e,t)=>new tXe({value:e,typeName:qr.ZodLiteral,...d(t)});function C(e,t){return new jEe({values:e,typeName:qr.ZodEnum,...d(t)})}class jEe extends Xd{_parse(e){if(typeof e.data!=="string"){let t=this._getOrReturnCtx(e),r=this._def.values;return ai(t,{expected:zp.joinValues(r),r
+
+- @178720573
+){return Bun.hash(t).toString()}function xer(t,e){return Bun.hash(e,Bun.hash(t)).toString()}var v=m("claude-cli"),I=200;function C(t){let e=t.replace(/[^a-zA-Z0-9]/g,"-");if(e.length<=I)return e;return`${e.slice(0,I)}-${Math.abs(v4(t)).toString(36)}`}function YSt(){try{return ce().cwd()}catch{return ve()}}function A(){return T(v.cache,C(Y
+
+- @178886801
+ new e({type:"date",coerce:!0,...g(t)})}function J(e,t){return new Le({check:"less_than",...g(t),value:e,inclusive:!1})}function C(e,t){return new Le({check:"less_than",...g(t),value:e,inclusive:!0})}function K(e,t){return new De({check:"greater_than",...g(t),value:e,inclusive:!1})}function j(e,t){return new De({check:"greater_than",...g(
+
+- @179293850
+de:DSn})})}async function OSn(e,r){let t=await xe(l(e,{bigint:!0}));if(!t.ok)return!1;return p(t.value,r)||C(e,r)}async function C(e,r){let t=await xe(g(e,b.O_RDONLY|Fp));if(!t.ok)return!1;try{let o=await xe(t.value.stat({bigint:!0}));return o.ok&&p(o.value,r)}finally{await xe(t.value.close())}}function p(e,r){return mm(e.ino)&&e.dev===r.
+
+## 248 "P(await" hits=7
+- @180532793
+e:!0,mode:448}),await mZ(u,o);let p=Or(u,kM(process.pid,e));try{await Jd(p)}catch{}return await Hn(p,S({peerToken:t,...UP(await cE()),pidDomain:await hY()}),384),p}async function _Z(e,t,r){let o=kM(process.pid,t),u=await e.ensureScope({namespace:"session"});if(!u.ok)throw n(`[uds-auth] sessions scope unavailable: ${Ge(u.error)}`),Error("m
+
+- @180533163
+be made through storage");try{await e.delete(Se.session(o))}catch{}let p=await e.write(Se.session(o),S({peerToken:r,...UP(await cE()),pidDomain:await hY()}),{publishDiscipline:"atomic",mode:384,exactMode:384});if(!p.ok)throw n(`[uds-auth] key publish failed: ${Ge(p.error)}`),Error("messaging key could not be published through storage");re
+
+- @182940093
+)}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.(
+
+- @183780028
+arker: ${E} does not resolve inside the plugins directory`),!1;return LNe(r,C,void 0),await Hn(C,S({pid:process.pid,...UP(await cE())})),!0}catch(M){return n(`Failed to write ${C$} marker: ${e}: ${M}`),!1}}let u=Ip(e,zu),p=Ip(u,String(process.pid));if(o){let E;try{E=await ple(u)}catch(C){return n(`Not writing an ${zu} marker: ${u} cannot 
+
+- @183780602
+rocess.pid)]):void 0;LNe(r,p,o&&k?{storageV5:t,key:k}:void 0);try{if(o&&k){let E=await t.write(k,S({pid:process.pid,...UP(await cE())}),{mode:438&~process.umask()});if(!E.ok)return n(`Failed to write ${zu} marker: ${e}: ${Ge(E.error)}`),!1;return!0}return await BNe(u,{recursive:!0}),await Hn(p,S({pid:process.pid,...UP(await cE())})),!0}ca
+
+- @183780800
+e ${zu} marker: ${e}: ${Ge(E.error)}`),!1;return!0}return await BNe(u,{recursive:!0}),await Hn(p,S({pid:process.pid,...UP(await cE())})),!0}catch(E){return n(`Failed to write ${zu} marker: ${e}: ${E}`),!1}}async function vV(e,t){if(await $k(e))return!0;let r=Ip(e,zu),o=Ip(r,String(process.pid)),u=D()&&t!==void 0,p=u?Xw(e,Ip(pi(),"cache"))
+
+- @186343832
+(await Ba(o.worktreePath).catch(()=>o.worktreePath))))return o.lockReason;return}async function pGe(e,t,r,o){try{let u=UP(await cE()).procStart,p=u?`claude ${o} ${r} (pid ${process.pid} start ${u})`:`claude ${o} ${r} (pid ${process.pid})`,g=()=>We(tt(),[...Zt,"worktree","lock","--reason",p,e],{cwd:t,env:Vo()}),k=await g();if(k.code===0)re
+
+## 248 "function v(" hits=138
+- @68605247
+):(c=typeof globalThis<"u"?globalThis:c||self,v((c.acorn=c.acorn||{},c.acorn.walk={})))})(this,function(c){"use strict";function v(t,n,e,r,a){e||(e=i),function f(o,u,p){var s=p||o.type;m(e,s,o,u,f),n[s]&&n[s](o,u)}(t,r,a)}function P(t,n,e,r,a){var f=[];e||(e=i),function o(u,p,s){var l=s||u.type,h=u!==f[f.length-1];h&&f.push(u),m(e,l,u,p,o
+
+- @83077687
+ise.resolve(p).then(i,(n)=>(t(n),i()))}catch(n){t(n)}if(o)throw r};return i()},d=new Map,P={},x={},S={},R,ee=null;async function v(e){let r=await O(e,!1,null);return r.esm?r.exports:r.cjs.exports}class b{id;esm;state=0;exports=null;cjs;failure=null;imports=null;updateImport=null;onDispose=null;selfAccept=null;depAccepts=null;importers=new
+
+- @178159837
+ements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+function r(n){return n}function v(n){return r(n)}function c(n){return r(n)}function Ce(n){return n==null?void 0:r(n)}function si(n){return r(String(n))}function DL(n){return n==null?void 0:r(String(n))}function d3t(n){return r(n.join(","))}fun
+
+- @178488317
+}function _1e(t,e){if(!Vn(t))return!1;if(TD(t)||F2(t))return!0;if(Wp(t))return!0;let r=Qq(t);return r===null||r!==Qq(e)}function v(t){return null}function T(t){return t.replace(/[A-Z]/g,(e)=>e.toLowerCase())}function Vvt(t,e="win32"){let r=(e==="darwin"?/^\/net\/([^/]+)(\/.*|$)/i:/^\/net\/([^/]+)(\/.*|$)/).exec(t);if(!r)return t;return"/n
+
+- @178731316
+ises";import{homedir as J}from"os";import{delimiter as Q,join as p}from"path";function f(){return!1}function F(){return}function v(){return!1}function q(){if(ce().existsSync(p(ge(),".config.json")))return p(ge(),".config.json");return tt()}function tt(){let t=`.claude${b4()}.json`;return p(process.env.CLAUDE_CONFIG_DIR||J(),t)}function vs
+
+- @178822124
+se"true":return u=8;case"false":return u=9;case"null":return u=7}return u=16}return l+=String.fromCharCode(p),t++,u=16}}function v(p){if(H(p)||J(p))return!1;switch(p){case 125:case 93:case 123:case 91:case 34:case 58:case 44:case 47:return!1}return!0}function B(){let p;do p=A();while(p>=12&&p<=15);return p}return{setPosition:T,getPosition
+
+- @178824959
+eturn U(o,a)+U(b,t+m);let c=b.length*(t+m);if(!g||c>Q[T][o].length)return o+U(b,t+m);if(c<=0)return o;return Q[T][o][c]}function v(){let c=O.scan();a=0;while(c===15||c===14){if(c===14&&r.keepLines)a+=1;else if(c===14)a=1;c=O.scan()}return N=c===16||O.getTokenError()!==0,c}let B=[];function p(c,k,h){if(!N&&(!i||k<f&&h>u)&&e.substring(k,h)!
+
+- @179189055
+urn n.remember(e,r),r}if(i.length>0&&!l)n.remember(e,null);return null}catch(s){if(v(s))n.remember(e,null);return null}}function v(e){if(e===null||typeof e!=="object")return!1;let t="status"in e?e.status:void 0,n="signal"in e?e.signal:void 0,o="code"in e?e.code:void 0;return t===1&&!n&&!o}function u0(e,t=!1){if(!w())return e;if(e.includes
+
+## 248 "function N(" hits=131
+- @68606283
+==null||u.start===n)&&(e==null||u.end===e)&&r(l,u))throw new E(u,p)})(t,f)}catch(o){if(o instanceof E)return o;throw o}}function N(t,n,e,r,a){e=y(e),r||(r=i);try{(function f(o,u,p){var s=p||o.type;if(!(o.start>n||o.end<n)&&(m(r,s,o,u,f),e(s,o)))throw new E(o,u)})(t,a)}catch(f){if(f instanceof E)return f;throw f}}function C(t,n,e,r,a){e=y(
+
+- @82771118
+d(t,r),enumerable:!0,configurable:!0})},oe=(e,t)=>{u(e,"default",{get:()=>t,set:r=>t=r,enumerable:!0,configurable:!0})};function N(e){for(let t in e)return!0;return!1}function U(e,t){var r=w(t,W(e));for(let o in t)r[o]===void 0&&(r[o]=t[o]);return r}var ne=(e,t)=>N(t)?N(e)?U(e,t):t:e,ae=function(e,t,r,o){var n=arguments.length,a=n<3?t:o==
+
+- @178448517
+has(b))throw new Ae.HooksError(`${r}: on("${b}") registered twice`);O.add(b)}P({event:b,hook:T,matcher:A,observing:!1})}function N(b,T){if(v)throw new Ae.HooksError(`${r}: on("*") registered twice`);v=!0;for(let A of V.EVERY_EVENT)P({event:A,hook:b,matcher:T,observing:!0})}let Z=d.sealed(i((b,...T)=>{let[A,C]=T.length===1?[void 0,T[0]]:T;
+
+- @178460956
+uginRoot)));function ne(c){if(X.isHostError(c))return c;let{name:h,message:E}=k(c);return new Ae.HooksError(E===""?h:E)}function N(c){if(X.isHostError(c))return P.makeError(c.name,c.message);if(c===null||typeof c!=="object"&&typeof c!=="function"||O(c))return c;let{name:h,message:E}=c;return P.makeError(typeof h==="string"?h:"Error",typeo
+
+- @178586779
+=/^[+-]?(\d+(\.\d*)?|\.\d+)[eE][+-]?\d+$/,c=/^[+-]?\d{1,3}([_,\u00A0\u202F ])\d{3}(?:\1\d{3})*$/,E=/[_,\u00A0\u202F ]/g;function N(e){if(e.length<=32){if(l.test(e)){let n=Number(e);return Number.isInteger(n)?n:NaN}if(c.test(e))return parseInt(e.replace(E,""),10)}return}function Da(e){let n=String(e).trim();return N(n)??parseInt(n,10)}func
+
+- @178820324
+++;if(t<e.length&&x(e.charCodeAt(t))){t++;while(t<e.length&&x(e.charCodeAt(t)))t++;d=t}else m=3}return e.substring(p,d)}function N(){let p="",d=t;while(!0){if(t>=r){p+=e.substring(d,t),m=2;break}let c=e.charCodeAt(t);if(c===34){p+=e.substring(d,t),t++;break}if(c===92){if(p+=e.substring(d,t),t++,t>=r){m=2;break}switch(e.charCodeAt(t++)){ca
+
+- @178849027
+p((r)=>{var o;return(o=r).path??(o.path=[]),r.path.unshift(e),r})}function Y(e){return typeof e==="string"?e:e?.message}function N(e,t,r){let o={...e,path:e.path??[]};if(!e.message){let n=Y(e.inst?._zod.def?.error?.(e))??Y(t?.error?.(e))??Y(r.customError?.(e))??Y(r.localeError?.(e))??"Invalid input";o.message=n}if(delete o.inst,delete o.c
+
+- @178932835
+n St(e){if(typeof e=="string")return e;let t=e+"";return t=="0"&&1/e==-_t?"-0":t}function kt(e){return e==null?"":St(e)}function N(e){return typeof e==="string"}function Ie(e){return typeof e==="number"}function xt(e){return e===!0||e===!1||vt(e)&&Te(e)=="[object Boolean]"}function Ce(e){return typeof e==="object"}function vt(e){return Ce
+
+## 248 "var y=65534" hits=1
+- @182939589
+UN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(
+
+## 248 "y===" hits=1463
+- @95020452
+u...var cw=el.clientWidth,ch=el.clientHeight;if(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&
+
+- @95020476
+h,ch=el.clientHeight;if(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&&!(cs.textOverflow==='el
+
+- @95020499
+(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&&!(cs.textOverflow==='ellipsis'&&ox==='hidden')
+
+- @95763525
+'light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'b
+
+- @178220928
+ys:F.encodeDotInKeys,encoder:typeof e.encoder==="function"?e.encoder:F.encoder,encodeValuesOnly:typeof e.encodeValuesOnly==="boolean"?e.encodeValuesOnly:F.encodeValuesOnly,filter:n,format:r,formatter:s,serializeDate:typeof e.serializeDate==="function"?e.serializeDate:F.serializeDate,skipNulls:typeof e.skipNulls==="boolean"?e.skipNulls:F.s
+
+- @178344833
+Listener("abort",p,{once:!0});let _=globalThis.ReadableStream&&u.body instanceof globalThis.ReadableStream||typeof u.body==="object"&&u.body!==null&&Symbol.asyncIterator in u.body,h={signal:s.signal,..._?{duplex:"half"}:{},method:"GET",...u};if(o)h.method=o.toUpperCase();let l=this.fetch,m=async(g,v)=>{let R=setTimeout(p,r);try{return awa
+
+- @178395581
+.pendingDownstream++===0)n.pause();let u=new AbortController,f=Ge(s,u),g=Ge(m,u),y=t(a,u.signal).then((x)=>{let k=r.carry===void 0?x:r.carry(x,a,o);return p.belowRejected=void 0,p.fromBelow.push(k),k},(x)=>{throw p.belowRejected={error:x},x});p.inFlight=y;try{return await y}finally{f(),g(),St(p,n)}}return{runBelow:i,call:async(a,m)=>{let 
+
+- @178397072
+({members:t,e:r,call:n,signal:o.signal})});var Rt=(e)=>e.reduce((t,r)=>{let o=t.at(-1);return r.hop!==void 0&&o?.hop?.key===r.hop.key?[...t.slice(0,-1),{hop:o.hop,members:[...o.members,r]}]:[...t,{hop:r.hop,members:[r]}]},[]);var Po=(e)=>Rt(e).map((t)=>t.hop===void 0?t.members[0]:Ot(t.hop,t.members));var H$={};je(H$,{default:()=>H$,freeze
+
+## 248 "===y" hits=127
+- @68512037
+is.isContextual("of"))?(t>-1?(this.type===a._in&&this.unexpected(t),e.await=!0):u&&this.options.ecmaVersion>=8&&(S.start===y&&!p&&S.type==="Identifier"&&S.name==="async"?this.unexpected():this.options.ecmaVersion>=9&&(e.await=!1)),n&&u&&this.raise(S.start,"The left-hand side of a for-of loop may not start with \'let\'."),this.toAssignable
+
+- @180781723
+;if(e=e.trim().split(/\s+/).join(" "),oe("comparator",e,r),this.options=r,this.loose=!!r.loose,this.parse(e),this.semver===y)this.value="";else this.value=this.operator+this.semver.version;oe("comp",this)}parse(e){let r=this.options.loose?$r[mr.COMPARATORLOOSE]:$r[mr.COMPARATOR],t=e.match(r);if(!t)throw TypeError(`Invalid comparator: ${e}
+
+- @180782188
+(t[2],this.options.loose)}toString(){return this.value}test(e){if(oe("Comparator.test",e,this.options.loose),this.semver===y||e===y)return!0;if(typeof e==="string")try{e=new Ir(e,this.options)}catch(r){return!1}return ne(e,this.operator,this.semver,this.options)}intersects(e,r){if(!(e instanceof K))throw TypeError("a Comparator is require
+
+- @180782195
+his.options.loose)}toString(){return this.value}test(e){if(oe("Comparator.test",e,this.options.loose),this.semver===y||e===y)return!0;if(typeof e==="string")try{e=new Ir(e,this.options)}catch(r){return!1}return ne(e,this.operator,this.semver,this.options)}intersects(e,r){if(!(e instanceof K))throw TypeError("a Comparator is required");if(
+
+- @181100876
+t===13&&s.charCodeAt(e)===10)e++;r.push({type:"text",value:String.fromCharCode(t)}),o=e}else e++;break;case"escape":if(t===yO.CSI)a.state="csi",e++;else if(t===yO.OSC)a.state="osc",e++;else if(t===yO.DCS)a.state="dcs",e++;else if(!i&&t===yO.APC)a.state="apc",e++;else if(!i&&t===yO.PM)a.state="pm",e++;else if(!i&&(t===yO.SOS||t===107))a.st
+
+- @181100913
+sh({type:"text",value:String.fromCharCode(t)}),o=e}else e++;break;case"escape":if(t===yO.CSI)a.state="csi",e++;else if(t===yO.OSC)a.state="osc",e++;else if(t===yO.DCS)a.state="dcs",e++;else if(!i&&t===yO.APC)a.state="apc",e++;else if(!i&&t===yO.PM)a.state="pm",e++;else if(!i&&(t===yO.SOS||t===107))a.state="sos",e++;else if(t===79)a.state=
+
+- @181100950
+Code(t)}),o=e}else e++;break;case"escape":if(t===yO.CSI)a.state="csi",e++;else if(t===yO.OSC)a.state="osc",e++;else if(t===yO.DCS)a.state="dcs",e++;else if(!i&&t===yO.APC)a.state="apc",e++;else if(!i&&t===yO.PM)a.state="pm",e++;else if(!i&&(t===yO.SOS||t===107))a.state="sos",e++;else if(t===79)a.state="ss3",e++;else if(i&&(t===32||t===13|
+
+- @181100991
+:if(t===yO.CSI)a.state="csi",e++;else if(t===yO.OSC)a.state="osc",e++;else if(t===yO.DCS)a.state="dcs",e++;else if(!i&&t===yO.APC)a.state="apc",e++;else if(!i&&t===yO.PM)a.state="pm",e++;else if(!i&&(t===yO.SOS||t===107))a.state="sos",e++;else if(t===79)a.state="ss3",e++;else if(i&&(t===32||t===13||t===10||t===9))e++,r.push({type:"text",v
+
+## 248 "===y||" hits=6
+- @180782188
+(t[2],this.options.loose)}toString(){return this.value}test(e){if(oe("Comparator.test",e,this.options.loose),this.semver===y||e===y)return!0;if(typeof e==="string")try{e=new Ir(e,this.options)}catch(r){return!1}return ne(e,this.operator,this.semver,this.options)}intersects(e,r){if(!(e instanceof K))throw TypeError("a Comparator is require
+
+- @189277239
+stateNode=y}}function Fu(i,l,s,f,y){if((i.mode&32)!==0&&(s===null?Kg(l,f):Gg(l,s,f))){if(i.flags|=16777216,(y&335544128)===y||fc(l,f))if(fm(i.stateNode,l,f))i.flags|=8192;else if(Lh())i.flags|=8192;else throw ya=Rs,Mc}else i.flags&=-16777217}function ch(i,l){if($b(l)){if(i.flags|=16777216,!Nm(l))if(Lh())i.flags|=8192;else throw ya=Rs,Mc}e
+
+- @198676283
+(f),y)&&!await Nl(r,a))return re({kind:"escapes",reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===void 0||lr(k)||Ln(k)!==void 0||!m&&g.some((b)=>Mb(b).some((v)=>rD(v,dL(i.
+
+- @216364289
+;p=!1;break}if(m){if(!Efe(t,function(x,b){if(!P3(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}var cat,uat,O3,JO=F(()=>{"use strict";ZO();Afe();QO();cat=1,uat=2;o(hat,"equalArrays");O3=hat});function dat(e){var t=-1,r=Array(e.size);return e.forEach(
+
+- @217217762
+;p=!1;break}if(m){if(!JEe(t,function(x,b){if(!bq(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}function n4e(e){var t=-1,r=Array(e.size);return e.forEach(function(n,i){r[++t]=[i,n]}),r}function i4e(e){var t=-1,r=Array(e.size);return e.forEach(functio
+
+- @217263509
+p=!1;break}if(m){if(!Cwt(t,function(x,b){if(!ZAe(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}function e6e(e){var t=-1,r=Array(e.size);return e.forEach(function(n,i){r[++t]=[i,n]}),r}function t6e(e){var t=-1,r=Array(e.size);return e.forEach(functio
+
+## 248 "===y?" hits=7
+- @189277035
+=f&&oi(l);else if(Ri){var{stateNode:y,memoizedProps:v}=i;if((i=rh(i,l))||v!==f){var M=Qt.current;v=yb(y,s,v,f,!i,null),v===y?l.stateNode=y:(ls(l),um(v,s,f,M)&&oi(l),l.stateNode=v,i&&Uu(v,l,!1,!1))}else l.stateNode=y}}function Fu(i,l,s,f,y){if((i.mode&32)!==0&&(s===null?Kg(l,f):Gg(l,s,f))){if(i.flags|=16777216,(y&335544128)===y||fc(l,f))if
+
+- @189914004
+cided: ${lo(s.label)}</p>`,l=e.anchor===void 0?"":`<p class="anchor">Anchor: <code>${lo(e.anchor)}</code></p>`,p=n||e.id===y?"":`<div class="custom-answer"><input class="option-input" type="text" maxlength="${R}" disabled aria-disabled="true" title="Deciding from the page needs this Artifact to be able to update itself"`+' placeholder="Or
+
+- @198676332
+reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===void 0||lr(k)||Ln(k)!==void 0||!m&&g.some((b)=>Mb(b).some((v)=>rD(v,dL(i.within)))))return re({kind:"escapes",reason:"unna
+
+- @201536777
+null,m=null;function d(){let h=i.getState();if(m===null||l!==h)l=h,m=ld(h);return m}function f(h,y){i.setState((S)=>S[h]===y?S:{...S,[h]:y})}return{setRaw:(h)=>f("raw",h),setTransformed:(h)=>f("transformed",h),setSalvage:(h,y)=>i.setState((S)=>{let x=y??S.exact;if(S.salvage===h&&S.exact===x)return S;return{...S,salvage:h,exact:x}}),getSta
+
+- @216470904
+}}function oB(e,t){let{realNodeRects:a,labelNodeRects:s}=gu(t.values()),l=e.filter(g=>!g.isLayoutOnly),u=o((g,y,v)=>Jr(g===y?v??[]:g.points??[]),"pointsFor"),h=o((g,y)=>{let v=0;for(let x=0;x<l.length;x++){let b=jr(u(l[x],g,y));for(let T=x+1;T<l.length;T++){let k=jr(u(l[T],g,y));for(let C of b)for(let w of k)fc(C.a,C.b,w.a,w.b,rr)&&v++}}r
+
+- @216480926
+}function Cye(e,t){let{realNodeRects:i,labelNodeRects:a}=gu(t.values()),s=e.filter(g=>!g.isLayoutOnly),l=o((g,y,v)=>Jr(g===y?v??[]:g.points??[]),"pointsFor"),u=o(g=>jr(g).reduce((y,v)=>{let x=v.a.x-v.b.x,b=v.a.y-v.b.y;return y+Math.hypot(x,b)},0),"pathLength"),h=o((g,y)=>{let v=0;for(let x=0;x<s.length;x++){let b=jr(l(s[x],g,y));for(let T
+
+- @218307375
+));return}let v=u.node()?.querySelectorAll("g.node, g.rough-node"),x;if(v?.forEach(C=>{let w=C.textContent?.trim();(C.id===y?.domId||w===g)&&(x=C)}),!x){Z.warn("\u26A0\uFE0F Could not find node matching text:",g);return}let b=x.parentNode;if(!b){Z.warn("\u26A0\uFE0F Node has no parent, cannot wrap:",g);return}let T=document.createElementN
+
+## 248 ",y)" hits=550
+- @68509975
+s===a.name&&y.type==="Identifier"&&this.eat(a.colon)?this.parseLabeledStatement(r,d,y,e):this.parseExpressionStatement(r,y)}},l.parseBreakContinueStatement=function(e,t){var i=t==="break";this.next(),this.eat(a.semi)||this.insertSemicolon()?e.label=null:this.type!==a.name?this.unexpected():(e.label=this.parseIdent(),this.semicolon());for(
+
+- @68545251
+s;this.yieldPos=0,this.awaitPos=0,this.awaitIdentPos=0;var xe=this.parseExprList(a.parenR,this.options.ecmaVersion>=8,!1,y);if(r&&!h&&this.shouldParseAsyncArrow())return this.checkPatternErrors(y,!1),this.checkYieldAwaitInDefaultParams(),this.awaitIdentPos>0&&this.raise(this.awaitIdentPos,"Cannot use \'await\' as identifier inside an asyn
+
+- @74144160
+.._...<.*..^._ju.RCV.[a^.a.e.eY~....S...S|..U.<.*..Q.Q.Q>l%SKg.g.wu|..$..p'.2{.h"niq.}.X
+jNj.q.t....A~N.m..s.*...o.*p?p,y)...".....<.*..SUb.N....<.*..r.YNl.lm...).Hu	...OZ.h.v5{.........n.[.{<.*..S.e..JWxl...ger...m....:...<.*.2..Y?b...W..t...<.*..N...~	f.f.t.w#P.e!}+.*.....<.*.>e..<.*..X<.*....Y^...aUSZTZ.n.~..s...Ib.f.s_....}......%...
+
+- @138948336
+.....o#..7...H0......,p&....q$..G.....r$..8...61......,s'....t%..H.....u%..9...F2......,v(....w&..I.....x&..:....3......,y)....z'..J.....{'..;....4a........K.....|(........L.....})..........<....5......=......=...~*..M.........*..>...A6......?......?....+..N.........+.........@......@....,..O.........,..........A...77......B......B....-..
+
+- @178437617
+rted){g?.(),x(qt(f));return}let k=()=>{return};function O(){t?.delete(S),k(),g?.()}let v=setTimeout((w,H)=>{w(),H()},m,O,y);if(f)k=Gd.relayAbort(f,{abort:()=>{clearTimeout(v),O(),x(qt(f))}});let S=d.sealNoun({cancel:()=>{clearTimeout(v),O(),x(Ae.unloadedError(e))}});t?.add(S)})},after:(i,a)=>p({event:"after",ms:i,fn:a,repeat:!1}),every:(i
+
+- @178471218
+,f)),build:(m,u,f)=>{_.environmentOf(r,m).environment.activation.finalize(u,f)},callInterface(m,{name:u,method:f,args:g},y){let{environment:x}=_.environmentOf(r,m);if(y!==void 0)r.servingLive.add(y.callId);let k=y===void 0?void 0:setTimeout(_.servedOver,qS.HANDLER_BUDGET_MS,r.servingLive,y.callId);function O(){if(clearTimeout(k),y!==void 
+
+- @178598308
+rn;try{a(l(n,f),e)}catch{}}function Xwr(e,t,n){let r=n??process.env.CLAUDE_JOB_DIR,o=t.trim();if(!r||!o)return;try{a(l(r,y),`${e}
+${o.slice(0,g)}`)}catch{}}function own(e){return h(l(e,f))}function iwn(e,t){let n=h(l(e,y));if(!n)return;let r=n.indexOf(`
+`);return r!==-1&&n.slice(0,r)===t?n.slice(r+1):void 0}function h(e){try{let t=x(e);if
+
+- @178598406
+r||!o)return;try{a(l(r,y),`${e}
+${o.slice(0,g)}`)}catch{}}function own(e){return h(l(e,f))}function iwn(e,t){let n=h(l(e,y));if(!n)return;let r=n.indexOf(`
+`);return r!==-1&&n.slice(0,r)===t?n.slice(r+1):void 0}function h(e){try{let t=x(e);if(!t.isFile()||t.size>65536){try{C(e,{recursive:!0,force:!0})}catch{}return}let n=S(e,"utf8");retur
+
+## 248 "(y)" hits=885
+- @12536643
+..Q.H..x....t.H.......k.Q.H.. ...H...\...H...T.Q.../....u.H.......?.Q..u.H...+*.H.D$ H.u.9.L...7.I.........x).L...**..(y).L...**.H........y)...O....d...H.D$ ....H..H......A.....H..H..I.....*.H..H......H...........L..v**...x).L..j**........x).L..Y**.H..H....x).fD..}.fD..u.fD..m fD..e0fD..]@fD..UPfD..M`fD..Epf.......f.......f.......f....
+
+- @66994858
+)
+    callback = y, y = @undefined;
+  if (NumberIsNaN(x))
+    throw new ERR_INVALID_ARG_VALUE("x", x);
+  if (NumberIsNaN(y))
+    throw new ERR_INVALID_ARG_VALUE("y", y);
+  if (stream == null || typeof x !== "number" && typeof y !== "number") {
+    if (typeof callback === "function")
+      process.nextTick(callback, null);
+    return !0;
+ 
+
+- @68547878
+this.start,y=this.parseParenAndDistinguishExpression(r,t);return e&&(e.parenthesizedAssign<0&&!this.isSimpleAssignTarget(y)&&(e.parenthesizedAssign=d),e.parenthesizedBind<0&&(e.parenthesizedBind=d)),y;case a.bracketL:return s=this.startNode(),this.next(),s.elements=this.parseExprList(a.bracketR,!0,!0,e),this.finishNode(s,"ArrayExpression"
+
+- @74296334
+.r.r.r.r.r<.*..r.r.r
+>.>Q.s.Q...Q....r.rQ...{s|s}s.t.t.t.t.t.t.t.t.?R...R....u.ubvevfv.v.v.v.?.v.w.w.w.w.w.w"y#y$y%y&y'y(y)y*y+y,y.ylzmznzoz.z.z.zC|D|E|F|G|H|I|J|K|L|M|N|O|U|.|.|.|.B{~|~}~~~.~.~.~.~.~&CX...X...X...q.K.L.X.5......./.y.z.{.|...........Z...f.g.h.i.$...............................<.*.......	.
+..................".gEjEmE\...\.
+
+- @82686120
+  _Generic((x), float: F##f, long double: F##l, default: F)(x, y)
+#define __tgmath_real_2(x, y, F) \
+    _Generic((x) + (y), float: F##f, long double: F##l, default: F)(x, y)
+#define __tgmath_real_3_2(x, y, z, F) \
+    _Generic((x) + (y), float: F##f, long double: F##l, default: F)(x, y, z)
+#define __tgmath_real_3(x, y, z, F) \
+    _Gener
+
+- @82686234
+(x) + (y), float: F##f, long double: F##l, default: F)(x, y)
+#define __tgmath_real_3_2(x, y, z, F) \
+    _Generic((x) + (y), float: F##f, long double: F##l, default: F)(x, y, z)
+#define __tgmath_real_3(x, y, z, F) \
+    _Generic((x) + (y) + (z), float: F##f, long double: F##l, default: F)(x, y, z)
+
+/* Functions defined in both <math.h> an
+
+- @82686349
+x) + (y), float: F##f, long double: F##l, default: F)(x, y, z)
+#define __tgmath_real_3(x, y, z, F) \
+    _Generic((x) + (y) + (z), float: F##f, long double: F##l, default: F)(x, y, z)
+
+/* Functions defined in both <math.h> and <complex.h> (7.22p4) */
+#define acos(z) __tgmath_real(z, acos)
+#define asin(z) __tgmath_real(z, asin)
+#define ata
+
+- @83078390
+ operation.`;throw r}}dynamicImport(e,r){let o=O(e,!0,this);if(o){if(o.id===e)return Promise.resolve(y(o));return o.then(y)}return r?(ee??=Function("specifier, opts","import(specifier, opts)"))(e,r):import(e)}reactRefreshAccept(){if(ne(this.exports))this.accept()}get importMeta(){let e={url:`${location.origin}/${this.id}`,main:!1,require:
+
+## 248 "y," hits=9476
+- @431621
+A.............,Y..D....X..+.X....,Y....X...).X.D....X.A..E).D..!kU....oU.E9.E.M.A..A..A..E1.E).E.N.D....X.E....h....=y,Y..uV...,Y....H...BW.H.5.BW.H.D.H.......H.:,Y.H.D$ ....L.L$@H..A......K......,Y..D...,Y.H..,Y.H.D$ ....H..AU:.L.L$@A............+Y..D...+Y.H..+Y.H.D$ ....H..8	>.L.L$@A............+Y..D...+Y..=..X....a...H.5..X
+
+- @625006
+D.y.E.....A..D......D..A..|....-t..........u.@..)......@..H........@.yRA..D......H...H.EpI.C.E..B.....P....w.Hc..H....@.y,A....ff...........-tY..).."...H........P.D......H......L......H......A....@.y-A...z...@.yTA...n...@.yVA...b...1.A...X....(..H............H......A..D....L......A.......I......H.EPI......H.E(I......H.E......H.......W.H.E
+
+- @631046
+..N	D.pD.A.fA...w....A.....I..L	ExL.B.A.x..t%..D..H.J..y..u.I..H..L;A.t...........L..M..A.x..t....H.@8H..H..H......H.z8.y,.t..r...H......H.@0H.@8H..H......H9.......D..{ L.s0L......A.......=................%r..H......L.`......1.H..............H......H......H...H........t.0..t. ..t....4.H.D.@.....8....Uq..H......H......H..H..8H......H..H.@.
+
+- @2099366
+.E....9..H..A......H.Q(D.J.A..H.Q(H.R.Mc.B...Bf;Q.r.f9Q.A...f;Q....D .H.. ^.D.J.A.....f.........f.VWSH.. @..L9.t~A..@...y,I..L.Q(H..L..I....L..M..D..I....9..A..H.....H.Q(H.R.H....B..u.1..3E..t.@.....t&f9A.w.f;A.s	...f....H.I0...f.<...@.....H.. [_^.f........VH..0L9.t=A).Ic.L.@.D.D$,..D....y..D$ .L.D$,H..H..1.A.....	.H....Q.9.}.1..?=....w/
+
+- @3149180
+.........D..H..H.. L.A......E.P.M.@.M..t.E.H.A..A9.t.~.A..E.....I,.Q09.|....Q0.f............VH..0L.I.1.A.9..mH.y .ucE1..y,....A...E..H.A.H..H..1...0..H.F H.N..	.L$,L.L$,H..1.E1...?..H...F(.D$,........A...A..u.H.Q....A(H..0^.f.........f..A,....f........D.A(L.I.H.I .??..f...........D...A0.f.........f...A4.f..........H.I......H..t.f.9Q.t
+H.I
+
+- @3170584
+Q..6.A(..~.D.Q.D9.}&L.Y ..A9..u....A(A...A..1.;A,....D.4.GH.A E..L....f.........L..9.|.L.^.D.Y(..~*1.A9.|.D...<...A.81.;y,....D.4A....H..(_^...Y...f............AWAVAUATVWUSH..XD..)......V...D..D..A..H....$.....A(....H.A,H.D$PH....W...F,H.L$H..,...n4.^8.D$<....H..L......D.|$@Ic.L.......L.......A..H..H......H.H0D.......A..H..H......H.@.D.x.
+
+- @3269822
+.F.L.p I..A............H..D........Q.*...H..H...P@...........A.............k...A..
+E....$..........S...............I..D;y,......H..E..A...Mc.F...B@...E..A...A..?E..B...JA..A...A....T...M.f(D....T..H.Hi..$I.H.. B..9.T.................R..Li.'.toA..A).Hc.Hi.1..0H..H..?H.."........).L..H..?I..(A..............Ic.E...H.\$@H.\$(D..l$?D.l$ H..L..
+
+- @3271028
+..t.L..9^..A........w...H..x...A.....H..........C.f.. H.-w.........f.........K.......Q0H.I.Hc.D.$.A............M.v I..D;y,}1H..E..A...Mc.F...B@...E..A...A..?E..B...J.........A0H.I.H.D.$..E....H0.....H.-.....-............9.~.....H....A.......h..E1.......H..H..D..L.D$@.P`........x	D........D..l$?.....H.D$@.8.......H.D$@...........I.F...H..
+
+## 248 "uidsCollapse" hits=4
+- @97792400
+tory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key
+
+- @179894498
+port{readFile as a,readlink as u}from"fs/promises";import{hostname as e}from"os";class o{pidSpace=null;pidDomain=void 0;uidsCollapse=null}var qce=new o;function Qgt(){if(qce.pidSpace===null){let n="";qce.pidSpace=`${e()}${n===""?"":"#"+n}`}return qce.pidSpace}function hY(){return qce.pidDomain??=(async()=>{let n=B();if(n==="windows")retur
+
+- @182940371
+teger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{ch
+
+- @182940398
+ction r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir a
+
+## 248 "function M(" hits=149
+- @68497407
+on(e,t){return Ct.call(e,t)},Oe=Array.isArray||function(e){return _t.call(e)==="[object Array]"},Be=Object.create(null);function M(e){return Be[e]||(Be[e]=new RegExp("^(?:"+e.replace(/ /g,"|")+")$"))}function B(e){return e<=65535?String.fromCharCode(e):(e-=65536,String.fromCharCode((e>>10)+55296,(e&1023)+56320))}var St=/(?:[\\uD800-\\uDBF
+
+- @83081325
+t{list:n,isAsync:l}=C(t,s,O);return l?Promise.all(n).then((a)=>M(t,p,a),(a)=>{throw t.state=3,t.failure=a,a}):M(t,p,n)}}function M(e,r,o){try{let t=e.exports;e.imports=o.map(y);let i=!e.selfAccept||e.selfAccept===j,s=r(e);if(e.imports=o,s)return s.then(()=>{if(e.state=2,e.exports===t)e.exports={};if(e.cjs=null,i)$(e);return e});if(e.expor
+
+- @178611827
+ess?.getBuiltinModule?.("async_hooks"),le=B!==void 0,U=B?new B.AsyncLocalStorage:{run:(e,t)=>t(),getStore:()=>{return}};function M({writeBatch:e,sizeOf:t,flushIntervalMs:r=1000,maxBufferSize:i=100,maxBufferBytes:o=1/0,immediateMode:s=!1}){let a=[],u=0,l=null,d=null;function p(){if(l)clearTimeout(l),l=null}function g(y){try{e(y)}catch{}}fu
+
+- @178887861
+ts_with",...g(t),prefix:e})}function Qe(e,t){return new ar({check:"string_format",format:"ends_with",...g(t),suffix:e})}function M(e){return new pr({check:"overwrite",tx:e})}function tt(e){return M((t)=>t.normalize(e))}function rt(){return M((e)=>e.trim())}function ot(){return M((e)=>e.toLowerCase())}function nt(){return M((e)=>e.toUpperC
+
+- @179200836
+found&&i.value.length>0?M(i.value):o;return{head:o,tail:c,mtimeMs:a.mtimeMs,totalBytes:a.totalBytes}}catch{return null}}function M(e){return Buffer.from(e.buffer,e.byteOffset,e.byteLength).toString("utf8")}async function AZn(e,n){return await USn(e,n)!=="none"}async function USn(e,n){if(n!==void 0&&n.hoverRestOn)return R(n.source);try{if(
+
+- @179267558
+i})`),f("shell_memory_cgroup",oo(i)??"no_hierarchy"),s("tengu_tool_cgroup",{status:v("disabled")})}return e.dir??void 0}function M(e){if(Me()===void 0)return;if(e!=="shell"&&wn().has(e))return;let t=KS(E),r=Po(t);if(r===void 0)return;if(Pn(t),!t.activatedClasses.has(e))t.activatedClasses.add(e),s("tengu_tool_cgroup",{status:v("class_enabl
+
+- @179305352
+oid 0)return n;let t=se(e);if(t===void 0)return Ne("key",`${e.namespace} is not a storage namespace`);return M("key",t)}function M(e,n){for(let[t,a,s]of n){let i=`${e}.${t}`;if(a===void 0){if(s!=="optional")return Ne(i,"required")}else if(he(t)){if(!(e==="scope"&&t==="agentRelPath"&&Array.isArray(a)&&a.length===0)&&(!Array.isArray(a)||!wd
+
+- @179471279
+GINT")]]);function W(t){if(!t)return;return O.get(t)??v("other")}function L(t){if(!t)return;return b.get(t)??v("other")}function M(t,e){if(!e)return{};return{[`${t}_status`]:c(e.status),[`${t}_exit_code`]:e.exitCode??void 0,[`${t}_errno`]:W(e.errno),[`${t}_signal`]:L(e.signal),[`${t}_duration_ms`]:e.durationMs}}function N(t,e){return{is_w
+
+## 248 "function ce(" hits=67
+- @68523977
+"&&r==="iset"||s==="iset"&&r==="iget"||s==="sget"&&r==="sset"||s==="sset"&&r==="sget"?(e[i]="true",!1):s?!0:(e[i]=r,!1)}function ce(e,t){var i=e.computed,s=e.key;return!i&&(s.type==="Identifier"&&s.name===t||s.type==="Literal"&&s.value===t)}l.parseExportAllDeclaration=function(e,t){return this.options.ecmaVersion>=11&&(this.eatContextual(
+
+- @178485714
+nction se(t,e){var r=t.length;while(r--)if(Jq(t[r][0],e))return r;return-1}var f=se;var le=Array.prototype,ue=le.splice;function ce(t){var e=this.__data__,r=f(e,t);if(r<0)return!1;var n=e.length-1;if(r==n)e.pop();else ue.call(e,r,1);return--this.size,!0}var Z=ce;function fe(t){var e=this.__data__,r=f(e,t);return r<0?void 0:e[r][1]}var B=f
+
+- @178624585
+eak;a+=u}return{content:(a<o?s.subarray(0,a):s).toString("utf8"),stats:i}}finally{await r.close()}}catch{return null}}};function ce(){return TE}function bu(e){process.chdir(e);try{process.cwd()}catch{}}async function rde(e,t,r){await using i=await v(e,"r");let o=(await i.stat()).size;if(o<=t)return null;let s=Math.min(o-t,r),a=Buffer.allo
+
+- @178826642
+Size||4;while(r<e.length){let s=e.charAt(r);if(s===L[1])t++;else if(s==="\t")t+=l;else break;r++}return Math.floor(t/l)}function ce(e,i){for(let r=0;r<i.length;r++){let t=i.charAt(r);if(t==="\r"){if(r+1<i.length&&i.charAt(r+1)===`
+`)return`\r
+`;return"\r"}else if(t===`
+`)return`
+`}return e&&e.eol||`
+`}function V(e,i){return`\r
+`.indexOf(e
+
+- @179328459
+t=TSn){if(n.namespace!=="log"||n.channel!=="debug")return;return{maxBytes:t,rotatedPath:`${Oo(e,n).slice(0,-4)}.1.txt`}}function ce(e){switch(e){case"debug":return"debug";case"telemetry":return"telemetry";case"apiDump":return"dump-prompts"}}function P(e,n){return n.layer==="user"?r(e,"agent-memory"):r(e,`agent-memory-${n.layer}`,n.project
+
+- @179538269
+d");return e+" ms"}function E(e,t,r,s){var u=t>=r*1.5;return Math.round(e/r)+" "+s+(u?"s":"")}});var L=d(function(Ue,j){function ce(e){r.debug=r,r.default=r,r.coerce=H,r.disable=h,r.enable=u,r.enabled=Z,r.humanize=Rvn(),r.destroy=K,Object.keys(e).forEach((n)=>{r[n]=e[n]}),r.names=[],r.skips=[],r.formatters={};function t(n){let o=0;for(let
+
+- @179649355
+|a.NO_COLOR||a.FORCE_COLOR!==void 0||te())return!1;let e=a.TERM;if(e&&se.has(e)&&u.level<3)return u.level=3,!0;return!1}function ce(){if(a.CLAUDE_CODE_TMUX_TRUECOLOR)return!1;if(a.TMUX&&u.level>2)return u.level=2,!0;return!1}function a7n(e){if(p.ensureInit(),e&&u.level>2)return u.level=2,!0;return!1}function gte(e){return p.ensureInit(),"
+
+- @179664095
+le",{value:!0});y.parseProxyResponse=void 0;var ie=se(Yue()),P=(0,ie.default)("https-proxy-agent:parse-proxy-response");function ce(e){return new Promise((t,r)=>{let n=0,o=[];function u(){let l=e.read();if(l)w(l);else e.once("readable",u)}function s(){e.removeListener("end",p),e.removeListener("error",_),e.removeListener("readable",u)}fun
+
+## 248 "function _()" hits=22
+- @178588277
+(s()??i(g(),".claude")).normalize("NFC"),s);function Dde(e){return t(ge())===t(e)}function Mde(){return i(ge(),"teams")}function _(){return process.env.CLAUDE_CODE_PROJECT_DIR_NAME}var D=/^[A-Za-z0-9_-]{1,64}$/,C=/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;function ATn(e){if(!e||!D.test(e)||C.test(e))return;return e}function I(){return`${s
+
+- @178645189
+{}}}class Qer{instance=void 0;init={};setInstance(e){this.instance=e}setInit(e){this.init=e}}var hfr=new K(()=>new Qer);function _(){return hfr.of(z().host)}function ie(e,t){return new Jer({argv:process.argv,env:process.env,sessionId:()=>V(),configHomeDir:()=>ge(),onExit:(r)=>{process.on("exit",r)},registerCleanup:(r)=>{Et(r)},writeToStde
+
+- @179278097
+h";function Awe(){return a.CLAUDE_CODE_REMOTE||a.CLAUDE_CODE_PLUGIN_PREFER_HTTPS}var rq="--upload-pack=git-upload-pack";function _(){return B()==="windows"?"\\\\.\\NUL":"/dev/null"}var p=/^core\.hooksPath=(?:\/dev\/null|\\\\\.\\nul)$/i;function u(){return[["core.fsmonitor",""],["core.hooksPath",_()],["core.askPass",""],["protocol.ext.allo
+
+- @179651615
+if(u.has(e))return!1;return u.add(e),!0}class h{extraCACerts=null;certificates=Ko(()=>x(this))}var Wdr=new K(()=>new h);function _(){return Wdr.of(z().host)}var Zte=c0(async()=>{let e=_(),r=a.NODE_EXTRA_CA_CERTS;if(!r){if(e.extraCACerts!==null)return e.extraCACerts=null,p(e),!0;return!1}try{let t=await ce().readFile(r,{encoding:"utf8"});i
+
+- @181186750
+eturn!1;if(Tt())return!1;if(Eo(a.CLAUDE_CODE_ARTIFACT))return!1;if(!Me(a.CLAUDE_CODE_ARTIFACT)&&our())return!1;return!0}function _(){return U_e()&&f()}function f(){return!iur()&&E()}function Qbr(){if(u())return!1;return _()}function w(){let e=ISe();return e===void 0||e==="prosumer_oauth"||e==="no_auth"}function y(){return Me(a.CLAUDE_CODE
+
+- @181912109
+ext=s,o)e.new_context_truncated=!0,e.new_context_original_length=r.length}class J{recorder=null}var St=new K(()=>new J);function _(){return St.of(z().host).recorder}function dGn(){let e=a.CLAUDE_CODE_PERFETTO_TRACE;n(`[Perfetto] initializePerfettoTracing called, env value: ${e}`)}function vZ(){return _()!==null}function mdt(e,t,r){let s=_
+
+- @182024919
+S>f)return s(null,c);l.start(null,null),l.update(t),l.update(Qe.util.int32ToBytes(S)),y=g=l.digest().getBytes(),T=2,_()}function _(){if(T<=a)return l.start(null,null),l.update(g),m=l.digest().getBytes(),y=Qe.util.xorBytes(y,m,n),g=m,++T,Qe.util.setImmediate(_);c+=S<f?y:y.substr(0,u),++S,A()}A()}});var pa=d(function(mf,Pi){var ht=Y();ft();
+
+- @182939646
+nk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Nu
+
+## 248 "uid mapping" hits=2
+- @97792259
+9]{16}$..	....t.ENOTOWNED.......<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y
+
+- @182943117
+&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)";function b(){if(F1t())throw Object.assign(Error(tsn),{code:U1t})}async function s4n(e){if(B()==="windows"){awai
+
+## 248 "uid_map" hits=0
+## 248 "/proc/self/uid_map" hits=0
+## 248 "/proc/1/uid_map" hits=0
+## 248 "user namespace" hits=4
+- @97792234
+gj7cgsd.js....<XY.^[a-f0-9]{16}$..	....t.ENOTOWNED.......<.i.refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.....I}..cc-dae
+
+- @182943092
+`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)";function b(){if(F1t())throw Object.assign(Error(tsn),{code:U1t})}async function s4n(e)
+
+- @189798445
+t as the prompt instead of the normal continuation message\n- Fixed cross-session messaging silently turning off inside user namespaces and rootless containers after the 2.1.232 socket-directory hardening\n- Fixed text that hangs outside its container (for example the sign-in URL in `/login`) losing its leading columns when another part o
+
+- @226423326
+ output exists.
+
+**`--no-sandbox` is almost always needed in containers.** Electron's
+sandbox needs CAP_SYS_ADMIN or user namespaces. Neither by default.
+
+## Step 2 - build the REPL driver
+
+Once you can launch it, turn that throwaway script into a REPL. Start
+minimal - you will add commands as you need them. **The REPL is the
+rig
+
+## 248 "userns" hits=0
+## 248 "root-equivalent" hits=0
+## 248 "canonical system" hits=0
+## 248 "SYSTEM_DIR" hits=0
+## 248 "system dir" hits=4
+- @96642648
+proval and cannot be auto-allowed by permission rules........>..[*?[]........[..'
+
+This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.........A..on critical path: ......ENJ.'
+
+This command would remove a workspace directory (the working directory, an additi
+
+- @98054302
+ut: .......i..install_ambient_failed..........srt-win install: ambient write-deny stamping failed (stock world-writable system dirs could not be deny-stamped for the sandbox user): .....=xu.srt-win install failed (exit ...........throwIfNoEntry........#."code"........l.mapped_drive_cwd&...~h[.mapped/network-drive working directory......`5
+
+- @182695072
+ase 17:throw new ju("install_ambient_failed",`srt-win install: ambient write-deny stamping failed (stock world-writable system dirs could not be deny-stamped for the sandbox user): ${t}`);default:throw new ju("install_failed",`srt-win install failed (exit ${e.status}): ${t}`)}}function qcr(e={}){let t=e.srtWin??yr(),r;try{r=Li(jh(e),{time
+
+- @184246820
+r(let pe of ue){if(ube(pe))return aw(e,`Dangerous ${e} operation detected: '${N}'
+
+This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,`on critical path: ${N}`);if((j?C:E).some((we)=>im(we,pe)))return aw(e,`Dangerous ${e} operation detected: '${N}'
+
+This c
+
+## 248 "nobody" hits=20
+- @95918262
+ranted apps are reachable, via the background app_* tools.....Q...Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running granted apps...1...m...Taking over the screen needs your approval. Call ...5.......r.e.q.u.e.s.t._.f.u.l.l._.c.o.n.t.r.o.l. .
+
+- @96718344
+ load: .........hooking.....Kd..engine.create: ......M..no plugin-provided interfaces.......&'T.; $ built for ......o|\.nobody......A...hooks worker respawn: .........., which withheld $..3......, did not come back; the withholding held until now.....@.4.plugin_function_hooks_worker......h.plugin_function_hooks_load..........crashed_work
+
+- @101481417
+=..-infile.......`.-allowinsecureredirect..........-allowunencryptedauthentication.........-disablekeepalive........Ve.-nobodyprogress."...X.d.-preservefileauthorizationmetadata..........-resume.........-skipcertificatecheck...........-skipheadervalidation.......g9..-skiphttperrorcheck.........-usebasicparsing.....w..-usedefaultcredential
+
+- @180357768
+, `kept` (an attach: the existing session keeps what it was created with) or `preference` (a display or host preference nobody would miss \u2014 the informational notice names these two), so a host may show them itself once or never; absent when nothing was left unapplied. `client_version` rises only on a breaking change to this block \u2
+
+- @184845535
+-provided interfaces":p.join("; ")}${g.length===0?"":`; ${g.join("; ")}`}; $ built for ${u.map((k)=>k.name).join(",")||"nobody"}`)}function uZe(e,t,r){for(let[o,u]of Object.entries(e??{})){let p=Object.hasOwn(t,o)?t[o]:void 0;for(let g of u.withheldBy??[])if(!r.includes(g)&&!(p?.withheldBy??[]).includes(g))n(`hooks worker respawn: ${g}, w
+
+- @184854048
+Crashes} times`)}let u=vl.declaredArgs(e.state);n(`hooks worker: respawning for ${u.map((E)=>E.pluginName).join(", ")||"nobody"} (${t})`);let p=[];for(let E of u)try{p.push(await Oc.loadEnvironment(e,E)),vl.bumpGeneration(e.state,E.pluginName)}catch(C){if(n(`hooks module ${E.pluginName} failed to load after the respawn: ${Oc.loadFailureTe
+
+- @192617022
+"open_application"?"Launching or activating an app takes over the screen, "+"which needs the user's approval \u2014 and nobody is present "+"to answer (unattended session). Only already-running granted apps are reachable, via the background app_* tools.":"Taking over the screen needs the user's approval, and nobody is present to answer (u
+
+- @192617212
+ing granted apps are reachable, via the background app_* tools.":"Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running granted apps."}],isError:!0,telemetry:{error_kind:"unattended_no_approver"}};let q=(J??[]).map((Z)=>{let j=t.getAllowedApps()
+
+## 248 "65534" hits=7
+- @182060814
+At(A)!==S.charAt(A);var _=1,N=i.digestLength;for(var O=i.digestLength;O<g.length;O++){var k=g.charCodeAt(O),L=k&1^1,Q=_?65534:0;T|=k&Q,_=_&L,N+=_}if(T||g.charCodeAt(N)!==1)throw Error("Invalid RSAES-OAEP padding.");return g.substring(N+1)};function Or(e,t,a){if(!a)a=vt.md.sha1.create();var r="",i=Math.ceil(t/a.digestLength);for(var s=0;s<
+
+- @182939595
+t/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);
+
+- @195701850
+{for(let t of e){let r=t.codePointAt(0)??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=65528||r>=917504&&r<=921599)return!0;if(r===847||r===4447||r===4448||r===6068||r===6069||r===8293||r===12644||r===65440)return!0;
+
+- @195701859
+t of e){let r=t.codePointAt(0)??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=65528||r>=917504&&r<=921599)return!0;if(r===847||r===4447||r===4448||r===6068||r===6069||r===8293||r===12644||r===65440)return!0;if(qh.tes
+
+- @199615314
+6,32768:15,49152:14,57344:13,61440:12,63488:11,64512:10,65024:9,65280:8,65408:7,65472:6,65504:5,65520:4,65528:3,65532:2,65534:1,65535:0},p=0,v=!1;for(m=_=7;_>=0;m=_+=-1)if(b=this.parts[m],b in I){if(E=I[b],v&&E!==0)return null;if(E!==16)v=!0;p+=E}else return null;return 128-p},f}(),r="(?:[0-9a-f]+::?)+",c="%[0-9a-z]{1,}",o={zoneIndex:new 
+
+- @204274961
+e.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{je}from"B:/~BUN/root/chunk-n4vhwd20.js";var Nt=new Set([65534,65535,131070,131071,196606,196607,262142,262143,327678,327679,393214,393215,458750,458751,524286,524287,589822,589823,655358,655359,720894,720895,786430,786431,851966,851967,917502,917503,983038,983039,1048574,1048
+
+- @222929077
+=128|n&63):(t[i++]=240|n>>>18,t[i++]=128|n>>>12&63,t[i++]=128|n>>>6&63,t[i++]=128|n&63);return t};function cQ(e,t){if(t<65534&&(e.subarray&&lQ||!e.subarray&&sQ))return String.fromCharCode.apply(null,YR.shrinkBuf(e,t));for(var n="",r=0;r<t;r++)n+=String.fromCharCode(e[r]);return n}Rv.buf2binstring=function(e){return cQ(e,e.length)};Rv.bins
+
+## 248 "4294967295" hits=60
+- @67575179
+Object(parameters, "parameters");
+  let { parallelism, tagLength, memory, passes } = parameters, MAX_POSITIVE_UINT_32 = 4294967295, message = getArgon2BufferSource(parameters.message, "parameters.message");
+  validateInteger(message.byteLength, "parameters.message.byteLength", 0, MAX_POSITIVE_UINT_32);
+  let nonce = getArgon2BufferSource(
+
+- @68402616
+te.highWaterMark;
+  }
+  set highWaterMark(val) {
+    assertIsQuicStream(this), validateInteger(val, "highWaterMark", 0, 4294967295);
+    let inner = this.#inner;
+    if (inner.state.highWaterMark = val, inner.state.writeDesiredSize === 0 && val > 0)
+      inner.state.writeDesiredSize = val;
+  }
+  get onerror() {
+    return assertIsQuicStr
+
+- @68861191
+  8: "enableConnectProtocol"
+}, kDefaultSettings = {
+  headerTableSize: 4096,
+  enablePush: !0,
+  maxConcurrentStreams: 4294967295,
+  initialWindowSize: 65535,
+  maxFrameSize: 16384,
+  maxHeaderListSize: 65535,
+  maxHeaderSize: 65535,
+  enableConnectProtocol: !1
+};
+function initialLocalSettings(submitted) {
+  let settings = { ...kDefaultS
+
+- @68869520
+way(session, error) {
+  return error?.code === "ECONNRESET" && session[kGoawayCode] !== @undefined;
+}
+var kMaxStreams = 4294967295, kMaxUint32 = 4294967295, kMaxInt = 4294967295, kMaxWindowSize = 2147483647, {
+  validateInteger,
+  validateString,
+  validateObject,
+  validateFunction,
+  checkIsHttpToken,
+  validateLinkHeaderValue,
+  valida
+
+- @68869545
+eturn error?.code === "ECONNRESET" && session[kGoawayCode] !== @undefined;
+}
+var kMaxStreams = 4294967295, kMaxUint32 = 4294967295, kMaxInt = 4294967295, kMaxWindowSize = 2147483647, {
+  validateInteger,
+  validateString,
+  validateObject,
+  validateFunction,
+  checkIsHttpToken,
+  validateLinkHeaderValue,
+  validateUint32,
+  validateBuffe
+
+- @68869567
+"ECONNRESET" && session[kGoawayCode] !== @undefined;
+}
+var kMaxStreams = 4294967295, kMaxUint32 = 4294967295, kMaxInt = 4294967295, kMaxWindowSize = 2147483647, {
+  validateInteger,
+  validateString,
+  validateObject,
+  validateFunction,
+  checkIsHttpToken,
+  validateLinkHeaderValue,
+  validateUint32,
+  validateBuffer,
+  validateNumber,
+ 
+
+- @68893891
+DEFAULT_SETTINGS_HEADER_TABLE_SIZE: 4096,
+  DEFAULT_SETTINGS_ENABLE_PUSH: 1,
+  DEFAULT_SETTINGS_MAX_CONCURRENT_STREAMS: 4294967295,
+  DEFAULT_SETTINGS_INITIAL_WINDOW_SIZE: 65535,
+  DEFAULT_SETTINGS_MAX_FRAME_SIZE: 16384,
+  DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE: 65535,
+  DEFAULT_SETTINGS_ENABLE_CONNECT_PROTOCOL: 0,
+  MAX_MAX_FRAME_SIZE: 16
+
+- @82530635
+ent 'encoding' is invalid for data of length ... Received ..algorithmtimeCostTime cost must be an integer between 1 and 4294967295Time cost must be greater than 0memoryCostMemory cost must be an integer between 8 and 4294967295Memory cost must be at least 8Rounds must be an integer between 4 and 31unknown algorithm, expected one of: "bcry
+
+## 247 "overflowuid" hits=0
+## 247 "innerStart" hits=4
+- @240234948
+ength-1));return Math.max(s,n,o)/2}}});function Xn(t,e,i,s){const n=vi(t.options.borderRadius,["outerStart","outerEnd","innerStart","innerEnd"]);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerE
+
+- @240235131
+t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.
+
+- @240235146
+Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i
+
+- @240235558
+0?d-s:0))/2;f=(g-(0!==t?g*t/(t+s):g))/2}const p=(g-Math.max(.001,g*d-i/C)/d)/2,m=l+p+f,x=n-p-f,{outerStart:b,outerEnd:_,innerStart:y,innerEnd:v}=Xn(e,u,d,x-m),M=d-b,w=d-_,k=m+b/M,S=x-_/w,P=u+y,D=u+v,O=m+y/P,A=x-v/D;if(t.beginPath(),o){const e=(k+S)/2;if(t.arc(a,r,d,k,e),t.arc(a,r,d,e,S),_>0){const e=qn(w,S,a,r);t.arc(e.x,e.y,_,S,x+E)}cons
+
+## 247 "var y=65534" hits=0
+## 247 "function v(e){let n=[];for(let t of e.split" hits=0
+## 247 "uidsCollapse" hits=0

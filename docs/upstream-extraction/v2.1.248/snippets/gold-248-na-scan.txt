@@ -1,0 +1,406 @@
+# gold-248-na-scan
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:49.970Z
+b247=253204128
+
+## #10 needle="desktopSessionCleanupPeriodDays" hits248=5 hits247=0
+- #0 @95984188 js=0 leanup....6...skill-proposal..
+........json.tmp.......Mm..^[0-9A-Za-z_-]{1,64}$.......:...desktopSessionCleanupPeriodDays.........filesRetainedFresh.......x..filesPastCutoff.!.......T(\d{2})-(\d{2})-(\d{2})-(\d{
+- #1 @179088656 js=0 for long retention; use --no-session-persistence to disable transcript writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for session transc
+- #2 @179440961 js=1 urn{settings:r,errors:Jjt(o)}}var lyn="parent managed settings",$te=["cleanupPeriodDays","desktopSessionCleanupPeriodDays"];function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return{settings:
+- #3 @191902421 js=1 rrorMetadata&&r.severity!=="warning").length>0)for(let r of $te){let a=await OMe(r,e,r==="desktopSessionCleanupPeriodDays"?{presenceSources:["userSettings","flagSettings"]}:void 0);if(a==="unknowable")return n(`
+- #4 @191903610 js=1 return"none"}function Fe(e){return/^[0-9A-Za-z_-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}function xe(){i
+
+## #10 needle="desktopSessionCleanupPeriod" hits248=5 hits247=0
+- #0 @95984188 js=0 leanup....6...skill-proposal..
+........json.tmp.......Mm..^[0-9A-Za-z_-]{1,64}$.......:...desktopSessionCleanupPeriodDays.........filesRetainedFresh.......x..filesPastCutoff.!.......T(\d{2})-(\d{2})-(\d{2})-
+- #1 @179088656 js=0 for long retention; use --no-session-persistence to disable transcript writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for session tr
+- #2 @179440961 js=1 urn{settings:r,errors:Jjt(o)}}var lyn="parent managed settings",$te=["cleanupPeriodDays","desktopSessionCleanupPeriodDays"];function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return{setti
+- #3 @191902421 js=0 rrorMetadata&&r.severity!=="warning").length>0)for(let r of $te){let a=await OMe(r,e,r==="desktopSessionCleanupPeriodDays"?{presenceSources:["userSettings","flagSettings"]}:void 0);if(a==="unknowable")return
+- #4 @191903610 js=1 return"none"}function Fe(e){return/^[0-9A-Za-z_-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}function xe
+
+## #10 needle="desktopSessionCleanup" hits248=5 hits247=0
+- #0 @95984188 js=0 leanup....6...skill-proposal..
+........json.tmp.......Mm..^[0-9A-Za-z_-]{1,64}$.......:...desktopSessionCleanupPeriodDays.........filesRetainedFresh.......x..filesPastCutoff.!.......T(\d{2})-(\d{2})-(\
+- #1 @179088656 js=0 for long retention; use --no-session-persistence to disable transcript writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for sess
+- #2 @179440961 js=1 urn{settings:r,errors:Jjt(o)}}var lyn="parent managed settings",$te=["cleanupPeriodDays","desktopSessionCleanupPeriodDays"];function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return
+- #3 @191902421 js=0 rrorMetadata&&r.severity!=="warning").length>0)for(let r of $te){let a=await OMe(r,e,r==="desktopSessionCleanupPeriodDays"?{presenceSources:["userSettings","flagSettings"]}:void 0);if(a==="unknowable")
+- #4 @191903610 js=1 return"none"}function Fe(e){return/^[0-9A-Za-z_-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}funct
+
+## #10 needle="desktop-written" hits248=0 hits247=0
+
+## #10 needle="desktopWritten" hits248=0 hits247=0
+
+## #10 needle="isDesktopSession" hits248=0 hits247=0
+
+## #10 needle="coworkSession" hits248=0 hits247=0
+
+## #10 needle="Cowork sessions" hits248=1 hits247=1
+- #0 @189845392 js=0 ll platforms\n- Shortened the message shown when resuming a completed background agent\n- Cowork sessions no longer inline external @-imports from user-scope memory files\n- Hardened the auto-gen
+
+## #10 needle="desktop-written sessions" hits248=0 hits247=0
+
+## #10 needle="Claude Desktop" hits248=79 hits247=77
+- #0 @92343308 js=0 t-installed.......}M..version-too-old.........coerce..........Opening deep link: .K.....0.Claude Desktop is not installed. Install it from https://claude.ai/download.........Claude Desktop .5...
+- #1 @92343392 js=0 ....0.Claude Desktop is not installed. Install it from https://claude.ai/download.........Claude Desktop .5...~F.. is too old to resume this session. Please update to ...
+.....{. or later...>...
+- #2 @92343515 js=0 ld to resume this session. Please update to ...
+.....{. or later...>....L
+.Failed to open Claude Desktop. Please try opening it manually........cj.deepLinkUrl......_].hasUserDefined(.
+...,n..) f
+- #3 @94435517 js=0 valid plugin name (PluginIdSchema)...........Marketplace name ".........." is reserved in Claude Desktop. Claude Code accepts it, but the Claude Desktop managed marketplace sync (allowedPluginMa
+- #4 @94435565 js=0 ketplace name ".........." is reserved in Claude Desktop. Claude Code accepts it, but the Claude Desktop managed marketplace sync (allowedPluginMarketplaces) will reject the whole marketplace...
+- #5 @94435697 js=0 llowedPluginMarketplaces) will reject the whole marketplace......^5.." is not accepted by Claude Desktop (letters, digits, ".", "_", "-"; must start alphanumeric; max 128 chars). Claude Code acc
+- #6 @94435818 js=0 , ".", "_", "-"; must start alphanumeric; max 128 chars). Claude Code accepts it, but the Claude Desktop managed marketplace sync (allowedPluginMarketplaces) will reject the whole marketplace.".
+- #7 @94442173 js=0 .+S..].source.path......Njz.^[a-z0-9.-]+$.........:.].name.........." is not accepted by Claude Desktop (letters, digits, ".", "_", "-"; must start alphanumeric; max 128 chars). Claude Code acc
+- … +71 more
+
+## #10 needle="CLAUDE_DESKTOP" hits248=0 hits247=0
+
+## #10 needle="sessionSource:\"desktop\"" hits248=0 hits247=0
+
+## #10 needle="source:\"desktop\"" hits248=0 hits247=0
+
+## #10 needle="source===\"desktop\"" hits248=0 hits247=0
+
+## #10 needle="source===\"cowork\"" hits248=0 hits247=0
+
+## #10 needle="org policy manages retention" hits248=0 hits247=0
+
+## #30 needle="prod.env" hits248=0 hits247=0
+
+## #30 needle=".tfvars" hits248=6 hits247=6
+- #0 @85494010 js=0 textile....E............*.textile..........E....	.......tf.........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*
+- #1 @85494026 js=0 ........*.textile..........E....	.......tf.........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*.tfrc*.terraform
+- #2 @85494048 js=0 .....E....	.......tf.........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*.tfrc*.terraform.lock.hcl.......E.....
+- #3 @85494069 js=0 ........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*.tfrc*.terraform.lock.hcl.......E...............E.........
+- #4 @98014598 js=0 )?)?|secrets?\.(?:ya?ml|json|toml))$.....G..sample.......[3.(?:\.save\.\d+|.....(...^(.*)\.tfvars(?:\.json)?$.......G.\.[\u017f\u212a\ufb00-\ufb06]......Ir.[\u0131\u017f]..-....E..[\u0131
+- #5 @183210213 js=1 (`${gt}.`)}function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}var sr=/^(.*)\.tfvars(?:\.json)?$/;function ar(e){let t=sr.exec(e)?.[1];return t!==void 0&&!St(t)}function St(e
+
+## #30 needle="key.pem.tmp" hits248=0 hits247=0
+
+## #30 needle="id_rsa.swo" hits248=0 hits247=0
+
+## #30 needle="terraform.tfvars" hits248=2 hits247=2
+- #0 @85494017 js=0 ....E............*.textile..........E....	.......tf.........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*.tfrc*.terraform
+- #1 @85494060 js=0 ......tf.........E............*.tf*.auto.tfvarsterraform.tfvars*.tf.json*.auto.tfvars.jsonterraform.tfvars.json*.terraformrcterraform.rc*.tfrc*.terraform.lock.hcl.......E...............E.........
+
+## #30 needle=".pem.tmp" hits248=0 hits247=0
+
+## #30 needle="id_rsa.swp" hits248=0 hits247=0
+
+## #30 needle=".swo" hits248=0 hits247=0
+
+## #30 needle="locally seeded" hits248=0 hits247=0
+
+## #30 needle="seeded cloud" hits248=0 hits247=0
+
+## #31 needle="silently reconnected" hits248=0 hits247=0
+
+## #31 needle="silent reconnect" hits248=0 hits247=0
+
+## #31 needle="silently reconnect" hits248=1 hits247=1
+- #0 @189860756 js=0 showing Remote Control as connected after the connection failed\n- Fixed a session resume silently reconnecting Remote Control after the user turned it off (`--resume`, SDK hosts, and the VS Code ex
+
+## #31 needle="after the CLI silently" hits248=0 hits247=0
+
+## #31 needle="never showing a permission" hits248=0 hits247=0
+
+## #31 needle="replay permission" hits248=0 hits247=0
+
+## #31 needle="flush pending permission" hits248=0 hits247=0
+
+## #31 needle="pending permission after" hits248=0 hits247=0
+
+## #31 needle="resync after reconnect" hits248=0 hits247=0
+
+## #31 needle="latest messages on the connected" hits248=0 hits247=0
+
+## #32 needle="not yet readable" hits248=0 hits247=0
+
+## #32 needle="credentials were not yet" hits248=0 hits247=0
+
+## #32 needle="session credentials" hits248=2 hits247=2
+- #0 @95545810 js=0  .r.u.n. ./.l.o.g.i.n. .t.o. .r.e.-.a.u.t.h.e.n.t.i.c.a.t.e.5.......could not fetch fresh session credentials after code ........... late OAuth refresh threw: ........fetchRemoteCredentials (....$."
+- #1 @198362432 js=0 turn}}if(m)return;if(!w&&he[e].fetchFailure==="retry"&&!Jr()){hn(e,`could not fetch fresh session credentials after code ${e}`);return}if(TP(w)&&!he[e].needsOAuthRefresh&&z){if(await fr("owner_change
+
+## #32 needle="container's session" hits248=0 hits247=0
+
+## #32 needle="container session credentials" hits248=0 hits247=0
+
+## #32 needle="cloud sessions occasionally failing" hits248=0 hits247=0
+
+## #33 needle="unknown option '--spawn'" hits248=0 hits247=0
+
+## #33 needle="unknown option `--spawn`" hits248=0 hits247=0
+
+## #33 needle="unknown option \"--spawn\"" hits248=0 hits247=0
+
+## #33 needle="unknown option '--name'" hits248=0 hits247=0
+
+## #33 needle="passThroughOptions" hits248=10 hits247=10
+- #0 @99645976 js=0 mbineFlagAndOptionalValue.....Xw..allowUnknownOption........\.allowExcessArguments.....
+..passThroughOptions......)h.._checkForBrokenPassThrough..........storeOptionsAsProperties....t%..getOptionVal
+- #1 @99673969 js=0 OptionalValue.....3C._description....G.E._summary....I.s._enablePositionalOptions......._passThroughOptions......*.._lifeCycleHooks........._showHelpAfterError.....@p.._showSuggestionAfterError....
+- #2 @99675084 js=0 Z.To add an Option object use addOption() instead of option() or requiredOption().'....K..passThroughOptions cannot be used for '.B.....C.' without turning on enablePositionalOptions for parent comm
+- #3 @191485204 js=0 n="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._showSuggestionAfterError=!0,
+- #4 @191492105 js=1 ents=!!t,this}enablePositionalOptions(t=!0){return this._enablePositionalOptions=!!t,this}passThroughOptions(t=!0){return this._passThroughOptions=!!t,this._checkForBrokenPassThrough(),this}_checkFo
+- #5 @191492143 js=1 t=!0){return this._enablePositionalOptions=!!t,this}passThroughOptions(t=!0){return this._passThroughOptions=!!t,this._checkForBrokenPassThrough(),this}_checkForBrokenPassThrough(){if(this.parent&&t
+- #6 @191492256 js=0 this._checkForBrokenPassThrough(),this}_checkForBrokenPassThrough(){if(this.parent&&this._passThroughOptions&&!this.parent._enablePositionalOptions)throw Error(`passThroughOptions cannot be used for
+- #7 @191492327 js=0 this.parent&&this._passThroughOptions&&!this.parent._enablePositionalOptions)throw Error(`passThroughOptions cannot be used for '${this._name}' without turning on enablePositionalOptions for parent 
+- … +2 more
+
+## #33 needle="enablePositionalOptions" hits248=14 hits247=14
+- #0 @99618068 js=0 d project-scoped (.mcp.json) servers within this project.........configureHelp...........enablePositionalOptions.......R.init <name>.....; .--description <text>........Manifest description......w.--aut
+- #1 @99673937 js=0 llback.......6..._combineFlagAndOptionalValue.....3C._description....G.E._summary....I.s._enablePositionalOptions......._passThroughOptions......*.._lifeCycleHooks........._showHelpAfterError.....@p.._s
+- #2 @99675153 js=0 iredOption().'....K..passThroughOptions cannot be used for '.B.....C.' without turning on enablePositionalOptions for parent command(s)..6....1..call .storeOptionsAsProperties() before adding options..=.
+- #3 @191485171 js=0 OptionalValue=!0,this._description="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._
+- #4 @191486086 js=0 e=t._combineFlagAndOptionalValue,this._allowExcessArguments=t._allowExcessArguments,this._enablePositionalOptions=t._enablePositionalOptions,this._showHelpAfterError=t._showHelpAfterError,this._showSugge
+- #5 @191486113 js=0 Value,this._allowExcessArguments=t._allowExcessArguments,this._enablePositionalOptions=t._enablePositionalOptions,this._showHelpAfterError=t._showHelpAfterError,this._showSuggestionAfterError=t._showSugg
+- #6 @191492029 js=1 nownOption=!!t,this}allowExcessArguments(t=!0){return this._allowExcessArguments=!!t,this}enablePositionalOptions(t=!0){return this._enablePositionalOptions=!!t,this}passThroughOptions(t=!0){return this.
+- #7 @191492072 js=1 !0){return this._allowExcessArguments=!!t,this}enablePositionalOptions(t=!0){return this._enablePositionalOptions=!!t,this}passThroughOptions(t=!0){return this._passThroughOptions=!!t,this._checkForBroke
+- … +6 more
+
+## #33 needle="allowUnknownOption" hits248=7 hits247=6
+- #0 @99645920 js=0 n......m.._registerCommand	......._optionEx........;..combineFlagAndOptionalValue.....Xw..allowUnknownOption........\.allowExcessArguments.....
+..passThroughOptions......)h.._checkForBrokenPassThrou
+- #1 @99673505 js=0 ions.....ev^.dualOptions.....R...
+(Did you mean one of ......K.*.
+(Did you mean .....{y.._allowUnknownOption........._allowExcessArguments...........rawArgs..../...processedArgs.......Q".._scriptPa
+- #2 @191484597 js=0 extends Ei{constructor(t){super();this.commands=[],this.options=[],this.parent=null,this._allowUnknownOption=!1,this._allowExcessArguments=!0,this.registeredArguments=[],this._args=this.registeredAr
+- #3 @191491893 js=1 ,p,u)}combineFlagAndOptionalValue(t=!0){return this._combineFlagAndOptionalValue=!!t,this}allowUnknownOption(t=!0){return this._allowUnknownOption=!!t,this}allowExcessArguments(t=!0){return this._al
+- #4 @191491931 js=1 ){return this._combineFlagAndOptionalValue=!!t,this}allowUnknownOption(t=!0){return this._allowUnknownOption=!!t,this}allowExcessArguments(t=!0){return this._allowExcessArguments=!!t,this}enablePosi
+- #5 @191504330 js=0 ith ${u(o)}`;this.error(g,{code:"commander.conflictingOption"})}unknownOption(t){if(this._allowUnknownOption)return;let o="";if(t.startsWith("--")&&this._showSuggestionAfterError){let u=[],g=this;do
+- #6 @191608867 js=1 ion("Control local sessions from claude.ai/code or the Claude mobile app").helpOption(!1).allowUnknownOption().allowExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptions
+
+## #33 needle="--spawn may only be specified once" hits248=2 hits247=2
+- #0 @100811132 js=0 prefix=...........--session-id requires a value.......s.a.--spawn.........--spawn="...$..--spawn may only be specified once......M...--capacity=.%...g~..--capacity may only be specified once...........--create-ses
+- #1 @205367099 js=1 "||x==="-c")Q=!0;else if(x==="--spawn"||x.startsWith("--spawn=")){if(w!==void 0)return U("--spawn may only be specified once");let F=x.startsWith("--spawn=")?x.slice(8):e[++K],ee=Jr(F);if(ee==="single-session"||ee=
+
+## #33 needle="--spawn requires one of" hits248=2 hits247=2
+- #0 @100810752 js=0 vironment .* not found....w.9.Session spawn failed: .......6..Session spawn failed........--spawn requires one of: .......Il.. (got: .	...h.b.<missing>...-...Q...--capacity requires a positive integer (g
+- #1 @205365690 js=1 gle-session";if(e==="same-dir")return"same-dir";if(e==="worktree")return"worktree";return`--spawn requires one of: ${Kr.join(", ")} (got: ${e??"<missing>"})`}function Qr(e){let t=e===void 0?NaN:Da(e);if(
+
+## #39 needle="No conversation found" hits248=5 hits247=5
+- #0 @99668508 js=0 perty 'clearSessionCaches' from null or undefined value...........tengu_continue..!.......No conversation found to continue...!....Sv.continue/resume launchRepl failed...I...&^..Claude Code exited: sta
+- #1 @99671700 js=0 ile unreadable (..%.......Unable to load transcript from file: .......%_f.cli_flag'....1..No conversation found with session ID: .........--resume session load failed (..........Failed to resume sessio
+- #2 @191623198 js=1 ion:!!o.forkSession})});if(!dt)return await ns("tengu_continue",{success:!1}),await Pe(q,"No conversation found to continue");let je=await cJe(dt,{forkSession:!!o.forkSession,includeAttribution:!0,tran
+- #3 @191637998 js=1 ,{entrypoint:v("cli_flag"),success:!1,failure_reason:v("not_found_explicit_id")});let Ae=`No conversation found with session ID: ${W}`;return n(Ae,{level:"error"}),await Pe(q,Ae,()=>kn(1))}V="processin
+- #4 @201075974 js=0 esumed",{entrypoint:v("print"),success:!1,failure_reason:v("not_found_explicit_id")}),xs(`No conversation found with session ID: ${p.sessionId}`,d.outputFormat),Lr(1),{messages:[]};if(d.resumeSessionAt
+
+## #39 needle="conversation was never saved" hits248=0 hits247=0
+
+## #39 needle="never saved" hits248=5 hits247=5
+- #0 @97345190 js=0  deleted from shared memory by another session, but your local copy has changes that were never saved there. ...v..... .Your local copy was kept and will be re-saved to shared memory on the n
+- #1 @100824582 js=0  not trusted. ........5. is your home directory, and for security home-directory trust is never saved, so running `claude` here first won't help. Run `claude rc` from a project directory inst
+- #2 @183999586 js=0  deleted from shared memory by another session, but your local copy has changes that were never saved there. `+(Ke?"Your local copy was kept and will be re-saved to shared memory on the next 
+- #3 @205375553 js=0 kspace not trusted. ${R} is your home directory, and for security home-directory trust is never saved, so running \`claude\` here first won't help. Run \`claude rc\` from a project directory 
+- #4 @205392782 js=0 row new _t(ir()===te()?`Workspace not trusted: ${r} is the home directory, whose trust is never saved \u2014 running \`claude\` there first won't help. Run Remote Control from a project direc
+
+## #39 needle="starts a new conversation instead" hits248=0 hits247=0
+
+## #40 needle="workflow-authoring" hits248=2 hits247=0
+- #0 @97789180 js=0 taviz.........artifact-pr-review.......o..commit-push-pr.....Bl..cowork-plugin...........workflow-authoring..(.......file:///B:/%7EBUN/root/chunk-qrr5hhg8.js........readResolve.
+...G.I.readReject..
+- #1 @183512380 js=1 ="commit",UGe="pr",Jin="commit-push-pr",but="cowork-plugin",_ut="loop",JWn="schedule",$w="workflow-authoring";
+export{NGe,hut,PT,gut,KWn,YWn,yut,oP,XWn,q1,$Ge,FGe,UGe,Jin,but,_ut,JWn,$w};
+.// @bun @
+
+## #40 needle="workflow_authoring" hits248=4 hits247=0
+- #0 @100624866 js=0  .l.i.s.t...(.......file:///B:/%7EBUN/root/chunk-xhhb2t5v.js.... 	k.bundled:'...`...tengu_workflow_authoring_skill_autoload.........workflow_authoring_autoload.(...`...file:///B:/%7EBUN/root/chunk-h
+- #1 @100624908 js=0 /chunk-xhhb2t5v.js.... 	k.bundled:'...`...tengu_workflow_authoring_skill_autoload.........workflow_authoring_autoload.(...`...file:///B:/%7EBUN/root/chunk-hf670ewa.js.....Q..^\/\S+......I.K.unavaila
+- #2 @204710373 js=0 content!==n)K$($w,`bundled:${$w}`,n,null);return[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMe
+- #3 @204710427 js=0 $w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadata:d}=await import("B:/~BUN/root/chunk-eb9hsjf5.js
+
+## #40 needle="script-writing" hits248=0 hits247=0
+
+## #40 needle="script writing reference" hits248=0 hits247=0
+
+## #40 needle="Execute a workflow script that orchestrates" hits248=1 hits247=1
+- #0 @196763892 js=0 g.js";import{Fy}from"B:/~BUN/root/chunk-seqew409.js";var s="",a="'worktree'",r="",n="",e=`Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background \u2014 this tool re
+
+## #40 needle="bundled workflow-authoring" hits248=0 hits247=0
+
+## #41 needle="PR unchanged" hits248=0 hits247=0
+
+## #41 needle="pr unchanged" hits248=0 hits247=0
+
+## #41 needle="lastHeadSha" hits248=0 hits247=0
+
+## #41 needle="lastPrHead" hits248=0 hits247=0
+
+## #41 needle="prHeadSha" hits248=0 hits247=0
+
+## #41 needle="skip GitHub" hits248=0 hits247=0
+
+## #41 needle="immediate refresh" hits248=0 hits247=0
+
+## #41 needle="gh pr still" hits248=0 hits247=0
+
+## #41 needle="Wut" hits248=24 hits247=18
+- #0 @101716402 js=0 40c30af20d0d75c1cC00000745vif4nm4nssnh4nasnzRt9dsnl5Y1X1tJ1tdZDuttbeMutOutDMpZo3e_aeI4ni3eWutzKnNNUAkBLht$NqeeOfnjSeZiArTyFNXKnh_g_JKnQKnkIt9nvWWSejBtGhtbrDfvcemgMpy_OpVi_6exke2tS9nDV
+- #1 @109120909 js=0 .	ie.....	An.....$utI...	ir.	...	Mn.	...	sr.....	lr.I...dsn....	Et.	...AIeI...	Jn.....Wut....	jn.....u4n	...	ut.....	mt.I...	yr.....f4n	...	Xt.....ibeI...	l5.I	..	Qt.....asn..
+- #2 @109130789 js=0 .....#...-...@...D4n.....!@................-.......	Ct......!.......i..........-.......Wut.....!..................-.......xsn.....!..................-.......M4n.....!............
+- #3 @116089681 js=0 .Goe....I7t....	aL.	...LAtI...x5n...._pn....IWtI...UAt....VPn....Kct	...MseI...Wut....zGeI...G6e....gen....	sD.	...KynI...WarI...l5t	...y6t....	nz.I...Z4t....grt	.
+- #4 @116403565 js=0 .-.......WEn.....!....u..>.............-.	.....jut.....#....u#...............-.......Wut.....!@...u................-.......Ste.....!....u........w...-.......GEnh....!....u...
+- #5 @119853149 js=0 .........................
+............u..	....................L..z..."...................Wut~u......	Dt.NN...................u..mapBVnUVnZStQWtlHe....JN..b...ZWt..............
+- #6 @157763789 js=0 .	ih.zTt.L..	Ee.	rn..U..	yc.	ml.	ir.	iP.	ie.NtnJzn	ay.	fo.lMelVtmzn	u6.xpn	sm.jVtWut	UV.WVt	dA.	HN..G..jRe	U5.oHeaon	J4.R7ethefUn	zl.sRnpxnVNe	st.	ne..a..srt	ft.	P
+- #7 @157778781 js=0 ..
+.........H.....................
+.....i.............................3...m...l.......d..Wut.....f...
+..............rawv;..........Wutz;..~;..r....;..x...........8
+..
+..	.........
+
+- … +16 more
+
+## #41 needle="classifyPrStatusFocusRecheck" hits248=0 hits247=0
+
+## #43 needle="can access the repository" hits248=0 hits247=0
+
+## #43 needle="GitHub account connected" hits248=2 hits247=0
+- #0 @94751515 js=0 un .....
+7.install the app at ....../w.Ultrareview clones ......... in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ......
+- #1 @193378217 js=0 ""}`,se=L.verdict==="github_not_connected"?`Ultrareview clones ${O} in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ${x?`$
+
+## #43 needle="connected to your Claude account" hits248=2 hits247=0
+- #0 @94751530 js=0 all the app at ....../w.Ultrareview clones ......... in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ........., or connect....>.-.
+- #1 @193378232 js=0 ct==="github_not_connected"?`Ultrareview clones ${O} in the cloud with the GitHub account connected to your Claude account, and none is connected (or the connection expired). To fix: ${x?`${x}, or connect`:"conne
+
+## #43 needle="Claude-connected GitHub" hits248=0 hits247=0
+
+## #43 needle="ultrareview precheck" hits248=0 hits247=0
+
+## #43 needle="ultrareview <PR" hits248=0 hits247=0
+
+## #43 needle="before the cloud session starts" hits248=0 hits247=0
+
+## #43 needle="instead of failing after the cloud" hits248=0 hits247=0
+
+## #46 needle="self-paced" hits248=1 hits247=1
+- #0 @204820861 js=0 r can restart it anytime with /loop.${y()}`;return`# /loop \u2014 schedule a recurring or self-paced prompt
+
+Parse the input below into \`[interval] <prompt\u2026>\` and schedule it.
+
+## Par
+
+## #46 needle="self-pace" hits248=11 hits247=11
+- #0 @100409579 js=0  command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace..........h.When the user wants to set up a recurring task, poll for status, or run someth
+- #1 @100410289 js=0 .a.s. .a. .l.o.o.p.-.t.a.s.k.s. .f.i.l.e. .a.t. .`...>.......`. Run those tasks now, then self-pace the next iteration via .......... ..  .n.o. .c.r.o.n..........L..#. ./.l.o.o.p. ..  .a.u.
+- #2 @181121775 js=0 rk in /loop dynamic mode \u2014 the user invoked /loop without an interval, asking you to self-pace iterations of a specific task.
+
+Do NOT schedule a short-interval wakeup to poll for backg
+- #3 @185604633 js=1 An="tengu_slate_anchor";function NAn(){return zce(FAn,!0)}var fmt=At({name:Ks,searchHint:`self-pace the dynamic /loop: pick a delay before the next tick, or stop/end/cancel the dynamic loop
+- #4 @204817556 js=0 prompt or slash command on a recurring interval \u2014 or with no interval, let the model self-pace based on the task.
+
+Intervals: Ns, Nm, Nh, Nd (e.g. 5m, 30m, 2h, 1d). Minimum granularity
+- #5 @204818002 js=1 ks delays)
+  /loop check the deploy every 20m`}function A(e){let o=`The user wants you to self-pace. Decide what makes the next iteration worth running \u2014 a passage of time, or an obser
+- #6 @204820861 js=0 r can restart it anytime with /loop.${y()}`;return`# /loop \u2014 schedule a recurring or self-paced prompt
+
+Parse the input below into \`[interval] <prompt\u2026>\` and schedule it.
+
+## Pa
+- #7 @204821552 js=0 has no interval.
+3. **No interval**: otherwise, the entire input is the prompt and you'll self-pace dynamically (see "Dynamic mode" below).
+
+If the resulting prompt is empty, show usage \`/
+- … +3 more
+
+## #46 needle="autonomous default" hits248=6 hits247=6
+- #0 @100410849 js=0 .....` in dynamic-pacing mode, that you ran the first tick now...V....Z..that this is the autonomous default in dynamic-pacing mode, that you ran the check now..	....T>.1. **Run .......A... now**, f
+- #1 @100415743 js=0 , and that they can cancel sooner with u....... (include the job ID). Mention this is the autonomous default and that the autonomous-loop instructions are baked in......../...
+
+## Action
+
+1. Convert
+- #2 @204823495 js=0 e tasks now, then self-pace the next iteration via ${Ks} \u2014 no cron.`:`# /loop \u2014 autonomous default with dynamic pacing
+
+The user invoked \`/loop\` with no prompt and no interval. Run the a
+- #3 @204823810 js=0  \`${e.path}\` in dynamic-pacing mode, that you ran the first tick now`:"that this is the autonomous default in dynamic-pacing mode, that you ran the check now",O=`1. **Run ${h} now**, following the
+- #4 @204826675 js=0 those tasks each tick, then run the first tick immediately.`:`# /loop \u2014 schedule the autonomous default
+
+The user invoked \`/loop\` with no prompt (input was empty or just the interval \`${t}\`
+- #5 @204827752 js=0 ays, and that they can cancel sooner with ${o_} (include the job ID). Mention this is the autonomous default and that the autonomous-loop instructions are baked in.`;return`${u}
+
+## Action
+
+1. Conve
+
+## #46 needle="tengu_kairos_loop_dynamic" hits248=0 hits247=2
+
+## #46 needle="tengu_kairos_loop_prompt" hits248=0 hits247=2
+
+## #46 needle="always available" hits248=2 hits247=2
+- #0 @100529124 js=0 rise MCPs.....
+...Active agent MCPs........Z.. frontmatter....fF.Built-in MCPs.......a.I.always available<....\'.Cannot destructure property 's' from null or undefined valueD...t...To use this co
+- #1 @209645863 js=1 `@${i} frontmatter`:"agent frontmatter"}}case"dynamic":return{label:"Built-in MCPs",path:"always available"};default:return{label:s}}}function So(Gr){let ke=g(12),{s:me}=Gr;if(me.duplicateOf.start
+
+## #46 needle="including on Bedrock" hits248=0 hits247=0
+
+## #47 needle="[Anthropic telemetry]" hits248=2 hits247=0
+- #0 @98488208 js=0 .._flushAll........qI._flushOneBatch.......!.._maybeStartTimer....~c<._clearTimer.........[Anthropic telemetry]...
+.......logSummary..
+.......^[a-z]+-\d......3#..)\.(anthropic\..+)$......q..^[A-Za-z][A
+- #1 @180153373 js=0 utdown(){}}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e)
+
+## #47 needle="[3P telemetry] OTEL diag error" hits248=2 hits247=2
+- #0 @94767060 js=0 //B:/%7EBUN/root/chunk-svsrg0wm.js(....0/.file:///B:/%7EBUN/root/chunk-asg52y33.js....#WK.[3P telemetry] OTEL diag error:.....'...CLAUDE_CODE_OTEL_DIAG_STDERR......K.[3P telemetry] OTEL diag warn: .(...?...file
+- #1 @187788221 js=0 om"B:/~BUN/root/chunk-21hv5ssy.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";var Ext="[3P telemetry] OTEL diag error:";class xKt{error(r,...e){if(a.CLAUDE_CODE_OTEL_DIAG_STDERR)process.stderr.write(`${Ext} 
+
+## #47 needle="[3P telemetry] OTEL diag error:" hits248=2 hits247=2
+- #0 @94767060 js=0 //B:/%7EBUN/root/chunk-svsrg0wm.js(....0/.file:///B:/%7EBUN/root/chunk-asg52y33.js....#WK.[3P telemetry] OTEL diag error:.....'...CLAUDE_CODE_OTEL_DIAG_STDERR......K.[3P telemetry] OTEL diag warn: .(...?...file:
+- #1 @187788221 js=0 om"B:/~BUN/root/chunk-21hv5ssy.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";var Ext="[3P telemetry] OTEL diag error:";class xKt{error(r,...e){if(a.CLAUDE_CODE_OTEL_DIAG_STDERR)process.stderr.write(`${Ext} $
+
+## #47 needle="[3P telemetry] OTEL diag" hits248=4 hits247=4
+- #0 @94767060 js=0 //B:/%7EBUN/root/chunk-svsrg0wm.js(....0/.file:///B:/%7EBUN/root/chunk-asg52y33.js....#WK.[3P telemetry] OTEL diag error:.....'...CLAUDE_CODE_OTEL_DIAG_STDERR......K.[3P telemetry] OTEL diag warn: .(...?.
+- #1 @94767136 js=0 y33.js....#WK.[3P telemetry] OTEL diag error:.....'...CLAUDE_CODE_OTEL_DIAG_STDERR......K.[3P telemetry] OTEL diag warn: .(...?...file:///B:/%7EBUN/root/chunk-cmt8hspc.js$.......41077d10-94b8-4194-be48-d2
+- #2 @187788221 js=0 om"B:/~BUN/root/chunk-21hv5ssy.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";var Ext="[3P telemetry] OTEL diag error:";class xKt{error(r,...e){if(a.CLAUDE_CODE_OTEL_DIAG_STDERR)process.stderr.write(`$
+- #3 @187788398 js=0 ERR)process.stderr.write(`${Ext} ${r}
+`);n(`${Ext} ${r}`,{level:"error"})}warn(r,...e){n(`[3P telemetry] OTEL diag warn: ${r}`,{level:"warn"})}info(r,...e){return}debug(r,...e){return}verbose(r,...e){retu
+
+## #47 needle="Anthropic telemetry" hits248=4 hits247=2
+- #0 @98488209 js=0 ._flushAll........qI._flushOneBatch.......!.._maybeStartTimer....~c<._clearTimer.........[Anthropic telemetry]...
+.......logSummary..
+.......^[a-z]+-\d......3#..)\.(anthropic\..+)$......q..^[A-Za-z][
+- #1 @99867772 js=0 kFamily.........).noDiscoveryFor......._..General restrictions
+.....l.fHh9zisMLR..........Anthropic telemetry.
+... ...auYj3lyf1+..
+.....K.K9q4XwLJd2.......g..Bootstrap config URL
+...:...MPdK0gXvRA..5
+- #2 @180153374 js=0 tdown(){}}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e
+- #3 @200148991 js=0  restrictions",id:"fHh9zisMLR"});fS.ANTHROPIC_TELEMETRY_GROUP=(0,ha.msg)({defaultMessage:"Anthropic telemetry",id:"auYj3lyf1+"});fS.MCP_SERVERS_GROUP=(0,ha.msg)({defaultMessage:"MCP servers",id:"K9q4
+
+# unique-fn-extracts (hits248===1 only, lastFnStartGeneric)
+
+## #10 UNIQUE "Cowork sessions" @189845392
+NO_FN_START ms\n- Shortened the message shown when resuming a completed background agent\n- Cowork sessions no longer inline external @-imports from user-scope memory files\n- Hardened the auto-generated cross-session messaging socket directory on shar
+
+## #31 UNIQUE "silently reconnect" @189860756
+NO_FN_START mote Control as connected after the connection failed\n- Fixed a session resume silently reconnecting Remote Control after the user turned it off (`--resume`, SDK hosts, and the VS Code extension)\n- [VSCode] Fixed sessions not honoring `re
+
+## #40 UNIQUE "Execute a workflow script that orchestrates" @196763892
+fn=uXt start=196761026 len=386 sha=b33d3188c4bba9e3
+function uXt(i){let r=i?.baseHoldMs??oor,o=i?.maxHoldMs??ior,n=new Map,a=(e,t)=>{let s=n.get(e);return s!==void 0&&t<s.holdUntil};return{shouldSkip(e,t=Date.now()){return a(e,t)},recordFailure(e,t=Date.now()){if(a(e,t))return;let c=(n.get(e)?.count??0)+1,l=Math.min(o,r*2**(c-1));n.set(e,{count:c,holdUntil:t+l})},recordSuccess(e){n.delete(e)},holdUntil(e){return n.get(e)?.holdUntil}}}
+
+## #46 UNIQUE "self-paced" @204820861
+fn=A start=204817959 len=4960 sha=098624cb3bd9eaeb
+BODY_TOO_LONG preview=function A(e){let o=`The user wants you to self-pace. Decide what makes the next iteration worth running \u2014 a passage of time, or an observable event.
+
+1. **Run the parsed prompt now.** If it's a slash command, invoke it via the Skill tool; otherwise act on it directly.
+2. **If the next run is gated on an event** (CI finishing, a log line matching, a file changing, a PR comment) and no ${ba} is already running for it: arm one now with \`persistent: true\`. Its events arrive as \`<task-notifi
+… tail=w** \u2014 don't wait for the first cron fire. If it's a slash command, invoke it via the Skill tool; otherwise act on it directly.
+
+## Dynamic mode (rule 3 \u2014 no interval)
+
+${o}
+
+## Input
+
+${e}`}
+
+# extract-index
+- #40 "Execute a workflow script that orchestrates" fn=uXt @196761026 len=386 sha=b33d3188c4bba9e3
+- #46 "self-paced" fn=A @204817959 len=4960 sha=098624cb3bd9eaeb

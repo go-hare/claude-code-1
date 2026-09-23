@@ -1,0 +1,164 @@
+# gold-248-41-footer-peel
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+## #41 streak-setInputs @203021124
+#e;#t;#o=h5e;#s=$e();#n=0;#r=!1;#l=null;#a=0;#i=!1;#m=null;#d=0;#u=0;#p=-1;#c=0;constructor(d,C){this.#e=d,this.#t=C}getSnapshot=()=>this.#o;subscribe=(d)=>{let C=this.#s.subscribe(d);if(this.#n++,!this.#r)this.#g();let x=!1;return()=>{if(x)return;if(x=!0,C(),this.#n--,this.#n===0)this.#f()}};setInputs(d){let C=this.#t;if(this.#t=d,!this.#r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#e.shared.pollerNotModifiedStreak=0;if(d.focused!==C.focused&&this.#b()||d.isLoading!==C.isLoading||d.enabled!==C.enabled)this.#h()}#g(){this.#r=!0,this.#i=!1,this.#l=this.#e.shared.bump.subscribe(()=>{if(this.
+
+## #41 streak-b @203021705
+cribe(()=>{if(this.#e.shared.pollerDisabled)return;this.#u=0,this.#d=0,this.#h()}),this.#y()}#f(){this.#r=!1,this.#i=!1,this.#l?.(),this.#l=null,this.#k()}#h(){if(this.#i)return;this.#i=!0,queueMicrotask(()=>{if(!this.#i)return;this.#i=!1,this.#y()})}#b(){if(!this.#e.isDirectApiEnabled())return!1;if(!this.#t.focused||this.#e.shared.pollerDisabled)return!1;if(this.#d===0)return!1;if(this.#e.shared.pollerNotModifiedStreak=0,this.#e.now()-this.#d>=p5e)this.#u=0,this.#d=0;return!0}#k(){if(this.#a++,this.#m)this.#m(),this.#m=null}#y(){if(this.#k(),!this.#t.enabled)return;if(this.#e.shared.pollerDisabled)return;let d=this.#a;this.#p=-1,this.#c=this
+
+## #41 streak-S @203022291
+{if(this.#a++,this.#m)this.#m(),this.#m=null}#y(){if(this.#k(),!this.#t.enabled)return;if(this.#e.shared.pollerDisabled)return;let d=this.#a;this.#p=-1,this.#c=this.#e.now();let C=this.#S(!0),x=this.#e.now()-this.#d;if(x>=C)this.#w(d);else this.#C(d,C-x)}#C(d,C){this.#m=this.#e.setTimeout(()=>{this.#m=null,this.#w(d)},C)}#w(d){this.#T(d).catch(_)}#S(d){if(!this.#e.isDirectApiEnabled())return a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}async#T(d){if(d!==this.#a)return;let{now:C,shared:x}=this.#e,H=this.#e.getLastInteractionTime();if(this.#p!==H)this.#p=H,this.#c=C();else if(C()-this.#c>=u5e)return;let X=C(),Z;try{Z=await this.#e.fetchPrStatus()}catch(Ie){_(
+
+## #41 streak-T @203022837
+e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}async#T(d){if(d!==this.#a)return;let{now:C,shared:x}=this.#e,H=this.#e.getLastInteractionTime();if(this.#p!==H)this.#p=H,this.#c=C();else if(C()-this.#c>=u5e)return;let X=C(),Z;try{Z=await this.#e.fetchPrStatus()}catch(Ie){_(Ie),Z=null}let ee=Z;if(d!==this.#a)return;this.#d=X;let re=ee==="needs-auth"||ee==="gh-missing",me=re?ee:!1,ge=ee==="fetch-failed",xe=null,Re=!1;if(!re&&!ge&&ee!==null){let{notModified:Ie=!1,...Ae}=ee;Re=Ie,xe=Ae}if(this.#u=me?1:xe===null?this.#u+1:0,x.pollerBadStreak=ge?x.pollerBadStreak+1:0,x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0,this.#_(xe,me),x.pollerBadStreak>=f5e){x.pollerDisabled=!0,y("github_pr_status_direct","bad_streak_disabled");return}let Pe=C()-X;if(Pe>l5e){if(x.pollerDisabled=!0,this.#e.isDirectApiEnabled())y("github_pr_status_direct","slow_disabled",{elapsed_ms:Pe});return}this.#C(d,this.#S(!1))}#_(d,C){let x=this.#o;if(x.lastUpdated>0&&x.pr?.number===d?
+
+## class names before 203021200
+- class wY rel=2715 abs=203020715
+
+## #41 class-head @203020715
+ludeKeyed===!0;return G(()=>{let H=x?C.filter((X)=>X.key===void 0):C;return H.length<=Bx?H:H.slice(0,Bx)},[C,x])}N();var a5e=60000,l5e=4000,u5e=3600000,p5e=60000,f5e=3,g5e=300000,h5e={pr:null,needsAuth:!1,lastUpdated:0};class wY{#e;#t;#o=h5e;#s=$e();#n=0;#r=!1;#l=null;#a=0;#i=!1;#m=null;#d=0;#u=0;#p=-1;#c=0;constructor(d,C){this.#e=d,this.#t=C}getSnapshot=()=>this.#o;subscribe=(d)=>{let C=this.#s.subscribe(d);if(this.#n++,!this.#r)this.#g();let x=!1;return()=>{if(x)return;if(x=!0,C(),this.#n--,this.#n===0)this.#f()}};setInputs(d){let C=this.#t;if(this.#t=d,!this.#r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#
+
+## #41 class-window @203020715
+j((H)=>H.footerLinks),x=d?.excludeKeyed===!0;return G(()=>{let H=x?C.filter((X)=>X.key===void 0):C;return H.length<=Bx?H:H.slice(0,Bx)},[C,x])}N();var a5e=60000,l5e=4000,u5e=3600000,p5e=60000,f5e=3,g5e=300000,h5e={pr:null,needsAuth:!1,lastUpdated:0};class wY{#e;#t;#o=h5e;#s=$e();#n=0;#r=!1;#l=null;#a=0;#i=!1;#m=null;#d=0;#u=0;#p=-1;#c=0;constructor(d,C){this.#e=d,this.#t=C}getSnapshot=()=>this.#o;subscribe=(d)=>{let C=this.#s.subscribe(d);if(this.#n++,!this.#r)this.#g();let x=!1;return()=>{if(x)return;if(x=!0,C(),this.#n--,this.#n===0)this.#f()}};setInputs(d){let C=this.#t;if(this.#t=d,!this.#r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#e.shared.pollerNotModifiedStreak=0;if(d.focused!==C.focused&&this.#b()||d.isLoading!==C.isLoading||d.enabled!==C.enabled)this.#h()}#g(){this.#r=!0,this.#i=!1,this.#l=this.#e.shared.bump.subscribe(()=>{if(this.#e.shared.pollerDisabled)return;this.#u=0,this.#d=0,this.#h()}),this.#y()}#f(){this.#r=!1,this.#i=!1,this.#l?.(),this.#l=null,this.#k()}#h(){if(this.#i)return;this.#i=!0,queueMicrotask(()=>{if(!this.#i)return;this.#i=!1,this.#y()})}#b(){if(!this.#e.isDirectApiEnabled())return!1;if(!this.#t.focused||this.#e.shared.pollerDisabled)return!1;if(this.#d===0)return!1;if(this.#e.shared.pollerNotModifiedStreak=0,this.#e.now()-this.#d>=p5e)this.#u=0,this.#d=0;return!0}#k(){if(this.#a++,this.#m)this.#m(),this.#m=null}#y(){if(this.#k(),!this.#t.enabled)return;if(this.#e.shared.pollerDisabled)return;let d=this.#a;this.#p=-1,this.#c=this.#e.now();let C=this.#S(!0),x=this.#e.now()-this.#d;if(x>=C)this.#w(d);else this.#C(d,C-x)}#C(d,C){this.#m=this.#e.setTimeout(()=>{this.#m=null,this.#w(d)},C)}#w(d){this.#T(d).catch(_)}#S(d){if(!this.#e.isDirectApiEnabled())return a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}async#T(d){if(d!==this.#a)return;let{now:C,shared:x}=this.#e,H=this.#e.getLastInteractionTime();if(this.#p!==H)this.#p=H,this.#c=C();else if(C()-this.#c>=u5e)return;let X=C(),Z;try{Z=await this.#e.fetchPrStatus()}catch(Ie){_(Ie),Z=null}let ee=Z;if(d!==this.#a)return;this.#d=X;let re=ee==="needs-auth"||ee==="gh-missing",me=re?ee:!1,ge=ee==="fetch-failed",xe=null,Re=!1;if(!re&&!ge&&ee!==null){let{notModified:Ie=!1,...Ae}=ee;Re=Ie,xe=Ae}if(this.#u=me?1:xe===null?this.#u+1:0,x.pollerBadStreak=ge?x.pollerBadStreak+1:0,x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0,this.#_(xe,me),x.pollerBadStreak>=f5e){x.pollerDisabled=!0,y("github_pr_status_direct","bad_streak_disabled");return}let Pe=C()-X;if(Pe>l5e){if(x.pollerDisabled=!0,this.#e.isDirectApiEnabled())y("github_pr_status_direct","slow_disabled",{elapsed_ms:Pe});return}this.#C(d,this.#S(!1))}#_(d,C){let x=this.#o;if(x.lastUpdated>0&&x.pr?.number===d?.number&&x.pr?.url===d?.url&&x.pr?.reviewState===d?.reviewState&&x.pr?.kind===d?.kind&&x.needsAuth===C)return;this.#o={pr:d,needsAuth:C,lastUpdated:this.#e.now()};try{this.#s.emit()}catch(H){_(H)}}}function y5e(d,C,x,H){let X=C<30000?90000:C<300000?180000:C<1800000?600000:1800000,Z=x<=0?90000:x===1?300000:x===2?900000:1800000,ee=H<=0?90000:H===1?120000:H===2?240000:300000;return Math.max(X,Z,ee,d?0:g5e)}function nge(d,C=!0){let x=xt(),{host:H}=pt(),X=ca(),[Z]=u(()=>new wY({setTimeout:(ee,re)=>x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,enabled:C,focused:X})},[Z,d,C,X]),Ht(Z.subscribe,Z.getSnapshot)}function b0(aco){let rge=g(7),{count:$w}=aco;if($w<=0){return null}let TY;if(rge[0]!==$w)TY=e(t,{dimColor:!1,children:$w}),rge[0]=$w,rge[1]=TY;else TY=rge[1];let _Y;if(rge[2]!==$w)_Y=I($w,"feedback draft"),rge[2]=$w,rge[3]=_Y;else _Y=rge[3];let S5e;if(rge[4]!==TY||rge[5]!==_Y)S5e=r(t,{dimColor:!0,children:[TY," ",_Y]}),rge[4]=TY,rge[5]=_Y,rge[6]=S5e;else S5e=rge[6];return S5e}N();function RY(){return Ht(vi.feedbackNotice.subscribe,()=>vi.feedbackNotice.getState())}function k0(){let d=RY(),{storageV5:C}=fe();return k(()=>{if(!qH()||!ljn())return;ojn(V(),C).then(cjn).catch(()=>{})},[C]),qH()?d.sessionDraftCount:0}var P5e=import.meta.require("B:/~BUN/root/chunk-tx8d3hp7.js"),A5e=3;function FY({exitMessage:d,leftArrowDetachAvailable:C,vimMode:x,hideVimModeIndicator:H,mode:X,toolPermissionContext:Z,suppressHint:ee,suppressHintExceptStatusline:re=ee,isInputEmpty:me,isLoading:ge,isExternalLoading:xe=!1,betweenCalls:Re=!0,tasksSelected:Pe,isPasting:Ie,showExpandPasteHint:Ae,isSearching:Ne,historyQuery:Ve,setHistoryQuery:et,historyFailedMatch:tt,onOpenTasksDialog:Ke,onOpenSessionMemories:nt}){Qfe();let ft=rhe(),Yt=N5e(ft)&&!Kt(),Ct=nge(ge,Yt),Jt=ege(),Ut=Yt&&Ct.pr?Ct.pr:Jt?{number:Jt.number,ur
+
+## #41 function y5e needle="function y5e" hits248=4 hits247=0
+- #0 @181146633 *\/\d+ \* \* \* \*$/,P=y(".claude","scheduled_tasks.json");function h9(o){return y(o??an(),P)}async function y5e(o){let s=ce(),e;try{e=await s.readFile(h9(o),{encoding:"utf-8"})}catch(r){if(kt(r))return[];return 
+- #1 @184460495  ${t}, creation: ${r}${Pe}]`;n(Ie,{level:"warn"}),E.pendingChanges=null}catch(C){_(C)}finally{mE()}}function y5e(e,t){try{s("tengu_prompt_cache_diagnosis_received",{diagnosisType:e.type,tokensMissed:e.cache_misse
+- #2 @203023435 ===C)return;this.#o={pr:d,needsAuth:C,lastUpdated:this.#e.now()};try{this.#s.emit()}catch(H){_(H)}}}function y5e(d,C,x,H){let X=C<30000?90000:C<300000?180000:C<1800000?600000:1800000,Z=x<=0?90000:x===1?300000:x==
+- #3 @217248509 w:$v;return a(s,n,l,i)}function g5e(e,t,r,n,i,a){let s=Dw(e,t,i,r),l=Bq(s)?nw:$v;return a(s[0],l,n)}function y5e(e,t,r,n){let i=e.length,a=Ec(e,s=>Ec(s,l=>l.length===1));if(t)return function(s){let l=hr(s,u=>u.GA
+
+## #41 var y5e needle="var y5e=" hits248=0 hits247=1
+
+## #41 y5e( needle="y5e(" hits248=11 hits247=2
+- #0 @181146642  \* \* \*$/,P=y(".claude","scheduled_tasks.json");function h9(o){return y(o??an(),P)}async function y5e(o){let s=ce(),e;try{e=await s.readFile(h9(o),{encoding:"utf-8"})}catch(r){if(kt(r))return[];return _
+- #1 @181148221 ,createdAt:Date.now(),...e&&{recurring:!0}};if(!t)return Uq({...r,...i&&{agentId:i}}),a;let c=await y5e();return c.push({...r,createdBySessionId:V(),createdByPid:process.pid,createdByProcStart:zB()}),awai
+- #2 @181148446 tion P5(o,s){if(o.length===0)return;if(s===void 0&&hD(o)===o.length)return;let e=new Set(o),t=await y5e(s),i=t.filter((a)=>!e.has(a.id));if(i.length===t.length)return;await Tpt(i,s)}async function A5n(o,s
+- #3 @181148602 gth)return;await Tpt(i,s)}async function A5n(o,s,e){if(o.length===0)return;let t=new Set(o),i=await y5e(e),a=!1;for(let r of i)if(t.has(r.id))r.lastFiredAt=s,a=!0;if(!a)return;await Tpt(i,e)}async functio
+- #4 @181148726  i)if(t.has(r.id))r.lastFiredAt=s,a=!0;if(!a)return;await Tpt(i,e)}async function $U(o){let s=await y5e(o);if(o!==void 0)return s;let e=Vm().map((t)=>({...t,durable:!1}));return[...s,...e]}function b5e(o,
+- #5 @184460504 eation: ${r}${Pe}]`;n(Ie,{level:"warn"}),E.pendingChanges=null}catch(C){_(C)}finally{mE()}}function y5e(e,t){try{s("tengu_prompt_cache_diagnosis_received",{diagnosisType:e.type,tokensMissed:e.cache_missed
+- #6 @186522233 pawnedBySkill,p.activeSkill,p.activeMcpServer,p.activeMcpTool)}}if(Tn&&it)Own(Tn);if(U1e(ct),En&&os)y5e(os,{requestId:Tn,previousMessageId:M,model:p.model,is1hCacheTTL:Bn==="1h",querySource:p.querySource,
+- #7 @203022197 l,this.#w(d)},C)}#w(d){this.#T(d).catch(_)}#S(d){if(!this.#e.isDirectApiEnabled())return a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotM
+- #8 @203023444 rn;this.#o={pr:d,needsAuth:C,lastUpdated:this.#e.now()};try{this.#s.emit()}catch(H){_(H)}}}function y5e(d,C,x,H){let X=C<30000?90000:C<300000?180000:C<1800000?600000:1800000,Z=x<=0?90000:x===1?300000:x===
+- #9 @208012798 &(o.createdByPid===void 0||me(o.createdByPid,o.createdByProcStart))}async function q(o){let p=await y5e(u),k=z?await z().catch((c)=>{if(Al().claim("cron_extra_tasks_load_bad"))f("routine_register_trigger"
+- #10 @217248518 rn a(s,n,l,i)}function g5e(e,t,r,n,i,a){let s=Dw(e,t,i,r),l=Bq(s)?nw:$v;return a(s[0],l,n)}function y5e(e,t,r,n){let i=e.length,a=Ec(e,s=>Ec(s,l=>l.length===1));if(t)return function(s){let l=hr(s,u=>u.GAT
+
+## #41 function wY needle="function wY" hits248=8 hits247=7
+- #0 @178392289  || o === undefined ? undefined : o[k] } catch { return undefined }
+        },
+      }
+    })()`,e)}function wYe(e){if(typeof e==="string")return e;if(e===null||typeof e!=="object"&&typeof e!=="function")return 
+- #1 @179457677  null;let o=[];if(r.remote)o.push("remote");if(r.mdm)o.push(fe());if(r.file)o.push("file");return o}function wY(e){let t=e.helper?.()??null;if(!t)return{composes:"none"};let r=e.helperArmedFromRemote?.()===!1?"t
+- #2 @180682077 gin] could not remove the discarded credential from secure storage: ${l(o)}`,{level:"warn"})}}async function wYn(e,t){u7(e);let r=await _n().mutate((o)=>({...o,enterpriseGateway:e}),t);if(!r.success)throw Error(
+- #3 @182790481 {if(e===null||t===null||e.length!==t.length)return!1;let r=new Set(e);return t.every((o)=>r.has(o))}function wY(e){let t=st(),r=[],o=[];for(let E=e.length-1;E>=0;E--){let{index:I,stillSymlink:v,currentHopDirecto
+- #4 @183832099 ocess.pid))}function q$e(e,t){return YVe(t,e)}function cR(e,t){return pdn(t.name,t.generation??1,e)}function wY(e,t){try{return vY(cR(e,t))}catch{return t.name}}async function mGt(e,t){let{pluginId:r}=t,o;try{o=
+- #5 @190273998 es and made room for a protected watch to reconnect`,shortReason:"made room for another watch"}),!0}function wYt(){let e=me().live;e.handoffGeneration+=1,e.bootingWiredArms.clear(),zne($Be(z$())),$X({flush:!0}),
+- #6 @215964227 t){return e=Cne(e),pn(e.getFullYear()%100,t,2)}function CYe(e,t){return pn(e.getFullYear()%1e4,t,4)}function wYe(e,t){var r=e.getDay();return e=r>=4||r===0?Qc(e):Qc.ceil(e),pn(e.getFullYear()%1e4,t,4)}function k
+- #7 @222809183 available-height)","--cds-popup-list-max-h":t!==void 0?`calc(${e} * ${t}px)`:`calc(${e} * ${mbe})`}}function wY(e,t){let n=tL(t);return tL(e.label).includes(n)||tL(e.value).includes(n)}function xbe(e,t,n){return
+
+## #41 class wY needle="class wY{" hits248=1 hits247=0
+- #0 @203020715  a5e=60000,l5e=4000,u5e=3600000,p5e=60000,f5e=3,g5e=300000,h5e={pr:null,needsAuth:!1,lastUpdated:0};class wY{#e;#t;#o=h5e;#s=$e();#n=0;#r=!1;#l=null;#a=0;#i=!1;#m=null;#d=0;#u=0;#p=-1;#c=0;constructor(d,C){thi
+
+## #41 p5e= needle="p5e=" hits248=2 hits247=2
+- #0 @181335667 ant"?[md]:[],ii,...rht])}var Q3n=new Set([]),L=null;function Z3n(e,t){return L!==null&&e&&t===L}var p5e=X("external"),J=20;function e5n(){return a.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS??J}var Q=200;functio
+- #1 @203020647 .key===void 0):C;return H.length<=Bx?H:H.slice(0,Bx)},[C,x])}N();var a5e=60000,l5e=4000,u5e=3600000,p5e=60000,f5e=3,g5e=300000,h5e={pr:null,needsAuth:!1,lastUpdated:0};class wY{#e;#t;#o=h5e;#s=$e();#n=0;#
+
+## #41 var p5e needle="var p5e=" hits248=1 hits247=1
+- #0 @181335663 ==="ant"?[md]:[],ii,...rht])}var Q3n=new Set([]),L=null;function Z3n(e,t){return L!==null&&e&&t===L}var p5e=X("external"),J=20;function e5n(){return a.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS??J}var Q=200;functio
+
+## #41 Wut= needle="Wut=" hits248=1 hits247=3
+- #0 @216615365 turn;var h=n[4];if(h!==void 0){if(h=parseFloat(h),h<0||h>1)return;r.push(h)}}return r},"rgb2tuple"),Wut=o(function(t){return qut[t.toLowerCase()]},"colorname2tuple"),fbe=o(function(t){return(Hn(t)?t:null)
+
+## #41 var Wut needle="var Wut=" hits248=0 hits247=1
+
+## #41 xfe= needle="xfe=" hits248=4 hits247=3
+- #0 @180493224 , and acks the event processed only when drained \u2014 an undrained event redelivers on resume.")),xfe=h(()=>lt([Bu(),Iu(),xu(),Lu(),zu(),Fu()]).describe("Observational messages the agent loop emits \u20
+- #1 @184546318  t=e.match(eJt);if(!t)return null;return{url:e,host:t[1],owner:t[2],repo:t[3],num:Number(t[4])}}var xfe=60000;class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};p
+- #2 @216362254 ",vfe="[object Function]",Nit="[object GeneratorFunction]",Pit="[object Map]",Oit="[object Number]",xfe="[object Object]",Bit="[object RegExp]",$it="[object Set]",Fit="[object String]",zit="[object Symbol
+- #3 @222549794 fe,jfe,Gfe,Wfe,Kfe,qfe,Yfe,Xfe,$fe,Zfe,tV=K(()=>{bfe="none",vfe="trigger-press",yfe="trigger-hover",xfe="trigger-focus",wfe="outside-press",Efe="item-press",Sfe="close-press",kfe="link-press",Cfe="clear-p
+
+## #41 Hut= needle="Hut=" hits248=1 hits247=3
+- #0 @202426662 .split(`
+`).flatMap(fee),VAe=jB.length<=zI?jB:jB.slice(0,zI-1),HI=jB.length-VAe.length;const hee=Ii,Hut=UB.needsGutter,yee=t,jut=!0,See=VAe.join(`
+`);let qB;if(HB[2]!==HI)qB=HI>0?`
+\u2026 +${HI} more ${I(
+
+## #41 function N5e needle="function N5e" hits248=4 hits247=0
+- #0 @182689115 yer-guid",e.sublayerGuid);let r=od(t,{srtWin:e.srtWin});return{user:xc(r.user),wfp:Ec(r.wfp)}}async function N5e(e={}){let t=["status"];if(e.sublayerGuid)t.push("--sublayer-guid",e.sublayerGuid);let r=await ad(t,
+- #1 @184479200 
+- Fixed NPE in UserService
+- Created signup endpoint
+- Read config.json
+- Ran failing tests`;async function N5e({tools:e,signal:t,isNonInteractiveSession:r,lastAssistantText:o,agentContext:u,credentials:p}){if(e
+- #2 @203037324 e?[e(t,{dimColor:!0,children:e(M,{chord:x,action:Z,format:{keyCase:"lower"}})},"toggle-tasks")]:[]]}function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}function NY(nmo){let w0=g(
+- #3 @217255541 prefixPath:p.path}),type:Vs.AMBIGUOUS_PREFIX_ALTS,ruleName:r.name,occurrence:g,alternatives:m}})}))}function N5e(e,t,r){let n=[],i=hr(t,a=>a.name);return Ir(e,a=>{let s=a.name;if(qs(i,s)){let l=r.buildNamespaceCo
+
+## #41 new y6 needle="new y6" hits248=0 hits247=1
+
+## #41 isDirectApiEnabled needle="isDirectApiEnabled" hits248=5 hits247=5
+- #0 @92523788 locked........t.shared.......4`.pollerNotModifiedStreak.........bump.....L..queueMicrotask........b.isDirectApiEnabled........'.getLastInteractionTime.......$C. background......p|.UI_TEXT_MAX.I...UC*.Cannot destructure
+- #1 @203021573 #i)return;this.#i=!0,queueMicrotask(()=>{if(!this.#i)return;this.#i=!1,this.#y()})}#b(){if(!this.#e.isDirectApiEnabled())return!1;if(!this.#t.focused||this.#e.shared.pollerDisabled)return!1;if(this.#d===0)return!1;if(t
+- #2 @203022158 .#m=this.#e.setTimeout(()=>{this.#m=null,this.#w(d)},C)}#w(d){this.#T(d).catch(_)}#S(d){if(!this.#e.isDirectApiEnabled())return a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,
+- #3 @203023066 status_direct","bad_streak_disabled");return}let Pe=C()-X;if(Pe>l5e){if(x.pollerDisabled=!0,this.#e.isDirectApiEnabled())y("github_pr_status_direct","slow_disabled",{elapsed_ms:Pe});return}this.#C(d,this.#S(!1))}#_(d,C
+- #4 @203023831 e)=>x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,e
+
+## #41 pollerNotModifiedStreak=Re needle="pollerNotModifiedStreak=Re" hits248=1 hits247=0
+- #0 @203022837 }=ee;Re=Ie,xe=Ae}if(this.#u=me?1:xe===null?this.#u+1:0,x.pollerBadStreak=ge?x.pollerBadStreak+1:0,x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0,this.#_(xe,me),x.pollerBadStreak>=f5e){x.pollerDisabled=!0,y("github_
+
+## #41 shared.pollerNotModifiedStreak needle="shared.pollerNotModifiedStreak" hits248=3 hits247=0
+- #0 @203021117 ;setInputs(d){let C=this.#t;if(this.#t=d,!this.#r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#e.shared.pollerNotModifiedStreak=0;if(d.focused!==C.focused&&this.#b()||d.isLoading!==C.isLoading||d.enabled!==C.enabled)this.#h()}#
+- #1 @203021698 rn!1;if(!this.#t.focused||this.#e.shared.pollerDisabled)return!1;if(this.#d===0)return!1;if(this.#e.shared.pollerNotModifiedStreak=0,this.#e.now()-this.#d>=p5e)this.#u=0,this.#d=0;return!0}#k(){if(this.#a++,this.#m)this.#m(),this.
+- #2 @203022284 n a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}async#T(d){if(d!==this.#a)return;let{now:C,shared:x}=this.#e,H=this.#e.getLastInteractionTime();if
+
+## #41 function uJt needle="function uJt" hits248=2 hits247=1
+- #0 @184548945 ct({pullRequest:w.object({reviewDecision:w.string().nullable()}).nullable()}).nullable()})}));async function uJt(e){let t=Date.now();if(Tt()||KX())return null;if(e==="main"||e==="master")return null;let r=await p
+- #1 @190033410 /1024/1024)}MB \u2014 a version's `+`files may total at most ${aie/1024/1024}MB`);return null}async function uJt(e,t){let r=bn(e,"file");if(r!==null)return r.err;let s=_n(null,e,[])?.msg??null;if(s!==null||t===vo
+
+## #41 async function uJt needle="async function uJt" hits248=2 hits247=0
+- #0 @184548939 w.object({pullRequest:w.object({reviewDecision:w.string().nullable()}).nullable()}).nullable()})}));async function uJt(e){let t=Date.now();if(Tt()||KX())return null;if(e==="main"||e==="master")return null;let r=await p
+- #1 @190033404 ceil(g/1024/1024)}MB \u2014 a version's `+`files may total at most ${aie/1024/1024}MB`);return null}async function uJt(e,t){let r=bn(e,"file");if(r!==null)return r.err;let s=_n(null,e,[])?.msg??null;if(s!==null||t===vo
+
+## #41 uJt= needle="uJt=" hits248=0 hits247=1
+
+## #41 function Kut needle="function Kut" hits248=2 hits247=1
+- #0 @183256374 ~BUN/root/chunk-h5e2qvst.js";var r=new K(()=>$e());function i(){return r.of(z().host)}var CIe=qk(i);function Kut(e){return{setMode(n){CIe.emit({kind:"agent-mode",agentId:e,mode:n})},setRetryStatus(n){CIe.emit({ki
+- #1 @216558806 ;var h=!0}catch{}var d=n.call(s);return h&&(l?s[i]=u:delete s[i]),d}return o(a,"getRawTag"),_B=a,_B}function Kut(){if(V1e)return LB;V1e=1;var e=Object.prototype,t=e.toString;function r(n){return t.call(n)}return 
+
+## #41 PRe( needle="function PRe" hits248=3 hits247=3
+- #0 @186734143 cation \u2014 wait for their next message.",mode:"task-notification",agentId:rt(),isMeta:!0})}async function PRe(e){let{arg:t,source:r,seedPlan:o,promptIdentifier:u,getAppState:p,setAppState:g,signal:k,disconnect
+- #1 @217274754 Et),i||(i=[]);++a<s;){var l=e[a];t>0&&r(l)?t>1?sH(l,t-1,r,n,i):i6e(i,l):n||(i[i.length]=l)}return i}function PRe(e,t){return NRe(Hh(e,t),1)}function ORe(e,t,r,n){for(var i=e.length,a=r+(n?1:-1);n?a--:++a<i;)if(t(
+- #2 @224142054 )})]}),children:t.message?(0,pa.jsx)("p",{className:"text-fg-secondary",children:t.message}):null})}function PRe({p:e}){let{opts:t}=e,[n,r]=(0,mE.useState)(t.initialValue??""),o=n.trim(),i=o.length===0,a=()=>{i||
+
+## #41 RRe( needle="function RRe" hits248=3 hits247=1
+- #0 @186627011 (e)&&!yR(e)&&!t.toLowerCase().includes("input is too long for requested model"))return;return wU(t)}function RRe(e,t,r){return{role:"assistant",content:[{type:"tool_use",name:e,input:t,...r!==void 0&&{id:r}}]}}va
+- #1 @217273668 .get(n),a=da(e,t,r,{type:gp}),s=da(e,t,r,{type:gp}),l=new tH(i,n,s);return d_(a,l),{left:a,right:s}}function RRe(e,t,r){let n=e.ruleToStartState.get(t);$i(n,r.left);let i=e.ruleToStopState.get(t);return $i(r.righ
+- #2 @224141168 function pH(){for(let e of pE)e(Fu)}function fH(e){e.kind==="confirm"?e.resolve(!1):e.resolve(null)}function RRe(e){let t=Fu;if(Fu=e,t&&fH(t),pE.size===0){Fu=null,fH(e);return}pH()}function eae(e){return new Prom
+
+## #41 DRe( needle="function DRe" hits248=3 hits247=2
+- #0 @186742269 n r.data})}function pAt(){let e=An();return!!(In()?.organizationUuid&&St()&&(e==="max"||e==="pro"))}function DRe(){if(!pAt())return{eligible:!1,needsRefresh:!1,hasCache:!1};let e=In()?.organizationUuid;if(!e)retu
+- #1 @217274459 length;++n<i;){var a=e[n],s=t(a);if(s!=null&&(l===void 0?s===s&&!s_(s):r(s,l)))var l=s,u=a}return u}function DRe(e,t){return e<t}function IRe(e){return e&&e.length?ZSt(e,Qq,QSt):void 0}function MRe(e){return Ws(e
+- #2 @224145408 |Claude-Desktop\/|Nest\/)/.test(e)}function yH(e,t){return typeof e=="object"&&e!==null?e[t]:void 0}function DRe(e=globalThis){let t=yH(yH(e,"claude"),"chat"),n=yH(t,"suggestPrompt");if(typeof n=="function")retur
+
+## #41 KO() needle="function KO" hits248=6 hits247=4
+- #0 @179329297 turn"file"in e&&e.file==="pins";default:return!1}}function ASn(e){return r(e.configHome,b,"leases")}function KOe(e,n){let t="lease"in n?`lease:${n.lease}`:Pu(n);return r(ASn(e),`${Mn(t)}.json`)}function aq(e,n){
+- #1 @180143327 eof globalThis==="object"?globalThis:global;var po=Symbol.for("io.opentelemetry.js.api.logs"),Er=$i;function KO(e,t,r){return(o)=>o===e?t:r}var Oc=1;class Xi{constructor(){this._proxyLoggerProvider=new Wi}static
+- #2 @182272168 case bn.ScalarType.INT64:case bn.ScalarType.SFIXED64:case bn.ScalarType.SINT64:return t==r}return!1}function KO(e,t){switch(e){case bn.ScalarType.STRING:return"";case bn.ScalarType.BOOL:return!1;case bn.ScalarTy
+- #3 @186086394 t u=e.attachment.type||"unknown";t.attachmentsByType.set(u,(t.attachmentsByType.get(u)||0)+o)}async function KOn(e,t,r){let o={totalTokens:0,toolCallTokens:0,toolResultTokens:0,attachmentTokens:0,assistantMessag
+- #4 @186133650 ge missing");return Buffer.from(M.value)}))}async function qOt(){return(await KOt()).sessions}async function KOt(){if(Po()){let{listLivePeerSessions:e,SessionRecordsUnreadableError:t}=import.meta.require("B:/~BU
+- #5 @190704396 status>=500?"http_5xx":"http_4xx",`${s} could not be read (HTTP ${e.status}: ${Jy(e.data)})`)}async function KOn(e){let o=await D(ee(e.query),{signal:e.signal,maxContentLength:re,feature:"artifact_type_list",cre
+
+## #41 N5e-win @203037384
+toggle-tasks")]:[]]}function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}function NY(nmo){let w0=g(17),{link:pl}=nmo,MY;if(w0[0]!==pl.prefix)MY=pl.prefix!==void 0&&r(L,{children:[e(t,{dimColor:!0,children:pl.prefix})," "]}),w0[0]=pl.prefix,w0[1]=M
+
+## #41 before-N5e @203037000
+10]=T5e;else T5e=v0[10];return T5e});function D5e(d,C,x,H,X){let Z=X==="tasks"?"hide tasks":"show tasks",ee=H;return[...d?[e(t,{dimColor:!0,children:e(M,{chord:C,action:"interrupt",format:{keyCase:"lower"}})},"esc")]:[],...ee?[e(t,{dimColor:!0,children:e(M,{chord:x,action:Z,format:{keyCase:"lower"}})},"toggle-tasks")]:[]]}function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}function NY(nmo){let w0=g(17),{link:pl}=nmo,MY;if(w0[0]!==pl.prefix)MY=pl.prefix!==void 0&
+
+## #41 setInputs needle="setInputs({isLoading" hits248=1 hits247=1
+- #0 @203023925 Dt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z.setInputs({isLoading:d,enabled:C,focused:X})},[Z,d,C,X]),Ht(Z.subscribe,Z.getSnapshot)}function b0(aco){let rge=g(7),{co
+
+## #41 focused:r needle="focused:r" hits248=2 hits247=3
+- #0 @209622091 [76]!==m||l[77]!==A)ge=m.length===0?e(Wn,{children:"No active loops"}):m.map((wt,ro)=>e(be,{loop:wt,focused:ro===A},wt.id)),l[76]=m,l[77]=A,l[78]=ge;else ge=l[78];let bt;if(l[79]!==ge)bt=e(o,{flexDirection:"co
+- #1 @224036237 (0,ye.useEffect)(()=>{so==="tweaks"&&(jd||kt(null))},[so,J,jd,kt]);let P=(0,ye.useMemo)(()=>I?{...I,focused:r}:void 0,[I,r]),B=(0,Se.jsx)(Hz,{artboards:P,nodes:qc,directiveState:Vo,selectedTids:q?.name===S?q.t
+
+## #41 fetchPrStatus:()=> needle="fetchPrStatus:()=>" hits248=1 hits247=1
+- #0 @203023806 >new wY({setTimeout:(ee,re)=>x.setTimeout(ee,re),now:()=>Date.now(),getLastInteractionTime:()=>Zg(),fetchPrStatus:()=>eDt(H),isDirectApiEnabled:()=>Wen(),shared:JE()},{isLoading:d,enabled:C,focused:X}));return k(()=>{Z

@@ -1,0 +1,54 @@
+# gold-248-fGt-D-bind
+
+## marker // @bun count=13 last=178478154,178478808,178479510,178482251,178493889
+## marker //@bun count=0 last=
+## imports binding D before fGt count=1
+@178494551 import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js"
+
+## class SKn
+@179523748
+class SKn{storageV5;store;inFlight=null;followUpQueued=!1;disposed=!1;state={kind:"unprimed"};consecutiveThrows=0;runsInState=0;loggedThrowMessages=new Set;loggedOwnershipThrowMessages=new Set;loggedHostFilesThrowMessages=new Set;unsubscribe;constructor(t,e){this.storageV5=t;this.store=e;this.unsubscribe=e.onInvalidate(()=>{if(!this.disposed)this.seedAttestedTier(),this.schedule()}),this.seedAttestedTier(),this.schedule()}seedAttestedTier(){try{v(this.storageV5,this.store,this.store.epoch)}catch(t){this.logThrowOnce(t,this.loggedHostFilesThrowMessages)}}schedule(){if(this.inFlight!==null){this
+
+## e.primer=new SKn
+@179527321
+ued=!1,this.store.primer===this)this.store.primer=void 0,this.store.managedFileReads.clear()}}async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;try{return await z(t,e)}finally{i()}}async function z(t,e){if(await e.primer?.whenIdle(),e.primer!==void 0)await L(t,e);let s=e.primer===void 0?[]:(await Promise.all([...kur(t).map((i)=>Dgn
+
+## D defs/imports in settings-load band
+"function D(){" → NONE
+"function D(" → NONE
+"import{D}" → 179522388
+"import{D," → NONE
+",D}" → NONE
+",D," → NONE
+"{D as " → NONE
+" as D}" → NONE
+" as D," → NONE
+
+## D() call lookback imports in load band
+### call @179502725
+import{D} @179476514 …/~BUN/root/chunk-m0p20t24.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{J,se}from"B:/~BUN/root/chunk-4n8335pp.js";impor
+### call @179522609
+import{D} @179522388 …/~BUN/root/chunk-5tjjc1xb.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as H,dirname as I,join as f}from"path"
+### call @179533694
+import{D} @179522388 …/~BUN/root/chunk-5tjjc1xb.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as H,dirname as I,join as f}from"path"
+### call @179534324
+import{D} @179522388 …/~BUN/root/chunk-5tjjc1xb.js";import{D}from"B:/~BUN/root/chunk-4qdmbxwt.js";import{basename as H,dirname as I,join as f}from"path"
+
+## // @bun between fGt and loadBand count=61 first=178585828,178590496,178591298,178595622,178597274 last=179465617,179468097,179474165
+
+## pin-style D @178167129 context
+le for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var e;function D(){return e===!0}function rtr(t){let n=t===!0;if(e===void 0)return e=n,"pinned";return e===n?"unchanged":"conflict"}
+export{D,rtr};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agr
+
+## who might be settings D — scan tiny return-bool D near load
+
+## feature( near first load D call
+(st);function fXn(e){let t=g.state?.armedFromRemote?g.state.config:g.remoteArmingConfig,r=g.remoteNoticeSubject;if(!t&&r===null)return;let o=e(),u=_e(o);if(t){if(!qMe()||u!==fzt(t))st()}else if(u!==r)

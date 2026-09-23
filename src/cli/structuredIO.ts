@@ -31,6 +31,7 @@ import type { PermissionUpdate as InternalPermissionUpdate } from 'src/types/per
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { type HookCallback, hookJSONOutputSchema } from 'src/types/hooks.js'
+import { stampIdLessAssistantEntry } from 'src/utils/conversationRecovery.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logForDiagnosticsNoPII } from 'src/utils/diagLogs.js'
 import {
@@ -233,6 +234,36 @@ type PendingRequest<T> = {
 // entry is evicted. This bounds memory in very long sessions while keeping
 // enough history to catch duplicate control_response deliveries.
 const MAX_RESOLVED_TOOL_USE_IDS = 1000
+
+/** densable `_e` — host wait for a non-request SDK MCP message. */
+export const SDK_MCP_NON_REQUEST_TIMEOUT_MS = 70_000
+
+/**
+ * densable `rot` — true when the message is a JSON-RPC request
+ * (`method` present and `id` present and not null). Those do not get the
+ * 70s host timer.
+ */
+export function isJsonRpcRequestMessage(message: JSONRPCMessage): boolean {
+  if (typeof message !== 'object' || message === null) return false
+  if (!('method' in message) || !('id' in message)) return false
+  return message.id !== null
+}
+
+function armSdkMcpHostWait(timeoutMs: number): {
+  signal: AbortSignal
+  cleanup: () => void
+} {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer)
+    },
+  }
+}
 
 export class StructuredIO {
   readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
@@ -746,6 +777,9 @@ export class StructuredIO {
         return message
       }
       if (message.type === 'assistant' || message.type === 'system') {
+        if (message.type === 'assistant') {
+          return stampIdLessAssistantEntry(message)
+        }
         return message
       }
       if (
@@ -1294,23 +1328,36 @@ export class StructuredIO {
   }
 
   /**
-   * Sends an MCP message to an SDK server and waits for the response
+   * Sends an MCP message to an SDK server and waits for the response.
+   * densable `sendMcpMessage` / `rot`: the 70s host wait is armed only when
+   * the message is not a JSON-RPC request (method + non-null id). Requests
+   * keep their own wait. Timeout rejects this call so setupSdkMcpClients
+   * marks only that server failed.
    */
   async sendMcpMessage(
     serverName: string,
     message: JSONRPCMessage,
+    timeoutMs = SDK_MCP_NON_REQUEST_TIMEOUT_MS,
   ): Promise<JSONRPCMessage> {
-    const response = await this.sendRequest<{ mcp_response: JSONRPCMessage }>(
-      {
-        subtype: 'mcp_message',
-        server_name: serverName,
-        message,
-      },
-      z.object({
-        mcp_response: z.any() as z.Schema<JSONRPCMessage>,
-      }),
-    )
-    return response.mcp_response
+    const wait = isJsonRpcRequestMessage(message)
+      ? undefined
+      : armSdkMcpHostWait(timeoutMs)
+    try {
+      const response = await this.sendRequest<{ mcp_response: JSONRPCMessage }>(
+        {
+          subtype: 'mcp_message',
+          server_name: serverName,
+          message,
+        },
+        z.object({
+          mcp_response: z.any() as z.Schema<JSONRPCMessage>,
+        }),
+        wait?.signal,
+      )
+      return response.mcp_response
+    } finally {
+      wait?.cleanup()
+    }
   }
 }
 

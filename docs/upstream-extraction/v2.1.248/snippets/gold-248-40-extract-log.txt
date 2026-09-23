@@ -1,0 +1,172 @@
+=== pXt at gold start ===
+goldSlice len=17303 sha=498a85cdc7e27a20
+goldSlice head="pXt=`# Workflow authoring reference\n\nA workflow structures work across many agents \\u2014 to be comprehensive (decompose"
+goldSlice tail=" writing a script, load the \\`${$w}\\` skill \\u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.`;"
+pXt assign {
+  "prefix": "pXt=`# Workf",
+  "quote": "`",
+  "openPos": 196766976,
+  "closePos": 196784084,
+  "innerLenAscii": 17107,
+  "innerLenUtf8": 17107,
+  "innerShaAscii": "1af6404b4ee1ab88",
+  "innerShaUtf8": "1af6404b4ee1ab88",
+  "assignShaAscii": "03b64a681fa41dc2",
+  "headUtf8": "# Workflow authoring reference\n\nA workflow structures work across many agents \\u2014 to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial ch",
+  "tailUtf8": "p results after the workflow returns, or pass timestamps via args. Fallback when no journal is available: Read agent-<id>.jsonl files in the transcript directory and hand-author a continuation script.",
+  "after": "`,o=`Before writing a script, load the \\`${$w}\\` skill \\u2014 the workflow autho"
+}
+
+## before pXt
+onfirmed = results.flat().filter(Boolean).filter(f => f.verdict?.isReal)
+  return { confirmed }
+  // Dimension 'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.`,pXt=`# Workflow auth
+prev backtick @196766970
+before-400: map(f => () =>
+      agent(\`Adversarially verify: \${f.title}\`, {label: \`verify:\${f.file}\`, phase: 'Verify', schema: VERDICT_SCHEMA})
+        .then(v => ({...f, verdict: v}))
+    ))
+  )
+  const confirmed = results.flat().filter(Boolean).filter(f => f.verdict?.isReal)
+  return { confirmed }
+  // Dimension 'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.`,
+
+## pXt= needle="pXt=`" hits=1
+- #0 @196766972 still reviewing. No wasted wall-clock.`,pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \u
+
+## pXt var needle="pXt=" hits=1
+- #0 @196766972 still reviewing. No wasted wall-clock.`,pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \
+
+## o= Before writing needle="o=`Before writing a script" hits=1
+- #0 @196784086 and hand-author a continuation script.`,o=`Before writing a script, load the \`${$w}\` skill \u2014 the workflow authoring reference: script API a
+
+## fXt= needle="var fXt=" hits=0
+
+## fXt assign needle="fXt=" hits=0
+
+## fXt= needle="fXt=`" hits=0
+
+## fXt function needle="function fXt" hits=2
+- #0 @184302952 =t.slice(t[3]==="--"?4:3);else return t}function fXt(e,t){if(t)return t.envVars.some((p)=>!cw(p.name));let r=/^([A-Za-z_][A-Za-z0-9_
+- #1 @196784275 on, quality patterns, worked examples.`;function fXt(t){return t?`${e}
+
+${o}`:`${e}
+
+${pXt}`}
+export{pXt,fXt};
+.// @bun @bytecode
+//
+
+## fXt call needle="return fXt(" hits=2
+- #0 @196825663 pt(e){let r=cr();if(r!==void 0)return r;return fXt(eJ(e?.tools))+Rin(oe().workflowSizeGuideline)},async description(e,r){let t=cr()
+- #1 @196825778 (e,r){let t=cr();if(t!==void 0)return t;return fXt(eJ(r?.tools))+Rin(oe().workflowSizeGuideline)},get inputSchema(){return zr()},ge
+
+## Workflow tool desc needle="deterministic JavaScript workflow" hits=2
+- #0 @101193151 flow.<.......orchestrate subagents with deterministic JavaScript workflow....S"..isLost......UC..founded.......
+.evalControllers.......u.spentIn.
+.......
+- #1 @196825512 ,searchHint:"orchestrate subagents with deterministic JavaScript workflow",enablesCodeExecution:!0,maxResultSizeChars:1e5,isEnabled:()=>xu(),async prompt
+
+## script API and gotchas needle="script API and gotchas" hits=3
+- #0 @94425002 nce for writing a ........ tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for
+- #1 @196784180 u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.`;functio
+- #2 @204697636 erence for writing a ${md} tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for
+
+## Load before authoring needle="Load before authoring a script" hits=2
+- #0 @94425070 me, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize runnin
+- #1 @204697704 me, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize runnin
+
+## workflow-authoring skill needle="workflow-authoring" hits=2
+- #0 @97789180 ush-pr.....Bl..cowork-plugin...........workflow-authoring..(.......file:///B:/%7EBUN/root/chunk-qrr5hhg8.js........readResolve.
+...G.I.re
+- #1 @183512380 k-plugin",_ut="loop",JWn="schedule",$w="workflow-authoring";
+export{NGe,hut,PT,gut,KWn,YWn,yut,oP,XWn,q1,$Ge,FGe,UGe,Jin,but,_ut,JWn,$w};
+
+
+## function xu(){ hits=1
+@180846747 {"i":180846747,"body":"function xu(){if(O_e())return!1;if(!zft())return!1;let{available:r,defaultOn:e}=o();if(!r)return!1;return OS()?.settings.enableWorkflows??e}","sha":"9ff1647fa0e7ed9e","len":140}
+
+## function gme needle="function gme" hits=2
+- #0 @193111352 al-and-compliance.
+
+// Version: 2.1.248
+function gme(){return!1}
+export{gme};
+.// @bun @bytecode
+// Claude Code is a Beta product pe
+- #1 @202918553 rn!d&&C.includes(" ")&&!C.endsWith(" ")}function gme({draft:d,commands:C,onSubmit:x,agents:H,suggestionsStore:X,suppressSuggestions:
+
+## gme() needle="gme()" hits=4
+- #0 @193111361 mpliance.
+
+// Version: 2.1.248
+function gme(){return!1}
+export{gme};
+.// @bun @bytecode
+// Claude Code is a Beta product per 
+- #1 @193112314 on})}function E2e(){if(vy())return[];if(gme())return ro().bundledWorkflowsV2;return ro().bundledWorkflows}
+export{GOn,E2e};
+.
+- #2 @195582192 ===void 0||i(o))}function e(){if(!xu()||gme())return!1;if(vy()||vg())return!1;if(a.CLAUDE_CODE_ENTRYPOINT==="local-agent")ret
+- #3 @204697931 ",userInvocable:!0,isEnabled:()=>xu()&&!gme(),async getPromptForCommand(){return gTt()}})}
+export{gTt,Fmr};
+.// @bun @bytecod
+
+## getWorkflowAuthoringAutoloadMessages needle="getWorkflowAuthoringAutoloadMessages" hits=5
+- #0 @92320781 s.._....5..Cannot destructure property 'getWorkflowAuthoringAutoloadMessages' from null or undefined value.$....6&.getWorkflowAuthoringAutoloadMessages
+...%
+- #1 @92320856 s' from null or undefined value.$....6&.getWorkflowAuthoringAutoloadMessages
+...%.@.attachment..........filename........loadedNestedMemoryPaths.......3.inpu
+- #2 @101827122 ootapplyAdvisor0c30af20d0d75c1cC00000499getWorkflowAuthoringAutoloadMessagesB:/~BUN/root/chunk-g1jfqt37.jsresolveBridgeSlashOverrideprocessBashCommandDEFAUL
+- #3 @191185394 d,C,w){if(!d.shouldQuery)return;try{let{getWorkflowAuthoringAutoloadMessages:F}=import.meta.require("B:/~BUN/root/chunk-xhhb2t5v.js");d.messages.push(...awa
+- #4 @204710744 .some((r)=>r.uuid===t.uuid)}export{T as getWorkflowAuthoringAutoloadMessages};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercia
+
+## T call tengu needle="tengu_workflow_authoring_skill_autoload" hits=2
+- #0 @100624860 hunk-xhhb2t5v.js.... 	k.bundled:'...`...tengu_workflow_authoring_skill_autoload.........workflow_authoring_autoload.(...`...file:///B:/%7EBUN/root/chunk-hf670e
+- #1 @204710367 turn[]}K$($w,`bundled:${$w}`,n,null),s("tengu_workflow_authoring_skill_autoload",{trigger:c(r)}),b("workflow_authoring_autoload");let{formatSkillLoadingMetadat
+
+## ultracode skill name needle="name:\"ultracode\"" hits=0
+
+## ultracode playbook needle="Workflow Orchestration Playbook" hits=0
+
+## See /ultracode needle="See /ultracode" hits=0
+
+## WORKFLOW_TOOL needle="WORKFLOW_TOOL" hits=4
+- #0 @93427876 ....LIST_CONNECTORS_TOOL_NAME.......
+...WORKFLOW_TOOL_NAME......7...ARTIFACT_TOOL_NAME......$...END_CONVERSATION_TOOL_NAME......Q.S.r
+- #1 @101823326 eMessageAssistantNarrationSummaryMessageWORKFLOW_TOOL_NAMEAgentPromptDisplayAgentResponseDisplayextractLastToolInforenderGroupedAgent
+- #2 @201372627 quire("B:/~BUN/root/chunk-h6vmcfqm.js").WORKFLOW_TOOL_NAME,ui:import.meta.require("B:/~BUN/root/chunk-6hez6aeg.js")},Om=null,Ys=impor
+- #3 @208166113 UN/root/chunk-d3825ed1.js";export{md as WORKFLOW_TOOL_NAME};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Comm
+
+## function fXt @184302952
+{"i":184302952,"body":"function fXt(e,t){if(t)return t.envVars.some((p)=>!cw(p.name));let r=/^([A-Za-z_][A-Za-z0-9_]*)\\+?=/,o=/^[A-Za-z_][A-Za-z0-9_]*\\+?=(?:\"[^\"$`\\\\]*\"|'[^']*'|[A-Za-z0-9_./:+-]*)[ \\t]+/,u=e.command;for(;;){let p=u.match(r);if(!p)return!1;if(!cw(p[1]))return!0;let g=u.match(o);if(!g)return!0;u=u.slice(g[0].length)}}function sX(e,t){let r=/^([A-Za-z_][A-Za-z0-9_]*(?:\\[[^\\]]*\\])?)\\+?=(?:'[^'\\n\\r]*'|\"(?:\\\\","sha":"62662ac8c400a13d","len":585}
+wrote gold-248-40-fXt.txt len=585 sha=62662ac8c400a13d
+
+## function fXt @196784275
+{"i":196784275,"body":"function fXt(t){return t?`${e}\n\n${o}`:`${e}\n\n${pXt}`}","sha":"88c4522c4d3924bd","len":53}
+wrote gold-248-40-fXt.txt len=53 sha=88c4522c4d3924bd
+wrote gold-248-40-pXt-inner.txt utf8Len=17107 shaUtf8=1af6404b4ee1ab88 shaAscii=1af6404b4ee1ab88
+
+## o= slim @196784086 {
+  "prefix": "o=`Before wr",
+  "quote": "`",
+  "openPos": 196784088,
+  "closePos": 196784273,
+  "innerLenAscii": 184,
+  "innerLenUtf8": 184,
+  "innerShaAscii": "dc3e66305d5678ee",
+  "innerShaUtf8": "dc3e66305d5678ee",
+  "assignShaAscii": "6cc42741d2278572",
+  "headUtf8": "Before writing a script, load the \\`${$w}\\` skill \\u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.",
+  "tailUtf8": "Before writing a script, load the \\`${$w}\\` skill \\u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.",
+  "after": "`;function fXt(t){return t?`${e}\n\n${o}`:`${e}\n\n${pXt}`}\nexport{pXt,fXt};\n.// @bu"
+}
+wrote gold-248-40-o-slim.txt len=184 sha=dc3e66305d5678ee

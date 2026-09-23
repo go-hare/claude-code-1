@@ -1,0 +1,29 @@
+# gold-248-kairos-source
+DIG kairosActive / sessionSource in official host tree
+when=2026-09-21
+exe=official-248/package/claude.exe
+
+## String hunt (SEA)
+| needle | hits |
+|---|---|
+| kairosActive | 0 |
+| sessionSource | 0 |
+| replaceKairos | 0 |
+| session_source | 0 |
+| setSessionSource / getSessionSource / replaceSessionSource | 0 |
+| isKairos | 5 — all isKairosCronEnabled (feature gate, NOT host bag) |
+| kairos / Kairos | tengu_kairos_* GrowthBook gates + cron helpers only |
+
+## Host bags inspected (no slot)
+### ge sessionFlags @178521439 — no kairos* / sessionSource*
+### Ie launchOptions @178534988 — no kairos* / sessionSource*
+### Ee modelStringsCache @178539976 — unrelated sibling of diagnostics
+### sn() Ke host bags
+backgroundHousekeeping, launchOptions, settingsSource, extensionsConfig, modelStringsCache, diagnostics, telemetryHandles, credentialSlots, mcpProcessWiring, requestLatches, accountCreditLatches, proactivity
+### en() session siblings (incl turnBudget / sessionFlags / surfaceCapabilities)
+… sessionFlags:new ge … surfaceCapabilities:new he … turnBudget:new me … — no kairosActive / sessionSource field
+
+## VERDICT (superseded by gold-248-kairos-source-verdict.txt)
+- kairosActive: KEEP STATE residual — live product latch; no official bag; do NOT invent
+- sessionSource: CUT — write-only dead leftover; official missing; not clientType/sessionStartType
+- isKairosCronEnabled / tengu_kairos_*: unrelated feature gates — not host-slot land targets

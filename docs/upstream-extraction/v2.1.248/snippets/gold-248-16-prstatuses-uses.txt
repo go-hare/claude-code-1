@@ -1,0 +1,151 @@
+# gold-248-16-prstatuses-uses
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+hits=15
+offsets=92720516,92728225,192130838,192131709,192134546,192134569,192134592,192134644,192135779,192137355,192178267,192204952,192234494,192267093,192274803
+
+## prStatuses @92720516
+artbeat......ks.watchJobDirOnce......<..adoptedPeers
+....q..remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.../$[.loopKicks.........}.logTails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the original
+.....).focusedIdx.......i.hoverFocusIdx...	...`.[.
+
+## prStatuses @92728225
+groupMode' from null or undefined valueI.......Cannot destructure property 'attachingJobId' from null or undefined value...E...,...Cannot destructure property 'prStatuses' from null or undefined value...I.......Cannot destructure property 'toggleCollapse' from null or undefined value........J..no sessions match.........+... .l.o.o.k.i.n.g. .f.o.r. .p.a.s.t. .s.e.s.s.i.o.n.s.& ......D.owners..	....:p.scrollRef.......85?.renameInput.
+...$
+
+## prStatuses @192130838
+bDirOnce:(i,d)=>Din(i,d)}}function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();
+
+## prStatuses @192131709
+P()}}setRemoteWanted(i){if(i===this.#d)return;if(this.#d=i,this.#r===0)return;if(i)this.#I();else this.#o?.(),this.#o=null}#x(i){if(this.#i=i,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)});if(this.load(),this.#s.push(w8(i,()=>void this.load(),fc),w8(i,this.#O,Ah),w8(i,()=>{this.#d},fc)),this.#d)this.#I()}#I(){if(!this.#i)return;this.#p("remoteJo
+
+## prStatuses @192134546
+obs",i)}updateAdoptedPeers(i){this.#p("adoptedPeers",i)}updateRemoteJobs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#
+
+## prStatuses @192134569
+ers(i){this.#p("adoptedPeers",i)}updateRemoteJobs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#c.has(S.id)).map((S)=>[
+
+## prStatuses @192134592
+Peers",i)}updateRemoteJobs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#c.has(S.id)).map((S)=>[S.id,S])):null;return h
+
+## prStatuses @192134644
+)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#c.has(S.id)).map((S)=>[S.id,S])):null;return hn(w?m.map((S)=>w.get(S.id)??S):m)})}settleLandedPend
+
+## prStatuses @192135779
+bs(this.#n)]),w=Mye(await this.#e.adoptRosterOrphans(d,m.records,this.#n),m.shorts).filter((P)=>!this.#m.has(P.id)).map((P)=>({...P,activity:Oo(P.state,this.#t.prStatuses)}));if(i<=this.#u)return;if(this.#u=i,this.#r>0)this.#p("overlaidLoadLanded",()=>!0);this.updateJobs((P)=>{let V=P&&this.#c.size>0?new Map(P.filter((W)=>this.#c.has(W.id)).map((W)=>[W.id,W])):null,K=hn(V?w.map((W)=>V.get(W.id)??W):w);if(P&&P.length===K.length&&P.every(
+
+## prStatuses @192137355
+(ee[0],ee[1]),Y=!0;return Y?Z:W})}}let x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.filter((P)=>{let V=this.#t.prStatuses.get(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.ma
+
+## prStatuses @192178267
+tched)}function xb(i){return!!(i&&(i.intent||i.routine||i.matched||i.cwd!==void 0||i.exec!==void 0))}function rp({jobs:i,adoptedPeers:d,remoteJobs:m,pendings:w,prStatuses:S,liveStatus:h,heldInTerminal:C,loopJobIds:x,loopKicks:A,focusedIdx:F,hoverFocusIdx:T,collapsed:P,capExpanded:V,groupMode:K,activeTab:W,query:Y,mode:Z,dispatch:ee,linkMatchId:X,dispatchRepoCwd:Q,pendingDelete:le,earlierEntries:ye,cwdFilter:xe,initialJobId:me,simpleView
+
+## prStatuses @192204952
+activeTab:zr,groupEdit:En,groupPickIdx:go,groupPristine:on,renaming:mC,previewOpen:nn}=Ze(uC),{attachingJobId:Zp,warmingJobIds:ef,newSessionOpening:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTargetGroup:sf,hasMultipleOrigins:af,focusedGroup:lf,groupCounts:df,earlierVisi
+
+## prStatuses @192234494
+hildren:"hold space to speak"}):null,e(M,{chord:"ctrl+x",action:w?"confirm":"delete"})]})})})]})}function Qw(Xx){return Xx.replyError}function Xw(Zx){return Zx.prStatuses}function Zw(Yw){return Yw.kind==="job"&&Yw.group===$n}function Gd(Vx){let pr=g(50),{owners:Wx,layout:Ux,footer:Zf,simpleView:gi,groupsEnabled:em,showRemoteTabs:tm,canMention:om,isTerminalFocused:rm,awayLoop:im,storageV5:sm,onOpen:Kx}=Vx,{roster:lr,view:Js,attach:am,edi
+
+## prStatuses @192267093
+",{listeners:H})},1500,[]);let[ee]=u(()=>A??_i()),[X]=u(()=>F??epe()),[Q]=u(()=>xr(X,T)),{jobs:le,adoptedPeers:ye,remoteJobs:xe,remoteListLoaded:me,pendings:be,prStatuses:Te,loopKicks:ge,overlaidLoadLanded:de}=Ze(Q),[re]=u(()=>Wi(X,Q,T)),{focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt}=Ze(re),Me=!1,[he]=u(()=>og(X,Me)),{groupMode:et,activeTab:ut,groupEdit:Ie,resumePicker:Fe,renaming:Ve,previewOpen:We,helpOpen:ze,debugOpen:lt
+
+## prStatuses @192274803
+perlinkClick=(Pe)=>{xje(Pe)},()=>{H.onHyperlinkClick=void 0}},[]);let Zs=!1,Ru=G(()=>ml().hasToken,[]),Fn=rp({jobs:le,adoptedPeers:ye,remoteJobs:nt,pendings:be,prStatuses:Te,liveStatus:Su,heldInTerminal:(H)=>Q.terminalHolderOf(H)!==void 0,loopJobIds:ku,loopKicks:ge,focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt,groupMode:et,activeTab:ut,query:Xe,mode:Mt,dispatch:Tn,linkMatchId:Xo,dispatchRepoCwd:An,pendingDelete:zt,earlierEn
+
+## needle "fetchPrStatusBatch" hits=3
+### @92720196
+ession........".archiveRemoteSession....`.E.readLogTail......k@.probeFleetTranscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat.........clearFleetViewHeartbeat......ks.watchJobDirOnce......<..adoptedPeers
+....q..remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.
+
+### @192130470
+chiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persistPrStatusCache:(i,d)=>q$n(i,d),touchFleetViewHeartbeat:(i)=>kmn(i),clearFleetViewHeartbeat:(i)=>Tmn(i),watchJobDirOnce:(i,d)=>Din(i,d)}}function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendi
+
+### @192137568
+),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title
+
+## needle "function V$n" hits=1
+### @184556749
+
+  }}}}
+}`,aXe=20,EJt=6,CJt=15000,AJt="30s",lXe=/rate limit/i;function KX(){return Date.now()<JE().ghBackoffUntil}async function V$n(e){let t=new Map,r=[],o=null;if(e.length===0||Tt()||KX()){for(let k of e)t.set(k,null);return{statuses:t,rateLimit:o,unbatched:[]}}let u=[];for(let k of e){let E=tst(k);if(E)u.push(E);else if(/\/pull\/\d+/.test(k))r.push(k)}u.sort((k,E)=>k.url.localeCompare(E.url));let p=[];for(let[k,E]of iXe(u,(C)=>C.host
+
+## needle "this.#E(" hits=10
+### @178809741
+if(f!==void 0)o.oldValue=f}}else if(o)o.set="update"}if(s!==0&&!this.#d)this.#U();if(this.#d){if(!d)this.#M(a,s,n);if(o)this.#E(o,a)}if(!h&&this.#f&&this.#o){let c=this.#o,f;while(f=c?.shift())this.#w?.(...f)}return this}pop(){try{while(this.#n){let t=this.#t[this.#r];if(this.#L(!0),this.#e(t)){if(t.__staleWhileFetching)return t.__staleWhileFetching}else if(t!==void 0)return t}}finally{if(this.#f&&this.#o){let t=this.#o,e;while(e=t?.shi
+
+### @178810695
+t h=this.#t[n];if(this.#e(h)&&h.__staleWhileFetching===void 0)return!1;if(!this.#g(n)){if(i)this.#z(n);if(s)s.has="hit",this.#E(s,n);return!0}else if(s)s.has="stale",this.#E(s,n)}else if(s)s.has="miss";return!1}peek(t,e={}){let{allowStale:i=this.allowStale}=e,s=this.#s.get(t);if(s===void 0||!i&&this.#g(s))return;let n=this.#t[s];return this.#e(n)?n.__staleWhileFetching:n}#x(t,e,i,s){let n=e===void 0?void 0:this.#t[e];if(this.#e(n))retur
+
+### @178810741
+tching===void 0)return!1;if(!this.#g(n)){if(i)this.#z(n);if(s)s.has="hit",this.#E(s,n);return!0}else if(s)s.has="stale",this.#E(s,n)}else if(s)s.has="miss";return!1}peek(t,e={}){let{allowStale:i=this.allowStale}=e,s=this.#s.get(t);if(s===void 0||!i&&this.#g(s))return;let n=this.#t[s];return this.#e(n)?n.__staleWhileFetching:n}#x(t,e,i,s){let n=e===void 0?void 0:this.#t[e];if(this.#e(n))return n;let h=new z,{signal:r}=i;r?.addEventListen
+
+### @178813961
+ R?_.__staleWhileFetching:_.__returned=_}let E=this.#g(g);if(!w&&!E){if(l)l.fetch="hit";if(this.#C(g),s)this.#z(g);if(l)this.#E(l,g);return _}let b=this.#x(t,g,m,u),v=b.__staleWhileFetching!==void 0&&i;if(l){if(l.fetch=E?"stale":"refresh",v&&E)l.returnedStale=!0}return v?b.__staleWhileFetching:b.__returned=b}}async forceFetch(t,e={}){let i=await this.fetch(t,e);if(i===void 0)throw Error("fetch() returned undefined");return i}memo(t,e={}
+
+### @178814702
+leteOnStaleGet:n=this.noDeleteOnStaleGet,status:h}=e,r=this.#s.get(t);if(r!==void 0){let o=this.#t[r],d=this.#e(o);if(h)this.#E(h,r);if(this.#g(r)){if(h)h.get="stale";if(!d){if(!n)this.#T(t,"expire");if(h&&i)h.returnedStale=!0;return i?o:void 0}else{if(h&&i&&o.__staleWhileFetching!==void 0)h.returnedStale=!0;return i?o.__staleWhileFetching:void 0}}else{if(h)h.get="hit";if(d)return o.__staleWhileFetching;if(this.#C(r),s)this.#z(r);return
+
+### @190358997
+ hide until it settles",{level:"verbose"});else this.#o=this.#s.setTimeout(this.#x.bind(this,s),b),this.#o.unref();if(h)this.#E();if(this.#t)this.#s.clearTimeout(this.#t),this.#t=null;if(r||this.#i){if(this.#e.phase==="live")return;this.#c()}};#x(e){this.#o=null;let s=Jw();if(s!==e)return;this.#m=!0,hk(s,this.#r).then(async(t)=>{if(t.length>0&&t.every((r)=>r.status==="completed")&&await Kqn(s,this.#r))this.#d=[],this.#u=!0;this.#E()}).c
+
+### @190359304
+his.#r).then(async(t)=>{if(t.length>0&&t.every((r)=>r.status==="completed")&&await Kqn(s,this.#r))this.#d=[],this.#u=!0;this.#E()}).catch((t)=>{if(this.#r)this.#c();if(T(t)==="ELOCKED"){n("Task list lock is busy (another session or process sharing this task list, or an in-flight task write, holds it); completed tasks stay visible and the reset is retried on the next refresh");return}if(Cd(t)||mp(t)){n(`Task list reset failed on the task
+
+### @192131785
+o=null}#x(i){if(this.#i=i,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)});if(this.load(),this.#s.push(w8(i,()=>void this.load(),fc),w8(i,this.#O,Ah),w8(i,()=>{this.#d},fc)),this.#d)this.#I()}#I(){if(!this.#i)return;this.#p("remoteJobs",(i)=>{let d=i.map((m)=>{let w=Oo(m.state);return w===m.activity?m:{...m,activity:w}});return d.every((m,w)=>m===
+
+### @192137786
+#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!
+
+### @192138314
+ Y})})()}if(this.#u===i){let P=new Set(w.map((K)=>K.state.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.listAllLiveSessions(this.#n).then((i)=>{let d=new Map,m=new Map;for(let h of i){if(h.kind==="interactive"&&h.pid!==process.pid&&h.sessionId&&h.pa
+
+## needle ".prStatuses.get" hits=1
+### @192137354
+x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.filter((P)=>{let V=this.#t.prStatuses.get(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetch
+
+## needle ".prStatuses.set" hits=0
+## needle "Cannot destructure property" hits=12
+### @89087087
+'defineProperty' trap returned falsy value for property '.Proxy object's 'set' trap returned falsy value for property '.Cannot destructure property '.Proxy object's 'target' has the non-configurable property '.Proxy object's non-extensible 'target' has configurable property '.Cannot delete unqualified property '.Cannot modify '.: FAILED in cell list '.Cannot export '.Export '.' on 'SubtleCrypto': 1st argument '.The argument '.Wrong prot
+
+### @92202648
+thorization value must be a single header line (control characters such as CR/LF are not allowed)........@|.trimA...iMk.Cannot destructure property 'source' from null or undefined value........Uk.source.......]..commandTimeoutMs........upstreamProxyUrl......`.hostname......{.kind.....X..mint........toLowerCase.....v...indexOf.....Dw..filter......r...utf8....E{C.[ \t].......c.r.toString.....d@.search..	....L..startLine........i..headerLi
+
+### @92216956
+ion: ...........head
+....%3.user-agent..".......upstream answered 407 for CONNECT ..........; re-minting once...=...g...Cannot destructure property 'up' from null or undefined value...4.....g.upstream proxy sent an unparseable reply to CONNECT ......I.; answering the client 502..&.....D.unparseable reply from upstream proxy
+......j...tunnel established: CONNECT '.......HTTP/1.1 200 Connection Established
+
+.....]dD.upstream proxy refus
+
+### @92218696
+orted.......g.&.checkout hook failed (exit .....6o..checkout hook killed by signal.......q..exited with status .D....(6.Cannot destructure property 'bytesRead' from null or undefined value	...beH.bytesRead...*...`...timed out connecting to the upstream proxy..3.......upstream proxy closed the connection during connect.Y....L..client sent bytes past its declared Content-Length on a plain HTTP request; not forwarded.......%...client: ....
+
+### @92222660
+ly@anthropic.com>, gpg.ssh.program=.....{s,.baseDir.	...9|..recursive.........A.execPath....Y..gitConfigPath...A.....&.Cannot destructure property 'stdout' from null or undefined value.........v.\/+$:.......--use-anthropic-git-proxy: apiBaseUrl is not a valid URL: ......)...credential.https://.......o..helper.........false.......9....useHttpPath........unused..	...7.a..username........)..basic........3.http.https://.......q../.proact
+
+### @92224324
+.0..Error: Invalid JSON provided to --settings..........[\u007f-\u009f].....:CL.claude-settings.....).>..json...G....I{.Cannot destructure property 'resolvedPath' from null or undefined value. .......Error: Settings file not found: ....*.I.ERR_FILE_TOO_LARGE..!.....M.Error: Settings file exceeds the ...........MiB limit: .!...B...Error: Cannot use settings file (.......1-..Error processing --settings: .......n.Q.Error processing setting
+
+### @92228556
+Outcome.......2.handoffKill.........pidPollTick......1..setInterval.....UW..feed......9.dispose.....R1V.lastLineD.......Cannot destructure property 'procStart' from null or undefined value......5.short.......
+-O.hostProc........auth........onAuthRequired..	....e..skipCache.......X...replPid.....z.\.replVersion.....#.1.onResume......B.onData..........\r?\n.......tf;.send......?.tengu_bg_revival_guard.......a..--resume....f...--session-id
+
+### @92230280
+CKET_TOKENS_PATH	....:..claimAuth.......b...CLAUDE_BG_CLAIM_AUTH.....U..claimed......zm.hostPid.........ptySock.>.......Cannot destructure property 'env' from null or undefined value.......]..argv.....d..starting....:...nonce...	..._.~.startedAt...	.......createdAt.......\...backend......D..state.........4.detail..........agent...........routine.....}...worktreePath
+.....1.cliVersion........O.cols....^.-.rows........reap....>.h.grace...
+
+### @92234420
+s. .l.i.v.e.n.e.s.s. .b.a.c.k.s.t.o.p.).........tengu_bg_rv_connect_exhausted.......E...[bg-rv] send failed: ...>....jP.Cannot destructure property 'cmd' from null or undefined value.......7.--bg-pty-host.......3Zj.claude bg-pty-host.......qS.ENOENT........V.ENOSPC......:0v.EACCES..........EROFS...+....b..bg: ptyHost stderr breadcrumb open failed (.....c...) at ...@...&.t. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .s.t.d.e.r.r. .d.i.s.c.a.r.d.e.
+
+### @92234812
+i.n.g. .w.i.t.h. .s.t.d.e.r.r. .d.i.s.c.a.r.d.e.d. .(.c.r.a.s.h. .d.i.a.g.n.o.s.t.i.c.s. .d.e.g.r.a.d.e.d.).:. .A....c..Cannot destructure property 'cgroup' from null or undefined value...:...:...bg: retrying ptyHost spawn without tool cgroup placement (..........pinToCurrentBinary..
+....}.prefixArgs........l.argv0.........V.cgroup......*...writeAuthSnapshot failed: ........E.writeSocketTokensFile failed: ..#...F...[bg-spare] missing c
+
+### @92238548
+ODE_RESUME_PROMPT.......SKX.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS.......W..CLAUDE_BG_POST_CLEAR_RESPAWNC..._...Cannot destructure property 'exitCode' from null or undefined value.!....g..: deferred auth-mismatch re-key (...6....A..). .d.r.o.p.p.e.d. ..  .w.o.r.k.e.r. .s.e.t.t.l.e.d.;. .l.e.a.v.i.n.g. .t.o. .r.e.t.i.r.e.I.f.S.e.t.t.l.e.d.....%...) firing on tempo='......B..tengu_bg_respawn_suppressed......j..settled_on_disk.....
+
+### @92241368
+w.a.r.m.-.a.t.t.a.c.h. .s.h.o.r.t.c.u.t.....(....I..file:///B:/%7EBUN/root/chunk-b4c32ndy.js....g}..spare_claim.?...,...Cannot destructure property 'main' from null or undefined value.....-.m.originalCwd.......C.projectRoot......._.warm_spare_claimed..........ANTHROPIC_API_KEY.......,.H.preservePendingExposures........preserveLoggedExposures......3..main....H...setEncoding.(...=...file:///B:/%7EBUN/root/chunk-k0qn8jjz.js........promise.

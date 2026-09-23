@@ -1,0 +1,30 @@
+# gold-248-state-dead-fields
+
+when=2026-09-21 · SEA 2.1.248
+pass=full State type gut of bag-owned mirrors (safe brace-scoped cut)
+
+## State type after cut = 19 fields
+
+### KEEP STATE (live `STATE.*`)
+kairosActive, promptCache1hEligible, afk/fast/cacheEditing HeaderLatched,
+teleportedSessionIds, replBridgeSessionId, turn*DurationMs/Count,
+pinnedFeatureValues, claudeInChromeSessionPromptActive
+
+### KEEP g() type residual (official dual-path; leftover accessors bag-only)
+sessionCronTasks, cachedClaudeMdContent, registeredHooks, mainThreadAgentType
+
+### LAND cut (~79)
+All other former State fields with 0 `STATE.field` refs — costLedger,
+userPresence.lastInteractionTime, surfaceCapabilities.mainLoopBusy,
+sessionFlags.teleportedSessionInfo, sessionCron loop*, requestLatches
+(midConv/foundry/allowlist), mcpProcessWiring.directConnect,
+conversationLatches.stickyBetas, hookRegistry.mainThreadAgentHooks,
+Ie/Fe/Oe/credential/telemetry/sessionScratch pending* mirrors, etc.
+
+## Rule
+- Cut only inside `type State = {…}` and `const state: State = {…}`
+- Never strip function parameter names (prior global regex ate `sessionId:` / `meter:`)
+- Do not invent `g()` parent residual
+
+## Tests
+stateBagRewire.248 + stickyBetas.248 + sessionRoot.248

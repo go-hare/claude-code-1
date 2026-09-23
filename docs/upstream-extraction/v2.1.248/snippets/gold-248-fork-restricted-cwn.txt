@@ -1,0 +1,41 @@
+# gold-248-fork-restricted-cwn
+# leftover bit — NOT #1 Yk/restrictedSession
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T08:47:55.105Z
+
+## official Ie #w field @178535191
+#w=!1
+
+## official Ie methods @178537404
+forkRestrictedLaunchConfig(){return this.#w}
+replaceForkRestrictedLaunchConfig(e){this.#w=e}
+
+## official Ie.reset #w @178537925
+this.#w=!1
+
+## official GC @178553257 sha=c75e51a6d6ddf107
+function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}
+
+## official Cwn @178553330 sha=c836daccafc6bb62
+function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}
+
+## export alias GC as getForkRestrictedLaunchConfig @192776753
+GC as getForkRestrictedLaunchConfig
+
+## export alias Cwn as setForkRestrictedLaunchConfig @192785069
+Cwn as setForkRestrictedLaunchConfig
+
+## leftover 2.1.212 Hei/xei
+function Hei( hits=0
+function xei( hits=0
+
+## Cwn caller — Ajs write @191374601
+Cwn(Win(C))
+
+## GC callers (leftover already reads getForkRestrictedLaunchConfig)
+# tui/update uncarriable wU(...,GC()) @192086231
+# tui restart wU(...,GC()) @201904780 @201907946
+# fullscreen PUe / if(GC()) @202592038 @202592341
+# restart refuse wU(...,GC()) @205714430
+# fork wr()||No()||GC() @209796532

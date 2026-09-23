@@ -1,0 +1,683 @@
+# gold-248-unk-31
+when=2026-09-20T05:54:00.733Z
+sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+item=#31 rc-reconnect-prompt
+rule=unique 248 body + leftover host, else stay UNKNOWN
+
+# ==== leftover-host needles ====
+- "[bridge:repl] Ingress transport connected" 248=0 247=0
+- "tengu_bridge_repl_ws_connected" 248=2 247=2
+- "[bridge:repl] Capped initial flush" 248=0 247=0
+- "[bridge:repl] Flushing" 248=0 247=0
+- "[bridge:repl] Initial flush dropped" 248=0 247=0
+- "[bridge:repl] Initial flush failed" 248=0 247=0
+- "[remote-bridge] v2 transport connected" 248=2 247=2
+- "[remote-bridge] flushHistory failed" 248=2 247=2
+- "[RemoteSessionManager] Connected" 248=2 247=2
+- "[RemoteSessionManager] Reconnecting" 248=4 247=4
+- "[RemoteSessionManager] Connecting to session" 248=2 247=2
+- "tengu_bridge_reconnected" 248=2 247=2
+- "[bridge:poll] Reconnected after" 248=2 247=2
+- "tengu_pending_action_republished" 248=3 247=3
+- "getPendingPermissionRequests" 248=9 247=9
+- "republishSurvivingPendingAction" 248=4 247=4
+- "pending_permission_requests" 248=16 247=16
+- "pending_user_dialog_requests" 248=15 247=15
+- "tengu_reinit_pending_redelivery" 248=2 247=2
+- "tengu_bridge_repl_history_capped" 248=0 247=0
+- "tengu_bridge_repl_reconnected_in_place" 248=0 247=0
+- "Force-republish" 248=0 247=0
+- "forceNextPublish" 248=0 247=0
+- "shouldPublishTaskState" 248=0 247=0
+- "buildTaskStateMessage" 248=0 247=0
+
+# ==== extra reconnect/permission needles ====
+- "replayPermission" 248=0 247=0
+- "replay permission" 248=0 247=0
+- "reshow" 248=0 247=0
+- "reShow" 248=0 247=0
+- "reconnect-repaint" 248=0 247=0
+- "silent reconnect" 248=0 247=0
+- "last message" 248=20 247=18
+- "flush last" 248=0 247=0
+- "flushLast" 248=0 247=0
+- "pendingPermissionRequests" 248=11 247=12
+- "can_use_tool" 248=54 247=52
+- "control_request" 248=127 247=128
+- "writeBatch" 248=26 247=27
+- "initialFlushDone" 248=0 247=0
+- "previouslyFlushed" 248=0 247=0
+- "permission prompt" 248=106 247=105
+- "PermissionRequest" 248=151 247=133
+- "undelivered" 248=71 247=58
+- "catchUp" 248=23 247=5
+- "replay-on-reconnect" 248=0 247=0
+- "redeliver" 248=37 247=33
+- "rearm" 248=71 247=68
+
+# ==== leftover-host windows 248 vs 247 ====
+# -- "[bridge:repl] Ingress transport connected" code248=0 code247=0
+# -- "tengu_bridge_repl_ws_connected" code248=1 code247=2
+## #31 248 tengu_bridge_repl_ws_connected #0 @198352152
+=!0;if(L){if(P!==void 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else if(P!==void 0&&a&&!m){if(gn(P.code)&&!t)Se(he[P.code].recoveredCode)}else if(d!==void 0&&!m){if(G(d,w),S!==void 0&&S!=="refresh_credentials_rejected"&&!t)X(S)}}})()},label:"remote"});if(tr.scheduleFromExpiresIn(p,H.expires_in),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=void 0})}function r(o){OKn(o,cr,ji,(t)=>{if(Pnt(t,"bridge"))dr.noteActivity();return Hn?.(t)},St?(t)=>{if(St(t)){let a=t.response.subtype==="success"&&!!t.response.response;if(a)dr.not
+
+- enclosing 248 fn=fn @198351726
+## #31 248-fn fn near tengu_bridge_repl_ws_connected @198351726
+len=1918 sha=6639d1c05696f53b exactOther=0
+function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=void 0})}function r(o){OKn(o,cr,ji,(t)=>{if(Pnt(t,"bridge"))dr.noteActivity();return Hn?.(t)},St?(t)=>{if(St(t)){let a=t.response.subtype==="success"&&!!t.response.response;if(a)dr.noteActivity();ot(t.response.request_id,a),ye("running")}}:void 0,(t)=>{if(Rnt(t))dr.noteActivity();LKn(t,{transport:C,sessionId:p,onInterrupt:Ln,onStopTask:Gn,getInitializeState:Wn,getCommands:Kn,getPendingPrompts:xi,onDialogKindsDeclared:Vn,onClientInitialize:zn,onSetModel:Yn,onSetMaxThinkingTokens:Jn,onSetPermissionMode:Xn,onApplyFlagSettings:Zn,onRenameSession:ei,onSetColor:ri,onFileSuggestions:ti,onReadFile:ni,onGetWorkspaceDiff:ii,onGetContextUsage:oi,onGetUsage:si,onMcpAuthenticate:ai,onMcpOauthCallbackUrl:di,onMcpReconnect:ci,onMcpStatus:li,onMcpSetServers:Ii,outboundOnly:hr})})}}
+
+## #31 247 tengu_bridge_repl_ws_connected #0 @202493100
+ed session outside it... .....N.[remote-bridge] Created session .....t..bridge_repl_v2_session_created......Y..confirmChanged..C...C@..[remote-bridge] Signed-in account changed under teleported session .........). ..  .l.a.t.c.h.e.d. .o.n.l.y.0.......[remote-bridge] Signed-in account changed under ....O._., episode already dead..........). ..  .s.t.o.p.p.i.n.g......F..bridge_repl_v2_owner_changed....b3..account_changed.........skipped_host_owned..=...L\..[remote-bridge] Owner-changed settle left host-owned session ........5v. unarchived.........[remote-bridge] Owner-changed settle archived ..&...8.W. with the owner's credential (archive=..........tengu_bridge_owner_changed......w...archive_status.......h..episode_already_dead6...V.A.[remote-bridge] Proactive forced OAuth refresh threw: ..&....W..[remote-bridge] v2 transport connected.."....]P.bridge_repl_v2_transport_connected..........tengu_bridge_repl_ws_connected..........remint_attempts.:.......[remote-bridge] Rebuild suppressed for teleported session .......m..suppressed_teleported.......l.C.suppressed_owner_changed....*%.refresh_threw.......3"6.updateAccessToken...1..._.>.[remote-bridge] Signed out on this machine under ...........bridge_repl_v2_signed_out........|..recovery_no_oauth_token."...l.A.bridge_repl_v2_remint_loop_entered..6...;|..R.e.m.o.t.e. .C.o.n.t.r.o.l. .s.e.r.v.e.r. .u.n.r.e.a.c.h.a.b.l.e. ..  .r.e.t.r.y.i.n.g. .(.a.t.t.e.m.p.t. .	....B..m elapsed.......[G..Session teleported to cloud.%.....W.bridge_repl_v2_remint_loop_teleported...#.......bridge_repl_v2_remint_loop_no_oauth.........remint_loop.-....g..[remote-bridge] Re-mint loop exhausted (code ........X[. unreachable attempts, .$.......bridge_repl_v2_remint_loop_exhausted2....u..[remote-bridge] Re-mint loop OAuth refresh threw: ..o...I.`.[.r.
+
+## unique-in-248-window tengu_bridge_repl_ws_connected #0 n=12
+- =!0;if(L){if(P!==void 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&
+- if(P!==void 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!
+- d 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=
+- "Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,
+- eleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.
+- to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0)
+- }else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==vo
+- !==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&
+- &!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G
+- V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else
+- $r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else if(P!==vo
+- P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else if(P!==void 0&&a&&!
+
+# -- "[bridge:repl] Capped initial flush" code248=0 code247=0
+# -- "[remote-bridge] v2 transport connected" code248=1 code247=2
+## #31 248 [remote-bridge] v2 transport connected #0 @198351971
+ failed: ${l(P)}`,S="refresh_rebuild_failed",w="terminal",E={leg:"bad",code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void 0;let L=k;if(lb(e))L=!0;if(L){if(P!==void 0&&!m)G("Session teleported to cloud")}else if(P!==void 0&&!a&&!m&&!V){let ae=$r(P.code,P.cause,P.detail,!0);if(d!==void 0&&!ae&&!m&&!ce)G(d,w)}else if(P!==void 0&&a&&!m){if(gn(P.code)&&!t)Se(he[P.code].recoveredCode)}else if(d!==void 0&&!m){if(G(d,w),S!==void 0&&S!=="refresh_credentials_rejected"&&!t)X(S)}}})()},label:"remote"});if(tr.scheduleFromExpiresIn(p,H.expires_in),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=voi
+
+- enclosing 248 fn=fn @198351726
+## #31 248-fn fn near [remote-bridge] v2 transport connected @198351726
+len=1918 sha=6639d1c05696f53b exactOther=0
+function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=void 0})}function r(o){OKn(o,cr,ji,(t)=>{if(Pnt(t,"bridge"))dr.noteActivity();return Hn?.(t)},St?(t)=>{if(St(t)){let a=t.response.subtype==="success"&&!!t.response.response;if(a)dr.noteActivity();ot(t.response.request_id,a),ye("running")}}:void 0,(t)=>{if(Rnt(t))dr.noteActivity();LKn(t,{transport:C,sessionId:p,onInterrupt:Ln,onStopTask:Gn,getInitializeState:Wn,getCommands:Kn,getPendingPrompts:xi,onDialogKindsDeclared:Vn,onClientInitialize:zn,onSetModel:Yn,onSetMaxThinkingTokens:Jn,onSetPermissionMode:Xn,onApplyFlagSettings:Zn,onRenameSession:ei,onSetColor:ri,onFileSuggestions:ti,onReadFile:ni,onGetWorkspaceDiff:ii,onGetContextUsage:oi,onGetUsage:si,onMcpAuthenticate:ai,onMcpOauthCallbackUrl:di,onMcpReconnect:ci,onMcpStatus:li,onMcpSetServers:Ii,outboundOnly:hr})})}}
+
+## #31 247 [remote-bridge] v2 transport connected #0 @202493008
+epl_v2_grouping_dropped.Q....<..[bridge:core] persisted Project no longer available; recreated session outside it... .....N.[remote-bridge] Created session .....t..bridge_repl_v2_session_created......Y..confirmChanged..C...C@..[remote-bridge] Signed-in account changed under teleported session .........). ..  .l.a.t.c.h.e.d. .o.n.l.y.0.......[remote-bridge] Signed-in account changed under ....O._., episode already dead..........). ..  .s.t.o.p.p.i.n.g......F..bridge_repl_v2_owner_changed....b3..account_changed.........skipped_host_owned..=...L\..[remote-bridge] Owner-changed settle left host-owned session ........5v. unarchived.........[remote-bridge] Owner-changed settle archived ..&...8.W. with the owner's credential (archive=..........tengu_bridge_owner_changed......w...archive_status.......h..episode_already_dead6...V.A.[remote-bridge] Proactive forced OAuth refresh threw: ..&....W..[remote-bridge] v2 transport connected.."....]P.bridge_repl_v2_transport_connected..........tengu_bridge_repl_ws_connected..........remint_attempts.:.......[remote-bridge] Rebuild suppressed for teleported session .......m..suppressed_teleported.......l.C.suppressed_owner_changed....*%.refresh_threw.......3"6.updateAccessToken...1..._.>.[remote-bridge] Signed out on this machine under ...........bridge_repl_v2_signed_out........|..recovery_no_oauth_token."...l.A.bridge_repl_v2_remint_loop_entered..6...;|..R.e.m.o.t.e. .C.o.n.t.r.o.l. .s.e.r.v.e.r. .u.n.r.e.a.c.h.a.b.l.e. ..  .r.e.t.r.y.i.n.g. .(.a.t.t.e.m.p.t. .	....B..m elapsed.......[G..Session teleported to cloud.%.....W.bridge_repl_v2_remint_loop_teleported...#.......bridge_repl_v2_remint_loop_no_oauth.........remint_loop.-....g..[remote-bridge] Re-mint loop exhausted (code ........X[. unreachable attempts, .$.......bridge_repl_v2_r
+
+## unique-in-248-window [remote-bridge] v2 transport connected #0 n=12
+-  failed: ${l(P)}`,S="refresh_rebuild_failed",w="terminal",E={leg:"bad",code:"reb
+- {l(P)}`,S="refresh_rebuild_failed",w="terminal",E={leg:"bad",code:"rebuild_threw
+- "refresh_rebuild_failed",w="terminal",E={leg:"bad",code:"rebuild_threw"}}finally
+- ebuild_failed",w="terminal",E={leg:"bad",code:"rebuild_threw"}}finally{if(E!==vo
+- led",w="terminal",E={leg:"bad",code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&
+- rminal",E={leg:"bad",code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);i
+- {leg:"bad",code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))r
+- ,code:"rebuild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let 
+- uild_threw"}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void
+- "}}finally{if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void 0;let L=k
+- {if(E!==void 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void 0;let L=k;if(lb(e))
+- id 0&&!t&&!m)nt(E);if(!Wt(o))return;let P=W;W=void 0;let L=k;if(lb(e))L=!0;if(L)
+
+# -- "[remote-bridge] flushHistory failed" code248=1 code247=2
+## #31 248 [remote-bridge] flushHistory failed #0 @198352337
+.expires_in),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=void 0})}function r(o){OKn(o,cr,ji,(t)=>{if(Pnt(t,"bridge"))dr.noteActivity();return Hn?.(t)},St?(t)=>{if(St(t)){let a=t.response.subtype==="success"&&!!t.response.respo
+
+- enclosing 248 fn=fn @198351726
+## #31 248-fn fn near [remote-bridge] flushHistory failed @198351726
+len=1918 sha=6639d1c05696f53b exactOther=0
+function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=void 0,Ve=!1,zr(),te=void 0,pe.size>0){let o=[...pe.values()].findLast((t)=>t.details!==void 0);ye("requires_action",o?.details),Ze.clear()}if(n("[remote-bridge] v2 transport connected"),Y("info","bridge_repl_v2_transport_connected"),Mt){let o=C.getInternalEventWriter?.(),t=C.getInternalEventReaders?.();if(o&&t)Mt(o,t)}if(s("tengu_bridge_repl_ws_connected",{v2:!0,cause:c(jr),...st>0&&{remint_attempts:st}}),!Fe&&Ye())Fe=!0,b("bridge_presence");if(!rt&&fe&&fe.length>0&&!Vr){rt=!0;let o=C;Ki(fe).catch((t)=>n(`[remote-bridge] flushHistory failed: ${t}`)).finally(()=>{if(C!==o||m||x||ce)return;_r(),Ar()})}else if((ge.active||de.active)&&!ce)Ke(),_r(),Ar();else if(!ge.active)Ar()}),C.setOnData((o)=>{if(x)return;if(Ne!==void 0){Ne.push(o);return}if(!Je()){r(o);return}Ne=[o],e()}),C.setOnClose($r);function e(){Qe("owner_changed").then((o)=>{let t=Ne;if(t===void 0)return;if(o||m){Ne=void 0;return}let a=t.length;while(t.length>0){if(x||m){Ne=void 0;return}if(a===0&&Je()){e();return}a=Math.max(0,a-1);let d=t.shift();if(d!==void 0)r(d)}Ne=void 0})}function r(o){OKn(o,cr,ji,(t)=>{if(Pnt(t,"bridge"))dr.noteActivity();return Hn?.(t)},St?(t)=>{if(St(t)){let a=t.response.subtype==="success"&&!!t.response.response;if(a)dr.noteActivity();ot(t.response.request_id,a),ye("running")}}:void 0,(t)=>{if(Rnt(t))dr.noteActivity();LKn(t,{transport:C,sessionId:p,onInterrupt:Ln,onStopTask:Gn,getInitializeState:Wn,getCommands:Kn,getPendingPrompts:xi,onDialogKindsDeclared:Vn,onClientInitialize:zn,onSetModel:Yn,onSetMaxThinkingTokens:Jn,onSetPermissionMode:Xn,onApplyFlagSettings:Zn,onRenameSession:ei,onSetColor:ri,onFileSuggestions:ti,onReadFile:ni,onGetWorkspaceDiff:ii,onGetContextUsage:oi,onGetUsage:si,onMcpAuthenticate:ai,onMcpOauthCallbackUrl:di,onMcpReconnect:ci,onMcpStatus:li,onMcpSetServers:Ii,outboundOnly:hr})})}}
+
+## #31 247 [remote-bridge] flushHistory failed #0 @202523084
+ten command no longer parses as a sed edit; denying instead of showing a stale preview.......<..The hook rewrote this sed edit into a command that cannot be previewed as a file edit. Re-run the rewritten command directly if intended....9.....m.Sed-edit permission reprompt: descriptor rebuild failed (...2....B..); denying instead of executing a stale simulation../.....6.Failed to preview the hook-rewritten sed edit: .k.......The permission request could not be delivered to the team lead (mailbox write failed). Retry the tool call......
+... lifecycle aborted..&.....U. current work aborted (Escape pressed).......E..createCodeSession...........getPendingPrompts.......h'..onMcpSetServers.%...6.{.[remote-bridge] flushHistory failed: ...3.......[remote-bridge] Proactive refresh skipped: session .....go..stopped for an owner change.F.....	.[remote-bridge] Recovery already in flight, skipping proactive refresh..D...FUx.[remote-bridge] Proactive refresh suppressed for teleported session "....";.fetchRemoteCredentials (proactive)..~.......[.r.e.m.o.t.e.-.b.r.i.d.g.e.]. .P.r.o.a.c.t.i.v.e. .c.y.c.l.e.:. .b.e.a.r.e.r. .a.l.r.e.a.d.y. .r.e.j.e.c.t.e.d. .b.y. ./.b.r.i.d.g.e. ..  .r.e.t.r.y.i.n.g. .t.h.e. .f.o.r.c.e.d. .O.A.u.t.h. .r.e.f.r.e.s.h. .w.i.t.h.o.u.t. .r.e.-.r.e.g.i.s.t.e.r.i.n.g.e...{'..[.r.e.m.o.t.e.-.b.r.i.d.g.e.]. .P.r.o.a.c.t.i.v.e. ./.b.r.i.d.g.e. .r.e.-.m.i.n.t. .r.e.j.e.c.t.
+
+## unique-in-248-window [remote-bridge] flushHistory failed #0 n=12
+- .expires_in),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed"
+- n),ur=ee?.subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;f
+- subscribe(()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn
+- ()=>{Qe("owner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOn
+- wner_changed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()
+- ed")}),Je())Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)re
+- ))Qe("owner_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(cl
+- r_changed");let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout
+- );let Ne;function fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,
+- unction fn(){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,
+- (){C.setOnConnect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=vo
+- Connect(()=>{if(x)return;if(clearTimeout(rr),We=0,Re=void 0,V=!1,ze=void 0,Oe=vo
+
+# -- "[RemoteSessionManager] Connected" code248=1 code247=2
+## #31 248 [RemoteSessionManager] Connected #0 @201943709
+tAMessage=!1;lastHeld={issued:Promise.resolve(),posted:Promise.resolve()};pendingInterrupt=null;constructor(e,t){this.config=e;this.callbacks=t;if(e.homeSeed!==void 0&&e.homeSeedHoldsFirstSend!==!1)this.gateSendsOnSettings(e.homeSeed);if(e.withheldInitialPrompt!==void 0){let o=e.withheldInitialPrompt;queueMicrotask(()=>void this.sendWithheldInitialPrompt(o))}else if(e.initialPromptUuid!==void 0)e.dirSync?.sync.messageSent(e.initialPromptUuid)}connect(){n(`[RemoteSessionManager] Connecting to session ${this.config.sessionId}`);let e={onMessage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null;this.resendUndeliveredResponses(),this.workerSeenThisConnection=!1,this.callbacks.onConnected?.()},onClose:(t)=>{if(n("[RemoteSessionManager] Disconnected"),this.client?.isRevivable())this.giveUpUndeliveredResponses();else this.dropUndeliveredResponses();this.callbacks.onDisconnected?.(t)},onReconnecting:()=>{this.workerSeenThisConnection=!1,n("[RemoteSessionManager] Reconnecting"),this.callbacks.onRec
+
+- enclosing 248 fn=iJe @201941220
+## #31 248-fn iJe near [RemoteSessionManager] Connected @201941220
+len=1261 sha=fc55fbea886253c0 exactOther=0
+function iJe(e,t){switch(e){case"permission":return"A permission answer you gave could not be delivered to the cloud session, which may still be waiting for it. If the session looks stuck, interrupt it and retry.";case"dialog":return"A dialog answer you gave could not be delivered to the cloud session, which may still be waiting for it. If the session looks stuck, interrupt it and retry.";case"hook":return t==="overtaken"?"A hook's decision from this machine did not reach the cloud session before it stopped waiting for it: if the hook's deadline passed the tool call it was judging may have run without it; if the turn was interrupted, nothing ran.":"A hook's decision from this machine could not be delivered to the cloud session, which waits for it until the hook's deadline and then proceeds without it. Interrupt the session if that tool call must not run.";case"tool":return t==="overtaken"?"The result of work this machine did for the cloud session (a command it ran, or files it synced) did not reach the session before it stopped waiting for it.":"The result of work this machine did for the cloud session (a command it ran, or files it synced) could not be delivered; the session waits for it until its deadline and then carries on without it."}}
+
+## #31 247 [RemoteSessionManager] Connected #0 @197438256
+s.h.i.n.g. .+. .r.e.t.r.y...C....'..[.S.e.s.s.i.o.n.s.V.2.C.l.i.e.n.t.]. .u.n.t.r.u.s.t.e.d._.d.e.v.i.c.e. .o.n. .P.O.S.T. ..  .r.e.-.e.n.r.o.l.l.e.d.,. .r.e.t.r.y.i.n.g...)....4..[SessionsV2Client] POST /events returned ........... (session not active)..."...%...remote_send_event_session_inactive......y...remote_send_event_http_error".......remote_send_event_untrusted_device..(...E...[SessionsV2Client] POST /events failed:  ...k...remote_send_event_request_failed.....L..anthropic-client-platform...........x-organization-uuid.1...6...[SessionsV2Client] Liveness timeout, reconnecting... ....l..[RemoteSessionManager] Connected#....v..[RemoteSessionManager] Reconnecting.6...	KS.[RemoteSessionManager] The service reports the worker ......@bR.in an unknown state.....~jJ.onWorkerGone).......[RemoteSessionManager] Catch-up truncated...%...I...[RemoteSessionManager] Stream error: .........$.keepStreamRedialling2.....w.[RemoteSessionManager] Sending message to session ..'...,I..[RemoteSessionManager] Send to session ......... threw: ........remote_send_message.....t.<.remote_send_message_threw...8....2/.[RemoteSessionManager] Message withheld by a send gate: ........remote_send_message_canc
+
+## unique-in-248-window [RemoteSessionManager] Connected #0 n=12
+- tAMessage=!1;lastHeld={issued:Promise.resolve(),posted:Promise.resolve()};pendin
+- !1;lastHeld={issued:Promise.resolve(),posted:Promise.resolve()};pendingInterrupt
+- d={issued:Promise.resolve(),posted:Promise.resolve()};pendingInterrupt=null;cons
+- Promise.resolve(),posted:Promise.resolve()};pendingInterrupt=null;constructor(e,
+- solve(),posted:Promise.resolve()};pendingInterrupt=null;constructor(e,t){this.co
+- sted:Promise.resolve()};pendingInterrupt=null;constructor(e,t){this.config=e;thi
+- se.resolve()};pendingInterrupt=null;constructor(e,t){this.config=e;this.callback
+- ()};pendingInterrupt=null;constructor(e,t){this.config=e;this.callbacks=t;if(e.h
+- gInterrupt=null;constructor(e,t){this.config=e;this.callbacks=t;if(e.homeSeed!==
+- =null;constructor(e,t){this.config=e;this.callbacks=t;if(e.homeSeed!==void 0&&e.
+- tructor(e,t){this.config=e;this.callbacks=t;if(e.homeSeed!==void 0&&e.homeSeedHo
+- t){this.config=e;this.callbacks=t;if(e.homeSeed!==void 0&&e.homeSeedHoldsFirstSe
+
+# -- "[RemoteSessionManager] Reconnecting" code248=2 code247=4
+## #31 248 [RemoteSessionManager] Reconnecting #0 @201944251
+essage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null;this.resendUndeliveredResponses(),this.workerSeenThisConnection=!1,this.callbacks.onConnected?.()},onClose:(t)=>{if(n("[RemoteSessionManager] Disconnected"),this.client?.isRevivable())this.giveUpUndeliveredResponses();else this.dropUndeliveredResponses();this.callbacks.onDisconnected?.(t)},onReconnecting:()=>{this.workerSeenThisConnection=!1,n("[RemoteSessionManager] Reconnecting"),this.callbacks.onReconnecting?.()},onOwnRequestEchoed:(t,o)=>{let r=this.pendingControlRequests.get(t);if(r?.onEchoed)this.pendingControlRequests.set(t,{...r,onEchoed:void 0}),r.onEchoed(o)},onWorkerConnectionStatus:(t)=>{if(n(`[RemoteSessionManager] The service reports the worker ${t==="connected"||t==="disconnected"?t:"in an unknown state"}`),t==="connected")this.noteWorkerLive();else if(t==="disconnected")this.workerSeenThisConnection=!1,this.callbacks.onWorkerGone?.()},onCatchUpTruncated:()=>{n("[RemoteSessionManager] Catch-up truncated"),this.callback
+
+- enclosing 248 fn=iJe @201941220
+## #31 248-fn iJe near [RemoteSessionManager] Reconnecting @201941220
+len=1261 sha=fc55fbea886253c0 exactOther=0
+function iJe(e,t){switch(e){case"permission":return"A permission answer you gave could not be delivered to the cloud session, which may still be waiting for it. If the session looks stuck, interrupt it and retry.";case"dialog":return"A dialog answer you gave could not be delivered to the cloud session, which may still be waiting for it. If the session looks stuck, interrupt it and retry.";case"hook":return t==="overtaken"?"A hook's decision from this machine did not reach the cloud session before it stopped waiting for it: if the hook's deadline passed the tool call it was judging may have run without it; if the turn was interrupted, nothing ran.":"A hook's decision from this machine could not be delivered to the cloud session, which waits for it until the hook's deadline and then proceeds without it. Interrupt the session if that tool call must not run.";case"tool":return t==="overtaken"?"The result of work this machine did for the cloud session (a command it ran, or files it synced) did not reach the session before it stopped waiting for it.":"The result of work this machine did for the cloud session (a command it ran, or files it synced) could not be delivered; the session waits for it until its deadline and then carries on without it."}}
+
+## #31 247 [RemoteSessionManager] Reconnecting #0 @197435140
+s. .n.o. .l.o.n.g.e.r. .p.e.n.d.i.n.g. ..  .a.n.s.w.e.r. .n.o.t. .s.e.n.t...&.......[RemoteSessionManager] served request ..'...n... .i.s. .n.o. .l.o.n.g.e.r. .p.e.n.d.i.n.g. ..  .r.e.s.u.l.t. .n.o.t. .s.e.n.t...........cancelled by the worker.....Qx..dropped with the stream.....:.A.onServedChannelRequestCancelled.........onWorkerLive/...e.M.[RemoteSessionManager] Sending interrupt signal.....+...remote_control_rpc..2.......[RemoteSessionManager] Cancelling control request ..$.......[RemoteSessionManager] Disconnecting#...U...[RemoteSessionManager] Disconnected.....`...afterDisconnect.....4...[RemoteSessionManager] Reconnecting SSE stream......$.0.unreadable block (..........failureAnsweredAtMs.C....(H.Cannot destructure property 'released' from null or undefined value.?.....b.Cannot destructure property 'done' from null or undefined value.	.....>.getReader...
+....}#.Uint8Array..........TextDecoder.....9@s.decode..>.......[RemoteSessionManager] send gate failed, message goes anyway: ..D...)...Cannot destructure property 'onRelease' from null or undefined valueF....*a.Cannot destructure property 'accessToken' from null or undefined value..
+...d.$.sessionUrl......*.C./events......{j.
+
+## unique-in-248-window [RemoteSessionManager] Reconnecting #0 n=12
+- essage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager]
+- o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected
+- andleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.co
+- ge(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSy
+- Connected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.a
+- ()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnec
+- emoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(le
+- onManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of thi
+-  Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undelive
+- "),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredRespons
+- nfig.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values(
+- nc?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.fai
+
+## #31 248 [RemoteSessionManager] Reconnecting #1 @201970571
+?.sync.afterDisconnect(),this.pendingPermissionRequests.clear(),this.pendingDialogRequests.clear();for(let t of this.pendingForwardedHooks)this.callbacks.onForwardedHookCancelled?.(t,"disconnected");this.pendingForwardedHooks.clear();for(let t of[...this.pendingServedRequests.keys()])this.retireServedRequest(t,"disconnected");this.workerSeenThisConnection=!1;for(let t of this.pendingControlRequests.values())clearTimeout(t.timer),t.removeAbortListener?.(),t.reject(Error("[RemoteSessionManager] Disconnected"));this.pendingControlRequests.clear(),this.pendingModelSwitchIds.clear()}reconnect(){n("[RemoteSessionManager] Reconnecting SSE stream"),this.client?.reconnect()}}function wt(e){if(typeof e!=="object"||e===null||!("type"in e)||e.type!=="synced_file_changed")return null;let t="path"in e?e.path:void 0;if(typeof t!=="string")return{path:null};let o=oVn(t);return o===null?null:{path:o}}function kt(e){return typeof e.callback_id==="string"&&(typeof e.issued_at==="number"||typeof e.deadline_ms==="number"||nF(e.callback_id)!==null)}function Ct(e){return yt.includes(e.subtype)}function Pe(e){return e==="tool"?{timeoutMs:Rt}:{}}function bt(e){let t=Buffer.byteLength(S(e),"utf8");if(t<=EEt
+
+- enclosing 248 fn= @-1
+## #31 247 [RemoteSessionManager] Reconnecting #1 @197438296
+e.s.s.i.o.n.s.V.2.C.l.i.e.n.t.]. .u.n.t.r.u.s.t.e.d._.d.e.v.i.c.e. .o.n. .P.O.S.T. ..  .r.e.-.e.n.r.o.l.l.e.d.,. .r.e.t.r.y.i.n.g...)....4..[SessionsV2Client] POST /events returned ........... (session not active)..."...%...remote_send_event_session_inactive......y...remote_send_event_http_error".......remote_send_event_untrusted_device..(...E...[SessionsV2Client] POST /events failed:  ...k...remote_send_event_request_failed.....L..anthropic-client-platform...........x-organization-uuid.1...6...[SessionsV2Client] Liveness timeout, reconnecting... ....l..[RemoteSessionManager] Connected#....v..[RemoteSessionManager] Reconnecting.6...	KS.[RemoteSessionManager] The service reports the worker ......@bR.in an unknown state.....~jJ.onWorkerGone).......[RemoteSessionManager] Catch-up truncated...%...I...[RemoteSessionManager] Stream error: .........$.keepStreamRedialling2.....w.[RemoteSessionManager] Sending message to session ..'...,I..[RemoteSessionManager] Send to session ......... threw: ........remote_send_message.....t.<.remote_send_message_threw...8....2/.[RemoteSessionManager] Message withheld by a send gate: ........remote_send_message_cancelled...........remote_send_message_with
+
+## unique-in-248-window [RemoteSessionManager] Reconnecting #1 n=12
+- ?.sync.afterDisconnect(),this.pendingPermissionRequests.clear(),this.pendingDial
+- erDisconnect(),this.pendingPermissionRequests.clear(),this.pendingDialogRequests
+- ct(),this.pendingPermissionRequests.clear(),this.pendingDialogRequests.clear();f
+- pendingPermissionRequests.clear(),this.pendingDialogRequests.clear();for(let t o
+- missionRequests.clear(),this.pendingDialogRequests.clear();for(let t of this.pen
+- uests.clear(),this.pendingDialogRequests.clear();for(let t of this.pendingForwar
+- r(),this.pendingDialogRequests.clear();for(let t of this.pendingForwardedHooks)t
+- endingDialogRequests.clear();for(let t of this.pendingForwardedHooks)this.callba
+- ogRequests.clear();for(let t of this.pendingForwardedHooks)this.callbacks.onForw
+- .clear();for(let t of this.pendingForwardedHooks)this.callbacks.onForwardedHookC
+- or(let t of this.pendingForwardedHooks)this.callbacks.onForwardedHookCancelled?.
+- f this.pendingForwardedHooks)this.callbacks.onForwardedHookCancelled?.(t,"discon
+
+# -- "tengu_bridge_reconnected" code248=1 code247=2
+## #31 248 tengu_bridge_reconnected #0 @205348548
+(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}while(!O.aborted){let u=Kre();try{let j=R.size>=e.maxSessions?u.multisession_poll_interval_ms_at_capacity:R.size>0?u.multisession_poll_interval_ms_partial_capacity:u.multisession_poll_interval_ms_not_at_capacity,M=await d.pollForWork(t,Q,O,u.reclaim_older_than_ms,j);if(ue!==null||Oe!==null){let A=Date.now()-(ue??Oe??Date.now());i.logReconnected(A),n(`[bridge:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1,s("tengu_bridge_env_reregister",{attempt:G,outcome:v("recovered")}),b("bridge_env_reregister");if(G=0,!M){if(U.size>0||K.size>0)await Je();if(R.size>=e.maxSessions){let ge=u.multisession_poll_interval_ms_at_capacity;if(u.non_exclusive_heartbeat_interval_ms>0){s("tengu_bridge_heartbeat_mode_entered",{active_sessions:R.size,heartbeat_interval_ms:u.non_exclusive_heartbeat_interval_ms});let Ee=ge>0?Date.now()+ge:null,Ie="ok",ze=0;while(!O.aborted&&R.size>=e.maxSessions&&(Ee===null||Date.now()<Ee)){let Be=Kre();if(Be.non_exclusive_heartbeat_interval_ms<=0)break;let Qe=Ae.signal();if(Ie=await xe(),Ie==="auth_failed"||Ie==="fatal"){Qe.cleanup();break}ze++,await ne(Be.non_exclusive_heartbeat_in
+
+- enclosing 248 fn=dt @205347718
+## #31 248-fn dt near tengu_bridge_reconnected @205347718
+len=431 sha=56035e9e70c1c40c exactOther=0
+function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}
+
+## #31 247 tengu_bridge_reconnected #0 @205764364
+environment !.....'.[bridge:poll] Re-registration of ........	..failed transiently..........tengu_bridge_env_reregister.........register_rejected........B..register_transient......z.S.bridge_env_reregister...'....fO.[bridge:poll] Re-registration returned .......(.; sessions attached to ....._%G. cannot be reconnected......l...reregistered.....Z..bridge_env_reregistered.........[bridge:poll] Environment ..$....... re-registered in place; re-queuing ....*... session(s)......1..reuseEnvironmentId.......Y..environmentSecret.......==..pendingRequeues.....IJ..[bridge:poll] reconnectSession(.....8...) after re-registration +.......[bridge:work] Starting poll loop spawnMode=....xS.. maxSessions=.......,... environmentId=.........bridge_loop_started. .......[bridge:poll] Reconnected after ....*9|.tengu_bridge_reconnected#....n..tengu_bridge_heartbeat_mode_entered.........capacity_changed....Bw..poll_due........config_disabled.".....,.tengu_bridge_heartbeat_mode_exited..'... ...[bridge:poll] Heartbeat poll_due after .(....Y.. .c.y.c.l.e.s. ..  .f.a.l.l.i.n.g. .t.h.r.o.u.g.h. .t.o. .p.o.l.l.F.o.r.W.o.r.k.*.../Oe.[bridge:work] Previously completed workId=..2....... was re-queued by the server, handling as new work..0.......[bridge:work] Skipping already-completed workId=......+. state=.(.......Failed to decode work secret for workId=........tengu_bridge_work_secret_failed.....z...healthcheck."....1Q.[bridge:work] Healthcheck received..........Healthcheck received........Invalid session_id received: ...:....I..[bridge:work] Updated access token for existing sessionId=......td/. workId=
+
+## unique-in-248-window tengu_bridge_reconnected #0 n=12
+- (i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u
+- us(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the e
+- u} ${I(u,"session")} ended while this machine was offline \u2014 the environment
+- session")} ended while this machine was offline \u2014 the environment was clean
+-  ended while this machine was offline \u2014 the environment was cleaned up on t
+- le this machine was offline \u2014 the environment was cleaned up on the server 
+- chine was offline \u2014 the environment was cleaned up on the server and can't 
+- offline \u2014 the environment was cleaned up on the server and can't be resumed
+- 2014 the environment was cleaned up on the server and can't be resumed.`:"This e
+- nvironment was cleaned up on the server and can't be resumed.`:"This environment
+-  was cleaned up on the server and can't be resumed.`:"This environment was clean
+- ed up on the server and can't be resumed.`:"This environment was cleaned up whil
+
+# -- "[bridge:poll] Reconnected after" code248=1 code247=2
+## #31 248 [bridge:poll] Reconnected after #0 @205348502
+e()}}if(!p)Ge();function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}while(!O.aborted){let u=Kre();try{let j=R.size>=e.maxSessions?u.multisession_poll_interval_ms_at_capacity:R.size>0?u.multisession_poll_interval_ms_partial_capacity:u.multisession_poll_interval_ms_not_at_capacity,M=await d.pollForWork(t,Q,O,u.reclaim_older_than_ms,j);if(ue!==null||Oe!==null){let A=Date.now()-(ue??Oe??Date.now());i.logReconnected(A),n(`[bridge:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1,s("tengu_bridge_env_reregister",{attempt:G,outcome:v("recovered")}),b("bridge_env_reregister");if(G=0,!M){if(U.size>0||K.size>0)await Je();if(R.size>=e.maxSessions){let ge=u.multisession_poll_interval_ms_at_capacity;if(u.non_exclusive_heartbeat_interval_ms>0){s("tengu_bridge_heartbeat_mode_entered",{active_sessions:R.size,heartbeat_interval_ms:u.non_exclusive_heartbeat_interval_ms});let Ee=ge>0?Date.now()+ge:null,Ie="ok",ze=0;while(!O.aborted&&R.size>=e.maxSessions&&(Ee===null||Date.now()<Ee)){let Be=Kre();if(Be.non_exclusive_heartbeat_interval_ms<=0)break;let Qe=Ae.signal();if(Ie=await xe(),Ie==="auth_failed"||Ie==="fatal"){Qe.cleanup();bre
+
+- enclosing 248 fn=dt @205347718
+## #31 248-fn dt near [bridge:poll] Reconnected after @205347718
+len=431 sha=56035e9e70c1c40c exactOther=0
+function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}
+
+## #31 247 [bridge:poll] Reconnected after #0 @205764324
+poll] Poll returned 404; re-registering environment !.....'.[bridge:poll] Re-registration of ........	..failed transiently..........tengu_bridge_env_reregister.........register_rejected........B..register_transient......z.S.bridge_env_reregister...'....fO.[bridge:poll] Re-registration returned .......(.; sessions attached to ....._%G. cannot be reconnected......l...reregistered.....Z..bridge_env_reregistered.........[bridge:poll] Environment ..$....... re-registered in place; re-queuing ....*... session(s)......1..reuseEnvironmentId.......Y..environmentSecret.......==..pendingRequeues.....IJ..[bridge:poll] reconnectSession(.....8...) after re-registration +.......[bridge:work] Starting poll loop spawnMode=....xS.. maxSessions=.......,... environmentId=.........bridge_loop_started. .......[bridge:poll] Reconnected after ....*9|.tengu_bridge_reconnected#....n..tengu_bridge_heartbeat_mode_entered.........capacity_changed....Bw..poll_due........config_disabled.".....,.tengu_bridge_heartbeat_mode_exited..'... ...[bridge:poll] Heartbeat poll_due after .(....Y.. .c.y.c.l.e.s. ..  .f.a.l.l.i.n.g. .t.h.r.o.u.g.h. .t.o. .p.o.l.l.F.o.r.W.o.r.k.*.../Oe.[bridge:work] Previously completed workId=..2....... was re-queued by the server, handling as new work..0.......[bridge:work] Skipping already-completed workId=......+. state=.(.......Failed to decode work secret for workId=........tengu_bridge_work_secret_failed.....z...healthcheck."....1Q.[bridge:work] Healthcheck received..........Healthcheck received........Invalid session_id received: ...:....I..[bridge:work] Updated access token f
+
+## unique-in-248-window [bridge:poll] Reconnected after #0 n=12
+- e()}}if(!p)Ge();function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"sess
+- )Ge();function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} end
+- tion dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while t
+- let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machin
+- ize;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offl
+- ogStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014
+- >0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the envir
+- {I(u,"session")} ended while this machine was offline \u2014 the environment was
+- ion")} ended while this machine was offline \u2014 the environment was cleaned u
+- ed while this machine was offline \u2014 the environment was cleaned up on the s
+- his machine was offline \u2014 the environment was cleaned up on the server and 
+- e was offline \u2014 the environment was cleaned up on the server and can't be r
+
+# -- "tengu_pending_action_republished" code248=2 code247=3
+## #31 248 tengu_pending_action_republished #0 @180649367
+auth_success","tengu_oauth_token_refresh_failure","tengu_oauth_token_refresh_success","tengu_oauth_token_refresh_lock_acquiring","tengu_oauth_token_refresh_lock_acquired","tengu_oauth_token_refresh_starting","tengu_oauth_token_refresh_completed","tengu_oauth_token_refresh_lock_releasing","tengu_oauth_token_refresh_lock_released","tengu_ptl_surfaced_to_user","tengu_query_error","tengu_remote_tool_targets","tengu_sdk_oauth_refresh_unfulfilled","tengu_rc_pill_clicked","tengu_ccr_init_park_report","tengu_pending_action_republished","tengu_resume_interrupted_turn","tengu_resume_parked_permission","tengu_resume_stale_prompt_cancel","tengu_request_user_dialog_implicit_cancel","tengu_request_user_dialog_late_answer","tengu_request_user_dialog_requires_action","tengu_request_user_dialog_response_ignored","tengu_request_user_dialog_timeout","tengu_review_remote_teleport_failed","tengu_supported_dialog_kinds_restored","tengu_sdk_init_handshake","tengu_sdk_mcp_false_unavailable","tengu_sdk_result"
+
+- enclosing 248 fn=C @180646098
+## #31 248-fn C near tengu_pending_action_republished @180646098
+len=68 sha=c6d95d3b6ad68b31 exactOther=0
+function C(){if(u)return;u=setTimeout(()=>{u=null,E()},t()).unref()}
+
+## #31 247 tengu_pending_action_republished #0 @197058220
+son.........total_cost_usd........s.usage...
+....P..modelUsage......'I..permission_denials......H...user_message_uuid...*.....%.The name of the tool requesting permission......G...The input for the tool........y.The unique tool use request ID........B.describe....*W..optional......'.user_temporary..........user_permanent..........user_reject.	...%.L.toolUseID.......Vl".decisionClassification.......KT.getPendingActionDetails......'..control_cancel_request........o.schema......#(..enqueue. .....&.tengu_pending_action_republished.....@..dialog:......7..dialog..
+.......permission......M.%.republishPendingAction.....#.|.survivor_kind...........pending_permission_requests......t..pending_dialog_requests.B....b..Cannot destructure property 'request' from null or undefined value..)....]4.tengu_request_user_dialog_implicit_cancel........9..dialog_kind.	...f...cancelled...*...M\5.tengu_request_user_dialog_response_ignored..Q...C/..Ignoring error-shaped control_response for parked request_user_d
+
+## unique-in-248-window tengu_pending_action_republished #0 n=12
+- auth_success","tengu_oauth_token_refresh_failure","tengu_oauth_token_refresh_suc
+- ss","tengu_oauth_token_refresh_failure","tengu_oauth_token_refresh_success","ten
+- _oauth_token_refresh_failure","tengu_oauth_token_refresh_success","tengu_oauth_t
+- en_refresh_failure","tengu_oauth_token_refresh_success","tengu_oauth_token_refre
+- _failure","tengu_oauth_token_refresh_success","tengu_oauth_token_refresh_lock_ac
+- "tengu_oauth_token_refresh_success","tengu_oauth_token_refresh_lock_acquiring","
+- th_token_refresh_success","tengu_oauth_token_refresh_lock_acquiring","tengu_oaut
+- efresh_success","tengu_oauth_token_refresh_lock_acquiring","tengu_oauth_token_re
+- cess","tengu_oauth_token_refresh_lock_acquiring","tengu_oauth_token_refresh_lock
+- gu_oauth_token_refresh_lock_acquiring","tengu_oauth_token_refresh_lock_acquired"
+- oken_refresh_lock_acquiring","tengu_oauth_token_refresh_lock_acquired","tengu_oa
+- sh_lock_acquiring","tengu_oauth_token_refresh_lock_acquired","tengu_oauth_token_
+
+## #31 248 tengu_pending_action_republished #1 @200588836
+iredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.parse(l):l;this.pendingRequests.delete(o),this.outbound.enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let o=0;for(let{request:r}of Array.from(this.pendingRequests.values())){if(r.request.subtype!=="request_user_dialog"||r.request.dialog_kind!==t)continue;if(!this.cancelDialogByMachine(r.request_id))continue;s("tengu_reques
+
+- enclosing 248 fn=Re @200584746
+## #31 248-fn Re near tengu_pending_action_republished @200584746
+len=114 sha=d5ce4f2820256a2c exactOther=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 247 tengu_pending_action_republished #1 @208794749
+auth_success","tengu_oauth_token_refresh_failure","tengu_oauth_token_refresh_success","tengu_oauth_token_refresh_lock_acquiring","tengu_oauth_token_refresh_lock_acquired","tengu_oauth_token_refresh_starting","tengu_oauth_token_refresh_completed","tengu_oauth_token_refresh_lock_releasing","tengu_oauth_token_refresh_lock_released","tengu_ptl_surfaced_to_user","tengu_query_error","tengu_remote_tool_targets","tengu_sdk_oauth_refresh_unfulfilled","tengu_rc_pill_clicked","tengu_ccr_init_park_report","tengu_pending_action_republished","tengu_resume_interrupted_turn","tengu_resume_parked_permission","tengu_resume_stale_prompt_cancel","tengu_request_user_dialog_implicit_cancel","tengu_request_user_dialog_late_answer","tengu_request_user_dialog_requires_action","tengu_request_user_dialog_response_ignored","tengu_request_user_dialog_timeout","tengu_review_remote_teleport_failed","tengu_supported_dialog_kinds_restored","tengu_sdk_init_handshake","tengu_sdk_mcp_false_unavailable","tengu_sdk_result"
+
+## unique-in-248-window tengu_pending_action_republished #1 n=12
+- iredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){le
+- okAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.requ
+- ;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.reques
+- or(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.sub
+- ]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="ho
+- from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callbac
+- pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callback")continu
+- uests)){let u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(
+- t u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d
+- est.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?
+- t;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.p
+- type!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.parse(l):l;
+
+# -- "getPendingPermissionRequests()" code248=8 code247=8
+## #31 248 getPendingPermissionRequests() #0 @200587966
+Requests.entries())if(!p.forwarded&&p.request.request.subtype==="can_use_tool"&&p.request.request.tool_name===Oi)this.streamCloseInterruptRequestIds.add(d);if(this.streamCloseInterruptRequestIds.size>0)this.onStreamClosedWithParkedQuestion?.()}for(let d of this.pendingRequests.values()){if(l&&this.asksOurHuman(d))continue;d.reject(new Ua("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;f
+
+- enclosing 248 fn=Re @200584746
+## #31 248-fn Re near getPendingPermissionRequests() @200584746
+len=114 sha=d5ce4f2820256a2c exactOther=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 247 getPendingPermissionRequests() #0 @230170332
+gRequests.entries())if(!a.forwarded&&a.request.request.subtype==="can_use_tool"&&a.request.request.tool_name===me)this.streamCloseInterruptRequestIds.add(i);if(this.streamCloseInterruptRequestIds.size>0)this.onStreamClosedWithParkedQuestion?.()}for(let i of this.pendingRequests.values()){if(o&&this.asksOurHuman(i))continue;i.reject(new D("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;f
+
+## unique-in-248-window getPendingPermissionRequests() #0 n=12
+- Requests.entries())if(!p.forwarded&&p.request.request.subtype==="can_use_tool"&&
+- ntries())if(!p.forwarded&&p.request.request.subtype==="can_use_tool"&&p.request.
+- f(!p.forwarded&&p.request.request.subtype==="can_use_tool"&&p.request.request.to
+- rded&&p.request.request.subtype==="can_use_tool"&&p.request.request.tool_name===
+- quest.request.subtype==="can_use_tool"&&p.request.request.tool_name===Oi)this.st
+- est.subtype==="can_use_tool"&&p.request.request.tool_name===Oi)this.streamCloseI
+- e==="can_use_tool"&&p.request.request.tool_name===Oi)this.streamCloseInterruptRe
+- se_tool"&&p.request.request.tool_name===Oi)this.streamCloseInterruptRequestIds.a
+- p.request.request.tool_name===Oi)this.streamCloseInterruptRequestIds.add(d);if(t
+- request.tool_name===Oi)this.streamCloseInterruptRequestIds.add(d);if(this.stream
+- ol_name===Oi)this.streamCloseInterruptRequestIds.add(d);if(this.streamCloseInter
+- Oi)this.streamCloseInterruptRequestIds.add(d);if(this.streamCloseInterruptReques
+
+## #31 248 getPendingPermissionRequests() #1 @200588977
+e({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let o=0;for(let{request:r}of Array.from(this.pendingRequests.values())){if(r.request.subtype!=="request_user_dialog"||r.request.dialog_kind!==t)continue;if(!this.cancelDialogByMachine(r.request_id))continue;s("tengu_request_user_dialog_implicit_cancel",{dialog_ki
+
+- enclosing 248 fn=Re @200584746
+## #31 248-fn Re near getPendingPermissionRequests() @200584746
+len=114 sha=d5ce4f2820256a2c exactOther=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 247 getPendingPermissionRequests() #1 @230171343
+e({type:"control_cancel_request",request_id:n}),s.resolve(i),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,n]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=n;if(!t)return;this.sessionState.republishPendingAction(t),g("tengu_pending_action_republished",{survivor_kind:m(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let n=0;for(let{request:s}of Array.from(this.pendingRequests.values())){if(s.request.subtype!=="request_user_dialog"||s.request.dialog_kind!==t)continue;if(!this.cancelDialogByMachine(s.request_id))continue;g("tengu_request_user_dialog_implicit_cancel",{dialog_ki
+
+## unique-in-248-window getPendingPermissionRequests() #1 n=12
+- e({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republ
+- ontrol_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivi
+- cel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingA
+- t",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){le
+- _id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(le
+- resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of t
+- ,e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publis
+- n e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPending
+- ishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDeta
+- ngPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(thi
+- ction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingR
+- t t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.ha
+
+## #31 248 getPendingPermissionRequests() #2 @200604706
+ssion result. ${Owt}`,T=LKe;else if(k instanceof Ua)T=ibn;else if(Mt(k)&&b.aborted){if(D="Tool permission request aborted",T=hwe,P)GPt(P.logContext,{kind:"turn_aborted"},P.shownAtMs)}return{behavior:"deny",message:D,toolUseID:l,decisionReason:T,decideLocation:"ask-path"}}finally{if(K&&E!==void 0)this.sessionState.notifyNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j)}}}createHookCallback(t,e){let o=this.sdkHostHookGeneration;return{type:"callback",timeout:e,callba
+
+- enclosing 248 fn= @-1
+## #31 247 getPendingPermissionRequests() #2 @230187031
+d permission result. ${je}`,q=lt;else if(_ instanceof D)q=ut;else if(L(_)&&p.aborted){if(R="Tool permission request aborted",q=ue,y)Q(y.logContext,{kind:"turn_aborted"},y.shownAtMs)}return{behavior:"deny",message:R,toolUseID:o,decisionReason:q,decideLocation:"ask-path"}}finally{if(ye&&j!==void 0)this.sessionState.notifyNestedPromptUnblocking(j);if(this.publishedPendingActionDetails.delete(k),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!f())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();p.removeEventListener("abort",he)}}}createHookCallback(t,e){let n=this.sdkHostHookGeneration;return{type:"callback",timeout:e,callba
+
+## unique-in-248-window getPendingPermissionRequests() #2 n=12
+- ssion result. ${Owt}`,T=LKe;else if(k instanceof Ua)T=ibn;else if(Mt(k)&&b.abort
+- lt. ${Owt}`,T=LKe;else if(k instanceof Ua)T=ibn;else if(Mt(k)&&b.aborted){if(D="
+- `,T=LKe;else if(k instanceof Ua)T=ibn;else if(Mt(k)&&b.aborted){if(D="Tool permi
+- se if(k instanceof Ua)T=ibn;else if(Mt(k)&&b.aborted){if(D="Tool permission requ
+- stanceof Ua)T=ibn;else if(Mt(k)&&b.aborted){if(D="Tool permission request aborte
+- a)T=ibn;else if(Mt(k)&&b.aborted){if(D="Tool permission request aborted",T=hwe,P
+- se if(Mt(k)&&b.aborted){if(D="Tool permission request aborted",T=hwe,P)GPt(P.log
+- )&&b.aborted){if(D="Tool permission request aborted",T=hwe,P)GPt(P.logContext,{k
+- ed){if(D="Tool permission request aborted",T=hwe,P)GPt(P.logContext,{kind:"turn_
+- Tool permission request aborted",T=hwe,P)GPt(P.logContext,{kind:"turn_aborted"},
+- ssion request aborted",T=hwe,P)GPt(P.logContext,{kind:"turn_aborted"},P.shownAtM
+- est aborted",T=hwe,P)GPt(P.logContext,{kind:"turn_aborted"},P.shownAtMs)}return{
+
+# -- "republishSurvivingPendingAction" code248=3 code247=4
+## #31 248 republishSurvivingPendingAction #0 @200588651
+est_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.parse(l):l;this.pendingRequests.delete(o),this.outbound.enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPend
+
+- enclosing 248 fn=Re @200584746
+## #31 248-fn Re near republishSurvivingPendingAction @200584746
+len=114 sha=d5ce4f2820256a2c exactOther=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 247 republishSurvivingPendingAction #0 @197054216
+Transport.......m.[.rereadWorkerState.......x...trackResolvedToolUseId......?...flushInternalEvents.....&.D.flushDeliveryAcks.......[.h.flushClientEvents.........n.flushInternalEventsConfirmed....T3..flushSessionState...........prependUserMessage......+.I.isLocallyPrependedMessage.........e.getPendingPermissionRequests........getPendingUserDialogRequests.....]..retireSdkHostHookCallbacks.......$..republishSurvivingPendingAction.....(..cancelPendingUserDialogs....x.r.cancelDialogByMachine........N..setUnexpectedResponseCallback.......do#.setMainLoopLiveness. ...G...ignoresErrorShapedDialogResponse....Jc..asksOurHuman....S...ignoresResponseAtShutdown.......O|..ignoresUnsettlingDeviceResponse......+..hasCanUseToolNameMismatch........6s.injectControlResponse.......S-.setOnControlRequestSent.
+
+## unique-in-248-window republishSurvivingPendingAction #0 n=12
+- est_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,thi
+- ialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredH
+- tireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAns
+- tHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let 
+- acks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(le
+- is.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of A
+- HookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(
+- tion++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendi
+- s.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests
+- ostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r
+- wer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.r
+- e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(
+
+## #31 248 republishSurvivingPendingAction #1 @200604941
+nReason:T,decideLocation:"ask-path"}}finally{if(K&&E!==void 0)this.sessionState.notifyNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j)}}}createHookCallback(t,e){let o=this.sdkHostHookGeneration;return{type:"callback",timeout:e,callback:async(r,u,l)=>{if(o!==this.sdkHostHookGeneration&&this.retiredHostHookAnswer)return this.retiredHostHookAnswer(r);try{return await this.sendRequest({subtype:"hook_callback",callback_id:t,input:r,tool_use_id:u||void 0},cz(),l)}catch(
+
+- enclosing 248 fn= @-1
+## #31 247 republishSurvivingPendingAction #1 @230171017
+est_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[n,s]of Array.from(this.pendingRequests)){let r=s.request.request;if(r.subtype!=="hook_callback")continue;let o=t(r.input),i=s.schema?s.schema.parse(o):o;this.pendingRequests.delete(n),this.outbound.enqueue({type:"control_cancel_request",request_id:n}),s.resolve(i),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,n]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=n;if(!t)return;this.sessionState.republishPendingAction(t),g("tengu_pending_action_republished",{survivor_kind:m(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPend
+
+## unique-in-248-window republishSurvivingPendingAction #1 n=12
+- nReason:T,decideLocation:"ask-path"}}finally{if(K&&E!==void 0)this.sessionState.
+- decideLocation:"ask-path"}}finally{if(K&&E!==void 0)this.sessionState.notifyNest
+- tion:"ask-path"}}finally{if(K&&E!==void 0)this.sessionState.notifyNestedPromptUn
+- path"}}finally{if(K&&E!==void 0)this.sessionState.notifyNestedPromptUnblocking(E
+- ally{if(K&&E!==void 0)this.sessionState.notifyNestedPromptUnblocking(E);if(this.
+- &E!==void 0)this.sessionState.notifyNestedPromptUnblocking(E);if(this.publishedP
+- 0)this.sessionState.notifyNestedPromptUnblocking(E);if(this.publishedPendingActi
+- sionState.notifyNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.
+- notifyNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),
+- edPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPe
+- blocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPendingPermi
+- );if(this.publishedPendingActionDetails.delete(C),this.getPendingPermissionReque
+
+## #31 248 republishSurvivingPendingAction #2 @200609485
+})}catch{return{behavior:"cancelled"}}finally{if(d!==void 0)clearTimeout(d);if(this.publishedPendingActionDetails.delete(r),this.getPendingUserDialogRequests().length===0&&this.getPendingPermissionRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else{if(!this.timedOutUserDialogs.has(r))this.sessionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(t,e,o){let r=new Map,u=async(l)=>{try{let d={type:"addRules",rules:[{toolName:Yr,ruleContent:`domain:${JZ(l)}`}],behavior:"allow",destination:"localSettings"},p=M(nz(PQ),e,o),f;try{f=await this.sendRequest({subtype:"can_use_tool",tool_name:PQ,display_name:nz(PQ),input:{host:l},permission_suggestions:[d],tool_use_id:O(),description:`Allow
+
+- enclosing 248 fn= @-1
+## #31 247 republishSurvivingPendingAction #2 @230187265
+nReason:q,decideLocation:"ask-path"}}finally{if(ye&&j!==void 0)this.sessionState.notifyNestedPromptUnblocking(j);if(this.publishedPendingActionDetails.delete(k),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!f())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();p.removeEventListener("abort",he)}}}createHookCallback(t,e){let n=this.sdkHostHookGeneration;return{type:"callback",timeout:e,callback:async(s,r,o)=>{if(n!==this.sdkHostHookGeneration&&this.retiredHostHookAnswer)return this.retiredHostHookAnswer(s);try{return await this.sendRequest({subtype:"hook_callback",callback_id:t,input:s,tool_use_id:r||void 0},ge(),o)}catch
+
+## unique-in-248-window republishSurvivingPendingAction #2 n=12
+- })}catch{return{behavior:"cancelled"}}finally{if(d!==void 0)clearTimeout(d);if(t
+- eturn{behavior:"cancelled"}}finally{if(d!==void 0)clearTimeout(d);if(this.publis
+- vior:"cancelled"}}finally{if(d!==void 0)clearTimeout(d);if(this.publishedPending
+- elled"}}finally{if(d!==void 0)clearTimeout(d);if(this.publishedPendingActionDeta
+- nally{if(d!==void 0)clearTimeout(d);if(this.publishedPendingActionDetails.delete
+- !==void 0)clearTimeout(d);if(this.publishedPendingActionDetails.delete(r),this.g
+- clearTimeout(d);if(this.publishedPendingActionDetails.delete(r),this.getPendingU
+- ut(d);if(this.publishedPendingActionDetails.delete(r),this.getPendingUserDialogR
+- his.publishedPendingActionDetails.delete(r),this.getPendingUserDialogRequests().
+- hedPendingActionDetails.delete(r),this.getPendingUserDialogRequests().length===0
+- ActionDetails.delete(r),this.getPendingUserDialogRequests().length===0&&this.get
+- ils.delete(r),this.getPendingUserDialogRequests().length===0&&this.getPendingPer
+
+# -- "tengu_reinit_pending_redelivery" code248=1 code247=2
+## #31 248 tengu_reinit_pending_redelivery #0 @201061287
+ssed via --permission-prompt-tool) must be an MCP tool`;throw process.stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.isPromptToolServerSwept()===!0)}return w(E,A,p,k,H,W)}}function l_(e){return Array.isArray(e)&&e.length===1&&e[0]===""}async function u_(e,t,o,d,g,w,E,A,p,k,H,W,C,me){let le;if(o){let be=ru(e,A),Ue=0;if(be)Ue=A.retireSdkHostHookCallbacks(nu),rl(be,(Fe,ct)=>A.createHookCallback(Fe,ct));let x=A.getPendingPermissionRequests(),ee=A.getPendingUserDialogRequests();return s("tengu_reinit_pending_redelivery",{n_pending_permissions:si(x.length),n_pending_dialogs:si(ee.length),host_hooks_resent:e.hooks!==void 0,host_hooks_applied:be!==void 0,n_settled_hook_callbacks:si(Ue)}),d.enqueue({type:"control_response",response:{subtype:"success",request_id:t,response:await Cm(g,Fhe(H()),w,E,W,me(),()=>A.sessionState.getState(),e.hooks?be!==void 0:void 0,k.storageV5),pending_permission_requests:x,pending_user_dialog_requests:ee}}),C1e(W()),{}}if(e.systemPrompt!==void 0)k.systemP
+
+- enclosing 248 fn=u_ @201061035
+## #31 248-fn u_ near tengu_reinit_pending_redelivery @201061035
+len=2951 sha=7e03296ea4df86f0 exactOther=0
+async function u_(e,t,o,d,g,w,E,A,p,k,H,W,C,me){let le;if(o){let be=ru(e,A),Ue=0;if(be)Ue=A.retireSdkHostHookCallbacks(nu),rl(be,(Fe,ct)=>A.createHookCallback(Fe,ct));let x=A.getPendingPermissionRequests(),ee=A.getPendingUserDialogRequests();return s("tengu_reinit_pending_redelivery",{n_pending_permissions:si(x.length),n_pending_dialogs:si(ee.length),host_hooks_resent:e.hooks!==void 0,host_hooks_applied:be!==void 0,n_settled_hook_callbacks:si(Ue)}),d.enqueue({type:"control_response",response:{subtype:"success",request_id:t,response:await Cm(g,Fhe(H()),w,E,W,me(),()=>A.sessionState.getState(),e.hooks?be!==void 0:void 0,k.storageV5),pending_permission_requests:x,pending_user_dialog_requests:ee}}),C1e(W()),{}}if(e.systemPrompt!==void 0)k.systemPrompt=l_(e.systemPrompt)?"":e.systemPrompt;if(e.supportedDialogKinds!==void 0){let be=wB(e.supportedDialogKinds);CGt(be,Im(a.CLAUDE_CODE_WORKER_EPOCH)?"attach_time":"create_time"),A.sessionState.notifyInternalMetadataChanged({declared_dialog_kinds:be})}if(e.perTaskStopAffordance===!0)Ywn(!0);if(e.appendSystemPrompt!==void 0)k.appendSystemPrompt=e.appendSystemPrompt;if(e.planModeInstructions!==void 0)k.planModeInstructions=e.planModeInstructions;if(e.appendSubagentSystemPrompt!==void 0)k.appendSubagentSystemPrompt=e.appendSubagentSystemPrompt;if(e.toolAliases!==void 0)k.toolAliases=e.toolAliases,C((be)=>({...be,toolPermissionContext:{...be.toolPermissionContext,toolAliases:e.toolAliases}}));if(e.excludeDynamicSections!==void 0)k.excludeDynamicSections=e.excludeDynamicSections;if(e.promptSuggestions!==void 0)k.promptSuggestions=e.promptSuggestions;if(e.forwardSubagentText!==void 0)k.forwardSubagentText=e.forwardSubagentText;if(e.skills!==void 0)Ykn(e.skills);let Z;if(e.agents)Z=Tze(e.agents,"flagSettings");let re=()=>Fhe(Z?[...H(),...Z]:H());if(k.agent){let be=jy()===k.agent,Ue=y1(re(),k.agent);if(Ue&&!be){if(H2(Ue.agentType),fre(Ue),!k.systemPrompt&&!Ta(Ue)){let x=Ue.getSystemPrompt();if(x)k.systemPrompt=x}if(!k.userSpecifiedModel&&Ue.model&&Ue.model!=="inherit"){let x=Pt(Ue.model);if(Op(x)||br(x))Su(x);else le=Ue.model}if(Ue.initialPrompt)A.prependUserMessage(Ue.initialPrompt)}else if(Ue?.initialPrompt)A.prependUserMessage(Ue.initialPrompt)}if(e.hooks)rl(e.hooks,(be,Ue)=>A.createHookCallback(be,Ue));if(e.jsonSchema)Dkn(e.jsonSchema);d.enqueue({type:"control_response",response:{subtype:"success",request_id:t,response:await Cm(g,re(),w,E,W,me(),()=>A.sessionState.getState(),e.hooks?!0:void 0,k.storageV5)}});let Oe=W().mcp;if(s("tengu_sdk_init_handshake",{uptime_ms:Math.round(process.uptime()*1000),mcp_client_count:Oe.clients.length,mcp_pending_count:J(Oe.clients,(be)=>be.type==="pending"),mcpNonBlocking:pde(),session_mirror:!!k.sessionMirror}),p){let Ue=CO.getInstance().getStatus();if(Ue)d.enqueue({type:"auth_status",isAuthenticating:Ue.isAuthenticating,output:Ue.output,error:Ue.error,uuid:Kn(),session_id:V()})}return{restrictedAgentModel:le,mergedStdinAgents:Z}}
+
+## #31 247 tengu_reinit_pending_redelivery #0 @205187120
+pTelemetry' from null or undefined value.....#.skipTelemetry.......b.7.willDeferMcp....>...pendingWaitedBefore.........toolsBefore.#.......permissionPromptServerPendingBefore.........permissionPromptWaitedMs......h.pendingWaitedAfter.."...v...permissionPromptServerPendingAfter..
+....<H.toolsAfter........m.Error: MCP tool G....... (passed via --permission-prompt-tool) not found. Available MCP tools: ......H..Error: tool :....\.. (passed via --permission-prompt-tool) must be an MCP tool......'s	.tengu_reinit_pending_redelivery......% .attach_time.....GS..create_time......?..n_pending_permissions.........8.n_pending_dialogs.........9.host_hooks_resent.........8.host_hooks_applied........Z.n_settled_hook_callbacks....9...mcp_client_count........mcp_pending_count.......Wn..session_mirror..........restrictedAgentModel......P.mergedStdinAgents........!F.tengu_ide_rc_auto_enable........startWorkerHomeSeed.......#.home_seed_worker_start_failed.......@...Headless output write failed during shut
+
+## unique-in-248-window tengu_reinit_pending_redelivery #0 n=12
+- ssed via --permission-prompt-tool) must be an MCP tool`;throw process.stderr.wri
+- -permission-prompt-tool) must be an MCP tool`;throw process.stderr.write(`${Z}
+`
+- n-prompt-tool) must be an MCP tool`;throw process.stderr.write(`${Z}
+`),Lr(1),ut
+- ool) must be an MCP tool`;throw process.stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),
+- be an MCP tool`;throw process.stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(l
+- tool`;throw process.stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.i
+- w process.stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.isPromptToo
+- stderr.write(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.isPromptToolServerSwe
+- te(`${Z}
+`),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.isPromptToolServerSwept()===!0)
+- ),Lr(1),ut(Error(Z),i_)}w=vm(le,()=>g?.isPromptToolServerSwept()===!0)}return w(
+- (Error(Z),i_)}w=vm(le,()=>g?.isPromptToolServerSwept()===!0)}return w(E,A,p,k,H,
+- i_)}w=vm(le,()=>g?.isPromptToolServerSwept()===!0)}return w(E,A,p,k,H,W)}}functi
+
+# -- "pending_permission_requests" code248=13 code247=16
+## #31 248 pending_permission_requests #0 @180489061
+ what its success response carries.")),VP=h(()=>x($C(()=>js())).optional().describe("Permission requests still awaiting a response. Sent on the `initialize` response so a client joining an already-initialized session learns about in-flight prompts.")),GP=h(()=>x($C(()=>js())).optional().describe("request_user_dialog requests still awaiting a response. Sent on the `initialize` response (sibling of pending_permission_requests) so a client joining an already-initialized session can re-arm in-flight dialogs. Receivers must tolerate the same request_id also arriving as a live or replayed control_request frame and render it once.")),j5=h(()=>m({subtype:F("success"),request_id:i().describe("The request_id of the control_request this answers."),response:Oe(i(),ye()).optional().describe("The succes
+
+- enclosing 248 fn=fe @180486861
+## #31 248-fn fe near pending_permission_requests @180486861
+len=61 sha=16d11aae226c692d exactOther=0
+function fe(e,t,r){return{request:e,originator:t,response:r}}
+
+## #31 247 pending_permission_requests #0 @197058368
+..B.describe....*W..optional......'.user_temporary..........user_permanent..........user_reject.	...%.L.toolUseID.......Vl".decisionClassification.......KT.getPendingActionDetails......'..control_cancel_request........o.schema......#(..enqueue. .....&.tengu_pending_action_republished.....@..dialog:......7..dialog..
+.......permission......M.%.republishPendingAction.....#.|.survivor_kind...........pending_permission_requests......t..pending_dialog_requests.B....b..Cannot destructure property 'request' from null or undefined value..)....]4.tengu_request_user_dialog_implicit_cancel........9..dialog_kind.	...f...cancelled...*...M\5.tengu_request_user_dialog_response_ignored..Q...C/..Ignoring error-shaped control_response for parked request_user_dialog request_id=...3....... ..  .n.o.t. .a. .h.
+
+## unique-in-248-window pending_permission_requests #0 n=12
+-  what its success response carries.")),VP=h(()=>x($C(()=>js())).optional().descr
+- success response carries.")),VP=h(()=>x($C(()=>js())).optional().describe("Permi
+- sponse carries.")),VP=h(()=>x($C(()=>js())).optional().describe("Permission requ
+- ries.")),VP=h(()=>x($C(()=>js())).optional().describe("Permission requests still
+- P=h(()=>x($C(()=>js())).optional().describe("Permission requests still awaiting 
+- $C(()=>js())).optional().describe("Permission requests still awaiting a response
+- ))).optional().describe("Permission requests still awaiting a response. Sent on 
+- al().describe("Permission requests still awaiting a response. Sent on the `initi
+- ibe("Permission requests still awaiting a response. Sent on the `initialize` res
+- ssion requests still awaiting a response. Sent on the `initialize` response so a
+- ests still awaiting a response. Sent on the `initialize` response so a client jo
+-  awaiting a response. Sent on the `initialize` response so a client joining an a
+
+## #31 248 pending_permission_requests #1 @180489587
+olerate the same request_id also arriving as a live or replayed control_request frame and render it once.")),j5=h(()=>m({subtype:F("success"),request_id:i().describe("The request_id of the control_request this answers."),response:Oe(i(),ye()).optional().describe("The success payload, shaped as documented for the answered request's subtype; absent or {} for requests that are merely acknowledged."),pending_permission_requests:VP(),pending_user_dialog_requests:GP()}).describe("The request was handled.")),Y5=h(()=>m({subtype:F("error"),request_id:i().describe("The request_id of the control_request this answers."),error:i().describe("Human-readable failure description."),pending_permission_requests:VP(),pending_user_dialog_requests:GP()}).describe("The request failed or was rejected (unknown su
+
+- enclosing 248 fn=fe @180486861
+## #31 248-fn fe near pending_permission_requests @180486861
+len=61 sha=16d11aae226c692d exactOther=0
+function fe(e,t,r){return{request:e,originator:t,response:r}}
+
+## #31 247 pending_permission_requests #1 @203896518
+ot waiting on. Each request type's own documentation says which side sends it and what its success response carries.......k...Permission requests still awaiting a response. Sent on the `initialize` response so a client joining an already-initialized session learns about in-flight prompts..M.....J.request_user_dialog requests still awaiting a response. Sent on the `initialize` response (sibling of pending_permission_requests) so a client joining an already-initialized session can re-arm in-flight dialogs. Receivers must tolerate the same request_id also arriving as a live or replayed control_request frame and render it once....3...t...The request_id of the control_request this answers.......&\.The success payload, shaped as documented for the answered request's subtype; absent or {} for req
+
+## unique-in-248-window pending_permission_requests #1 n=12
+- so arriving as a live or replayed control_request frame and render it once.")),j
+- g as a live or replayed control_request frame and render it once.")),j5=h(()=>m(
+- e or replayed control_request frame and render it once.")),j5=h(()=>m({subtype:F
+- yed control_request frame and render it once.")),j5=h(()=>m({subtype:F("success"
+- l_request frame and render it once.")),j5=h(()=>m({subtype:F("success"),request_
+- frame and render it once.")),j5=h(()=>m({subtype:F("success"),request_id:i().des
+- render it once.")),j5=h(()=>m({subtype:F("success"),request_id:i().describe("The
+- once.")),j5=h(()=>m({subtype:F("success"),request_id:i().describe("The request_i
+- 5=h(()=>m({subtype:F("success"),request_id:i().describe("The request_id of the c
+- {subtype:F("success"),request_id:i().describe("The request_id of the control_req
+- ("success"),request_id:i().describe("The request_id of the control_request this 
+- ),request_id:i().describe("The request_id of the control_request this answers.")
+
+## #31 248 pending_permission_requests #2 @180489862
+ payload, shaped as documented for the answered request's subtype; absent or {} for requests that are merely acknowledged."),pending_permission_requests:VP(),pending_user_dialog_requests:GP()}).describe("The request was handled.")),Y5=h(()=>m({subtype:F("error"),request_id:i().describe("The request_id of the control_request this answers."),error:i().describe("Human-readable failure description."),pending_permission_requests:VP(),pending_user_dialog_requests:GP()}).describe("The request failed or was rejected (unknown subtype, invalid arguments, or an error while handling it).")),Ws=h(()=>m({type:F("control_response"),response:lt([j5(),Y5()])}).describe("Envelope for the single reply to a control_request, sent by whichever side received the request.")),qs=h(()=>m({type:F("control_cancel_req
+
+- enclosing 248 fn=fe @180486861
+## #31 248-fn fe near pending_permission_requests @180486861
+len=61 sha=16d11aae226c692d exactOther=0
+function fe(e,t,r){return{request:e,originator:t,response:r}}
+
+## #31 247 pending_permission_requests #2 @205804181
+ack........paramsSchema....D...Connection aborted.."...6.c.Transport is not ready for writing../....W'.[SessionStore] dropping mirror frame: filePath .h...=... -- subprocess CLAUDE_CONFIG_DIR likely differs from parent (custom spawnClaudeCodeProcess / container?)....Y.O.initialize_timeout..).....u.WarmQuery.query() can only be called once.......t...cancelQueuedV....X|.Cannot destructure property 'pending_permission_requests' from null or undefined value..'....i&.awaitControlResponse: CLI error verdict.J....\..[Query] Ignoring prompt-redelivery fields on awaitControlResponse response..........trustedDirectory.....TB.Control request aborted.$.....p.Claude Code control request failed (........control_request_failed..N...c...[Query] Ignoring prompt-redelivery fields on non-initialize response 
+
+## unique-in-248-window pending_permission_requests #2 n=12
+-  payload, shaped as documented for the answered request's subtype; absent or {} 
+- shaped as documented for the answered request's subtype; absent or {} for reques
+- documented for the answered request's subtype; absent or {} for requests that ar
+-  for the answered request's subtype; absent or {} for requests that are merely a
+- nswered request's subtype; absent or {} for requests that are merely acknowledge
+- quest's subtype; absent or {} for requests that are merely acknowledged."),pendi
+- btype; absent or {} for requests that are merely acknowledged."),pending_permiss
+- ent or {} for requests that are merely acknowledged."),pending_permission_reques
+- for requests that are merely acknowledged."),pending_permission_requests:VP(),pe
+- ts that are merely acknowledged."),pending_permission_requests:VP(),pending_user
+- e merely acknowledged."),pending_permission_requests:VP(),pending_user_dialog_re
+- cknowledged."),pending_permission_requests:VP(),pending_user_dialog_requests:GP(
+
+## #31 leftoverish onStateChange?.("connected")  needle="onStateChange?.(\"connected\")"  248=0 247=0
+
+## #31 leftoverish onStateChange("connected")  needle="onStateChange(\"connected\")"  248=0 247=0
+
+## #31 leftoverish .("connected")  needle=".(\"connected\")"  248=0 247=1
+
+## #31 leftoverish ("connected")  needle="(\"connected\")"  248=4 247=6
+- #0 @202037715 )},onForwardedHookCancelled:(t,p)=>{r.handleCancelled(t,p)}},onStreamConnected:I("connected"),onWorkerInit:I("init"),onWorkerUp:I("worker_up"),onTurnInFlight:()=>d.turnInFli
+- #1 @202650391 mn),!Jt.current)Ct(!0)},onConnected:()=>{n(`[${ln}] connected`),Ke.current=!0,bo("connected"),Lo(Yo)},onReconnecting:(mn,ar)=>{if(nn=!1,n(`[${ln}] dropped, reconnecting${mn!
+- #2 @202671186 ks.onWorkerLive?.(),gu=!0},onConnected:()=>{n("[useRemoteSession] Connected"),qo("connected"),ya?.onStreamConnected(),Ls()},onReconnecting:()=>{n("[useRemoteSession] Reconne
+- #3 @203453175 )=>this.agentRequests.cancel(C),onConnected:()=>this.guarded(()=>{this.logStream("connected"),this.features?.noteStreamConnected()}),onReconnecting:()=>this.guarded(()=>this
+
+## #31 leftoverish ('connected')  needle="('connected')"  248=0 247=0
+
+# ==== permission+reconnect co-occurrence ====
+pairs "tengu_bridge_reconnected"~"getPendingPermissionRequests" 248=0 247=0
+
+pairs "tengu_bridge_reconnected"~"can_use_tool" 248=0 247=0
+
+pairs "tengu_bridge_reconnected"~"pending_permission" 248=0 247=0
+
+pairs "tengu_bridge_reconnected"~"republish" 248=0 247=0
+
+pairs "tengu_bridge_repl_ws_connected"~"can_use_tool" 248=0 247=0
+
+pairs "tengu_bridge_repl_ws_connected"~"pending_permission" 248=0 247=0
+
+pairs "tengu_bridge_repl_ws_connected"~"republish" 248=0 247=0
+
+pairs "tengu_bridge_repl_ws_connected"~"getPendingPermissionRequests" 248=0 247=0
+
+pairs "[bridge:repl] Ingress transport connected"~"can_use_tool" 248=0 247=0
+
+pairs "[bridge:repl] Ingress transport connected"~"permission" 248=0 247=0
+
+- 248 "[RemoteSessionManager] Connected"@201943709 ~ "pendingPermission"@201942520 d=1189
+adline and then carries on without it."}}class rNe{config;callbacks;client=null;pendingPermissionRequests=new Map;undeliveredResponses=new Map;undeliveredHookIds=new Set;hookGiveUpsTold=new Set;pendingDialogRequests=new Set;pendingForwardedHooks=new Set;settledForwardedHookIds=new Set;workerSeenThisConnection=!1;pendingServedRequests=new Map;settledServedRequestIds=new Set;seenControlResponseIds=new Set;retiredPermissionRequestIds=new Set;pendingControlRequests=new Map;pendingModelSwitchIds=new Set;sendGates=new Set;heldSends=new Set;chainedSends=0;lifetime=new AbortController;serving=!1;firstSendReleased=!1;exitFlushRequested=!1;withheldPromptInFlight=null;sentAMessage=!1;lastHeld={issued:Promise.resolve(),posted:Promise.resolve()};pendingInterrupt=null;constructor(e,t){this.config=e;this.callbacks=t;if(e.homeSeed!==void 0&&e.homeSeedHoldsFirstSend!==!1)this.gateSendsOnSettings(e.homeSeed);if(e.withheldInitialPrompt!==void 0){let o=e.withheldInitialPrompt;queueMicrotask(()=>void this.sendWithheldInitialPrompt(o))}else if(e.initialPromptUuid!==void 0)e.dirSync?.sync.messageSent(e.initialPromptUuid)}connect(){n(`[RemoteSessionManager] Connecting to session ${this.config.sessionId}`);let e={onMessage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null;this.
+- 248 "[RemoteSessionManager] Connected"@201943709 ~ "pendingPermission"@201946293 d=-2584
+essionId}`);let e={onMessage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null;this.resendUndeliveredResponses(),this.workerSeenThisConnection=!1,this.callbacks.onConnected?.()},onClose:(t)=>{if(n("[RemoteSessionManager] Disconnected"),this.client?.isRevivable())this.giveUpUndeliveredResponses();else this.dropUndeliveredResponses();this.callbacks.onDisconnected?.(t)},onReconnecting:()=>{this.workerSeenThisConnection=!1,n("[RemoteSessionManager] Reconnecting"),this.callbacks.onReconnecting?.()},onOwnRequestEchoed:(t,o)=>{let r=this.pendingControlRequests.get(t);if(r?.onEchoed)this.pendingControlRequests.set(t,{...r,onEchoed:void 0}),r.onEchoed(o)},onWorkerConnectionStatus:(t)=>{if(n(`[RemoteSessionManager] The service reports the worker ${t==="connected"||t==="disconnected"?t:"in an unknown state"}`),t==="connected")this.noteWorkerLive();else if(t==="disconnected")this.workerSeenThisConnection=!1,this.callbacks.onWorkerGone?.()},onCatchUpTruncated:()=>{n("[RemoteSessionManager] Catch-up truncated"),this.callbacks.onCatchUpTruncated?.()},onError:(t)=>{n(`[RemoteSessionManager] Stream error: ${t.message}`,{level:"error"}),this.callbacks.onError?.(t)}};this.client=new re(this.config.sessionId,this.config.orgUuid,this.config.getAccessToken,e,this.config.onAuth401,this.config.initialSequenceNum,{trackSends:this.config.trackSendsInFlight===!0,keepRedialling:()=>this.config.keepStreamRedialling===!0||this.serving,...this.signedOpts({})}),this.client.connect()}handleMessage(e,t={}){if(E("in",e,t),t.source==="worker"&&t.replayed!==!0)this.noteWorkerLive();if(e.type==="control_request"){this.handleControlRequest(e);return}if(e.type==="control_cancel_request"){let{request_id:r}=e,a=this.undeliveredResponses.get(r);if(a?.kind==="hook"||a?.kind==="tool")this.giveUp(a,"overtaken");else if(a)this.dropKept(a);else if(this.config.keepUndeliveredResponses===!0&&this.settledForwardedHookIds.has(r)&&!this.hookGiveUpsTold.has(r))M(this.hookGiveUpsTold,r),f("remote_control_response","overtaken"),this.callbacks.onResponseUndelivered?.(r,"hook","overtaken");if(this.pendingForwardedHooks.delete(r)){n(`[RemoteSessionManager] Forwarded hook request cancelled by the worker: ${lw(r)}`),this.callbacks.onForwardedHookCancelled?.(r,"worker");return}if(this.retireServedRequest(r,"worker"))return;if(this.pendingDialogRequests.delete(r)){n(`[RemoteSessionManager] User dialog request cancelled: ${r}`),this.callbacks.onUserDialogCancelled?.(r);return}let u=this.pendingPermissionRequests.get(r);if(!u){n(`[RemoteSessionManager] control_cancel_request for unknown request ${r} \u2014 nothing pending, ignoring`);return}n(`[RemoteSessionManager] Permission request
+pairs "[RemoteSessionManager] Connected"~"pendingPermission" 248=2 247=3
+
+pairs "[RemoteSessionManager] Connected"~"can_use_tool" 248=0 247=0
+
+pairs "[RemoteSessionManager] Connected"~"redeliver" 248=0 247=0
+
+- 248 "logReconnected"@205398339 ~ "permission"@205396530 d=1809
+th:Je.cmd,scriptArgs:Je.prefixArgs,env:process.env,verbose:!1,sandbox:e.sandbox,permissionMode:e.permissionMode,onDebug:d,onChildWarning:(Z,ce)=>xe.logWarning(`${ce} (${Z})`)});xe.printBanner(fe,N);let Le;if(e.createSessionOnStart){let{createBridgeSession:Z}=await import("B:/~BUN/root/chunk-y7yxkv6g.js");try{let ce=await Z({environmentId:N,title:e.name,events:[],gitRepoUrl:X,branch:Re,defaultBranch:he,signal:t,baseUrl:x,getAccessToken:e.getAccessToken,permissionMode:e.permissionMode,tags:[R3e]});if(ce)Le=ce,d(`created initial session ${ce}`)}catch(ce){d(`session pre-creation failed (non-fatal): ${l(ce)}`)}}let De=null;if(!Ve){if(Se&&N!==Se)d(`env reuse mismatch: requested ${Se}, backend returned ${N}; existing sessions will not reconnect`);let{writeBridgePointer:Z,createBridgePointerWriteQueue:ce,PERSISTED_SESSION_RESUME_WINDOW_MS:_e,isPersistedStampFresh:ue}=await import("B:/~BUN/root/chunk-849g4rtr.js"),{ownProcStartAsync:Oe}=await import("B:/~BUN/root/chunk-8j0j3mf1.js"),ve={sessionId:Le??"",environmentId:N,source:"standalone",pid:process.pid,procStart:await Oe(),...le.length>0&&{activeSessionIds:le,activeSessionIdsPersistedAt:je}};if(fe.preserveOnShutdown=await Z(r,ve,e.storageV5),fe.ownsPointer=fe.preserveOnShutdown,fe.preserveOnShutdown)fe.enqueuePointerWrite=ce(),De=lr(Z,Oe,r,ve,e.storageV5,t,fe.enqueuePointerWrite,_e,ue,()=>fe.pointerCleared===!0)}try{await dr(fe,N,oe,g,Ue,xe,t,void 0,Le,async()=>e.getAccessToken())}finally{if(De)clearInterval(De)}}function dn(e){let t=()=>{};return{printBanner:(r,d)=>e(`registered environmentId=${d} dir=${r.dir} spawnMode=${r.spawnMode} capacity=${r.maxSessions}`),logSessionStart:(r,d)=>e(`session start ${r}`),logSessionComplete:(r,d)=>e(`session complete ${r} (${d}ms)`),logSessionFailed:(r,d)=>e(`session failed ${r}: ${d}`),logStatus:e,logVerbose:e,logError:(r)=>e(`error: ${r}`),logWarning:(r)=>e(`warning: ${r}`),logReconnected:(r)=>e(`reconnected after ${r}ms`),addSession:(r,d)=>e(`session attached ${r}`),removeSession:(r)=>e(`session detached ${r}`),updateIdleStatus:t,updateReconnectingStatus:t,updateSession
+- 248 "logReconnected"@205398339 ~ "permission"@205396547 d=1792
+rgs:Je.prefixArgs,env:process.env,verbose:!1,sandbox:e.sandbox,permissionMode:e.permissionMode,onDebug:d,onChildWarning:(Z,ce)=>xe.logWarning(`${ce} (${Z})`)});xe.printBanner(fe,N);let Le;if(e.createSessionOnStart){let{createBridgeSession:Z}=await import("B:/~BUN/root/chunk-y7yxkv6g.js");try{let ce=await Z({environmentId:N,title:e.name,events:[],gitRepoUrl:X,branch:Re,defaultBranch:he,signal:t,baseUrl:x,getAccessToken:e.getAccessToken,permissionMode:e.permissionMode,tags:[R3e]});if(ce)Le=ce,d(`created initial session ${ce}`)}catch(ce){d(`session pre-creation failed (non-fatal): ${l(ce)}`)}}let De=null;if(!Ve){if(Se&&N!==Se)d(`env reuse mismatch: requested ${Se}, backend returned ${N}; existing sessions will not reconnect`);let{writeBridgePointer:Z,createBridgePointerWriteQueue:ce,PERSISTED_SESSION_RESUME_WINDOW_MS:_e,isPersistedStampFresh:ue}=await import("B:/~BUN/root/chunk-849g4rtr.js"),{ownProcStartAsync:Oe}=await import("B:/~BUN/root/chunk-8j0j3mf1.js"),ve={sessionId:Le??"",environmentId:N,source:"standalone",pid:process.pid,procStart:await Oe(),...le.length>0&&{activeSessionIds:le,activeSessionIdsPersistedAt:je}};if(fe.preserveOnShutdown=await Z(r,ve,e.storageV5),fe.ownsPointer=fe.preserveOnShutdown,fe.preserveOnShutdown)fe.enqueuePointerWrite=ce(),De=lr(Z,Oe,r,ve,e.storageV5,t,fe.enqueuePointerWrite,_e,ue,()=>fe.pointerCleared===!0)}try{await dr(fe,N,oe,g,Ue,xe,t,void 0,Le,async()=>e.getAccessToken())}finally{if(De)clearInterval(De)}}function dn(e){let t=()=>{};return{printBanner:(r,d)=>e(`registered environmentId=${d} dir=${r.dir} spawnMode=${r.spawnMode} capacity=${r.maxSessions}`),logSessionStart:(r,d)=>e(`session start ${r}`),logSessionComplete:(r,d)=>e(`session complete ${r} (${d}ms)`),logSessionFailed:(r,d)=>e(`session failed ${r}: ${d}`),logStatus:e,logVerbose:e,logError:(r)=>e(`error: ${r}`),logWarning:(r)=>e(`warning: ${r}`),logReconnected:(r)=>e(`reconnected after ${r}ms`),addSession:(r,d)=>e(`session attached ${r}`),removeSession:(r)=>e(`session detached ${r}`),updateIdleStatus:t,updateReconnectingStatus:t,updateSession
+- 248 "logReconnected"@205398339 ~ "permission"@205396906 d=1433
+X,branch:Re,defaultBranch:he,signal:t,baseUrl:x,getAccessToken:e.getAccessToken,permissionMode:e.permissionMode,tags:[R3e]});if(ce)Le=ce,d(`created initial session ${ce}`)}catch(ce){d(`session pre-creation failed (non-fatal): ${l(ce)}`)}}let De=null;if(!Ve){if(Se&&N!==Se)d(`env reuse mismatch: requested ${Se}, backend returned ${N}; existing sessions will not reconnect`);let{writeBridgePointer:Z,createBridgePointerWriteQueue:ce,PERSISTED_SESSION_RESUME_WINDOW_MS:_e,isPersistedStampFresh:ue}=await import("B:/~BUN/root/chunk-849g4rtr.js"),{ownProcStartAsync:Oe}=await import("B:/~BUN/root/chunk-8j0j3mf1.js"),ve={sessionId:Le??"",environmentId:N,source:"standalone",pid:process.pid,procStart:await Oe(),...le.length>0&&{activeSessionIds:le,activeSessionIdsPersistedAt:je}};if(fe.preserveOnShutdown=await Z(r,ve,e.storageV5),fe.ownsPointer=fe.preserveOnShutdown,fe.preserveOnShutdown)fe.enqueuePointerWrite=ce(),De=lr(Z,Oe,r,ve,e.storageV5,t,fe.enqueuePointerWrite,_e,ue,()=>fe.pointerCleared===!0)}try{await dr(fe,N,oe,g,Ue,xe,t,void 0,Le,async()=>e.getAccessToken())}finally{if(De)clearInterval(De)}}function dn(e){let t=()=>{};return{printBanner:(r,d)=>e(`registered environmentId=${d} dir=${r.dir} spawnMode=${r.spawnMode} capacity=${r.maxSessions}`),logSessionStart:(r,d)=>e(`session start ${r}`),logSessionComplete:(r,d)=>e(`session complete ${r} (${d}ms)`),logSessionFailed:(r,d)=>e(`session failed ${r}: ${d}`),logStatus:e,logVerbose:e,logError:(r)=>e(`error: ${r}`),logWarning:(r)=>e(`warning: ${r}`),logReconnected:(r)=>e(`reconnected after ${r}ms`),addSession:(r,d)=>e(`session attached ${r}`),removeSession:(r)=>e(`session detached ${r}`),updateIdleStatus:t,updateReconnectingStatus:t,updateSession
+- 248 "logReconnected"@205398339 ~ "permission"@205396923 d=1416
+ltBranch:he,signal:t,baseUrl:x,getAccessToken:e.getAccessToken,permissionMode:e.permissionMode,tags:[R3e]});if(ce)Le=ce,d(`created initial session ${ce}`)}catch(ce){d(`session pre-creation failed (non-fatal): ${l(ce)}`)}}let De=null;if(!Ve){if(Se&&N!==Se)d(`env reuse mismatch: requested ${Se}, backend returned ${N}; existing sessions will not reconnect`);let{writeBridgePointer:Z,createBridgePointerWriteQueue:ce,PERSISTED_SESSION_RESUME_WINDOW_MS:_e,isPersistedStampFresh:ue}=await import("B:/~BUN/root/chunk-849g4rtr.js"),{ownProcStartAsync:Oe}=await import("B:/~BUN/root/chunk-8j0j3mf1.js"),ve={sessionId:Le??"",environmentId:N,source:"standalone",pid:process.pid,procStart:await Oe(),...le.length>0&&{activeSessionIds:le,activeSessionIdsPersistedAt:je}};if(fe.preserveOnShutdown=await Z(r,ve,e.storageV5),fe.ownsPointer=fe.preserveOnShutdown,fe.preserveOnShutdown)fe.enqueuePointerWrite=ce(),De=lr(Z,Oe,r,ve,e.storageV5,t,fe.enqueuePointerWrite,_e,ue,()=>fe.pointerCleared===!0)}try{await dr(fe,N,oe,g,Ue,xe,t,void 0,Le,async()=>e.getAccessToken())}finally{if(De)clearInterval(De)}}function dn(e){let t=()=>{};return{printBanner:(r,d)=>e(`registered environmentId=${d} dir=${r.dir} spawnMode=${r.spawnMode} capacity=${r.maxSessions}`),logSessionStart:(r,d)=>e(`session start ${r}`),logSessionComplete:(r,d)=>e(`session complete ${r} (${d}ms)`),logSessionFailed:(r,d)=>e(`session failed ${r}: ${d}`),logStatus:e,logVerbose:e,logError:(r)=>e(`error: ${r}`),logWarning:(r)=>e(`warning: ${r}`),logReconnected:(r)=>e(`reconnected after ${r}ms`),addSession:(r,d)=>e(`session attached ${r}`),removeSession:(r)=>e(`session detached ${r}`),updateIdleStatus:t,updateReconnectingStatus:t,updateSession
+pairs "logReconnected"~"permission" 248=4 247=6
+
+pairs "disconnected_ms"~"permission" 248=0 247=1
+
+pairs "afterReconnect"~"can_use_tool" 248=0 247=0
+
+- 248 "afterReconnect"@204986323 ~ "permission"@204987650 d=-1327
+ope:void 0;if(O===void 0)return{requestBytes:L,reconcile:X.trace,...dNe(e,o,ae,{afterReconnect:X.kind==="answered"})};let Re=await(async()=>{if(m===void 0)return F(O.ask_id),{requestBytes:L,approval:"no_handler",...dNe(e,o,ae)};let N=V4(O.input)<=ye(o)?e.inputSchema.safeParse(O.input):{success:!1};if(O.tool!==A.ask||!N.success)return F(O.ask_id),{requestBytes:L,approval:"unreadable_ask",outcome:{kind:"error",code:"refused_by_host",message:cNe({name:o.name,message:"it asked for approval of a call this session could not read; nothing ran"}),host:h}};let M=await te({tool:e,parsedInput:N.data,requestBytes:L,toolUseContext:i,host:o}).catch((C)=>{throw F(O.ask_id),C});if(M.kind==="refuse")return F(O.ask_id),{requestBytes:L,approval:"withdrawn",outcome:Ve(M,o.name,h)};let x=!1,Q=re!==void 0&&(M.kind!=="ask_first"||M.rule===re)&&O.prior_answer_ok===!0&&Jn(N.data,S),nn=O.classifier_eligible===!0&&M.kind!=="ask_first"&&G==="auto",H=Q?{decision:"allow"}:await m({askId:O.ask_id,host:h,tool:e.name,input:O.input,message:cw(O.message,pNe),decisionReason:O.decision_reason===void 0?void 0:cw(O.decision_reason,pNe),suggestions:(O.suggestions??[]).map((C)=>cw(C,nr)),classifierEligible:nn,...nn&&O.auto_mode!==void 0&&{hostRules:Ji(O.auto_mode,(C)=>C?.map((B)=>or(B)).filter((B)=>B!==""))}}).catch((C)=>{if(C instanceof Je&&!u.aborted)throw F(O.ask_id),C;if(x=!u.aborted,x)n(`remote tool call: the session's permission prompt failed: ${l(C)}`,{level:"error"});return});if(H===void 0||u.aborted&&H.decision!=="deny"){if(F(O.ask_id),x&&!u.aborted)return{requestBytes:L,approval:"prompt_failed",outcome:{kind:"e
+- 248 "afterReconnect"@204986323 ~ "permission"@204987919 d=-1596
+ope:void 0;if(O===void 0)return{requestBytes:L,reconcile:X.trace,...dNe(e,o,ae,{afterReconnect:X.kind==="answered"})};let Re=await(async()=>{if(m===void 0)return F(O.ask_id),{requestBytes:L,approval:"no_handler",...dNe(e,o,ae)};let N=V4(O.input)<=ye(o)?e.inputSchema.safeParse(O.input):{success:!1};if(O.tool!==A.ask||!N.success)return F(O.ask_id),{requestBytes:L,approval:"unreadable_ask",outcome:{kind:"error",code:"refused_by_host",message:cNe({name:o.name,message:"it asked for approval of a call this session could not read; nothing ran"}),host:h}};let M=await te({tool:e,parsedInput:N.data,requestBytes:L,toolUseContext:i,host:o}).catch((C)=>{throw F(O.ask_id),C});if(M.kind==="refuse")return F(O.ask_id),{requestBytes:L,approval:"withdrawn",outcome:Ve(M,o.name,h)};let x=!1,Q=re!==void 0&&(M.kind!=="ask_first"||M.rule===re)&&O.prior_answer_ok===!0&&Jn(N.data,S),nn=O.classifier_eligible===!0&&M.kind!=="ask_first"&&G==="auto",H=Q?{decision:"allow"}:await m({askId:O.ask_id,host:h,tool:e.name,input:O.input,message:cw(O.message,pNe),decisionReason:O.decision_reason===void 0?void 0:cw(O.decision_reason,pNe),suggestions:(O.suggestions??[]).map((C)=>cw(C,nr)),classifierEligible:nn,...nn&&O.auto_mode!==void 0&&{hostRules:Ji(O.auto_mode,(C)=>C?.map((B)=>or(B)).filter((B)=>B!==""))}}).catch((C)=>{if(C instanceof Je&&!u.aborted)throw F(O.ask_id),C;if(x=!u.aborted,x)n(`remote tool call: the session's permission prompt failed: ${l(C)}`,{level:"error"});return});if(H===void 0||u.aborted&&H.decision!=="deny"){if(F(O.ask_id),x&&!u.aborted)return{requestBytes:L,approval:"prompt_failed",outcome:{kind:"error",code:"prompt_failed",message:`This session could not raise its permission prompt for ${o.name}; the call did not run.`,host:h}};return{outcome:uJe(h),requestBytes:L,approval:"withdrawn"}}if(H.decision==="unanswerable")return F(O.ask_id),{requestBytes:L,approval:"
+- 248 "afterReconnect"@204990808 ~ "permission"@204990084 d=724
+e))return{kind:"late_refusal",verdict:{code:"denied_by_session_rule",message:`A permission rule of this session now asks before this ${e.name} call; it appeared after the approval. ${o.name} was not contacted.`}};if(u.aborted)return{kind:"cancelled"};if(wo())await If();return R(W(Ae),sn)}).catch((C)=>{throw F(O.ask_id),C}),Oe=Q?"pre_approved":"allowed",To=(C,B)=>{let U=C?.kind==="result"?C.envelope:void 0;if(U?.outcome==="acknowledged"&&U.ask_id===O.ask_id)return{approval:"withdrawn",outcome:{kind:"error",code:"approval_not_received",message:B5t(o.name,B,!0),host:h}};if(C?.kind==="result"&&U!==void 0&&(U.outcome==="in_progress"||U.outcome!=="needs_approval"&&U.outcome!=="acknowledged"&&U.replayed===!0||U.outcome==="completed"&&U.disposition==="duplicate_call"))return{approval:Oe,...dNe(e,o,C,{afterReconnect:!0})};return{approval:"withdrawn",outcome:{kind:"error",code:"approval_not_received",message:B5t(o.name,B,!1),host:h}}};return(async(C)=>{if(C?.kind==="late_refusal")return F(O.ask_id),
+pairs "afterReconnect"~"permission" 248=3 247=4
+
+## #31 method getPendingPermissionRequests(){  needle="getPendingPermissionRequests(){"  248=1 247=1
+- #0 @200587966 eam closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.v
+
+## #31 248 method-win getPendingPermissionRequests(){ @200587966
+nue;d.reject(new Ua("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.parse(l):l;this.pendingRequests.delete(o),this.outbound.enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republish
+
+## #31 247 method-win getPendingPermissionRequests(){ @230170332
+inue;i.reject(new D("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[n,s]of Array.from(this.pendingRequests)){let r=s.request.request;if(r.subtype!=="hook_callback")continue;let o=t(r.input),i=s.schema?s.schema.parse(o):o;this.pendingRequests.delete(n),this.outbound.enqueue({type:"control_cancel_request",request_id:n}),s.resolve(i),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,n]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=n;if(!t)return;this.sessionState.republishPendingAction(t),g("tengu_pending_action_republish
+
+## #31 method republishSurvivingPendingAction(){  needle="republishSurvivingPendingAction(){"  248=1 247=1
+- #0 @200588651 equest_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendi
+
+## #31 248 method-win republishSurvivingPendingAction(){ @200588651
+enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let o=0;for(let{request:r}of Array.from(this.pendingRequests.values())){if(r.request.subtype!=="request_user_dialog"||r.request.dialog_kind!==t)continue;if(!this.cancelDialogByMachine(r.request_id))continue;s("tengu_request_user_dialog_implicit_cancel",{dialog_kind:Gn(t),reason:c(e)}),o+=1}return o}cancelDialogByMachine(t){if(!this.pendingRequests.has(t)||wo())return!1;return this.injectControlResponse({type:"control_response",respon
+
+## #31 247 method-win republishSurvivingPendingAction(){ @230171017
+enqueue({type:"control_cancel_request",request_id:n}),s.resolve(i),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,n]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=n;if(!t)return;this.sessionState.republishPendingAction(t),g("tengu_pending_action_republished",{survivor_kind:m(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let n=0;for(let{request:s}of Array.from(this.pendingRequests.values())){if(s.request.subtype!=="request_user_dialog"||s.request.dialog_kind!==t)continue;if(!this.cancelDialogByMachine(s.request_id))continue;g("tengu_request_user_dialog_implicit_cancel",{dialog_kind:E(t),reason:m(e)}),n+=1}return n}cancelDialogByMachine(t){if(!this.pendingRequests.has(t)||f())return!1;return this.injectControlResponse({type:"control_response",response
+
+## #31 method getPendingUserDialogRequests(){  needle="getPendingUserDialogRequests(){"  248=1 247=1
+- #0 @200588114 t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.v
+
+## #31 248 method-win getPendingUserDialogRequests(){ @200588114
+s.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[o,r]of Array.from(this.pendingRequests)){let u=r.request.request;if(u.subtype!=="hook_callback")continue;let l=t(u.input),d=r.schema?r.schema.parse(l):l;this.pendingRequests.delete(o),this.outbound.enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length
+
+## #31 247 method-win getPendingUserDialogRequests(){ @230170480
+s.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog")}retireSdkHostHookCallbacks(t){this.sdkHostHookGeneration++,this.retiredHostHookAnswer=t;let e=0;for(let[n,s]of Array.from(this.pendingRequests)){let r=s.request.request;if(r.subtype!=="hook_callback")continue;let o=t(r.input),i=s.schema?s.schema.parse(o):o;this.pendingRequests.delete(n),this.outbound.enqueue({type:"control_cancel_request",request_id:n}),s.resolve(i),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,n]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=n;if(!t)return;this.sessionState.republishPendingAction(t),g("tengu_pending_action_republished",{survivor_kind:m(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length
+
+## #31 rsm [RemoteSessionManager] Connected  needle="[RemoteSessionManager] Connected"  248=1 247=2
+- #0 @201943709 dirSync?.sync.messageSent(e.initialPromptUuid)}connect(){n(`[RemoteSessionManager] Connecting to session ${this.config.sessionId}`);let e={onMessage:(t,o)=>this.handleMessage(t,o),onConnected:()=>{n("[RemoteSessionManager] Connected"),this.config.dirSync?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null;this.resendUndeliveredResponses(),thi
+
+## #31 rsm [RemoteSessionManager] Reconnecting WebSocket  needle="[RemoteSessionManager] Reconnecting WebSocket"  248=0 247=0
+
+## #31 rsm [RemoteSessionManager] Permission request for tool  needle="[RemoteSessionManager] Permission request for tool"  248=1 247=2
+- #0 @201950717 esponseId(e){M(this.seenControlResponseIds,e)}recordSettledForwardedHookId(e){M(this.settledForwardedHookIds,e)}handleControlRequest(e){let{request_id:t,request:o}=e;if(o.subtype==="can_use_tool"){n(`[RemoteSessionManager] Permission request for tool: ${o.tool_name}`);let r=this.pendingPermissionRequests.get(t);if(r!==void 0){let a=!1;try{a=ht(r,o)}catch{a=!1}if(a)n(`[RemoteSessionManager] Duplicate permission request ${lw(String(t))} \u2014 alre
+
+## #31 rsm Redelivered dialog  needle="Redelivered dialog"  248=1 247=2
+- #0 @201948845 dialog_requests)for(let d of e.response.pending_user_dialog_requests){if(d.request.subtype!=="request_user_dialog")continue;if(this.seenControlResponseIds.has(d.request_id)){n(`[RemoteSessionManager] Redelivered dialog ${d.request_id} already answered \u2014 skipping`);continue}let p=this.pendingDialogRequests.has(d.request_id);if(this.handleControlRequest(d),!p&&this.pendingDialogRequests.has(d.request_id))b("remo
+
+- leftover-useRepl "tengu_bridge_system_init" 248=0 247=0
+- leftover-useRepl "Failed to send system/init" 248=2 247=2
+- leftover-useRepl "Failed to publish task_state" 248=0 247=0
+- leftover-useRepl "Remote Control" 248=360 247=352
+- leftover-useRepl "PushNotification" 248=11 247=10

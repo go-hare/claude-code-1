@@ -1,0 +1,12 @@
+# gold-248-41-wY  footer poller class (247 y6 successor)
+# Official 248 footer DOES call dXe / y5e / 304 streak — not leftover Wut-only.
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+class wY @203020715
+p5e=60000 (247 Wut sibling, name gone)
+#S @203022158 y5e(..., this.#e.shared.pollerNotModifiedStreak)
+#T @203022837 pollerNotModifiedStreak=Re?+1:0
+#b @203021698 resets streak; p5e focus sibling
+
+var a5e=60000,l5e=4000,u5e=3600000,p5e=60000,f5e=3,g5e=300000,h5e={pr:null,needsAuth:!1,lastUpdated:0};class wY{#e;#t;#o=h5e;#s=$e();#n=0;#r=!1;#l=null;#a=0;#i=!1;#m=null;#d=0;#u=0;#p=-1;#c=0;constructor(d,C){this.#e=d,this.#t=C}...
+#S(d){if(!this.#e.isDirectApiEnabled())return a5e;return y5e(this.#t.focused,this.#e.now()-this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}
+async#T(d){...Z=await this.#e.fetchPrStatus()...x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0...}

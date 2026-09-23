@@ -1,0 +1,7 @@
+# gold-248-41-FY-nge  PromptInput footer calls nge (usePrStatus)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+FY @203025150  Ct=nge(ge,Yt)
+N5e @203037324  prStatusFooterEnabled
+
+function N5e(d){if(_t()&&d==="unknown")return!1;return oe().prStatusFooterEnabled??!0}
+...FY({...isLoading:ge...}){...Yt=N5e(ft)&&!Kt(),Ct=nge(ge,Yt),Jt=ege(),Ut=Yt&&Ct.pr?Ct.pr:Jt?{number:Jt.number,url:Jt.url,reviewState:void 0,kind:est(Jt.url)?"mr":void 0}:null...

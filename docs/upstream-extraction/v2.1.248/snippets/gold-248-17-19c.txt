@@ -1,0 +1,75 @@
+when=2026-09-20T03:23:59.694Z
+
+## hits "var H1t=" count=0 
+
+## hits "H1t=" count=2 182995128,217499303
+-- @182995128
+="send a prompt to start",Lye=`(idle \u2014 ${sh})`,Nye=["starting","resuming","adopted","crashed"],H1t=172800000,mcr="ended while the background service was off";function a5(e){let t=new Date().toISOString();return{state:"working",detail:e.detail!==void 0?Xr(e.detail):Oye,tempo:e.tempo??"active",needs:e.needs,inFlight:e.inFlight,output:null,children:null,linkScanOffset:0,linkS
+-- @217499303
+"[object Map]",G1t="[object Number]",V1t="[object Object]",W1t="[object RegExp]",q1t="[object Set]",H1t="[object String]",U1t="[object WeakMap]",Y1t="[object ArrayBuffer]",j1t="[object DataView]",X1t="[object Float32Array]",K1t="[object Float64Array]",Z1t="[object Int8Array]",Q1t="[object Int16Array]",J1t="[object Int32Array]",evt="[object Uint8Array]",tvt="[object Uint8Clamped
+
+## hits "var mcr=" count=0 
+
+## hits "mcr=" count=1 182995142
+-- @182995142
+t to start",Lye=`(idle \u2014 ${sh})`,Nye=["starting","resuming","adopted","crashed"],H1t=172800000,mcr="ended while the background service was off";function a5(e){let t=new Date().toISOString();return{state:"working",detail:e.detail!==void 0?Xr(e.detail):Oye,tempo:e.tempo??"active",needs:e.needs,inFlight:e.inFlight,output:null,children:null,linkScanOffset:0,linkScanPath:e.link
+
+## hits "function uae(" count=2 182998858,202613864
+-- @182998858
+eturn e.routine!==void 0||e.selfWake===!0||(e.inFlight?.kinds.includes("session_cron")??!1)||$ye(e)}function uae(e,t,r,o,d){let g=Kn(e);return nr(g,d).then(async(p)=>{if(!p||Di(p)||t==="failed"&&yIe(p))return"none";let b=Date.now(),f=new Date(b).toISOString(),u=o?.resumable==="auto-resume"&&t==="failed"&&!sS(p)&&b-Date.parse(p.updatedAt)>H1t;return await ps(g,{...p,state:u?"sto
+-- @202613864
+e)x.add(me)}}catch(H){n(`refresh-on-miss: unexpected error: ${l(H)}`,{level:"warn"})}return x}async function uae(d,C){n("performBackgroundPluginInstallations called");try{let x=eA(),H=await bc(C).catch(()=>({})),X=y5t(x,H),Z=[...X.missing,...X.sourceChanged.map((me)=>me.name)];if(d((me)=>({...me,plugins:{...me.plugins,installationStatus:{marketplaces:Z.map((ge)=>({name:ge,statu
+
+## hits "uae(" count=9 182998867,188001704,191782888,191793617,191793875,191794051,202613873,202616079,216045928
+-- @182998867
+outine!==void 0||e.selfWake===!0||(e.inFlight?.kinds.includes("session_cron")??!1)||$ye(e)}function uae(e,t,r,o,d){let g=Kn(e);return nr(g,d).then(async(p)=>{if(!p||Di(p)||t==="failed"&&yIe(p))return"none";let b=Date.now(),f=new Date(b).toISOString(),u=o?.resumable==="auto-resume"&&t==="failed"&&!sS(p)&&b-Date.parse(p.updatedAt)>H1t;return await ps(g,{...p,state:u?"stopped":t==
+-- @188001704
+et d={state:"stopped",detail:"stopped"},h=u?.state==="done"?u:t.supervisorKilledAll?d:u??d;if(await uae(a,h.state,h.detail,void 0,e),i&&e)await e.delete(Se.daemon(["pty-pids",S(IM(s.ptySock??xh(a)))])).catch(()=>{});else await m(IM(s.ptySock??xh(a))).catch(()=>{})}if(i)if(e)await C(e,a);else{await m(Sz(a)).catch(()=>{});let d=og(xh(a));await m(d).catch(()=>{}),await m(`${d}.rea
+-- @191782888
+tySock,C.dispatch),ge=ie??{state:"failed",detail:"process gone while supervisor was down"};if(await uae(m,ge.state,ge.detail,{resumable:ie?void 0:"auto-resume"},e.storageV5)==="dead-epoch")oe++,ee=!0;if(ee)Ae++;if(e.credentials)e.credentials.discardSpentCredentialFile(Yye(m)).catch(()=>{});else Z(Yye(m)).catch(()=>{});if(B()==="windows")if(e.storageV5)qe(e.storageV5,m,C.ptySock
+-- @191793617
+ue;u++;let M=Sz(h);Hre(xh(h),o.storageV5).then((w)=>{let N=og(xh(h)),i=Ev(xh(h)),A=IM(xh(h));if(!r){uae(h,"failed","reaped (roster gap)",{resumable:"wake-only"},o.storageV5),Z(i).catch(()=>{}),Z(A).catch(()=>{});return}let V=()=>{if(o.storageV5)qe(o.storageV5,h,void 0);else Z(M).catch(()=>{}),Z(N).catch(()=>{}),Z(i).catch(()=>{}),Z(A).catch(()=>{})};if(w){uae(h,"failed","reaped
+-- @191793875
+5,h,void 0);else Z(M).catch(()=>{}),Z(N).catch(()=>{}),Z(i).catch(()=>{}),Z(A).catch(()=>{})};if(w){uae(h,"failed","reaped (roster gap)",{resumable:"wake-only"},o.storageV5),V();return}(o.storageV5?kqt(o.storageV5,h):$a(M,b$e)).then((L)=>{if(L===null)return;if(!as(Number(L)))uae(h,"failed","reaped (roster gap)",{resumable:"wake-only"},o.storageV5),V()}).catch(()=>{})})}if(u)e(`
+-- @191794051
+);return}(o.storageV5?kqt(o.storageV5,h):$a(M,b$e)).then((L)=>{if(L===null)return;if(!as(Number(L)))uae(h,"failed","reaped (roster gap)",{resumable:"wake-only"},o.storageV5),V()}).catch(()=>{})})}if(u)e(`bg orphan-reap: ${u} roster-less pty host(s)`),s("tengu_bg_orphan_reap",{reaped:u})}var sr={namespace:"daemon",relPath:["pty-pids"]};async function dr(t){if(D()&&t!==void 0){aw
+
+## hits "parkedJobId" count=15 92742180,180542927,180542998,181016699,181016720,181016745,189584882,189692736,189692770,189692796
+-- @92742180
+alreadyInAlt........gateStdinUntilFirstFrame....:...tengu_fleetview_pr_batch....=...shorts..........parkedJobId.......L.statusUpdatedAt."...>.z.[fleet:remote] poll mapper threw: ..K...../.Cannot destructure property 'clearServerCache' from null or undefined value......b..connectToServer.
+....ND.job_attach........,.C.o.u.l.d.n.'.t. .a.t.t.a.c.h. ..  ......4&.peerProtocol	.....b.
+-- @180542927
+now()},t)}async function Tgt(e,t){await cn({bridgeSessionId:e},t)}async function xmn(e,t){await cn({parkedJobId:e,updatedAt:Date.now()},t)}async function w2t(e){await cn({parkedJobId:void 0,updatedAt:Date.now()},e)}async function M_r(e,t){}async function tMe(e,t){let r=Date.now(),o=CW(),u=o.bornSpare&&e.status==="busy",p=await cn({...e,updatedAt:r,...e.status!==void 0&&{statusU
+-- @180542998
+ function xmn(e,t){await cn({parkedJobId:e,updatedAt:Date.now()},t)}async function w2t(e){await cn({parkedJobId:void 0,updatedAt:Date.now()},e)}async function M_r(e,t){}async function tMe(e,t){let r=Date.now(),o=CW(),u=o.bornSpare&&e.status==="busy",p=await cn({...e,updatedAt:r,...e.status!==void 0&&{statusUpdatedAt:r},...u&&{spare:void 0}},t);if(u&&p)UM(o)}function UM(e){if(e.
+-- @181016699
+nId:typeof o.sessionId==="string"?o.sessionId:void 0,jobId:typeof o.jobId==="string"?o.jobId:void 0,parkedJobId:typeof o.parkedJobId==="string"?o.parkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.wa
+-- @181016720
+d==="string"?o.sessionId:void 0,jobId:typeof o.jobId==="string"?o.jobId:void 0,parkedJobId:typeof o.parkedJobId==="string"?o.parkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updat
+-- @181016745
+void 0,jobId:typeof o.jobId==="string"?o.jobId:void 0,parkedJobId:typeof o.parkedJobId==="string"?o.parkedJobId:void 0,spare:o.spare===!0,bridgeSessionId:typeof o.bridgeSessionId==="string"?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statu
+
+## hits "function Nw(" count=5 180237246,182998139,184943651,192219955,201337951
+-- @180237246
+n Pt(e);return Na()}var Ds={fable:{available:QSe,defaultModel:()=>Kht(),builtinDefault:(e)=>uu(e)}};function Nw(){let e=NO().best;if(e!==void 0&&Object.hasOwn(Ds,e)&&Ds[e]?.available())return e;return"opus"}function Lur(){let e=Ds[Nw()];if(e!==void 0){let t=e.defaultModel(),r=Bd();if(r.resolvingBestModel)return t;r.resolvingBestModel=!0;try{if(br(t))return t}finally{r.resolving
+-- @182998139
+"done")return"success";if(e==="failed")return"failure";if(e==="stopped")return"stopped";return null}function Nw(e){return Cf(e)!==null}function Di(e){return Nw(e.state)&&e.tempo!=="active"}function sS(e){return e.template==="exec"&&e.respawnFlags.length===0}function yIe(e){return e.state==="blocked"&&!sS(e)}function aut(e){return e.backend==="daemon"&&!sS(e)}function EU(e){let 
+-- @184943651
+available for HIPAA-regulated organizations")}function Rbe(e){n(`[files-api] ${e}`,{level:"error"})}function Nw(e){n(`[files-api] ${e}`)}function Det(e){return{Authorization:`Bearer ${e.oauthToken}`,"anthropic-version":ffn,"anthropic-beta":mfn}}var ML=3,gfn=500,Iet=524288000;async function Let(e,t){let r="";for(let o=1;o<=ML;o++){let u=await t(o);if(u.done)return u.value;if(r=u
+-- @192219955
+addingLeft:Nf,height:1,children:ld}),Jf[37]=Nf,Jf[38]=ld,Jf[39]=bw;else bw=Jf[39];return bw}N();N();function Nw(_w){return e(t,{dimColor:!0,children:_w},_w)}function Bw(yI,SI){return e(o,{flexDirection:"column",children:yI.map(Nw)},SI)}function Hw(){return Date.now()}function Fs(bI){let wI=g(12),{focusedPinned:Hf,canReorder:Gf,canRename:Vf,canGroup:Wf,canPin:Uf,canMention:Kf,ca
+-- @201337951
+tamp;if(!d||!f)return"";let T=Date.parse(f)-Date.parse(d);return Number.isFinite(T)&&T>=0?kwe(T):""}function Nw(G1){return G1.data.phase==="start"}function Ew(Y1){return{line:Y1}}function Aw(J1,Z1){return r(t,{children:[Zn,J1.line]},Z1)}function Dw(tj,rj){return r(t,{color:"error",children:[Zn,tj.line]},rj)}var Zn="    ",Tb="\u258C";function bm(Jp){let j1=g(2);if(!iK()||Jp.para
+
+## hits "\"dead-epoch\"" count=2 182999556,191782964
+-- @182999556
+At:p.updatedAt}),...o?.resumable==="wake-only"&&t==="failed"&&{reapedUnsettledAt:p.updatedAt}},d),u?"dead-epoch":"settled"}).catch((p)=>(ea(p),"none"))}var et=h(()=>w.object({state:w.string().nullish(),detail:w.string().nullish(),tempo:w.string().nullish(),needs:w.string().nullish(),output:w.record(w.string(),w.unknown()).nullish()})),tt={working:"actively progressing on the ta
+-- @191782964
+sor was down"};if(await uae(m,ge.state,ge.detail,{resumable:ie?void 0:"auto-resume"},e.storageV5)==="dead-epoch")oe++,ee=!0;if(ee)Ae++;if(e.credentials)e.credentials.discardSpentCredentialFile(Yye(m)).catch(()=>{});else Z(Yye(m)).catch(()=>{});if(B()==="windows")if(e.storageV5)qe(e.storageV5,m,C.ptySock);else Z(Sz(m)).catch(()=>{}),Z(og(xh(m))).catch(()=>{}),Z(Ev(xh(m))).catch(
+
+## hits "dead-epoch row" count=1 189672592
+-- @189672592
+resh.`}}if(g.deadEpochReapedAt!==void 0&&!t?.force&&!R)return n(`bg: respawn of ${e} refused \u2014 dead-epoch row whose transcript is gone`,{level:"warn"}),s("tengu_bg_respawn_no_transcript",{via:c(le.via),had_link_scan_path:g.linkScanPath!==void 0,quarantined:!1,refused:!0}),y("job_respawn","dead_epoch_transcript_gone"),{ok:!1,alive:!1,state:g,errorCode:"dead_epoch_transcript
+
+## Nw-near-Di @182998139
+function Nw(e){return Cf(e)!==null}

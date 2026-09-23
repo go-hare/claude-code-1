@@ -1,0 +1,145 @@
+# gold-248-fe-ext
+when=2026-09-21T00:45:17.107Z
+
+## Fe-178537988 @178537988
+d 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}replaceFlagSettingsPath(e){this.#e=e}flagSettingsExpectedContent(){return this.#t}replaceFlagSettingsExpectedContent(e){this.#t=e}flagSettingsFilePinnedContent(){return this.#n}replaceFlagSettingsFilePinnedContent(e){this.#n=e}flagSettingsInline(){return this.#o}replaceFlagSettingsInline(e){this.#o=e}parentManagedSettings(){return this.#r}replaceParentManagedSettings(e){this.#r=e}parentManagedSettingsInvalid(){return this.#i}replaceParentManagedSettingsInvalid(e){this.#i=e}allowedSettingSources(){return this.#a}replaceAllowedSettingSources(e){this.#a=e}useCoworkPlugins(){return this.#s}replaceUseCoworkPlugins(e){this.#s=e}reset(){this.#e=void 0,this.#t=void 0,this.#n=void 0,this.#o=null,this.#r=null,this.#i=!1,this.#a=tn(),this.#s=!1}}function tn(){return["userSettings","projectSettings","localSettings","flagSettings","policySettings"]}class Oe{#e=[];#t=[];#n=[];#o=void 0;#r=[];#i=[];#a=!1;#s=void 0;#d=void 0;#l=void 0;inlinePlugins(){return this.#e}replaceInlinePlugins(e){this.#e=e}inlinePluginsNoMcp(){return this.#t}replaceInlinePluginsNoMcp(e){this.#t=e}inlinePluginUrls(){return this.#n}replaceInlinePluginUrls(e){this.#n=e}syncedPluginDirs(){return this.#o??[]}syncedPluginDirsRegistered(){return this.#o!==void 0}replaceSyncedPluginDirs(e){this.#o=e}clearSyncedPluginDirs(){this.#o=void 0}additionalDirectoriesForClaudeMd(){return this.#r}replaceAdditionalDirectoriesForClaudeMd(e){this.#r=e}allowedChannels(){return this.#i}replaceAllowedChannels(e){this.#i=e}hasDevChannels(){return this.#a}replaceHasDevChannels(e){this.#a=e}sessionSkillAllowlist(){return this.#s}replaceSessionSkillAllowlist(e){this.#s=e}chromeFlagOverride(){return this.#d}replaceChromeFlagOverride(e){this.#d=e}teammateAgentId(){return this.
+
+## needle "class Fe{" hits=4
+@178537943 sha=0ab3d41a6899e314 class Fe{#e=void 0;#t=void 0;#n=void 0;#o=null;#r=null;#i=!1;#a=tn();#s=!1;flagSettingsPath(){return this.#e}
+@191795235 sha=e85186a2dbfb4f28 class Fe{id;kind;config;invocation;logger;authManager;onStateChange;child=null;spawnedAt=0;stopping=!1;consecutiveCrashes=0;backoffTimer=null;wrapperParkLogged=!1;exitPromise=null;lastBusy=!1;lastBusyAt=0;constructor(t,e,o,r,a,p,g){this.id=t;this.kind=e;this.config=o;this.invocation=r;this.logger=a;this.authManager=p;this.onStateChange=g}
+@203424737 sha=c84725921b634eff class Fe{cap;replay;entries=new Map;constructor(e,t){this.cap=e;this.replay=t}
+@204977147 sha=50d49145c2707cfe class Fe{#e=new Map;acquire(e,o,t){let r=this.#o(e),i=()=>{r.active-=1,this.#n(r)};if(t.aborted)return Promise.resolve(void 0);if(r.active<o&&r.waiters.length===0)return r.active+=1,Promise.resolve(i);return new Promise((d)=>{let u={limit:o,signal:t,grant:()=>{t.removeEventListener("abort",m),d(i)},cancel:()=>d(void 0)},m=()=>{let p=r.waiters.indexOf(u);if(p!==-1)r.waiters.splice(p,1);d(void 0),this.#n(r)};r.waiters.push(u),t.addEventListener("abort",m,{once:!0}),this.#n(r)})}
+
+## needle "function tn(" hits=33
+@178321953 sha=5405a81eb1b3e150 function tn(e){return e.type==="tool_use"||e.type==="server_tool_use"}
+@178538797 sha=4c7707fa4d321be9 function tn(){return["userSettings","projectSettings","localSettings","flagSettings","policySettings"]}
+@179021703 sha=b0c84412b272d45f function tn(e){return Hq(e)?dGt(e,!0):ze(e)}
+@179337359 sha=20cafe56700c6cba function tn(e,n,t){let{projectKey:a,year:s,month:i,day:o}=e;if(a===void 0)return t?{kind:"scope",scope:{namespace:"sessionLog",projectKey:n}}:void 0;if(s===void 0)return t&&KWt.test(n)?{kind:"scope",scope:{...e,year:n}}:void 0;if(i===void 0||o===void 0)return t&&R9e.test(n)?{kind:"scope",scope:i===void 0?{...e,month:n}:{...e,day:n}}:void 0;if(t||!$e(n))return;let d=n.slice(0,-h.length);return{kind:"key",key:{namespace:"sessionLog",projectKey:a,year:s,month:i,day:o,logName:d}}}
+
+## needle "function xL(" hits=5
+@178566482 sha=24a623548308081d function xL(){return n().host.settingsSource.flagSettingsPath()}
+@184915744 sha=31602efcec0cdad0 function xL(e){return e>=200&&e<300}
+@199960344 sha=e48c7883d56dbf85 function xL(e,t){return new e({type:"file",...z.normalizeParams(t)})}
+@201056460 sha=bbdca87c3a9268ff function xL(e,t){return t||!QA.isBridgeCarrierChild&&Object.values(e).some((o)=>o.type!=="sdk")}
+
+## needle "function XEn(" hits=1
+@178566546 sha=303873f56ed30ce1 function XEn(e){n().host.settingsSource.replaceFlagSettingsPath(e)}
+
+## needle "function x2(" hits=4
+@178566924 sha=db64f18924e34971 function x2(){return n().host.settingsSource.flagSettingsInline()}
+@183736151 sha=faacf8d3e390e08c function x2(){let e=new Map;return{get:(t)=>e.get(t),set:(t,r)=>{e.set(t,r)}}}
+@200418635 sha=fd583d147d55158c function x2({url:e,sql:t,requestId:n}){let i=e.searchParams,r=xa(i,20);if(r===null)return et(400,"limit: must be between 1 and 1000",n);let o=i.get("scope_type");if(o!==null&&o!=="organization"&&o!=="rbac_group"&&o!=="user")return et(400,"scope_type: must be one of organization, rbac_group, user",n);let s=i.get("after_id"),u=i.get("before_id");if(s!==null&&u!==null)return et(400,"after_id and before_id are mutually exclusive",n);let c=s??u,f;if(c!==null){if(f=(await t`SELECT created_at::text AS created_at, id FROM spend_limits WHERE id = ${c}`)[0],!f)return et(400,`${s!==null?"after_id":"before_id"}: no spend limit with this id`,n)}let p=r+1,m,_;if(u!==null&&f){let v=await t`
+      SELECT * FROM spend_limits
+      WHERE (created_at, id) < (${f.created_at}::timestamptz, ${f.id})
+        AND (${o}::text IS NULL OR scope_type = ${o})
+      ORDER BY created_at DESC, id DESC LIMIT ${p}
+    `;m=v.length>r,_=v.slice(0,r).reverse().map(Io)}else{let v=f?.created_at??null,E=await t`
+      SELECT * FROM spend_limits
+      WHERE (${v}::timestamptz IS NULL
+             OR (created_at, id) > (${v}::timestamptz, ${f?.id??null}))
+        AND (${o}::text IS NULL OR scope_type = ${o})
+      ORDER BY created_at, id LIMIT ${p}
+    `;m=E.length>r,_=E.slice(0,r).map(Io)}let b=_.map(Ap);return Response.json({data:b,has_more:m,first_id:b[0]?.id??null,last_id:b.at(-1)?.id??null},{headers:Ci})}
+@216029558 sha=92fe6370ea0abd8b function x2(e){return e!==null&&typeof e=="object"&&xh(e)==="[object Arguments]"}
+
+## needle "function AEe(" hits=3
+@178566990 sha=1a22b65420e75761 function AEe(e){n().host.settingsSource.replaceFlagSettingsInline(e)}
+@217214947 sha=b5633f5250c84c2c function AEe(e,t){return ww(e,yq(e),t)}
+@223389976 sha=366fdeac45402878 function AEe(e,t,n){return e&&e.top===t&&e.left===n?e:{top:t,left:n}}
+
+## needle "function ZEn(" hits=1
+@178567059 sha=58473ba8ed203462 function ZEn(){return n().host.settingsSource.parentManagedSettings()}
+
+## needle "function ekn(" hits=2
+@178567129 sha=3a3b6bea328da4d2 function ekn(e){n().host.settingsSource.replaceParentManagedSettings(e)}
+@185359304 sha=2e27c889c1877b19 function ekn(e,t,r,o=!1){if(e instanceof XC){if(e.interrupted)throw new tH(`Shell command interrupted for pattern "${t}": [Command interrupted]`);let g=Zrt(e.stdout,e.stderr,o);throw new tH(`Shell command failed for pattern "${t}": ${g}`)}let u=l(e);if(no(r))throw n(`prompt shell substitution spawn failure: ${u}`,{level:"error"}),new tH(`Shell substitution failed for pattern "${t}" (detail withheld on this connection)`);let p=o?`[Error: ${u}]`:`[Error]
+${u}`;throw new tH(p)}
+
+## needle "function kde(" hits=3
+@178569888 sha=ba9ccdd1990b29b7 function kde(){return n().host.settingsSource.allowedSettingSources()}
+@184070545 sha=c9ac792d71ab0c0d function kde(e){try{tD.peek(e)?.builds.emit()}catch(t){_(t)}}
+@222522230 sha=07c9e82d14811743 function kde(e,t){return function(r,...o){let i=new URL(e);return i.searchParams.set("code",r.toString()),o.forEach(a=>i.searchParams.append("args[]",a)),`${t} error #${r}; visit ${i} for the full message.`}}
+
+## needle "function mkn(" hits=2
+@178569958 sha=142a9cea176da4a4 function mkn(e){n().host.settingsSource.replaceAllowedSettingSources(e)}
+@185371780 sha=987110e204b02458 function mkn(e,t,r){try{let[o,u]=await Promise.all([F8("commands",e,r),Promise.all(t.map((C)=>{let M=hc(C,".claude","commands");return kP(M,r).then((L)=>L.map((N)=>({...N,baseDir:M,source:"projectSettings"})))}))]),p=[...o,...u.flat()],g=lkn(p),k=[],E=!1;for(let{baseDir:C,filePath:M,frontmatter:L,content:N,source:U}of g)try{let G=oke(M)?wx(M):void 0,ue=dkn({baseDir:C,filePath:M,frontmatter:L,content:N,source:U});TE("skill",L);let pe=jee(L,N,ue,"Custom command");k.push({skill:h4e({...pe,skillName:ue,displayName:void 0,markdownContent:zS(ro().skillContentIntern,M,N),source:U,baseDir:G,loadedFrom:"commands_DEPRECATED",paths:void 0}),filePath:M})}catch(j){n(`[skills] failed to load command from ${M}: ${j}`,{level:"error"}),E=!0}if(E)f("skill_load_commands_dir","skill_load_commands_parse_failed");else b("skill_load_commands_dir");return k.sort((C,M)=>C.skill.name.localeCompare(M.skill.name))}catch(o){if(xo(o))n(`[skills] commands-dir load failed: ${o.code}`,{level:"error"});else _(o);return y("skill_load_commands_dir","skill_load_commands_dir_failed"),[]}}
+
+## needle "function C4(" hits=3
+@178570178 sha=bde3aecf59bfb66e function C4(){return n().host.extensionsConfig.inlinePlugins()}
+@182556736 sha=f63de3cf6dad98bf function C4(e,t,r){switch(t.fieldKind){case"list":if(!(0,$l.isCelList)(r))throw ar(t,"list",r);let o=(0,Ar.reflectList)(t,void 0,!1);O4(o,r),e.set(t,o);return;case"map":if(!(0,Vl.isCelMap)(r))throw ar(t,"map",r);let u=(0,Ar.reflectMap)(t,void 0,!1);k4(u,r),e.set(t,u);return;case"enum":e.set(t,Ap(t,r));return;case"message":let p=vp(t,r);if(p!==null)e.set(t,p);return}e.set(t,Oa(t,t.scalar,r))}
+@200049096 sha=eafa5667c62a6c1a function C4(e){let t=e;for(;;){if(ut(t)===qn.ZodKind.ZodOptional)return!0;let n=Xi(t);if(n===t)return!1;t=n}}
+
+## needle "function m7e(" hits=2
+@178570112 sha=ea4a9d396eb30fb4 function m7e(e){n().host.extensionsConfig.replaceInlinePlugins(e)}
+@184783467 sha=c15849a0a12a7553 function m7e(e,t){if(rC()||!yo("projectSettings"))return n(`$.fs.ancestors (${t}): project memory is off`),[];let r=ve(),o=[],u=r;while(u!==Hcn(u).root)o.push(u),u=$cn(u);let p=sCe(r),g=Go().hasClaudeMdExternalIncludesApproved??!1,k=new Set,E=[];for(let C of o.reverse()){if(aCe(C,p))continue;for(let M of e){let L=await bg(Ucn(C,M),"Project",k,g);if(L.length>0)E.push({dir:C,name:M,content:L.map((N)=>N.content).join(`
+
+`)})}}return n(`$.fs.ancestors (${t}): ${e.join(", ")} found ${E.length} of ${o.length} directories`),E}
+
+## needle "function R4(" hits=4
+@178570312 sha=f9416924118f1b70 function R4(){return n().host.extensionsConfig.inlinePluginsNoMcp()}
+@182556508 sha=6aeb70a15b4b79b8 function R4(e,t){let r=(0,A4.getMsgDesc)(e),o=(0,Ar.reflect)(r);for(let[u,p]of t.entries()){let E=r.fields.find((I)=>I.name===u);if(E===void 0)throw Error(`Unknown field ${u} for ${e}`);C4(o,E,p)}return(0,I4.reflectMsgToCel)(o)}
+@200048569 sha=2ce691ff53be4606 function R4(e){if(ut(e)!==qn.ZodKind.ZodNumber)return{min:void 0,max:void 0};let t=e._zod.def.checks,n,i;for(let r of t!==null&&t!==void 0?t:[]){let o=r._zod.def;if(typeof o.value!=="number")continue;if(o.check==="greater_than")n={value:o.value,inclusive:o.inclusive===!0};else if(o.check==="less_than")i={value:o.value,inclusive:o.inclusive===!0}}return{min:n,max:i}}
+@203288716 sha= {"i":203288716,"missEnd":true,"preview":"function R4(fjo){let fu=g(35),{pluginName:Uy,pluginDescription:y4,fileExtension:Xwe,onResponse:Ym}=fjo,iet;if(fu[0]!==Ym)iet=()=>Ym(\"no\"),fu[0]=Ym,fu[1]=iet;else iet=fu[1];let set;if(fu[2]===p)set=[],fu[2]=set;else set=fu[2];tr(iet,eTe,set);let aet;if(fu[3]!==Ym)aet=function yO(g"}
+
+## needle "function h7e(" hits=1
+@178570241 sha=e7c19f8b6f92af8c function h7e(e){n().host.extensionsConfig.replaceInlinePluginsNoMcp(e)}
+
+## needle "function hkn(" hits=2
+@178570380 sha=0218cc636114e1c1 function hkn(e){n().host.extensionsConfig.replaceInlinePluginUrls(e)}
+@185373424 sha=603eb042346746f7 function hkn(e,t){let r=await sot(t);if(r.status!=="ok")return null;let o=r.names,u=`@${cu}`,p=qe().enabledPlugins,g=new Set;for(let E in p)if(p[E]===!1&&E.endsWith(u))g.add(E.slice(0,-u.length));let k=await Promise.all(o.map(async(E)=>{if(g.has(E))return null;if(g.size>0){let C=await t.read([Se.userConfigDir("skills",[E,".claude-plugin","plugin.json"])]);if(!C.ok)return null;let M=C.value.items[0];if(M.found&&M.totalBytes>_A)return null}try{return await DW(hc(e,E,"SKILL.md"))}catch{return null}}));return new Set(k.filter((E)=>E!==null))}
+
+## needle "function Vne(" hits=2
+@178570449 sha=9d232015003264f3 function Vne(){return n().host.extensionsConfig.inlinePluginUrls()}
+@223777580 sha= {"i":223777580,"missEnd":true,"preview":"function Vne({spec:e,scale:t,editing:n,selected:r,onSelect:o,onChange:i,onGesture:a,armWindowGestureEnd:s,onTextEditing:c,autoEdit:l,onDuplicate:u,onCopyGhost:f}){let[d,p]=(0,Sl.useState)(l===!0);(0,Sl.useEffect)(()=>(c?.(d),()=>{d&&c?.(!1)}),[d]);let m=(0,Sl.useRef)(null),g=(0,S"}
+
+## needle "extensionsConfig." hits=22
+@178570137
+&n().host.launchOptions.clientType()!=="claude-vscode"}function m7e(e){n().host.extensionsConfig.replaceInlinePlugins(e)}function C4(){return n().host.extensionsConfig.inlinePlugins()}function h7e(e){n().host.extensionsConfig.replaceInlinePluginsNoMcp(e)}function R4(){return n().host.extensionsConfig.inlinePluginsNo
+@178570208
+n().host.extensionsConfig.replaceInlinePlugins(e)}function C4(){return n().host.extensionsConfig.inlinePlugins()}function h7e(e){n().host.extensionsConfig.replaceInlinePluginsNoMcp(e)}function R4(){return n().host.extensionsConfig.inlinePluginsNoMcp()}function hkn(e){n().host.extensionsConfig.replaceInlinePluginUrls
+@178570266
+ C4(){return n().host.extensionsConfig.inlinePlugins()}function h7e(e){n().host.extensionsConfig.replaceInlinePluginsNoMcp(e)}function R4(){return n().host.extensionsConfig.inlinePluginsNoMcp()}function hkn(e){n().host.extensionsConfig.replaceInlinePluginUrls(e)}function Vne(){return n().host.extensionsConfig.inline
+@178570342
+ost.extensionsConfig.replaceInlinePluginsNoMcp(e)}function R4(){return n().host.extensionsConfig.inlinePluginsNoMcp()}function hkn(e){n().host.extensionsConfig.replaceInlinePluginUrls(e)}function Vne(){return n().host.extensionsConfig.inlinePluginUrls()}function Tde(e){n().host.extensionsConfig.replaceSyncedPluginDi
+
+## alias "xL as getFlagSettingsPath" hits=1
+nnedContent,x2 as getFlagSettingsInline,xL as getFlagSettingsPath,AL as getForkReplayLaunchConfig,GC as g
+
+## alias "XEn as setFlagSettingsPath" hits=1
+nedContent,AEe as setFlagSettingsInline,XEn as setFlagSettingsPath,Rwn as setForkReplayLaunchConfig,Cwn as
+
+## alias "x2 as getFlagSettingsInline" hits=1
+vde as getFlagSettingsFilePinnedContent,x2 as getFlagSettingsInline,xL as getFlagSettingsPath,AL as getFork
+
+## alias "AEe as setFlagSettingsInline" hits=1
+QEn as setFlagSettingsFilePinnedContent,AEe as setFlagSettingsInline,XEn as setFlagSettingsPath,Rwn as setFo
+
+## alias "ZEn as getParentManagedSettings" hits=1
+ngShownThisSession,ve as getOriginalCwd,ZEn as getParentManagedSettings,wde as getParentManagedSettingsInvalid,
+
+## alias "ekn as setParentManagedSettings" hits=1
+ngShownThisSession,Nb as setOriginalCwd,ekn as setParentManagedSettings,tkn as setParentManagedSettingsInvalid,
+
+## alias "kde as getAllowedSettingSources" hits=1
+tAgentColorMap,Bp as getAllowedChannels,kde as getAllowedSettingSources,UGt as getApiKeyFromFd,ll as getAttache
+
+## alias "mkn as setAllowedSettingSources" hits=1
+eeringSnapshot,p7 as setAllowedChannels,mkn as setAllowedSettingSources,BGt as setApiKeyFromFd,IEn as setAttach
+
+## alias "C4 as getInlinePlugins" hits=1
+ainLoopModel,Vne as getInlinePluginUrls,C4 as getInlinePlugins,R4 as getInlinePluginsNoMcp,Wq as getIn
+
+## alias "m7e as setInlinePlugins" hits=1
+ainLoopModel,hkn as setInlinePluginUrls,m7e as setInlinePlugins,h7e as setInlinePluginsNoMcp,AEn as set
+
+## alias "R4 as getInlinePluginsNoMcp" hits=1
+InlinePluginUrls,C4 as getInlinePlugins,R4 as getInlinePluginsNoMcp,Wq as getInvokedSkills,Vkn as getInvoke
+
+## alias "h7e as setInlinePluginsNoMcp" hits=1
+nlinePluginUrls,m7e as setInlinePlugins,h7e as setInlinePluginsNoMcp,AEn as setIsInteractive,P4 as setIsRemo
+
+## alias "Vne as getInlinePluginUrls" hits=1
+aultModel,y0 as getInitialMainLoopModel,Vne as getInlinePluginUrls,C4 as getInlinePlugins,R4 as getInlineP
+
+## alias "hkn as setInlinePluginUrls" hits=1
+ultModel,Xwn as setInitialMainLoopModel,hkn as setInlinePluginUrls,m7e as setInlinePlugins,h7e as setInlin

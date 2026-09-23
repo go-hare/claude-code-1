@@ -85,6 +85,20 @@ export async function setup(
     process.exit(1)
   }
 
+  // densable uo — daemon bg workers await z() so /dev/tty editors work.
+  if (process.env.CLAUDE_BG_BACKEND === 'daemon') {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } = await import(
+      './services/analytics/growthbook.js'
+    )
+    const { applyBgWorkerCttyOutcome, ensureBgWorkerControllingTty } =
+      await import('./utils/bgWorkerCtty.js')
+    const cttyEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_bg_worker_ctty',
+      true,
+    )
+    applyBgWorkerCttyOutcome(await ensureBgWorkerControllingTty(cttyEnabled))
+  }
+
   // Set custom session ID if provided
   if (customSessionId) {
     switchSession(asSessionId(customSessionId), null, 'startup_custom_id')

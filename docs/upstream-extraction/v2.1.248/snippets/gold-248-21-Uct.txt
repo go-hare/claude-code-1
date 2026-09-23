@@ -1,0 +1,46 @@
+# gold-248-21-Uct
+when=2026-09-20T05:58:53.268Z
+
+## 248 Uct( hits=6
+- #0 @186255702 .length===0}catch{return!1}})}function l1t(e){let t=ur(e).trim();if(!t.startsWith("{"))return!1;try{let r=q(t);return typeof r==="object"&&r!==null&&"async"in r&&r.async===!0}catch{return!1}}function Uct(e,t,r){let o=r.trim();return t!==0&&o?`${e}
+
+Hook exited ${t} with stderr:
+${o}`:e}function Bct(e){let t=e.trim();if(t===""){let r=cz().safeParse({});if(r.success)return n("HTTP hook returned empty bo
+- #1 @186301299 ,hookEvent:ue,command:Sr,durationMs:po,timedOut:!p?.aborted,timeoutMs:Xn}),outcome:"cancelled",hook:fn};return}let{json:Di,plainText:ai,validationError:Rs}=lIe(Pn.stdout);if(Rs&&Pn.status!==2){let wn=Uct(Rs,Pn.status,Pn.stderr);du({hookId:ir,hookName:pe,hookEvent:ue,output:Pn.output,stdout:Pn.stdout,stderr:wn,exitCode:Pn.status,outcome:"error"}),yield{message:Nn({type:"hook_non_blocking_error",hookNam
+- #2 @186318972 ,output:"Hook cancelled",blocked:!1,...p?.aborted&&{cancelled:!0}};n(`${M} [${Be}] completed with status ${ze.status}`);let{json:Qe,validationError:xt}=lIe(ze.stdout);if(xt&&ze.status!==2)throw Error(Uct(xt,ze.status,ze.stderr));if(Qe&&!S_(Qe))n(`Parsed JSON output from hook: ${S(Qe)}`,{level:"verbose"});if(Qe&&ep(Qe))Qse(Qe.metrics,Ie,C);Sre(Qe,M);let ct=Qe&&ep(Qe)&&Qe.decision==="block",Jt=ze.status
+- #3 @199313402 rr,"No stderr output")}`,blocked:!1}}let{json:f,plainText:l,validationError:y}=lIe(e.stdout);if(y!==void 0&&e.status!==2)return{answer:{},exitClass:e.status===0?"0":"other",localWarning:`[${r}]: ${Je(Uct(y,e.status,e.stderr),"hook JSON output failed validation")}`,blocked:!1};if(f!==void 0){if("async"in f)return e.status===2&&!p&&w?{answer:st(t,`[${r}]: ${e.stderr||"No stderr output"}`),exitClass:"2",
+- #4 @216504280 ge,P)){M.edge.points=P,R=!0;break}let B=k(M,D);if(B&&g(M.edge,B)){M.edge.points=B,R=!0;break}}if(R)break}}if(!R)return}}var Pye=F(()=>{"use strict";pc();o(hB,"nudgeSharedInteriorSubpaths")});function Uct(e,t,r,n){let i=t.x-e.x,a=t.y-e.y,s=n.x-r.x,l=n.y-r.y,u=i*l-a*s;if(Math.abs(u)<1e-10)return!1;let h=r.x-e.x,d=r.y-e.y,f=(h*l-d*s)/u,p=(h*a-d*i)/u,m=.01;return f>m&&f<1-m&&p>m&&p<1-m}function dB(e){let 
+- #5 @216505228 [g],p2:h[g+1]})}let l=new Set;for(let u=0;u<s.length;u++)for(let h=u+1;h<s.length;h++){let d=s[u],f=s[h];if(d.edgeId!==f.edgeId&&!(d.start===f.start||d.start===f.end||d.end===f.start||d.end===f.end)&&Uct(d.p1,d.p2,f.p1,f.p2)){let p=d.edgeId<f.edgeId?`${d.edgeId}|${f.edgeId}`:`${f.edgeId}|${d.edgeId}`;l.has(p)||(l.add(p),n.push({type:"edge-edge-crossing",edgeId:d.edgeId,targetId:f.edgeId,detail:`edges 
+
+## 248 function Uct hits=2
+- #0 @186255693 s(u.data).length===0}catch{return!1}})}function l1t(e){let t=ur(e).trim();if(!t.startsWith("{"))return!1;try{let r=q(t);return typeof r==="object"&&r!==null&&"async"in r&&r.async===!0}catch{return!1}}function Uct(e,t,r){let o=r.trim();return t!==0&&o?`${e}
+
+Hook exited ${t} with stderr:
+${o}`:e}function Bct(e){let t=e.trim();if(t===""){let r=cz().safeParse({});if(r.success)return n("HTTP hook returned empty b
+- #1 @216504271 P&&g(M.edge,P)){M.edge.points=P,R=!0;break}let B=k(M,D);if(B&&g(M.edge,B)){M.edge.points=B,R=!0;break}}if(R)break}}if(!R)return}}var Pye=F(()=>{"use strict";pc();o(hB,"nudgeSharedInteriorSubpaths")});function Uct(e,t,r,n){let i=t.x-e.x,a=t.y-e.y,s=n.x-r.x,l=n.y-r.y,u=i*l-a*s;if(Math.abs(u)<1e-10)return!1;let h=r.x-e.x,d=r.y-e.y,f=(h*l-d*s)/u,p=(h*a-d*i)/u,m=.01;return f>m&&f<1-m&&p>m&&p<1-m}function dB(e){let
+
+## 247 function Uct hits=1
+- #0 @213932969 0,t);if(n){_(`Failed to persist skipWorkflowUsageWarning: ${n.message}`,{level:"error"});return}D("tengu_workflow_usage_warning_accepted",{})}var Ict=w(()=>{Pt();Cc();Nr();be();up();Co();Act();xC()});function Uct(e){return!Dq(e.agentId)&&qct()}function GRo(){if(As.CLAUDE_CODE_TICKLISH_WHISPER!==void 0)return As.CLAUDE_CODE_TICKLISH_WHISPER;return we("tengu_ticklish_whisper",!1)}function qce(e){return GRo()&&e
+
+## 247 Uct( hits=4
+- #0 @213932978 ){_(`Failed to persist skipWorkflowUsageWarning: ${n.message}`,{level:"error"});return}D("tengu_workflow_usage_warning_accepted",{})}var Ict=w(()=>{Pt();Cc();Nr();be();up();Co();Act();xC()});function Uct(e){return!Dq(e.agentId)&&qct()}function GRo(){if(As.CLAUDE_CODE_TICKLISH_WHISPER!==void 0)return As.CLAUDE_CODE_TICKLISH_WHISPER;return we("tengu_ticklish_whisper",!1)}function qce(e){return GRo()&&e.
+- #1 @213959234 de!==void 0;return{behavior:"deny",decisionReason:{type:"classifier",classifier:"auto-mode",reason:M.reason,...W&&{noVerdict:W}},message:W?Dct(M.reason,{refused:!1}):Imn(M.reason,{autoModeConsentFlow:Uct(a)})}}if(!F||!qce(a))gX(a,Rq);if(F)return D("tengu_auto_mode_fallback_to_ask",{reason:de("requires_user_interaction"),toolName:fr(e.name),isMcp:e.isMcp??!1}),l;return k({updatedInput:l.updatedInput??t
+- #2 @218186254 s=t.options.tools,i=s.some((l)=>Zn(l,kn))&&s.some((l)=>Zn(l,cr)||Zn(l,$r))&&P9e();if(o&&!i)return[];let a=zHr(e??[]);if(a&&!(a.steerOnly&&!o))return[];return[{type:"auto_mode",autoModeConsentFlow:!r&&Uct(t),bashFirst:i,steerOnly:o,bypass:r}]}async function M0s(e,t){if(t.agentId)return[];if(!hHr())return[];if(CA(!1),Le(t).mode==="auto"||K_())return[];let n=zHr(e??[]);if(!n)return[];return[{type:"auto_m
+- #3 @243070202 n Mdt(e,r);case Odt:return new i;case Pdt:case $dt:return new i(e);case Bdt:return Rdt(e);case Fdt:return new i;case zdt:return Ldt(e)}}function g2e(e){return typeof e.constructor=="function"&&!LT(e)?Uct($be(e)):{}}function y2e(e){return Yl(e)&&ey(e)==eft}function v2e(e){return Yl(e)&&ey(e)==nft}function X2(e,t,r,i,n,a){var s,l=t&lft,u=t&cft,h=t&uft;if(r&&(s=n?r(e,i,n,a):r(e)),s!==void 0)return s;if(!
+
+## Uct near@186255693 fn=l1t @186255532
+len=161 sha=80cc9bad2a6cf598
+exact247=0
+function l1t(e){let t=ur(e).trim();if(!t.startsWith("{"))return!1;try{let r=q(t);return typeof r==="object"&&r!==null&&"async"in r&&r.async===!0}catch{return!1}}
+
+## Uct near@216504271 fn=hB @216501526
+MISS {"i":216501526,"missEnd":true,"preview":"function hB(e,t){let{realNodeRects:h,labelNodeRects:d}=gu(t.values()),f=o((w,S)=>Lf(S,.001).map(R=>({...R,edge:w,interior:R.index>=1&&R.index<=S.length-3})),\"segmentsFor\"),p=o(()=>{let w=[];for(let S of e){if(S.isLayoutOnly)continue;let R=S.points;!R||R.length<2||w.push(...f(S,Jr"}
+
+## Uct(Rs caller near@186301299 fn= @-1
+NO_FN
+
+## 248 JSON validation failed: ${ hits=0
+
+## 247 JSON validation failed hits=2
+- #0 @201924636 mpt too long; retrying with (.....6.Hooks: prompt-hook evaluator API error: ........Hook evaluator API error: ......p...Hooks: Model response: .'...H...Hooks: error parsing response as JSON: ......o..JSON validation failed..;...&...Hooks: model response does not conform to expected schema: .........Schema validation failed: ..0...9<..Hooks: Prompt hook condition judged impossible: *.....6.Hooks: Prompt hook condition w
+- #1 @218221237 )}let P=is(C.message.content).trim();_(`Hooks: Model response: ${P}`);let x=yu(LI(P),!1);if(!x)return _(`Hooks: error parsing response as JSON: ${P}`),tY(e,{hookName:t,toolUseID:c,hookEvent:n,stderr:"JSON validation failed",stdout:P});let A=gke().safeParse(x);if(!A.success)return _(`Hooks: model response does not conform to expected schema: ${A.error.message}`),tY(e,{hookName:t,toolUseID:c,hookEvent:n,stderr:`Schema va

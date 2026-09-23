@@ -1,0 +1,178 @@
+# gold-248-feat-1  --restricted / CLAUDE_CODE_RESTRICTED
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:37.657Z
+
+## #1 --restricted  needle="--restricted"  hits=32
+- #0 @92224972 ?...--settings........*.--managed-settings.......R^.--setting-sources.......r...--restricted....=o..eagerLoadSettings_end.......n.A.settings_load_ms..../V..performance.
+...
+- #1 @92346183 not destructure property 'teleport' from null or undefined value.}...u^{.Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs it
+- #2 @92348946 rvers policy..F...:...[Claude in Chrome] Skipping chrome wiring: --safe-mode or --restricted..<.......[Claude in Chrome] MCP server blocked by enterprise policy: 2.......Wa
+- #3 @96359976 ....1	..claude/background-task..X...Q.P.Cloud sessions cannot be created from a --restricted session: they would not enforce it......_n.bind_attestation_stale.......	..boun
+- #4 @97620017 v..' ignored; the built-in web-fetch agent always runs as a local agent....x...(--restricted)..(....3W.(no claude.ai login or feature gate off)1...^...[remote agent] isolat
+- #5 @97651828 tained no-internet environment (or bypass is policy-disabled, or the session is --restricted); keeping parent mode '......p.] Failed to compute skill listing attachment: ..
+- #6 @97859940 hosts path, which is not supported..Q.....m." is outside the working directory; --restricted only sends files from inside it........U..." is not a regular file.-...Mp.." do
+- #7 @98326298 a sensitive file......
+<..resolvedWorkingDirPaths.......P. is outside @....%..; --restricted confines the file tools to the working directory."....f8.tengu_auto_mode_worktr
+- #8 @99066904 x (autoAllowBashIfSandboxed enabled).......Read-only command is allowed0.......--restricted: path outside the working directory4...Jo..bashCommandClamp: no clamp rule matc
+- #9 @178161324 !0;continue}if(s==="--strict-mcp-config"){t.strictMcpConfig=!0;continue}if(s==="--restricted"){t.restricted=!0;continue}let o=s.indexOf("="),p=o===-1?s:s.slice(0,o),l=Objec
+- #10 @178162289 p-config",i]),...n.strictMcpConfig?["--strict-mcp-config"]:[],...n.restricted?["--restricted"]:[]]}function rer(n){let i=0;while(n[i]==="--dangerously-skip-permissions"||n[
+- #11 @178914724 box (autoAllowBashIfSandboxed enabled)",wbt="Read-only command is allowed",HKe="--restricted: path outside the working directory",ZMe="bashCommandClamp: no clamp rule match
+- … +20 more
+
+## #1 CLAUDE_CODE_RESTRICTED  needle="CLAUDE_CODE_RESTRICTED"  hits=8
+- #0 @92605544 d.......py..extraEnv........dispatchExtraArgs........n..dispatchDefaults.....)..CLAUDE_CODE_RESTRICTED..........[ \t]+$.........cc-transcript-........y..txt....Ug..opening ....o.>.wr
+- #1 @178178462 et d=MSt(t);d.config.restricted||=["1","true","yes","on"].includes((process.env.CLAUDE_CODE_RESTRICTED??"").toLowerCase().trim());let{dispatchDefaults:u,rest:M}=Dt(d.rest),k=d.hasAge
+- #2 @178589387 nv.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-mode")?"restart without --safe-mode":"unset CLA
+- #3 @178770643 TTINGS_POLL_MS:()=>vc,CLAUDE_CODE_REPL:()=>dL,CLAUDE_CODE_REPO_CHECKOUTS:()=>ET,CLAUDE_CODE_RESTRICTED:()=>fL,CLAUDE_CODE_RESUME_FROM_SESSION:()=>_T,CLAUDE_CODE_RESUME_INTERRUPTED_TU
+- #4 @180925888 ,"CLAUDE_CODE_DISABLE_HOOK_FORWARDING","CLAUDE_CODE_DISABLE_PLUGIN_FORWARDING","CLAUDE_CODE_RESTRICTED"]),G=new Set(["CLAUDE_REMOTE_WORKFLOW_SCRIPT","CLAUDE_REMOTE_WORKFLOW_ARGS","CL
+- #5 @189140602 E.CLAUDE_CODE_ENTRYPOINT}var WTe=["CLAUDE_CODE_SAFE_MODE","CLAUDE_CODE_SIMPLE","CLAUDE_CODE_RESTRICTED","CLAUDE_BG_POST_CLEAR_RESPAWN","CLAUDE_CODE_RESUME_INTERRUPTED_TURN","CLAUDE_C
+- #6 @202357703 ",...xQe(Xo)],env:{CLAUDE_AGENTS_SELECT:me?.autoOpenJobId??Jt,...$B(),...Yk()&&{CLAUDE_CODE_RESTRICTED:"1"}}});return w2t(ge).catch(()=>{}),wo})();return WL(Pe,Re)}catch(Pe){return _
+- #7 @204050804 E_FEDERATION_CACHE_DIR=g}let k=new Set(WTe.map((g)=>g.toUpperCase()));k.delete("CLAUDE_CODE_RESTRICTED");for(let g of Object.keys(d))if(k.has(g.toUpperCase()))delete d[g];if(nj(d),r)
+
+## #1 option --restricted  needle="option(\"--restricted"  hits=2
+- #0 @191582617 s, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").').option("--restricted","Restricted mode: removes the built-in tools that run commands or code (Bash, 
+- #1 @191605275 ct-mcp-config","Only use MCP servers from --mcp-config in dispatched sessions").option("--restricted","Start dispatched sessions in restricted mode").option("--permission-mode <mod
+
+## #1 option --restricted sq  needle="option('--restricted"  hits=0
+
+## #1 .option(--restricted  needle=".option(\"--restricted"  hits=2
+- #0 @191582616 ls, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").').option("--restricted","Restricted mode: removes the built-in tools that run commands or code (Bash, 
+- #1 @191605274 ict-mcp-config","Only use MCP servers from --mcp-config in dispatched sessions").option("--restricted","Start dispatched sessions in restricted mode").option("--permission-mode <mod
+
+## #1 restricted=1  needle="CLAUDE_CODE_RESTRICTED=1"  hits=0
+
+## #1 process.env.CLAUDE_CODE_RESTRICTED  needle="process.env.CLAUDE_CODE_RESTRICTED"  hits=2
+- #0 @178178450 0)}}return}let d=MSt(t);d.config.restricted||=["1","true","yes","on"].includes((process.env.CLAUDE_CODE_RESTRICTED??"").toLowerCase().trim());let{dispatchDefaults:u,rest:M}=Dt(d.rest),k=d.hasAge
+- #1 @178589375 Me(process.env.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-mode")?"restart without --safe-mode":"unset CLA
+
+## #1 ignores user, project  needle="ignores user, project"  hits=2
+- #0 @99632024 L and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --st
+- #1 @191582812 L and the other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --st
+
+## #1 user, project and local  needle="user, project and local"  hits=2
+- #0 @99632032 e other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-c
+- #1 @191582820 e other code-running tools) and WebFetch unless --tools names them, and ignores user, project and local settings files (managed settings and --settings still apply; add --strict-mcp-c
+
+## #1 refuse bypassPermissions  needle="bypassPermissions"  hits=155
+- #0 @92260620 4J..is not available while this process drives a cloud-hosted session...<.......bypassPermissions is not available in a cloud-hosted sessiond...f.c.file rewinding is not availab
+- #1 @92262006 not bypass permissions; drop --dangerously-skip-permissions / --permission-mode bypassPermissions / a settings defaultMode of bypassPermissions.......t.$.Error: in-process SDK M
+- #2 @92262052 p-permissions / --permission-mode bypassPermissions / a settings defaultMode of bypassPermissions.......t.$.Error: in-process SDK MCP servers cannot apply to a cloud-hosted sess
+- #3 @92299832 /9..a request without a string subtype..........forward.....%...local...........bypassPermissions...5...3...apply_flag_settings requires settings to be an object...B...3.a.apply
+- #4 @92325177 .`.recordOperation.......4.[externalMetadataToAppState] Refusing restored mode 'bypassPermissions' (disabled by settings/policy or session not launched with --dangerously-skip-p
+- #5 @92355256 PT_ADDENDUM.....g...before......Uj=.after........p..permissionModeCli...........bypassPermissionsBlockedByHost......Z.C.agentPermissionMode......\..notification....%M^.modeSuppl
+- #6 @92718816 _attach_of_visit....D)..ms_since_notification..........notified_kind......../E.bypassPermissionsModeAccepted...........allowBypass.C.......Cannot destructure property 'defaults
+- #7 @93488814  .'.<.t.a.s.k.>.'.`.......<...--dangerously-skip-permissions......6...--bg with bypassPermissions requires accepting the disclaimer first. Run `claude --dangerously-skip-permiss
+- #8 @96361452 ressable via ...........# Scratchpad Directory......".h.tengu_rosy_wren.2....&..bypassPermissions not supported in restricted mode......{&-.Use this tool when you are in plan mo
+- #9 @96763302 nsition to auto mode: gate is not enabled.c...=U..Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration.x...X...Cannot set permissi
+- #10 @96763410  is disabled by settings or configuration.x...X...Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions$...J(.
+- #11 @97207658 json\b|(?<![\w-])managed-settings\.json\b......e..bypass-permissions......4J..\bbypassPermissions.....o8..dangerously-skip-permissions .....{.--dangerously-skip-permissions\b...
+- … +143 more
+
+## #1 restricted mode  needle="restricted mode"  hits=4
+- #0 @96361487 d Directory......".h.tengu_rosy_wren.2....&..bypassPermissions not supported in restricted mode......{&-.Use this tool when you are in plan mode and have finished writing your
+- #1 @99663489 from --mcp-config in dispatched sessions...,.....K.Start dispatched sessions in restricted mode?.....0.Default permission mode for sessions dispatched from agent view.-.....*.
+- #2 @185211520 =!0}function Zj(){return yS()&&uM()}var RSe="bypassPermissions not supported in restricted mode";function D2n(e){return e.restricted&&(e.permissionMode==="bypassPermissions"||
+- #3 @191605327 ig in dispatched sessions").option("--restricted","Start dispatched sessions in restricted mode").option("--permission-mode <mode>","Default permission mode for sessions dispa
+
+## #1 Restricted mode  needle="Restricted mode"  hits=2
+- #0 @99631852 ault" to use all tools, or specify tool names (e.g. "Bash,Edit,Read")...........Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL a
+- #1 @191582640  tools, or specify tool names (e.g. "Bash,Edit,Read").').option("--restricted","Restricted mode: removes the built-in tools that run commands or code (Bash, PowerShell, REPL a
+
+## #1 --restricted   needle="--restricted "  hits=8
+- #0 @92346183 not destructure property 'teleport' from null or undefined value.}...u^{.Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its
+- #1 @96359976 ....1	..claude/background-task..X...Q.P.Cloud sessions cannot be created from a --restricted session: they would not enforce it......_n.bind_attestation_stale.......	..bound
+- #2 @97859940 hosts path, which is not supported..Q.....m." is outside the working directory; --restricted only sends files from inside it........U..." is not a regular file.-...Mp.." doe
+- #3 @98326298 a sensitive file......
+<..resolvedWorkingDirPaths.......P. is outside @....%..; --restricted confines the file tools to the working directory."....f8.tengu_auto_mode_worktre
+- #4 @181746129 ay.from(Dv(r)).join(", ");return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`,decisionReason:{type:"other",
+- #5 @183550610 ))return{result:!1,message:`Attachment "${o}" is outside the working directory; --restricted only sends files from inside it.`,errorCode:1};try{if(!(await c(s)).isFile())ret
+- #6 @185034158 .p,hasRemoteEnvironment:!0},u)}var MMt="Cloud sessions cannot be created from a --restricted session: they would not enforce it.";function VUn(e){if(typeof e!=="string"||e==
+- #7 @191366444 |yo!==null||Zo||gr!==null||Boolean(j?.url)||Boolean(H?.host)))return gn("Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its
+
+## #1 restricted launch  needle="restricted launch"  hits=0
+
+## #1 isRestricted  needle="isRestricted"  hits=16
+- #0 @93374540 cyUnreadable.....s..getSettingsForSource......E.allowManagedHooksOnly........o..isRestrictedToPluginOnly....k...disableAllHooksByUser.......hv.switchSources........Uj.isBa
+- #1 @93469764  .t.r.u.n.c.a.t.e.d. .(.e.x.c.e.e.d.e.d. .4.0.0. .l.i.n.e. .l.i.m.i.t.).....L.N.isRestricted....,.
+.remote_workspace_diff_fetch.
+.....a.no_channel..W.......W.o.r.k.s.p.a.c.
+- #2 @100145909 s......%1.B:/~BUN/root/chunk-q26sp4zf.js..S....o..Cannot destructure property 'isRestrictedToPluginOnly' from null or undefined value.R...H...Cannot destructure property '
+- #3 @101804598 cpathListSignatureresetFileIndexCachestartBackgroundCacheRefreshrunStagedMcpCallisRestrictedToPluginOnlyisSourceAdminTrustedisClaudeMdLoadingDisabledisCustomizationDisabled
+- #4 @101893659 nFromBgSnapshotisPerTurnEffortOkEmittedisPollEventIngressWiredisReplBridgeActiveisRestrictedSessionisSdkDialogHostActiveisSessionPersistenceDisabledisSingleShotPrintSession
+- #5 @192782090 rnEffortOkEmitted,WEn as isPollEventIngressWired,Pl as isReplBridgeActive,Yk as isRestrictedSession,$q as isSdkDialogHostActive,qC as isSessionPersistenceDisabled,NEn as is
+- #6 @199344325 edHooksOnly===!0||e.isSafeMode())return{kind:"none",reason:"managed_only"};if(e.isRestrictedToPluginOnly())return{kind:"none",reason:"plugin_only"};let r=e.disableAllHooksB
+- #7 @199346177 ks;return typeof e==="object"&&e!==null&&Object.keys(e).length>0},isSafeMode:wr,isRestrictedToPluginOnly:()=>ud("hooks"),isBare:()=>ho("hooks"),isSettingSourceEnabled:yo,no
+- #8 @201729442 e:x,isTruncated:!x&&!m.isBinary&&m.added+m.removed>ye,isUntracked:m.isUntracked,isRestricted:a.has(m.path)}}).sort((m,x)=>m.path.localeCompare(x.path));return{stats:i.stats
+- #9 @201741077 ),{filePath:R,hunks:de,isLargeFile:me,isBinary:he,isTruncated:ge,isUntracked:Se,isRestricted:be,width:kt}=Tt,{columns:Bt}=we(),Le=pt(),W=kt??Bt-4,ce;if(T[0]!==R||T[1]!==he|
+- #10 @207579215 e(t){return t!==void 0&&Number.isInteger(t)&&t>=1?t:1}async function fe(t){let[{isRestrictedToPluginOnly:m},{isCustomizationDisabled:_},{shouldHoldDeviceHooksByPolicy:h,sho
+- #11 @211571515 BUN/root/chunk-4hkt7f9w.js";import"B:/~BUN/root/chunk-h5e2qvst.js";export{ud as isRestrictedToPluginOnly,HU as isSourceAdminTrusted};
+.// @bun @bytecode
+// Claude Code is a
+- … +4 more
+
+## #1 setForkRestrictedLaunchConfig  needle="setForkRestrictedLaunchConfig"  hits=2
+- #0 @101895898 lePinnedContentsetFlagSettingsInlinesetFlagSettingsPathsetForkReplayLaunchConfigsetForkRestrictedLaunchConfigsetGatewayAuthsetGatewayRefreshInFlightsetGatewayServerProcesssetHasDevChannelss
+- #1 @192785069 ttingsInline,XEn as setFlagSettingsPath,Rwn as setForkReplayLaunchConfig,Cwn as setForkRestrictedLaunchConfig,u7 as setGatewayAuth,jGt as setGatewayRefreshInFlight,ikn as setGatewayServerPr
+
+## #1 forkRestrictedLaunchConfig  needle="forkRestrictedLaunchConfig"  hits=3
+- #0 @99403620 ........cliSessionConfigCarried.........replaceCliSessionConfigCarried..........forkRestrictedLaunchConfig..!.......replaceForkRestrictedLaunchConfig.......7qV.forkReplayLaunchConfig....
+- #1 @178537404 ssionConfigCarried(){return this.#M}replaceCliSessionConfigCarried(e){this.#M=e}forkRestrictedLaunchConfig(){return this.#w}replaceForkRestrictedLaunchConfig(e){this.#w=e}forkReplayLaunc
+- #2 @178553301 s.replaceCliSessionConfigCarried(e)}function GC(){return n().host.launchOptions.forkRestrictedLaunchConfig()}function Cwn(e){n().host.launchOptions.replaceForkRestrictedLaunchConfig(e)}f
+
+## #1 win --restricted#0 @92224972
+ .......Invalid --setting-sources flag: $....
+[.Error processing --setting-sources: ....J.U.eagerLoadSettings_start.
+...?...--settings........*.--managed-settings.......R^.--setting-sources.......r...--restricted....=o..eagerLoadSettings_end.......n.A.settings_load_ms..../V..performance.
+...._..charCodeAt......s+..toUpperCase.....{n..padStart(...M...file:///B:/%7EBUN/root/chunk-tnj0mqmq.js
+.......\x1b\[\d*D........\.Continue from where you left off. Note: this session was automatically restarted after its process exited unexpectedly; the user has not sent a new message since the restart. Re-ve
+
+## #1 win --restricted#1 @92346183
+ is not installed.
+..N.......Error: --agent-id, --agent-name, and --team-name must all be provided together..C....r..Cannot destructure property 'teleport' from null or undefined value.}...u^{.Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its tools on another machine...l....	..E.r.r.o.r.:. .-.-.w.a.t.c.h.-.a.r.t.i.f.a.c.t. .i.s.n.'.t. .s.u.p.p.o.r.t.e.d. .y.e.t. .f.r.o.m. .r.e.m.o.t.e. .s.e.s.s.i.o.n.s. ..  .r.u.n. .i.t. .i.n. .C.l.a.u.d.e. .C.o.d.e. .o.n. .y.o.u.r. .o.w.n. .m.a.c.h.i.n.e.v...\8..Error: --watch-artifact requires an interactive
+
+## #1 win --restricted#2 @92348946
+livered MCP ..n....{}.[Claude in Chrome] Skipping chrome wiring: blocked by enterprise MCP config or managed deniedMcpServers policy..F...:...[Claude in Chrome] Skipping chrome wiring: --safe-mode or --restricted..<.......[Claude in Chrome] MCP server blocked by enterprise policy: 2.......Warning: MCP server blocked by enterprise policy: .......R..tengu_claude_in_chrome_setupD.....d.Cannot destructure property 'mcpConfig' from null or undefined value#...Ll'.tengu_claude_in_chrome_setup_failed.....P.%.[Claude in Chrome] Error: ..+....d..Error: Failed to run with Claude in Chrome......`...--fall
+
+## #1 win --restricted#3 @96359976
+ .o.f. .t.h.e. .d.e.s.c.r.i.p.t.i.o.n.,. .t.h.e. .b.r.a.n.c.h. .n.a.m.e. .i.n. .E.n.g.l.i.s.h.......4...Background task.....1	..claude/background-task..X...Q.P.Cloud sessions cannot be created from a --restricted session: they would not enforce it......_n.bind_attestation_stale.......	..bound_session_unattested_write..........CLAUDE_PLUGIN_DATA..
+...._..zzwildcard..	...}.6.EAI_AGAIN.......{.E.ERR_SOCKET_CLOSED.........).ERR_PROXY_TUNNEL......X.downstream_error......g.downstream_unreachable..	.....9.user_auth.......g...ENETUNREACH.....t.G.FailedToOpenSocket......m...ERR_INVALID_URL.......P.MODU
+
+## #1 win --restricted#4 @97620017
+kground agents. Agent ')...DV..' has background: true in its definition.........l..[web-fetch agent] isolation:'...D....v..' ignored; the built-in web-fetch agent always runs as a local agent....x...(--restricted)..(....3W.(no claude.ai login or feature gate off)1...^...[remote agent] isolation:'remote' is unavailable ...8....R..(already inside a CCR session); running as a local agent&.......; falling back to isolation:'worktree'..*....7.. and no git root; running as a local agent..........subagent_mcp_required_missing...!.......' requires MCP servers matching: ......._.%.. MCP servers with to
+
+## #1 win --restricted#5 @97651828
+ugin directory here.......&.Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled, or the session is --restricted); keeping parent mode '......p.] Failed to compute skill listing attachment: ..#...b[v.bg-subagent progress write failed: .*...L.k.bg-subagent nested progress write failed: ..R....P..propagateNestedMemory: parent context has no pendingNestedMemoryTriggers; skipping../....g..CLAUDE_CODE_COORDINATOR_PROPAGATE_NESTED_MEMORY.%....&..[AgentSummary] Timer fired for agent ...$...]U).[AgentSu
+
+## #1 win CLAUDE_CODE_RESTRICTED#0 @92605544
+rCapFired.......G9Q.defer_cap_fired.........adopted_frame_live.......vG.undisclosed_frame_live......L.\.providedSessionId.......py..extraEnv........dispatchExtraArgs........n..dispatchDefaults.....)..CLAUDE_CODE_RESTRICTED..........[ \t]+$.........cc-transcript-........y..txt....Ug..opening ....o.>.wrote ......&.'. . no $VISUAL/$EDITOR set...........render failed: .........respond_build_failed....../.build_result_failed.........flaggedPluginCount.........plugin-system...........on-skill-invoke:....Zi..skillToolMembershipUnchanged....?...buildSkillTools....nIW.emitTelemetry...	...../.availabl
+
+## #1 win CLAUDE_CODE_RESTRICTED#1 @178178462
+romise.race([Promise.all([c(),C()]),A(500,void 0,{unref:!0})]).catch(()=>{}),process.exit(process.exitCode??0)}}return}let d=MSt(t);d.config.restricted||=["1","true","yes","on"].includes((process.env.CLAUDE_CODE_RESTRICTED??"").toLowerCase().trim());let{dispatchDefaults:u,rest:M}=Dt(d.rest),k=d.hasAgentsPositional&&tt(M);if((k||tt(t)&&process.stdin.isTTY)&&process.stdout.isTTY){let{startCapturingEarlyInput:e,consumeEarlyInput:r}=await import("B:/~BUN/root/chunk-zhdm7d8z.js");e();let[{startMdmRawRead:o},{startKeychainPrefetch:y}]=await Promise.all([import("B:/~BUN/root/chunk-parg11tw.js"),impor
+
+## #1 win CLAUDE_CODE_RESTRICTED#2 @178589387
+0,n)).includes(e)}function No(){return Me(process.env.CLAUDE_CODE_SIMPLE)||a("--bare")}function wr(){return Me(process.env.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-mode")?"restart without --safe-mode":"unset CLAUDE_CODE_SAFE_MODE"}function sXe(){return Me(process.env.CLAUDE_CODE_SUPERVISED)}function ptr(e){let n={};if(e)for(let r of e){let[o,...u]=r.split("=");if(!o||u.length===0)throw Error(`Invalid environment variable format: ${r}, environment variables should be added as: -e KEY1=value1 -e KEY2=value
+
+### lastFnStart before CLAUDE_CODE_RESTRICTED#2 name=function  @178589351
+## #1 fn-before CLAUDE_CODE_RESTRICTED#2 @178589351
+len=60 sha=9555f7c727a5a06d
+function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}
+
+## #1 win CLAUDE_CODE_RESTRICTED#3 @178770643
+SESSION_ID:()=>qD,CLAUDE_CODE_REMOTE_SESSION_ORIGIN:()=>tT,CLAUDE_CODE_REMOTE_SETTINGS_PATH:()=>oT,CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS:()=>vc,CLAUDE_CODE_REPL:()=>dL,CLAUDE_CODE_REPO_CHECKOUTS:()=>ET,CLAUDE_CODE_RESTRICTED:()=>fL,CLAUDE_CODE_RESUME_FROM_SESSION:()=>_T,CLAUDE_CODE_RESUME_INTERRUPTED_TURN:()=>FL,CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS:()=>vL,CLAUDE_CODE_RESUME_PROMPT:()=>rT,CLAUDE_CODE_RESUME_SOURCE_ALIVE:()=>KL,CLAUDE_CODE_RESUME_THRESHOLD_MINUTES:()=>Wc,CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:()=>gc,CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS:()=>JL,CLAUDE_CODE_RETIRE_UNANS
+
+## #1 win CLAUDE_CODE_RESTRICTED#4 @180925888
+KING_SYNC","CLAUDE_CODE_DIR_SYNC_GIT","CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS","CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS","CLAUDE_CODE_DISABLE_HOOK_FORWARDING","CLAUDE_CODE_DISABLE_PLUGIN_FORWARDING","CLAUDE_CODE_RESTRICTED"]),G=new Set(["CLAUDE_REMOTE_WORKFLOW_SCRIPT","CLAUDE_REMOTE_WORKFLOW_ARGS","CLAUDE_WORKFLOW_NAME_ONLY"]),V=new Set(["CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_IS_COWORK","CLAUDE_CODE_COWORK_FRAME_ARTIFACTS"]),K=new Set(["CLAUDE_STAGE_FILE_ROOT"]),b=new Set([]);function I(e){if(!e)return{};let o={};for(let[t,r]of Object.entries(e)){let s=t.toUpperCase();if(!M.has(s)&&!G.has(s)&&!
+
+### lastFnStart before CLAUDE_CODE_RESTRICTED#4 name=function  @180924651
+## #1 fn-before CLAUDE_CODE_RESTRICTED#4 @180924651
+len=166 sha=ae3c65ffcf173156
+function H(e,o){if(!e)return{};let t={};for(let[r,s]of Object.entries(e)){let E=r.toUpperCase();if(E==="NO_COLOR"||E==="FORCE_COLOR"){o[r]=s;continue}t[r]=s}return t}
+
+## #1 win CLAUDE_CODE_RESTRICTED#5 @189140602
+de","claude-desktop","claude-desktop-3p"]);function nj(E){let _=E.CLAUDE_CODE_ENTRYPOINT;if(_!==void 0&&A.has(_))delete E.CLAUDE_CODE_ENTRYPOINT}var WTe=["CLAUDE_CODE_SAFE_MODE","CLAUDE_CODE_SIMPLE","CLAUDE_CODE_RESTRICTED","CLAUDE_BG_POST_CLEAR_RESPAWN","CLAUDE_CODE_RESUME_INTERRUPTED_TURN","CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS","CLAUDE_CODE_RESUME_PROMPT","CLAUDE_CODE_QUESTION_PREVIEW_FORMAT","GITHUB_ACTIONS","CLAUDECODE","CLAUDE_CODE_SESSION_ID","CLAUDE_CODE_BRIDGE_SESSION_ID","CLAUDE_CODE_CHILD_SESSION","CLAUDE_CODE_EXECPATH","CLAUDE_CODE_COWORK_FRAME_ARTIFACTS","CLAUDE_CODE_SKIL
+
+### lastFnStart before CLAUDE_CODE_RESTRICTED#5 name=function  @189140445
+## #1 fn-before CLAUDE_CODE_RESTRICTED#5 @189140445
+len=102 sha=042315a23983b149
+function nj(E){let _=E.CLAUDE_CODE_ENTRYPOINT;if(_!==void 0&&A.has(_))delete E.CLAUDE_CODE_ENTRYPOINT}

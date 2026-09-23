@@ -36,6 +36,9 @@ export const HOOK_EVENTS = [
   'SubagentStop',
   'PreCompact',
   'PostCompact',
+  // densable 2.1.251 #1 — mBn registry keys, after PostCompact
+  'PreModelSwitch',
+  'PostModelSwitch',
   'PermissionRequest',
   'PermissionDenied',
   'Setup',

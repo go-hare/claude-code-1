@@ -1,0 +1,17 @@
+# gold-248-gc-stop-x2
+when=2026-09-20T14:45:24.818Z
+
+## "[\"stopRemote\"]" hits=0 
+## "stopRemote:" hits=0 
+## "archiveRemote:" hits=0 
+## "Q.stopRemote" hits=0 
+## "d.stopRemote" hits=0 
+## "i.stopRemote" hits=0 
+## "roster.stopRemote" hits=0 
+## ".stopRemote" hits=0 
+## "await Q.stop" hits=0 
+## "key:\"a\"" hits=0 
+## "label:\"archive\"" hits=0 
+## "key:\"a\"" hits=0 
+## cp-full-start @192191430
+super(i);this.name="FleetActionUnconfirmedError"}}function cp(i,d,m,w,S){return[{key:"x",label:"stop",bands:["active","blocked"],run:async(h)=>{d(h.id);let C=new Date().toISOString(),x=m((A)=>A.map((F)=>F.id===h.id&&!Di(F.state)?{...F,state:{...F.state,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:F.state.firstTerminalAt??C},activity:"stopped"}:F),void 0,h.id);try{let A=await K7(h.id,h.state,void 0,S);if(!A.confirmed)throw f("fleet_view_stop_job","kill_unconfirmed"),new Fr(A.error??"worker may still be running");s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)}),b("fleet_view_stop_job");let F=Kn(h.id),T=await nr(F,S);if(T&&!Di(T))await ps(F,{...T,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:T.firstTerminalAt??C},S)}finally{x?.(),i()}}},{key:"x",label:"delete",bands:["completed"],run:async(h)=>{w(h.id,null);let C=m((V)=>V.filter((K)=>K.id!==h.id),h.id),x=!1,A,F,T,P;try{let V=await oG(h.id,{force:!0},S);if(x=V.removed,A=V.keptWorktree,F=V.keptReason,T=V.keptErrorSummary,P=V.leftWorktreeDir,!x&&!A)throw f("fleet_view_delete_job",V.errorCode??"delete_unconfirmed"),w(h.id,V.error??"worker may still be running"),new Fr(V.error??"worker may still be running")}finally{C?.(),i()}if(x){if(P)y("fleet_view_delete_job","worktree_left_in_place");else b("fleet_view_delete_job");if(h.state.pinned)sut(h.id,!1,S).catch(()=>{});s("tengu_bg_agent_action",{action:v("delete"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)})}if(A){let V=F??"remove_failed";y("fleet_view_delete_job",`workt

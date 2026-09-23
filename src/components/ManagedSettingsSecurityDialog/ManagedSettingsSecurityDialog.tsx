@@ -3,10 +3,16 @@ import { Box, Text, useTimeout } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { LOGIN_HANDOFF_WINDOW_MS, useIsWithinWindow, useRefusedWithin } from '../../hooks/useRefuseWithin.js';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { getConsentedPayload } from '../../services/remoteManagedSettings/syncCacheState.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import { Select } from '../CustomSelect/index.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
-import { extractDangerousSettings, formatDangerousSettingsList } from './utils.js';
+import {
+  extractDangerousSettings,
+  formatRemovedApprovalCount,
+  formatUnchangedApprovalCount,
+  listManagedSettingsForApproval,
+} from './utils.js';
 
 export type ManagedSettingsReveal = 'login_handoff' | 'default';
 
@@ -29,7 +35,9 @@ export function ManagedSettingsSecurityDialog({
   accepts,
 }: Props): React.ReactNode {
   const dangerous = extractDangerousSettings(settings);
-  const settingsList = formatDangerousSettingsList(dangerous);
+  const approval = listManagedSettingsForApproval(getConsentedPayload(), dangerous);
+  const unchangedLine = formatUnchangedApprovalCount(approval.unchangedCount);
+  const removedLine = formatRemovedApprovalCount(approval.removedCount);
 
   const exitState = useExitOnCtrlCDWithKeybindings();
   // densable X: s = reveal === "login_handoff"
@@ -100,7 +108,7 @@ export function ManagedSettingsSecurityDialog({
 
         <Box flexDirection="column">
           <Text dimColor>Settings requiring approval:</Text>
-          {settingsList.map((item, index) => (
+          {approval.items.map((item, index) => (
             <Box key={index} paddingLeft={2}>
               <Text>
                 <Text dimColor>· </Text>
@@ -108,6 +116,16 @@ export function ManagedSettingsSecurityDialog({
               </Text>
             </Box>
           ))}
+          {unchangedLine ? (
+            <Box paddingLeft={2}>
+              <Text>{unchangedLine}</Text>
+            </Box>
+          ) : null}
+          {removedLine ? (
+            <Box paddingLeft={2}>
+              <Text>{removedLine}</Text>
+            </Box>
+          ) : null}
         </Box>
 
         <Text>

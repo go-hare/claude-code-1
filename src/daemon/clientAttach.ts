@@ -637,6 +637,7 @@ function getTerminalCaps(): Record<string, unknown> {
         : process.env.STY
           ? 'screen'
           : null,
+    tmuxSocket: process.env.TMUX?.split(',')[0] || null,
     ssh: !!process.env.SSH_CONNECTION || !!process.env.SSH_CLIENT,
     wtSession: !!process.env.WT_SESSION,
     isVscodeTerm: process.env.TERM_PROGRAM === 'vscode',

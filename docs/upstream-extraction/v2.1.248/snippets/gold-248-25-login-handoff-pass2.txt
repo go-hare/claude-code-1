@@ -1,0 +1,140 @@
+# gold-248-25-login-handoff-pass2
+# when=2026-09-20T04:56:08.269Z
+
+## #25 hn-confirm @198978718 len=452 sha=b4f908da7f5c6a05 bodyHits247=0
+cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r||s[2]!==o||s[3]!==n||s[4]!==b||s[5]!==R||s[6]!==N)a=e(ITt,{confirmLabel:r,cancelLabel:c,onConfirm:n,onCancel:o,refuseInput:b,windowAnchorMs:R,windowMs:N}),s[0]=c,s[1]=r,s[2]=o,s[3]=n,s[4]=b,s[5]=R,s[6]=N,s[7]=a;else a=s[7];return a}
+
+## #25 hn-confirm-full @198978718
+/chunk-6s1fd9rm.js";import{ITt,li,Te}from"B:/~BUN/root/chunk-zjmyxdw3.js";import{e}from"B:/~BUN/root/chunk-8ap061gk.js";function hn(J){let s=g(25),{onConfirm:n,onCancel:o,confirmLabel:P,cancelLabel:V,cancelFirst:_,focus:D,hideIndexes:X,refuseInput:b,windowAnchorMs:R,windowMs:N}=J,r=P===void 0?"Yes":P,c=V===void 0?"No":V,v=_===void 0?!1:_,C=D===void 0?"confirm":D,A=X===void 0?!1:X;if(pn()){let a;if(s[0]!==c||s[1]!==r||s[2]!==o||s[3]!==n||s[4]!==b||s[5]!==R||s[6]!==N)a=e(ITt,{confirmLabel:r,cancelLabel:c,onConfirm:n,onCancel:o,refuseInput:b,windowAnchorMs:R,windowMs:N}),s[0]=c,s[1]=r,s[2]=o,s[3]=n,s[4]=b,s[5]=R,s[6]=N,s[7]=a;else a=s[7];return a}let a;if(s[8]!==r)a={label:r,value:"confirm"},s[8]=r,s[9]=a;else a=s[9];let i=a,Y;if(s[10]!==c)Y={label:c,value:"cancel"},s[10]=c,s[11]=Y;else Y=s[11];let l=Y,f;if(s[12]!==l||s[13]!==v||s[14]!==i)f=v?[l,i]:[i,l],s[12]=l,s[13]=v,s[14]=i,s[15]=f;else f=s[15];let d;if(s[16]!==o||s[17]!==n)d=(K)=>K==="confirm"?n():o(),s[16]=o,s[17]=n,s[18]=d;else d=s[18];let k;if(s[19]!==C||s[20]!==A||s[21]!==o||s[22]!==f||s[23]!==d)k=e(Te,{options:f,selectedValue:li,hideIndexes:A,defaultFocusValue:C,onChange:d,onCancel:o}),s[19]=C,s[20]=A,s[21]=o,s[22]=f,s[23]=d,s[24]=k;else k=s[24];return k}
+export{hn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{g}from"B:/~BUN/root/chunk-3pydakxf.js";import{o,t}from"B:/~BUN/root/chunk-6s1fd9rm.js";import{ao}from"B:/~BUN/root/chunk-vv2qj3x7.js";import{e,r}from"B:/~BUN/root/chunk-8ap061gk.js";import{p}from"B:/~BUN/root/chunk-n4vhwd20.js";function zn(B){let a=g(10),{message:f,bold:C,dimColor:R,subtitle:i}=B,m=C===void 0?!1:C,s=R===void 0?!1:R
+
+## #25 Is-cand @180236445 len=42 sha=261c3e3e7aab9c5c bodyHits247=0
+function Is(e,t){return dc(e)?.family===t}
+
+## #25 Is-cand @190607829 len=72 sha=d46ab1e98ebff02f bodyHits247=0
+function Is(i=Ky){let l=E(Date.now());return U(()=>ed(l.current,i),[i])}
+
+## #25 Is-cand @195704081 len=64 sha=97c25bfe26f12089 bodyHits247=0
+function Is(e){return typeof e==="string"?xMe(e,Zh):"(unknown)"}
+
+## #25 Is-cand @205562866 len=48 sha=299469f7b53f7021 bodyHits247=0
+function Is(t){return lt.join(t,`index-v${Tf}`)}
+
+## #25 Hi-chunk @190608109
+all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{v}from"B:/~BUN/root/chunk-s74r2b92.js";import{n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{wx,Y$}from"B:/~BUN/root/chunk-3yhm9tnn.js";import{g}from"B:/~BUN/root/chunk-3pydakxf.js";import{st}from"B:/~BUN/root/chunk-0qn02gme.js";import{s}from"B:/~BUN/root/chunk-a8z8y32v.js";import{o,t,it,zr,pn,vxe,tr}from"B:/~BUN/root/chunk-6s1fd9rm.js";import{gje}from"B:/~BUN/root/chunk-vhqt1q07.js";import{Yp}from"B:/~BUN/root/chunk-edcx6t86.js";import{xt}from"B:/~BUN/root/chunk-pgrh2t0x.js";import{mi}from"B:/~BUN/root/chunk-jty8a3k6.js";import{Qd,os,vf}from"B:/~BUN/root/chunk-67ctrnfz.js";import{ki}from"B:/~BUN/root/chunk-qg0tmh43.js";import{we}from"B:/~BUN/root/chunk-1n2cb9kc.js";import{Qe}from"B:/~BUN/root/chunk-pa6z61cs.js";import{Fe,dt}from"B:/~BUN/root/chunk-jhq0fw6a.js";import{M}from"B:/~BUN/root/chunk-6k6x82d7.js";import{ue}from"B:/~BUN/root/chunk-k7h4w77r.js";import{wn}from"B:/~BUN/root/chunk-jem588hv.js";import{cH}from"B:/~BUN/root/chunk-n7zy975b.js";import{Be}from"B:/~BUN/root/chunk-m0d3g4gg.js";import{L,e,r}from"B:/~BUN/root/chunk-8ap061gk.js";import{ay,U,k,ir,G,E,u,N}from"B:/~BUN/root/chunk-pg7xwnzs.js";import{Oa}from"B:/~BUN/root/chunk-bqtjmfvq.js";import{b5}from"B:/~BUN/root/chunk-wz13qzc5.js";import{O}from"B:/~BUN/root/chunk-nm3rsk89.js";import{ot}from"B:/~BUN/root/chunk-pb5fay4v.js";import{ie}from"B:/~BUN/root/chunk-ye4jj2gn.js";import{J}from"B:/~BUN/root/chunk-4n8335pp.js";import{p,rn}from"B:/~BUN/root/chunk-n4vhwd20.js";N();var Ky=150,sa=250;function ed(i,l=Ky){let a=Date.now()-i;return a>=0&&a<l}function lH(i){let[l,a]=u(()=>({key:i,at:Date.now()}));if(l.key!==i)a({key:i,at:Date.now()});return function(){return ed(l.at)}}function ATe(){let[i,l]=u();return k(()=>{if(i!==void 0)l(void 0)},[i]),[i,l]}N();function Is(i=Ky){let l=E(Date.now());return U(()=>ed(l.current,i),[i])}function qf(){return E(Date.now()).current}function Hs(i,l=Ky){let a=tr(l,i);return{remountKey:a?"settled":"held",settled:a}}function Q$e(){let[i,l]=u(0),a=U(()=>l((c)=>c+1),[]);return{epoch:i,noteAttempt:a}}function Hi(){let i=E(null),{epoch:l,noteAttempt:a}=Q$e(),c=U((f=Ky)=>i.current!==null&&ed(i.current,f),[]),d=U(()=>{i.current=Date.now(),a()},[a]);return{refusedWithin:c,noteRefused:d,epoch:l}}N();N();function fw(i){if(typeof i==="string")return i;if(typeof i==="number")return String(i);if(!i)return"";if(Array.isArray(i))return i.map(fw).join("");if(ay(i))return fw(i.props.children);return""}func
+
+## onConsentNeeded 248=3 247=0
+## onConsentNeeded @205709200
+ted:!1,accountSwitched:!1,relaunching:!1};let d=ei(),c=d!==null&&d!==i.previousGatewayAuth;if(Le()==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void
+
+## onConsentNeeded @205716642
+{startingMessage:i,onDone:async(w,A,S)=>{let b=!1,T=await b6(s,w,{setAppState:S,previousAccount:m,previousGatewayAuth:h,onConsentNeeded:()=>(b=!0,o(lnr(),{display:"system"}),zI())}),D=Hke(s,w,T,{envTokenWasSet:d,envWarningOnce:y});if(b){let[L]=D;if(L)s.applyMessageOp({type:"append",messages:[It(L,"notice")]});return}o(...D)}})}function Y4(M){let v=g(23),X=Mc(),J=yt(),pt=aa(),[P,ht]=u(!1),te;if(v[0]===p)te=()=>ht(!0),v[0]=te;else te=v[0];let wt=te,ne=E(!1),oe;if(v[1]
+
+## function CHn 248=2 247=0
+## function CHn @186421099
+tigated, what you found, what you changed, decisions you made, and what's next. Do not assume they saw earlier output.`;function CHn(e){if(De()){if(be("flagSettings")?.viewMode!=="focus")return null}else if(!Dle())return null;return Ru(e)?EHn:vHn}var bTt=new $n(()=>{let e=()=>{};return{promise:new Promise((r)=>{e=r}),resolve:e,committed:!1}});function STt(e){return bTt.of(e).promise}function cWn(e){let t=bTt.of(e);t.committed=!0,t.resolve()}class wTt{canonicalToConf
+
+## function CHn @190466236
+ize>0}function DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"managed-settings security dialog requester wait timed out")
+
+## CHn( 248=4 247=0
+## CHn( @186409349
+cSections?[]:[gu("scratchpad",()=>ZZ())],gu("context_management",()=>wHn),gu("brief",()=>THn()),gu(`focus_mode${k}`,()=>CHn(u)),gu("act_dont_rederive",()=>pHn()?mHn:null),gu("delivering_work_max",()=>A8n(u)?fHn:null),gu("overcorrection",()=>x8n(u)?gHn:null),gu("subagent_steer_delegation",()=>N.has(ft)&&YA()==="counter_steer"?jYn:null),gu("heron_brook",()=>X0n(u)),gu("willow_tern",()=>J0n(u)),gu("autonomy_append",()=>Z0n(g)),gu("endconv_deferred_hint",()=>{let fe=imp
+
+## CHn( @186421108
+what you found, what you changed, decisions you made, and what's next. Do not assume they saw earlier output.`;function CHn(e){if(De()){if(be("flagSettings")?.viewMode!=="focus")return null}else if(!Dle())return null;return Ru(e)?EHn:vHn}var bTt=new $n(()=>{let e=()=>{};return{promise:new Promise((r)=>{e=r}),resolve:e,committed:!1}});function STt(e){return bTt.of(e).promise}function cWn(e){let t=bTt.of(e);t.committed=!0,t.resolve()}class wTt{canonicalToConfig=void 0
+
+## CHn( @190466245
+ction DKt(){return P().consentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"managed-settings security dialog requester wait timed out").catch(()
+
+## CHn( @205709237
+:!1};let d=ei(),c=d!==null&&d!==i.previousGatewayAuth;if(Le()==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void 0:C.failure;return await le(o,inr(k,
+
+## consentNeededRelease 248=8 247=0
+## consentNeededRelease @190465310
+nsentRelease=null;fireStartupConsentRelease(){let e=this.startupConsentRelease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e)
+
+## consentNeededRelease @190465380
+tRelease;if(e)this.startupConsentRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.startupCons
+
+## consentNeededRelease @190465411
+ntRelease=null,e()}consentNeededRelease=null;async fireConsentNeededRelease(){let e=this.consentNeededRelease;if(e)this.consentNeededRelease=null,await e()}consentHandoffHolds=new Set;consentHandoffSignal=$e();consentHandoffRevealActive=!1}var Ce=new K(()=>new G);function P(){return Ce.of(z().host)}function Y(){return _o.pendingStandaloneRender!==null}function HKt(e){P().registerRequester(e)}function X(e){let t=P();return t.startupConsentRelease=e,()=>{if(t.startupC
+
+## consentNeededRelease @190466271
+sentHandoffRevealActive}function xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"managed-settings security dialog requester wait timed out").catch(()=>null);if(o===null)e.drop
+
+## consentNeededRelease @190466304
+xHn(e){return P().consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"managed-settings security dialog requester wait timed out").catch(()=>null);if(o===null)e.dropWaiter(t);return o}async function
+
+## consentNeededRelease @190466331
+ndoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await qt(r,ve,"managed-settings security dialog requester wait timed out").catch(()=>null);if(o===null)e.dropWaiter(t);return o}async function ee(e,t,r){if(!t||!swe(zW(t
+
+## LKt(qEt 248=1 247=0
+## LKt(qEt @205709297
+)==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void 0:C.failure;return await le(o,inr(k,H,c),(ee)=>snr(k,H,ee,c)),G}if(wo())return G;UJe("gateway"),
+
+## gateway_cert_mismatch 248=5 247=4
+## gateway_cert_mismatch @190477042
+udes(Mgt)){let R=bYn(a);return c({success:!1,error:"Cloud gateway TLS certificate does not match stored pin",errorKind:"gateway_cert_mismatch",...R&&{gatewayPinMismatch:R},skipRetry:!0})}let{kind:p,status:g,message:M}=hs(a);if(g===404)return{success:!0,settings:{},checksum:"",consentIdentity:d};switch(p){case"auth":{let R={success:!1,error:"Not authorized for remote settings",errorKind:g===401?"http_401":"http_403",skipRetry:!0};if(g===401&&o&&!t){await Nf(o,r);let 
+
+## gateway_cert_mismatch @199435662
+n`server error${t?` (${t})`:""}`;case"timeout":return"request timed out";case"network_error":return"network error";case"gateway_cert_mismatch":return"gateway certificate mismatch";case"gateway_pin_refused":return"gateway TLS pin is in a symlinked credentials file";case"gateway_pin_unreadable":return"gateway TLS pin could not be read from the credentials file";case"parse_error":return"server response could not be parsed";case"invalid_settings":return"server returned 
+
+## gateway_cert_mismatch @205709414
+it LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void 0:C.failure;return await le(o,inr(k,H,c),(ee)=>snr(k,H,ee,c)),G}if(wo())return G;UJe("gateway"),jT(),Scn()}finally{if(!wo())V.release?.()}}else H0e(qEt,o.storageV5,o.credentials);yde(),Xqe(),LN(),DW();let{setAppSt
+
+## gateway_cert_mismatch @205712789
+ttpStatus}`;case"parse_error":case"invalid_settings":return"the gateway's response was not valid managed settings";case"gateway_cert_mismatch":return"the gateway's TLS certificate did not match the one you trusted";case"gateway_pin_refused":return"the credentials file that keeps the gateway's TLS pin is a symlink, which is not followed";case"gateway_pin_unreadable":return"the credentials file that keeps the gateway's TLS pin could not be read (try again)";case"unkno
+
+## #25 CHn @190466202 len=156 sha=d697ab2df9d99f1a bodyHits247=0
+consentHandoffSignal.subscribe(e)}function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}
+
+## #25 CHn-fn @186421099 len=127 sha=a2bcee6359be7558 bodyHits247=0
+function CHn(e){if(De()){if(be("flagSettings")?.viewMode!=="focus")return null}else if(!Dle())return null;return Ru(e)?EHn:vHn}
+
+## #25 CHn-fn @190466236 len=122 sha=eb681a7893610ca8 bodyHits247=0
+function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}
+
+## gateway lastFn b6 @205708962
+## #25 gateway-caller @205708962 len=1926 sha=cab523edbf90e2cc bodyHits247=0
+async function b6(o,s,i){if(o.onChangeAPIKey(),o.applyMessageOp({type:"update",updater:don}),!s)return{bridgeDisconnected:!1,accountSwitched:!1,relaunching:!1};let d=ei(),c=d!==null&&d!==i.previousGatewayAuth;if(Le()==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void 0:C.failure;return await le(o,inr(k,H,c),(ee)=>snr(k,H,ee,c)),G}if(wo())return G;UJe("gateway"),jT(),Scn()}finally{if(!wo())V.release?.()}}else H0e(qEt,o.storageV5,o.credentials);yde(),Xqe(),LN(),DW();let{setAppState:m}=i,h=()=>{m((f)=>({...f,authChangeGeneration:f.authChangeGeneration+1}))},y=i.previousAccount,w=In(),A=xS(y,w),{replBridgeEnabled:S,replBridgeOutboundOnly:b}=o.getAppState(),T=y?.accountUuid!==void 0&&!A,D=T&&S&&!b;if(T)m((f)=>{if(!(f.replBridgeEnabled||f.replBridgeError!==void 0))return f;return n("[bridge:repl] Account changed via /login \u2014 disconnecting Remote Control session"),{...f,replBridgeEnabled:!1,replBridgeExplicit:!1,replBridgeOutboundOnly:!1,replBridgeError:void 0,replBridgeErrorKind:void 0,notifications:UTe(f.notifications,B_)}});if(SO(),Kun(),p6n(w),T)Yun(),i.setAppState((f)=>({...f,replBridgeSessionGroupingId:void 0,replBridgeInitialName:void 0,showRemoteCallout:!1,ultrareviewOverageConfirmed:!1}));if(A&&await Jqe())n("[trusted-device] Same account+org re-login with existing token, skipping re-enrollment"),h();else{sfn();let f=Qqe({credentials:o.credentials}).then(h,h);if(i.awaitEnrollment)await f}let{host:L}=o.session,Y=o.getAppState();return jJe(L),Pke(L,he(o),m,Y.fastMode),rnr(),m((f)=>({...f,authVersion:f.authVersion+1})),{bridgeDisconnected:D,accountSwitched:T,relaunching:!1}}
+
+## #25 gateway-win @205709258
+from"B:/~BUN/root/chunk-t73t9gt5.js";import{LNe}from"B:/~BUN/root/chunk-48t9wr2p.js";import{Pke,jJe}from"B:/~BUN/root/chunk-e99eknq1.js";import{lR,_G}from"B:/~BUN/root/chunk-22293z36.js";import{UJe}from"B:/~BUN/root/chunk-081mjtqd.js";import{B_}from"B:/~BUN/root/chunk-p06x88dw.js";import{Be}from"B:/~BUN/root/chunk-m0d3g4gg.js";import{e,r}from"B:/~BUN/root/chunk-8ap061gk.js";import{U,E,u,N}from"B:/~BUN/root/chunk-pg7xwnzs.js";import{p}from"B:/~BUN/root/chunk-n4vhwd20.js";N();function rnr(){Spn(PN())}async function b6(o,s,i){if(o.onChangeAPIKey(),o.applyMessageOp({type:"update",updater:don}),!s)return{bridgeDisconnected:!1,accountSwitched:!1,relaunching:!1};let d=ei(),c=d!==null&&d!==i.previousGatewayAuth;if(Le()==="gateway"){let f=i.onConsentNeeded,V={release:null},Z=f?CHn(()=>(V.release??=PKt(),f())):null;try{let C;try{C=await LKt(qEt,o.storageV5,o.credentials)}finally{Z?.()}let W=ei(),k=ce(W);if(c&&!C.fetchSucceeded&&C.failure?.errorKind==="gateway_cert_mismatch")return await de(o,W,onr(k,C.failure.gatewayPinMismatch));if(!C.fetchSucceeded||LNe()){let H=C.fetchSucceeded?void 0:C.failure;return await le(o,inr(k,H,c),(ee)=>snr(k,H,ee,c)),G}if(wo())return G;UJe("gateway"),jT(),Scn()}finally{if(!wo())V.release?.()}}else H0e(qEt,o.storageV5,o.credentials);yde(),Xqe(),LN(),DW();let{setAppState:m}=i,h=()=>{m((f)=>({...f,authChangeGeneration:f.authChangeGeneration+1}))},y=i.previousAccount,w=In(),A=xS(y,w),{replBridgeEnabled:S,replBridgeOutboundOnly:b}=o.getAppState(),T=y?.accountUuid!==void 0&&!A,D=T&&S&&!b;if(T)m((f)=>{if(!(f.replBridgeEnabled||f.replBridgeError!==void 0))return f;return n("[bridge:repl] Account changed via /login \u2014 disconnecting Remote Control session"),{...f,replBridgeEnabled:!1,replBridgeExplicit:!1,replBridgeOutboundOnly:!1,replBridgeError:void 0,replBridgeErrorKind:void 0,notifications:UTe(f.notifications,B_)}});if(SO(),Kun(),p6n(w),T)Yun(),i.setAppState((f)=>({...f,replBridgeSessionGroupingId:void 0,replBridgeInitialName:void 0,showRemoteCallout:!1,ultrareviewOverageConfirmed:!1}));if(A&&await Jqe())n("[trusted-device] Same account+org re-login with existing token, skipping re-enrollment"),h();else{sfn();let f=Qqe({credentials:o.credentials}).then(h,h);if(i.awaitEnrollment)await f}let{host:L}=o.session,Y=o.getAppState();return jJe(L),Pke(L,he(o),m,Y.fastMode),rnr(),m((f)=>({...f,authVersion:f.authVersion+1})),{bridgeDisconnected:D,accountSwitched:T,relaunching:!1}}var se=16;function j(o){return`${o.slice(0,se)}\u2026`}function ce(o){try{return o?new URL(o.url).hostname:"gateway"}catch{return o?.url??"gateway"}}var G={bridgeDisconnected:!1,accountSwitched:!1,relaunching:!0};async function de(o,s,i){for(let m=JLe();m;m=JLe())await m.catch(()=>{});let d=ei();if(await vYn(d&&s&&d.url===s.url?d:s,o.credentials),await ott(o.storageV5
+
+## 247 class G hits=0
+## 247 async function ee( hits=15
+## #25 247 ee @209210477 len=190 sha=93acca961bb35157 bodyHits247=NA
+async function ee(){let r=y();if(r)return r;if(await j())return null;return`${i}: launcher \`${P()[0]}\` was deleted or is not executable \u2014 restore it (or fix the setting), then retry`}
+
+## #25 247 ee @210454457 len=153 sha=a5da1476de6bc496 bodyHits247=NA
+async function ee(t,e,s){let i=Z(t);if(i.length===0)return!0;let n=await Promise.all(i.map((r)=>r.read()));if(e.epoch!==s)return!1;return Te(e,i,n,s),!0}
+
+## #25 247 ee @210496618 len=489 sha=52994325e00aab86 bodyHits247=NA
+async function ee(e){if((await b(v(),["--no-optional-locks","rev-parse","--verify","--quiet","HEAD"],{timeout:P,preserveOutputOnError:!1,abortSignal:e})).exitCode!==1)return null;let n={stats:{filesCount:0,linesAdded:0,linesRemoved:0},perFileStats:new Map,hunks:new Map,source:{kind:"working-tree"},noCommits:!0},i=await q("--cached",e);if(i!==null){if(n.stats=i.stats,n.perFileStats=i.perFileStats,i.stats.filesCount>B)return n;if(i.stats.filesCount>0)await Wt(n,e)}return await z(n,e),n}
+
+## #25 247 ee @211681654 len=237 sha=87c45dc4fd0a85f2 bodyHits247=NA
+async function ee(e,t){let n=t.replace(/^\/+/,""),r=e.scope==="user"?await qn(n):await Cr(W(e.mountName,n).split(J).join("/"));if(!r.normalize("NFC").startsWith(e.mountDir))throw new Y(`path escapes mount ${e.mountName}: ${t}`);return r}
+
+## 247 deferred_no_consent_surface hits=10
+## pOe yield 248=1 247=0
+## yield{settings:d} 248=0 247=0

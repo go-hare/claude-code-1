@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WORKFLOW_DIR_NAME } from '../constants.js'
 import type { HostHandle, WorkflowPorts } from '../ports.js'
@@ -8,6 +7,10 @@ import { WorkflowAbortedError, WorkflowError } from './errors.js'
 import { makeHooks, type SubWorkflowRunner } from './hooks.js'
 import { resolveNamedWorkflow } from './namedWorkflows.js'
 import { parseScript, type ParsedScript } from './script.js'
+import {
+  readAllowedWorkflowScript,
+  type WorkflowScriptReadableSet,
+} from './workflowScriptRead.js'
 
 export type RunWorkflowOptions = {
   /** Already-resolved script source code. */
@@ -19,6 +22,10 @@ export type RunWorkflowOptions = {
   host: HostHandle
   signal: AbortSignal
   cwd: string
+  /** Directories besides cwd that a nested scriptPath may already read. */
+  readableRoots?: readonly string[]
+  /** densable `Oo` tools-readable-set gate for nested `scriptPath`. */
+  readableSet?: WorkflowScriptReadableSet
   budgetTotal: number | null
   /** Concurrency slots for a single run; undefined → DEFAULT_MAX_CONCURRENCY. */
   maxConcurrency?: number
@@ -81,7 +88,12 @@ export async function runWorkflow(
 
   // Sub-workflow executor: reuses the same ctx (sharing journal/concurrency/budget/counters), temporarily +1 depth
   const runSubWorkflow: SubWorkflowRunner = async sub => {
-    const script = await resolveSubScript(sub, opts.cwd)
+    const script = await resolveSubScript(
+      sub,
+      opts.cwd,
+      opts.readableRoots,
+      opts.readableSet,
+    )
     let subParsed: ParsedScript
     try {
       subParsed = parseScript(script)
@@ -141,9 +153,19 @@ export async function runWorkflow(
 async function resolveSubScript(
   sub: { name?: string; scriptPath?: string; script?: string },
   cwd: string,
+  readableRoots?: readonly string[],
+  readableSet?: WorkflowScriptReadableSet,
 ): Promise<string> {
   if (sub.script) return sub.script
-  if (sub.scriptPath) return await readFile(sub.scriptPath, 'utf-8')
+  if (sub.scriptPath) {
+    const read = await readAllowedWorkflowScript(
+      sub.scriptPath,
+      cwd,
+      readableRoots,
+      readableSet,
+    )
+    return read.script
+  }
   if (sub.name) {
     const found = await resolveNamedWorkflow(
       join(cwd, WORKFLOW_DIR_NAME),

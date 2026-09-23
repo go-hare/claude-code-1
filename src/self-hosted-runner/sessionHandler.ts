@@ -10,6 +10,7 @@
  *   push-on-release (Hjv) → Y2h on fail → M2h
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { killSessionProcessTree } from './killSessionProcessTree.js'
 import { mkdir, rm } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
@@ -449,17 +450,28 @@ export async function spawnSessionChild(
   }
 
   let terminationRequested = false
+  const logKillTreeFailure = (message: string): void => {
+    opts.onDebug(message)
+  }
   const terminate = (): void => {
     terminationRequested = true
-    if (child.pid !== undefined) {
+    const pid = child.pid
+    if (pid === undefined) return
+    // densable session abort: win32 ug() is taskkill /T /F; else child.kill().
+    if (process.platform === 'win32') {
+      opts.onStatus(
+        `[runner:session] Abort signal received, killing process tree at pid=${pid}`,
+      )
+      void killSessionProcessTree(pid, logKillTreeFailure)
+      return
+    }
+    try {
+      process.kill(-pid, 'SIGTERM')
+    } catch {
       try {
-        process.kill(-child.pid, 'SIGTERM')
+        child.kill('SIGTERM')
       } catch {
-        try {
-          child.kill('SIGTERM')
-        } catch {
-          /* ignore */
-        }
+        /* ignore */
       }
     }
   }
@@ -563,6 +575,10 @@ export async function spawnSessionChild(
       setTimeout(
         () => {
           if (!settled && child.pid !== undefined) {
+            if (process.platform === 'win32') {
+              void killSessionProcessTree(child.pid, logKillTreeFailure)
+              return
+            }
             try {
               process.kill(-child.pid, 'SIGKILL')
             } catch {

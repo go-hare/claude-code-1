@@ -188,6 +188,11 @@ export type AccountInfo = {
   displayName?: string
   hasExtraUsageEnabled?: boolean
   billingType?: BillingType | null
+  /**
+   * densable pbr seat tier. Usage-based enterprise is
+   * `enterprise_usage_based` (same token billingType may carry).
+   */
+  seatTier?: string | null
   accountCreatedAt?: string
   subscriptionCreatedAt?: string
 }

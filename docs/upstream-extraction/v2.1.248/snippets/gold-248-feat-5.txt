@@ -1,0 +1,167 @@
+# gold-248-feat-5  /web-setup workflow scope warning
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:39.899Z
+
+## #5 workflow scope  needle="workflow scope"  hits=2
+- #0 @100461711 server. Check your connection....@.....+.Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, a
+- #1 @208680890 children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, a
+
+## #5 lacks the workflow  needle="lacks the workflow"  hits=0
+
+## #5 missing workflow  needle="missing workflow"  hits=0
+
+## #5 Token scopes  needle="Token scopes"  hits=2
+- #0 @100524984 Or set up authentication using environment variables or other methods........W..Token scopes:.*$....*.<.Failed to set up GitHub Actions.....<...workflow file already exists
+- #1 @209581390 n using environment variables or other methods"]});else{let Jn=Mn.stdout.match(/Token scopes:.*$/m);if(Jn){let Zn=Jn[0];let At=[];if(!Zn.includes("repo"))At.push("repo");if
+
+## #5 very large repositories  needle="very large repositories"  hits=2
+- #0 @100461818  GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the 
+- #1 @208680997  GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the 
+
+## #5 very large repository  needle="very large repository"  hits=0
+
+## #5 /web-setup  needle="/web-setup"  hits=17
+- #0 @92311524 s in the cloud while you keep coding locally . clau.de/web..........Run 
+..../m./web-setup..I....1x. to use Claude Code on the web with the GitHub account gh is signed in
+- #1 @93533649 es......t..Claude Code on the web........s.GitHub connected)...c...Not set up . /web-setup to connect GitHub........-..gap-....0w../rename to add a name...&.......not ava
+- #2 @94751332 ....github_repo_not_found........}S./code/onboarding?step=alt-auth..........run /web-setup......NK8. in Claude Code.....\.Z. to reuse your GitHub CLI login.........then r
+- #3 @100461975  continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manual/gh_auth_refresh...........C.o.n.n.e
+- #4 @100463712 Update it via https://cli.github.com/, or connect GitHub on the web: ...+...N"?./web-setup: couldn't check gh auth status: .&.......Couldn't check GitHub CLI login status
+- #5 @100468051 ent.._...Y...No cloud environment available. Create one from the web UI (or run /web-setup), then try again..h...	:.. .Y.o.u.r. .d.e.f.a.u.l.t. .t.a.r.g.e.t. .i.s. .a. .s
+- #6 @189797095 ng claude.ai users who haven\'t connected GitHub for Claude Code on the web to `/web-setup`\n- Added a `/status` line showing whether GitHub is connected for Claude Code 
+- #7 @189797220  whether GitHub is connected for Claude Code on the web (Pro/Max), pointing to `/web-setup` when it isn\'t\n- Added the model (and effort level) each subagent ran on to `
+- #8 @189801355 fering to stash them and continue, as the session picker already does\n- Fixed `/web-setup` repeatedly asking you to log in when an older GitHub CLI (without `gh auth tok
+- #9 @191344547 sions:Kd,maxLifetimeShows:Wd,content:async(d)=>`Run ${ct("suggestion",d.theme)("/web-setup")} to use Claude Code on the web with the GitHub account gh is signed in to`,is
+- #10 @193377935 `,x=!_d()&&!Tt()&&Rt("allow_remote_sessions")&&Rt("allow_quick_web_setup")?`run /web-setup${t.startsWith("/")?"":" in Claude Code"} to reuse your GitHub CLI login`:"",W=`
+- #11 @204848067 ing a repo, opening PRs, reading code), remind them that ${b()?"they should run /web-setup to connect their GitHub account (or install the Claude GitHub App on the repo a
+- … +5 more
+
+## #5 web-setup  needle="web-setup"  hits=30
+- #0 @92258988 ntextual.....6_.claude-design-command...........design......g...web-app.....\...web-setup-github	.......web-setup........em.remote-control......S.Y.remote-control-next-s
+- #1 @92259012 esign-command...........design......g...web-app.....\...web-setup-github	.......web-setup........em.remote-control......S.Y.remote-control-next-surface.
+...P.\.push-noti
+- #2 @92311525  in the cloud while you keep coding locally . clau.de/web..........Run 
+..../m./web-setup..I....1x. to use Claude Code on the web with the GitHub account gh is signed in
+- #3 @93533650 s......t..Claude Code on the web........s.GitHub connected)...c...Not set up . /web-setup to connect GitHub........-..gap-....0w../rename to add a name...&.......not ava
+- #4 @94751333 ...github_repo_not_found........}S./code/onboarding?step=alt-auth..........run /web-setup......NK8. in Claude Code.....\.Z. to reuse your GitHub CLI login.........then r
+- #5 @97714559 nd.........../sync/github/auth...0....<..Checking if GitHub token is synced via web-setup........GitHub token synced: .......f..., data=......3C.checkGithubTokenSynced: 
+- #6 @100461976 continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manual/gh_auth_refresh...........C.o.n.n.e
+- #7 @100463029 p_started......}...tengu_remote_setup_result.......'V.import_failed...2...<V5.[web-setup] Failed to create default environment: .....~...Connected as ...	....>@.. Open
+- #8 @100463713 pdate it via https://cli.github.com/, or connect GitHub on the web: ...+...N"?./web-setup: couldn't check gh auth status: .&.......Couldn't check GitHub CLI login status
+- #9 @100468052 nt.._...Y...No cloud environment available. Create one from the web UI (or run /web-setup), then try again..h...	:.. .Y.o.u.r. .d.e.f.a.u.l.t. .t.a.r.g.e.t. .i.s. .a. .s
+- #10 @179412415 "config",upgrade:"config","usage-credits":"config",vim:"config",voice:"config","web-setup":"config",wellbeing:"config","add-dir":"action","ant-trace":"action",artifacts:
+- #11 @183084372 ,o={...yb(e),"x-organization-uuid":t};n("Checking if GitHub token is synced via web-setup");let r=await nt.get(s,{headers:o,timeout:15000}),c=r.status===200&&r.data?.is_
+- … +18 more
+
+## #5 gh auth refresh  needle="gh auth refresh"  hits=8
+- #0 @100461933 cted while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manua
+- #1 @100525905 our GitHub token has the "repo" scope..O.....L.You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow.+....V..Check that the repository name is correc
+- #2 @100526466 missions: .....,..Missing required scopes......a-.To fix this, run:...0.......  gh auth refresh -h github.com -s repo,workflowH.......This will add the necessary permissions t
+- #3 @208681112 cted while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual
+- #4 @209573021 ..S});let ce=`
+
+Need help? Common issues:
+`+`\xB7 Permission denied \u2192 Run: gh auth refresh -h github.com -s repo,workflow
+`+`\xB7 Not authorized \u2192 Ensure you have ad
+- #5 @209575356 ...x});let j=`
+
+Need help? Common issues:
+`+`\xB7 Permission denied \u2192 Run: gh auth refresh -h github.com -s repo
+`+`\xB7 Not authorized \u2192 Ensure you have admin acces
+- #6 @209581867 cope")} needed to manage GitHub Actions and secrets.`,"","To fix this, run:","  gh auth refresh -h github.com -s repo,workflow","","This will add the necessary permissions to 
+- #7 @209586455  sure your GitHub token has the "repo" scope',"You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow"]});else if(!ma.hasAccess)vt.push({title:"Admin 
+
+## #5 -s repo,workflow  needle="-s repo,workflow"  hits=5
+- #0 @100525935 " scope..O.....L.You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow.+....V..Check that the repository name is correct: ......t=.Admin permissions r
+- #1 @100526496 ired scopes......a-.To fix this, run:...0.......  gh auth refresh -h github.com -s repo,workflowH.......This will add the necessary permissions to manage workflows and secrets.
+- #2 @209573051 mon issues:
+`+`\xB7 Permission denied \u2192 Run: gh auth refresh -h github.com -s repo,workflow
+`+`\xB7 Not authorized \u2192 Ensure you have admin access to the repository
+`+
+- #3 @209581897 b Actions and secrets.`,"","To fix this, run:","  gh auth refresh -h github.com -s repo,workflow","","This will add the necessary permissions to manage workflows and secrets."]
+- #4 @209586485 e "repo" scope',"You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow"]});else if(!ma.hasAccess)vt.push({title:"Admin permissions required",message:`
+
+## #5 -s workflow  needle="-s workflow"  hits=2
+- #0 @100461949 b checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manual/gh_auth_re
+- #1 @208681128 b checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual/gh_auth_ref
+
+## #5 scopes: workflow  needle="scopes: workflow"  hits=0
+
+## #5 "workflow"  needle="\"workflow\""  hits=29
+- #0 @181513625 pB(r){return r.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"workflow"}function cUt(){return d(yu(te()),V(),"workflows","scripts")+k}function y(r,e){r
+- #1 @182974702 lfWake:W().optional().catch(void 0),fan:x(m({id:i().optional(),kind:le(["agent","workflow","shell","monitor","mcp","todo"]).optional().catch(void 0),label:i(),startedAt:A
+- #2 @183932495 l`;case"command":{let u=ie("/")+ie(" command");return`/${fse(t,u)} command`}case"workflow":{let u=ie("/")+ie(" workflow");return`/${fse(t,u)} workflow`}case"agent":return
+- #3 @183932870 {return t&&e.startsWith(t)?e.slice(t.length):e}function sWe(e,t){let r=e.kind==="workflow"?`${t}:`:e.name.slice(0,e.name.lastIndexOf(":")+1),o=e.userFacingName?.()??e.nam
+- #4 @183932994 tIndexOf(":")+1),o=e.userFacingName?.()??e.name,u=Q2t(o,r);return{kind:e.kind==="workflow"?"workflow":e.loadedFrom==="plugin"?"skill":"command",name:u}}var bUe=64,Btn=6;f
+- #5 @183933005 ")+1),o=e.userFacingName?.()??e.name,u=Q2t(o,r);return{kind:e.kind==="workflow"?"workflow":e.loadedFrom==="plugin"?"skill":"command",name:u}}var bUe=64,Btn=6;function SUe
+- #6 @185168026 o.uuid!==t.uuid);return cse(r,t)}var xCe={local_agent:"subagent",local_workflow:"workflow",local_bash:"shell",monitor_mcp:"monitor",monitor_ws:"monitor",mcp_task:"MCP tas
+- #7 @186787804 nteractive}function HK(e){if(e.type!=="prompt")return e.description;if(e.kind==="workflow")return`${e.description} (dynamic workflow)`;if(e.source==="plugin"){let t=e.plu
+- #8 @190381816 (t.description,c,!0)})}return n.push(...l()),n}var b={agent:"subagent",workflow:"workflow",shell:"shell",monitor:"monitor",mcp:"MCP task"};function tHn(){let{items:e,kind
+- #9 @192155049 round",repo:"repo",worktree:"worktree",skill:"skill",command:"command",workflow:"workflow",routine:"routine",model:"model"},Ia={agent:"@",repo:"@",worktree:"@",routine:"@
+- #10 @192176740 S.doneAt!==void 0)}/${m.length}`;let w=d.filter((S)=>S.kind==="agent"||S.kind==="workflow");if(w.length>0)return`${J(w,(S)=>S.doneAt!==void 0)}/${w.length} agents`;return
+- #11 @192265201 ((h)=>!h.isHidden&&!oA(h)).map((h)=>({kind:h.type!=="prompt"?"command":h.kind==="workflow"?"workflow":"skill",name:h.name,aliases:h.aliases,description:ur(h.description??
+- … +17 more
+
+## #5 lacks the  needle="lacks the"  hits=2
+- #0 @207760952 ); their machine has been asked to resend its current state. The checkout still lacks them \u2014 say so if it matters."),Y("warn","dir_sync_git_object_gave_up",{generat
+- #1 @214483310 eclared is
+harmless; a page whose island is filled but whose stored declaration
+lacks the artifact-publish capability never becomes decidable by omission alone). Pass th
+
+## #5 win workflow scope#0 @100461711
+GitHub App.>....w5.GitHub rejected that token. Run `gh auth login` and try again...........Server error (......?...). Try again in a moment....1....,..Couldn't reach the server. Check your connection....@.....+.Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manual/gh_auth_refresh...........C.o.n.n.e.c.t.i.n.g. .G.i.t.H.u.b. .t.o. .C.l.a.u.d.e.& ......6.C.h.e.c.k.i.n.g. .l.o.g.i.n. .s.t.a.t.u.s
+
+## #5 win workflow scope#1 @208680890
+a.status}). Try again in a moment.`;case"network":return"Couldn't reach the server. Check your connection."}}function B(){let Nt=g(1),it;if(Nt[0]===p)it=e(o,{marginTop:1,children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual/gh_auth_refresh"]})}),Nt[0]=it;else it=Nt[0];return it}function ot(Vt){let h=g(38),{onDone:_,host:z,storageV5:K,credentials:T}=Vt,ut
+
+## #5 fn-before workflow scope#1 @208680749
+len=514 sha=0e0a881993c11f88
+function B(){let Nt=g(1),it;if(Nt[0]===p)it=e(o,{marginTop:1,children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual/gh_auth_refresh"]})}),Nt[0]=it;else it=Nt[0];return it}
+
+## #5 win very large repositories#0 @100461818
+....?...). Try again in a moment....1....,..Couldn't reach the server. Check your connection....@.....+.Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:-...	.$.https://cli.github.com/manual/gh_auth_refresh...........C.o.n.n.e.c.t.i.n.g. .G.i.t.H.u.b. .t.o. .C.l.a.u.d.e.& ......6.C.h.e.c.k.i.n.g. .l.o.g.i.n. .s.t.a.t.u.s.& $...'...Connect Claude on the web to GitHub?c...).z.Claude on the web requires connecting to your GitHub
+
+## #5 win very large repositories#1 @208680997
+}}function B(){let Nt=g(1),it;if(Nt[0]===p)it=e(o,{marginTop:1,children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual/gh_auth_refresh"]})}),Nt[0]=it;else it=Nt[0];return it}function ot(Vt){let h=g(38),{onDone:_,host:z,storageV5:K,credentials:T}=Vt,ut;if(h[0]===p)ut={name:"checking"},h[0]=ut;else ut=h[0];let[d,ct]=u(ut),H=E(!1),lt;if(h[1]!==T||h[2]!==_)lt=
+
+## #5 fn-before very large repositories#1 @208680749
+len=514 sha=0e0a881993c11f88
+function B(){let Nt=g(1),it;if(Nt[0]===p)it=e(o,{marginTop:1,children:r(t,{color:"warning",children:["Your GitHub CLI token doesn't have the workflow scope. Without it, GitHub rejects pushes that change GitHub Actions workflow files, and pushes to very large repositories can be rejected while GitHub checks for them. You can continue now. To add the scope, run `gh auth refresh -s workflow` and then run /web-setup again:"," ","https://cli.github.com/manual/gh_auth_refresh"]})}),Nt[0]=it;else it=Nt[0];return it}
+
+## #5 win -s repo,workflow#0 @100525935
+55. was not found or you don't have access.)...x...Ensure you have access to this repository...J....D..For private repositories, make sure your GitHub token has the "repo" scope..O.....L.You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow.+....V..Check that the repository name is correct: ......t=.Admin permissions required..$...D.L.You might need admin permissions on ....l... to set up GitHub Actions...9...n...Repository admins can install GitHub Apps and set secrets...9...t...Ask a repository admin to run this command if setup fails...8.....=.Alternatively, you can use the manual setup instructions....$P..api_key_missing.,....@e.GitHub CLI is missing required pe
+
+## #5 win -s repo,workflow#1 @100526496
+p fails...8.....=.Alternatively, you can use the manual setup instructions....$P..api_key_missing.,....@e.GitHub CLI is missing required permissions: .....,..Missing required scopes......a-.To fix this, run:...0.......  gh auth refresh -h github.com -s repo,workflowH.......This will add the necessary permissions to manage workflows and secrets./.......Your GitHub CLI authentication is missing the ".-....... needed to manage GitHub Actions and secrets........yk..GitHub Actions setup failed.(.......file:///B:/%7EBUN/root/chunk-bdmc0pys.js(.......file:///B:/%7EBUN/root/chunk-3s6rhssk.js....`...This background session shares credentials with other sessions; /logout here has no effect. Run /logou
+
+## #5 win -s repo,workflow#2 @209573051
+emove it first or update it manually.`);s("tengu_setup_github_actions_failed",{reason:v("failed_to_create_workflow_file"),exit_code:B.code,...S});let ce=`
+
+Need help? Common issues:
+`+`\xB7 Permission denied \u2192 Run: gh auth refresh -h github.com -s repo,workflow
+`+`\xB7 Not authorized \u2192 Ensure you have admin access to the repository
+`+"\xB7 For manual setup \u2192 Visit: https://github.com/anthropics/claude-code-action";throw Error(`Failed to create workflow file ${d}: ${B.stderr}${ce}`)}}async function Zo(h,b,d,a,f=!1,A,S,x,G){try{s("tengu_setup_github_actions_started",{skip_workflow:f,has_api_key:!!b,using_default_secret_name:d==="ANTHROPIC_API_KEY",selected_claude_workflow:A.incl
+
+## #5 fn-before -s repo,workflow#2 @209571737
+len=1567 sha=5fe6629dcdd98094
+function Nn({repoName:h,branchName:b,workflowPath:d,workflowContent:a,secretName:f,message:A,context:S}){let x=await Ue("gh",["api",`repos/${h}/contents/${d}`,"--jq",".sha"]),G=null;if(x.code===0)G=x.stdout.trim();let P=a;if(f==="CLAUDE_CODE_OAUTH_TOKEN")P=a.replace(/anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/g,"claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}");else if(f!=="ANTHROPIC_API_KEY")P=a.replace(/anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/g,`anthropic_api_key: \${{ secrets.${f} }}`);let F=Buffer.from(P).toString("base64"),V=["api","--method","PUT",`repos/${h}/contents/${d}`,"-f",`message=${G?`"Update ${A}"`:`"${A}"`}`,"-f",`content=${F}`,"-f",`branch=${b}`];if(G)V.push("-f",`sha=${G}`);let B=await Ue("gh",V);if(B.code!==0){if(B.stderr.includes("422")&&B.stderr.includes("sha"))throw s("tengu_setup_github_actions_failed",{reason:v("failed_to_create_workflow_file"),exit_code:B.code,...S}),Error(`Failed to create workflow file ${d}: A Claude workflow file already exists in this repository. Please remove it first or update it manually.`);s("tengu_setup_github_actions_failed",{reason:v("failed_to_create_workflow_file"),exit_code:B.code,...S});let ce=`
+
+Need help? Common issues:
+`+`\xB7 Permission denied \u2192 Run: gh auth refresh -h github.com -s repo,workflow
+`+`\xB7 Not authorized \u2192 Ensure you have admin access to the repository
+`+"\xB7 For manual setup \u2192 Visit: https://github.com/anthropics/claude-code-action";throw Error(`Failed to create workflow file ${d}: ${B.stderr}${ce}`)}}
+
+## #5 win -s repo,workflow#3 @209581897
+rReason:"Missing required scopes",errorInstructions:[`Your GitHub CLI authentication is missing the "${At.join('" and "')}" ${I(At.length,"scope")} needed to manage GitHub Actions and secrets.`,"","To fix this, run:","  gh auth refresh -h github.com -s repo,workflow","","This will add the necessary permissions to manage workflows and secrets."]}));return}}}let br=await kOe()??"";s("tengu_install_github_app_step_completed",{step:v("check-gh")}),T((rm)=>({...rm,warnings:os,currentRepo:br,selectedRepoName:br,useCurrentRepo:!!br,step:os.length>0?"warnings":"choose-repo"}))},R[8]=jn;else jn=R[8];let Qn=jn,ea,ta;if(R[9]!==i.step)ea=()=>{if(i.step==="check-gh")Qn()},ta=[i.step,Qn],R[9]=i.step,R[10]
+
+## #5 fn-before -s repo,workflow#3 @209580016
+MISS {"i":209580016,"missEnd":true,"preview":"function Or(xe){let R=g(126),{storageV5:hr}=fe(),[q]=u(Na);const gr=!!q,wr=q?\"existing\":nl()?\"oauth\":\"new\";let qn;if(R[0]!==gr||R[1]!==wr)qn={...Ir,useExistingKey:gr,selectedApiKeyOption:wr},R[0]=gr,R[1]=wr,R[2]=qn;else qn=R[2];let[i,T]=u(qn),ts=xt();hi();let Yn;if(R[3]!==xe)Yn={"}
+
+## #5 win -s repo,workflow#4 @209586485
+instructions:[`Check that the repository name is correct: ${le}`,"Ensure you have access to this repository",'For private repositories, make sure your GitHub token has the "repo" scope',"You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow"]});else if(!ma.hasAccess)vt.push({title:"Admin permissions required",message:`You might need admin permissions on ${le} to set up GitHub Actions.`,instructions:["Repository admins can install GitHub Apps and set secrets","Ask a repository admin to run this command if setup fails","Alternatively, you can use the manual setup instructions"]});let da=await Cr(le);if(vt.length>0){let mm=[...i.warnings,...vt];T((dm)=>({...dm,selected
+
+## #5 fn-before -s repo,workflow#4 @209584350
+len=363 sha=7e21d856ea79bd93
+function Ke(){let la=await Ue("gh",["secret","list","--app","actions","--repo",i.selectedRepoName]);if(la.code===0){if(la.stdout.split(`
+`).some(Ua))T(Fa);else if(q)T((um)=>({...um,apiKeyOrOAuthToken:q,useExistingKey:!0})),await ke(q,i.secretName);else T(qa)}else if(q)T((pm)=>({...pm,apiKeyOrOAuthToken:q,useExistingKey:!0})),await ke(q,i.secretName);else T(Ya)}

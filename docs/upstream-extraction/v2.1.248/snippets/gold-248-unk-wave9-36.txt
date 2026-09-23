@@ -1,0 +1,33 @@
+# gold-248-unk-wave9-36  densable 2.1.248 #36
+# mention-ime — no unique @mention IME/NFKC fold
+# SEA 226708128 · 247 present
+# leftover NFKC. stay UNKNOWN.
+
+extracted? no unique mention IME fold
+landed? no
+stay UNKNOWN? YES
+
+## non-Latin
+non-Latin 248=1 247=0 @189782108 old kitty changelog
+  "Ctrl keyboard shortcuts not firing under non-Latin (e.g. Cyrillic) keyboard layouts"
+NOT @mention IME.
+
+## leftover-same fold
+dr @180525410 sha=cdbd73e6c8d8fd63
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+leftover normalizeSessionNameKey / concurrentSessions vu. peerAtMention already calls it.
+
+tengu_at_mention_peer_ 248=2 247=2
+XTe @186137661 analytics only
+
+## extra NFKC (not mention)
+NFKC 248=23 247=22
+Hjn @186196714 memory-recall CJK/Hangul gate — not @mention
+lFe @183705956 MCP * / %2a leftover envExpansion
+dar @184698233 agent name colon check
+
+toLocaleLowerCase 248=5 247=5 (not mention)
+localeCompare 248=138 247=116 (sorts, not mention fold)
+IME/isComposing/foldCase mention  no unique 248 body
+
+no unique 248 mention IME body. leftover NFKC host already present. do not invent. stay UNKNOWN.

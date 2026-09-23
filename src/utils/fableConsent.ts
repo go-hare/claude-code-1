@@ -85,6 +85,30 @@ export type FableConsentGateInput = {
 }
 
 /**
+ * densable `f6e` — requestDialog host can show `fable_overage_consent_prompt`.
+ * Undefined host → false. Kind-allowlist (`G5`/`Xpe`) is ABSENT locally;
+ * a present host is treated as allowing the registered kind.
+ */
+export function canShowFableOverageConsentDialog(
+  requestDialog: unknown,
+): boolean {
+  return typeof requestDialog === 'function'
+}
+
+/**
+ * densable `gP` — fable + not consented + credits required + f6e.
+ * `lp`/`cjt`/`Gce` map onto shouldShowFableConsentDialog.
+ */
+export function shouldPromptFableOverageConsent(
+  input: FableConsentGateInput & { requestDialog?: unknown },
+): boolean {
+  return (
+    shouldShowFableConsentDialog(input) &&
+    canShowFableOverageConsentDialog(input.requestDialog)
+  )
+}
+
+/**
  * Official densable — should Fable consent dialog block model selection / first use?
  * Requires fable model + credits required + no stored/session consent.
  *
@@ -553,26 +577,13 @@ export async function runFableOverageConsentFlow(input: {
     }
   }
 
-  if (!input.requestDialog) {
-    // Official no_dialog_fallback — headless without cvf host.
-    const fallbackOk =
-      input.isFallbackAllowed !== false && Boolean(input.fallbackModel)
-    if (fallbackOk) {
-      return {
-        choice: 'switch_default',
-        reason: 'no_dialog_fallback',
-        dialogShown: false,
-        shouldAbort: false,
-        fallbackModel: input.fallbackModel,
-      }
-    }
+  // densable gP: f6e(requestDialog) false → do not prompt (bg / --bg / no host).
+  if (!canShowFableOverageConsentDialog(input.requestDialog)) {
     return {
-      choice: 'cancelled',
+      choice: 'skipped',
       reason: 'no_dialog_fallback',
       dialogShown: false,
-      shouldAbort: true,
-      errorMessage:
-        'Your model policy only allows Fable 5, which requires usage credits — /model to set it up',
+      shouldAbort: false,
     }
   }
 

@@ -1,0 +1,720 @@
+# gold-248-48-apply
+
+## 248 "owner does not match" hits=0
+## 248 "assertPrivateDirectory" hits=0
+## 248 "socket parent" hits=0
+## 248 "owned by uid" hits=7
+- @97792712
+control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.
+
+- @97858159
+d: connected endpoint is not the expected process<....|e.Refusing to send: connected endpoint owner could not be read0.....z.[uds-client] connected endpoint is owned by uid ....@n..,. .n.o.t. .o.u.r.s. ..  .r.e.f.u.s.i.n.g. .t.o. .w.r.i.t.e.>...W(?.Refusing to send: connected endpoint is not owned by this user..$...F.3.[uds-client] connected endpoint pid ]...z... .i.s. .n.o.t. .t.h.e. .p.r.o.c.e.s.s. .t.h.a.t. .w.r.o.t.e. .t.o. .u.s. .(
+
+- @180811761
+lanted symlink). Refusing to use it. ${i}`);if(d==="EACCES"){let u;try{let p=S(t);if(p.uid!==r)u=p.uid}catch{}if(u!==void 0)throw new P(`Temp directory ${e} is owned by uid ${u}, expected ${r}. Refusing to use it \u2014 another user may have pre-created it. ${i}`,"temp dir owned by another uid (EACCES at open); refusing to use it");throw new P(`Temp directory ${e} is not readable (its mode may have been altered, or a path component deni
+
+- @180812393
+t o=w(n);if(o.uid!==r){if(r===0&&a.CLAUDE_CODE_CONTAINER_ID){Y("warn","tempdir_owner_mismatch",{observed_uid:o.uid});return}throw Error(`Temp directory ${e} is owned by uid ${o.uid}, expected ${r}. Refusing to use it \u2014 another user may have pre-created it. ${i}`)}if((o.mode&511)!==448)_(n,448)}finally{E(n)}}class l{ensured=void 0;childProcessTmpDirMemo=void 0;markEnsured(e){this.ensured=e}setChildProcessTmpDirMemo(e){this.childProc
+
+- @181014450
+erifiable","Refusing to send: connected endpoint owner could not be read"));return}if(x!==void 0&&v!==x){k=!0,g.destroy(),n(`[uds-client] connected endpoint is owned by uid ${v}, not ours \u2014 refusing to write`),b(new $M("wrong-endpoint","Refusing to send: connected endpoint is not owned by this user"));return}if(p!==void 0&&Rve(l)!==p){k=!0,g.destroy(),n(`[uds-client] connected endpoint pid ${l} is not the process that wrote to us (
+
+- @182942555
+);return}await d(e,{recursive:!0,mode:448}),b();let n=process.getuid?.(),t=await m(e);if(n!==void 0&&t.uid!==n)throw Error(`refusing to use daemon dir: ${e} is owned by uid ${t.uid}`);if((t.mode&511)!==448)await x(e,448)}async function GGe(){if(B()==="windows")return;let e=QK();await d(e,{recursive:!0,mode:448});let n=new Date;await W(e,n,n).catch(()=>{}),await I([R(e),e])}var U1t="ENOTOWNED";async function I(e){let n=process.getuid?.()
+
+## 248 "overflowuid" hits=2
+- @97792901
+ing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.........browser-sdk.js.......A..agentSdk.js....._V..^chunk-[0-9a-z]+\.js$...>...&.	.^(?:\/(?:\$bunfs|~BUN)|\/?[A-Za-z]:[\\/](?:\$bunfs|~BUN))[\\/]........h.src/	.......p
+
+- @182940121
+t:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uid
+
+## 248 "hostStart" hits=2
+- @97792592
+daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json........!..unknown frame ki
+
+- @182939953
+(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);retu
+
+## 248 "innerStart" hits=7
+- @97792572
+....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl json.......
+
+- @182939940
+[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=N
+
+- @182940024
+Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.
+
+- @213393300
+.size(this.resolveDataElementOptions(e.length-1));return Math.max(s,n,o)/2}}});function Xn(t,e,i,s){const n=vi(t.options.borderRadius,["outerStart","outerEnd","innerStart","innerEnd"]);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math
+
+- @213393483
+);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i-h,0),u=c>0?c+s+i+h:0;let f=0;const g=n-l;if(
+
+- @213393498
+/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i-h,0),u=c>0?c+s+i+h:0;let f=0;const g=n-l;if(s){const t=((c>
+
+## 248 "uidsCollapse" hits=4
+- @97792400
+amespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing
+
+- @179894498
+}from"B:/~BUN/root/chunk-m0p20t24.js";import{readFile as a,readlink as u}from"fs/promises";import{hostname as e}from"os";class o{pidSpace=null;pidDomain=void 0;uidsCollapse=null}var qce=new o;function Qgt(){if(qce.pidSpace===null){let n="";qce.pidSpace=`${e()}${n===""?"":"#"+n}`}return qce.pidSpace}function hY(){return qce.pidDomain??=(async()=>{let n=B();if(n==="windows")return`win32:${e().toLowerCase()}`;if(n!=="linux"&&n!=="wsl")retu
+
+- @182940371
+n;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir as d,readdir as w,readFile as D,rm
+
+- @182940398
+mber.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir as d,readdir as w,readFile as D,rm as F,utimes as W}from"fs/p
+
+## 248 "/proc/self/" hits=31
+- @94736836
+D....;..Cannot destructure property 'installed' from null or undefined value(...j^..file:///B:/%7EBUN/root/chunk-g84d5c8a.js....l.$.generateHeapSnapshot....(../proc/self/fd......./DR./proc/self/smaps_rollup.....3...bun:jsc.D....j..Cannot destructure property 'heapStats' from null or undefined value3....T.. detached context(s) - possible iframe/context leak.,...-... active handles - possible timer/socket leakK....	e.Native memory > heap
+
+- @94736860
+re property 'installed' from null or undefined value(...j^..file:///B:/%7EBUN/root/chunk-g84d5c8a.js....l.$.generateHeapSnapshot....(../proc/self/fd......./DR./proc/self/smaps_rollup.....3...bun:jsc.D....j..Cannot destructure property 'heapStats' from null or undefined value3....T.. detached context(s) - possible iframe/context leak.,...-... active handles - possible timer/socket leakK....	e.Native memory > heap - leak may be in native
+
+- @96052948
+..".could not copy the index: ........>.not a single regular file.......g.@.larger than an index can be.........changed while being read....!...copied.......j../proc/self/mountinfo....?7..\\([0-7]{3})....2...fstype......,M..core.splitIndex=false...	...4h&.read-tree........3@.old_git......).--cacheinfo.....B...100644,.....8...core.ignorecase=true	...%.
+.indexPath...........GIT_INDEX_FILE......B@..GIT_OBJECT_DIRECTORY ....S	.GIT_ALTERNAT
+
+- @96712920
+ance....}...$.audio.speak: text must be a non-empty string..........$.audio.speak: text over ...0...i. .$.audio.speak: voice must be a string when given....}.../proc/self/fd/..C.......Cannot destructure property 'realRoot' from null or undefined value......... is a ..J...g].. directory, the project's own configuration, and is not written by plugins..U....... is a bare repository, the project's own configuration, and is not written by pl
+
+- @98059068
+null byte (\0)..A....l..Cannot destructure property 'rgPath' from null or undefined value... .......CLAUDE_CODE_GLOB_TIMEOUT_SECONDS
+....<..killSignal......h.../proc/self/exe..N....A..sandbox: failed to open /proc/self/exe for the embedded apply-seccomp helper: ..&...B.c.sandbox: failed to open /proc/self/exe........{.^([^(]+)\(([^)]+)\)$	....H..^(.+):\*$...H...@.w.Cannot destructure property 'evenAfterGlob' from null or undefined value
+
+- @98059116
+rty 'rgPath' from null or undefined value... .......CLAUDE_CODE_GLOB_TIMEOUT_SECONDS
+....<..killSignal......h.../proc/self/exe..N....A..sandbox: failed to open /proc/self/exe for the embedded apply-seccomp helper: ..&...B.c.sandbox: failed to open /proc/self/exe........{.^([^(]+)\(([^)]+)\)$	....H..^(.+):\*$...H...@.w.Cannot destructure property 'evenAfterGlob' from null or undefined value.....y.evenAfterGlob........6V.trustedPair.....
+
+## 248 "uid_map" hits=0
+## 248 "gid_map" hits=0
+## 248 "setgroups" hits=2
+- @96294754
+output-limit..	....(..--log-out.........8.--log-io......&.--log-in....o...--setuid.....*=.--setgid.....f..--root..........--wd...G.#.--propagation.......Z. .--setgroups.......*.--monotonic.
+...J\E.--boottime......i...--target....?]	.--split-string..	.......--command.......S&>.^[A-Za-z_][A-Za-z0-9_]*\+?=.........^(LD_|DYLD_|PATH$)......'...[;|&`$(){}<>#\n\r]..].......(?:^|[|;&\n({])[ \t]*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Recu
+
+- @184304958
+ging-format","--output-limit","--log-out","--log-io","--log-in"]),unshare:new Set(["-R","-w","-S","-G","--setuid","--setgid","--root","--wd","--propagation","--setgroups","--monotonic","--boottime"]),nsenter:new Set(["-t","-S","-G","--target","--setuid","--setgid"]),exec:new Set(["-a"]),command:new Set([]),builtin:new Set([]),noglob:new Set([]),nocorrect:new Set([])},hXt={env:new Set(["-S","--split-string"]),flock:new Set(["-c","--comma
+
+## 248 "canonical system" hits=0
+## 248 "system directories" hits=0
+## 248 "root-equivalent" hits=0
+## 248 "root equivalent" hits=0
+## 248 "unmapped owner" hits=0
+## 248 "unmapped" hits=18
+- @88446338
+Attribute.hasAttribute.removeAttribute.blockquote.unistr_quote.json_quote.VectorPromote.init_max_stream_data_bidi_remote.VectorDemote.Composite.samesite.Put an unmapped cell-like pointer (poisonedDeadOSRExitValue) into dead OSR exit values rather than jsUndefined, so accidental reads of dead variables crash at the access site.archive_write.Failed to write.Executed NotifyWrite.hexWrite.currentWrite.boundOneShotDirectWrite.boundDirectWrit
+
+- @94926765
+`]+`...........[. ]+$..........<!-- import-fallback: .......... -->....]qP.From your user-level ...
+....... config:
+
+..........There .......kt. also ..
+....vX. unmapped ......)lu. from the project-level .....0q. config in the repo where the import ran. Those are not listed here (project config can be authored by anyone with write access to that repo). If you still need them, re-open that project and review its `.codex/` or `.gemini/` di
+
+- @97799488
+SAL_FALLBACK_CATCH_ALL..Q....+P.Cannot destructure property 'originalModelCanonical' from null or undefined value.......].Q.mapped_target_unresolvable......t...unmapped$.......CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK.....{..catalog_flag	.....c.gb_listed...........walk_down_opus_lineup.......h...\[1m\]..%...Y...tengu_refusal_fallback_route_declined.........:.chain_entry_unresolvable....e'd.armed_fallback_model.....=3.chainEntryIndex.....+-..
+
+- @98816547
+ry] cached ......c.v.[gatewayDiscovery] failed: .;....3..enforceAvailableModels: the managed modelOverrides target ".5......." is server-unavailable; using the unmapped candidate........^@.e.n.f.o.r.c.e.A.v.a.i.l.a.b.l.e.M.o.d.e.l.s.:. .a.n. .a.d.m.i.n. .p.o.l.i.c.y. .s.o.u.r.c.e. .f.a.i.l.e.d. .t.o. .l.o.a.d.;. .e.n.f.o.r.c.i.n.g. .t.h.e. .s.u.r.v.i.v.i.n.g. .a.d.m.i.n. .t.i.e.r. .(.t.h.e. .f.a.i.l.e.d. .s.o.u.r.c.e. .m.a.y. .c.a.r.r.y
+
+- @100506925
+,/.D.r.y. .r.u.n. ..  .w.o.u.l.d. .i.m.p.o.r.t. ...	.....j.Imported .......Go.. . ..& ......0.Review these:...F...u.F.Run /import-to-claude-code to finish the unmapped items interactively...<....Xx. were skipped (re-run /import to generate the helper skill).......d. warning-flagged ...,....... .h.e.l.d. .b.a.c.k. ..  .r.e.-.r.u.n. .w.i.t.h.o.u.t. .-.-.y.e.s. .t.o. .r.e.v.i.e.w.......X.N. project-level .(...y.X.file:///B:/%7EBUN/root/ch
+
+- @180246849
+nr}}}if(AB(ln(we),{ignoreModelOverrides:!0})!==null){let ze=`enforceAvailableModels: the managed modelOverrides target "${we}" is server-unavailable; using the unmapped candidate`;if(!Be().has(ze))Be().add(ze),n(ze,{level:"warn"});return Ke}if(Ne!==Ke)return wW(we,k)?Ze(we):EO(we);if(mu(we)&&!wW(we,k))return EO(we);return we},N=null,U=String(e),G=ln(U.trim().toLowerCase()),j=mu(e),ie=G.startsWith("claude-")?G:`claude-${G}`,J=Ece(ie)?xt(
+
+## 248 "nobody" hits=20
+- @95918262
+ttended session). Only already-running granted apps are reachable, via the background app_* tools.....Q...Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running granted apps...1...m...Taking over the screen needs your approval. Call ...5.......r.e.q.u.e.s.t._.f.u.l.l._.c.o.n.t.r.o.l. .f.i.r.s.t. ..  .o.n.c.e. .a.p.p.r.o.v.e.d. .(.f.o.r. .t.h.i.
+
+- @96718344
+gin.........hooks module....}.>. did not load: .........hooking.....Kd..engine.create: ......M..no plugin-provided interfaces.......&'T.; $ built for ......o|\.nobody......A...hooks worker respawn: .........., which withheld $..3......, did not come back; the withholding held until now.....@.4.plugin_function_hooks_worker......h.plugin_function_hooks_load..........crashed_worker..*...=e.. was unloaded: it crashed the hooks worker......
+
+- @101481417
+.?.-filterhashtable........-outfile....O=..-infile.......`.-allowinsecureredirect..........-allowunencryptedauthentication.........-disablekeepalive........Ve.-nobodyprogress."...X.d.-preservefileauthorizationmetadata..........-resume.........-skipcertificatecheck...........-skipheadervalidation.......g9..-skiphttperrorcheck.........-usebasicparsing.....w..-usedefaultcredentials..........-uri....C...-method.....+...-body.......T...-cont
+
+- @180357768
+4 the informational warning names these), `kept` (an attach: the existing session keeps what it was created with) or `preference` (a display or host preference nobody would miss \u2014 the informational notice names these two), so a host may show them itself once or never; absent when nothing was left unapplied. `client_version` rises only on a breaking change to this block \u2014 warn and continue on a higher value, never refuse; `stat
+
+- @184845535
+engine.create: ${p.length===0?"no plugin-provided interfaces":p.join("; ")}${g.length===0?"":`; ${g.join("; ")}`}; $ built for ${u.map((k)=>k.name).join(",")||"nobody"}`)}function uZe(e,t,r){for(let[o,u]of Object.entries(e??{})){let p=Object.hasOwn(t,o)?t[o]:void 0;for(let g of u.withheldBy??[])if(!r.includes(g)&&!(p?.withheldBy??[]).includes(g))n(`hooks worker respawn: ${g}, which withheld $.${o}, did not come back; the withholding hel
+
+- @184854048
+ks worker crashed ${e.state.unattributedCrashes} times`)}let u=vl.declaredArgs(e.state);n(`hooks worker: respawning for ${u.map((E)=>E.pluginName).join(", ")||"nobody"} (${t})`);let p=[];for(let E of u)try{p.push(await Oc.loadEnvironment(e,E)),vl.bumpGeneration(e.state,E.pluginName)}catch(C){if(n(`hooks module ${E.pluginName} failed to load after the respawn: ${Oc.loadFailureText(C)}`,{level:"error"}),Gy.abandoned(e,p,"the respawn"))ret
+
+## 248 "65534" hits=7
+- @182060814
+r(var A=0;A<i.digestLength;++A)T|=o.charAt(A)!==S.charAt(A);var _=1,N=i.digestLength;for(var O=i.digestLength;O<g.length;O++){var k=g.charCodeAt(O),L=k&1^1,Q=_?65534:0;T|=k&Q,_=_&L,N+=_}if(T||g.charCodeAt(N)!==1)throw Error("Invalid RSAES-OAEP padding.");return g.substring(N+1)};function Or(e,t,a){if(!a)a=vt.md.sha1.create();var r="",i=Math.ceil(t/a.digestLength);for(var s=0;s<i;++s){var n=String.fromCharCode(s>>24&255,s>>16&255,s>>8&25
+
+- @182939595
+k-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSa
+
+- @195701850
+e"||e in Object.prototype}function Yh(e){for(let t of e){let r=t.codePointAt(0)??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=65528||r>=917504&&r<=921599)return!0;if(r===847||r===4447||r===4448||r===6068||r===6069||r===8293||r===12644||r===65440)return!0;if(qh.test(t))return!0}return!1}function Xh(e){return e.leng
+
+- @195701859
+Object.prototype}function Yh(e){for(let t of e){let r=t.codePointAt(0)??0;if(r===10||r===9||Vh.test(t))continue;if(r<32||r>=127&&r<=159)return!0;if((r&65534)===65534||r>=64976&&r<=65007)return!0;if(r===8232||r===8233)return!0;if(r>=65520&&r<=65528||r>=917504&&r<=921599)return!0;if(r===847||r===4447||r===4448||r===6068||r===6069||r===8293||r===12644||r===65440)return!0;if(qh.test(t))return!0}return!1}function Xh(e){return e.length<=jh&&!
+
+- @199615314
+Mask=function(){var p,m,_,b,v,E,I;I={0:16,32768:15,49152:14,57344:13,61440:12,63488:11,64512:10,65024:9,65280:8,65408:7,65472:6,65504:5,65520:4,65528:3,65532:2,65534:1,65535:0},p=0,v=!1;for(m=_=7;_>=0;m=_+=-1)if(b=this.parts[m],b in I){if(E=I[b],v&&E!==0)return null;if(E!==16)v=!0;p+=E}else return null;return 128-p},f}(),r="(?:[0-9a-f]+::?)+",c="%[0-9a-z]{1,}",o={zoneIndex:new RegExp(c,"i"),native:new RegExp("^(::)?("+r+")?([0-9a-f]+)?(
+
+- @204274961
+ements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{je}from"B:/~BUN/root/chunk-n4vhwd20.js";var Nt=new Set([65534,65535,131070,131071,196606,196607,262142,262143,327678,327679,393214,393215,458750,458751,524286,524287,589822,589823,655358,655359,720894,720895,786430,786431,851966,851967,917502,917503,983038,983039,1048574,1048575,1114110,1114111]),f="\uFFFD",s;(function(e){e[e.EOF=-1]=
+
+## 248 "===y||" hits=6
+- @180782188
+2])this.semver=y;else this.semver=new Ir(t[2],this.options.loose)}toString(){return this.value}test(e){if(oe("Comparator.test",e,this.options.loose),this.semver===y||e===y)return!0;if(typeof e==="string")try{e=new Ir(e,this.options)}catch(r){return!1}return ne(e,this.operator,this.semver,this.options)}intersects(e,r){if(!(e instanceof K))throw TypeError("a Comparator is required");if(this.operator===""){if(this.value==="")return!0;retur
+
+- @189277239
+,l.stateNode=v,i&&Uu(v,l,!1,!1))}else l.stateNode=y}}function Fu(i,l,s,f,y){if((i.mode&32)!==0&&(s===null?Kg(l,f):Gg(l,s,f))){if(i.flags|=16777216,(y&335544128)===y||fc(l,f))if(fm(i.stateNode,l,f))i.flags|=8192;else if(Lh())i.flags|=8192;else throw ya=Rs,Mc}else i.flags&=-16777217}function ch(i,l){if($b(l)){if(i.flags|=16777216,!Nm(l))if(Lh())i.flags|=8192;else throw ya=Rs,Mc}else i.flags&=-16777217}function as(i,l){l!==null&&(i.flags|=
+
+- @198676283
+t));let y=p.value;if(m&&de(f)!==y&&v$(de(f),y)&&!await Nl(r,a))return re({kind:"escapes",reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===void 0||lr(k)||Ln(k)!==void 0||!m&&g.some((b)=>Mb(b).some((v)=>rD(v,dL(i.within)))))return re({kind:"escapes",reason:"unnameable"});l
+
+- @216364289
+,y,f,e,t,a);if(v!==void 0){if(v)continue;p=!1;break}if(m){if(!Efe(t,function(x,b){if(!P3(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}var cat,uat,O3,JO=F(()=>{"use strict";ZO();Afe();QO();cat=1,uat=2;o(hat,"equalArrays");O3=hat});function dat(e){var t=-1,r=Array(e.size);return e.forEach(function(n,i){r[++t]=[i,n]}),r}var Rfe,_fe=F(()=>{"use stric
+
+- @217217762
+,y,f,e,t,a);if(v!==void 0){if(v)continue;p=!1;break}if(m){if(!JEe(t,function(x,b){if(!bq(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}function n4e(e){var t=-1,r=Array(e.size);return e.forEach(function(n,i){r[++t]=[i,n]}),r}function i4e(e){var t=-1,r=Array(e.size);return e.forEach(function(n){r[++t]=n}),r}function a4e(e,t,r,n,i,a,s){switch(r){case
+
+- @217263509
+y,f,e,t,a);if(v!==void 0){if(v)continue;p=!1;break}if(m){if(!Cwt(t,function(x,b){if(!ZAe(m,b)&&(g===x||i(g,x,r,n,a)))return m.push(b)})){p=!1;break}}else if(!(g===y||i(g,y,r,n,a))){p=!1;break}}return a.delete(e),a.delete(t),p}function e6e(e){var t=-1,r=Array(e.size);return e.forEach(function(n,i){r[++t]=[i,n]}),r}function t6e(e){var t=-1,r=Array(e.size);return e.forEach(function(n){r[++t]=n}),r}function r6e(e,t,r,n,i,a,s){switch(r){case
+
+## 248 "===y&&" hits=2
+- @68512037
+._in||(u=this.options.ecmaVersion>=6&&this.isContextual("of"))?(t>-1?(this.type===a._in&&this.unexpected(t),e.await=!0):u&&this.options.ecmaVersion>=8&&(S.start===y&&!p&&S.type==="Identifier"&&S.name==="async"?this.unexpected():this.options.ecmaVersion>=9&&(e.await=!1)),n&&u&&this.raise(S.start,"The left-hand side of a for-of loop may not start with \'let\'."),this.toAssignable(S,!1,d),this.checkLValPattern(S),this.parseForIn(e,S)):(thi
+
+- @189921329
+ll))return null;if(d==="resolved"&&m!==null===(g!==null))return null;a.push({id:l,opts:p.slice(),state:d,choice:m,custom:g})}return a}function ce(e){return e.id===y&&e.opts.length===2&&b.every((n)=>e.opts.includes(n))&&e.custom===null}function V2e(e){let n=e.find(ce);if(e.some((s)=>s!==n&&s.state==="open"))return"in-progress";if(n!==void 0&&n.choice===b[0])return"started";if(n!==void 0&&n.state==="open")return"ready";return"in-progress"
+
+## 248 "===y?" hits=7
+- @189277035
+tion Pu(i,l,s,f){if(on)i.memoizedProps!==f&&oi(l);else if(Ri){var{stateNode:y,memoizedProps:v}=i;if((i=rh(i,l))||v!==f){var M=Qt.current;v=yb(y,s,v,f,!i,null),v===y?l.stateNode=y:(ls(l),um(v,s,f,M)&&oi(l),l.stateNode=v,i&&Uu(v,l,!1,!1))}else l.stateNode=y}}function Fu(i,l,s,f,y){if((i.mode&32)!==0&&(s===null?Kg(l,f):Gg(l,s,f))){if(i.flags|=16777216,(y&335544128)===y||fc(l,f))if(fm(i.stateNode,l,f))i.flags|=8192;else if(Lh())i.flags|=819
+
+- @189914004
+p>`:s===void 0?"":`<p class="decided">Decided: ${lo(s.label)}</p>`,l=e.anchor===void 0?"":`<p class="anchor">Anchor: <code>${lo(e.anchor)}</code></p>`,p=n||e.id===y?"":`<div class="custom-answer"><input class="option-input" type="text" maxlength="${R}" disabled aria-disabled="true" title="Deciding from the page needs this Artifact to be able to update itself"`+' placeholder="Or type your own answer\u2026" aria-label="Your own answer"></
+
+- @198676332
+await Nl(r,a))return re({kind:"escapes",reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===void 0||lr(k)||Ln(k)!==void 0||!m&&g.some((b)=>Mb(b).some((v)=>rD(v,dL(i.within)))))return re({kind:"escapes",reason:"unnameable"});let R=await xe(zt(f));if(!R.ok&&R.error.kind!=="ab
+
+- @201536777
+nsformed:null,salvage:null,exact:!1}),l=null,m=null;function d(){let h=i.getState();if(m===null||l!==h)l=h,m=ld(h);return m}function f(h,y){i.setState((S)=>S[h]===y?S:{...S,[h]:y})}return{setRaw:(h)=>f("raw",h),setTransformed:(h)=>f("transformed",h),setSalvage:(h,y)=>i.setState((S)=>{let x=y??S.exact;if(S.salvage===h&&S.exact===x)return S;return{...S,salvage:h,exact:x}}),getState:i.getState,getDerived:d,getFlags(){let h=i.getState(),{di
+
+- @216470904
+ts=m,h=!0;break}}if(h)break}if(!h)return}}function oB(e,t){let{realNodeRects:a,labelNodeRects:s}=gu(t.values()),l=e.filter(g=>!g.isLayoutOnly),u=o((g,y,v)=>Jr(g===y?v??[]:g.points??[]),"pointsFor"),h=o((g,y)=>{let v=0;for(let x=0;x<l.length;x++){let b=jr(u(l[x],g,y));for(let T=x+1;T<l.length;T++){let k=jr(u(l[T],g,y));for(let C of b)for(let w of k)fc(C.a,C.b,w.a,w.b,rr)&&v++}}return v},"strictCrossingCount"),d=o(g=>{let y=jr(g);if(y.len
+
+- @216480926
+f(!S)return;for(let[I,_]of S)I.points=_}}function Cye(e,t){let{realNodeRects:i,labelNodeRects:a}=gu(t.values()),s=e.filter(g=>!g.isLayoutOnly),l=o((g,y,v)=>Jr(g===y?v??[]:g.points??[]),"pointsFor"),u=o(g=>jr(g).reduce((y,v)=>{let x=v.a.x-v.b.x,b=v.a.y-v.b.y;return y+Math.hypot(x,b)},0),"pathLength"),h=o((g,y)=>{let v=0;for(let x=0;x<s.length;x++){let b=jr(l(s[x],g,y));for(let T=x+1;T<s.length;T++){let k=jr(l(s[T],g,y));for(let C of b)fo
+
+## 248 "==y||" hits=55
+- @180782189
+])this.semver=y;else this.semver=new Ir(t[2],this.options.loose)}toString(){return this.value}test(e){if(oe("Comparator.test",e,this.options.loose),this.semver===y||e===y)return!0;if(typeof e==="string")try{e=new Ir(e,this.options)}catch(r){return!1}return ne(e,this.operator,this.semver,this.options)}intersects(e,r){if(!(e instanceof K))throw TypeError("a Comparator is required");if(this.operator===""){if(this.value==="")return!0;return
+
+- @189277240
+l.stateNode=v,i&&Uu(v,l,!1,!1))}else l.stateNode=y}}function Fu(i,l,s,f,y){if((i.mode&32)!==0&&(s===null?Kg(l,f):Gg(l,s,f))){if(i.flags|=16777216,(y&335544128)===y||fc(l,f))if(fm(i.stateNode,l,f))i.flags|=8192;else if(Lh())i.flags|=8192;else throw ya=Rs,Mc}else i.flags&=-16777217}function ch(i,l){if($b(l)){if(i.flags|=16777216,!Nm(l))if(Lh())i.flags|=8192;else throw ya=Rs,Mc}else i.flags&=-16777217}function as(i,l){l!==null&&(i.flags|=4
+
+- @189911229
+l}return P(t)?t:null}function D(e){return e.resolved!==void 0||e.custom!==void 0}var y="get-started",b=["get-started","keep-iterating"];function Brt(e){if(e.id!==y||e.options.length!==2)return!1;if(e.custom!==void 0)return!1;let n=new Set(e.options.map((t)=>t.token));return b.every((t)=>n.has(t))}function F(e){let n=e.find(Brt);if(e.some((s)=>s!==n&&!D(s)))return"in-progress";if(n?.resolved===b[0])return"started";if(n!==void 0&&n.resolv
+
+- @192094960
+588\u2588\u2588\u2588"}),c[16]=N;else N=c[16];let _;if(c[17]!==l.r2R)_=e(t,{color:"clawd_body",children:l.r2R}),c[17]=l.r2R,c[18]=_;else _=c[18];let k;if(c[19]!==y||c[20]!==_)k=r(t,{children:[y,N,_]}),c[19]=y,c[20]=_,c[21]=k;else k=c[21];let B;if(c[22]===p)B=r(t,{color:"clawd_body",children:["  ","\u259D\u259D \u259D\u259D","  "]}),c[22]=B;else B=c[22];let I;if(c[23]!==k||c[24]!==f)I=r(o,{flexDirection:"column",flexShrink:0,children:[f,
+
+- @196469360
+!f.aborted&&b.isError!==!0&&(y===d&&!s||!OG(n,d)))VX(n,d);return b}catch(b){if(b instanceof Y){if(zoe(n,b.projectId),BMn(n),g.grant===!0)throw b;if(b.projectId!==y||s){if(e.operation==="write_files"||e.operation==="create_support_js"){if(t.options?.isNonInteractiveSession===!0)throw new P("Writing to this project needs a project write grant that is not currently active (it may have been revoked) \u2014 use finalize_plan with writes (and
+
+- @198676284
+));let y=p.value;if(m&&de(f)!==y&&v$(de(f),y)&&!await Nl(r,a))return re({kind:"escapes",reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===void 0||lr(k)||Ln(k)!==void 0||!m&&g.some((b)=>Mb(b).some((v)=>rD(v,dL(i.within)))))return re({kind:"escapes",reason:"unnameable"});le
+
+## 248 "==y&&" hits=11
+- @68512038
+_in||(u=this.options.ecmaVersion>=6&&this.isContextual("of"))?(t>-1?(this.type===a._in&&this.unexpected(t),e.await=!0):u&&this.options.ecmaVersion>=8&&(S.start===y&&!p&&S.type==="Identifier"&&S.name==="async"?this.unexpected():this.options.ecmaVersion>=9&&(e.await=!1)),n&&u&&this.raise(S.start,"The left-hand side of a for-of loop may not start with \'let\'."),this.toAssignable(S,!1,d),this.checkLValPattern(S),this.parseForIn(e,S)):(this
+
+- @189218911
+urn U!==0?(f=U&~v,f!==0?y=O(f):(M&=U,M!==0?y=O(M):s||(s=U&~i,s!==0&&(y=O(s))))):(U=f&~v,U!==0?y=O(U):M!==0?y=O(M):s||(s=f&~i,s!==0&&(y=O(s)))),y===0?0:l!==0&&l!==y&&(l&v)===0&&(v=y&-y,s=l&-l,v>=s||v===32&&(s&4194048)!==0)?l:y}function k(i,l){return(i.pendingLanes&~(i.suspendedLanes&~i.pingedLanes)&l)===0}function F(i,l){switch(i){case 1:case 2:case 4:case 8:case 64:return l+250;case 16:case 32:case 128:case 256:case 512:case 1024:case 2
+
+- @189281519
+Pool!==null&&(y=f.alternate.memoizedState.cachePool.pool),v=null,f.memoizedState!==null&&f.memoizedState.cachePool!==null&&(v=f.memoizedState.cachePool.pool),v!==y&&(f.flags|=2048)),s!==i&&s&&(l.child.flags|=8192),as(l,l.updateQueue),pt(l),null;case 4:return xt(),uh(i,l),i===null&&Pg(l.stateNode.containerInfo),pt(l),null;case 10:return et(l.type),pt(l),null;case 19:if(A(wt),f=l.memoizedState,f===null)return pt(l),null;if(y=(l.flags&128)
+
+- @189921330
+l))return null;if(d==="resolved"&&m!==null===(g!==null))return null;a.push({id:l,opts:p.slice(),state:d,choice:m,custom:g})}return a}function ce(e){return e.id===y&&e.opts.length===2&&b.every((n)=>e.opts.includes(n))&&e.custom===null}function V2e(e){let n=e.find(ce);if(e.some((s)=>s!==n&&s.state==="open"))return"in-progress";if(n!==void 0&&n.choice===b[0])return"started";if(n!==void 0&&n.state==="open")return"ready";return"in-progress"}
+
+- @198676153
+anchor==="resolved"?await r.realpath(s):await Tl(r,u,s);if(!p.ok)return p.error.kind==="absent"?re({kind:"inPlace"}):H(Ve(p.error,t));let y=p.value;if(m&&de(f)!==y&&v$(de(f),y)&&!await Nl(r,a))return re({kind:"escapes",reason:"enclosing"});if(f===ge(y,...d))return re({kind:"inPlace"});if(f===y||!v$(y,f))return re({kind:"escapes",reason:f===y?"unnameable":v$(f,y)?"enclosing":"outside"});let g=Rn(y,f).split(ke),k=NY(i.within,g);if(k===voi
+
+- @213340156
+ontext(t),o=e.lineWidth,a=e.color,l=s.dash||[],d=s.dashOffset,u=e.tickWidth,g=e.tickColor,p=e.tickBorderDash||[],m=e.tickBorderDashOffset;y=Gs(this,_,h),void 0!==y&&(v=Ae(i,y,o),c?M=k=P=C=v:w=S=D=O=v,f.push({tx1:M,ty1:w,tx2:k,ty2:S,x1:P,y1:D,x2:C,y2:O,width:o,color:a,borderDash:l,borderDashOffset:d,tickWidth:u,tickColor:g,tickBorderDash:p,tickBorderDashOffset:m}))}return this._ticksLength=d,this._borderValue=b,f}_computeLabelItems(t){co
+
+## 248 ",y)" hits=550
+- @68509975
+s.value,y=this.parseExpression();return s===a.name&&y.type==="Identifier"&&this.eat(a.colon)?this.parseLabeledStatement(r,d,y,e):this.parseExpressionStatement(r,y)}},l.parseBreakContinueStatement=function(e,t){var i=t==="break";this.next(),this.eat(a.semi)||this.insertSemicolon()?e.label=null:this.type!==a.name?this.unexpected():(e.label=this.parseIdent(),this.semicolon());for(var s=0;s<this.labels.length;++s){var r=this.labels[s];if((e
+
+- @68545251
+Pos,se=this.awaitPos,Q=this.awaitIdentPos;this.yieldPos=0,this.awaitPos=0,this.awaitIdentPos=0;var xe=this.parseExprList(a.parenR,this.options.ecmaVersion>=8,!1,y);if(r&&!h&&this.shouldParseAsyncArrow())return this.checkPatternErrors(y,!1),this.checkYieldAwaitInDefaultParams(),this.awaitIdentPos>0&&this.raise(this.awaitIdentPos,"Cannot use \'await\' as identifier inside an async function"),this.yieldPos=S,this.awaitPos=se,this.awaitIden
+
+- @74144160
+){.PO{.wp...x.Cj..<.*.qO.l.xE.Kp<.*..s:t.._...<.*..^._ju.RCV.[a^.a.e.eY~....S...S|..U.<.*..Q.Q.Q>l%SKg.g.wu|..$..p'.2{.h"niq.}.X
+jNj.q.t....A~N.m..s.*...o.*p?p,y)...".....<.*..SUb.N....<.*..r.YNl.lm...).Hu	...OZ.h.v5{.........n.[.{<.*..S.e..JWxl...ger...m....:...<.*.2..Y?b...W..t...<.*..N...~	f.f.t.w#P.e!}+.*.....<.*.>e..<.*..X<.*....Y^...aUSZTZ.n.~..s...Ib.f.s_....}......%.........<.*....mS.0...<.*..g..*S..\Y.`.e.h.i..\....{<.*. T...^
+
+- @138948336
+..k"..E.....l"..6..../......,m%....n#..F.....o#..7...H0......,p&....q$..G.....r$..8...61......,s'....t%..H.....u%..9...F2......,v(....w&..I.....x&..:....3......,y)....z'..J.....{'..;....4a........K.....|(........L.....})..........<....5......=......=...~*..M.........*..>...A6......?......?....+..N.........+.........@......@....,..O.........,..........A...77......B......B....-..P.........-.........C......C.......Q....................D...
+
+- @178437617
+ink;return new Promise((y,x)=>{if(f?.aborted){g?.(),x(qt(f));return}let k=()=>{return};function O(){t?.delete(S),k(),g?.()}let v=setTimeout((w,H)=>{w(),H()},m,O,y);if(f)k=Gd.relayAbort(f,{abort:()=>{clearTimeout(v),O(),x(qt(f))}});let S=d.sealNoun({cancel:()=>{clearTimeout(v),O(),x(Ae.unloadedError(e))}});t?.add(S)})},after:(i,a)=>p({event:"after",ms:i,fn:a,repeat:!1}),every:(i,a)=>p({event:"every",ms:i,fn:a,repeat:!0})})}var xne={};je(
+
+- @178471218
+},dispatch:(m,u,f)=>s.run(m.id,()=>a(m,u,f)),build:(m,u,f)=>{_.environmentOf(r,m).environment.activation.finalize(u,f)},callInterface(m,{name:u,method:f,args:g},y){let{environment:x}=_.environmentOf(r,m);if(y!==void 0)r.servingLive.add(y.callId);let k=y===void 0?void 0:setTimeout(_.servedOver,qS.HANDLER_BUDGET_MS,r.servingLive,y.callId);function O(){if(clearTimeout(k),y!==void 0)r.servingLive.delete(y.callId)}try{return p.run(y,()=>pD.s
+
+## 248 "(y," hits=679
+- @67077985
+tions.autoCommit"), this.#autoCommit = options.autoCommit;
+  }
+  cursorTo(x, y = @undefined) {
+    if (validateInteger(x, "x"), y != null)
+      validateInteger(y, "y");
+    let data = y == null ? CSI`${x + 1}G` : CSI`${y + 1};${x + 1}H`;
+    if (this.#autoCommit)
+      process.nextTick(() => this.#stream.write(data));
+    else
+      ArrayPrototypePush(this.#todo, data);
+    return this;
+  }
+  moveCursor(dx, dy) {
+    if (dx || dy) {
+  
+
+- @68545324
+,this.awaitIdentPos=0;var xe=this.parseExprList(a.parenR,this.options.ecmaVersion>=8,!1,y);if(r&&!h&&this.shouldParseAsyncArrow())return this.checkPatternErrors(y,!1),this.checkYieldAwaitInDefaultParams(),this.awaitIdentPos>0&&this.raise(this.awaitIdentPos,"Cannot use \'await\' as identifier inside an async function"),this.yieldPos=S,this.awaitPos=se,this.awaitIdentPos=Q,this.parseSubscriptAsyncArrow(t,i,xe,u);this.checkExpressionErrors
+
+- @68545604
+s identifier inside an async function"),this.yieldPos=S,this.awaitPos=se,this.awaitIdentPos=Q,this.parseSubscriptAsyncArrow(t,i,xe,u);this.checkExpressionErrors(y,!0),this.yieldPos=S||this.yieldPos,this.awaitPos=se||this.awaitPos,this.awaitIdentPos=Q||this.awaitIdentPos;var Y=this.startNodeAt(t,i);Y.callee=e,Y.arguments=xe,o&&(Y.optional=h),e=this.finishNode(Y,"CallExpression")}else if(this.type===a.backQuote){(h||n)&&this.raise(this.st
+
+- @68551314
+seParenItem));var xe=this.lastTokEnd,Y=this.lastTokEndLoc;if(this.expect(a.parenR),e&&this.shouldParseArrow(h)&&this.eat(a.arrow))return this.checkPatternErrors(y,!1),this.checkYieldAwaitInDefaultParams(),this.yieldPos=S,this.awaitPos=se,this.parseParenArrowList(i,s,h,t);(!h.length||d)&&this.unexpected(this.lastTokStart),Q&&this.unexpected(Q),this.checkExpressionErrors(y,!0),this.yieldPos=S||this.yieldPos,this.awaitPos=se||this.awaitPos
+
+- @68551525
+ieldPos=S,this.awaitPos=se,this.parseParenArrowList(i,s,h,t);(!h.length||d)&&this.unexpected(this.lastTokStart),Q&&this.unexpected(Q),this.checkExpressionErrors(y,!0),this.yieldPos=S||this.yieldPos,this.awaitPos=se||this.awaitPos,h.length>1?(r=this.startNodeAt(u,o),r.expressions=h,this.finishNodeAt(r,"SequenceExpression",xe,Y)):r=h[0]}else r=this.parseParenExpression();if(this.options.preserveParens){var X=this.startNodeAt(i,s);return X
+
+- @178398071
+({handler:e,below:t,site:r,e:p,budget:y,downstreamSignal:m.signal,state:a}),O=It({call:x,signal:f.signal,event:r.event,origin:n}),v,S;try{S=qS.runningBudget.run(y,()=>e.run(At(p),O,x));let w=y.expired===void 0?await S:await Promise.race([S,y.expired]);if(w===void 0)throw new Ae.HooksError("returned no result");let H=J(e)?void 0:r.check?.(w,p,a.fromBelow);if(H!==void 0)throw new Ae.HooksError(`returned ${H}`);v=w}catch(w){if(jt(w,i))thro
+
+## 248 "y===" hits=1463
+- @95020452
+instanceof HTMLElement))continue;...D...u...var cw=el.clientWidth,ch=el.clientHeight;if(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&&!(cs.textOverflow==='ellipsis'&&ox==='hidden');(...t...var 
+
+- @95020476
+continue;...D...u...var cw=el.clientWidth,ch=el.clientHeight;if(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&&!(cs.textOverflow==='ellipsis'&&ox==='hidden');(...t...var by=dy>3&&oy!=='auto'&&oy
+
+- @95020499
+ cw=el.clientWidth,ch=el.clientHeight;if(cw===0&&ch===0)continue;m.....y.var cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden'||cs.display==='inline')continue;...$.......var ox=cs.overflowX,oy=cs.overflowY;/.......var dx=el.scrollWidth-cw,dy=el.scrollHeight-ch;.X....cw.var bx=dx>3&&ox!=='auto'&&ox!=='scroll'&&!(cs.textOverflow==='ellipsis'&&ox==='hidden');(...t...var by=dy>3&&oy!=='auto'&&oy!=='scroll';........if(
+
+- @95763525
+==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,
+
+- @178220928
+odeDotInKeys==="boolean"?e.encodeDotInKeys:F.encodeDotInKeys,encoder:typeof e.encoder==="function"?e.encoder:F.encoder,encodeValuesOnly:typeof e.encodeValuesOnly==="boolean"?e.encodeValuesOnly:F.encodeValuesOnly,filter:n,format:r,formatter:s,serializeDate:typeof e.serializeDate==="function"?e.serializeDate:F.serializeDate,skipNulls:typeof e.skipNulls==="boolean"?e.skipNulls:F.skipNulls,sort:typeof e.sort==="function"?e.sort:null,strictN
+
+- @178344833
+|{},p=this._makeAbort(s);if(a)a.addEventListener("abort",p,{once:!0});let _=globalThis.ReadableStream&&u.body instanceof globalThis.ReadableStream||typeof u.body==="object"&&u.body!==null&&Symbol.asyncIterator in u.body,h={signal:s.signal,..._?{duplex:"half"}:{},method:"GET",...u};if(o)h.method=o.toUpperCase();let l=this.fetch,m=async(g,v)=>{let R=setTimeout(p,r);try{return await l.call(void 0,g,v)}finally{clearTimeout(R)}},b=n===void 0
+
+## 248 "await C()" hits=17
+- @183987695
+e}]: ${t} not rewritable in place via storage; publishing it`);let N=await g.backend.write(g.key,r,{mode:438&~process.umask()});if(!N.ok)E(N.error)};if(Mue(e)){await C();return}let M=await g.backend.write(g.key,r,{precondition:{type:"ifAbsent"},publishDiscipline:"atomic",mode:438&~process.umask()});if(!M.ok){if(M.error.code!=="AlreadyExists"&&!bNt(M.error))E(M.error);await C();return}}else await Fue(NKt(p),{recursive:!0});if(g===void 0)
+
+- @183987905
+,r,{precondition:{type:"ifAbsent"},publishDiscipline:"atomic",mode:438&~process.umask()});if(!M.ok){if(M.error.code!=="AlreadyExists"&&!bNt(M.error))E(M.error);await C();return}}else await Fue(NKt(p),{recursive:!0});if(g===void 0)try{await Aue(p,r,{encoding:"utf8",flag:"wx"})}catch(E){if(T(E)!=="EEXIST")throw E;await Aue(p,r,"utf8");return}if(Mue(e))return;let k=new Date(o);if(!Number.isNaN(k.getTime())&&k.getTime()<=Date.now())await FK
+
+- @185280653
+En.warning},...Ur.result.content];return{...Ur,result:{...Ur.result,content:xr,harnessNoteCount:(Ur.result.harnessNoteCount??0)+1,harnessSectionHash:nv(xr)}}})}await C();return}let Sr=iDt(he(p).mode);if(Sr)s("tengu_auto_mode_decision",{decision:c("skipped_enveloped_handback"),toolName:c(nf),isHandoff:!0,toolUseCount:pr.totalToolUseCount});let Fn=Sr?null:await Tr();if(Fn)ir=`${Fn.warning}
+
+${ir}`;let yr=await C();bx({taskId:e,description
+
+- @185280899
+("skipped_enveloped_handback"),toolName:c(nf),isHandoff:!0,toolUseCount:pr.totalToolUseCount});let Fn=Sr?null:await Tr();if(Fn)ir=`${Fn.warning}
+
+${ir}`;let yr=await C();bx({taskId:e,description:u,status:"completed",taskRegistry:g,finalMessage:ir,maxTurnsReached:Ne,usage:{totalTokens:hee(Ve),toolUses:pr.totalToolUseCount,durationMs:pr.totalDurationMs},toolUseId:p.toolUseId,ownerAgentId:Ie,...yr})}catch(Ve){if(sn(),Be){let Sn=Qh(l(Ve));i
+
+- @185281897
+f(pe())return;Ze("cancelled"),U?.(),RR(e,g,"user",o.persistedToolResultFiles);let Sn=g.get(e),tr=hr(Sn)?Sn.killedBy:void 0;o.spawnedSubagent?.killed(tr);let Ir=await C();if(!G())throw Ve;s("tengu_agent_tool_terminated",{agent_type:o.agentType,model:rr(o.resolvedAgentModel),final_model:rr(we.at(-1)??o.resolvedAgentModel),model_swapped:we.length>1,duration_ms:Date.now()-o.startTime,is_async:!0,is_built_in_agent:o.isBuiltInAgent,agent_dept
+
+- @185282636
+Kind:Ve instanceof Error?`${Ve.name}:${de(bn,80)}`:"unknown"}),U?.(),gee(e,bn,g,{summary:bn},o.persistedToolResultFiles),G())o.spawnedSubagent?.failed();let mn=await C();if(!G())throw Ve;f("subagent_complete","subagent_async_errored"),o.spawnedSubagent?.failed(),bx({taskId:e,description:u,status:"failed",error:bn,taskRegistry:g,toolUseId:p.toolUseId,finalMessage:KL(fe),ownerAgentId:Ie,...mn})}finally{art(e,g),sn(),U?.(),ze.setTurnEffort
+
+## 248 "function ce(" hits=67
+- @68523977
+&(r=(t.static?"s":"i")+t.kind),s==="iget"&&r==="iset"||s==="iset"&&r==="iget"||s==="sget"&&r==="sset"||s==="sset"&&r==="sget"?(e[i]="true",!1):s?!0:(e[i]=r,!1)}function ce(e,t){var i=e.computed,s=e.key;return!i&&(s.type==="Identifier"&&s.name===t||s.type==="Literal"&&s.value===t)}l.parseExportAllDeclaration=function(e,t){return this.options.ecmaVersion>=11&&(this.eatContextual("as")?(e.exported=this.parseModuleExportName(),this.checkExp
+
+- @178485714
+{return t===e||t!==t&&e!==e}var Jq=ae;function se(t,e){var r=t.length;while(r--)if(Jq(t[r][0],e))return r;return-1}var f=se;var le=Array.prototype,ue=le.splice;function ce(t){var e=this.__data__,r=f(e,t);if(r<0)return!1;var n=e.length-1;if(r==n)e.pop();else ue.call(e,r,1);return--this.size,!0}var Z=ce;function fe(t){var e=this.__data__,r=f(e,t);return r<0?void 0:e[r][1]}var B=fe;function pe(t){return f(this.__data__,t)>-1}var J=pe;funct
+
+- @178624585
+d:u}=await r.read(s,a,o-a,a);if(u===0)break;a+=u}return{content:(a<o?s.subarray(0,a):s).toString("utf8"),stats:i}}finally{await r.close()}}catch{return null}}};function ce(){return TE}function bu(e){process.chdir(e);try{process.cwd()}catch{}}async function rde(e,t,r){await using i=await v(e,"r");let o=(await i.stat()).size;if(o<=t)return null;let s=Math.min(o-t,r),a=Buffer.allocUnsafe(s),u=0;while(u<s){let{bytesRead:l}=await i.read(a,u,
+
+- @178826642
+n r}function ue(e,i){let r=0,t=0,l=i.tabSize||4;while(r<e.length){let s=e.charAt(r);if(s===L[1])t++;else if(s==="\t")t+=l;else break;r++}return Math.floor(t/l)}function ce(e,i){for(let r=0;r<i.length;r++){let t=i.charAt(r);if(t==="\r"){if(r+1<i.length&&i.charAt(r+1)===`
+`)return`\r
+`;return"\r"}else if(t===`
+`)return`
+`}return e&&e.eol||`
+`}function V(e,i){return`\r
+`.indexOf(e.charAt(i))!==-1}var F;(function(e){e.DEFAULT={allowTrailing
+
+- @179328459
+sessionLog":return Ly}}function cZn(e,n,t=TSn){if(n.namespace!=="log"||n.channel!=="debug")return;return{maxBytes:t,rotatedPath:`${Oo(e,n).slice(0,-4)}.1.txt`}}function ce(e){switch(e){case"debug":return"debug";case"telemetry":return"telemetry";case"apiDump":return"dump-prompts"}}function P(e,n){return n.layer==="user"?r(e,"agent-memory"):r(e,`agent-memory-${n.layer}`,n.projectKey)}function de(e,n,t){return e.layer==="user"?{namespace:"
+
+- @179538269
+,"minute");if(t>=x)return E(e,t,x,"second");return e+" ms"}function E(e,t,r,s){var u=t>=r*1.5;return Math.round(e/r)+" "+s+(u?"s":"")}});var L=d(function(Ue,j){function ce(e){r.debug=r,r.default=r,r.coerce=H,r.disable=h,r.enable=u,r.enabled=Z,r.humanize=Rvn(),r.destroy=K,Object.keys(e).forEach((n)=>{r[n]=e[n]}),r.names=[],r.skips=[],r.formatters={};function t(n){let o=0;for(let i=0;i<n.length;i++)o=(o<<5)-o+n.charCodeAt(i),o|=0;return r
+
+## 248 "/tmp" hits=294
+- @66743482
+      enumerable: !0
+    },
+    ShellError: {
+      value: ShellError,
+      enumerable: !0
+    }
+  }), BunShell;
+})
+.(function (){"use strict";// build/release/tmp_modules/internal/promisify.ts
+var $, kCustomPromisifiedSymbol = Symbol.for("nodejs.util.promisify.custom"), { validateFunction } = @getInternalField(@internalModuleRegistry, 121) || @createInternalModuleById(121), { kCustomPromisifyArgsSymbol } = @getInternalField(@internalM
+
+- @66745583
+nal));
+};
+promisify.custom = kCustomPromisifiedSymbol;
+$ = {
+  defineCustomPromisifyArgs,
+  promisify
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/deprecate.ts
+var $, { validateString } = @getInternalField(@internalModuleRegistry, 
+
+- @66745752
+les/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/deprecate.ts
+var $, { validateString } = @getInternalField(@internalModuleRegistry, 121) || @createInternalModuleById(121), codesWarned = /* @__PURE__ */ new Set;
+function getDeprecationWarningEmitter(code, msg, deprecated, shouldEmitWarning = () => !0)
+
+- @66747223
+o__: null,
+    ...Object.getOwnPropertyDescriptor(fn, "length")
+  }), deprecated;
+}
+$ = {
+  deprecate
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/primordials.ts
+var $, ObjectSetPrototypeOf = Object.setPrototypeOf, ObjectFreeze = Object.freeze, createSafeIterator = (factory, next_) => {
+  class SafeIterator {
+    constructor(iterable) {
+      this._iterator = factory(iterable);
+    }
+    next() {
+     
+
+- @66752180
+ray,
+  Float16Array,
+  Float32Array,
+  Float64Array,
+  BigUint64Array,
+  BigInt64Array,
+  uncurryThis
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/util/comparisons.ts
+var $, isDeepStrictEqual = @lazy(38);
+$ = { isDeepStrictEqual };
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/url.ts
+var $;
+function urlToHttpOptions(url) {
+  let options = {
+    ...url,
+    protocol: url.p
+
+- @66752342
+mp_modules/internal/util/comparisons.ts
+var $, isDeepStrictEqual = @lazy(38);
+$ = { isDeepStrictEqual };
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/url.ts
+var $;
+function urlToHttpOptions(url) {
+  let options = {
+    ...url,
+    protocol: url.protocol,
+    hostname: typeof url.hostname === "string" && url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname,
+    hash: url.hash,
+    search
+
+## 248 "/var/tmp" hits=0
+## 248 "/run" hits=199
+- @82421180
+....#define HAS_ARGUMENTS
+#define USES_FLOAT 1
+// This file is part of Bun!
+// You can find the original source:
+// https://github.com/oven-sh/bun/blob/main/src/runtime/api/FFI.h
+//
+// clang-format off
+// This file is only compatible with 64 bit CPUs
+// It must be kept in sync with JSCJSValue.h
+// https://github.com/oven-sh/WebKit/blob/main/Source/JavaScriptCore/runtime/JSCJSValue.h
+#define IS_BIG_ENDIAN 0
+#define USE_JSVALUE64 1
+#defin
+
+- @82421384
+ This file is only compatible with 64 bit CPUs
+// It must be kept in sync with JSCJSValue.h
+// https://github.com/oven-sh/WebKit/blob/main/Source/JavaScriptCore/runtime/JSCJSValue.h
+#define IS_BIG_ENDIAN 0
+#define USE_JSVALUE64 1
+#define USE_JSVALUE32_64 0
+
+#define ZIG_REPR_TYPE int64_t
+
+#ifdef _WIN32
+#define BUN_FFI_IMPORT __declspec(dllimport)
+#else
+#define BUN_FFI_IMPORT
+#endif
+
+// /* 7.18.1.1  Exact-width integer types */
+typedef un
+
+- @82605041
+lder to the "examples" folder, and submit a PR..[0m..array of stringsPlugin Errorinfallible: bundle activeFailed to resolve '{}' for framework ({})react-refresh/runtimereact-refresh/runtime/index.jsimport type { Bake } from "bun";
+import { renderToHtml, renderToStaticHtml } from "bun-framework-react/ssr.tsx" with { bunBakeGraph: "ssr" };
+import { serverManifest } from "bun:bake/server";
+import type { AsyncLocalStorage } from "node:async
+
+- @82605062
+" folder, and submit a PR..[0m..array of stringsPlugin Errorinfallible: bundle activeFailed to resolve '{}' for framework ({})react-refresh/runtimereact-refresh/runtime/index.jsimport type { Bake } from "bun";
+import { renderToHtml, renderToStaticHtml } from "bun-framework-react/ssr.tsx" with { bunBakeGraph: "ssr" };
+import { serverManifest } from "bun:bake/server";
+import type { AsyncLocalStorage } from "node:async_hooks";
+import { Pas
+
+- @82655011
+ bun run ./index.js
+  bun run ./index.tsx
+
+  Run a package.json script
+  bun run dev
+  bun run lint
+
+Full documentation is available at https://bun.com/docs/cli/run
+
+
+.[1mExamples:.[0m
+  .[2mRun a JavaScript or TypeScript file.[0m
+  .[1m.[32mbun run.[0m .[34m./index.js.[0m
+  .[1m.[32mbun run.[0m .[34m./index.tsx.[0m
+
+  .[2mRun a package.json script.[0m
+  .[1m.[32mbun run.[0m .[34mdev.[0m
+  .[1m.[32mbun run.[0m .[34mlint.[0m
+
+Full docume
+
+- @82655344
+ckage.json script.[0m
+  .[1m.[32mbun run.[0m .[34mdev.[0m
+  .[1m.[32mbun run.[0m .[34mlint.[0m
+
+Full documentation is available at .[35mhttps://bun.com/docs/cli/run.[0m
+%
+No "scripts" found in package.json.
+..2
+.[0m.[33mNo "scripts" found in package.json..[0m
+...
+package.json scripts (.. found):..
+.[1mpackage.json scripts (.. found):.[0m..  $ bun run ..
+...  .[2m$.[0m bun run.[0m .[34m...[0m
+...    ..
+...  .[2m  ...[0m
+..,error: preconn
+
+## 248 "/dev" hits=293
+- @5592733
+........I..XV..H.0H......H...H....s:H.{..ue..C H.=...Hc..H....H.K0H..ttH.........H#C(H..	tB.^H..u.H.C.H..u(.NH.C.H..t......W...H.C.H.K H..	t..,H.C.H.K.H..	u.H./dev/nulH3...@.H..lH	.......H..H.......I..D.K8.C<D....@D........D........E..A......A........9A..............D.D...........A..... A	.A	.........E.H..;B..H.D$(.L$ H..L....=..H.CxH........H.........H!.H..H........H......[A\A]A^A_]...H....Ib.H.E.H...t.H..t	H.M......H.}@H..t.H.......H
+
+- @5593974
+.I......H.....Hc..H....H......H..t.I.........L#......RL.......1......L......H......E1.H..	uf.:H.......A.L.q.A.....H..	uJ..H.......A.L.q.L..I......H..	u*A..F.H./dev/nulI3.H..lH	.u.H......A.......M..H......H.......I..M..D.............L$ H......H.......D.......A............t~L......L......H......H..x...H......H..p...A.D$....saI................A.....H.^...Hc..H....H......H........H.........H#......dH......H....l..H.......M..u
+H..u3.....M.
+
+- @10200577
+....H......H........I..L..@...H..t....u.H...	..H.........L...H..0...M........L9.......C..7 I..L..@...H..0....o....	.............H....j!..I..H......	...H......H./dev/nulI..A.F.lH......	...A.	...H.......L..8	..t]H..`.U.H......H..........H......H......A.....H..0...L....f..L..8...H..@...H..0..........	...N.	.............H..... ..I..H..0...	...H..8...H./dev/nulI..A.G.l.	......	......L.n8H.^@A.......H....U....5...L..L..8	.....5.A.......H..{.U
+
+- @10200767
+...H.......L..8	..t]H..`.U.H......H..........H......H......A.....H..0...L....f..L..8...H..@...H..0..........	...N.	.............H..... ..I..H..0...	...H..8...H./dev/nulI..A.G.l.	......	......L.n8H.^@A.......H....U....5...L..L..8	.....5.A.......H..{.U....5...L..I.....5.A.......H..	.M....5...L..I.....5....	...u.L.....u.H.......H...	..L.-L...H..0	..t.L.....u.L...........H......H......H......H......H......H......H......H..`...H......H..	...
+
+- @10566325
+...M....t....w...H..t.H......H...H..............1.H..E1.E1...
+q.I..H.............H.....H...UAWAVATVWSH......H..$....L..M..I..H..H......M........H..	u5A..N.I..H./dev/nulH1.H..lH	.u.H....K.H..H.F..........A...</t......\......L.6H.^..qH.M.L..I....,...}....|...H.M.H.U...o5.L.|..I9...6...I........)...H..I..H..H..L..I...{.C.I........M...B..?.H.>L.~..F+......H...r.A.~.:u.A..F.../..b.....\..Y...H.M.L..I...V,...}..u.L.}.M..y^1.L.....H.H.}.L.u.H.
+
+- @10930518
+....L.{.H.H.H...s@I.?.up..C H...P.Hc..H....H.K0H........H.........H#C(H..	tM.....H..uI..H..u-.....I..H..t..........H.C.H.K H..	t..z...H.C.H.K.H..	..h.....H.H./dev/nulH3.H..lH	...J...H....O..H......H.C.....H....N.H.C.H.C..........L.. .........eH..%X...H...H......H..0x....37.I..H...[.u.H.ExH......I.N..G.u.H......H......I.N .0.u.H......H......I.N0...u.H......I..I.N@...u.I..H..I.NP...u.A..N`A...A..O.A..W L..H...........B.A.._......B.A....
+
+## 248 "XDG_RUNTIME_DIR" hits=7
+- @94531106
+nHooks.....W..getEntry........function-hook-noop..(....g..file:///B:/%7EBUN/root/chunk-xxp43apj.js(....z..file:///B:/%7EBUN/root/chunk-0dax9fvw.jsn....v,.Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location...S...b...A component of the sockets path is not a directory (a regular file is in the way). ......T..The sockets path runs through a symlink loop. .........readAncestors.....
+
+- @94539007
+led..&...r...[uds-messaging] Socket path too long (........z. bytes, max ~104): .n........ Try a shorter --messaging-socket-path, or set CLAUDE_CODE_TMPDIR or $XDG_RUNTIME_DIR to a shorter directory...!....S..[uds-messaging] Failed to start: ..........allowHalfOpen.......t...requireAuth.	.......peerToken...........sweepPermitted..
+.......childToken..D...k...Cannot destructure property 'ancestors' from null or undefined value........anc
+
+- @99371640
+_UID	.......SUDO_USER.........8.TERMINAL....0.].UV_THREADPOOL_SIZE......E
+O.VERCEL......K...WEBSITE_SITE_NAME........V..WEBSITE_SKU.....F...WSL_INTEROP.........XDG_RUNTIME_DIR......<..rawStr.......R..ALLOW_ANT_COMPUTER_USE_MCP..........CLAUDE_AGENT_SDK_MCP_NO_PREFIX......_...CLAUDE_BG_TCC_DISCLAIMED.....rz.CLAUDE_CLIENT_PRESENCE_FILE./.../..CLAUDE_CODE_ADOPT_UNDERIVABLE_PARKED_PERMISSION.*.....W.CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIO
+
+- @178762783
+PLAY:()=>Gn,WEBSITE_SITE_NAME:()=>rO,WEBSITE_SKU:()=>sO,WSL_DISTRO_NAME:()=>BC,WSL_INTEROP:()=>bC,WT_SESSION:()=>xC,XDG_CONFIG_HOME:()=>wn,XDG_DATA_HOME:()=>kn,XDG_RUNTIME_DIR:()=>Xn,XTERM_VERSION:()=>SC,ZDOTDIR:()=>QC,ZED_TERM:()=>aC,ZELLIJ:()=>uC,__CFBundleIdentifier:()=>vC,gcloud_project:()=>tO,google_application_credentials:()=>EO,google_cloud_project:()=>oO});var An=C.str(),On=C.str(),Dn=C.str(),Tn=C.str(),Ln=C.str(),cn=C.str(),pn=
+
+- @196973539
+ss Tt extends Q.WriteableStreamMessageWriter{constructor(e,t){super((0,_e.default)().stream.asWritableStream(e),t)}}b.StreamMessageWriter=Tt;var Tn=process.env.XDG_RUNTIME_DIR,Es=new Map([["linux",107],["darwin",103]]);function Cs(){let e=(0,Ts.randomBytes)(21).toString("hex");return`\\\\.\\pipe\\vscode-jsonrpc-${e}-sock`}b.generateRandomPipeName=Cs;function xs(e,t="utf-8"){let r,s=new Promise((a,h)=>{r=a});return new Promise((a,h)=>{le
+
+- @202069037
+(e,t){return Wnr(e??jnr(),t,{isExplicit:e!==void 0})}function D(){D_.unset("CLAUDE_CODE_MESSAGING_SOCKET"),D_.unset("CLAUDE_CODE_MESSAGING_TOKEN")}var X="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location.",Tn=`A component of the sockets path is not a directory (a regular file is in the way). ${X}`,Un=`The sockets path runs through a symlink loop. ${X}`;async function Wnr(e,t,i=
+
+## 248 "isCanonical" hits=18
+- @94979196
+....Zg..^#\d+$......c.Y.^(\S+)(?:\s+(\S+))?.......+.hitDeadline.....hb}.fish_history....p.\.consolehost_history.txt.....hy..xdgDataHome.....Zm#.appData.....x.#.isCanonical....."2).^([a-zA-Z0-9.][a-zA-Z0-9.-]*)...........^[a-zA-Z0-9.][a-zA-Z0-9.-]*$....h..._nothing found_......p..#### .......`Ck.[\r\n\v\f\u0085\u2028\u2029]....hf..^(#|-|>|<<<)........(unusual name redacted)......k..[\u2028\u2029\u0085`].........E.^(python[0-9.]*|pip[0-9]
+
+- @100132352
+.....<..getPlanFilePath......AT.generateFileSuggestions.....N. .globalFileIndexCache........REMOTE_READ_OPEN_FLAGS......I...bindCanonicalPathToHandle...........isCanonicalPathContained....r...readHandleBounded........R..oauthPromise	....l..manualUrl.......G.4.automaticUrl.....$..exists_in_session.......e...runtime_dup.....F}..has_uuid......\.has_priority........queue_depth......[..isLocalMcpServerd.......T.h.e. .p.e.r.m.i.s.s.i.o.n. .p.
+
+- @101804174
+TargetwithGatedGrantsAppliedB:/~BUN/root/chunk-cf96qqnr.jsREMOTE_READ_MAX_BYTESREMOTE_READ_OPEN_FLAGS_setFixedRemoteReadRootsForTestingbindCanonicalPathToHandleisCanonicalPathContainedreadFileForRemotereadHandleBounded0c30af20d0d75c1cC00000032buildWorkspaceDiffResponseB:/~BUN/root/chunk-2tr1135q.jsapplyFileSuggestioncreateFileIndexCachefilterIgnoredAsyncfindLongestCommonPrefixgenerateFileSuggestionsgetDirectoryNamesgetDirectoryNamesAsyn
+
+- @101881558
+ifactViewerUrlForcanonicalArtifactTargetForcanonicalizeArtifactUrlInputdecodeHtmlEntitiesderiveDescriptionextractHtmlTitlefaviconClausegetArtifactPublishStubDirisCanonicalArtifactViewerUrlisDecisionSurfaceControlisPublishShapedArtifactActionisResultLineControllistScopeFromnotAnArtifactUrlMessageparseArtifactUrlparseArtifactUrlInputparseStubArtifactUrlsanitizeArtifactTitlesanitizeFaviconscrubArtifactEnvelopeTagsscrubServerLinescrubbedHea
+
+- @178618530
+split(G).filter(Boolean),...a]}if(a.length>0&&t?.surfaceNetworkRaw)return xq;return}function Cs(e,t){if(Vn(t)&&!Ea(t)||Er(t))return{resolvedPath:t,isSymlink:!1,isCanonical:!1};let r=Sh(e,t);if(r!==void 0)return{resolvedPath:r,isSymlink:!0,isCanonical:!1};try{let i=e.realpathSync(t);return{resolvedPath:i,isSymlink:i!==t,isCanonical:!0}}catch(i){return{resolvedPath:t,isSymlink:!1,isCanonical:!1}}}function Cq(e,t,r){let{resolvedPath:i}=Cs(
+
+- @178618609
+turn}function Cs(e,t){if(Vn(t)&&!Ea(t)||Er(t))return{resolvedPath:t,isSymlink:!1,isCanonical:!1};let r=Sh(e,t);if(r!==void 0)return{resolvedPath:r,isSymlink:!0,isCanonical:!1};try{let i=e.realpathSync(t);return{resolvedPath:i,isSymlink:i!==t,isCanonical:!0}}catch(i){return{resolvedPath:t,isSymlink:!1,isCanonical:!1}}}function Cq(e,t,r){let{resolvedPath:i}=Cs(e,t);if(r.has(i))return!0;return r.add(i),!1}var Z=/(^|[\\/])\.\.([\\/]|$)/;fun
+
+## 248 "canonicalDir" hits=0
+## 248 "systemDir" hits=3
+- @97330256
+o generate MCP server configuration from manifest ".:.......MCPB manifest: failed to generate MCP server configuration......Q,..getMcpConfigForManifest.
+...{+..systemDirs.......R.pathSeparator...$.....|.Failed to load MCPB cache metadata: ....#...Downloading MCPB from ......].;.Downloading ........mcpb......m.Downloaded .
+....... bytes to .......,..Download complete...".../...Failed to download MCPB file from ..........onDownloadProgre
+
+- @183714939
+h===0,errors:r}}async function w2(e,t,r={}){let{getMcpConfigForManifest:o}=await import("B:/~BUN/root/chunk-xf8qmbxf.js"),u=await o({manifest:e,extensionPath:t,systemDirs:uFe(),userConfig:r,pathSeparator:"/"});if(!u){let p=ut(Error(`Failed to generate MCP server configuration from manifest "${e.name}"`),"MCPB manifest: failed to generate MCP server configuration");throw _(p),p}return u}async function gFe(e,t){try{return await mFe(e,t).r
+
+- @195047150
+rn r}else if(e&&typeof e==="object"){let r={};for(let[n,o]of Object.entries(e))r[n]=m(o,i);return r}return e}async function x(e){let{manifest:i,extensionPath:r,systemDirs:n,userConfig:o,pathSeparator:t,logger:y}=e,a=i.server?.mcp_config;if(!a)return;let s={...a};if(a.platform_overrides){if("win32"in a.platform_overrides){let c=a.platform_overrides.win32;s.command=c.command||s.command,s.args=c.args||s.args,s.env=c.env||s.env}}if(d({manif
+
+## 248 "SYSTEM_DIRS" hits=0
+## 248 "CANONICAL" hits=17
+- @98017097
+ a symlink or not a directory..-.......files cannot be placed safely on this machine...(....	..tree anchor root is not a canonical path........WORKING_ROOT_NOT_CANONICAL..1...,W..anchored path must be relative, of plain segments.......&...anchored open never creates.>.....O.Cannot destructure property 'sep' from null or undefined value.......0..byNameReason,...!@\.a held-directory leaf must be one plain name....:v.held directory is clo
+
+- @99529684
+d git: rejecting unsafe owner/repo in ......CV.. -> git mount /.....W.F. (governed git).!...G.d.SELF_HOSTED_RUNNER_DRAIN_GRACE_MS...%....B..CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM...L....T..[runner:warn] CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM ignored: drain-grace is ....z...ms (> 0), so a prior session ...7.....k.c.o.u.l.d. .h.a.v.e. .w.r.i.t.t.e.n. .t.o. .t.h.e. .c.a.n.o.n.i.c.a.l. ..  .s.a.n.i.t.i.z.i.n.g. .a.n.y.w.a.y...B....lK.[.r.u.n.
+
+- @99529746
+/.....W.F. (governed git).!...G.d.SELF_HOSTED_RUNNER_DRAIN_GRACE_MS...%....B..CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM...L....T..[runner:warn] CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM ignored: drain-grace is ....z...ms (> 0), so a prior session ...7.....k.c.o.u.l.d. .h.a.v.e. .w.r.i.t.t.e.n. .t.o. .t.h.e. .c.a.n.o.n.i.c.a.l. ..  .s.a.n.i.t.i.z.i.n.g. .a.n.y.w.a.y...B....lK.[.r.u.n.n.e.r.:.s.e.s.s.i.o.n.]. .C.L.A.U.D.E._.R.U.N.N.E.R._.T.R.U.S.
+
+- @99537229
+ories should be checked out under..........gate off.....:..no usable freshness bound...l....{*.canonical is not a trusted one-shot prewarm (CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM unset or drain-grace > 0)..... ..worktree mode (capacity > 1)........worker epoch unknown (..8.......session named a revision the standby does not prefetch (......M.not the prefetched repository (.........unknown host....<...maxAgeS.
+...F=..maxTipAgeS.......%..t
+
+- @99587723
+(the proxy URL is per-session and linked worktrees share origin). Omit --use-anthropic-git-proxy or set --capacity 1.V...0u..[runner:fatal] CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM requires --drain-grace-sec 0 (one-shot). With drain-grace > 0 a second session could reuse this VM after the first's child wrote to the canonical .git/, and the skip would bypass the cross-session-isolation sanitize for an untrusted canonical. Unset the env var 
+
+- @101798366
+atchespurgeProjectHandlerscanHistoryFileprintAgentsJsonapplyBypassPolicyGateensureAgentsBypassConsentrefuseBypassUnderRootcapturePolicySnapshothasPolicyDivergedCANONICAL_MANIFEST_RELPATHENTRY_COMPONENT_FIELDSIMPLICIT_PLUGIN_LAYOUT_ENTRIESMANIFEST_IDENTITY_READ_RELPATHSPLUGIN_MANIFEST_RELPATHSTOPLEVEL_MANIFEST_RELPATHcacheDirHasPluginContentcacheDirHasPluginContentStrictcacheMatchesDeclaredPathscachePlugincachePluginSettingsclearOccupant
+
+## 247 "var y=65534" hits=0
+## 247 "overflowuid" hits=0
+## 247 "innerStart" hits=4
+- @240234948
+.size(this.resolveDataElementOptions(e.length-1));return Math.max(s,n,o)/2}}});function Xn(t,e,i,s){const n=vi(t.options.borderRadius,["outerStart","outerEnd","innerStart","innerEnd"]);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math
+
+- @240235131
+);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i-h,0),u=c>0?c+s+i+h:0;let f=0;const g=n-l;if(
+
+- @240235146
+/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l,pixelMargin:h,innerRadius:c}=e,d=Math.max(e.outerRadius+s+i-h,0),u=c>0?c+s+i+h:0;let f=0;const g=n-l;if(s){const t=((c>
+
+- @240235558
+nst g=n-l;if(s){const t=((c>0?c-s:0)+(d>0?d-s:0))/2;f=(g-(0!==t?g*t/(t+s):g))/2}const p=(g-Math.max(.001,g*d-i/C)/d)/2,m=l+p+f,x=n-p-f,{outerStart:b,outerEnd:_,innerStart:y,innerEnd:v}=Xn(e,u,d,x-m),M=d-b,w=d-_,k=m+b/M,S=x-_/w,P=u+y,D=u+v,O=m+y/P,A=x-v/D;if(t.beginPath(),o){const e=(k+S)/2;if(t.arc(a,r,d,k,e),t.arc(a,r,d,e,S),_>0){const e=qn(w,S,a,r);t.arc(e.x,e.y,_,S,x+E)}const i=qn(D,x,a,r);if(t.lineTo(i.x,i.y),v>0){const e=qn(D,A,a,r
+
+## 247 "async function _(){return}" hits=0
+## 247 "function v(e){let n=[];for(let t of e.split" hits=0
+## 247 "owner does not match" hits=0
+## 247 "owned by uid" hits=5
+- @202766392
+..Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock....<XY.^[a-f0-9]{16}$.......@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......o..pipe.key$...B.|.daemon pipe.key is not a valid nonce......k.file:///B:/%7EBUN/root/_516.js.......fG.frame too large (........x.bad ctrl json........!..unknown frame kind .......7.file:///
+
+- @208932690
+=>{});return}await u(t,{recursive:!0,mode:448});let r=process.getuid?.(),e=await d(t);if(r!==void 0&&e.uid!==r)throw Error(`refusing to use daemon dir: ${t} is owned by uid ${e.uid}`);if((e.mode&511)!==448)await l(t,448)}async function st(){if(a()==="windows")return;let t=f();await u(t,{recursive:!0,mode:448});let r=new Date;await Z(t,r,r).catch(()=>{}),await C([F(t),t])}async function C(t){let r=process.getuid?.();for(let e of t){let i
+
+- @208933060
+t])}async function C(t){let r=process.getuid?.();for(let e of t){let i=await d(e);if(r!==void 0&&i.uid!==r)throw Object.assign(Error(`refusing to bind: ${e} is owned by uid ${i.uid}`),{code:ct});if((i.mode&511)!==448)await l(e,448)}}async function Nt(t){if(a()==="windows"){await u(t,{recursive:!0}).catch(()=>{});return}await st();let r=[j(),b()];for(let e of r)await u(e,{recursive:!0,mode:448});if(!r.includes(t)){if(await u(t,{recursive
+
+- @209039484
+lanted symlink). Refusing to use it. ${i}`);if(u==="EACCES"){let a;try{let g=F(t);if(g.uid!==r)a=g.uid}catch{}if(a!==void 0)throw new p(`Temp directory ${e} is owned by uid ${a}, expected ${r}. Refusing to use it \u2014 another user may have pre-created it. ${i}`,"temp dir owned by another uid (EACCES at open); refusing to use it");throw new p(`Temp directory ${e} is not readable (its mode may have been altered, or a path component deni
+
+## official temp dirs
+official-246
+official-246-repack
+official-247
+official-248

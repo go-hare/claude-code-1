@@ -103,6 +103,11 @@ export function markSessionCacheConsented(value: SettingsJson | null): void {
   consentedPayload = value
 }
 
+/** Last approved managed-settings bag (densable Oe `baseline`). */
+export function getConsentedPayload(): SettingsJson | null {
+  return consentedPayload
+}
+
 export function resetSyncCache(): void {
   sessionCache = null
   verifiedPayload = null
@@ -114,6 +119,14 @@ export function resetSyncCache(): void {
 /** densable xt.sessionCache read for Ut/uo host bag. */
 export function getSessionCache(): SettingsJson | null {
   return sessionCache
+}
+
+/**
+ * densable yN — `sessionCache !== null && sessionCache === verifiedPayload`.
+ * Not Qxn (triple with consentedPayload).
+ */
+export function isRemoteManagedSettingsVerified(): boolean {
+  return sessionCache !== null && sessionCache === verifiedPayload
 }
 
 /** densable xt.backendView slot — owned by remoteSettingsBackendView host. */

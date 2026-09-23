@@ -1,0 +1,1315 @@
+# gold-248-unk-scan  densable 2.1.248 UNKNOWN re-peel
+# SEA 226708128 · 247 253204128
+# when=2026-09-20T03:38:34.589Z
+# items=#8 #9 #14 #23 #24 #25 #28 #31 #36
+# NEVER HAVE — unique 248 body only
+
+# ---- #8 oauth-refresh-tool-cache ----
+## #8 clearToolSchemaCache  needle="clearToolSchemaCache"  hits248=0  hits247=0
+
+## #8 getToolSchemaCache  needle="getToolSchemaCache"  hits248=0  hits247=0
+
+## #8 TOOL_SCHEMA_CACHE  needle="TOOL_SCHEMA_CACHE"  hits248=0  hits247=0
+
+## #8 tengu_oauth_tokens_saved  needle="tengu_oauth_tokens_saved"  hits248=3  hits247=3
+- @98832564 u_oauth_tokens_save_exception...........tengu_oauth_tokens_saved......#.tengu_oauth_tokens_save_failed..3....1..tengu_oauth_refresh_compromised_
+- @180708345 end:C,...Lf(M)});if(!E&&!k)s(O.success?"tengu_oauth_tokens_saved":"tengu_oauth_tokens_save_failed",{storageBackend:C});if(p)s(E?"tengu_oauth_ref
+- @180709316 tTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O}
+
+## #8 clearBetasCaches  needle="clearBetasCaches"  hits248=0  hits247=0
+
+## #8 getClaudeAIOAuthTokens.cache  needle="getClaudeAIOAuthTokens"  hits248=23  hits247=25
+- @94553472 efresh in ..........failedToken.......m.getClaudeAIOAuthTokens.......;t.unknown worker kind: ......l...worker kind '.......J...' is not avail
+- @94555200 own......q..awaitShutdownCause..........getClaudeAIOAuthTokensAsync. ....Lw.auth: proactive refresh starting!....\9.auth: proactive refresh su
+- @95567577 lueQ...._..Cannot destructure property 'getClaudeAIOAuthTokens' from null or undefined value...........B:/~BUN/root/chunk-d6fgpfg7.js..N....x.
+- @101920425 enOrigingetClaudeAIOAuthTokenOriginAsyncgetClaudeAIOAuthTokensgetClaudeAIOAuthTokensAsyncgetColdApiKeyHelperRungetConfiguredApiKeyHelpergetCon
+- @101920447 thTokenOriginAsyncgetClaudeAIOAuthTokensgetClaudeAIOAuthTokensAsyncgetColdApiKeyHelperRungetConfiguredApiKeyHelpergetConfiguredAwsAuthRefreshg
+- @183122454 deAISubscriber:r,isConsumerSubscriber:o,getClaudeAIOAuthTokens:y,checkAndRefreshOAuthTokenIfNeeded:D}=import.meta.require("B:/~BUN/root/chunk-
+- … +17 more
+
+## #8 tool schema cache  needle="tool schema cache"  hits248=0  hits247=0
+
+## #8 schema cache  needle="schema cache"  hits248=0  hits247=0
+
+## #8 memoiz  needle="memoiz"  hits248=911  hits247=911
+- @84903775 all::property must be an unpromoted + unmemoized MemberExpression.Got: '..'.(CodegenReactiveFunction::codegenInstructionValue)
+- @84906771  it will change state. This can cause a memoization dependency to change, running the memo function again and causing an infin
+- @84907878 tchBuiltInSetOptimisticmissing.Found .. memoization dependencies.Missing dependencies can cause a value to update less often t
+- @84910233 s component because the existing manual memoization could not be preserved. This value was memoized in source but not in compi
+- @84910284  could not be preserved. This value was memoized in source but not in compilation outputExisting memoization could not be pres
+- @84910341 e but not in compilation outputExisting memoization could not be preservedCould not preserve existing memoizationReact Compile
+- … +905 more
+
+## #8 first render  needle="first render"  hits248=2  hits247=2
+- @220687531 
+// only what's needed for a meaningful first render (children + variant axis +
+// visibility toggles + required arrays). Optional 
+- @223448850 outline/getBoundingClientRect go to its first rendered child instead.
+  function paintEl(el){
+    if (el && el.classList && el.class
+
+## #8 mid-session  needle="mid-session"  hits248=35  hits247=35
+- @84983532 concurrent brokers refcount and a crash mid-session is recoverable by the next `acl` opDENY_READPer-exec read-deny: add an additive
+- @92510036  this content?.......y'.Fetch........+$.mid-session.N.....#.A local_jsx dialog cannot render outside of a LocalJsxRegistryContext p
+- @95830867 whole set or denies it. Call this again mid-session to add more apps; previously granted apps remain granted. Returns the granted a
+- @97629883 the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted..........mid_session......V..cwd_override..
+- @98630269 ...~....N..stop (idle session, flag off mid-session), the last observed value persists, so still expire any UI derived from this fi
+- @98644129 s; a resumed session starts fresh and a mid-session /clear zeroes it, though a background subagent that outlives the /clear still r
+- … +29 more
+
+## #8 after an OAuth token  needle="after an OAuth token"  hits248=0  hits247=0
+
+## #8 tool definitions being re-rendered  needle="tool definitions being re-rendered"  hits248=0  hits247=0
+
+## #8 re-rendered after  needle="re-rendered after"  hits248=0  hits247=0
+
+## #8 skipClear  needle="skipClear"  hits248=0  hits247=0
+
+## #8 preserveTool  needle="preserveTool"  hits248=12  hits247=12
+- @95028904 skipAggregateToolResultBudget... ...+.f.preserveToolUseResultInSubagents....Cl..stripToolUseResultAtCreation.....k`.stripForStorage.
+- @95448668 fOwningPins.........withProject.........preserveToolUseResults.........recordedUuids.......i..userStopCount........O#.parentAbortC
+- @184208073 s:()=>nYe});var X6=(e,t)=>!e.agentId||e.preserveToolUseResults===!0||t.preserveToolUseResultInSubagents===!0;var I_={};je(I_,{defaul
+- @184208104 entId||e.preserveToolUseResults===!0||t.preserveToolUseResultInSubagents===!0;var I_={};je(I_,{default:()=>I_,errorBlock:()=>t2e,isC
+- @185189070 edSkill:M,override:L,model:N,maxTurns:U,preserveToolUseResults:j,persistedToolResultFiles:G,availableTools:ue,webFetchReadmissionAll
+- @185198517 or(let ci of li)Sn.push(Nn(ci))}if(j)la.preserveToolUseResults=!0;if(G)la.persistedToolResultFiles=G;let ca=null,Bl=null,yu=Ie??(Te?
+- … +6 more
+
+## #8 oauthRefreshTool  needle="oauthRefreshTool"  hits248=0  hits247=0
+
+## #8 toolsHash latch  needle="toolsHash"  hits248=7  hits247=7
+- @96663548 essageHashes
+...;...systemHash..	...F...toolsHash........x..cacheControlHash.....(J.systemCharCount.....5..extraBodyHash.......5
+- @184449374 ax(200),w.object({systemHash:w.number(),toolsHash:w.number(),cacheControlHash:w.number(),toolNames:w.array(w.string().max(200)).m
+- @184453055 ;pt.delete(pr)}pt.set(we,{systemHash:xe,toolsHash:Fe,cacheControlHash:Be,toolNames:Ne,systemCharCount:xt,model:p,fastMode:rn,glob
+- @184453556 ++;let Ze=xe!==it.systemHash,vt=Fe!==it.toolsHash,pn=p!==it.model,sn=rn!==it.fastMode,gn=Be!==it.cacheControlHash,Ht=E!==it.globa
+- @184455478 pendingChanges=null;it.systemHash=xe,it.toolsHash=Fe,it.cacheControlHash=Be,it.toolNames=Ne,it.systemCharCount=xt,it.model=p,it.f
+- @184459824 cheStrategy??"",systemHash:E.systemHash,toolsHash:E.toolsHash,is1hCacheTTL:E.is1hCacheTTL,queryDepth:E.queryDepth,querySource:Dp(
+- … +1 more
+
+## #8 should1hCacheTTL  needle="should1hCacheTTL"  hits248=0  hits247=0
+
+## #8 latched session-stable  needle="session-stable"  hits248=0  hits247=0
+
+## #8 sticky-on  needle="sticky-on"  hits248=0  hits247=0
+
+## #8 tokens_saved-win @180708345
+Hk();else{let L=D()&&o!==void 0?o:void 0,N=L&&yve.of(z().host).promise;if(ON(),L!==void 0)await Bgt(L,N)}if(k)s("tengu_oauth_tokens_save_exception",{storageBackend:C,...Lf(M)});if(!E&&!k)s(O.success?"tengu_oauth_tokens_saved":"tengu_oauth_tokens_save_failed",{storageBackend:C});if(p)s(E?"tengu_oauth_refresh_compromised_cas_adopted_sibling":"tengu_oauth_refresh_compromised_cas_saved",{});else if(E)s("tengu_oauth_refresh_save_adopted_newer_write",{});if(E)return pn(),"adopted_sibling";return O.success?"saved":"save_failed"}let u=await G2t(r,o);return Hk(),u.success?"saved":"save_failed"}function TN(){return _n().name}async function G2t(e,t){if(!VA(e.scopes))return s("tengu_oauth_tokens_not_cla
+
+## #8 tokens_saved-fn function  @180707284 len=1453 sha=62e237c798b095b2 bodyHits247=0
+function cMe({isCompromised:e,postedRefreshToken:t,refreshedTokens:r,credentials:o}){if(VA(r.scopes)&&r.refreshToken&&r.expiresAt){let p=e();if(p)s("tengu_oauth_token_refresh_lock_compromised_post_post",{});let g={accessToken:r.accessToken,refreshToken:r.refreshToken,expiresAt:r.expiresAt,refreshTokenExpiresAt:r.refreshTokenExpiresAt,scopes:r.scopes,subscriptionType:r.subscriptionType,rateLimitTier:r.rateLimitTier,clientId:r.clientId},E=!1,C=TN(),O={success:!1},k=!1,M;for(let L=0;L<3;L++){if(L>0)await ne(100*L);E=!1,k=!1;try{O=await _n().mutate((N)=>{let U=N.claudeAiOauth?.refreshToken;if(!(N.claudeAiOauth!==void 0&&N.claudeAiOauth!==null&&(U===""||U===t)))return E=!0,N;return{...N,claudeAiOauth:SN(N.claudeAiOauth,g)}},o)}catch(N){n(`OAuth refresh CAS save failed: ${l(N)}`,{level:"error"}),O={success:!1},k=!0,M=N;continue}if(E||O.success)break}if(k)Hk();else{let L=D()&&o!==void 0?o:void 
+… +553 chars
+
+## #8 tokens_saved-win @180709316
+Oauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf(k)}),{success:!1,warning:"Failed to save OAuth tokens"}}}var ni=new Set,Ir=new Set,gee=32;function Gmn(e){return Ir.has(e)}function V2t(e){if(Ir.size
+
+## #8 tokens_saved-fn function  @180708774 len=950 sha=cc44d2bb74242102 bodyHits247=0
+function G2t(e,t){if(!VA(e.scopes))return s("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return s("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,clientId:E}=e,C=_n(),O=TN();try{let k=await C.mutate((N)=>({...N,claudeAiOauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf(k)}),{s
+… +50 chars
+
+## #8 248 oauth-save window @180708345
+t)))return E=!0,N;return{...N,claudeAiOauth:SN(N.claudeAiOauth,g)}},o)}catch(N){n(`OAuth refresh CAS save failed: ${l(N)}`,{level:"error"}),O={success:!1},k=!0,M=N;continue}if(E||O.success)break}if(k)Hk();else{let L=D()&&o!==void 0?o:void 0,N=L&&yve.of(z().host).promise;if(ON(),L!==void 0)await Bgt(L,N)}if(k)s("tengu_oauth_tokens_save_exception",{storageBackend:C,...Lf(M)});if(!E&&!k)s(O.success?"tengu_oauth_tokens_saved":"tengu_oauth_tokens_save_failed",{storageBackend:C});if(p)s(E?"tengu_oauth_refresh_compromised_cas_adopted_sibling":"tengu_oauth_refresh_compromised_cas_saved",{});else if(E)s("tengu_oauth_refresh_save_adopted_newer_write",{});if(E)return pn(),"adopted_sibling";return O.success?"saved":"save_failed"}let u=await G2t(r,o);return Hk(),u.success?"saved":"save_failed"}function
+
+## #8 248 oauth-save window @180709316
+gu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,clientId:E}=e,C=_n(),O=TN();try{let k=await C.mutate((N)=>({...N,claudeAiOauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf(k)}),{success:!1,warning:"Failed to save OAuth to
+
+## #8 247 oauth-save window @203673040
+o save API key to macOS Keychain2...@.T.. Run `claude doctor` to diagnose keychain access.......=...tengu_api_key_saved_to_keychain.........tengu_api_key_saved_to_config...
+.......error_hash.......I..Failed to remove API key from macOS keychain: ..4.......tengu_oauth_token_refresh_lock_compromised_post_post........OAuth refresh CAS save failed: .!...2uh.tengu_oauth_tokens_save_exception...........tengu_oauth_tokens_saved......#.tengu_oauth_tokens_save_failed..3....1..tengu_oauth_refresh_compromised_cas_adopted_sibling.)...b>..tengu_oauth_refresh_compromised_cas_saved...,....;:.tengu_oauth_refresh_save_adopted_newer_write........storageBackend.. ...z.J.tengu_oauth_tokens_not_claude_ai!...Y..tengu_oauth_tokens_inference_only.........g.Failed to save OAuth tokens: .......A.e.Failed to save O
+
+## #8 247 oauth-save window @208856332
+==t)))return a=!0,g;return{...g,claudeAiOauth:mx(g.claudeAiOauth,s)}},r)}catch(g){p(`OAuth refresh CAS save failed: ${M(g)}`,{level:"error"}),l={success:!1},d=!0,f=g;continue}if(a||l.success)break}if(d)wt();else{let h=F()&&r!==void 0?r:void 0,g=h&&tr.of(C().host).promise;if(Tx(),h!==void 0)await Dm(h,g)}if(d)E("tengu_oauth_tokens_save_exception",{storageBackend:u,...Ar(f)});if(!a&&!d)E(l.success?"tengu_oauth_tokens_saved":"tengu_oauth_tokens_save_failed",{storageBackend:u});if(i)E(a?"tengu_oauth_refresh_compromised_cas_adopted_sibling":"tengu_oauth_refresh_compromised_cas_saved",{});else if(a)E("tengu_oauth_refresh_save_adopted_newer_write",{});if(a)return er(),"adopted_sibling";return l.success?"saved":"save_failed"}let o=await yx(n,r);return wt(),o.success?"saved":"save_failed"}function 
+
+## #8 247 oauth-save window @208857301
+gu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,clientId:a}=e,u=ne(),l=_x();try{let d=await u.mutate((g)=>({...g,claudeAiOauth:mx(g.claudeAiOauth,{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:a})}),t);if(d.success)E("tengu_oauth_tokens_saved",{storageBackend:l});else E("tengu_oauth_tokens_save_failed",{storageBackend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OAuth tokens: ${M(d)}`,{level:"error"}),E("tengu_oauth_tokens_save_exception",{storageBackend:l,...Ar(d)}),{success:!1,warning:"Failed to save OAuth
+
+# ---- #9 wakeup-resume-cache ----
+## #9 ScheduleWakeup  needle="ScheduleWakeup"  hits248=16  hits247=14
+- @96284866 ader:.
+...-.b.tools:Bash..........tools:ScheduleWakeup....{.%.tools:Agent.....gP..tools:Skill.........tools:ToolSearch......q.tools:Ar
+- @96325088 x...CronDelete......g\1.CronList.....,..ScheduleWakeup.......O.RemoteTrigger...........SendUserMessage.......h.Brief........|..PushNo
+- @96415616 SandboxUnavailableForShellError.....a...ScheduleWakeupInputError.... ...SelectedRangeTooLargeError......v...SendMessagePreconditionErr
+- @96678792 her gh calls. If polling in a loop, use ScheduleWakeup instead of retrying.</system-reminder>...........frontmatter_shadow:.$.....S.te
+- @98606143 .Session-scoped cron tasks (CronCreate, ScheduleWakeup, /loop) that will wake this session later. Empty array when none are scheduled.
+- @180294065 "Session-scoped cron tasks (CronCreate, ScheduleWakeup, /loop) that will wake this session later. Empty array when none are scheduled.
+- … +10 more
+
+## #9 function k5n  needle="function k5n("  hits248=1  hits247=0
+- @181122899 mediately and no further wakeups fire.`;function k5n(e){return`${t}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and th
+
+## #9 guidance here stays  needle="the guidance here stays the same"  hits248=1  hits247=1
+- @181123904 n't try to track or preempt that \u2014 the guidance here stays the same.)
+
+Match the delay to what you're actually waiting for:
+
+- **Actively polling e
+
+## #9 resume first turn  needle="resumed session"  hits248=20  hits247=19
+- @97919466 ..{.G.Entered coordinator mode to match resumed session...1.......Exited coordinator mode to match resumed session........>.8.Workers s
+- @97919525 .......Exited coordinator mode to match resumed session........>.8.Workers spawned via the "...h... tool have access to these tools:
+..
+- @98644094 t rather than summing across results; a resumed session starts fresh and a mid-session /clear zeroes it, though a background subagent t
+- @100108264 r: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), o
+- @100663044 ory_file requires execution.prompt (the resumed session needs a next turn)..Q....D2.execution.prompt is required (a prompt.md body, or 
+- @180340395 t rather than summing across results; a resumed session starts fresh and a mid-session /clear zeroes it, though a background subagent t
+- … +14 more
+
+## #9 --resume  needle="--resume"  hits248=132  hits247=132
+- @92228848 ......?.tengu_bg_revival_guard.......a..--resume....f...--session-id........--fork-session.......lu.launch..........args........
+- @92290300 -id can only be used with --continue or --resume if --fork-session is also specified............sdkUrl......'H".unsubscribe....
+- @92310048 A.....<.Run claude --continue or claude --resume to resume a conversation...I.......Name your conversations with /rename to find
+- @92339285 : --environment cannot be combined with --resume, --continue, or --teleport-...g...Error: --environment cannot be combined with 
+- @92481418 H.I.S.T.O.R.Y. .i.s. .s.e.t...J...w.... --resume will not find this session; if unintended, unset it and restart..E....~..T.r.a.
+- @92609309 ous session saved . resume with: claude --resume ..#...E...Ultraplan rejected . Plan saved to .....3...touch...*...L.#.[bridge:r
+- … +126 more
+
+## #9 definition changing  needle="definition changing"  hits248=0  hits247=0
+
+## #9 tool definition  needle="tool definition"  hits248=10  hits247=10
+- @96622572 s.t.l.y. ...5...%.C.from system prompt, tool definitions, or attachments........MA8. . the request is ~......5.. tokens (limit .....{..
+- @96622964 s.y.s.t.e.m. .p.r.o.m.p.t.,. .......BG..tool definitions, and attachment content. A single-exchange conversation cannot be compacted; r
+- @184120415 ize comes mostly "+"from system prompt, tool definitions, or attachments.";if(o>=t*c5t)return`${aA} \xB7 the request is ~${t} tokens (l
+- @184120820 ns \u2014 the rest is system prompt, `+"tool definitions, and attachment content. A single-exchange conversation cannot be compacted; r
+- @189860130 ncludes your `CLAUDE.md` instructions), tool definitions, and model parameters. Secrets are redacted as before, and these fields are dr
+- @224341136 lock`, `ToolResultBlockParam`, `Tool*` (tool definition classes) |
+| `Anthropic.Models.Beta.Messages` | beta-endpoint equivalents - `M
+- … +4 more
+
+## #9 cache miss on the  needle="cache miss on the"  hits248=0  hits247=0
+
+## #9 first turn  needle="first turn"  hits248=14  hits247=14
+- @93309983 e system prompt (cached input after the first turn). Agents and MCP tools not yet counted.........P".Total.........*. . ~0....w;.N
+- @93538983 e system prompt (cached input after the first turn). Agents and MCP tools not yet counted....L....... (capped at the listing budge
+- @95051561 .......hashes.......6z.The refusal that first turned this content away says why that version could not be handed to you and what t
+- @99061447 nal can surface a suggestion before the first turn...\.......W.h.a.t. .t.h.e. .u.s.e.r. .i.s. .w.o.r.k.i.n.g. .w.i.t.h. .w.h.e.n. 
+- @100179072 out (...5...>.>.); they go out with the first turn after that clears..........v.Directory sync: this turn's changes were NOT sent 
+- @100201891 nflicts..9.....x.; they go out with the first turn after that is resolved....$...j.9.claude --cloud directory sync: turn &..."4..d
+- … +8 more
+
+## #9 session-stable overage  needle="session-stable"  hits248=0  hits247=0
+
+## #9 latch overage  needle="latch"  hits248=284  hits247=286
+- @92458800 ssages.........bannersSliced...........latchActive.......j.keptMessages
+.....&.clearLatch..........lastSlicedFallbackModel.@
+- @92520252 oredFrom...9.N.restored_from.......;..latch_cleared.......()..banners_sliced......'.!.model_scope.*.......
+Error: sandbox r
+- @92628357 ......U.5.arm_in_flight.......d.?.stop_latched...t.}.recorded_stop.......1...record_incomplete........E..watch_cap_reconnec
+- @92673302 ..#...N...tengu_refusal_fallback_resume_latch.....!...fork_skip_restore...........skipped_fork_fallback.......,...fork_neutra
+- @92673446 ..skipped_fork_neutralized.... s..model_latch_only....Q...previousOverride........previousAppStateModel.......,)..previousMod
+- @93277656 n.& .... qL.static......[C..site.....b..latchAnnouncementSlot...	....$>.gitBranch.......)....% .....&.F..% ......k.. . ..% .@
+- … +278 more
+
+## #9 resolveScheduleWakeup  needle="resolveScheduleWakeup"  hits248=0  hits247=0
+
+## #9 DUe(  needle="function DUe("  hits248=2  hits247=1
+- @202598269 4e.of(d);C.onToolRound=null,C.sink=null}function DUe(d){if(!PEe())return;let C=u4e.of(d.session),x=`${d.messages.length}:${d.messages
+- @203493840 (-1),defaultKey:n.defaultKey})}return r}function DUe(e,o){let r=u.indexOf(e),t=[];for(let n=r-1;n>=0;n--){let i=u[n];if(l(i)===o)t.pu
+
+## #9 FKu(  needle="function FKu("  hits248=0  hits247=0
+
+## #9 EU_(  needle="function EU_("  hits248=0  hits247=0
+
+## #9 BKu(  needle="function BKu("  hits248=0  hits247=0
+
+## #9 Cfr(  needle="function Cfr("  hits248=0  hits247=1
+
+## #9 k5n EXTRACT FAIL @181122899 {"i":181122899,"missEnd":true,"preview":"function k5n(e){return`${t}\n\n${'Set `noop: true` if nothing changed \\u2014 you checked and there\\'s nothing to report (\"no change\", \"still waiting\", \"
+
+## #9 247 guidance-fn S3t @212903745
+len=7199 sha=2a5b0aa8f38a0d90
+function S3t(e){return`${pco}
+
+${'Set `noop: true` if nothing changed \u2014 you checked and there\'s nothing to report ("no change", "still waiting", "quiet hold"). Set `noop: false` if something happened worth keeping \u2014 you edited a file, posted a message, advanced state, or surfaced a finding. Consecutive `noop: true` ticks are collapsed in the user\'s terminal view and tracked as a streak
+
+## #9 overage delay sentence  needle="If the session enters usage overage"  hits248=1  hits247=1
+- @181123784 rm is pure waste \u2014 never do that. (If the session enters usage overage, later requests drop to the 5-minute TTL; don't try to track or preempt that \u
+
+## #9 overage-delay-fn function k5n( EXTRACT FAIL @181122899 {"i":181122899,"missEnd":true,"preview":"function k5n(e){return`${t}\n\n${'Set `noop: true` if nothing changed \\u2014 you checked and there\\'s nothing to report (\"no change\", \"still waiting\", \"
+
+# ---- #14 model-name-code ----
+## #14 function JKt(  needle="function JKt("  hits248=2  hits247=1
+- @183982391 .ctimeMs===o&&p.size===u?p.entry:void 0}function JKt(e,t,r,o,u,p,g){if(g-r>mBe)e.set(t,{mtimeMs:r,ctimeMs:o,size:u,entry:{sha256:p}})
+- @193082880 edits":"")+(s?" \xB7 Fast mode OFF":"")}function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws 
+
+## #14 function Dv(  needle="function Dv("  hits248=6  hits247=5
+- @181745572 lassifierApprovable:!0};return{safe:!0}}function Dv(e){return new Set([ve(),...e.additionalWorkingDirectories.keys()])}function oUt(
+- @182598640 th";import{Transform as kv}from"stream";function Dv(e){return e.every((t)=>t.sentinel.length===t.realValue.length)}function rc(e,t,r
+- @189453269 .push({type:"styleStr",str:h});return c}function Dv(t,o){let u="";for(let c=0;c<t.width;c++)u+=Yy(t,c,o)??" ";return u.trimEnd()}fun
+- @202783798 )}import{randomUUID as hWe}from"crypto";function Dv(d){return cGn(d,(C)=>ae.bold(C))}function Aue(d,C){let x=fR(d);if(!x)return!0;le
+- @217296251 rror?a:void 0,a}return e[t]}else return}function Dv(e,t){if(t){for(let[r,n]of Object.entries(t))if(n!=null)if(typeof n=="object"){le
+- @223322665 t","emulator","host"].join("-")}var zee;function Dv(e){return e.startsWith("blob:")?(zee??=typeof document<"u"&&(document.querySelec
+
+## #14 Fast mode ON  needle="Fast mode ON"  hits248=7  hits247=9
+- @93350490 t........Fast mode OFF......._B.. Kept Fast mode ON..........Kept Fast mode OFF.......T..Fast mode is not available..........shortc
+- @94915379 .opus-4-6
+...|.k.sonnet-4-6.......... . Fast mode ON......O.. . Draws from usage credits.....q.N. . Fast mode OFF....g...announceKep
+- @94915484 mode OFF....g...announceKeptOn......O.".Fast mode ON....Dr..validatedModels......W:.. Try '.....NQI.Model '.....n.o.' not found.9...
+- @183526985 Cloud session couldn't switch to ",$Ie="Fast mode ON",FIe=" \xB7 model set to ",_=[i9,SZ,wNt,ENt,kNt],E=/\x1b\[[0-9;]*m/g,p=4;functi
+- @193082783 ptOn===!0),s=i&&!!e&&!o;return(r?" \xB7 Fast mode ON":"")+(m(n,o,b_())?" \xB7 Draws from usage credits":"")+(s?" \xB7 Fast mode OFF"
+- @193082933 e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}function M(
+- … +1 more
+
+## #14 [1m]  needle="[1m]"  hits248=84  hits247=84
+- @92291091 ........unknown-model...$.....p.append [1m] to the model name for 1M5...M%..set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real 
+- @92673180 .....|..sonnet.......c..haiku........U..[1m]........neutralizedByFork........?..tengu_resume_model_restore..........is_eap..
+- @94916118 selection.........
+     ..
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base 
+- @94916142 ..
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: .........m.Model 
+- @94916164 ....G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: .........m.Model name cannot be empty..
+- @94955156 7EBUN/root/chunk-cs4mb0en.js....D...opus[1m]......-.Opus 1M.	....{..Sonnet 1M.........1.Tip: You have access to ........ wit
+- … +78 more
+
+## #14 sonnet[1m]  needle="sonnet[1m]"  hits248=10  hits247=10
+- @94916112 _user_selection.........
+     ..
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base 
+- @99657962 -20250929[1m].,....
+..Failed to migrate sonnet[1m] model setting: ......".migration_sonnet1m_to_sonnet45......H]..migration_sonnet
+- @179703741 "sonnet","opus","haiku","fable","best","sonnet[1m]","opus[1m]","fable[1m]","opusplan"],xyt=["sonnet","opus","haiku","fable"];var M
+- @180875627  codebases"}}function B(){let e={value:"sonnet[1m]",label:"Sonnet 5 (1M context)",descriptionForModel:"Sonnet 5 with 1M context wi
+- @191561804 et p=!1;if(be("userSettings")?.model==="sonnet[1m]"){let{error:w}=await Wt("userSettings",{model:"sonnet-4-5-20250929[1m]"},void 0
+- @191561931 d 0,t);if(w)return n(`Failed to migrate sonnet[1m] model setting: ${w}`,{level:"error"}),f("migration_sonnet1m_to_sonnet45","migra
+- … +4 more
+
+## #14 backtick sonnet  needle="`sonnet"  hits248=8  hits247=8
+- @97175297 tool...r...V...Model override (`haiku`, `sonnet`, `opus`, `fable`, or a full ID). Use `inherit` to match the parent conversatio
+- @99882923 s. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won't appear.
+
+**Extended cont
+- @99884100 ells the app which Claude tier (`haiku`/`sonnet`/`opus`/`fable`/`mythos`) an entry stands in for, so bare tier aliases (e.g. in
+- @184571012 al().describe("Model override (`haiku`, `sonnet`, `opus`, `fable`, or a full ID). Use `inherit` to match the parent conversatio
+- @200176897 s. If you set `supports1m` on an alias (`sonnet`) but discovery returns the full ID, the variant won\'t appear.\n\n**Extended c
+- @200178094 ells the app which Claude tier (`haiku`/`sonnet`/`opus`/`fable`/`mythos`) an entry stands in for, so bare tier aliases (e.g. in
+- … +2 more
+
+## #14 render as code  needle="render as code"  hits248=0  hits247=0
+
+## #14 as code  needle=" as code"  hits248=3  hits247=3
+- @187680666 OR_SSH_SIGN,tmr as coauthorHookStubs,Zfr as codeSignArtifacts,Qfr as configureGitForSigning,E3t as configureGitGovernedEntries,n
+- @214720798 nd escapes raw HTML, so inline SVG shows as code too), and the
+  viewer's content-security policy blocks external image hosts, s
+- @226018269 verification date | Skills rot factually as code ships; nothing re-checks them by default | Encode architecture, data models, an
+
+## #14 markdown code  needle="markdown code"  hits248=0  hits247=0
+
+## #14 children:[`  needle="children:[`"  hits248=5  hits247=5
+- @192195635 g"]})}):e(t,{dimColor:!0,children:r(ue,{children:[`${ms.blocked} awaiting input`,`${ms.active} working`,`${ms.completed+bp.length} 
+- @202374651 e,Cxe;if(Cu[1]===p)Cxe=r(t,{dimColor:!0,children:[`${O.arrowUp}${O.arrowDown} j/k`.padEnd(9),"scroll"]}),Cu[1]=Cxe;else Cxe=Cu[1];l
+- @209014810 olor:Fa.usageCount===0?"warning":void 0,children:[`  ${qL(Fa.name,_o.name)}  `,e(t,{dimColor:!0,children:qL(Fa.source,_o.source)}),
+- @209382516 `${Ty} Built-in rules`,r(t,{dimColor:!0,children:[` \xB7 ${ky}${bn.enabled?"":" \xB7 off"}`,bn.control==="user"||bn.control==="empt
+- @224038775 s:M}),M==null&&!q&&be&&(0,Se.jsxs)(DCe,{children:[`<${be.tag}>`," isn\u2019t part of the template \u2014 read-only.",(0,Se.jsx)("br
+
+## #14 Code component  needle="createElement(Code"  hits248=0  hits247=0
+
+## #14 <Code  needle="<Code"  hits248=0  hits247=0
+
+## #14 inverse  needle="inverse:"  hits248=39  hits247=39
+- @66797293 underline: [4, 24],
+  blink: [5, 25],
+  inverse: [7, 27],
+  hidden: [8, 28],
+  strikethrough: [9, 29],
+  doubleunderline: [21, 2
+- @179641792 3,23],underline:[4,24],overline:[53,55],inverse:[7,27],hidden:[8,28],strikethrough:[9,29]},color:{black:[30,39],red:[31,39],gree
+- @183343323 3,23],underline:[4,24],overline:[53,55],inverse:[7,27],hidden:[8,28],strikethrough:[9,29]},color:{black:[30,39],red:[31,39],gree
+- @189344149 italic:RS,underline:TS,strikethrough:NS,inverse:AS,wrap:_S,children:Us,"aria-hidden":Qm,"aria-label":Zm,"aria-role":Jm,"aria-sta
+- @189344981 tf=Ai[13];let nf;if(Ai[14]!==qc)nf=qc&&{inverse:qc},Ai[14]=qc,Ai[15]=nf;else nf=Ai[15];let DS;if(Ai[16]!==$c||Ai[17]!==ef||Ai[18
+- @190500376 italic:Xe,underline:Qe,strikethrough:Ze,inverse:et,wrap:tt,children:Re,...xe}=Je),Se[0]=Je,Se[1]=xe,Se[2]=ve,Se[3]=Re,Se[4]=ke,S
+- … +33 more
+
+## #14 wrapCode  needle="wrapCode"  hits248=0  hits247=0
+
+## #14 asCode  needle="asCode"  hits248=0  hits247=0
+
+## #14 code wrap  needle="code wrap"  hits248=1  hits247=1
+- @186576858 4 expand chained commands, look through code wrappers, check files written earlier in the transcript, consider delayed effects (p
+
+## #14 OSC8  needle="OSC8"  hits248=0  hits247=0
+
+## #14 ](1m  needle="](1m"  hits248=0  hits247=0
+
+## #14 markdown link 1m  needle="](1m]"  hits248=0  hits247=0
+
+## #14 href 1m]  needle="1m]"  hits248=84  hits247=84
+- @92291092 .......unknown-model...$.....p.append [1m] to the model name for 1M5...M%..set CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real 
+- @92673181 ....|..sonnet.......c..haiku........U..[1m]........neutralizedByFork........?..tengu_resume_model_restore..........is_eap..
+- @94916119 election.........
+     ..
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base 
+- @94916143 .
+...}:..sonnet[1m]......G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: .........m.Model 
+- @94916165 ...G{8.sonnet-4-6[1m]..........sonnet-5[1m]
+..../?. (effort: .........
+Base model: .........m.Model name cannot be empty..
+- @94955157 EBUN/root/chunk-cs4mb0en.js....D...opus[1m]......-.Opus 1M.	....{..Sonnet 1M.........1.Tip: You have access to ........ wit
+- … +78 more
+
+## #14 JKt @183982391 len=111 sha=40c9d932a74c17de bodyHits247=0
+function JKt(e,t,r,o,u,p,g){if(g-r>mBe)e.set(t,{mtimeMs:r,ctimeMs:o,size:u,entry:{sha256:p}});else e.delete(t)}
+
+## #14 JKt @193082880 len=134 sha=0b1086335e971968 bodyHits247=0
+function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}
+
+## #14 Dv @181745572 len=79 sha=487430265dbc3724 bodyHits247=0
+function Dv(e){return new Set([ve(),...e.additionalWorkingDirectories.keys()])}
+
+## #14 Dv @182598640 len=75 sha=4e0db693fd29adda bodyHits247=0
+function Dv(e){return e.every((t)=>t.sentinel.length===t.realValue.length)}
+
+## #14 Dv @189453269 len=89 sha=5d7b8d882067b5c6 bodyHits247=0
+function Dv(t,o){let u="";for(let c=0;c<t.width;c++)u+=Yy(t,c,o)??" ";return u.trimEnd()}
+
+## #14 Dv @202783798 len=45 sha=173112c5dbb75313 bodyHits247=0
+function Dv(d){return cGn(d,(C)=>ae.bold(C))}
+
+## #14 Dv @217296251 len=178 sha=e5588682a0be5d9f bodyHits247=0
+function Dv(e,t){if(t){for(let[r,n]of Object.entries(t))if(n!=null)if(typeof n=="object"){let i=e[r];typeof i=="object"&&i!==null?e[r]=Dv(i,n):e[r]=Dv({},n)}else e[r]=n}return e}
+
+## #14 Dv @223322665 len=194 sha=9147066751da59bb bodyHits247=1
+function Dv(e){return e.startsWith("blob:")?(zee??=typeof document<"u"&&(document.querySelector('meta[name="'+MR()+'"]')!==null||document.querySelector('meta[name="'+_0e()+'"]')!==null),zee):!1}
+
+## #14 fast-mode-toggled-win @203097580
+sion:fr}))&&Ty()})})},[Mr,qn,fr,A9,I9,io,Ri]),D9=U((kt)=>{if(Gi(!1),kt)Ni({key:"fast-mode-toggled",kind:"feedback",segments:[{text:Dv(kt)}],priority:"immediate",timeoutMs:3000})},[Ni]),N9=G(()=>{if(!Ka)return null;return e(o,{flexDirection:"column",marginTop:1,children:e(zJe,{onDone:D9,unavailableReason:FN(),storageV5:Ri})})},[Ka,D9,Ri]),L9=U((kt)=>{Yn((Ao)=>({...Ao,thinkingEnabled:kt})),Gr(!1),Pr()?.sendControlRequest({subtype:"set_max_thinking_tokens",max_thinking_tokens:kt?null:0}).catch((Ao)=>{n(`[remote] set_max_thinking_tokens failed: ${Ao}`)}),s("tengu_thinking_toggl
+
+## #14 fast-mode-fn function  @203093138 len=45 sha=17a60bf18b5f82d4 bodyHits247=0
+function b9(){if(Gy){h9(-1);return}af(Sr,-1)}
+
+## #14 model-switch-win @202861247
+,vs!==void 0&&gl!==void 0){g_(vs,gl);let Eo=JKt(vs,gl,Ks);if(Eo!==null)Yn({key:"model-switch-fast-mode",kind:"feedback",text:Eo,priority:"immediate",timeoutMs:3000})}},onSetMaxThinkingTokens(or){let Gr=or==null?ge?ge.type!=="disabled":PP():or!==0;xr((Qr)=>{if(Qr.thinkingEnabled===Gr)return Qr;return{...Qr,thinkingEnabled:Gr}})},onSetPermissionMode:(or)=>ode(or,Mn,xr),onApplyFlagSettings:(or)=>{let Gr=st(),Qr=jD(Gr,fl(Mn.getState())),Ss=ZBe(or,{model:Gr,getAppState:Mn.getState
+
+## #14 wrap `$  needle="`$"  hits248=10438  hits247=10289
+- @191998 ...I......H.	.Z.H..t	H9........=..Z....`$..I.........R$..H..`...$.......L.............PQ.......f.........H.=..Z..t.H...Z
+- @344860 ......b.L....."....1..~(.L..H.E.H..@=..`$...N0...t......N4.....H.F0....H...........H.........uG..........tE.F-.H..`...H.
+- @4203197 ....L.l$8L.d$@D.......A...A..
+D.h.D.x.D.`$C..6....B.........H.......H......H........A..@D....E).A...A).E1.H..1.I...d...H.V
+- @5336908 ....I.....Z..............H.......T..H..`$..H9...>....=...H....c.............$..z..u.........$..z........H...e............
+- @6100699 .........t5.(E..).0#..H.E.H..@#....E.f..`$....E...b$...}........A...u.L........W..)E..)E..E.....L.E.L..H...^...........(E
+- @6100807 ...........(E..).0#..H.E.H..@#....E.f..`$....E...b$..D..e.A.........}.H..@#..H...#...(.0#...)..#.....`$..f..($.....b$...
+- … +10432 more
+
+## #14 wrap children:[`  needle="children:[`"  hits248=5  hits247=5
+- @192195635 g"]})}):e(t,{dimColor:!0,children:r(ue,{children:[`${ms.blocked} awaiting input`,`${ms.active} working`,`${ms.completed+bp.length} 
+- @202374651 e,Cxe;if(Cu[1]===p)Cxe=r(t,{dimColor:!0,children:[`${O.arrowUp}${O.arrowDown} j/k`.padEnd(9),"scroll"]}),Cu[1]=Cxe;else Cxe=Cu[1];l
+- @209014810 olor:Fa.usageCount===0?"warning":void 0,children:[`  ${qL(Fa.name,_o.name)}  `,e(t,{dimColor:!0,children:qL(Fa.source,_o.source)}),
+- @209382516 `${Ty} Built-in rules`,r(t,{dimColor:!0,children:[` \xB7 ${ky}${bn.enabled?"":" \xB7 off"}`,bn.control==="user"||bn.control==="empt
+- @224038775 s:M}),M==null&&!q&&be&&(0,Se.jsxs)(DCe,{children:[`<${be.tag}>`," isn\u2019t part of the template \u2014 read-only.",(0,Se.jsx)("br
+
+## #14 wrap bold:!0,children:  needle="bold:!0,children:"  hits248=389  hits247=387
+- @189431007 ren:[e(qs,{dim:!0,children:"- "}),e(qs,{bold:!0,children:Rd})]},Rd)}return r(ka,{children:[e(qs,{dim:!0,children:"- "}),e(qs,{bold:!0,chi
+- @189431093 ren:[e(qs,{dim:!0,children:"- "}),e(qs,{bold:!0,children:mu.function}),r(qs,{dim:!0,children:[" ","(",pu(mu.file)??"",":",mu.line,":",mu.
+- @190514239  Y;if(we[8]!==D||we[9]!==F)Y=e(qs,{...F,bold:!0,children:D}),we[8]=D,we[9]=F,we[10]=Y;else Y=we[10];return Y}let Y;if(we[11]!==D||we[12]!
+- @190590213 l}let J;if(h[4]!==O||h[5]!==y)J=O?e(qs,{bold:!0,children:y}):y,h[4]=O,h[5]=y,h[6]=J;else J=h[6];let d=J;if(ie){let C;if(h[7]!==c||h[8]!==
+- @190663874 &&a.isSubmitFocused?"suggestion":void 0,bold:!0,children:R})})]}),F[44]=p,F[45]=W,F[46]=_,F[47]=a,F[48]=R,F[49]=Fe,F[50]=ge;else ge=F[50]
+- @192011558 ission to npm prefix \xB7 Run"," ",e(t,{bold:!0,children:"claude doctor"})]}),S?.status==="install_failed"&&(P?P.preservedPath?r(o,{flexD
+- … +383 more
+
+## #14 wrap code:!0  needle="code:!0"  hits248=10  hits247=10
+- @178217495 f-8",charsetSentinel:!1,delimiter:"&",encode:!0,encodeDotInKeys:!1,encoder:An,encodeValuesOnly:!1,format:hs,formatter:ds,indice
+- @191130375 d 0){if(d){if(!t.ultracode)t={...t,ultracode:!0}}else if(l&&t.ultracode)t={...t,ultracode:!1}}else if(i){if(!t.ultracode||fl(t)
+- @191130486 ultracode||fl(t)!=="xhigh")t={...t,ultracode:!0,sessionEffort:tB("xhigh")}}else if(t.ultracode)t={...t,ultracode:!1};return t})
+- @193037187 ease the pin.`};r?.({value:"xhigh",ultracode:!0});let f=m("xhigh",!0);if(t)Sy(n);s("tengu_effort_command",{effort:v("ultracode"
+- @193037526  over`,effortUpdate:{value:"xhigh",ultracode:!0}};return{message:`Set effort level to ultracode (this session only): xhigh + dy
+- @193037684 ??""}`,effortUpdate:{value:"xhigh",ultracode:!0}}}async function U(t,r=!0,n,o){let f=t.toLowerCase();if(f==="auto"||f==="unset"
+- … +4 more
+
+## #14 wrap type:"code"  needle="type:\"code\""  hits248=5  hits247=5
+- @182855338 rules.other.codeRemoveIndent,"");return{type:"code",raw:t[0],codeBlockStyle:"indented",text:!this.options.pedantic?P(n,`
+`):n}}}fen
+- @182855526 t[0],s=rt(n,t[3]||"",this.rules);return{type:"code",raw:n,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2]
+- @185508278 :xe,source:t,metadata:{}};else ct={cell_type:"code",id:xe,source:t,metadata:{},execution_count:null,outputs:[]};we.cells.splice(Pe,
+- @216110554 rules.other.codeRemoveIndent,"");return{type:"code",raw:t[0],codeBlockStyle:"indented",text:this.options.pedantic?r:L2(r,`
+`)}}}fen
+- @216110743 [0],n=WZe(r,t[3]||"",this.rules);return{type:"code",raw:r,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2]
+
+## #14 wrap kind:"code"  needle="kind:\"code\""  hits248=0  hits247=0
+
+# ---- #23 mcp-fake-claude-ai ----
+## #23 claude.ai  needle="claude.ai"  hits248=742  hits247=741
+- @92261601 ud session signs in with this machine's claude.ai login, which --bare turns off).......,...--disable-slash-commands0.....B.no tur
+- @92299078 d value...........mounted.@...x^..[MCP] claude.ai connector list superseded by an account switch (........). ..  .n.o.t. .m.o.u.n
+- @92299270 lugin server(s) no longer duplicated by claude.ai connectors after account switch: ...........plugin-restore..
+...8+q.getClients.
+- @92310820 eens before you build . ]...7...https://claude.ai/design?utm_source=claude_code&utm_medium=tip&utm_campaign=tengu_cedar_plume....
+- @92310916 tm_campaign=tengu_cedar_plume........g..claude.ai/design....@...tengu_cedar_plume...........Working on UI? Run ........./design.-
+- @92311788 .....^../remote-control......K..https://claude.ai/code.......VA.claude.ai/code......s... on any browser.%.......You can also driv
+- … +736 more
+
+## #23 claudeai-proxy  needle="claudeai-proxy"  hits248=136  hits247=137
+- @92291740 .....U].managed.....Z...sse-ide.........claudeai-proxy........-.ws-ide......TAg.\$\{[^}]*\}.........^[a-z][a-z0-9+.-]*:\/\/\/........'
+- @178923182 "ask","blocked"])),Zyn=h(()=>m({type:F("claudeai-proxy"),url:i(),id:i(),displayName:i().optional(),iconUrl:i().optional(),timeout:o().
+- @178923772 e!==void 0}function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}var y=h(()=
+- @179098348  gates auto-fetched connectors \u2014 a claudeai-proxy server passed explicitly "+"(e.g. via --mcp-config or the SDK mcpServers option
+- @180283979 ),$3(),q3(),bu()])),X3=h(()=>m({type:F("claudeai-proxy"),url:i(),id:i(),timeout:vo()})),Q3=h(()=>lt([Hs(),X3()])),yu=h(()=>m({name:i()
+- @180552567 YPOINT==="local-agent")return!0;if(e==="claudeai-proxy")return!0;if(t&&rM(t))return!0;if(t&&aE(t))return!0;return!1}var H2t=new Set([O
+- … +130 more
+
+## #23 Manage MCP servers  needle="Manage MCP servers"  hits248=4  hits247=4
+- @96491556 ..Z.Install the Claude Slack app....16..Manage MCP servers..).....?.[reconnect|enable|disable [<server>|all]]...2....s	.[reconnect <server
+- @186707889 ,supportsNonInteractive:!0,description:"Manage MCP servers",argumentHint:"[reconnect|enable|disable [<server>|all]]",thinClientDispatch:"p
+- @186708141 ype:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]"
+- @209652075 olumn",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,
+
+## #23 Project MCPs  needle="Project MCPs"  hits248=2  hits247=2
+- @100528968 he agent........(N..agentServer.........Project MCPs	.......User MCPs...
+...!.u.Local MCPs........H.Enterprise MCPs.....
+...Active a
+- @209645536 ){switch(s){case"project":return{label:"Project MCPs",path:gv(s)};case"user":return{label:"User MCPs",path:gv(s)};case"local":return
+
+## #23 User MCPs  needle="User MCPs"  hits248=2  hits247=2
+- @100528988 agentServer.........Project MCPs	.......User MCPs...
+...!.u.Local MCPs........H.Enterprise MCPs.....
+...Active agent MCPs........
+- @209645587 s",path:gv(s)};case"user":return{label:"User MCPs",path:gv(s)};case"local":return{label:"Local MCPs",path:gv(s)};case"enterprise"
+
+## #23 enterpriseManaged  needle="enterpriseManaged"  hits248=7  hits247=7
+- @93305056 ..m.negotiatedProtocolVersion.......Q9..enterpriseManaged.......R.w.c.o.n.n.e.c.t.i.n.g.& .......Ts. Restarting MCP server process.......
+- @178923599 ullish(),ineligibleReason:i().nullish(),enterpriseManaged:W().optional()})),AY=h(()=>lt([CKe(),Xyn(),l(),d(),Mzt(),Jyn(),Qyn(),Zyn()]));f
+- @181776261 ible,delete r.ineligibleReason,delete r.enterpriseManaged,r.type==="stdio"||r.type===void 0&&"command"in r)r.type="stdio",r.args=r.args??
+- @185116768 e,ineligibleReason:j.eligibility_reason,enterpriseManaged:j.enterprise_managed}}return n(`[claudeai-mcp] Fetched ${Object.keys(N).length}
+- @208931310 -proxy"&&a.scope==="claudeai"&&a.config.enterpriseManaged&&r(Rs.Row,{children:[e(L,{children:"Managed:"}),e(t,{dimColor:!0,children:"by y
+- @208962937 udeai-proxy"&&zp.scope==="claudeai"&&zp.enterpriseManaged===!0;if(me.indented){const In=!tt;let pn;if(Pe[156]!==In)pn=e(t,{dimColor:In,ch
+- … +1 more
+
+## #23 real scope  needle="real scope"  hits248=0  hits247=0
+
+## #23 trusted heading  needle="trusted heading"  hits248=0  hits247=0
+
+## #23 type==="claudeai-proxy"  needle="type===\"claudeai-proxy\""  hits248=60  hits247=60
+- @184542106 &&o.config.scope==="claudeai"&&o.config.type==="claudeai-proxy"&&U3e(o.config)}var j7t=65536;function H3e(e){for(let t of G7t(e)){if(t.length>j
+- @191176881 ders:C.config.headers};else if(C.config.type==="claudeai-proxy")w={type:"claudeai-proxy",url:C.config.url,id:C.config.id};else if(C.config.type
+- @200724725 .length<=1024?s:o}function Cx(e,t){if(t.type==="claudeai-proxy")return{kind:"claudeai-proxy",config:t};if(t.type!=="sse"&&t.type!=="http")retur
+- @200950390 ,oauth:L.config.oauth};else if(L.config.type==="claudeai-proxy")ie={type:"claudeai-proxy",url:L.config.url,id:L.config.id};else if(L.config.typ
+- @201527811 kt(e,r,o){if(lS(e))return!1;if(e.config.type==="claudeai-proxy"){if(e.config.eligible===!1&&!o(e.name))return!1;return r(e.name)}return e.confi
+- @202284644 of q.getState().mcp.clients)if(i.config.type==="claudeai-proxy"&&!C.has(i.name))ee.add(i.name);for(let i of[...W.current.keys()]){if(C.has(i))c
+- … +54 more
+
+## #23 type!=="claudeai-proxy"  needle="type!==\"claudeai-proxy\""  hits248=14  hits247=15
+- @178923764 ginSource!==void 0}function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}var y=h(()=>
+- @204836120  t of o){if(!zo(t))continue;if(t.config.type!=="claudeai-proxy")continue;let i=k(t.config.id);if(!i)continue;e.push({uuid:i,name:t.name,url:t.c
+- @207011139 ==!0&&pWe()}function Po(e){if(!dt(e)||e.type!=="claudeai-proxy")return;if(e.cachedInitResponse==null)return;let t=r0e.safeParse(e.cachedInitRes
+- @207011761 tional()}));function wo(e){if(!dt(e)||e.type!=="claudeai-proxy")return;if(e.discoverSupport==="legacy")return"method-not-found";if(e.discoverSu
+- @207089556 "),{client:w,tools:[],commands:[]};if(t.type!=="claudeai-proxy")wt(e,o);if(t.type==="http"||t.type==="sse")await w0t(e,t);mw(e);let j;if(mo())j
+- @207092242 e==="sse")&&rve(M,_,await nve()))){if(_.type!=="claudeai-proxy"&&_.pluginSource===void 0)X(M,"Skipping connection (cached needs-auth)");p({clie
+- … +8 more
+
+## #23 !=="claudeai-proxy"  needle="!==\"claudeai-proxy\""  hits248=15  hits247=16
+- @178923768 ource!==void 0}function ebn(e){if(e.type!=="claudeai-proxy")return!1;return e.scope==="claudeai"||e.scope==="dynamic"&&!_bt(e)}var y=h(()=>
+- @204836124 f o){if(!zo(t))continue;if(t.config.type!=="claudeai-proxy")continue;let i=k(t.config.id);if(!i)continue;e.push({uuid:i,name:t.name,url:t.c
+- @207011143 &&pWe()}function Po(e){if(!dt(e)||e.type!=="claudeai-proxy")return;if(e.cachedInitResponse==null)return;let t=r0e.safeParse(e.cachedInitRes
+- @207011765 al()}));function wo(e){if(!dt(e)||e.type!=="claudeai-proxy")return;if(e.discoverSupport==="legacy")return"method-not-found";if(e.discoverSu
+- @207089560 client:w,tools:[],commands:[]};if(t.type!=="claudeai-proxy")wt(e,o);if(t.type==="http"||t.type==="sse")await w0t(e,t);mw(e);let j;if(mo())j
+- @207092246 "sse")&&rve(M,_,await nve()))){if(_.type!=="claudeai-proxy"&&_.pluginSource===void 0)X(M,"Skipping connection (cached needs-auth)");p({clie
+- … +9 more
+
+## #23 official connector  needle="official connector"  hits248=0  hits247=0
+
+## #23 fake connector  needle="fake connector"  hits248=0  hits247=0
+
+## #23 connector type  needle="connector type"  hits248=0  hits247=0
+
+## #23 .mcp.json  needle=".mcp.json"  hits248=109  hits247=109
+- @92279548 rs.......(..on-session-start.ts.	....h...mcp.json...	.....O..lsp.json...	.......server.ts........2p.package.json......F.with.....
+- @93308442 ...#c.Check MCP server configuration in .mcp.json or manifest.J.......Check the plugin's hooks configuration and that its hooks f
+- @96750783 t)...%.......Project config (shared via .mcp.json)...,....J..User config (available in all your projects)".......Dynamic config (
+- @97434091 prise policy.....@1.. already exists in .mcp.json&.......MCP server already exists in .mcp.json......O.P. already exists in user 
+- @97434137 son&.......MCP server already exists in .mcp.json......O.P. already exists in user config..(.....E.MCP server already exists in u
+- @97434559 write_failed.....[Y..Failed to write to .mcp.json: .. .....p.Cannot add MCP server to scope: ........" in .mcp.json..........mcp_
+- … +103 more
+
+## #23 manage-mcp-win @186707889
+NonInteractive:!1,load:()=>import("B:/~BUN/root/chunk-ksagpte2.js")},PCt=bVn;var xCt={isEnabled:()=>!1,isHidden:!0,name:"stub"};var Jre={type:"local",name:"mcp",supportsNonInteractive:!0,description:"Manage MCP servers",argumentHint:"[reconnect|enable|disable [<server>|all]]",thinClientDispatch:"post-text",isEnabled:()=>De(),get isHidden(){return!De()},load:()=>import("B:/~BUN/root/chunk-q6d1zv8w.js")},SVn={type:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]",thinClientDispatch:"twin"},NAe=SVn;var kVn={type:"local-jsx",name:"mobile",aliases:["ios","android"],description:"Show QR code to download the Claude mobile app",requires:{ink:!0}},$Ae=kVn;var MCt={isEnabled:()=>!1,isHidden:!0,name:"stub"};var vVn={type:"local",name:"voice",description:"Toggle voice mode",argumentHint:"[hold|tap|off]",availability:["claude-ai"],get isHidden(){return!mbe()},supportsNonInteractive:!1,load:()=>import("B:/~BUN/root/
+
+## #23 manage-mcp-fn function  @186681716 len=84 sha=1f0afb05017b2f93 bodyHits247=0
+function dVn(){return a.CLAUDE_CODE_NEW_INIT||R("tengu_slate_harbor_experiment",!1)}
+
+## #23 manage-mcp-win @186708141
+disable [<server>|all]]",thinClientDispatch:"post-text",isEnabled:()=>De(),get isHidden(){return!De()},load:()=>import("B:/~BUN/root/chunk-q6d1zv8w.js")},SVn={type:"local-jsx",name:"mcp",description:"Manage MCP servers",immediate:!0,argumentHint:"[reconnect <server>|enable|disable [<server>|all]]",thinClientDispatch:"twin"},NAe=SVn;var kVn={type:"local-jsx",name:"mobile",aliases:["ios","android"],description:"Show QR code to download the Claude mobile app",requires:{ink:!0}},$Ae=kVn;var MCt={isEnabled:()=>!1,isHidden:!0,name:"stub"};var vVn={type:"local",name:"voice",description:"Toggle voice mode",argumentHint:"[hold|tap|off]",availability:["claude-ai"],get isHidden(){return!mbe()},supportsNonInteractive:!1,load:()=>import("B:/~BUN/root/chunk-nywtfmfb.js")},ICt=vVn;var UAe={type:"local-jsx",name:"powerup",description:"Discover Claude Code features through quick interactive lessons",requires:{ink:!0}};var EVn={description:"View release notes",name:"release-notes",type:"local-jsx",requi
+
+## #23 manage-mcp-fn function  @186681716 len=84 sha=1f0afb05017b2f93 bodyHits247=0
+function dVn(){return a.CLAUDE_CODE_NEW_INIT||R("tengu_slate_harbor_experiment",!1)}
+
+## #23 manage-mcp-win @209652075
+selectableIndex===P)),Ke=la(Go-Math.floor(nt/2),0,Math.max(0,_e.length-nt)),Xt=_e.slice(Ke,Ke+nt),Gt=Ke,Jt=_e.length-(Ke+Xt.length);return r(o,{flexDirection:"column",children:[e(X$e,{}),e(pe,{title:"Manage MCP servers",subtitle:`${Vt} ${I(Vt,"server")}`,onCancel:qe,hideInputGuide:!0,children:r(o,{flexDirection:"column",children:[Gt>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:[CC," ",Gt," more above"]})}),Xt.map((c)=>e(Ma,{children:c.node},c.key)),Jt>0&&e(o,{paddingLeft:2,children:r(t,{dimColor:!0,children:[o0," ",Jt," more below"]})}),r(o,{flexDirection:"column",marginTop:Wt?0:1,children:[Ht&&e(t,{dimColor:!0,children:tt?"\u203B Error logs shown inline with --debug":"\u203B Run claude --debug to see error logs"}),r(t,{dimColor:!0,children:[e(it,{url:"https://code.claude.com/docs/en/mcp",children:"https://code.claude.com/docs/en/mcp"})," ","for help"]})]})]})}),e(o,{paddingX:1,children:e(t,{dimColor:!0,italic:!0,children:r(ue,{children:[e(M,{chord:["up","down"],action:"nav
+
+## #23 manage-mcp-fn function  @209649761 len=123 sha=db396691d07b6a6a bodyHits247=0
+function le(h,W){let ae=b++;c.push({key:W,selectableIndex:ae,node:e(Mo,{server:h,isSelected:P===ae,toolCount:l[h.name]})})}
+
+## #23 claudeai-proxy code hits 248=132 247=137
+## #23 248 proxy @180283979 @180283979
+red server has no effect until it is removed and re-added.`)})),Hs=h(()=>lt([W3(),$3(),q3(),bu()])),X3=h(()=>m({type:F("claudeai-proxy"),url:i(),id:i(),timeout:vo()})),Q3=h(()=>lt([Hs(),X3()])),yu=h(()=>m({name:i().describe("Server name as configured"),status:le(["connected","failed","needs-auth","pending","disabled"]).describe("Current c
+
+## #23 248 proxy @180552567 @180552567
+cess.env.OTEL_LOG_TOOL_CONTENT)}function HM(e,t){if(process.env.CLAUDE_CODE_ENTRYPOINT==="local-agent")return!0;if(e==="claudeai-proxy")return!0;if(t&&rM(t))return!0;if(t&&aE(t))return!0;return!1}var H2t=new Set([OI]);function Uv(e,t){if(t===void 0){if(H2t.has(e))return!0;return HM(void 0,void 0)}if(lM(e,t))return!0;if("url"in t&&E8e(t.ur
+
+## #23 248 proxy @184542114 @184542114
+ame))return!1;let o=t.find((u)=>u.name===r.serverName);return o!==void 0&&o.config.scope==="claudeai"&&o.config.type==="claudeai-proxy"&&U3e(o.config)}var j7t=65536;function H3e(e){for(let t of G7t(e)){if(t.length>j7t||!t.includes('"frame"'))continue;let r=gt(t,`
+
+`),o;try{o=q(r)}catch{continue}let u=z7t(o);if(u!==null)return u}return nul
+
+## #23 248 proxy @185108996 @185108996
+{expanded:ue,missingVars:pe}=FH(G);g.push(...pe),U.headersHelper=ue}L=U;break}case"sse-ide":case"ws-ide":case"sdk":case"claudeai-proxy":L=e;break}if(o&&g.length>0){let j=se(g).join(", ");if(n(`Missing environment variables in plugin MCP config: ${j}`,{level:"warn"}),u&&p)o.push({type:"mcp-config-invalid",source:t.source,plugin:u,serverNam
+
+## #23 248 proxy @185116435 @185116435
+>1)n(`[claudeai-mcp] Display-name collision on distinct upstreams: "${ue}" (${j.id}, ${j.url})`);U.add(pe),N[ue]={type:"claudeai-proxy",url:j.url,id:j.id,displayName:j.display_name,iconUrl:j.icon_url,scope:"claudeai",toolPermissions:Tyn(j.tools),stateless:j.stateless,cachedInitResponse:j.cached_init_response,discoverSupport:j.discover_sup
+
+## #23 248 proxy @185121696 @185121696
+t k=Vtt(p,!0);if(k!=="other")return k;p=p instanceof Error?p.cause:void 0}}return"other"}var Oyn=new Set(["http","sse","claudeai-proxy"]),SSe=new Set(["500","502","503","504",...pge,"23","CLI_OWNED_BEARER_REJECTED","HEADERS_HELPER_AUTH_REJECTED","CONNECT_TIMEOUT"]);function mQ(e){if(e.type!=="failed")return!1;let t=e.config.type??"";if(!O
+
+## #23 248 proxy @185126453 @185126453
+switch(e.type){case void 0:case"stdio":case"sse":case"http":case"sdk":return!0;case"ws":case"sse-ide":case"ws-ide":case"claudeai-proxy":return!1;default:return!1}}function tnn(e){let t=new Map;for(let o of e){if(!o.mcpServers?.length)continue;for(let u of o.mcpServers){if(typeof u==="string")continue;let p=Object.entries(u);if(p.length!==
+
+## #23 248 proxy @185137903 @185137903
+..p,url:g,headers:p.headers?Ji(p.headers,o):void 0};break}case"sse-ide":case"ws-ide":u=e;break;case"sdk":u=e;break;case"claudeai-proxy":u=e;break}return{expanded:u,missingVars:se(t),urlExpandedToEmpty:r}}var Aar="Invalid name <redacted>. Names can only contain letters, numbers, hyphens, and underscores.";async function gM(e,t,r,o){if(e.ma
+
+## #23 247 proxy @197003448
+ wait-for-the-API behavior.......SK.CLAUDE_CODE_MAX_CONTEXT_TOKENS.......U].managed.....Z...sse-ide.........http........claudeai-proxy........-.ws-ide......TAg.\$\{[^}]*\}.........^[a-z][a-z0-9+.-]*:\/\/\/........'..^\[|\]$......J..localhost.localdomain...
+...2.K..localhost..........^127\.\d+\.\d+\.\d+$....E.*.private_network.........publ
+
+## #23 247 proxy @206689088
+mpt is built."),role:E()})),ls=s(()=>t({type:n("sdk"),name:e()})),D=s(()=>p([rs(),as(),is(),ls()])),ds=s(()=>t({type:n("claudeai-proxy"),url:e(),id:e(),timeout:T()})),cs=s(()=>p([D(),ds()])),q=s(()=>t({name:e().describe("Server name as configured"),status:a(["connected","failed","needs-auth","pending","disabled"]).describe("Current connec
+
+## #23 247 proxy @207831686
+),name:e(),timeout:p().optional(),alwaysLoad:t().optional()})),u=o(()=>s(["allow","ask","blocked"])),A=o(()=>n({type:a("claudeai-proxy"),url:e(),id:e(),displayName:e().optional(),iconUrl:e().optional(),timeout:p().optional(),alwaysLoad:t().optional(),toolPermissions:i(e(),u()).optional(),stateless:t().optional(),cachedInitResponse:i(e(),S
+
+## #23 247 proxy @208010135
+ource, claude.ai MCP cloud connectors are not auto-fetched or connected. "+"Only gates auto-fetched connectors \u2014 a claudeai-proxy server passed explicitly "+"(e.g. via --mcp-config or the SDK mcpServers option) still follows the normal MCP config trust flow. Any-source-true wins: a project can opt out, but a project-level false canno
+
+## #23 247 proxy @208671471
+cess.env.OTEL_LOG_TOOL_CONTENT)}function BC(e,t){if(process.env.CLAUDE_CODE_ENTRYPOINT==="local-agent")return!0;if(e==="claudeai-proxy")return!0;if(t&&KS(t))return!0;if(t&&hl(t))return!0;return!1}function M9(e,t){if(t===void 0){if(lA.has(e))return!0;return BC(void 0,void 0)}if(av(e,t))return!0;if("url"in t&&QC(t.url)&&Ct(e)===bl)return!0;
+
+## #23 247 proxy @213970311
+ame))return!1;let r=t.find((o)=>o.name===n.serverName);return r!==void 0&&r.config.scope==="claudeai"&&r.config.type==="claudeai-proxy"&&Jmn(r.config)}function tgn(e){for(let t of vAo(e)){if(t.length>SAo||!t.includes('"frame"'))continue;let n=Qr(t,`
+
+`),r;try{r=ut(n)}catch{continue}let o=kAo(r);if(o!==null)return o}return null}function kA
+
+## #23 247 proxy @215815003
+,t),{expanded:h,missingVars:y}=GS(g);i.push(...y),f.headersHelper=h}d=f;break}case"sse-ide":case"ws-ide":case"sdk":case"claudeai-proxy":d=e;break}if(r&&i.length>0){let m=Cn(i).join(", ");if(_(`Missing environment variables in plugin MCP config: ${m}`,{level:"warn"}),o&&s)r.push({type:"mcp-config-invalid",source:t.source,plugin:o,serverNam
+
+## #23 247 proxy @215822893
+f(b>1)_(`[claudeai-mcp] Display-name collision on distinct upstreams: "${h}" (${m.id}, ${m.url})`);f.add(y),p[h]={type:"claudeai-proxy",url:m.url,id:m.id,displayName:m.display_name,iconUrl:m.icon_url,scope:"claudeai",toolPermissions:Nns(m.tools),stateless:m.stateless,cachedInitResponse:m.cached_init_response,discoverSupport:m.discover_sup
+
+# ---- #24 headershelper-401 CONFIRM leftover ----
+## #24 re-running headersHelper  needle="re-running headersHelper"  hits248=3  hits247=3
+- @100881778 refused.......;C..' returned .,.......; re-running headersHelper and retrying once>...l.~.;. .s.e.s.s.i.o.n. .c.r.e.d.e.n.t.i.a.l. .r.e.j.e.c.t.
+- @207115285 (N,ye?`Tool '${t}' returned ${oe??401}; re-running headersHelper and retrying once`:we?`Tool '${t}' returned ${oe??401}; session credential reje
+- @207256960 X(t,he?`Tool '${d}' returned ${W??401}; re-running headersHelper and retrying once`:w?`Tool '${d}' returned ${W??401}; session credential reject
+
+## #24 tengu_mcp_headers_helper_retry  needle="tengu_mcp_headers_helper_retry"  hits248=0  hits247=0
+
+## #24 classifyAuthReconnectKind  needle="classifyAuthReconnectKind"  hits248=0  hits247=0
+
+## #24 mcp_headers_helper  needle="mcp_headers_helper"  hits248=8  hits247=8
+- @94585176 ..y. headers from headersHelper......`..mcp_headers_helper.......	.missing_trust...........not available to a session rooted at the home 
+- @206932141 length} headers from headersHelper`),b("mcp_headers_helper"),i.headers;if(i.reason==="missing_trust"){let o=g0()?"not available to a sessi
+- @206932847 mcp_headersHelper_missing_trust",{}),y("mcp_headers_helper","missing_trust"),null}throw f("mcp_headers_helper",i.reason),Error(Br(e,i.reas
+- @206932898 _helper","missing_trust"),null}throw f("mcp_headers_helper",i.reason),Error(Br(e,i.reason))}catch(a){return Fr(e,`Error getting headers fr
+- @207115537 connecting and retrying once`),Se)y(ye?"mcp_headers_helper":"mcp_oauth_refresh","collateral_rejoin");if(!ae){y(ye?"mcp_headers_helper":"mc
+- @207115612 esh","collateral_rejoin");if(!ae){y(ye?"mcp_headers_helper":"mcp_oauth_refresh","reauth_retry"),_.onclose=void 0;let ue=ce;ae=(async()=>(a
+- … +2 more
+
+## #24 Authorization header already  needle="Authorization header"  hits248=20  hits247=17
+- @97806478 USTOM_HEADERS present: .......7..., has Authorization header: !......x-anthropic-additional-protection.........=.provider_route..G.....G.C.
+- @98131519 equest uses a masked credential but its Authorization header is malformed; the proxy cannot re-sign it...i...&...AWS SigV4 request uses a ma
+- @98531224 ....... header value..."....w..Invalid Authorization header value........1.Invalid value for .......... header value: ......]..Invalid requ
+- @98937995 .k2..Shell command that outputs a Proxy-Authorization header value (EAP).-....4~.Path to a script that exports AWS credentials...2....}7.Pat
+- @99001568 orithm/X-Amz-Signature in the query, no Authorization header): the signature lives in the URL itself. `deny` (default) or `passthrough`.....
+- @99558623 For egress proxies that require a Proxy-Authorization header (for
+                              example a short-lived bearer token) on every
+- … +14 more
+
+## #24 startOAuth discovery  needle="OAuth discovery"  hits248=0  hits247=0
+
+## #24 re-run-win @100881778
+ount changed before reauth.....x.stale_refused.......;C..' returned .,.......; re-running headersHelper and retrying once>...l.~.;. .s.e.s.s.i.o.n. .c.r.e.d.e.n.t.i.a.l. .r.e.j.e.c.t.e.d. ..  .r.e.c.o.n.n.e.c.t.i.n.g. .a.n.d. .r.e.t.r.y.i.n.g. .o.n.c.e.7...D...;. .r.e.f.r.e.s.h. .t.o.k.e.n. .s.t.o.r.e.d. ..  .r.e.c.o.n.n.e.c.t.i.n.g. .a.n.d. .r.e.t.r.y.i.n.g. .o.n.c.e.........
+
+## #24 re-run-fn function  @99441880 len=1770 sha=bb3300e40c1b6248 bodyHits247=0
+function return type........Invalid date....b...Invalid input: must include "...3....Tg. at one or more positions greater than or equal to . ...i...Invalid input: must start with "........Invalid input: must end with "......G!I.Array must contain ......^..exactly......ob.at least	...?J..more than.......... element(s)......6..String must contain ....v.. character(s).......Y...Number must be ......n..exactly equal to .......g&..greater than or equal to ..........greater than ......-W_.Date must be .......J...at most.	.......less than.......)...less than or equal to........e:.BigInt must be .....f.L.smaller than or equal to........smaller than(.......Intersection results could not be merged........Number must be a multiple of ...........Number must be finite.......'...defaultError	.....h.alwaysSet.........e.errToObj........_cachedPath.....o..._path........4)._key)...w$P.Validation faile
+… +870 chars
+
+## #24 body exact in 247: 0
+## #24 re-run-win @207115285
+ye||Le&&we||Ve)&&!ni(N)&&!ss(N,ee)){if(X(N,ye?`Tool '${t}' returned ${oe??401}; re-running headersHelper and retrying once`:we?`Tool '${t}' returned ${oe??401}; session credential rejected \u2014 reconnecting and retrying once`:`Tool '${t}' returned ${oe??401}; refresh token stored \u2014 reconnecting and retrying once`),Se)y(ye?"mcp_headers_helper":"mcp_oauth_refresh","collate
+
+## #24 re-run-fn function  @207108764 len=9801 sha=2c5b3c01e5951f5a bodyHits247=0
+function fo({client:e,tool:t,args:o,meta:r,signal:d,onProgress:u,hasResultSizeAnnotation:p=!1,imageLimits:g,toolExecution:T,taskRegistry:w,toolUseId:j,idleTimeoutMs:H,isAuthRetry:q=!1,storageV5:O,credentials:W,setAppState:he,taskBackground:Te,disallowTasks:xe}){let{client:Me,name:N,config:ee,transportErrorState:M}=e,_=Ue(Me),me=Date.now(),ce=qn(),G,re={armedAt:0};M?.activeCallWatchdogs.add(re);try{X(N,`Calling MCP tool: ${t}`);let L=H??er(ee),E=me,le,oe=new Promise((pe,ue)=>{le=ue});G=setInterval(()=>{let pe=Math.floor((Date.now()-me)/1000);if(X(N,`Tool '${t}' still running (${pe}s elapsed)`),re.armedAt>0&&Date.now()-re.armedAt>90000){X(N,`Tool '${t}' aborting: transport error ${Math.floor((Date.now()-re.armedAt)/1000)}s ago, response presumed lost`),le(Object.assign(new P(`MCP server "${N}" transport dropped mid-call; response for tool "${t}" was lost`,"MCP transport lost mid-call"),{mc
+… +8901 chars
+
+## #24 body exact in 247: 0
+## #24 re-run-win @207256960
+e&&he||le&&w||Se)&&!ni(t)&&!ss(t,r)){if(X(t,he?`Tool '${d}' returned ${W??401}; re-running headersHelper and retrying once`:w?`Tool '${d}' returned ${W??401}; session credential rejected \u2014 reconnecting and retrying once`:`Tool '${d}' returned ${W??401}; refresh token stored \u2014 reconnecting and retrying once`),_e)y(he?"mcp_headers_helper":"mcp_oauth_refresh","collateral
+
+## #24 re-run-fn function  @207253138 len=6892 sha=ebd9dbaf861901fc bodyHits247=0
+function Lt({client:{client:e,name:t,config:r,transportErrorState:o},tool:d,args:u,meta:p,signal:g,onProgress:T,hasResultSizeAnnotation:m=!1,imageLimits:M,toolExecution:O,taskRegistry:H,toolUseId:A,idleTimeoutMs:N,isAuthRetry:q=!1,storageV5:ee,credentials:G}){let ce=Mi(e),z=Date.now(),ie=qn(),_,C={armedAt:0};o?.activeCallWatchdogs.add(C);try{X(t,`Calling MCP tool: ${d}`);let k=N??Yr(r),K=z,te,W=new Promise((oe,ge)=>{te=ge});_=setInterval(()=>{let oe=Math.floor((Date.now()-z)/1000);if(X(t,`Tool '${d}' still running (${oe}s elapsed)`),C.armedAt>0&&Date.now()-C.armedAt>90000){X(t,`Tool '${d}' aborting: transport error ${Math.floor((Date.now()-C.armedAt)/1000)}s ago, response presumed lost`),te(Object.assign(new P(`MCP server "${t}" transport dropped mid-call; response for tool "${d}" was lost`,"MCP transport lost mid-call"),{mcpErrorSource:"downstream_unreachable"}));return}if(o?.pendingEli
+… +5992 chars
+
+## #24 body exact in 247: 0
+## #24 247 re-run @201997274
+ount changed before reauth.....x.stale_refused.......;C..' returned .,.......; re-running headersHelper and retrying once>...l.~.;. .s.e.s.s.i.o.n. .c.r.e.d.e.n.t.i.a.l. .r.e.j.e.c.t.e.d. ..  .r.e.c.o.n.n.e.c.t.i.n.g. .a.n.d. .r.e.t.r.y.i.n.g. .o.n.c.e.7...D...;. .r.e.f.r.e.s.h. .t.o.k.e.n. .s.t.o.r.e.d. ..  .r.e.c.o.n.n.e.c.t.i.n.g. .a.n.d. .r.e.t.r.y.i.n.g. .o.n.c.e.........
+
+## #24 247 re-run @219081420
+e||z&&O||z&&H||B)&&!Sc(S)&&!yd(S,k)){if(se(S,O?`Tool '${t}' returned ${F??401}; re-running headersHelper and retrying once`:H?`Tool '${t}' returned ${F??401}; session credential rejected \u2014 reconnecting and retrying once`:`Tool '${t}' returned ${F??401}; refresh token stored \u2014 reconnecting and retrying once`),re)te(O?"mcp_headers_helper":"mcp_oauth_refresh","collateral
+
+## #24 247 re-run @219262544
+U||F&&x||F&&A||H)&&!Sc(t)&&!yd(t,n)){if(se(t,x?`Tool '${o}' returned ${P??401}; re-running headersHelper and retrying once`:A?`Tool '${o}' returned ${P??401}; session credential rejected \u2014 reconnecting and retrying once`:`Tool '${o}' returned ${P??401}; refresh token stored \u2014 reconnecting and retrying once`),U)te(x?"mcp_headers_helper":"mcp_oauth_refresh","collateral_
+
+# ---- #25 login-gateway-hang ----
+## #25 [gateway-login]  needle="[gateway-login]"  hits248=8  hits247=8
+- @94461336 ngs (~/.claude/settings.json)...-....8..[gateway-login] ignoring advertised endpoint .......h... (not same-origin with .	....+..); usin
+- @94468368 g without storing credentials...,....j..[gateway-login] secureStorage write failed: .....x..access_token.......refresh_token..........
+- @98829020 g persist; discarding outcome...M...aJ..[gateway-login] could not remove the discarded credential from secure storage...O.....<.[gatewa
+- @98829108 redential from secure storage...O.....<.[gateway-login] could not remove the discarded credential from secure storage: .$.......Failed 
+- @180681827 nterpriseGateway,p},t);if(!o.success)n(`[gateway-login] could not remove the discarded credential from secure storage${o.warning?`: ${o
+- @180681966 ning}`:""}`,{level:"warn"})}catch(o){n(`[gateway-login] could not remove the discarded credential from secure storage: ${l(o)}`,{level:
+- … +2 more
+
+## #25 Managed-settings consent dialog exited without an answer  needle="Managed-settings consent dialog exited without an answer"  hits248=2  hits247=2
+- @93348584 r' from null or undefined value.8...Az.Managed-settings consent dialog exited without an answer........rerender(...U...file:///B:/%7EBUN/root/chunk-e99eknq1.js.....Jz.claimAut
+- @201106418 n=Date.now(),await m(),!o){let u=Error("Managed-settings consent dialog exited without an answer");_(u),s(u)}})().catch((t)=>{_(t),s(t)})});
+export{qEt};
+.// @bun @bytecode
+// 
+
+## #25 deferred_no_consent_surface  needle="deferred_no_consent_surface"  hits248=11  hits247=10
+- @92406496 Zy..managed_settings_security.......Y...deferred_no_consent_surface....R.k.resume_return...........sandbox_network_access......}C..B:/~BUN/root/ch
+- @190464828 e(t,o.updates)}catch{d=Promise.resolve("deferred_no_consent_surface")}d.then((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))}
+- @190464904 ((c)=>this.close(o,c),()=>this.close(o,"deferred_no_consent_surface"))})}close(e,t){if(this.pendingReview=null,t==="approved")s("tengu_managed_sett
+- @190467101 ealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequ
+- @190467246 quester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)
+- @190467415 f(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdo
+- … +5 more
+
+## #25 showManagedSettingsSecurityDialog  needle="showManagedSettingsSecurityDialog"  hits248=0  hits247=0
+
+## #25 forceLoginGatewayUrl  needle="forceLoginGatewayUrl"  hits248=10  hits247=10
+- @94463900 countOnHold.	.......expiresIn...........forceLoginGatewayUrl........forceLoginOrgUUID.......t...toRetry.....5...marginX........oauthStatus.
+- @98970747 forceLoginOrgUUID, forceLoginMethod and forceLoginGatewayUrl (highest source only). Honored only from the highest-priority source present; e
+- @179112919 or the Cloud gateway OIDC device flow'),forceLoginGatewayUrl:i().url().optional().catch(void 0).describe('Cloud gateway URL to pre-fill and 
+- @179114430 forceLoginOrgUUID, forceLoginMethod and forceLoginGatewayUrl (highest source only). Honored only from the highest-priority source present; e
+- @179459301 "forceLoginOrgUUID","forceLoginMethod","forceLoginGatewayUrl","parentSettingsBehavior","env","modelPicker",...It];function Ko(e){return zXn.
+- @180738861 inMethod==="gateway")return!0;return e?.forceLoginGatewayUrl!==void 0&&e?.forceLoginMethod===void 0}function a8e(){return BO().length>0}func
+- … +4 more
+
+## #25 hang  needle="hanging"  hits248=100  hits247=98
+- @68015848 ng(_encoding) {
+      let err = Error("Changing the socket encoding is not allowed per RFC7230 Section 3.");
+      throw err.co
+- @82300145 alaysiadirectormaintain;height:schedulechangingback to catholicpatternscolor: #greatestsuppliesreliable</ul>
+		<select citizens
+- @82342309 blylink betweenprofessor ofinteractionschanging theIndian Ocean class="lastworking with'http://www.years beforeThis was therecr
+- @83162223 g directory was likely removed without changing the working directory. : process.cwd failed with error ..., uv_cwd.uv_cwdExpect
+- @83789706 hat bun audit fix would change without changing anything.<r>
+  <b><green>bun audit fix --dry-run<r>
+
+  <d>Also apply fixes that
+- @83791228  versions that can be removed, without changing anythingcheckPrint the duplicate versions that would be removed without changin
+- … +94 more
+
+## #25 login hang  needle="login hang"  hits248=0  hits247=0
+
+## #25 skip security  needle="skip security"  hits248=0  hits247=0
+
+## #25 skipSecurity  needle="skipSecurity"  hits248=0  hits247=0
+
+## #25 during login  needle="during login"  hits248=2  hits247=2
+- @98969314 way URL to pre-fill and auto-connect to during login, alongside forceLoginMethod: "gateway". Honored only from admin-controlled mana
+- @179113035 way URL to pre-fill and auto-connect to during login, alongside forceLoginMethod: "gateway". Honored only from admin-controlled mana
+
+## #25 login in progress  needle="login in progress"  hits248=0  hits247=0
+
+## #25 consent during login  needle="consent during"  hits248=0  hits247=0
+
+## #25 noConsentSurface  needle="noConsentSurface"  hits248=6  hits247=6
+- @94775240 ester.......K...requesterWaiters...... .noConsentSurface.....".pendingReview.......C.u.startupConsentRelease.......,...consentNeededRel
+- @190464273 {replRequester=null;requesterWaiters=[];noConsentSurface=!1;pendingReview=null;registerRequester(e){if(this.replRequester=e,e&&this.requ
+- @190466377 tNeededRelease=null}}function RHn(){P().noConsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=ne
+- @190466421 nsentSurface=!0}function Z(){return P().noConsentSurface}async function W(){let e=P(),t,r=new Promise((d)=>{t=d,e.addWaiter(d)}),o=await
+- @190467222 return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupCon
+- @190467391 u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_s
+
+## #25 Claude apps gateway  needle="Claude apps gateway"  hits248=3  hits247=1
+- @189784225 rvices" when managed settings configure Claude apps gateway sign-in and Anthropic endpoints are unreachable\n- Fixed cloud sessions (Claude
+- @189785868 uth deployment is configured\n- Changed Claude apps gateway sign-in requests to identify Claude Code (a `surface=claude_code` device-author
+- @189794889 ck, Vertex AI, and Foundry, through the Claude apps gateway, and when telemetry or non-essential traffic is disabled\n- `/goal`: Changed id
+
+## #25 unanswered-win @93348584
+.g..Cannot destructure property 'rerender' from null or undefined value.8...Az.Managed-settings consent dialog exited without an answer........rerender(...U...file:///B:/%7EBUN/root/chunk-e99eknq1.js.....Jz.claimAutoModeCheck........F.rearmAutoModeCheck......#...autoModeCheckRan
+
+## #25 unanswered-fn function  EXTRACT FAIL @92752612 {"i":92752612,"missEnd":true,"preview":"function parameters.......>.chrome_install_upsell........i..chrome_install_setup....O...The user started installing the Claude in Chrome extension but chose to 
+
+## #25 unanswered-win @201106418
+"managed-settings-security"),nv(!1));if(n=Date.now(),await m(),!o){let u=Error("Managed-settings consent dialog exited without an answer");_(u),s(u)}})().catch((t)=>{_(t),s(t)})});
+export{qEt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms o
+
+## #25 unanswered-fn function  @201106028 len=37 sha=34fa9c10e43b6055 bodyHits247=0
+function a(){return n!==null&&!ed(n)}
+
+## #25 [gateway-login] code hits 4
+## #25 gw-login @180681827 @180681827
+u};return delete p.enterpriseGateway,p},t);if(!o.success)n(`[gateway-login] could not remove the discarded credential from secure storage${o.warning?`: ${o.warning}`:""}`,{level:"warn"})}catch(o){n(`[gateway-login] could not remove the discarded credential fro
+
+## #25 gw-login @180681966 @180681966
+o.warning?`: ${o.warning}`:""}`,{level:"warn"})}catch(o){n(`[gateway-login] could not remove the discarded credential from secure storage: ${l(o)}`,{level:"warn"})}}async function wYn(e,t){u7(e);let r=await _n().mutate((o)=>({...o,enterpriseGateway:e}),t);if(!
+
+## #25 gw-login @199055410 @199055410
+if(new URL(c).origin===new URL(a).origin)return c}catch{}n(`[gateway-login] ignoring advertised endpoint ${c} (not same-origin with ${a}); using ${B}`)}return`${a}${B}`}var Co=h(()=>w.object({device_code:w.string(),user_code:w.string(),verification_uri:w.strin
+
+## #25 gw-login @199058779 @199058779
+ wYn(C,R)}catch(me){if(K!==P.current)return;let ae=l(me);n(`[gateway-login] secureStorage write failed: ${ae}`,{level:"error"}),H({state:"error",message:ae});return}if(K!==P.current)return;a()}let z=S.state==="url_input";switch(Fe("confirm:yes",()=>{if(te)ue(t
+
+# ---- #28 trust-emoji-trunc ----
+## #28 cut off mid-emoji  needle="cut off mid-emoji"  hits248=1  hits247=1
+- @189843154 ommand or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due
+
+## #28 TrustDialog  needle="TrustDialog"  hits248=43  hits247=43
+- @94585561 tively, or set projects[.......g.-.].hasTrustDialogAccepted in >.....].headersHelper not run: this workspace has no persisted trust
+- @94780665 ...Cannot destructure property 'checkHasTrustDialogAccepted' from null or undefined value......lq..B:/~BUN/root/chunk-ja1gsxmj.js..
+- @94781148 figEnvironmentVariables......q..checkHasTrustDialogAccepted......q\.clearProxyCache.......2.configureGlobalAgents.......?.I.clearCA
+- @96690845 dialog, or set projects[..."...{ S.].hasTrustDialogAccepted: true in .......,x.agent-origin-skip.......~...main-thread agent.......
+- @98512287 .	...taskCompleteNotifEnabled.....B#.hasTrustDialogAccepted...........external-refresh.../...`._.The corrupted file has already bee
+- @99399040 replaceSessionTrustAccepted......MC.homeTrustDialogAccepted.......s.replaceHomeTrustDialogAccepted.......q..hasExitedPlanMode......
+- … +37 more
+
+## #28 tengu_trust_dialog_shown  needle="tengu_trust_dialog_shown"  hits248=2  hits247=2
+- @100249756 urces........l.offerBackstop.......Rz..tengu_trust_dialog_shown	.....".isHomeDir.......q..hasMcpServers...........hasBashExecution......B.hasP
+- @203836876 ,To;if(n[17]!==w)_o=()=>{let vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowR
+
+## #28 permission rules  needle="permission rules"  hits248=97  hits247=90
+- @92407057 iew8...W.&.Auto-mode setup flagged some permission rules for review......y.Claude proposed a session goal..0...D...Claude needs your app
+- @92535772 ing q.....H. team-wide allowed path(s): permission rules are restricted to managed settings (allowManagedPermissionRulesOnly)...........
+- @92577591 ropping team_permission_update message: permission rules are never accepted from the inbox...j.......[InboxPoller] Dropping mode_set_req
+- @93469411 value+...~...Content restricted by read-permission rules.....Z_..New file not yet staged......z..Run `git add :/......z-.` to see line c
+- @93556567 nd preferences in this folder, plus the permission rules that don't name paths on this machine, into each cloud session you start with c
+- @94411600  this directory explicitly: its project permission rules and additional directories are now applied.....g.N.gatedNotice.........modelMes
+- … +91 more
+
+## #28 repo permission  needle="repo permission"  hits248=0  hits247=0
+
+## #28 toWellFormed  needle="toWellFormed"  hits248=5  hits247=5
+- @66879079 ng = (input) => {
+  return (input + "").toWellFormed();
+}, kEscape = "\x1B[", kEscapeEnd = "m", kDimCode = 2, kBoldCode = 1, kHexClo
+- @88553186 is malformed.URI malformed.isWellFormed.toWellFormed.flex scanner jammed.named.Named.scheduled..defer() called after the onLoad call
+- @99411248 q-uy=><~]))......#..isWellFormed.....Am.toWellFormed........totalBytesReceived......?...[\uFF10-\uFF19].....!......[truncated]......
+- @178358433 ormed):void 0,g=typeof String.prototype.toWellFormed==="function"?Function.prototype.call.bind(String.prototype.toWellFormed):void 0
+- @178358505 on.prototype.call.bind(String.prototype.toWellFormed):void 0;function eu(t){if(u)return u(t);return!x.test(t)}function zy(t){if(g)re
+
+## #28 Intl.Segmenter  needle="Intl.Segmenter"  hits248=14  hits247=14
+- @88305319 er.ConstantStoragePointer.IntlSegmenter.Intl.Segmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value
+- @88305365 egmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototy
+- @88305437  called on value that's not a Segmenter.Intl.Segmenter.prototype.resolvedOptions called on value that's not a Segmenter.center.op_ente
+- @178380958      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+  
+- @178381012  ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p
+- @179393116 e"});return m}function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return
+- … +8 more
+
+## #28 granularity:"grapheme"  needle="granularity:\"grapheme\""  hits248=2  hits247=2
+- @179393139 Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return Xi().segment(e)[Symbol.iterato
+- @192560894 eof e==="function")return new e(void 0,{granularity:"grapheme"})}catch{}return})();function lr(e){if(Qt)try{return Array.from(Qt.segment(e),(n
+
+## #28 granularity: "grapheme"  needle="granularity: 'grapheme'"  hits248=0  hits247=0
+
+## #28 grapheme  needle="grapheme"  hits248=61  hits247=61
+- @66657074 itic.gong.gonm.goth.gothic.gran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gu
+- @66657087 m.goth.gothic.gran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gukh.gunjalagon
+- @66657102 ran.grantha.graphemebase.graphemeextend.graphemelink.grbase.greek.grek.grext.grlink.gujarati.gujr.gukh.gunjalagondi.gurmukhi.gur
+- @85781770 compositionexclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabl
+- @85781782 xclusiongcgcbgeneralcategorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_
+- @85781802 categorygraphemebasegraphemeclusterbreakgraphemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_Syllable_Typehexdigi
+- … +55 more
+
+## #28 ACCESSING_CAPABILITY  needle="ACCESSING_CAPABILITY"  hits248=0  hits247=0
+
+## #28 Quick safety check  needle="Quick safety check"  hits248=2  hits247=2
+- @100248888 lue......7v.Accessing workspace:........Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-kn
+- @203839032 ren:Jn(ce().cwd())}),le=r(t,{children:["Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-kn
+
+## #28 Claude Code'll  needle="Claude Code'll"  hits248=0  hits247=0
+
+## #28 trust-shown-win @203836876
+n[16]=Ho;else Ho=n[16];let vo=Ho,y=vo,_o,To;if(n[17]!==w)_o=()=>{let vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De,w,R,B,He,ve,_e,Te,je,Ae,F,Pe,Re],n[17]=w,n[18]=_o,n
+
+## #28 trust-shown-fn function  @203835504 len=6215 sha=20a8dc730a25725d bodyHits247=0
+function Go(yt){let n=g(67),{onDone:P,commands:v}=yt,{storageV5:xe}=fe(),io;if(n[0]===p)io=tp("project"),n[0]=io;else io=n[0];let{servers:kt}=io,co;if(n[1]===p)co=Object.keys(kt),n[1]=co;else co=n[1];let Se=co.length>0,lo;if(n[2]===p)lo=Bqt(),n[2]=lo;else lo=n[2];let De=lo.length>0,uo;if(n[3]===p)uo=jqt(),n[3]=uo;else uo=n[3];let Ct=uo,_=cTe(),R=_.sources.length>0,T=uTe(),B=T.sources.length>0,po;if(n[4]===p)po=Gqt(),n[4]=po;else po=n[4];let He=po.length>0,ho;if(n[5]===p)ho=Vqt(),n[5]=ho;else ho=n[5];let ve=ho.length>0,fo;if(n[6]===p)fo=qqt(),n[6]=fo;else fo=n[6];let _e=fo.length>0,mo;if(n[7]===p)mo=zqt(),n[7]=mo;else mo=n[7];let Te=mo.length>0,go;if(n[8]===p)go=Kqt(),n[8]=go;else go=n[8];let je=go.length>0,wo;if(n[9]===p){let bo=Fwt();let yo=$wt(bo);wo={marketplaceHelperSources:bo,repoHelperSources:yo,offerBackstop:cre(yo)};n[9]=wo}else wo=n[9];let{marketplaceHelperSources:xt,repoHelperS
+… +5315 chars
+
+## #28 extra Allow rules  needle="Allow rules"  hits248=2  hits247=2
+- @100845157 ols so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.. ...
+- @205468159 ols so they fall through to canUseTool. Allow rules from settings files can also shadow the callback but are not visible here.`}fun
+
+## #28 extra allow rules  needle="allow rules"  hits248=10  hits247=9
+- @98934002 ool name "!...}>V." is not supported in allow rules.......?3..A.n. .a.l.l.o.w. .p.a.t.t.e.r.n. .m.u.s.t. .n.a.m.e. .t.h.e. .s.c.o.p
+- @98989758 allowedDomains and WebFetch(domain:...) allow rules from managed settings are respected. User, project, local, and flag settings do
+- @179038414 allowedDomains and WebFetch(domain:...) allow rules from managed settings are respected. User, project, local, and flag settings do
+- @179067866 rd tool name "${e}" is not supported in allow rules`,suggestion:"An allow pattern must name the scope it widens \u2014 globs are pe
+- @186602154 ts deny rules are reasons to block, its allow rules are ALLOW exceptions its user added there, its environment lines are context \u
+- @189786263 246\n- Added a startup warning for Bash allow rules with a wildcard before the subcommand (e.g. `Bash(git * main)`), since they als
+- … +4 more
+
+## #28 extra permission rule  needle="permission rule"  hits248=148  hits247=139
+- @92407057 iew8...W.&.Auto-mode setup flagged some permission rules for review......y.Claude proposed a session goal..0...D...Claude needs your ap
+- @92535772 ing q.....H. team-wide allowed path(s): permission rules are restricted to managed settings (allowManagedPermissionRulesOnly)..........
+- @92577591 ropping team_permission_update message: permission rules are never accepted from the inbox...j.......[InboxPoller] Dropping mode_set_re
+- @93469411 value+...~...Content restricted by read-permission rules.....Z_..New file not yet staged......z..Run `git add :/......z-.` to see line 
+- @93556567 nd preferences in this folder, plus the permission rules that don't name paths on this machine, into each cloud session you start with 
+- @94410989 .e.d. .o.f.f. .b.y. .t.h.e. .......1... permission rule in .....bD. ..  .i.t.'.s. .e.x.c.l.u.d.e.d. .b.y. .t.h.e. .C....<... Pick a dir
+- … +142 more
+
+## #28 extra Bash(  needle="Bash("  hits248=68  hits247=68
+- @92829108 Existing permissions
+2. **Merge**: Add `Bash(npm *)` to allow array
+3. **Result**: Combined with existing allows
+
+### Environ
+- @97306380 B:/~BUN/root/chunk-24ehrhmr.js......o...Bash(........T".PowerShell(.i.......Enable Option+Enter key binding for newlines and 
+- @98920187 ormat: ["Tool(specifier)"]. Examples: ["Bash(npm run build)", "Edit(docs/**)", "Read(~/.zshrc)"]. Use * for wildcards........
+- @98935168 or use * for wildcard matching..*....3..Bash(npm run:*) - prefix matching (legacy)..#...7...Bash(npm run *) - wildcard matchi
+- @98935220 :*) - prefix matching (legacy)..#...7...Bash(npm run *) - wildcard matching. .......Prefix cannot be empty before :*"...B.-.S
+- @98935348 ify a command prefix before :*..........Bash(npm *)......J..Bash(git *).H.....-. For git, options such as -c and --exec-path 
+- … +62 more
+
+## #28 extra slice(0,  needle="slice(0,"  hits248=2385  hits247=2332
+- @66760671 RRIAGE_RETURN */:
+          rest = rest.slice(0, i2) + rest.slice(i2 + 1), i2 -= 1;
+          break;
+        case 32 /* SPACE */
+- @66761717     this.auth = decodeURIComponent(rest.slice(0, atSign)), authStart = atSign + 1;
+    if (nonHost === -1)
+      this.host = res
+- @66763296 ash = rest.substring(hash), rest = rest.slice(0, hash);
+  var qm = rest.indexOf("?");
+  if (qm !== -1) {
+    if (this.search = r
+- @66763596 .toJSON(), null);
+    }
+    rest = rest.slice(0, qm);
+  } else if (parseQueryString)
+    this.search = null, this.query = Object
+- @66767027 }
+      return self.hostname = hostname.slice(0, i), `/${hostname.slice(i)}${rest}`;
+    }
+  }
+  return rest;
+}
+function urlForm
+- @66777975 s.port = port.slice(1);
+    host = host.slice(0, host.length - port.length);
+  }
+  if (host)
+    this.hostname = host;
+};
+var is
+- … +2379 more
+
+## #28 extra truncateToWidth  needle="truncateToWidth"  hits248=4  hits247=4
+- @101828877 tetruncatePathMiddletruncateStartToWidthtruncateToWidthtruncateToWidthNoEllipsisVALID_INSTALLABLE_SCOPESVALID_UPDATE_SCOPESbulkMarketpl
+- @101828892 iddletruncateStartToWidthtruncateToWidthtruncateToWidthNoEllipsisVALID_INSTALLABLE_SCOPESVALID_UPDATE_SCOPESbulkMarketplaceUpdateResult
+- @210513946 Middle,zS as truncateStartToWidth,ot as truncateToWidth,_$ as truncateToWidthNoEllipsis,v_n as wrapText};
+.// @bun @bytecode
+// Claude 
+- @210513968 tartToWidth,ot as truncateToWidth,_$ as truncateToWidthNoEllipsis,v_n as wrapText};
+.// @bun @bytecode
+// Claude Code is a Beta product
+
+## #28 extra toWellFormed  needle="toWellFormed"  hits248=5  hits247=5
+- @66879079 ng = (input) => {
+  return (input + "").toWellFormed();
+}, kEscape = "\x1B[", kEscapeEnd = "m", kDimCode = 2, kBoldCode = 1, kHexClo
+- @88553186 is malformed.URI malformed.isWellFormed.toWellFormed.flex scanner jammed.named.Named.scheduled..defer() called after the onLoad call
+- @99411248 q-uy=><~]))......#..isWellFormed.....Am.toWellFormed........totalBytesReceived......?...[\uFF10-\uFF19].....!......[truncated]......
+- @178358433 ormed):void 0,g=typeof String.prototype.toWellFormed==="function"?Function.prototype.call.bind(String.prototype.toWellFormed):void 0
+- @178358505 on.prototype.call.bind(String.prototype.toWellFormed):void 0;function eu(t){if(u)return u(t);return!x.test(t)}function zy(t){if(g)re
+
+## #28 mid-emoji-win @189843154
+taining truncated text rendering one column too wide, and start-truncated text collapsing to an ellipsis\n- Fixed a stray garbled character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due to concurrent writes to `known_marketplaces.json`\n- Fixed `/update` and `/tui` refusing to restart wh
+
+# ---- #31 rc-reconnect-prompt ----
+## #31 silently reconnect  needle="silently reconnect"  hits248=1  hits247=1
+- @189860756 ection failed\n- Fixed a session resume silently reconnecting Remote Control after the user turned it off (`--resume`, SDK hosts, and the 
+
+## #31 tengu_bridge_reconnected  needle="tengu_bridge_reconnected"  hits248=2  hits247=2
+- @100815700 [bridge:poll] Reconnected after ....*9|.tengu_bridge_reconnected#....n..tengu_bridge_heartbeat_mode_entered.........capacity_changed....Bw..poll
+- @205348548 e:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1
+
+## #31 tengu_bridge_repl_reconnected_in_place  needle="tengu_bridge_repl_reconnected_in_place"  hits248=0  hits247=0
+
+## #31 getPendingPermissionRequests  needle="getPendingPermissionRequests"  hits248=9  hits247=9
+- @92388832 +.I.isLocallyPrependedMessage.........e.getPendingPermissionRequests........getPendingUserDialogRequests.....]..retireSdkHostHookCallbacks.......$..
+- @200587966 eam closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((
+- @200588977 sion"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}c
+- @200604706 shedPendingActionDetails.delete(C),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!wo())this.ses
+- @200609262 ngUserDialogRequests().length===0&&this.getPendingPermissionRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLivene
+- @200793948 l?.pending_actions??[]],g=new Set([...e.getPendingPermissionRequests(),...e.getPendingUserDialogRequests()].map((A)=>A.request_id)),w=new Set,E=new 
+- … +3 more
+
+## #31 republishSurviving  needle="republishSurviving"  hits248=4  hits247=4
+- @92388940 .]..retireSdkHostHookCallbacks.......$..republishSurvivingPendingAction.....(..cancelPendingUserDialogs....x.r.cancelDialogByMachine.....
+- @200588651 equest_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.
+- @200604941 .sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j)}}}createHookCallback(t,e){let o
+- @200609485 .sessionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(t,e,o){let r=new Map,u=async(l)=>{try
+
+## #31 flushPendingReceipts  needle="flushPendingReceipts"  hits248=3  hits247=3
+- @97327392 ation: .....&lm.terminalEmitted.........flushPendingReceipts....T...from:........w..pid:......t.peer_loop_guard........checkHopChain.......
+- @181004821 ()}return{report:_,noteDropForReceipt:p,flushPendingReceipts:E,dispose:w}}var Te=50,X={...K,maxQueuedPeerMessages:Te},L=X,Le=h(()=>m({bucket
+- @183679620 (),it=Han(pt)}function vt(wn){return it.flushPendingReceipts(wn)}function pn(){return J(o,(wn)=>dae(wn.origin))}function sn(wn,Jn="coalesced
+
+## #31 after silent  needle="after silent"  hits248=0  hits247=0
+
+## #31 permission prompt  needle="permission prompt"  hits248=106  hits247=105
+- @92315398 value.l.......--permission-prompt-tool (permission prompts reach the host over stdio; an MCP tool cannot answer them here)@.......Cannot 
+- @92391140 suppressesAlwaysAllowRule...+...!...SDK permission prompt deny+interrupt: tool=.	....... message=........$..ask-path......9.permissionPro
+- @92433129 n......j.o.Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injec
+- @92447273 mission mode, and this session bypasses permission prompts.-....gd.Your "crossSessionInbound" setting is "hold"....I.....>.Your organizat
+- @92452908 -again-domain.......|.{.inline......l[..permission prompt...
+.......waitingFor..........delegatedActive.....N4.isQueryActive........rD.w
+- @92812186 missionRequest | Tool name | Run before permission prompt |
+| PreToolUse | Tool name | Run before tool, can block |
+| PostToolUse | Tool 
+- … +100 more
+
+## #31 latest messages  needle="latest messages"  hits248=1  hits247=1
+- @189810016 model`) in fullscreen mode covering the latest messages; the conversation now stays pinned above the panel\n- Fixed the `/workflows` de
+
+## #31 connected device  needle="connected device"  hits248=0  hits247=0
+
+## #31 repaint  needle="repaint"  hits248=24  hits247=24
+- @92231812 rendezvousSock........'.snapshot....n.b.repaint.	...f...subscribe........A\.legacy......,R..pendingRespawn.......lr.parse.....
+- @92239452 ected...........detach-request..........repaint-done....6.7.interactive-mark........[bg -.......] dropped malformed rv interact
+- @189173241 ize"});if(k.cols=d.cols,k.rows=d.rows,k.repaint)return k.repaint(),w(e,{ok:!0,op:"resize"})}return r.resize(d.cols,d.rows),w(e,
+- @189173258 d.cols,k.rows=d.rows,k.repaint)return k.repaint(),w(e,{ok:!0,op:"resize"})}return r.resize(d.cols,d.rows),w(e,{ok:!0,op:"resize
+- @189180062 =null){let x=r.attachers.get(ue);if(x)x.repaint=()=>{if(e.destroyed)return;r.resize(x.cols,x.rows);let H=Ge(k,x.cols,x.rows,{co
+- @189180239 eme});e.write(Dh+sm+(H??""))},Ie=()=>{x.repaint=void 0,Ie=void 0}}r.noteActivity(),r.seedFocus(!0),r.sendAttacherCaps(d.caps??n
+- … +18 more
+
+## #31 forceRender  needle="forceRender"  hits248=4  hits247=4
+- @216759725 urn this._private.renderer},"renderer"),forceRender:o(function(){return this.notify("draw"),this},"forceRender"),resize:o(function(
+- @216759784 ion(){return this.notify("draw"),this},"forceRender"),resize:o(function(){return this.invalidateSize(),this.emitAndNotify("resize")
+- @222842008 n(t,n){let{render:r,className:o,style:i,forceRender:a=!1,...s}=t,{store:c}=ca(),l=c.useState("open"),u=c.useState("nested"),f=c.use
+- @222853184 .base,children:[(0,Ir.jsx)(Ls.Backdrop,{forceRender:m,className:Pe(jbe,o),style:i}),(0,Ir.jsx)(Wbe,{}),(0,Ir.jsx)(KX,{"data-cds":"D
+
+## #31 forceUpdate  needle="forceUpdate"  hits248=10  hits247=10
+- @96145964 .V..__source	...
+...isMounted........8..forceUpdate.f.......takes an object of state variables to update or a function which return
+- @187979769 State(this,t,e,"setState")};_.prototype.forceUpdate=function(t){this.updater.enqueueForceUpdate(this,t,"forceUpdate")};h.prototype=
+- @187979833 this.updater.enqueueForceUpdate(this,t,"forceUpdate")};h.prototype=_.prototype;R=x.prototype=new h;R.constructor=x;q(R,_.prototype)
+- @222275541 tate(this,e,t,"setState")};pg.prototype.forceUpdate=function(e){this.updater.enqueueForceUpdate(this,e,"forceUpdate")};function cB(
+- @222275605 this.updater.enqueueForceUpdate(this,e,"forceUpdate")};function cB(){}cB.prototype=pg.prototype;function FA(e,t,n){this.props=e,thi
+- @222988201 State(this,a,b,"setState")};w.prototype.forceUpdate=function(a){this.updater.enqueueForceUpdate(this,a,"forceUpdate")};Y.prototype=
+- … +4 more
+
+## #31 onReconnect  needle="onReconnect"  hits248=16  hits247=16
+- @92537692 Cancelled.........q.onConnected......J..onReconnecting........(.afterConnect7.......R.e.m.o.t.e. .s.e.s.s.i.o.n. .i.s. .n.o.t. .c.o
+- @95552448 etoed.......:w..onHeartbeatProbe.....|.onReconnected........E..onDiagnostic......(.refreshHeaders......3...seenSequenceNums.....R.
+- @95558366 E connected in ...+...}...SSETransport: onReconnected handler threw: .!....k..cli_sse_reconnected_handler_threw... ...#.9.SSETransp
+- @198252777 ntFilter;onEventVetoed;onHeartbeatProbe;onReconnected;onDiagnostic;headers;sessionId;refreshHeaders;getAuthHeaders;abortController=
+- @198256215 .get("content-type")??"");if(v)try{this.onReconnected?.()}catch(g){n(`SSETransport: onReconnected handler threw: ${l(g)}`,{level:"e
+- @198256259 connected?.()}catch(g){n(`SSETransport: onReconnected handler threw: ${l(g)}`,{level:"error"}),Y("error","cli_sse_reconnected_handl
+- … +10 more
+
+## #31 afterReconnect  needle="afterReconnect"  hits248=8  hits247=8
+- @92698161 d..I...P!~.Cannot destructure property 'afterReconnect' from null or undefined value........
+t.host_withdrawn........G.afterReconnect.
+- @92698240 value........
+t.host_withdrawn........G.afterReconnect..........metaCopy........refusalCode.........homeDir.....U.T.disposition.	...{.
+- @204894252 s(t):e,truncated:r}}function dNe(e,t,r,{afterReconnect:o=!1}={}){let d=vEt(t),a=t.name;switch(r.kind){case"result":if(r.envelope!==voi
+- @204894384 oid 0)return{outcome:xe(e,t,r.envelope,{afterReconnect:o,dirSync:r.dirSync}),responseBytes:r.responseBytes,metaCopy:r.metaCopy,refusal
+- @204896587 structuredContent"]);function xe(e,t,r,{afterReconnect:o=!1,dirSync:d}={}){let a={name:t.name,working_dir:U(r.target.working_dir)},u=r
+- @204986323 ytes:L,reconcile:X.trace,...dNe(e,o,ae,{afterReconnect:X.kind==="answered"})};let Re=await(async()=>{if(m===void 0)return F(O.ask_id),
+- … +2 more
+
+## #31 resync  needle="resync"  hits248=75  hits247=63
+- @92277212 erred.........`.firstSyncPromise....1.H.resyncInterval........0.firstRoundSettled...........firstRoundEmitted......r
+}.userCo
+- @92700056 rst (...k.....g.the user's next message resyncs; if the machine is unreachable the command would not have reached it either.1.
+- @92700340 sions)......oP
+.the user's next message resyncs.B...G...Cannot destructure property 'catchUp' from null or undefined value....
+- @92704156 hes it..Y.......the user's next message resyncs once they have dealt with what their Claude Code reported...B...S...Cannot des
+- @95551560 urrentIntervalToTokenLifetime.......9.T.resyncAfterReconnect........staleReconnectBeatWanted....)oJ.resetHeartbeatStreak......
+- @95556976 er (goodbye)
+...ml..reactivate......m...resync_stale........cli_heartbeat_interval_updated..........from_ms.....9.e.to_ms.....
+- … +69 more
+
+## #31 replay permission  needle="replay permission"  hits248=0  hits247=0
+
+## #31 flushGate  needle="flushGate"  hits248=0  hits247=0
+
+## #31 undeliveredResponses  needle="undeliveredResponses"  hits248=17  hits247=17
+- @92651692 1...pendingPermissionRequests..........undeliveredResponses....vb..undeliveredHookIds......\.:.hookGiveUpsTold.........pendingDialogRequest
+- @201942554 =null;pendingPermissionRequests=new Map;undeliveredResponses=new Map;undeliveredHookIds=new Set;hookGiveUpsTold=new Set;pendingDialogRequest
+- @201943803 ?.sync.afterConnect();for(let t of this.undeliveredResponses.values())if(t.failures=0,t.giveUpOnSettle==="undelivered")t.giveUpOnSettle=null
+- @201945529 el_request"){let{request_id:r}=e,a=this.undeliveredResponses.get(r);if(a?.kind==="hook"||a?.kind==="tool")this.giveUp(a,"overtaken");else if
+- @201947150 cordSeenControlResponseId(r);let a=this.undeliveredResponses.get(r);if(a!==void 0&&"uuid"in e&&e.uuid===a.uuid&&a.giveUpOnSettle!=="overtake
+- @201950269 ogRequests.clear();for(let r of[...this.undeliveredResponses.values()])if(r.kind==="permission"||r.kind==="dialog")this.dropKept(r)}this.cal
+- … +11 more
+
+## #31 reconnected-win @205348548
+ate.now());i.logReconnected(A),n(`[bridge:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1,s("tengu_bridge_env_reregister",{attempt:G,outcome:v("recovered")}),b("bridge_env_reregister");if(G=0,!M){if(U.size>0||K.size>0)await Je();if(R.size>=e.maxSessions){let ge=u.multisession_poll_interval_ms_at_capacity;if(u.non_exclusive_heartbeat_interval_ms>0){s("tengu_bridge_heartbeat_mode_ente
+
+## #31 reconnected-fn function  @205347718 len=431 sha=56035e9e70c1c40c bodyHits247=0
+function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}
+
+## #31 reconnected bodyHits247=0
+## #31 tengu_bridge_reconnected code 248=1 247=2
+## #31 247 reconnected @205764364
+Id=.........bridge_loop_started. .......[bridge:poll] Reconnected after ....*9|.tengu_bridge_reconnected#....n..tengu_bridge_heartbeat_mode_entered.........capacity_changed....Bw..poll_due........config_disabled.".....,.tengu_bridge_heartbeat_mode_exited..'... ...[bridge:poll] Heartbeat poll_due after .(....Y.. .c.y.c.l.e.s. ..  .f.a.l.l.i.n.g. .t.h.r.o.u.g.h. .t.o. .p.o.l.l.F.o.r.W.o.r.k.*.../Oe.[bridge:work] Previously completed workId=..2....... was re-queued by the server
+
+## #31 247 reconnected @224018711
+ate.now());n.logReconnected(f),d(`[bridge:poll] Reconnected after ${je(f)}`),K("tengu_bridge_reconnected",{disconnected_ms:f}),ve=!1}if(ge=0,z=0,D=null,se=null,re=null,N=!1,ne)ne=!1,K("tengu_bridge_env_reregister",{attempt:A,outcome:Ee("recovered")}),Fe("bridge_env_reregister");if(A=0,!C){if(v.size>0)await u();if(l.size>=e.maxSessions){let M=c.multisession_poll_interval_ms_at_capacity;if(c.non_exclusive_heartbeat_interval_ms>0){K("tengu_bridge_heartbeat_mode_entered",{active_
+
+# ---- #36 mention-ime ----
+## #36 mentionQuery  needle="mentionQuery"  hits248=0  hits247=0
+
+## #36 tengu_at_mention_peer_  needle="tengu_at_mention_peer_"  hits248=2  hits247=2
+- @96912744 age session . ......A...mention.....K...tengu_at_mention_peer_..........input_peer_at_mention..........mentionType......R..... and !...r-.. m
+- @186137683 ere:g2t(e.where)}}function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_
+
+## #36 non-Latin  needle="non-Latin"  hits248=1  hits247=0
+- @189782108 trl keyboard shortcuts not firing under non-Latin (e.g. Cyrillic) keyboard layouts in kitty-protocol terminals\n- Fixed text like
+
+## #36 IME  needle="IME"  hits248=1547  hits247=1544
+- @28401667 NStqA..sBITth.....A..aKGD~@A..bKGDtQA..tIMEtHA..PLTEt?.....A..hISTt1A..pHYst(A..oFFst......A..gAMAt.A..sRGB........@.......
+- @28402950 ............	......	...A..bKGD..k	..A..tIME.............. .............'...f.nB.f.o.f...f.o.f...f.t.fA...f.8!..P.A.;.......
+- @66745628 modules/internal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(
+- @66745640 rnal/util/mime.ts
+var $, { MIMEParams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){
+- @66745672 arams, MIMEType } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tm
+- @66745686 e } = @lazy(40);
+$ = {
+  MIMEParams,
+  MIMEType
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/inte
+- … +1541 more
+
+## #36 toLocaleLowerCase  needle="toLocaleLowerCase"  hits248=5  hits247=5
+- @66976540 ToLocaleLowerCaseFn = @String.prototype.toLocaleLowerCase, StringPrototypeToLowerCaseFn = @String.prototype.toLowerCase, StringPrototypeT
+- @88459510 ndAddAccessCase.toLowerCase.ToLowerCase.toLocaleLowerCase.toUpperCase.ToUpperCase.toLocaleUpperCase.ignoreCase.WebAssemblyGCObjectBase.JS
+- @98449000 ....&O..MetadataLookupWarning...........toLocaleLowerCase...
+.....#.DEBUG_AUTH......t*..x-goog-api-client.........y.%s [%s] request %j...
+- @195394367 :case"legacy":return Promise.resolve(r?.toLocaleLowerCase());case void 0:return Promise.resolve("legacy");default:throw Error(`Invalid pa
+- @197321976 ss.env.METADATA_SERVER_DETECTION.trim().toLocaleLowerCase();if(!(e in N.METADATA_SERVER_DETECTION))throw RangeError(`Unknown \`METADATA_S
+
+## #36 localeCompare  needle="localeCompare"  hits248=138  hits247=116
+- @68301730 );
+  args.sort((a, b) => {
+    return a.localeCompare(b);
+  });
+  let needsPop = !1;
+  if (args.length === 1)
+    args.push(process.c
+- @68306338       return -1;
+        return a.route.localeCompare(b.route);
+      });
+      for (let i = 0, length = pairs.length;i < length; i++
+- @88465565 e.SorterCompare.BranchCompare.IfCompare.localeCompare.StringLocaleCompare.JSGlobalObject_canDoASCIIUCADUCETLocaleCompare.prepare.inte
+- @88550810 t be null or undefined.String.prototype.localeCompare requires that |this| not be null or undefined.String.prototype.strike requires 
+- @92548132 ........isHidden....'l@.score......"...localeCompare...........Failed to read shell history: .......`..shellHistoryLoadedAt....n...p
+- @180261991 rt((t,r)=>r.id.length-t.id.length||t.id.localeCompare(r.id))}function Co(){return Bd().modelCapabilitiesByCachePath}function Hw(e,t=B
+- … +132 more
+
+## #36 normalize("NFKD"  needle="normalize(\"NFKD\""  hits248=5  hits247=5
+- @179850729 rmalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdefghijklmnopqrstuvwxyz";function kyt(u){if(!
+- @183211046 ;function M5(e){return e.replace(wt,"").normalize("NFKD").toLowerCase().toUpperCase().toLowerCase().replace(/i\u0307/g,"i").replace(/\u0
+- @192501780 /.test(e))return null;if(/[<>"]/.test(e.normalize("NFKD")))return null;if(/\udb40[\udc00-\udc7f]/.test(e))return null;return e}function 
+- @193848860 }return t.push(e.slice(n)),t},de=(e)=>e.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").toLowerCase(),Ge=(e)=>/^[a-z]+$/.test(e),Qe=(e)
+- @205647353 >{let e=ia.get(t);if(e)return e;let i=t.normalize("NFKD");return ia.set(t,i),i},sa=new Ui.LRUCache({max:4096}),$i=(t)=>{let e=sa.get(t);
+
+## #36 normalize("NFD"  needle="normalize(\"NFD\""  hits248=6  hits247=6
+- @181628604 \ufeff]/g,"").replace(/\u1e9e/g,"\xDF").normalize("NFD").toUpperCase().toLowerCase()}function uB(e){return Zw(e.normalize("NFKC").repla
+- @182790154 ction xY(e,t){if(e===t)return!0;let r=e.normalize("NFD"),o=t.normalize("NFD");if(r.toLowerCase()===o.toLowerCase()||r.toUpperCase()===o
+- @182790175 t)return!0;let r=e.normalize("NFD"),o=t.normalize("NFD");if(r.toLowerCase()===o.toLowerCase()||r.toUpperCase()===o.toUpperCase())return
+- @194459398 path),w=(d)=>se([d,d.normalize("NFC"),d.normalize("NFD")]),M=t.filter(o).map((d)=>d.path),[O,N,D]=await Promise.all([Ce(e,A.flatMap(w),
+- @194602982 izationBlind?se([g,g.normalize("NFC"),g.normalize("NFD")]):[g],a=se(t.flatMap(i));if(r!==null){if((await e(["-c","core.splitIndex=false
+- @222825801 1",FY="No results",gbe=32,bbe=3,tL=e=>e.normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase();vbe=e=>e.label,ybe=e=>e.value;nL=(
+
+## #36 normalize("NFKC"  needle="normalize(\"NFKC\""  hits248=23  hits247=22
+- @178797376 ,r="",t=0,i=10;while(n!==r&&t<i)r=n,n=n.normalize("NFKC"),n=kd(n),t++;if(t>=i)throw Error(`Unicode sanitization reached maximum iteratio
+- @179688169 {t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerC
+- @179688239 )}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}function oOe(e){if(L.test(e))return"";let t=E(
+- @179850687 eplace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdef
+- @180525434 Kind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replac
+- @181598000 traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x
+- … +17 more
+
+## #36 normalize("NFC"  needle="normalize(\"NFC\""  hits248=94  hits247=94
+- @178493159 ={}){if(e??=!0,Kh(t)||_i(t)){let a=u(t).normalize("NFC");return e?a.toLowerCase():a}let r=u(t),n=[],o=Ub(r);while(o===null&&s(r)!==r)n.
+- @178493322 ;o=n.length>0?u(o??r,...n):o??r;let i=o.normalize("NFC");return e?i.toLowerCase():i}function Xk(t,e,{alreadyComparable:r=!1,foldCase:n}
+- @178588181 R}var ge=Ko(()=>(s()??i(g(),".claude")).normalize("NFC"),s);function Dde(e){return t(ge())===t(e)}function Mde(){return i(ge(),"teams")
+- @178620995 unction Ri(e){let t=e;if(t==="~")t=Se().normalize("NFC");else if(t.startsWith("~/"))t=c.join(Se().normalize("NFC"),t.slice(2));let r=ne
+- @178621053 lse if(t.startsWith("~/"))t=c.join(Se().normalize("NFC"),t.slice(2));let r=new Set,i=ce();if(r.add(t),Vn(t)&&!Ea(t)||Er(t))return Array
+- @179378076 (e,t,t)??t;try{r=X.native(r)}catch{}r=r.normalize("NFC").toLowerCase();let o=r.endsWith(C)?r:r+C,i=(c)=>{let d=c.toLowerCase();return d
+- … +88 more
+
+## #36 hangul  needle="hangul"  hits248=4  hits247=4
+- @66657213 ondi.gurmukhi.guru.gurungkhema.han.hang.hangul.hani.hanifirohingya.hano.hanunoo.hatr.hatran.hebr.hebrew.hex.hexdigit.hira.hira
+- @85781845 phemeextendgraphemelinkgrbasegrextgrlinkhangulsyllabletypeHangul_Syllable_Typehexdigithsthyphenidcidcompatmathcontinueidcompat
+- @85800225 iGurmukhigurugurungkhemahanHanhangHangulhangulhanihanifirohingyaHanifi_RohingyahanoHanunoohanunoohatrHatranhatranhebrHebrewhir
+- @215568148 3],[19968,40879],[65280,65376]]},{name:"hangul",blocks:[[44032,55215]]}];o(CGe,"scriptFromCodepoint");Hk=[];N7.forEach(e=>e.bl
+
+## #36 Hangul  needle="Hangul"  hits248=21  hits247=21
+- @68567606 ek Gujarati Gujr Gurmukhi Guru Han Hani Hangul Hang Hanunoo Hano Hatran Hatr Hebrew Hebr Hiragana Hira Imperial_Aramaic Armi I
+- @81932784 yanmar.Myanmar..Georgian.Georgian..Jamo.Hangul_Jamo..Ethiopic.Ethiopic..Cherokee.Cherokee..UCAS.Unified_Canadian_Aboriginal_Sy
+- @81933897 atakana..Bopomofo.Bopomofo..Compat_Jamo.Hangul_Compatibility_Jamo..Kanbun.Kanbun..Bopomofo_Ext.Bopomofo_Extended..Enclosed_CJK
+- @81934173 .Yi_Syllables..Yi_Radicals.Yi_Radicals..Hangul.Hangul_Syllables..High_Surrogates.High_Surrogates..High_PU_Surrogates.High_Priv
+- @81934180 lables..Yi_Radicals.Yi_Radicals..Hangul.Hangul_Syllables..High_Surrogates.High_Surrogates..High_PU_Surrogates.High_Private_Use
+- @81937473 ari_Ext.Devanagari_Extended..Jamo_Ext_A.Hangul_Jamo_Extended_A..Javanese.Javanese..Myanmar_Ext_A.Myanmar_Extended_A..Tai_Viet.
+- … +15 more
+
+## #36 Korean  needle="Korean"  hits248=2  hits247=2
+- @88596684 ga.mga.Amiga.giga.mega.tcc 05f0fafa.zea.Korean_Korea.geopoly_area.private use area.IsPrivateUseArea.kea.id-pda.Knda.IsSharada.
+- @190315613 phrase, not a clause, so in Japanese or Korean it does not end in a verb either. Do not append an explanation after a dash or 
+
+## #36 composition  needle="composition"  hits248=162  hits247=162
+- @81942646 ki..ccc.Canonical_Combining_Class..dt.Decomposition_Type..None.None.none..Can.Canonical.can..Com.Compat.com..Enc.Circle.enc..Fin.Fi
+- @82326112 t:left;<li class="hundreds of
+
+However, compositionclear:both;cooperationwithin the label for="border-top:New Zealandrecommendedpho
+- @82359068 miniscent ofmore difficultVice Presidentcomposition ofpassed throughmore importantfont-size:11pxexplanation ofthe concept ofwritten
+- @85781200 SUnicodecompexFull_Composition_ExclusioncompositionexclusioncwcfcwcmcwkcfcwlcwtcwudashdecompositionmappingDecomposition_Mappingdeco
+- @85781248 ionexclusioncwcfcwcmcwkcfcwlcwtcwudashdecompositionmappingDecomposition_MappingdecompositiontypeDecomposition_Typedefaultignorablec
+- @85781268 cwkcfcwlcwtcwudashdecompositionmappingDecomposition_MappingdecompositiontypeDecomposition_Typedefaultignorablecodepointdepdeprecate
+- … +156 more
+
+## #36 isComposing  needle="isComposing"  hits248=11  hits247=11
+- @223213063 r}){if(e.key==="Enter"&&!(e.nativeEvent.isComposing||e.keyCode===229)){if(e.metaKey||e.ctrlKey){e.preventDefault(),n?.("mod-enter")
+- @223388045 h.key!=="Escape"||h.defaultPrevented||h.isComposing)return;let b=h.target;b&&i.current?.contains(b)&&(b.tagName==="INPUT"||b.tagNam
+- @223671383 from keyup.
+    if (e.key === ' ' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey && editing.el.contains(e.target) && ed
+- @223672563 (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.ctrlKey && !e.metaKey) {
+      var s = getSelection && getSelection();
+  
+- @223867291 n"||a.metaKey||a.ctrlKey||a.nativeEvent.isComposing||!a.shiftKey&&!(a.altKey&&!o))return;a.preventDefault();let s=a.currentTarget.v
+- @223889033 {if(g.metaKey||g.ctrlKey||g.nativeEvent.isComposing)return;let v=ro(f.trim());if(f.trim()&&!v)return;g.preventDefault();let h=v?.va
+- … +5 more
+
+## #36 foldCase mention  needle="foldCase"  hits248=19  hits247=19
+- @97078344 ue..........repoAuthoredContent.........foldCase....f...alreadyComparable...J.......Cannot destructure property 'marketplaceName
+- @99445273 es.C...`...Cannot destructure property 'foldCase' from null or undefined value.L...[!$.Cannot destructure property 'alreadyCompa
+- @178493108 claude"?s(s(s(t))):null}function KEe(t,{foldCase:e}={}){if(e??=!0,Kh(t)||_i(t)){let a=u(t).normalize("NFC");return e?a.toLowerCa
+- @178493406 function Xk(t,e,{alreadyComparable:r=!1,foldCase:n}={}){let o=Se(r?t:KEe(t,{foldCase:n}),r?e:KEe(e,{foldCase:n}));return o===""|
+- @178493442 =!1,foldCase:n}={}){let o=Se(r?t:KEe(t,{foldCase:n}),r?e:KEe(e,{foldCase:n}));return o===""||!we(o)&&o!==".."&&!o.startsWith(`..
+- @178493466 o=Se(r?t:KEe(t,{foldCase:n}),r?e:KEe(e,{foldCase:n}));return o===""||!we(o)&&o!==".."&&!o.startsWith(`..${l}`)}function Kh(t){re
+- … +13 more
+
+## #36 peer_mention  needle="peer_mention"  hits248=10  hits247=10
+- @92251060 resource....#..agent_mention.......j...peer_mention...Y...nested_memory...#...T...(?:^|[\s\u3002\u3001\uFF1F\uFF01])@.....?h}.(.?.
+- @97505268 urces...........agent_mentions.......k.peer_mentions........GO.queued_commands.....Q.H.todo_reminders..........agent_pending_messag
+- @186173432 ns.agentDefinitions.activeAgents))),Xi("peer_mentions",()=>g?.isHumanTypedPrompt&&g.preExpansionInput!==void 0?U.then((Te)=>MLn(g.pr
+- @186192244 ,p).map((g)=>g.kind==="resolved"?{type:"peer_mention",mention:g.mention,status:"resolved",candidates:[g.candidate],total:1}:{type:"p
+- @186192335 andidates:[g.candidate],total:1}:{type:"peer_mention",mention:g.mention,status:"ask",candidates:g.candidates,total:g.total})}return[
+- @187221312 required context to it. `,isMeta:!0})]),peer_mention:(e)=>Ns([He({content:dZn(e),isMeta:!0})]),skill_listing:(e)=>{if(!e.content)ret
+- … +4 more
+
+## #36 @mention  needle="@mention"  hits248=0  hits247=0
+
+## #36 @-mention  needle="@-mention"  hits248=12  hits247=12
+- @93415924 .  .m.o.d.e.s.,. .u.n.d.o.,. .../.....H.@-mentions, and how to teach Claude your rules......)...heading.....l.u.tengu_birch_lante
+- @97149013 _message tool for it)..)...r.b.The user @-mentioned the Claude session "...G....E~.. If their message asks you to tell or ask tha
+- @97317893 you need to access it..$...r!,.The user @-mentioned the audio file +......., but Claude Code could not transcribe it.
+.
+.........
+- @97692432 _mention_mcp_resource_error.......%.MCP @-mention resource read.%.....6.tengu_at_mention_mcp_resource_success.......k...MCP resou
+- @101078030 t.i.n.g.,. .......*.%.preamble, or bare @-mention.......w.message must not be empty...........notify_when_idle is only supported 
+- @186193211 l:t.abortController.signal,context:"MCP @-mention resource read"}),j=await LIe(U,E);return s("tengu_at_mention_mcp_resource_succe
+- … +6 more
+
+## #36 mention-analytics-win @186137683
+`)}function YTe(e){return{token:GN(e),where:g2t(e.where)}}function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}import{readdir as Ykt,stat as Xkt}from"fs/promises";function Rz(e){if(!e||e.length===
+
+## #36 mention-fn function  @186137661 len=237 sha=f84eba9be38fdf82 bodyHits247=0
+function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}
+
+## #36 NFKC hits dquote=23 squote=0
+## #36 NFKC @178797376 @178797376
+).replace(f,""))}function bvn(e){let n=e,r="",t=0,i=10;while(n!==r&&t<i)r=n,n=n.normalize("NFKC"),n=kd(n),t++;if(t>=i)throw Error(`Unicode sanitization reached maximum iterations (${i}) for input: ${e.slice(0,100)}`);return n}function Um(e){if(typeof e==="string")return bvn(e);if
+
+## #36 NFKC-fn function  @178797313 len=209 sha=9b6ed4325671295b bodyHits247=0
+function bvn(e){let n=e,r="",t=0,i=10;while(n!==r&&t<i)r=n,n=n.normalize("NFKC"),n=kd(n),t++;if(t>=i)throw Error(`Unicode sanitization reached maximum iterations (${i}) for input: ${e.slice(0,100)}`);return n}
+
+## #36 NFKC @179688169 @179688169
+tion H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}function oOe(e){if(L.test(e))return"";let t=E(e);if(!O.test(t))return t;let r=H(
+
+## #36 NFKC-fn function  @179688085 len=204 sha=673c450570416597 bodyHits247=0
+function H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}
+
+## #36 NFKC @179688239 @179688239
+{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}function oOe(e){if(L.test(e))return"";let t=E(e);if(!O.test(t))return t;let r=H(e);return r===t?t:r}function EJn(e){return!L.test(e)&&O.test(E(e))}fun
+
+## #36 NFKC-fn function  @179688085 len=204 sha=673c450570416597 bodyHits247=0
+function H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}
+
+## #36 NFKC @179850687 @179850687
+n(u){let{table:d,pattern:a}=N,e=(f)=>f.replace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdefghijklmnopqrstuvwxyz";function kyt(u){if(!/^[a-z]$/.test(u))throw Error("latinLetterConfusableClass: exp
+
+## #36 NFKC-fn function  @179850596 len=110 sha=eca3f01d775ada0f bodyHits247=0
+function ggn(u){let{table:d,pattern:a}=N,e=(f)=>f.replace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}
+
+## #36 NFKC @180525434 @180525434
+.environmentKind!==void 0&&e.environmentKind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}var aa=6,Smn=12,NV=`[0-9a-f]{${aa},${Smn}}`,Z8=new RegExp(`^(.*\\S)\\s*\\[(${NV})\\]$`);fu
+
+## #36 NFKC-fn function  @180525410 len=134 sha=cdbd73e6c8d8fd63 bodyHits247=0
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+
+## #36 NFKC @181598000 @181598000
+ncludes("/")))throw new wy(`URL-encoded traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x00")))throw new wy(`Unicode-normalized traversal in path key: "${e}"`);if(e.includes("\\"))throw new wy(
+
+## #36 NFKC-fn function  @181597760 len=545 sha=0fe9dfb1e18146b3 bodyHits247=0
+function VVe(e){if(e.includes("\x00"))throw new wy(`Null byte in path key: "${e}"`);let t;try{t=decodeURIComponent(e)}catch{t=e}if(t!==e&&(t.includes("..")||t.includes("/")))throw new wy(`URL-encoded traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x00")))throw new wy(`Unicode-normalized traversal in path key: "${e}"`);if(e.includes("\\"))throw new wy(`Backslash in path key: "${e}"`);if(e.startsWith("/"))throw new wy(`Absolute path key: "${e}"`);return e}
+
+## #36 NFKC @181628676 @181628676
+"\xDF").normalize("NFD").toUpperCase().toLowerCase()}function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu,"").replace(/[\p{Pd}\u2212]/gu,"-").replace(/[\ua789\u2236\u0589\u05c3\u02d0]/g,":"))}function _N(e){return xl(e
+
+## #36 NFKC-fn function  @181628649 len=201 sha=96212f6f24f9728e bodyHits247=0
+function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu,"").replace(/[\p{Pd}\u2212]/gu,"-").replace(/[\ua789\u2236\u0589\u05c3\u02d0]/g,":"))}
+
+## #36 NFKC @182914061 @182914061
+or===void 0||typeof e.error==="string")}var c=200;function uu(r,e=c){let n=dn(r.normalize("NFKC")).replaceAll(/[<>";\u2018\u2019\u201A\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A\u2329\u232A\u27E8\u27E9\u27EA\u27EB\u3008\u3009\u300A\u300B]/g," ").replaceAll(/\s+/g," ").trim(),o=Mat
+
+## #36 NFKC-fn function  @182914031 len=948 sha=1118e5079722ed8a bodyHits247=0
+function uu(r,e=c){let n=dn(r.normalize("NFKC")).replaceAll(/[<>";\u2018\u2019\u201A\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A\u2329\u232A\u27E8\u27E9\u27EA\u27EB\u3008\u3009\u300A\u300B]/g," ").replaceAll(/\s+/g," ").trim(),o=Math.max(s,e+l),t=n.length>o,i=HNt(t?de(n,o):n);return t||i.length>e?`${de(i,e)}\u2026`:i}var a=500;function JR(r){let e=dn(r).replaceAll(/\s+/g," ").trim(),n=HNt(e.length>s?de(e,s):e);return n.length>a?`${de(n,a)}\u2026`:n}function HNt(r){function e(n,o,t){return/[0-9._~+/=%-]/.test(t)?`${o} [redacted]`:n}return r.replace(/(?:\b|(?<=\\[A-Za-z"']))(bearer|basic)[\s:=\uFF1A\uFF1D]+(?:(?:\\*["']|\\+)\s*)?([A-Za-z0-9._~+/=%-]{8,})/gi,e).replace(/(?:\b|(?<=\\[A-Za-z"']))((?:access[-_ ]?|refresh[-_ ]?|id[-_ ]?|client[-_ ]?|api[-_ ]?|x[-_]api[-_ ]?|session[-_ ]?|auth[-_ ]?)?(?:token|key|secret|password|authorization|credential)s?)(?:\\*["']|\\+)?\s*[:=\uFF1A\uFF1D]\s*(?:
+… +48 chars
+
+## #36 mention analytics code 248=1 247=2

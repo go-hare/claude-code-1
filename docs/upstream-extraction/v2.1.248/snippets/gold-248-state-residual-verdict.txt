@@ -1,0 +1,34 @@
+# gold-248-state-residual-verdict
+
+when=2026-09-21 · SEA 2.1.248 (226708128)
+cut=STATE residual wrappers vs n().host / n() sibling bags
+
+## Bag map clarification
+- `qe` @178545454 = `n().host.requestLatches` (NOT modelStringsCache)
+- `Ee` @178539976 = `n().host.modelStringsCache` (modelStrings / admin3P only)
+- Neither holds promptCache1hEligible / *HeaderLatched
+
+## Field table
+
+| leftover field | official routing | verdict | offsets |
+| --- | --- | --- | --- |
+| promptCache1hEligible | SEA hits=0; qe has allowlist only | KEEP STATE / invent-ban bag | allowlist nTn @178581416 |
+| afkModeHeaderLatched | SEA hits=0 | KEEP STATE / invent-ban bag | — |
+| fastModeHeaderLatched | SEA hits=0 | KEEP STATE / invent-ban bag | — |
+| cacheEditingHeaderLatched | SEA hits=0 | KEEP STATE / invent-ban bag | — |
+| lastMainRequestId | `n().requestJournal` (ce) | LAND (cut STATE dual-write) | EEe/Own @178555535/590 |
+| pendingPostCompaction | `n().requestJournal` (ce) | LAND (cut STATE dual-write) | XYe/$wn @178555998/6075 |
+| lastApiCompletionTimestamp | `n().requestJournal` (ce) | LAND (cut STATE dual-write) | l7/pvt @178555xxx |
+| isRemoteMode | `surfaceCapabilities.caps().workspace==="remote"` / `markRemote` | LAND (already) | On/P4 @178580174/247 |
+| teleportedSessionIds | `Qo().teleportedSessionIds` host-keyed class `s` — NOT n().host | KEEP STATE / invent-ban n().host | init @179876551; rlt/lb @185529522 |
+| replBridgeSessionId | AppState only; get/set export aliases hits=0 | KEEP STATE / invent-ban bag | AppState @190426654+ |
+
+## clearBetaHeaderLatches
+Official Pvt @178583191:
+`function Pvt(){let e=g();if(e)e.stickyBetas=k4();else n().conversationLatches.unlatchStickyBetas();e?.perTurnEffortPins.clear()}`
+— no header-latch nulls (slots absent). Leftover keeps STATE nulls + unlatchStickyBetas + requestLatches.reset.
+
+## peels
+- `gold-248-state-residual.txt` (needle dump)
+- `gold-248-state-residual-headers.txt` (earlier On/P4 dig)
+- this file (verdict)

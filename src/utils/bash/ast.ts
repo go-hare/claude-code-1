@@ -2134,6 +2134,13 @@ function walkCommand(
           bareAssignmentNames,
         )
         if ('kind' in ev) return ev
+        if (densableUVu(ev.name, ev.value)) {
+          return {
+            kind: 'too-complex',
+            reason: `${ev.name} has integer attribute — assignment arith-evals RHS, executing subscript command substitution`,
+            nodeType: 'variable_assignment',
+          }
+        }
         // SECURITY: Env-prefix assignments (`VAR=x cmd`) are command-local in
         // bash — VAR is only visible to `cmd` as an env var, NOT to
         // subsequent commands. Do NOT add to global varScope — that would
@@ -2424,8 +2431,9 @@ function isDangerousForLoopVar(name: string): boolean {
 }
 
 /**
- * densable `uVu` — integer-attr specials (qws/eQi): RHS with `[` / `` ` `` /
- * `$(` / placeholder / letter is arith-evalable → too-complex.
+ * densable `uVu` / Qo — integer-attr specials: RHS with `[` / `` ` `` /
+ * `$(` / placeholder, or anything other than a plain integer, is not
+ * auto-approved.
  */
 function densableUVu(name: string, value: string): boolean {
   if (!DENSABLE_YPG_EQI.has(name)) return false
@@ -2437,8 +2445,44 @@ function densableUVu(name: string, value: string): boolean {
   ) {
     return true
   }
-  if (/[A-Za-z_]/.test(value)) return true
+  if (!/^(0|[1-9][0-9]{0,17})$/.test(value)) return true
   return false
+}
+
+function unquoteAssignmentValue(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"')))
+  ) {
+    return value.slice(1, -1)
+  }
+  return value
+}
+
+/**
+ * densable Qo — leading NAME=value / NAME+=value whose RHS is not a plain
+ * integer. True means the assignment must not be auto-approved.
+ */
+export function unsafeIntegerAttributeAssignmentName(
+  command: string,
+): string | null {
+  const segments = command.split(/(?:&&|\|\||[;&|\n])/)
+  for (const segment of segments) {
+    let rest = segment.trim()
+    while (rest) {
+      const match = rest.match(
+        /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=(?:'[^']*'|"[^"]*"|[^\s;&|]+)(?:\s+|$)/,
+      )
+      if (!match?.[1]) break
+      const assigned = match[0].trim()
+      const eq = assigned.indexOf('=')
+      const raw = eq >= 0 ? assigned.slice(eq + 1) : ''
+      if (densableUVu(match[1], unquoteAssignmentValue(raw))) return match[1]
+      rest = rest.slice(match[0].length).trimStart()
+    }
+  }
+  return null
 }
 
 function densableYPg(

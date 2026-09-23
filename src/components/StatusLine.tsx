@@ -29,6 +29,9 @@ import { Ansi, Box, Text } from '@anthropic/ink';
 import { getRawUtilization } from '../services/claudeAiLimits.js';
 import type { Message } from '../types/message.js';
 import type { StatusLineCommandInput } from '../types/statusLine.js';
+import { getAPIProvider } from '../utils/model/providers.js';
+import { promptCacheCommandFields } from '../commands/cost/promptCacheStatus.js';
+import { statusLineRateLimits } from './statusLineRateLimits.js';
 import type { VimMode } from '../types/textInputTypes.js';
 import { checkHasTrustDialogAccepted } from '../utils/config.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../utils/context.js';
@@ -238,20 +241,7 @@ function buildStatusLineCommandInput(
   const sessionId = getSessionId();
   const sessionName = getCurrentSessionTitle(sessionId);
   const rawUtil = getRawUtilization();
-  const rateLimits: NonNullable<StatusLineCommandInput['rate_limits']> = {
-    ...(rawUtil.five_hour && {
-      five_hour: {
-        used_percentage: rawUtil.five_hour.utilization * 100,
-        resets_at: rawUtil.five_hour.resets_at,
-      },
-    }),
-    ...(rawUtil.seven_day && {
-      seven_day: {
-        used_percentage: rawUtil.seven_day.utilization * 100,
-        resets_at: rawUtil.seven_day.resets_at,
-      },
-    }),
-  };
+  const rateLimits = statusLineRateLimits(rawUtil, getAPIProvider());
   return {
     ...createBaseHookInput(),
     ...(sessionName && { session_name: sessionName }),
@@ -284,7 +274,8 @@ function buildStatusLineCommandInput(
       remaining_percentage: contextPercentages.remaining,
     },
     exceeds_200k_tokens: exceeds200kTokens,
-    ...((rateLimits.five_hour || rateLimits.seven_day) && {
+    ...promptCacheCommandFields(),
+    ...(rateLimits && {
       rate_limits: rateLimits,
     }),
     ...(isVimModeEnabled() && {

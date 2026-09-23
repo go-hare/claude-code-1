@@ -1,0 +1,156 @@
+# gold-248-31-host-hunt  densable 2.1.248 #31
+# rc-reconnect-prompt — leftover-name rehunt
+# SEA 226708128 · 247 present
+# stay UNKNOWN. invent-ban. not N/A.
+# do not edit official-248-checklist.md / boards/alignment-248.md
+
+extracted? unique 248 Ze.clear-on-reconnect + Local-only retract
+landed? no
+stay UNKNOWN? YES
+reason: leftover has ZERO host-side pending-forward Map (247 ma / 248 pe).
+Cannot land Ze=Set + clear-on-reconnect + retract 1:1 without inventing pe/ma.
+
+when=2026-09-20T07:38:00Z
+peels: gold-248-unk-31.txt / 31b / 31c / 31d / 31e + this hunt
+
+## official unique 248 (not in 247)
+
+248 remote-bridge sendControlRequest @198368815
+  if can_use_tool || request_user_dialog:
+    pe.delete; pe.set({request}); Ze.delete
+  if request_user_dialog && writes gated / recovering:
+    Ze.add; log "[remote-bridge] Not forwarding request_user_dialog while
+    writes are gated / transport recovering (local-only): ${id}"; return false
+  later pe.set({request,details}); ye("requires_action", details)
+
+248 fn setOnConnect @198351726 sha=6639d1c05696f53b
+  if(pe.size>0){ findLast details; ye("requires_action", details); Ze.clear() }
+
+248 pe=Map pending forwards, Ze=Set ids locally shown (not forwarded)
+248 ot(e,r){ Ze.delete(e); pe.delete(e)&&r && Hht(e) }
+248 xi(){ Ze.clear(); return [...pe.values()].map(e=>e.request) }  // getPendingPrompts
+248 sendControlCancelRequest @198370641
+  if(Ze.delete(e)){ pe.delete(e); log
+    "[remote-bridge] Local-only retract of a declined dialog forward request_id="
+    ; return }
+  else ot(e,true); write cancel; ye("running")
+
+247 twin: ma=Map only; Xg/dP/kl; Pu setOnConnect re-emits requires_action
+  without Ze / without .clear(). No Local-only retract. No gated Ze.add.
+
+NEW248 leftover-name strings (248>0 247=0):
+  "Local-only retract of a declined dialog" 248=2 247=0
+  "declined dialog forward" 248=2 247=0
+  "[remote-bridge] Not forwarding request_user_dialog while writes are gated"
+    leftover src hits = 0
+
+## leftover-name grep (src/bridge src/remote src/services/acp src/screens)
+
+setOnConnect          leftover remoteBridgeCore + replBridge + replBridgeTransport
+onConnected           leftover RemoteSessionManager (no Map read)
+afterReconnect        not this item (dNe SendMessage mapper; 247 twin)
+requires_action       leftover remoteBridgeCore sendControlRequest reportState
+                      (no details, no Map store)
+getPendingPrompts     leftover src = 0 (handleServerControlRequest missing param)
+getPendingPermission  leftover structuredIO === 247
+pendingPrompts        leftover src = 0
+pendingRequests       leftover structuredIO (SDK parks, not bridge forwards)
+republish             leftover structuredIO republishSurviving === 247
+redeliver             leftover RemoteSessionManager inbound dialogs (214)
+undelivered           leftover inboundAttachments notice; official RSM stack
+                      missing from leftover RSM
+Local-only retract    leftover src = 0
+declined dialog       leftover src = 0
+sendControlCancel     leftover remoteBridgeCore + replBridge (write-only)
+control_cancel        leftover write path; no Ze retract
+forceTaskStatePublish leftover useReplBridge 207 task_state, not permission
+structuredIO pending  leftover Map exists; not used on remote-bridge reconnect
+Not forwarding request_user_dialog  leftover src = 0
+tengu_bridge_requires_action_details leftover src = 0
+pendingControlRequests leftover src = 0 (official RSM only)
+pendingForwards / locallyShown / shownLocally / forwardedIds leftover src = 0
+
+## Map+Set pairs near permission / bridge inbound
+
+### REJECTED — src/bridge/remoteBridgeCore.ts
+official host file (setOnConnect + sendControlRequest + sendControlCancel).
+leftover setOnConnect: persist writer/readers + flushHistory + onStateChange.
+no pe.size / findLast details / requires_action re-emit / Ze.clear.
+sendControlRequest: 401-drop + reportState('requires_action') for can_use_tool
++ write. no pe.set, no request_user_dialog gated Ze.add, no details.
+sendControlCancelRequest: 401-drop + reportState('running') + write.
+no Ze.delete / Local-only retract.
+only collection: initialMessageUUIDs Set (flush dedupe). ZERO pending-prompt Map.
+247 predecessor ma/Xg/dP/kl also unlanded. invent-ban.
+
+### REJECTED — src/bridge/replBridge.ts
+leftover setOnConnect: Ingress-transport logs (official 248=0 247=0) +
+history cap flush. sendControlCancel write-only. no pending Map.
+leftover-only strings, not official host.
+
+### REJECTED — src/bridge/replBridgeTransport.ts
+setOnConnect / reportState('requires_action') interface only. no Map.
+
+### REJECTED — src/bridge/bridgeMessaging.ts handleServerControlRequest
+official inbound passes getPendingPrompts:xi / dP.
+leftover ServerControlRequestHandlers has no getPendingPrompts /
+onDialogKindsDeclared. cannot be pe/Ze host.
+
+### REJECTED — src/bridge/bridgePermissionCallbacks.ts
+types + parseBridgePermissionResponse. no Map.
+
+### REJECTED — src/remote/RemoteSessionManager.ts
+leftover HAS pendingPermissionRequests Map + pendingDialogRequests Set +
+seenControlResponseIds Set.
+onConnected leftover: log + callbacks.onConnected only. Map NOT read on reconnect.
+official RSM onConnected === 247 (dirSync + undeliveredResponses resend) —
+not 248-unique; leftover also missing that 247+ cloud stack.
+polarity is inbound CCR client (receive can_use_tool), not host-side
+forward Map pe (send local dialog to peer).
+official pendingControlRequests Map exists only in SEA, not leftover.
+landing Ze here would invent wrong-side 248 sliver.
+
+### REJECTED — src/cli/structuredIO.ts
+pendingRequests Map + publishedPendingActionDetails Map +
+resolvedToolUseIds Set + timedOutUserDialogs Map.
+getPendingPermissionRequests / republishSurvivingPendingAction 248=247.
+used on park-resolve + web re-initialize (216 sdkReinitRedelivery), not
+remote-bridge setOnConnect.
+WS-reconnect comment = ignore duplicate control_response (opposite of
+Ze.clear re-show). no Local-only retract.
+
+### REJECTED — src/hooks/useReplBridge.tsx
+pendingPermissionHandlers Map = inbound allow/deny callbacks.
+not {request,details} forwards; not read on reconnect.
+forceTaskStatePublish = leftover 207 task_state republish.
+comment "densable #31 ready-push" is a different already-landed sliver.
+
+### REJECTED — src/utils/sessionState.ts
+hasPendingAction boolean + single pending_action details.
+not a Map of pending forwards. no reconnect re-emit of pe.
+
+### REJECTED — src/utils/sdkReinitRedelivery.ts
+216 helper around structuredIO pending_*. counts 248=247.
+
+### REJECTED — src/cli/transports/ccrClient.ts
+init PUT clears stale pending_action after crash. opposite of re-emit.
+
+### REJECTED — src/utils/userDialog.ts
+buildUserDialogRequiresActionDetails (official Cnt). helper only. no Map.
+
+### REJECTED — src/services/acp
+pendingMessages Map in createSessionMethod. unrelated.
+
+### REJECTED — src/screens
+no pending-prompt / reconnect-forward Map.
+
+## verdict
+
+leftover has no 247 ma / 248 pe pending-forward Map under any leftover name.
+nearest file is remoteBridgeCore.ts (official sendControl* + setOnConnect) but
+it has ZERO pending-prompt state. rule 5: stay UNKNOWN. do not invent pe/ma.
+do not land Ze.clear / Local-only retract onto a write-only cancel path.
+
+HOST: none
+landed: no
+stay: UNKNOWN

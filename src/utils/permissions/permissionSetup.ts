@@ -16,9 +16,14 @@ import { getCwd } from '../cwd.js'
 import { isEnvTruthy } from '../envUtils.js'
 import type { SettingSource } from '../settings/constants.js'
 import { SETTING_SOURCES } from '../settings/constants.js'
+import { isAdminManagedPolicyOrigin } from '../forceLoginMethod.js'
+import { isRemoteManagedSettingsVerified } from '../../services/remoteManagedSettings/syncCacheState.js'
 import {
+  canTrustAdminPolicyCascade,
+  getPolicySettingsOrigin,
   getSettings_DEPRECATED,
   getSettingsFilePathForSource,
+  getSettingsForSource,
   getUseAutoModeDuringPlan,
   hasAutoModeOptIn,
 } from '../settings/settings.js'
@@ -28,6 +33,7 @@ import {
   permissionModeFromString,
   toExternalPermissionMode,
 } from './PermissionMode.js'
+import { isAutoDefaultLaunchEnabled } from '../../services/mcp/vscodeIdeBridgeCallbacks.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
@@ -961,9 +967,7 @@ export function initialPermissionModeFromCLI({
         hasResolvedMode: false,
         circuitBroken: autoModeCircuitBrokenSync,
         disableAutoMode: isAutoModeDisabledBySettings(),
-        harborWillow: checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
-          'tengu_harbor_willow',
-        ),
+        harborWillow: isAutoDefaultLaunchEnabled(),
         isNonInteractiveSession: getIsNonInteractiveSession(),
         mossAnchor:
           checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_moss_anchor'),
@@ -1767,6 +1771,97 @@ export function prepareContextForPlanMode(
     { level: 'info' },
   )
   return { ...context, prePlanMode: currentMode }
+}
+
+/**
+ * densable `$at` — managed policySettings `disableAutoMode: "disable"`.
+ */
+export function managedPolicyDisablesAutoMode(): boolean {
+  const policy = getSettingsForSource('policySettings')
+  if (!policy) return false
+  const permissions = policy.permissions as
+    | { disableAutoMode?: 'disable' }
+    | undefined
+  return (
+    (policy as { disableAutoMode?: 'disable' }).disableAutoMode === 'disable' ||
+    permissions?.disableAutoMode === 'disable'
+  )
+}
+
+/**
+ * densable `Qan` — trusted policy origin plus `$at(policySettings)`.
+ * `Fx` is helper|plist|hklm|file; remote also counts when `yN`.
+ */
+export function managedPolicyDisablesAutoModeFromTrustedOrigin(): boolean {
+  const origin = getPolicySettingsOrigin()
+  return (
+    (isAdminManagedPolicyOrigin(origin) ||
+      (origin === 'remote' && isRemoteManagedSettingsVerified())) &&
+    managedPolicyDisablesAutoMode()
+  )
+}
+
+/**
+ * densable `Bdt` — live auto, or plan that is still auto (prePlanMode or stash).
+ */
+export function isManagedAutoModeSession(
+  context: ToolPermissionContext,
+): boolean {
+  return (
+    context.mode === 'auto' ||
+    (context.mode === 'plan' &&
+      (context.prePlanMode === 'auto' || !!context.strippedDangerousRules))
+  )
+}
+
+/**
+ * densable `BFt` — fk(false), zM(true); auto → setMode default + PG auto_gate_denied
+ * + vY restore; else restore stash and defuse prePlanMode auto.
+ * Always clears isAutoModeAvailable / canAutoClassifierRun.
+ */
+export function exitAutoModeWhenManagedDisable(
+  context: ToolPermissionContext,
+  policyDisablesAuto: boolean,
+): ToolPermissionContext {
+  if (!policyDisablesAuto) return context
+  if (!isManagedAutoModeSession(context)) return context
+  autoModeStateModule?.setAutoModeActive(false)
+  setNeedsAutoModeExitAttachment(true)
+  const restored = restoreDangerousPermissions(context)
+  if (context.mode === 'auto') {
+    logPermissionModeChanged('auto', 'default', AUTO_GATE_DENIED_TRIGGER)
+    return {
+      ...applyPermissionUpdate(restored, {
+        type: 'setMode',
+        mode: 'default',
+        destination: 'session',
+      }),
+      isAutoModeAvailable: false,
+      canAutoClassifierRun: false,
+    }
+  }
+  return {
+    ...restored,
+    prePlanMode:
+      context.prePlanMode === 'auto' ? 'default' : context.prePlanMode,
+    isAutoModeAvailable: false,
+    canAutoClassifierRun: false,
+  }
+}
+
+/**
+ * densable `Int` → `iJt` → `BFt` on settings change.
+ * iJt predicate: `(hM().length===0||o5()) && Bdt(r) && Qan()`.
+ */
+export function applyManagedAutoModeExit(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  return exitAutoModeWhenManagedDisable(
+    context,
+    canTrustAdminPolicyCascade() &&
+      isManagedAutoModeSession(context) &&
+      managedPolicyDisablesAutoModeFromTrustedOrigin(),
+  )
 }
 
 /**

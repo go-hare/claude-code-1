@@ -1,0 +1,371 @@
+# gold-248-agents-bodies
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:20.651Z
+helpers=247 _peel-1-ye-Ht-Jt-DE.mjs extractFnAt/lastFnStart/allHits
+
+## #12 applyFleetViewHostWindowsEnv  needle="applyFleetViewHostWindowsEnv"  hits=9
+- #0 @92525689 structure property 'seedHostJobs' from null or undefined value.W....>n.Cannot destructure property 'applyFleetViewHostWindowsEnv' from null or undefined value.Y...Wg..Cannot destructure property 'mountFleetViewWithComposerBack' 
+- #1 @92526256 u.m.e. .........unmount.....A.t.CLAUDE_AGENTS_SELECT
+...."b.createRoot..........seedHostJobs......\.applyFleetViewHostWindowsEnv........mountFleetViewWithComposerBack......O...createFleetViewHost.....T`".entryChannel......a.orig
+- #2 @101817069 75c1cC00000045mountFleetViewremountClearSeqseedHostJobsB:/~BUN/root/chunk-q0j68bsy.jsFleetViewScreenapplyFleetViewHostWindowsEnvresolveSurfaceBackgroundmountFleetViewWithComposerBackcreateFleetViewHostuseAttachFleetOwnersWORKFLO
+- #3 @178180255 hMarker:R}=await import("B:/~BUN/root/chunk-4erys86q.js");if(await P({kickGrowthBook:!1}),C()){let[{applyFleetViewHostWindowsEnv:S},{createRoot:_},{getBaseRenderOptions:f},{resolve:I},{getRootSession:H,setCliSessionConfigCarried
+- #4 @191626256 (q,`Couldn't attach to cloud session: ${l(Oo)}`,()=>kn(1))}let[{mountFleetViewWithComposerBack:Ut},{applyFleetViewHostWindowsEnv:ko},{createRoot:pt}]=await Promise.all([import("B:/~BUN/root/chunk-1hdrm8bm.js"),import("B:/~BUN/ro
+- #5 @191640072 st,G)),B()==="windows")_o.get(process.stdout)?.handoffRawMode();q.unmount();let[{mountFleetView:W},{applyFleetViewHostWindowsEnv:V},{createRoot:K}]=await Promise.all([import("B:/~BUN/root/chunk-00k7myk8.js"),import("B:/~BUN/root
+- … +3 more
+
+## #12 WIN32_INPUT_MODE  needle="WIN32_INPUT_MODE"  hits=3
+- #0 @96143448 E...(....Q;.file:///B:/%7EBUN/root/chunk-65c3f6mz.js	....#..MOUSE_SGR...........THEME_NOTIFY....R...WIN32_INPUT_MODE(....n,.file:///B:/%7EBUN/root/chunk-82ac1fr1.js(.......file:///B:/%7EBUN/root/chunk-3pydakxf.js(...
+- #1 @187972832 03,MOUSE_SGR:1006,FOCUS_EVENTS:1004,BRACKETED_PASTE:2004,THEME_NOTIFY:2031,SYNCHRONIZED_UPDATE:2026,WIN32_INPUT_MODE:9001};function CH(E){return Rp(`?${E}h`)}function Hj(E){return Rp(`?${E}l`)}var Eje=CH(wf.SYNCHRONI
+- #2 @187973257 VISIBLE),z0=Hj(wf.CURSOR_VISIBLE),Kot=CH(wf.ALT_SCREEN_CLEAR),lNn=Hj(wf.ALT_SCREEN_CLEAR),Yot=Hj(wf.WIN32_INPUT_MODE),_=CH(wf.MOUSE_NORMAL)+CH(wf.MOUSE_BUTTON)+CH(wf.MOUSE_ANY)+CH(wf.MOUSE_SGR),t=CH(wf.MOUSE_NORMAL)+
+
+## #12 Yot=Hj(wf.WIN32_INPUT_MODE)  needle="Yot=Hj(wf.WIN32_INPUT_MODE)"  hits=1
+- #0 @187973247 wf.CURSOR_VISIBLE),z0=Hj(wf.CURSOR_VISIBLE),Kot=CH(wf.ALT_SCREEN_CLEAR),lNn=Hj(wf.ALT_SCREEN_CLEAR),Yot=Hj(wf.WIN32_INPUT_MODE),_=CH(wf.MOUSE_NORMAL)+CH(wf.MOUSE_BUTTON)+CH(wf.MOUSE_ANY)+CH(wf.MOUSE_SGR),t=CH(wf.MOUSE_NORMAL)+C
+
+## #14 showFastModeNotice  needle="showFastModeNotice"  hits=5
+- #0 @92567500 u_model_picker_hotkey.........r.sessionModel........onSetDefault......W.isStandaloneCommand.....ev..showFastModeNotice........f.fast-mode-toggled...........unavailableReason...........tengu_thinking_toggled_hotkey.....
+- #1 @202120499 14;function C6({initial:n,sessionModel:l,onSelect:d,onSetDefault:m,onCancel:S,isStandaloneCommand:I,showFastModeNotice:w,headerText:_,options:te,skipSettingsWrite:X}){let{storageV5:K,credentials:q}=fe(),Ro=yt(),{rows:D
+- #2 @203097428 9,onSetDefault:(kt)=>{if(dj(kt))return;oI.current=!0,jUe(kt,Ri)},onCancel:I9,isStandaloneCommand:!0,showFastModeNotice:Ar()&&io&&Yc(TF({mainLoopModel:qn,mainLoopModelForSession:fr}))&&Ty()})})},[Mr,qn,fr,A9,I9,io,Ri]),
+- #3 @208560965 6,{initial:Co,sessionModel:Wi,onSelect:(C,le)=>{hh(C),Ee(null),h(!1)},onCancel:()=>{Ee(null),h(!1)},showFastModeNotice:Ar()?mm&&Yc(Kn)&&Ty():!1}),e(t,{dimColor:!0,children:r(ue,{children:[e(M,{chord:"enter",action:"con
+- #4 @209298698 onSelect:F,onSetDefault:(o)=>{T.current=!0},onCancel:ye,isStandaloneCommand:!0,skipSettingsWrite:!0,showFastModeNotice:Ar()&&ee&&Yc(_)&&Ty()})}function ot(Ro){let oe=g(30),{getMessages:Ne,onDone:L,storageV5:Pe,credenti
+
+## #14 fast-mode-toggled  needle="fast-mode-toggled"  hits=2
+- #0 @92567528 ..r.sessionModel........onSetDefault......W.isStandaloneCommand.....ev..showFastModeNotice........f.fast-mode-toggled...........unavailableReason...........tengu_thinking_toggled_hotkey...........thinking_toggle.....u
+- #1 @203097580 ,mainLoopModelForSession:fr}))&&Ty()})})},[Mr,qn,fr,A9,I9,io,Ri]),D9=U((kt)=>{if(Gi(!1),kt)Ni({key:"fast-mode-toggled",kind:"feedback",segments:[{text:Dv(kt)}],priority:"immediate",timeoutMs:3000})},[Ni]),N9=G(()=>{if
+
+## #14 model-switch-fast-mode  needle="model-switch-fast-mode"  hits=2
+- #0 @92618120 (.).....H]..model-restricted-bridge-........not_allowed..... LY.family_alias_stepped_down........	u.model-switch-fast-mode......~.;.Unknown color ".....Fz..". Available: ..	....E.., default.........9.href.....#9.enabledPlu
+- #1 @202861247 de&&{fastMode:Sr}}}),vs!==void 0&&gl!==void 0){g_(vs,gl);let Eo=JKt(vs,gl,Ks);if(Eo!==null)Yn({key:"model-switch-fast-mode",kind:"feedback",text:Eo,priority:"immediate",timeoutMs:3000})}},onSetMaxThinkingTokens(or){let Gr=
+
+## #14 `sonnet[1m]`  needle="`sonnet[1m]`"  hits=0
+
+## #14 children model code  needle="as code"  hits=3
+- #0 @187680667 r as GIT_PROXY_CRED_HELPER_CONTENT,$Tn as MIN_GIT_VERSION_FOR_SSH_SIGN,tmr as coauthorHookStubs,Zfr as codeSignArtifacts,Qfr as configureGitForSigning,E3t as configureGitGovernedEntries,nmr as configureGitPr
+- #1 @214720799 renderer de-fangs `data:` image URLs to their alt text
+  (and escapes raw HTML, so inline SVG shows as code too), and the
+  viewer's content-security policy blocks external image hosts, so an
+  `https:` imag
+- #2 @226018270 ardcoded paths, flags, version numbers, API claims with no verification date | Skills rot factually as code ships; nothing re-checks them by default | Encode architecture, data models, and workflows; verify 
+
+## #16 loadPrStatusCache  needle="loadPrStatusCache"  hits=9
+- #0 @92720252 anscript........scanLoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat.........clearFleetViewHeartbeat......
+- #1 @96677404 ....2...checkRunCountsByState.......BB\.statusContextCountsByState..........reviewDecision......%&..loadPrStatusCache: dropped ......... malformed cache entries,.......\bgit(?:\s+-[cC]\s+\S+|\s+--[^\s=]+=\S+)*\s+.....
+- #2 @97377868 additions,deletions.........\/pull\/\d+.	.......rateLimit.......".".persistPrStatusCache: ......2.
+.loadPrStatusCache: .....4.y.withSpilledOutputTail ......A...: scanning head only........recordCreatedPrToCcr.....~..^
+- #3 @184559528 [u,p]of Object.entries(r)){let g=RJt().safeParse(p);if(g.success)t.set(u,g.data);else o++}if(o>0)n(`loadPrStatusCache: dropped ${o} malformed cache entries`);return t}async function K$n(e){if(e){let t;try{t=await e.re
+- #4 @184559674 e entries`);return t}async function K$n(e){if(e){let t;try{t=await e.read([hXe])}catch(u){return n(`loadPrStatusCache: ${l(u)}`),new Map}if(!t.ok)return n(`loadPrStatusCache: ${t.error.code}`),new Map;let r=t.value.it
+- #5 @184559730 ry{t=await e.read([hXe])}catch(u){return n(`loadPrStatusCache: ${l(u)}`),new Map}if(!t.ok)return n(`loadPrStatusCache: ${t.error.code}`),new Map;let r=t.value.items[0];if(!r?.found)return new Map;let o;try{o=Buffer.fr
+- … +3 more
+
+## #16 persistPrStatusCache  needle="persistPrStatusCache"  hits=6
+- #0 @92720280 script.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat.........clearFleetViewHeartbeat......ks.watchJobDirOnce......<..adop
+- #1 @97377836 tatusCheckRollup,reviewDecision,additions,deletions.........\/pull\/\d+.	.......rateLimit.......".".persistPrStatusCache: ......2.
+.loadPrStatusCache: .....4.y.withSpilledOutputTail ......A...: scanning head only........
+- #2 @184558867 eturn Promise.resolve().then(()=>t.write(hXe,o,{mode:438&~process.umask()})).then((u)=>{if(!u.ok)n(`persistPrStatusCache: ${u.error.code}`)}).catch((u)=>{n(`persistPrStatusCache: ${l(u)}`)});return Hn(gXe(),o).catch(()=>
+- #3 @184558924 ~process.umask()})).then((u)=>{if(!u.ok)n(`persistPrStatusCache: ${u.error.code}`)}).catch((u)=>{n(`persistPrStatusCache: ${l(u)}`)});return Hn(gXe(),o).catch(()=>{})}var RJt=h(()=>w.object({number:w.number(),title:w.str
+- #4 @192130562 ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persistPrStatusCache:(i,d)=>q$n(i,d),touchFleetViewHeartbeat:(i)=>kmn(i),clearFleetViewHeartbeat:(i)=>Tmn(i),watchJobDir
+- #5 @192134615 ndings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id
+
+## #17 weeks  needle="weeks"  hits=30
+- #0 @82267707 10px;serveuntilhandsCheckSpacequeryjamesequaltwice0,000Startpanelsongsroundeightshiftworthpostsleadsweeksavoidthesemilesplanesmartalphaplantmarksratesplaysclaimsalestextsstarswrong</h3>thing.org/multiheard
+- #1 @88158642 y.Array.gray.Garay.currencyDisplay.unitDisplay.compactDisplay.daysDisplay.hoursDisplay.yearsDisplay.weeksDisplay.monthsDisplay.minutesDisplay.microsecondsDisplay.nanosecondsDisplay.millisecondsDisplay.trai
+- #2 @88260180 ://node/async/hooks.Expected an array of chunks.recurse symlinks.too many links.symbolic links.Bhks.weeks.Encountered out-of-order sparse blocks.new.target is only valid inside functions or static blocks.B
+- #3 @88343363 h slow path alloc, where N is specified by this option.Cannot total a duration of years, months, or weeks without a relativeTo option.Cannot compare a duration of years, months, or weeks without a relative
+- #4 @88343444  years, months, or weeks without a relativeTo option.Cannot compare a duration of years, months, or weeks without a relativeTo option.Cannot round a duration of years, months, or weeks without a relativeTo
+- #5 @88343523 of years, months, or weeks without a relativeTo option.Cannot round a duration of years, months, or weeks without a relativeTo option.Temporal.Instant.prototype.round requires a roundTo option.Temporal.Dur
+- … +24 more
+
+## #17 ask before  needle="ask before"  hits=14
+- #0 @96962332  for one. If you didn't enter the worktree yourself this job, or you're in the user's own checkout, ask before committing or switching branches.....A>..#. .B.a.c.k.g.r.o.u.n.d. .S.e.s.s.i.o.n.
+.
+.T.h.i.s. .s.e.
+- #1 @98919204 .V	.^@internal(?:\b|$)......K...https://code.claude.com/docs/en.........Valid modes: "acceptEdits" (ask before file changes), "plan" (analysis only), "bypassPermissions" (auto-accept all), or "default" (standar
+- #2 @100494586 ..>.......Cannot destructure property 'tab' from null or undefined value..1.......Claude Code won't ask before using allowed tools....F.......Claude Code will always ask for confirmation before using these tool
+- #3 @100981435 .Subtasks are not available in coordinator sessions. Use /branch instead.9...nS..Cannot start a subtask before the first conversation turn...(....y}.file:///B:/%7EBUN/root/chunk-r4a92rz5.js....Y...Only show ena
+- #4 @179423499 ==="permissions.defaultMode"&&e.code==="invalid_value",tip:{suggestion:'Valid modes: "acceptEdits" (ask before file changes), "plan" (analysis only), "bypassPermissions" (auto-accept all), or "default" (standar
+- #5 @186398858 the file's contents before pushing. In short: only take risky actions carefully, and when in doubt, ask before acting. Follow both the spirit and letter of these instructions - measure twice, cut once.`}functio
+- … +8 more
+
+## #17 Resume?  needle="Resume?"  hits=7
+- #0 @189438818 mplete,E)};handleReadable=()=>{let t=performance.now();if(t-this.lastStdinTime>iE)this.props.onStdinResume?.();this.lastStdinTime=t;try{let o;while((o=this.props.stdin.read())!==null)this.processInput(o)}cat
+- #1 @189445093 =b.n;if(m>=sE)t.internal_eventEmitter.emit("arrow-burst",{direction:u.name,count:m}),t.props.onStdinResume?.(),h.length=0}class yje extends k8{key;name;sequence;ctrl;shift;meta;superKey;fn;soloKeypress;const
+- #2 @191621376 st:null,authVersion:0,policyVersion:0,initialMessage:he?{message:He({content:String(he)})}:o.replyOnResume?{replay:!0}:null,...fPe(o.effort,G),ultracode:RFt(o.effort,G),cacheMissAckedAtOutputTokens:-1,autoCo
+- #3 @191689508 ch({pid:x.pid})})}wirePty(e){this.pty=e,this.transitionTo({kind:"running"}),this.decModes=y$e(),e.onResume?.(()=>{this.rv?.send({type:"repaint"})}),this.offData=e.onData((i)=>{if(this.decModes.feed(i)&&this.
+- #4 @200826018 )},persistSession:Vt}),or=this.hasHandledOrphanedPermission?void 0:xe,kr=this.hasHandledDeferredToolResume?void 0:$e;if(or)this.hasHandledOrphanedPermission=!0;if(kr)this.hasHandledDeferredToolResume=!0;if(y
+- #5 @201712424 Prompt??"").includes(Xe)?[Xe]:[]],Sr=[...Ge!==null?["--resume",Ge,"--fork-session"]:[],...i?.replyOnResume?["--reply-on-resume"]:[],...i?.keepParent?$Be(M):M,...Q.flatMap((T)=>["--add-dir",T]),...z.flatMap((
+- … +1 more
+
+## #18 willInsertNewline  needle="willInsertNewline"  hits=5
+- #0 @92722828 and......;9.section.
+.......newsession.......d..relaunchForUpdate......%...searchKeyDown.......wM..willInsertNewline........=r.canonicalLauncherCwd.....aU.launcherCwd.	.......cwdFilter........3..allRepos...f...templ
+- #1 @192073232 wn:p,offset:B,setOffset:k};return{query:ee,queryRef:re,setQuery:Ke,cursorOffset:B,cursorOffsetRef:Z,willInsertNewline:xe,setCursorOffset:k,handleKeyDown:(y)=>{if(!C){p(y);return}if(!n)return;if(y.name==="escape"&&g.mo
+- #2 @192159028 n:S,view:h,attach:C,storageV5:x,credentials:A,onAction:F,exit:T,relaunchForUpdate:P,searchKeyDown:V,willInsertNewline:K,canonicalLauncherCwd:W,launcherCwd:Y,effectiveCwd:Z,scopedFallbackOrigin:ee,cwdFilter:X,dispatchD
+- #3 @192269870 Open(!Ae)},un=!Y&&!We&&ct===null&&Ie===null&&Ft===null&&Fe===null,{query:Xe,queryRef:Yo,setQuery:yo,willInsertNewline:iu,setCursorOffset:Gs,handleKeyDown:hr,handlePaste:cn,vimMode:hg}=Zu({buffer:Ne,isActive:un,multili
+- #4 @192279873 iew:he,attach:yt,storageV5:T,credentials:W,onAction:i,exit:pt,relaunchForUpdate:fu,searchKeyDown:hr,willInsertNewline:iu,vimMode:hg,dispatchInputActive:un,canonicalLauncherCwd:At,launcherCwd:dt,effectiveCwd:mt,scopedF
+
+## #19 Open in a terminal  needle="Open in a terminal"  hits=2
+- #0 @92727268  again to delete......{.ctrl+x again to delete......I...not deleted.....y.k.o.p.e.n.i.n.g.& ....{...Open in a terminal......b...continue it there...........focusFg.........isOrigin....1.K.logTail......o>.showVerb.....
+- #1 @192201067 opening\u2026"}):Wr?e(t,{wrap:"truncate",children:r(ue,{children:[e(t,{color:"suggestion",children:"Open in a terminal"}),e(t,{dimColor:!0,children:"continue it there"})]})}):wp?e(t,{wrap:"truncate",children:r(ue,{chil
+
+## #19 continue it there  needle="continue it there"  hits=4
+- #0 @92727296 +x again to delete......I...not deleted.....y.k.o.p.e.n.i.n.g.& ....{...Open in a terminal......b...continue it there...........focusFg.........isOrigin....1.K.logTail......o>.showVerb.......loopKickCount...	...>j..c
+- #1 @94921037 ession moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).....$.n.Automatic continue cancelled . sending this session to the cloud, so the task will not res
+- #2 @189562235 ession moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there)",cloud_handoff:"Automatic continue cancelled \xB7 sending this session to the cloud, so the task w
+- #3 @192201116 :r(ue,{children:[e(t,{color:"suggestion",children:"Open in a terminal"}),e(t,{dimColor:!0,children:"continue it there"})]})}):wp?e(t,{wrap:"truncate",children:r(ue,{children:[e(t,{color:Ur.color,dimColor:Ur.dim,childr
+
+## #19 already open in another running  needle="already open in another running"  hits=1
+- #0 @189673903 tialPrompt&&await pt(r,g,t.initialPrompt,o),error:ie.kind==="interactive"?v$e:"This conversation is already open in another running Claude session \u2014 use that one, or close it and try again",errorCode:"resume_session_live_elsew
+
+## #20 unpushed:  needle="unpushed:"  hits=1
+- #0 @189689950 etached",msg:p.msg.replace(Wye,"")};return{kind:"detached"}}var ei={dirty:"has uncommitted changes",unpushed:"has commits that are not pushed anywhere",in_use:"is claimed by another running job",live_lock:"is 
+
+## #21 hookName schema  needle="schema"  hits=2569
+- #0 @42269512 .M.H.,arg HIDH....D..DDEN..H......H.M.A............W	.M..E.....@rM.P.9.s(.U.H.M...H.a HIDDENH.T..H.,schema H.....H.._...H.M.A.............M..E..P.9.s..U.H.M......)..H...9..H.M.A..........H.E.H..t..M......}.
+- #1 @68171823 nt,
+      severity,
+      position,
+      internalPosition,
+      internalQuery,
+      where,
+      schema,
+      table,
+      column,
+      dataType,
+      constraint,
+      file,
+      line,
+      routine
+- #2 @68172496 this.internalQuery = internalQuery;
+    if (where !== @undefined)
+      this.where = where;
+    if (schema !== @undefined)
+      this.schema = schema;
+    if (table !== @undefined)
+      this.table = table;
+- #3 @68172530 ;
+    if (where !== @undefined)
+      this.where = where;
+    if (schema !== @undefined)
+      this.schema = schema;
+    if (table !== @undefined)
+      this.table = table;
+    if (column !== @undefined)
+  
+- #4 @68172539 (where !== @undefined)
+      this.where = where;
+    if (schema !== @undefined)
+      this.schema = schema;
+    if (table !== @undefined)
+      this.table = table;
+    if (column !== @undefined)
+      this.
+- #5 @82274288 ody 10px 0pragmafridayjuniordollarplacedcoversplugin5,000 page">boston.test(avatartested_countforumsschemaindex,filledsharesreaderalert(appearSubmitline">body">
+* TheThoughseeingjerseyNews</verifyexpertinju
+- … +2563 more
+
+## #21 waitingFor hook  needle="waitingFor"  hits=21
+- #0 @92452936 substring...........yes-dont-ask-again-domain.......|.{.inline......l[..permission prompt...
+.......waitingFor..........delegatedActive.....N4.isQueryActive........rD.worker request......!.-.workerSandboxPromp
+- #1 @95309280 .<s.worklet.E...b...part of the page started outside the preview sandbox; preview stopped........V..waitingForDebugger..	...<...download:.......I...suggestedFilename.........T.popup:..........Page.handleJavaScr
+- #2 @181016933 "?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.sta
+- #3 @181016953 void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entryp
+- #4 @181016977 logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statusUpdatedAt),entrypoint:typeof o.entrypoint
+- #5 @192120439 .updatedAt??i.startedAt).toISOString();return{state:i.state??i.status??"running",detail:i.detail??i.waitingFor??"",tempo:i.tempo??(i.status==="busy"?"active":i.status==="waiting"?"blocked":"idle"),needs:i.needs
+- … +15 more
+
+## #27 cli_bg_logs  needle="cli_bg_logs"  hits=3
+- #0 @93493780 es: .....Sr.claude logs <id>6...E...Print the background session's recent terminal output........>R.cli_bg_logs.......}.Couldn't read logs for .A....Z..Cannot destructure property 'replay' from null or undefined
+- #1 @189642543 E.type==="snapshot")k(),p(E.streamTail)},(E)=>{k(),p(E)})});if(typeof r==="string")return await En("cli_bg_logs","read_failed"),process.stderr.write(`Couldn't read logs for ${o} \u2014 ${Ig(r)}
+`),Pi(1);let{repl
+- #2 @189642807 ut.rows||9999,m=process.stdout.isTTY?"\x1B[0m"+(d?SI(u,1)+`
+`:""):"";return await ov(i+m),await Ns("cli_bg_logs"),Pi(0)}var Io=60000,Oo=2000;function xo(e){if(e.includes(Bye)){if(e.includes(SIe)||/upgrad/i.test(
+
+## #27 async function Pmr  needle="async function Pmr("  hits=1
+- #0 @189642272 ' to list running sessions.
+`:`Ambiguous prefix '${e}', matches: ${d.join(", ")}
+`),process.exit(1)}async function Pmr(e,t){let o=await dn(e,"claude logs <id>","Print the background session's recent terminal output.",t)
+
+## #27 function Nj(  needle="function Nj("  hits=4
+- #0 @187437306 E} filtered out, ${u.length} visible (${e.length-g} remaining on disk)`);return{logs:u,nextIndex:g}}function Nj(){Dcn()?.cleanupTerminalModes()}var rtr=10,gOe=5000,otr=3,qsr=50,Ksr=60000,Ysr=10,Xsr=1e4,Jsr=15000,
+- #1 @199783806 {r(f.origin??"array")}`;default:return"\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF"}}};function Nj(){return{localeError:Uj()}}q_.exports=Lr.default});var G_=d(function(Ur,V_){var Zj=Ur&&Ur.__createBi
+- #2 @218520308 ight",i.height+t.padding),mi(t,s),t.intersect=function(l){return ei.rect(t,l)},n},"note"),IOe=m7t});function Nj(e,t,r,n){let i=[],a=o(l=>{i.push(l,0)},"addBorder"),s=o(l=>{i.push(0,l)},"skipBorder");t.includes("t
+- #3 @223016231 a.push({event:c,listeners:b}))}function Mj(a){Xg(a,
+0)}function fd(a){var b=Ib(a);if(jg(b))return a}function Nj(a,b){if("change"===a)return b}function Yg(){oc&&(oc.detachEvent("onpropertychange",Zg),pc=oc=null)}f
+
+## #28 mid-emoji changelog  needle="cut off mid-emoji"  hits=1
+- #0 @189843154 psis\n- Fixed a stray garbled character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due to concurrent write
+
+## #34 MCP server needs  needle="server needs"  hits=12
+- #0 @92407343  settings need your review before they apply..... ...Teammate setup needs your input.....O]l.An MCP server needs your input......tBZ.elicitation_url_dialog......c.%.agent_needs_input........;	.input needed.....].
+- #1 @93411052 k Claude to trim agent descriptions in .claude/agents/.......&i. MCP........authentication..........server needs....w.?.servers need........ . run /mcp.........socket_dir_refused..........lastStartFailureCause...
+- #2 @100878344 l.s.....h&..MCP server disabled.......8.MCP connection......MG.." needs authentication......s...MCP server needs authentication.....L.#.MCP dial failed.'...4...Discovery cache write-through skipped: .".......Norm
+- #3 @201566839 ,render:(i)=>r(Gp,{status:"warning",children:[i.mcpNeedsAuthCount," MCP"," ",I(i.mcpNeedsAuthCount,"server needs","servers need")," ","authentication",e(t,{dimColor:!0,children:" \xB7 run /mcp"})]})},Bf={id:"cros
+- #4 @202580429 iew before they apply",[XFe.kind]:Dm,[sme.kind]:"Teammate setup needs your input",[gF.kind]:"An MCP server needs your input"},oq={[gF.kind]:"elicitation_url_dialog",[sme.kind]:"agent_needs_input"},EFe={[ame.kind]
+- #5 @207024237 ?`${g} rejected your /design-login credential (HTTP 403). Your `+"token may be missing a scope this server needs \u2014 run /design-login "+"to re-authorize it, or check that your account has access.":`${g} rejec
+- … +6 more
+
+## #34 servers need  needle="servers need"  hits=3
+- #0 @93411072 nt descriptions in .claude/agents/.......&i. MCP........authentication..........server needs....w.?.servers need........ . run /mcp.........socket_dir_refused..........lastStartFailureCause...........Cross-sessio
+- #1 @187242221 This session is non-interactive, so Claude cannot run the OAuth flow here. Tell the user that these servers need to be authorized \u2014 for claude.ai connectors, via their claude.ai connector settings; for other
+- #2 @201566854 Gp,{status:"warning",children:[i.mcpNeedsAuthCount," MCP"," ",I(i.mcpNeedsAuthCount,"server needs","servers need")," ","authentication",e(t,{dimColor:!0,children:" \xB7 run /mcp"})]})},Bf={id:"cross-session-messa
+
+## #35 no worktree lock names  needle="no worktree lock names this process"  hits=2
+- #0 @100802349 p_path.!...s...[worktree] bg boot: not adopting .......r.V.[worktree] bg boot: adopted (....?<. but no worktree lock names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 o
+- #1 @204223417 await ne(250),h=await pGe(e,m,g,"session"),h&&!await U(e,m))n(`[worktree] bg boot: adopted ${e} but no worktree lock names this process`,{level:"warn"})}if(!h)return null;let E={originalCwd:m,worktreePath:e,worktreeName:g,worktreeBranc
+
+## #35 git worktree lock --reason  needle="worktree\",\"lock\""  hits=1
+- #0 @186343973 ${r} (pid ${process.pid} start ${u})`:`claude ${o} ${r} (pid ${process.pid})`,g=()=>We(tt(),[...Zt,"worktree","lock","--reason",p,e],{cwd:t,env:Vo()}),k=await g();if(k.code===0)return!0;let E;try{E=await tae(e,t)}cat
+
+## #36 composition  needle="composition"  hits=162
+- #0 @81942646 ents_Sup.Tangut_Components_Supplement..Tolong_Siki.Tolong_Siki..ccc.Canonical_Combining_Class..dt.Decomposition_Type..None.None.none..Can.Canonical.can..Com.Compat.com..Enc.Circle.enc..Fin.Final.fin..Font.Font.f
+- #1 @82326112 n) no-repeatcollections.JPG|thumb|participate/head><bodyfloat:left;<li class="hundreds of
+
+However, compositionclear:both;cooperationwithin the label for="border-top:New Zealandrecommendedphotographyinteresting&
+- #2 @82359068 t"</head>
+<body aspects of thehas since beenEuropean Unionreminiscent ofmore difficultVice Presidentcomposition ofpassed throughmore importantfont-size:11pxexplanation ofthe concept ofwritten in the	<span class=
+- #3 @85781200 ckOtherNumericcjkprimarynumerickPrimaryNumericcjkrsunicodekRSUnicodecompexFull_Composition_ExclusioncompositionexclusioncwcfcwcmcwkcfcwlcwtcwudashdecompositionmappingDecomposition_MappingdecompositiontypeDecompo
+- #4 @85781248 krsunicodekRSUnicodecompexFull_Composition_ExclusioncompositionexclusioncwcfcwcmcwkcfcwlcwtcwudashdecompositionmappingDecomposition_MappingdecompositiontypeDecomposition_Typedefaultignorablecodepointdepdeprecate
+- #5 @85781268 compexFull_Composition_ExclusioncompositionexclusioncwcfcwcmcwkcfcwlcwtcwudashdecompositionmappingDecomposition_MappingdecompositiontypeDecomposition_TypedefaultignorablecodepointdepdeprecateddidiadiacriticdmeaE
+- … +156 more
+
+## #45 ctrl+enter to start and open  needle="ctrl+enter to start and open"  hits=2
+- #0 @92729464 name........ctrl+e to set group......t.ctrl+s to switch views......+...ctrl+j for newline......~...ctrl+enter to start and open........@ to mention
+....l$.ctrl+t to .......!~.unpin...
+....!).pin to top.......V..alt+1.........U.
+- #1 @192220684 o set group");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if(Uf)no.push(`ctrl+t to ${Hf?"unpin":"pin to top"}`);if(Ds>0)no.pu
+
+## #45 $f)no.push("ctrl+enter  needle="$f)no.push(\"ctrl+enter"  hits=1
+- #0 @192220672 sh("ctrl+e to set group");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if(Uf)no.push(`ctrl+t to ${Hf?"unpin":"pin to top
+
+## #12-WIN32_INPUT_MODE-win @187972832
+CUS_EVENTS:1004,BRACKETED_PASTE:2004,THEME_NOTIFY:2031,SYNCHRONIZED_UPDATE:2026,WIN32_INPUT_MODE:9001};function CH(E){return Rp(`?${E}h`)}function Hj(E){return Rp(`?${E}l`)}var Eje=CH(wf.SYNCHRONIZED_UPDATE),she=Hj(wf.SYNCHRONIZED_UPDATE),AHt=CH(wf.BRACKETED_PASTE),kje=Hj(wf.BRACKETED_PASTE),qot=CH(wf.FOCUS_EVENTS),Axe=Hj(wf.FOCUS_EVENTS),xHt=CH(wf.THEME_NOTIFY),Tje=Hj(wf.THEME_NOTIFY),dT=CH(wf.CURSOR_VISIBLE),z0=Hj(wf.CURSOR_VISIBLE),Kot=CH(wf.ALT_SCREEN_CLEAR),lNn=Hj(wf.ALT
+
+## #12-WIN32 hit@187972832 fn=function  @187971910
+## #12-WIN32-body function  @187971910
+len=36 sha=d71073dc0f61893e
+function pT(){return n.of(z().host)}
+
+## #12-Yot-disable @187973247
+REEN_CLEAR),lNn=Hj(wf.ALT_SCREEN_CLEAR),Yot=Hj(wf.WIN32_INPUT_MODE),_=CH(wf.MOUSE_NORMAL)+CH(wf.MOUSE_BUTTON)+CH(wf.MOUSE_ANY)+CH(wf.MOUSE_SGR),t=CH(wf.MOUSE_NORMAL)+CH(wf.MOUSE_SGR),d1=Hj(wf.MOUSE_SGR)+Hj(wf.MOUSE_ANY)+Hj(wf.MOUSE_BUTTON)+Hj(wf.MOUSE_NORMAL);function A8(E){switch(E){case"full":return _;case"scroll":return t;case"off":ret
+
+## #12-applyFleetViewHostWindowsEnv @92525689
+seedHostJobs' from null or undefined value.W....>n.Cannot destructure property 'applyFleetViewHostWindowsEnv' from null or undefined value.Y...Wg..Cannot destructure property 'mountFleetViewWithComposerBack' from null or undefined value...N...K...Cannot destructure property 'crea
+
+## #12-fleetWin@92525689 hit@92525689 fn=MISS @-1
+NO_FN
+
+## #12-fleetWin@92526256 hit@92526256 fn=MISS @-1
+NO_FN
+
+## #12-fleetWin@101817069 hit@101817069 fn=MISS @-1
+NO_FN
+
+## #12-fleetWin@178180255 hit@178180255 fn=function  @178169596
+## #12-fleetWin@178180255-body function  @178169596
+MISS {"i":178169596,"missEnd":true,"preview":"function At(){let n=OSt(process.argv);if(n)console.error(n),process.exit(1);let t=process.argv.slice(2);if((t.length===1||t.length===2&&t[1]===\"--verbose\")&&(t[0]===\"--version\"||t[0]===\"-v\"||t[0]===\"-V\")){if(console.log(`${{ISSUES_EXPLAINER:\"report the issue at https://github.com"}
+
+## #15-agentsTrustDecision-T @191847905
+len=104 sha=cf8fc01922dce784
+function T(){if(Me(!1)||Boolean(a.IS_DEMO)||a.CLAUBBIT)return"skip";return Jo()&&!cre()?"trusted":"ask"}
+
+## #15-T-win @191847905
+/chunk-90xxmjzx.js";function T(){if(Me(!1)||Boolean(a.IS_DEMO)||a.CLAUBBIT)return"skip";return Jo()&&!cre()?"trusted":"ask"}async function B(s,i,t){switch(i){case"skip":if(!a.CLAUBBIT&&Jo()){Sx(!0);let{primePlanSlugCollisions:o}=await import("B:/~BUN/root/chunk-63yqfkx8.js");o(t)}{let{capturePolicySnapshot:o}=await import("B:/~BUN/root/chunk-1rtne3hy.js");o()}return;case"trusted":{Sx(!0);let[{primePlanSlugCollisions:o},{capturePolicySnapshot:r}]=await Promise.all([import("B:/~BUN/root/chunk-63yqfkx8.js"),import("B:/~BUN/root/chunk-1rtne3hy.js")]);o(t),r();return}case"ask":{let[{AppRoot:o},{TrustDialog:r},{getCommands:n}]=await Promise.all([import("B:/~BUN/root/chunk-bavegsst.js"),import("B:/~BUN/root/chunk-xm96b37r.js"),import("B:/~BUN/root/chunk-f3m0fx0a.js")]),p=await n(te(),t).catch(()=>[]);await new Promise((k)=>{s.render(e(o,{session:z(),storageV5:t,children:e(r,{commands:p,onDone:()=>k()})},"agents-trust"))}),Sx(!0);let{clearPluginCache:c}=await import("B:/~BUN/root/chunk-nav78fzr.js");c("post-trust: re-discover project @skills-dir plugins");let[{resetGrowthBook:m,initializeGrowthBook:u},{primePlanSlugCollisions:l},{logError:d},{capturePolicySnapshot:g}]=await Promise.all([import("B:/~BUN/root/c
+
+## #16-loadPrStatusCache-win @92720252
+LoopTranscript.......J..fetchPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat.........clearFleetViewHeartbeat......ks.watchJobDirOnce......<..adoptedPeers
+....q..remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHo
+
+## #16-loadPr@92720252 hit@92720252 fn=MISS @-1
+NO_FN
+
+## #16-loadPr@96677404 hit@96677404 fn=function  @96584958
+## #16-loadPr@96677404-body function  @96584958
+MISS {"i":96584958,"missEnd":true,"preview":"function named at the top of this file or imported from one of the module's own files.,.......\" is passed in a call with a spread argument\n...I.l.the callee..\r.......argumentsRead...A...I}/.Cannot destructure property 'l"}
+
+## #16-loadPr@97377868 hit@97377868 fn=MISS @-1
+NO_FN
+
+## #16-loadPr@184559528 hit@184559528 fn=function  @184559295
+## #16-loadPr@184559528-body function  @184559295
+len=300 sha=47077b3550afa3f2
+function uXe(e){let t=new Map,r;try{r=q(e)}catch{return t}if(r===null||typeof r!=="object"||Array.isArray(r))return t;let o=0;for(let[u,p]of Object.entries(r)){let g=RJt().safeParse(p);if(g.success)t.set(u,g.data);else o++}if(o>0)n(`loadPrStatusCache: dropped ${o} malformed cache entries`);return t}
+
+## #16-persistPrStatusCache-win @92720280
+hPrStatusBatch......M...fetchPrStatusByUrl..........loadPrStatusCache.......N.".persistPrStatusCache........touchFleetViewHeartbeat.........clearFleetViewHeartbeat......ks.watchJobDirOnce......<..adoptedPeers
+....q..remoteJobs........}.remoteListLoaded......m.pendings..../G=.statuses....;W..terminalHolders.
+....]c.prStatuses..	.
+
+## #16-persistPr@92720280 hit@92720280 fn=MISS @-1
+NO_FN
+
+## #16-persistPr@97377836 hit@97377836 fn=MISS @-1
+NO_FN
+
+## #16-persistPr@184558867 hit@184558867 fn=function  @184558619
+## #16-persistPr@184558867-body function  @184558619
+len=372 sha=bfeb4eac3fbfa629
+function q$n(e,t){let r={};for(let[u,p]of e)if(p)r[u]=p;let o=S(r);if(o==="{}"||!JE().notePersistedCacheBody(o))return Promise.resolve();if(D()&&t)return Promise.resolve().then(()=>t.write(hXe,o,{mode:438&~process.umask()})).then((u)=>{if(!u.ok)n(`persistPrStatusCache: ${u.error.code}`)}).catch((u)=>{n(`persistPrStatusCache: ${l(u)}`)});return Hn(gXe(),o).catch(()=>{})}
+
+## #19-Open-in-a-terminal @92727268
+..{.ctrl+x again to delete......I...not deleted.....y.k.o.p.e.n.i.n.g.& ....{...Open in a terminal......b...continue it there...........focusFg.........isOrigin....1.K.logTail......o>.showVerb.......loopKickCount...	...>j..childRows.........c.groupEditing.....-C.deleteArmed....
+
+## #19-OpenTerm hit@92727268 fn=MISS @-1
+NO_FN
+
+## #19-already-open-conv @189673882
+),{ok:!1,alive:!1,state:g,queued:!!t?.initialPrompt&&await pt(r,g,t.initialPrompt,o),error:ie.kind==="interactive"?v$e:"This conversation is already open in another running Claude session \u2014 use that one, or close it and try again",errorCode:"resume_session_live_elsewhere"}}let Je=Tpe(Ye??g.respawnFlags),me=Re?[]:J
+
+## #19-alreadyOpen hit@189673882 fn=function  @189669513
+## #19-alreadyOpen-body function  @189669513
+MISS {"i":189669513,"missEnd":true,"preview":"function p$e(e,t,o){let r=Kn(e),i=t?.knownState,d=Zn(e);if(d){n(`bg: respawn of ${e} waiting on its in-flight spawn`);let J=await d;if(Uu(r),i=void 0,!J.ok&&!J.alive){y(\"job_respawn\",\"in_flight_spawn_failed\");let ie=await nr(r,o),se=!!t?.initialPrompt&&ie!==null&&await pt(r,ie,t."}
+
+## #20-unpushed-map @189689950
+var ei={dirty:"has uncommitted changes",unpushed:"has commits that are not pushed anywhere",in_use:"is claimed by another running job",live_lock:"is locked \u2014 in use by another live session, or locked by hand",occupied:"is the working d
+
+## #20-unpushed hit@189689950 fn=function  @189685174
+## #20-unpushed-body function  @189685174
+len=4736 sha=2e847383d95de128
+function hqt(e,t={}){vnr(e,t.storageV5),n("[PERF:bg-attach-start]"),Exe();let o=PGe,r=HGe,i={holdScreenOnDisconnect:!0,alreadyInAlt:t.alreadyInAlt,gateStdinUntilFirstFrame:t.gateStdinUntilFirstFrame},d={...i,holdingFrame:!0,gateStdinUntilFirstFrame:!1},u=t.gesture??{gestureId:qo(),attempt:0,interactive:{}},m=!t.alreadyInAlt,p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}}),k;if(p.outcome==="error"&&p.msg&&o.test(p.msg)){if(k=await RD({forceTransient:!0},t.storageV5),k.ok)p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}})}for(let A=0;p.msg&&r.test(p.msg)&&A<20;A++)await ne(500),p=await Qe(e,{...i,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});let E=async()=>{if(m)process.stdout.write(WE());let A=await dr(e,u,t.storageV5);if(A)return A;return y("job_attach","job_attach_crashed"),{kind:"error",orphaned:!0,msg:"Session crashed \u2014 press Enter to respawn"}};while(p.outcome==="disconnected"){let g=Math.max(1,(process.stdout.columns??80)-15);process.stdout.write(`\x1B7${SI(1,g)}\x1B[2;7m${" Reconnecting\u2026 "}\x1B[0m\x1B8`);let x;if(process.stdin.isTTY){let C="isRaw"in process.stdin?Boolean(process.stdin.isRaw):!1;if(!C)cv(process.stdin,!0);let N=Yn(process.stdin);try{x=await Promise.race([RD({forceTransient:!0},t.storageV5),N.promise.then(()=>"detach")])}finally{if(N.cancel(),!C)cv(process.stdin,!1)}}else x=await RD({forceTransient:!0},t.storageV5);if(x==="detach"){if(m)process.stdout.write(WE());return n("[PERF:bg-attach-end]"),b("job_attach"),Ee(u,"detached"),{kind:"detached"}}let R=x;if(!R.ok){if(m)process.stdout.write(WE());return f("job_attach",`job_attach_daemon_start_failed_${R.causeCode}`),Ee(u,"error"),{kind:"error",msg:`Couldn't restart the ${xc()} \u2014 ${R.reason}`}}let M=Exe();if(M&&At(M)){if(m)process.stdout.write(WE());return n("[PERF:bg-attach-end]"),b("job_attach"),Ee(u,"detached"),{kind:"detached"}}if(await vt(e))return n(`[bg-attach] worker gone on reconnect probe short=${e} \u2014 settled while attached`),E();p=await Qe(e,{...d,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});for(let C=0;p.msg&&r.test(p.msg)&&C<10;C++)await ne(200),p=await Qe(e,{...d,telemetry:{gestureId:u.gestureId,attempt:++u.attempt,t0:u.t0,surface:u.surface,daemonBooted:u.daemonBooted,interactive:u.interactive,storageV5:t.storageV5}});if(p.msg?.includes("ENOJOB"))return n(`[bg-attach] ENOJOB on reconnect short=${e} \u2014 daemon has no handle (or it's killing/settled)`),E();if(p.outcome==="error"&&m)process.stdout.write(WE())}if(p.outcome==="detached"&&p.msg&&(OGe.test(p.msg)||r.test(p.msg))){if(m)process.stdout.write(WE());return f("job_attach","job_attach_stalled"),{kind:"error",msg:p.msg.replace(/^E(STALLED|RESPAWNING|STARTING):\s*/,"")}}if(p.outcome==="error"){if(p.msg?.startsWith(`${MGe}:`)){f("job_attach","job_attach_host_dead");let g=await nr(Kn(e),t.storageV5).catch(()=>null),x=p.msg.slice(MGe.length+1).trim();return{kind:"error",msg:g!==null&&sS(g)?x:`${x} \u2014 press Enter to restart it`}}if(p.msg?.startsWith(`${Et}:`)){f("job_attach","job_attach_no_response");let g=await nr(Kn(e),t.storageV5).catch(()=>null);if(g!==null&&sS(g))return{kind:"error",msg:`${st} \u2014 it runs a shell command, which is never run again for you; ctrl+x stops it`};return{kind:"error",notResponding:!0,msg:`${st} \u2014 press Enter again to restart it (the conversation is saved)`}}if(p.msg?.includes("ENOJOB")){n(`[bg-attach] ENOJOB on first attach short=${e} \u2014 daemon has no handle (or it's killing/settled)`);let g=await dr(e,void 0,t.storageV5);if(g)return g;return y("job_attach","job_attach_orphaned"),{kind:"error",orphaned:!0,msg:`${SV()} lost track of this job \u2014 press Enter to respawn it`}}if(k&&!k.ok)return f("job_attach",`job_attach_daemon_start_failed_${k.causeCode}`),Ee(u,"error"),{kind:"error",msg:`Couldn't start the ${xc()} \u2014 ${k.reason}`};let A=p.msg&&r.test(p.msg)?`${SV()} is still starting \u2014 try again in a moment`:p.msg&&o.test(p.msg)?`${SV()} didn't respond after starting \u2014 try again in a moment`:p.msg?`Couldn't attach \u2014 ${p.msg}`:"Couldn't attach to that session";return f("job_attach","job_attach_failed"),{kind:"error",msg:A}}if(n("[PERF:bg-attach-end]"),b("job_attach"),p.msg&&Wye.test(p.msg))return{kind:"detached",msg:p.msg.replace(Wye,"")};return{kind:"detached"}}
+
+## #27-Pmr-logs @189642272
+len=555 sha=90e236fb25f3e1ac
+async function Pmr(e,t){let o=await dn(e,"claude logs <id>","Print the background session's recent terminal output.",t),r=await new Promise((p)=>{let k=Pqt(o,500,(E)=>{if(E.type==="snapshot")k(),p(E.streamTail)},(E)=>{k(),p(E)})});if(typeof r==="string")return await En("cli_bg_logs","read_failed"),process.stderr.write(`Couldn't read logs for ${o} \u2014 ${Ig(r)}
+`),Pi(1);let{replay:i,cursorAddressed:d}=tr(r.join("")),u=process.stdout.rows||9999,m=process.stdout.isTTY?"\x1B[0m"+(d?SI(u,1)+`
+`:""):"";return await ov(i+m),await Ns("cli_bg_logs"),Pi(0)}
+
+## #27-Pmr-win @189642272
+
+`),process.exit(1)}async function Pmr(e,t){let o=await dn(e,"claude logs <id>","Print the background session's recent terminal output.",t),r=await new Promise((p)=>{let k=Pqt(o,500,(E)=>{if(E.type==="snapshot")k(),p(E.streamTail)},(E)=>{k(),p(E)})});if(typeof r==="string")return await En("cli_bg_logs","read_failed"),process.stderr.write(`Couldn't read logs for ${o} \u2014 ${Ig(r)}
+`),Pi(1);let{replay:i,cursorAddressed:d}=tr(r.join("")),u=process.stdout.rows||9999,m=process.stdout.isTTY?"\x1B[0m"+(d?SI(u,1)+`
+`:""):"";return await ov(i+m),await Ns("cli_bg_logs"),Pi(0)}var Io=60000,Oo=2000;function xo(e){if(e.includes(Bye)){if(e.includes(SIe)||/upgrad/i.test(e))return"Agent is updating to the new Claude Code\u2026";if(e.includes(fae))return"Session not responding \u2014 restarting it\u2026";if(e.includes(DGe))
+
+## #27-Nj-cleanup @187437306
+len=44 sha=fec2d507c605d60f
+function Nj(){Dcn()?.cleanupTerminalModes()}
+
+## #28-mid-emoji-context @189843154
+taining truncated text rendering one column too wide, and start-truncated text collapsing to an ellipsis\n- Fixed a stray garbled character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugi
+
+## #29-ctrlc-ui @92728832
+ from null or undefined value........B..press ctrl+c or q again to exit......v..Press Ctrl-C again to exit.......... will keep running.......wv.save....'>..deselect......A.stopped . ctrl+x again to delete . esc to keep..$...O...ctrl+x again to delete . esc to keep......U.ctrl+x.......... or enter to start........c. or enter to o
+
+## #29-ctrlc hit@192217064 fn=function  @192215805
+## #29-ctrlc-body function  @192215805
+MISS {"i":192215805,"missEnd":true,"preview":"function dd(qC){let Jf=g(40),{owners:zC,layout:YC,simpleView:li,dispatchDefaults:Os,groupInput:QC,suggestionsOpen:ed}=qC,{selection:XC,view:ZC,editor:eI,deleteConfirm:tI}=zC,{columns:sr}=we(),kf=Ze(XC,ww),{groupMode:vf,groupEdit:di,groupPickIdx:Rf,renaming:oI,previewOpen:_f,exitP"}
+
+## #35-wt-lock-warn @100802349
+h: ........has_backup_path.!...s...[worktree] bg boot: not adopting .......r.V.[worktree] bg boot: adopted (....?<. but no worktree lock names this process....Z..setup_started...	.......^v(\d+)\....9.......Error: Claude Code requires Node.js version 22 or higher....m.......[uds-messaging] Skipped: cross-session messag
+
+## #35-wtLock hit@100802349 fn=MISS @-1
+NO_FN
+
+## #45-ctrl-enter-hint @92729464
+o set group......t.ctrl+s to switch views......+...ctrl+j for newline......~...ctrl+enter to start and open........@ to mention
+....l$.ctrl+t to .......!~.unpin...
+....!).pin to top.......V..alt+1.........U. to open
+....87.ctrl+x to ........}. to go back.........esc to quit.....
+
+## #45-ctrlEnter hit@192220684 fn=function  @192220123
+## #45-ctrlEnter-body function  @192220123
+len=1177 sha=3623b53aea0f1119
+function Fs(bI){let wI=g(12),{focusedPinned:Hf,canReorder:Gf,canRename:Vf,canGroup:Wf,canPin:Uf,canMention:Kf,canSwitchViews:ud,canDispatchAndOpen:$f,altOpenCount:Ds,canDelete:cd,canGoBack:jf}=bI,vw;if(wI[0]!==Ds||wI[1]!==cd||wI[2]!==$f||wI[3]!==jf||wI[4]!==Wf||wI[5]!==Kf||wI[6]!==Uf||wI[7]!==Vf||wI[8]!==Gf||wI[9]!==ud||wI[10]!==Hf){let no=[];if(Gf)no.push(`shift+${O.arrowUp+O.arrowDown} to reorder`);if(Vf)no.push("ctrl+r to rename");if(Wf)no.push("ctrl+e to set group");if(ud){if(no.push("ctrl+s to switch views"),no.push("ctrl+j for newline"),$f)no.push("ctrl+enter to start and open")}if(Kf)no.push("@ to mention");if(Uf)no.push(`ctrl+t to ${Hf?"unpin":"pin to top"}`);if(Ds>0)no.push(`alt+1${Ds>1?`-${Ds}`:""} to open`);if(cd)no.push(`ctrl+x to ${cd}`);if(jf)no.push(`${O.arrowLeft} to go back`);no.push(ud?"esc to quit":"esc to close \xB7 esc again quits");no.push("? to close");let Rw=[];for(let pi=0;pi<no.length;pi=pi+2,pi)Rw.push(no.slice(pi,pi+2));vw=e(o,{flexShrink:0,paddingX:2,flexDirection:"row",gap:4,children:Rw.map(Bw)});wI[0]=Ds,wI[1]=cd,wI[2]=$f,wI[3]=jf,wI[4]=Wf,wI[5]=Kf,wI[6]=Uf,wI[7]=Vf,wI[8]=Gf,wI[9]=ud,wI[10]=Hf,wI[11]=vw}else vw=wI[11];return vw}

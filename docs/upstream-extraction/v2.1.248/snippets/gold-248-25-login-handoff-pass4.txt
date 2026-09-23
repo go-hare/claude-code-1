@@ -1,0 +1,45 @@
+# gold-248-25-login-handoff-pass4
+# when=2026-09-20T04:58:01.090Z
+
+## #25 login-chunk-start @205715000
+llowed";case"gateway_pin_unreadable":return"the credentials file that keeps the gateway's TLS pin could not be read (try again)";case"unknown_error":return"something unexpected went wrong (details with --debug)"}}function Q(o,s,i){if(s){let d=ue(s,i);return i?`Signed in to Cloud gateway ${o}, but couldn't load your organization's managed settings (${d})`:`Couldn't reload your organization's managed settings from Cloud gateway ${o} (${d})`}return i?`Signed in to Cloud gateway ${o}`:`Your organization's managed settings on Cloud gateway ${o} changed`}function inr(o,s,i,d=!Sc()){let c=d?"\u2026":" (this conversation is not saved, so it starts fresh)\u2026",m=Q(o,s,i);return s?`${m}. Restarting Claude Code to retry${c}`:`${m}. Restarting Claude Code to apply ${i?"your organization's managed settings":"them"}${c}`}function snr(o,s,i,d,c=!Sc()){return`${Q(o,s,d)}. ${s?"Claude Code has to restart to retry":`Claude Code has to restart to apply ${d?"your organization's managed settings":"them"}`}, and ${i}, so this session is ending instead. Your sign-in is saved: start claude again the same way${c?" (add --continue to return to this conversation)":""}.`}async function le(o,s,i){if(wo())return;let d=(y)=>kn(0,"other",{finalMessage:i(y)});if(await lR(Z1(o),o.storageV5),wo())return;if(_t())return d("a background session cannot restart itself (sign in from a session started directly with `claude`)");let c=he(o),m=wU(c,GC());if(m.length>0)return d(`this session has restrictions a restart can't carry over (${m.join("; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermissionContext:c};try{await _G({freshIfNoTranscript:!0,extraArgs:[...o5(c,wle(o)),...i5(c,AL())],proactivity:h,env:$B(),preSpawn:()=>process.stdout.write(`
+${s}
+`)},o.storageV5)}catch(y){return _(Ee(y)),d(`it could not restart itself (${l(y)})`)}}function Hke(o,s,i,{envTokenWasSet:d=!1,envWarningOnce:c}={}){if(i.gatewayLoginError!==void 0||i.relaunching)return[i.gatewayLoginError];let m=s?anr(o,i):void 0,h=unr({envTokenWasSet:d,gatewayActive:Le()==="gateway",willAutoQuery:m?.shouldQuery===!0});if(h==="out-of-band"&&c&&!c.delivered)c.delivered=!0,o.applyMessageOp({type:"append",messages:[It(Mxn,"notice
+
+## #25 lnr-before @205715658
+mething unexpected went wrong (details with --debug)"}}function Q(o,s,i){if(s){let d=ue(s,i);return i?`Signed in to Cloud gateway ${o}, but couldn't load your organization's managed settings (${d})`:`Couldn't reload your organization's managed settings from Cloud gateway ${o} (${d})`}return i?`Signed in to Cloud gateway ${o}`:`Your organization's managed settings on Cloud gateway ${o} changed`}function inr(o,s,i,d=!Sc()){let c=d?"\u2026":" (this conversation is not saved, so it starts fresh)\u2026",m=Q(o,s,i);return s?`${m}. Restarting Claude Code to retry${c}`:`${m}. Restarting Claude Code to apply ${i?"your organization's managed settings":"them"}${c}`}function snr(o,s,i,d,c=!Sc()){return`${Q(o,s,d)}. ${s?"Claude Code has to restart to retry":`Claude Code has to restart to apply ${d?"your organization's managed settings":"them"}`}, and ${i}, so this session is ending instead. Your sign-in is saved: start claude again the same way${c?" (add --continue to return to this conversation)":""}.`}async function le(o,s,i){if(wo())return;let d=(y)=>kn(0,"other",{finalMessage:i(y)});if(await lR(Z1(o),o.storageV5),wo())return;if(_t())return d("a background session cannot restart itself (sign in from a session started directly with `claude`)");let c=he(o),m=wU(c,GC());if(m.length>0)return d(`this session has restrictions a restart can't carry over (${m.join("; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermissionContext:c};try{await _G({freshIfNoTranscript:!0,extraArgs:[...o5(c,wle(o)),...i5(c,AL())],proactivity:h,env:$B(),preSpawn:()=>process.stdout.write(`
+${s}
+`)},o.storageV5)}catch(y){return _(Ee(y)),d(`it could not restart itself (${l(y)})`)}}function Hke(o,s,i,{envTokenWasSet:d=!1,envWarningOnce:c}={}){if(i.gatewayLoginError!==void 0||i.relaunching)return[i.gatewayLoginError];let m=s?anr(o,i):void 0,h=unr({envTokenWasSet:d,gatewayActive:Le()==="gateway",willAutoQuery:m?.shouldQuery===!0});if(h==="out-of-band"&&c&&!c.delivered)c.delivered=!0,o.applyMessageOp({type:"append",messages:[It(Mxn,"notice")]});return[dnr(s,{bridgeDisconnected:i.bridgeDisconnected,includeEnvTokenWarning:h==="inline"}),m]}function anr(o,s){if(s.accountSwitched||s.relaunching)return;let i=cb(o.messages);if(i?.isApiErrorMessage&&i.error==="authentication_failed")return{display:"system",shouldQuery:!0};return}var q="but if that variable is set in your shell profile or a Claude Code settings file, new `claude` sessions will keep using the old token until you remove it there.";function lnr(){return"Signed in. Review your organization's managed settings to continue."}function cnr(){return a.CLAUDE_CODE_OAUTH_TOKEN?`Warning: CLAUDE_CODE_OAUTH_TOKEN is set in your environment.
+
+## #25 qEt-full @201105981
+9rm.js";import{nv}from"B:/~BUN/root/chunk-q41r7ccn.js";import{Zd}from"B:/~BUN/root/chunk-1wh0pw80.js";import{NNe}from"B:/~BUN/root/chunk-9v3a1efe.js";import{e}from"B:/~BUN/root/chunk-8ap061gk.js";var qEt=(p,r)=>new Promise((i,s)=>{let o=!1,n=null;function a(){return n!==null&&!ed(n)}(async()=>{let{rerender:t,unmount:l,waitUntilExit:m}=await bR(e(Zd,{session:z(),children:e(NNe,{settings:p,reveal:"default",onAccept:()=>{if(!a())return!1;if(o=!0,i("approved"),r)t(null);else l()},onReject:()=>{if(!a())return!1;if(o=!0,i("rejected"),r)t(null);else l()}})},"managed-settings-security"),nv(!1));if(n=Date.now(),await m(),!o){let u=Error("Managed-settings consent dialog exited without an answer");_(u),s(u)}})().catch((t)=>{_(t),s(t)})});
+export{qEt};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{qEt}from"B:/~BUN/root/chunk-5pp1trz7.js";import"B:/~BUN/root/chunk-9v3a1efe.js";import"B:/~BUN/root/chunk-ncymer7j.js";import"B:/~BUN/root/chunk-xp3fs5hr.js";import"B:/~BUN/root/chunk-1t7qf5w9.js";import"B:/~BUN/root/chunk-zjmyxdw3.js";import"B:/~BUN/root/chunk-n7zy975b.js";import"B:/~BUN/root/chunk-jem588hv.js";import"B:/~BUN/root/chunk-67ctrnfz.js";import"B:/~BUN/root/chunk-4dkmxnjy.js";import"B:/~BUN/root/chunk-20376w6x.js";import"B:/~BUN/root/chunk-pa6z61cs.js";import"B:/~BUN/root/chunk-q41r7ccn.js";import"B:/~BUN/root/chunk-qc7yb3da.js";import"B:/~BUN/root/chunk-1wh0pw80.js";import"B:/~BUN/root/chunk-ex69cjb8.js";import"B:/~BUN/root/chunk-jcbzt3hb.js";import"B:/~BUN/root/chunk-at5j5pw7.js";import"B:/~BUN/root/chunk-82s06grw.js";import"B:/~BUN/root/chunk-54a0cekq.js";import"B:/~BUN/root/chunk-cjbhd436.js";import"B:/~BUN/root/chunk-jd5q8jsp.js";import"B:/~BUN/root/chunk-zmrgx8j3.js";import"B:/~BUN/root/chunk-jty8a3k6.js";import"B:/~BUN/root/chunk-jv55rszw.js";import"B:/~BUN/root/chunk-643pwskv.js";import"B:/~BUN/root/chunk-f8d55064.js";import"B:/~BUN/root/chunk-rv78qt7w.js";import"B:/~BUN/root/chunk-sne8sbfe.js";import"B:/~BUN/root/chunk-fb5412mq.js";import"B:/~BUN/root/chunk-sjzy6rec.js";import"B:/~BUN/root/chunk-cy1v9bmm.js";import"B:/~BUN/root/chunk-5svefzwm.js";import"B:/~BUN/root/chunk-bdwwg241.js
+
+## qEt lastFn  @-1
+## function tr( hits=30 179591066,180682292,180969613,181045175,181257050,181673806,183209472,183683642,189253759,189466795
+## #25 tr @190521361 len=332 sha=6cc7d43ae03c635c
+function tr(r,i,l){let d=ze(U0),f=typeof r==="function",h=f?r:null,m=f?i:r,C=f?void 0:i,x=E(h);x.current=h;let S=E(null),T=d?.setTimeout??u1,v=G(()=>{if(m===null)return Pie;let P=(M)=>(S.current=null,M(),T(()=>{if(S.current=P,f)x.current?.();else M()},m));return P},[T,m,f,C,...l??[]]),I=Ht(v,f?pr:()=>S.current===v);if(!f)return I}
+
+## #25 tr @190573284 len=83 sha=f9bf7e00ecf32a90
+function tr(){let{cursor:c,killed:C}=p.deleteWORDBefore();return Oe(C,"prepend"),c}
+
+## #25 tr @190734929 len=41 sha=c0c48e534ae37d1b
+function tr(e){return fe(e,"trigger_id")}
+
+## function zI(){ hits=1
+## #25 zI-noarg @178950160 len=264 sha=18c75ee094359f5d
+function zI(){if(typeof setImmediate==="function")return new Promise((e)=>setImmediate(e));if(typeof MessageChannel==="function")return new Promise((e)=>{let t=new MessageChannel;t.port1.onmessage=()=>{t.port1.close(),e()},t.port2.postMessage(null)});return ne(0)}
+
+## #25 IHn @190484440 len=213 sha=e101ae09758c38b8
+H0e(e,t,r).then((a)=>a?"refreshed":"failed",(a)=>(_(a),"failed"));try{let a=await un(Promise.race([c,d]),Qe);if(a===void 0)return y("remote_managed_settings_startup_await","deadline_expired"),"timed_out";return a}

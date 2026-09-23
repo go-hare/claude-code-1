@@ -1,0 +1,42 @@
+# gold-248-cut-extras
+
+## markMidConvCachePromotionRejected hits=5
+@99407328 supported.......8...midConvCachePromotionRejected...!.......markMidConvCachePromotionRejected........`..strictPrefixLockStoodDown........G..markStrictPrefixLockStoodDown...........perTurnEffortOkEmitted......X...markPerTurnEffortOkEmitted.."...dv..recordInferenceProfileBackingMod
+
+@101893893 inAgentIdmarkEffortUnsupportedmarkFirstTeleportMessageLoggedmarkMidConvCachePromotionRejectedmarkPerTurnEffortOkEmittedmarkPollEventIngressWiredmarkPostCompactionmarkRefusalFallbackHeaderArmedmarkRefusalFallbackOccurredmarkScrollActivitymarkStrictPrefixLockStoodDownmarkSyncedPlug
+
+@178545930 is.#o.add(e)}midConvCachePromotionRejected(){return this.#r}markMidConvCachePromotionRejected(){this.#r=!0}strictPrefixLockStoodDown(){return this.#i}markStrictPrefixLockStoodDown(){this.#i=!0}perTurnEffortOkEmitted(){return this.#a}markPerTurnEffortOkEmitted(){this.#a=!0}inferen
+
+@178582427 ePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockStoodDown()}function HEr(){n().host.requestLatches.markStrictPrefixLockStoodDown()}function dTn(){return n().host.requestL
+
+## midConvCachePromotionRejected hits=3
+@99407288 rtUnsupportedModels......N.markEffortUnsupported.......8...midConvCachePromotionRejected...!.......markMidConvCachePromotionRejected........`..strictPrefixLockStoodDown........G..markStrictPrefixLockStoodDown...........perTurnEffortOkEmitted......X...markPerTurnEffortOkEmitted..
+
+@178545883 ls(){return this.#o}markEffortUnsupported(e){this.#o.add(e)}midConvCachePromotionRejected(){return this.#r}markMidConvCachePromotionRejected(){this.#r=!0}strictPrefixLockStoodDown(){return this.#i}markStrictPrefixLockStoodDown(){this.#i=!0}perTurnEffortOkEmitted(){return this.#a}
+
+@178582356 nsupported(e)}function lTn(){return n().host.requestLatches.midConvCachePromotionRejected()}function cTn(){n().host.requestLatches.markMidConvCachePromotionRejected()}function uTn(){return n().host.requestLatches.strictPrefixLockStoodDown()}function HEr(){n().host.requestLatches.
+
+## FORCE_SESSION_PERSISTENCE hits=5
+@92481675 .S.I.O.N. .m.a.r.k.e.r...Q....... restart with CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 to keep future transcripts...H.....&.Cannot destructure property 'degradedStore' from null or undefined value....i..degradedStore...........Transcript writes are failing (.....x@.. . recent m
+
+@98855180 Context' from null or undefined value...%.......CLAUDE_CODE_FORCE_SESSION_PERSISTENCE...........show-environment....N...CLAUDE_CODE_PLAN_MODE_REQUIRED..........CLAUDE_CODE_CHILD_SESSION=..(.....@.file:///B:/%7EBUN/root/chunk-9yg51vax.js....7...forceUnavailable........forcedUnavai
+
+@178751394 LAUDE_CODE_FORCE_MID_CONVERSATION_SYSTEM:()=>ps,CLAUDE_CODE_FORCE_SESSION_PERSISTENCE:()=>Ls,CLAUDE_CODE_FORCE_STRIKETHROUGH:()=>cs,CLAUDE_CODE_FORCE_WINDOWS_CREDMAN:()=>Rs,CLAUDE_CODE_FORK_SUBAGENT:()=>As,CLAUDE_CODE_FORWARD_SUBAGENT_TEXT:()=>Ss,CLAUDE_CODE_GAULT_KESTREL:()=>Cr,
+
+@179897727 a.CLAUDE_CODE_CHILD_SESSION}function Kce(){if(a.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE)return!1;if(!(a.CLAUDE_CODE_CHILD_SESSION&&vu()&&!ha()))return!1;return!n().isChildSessionMarkerAmbientInTmux()}function ovr(e){n().setAmbientMarkerProbe(e??x)}function f(e){let t=null;return()=
+
+## sessionPersistenceDisabled() hits=2
+@178536738 his.#S}replaceSdkAgentProgressSummariesEnabled(e){this.#S=e}sessionPersistenceDisabled(){return this.#C}replaceSessionPersistenceDisabled(e){this.#C=e}sessionBypassPermissionsMode(){return this.#k}replaceSessionBypassPermissionsMode(e){this.#k=e}disableSlashCommands(){return this
+
+@178573970 enceDisabled(e)}function qC(){return n().host.launchOptions.sessionPersistenceDisabled()}function Avt(){return n().sessionFlags.hasExitedPlanMode()}function gD(e){n().sessionFlags.replaceHasExitedPlanMode(e)}function bEr(){return n().host.proactivity.selectorGate()}function _Er()
+
+## function qC() hits=2
+@178573926 n().host.launchOptions.replaceSessionPersistenceDisabled(e)}function qC(){return n().host.launchOptions.sessionPersistenceDisabled()}function Avt(){return n().sessionFlags.hasExitedPlanMode()}function gD(e){n().sessionFlags.replaceHasExitedPlanMode(e)}function bEr(){return n().ho
+
+@199838021 \u012Fvest\u012F`}default:return"Klaidinga \u012Fvestis"}}};function qC(){return{localeError:KC()}}hy.exports=Jr.default});var by=d(function(Yr,yy){var HC=Yr&&Yr.__createBinding||(Object.create?function(e,t,n,i){if(i===void 0)i=n;var r=Object.getOwnPropertyDescriptor(t,n);if(!r||
+
+## function Rkn( hits=1
+@178573850 ion Ckn(){return n().sessionFlags.homeTrustDialogAccepted()}function Rkn(e){n().host.launchOptions.replaceSessionPersistenceDisabled(e)}function qC(){return n().host.launchOptions.sessionPersistenceDisabled()}function Avt(){return n().sessionFlags.hasExitedPlanMode()}function gD(
+
+## requestLatches.reset() hits=0
+## .requestLatches.reset( hits=0

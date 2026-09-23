@@ -1,0 +1,907 @@
+# gold-248-unk-wave9
+when=2026-09-20T05:31:22.368Z
+sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+items=#14 #21 #28 #31 #36
+rule=extract unique 248 body AND leftover host, else stay UNKNOWN
+
+# ==== #14 model-name-code ====
+- count "function JKt(" 248=2 247=1
+- count "function Dv(" 248=6 247=5
+- count "Fast mode ON" 248=7 247=9
+- count "Fast mode OFF" 248=9 247=9
+- count "sonnet[1m]" 248=10 247=10
+- count "opus[1m]" 248=9 247=9
+- count "[1m]" 248=84 247=84
+- count "`sonnet" 248=8 247=8
+- count "`opus" 248=6 247=6
+- count "render as code" 248=0 247=0
+- count " as code" 248=3 247=3
+- count "markdown code" 248=0 247=0
+- count "wrapCode" 248=0 247=0
+- count "asCode" 248=0 247=0
+- count "code:!0" 248=10 247=10
+- count "type:\"code\"" 248=5 247=5
+- count "kind:\"code\"" 248=0 247=0
+- count "inverse:" 248=39 247=39
+- count "createElement(Code" 248=0 247=0
+- count "<Code" 248=0 247=0
+- count "](1m]" 248=0 247=0
+- count "](1m" 248=0 247=0
+- count "OSC8" 248=0 247=0
+- count "fast-mode-toggled" 248=2 247=2
+- count "model-switch-fast-mode" 248=2 247=2
+- count "FAST_MODE_MODEL_DISPLAY" 248=0 247=0
+- count "available with " 248=26 247=24
+- count "model set to " 248=2 247=3
+- count "bold:!0,children:" 248=389 247=387
+
+## #14 JKt @183982391
+len=111 sha=40c9d932a74c17de exact247=0
+function JKt(e,t,r,o,u,p,g){if(g-r>mBe)e.set(t,{mtimeMs:r,ctimeMs:o,size:u,entry:{sha256:p}});else e.delete(t)}
+
+## #14 JKt @193082880
+len=134 sha=0b1086335e971968 exact247=0
+function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}
+
+## #14 247-JKt @218982367
+len=58 sha=29952f7d9b2f8cdb
+function JKt(){return(Fp(),It(Np)).mcpTaskWatcherModule()}
+
+## #14 Dv @181745572
+len=79 sha=487430265dbc3724 exact247=0
+function Dv(e){return new Set([ve(),...e.additionalWorkingDirectories.keys()])}
+
+## #14 Dv @182598640
+len=75 sha=4e0db693fd29adda exact247=0
+function Dv(e){return e.every((t)=>t.sentinel.length===t.realValue.length)}
+
+## #14 Dv @189453269
+len=89 sha=5d7b8d882067b5c6 exact247=0
+function Dv(t,o){let u="";for(let c=0;c<t.width;c++)u+=Yy(t,c,o)??" ";return u.trimEnd()}
+
+## #14 Dv @202783798
+len=45 sha=173112c5dbb75313 exact247=0
+function Dv(d){return cGn(d,(C)=>ae.bold(C))}
+
+## #14 Dv @217296251
+len=178 sha=e5588682a0be5d9f exact247=0
+function Dv(e,t){if(t){for(let[r,n]of Object.entries(t))if(n!=null)if(typeof n=="object"){let i=e[r];typeof i=="object"&&i!==null?e[r]=Dv(i,n):e[r]=Dv({},n)}else e[r]=n}return e}
+
+## #14 Dv @223322665
+len=194 sha=9147066751da59bb exact247=249878211
+function Dv(e){return e.startsWith("blob:")?(zee??=typeof document<"u"&&(document.querySelector('meta[name="'+MR()+'"]')!==null||document.querySelector('meta[name="'+_0e()+'"]')!==null),zee):!1}
+
+## #14 Fast mode ON-win @183526985
+nt model: ",ENt="No response from the cloud session \u2014 the switch to ",kNt="Cloud session couldn't switch to ",$Ie="Fast mode ON",FIe=" \xB7 model set to ",_=[i9,SZ,wNt,ENt,kNt],E=/\x1b\[[0-9;]*m/g,p=4;function a(n){let t=n.replace(E,"").indexOf(`${$Ie}${FIe}\``);return t>=0&&t<=p}function d(n){return _.some((t)=>n.startsWith(t))||a(n)}function cGn(n,t){return d(n)?c(n,t):n}
+export{em,i9,SZ,wNt,ENt,kNt,$Ie,FIe,cGn};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+
+## #14 Fast mode ON-fn near@183526985 fn=c @183526668
+## #14 Fast mode ON-fn c @183526668
+len=483 sha=f0466ba60fccefca exact247=0
+function c(n,t){return n.replace(/(`+)(.+?)\1/g,(r,o,e)=>{let s=e.startsWith(" ")&&e.endsWith(" ")&&e.trim()!=="";return t(s?e.slice(1,-1):e)})}var i9="Set model to ",SZ="Kept model as ",wNt="Current model: ",ENt="No response from the cloud session \u2014 the switch to ",kNt="Cloud session couldn't switch to ",$Ie="Fast mode ON",FIe=" \xB7 model set to ",_=[i9,SZ,wNt,ENt,kNt],E=/\x1b\[[0-9;]*m/g,p=4;function a(n){let t=n.replace(E,"").indexOf(`${$Ie}${FIe}\``);return t>=0&&t<=p}
+
+## #14 Fast mode ON-win @193082783
+)return!1;return s||d}function AX(e,o,n,t){let i=Ar(),r=i&&o&&(!e||t?.announceKeptOn===!0),s=i&&!!e&&!o;return(r?" \xB7 Fast mode ON":"")+(m(n,o,b_())?" \xB7 Draws from usage credits":"")+(s?" \xB7 Fast mode OFF":"")}function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}function M(){return Bd().providerCache.validatedModels}async function UUe(e,o){let n=e.trim();if(!n)return{valid:!1,error:"Model name cannot be empty"};if(!br(n,o.skipEn
+
+## #14 Fast mode ON-fn near@193082783 fn=AX @193082685
+## #14 Fast mode ON-fn AX @193082685
+len=195 sha=ed57431133493d41 exact247=0
+function AX(e,o,n,t){let i=Ar(),r=i&&o&&(!e||t?.announceKeptOn===!0),s=i&&!!e&&!o;return(r?" \xB7 Fast mode ON":"")+(m(n,o,b_())?" \xB7 Draws from usage credits":"")+(s?" \xB7 Fast mode OFF":"")}
+
+## #14 Fast mode ON-win @193082933
+?" \xB7 Draws from usage credits":"")+(s?" \xB7 Fast mode OFF":"")}function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}function M(){return Bd().providerCache.validatedModels}async function UUe(e,o){let n=e.trim();if(!n)return{valid:!1,error:"Model name cannot be empty"};if(!br(n,o.skipEntitlementDenyOverlay?{skipEntitlementDenyOverlay:!0}:void 0))return{valid:!1,error:`Model '${n}' is not in the list of available models`};if(!o.forceS
+
+## #14 Fast mode ON-fn near@193082933 fn=JKt @193082880
+## #14 Fast mode ON-fn JKt @193082880
+len=134 sha=0b1086335e971968 exact247=0
+function JKt(e,o,n){if(!!e===o)return null;return o?`Fast mode ON${m(n,!0,b_())?" \xB7 Draws from usage credits":""}`:"Fast mode OFF"}
+
+## #14 Fast mode ON-win @202085776
+]!==A)ro=function k(){if(i){if(E)SUe(!1,y,void 0,A);F("Fast mode OFF",{display:"system"});return}let Go=E?`${z6()} Kept Fast mode ON`:"Kept Fast mode OFF";F(Go,{display:"system"})},a[9]=E,a[10]=i,a[11]=F,a[12]=y,a[13]=A,a[14]=ro;else ro=a[14];let k=ro,no;if(a[15]!==i)no=function c(){if(i){return}Zo(Fo)},a[15]=i,a[16]=no;else no=a[16];let c=no,io;if(a[17]!==T||a[18]!==c)io={"confirm:yes":T,"confirm:nextField":c,"confirm:next":c,"confirm:previous":c,"confirm:cycleMode":c,"confirm:toggle":c},a[17]=T,a[18]=c,a[19]=io;e
+
+## #14 Fast mode ON-fn near@202085776 fn=k @202085665
+## #14 Fast mode ON-fn k @202085665
+len=171 sha=1c31e782761ba452 exact247=0
+function k(){if(i){if(E)SUe(!1,y,void 0,A);F("Fast mode OFF",{display:"system"});return}let Go=E?`${z6()} Kept Fast mode ON`:"Kept Fast mode OFF";F(Go,{display:"system"})}
+
+## #14 fast-mode-toggled-win @203097580
+TF({mainLoopModel:qn,mainLoopModelForSession:fr}))&&Ty()})})},[Mr,qn,fr,A9,I9,io,Ri]),D9=U((kt)=>{if(Gi(!1),kt)Ni({key:"fast-mode-toggled",kind:"feedback",segments:[{text:Dv(kt)}],priority:"immediate",timeoutMs:3000})},[Ni]),N9=G(()=>{if(!Ka)return null;return e(o,{flexDirection:"column",marginTop:1,children:e(zJe,{onDone:D9,unavailableReason:FN(),storageV5:Ri})})},[Ka,D9,Ri]),L9=U((kt)=>{Yn((Ao)=>({...Ao,thinkingEnabled:kt})),Gr(!1),Pr()?.sendControlRequest({subtype:"set_max_thinking_tokens",max_thinking_tokens:kt
+
+## #14 fast-mode-toggled-fn near@203097580 fn= @-1
+## #14 fast-mode-toggled-fn  @-1
+MISS
+
+## #14 model-switch-fast-mode-win @202861247
+,...Sr!==!!Eo.fastMode&&{fastMode:Sr}}}),vs!==void 0&&gl!==void 0){g_(vs,gl);let Eo=JKt(vs,gl,Ks);if(Eo!==null)Yn({key:"model-switch-fast-mode",kind:"feedback",text:Eo,priority:"immediate",timeoutMs:3000})}},onSetMaxThinkingTokens(or){let Gr=or==null?ge?ge.type!=="disabled":PP():or!==0;xr((Qr)=>{if(Qr.thinkingEnabled===Gr)return Qr;return{...Qr,thinkingEnabled:Gr}})},onSetPermissionMode:(or)=>ode(or,Mn,xr),onApplyFlagSettings:(or)=>{let Gr=st(),Qr=jD(Gr,fl(Mn.getState())),Ss=ZBe(or,{model:Gr,getAppState:Mn.getState
+
+## #14 model-switch-fast-mode-fn near@202861247 fn= @-1
+## #14 model-switch-fast-mode-fn  @-1
+MISS
+
+## #14 wrap children:[`  needle="children:[`"  248=5 247=5
+- #0 @192195635 le`,Eo.runningCount===0&&"nothing running"]})}):e(t,{dimColor:!0,children:r(ue,{children:[`${ms.blocked} awaiting input`,`${ms.active} working`,`${ms.completed+bp.length} 
+- #1 @202374651 uR(),Cu[0]=kxe;else kxe=Cu[0];let Oit=kxe,Cxe;if(Cu[1]===p)Cxe=r(t,{dimColor:!0,children:[`${O.arrowUp}${O.arrowDown} j/k`.padEnd(9),"scroll"]}),Cu[1]=Cxe;else Cxe=Cu[1];l
+- #2 @209014810 ap((Fa,Ek)=>{let wm=hD[Ek];return r(t,{color:Fa.usageCount===0?"warning":void 0,children:[`  ${qL(Fa.name,_o.name)}  `,e(t,{dimColor:!0,children:qL(Fa.source,_o.source)}),
+- #3 @209382516 lor:Ne(Ht),children:ee(Ht).padEnd(Re)}),`${Ty} Built-in rules`,r(t,{dimColor:!0,children:[` \xB7 ${ky}${bn.enabled?"":" \xB7 off"}`,bn.control==="user"||bn.control==="empt
+- #4 @224038775 ildren:[M!=null&&(0,Se.jsx)(NCe,{settings:M}),M==null&&!q&&be&&(0,Se.jsxs)(DCe,{children:[`<${be.tag}>`," isn\u2019t part of the template \u2014 read-only.",(0,Se.jsx)("br
+
+## #14 wrap bold:!0,children:[`  needle="bold:!0,children:[`"  248=0 247=0
+
+## #14 wrap children:[`sonnet  needle="children:[`sonnet"  248=0 247=0
+
+## #14 wrap children:[`opus  needle="children:[`opus"  248=0 247=0
+
+## #14 wrap children:[`claude  needle="children:[`claude"  248=0 247=0
+
+## #14 wrap `+[  needle="`+["  248=3 247=5
+- #0 @179429029 gth===0)return{isValid:!0};return{isValid:!1,error:`Settings validation failed:
+`+[...r.map((d)=>`- ${d}`),...i.map((d)=>{let u=`- ${d.path}: ${d.message}`;if(d.su
+- #1 @188607431 .|\\n)*?\\1`*[ ]*"},{begin:"(~{3,})[^~](.|\\n)*?\\1~*[ ]*"},{begin:"```",end:"```+[ ]*$"},{begin:"~~~",end:"~~~+[ ]*$"},{begin:"`.+?`"},{begin:"(?=^( {4}|\\t))",co
+- #2 @213660136 .|\\n)*?\\1`*[ ]*"},{begin:"(~{3,})[^~](.|\\n)*?\\1~*[ ]*"},{begin:"```",end:"```+[ ]*$"},{begin:"~~~",end:"~~~+[ ]*$"},{begin:"`.+?`"},{begin:"(?=^( {4}|\\t))",co
+
+## #14 wrap +`]  needle="+`]"  248=0 247=0
+
+## #14 wrap "`"+  needle="\"`\"+"  248=5 247=5
+- #0 @185351590 e){return e.replace(/`[^`\n]+`/g,(t,r)=>{let o=e[r-1];return o==="!"||o==="`"?t:"`"+ti(" ",t.length-2)+"`"})}function Y0(e){return e.replace(/`!/g,"` !").replace(/!
+- #1 @194638989 .split("\x00"),(u)=>u!=="")}return i}function Vt(e){let t=e.slice(0,3).map((r)=>"`"+r.replace(/`/g,"'")+"`").join(", ");return e.length>3?`${t} and ${e.length-3} mo
+- #2 @216802649 ||y.mapped)return!1;if(g.pfValue===y.pfValue||g.strValue===y.strValue)return In("`"+e+": "+t+"` is not a valid mapper because the output range is zero; converting t
+- #3 @216804691 s*,\s*|\s+/),V=0;V<$.length;V++){var G=$[V].trim();i.properties[G]?B.push(G):In("`"+G+"` is not a valid property name")}if(B.length===0)return null}return{name:e,va
+- #4 @217612931 r")}buildMismatchTokenMessage({expected:e,actual:t}){return`Expecting ${e.LABEL?"`"+e.LABEL+"`":e.name.endsWith(":KW")?`keyword '${e.name.substring(0,e.name.length-
+
+## #14 wrap +'`'  needle="+'`'"  248=0 247=0
+
+## #14 wrap wrapInBackticks  needle="wrapInBackticks"  248=0 247=0
+
+## #14 wrap asMarkdownCode  needle="asMarkdownCode"  248=0 247=0
+
+## #14 wrap markdownCode  needle="markdownCode"  248=0 247=0
+
+## #14 wrap renderModel  needle="renderModel"  248=2 247=4
+- #0 @206122718 t as preserve1mContextForRefusalFallback,b6e as renderDefaultModelSetting,Vi as renderModelName,HP as renderModelSetting,C_r as resetEnforcementWarnDedupForTests,Jee as re
+- #1 @206122740 ForRefusalFallback,b6e as renderDefaultModelSetting,Vi as renderModelName,HP as renderModelSetting,C_r as resetEnforcementWarnDedupForTests,Jee as resolveDefaultMainLoopMo
+
+## #14 wrap formatModelName  needle="formatModelName"  248=0 247=0
+
+## #14 wrap modelDisplayName  needle="modelDisplayName"  248=0 247=0
+
+## #14 leftoverish Fast mode is   needle="Fast mode is "  248=9 247=16
+- #0 @180189943 etwork_error":return"Fast mode unavailable due to network connectivity issues";case"unknown":return"Fast mode is currently unavailable"}}function $v(e){if(!Ar())return Le()!=="firstParty"?"not_first_party":"disabl
+- #1 @180190699 (t);return n(`Fast mode unavailable: ${r}`),r}function K4(e){switch(e){case"not_first_party":return"Fast mode is only available when using the Anthropic API directly";case"disabled_by_env":return"Fast mode is not 
+- #2 @180190795 urn"Fast mode is only available when using the Anthropic API directly";case"disabled_by_env":return"Fast mode is not available";case"model_not_allowed":return`${Ek()} is not in your organization's allowed models`;
+- #3 @180190941 owed":return`${Ek()} is not in your organization's allowed models`;case"sdk_opt_in_required":return"Fast mode is not available in the Agent SDK";case"pending":return"Checking fast mode availability";case"unknown":
+- … +5 more
+
+## #14 leftoverish available with   needle="available with "  248=14 247=24
+- #0 @183374531 /code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var Gye="Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.",kIe="Error: Yo
+- #1 @183374715 ude.ai account.",kIe="Error: You must be logged in to use Remote Control.\n\nRemote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.",rZ="Remote Con
+- #2 @184137474 vel setting)":"run /effort high to continue",E=tmn();return Ho({content:`${Wc}: Effort '${g}' isn't available with thinking turned off on this model \xB7 ${k}, or turn thinking back on (${E==="MAX_THINKING_TOKENS"?"
+- #3 @184139569 Details:e.message})}if(St()&&g1e(e)&&(TB(Ye(t))||t==="opus"))return Ho({content:"Claude Opus is not available with the Claude Pro plan. If you have updated your subscription plan recently, run /logout and /login for
+- … +10 more
+
+## #14 leftoverish Switching to other models  needle="Switching to other models"  248=1 247=2
+- #0 @202125922 !0,children:["Fast mode is ",e(t,{bold:!0,children:"ON"})," and available with"," ",Ek()," (/fast). Switching to other models turns off fast mode."]})}):e(o,{marginBottom:1,children:r(t,{dimColor:!0,children:["Use ",e(t,{bold
+
+## #14 leftoverish model set to   needle="model set to "  248=1 247=3
+- #0 @183527010 ession \u2014 the switch to ",kNt="Cloud session couldn't switch to ",$Ie="Fast mode ON",FIe=" \xB7 model set to ",_=[i9,SZ,wNt,ENt,kNt],E=/\x1b\[[0-9;]*m/g,p=4;function a(n){let t=n.replace(E,"").indexOf(`${$Ie}$
+
+## #14 leftoverish Use /fast  needle="Use /fast"  248=0 247=0
+
+## #14 leftoverish to turn on Fast mode  needle="to turn on Fast mode"  248=1 247=2
+- #0 @202126072 }):e(o,{marginBottom:1,children:r(t,{dimColor:!0,children:["Use ",e(t,{bold:!0,children:"/fast"})," to turn on Fast mode (",Ek(),")."]})}):null]}),I&&e(gs,{children:de?r(ue,{children:[e(t,{children:"Type to filter"}),e(M
+
+# ==== #21 hook-invalid-answer ====
+- count "function Swt(" 248=2 247=1
+- count "function Owt(" 248=1 247=1
+- count "function UFe(" 248=1 247=1
+- count "function lq(" 248=3 247=3
+- count "function _P(" 248=6 247=2
+- count "PermissionRequest decision must be" 248=2 247=0 **NEW248**
+- count "top-level decision is the legacy" 248=4 247=0 **NEW248**
+- count "hookSpecificOutput is missing required field" 248=2 247=2
+- count "Hook JSON output validation failed" 248=1 247=1
+- count "Expected schema:" 248=4 247=4
+- count "schema error" 248=0 247=0
+- count "hook schema" 248=0 247=0
+- count "invalid answer" 248=0 247=0
+- count "waiting silently" 248=0 247=0
+- count "hookName} hook" 248=4 247=4
+- count "${e.hookName}" 248=5 247=5
+- count "JSON validation failed: " 248=0 247=0
+- count "async hook JSON output failed schema validation" 248=2 247=2
+- count "topDialogWaitingFor" 248=4 247=4
+- count "waitingFor:" 248=8 247=8
+- count "lastMessage:" 248=1 247=1
+- count "updateSessionActivity" 248=6 247=7
+
+## #21 Swt @186235528
+len=1134 sha=7cd25b6ba6d5958a exact247=0
+function Swt(e,t){let r=Dz(e)?e.hookSpecificOutput:void 0,o=t.issues.map((k)=>bwt(k,[])),u=o[0],p=u?`${_wt(u.path)}: ${u.message}`:"unknown error";if(Dz(r)&&!("hookEventName"in r))p='hookSpecificOutput is missing required field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision==="ask"))p+=e.decision==="ask"?' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)':` (top-level decision is the legacy approve|block field; for "${e.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.decision}"} in a PermissionRequest hook)`;let g=o.slice(1).map((k)=>`  - ${_wt(k.path)}: ${k.message}`).join(`
+`);return`${Eve}${p}${g?`
+`+g:""}
+
+The hook's output was: ${S(e,null,2)}`}
+
+## #21 Swt @191284665
+len=598 sha=4fc312d0101295f0 exact247=0
+function Swt(d,C){let w=C;if(!w?.signals||!w.signals.cli?.length&&!w.signals.filesRead?.length&&!w.signals.manifestDeps?.length&&!w.signals.hosts?.length&&!w.signals.cwd?.length)return null;let F;try{if(w.signals.manifestDeps?.length)F=w.signals.manifestDeps.map((H)=>({file:new RegExp(H.file,"i"),pattern:new RegExp(H.pattern)}))}catch(H){return n(`Skipping relevance signals for "${d}": invalid RegExp in relevance.signals: ${H}`,{level:"warn"}),null}let j=w.signals.hosts?.map((H)=>H.toLowerCase());return{cli:w.signals.cli,hosts:j,filesRead:w.signals.filesRead,manifestDep:F,cwd:w.signals.cwd}}
+
+## #21 247-Swt @214703876
+len=121 sha=61cf65c80df60c4f
+function Swt(e){if(!e||typeof e!=="object")return!1;let t=e;return QFn.some((n)=>n==="experimental"?Fzo(t[n]):eUn(t[n]))}
+
+## #21 Owt @186253739
+len=189 sha=8c431a9ef22b837b exact247=0
+function Owt(e){let t=q(e),r=cz().safeParse(t);if(r.success)return n("Successfully parsed and validated hook JSON output"),b4(t,r.data),{json:r.data};return{validationError:Swt(t,r.error)}}
+
+## #21 UFe @202584294
+len=329 sha=777e1663cee655c2 exact247=0
+function UFe(d){if(d.workerSandboxPrompt)return"sandbox request";if(d.elicitationPrompt)return"input needed";if(d.topDialogWaitingFor!==void 0)return d.topDialogWaitingFor;if(d.pendingWorkerRequest)return"worker request";if(d.pendingSandboxRequest)return"sandbox request";if(d.isShowingLocalJSXCommand)return"dialog open";return}
+
+## #21 uniq PermissionRequest decision must be  needle="PermissionRequest decision must be"  248=2 247=0  **NEW248**
+- #0 @96921178 -Z_][A-Z0-9_]*).........m.^Invalid input: ........expected one of .....(4. .|. .& <...q.(.hookSpecificOutput is missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOu
+- #1 @186235908 d field "hookEventName"';else if(Dz(r)&&r.hookEventName==="PermissionRequest"&&!Dz(r.decision)&&u?.path[0]==="hookSpecificOutput"&&u.path[1]==="decision")p+=' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision=
+
+## #21 uniq top-level decision is the legacy  needle="top-level decision is the legacy"  248=4 247=0  **NEW248**
+- #0 @96921290 missing required field "hookEventName"e...?{[. (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field
+- #1 @96921430 "..."}).......<.7. (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)...=....K.. (top-level decision is the legacy approve|block field; for "...p...~.r." use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "....._9."}
+- #2 @186236157 ": "..."})';else if(Dz(e)&&u?.path.length===1&&u.path[0]==="decision"&&(e.decision==="allow"||e.decision==="deny"||e.decision==="ask"))p+=e.decision==="ask"?' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)':` (top-level decision is the legacy approve|block field; for "$
+- #3 @186236289 "))p+=e.decision==="ask"?' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)':` (top-level decision is the legacy approve|block field; for "${e.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${e.deci
+
+## #21 uniq  hook error  needle=" hook error"  248=32 247=32
+- #0 @93439536  file referenced (.......o..Skills restored (........s..Read MCP resource ......>[.. from........0..Async hook .....>n.. hook returned blocking error.......h... hook error......... hook timed out.C....J.. ..  .o.u.t.p.u.t. .d.i.s.c.a.r.d.e.d... .R.a.i.s.e. .t.h.e. .h.o.o.k.'.s. .".t.i.m.e.o.u.t.". .t.o. .a.l.l.o.w. .m.o.r.e. .t.i
+- #1 @93449960 ..Q. (tool: .....Z..). ..  .w.r.a.p.p.e.d. .i.n. .<.T.e.x.t.>...........comma-......!l..hook-...........^claude\.ai ....Cj..hint-...........isInProgress.....5. hook error: ........Z..summary-	.......startUuid.......g0.. (one-shot).....I... [session-only]......l..failure_scenario(....v..file:///B:/%7EBUN/root/chunk-85p1j361.js...
+- #2 @94559983 .pendingElicitations.........lastElicitationClosedAt.N.......Cannot destructure property 'elicitationResponse' from null or undefined value......@...Elicitation hook error: ........elicitationResponse.T...`...Cannot destructure property 'elicitationResultResponse' from null or undefined value!...h...Elicitation response for serve
+- #3 @94560233 esultResponse' from null or undefined value!...h...Elicitation response for server "...
+....H..": decline......8...elicitation_response........ElicitationResult hook error: .......37.elicitationResultResponse...........Skip confirmation...(....*1.file:///B:/%7EBUN/root/chunk-w6w5pcf2.js*.....r.Server returned 403 after trying ups
+- #4 @95639612 de Code on the web: !.......Removing one-shot hook for event ........... in skill '.........goal_met....o...evaluator_timeout...
+.....\.Exit code ......}.5.Stop hook error: ...".......Forked command Stop hooks failed: ......._..additionalContexts......a...requestQuery.....@..tengu_slash_command_forked..
+...R...user-slash..G......
+- #5 @95642364 g^a.
+
+Original prompt: .......3.Operation stopped by hook: .....D._.Operation stopped by hook.......#Z..cmd_prompt_submit_hook_stopped.......r..UserPromptSubmit hook error: ...........cmd_prompt_aborted......L...cmd_prompt_threw....e.9.Stacked skill /.$...;c.. blocked by UserPromptExpansion hook%....B..stacked slash command expan
+- … +26 more
+
+## #21 uniq hook + schema  needle="hook + schema"  248=0 247=0
+
+## #21 uniq hook and schema  needle="hook and schema"  248=0 247=0
+
+## #21 uniq schemaError  needle="schemaError"  248=9 247=9
+- #0 @99441152 ..S.isBase64url.....G>..strictCreate
+.....9.lazycreate..
+.......optionsMap........(.createWithPreprocess	.......issueData.........p.contextualErrorMap.......L..schemaErrorMap..	...B...errorMaps...C.......Cannot destructure property 'errorMap' from null or undefined value.X...p.a.Can't use "invalid_type_error" or "required_error" 
+- #1 @178655007 .message;return{...s,path:i,message:c}},bfr=[];function ai(e,t){let r=V7e(),a=Fvt({issueData:t,data:e.data,path:e.path,errorMaps:[e.common.contextualErrorMap,e.schemaErrorMap,r,r===Hde?void 0:Hde].filter((s)=>!!s)});e.common.issues.push(a)}class wD{constructor(){this.value="valid"}dirty(){if(this.value==="valid")this.value="dirty
+- #2 @178657523 ription(){return this._def.description}_getType(e){return tre(e.data)}_getOrReturnCtx(e,t){return t||{common:e.parent.common,data:e.data,parsedType:tre(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}_processInputParams(e){return{status:new wD,ctx:{common:e.parent.common,data:e.data,parsedType:tre(e.data),s
+- #3 @178657693 rMap:this._def.errorMap,path:e.path,parent:e.parent}}_processInputParams(e){return{status:new wD,ctx:{common:e.parent.common,data:e.data,parsedType:tre(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}}_parseSync(e){let t=this._parse(e);if(q7e(t))throw Error("Synchronous parse encountered promise.");return t
+- #4 @178658113 Parse(e,t);if(r.success)return r.data;throw r.error}safeParse(e,t){let r={common:{issues:[],async:t?.async??!1,contextualErrorMap:t?.errorMap},path:t?.path||[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:tre(e)},a=this._parseSync({data:e,path:r.path,parent:r});return k(r,a)}"~validate"(e){let t={common:{issues
+- #5 @178658329 sedType:tre(e)},a=this._parseSync({data:e,path:r.path,parent:r});return k(r,a)}"~validate"(e){let t={common:{issues:[],async:!!this["~standard"].async},path:[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:tre(e)};if(!this["~standard"].async)try{let r=this._parseSync({data:e,path:[],parent:t});return $Ee(r)?{val
+- … +3 more
+
+## #21 uniq hookSchemaError  needle="hookSchemaError"  248=0 247=0
+
+## #21 uniq invalidHook  needle="invalidHook"  248=0 247=0
+
+## #21 uniq hook_validation  needle="hook_validation"  248=0 247=0
+
+## #21 uniq hookValidation  needle="hookValidation"  248=0 247=0
+
+## #21 set waitingFor:C  needle="waitingFor:C"  248=1 247=0  **NEW248**
+- #0 @202584167 e()}function aq(){Rse().release()}function lq(d){let C=UFe(d);if(C!==void 0)return{status:"waiting",waitingFor:C,working:!1};return{status:d.isLoading||d.delegatedActive?"busy":"idle",waitingFor:void 0,working:d.
+
+## #21 set waitingFor:e  needle="waitingFor:e"  248=1 247=1
+- #0 @207448570 essionId,...m&&{name:m},...e?.status&&{status:p(e.status)},...e?.status==="waiting"&&e.waitingFor&&{waitingFor:e.waitingFor},state:r})}for(let t of u){if(t.kind!=="interactive"&&t.kind!=="bg"||l.has(t.pid))contin
+
+## #21 set waitingFor:t  needle="waitingFor:t"  248=2 247=3
+- #0 @181016933 "?o.bridgeSessionId:void 0,logPath:typeof o.logPath==="string"?o.logPath:void 0,status:je(o.status),waitingFor:typeof o.waitingFor==="string"?o.waitingFor:void 0,updatedAt:N(o.updatedAt),statusUpdatedAt:N(o.statu
+- #1 @207449031 sessionId},...e&&{name:e},...t.status&&{status:p(t.status)},...t.status==="waiting"&&t.waitingFor&&{waitingFor:t.waitingFor}})}o.sort((t,e)=>t.startedAt-e.startedAt),await ov(S(o,null,2)+`
+`),b("cli_agents_json")
+
+## #21 set waitingFor:`  needle="waitingFor:`"  248=0 247=0
+
+## #21 set lastMessage:`  needle="lastMessage:`"  248=0 247=0
+
+## #21 set lastMessage:e  needle="lastMessage:e"  248=0 247=0
+
+## #21 set topDialogWaitingFor=  needle="topDialogWaitingFor="  248=0 247=0
+
+## #21 set topDialogWaitingFor:  needle="topDialogWaitingFor:"  248=1 247=1
+- #0 @202588134 ||av[2]!==Bse||av[3]!==Ose||av[4]!==Fse||av[5]!==Lse||av[6]!==Nse||av[7]!==Use||av[8]!==Ese)iBe=lq({topDialogWaitingFor:nq(Use),workerSandboxPrompt:Ese,elicitationPrompt:Dse,pendingWorkerRequest:Nse,pendingSandboxRequest
+
+## #21 _P-sig  needle="function _P("  248=6 247=2
+- #0 @180918821 02gme.js";import{Le,Uo}from"B:/~BUN/root/chunk-7vtvsc2r.js";function tV(){Oyn()}function _P(){let r=KMe();if(r!==void 0)return r;if(Yv())return TY(!0);if(Le()==="gateway"){
+- #1 @184536494 turn"user_abort";case"user_reject":return"user_reject";default:return"unknown"}}function _P(e,t,r){return{messageID:ke(t),toolName:Rn(e.name),isMcp:e.isMcp??!1,sandboxEnabl
+- #2 @200480736 NY","Referrer-Policy":"no-referrer","Cross-Origin-Opener-Policy":"same-origin"};function _P(e,t){for(let[n,i]of Object.entries(S3))if(!e.headers.has(n))e.headers.set(n,i);i
+- #3 @201448189 ate"," ",Kh," ",RP]})]}),au[10]=RP,au[11]=Kh,au[12]=uO;else uO=au[12];return uO}function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+Expected sche
+- #4 @216065399 t+1)&&r===e.input.charCodeAt(t+2)&&(t+=3,r=e.input.charCodeAt(t),r===0||ro(r)))}function _P(e,t){t===1?e.result+=" ":t>1&&(e.result+=sa.repeat(`
+`,t-1))}function fKe(e,t,r)
+- #5 @223911285 e.varSource??e.value??"").trim(),onChange:p=>t(e.prop,p),onClose:()=>o(!1)})]})}function _P(e){let{state:t}=e,[n,r]=(0,fa.useState)(null),[o,i]=(0,fa.useState)(!1),{alsoCom
+
+## #21 _P @180918821
+len=631 sha=ed447ef64044fc48 exact247=0
+function _P(){let r=KMe();if(r!==void 0)return r;if(Yv())return TY(!0);if(Le()==="gateway"){let e=ZI(ei());return TY(e,e?void 0:"unpinned_gateway")}if(Le()!=="firstParty")return TY(!1,"third_party_provider");if(!Uo())return TY(!1,"custom_base_url");let t=a.CLAUDE_CODE_ENTRYPOINT;if(t==="local-agent"||t==="remote_cowork"||t?.startsWith("claude-coworker"))return TY(!1,"sandboxed_entrypoint");if(hl()&&bve()===null)return TY(!0);if(hl()&&(bve()==="enterprise"||bve()==="team"))return TY(!0);try{let{key:e}=gh({skipRetrievingKeyFromApiKeyHelper:!0});if(e)return TY(!0)}catch{}return TY(!1,hl()?"unsupported_subscription":"no_auth")}
+
+## #21 _P @184536494
+len=171 sha=492217f56b02e829 exact247=0
+function _P(e,t,r){return{messageID:ke(t),toolName:Rn(e.name),isMcp:e.isMcp??!1,sandboxEnabled:at.isSandboxingEnabled(),...r!==void 0&&{waiting_for_user_permission_ms:r}}}
+
+## #21 _P @200480736
+len=231 sha=58a55142932a3eee exact247=0
+function _P(e,t){for(let[n,i]of Object.entries(S3))if(!e.headers.has(n))e.headers.set(n,i);if(t&&!e.headers.has("Strict-Transport-Security"))e.headers.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");return e}
+
+## #21 _P @201448189
+len=312 sha=53fb0e6c00002e9e exact247=0
+function _P(l,d){let f=l?.trim()?l:d?.trim()?d:"";if(!f)return"";let T=gt(f,`
+
+Expected schema:`).trim(),y=0,b=T.indexOf(`
+`);while(b!==-1){let C=T.slice(y,b).trim();if(C)return C.length>200?C.slice(0,200)+"\u2026":C;y=b+1,b=T.indexOf(`
+`,y)}let P=T.slice(y).trim();return P.length>200?P.slice(0,200)+"\u2026":P}
+
+## #21 _P @216065399
+len=73 sha=393b163d610cad97 exact247=0
+function _P(e,t){t===1?e.result+=" ":t>1&&(e.result+=sa.repeat(`
+`,t-1))}
+
+## #21 _P @223911285
+MISS {"i":223911285,"missEnd":true,"preview":"function _P(e){let{state:t}=e,[n,r]=(0,fa.useState)(null),[o,i]=(0,fa.useState)(!1),{alsoCommit:a,alsoCommitOnClear:s}=t,{onCommit:c,onCommitMany:l}=e,u=(0,fa.useCallback)((C,A)=>{let D=A!=null?a:s;if(D&&D.length>0)if(l)l([{prop:C,value:A},...D]);else for(let L of[{prop:C,value:A"}
+
+## #21 fleet-region validationError @195638860
+|")}function w(e){return eMn(e.toolUseId)||mnt(e.toolUseId)}function UPn(e){let{validationErrorSteer:t,validateInput:r,call:n}=e,i={validationErrorSteer:(o,l)=>B(o,l,t?.(o,l)??null),...r!==void 0&&{validateInput:V(r)},call:D(n)};return Object.defineProperties(Object.definePropert
+
+## #21 fleet-region validationError @195638912
+lUseId)}function UPn(e){let{validationErrorSteer:t,validateInput:r,call:n}=e,i={validationErrorSteer:(o,l)=>B(o,l,t?.(o,l)??null),...r!==void 0&&{validateInput:V(r)},call:D(n)};return Object.defineProperties(Object.defineProperties({},Object.getOwnPropertyDescriptors(e)),Object.g
+
+## #21 fleet-region validationError @196010807
+oid 0)return Ae}}let ae=await zu(e,t);if(ae!==null)return ae;return{result:!0}},validationErrorSteer(e){if(typeof e!=="object"||e===null)return null;if("content"in e)return"The Artifact tool reads from a file on disk \u2014 it does not take inline `content`. "+"Write the page as 
+
+## #21 fleet-region validationError @199312329
+nswer:P,exitClass:"other",localWarning:`[${r}]: ${U}`,blocked:_f(P)}}let{json:g,validationError:W}=Bct(e.body);if(W!==void 0||g===void 0)return{answer:{},exitClass:"other",localWarning:`[${r}]: ${Je(W??"","no JSON in the response")}`,blocked:!1};return{answer:g,exitClass:"0",bloc
+
+## #21 row waitingFor??  needle="waitingFor??"  248=0 247=1
+
+## #21 row waitingFor ??  needle="waitingFor ??"  248=0 247=0
+
+## #21 row .waitingFor??  needle=".waitingFor??"  248=0 247=1
+
+## #21 row .waitingFor??.  needle=".waitingFor??."  248=0 247=0
+
+## #21 row session.waitingFor  needle="session.waitingFor"  248=0 247=0
+
+# ==== #28 trust-emoji-trunc ====
+- count "cut off mid-emoji" 248=1 247=1
+- count "Intl.Segmenter" 248=14 247=14
+- count "granularity:\"grapheme\"" 248=2 247=2
+- count "granularity:'grapheme'" 248=0 247=0
+- count "grapheme" 248=61 247=61
+- count "toWellFormed" 248=5 247=5
+- count "tengu_trust_dialog_shown" 248=2 247=2
+- count "TrustDialog" 248=43 247=43
+- count "Quick safety check" 248=2 247=2
+- count "Allow rules" 248=2 247=2
+- count "allow rules" 248=10 247=9
+- count "permission rules" 248=97 247=90
+- count "repo permission" 248=0 247=0
+- count "truncateToWidth" 248=4 247=4
+- count "stringWidth" 248=3 247=3
+
+## #28 mid-emoji-win @189843154
+t-sized overlays containing truncated text rendering one column too wide, and start-truncated text collapsing to an ellipsis\n- Fixed a stray garbled character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due to concurrent writes to `known_marketplaces.json`\n- Fixed `/update` and `/tui` refusing to restart while work that surviv
+
+## #28 Segmenter-win @88305319
+ignumPointer.specialPointer.SetFilePointer.ConstantStoragePointer.IntlSegmenter.Intl.Segmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototype.resolvedOptions called on value that's not a Segmenter.ce
+
+## #28 Segmenter-fn near@88305319 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @88305365
+stantStoragePointer.IntlSegmenter.Intl.Segmenter.failed to initialize Segmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototype.resolvedOptions called on value that's not a Segmenter.center.op_enter.**enter.CheckTierUpAndOSREnter.C
+
+## #28 Segmenter-fn near@88305365 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @88305437
+gmenter.Intl.Segmenter.prototype.segment called on value that's not a Segmenter.Intl.Segmenter.prototype.resolvedOptions called on value that's not a Segmenter.center.op_enter.**enter.CheckTierUpAndOSREnter.Cannot append program filter using archive_read_append_filter.options.fil
+
+## #28 Segmenter-fn near@88305437 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @178380958
+ise see a writable .then on the chain.
+      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p; p = Object.getPrototypeOf(p)) {
+        Object.fre
+
+## #28 Segmenter-fn near@178380958 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @178381012
+f Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p; p = Object.getPrototypeOf(p)) {
+        Object.freeze(p);
+      }
+    }
+    })()`,e)}function eEe(e){ret
+
+## #28 Segmenter-fn near@178381012 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @179393116
+ Intl.DisplayNames(["en"],{type:"language"});return m}function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return Xi().segment(e)[Symbol.iterator]().next().value?.segment??""}function JO(e){if(!e)return"";let t="";for(l
+
+## #28 Segmenter-fn near@179393116 fn=Xi @179393090
+## #28 Segmenter-fn Xi @179393090
+len=83 sha=9301715501d9e440 exact247=0
+function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}
+
+## #28 Segmenter-win @179393548
+[];return Array.from(Xi().segment(e),(t)=>t.segment)}function w_n(){if(!l)l=new Intl.Segmenter(void 0,{granularity:"word"});return l}function eQn(e){let t=e.trim();if(t==="")return 0;let r=t.split(/\s+/).length,n=0;for(let i of w_n().segment(t))if(i.isWordLike)n++;return Math.max
+
+## #28 Segmenter-fn near@179393548 fn=w_n @179393521
+## #28 Segmenter-fn w_n @179393521
+len=80 sha=31ac5e72abc38059 exact247=0
+function w_n(){if(!l)l=new Intl.Segmenter(void 0,{granularity:"word"});return l}
+
+## #28 Segmenter-win @192560833
+ypeof n==="object"&&n!==null?Error(n.error):n}var pt=8,ar=50,Qt=(()=>{try{let e=Intl.Segmenter;if(typeof e==="function")return new e(void 0,{granularity:"grapheme"})}catch{}return})();function lr(e){if(Qt)try{return Array.from(Qt.segment(e),(n)=>n.segment)}catch{}return Array.fro
+
+## #28 Segmenter-fn near@192560833 fn=gt @192560711
+## #28 Segmenter-fn gt @192560711
+len=88 sha=db68c4e4fb312376 exact247=0
+function gt(e){let n=Qe(e?.scale);return typeof n==="object"&&n!==null?Error(n.error):n}
+
+## #28 Segmenter-win @201834864
+FD\uDFFF])?|\uDFFF(?:\u200D\uD83E\uDEF2\uD83C[\uDFFB-\uDFFE])?))?)/g;var ND=new Intl.Segmenter,LD=/^\p{Default_Ignorable_Code_Point}$/u;function Pe(n,D={}){if(typeof n!=="string"||n.length===0)return 0;let{ambiguousIsNarrow:i=!0,countAnsiEscapeCodes:a=!1}=D;if(!a)n=We(n);if(n.len
+
+## #28 Segmenter-fn near@201834864 fn= @-1
+## #28 Segmenter-fn  @-1
+MISS
+
+## #28 Segmenter-win @216138565
+s");o(Ese,"nonMarkdownToHTML");o(Ase,"markdownToHTML")});function UZe(e){return Intl.Segmenter?[...new Intl.Segmenter().segment(e)].map(t=>t.segment):[...e]}function YZe(e,t){let r=UZe(t.content);return _se(e,[],r,t.type)}function _se(e,t,r,n){if(r.length===0)return[{content:t.jo
+
+## #28 Segmenter-fn near@216138565 fn=UZe @216138542
+## #28 Segmenter-fn UZe @216138542
+len=100 sha=211627bbd95ec852 exact247=0
+function UZe(e){return Intl.Segmenter?[...new Intl.Segmenter().segment(e)].map(t=>t.segment):[...e]}
+
+## #28 Segmenter-win @216138588
+oHTML");o(Ase,"markdownToHTML")});function UZe(e){return Intl.Segmenter?[...new Intl.Segmenter().segment(e)].map(t=>t.segment):[...e]}function YZe(e,t){let r=UZe(t.content);return _se(e,[],r,t.type)}function _se(e,t,r,n){if(r.length===0)return[{content:t.join(""),type:n},{content
+
+## #28 Segmenter-fn near@216138588 fn=UZe @216138542
+## #28 Segmenter-fn UZe @216138542
+len=100 sha=211627bbd95ec852 exact247=0
+function UZe(e){return Intl.Segmenter?[...new Intl.Segmenter().segment(e)].map(t=>t.segment):[...e]}
+
+## #28 Segmenter-win @223254890
+of window<"u"&&"getScreenDetails"in window,SJe=(()=>{if(typeof Intl>"u"||typeof Intl.Segmenter!="function")return null;try{return new Intl.Segmenter(typeof navigator<"u"&&navigator.language||"en-US",{granularity:"word"})}catch{try{return new Intl.Segmenter("en-US",{granularity:"w
+
+## #28 Segmenter-fn near@223254890 fn=sp @223253947
+## #28 Segmenter-fn sp @223253947
+len=41 sha=7b6f88e11f558848 exact247=249809493
+function sp(e){return yJ(e,"background")}
+
+## #28 Segmenter-win @223254944
+f(typeof Intl>"u"||typeof Intl.Segmenter!="function")return null;try{return new Intl.Segmenter(typeof navigator<"u"&&navigator.language||"en-US",{granularity:"word"})}catch{try{return new Intl.Segmenter("en-US",{granularity:"word"})}catch{return null}}})(),qye;function EJ(){retur
+
+## #28 Segmenter-fn near@223254944 fn=sp @223253947
+## #28 Segmenter-fn sp @223253947
+len=41 sha=7b6f88e11f558848 exact247=249809493
+function sp(e){return yJ(e,"background")}
+
+## #28 Segmenter-win @223255052
+tor<"u"&&navigator.language||"en-US",{granularity:"word"})}catch{try{return new Intl.Segmenter("en-US",{granularity:"word"})}catch{return null}}})(),qye;function EJ(){return qye??=(async()=>{try{let e=new OffscreenCanvas(1,1);return e.getContext("2d"),(await e.convertToBlob({type
+
+## #28 Segmenter-fn near@223255052 fn=sp @223253947
+## #28 Segmenter-fn sp @223253947
+len=41 sha=7b6f88e11f558848 exact247=249809493
+function sp(e){return yJ(e,"background")}
+
+## #28 granularity:"grapheme" @179393139
+"],{type:"language"});return m}function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return Xi().segment(e)[Symbol.iterator]().next().value?.segment??""}function JO(e){if(!e)return
+
+## #28 grapheme-fn near@179393139 fn=Xi @179393090
+## #28 grapheme-fn Xi @179393090
+len=83 sha=9301715501d9e440 exact247=0
+function Xi(){if(!s)s=new Intl.Segmenter(void 0,{granularity:"grapheme"});return s}
+
+## #28 granularity:"grapheme" @192560894
+Qt=(()=>{try{let e=Intl.Segmenter;if(typeof e==="function")return new e(void 0,{granularity:"grapheme"})}catch{}return})();function lr(e){if(Qt)try{return Array.from(Qt.segment(e),(n)=>n.segment)}catch{}return Array.from(e)}function hn(e){r
+
+## #28 grapheme-fn near@192560894 fn=gt @192560711
+## #28 grapheme-fn gt @192560711
+len=88 sha=db68c4e4fb312376 exact247=0
+function gt(e){let n=Qe(e?.scale);return typeof n==="object"&&n!==null?Error(n.error):n}
+
+## #28 trust-shown-win @203836876
+n[16]=Ho;else Ho=n[16];let vo=Ho,y=vo,_o,To;if(n[17]!==w)_o=()=>{let vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De,w,R,B,He,ve,_e,Te,je,Ae,F,Pe,Re],n[17]=w,n[18]=_o,n
+
+## #28 trust-shown-fn near@203836876 fn=Go @203835504
+## #28 trust-shown-fn Go @203835504
+len=6215 sha=20a8dc730a25725d exact247=0
+function Go(yt){let n=g(67),{onDone:P,commands:v}=yt,{storageV5:xe}=fe(),io;if(n[0]===p)io=tp("project"),n[0]=io;else io=n[0];let{servers:kt}=io,co;if(n[1]===p)co=Object.keys(kt),n[1]=co;else co=n[1];let Se=co.length>0,lo;if(n[2]===p)lo=Bqt(),n[2]=lo;else lo=n[2];let De=lo.length>0,uo;if(n[3]===p)uo=jqt(),n[3]=uo;else uo=n[3];let Ct=uo,_=cTe(),R=_.sources.length>0,T=uTe(),B=T.sources.length>0,po;if(n[4]===p)po=Gqt(),n[4]=po;else po=n[4];let He=po.length>0,ho;if(n[5]===p)ho=Vqt(),n[5]=ho;else ho=n[5];let ve=ho.length>0,fo;if(n[6]===p)fo=qqt(),n[6]=fo;else fo=n[6];let _e=fo.length>0,mo;if(n[7]===p)mo=zqt(),n[7]=mo;else mo=n[7];let Te=mo.length>0,go;if(n[8]===p)go=Kqt(),n[8]=go;else go=n[8];let je=go.length>0,wo;if(n[9]===p){let bo=Fwt();let yo=$wt(bo);wo={marketplaceHelperSources:bo,repoHelperSources:yo,offerBackstop:cre(yo)};n[9]=wo}else wo=n[9];let{marketplaceHelperSources:xt,repoHelperSources:ko,offerBackstop:St}=wo,Ae=xt.length>0,F=ko.length>0,Co;if(n[10]===p)Co=Yqt(),n[10]=Co;else Co=n[10];let Pe=Co.length>0,xo;if(n[11]===p)xo=Wqt(),n[11]=xo;else xo=n[11];let Re=xo.length>0,So;if(n[12]!==v)So=v?.some(No)??!1,n[12]=v,n[13]=So;else So=n[13];let Dt=So,Do;if(n[14]!==v)Do=v?.some(Ko)??!1,n[14]=v,n[15]=Do;else Do=n[15];let Ht=Do,w=Ct.length>0||Dt||Ht,Ho;if(n[16]===p)Ho=Jo(),n[16]=Ho;else Ho=n[16];let vo=Ho,y=vo,_o,To;if(n[17]!==w)_o=()=>{let vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re})},To=[Se,De,w,R,B,He,ve,_e,Te,je,Ae,F,Pe,Re],n[17]=w,n[18]=_o,n[19]=To;else _o=n[18],To=n[19];k(_o,To);let V=E(!1),l=Is(),{refusedWithin:u,noteRefused:d,epoch:_t}=Hi(),jo;if(n[20]!==l||n[21]!==d||n[22]!==u)jo=function K(){if(l()||u()){return d(),!0}return!1},n[20]=l,n[21]=d,n[22]=u,n[23]=jo;else jo=n[23];let K=jo,Ee=qf(),Ie=Hs(_t),Ao;if(n[24]!==w||n[25]!==y||n[26]!==l||n[27]!==d||n[28]!==P||n[29]!==u||n[30]!==xe)Ao=function c(Tt){if(V.current||ys()){return}if(l()||u()){d();return}if(V.current=!0,Tt==="exit"){if(y){f("onboarding_trust_dialog","gated_grants_backstop_declined"),P();return}f("onboarding_trust_dialog","onboarding_trust_denied"),Lr(1);return}let Po=g0();if(b("onboarding_trust_dialog"),s("tengu_trust_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:Te,hasProxyAuthHelper:je,hasMarketplaceHeadersHelper:Ae,hasRepoHeadersHelpers:F,hasDangerousEnvVars:Pe,hasAutoMemoryDirectory:Re}),Po)Sx(!0),t1e(!0);else cc(qo,xe);P()},n[24]=w,n[25]=y,n[26]=l,n[27]=d,n[28]=P,n[29]=u,n[30]=xe,n[31]=Ao;else Ao=n[31];let c=Ao,Ro;if(n[32]===p)Ro=()=>{V.current=!0,Lr(1)},n[32]=Ro;else Ro=n[32];let j=hi(Ro),Eo;if(n[33]!==y||n[34]!==l||n[35]!==d||n[36]!==c||n[37]!==u)Eo=()=>{if(cT()){c("exit");return}if(y){c("exit");return}if(l()||u()){d();return}if(V.current||ys()){return}V.current=!0,Lr(0)},n[33]=y,n[34]=l,n[35]=d,n[36]=c,n[37]=u,n[38]=Eo;else Eo=n[38];let Io;if(n[39]===p)Io={context:"Confirmation"},n[39]=Io;else Io=n[39];if(Fe("confirm:no",Eo,Io),vo&&!St){return queueMicrotask(P),null}const Be=Zo,jt="warning",At="warning",Pt="Accessing workspace:",Me=o,Rt="column",Et=1,It=1;let ie,le,pe;if(n[40]===p)ie=e(t,{bold:!0,children:Jn(ce().cwd())}),le=r(t,{children:["Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what","'","s in this folder first."]}),pe=r(t,{children:["Claude Code","'","ll be able to read, edit, and execute files here."]}),n[40]=ie,n[41]=le,n[42]=pe;else ie=n[40],le=n[41],pe=n[42];const Ve=(R||B||F)&&r(o,{flexDirection:"column",children:[R&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder pre-approves ",_.rawCount," ",I(_.rawCount,"tool permission")," in"," ",$_(_.sources),":"]}),r(t,{children:["  ",_.rules.length>0?$_(_.rules,8):"(rule names contain unprintable characters)"]})]}),B&&r(L,{children:[r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder adds ",T.rawCount," ",I(T.rawCount,"directory","directories")," ","to the workspace in"," ",$_(T.sources),":"]}),r(t,{children:["  ",T.dirs.length>0?$_(T.dirs,6):"(directory names contain unprintable characters)"]})]}),F&&r(t,{bold:!0,color:"warning",children:[e(Qe,{status:"warning",withSpace:!0}),"This folder runs commands to mint HTTP headers (headersHelper), declared in ",$_(ko)]}),e(t,{dimColor:!0,children:"These will apply without asking. Only proceed if you trust this configuration."})]});let Bo;if(n[43]===p)Bo=e(t,{dimColor:!0,children:e(it,{url:"https://code.claude.com/docs/en/security",children:"Security guide"})}),n[43]=Bo;else Bo=n[43];let de,he;if(n[44]!==c)de=()=>c("enable_all"),he=()=>c("exit"),n[44]=c,n[45]=de,n[46]=he;else de=n[45],he=n[46];let me;if(n[47]!==Ie.remountKey||n[48]!==K||n[49]!==Ee||n[50]!==de||n[51]!==he)me=e(hn,{refuseInput:K,windowAnchorMs:Ee,hideIndexes:!0,cancelFirst:!0,focus:"cancel",confirmLabel:"Yes, I trust this folder",cancelLabel:y?"No, continue without these permissions":"No, exit",onConfirm:de,onCancel:he},Ie.remountKey),n[47]=Ie.remountKey,n[48]=K,n[49]=Ee,n[50]=de,n[51]=he,n[52]=me;else me=n[52];let ge;if(n[53]!==j.keyName||n[54]!==j.pending)ge=e(t,{dimColor:!0,children:j.pending?r(L,{children:["Press ",j.keyName," again to exit"]}):r(ue,{children:[e(M,{chord:"enter",action:"confirm"}),e(M,{chord:"escape",action:"cancel"})]})}),n[53]=j.keyName,n[54]=j.pending,n[55]=ge;else ge=n[55];let we;if(n[56]!==Me||n[57]!==ie||n[58]!==le||n[59]!==pe||n[60]!==Ve||n[61]!==me||n[62]!==ge)we=r(Me,{flexDirection:Rt,gap:Et,paddingTop:It,children:[ie,le,pe,Ve,Bo,me,ge]}),n[56]=Me,n[57]=ie,n[58]=le,n[59]=pe,n[60]=Ve,n[61]=me,n[62]=ge,n[63]=we;else we=n[63];let Mo;if(n[64]!==Be||n[65]!==we)Mo=e(Be,{color:jt,titleColor:At,title:Pt,children:we}),n[64]=Be,n[65]=we,n[66]=Mo;else Mo=n[66];return Mo}
+
+## #28 api toWellFormed()  needle="toWellFormed()"  248=0 247=1
+
+## #28 api .toWellFormed(  needle=".toWellFormed("  248=0 247=1
+
+## #28 api segment(text)  needle="segment(text)"  248=0 247=0
+
+## #28 api segment(e)  needle="segment(e)"  248=9 247=18
+- #0 @179393216 0,{granularity:"grapheme"});return s}function Twe(e){if(!e)return"";return Xi().segment(e)[Symbol.iterator]().next().value?.segment??""}function JO(e){if(!e)return"";let 
+- #1 @179393337 e?.segment??""}function JO(e){if(!e)return"";let t="";for(let{segment:r}of Xi().segment(e))t=r;return t}function QO(e){if(!e)return 0;let t=0;for(let r of Xi().segment(e)
+- #2 @179393417 segment(e))t=r;return t}function QO(e){if(!e)return 0;let t=0;for(let r of Xi().segment(e))t++;return t}function n4(e){if(!e)return[];return Array.from(Xi().segment(e),(t
+- #3 @179393494 ().segment(e))t++;return t}function n4(e){if(!e)return[];return Array.from(Xi().segment(e),(t)=>t.segment)}function w_n(){if(!l)l=new Intl.Segmenter(void 0,{granularity:"
+- #4 @184443908 if(e[g]==t[p])p++}return p}function Nme(e,t){let r=[];for(let o of Array.from(t.segment(e))){let u=o.segment;if(r.length&&/\s/.test(r[r.length-1])&&/\s/.test(u))r[r.lengt
+- … +4 more
+
+## #28 api segment(t)  needle="segment(t)"  248=7 247=7
+- #0 @179393702 =e.trim();if(t==="")return 0;let r=t.split(/\s+/).length,n=0;for(let i of w_n().segment(t))if(i.isWordLike)n++;return Math.max(r,n)}var g=new Map;function E_n(e,t){let r=
+- #1 @181104479 rn r.join(`
+`)}).join(`
+`)}function b(t){let n="",r=0;for(let{segment:e}of Xi().segment(t)){n+=e;let o=ie(n),s=o-r;if(r=o,s!==S(e))return!1}return!0}function P(t){let n="
+- #2 @181104606 (e))return!1}return!0}function P(t){let n="",r="",e=0;for(let{segment:o}of Xi().segment(t)){r+=o;let s=ie(r),i=s-e;e=s,n+=i===S(o)?o:"\uFFFD"}return n}function _(t){let n
+- #3 @181104890 ].map(()=>"\uFFFD").join("")}function R(t,n){let r="";for(let{segment:e}of Xi().segment(t)){if(r.length+e.length>n)break;r+=e}return r}function W(t){return H(t,M)}functio
+- #4 @189475514 h&&E.code.startsWith(Zme))?Gy(o):o,S=u.intern(fqn(b));for(let{segment:E}of Xi().segment(t))c.push({value:E,width:ie(E),styleId:S,hyperlink:h})}function RE(t,o,u,c,h,m,b){
+- … +2 more
+
+## #28 api graphemeSegments  needle="graphemeSegments"  248=0 247=0
+
+## #28 api truncateGrapheme  needle="truncateGrapheme"  248=0 247=0
+
+## #28 api cutGrapheme  needle="cutGrapheme"  248=0 247=0
+
+## #28 api mid-emoji  needle="mid-emoji"  248=1 247=1
+- #0 @189843162 d character where a long shell-command or agent-description preview was cut off mid-emoji\n- Fixed a startup race that could silently unregister a plugin marketplace due
+
+## #28 api U+FFFD  needle="U+FFFD"  248=4 247=7
+- #0 @180207405 e or paragraph separator (${To(e)})`;case 65533:return"a replacement character (U+FFFD)";default:return e>=55296&&e<=57343?"an unpaired UTF-16 surrogate":null}}functi
+- #1 @185668590 /format characters are stripped, and other control characters are replaced with U+FFFD. Empty or whitespace-only content is rejected. Capped at 100KB per document."),
+- #2 @204001146 em (a ZIP entry name, a \`%PDF\`/\`PK\` header \u2014 non-ASCII bytes decode to U+FFFD, so high-byte signatures cannot be matched), which is fine for existence checks
+- #3 @223245716  is usually a content problem \u2014 most often a pasted replacement character (U+FFFD, the question-mark-in-a-box glyph), which the platform rejects; find and remove
+
+## #28 api \uFFFD  needle="\\uFFFD"  248=76 247=85
+- #0 @178358627 eturn u(t);return!x.test(t)}function zy(t){if(g)return g(t);return t.replace(a,"\uFFFD")}function I7e(t){if(u&&u(t))return t;return t.replace(a,"")}function Zne(t){le
+- #1 @178361936 (e.length<=n)return t;return new TextDecoder().decode(e.subarray(0,n)).replace(/\uFFFD+$/,"")}function Lvt(t,n=""){let e=(t.match(/`+/g)??[]).reduce((i,o)=>Math.max(i
+- #2 @181104660 for(let{segment:o}of Xi().segment(t)){r+=o;let s=ie(r),i=s-e;e=s,n+=i===S(o)?o:"\uFFFD"}return n}function _(t){let n=t;for(let r=0;r<16;r++){if(b(n))return n;let e=P(
+- #3 @181104821  e=P(n);if(e===n)break;n=e}if(b(n))return n;return[...Xi().segment(n)].map(()=>"\uFFFD").join("")}function R(t,n){let r="";for(let{segment:e}of Xi().segment(t)){if(r.
+- #4 @181105963 "";for(let o of t){let s=o.codePointAt(0);if(D(s))continue;r+=C(s)||E(s)||L(s)?"\uFFFD":o}let e=qmt(r);return n?v(e):e}var N=/\p{DI}/gu;function Hqe(t){return t.repla
+- … +71 more
+
+## #28 api replacement character  needle="replacement character"  248=4 247=7
+- #0 @180207382 :case 8233:return`a line or paragraph separator (${To(e)})`;case 65533:return"a replacement character (U+FFFD)";default:return e>=55296&&e<=57343?"an unpaired UTF-16 surrogate":null
+- #1 @182479965 return"\\v";case"'":return"\\'";default:throw Error("Unexpected string encoding replacement character. This should be an unreachable error.")}})+"'"}function o(p){let E=[...new Set(
+- #2 @205838306 r.mimeType);if(e.indexOf(F.UNICODE_REPLACEMENT_CHARACTER)>=0)n.warning("Unicode replacement character detected, source encoding issues?");function a(B){if(B>65535){B-=65536;var z=55
+- #3 @223245693 : "+ee.message+"). This is usually a content problem \u2014 most often a pasted replacement character (U+FFFD, the question-mark-in-a-box glyph), which the platform rejects; find an
+
+## #28 leftoverish ACCESSING_CAPABILITY  needle="ACCESSING_CAPABILITY"  248=0 247=0
+
+## #28 leftoverish hasProjectAllowRules  needle="hasProjectAllowRules"  248=2 247=3
+- #0 @203836964  vt=g0();s("tengu_trust_dialog_shown",{isHomeDir:vt,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:T
+- #1 @203838010 ialog"),s("tengu_trust_dialog_accept",{isHomeDir:Po,hasMcpServers:Se,hasHooks:De,hasBashExecution:w,hasProjectAllowRules:R,hasProjectAddDirs:B,hasApiKeyHelper:He,hasAwsCommands:ve,hasGcpCommands:_e,hasOtelHeadersHelper:T
+
+## #28 leftoverish project allow  needle="project allow"  248=0 247=0
+
+## #28 leftoverish Bash(  needle="Bash("  248=54 247=68
+- #0 @178955151 ];var V=h(()=>i().optional().describe('Permission rule syntax to filter when this hook runs (e.g., "Bash(git *)"). Only runs if the tool call matches the pattern. Avoids spawning hooks for non-matching com
+- #1 @179069858 end",suggestion:"Move :* to the end for prefix matching, or use * for wildcard matching",examples:["Bash(npm run:*) - prefix matching (legacy)","Bash(npm run *) - wildcard matching"]};if(c===":*")return{va
+- #2 @179069903 x matching, or use * for wildcard matching",examples:["Bash(npm run:*) - prefix matching (legacy)","Bash(npm run *) - wildcard matching"]};if(c===":*")return{valid:!1,error:"Prefix cannot be empty before :
+- #3 @179070070 error:"Prefix cannot be empty before :*",suggestion:"Specify a command prefix before :*",examples:["Bash(npm *)","Bash(git *)"]};if(t==="allow"){let E=Rn(c);if(E!==void 0){let _=E==="git",b=_?" For git, op
+- … +50 more
+
+## #28 leftoverish permission rule  needle="permission rule"  248=89 247=139
+- #0 @179040334 cribe("Additional paths to allow writing within the sandbox. Merged with paths from Edit(...) allow permission rules."),denyWrite:x(i()).optional().describe("Additional paths to deny writing within the sandbox. Merg
+- #1 @179040483 escribe("Additional paths to deny writing within the sandbox. Merged with paths from Edit(...) deny permission rules."),denyRead:x(i()).optional().describe("Additional paths to deny reading within the sandbox. Merge
+- #2 @179040631 escribe("Additional paths to deny reading within the sandbox. Merged with paths from Read(...) deny permission rules."),allowRead:x(i()).optional().describe("Paths to re-allow reading within denyRead regions. Takes 
+- #3 @179071808 ],Dn=h(()=>Oe(i(),Wk.string()));function ft(e){return m({allow:x(st()).optional().describe("List of permission rules for allowed operations"),deny:x(Ae()).optional().describe("List of permission rules for denied ope
+- … +85 more
+
+# ==== #31 rc-reconnect-prompt ====
+- count "silently reconnect" 248=1 247=1
+- count "tengu_bridge_reconnected" 248=2 247=2
+- count "tengu_bridge_repl_reconnected_in_place" 248=0 247=0
+- count "getPendingPermissionRequests" 248=9 247=9
+- count "republishSurviving" 248=4 247=4
+- count "flushPendingReceipts" 248=3 247=3
+- count "afterReconnect" 248=8 247=8
+- count "onReconnect" 248=16 247=16
+- count "replay permission" 248=0 247=0
+- count "permission prompt" 248=106 247=105
+- count "latest messages" 248=1 247=1
+- count "forceRender" 248=4 247=4
+- count "forceUpdate" 248=10 247=10
+- count "repaint" 248=24 247=24
+- count "resync" 248=75 247=63
+- count "undeliveredResponses" 248=17 247=17
+- count "flushGate" 248=0 247=0
+- count "silent reconnect" 248=0 247=0
+- count "reconnect-repaint" 248=0 247=0
+- count "reShow" 248=0 247=0
+- count "reshow" 248=0 247=0
+- count "re-show" 248=2 247=2
+- count "replayPrompt" 248=0 247=0
+- count "replayPermission" 248=0 247=0
+
+## #31 tengu_bridge_reconnected-win @205348548
+ate.now());i.logReconnected(A),n(`[bridge:poll] Reconnected after ${Ot(A)}`),s("tengu_bridge_reconnected",{disconnected_ms:A}),Ze=!1}if(ce=0,_e=0,ue=null,Oe=null,ve=null,ee=!1,ye)ye=!1,s("tengu_bridge_env_reregister",{attempt:G,outcome:v("recovered")}),b("bridge_env_reregister");if(G=0,!M){if(U.size>0||K.size>0)await Je();if(R.size>=e.maxSessions){let ge=u.multisession_poll_int
+
+## #31 tengu_bridge_reconnected-fn near@205348548 fn=dt @205347718
+## #31 tengu_bridge_reconnected-fn dt @205347718
+len=431 sha=56035e9e70c1c40c exact247=0
+function dt(){let u=Ve.size;if(i.logStatus(u>0?`${u} ${I(u,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed."),be.size>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${[...be].join(", ")}`);i.logStatus("Run `claude remote-control` to start a fresh environment.")}
+
+## #31 getPendingPermissionRequests-win @200587966
+nue;d.reject(new Ua("Tool permission stream closed before response received"))}}getPendingPermissionRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="can_use_tool")}getPendingUserDialogRequests(){return Array.from(this.pendingRequests.values()).map((t)=>t.request).filter((t)=>t.request.subtype==="request_user_dialog
+
+## #31 getPendingPermissionRequests-fn near@200587966 fn=Re @200584746
+## #31 getPendingPermissionRequests-fn Re @200584746
+len=114 sha=d5ce4f2820256a2c exact247=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 getPendingPermissionRequests-win @200588977
+e.startsWith("dialog:")?"dialog":"permission"),pending_permission_requests:this.getPendingPermissionRequests().length,pending_dialog_requests:this.getPendingUserDialogRequests().length})}cancelPendingUserDialogs(t,e){let o=0;for(let{request:r}of Array.from(this.pendingRequests.values())){if(r.request.subtype!=="request_user_dialog"||r.request.dialog_kind!==t)continue;if(!this.c
+
+## #31 getPendingPermissionRequests-fn near@200588977 fn=Re @200584746
+## #31 getPendingPermissionRequests-fn Re @200584746
+len=114 sha=d5ce4f2820256a2c exact247=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 getPendingPermissionRequests-win @200604706
+yNestedPromptUnblocking(E);if(this.publishedPendingActionDetails.delete(C),this.getPendingPermissionRequests().length===0&&this.getPendingUserDialogRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j
+
+## #31 getPendingPermissionRequests-fn near@200604706 fn= @-1
+## #31 getPendingPermissionRequests-fn  @-1
+MISS
+
+## #31 getPendingPermissionRequests-win @200609262
+ingActionDetails.delete(r),this.getPendingUserDialogRequests().length===0&&this.getPendingPermissionRequests().length===0){if(!wo())this.sessionState.notifyStateChanged(this.mainLoopLiveness?.()===!1?"idle":"running")}else{if(!this.timedOutUserDialogs.has(r))this.sessionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(t,e,o){let r=new
+
+## #31 getPendingPermissionRequests-fn near@200609262 fn= @-1
+## #31 getPendingPermissionRequests-fn  @-1
+MISS
+
+## #31 republishSurviving-win @200588651
+enqueue({type:"control_cancel_request",request_id:o}),r.resolve(d),e++}return e}republishSurvivingPendingAction(){let t;for(let[e,o]of this.publishedPendingActionDetails)if(this.pendingRequests.has(e))t=o;if(!t)return;this.sessionState.republishPendingAction(t),s("tengu_pending_action_republished",{survivor_kind:c(t.tool_name.startsWith("dialog:")?"dialog":"permission"),pending
+
+## #31 republishSurviving-fn near@200588651 fn=Re @200584746
+## #31 republishSurviving-fn Re @200584746
+len=114 sha=d5ce4f2820256a2c exact247=0
+function Re(t){switch(t){case"delivered":return!0;case"queued":return!1;case"sending":case"indeterminate":return}}
+
+## #31 republishSurviving-win @200604941
+ess?.()===!1?"idle":"running")}else this.sessionState.reteeWaitingOnUser(),this.republishSurvivingPendingAction();b.removeEventListener("abort",j)}}}createHookCallback(t,e){let o=this.sdkHostHookGeneration;return{type:"callback",timeout:e,callback:async(r,u,l)=>{if(o!==this.sdkHostHookGeneration&&this.retiredHostHookAnswer)return this.retiredHostHookAnswer(r);try{return await t
+
+## #31 republishSurviving-fn near@200604941 fn= @-1
+## #31 republishSurviving-fn  @-1
+MISS
+
+## #31 republishSurviving-win @200609485
+if(!this.timedOutUserDialogs.has(r))this.sessionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(t,e,o){let r=new Map,u=async(l)=>{try{let d={type:"addRules",rules:[{toolName:Yr,ruleContent:`domain:${JZ(l)}`}],behavior:"allow",destination:"localSettings"},p=M(nz(PQ),e,o),f;try{f=await this.sendRequest({subtype:"can_use_tool",tool_name
+
+## #31 republishSurviving-fn near@200609485 fn= @-1
+## #31 republishSurviving-fn  @-1
+MISS
+
+## #31 function dNe(  needle="function dNe("  248=1 247=0  **NEW248**
+- #0 @204894232 :r?Object.fromEntries(t):e,truncated:r}}function dNe(e,t,r,{afterReconnect:o=!1}={}){let d=vE
+
+## #31 function xe(  needle="function xe("  248=69 247=61
+- #0 @178486554 lean"?t!=="__proto__":t===null}var q=de;function xe(t,e){var r=t.__data__;return q(e)?r[type
+- #1 @178616273 &!Ea(t))return t;return _t(e)}var Ft=Lt;function xe(e,t,r){let i=Wp(e);if(t.length===0||i||t
+- #2 @179288695 "fs"?T(e.error)??"unknown":e.kind}async function xe(e){try{return re(await e)}catch(r){retur
+- #3 @180869116 ata:Z}}return o.creditsOnlyTiers.parsed}function xe(){return An()==="enterprise"&&!Bce()}fun
+- … +65 more
+
+## #31 async function dNe(  needle="async function dNe("  248=0 247=0
+
+## #31 leftoverish reconnect-after-env-lost  needle="reconnect-after-env-lost"  248=0 247=0
+
+## #31 leftoverish reconnected_in_place  needle="reconnected_in_place"  248=0 247=0
+
+## #31 leftoverish flush pending  needle="flush pending"  248=0 247=0
+
+## #31 leftoverish pending permission  needle="pending permission"  248=3 247=3
+- #0 @92662922 ......^... attempts; giving up....?...resend..>....`..[RemoteSessionManager] No pending permission request with ID: .......P..remote_permission_respond...$.......remote_permissio
+- #1 @183871065 p?") approves nothing. Neither a marked message nor such a reply ever answers a pending permission prompt or licenses editing permission settings, CLAUDE.md, or other configurati
+- #2 @201964040 this.pendingPermissionRequests.get(e);if(!o){_(Error(`[RemoteSessionManager] No pending permission request with ID: ${e}`)),f("remote_permission_respond","remote_permission_respo
+
+## #31 leftoverish latest message  needle="latest message"  248=3 247=3
+- #0 @181602193 uding replies that are only tool calls and long execution turns: did the user's latest message teach you a durable, applicable lesson? The only thing you may save this turn i
+- #1 @185654079  memory content.",WVe],ERn=`Check each reply before you send it: did the user's latest message correct you or state a preference \u2014 even one phrased as a task instruction
+- #2 @189810016 slash-command panels (e.g. `/config`, `/model`) in fullscreen mode covering the latest messages; the conversation now stays pinned above the panel\n- Fixed the `/workflows` d
+
+## #31 leftoverish show permission  needle="show permission"  248=0 247=0
+
+# ==== #36 mention-ime ====
+- count "non-Latin" 248=1 247=0 **NEW248**
+- count "IME" 248=1547 247=1544
+- count "toLocaleLowerCase" 248=5 247=5
+- count "localeCompare" 248=138 247=116
+- count "normalize(\"NFKC\")" 248=23 247=22
+- count "normalize('NFKC')" 248=0 247=0
+- count "normalize(\"NFKD\")" 248=5 247=5
+- count "normalize('NFKD')" 248=0 247=0
+- count "normalize(\"NFD\")" 248=6 247=6
+- count "normalize(\"NFC\")" 248=94 247=94
+- count "hangul" 248=4 247=4
+- count "Hangul" 248=21 247=21
+- count "Korean" 248=2 247=2
+- count "isComposing" 248=11 247=11
+- count "foldCase" 248=19 247=19
+- count "tengu_at_mention_peer_" 248=2 247=2
+- count "peer_mention" 248=10 247=10
+- count "@mention" 248=0 247=0
+- count "mentionQuery" 248=0 247=0
+- count "composition" 248=162 247=162
+
+## #36 non-Latin-win @189782108
+hook or background agent that printed megabytes of error output being able to overflow the conversation and wedge the session on "Prompt is too long"\n- Fixed Ctrl keyboard shortcuts not firing under non-Latin (e.g. Cyrillic) keyboard layouts in kitty-protocol terminals\n- Fixed text like `<35;150;7M` being inserted into the prompt when a mouse report arrived split across reads right after the esc
+
+## #36 mention-analytics-win @186137683
+`)}function YTe(e){return{token:GN(e),where:g2t(e.where)}}function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}import{readdir as Ykt,stat as Xkt}from"fs/promises";function Rz(e){if(!e||e.length===
+
+## #36 mention-fn near@186137683 fn=XTe @186137661
+## #36 mention-fn XTe @186137661
+len=237 sha=f84eba9be38fdf82 exact247=0
+function XTe(e){if(s(`tengu_at_mention_peer_${e}`,{}),LT({mentionType:"peer",success:e==="success"}),e==="success")b("input_peer_at_mention");else if(e==="ask")y("input_peer_at_mention","ask");else f("input_peer_at_mention","not_found")}
+
+## #36 normalize("NFKC") code-hits=23
+## #36 NFKC @178797376 @178797376
+).replace(f,""))}function bvn(e){let n=e,r="",t=0,i=10;while(n!==r&&t<i)r=n,n=n.normalize("NFKC"),n=kd(n),t++;if(t>=i)throw Error(`Unicode sanitization reached maximum iterations (${i}) for input: ${e.slice(0,100)}`);return n}function Um(e){if(typeof e==="stri
+
+## #36 NFKC-fn near@178797376 fn=bvn @178797313
+## #36 NFKC-fn bvn @178797313
+len=209 sha=9b6ed4325671295b exact247=0
+function bvn(e){let n=e,r="",t=0,i=10;while(n!==r&&t<i)r=n,n=n.normalize("NFKC"),n=kd(n),t++;if(t>=i)throw Error(`Unicode sanitization reached maximum iterations (${i}) for input: ${e.slice(0,100)}`);return n}
+
+## #36 NFKC @179688169 @179688169
+tion H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}function oOe(e){if(L.test(e))return"";let t=E(e);if(!O.test(
+
+## #36 NFKC-fn near@179688169 fn=H @179688085
+## #36 NFKC-fn H @179688085
+len=204 sha=673c450570416597 exact247=0
+function H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}
+
+## #36 NFKC @179688239 @179688239
+{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}function oOe(e){if(L.test(e))return"";let t=E(e);if(!O.test(t))return t;let r=H(e);return r===t?t:r}function EJn(e){return!L.test(
+
+## #36 NFKC-fn near@179688239 fn=H @179688085
+## #36 NFKC-fn H @179688085
+len=204 sha=673c450570416597 exact247=0
+function H(e){let t=e;if(t.includes("%"))try{t=decodeURIComponent(t)}catch{return e.normalize("NFKC").toLowerCase()}return t.replace(B,"").replace(v,".").normalize("NFKC").toLowerCase().replace(/\.$/,"")}
+
+## #36 NFKC @179850687 @179850687
+n(u){let{table:d,pattern:a}=N,e=(f)=>f.replace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}function I(u){return u.normalize("NFKD").replace(/\p{M}+/gu,"")}var y="abcdefghijklmnopqrstuvwxyz";function kyt(u){if(!/^[a-z]$/.test(u))throw Error("latinLetter
+
+## #36 NFKC-fn near@179850687 fn=ggn @179850596
+## #36 NFKC-fn ggn @179850596
+len=110 sha=eca3f01d775ada0f exact247=0
+function ggn(u){let{table:d,pattern:a}=N,e=(f)=>f.replace(a,(c)=>d[c]??c);return e(I(e(u)).normalize("NFKC"))}
+
+## #36 NFKC @180525434 @180525434
+.environmentKind!==void 0&&e.environmentKind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}var aa=6,Smn=12,NV=`[0-9a-f]{${aa},${Smn}}`,Z8=new RegExp(`^(.*\\S)\\s
+
+## #36 NFKC-fn near@180525434 fn=dr @180525410
+## #36 NFKC-fn dr @180525410
+len=134 sha=cdbd73e6c8d8fd63 exact247=0
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+
+## #36 NFKC @181598000 @181598000
+ncludes("/")))throw new wy(`URL-encoded traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x00")))throw new wy(`Unicode-normalized traversal in path key: "${e}"`);if(e.includes
+
+## #36 NFKC-fn near@181598000 fn=VVe @181597760
+## #36 NFKC-fn VVe @181597760
+len=545 sha=0fe9dfb1e18146b3 exact247=0
+function VVe(e){if(e.includes("\x00"))throw new wy(`Null byte in path key: "${e}"`);let t;try{t=decodeURIComponent(e)}catch{t=e}if(t!==e&&(t.includes("..")||t.includes("/")))throw new wy(`URL-encoded traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x00")))throw new wy(`Unicode-normalized traversal in path key: "${e}"`);if(e.includes("\\"))throw new wy(`Backslash in path key: "${e}"`);if(e.startsWith("/"))throw new wy(`Absolute path key: "${e}"`);return e}
+
+## #36 NFKC @181628676 @181628676
+"\xDF").normalize("NFD").toUpperCase().toLowerCase()}function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu,"").replace(/[\p{Pd}\u2212]/gu,"-").replace(/[\ua789\u2236\u0589\u05c3\u02d0]/g,":"))}functi
+
+## #36 NFKC-fn near@181628676 fn=uB @181628649
+## #36 NFKC-fn uB @181628649
+len=201 sha=96212f6f24f9728e exact247=0
+function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu,"").replace(/[\p{Pd}\u2212]/gu,"-").replace(/[\ua789\u2236\u0589\u05c3\u02d0]/g,":"))}
+
+## #36 NFKC @182914061 @182914061
+or===void 0||typeof e.error==="string")}var c=200;function uu(r,e=c){let n=dn(r.normalize("NFKC")).replaceAll(/[<>";\u2018\u2019\u201A\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A\u2329\u232A\u27E8\u27E9\u27EA\u27EB\u3008\u3009\u300A\u300B]/g," ").replaceAll(/\s+
+
+## #36 NFKC-fn near@182914061 fn=uu @182914031
+## #36 NFKC-fn uu @182914031
+len=948 sha=1118e5079722ed8a exact247=0
+function uu(r,e=c){let n=dn(r.normalize("NFKC")).replaceAll(/[<>";\u2018\u2019\u201A\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A\u2329\u232A\u27E8\u27E9\u27EA\u27EB\u3008\u3009\u300A\u300B]/g," ").replaceAll(/\s+/g," ").trim(),o=Math.max(s,e+l),t=n.length>o,i=HNt(t?de(n,o):n);return t||i.length>e?`${de(i,e)}\u2026`:i}var a=500;function JR(r){let e=dn(r).replaceAll(/\s+/g," ").trim(),n=HNt(e.length>s?de(e,s):e);return n.length>a?`${de(n,a)}\u2026`:n}function HNt(r){function e(n,o,t){return/[0-9._~+/=%-]/.test(t)?`${o} [redacted]`:n}return r.replace(/(?:\b|(?<=\\[A-Za-z"']))(bearer|basic)[\s:=\uFF1A\uFF1D]+(?:(?:\\*["']|\\+)\s*)?([A-Za-z0-9._~+/=%-]{8,})/gi,e).replace(/(?:\b|(?<=\\[A-Za-z"']))((?:access[-_ ]?|refresh[-_ ]?|id[-_ ]?|client[-_ ]?|api[-_ ]?|x[-_]api[-_ ]?|session[-_ ]?|auth[-_ ]?)?(?:token|key|secret|password|authorization|credential)s?)(?:\\*["']|\\+)?\s*[:=\uFF1A\uFF1D]\s*(?:\\*["']|\\+)?\s*([A-Za-z0-9._~+/=%-]{8,})/gi,e)}
+
+## #36 NFKC @183211227 @183211227
+,"\u03C3").normalize("NFC")}function jz(e){return gr.test(e)?e:e.replace(wt,"").normalize("NFKC")}function mr(e,t){if(t(e))return!0;let r=M5(e);return r!==e&&t(r)}function b9(e){return mr(e,dI)}function Ct(e){return e?.aborted===!0}function Npt(e){return new P
+
+## #36 NFKC-fn near@183211227 fn=jz @183211175
+## #36 NFKC-fn jz @183211175
+len=70 sha=e9251e3c6aaf2460 exact247=0
+function jz(e){return gr.test(e)?e:e.replace(wt,"").normalize("NFKC")}
+
+## #36 NFKC @183689703 @183689703
+,value:`/${e}`,origin:t}));import{sep as DHt}from"path";function Rb(e){return e.normalize("NFKC").toLowerCase().replace(/[\p{White_Space}\p{Pd}_]+/gu,"")}var iu="web-fetch",LHt=Rb(iu);function Qit(e){return typeof e==="string"&&Rb(e)===LHt}function XE(e){retur
+
+## #36 NFKC-fn near@183689703 fn=Rb @183689679
+## #36 NFKC-fn Rb @183689679
+len=98 sha=e35786a4e1be8b27 exact247=0
+function Rb(e){return e.normalize("NFKC").toLowerCase().replace(/[\p{White_Space}\p{Pd}_]+/gu,"")}
+
+## #36 normalize('NFKC') code-hits=0
+## #36 fold function kp(  needle="function kp("  248=7 247=9
+- #0 @181805015 e}]`}var _e=new RegExp(String.raw`\[(${j}) #(\d+)(?: \+\d+ lines)?(\.)*\]`,"g");function kp(e){if(!e)return[];return[...e.matchAll(_e)].map((r)=>({id:parseInt(r[2]||"0"),ma
+- #1 @188879339 H_COMMENT_MODE]},e.HASH_COMMENT_MODE]}}Ho.exports=wp});var zo=d(function(kT,qo){function kp(e){let r={className:"variable",variants:[{begin:/\$[\w\d#@][\w\d_]*/},{begin:/\$
+- #2 @189376556 eInt(c,10)}function al(t,o){return{sequences:Array(t).fill(o),highSurrogate:""}}function kp(t){if(t<32)return t;if(t>=64&&t<=95||t>=97&&t<=122)return t&31;switch(t){case 32
+- #3 @200393282 stream","x-gateway-upstream-kind","x-gateway-model","x-gateway-upstream-model"];function kp(e,t){for(let n of f2){let i=e.get(n);if(i!==null)t.set(n,i)}}function p2(e,t){e.
+- #4 @209402911 $p(AS){return ae.bold(AS.text)}function Tp(PS){return PS.value!=="add-new-rule"}function kp($S){return $S.value}function Dp(TS){return TS.replace(/\n+$/,"")}function _p(kS)
+- #5 @213553221 ]},a,r,e.QUOTE_STRING_MODE]}}],illegal:/\S/}}St.exports=wp});var Ut=d((yf,ht)=>{function kp(e){let t=e.regex,r=e.inherit(e.QUOTE_STRING_MODE,{illegal:null}),a={className:"p
+- … +1 more
+
+## #36 fold function vu(  needle="function vu("  248=15 247=14
+- #0 @178563058 tpAgentFactory(e,t)}function De(){return!n().host.launchOptions.isInteractive()}function vu(){return n().host.launchOptions.isInteractive()}function AEn(e){n().host.launchO
+- #1 @181240002 .allKeys&&!(l in se.skipKeywords))st(e,t,r,f,n+"/"+l,o,n,l,s)}r(s,n,o,i,a,c,u)}}function vu(e){return e.replace(/~/g,"~0").replace(/\//g,"~1")}});var je=d(function(Ls){Obje
+- #2 @182599945  Uv}from"net";import{createSecureContext as Fv}from"tls";var{pki:sc}=Nm.default;function vu(e,t){let r=e.leafCerts.get(t);if(r)return r;let o=sc.rsa.generateKeyPair(2048),u
+- #3 @190608863 n fu(od){return od.type!=="input"}function pu(){return""}function mu(){return""}function vu(){return""}function bu(fd){return fd.slice(0,-1)}function Fn(){let el=g(3),[Jr,K
+- #4 @194670977 ync function Ru(e,t){try{return!(await er(yn(e,t))).isFile()}catch{return null}}function vu(e,t){return e.length===64?$d("sha256").update(`blob ${t.length}\x00`).update(t).
+- #5 @195863527 and if the user expects you to notice comments as they arrive, say so plainly.'}function vu(e,t){return`**To update**: Edit the file, then call Artifact again with the same
+- … +9 more
+
+## #36 fold function dr(  needle="function dr("  248=28 247=32
+- #0 @178206944 oauth-2025-04-20",ln="oidc-federation-2026-04-01",un=120,LEe=30,hn=5,on=1048576;function dr(e){if(!e)return;let t;try{t=new URL(e)}catch(s){throw new ia(`Invalid token endp
+- #1 @178469495 :n,bottom:(s)=>Promise.resolve(q.elementTable(s.surface)),origin:De(e,t).name})}function dr(e){let t=e.serving.getStore();return t!==void 0&&e.servingLive.has(t.callId)?t.c
+- #2 @178502269 &&e.constructor,o=typeof t=="function"&&t.prototype||ar;return e===o}var NLe=lr;function dr(e,t){return function(o){return e(t(o))}}var pGt=dr;var ur=pGt(Object.keys,Object
+- #3 @178872115 s:_,input:u,inst:e});if(!h.length)return v;return Promise.all(h).then(()=>v)}});function dr(e,t,r,o){for(let n of e)if(n.issues.length===0)return t.value=n.value,t;return t
+- #4 @179382855 (e,t){let r=fr(t,e);if(r===""||r.startsWith("..")||ur(r))return!0;return!W(e,t)}function dr(e,t){return Wl(e,t)}var pr=/[/\\]+/,mr=/[\\/]$/,qe=/^(?:[/\\]|[A-Za-z]:[/\\])/,g
+- #5 @179603731 /.test(s))return e!==s;if(s.charAt(0)==="*")s=s.slice(1);return!e.endsWith(s)})}function dr(e){return process.env[e.toLowerCase()]||process.env[e.toUpperCase()]||""}var Vs=
+- … +22 more
+
+## #36 fold function normalizeSessionNameKey(  needle="function normalizeSessionNameKey("  248=0 247=0
+
+## #36 fold toLocaleLowerCase()  needle="toLocaleLowerCase()"  248=2 247=2
+- #0 @195394367 ross-region":case"mobile":case"standard":case"legacy":return Promise.resolve(r?.toLocaleLowerCase());case void 0:return Promise.resolve("legacy");default:throw Error(`Invalid para
+- #1 @197321976 v.METADATA_SERVER_DETECTION){let e=process.env.METADATA_SERVER_DETECTION.trim().toLocaleLowerCase();if(!(e in N.METADATA_SERVER_DETECTION))throw RangeError(`Unknown \`METADATA_SER
+
+## #36 fold localeCompare(  needle="localeCompare("  248=135 247=113
+- #0 @68301730 nd matching " + JSON.stringify(Bun.main));
+  args.sort((a, b) => {
+    return a.localeCompare(b);
+  });
+  let needsPop = !1;
+  if (args.length === 1)
+    args.push(process.cw
+- #1 @68306338 turn 1;
+        if (a.route === "")
+          return -1;
+        return a.route.localeCompare(b.route);
+      });
+      for (let i = 0, length = pairs.length;i < length; i++)
+- #2 @180261991 {return!1}function E3(e){return[...e].sort((t,r)=>r.id.length-t.id.length||t.id.localeCompare(r.id))}function Co(){return Bd().modelCapabilitiesByCachePath}function Hw(e,t=Bd
+- #3 @181045014 sition:tr(r)})).sort((r,t)=>te(r.position,t.position))}function nr(e,r){let t=e.localeCompare(r);if(t!==0)return t;return e<r?-1:e>r?1:0}function te(e,r){let t=nr(e.body,r.bo
+- #4 @181119712 return e.name===o||(e.aliases?.includes(o)??!1)}function Oee(e,o){return e.name.localeCompare(o.name)}var l;function W8n(e){l=e}function tce(){return l?.()}var i=new WeakMap,
+- #5 @181801298 s);return s.aliases?`${o} (aliases: ${s.aliases.join(", ")})`:o}).sort((s,o)=>s.localeCompare(o)).join(", ")}`);return r}function I(e){if(e.length<=L)return Rhn(e);let t=L-fe
+- … +129 more
+
+## #36 leftover-NFKC-shape  needle=".normalize(\"NFKC\").replace(/[\\p{Cc}\\p{Cf}]/gu"  248=1 247=1
+- #0 @180525433 e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}var aa=6,Smn=1
+
+## #36 leftover-NFKC-shape2  needle="normalize(\"NFKC\")"  248=19 247=22
+- #0 @180525434 .environmentKind!==void 0&&e.environmentKind!=="bridge"}function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace
+- #1 @181598000 ncludes("/")))throw new wy(`URL-encoded traversal in path key: "${e}"`);let r=e.normalize("NFKC");if(r!==e&&(r.includes("..")||r.includes("/")||r.includes("\\")||r.includes("\x0
+- #2 @181628676 "\xDF").normalize("NFD").toUpperCase().toLowerCase()}function uB(e){return Zw(e.normalize("NFKC").replace(/[\p{Z}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu,"").repla
+- #3 @182914061 or===void 0||typeof e.error==="string")}var c=200;function uu(r,e=c){let n=dn(r.normalize("NFKC")).replaceAll(/[<>";\u2018\u2019\u201A\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A\
+- #4 @183211227 ,"\u03C3").normalize("NFC")}function jz(e){return gr.test(e)?e:e.replace(wt,"").normalize("NFKC")}function mr(e,t){if(t(e))return!0;let r=M5(e);return r!==e&&t(r)}function b9(e)
+- #5 @183689703 ,value:`/${e}`,origin:t}));import{sep as DHt}from"path";function Rb(e){return e.normalize("NFKC").toLowerCase().replace(/[\p{White_Space}\p{Pd}_]+/gu,"")}var iu="web-fetch",LHt=
+- #6 @183705977 s hFe,relative as yFe,resolve as Hae,sep as Cjt}from"path";function lFe(e){if(e.normalize("NFKC").includes("*")||/%2a/i.test(e))return!0;if(e.includes("%"))try{return decodeURIC
+- #7 @183706086 ")||/%2a/i.test(e))return!0;if(e.includes("%"))try{return decodeURIComponent(e).normalize("NFKC").includes("*")}catch{return!1}return!1}var yCe=String.raw`\$\{([A-Za-z_][A-Za-z0
+- … +11 more

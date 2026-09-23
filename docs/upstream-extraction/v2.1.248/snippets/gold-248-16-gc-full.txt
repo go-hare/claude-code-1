@@ -1,0 +1,184 @@
+# gold-248-16-gc-full
+exe248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes248=226708128
+exe247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe
+bytes247=253204128
+when=2026-09-20T08:13:03.090Z
+
+## OFFSETS-KNOWN
+{
+  "classGc": 192130933,
+  "Fh": 192130838,
+  "DhExport": 192130470,
+  "hashX": 192131709,
+  "hashP": 192131287,
+  "hashE": 192134546,
+  "loadPrStatuses": 192135779,
+  "prGetFilter": 192137355,
+  "fetchBatchCall": 192137568,
+  "hashEMerge": 192137786,
+  "pruneLi": 192138314,
+  "rp": 192178267,
+  "ZeOr": 192204952,
+  "Xw": 192234494,
+  "V$n": 184556749,
+  "K$n": 184559595,
+  "q$n": 184558619,
+  "uXe": 184559295
+}
+
+## class gc locate
+findClassGc=192130933 known=192130933 delta=0
+
+## Fh @192130704
+len=229 sha=c0ff7312c4a8c947
+function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}
+
+## Fh-body @192130704
+len=229 sha=c0ff7312c4a8c947 end@192130933
+function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}
+
+## Dh-export-window @192130470
+chiveRemoteSession(i)),readLogTail:(i,d)=>ic(i,d),probeFleetTranscript:(i,d)=>Fi(i,d),scanLoopTranscript:(i,d)=>ec(i,d),fetchPrStatusBatch:(i)=>V$n(i),fetchPrStatusByUrl:(i)=>G$n(i),loadPrStatusCache:(i)=>K$n(i),persistPrStatusCache:(i,d)=>q$n(i,d),touchFleetViewHeartbeat:(i)=>kmn(i),clearFleetViewHeartbeat:(i)=>Tmn(i),watchJobDirOnce:(i,d)=>Din(i,d)}}function Fh(){return{jobs:null,adoptedPeers:[],remoteJobs:[],remoteListLoaded:!1,pendings:[],statuses:new Map,terminalHolders:new Map,prStatuses:new Map,loopKicks:new Map,logTails:{},deleteRefusals:new Map,overlaidLoadLanded:!1}}class gc{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#
+
+## class gc FULL @192130933
+len=10895 sha=e74a66069314570f end@192141836
+{#n;#e;#a=$e();#t=Fh();#i=null;#r=0;#d=!1;#s=[];#o=null;#f=0;#u=0;#m=new Set;#l=new Map;#g=new Set;#c=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#h=new Set;#b=new Map;#_=Xu();#k=null;constructor(i){this.#n=i?.storageV5,this.#e={...Dh(),...i?.client}}getSnapshot=()=>this.#t;usesStorage(i){return this.#n===i}subscribe=(i)=>this.#a.subscribe(i);#p(i,d){let m=this.#t[i],w=d(m);if(Object.is(w,m))return;this.#t={...this.#t,[i]:w},this.#a.emit()}#C(i,d){return(this.#i?.setTimeout??u1)(i,d)}attachView(i){if(this.#r++,this.#r===1)this.#x(i);let d=!1;return()=>{if(d)return;if(d=!0,this.#r--,this.#r===0)this.#P()}}setRemoteWanted(i){if(i===this.#d)return;if(this.#d=i,this.#r===0)return;if(i)this.#I();else this.#o?.(),this.#o=null}#x(i){if(this.#i=i,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)});if(this.load(),this.#s.push(w8(i,()=>void this.load(),fc),w8(i,this.#O,Ah),w8(i,()=>{this.#d},fc)),this.#d)this.#I()}#I(){if(!this.#i)return;this.#p("remoteJobs",(i)=>{let d=i.map((m)=>{let w=Oo(m.state);return w===m.activity?m:{...m,activity:w}});return d.every((m,w)=>m===i[w])?i:d}),this.loadRemote(),this.#o?.(),this.#o=w8(this.#i,this.loadRemote,Th)}#P(){for(let m of this.#s)m();this.#s=[],this.#o?.(),this.#o=null,this.#k?.(),this.#k=null,this.#e.clearFleetViewHeartbeat(this.#n),this.#i=null,this.#h.clear(),this.#b.clear();let i=this.#t,d=i.remoteJobs.some((m)=>m.id.startsWith("remote-pending-"))?i.remoteJobs.filter((m)=>!m.id.startsWith("remote-pending-")):i.remoteJobs;if(i.pendings.length>0||d!==i.remoteJobs||i.remoteListLoaded||i.overlaidLoadLanded)this.#t={...i,pendings:i.pendings.length>0?[]:i.pendings,remoteJobs:d,remoteListLoaded:!1,overlaidLoadLanded:!1},this.#a.emit()}get jobs(){return this.#t.jobs}isDeleting(i){return this.#m.has(i)}isDeletingSession(i){return this.#g.has(i)}isHolding(i){return this.#c.has(i)}isArchiving(i){return this.#w.has(i)}liveStatus(i){let{sessionId:d,resumeSessionId:m}=i.state;if(sS(i.state))return i.state.tempo==="active"?"busy":void 0;if(i.state.backend==="remote")return i.state.tempo==="active"?"busy":i.state.tempo==="blocked"?"waiting":void 0;if(this.#b.has(m??d))return"busy";if(this.#t.pendings.some((S)=>S.state.sessionId===d))return"busy";let w=this.terminalHolderOf(i)!==void 0?this.#t.statuses.get(Ir(i.id)):ac(this.#t.statuses,i);if(w)return w;if(this.#h.has(d))return"busy";return}terminalHolderOf(i){if(i.state.backend==="peer"||i.state.backend==="remote")return;return this.#t.terminalHolders.get(i.state.resumeSessionId??i.state.sessionId)}bumpGen(){this.#u=++this.#f}resetPrFetchGate(){this.#y=0}holdJob=(i)=>(this.#u=++this.#f,this.#c.set(i,(this.#c.get(i)??0)+1),()=>{this.#u=++this.#f;let d=(this.#c.get(i)??1)-1;if(d<=0)this.#c.delete(i);else this.#c.set(i,d)});optimistic=(i,d,m)=>{if(this.#u=++this.#f,d){this.#m.add(d);let S=this.#t.jobs?.find((h)=>h.id===d);if(S){let h=[S.state.sessionId,S.state.resumeSessionId].filter((C)=>Boolean(C));this.#l.set(d,h);for(let C of h)this.#g.add(C)}}let w=m?this.holdJob(m):void 0;return this.updateJobs((S)=>S?i(S):S),d||w?()=>{if(d){this.#u=++this.#f,this.#m.delete(d);for(let S of this.#l.get(d)??[])this.#g.delete(S);this.#l.delete(d)}w?.()}:void 0};noteDeleteRefusal=(i,d)=>{this.#p("deleteRefusals",(m)=>{if((m.get(i)??null)===d)return m;let w=new Map(m);if(d===null)w.delete(i);else w.set(i,d);return w})};updateJobs(i){this.#p("jobs",i)}updateAdoptedPeers(i){this.#p("adoptedPeers",i)}updateRemoteJobs(i){this.#p("remoteJobs",i)}updatePendings(i){this.#p("pendings",i)}#E(i){let d=this.#t.prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#c.has(S.id)).map((S)=>[S.id,S])):null;return hn(w?m.map((S)=>w.get(S.id)??S):m)})}settleLandedPendings(i){let d=new Set(i.map((m)=>m.id));for(let m of i){let w=m.state.sessionId;this.#h.add(w),this.#C(()=>this.#h.delete(w),mc)}this.updatePendings((m)=>m.filter((w)=>!d.has(w.id)))}kick(i,d){let m={kickedAt:Date.now(),jobId:d};return this.#b.set(i,m),this.#C(()=>{if(this.#b.get(i)===m)this.#b.delete(i),this.#p("statuses",(w)=>new Map(w))},mc),()=>{if(this.#b.get(i)===m)this.#b.delete(i)}}watchPendingJobDir(i){this.#k?.(),this.#k=this.#e.watchJobDirOnce(i,()=>void this.load())}reload=()=>{this.load()};load=async()=>{if(Po()&&R("tengu_fleetview_peers",!1))this.#e.touchFleetViewHeartbeat(this.#n);let i=++this.#f,[d,m]=await Promise.all([this.#e.listJobs(this.#n),this.#e.listAliveDaemonJobs(this.#n)]),w=Mye(await this.#e.adoptRosterOrphans(d,m.records,this.#n),m.shorts).filter((P)=>!this.#m.has(P.id)).map((P)=>({...P,activity:Oo(P.state,this.#t.prStatuses)}));if(i<=this.#u)return;if(this.#u=i,this.#r>0)this.#p("overlaidLoadLanded",()=>!0);this.updateJobs((P)=>{let V=P&&this.#c.size>0?new Map(P.filter((W)=>this.#c.has(W.id)).map((W)=>[W.id,W])):null,K=hn(V?w.map((W)=>V.get(W.id)??W):w);if(P&&P.length===K.length&&P.every((W,Y)=>W.id===K[Y].id&&W.state.updatedAt===K[Y].state.updatedAt&&W.state.state===K[Y].state.state&&W.state.pinned===K[Y].state.pinned&&W.state.group===K[Y].state.group&&W.state.stateSortOrder===K[Y].state.stateSortOrder&&W.activity===K[Y].activity))return P;return K});let S=w.filter((P)=>lo(P.state)!=="completed"),h=await Promise.all(S.map(async(P)=>[P.id,await this.#e.readLogTail(P,this.#n)]));this.#p("logTails",(P)=>{let V=Object.fromEntries(h),K=Object.keys(P);if(K.length===h.length&&K.every((W)=>P[W]===V[W]))return P;return V});let C=w.filter((P)=>$ye(P.state));if(C.length>0){let V=(await Promise.all(C.map(async(K)=>{let W=Mi(K.state);try{let Y=await this.#e.probeFleetTranscript(W,this.#n);return Y.kind==="present"?[K.state.sessionId,Y.mtimeMs,W]:null}catch{return null}}))).filter((K)=>K!==null).filter(([K,W])=>{let Y=this.#t.loopKicks.get(K);return!Y||Y.mtimeMs!==W});if(V.length>0){let K=await Promise.all(V.map(async([W,Y,Z])=>{try{let ee=await this.#e.scanLoopTranscript(this.#_,Z);return ee?[W,{mtimeMs:Y,...ee}]:null}catch{return null}}));this.#p("loopKicks",(W)=>{let Y=!1,Z=new Map(W);for(let ee of K)if(ee)Z.set(ee[0],ee[1]),Y=!0;return Y?Z:W})}}let x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.filter((P)=>{let V=this.#t.prStatuses.get(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!W)return K;let Y=new Map(K);for(let[Z,ee]of V)if(ee!==null||!K.has(Z))Y.set(Z,ee);return Y})})()}if(this.#u===i){let P=new Set(w.map((K)=>K.state.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.listAllLiveSessions(this.#n).then((i)=>{let d=new Map,m=new Map;for(let h of i){if(h.kind==="interactive"&&h.pid!==process.pid&&h.sessionId&&h.parkedJobId===void 0)m.set(h.sessionId,h.pid);if(!h.status)continue;if(h.sessionId)d.set(h.sessionId,h.status);if(h.jobId)d.set(Ir(h.jobId),h.status)}for(let h of d.keys())this.#h.delete(h);let w=Wkt();if(w&&i.some((h)=>h.sessionId===w.sessionId))qCn(w.sessionId);let S=!1;for(let[h,C]of this.#b){let x=i.find((A)=>A.sessionId===h||A.jobId===C.jobId);if(d.get(h)==="busy"||d.get(Ir(C.jobId))==="busy"||x!==void 0&&(x.statusUpdatedAt??0)>C.kickedAt&&x.startedAt<=C.kickedAt)this.#b.delete(h),S=!0}if(this.#p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_peers",!1)){let h=new Set((this.#t.jobs??[]).map((A)=>A.state.sessionId)),C=Date.now(),x=i.filter((A)=>A.kind==="interactive"&&A.pid!==process.pid&&A.sessionId&&!h.has(A.sessionId)&&(A.peerProtocol??0)>=_2t&&C-(A.updatedAt??A.startedAt)<86400000).map((A)=>{let F=zu(A);return{id:`peer-${A.pid}`,state:F,activity:Oo(F)}});this.updateAdoptedPeers((A)=>{let F=new Map(A.map((P)=>[P.id,P])),T=x.map((P)=>{let V=F.get(P.id);return V&&V.state.name!==P.state.name&&(V.state.updatedAt??"")>=(P.state.updatedAt??"")?{...P,state:{...P.state,name:V.state.name,intent:V.state.intent,updatedAt:V.state.updatedAt}}:P});return A.length===T.length&&A.every((P,V)=>P.id===T[V].id&&P.state.updatedAt===T[V].state.updatedAt&&P.state.name===T[V].state.name&&P.activity===T[V].activity)?A:T})}}).catch(()=>{})};loadRemote=()=>{this.#R=Date.now();let i=++this.#v;this.#e.listRemoteSessions().then((d)=>{if(i!==this.#v)return;let m=d.map((w)=>{let S=WKe(w.id),h=Gu(w),C=this.#S.get(S);if(C!==void 0)if(Di(h)||Date.now()>C)this.#S.delete(S);else h={...h,state:"stopped",tempo:"idle",needs:void 0};return{id:S,state:h,activity:Oo(h)}}).filter((w)=>{let S=this.#w.get(w.id);if(S===void 0)return!0;if(Date.now()>S)return this.#w.delete(w.id),!0;return!1});if(this.updateRemoteJobs((w)=>Vu(w,m)),this.#r>0)this.#p("remoteListLoaded",()=>!0)}).catch((d)=>{if(n(`[fleet:remote] poll mapper threw: ${l(d)}`),i===this.#v&&this.#r>0)this.#p("remoteListLoaded",()=>!0)})};async stopRemote(i){let d=i.state.sessionId;this.#S.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.map((w)=>w.id===i.id&&!Di(w.state)?{...w,state:{...w.state,state:"stopped",tempo:"idle",needs:void 0},activity:"stopped"}:w));try{if(!await this.#e.interruptRemoteSession(d))throw Error("interrupt rejected");b("fleet_view_stop_session"),s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_stop_session","interrupt_failed"),n(`[fleet:remote] interrupt ${d} failed: ${l(m)}`),this.#S.delete(i.id),this.loadRemote(),m}}async archiveRemote(i){let d=i.state.sessionId;this.#w.set(i.id,Date.now()+pc),this.updateRemoteJobs((m)=>m.filter((w)=>w.id!==i.id));try{if(!await this.#e.archiveRemoteSession(d))throw Error("archive rejected");b("fleet_view_archive_session"),s("tengu_bg_agent_action",{action:v("archive"),source:v("fleet"),jobSessionId:ke(d)})}catch(m){throw f("fleet_view_archive_session","archive_failed"),n(`[fleet:remote] archive ${d} failed: ${l(m)}`),this.#w.delete(i.id),this.loadRemote(),m}}}
+
+## class gc METHOD-LIST
+p, C, x, I, P, E, stopRemote, archiveRemote, constructor, getSnapshot, usesStorage, subscribe, attachView, setRemoteWanted, load, reload, isDeleting, isDeletingSession, isHolding, isArchiving, liveStatus, terminalHolderOf, bumpGen, resetPrFetchGate, holdJob, optimistic, updateJobs, noteDeleteRefusal, updateAdoptedPeers, updateRemoteJobs, updatePendings, seedJobs, settleLandedPendings, kick, watchPendingJobDir, #O=()=>{, #O, load, reload
+
+## gc.load @192135432
+len=3040 sha=4fe016a32cf04c48 end@192138472
+load=async()=>{if(Po()&&R("tengu_fleetview_peers",!1))this.#e.touchFleetViewHeartbeat(this.#n);let i=++this.#f,[d,m]=await Promise.all([this.#e.listJobs(this.#n),this.#e.listAliveDaemonJobs(this.#n)]),w=Mye(await this.#e.adoptRosterOrphans(d,m.records,this.#n),m.shorts).filter((P)=>!this.#m.has(P.id)).map((P)=>({...P,activity:Oo(P.state,this.#t.prStatuses)}));if(i<=this.#u)return;if(this.#u=i,this.#r>0)this.#p("overlaidLoadLanded",()=>!0);this.updateJobs((P)=>{let V=P&&this.#c.size>0?new Map(P.filter((W)=>this.#c.has(W.id)).map((W)=>[W.id,W])):null,K=hn(V?w.map((W)=>V.get(W.id)??W):w);if(P&&P.length===K.length&&P.every((W,Y)=>W.id===K[Y].id&&W.state.updatedAt===K[Y].state.updatedAt&&W.state.state===K[Y].state.state&&W.state.pinned===K[Y].state.pinned&&W.state.group===K[Y].state.group&&W.state.stateSortOrder===K[Y].state.stateSortOrder&&W.activity===K[Y].activity))return P;return K});let S=w.filter((P)=>lo(P.state)!=="completed"),h=await Promise.all(S.map(async(P)=>[P.id,await this.#e.readLogTail(P,this.#n)]));this.#p("logTails",(P)=>{let V=Object.fromEntries(h),K=Object.keys(P);if(K.length===h.length&&K.every((W)=>P[W]===V[W]))return P;return V});let C=w.filter((P)=>$ye(P.state));if(C.length>0){let V=(await Promise.all(C.map(async(K)=>{let W=Mi(K.state);try{let Y=await this.#e.probeFleetTranscript(W,this.#n);return Y.kind==="present"?[K.state.sessionId,Y.mtimeMs,W]:null}catch{return null}}))).filter((K)=>K!==null).filter(([K,W])=>{let Y=this.#t.loopKicks.get(K);return!Y||Y.mtimeMs!==W});if(V.length>0){let K=await Promise.all(V.map(async([W,Y,Z])=>{try{let ee=await this.#e.scanLoopTranscript(this.#_,Z);return ee?[W,{mtimeMs:Y,...ee}]:null}catch{return null}}));this.#p("loopKicks",(W)=>{let Y=!1,Z=new Map(W);for(let ee of K)if(ee)Z.set(ee[0],ee[1]),Y=!0;return Y?Z:W})}}let x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.filter((P)=>{let V=this.#t.prStatuses.get(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!W)return K;let Y=new Map(K);for(let[Z,ee]of V)if(ee!==null||!K.has(Z))Y.set(Z,ee);return Y})})()}if(this.#u===i){let P=new Set(w.map((K)=>K.state.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}}
+
+## #x-attachView-context @192131509
+urn;if(d=!0,this.#r--,this.#r===0)this.#P()}}setRemoteWanted(i){if(i===this.#d)return;if(this.#d=i,this.#r===0)return;if(i)this.#I();else this.#o?.(),this.#o=null}#x(i){if(this.#i=i,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)});if(this.load(),this.#s.push(w8(i,()=>void this.load(),fc),w8(i,this.#O,Ah),w8(i,()=>{this.#d},fc)),this.#d)this.#I()}#I(){if(!this.#i)return;this.#p("remoteJobs",(i)=>{let d=i.map((m)=>{let w=Oo(m.state);return w===m.activity?m:{...m,activity:w}});return d.every((m,w)=>m===i[w])?i:d}),this.loadRemote(),this.#o?.(),this.#o=w8(this.#i,this.loadRemote,Th)}#P(){for(let m of this.#s)m();this.#s=[],this.#o?.(),this.#o=null,this.#k?.(),this.#k=null,this.#e.clearFleetViewHeartbeat(this.#n),this.#i=null,this.#h.clear(),this.#b.clear();let i=this.#t,d=i.remoteJobs.some((m)=>m.id.startsWith("remote-pending-"))?i.remoteJobs.filter((m)=>!m.id.startsWith("remote-pending-")):i.remoteJobs;if(i.pendings.length>0||d!==i.remoteJobs||i.remoteListLoaded||i.overlaidLoadLanded)this.#t={...i
+
+## #x @192131752
+len=77 sha=ff98b407b0f55570
+he(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)}
+
+## #I @192131948
+len=238 sha=c625b9ec7a7e87ad
+#I(){if(!this.#i)return;this.#p("remoteJobs",(i)=>{let d=i.map((m)=>{let w=Oo(m.state);return w===m.activity?m:{...m,activity:w}});return d.every((m,w)=>m===i[w])?i:d}),this.loadRemote(),this.#o?.(),this.#o=w8(this.#i,this.loadRemote,Th)}
+
+## #P @192132186
+len=538 sha=7c61024e69234680
+#P(){for(let m of this.#s)m();this.#s=[],this.#o?.(),this.#o=null,this.#k?.(),this.#k=null,this.#e.clearFleetViewHeartbeat(this.#n),this.#i=null,this.#h.clear(),this.#b.clear();let i=this.#t,d=i.remoteJobs.some((m)=>m.id.startsWith("remote-pending-"))?i.remoteJobs.filter((m)=>!m.id.startsWith("remote-pending-")):i.remoteJobs;if(i.pendings.length>0||d!==i.remoteJobs||i.remoteListLoaded||i.overlaidLoadLanded)this.#t={...i,pendings:i.pendings.length>0?[]:i.pendings,remoteJobs:d,remoteListLoaded:!1,overlaidLoadLanded:!1},this.#a.emit()}
+
+## #p @192131287
+len=99 sha=64bdd9929e4d4edb
+#p(i,d){let m=this.#t[i],w=d(m);if(Object.is(w,m))return;this.#t={...this.#t,[i]:w},this.#a.emit()}
+
+## #E @192134546
+len=362 sha=4bd4d1feacb640f2
+prStatuses;if(this.#p("prStatuses",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}seedJobs(i){this.updateJobs((d)=>{let m=i.filter((S)=>!this.#m.has(S.id)).map((S)=>({...S,activity:Oo(S.state)})),w=d&&this.#c.size>0?new Map(d.filter((S)=>this.#c.has(S.id)).map((S)=>[S.id,S])):null;return hn(w?m.map((S)=>w.get(S.id)??S):m)})}
+
+## load-Oo-prStatuses @192135779
+this.#b.get(i)===m)this.#b.delete(i)}}watchPendingJobDir(i){this.#k?.(),this.#k=this.#e.watchJobDirOnce(i,()=>void this.load())}reload=()=>{this.load()};load=async()=>{if(Po()&&R("tengu_fleetview_peers",!1))this.#e.touchFleetViewHeartbeat(this.#n);let i=++this.#f,[d,m]=await Promise.all([this.#e.listJobs(this.#n),this.#e.listAliveDaemonJobs(this.#n)]),w=Mye(await this.#e.adoptRosterOrphans(d,m.records,this.#n),m.shorts).filter((P)=>!this.#m.has(P.id)).map((P)=>({...P,activity:Oo(P.state,this.#t.prStatuses)}));if(i<=this.#u)return;if(this.#u=i,this.#r>0)this.#p("overlaidLoadLanded",()=>!0);this.updateJobs((P)=>{let V=P&&this.#c.size>0?new Map(P.filter((W)=>this.#c.has(W.id)).map((W)=>[W.id,W])):null,K=hn(V?w.map((W)=>V.get(W.id)??W):w);if(P&&P.length===K.length&&P.every((W,Y)=>W.id===K[Y].id&&W.state.updatedAt===K[Y].state.updatedAt&&W.state.state===K[Y].state.state&&W.state.pinned===K[Y].state.pinned&&W.state.group===K[Y].state.group&&W.state.stateSortOrder===K[Y].state.stateSortOrder&&W.activity===K[Y].activity))return P;return K});let S=w.filter((P)=>lo(P.state)!=="completed"),h=await Promise.all(S.map(async(P)=>[P.id,await this.#e.readLogTail(P,this.#n)]));this.#p("logTails",(P)=>{let V=Object.fromEntries(h),K=Object.keys(P);if(K.length===h.length&&K.every((W)=>P[W]===V[W]))return P;return V});let C=w.filter((P)=>$ye(P.state));if(C.length>0){let V=(await Promise.all(C.map(as
+
+## prStatuses.get-filter @192137355
+>0){let K=await Promise.all(V.map(async([W,Y,Z])=>{try{let ee=await this.#e.scanLoopTranscript(this.#_,Z);return ee?[W,{mtimeMs:Y,...ee}]:null}catch{return null}}));this.#p("loopKicks",(W)=>{let Y=!1,Z=new Map(W);for(let ee of K)if(ee)Z.set(ee[0],ee[1]),Y=!0;return Y?Z:W})}}let x=se(w.flatMap((P)=>Wo(P.state.children).filter((V)=>V.kind!=="frame").map((V)=>V.href))),A=x.filter((P)=>{let V=this.#t.prStatuses.get(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additi
+
+## fetchPrStatusBatch-call @192137568
+t(P)?.state;return V!=="MERGED"&&V!=="CLOSED"}),F=Date.now(),T=F-this.#y>=Yu(ZZ(),F-Zg());if(A.length>0&&T){this.#y=F;let P=R("tengu_fleetview_pr_batch",!0);(async()=>{let V;if(P){let K=await this.#e.fetchPrStatusBatch(A);V=K.statuses,await Promise.all(K.unbatched.map(async(W)=>V.set(W,await this.#e.fetchPrStatusByUrl(W))))}else V=new Map(await Promise.all(A.map(async(K)=>[K,await this.#e.fetchPrStatusByUrl(K)])));this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!W)return K;let Y=new Map(K);for(let[Z,ee]of V)if(ee!==null||!K.has(Z))Y.set(Z,ee);return Y})})()}if(this.#u===i){let P=new Set(w.map((K)=>K.state.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))
+
+## #E-merge-callback @192137786
+len=411 sha=8a94beda99068d2b end@192138197
+this.#E((K)=>{let W=!1;for(let[Z,ee]of V){let X=K.get(Z);if(X?.state!==ee?.state||X?.title!==ee?.title||X?.review!==ee?.review||X?.checks.passed!==ee?.checks.passed||X?.checks.failed!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!W)return K;let Y=new Map(K);for(let[Z,ee]of V)if(ee!==null||!K.has(Z))Y.set(Z,ee);return Y}
+
+## prune-Li-prStatuses @192138314
+iled!==ee?.checks.failed||X?.checks.pending!==ee?.checks.pending||X?.additions!==ee?.additions||X?.deletions!==ee?.deletions){W=!0;break}}if(!W)return K;let Y=new Map(K);for(let[Z,ee]of V)if(ee!==null||!K.has(Z))Y.set(Z,ee);return Y})})()}if(this.#u===i){let P=new Set(w.map((K)=>K.state.sessionId)),V=new Set(x);if(this.#p("loopKicks",(K)=>Li(K,P)),this.#E((K)=>Li(K,V)),w.length>0)this.#p("deleteRefusals",(K)=>Li(K,new Set([...w.map((W)=>W.id),...this.#m])));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.listAllLiveSessions(this.#n).then((i)=>{let d=new Map,m=new Map;for(let h of i){if(h.kind==="interactive"&&h.pid!==process.pid&&h.sessionId&&h.parkedJobId===void 0)m.set(h.sessionId,h.pid);if(!h.status)continue;if(h.sessionId)d.set(h.sessionId,h.status);if(h.jobId)d.set(Ir(h.jobId),h.status)}for(let h of d.keys())this.#h.delete(h);let w=Wkt();if(w&&i.some((h)=>h.sessionId===w.sessionId))qCn(w.sessionId);let S=!1;for(let[h
+
+## V$n @184556749
+len=1787 sha=77b300b83f96cd49
+function V$n(e){let t=new Map,r=[],o=null;if(e.length===0||Tt()||KX()){for(let k of e)t.set(k,null);return{statuses:t,rateLimit:o,unbatched:[]}}let u=[];for(let k of e){let E=tst(k);if(E)u.push(E);else if(/\/pull\/\d+/.test(k))r.push(k)}u.sort((k,E)=>k.url.localeCompare(E.url));let p=[];for(let[k,E]of iXe(u,(C)=>C.host))for(let C=0;C<E.length;C+=aXe)p.push({host:k,chunk:E.slice(C,C+aXe)});let g=Ao(EJt,async({host:k,chunk:E})=>{if(KX()){for(let fe of E)t.set(fe.url,null);return}let C=new Map,L=[...iXe(E,(fe)=>`${fe.owner}/${fe.repo}`)].map(([fe,we],Pe)=>{let[Ie,Te]=fe.split("/"),xe=we.map((Fe,Be)=>{let Ne=`p${Pe}_${Be}`;return C.set(Ne,Fe.url),`${Ne}: pullRequest(number: ${Fe.num}) { ...pr }`}).join(" ");return`r${Pe}: repository(owner:"${Ie}", name:"${Te}") { ${xe} }`}),N=`${vJt}
+query { rateLimit{cost remaining resetAt} ${L.join(" ")} }`,{stdout:U,stderr:j,code:G}=await Ue("gh",["api","graphql","--hostname",k,"--cache",AJt,"-F","query=@-"],{timeout:CJt,input:N,preserveOutputOnError:!0}),ue=null;if(U.trim())try{ue=q(U)}catch{ue=null}if(!ue?.data){if(lXe.test(j)||lXe.test(U))JE().backOffUntil(Date.now()+xfe),n(`[ghPrStatus] GitHub rate-limited on ${k}; backing off 60s`,{level:"warn"});else n(`[ghPrStatus] batch query failed on ${k} (exit ${G}); keeping last-known`);for(let fe of E)t.set(fe.url,null);return}let pe=ue.data.rateLimit;if(pe){if(!o||pe.remaining<o.remaining)o=pe;if(pe.remaining<50)JE().backOffUntil(Date.parse(pe.resetAt)||Date.now()+xfe)}for(let[fe,we]of Object.entries(ue.data)){if(!fe.startsWith("r")||!TJt(we))continue;for(let[Pe,Ie]of Object.entries(we)){let Te=C.get(Pe);if(!Te)continue;t.set(Te,wJt(Ie)?kJt(Ie):null)}}for(let fe of C.values())if(!t.has(fe))t.set(fe,null)});return await Promise.all(p.map(g)),{statuses:t,rateLimit:o,unbatched:r}}
+
+## K$n @184559595
+len=422 sha=d5f332dda9cbcad7
+async function K$n(e){if(e){let t;try{t=await e.read([hXe])}catch(u){return n(`loadPrStatusCache: ${l(u)}`),new Map}if(!t.ok)return n(`loadPrStatusCache: ${t.error.code}`),new Map;let r=t.value.items[0];if(!r?.found)return new Map;let o;try{o=Buffer.from(r.value).toString("utf-8")}catch(u){return n(`loadPrStatusCache: ${l(u)}`),new Map}return uXe(o)}try{let t=await nJt(gXe(),"utf8");return uXe(t)}catch{return new Map}}
+
+## q$n @184558619
+len=372 sha=bfeb4eac3fbfa629
+function q$n(e,t){let r={};for(let[u,p]of e)if(p)r[u]=p;let o=S(r);if(o==="{}"||!JE().notePersistedCacheBody(o))return Promise.resolve();if(D()&&t)return Promise.resolve().then(()=>t.write(hXe,o,{mode:438&~process.umask()})).then((u)=>{if(!u.ok)n(`persistPrStatusCache: ${u.error.code}`)}).catch((u)=>{n(`persistPrStatusCache: ${l(u)}`)});return Hn(gXe(),o).catch(()=>{})}
+
+## uXe @184559295
+len=300 sha=47077b3550afa3f2
+function uXe(e){let t=new Map,r;try{r=q(e)}catch{return t}if(r===null||typeof r!=="object"||Array.isArray(r))return t;let o=0;for(let[u,p]of Object.entries(r)){let g=RJt().safeParse(p);if(g.success)t.set(u,g.data);else o++}if(o>0)n(`loadPrStatusCache: dropped ${o} malformed cache entries`);return t}
+
+## Oo fleet candidate
+{"i":192124798,"name":"function Oo("}
+## Oo @192124798
+len=408 sha=361a3eb419980f02
+function Oo(i,d){let m=Cf(i.state);if(m&&i.tempo!=="active"&&!(m==="success"&&rP(i)))return m;let w=Wo(i.children).filter((C)=>C.kind!=="frame");if(d&&i.tempo!=="active"&&i.template===aF.name&&w.length&&w.every((C)=>d.get(C.href)?.state==="MERGED"))return"success";let S=i.tempo==="active"?1:5,h=Date.now()-Date.parse(i.updatedAt);if(h<S*3*60000)return"flowing";if(h<S*15*60000)return"slowing";return"stuck"}
+
+## needle ensureFleetRoster
+hits=2 first=92720639
+## ensureFleetRoster @92720639
+Tails....DD}.deleteRefusals......[3..overlaidLoadLanded..x...u.d.[fleet:roster] ensureFleetRoster called with a different storageV5 than the visit was created with; keeping the original
+.....).focusedIdx.......i.hoverFocusIdx...	...`.[.collapsed...........capExpanded.........attachingJobId......e.".newSessionOpening...
+....cL.autoOpened..J.......Cannot destructure property 'pruneTextPastes' from null or undefined value..........pruneTextPastes.C....:W.Cannot destructure property 'onMinted' from null or undefined value......
+
+## needle function rp(
+hits=5 first=181774799
+## function rp( @181774799
+??e.find((t)=>ub(t,n))}function Jsn(e,n){return e.filter((t)=>ub(jt(t).name,n))}function rp(e){return e!==void 0&&wzt.has(e.toLowerCase())}function sdt(e){return rp(e)||e!==void 0&&EKe.has(e.toLowerCase())}var P=new Set(["anthropic-skills","core","cowork-plugin-management","data","design","engineering","enterprise-search","figma","finance","human-resources","internal-apps","legal","marketing","operations","product-management","productivity","sales","small-business","ai-governance-legal","cocounsel-legal","commercial-legal","
+
+## needle function Xw(
+hits=6 first=181868444
+## function Xw( @181868444
+=u.split(U);return N(t,...o)===e?o:null}function J(e){return e.endsWith(".zip")}function Xw(e,r){let t=X(e,r);if(t===null||t.length!==3||!wd(t)||J(t[2]))return null;let[u,o,d]=t;return{marketplace:u,plugin:o,version:d}}function kqn(e){return e.namespace==="pluginCache"&&e.marketplace!==void 0&&e.plugin!==void 0&&e.version!==void 0&&e.relPath===void 0}function KHe(e,r){let t=Xw(e,r);return t===null?null:{namespace:"pluginCache",...t}}function Tqn(e,r){let t=[e.marketplace,e.plugin,e.version];if(r!==W()||!wd(t)||J(e.version))r
+
+## rp-props @192178267
+prStatuses:S,liveStatus:h,heldInTerminal:C,loopJobIds:x,loopKicks:A,focusedIdx:F,hoverFocusIdx:T,collapsed:P,capExpanded:V,groupMode:K,activeTab:W,query:Y,mode:Z,dispatch:ee,linkMatchId:X,dispatchRepoCwd:Q,pendingDelete:le,earlierEntries:ye,cwdFilter:xe,initialJobId:me,simpleView:be,simpleWantsRemote:Te,peersEnabled:ge,showRemoteTabs:de,launcherCwd:re,launcherGroup:He,scopedFallbackOrigin:tt,termR
+
+## Ze(or)-prStatuses @192204952
+o,groupPristine:on,renaming:mC,previewOpen:nn}=Ze(uC),{attachingJobId:Zp,warmingJobIds:ef,newSessionOpening:tf}=Ze(cC),{prStatuses:of,loopKicks:Cs,logTails:nf,deleteRefusals:Tl}=Ze(or),Mo=Ze(jb,pw),{pending:rr}=Ze(pC),Yr=Ze(fC,fw),{rows:Lo,filtered:rf,byState:Cn,byGroup:Dl,isOnboarding:Qr,hasComposedDispatch:Zr,dispatchTargetGroup:sf,hasMultipleOrigins:af,focusedGroup:lf,groupCounts:df,earlierVisible:uf,simpleBuilt:ir,cols:ei,loopJobIds:Is,focusIsFromHover:oi,queryI
+
+## Xw-prStatuses @192234494
+ete"})]})})})]})}function Qw(Xx){return Xx.replyError}function Xw(Zx){return Zx.prStatuses}function Zw(Yw){return Yw.kind==="job"&&Yw.group===$n}function Gd(Vx){let pr=g(50),{owners:Wx,layout:Ux,foote
+
+## 247vs248 class gc needle="class gc{"
+hits248=2 hits247=3
+248 offsets (first 8)=192130933,211011725
+247 offsets (first 8)=227060493,237967548,238413287
+windowSha248=d3176bc60ad7a97a windowSha247=e2c67c3b693eab84 same=false
+
+## 247vs248 #x loadPrStatusCache needle="prStatuses.size===0)this.#e.loadPrStatusCache(this.#n).then((d)=>{if(d.size)this.#E((m)=>m.size?new Map([...d,...m]):d)}"
+hits248=1 hits247=0
+248 offsets (first 8)=192131709
+windowSha248=cefeb3ac3835c0a8 windowSha247=none same=false
+
+## 247vs248 #E persist needle="#E(i){let d=this.#t.prStatuses;if(this.#p(\"prStatuses\",i),this.#t.prStatuses!==d)this.#e.persistPrStatusCache(this.#t.prStatuses,this.#n)}"
+hits248=1 hits247=0
+248 offsets (first 8)=192134526
+windowSha248=284c1b240c50e01f windowSha247=none same=false
+
+## 247vs248 V$n head needle="async function V$n(e){let t=new Map,r=[],o=null;"
+hits248=1 hits247=0
+248 offsets (first 8)=184556743
+windowSha248=466d0b5b4f1496c0 windowSha247=none same=false
+
+## 247 fleet roster class Mf
+hit=223695015
+len=10447 sha=75ec8d059dcbe111
+{#r;#e;#a=Tt();#t=Tk();#i=null;#n=0;#d=!1;#s=[];#o=null;#u=0;#l=0;#c=new Set;#f=new Map;#b=new Set;#g=new Map;#y=0;#R=0;#v=0;#w=new Map;#S=new Map;#m=new Set;#h=new Map;#_=zp();#k=null;constructor(e){this.#r=e?.storageV5,this.#e={...Ok(),...e?.client}}getSnapshot=()=>this.#t;usesStorage(e){return this.#r===e}subscribe=(e)=>this.#a.subscribe(e);#p(e,t){let o=this.#t[e],n=t(o);if(Object.is(n,o))return;this.#t={...this.#t,[e]:n},this.#a.emit()}#E(e,t){return(this.#i?.setTimeout??Is)(e,t)}attachView(e){if(this.#n++,this.#n===1)this.#I(e);let t=!1;return()=>{if(t)return;if(t=!0,this.#n--,this.#n===0)this.#P()}}setRemoteWanted(e){if(e===this.#d)return;if(this.#d=e,this.#n===0)return;if(e)this.#x();else this.#o?.(),this.#o=null}#I(e){if(this.#i=e,this.#y=0,this.#t.prStatuses.size===0)this.#e.loadPrStatusCache(this.#r).then((t)=>{if(t.size)this.#C((o)=>o.size?new Map([...t,...o]):t)});if(this.load(),this.#s.push(Vr(e,()=>void this.load(),hf),Vr(e,this.#A,Pk),Vr(e,()=>{this.#d},hf)),this.#d)this.#x()}#x(){if(!this.#i)return;this.#p("remoteJobs",(e)=>{let t=e.map((o)=>{let n=ho(o.state);return n===o.activity?o:{...o,activity:n}});return t.every((o,n)=>o===e[n])?e:t}),this.loadRemote(),this.#...(trunc in gold; full in re-peel if needed)
+## 247vs248 247 attach loadPrStatusCache (storage #r) needle="prStatuses.size===0)this.#e.loadPrStatusCache(this.#r).then((t)=>{if(t.size)this.#C((o)=>o.size?new Map([...t,...o]):t)}"
+hits248=0 hits247=1
+247 offsets (first 8)=223695791
+windowSha248=none windowSha247=a5ef12bb83adaf61 same=false
+
+## 247vs248 248 uXe log needle="loadPrStatusCache: dropped"
+hits248=2 hits247=0
+248 offsets (first 8)=96677404,184559528
+windowSha248=43391b1f05d7a6c4 windowSha247=none same=false
+
+
+## CONTRACT
+#16 unique knife (248): uXe @184559295 — RJt().safeParse per entry, log `loadPrStatusCache: dropped N malformed cache entries`, return Map (248 log string absent in 247 SEA).
+Roster host (248): class gc @192130933 sha=e74a66069314570f, snapshot Fh() includes prStatuses Map; attachView→#x loads K$n when prStatuses.size===0, merges via #E; #E calls q$n on Map identity change after #p("prStatuses").
+247 SEA: same product wiring under class Mf @223695xxx + Tk() (NOT named gc — gc{ in 247 is unrelated @azure/msal). attachView→#I, persist hook #C, storage this.#r. loadPrStatusCache merge path ALREADY in 247.
+Leftover missing production (official — do NOT invent): class gc/Mf-equivalent roster module, Fh/Tk snapshot, Dh/Ok client export, attachView/#x/#P/#I/#E/#p, load() Oo(state,prStatuses)+href batch+Li prune, ensureFleetRoster, V$n/G$n, K$n/q$n/uXe wiring from store, FleetView rp({prStatuses}) / Xw / Ze(or).
+Leftover rejects (from gold-248-16-host-hunt): src/utils/prStatusCache.ts (helpers only), AgentView useState maps, prViewCache/prCheckCache, usePrStatus/wY, prStatusPoller JE().

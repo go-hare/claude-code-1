@@ -8,6 +8,7 @@ import {
   DiskTaskOutput,
   formatLostOutputNotice,
   getTaskOutputPath,
+  resolveTaskOutputReadPath,
 } from './diskOutput.js'
 
 const DEFAULT_MAX_MEMORY = 8 * 1024 * 1024 // 8MB
@@ -304,7 +305,12 @@ export class TaskOutput {
   async #readStdoutFromFile(): Promise<string> {
     const maxBytes = getMaxOutputLength()
     try {
-      const result = await readFileRange(this.path, 0, maxBytes)
+      const readable = await resolveTaskOutputReadPath(this.path)
+      if (readable === null) {
+        this.#outputFileRedundant = true
+        return ''
+      }
+      const result = await readFileRange(readable, 0, maxBytes)
       if (!result) {
         this.#outputFileRedundant = true
         return ''

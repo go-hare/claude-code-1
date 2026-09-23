@@ -1,0 +1,79 @@
+when=2026-09-22T02:01:10.402Z
+
+## Qbt window
+ndingWrite=Promise.resolve();cleanupRegistered=!1;append(n,t){if(this.pendingWrite=this.pendingWrite.then(p.bind(null,n,t)).catch(s),!this.cleanupRegistered)this.cleanupRegistered=!0,Et(()=>this.flush())}flush(){return this.pendingWrite}}var f=new K(()=>new g);function c(){return f.of(z().host)}function Y(n,t,i){let r=m();if(!r)return;let o;try{o=e(n,t,l(i))}catch{o=e(n,t,{diagnostics_payload_failed:!0})}c().append(r,o)}function l(n){try{return(typeof n==="function"?n():n)??{}}catch{return{diagnostics_payload_failed:!0}}}function e(n,t,i){let r={timestamp:new Date().toISOString(),level:n,event:t,data:i};return S(r)+`
+`}function Qbt(){return c().flush()}function m(){return a.CLAUDE_CODE_DIAGNOSTICS_FILE}async function TOe(n,t,i){let r=Date.now();Y("info",`${n}_started`);try{let o=await t(),d=i?i(o):{};return Y("info",`${n}_completed`,{duration_ms:Date.now()-r,...d}),o}catch(o){throw Y("error",`${n}_failed`,{duration_ms:Date.now()-r}),o}}
+export{Y,Qbt,TOe};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions
+
+## T===Wa near gKt
+al,process.exit(c.status??(c.signal?1:0))}function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}async function 
+
+## sessionFile Zs hits=187286961
+function Zs(){return Si().project?.sessionFile??null}function bon(){return Si().project?.currentSessionLastPrompt!==void 0}function Am(e){if(e===V())return Zs()??pa();let t=Wa(ve());return Ya(t,`${e}.jsonl`)}var Uyr=52428800,Rlr=256,Ilr=4096,Hlr=1024,Plr=64;function JIe(e){return Ud(e).replace(/\.jsonl$/,".meta.json")}var $Ie=["isObserver","observerStopped","observerTaskId","armingPermissionMode"];async function ZIe(e,t){if(D()&&t!==void 0){let r=u9e(e);if(r!==void 0){let o=await t.read([r]);if(!o.ok)throw Error("readAgentMetadataAtPath: storage read failed",{cause:o.error});let[u]=o.value.items;if(!u.found)return null;return q(Buffer.from(u.value).toString("utf-8"))}}try{let r=await ZC(e,"utf-8");return q(r)}catch(r){if(kt(r))return null;throw r}}async function l0t(e,t,r){let o=t;if($Ie.s
+
+## needle "function T(e){return" hits=8
+- @179862064 65531||e>=917504&&e<=917999}var k=/^[\p{Default_Ignorable_Code_Point}\u2800]$/u;function T(e){return e===8204||e===8205}function C(e){return e>=65024&&e<=65039||e>=917760&&e<=917999}function I(e){return T(e)||C(e)}function Cdr(e){return!I(e)&&(Gv(e)||e>127&&k.test(String.fromCode
+function T(r,f,a,F){if(typeof a==="function")F=a,a=0;return _(r,f,a,F);function _(O,S,w,p,b){return I(O,S,w,function(s){if(s&&(s.code==="EMFILE"||s.code==="ENFILE"))W([_,[O,S,w,p],s,b||Date.now(),Date.now()]);else if(typeof p==="function")p.apply(this,arguments)})}}
+- @180794303 "ws","undici","node-fetch","isomorphic-fetch","vercel_fetch","utf-8-validate"]);function T(e){return V.has(e)||K.some((n)=>e.startsWith(n))}function q(e){return T(e.file)}function O(e){let n=e.find((t)=>!q(t));if(n===void 0)return e.length>=x;return n.file===f||n.file.startsWith(
+function T(e,t,o,r){let i=o[Symbol.asyncIterator](),a=await i.next();if(a.done)return t.default;let l=t.payload().safeParse(a.value);if(!l.success)return i.return?.(void 0),t.default;let n=new AbortController,s=()=>n.abort();if(r?.signal)if(r.signal.aborted)n.abort();else r.signal.addEventListener("abort",s,{once:!0});let{replied:P,update:m}=e.request({kind:t.kind,payload:l.data,userInvoked:t.user
+- @180897410 .failedAccessTokens.delete(o);break}}r.invalidate()}function TV(){return T(w())}function T(e){return e.tokenCachePromise??=C(e).then((t)=>{if(t===null)return null;return new c1e(async(o)=>{try{let i=await t.provider(o);return b("wif_token_exchange"),i}catch(i){let u=i instanceof 
+function T(e){let o=e.toLowerCase();if(o.includes("fable"))return"fable";if(o.includes("opus"))return"opus";if(o.includes("sonnet"))return"sonnet";if(o.includes("haiku"))return"haiku";return null}
+- @183324560 endDown","selection:extendLineStart","selection:extendLineEnd"],ee=new Set(ybe);function T(e){return ee.has(e)||e.startsWith("command:")}var ne=h(()=>m({context:le(k3e).describe("UI context where these bindings apply. Global bindings work everywhere."),bindings:Oe(i().describe('K
+function T(){return Math.floor(Math.random()*4294967295).toString(16).padStart(8,"0")}
+- @192690833 :/~BUN/root/chunk-7qt04px4.js";import g from"ws";function rKt(){return"Windows"}function T(e){return{on:(n,t)=>{e.on(n,t)},removeAllListeners:()=>e.removeAllListeners(),send:(n)=>e.send(n),close:(n,t)=>{if(e.readyState===g.OPEN)e.close(n,t);else e.terminate()},get readyState(){re
+function T(e,t){let n=t;if(e.tabContextJson&&!n.isError)n={...n,content:[...Array.isArray(n.content)?n.content:[],{type:"text",text:`
+Tab context (from front-loaded tabs_context_mcp):
+${e.tabContextJson}`}]};if(e.tabGroupId!==void 0)n={...n,_meta:{...n._meta,frontLoadedTabGroupId:e.tabGroupId}};return n}
+- @195637931 2014 do not try to work around this refusal.`,FPn=Math.max(A.length,_.length)+2;function T(e){return U.has(e)?_:A}function Ftt(e){for(let t of[A,_])if(e.startsWith(`${t}  `))return e.slice(t.length+2);return e}var P="live_edit_conflict";function j(e,t,r){let n=Ftt(t),i=r===P?Gn(n
+function T(e){if(e instanceof Ut)return e.requestID??void 0;return}
+
+## needle "function T(t){return" hits=4
+- @178488343 Wp(t))return!0;let r=Qq(t);return r===null||r!==Qq(e)}function v(t){return null}function T(t){return t.replace(/[A-Z]/g,(e)=>e.toLowerCase())}function Vvt(t,e="win32"){let r=(e==="darwin"?/^\/net\/([^/]+)(\/.*|$)/i:/^\/net\/([^/]+)(\/.*|$)/).exec(t);if(!r)return t;return"/net/"+T
+function T(o,{environmentId:n,op:t,args:c,signal:u,dispatchId:f,serving:a}){let i=o.ports.get(n);if(i===void 0)return Promise.reject(new Ae.HooksError(`${t}: the plugin's environment is unloaded`));let{port:r}=i,e=++o.opCounter;return y({pending:i.pendingOps,key:e,send:()=>r.postMessage({type:"op",opId:e,dispatchId:f,serving:a,op:t,args:c}),onAbort:u===void 0?()=>{}:()=>r.postMessage({type:"op_abo
+- @193773842 o);let L=await O3(t,"clear",{storageV5:o,credentials:I});if(L.length>0)m(()=>L)}function T(t){return"isBackgrounded"in t&&t.isBackgrounded===!1}var Y=new Set(["local_bash","monitor_mcp","monitor_ws","mcp_task"]),X=new Set(["local_agent","in_process_teammate","local_workflow","dre
+function T(e,t){let r=ue(e,t);if(r===null)return null;let a=ee(e,r).split(ce),o=e;for(let d of a){o=V(o,d);let c;try{c=await ie(o)}catch(u){if(Q(u))return r;return null}if(c.isSymbolicLink())return null}return r}
+- @194539972 g=d.flatMap((m)=>m.kind==="ok"?[m.object]:[]);return g.length===d.length?g:null}function T(t){return`Cannot start a cloud session from this folder: ${t}.`}function E(t){return so(t,{maxCodeUnits:512})}var M={unreadable:"its files could not all be read",busy:"its files kept changi
+function T(e,r){let o=e.ok||e.reason==="too_large"?e:null;if(s("tengu_ccr_overlay_bundle",{outcome:c(e.ok?"bundle":e.reason),stage:!e.ok&&e.reason==="git_error"?c(e.stage):void 0,duration_ms:r,size_bytes:o?.sizeBytes,ahead:o?.aheadCount,prerequisite_count:e.ok?e.prerequisites.length:void 0}),e.ok){b("teleport_overlay_bundle");return}if(n(`[overlayBundle] not created: ${e.reason}${e.reason==="git_e
+- @196556204 U)return jp(n,r);let e=de(n,r);return`${e}\u2026 [+${t.length-e.length} chars]`}function T(t){return Re(t)?t:void 0}function l(t,r,n){let e=t?.[r];return typeof e==="string"?y(e,n):void 0}function P(t,r){let n=t?.[r];return typeof n==="number"?n:void 0}function O(t){return[`[unre
+function T(e,s){return{kind:"ambiguous",candidates:e.slice(0,ge),total:e.length,matchedBy:s}}
+
+## needle "function T(e){let" hits=14
+- @178664476 69]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))",B=new RegExp(`^${w}$`);function T(e){let t="[0-5]\\d";if(e.precision)t=`${t}\\.\\d{${e.precision}}`;else if(e.precision==null)t=`${t}(\\.\\d+)?`;let r=e.precision?"+":"?";return`([01]\\d|2[0-3]):[0-5]\\d(:${t})${r}`}functio
+function T(e){var t=this.__data__=new GEe(e);this.size=t.size}
+- @179655815 r zdr=new K(()=>new L);function c(){return zdr.of(z().host)}var u="-----BEGIN ";function T(e){let t=e.lastIndexOf(u);if(t===-1)return!1;let r=e.indexOf("-----",t+u.length);if(r===-1)return!1;let o=e.slice(t+u.length,r);return e.includes(`-----END ${o}-----`,r)}var Bzt=/-----BEGIN
+function T(t,e,s){let i=R(t);if(i.length===0)return!0;let r=await Promise.all(i.map((a)=>a.read()));if(e.epoch!==s)return!1;return x(e,i,r,s),!0}
+- @179689763 ytes:i,zone:t}:null}if(t)return null;let s=T(r);return s?{bytes:s,zone:""}:null}function T(e){let t=e.split(".");if(t.length!==4)return null;let r=new Uint8Array(4);for(let o=0;o<4;o++){let s=t[o];if(s===void 0||s===""||!/^\d{1,3}$/.test(s))return null;if(s.length>1&&s.startsWith
+function T(e){let t=e.lastIndexOf(u);if(t===-1)return!1;let r=e.indexOf("-----",t+u.length);if(r===-1)return!1;let o=e.slice(t+u.length,r);return e.includes(`-----END ${o}-----`,r)}
+- @180890358 ")break;let W=T(g);if(W!==null&&v.has(W)||l3e(g))c++;else break}e.splice(c,0,o)}function T(e){let o=e.toLowerCase();if(o.includes("fable"))return"fable";if(o.includes("opus"))return"opus";if(o.includes("sonnet"))return"sonnet";if(o.includes("haiku"))return"haiku";return null} exp
+function T(e,o){let t=e;if(typeof t==="string"&&CA(t))t=mN(t,o);if(t==="max"&&!ZU(o))t="high";if(t==="xhigh"&&!eB(o))t="high";return t}
+- @193014282 5000;function J(e,t){return t.resetsAt===e.wallResetsAt&&e.accountEpoch===KCe()}function T(e){let t=ND();return t.phase==="answered"&&J(t,e)?t.status:void 0}function k(e){let t=ND();return t.phase==="failed"&&J(t,e)}function w0e(e,t=Date.now()){let r=T(e);return foe(e)&&r!==void 
+function T(){return a.USE_LOCAL_OAUTH||a.LOCAL_BRIDGE}
+- @193106533 &"line"in t&&typeof t.line==="number"&&"column"in t&&typeof t.column==="number"}function T(e){let t=e.declaration;if(!t||t.type!=="VariableDeclaration")return!1;if(t.kind!=="const"||t.declarations.length!==1)return!1;let n=t.declarations[0];return n.id.type==="Identifier"&&n.id.n
+function T(e){let t=ND();return t.phase==="answered"&&J(t,e)?t.status:void 0}
+
+## needle "T(e)===Wa" hits=1
+- @189576931 l,process.exit(c.status??(c.signal?1:0))}function gKt(){let e=Zs(),t=ve();if(e&&T(e)===Wa(t))return t;return an()}async function g(){await Promise.all([qt(Rq(),2000,"debug flush timeout (relaunch)").catch(()=>{}),qt(Qbt(),2000,"diag flush timeout (relaunch)").catch(()=>{}),qt(svt
+function T(){let e=N();return q(e)?e:{}}
+
+## c().flush hits
+Qbt exact=179233427
+&t.mode!==void 0?t.mode:void 0)}catch(h){try{await o.unlink(m)}catch(v){n(`Failed to clean up temp file: ${v}`)}if(T(h)==="ELOOP")throw new vE(`Refusing to write through symlink: ${i} (O_NOFOLLOW)`);throw c}try{await g.writeFile(r,{encoding:t.encoding});try{await g.sync()}catch(h){if(!mx(h))throw h;n(`fsync unsupported on this filesystem: ${h}`)}await g.close();try{await o.unlink(m)}catch(h){n(`Failed to clean up temp file: ${h}`)}n(`File ${i} written via in-place fallback`);return}catch(h){try{await g.close()}catch{}try{await o.unlink(i)}catch{}if(E)throw new P(`Write to ${i} failed (${T(h)??h}) after the target was truncated. The new content was preserved at ${m}.`,"writeFileAndFlush: in-place fallback write failed; content preserved at temp path");re(h,c)}}try{await o.unlink(m)}catch(g){n(`Failed to clean up temp file: ${g}`)}throw c}}var me=new Set(["Public","Default","Default User","All Users"]);async function SZn(){let e=B(),r=J(),t=ce();if(e==="macos")return F(r,"Desktop");if(e==="windows"){let u=a.USERPROFILE?a.USERPROFILE.replaceAll("\\","/"):null;if(u){let s=`/mnt/c${u.replace(/^[A-Z]:/,"")}/Desktop`;if(await ga(s))return s}try{let s=await t.readdir("/mnt/c/Users");for(let d of s){if(me.has(d.name))continue;let w=F("/mnt/c/Users",d.name,"Desktop");if(await ga(w))return w}}catch(i){n(`Failed to enumerate /mnt/c/Users for Windows desktop path: ${i}`,{level:"error"})}}let o=F(r,"Desktop");if(await ga(o))return o;return r}async function e4t(e,r=Lue){try{return(await ce().stat(e)).size<=r}catch{return!1}}function up(e){let r=B()==="windows",t=ae(e),o=r?/[\\/]+$/:/\/+$/,u=t.length>le(t).root.length?t.replace(o,""):t;return r?u.replaceAll("/","\\").toLowerCase():u}function B_t(e,r){return up(e)===up(r)}
+export{E$,yZn,vE,Lwe,Nwe,uq,k$,ga,Lue,Nue,T$,ux,ISn,L9e,N9e,u2,$9e,$Y,bZn,d2,Wo,gne,dx,p2,QWt,ZWt,_Zn,HSn,qg,SZn,e4t,up,B_t};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{K,z}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{Et,S,ce}from"B:/~BUN/root/chunk-21hv5ssy.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{dirname as u}from"path";function s(){}async function p(n,t){let i=ce();try{await i.appendFile(n,t)}catch{await i.mkdir(u(n)).catch(s),await i.appendFile(n,t)}}class g{pendingWrite=Promise.resolve();cleanupRegistered=!1;append(n,t){if(this.pendingWrite=this.pendingWrite.then(p.bind(null,n,t)).catch(s),!this.cleanupRegistered)this.cleanupRegistered=!0,Et(()=>this.flush())}flush(){return this.pendingWrite}}var f=new K(()=>new g);function c(){return f.of(z().host)}function Y(n,t,i){let r=m();if(!r)return;let o;try{o=e(n,t,l(i))}catch{o=e(n,t,{diagnostics_payload_failed:!0})}c().append(r,o)}function l(n){try{return(typeof n==="function"?n():n)??{}}catch{return{diagnostics_payload_failed:!0}}}function e(n,t,i){let r={timestamp:new Date().toISOString(),level:n,event:t,data:i};return S(r)+`
+`}function Qbt(){return c().flush()}function m(){return a.CLAUDE_CODE_DIAGN

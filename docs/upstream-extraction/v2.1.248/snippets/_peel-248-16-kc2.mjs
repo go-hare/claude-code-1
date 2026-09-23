@@ -1,0 +1,12 @@
+import { EXE_248, loadSea, asciiSlice } from './_peel-248-na-helpers.mjs'
+const b = loadSea(EXE_248)
+const k = b.lastIndexOf(Buffer.from('KC='), 192124739)
+const k2 = b.lastIndexOf(Buffer.from('KC='), 192124739 + 1)
+console.log('KC=', k)
+console.log(asciiSlice(b, k - 80, k + 200))
+const k3 = b.lastIndexOf(Buffer.from('var KC='), 192124739)
+console.log('var KC=', k3)
+console.log(asciiSlice(b, Math.max(0, k3 - 20), k3 + 120))
+const k4 = b.lastIndexOf(Buffer.from('KC=/'), 192124739)
+console.log('KC=/', k4)
+console.log(asciiSlice(b, k4 - 20, k4 + 80))

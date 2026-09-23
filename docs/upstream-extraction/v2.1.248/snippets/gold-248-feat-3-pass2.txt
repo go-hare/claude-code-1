@@ -1,0 +1,16 @@
+# gold-248-feat-3-pass2  pass2 clientLabel register
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:07:14.114Z
+
+## t.clientLabel??  needle="t.clientLabel??"  hits=1
+- #0 @187936083 it m(),process.exit(1)}let ce=pXe({baseUrl:t.apiUrl,poolSecret:n,onDebug:p}),ye=t.clientLabel??Go();if(t.lockToAccountId)s(`Registering locked to account: ${t.lockToAccountId}
+
+## clientLabel??  needle="clientLabel??"  hits=1
+- #0 @187936085  m(),process.exit(1)}let ce=pXe({baseUrl:t.apiUrl,poolSecret:n,onDebug:p}),ye=t.clientLabel??Go();if(t.lockToAccountId)s(`Registering locked to account: ${t.lockToAccountId}
+
+## n.clientLabel=u  needle="n.clientLabel=u"  hits=1
+- #0 @187911385 o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"--debug-token-dir":if(o)n.debugTokenDir=o,i++;break;case"--proxy
+
+## register-clientLabel @187936083
+s_proxy_auth","listener_start_failed"),s(`[runner:fatal] could not start the proxy-authorization listener: ${l(_)}`),await m(),process.exit(1)}let ce=pXe({baseUrl:t.apiUrl,poolSecret:n,onDebug:p}),ye=t.clientLabel??Go();if(t.lockToAccountId)s(`Registering locked to account: ${t.lockToAccountId}`);let Ce,xe;try{let _=await fn(()=>ce.registerRunner(ye,t.lockToAccountId),{initialDelayMs:1000,maxDelayMs:16000,maxAttempts:5,shouldRetry:YEe,onRetry:(L,pe)=>{s(`RegisterRunner attempt ${L} transient failure (${pe instanceof Error?pe.message:pe}) \u2014 retrying`)}});Ce=_.runner_id,xe=_.runner_token,b(

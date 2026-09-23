@@ -1,0 +1,18 @@
+# gold-248-n-iq
+
+## window 178494800-178496200
+;import{cwd as Ri}from"process";import{randomUUID as Iq}from"crypto";import{randomUUID as Cn}from"crypto";import{createHash as vn,randomBytes as bn}from"crypto";function _u(e){return e}function eo(e){return e}function kL(e){return typeof e==="string"&&e.length<=200&&/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(e)&&!/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(e)}var Je="[\\w-]{1,63}",ze=new RegExp(`^${Je}$`),mn=/^[\w-]{1,128}$/;function iGt(e){return mn.test(e)}var Sn=new RegExp(`^a(?:${Je}-)?[0-9a-f]{16}$`);function h0(e){return Sn.test(e)?e:null}var yn=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;function i7(e,t){let o=Buffer.from(t.replace(/-/g,""),"hex"),r=vn("sha1").update(o).update(Buffer.from(e,"utf8")).digest();r[6]=r[6]&15|80,r[8]=r[8]&63|128;let i=r.subarray(0,16).toString("hex");return`${i.slice(0,8)}-${i.slice(8,12)}-${i.slice(12,16)}-${i.slice(16,20)}-${i.slice(20,32)}`}function Vr(e){if(typeof e!=="string")return null;return yn.test(e)?e:null}function Gh(e){if(e&&!ze.test(e))e=e.replace(/[^\w-]/g,"").slice(0,63);let t=bn(8).toString("hex");return e?`a${e}-${t}`:`a${t}`}var Z="3ab19d7e-9f35-45c2-926e-75e271cc60b3";function Zer(e){return i7(e.trim(),Z)}function avt(){let e=process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim();return e?i7(e,Z):null}function cwn(e){if(e.toLowerCase().endsWith(".jsonl"))return{sessionId:Cn(),ingressUrl:null,isUrl:!1,jsonlFil
+
+## Iq( hits near host
+@178548490 {e=dn(ln(t))}catch{e=dn(t)}}return yGt({host:sn(),id:avt()??Iq(),project:{originalCwd:e,projectRoot:e,cwd:e}})}var v=un();function z(){retur
+@178549470 ratch.replaceChromeAvailabilityStagesLogged(r);let i=fn(),s=Iq();return t.costLedger.scopeTo(s),t.update({id:s,...e.setCurrentAsParent&&{par
+
+## function Iq 
+
+## function Cn( 
+
+## randomUUID 178494839,178494876
+@178494839 randomUUID as Iq}from"crypto";import{randomUUID as Cn}from"crypto";import{createHash as vn,randomBytes as bn}from"crypto";function _u(e){return e}function eo(e)
+@178494876 randomUUID as Cn}from"crypto";import{createHash as vn,randomBytes as bn}from"crypto";function _u(e){return e}function eo(e){return e}function kL(e){return typeo
+
+## crypto.randomUUID 

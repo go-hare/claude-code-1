@@ -14,6 +14,8 @@ import {
   seedUtilizationFromOpenHeaders,
   type Utilization,
 } from '../../services/api/usage.js';
+import { getRawUtilization } from '../../services/claudeAiLimits.js';
+import { spendLimitBarProps } from './spendLimitBar.js';
 import { useAppState } from '../../state/AppState.js';
 import type { Message } from '../../types/message.js';
 import { formatResetText, formatRelativeTimeAgo, formatTokens } from '../../utils/format.js';
@@ -217,6 +219,8 @@ export function Usage(): React.ReactNode {
         ({ title, limit }) => limit && <LimitBar key={title} title={title} limit={limit} maxWidth={maxWidth} />,
       )}
 
+      <SpendLimitSection maxWidth={maxWidth} />
+
       {utilization.extra_usage && <ExtraUsageSection extraUsage={utilization.extra_usage} maxWidth={maxWidth} />}
 
       {isEligibleForOverageCreditGrant() && <OverageCreditUpsell maxWidth={maxWidth} />}
@@ -227,6 +231,22 @@ export function Usage(): React.ReactNode {
         <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
       </Text>
     </Box>
+  );
+}
+
+/** densable 2.1.251 Dl — Spend limit bar from jL().overage. */
+function SpendLimitSection({ maxWidth }: { maxWidth: number }): React.ReactNode {
+  const bar = spendLimitBarProps(getRawUtilization().overage);
+  if (!bar) {
+    return null;
+  }
+  return (
+    <LimitBar
+      title={bar.title}
+      limit={{ utilization: bar.utilization, resets_at: bar.resetsAtIso }}
+      maxWidth={maxWidth}
+      alwaysShowDateInReset={bar.alwaysShowDateInReset}
+    />
   );
 }
 

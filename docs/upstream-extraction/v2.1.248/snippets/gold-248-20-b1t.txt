@@ -1,0 +1,116 @@
+# gold-248-20-b1t
+when=2026-09-20T03:37:35.807Z
+bytes248=226708128 bytes247=253204128
+
+## #20-248 primaryCheckoutVouches needle="primaryCheckoutVouches" hits=5
+- #0 @93506276 K...jobdir_rm_failed/...lpL.couldn't remove the session's state directory (.........gitError
+.....K.lockReason.......p..primaryCheckoutVouches..
+...O.A.needsForce........%.errorSummary....._6.job_spare_ensure....h0.defaults_mismatch_reboot....\2..low_mem.....=)
+- #1 @96927217 l or undefined value.......\~..requireManagedLocation......z...requireCwdInsideRepoQ.......Cannot destructure property 'primaryCheckoutVouches' from null or undefined value...~....?..Workspace trust not yet accepted. Run `claude` once in this directory and accep
+- #2 @186369419  We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!=
+- #3 @186370851 ional-locks","status","--porcelain"],{cwd:e,env:Vo()});if(o.code!==0||o.stdout.trim().length>0)return!1;return b1t(e,t,{primaryCheckoutVouches:!1})}async function vin(e){let t=Mr(te());if(!t)return 0;await ucr(t);let r=sT(t),o;try{o=await Qz(r)}catch{return awai
+- #4 @189693293 y",n(`deleteJob: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has commits that are on no remote, kept`,{level:"warn"});else{let pe=zct(k,r.origi
+
+## #20-248 function b1t( needle="function b1t(" hits=1
+- #0 @186369401 master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{c
+
+## #20-248 async function b1t( needle="async function b1t(" hits=1
+- #0 @186369395 rigin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{c
+
+## #20-248 function P0n( needle="function P0n(" hits=2
+- #0 @186369921 ,{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git
+- #1 @191299504 eInChromeOnboarding","remoteDialogSeen","lspRecommendationIgnoredCount","autoUpdates","autoUpdatesProtectedForNative"]);function P0n(d){let C=qe(),w=[];for(let F of ajt){if(bg.has(F))continue;let H=(ASe.includes(F)?C[F]:void 0)??d[F],W=NP[F];if(H===void
+
+## #20-248 async function P0n( needle="async function P0n(" hits=1
+- #0 @186369915 HEAD"],{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git
+
+## #20-248 function mGe( needle="function mGe(" hits=2
+- #0 @186369073 nly","--no-merges","--max-count=1",`${t}...HEAD`],{cwd:e,env:Vo()});return p.code===0&&p.stdout.trim().length===0}async function mGe(e){let t=await We(tt(),[...Zt,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:Vo()});if(t.code===0&
+- #1 @215551226 ,__renderToHTMLTree:()=>jQ,__setFontMetrics:()=>rQ,default:()=>WVe,render:()=>c8,renderToString:()=>HQ,version:()=>XQ});function mGe(e){if("default"in e)return e.default;var t=e.type,r=Array.isArray(t)?t[0]:t;if(typeof r!="string")return r.enum[0];switc
+
+## #20-248 async function mGe( needle="async function mGe(" hits=1
+- #0 @186369067 ight-only","--no-merges","--max-count=1",`${t}...HEAD`],{cwd:e,env:Vo()});return p.code===0&&p.stdout.trim().length===0}async function mGe(e){let t=await We(tt(),[...Zt,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:Vo()});if(t.code===0&
+
+## #20-248 P0n( needle="P0n(" hits=4
+- #0 @186369630 s"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&!C.stdout.trim())return!0}}let[p,g]=await 
+- #1 @186369930 nv:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git
+- #2 @191299513 Onboarding","remoteDialogSeen","lspRecommendationIgnoredCount","autoUpdates","autoUpdatesProtectedForNative"]);function P0n(d){let C=qe(),w=[];for(let F of ajt){if(bg.has(F))continue;let H=(ASe.includes(F)?C[F]:void 0)??d[F],W=NP[F];if(H===void
+- #3 @191599310 Es(t){if(pg())return;let[o,p,u,g]=await Promise.all([_h(),EOe(),rke({allowNetworkFallbackForOldGh:!1}),null]),w=H0n(),A=P0n(t),C=D0n(qe());s("tengu_startup_telemetry",{is_git:o,worktree_count:p,...!1,warm_spare_claimed:gWn(),gh_auth_status:c(u.
+
+## #20-248 b1t @186369395
+len=520 sha=a6321b76b8763900
+async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&!C.stdout.trim())return!0}}let[p,g]=await Promise.all([We(tt(),[...Zt,"rev-parse","HEAD"],{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}
+
+## #20-248 b1t-win @186369395
+t.code===0&&t.stdout.trim())return t.stdout.trim();for(let r of["origin/main","origin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&!C.stdout.trim())return!0}}let[p,g]=await Promise.all([We(tt(),[...Zt,"rev-parse","HEAD"],{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git-dir","--git-common-dir","--symbolic-full-name","HEAD"],{cwd:e,env:Vo()}),u=o.stdout.trim().split(`
+`),[p,g,k]=u;if(o.code!==0||u.length!==3||!p||!g||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.trim();if(E.code!==0||E.stdout.trim()!=="false"||C.code!==0||M!==r||M===k)return null;return M}async function aTt(e,t){let r=await Jve(e);if(r===null)return!1;let o=await We(tt(),[...r,...Zt,"--no-optional-locks","status","--porcelain"],{cwd:e,env:Vo()});if(o.code!==0||o.stdout.trim().length>0)return!1;return b1t(e,t,{primaryCheckoutVouches:!1})}async function vin(e){let t=Mr(te());if(!t)return 0;await ucr(t);let r=sT(t),o;try{o=await Qz(r)}catch{return await fGe(t),0}let u=e.getTime(),p=Ws()?.worktreePath,g=await mGe(t),k=0;for(let E of o){if(!sTt(E))continue;let C=Ul(r,E);if(p===C)continue;let M;try{M=(await Jx(C)).mtimeMs}catch{continue}if(M>=u)continue;if(!await aTt(C,g))continue;try{if(!await eae(await tae(C,t))){n(`cleanupStaleAgentWorktrees: kept ${C} \u2014 locked by a live Claude Code process, or with a reason we did not write`);continue}}catch(L){n(`cleanupStaleAgentWorktrees: kept ${C} \u2014 cannot read the worktree registry to verify lock ownership (${l(L)})`);continue}if((await bz(C,Zse(E),t,!1,"stale_cleanup")).outcome!=="failed")k++}if(k>0)await We(tt(),[...Zt,"worktree","prune"],{cwd:t,env:Vo()}),n(`cleanupStaleAgentWorktrees: removed ${k} stale worktree(s)`);return await fGe(t),k}async function win(e){let{worktreePath:t,worktreeBranch:r,originCwd:o,hookBased:u,cutoff:p}=e;if(u)return!1;let g=zct(t,o);if(!g||!Wct(t,g))return!
+
+## #20-248 async P0n @186369915
+len=711 sha=87c14d737c9dcf6e
+async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git-dir","--git-common-dir","--symbolic-full-name","HEAD"],{cwd:e,env:Vo()}),u=o.stdout.trim().split(`
+`),[p,g,k]=u;if(o.code!==0||u.length!==3||!p||!g||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.trim();if(E.code!==0||E.stdout.trim()!=="false"||C.code!==0||M!==r||M===k)return null;return M}
+
+## #20-248 P0n @186369921
+len=705 sha=eb004321e78dd84e
+function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git-dir","--git-common-dir","--symbolic-full-name","HEAD"],{cwd:e,env:Vo()}),u=o.stdout.trim().split(`
+`),[p,g,k]=u;if(o.code!==0||u.length!==3||!p||!g||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.trim();if(E.code!==0||E.stdout.trim()!=="false"||C.code!==0||M!==r||M===k)return null;return M}
+
+## #20-248 P0n-win @186369915
+stdout.trim())return!0}}let[p,g]=await Promise.all([We(tt(),[...Zt,"rev-parse","HEAD"],{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git-dir","--git-common-dir","--symbolic-full-name","HEAD"],{cwd:e,env:Vo()}),u=o.stdout.trim().split(`
+`),[p,g,k]=u;if(o.code!==0||u.length!==3||!p||!g||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.trim();if(E.code!==0||E.stdout.trim()!=="false"||C.code!==0||M!==r||M===k)return null;return M}async function aTt(e,t){let r=await Jve(e);if(r===null)return!1;let o=await We(tt(),[...r,...Zt,"--no-optional-locks","status","--porcelain"],{cwd:e,env:Vo()});if(o.code!==0||o.stdout.trim().length>0)return!1;return b1t(e,t,{primaryCheckoutVouches:!1})}async function vin(e){let t=Mr(te());if(!t)return 0;await ucr(t);let r=sT(t),o;try{o=await Qz(r)}catch{return await fGe(t),0}let u=e.getTime(),p=Ws()?.worktreePath,g=await mGe(t),k=0;for(let E of o){if(!sTt(E))continue;let C=Ul(r,E);if(p===C)continue;let M;try{M=(await Jx(C)).mtimeMs}catch{continue}if(M>=u)continue;if(!await aTt(C,g))continue;try{if(!await eae(await tae(C,t))){n(`cleanupStaleAgentWorktrees: kept ${C} \u2014 locked by a live Claude Code process, or with a reason we did not write`);continue}}catch(L){n(`cleanupStaleAgentWorktrees: kept ${C} \u2014 cannot read the worktree registry to verify lock ownership (${l(L)})`);continue}if((await bz(C,Zse(E),t,!1,"stale_cleanup")).outcome!=="failed")k++}if(k>0)await We(tt(),[...Zt,"worktree","prune"],{cwd:t,env:Vo()}),n(`cleanupStaleAgentWorktrees: removed ${k} stale worktree(s)`);return await fGe(t),k}async function win(e){let{worktreePath:t,worktreeBranch:r,originCwd:o,hookBased:u,cutoff:p}=e;if(u)return!1;let g=zct(t,o);if(!g||!Wct(t,g))return!1;let k;try{k=(await Jx(t)).mtimeMs}catch{return!1}if(k>=p.getTime())return!1;if(await cGe(t)===null)return n(`reapJobWorktreeIfSafe: kept ${t} \u2014 no Claude Code creation marker (${qve}) in its git admin dir, so Claude Code did not create it; not ours to remove`,{level:"warn"}),!1;let E=await Ba(t).catch(()=>t),C=Ws()?.worktreePath;if(C&&E===await Ba(C).catch(()=>C))return!1;let M=await YK(g).catch(()=>null),L;for(let N of M??[])if(E===await Ba(N.worktreePath).catch(()=>N.worktreePath)){L=N;break}if(!await eae(
+
+## #20-248 mGe @186369067
+len=328 sha=3f4e72d10c6275b5
+async function mGe(e){let t=await We(tt(),[...Zt,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:Vo()});if(t.code===0&&t.stdout.trim())return t.stdout.trim();for(let r of["origin/main","origin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}
+
+## #20-248 mGe-win @186369067
+,`${t}...HEAD`],{cwd:e,env:Vo()});return p.code===0&&p.stdout.trim().length===0}async function mGe(e){let t=await We(tt(),[...Zt,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:Vo()});if(t.code===0&&t.stdout.trim())return t.stdout.trim();for(let r of["origin/main","origin/master"])if((await We(tt(),[...Zt,"rev-parse","--verify","-q",r],{cwd:e,env:Vo()})).code===0)return r;return null}async function b1t(e,t,{primaryCheckoutVouches:r}){let o=[...Zt,"rev-list","--max-count=1","HEAD","--not","--remotes"],u=await We(tt(),o,{cwd:e,env:Vo()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&!C.stdout.trim())return!0}}let[p,g]=await Promise.all([We(tt(),[...Zt,"rev-parse","HEAD"],{cwd:e,env:Vo()}),cGe(e)]);if(p.code===0&&g!==null&&p.stdout.trim()===g)return!0;return t!==null&&await iTt(e,t)}async function P0n(e,t){if(!t?.startsWith("origin/"))return null;let r=`refs/heads/${t.slice(7)}`,o=await We(tt(),[...Zt,"rev-parse","--git-dir","--git-common-dir","--symbolic-full-name","HEAD"],{cwd:e,env:Vo()}),u=o.stdout.trim().split(`
+`),[p,g,k]=u;if(o.code!==0||u.length!==3||!p||!g||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.trim();if(E.code!==0||E.stdout.trim(
+
+## #20-248 await b1t( needle="await b1t(" hits=1
+- #0 @189693267 b: worktree has uncommitted changes, kept ${k}`,{level:"warn"});else if(!C&&N&&!await b1t(k,await mGe(N),{primaryCheckoutVouches:!0}))E="unpushed",n(`deleteJob: ${k} has 
+
+## #20-248 await P0n( needle="await P0n(" hits=1
+- #0 @186369624 o()});if(u.code!==0)return!1;if(u.stdout.trim().length===0)return!0;if(r){let E=await P0n(e,t);if(E){let C=await We(tt(),[...o,E,"--"],{cwd:e,env:Vo()});if(C.code===0&&!C
+
+## #20 247 counterpart hit counts
+- "primaryCheckoutVouches" 247=0 248=5
+- "async function b1t(" 247=0 248=1
+- "async function P0n(" 247=0 248=1
+- "function P0n(" 247=1 248=2
+- "async function mGe(" 247=0 248=1
+- "HEAD\",\"--not\",\"--remotes\"" 247=1 248=1
+
+## #20-247 b1t @-1
+MISS {"miss":true}
+
+## #20-247 b1t-win @-1
+MISS
+
+## #20-247 HEAD-not-remotes @218364397
+function hqt(e){let t=await Nn($n(),[...io,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:ss()});if(t.code===0&&t.stdout.trim())return t.stdout.trim();for(let n of["origin/main","origin/master"])if((await Nn($n(),[...io,"rev-parse","--verify","-q",n],{cwd:e,env:ss()})).code===0)return n;return null}async function aUs(e,t){let n=await Nn($n(),[...io,"rev-list","--max-count=1","HEAD","--not","--remotes"],{cwd:e,env:ss()});if(n.code!==0)return!1;if(n.stdout.trim().length===0)return!0;let[r,o]=await Promise.all([Nn($n(),[...io,"rev-parse","HEAD"],{cwd:e,env:ss()}),dqt(e)]);if(r.code===0&&o!==null&&r.stdout.trim()===o)return!0;return t!==null&&await G1r(e,t)}async function V1r(e,t){let n=await yqt(e);if(n===null)return!1;let r=await Nn($n(),[...n,...io,"--no-optional-locks","status","--porcelain"],{cwd:e,env:ss()});if(r.code!==0||r.stdout.trim().length>0)return!1;return aUs(e,t)}async function Qbu(e){let t=zs(ze());if(!t)return 0;await lUs(t);let n=K0(t),r;try{r=await Tke(n)}catch{return await pre(t),0}let o=e.getTime(),s=Fd()?.worktreePath,i=await hqt(t),a=0;for(let l of r){if(!q1r(l))continue;let c=_l(n,l);if(s===c)continue;let u;try{u=(await sY(c)).mtimeMs}catch{continue}if(u>=o)continue;if(!await V1r(c,i))continue;try{if(!await mre(await gre(c,t))){_(`cleanupStaleAgentWorktrees: kept ${c} \u2014 locked by a live Claude Code process, or with a reason we did not write`);continue}}catch(d){_(`cleanupStaleAgentWorktrees: kept ${c} \u2014 cannot read the worktree registry to verify lock ownership (${Y(d)})`);continue}if((await mee(c,cqt(l),t,!1,"stale_cleanu
+
+## #20-247 covering aUs @218364319
+len=362 sha=2afad4fb6b4cea4d
+async function aUs(e,t){let n=await Nn($n(),[...io,"rev-list","--max-count=1","HEAD","--not","--remotes"],{cwd:e,env:ss()});if(n.code!==0)return!1;if(n.stdout.trim().length===0)return!0;let[r,o]=await Promise.all([Nn($n(),[...io,"rev-parse","HEAD"],{cwd:e,env:ss()}),dqt(e)]);if(r.code===0&&o!==null&&r.stdout.trim()===o)return!0;return t!==null&&await G1r(e,t)}
+
+## #20-247 primaryCheckoutVouches @-1
+MISS
+
+## #20-247 on-no-remote js @198121621
+s window, pid .......u.background session ........., pid ..........pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn't remove the session's state directory (.........gitError
+.....K.lockReason..........parkedJobId.
+...O.A.needsForce........%.errorSummary....._6.job_spare_ensure....h0.defaults_mismatch_reboot....\2..low_mem.....=)..[PERF:bg-
+
+## #20-247 delete-unpushed  @-1
+MISS {"miss":true}
+
+## #20 helpers around mGe/b1t
+- mGe @186369067
+- b1t @186369395
+- P0n @186369915
+- aTt @186370626
+- vin @186370879
+- win @186371748
+- Gwt @186372694
+- ucr @186372804

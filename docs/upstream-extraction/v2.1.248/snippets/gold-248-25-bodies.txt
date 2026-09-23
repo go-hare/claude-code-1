@@ -1,0 +1,62 @@
+# gold-248-25-bodies  densable 2.1.248 #25 login-gateway-hang
+# SEA 226708128 · 247 present · unique 248=yes (login_handoff 6/0)
+# peels: _peel-248-25.mjs + _peel-248-25b.mjs + _peel-248-25c.mjs + _peel-248-25d.mjs
+# NEVER invent leftover Select/hn API. leftover Select already has hideIndexes.
+
+login_handoff 248=6 247=0
+consentHandoffRevealActive 248=6 247=0
+onConsentNeeded 248=3 247=0
+windowAnchorMs 248=13 247=0
+refuseInput 248=47 247=0
+
+## DKt @190466122 len=53 sha=454151d2310e485e bodyHits247=0
+function DKt(){return P().consentHandoffRevealActive}
+
+## Ixt @190466069 len=53 sha=c42da064025718f5 bodyHits247=0
+function Ixt(){return P().consentHandoffHolds.size>0}
+
+## PKt @190465809 len=260 sha=04fd5b407977f065 bodyHits247=0
+function PKt(){let e=P(),t=Symbol("consent-handoff-hold");if(e.consentHandoffHolds.add(t),e.consentHandoffHolds.size===1)e.consentHandoffSignal.emit();return()=>{if(e.consentHandoffHolds.delete(t)&&e.consentHandoffHolds.size===0)e.consentHandoffSignal.emit()}}
+
+## CHn @190466236 len=122 sha=eb681a7893610ca8 bodyHits247=0
+function CHn(e){let t=P();return t.consentNeededRelease=e,()=>{if(t.consentNeededRelease===e)t.consentNeededRelease=null}}
+
+## nie @202549952 len=81 sha=1805be608bd2f346 bodyHits247=0
+function nie(d){return HKt((C,x)=>d(gb,pOe(C,x),{queueBehind:!0})),()=>HKt(null)}
+
+## pOe @202550033 len=187 sha=225b6414455f0d62 bodyHits247=0
+async function*pOe(d,C){let x=DKt()?"login_handoff":"default";yield{settings:d,reveal:x};for await(let H of C){if(x!=="login_handoff"&&DKt())x="login_handoff";yield{settings:H,reveal:x}}}
+
+## ee @190466640 len=1226 sha=475455ca063863db bodyHits247=0
+async function ee(e,t,r){if(!t||!swe(zW(t)))return"no_check_needed";if(!tJn(e,t))return"no_check_needed";if(!vu())return"deferred_non_interactive";let o=P();if(o.replRequester)if(o.consentNeededRelease){let u=null;try{u=PKt(),await o.fireConsentNeededRelease();let p=o.replRequester;if(p)return o.consentHandoffRevealActive=!0,await o.review(p,t);if(_o.has(process.stdout)){let g=await W();if(g)return o.consentHandoffRevealActive=!0,await o.review(g,t)}return"deferred_no_consent_surface"}finally{o.consentHandoffRevealActive=!1,u?.()}}else return o.review(o.replRequester,t);if(o.noConsentSurface)return"deferred_no_consent_surface";if(_o.has(process.stdout)){o.fireStartupConsentRelease();let u=await W();if(u)return o.review(u,t)}if(r===void 0||o.noConsentSurface)return"deferred_no_consent_surface";s("tengu_managed_settings_security_dialog_shown",{});let d=_o.has(process.stdout),c=r(t,d);if(!d)_o.claimForStandaloneRender(c);let a;try{a=await c}catch(u){throw f("remote_managed_settings_security_check","dialog_unavailable"),u}if(s(a==="approved"?"tengu_managed_settings_security_dialog_accepted":"tengu_managed_settings_security_dialog_rejected",{}),a==="approved")b("remote_managed_settings_security_check");return a}
+
+## X @201101609 len=3364 sha=4a838213a8ac7203 bodyHits247=0
+# full body in gold-248-25-login-handoff.txt / gold-248-unk-pass4.txt
+# {settings,reveal,onAccept,onReject,accepts}; s=yo==="login_handoff"
+# d/Ke: if(!s)return!1; if(le()||de(c))return he(),!0
+# hn: cancelFirst:s hideIndexes:s focus:s?"cancel":… windowMs:s?c:void 0
+# leftover Select already has hideIndexes; official hn non-SR Te does NOT take refuseInput
+
+## hn-confirm @198978718
+# non-SR: Te({options: cancelFirst?[cancel,confirm]:[confirm,cancel], hideIndexes, defaultFocusValue:focus})
+# SR only: ITt refuseInput/windowMs — leftover is not SR; do not invent Select refuseInput
+
+## qEt @201105981 showStandaloneSecurityDialog
+# reveal:"default"; accepts a()=n!==null&&!ed(n); n=Date.now() after render
+
+## lnr @205715658 len=91 sha=114d79c5f03c131f bodyHits247=0
+function lnr(){return"Signed in. Review your organization's managed settings to continue."}
+
+## zI @178950160 len=264 sha=18c75ee094359f5d
+function zI(){if(typeof setImmediate==="function")return new Promise((e)=>setImmediate(e));if(typeof MessageChannel==="function")return new Promise((e)=>{let t=new MessageChannel;t.port1.onmessage=()=>{t.port1.close(),e()},t.port2.postMessage(null)});return ne(0)}
+
+## b6 gateway @205708962 sha=cab523edbf90e2cc
+# if(Le()==="gateway"){ CHn(()=>(V.release??=PKt(),f())); await LKt(qEt,…); finally Z?.(); finally V.release?.() }
+# Smr onConsentNeeded: (b=!0, o(lnr(),{display:"system"}), zI())
+
+## refuse-within chunk-zjmyxdw3 @190608109
+# Ky=150 sa=250
+# ed(i,l=Ky){let a=Date.now()-i;return a>=0&&a<l}
+# Is(i=Ky){let l=E(Date.now());return U(()=>ed(l.current,i),[i])}
+# Hi(){refusedWithin,noteRefused,epoch}
+# Hs(i,l=Ky){remountKey: tr(l,i)?"settled":"held"}

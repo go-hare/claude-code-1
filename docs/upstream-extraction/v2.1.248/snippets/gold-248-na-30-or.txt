@@ -1,0 +1,6 @@
+# gold-248-na-30-or  *.env (prod.env)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=183210134
+
+len=65 sha=6df6c632fdd8df6a
+function or(e){return e.endsWith(ke)&&!St(e.slice(0,-ke.length))}

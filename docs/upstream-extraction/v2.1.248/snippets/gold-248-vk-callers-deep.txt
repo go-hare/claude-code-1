@@ -1,0 +1,218 @@
+# gold-248-vk-callers-deep
+# when=2026-09-22T02:56:17.379Z
+
+## "function X$n(" hits=1
+- @183765544 e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e){return(t)=>{let r={...t.pluginUsage};for(let[o,u]of e){let p=r[o];r[o]={usag
+
+## "function CNe(" hits=2
+- @183765471 nction vWt(){let e=ZK();if(!e)return;_e(sle(e),vNe())}async function CNe(e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e){ret
+- @209225366 {sP,eN,aP,QR,Cdt}from"B:/~BUN/root/chunk-3ajnwt4b.js";async function CNe(g,r){let[o,s]=await Promise.allSettled([QR(void 0,g,r),Cdt(void 0,r)]),i=o.status==="rejected"?l(o.reason):null,d=o.status==="fulfilled"?o.value:[],a=s.status==="fulfilled"?s.value:[],t=[...d,...a],e=aP(),u=e.ignoredUntrustedPool??null;if(e.id!==void 0&&eN(e.id)&&!t.
+
+## "function TNe(" hits=2
+- @183764987 ht.flat();return e.exitFlushesInFlight=[],t.length>0?t:null}function TNe(e){Db().flushStorageV5=e}function vNe(){return Db().flushStorageV5}function ZK(){let e=Db();if(e.flushTimer)clearTimeout(e.flushTimer),e.flushTimer=null;if(e.pendingUsage.size===0)return null;let t=[...e.pendingUsage.entries()];return e.pendingUsage.clear(),t}functio
+- @189779938 w();await _e((s)=>({...s,changelogLastFetched:l}),a)}}async function TNe(a){let t=m();if(t.content!==null)return t.content;if(D()&&a){let e=await a.readText([p()]),i=e.ok&&e.value.items[0].found?e.value.items[0].value:"";return t.remember(i),i}let r=u();try{let e=await Qt().read(r);return t.remember(e),e}catch{return t.remember(""),""}}fu
+
+## "function EWt(" hits=1
+- @183765616 (e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e){return(t)=>{let r={...t.pluginUsage};for(let[o,u]of e){let p=r[o];r[o]={usageCount:(p?.usageCount??0)+u.count,lastUsedAt:u.lastUsedAt,lastUsedNumSta
+
+## "function vWt(" hits=1
+- @183765409 for(let r of t.keys())if(e.has(r.toLowerCase()))t.delete(r)}function vWt(){let e=ZK();if(!e)return;_e(sle(e),vNe())}async function CNe(e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8
+
+## "pluginUsage" hits=26
+- @96586232 roperty 'pendingUsage' from null or undefined value.....9...pluginUsage.......#.pluginUsageLspGraceAppliedIds...........lastUsedNumStartups.......E.default-bundle..........official
+....p`.user-local......~p..skill_activated.....H~..custom_skill........skill.source
+.....J.skill.kind........J.skill_source....$...skill_loaded_from...
+....e..
+- @96586252 e' from null or undefined value.....9...pluginUsage.......#.pluginUsageLspGraceAppliedIds...........lastUsedNumStartups.......E.default-bundle..........official
+....p`.user-local......~p..skill_activated.....H~..custom_skill........skill.source
+.....J.skill.kind........J.skill_source....$...skill_loaded_from...
+....e..skill_kind......dXO.
+- @98544588 speculationEnabled......U...fleetViewPeakConcurrent......Aw.pluginUsageLspGraceApplied.......D..autoModeOptInDismissed..	....pF.prideFlag...B...t.7.Cannot destructure property 'history' from null or undefined value........V.projectOnboardingSeenCount......A.M.hasCompletedProjectOnboarding...b....0l.Not watching ~/.claude.json for other pr
+- @180613543 tionEnabled===void 0&&t.fleetViewPeakConcurrent===void 0&&t.pluginUsageLspGraceApplied===void 0&&t.autoModeOptInDismissed===void 0&&t.prideFlag===void 0)return e;let{opus1mMergeNoticeSeenCount:r,voiceNoticeSeenCount:o,opus47LaunchSeenCount:u,opus48LaunchSeenCount:p,speculationEnabled:g,fleetViewPeakConcurrent:E,pluginUsageLspGraceApplied:
+- @180613796 hSeenCount:p,speculationEnabled:g,fleetViewPeakConcurrent:E,pluginUsageLspGraceApplied:C,autoModeOptInDismissed:O,prideFlag:k,...M}=t;return M}function Oa(e){if(!e)return e;let t={},r=!1;for(let[o,u]of Object.entries(e)){if(!u||typeof u!=="object"){t[o]=u;continue}let p=u;if(p.history!==void 0||p.projectOnboardingSeenCount!==void 0||p.has
+- @183765772 t,flushAtExit:EWt});function sle(e){return(t)=>{let r={...t.pluginUsage};for(let[o,u]of e){let p=r[o];r[o]={usageCount:(p?.usageCount??0)+u.count,lastUsedAt:u.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:r}}}function aDt(e,t){let r=Date.now();_e((o)=>{let u=e.filter((g)=>!o.pluginUsage?.[g]);if(u.length===0)return
+
+## "_Ne({flush:" hits=1
+- @183765699 ..wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e){return(t)=>{let r={...t.pluginUsage};for(let[o,u]of e){let p=r[o];r[o]={usageCount:(p?.usageCount??0)+u.count,lastUsedAt:u.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:r}}}function aDt(e,t){let r=Date.now()
+
+## "flushAtExit" hits=3
+- @96528868 n........A..textOnlyReader.........topLevelAwait.......K3[.flushAtExit.
+...AJ..settingKey..	...L3..policyKey.......(N..flagName....dV..isTierInPlay.....j..HOOKS_MODULES_FLAG......q.y.HOOKS_MODULES_FLAG_SOURCE...........hooksModulesFlagDefault.....x.p.hooksModulesRolloutOn........<..hooksModulesRolloutSource.......j...sessionstart
+...C...
+- @183764655 ushRegistered)GI.exitFlushRegistered=!0,process.on("exit",t.flushAtExit);if(!e.flushTimer)e.flushTimer=setTimeout(t.flush,TWt),e.flushTimer.unref?.()}function SNe(e){Db().exitFlushesInFlight.push(e)}function kNe(e){let t=Db().exitFlushesInFlight,r=t.indexOf(e);if(r!==-1)t.splice(r,1)}function wNe(){let e=Db(),t=e.exitFlushesInFlight.flat(
+- @183765714 ZK()??[]];if(e.length===0)return;g8e(sle(e))}_Ne({flush:vWt,flushAtExit:EWt});function sle(e){return(t)=>{let r={...t.pluginUsage};for(let[o,u]of e){let p=r[o];r[o]={usageCount:(p?.usageCount??0)+u.count,lastUsedAt:u.lastUsedAt,lastUsedNumStartups:t.numStartups}}return{...t,pluginUsage:r}}}function aDt(e,t){let r=Date.now();_e((o)=>{let u
+
+## fn X$n @183765544
+len=72 sha=7d0fc5c6bb4289bc
+function X$n(e){if(D()&&e!==void 0)TNe(e),Et(()=>CNe(e)),Vk(()=>CNe(e))}
+
+## fn CNe @183765465
+len=79 sha=efda32acc3465435
+async function CNe(e){let t=ZK();if(!t)return;SNe(t),await _e(sle(t),e),kNe(t)}
+
+## fn CNe @209225360
+len=777 sha=f02f49a0e28f3120
+async function CNe(g,r){let[o,s]=await Promise.allSettled([QR(void 0,g,r),Cdt(void 0,r)]),i=o.status==="rejected"?l(o.reason):null,d=o.status==="fulfilled"?o.value:[],a=s.status==="fulfilled"?s.value:[],t=[...d,...a],e=aP(),u=e.ignoredUntrustedPool??null;if(e.id!==void 0&&eN(e.id)&&!t.some((n)=>sP(n)===e.id))t.push({kind:"self_hosted_pool",pool_id:e.id,name:e.id,created_at:"",alive_runner_count:0});if(t.length===0)return{availableTargets:[],selectedTarget:null,selectedTargetSource:null,environmentsError:i,ignoredUntrustedPool:u};let c=d.find((n)=>n.kind!=="bridge")??a[0]??t[0],f=null;if(e.id!==void 0){let n=t.find((m)=>sP(m)===e.id);if(n)c=n,f=e.source??null}return{availableTargets:t,selectedTarget:c,selectedTargetSource:f,environmentsError:i,ignoredUntrustedPool:u}}
+
+## fn EWt @183765616
+len=83 sha=c1a2642c06cdc9ba
+function EWt(){let e=[...wNe()??[],...ZK()??[]];if(e.length===0)return;g8e(sle(e))}
+
+## fn vWt @183765409
+len=56 sha=369c348bcd3122c5
+function vWt(){let e=ZK();if(!e)return;_e(sle(e),vNe())}
+
+## "lastSessionMetrics" hits=4
+- @94524048 [adopt] dropping shell ......0.. from the handoff (......n..lastSessionMetrics.......E..adopt_checkpoint_flush_failed.......g3g.[adopt] checkpoint flush: ..(.....w.file:///B:/%7EBUN/root/chunk-ex69cjb8.js
+...m...firedSites.."....u..tengu_dead_probe_adopt_ticks_token..	.......kill_gate...(.......file:///B:/%7EBUN/root/chunk-jcbzt3hb.js(...
+- @190429328 getAll();if(Object.keys(Br).length>0)await cc((Ga)=>({...Ga,lastSessionMetrics:Br}),kt);jr=!0}):void 0;let Wr=()=>{if(jr){return}let Ur=Ie.getAll();if(Object.keys(Ur).length>0)vMe((qa)=>({...qa,lastSessionMetrics:Ur}))};return process.on("exit",Wr),()=>{Va?.(),process.off("exit",Wr)}},Or=[Ie,kt],tn[1]=kt,tn[2]=Ie,tn[3]=Nr,tn[4]=Or;else Nr
+- @190429462 r=Ie.getAll();if(Object.keys(Ur).length>0)vMe((qa)=>({...qa,lastSessionMetrics:Ur}))};return process.on("exit",Wr),()=>{Va?.(),process.off("exit",Wr)}},Or=[Ie,kt],tn[1]=kt,tn[2]=Ie,tn[3]=Nr,tn[4]=Or;else Nr=tn[3],Or=tn[4];k(Nr,Or);let $r;if(tn[5]!==en||tn[6]!==Ie)$r=e(nn.Provider,{value:Ie,children:en}),tn[5]=en,tn[6]=Ie,tn[7]=$r;else $r=
+- @204230848 ionBase??"unknown",last_session_id:ke(d.lastSessionId),...d.lastSessionMetrics})}function Yt(e){return!1}function Kt(e){return!1}function pe({isNonInteractiveSession:e,isRemoteMode:o,isBareMode:r,exitAfterFirstRender:p,trustAccepted:m}){return!e&&!o&&!r&&!p&&m}class G{fired=!1;claim(){if(this.fired)return!1;return this.fired=!0,!0}}var me
+
+## "function wt($a)" hits=1
+- @190429035 99)}for(let[d,m]of r)i[d]=m.size;return i}}}var nn=fn(null);function wt($a){let tn=g(8),{store:Ka,children:en}=$a,Lr;if(tn[0]===p)Lr=GTt(),tn[0]=Lr;else Lr=tn[0];let Ie=Ka??Lr,{storageV5:kt}=fe(),Nr,Or;if(tn[1]!==kt||tn[2]!==Ie)Nr=()=>{let jr=!1;let Va=D()&&kt!==void 0?Vk(async()=>{let Br=Ie.getAll();if(Object.keys(Br).length>0)await cc((
+
+## "GTt()" hits=3
+- @190428265 urn t[i];return t[i]+(t[d]-t[i])*(r-i)}var on=1024;function GTt(){let t=new Map,o=new Map,r=new Map;return{increment(i,d=1){t.set(i,(t.get(i)??0)+d)},set(i,d){t.set(i,d)},observe(i,d){let m=o.get(i);if(!m)m={reservoir:[],count:0,sum:0,min:d,max:d},o.set(i,m);if(m.count++,m.sum+=d,d<m.min)m.min=d;if(d>m.max)m.max=d;if(m.reservoir.length<on
+- @190429108 a){let tn=g(8),{store:Ka,children:en}=$a,Lr;if(tn[0]===p)Lr=GTt(),tn[0]=Lr;else Lr=tn[0];let Ie=Ka??Lr,{storageV5:kt}=fe(),Nr,Or;if(tn[1]!==kt||tn[2]!==Ie)Nr=()=>{let jr=!1;let Va=D()&&kt!==void 0?Vk(async()=>{let Br=Ie.getAll();if(Object.keys(Br).length>0)await cc((Ga)=>({...Ga,lastSessionMetrics:Br}),kt);jr=!0}):void 0;let Wr=()=>{if(jr
+- @191550345 );if(p.stdin)s("tengu_stdin_interactive",{});let u=new Zo,g=GTt();Pwn(g);let w=a.CLAUDE_CODE_FRAME_TIMING_LOG,A=-1,C=0,O=Math.max(1,a.CLAUDE_CODE_FRAME_TIMING_SAMPLE_EVERY||1);if(w)try{A=Xi(w,"a")}catch{}return{getFpsMetrics:()=>u.getMetrics(),stats:g,renderOptions:{...p,onFrame:(k)=>{if(u.record(k.durationMs),g.observe("frame_duration_ms
+
+## "function be(e){let{pendingOps" hits=1
+- @190739086 finally{let l=uDn(t,o);try{e.onSettled?.(l)}catch(d){_(d)}}}function be(e){let{pendingOps:t}=me().durable;t.add(e);let r=()=>void t.delete(e);e.then(r,r),Vk(wr)}async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}async function vr(e,t,r){return ge(e,async()=>{let s=H().get(e);if(s?.restored&&!r){let o=await 
+
+## "async function wr()" hits=2
+- @179390083 (r&&r!==e)return Z(r);return null}var SOe=["main","master"];async function wr(){let e=await US();if(!e)return"main";let t=await XP(e)??e,r=await VJn(t,"refs/remotes/origin/HEAD","refs/remotes/origin/");if(r&&await o2(t,`refs/remotes/origin/${r}`))return r;for(let o of SOe)if(await o2(t,`refs/remotes/origin/${o}`))return o;return"main"}fun
+- @190739187 able;t.add(e);let r=()=>void t.delete(e);e.then(r,r),Vk(wr)}async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}async function vr(e,t,r){return ge(e,async()=>{let s=H().get(e);if(s?.restored&&!r){let o=await Ye(e,t,!1,s);if(o.outcome==="subscribed")return o;let l=o.outcome==="already_watching"?o.outcome:o.ou
+
+## "durable.pendingOps" hits=1
+- @190739244 r)}async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}async function vr(e,t,r){return ge(e,async()=>{let s=H().get(e);if(s?.restored&&!r){let o=await Ye(e,t,!1,s);if(o.outcome==="subscribed")return o;let l=o.outcome==="already_watching"?o.outcome:o.outcome==="failed"&&o.kept?"outcome_unknown":o.reason;retur
+
+## "me().durable" hits=44
+- @190097179 nvelope:n,orphansEnvelope:d,row:s,stop:u}});function sMn(e){me().durable.registrySink=e}function aMn(){me().durable.registryPublished=rt}function i8(){if(!a.CLAUDE_CODE_REMOTE)return;let e=me(),{durable:t}=e;if(t.registrySink===null)return;let n={},o=[],r=new Set;for(let c of t.pendingRestoredRows.values()){let p=t.rows.get(c.slug);if(p==
+- @190097222 ;function sMn(e){me().durable.registrySink=e}function aMn(){me().durable.registryPublished=rt}function i8(){if(!a.CLAUDE_CODE_REMOTE)return;let e=me(),{durable:t}=e;if(t.registrySink===null)return;let n={},o=[],r=new Set;for(let c of t.pendingRestoredRows.values()){let p=t.rows.get(c.slug);if(p===void 0&&!t.unwatchedSlugs.has(c.slug)){o.p
+- @190102252 ,k(t?.storageV5)}function vnt(e,t){let n=k(t?.storageV5);if(me().durable.stopLatches.isStopped(e))return;let o=t?.title,r=o!==void 0&&o.length>=1&&o.length<=X,d=n.bySlug.get(e)?.title;n.forgottenAt.delete(e),n.bySlug.set(e,{state:"armed",writtenAtMs:Date.now(),...r?{title:o}:d!==void 0&&{title:d},...Ha()&&{holder:"bg",...st()}}),Y(n,e),v(
+- @190103583 )}}}function wnt(e,t){let n=k(t?.storageV5),{stopLatches:o}=me().durable;for(let[r,d]of e){if(o.wasClearedByRewatch(r))continue;let s=n.bySlug.get(r);if(s===void 0||s.state==="armed"||s.writtenAtMs<=d)n.bySlug.set(r,{state:"stopped",writtenAtMs:d,...s?.title!==void 0&&{title:s.title}});o.reaffirmStop(r)}v()}function pMn(e){let t=k(e?.stor
+- @190107796 (g))l.add(g);else t.bySlug.delete(g),c++}let{stopLatches:p}=me().durable;for(let[g,w]of Object.entries(t.parked.get(n)?.line??{})){let M=t.forgottenAt.get(g);if(w.state==="armed"&&M!==void 0&&w.writtenAtMs<=M&&!FX(g)){r=!0;continue}let b=T(t.bySlug.get(g),w);if(b.state==="armed"&&p.isStopped(g))b={state:"stopped",writtenAtMs:Date.now(),..
+- @190109945 lTorn===!0)Hon(t.transcriptPath??void 0);let{stopLatches:f}=me().durable,l=new Map;for(let[c,p]of u){let g=t.forgottenAt.get(c);if(p.state==="armed"&&g!==void 0&&p.writtenAtMs<=g&&!FX(c)){s=!0;continue}let w=t.bySlug.get(c);if(t.tornStops.has(c)&&w?.state==="armed"&&FX(c)){t.tornStops.delete(c),l.set(c,w),s=!0;continue}let M=T(w,p);if(t.b
+
+## fn wr @190739187
+len=83 sha=592018c0b5a70919
+async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}
+
+## fn be @190739086
+len=101 sha=3cdd9f7a0868320e
+function be(e){let{pendingOps:t}=me().durable;t.add(e);let r=()=>void t.delete(e);e.then(r,r),Vk(wr)}
+
+## durable-window @190739086
+.length>0)d[d.length-1]=re;let c=d.map((m,p)=>m===pe||br(m,d[p-1],d[p+1])?m:re).filter((m,p,O)=>m!==re||O[p-1]!==re);if(!c.some((m)=>m!==re&&m!==pe&&!tt.test(m)))return;let u=c.join(" ");return u.length>He?`${de(u,He-3)}...`:u}function _r(e){let t="content"in e?e.content:void 0;if(!Array.isArray(t))return"";let r=[];for(let s of t)if(typeof s==="object"&&s!==null&&"type"in s&&s.type==="text"&&"text"in s&&typeof s.text==="string")r.push(s.text);return r.join(`
+`)}async function at(e,t,r){try{let s=await qR(e,{name:t,arguments:r},{timeout:15000});return{isError:"isError"in s&&s.isError===!0,text:_r(s)}}catch{return null}}async function X(e,t){let r=await at(e,"unwatch_url",{trigger_id:t});return r!==null&&!r.isError}async function ot(e){let{durable:t}=me(),r=[...t.orphanTriggers];if(r.length===0)return;let s=await Promise.all(r.map((l)=>X(e,l))),o=0;if(r.forEach((l,d)=>{if(s[d])t.orphanTriggers.delete(l);else o++}),o>0)y("artifact_durable_subscribe","orphan_trigger_release_failed");i8()}async function st(e,t,r,s){try{let o=await td.post(e,t,{headers:su(),timeout:15000,refreshOAuth:!0,credentials:s,...r&&{signal:r}});return{res:o,relayed:o.route==="relay"}}catch(o){return{res:void 0,relayed:vH(o)}}}function it(e){return e.relayed?{relayed:!0}:{}}function he(e){return e.relayed?[{relay:!0}]:[]}async function D9t(e){let{slug:t,context:r,detachedFromUser:s}=e;cDn(t);let o;try{let l=vr(t,r,s);return be(l),o=await l,Ar(o),o}finally{let l=uDn(t,o);try{e.onSettled?.(l)}catch(d){_(d)}}}function be(e){let{pendingOps:t}=me().durable;t.add(e);let r=()=>void t.delete(e);e.then(r,r),Vk(wr)}async function wr(){await un(Promise.allSettled([...me().durable.pendingOps]),1e4)}async function vr(e,t,r){return ge(e,async()=>{let s=H().get(e);if(s?.restored&&!r){let o=await Ye(e,t,!1,s);if(o.outcome==="subscribed")return o;let l=o.outcome==="already_watching"?o.outcome:o.outcome==="failed"&&o.kept?"outcome_unknown":o.reason;return y("artifact_durable_subscribe",`refresh_${l}`),n(`[artifact] restored durable watch not refreshed: reason=${l}`),dt(H().get(e)??s)}return Ye(e,t,r)})}function Ar(e){switch(e.outcome){case"subscribed":if(e.downgraded){y("artifact_durable_subscribe","comment_events_unsupported",...he(e));break}b("artifact_durable_subscribe",...he(e));break;case"already_watching":b("artifact_durable_subscribe",{already_watching:!0,...e.restored&&{restored:!0}});break;case"skipped":y("artifact_durable_subscribe",e.reason);break;case"failed":{let t=Sr(e),[r]=he(e),s={...e.status!==void 0&&{status:e.status},...e.gatewayDeclined!==void 0&&{gateway_declined:e.gatewayDeclined},...r},o=Object.keys(s).length>0?[s]:[];if(t!==void 0)y("artifact_durable_subscribe",t,...o);else f("
+
+## "draftForDisk" hits=5
+- @92715168 d.........T.setQueryAndCursor...	...^p..dropDraft...........draftForDisk....(;>.beginProgrammaticChange......#5.takeProgrammaticChange..........setSessionModel.....1..setReplyError.......PH..setExpandHintPasteId.......replacePastes...........mergeRestoredPastes....+...mintTextPaste...........registerLivePeekQuery...
+.......replyDraft..
+- @192151026 de("prompt"),this.pruneOrphanedPastes({pruneTextPastes:!0})}draftForDisk(){let{query:i,mode:d}=this.#e;return d==="bash"?`!${i}`:i}beginProgrammaticChange(){this.#i=!0}takeProgrammaticChange(){let i=this.#i;return this.#i=!1,i}setSessionModel(i){this.#l({sessionModel:i})}setError=(i)=>{this.#l({error:i})};setHint=(i)=>{this.#l({hint:i})};
+- @192242106 !==ro||$d[1]!==No||$d[2]!==Ho||$d[3]!==Io)ry=()=>{let sy=No.draftForDisk();let ay=[...Ho.getSnapshot().collapsed];sy||ay.length?X2e(ro,{q:sy,collapsed:ay},Io):KJt(ro,Io)},$d[0]=ro,$d[1]=No,$d[2]=Ho,$d[3]=Io,$d[4]=ry;else ry=$d[4];let ly;if($d[5]!==ro||$d[6]!==Qm||$d[7]!==zm||$d[8]!==qm||$d[9]!==Io)ly=[qm,zm,Qm,ro,Io],$d[5]=ro,$d[6]=Qm,$d[
+- @192242569 |$d[14]!==Io)uy=()=>D()&&Io!==void 0?Vk(async()=>{let py=No.draftForDisk();let my=[...Ho.getSnapshot().collapsed];dy.current=py||my.length?await AIt(ro,{q:py,collapsed:my},Io):!0}):void 0,cy=[ro,No,Ho,Io],$d[11]=ro,$d[12]=No,$d[13]=Ho,$d[14]=Io,$d[15]=uy,$d[16]=cy;else uy=$d[15],cy=$d[16];k(uy,cy);let gy,hy;if($d[17]!==ro||$d[18]!==No||$d
+- @192242906 |$d[19]!==Ho)gy=()=>QP(()=>{if(dy.current){return}let by=No.draftForDisk();let wy=[...Ho.getSnapshot().collapsed];if(by||wy.length)qJt(ro,{q:by,collapsed:wy})}),hy=[ro,No,Ho],$d[17]=ro,$d[18]=No,$d[19]=Ho,$d[20]=gy,$d[21]=hy;else gy=$d[20],hy=$d[21];k(gy,hy)}var zd={pending:null};class Xm{#n=$e();#e=zd;#a=0;#t=0;#i=new Set;#r;constructor(
+
+## "function qd(" hits=12
+- @181280352 , warn and error methods")}var Od=/^[a-z_$][a-z0-9_$:-]*$/i;function qd(e,t){let{RULES:r}=this;if((0,lr.eachItem)(e,(s)=>{if(r.keywords[s])throw Error(`Keyword ${s} is already defined`);if(!Od.test(s))throw Error(`Keyword ${s} has invalid name`)}),!t)return;if(t.$data&&!(("code"in t)||("validate"in t)))throw Error('$data keyword must have
+- @182295246 typeof t=="string")t=Gi.protoInt64.uParse(t);break}return t}function qd(e,t){switch(e.scalar){case _n.ScalarType.INT64:case _n.ScalarType.SFIXED64:case _n.ScalarType.SINT64:if("longAsString"in e&&e.longAsString)t=String(t);else if(typeof t=="string"||typeof t=="number")t=Gi.protoInt64.parse(t);break;case _n.ScalarType.FIXED64:case _n.Scal
+- @188421364 ,e.C_NUMBER_MODE]}}Pa.exports=Vd});var Ua=d(function(cg,ka){function qd(e){let s={keyword:["break","case","chan","const","continue","default","defer","else","fallthrough","for","func","go","goto","if","import","interface","map","package","range","return","select","struct","switch","type","var"],type:["bool","byte","complex64","complex128"
+- @189258292 (i,l,s,f){l.child=i===null?Um(l,null,s,f):va(l,i.child,s,f)}function qd(i,l,s,f,y){s=s.render;var v=l.ref;if("ref"in f){var M={};for(var U in f)U!=="ref"&&(M[U]=f[U])}else M=f;if(de(l),f=Ha(i,l,s,M,v,y),U=Ba(),i!==null&&!zt)return Fi(i,l,y),ji(i,l,y);return Xe&&U&&ke(l),l.flags|=1,qt(i,l,f,y),l.child}function Qd(i,l,s,f,y){if(i===null){va
+- @191331364 d(){return iae()||!eZ(oe().workflowSizeGuideline).isDefault}function qd(){let d=kv.bindings??OGn();return ale(wd(d),"Chat",d)}async function Z3t(d){if(!Kt())return!0;let{filterCommandsForRemoteMode:C,getBuiltinCommands:w}=await import("B:/~BUN/root/chunk-f3m0fx0a.js");return C(w()).some((F)=>F.name===d||F.aliases?.includes(d))}var Xd=[{id
+- @192241903 ]=Wd,gr[37]=Ud,gr[38]=Kd,gr[39]=ny;else ny=gr[39];return ny}function qd(FP){let $d=g(22),{editor:No,selection:Ho,query:qm,dispatchMode:zm,collapsed:Qm,canonicalLauncherCwd:ro,storageV5:Io}=FP,ry;if($d[0]!==ro||$d[1]!==No||$d[2]!==Ho||$d[3]!==Io)ry=()=>{let sy=No.draftForDisk();let ay=[...Ho.getSnapshot().collapsed];sy||ay.length?X2e(ro,{q
+
+## "canonicalLauncherCwd" hits=9
+- @92722856 ...%...searchKeyDown.......wM..willInsertNewline........=r.canonicalLauncherCwd.....aU.launcherCwd.	.......cwdFilter........3..allRepos...f...templateCache.......*.&.modelSuggestions....K'..pickSuggestion......G...applySuggestion.....Q.d.closeAgentBrowse.....9.jobSessionIds...	...q...builtRows.......Z-..bumpSuggGen.....+...mountAt.....
+- @192159048 t:T,relaunchForUpdate:P,searchKeyDown:V,willInsertNewline:K,canonicalLauncherCwd:W,launcherCwd:Y,effectiveCwd:Z,scopedFallbackOrigin:ee,cwdFilter:X,dispatchDefaults:Q,query:le,dispatch:ye,templates:xe,allRepos:me,routines:be,templateCache:Te,suggestions:ge,skills:de,modelArgMatch:re,modelSuggestions:He,pickSuggestion:tt,applySuggestion:Ge
+- @192185161 ,roster:S,selection:h,view:C,attach:x,storageV5:A,mountAt:F,canonicalLauncherCwd:T}=i,P=w.setError;if(x.getSnapshot().attachingJobId!==null||x.isPromoting(d.sessionId))return;let V=C.resumePromoteSessionId;if(V!==null&&d.sessionId!==V&&x.isPromoting(V))return;x.beginPromote(d.sessionId),C.closeResumePicker(),s("tengu_fleetview_earlier_ope
+- @192194018 mpleView:Ya,dispatchDefaults:fp,targetCwd:fs,launcherCwd:mp,canonicalLauncherCwd:gp,originJobId:hp}=j_,{columns:Jr}=we(),Qa=Ze(q_,Bb),{compactHeader:Br,simpleBuilt:Eo,bandCounts:ms,earlierVisible:bp}=z_,Nr,vn,Mb,gs;if(kn[0]!==gp||kn[1]!==Jr||kn[2]!==fp?.model||kn[3]!==mp||kn[4]!==Qa||kn[5]!==fs){let{version:Hr,cwd:Lb}=Lke();gs=Hr;vn=Qa?`$
+- @192241994 ditor:No,selection:Ho,query:qm,dispatchMode:zm,collapsed:Qm,canonicalLauncherCwd:ro,storageV5:Io}=FP,ry;if($d[0]!==ro||$d[1]!==No||$d[2]!==Ho||$d[3]!==Io)ry=()=>{let sy=No.draftForDisk();let ay=[...Ho.getSnapshot().collapsed];sy||ay.length?X2e(ro,{q:sy,collapsed:ay},Io):KJt(ro,Io)},$d[0]=ro,$d[1]=No,$d[2]=Ho,$d[3]=Io,$d[4]=ry;else ry=$d[4
+- @192271204 ditor:Ne,selection:re,query:Xe,dispatchMode:Mt,collapsed:Ge,canonicalLauncherCwd:At,storageV5:T}),rVt(De,{clock:P,groupsEnabled:Me});let lu=()=>Dr(yt,Ne),Ws=G(Tc,[]),{query:Sg,queryRef:kg,setQuery:du,cursorOffset:vg,handleKeyDown:_g,handlePaste:Eg}=Zu({isActive:ct!==null,honorEditorMode:!0,backspaceExitsOnEmpty:!1,onExit:()=>ig(ia()),onCa
+
+## "AIt(ro,{q:" hits=1
+- @192242654 .Ho.getSnapshot().collapsed];dy.current=py||my.length?await AIt(ro,{q:py,collapsed:my},Io):!0}):void 0,cy=[ro,No,Ho,Io],$d[11]=ro,$d[12]=No,$d[13]=Ho,$d[14]=Io,$d[15]=uy,$d[16]=cy;else uy=$d[15],cy=$d[16];k(uy,cy);let gy,hy;if($d[17]!==ro||$d[18]!==No||$d[19]!==Ho)gy=()=>QP(()=>{if(dy.current){return}let by=No.draftForDisk();let wy=[...Ho
+
+## "flushBeforeExit" hits=3
+- @94558692 writerFor........bm.writers........pendingWrites........'i.flushBeforeExit.....~...mcpLogs.....T2..url=....?.e.status=.......Y.body=........'..isAxiosError....2[..Error log sink initialized......Xd).logMCPError.........logMCPDebug.....{..getErrorsPath...........getMCPLogsPath..
+.....z.appendFile......*#-.clearForTest.....BH.Dropping log
+- @192334892 =>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pending
+- @192335011 riters.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pendingWrites.clearForTest()}}async function u(e,r,t){let i=ce();try{await i.appendFile(r,t)}catch{await i.mkdir(e).catch(l),a
+
+## "pendingWrites.settle" hits=3
+- @192334859 ,this.writers.set(e,r),Et(async()=>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),
+- @192334988 h(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pendingWrites.clearForTest()}}async function u(e,r,t){let i=ce();try{await i.appendFile(r,t)}catch{awai
+- @192335116 ){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pendingWrites.clearForTest()}}async function u(e,r,t){let i=ce();try{await i.appendFile(r,t)}catch{await i.mkdir(e).catch(l),await i.appendFile(r,t)}}function p(e,r,t){return}function m(e){if(typeof e==="string")return e;if(e&&type
+
+## flushBeforeExit-2k @192334884
+ray(c),o-=c,h+=c;if(n[t].length>0||n.length-t===1)break;t++}}if(t>=n.length-t)l()}}}function ye(r,n,t){if(!r)return;let o=process.hrtime.bigint(),l;try{l=ie(r,{flags:"w"})}catch{return}l.on("error",()=>{l?.destroy(),l=void 0});let u=Buffer.allocUnsafe(8);return u.writeUInt32BE(n,0),u.writeUInt32BE(t,4),l.write(u),{write(h){if(!l)return;let m=Buffer.allocUnsafe(8+h.length),c=Number((process.hrtime.bigint()-o)/1000n);m.writeUInt32BE(c>>>0,0),m.writeUInt32BE(h.length,4),h.copy(m,8),l.write(m)},close(){l?.end()}}}async function X(r,n){try{let t=og(r);await ce(Q(t),{recursive:!0}),await se(t,`${new Date().toISOString()} ${n}
+`)}catch{}}function _(r,n){if(r)try{let t=og(r);oe(Q(t),{recursive:!0}),re(t,`${new Date().toISOString()} ${n}
+`)}catch{}process.exit(1)}export{me as applyKillCtrl,he as createRing,pe as holdForLateConnect,He as runPtyHost};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{nt}from"B:/~BUN/root/chunk-2w19r5j8.js";import{V}from"B:/~BUN/root/chunk-2q4zpwx4.js";import{ivt,Et,Vk,S,ce,n}from"B:/~BUN/root/chunk-21hv5ssy.js";import{YSt,Zue,eGt,Bvn}from"B:/~BUN/root/chunk-t9vggba1.js";import{sZ}from"B:/~BUN/root/chunk-d4ydbwdj.js";import{g3n}from"B:/~BUN/root/chunk-96xk7m08.js";import{fm}from"B:/~BUN/root/chunk-n9yzjvwe.js";import{dirname as f,join as g}from"path";var a=eGt(new Date);function kIn(){return g(Zue.errors(),a+".jsonl")}function b8t(e){return g(Zue.mcpLogs(e),a+".jsonl")}function c(e){let r=ivt(e);return{write(t){r.write(S(t)+`
+`)},flush:r.flush,dispose:r.dispose}}function l(){}class TIn{writers=new Map;pendingWrites=fm();writerFor(e){let r=this.writers.get(e);if(!r){let t=f(e),i=!1;r=c({writeFn:(o)=>{this.pendingWrites.run(e,async()=>{try{await u(t,e,o)}catch(s){if(!i)i=!0,n(`Dropping log batch for ${e}: ${s instanceof Error?s.message:String(s)}`)}})},flushIntervalMs:1000,maxBufferSize:50}),this.writers.set(e,r),Et(async()=>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pendingWrites.clearForTest()}}async function u(e,r,t){let i=ce();try{await i.appendFile(r,t)}catch{await i.mkdir(e).catch(l),await i.appendFile(r,t)}}function p(e,r,t){return}function m(e){if(typeof e==="string")return e;if(e&&typeof e==="object"){let r=e;if(typeof r.message==="string")return r.message;if(typeof r.error==="object"&&r.error&&"message"in r.error&&typeof r.error.message==="string")return r.error.message}return}function d(e,r){g3n(r),sZ(r);let t=r.stack||r.message,i="";if(nt.isAxiosError(r)&&r.config?.url){let o=[`url=${r.config.url}`];if(r.response?.status!==void 0)o.push(`status=${r.response.statu
+
+## class hunt before flushBeforeExit idx=4596
+- class @192334480 class TIn{writers=new Map;pendingWrites=fm();writerFor(e){let r=this.writers.get(e);if(!r){let t=f(e),i=!1;r=c({writeFn:
+
+## "this.writers.set(e,r)" hits=1
+- @192334800 ge:String(s)}`)}})},flushIntervalMs:1000,maxBufferSize:50}),this.writers.set(e,r),Et(async()=>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writ
+
+## "this.flushBeforeExit" hits=1
+- @192334887 ync()=>{r?.dispose(),await this.pendingWrites.settle()}),Vk(this.flushBeforeExit)}return r}async flush(){for(let e of this.writers.values())e.flush();await this.pendingWrites.settle()}flushBeforeExit=()=>this.flush();async reset(){for(let e of this.writers.values())e.dispose();await this.pendingWrites.settle(),this.writers.clear(),this.pe
+
+## "function Aye(" hits=2
+- @186242691 esponse}return{elicitationResponse:N,blockingError:U}}async function Aye({session:e,serverName:t,action:r,content:o,permissionMode:u,signal:p,timeoutMs:g=Pi,mode:k,elicitationId:E}){let C={...Aa(e,te(),u),hook_event_name:"ElicitationResult",mcp_server_name:t,elicitation_id:E,mode:k,action:r,content:o},M=await Mw({session:e,hookInput:C,mat
+- @203114499 ncel("local"),[H,Z].filter(Boolean).join(`
+
+`)||void 0}}N();function Aye(d){let C=pn(),{storageV5:x}=fe();k(()=>{if(On())return;let H=Go(),X=j6e();if(H.lastGracefulShutdown!==!1||H.lastVersionBase!==X)cc((me)=>({...me,lastGracefulShutdown:!1,lastVersionBase:X}),x);let Z=!1,ee=D()&&x!==void 0?Vk(async()=>{await ZFn(d?.(),x),Z=!0}):void 0;l
+
+## "async function ZFn(" hits=1
+- @184601210 !0}function Jhe(e,t){let r=Atn();if(r)sEn(r,t);cc(zfe(e),t)}async function ZFn(e,t){await cc(zfe(e),t)}function eUn(e){vMe(zfe(e))}function zfe(e){let t={lastCost:al(),lastAPIDuration:vh(),lastAPIDurationWithoutRetries:vGt(),lastToolDuration:wGt(),lastDuration:T2(),lastStartTime:bEe(),lastLinesAdded:Oq(),lastLinesRemoved:Lq(),lastTotalInp
+
+## "function eUn(" hits=1
+- @184601253 ,t);cc(zfe(e),t)}async function ZFn(e,t){await cc(zfe(e),t)}function eUn(e){vMe(zfe(e))}function zfe(e){let t={lastCost:al(),lastAPIDuration:vh(),lastAPIDurationWithoutRetries:vGt(),lastToolDuration:wGt(),lastDuration:T2(),lastStartTime:bEe(),lastLinesAdded:Oq(),lastLinesRemoved:Lq(),lastTotalInputTokens:SEe(),lastTotalOutputTokens:Zc(),l
+
+## "lastGracefulShutdown" hits=5
+- @92552940 on extra usage billing).....
+(..needs_payment_setup.......x.lastGracefulShutdown....(m..lastVersionBase......R..Background agent "......[6d." was stopped by the user...-....... background agents were stopped by the user: ...........enqueuePendingNotification..........suppressBackgroundAgentKill.....(...pressLandedOnWork...
+.....|.message_
+- @184601699 ),lastFpsAverage:e?.averageFps,lastFpsLow1Pct:e?.low1PctFps,lastGracefulShutdown:ys(),lastVersionBase:j6e(),lastModelUsage:Ji(Gm(),(r)=>({inputTokens:r.inputTokens,outputTokens:r.outputTokens,cacheReadInputTokens:r.cacheReadInputTokens,cacheCreationInputTokens:r.cacheCreationInputTokens,webSearchRequests:r.webSearchRequests,costUSD:r.cost
+- @203114591 ageV5:x}=fe();k(()=>{if(On())return;let H=Go(),X=j6e();if(H.lastGracefulShutdown!==!1||H.lastVersionBase!==X)cc((me)=>({...me,lastGracefulShutdown:!1,lastVersionBase:X}),x);let Z=!1,ee=D()&&x!==void 0?Vk(async()=>{await ZFn(d?.(),x),Z=!0}):void 0;lEn(),zQ(Atn);let re=()=>{if(_Nt()){let me=C?"Cost: ":"";process.stdout.write(`
+`+me+T3()+`
+`
+- @203114657 acefulShutdown!==!1||H.lastVersionBase!==X)cc((me)=>({...me,lastGracefulShutdown:!1,lastVersionBase:X}),x);let Z=!1,ee=D()&&x!==void 0?Vk(async()=>{await ZFn(d?.(),x),Z=!0}):void 0;lEn(),zQ(Atn);let re=()=>{if(_Nt()){let me=C?"Cost: ":"";process.stdout.write(`
+`+me+T3()+`
+`)}if(!Z)eUn(d?.())};return process.on("exit",re),()=>{if(ee?.(),ys
+- @204230727 low_1_pct:d.lastFpsLow1Pct,last_session_graceful_shutdown:d.lastGracefulShutdown??!1,last_session_version_base:d.lastVersionBase??"unknown",last_session_id:ke(d.lastSessionId),...d.lastSessionMetrics})}function Yt(e){return!1}function Kt(e){return!1}function pe({isNonInteractiveSession:e,isRemoteMode:o,isBareMode:r,exitAfterFirstRender:p,
+
+## "function Jhe(" hits=1
+- @184601153 ).default})),hasUnknownModelCost:t.hasUnknownModelCost}),!0}function Jhe(e,t){let r=Atn();if(r)sEn(r,t);cc(zfe(e),t)}async function ZFn(e,t){await cc(zfe(e),t)}function eUn(e){vMe(zfe(e))}function zfe(e){let t={lastCost:al(),lastAPIDuration:vh(),lastAPIDurationWithoutRetries:vGt(),lastToolDuration:wGt(),lastDuration:T2(),lastStartTime:bEe
+
+## fn Aye @186242691
+len=482 sha=1c58ca993980605f
+function Aye({session:e,serverName:t,action:r,content:o,permissionMode:u,signal:p,timeoutMs:g=Pi,mode:k,elicitationId:E}){let C={...Aa(e,te(),u),hook_event_name:"ElicitationResult",mcp_server_name:t,elicitation_id:E,mode:k,action:r,content:o},M=await Mw({session:e,hookInput:C,matchQuery:t,signal:p,timeoutMs:g}),L,N;for(let U of M){let j=din(U,"ElicitationResult");if(j.blockingError)N=j.blockingError;if(j.response)L=j.response}return{elicitationResultResponse:L,blockingError:N}}
+
+## fn Aye @203114499
+len=486 sha=a780b2003584e4d3
+function Aye(d){let C=pn(),{storageV5:x}=fe();k(()=>{if(On())return;let H=Go(),X=j6e();if(H.lastGracefulShutdown!==!1||H.lastVersionBase!==X)cc((me)=>({...me,lastGracefulShutdown:!1,lastVersionBase:X}),x);let Z=!1,ee=D()&&x!==void 0?Vk(async()=>{await ZFn(d?.(),x),Z=!0}):void 0;lEn(),zQ(Atn);let re=()=>{if(_Nt()){let me=C?"Cost: ":"";process.stdout.write(`
+`+me+T3()+`
+`)}if(!Z)eUn(d?.())};return process.on("exit",re),()=>{if(ee?.(),ys())Jhe(d?.(),x);process.off("exit",re)}},[C,x])}
+
+## fn ZFn @184601210
+len=43 sha=3218a96367940b6a
+async function ZFn(e,t){await cc(zfe(e),t)}
+
+## fn eUn @184601253
+len=28 sha=63006e3a83e3e9c6
+function eUn(e){vMe(zfe(e))}

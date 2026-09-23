@@ -1,0 +1,4 @@
+# gold-248-na-41-dXe  pollerNotModifiedStreak + bump emit reset (247=0)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;lastPersistedCacheBody="";directStateForBranch(e){if(this.directState?.branch!==e)this.directState={branch:e,etag:null,pr:null,reviewDecision:"",lastReviewFetchAt:0,redirectedListUrl:null};return this.directState}logAuthState(e){if(e===this.lastLoggedGhAuthState)return;this.lastLoggedGhAuthState=e,s("tengu_gh_pr_status_auth_state",{auth_state:c(e)})}rememberBaseRepo(e){return this.baseRepoCache=e,e}backOffUntil(e){this.ghBackoffUnt

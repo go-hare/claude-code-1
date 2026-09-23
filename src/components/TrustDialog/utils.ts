@@ -11,7 +11,7 @@ import {
 import { getProjectMcpServerStatusStrict } from '../../services/mcp/utils.js'
 import { getCwd } from '../../utils/cwd.js'
 import { getGlobalClaudeFile } from '../../utils/env.js'
-import { SAFE_ENV_VARS } from '../../utils/managedEnvConstants.js'
+import { isSafeManagedEnv } from '../../utils/managedEnvConstants.js'
 import { getPermissionRulesForSource } from '../../utils/permissions/permissionsLoader.js'
 import { isSourceAllowedByPolicy } from '../../utils/plugins/marketplaceHelpers.js'
 import { lookupTrustedMarketplaceAuth } from '../../utils/plugins/marketplaceHeadersHelper.js'
@@ -200,20 +200,21 @@ export function getGcpCommandsSources(): string[] {
 
 /**
  * Check if settings have dangerous environment variables configured.
- * Any env var NOT in SAFE_ENV_VARS is considered dangerous.
+ * Safe when isSafeManagedEnv (LEh, truthy MEh, or non-sensitive custom headers).
  */
 function hasDangerousEnvVars(settings: SettingsJson | null): boolean {
   if (!settings?.env) {
     return false
   }
-  return Object.keys(settings.env).some(
-    key => !SAFE_ENV_VARS.has(key.toUpperCase()),
-  )
+  return Object.entries(settings.env).some(([key, value]) => {
+    if (value === undefined) return false
+    return !isSafeManagedEnv(key, String(value))
+  })
 }
 
 /**
  * Get which setting sources have dangerous environment variables configured.
- * Returns an array of file paths that have env vars not in SAFE_ENV_VARS.
+ * Returns an array of file paths that have env vars needing approval.
  */
 export function getDangerousEnvVarsSources(): string[] {
   const sources: string[] = []

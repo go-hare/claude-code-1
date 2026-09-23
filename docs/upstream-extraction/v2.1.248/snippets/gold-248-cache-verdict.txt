@@ -1,0 +1,49 @@
+# gold-248-cache-verdict  densable 2.1.248
+# peel #8 #9 #11 #13 #22 #23 #24 #25 #26 #37 #38 #42 #44 #48 #49
+# SEA 226708128 · 247 SEA 253204128 present · changelog=index
+# NEVER HAVE — no checklist/board edit
+# peels: _peel-248-cache-{1,2,3,4}.mjs → gold-248-cache-{1,2,3,4}.txt
+# helpers: asciiSlice / allHits / extractFnAt from v2.1.247/snippets/_peel-1-ye-Ht-Jt-DE.mjs
+
+## Compact
+
+| # | key | 248-new SEA (hits248/hits247) | leftover vs missing (file:line) | bucket |
+| - | --- | ----------------------------- | -------------------------------- | ------ |
+| 8 | oauth-refresh-tool-cache | changelog literals 0. toolsHash/toolSchemasChanged/overageChanged/is1hCacheTTL **5=5**. No OAuth-refresh re-render body. | leftover-looking: `src/services/api/promptCacheBreakDetection.ts:43,49,108,115` toolsHash / per-tool schema / overage flip. Missing: hourly OAuth-refresh tool re-render. | UNKNOWN |
+| 9 | wakeup-resume-cache | `usage overage` **2=2** in ScheduleWakeup prompt k5n. `function k5n(` 1/0 (minify). ScheduleWakeup 16/14. | leftover-looking: `src/tools.ts:51-54`, `src/utils/loopDynamic.ts:80` (noop schema). Missing: --resume overage def-stability. | UNKNOWN |
+| 11 | refresh-lock-retry | **248-new** `OAuthRefreshLockTimeoutError` 2/0; `Could not refresh your login because another Claude Code process` 2/0; `Failed to refresh OAuth token: another…` 2/0; retry copy not `/login`. class Zye @180967566. MCP lock `skipping refresh` **10=10**. | leftover-looking: `src/utils/accountOnHold.ts:134-141` DeadError only (LockTimeout **missing**). MCP: `src/services/mcp/auth.ts:2405-2442` local `proceeding without lock` ≠ SEA skip. `src/services/api/client.ts:754-763` throws DeadError → login. | leftover-looking |
+| 13 | login-console-fallback | **248-new** `Keyless Console sign-in unavailable here, continuing with the API-key sign-in` 2/0. catch `fallbackCures` then `startOAuthFlow` @199068144. kxt() env/helper shadow @193501380 (profile path). | leftover-looking: `src/utils/auth.ts:242,350,356` skipRetrievingKeyFromApiKeyHelper. Missing: Keyless string, `fallbackCures`. | leftover-looking |
+| 22 | hook-invalid-json | **248-new** `lIe` @186254433 sha=b5614ce00cf5c225. `{` + invalid JSON → `validationError` + parse msg (`Hook output looks like a JSON object but is not valid JSON`). 247 `Failed to parse hook output as JSON` 2→0. | leftover-looking: `src/utils/hooks.ts:418-469` parseHookOutput. `{` catch `467-468` returns `{plainText}` **no** validationError. | leftover-looking |
+| 23 | mcp-fake-claude-ai | no 248-new heading/`real scope` string. `Manage MCP servers` **4=4**. | leftover-looking: `src/components/mcp/MCPListPanel.tsx:88-94,265-272` `type==='claudeai-proxy'` forced under bold `claude.ai` (project `.mcp.json` same bucket). Missing: scope heading for fake connector. | leftover-looking |
+| 24 | headershelper-401 | `re-running headersHelper` **3=3**. 401 window @207115285 (`ye` helper vs oauth refresh). headersHelper 186/181. | leftover-looking: `src/services/mcp/client.ts:2741-2792`, `src/services/mcp/authReconnect.ts:33-49`. 248 Authorization-already-set vs OAuth-discovery split **not** isolated. | leftover-looking |
+| 25 | login-gateway-hang | `Claude apps gateway` hits are changelog embed `lVt()`. `[gateway-login]` **8=8**. `deferred_no_consent_surface` 11/10. No hang-fix string. | leftover-looking: `src/utils/gatewayLogin.ts:128`, `src/components/GatewayConnect.tsx:309`, `src/services/remoteManagedSettings/securityCheck.tsx:51-95` unanswered dialog throws. Missing: gateway+/login skip-or-defer approval. | UNKNOWN |
+| 26 | gateway-discovery-helper | **248-new** `su()` @180224462 sha=7e88b956741cffee; `c9n()` @180225763 sha=9ee3edae130850e4. apiKeyHelper **is** a credential; skip only `apiKeyHelper requires workspace trust`. | leftover-looking: `src/utils/residualMoreEnvGates.ts:59-81` $5l gate only; comment says q5l download denser. Missing: helper-as-cred fetch. | leftover-looking |
+| 37 | crossSessionInbound | **248-new** `invalidSetting` 3/0. resolver @196196061: warning `N()` → `e="hold",o="invalidSetting"`. sne/Qje copy. `N()` @196196105 sha=8852096933c85ace. | leftover-looking: `src/utils/settings/settings.ts:1459-1490` skips non-enum **silently**. `src/utils/crossSessionInbound.ts:24-30` holdCause **no** invalid-setting. `src/utils/peerInboundHoldUi.ts:145-160` switch incomplete. `src/utils/settings/types.ts:681` enum optional. | leftover-looking |
+| 38 | usage-credits-hint-gate | **248-new** `v_()` @180726877: `DISABLE_EXTRA_USAGE_COMMAND` → false. `Nde()` @184100558 sha=c8ad9d2a1a2d348e gates ask-hint. `run /usage-credits to ask` **2/6** (fewer). | leftover-looking: `src/commands/extra-usage/index.ts:6-11` hides command. `src/services/rateLimitMessages.ts:220-221` hardcodes `/usage-credits` (no `v_`). `src/utils/managedEnvConstants.ts:360` env listed. | leftover-looking |
+| 42 | managed-env-no-approval | **248-new** LEh set @179035200 adds `MCP_CONNECTION_NONBLOCKING`, `CLAUDE_ENABLE_BYTE_WATCHDOG`, `CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK`, `CLAUDE_ENABLE_STREAM_WATCHDOG` (quoted STREAM 1/0). `API_TIMEOUT_MS` / `CLAUDE_STREAM_IDLE_TIMEOUT_MS` **11=11 / 5=5**. No `startup-mode` literal. | leftover-looking: `src/utils/managedEnvConstants.ts:202,377,390` has timeout/idle; **missing** STREAM_WATCHDOG + MCP_CONNECTION_NONBLOCKING + BYTE_WATCHDOG. | leftover-looking |
+| 44 | xsession-tmp-fallback | `per-user /tmp` 0. `socket directory` 11/8. `/status` notice `wZe` @201218895 names `lastStartFailureDetail`. `UDS` hint **2=2**. | leftover-looking: `src/utils/udsMessaging.ts:147-148,271-282` XDG / TMPDIR / tmpdir. Missing: /status names fallback dir (248-new copy). | leftover-looking |
+| 48 | linux-userns-trust | **248-new** `/proc/sys/kernel/overflowuid` 2/0; uid_map parse + `y=65534` @182939595; `C()`/`P()` @182940121. `without a uid mapping` 2/0 is **daemon socket** (`tsn` @182943107) — not this bullet. `root-equivalent` 0. Do not steal `F1t(e)` @183796022 (materializeLinks). | leftover-looking: daemon userns only if confused with `tsn`. Missing: overflowuid + canonical-dir trust. | leftover-looking |
+| 49 | sendmessage-parent-reply | **248-new** `Pe()` @196262799 sha=ceb9246a40b27ef7: subagent send under parent address; reply to parent conversation, not you. 1/0. | leftover-looking: `packages/builtin-tools/src/tools/SendMessageTool/prompt.ts:11-36` 239 Cross-session block **missing** that sentence (gap after line 32). | leftover-looking |
+
+## Notes
+
+- 247 vs 248 hit counts are the only “new” test. Changelog words (`lost thinking`, `re-rendered` tools, `per-user /tmp`, `root-equivalent`) are **absent**.
+- MCP refresh lock (`mcp-refresh-`, skip) is **not** #11. #11 is first-party `OAuthRefreshLockTimeoutError` + retryable copy.
+- #37 managed **refuse** is not a separate extracted invalid-managed arm; SEA forces **hold** when `N()` warning and policy < hold. Do not invent refuse-from-invalid.
+- #42 “MCP startup-mode” has no `startup-mode` needle; nearest 248-new LEh key is `MCP_CONNECTION_NONBLOCKING`.
+- #48 daemon `without a uid mapping` ≠ overflowuid trust. Keep them apart.
+
+## Extracted bodies (sha)
+
+| item | fn | off | sha | len |
+| ---- | -- | --- | --- | --- |
+| #13 | kxt | 193501380 | 0c86012344382869 | 3355 |
+| #22 | lIe | 186254433 | b5614ce00cf5c225 | 833 |
+| #26 | su | 180224462 | 7e88b956741cffee | 164 |
+| #26 | c9n | 180225763 | 9ee3edae130850e4 | 3231 |
+| #37 | sne | 202504085 | b0c1910677b8a7c6 | 940 |
+| #37 | Qje | 202716145 | 26618e9fe671cbf0 | 1258 |
+| #37 | N | 196196105 | 8852096933c85ace | 95 |
+| #38 | Nde | 184100558 | c8ad9d2a1a2d348e | 133 |
+| #48 | P | 182940157 | f0e48cdda0d992f1 | 112 |
+| #49 | Pe | 196262799 | ceb9246a40b27ef7 | 4341 |

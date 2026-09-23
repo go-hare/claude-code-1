@@ -1,0 +1,159 @@
+--- needles ---
+"class gEt" hits=1 186762671
+"function gEt" hits=1 179889803
+"gEt=" hits=0 
+"class Ln" hits=1 179027862
+"function Ln" hits=32 178704990,178919810,179435203,179562660,180096040,180447261,181139723,181436542,181532635,181867984
+"hookRegistrationInFlight" hits=9 96464084,181784927,186757488,186757808,186757839,186757942,186758203,186758331,186758406
+"var Jt=" hits=18 178916623,179005418,179437668,179741721,182702384,188824762,189573135,192345885,197949450,199712718
+"Jt=new Ln" hits=0 
+"function Jt()" hits=4 180204504,181786426,197647112,202286026
+"limitsObserved" hits=6 96094840,184976356,184976928,184977230,184977322,184985306
+"rawUtilization" hits=23 96094708,184976228,184977068,184977348,184977420,184977457,184977529,184977566,184977672,184978740
+
+## z_* @187242129 miss=false len=261 sha=c69b633a8407c3ce cap=2000
+HEAD urn e!=="SessionEnd"&&xo()&&!t?.aborted}async function*z_(e){let t=()=>xo()&&!e.signal?.aborted;if(!
+FULL
+async function*z_(e){let t=()=>xo()&&!e.signal?.aborted;if(!W6n.has(e.hookInput.hook_event_name)){if(t())return;yield*Xxt(e);return}if(t())await dm();try{for await(let r of Xxt(e)){if(t())await dm();yield r}}catch(r){if(t())await dm();throw r}if(t())await dm()}
+
+--- z_ neighborhood ---
+romptSubmit","UserPromptExpansion","TaskCompleted","TeammateIdle"]);function Yxt(e,t){return e!=="SessionEnd"&&xo()&&!t?.aborted}async function*z_(e){let t=()=>xo()&&!e.signal?.aborted;if(!W6n.has(e.h
+
+--- before yEt ---
+var fEt=new Ln(()=>new mEt);function hBn(e,t,r){fEt.of(e).next={source:t,requestedModel:r}}function ng(e,t,r,o){if(ET(t)!==Hqe(r,t.toolPermissionContext.mode))hBn(e,o,r)}function sqn(e){let t=fEt.of(e),r=t.next??{source:"auto",requestedModel:null};return t.next=void 0,r}class gEt{pending=[];landedOn=null;inFlight=new Set}var yEt=new Ln(()=>new gEt)
+class gEt [ 186762671 ]
+function gEt [ 179889803 ]
+gEt{ [ 186762677 ]
+class gEt{ [ 186762671 ]
+gEt decl 186762671 class gEt{pending=[];landedOn=null;inFlight=new Set}
+
+class Ln @ 179027862 class Ln{#e;#t=new WeakMap;constructor(e){this.#e=e}peek(e){return this.#t.get(e.root)}of(e){let t=e.root,o=this.#t.get(t);if(o!==void 0)return o;let r=this.#e();return this.#t.set(t,r),r}drop(e){this
+hookReg @ 96464084 dules not loaded: rollout flag (
+...Wi..) is off, .......MU.hookRegistrationInFlight........hookRegistrationFailed........_.hookRegistration lastFn {
+  i: -1,
+  name: "",
+}
+hookReg @ 181784927 utputStyles:void 0,workflows:void 0,hookRegistration:void 0,hookRegistrationInFlight:void 0,hookRegistrationFailed:!1,hookRegistrationRetrie lastFn {
+  i: 181784689,
+  name: "se",
+}
+hookReg @ 186757488 0;throw u=!0,A.error}})(),o){let A=r.hookRegistration;k=A,r.hookRegistrationInFlight=A,r.hookRegistrationArgs={storageV5:e,credentials:t},r. lastFn {
+  i: 186754428,
+  name: "fY",
+}
+hookReg @ 186757808 nFailed=!0};A.then(()=>x(y),()=>x(!u||y)).finally(()=>{if(r.hookRegistrationInFlight===A)r.hookRegistrationInFlight=void 0})}await r.hookReg lastFn {
+  i: 186754428,
+  name: "fY",
+}
+hookReg @ 186757839 >x(!u||y)).finally(()=>{if(r.hookRegistrationInFlight===A)r.hookRegistrationInFlight=void 0})}await r.hookRegistration}async function Lsn(e) lastFn {
+  i: 186754428,
+  name: "fY",
+}
+hookReg @ 186757942 ookRegistration}async function Lsn(e){let t=Jt();if(await t.hookRegistrationInFlight?.catch(()=>{}),!t.hookRegistrationFailed)return!1;if(e& lastFn {
+  i: 186757898,
+  name: "Lsn",
+}
+hookReg @ 186758203 await fY(r?.storageV5,r?.credentials).catch(()=>{}),await t.hookRegistrationInFlight?.catch(()=>{}),t.hookRegistrationRetried=!0}return t.ho lastFn {
+  i: 186757898,
+  name: "Lsn",
+}
+hookReg @ 186758331 }return t.hookRegistrationFailed}function Osn(){return Jt().hookRegistrationInFlight?.catch(()=>{})}function nVn(){let e=Jt();return e.hookR lastFn {
+  i: 186758304,
+  name: "Osn",
+}
+hookReg @ 186758406 nInFlight?.catch(()=>{})}function nVn(){let e=Jt();return e.hookRegistrationInFlight!==void 0||e.hookRegistrationFailed}function Nsn(){Jt(). lastFn {
+  i: 186758371,
+  name: "nVn",
+}
+
+## HPe @184985281 miss=false len=40 sha=68854330a39beb2a cap=2000
+HEAD r}function CPe(){return pm.accountEpoch}function HPe(){return pm.limitsObserved}function bY(e){retur
+FULL
+function HPe(){return pm.limitsObserved}
+
+## jL-util @184985089 miss=false len=154 sha=09e58cf644b42090 cap=2000
+HEAD e;function Od(){return pm.currentLimits}function jL(){let e=Date.now()/1000,t=e+31536000,r={};for(le
+FULL
+function jL(){let e=Date.now()/1000,t=e+31536000,r={};for(let[o]of V4e){let u=pm.rawUtilization[o];if(_Y(u)&&u.resets_at>e&&u.resets_at<t)r[o]=u}return r}
+
+## Jt-bar @208972948 miss=false len=2226 sha=d16b7d81ecf6bf05 cap=8000
+HEAD e:h0,limit:S0,alwaysShowDateInReset:!0}}function Jt(zD){let et=y(41),{title:gs,limit:YD,maxWidth:Yr,
+FULL
+function Jt(zD){let et=y(41),{title:gs,limit:YD,maxWidth:Yr,showTimeInReset:fh,alwaysShowDateInReset:gh,extraSubtext:Zd,trailingLines:hs,subtextOverride:hh}=zD,em=fh===void 0?!0:fh,tm=gh===void 0?!1:gh,{utilization:qr,resets_at:Jr}=YD;if(qr===null){return null}let ys=`${Math.floor(qr)}% used`,it;if(Jr){let gt;if(et[0]!==tm||et[1]!==Jr||et[2]!==em)gt=R$e(Jr,!0,em,tm),et[0]=tm,et[1]=Jr,et[2]=em,et[3]=gt;else gt=et[3];it=`Resets ${gt}`}if(Zd){if(it)it=`${Zd} \xB7 ${it}`;else it=Zd}if(hh!==void 0)it=hh;if(Yr>=62){let gt;if(et[4]!==gs)gt=e(t,{bold:!0,children:gs}),et[4]=gs,et[5]=gt;else gt=et[5];const Fo=qr/100;let lo;if(et[6]!==Fo)lo=e(M_,{ratio:Fo,width:50,fillColor:"rate_limit_fill",emptyColor:"rate_limit_empty"}),et[6]=Fo,et[7]=lo;else lo=et[7];let co;if(et[8]!==ys)co=e(t,{children:ys}),et[8]=ys,et[9]=co;else co=et[9];let Uo;if(et[10]!==lo||et[11]!==co)Uo=r(o,{flexDirection:"row",gap:1,children:[lo,co]}),et[10]=lo,et[11]=co,et[12]=Uo;else Uo=et[12];let uo;if(et[13]!==it)uo=it&&e(t,{dimColor:!0,children:it}),et[13]=it,et[14]=uo;else uo=et[14];let mo;if(et[15]!==hs)mo=e(Mi,{lines:hs}),et[15]=hs,et[16]=mo;else mo=et[16];let Di;if(et[17]!==gt||et[18]!==Uo||et[19]!==uo||et[20]!==mo)Di=r(o,{flexDirection:"column",flexShrink:0,children:[gt,Uo,uo,mo]}),et[17]=gt,et[18]=Uo,et[19]=uo,et[20]=mo,et[21]=Di;else Di=et[21];return Di}else{let gt;if(et[22]!==gs)gt=e(t,{bold:!0,children:gs}),et[22]=gs,et[23]=gt;else gt=et[23];let Fo;if(et[24]!==it)Fo=it&&r(U,{children:[e(t,{children:" "}),r(t,{dimColor:!0,children:["\xB7 ",it]})]}),et[24]=it,et[25]=Fo;else Fo=et[25];let lo;if(et[26]!==gt||et[27]!==Fo)lo=r(t,{children:[gt,Fo]}),et[26]=gt,et[27]=Fo,et[28]=lo;else lo=et[28];let co;if(et[29]!==hs)co=e(Mi,{lines:hs}),et[29]=hs,et[30]=co;else co=et[30];const Uo=qr/100;let uo;if(et[31]!==Yr||et[32]!==Uo)uo=e(M_,{ratio:Uo,width:Yr,fillColor:"rate_limit_fill",emptyColor:"rate_limit_empty"}),et[31]=Yr,et[32]=Uo,et[33]=uo;else uo=et[33];let mo;if(et[34]!==ys)mo=e(t,{children:ys}),et[34]=ys,et[35]=mo;else mo=et[35];let Di;if(et[36]!==lo||et[37]!==co||et[38]!==uo||et[39]!==mo)Di=r(o,{flexDirection:"column",flexShrink:0,children:[lo,co,uo,mo]}),et[36]=lo,et[37]=co,et[38]=uo,et[39]=mo,et[40]=Di;else Di=et[40];return Di}}
+
+## Osn @186758304 miss=false len=67 sha=b7a9efa8843d8ce6 cap=2000
+HEAD ried=!0}return t.hookRegistrationFailed}function Osn(){return Jt().hookRegistrationInFlight?.catch((
+FULL
+function Osn(){return Jt().hookRegistrationInFlight?.catch(()=>{})}
+
+## Lsn @186757898 miss=false len=406 sha=745c0ba7ad9ed0dd cap=2000
+HEAD light=void 0})}await r.hookRegistration}async function Lsn(e){let t=Jt();if(await t.hookRegistration
+FULL
+async function Lsn(e){let t=Jt();if(await t.hookRegistrationInFlight?.catch(()=>{}),!t.hookRegistrationFailed)return!1;if(e&&!t.hookRegistrationRetried){t.hookRegistration=void 0,em("plugin hook registration retry");let r=t.hookRegistrationArgs;await fY(r?.storageV5,r?.credentials).catch(()=>{}),await t.hookRegistrationInFlight?.catch(()=>{}),t.hookRegistrationRetried=!0}return t.hookRegistrationFailed}
+
+## $sn @185574156 miss=false len=270 sha=87935827b04fe4f2 cap=2000
+HEAD nchorUuid;return o!==void 0&&o===r.uuid}function $sn(e){let t=e.findLastIndex(Pu);for(let o=e.length
+FULL
+function $sn(e){let t=e.findLastIndex(Pu);for(let o=e.length-1;o>t;o--){let u=e[o];if(u?.type!=="assistant")continue;let d=Eh(u),y=d?Pj(d):0;if(y>0)return y}let r=t===-1?void 0:e[t];if(r!==void 0&&Pu(r))return r.compactMetadata.postTokens??oh(e.slice(t+1));return oh(e)}
+
+## Y_e @185568683 miss=false len=83 sha=70f354bc5317effe cap=2000
+HEAD FZ.updateWatchPaths,irt=FZ.onCwdChanged;function Y_e(e){return e.findLast((t)=>t.type==="assistant"&
+FULL
+function Y_e(e){return e.findLast((t)=>t.type==="assistant"&&t.message.model!==rd)}
+
+## vwe @185568973 miss=false len=270 sha=a69bbea65369c349 cap=2000
+HEAD "repl_main_thread")?D4:tC);return t-o<u}function vwe(e,t,r=GSn()){let o={...gf,cache_creation_input_
+FULL
+function vwe(e,t,r=GSn()){let o={...gf,cache_creation_input_tokens:t,cache_creation:{ephemeral_5m_input_tokens:r==="5m"?t:0,ephemeral_1h_input_tokens:r==="1h"?t:0}},{usd:u,pricing:d}=Ler(e,o);return{cache_ttl:r,estimated_cache_write_usd:Math.round(u*1e4)/1e4,pricing:d}}
+
+## VSn @185573811 miss=false len=345 sha=d4f1b59917694bc9 cap=2000
+HEAD _write_usd:A.estimated_cache_write_usd}}function VSn(e){let t=e.findLastIndex(Pu);if(t===-1)return!0
+FULL
+function VSn(e){let t=e.findLastIndex(Pu);if(t===-1)return!0;for(let u=e.length-1;u>t;u--){let d=e[u];if(d?.type!=="assistant")continue;let y=Eh(d);if(y&&Pj(y)>0)return!0}let r=e[t];if(r===void 0||!Pu(r))return!1;let o=r.compactMetadata.preservedMessages?.anchorUuid??r.compactMetadata.preservedSegment?.anchorUuid;return o!==void 0&&o===r.uuid}
+
+## gRn @179049328 miss=false len=147 sha=82ea52c51c8c78da cap=2000
+HEAD l.replaceLastMainThreadContextTokens(e)}function gRn(e){let t=n();if(e.sessionId!==void 0&&e.session
+FULL
+function gRn(e){let t=n();if(e.sessionId!==void 0&&e.sessionId===t.id)t.requestJournal.applyResumeSeed(e);else t.requestJournal.stageResumeSeed(e)}
+
+## dD @186760799 miss=false len=85 sha=bb98049db725662c cap=2000
+HEAD !==null&&eC(fn(e.trim().toLowerCase()))}function dD(e){if(nVn())return!0;return iE("PreModelSwitch",
+FULL
+function dD(e){if(nVn())return!0;return iE("PreModelSwitch",Kle.of(e).registry,e.id)}
+
+## cre @180584703 miss=false len=97 sha=410354fdbaffbc77 cap=2000
+HEAD (o===void 0)o=_I(t),r.set(t,o);return o}function cre(e){return e.includes("application-inference-pro
+FULL
+function cre(e){return e.includes("application-inference-profile")&&typeof gie(hr(e))!=="string"}
+
+## hJ @180584572 miss=false len=131 sha=b3b70c4821f152d5 cap=2000
+HEAD nc(d)=>(await rC(t))(d)}return new e(o)}function hJ(e){let t=hr(e),r=Ac().providerCache.inferencePro
+FULL
+function hJ(e){let t=hr(e),r=Ac().providerCache.inferenceProfileBackingModels,o=r.get(t);if(o===void 0)o=_I(t),r.set(t,o);return o}
+
+## pEt @179887321 miss=false len=35 sha=affde90d06fa895f cap=2000
+HEAD 52,GXe="remote-settings-helper-consent";function pEt(){return Kt(we(),GXe)}function VKt(e){if(e.poli
+FULL
+function pEt(){return Kt(we(),GXe)}
+
+## LOe @180780907 miss=false len=30 sha=6ff11d8499b77b25 cap=2000
+HEAD eturn fn(Xe(e,{overridesMap:UJ()??{}}))}function LOe(e){return DOe(e)}jO(()=>bk(at()));var g3=new Se
+FULL
+function LOe(e){return DOe(e)}
+
+## yBn @186764691 miss=false len=256 sha=2f1c6d7ff023ab17 cap=2000
+HEAD (y.has(A))return!1;return y.add(A),!0})}function yBn(e,t){if(e?.type!=="attachment")return;let r=e.a
+FULL
+function yBn(e,t){if(e?.type!=="attachment")return;let r=e.attachment;if(r.type==="hook_system_message")t.push(r.content);else if(r.type==="hook_non_blocking_error"){let o=r.stderr.trim();t.push(`PreModelSwitch hook ${r.hookName} failed${o?`: ${o}`:""}`)}}
+
+Hye const window:
+,yield*W?.yields??[],yield Uye(F)}var Oi=600000,Bye=30000,_Ve=6000,Hye=30000,x7e=5000;var jye=new Set(["PreToolUse","PostToolUse","PostToolU
+
+Kle window:
+then(()=>{r.pending--},()=>{r.pending--}),o}var Kle=new Ln(()=>({registry:void 0}));var _Bn=8;class vEt{#e=[];#t=!1;#n=n
+
+yEt window:
+{pending=[];landedOn=null;inFlight=new Set}var yEt=new Ln(()=>new gEt);function 
+
+HPe neighborhood:
+void 0})}if(!d)try{this.quotaRejected.emit(F,t)}catch(B){h(B)}if(!d&&!ws(this.currentLimits,F))this.emitStatusChange(F)}catch(d){h(d)}}}var pm=new c5e;function Od(){return pm.currentLimits}function jL(){let e=Date.now()/1000,t=e+31536000,r={};for(let[o]of V4e){let u=pm.rawUtilization[o];if(_Y(u)&&u.resets_at>e&&u.resets_at<t)r[o]=u}return r}function CPe(){return pm.accountEpoch}function HPe(){return pm.limitsObserved}function bY(e){return pm.statusChanged.subscribe(e)}function GVn(e){return pm.o

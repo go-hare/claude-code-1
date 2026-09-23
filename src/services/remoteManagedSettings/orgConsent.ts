@@ -219,24 +219,29 @@ export async function recordOrgConsent(
 /**
  * densable BXd — true if new settings need a security check vs baseline.
  */
+/**
+ * densable Zor — consented_payload → wt; org_record → !c5(new) false,
+ * hash match false, else wt(consentedPayload).
+ */
 export function hasDangerousSettingsChangedAgainstBaseline(
   baseline: ConsentBaseline,
   newSettings: SettingsJson | null | undefined,
 ): boolean {
-  const newDangerous = extractDangerousSettings(newSettings)
-  if (!hasDangerousSettings(newDangerous)) return false
-
-  if (baseline.source === 'consented_payload') {
-    return hasDangerousSettingsChangedLegacy(baseline.settings, newSettings)
+  switch (baseline.source) {
+    case 'consented_payload':
+      return hasDangerousSettingsChangedLegacy(baseline.settings, newSettings)
+    case 'org_record': {
+      const next = extractDangerousSettings(newSettings)
+      if (!hasDangerousSettings(next)) return false
+      if (hashDangerousSettings(next) === baseline.dangerousSettingsHash) {
+        return false
+      }
+      return hasDangerousSettingsChangedLegacy(
+        baseline.consentedPayload,
+        newSettings,
+      )
+    }
   }
-
-  // org_record: hash match → no re-prompt even if local cache wiped
-  const newHash = hashDangerousSettings(newDangerous)
-  if (newHash === baseline.dangerousSettingsHash) return false
-  return hasDangerousSettingsChangedLegacy(
-    baseline.consentedPayload,
-    newSettings,
-  )
 }
 
 /** densable $Xd / local hasDangerousSettingsChanged content compare */

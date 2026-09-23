@@ -1,0 +1,32 @@
+# gold-248-20-sp2
+
+## worktree-band start @186320000
+d;if(e&&e.length>0)return!0;if(!Hg()){let r=Yne()?.InstructionsLoaded;if(r&&r.length>0)return!0}let t=yD()?.InstructionsLoaded;if(t&&t.length>0)return!0;return!1}function din(e,t){if(e.blocked&&!e.succeeded)return{blockingError:{blockingError:e.output||"Elicitation blocked by hook",command:e.command}};if(!e.output.trim())return{};let r=e.output.trim();if(!r.startsWith("{"))return{};try{let o=cz().parse(q(r));if(S_(o))return{};if(!ep(o))return{};if(o.decision==="block"||e.blocked)return{blockingError:{blockingError:o.reason||"Elicitation blocked by hook",command:e.command}};let u=o.hookSpecificOutput;if(!u||u.hookEventName!==t)return{};if(!u.action)return{};let g={response:{action:u.action,content:u.content}};if(u.action==="decline")g.blockingError={blockingError:o.reason||(t==="Elicitation"?"Elicitation denied by hook":"Elicitation result blocked by hook"),command:e.command};return g}catch{return{}}}class Bwt{okLogged=!1;badLogged=!1}var scr=new K(()=>new Bwt);async function m1t(e,t,r,o=!1){if(OT())return;let u=scr.of(e.host);if(ho("statusLine"))return;if(VK()){n("Skipping StatusLine command execution - workspace trust not accepted");return}let p=hhe(yn()?.statusLine);if(!p||p.type!=="command")return;try{let g=S(t),k=Date.now(),E=await qz(p,"StatusLine","statusLine",g,HJ(t),e.project,t.cwd,r,rT());if(E.aborted)return;let C=E.stderr.trim();if(C)n(`StatusLine [${p.command}] stderr: ${C}`);if(E.status===0){if(!u.okLogged)u.okLogged=!0,b("status_line_command");let M=E.stdout.trim
+
+## "function sp(e,t)" in 178-187M hits=0
+
+## "function sp(e,t)" in 178-187M hits=0
+
+## "sp=(e,t)" in 178-187M hits=0
+
+## "sp=function(e,t)" in 178-187M hits=0
+
+## ",sp," in 178-187M hits=0
+
+## function sp( in 186M-P0n hits=0
+
+## v0n @186330421
+async function v0n(e,t,r){let o=await RF(t);if(!o)return;let u=!1;try{await Qz(o)}catch(E){u=Q(E)}if(!u)return;let p=await US(e);if(p){let E=jn(sp(Ky(o))),C=jn(sp(Ul(p,"worktrees"))),M=await Ba(p).then((L)=>jn(Ul(L,"worktrees")),()=>null);if(E!==C&&E!==M)throw new Fc(`Orphaned worktree dir at ${t} is registered to a different repository (under ${Ky(o)}, expected under ${Ul(p,"worktrees")}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`)}let g=await We(tt(),[...Zt,"remote"],{cwd:e,env:Vo()});if(g.code!==0)throw Error(`Orphaned worktree dir at ${t} but \`git remote\` failed (${g.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);let k=await We(tt(),[...Zt,"rev-parse","--verify","--quiet",r],{cwd:e,env:Vo()});if(k.code!==0&&k.stderr.trim().length>0)throw Error(`Orphaned worktree dir at ${t} but rev-parse on ${r} failed (${k.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);if(g.stdout.trim().length>0&&k.code===0){let E=await We(tt(),[...Zt,"rev-list","--max-count=1",r,"--not","--remotes"],{cwd:e,env:Vo()});if(E.code!==0)throw Error(`Orphaned worktree dir at ${t} but rev-list on ${r} failed (${E.stderr.trim()}) \u2014 refusing to self-heal. Remove ${t} manually if it has no work to keep.`);if(E.stdout.trim().length>0)throw Error(`Orphaned worktree dir at ${t} but branch ${r} has unpushed commits \u2014 refusing to self-heal. Push or delete the branch, then retry.`)}await jve(e,t);try{await Kwt(t,{recursive:!0,force:!0}),n(`[worktree] removed orphaned worktree directory at ${t}`)}catch(E){throw Error(`Cannot self-heal orphaned worktree at ${t}: ${l(E)}. Remove manually to proceed.`)}}
+
+## function sp( in 2MB before P0n count=0
+
+## exact "function sp(e,t){return" hits=0
+
+## exact "function sp(e,t){let" hits=1
+- @206439245 , but results of ${e} only support 'complete' on protocol revision 2026-07-28`)}function sp(e,t){let r=ep(t);if(t.resultType!=="complete"||!Qm(e))return r===void 0?t:lp(t);let o=t,n=Ol(o.ttlMs)?o.ttlMs:cp(r),s=Nl(o.cacheScope)?o.cacheScope:up(r),i={...o,ttlMs:n,cacheScope:s};return delete i[Ms],i}function ip(e){return e!==null&&
+function sp(e,t){let r=ep(t);if(t.resultType!=="complete"||!Qm(e))return r===void 0?t:lp(t);let o=t,n=Ol(o.ttlMs)?o.ttlMs:cp(r),s=Nl(o.cacheScope)?o.cacheScope:up(r),i={...o,ttlMs:n,cacheScope:s};return delete i[Ms],i}
+
+## exact "sp(e,p)===sp(e,g)" hits=1
+- @186370282 ||!k||u.some((L)=>L.startsWith("-"))||k!=="HEAD"&&!k.startsWith("refs/heads/")||sp(e,p)===sp(e,g))return null;let[E,C]=await Promise.all([We(tt(),[...Zt,"config","--bool","--get","core.bare"],{cwd:e,env:Vo()}),We(tt(),[...Zt,"rev-parse","--verify","-q","--symbolic-full-name","main-worktree/HEAD"],{cwd:e,env:Vo()})]),M=C.stdout.t
+
+## as sp in 186250-186330 count=0

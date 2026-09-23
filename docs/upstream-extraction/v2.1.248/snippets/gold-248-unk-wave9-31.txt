@@ -1,0 +1,28 @@
+# gold-248-unk-wave9-31  densable 2.1.248 #31
+# rc-reconnect-prompt — no unique reconnect-repaint
+# SEA 226708128 · 247 present
+# leftover replBridge. stay UNKNOWN. not N/A.
+
+extracted? no unique RC silent-reconnect re-show body
+landed? no
+stay UNKNOWN? YES
+
+## counts (not unique)
+silently reconnect 248=1 247=1 (changelog)
+tengu_bridge_reconnected 248=2 247=2
+getPendingPermissionRequests 248=9 247=9
+republishSurviving 248=4 247=4
+afterReconnect 248=8 247=8
+resyncAfterReconnect 248=3 247=3
+reconnect-repaint / reShow / replayPermission 248=0 247=0
+tengu_bridge_repl_reconnected_in_place 248=0 247=0
+
+## dNe is NOT this item
+dNe @204894232 len=1769 sha=b522ee7db3bbc025
+function dNe(e,t,r,{afterReconnect:o=!1}={})
+247 Ee @234390293 len=1746 sha=81367bf4a1eaaa94 same SendMessage/host-result mapper
+248 adds dirSync on xe() only. not RC permission/latest-message repaint.
+
+dt @205347718 tengu_bridge_reconnected = env-cleanup log, not repaint.
+
+leftover src/bridge/replBridge.ts exists. no unique 248 body to land. stay UNKNOWN.

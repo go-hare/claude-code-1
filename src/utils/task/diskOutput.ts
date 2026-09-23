@@ -1,6 +1,7 @@
 import { constants as fsConstants } from 'fs'
 import {
   type FileHandle,
+  lstat,
   mkdir,
   open,
   readdir,
@@ -9,7 +10,7 @@ import {
   symlink,
   unlink,
 } from 'fs/promises'
-import { join, sep } from 'path'
+import { dirname, isAbsolute, join, sep } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
@@ -132,6 +133,46 @@ async function ensureOutputDir(): Promise<void> {
  */
 export function getTaskOutputPath(taskId: string): string {
   return join(getTaskOutputDir(), `${taskId}.output`)
+}
+
+/** densable XX — read refuses a symlink-to-symlink or unix nlink≠1 leaf. */
+const TASK_OUTPUT_NOT_REGULAR = 'not a regular nlink-1 file'
+
+/**
+ * densable XX leaf check. Follows one symlink hop (initTaskOutputAsSymlink);
+ * refuses a second hop and unix nlink≠1. No /proc ancestor walk.
+ */
+export async function resolveTaskOutputReadPath(
+  path: string,
+): Promise<string | null> {
+  let st
+  try {
+    st = await lstat(path)
+  } catch (e) {
+    if (getErrnoCode(e) === 'ENOENT') return null
+    throw e
+  }
+  let readPath = path
+  if (st.isSymbolicLink()) {
+    const target = await readlink(path)
+    readPath = isAbsolute(target) ? target : join(dirname(path), target)
+    try {
+      st = await lstat(readPath)
+    } catch (e) {
+      if (getErrnoCode(e) === 'ENOENT') return null
+      throw e
+    }
+    if (st.isSymbolicLink()) {
+      throw new Error(TASK_OUTPUT_NOT_REGULAR)
+    }
+  }
+  if (!st.isFile()) {
+    throw new Error(TASK_OUTPUT_NOT_REGULAR)
+  }
+  if (process.platform !== 'win32' && st.nlink !== 1) {
+    throw new Error(TASK_OUTPUT_NOT_REGULAR)
+  }
+  return readPath
 }
 
 // Tracks fire-and-forget promises (initTaskOutput, initTaskOutputAsSymlink,
@@ -434,11 +475,11 @@ export async function getTaskOutputDelta(
   maxBytes: number = DEFAULT_MAX_READ_BYTES,
 ): Promise<{ content: string; newOffset: number }> {
   try {
-    const result = await readFileRange(
-      getTaskOutputPath(taskId),
-      fromOffset,
-      maxBytes,
-    )
+    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
+    if (readable === null) {
+      return { content: '', newOffset: fromOffset }
+    }
+    const result = await readFileRange(readable, fromOffset, maxBytes)
     if (!result) {
       return { content: '', newOffset: fromOffset }
     }
@@ -465,8 +506,12 @@ export async function getTaskOutput(
   maxBytes: number = DEFAULT_MAX_READ_BYTES,
 ): Promise<string> {
   try {
+    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
+    if (readable === null) {
+      return ''
+    }
     const { content, bytesTotal, bytesRead } = await tailFile(
-      getTaskOutputPath(taskId),
+      readable,
       maxBytes,
     )
     if (bytesTotal > bytesRead) {
@@ -488,7 +533,11 @@ export async function getTaskOutput(
  */
 export async function getTaskOutputSize(taskId: string): Promise<number> {
   try {
-    return (await stat(getTaskOutputPath(taskId))).size
+    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
+    if (readable === null) {
+      return 0
+    }
+    return (await stat(readable)).size
   } catch (e) {
     const code = getErrnoCode(e)
     if (code === 'ENOENT') {

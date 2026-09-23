@@ -7,6 +7,7 @@ import {
   applyWorkerProviderStrips,
   applyWorkerSessionStrips,
   buildDispatchProviderEnv,
+  copyProviderGatewayEnv,
   inheritParentEndpointEnv,
   isExternallyManagedProviderEnv,
   snapshotProviderEnv,
@@ -274,6 +275,73 @@ describe('tl() / Ht() / wt (densable dispatch.env + ci strips)', () => {
       _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: '1',
       ANTHROPIC_CUSTOM_HEADERS: 'X: 1',
     })
+  })
+
+  test('Oo copies Vertex/Bedrock SKIP companions when selected', () => {
+    const parent = {
+      ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example',
+      CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+      ANTHROPIC_CUSTOM_HEADERS: 'X: 1',
+      ANTHROPIC_BEDROCK_BASE_URL: 'https://bedrock.example',
+      CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+      CLAUDE_CODE_USE_VERTEX: '1',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+    }
+    expect(copyProviderGatewayEnv(parent, parent)).toEqual({
+      ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example',
+      CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+      ANTHROPIC_CUSTOM_HEADERS: 'X: 1',
+      ANTHROPIC_BEDROCK_BASE_URL: 'https://bedrock.example',
+      CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+    })
+    expect(
+      copyProviderGatewayEnv(
+        { CLAUDE_CODE_USE_VERTEX: '1' },
+        { ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example' },
+      ),
+    ).toEqual({ ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example' })
+    expect(
+      copyProviderGatewayEnv(
+        {},
+        {
+          ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example',
+          CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+        },
+      ),
+    ).toEqual({})
+    expect(
+      copyProviderGatewayEnv(
+        { CLAUDE_CODE_USE_VERTEX: '1' },
+        {
+          ANTHROPIC_UNIX_SOCKET: '/tmp/s',
+          ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example',
+          CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+        },
+      ),
+    ).toEqual({})
+  })
+
+  test('So spreads Oo into non-exec dispatch env', () => {
+    const parent = {
+      ANTHROPIC_VERTEX_BASE_URL: 'https://vertex.example',
+      CLAUDE_CODE_SKIP_VERTEX_AUTH: '1',
+      CLAUDE_CODE_USE_VERTEX: '1',
+    }
+    expect(
+      buildDispatchProviderEnv({
+        source: 'repl',
+        currentCwd: '/a',
+        parentEnv: parent,
+      }).CLAUDE_CODE_SKIP_VERTEX_AUTH,
+    ).toBe('1')
+    expect(
+      buildDispatchProviderEnv({
+        exec: 'ls',
+        source: 'repl',
+        currentCwd: '/a',
+        parentEnv: parent,
+      }).CLAUDE_CODE_SKIP_VERTEX_AUTH,
+    ).toBeUndefined()
   })
 
   test('snapshotProviderEnv skips empty values except securestorage', () => {

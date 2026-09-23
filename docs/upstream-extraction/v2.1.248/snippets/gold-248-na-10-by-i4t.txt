@@ -1,0 +1,82 @@
+# gold-248-na-10-by-i4t
+
+## # BY-i4t-call @191908729
+ing a transcript for the desktop retention exemption");let T=R.size>Wd?FSn(k):k,S=BY(C,"entrypoint"),O=i4t(T,"entrypoint");if(!(S!==void 0&&Sgn(S)||O!==void 0&&Sgn(O)))return!1;let B=Z(g).startsWith("agent-")?BY(C,"sessionId")??i4t(T,"sessionId"):void 0;if(B!==void 0&&Fe(B)){let 
+
+## # import-BY @191899908
+/chunk-9yg51vax.js";import{Wd,BY,i4t,G9e,FSn}from"B:/~BUN/root/chunk-bk8db6yj.js";import{vue}from"B:/~BUN/root/chunk-wbhyj9x7.js";import{Mue,sZn,M_t,C9e,wSn}from"B:/~BUN/root/chunk-c1q0czgf.js";import{be,yn,Vgn,UW,tx,OMe
+
+## decl BY sync=2 async=1
+## BY @179198018 @179198018
+len=261 sha=e7faf9fda7c63344
+function BY(e,n){let t=`"${n}":`,r=0;while(r<e.length){let a=e.indexOf(`
+`,r),i=a<0?e.slice(r):e.slice(r,a);if(r=a<0?e.length:a+1,i.includes(t))try{let o=JSON.parse(i);if(typeof o==="object"&&o!==null){let c=o[n];if(typeof c==="string")return c}}catch{}}return}
+
+## BY-win @179198018
+==="object"&&u!==null&&(t===void 0||u.type===t)){let s=u[n];if(typeof s==="string")return s}}catch{}if(o<0)break}return}function BY(e,n){let t=`"${n}":`,r=0;while(r<e.length){let a=e.indexOf(`
+`,r),i=
+
+## BY @182802584 @182802584
+len=129 sha=e47f1d855c633c14
+function BY(e,t,r,o,u){await rI();try{let p=await dt.wrapWithSandbox(e,t,r,o,u);return b("sandbox_exec"),p}catch(p){throw sI(p)}}
+
+## BY-win @182802584
+";return new IVn(`Linux sandbox ${t} bridge socket is missing (socat may have died). Restart to retry.`)}return e}async function BY(e,t,r,o,u){await rI();try{let p=await dt.wrapWithSandbox(e,t,r,o,u);
+
+## BY @182802578 @182802578
+len=135 sha=2bc3a43a374c48ae
+async function BY(e,t,r,o,u){await rI();try{let p=await dt.wrapWithSandbox(e,t,r,o,u);return b("sandbox_exec"),p}catch(p){throw sI(p)}}
+
+## BY-win @182802578
+:"HTTP";return new IVn(`Linux sandbox ${t} bridge socket is missing (socat may have died). Restart to retry.`)}return e}async function BY(e,t,r,o,u){await rI();try{let p=await dt.wrapWithSandbox(e,t,r
+
+## decl i4t sync=1 async=0
+## i4t @179198279 @179198279
+len=32 sha=7a632eedf8eca690
+function i4t(e,n){return U(e,n)}
+
+## i4t-win @179198279
+t))try{let o=JSON.parse(i);if(typeof o==="object"&&o!==null){let c=o[n];if(typeof c==="string")return c}}catch{}}return}function i4t(e,n){return U(e,n)}function z9e(e,n){return e?.realWorkspacePath===
+
+## decl G9e sync=1 async=1
+## G9e @179199826 @179199826
+len=506 sha=e8954258620d6095
+function G9e(e,n,t,r){if(r!==void 0&&r.hoverRestOn)return de(r.source);try{if(K===A.O_RDONLY){if(!(await ae(e)).isFile())return{head:"",tail:""}}let a=await L(e,K);try{if(!(await a.stat()).isFile())return{head:"",tail:""};let i=await a.read(t,0,Wd,0);if(i.bytesRead===0)return{head:"",tail:""};let o=t.toString("utf8",0,i.bytesRead),c=Math.max(0,n-Wd),u=o;if(c>0){let s=await a.read(t,0,Wd,c);u=t.toString("utf8",0,s.bytesRead)}return{head:o,tail:u}}finally{await a.close()}}catch{return{head:"",tail:""}}}
+
+## G9e-win @179199826
+f t!=="object"||t===null)continue;let r=Uue(t,n);if(r!==void 0)return r}return n.commandFallback}var K=A.O_RDONLY;async function G9e(e,n,t,r){if(r!==void 0&&r.hoverRestOn)return de(r.source);try{if(K=
+
+## G9e @179199820 @179199820
+len=512 sha=27688031d1ef67a8
+async function G9e(e,n,t,r){if(r!==void 0&&r.hoverRestOn)return de(r.source);try{if(K===A.O_RDONLY){if(!(await ae(e)).isFile())return{head:"",tail:""}}let a=await L(e,K);try{if(!(await a.stat()).isFile())return{head:"",tail:""};let i=await a.read(t,0,Wd,0);if(i.bytesRead===0)return{head:"",tail:""};let o=t.toString("utf8",0,i.bytesRead),c=Math.max(0,n-Wd),u=o;if(c>0){let s=await a.read(t,0,Wd,c);u=t.toString("utf8",0,s.bytesRead)}return{head:o,tail:u}}finally{await a.close()}}catch{return{head:"",tail:""}}}
+
+## G9e-win @179199820
+(typeof t!=="object"||t===null)continue;let r=Uue(t,n);if(r!==void 0)return r}return n.commandFallback}var K=A.O_RDONLY;async function G9e(e,n,t,r){if(r!==void 0&&r.hoverRestOn)return de(r.source);try
+
+## decl FSn sync=1 async=0
+## FSn @179200430 @179200430
+len=65 sha=8240d3d4c3c0d339
+function FSn(e){let n=e.indexOf(`
+`);return n>=0?e.slice(n+1):""}
+
+## FSn-win @179200430
+urn{head:"",tail:""}}}async function de(e){let n=await J(e);return n===null?{head:"",tail:""}:{head:n.head,tail:n.tail}}function FSn(e){let n=e.indexOf(`
+`);return n>=0?e.slice(n+1):""}async function 
+
+## # ie @191903239
+len=294 sha=84d1f137407bfac6
+async function ie(e,t,r){let a=await t.readFileFdGated(e,Ie);if(a===null)return"none";let o;try{let u=Te().safeParse(q(a.content));o=u.success?u.data.reason:void 0}catch{return"none"}if(o==="delete")return"release-now";if(o==="archive")return a.stats.mtime<r?"release-now":"grace";return"none"}
+
+## # ie-win @191903239
+rn null;if(e!==void 0&&e<r)r=e;let a=r*24*60*60*1000;return new Date(Date.now()-a)}var U=".desktop-released.json",Ie=4096;function X(e){return e.slice(0,-6)+U}var Te=h(()=>m({reason:i().optional()}));async function ie(e,t,r){let a=await t.readFileFdGated(e,Ie);if(a===null)return"none";let o;try{let u=Te().safeParse(q(a.content));o=u.success?u.data.reason:void 0}catch{return"none"}if(o==="delete")return"release-now";if(o==="archive")return a.stats.mtime<r?"release-now":"grace";return"none"}function Fe(e){return/^[0-9A-Za-z_-]{1,64}$/.test(e)}function Ae(){let e=tx("desktopSessionCleanupPeriodDa
+
+## # X @191903161
+len=37 sha=666defc5d7ba3b3f
+function X(e){return e.slice(0,-6)+U}
+
+## # F @191905156
+len=278 sha=f99c9235ada23fe8
+async function F(e,t,r,a,o=t,u){let p;try{p=await r.stat(e)}catch(w){if(Q(w))return!1;throw w}if(!(p.mtime<t))return a.filesRetainedFresh++,!1;if(u!==void 0&&await u(e,p))return!1;try{await r.unlink(e)}catch(w){if(Q(w))return!1;if(p.mtime<o)a.filesPastCutoff++;throw w}return!0}
+
+## # FSn-call @191908710
+the desktop retention exemption");let T=R.size>Wd?FSn(k):k,S=BY(C,"entrypoint"),O=i4t(T,"entrypoint");if(!(S!==void 0&&S

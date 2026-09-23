@@ -35,6 +35,7 @@ import {
   resolveFableConsentKey,
   resolveUsageCreditsCommandName,
   shouldApplyDeferredEffortCommit,
+  shouldPromptFableOverageConsent,
   shouldShowFableConsentDialog,
   showFableOverageConsentDialog,
   runFableOverageConsentFlow,
@@ -217,7 +218,23 @@ describe('fableConsent densables', () => {
     expect(consented.reason).toBe('already_consented')
   })
 
-  test('runFableOverageConsentFlow no host + no fallback aborts', async () => {
+  test('gP is false without requestDialog (bg / --bg)', () => {
+    expect(
+      shouldPromptFableOverageConsent({
+        model: 'claude-fable-5',
+        organizationUuid: 'org-missing',
+      }),
+    ).toBe(false)
+    expect(
+      shouldPromptFableOverageConsent({
+        model: 'claude-fable-5',
+        organizationUuid: 'org-missing',
+        requestDialog: async () => 'consent',
+      }),
+    ).toBe(true)
+  })
+
+  test('runFableOverageConsentFlow no host does not abort (gP/f6e)', async () => {
     const flow = await runFableOverageConsentFlow({
       model: 'claude-fable-5',
       organizationUuid: 'org-missing',
@@ -225,9 +242,9 @@ describe('fableConsent densables', () => {
       fallbackModel: null,
       isFallbackAllowed: false,
     })
-    expect(flow.shouldAbort).toBe(true)
+    expect(flow.shouldAbort).toBe(false)
+    expect(flow.dialogShown).toBe(false)
     expect(flow.reason).toBe('no_dialog_fallback')
-    expect(flow.errorMessage).toContain('Fable 5')
   })
 
   test('runFableOverageConsentFlow consent via requestDialog', async () => {

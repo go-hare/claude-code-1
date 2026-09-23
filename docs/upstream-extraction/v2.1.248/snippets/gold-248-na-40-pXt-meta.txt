@@ -1,0 +1,9 @@
+# gold-248-na-40-pXt-meta  skill body EXISTS in SEA — do not invent locally
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+start=196766972 len=17303 sha=498a85cdc7e27a20
+head=pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \u2014 to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrat
+…
+tail= writing a script, load the \`${$w}\` skill \u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.`;

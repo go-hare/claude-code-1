@@ -13,6 +13,7 @@ import {
   findOverlyBroadBashPermissions,
   isBypassPermissionsModeDisabled,
   removeDangerousPermissions,
+  applyManagedAutoModeExit,
   transitionPlanAutoMode,
 } from '../permissions/permissionSetup.js'
 import { syncPermissionRulesFromDisk } from '../permissions/permissions.js'
@@ -193,6 +194,7 @@ export function applySettingsChange(
     }
 
     newContext = transitionPlanAutoMode(newContext)
+    newContext = applyManagedAutoModeExit(newContext)
 
     // Sync effortLevel / ultracode from settings to top-level AppState when
     // they change (e.g. via applyFlagSettings from IDE). Only propagate if

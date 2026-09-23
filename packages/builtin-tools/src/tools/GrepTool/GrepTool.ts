@@ -1,3 +1,4 @@
+import { isAbsolute, join } from 'path'
 import { z } from 'zod/v4'
 import type { ValidationResult } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
@@ -7,11 +8,16 @@ import { FILE_NOT_FOUND_CWD_NOTE, suggestPathUnderCwd } from 'src/utils/file.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { expandPath, toRelativePath } from 'src/utils/path.js'
+import { checkReadPermissionForTool } from 'src/utils/permissions/filesystem.js'
 import {
-  checkReadPermissionForTool,
-  getFileReadIgnorePatterns,
-  normalizePatternsToPath,
-} from 'src/utils/permissions/filesystem.js'
+  noteApprovedFileToolPath,
+  takeApprovedFileToolPath,
+} from 'src/utils/fileToolApprovedOpen.js'
+import {
+  compileReadDenyRgGlobs,
+  openSearchRoot,
+  type SearchRoot,
+} from 'src/utils/searchRootGuard.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { getGlobExclusionsForPluginCache } from 'src/utils/plugins/orphanedPluginFilter.js'
@@ -228,6 +234,7 @@ export const GrepTool = buildTool({
     return { result: true }
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
+    noteApprovedFileToolPath(input.path ? expandPath(input.path) : getCwd())
     const appState = context.getAppState()
     return checkReadPermissionForTool(
       GrepTool,
@@ -405,39 +412,39 @@ export const GrepTool = buildTool({
       }
     }
 
-    // Add ignore patterns
     const appState = getAppState()
-    const ignorePatterns = normalizePatternsToPath(
-      getFileReadIgnorePatterns(appState.toolPermissionContext),
-      getCwd(),
-    )
-    for (const ignorePattern of ignorePatterns) {
-      // Note: ripgrep only applies gitignore patterns relative to the working directory
-      // So for non-absolute paths, we need to prefix them with '**'
-      // See: https://github.com/BurntSushi/ripgrep/discussions/2156#discussioncomment-2316335
-      //
-      // We also need to negate the pattern with `!` to exclude it
-      const rgIgnorePattern = ignorePattern.startsWith('/')
-        ? `!${ignorePattern}`
-        : `!**/${ignorePattern}`
-      args.push('--glob', rgIgnorePattern)
-    }
+    const approved = takeApprovedFileToolPath(absolutePath)
+    const root = await openSearchRoot(absolutePath, approved)
+    let results: string[] = []
+    if (root) {
+      try {
+        await root.recheckBeforeSpawn()
+        for (const denyGlob of compileReadDenyRgGlobs(
+          appState.toolPermissionContext,
+          root,
+        )) {
+          args.push('--glob', denyGlob)
+        }
 
-    // Exclude orphaned plugin version directories
-    for (const exclusion of await getGlobExclusionsForPluginCache(
-      absolutePath,
-    )) {
-      args.push('--glob', exclusion)
-    }
+        for (const exclusion of await getGlobExclusionsForPluginCache(
+          absolutePath,
+        )) {
+          args.push('--glob', exclusion)
+        }
 
-    // WSL has severe performance penalty for file reads (3-5x slower on WSL2)
-    // The timeout is handled by ripgrep itself via execFile timeout option
-    // We don't use AbortController for timeout to avoid interrupting the agent loop
-    // If ripgrep times out, it throws RipgrepTimeoutError which propagates up
-    // so Claude knows the search didn't complete (rather than thinking there were no matches)
-    const results = await ripGrep(args, absolutePath, abortController.signal, {
-      rejectOnInputError: true,
-    })
+        results = await ripGrep(args, root.target, abortController.signal, {
+          rejectOnInputError: true,
+          cwd: root.spawnCwd,
+        })
+        if (root.relativeOutput) {
+          results = results.map(line =>
+            absolutizeRipgrepLine(line, root, output_mode),
+          )
+        }
+      } finally {
+        await root.close()
+      }
+    }
 
     if (output_mode === 'content') {
       // For content mode, results are the actual content lines
@@ -574,3 +581,24 @@ export const GrepTool = buildTool({
     }
   },
 } satisfies ToolDef<InputSchema, Output>)
+
+function absolutizeRipgrepLine(
+  line: string,
+  root: SearchRoot,
+  outputMode: string,
+): string {
+  if (outputMode !== 'content' && outputMode !== 'count') {
+    return isAbsolute(line) ? line : join(root.canonical, line)
+  }
+  const sepIdx =
+    outputMode === 'count' ? line.lastIndexOf(':') : line.indexOf(':')
+  if (sepIdx <= 0) {
+    return isAbsolute(line) ? line : join(root.canonical, line)
+  }
+  const filePath = line.slice(0, sepIdx)
+  const rest = line.slice(sepIdx)
+  const absolute = isAbsolute(filePath)
+    ? filePath
+    : join(root.canonical, filePath)
+  return absolute + rest
+}

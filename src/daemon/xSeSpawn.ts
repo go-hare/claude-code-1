@@ -12,6 +12,11 @@ import { randomUUID } from 'crypto'
 import { mkdirSync } from 'fs'
 import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
+import { getDispatcherAccountFromOauthToken } from '../utils/auth.js'
+import {
+  type DispatcherAccount,
+  reattachEnvWithDispatcherAccount,
+} from '../utils/bgDispatcherAccount.js'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getGlobalConfig } from '../utils/config.js'
 import { errorMessage } from '../utils/errors.js'
@@ -233,6 +238,11 @@ export function seedJobStateClient(
   }
 }
 
+/** densable So `urr(awn())` — token fields only when wl() and Yp(). */
+function parentDispatcherAccount(): DispatcherAccount {
+  return getDispatcherAccountFromOauthToken()
+}
+
 /**
  * densable Uq_ peel + launch build.
  * When `opts.argv` present, peel agent/name/resume/intent/respawnFlags/session-id
@@ -417,10 +427,12 @@ function buildDispatchRequest(opts: XSeOpts): {
     isolation: opts.isolation,
     worktree: opts.worktree,
     env: Object.keys(env).length > 0 ? env : undefined,
-    reattachEnv:
-      Object.keys(opts.reattachEnv ?? {}).length > 0
-        ? opts.reattachEnv
-        : undefined,
+    // densable So: reattachEnv spreads urr(account) only when not exec.
+    reattachEnv: reattachEnvWithDispatcherAccount(
+      opts.reattachEnv,
+      opts.exec,
+      parentDispatcherAccount(),
+    ),
     launch,
   }
 

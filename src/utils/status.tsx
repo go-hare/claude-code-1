@@ -3,7 +3,17 @@ import figures from 'figures';
 import * as React from 'react';
 import { color, Text } from '@anthropic/ink';
 import type { MCPServerConnection } from '../services/mcp/types.js';
-import { getAccountInformation, getSubscriptionType, isClaudeAISubscriber } from './auth.js';
+import { isOAuthRefreshTokenDead, isStoredOAuthRefreshTokenCleared } from './accountOnHold.js';
+import { describeAnthropicProfile, isProfileAuthActive, isUsableStoredClaudeAiLogin } from './anthropicProfile.js';
+import {
+  getAccountInformation,
+  getClaudeAIOAuthTokens,
+  getOauthAccountInfo,
+  getSubscriptionType,
+  isAnthropicAuthEnabled,
+  isClaudeAISubscriber,
+} from './auth.js';
+import { getSecureStorage } from './secureStorage/index.js';
 import { getLargeMemoryFiles, getMemoryFiles, MAX_MEMORY_CHARACTER_COUNT } from './claudemd.js';
 import { getDoctorDiagnostic } from './doctorDiagnostic.js';
 import { getAWSRegion, getDefaultVertexRegion, isEnvTruthy } from './envUtils.js';
@@ -349,10 +359,50 @@ export function buildCrossSessionPeerAddressProperties(): Property[] {
   return [];
 }
 
+/**
+ * densable TYe — `VN(Xt())` else `GN(Tn().read())`.
+ * VN = isOAuthRefreshTokenDead; GN = isStoredOAuthRefreshTokenCleared;
+ * Xt = getClaudeAIOAuthTokens; Tn = getSecureStorage.
+ */
+function isStatusOauthRefreshDead(): boolean {
+  const dead = isOAuthRefreshTokenDead(getClaudeAIOAuthTokens());
+  if (dead !== undefined) return dead;
+  try {
+    return isStoredOAuthRefreshTokenCleared(getSecureStorage().read());
+  } catch {
+    return false;
+  }
+}
+
 export function buildAccountProperties(): Property[] {
   const accountInfo = getAccountInformation();
   if (!accountInfo) {
     return [];
+  }
+
+  const tokens = getClaudeAIOAuthTokens();
+  // Aqt(Xt()) — usable stored claude.ai login, not bare accessToken
+  const storedClaudeAiLogin = isUsableStoredClaudeAiLogin(tokens);
+  const profileActive = isProfileAuthActive({ storedClaudeAiLogin });
+
+  // gold Ztt: i!==void 0&&M()?i.refreshKnownDead:wl()&&TYe()
+  // No local M() inject. wl has if(Wd())return!1 — skip expired when profile is active.
+  if (isAnthropicAuthEnabled() && !profileActive && isStatusOauthRefreshDead()) {
+    const expired: Property[] = [{ label: 'Login', value: 'Expired \u2014 log in again' }];
+    const oauth = getOauthAccountInfo();
+    if (oauth?.organizationName && !process.env.IS_DEMO) {
+      expired.push({
+        label: 'Organization',
+        value: oauth.organizationName,
+      });
+    }
+    if (oauth?.emailAddress && !process.env.IS_DEMO) {
+      expired.push({
+        label: 'Email',
+        value: oauth.emailAddress,
+      });
+    }
+    return expired;
   }
 
   const properties: Property[] = [];
@@ -375,6 +425,14 @@ export function buildAccountProperties(): Property[] {
     properties.push({
       label: 'API key',
       value: accountInfo.apiKeySource,
+    });
+  }
+
+  // densable Ztt: if(Wd())s.push({label:"Profile",value:AJe()})
+  if (profileActive) {
+    properties.push({
+      label: 'Profile',
+      value: describeAnthropicProfile(),
     });
   }
 

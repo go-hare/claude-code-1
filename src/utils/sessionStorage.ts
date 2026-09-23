@@ -17,6 +17,7 @@ import {
   rm as fsRm,
   stat,
   unlink,
+  utimes as fsUtimes,
   writeFile,
 } from 'fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
@@ -2142,6 +2143,24 @@ async function tryAppendRaw(filePath: string, data: string): Promise<boolean> {
 }
 
 /**
+ * densable `dpe` — move an existing same-id transcript aside before relocate.
+ * Returns the aside path, or undefined when the destination is absent.
+ */
+async function setAsideExistingTranscript(
+  targetFile: string,
+): Promise<string | undefined> {
+  try {
+    await stat(targetFile)
+  } catch (e) {
+    if (isFsInaccessible(e)) return undefined
+    throw e
+  }
+  const aside = `${targetFile}.superseded-${Date.now()}`
+  await renamePathWithCrossDeviceFallback(targetFile, aside)
+  return aside
+}
+
+/**
  * densable tNt — rehome the current session transcript under the project dir
  * for the current originalCwd (after chdir / setOriginalCwd).
  *
@@ -2199,14 +2218,44 @@ export async function relocateSessionTranscript(): Promise<void> {
     await project.flush()
     await mkdir(targetProjectDir, { recursive: true, mode: 0o700 })
 
+    let sameInode = false
+    try {
+      const sourceStat = await stat(currentFile)
+      const destStat = await stat(targetFile)
+      sameInode =
+        sourceStat.dev === destStat.dev && sourceStat.ino === destStat.ino
+    } catch (e) {
+      if (!isFsInaccessible(e)) throw e
+    }
+    const setAside = sameInode
+      ? undefined
+      : await setAsideExistingTranscript(targetFile)
+
     let jsonlMoved = true
     try {
       await renamePathWithCrossDeviceFallback(currentFile, targetFile)
     } catch (e) {
       if (isFsInaccessible(e)) {
+        if (setAside !== undefined) {
+          await fsRename(setAside, targetFile).catch(restoreErr => {
+            logForDebugging(
+              `relocateSessionTranscript: could not restore set-aside destination after ENOENT move: ${restoreErr}`,
+              { level: 'warn' },
+            )
+          })
+          throw e
+        }
         logForDebugging(`relocateSessionTranscript: old file missing: ${e}`)
         jsonlMoved = false
       } else {
+        if (setAside !== undefined) {
+          await fsRename(setAside, targetFile).catch(restoreErr => {
+            logForDebugging(
+              `relocateSessionTranscript: could not restore set-aside destination after failed move: ${restoreErr}`,
+              { level: 'warn' },
+            )
+          })
+        }
         throw e
       }
     }

@@ -1,0 +1,74 @@
+=== pp8hjrn6 / 81n9r8qk near uo ===
+chunk-pp8hjrn6 in (203e6, uo)=39 203635580,203671594,203676390,203794323,203803095,203812434,203835291,203838253,203854208,203863592,203878845,203893144,203902947,203907431,203910658,203925666,203936183,203948351,203951722,203954943,203969231,203992451,203996897,203999990,204016378,204039209,204061451,204064373,204081129,204093222,204120705,204150537,204167440,204170195,204235508,204533185,204536633,204601726,204640406
+  @203635580 f}from"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-x3jf6yvv.js";import{pt,Se,IW}from"B
+  @203671594 g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{l}from"B:/~BUN/root/chunk-gxt9hrbz.js";import{n}from"B
+  @203676390 n}from"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-0aa88a5x.js";import"B:/~BUN/root/ch
+  @203794323 import"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-0aa88a5x.js";import"B:/~BUN/root/ch
+  @203803095 import"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-0aa88a5x.js";import"B:/~BUN/root/ch
+  @203812434 r}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{ku,l}from"B:/~BUN/root/chunk-gxt9hrbz.js";import{n}fro
+  @203835291 import"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-qacex9w1.js";import"B:/~BUN/root/ch
+  @203838253 import"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-0aa88a5x.js";import"B:/~BUN/root/ch
+chunk-81n9r8qk in (203e6, uo)=34 203636352,203676663,203794557,203803329,203834433,203838495,203854442,203863826,203879079,203902128,203906612,203910892,203925900,203935364,203947493,203955177,203968412,203991593,203996078,204000224,204015559,204039287,204060632,204064607,204080310,204093456,204120783,204149718,204166582,204235594,204532327,204537779,204602570,204640499
+  @203636352 import"B:/~BUN/root/chunk-81n9r8qk.js";import{ti}from"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN
+  @203676663 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+  @203794557 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+  @203803329 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+  @203834433 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-47zvrhaf.js";import"B:/~BUN/root/ch
+  @203838495 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+  @203854442 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+  @203863826 import"B:/~BUN/root/chunk-81n9r8qk.js";import"B:/~BUN/root/chunk-6zfqmy4g.js";import"B:/~BUN/root/ch
+import{_,f,g} in (203e6, uo)=5 203671563,203863561,203893113,204170164,204640375
+  @203671563 /chunk-5jem3zk6.js";import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{l}from"B:/~BUN/root/chu
+  @203863561 /chunk-6hf8n6ey.js";import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import"B:/~BUN/root/chunk-0aa8
+  @203893113 /chunk-6hf8n6ey.js";import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{o,t}from"B:/~BUN/root/c
+  @204170164 /chunk-6hf8n6ey.js";import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{l,v,Y}from"B:/~BUN/root
+  @204640375 /chunk-6hf8n6ey.js";import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js";import{ee}from"B:/~BUN/root/ch
+import{J,H$e} in (203e6, uo)=0 
+import{J, in (203e6, uo)=0 
+
+=== last @bun before L ===
+last @bun before L: -1
+
+=== search named import of _ g J in 2044-2046 ===
+matching imports 3
+  @204601686 import{_,f,g,Zs,In,Ic}from"B:/~BUN/root/chunk-pp8hjrn6.js"
+  @204640375 import{_,f,g}from"B:/~BUN/root/chunk-pp8hjrn6.js"
+  @204640472 import{J}from"B:/~BUN/root/chunk-81n9r8qk.js"
+
+=== qe before gRt ===
+extract @210227142 miss=false len=117 sha=b5610c4a2b58e94f
+function qe(m,s,f,p){return wur(m,s.abortController.signal,s.messages,f,{...s.taskRegistry.all()},s.readFileState,p)}
+---
+feedback"){let K=Tie(J);if(K.kind==="disabled")return m(K.reason),null;let te=fOn()??void 0;return e(gt,{abortSignal:s,messages:f,initialDescription:p,onDone:m,backgroundTasks:v,mode:K.kind,readFileState:g,surveyFeedbackSource:te,command:J})}function qe(m,s,f,p){return wur(m,s.abortController.signal,s.messages,f,{...s.taskRegistry.all()},s.readFileState,p)}async function gRt(m,s,f,p="/feedback"){let v=f?.trim()==="public"?"":f||"";return qe(m,s,v,p)}functi
+
+=== fke ===
+extract @179690054 miss=false len=657 sha=b3794a1bb093d67c
+function fke(e,t){let s=e.toLowerCase();if(!goe.has(s))return null;if(t.source==="github"){let r=t.repo||"";if(!r.toLowerCase().startsWith(`${te}/`)||r.split("/").includes(".."))return`The name '${e}' is reserved for official Anthropic marketplaces. Only repositories from 'github.com/${te}/' can use this name.`;return null}if(t.source==="git"&&t.url){if(Is(t.url))return null;return`The name '${e}' is reserved for official Anthropic marketplaces. Only repositories from 'github.com/${te}/' can use this name.`}return`The name '${e}' is reserved for official Anthropic marketplaces and can only be used with GitHub sources from the '${te}' organization.`}
+---
+
+=== class u italic ===
+class u hits 183516370
+class u @183516370 italicRel=1088
+class u{proc;constructor(r=process){this.proc=r}isJetBrainsIdeTerminal(){return this.proc.env.TERMINAL_EMULATOR==="JetBrains-JediTerm"}isMicrosoftWindowsTerminal(){return this.proc.platform==="win32"&
+
+=== export _ g J from telemetry ===
+e(e){return`hook_${n(e)}`}function _(e,u){s("tengu_feature_ok",{feature_name:c(e),...u})}function f(e,u,r){s("tengu_feature_bad",{...r,feature_name:c(e),error_code:u})}function g(e,u,r){s("tengu_feature_sad",{...r,feature_name:c(e),error_code:u})}async function Zs(e,u){await Ss("tengu_feature_ok",{feature_name:c(e),...u})}async function In(e,u,r){await Ss("tengu_feature_bad",{...r,feature_name:c(e),error_code:u})}async function Ic(e,u,r){await Ss("tengu_feature_sad"
+export{_,f,g hits 0
+
+=== J export neighborhood ===
+new g);function c(){return f.of(G().host)}function J(n,t,i){let r=m();if(!r)return;let o;try{o=e(n,t,l(i))}catch{o=e(n,t,{diagnostics_payload_failed:!0})}c().append(r,o)}function l(n){try{return(typeo
+"export{J," hits=1
+  @179949997 | failed`,{duration_ms:Date.now()-r}),o}} export{J,uvt,H$e}; .// @bun @bytecode // Claude Code is a Beta product per Anthropic's Com
+
+=== bug command load/call ===
+ink:!0}},bIe=nZn;var rZn={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conversation",argumentHint:"[report]",immediate:!0,requires:{ink:!0}},kIe=rZn;var oZn={type:"local-jsx",name:"cd",description:"Move this session to a new working directory",argumentHint:"<path>"},yOt=oZn;var sZn={type:"local",name:"clear"
+"aliases:[\"share\"]" hits=1
+  @187510876 | :!0,requires:{ink:!0}},bIe=nZn;var rZn={aliases:["share"],type:"local-jsx",name:"bug",description:"Report a bug or share your conv
+"m===\"share\"?\"/share\":\"/bug\"" hits=1
+  @210459733 | nc function n(o,a,e,m){return gRt(o,a,e,m==="share"?"/share":"/bug")}export{n as call}; .// @bun @bytecode // Claude Code is a Bet
+
+=== $Y neighborhood zS goe ===
+extract @187704335 miss=false len=98 sha=63d75c6a2ed3df0e
+function zS(e){let t=zp(e);return Zv().find((r)=>{let o=zp(r);return t===o||t.startsWith(o+W0t)})}
+---
+rty-plugins"]),goe=new Set([...n4t,...dJe]),vs=new Set(["knowledge-work-plugins","first-party-plugins"]);function u5(e,t,s){if(s!==void 0)return s;let r=e.toLow

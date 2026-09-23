@@ -6,6 +6,7 @@ import {
 import { logForDebugging } from '../utils/debug.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { getRunsDir } from './persistence.js'
+import { workflowReadableRoots } from './readableRoots.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -68,6 +69,7 @@ function makeHostFactory(): WorkflowPorts['hostFactory'] {
       // resolution (scriptPath/name) and does not affect the agent's execution cwd
       // (the agent gets its own cwd via the toolUseContext inside the host bundle).
       cwd: getProjectRoot(),
+      readableRoots: workflowReadableRoots(),
       budgetTotal: null, // turn-level budget injection point (read from settings in the future)
       ...(ctx.toolUseId ? { toolUseId: ctx.toolUseId } : {}),
     }

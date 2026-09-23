@@ -1,0 +1,11 @@
+# gold-248-gc-stop-x
+when=2026-09-20T14:44:56.878Z
+
+## before-stop-job @192191400
+ extends Error{constructor(i){super(i);this.name="FleetActionUnconfirmedError"}}function cp(i,d,m,w,S){return[{key:"x",label:"stop",bands:["active","blocked"],run:async(h)=>{d(h.id);let C=new Date().toISOString(),x=m((A)=>A.map((F)=>F.id===h.id&&!Di(F.state)?{...F,state:{...F.state,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:F.state.firstTerminalAt??C},activity:"stopped"}:F),void 0,h.id);try{let A=await K7(h.id,h.state,void 0,S);if(!A.confirmed)throw f("fleet_view_stop_job","kill_unconfirmed"),new Fr(A.error??"worker may still be running");s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)}),b("fleet_view_stop_job");let F=Kn(h.id),T=await nr(F,S);if(T&&!Di(T))await ps(F,{...T,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:T.firstTerminalAt??C},S)}finally{x?.(),i()}}},{key:"x",label:"del
+
+## archive-key-hunt @192193200
+ \u2014 git no longer recognized it; the session was deleted`}}]}N();import{basename as Py}from"path";N();function pp(i){let[d,m]=u([]);k(()=>{if(Kt()||_t())return;if(!cle())return;let w=!1;return Q$t().then(async(S)=>{if(w||!S)return;let h={type:S.url.startsWith("ws:")?"ws-ide":"sse-ide",url:S.url,ideName:S.name,authToken:S.authToken,ideRunningInWindows:S.ideRunningInWindows,scope:"dynamic"};if(await nRe(),w||ss("ide",h))return;let{clearServerCache:C,connectToServer:x}=import.meta.require("B:/~BUN/root/chunk-34g31d31.js").mcpClientModule(),A=await x("ide",h);if(w)return;if(A.type!=="connected")C("ide",h).catch(()=>{});m([A])}),()=>{w=!0,X5e()}},[]),EJe(d,i)}function Bb(Y_){return Y_.sessionModel}function nl(j_){let kn=g(35),{editor:q_,layout:z_,simpleView:Ya,dispatchDefaults:fp,targetCwd:fs,launcherCwd:mp,canonicalLauncherCwd:gp,originJobId:hp}=j_,{columns:Jr}=we(),Qa=Ze(q_,Bb),{compact
+
+## bands-active @192191200
+ion \u2014 ${l(T)}`)})}function Lr(i,d,m){s("tengu_bg_agent_action",{action:c(i),source:v("fleet"),jobSessionId:ke(d.sessionId),agent:d.template,jobState:d.state,tempo:c(d.tempo),...m,...!1})}class Fr extends Error{constructor(i){super(i);this.name="FleetActionUnconfirmedError"}}function cp(i,d,m,w,S){return[{key:"x",label:"stop",bands:["active","blocked"],run:async(h)=>{d(h.id);let C=new Date().t

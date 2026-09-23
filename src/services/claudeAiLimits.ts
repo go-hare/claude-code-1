@@ -151,10 +151,12 @@ type RawWindowUtilization = {
 type RawUtilization = {
   five_hour?: RawWindowUtilization
   seven_day?: RawWindowUtilization
+  /** densable 2.1.251 jL().overage — 0–1 utilization, unix-seconds reset. */
+  overage?: RawWindowUtilization
 }
 let rawUtilization: RawUtilization = {}
 
-const RAW_UTILIZATION_KEYS = ['five_hour', 'seven_day'] as const
+const RAW_UTILIZATION_KEYS = ['five_hour', 'seven_day', 'overage'] as const
 
 /**
  * densable 2.1.243 `Y0a` — drop windows whose `resets_at` has passed.
@@ -178,11 +180,15 @@ export function getRawUtilization(): RawUtilization {
   return selectOpenRawUtilization(rawUtilization)
 }
 
-function extractRawUtilization(headers: globalThis.Headers): RawUtilization {
+export function extractRawUtilization(
+  headers: globalThis.Headers,
+): RawUtilization {
   const result: RawUtilization = {}
   for (const [key, abbrev] of [
     ['five_hour', '5h'],
     ['seven_day', '7d'],
+    // Same header family as mockRateLimits overage-utilization / overage-reset.
+    ['overage', 'overage'],
   ] as const) {
     const util = headers.get(
       `anthropic-ratelimit-unified-${abbrev}-utilization`,

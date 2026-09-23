@@ -1,0 +1,72 @@
+# gold-248-16-fh-fields3
+when=2026-09-20T08:50:50.236Z
+
+## needle "Tl.get(" n=2 192212863,192214052
+## Tl.get( @192212863
+Boolean(at.state.pinned)||jn(at.state,ql)==="needs",refusal:Tl.get(at.id),srLabel:Vn(at.activity,at.state.tempo,ql,$l,Xt,at.state.pinned===!0)})},at.id)}let EC=En?.kind==="assign"&&En.jobId===at.id;let CC=e(o,{ref:Xt?In:void 0,width:"100%",
+
+## Tl.get( @192214052
+pinned"&&Ke.group!==Lw&&Ke.group!==fy}:void 0,deleteRefused:Tl.get(at.id),attaching:Zp===at.id?"armed":ef.has(at.id)?"warming":!1})},at.id);return r(L,{children:[CC,EC&&Sf]})}),ho[30]=zr,ho[31]=Zp,ho[32]=Dl,ho[33]=Cn,ho[34]=hf,ho[35]=Xp,ho[
+
+## needle "deleteRefused:" n=2 192197171,192214038
+## deleteRefused: @192197171
+:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.te
+
+## deleteRefused: @192214038
+&&Ke.group!=="pinned"&&Ke.group!==Lw&&Ke.group!==fy}:void 0,deleteRefused:Tl.get(at.id),attaching:Zp===at.id?"armed":ef.has(at.id)?"warming":!1})},at.id);return r(L,{children:[CC,EC&&Sf]})}),ho[30]=zr,ho[31]=Zp,ho[32]=Dl,ho[33]=Cn,ho[34]=hf
+
+## needle "overlaidLoadLanded" n=1 192267120
+## overlaidLoadLanded @192267120
+,remoteListLoaded:me,pendings:be,prStatuses:Te,loopKicks:ge,overlaidLoadLanded:de}=Ze(Q),[re]=u(()=>Wi(X,Q,T)),{focusedIdx:He,hoverFocusIdx:tt,collapsed:Ge,capExpanded:wt}=Ze(re),Me=!1,[he]=u(()=>og(X,Me)),{groupMode:et,activeTab:ut,groupEd
+
+## needle "!de&&" n=0 
+## needle "de?" n=6 192192586,192215716,192227444,192246171,192269588,192284181
+## de? @192192586
+WorktreeDir,!x&&!A)throw f("fleet_view_delete_job",V.errorCode??"delete_unconfirmed"),w(h.id,V.error??"worker may still be running"),new Fr(V.error??"worker may still be running")}finally{C?.(),i()}if(x){if(P)y("fleet_view_delete_job","work
+
+## de? @192215716
+rn rI.collapsed}function yw(iI){return iI.settings.voice?.mode??"hold"}function Sw(sI){return sI.voiceState}function kw(aI){return aI.voiceWarmingUp}function dd(qC){let Jf=g(40),{owners:zC,layout:YC,simpleView:li,dispatchDefaults:Os,groupIn
+
+## de? @192227444
+ply)||void 0:void 0,et=E0(),ut=j((ce)=>ce.settings.voice?.mode??"hold"),Ie=xt(),Fe=E(null),Ve=iX();k(()=>()=>{Fe.current?.(),Fe.current=null},[]);let{query:We,queryRef:ze,setQuery:lt,cursorOffset:yt,cursorOffsetRef:Ft,setCursorOffset:Ct,han
+
+## de? @192246171
+ og(i,d){if(i.view)return i.view;let m=oe().fleetViewGroupMode??"state";return i.view=new tg({groupMode:m==="group"&&!d?"state":m})}function ng(i){if(i.originJobId===void 0)return{kind:"exit"};if(i.originSpawn!==void 0&&!i.originSpawn.settl
+
+## needle ",de)" n=0 
+## needle "de&&" n=2 192257841,192261763
+## de&& @192257841
+i,d.key==="up"?-1:1);return}if(d.ctrl&&d.key==="r"){if(Je(),de&&X?.kind==="header"&&X.group!==Lw&&X.group!=="pinned"&&X.group!==fy){De(X.group),Ut(),h.openGroupEdit({kind:"rename",from:X.group},!0);return}if(!Q||Ve.some((Re)=>Re.id===Q.id))
+
+## de&& @192261763
+n}if(d.ctrl&&d.key==="x"){if(Je(),W.length>0)return;if(!re&&de&&X?.kind==="header"){if(X.group==="pinned"||X.group===Lw||X.group===fy){vt(`${X.group==="pinned"?"Pinned":X.group===Lw?"Ungrouped":"Past"} is reserved \u2014 can't ungroup`);ret
+
+## needle "de||" n=0 
+## needle "if(de" n=6 192252090,192285353,192286025,192286383,192287340,192287954
+## if(de @192252090
+ye){let be=new Set(C.map((de)=>de.id)),Te=0;for(let de of h)if(de.kind==="job"&&de.group===V.group&&!be.has(de.job.id))xe.set(de.job.id,Te++);let ge=xe.get(Y.id);xe.set(Y.id,xe.get(Z.id)),xe.set(Z.id,ge)}else xe.set(Y.id,ye),xe.set(Z.id,le)
+
+## if(de @192285353
+void 0,d?.storageV5));let de=xe.jobs?.find((re)=>re.id===K);if(de){let re=performance.now(),He=ru();wpe(He,"fleet",d?.storageV5).catch(()=>{}),ge={type:"open",job:de,respawnResult:await bn(de.id,{knownState:de.state},d?.storageV5),gestureT0
+
+## if(de @192286025
+:d?.storageV5})},"agents-list")}))});ge=void 0;let re=b_e();if(de.type==="back"){P.unmount();break}if(re&&de.type==="open")_o.get(process.stdout)?.handoffAltScreen();if(B()==="windows"&&de.type==="open")_o.get(process.stdout)?.handoffRawMod
+
+## if(de @192286383
+pen"&&de.job.id!==K)W=!1;if(K=void 0,de.type==="done")break;if(de.type==="login"){let{getLoginStartingMessage:he,Login:et}=await import("B:/~BUN/root/chunk-bdmc0pys.js");P=await Qme(nv(!1));let ut=await Promise.race([new Promise((Ie)=>{P.re
+
+## needle "if(!de" n=0 
+## needle "nf[" n=1 192213304
+## nf[ @192213304
+{job:at,isFocused:Xt,focusFg:ii,isOrigin:at.id===Al,logTail:nf[at.id],cols:ei,status:xs(at),heldInTerminal:or.terminalHolderOf(at)!==void 0,showVerb:!Cn,loopKickCount:Is.has(at.id)?Cs.get(at.state.sessionId)?.count:void 0,age:Hn(at,Is.has(a
+
+## needle "not deleted" n=2 192193144,192200861
+## not deleted @192193144
+ ${K}`),`Worktree kept at ${A} \u2014 ${K}; the session was not deleted`}if(P)return`Worktree directory left at ${P} \u2014 git no longer recognized it; the session was deleted`}}]}N();import{basename as Py}from"path";N();function pp(i){let
+
+## not deleted @192200861
+r(t,{wrap:"truncate",children:[e(t,{color:"error",children:"not deleted"}),r(t,{dimColor:!0,children:[" \xB7 ",zn]})]}):$o?e(t,{dimColor:!0,wrap:"truncate",children:"opening\u2026"}):Wr?e(t,{wrap:"truncate",children:r(ue,{children:[e(t,{col
+
+## function Di( 182998174
+## Di @182998174
+function Di(e){return Nw(e.state)&&e.tempo!=="active"}function sS(e){return e.template==="exec"&&e.respawnFlags.length===0}function yIe(e){return e.state==="blocked"&&!sS(e)}function aut(e){return e.backend==="daemon"&&!

@@ -1,0 +1,35 @@
+when=2026-09-20T03:38:58.171Z
+
+## "function cs(" count=1 192187506
+-- @192187506 lowId=K,S.updatePendings((ee)=>[...ee,Z]),cs(i,Z)}function cs(i,d){let{editor:m,roster:w,view:S,attach:h,deleteConfirm:C,storageV5:x,onAction:A,pendings:F}=i,T=m.setError,P=performance.now();if(!d||h.getSnapshot().attachingJobId!==null)return
+
+## "cs=(" count=0 
+
+## "keepQuery" count=3 192188109,192189598,192287262
+-- @192188109 iew_open");return}A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:{ok:!0,short:d.id,state:d.state},gestureT0:P});return}if(w.terminalHolderOf(d)!==void 0){T(v$e),b("fleet_view_open");return}if(d.state.deadEpochReapedAt!==void 0
+-- @192189598 }if(X.ok||X.alive)A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:X,gestureT0:P,gestureId:Y});else if(X.errorCode==="fork_transcript_never_materialized")xx(Y,x).catch(()=>{}),y("fleet_view_open","fork_transcript_never_materiali
+-- @192287262 ess.stdout.write(WE())):()=>{};if(V=de.job.id,!de.keepQuery)me.dropDraft();h.agentLastUsedMigrationDone=!0;let Ge=Date.now(),wt;if(de.respawnResult===void 0&&de.gestureId===void 0)wt=ru(),wpe(wt,"fleet",d?.storageV5).catch(()=>{});let Me=d
+
+## "freshDispatch" count=2 192164773,192287490
+-- @192164773 t()}if(Ne)C.arm(Ut.id,null),F({type:"open",job:Ut,freshDispatch:!0});else if(w.reload(),!St)w.watchPendingJobDir(mt)},(Se)=>{if(St)CQe(ee,!1,Q,Te.get(ee),x);Oe(l(Se))})}else if(!De?.cwd&&De?.exec===void 0)if(Ie?.kind==="fold")S.followOrigin=nu
+-- @192287490 });let Me=de.respawnResult??await bn(de.job.id,de.freshDispatch?void 0:{knownState:de.job.state},d?.storageV5);if(n(`[FV-attach] respawnJob ${de.job.id}: ok=${Me.ok} alive=${!Me.ok&&Me.alive} err=${Me.ok?"":Me.error}`),Me.ok||Me.alive){Lr("att
+
+## "function dp(" count=1 192185070
+-- @192185070 ster.jobs,i.cwdFilter),i.parseScope)!==null}async function dp(i,d,m){let{editor:w,roster:S,selection:h,view:C,attach:x,storageV5:A,mountAt:F,canonicalLauncherCwd:T}=i,P=w.setError;if(x.getSnapshot().attachingJobId!==null||x.isPromoting(d.sess
+
+## "openNewSessionRow(" count=0 
+
+## function cs @192187506 sha=4b20925b9a65544b len=2690 missEnd=undefined
+hasKeepQuery=true hasDropDraft=false
+function cs(i,d){let{editor:m,roster:w,view:S,attach:h,deleteConfirm:C,storageV5:x,onAction:A,pendings:F}=i,T=m.setError,P=performance.now();if(!d||h.getSnapshot().attachingJobId!==null)return;let V=S.resumePromoteSessionId;if(V!==null&&d.state.sessionId!==V&&h.isPromoting(V))return;if(S.closeResumePicker(),F.some((X)=>X.id===d.id))return;if(d.state.backend==="peer"){T("Can't attach \u2014 this session is running in another terminal"),b("fleet_view_open");return}if(d.state.backend==="remote"){if(d.id.startsWith("remote-pending-")){T(Pr),b("fleet_view_open");return}A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:{ok:!0,short:d.id,state:d.state},gestureT0:P});return}if(w.terminalHolderOf(d)!==void 0){T(v$e),b("fleet_view_open");return}if(d.state.deadEpochReapedAt!==void 0&&Di(d.state)&&!sS(d.state)&&h.forkRefusedJobId!==d.id){if(h.deadEpochGoneJobId===d.id){T(ip),b("fleet_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h.deadEpochOfferedJobId=d.id;return}if(!X){h.forkRefusedJobId=null,h.restartOfferedJobId=null,h.deadEpochOfferedJobId=d.id,T(ja),s("tengu_fleetview_dead_epoch_offer",{}),b("fleet_view_open");return}h.deadEpochOfferedJobId=null}else if(h.deadEpochOfferedJobId===d.id)h.deadEpochOfferedJobId=null;let K=Ka(m,S,C,$a)&&h.forkRefusedJobId===d.id;if(K)h.forkRefusedJobId=null;let W=Ka(m,S,C,qa)&&h.restartOfferedJobId===d.id&&!sS(d.state);if(h.restartOfferedJobId===d.id)h.restartOfferedJobId=null;let Y=Pb();wpe(Y,"fleet",x).catch(()=>{}),h.arm(d.id,Y),T(null);let Z=h.nextRespawnAttempt(),ee=h.getWarming(d.id);if(!ee)ee=bn(d.id,{knownState:d.state,...K&&{forceRefusalRetry:!0},...W&&{forceUnresponsive:!0,replyOnResume:d.state.tempo==="active"}},x),h.trackWarming(d.id,ee);ee.then((X)=>{if(!h.isCurrentRespawnAttempt(Z)){xx(Y,x).catch(()=>{});return}if(h.disarm(),W&&!X.ok&&X.alive){y("fleet_view_open","restart_stop_unconfirmed"),xx(Y,x).catch(()=>{}),h.restartOfferedJobId=d.id,T(`${X.error} \u2014 press Enter to try the restart again`);return}if(X.ok||X.alive)A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:X,gestureT0:P,gestureId:Y});else if(X.errorCode==="fork_transcript_never_materialized")xx(Y,x).catch(()=>{}),y("fleet_view_open","fork_transcript_never_materialized"),h.forkRefusedJobId=d.id,T($a);else if(X.errorCode==="resume_session_live_elsewhere")xx(Y,x).catch(()=>{}),y("fleet_view_open","resume_session_live_elsewhere"),T(X.error);else if(X.errorCode==="dead_epoch_transcript_gone")xx(Y,x).catch(()=>{}),y("fleet_view_open","dead_epoch_transcript_gone"),h.deadEpochGoneJobId=d.id,T(ip);else f("fleet_view_open","respawn_failed"),T(X.error),xx(Y,x).catch(()=>{})})}
+
+## Lc-newsession-tail @192165253
+ndings((Ye)=>Ye.map((pt)=>pt.id===mt?Ut:pt));if(St)w.kick(Se.sessionId,Se.jobId);if(Qt){let Ye=!1;if(_e((pt)=>{let Gt=Date.now(),ce=pt.agentLastUsed?.[Qt];if(ce!==void 0&&Gt-ce<60000)return pt;return Ye=!0,{...pt,agentLastUsed:{...pt.agentLastUsed??{},[Qt]:Gt}}},x),Ye)et()}if(Ne)C.arm(Ut.id,null),F({type:"open",job:Ut,freshDispatch:!0});else if(w.reload(),!St)w.watchPendingJobDir(mt)},(Se)=>{if(St)CQe(ee,!1,Q,Te.get(ee),x);Oe(l(Se))})}else if(!De?.cwd&&De?.exec===void 0)if(Ie?.kind==="fold")S.followOrigin=null,S.followId=null,S.expandCap(Ie.group),s("tengu_fleetview_fold_expand",{hidden_count:Ie.hidden,ms_since_mount:Date.now()-ut});else if(Ie?.kind==="header"){if(Ve)return;S.followOrigin=Ie.group,S.followId=null,We(Ie.group)}else if(Ie?.kind==="earlier")ze(Ie.entry,"section");else if(Ie?.kind==="newsession")lt(Ie.origin);else yt(Fe)}function Jc(i,d){let{editor:m,disp
+
+## ag sha=c97cb5fcc4db9c66 len=10676
+newsession idx=8931
+ull&&Oe!==void 0&&me.pending.id!==Oe.id)me.disarm();Yd(i,"x",Oe);return}if(Ge)return;if(d.key==="tab"){if(Je(),We)return;if(!m.getSnapshot().query&&m.getSnapshot().mode==="prompt"&&K.length>0)St((Re)=>!Re);else if(W.length>0)Z(Y());return}if(d.key==="right"&&!d.shift&&!m.getSnapshot().query&&m.getSnapshot().mode==="prompt"&&!Ge){if(Je(),X?.kind==="earlier")le(X.entry,"section");else if(X?.kind==="newsession")ye(X.origin);else xe(Q);return}if((d.meta||d.superKey)&&d.key>="1"&&d.key<="9"){Je();let Re=Number(d.key),Oe=be.find((Se)=>Se.kind==="job"&&Se.origin===ge&&--Re===0);if(Oe?.kind==="job")xe(Oe.job);return}if(d.name==="return"){Lc(i.submit,d);return}if(d.ctrl&&d.key==="x"){if(Je(),W.length>0)return;if(!re&&de&&X?.kind==="header"){if(X.group==="pinned"||X.group===Lw||X.group===fy){vt(`${X.group==="pinned"?"Pinned":X.group===Lw?"Ungrouped":"Past"} is reserved \u2014 can't ungroup`);retur
+willInsertNewline idx=-1
+
+## 247 same-up-sig hits=0 
+## 247 fleet_view_new_session hits=6

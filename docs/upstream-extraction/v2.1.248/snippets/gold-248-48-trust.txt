@@ -1,0 +1,192 @@
+# gold-248-48-trust  densable 2.1.248 #48
+# when=2026-09-20T02:52:59.108Z
+
+## #48 y=65534 wide @182939595
+.js";import{Hn,LC}from"B:/~BUN/root/chunk-e58tkaqf.js";import{a}from"B:/~BUN/root/chunk-yj0qewn4.js";import{B}from"B:/~BUN/root/chunk-m0p20t24.js";import{Ko}from"B:/~BUN/root/chunk-36v26nmg.js";var y=65534;import{readFile as k}from"fs/promises";async function _(){return}function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writeFileSync as V}from"fs";import{chmod as x,lstat as m,mkdir as d,readdir as w,readFile as D,rm as F,utimes as W}from"fs/promises";import{connect as X}from"net";import{basename as H,dirname as R,join as i,resolve as G}from"path";function c(){return i(ge(),"daemon")}function Y(){return A("sha256").update(G(ge())).digest("hex").slice(0,8)}function QK(){let e=process.getuid?.()??0,n=a.TERMUX_VERSION&&a.PREFIX?i(a.PREFIX,"tmp"):"/tmp";return i(n,`cc-daemon-${e}`,Y())}var J=/^[a-f0-9]{16}$/,Z=Ko(()=>{let e=i(c(),"pipe.key");for(let n=0;n<8;n++){let t;try{let o=L(e);if(!o.isFile()||o.size>4096){try{z(e,{recursive:!0,force:!0})}catch{}t="invalid"}else t=K(e,"utf8").trim()}catch(o){if(!Q(o))throw o}if(t!==void 0){if(J.test(t))return t;if(t===""&&n<3)continue;let o=h(8).toString("hex");return LC(e,o,384),o}let r=h(8).toString("hex");j(c(),{recursive:!0,mode:448});try{return V(e,r,{flag:"wx",mode:384}),r}catch(o){if(T(o)!=="EEXIST")throw o}}throw Error("daemon pipe.key is not a valid nonce")},()=>ge());function U(e){return`\\\\.\\pipe\\cc-daemon-${Z()}-${e}`}function Ig(e){return e.replace(/cc-daemon-[0-9a-f]{16}/g,"cc-daemon-*")}function TIe(e){if(e instanceof Error){if(e.message=Ig(e.message),typeof e.stack==="string")e.stack=Ig(e.stack)}return e}function E(){return i(c(),"control.key")}async function o4n(){let e=E();try{let t=await m(e);if(t.isFile()&&t.size<=4096){let r=(await D(e,"utf8")).trim();if(r)return r}else await F(e,{recursive:!0,force:!0}).catch(()=>{})}catch(t){if(!Q(t))throw t}let n=h(16).toString("hex");return await d(c(),{recursive:!0,mode:448}),await Hn(e,n,384),n}async function oZ(){try{let e=await m(E());if(!e.isFile()||e.size>4096)return;return(await D(E(),"utf8")).trim()||void 0}catch{return}}async function i4n(){let e=c();if(B()==="windows"){await d(e,{recursive:!0}),await x(e,448).catch(()=>{});return}await d(e,{recursive:!0,mode:448}),b();let n=process.getuid?.(),t=await m(e);if(n!==void 0&&t.uid!==n)throw Error(`refusing to use daemon dir: ${e} is owned by uid ${t.uid}`);if((t.mode&511)!==448)await x(e,448)}async function GGe(){if(B()==="windows")return;let e=QK();await d(e,{recursive:!0,mode:448});let n=new Date;await W(e,n,n).catch(()=>{}),await I([R(e),e])}var U1t="ENOTOWNED";async function I(e){let n=process.getuid?.();b();for(let t of e){let r=await m(t);if(n!==void 0&&r.uid!==n)throw Object.assign(Error(`refusing to bind: ${t} is owned by uid ${r.uid}`),{code:U1t});if((r.mode&511)!==448)await x(t,448)}}var tsn="refusing to use the daemon socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)";function b(){if(F1t())throw Object.assign(Error(tsn),{code:U1t})}async function s4n(e){if(B()==="windows"){await d(e,{recursive:!0}).catch(()=>{});return}await GGe();let n=[Xye(),B1t()];for(let t of n)await d(t,{recursive:!0,mode:448});if(!n.includes(e)){if(await d(e,{recursive:!0,mode:448}).then(()=>!0,()=>!1))n.push(e)}await I(n)}function a4n(){if(B()==="windows")r
+
+## #48 v uid_map @182939666
+len=318 sha=f23451aeb8af7775
+function v(e){let n=[];for(let t of e.split(`
+`)){if(t.trim()==="")continue;let r=t.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}
+
+## #48 N identity @182939984
+len=79 sha=4080e48af3fab479
+function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}
+
+## #48 C overflowuid @182940100
+len=56 sha=1c3d925efc2067c0
+ k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}
+
+## #48 P parse @182940157
+len=112 sha=f0e48cdda0d992f1
+function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}
+
+## #48 r4n getuid @182940269
+len=76 sha=73d0de3055a00833
+async function r4n(){let e=process.getuid?.();if(e===void 0)return;return e}
+
+## #48 F1t uidsCollapse @182940345
+len=66 sha=d19d877b6f6b43f0
+function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}
+
+## #48 M stub @182940411
+len=23 sha=70381416e3b04aba
+function M(e){return!1}
+
+## /proc/self/uid_map needle="/proc/self/uid_map" hits=0
+
+## uid_map needle="uid_map" hits=0
+
+## overflowuid needle="overflowuid" hits=2
+- @97792901 ........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.........browser-sdk.js.......A..agentSdk.js....._
+- @182940121 [0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:void 0}async functi
+
+## innerStart needle="innerStart" hits=7
+- @97792572 ....E[..control.key.....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......
+- @182939940 0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await
+- @182940024 rStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim(
+- @213393300 unction Xn(t,e,i,s){const n=vi(t.options.borderRadius,["outerStart","outerEnd","innerStart","innerEnd"]);const o=(i-e)/2,a=Math.min(o,s*e/2),r=t=>{const e=(i-Math.min(o,t))*s/2;return Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),
+- @213393483  Z(t,0,Math.min(o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y
+- @213393498 (o,e))};return{outerStart:r(n.outerStart),outerEnd:r(n.outerEnd),innerStart:Z(n.innerStart,0,a),innerEnd:Z(n.innerEnd,0,a)}}function qn(t,e,i,s){return{x:i+t*Math.cos(e),y:s+t*Math.sin(e)}}function Kn(t,e,i,s,n,o){const{x:a,y:r,startAngle:l
+
+## hostStart needle="hostStart" hits=2
+- @97792592 ....C....tokens.json........pty-.......control.sock
+.......innerStart..	...m...hostStart........o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind
+- @182939953 SafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;n.push({innerStart:o,hostStart:s,count:u})}return n}function N(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys
+
+## uidsCollapse needle="uidsCollapse" hits=4
+- @97792400 ed (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal.......2..uidsCollapse....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.
+- @179894498 /promises";import{hostname as e}from"os";class o{pidSpace=null;pidDomain=void 0;uidsCollapse=null}var qce=new o;function Qgt(){if(qce.pidSpace===null){let n="";qce.pidSpace=`${e()}${n===""?"":"#"+n}`}return qce.pidSpace}function hY(){return
+- @182940371 et e=process.getuid?.();if(e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFil
+- @182940398 e===void 0)return;return e}function F1t(){return qce.uidsCollapse??=M(ce()),qce.uidsCollapse}function M(e){return!1}import{createHash as A,randomBytes as h}from"crypto";import{lstatSync as L,mkdirSync as j,readFileSync as K,rmSync as z,writ
+
+## canonical needle="canonical" hits=460
+- @66718173 omise) ? @peekPromiseStatus(promise) : 1];
+})
+(function () {"use strict";
+  let canonical = [
+    "--conditions",
+    "--diagnostic-dir",
+    "--disable-warning",
+    "--dns-result-order",
+    "--enable-source-maps",
+    "--import",
+    "--
+- @66718962 ,
+    "--use-openssl-ca",
+    "--use-system-ca",
+    "--zero-fill-buffers"
+  ], canonicalSet = new Set(canonical);
+
+  class NodeEnvironmentFlagsSet extends Set {
+    add() {
+      return this;
+    }
+    delete() {
+      return !1;
+    }
+   
+- @66718985 ",
+    "--use-system-ca",
+    "--zero-fill-buffers"
+  ], canonicalSet = new Set(canonical);
+
+  class NodeEnvironmentFlagsSet extends Set {
+    add() {
+      return this;
+    }
+    delete() {
+      return !1;
+    }
+    clear() {}
+    has(key
+- @66719300 _", "-"), /^--?[^-]/.test(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(
+- @66719373 , ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback
+- @66719443       if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(
+
+## root-equivalent needle="root-equivalent" hits=0
+
+## root equivalent needle="root equivalent" hits=0
+
+## nobody needle="nobody" hits=20
+- @95918262 round app_* tools.....Q...Taking over the screen needs the user's approval, and nobody is present to answer (unattended session). Stay with the app_* tools on already-running granted apps...1...m...Taking over the screen needs your approval
+- @96718344 reate: ......M..no plugin-provided interfaces.......&'T.; $ built for ......o|\.nobody......A...hooks worker respawn: .........., which withheld $..3......, did not come back; the withholding held until now.....@.4.plugin_function_hooks_wo
+- @101481417 t..........-allowunencryptedauthentication.........-disablekeepalive........Ve.-nobodyprogress."...X.d.-preservefileauthorizationmetadata..........-resume.........-skipcertificatecheck...........-skipheadervalidation.......g9..-skiphttperro
+- @180357768 n keeps what it was created with) or `preference` (a display or host preference nobody would miss \u2014 the informational notice names these two), so a host may show them itself once or never; absent when nothing was left unapplied. `clien
+- @184845535 ength===0?"":`; ${g.join("; ")}`}; $ built for ${u.map((k)=>k.name).join(",")||"nobody"}`)}function uZe(e,t,r){for(let[o,u]of Object.entries(e??{})){let p=Object.hasOwn(t,o)?t[o]:void 0;for(let g of u.withheldBy??[])if(!r.includes(g)&&!(p?.
+- @184854048 .state);n(`hooks worker: respawning for ${u.map((E)=>E.pluginName).join(", ")||"nobody"} (${t})`);let p=[];for(let E of u)try{p.push(await Oc.loadEnvironment(e,E)),vl.bumpGeneration(e.state,E.pluginName)}catch(C){if(n(`hooks module ${E.plug
+
+## unmapped needle="unmapped" hits=18
+- @88446338 Promote.init_max_stream_data_bidi_remote.VectorDemote.Composite.samesite.Put an unmapped cell-like pointer (poisonedDeadOSRExitValue) into dead OSR exit values rather than jsUndefined, so accidental reads of dead variables crash at the acce
+- @94926765 your user-level ...
+....... config:
+
+..........There .......kt. also ..
+....vX. unmapped ......)lu. from the project-level .....0q. config in the repo where the import ran. Those are not listed here (project config can be authored by anyone
+- @97799488 cal' from null or undefined value.......].Q.mapped_target_unresolvable......t...unmapped$.......CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK.....{..catalog_flag	.....c.gb_listed...........walk_down_opus_lineup.......h...\[1m\]..%...Y...tengu_refusa
+- @98816547  the managed modelOverrides target ".5......." is server-unavailable; using the unmapped candidate........^@.e.n.f.o.r.c.e.A.v.a.i.l.a.b.l.e.M.o.d.e.l.s.:. .a.n. .a.d.m.i.n. .p.o.l.i.c.y. .s.o.u.r.c.e. .f.a.i.l.e.d. .t.o. .l.o.a.d.;. .e.n.f
+- @100506925 . ..& ......0.Review these:...F...u.F.Run /import-to-claude-code to finish the unmapped items interactively...<....Xx. were skipped (re-run /import to generate the helper skill).......d. warning-flagged ...,....... .h.e.l.d. .b.a.c.k. ..  
+- @180246849 els: the managed modelOverrides target "${we}" is server-unavailable; using the unmapped candidate`;if(!Be().has(ze))Be().add(ze),n(ze,{level:"warn"});return Ke}if(Ne!==Ke)return wW(we,k)?Ze(we):EO(we);if(mu(we)&&!wW(we,k))return EO(we);ret
+
+## overflow needle="overflow" hits=735
+- @66495043 iled to allocate heap memory.unmatched closing parenthesis.internal error: code overflow.missing closing parenthesis for condition.length of lookbehind assertion is not limited.a relative value of zero is not allowed.conditional subpattern 
+- @66496854 ttern number is too big.subpattern name expected.internal error: parsed pattern overflow.non-octal character in \o{} (closing brace missing?).different names for subpatterns of the same number are not allowed.(*MARK) must have an argument.n
+- @66885207 ess",
+  EAI_NONAME: "unknown node or service",
+  EAI_OVERFLOW: "argument buffer overflow",
+  EAI_PROTOCOL: "resolved protocol is unknown",
+  EAI_SERVICE: "service not available for socket type",
+  EAI_SOCKTYPE: "socket type not supported",
+
+- @66886299 etwork is down",
+  ENETUNREACH: "network is unreachable",
+  ENFILE: "file table overflow",
+  ENOBUFS: "no buffer space available",
+  ENODEV: "no such device",
+  ENOENT: "no such file or directory",
+  ENOMEM: "not enough memory",
+  ENONET: "
+- @66928120 xListeners(target);
+  if (m > 0 && handlers.length > m && !handlers.warned)
+    overflowWarning(target, type, handlers);
+}
+EventEmitterPrototype.addListener = function addListener(type, fn) {
+  return _addListener(this, type, fn, !1), this;
+- @66928829 n] = fn;
+  }
+  if (list.warned)
+    copy.warned = !0;
+  return copy;
+}
+function overflowWarning(emitter, type, handlers) {
+  if (!inspect)
+    inspect = (@getInternalField(@internalModuleRegistry, 119) || @createInternalModuleById(119)).ins
+
+## /proc/sys/kernel/overflowuid needle="/proc/sys/kernel/overflowuid" hits=2
+- @97792884 frame too large (........x.bad ctrl json........!..unknown frame kind .....o.g./proc/sys/kernel/overflowuid(...OM[.file:///B:/%7EBUN/root/chunk-d4ydbwdj.js....vi..<user-code>.........cli.js.......U..sdk.mjs.........browser-sdk.js.......A..
+- @182940104 innerStart===0&&e[0].count>=4294967295}async function C(){try{return P(await k("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function P(e){let n=e.trim();if(!/^\d+$/.test(n))return;let t=Number(n);return Number.isSafeInteger(t)?t:vo

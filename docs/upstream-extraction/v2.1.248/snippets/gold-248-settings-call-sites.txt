@@ -1,0 +1,30 @@
+# gold-248-settings-call-sites
+
+Official densable 2.1.248 SEA call sites for SettingsPrimer / SettingsOwner glue.
+Bodies: gold-248-SKn-primer.txt / gold-248-Gqe-z-load.txt / gold-248-_Ke-Ut-uo.txt /
+gold-248-SKn-chunk-fns.txt. Leftover map: gold-248-SKn-leftover-map.txt.
+
+## Call-site gap table (2026-09-21)
+
+| official | role | leftover | verdict |
+|----------|------|----------|---------|
+| `$pn(i,ra())` @191443858 init after safe env | assign SettingsPrimer | `settingsPrime` in `entrypoints/init.ts` | LAND |
+| `Npn(backend,ra())` @ init configs enable | start-up seed before SKn | `seedUserSettings` in `entrypoints/init.ts` | LAND |
+| early `_Ke(backend)` init_remote_settings_primed | Ut/uo remote view | `primeRemoteSettingsBackendView` in `entrypoints/init.ts` | LAND |
+| `nHe` @180749992 setup_hooks_snapshot | Gqe then hooks | `updateHooksConfigSnapshotUnderPrime` in `setup.ts` | LAND |
+| `nHe` setup_worktree | Gqe then hooks | same UnderPrime in `setup.ts` worktree | LAND |
+| `nHe` ExitWorktree restore | Gqe then hooks | UnderPrime in `ExitWorktreeTool.ts` | LAND |
+| `zan`/`uP`/`Yl` hooks refresh (D off) | invalidateAll + snapshot | `updateHooksConfigSnapshot` / UnderPrime fallback | LAND |
+| `/cd` after rehome `uP()` | Yl only (not Gqe) | `updateHooksConfigSnapshot` in `cdCommand.tsx` | LAND (thinner OK — official also non-Gqe) |
+| `applySettingsChange` hooks | Yl path | `updateHooksConfigSnapshot` | LAND |
+| `ra()` / `OS()`=`ra().mergedSettings` / `Yl` | owner accessors | `getSettingsOwner` / merged cache / `resetSettingsCache` | LAND |
+| fGt `invalidateAll` retain | primer gate | `settingsPrimerGate` + retain branch | LAND |
+| `L0n` deeplink `@191362512` `Gqe`+`uP(retain)` | `--deep-link-cwd-b64` | **invent-ban** — no deep-link host | BAN |
+| pluginMonitors `nHe(d, credentials)` | ≠ Gqe hooks nHe | **invent-ban** | BAN |
+| cloud attestation / deep helper consent beyond Ut stub | | **invent-ban** (Yv empty; no invent) | BAN |
+
+## Before this pass
+
+- Bodies LANDED; `$pn` / `Npn` had **no** production callers (tests only).
+- setup first hooks capture used `captureHooksConfigSnapshot` (no Yl/Gqe) — thinner than zan/nHe.
+- ExitWorktree restore used sync `updateHooksConfigSnapshot` — missing nHe when D on.

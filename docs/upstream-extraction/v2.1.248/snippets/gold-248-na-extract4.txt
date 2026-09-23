@@ -1,0 +1,82 @@
+# gold-248-na-extract4
+
+## #30 Ke-before-Xn @183208489
+.vscode_profile.ps1","microsoft.powershellise_profile.ps1",".bash_history",".zsh_history","fish_history","consolehost_history.txt",".python_history",".node_repl_history",".psql_history",".mysql_history"],zn=/(?:\.(?:pem|key|p12|pfx|keystore|jks)|_(?:rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml))$/,ke=".env",Vn=".claude.json",kt=["example","sample","template","dist"],Xn=new RegExp(`(?:${Ke})$`,"i"),bt=64,Jn=".git",gt="config";function ocn(e){let 
+
+## var Ke= hits=37
+- @183206850 var Ke=String.raw`\.sw[a-p]|\.un~|\.rej|\.save|\.tmp|\.temp|\.bak|\.old|\.orig|\.backup|\.~\d+~|~`;var Kn=[".ssh",".aws",".azure",".gnupg",".kube",".docker"],$n=[[".config","git"],
+
+## #30 Xn-Ke-assign @183208488
+n|toml))$/,ke=".env",Vn=".claude.json",kt=["example","sample","template","dist"],Xn=new RegExp(`(?:$
+
+## #30 last-Ke-before-Xn @183206854
+_platform",!0)}}var Ke=String.raw`\.sw[a-p]|\.un~|\.rej|\.save|\.tmp|\.temp|\.bak|\.old|\.orig|\.backup|\.~\d+~|~`;var Kn=[".ssh",".aws",".azure",".gnupg",".kube",".docker"],$n=[[".config","git"],[".config","gh"],[".conf
+
+## #33 f-map @191865059
+n);await y(o,t,e,r)}var f=new Map([["verbose",()=>!0],["debug",()=>!0],["debugToStderr",()=>!0],["debugFile",()=>!0],["axScreenReader",()=>!0],["workload",()=>!0],["sessionId",()=>!0],["name",()=>!0],["remoteControlSessionNamePrefix",()=>!0],["pluginDir",()=>!0],["pluginDirNoMcp",()=>!0],["pluginUrl",()=>!0],["addDir",()=>!0],["ide",()=>!0],["chrome",(t)=>t===!0],["model",()=>!0],["effort",()=>!0],["fallbackModel",()=>!0],["betas",()=>!0],["thinking",()=>!0],["thinkingDisplay",()=>!0],["maxThinkingTokens",()=>!0],["autocompact",()=>!0],["allowedTools",()=>!0],["dangerouslySkipPermissions",()=>!0],["allowDangerouslySkipPermissions",()=>!0],["enableAutoMode",()=>!0],["bare",()=>!0]]);function b(t){let e=t.parent;if(e===null)return[];let r=new Map;for(let n of e.options){let o=n.attributeName();if(r.has(o)||e.getOptionValueSource(o)!=="cli")continue;let i=e.getOptionValue(o),a=e.options.find((l)=>l.attributeNa
+
+## #33 y-startRemoteControl @191864432
+len=557 sha=d39a46e912f8b118
+async function y(t,e,r,n){let[{preflightTrustedDeviceBlocking:o},{shutdown1PEventLogging:i},{shutdownDatadog:a},{sleep:l},{exitWithError:s},{bridgeMain:d}]=await Promise.all([import("B:/~BUN/root/chunk-grq6v7c9.js"),import("B:/~BUN/root/chunk-a6q7kf96.js"),import("B:/~BUN/root/chunk-n9cphkwp.js"),import("B:/~BUN/root/chunk-d2127z51.js"),import("B:/~BUN/root/chunk-k2p8eem1.js"),import("B:/~BUN/root/chunk-myxmh790.js")]),u=await o(n);if(u)await Promise.race([Promise.all([i(),a()]),l(500,void 0,{unref:!0})]).catch(()=>{}),s(`Error: ${u}`);await d(e,r,n)}
+
+## #33 R-enter @191864989
+len=70 sha=00fd7cafee15239a
+async function R(t,e,r){let n=await m(),o=await g(n);await y(o,t,e,r)}
+
+## #40 pXt-head @196766972
+wasted wall-clock.`,pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \u2014 to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrations, audits, broad sweeps). The script is where you encode that structure: what fans out, what verifies, what synthesiz
+
+## #40 pXt-string endRel=17301
+len=17303 sha=498a85cdc7e27a20
+pXt=`# Workflow authoring reference
+
+A workflow structures work across many agents \u2014 to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrations, audits, broad sweeps). The script is where you encode that structure: what fans out, what verifies, what synthesizes.
+
+When you do call it, the right move is often **hybrid**: scout inline first (list the files, find the channels, scope the diff) to discover the work-list, then call Workflow to pipeline over it. You don't need to know the shape before the *task* \u2014 only before the *orchestration step*.
+
+Common single-phase workflows you can chain across turns:
+- **Understand** \u2014 parallel readers over relevant subsystems \u2192 structured map
+- **Design** \u2014 judge panel of N independent approaches \u2192 scored synthesis
+- **Review** \u2014 dimensions \u2192 find \u2192 adversarially verify (the review-changes example)
+- **Research** \u2014 multi-modal sweep \u2192 deep-read \u2192 synthesize
+- **Migrate** \u2014 discover sites \u2192 transform each (worktree isolation) \u2192 verify
+
+For 
+…
+2014 stamp results after the workflow returns, or pass timestamps via args. Fallback when no journal is available: Read agent-<id>.jsonl files in the transcript directory and hand-author a continuation script.`,o=`Before writing a script, load the \`${$w}\` skill \u2014 the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.`;
+
+## #41 A$-ttl @178817076
+len=814 sha=e64adecbbf14ad90
+function A$(i,u=300000,l){let o=(c)=>typeof u==="function"?u(c):u,e=new Map,t=new Map,a=async(...c)=>{let s=S(c),r=e.get(s);if(r&&l&&!l(r.value,r.timestamp)){if(r.refreshPromise)return r.refreshPromise;e.delete(s),r=void 0}let h=Date.now();if(!r){let f=t.get(s);if(f)return f;let g=i(...c);t.set(s,g);try{let m=await g;if(t.get(s)===g)e.set(s,{value:m,timestamp:Date.now(),refreshing:!1,lifetimeMs:o(m)});return m}finally{if(t.get(s)===g)t.delete(s)}}if(r&&h-r.timestamp>r.lifetimeMs&&!r.refreshing){r.refreshing=!0;let f=r,g=i(...c);return f.refreshPromise=g,g.then((m)=>{if(e.get(s)===f)e.set(s,{value:m,timestamp:Date.now(),refreshing:!1,lifetimeMs:o(m)})}).catch((m)=>{if(n(String(m),{level:"error"}),e.get(s)===f)e.delete(s)}),r.value}return e.get(s).value};return a.cache={clear:()=>{e.clear(),t.clear()}},a}
+
+## #41 304-skip-win @184550117
+}),Te=await Ie(g.redirectedListUrl??M),xe=aJt.has(Te.status)?Te.headers.get("location"):null,Fe=xe?new URL(xe,M):null;if(Fe?.origin===C)g.redirectedListUrl=Fe.href,Te=await Ie(Fe.href);if(N=Te.status,Te.status===304);else if(Te.ok){g.etag=Te.headers.get("etag"),L=!0;let Be=lJt().safeParse(await Te.json()),Ne=Be.success?Be.data[0]:void 0;if(Ne&&g.pr?.number!==Ne.number)g.reviewDecision="";g.pr=Ne?{number:Ne.number,url:Ne.html_url,isDraft:Ne.draft}:null}else{if(Te.status===401)Pfe(r.host);else if(Te.status===403||Te.status===429)JE().backOffFromResponse(Te);return f("github_pr_status_direct",Te.status===401?"unauthorized":Te.status===403||Te.status===429?"rate_limited":"http_error",{http_status:si(Te.status)}),n(`[ghPrStatus] REST list ${Te.status} on ${r.host}`,{level:"debug"}),"fetch-faile
+
+## #41 streak-uses @184546373
+ dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStrea
+
+## pollerNotModifiedStreak js
+- @184546378 xfe=60000;class dXe{#e=$e();bump={...this.#e,emit:()=>{this.pollerNotModifiedStreak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthSt
+- @184546457 reak=0,this.#e.emit()}};pollerDisabled=!1;pollerBadStreak=0;pollerNotModifiedStreak=0;directState=null;lastLoggedGhAuthState=null;baseRepoCache=void 0;prStatusByUrl=A$(_Jt,30000);ghBackoffUntil=0;last
+- @184547421 }reset(){this.pollerDisabled=!1,this.pollerBadStreak=0,this.pollerNotModifiedStreak=0,this.directState=null,this.lastLoggedGhAuthState=null,this.baseRepoCache=void 0,this.ghBackoffUntil=0,this.lastPer
+- @203021124 #r)return;if(d.enabled&&!C.enabled)this.#u=0,this.#e.shared.pollerNotModifiedStreak=0;if(d.focused!==C.focused&&this.#b()||d.isLoading!==C.isLoading||d.enabled!==C.enabled)this.#h()}#g(){this.#r=!0,th
+- @203021705 Disabled)return!1;if(this.#d===0)return!1;if(this.#e.shared.pollerNotModifiedStreak=0,this.#e.now()-this.#d>=p5e)this.#u=0,this.#d=0;return!0}#k(){if(this.#a++,this.#m)this.#m(),this.#m=null}#y(){if(t
+- @203022291 this.#e.getLastInteractionTime(),d?0:this.#u,this.#e.shared.pollerNotModifiedStreak)}async#T(d){if(d!==this.#a)return;let{now:C,shared:x}=this.#e,H=this.#e.getLastInteractionTime();if(this.#p!==H)this
+- @203022837 ll?this.#u+1:0,x.pollerBadStreak=ge?x.pollerBadStreak+1:0,x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0,this.#_(xe,me),x.pollerBadStreak>=f5e){x.pollerDisabled=!0,y("github_pr_status_dire
+- @203022866 eak=ge?x.pollerBadStreak+1:0,x.pollerNotModifiedStreak=Re?x.pollerNotModifiedStreak+1:0,this.#_(xe,me),x.pollerBadStreak>=f5e){x.pollerDisabled=!0,y("github_pr_status_direct","bad_streak_disabled");re
+
+## #43 TUn hits=1
+- #0 @184607964 ,8000)}}function kUn(){return dse()?.empty_tree_fallback_enabled!==!1}function TUn(){return dse()?.github_access_precheck_enabled!==!1}function tA(){return ICe()&&cDe()}fun
+
+## #43 linkedAccountAccess hits=11
+- #0 @94761453 indings (not a base branch): "...N.....6.Cannot destructure property 'linkedAccountAccess' from null or undefined value..........linkedAccountAccess.(.....W.file:///B:/%7EBUN/root
+- #1 @94761512  property 'linkedAccountAccess' from null or undefined value..........linkedAccountAccess.(.....W.file:///B:/%7EBUN/root/chunk-5jsn90ry.js.....^..tengu_ultrareview_awareness.....c
+- #2 @183081444  app not installed"),{appInstalled:!1,defaultBranch:null,transient:!1,linkedAccountAccess:"inconclusive",httpStatus:null};let r=await SC();if(!r){let u=yd();return n(u?"checkGithu
+- #3 @183081838 g app not installed"),{appInstalled:!1,defaultBranch:null,transient:u,linkedAccountAccess:"inconclusive",httpStatus:null}}let c=`${Vt().BASE_API_URL}/api/oauth/organizations/${r}/
+- #4 @183082336 installed on ${e}/${t}`),{appInstalled:d,defaultBranch:u,transient:!1,linkedAccountAccess:"ok",httpStatus:a.status}}return n(`GitHub app is not installed on ${e}/${t} (status is n
+
+## #43 be-call @193377282 lastFn=@-1
+## #43 be-call @193377282
+hangedFiles"],{timeout:5000,preserveOutputOnError:!1}),Mo(u.host)&&TUn()&&!Tt()?be(u.owner,u.name,d?.accessProbeBudgetMs??5000):null]);if(L){if(n(`ultrareview: 

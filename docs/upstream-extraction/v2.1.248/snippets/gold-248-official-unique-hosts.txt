@@ -1,0 +1,74 @@
+# gold-248-official-unique-hosts
+# when=2026-09-22 · SEA 2.1.248 (226708128)
+# 官方有体 / leftover 无对等宿主 → invent-ban（不造）
+# 与「leftover 合同差」（#19 文案 / #35 锁名 / Cwn≠Yk）分开：那些有宿主，故意钉差
+
+## A. 架构出口袋（Vk / Et / DYe）— 无可接线宿主
+
+| 官方 | 作用 | leftover 缺什么 | 类 |
+|------|------|-----------------|----|
+| `be`/`wr` @190739086 | durable subscribe Promise → `pendingOps` + `Vk(wr)` 10s drain | `pendingOps` 死字段 `Set<string>`；无 D9t/`be` | durable-exit |
+| `qd` @192241903 | fleet editor `draftForDisk` + `Ho.collapsed` → `AIt` storageV5 | 无 editor class / AIt / Ho；AgentView 仅 composer state | fleet-editor |
+| `Ma`/`kD` + planFile `DYe()` | storage-watch 失败/结束 → resubscribe，drain 后跳过 | **Ma/kD HAVE** on `watchFile` host (`config.ts`)；planFile watch 仍无宿主 | storage-watch |
+| `pendingWrites.fm()` (TIn) | errorLogSink async settle | leftover sync `appendFileSync` | other |
+| `lastGracefulShutdown` / `Jhe` (Aye) | cost exit 产品字段 | leftover costHook 无这些字段 | other |
+
+## B. 云 / Desktop / VSCode（N/A 或 invent-ban 第二份）
+
+| 官方 | 作用 | leftover | 类 |
+|------|------|----------|----|
+| `#32` cloud container credentials | 容器会话凭证启动 | 无 local-CLI 路径 | cloud N/A |
+| `#39` VSCode conversation host | VSCode 无会话 → 新会话 | CLI resume only | vscode N/A |
+| `#10` Desktop/Cowork `desktopSessionCleanupPeriodDays` | desktop-host transcript 豁免 | 仅 `cleanupPeriodDays` | desktop N/A |
+| `Hu()=[]` / `Zs=!1` | cloud list / remote tabs | leftover 已钉 `[]` / `showRemoteTabs:false`；不 invent 真 list | cloud |
+| `#30`/`#43` cloud upload / gh precheck 云半 | ultrareview 云路径 | local seed/precheck 已有；云半不 invent | cloud |
+| cloud attestation / deep helper consent (Yv) | settings 深同意 | Ut stub；不 invent | cloud |
+
+## C. Settings / deep-link / 旁路宿主
+
+| 官方 | 作用 | leftover 缺什么 | 类 |
+|------|------|-----------------|----|
+| `L0n` `--deep-link-cwd-b64` | deeplink → Gqe+uP(retain) | 无 deep-link argv 宿主 | other |
+| pluginMonitors `nHe(d, credentials)` | ≠ Gqe hooks nHe | 不同符号；不 invent | other |
+| `gqn` `gbGateSource` | tui relaunch gate 源 | leftover inject default false；无 gbGateSource | other |
+| `#40` `pXt` workflow-authoring skill body | SEA 有完整 skill | register/autoload 有；不 copy `pXt` body | other |
+
+## D. UI / 协议边角（官方多体，leftover 故意不扩）
+
+| 官方 | 作用 | leftover | 类 |
+|------|------|----------|----|
+| `#24` `lyt`/`Ste`/`oKn` toast | headersHelper 401 UI | `connectAuthClassify` HAVE；不 invent toast | UI toast |
+| `#31` `Hht`/`yan` | RC reconnect 旁路 | `remoteBridgeCore` HAVE；不 invent Hht | other |
+| `#36` Hangul/jamo | @mention IME | NFKC/`bP` HAVE；不 invent Hangul | other |
+| `#28` TrustDialog `Go` rule list | emoji trunc / 规则列表 UI | 无 Go list 宿主 | UI |
+| `#8` `Ip`/`r_`/`s_` keepAcross | oauth refresh tool-cache | leftover save 已 always-clear；无 r_/dropInFlight | other |
+| `#25` login_handoff `pOe` / Select reveal | gateway hang UI | leftover Select 无 reveal | UI |
+| `#14` model-name code wrap | Fast ON/OFF backtick | 无 extracted wrap body | UI |
+| SR `ITt` refuseInput/windowMs | Select refuse | leftover 非 SR；不 invent | UI |
+
+## E. KEEP STATE residual（官方 SEA hits=0 或非 n().host 袋）
+
+| leftover 槽 | 裁决 |
+|-------------|------|
+| `kairosActive` | KEEP STATE — 无官方 bag |
+| `promptCache1hEligible` / `*HeaderLatched` | KEEP STATE — SEA hits=0 |
+| `teleportedSessionIds` | KEEP STATE — `Qo()` class `s`，非 n().host |
+| `replBridgeSessionId` | KEEP STATE — AppState only |
+
+## F. 不是「官方独有」—— leftover 合同差（有宿主）
+
+| 项 | 说明 |
+|----|------|
+| `#19` spawn-refuse 文案 | leftover 锁；interactive→v$e 已接 |
+| `#35` `pGe`/`Gct` 锁名 | leftover 名钉住 |
+| `Cwn`/`GC` `#w` ≠ `Yk` `#l` | 双门合同 |
+| `#41` `p5e=60000` / `gh pr view` | leftover footer；无 304 streak 是另一刀 |
+
+## 金标指针
+- Vk: `gold-248-vk-callers.txt`
+- Et/DYe: `gold-248-et-callers.txt`
+- Fh/Hu: `gold-248-16-fh-verdict.txt`
+- Settings BAN: `gold-248-settings-call-sites.txt`
+- STATE: `gold-248-state-residual-verdict.txt`
+- N/A: `gold-248-na-table.txt`
+- UNKNOWN invent: `gold-248-unk-verdict.txt`

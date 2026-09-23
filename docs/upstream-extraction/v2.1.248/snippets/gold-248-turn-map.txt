@@ -1,0 +1,41 @@
+# gold-248-turn-map
+Map leftover turn counters → official me (turnBudget) / ce (requestJournal)
+when=2026-09-21
+exe=official-248/package/claude.exe
+
+## EXACT class me (turnBudget) @178526864 sha=c2c42c19a7fa729d len=254
+class me{#e=0;#t=null;#n=0;outputTokensAtTurnStart(){return this.#e}budget(){return this.#t}continuationCount(){return this.#n}snapshotForTurn(e,t){this.#e=e,this.#t=t,this.#n=0}incrementContinuation(){this.#n++}reset(){this.#e=0,this.#t=null,this.#n=0}}
+
+## EXACT class ce (requestJournal) promptIndex slice @178519637
+… promptIndex(){return this.#i} replacePromptIndex(e){this.#i=e} incrementPromptIndex(){return this.#i++,this.#i} …
+
+## Official wrappers (turnBudget)
+function FLe(){return Zc()-n().turnBudget.outputTokensAtTurnStart()}
+function ULe(){return n().turnBudget.budget()}
+function oEr(e){n().turnBudget.snapshotForTurn(Zc(),e)}
+function iEr(){return n().turnBudget.continuationCount()}
+function sEr(){n().turnBudget.incrementContinuation()}
+
+## Official wrappers (promptIndex)
+function Dvt(){return n().requestJournal.promptIndex()}
+cn() uses e.requestJournal.promptIndex()>0
+uwn reset: requestJournal.replacePromptIndex(0)
+
+## Name map leftover → official
+| leftover name | official locus | verdict |
+|---|---|---|
+| outputTokensAtTurnStart (module let in state.ts) | me.#e / turnBudget.outputTokensAtTurnStart + snapshotForTurn | 补 land on session.turnBudget (bag already exists in sessionSlots TurnBudget) |
+| token-budget / max-output for turn | me.#t / budget() | 补 via snapshotForTurn 2nd arg |
+| continuationCount (token-budget loop) | me.#n / continuationCount + incrementContinuation | 补 land on turnBudget (not invent STATE field) |
+| promptIndex / prompt ordinal | ce.#i / requestJournal.promptIndex | 补 land on requestJournal |
+| turnCount (QueryEngine local / ACP session.turnCount plugin) | NOT an n() bag field — computed from messages or local var | keep local/plugin; 砍 inventing host bag |
+| totalTurns | SEA hits=0 as identifier | 砍 if leftover STATE; N/A official |
+| numTurns / num_turns | result/telemetry schemas only (not host bag) | keep as result field; 砍 inventing host bag |
+
+## SEA note on session.turnCount
+Official has plugin API `session.turnCount` that counts user messages from bound session — NOT a persistent bag slot on n()/en().
+
+## VERDICT one-liners
+- me/turnBudget: 补 — next land: rewire state.ts module outputTokensAtTurnStart → n().turnBudget
+- ce.promptIndex: 补/keep — already on requestJournal in official; leftover should use bag not invent alternate
+- turnCount/totalTurns/numTurns as STATE/host bag: 砍 — leftover-only invent; official has no bag

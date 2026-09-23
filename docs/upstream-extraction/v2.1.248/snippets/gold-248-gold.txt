@@ -1,0 +1,79 @@
+# densable 2.1.248 SEA gold extracts (first knife)
+bytes=226708128
+
+## #1 restricted||= env @178178462
+romise.race([Promise.all([c(),C()]),A(500,void 0,{unref:!0})]).catch(()=>{}),process.exit(process.exitCode??0)}}return}let d=MSt(t);d.config.restricted||=["1","true","yes","on"].includes((process.env.CLAUDE_CODE_RESTRICTED??"").toLowerCase().trim());let{dispatchDefaults:u,rest:M}=Dt(d.rest),k=d.hasAgentsPositional&&tt(M);if((k||tt(t)&&process.stdin.isTTY)&&process.stdout.isTTY){let{startCapturingEarlyInput:e,consumeEarlyInput:r}=await import("B:/~BUN/root/chunk-zhdm7d8z.js");e();let[{startMdmRawRead:o},{startKeychainPrefetch:y}]=await Promise.all([import("B:/~BUN/root/chunk-parg11tw.js"),import("B:/~BUN/root/chunk-dhy1djkh.js")]);o(),y();let{enableConfigs:L,getGlobalConfig:T,seedInstallIDs:E}=await import("B:/~BUN/root/chunk-vkmv4g3m.js"),a=!1,i=!1;try{await L(D()?s?.backend:void 0),i=T().defaultToAgentsView===!0,a=k||i}catch{}if(a){if(d.config.settings){let{loadSettingsFromFlag:S}=await import("B:/~BUN/root/chunk-9hmn07am.js");S(d.config.settings)}if(d.config.pluginDir.length>0||d.config.pluginDirNoMcp.length>0){let[{setInlinePlugins:S,setInlinePluginsNoMcp:_},{clearPluginCache:f}]=
+
+## #1 O2 CLAUDE_CODE_RESTRICTED near @178589387 fn=function O2( @178589351
+len=60 sha=9555f7c727a5a06d
+function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}
+
+## #1 O2/hp window @178589387
+nv.CLAUDE_CODE_SAFE_MODE)||a("--safe-mode")}function O2(){return Me(process.env.CLAUDE_CODE_RESTRICTED)}function hp(){return a("--safe-mode")?"restart without --safe-mode":"unset CLAUDE_CODE_SAFE_MODE"}function sXe(){return Me(process.env.CLAUDE_CODE_SUPERVISED)}function ptr(e){let n={};if(e)for(let r of e){let[o,...u]=r.split("=");if(!o||u.length===0)throw Error(`Invalid environment variable format: ${r}, environment variables should be added as: -e KEY1=value1 -e KEY2=value2`);n[o]=u.join("=")}return n}function y3t(){return L4(process.env.CLOUD_ML_REGION?.trim())||"us-eas
+
+## #1 cannot be enforced @92346183
+ null or undefined value.}...u^{.Error: --restricted cannot be enforced in a cloud, remote-environment or ssh session, which runs its tools on another machine...l....	..E.r.r.o.r.:. .-.-.w.a.t.c.h.-.a.r.t.i.f.a.c.t. .i.s.n.'.t. .s.u.p.p.o.r.t.e.d. .y.e.t. .f.r.o.m. .r.e.m.o.t.e. .s.e.s.s.i.o.n.s. ..  .r.u.n. .i.t. .i.n. .C.l.a.u.d.e. .C.o.d.e. .o.n. .y.o.u.r. .o.w.n. .m.a.c.h.i.n.e.v...\8..Error: --watch-artifact requires an interactive
+
+## #2 experimental cacheTtl schema @184576834
+s agent spawns do not inherit its observer. Defaults to true."),experimental:m({cacheTtl:Pu().optional().describe('Prompt cache TTL for this agent\'s requests ("5m" or "1h") when no `subagentPromptCacheTtl` setting or env var is set. "1h" is ignored while a Claude subscription is in overage.')}).loose().nullable().optional().describe("Experimental per-agent options; unknown keys are ignored.")})),iZt=h(()=>m({name:Pu().optional().describe("Style name used in the Output style picker in `/config` and in settings. Defaults to the filename."),description:Pu().optional().describ
+
+## #2 agentCacheTtlOverride @185198866
+toolUseContext:la,forkContextMessages:Sn,stickyBetas:yu,agentCacheTtlOverride:e.cacheTtl},()=>lr)}let Ui=Sn,qa=null;if(it!==void 0){let lr=Sn.findLastIndex((li)=>it.has(li.uuid));Ui=Sn.slice(lr+1),qa=lr>=0?Sn[lr].uuid:null}else if(g!==void 0&&g===r.messages&&r.agentId===void 0){let lr=mn.at(-1)?.uuid;if(lr!==void 0)Ui=Sn.slice(mn.length),Hzn({agentId:Ve,parentSessionId:V(),parentLastUuid:lr,contextLength:mn.length},r.storageV5).catch(Y_n)}WQ(Ui,Ve,qa,r.storageV5).catch(CSe);l
+
+## #3 --client-label parse @187911322
+String(m);break}case"--lock-to-account":if(o)n.lockToAccountId=o,i++;break;case"--client-label":if(o&&!o.startsWith("--")){let u=o.trim();if(u)n.clientLabel=u,i++}break;case"--debug-token-dir":if(o)n.debugTokenDir=o,i++;break;case"--proxy-authorization-command":case"--proxy-authorization-file":if(o===void 0||o.startsWith("--"))throw Error("--proxy-authorization-command / --proxy-authorization-file requires a value");if(d==="--proxy-authorization-command")n.proxyAuthorizationC
+
+## #3 env clientLabel @187904951
+ccountId:process.env.SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT,clientLabel:process.env.SELF_HOSTED_RUNNER_CLIENT_LABEL?.trim()||void 0,gitSshRewriteHosts:[],gitHostRewrites:[],useAnthropicGitProxy:Me(process.env.CLAUDE_RUNNER_USE_GIT_PROXY),configureGit:Me(process.env.SELF_HOSTED_RUNNER_CONFIGURE_GIT),pushOutcomeOnRelease:Me(process.env.SELF_HOSTED_RUNNER_PUSH_OUTCOME_ON_RELEASE),trustWorkspace:ta(process.env.SELF_HOSTED_RUNNER_TRUST_WORKSPACE),confineRepoSettings:na(process.env.SEL
+
+## #3 help text @99558089
+: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --client-label <label>      Observability label sent at registration (default: hostname). Shown
+                              beside the runner in the Anthropic console; never used for
+                              authorization or routing. Set it when the hostname is not
+                              meaningful, e.g. to a VM or container name.
+   
+
+## #10 desktopSessionCleanupPeriodDays schema @179088656
+etention; use --no-session-persistence to disable transcript writes entirely."),desktopSessionCleanupPeriodDays:A().int().nonnegative().optional().describe("Retention ceiling in days for session transcripts created or last written by a desktop-host surface (Claude Desktop, Cowork), which are otherwise exempt from the cleanupPeriodDays sweep. 0 (the default) means no ceiling: such transcripts are kept until deleted another way. Unlike cleanupPeriodDays, 0 is allowed because this setting never disables writes \u2014 it only bounds an exemption from deletion. The ceiling is a 
+
+## #10 Ae() cutoff near @191903610 fn=function Ae( @191903586
+len=130 sha=3e20bf3910e15834
+function Ae(){let e=tx("desktopSessionCleanupPeriodDays")[0]??Ce;if(e===0)return null;return new Date(Date.now()-e*24*60*60*1000)}
+
+## #10 $te keys @179440961
+ged settings",$te=["cleanupPeriodDays","desktopSessionCleanupPeriodDays"];function Y8e(e){let t=e.parentManaged;if(!t||Object.keys(t).length===0)return{settings:null,errors:[]};return Jve(t,lyn)}function Vyt(e){let t=e.flagInline;if(!t)return{settings:null,errors:[]};let r=Up(t),o=Xve(r,"SDK inline settings"),i=LS().safeParse(r);if(!i.success)return{settings:null,errors:[...o,...j(i.erro
+
+## #13 Keyless Console @199068152
+|!D.fallbackCures)throw D;let se=Li(l(D));st({cause:D.causeSummary!==null?Li(D.causeSummary):se,message:se}),n(`Keyless Console sign-in unavailable here, continuing with the API-key sign-in: ${se}`,{level:"warn"})}}let Y=await ve.startOAuthFlow(async(D)=>Z(D),{loginWithClaudeAi:ye,inferenceOnly:R==="setup-token",expiresIn:R==="setup-token"?S??O$:void 0,orgUUID:He}).catch((D)=>{if(D instanceof KO)throw D;let se=D.message.includes("Token exchange failed"),ft=Dz(D);throw ee({state:"error",message:ft??(se?"Failed to ex
+
+## #37 unrecognized crossSessionInbound @92447605
+k..A settings file has an unrecognized "crossSessionInbound" value (see the settings warning), so messages are held while it is present........"M..This session is not prompting for permissions...7.......This session's permission mode could not be determined.....!...mode-mismatch...........invalid-setting.....]. .mode-
+
+## #38 v_() DISABLE_EXTRA_USAGE_COMMAND near @180726877 fn=function v_( @180726858
+len=93 sha=8ff3b75a85494593
+function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}
+
+## #38 v_() window @180726877
+n!1;return DN.has(e)}function v_(){if(a.DISABLE_EXTRA_USAGE_COMMAND)return!1;if(kS()!==null)return!0;return Zur()}function U_r(){let e=An();return e==="max"||e==="enterprise"||e==="team"||e==="pro"||e===null}function An(){if(fl())return pl();if(!nl())return null;let e=Bt();if(!e)return null;return e.subscriptionType??null}function zV(){return An()==="max"}function B_r(){return An()==="te
+
+## #40 workflow-authoring export @183512380
+UGe="pr",Jin="commit-push-pr",but="cowork-plugin",_ut="loop",JWn="schedule",$w="workflow-authoring";
+export{NGe,hut,PT,gut,KWn,YWn,yut,oP,XWn,q1,$Ge,FGe,UGe,Jin,but,_ut,JWn,$w};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code accept
+
+## #47 Oht Anthropic telemetry near @180153373 fn=MISS @-1
+Promise.all(r.map((o)=>o.waitForAsyncAttributes?.())).then(t,Qe.globalErrorHandler)}}class gce extends Nc{onShutdown(){}}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e){if(this.count++,this.last=e,this.count===1)n(`${xP} ${this.pipeline} export failed (${e}). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures are counted and summarised at shutdown.`)}logSummary(){if(this.count===this.reportedCount)return;this.reportedCount=this.count,n(`${xP} ${this.pipeline} export: ${this.count} failure(s) this session (last: ${this.last})`)}}function QO(e,t){let r=e.export.bind(e),o=e.forceFlush?.bind(e),u=e.shutdown.bind(e);if(e.export=(p,g)=>r(p,(E)=>{if(E.code!==Ic.ExportResultCode.SUCCESS)t.record(E.error?.message??"unknown error");g({code:Ic.ExportResultCode.SUCCESS})}),o)e.forceFlush=async()=>{await o(),t.logSummary()}
+
+## #47 xP prefix @180153373
+}var ya=Z(AV(),1);import{randomUUID as tD}from"crypto";var Ic=Z(pu(),1);var xP="[Anthropic telemetry]";class Oht{pipeline;count=0;reportedCount=0;last;constructor(e){this.pipeline=e}record(e){if(this.count++,this.last=e,this.count===1)n(`${xP} ${this.pipeline} export failed (${e}). This is Anthropic's own telemetry pipeline, not your OTel collector; further failures are counted and summarised at shutdown.`)}logSummary(){if(this.count===this.reportedCount)return;this.reportedC
+
+## #49 parent reply @196264366
+ message, copy its \`from\` attribute as your \`to\`.** Cross-session messages travel between SESSIONS: if you are a subagent, your send goes out under your parent session's address, and any reply is delivered to the parent session's conversation, not to you.
+
+To hear when a session ON THIS MACHINE finishes what it is doing, pass \`notify_when_idle: true\` (from the main conversation only) \u2014 one-shot and opt-in: exactly one \`[Cross-session idle notice]\` arrives when it next goes idle (or exits) \u2014 shown to you, or only to your user when this session holds peer messages for approval 
+
+## #7 ListAgents .248 @181140565
+B:/~BUN/root/chunk-6znqw5fd.js";var Ds="ListAgents",c5n="ListPeers";function e(){return""}var s=`Lists agents you can ${ko} to \u2014 in-process subagents you spawned, the teammates on your team, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its an

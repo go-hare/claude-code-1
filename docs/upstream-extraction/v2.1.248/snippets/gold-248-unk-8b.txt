@@ -1,0 +1,216 @@
+# gold-248-unk-8b
+# when=2026-09-20T04:55:53.577Z
+
+# ---- exact no-arg defs 248 ----
+## function jN() hits=2 180274814,222529151
+## #8 jN() @180274814 len=30 sha=0a2d32fc2c27739b otherHits=0
+function jN(){Bd().betas=al()}
+
+## #8 jN() @222529151 len=42 sha=523dbdbfb5227975 otherHits=1
+function jN(){return(0,Cn.useContext)(zN)}
+
+## function s_() hits=1 180125738
+## #8 s_() @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## function IW() hits=2 180125586,222702249
+## #8 IW() @180125586 len=35 sha=a2343b0146ed09ed otherHits=0
+function IW(){kn().invalidateAll()}
+
+## #8 IW() @222702249 len=133 sha=6ec589d446159dd8 otherHits=1
+function IW(){return YO??=Promise.resolve().then(()=>(DW(),_W)).then(e=>{fw=e;for(let t of XO)t();return e},e=>{throw YO=null,e}),YO}
+
+## function o_() hits=1 180125621
+## #8 o_() @180125621 len=42 sha=7a1425b27219fa53 otherHits=0
+function o_(){kn().dropInFlightComposes()}
+
+## function mE() hits=2 179800735,184450722
+## #8 mE() @179800735 len=114 sha=70312ae1244362ee otherHits=0
+function mE(){let n=UO();n.cache={data:null,cachedAt:0},n.generation++,n.readInFlight=null,n.lastReadFailure=null}
+
+## #8 mE() @184450722 len=554 sha=e448b724eb8f902b otherHits=0
+function mE(){if(!s5e())return;try{let e=gE(),t={};for(let[u,p]of e.previousStateBySource){if(!vX(u))continue;let{content:g,pendingChanges:k,baselineFromDisk:E,...C}=p;t[u]=C}let r=i5e();if(r===null)return;let o=Object.keys(t).length===0?{action:"remove"}:{action:"write",payload:S(t)};e.latestQueuedPersist=o,e.pendingPersist=e.pendingPersist.then(async()=>{if(o.action==="remove"){q9(Cp()),await H9t(r,{force:!0});return}if(e.latestQueuedPersist!==o)return;await B9t(Cp(),{recursive:!0,mode:448}),q9(Cp()),await Hn(r,o.payload)}).catch(()=>{})}catch{}}
+
+## function _Y() hits=2 179810366,182787748
+## #8 _Y() @179810366 len=21 sha=aaccbd41d2d12b2b otherHits=0
+function _Y(){h(C())}
+
+## #8 _Y() @182787748 len=975 sha=edf1f2a37a46204a otherHits=0
+function _Y(){let{symlinkedDenyScrubPaths:e}=st(),t=[],r;for(let o=0;o<e.length;o++){let{literal:u,resolved:p,hopDirectories:E,danglingBaseline:I}=e[o],v,N,O=null;try{let U=qs(u);O=U,v=U.isSymbolicLink()}catch(U){if(T(U)==="ENOENT")continue;v=!1}let C;if(v)try{if(C=On(u),C===p)continue}catch{N=null;try{let U=xs(u);N=su(u,U)}catch{}if(I&&N!==null&&N===p&&TY(ru(u,null),E))continue}if(r===void 0)try{r=SY()}catch(U){n(`[Sandbox] scrub write-root derivation failed: ${U}`,{level:"warn"}),r=null}if(!k0(E,r)){if(!v&&O===null)continue;if(N!==null){let U=ru(u,N!==void 0?null:C??pY(u));if(U!==null&&!k0(U,r)){t.push({index:o,stillSymlink:v,currentHopDirectories:U,observedEnd:N??C,dangling:N!==void 0});continue}}}try{if(L0(u,{recursive:!0,force:!0}),n(`[Sandbox] scrubbed replaced symlinked-deny path: ${u}`),!v){let U=O===null?"unknown":O.isDirectory()?"directory":O.isFile()?"file":"other";s("tengu_sandbox_scrub_removed_non_symlink",{kind:c(U)})}}catch{}}if(t.length>0)wY(t)}
+
+## function lMe() hits=0 
+## function J2t() hits=0 
+## function s_(){ hits=1 180125738
+## #8 s_(){ @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## function s_( hits=5 180125738,180850381,199695965,210938507,222370168
+## #8 s_( @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## #8 s_( @180850381 len=64 sha=2fcbc8392ce00b00 otherHits=0
+function s_(e){return xu()&&(e===void 0||eB(e)&&kle("xhigh",e))}
+
+## #8 s_( @199695965 len=55 sha=96bb6abbb52b3399 otherHits=0
+function s_(e){return e.value=Object.freeze(e.value),e}
+
+## #8 s_( @210938507 len=204 sha=cce713f0421dcf62 otherHits=0
+function s_(e,t){let r,i=new Promise(function(s,o){r=setTimeout(function(){o(new De("Operation timed out."))},t)});return Promise.race([e,i]).then((n)=>(clearTimeout(r),n),(n)=>{throw clearTimeout(r),n})}
+
+## #8 s_( @222370168 len=113 sha=9004282c6fac6bb5 otherHits=1
+function s_(e,t,n){return om(t,e.child,null,n),e=J_(t,t.pendingProps.children),e.flags|=2,t.memoizedState=null,e}
+
+# ---- nearby any-arity ----
+## jN in 179-182M hits=1 180274814
+## #8 near jN @180274814 len=30 sha=0a2d32fc2c27739b otherHits=0
+function jN(){Bd().betas=al()}
+
+## IW in 179-182M hits=1 180125586
+## #8 near IW @180125586 len=35 sha=a2343b0146ed09ed otherHits=0
+function IW(){kn().invalidateAll()}
+
+## o_ in 179-182M hits=1 180125621
+## #8 near o_ @180125621 len=42 sha=7a1425b27219fa53 otherHits=0
+function o_(){kn().dropInFlightComposes()}
+
+## mE in 179-182M hits=1 179800735
+## #8 near mE @179800735 len=114 sha=70312ae1244362ee otherHits=0
+function mE(){let n=UO();n.cache={data:null,cachedAt:0},n.generation++,n.readInFlight=null,n.lastReadFailure=null}
+
+## _Y in 179-182M hits=1 179810366
+## #8 near _Y @179810366 len=21 sha=aaccbd41d2d12b2b otherHits=0
+function _Y(){h(C())}
+
+## s_ in 179-182M hits=2 180125738,180850381
+## #8 near s_ @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## #8 near s_ @180850381 len=64 sha=2fcbc8392ce00b00 otherHits=0
+function s_(e){return xu()&&(e===void 0||eB(e)&&kle("xhigh",e))}
+
+# ---- jN() call sites ----
+## jN() late=10 180274823,180712792,180712966,180756046,190688851,190691026,191452571,193510475,222529160,222535210
+## #8 jN() @180274823
+des(p))]}function igt(e){return Eu(e).includes(CV)}function jN(){Bd().betas=al()}var $w=new Set([Wn,yr,BA,HDe,CV,So,r6e,Rr,YT,EI,jA]);functi
+
+## #8 jN() @180712792
+"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D()
+
+## #8 jN() @180712966
+ache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async func
+
+## #8 jN() @180756046
+ice??null),o.length!==t.length||t.some((n)=>!o.includes(n)))jN()}}var Pur=new K(()=>new CKn);function r(){return Pur.of(z().host)}function C
+
+## #8 jN() @190688851
+rCaches:l=!1}={}){$xt();try{let u=Le()==="firstParty";if(!u)jN(),IW();let d=t9t(),c=Ede(),m=await Y(d,e);if(!m)return!1;let{response:r,viaSc
+
+## #8 jN() @190691026
+tWindowsCache??null,oauthAccount:B}},t),N)return!1;if(S&&!l)jN(),IW();return!0}catch(u){if(Dl(u))n(`[Bootstrap] fetchBootstrapData failed: $
+
+## #8 jN() @191452571
+om"B:/~BUN/root/chunk-0qn02gme.js";function UJe(o){if(dEn(),jN(),Bd().providerCache=bfn(),OB(),ute(),Ahn(),o==="firstParty")c8e()}
+export{UJ
+
+## #8 jN() @193510475
+ity:s,credentials:f}={}){if(lY(),D()&&f===void 0)_Y();PSe(),jN(),Bd().providerCache.modelConfigs.clear(),IW(),SO();let c=z();if(ZPn(c.host),
+
+## #8 jN() @222529160
+laceAll("\\","\\\\").replaceAll('"','\\"')}",`}:{}}function jN(){return(0,Cn.useContext)(zN)}function GN(){return(0,Cn.useContext)(kx)}funct
+
+## #8 jN() @222535210
+tyle:n,surface:r}){let o=hd(),i=UN(),a=Cx(),s=ok(),c=zU(),l=jN(),u=GN(),f=r??u,d=f||c!==void 0||n?{...WN(f),...VN(c),...n}:void 0;return(0,l
+
+# ---- IW() / o_() call sites ----
+## IW() late=10 180125595,180712803,180712971,183297197,190688856,190691031,193510520,222702258,222702459,222703944
+## #8 IW() @180712803
+(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if
+
+## #8 IW() @180712971
+?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeChe
+
+## o_() late=4 180125630,180712813,206608685,214447005
+## #8 o_() @180712813
+)}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())
+
+## mE() late=22 179800744,179814671,179814793,179815113,180712761,180712837,184450731,184453492,184455802,184460489,184460970,184461082,184461166,184461227,184461491,199562898
+## #8 mE() @180712761
+"fd";return"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}fun
+
+## #8 mE() @180712837
+!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(l
+
+## _Y() late=11 179808851,179808992,179810375,179810725,180712770,180712873,180712980,180714130,182787757,182807876,193510464
+## #8 _Y() @180712770
+rn"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(
+
+## #8 _Y() @180712873
+Y(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.
+
+## #8 _Y() @180712980
+(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}asyn
+
+## #8 _Y() @180714130
+,e)}}async function tN(e,t){if(lY(),D())_Y();let o=(await qa(t))?.accessToken??null;if(o!==e.lastKey
+
+# ---- 247 no() ki() Sm() ----
+## 247 function no() hits=4 207164578,208606096,230819224,233530395
+## #8 247 no() @207164578 len=76 sha=7879ea2051f8b8c9 otherHits=0
+function no(){return process.env.__CFBundleIdentifier==="com.conductor.app"}
+
+## #8 247 no() @208606096 len=30 sha=4cce828164005f44 otherHits=0
+function no(){De().betas=Xc()}
+
+## 247 function ki() hits=1 208828664
+## #8 247 ki() @208828664 len=35 sha=ea9d7ec564467d4c otherHits=0
+function ki(){pa().invalidateAll()}
+
+## 247 function Sm() hits=0 
+## 247 function va() hits=1 221611270
+## 247 no() in oauth-win=4 208857475,208860626,208860749,208862009
+## #8 247 no()-win @208857475
+Backend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OA
+
+## #8 247 no()-win @208860626
+rn"fd";return"none"}function kx(){if(Pi(),Sm(),F())va()}function Tx(){Pi(),Sm(),no(),ki()}function wt(){if(Tx(),F())va()}function o$(){if(Pi(),Aa.cache?.clear?.
+
+## #8 247 no()-win @208860749
+nction o$(){if(Pi(),Aa.cache?.clear?.(),ka.cache?.clear?.(),ix(),ux(),lx(),px(),no(),ki(),F())va()}function i$(){tr.of(C().host).resetChangeCheck()}async functi
+
+## #8 247 no()-win @208862009
+.accessToken??null;if(r!==e.lastKeychainAccessToken)e.lastKeychainAccessToken=r,no(),ki()}function CR(e,t){return`${e}|${t}`}function wx(e,t){if(!(F()&&e!==void
+
+## 247 ki() in oauth-win=4 208857480,208860631,208860754,208862014
+## #8 247 ki()-win @208857480
+nd:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OAuth t
+
+## #8 247 ki()-win @208860631
+";return"none"}function kx(){if(Pi(),Sm(),F())va()}function Tx(){Pi(),Sm(),no(),ki()}function wt(){if(Tx(),F())va()}function o$(){if(Pi(),Aa.cache?.clear?.(),ka
+
+## #8 247 ki()-win @208860754
+n o$(){if(Pi(),Aa.cache?.clear?.(),ka.cache?.clear?.(),ix(),ux(),lx(),px(),no(),ki(),F())va()}function i$(){tr.of(C().host).resetChangeCheck()}async function Dm
+
+## #8 247 ki()-win @208862014
+ssToken??null;if(r!==e.lastKeychainAccessToken)e.lastKeychainAccessToken=r,no(),ki()}function CR(e,t){return`${e}|${t}`}function wx(e,t){if(!(F()&&e!==void 0)||
+
+## #8 247 before-Tx @208860602
+wait ne().mutate((o)=>{let i=o.claudeAiOauth;if(!i||i.refreshToken!==e)return o;return n=!0,{...o,claudeAiOauth:{...i,refreshToken:"",accessToken:"",expiresAt:0}}},t);if(n&&r.success)E("tengu_oauth_refresh_token_cleared_on_disk",{});else if(n)p("OAuth dead-token disk clear: backend write failed",{level:"error"})}catch(n){p(`OAuth dead-token disk clear failed: ${M(n)}`,{level:"error"})}}function ZG(){let e=Ex(D());if(e!==void 0)return e;try{return Sx(ne().read())}catch{return!1}}async function pl(e){let t=Ex(await rt(e));if(t!==void 0)return t;try{return Sx(await ne().readAsync(e))}catch{return!1}}function Ex(e){if(e){let t=e.refreshToken;return t===""||!!t&&ya.has(t)}if(Ee())return!1;return}function Sx(e){return e?.claudeAiOauth?.refreshToken===""}function SR(e=["user:inference"]){let t=c.CLAUDE_CODE_OAUTH_SCOPES?.split(/\s+/).filter(Boolean);return t?.length?t:[...e]}function t$(){if(Te())return null;if(c.CLAUDE_CODE_OAUTH_TOKEN)return{accessToken:c.CLAUDE_CODE_OAUTH_TOKEN,refreshToken:null,expiresAt:null,scopes:SR(),subscriptionType:c.CLAUDE_CODE_SUBSCRIPTION_TYPE||null,rateLimitTier:c.CLAUDE_CODE_RATE_LIMIT_TIER||null};let e=ft(),t=(n)=>({accessToken:n,refreshToken:null,expiresAt:null,scopes:TR()??SR(e$),subscriptionType:c.CLAUDE_CODE_SUBSCRIPTION_TYPE||null,rateLimitTier:c.CLAUDE_CODE_RATE_LIMIT_TIER||null});if(e&&(!xi()||Ee()))return t(e);if(Ee())return null;try{let o=ne().read({fromStoreCopy:!0})?.claudeAiOauth;if(o?.accessToken)return o}catch(n){I(n)}if(e)return t(e);return null}class vx{value=void 0;promise=null;lastCredentialsMtimeMs=0;lastCredentialsVersion=void 0;lastKeychainAccessToken=null;clear(){this.value=void 0,this.promise=null}resetChangeCheck(){this.lastCredentialsMtimeMs=0,this.lastCredentialsVersion=void 0,this.lastKeychainAccessToken=null}}function D(){let e=tr.of(C().host);if(e.value!==void 0)return e.value;let t=t$();return e.value=t,t}function Pi(){tr.of(C().host).clear()}function n$(){let e=Cx();if(typeof e==="string")return e;let t=ne().read()?.claudeAiOauth?.accessToken;return Ax(e,t)}async function r$(e){let t=Cx();if(typeof t==="string")return t;let n=(await ne().readAsync(e))?.claudeAiOauth?.accessToken;return Ax(t,n)}function Cx(){let e=D();if(!e?.accessToken)return"none";if(c.CLAUDE_CODE_OAUTH_TOKEN)return"env";let t=ft();if(t&&(!xi()||Ee()))return"fd";return{bearer:e.accessToken,fdToken:t}}function Ax({bearer:e,fdToken:t},n){if(n&&n===e)return"store";if(t&&e===t)return"fd";return"none"}function kx(){if(Pi(),Sm(),F())va()}function Tx(){Pi(),Sm(),no(),ki()}function wt(){if(Tx(),F())va()}function o$(){i
+
+# ---- invalidateAll near oauth 248 ----
+## invalidateAll 248=13
+## invalidateAll 247=11
+## #8 247 invAll @208828572
+n){if(n===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}}function pa(){return eG.of(C().host)}function ki(){pa().invalidateAll()}var eG,$se;var hR=y(()=>{B();Fe()
+
+## #8 247 invAll @208828683
+r(),this.generation+=1}}function pa(){return eG.of(C().host)}function ki(){pa().invalidateAll()}var eG,$se;var hR=y(()=>{B();Fe();im();eG=new L(()=>new mR);$se={get(e){return pa().get(e)},stamp(){return pa().stamp()},register(e,t,n){pa().re
+
+## #8 247 invAll-fn ki @208828664 len=35 sha=ea9d7ec564467d4c otherHits=0
+function ki(){pa().invalidateAll()}
+
+# ---- Map.clear / schema cache patterns ----
+## needle "TOOL_SCHEMA" 248=5 247=5
+## needle "toolSchemas" 248=8 247=8
+## needle "schemaCache" 248=0 247=0
+## needle ".clear()" 248=875 247=834
+## needle "new Map" 248=2689 247=2522

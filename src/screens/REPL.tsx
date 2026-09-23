@@ -149,11 +149,18 @@ import { type ToolUseConfirm } from '../components/permissions/PermissionRequest
 import { ElicitationDialog } from '../components/mcp/ElicitationDialog.js';
 import { PromptDialog } from '../components/hooks/PromptDialog.js';
 import {
+  getHostDialogVisibility,
+  getHostParkMode,
+  hostParkToSuppressReason,
+  pickNextHostOffer,
+} from '../dialog/hostPark.js';
+import { wireClipboardAttacherCaps } from '../utils/clipboardAttacher.js';
+import { applyMessageStoreAction } from '../utils/messageStore.js';
+import {
   COST_THRESHOLD_KIND,
   createDialogMailbox,
   createRequestDialog,
   DialogHost,
-  getModalChromeVisibility,
   installManagedSettingsSxg,
   isFullscreenModalChromeActive,
   isPermissionPromptDialog,
@@ -1098,6 +1105,7 @@ export function REPL({
   onCommandsChange,
   onQueryParamsChange,
 }: Props): React.ReactNode {
+  wireClipboardAttacherCaps();
   const { storageV5 } = useSessionServices();
   const isRemoteSession = !!remoteSessionConfig;
 
@@ -3811,6 +3819,8 @@ export function REPL({
     }
     if (allowDialogsWithAnimation && showFullscreenUpsell) return 'fullscreen-upsell';
     if (allowDialogsWithAnimation && showRemoteCallout) return 'remote-callout';
+    // densable Vd draft — plugin/LSP Host offers wait for an empty prompt.
+    if (inputValue.trim() !== '') return undefined;
     if (allowDialogsWithAnimation && lspRecommendation && !viewingAgent) return 'lsp-recommendation';
     if (allowDialogsWithAnimation && hintRecommendation && !viewingAgent) return 'plugin-hint';
 
@@ -3818,6 +3828,32 @@ export function REPL({
   }
 
   const focusedInputDialog = getFocusedInputDialog();
+
+  // densable Vd / jx / G$ — Host park. zIr strings below stay for 239 SEA.
+  const hostParkMode = getHostParkMode({
+    hasLegacyDialog: legacyFocusForUqc(focusedInputDialog) != null,
+    hasBlockingToolProgress: Boolean(toolJSX && !toolJSX.shouldContinueAnimation),
+    hasLocalJsxPanel: isShowingLocalJSXCommand,
+    hasDraft: inputValue.trim() !== '',
+    isPromptInputActive,
+  });
+  const hostDialogVisibility = getHostDialogVisibility({
+    hasOpenDialogs,
+    focusedOverlay: focusedInputDialog,
+    parkMode: hostParkMode,
+  });
+  const nextHostOffer = pickNextHostOffer({
+    exitFlowActive: pke.kind !== 'none',
+    isPromptInputActive,
+    hasBlockingToolProgress: Boolean(toolJSX && !toolJSX.shouldContinueAnimation),
+    hasLocalJsxPanel: isShowingLocalJSXCommand,
+    hasElicitationRequest: Boolean(elicitation.queue[0]),
+    leftArrowConfirmOpen: Boolean(leftArrowConfirm),
+    isLoading,
+    isBgSession: isBgSession(),
+    hasEffortMediumNudge: Boolean(showEffortCallout),
+    hasOpenDialog: hasOpenDialogs || hasBlockingOpenDialogs,
+  });
 
   // Tip product overlays — paint without claiming densable _Zt / uQc.
   // Gold _Zt returns after plugin-hint; these stay tip-only.
@@ -3841,7 +3877,7 @@ export function REPL({
     if (isBgSession()) return undefined;
     if (process.env.USER_TYPE === 'ant' && showModelSwitchCallout) return 'model-switch';
     if (process.env.USER_TYPE === 'ant' && showUndercoverCallout) return 'undercover-callout';
-    if (showEffortCallout) return 'effort-callout';
+    if (nextHostOffer === 'effort-medium-nudge') return 'effort-callout';
     if (searchExtraToolsHint.visible) return 'search-extra-tools-hint';
     if (showDesktopUpsellStartup) return 'desktop-upsell';
     return undefined;
@@ -3853,20 +3889,10 @@ export function REPL({
   const hasSuppressedDialogs =
     isPromptInputActive && (hasBlockingOpenDialogs || workerSandboxPermissions.queue[0] || elicitation.queue[0]);
 
-  // densable zIr same-render (no suppress-reason hook — keystroke tear).
-  const dialogSuppressReason =
-    legacyFocusForUqc(focusedInputDialog) != null
-      ? ('legacy-dialog' as const)
-      : isPromptInputActive
-        ? ('typing' as const)
-        : null;
-
-  // densable RPs — also gates chat:cancel isActive (`!Z` when Z==="visible")
-  const modalChrome = getModalChromeVisibility({
-    hasOpenDialogs,
-    suppressReason: dialogSuppressReason,
-  });
+  // densable jx / RPs — Host park visibility, not 239 zIr typing-only.
+  const modalChrome = hostDialogVisibility;
   const isDialogChromeVisible = modalChrome === 'visible';
+  const dialogSuppressReason = hostParkToSuppressReason(hostParkMode);
 
   // densable uQc — allowlisted _Zt focus only (Host-owned stays out).
   useLayoutEffect(() => {
@@ -4698,36 +4724,23 @@ export function REPL({
             }
           } else if (
             newMessage.type === 'progress' &&
-            isEphemeralToolProgress((newMessage as unknown as { data?: { type?: string } }).data?.type)
+            isEphemeralToolProgress(
+              newMessage.data &&
+                typeof newMessage.data === 'object' &&
+                newMessage.data !== null &&
+                'type' in newMessage.data
+                ? newMessage.data.type
+                : undefined,
+            )
           ) {
-            // Replace the previous ephemeral progress tick for the same tool
-            // call instead of appending. Sleep/Bash emit a tick per second and
-            // only the last one is rendered; appending blows up the messages
-            // array (13k+ observed) and the transcript (120MB of sleep_progress
-            // lines). useLogMessages tracks length, so same-length replacement
-            // also skips the transcript write.
-            // agent_progress / hook_progress / skill_progress are NOT ephemeral
-            // — each carries distinct state the UI needs (e.g. subagent tool
-            // history). Replacing those leaves the AgentTool UI stuck at
-            // "Initializing…" because it renders the full progress trail.
-            setMessages(oldMessages => {
-              const newData = newMessage.data as Record<string, unknown>;
-              // Scan backwards to find the last ephemeral progress with matching
-              // parentToolUseID and type. Previously only checked the last message,
-              // so interleaved non-ephemeral messages caused duplicate progress
-              // entries to accumulate (observed 13k+ entries in sleep-heavy sessions).
-              for (let i = oldMessages.length - 1; i >= 0; i--) {
-                const m = oldMessages[i]!;
-                if (m.type !== 'progress') break;
-                const mData = m.data as Record<string, unknown> | undefined;
-                if (m.parentToolUseID === newMessage.parentToolUseID && mData?.type === newData.type) {
-                  const copy = oldMessages.slice();
-                  copy[i] = newMessage;
-                  return copy;
-                }
-              }
-              return [...oldMessages, newMessage];
-            });
+            // densable iCe replace-last-ephemeral-progress (mcn/XVt).
+            // agent_progress / hook_progress / skill_progress are NOT ephemeral.
+            setMessages(oldMessages =>
+              applyMessageStoreAction(oldMessages, {
+                type: 'replace-last-ephemeral-progress',
+                message: newMessage,
+              }),
+            );
           } else {
             setMessages(oldMessages => [...oldMessages, newMessage]);
             // densable slt: onStreamingText(() => null) then onMessage in same

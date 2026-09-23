@@ -1,0 +1,24 @@
+# gold-248-unk-9-slate  densable 2.1.248 #9
+# wakeup-resume-cache — unique Ivt/B1 ignoreOverage + NAn/zce tengu_slate_anchor
+# SEA 226708128 · 247 present
+
+ignoreOverage 248=4 247=0
+tengu_slate_anchor 248=2 247=0
+
+## NAn @185604567 len=34 sha=77e65efa3fdb5b46 hits=1
+function NAn(){return zce(FAn,!0)}
+
+## zce @180589886 len=104 sha=21601b2204427c03 hits=1
+function zce(e,t){let r=rl().pinnedFeatureValues??=new Map;if(!r.has(e))r.set(e,R(e,t));return r.get(e)}
+
+## Ivt @186445321 len=365 sha=aa889df2f042f9e9 hits=1
+function Ivt(e,{agentCacheTtlOverride:t,ignoreOverage:r=!1}={}){let o=St(),u=o&&!r&&id().isUsingOverage===!0,p=jTt(e,t,u);if(p!==void 0)return p;if(!o||u)return{ttl:"5m",reason:"default"};let g=nTn();if(g===null)g=R("tengu_prompt_cache_1h_config",{allowlist:[...DEe]}).allowlist??[],rTn(g);return LEe(e,g)?{ttl:"1h",reason:"subscriber"}:{ttl:"5m",reason:"default"}}
+
+## B1 @186445686 len=44 sha=eed8334d62f460c7 hits=1
+function B1(e,t){return Ivt(e,t).ttl==="1h"}
+
+## prompt() 248 @185604878
+async prompt(){let e=NAn(),t=B1("repl_main_thread",{ignoreOverage:e}),r=B1("sdk",{ignoreOverage:e});return k5n(t===r?t:void 0)},get inputSchema(){return DAn()},get outputSchema(){r
+
+## 247 prompt() hits=1 @216445468
+async prompt(){let e=PR("repl_main_thread"),t=PR("sdk");return S3t(e===t?e:void 0)},get inputSchema(){return Jds()},get outputSchema(){retur

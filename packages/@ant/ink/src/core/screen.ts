@@ -3,6 +3,7 @@ import {
   ansiCodesToString,
   diffAnsiCodes,
 } from '@alcalzone/ansi-tokenize'
+import { filterItalicOffTokens } from './colorize.js'
 import {
   type Point,
   type Rectangle,
@@ -166,6 +167,8 @@ export class StylePool {
    * with a single bitmask check on the packed word.
    */
   intern(styles: AnsiCode[]): number {
+    // densable jJn — drop italic-off SGR before the cell style is interned.
+    styles = filterItalicOffTokens(styles)
     const key = styles.length === 0 ? '' : styles.map(s => s.code).join('\0')
     let id = this.ids.get(key)
     if (id === undefined) {
@@ -432,24 +435,13 @@ export type Screen = Size & {
   noSelect: Uint8Array
 
   /**
-   * Per-ROW soft-wrap continuation marker. softWrap[r]=N>0 means row r
-   * is a word-wrap continuation of row r-1 (the `\n` before it was
-   * inserted by wrapAnsi, not in the source), and row r-1's written
-   * content ends at absolute column N (exclusive — cells [0..N) are the
-   * fragment, past N is unwritten padding). 0 means row r is NOT a
-   * continuation (hard newline or first row). Selection copy checks
-   * softWrap[r]>0 to join row r onto row r-1 without a newline, and
-   * reads softWrap[r+1] to know row r's content end when row r+1
-   * continues from it. The content-end column is needed because an
-   * unwritten cell and a written-unstyled-space are indistinguishable in
-   * the packed typed array (both all-zero) — without it we'd either drop
-   * the word-separator space (trim) or include trailing padding (no
-   * trim). This encoding (continuation-on-self, prev-content-end-here)
-   * is chosen so shiftRows preserves the is-continuation semantics: when
-   * row r scrolls off the top and row r+1 shifts to row r, sw[r] gets
-   * old sw[r+1] — which correctly says the new row r is a continuation
-   * of what's now in scrolledOffAbove. Reset each frame; copied by
-   * blitRegion/shiftRows.
+   * densable screen.softWrap packing (`id` / `Ao`). softWrap[r]≠0 means
+   * row r is a word-wrap continuation of row r-1. Packed as
+   * `prevContentEnd<<16 | startCol` with optional SW_ELIDED_SEP (bit 15)
+   * when the continuation elided a leading space. Selection copy joins
+   * without a newline when softWrap[r]≠0, reads softWrap[r+1]>>>16 for
+   * row r's content end, and reinserts a space when bit 15 is set.
+   * Reset each frame; copied by blitRegion/shiftRows.
    */
   softWrap: Int32Array
 }

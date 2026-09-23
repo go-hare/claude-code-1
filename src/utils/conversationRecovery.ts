@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { relative } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
 import { addInvokedSkill } from '../bootstrap/state.js'
@@ -259,6 +260,56 @@ export function isResumeInterruptedTurnStale(
  * synthetic assistant sentinel when the last message is from the user.
  * @internal Exported for testing - use loadConversationForResume instead
  */
+type IdLessAssistant = {
+  type?: unknown
+  requestId?: unknown
+  message?: { id?: unknown }
+}
+
+function stampOneIdLessAssistant<T>(entry: T): T {
+  if (typeof entry !== 'object' || entry === null) return entry
+  const rec = entry as IdLessAssistant
+  if (rec.type !== 'assistant' || rec.message === undefined) return entry
+  if (rec.requestId !== undefined) return entry
+  if (typeof rec.message.id === 'string' && rec.message.id.length > 0) {
+    return entry
+  }
+  return {
+    ...(entry as object),
+    message: { ...rec.message, id: randomUUID() },
+  } as T
+}
+
+/**
+ * densable `aVn` — stamp message.id on assistant entries that have no id and
+ * no requestId, before same-id merge. Live stream-json injection and resume
+ * of older sessions share this rule.
+ */
+export function stampIdLessAssistantEntry<T>(entry: T): T {
+  const next = stampOneIdLessAssistant(entry)
+  if (next !== entry) {
+    logForDebugging(
+      'deserializeMessages: stamped a message.id on 1 id-less assistant entry (pre-#61940 stream-json injection)',
+    )
+  }
+  return next
+}
+
+export function stampIdLessAssistantMessages<T>(messages: readonly T[]): T[] {
+  let count = 0
+  const next = messages.map(message => {
+    const stamped = stampOneIdLessAssistant(message)
+    if (stamped !== message) count += 1
+    return stamped
+  })
+  if (count > 0) {
+    logForDebugging(
+      `deserializeMessages: stamped a message.id on ${count} id-less assistant entr${count === 1 ? 'y' : 'ies'} (pre-#61940 stream-json injection)`,
+    )
+  }
+  return next
+}
+
 export function deserializeMessages(serializedMessages: Message[]): Message[] {
   return deserializeMessagesWithInterruptDetection(serializedMessages).messages
 }
@@ -318,8 +369,10 @@ export function deserializeMessagesWithInterruptDetection(
 
     // Filter out assistant messages with only whitespace text content.
     // This can happen when model outputs "\n\n" before thinking, user cancels mid-stream.
-    const filteredMessages = filterWhitespaceOnlyAssistantMessages(
-      filteredThinking,
+    const filteredMessages = stampIdLessAssistantMessages(
+      filterWhitespaceOnlyAssistantMessages(
+        filteredThinking,
+      ) as NormalizedMessage[],
     ) as NormalizedMessage[]
 
     // densable lrs: f = t?.size||r ? {kind:"none"} : N4g(p)

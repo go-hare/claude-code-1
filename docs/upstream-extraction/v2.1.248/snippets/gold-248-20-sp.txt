@@ -1,0 +1,71 @@
+# gold-248-20-sp
+
+## window before P0n looking for function sp
+anged_files:0,commits:0,no_root:1,aborted:1}),{outcome:"failed",errorSummary:Vct,needsForce:!0};if(await Ba(M).catch(()=>null)!==M)return u(nae);if(!await mW(M))return n(`removeAgentWorktree: aborted ${t} removal \u2014 unremovable reparse point in ${e}`,{level:"warn"}),{outcome:"failed",errorSummary:tTt};if(await Ba(M).catch((G)=>Q(G)?M:null)!==M)return u(nae);return await Kwt(M,{recursive:!0,force:!0}),n(`Removed agent worktree with no git root at: ${e}`),p()}async function bz(e,t,r,o,u="unknown",p,g,{storageV5:k,credentials:E}={}){if(o){if(!eG(e)||Wp(e)||y1t(e,te()))return CF(e,u,p,!0);let pe=e;if(p!==void 0){let we=te(),Pe=jC(ce(),e,{surfaceNetworkRaw:!0,anchor:we});if(Pe===xq||Pe!==void 0&&(y1t(Pe,we)||Wp(Pe)))return CF(e,u,p,!0);let Ie;try{Ie=await Uf(e)}catch(xe){if(Q(xe)||T(xe)==="ENOTDIR")return CF(e,u,p,!0);return{outcome:"failed",errorSummary:`cannot stat the worktree path (${T(xe)??"unknown error"})`}}if(Ie.isSymbolicLink())return n(`removeAgentWorktree: refused hook remova
+
+## helpers in 200k before P0n count=0
+
+## function sp( hits=9
+- @180593720 function sp(){return aD(a.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE,!1)}function sD(){let e=UB(),t=be("policySettings")?.autoMemoryDirectory??be("flagSettings")?.autoMemoryDirectory??(e?b
+- @181181855 function sp(e){return`Not authenticated \u2014 run /login (${e})`}
+export{U_e,Vft,LVe,LFt,qft,sp};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Te
+- @188801044 function sp(e){let t=e.regex,n=["ADMINTOOLS","APPDATA","CDBURN_AREA","CMDLINE","COMMONFILES32","COMMONFILES64","COMMONFILES","COOKIES","DESKTOP","DOCUMENTS","EXEDIR","EXEFILE","EXE
+- @189350554 function sp(){return{direction:0,flexDirection:0,justifyContent:0,alignItems:4,alignSelf:0,alignContent:1,flexWrap:0,overflow:0,display:0,positionType:1,flexGrow:0,flexShrink:0,fle
+- @191185547 function sp(d,C,w){for(let F of d){if(F.type!=="user"||F.isMeta)continue;let{content:j}=F.message;if(j===C)return F.message.content=w,F;if(typeof j!=="string"&&qx(j)===C){let H=j.f
+- @192184937 function sp(i){let{query:d,mode:m}=i.editor.getSnapshot();return us(d,m,ds(d,m,i.roster.jobs,i.cwdFilter),i.parseScope)!==null}async function dp(i,d,m){let{editor:w,roster:S,select
+
+## function Dm( hits=10
+- @181518950 function Dm(e){return e.toLowerCase().replace(/\u0131/g,"i").replace(/\u017F/g,"s")}async function mW(e){if(B()!=="windows")return!0;let t=await s(k(e)).catch(()=>null);return!awai
+- @182606783 function Dm(e){return/Credential=([^/,\s]+)\//.exec(e)?.[1]}function Mm(e){if(!e.startsWith($o))return null;let t=/Credential=([^,\s]+)/.exec(e)?.[1],r=/SignedHeaders=([^,\s]+)/.ex
+- @189019560 function Dm(e){let t=e.regex,n=/[a-zA-Z_][a-zA-Z0-9_]*/,a={className:"number",variants:[e.BINARY_NUMBER_MODE,e.C_NUMBER_MODE]};return{name:"Tcl",aliases:["tk"],keywords:["after","a
+- @191161586 function Dm(d,C,w,F){if(C==="session")return{transcripts:void 0,droppedThirdParty:0};if(F!==void 0){let me=cl(d);if(me!==void 0)return xm(F,me,C,w)}let j=_i(d),H=Si(d),W=Date.now()
+- @195799793 function Dm(e,t,r="GET",o=!1){return t!==void 0&&(r==="GET"||r==="HEAD")&&!o&&ic(e,t)}var xm=["/css","/icon","/earlyaccess/","/s/","/l/","/ea/"];function ic(e,t){try{return new URL
+- @197441745 function Dm(o){return{schemeId:"aws.auth#sigv4",signingProperties:{name:"bedrock",region:o.region},propertiesExtractor:(t,e)=>({signingProperties:{config:t,context:e}})}}function G
+
+## function jn( hits=33
+- @178233089 function jn(e){if(e===null||typeof e!=="object")return;if(e[Symbol.asyncIterator]){await e[Symbol.asyncIterator]().return?.();return}let t=e.getReader(),r=t.cancel();t.releaseLock(
+- @178487648 function jn(t){return t}function Vn(t){return/^[\\/]{2}/.test(t)||F2(t)}function aXe(t){return/(^|[\\/])\.\.([\\/]|$)/.test(t)}function ru(t){return/^[\\/]\?\?[\\/]/.test(t)}functi
+- @178847565 function jn(e,t){let r={...e._zod.def.shape},o=e._zod.def;for(let n in t){if(!(n in o.shape))throw Error(`Unrecognized key: "${n}"`);if(!t[n])continue;delete r[n]}return g4(e,{...e
+- @179155207 function jn(e){return{bytes:Buffer.byteLength(e,"utf8"),lines:xn(e,`
+`)+(e.endsWith(`
+`)?0:1)}}function wt(e){return Ct("sha256").update(S(e)).digest("hex")}function Fn(e){if(typeo
+- @179241570 function jn(e){return e=e.replace(ce,"^$1"),e}function Ln(e,t){if(e=`${e}`,e=e.replace(/(?=(\\+?)?)\1"/g,"$1$1\\\""),e=e.replace(/(?=(\\+?)?)\1$/,"$1$1"),e=`"${e}"`,e=e.replace(ce,
+- @179916550 function jn(e,t,r,n=!1){var o;let i=N[T]=(o=N[T])!==null&&o!==void 0?o:{version:v.VERSION};if(!n&&i[e]){let s=Error(`@opentelemetry/api: Attempted duplicate registration of API: ${
+
+## #20 last function sp( before P0n @-1
+MISS {"miss":true}
+
+## last sp @-1
+
+## needle ",sp," hits=3
+- @201549574 l[0]=An,Ml[1]=rp;else rp=Ml[1];let Lo=rp,sp,ip;if(Ml[2]!==Hs||Ml[3]!==Lo)sp=()=>({requestId:`notice:${Lo}`,props:{text:Lo,command:Hs??null}}),ip=[Lo,Hs],Ml[2]=Hs,Ml[3]=Lo,Ml[4]=sp,Ml[5]=ip;else sp=Ml[4],ip=Ml[5];let CT=Wi.useRenderInput("In
+- @201549783 5];let CT=Wi.useRenderInput("InfoNotice",sp,ip),ap;if(Ml[6]!==An||Ml[7]!==Lo)ap=(Cl)=>e(Fs,{command:Cl.props.command??void 0,children:Cl.props.text===Lo?An:Cl.props.text}),Ml[6]=An,Ml[7]=Lo,Ml[8]=ap;else ap=Ml[8];return Wi.useRenderHook(CT,
+- @217298421 Cv,XC,lW,Fwe,syt,xo,LC,ov,Uo,ap,DC,L6,D6,sp,I6,op,lp,IC,cp,MC,M6,Wh,N6,wg,P6,Du,NC,O6,lv,cv,uv,kg,B6,$6,hv,F6,xc,PC,Sg,z6,Eg,dv,G6,Ag,bo,Rg,qh,_g,OC,Lg,Dg,V6,BC,Ig,Mg,fv,_W,Tr,Mu,MW,$W,ER,zW,q6,H6,$Te,oyt,MA,lyt,cke,AR,uke,hke,cyt,Wg,fke,nq
+
+## needle "sp=function" hits=0
+
+## needle "const sp=" hits=1
+- @208918191 =yf(lp),ai[5]=lp,ai[6]=oh;else oh=ai[6];const sp=`${oh} MCP Server`;let ih,rh;if(ai[7]===p)ih=e(ue,{children:e(Be,{action:"confirm:no",context:"Confirmation",fallback:"Esc",description:"back"})}),rh=e(t,{dimColor:!0,children:"Checking crede
+
+## needle "var sp=" hits=4
+- @182455512 LLISECONDS,(e)=>e.getMilliseconds())]});var sp=d(function(uT){Object.defineProperty(uT,"__esModule",{value:!0});uT.celEnv=fH;var cT=dx(),sH=Vf(),iH=yx(),aH=Xx(),cH=zf(),lH=sT(),uH=aT(),dH=Symbol.for("@bufbuild/cel/env");function fH(e){retur
+- @197740560 .${o}.${i}${s}${a}`,t)};rp.exports=cI});var sp=d(function(PG,ip){class op{constructor(){this.max=1000,this.map=new Map}get(e){let t=this.map.get(e);if(t===void 0)return;else return this.map.delete(e),this.map.set(e,t),t}delete(e){return thi
+- @200318888 function(){return ok.InferenceConfig}});var sp=Bf();Object.defineProperty(y,"buildGroupServableSchema",{enumerable:!0,get:function(){return sp.buildGroupServableSchema}});Object.defineProperty(y,"GroupServableConfig",{enumerable:!0,get:func
+- @205618274 He.minimatch.braceExpand=He.braceExpand;var sp=(t,e={})=>new we(t,e).makeRe();He.makeRe=sp;He.minimatch.makeRe=He.makeRe;var rp=(t,e,i={})=>{let s=new we(e,i);if(t=t.filter((r)=>s.match(r)),s.options.nonull&&!t.length)t.push(e);return t};He
+
+## needle "function sp(e,t)" hits=1
+- @206439245 lete' on protocol revision 2026-07-28`)}function sp(e,t){let r=ep(t);if(t.resultType!=="complete"||!Qm(e))return r===void 0?t:lp(t);let o=t,n=Ol(o.ttlMs)?o.ttlMs:cp(r),s=Nl(o.cacheScope)?o.cacheScope:up(r),i={...o,ttlMs:n,cacheScope:s};retu
+
+## 247 on-no-remote kept @ 198121621,221786937
+....... is locked by a live Claude Code process, or with a reason we did not write (.......g.f.). ..  .n.o.t. .o.u.r.s. .t.o. .r.e.m.o.v.e.	...u...a session.../....GU. moved to the background from this window, pid .......u.background session ........., pid ..........pid 1.....W. is the working directory of a live session (pid ...2.......deleteJob: worktree has uncommitted changes, kept ..(...8xt. has commits that are on no remote, kept......y.job_delete_force....uT.left_in_place...(....Nu.deleteJob: failed to remove job dir for ....K...jobdir_rm_failed/...lpL.couldn't remove the session's sta
+---
+## #20-247 covering  @-1
+MISS {"miss":true}
+
+t.test(m.jobId)?`background session ${m.jobId}, pid ${m.pid}`:`pid ${m.pid}, ${m.kind}`,y(`deleteJob: ${l} is the working directory of a live session (pid ${m.pid}, ${m.kind}) \u2014 not ours to remove`,{level:"warn"});else if(b&&!p&&!t.force)u="dirty",y(`deleteJob: worktree has uncommitted changes, kept ${l}`,{level:"warn"});else if(!p&&k&&!await Qa(l,await Za(k)))u="unpushed",y(`deleteJob: ${l} has commits that are on no remote, kept`,{level:"warn"});else{let Q=lo(l,n.originCwd)??void 0,Y=(n.originCwd?xa(n.originCwd):null)??void 0,re=await Xa(l,n.worktreeBranch,Q,n.worktreeHookBased,t.force?
+---
+## #20-247 covering Qe @221784504
+len=3894 sha=65a4637d987e1e28
+async function Qe(e,t={},r){let n=await K(O(e),r),o=n?.worktreePath?await mo().catch(()=>[]):[],s=new Set;for(let l of o)if(l.kind==="bg"&&(l.jobId===e||l.sessionId?.startsWith(e)))s.add(l.pid);let i=await Tt(e,n??void 0,{knownGone:t.knownGone,evict:!0},r).catch((l)=>({confirmed:!1,error:N(l)}));if(!i.confirmed){if(y(`deleteJob: kill unconfirmed for ${e} \u2014 skipping jobdir/worktree removal to avoid stranding a live worker`,{level:"warn"}),!t.internal)j("job_delete","kill_unconfirmed",{had_worktree:Boolean(n?.worktreePath)});return{removed:!1,error:i.error,errorCode:"kill_unconfirmed"}}let c;if(n?.worktreePath){let l=n.worktreePath,u,f=null,d="present",_,m,{dirty:b,gitError:p}=await qa(l,void 0,{hookBased:n.worktreeHookBased}),k=lo(l,n.originCwd)??void 0,P=await uo(l).catch(()=>l),M=!p&&k?await Ka(k).catch(()=>null):null,R;for(let Q of M??[])if(await uo(Q.worktreePath).catch(()=>Q.worktreePath)===P){R=Q;break}let ye=Ha(R?.lockReason);if(await Nl(e,P,l,r))u="in_use",y(`deleteJob: ${l} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await Ba(l)===null&&(d=await ya(l))!=="gone"&&(f=d==="unreadable"?"unreadable":await Ll(e,P,l,r))!==null)u=f==="claimed"?"shared_record":"records_unreadable",y(f==="claimed"?`deleteJob: ${l} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${l} against sibling records \u2014 refusing until records are readable`,{level:"warn"});else if(!await Ga(R?.lockReason)&&!(ye!==null&&s.has(ye)))u="live_lock",y(`deleteJob: ${l} is locked by a live Claude Code process, or with a reason we did not write (${R?.lockReason}) \u2014 not ours to remove`,{level:"warn"});else if((m=await Ml(o,e,s,P,l))!==void 0&&await ya(l)!=="gone")u="occupied",_=m.pid===process.pid?`${typeof m.parkedJobId==="string"&&dt.test(m.parkedJobId)?`session ${m.parkedJobId},`:"a session"} moved to the background from this window, pid ${m.pid}`:m.kind==="bg"&&typeof m.jobId==="string"&&dt.test(m.jobId)?`background session ${m.jobId}, pid ${m.pid}`:`pid ${m.pid}, ${m.kind}`,y(`deleteJob: ${l} is the working directory of a live session (pid ${m.pid}, ${m.kind}) \u2014 not ours to remove`,{level:"warn"});else if(b&&!p&&!t.force)u="dirty",y(`deleteJob: worktree has uncommitted changes, kept ${l}`,{level:"warn"});else if(!p&&k&&!await Qa(l,await Za(k)))u="unpushed",y(`deleteJob: ${l} has commits that are on no remote, kept`,{level:"warn"});else{let Q=lo(l,n.originCwd)??void 0,Y=(n.originCwd?xa(n.originCwd):null)??void 0,re=await Xa(l,n.worktreeBranch,Q,n.worktreeHookBased,t.force?"job_delete_force":"job_delete",P,Y,{storageV5:r}).catch((ae)=>(y(`deleteJob: removeAgentWorktree threw for ${l}: ${N(ae)}`,{level:"error"}),{outcome:"failed",errorSummary:N(ae)}));if(re.outcome==="failed")u=re.needsForce?"unverified":re.errorSummary===Ya?"identity_changed":"remove_failed",_=re.needsForce?void 0:re.errorSummary;else if(re.outcome==="left_in_place")c=vt(l)}if(u){if(!t.internal)I("job_delete",`worktree_kept_${u}`,{had_worktree:!0});return{removed:!1,keptWorktree:vt(l),keptReason:u,..._!==void 0&&{keptErrorSummary:_}}}}let a=n?.fan?.some((l)=>l.kind==="shell"&&l.doneAt===void 0)??!1;await To(O(e),{waitMs:a?4000:0});try{await Cl(O(e),{recursive:!0,force:!0})}catch(l){if(_e(O(e)),y(`deleteJob: failed to remove job dir for ${e}: ${N(l)}`,{level:"warn"}),!t.internal)j("job_delete","jobdir_rm_failed",{had_worktree:Boolean(n?.worktreePath)});return{removed:!1,error:`couldn't remove the session's state directory (${vt(N(l))})`,errorCode:"jobdir_rm_failed"}}if(je()&&r!==void 0&&fo(ec(e))===void 0)await tc(r,e);else await Pl(Ut(e)).catch(()=>{});if(_e(O(e)),!t.internal)if(c)I("job_delete","worktree_left_in_place",{had_worktree:!0});else Z("job_delete",{had_worktree:Boolean(n?.worktreePath)});return{removed:!0,...c&&{leftWorktreeDir:c}}}

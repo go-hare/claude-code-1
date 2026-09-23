@@ -1,0 +1,334 @@
+# gold-248-48-linux
+# linux=223599960 win=226708128
+
+## linux "overflowuid" hits=3
+- @93487621
+annot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart........2..uidsCollapse......../proc/self/uid_map......o.g./proc/sys/kernel/overflowuid....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock.....o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.frame too large (........x.bad ctrl 
+
+- @178759357
+<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function S(){try{return R(await P("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,ui
+
+- @178760577
+ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid",{encoding:"utf8"});r=R(u)}catch{r=void 0}let o=r??m;if(n===void 0)return t===o;if(h(n))return!1;return n.length===0||t!==void 0&&t===o}import{createHash as K,randomBytes as x}from"crypto";import{lstatSync as z,mkdirSync as W,readFileSync as H,rmSync as G,writeFileSync as Y}from"fs";import{chmod as E,lstat as l,mkdir as d,readdir as y,readFile as I,rm as O,utimes as J}from"fs/promises"
+
+## linux "uid_map" hits=4
+- @2988634
+ not in the result from the 'ownKeys' trap.LibuvStreamWrap.wordWrap.TTYWrap.pap.nap.munmap.no-mmap.stackmap.weakmap.mremap.x-sourcemap.X-Sourcemap.equi-angular-cubemap.apply-seccomp: write /proc/self/uid_map.apply-seccomp: write /proc/self/gid_map....exe.map....map...: searching via memory map.Failed to iterate over cjs map.geopoly_overlap.heap.JSC_verifyHeap.javascriptHeap.InvalidAbstractHeap.WKIsoHeap.JSStructureHeap.location.heap().kind() != Heap.id-smime-cd-ldap.setAttr-PGWYcap.OPENSSL_ia32cap.keyMap.NewMap.flatMap.isMap.getErrorMap.JSC_alwaysGeneratePCToCodeOriginMap.subscriptionCallbackM
+
+- @93487587
+ so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart........2..uidsCollapse......../proc/self/uid_map......o.g./proc/sys/kernel/overflowuid....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock.....o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+.......fG.fra
+
+- @178758870
+var/tmp","/var/run","/home","/var/home","/root","/var/roothome","/mnt","/mnt/wslg"]);function eGn(){return M}import{readFile as P}from"fs/promises";async function D(){try{return F(await P("/proc/self/uid_map","utf8"))}catch{return}}function F(e){let t=[];for(let n of e.split(`
+`)){if(n.trim()==="")continue;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0].innerStart
+
+- @178760478
+);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid",{encoding:"utf8"});r=R(u)}catch{r=void 0}let o=r??m;if(n===void 0)return t===o;if(h(n))return!1;return n.length===0||t!==void 0&&t===o}import{createHash as K,randomBytes as x}from"crypto";import{lstatSync as z,mkdirSync as W,readFileSync as H,rmSync as G,writeFileSync as Y}from"fs";impor
+
+## linux "/proc/self/uid_map" hits=4
+- @2988623
+.' that was not in the result from the 'ownKeys' trap.LibuvStreamWrap.wordWrap.TTYWrap.pap.nap.munmap.no-mmap.stackmap.weakmap.mremap.x-sourcemap.X-Sourcemap.equi-angular-cubemap.apply-seccomp: write /proc/self/uid_map.apply-seccomp: write /proc/self/gid_map....exe.map....map...: searching via memory map.Failed to iterate over cjs map.geopoly_overlap.heap.JSC_verifyHeap.javascriptHeap.InvalidAbstractHeap.WKIsoHeap.JSStructureHeap.location.heap().kind() != Heap.id-smime-cd-ldap.setAttr-PGWYcap.OPENSSL_ia32cap.keyMap.NewMap.flatMap.isMap.getErrorMap.JSC_alwaysGeneratePCToCodeOriginMap.subscripti
+
+- @93487576
+id mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart........2..uidsCollapse......../proc/self/uid_map......o.g./proc/sys/kernel/overflowuid....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock.....o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ......?.K.ENOTSOCK.....+M.{"op":"ping"}
+..
+
+- @178758859
+","/var","/var/tmp","/var/run","/home","/var/home","/root","/var/roothome","/mnt","/mnt/wslg"]);function eGn(){return M}import{readFile as P}from"fs/promises";async function D(){try{return F(await P("/proc/self/uid_map","utf8"))}catch{return}}function F(e){let t=[];for(let n of e.split(`
+`)){if(n.trim()==="")continue;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0]
+
+- @178760467
+art+s.count);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid",{encoding:"utf8"});r=R(u)}catch{r=void 0}let o=r??m;if(n===void 0)return t===o;if(h(n))return!1;return n.length===0||t!==void 0&&t===o}import{createHash as K,randomBytes as x}from"crypto";import{lstatSync as z,mkdirSync as W,readFileSync as H,rmSync as G,writeFileSync as Y}fro
+
+## linux "innerStart" hits=14
+- @93487516
+on socket: this process runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart........2..uidsCollapse......../proc/self/uid_map......o.g./proc/sys/kernel/overflowuid....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock.....o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...
+
+- @178759176
+e;let r=n.trim().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function S(){try{return R(await P("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t
+
+- @178759260
+th!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function S(){try{return R(await P("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.
+
+- @178759580
+atch{return}}function R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}asyn
+
+- @178759596
+ction R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStart&&t<r.innerStart+r.count)?void 0:t}async function tGn(){let e=process.getuid?.(),t=await D();if(t===void 0){let n=await S()??m;return e===n?{unmappedOwnerUid:void 0,uidCollapses:!0,rootUidAmbiguous:n===0}:void 0}if(h(t))return;return L(t,e)}async function L(e,t){let n=await S(),r=n??m;return{unmappedOwnerUid:A(e,n),uidCollapses:e.length===0||t!==void 0&&t===r,rootUidAmbiguous:n===0}}async function GWe()
+
+- @178760172
+=0}}async function GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s.count);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/ke
+
+- @178760188
+on GWe(){let e=process.getuid?.();if(e===void 0)return;let t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s.count);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid
+
+- @178760244
+et t=await D();if(t===void 0)return;if(h(t))return e;let n=await S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s.count);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid",{encoding:"utf8"});r=R(u)}catch{r=void 0}let o=r??m;if
+
+## linux "hostStart" hits=3
+- @93487536
+ess runs in a user namespace without a uid mapping, so directory and peer ownership cannot be verified (start it with a mapping, e.g. unshare -Ur)......r`..attach-journal..
+.......innerStart..	...m...hostStart........2..uidsCollapse......../proc/self/uid_map......o.g./proc/sys/kernel/overflowuid....1,..\\.\pipe\cc-daemon-.....I}..cc-daemon-[0-9a-f]{16}........Y.cc-daemon-*.....E[..control.key.....C....tokens.json........pty-.......control.sock.....o..pipe.key$...B.|.daemon pipe.key is not a valid nonce.....@}.refusing to use daemon dir: .....\g. is owned by uid .......|...refusing to bind: ..
+
+- @178759189
+m().split(/\s+/),o=Number(r[0]),s=Number(r[1]),u=Number(r[2]);if(r.length!==3||!Number.isSafeInteger(o)||o<0||!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<=0)return;t.push({innerStart:o,hostStart:s,count:u})}return t}function h(e){return e.length===1&&e[0].innerStart===0&&e[0].count>=4294967295}async function S(){try{return R(await P("/proc/sys/kernel/overflowuid","utf8"))}catch{return}}function R(e){let t=e.trim();if(!/^\d+$/.test(t))return;let n=Number(t);return Number.isSafeInteger(n)?n:void 0}function A(e,t){if(e.length===0||t===void 0)return;return e.some((r)=>t>=r.innerStar
+
+- @178760307
+t S()??m;if(t.length===0||e===n)return;if(((s)=>t.some((u)=>s>=u.innerStart&&s<u.innerStart+u.count))(n))return e;let o=t.find((s)=>e>=s.innerStart&&e<s.innerStart+s.count);return o===void 0?void 0:o.hostStart+(e-o.innerStart)}function M$t(){return Bce.uidsCollapse??=j(ce()),Bce.uidsCollapse}function j(e){let t=process.getuid?.(),n;try{let s=e.readFileSync("/proc/self/uid_map",{encoding:"utf8"});n=F(s)}catch{n=void 0}let r;try{let u=e.readFileSync("/proc/sys/kernel/overflowuid",{encoding:"utf8"});r=R(u)}catch{r=void 0}let o=r??m;if(n===void 0)return t===o;if(h(n))return!1;return n.length===0||
+
+## linux "var y=65534" hits=0
+## linux "async function _(){return}" hits=0
+## linux "async function _(){" hits=2
+- @187934854
+case"iterm2":case"iterm2_with_bell":case"kitty":case"ghostty":case"terminal_bell":o=t;break;case"notifications_disabled":o="disabled";break;default:o="none"}try{return u(o,e,i),o}catch{return"error"}}async function _(){switch(ll()?.terminal??a.terminal){case"Apple_Terminal":return await g()?"terminal_bell":"no_method_available";case"iTerm.app":return"iterm2";case"kitty":return"kitty";case"ghostty":return"ghostty";default:return"no_method_available"}}function u(t,e,i){switch(t){case"iterm2":i.notifyITerm2(e);return;case"iterm2_with_bell":i.notifyITerm2(e),i.notifyBell();return;case"kitty":i.not
+
+- @188472217
+t.apps.listInstalled(),m),o=l(e,C());if(!o.includes("Finder"))o.unshift("Finder");return o}catch{n(`[Computer Use MCP] app enumeration exceeded ${m}ms or failed; tool description omits list`);return}}async function _(){let t=Ret(),e=cfe(),o=AJt(t,e),r=await N(),s=vme(t.executor.capabilities,e,r);return o.setRequestHandler(gE,async()=>t.isDisabled()?{tools:[]}:{tools:s}),o}async function H(t){let e=await XFe(t);if(e)process.stderr.write(`${e}
+`);jO();let o=nk(t);if(D()&&o!==void 0){dT({storageV5:o}),Qk(o);let[{credentialsStoreFor:a},{primeFastPathCredentials:d}]=await Promise.all([import("/$bun
+
+## linux "function v(e){let n=[];for(let t of e.split" hits=0
+## linux "canonical" hits=434
+- @145248
+ue(promise) : promise;
+})
+(function (promise) {"use strict";
+  return ["pending", "fulfilled", "rejected"][@isPromise(promise) ? @peekPromiseStatus(promise) : 1];
+})
+(function () {"use strict";
+  let canonical = [
+    "--conditions",
+    "--diagnostic-dir",
+    "--disable-warning",
+    "--dns-result-order",
+    "--enable-source-maps",
+    "--import",
+    "--inspect",
+    "--inspect-brk",
+    "--inspect-port",
+    "--max-http-header-size",
+    "--no-addons",
+    "--no-deprecation",
+    "--no-warnings",
+    "--pending-deprecation",
+    "--perf-basic-prof",
+    "--perf-basic-prof-only-functions",
+
+- @146037
+it",
+    "--throw-deprecation",
+    "--title",
+    "--trace-deprecation",
+    "--trace-warnings",
+    "--use-bundled-ca",
+    "--use-openssl-ca",
+    "--use-system-ca",
+    "--zero-fill-buffers"
+  ], canonicalSet = new Set(canonical);
+
+  class NodeEnvironmentFlagsSet extends Set {
+    add() {
+      return this;
+    }
+    delete() {
+      return !1;
+    }
+    clear() {}
+    has(key) {
+      if (typeof key === "string") {
+        if (key = key.replaceAll("_", "-"), /^--?[^-]/.test(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+   
+
+- @146060
+cation",
+    "--title",
+    "--trace-deprecation",
+    "--trace-warnings",
+    "--use-bundled-ca",
+    "--use-openssl-ca",
+    "--use-system-ca",
+    "--zero-fill-buffers"
+  ], canonicalSet = new Set(canonical);
+
+  class NodeEnvironmentFlagsSet extends Set {
+    add() {
+      return this;
+    }
+    delete() {
+      return !1;
+    }
+    clear() {}
+    has(key) {
+      if (typeof key === "string") {
+        if (key = key.replaceAll("_", "-"), /^--?[^-]/.test(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet
+
+- @146375
+  return !1;
+    }
+    clear() {}
+    has(key) {
+      if (typeof key === "string") {
+        if (key = key.replaceAll("_", "-"), /^--?[^-]/.test(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(thisArg, flag, flag, this);
+    }
+    get size() {
+      return canonicalSet.size;
+    }
+    *[Sy
+
+- @146448
+ "string") {
+        if (key = key.replaceAll("_", "-"), /^--?[^-]/.test(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(thisArg, flag, flag, this);
+    }
+    get size() {
+      return canonicalSet.size;
+    }
+    *[Symbol.iterator]() {
+      yield* canonical;
+    }
+    *values() {
+      yi
+
+- @146518
+st(key))
+          return key = key.replace(/=.*$/, ""), canonicalSet.has(key);
+        if (!key.startsWith("-")) {
+          if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(thisArg, flag, flag, this);
+    }
+    get size() {
+      return canonicalSet.size;
+    }
+    *[Symbol.iterator]() {
+      yield* canonical;
+    }
+    *values() {
+      yield* canonical;
+    }
+    *keys() {
+      yield* canonical;
+    }
+    
+
+- @146644
+if (canonicalSet.has(`--${key}`))
+            return !0;
+          return canonicalSet.has(`-${key}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(thisArg, flag, flag, this);
+    }
+    get size() {
+      return canonicalSet.size;
+    }
+    *[Symbol.iterator]() {
+      yield* canonical;
+    }
+    *values() {
+      yield* canonical;
+    }
+    *keys() {
+      yield* canonical;
+    }
+    *entries() {
+      for (let flag of canonical)
+        yield [flag, flag];
+    }
+  }
+  return Object.freeze(NodeEnvironmentFla
+
+- @146742
+}`);
+        }
+      }
+      return !1;
+    }
+    forEach(callback, thisArg) {
+      for (let flag of canonical)
+        callback.@call(thisArg, flag, flag, this);
+    }
+    get size() {
+      return canonicalSet.size;
+    }
+    *[Symbol.iterator]() {
+      yield* canonical;
+    }
+    *values() {
+      yield* canonical;
+    }
+    *keys() {
+      yield* canonical;
+    }
+    *entries() {
+      for (let flag of canonical)
+        yield [flag, flag];
+    }
+  }
+  return Object.freeze(NodeEnvironmentFlagsSet.prototype.constructor), Object.freeze(NodeEnvironmentFlagsSet.prototype), Object.freeze(new 
+
+## linux "root-equivalent" hits=0
+## linux "system dir" hits=4
+- @92336064
+l target cannot be statically resolved to a directory. This requires explicit approval and cannot be auto-allowed by permission rules........>..[*?[]........[..'
+
+This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.........A..on critical path: ......ENJ.'
+
+This command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories). This requires explicit approval and cannot be auto-allowed by permission rules.&...gKm.on working directory or its ance
+
+- @93752042
+user name. Pass {force: true} to replace, or pick a different sublayerGuid. Output: .......i..install_ambient_failed..........srt-win install: ambient write-deny stamping failed (stock world-writable system dirs could not be deny-stamped for the sandbox user): .....=xu.srt-win install failed (exit ...........throwIfNoEntry........#."code"........l.mapped_drive_cwd&...~h[.mapped/network-drive working directory......`5..drive.......Y...--holder-pid.....q..--sandbox-user-sid..!...l)..[Sandbox Windows] acl stamp exit=.......1|g.acl_stamp_failed....x...srt-win acl stamp exited ........P..(.p.a.r.t.
+
+- @178513641
+ass {force: true} to replace, or pick a different sublayerGuid. Output: ${t}`);case 17:throw new ju("install_ambient_failed",`srt-win install: ambient write-deny stamping failed (stock world-writable system dirs could not be deny-stamped for the sandbox user): ${t}`);default:throw new ju("install_failed",`srt-win install failed (exit ${e.status}): ${t}`)}}function Wcr(e={}){let t=e.srtWin??yr(),r;try{r=Ui(jh(e),{timeoutMs:Hh(e),srtWin:t})}catch(u){Yh(u)}Kh(r);let o=CR({sublayerGuid:e.sublayerGuid,srtWin:t});return r.status===10?{...o,cancelled:!0}:o}async function RNt(e={}){let t=e.srtWin??yr(
+
+- @180068782
+)){let ue=[U];if(U!==N){let{resolvedPath:pe}=Cs(ce(),U);if(pe!==U)ue.push(pe)}for(let pe of ue){if(obe(pe))return $k(e,`Dangerous ${e} operation detected: '${N}'
+
+This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,`on critical path: ${N}`);if((j?A:C).some((ke)=>im(ke,pe)))return $k(e,`Dangerous ${e} operation detected: '${N}'
+
+This command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories). This requires explicit approval and cannot b

@@ -29,19 +29,17 @@ describe('densable 2.1.246 UKc formatMcpServerLabel', () => {
     )
   })
 
-  // Local hardening, not part of the densable UKc contract.
+  // densable 2.1.251 An/fr: Cc/Cf → space, then collapse (not U+FFFD).
   test('control characters in an untrusted name cannot restructure the dialog', () => {
     expect(formatMcpServerLabel('evil\nAllow all tools', false)).toBe(
-      'evil\uFFFDAllow all tools',
+      'evil Allow all tools',
     )
     expect(formatMcpServerLabel('evil\roverwrite', false)).toBe(
-      'evil\uFFFDoverwrite',
+      'evil overwrite',
     )
-    expect(formatMcpServerLabel('evil\u001b[2Kesc', false)).toBe(
-      'evil\uFFFD[2Kesc',
-    )
+    expect(formatMcpServerLabel('evil\u001b[2Kesc', false)).toBe('evil [2Kesc')
     expect(formatMcpServerLabel('plugin:sl\nack:al\nerts', true)).toBe(
-      'al\uFFFDerts (from plugin sl\uFFFDack)',
+      'al erts (from plugin sl ack)',
     )
     // Ordinary punctuation and non-ASCII names are untouched.
     expect(formatMcpServerLabel('my-server_v2.1', false)).toBe('my-server_v2.1')

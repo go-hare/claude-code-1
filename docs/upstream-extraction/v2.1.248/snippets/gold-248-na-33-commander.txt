@@ -1,0 +1,4 @@
+# gold-248-na-33-commander  allowUnknownOption + refuse then enterRemoteControl (247 MISS)
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+
+("Control local sessions from claude.ai/code or the Claude mobile app").helpOption(!1).allowUnknownOption().allowExcessArguments(!0).action(w(async(P,M,H,L)=>{let{enterRemoteControl:j,rootOptionsRefusedMessage:N,rootOptionsRemoteControlRefuses:U,suppliedRootOptions:Y}=await import("B:/~BUN/root/chunk-2dr7g7p2.js"),re=U(Y(L));if(re.length>0)return gn(N(re));await j(L.args,P,M)})),u.command("doctor").description("Check the health of your Claude Code installation. Reads settings files in the current directory without 

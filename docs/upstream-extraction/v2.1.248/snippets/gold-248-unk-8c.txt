@@ -1,0 +1,95 @@
+# gold-248-unk-8c
+# when=2026-09-20T04:57:00.281Z
+
+# ---- kn / Gx / compose class ----
+## function kn() hits=3 178496439,180125416,199315289
+## #8 kn @180125416 len=37 sha=065181534dc2dc9d otherHits=0
+function kn(){return Vx.of(z().host)}
+
+## needle "keepAcrossTokenChanges" 248=5 247=0
+## #8 keepAcrossTokenChanges @180125095
+jt.resolveToolDescription;var Bx=jt.setToolDescribeInvalidator;var Hx=jt.setToolDescribeResolver;class r_{byKey=new Map;keepAcrossTokenChanges=void 0;generation=0;get(e){return this.byKey.get(e)}stamp(){return this.generation}register(e,t,r){if(r===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+
+
+## #8 keepAcrossTokenChanges-fn n_ @180124683 len=213 sha=cd27acc469737648 otherHits=0
+function n_(){let e=K6e(),t=K6e();return{setToolDescribeResolver:e.set,resolveToolDescription:(r,o)=>e.get()?.(r,o)??Promise.resolve(o),setToolDescribeInvalidator:t.set,invalidateToolDescriptions:()=>t.get()?.()}}
+
+## #8 keepAcrossTokenChanges @180125768
+ightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}sY.setToolDescribeInvalidator(IW);class a_{reader=null;register(e){let t=this.reader;return this.reader=e,t}}
+
+## #8 keepAcrossTokenChanges-fn s_ @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## #8 keepAcrossTokenChanges @180125809
+l",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}sY.setToolDescribeInvalidator(IW);class a_{reader=null;register(e){let t=this.reader;return this.reader=e,t}}var l_=new a_;function c_(e){return l_.re
+
+## #8 keepAcrossTokenChanges-fn s_ @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## #8 keepAcrossTokenChanges @180125882
+;if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}sY.setToolDescribeInvalidator(IW);class a_{reader=null;register(e){let t=this.reader;return this.reader=e,t}}var l_=new a_;function c_(e){return l_.register(e)}function zYn(){let e=l_.reader;if(!e)return!0;try{return e("ten
+
+## #8 keepAcrossTokenChanges-fn s_ @180125738 len=171 sha=4fb6f117e0cecea6 otherHits=0
+function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}
+
+## needle "dropInFlightComposes" 248=3 247=0
+## #8 dropInFlightComposes @180125348
+.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}dropInFlightComposes(){this.generation+=1}}var Vx=new K(()=>new r_);function kn(){return Vx.of(z().host)}var F2t={get(e){return kn().get(e)},stamp(){return kn().stamp()},register(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(
+
+## #8 dropInFlightComposes-fn n_ @180124683 len=213 sha=cd27acc469737648 otherHits=0
+function n_(){let e=K6e(),t=K6e();return{setToolDescribeResolver:e.set,resolveToolDescription:(r,o)=>e.get()?.(r,o)??Promise.resolve(o),setToolDescribeInvalidator:t.set,invalidateToolDescriptions:()=>t.get()?.()}}
+
+## #8 dropInFlightComposes @180125640
+gister(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(){kn().invalidateAll()}function o_(){kn().dropInFlightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcro
+
+## #8 dropInFlightComposes-fn o_ @180125621 len=42 sha=7a1425b27219fa53 otherHits=0
+function o_(){kn().dropInFlightComposes()}
+
+## needle "dropInFlight" 248=3 247=0
+## #8 dropInFlight @180125348
+.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}dropInFlightComposes(){this.generation+=1}}var Vx=new K(()=>new r_);function kn(){return Vx.of(z().host)}var F2t={get(e){return kn().get(e)},stamp(){return kn().stamp()},register(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(
+
+## #8 dropInFlight-fn n_ @180124683 len=213 sha=cd27acc469737648 otherHits=0
+function n_(){let e=K6e(),t=K6e();return{setToolDescribeResolver:e.set,resolveToolDescription:(r,o)=>e.get()?.(r,o)??Promise.resolve(o),setToolDescribeInvalidator:t.set,invalidateToolDescriptions:()=>t.get()?.()}}
+
+## #8 dropInFlight @180125640
+gister(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(){kn().invalidateAll()}function o_(){kn().dropInFlightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcro
+
+## #8 dropInFlight-fn o_ @180125621 len=42 sha=7a1425b27219fa53 otherHits=0
+function o_(){kn().dropInFlightComposes()}
+
+## needle "inFlightComposes" 248=0 247=0
+## #8 Gx-near-s_ @180125738
+ration+=1}dropInFlightComposes(){this.generation+=1}}var Vx=new K(()=>new r_);function kn(){return Vx.of(z().host)}var F2t={get(e){return kn().get(e)},stamp(){return kn().stamp()},register(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(){kn().invalidateAll()}function o_(){kn().dropInFlightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}sY.setToolDescribeInvalidator(IW);class a_{reader=null;register(e){let t=this.r
+
+## #8 class-around-drop @98486740
+e. .s.p.a.w.n.e.d. .i.t...
+.-. .K.e.e.p. .s.p.a.w.n. .c.o.u.n.t.s. .l.o.w... .O.n.e. .w.e.l.l.-.b.r.i.e.f.e.d. .s.u.b.a.g.e.n.t. .f.o.r. .a. .l.a.r.g.e. .i.n.d.e.p.e.n.d.e.n.t. .c.h.u.n.k. .i.s. .w.o.r.t.h. .m.o.r.e. .t.h.a.n. .s.e.v.e.r.a.l. .l.o.o.s.e.l.y.-.b.r.i.e.f.e.d. .o.n.e.s.;. .b.r.i.e.f. .i.t. .p.r.e.c.i.s.e.l.y. .t.h.e. .f.i.r.s.t. .t.i.m.e. .r.a.t.h.e.r. .t.h.a.n. .l.a.u.n.c.h.i.n.g.,. .w.a.i.t.i.n.g.,. .a.n.d. .r.e.-.b.r.i.e.f.i.n.g...
+.
+.D.e.l.e.g.a.t.e. .f.o.r. .w.o.r.k. .t.h.a.t. .i.s. .g.e.n.u.i.n.e.l.y. .i.n.d.e.p.e.n.d.e.n.t.,. .l.a.r.g.e. .e.n.o.u.g.h. .t.o. .j.u.s.t.i.f.y. .a. .f.r.e.s.h. .c.o.n.t.e.x.t.,. .o.r. .n.a.t.u.r.a.l.l.y. .p.a.r.a.l.l.e.l... .O.t.h.e.r.w.i.s.e.,. .d.o. .i.t. .y.o.u.r.s.e.l.f.........nd..tengu_cinder_relay.......HZ.tengu_opal_circuit..........dropInFlightComposes.....6..tengu_still_kestrel.
+...~.x.emailAsync..!.....O.GrowthBook pre-init OAuth refresh........1..setStorageBackend.........-.refreshOAuthToken.......L.M.hasEnvironmentOverride..........hasOverride.........isFeatureFromExperiment.....3.|.readConfigOverrides.....Ogo.getAllFeatures......6x..hasFreshFeatures......a.getNonDefaultFeatureKeys.....z..getConfigOverrides..........setC
+
+## #8 class-around-drop @180125348
+ot:()=>jt});var qr={};je(qr,{createToolDescribeSlot:()=>n_,default:()=>qr});function K6e(){let e=null;return{get:()=>e,set:(t)=>{e=t}}}function n_(){let e=K6e(),t=K6e();return{setToolDescribeResolver:e.set,resolveToolDescription:(r,o)=>e.get()?.(r,o)??Promise.resolve(o),setToolDescribeInvalidator:t.set,invalidateToolDescriptions:()=>t.get()?.()}}var jt=qr.createToolDescribeSlot();var zx=jt.invalidateToolDescriptions;var Fx=jt.resolveToolDescription;var Bx=jt.setToolDescribeInvalidator;var Hx=jt.setToolDescribeResolver;class r_{byKey=new Map;keepAcrossTokenChanges=void 0;generation=0;get(e){return this.byKey.get(e)}stamp(){return this.generation}register(e,t,r){if(r===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}dropInFlightComposes(){this.generation+=1}}var Vx=new K(()=>new r_);function kn(){return Vx.of(z().host)}var F2t={get(e){return kn().get(e)},stamp(){return kn().stamp()},register(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(){kn().invalidateAll()}function o_(){kn().dropInFlightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s
+
+## #8 class-around-drop @180125640
+dator:t.set,invalidateToolDescriptions:()=>t.get()?.()}}var jt=qr.createToolDescribeSlot();var zx=jt.invalidateToolDescriptions;var Fx=jt.resolveToolDescription;var Bx=jt.setToolDescribeInvalidator;var Hx=jt.setToolDescribeResolver;class r_{byKey=new Map;keepAcrossTokenChanges=void 0;generation=0;get(e){return this.byKey.get(e)}stamp(){return this.generation}register(e,t,r){if(r===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}dropInFlightComposes(){this.generation+=1}}var Vx=new K(()=>new r_);function kn(){return Vx.of(z().host)}var F2t={get(e){return kn().get(e)},stamp(){return kn().stamp()},register(e,t,r){kn().register(e,t,r)},get size(){return kn().size}};function IW(){kn().invalidateAll()}function o_(){kn().dropInFlightComposes()}var Gx="tengu_still_kestrel",Bl=null;function i_(e){let t=Bl;return Bl=e,t}function s_(){let e=kn();if(e.keepAcrossTokenChanges!==void 0)return e.keepAcrossTokenChanges;let t=Bl?.(Gx,!1);if(t===void 0)return!1;return e.keepAcrossTokenChanges=t,t}sY.setToolDescribeInvalidator(IW);class a_{reader=null;register(e){let t=this.reader;return this.reader=e,t}}var l_=new a_;function
+
+# ---- 247 pa / mR ----
+## 247 function pa() hits=2 208828627,223296233
+## #8 247 pa @208828627 len=37 sha=4519369e596b4a59 otherHits=NA
+function pa(){return eG.of(C().host)}
+
+## #8 247 mR-class @208828572
+lveToolDescription});var QK;var pR=y(()=>{Ai();QK=Zn.setToolDescribeInvalidator});var ZK;var gR=y(()=>{Ai();ZK=Zn.setToolDescribeResolver});var fa={};Jt(fa,{createToolDescribeSlot:()=>aR,default:()=>fa,invalidateToolDescriptions:()=>XK,resolveToolDescription:()=>JK,setToolDescribeInvalidator:()=>QK,setToolDescribeResolver:()=>ZK,toolDescribeSlot:()=>Zn});var im=y(()=>{im();dR();Nc();fR();pR();gR();Ai()});class mR{byKey=new Map;generation=0;get(e){return this.byKey.get(e)}stamp(){return this.generation}register(e,t,n){if(n===this.generation)this.byKey.set(e,t)}get size(){return this.byKey.size}invalidateAll(){this.byKey.clear(),this.generation+=1}}function pa(){return eG.of(C().host)}function ki(){pa().invalidateAll()}var eG,$se;var hR=y(()=>{B();Fe();im();eG=new L(()=>new mR);$se={get(e){return pa().get(e)},stamp(){return pa().stamp()},register(e,t,n){pa().register(e,t,n)},get size(){return pa().size}};fa.setToolDescribeInvalidator(ki)});var bT={};Jt(bT,{AWS_CHAIN_RESOLVE_REQUEST_TIMEO
+
+## 247 keepAcrossTokenChanges hits=0
+## 247 dropInFlightComposes hits=0
+# ---- jN betas reset ----
+## function Bd() hits=3 180059199,191325990,201450792
+## function al() hits=3 178553949,180058644,222404134
+## #8 247 no-betas @208606096 len=30 sha=4cce828164005f44 otherHits=NA
+function no(){De().betas=Xc()}
+
+# ---- G2t vs leftover save trio ----
+## #8 leftover-compare @180709491
+Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth 

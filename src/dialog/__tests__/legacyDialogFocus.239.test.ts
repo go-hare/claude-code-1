@@ -242,9 +242,9 @@ describe('REPL densable uQc sync', () => {
     // Tear: setPromptInputStoreActive inside setInputValue notifies subscribers
     // before React commits inputValue/isPromptInputActive → one-frame flash.
     expect(replSrc).not.toContain('useDialogSuppressReason')
-    expect(replSrc).toContain('legacyFocusForUqc(focusedInputDialog) != null')
-    expect(replSrc).toContain("? ('legacy-dialog' as const)")
-    expect(replSrc).toContain("? ('typing' as const)")
+    // densable 251 jx: Host park → suppressReason, not 239 typing-only zIr.
+    expect(replSrc).toContain('hostParkToSuppressReason(hostParkMode)')
+    expect(replSrc).toContain('const modalChrome = hostDialogVisibility')
     // hyr synced after commit, not inline in setInputValue
     expect(replSrc).toContain('setPromptInputStoreActive(isPromptInputActive)')
     // Must not hyr-notify from inside setInputValue (comment may mention the name)

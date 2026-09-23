@@ -1,0 +1,36 @@
+# gold-248-24-ste-xde
+when=2026-09-20T07:49:38.135Z
+
+## needle function Ste( 248=2 247=2 @179817400,185500973
+## function Ste( @179817400
+len=90 sha=e3a53b24b158b035 exact247=-1
+function Ste(e){return typeof e==="object"&&e!==null&&$t().cliOwnedBearerProviders.has(e)}
+
+## function Ste( @185500973
+len=34 sha=80a69ad15d7ea16c exact247=-1
+function Ste(){return GEn().value}
+
+## needle function XDe( 248=2 247=0 @180515731,183657250
+## function XDe( @180515731
+len=100 sha=dd6cf221ca3638b0 exact247=-1
+function XDe(e,t){let r=await nte();if(r===qu)return!0;return!!r?.mcpOAuth?.[Ys(e,t)]?.refreshToken}
+
+## function XDe( @183657250
+len=72 sha=2c633da368a691ff exact247=-1
+function XDe(e){let t=rHt().safeParse(e);return t.success?t.data:void 0}
+
+## needle function gC( 248=3 247=6 @180515320,186200274,197918028
+## function gC( @180515320
+len=41 sha=3f6412ddd5d0cd29 exact247=-1
+function gC(e){return x6e(e.headers??{})}
+
+## function gC( @186200274
+len=33 sha=4730497071c29326 exact247=-1
+function gC(){return Mjn.of(z())}
+
+## function gC( @197918028
+len=101 sha=3981cebd3b44d56b exact247=-1
+function gC(e){if(!e)return!1;return zs(e)&&e.hasOwnProperty("realm")&&e.credentialType===W.ID_TOKEN}
+
+## needle we=Ste( 248=1 247=0 @207114290
+n L)&&typeof L.code==="number"?L.code:void 0,ye=(ee.type==="http"||ee.type==="sse"||ee.type==="ws")&&!!ee.headersHelper,we=Ste(ee),te=L instanceof iR?L.code:("errorCode"in L)&&typeof L.errorCode==="string"?L.errorCode:void 0,He=te!==void 0&&!["invalid_grant","invalid_client","unauthorized_client"].includes(te)&&/^HTTP 

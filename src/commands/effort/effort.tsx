@@ -21,6 +21,8 @@ import {
   isEffortLevel,
   isUltracodeModeActive,
   isUltracodeOfferable,
+  effortModelClearPatch,
+  effortModelSettingsPatch,
   toPersistableEffort,
   unpinAllEffortLaunchPins,
 } from '../../utils/effort.js';
@@ -82,9 +84,8 @@ function setEffortValue(
   // env will override the session (densable QLr then env then pin).
   const persistable = ultracode || !interactive ? undefined : toPersistableEffort(effortValue);
   if (persistable !== undefined) {
-    const result = updateSettingsForSource('userSettings', {
-      effortLevel: persistable,
-    });
+    const patch = model.length > 0 ? effortModelSettingsPatch(model, persistable) : { effortLevel: persistable };
+    const result = updateSettingsForSource('userSettings', patch);
     if (result.error) {
       return {
         message: `Failed to set effort level: ${result.error.message}`,
@@ -220,13 +221,12 @@ export function showCurrentEffort(
   };
 }
 
-function unsetEffortLevel(interactive: boolean = getIsInteractive()): EffortCommandResult {
+function unsetEffortLevel(interactive: boolean = getIsInteractive(), model = ''): EffortCommandResult {
   // densable QLr(undefined, t): persist + N9 only when interactive.
   if (interactive) {
     unpinAllEffortLaunchPins();
-    const result = updateSettingsForSource('userSettings', {
-      effortLevel: undefined,
-    });
+    const patch = model.length > 0 ? effortModelClearPatch(model) : { effortLevel: undefined };
+    const result = updateSettingsForSource('userSettings', patch);
     if (result.error) {
       return {
         message: `Failed to set effort level: ${result.error.message}`,
@@ -263,7 +263,7 @@ export function executeEffort(
 ): EffortCommandResult {
   const normalized = args.toLowerCase();
   if (normalized === 'auto' || normalized === 'unset') {
-    return unsetEffortLevel(interactive);
+    return unsetEffortLevel(interactive, model);
   }
 
   if (normalized === 'ultracode') {

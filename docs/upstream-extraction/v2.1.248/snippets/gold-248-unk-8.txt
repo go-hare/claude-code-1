@@ -1,0 +1,157 @@
+# gold-248-unk-8
+# when=2026-09-20T04:55:14.130Z
+# sea248=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe bytes=226708128
+# sea247=C:/Users/Administrator/AppData/Local/Temp/official-247/package/claude.exe bytes=253204128
+
+# ---- G2t / 247 yx ----
+## #8 G2t @180708774 len=950 sha=cc44d2bb74242102 otherHits=0
+function G2t(e,t){if(!VA(e.scopes))return s("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return s("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,clientId:E}=e,C=_n(),O=TN();try{let k=await C.mutate((N)=>({...N,claudeAiOauth:SN(N.claudeAiOauth,{accessToken:r,refreshToken:o,expiresAt:u,refreshTokenExpiresAt:p,scopes:g,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:E})}),t);if(k.success)s("tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth tokens: ${l(k)}`,{level:"error"}),s("tengu_oauth_tokens_save_exception",{storageBackend:O,...Lf(k)}),{success:!1,warning:"Failed to save OAuth tokens"}}}
+
+## #8 G2t-after-save @180709316
+tengu_oauth_tokens_saved",{storageBackend:O});else s("tengu_oauth_tokens_save_failed",{storageBackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch
+
+## #8 247 yx @208856754 len=958 sha=f704632816904f8d otherHits=0
+async function yx(e,t){if(!en(e.scopes))return E("tengu_oauth_tokens_not_claude_ai",{}),{success:!0};if(!e.refreshToken||!e.expiresAt)return E("tengu_oauth_tokens_inference_only",{}),{success:!0};let{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,clientId:a}=e,u=ne(),l=_x();try{let d=await u.mutate((g)=>({...g,claudeAiOauth:mx(g.claudeAiOauth,{accessToken:n,refreshToken:r,expiresAt:o,refreshTokenExpiresAt:i,scopes:s,subscriptionType:e.subscriptionType,rateLimitTier:e.rateLimitTier,clientId:a})}),t);if(d.success)E("tengu_oauth_tokens_saved",{storageBackend:l});else E("tengu_oauth_tokens_save_failed",{storageBackend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}catch(d){return p(`Failed to save OAuth tokens: ${M(d)}`,{level:"error"}),E("tengu_oauth_tokens_save_exception",{storageBackend:l,...Ar(d)}),{success:!1,warning:"Failed to save OAuth tokens"}}}
+
+## #8 247 yx-after-save @208857301
+tengu_oauth_tokens_saved",{storageBackend:l});else E("tengu_oauth_tokens_save_failed",{storageBackend:l});let f=F()&&t!==void 0?t:void 0,h=f&&tr.of(C().host).promise;if(Pi(),no(),ki(),f!==void 0)await Dm(f,h);return d}ca
+
+# ---- 248 cluster lY Ip ON Hk Vmn ----
+## #8 lY @180712164 len=39 sha=3611e9129dcf8433 otherHits=0
+function lY(){yve.of(z().host).clear()}
+
+## #8 Ip @180712775 len=43 sha=043f2d44f49faba4 otherHits=0
+function Ip(){if(jN(),!s_())IW();else o_()}
+
+## #8 ON @180712818 len=29 sha=f37fdd844f70491a otherHits=0
+function ON(){lY(),mE(),Ip()}
+
+## #8 Hk @180712847 len=31 sha=d406634b0df40921 otherHits=0
+function Hk(){if(ON(),D())_Y()}
+
+## #8 Vmn @180712878 len=107 sha=930566aff607d6b4 otherHits=0
+function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}
+
+## #8 function Vmn( hits=1 180712878
+## #8 Vmn-hit @180712878 len=107 sha=930566aff607d6b4 otherHits=0
+function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}
+
+# ---- Ip callees jN s_ IW o_ mE ----
+## #8 nearest jN @180274814 dist=437961
+## #8 nearest s_ @180850381 dist=137606
+## #8 nearest IW @180125586 dist=587189
+## #8 nearest o_ @180125621 dist=587154
+## #8 nearest mE @179800735 dist=912040
+## #8 nearest D @180794092 dist=81317
+## #8 nearest _Y @179810366 dist=902409
+## #8 cluster ascii 2500 @180711800
+alsMtimeMs=0;lastCredentialsVersion=void 0;lastKeychainAccessToken=null;clear(){this.value=void 0,this.promise=null}resetChangeCheck(){this.lastCredentialsMtimeMs=0,this.lastCredentialsVersion=void 0,this.lastKeychainAccessToken=null}}var yve=new K(()=>new yN);function Bt(){let e=yve.of(z().host);if(e.value!==void 0)return e.value;let t=Eee();return e.value=t,t}function lY(){yve.of(z().host).clear()}function r8e(){let e=RN();if(typeof e==="string")return e;let t=_n().read()?.claudeAiOauth?.accessToken;return CN(e,t)}async function Bv(e){let t=RN();if(typeof t==="string")return t;let r=(await _n().readAsync(e))?.claudeAiOauth?.accessToken;return CN(t,r)}function RN(){let e=Bt();if(!e?.accessToken)return"none";if(a.CLAUDE_CODE_OAUTH_TOKEN)return"env";let t=l$();if(t&&(!Gne()||lc()))return"fd";return{bearer:e.accessToken,fdToken:t}}function CN({bearer:e,fdToken:t},r){if(r&&r===e)return"store";if(t&&e===t)return"fd";return"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yve.of(z().host),o;try{let g=await e.probeCredentials();o=g.state==="present"?g.version:void 0}catch(g){n(`Credentials version prime failed: ${l(g)}`,{level:"error"})}if(await t?.catch(()=>null),await r.promise?.catch(()=>null),r.promise=null,o!==void 0)r.lastCredentialsVersion=o;let u=See(e);if(r.promise=u,await u===null){if(o!==void 0)r.lastCredentialsVersion=void 0;if(r.promise===u)r.promise=null}r.value=void 0}async function See(e){try{let t=(await _n().readAsync(e))?.claudeAiOauth;return t?.accessToken?t:null}catch(t){return n(`Credentials prime through the store failed (${t instanceof Error?t.name:typeof t})`,{level:"error"}),null}}async function Tee(e){let t=yve.of(z().host);if(D()&&e!==void 0){let r=await e.probeCredentials();if(r.state!=="present")return tN(t,e);if(r.version!==t.lastCredentialsVersion)t.lastCredentialsVersion=r.version,Hk();return}try{let{mtimeMs:r}=await sN(kp(qv(),".credentials.json"));if(r!==t.lastCredentialsMtimeMs)t.lastCredentialsMtimeMs=r,Hk()}catch{await tN(t,e)}}async function tN(e,t){if(lY(),D())_Y();let o=(await qa(t))?.accessToken??null;if(o!==e.lastKeychainAccessToken)e.lastKeychainAccessToken=o,Ip()}var bp=new Map,sl=["bare","store","backend"];function nN(e,t
+
+# ---- Ip() call sites ----
+## #8 Ip() hits=5 180709491,180712784,180712842,180714235,211427152
+## #8 Ip()-call @180709491
+ackend:O});let M=D()&&t!==void 0?t:void 0,L=M&&yve.of(z().host).promise;if(lY(),Ip(),M!==void 0)await Bgt(M,L);return k}catch(k){return n(`Failed to save OAuth 
+
+## #8 Ip() caller G2t @180708768
+## #8 Ip()-call @180712784
+f(t&&e===t)return"fd";return"none"}function vN(){if(lY(),mE(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(
+
+## #8 Ip() caller vN @180712739
+## #8 Ip()-call @180712842
+E(),D())_Y()}function Ip(){if(jN(),!s_())IW();else o_()}function ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),
+
+## #8 Ip() caller ON @180712818
+## #8 Ip()-call @180714235
+.accessToken??null;if(o!==e.lastKeychainAccessToken)e.lastKeychainAccessToken=o,Ip()}var bp=new Map,sl=["bare","store","backend"];function nN(e,t){return`${e}|$
+
+## #8 Ip() caller tN @180714095
+## #8 Ip()-call @211427152
+{return SO.ServerMetricRecorder}});var CO=oo();Y.experimental=CO;var EO=Pa(),TO=Ip(),RO=qp(),bO=di(),OO=Gp(),wO=Zp(),AO=hg(),PO=Ot();(()=>{EO.setup(),TO.setup()
+
+## #8 Ip() caller  @-1
+# ---- 247 cluster Pi no ki Sm Tx wt o$ ----
+## #8 247 Pi-oauth @208859995 len=38 sha=52f67032b298ecdf otherHits=0
+function Pi(){tr.of(C().host).clear()}
+
+## #8 247 nearest no @208948763 dist=88768
+## #8 247 nearest ki @208828664 dist=31331
+## #8 247 ki @208828664 len=35 sha=ea9d7ec564467d4c otherHits=0
+function ki(){pa().invalidateAll()}
+
+## #8 247 nearest Sm @206576362 dist=2283633
+## #8 247 nearest Tx @208860602 dist=607
+## #8 247 Tx @208860602 len=34 sha=f5f0906b9c781c48 otherHits=0
+function Tx(){Pi(),Sm(),no(),ki()}
+
+## #8 247 nearest wt @208860636 dist=641
+## #8 247 wt @208860636 len=31 sha=772fdf0fd731f859 otherHits=0
+function wt(){if(Tx(),F())va()}
+
+## #8 247 nearest o$ @208860667 dist=672
+## #8 247 o$ @208860667 len=101 sha=d9a391c49761b933 otherHits=0
+function o$(){if(Pi(),Aa.cache?.clear?.(),ka.cache?.clear?.(),ix(),ux(),lx(),px(),no(),ki(),F())va()}
+
+## #8 247 nearest va @207985866 dist=874129
+## #8 247 nearest F @209028993 dist=168998
+## #8 247 cluster ascii @208859900
+ion D(){let e=tr.of(C().host);if(e.value!==void 0)return e.value;let t=t$();return e.value=t,t}function Pi(){tr.of(C().host).clear()}function n$(){let e=Cx();if(typeof e==="string")return e;let t=ne().read()?.claudeAiOauth?.accessToken;return Ax(e,t)}async function r$(e){let t=Cx();if(typeof t==="string")return t;let n=(await ne().readAsync(e))?.claudeAiOauth?.accessToken;return Ax(t,n)}function Cx(){let e=D();if(!e?.accessToken)return"none";if(c.CLAUDE_CODE_OAUTH_TOKEN)return"env";let t=ft();if(t&&(!xi()||Ee()))return"fd";return{bearer:e.accessToken,fdToken:t}}function Ax({bearer:e,fdToken:t},n){if(n&&n===e)return"store";if(t&&e===t)return"fd";return"none"}function kx(){if(Pi(),Sm(),F())va()}function Tx(){Pi(),Sm(),no(),ki()}function wt(){if(Tx(),F())va()}function o$(){if(Pi(),Aa.cache?.clear?.(),ka.cache?.clear?.(),ix(),ux(),lx(),px(),no(),ki(),F())va()}function i$(){tr.of(C().host).resetChangeCheck()}async function Dm(e,t){if(!Fm())return;let n=tr.of(C().host),r;try{let s=await e.probeCredentials();r=s.state==="present"?s.version:void 0}catch(s){p(`Credentials version prime failed: ${M(s)}`,{level:"error"})}if(await t?.catch(()=>null),await n.promise?.catch(()=>null),n.promise=null,r!==void 0)n.lastCredentialsVersion=r;let o=s$(e);if(n.promise=o,await o===null){if(r!==void 0)n.lastCredentialsVersion=void 0;if(n.promise===o)n.promise=null}n.value=void 0}async function s$(e){try{let t=(await ne().readAsync(e))?.claudeAiOauth;return t?.accessToken?t:null}catch(t){return p(`Credentials prime through the store failed (${t instanceof Error?t.name:typeof t})`,{level:"error"}),null}}async function a$(e){let t=tr.of(C().host);if(F()&&e!==void 0){let n=await e.probeCredentials();if(n.state!=="present")return vR(t,e);if(n.version!==t.lastCredentialsVersion)t.lastCredentialsVersion=n.version,wt();return}try{let{mtimeMs:n}=await dG(Cm(Wc(),".credentials.json"));if(n!==t.lastCredentialsMtimeMs)t.lastCredentialsMtimeMs=n,wt()}catch{await vR(t,e)}}async function vR(e,t){if(Pi(),F())va();let r=(await rt(t))?.accessToken??null;if(r!==e.lastKeychainAccessToken)e.lastKeychainAccessToken=r,no(),ki()}function CR(e,t){return`${e}|${t}`}function wx(e,t){if(!(F()&&e!==void 0)||Te()||
+
+# ---- Ip vs 247 bodies ----
+## #8 Ip body sha=043f2d44f49faba4 247exact=0
+## #8 folded-needle "if(jN(),!s_())IW();else o_()" 248=1 247=0
+# ---- leftover-looking needles ----
+## #8 needle "clearToolSchemaCache" 248=0 247=0
+## #8 needle "TOOL_SCHEMA_CACHE" 248=0 247=0
+## #8 needle "clearBetasCaches" 248=0 247=0
+## #8 needle "invalidateAll" 248=13 247=11
+## #8 needle "getClaudeAIOAuthTokens.cache" 248=0 247=0
+## #8 needle ".cache?.clear?.()" 248=7 247=7
+## #8 .cache?.clear?.() near-oauth @180706687
+yResponses?.rejected??[]}}},t),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function Wmn(e){await EN(),await _e((t)=>({...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function 
+
+## #8 .cache?.clear?.() near-oauth @180706814
+...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function EN(){try{await YD()}catch(e){n(`Failed to remove API key from macOS keychain: ${l(e)}`,{level:"error"})}}function SN(e,t){retur
+
+## #8 .cache?.clear?.() near-oauth @180712904
+()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!
+
+## #8 .cache?.clear?.() near-oauth @180712925
+N(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yv
+
+## #8 needle "cache?.clear?.()" 248=7 247=7
+## #8 cache?.clear?.() near-oauth @180706688
+Responses?.rejected??[]}}},t),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function Wmn(e){await EN(),await _e((t)=>({...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function E
+
+## #8 cache?.clear?.() near-oauth @180706815
+..t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function EN(){try{await YD()}catch(e){n(`Failed to remove API key from macOS keychain: ${l(e)}`,{level:"error"})}}function SN(e,t){return
+
+## #8 cache?.clear?.() near-oauth @180712905
+)}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!W
+
+## #8 cache?.clear?.() near-oauth @180712926
+(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yve
+
+## #8 cache?.clear?.() late hits=7 180654974,180706688,180706815,180712905,180712926,193510605,193510625
+## #8 cache-clear near oauth @180706688
+ected:u.customApiKeyResponses?.rejected??[]}}},t),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function Wmn(e){await EN(),await _e((t)=>({...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function EN(){try{await YD()}catch(e){n(`Failed to
+
+## #8 cache-clear near oauth @180706815
+(),await _e((t)=>({...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}async function EN(){try{await YD()}catch(e){n(`Failed to remove API key from macOS keychain: ${l(e)}`,{level:"error"})}}function SN(e,t){return{accessToken:t.accessToken,refreshToken:
+
+## #8 cache-clear-fn Wmn @180706705 len=127 sha=352c1616401d0258 otherHits=0
+async function Wmn(e){await EN(),await _e((t)=>({...t,primaryApiKey:void 0}),e),lMe.cache.clear?.(),Ujt(),J2t.cache?.clear?.()}
+
+## #8 cache-clear near oauth @180712905
+n ON(){lY(),mE(),Ip()}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yve.of(z().host),o;try
+
+## #8 cache-clear-fn Vmn @180712878 len=107 sha=930566aff607d6b4 otherHits=0
+function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}
+
+## #8 cache-clear near oauth @180712926
+}function Hk(){if(ON(),D())_Y()}function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}function F_r(){yve.of(z().host).resetChangeCheck()}async function Bgt(e,t){if(!Wgt())return;let r=yve.of(z().host),o;try{let g=await e.probeC
+
+## #8 cache-clear-fn Vmn @180712878 len=107 sha=930566aff607d6b4 otherHits=0
+function Vmn(){if(lY(),lMe.cache?.clear?.(),J2t.cache?.clear?.(),mve(),OB(),hve(),ute(),jN(),IW(),D())_Y()}
+
+# ---- toolsHash ----
+## #8 toolsHash 248=7 247=7

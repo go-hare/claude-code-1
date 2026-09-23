@@ -1,0 +1,34 @@
+# gold-248-gc-stop-gg
+when=2026-09-20T14:44:30.120Z
+
+## fleet_view_stop_job-192191979 @192191979
+d);let C=new Date().toISOString(),x=m((A)=>A.map((F)=>F.id===h.id&&!Di(F.state)?{...F,state:{...F.state,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:F.state.firstTerminalAt??C},activity:"stopped"}:F),void 0,h.id);try{let A=await K7(h.id,h.state,void 0,S);if(!A.confirmed)throw f("fleet_view_stop_job","kill_unconfirmed"),new Fr(A.error??"worker may still be running");s("tengu_bg_agent_action",{action:v("stop"),source:v("fleet"),jobSessionId:ke(h.state.sessionId)}),b("fleet_view_stop_job");let F=Kn(h.id),T=await nr(F,S);if(T&&!Di(T))await ps(F,{...T,state:"stopped",detail:"stopped",tempo:"idle",updatedAt:C,firstTerminalAt:T.firstTerminalAt??C},S)}finally{x?.(),i()}}},{key:"x",label:"delete",bands:["completed"],run:async(h)=>{w(h.id,null);let C=m((V)=>V.filter((K)=>K.id!==h.id),h.id),x=!1,A,F,T,P;try{let V=await oG(h.id,{force:!0},S);if(x=V.removed,A=V.keptWorktree,F=V.keptReason,T=V.keptErrorSummary,P=V.leftWorktreeDir,!x&&!A)throw f("fleet_view_delete_job",V.errorCode??"delete_unconfirmed"),w(h.id,V.error??"worker may still be running"),new Fr(V.error??"wor
+
+## Lr-192191245 @192191245
+hrew"),C(`Couldn't start a new session \u2014 ${l(T)}`)})}function Lr(i,d,m){s("tengu_bg_agent_action",{action:c(i),source:v("fleet"),jobSessionId:ke(d.sessionId),agent:d.template,jobState:d.state,tempo:c(d.tempo),...m,...!1})}class Fr extends Error{constructor(i){super(i);this.name="FleetActionUnconfirmedError"}}function cp(i,d
+
+## "backend===\"remote\"" in gg window hits=3 192187984,192228241,192259405
+## gg-backend==="remote" @192187984
+mePicker(),F.some((X)=>X.id===d.id))return;if(d.state.backend==="peer"){T("Can't attach \u2014 this session is running in another terminal"),b("fleet_view_open");return}if(d.state.backend==="remote"){if(d.id.startsWith("remote-pending-")){T(Pr),b("fleet_view_open");return}A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:{ok:!0,short:d.id,state:d.state},gestureT0:P});return}if(w.terminal
+
+## gg-backend==="remote" @192228241
+}let Rt=()=>{if(ze.current===""&&Ox(F.replyDraft(i.id)??"")===""){F.saveReplyDraft(i.id,rt),lt(ce),wt(Yt);for(let Qe of so){let to=Ee[Qe.id];if(to)F.pastes[Qe.id]=to}}};if(i.state.backend==="remote"&&so.some((Qe)=>Ee[Qe.id]?.type==="image")){ge.current=!1,Rt(),V("Image attachments aren't available when replying to cloud sessions yet \u2014 open the session to send images");return}zkt(rt,Ee,i.id,W)
+
+## gg-backend==="remote" @192259405
+&&d.key==="t"){Je();let Re=be[S.getSnapshot().focusedIdx],Oe=Re?.kind==="job"?Re.job:void 0;if(!Oe||Ve.some((ce)=>ce.id===Oe.id))return;if(Oe.state.backend!=="daemon"){vt(Oe.state.backend==="remote"?"Can't pin a cloud session":"Can't pin a session that's running in another terminal"),b("fleet_view_pin_toggle");return}let Se=Oe.id,pt=!(w.jobs?.find((ce)=>ce.id===Se)?.state.pinned??Oe.state.pinned);
+
+## "backend===\"remote\"&&" in gg window hits=1 192228241
+## gg-backend==="remote"&& @192228241
+}let Rt=()=>{if(ze.current===""&&Ox(F.replyDraft(i.id)??"")===""){F.saveReplyDraft(i.id,rt),lt(ce),wt(Yt);for(let Qe of so){let to=Ee[Qe.id];if(to)F.pastes[Qe.id]=to}}};if(i.state.backend==="remote"&&so.some((Qe)=>Ee[Qe.id]?.type==="image")){ge.current=!1,Rt(),V("Image attachments aren't available when replying to cloud sessions yet \u2014 open the session to send images");return}zkt(rt,Ee,i.id,W)
+
+## "state.backend===\"remote\"" in gg window hits=3 192187978,192228235,192259399
+## gg-state.backend==="remote" @192187978
+seResumePicker(),F.some((X)=>X.id===d.id))return;if(d.state.backend==="peer"){T("Can't attach \u2014 this session is running in another terminal"),b("fleet_view_open");return}if(d.state.backend==="remote"){if(d.id.startsWith("remote-pending-")){T(Pr),b("fleet_view_open");return}A({type:"open",job:d,...sp(i)&&{keepQuery:!0},respawnResult:{ok:!0,short:d.id,state:d.state},gestureT0:P});return}if(w.te
+
+## gg-state.backend==="remote" @192228235
+id]=to}let Rt=()=>{if(ze.current===""&&Ox(F.replyDraft(i.id)??"")===""){F.saveReplyDraft(i.id,rt),lt(ce),wt(Yt);for(let Qe of so){let to=Ee[Qe.id];if(to)F.pastes[Qe.id]=to}}};if(i.state.backend==="remote"&&so.some((Qe)=>Ee[Qe.id]?.type==="image")){ge.current=!1,Rt(),V("Image attachments aren't available when replying to cloud sessions yet \u2014 open the session to send images");return}zkt(rt,Ee,i
+
+## gg-state.backend==="remote" @192259399
+d.ctrl&&d.key==="t"){Je();let Re=be[S.getSnapshot().focusedIdx],Oe=Re?.kind==="job"?Re.job:void 0;if(!Oe||Ve.some((ce)=>ce.id===Oe.id))return;if(Oe.state.backend!=="daemon"){vt(Oe.state.backend==="remote"?"Can't pin a cloud session":"Can't pin a session that's running in another terminal"),b("fleet_view_pin_toggle");return}let Se=Oe.id,pt=!(w.jobs?.find((ce)=>ce.id===Se)?.state.pinned??Oe.state.pi
+
+## "stopRemote" in gg window hits=0 

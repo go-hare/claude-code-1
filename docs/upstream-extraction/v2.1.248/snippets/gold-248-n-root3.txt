@@ -1,0 +1,23 @@
+# gold-248-n-root3
+
+## function sn( near=1 178548001
+@178548001 sha=50bedc636c2910a7 function sn(){return new Ke({backgroundHousekeeping:new Ne,launchOptions:new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,telemetryHandles:new Be,credentialSlots:new _e,mcpProcessWiring:new Ue,requestLatches:new qe,accountCreditLatches:new We,proactivity:new Ge})}
+
+## function yGt( near=0 
+
+## function un( near=1 178548313
+@178548313 sha=a9fa0bdb5650afc5 function un(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof ln==="function"){let t=Ri();try{e=dn(ln(t))}catch{e=dn(t)}}return yGt({host:sn(),id:avt()??Iq(),project:{originalCwd:e,projectRoot:e,cwd:e}})}
+
+## function avt( near=0 
+
+## function Iq( near=0 
+
+## function dn( near=1 178551156
+@178551156 sha=8bcafa27488500c1 function dn(e){return e}
+
+## function ln( near=0 
+
+## function Xi( near=0 
+
+## win @178547800
+es,this.credentialSlots=e.credentialSlots,this.mcpProcessWiring=e.mcpProcessWiring,this.requestLatches=e.requestLatches,this.accountCreditLatches=e.accountCreditLatches,this.proactivity=e.proactivity}}function sn(){return new Ke({backgroundHousekeeping:new Ne,launchOptions:new Ie,settingsSource:new Fe,extensionsConfig:new Oe,modelStringsCache:new Ee,diagnostics:new He,telemetryHandles:new Be,credentialSlots:new _e,mcpProcessWiring:new Ue,requestLatches:new qe,accountCreditLatches:new We,proactivity:new Ge})}function un(){let e="";if(typeof process<"u"&&typeof process.cwd==="function"&&typeof ln==="function"){let t=Ri();try{e=dn(ln(t))}catch{e=dn(t)}}return yGt({host:sn(),id:avt()??Iq(),project:{originalCwd:e,projectRoot:e,cwd:e}})}var v=un();function z(){return n()}func

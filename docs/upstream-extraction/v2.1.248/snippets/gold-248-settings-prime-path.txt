@@ -1,0 +1,42 @@
+# gold-248-settings-prime-path
+
+## async function $pn( hits=1
+@179527115 sha=6e91860bc34fc69a len=254
+async function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}
+
+## function $pn( hits=1
+@179527121 sha=c781a852112603c1 len=248
+function $pn(t,e){if(!D()||t===void 0)return;if(e.primer!==void 0){if(!e.primer.primes(t))n("settingsPrime: store already primed through another backend; second prime ignored");return}_Ke(t).catch(_),e.primer=new SKn(t,e),await e.primer.whenIdle()}
+
+## async function Gqe( hits=1
+@179527369 sha=1dcf73a10dc5265c len=150
+async function Gqe(t){let e=ra(),s=e.backendReadResetTail,i;e.backendReadResetTail=new Promise((r)=>i=r),await s;try{return await z(t,e)}finally{i()}}
+
+## settingsPrime: hits=50
+@98416568 8kS.local settings.......6$.legacy local settings.......0ld.settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself.........settings: a managed-settings file was read from a folder the host attested absent ('system' space); the attestation is ignored for the rest of this process and the policy w
+
+@98417012 and the policy walk reads the host's files itself.......K(,.settingsPrime: the host attests this machine has no OS policy folder ('system' absent); the policy walk is served an empty managed-settings file tier without reading the host........Y.systemAttestationContradicted.......HP[.systemSpaceServingLogged.....+..clearFolderListing..........unseedParsedFile.....r .seedFolderListing.........|.walkRead........seedParsedFile........a.settingsPrime: ....k...
+
+@98417388 erListing.........|.walkRead........seedParsedFile........a.settingsPrime: ....k... not seeded (...........); the file read serves.k.....?. not installed (the walk read different content while this read was in flight); re-verified next generation.V...=tV. changed after this generation's policy walk; it applies from the next reset, as today..........managedFileReads........policyInstallVerdict......T.walksAtReadStart......|.dropRetainedLayer.......D... lis
+
+@98418248 eration)
+....W..whenAbsent........h.walkReadDiffers.R.......settingsPrime: ownership of the local settings root read ahead through the backend........q.localStoreProbes....#@..primeCanonicalRootOwnerUids......v7.uids.....\..stat of the root failed: .......$AF.lstat of .git failed: ........b.lstat of .claude failed: ........B&.the root is absent.......'..no owner uid for the root...2...E...no .git entry (left to the probe's per-call throw).......E..no owner
+
+## function wKn( hits=1
+@179534306 sha=45d8a07f7d505f90 len=743
+function wKn(t,e){if(!D())return;if(typeof process.getuid!=="function"&&typeof process.geteuid!=="function")return;let s=Ngn();if(s===void 0||e.localStoreProbes.hasCanonicalRootOwnerUids(s))return;let i=t.hostFiles;if(!i.serves("workspace")){n("settingsPrime: ownership of the local settings root not read ahead (the backend does not serve the workspace); the probe runs as today");return}let[r,a,o]=await Promise.allSettled([i.stat(Pc.workspace(s)),i.stat(Pc.workspace(f(s,".git")),{follow:!1}),i.stat(Pc.workspace(f(s,".claude")),{follow:!1})]),g=S(r),d=S(a),u=S(o),c=W(g,d,u);if("skipped"in c){n(`settingsPrime: ownership of the local settings root not read ahead (${c.skipped}); the probe runs as today`);return}return{root:s,uids:c.uids}}
+
+## function Vjt( hits=1
+@179502013 sha=9dcc9022d209e217 len=448
+function Vjt(e,t,r){let o=await e.read([{key:Se.userSettings(),offset:0,length:A_+1}]);if(!o.ok)return{kind:"failing",code:o.error.code,failureClass:"failureClass"in o.error?o.error.failureClass:void 0};let u=o.value.items[0];if(!u.found)return Pn(e.hostFiles,t);if(u.totalBytes>A_)return{kind:"oversize"};let d=Mn(u.value),p=r!==void 0&&r.contentHash===d?r.parsed:FMe($ue(u.value),t);return{kind:"seeded",contentHash:d,size:u.totalBytes,parsed:p}}
+
+## function Qve( hits=2
+@179441964 sha=3fe9add7640c1fb7 len=96
+function Qve(e){n(`Broken symlink or missing file encountered for settings.json at path: ${e}`)}
+
+@186353634 sha=788e060b07b2b5de len=57
+function Qve(e,t){if(!QI(e))return e;return N4(t)??f0n()}
+
+## function Fte( hits=1
+@179442060 sha=fb2cdb2ec004d91d len=47
+function Fte(){return{settings:null,errors:[]}}

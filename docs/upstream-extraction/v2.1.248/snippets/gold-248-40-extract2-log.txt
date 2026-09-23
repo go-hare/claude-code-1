@@ -1,0 +1,106 @@
+byte at PXT-2 = 96 "`"
+around PXT-5: clock.`,pXt=
+e=` hits before pXt: 196763889
+e=` @196763889 close=196766970 len=3078 after=`,pXt=`# Workflow au head=e=`Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background \u2014 this tool returns immediately with a
+
+## Execute a workflow script needle="Execute a workflow script" hits=1
+- #0 @196763892 oot/chunk-seqew409.js";var s="",a="'worktree'",r="",n="",e=`Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background \u2014 this tool returns immedi
+
+## ONLY call this tool needle="ONLY call this tool when" hits=1
+- #0 @196764162 workflow completes. Use /workflows to watch live progress.
+
+ONLY call this tool when the user has explicitly opted into multi-agent orchestration. Workflows can spawn dozens of agents and consume a large 
+
+## function eJ needle="function eJ" hits=4
+- #0 @179078478  the fixed interpreter over stdin (never written to disk)");function eJn(e,t){let o=m({script:Et(t),interpreter:gt(t)}).safeParse(e);return o.success?null:o.error.issues[0]?.message||"invalid
+- #1 @184821416  submit from a later event (turn.complete)`;default:return}}function eJ(e,{caller:t,callers:r},{owner:o,name:u,method:p,args:g}){let k=[...e.building??[],...en().loadedModules].find((C)=>C.na
+- #2 @189988299 text defs body",cause:"malformed"};return{dts:s.body}}async function eJt(e,t){if(!FG.test(e))return{err:"invalid contract version",cause:"malformed"};let r=await gn(`/api/frame/contract/${e}/
+- #3 @195582042 7ghh9gvc.js";import{vy}from"B:/~BUN/root/chunk-28zsgbk9.js";function eJ(o){let l=rl();return l.workflowAuthoringSkillAvailable??=e(),l.workflowAuthoringSkillAvailable&&(o===void 0||i(o))}func
+
+## eJ( needle="eJ(e?.tools)" hits=1
+- #0 @196825674 sync prompt(e){let r=cr();if(r!==void 0)return r;return fXt(eJ(e?.tools))+Rin(oe().workflowSizeGuideline)},async description(e,r){let t=cr();if(t!==void 0)return t;return fXt(eJ(r?.tools))+Rin
+
+## eJ(i) needle="eJ(i)" hits=1
+- #0 @204710135 .reminderType==="full"))?"ultracode":void 0;if(r===void 0||!eJ(i))return[];let l=gTt(),n=l.filter((e)=>e.type==="text").map((e)=>e.text).join(`
+
+`),u=`:${$w}`;if(IWe(Ll([...o??[]]),n)!=
+
+## eJ(r needle="eJ(r" hits=2
+- #0 @196821036 .name===void 0&&(e.script!==void 0||e.scriptPath!==void 0)&&eJ(r)?`
+Load the \`${$w}\` skill for the script reference if you have not, fix the script, and retry.`:""}function cr(){retu
+- #1 @196825789 scription(e,r){let t=cr();if(t!==void 0)return t;return fXt(eJ(r?.tools))+Rin(oe().workflowSizeGuideline)},get inputSchema(){return zr()},get outputSchema(){return Nr()},coerceInput:(e
+
+## T caller @191185394
+essages,prompt:rt,text:Pl(Mn,Yt),typed:C===void 0?void 0:Pl(Mn,C),ambientTriggers:en,context:j,history:G,querySource:we})}}if(Bi("prompt_submit_hooks_ms",performance.now()-Xt,Xt),Qt.proceeds.sessionTitle)await r4e(j.session.id,Qt.proceeds.sessionTitle,j.storageV5,j.credentials);return rc("query_hooks_end"),await wl(Je,G,j.options.tools),Je}async function wl(d,C,w){if(!d.shouldQuery)return;try{let{getWorkflowAuthoringAutoloadMessages:F}=import.meta.require("B:/~BUN/root/chunk-xhhb2t5v.js");d.messages.push(...await F(d.messages,C,w))}catch(F){_(F)}}function sp(d,C,w){for(let F of d){if(F.type!=="user"||F.isMeta)continue;let{content:j}=F.message;if(j===C)return F.message.content=w,F;if(typeof j!=="string"&&qx(j)===C){let H=j.findLast((W)=>W.type==="text");if(H?.type==="text")return H.text=w,F.message.content=j.filter((W)=>W.type!=="text"||W===H),F}}n("prompt.submit: a hook rewrote the prompt but no user message carried the original text; the model sees the prompt as typed",{level:"warn"});return}var ip=new Set(["file","already_read_file","pdf_reference","audio_transcript","directory","mcp_resource","agent_mention","peer_mention","nested_memory"]),ap=new RegExp(String.raw`(?:^|[\s\u300
+lastFn before T call: {"i":191185336,"name":"wl"}
+caller fn wl @191185336 len=211 sha=401c40a846cd2b54
+wrote gold-248-40-T-caller.txt
+async function wl(d,C,w){if(!d.shouldQuery)return;try{let{getWorkflowAuthoringAutoloadMessages:F}=import.meta.require("B:/~BUN/root/chunk-xhhb2t5v.js");d.messages.push(...await F(d.messages,C,w))}catch(F){_(F)}}
+…
+async function wl(d,C,w){if(!d.shouldQuery)return;try{let{getWorkflowAuthoringAutoloadMessages:F}=import.meta.require("B:/~BUN/root/chunk-xhhb2t5v.js");d.messages.push(...await F(d.messages,C,w))}catch(F){_(F)}}
+
+## function eJ(
+@184821416 {"i":184821416,"body":"function eJ(e,{caller:t,callers:r},{owner:o,name:u,method:p,args:g}){let k=[...e.building??[],...en().loadedModules].find((C)=>C.name===o);if(k===void 0)return Promise.reject(new Ae.HooksError(`$.${u}.${p}: plugin ${o}, which provides $.${u}, is not loaded`));let E=performance.now();return k.callInterface({owner:o,name:u,method:p,args:g},r).then((C)=>(n(`$.${u}.${p} (${t} -> ${o}) answered in ${(performance.now()-E).toFixed(1)}ms`),C),(C)=>{throw n(`$.${u}.${p} (${t} -> ${o}) failed: ${l(C)}`,{level:\"error\"}),C})}","sha":"e15b8b5e13461438","len":519}
+@195582042 {"i":195582042,"body":"function eJ(o){let l=rl();return l.workflowAuthoringSkillAvailable??=e(),l.workflowAuthoringSkillAvailable&&(o===void 0||i(o))}","sha":"9bf1beb8d23f0c8e","len":127}
+
+## hut= needle="hut=\"" hits=1
+- #0 @183512098 -compliance.
+
+// Version: 2.1.248
+var NGe="artifact-design",hut="artifact-diagramming",PT="artifact-capabilities",gut="workshop",KWn="whiteboard",YWn="prototype",yut="dataviz",oP="code-
+
+## ultracode name const needle="\"ultracode\"" hits=42
+- #0 @98960419 . .a.n. .e.n.f.o.r.c.e.d. .l.i.m.i.t...........w.Enable the "ultracode" keyword trigger: including the keyword in a prompt opts that turn into the Workflow tool. Set to false to disable the t
+- #1 @179103455 owKeywordTriggerEnabled:W().optional().describe('Enable the "ultracode" keyword trigger: including the keyword in a prompt opts that turn into the Workflow tool. Set to false to disable the t
+- #2 @180852381 eturn}function RFt(e,o){let t=qe().ultracode===!0||I_e(e)==="ultracode";if(t)Sy(o);return t}function sC(){let e=a.CLAUDE_CODE_EFFORT_LEVEL;return e?.toLowerCase()==="unset"||e?.toLowerCase()=
+- #3 @183097715 ssage_receive_parse_failed")}}var Ae=new Set(["effortLevel","ultracode"]),Re=5,Te=40,xe="This session is outbound-only. Enable Remote Control locally to allow inbound control.",Ce=8000,P="get
+- #4 @183108272 : effortLevel must be a string or null"};r.effortLevel=o}if("ultracode"in e){let o=e.ultracode;if(typeof o!=="boolean")return f("bridge_flag_settings","invalid_type"),{ok:!1,error:"apply_flag
+- #5 @183108485 ust be a boolean"};r.ultracode=o}if(!("effortLevel"in r)&&!("ultracode"in r))return f("bridge_flag_settings","nothing_to_apply"),{ok:!1,error:"apply_flag_settings: nothing to apply \u2014 onl
+- #6 @186165555 e){return fve(e,"ultrareview")}function Drn(e){return fve(e,"ultracode")}function Vlt(e){return oLt(e).length>0}function Fkt(e){return Drn(e).length>0}function iLt(e){let[t]=oLt(e);if(!t)retu
+- #7 @187224826 _request:()=>Ns([He({content:'The user included the keyword "ultracode", opting this turn into multi-agent orchestration \u2014 use the Workflow tool to fulfill the request.',isMeta:!0})]),ul
+- #8 @191129904 rrides effort for this session"}}let d=I_e(e.effortLevel)==="ultracode",i="ultracode"in e?e.ultracode===!0:void 0;if((i===!0||i===void 0&&d)&&!s_(r))return f("bridge_flag_settings","ultracode
+- #9 @191129918 for this session"}}let d=I_e(e.effortLevel)==="ultracode",i="ultracode"in e?e.ultracode===!0:void 0;if((i===!0||i===void 0&&d)&&!s_(r))return f("bridge_flag_settings","ultracode_unavailable")
+
+## name hut needle="name:hut" hits=1
+- #0 @190882247 ics that keep it legible in both themes.";function Le(){Wr({name:hut,menuDescription:"Diagramming guidance for Artifacts",description:Ln,isEnabled:sO,userInvocable:!0,async getPromptForCom
+
+## name:"ultra needle="name:\"ultra" hits=5
+- #0 @186710192 aude Code on the web. See ${PVn}`}var NCt={type:"local-jsx",name:"ultrareview",get description(){return FCt()},isEnabled:()=>tA()},$Ct={type:"local",name:"ultrareview",get description(){retur
+- #1 @186710281 ption(){return FCt()},isEnabled:()=>tA()},$Ct={type:"local",name:"ultrareview",get description(){return FCt()},supportsNonInteractive:!0,isEnabled:()=>De()&&tA(),get isHidden(){return!De()},l
+- #2 @186738073 }})),e(void 0,{display:"skip"}),null},iAt={type:"local-jsx",name:"ultraplan",get description(){return`Draft an editable plan in Claude Code on the web (${tct().timeEstimate}) \xB7 See ${uz}`}
+- #3 @186753044 I-key access.`})})}}function f4n(){return St()}var LAt=[IF({name:"ultraplan",description:"Claude Code on the web drafts a plan you can edit and approve"}),IF({name:"ultrareview",description:"
+- #4 @186753143 de on the web drafts a plan you can edit and approve"}),IF({name:"ultrareview",description:"Find and verify bugs in your branch using Claude Code on the web"}),IF({name:"teleport",aliases:["t
+
+## registerUltracode needle="ultracode" hits=157
+- #0 @92260964 essions through the device link......z..advisorModel	...@...ultracode.........9.lost
+....Sr.preference..i.....z.agent definitions that list tools or hooks, or set a permission mode, are not
+- #1 @92476712 dAgents.....Hs.startedAgents.......W...totalTokens.....k.F.ultracodeActive.(...W+..CLAUDE_CODE_WORKFLOW_SIZE_WARNING_AGENTS(...O...CLAUDE_CODE_WORKFLOW_SIZE_WARNING_TOKENS....."..axis.....
+- #2 @93559797 rchModeRef....q.m.model_notices........;
+.effort:.F...e... ultracode . xhigh effort + dynamic workflows for maximum thoroughness..
+.....t. . /effort.......P..effortUltra.G...#`..Cannot des
+- #3 @94721185 y with deepest reasoning (.......f.Usage: /effort [
+.......|ultracode......Y\..|auto]
+
+Effort levels:
+.H....q%.- ultracode: xhigh + dynamic workflow orchestration (this session only)
+3....y
+- #4 @94721238 ......|ultracode......Y\..|auto]
+
+Effort levels:
+.H....q%.- ultracode: xhigh + dynamic workflow orchestration (this session only)
+3....y..- auto: Use the default effort level for your model
+- #5 @94721378 auto: Use the default effort level for your model......'&., ultracode.....6.-., auto..E...p5G. .(.a.p.p.l.i.e.d. .l.o.c.a.l.l.y. ..  .t.h.i.s. .r.e.m.o.t.e. .t.r.a.n.s.p.o.r.t. .c.a.n.. t. 
+- #6 @94721582 s.e.r.v.e.r. .e.f.f.o.r.t.)...[.......Current effort level: ultracode (xhigh + dynamic workflow orchestration; this session only).........Effort level: auto (currently .......D..Current eff
+- #7 @94722211 unch-effort pin holds effort at .n....	$. this session, and ultracode needs xhigh. Run /effort ultracode in an interactive terminal to release the pin...........tengu_effort_command....(...
+- #8 @94722246 ...	$. this session, and ultracode needs xhigh. Run /effort ultracode in an interactive terminal to release the pin...........tengu_effort_command....(...CLAUDE_CODE_EFFORT_LEVEL=...B...A..
+- #9 @94722536 a.c.o.d.e. .t.a.k.e.s. .o.v.e.r.Y..../..Set effort level to ultracode (this session only): xhigh + dynamic workflow orchestration...	...a...is_remote.......n[P.CLAUDE_CODE_EFFORT_LEVEL.....
+
+## function K$ needle="function K$(" hits=2
+- #0 @178578504 ion t3t(){n().sessionFlags.markFirstTeleportMessageLogged()}function K$(e,t,o,r=null){let i=`${r??""}:${e}`;n().invokedSkills.record(i,{skillName:e,skillPath:t,content:o,invokedAt:Date.now(),a
+- #1 @182428189 e){let u=t.get(r);if(u===void 0||!jf(o,u))return!1}return!0}function K$(e,t){if(e.length!==t.length)return!1;for(let r=0;r<e.length;r++)if(e[r]!==t[r])return!1;return!0}});var hi=d(function(Bx
+
+## IWe needle="function IWe" hits=2
+- #0 @184162680 ==t.length)return null;return r.map((o)=>o.text).join(`
+
+`)}function IWe(e,t){let r=!1;for(let o=e.length-1;o>=0;o--){let u=e[o];if(u.type==="attachment"){let p=u.attachment;if(!r&&p.type==="i
+- #1 @202842166 Z]),k(()=>{if(!H)return;rA.emit(re??null,"dialog")},[H,re])}function IWe(){let d=bp(),C=()=>{let x=mF(d.getState());if(x?.kind!==Wh.kind)return;let H=Wh.payload().safeParse(x.payload);return H

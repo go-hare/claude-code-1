@@ -1,0 +1,176 @@
+exe bytes=226708128
+when=2026-09-20T03:22:58.600Z
+
+## hits "v$e" count=33
+-- @101738682
+QekQevNeLu0c30af20d0d75c1cC00000346qet0c30af20d0d75c1cC00000109j7Lke0c30af20d0d75c1cC00000116J40c30af20d0d75c1cC00000150v$e0c30af20d0d75c1cC00000180D$eQ20c30af20d0d75c1cC00000248cH0c30af20d0d75c1cC00000252Eurxe0c30af20d0d75c1cC00000594cvxje0c30af20d0d75c1cC00000725AuZZ0c30af20d0d75c1cC00000924XiQOn4YmPbObAbjhhmraxnQ5tB:/~BUN/root/chunk-qzcaz8nr.jsB:/~BUN/root/chunk-5f8xc68y.jsB:/~BUN/root/chunk-4d
+-- @116121977
+hM...	.fSt..	.	eP...	.Cke	.	.wgeI.	.KzeI...v7e	.	.lGeI.	.	XL...	.SWe..	.i1e	.	.ylr..	.Pen	.	.iun....cJe	...v$eI...	C6...	.yGt	.	.GTn....BVeI.	.	V8.....wyr	...E4e..	.y1nI.	.pbr....NRt	.	.UZe	...One....	wY...	.lBn....	Tw...	.	mv.I.	.	QD.I...KNt	.	.	J5.....BZt..	.	uM.I.	.$Et	...	Bj.I...aen....Z1e....	FZ.	.	.fgn	...sin..	.hkn	.	.HGt....	NJ.I.	.X0t	...b3e	.	.y1eI.	.	
+-- @116152689
+x1tM1tXNeO1t	AV..3..	Hk..e..JNeRlenztozta$eizt~*...*...*...*..	pO.m$eh$e_ztkztwztTztS$ebzek$ew$eT$ev$eE$eC$egEeBYe	QZ.A$e$zt	dY.	Nc._ze	UF.Vzt	ok._$n."..^...GxeS$nrzetGtKledGtG$epGtgGthGt$$eU$e.Z..	Oh.	ay.	RY.Q$euceSGt	Wk..*...*...*...*...*..	y0......	..vD..n.......fce	_0.AGtRGt....N...v(...x..t0e.?..ink.....R..gceZjeBieeze	Md.OGtn0e	MY.qbe
+-- @116237865
+Eh.....oun....Ewn....yme....Lun....	s6.....Kze....k7n....v2e....lan....tKn....vme....vCt....iun....cJe....v$e....ikt....	RJ.....jPn....	$G.....yie....GTn....r7n....Ein....mon....	V8.....wyr....	y0.....pbr....RQe....UZe....Qjt....One....lBn....PUn....	QD.....Ygt....bht....ZVn....Ome....	J5.....	sx.....$Et....	R_.....Aae....JLn....nvn....	Bj.....aen....A0n....
+-- @119372429
+T$ek$ew$e.Re..q...T"............
+	
+ ......J.....F............H.'....................................i................v$eLRe..P......=...................
+	.$.........J.....F.........V..%\z......&............H..i....R...i..............................Re..W...	;..v.............
+	.$.....h...`...p...@...@...P.......p..........# ..'............................"........H.....................F.........
+-- @130494781
+.......................w...h...... ...............i.................o..........................Rqt........	...	iG.....v$eI........r.....starNamespace...v$e`.......8
+..........................4..............@.........8.2............
+	..........v$e....-.	.....	iG......#....!.e..	...
+........................-.	.t...Rqt.....#....#.....	...
+...h.......p...P...... .../.p........................~..
+-- @130494817
+..............i.................o..........................Rqt........	...	iG.....v$eI........r.....starNamespace...v$e`.......8
+..........................4..............@.........8.2............
+	..........v$e....-.	.....	iG......#....!.e..	...
+........................-.	.t...Rqt.....#....#.....	...
+...h.......p...P...... .../.p........................~...a...~...~...~......................
+-- @130494909
+.....r.....starNamespace...v$e`.......8
+..........................4..............@.........8.2............
+	..........v$e....-.	.....	iG......#....!.e..	...
+........................-.	.t...Rqt.....#....#.....	...
+...h.......p...P...... .../.p........................~...a...~...~...~............................5....Q.................F ..............F...............i.....F........................
+
+## hits "var v$e" count=3
+-- @183817860
+e.length;while(++o<u)if(e[o]===t)return o;return-1}var T$e=Rzt;function xzt(e,t,r){return t===t?T$e(e,t,r):k$e(e,w$e,r)}var v$e=xzt;function Izt(e,t){var r=e==null?0:e.length;return!!r&&v$e(e,t,0)>-1}var E$e=Izt;function Dzt(e,t,r){var o=-1,u=e==null?0:e.length;while(++o<u)if(r(t,e[o]))return!0;return!1}var C$e=Dzt;var Fzt=1/0,Nzt=!(gEe&&1/BYe(new gEe([,-0]))[1]==Fzt)?QZ:function(e){return new gEe
+-- @189584460
+bject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var v$e="Can't open \u2014 this session is running in another terminal";async function iG(o){let i=(await Rqt(o)).find((e)=>e.kind!=="interactive");return i?{kind:i.kind,jobId:i.jobId}:null}async function Rqt(o){let i=await import("B:/~BUN/root/chunk-g4fmkm8p.js").then((n)=>n.lis
+-- @218811313
+-box {
+    stroke: ${i.componentStroke};
+  }
+  .wardley-notes text {
+    fill: ${i.axisTextColor};
+  }
+  `},"styles")});var v$e={};ir(v$e,{diagram:()=>JMt});var JMt,x$e=F(()=>{"use strict";u$e();f$e();m$e();y$e();JMt={parser:SX,db:d$e,renderer:p$e,styles:g$e}});var C$e,lk,nNt,iNt,aNt,sNt,oNt,lNt,wx,EX=F(()=>{"use strict";ur();Wi();vt();Qt();Nn();C$e=o(()=>({domains:new Map,transitions:[]}),"create
+
+## hits "v$e=" count=5
+-- @183817864
+ngth;while(++o<u)if(e[o]===t)return o;return-1}var T$e=Rzt;function xzt(e,t,r){return t===t?T$e(e,t,r):k$e(e,w$e,r)}var v$e=xzt;function Izt(e,t){var r=e==null?0:e.length;return!!r&&v$e(e,t,0)>-1}var E$e=Izt;function Dzt(e,t,r){var o=-1,u=e==null?0:e.length;while(++o<u)if(r(t,e[o]))return!0;return!1}var C$e=Dzt;var Fzt=1/0,Nzt=!(gEe&&1/BYe(new gEe([,-0]))[1]==Fzt)?QZ:function(e){return new gEe(e)}
+-- @189584464
+t to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+var v$e="Can't open \u2014 this session is running in another terminal";async function iG(o){let i=(await Rqt(o)).find((e)=>e.kind!=="interactive");return i?{kind:i.kind,jobId:i.jobId}:null}async function Rqt(o){let i=await import("B:/~BUN/root/chunk-g4fmkm8p.js").then((n)=>n.listAll
+-- @202770459
+(15),{toolName:Kle,description:Qle}=dKt,k$e;if(Fp[0]===p)k$e=ts(),Fp[0]=k$e;else k$e=Fp[0];let C$e=k$e,v$e;if(Fp[1]===p)v$e=$p(),Fp[1]=v$e;else v$e=Fp[1];let w$e=v$e,T$e;if(Fp[2]===p)T$e=Tb(),Fp[2]=T$e;else T$e=Fp[2];let _$e=T$e,R$e;if(Fp[3]===p)R$e=r(o,{children:[e(ao,{}),r(t,{bold:!0,color:"warning",children:[" ","Waiting for team lead approval"]})]}),Fp[3]=R$e;else R$e=Fp[3];let x$e;if(Fp[4]===
+-- @202770483
+iption:Qle}=dKt,k$e;if(Fp[0]===p)k$e=ts(),Fp[0]=k$e;else k$e=Fp[0];let C$e=k$e,v$e;if(Fp[1]===p)v$e=$p(),Fp[1]=v$e;else v$e=Fp[1];let w$e=v$e,T$e;if(Fp[2]===p)T$e=Tb(),Fp[2]=T$e;else T$e=Fp[2];let _$e=T$e,R$e;if(Fp[3]===p)R$e=r(o,{children:[e(ao,{}),r(t,{bold:!0,color:"warning",children:[" ","Waiting for team lead approval"]})]}),Fp[3]=R$e;else R$e=Fp[3];let x$e;if(Fp[4]===p)x$e=w$e&&_$e&&e(o,{mar
+-- @218811317
+ {
+    stroke: ${i.componentStroke};
+  }
+  .wardley-notes text {
+    fill: ${i.axisTextColor};
+  }
+  `},"styles")});var v$e={};ir(v$e,{diagram:()=>JMt});var JMt,x$e=F(()=>{"use strict";u$e();f$e();m$e();y$e();JMt={parser:SX,db:d$e,renderer:p$e,styles:g$e}});var C$e,lk,nNt,iNt,aNt,sNt,oNt,lNt,wx,EX=F(()=>{"use strict";ur();Wi();vt();Qt();Nn();C$e=o(()=>({domains:new Map,transitions:[]}),"createDefa
+
+## hits "T(v$e)" count=1
+-- @192188226
+&&{keepQuery:!0},respawnResult:{ok:!0,short:d.id,state:d.state},gestureT0:P});return}if(w.terminalHolderOf(d)!==void 0){T(v$e),b("fleet_view_open");return}if(d.state.deadEpochReapedAt!==void 0&&Di(d.state)&&!sS(d.state)&&h.forkRefusedJobId!==d.id){if(h.deadEpochGoneJobId===d.id){T(ip),b("fleet_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h
+
+## Di-sS-open @192188300
+id 0){T(v$e),b("fleet_view_open");return}if(d.state.deadEpochReapedAt!==void 0&&Di(d.state)&&!sS(d.state)&&h.forkRefusedJobId!==d.id){if(h.deadEpochGoneJobId===d.id){T(ip),b("fleet_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h.deadEpochOfferedJobId=d.id;return}if(!X){h.forkRefusedJobId=null,h.restartOfferedJobId=null,h.deadEpochOfferedJobId=d.id,T(ja),s("tengu_fleetview_dead_epoch_offer",{}),b("fleet_view_open");retu
+
+## function Di( count=18 181201526,182667585,182998174,183686328,189350069,189941727,190183466,190939420,194318277,198338246,198554668,200796570,201766143,203984939,206206047,210896697,213294831,223073938
+-- @181201526 len=67
+function Di(e,t){return t.emptyStr()?e:e.emptyStr()?t:Sr`${e}${t}`}
+-- @182667585 len=212
+function Di(e,t,r){if(!r)return!1;if((r["*"]??[]).some((u)=>e.includes(u)))return!0;if(t===void 0)return!1;for(let[u,p]of Object.entries(r))if(u!=="*"&&t.includes(u)&&p.some((E)=>e.includes(E)))return!0;return!1}
+-- @182998174 len=54
+function Di(e){return Nw(e.state)&&e.tempo!=="active"}
+-- @183686328 len=704
+function Di(wn,Jn,Zn={}){if(o.length===0)return;let zn=wn==="",qn=o.filter((io)=>Hhe(io,zn));if(qn.length===0)return;let Wn=qn.every((io)=>io.mode==="bash")?"bash":"prompt",to=Wn==="bash"?qn:qn.filter((io)=>io.mode!=="bash"),Io=po(to,wn,Zn),is=Io.map((io)=>io.text),Cr=[...is,wn].filter(Boolean).join(`
+`),_o=is.join(`
+`).length+1+Jn,Tn=[],Qr=Date.now();for(let[io,ls]of to.entries()){Tn.push(...Io[io].entries);let Fi=DLe(ls.value,Qr);Tn.push(...Fi),Qr+=Fi.length}for(let io of to){if(io.unlogged)continue;r("popAll",typeof io.value==="string"?io.value:void 0)}let kr=new Set(to),fo=o.filter((io)=>!kr.has(io));return o.length=0,o.push(...fo),C(),bI.emit(to),{text:Cr,cursorOffset:_o,images:Tn,mode:Wn}}
+-- @189350069 len=66
+function Di(t){return Number.isFinite(t)&&Math.abs(t)<=2147483647}
+-- @189941727 {"i":189941727,"missEnd":true,"preview":"function Di(e,t){if(t===void 0)return;let r=/([^\\t\\n\\f\\r /=>]+)(?:[\\t\\n\\f\\r ]*=[\\t\\n\\f\\r ]*(?:\"[^\"]*\"|'[^']*'|[^\\t\\n\\f\\r >]*))?/y;r.lastIndex=t.startOffset;let s=r.exec(e);if(s===null||s[1].toLowerCase()!==\"id\")return;let o=t.startOffset+s[0].length;return o<t.endOffset?void 0:{s"}
+function Di(e,t){if(t===void 0)return;let r=/([^\t\n\f\r /=>]+)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"[^"]*"|'[^']*'|[^\t\n\f\r >]*))?/y;r.lastIndex=t.startOffset;let s=r.exec(e);if(s===null||s[1].toLowerCase()!=="id")return;let o=t.startOffset+s[0].length;return o<t.endOffset?void 0:{start:t.startOffset,end:o}}var Lt=(e)=>e.attrs?.find((t)=>t.name==="id")?.value,Bi=new Set(["","text/javascript","applica
+
+## function sS( count=4 182998228,184212853,208548925,215554967
+-- @182998228 len=69
+function sS(e){return e.template==="exec"&&e.respawnFlags.length===0}
+-- @184212853 len=45
+function sS(e){return f2e(e)?.category??null}
+-- @208548925 len=23
+function sS(){return""}
+-- @215554967 len=143
+function sS(e){var t=oS(e);if(!t)throw new Error("Expected node of symbol group type, but got "+(e?"node of type "+e.type:String(e)));return t}
+
+## terminalHolders-update @192139226
+Id&&h.parkedJobId===void 0)m.set(h.sessionId,h.pid);if(!h.status)continue;if(h.sessionId)d.set(h.sessionId,h.status);if(h.jobId)d.set(Ir(h.jobId),h.status)}for(let h of d.keys())this.#h.delete(h);let w=Wkt();if(w&&i.some((h)=>h.sessionId===w.sessionId))qCn(w.sessionId);let S=!1;for(let[h,C]of this.#b){let x=i.find((A)=>A.sessionId===h||A.jobId===C.jobId);if(d.get(h)==="busy"||d.get(Ir(C.jobId))==="busy"||x!==void 0&&(x.statusUpdatedAt??0)>C.kickedAt&&x.startedAt<=C.kickedAt)this.#b.delete(h),S=!0}if(this.#p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_peers",!1)){let h=new Set((this.#t.jobs??[]).map((A)=>A.state.sessionId)),C=Date.now(),x=i.filter((A)=>A.kind==="interactive"&&A.pid!==process.pid&&A.sessionId&&!h.has(A.sessionId)&&(A.peerProtocol??0)>=_2t&&C-(A.updatedAt??A.startedAt)<86400000).map((A)=>{let F=zu(A);return{id:`peer-${A.pid}`,state:F,activity:Oo(F)}});this.updateAdoptedPeers((A)=>{let F=new Map(A.map((P)=>[P.id,P])),T=x.map((P)=>{let V=F.get(P.id);return V&&V.state.name!==P.state.name&&(V.state.updatedAt??"")>=(P.state.updatedAt??"")?{...P,state:{...P.state,name:V.state.name,intent:V.state.intent,updatedAt:V.state.updatedAt}}:P});return A.length===T.length&&A.every((P,V)=>P.id===T[V].id&&P.state.updatedAt===T[V].state.updatedAt&&P.state.name===T[V].state.name&&P.activity===T[V].activity)?A:T})}}).catch(()=>{})};loadRemote=()=>{this.#R=Date.now();let i=++this.#v;this.#e.listRemoteSessions().then((d)=>{if(i!==this.#v)return;let m=d.map((w)=>{let S=WKe(w.id),h=Gu(w),C=this.#S.get(S);if(C!==void 0)if(Di(h)||Date.now()>C)this.#S.delete(S);else h={...h,state:"stopped",tempo:"idle",needs:void 0};return{id:S,state:h,ac
+
+## deadEpoch-writer @182999421
+ctive"}function sS(e){return e.template==="exec"&&e.respawnFlags.length===0}function yIe(e){return e.state==="blocked"&&!sS(e)}function aut(e){return e.backend==="daemon"&&!sS(e)}function EU(e){let t=e.originCwd||(e.cwd.match(/^(.+?)[/\\]\.claude[/\\]worktrees[/\\]/)?.[1]??e.cwd);return Fb(t)}function xGe(e,t){if(e.backend==="remote")return!0;let r=Me(t,EU(e));return r.split(/[/\\]/,1)[0]!==".."&&!Ae(r)}function $ye(e){let t=(r)=>r?.trim().toLowerCase().startsWith("/loop")??!1;return t(e.intent)||t(e.initialPrompt)}function rP(e){return e.routine!==void 0||e.selfWake===!0||(e.inFlight?.kinds.includes("session_cron")??!1)||$ye(e)}function uae(e,t,r,o,d){let g=Kn(e);return nr(g,d).then(async(p)=>{if(!p||Di(p)||t==="failed"&&yIe(p))return"none";let b=Date.now(),f=new Date(b).toISOString(),u=o?.resumable==="auto-resume"&&t==="failed"&&!sS(p)&&b-Date.parse(p.updatedAt)>H1t;return await ps(g,{...p,state:u?"stopped":t==="crashed"?"failed":t,detail:u?mcr:t==="stopped"?"stopped":t==="failed"?(p.detail||r).replace(/; respawning$/,""):r,tempo:"idle",inFlight:void 0,needs:void 0,updatedAt:f,firstTerminalAt:p.firstTerminalAt??(u?p.updatedAt:f),...o?.resumable==="auto-resume"&&t==="failed"&&(u?{deadEpochReapedAt:f}:{reapedMidWorkAt:p.updatedAt}),...o?.resumable==="wake-only"&&t==="failed"&&{reapedUnsettledAt:p.updatedAt}},d),u?"dead-epoch":"settled"}).catch((p)=>(ea(p),"none"))}var et=h(()=>w.object({state:w.string().nullish(),detail:w.string().nullish(),tempo:w.string().nullish(),needs:w.string().nullish(),output:w.record(w.string(),w.unknown()).nullish()})),tt={working:"actively progressing on the task \u2014 narrating plans, calling tools, or writing code; no pending question for the user",blocked:'the last message ends on a direct question or explicit request for the user ("want me to\u2026?", "which do you prefer?", "approve this?", "needs input: \u2026") \u2014 nothing will happen until the user replies',done:'the task the user asked for is fully delivered and there is no f
+
+## deadEpoch-writer-fn uae @182998858
+len=750 sha=0252fae4a4aad434
+function uae(e,t,r,o,d){let g=Kn(e);return nr(g,d).then(async(p)=>{if(!p||Di(p)||t==="failed"&&yIe(p))return"none";let b=Date.now(),f=new Date(b).toISOString(),u=o?.resumable==="auto-resume"&&t==="failed"&&!sS(p)&&b-Date.parse(p.updatedAt)>H1t;return await ps(g,{...p,state:u?"stopped":t==="crashed"?"failed":t,detail:u?mcr:t==="stopped"?"stopped":t==="failed"?(p.detail||r).replace(/; respawning$/,""):r,tempo:"idle",inFlight:void 0,needs:void 0,updatedAt:f,firstTerminalAt:p.firstTerminalAt??(u?p.updatedAt:f),...o?.resumable==="auto-resume"&&t==="failed"&&(u?{deadEpochReapedAt:f}:{reapedMidWorkAt:p.updatedAt}),...o?.resumable==="wake-only"&&t==="failed"&&{reapedUnsettledAt:p.updatedAt}},d),u?"dead-epoch":"settled"}).catch((p)=>(ea(p),"none"))}
+
+## Wr-assign @192197201
+(66),{job:ht,isFocused:co,focusFg:rl,isOrigin:po,logTail:bE,status:il,cols:Ao,showVerb:wp,loopKickCount:sl,age:yp,childRows:Sp,renaming:Vr,groupEditing:mo,deleteArmed:To,deleteRefused:wE,attaching:$o,heldInTerminal:Wr}=mE,qn=Cf(ht.state.state),zn=qn&&ht.state.tempo!=="active"?wE:void 0,al=Ao.detail-ie("group: ")-ys>=24,Ur=yn(ht.activity,ht.state.tempo,il,qn),{color:ll,dim:yE}=Ur,$r=il==="busy"?ll:Na(ll,Sp),SE=$r===ll&&yE,vp=$o==="armed"?void 0:To?.justKilled?xY:$o?void 0:Wn(ht.state,qn,il),hs=ht.state.output?.result,Nb;if(oo[0]!==hs)Nb=hs?Ea(hs):null,oo[0]=hs,oo[1]=Nb;else Nb=oo[1];let Yn=Nb,kE=Yn?void 0:hs,vE=qn!=="success"?bE||void 0:void 0,Rp=po&&co?ht.state.tempo==="blocked"?ht.state.needs:qn==="failure"?ht.state.detail:void 0:void 0,Hb;if(oo[2]!==ht.state.detail)Hb=Cr(ht.state.detail)
+
+## liveStatus-holder @192133247
+return this.#c.has(i)}isArchiving(i){return this.#w.has(i)}liveStatus(i){let{sessionId:d,resumeSessionId:m}=i.state;if(sS(i.state))return i.state.tempo==="active"?"busy":void 0;if(i.state.backend==="remote")return i.state.tempo==="active"?"busy":i.state.tempo==="blocked"?"waiting":void 0;if(this.#b.has(m??d))return"busy";if(this.#t.pendings.some((S)=>S.state.sessionId===d))return"busy";let w=this.terminalHolderOf(i)!==void 0?this.#t.statuses.get(Ir(i.id)):ac(this.#t.statuses,i);if(w)return w;if(this.#h.has(d))return"busy";return}terminalHolderOf(i){if(i.state.backend==="peer"||i.state.backend=
+
+## terminalHolders.set  get 192133480
+-- @192133480
+.#t.statuses.get(Ir(i.id)):ac(this.#t.statuses,i);if(w)return w;if(this.#h.has(d))return"busy";return}terminalHolderOf(i){if(i.state.backend==="peer"||i.state.backend==="remote")return;return this.#t.terminalHolders.get(i.state.resumeSessionId??i.state.sessionId)}bumpGen(){this.#u=++this.#f}resetPrFetchGate(){this.#y=0}holdJob=(i)=>(this.#u=++this.#f,this.#c.set(i,(this.#c.get(i)??0)+1),()=>{this.#u=++this.#f;let d=(this.#c.get(i)??1)-1;if(d<=0)this.#c.delete(i);else this.#c.set(i,d)});optimisti
+
+## #p terminalHolders 192139222
+
+## p-terminalHolders @192139222
+)));nc(this.#_,new Set(w.map((K)=>Mi(K.state))))}};#O=()=>{this.#e.listAllLiveSessions(this.#n).then((i)=>{let d=new Map,m=new Map;for(let h of i){if(h.kind==="interactive"&&h.pid!==process.pid&&h.sessionId&&h.parkedJobId===void 0)m.set(h.sessionId,h.pid);if(!h.status)continue;if(h.sessionId)d.set(h.sessionId,h.status);if(h.jobId)d.set(Ir(h.jobId),h.status)}for(let h of d.keys())this.#h.delete(h);let w=Wkt();if(w&&i.some((h)=>h.sessionId===w.sessionId))qCn(w.sessionId);let S=!1;for(let[h,C]of this.#b){let x=i.find((A)=>A.sessionId===h||A.jobId===C.jobId);if(d.get(h)==="busy"||d.get(Ir(C.jobId))==="busy"||x!==void 0&&(x.statusUpdatedAt??0)>C.kickedAt&&x.startedAt<=C.kickedAt)this.#b.delete(h),S=!0}if(this.#p("statuses",(h)=>!S&&h.size===d.size&&[...d].every(([C,x])=>h.get(C)===x)?h:d),this.#p("terminalHolders",(h)=>h.size===m.size&&[...m].every(([C,x])=>h.get(C)===x)?h:m),Po()&&R("tengu_fleetview_peers",!1)){let h=new Set((this.#t.jobs??[]).map((A)=>A.state.sessionId)),C=Date.now(),x=i.filter((A)=>A.kind==="interactive"&&A.pid!==process.pid&&A.sessionId&&!h.has(A.sessionId)&&(A.peerProtocol??0)>=_2t&&C-(A.updatedAt??A.startedAt)<86400000).map((A)=>{let F=zu(A);return{id:`peer-${A.pi
+
+## hits deadEpochGoneJobId 92718128,192147729,192147769,192188359,192190088
+-- @92718128
+RefusedJobId.....	..restartOfferedJobId....._...deadEpochOfferedJobId.......ze1.deadEpochGoneJobId......0...pastes..........lastMintedPasteId.......,D..resumePickerGen.....N:..resumePromoteSessionId......`...resumePickerRefusedAt........v..holdJob.
+.......optimistic......F...note
+-- @192147729
+te.now()}deadEpochOfferAgeMs(){return this.#f===null?1/0:Date.now()-this.#u}get deadEpochGoneJobId(){return this.#m}set deadEpochGoneJobId(i){this.#m=i}isPromoting(i){return this.#l.has(i)}beginPromote(i){this.#l.add(i)}endPromote(i){this.#l.delete(i)}releasePromoted(i){for(let d
+-- @192147769
+is.#f===null?1/0:Date.now()-this.#u}get deadEpochGoneJobId(){return this.#m}set deadEpochGoneJobId(i){this.#m=i}isPromoting(i){return this.#l.has(i)}beginPromote(i){this.#l.add(i)}endPromote(i){this.#l.delete(i)}releasePromoted(i){for(let d of this.#l)if(i.has(d))this.#l.delete(d
+-- @192188359
+chReapedAt!==void 0&&Di(d.state)&&!sS(d.state)&&h.forkRefusedJobId!==d.id){if(h.deadEpochGoneJobId===d.id){T(ip),b("fleet_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h.deadEpochOfferedJobId=d.id;return}if(!X){h.forkRefus
+-- @192190088
+gone")xx(Y,x).catch(()=>{}),y("fleet_view_open","dead_epoch_transcript_gone"),h.deadEpochGoneJobId=d.id,T(ip);else f("fleet_view_open","respawn_failed"),T(X.error),xx(Y,x).catch(()=>{})})}function up(i,d){let{editor:m,roster:w,attach:S,storageV5:h}=i,C=m.setError,x=S.getSnapshot(
+
+## hits deadEpochOfferedJobId 92718096,192147550,192147593,192184536,192184679,192188428,192188507,192188601,192188705,192188742,192188773
+-- @92718096
+....linkMatchFollow.....`.o.forkRefusedJobId.....	..restartOfferedJobId....._...deadEpochOfferedJobId.......ze1.deadEpochGoneJobId......0...pastes..........lastMintedPasteId.......,D..resumePickerGen.....N:..resumePromoteSessionId......`...resumePickerRefusedAt........v..holdJob.
+-- @192147550
+t restartOfferedJobId(){return this.#o}set restartOfferedJobId(i){this.#o=i}get deadEpochOfferedJobId(){return this.#f}set deadEpochOfferedJobId(i){this.#f=i,this.#u=i===null?0:Date.now()}deadEpochOfferAgeMs(){return this.#f===null?1/0:Date.now()-this.#u}get deadEpochGoneJobId(){
+-- @192147593
+restartOfferedJobId(i){this.#o=i}get deadEpochOfferedJobId(){return this.#f}set deadEpochOfferedJobId(i){this.#f=i,this.#u=i===null?0:Date.now()}deadEpochOfferAgeMs(){return this.#f===null?1/0:Date.now()-this.#u}get deadEpochGoneJobId(){return this.#m}set deadEpochGoneJobId(i){th
+-- @192184536
+",Db=5000;function Dr(i,d){i.forkRefusedJobId=null,i.restartOfferedJobId=null,i.deadEpochOfferedJobId=null;let m=d.getSnapshot().error;if(m===$a||m===qa||m===ja)d.setError(null)}function lp(i,d,m){i.forkRefusedJobId=null,i.deadEpochOfferedJobId=null,i.restartOfferedJobId=m,d.setE
+-- @192184679
+a||m===qa||m===ja)d.setError(null)}function lp(i,d,m){i.forkRefusedJobId=null,i.deadEpochOfferedJobId=null,i.restartOfferedJobId=m,d.setError(qa)}function Ka(i,d,m,w){let S=d.getSnapshot();return i.getSnapshot().error===w&&!S.previewOpen&&!S.helpOpen&&!S.debugOpen&&!S.exitPending
+-- @192188428
+d.id){if(h.deadEpochGoneJobId===d.id){T(ip),b("fleet_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h.deadEpochOfferedJobId=d.id;return}if(!X){h.forkRefusedJobId=null,h.restartOfferedJobId=null,h.deadEpochOfferedJobId=d.id,
+
+## hits deadEpochOfferAgeMs 92714824,192147658,192188479
+-- @92714824
+wnAttempt...
+.....t.getWarming..........trackWarming....#...dropWarming.......D.deadEpochOfferAgeMs......~..isPromoting.........beginPromote
+....n..endPromote......-...releasePromoted......(..beginNewSession.......A.isCurrentNewSessionAttempt......J.endNewSession.......l...aban
+-- @192147658
+rn this.#f}set deadEpochOfferedJobId(i){this.#f=i,this.#u=i===null?0:Date.now()}deadEpochOfferAgeMs(){return this.#f===null?1/0:Date.now()-this.#u}get deadEpochGoneJobId(){return this.#m}set deadEpochGoneJobId(i){this.#m=i}isPromoting(i){return this.#l.has(i)}beginPromote(i){this
+-- @192188479
+t_view_open");return}let X=h.deadEpochOfferedJobId===d.id&&Ka(m,S,C,ja);if(X&&h.deadEpochOfferAgeMs()<Tb){h.deadEpochOfferedJobId=d.id;return}if(!X){h.forkRefusedJobId=null,h.restartOfferedJobId=null,h.deadEpochOfferedJobId=d.id,T(ja),s("tengu_fleetview_dead_epoch_offer",{}),b("f
+
+## hits tengu_fleetview_dead_epoch_offer 92725820,192188637
+-- @92725820
+h.e.r. .t.e.r.m.i.n.a.l.......d.fleet_view_open.....Y...remote-pending-. ....]%.tengu_fleetview_dead_epoch_offer.....9j.fleet.......c..deleteConfirm...	...OW}.keepQuery........x.respawnResult...	.......gestureT0...........deadEpochReapedAt...
+.......knownState......x...forceRef
+-- @192188637
+usedJobId=null,h.restartOfferedJobId=null,h.deadEpochOfferedJobId=d.id,T(ja),s("tengu_fleetview_dead_epoch_offer",{}),b("fleet_view_open");return}h.deadEpochOfferedJobId=null}else if(h.deadEpochOfferedJobId===d.id)h.deadEpochOfferedJobId=null;let K=Ka(m,S,C,$a)&&h.forkRefusedJobI

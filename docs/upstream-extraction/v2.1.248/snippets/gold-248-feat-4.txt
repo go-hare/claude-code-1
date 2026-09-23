@@ -1,0 +1,214 @@
+# gold-248-feat-4  managed-settings load-fail startup + /doctor /status
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+when=2026-09-20T02:05:39.036Z
+
+## #4 managed settings failed  needle="managed settings failed"  hits=3
+- #0 @93411419 re restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld).......
+- #1 @189842312 lently or leaving an unresponsive terminal after "Press Enter to continue" when managed settings failed to load; the reason is now shown\n- Fixed voice mode on native builds getting s
+- #2 @201568447 errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using ca
+
+## #4 Failed to load managed  needle="Failed to load managed"  hits=0
+
+## #4 failed to load managed  needle="failed to load managed"  hits=0
+
+## #4 could not load managed  needle="could not load managed"  hits=0
+
+## #4 Couldn't load managed  needle="Couldn't load managed"  hits=0
+
+## #4 weren't fetched  needle="weren't fetched"  hits=0
+
+## #4 were not fetched  needle="were not fetched"  hits=0
+
+## #4 third-party provider  needle="third-party provider"  hits=35
+- #0 @93403106 m null or undefined value.........Channels3....u..Channels are not available on third-party providers......... blocked by org policy ().......Inbound messages will be silently drop
+- #1 @93533749 t GitHub........-..gap-....0w../rename to add a name...&.......not available on third-party providers......&z..not currently available.........blocked by org policy........R3.Confi
+- #2 @94513428 file:///B:/%7EBUN/root/chunk-njb53wfm.js5.......not available on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL..#...w...not availabl
+- #3 @94749589 ive....W.....B.Ultrareview runs in Claude Code on the web and is unavailable on third-party providers..E...;6L.Ultrareview requires a Claude.ai account. Run /login to authenticate.
+- #4 @94768868 ...., which does not use Anthropic Console sign-in..W.......This session uses a third-party provider, which does not use Anthropic Console sign-in..........ANTHROPIC_API_KEY is set
+- #5 @95609266 on with no unsolicited notification path..3...9D..channels are not available on third-party providers.+...x...channels feature is not currently available.R....Mk.channels not enabl
+- #6 @96248140 rlier session)..e...n...from the default (GrowthBook is off for this session: a third-party provider, or telemetry opted out)...:...}.\.from the default (a cold GrowthBook cache, n
+- #7 @96687124 i.n.....V....{..Posting runs on Claude Code on the web, which is unavailable on third-party providers...i....Ke.Posting runs on Claude Code on the web, which is unavailable while e
+- #8 @96729352 ropic.com........;C.CLAUDE_CODE_API_BASE_URLB...r...Files API is unavailable on third-party providers (data-residency)..:.......Files API is unavailable for HIPAA-regulated organiz
+- #9 @97431331 .$.......[claudeai-mcp] Disabled in safe mode/....A..[claudeai-mcp] Disabled on third-party provider.7...V1/.[claudeai-mcp] Disabled: API-key auth precedence active.....20I.api_key
+- #10 @98551563 ."...D...; +https://support.anthropic.com/)..0....s..Anthropic auth not used on third-party providers........third_party.........No OAuth token available(....9	.Not available when 
+- #11 @100884020 should be handled in print.ts...=.....}.claude.ai MCP proxy is not available on third-party providers...2....X..Initializing claude.ai proxy transport for server ......i...No claud
+- … +23 more
+
+## #4 third party provider  needle="third party provider"  hits=0
+
+## #4 custom ANTHROPIC_BASE_URL  needle="custom ANTHROPIC_BASE_URL"  hits=4
+- #0 @94513481 vailable on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL..#...w...not available in sandboxed sessions.8....#..gateway auth is unpinned; 
+- #1 @98880399 ion settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry.J...g.u.Arti
+- #2 @179856630 ion settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry."}}function 
+- #3 @199434951 Vertex/third-party providers";case"custom_base_url":return"not available with a custom ANTHROPIC_BASE_URL";case"sandboxed_entrypoint":return"not available in sandboxed sessions";case"un
+
+## #4 ANTHROPIC_BASE_URL  needle="ANTHROPIC_BASE_URL"  hits=87
+- #0 @92223587 .4....8..code-sign: CLAUDE_CODE_SESSION_ACCESS_TOKEN is unset&....:..code-sign: ANTHROPIC_BASE_URL is unset.......Q=.git_repository.......~../sign-commit....F.~.shr-%.....D.code-
+- #1 @92223828 missing signature.......t....sig...../..CLAUDE_CODE_REMOTE_SESSION_ID.......B/..ANTHROPIC_BASE_URL........g.SESSION_INGRESS_URL.........JSON	....~..stringify.........^.contents..
+- #2 @94513488 e on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL..#...w...not available in sandboxed sessions.8....#..gateway auth is unpinned; 
+- #3 @98345954 OOL_SEARCH=.......+.,., result=false..5.......[ToolSearch:optimistic] disabled: ANTHROPIC_BASE_URL=........... is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true (o
+- #4 @98548447 .\d+)$.......A{a.^([0-9a-f]{1,4}):...b...W...CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing; ignoring..B....n..CLAUDE_CODE_USE_GATEWAY i
+- #5 @98548555 PIC_AUTH_TOKEN is missing; ignoring..B....n..CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL is invalid: ......z.A.CLAUDE_CODE_USE_GATEWAY.P...v.\.T.h.e. .a.p.p. .m.a.y. .h
+- #6 @98815696 ....provider is /......._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL is set.(....,..ANTHROPIC_BASE_URL is a first-party host....y...ANTHROPIC_BASE_URL is unset.<....S..[gatewayDiscov
+- #7 @98815744 T_PARTY_BASE_URL is set.(....,..ANTHROPIC_BASE_URL is a first-party host....y...ANTHROPIC_BASE_URL is unset.<....S..[gatewayDiscovery] skipped: nonessential traffic is disabledZ.
+- #8 @98880406 tings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry.J...g.u.Arti
+- #9 @99491877 .B.A.S.E._.U.R.L.`. ..  .c.o.m.p.a.r.e. .t.o. .e.x.p.e.c.t.e.d. .`.r....N..` | `ANTHROPIC_BASE_URL` mis-set | Fix or unset `ANTHROPIC_BASE_URL` |
+| `Rate limited (429). Polling t
+- #10 @99491921 . .e.x.p.e.c.t.e.d. .`.r....N..` | `ANTHROPIC_BASE_URL` mis-set | Fix or unset `ANTHROPIC_BASE_URL` |
+| `Rate limited (429). Polling too frequently.` on PollWork | Custom poll in
+- #11 @99525811 ng on prior edits....!....!..[runner:session] Spawning child: .........F. args) ANTHROPIC_BASE_URL=........7. CLAUDE_CODE_WORKER_EPOCH=........e. cwd=...,...Z...[runner:session] 
+- … +75 more
+
+## #4 managed settings  needle="managed settings"  hits=302
+- #0 @92241990 _CODE_CLIENT_KEY..........BASE_API_URLH...er..[3P telemetry] Waiting for remote managed settings before telemetry init.....o..Boolean.....qSG.CLAUDE_CODE_ENABLE_TELEMETRY....T.
+- #1 @92245078 itialize1PEventLogging....|.9.onGrowthBookRefresh.E.......[3P telemetry] Remote managed settings loaded, initializing telemetry.......y...B:/~BUN/root/chunk-vny8kypt.js..Y...g.
+- #2 @92360664 on tips for marketplace "...p...ZI..": its registered source is not declared in managed settings (extraKnownMarketplaces or strictKnownMarketplaces)....T...marketplace-plugin:.
+- #3 @92447376 .gd.Your "crossSessionInbound" setting is "hold"....I.....>.Your organization's managed settings set "crossSessionInbound" to "hold"....u....[..This repository's settings set "
+- #4 @92461872 old"; set it to "accept" to deliver held messages.......Bhy.Your organization's managed settings set "crossSessionInbound" to "hold" (your own "accept" cannot override managed 
+- #5 @92535807 Skipping q.....H. team-wide allowed path(s): permission rules are restricted to managed settings (allowManagedPermissionRulesOnly)...........[TeammateInit] Found .........T. te
+- #6 @92545280 ....allow network: .......:.worker-sandbox.......V..MCP input: ..... .(.review: managed settings change......=..bridge_repl....._B$.multi_session_crash.......6.concurrent_bridg
+- #7 @92754717 utomatically...].......Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup wa
+- #8 @92756197 with /chrome...2...[..Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browse
+- #9 @93334259 e not enabled for your org . have an administrator set channelsEnabled: true in managed settings.....Q...Channel messages from ".R...U2.." are unavailable: this connection's pr
+- #10 @93340954  error updating ......A...Plugin autoupdate: command-source refresh disabled by managed settings (still excluding command-sourced plugins from the regular pass)......J.Z.Plugin
+- #11 @93345489 .......the gateway answered HTTP ..5...o.F.the gateway's response was not valid managed settings...?...Eas.the gateway's TLS certificate did not match the one you trusted.Y....
+- … +290 more
+
+## #4 Remote settings:  needle="Remote settings:"  hits=99
+- #0 @94775732 s.......R.../api/claude_code/settings...........remote managed settings.I...K.G.Remote settings: Settings validation failed - no fields could be salvaged..."...}g..Remote setti
+- #1 @94775816 te settings: Settings validation failed - no fields could be salvaged..."...}g..Remote settings: Payload contains .......ov. invalid entries; applying the salvaged subset..	...
+- #2 @94775960 plying the salvaged subset..	...q.%.skipRetry.......)5..salvagedSettingsX...P.#.Remote settings: Cache was reset (login/logout) during this fetch; discarding its result.....0 .
+- #3 @94776508 dialog_shown........dialog_unavailable..........claimForStandaloneRender....0.+.Remote settings: Consent records unreadable - .......^..Remote settings: Consent records file ex
+- #4 @94776564 StandaloneRender....0.+.Remote settings: Consent records unreadable - .......^..Remote settings: Consent records file exceeds ..!...	... bytes; treating it as unreadable.......
+- #5 @94776780 .e..Cannot destructure property 'records' from null or undefined value..)...'...Remote settings: Consent records file is ........X..from a newer version.....sX.; not overwritin
+- #6 @94776888 ords file is ........X..from a newer version.....sX.; not overwriting it0...N...Remote settings: Failed to record org consent - ....-=5.mocked fetch failure........mock JSON pa
+- #7 @94777112 consentIdentity.....y...No authentication available.	.......x-api-key...L....a..Remote settings: Login identity changed mid-fetch; not recording org consent........Remote setti
+- #8 @94777196 te settings: Login identity changed mid-fetch; not recording org consent........Remote settings: Retry .....9..singleAttempt...+...L...Authentication required for remote setti
+- #9 @94777564  .m.a.n.a.g.e.d.-.s.e.t.t.i.n.g.s. .f.e.t.c.h. .(.k.n.o.w.n. .g.a.p.)...,...d-..Remote settings: Using cached settings (304)$...^...Remote settings: No settings found (+....F..
+- #10 @94777616 n.o.w.n. .g.a.p.)...,...d-..Remote settings: Using cached settings (304)$...^...Remote settings: No settings found (+....F..Remote settings: Invalid response format - ......k..
+- #11 @94777660  Using cached settings (304)$...^...Remote settings: No settings found (+....F..Remote settings: Invalid response format - ......k..Invalid remote settings format......f.@.Inva
+- … +87 more
+
+## #4 Remote managed settings  needle="Remote managed settings"  hits=4
+- #0 @92245071 ...l.initialize1PEventLogging....|.9.onGrowthBookRefresh.E.......[3P telemetry] Remote managed settings loaded, initializing telemetry.......y...B:/~BUN/root/chunk-vny8kypt.js..Y...g.
+- #1 @93411412 tures are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)
+- #2 @191447148  managed settings before telemetry init"),wX().then(async()=>{n("[3P telemetry] Remote managed settings loaded, initializing telemetry"),jT();let{captureAdmin3PSteeringSnapshot:e}=awa
+- #3 @201568440 ailure.errorKind,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 u
+
+## #4 server-managed settings  needle="server-managed settings"  hits=1
+- #0 @189791827 h` failing with "Raw mode is not supported" for some Team/Enterprise users with server-managed settings\n- Fixed sessions that ended in plan mode resuming outside plan mode in the VS 
+
+## #4 Server-managed  needle="Server-managed"  hits=0
+
+## #4 why they weren  needle="why they weren"  hits=0
+
+## #4 Bedrock/Vertex  needle="Bedrock/Vertex"  hits=8
+- #0 @94513413 bled...(....M..file:///B:/%7EBUN/root/chunk-njb53wfm.js5.......not available on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL.
+- #1 @99627761  apiKeyHelper via --settings (OAuth and keychain are never read). 3P providers (Bedrock/Vertex/Foundry) use their own credentials. Skills still resolve via /skill-name. Expli
+- #2 @183381335 blement variable for machines that cannot receive the per-organization rollout (Bedrock/Vertex/Foundry, LLM gateways, telemetry-disabled clients, CI runners): `CLAUDE_CODE_WA
+- #3 @190990930 er is NOT a skip reason: auto mode is provider-supported on every provider, 3P (Bedrock/Vertex/Foundry) included. Per-model availability (not every model supports auto mode; 
+- #4 @191577870  apiKeyHelper via --settings (OAuth and keychain are never read). 3P providers (Bedrock/Vertex/Foundry) use their own credentials. Skills still resolve via /skill-name. Expli
+- #5 @199434863 id 0}function r(e){switch(e){case"third_party_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base_url":return"not available with a custom
+- #6 @211735957 aude update` and a fresh session. Clients that cannot fetch server-side flags - Bedrock/Vertex/Foundry, LLM gateways / custom `ANTHROPIC_BASE_URL`, or any client with `DISABL
+- #7 @211741907 ivately (`Published: <url>`); `--no-publish` keeps it local; never available on Bedrock/Vertex/Foundry or API-key auth. Exit codes: 0 all cases >= threshold (default **1.0**)
+
+## #4 settings fail to load  needle="settings fail to load"  hits=0
+
+## #4 settings failed to load  needle="settings failed to load"  hits=5
+- #0 @93411427 icted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . usi
+- #1 @98913556 :/..loadErrors..........adminLoadErrors......}.adminSurvivor...S....1..Managed settings failed to load; policies from the failed source are NOT in effect:.W.......Managed settings co
+- #2 @179511345 );if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain 
+- #3 @189842320 r leaving an unresponsive terminal after "Press Enter to continue" when managed settings failed to load; the reason is now shown\n- Fixed voice mode on native builds getting stuck on 
+- #4 @201568455 d,i.failure.httpStatus);return r(Gp,{status:"warning",children:["Remote managed settings failed to load (",l,")",i.state==="stale_cache"?i.transportEnvWithheld?" \xB7 using cached pol
+
+## #4 load failure  needle="load failure"  hits=4
+- #0 @94443791 parately.
+.....m.^[a-zA-Z]:..8........ The runtime loader will report this as a load failure.(....	..file:///B:/%7EBUN/root/chunk-gnqf3jk9.js
+...-..claude-cli.......]E.^[\
+- #1 @97556268 cmd_load_slash_tool_skills_failed...0.....0.Returning empty skills array due to load failure(.....-.Not marking a symlinked plugin version: ........Failed to write .orphane
+- #2 @186786081 ad","cmd_load_slash_tool_skills_failed"),n("Returning empty skills array due to load failure"),[]}}var ELt=new Set([WAe,fPe,LAe,YAe,TAe,qAe,vAe,SAe,kAe,bAe,$Ae,BAe,hPe,zAe,
+- #3 @203873777 : ${f}${R&&R!=="ENOENT"?` (${R})`:""}. The runtime loader will report this as a load failure.`});return}};if(o.commands){if(typeof o.commands==="string")await w(o.commands,
+
+## #4 Managed settings  needle="Managed settings"  hits=21
+- #0 @92407236 al for a review artifact(.......A sandboxed command needs network access3.....b.Managed settings need your review before they apply..... ...Teammate setup needs your input.....
+- #1 @93349832 mmand.......}-y.Yes, I trust these settings....."N,.No, exit Claude Code!.......Managed settings require approval.......$...commandRows.....	...envRows.........categoryRows
+...
+- #2 @93551512 (...	....P5., merged).......|...Setting sources.....t...Skipped sources.......`.Managed settings (remote)...........HKLMB...s:..Cannot destructure property 'hasBase' from null 
+- #3 @94508032 anager........%.Auto-update channel: .......Z...Last update attempt: .........O.Managed settings (remote): .L.......M.a.n.a.g.e.d. .s.e.t.t.i.n.g.s. .(.r.e.m.o.t.e.).:. .c.h.e.
+- #4 @94915964 t...........Your organization's default (........^..) applies on restart......$.Managed settings....Ti). pins .......`W. ..  .t.h.a.t. .a.p.p.l.i.e.s. .o.n. .r.e.s.t.a.r.t.....
+- #5 @98913548 ed..
+...:/..loadErrors..........adminLoadErrors......}.adminSurvivor...S....1..Managed settings failed to load; policies from the failed source are NOT in effect:.W.......Mana
+- #6 @98913640 ings failed to load; policies from the failed source are NOT in effect:.W.......Managed settings contain invalid entries (remaining valid policies are still enforced):.(.....!.
+- #7 @98925100 t to one of the values above.... ...B.l.managed-settings.d read failed: 6...m.+.Managed settings drop-in directory could not be read: ..........folderListingForPolicyWalk......
+- #8 @99950552  .a.r.e. .t.h.e. .s.a.m.e. .s.e.t.t.i.n.g. ..  .k.e.e.p. .o.n.l.y. .".........l.Managed settings file .......o{.: expected a JSON object, got ........7.x-stainless-	.......appl
+- #9 @179439207 -settings.d read failed: ${d}`,{level:"error"}),r.push({file:c,path:"",message:`Managed settings drop-in directory could not be read: ${u??"unknown error"}`,severity:"fatal"})}
+- #10 @179511337 et e=UW();if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed se
+- #11 @179511423 d settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain invalid entries (remaining valid policies are still enforced):",o=e.map
+- … +9 more
+
+## #4 win custom ANTHROPIC_BASE_URL#0 @94513481
+       ..(.......file:///B:/%7EBUN/root/chunk-q41r7ccn.js....B...exitOnCtrlC.....r...isScreenReaderEnabled...(....M..file:///B:/%7EBUN/root/chunk-njb53wfm.js5.......not available on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL..#...w...not available in sandboxed sessions.8....#..gateway auth is unpinned; run `claude auth login` to pin+...~...requires an Enterprise or Team subscription.,....-..no usable credentials for the settings fetch.....;..third_party_provider........unsupported_subscription....@'..no_auth.......A.sandboxed_entrypoint........unpinned_gateway....U.*.custom_base_url.....<.M.no credentials available....y...authentication reje
+
+## #4 win custom ANTHROPIC_BASE_URL#1 @98880399
+ then retry....f...2...Couldn't verify your organization's policy for artifacts. Check your network connection and try again.......7&..Artifacts can't check the organization settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry.J...g.u.Artifacts need a claude.ai login, and this session is authenticating with ..3....rR., which takes precedence over a claude.ai account. .?.....C. Then run /login and select "Claude account with subscription"..$....r..^https://(?:[a-z0-9-]+\.)?claude\.ai3...<...^https://(?:preview\.)?claude-ai\.staging\.ant\.dev.
+.......^https://(..7...D.	.)\.frame\
+
+## #4 win custom ANTHROPIC_BASE_URL#2 @179856630
+ouldn't verify your organization's policy for artifacts. Check your network connection and try again.";case"policy_unavailable":return"Artifacts can't check the organization settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry."}}function T8e(e,t){return`Artifacts need a claude.ai login, and this session is authenticating with ${e}, which takes precedence over a claude.ai account. ${t} Then run /login and select "Claude account with subscription".`}class Ke extends Error{reasonCode;constructor(e,t){super(e);this.name="ArtifactInputError",this.reasonCode=t}}var d="[0-9a-f]{8}-[0
+
+## #4 fn-before custom ANTHROPIC_BASE_URL#2 @179855668
+len=1058 sha=66a6f318faba0eb9
+function Cjt(e){switch(e){case"org_policy_unverifiable":return"Artifacts can't check the signed-in Claude account's organization settings from this session: the account belongs to a Claude organization (Team or Enterprise), and this session's API access uses a different credential that can't read those settings. Run /login with a personal Claude account (Pro or Max), then retry.";case"plan_unreadable":return"The signed-in Claude account's plan couldn't be read from this session. Run /login again to refresh the signed-in account, then retry.";case"org_denied":return"Artifacts are disabled by your organization's policy. Contact your organization admin to enable them, then retry.";case"cache_miss":return"Couldn't verify your organization's policy for artifacts. Check your network connection and try again.";case"policy_unavailable":return"Artifacts can't check the organization settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry."}}
+
+## #4 win custom ANTHROPIC_BASE_URL#3 @199434951
+n{state:"ineligible",reason:t}}return}function oIn(){return KMe()===!0&&YMe()===void 0}function r(e){switch(e){case"third_party_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base_url":return"not available with a custom ANTHROPIC_BASE_URL";case"sandboxed_entrypoint":return"not available in sandboxed sessions";case"unpinned_gateway":return"gateway auth is unpinned; run `claude auth login` to pin";case"unsupported_subscription":return"requires an Enterprise or Team subscription";case"no_auth":return"no usable credentials for the settings fetch"}}function WTt(e,t){switch(e){case"no_auth_available":return"no credentials available";case"http_401":return"authen
+
+## #4 fn-before custom ANTHROPIC_BASE_URL#3 @199434788
+len=500 sha=b42d89d013ed4143
+function r(e){switch(e){case"third_party_provider":return"not available on Bedrock/Vertex/third-party providers";case"custom_base_url":return"not available with a custom ANTHROPIC_BASE_URL";case"sandboxed_entrypoint":return"not available in sandboxed sessions";case"unpinned_gateway":return"gateway auth is unpinned; run `claude auth login` to pin";case"unsupported_subscription":return"requires an Enterprise or Team subscription";case"no_auth":return"no usable credentials for the settings fetch"}}
+
+## #4 win third-party provider#0 @93403106
+i...opusProMigrationTimestamp........U..is3P...Bz..policyBlocked...	.......unmatched........@..allowedChannelPlugins...C....iN.Cannot destructure property 'channels' from null or undefined value.........Channels3....u..Channels are not available on third-party providers......... blocked by org policy ().......Inbound messages will be silently dropped...M.....Q.Have an administrator set channelsEnabled: true in managed settings to enable...&.......Channels (experimental) messages from ..3.....e. inject directly in this session . restart without .'...B7~.no MCP server configured with that name.<.......server: entries need --dangerously-load-development-channels.....N..plugin not installed(...
+
+## #4 win third-party provider#1 @93533749
+.averageMs...	.......longestMs........T..lastWeekSessions....o...minutes......t..Claude Code on the web........s.GitHub connected)...c...Not set up . /web-setup to connect GitHub........-..gap-....0w../rename to add a name...&.......not available on third-party providers......&z..not currently available.........blocked by org policy........R3.Configured but not active (.........Listening for messages from ....l...Version......h..Session name
+...1<U.Session ID..........Session kind....%sy.background job . unattended.....C...background job . attached.........n.tmux session.....C..Peer address....>...uds:....CX..u.n.a.v.a.i.l.a.b.l.e. ..  .......D. (details in the --debug log).........e.Memory.
+
+## #4 win third-party provider#2 @94513428
+       ...*...Q...      *                                   ..(.......file:///B:/%7EBUN/root/chunk-q41r7ccn.js....B...exitOnCtrlC.....r...isScreenReaderEnabled...(....M..file:///B:/%7EBUN/root/chunk-njb53wfm.js5.......not available on Bedrock/Vertex/third-party providers.......h...not available with a custom ANTHROPIC_BASE_URL..#...w...not available in sandboxed sessions.8....#..gateway auth is unpinned; run `claude auth login` to pin+...~...requires an Enterprise or Team subscription.,....-..no usable credentials for the settings fetch.....;..third_party_provider........unsupported_subscription....@'..no_auth.......A.sandboxed_entrypoint........unpinned_gateway....U.*.custom_base_url.....<.
+
+## #4 win third-party provider#3 @94749589
+_note....4...github_login....$b>./v1/ultrareview/preflight...i....K..Ultrareview runs in Claude Code on the web and is unavailable when essential-traffic-only mode is active....W.....B.Ultrareview runs in Claude Code on the web and is unavailable on third-party providers..E...;6L.Ultrareview requires a Claude.ai account. Run /login to authenticate....+...:F..fetchUltrareviewPreflight schema mismatch: .........api_ultrareview_preflight.......?s..schema_mismatch."...."..fetchUltrareviewPreflight failed: ..).....}.CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE...'...F...tengu_review_remote_precondition_failed.......b.not_git_repoL....d.. needs a git repository so it can clone your code into a cloud 
+
+## #4 win settings failed to load#0 @93411427
+-session messaging is off:.(...!8..its socket directory could not be set up-...Ae,.run with --debug-file <path> for the full log...$...b...HIPAA . some features are restricted......!. . /status for details........8.stale_cache.(...z...Remote managed settings failed to load (7....H
+. . using cached policy (proxy/CA/provider env withheld)......... . using cached policy......Ga.. . no remote policy applied.........transportEnvWithheld
+....`.learn more........u.Debug mode enabled . logging to.........CLAUDE_CODE_TMUX_SESSION.....q..tmux session: .......s. . detach with..%.....O. d (press prefix twice - Claude uses ...!.......CLAUDE_CODE_TMUX_PREFIX_CONFLICTS........'..CLAUDE_CODE_TMUX_PREFIX..
+
+## #4 win settings failed to load#1 @98913556
+EnvComposition........loadSettingsFromDisk_start.......z..loadSettingsFromDisk_end........mergedSettings......%ky.primedFolderListing......`A.adminRetentionGoverned..
+...:/..loadErrors..........adminLoadErrors......}.adminSurvivor...S....1..Managed settings failed to load; policies from the failed source are NOT in effect:.W.......Managed settings contain invalid entries (remaining valid policies are still enforced):.(.....!.tengu_managed_settings_validation_errors....g.F.remote_error_count..6.....+.updateSettingsForSource: written settings not seeded: ..$...oy..tengu_plugin_settings_premature_read....02..pluginBaseLoaded!....Q..skipDangerousModePermissionPrompt.......}y
+.skipWorkflowUsageW
+
+## #4 win settings failed to load#2 @179511345
+t r=(p)=>p!=null&&BI(p),o=H(),d=wY(o).composes==="tier"||r(ZV(o).settings)||r(JB().settings)||r($yt().settings);return e.policy.adminSurvivor=d,d}function qgn(){let e=UW();if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain invalid entries (remaining valid policies are still enforced):",o=e.map((u)=>`  ${u.file??"managed settings"}${u.path?` (${u.path})`:""}: ${u.message}`);process.stderr.write(`${r}
+${o.join(`
+`)}
+`),s("tengu_managed_settings_validation_errors",{error_count:e.length,remote_error_count:J(e,(u)=>u.file==="remote managed settings"),fatal:t})}function
+
+## #4 fn-before settings failed to load#2 @179511241
+len=546 sha=31f356edf9841e1f
+function qgn(){let e=UW();if(e.length===0)return;let t=e.some((u)=>u.severity!=="warning"),r=t?"Managed settings failed to load; policies from the failed source are NOT in effect:":"Managed settings contain invalid entries (remaining valid policies are still enforced):",o=e.map((u)=>`  ${u.file??"managed settings"}${u.path?` (${u.path})`:""}: ${u.message}`);process.stderr.write(`${r}
+${o.join(`
+`)}
+`),s("tengu_managed_settings_validation_errors",{error_count:e.length,remote_error_count:J(e,(u)=>u.file==="remote managed settings"),fatal:t})}
+
+## #4 win settings failed to load#3 @189842320
+laude.ai or the app now starts a replacement instead of failing with a message about your login (regressed in v2.1.227)\n- Fixed Cloud gateway `/login` exiting silently or leaving an unresponsive terminal after "Press Enter to continue" when managed settings failed to load; the reason is now shown\n- Fixed voice mode on native builds getting stuck on "listening\u2026" when the voice service rejected the connection; the rejection is now shown immediately\n- Fixed mTLS client certificate rotation requiring a restart; Claude Code now reloads the rotated cert and key automatically on connection errors\n- Fixed malformed AWS or Vertex region values being used to build request URLs; they now fall 
+
+## #4 win server-managed settings#0 @189791827
+aved history contains tool blocks the Anthropic API does not accept (typically written by a third-party API proxy)\n- Fixed `curl -fsSL https://claude.ai/install.sh | bash` failing with "Raw mode is not supported" for some Team/Enterprise users with server-managed settings\n- Fixed sessions that ended in plan mode resuming outside plan mode in the VS Code extension, and in `claude -p --continue`/`--resume` with a permission prompt tool, when no permission mode was set\n- Fixed the `Notification` hook not firing while the sandbox "Network request outside of sandbox" permission prompt is waiting\n- Fixed Bash permission checks to always require approval for malformed commands with a dangling `

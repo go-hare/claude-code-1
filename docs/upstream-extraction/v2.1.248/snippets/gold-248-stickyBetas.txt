@@ -1,0 +1,76 @@
+# gold-248-stickyBetas
+when=2026-09-21
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+bytes=226708128
+
+## VERDICT: LAND (already) + gold
+
+Official primary store = n().conversationLatches (class oe), not qe/requestLatches
+(midConv only). Leftover STATE.stickyBetas dual-write already cut; wrappers on bag.
+
+Official also has g()?.stickyBetas injection sidecar (C/Qwr parent without .session).
+Default C=()=>{return} both sides → bag-only path. Invent-ban restoring STATE or
+inventing g() wiring. GRe leftover name ≠ SEA sticky reset (SEA GRe = unrelated;
+session clear sticky = Pvt / unlatchStickyBetas).
+
+## Offsets
+
+| symbol | offset | role |
+| --- | --- | --- |
+| k4 | 178509700 | `{sent:new Set,rejected:new Set}` factory |
+| L_ | 178509752 | clone sticky bag |
+| s7 | 178509825 | stickySend |
+| $ne | 178509866 | isStickyBetaSentActive |
+| Kk | 178509937 | stickyReject |
+| AE | 178509989 | isStickyBetaRejected |
+| oe | 178510113 | ConversationLatches |
+| g | 178548647 | parent residual accessor |
+| Yd | 178582915 | getStickyBetas |
+| Pvt | 178583191 | clearBetaHeaderLatches |
+| Yd as getStickyBetas | 192780104 | export |
+| Pvt as clearBetaHeaderLatches | 192774639 | export |
+
+## Bodies
+
+### k4 + helpers @178509700
+```
+function k4(){return{sent:new Set,rejected:new Set}}function L_(e){return{sent:new Set(e.sent),rejected:new Set(e.rejected)}}function s7(e,t){if(!e.rejected.has(t))e.sent.add(t)}function $ne(e,t){return e.sent.has(t)&&!e.rejected.has(t)}function Kk(e,t){e.sent.delete(t),e.rejected.add(t)}function AE(e,t){return e.rejected.has(t)}
+```
+
+### oe @178510113
+```
+class oe{#e=k4();#t=new Map;#n=void 0;stickyBetas(){return this.#e}unlatchStickyBetas(){this.#e=k4()}perTurnEffortPins(){return this.#t}atisLatch(){return this.#n}replaceAtisLatch(e){this.#n=e}reset(){this.#e=k4(),this.#t=new Map,this.#n=void 0}}
+```
+
+### g @178548647
+```
+function g(){let e=C();return e?.session?void 0:e}var C=()=>{return};function Qwr(e){C=e}
+```
+
+### Yd @178582915
+```
+function Yd(){return g()?.stickyBetas??n().conversationLatches.stickyBetas()}
+```
+
+### Pvt @178583191
+```
+function Pvt(){let e=g();if(e)e.stickyBetas=k4();else n().conversationLatches.unlatchStickyBetas();e?.perTurnEffortPins.clear()}
+```
+Pvt does NOT null afk/fast/cacheEditing; does NOT reset requestLatches/midConv.
+
+## Leftover map
+
+| leftover | official | action |
+| --- | --- | --- |
+| ConversationLatches | oe | HAVE |
+| getStickyBetas | Yd bag arm | HAVE |
+| resetStickyBetas / clear→unlatch | Pvt else-arm | HAVE |
+| stickySend/Reject/isSticky* | s7/Kk/$ne/AE | HAVE |
+| STATE.stickyBetas | g() sidecar only | LAND cut (done) |
+| clearBetaHeaderLatches extras | SEA absent | KEEP header nulls + requestLatches.reset |
+
+## peels
+- this file
+- gold-248-stickyBetas-parent.txt
+- gold-248-n-root.txt / gold-248-be-mgt.txt
+- gold-248-state-residual-verdict.txt

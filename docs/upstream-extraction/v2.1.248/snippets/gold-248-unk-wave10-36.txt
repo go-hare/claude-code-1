@@ -1,0 +1,38 @@
+# gold-248-unk-wave10-36  densable 2.1.248 #36
+# mention-ime — leftover dr already official; 247 callers ≡
+# SEA 226708128 · 247 present
+# stay UNKNOWN. do not leftover-as-HAVE.
+
+extracted? no unique 248 @mention IME fold
+landed? no
+stay UNKNOWN? YES
+
+## leftover-same body
+dr @180525410 sha=cdbd73e6c8d8fd63
+function dr(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}
+fold-body 248=@180525433 247=@208638048 (247 name Dr)
+leftover normalizeSessionNameKey / peerAtMention already calls it.
+
+## callers 247 ≡
+248 Ejn @186136100 sha=6df1bd33805752be  p=dr(u.name); !p.startsWith(t)
+247 dcu @218150944 sha=a339773a922c0a19  s=Dr(o.name); !s.startsWith(t)
+Ejn call @202924708 Ejn(gn.current.roster,Bn) — Bn not dr()-folded
+no Ejn(e,dr( 248=0
+
+248 NDn @186136403
+(?:^|[\s\u3002\u3001\uFF1F\uFF01])@(?:"([^"\n]{1,${lkt}})"|([\w-]{1,${akt}})...)
+247 GLs @218152701 same [\w-] bare (not \p{L})
+leftover PEER_AT_MENTION_RE 1:1 (literal 。、？！)
+
+248 ckt @186135342 = leftover isValidPeerMentionName (dr + [\w-] cap)
+248 pkt @186136311 parse uses dr — 247 vzr uses Dr
+
+## not unique
+non-Latin @189782108 old kitty changelog (247=0 string, not IME)
+isComposing 248=11 247=11
+Hangul 248=21 247=21
+NFKC 248=23 247=22 extra = Hjn memory / lFe MCP / dar agent (not mention)
+toLocaleLowerCase 248=5 247=5
+IME/jamo/compositionend mention  no unique 248 body
+
+no unique 248 mention IME caller. leftover already has official fold. stay UNKNOWN.

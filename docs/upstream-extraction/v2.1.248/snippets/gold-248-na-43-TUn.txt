@@ -1,0 +1,6 @@
+# gold-248-na-43-TUn  github_access_precheck_enabled
+exe=C:/Users/Administrator/AppData/Local/Temp/official-248/package/claude.exe
+start=184607964
+
+len=65 sha=62f3187a3c12f104
+function TUn(){return dse()?.github_access_precheck_enabled!==!1}

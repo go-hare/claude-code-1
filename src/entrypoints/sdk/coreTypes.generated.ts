@@ -157,6 +157,12 @@ export type HookInput =
       source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork'
       agent_type?: string
       model?: string
+      /** densable 2.1.251 SessionStart schema */
+      session_title?: string
+      seconds_since_last_response?: number
+      context_tokens?: number
+      prompt_cache_likely_expired?: boolean
+      estimated_cache_write_usd?: number
     })
   | (HookInputBase & {
       hook_event_name: 'SessionEnd'
@@ -205,6 +211,30 @@ export type HookInput =
       hook_event_name: 'PostCompact'
       trigger: 'manual' | 'auto'
       compact_summary: string
+    })
+  | (HookInputBase & {
+      hook_event_name: 'PreModelSwitch'
+      from_model: string
+      to_model: string
+      requested_model: string | null
+      source: string
+      context_tokens: number
+      prompt_cache_warm: boolean
+      cache_ttl: '5m' | '1h'
+      estimated_cache_write_usd: number
+      pricing: 'configured' | 'catalog' | 'default'
+    })
+  | (HookInputBase & {
+      hook_event_name: 'PostModelSwitch'
+      from_model: string
+      to_model: string
+      requested_model: string | null
+      source: string
+      context_tokens: number
+      prompt_cache_warm: boolean
+      cache_ttl: '5m' | '1h'
+      estimated_cache_write_usd: number
+      pricing: 'configured' | 'catalog' | 'default'
     })
   | (HookInputBase & {
       hook_event_name: 'TeammateIdle'
@@ -375,7 +405,19 @@ export type PermissionRequestHookInput = HookInput & { tool_name: string }
 export type PermissionDeniedHookInput = HookInput
 export type NotificationHookInput = HookInput & { message: string }
 export type UserPromptSubmitHookInput = HookInput & { prompt: string }
-export type SessionStartHookInput = HookInput
+export type SessionStartHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'SessionStart' }
+>
+/** densable 2.1.251 jw — model-switch hook input */
+export type PreModelSwitchHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'PreModelSwitch' }
+>
+export type PostModelSwitchHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'PostModelSwitch' }
+>
 export type SessionEndHookInput = HookInput & { exit_reason: string }
 export type SetupHookInput = HookInput
 export type StopHookInput = HookInput

@@ -123,34 +123,37 @@ export function setFeedbackDraftsSetting(
   return result
 }
 
-/** densable leftover Ps */
-export function getFeedbackCommandAvailability(): FeedbackCommandAvailability {
+export type FeedbackCommandName = '/feedback' | '/bug' | '/share'
+
+/**
+ * densable `TG` — the disabled sentence names the command that was invoked.
+ * Default `/feedback` matches `TG()` with no argument.
+ */
+export function getFeedbackCommandDisabledReason(
+  command: FeedbackCommandName = '/feedback',
+): string | null {
   if (isEnvTruthy(process.env.DISABLE_FEEDBACK_COMMAND)) {
-    return {
-      kind: 'disabled',
-      reason:
-        '/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable',
-    }
+    return `${command} has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable`
   }
   if (isEnvTruthy(process.env.DISABLE_BUG_COMMAND)) {
-    return {
-      kind: 'disabled',
-      reason:
-        '/feedback has been disabled via the DISABLE_BUG_COMMAND environment variable',
-    }
+    return `${command} has been disabled via the DISABLE_BUG_COMMAND environment variable`
   }
   if (isEssentialTrafficOnly()) {
-    return {
-      kind: 'disabled',
-      reason:
-        '/feedback has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable',
-    }
+    return `${command} has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable`
   }
   if (!isPolicyAllowed('allow_product_feedback')) {
-    return {
-      kind: 'disabled',
-      reason: "/feedback has been disabled by your organization's policy",
-    }
+    return `${command} has been disabled by your organization's policy`
+  }
+  return null
+}
+
+/** densable leftover Ps */
+export function getFeedbackCommandAvailability(
+  command: FeedbackCommandName = '/feedback',
+): FeedbackCommandAvailability {
+  const disabled = getFeedbackCommandDisabledReason(command)
+  if (disabled !== null) {
+    return { kind: 'disabled', reason: disabled }
   }
   const provider = getAPIProvider()
   if (provider !== 'firstParty') {

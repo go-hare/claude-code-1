@@ -747,7 +747,10 @@ export function formatTeammateMessages(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { wrapPeerOriginText } =
     require('./messages.js') as typeof import('./messages.js')
-  return wrapPeerOriginText(body, { midTurn: false })
+  return wrapPeerOriginText(body, {
+    midTurn: false,
+    lineage: 'descendant',
+  })
 }
 
 /**
@@ -761,30 +764,141 @@ export type IdleNotificationMessage = {
   idleReason?: 'available' | 'interrupted' | 'failed'
   /** Brief summary of the last DM sent this turn (if any) */
   summary?: string
+  /** Final assistant text from the turn that just ended. densable `IMe` `result`. */
+  result?: string
   completedTaskId?: string
   completedStatus?: 'resolved' | 'blocked' | 'failed'
   failureReason?: string
 }
 
+/** densable `RP` — UTF-16 unit cap used by `lyr` → `ce(s, RP)`. */
+export const IDLE_RESULT_CHAR_CAP = 4000
+
 /**
- * Creates an idle notification message to send to the team leader
+ * densable `lt` / `pt`.
+ * `pt = new RegExp(lt.source, "gu")`. Keeps ZWNJ/ZWJ/VS (those go to `yt`).
+ */
+const IDLE_RESULT_INVISIBLE_UNIT =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: official lt @181667150
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: official lt keeps ZWNJ/ZWJ/VS for yt
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029]|(?![\u200C\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}])[\p{Cf}\p{Default_Ignorable_Code_Point}]/u
+const IDLE_RESULT_INVISIBLE = new RegExp(
+  IDLE_RESULT_INVISIBLE_UNIT.source,
+  'gu',
+)
+
+/** densable `Z` — joiners / variation selectors budgeted by `yt`. */
+const IDLE_RESULT_JOINER_OR_VS =
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: official Z @181667305 includes ZWJ
+  /[\u200C\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu
+
+/** densable `ct` / `mt` / `ft` / `gt` */
+const IDLE_RESULT_JOINER_LINE_CAP = 8
+const IDLE_RESULT_JOINER_PER = 7
+const IDLE_RESULT_JOINER_MIN = 16
+const IDLE_RESULT_JOINER_DIV = 4
+
+/** densable `f` — UTF-16le round-trip after a mid-pair slice. */
+function roundtripIdleResultUtf16(text: string): string {
+  return Buffer.from(text, 'utf16le').toString('utf16le')
+}
+
+/**
+ * densable `yt`.
+ * Caps ZWNJ/ZWJ/VS: global `max(16, ceil(other/4))`, per line
+ * `max(8, ceil(other/7))`.
+ */
+function capIdleResultJoiners(text: string): string {
+  const joinerCount = (text.match(IDLE_RESULT_JOINER_OR_VS) ?? []).length
+  const otherCount = [...text].length - joinerCount
+  let budget = Math.max(
+    IDLE_RESULT_JOINER_MIN,
+    Math.ceil(otherCount / IDLE_RESULT_JOINER_DIV),
+  )
+  return text
+    .split('\n')
+    .map(line => {
+      const lineJoiners = (line.match(IDLE_RESULT_JOINER_OR_VS) ?? []).length
+      const lineOther = [...line].length - lineJoiners
+      const lineCap = Math.max(
+        IDLE_RESULT_JOINER_LINE_CAP,
+        Math.ceil(lineOther / IDLE_RESULT_JOINER_PER),
+      )
+      let kept = 0
+      return line.replace(IDLE_RESULT_JOINER_OR_VS, joiner =>
+        kept++ < lineCap && budget-- > 0 ? joiner : '',
+      )
+    })
+    .join('\n')
+}
+
+/** densable `xP` */
+export function sanitizeIdleResultText(text: string): string {
+  return capIdleResultJoiners(text.replace(IDLE_RESULT_INVISIBLE, ''))
+}
+
+/** densable `$e` */
+export function trimSanitizeIdleResult(text: string): string {
+  return sanitizeIdleResultText(text.trim())
+}
+
+/** densable `ce` */
+export function sliceIdleResultUtf16(text: string, max: number): string {
+  if (max <= 0) return ''
+  if (text.length <= max) return text
+  const sliced = text.slice(0, max)
+  const last = sliced.charCodeAt(max - 1)
+  return roundtripIdleResultUtf16(
+    last >= 55296 && last <= 56319 ? sliced.slice(0, -1) : sliced,
+  )
+}
+
+/**
+ * densable `lyr`. Empty after `$e` is `""` (IMe then `|| void 0`).
+ * `senderReachable` default matches `lyr(e, t=!0)`.
+ */
+export function formatIdleNotificationResult(
+  result: string | undefined,
+  senderReachable = true,
+): string {
+  const sanitized = result ? trimSanitizeIdleResult(result) : ''
+  if (!sanitized) return ''
+  const sliced = sliceIdleResultUtf16(sanitized, IDLE_RESULT_CHAR_CAP)
+  if (sliced.length >= sanitized.length) return sliced
+  const visible = sanitizeIdleResultText(sliced)
+  return senderReachable
+    ? `${visible}\n[result truncated \u2014 ask the agent for the rest via ${SEND_MESSAGE_TOOL_NAME}]`
+    : `${visible}\n[result truncated]`
+}
+
+/**
+ * Creates an idle notification message to send to the team leader.
+ * densable `IMe`: `result` is `lyr(...) || void 0`.
  */
 export function createIdleNotification(
   agentId: string,
   options?: {
     idleReason?: IdleNotificationMessage['idleReason']
     summary?: string
+    result?: string
     completedTaskId?: string
     completedStatus?: 'resolved' | 'blocked' | 'failed'
     failureReason?: string
+    /** densable `IMe` `senderReachable`; not a mailbox field. */
+    senderReachable?: boolean
   },
 ): IdleNotificationMessage {
+  const senderReachable =
+    options?.senderReachable ?? options?.idleReason !== 'failed'
+  const result =
+    formatIdleNotificationResult(options?.result, senderReachable) || undefined
   return {
     type: 'idle_notification',
     from: agentId,
     timestamp: new Date().toISOString(),
     idleReason: options?.idleReason,
     summary: options?.summary,
+    result,
     completedTaskId: options?.completedTaskId,
     completedStatus: options?.completedStatus,
     failureReason: options?.failureReason,
@@ -1512,6 +1626,42 @@ export async function markMessagesAsReadByPredicate(
       }
     }
   }
+}
+
+/**
+ * densable `aye` result half of `IMe` — last non-error assistant text on the
+ * turn. Empty text is omitted (`lyr(...) || void 0`).
+ */
+export function extractIdleNotificationResult(
+  messages: readonly Message[],
+): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg || msg.type !== 'assistant') continue
+    if ('isApiErrorMessage' in msg && msg.isApiErrorMessage) continue
+    const text = assistantVisibleText(msg.message?.content).trim()
+    if (text.length > 0) return text
+  }
+  return undefined
+}
+
+function assistantVisibleText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      'type' in block &&
+      (block as { type?: unknown }).type === 'text' &&
+      'text' in block &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      parts.push((block as { text: string }).text)
+    }
+  }
+  return parts.join('')
 }
 
 /**

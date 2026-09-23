@@ -1,0 +1,62 @@
+
+## needle "Cannot /update" hits=1
+@192085419
+
+## needle "tengu_update_refused" hits=6
+@192084837 @192085331 @192085752 @192086278 @192086880 @192087524
+
+## needle "Mhr=async" hits=1
+@192084760
+
+## needle "async function le(o,s,i){if(wo())return" hits=1
+@205714164
+
+## needle "this session has restrictions a restart" hits=1
+@205714460
+
+## needle "Signed in to Cloud gateway" hits=2
+@205713261 @205713453
+
+## needle "name:\"update\"" hits=1
+@186766171
+
+## needle "type:\"local\",name:\"update\"" hits=1
+@186766158
+
+## needle "name:\"update\",description" hits=0
+
+
+## update-refuse-g @192086231
+{Hb}from"B:/~BUN/root/chunk-g8q6cwap.js";import{ha}from"B:/~BUN/root/chunk-94s3hpj5.js";import{EBt}from"B:/~BUN/root/chunk-0pc8sqbw.js";import{da}from"B:/~BUN/root/chunk-jb9cv298.js";import{o5,wU,i5,Uc,kGe,s5}from"B:/~BUN/root/chunk-ygp7anbg.js";import{Wa}from"B:/~BUN/root/chunk-kkztd933.js";import{Zs,Sc,ja,$1}from"B:/~BUN/root/chunk-4sxpe00h.js";import{nht}from"B:/~BUN/root/chunk-nnjmn7ka.js";import{El}from"B:/~BUN/root/chunk-yntz6yjc.js";import{he,wle}from"B:/~BUN/root/chunk-7tyrfmzg.js";import{Pd,SH}from"B:/~BUN/root/chunk-5svefzwm.js";import{zL,vF,Ket,lR,lUe,gKt}from"B:/~BUN/root/chunk-22293z36.js";import{dxt,fKt,hoe}from"B:/~BUN/root/chunk-f8d55064.js";import{spawn as N}from"child_process";import{realpath as k}from"fs/promises";import{homedir as O}from"os";import{basename as L,join as D}from"path";async function qet(){let d=await wa("claude"),t=El()[0],[i,c]=await Promise.all([d?k(d).catch(()=>d):null,t?k(t).catch(()=>t):null]);if(d&&(c===null||i!==c))return SH({cmd:d,prefixArgs:[],target:d});return Pd()}var Mhr=async(d,t)=>{let i=_t()?a.CLAUDE_JOB_DIR:void 0;if(_t()&&(!RW()||!i)){s("tengu_update_refused",{bg_session:!0});let e=RW()?null:Uc();return{type:"text",value:e?`This is a background session \u2014 press \u2190 to detach, then run \`claude respawn ${e}\` to restart it on the latest build.`:"This is a background session \u2014 press \u2190 to detach, then run `claude respawn <id>` to restart it on the latest build (the id is in the agents view)."}}let c=()=>fKt(t.taskRegistry.all());if(!i){let e=Zs(),r=D(Wa(gKt()),`${V()}.jsonl`);if(e&&e!==r){let u=c();return s("tengu_update_refused",{transcript_path_drift:!0,comment_monitor:u}),{type:"text",value:`Cannot /update \u2014 this session was resumed from a different project directory. Restart manually with --resume to continue on the latest version${u?" (restarting stops the auto-replies to artifact comments)":""}.`}}}let h=(e)=>{let r=hoe(t.taskRegistry.all(),{autoRepliesCarried:i!==void 0&&dxt()});if(r===void 0)return;return s("tengu_update_refused",{active_tasks:r.activeTasks,comment_monitor:r.kind==="comment_monitor",...e&&{deferred:e}}),r.kind==="comment_monitor"?"Can't restart while auto-replying to artifact comments \u2014 restarting would stop the replies. Stop the artifact comment monitor via /tasks (or ask Claude to stop it), then try again.":"Can't restart while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then try again."},g=(e)=>{let r=wU(he(t),GC());if(r.length===0)return h(e);let u=c();s("tengu_update_refused",{uncarriable:!0,comment_monitor:u});let p=Sc()?"":" (add --continue to return to this conversation)";return`Can't switch to the new version from inside this session \u2014 it has restrictions a restart can't carry over (${r.join("; ")}). Nothing was changed; exit and start claude again for the new version${p}.${u?" Exiting also stops the auto-replies to artifact comments until the next publish.":""}`},v=i?h():g();if(v!==void 0)return{type:"text",value:v};if(i){let e=L(i);if(await lR(t.messages,t.storageV5),!await qt(ja(),30000,"session flush").then(()=>!0,()=>!1))return s("tengu_update_refused",{bg_flush_failed:!0}),{type:"text",value:"Couldn't save the session to disk, so nothing was restarted \u2014 try /restart again in a moment."};let u=await qet(),p=h(!0);if(p!==void 0)return{type:"text",value:p};let f={...process.env};for(let o of nht)delete f[o];delete f.CLAUDE_JOB_DIR;for(let o of Object.keys(f))if(o.startsWith("CLAUDE_BG_"))delete f[o];s("tengu_update_bg_respawn",{carried_comment_monitor:dxt()&&fKt(t.taskRegistry.all())});try{let o=N(u.cmd,[...u.prefixArgs,"respawn",e],{detached:!0,stdio:"ignore",windowsHide:!0,env:f,cwd:O()});Hb(o.pid),o.on("error",(P)=>{_(P)}),o.unref()}catch(o){return _(o),s("tengu_update_refused",{bg_spawn_failed:!0}),{type:"text",value:`Couldn't restart automatically \u2014 press \u2190 to detach, then run \`claude respawn ${e}\` to restart it on the latest build.`}}return{type
+
+## restart-le @205714430
+esented ${i}. No gateway credentials were kept. Usually this means the gateway runs several nodes behind one address that serve different certificates (they must all serve the same one), or something on the network path is intercepting TLS.`}function ue(o,s){switch(o.errorKind){case"timeout":return"the request timed out";case"network_error":return"couldn't connect to the gateway";case"http_401":case"http_403":return s?"the gateway did not accept the new credential":"the gateway did not accept this session's credential";case"no_auth_available":return"no credential was on hand for the request";case"http_4xx":case"http_5xx":return o.httpStatus===void 0?"the gateway answered with an unexpected status":`the gateway answered HTTP ${o.httpStatus}`;case"parse_error":case"invalid_settings":return"the gateway's response was not valid managed settings";case"gateway_cert_mismatch":return"the gateway's TLS certificate did not match the one you trusted";case"gateway_pin_refused":return"the credentials file that keeps the gateway's TLS pin is a symlink, which is not followed";case"gateway_pin_unreadable":return"the credentials file that keeps the gateway's TLS pin could not be read (try again)";case"unknown_error":return"something unexpected went wrong (details with --debug)"}}function Q(o,s,i){if(s){let d=ue(s,i);return i?`Signed in to Cloud gateway ${o}, but couldn't load your organization's managed settings (${d})`:`Couldn't reload your organization's managed settings from Cloud gateway ${o} (${d})`}return i?`Signed in to Cloud gateway ${o}`:`Your organization's managed settings on Cloud gateway ${o} changed`}function inr(o,s,i,d=!Sc()){let c=d?"\u2026":" (this conversation is not saved, so it starts fresh)\u2026",m=Q(o,s,i);return s?`${m}. Restarting Claude Code to retry${c}`:`${m}. Restarting Claude Code to apply ${i?"your organization's managed settings":"them"}${c}`}function snr(o,s,i,d,c=!Sc()){return`${Q(o,s,d)}. ${s?"Claude Code has to restart to retry":`Claude Code has to restart to apply ${d?"your organization's managed settings":"them"}`}, and ${i}, so this session is ending instead. Your sign-in is saved: start claude again the same way${c?" (add --continue to return to this conversation)":""}.`}async function le(o,s,i){if(wo())return;let d=(y)=>kn(0,"other",{finalMessage:i(y)});if(await lR(Z1(o),o.storageV5),wo())return;if(_t())return d("a background session cannot restart itself (sign in from a session started directly with `claude`)");let c=he(o),m=wU(c,GC());if(m.length>0)return d(`this session has restrictions a restart can't carry over (${m.join("; ")})`);let h={proactivityLevel:o.getProactivityLevel(),toolPermissionContext:c};try{await _G({freshIfNoTranscript:!0,extraArgs:[...o5(c,wle(o)),...i5(c,AL())],proactivity:h,env:$B(),preSpawn:()=>process.stdout.write(`
+${s}
+`)},o.storageV5)}catch(y){return _(Ee(y)),d(`it could not restart itself (${l(y)})`)}}function Hke(o,s,i,{envTokenWasSet:d=!1,envWarningOnce:c}={}){if(i.gatewayLoginError!==void 0||i.relaunching)return[i.gatewayLoginError];let m=s?anr(o,i):void 0,h=unr({envTokenWasSet:d,gatewayActive:Le()==="gateway",willAutoQuery:m?.shouldQuery===!0});if(h==="out-of-band"&&c&&!c.delivered)c.delivered=!0,o.applyMessageOp({type:"append",messages:[It(Mxn,"notice")]});return[dnr(s,{bridgeDisconnected:i.bridgeDisconnected,includeEnvTokenWarning:h==="inline"}),m]}function anr(o,s){if(s.accountSwitched||s.relaunching)return;let i=cb(o.messages);if(i?.isApiErrorMessage&&i.error==="authentication_failed")return{display:"system",shouldQuery:!0};return}var q="but if that variable is set in your shell profile or a Claude Code settings file, new `claude` sessions will keep using the old token 
+
+## Mhr@192084760
+from"B:/~BUN/root/chunk-f8d55064.js";import{spawn as N}from"child_process";import{realpath as k}from"fs/promises";import{homedir as O}from"os";import{basename as L,join as D}from"path";async function qet(){let d=await wa("claude"),t=El()[0],[i,c]=await Promise.all([d?k(d).catch(()=>d):null,t?k(t).catch(()=>t):null]);if(d&&(c===null||i!==c))return SH({cmd:d,prefixArgs:[],target:d});return Pd()}var Mhr=async(d,t)=>{let i=_t()?a.CLAUDE_JOB_DIR:void 0;if(_t()&&(!RW()||!i)){s("tengu_update_refused",{bg_session:!0});let e=RW()?null:Uc();return{type:"text",value:e?`This is a background session \u2014
+
+## Mhr uses near update 192084760 192089682 193068143 193079540
+
+### Mhr@192084760
+)=>d):null,t?k(t).catch(()=>t):null]);if(d&&(c===null||i!==c))return SH({cmd:d,prefixArgs:[],target:d});return Pd()}var Mhr=async(d,t)=>{let i=_t()?a.CLAUDE_JOB_DIR:void 0;if(_t()&&(!RW()||!i)){s("tengu_update_refused",{bg_session:!0});let e=RW()?null:Uc();return{type:"text",value:e?`This is a backg
+
+### Mhr@192089682
+ Claude Code (detail withheld on this connection).",l(e)):`Couldn't restart Claude Code \u2014 ${l(e)}.`}}};
+export{qet,Mhr};
+ // @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection deci
+
+### Mhr@193068143
+e Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.248
+import{qet,Mhr}from"B:/~BUN/root/chunk-7vfs1stp.js";import"B:/~BUN/root/chunk-f8d55064.js";import"B:/~BUN/root/chunk-rv78qt7w.js";import"B:/~BUN/root/chunk-22293z36.js";import"B:/~BUN/root/ch
+
+### Mhr@193079540
+rt"B:/~BUN/root/chunk-7qev109b.js";import"B:/~BUN/root/chunk-4hkt7f9w.js";import"B:/~BUN/root/chunk-h5e2qvst.js";export{Mhr as call,qet as resolveLauncher};
+ // @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all co

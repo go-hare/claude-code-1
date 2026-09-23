@@ -104,6 +104,7 @@ import {
 } from '../inProcessTeammateHelpers.js'
 import {
   createIdleNotification,
+  extractIdleNotificationResult,
   formatTeammateMessage,
   getLastPeerDmSummary,
   isModeSetRequest,
@@ -606,6 +607,7 @@ async function sendIdleNotification(
   options?: {
     idleReason?: 'available' | 'interrupted' | 'failed'
     summary?: string
+    result?: string
     completedTaskId?: string
     completedStatus?: 'resolved' | 'blocked' | 'failed'
     failureReason?: string
@@ -1547,6 +1549,9 @@ export async function runInProcessTeammate(
           {
             idleReason: workWasAborted ? 'interrupted' : 'available',
             summary: getLastPeerDmSummary(allMessages),
+            result: workWasAborted
+              ? undefined
+              : extractIdleNotificationResult(allMessages),
           },
         )
       } else {
@@ -1785,6 +1790,7 @@ export async function runInProcessTeammate(
         idleReason: 'failed',
         completedStatus: 'failed',
         failureReason: errorMessage,
+        result: extractIdleNotificationResult(allMessages),
       },
     )
 

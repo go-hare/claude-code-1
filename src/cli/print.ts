@@ -191,6 +191,7 @@ import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
 import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 import type { ReplBridgeHandle } from 'src/bridge/replBridge.js'
+import { forwardParentToolUseSdkFrame } from 'src/bridge/subagentSdkFrames.js'
 import { getRemoteSessionUrl } from 'src/constants/product.js'
 import { buildBridgeConnectUrl } from 'src/bridge/bridgeStatusUtil.js'
 import { extractInboundMessageFields } from 'src/bridge/inboundMessages.js'
@@ -218,6 +219,10 @@ import {
   processSetupHooks,
   takeInitialUserMessage,
 } from 'src/utils/sessionStart.js'
+import {
+  executePostModelSwitchHooks,
+  executePreModelSwitchHooks,
+} from 'src/utils/hooks.js'
 import {
   DEFAULT_OUTPUT_STYLE_NAME,
   getAllOutputStyles,
@@ -305,6 +310,7 @@ import {
   isMcpServerDisabled,
   setMcpServerEnabled,
 } from 'src/services/mcp/config.js'
+import { reconnectDisabledElsewhereResult } from 'src/services/mcp/mcpReconnectRemedy.js'
 import {
   ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON,
   HERMETIC_MCP_SET_SERVERS_IGNORE_REASON,
@@ -350,6 +356,7 @@ import {
   toInternalMessages,
   toSDKRateLimitInfo,
 } from 'src/utils/messages/mappers.js'
+import { stampIdLessAssistantEntry } from 'src/utils/conversationRecovery.js'
 import { createModelSwitchBreadcrumbs } from 'src/utils/messages.js'
 import { collectContextData } from 'src/commands/context/context-noninteractive.js'
 import { LOCAL_COMMAND_STDOUT_TAG } from 'src/constants/xml.js'
@@ -3017,9 +3024,20 @@ function runHeadlessStreaming(
                   } else {
                     // Flush SDK events (task_started, task_progress) so background
                     // agent progress is streamed in real-time, not batched until result.
+                    // task_progress stays a status payload. Tool frames with
+                    // parent_tool_use_id are additionally written to Remote
+                    // Control (densable Ce / idt).
                     for (const event of drainSdkEvents()) {
                       output.enqueue(event as StdoutMessage)
                     }
+                    forwardParentToolUseSdkFrame(
+                      bridgeHandle,
+                      message as {
+                        type?: string
+                        parent_tool_use_id?: string | null
+                        message?: { content?: unknown }
+                      },
+                    )
                     output.enqueue(message as StdoutMessage)
                   }
                 }
@@ -4374,6 +4392,28 @@ function runHeadlessStreaming(
               continue
             }
 
+            const fromModel = getMainLoopModel()
+            const requestedModel =
+              decision.requestedArg.trim().toLowerCase() === 'default'
+                ? null
+                : decision.requestedArg
+            const pre = await executePreModelSwitchHooks(
+              {
+                fromModel,
+                toModel: decision.model,
+                requestedModel,
+                source: 'print',
+              },
+              mutableMessages,
+            )
+            if (pre.decision === 'block' || pre.decision === 'ask') {
+              sendControlResponseError(
+                msg,
+                pre.reason ?? 'PreModelSwitch hooks blocked the switch',
+              )
+              continue
+            }
+
             activeUserSpecifiedModel = decision.model
             setMainLoopModelOverride(decision.model)
             // densable 2.1.219 #12 / Bcn: mde() on every model switch when fast
@@ -4415,6 +4455,15 @@ function runHeadlessStreaming(
                   'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               })
             }
+            executePostModelSwitchHooks(
+              {
+                fromModel,
+                toModel: decision.model,
+                requestedModel,
+                source: 'print',
+              },
+              mutableMessages,
+            )
             sendControlResponseSuccess(msg)
           } else if (msg.request.subtype === 'set_max_thinking_tokens') {
             if (msg.request.max_thinking_tokens === null) {
@@ -4818,7 +4867,28 @@ function runHeadlessStreaming(
               currentAppState.mcp.clients.find(c => c.name === serverName)
                 ?.config ??
               null
-            if (!config) {
+            const driftedClient = currentAppState.mcp.clients.find(
+              c => c.name === serverName,
+            )
+            const driftedRemedy = reconnectDisabledElsewhereResult(
+              driftedClient
+                ? [
+                    {
+                      name: driftedClient.name,
+                      type: driftedClient.type,
+                      ...(driftedClient.type === 'failed' &&
+                      driftedClient.errorCode !== undefined
+                        ? { errorCode: driftedClient.errorCode }
+                        : {}),
+                    },
+                  ]
+                : [],
+              serverName,
+              isMcpServerDisabled,
+            )
+            if (driftedRemedy !== null) {
+              sendControlResponseError(msg, driftedRemedy)
+            } else if (!config) {
               sendControlResponseError(msg, `Server not found: ${serverName}`)
             } else {
               const result = await withControlReconnect(serverName, () =>
@@ -6011,11 +6081,16 @@ function runHeadlessStreaming(
       } else if (message.type === 'assistant' || message.type === 'system') {
         // History replay from bridge: inject into mutableMessages as
         // conversation context so the model sees prior turns.
-        const internalMsgs = toInternalMessages([message as SDKMessage])
+        // Stamp id-less assistant tool calls before same-id merge.
+        const injected =
+          message.type === 'assistant'
+            ? stampIdLessAssistantEntry(message)
+            : message
+        const internalMsgs = toInternalMessages([injected as SDKMessage])
         mutableMessages.push(...internalMsgs)
         // Echo assistant messages back so CCR displays them
-        if (message.type === 'assistant' && options.replayUserMessages) {
-          output.enqueue(message as StdoutMessage)
+        if (injected.type === 'assistant' && options.replayUserMessages) {
+          output.enqueue(injected as StdoutMessage)
         }
         continue
       }

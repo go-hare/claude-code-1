@@ -168,6 +168,30 @@ export const colorize = (
   return str
 }
 
+const ITALIC_OFF_SGR = '\x1b[23m'
+
+/** densable `rendersItalicAsStandout` — TERM starts with `screen`. */
+export function rendersItalicAsStandout(): boolean {
+  return (process.env.TERM ?? '').startsWith('screen')
+}
+
+/**
+ * densable jJn — drop italic-off tokens when GNU screen would paint them
+ * as standout. Tokens without an italic-off endCode are unchanged.
+ */
+export function filterItalicOffTokens<T extends { endCode: string }>(
+  tokens: T[],
+): T[] {
+  for (const token of tokens) {
+    if (token.endCode === ITALIC_OFF_SGR) {
+      return rendersItalicAsStandout()
+        ? tokens.filter(entry => entry.endCode !== ITALIC_OFF_SGR)
+        : tokens
+    }
+  }
+  return tokens
+}
+
 /**
  * Apply TextStyles to a string using chalk.
  * This is the inverse of parsing ANSI codes - we generate them from structured styles.
@@ -194,7 +218,9 @@ export function applyTextStyles(text: string, styles: TextStyles): string {
     result = chalk.underline(result)
   }
 
-  if (styles.italic) {
+  // densable jJn — GNU screen / TERM=screen renders italic as standout,
+  // so the italic-off SGR is dropped instead of emitted.
+  if (styles.italic && !rendersItalicAsStandout()) {
     result = chalk.italic(result)
   }
 

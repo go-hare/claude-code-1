@@ -12,6 +12,8 @@ export {
   isSendFeedbackSessionEnabled,
   isFeedbackCallHt,
   getFeedbackCommandAvailability,
+  getFeedbackCommandDisabledReason,
+  type FeedbackCommandName,
   setFeedbackDraftsSetting,
 } from './gates.js'
 export {
