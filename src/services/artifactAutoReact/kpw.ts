@@ -71,20 +71,25 @@ ${list}`
 
   const select = (async (): Promise<number> => {
     try {
-      const { sideQuery } = await import('../../utils/sideQuery.js')
-      const { getSmallFastModel } = await import('../../utils/model/model.js')
-      const response = await sideQuery({
-        model: getSmallFastModel(),
-        system: KPW_SYSTEM,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 5,
-        thinking: false,
-        skipSystemPromptPrefix: true,
+      const { queryHaiku } = await import('../api/claude.js')
+      const { asSystemPrompt } = await import('../../utils/systemPromptType.js')
+      const response = await queryHaiku({
+        systemPrompt: asSystemPrompt([KPW_SYSTEM]),
+        userPrompt: prompt,
         signal: input.signal,
-        querySource: 'artifact_comment_fast_ack',
-        optional: true,
+        options: {
+          querySource: 'artifact_comment_fast_ack',
+          agents: [],
+          isNonInteractiveSession: true,
+          hasAppendSystemPrompt: false,
+          mcpTools: [],
+          maxOutputTokensOverride: 5,
+          enablePromptCaching: false,
+        },
       })
-      const text = extractDigit(response)
+      const text = extractDigit({
+        content: response.message.content,
+      })
       const m = /^\s*([0-9])\s*$/.exec(text ?? '')
       const idx = m ? Number(m[1]) : -1
       const opt = FAST_ACK_OPTIONS[idx]
@@ -116,6 +121,7 @@ ${list}`
 
 function extractDigit(message: { content?: unknown }): string | null {
   const content = message.content
+  if (typeof content === 'string') return content
   if (!Array.isArray(content)) return null
   for (const block of content) {
     if (

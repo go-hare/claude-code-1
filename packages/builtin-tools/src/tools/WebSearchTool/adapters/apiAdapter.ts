@@ -65,7 +65,7 @@ export class ApiSearchAdapter implements WebSearchAdapter {
         'You are an assistant for performing a web search tool use',
       ]),
       thinkingConfig: useHaiku
-        ? { type: 'disabled' as const }
+        ? { type: 'disabled', mechanical: true }
         : { type: 'enabled' as const, budgetTokens: 10000 },
       tools: [],
       signal: signal ?? new AbortController().signal,

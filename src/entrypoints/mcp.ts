@@ -133,7 +133,8 @@ export async function startMCPServer(
           commands: MCP_COMMANDS,
           tools,
           mainLoopModel: getMainLoopModel(),
-          thinkingConfig: { type: 'disabled' },
+          // densable Vm: MCP tools/call host thinkingConfig {type:"disabled",mechanical:!0}
+          thinkingConfig: { type: 'disabled', mechanical: true },
           mcpClients: [],
           mcpResources: {},
           isNonInteractiveSession: true,

@@ -2,7 +2,13 @@
  * Official n() sibling + host bag classes (248 gold-248-n-root).
  * Leftover names. Do not mint official minified slot identifiers.
  */
+import { LRUCache } from 'lru-cache'
 import { createSignal } from './signal.js'
+
+/** densable `Yt` — gzipRequestBody telemetry LRU cap. */
+const GZIP_REQUEST_BODY_TELEMETRY_MAX = 256
+/** densable `ld({max:64})` on streamFirstByteArmedRequestIds. */
+const STREAM_FIRST_BYTE_ARMED_MAX = 64
 
 function usageBag(
   e?: Record<string, Record<string, unknown>>,
@@ -618,6 +624,95 @@ export class ModelSelection {
     this.#i = false
     this.#a = undefined
     this.#s = undefined
+  }
+}
+
+/**
+ * densable 2.1.251 `Ge` — per-root session bag keyed by `Ln.of(G())`.
+ * Shape-only sibling fields (no persist writers). `once` / `firedOnceKeys`
+ * are the #13 contract. Not leftover 248 `Proactivity` (selectorGate) and
+ * not `RequestLatches` (`qe`).
+ */
+export class SessionOnceLatches {
+  promptCacheBreak: {
+    previousStateBySource: Map<unknown, unknown>
+    hydrationAttempted: boolean
+    pendingPersist: Promise<void>
+    latestQueuedPersist: unknown
+  } = {
+    previousStateBySource: new Map(),
+    hydrationAttempted: false,
+    pendingPersist: Promise.resolve(),
+    latestQueuedPersist: null,
+  }
+  threadDecisionTracker: unknown
+  dumpPrompts: {
+    recentRequests: unknown[]
+    stateByAgent: Map<unknown, unknown>
+  } = {
+    recentRequests: [],
+    stateByAgent: new Map(),
+  }
+  lastIngressUuidBySession = new Map<unknown, unknown>()
+  /** densable `qe()` */
+  cacheCoverage = new WeakMap<object, unknown>()
+  gzipRequestBody: {
+    latchedOff: boolean
+    rejectedThisProcess: boolean
+    persistedLatchChecked: boolean
+    persistedLatchInEffect: boolean
+    telemetryByClientRequestId: LRUCache<string, unknown>
+    ccrWorkerSkipReasonsLogged: Set<unknown>
+  } = {
+    latchedOff: false,
+    rejectedThisProcess: false,
+    persistedLatchChecked: false,
+    persistedLatchInEffect: false,
+    telemetryByClientRequestId: new LRUCache({
+      max: GZIP_REQUEST_BODY_TELEMETRY_MAX,
+    }),
+    ccrWorkerSkipReasonsLogged: new Set(),
+  }
+  sentPrefix: {
+    ledger: unknown
+    mode: unknown
+    persist: Promise<void>
+    persisted: unknown
+    pendingSeed: unknown
+    lastReport: WeakMap<object, unknown>
+    lastVerdict: WeakMap<object, unknown>
+    renderEpochs: WeakMap<object, unknown>
+    excuse: WeakMap<object, unknown>
+  } = {
+    ledger: undefined,
+    mode: undefined,
+    persist: Promise.resolve(),
+    persisted: undefined,
+    pendingSeed: undefined,
+    lastReport: new WeakMap(),
+    lastVerdict: new WeakMap(),
+    renderEpochs: new WeakMap(),
+    excuse: new WeakMap(),
+  }
+  keepForeignThinkingOnUpgrade: unknown
+  streamFirstByteArmedRequestIds = new LRUCache<string, unknown>({
+    max: STREAM_FIRST_BYTE_ARMED_MAX,
+  })
+  skillHealthMap: unknown
+  firedOnceKeys = new Set<string>()
+  hasFired(e: string): boolean {
+    return this.firedOnceKeys.has(e)
+  }
+  markFired(e: string): void {
+    this.firedOnceKeys.add(e)
+  }
+  once(e: string): boolean {
+    if (this.firedOnceKeys.has(e)) return false
+    this.firedOnceKeys.add(e)
+    return true
+  }
+  resetStreamNoEventsWarningLatch(): void {
+    this.firedOnceKeys.delete('stream_no_events_fallback_warning')
   }
 }
 

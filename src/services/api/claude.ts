@@ -96,7 +96,14 @@ import {
   getSonnet1mExpTreatmentEnabled,
 } from '../../utils/context.js'
 import { resolveAppliedEffort } from '../../utils/effort.js'
-import { decideEffortWhenThinkingDisabled } from '../../utils/effortThinkingGuard.js'
+import {
+  analyticsQuerySource,
+  decideEffortWhenThinkingDisabled,
+  formatEffortClampDebugMessage,
+  oncePerSession,
+  querySourceBucket,
+  transcriptEffortWhenMechanicalDisabled,
+} from '../../utils/effortThinkingGuard.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import {
   MAIN_PROMPT_CACHE_QUERY_SOURCES,
@@ -235,6 +242,7 @@ import { calculateUSDCost } from 'src/utils/modelCost.js'
 import { endQueryProfile, queryCheckpoint } from 'src/utils/queryProfiler.js'
 import {
   isThinkingActiveForToolChoice,
+  modelRejectsDisabledThinking,
   modelSupportsAdaptiveThinking,
   modelSupportsThinking,
   type ThinkingConfig,
@@ -2008,6 +2016,10 @@ async function* queryModel(
   // were dynamically added, so we can log and send it to telemetry.
   let lastRequestBetas: string[] | undefined
 
+  // densable `n2` — log the effort clamp once per queryModel call (retries
+  // reuse paramsFromContext).
+  let loggedEffortClamp = false
+
   const paramsFromContext = (retryContext: RetryContext) => {
     const betasParams = [...betas]
 
@@ -2081,24 +2093,6 @@ async function* queryModel(
     // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
     const effortName = typeof effort === 'string' ? effort : undefined
-    // densable 2.1.251 #13 — `ga.effort=Wht` when thinking is disabled and
-    // `bJn` (above high) and (`Vm` mechanical or `SJn`). Gold does not throw.
-    const effortDecision = decideEffortWhenThinkingDisabled({
-      effort: effortName,
-      thinkingOff: !hasThinking,
-      model: options.model,
-      mechanical:
-        thinkingConfig.type === 'disabled' &&
-        thinkingConfig.mechanical === true,
-    })
-    if (effortDecision.action === 'clamp') {
-      logForDebugging(
-        `output_config.effort '${effortDecision.from}' clamped to '${effortDecision.to}': thinking is disabled for this request, and this model rejects higher effort when thinking is disabled`,
-      )
-      if ('effort' in outputConfig) {
-        ;(outputConfig as { effort?: string }).effort = effortDecision.to
-      }
-    }
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
@@ -2107,10 +2101,8 @@ async function* queryModel(
     //
     // densable HQt (rejects_disabled_thinking): when config is disabled, densable
     // does NOT send {type:'disabled'} for those models (Bo stays undefined;
-    // server defaults adaptive). Local historically omits the field whenever
-    // hasThinking is false (no densable firstParty explicit-disabled branch) —
-    // keep that shape. HQt is enforced on sideQuery/classifier paths that
-    // would otherwise send disabled, and on tool_choice demotion below.
+    // server defaults adaptive). Gold firstParty explicit-disabled branch:
+    // `r.type==="disabled" && Ne()==="firstParty" && !Mc && tSn(F) && !NOe(F)`.
     if (hasThinking && modelSupportsThinking(options.model)) {
       if (
         !adaptiveThinkingDisabled &&
@@ -2136,6 +2128,55 @@ async function* queryModel(
           budget_tokens: thinkingBudget,
           type: 'enabled',
         } satisfies BetaMessageStreamParams['thinking']
+      }
+    } else if (
+      thinkingConfig.type === 'disabled' &&
+      getAPIProvider() === 'firstParty' &&
+      !thinkingDisabled &&
+      modelSupportsThinking(options.model) &&
+      !modelRejectsDisabledThinking(options.model)
+    ) {
+      thinking = { type: 'disabled' }
+    }
+
+    // densable 2.1.251 #13 — `ga.effort=Wht` when outgoing thinking is
+    // `{type:"disabled"}` and `bJn` (above high) and (`Vm` mechanical or
+    // `SJn`). Gold does not throw. Env DISABLE_THINKING omits the field
+    // (`!Mc` fails the firstParty branch) and does not clamp.
+    const mechanical =
+      thinkingConfig.type === 'disabled' && thinkingConfig.mechanical === true
+    const effortDecision = decideEffortWhenThinkingDisabled({
+      effort: effortName,
+      thinkingOff: thinking?.type === 'disabled',
+      model: options.model,
+      mechanical,
+    })
+    if (effortDecision.action === 'clamp') {
+      if (!loggedEffortClamp) {
+        loggedEffortClamp = true
+        logForDebugging(
+          formatEffortClampDebugMessage(
+            effortDecision.from,
+            effortDecision.to,
+            mechanical,
+          ),
+        )
+      }
+      if (
+        !mechanical &&
+        querySourceBucket(options.querySource) === 'main' &&
+        oncePerSession('effort_thinking_disabled_clamp')
+      ) {
+        logEvent('tengu_effort_clamped_thinking_disabled', {
+          from: effortDecision.from as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          to: effortDecision.to as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          query_source: analyticsQuerySource(
+            options.querySource,
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+      }
+      if ('effort' in outputConfig) {
+        ;(outputConfig as { effort?: string }).effort = effortDecision.to
       }
     }
 
@@ -2250,8 +2291,11 @@ async function* queryModel(
     const sendBetas = useBetas && (!simulateProxy || filteredBetas.length > 0)
 
     // densable: Ie = typeof ra === "string" && MPe(ra) ? ra : void 0
-    // Capture wire string effort for transcript stamping on assistant msgs.
-    effortLevelForTranscript = transcriptEffortFromOutputConfig(outputConfig)
+    // densable Ye: skip transcript effort when thinking is mechanically off.
+    effortLevelForTranscript = transcriptEffortWhenMechanicalDisabled(
+      thinkingConfig.type === 'disabled' && thinkingConfig.mechanical === true,
+      transcriptEffortFromOutputConfig(outputConfig),
+    )
 
     // densable ekd/rkd — server-lane fallbacks body + credit beta/token stamp
     let serverFallbackBody: Record<string, unknown> = {}
@@ -5329,7 +5373,7 @@ export async function queryHaiku({
       const result = await queryModelWithoutStreaming({
         messages,
         systemPrompt,
-        thinkingConfig: { type: 'disabled' },
+        thinkingConfig: { type: 'disabled', mechanical: true },
         tools: [],
         signal,
         options: {
@@ -5388,7 +5432,7 @@ export async function queryWithModel({
       const result = await queryModelWithoutStreaming({
         messages,
         systemPrompt,
-        thinkingConfig: { type: 'disabled' },
+        thinkingConfig: { type: 'disabled', mechanical: true },
         tools: [],
         signal,
         options: {

@@ -154,7 +154,7 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
           tools,
           mainLoopModel: model,
           isNonInteractiveSession: true,
-          thinkingConfig: { type: 'disabled' as const },
+          thinkingConfig: { type: 'disabled', mechanical: true },
         },
         setInProgressToolUseIDs: () => {},
         getAppState() {

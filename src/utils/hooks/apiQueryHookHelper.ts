@@ -85,7 +85,7 @@ export function createApiQueryHook<TResult>(
       const response = await queryModelWithoutStreaming({
         messages,
         systemPrompt,
-        thinkingConfig: { type: 'disabled' as const },
+        thinkingConfig: { type: 'disabled', mechanical: true },
         tools,
         signal: createAbortController().signal,
         options: {

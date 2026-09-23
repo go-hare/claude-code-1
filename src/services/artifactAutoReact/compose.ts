@@ -1,10 +1,13 @@
 /**
- * densable qPw / KPw / substantive compose via sideQuery (2.1.239).
+ * densable qPw / KPw / substantive compose via sX (queryHaiku / queryWithModel).
+ * Gold 2.1.251 #13: `thinkingConfig:{type:"disabled",mechanical:!0}`.
  * editCapable threads use densable KPw (B3i numbered pick); else qPw free sentence.
  */
 import { FAST_ACK_TEXT } from './actGates.js'
 import type { ArtifactComment, ArtifactThread } from './commentRead.js'
 import { composeFastAckKPw } from './kpw.js'
+import { extractTextContent } from '../../utils/messages.js'
+import { asSystemPrompt } from '../../utils/systemPromptType.js'
 
 /** densable LPw — mechanical auto-reply system prompt. */
 export const ARTIFACT_COMPOSE_SYSTEM =
@@ -29,23 +32,18 @@ export function formatThreadForCompose(
   return lines.join('\n')
 }
 
-function extractTextFromSideQuery(message: {
-  content?: unknown
+function extractAssistantText(message: {
+  message?: { content?: unknown }
 }): string | null {
-  const content = message.content
-  if (!Array.isArray(content)) return null
-  const parts: string[] = []
-  for (const block of content) {
-    if (
-      block &&
-      typeof block === 'object' &&
-      (block as { type?: string }).type === 'text' &&
-      typeof (block as { text?: string }).text === 'string'
-    ) {
-      parts.push((block as { text: string }).text)
-    }
+  const content = message.message?.content
+  if (typeof content === 'string') {
+    const s = content.replace(/\s+/g, ' ').trim()
+    return s || null
   }
-  const s = parts.join('').replace(/\s+/g, ' ').trim()
+  if (!Array.isArray(content)) return null
+  const s = extractTextContent(content as readonly { readonly type: string }[])
+    .replace(/\s+/g, ' ')
+    .trim()
   return s || null
 }
 
@@ -58,26 +56,23 @@ export async function composeFastAck(input: {
   signal: AbortSignal
 }): Promise<string> {
   try {
-    const { sideQuery } = await import('../../utils/sideQuery.js')
-    const { getSmallFastModel } = await import('../../utils/model/model.js')
+    const { queryHaiku } = await import('../api/claude.js')
     const framed = formatThreadForCompose(input.thread, input.newComments)
-    const response = await sideQuery({
-      model: getSmallFastModel(),
-      system: ARTIFACT_COMPOSE_SYSTEM,
-      messages: [
-        {
-          role: 'user',
-          content: `${framed}\n\n${FAST_ACK_COMPOSE_INSTRUCTION}`,
-        },
-      ],
-      max_tokens: 96,
-      thinking: false,
-      skipSystemPromptPrefix: true,
+    const response = await queryHaiku({
+      systemPrompt: asSystemPrompt([ARTIFACT_COMPOSE_SYSTEM]),
+      userPrompt: `${framed}\n\n${FAST_ACK_COMPOSE_INSTRUCTION}`,
       signal: input.signal,
-      querySource: 'artifact_comment_fast_ack',
-      optional: true,
+      options: {
+        querySource: 'artifact_comment_fast_ack',
+        agents: [],
+        isNonInteractiveSession: true,
+        hasAppendSystemPrompt: false,
+        mcpTools: [],
+        maxOutputTokensOverride: 96,
+        enablePromptCaching: false,
+      },
     })
-    const text = extractTextFromSideQuery(response)
+    const text = extractAssistantText(response)
     if (!text || text.length > 200) return FAST_ACK_TEXT
     return text
   } catch {
@@ -96,7 +91,7 @@ export async function composeSubstantiveReply(input: {
   signal: AbortSignal
 }): Promise<string | null> {
   try {
-    const { sideQuery } = await import('../../utils/sideQuery.js')
+    const { queryWithModel } = await import('../api/claude.js')
     const { getMainLoopModel } = await import('../../utils/model/model.js')
     const framed = formatThreadForCompose(input.thread, input.newComments)
     const prompt = `${framed}
@@ -105,18 +100,22 @@ Artifact URL: ${input.url}
 Slug: ${input.slug}
 
 Write a concise reply to post on this artifact comment thread answering the newest comment(s). Be specific and helpful. Output only the reply text — no quotes, no code fences, no preamble.`
-    const response = await sideQuery({
-      model: getMainLoopModel(),
-      system: ARTIFACT_COMPOSE_SYSTEM,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1024,
-      thinking: false,
-      skipSystemPromptPrefix: true,
+    const response = await queryWithModel({
+      systemPrompt: asSystemPrompt([ARTIFACT_COMPOSE_SYSTEM]),
+      userPrompt: prompt,
       signal: input.signal,
-      querySource: 'artifact_comment_reply',
-      optional: true,
+      options: {
+        model: getMainLoopModel(),
+        querySource: 'artifact_comment_reply',
+        agents: [],
+        isNonInteractiveSession: true,
+        hasAppendSystemPrompt: false,
+        mcpTools: [],
+        maxOutputTokensOverride: 1024,
+        enablePromptCaching: false,
+      },
     })
-    return extractTextFromSideQuery(response)
+    return extractAssistantText(response)
   } catch {
     return null
   }

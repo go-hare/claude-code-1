@@ -216,8 +216,10 @@ export async function composeEditDecision(input: {
   allowRewrite?: boolean
 }): Promise<EditDecision | null> {
   try {
-    const { sideQuery } = await import('../../utils/sideQuery.js')
+    const { queryWithModel } = await import('../api/claude.js')
     const { getMainLoopModel } = await import('../../utils/model/model.js')
+    const { asSystemPrompt } = await import('../../utils/systemPromptType.js')
+    const { extractTextContent } = await import('../../utils/messages.js')
     const comments = input.summons.length
       ? input.summons
       : input.thread.comments.filter(c => c.toClaudeAt)
@@ -249,31 +251,30 @@ ${
 {"action":"edit","content":"<the COMPLETE new artifact source>","reply":"<the comment text to post after the update publishes>"}`
     : ''
 }`
-    const response = await sideQuery({
-      model: getMainLoopModel(),
-      system:
+    const response = await queryWithModel({
+      systemPrompt: asSystemPrompt([
         'You decide and compose artifact comment-thread responses, optionally with an artifact edit. Output only the decision JSON object.',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 8192,
-      thinking: false,
-      skipSystemPromptPrefix: true,
+      ]),
+      userPrompt: prompt,
       signal: input.signal,
-      querySource: 'artifact_comment_reply',
-      optional: true,
+      options: {
+        model: getMainLoopModel(),
+        querySource: 'artifact_comment_reply',
+        agents: [],
+        isNonInteractiveSession: true,
+        hasAppendSystemPrompt: false,
+        mcpTools: [],
+        maxOutputTokensOverride: 8192,
+        enablePromptCaching: false,
+      },
     })
-    const content = response.content
-    let text = ''
-    if (Array.isArray(content)) {
-      for (const b of content) {
-        if (
-          b &&
-          typeof b === 'object' &&
-          (b as { type?: string }).type === 'text'
-        ) {
-          text += (b as { text?: string }).text ?? ''
-        }
-      }
-    }
+    const content = response.message.content
+    const text =
+      typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? extractTextContent(content)
+          : ''
     return parseEditDecision(text)
   } catch {
     return null
