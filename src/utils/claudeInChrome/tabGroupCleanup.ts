@@ -160,12 +160,15 @@ function parseAvailableTabs(
   }
 }
 
-/** densable `zLS`. */
+/**
+ * densable `Pvr` / `zLS`.
+ * Gold: `function Pvr(t,e){uf().bridgeBinding={context:t,socketClient:e}}`
+ */
 export function setChromeBinding(
-  _context: unknown,
+  context: unknown,
   socketClient: ChromeTabGroupSocketClient,
 ): void {
-  getChromeInstallSessionState().bridgeBinding = { socketClient }
+  getChromeInstallSessionState().bridgeBinding = { context, socketClient }
 }
 
 /** densable `jrl`. */

@@ -1,7 +1,8 @@
 /**
  * densable 2.1.239 `slf` / `gP` — chrome session singleton.
- * Tab-group close uses `bridgeBinding` / `closesInFlight` / cleanup latches
- * (`jrl` / `ANS`). Do not invent the rest of `slf` (resolvedHostByToolUseId, …).
+ * densable 2.1.251 #57 — Host bag fields used by VQt call:
+ * `bridgeBinding` (Pvr), `resolvedHostByToolUseId` (O),
+ * `resolvedUrlByToolUseId`, `lastExecutedTabUrlByScope` (E).
  */
 
 export type ChromeTabGroupSocketClient = {
@@ -11,9 +12,12 @@ export type ChromeTabGroupSocketClient = {
     args: Record<string, unknown>,
     extras?: unknown,
   ): Promise<unknown>
+  setPermissionMode?(mode: string, allowedDomains?: string[]): Promise<void>
 }
 
 export type ChromeBridgeBinding = {
+  /** densable Pvr stores both context + socketClient. */
+  context?: unknown
   socketClient: ChromeTabGroupSocketClient
 }
 
@@ -21,6 +25,14 @@ export type ChromeTabGroupCloseInFlight = {
   onlyIfEmpty: boolean | undefined
   promise: Promise<unknown>
 }
+
+export type ResolvedChromeHost = {
+  host: string
+  url?: string
+}
+
+/** densable D — max resolved-host map size before clear. */
+const RESOLVED_HOST_MAP_CAP = 64
 
 type ChromeInstallSessionState = {
   wiredThisSession: boolean
@@ -31,6 +43,12 @@ type ChromeInstallSessionState = {
   unsubscribeSessionSwitch: (() => void) | undefined
   unregisterExitCleanup: (() => void) | undefined
   closesInFlight: Map<string, ChromeTabGroupCloseInFlight>
+  /** densable uf().resolvedHostByToolUseId */
+  resolvedHostByToolUseId: Map<string, ResolvedChromeHost>
+  /** densable uf().resolvedUrlByToolUseId */
+  resolvedUrlByToolUseId: Map<string, string>
+  /** densable uf().lastExecutedTabUrlByScope */
+  lastExecutedTabUrlByScope: Map<string, string>
 }
 
 const state: ChromeInstallSessionState = {
@@ -42,9 +60,12 @@ const state: ChromeInstallSessionState = {
   unsubscribeSessionSwitch: undefined,
   unregisterExitCleanup: undefined,
   closesInFlight: new Map(),
+  resolvedHostByToolUseId: new Map(),
+  resolvedUrlByToolUseId: new Map(),
+  lastExecutedTabUrlByScope: new Map(),
 }
 
-/** densable `gP()` — session chrome host singleton. */
+/** densable `gP()` / `uf()` — session chrome host singleton. */
 export function getChromeInstallSessionState(): ChromeInstallSessionState {
   return state
 }
@@ -69,6 +90,28 @@ export function hasClaudeInChromeInstallUpsellLatch(): boolean {
   return state.installUpsellResolution !== undefined
 }
 
+/**
+ * densable `O` — remember host for toolUseId (checkPermissions → call).
+ * Caps map size like gold `n.size>=D` then clear.
+ */
+export function rememberResolvedChromeHost(
+  toolUseId: string,
+  host: ResolvedChromeHost,
+): void {
+  if (state.resolvedHostByToolUseId.size >= RESOLVED_HOST_MAP_CAP) {
+    state.resolvedHostByToolUseId.clear()
+  }
+  state.resolvedHostByToolUseId.set(toolUseId, host)
+}
+
+/** densable `E` — last executed tab URL by session scope. */
+export function rememberLastExecutedTabUrl(
+  sessionId: string,
+  url: string,
+): void {
+  state.lastExecutedTabUrlByScope.set(sessionId, url)
+}
+
 export function resetChromeInstallSessionState(): void {
   state.wiredThisSession = false
   state.installUpsellResolution = undefined
@@ -80,4 +123,7 @@ export function resetChromeInstallSessionState(): void {
   state.unregisterExitCleanup?.()
   state.unregisterExitCleanup = undefined
   state.closesInFlight = new Map()
+  state.resolvedHostByToolUseId = new Map()
+  state.resolvedUrlByToolUseId = new Map()
+  state.lastExecutedTabUrlByScope = new Map()
 }

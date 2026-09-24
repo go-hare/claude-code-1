@@ -4,7 +4,7 @@ export {
   BRIDGE_ONLY_BROWSER_TOOLS,
   BROWSER_TOOLS,
 } from './browserTools.js'
-export { sanitizeArgsForLog } from './toolCalls.js'
+export { handleToolCall, sanitizeArgsForLog } from './toolCalls.js'
 export {
   createChromeSocketClient,
   createClaudeForChromeMcpServer,
@@ -12,12 +12,14 @@ export {
 export { localPlatformLabel } from './types.js'
 export type {
   BridgeConfig,
+  BridgePermissionRequest,
   ChromeExtensionInfo,
   ChromeBridgeTrackEventMetadata,
   ClaudeForChromeContext,
   Logger,
   LoggerDetail,
   PermissionMode,
+  PermissionOverrides,
   SocketClient,
 } from './types.js'
 export { toLoggerDetail } from './types.js'

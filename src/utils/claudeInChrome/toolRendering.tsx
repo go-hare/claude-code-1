@@ -265,8 +265,9 @@ export function renderChromeToolResultMessage(
 }
 
 /**
- * Returns tool method overrides for Claude in Chrome MCP tools. Use this to customize
- * rendering for chrome tools in a single spread operation.
+ * Returns tool method overrides for Claude in Chrome MCP tools.
+ * densable 2.1.251 #57 VQt: rendering + `.call()` that builds PermissionOverrides
+ * (skip_all / follow_a_plan / ask) and dispatches via Pvr bridgeBinding.
  */
 export function getClaudeInChromeMCPToolOverrides(toolName: string): {
   userFacingName: (input?: Record<string, unknown>) => string;
@@ -277,6 +278,12 @@ export function getClaudeInChromeMCPToolOverrides(toolName: string): {
     progressMessagesForMessage: unknown[],
     options: { verbose: boolean },
   ) => React.ReactNode;
+  call: (
+    args: Record<string, unknown>,
+    context: import('../../Tool.js').ToolUseContext,
+    _canUseTool?: unknown,
+    parentMessage?: { message?: { content?: unknown } },
+  ) => Promise<{ data: unknown }>;
 } {
   return {
     userFacingName(_input?: Record<string, unknown>) {
@@ -299,6 +306,99 @@ export function getClaudeInChromeMCPToolOverrides(toolName: string): {
         return null;
       }
       return renderChromeToolResultMessage(output, toolName as ChromeToolName, verbose);
+    },
+    /**
+     * densable VQt `call` arm → ie(t,o,s,T).
+     * Host Biy (prepareChromeFileUploadInput) runs first — same as MCP client
+     * wrap. Then four-arm PermissionOverrides + handleToolCall.
+     * Return `{ data: result.content }` like Host MCPTool.call.
+     */
+    async call(args, context, _canUseTool, parentMessage) {
+      // Lazy require keeps React render path free of chrome-mcp cycle.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { handleToolCall } = require('@ant/claude-for-chrome-mcp') as typeof import('@ant/claude-for-chrome-mcp');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getChromeInstallSessionState } = require('./sessionState.js') as typeof import('./sessionState.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { resolveChromeCallPermissionOverrides } =
+        require('./chromeCallPermission.js') as typeof import('./chromeCallPermission.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isChromeFileUploadToolName, prepareChromeFileUploadInput } =
+        require('./fileUpload.js') as typeof import('./fileUpload.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } =
+        require('../errors.js') as typeof import('../errors.js');
+
+      const binding = getChromeInstallSessionState().bridgeBinding;
+      if (!binding?.socketClient) {
+        throw new Error('Claude in Chrome bridge is not initialized in this session.');
+      }
+
+      // densable Biy: Host-side file_upload path policy before the package
+      // expandFileUploadArgs path (which does not apply session allowlist).
+      let callArgs = args;
+      if (isChromeFileUploadToolName(toolName)) {
+        const permCtx = context.getAppState().toolPermissionContext;
+        const prepared = await prepareChromeFileUploadInput(toolName, args, permCtx);
+        if ('error' in prepared) {
+          throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+            prepared.error,
+            'chrome file_upload path rejected',
+          );
+        }
+        callArgs = prepared.input;
+      }
+
+      let toolUseId: string | undefined;
+      const content = parentMessage?.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block &&
+            typeof block === 'object' &&
+            'type' in block &&
+            (block as { type: string }).type === 'tool_use' &&
+            'name' in block &&
+            typeof (block as { name?: string }).name === 'string' &&
+            (block as { name: string }).name.includes(toolName) &&
+            'id' in block &&
+            typeof (block as { id?: string }).id === 'string'
+          ) {
+            toolUseId = (block as { id: string }).id;
+            break;
+          }
+        }
+      }
+      // fallback: any tool_use id on the parent message
+      if (!toolUseId && Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: string }).type === 'tool_use' &&
+            typeof (block as { id?: string }).id === 'string'
+          ) {
+            toolUseId = (block as { id: string }).id;
+            break;
+          }
+        }
+      }
+
+      const overrides = resolveChromeCallPermissionOverrides(context, toolUseId);
+      const contextArg =
+        (binding.context as import('@ant/claude-for-chrome-mcp').ClaudeForChromeContext) ??
+        ({} as import('@ant/claude-for-chrome-mcp').ClaudeForChromeContext);
+
+      const result = await handleToolCall(
+        contextArg,
+        binding.socketClient as import('@ant/claude-for-chrome-mcp').SocketClient,
+        toolName,
+        callArgs,
+        overrides,
+      );
+
+      // Host MCPTool.call: `{ data: mcpResult.content }`
+      return { data: result.content };
     },
   };
 }
