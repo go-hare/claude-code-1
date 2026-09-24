@@ -1,8 +1,10 @@
 import chalk from 'chalk'
 import { stat } from 'fs/promises'
 import { dirname, resolve } from 'path'
+import { getOriginalCwd } from '../../bootstrap/state.js'
 import type { ToolPermissionContext } from '../../Tool.js'
-import { getErrnoCode, hasExactErrorMessage } from '../../utils/errors.js'
+import { getErrnoCode, isENOENT } from '../../utils/errors.js'
+import { logError } from '../../utils/log.js'
 import { expandPath } from '../../utils/path.js'
 import {
   allWorkingDirectories,
@@ -31,7 +33,14 @@ export type AddDirectoryResult =
       resultType: 'alreadyInWorkingDirectory'
       directoryPath: string
       workingDir: string
+      isExactMatch: boolean
+      isOriginalCwd: boolean
     }
+
+/** densable zk — mbe callee: exact Error.message, not a substring. */
+export function zk(error: unknown, message: string): boolean {
+  return error instanceof Error && error.message === message
+}
 
 export async function validateDirectoryForWorkspace(
   directoryPath: string,
@@ -43,60 +52,59 @@ export async function validateDirectoryForWorkspace(
     }
   }
 
-  // resolve() strips the trailing slash expandPath can leave on absolute
-  // inputs, so /foo and /foo/ map to the same storage key (CC-33).
-  // densable mbe: expandPath \0 is zk(..., "Path contains null bytes").
+  // densable mbe: r=Lat(gt(e)); expandPath \0 is zk(..., "Path contains null bytes")
   let absolutePath: string
   try {
     absolutePath = resolve(expandPath(directoryPath))
   } catch (err) {
+    const containsNullByte = zk(err, 'Path contains null bytes')
+    if (!containsNullByte) {
+      logError(Error('validateDirectoryForWorkspace: expandPath threw'))
+    }
     return {
       resultType: 'invalidPath',
       directoryPath,
-      containsNullByte: hasExactErrorMessage(err, 'Path contains null bytes'),
+      containsNullByte,
     }
   }
 
-  // Check if path exists and is a directory (single syscall)
   try {
-    const stats = await stat(absolutePath)
-    if (!stats.isDirectory()) {
+    if (!(await stat(absolutePath)).isDirectory()) {
       return {
         resultType: 'notADirectory',
         directoryPath,
         absolutePath,
       }
     }
-  } catch (e: unknown) {
-    const code = getErrnoCode(e)
-    // Match prior existsSync() semantics: treat any of these as "not found"
-    // rather than re-throwing. EACCES/EPERM in particular must not crash
-    // startup when a settings-configured additional directory is inaccessible.
-    if (
-      code === 'ENOENT' ||
-      code === 'ENOTDIR' ||
-      code === 'EACCES' ||
-      code === 'EPERM'
-    ) {
-      return {
-        resultType: 'pathNotFound',
-        directoryPath,
-        absolutePath,
-      }
+  } catch (err: unknown) {
+    // densable mbe: if(!Rt(d)) h(...unexpected stat errno); always pathNotFound
+    if (!isENOENT(err)) {
+      logError(
+        Object.assign(
+          Error('validateDirectoryForWorkspace: unexpected stat errno'),
+          { code: getErrnoCode(err) },
+        ),
+      )
     }
-    throw e
+    return {
+      resultType: 'pathNotFound',
+      directoryPath,
+      absolutePath,
+    }
   }
 
-  // Get current permission context
+  // densable mbe: o=EE(t), u=be(); local EE seeds getOriginalCwd (not getCwd).
+  // Gold np(r,d,{caseFold:!1}) body is ABSENT — keep pathInWorkingPath as-is.
   const currentWorkingDirs = allWorkingDirectories(permissionContext)
-
-  // Check if already within an existing working directory
+  const originalCwd = getOriginalCwd()
   for (const workingDir of currentWorkingDirs) {
     if (pathInWorkingPath(absolutePath, workingDir)) {
       return {
         resultType: 'alreadyInWorkingDirectory',
         directoryPath,
         workingDir,
+        isExactMatch: resolve(workingDir) === absolutePath,
+        isOriginalCwd: workingDir === originalCwd,
       }
     }
   }
@@ -123,8 +131,18 @@ export function addDirHelpMessage(result: AddDirectoryResult): string {
       const parentDir = dirname(result.absolutePath)
       return `${chalk.bold(result.directoryPath)} is not a directory. Did you mean to add the parent directory ${chalk.bold(parentDir)}?`
     }
-    case 'alreadyInWorkingDirectory':
-      return `${chalk.bold(result.directoryPath)} is already accessible within the existing working directory ${chalk.bold(result.workingDir)}.`
+    case 'alreadyInWorkingDirectory': {
+      const path = chalk.bold(result.directoryPath)
+      if (result.isExactMatch) {
+        return result.isOriginalCwd
+          ? `${path} is already the current working directory.`
+          : `${path} is already added as a working directory.`
+      }
+      const within = result.isOriginalCwd
+        ? 'the current working directory'
+        : 'the additional working directory'
+      return `${path} is already accessible within ${within} ${chalk.bold(result.workingDir)}.`
+    }
     case 'success':
       return `Added ${chalk.bold(result.absolutePath)} as a working directory.`
   }
