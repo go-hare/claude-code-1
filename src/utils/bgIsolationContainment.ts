@@ -40,7 +40,7 @@ import { expandPath } from './path.js'
 import { getPlatform } from './platform.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { isClaudeWorktreesPath } from './worktreeGitIsolation.js'
-import { getCurrentWorktreeSession } from './worktree.js'
+import { getCurrentWorktreeSession, isLinkedWorktree } from './worktree.js'
 
 export type BgIsolationMode = 'worktree' | 'none'
 
@@ -1214,8 +1214,15 @@ export function checkBgIsolationWriteBlock(
   if (findGitRoot(sharedRoot) === null) {
     return null
   }
-  // densable dge: already in a worktree → no pre-isolation block
+  // densable cR(o): already in a worktree → no pre-isolation block
   if (isGitWorktreeCheckout(sharedRoot) || isClaudeWorktreesPath(getCwd())) {
+    return null
+  }
+  // densable Q$ Fkn arm 1:1 (2.1.251 #26):
+  // if (u.canonical !== null && Fkn(u.canonical)) return null
+  // Linked worktree path (incl. `git worktree add`) is accepted; no invent
+  // of ancestor /proc/self/fd walks beyond gold Fkn/Q$.
+  if (file.canonical !== null && isLinkedWorktree(file.canonical)) {
     return null
   }
 
@@ -1223,10 +1230,11 @@ export function checkBgIsolationWriteBlock(
   if (cls === 'unresolvable') return unresolvableMessage()
   if (cls === 'network') return networkMessage()
 
+  const k = shared.canonical !== null
   if (ctx.agentId) {
-    return `This subagent's parent bg session hasn't isolated yet, so writes to the shared checkout are blocked. Re-spawn this agent with \`isolation: "worktree"\`, or have the parent call ${ENTER_WORKTREE_TOOL_NAME} before spawning. (To disable this guard for this repo, set \`"worktree": {"bgIsolation": "none"}\` in .claude/settings.json.)`
+    return `This subagent's parent bg session hasn't isolated yet, so writes to the shared checkout are blocked. Re-spawn this agent with \`isolation: "worktree"\`${k ? `, have the parent call ${ENTER_WORKTREE_TOOL_NAME} before spawning, or make the edit inside a linked git worktree you create for this task with \`git worktree add\` — paths inside a worktree are accepted` : `, or have the parent call ${ENTER_WORKTREE_TOOL_NAME} before spawning`}. (To disable this guard for this repo, set \`"worktree": {"bgIsolation": "none"}\` in .claude/settings.json.)`
   }
-  return `This background session hasn't isolated its changes yet. Call ${ENTER_WORKTREE_TOOL_NAME} first so edits land in a worktree instead of the shared checkout, then retry this edit using the worktree path. (To disable this guard for this repo, set \`"worktree": {"bgIsolation": "none"}\` in .claude/settings.json.)`
+  return `This background session hasn't isolated its changes yet. Call ${ENTER_WORKTREE_TOOL_NAME} first so edits land in a worktree instead of the shared checkout, then retry this edit using the worktree path${k ? ' (a path inside a linked git worktree, including one you create with `git worktree add`, is accepted)' : ''}. (To disable this guard for this repo, set \`"worktree": {"bgIsolation": "none"}\` in .claude/settings.json.)`
 }
 
 /**

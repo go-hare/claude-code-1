@@ -518,7 +518,9 @@ export const FileEditTool = buildTool({
 
     const approved = takeApprovedFileToolPath(absoluteFilePath)
     const openedWrite = await openApprovedWrite(absoluteFilePath, approved, {
+      // densable DH: Edit replaces the leaf — recheck ao(dirname).map(join leaf)
       createParents: true,
+      leaf: 'replace',
     })
     let openedRead: ApprovedRead | null = null
     let originalFileContents = ''

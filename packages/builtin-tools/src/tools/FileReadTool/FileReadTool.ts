@@ -659,7 +659,11 @@ export const FileReadTool = buildTool({
     try {
       let opened: Awaited<ReturnType<typeof openApprovedRead>> | null = null
       try {
-        opened = await openApprovedRead(fullFilePath, approvedReadPaths)
+        opened = await openApprovedRead(
+          fullFilePath,
+          approvedReadPaths,
+          context.abortController.signal,
+        )
       } catch (error) {
         // ENOENT stays on the similar-file path; a swapped symlink does not.
         if (!isENOENT(error)) throw error

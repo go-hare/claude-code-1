@@ -487,6 +487,77 @@ describe('checkBgIsolationWriteBlock densable hsr', () => {
     expect(msg).not.toBeNull()
     expect(msg!).toContain("parent bg session hasn't isolated yet")
     expect(msg!).toContain('isolation: "worktree"')
+    expect(msg!).toContain('git worktree add')
+    expect(msg!).toContain('paths inside a worktree are accepted')
+  })
+
+  test('pre-isolation bg denial names git worktree add as accepted path', () => {
+    const { sharedFile } = makeFixture()
+    mockIsBgSession.mockReturnValue(true)
+    mockGetCurrentWorktreeSession.mockReturnValue(null)
+    const msg = checkBgIsolationWriteBlock(sharedFile)
+    expect(msg).not.toBeNull()
+    expect(msg!).toContain('git worktree add')
+    expect(msg!).toContain('linked git worktree')
+  })
+
+  test('densable Fkn/Q$: linked worktree write is allowed from shared cwd', () => {
+    const { shared, worktree } = makeFixture()
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'bgiso',
+      GIT_AUTHOR_EMAIL: 'bgiso@test',
+      GIT_COMMITTER_NAME: 'bgiso',
+      GIT_COMMITTER_EMAIL: 'bgiso@test',
+    }
+
+    // Sibling worktree outside shared checkout (classic `git worktree add` path).
+    const siblingFile = join(worktree, 'inside-sibling.ts')
+    writeFileSync(siblingFile, 'sibling\n', 'utf8')
+
+    // Nested under shared — also a linked worktree.
+    const nested = join(shared, 'linked-wt')
+    execFileSync('git', ['worktree', 'add', '-b', 'linked-wt', nested], {
+      cwd: shared,
+      stdio: 'ignore',
+      env: gitEnv,
+    })
+    const nestedFile = join(nested, 'inside.ts')
+    writeFileSync(nestedFile, 'nested\n', 'utf8')
+
+    // Claude-managed path under <repo>/.claude/worktrees/…
+    const claudeWt = join(shared, '.claude', 'worktrees', 'claude-wt')
+    mkdirSync(join(shared, '.claude', 'worktrees'), { recursive: true })
+    execFileSync('git', ['worktree', 'add', '-b', 'claude-wt', claudeWt], {
+      cwd: shared,
+      stdio: 'ignore',
+      env: gitEnv,
+    })
+    const claudeFile = join(claudeWt, 'inside-claude.ts')
+    writeFileSync(claudeFile, 'claude\n', 'utf8')
+
+    expect(realWorktree.isLinkedWorktree(worktree)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(siblingFile)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(nested)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(nestedFile)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(claudeWt)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(claudeFile)).toBe(true)
+    expect(realWorktree.isLinkedWorktree(shared)).toBe(false)
+    // Alias keeps call-site compatibility.
+    expect(realWorktree.isLinkedGitWorktree(nested)).toBe(true)
+
+    mockIsBgSession.mockReturnValue(true)
+    mockGetCurrentWorktreeSession.mockReturnValue(null)
+    // Q$: if (u.canonical !== null && Fkn(u.canonical)) return null
+    expect(checkBgIsolationWriteBlock(siblingFile)).toBeNull()
+    expect(checkBgIsolationWriteBlock(nestedFile)).toBeNull()
+    expect(checkBgIsolationWriteBlock(claudeFile)).toBeNull()
+    expect(
+      checkBgIsolationWriteBlock(nestedFile, { agentId: 'agent-nested' }),
+    ).toBeNull()
+    expect(
+      checkBgIsolationWriteBlock(siblingFile, { agentId: 'agent-sibling' }),
+    ).toBeNull()
   })
 
   test('bgIsolation none disables pre-isolation block', () => {
