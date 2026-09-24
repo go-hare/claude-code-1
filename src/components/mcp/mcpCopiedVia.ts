@@ -3,7 +3,11 @@
  * "sign-in URL" is older changelog text and is not in these functions.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getClipboardPath, setClipboard } from '@anthropic/ink'
+import {
+  getClipboardPath,
+  probeLinuxClipboardTool,
+  setClipboard,
+} from '@anthropic/ink'
 import type { ClipboardPath } from '@anthropic/ink'
 
 export type McpCopiedVia = 'native' | 'tmux-buffer' | 'osc52' | null
@@ -12,71 +16,89 @@ const MCP_COPY_DEBOUNCE_MS = 2000
 const MCP_COPY_NATIVE_CLEAR_MS = 2000
 
 /**
- * densable ZW — `{copiedVia, copy, reset}` using the existing clipboard
- * path helper (zue / getClipboardPath) and setClipboard (yy).
+ * densable `xt` — `{setTimeout}` returns a cancel fn, not a timer id.
+ * ZW stores `o.current?.()` / `n.current?.()`.
  */
-export function useMcpCopiedVia(): {
+const mcpCopyClock = {
+  setTimeout(onFire: () => void, ms: number): () => void {
+    const timer = setTimeout(onFire, ms)
+    return () => clearTimeout(timer)
+  },
+}
+
+/**
+ * densable ZW(r) — `{copiedVia, copy, reset}`.
+ * URL change: reset, then Xht (`probeLinuxClipboardTool`) when r !== null.
+ */
+export function useMcpCopiedVia(url: string | null): {
   copiedVia: ClipboardPath | null
   copy: (text: string) => void
   reset: () => void
 } {
+  const s = mcpCopyClock
   const [copiedVia, setCopiedVia] = useState<ClipboardPath | null>(null)
-  const mountedRef = useRef(true)
+  const nativeClearRef = useRef<(() => void) | null>(null)
   const lastTextRef = useRef<string | null>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const nativeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debounceRef = useRef<(() => void) | null>(null)
   const generationRef = useRef(0)
+  const mountedRef = useRef(true)
 
   const reset = useCallback(() => {
     generationRef.current += 1
-    if (debounceRef.current !== null) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-    if (nativeClearRef.current !== null) {
-      clearTimeout(nativeClearRef.current)
-      nativeClearRef.current = null
-    }
+    debounceRef.current?.()
+    debounceRef.current = null
     lastTextRef.current = null
+    nativeClearRef.current?.()
+    nativeClearRef.current = null
     setCopiedVia(null)
   }, [])
+
+  useEffect(() => {
+    reset()
+    if (url !== null) void probeLinuxClipboardTool()
+  }, [url, reset])
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      reset()
-    }
-  }, [reset])
-
-  const copy = useCallback((text: string) => {
-    if (lastTextRef.current === text) return
-    lastTextRef.current = text
-    if (debounceRef.current !== null) {
-      clearTimeout(debounceRef.current)
-    }
-    debounceRef.current = setTimeout(() => {
+      debounceRef.current?.()
       debounceRef.current = null
       lastTextRef.current = null
-    }, MCP_COPY_DEBOUNCE_MS)
-    const via = getClipboardPath()
-    const generation = generationRef.current
-    void setClipboard(text).then(raw => {
-      if (!mountedRef.current || generation !== generationRef.current) return
-      if (raw) process.stdout.write(raw)
-      if (nativeClearRef.current !== null) {
-        clearTimeout(nativeClearRef.current)
-        nativeClearRef.current = null
-      }
-      setCopiedVia(via)
-      if (via === 'native') {
-        nativeClearRef.current = setTimeout(() => {
-          nativeClearRef.current = null
-          setCopiedVia(null)
-        }, MCP_COPY_NATIVE_CLEAR_MS)
-      }
-    })
+      nativeClearRef.current?.()
+      nativeClearRef.current = null
+    }
   }, [])
+
+  const copy = useCallback(
+    (text: string) => {
+      if (lastTextRef.current === text) return
+      lastTextRef.current = text
+      debounceRef.current?.()
+      debounceRef.current = s.setTimeout(() => {
+        debounceRef.current = null
+        lastTextRef.current = null
+      }, MCP_COPY_DEBOUNCE_MS)
+      const via = getClipboardPath()
+      const generation = generationRef.current
+      void setClipboard(text).then(raw => {
+        if (!mountedRef.current || generation !== generationRef.current) {
+          return
+        }
+        if (raw) process.stdout.write(raw)
+        nativeClearRef.current?.()
+        nativeClearRef.current = null
+        setCopiedVia(via)
+        if (via === 'native') {
+          nativeClearRef.current = s.setTimeout(() => {
+            nativeClearRef.current = null
+            setCopiedVia(null)
+          }, MCP_COPY_NATIVE_CLEAR_MS)
+        }
+      })
+    },
+    [s],
+  )
 
   return { copiedVia, copy, reset }
 }

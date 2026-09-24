@@ -31,6 +31,7 @@ import type { PermissionUpdate as InternalPermissionUpdate } from 'src/types/per
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { type HookCallback, hookJSONOutputSchema } from 'src/types/hooks.js'
+import { createCombinedAbortSignal } from 'src/utils/combinedAbortSignal.js'
 import { stampIdLessAssistantEntry } from 'src/utils/conversationRecovery.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logForDiagnosticsNoPII } from 'src/utils/diagLogs.js'
@@ -247,22 +248,6 @@ export function isJsonRpcRequestMessage(message: JSONRPCMessage): boolean {
   if (typeof message !== 'object' || message === null) return false
   if (!('method' in message) || !('id' in message)) return false
   return message.id !== null
-}
-
-function armSdkMcpHostWait(timeoutMs: number): {
-  signal: AbortSignal
-  cleanup: () => void
-} {
-  const controller = new AbortController()
-  const timer = setTimeout(() => {
-    controller.abort()
-  }, timeoutMs)
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timer)
-    },
-  }
 }
 
 export class StructuredIO {
@@ -1341,7 +1326,7 @@ export class StructuredIO {
   ): Promise<JSONRPCMessage> {
     const wait = isJsonRpcRequestMessage(message)
       ? undefined
-      : armSdkMcpHostWait(timeoutMs)
+      : createCombinedAbortSignal(undefined, { timeoutMs })
     try {
       const response = await this.sendRequest<{ mcp_response: JSONRPCMessage }>(
         {

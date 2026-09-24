@@ -40,7 +40,7 @@ describe('densable 2.1.251 #35 MCP copiedVia', () => {
       'utf8',
     )
     expect(menu).toContain('copiedVia')
-    expect(menu).toContain('useMcpCopiedVia')
+    expect(menu).toContain('useMcpCopiedVia(copyUrl)')
     expect(menu).toContain('McpUrlCopyDetail')
     expect(menu).not.toContain('urlCopied')
     expect(menu).not.toContain('(Copied!)')
@@ -52,8 +52,11 @@ describe('densable 2.1.251 #35 MCP copiedVia', () => {
       'utf8',
     )
     expect(hook).toContain('export function useMcpCopiedVia')
+    expect(hook).toContain('useMcpCopiedVia(url: string | null)')
     expect(hook).toContain('getClipboardPath()')
     expect(hook).toContain('setClipboard(text)')
+    expect(hook).toContain('probeLinuxClipboardTool()')
+    expect(hook).toContain('if (url !== null)')
     expect(hook).toContain('return { copiedVia, copy, reset }')
   })
 })

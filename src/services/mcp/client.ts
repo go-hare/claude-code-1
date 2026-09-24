@@ -4619,11 +4619,14 @@ function extractToolUseId(message: AssistantMessage): string | undefined {
 
 /**
  * Sets up SDK MCP clients by creating transports and connecting them.
- * This is used for SDK MCP servers that run in the same process as the SDK.
+ * densable 2.1.251 #29 `Rd`: each server via Promise.allSettled; only a thrown
+ * server is marked failed. Callee-present arms only — no invent of
+ * connect analytics names ABSENT from sink, `qo` instruction scrub, `gD`, or
+ * `getNegotiatedProtocolVersion` (ABSENT).
  *
  * @param sdkMcpConfigs - The SDK MCP server configurations
  * @param sendMcpMessage - Callback to send MCP messages through the control channel
- * @returns Connected clients, their tools, and transport map for message routing
+ * @returns Connected clients, their tools, and MCP skill commands
  */
 export async function setupSdkMcpClients(
   sdkMcpConfigs: Record<string, McpSdkServerConfig>,
@@ -4634,30 +4637,50 @@ export async function setupSdkMcpClients(
 ): Promise<{
   clients: MCPServerConnection[]
   tools: Tool[]
+  commands: Command[]
 }> {
   const clients: MCPServerConnection[] = []
   const tools: Tool[] = []
+  const commands: Command[] = []
 
-  // Connect to all servers in parallel
+  // densable Rd — connect every SDK server in parallel; catch keeps only that
+  // name failed so one handshake stall does not take down the batch.
   const results = await Promise.allSettled(
     Object.entries(sdkMcpConfigs).map(async ([name, config]) => {
       const transport = new SdkControlClientTransport(name, sendMcpMessage)
 
       // densable: sdk-control transport is always legacy negotiation.
+      // gold `co("sdk-control")` ABSENT as a discrete factory — mode:'legacy'
+      // is the local densable plan equivalent.
       const client = createDensableMcpClient({ mode: 'legacy' })
 
       try {
-        // Connect the client
         await client.connect(transport)
 
-        // Get capabilities from the server
         const capabilities = client.getServerCapabilities()
+        const serverVersion = client.getServerVersion()
+        const rawInstructions = client.getInstructions()
+        // densable Rd `qo(x,b)` scrub ABSENT — same truncation as connectToServer.
+        let instructions = rawInstructions
+        if (
+          rawInstructions &&
+          rawInstructions.length > MAX_MCP_DESCRIPTION_LENGTH
+        ) {
+          instructions =
+            rawInstructions.slice(0, MAX_MCP_DESCRIPTION_LENGTH) +
+            '… [truncated]'
+          logMCPDebug(
+            name,
+            `Server instructions truncated from ${rawInstructions.length} to ${MAX_MCP_DESCRIPTION_LENGTH} chars`,
+          )
+        }
 
-        // Create the connected client object
         const connectedClient: MCPServerConnection = {
           type: 'connected',
           name,
           capabilities: capabilities || {},
+          serverInfo: serverVersion,
+          instructions,
           client,
           config: { ...config, scope: 'dynamic' as const },
           cleanup: async () => {
@@ -4666,19 +4689,33 @@ export async function setupSdkMcpClients(
           protocolEra: readClientProtocolEra(client),
         }
 
-        // Fetch tools if the server has them
+        // densable Rd: mr().toolLists.delete + at.invalidateMcpSkillsForServer —
+        // local memo is fetchTools / fetchMcpSkills keyed by server name.
+        fetchToolsForClient.cache.delete(name)
+        if (feature('MCP_SKILLS')) {
+          fetchMcpSkillsForClient!.cache.delete(name)
+        }
+
         const serverTools: Tool[] = []
         if (capabilities?.tools) {
           const sdkTools = await fetchToolsForClient(connectedClient)
           serverTools.push(...sdkTools)
         }
 
+        // densable Rd: mu() && resources → at.fetchMcpSkillsForClient
+        const serverCommands =
+          feature('MCP_SKILLS') && capabilities?.resources
+            ? await fetchMcpSkillsForClient!(connectedClient)
+            : []
+
+        // densable success connect analytics callee ABSENT — no invent.
         return {
           client: connectedClient,
           tools: serverTools,
+          commands: serverCommands,
         }
       } catch (error) {
-        // If connection fails, return failed server
+        // densable failed-connect analytics pair ABSENT — logMCPError only.
         logMCPError(name, `Failed to connect SDK MCP server: ${error}`)
         return {
           client: {
@@ -4687,19 +4724,35 @@ export async function setupSdkMcpClients(
             config: { ...config, scope: 'user' as const },
           },
           tools: [],
+          commands: [],
         }
       }
     }),
   )
 
-  // Process results and collect clients and tools
   for (const result of results) {
     if (result.status === 'fulfilled') {
       clients.push(result.value.client)
       tools.push(...result.value.tools)
+      commands.push(...result.value.commands)
     }
-    // If rejected (unexpected), the error was already logged inside the promise
   }
 
-  return { clients, tools }
+  // densable Rd: any connected + resources → ensure List/Read once.
+  // gold also pushes `gD` (ABSENT here) — only UA/VA (List/Read) are present.
+  if (
+    clients.some(
+      connection =>
+        connection.type === 'connected' && !!connection.capabilities?.resources,
+    )
+  ) {
+    const hasResourceTools = [ListMcpResourcesTool, ReadMcpResourceTool].some(
+      tool => tools.some(t => toolMatchesName(t, tool.name)),
+    )
+    if (!hasResourceTools) {
+      tools.push(ListMcpResourcesTool, ReadMcpResourceTool)
+    }
+  }
+
+  return { clients, tools, commands }
 }

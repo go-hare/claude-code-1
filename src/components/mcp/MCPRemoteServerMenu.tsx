@@ -98,7 +98,10 @@ export function MCPRemoteServerMenu({
   const [isClaudeAIClearingAuth, setIsClaudeAIClearingAuth] = useState(false);
   const [claudeAIClearAuthUrl, setClaudeAIClearAuthUrl] = useState<string | null>(null);
   const [claudeAIClearAuthBrowserOpened, setClaudeAIClearAuthBrowserOpened] = useState(false);
-  const { copiedVia, copy: copyViaClipboard } = useMcpCopiedVia();
+  // densable `gt=xe||we||(ot?Q4():null)` then `ZW(gt)`. Q4 body is not in this
+  // item; pass the three menu URLs ZW already sees on `c`.
+  const copyUrl = authorizationUrl || claudeAIAuthUrl || claudeAIClearAuthUrl;
+  const { copiedVia, copy: copyViaClipboard } = useMcpCopiedVia(copyUrl);
   const unmountedRef = useRef(false);
   const [callbackUrlInput, setCallbackUrlInput] = useState('');
   const [callbackUrlCursorOffset, setCallbackUrlCursorOffset] = useState(0);
@@ -243,9 +246,8 @@ export function MCPRemoteServerMenu({
       }
     }
     if (input === 'c') {
-      const urlToCopy = authorizationUrl || claudeAIAuthUrl || claudeAIClearAuthUrl;
-      if (urlToCopy) {
-        copyViaClipboard(urlToCopy);
+      if (copyUrl) {
+        copyViaClipboard(copyUrl);
       }
     }
   });

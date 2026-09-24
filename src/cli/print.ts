@@ -189,7 +189,10 @@ import { cwd } from 'process'
 import { getCwd } from 'src/utils/cwd.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
-import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
+import {
+  isRemotePolicyAllowed,
+  waitForPolicyLimitsToLoad,
+} from 'src/services/policyLimits/index.js'
 import type { ReplBridgeHandle } from 'src/bridge/replBridge.js'
 import { forwardParentToolUseSdkFrame } from 'src/bridge/subagentSdkFrames.js'
 import { getRemoteSessionUrl } from 'src/constants/product.js'
@@ -7238,7 +7241,8 @@ async function loadInitialMessages(
   // Handle teleport in print mode
   if (options.teleport) {
     try {
-      if (!isPolicyAllowed('allow_remote_sessions')) {
+      await waitForPolicyLimitsToLoad()
+      if (!isRemotePolicyAllowed('allow_remote_sessions')) {
         throw new Error(
           "Remote sessions are disabled by your organization's policy.",
         )
