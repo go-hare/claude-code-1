@@ -4742,13 +4742,8 @@ export function REPL({
               }),
             );
           } else {
-            setMessages(oldMessages => [...oldMessages, newMessage]);
-            // densable slt: onStreamingText(() => null) then onMessage in same
-            // call. Extra clear here if that updater is dropped/races, so a
-            // trailing-newline short reply cannot keep painting streaming ●
-            // while isLoading stays true through tools.
+            // densable: salvage/remove-by-uuid BEFORE Nt()?eBt:append (one copy).
             if (newMessage.type === 'assistant') {
-              // densable land: if salvage active, stash Jpe for r7o + hG remove-by-uuid + setSalvage(null)
               const st = streamingDisplayStore.getState();
               if (
                 st.salvage !== null &&
@@ -4780,10 +4775,22 @@ export function REPL({
                       void removeTranscriptMessage(uuid as `${string}-${string}-${string}-${string}-${string}`);
                     }
                   }
-                  // densable: ck.setSalvage(null) immediately on land
                   streamingDisplayStore.setSalvage(null);
                 }
               }
+            }
+            // densable 2.1.251 #46: Nt()? append-or-move-by-uuid : append
+            if (isFullscreenEnvEnabled()) {
+              setMessages(oldMessages =>
+                applyMessageStoreAction(oldMessages, {
+                  type: 'append-or-move-by-uuid',
+                  message: newMessage,
+                }),
+              );
+            } else {
+              setMessages(oldMessages => [...oldMessages, newMessage]);
+            }
+            if (newMessage.type === 'assistant') {
               clearStreamingText();
             }
           }
