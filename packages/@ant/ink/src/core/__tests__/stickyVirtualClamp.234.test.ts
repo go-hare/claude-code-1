@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
 /**
- * Sticky paint must drop leftover virtual-range clamp before drawing.
- * useVirtualScroll clears clamp in useLayoutEffect; Ink can paint sticky
- * follow / alreadySticky scrollToBottom before that effect — leftover
- * [min,max] from a scrolled-up range paints into topSpacer (empty
- * transcript, logo at y=0, isSticky still true so no Jump-to-bottom pill).
+ * Gold densable 2.1.251: `cn = un && !yt ? clamp(et) : et`.
+ * Sticky skips APPLY of leftover virtual-range clamp (so sticky follow
+ * does not paint into topSpacer) but MUST NOT delete scrollClampMin/Max —
+ * the next unsticky wheel frame still needs those bounds until React
+ * rewrites them in useLayoutEffect.
  */
 describe('render-node-to-output sticky virtual-range clamp skip', () => {
-  test('source: liveSticky clears clamp then applyVirtualScrollRangeClamp', async () => {
+  test('source: liveSticky skips apply, does not clear clamp fields', async () => {
     const src = await Bun.file(
       join(import.meta.dir, '../render-node-to-output.ts'),
     ).text()
@@ -18,10 +18,9 @@ describe('render-node-to-output sticky virtual-range clamp skip', () => {
     expect(idx).toBeGreaterThan(0)
     const applyIdx = src.indexOf('applyVirtualScrollRangeClamp(', idx)
     expect(applyIdx).toBeGreaterThan(idx)
-    const slice = src.slice(idx, applyIdx + 200)
-    expect(slice).toMatch(/if \(liveSticky\)/)
-    expect(slice).toMatch(/node\.scrollClampMin = undefined/)
-    expect(slice).toMatch(/node\.scrollClampMax = undefined/)
+    const slice = src.slice(idx, applyIdx + 250)
+    expect(slice).not.toMatch(/node\.scrollClampMin = undefined/)
+    expect(slice).not.toMatch(/node\.scrollClampMax = undefined/)
     expect(slice).toMatch(/applyVirtualScrollRangeClamp\(/)
     expect(slice).toMatch(/liveSticky/)
   })

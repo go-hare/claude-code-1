@@ -893,14 +893,13 @@ function renderNodeToOutput(
             node.stickyScroll = true
           }
         }
-        // Live sticky must not paint through leftover virtual-range clamp.
-        // useVirtualScroll clears clamp in useLayoutEffect, but Ink can paint
-        // (sticky follow, alreadySticky scrollToBottom) before that effect.
+        // Gold densable 2.1.251: yt = stickyScroll ?? Boolean(attr).
+        // Visual clamp is `cn = un && !yt ? clamp(et) : et` — skip APPLY when
+        // sticky, do NOT delete scrollClampMin/Max. Clearing the fields here
+        // left the next unsticky wheel frame without a clamp until
+        // useLayoutEffect rewrote bounds → drain painted into spacer (blank
+        // screen + Jump to bottom).
         const liveSticky = node.stickyScroll ?? Boolean(stickyAttr)
-        if (liveSticky) {
-          node.scrollClampMin = undefined
-          node.scrollClampMax = undefined
-        }
         const followDelta = (node.scrollTop ?? 0) - scrollTopBeforeFollow
         if (followDelta > 0) {
           const vpTop = node.scrollViewportTop ?? 0

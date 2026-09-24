@@ -91,9 +91,10 @@ export function clampVisualScrollTop(
 
 /**
  * Virtual-list mounted-range clamp (ScrollBox.scrollClampMin/Max).
- * Skip when sticky: leftover bounds from a prior scrolled-up range would
- * paint into topSpacer while isSticky() is still true (no Jump-to-bottom
- * pill) — empty transcript with the logo pinned at y=0.
+ * Gold: `cn = un && !yt ? Math.max($e, Math.min(et, gt)) : et`.
+ * Skip APPLY when sticky so leftover bounds do not paint into topSpacer
+ * (empty transcript, logo at y=0, no Jump-to-bottom). Do not delete the
+ * fields — the next unsticky frame still needs them until React rewrites.
  */
 export function applyVirtualScrollRangeClamp(
   visualScrollTop: number,
