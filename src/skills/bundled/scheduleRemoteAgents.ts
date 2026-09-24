@@ -1,9 +1,10 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { MCPServerConnection } from '../../services/mcp/types.js'
-import { isPolicyAllowed } from '../../services/policyLimits/index.js'
+import { isRemotePolicyAllowed } from '../../services/policyLimits/index.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/prompt.js'
 import { REMOTE_TRIGGER_TOOL_NAME } from '@claude-code/builtin-tools/tools/RemoteTriggerTool/prompt.js'
+import { getStrictMcpConfig } from '../../bootstrap/state.js'
 import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
 import { checkRepoForRemoteAccess } from '../../utils/background/remote/preconditions.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -11,7 +12,11 @@ import {
   detectCurrentRepositoryWithHost,
   parseGitRemote,
 } from '../../utils/detectRepository.js'
+import { isBareMode, isEnvDefinedFalsy } from '../../utils/envUtils.js'
 import { getRemoteUrl } from '../../utils/git.js'
+import { isClaudeAiConnectorsDisabledBySources } from '../../utils/residualFinalEnvGates.js'
+import { SETTING_SOURCES } from '../../utils/settings/constants.js'
+import { getSettingsForSource } from '../../utils/settings/settings.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   createDefaultCloudEnvironment,
@@ -23,6 +28,7 @@ import {
   countClaudeCodeConfiguredMcpServers,
   formatScheduleConnectorsInfo,
   formatScheduleNoConnectorNote,
+  resolveConnectorFetchSkipReason,
 } from './scheduleConnectorsCopy.js'
 
 // Base58 alphabet (Bitcoin-style) used by the tagged ID system
@@ -102,11 +108,70 @@ function sanitizeConnectorName(name: string): string {
 function formatConnectorsInfo(
   connectors: ConnectorInfo[],
   localOnlyServerCount: number,
+  skipReason: ReturnType<typeof resolveConnectorFetchSkipReason>,
+  hasUnlistedTrustedConnector: boolean,
 ): string {
   return formatScheduleConnectorsInfo(
     connectors,
     localOnlyServerCount,
     sanitizeConnectorName,
+    {
+      skipReason,
+      hasUnlistedTrustedConnector,
+    },
+  )
+}
+
+/**
+ * densable we/F skip-reason producer `v` — lockdown / restricted / optout /
+ * safe-mode / missing-scope from session gates.
+ */
+function resolveScheduleConnectorSkipReason(): ReturnType<
+  typeof resolveConnectorFetchSkipReason
+> {
+  const tokens = getClaudeAIOAuthTokens()
+  const disableFlags = SETTING_SOURCES.map(
+    source => getSettingsForSource(source)?.disableClaudeAiConnectors,
+  )
+  const allowAll = SETTING_SOURCES.some(
+    source => getSettingsForSource(source)?.allowAllClaudeAiMcps === true,
+  )
+  // org manages when policy disables without allowAll — approximate Obe via
+  // managed settings presence of allowAllClaudeAiMcps false path is covered
+  // by disable + lockdown when org-managed; local has no separate org list.
+  return resolveConnectorFetchSkipReason({
+    orgManagesClaudeAiMcps: false,
+    allowAllClaudeAiMcps: allowAll,
+    strictConfig: getStrictMcpConfig(),
+    bareOrSimple: isBareMode(),
+    enableClaudeAiMcpServers: isEnvDefinedFalsy(
+      process.env.ENABLE_CLAUDEAI_MCP_SERVERS,
+    )
+      ? false
+      : process.env.ENABLE_CLAUDEAI_MCP_SERVERS === undefined
+        ? undefined
+        : true,
+    disableClaudeAiConnectors:
+      isClaudeAiConnectorsDisabledBySources(disableFlags),
+    mcpClaudeAiSafeMode: getFeatureValue_CACHED_MAY_BE_STALE(
+      'mcpClaudeAi',
+      false,
+    ),
+    hasMcpServersScope: tokens?.scopes?.includes('user:mcp_servers') ?? false,
+  })
+}
+
+/**
+ * densable g — pending/failed claudeai connector still connecting.
+ */
+function hasUnlistedTrustedClaudeAiConnector(
+  mcpClients: MCPServerConnection[] | undefined,
+): boolean {
+  if (!mcpClients) return false
+  return mcpClients.some(
+    c =>
+      c.config?.type === 'claudeai-proxy' &&
+      (c.type === 'failed' || c.type === 'pending'),
   )
 }
 
@@ -333,7 +398,7 @@ export function registerScheduleRemoteAgentsSkill(): void {
     userInvocable: true,
     isEnabled: () =>
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_surreal_dali', false) &&
-      isPolicyAllowed('allow_remote_sessions'),
+      isRemotePolicyAllowed('allow_remote_sessions'),
     allowedTools: [REMOTE_TRIGGER_TOOL_NAME, ASK_USER_QUESTION_TOOL_NAME],
     async getPromptForCommand(args: string, context: ToolUseContext) {
       if (!getClaudeAIOAuthTokens()?.accessToken) {
@@ -420,14 +485,25 @@ export function registerScheduleRemoteAgentsSkill(): void {
       const localOnlyServerCount = countClaudeCodeConfiguredMcpServers(
         context.options.mcpClients,
       )
+      const skipReason = resolveScheduleConnectorSkipReason()
+      const unlisted = hasUnlistedTrustedClaudeAiConnector(
+        context.options.mcpClients,
+      )
       if (connectors.length === 0) {
-        setupNotes.push(formatScheduleNoConnectorNote(localOnlyServerCount))
+        setupNotes.push(
+          formatScheduleNoConnectorNote(localOnlyServerCount, {
+            skipReason,
+            hasUnlistedTrustedConnector: unlisted,
+          }),
+        )
       }
 
       const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
       const connectorsInfo = formatConnectorsInfo(
         connectors,
         localOnlyServerCount,
+        skipReason,
+        unlisted,
       )
       const gitRepoUrl = await getCurrentRepoHttpsUrl()
       const lines = ['Available environments:']
