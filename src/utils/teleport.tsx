@@ -9,12 +9,15 @@ import {
   getSessionId,
   markTeleportedSessionId,
 } from 'src/bootstrap/state.js';
-import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js';
+import {
+  checkGate_CACHED_OR_BLOCKING,
+  getFeatureValue_CACHED_MAY_BE_STALE,
+} from 'src/services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { isPolicyAllowed } from 'src/services/policyLimits/index.js';
+import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js';
 import { z } from 'zod/v4';
 import { getTeleportErrors, TeleportError, type TeleportLocalErrorType } from '../components/TeleportError.js';
 import { getOauthConfig } from '../constants/oauth.js';
@@ -244,7 +247,7 @@ function sessionGroupingCreateFailMessage(
 
 /** densable _8("allow_remote_sessions","Cloud sessions","are") deny copy. */
 function remoteSessionsPolicyDenyMessage(): string | null {
-  if (isPolicyAllowed('allow_remote_sessions')) return null;
+  if (isRemotePolicyAllowed('allow_remote_sessions')) return null;
   return "Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them.";
 }
 
@@ -615,7 +618,7 @@ export async function teleportResumeCodeSession(
   sessionId: string,
   onProgress?: TeleportProgressCallback,
 ): Promise<TeleportRemoteResponse> {
-  if (!isPolicyAllowed('allow_remote_sessions')) {
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
     throw new Error("Remote sessions are disabled by your organization's policy.");
   }
 
@@ -871,6 +874,8 @@ export type PollRemoteSessionResponse = {
   lastEventId: string | null;
   branch?: string;
   sessionStatus?: 'idle' | 'running' | 'requires_action' | 'archived';
+  /** densable z6: Q_r.startup_failure from session metadata GET. */
+  startupFailure?: string;
   /** densable OTe: set when session metadata GET fails (branch/status omitted). */
   metadataFetchError?: string;
 };
@@ -960,11 +965,13 @@ export async function pollRemoteSessionEvents(
   // Fetch session metadata (branch, status) — densable l3e with accessToken
   let branch: string | undefined;
   let sessionStatus: PollRemoteSessionResponse['sessionStatus'];
+  let startupFailure: string | undefined;
   let metadataFetchError: string | undefined;
   try {
     const sessionData = await fetchSession(sessionId, { accessToken });
     branch = getBranchFromSession(sessionData);
     sessionStatus = sessionData.session_status as PollRemoteSessionResponse['sessionStatus'];
+    startupFailure = sessionData.startup_failure;
   } catch (e) {
     metadataFetchError = errorMessage(e);
     logForDebugging(`teleport: failed to fetch session ${sessionId} metadata: ${e}`, { level: 'warn' });
@@ -975,6 +982,7 @@ export async function pollRemoteSessionEvents(
     lastEventId: cursor,
     branch,
     sessionStatus,
+    startupFailure,
     metadataFetchError,
   };
 }
@@ -2187,6 +2195,12 @@ export async function awaitRemoteSessionResult(
       } else if (ev.type === 'result') {
         lastResult = ev;
       }
+    }
+    // densable CLI O @199640294: startupFailure && $$t() throw before poll_timeout.
+    // $$t = tengu_linear_brook (default true). Message uses G8/j8 strip shape.
+    if (y.startupFailure && getFeatureValue_CACHED_MAY_BE_STALE('tengu_linear_brook', true)) {
+      const stripped = y.startupFailure.replace(/[<>]/g, '').slice(0, 200);
+      throw new Error(stripped ? `cloud session could not start: ${stripped}` : 'cloud session could not start');
     }
     if (y.sessionStatus === 'archived') {
       done = true;

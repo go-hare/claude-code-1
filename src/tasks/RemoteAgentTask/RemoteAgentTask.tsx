@@ -32,6 +32,7 @@ import {
   type RemoteAgentMetadata,
   writeRemoteAgentMetadata,
 } from '../../utils/sessionPaths.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
 import { appendTaskOutput, evictTaskOutput, getTaskOutputPath, initTaskOutput } from '../../utils/task/diskOutput.js';
 import { registerTask, updateTaskState } from '../../utils/task/framework.js';
@@ -803,6 +804,30 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         }
       }
 
+      // densable dnt: vut on the delta before startupFailure fail-fast.
+      if (task.isRemoteReview && logGrew && cachedReviewContent === null) {
+        cachedReviewContent = extractReviewTagFromLog(response.newEvents);
+      }
+      // densable dnt + $$t: fail on isRemoteReview && startupFailure && no tag
+      // instead of waiting out poll_timeout (cloud session exceeded 30 minutes).
+      if (
+        task.isRemoteReview &&
+        response.startupFailure &&
+        cachedReviewContent === null &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_linear_brook', true)
+      ) {
+        updateTaskState<RemoteAgentTaskState>(taskId, context.setAppState, t =>
+          t.status === 'running' ? { ...t, status: 'failed', endTime: Date.now() } : t,
+        );
+        const stripped = response.startupFailure.replace(/[<>]/g, '').slice(0, 200);
+        const reason = stripped ? `cloud session could not start: ${stripped}` : 'cloud session could not start';
+        enqueueRemoteReviewFailureNotification(taskId, reason, context.setAppState);
+        void evictTaskOutput(taskId);
+        void removeRemoteAgentMetadata(taskId);
+        runCompletionHook(taskId, task);
+        return;
+      }
+
       if (response.sessionStatus === 'archived') {
         updateTaskState<RemoteAgentTaskState>(taskId, context.setAppState, t =>
           t.status === 'running' ? { ...t, status: 'completed', endTime: Date.now() } : t,
@@ -861,15 +886,12 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         task.isUltraplan || task.isLongRunning ? undefined : accumulatedLog.findLast(msg => msg.type === 'result');
 
       // For remote-review: <remote-review> in hook_progress stdout is the
-      // bughunter path's completion signal. Scan only the delta to stay O(new);
-      // tag appears once at end of run so we won't miss it across ticks.
+      // bughunter path's completion signal. Delta scan is above, before
+      // densable dnt startupFailure fail-fast (vut then throw).
       // For the failure signal, debounce idle: remote sessions briefly flip
       // to 'idle' between every tool turn, so a single idle observation means
       // nothing. Require STABLE_IDLE_POLLS consecutive idle polls with no log
       // growth.
-      if (task.isRemoteReview && logGrew && cachedReviewContent === null) {
-        cachedReviewContent = extractReviewTagFromLog(response.newEvents);
-      }
       // Parse live progress counts from the orchestrator's heartbeat echoes.
       // hook_progress stdout is cumulative (every echo since hook start), so
       // each event contains all progress tags. Grab the LAST occurrence —

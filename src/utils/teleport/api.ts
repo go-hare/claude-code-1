@@ -18,6 +18,10 @@ import { logError } from '../log.js'
 import { getAPIProvider } from '../model/providers.js'
 import { sleep } from '../sleep.js'
 import { jsonStringify } from '../slowOperations.js'
+import {
+  deriveSessionStartupFailure,
+  type SessionStartupFailureSource,
+} from './startupFailure.js'
 
 // Retry configuration for teleport API requests
 const TELEPORT_RETRY_DELAYS = [2000, 4000, 8000, 16000] // 4 retries with exponential backoff
@@ -140,6 +144,8 @@ export type SessionResource = {
   created_at: string
   updated_at: string
   session_context: SessionContext
+  /** densable Q_r `startup_failure` — j8(last_init_error) or provision failed. */
+  startup_failure?: string
 }
 
 export type ListSessionsResponse = {
@@ -343,21 +349,26 @@ export async function prepareApiRequest(): Promise<{
 /**
  * densable zLc / ccrSessionToResource — map code-session API shape → SessionResource.
  */
-export function ccrSessionToResource(raw: {
-  id: string
-  title?: string | null
-  status?: string
-  worker_status?: string | null
-  environment_id?: string
-  created_at: string
-  updated_at?: string
-  last_event_at?: string
-  config?: {
-    sources?: SessionContextSource[]
-    outcomes?: Outcome[] | null
-    model?: string | null
-  }
-}): SessionResource {
+export function ccrSessionToResource(
+  raw: {
+    id: string
+    title?: string | null
+    status?: string
+    worker_status?: string | null
+    environment_id?: string
+    environment_kind?: string | null
+    created_at: string
+    updated_at?: string
+    last_event_at?: string
+    config?: {
+      sources?: SessionContextSource[]
+      outcomes?: Outcome[] | null
+      model?: string | null
+    }
+    external_metadata?: SessionStartupFailureSource['external_metadata']
+  },
+  opts?: { serverNow?: number },
+): SessionResource {
   const sessionStatus =
     raw.status === 'archived'
       ? 'archived'
@@ -381,6 +392,15 @@ export function ccrSessionToResource(raw: {
       custom_system_prompt: null,
       append_system_prompt: null,
     },
+    startup_failure: deriveSessionStartupFailure(
+      {
+        environment_kind: raw.environment_kind,
+        worker_status: raw.worker_status,
+        status: raw.status,
+        external_metadata: raw.external_metadata,
+      },
+      opts?.serverNow ?? Date.now(),
+    ),
   }
 }
 
@@ -561,7 +581,11 @@ export async function fetchSession(
   if (!raw?.id) {
     throw new Error(`Session not found: ${sessionId}`)
   }
-  return ccrSessionToResource(raw)
+  // densable A2: Date header → Q_r serverNow
+  const serverNow = Date.parse(String(response.headers?.date ?? ''))
+  return ccrSessionToResource(raw, {
+    serverNow: Number.isFinite(serverNow) ? serverNow : undefined,
+  })
 }
 
 /**

@@ -107,6 +107,49 @@ export type UpstreamProxyRelay = {
   stop: () => void
 }
 
+/** densable 2.1.251 #48 — status recentRelayFailures entries. */
+export type RelayFailureRecord = {
+  host?: string
+  reason: string
+  at: number
+}
+
+const recentRelayFailures: RelayFailureRecord[] = []
+const MAX_RELAY_FAILURES = 32
+
+function recordRelayFailure(reason: string, host?: string): void {
+  recentRelayFailures.push({ host, reason, at: Date.now() })
+  while (recentRelayFailures.length > MAX_RELAY_FAILURES) {
+    recentRelayFailures.shift()
+  }
+}
+
+/** Test/read helper for status. */
+export function getRecentRelayFailures(): readonly RelayFailureRecord[] {
+  return recentRelayFailures
+}
+
+export function clearRecentRelayFailuresForTests(): void {
+  recentRelayFailures.length = 0
+}
+
+/**
+ * densable GET /__agentproxy/status body — includes recentRelayFailures so
+ * tools can name host+reason after a bare mid-transfer reset (#48).
+ */
+export function buildAgentProxyStatusBody(
+  extra?: Record<string, unknown>,
+): string {
+  return JSON.stringify(
+    {
+      ...extra,
+      recentRelayFailures: [...recentRelayFailures],
+    },
+    null,
+    2,
+  )
+}
+
 type ConnState = {
   ws?: WebSocketLike
   connectBuf: Buffer
@@ -124,6 +167,8 @@ type ConnState = {
   // WS onerror is always followed by onclose; without a guard the second
   // handler would sock.end() an already-ended socket. First caller wins.
   closed: boolean
+  /** CONNECT target host:port when known (for failure records). */
+  connectTarget?: string
 }
 
 /**
@@ -316,12 +361,28 @@ function handleData(
     }
     const reqHead = st.connectBuf.subarray(0, headerEnd).toString('utf8')
     const firstLine = reqHead.split('\r\n')[0] ?? ''
+    // densable 2.1.251 #48: GET /__agentproxy/status → recentRelayFailures.
+    if (
+      /^GET\s+\/__agentproxy\/status(\?\S*)?\s+HTTP\/1\.[01]$/i.test(firstLine)
+    ) {
+      const body = buildAgentProxyStatusBody()
+      sock.write(
+        'HTTP/1.1 200 OK\r\n' +
+          'Content-Type: application/json; charset=utf-8\r\n' +
+          `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+          'Connection: close\r\n\r\n' +
+          body,
+      )
+      sock.end()
+      return
+    }
     const m = firstLine.match(/^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i)
     if (!m) {
       sock.write('HTTP/1.1 405 Method Not Allowed\r\n\r\n')
       sock.end()
       return
     }
+    st.connectTarget = m[1]
     // Stash any bytes that arrived after the CONNECT header so
     // openTunnel can flush them once the WS is open.
     const trailing = st.connectBuf.subarray(headerEnd + 4)
@@ -410,6 +471,10 @@ function openTunnel(
   ws.onerror = ev => {
     const msg = 'message' in ev ? String(ev.message) : 'websocket error'
     logForDebugging(`[upstreamproxy] ws error: ${msg}`)
+    // densable #48: mid-tunnel drop → bare reset at tool; status names host/reason.
+    if (st.established) {
+      recordRelayFailure(msg, st.connectTarget)
+    }
     if (st.closed) return
     st.closed = true
     if (!st.established) {
@@ -422,6 +487,9 @@ function openTunnel(
   ws.onclose = () => {
     if (st.closed) return
     st.closed = true
+    if (st.established) {
+      recordRelayFailure('connection reset', st.connectTarget)
+    }
     sock.end()
     cleanupConn(st)
   }
@@ -444,6 +512,11 @@ function forwardToWs(ws: WebSocketLike, data: Buffer): void {
 function cleanupConn(st: ConnState | undefined): void {
   if (!st) return
   if (st.pinger) clearInterval(st.pinger)
+  // Client hangup hits sock close → here → ws.close() → onclose. Latch
+  // closed first so onclose does not record a successful hangup as
+  // #48 "connection reset". Server/WS abort still records in onerror/onclose
+  // before calling cleanupConn.
+  st.closed = true
   if (st.ws && st.ws.readyState <= WebSocket.OPEN) {
     try {
       st.ws.close()

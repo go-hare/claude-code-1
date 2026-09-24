@@ -27,6 +27,12 @@ import { logForDebugging } from '../utils/debug.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { isENOENT } from '../utils/errors.js'
 import { NO_PROXY_EMBEDDED } from '../utils/agentProxy/noProxy.js'
+import {
+  agentProxyReadmePath,
+  buildAgentProxyEnvNote,
+  buildAgentProxyReadme,
+  setAgentProxyNote,
+} from './agentProxyPrompt.js'
 import { startUpstreamProxyRelay } from './relay.js'
 
 export const SESSION_TOKEN_PATH = '/run/ccr/session_token'
@@ -118,9 +124,33 @@ export async function initUpstreamProxy(opts?: {
   try {
     const wsUrl = baseUrl.replace(/^http/, 'ws') + '/v1/code/upstreamproxy/ws'
     const relay = await startUpstreamProxyRelay({ wsUrl, sessionId, token })
-    registerCleanup(async () => relay.stop())
+    registerCleanup(async () => {
+      setAgentProxyNote(undefined)
+      relay.stop()
+    })
     state = { enabled: true, port: relay.port, caBundlePath }
     logForDebugging(`[upstreamproxy] enabled on 127.0.0.1:${relay.port}`)
+    // densable 2.1.251 #48: An README + xe/Ept note (before agent tools run).
+    // Gold: Ept(xe(y,void 0)) then ee(U, An(port,y)) then Ept(xe(y,U)).
+    setAgentProxyNote(buildAgentProxyEnvNote(caBundlePath))
+    const readmePath = agentProxyReadmePath(caBundlePath)
+    void writeFile(
+      readmePath,
+      buildAgentProxyReadme(relay.port, caBundlePath),
+      'utf8',
+    )
+      .then(() => {
+        if (!state.enabled || state.port !== relay.port) return
+        setAgentProxyNote(buildAgentProxyEnvNote(caBundlePath, readmePath))
+      })
+      .catch((err: unknown) => {
+        logForDebugging(
+          `[upstreamproxy] README write failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'warn' },
+        )
+        if (!state.enabled || state.port !== relay.port) return
+        setAgentProxyNote(buildAgentProxyEnvNote(caBundlePath))
+      })
     // Only unlink after the listener is up: if CA download or listen()
     // fails, a supervisor restart can retry with the token still on disk.
     await unlink(tokenPath).catch(() => {
@@ -187,6 +217,7 @@ export function getUpstreamProxyEnv(): Record<string, string> {
 /** Test-only: reset module state between test cases. */
 export function resetUpstreamProxyForTests(): void {
   state = { enabled: false }
+  setAgentProxyNote(undefined)
 }
 
 async function readToken(path: string): Promise<string | null> {
