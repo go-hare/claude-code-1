@@ -2,8 +2,12 @@
  * densable `qge` / reconnect branch of inline `/mcp` (`ae`).
  * A server disabled in another session is still present here (type is not
  * `disabled`) while config says disabled. Reconnect reports that remedy
- * instead of a generic failure.
+ * instead of a generic failure / withheld-detail scrub.
+ *
+ * Gold callees (2.1.251 #23): `G8`, `YHe`, `Qo`, `XS`, `y$`, `UQ`, `$je`, `qge`.
  */
+
+import { formatMcpServerLabel } from './formatMcpServerLabel.js'
 
 export type McpRemedyClient = {
   name: string
@@ -32,6 +36,11 @@ function countWhere<T>(
   return n
 }
 
+/** densable `G8`. */
+export function mcpClientType(client: McpRemedyClient): string {
+  return client.type
+}
+
 /** densable `Qo`. */
 export function isConnectedOrCachedMcp(client: McpRemedyClient): boolean {
   return client.type === 'connected' || client.type === 'cached'
@@ -40,6 +49,60 @@ export function isConnectedOrCachedMcp(client: McpRemedyClient): boolean {
 /** densable `XS`. */
 export function isUnconfiguredMcp(client: McpRemedyClient): boolean {
   return client.type === 'failed' && client.errorCode === 'UNCONFIGURED'
+}
+
+/** densable `YHe`. */
+export function reconnectBlockStatus(
+  client: McpRemedyClient,
+): 'disabled' | 'pending' | 'needs-approval' | string | null {
+  const type = mcpClientType(client)
+  switch (type) {
+    case 'disabled':
+    case 'pending':
+    case 'needs-approval':
+      return type
+    case 'connected':
+    case 'failed':
+    case 'needs-auth':
+    case 'cached':
+      return null
+    default:
+      return type
+  }
+}
+
+/** densable `UQ`. */
+export function mcpDisabledLocallyRemedy(name: string): string {
+  return `"${formatMcpServerLabel(name)}" is disabled — enable it in /mcp first`
+}
+
+/**
+ * densable `y$` — singular RC / reconnect remedy when config is disabled
+ * but this session's client type is not yet `disabled`.
+ */
+export function mcpDisabledElsewhereSingularRemedy(name: string): string {
+  return `"${formatMcpServerLabel(name)}" was disabled in another session — disable and re-enable it in /mcp, or restart, to reconnect`
+}
+
+/**
+ * densable `$je` — singular still-available-here but disabled-elsewhere.
+ */
+export function mcpStillAvailableElsewhereDisabledRemedy(name: string): string {
+  return `"${formatMcpServerLabel(name)}" is still available in this session, but another session disabled it — it keeps working here and won't reconnect after the next launch. Disable and re-enable it in /mcp to persist the re-enable.`
+}
+
+/**
+ * densable reconnect gate before `reconnectMcpServerImpl` (`_i` + `UQ`/`y$`).
+ * Null when reconnect may proceed.
+ */
+export function mcpReconnectDisabledGateMessage(
+  client: McpRemedyClient | undefined,
+  name: string,
+  isDisabled: (name: string) => boolean,
+): string | null {
+  if (!isDisabled(name)) return null
+  if (client?.type === 'disabled') return mcpDisabledLocallyRemedy(name)
+  return mcpDisabledElsewhereSingularRemedy(name)
 }
 
 /** densable `B` && !isDisabled — `z`. */
@@ -51,25 +114,6 @@ function isReconnectCandidate(
     (client.type === 'failed' && !isUnconfiguredMcp(client)) ||
     client.type === 'needs-auth'
   return realFailure && !isDisabled(client.name)
-}
-
-/** densable `YHe`. */
-function reconnectBlockStatus(
-  client: McpRemedyClient,
-): 'disabled' | 'pending' | 'needs-approval' | null {
-  switch (client.type) {
-    case 'disabled':
-    case 'pending':
-    case 'needs-approval':
-      return client.type
-    case 'connected':
-    case 'failed':
-    case 'needs-auth':
-    case 'cached':
-      return null
-    default:
-      return null
-  }
 }
 
 /**
@@ -92,16 +136,17 @@ export function mcpServersDisabledElsewhereRemedy(
       client => client.type === 'disabled' && isDisabled(client.name),
     )
     return (
-      `${reenabled} MCP server(s) were re-enabled in another session, so this disable didn't persist for them \u2014 enable then disable each in /mcp to make it stick. Left alone, they connect on the next launch.` +
+      `${reenabled} MCP server(s) were re-enabled in another session, so this disable didn't persist for them — enable then disable each in /mcp to make it stick. Left alone, they connect on the next launch.` +
       (stillDisabled > 0
         ? ` The other ${stillDisabled} ${stillDisabled === 1 ? 'remains' : 'remain'} disabled.`
         : '')
     )
   }
+  // gold: i.type!=="disabled"&&G8(i)!=="needs-approval"&&t(i.name)
   const drifted = clients.filter(
     client =>
-      client.type !== 'disabled' &&
-      client.type !== 'needs-approval' &&
+      mcpClientType(client) !== 'disabled' &&
+      mcpClientType(client) !== 'needs-approval' &&
       isDisabled(client.name),
   )
   if (drifted.length === 0) return null
@@ -114,17 +159,17 @@ export function mcpServersDisabledElsewhereRemedy(
   const parts: string[] = []
   if (other > 0) {
     parts.push(
-      `${other} MCP server(s) were disabled in another session \u2014 disable and re-enable them in /mcp, or restart, to reconnect.`,
+      `${other} MCP server(s) were disabled in another session — disable and re-enable them in /mcp, or restart, to reconnect.`,
     )
   }
   if (unconfigured > 0) {
     parts.push(
-      `${unconfigured} MCP server(s) were disabled in another session but aren't configured yet \u2014 there's nothing to reconnect until they are.`,
+      `${unconfigured} MCP server(s) were disabled in another session but aren't configured yet — there's nothing to reconnect until they are.`,
     )
   }
   if (stillHere > 0) {
     parts.push(
-      `${stillHere} MCP server(s) are still available in this session but were disabled in another \u2014 they keep working here and won't reconnect after the next launch. Disable and re-enable them in /mcp to persist the re-enable.`,
+      `${stillHere} MCP server(s) are still available in this session but were disabled in another — they keep working here and won't reconnect after the next launch. Disable and re-enable them in /mcp to persist the re-enable.`,
     )
   }
   return parts.join(' ')
@@ -138,6 +183,10 @@ export type McpReconnectPlan =
 /**
  * densable `qge` for `/mcp reconnect` and the Remote Control mcp_reconnect
  * result. Null when this target was not disabled in another session.
+ *
+ * Gold `qge(e,n,t)` always emits the plural "N MCP server(s)…" sentences
+ * (`enabling` true arm). Singular `y$` / `$je` stay on the pre-reconnect
+ * gate (`mcpReconnectDisabledGateMessage`), not this result helper.
  */
 export function reconnectDisabledElsewhereResult(
   clients: readonly McpRemedyClient[],
@@ -179,7 +228,7 @@ export function planMcpReconnect(
     if (status === 'pending') {
       return {
         kind: 'text',
-        text: `"${target}" is already reconnecting \u2014 retries can take a few minutes when a server keeps failing.`,
+        text: `"${target}" is already reconnecting — retries can take a few minutes when a server keeps failing.`,
       }
     }
     if (status === 'needs-approval') {
@@ -275,4 +324,16 @@ export function missingMcpReconnectTarget(target: string): string {
     return 'No MCP servers are configured. Add one with `claude mcp add`.'
   }
   return `There's no MCP server named "${target}". Run \`/mcp\` in the terminal to see configured servers.`
+}
+
+/**
+ * densable `uer` — wire-safe mcp_reconnect failure (never leak dirty
+ * `client.error` through control_response, which RC scrubs to withheld-detail).
+ */
+export function mcpReconnectControlFailureMessage(client: {
+  type: string
+  error?: string
+}): string {
+  if (client.type === 'failed') return 'Connection failed'
+  return `Server status: ${client.type}`
 }

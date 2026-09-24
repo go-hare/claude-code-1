@@ -41,7 +41,7 @@ describe('densable 2.1.246 torn-pair + revive', () => {
       'revive identity re-check failed (store changed or unreadable since the watcher validated)',
     )
     const reviveIdx = init.indexOf('revive_identity_recheck_failed')
-    const policyIdx = init.indexOf("isPolicyAllowed('allow_remote_control')")
+    const policyIdx = init.indexOf("getPolicyDenyKind('allow_remote_control')")
     expect(reviveIdx).toBeGreaterThan(-1)
     expect(policyIdx).toBeGreaterThan(reviveIdx)
   })

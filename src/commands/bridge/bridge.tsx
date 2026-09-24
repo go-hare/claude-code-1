@@ -230,9 +230,9 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
  */
 async function checkBridgePrerequisites(): Promise<string | null> {
   // Check organization policy — remote control may be disabled
-  const { waitForPolicyLimitsToLoad, isPolicyAllowed } = await import('../../services/policyLimits/index.js');
+  const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import('../../services/policyLimits/index.js');
   await waitForPolicyLimitsToLoad();
-  if (!isPolicyAllowed('allow_remote_control')) {
+  if (!isRemotePolicyAllowed('allow_remote_control')) {
     return "Remote Control is disabled by your organization's policy.";
   }
 

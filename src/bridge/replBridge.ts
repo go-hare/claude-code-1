@@ -165,7 +165,16 @@ export type ReplBridgeHandle = {
   }
 }
 
-export type BridgeState = 'ready' | 'connected' | 'reconnecting' | 'failed'
+/**
+ * densable 2.1.251 #22: `policy_disabled` is a quiet org-policy skip
+ * (notice, not failure). `failed` still means hard error UI.
+ */
+export type BridgeState =
+  | 'ready'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  | 'policy_disabled'
 
 /**
  * Explicit-param input to initBridgeCore. Everything initReplBridge reads

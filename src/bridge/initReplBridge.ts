@@ -29,7 +29,7 @@ import {
 } from '../services/analytics/growthbook.js'
 import { getOrganizationUUID } from '../services/oauth/client.js'
 import {
-  isPolicyAllowed,
+  getPolicyDenyKind,
   waitForPolicyLimitsToLoad,
 } from '../services/policyLimits/index.js'
 import type { Message } from '../types/message.js'
@@ -137,6 +137,7 @@ export type InitBridgeOptions = {
   onStateChange?: (
     state: BridgeState,
     detail?: string,
+    // densable: failed kinds + policy_disabled quiet arm (no kind).
     kind?: 'auth' | 'terminal',
   ) => void
   initialMessages?: Message[]
@@ -667,14 +668,33 @@ export async function initReplBridge(
     }
   }
 
-  // 3. Check organization policy — remote control may be disabled
+  // 3. densable QD("allow_remote_control"):
+  //   cache_miss → Xb("policy_unverified") + W?.("failed", nbn(...), "terminal")
+  //   org_denied → Xb("policy_denied") + W?.("policy_disabled", v_n())
   await waitForPolicyLimitsToLoad()
-  if (!isPolicyAllowed('allow_remote_control')) {
+  const remoteControlPolicy = getPolicyDenyKind('allow_remote_control')
+  if (remoteControlPolicy === 'cache_miss') {
+    logBridgeSkip(
+      'policy_unverified',
+      '[bridge:repl] Skipping: allow_remote_control policy unverified (cache miss)',
+    )
+    // nbn fallback when no compliance taints: short "disabled by … policy"
+    onStateChange?.(
+      'failed',
+      "disabled by your organization's policy",
+      'terminal',
+    )
+    return null
+  }
+  if (remoteControlPolicy === 'org_denied') {
     logBridgeSkip(
       'policy_denied',
       '[bridge:repl] Skipping: allow_remote_control policy not allowed',
     )
-    onStateChange?.('failed', "disabled by your organization's policy")
+    onStateChange?.(
+      'policy_disabled',
+      "Remote Control is disabled by your organization's policy. Contact your organization admin for access.",
+    )
     return null
   }
 

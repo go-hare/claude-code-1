@@ -153,11 +153,11 @@ export async function refuseRemoteControlIneligible(
   if (versionError) {
     exitWithError(versionError)
   }
-  const { waitForPolicyLimitsToLoad, isPolicyAllowed } = await import(
+  const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import(
     '../services/policyLimits/index.js'
   )
   await waitForPolicyLimitsToLoad()
-  if (!isPolicyAllowed('allow_remote_control')) {
+  if (!isRemotePolicyAllowed('allow_remote_control')) {
     exitWithError(
       "Error: Remote Control is disabled by your organization's policy.",
     )

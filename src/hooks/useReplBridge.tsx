@@ -668,9 +668,17 @@ export function useReplBridge(
             }
           }
 
+          // densable 2.1.251 #22: policy_disabled latches a quiet notice for the
+          // post-init null branch (not surfaceBridgeFailure / not failed toast).
+          let policyDisabledNotice: string | undefined;
           // State change callback — maps bridge lifecycle events to AppState.
           function handleStateChange(state: BridgeState, detail?: string, kind?: string): void {
             if (cancelled) return;
+            // densable: Ur==="policy_disabled" → np=si; return (no failed UI).
+            if (state === 'policy_disabled') {
+              policyDisabledNotice = detail ?? "disabled by your organization's policy";
+              return;
+            }
             // densable eDe: FC/replBridgeActive true on connected|ready (when
             // handle exists), false on failed — gates JT enqueue for RC mid-join.
             if (state === 'failed') {
@@ -853,6 +861,9 @@ export function useReplBridge(
                   wasConnected: handleRef.current !== null,
                 });
                 break;
+              case 'policy_disabled':
+                // densable: handled above (np latch). Keep union exhaustive.
+                return;
             }
           }
 
@@ -1292,23 +1303,55 @@ export function useReplBridge(
             setAppState(prev => (prev.replBridgeEnabled ? { ...prev, replBridgeEnabled: false } : prev));
             return;
           }
+          // densable 2.1.251 #22: !ks && np !== void 0 → quiet org-policy decline.
+          // Log + optional informational notice; disable RC; no failed toast.
+          if (!handle && policyDisabledNotice !== undefined) {
+            const notice = policyDisabledNotice;
+            logForDebugging('[bridge:repl] Init declined by org policy; leaving Remote Control off');
+            if (!outboundOnly) {
+              setMessages(prev => {
+                const last = prev.at(-1);
+                if (last?.type === 'system' && last.subtype === 'informational' && last.content === notice) {
+                  return prev;
+                }
+                return [...prev, createSystemMessage(notice, 'info')];
+              });
+            }
+            setAppState(prev =>
+              prev.replBridgeEnabled
+                ? {
+                    ...prev,
+                    replBridgeEnabled: false,
+                    replBridgeSessionGroupingId: undefined,
+                  }
+                : prev,
+            );
+            return;
+          }
           if (!handle) {
-            // initReplBridge returned null — a precondition failed. For most
-            // cases (no_oauth, policy_denied, etc.) onStateChange('failed')
-            // already fired with a specific hint (surfaceBridgeFailure). If not,
-            // keep a fallback error + densable-persistent auto-disable.
+            // densable !ks generic: not_enabled / other silent skips do NOT invent
+            // a failure UI. Only bump consecutive when not a quiet skip latch;
+            // if error already set keep it; else just turn RC off.
+            // (Managed disableRemoteControl → isBridgeEnabledBlocking false →
+            // Xb("not_enabled") with no onStateChange failed — stays quiet.)
             consecutiveFailuresRef.current++;
             logForDebugging(
               `[bridge:repl] Init returned null (precondition or session creation failed); consecutive failures: ${consecutiveFailuresRef.current}`,
             );
             clearTimeout(failureTimeoutRef.current);
             setAppState(prev => {
-              if (prev.replBridgeError) return prev;
-              return {
-                ...prev,
-                replBridgeError: 'check debug logs for details',
-                replBridgeErrorKind: prev.replBridgeErrorKind ?? 'terminal',
-              };
+              if (prev.replBridgeError) {
+                return prev;
+              }
+              // Gold: else Er(disable enabled) — no invented error string.
+              if (prev.replBridgeEnabled) {
+                return {
+                  ...prev,
+                  replBridgeEnabled: false,
+                  replBridgeSessionGroupingId: undefined,
+                };
+              }
+              return prev;
             });
             scheduleBridgeAutoDisable();
             return;
