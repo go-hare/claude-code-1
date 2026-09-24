@@ -218,9 +218,9 @@ export function applyTextStyles(text: string, styles: TextStyles): string {
     result = chalk.underline(result)
   }
 
-  // densable jJn — GNU screen / TERM=screen renders italic as standout,
-  // so the italic-off SGR is dropped instead of emitted.
-  if (styles.italic && !rendersItalicAsStandout()) {
+  // densable jMe: italic is unconditional. GNU screen standout is handled
+  // by jJn (filterItalicOffTokens) at StylePool.intern, not here.
+  if (styles.italic) {
     result = chalk.italic(result)
   }
 

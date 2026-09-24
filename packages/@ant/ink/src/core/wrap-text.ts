@@ -57,10 +57,15 @@ export default function wrapText(
     })
   }
 
-  if (wrapType!.startsWith('truncate')) {
+  // densable uy: end/middle are truncate aliases (same as truncate / truncate-middle).
+  if (
+    wrapType === 'end' ||
+    wrapType === 'middle' ||
+    wrapType!.startsWith('truncate')
+  ) {
     let position: 'end' | 'middle' | 'start' = 'end'
 
-    if (wrapType === 'truncate-middle') {
+    if (wrapType === 'truncate-middle' || wrapType === 'middle') {
       position = 'middle'
     }
 

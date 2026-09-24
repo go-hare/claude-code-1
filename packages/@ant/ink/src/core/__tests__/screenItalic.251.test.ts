@@ -10,6 +10,7 @@ import {
 
 const previousTerm = process.env.TERM
 const previousLevel = chalk.level
+const ITALIC_ON = `${String.fromCharCode(0x1b)}[3m`
 
 afterEach(() => {
   if (previousTerm === undefined) delete process.env.TERM
@@ -18,22 +19,22 @@ afterEach(() => {
 })
 
 describe('italic suppressed for TERM=screen (2.1.251 #36)', () => {
-  test('screen does not emit italic SGR', () => {
+  test('jMe emits italic SGR even on TERM=screen (intern drops off-code)', () => {
     chalk.level = 3
     process.env.TERM = 'screen'
-    expect(applyTextStyles('hi', { italic: true })).toBe('hi')
+    expect(applyTextStyles('hi', { italic: true })).toContain(ITALIC_ON)
   })
 
-  test('screen-256color is also suppressed', () => {
+  test('jMe emits italic SGR on screen-256color', () => {
     chalk.level = 3
     process.env.TERM = 'screen-256color'
-    expect(applyTextStyles('hi', { italic: true })).toBe('hi')
+    expect(applyTextStyles('hi', { italic: true })).toContain(ITALIC_ON)
   })
 
   test('xterm still emits italic', () => {
     chalk.level = 3
     process.env.TERM = 'xterm-256color'
-    expect(applyTextStyles('hi', { italic: true })).toContain('\u001b[3m')
+    expect(applyTextStyles('hi', { italic: true })).toContain(ITALIC_ON)
   })
 
   test('jJn drops italic-off tokens only when TERM starts with screen', () => {
