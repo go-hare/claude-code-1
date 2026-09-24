@@ -471,25 +471,25 @@ export async function exec(
   // In file mode, both stdout and stderr go to the same file fd.
   // On POSIX, O_APPEND makes each write atomic (seek-to-end + write), so
   // stdout and stderr are interleaved chronologically without tearing.
-  // On Windows, 'a' mode strips FILE_WRITE_DATA (only grants FILE_APPEND_DATA)
-  // via libuv's fs__open. MSYS2/Cygwin probes inherited handles with
-  // NtQueryInformationFile(FileAccessInformation) and treats handles without
-  // FILE_WRITE_DATA as read-only, silently discarding all output. Using 'w'
-  // grants FILE_GENERIC_WRITE. Atomicity is preserved because duplicated
-  // handles share the same FILE_OBJECT with FILE_SYNCHRONOUS_IO_NONALERT,
-  // which serializes all I/O through a single kernel lock.
-  // SECURITY: O_NOFOLLOW prevents symlink-following attacks from the sandbox.
-  // On Windows, use string flags — numeric flags can produce EINVAL through libuv.
+  // densable 2.1.251 Que/nt exclusive create: O_CREAT|O_EXCL|O_NOFOLLOW
+  // (windows 'wx'). O_EXCL refuses a pre-planted symlink/hardlink leaf;
+  // O_NOFOLLOW blocks follow-on open races from the sandbox.
+  // On Windows, numeric flags can produce EINVAL through libuv — use 'wx'.
+  // 'wx' grants FILE_WRITE_DATA (unlike 'a'), so MSYS2/Cygwin does not
+  // discard inherited-handle output. Atomicity is preserved because
+  // duplicated handles share the same FILE_OBJECT with
+  // FILE_SYNCHRONOUS_IO_NONALERT.
   let outputHandle: FileHandle | undefined
   if (!usePipeMode) {
     const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
     outputHandle = await open(
       taskOutput.path,
       process.platform === 'win32'
-        ? 'w'
+        ? 'wx'
         : fsConstants.O_WRONLY |
-            fsConstants.O_CREAT |
             fsConstants.O_APPEND |
+            fsConstants.O_CREAT |
+            fsConstants.O_EXCL |
             O_NOFOLLOW,
     )
   }
