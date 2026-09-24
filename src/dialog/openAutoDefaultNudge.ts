@@ -20,11 +20,10 @@ import {
 } from './permissionAutoMode.js'
 import type { RequestDialog } from './requestDialog.js'
 import { autoDefaultNudgeSpec } from './specs/jsuKinds.js'
-import { isReplBridgeActive } from '../bootstrap/state.js'
-import { getAgentId } from '../utils/teammate.js'
 import {
-  isUnattendedAutoDefaultNudgeSession,
+  f_,
   shouldShowAutoDefaultNudge,
+  wt,
 } from './shouldShowAutoDefaultNudge.js'
 
 /** densable Veu SDs xge 4th arg / qLe trigger */
@@ -97,15 +96,9 @@ export async function maybeRequestAutoDefaultNudge(
   setAppState: SetAppState,
   addNotification: AddNotification,
 ): Promise<'opened' | 'skipped'> {
-  if (
-    isUnattendedAutoDefaultNudgeSession({
-      sessionKind: process.env.CLAUDE_CODE_SESSION_KIND,
-      teammateAgentId: getAgentId(),
-      replBridgeActive: isReplBridgeActive(),
-    })
-  ) {
-    return 'skipped'
-  }
+  // densable `#r`: if(wt())return; let fe=f_()?Promise.resolve(null):shouldShow…
+  if (wt()) return 'skipped'
+  if (f_()) return 'skipped'
   const currentMode = shouldShowAutoDefaultNudge(getContext())
   if (!currentMode) return 'skipped'
 

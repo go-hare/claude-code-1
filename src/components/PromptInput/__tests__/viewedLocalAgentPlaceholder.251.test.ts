@@ -7,6 +7,7 @@ import type { TaskState } from '../../../tasks/types.js'
 import type { Message } from '../../../types/message.js'
 import {
   resolveViewedTask,
+  viewedAgentForInput,
   viewedAgentNameForPlaceholder,
   viewedTeammateOrLocalAgent,
 } from '../viewedAgent.js'
@@ -25,6 +26,7 @@ function localAgent(
     outputOffset: 0,
     notified: false,
     isIdle: false,
+    agentType: 'explore',
     ...overrides,
   } as LocalAgentTaskState
 }
@@ -62,6 +64,26 @@ function teammate(
 }
 
 describe('viewed local agent placeholder (251 #51 dKe)', () => {
+  test('wCe is viewed / named_agent / leader', () => {
+    const a1 = localAgent('a1')
+    const t1 = teammate('t1')
+    const tasks = { a1, t1 } as Record<string, TaskState>
+    expect(viewedAgentForInput({ viewingAgentTaskId: 't1', tasks })).toEqual({
+      type: 'viewed',
+      task: t1,
+    })
+    expect(viewedAgentForInput({ viewingAgentTaskId: 'a1', tasks })).toEqual({
+      type: 'named_agent',
+      task: a1,
+    })
+    expect(
+      viewedAgentForInput({ viewingAgentTaskId: undefined, tasks }),
+    ).toEqual({ type: 'leader' })
+    expect(
+      viewedAgentForInput({ viewingAgentTaskId: 'missing', tasks }),
+    ).toEqual({ type: 'leader' })
+  })
+
   test('dKe returns localAgent when viewing a local_agent', () => {
     const a1 = localAgent('a1')
     const tasks = { a1 } as Record<string, TaskState>
@@ -79,9 +101,17 @@ describe('viewed local agent placeholder (251 #51 dKe)', () => {
     const tasks = { a1: localAgent('a1') } as Record<string, TaskState>
     const names = new Map([['scout', 'a1']])
     expect(viewedAgentNameForPlaceholder('a1', tasks, names)).toBe('scout')
-    expect(
-      viewedAgentNameForPlaceholder('a1', tasks, new Map()),
-    ).toBeUndefined()
+    // densable _Mn named_agent: registry miss → task.agentType
+    expect(viewedAgentNameForPlaceholder('a1', tasks, new Map())).toBe(
+      'explore',
+    )
+  })
+
+  test('placeholder name is teammate identity.agentName', () => {
+    const tasks = { t1: teammate('t1') } as Record<string, TaskState>
+    expect(viewedAgentNameForPlaceholder('t1', tasks, new Map())).toBe(
+      'researcher',
+    )
   })
 
   test('PromptInput uses the helper for viewingAgentName', () => {

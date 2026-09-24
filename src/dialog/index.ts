@@ -142,7 +142,13 @@ export {
 } from './openCostThreshold.js'
 export { openResumeReturnIfNeeded } from './openResumeReturn.js'
 export { maybeRequestAutoDefaultNudge } from './openAutoDefaultNudge.js'
-export { shouldShowAutoDefaultNudge } from './shouldShowAutoDefaultNudge.js'
+export {
+  f_,
+  oc,
+  pie,
+  shouldShowAutoDefaultNudge,
+  wt,
+} from './shouldShowAutoDefaultNudge.js'
 export { nhtHidesPromptInput } from './nhtPrompt.js'
 export {
   MANAGED_SETTINGS_SECURITY_KIND,
