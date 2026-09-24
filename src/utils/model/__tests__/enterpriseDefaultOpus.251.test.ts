@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
-  enterpriseSeatOrBillingValue,
+  UJ,
   enterpriseSeatTier,
   enterpriseTierPrefersOpus5,
   getAvailableModelsEnforcementState,
@@ -99,24 +99,45 @@ describe('enterprise default is opus5 (2.1.251 #60)', () => {
     expect(enterpriseSeatTier(null)).toBe(null)
   })
 
-  test('seatTier wins over billingType', () => {
+  test('RYe reads pbr seatTier only', () => {
     expect(
-      enterpriseSeatOrBillingValue({
-        seatTier: 'standard',
-        billingType: 'enterprise_usage_based',
+      enterpriseTierPrefersOpus5({
+        ...base,
+        seatOrBilling: enterpriseSeatTier({
+          seatTier: 'enterprise_usage_based',
+        }),
+        catalogHasOpus: false,
+        enforceAvailableModels: false,
       }),
-    ).toBe('standard')
+    ).toBe(true)
     expect(
-      enterpriseSeatOrBillingValue({
-        billingType: 'enterprise_usage_based',
+      enterpriseTierPrefersOpus5({
+        ...base,
+        seatOrBilling: enterpriseSeatTier({ seatTier: null }),
+        catalogHasSonnet: true,
+        catalogHasOpus: false,
+        enforceAvailableModels: false,
       }),
-    ).toBe('enterprise_usage_based')
-    expect(enterpriseSeatOrBillingValue(null)).toBe(null)
+    ).toBe(false)
   })
 
   test('wo().state is refused, inactive, or active', () => {
     const state = getAvailableModelsEnforcementState()
     expect(['refused', 'inactive', 'active']).toContain(state.state)
+  })
+
+  test('UJ returns undefined when host is not managing provider', () => {
+    const prev = process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+    delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+    try {
+      expect(UJ()).toBeUndefined()
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+      } else {
+        process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = prev
+      }
+    }
   })
 
   test('the resolver calls the enterprise arm and does not say seat-based', () => {
@@ -131,10 +152,14 @@ describe('enterprise default is opus5 (2.1.251 #60)', () => {
     )
     expect(modelSrc).toContain('isSonnetOnlyUnenforcedCatalog')
     expect(modelSrc).not.toContain('seat-based')
+    expect(modelSrc).not.toContain('UJ(')
     expect(helperSrc).not.toContain('seat-based')
+    expect(helperSrc).toContain('export function UJ(')
     expect(helperSrc).toContain("state: 'refused'")
     expect(helperSrc).toContain("state: 'inactive'")
     expect(helperSrc).toContain("state: 'active'")
+    // densable wo: d ?? UJ() ?? {}
+    expect(helperSrc).toContain('overridesMap: modelOverrides ?? UJ() ?? {}')
     const setting = modelSrc.slice(
       modelSrc.indexOf('function getDefaultMainLoopModelSetting'),
       modelSrc.indexOf('function getDefaultMainLoopModel():'),
@@ -144,5 +169,14 @@ describe('enterprise default is opus5 (2.1.251 #60)', () => {
     const sonnet = setting.indexOf('return getDefaultSonnetModel()')
     expect(enterprise).toBeGreaterThan(-1)
     expect(sonnet).toBeGreaterThan(enterprise)
+    const bedrock = setting.indexOf(
+      "provider === 'bedrock' || provider === 'vertex'",
+    )
+    expect(bedrock).toBeGreaterThan(enterprise)
+    expect(setting).toContain('return getBuiltinDefaultOpusSetting()')
+    const bedrockArm = setting.slice(bedrock)
+    expect(bedrockArm).not.toContain('getDefaultOpusModel()')
+    expect(modelSrc).toContain("resolveCatalogFamilyModelString('opus'")
+    expect(modelSrc).toContain('strings.opus5')
   })
 })

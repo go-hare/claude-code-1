@@ -1,6 +1,11 @@
+import { getParentManagedSettings } from '../../bootstrap/state.js'
+import { getRemoteManagedSettingsSyncFromCache } from '../../services/remoteManagedSettings/syncCacheState.js'
 import { getOauthAccountInfo, getSubscriptionType } from '../auth.js'
 import { logForDebugging } from '../debug.js'
+import { isEnvTruthy } from '../envUtils.js'
+import { buildHostModelOverlay } from '../settings/hostModelOverlay.js'
 import { getHkcuSettings, getMdmSettings } from '../settings/mdm/settings.js'
+import { getSettingsOwner } from '../settings/settingsCache.js'
 import {
   getAdminManagedPolicyLoadErrors,
   getPolicySettingsOrigin,
@@ -8,6 +13,7 @@ import {
   getSettingsForSource,
   loadManagedFileSettings,
 } from '../settings/settings.js'
+import type { SettingsJson } from '../settings/types.js'
 import { resolveCatalogFamilyModelString } from './catalogFamilyDefault.js'
 import { getModelStrings } from './modelStrings.js'
 import { getAPIProvider } from './providers.js'
@@ -18,10 +24,7 @@ import { getAPIProvider } from './providers.js'
  */
 export type EnterpriseOpusDefaultInput = {
   subscriptionType: string | null
-  /**
-   * seatTier when set, otherwise billingType.
-   * Usage-based enterprise is the string enterprise_usage_based.
-   */
+  /** densable pbr — seatTier only. Usage-based is enterprise_usage_based. */
   seatOrBilling: string | null
   catalogHasSonnet: boolean
   catalogHasOpus: boolean
@@ -57,33 +60,6 @@ export function enterpriseSeatTier(
     | undefined,
 ): string | null {
   return account?.seatTier ?? null
-}
-
-/**
- * densable RYe reads pbr() (seatTier). When seatTier is unset, billingType
- * carries the same enterprise_usage_based token.
- */
-export function enterpriseSeatOrBillingValue(
-  account:
-    | {
-        seatTier?: string | null
-        billingType?: unknown
-      }
-    | null
-    | undefined,
-): string | null {
-  if (!account) return null
-  const seat = enterpriseSeatTier(account)
-  if (seat !== null && seat.length > 0) {
-    return seat
-  }
-  if (
-    typeof account.billingType === 'string' &&
-    account.billingType.length > 0
-  ) {
-    return account.billingType
-  }
-  return null
 }
 
 export type AvailableModelsEnforcementState =
@@ -127,6 +103,95 @@ function policySourcesFullyLoaded(): boolean {
   if (getAdminManagedPolicyLoadErrors().length > 0) return false
   if (getHkcuSettings().errors.length > 0) return false
   return true
+}
+
+function isHostManagedProviderFlag(): boolean {
+  let hostManaged = isEnvTruthy(
+    process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+  )
+  try {
+    const { isProviderManagedByHostEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    hostManaged = isProviderManagedByHostEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return hostManaged
+}
+
+/**
+ * densable admin tier `i` for the paired-overrides formula — first
+ * policy source that carries settings (remote > MDM > file > HKCU).
+ */
+function firstAdminPolicyTierSettings(): SettingsJson | null {
+  const remote = getRemoteManagedSettingsSyncFromCache()
+  if (remote && Object.keys(remote).length > 0) {
+    return remote as SettingsJson
+  }
+  const mdm = getMdmSettings().settings
+  if (Object.keys(mdm).length > 0) return mdm
+  const file = loadManagedFileSettings().settings
+  if (file) return file
+  const hkcu = getHkcuSettings().settings
+  if (Object.keys(hkcu).length > 0) return hkcu
+  return null
+}
+
+/**
+ * densable pairedModelOverrides assignment on the main admin branch:
+ * hostManaged && admin.availableModels !== undefined &&
+ * admin.modelOverrides !== undefined &&
+ * overlay?.availableModels === undefined
+ *   ? admin.modelOverrides
+ *   : undefined
+ */
+function computePairedPolicyModelOverrides():
+  | Record<string, string>
+  | undefined {
+  if (!isHostManagedProviderFlag()) return undefined
+  const admin = firstAdminPolicyTierSettings()
+  if (
+    admin?.availableModels === undefined ||
+    admin.modelOverrides === undefined
+  ) {
+    return undefined
+  }
+  const rawParent = getParentManagedSettings()
+  const parent =
+    rawParent && typeof rawParent === 'object'
+      ? (rawParent as SettingsJson)
+      : null
+  const overlay = buildHostModelOverlay(parent, true)
+  if (overlay?.availableModels !== undefined) return undefined
+  return admin.modelOverrides as Record<string, string>
+}
+
+/**
+ * densable UJ — `return Tor(L())`.
+ * Tor reads `store.policy.pairedModelOverrides`; if unset, loads
+ * policySettings then re-reads. Local recomputes the gold assignment
+ * formula when the cache slot is empty (settings finish does not yet
+ * write the pair).
+ */
+export function UJ(): Record<string, string> | undefined {
+  const owner = getSettingsOwner()
+  const cached = owner.policy.pairedModelOverrides as
+    | { value: Record<string, string> | undefined }
+    | undefined
+  if (cached !== undefined) return cached.value
+  try {
+    getSettingsForSource('policySettings')
+  } catch {
+    // densable Tor swallows nEt failure then re-reads
+  }
+  const afterLoad = owner.policy.pairedModelOverrides as
+    | { value: Record<string, string> | undefined }
+    | undefined
+  if (afterLoad !== undefined) return afterLoad.value
+  const value = computePairedPolicyModelOverrides()
+  owner.policy.pairedModelOverrides = { value }
+  return value
 }
 
 /**
@@ -185,7 +250,8 @@ export function getAvailableModelsEnforcementState(): AvailableModelsEnforcement
     return {
       state: 'active',
       allowlist: availableModels,
-      overridesMap: modelOverrides ?? {},
+      // densable wo: d ?? UJ() ?? {}
+      overridesMap: modelOverrides ?? UJ() ?? {},
     }
   } catch (error) {
     const message = `enforceAvailableModels: policy-tier settings read failed; refusing cascade-trust mode: ${error instanceof Error ? error.message : String(error)}`
@@ -226,7 +292,7 @@ export function isEnterpriseOpusDefault(): boolean {
     settings.enforceAvailableModels === true
   return enterpriseTierPrefersOpus5({
     subscriptionType: getSubscriptionType(),
-    seatOrBilling: enterpriseSeatOrBillingValue(getOauthAccountInfo()),
+    seatOrBilling: enterpriseSeatTier(getOauthAccountInfo()),
     catalogHasSonnet: catalogHasFamily('sonnet'),
     catalogHasOpus: catalogHasFamily('opus'),
     enforceAvailableModels: enforcementOn,

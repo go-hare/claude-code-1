@@ -29,6 +29,7 @@ import {
   isEffortLevel,
   isUltracodeOfferable,
   modelSupportsEffort,
+  readUserSettingsEffortForModel,
   resolvePickerEffortPersistence,
   toPersistableEffort,
   unpinAllEffortLaunchPins,
@@ -44,7 +45,7 @@ import {
   isModelPickerFastModeNoticeChrome,
 } from '../utils/model/modelPickerVisible.js';
 import { getModelOptions } from '../utils/model/modelOptions.js';
-import { getSettingsForSource, updateSettingsForSource } from '../utils/settings/settings.js';
+import { updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
 import { Byline, KeyboardShortcutHint, Pane } from '@anthropic/ink';
@@ -314,15 +315,15 @@ export function ModelPicker({
         }));
         return;
       }
-      // Prior comes from userSettings on disk — NOT merged settings (which
-      // includes project/policy layers that must not leak into the user's
-      // global ~/.claude/settings.json), and NOT AppState.effortValue (which
-      // includes session-ephemeral sources like --effort CLI flag).
-      // See resolvePickerEffortPersistence JSDoc.
+      // Prior comes from userSettings on disk — modelSettings[canonical] first
+      // (2.1.251 #61), else legacy top-level effortLevel. NOT merged settings
+      // (project/policy must not leak into ~/.claude/settings.json) and NOT
+      // AppState.effortValue (session-ephemeral sources like --effort CLI).
+      // See resolvePickerEffortPersistence / readUserSettingsEffortForModel.
       const effortLevel = resolvePickerEffortPersistence(
         effortForModel,
         getDefaultEffortLevelForOption(value),
-        getSettingsForSource('userSettings')?.effortLevel,
+        readUserSettingsEffortForModel(selectedModel ?? ''),
         hasToggledEffort,
       );
       const persistable = toPersistableEffort(effortLevel);

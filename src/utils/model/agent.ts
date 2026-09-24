@@ -1,7 +1,7 @@
 import type { PermissionMode } from '../permissions/PermissionMode.js'
 import { logForDebugging } from '../debug.js'
 import { capitalize } from '../stringUtils.js'
-import { MODEL_ALIASES, type ModelAlias } from './aliases.js'
+import { MODEL_ALIASES } from './aliases.js'
 import { applyBedrockRegionPrefix, getBedrockRegionPrefix } from './bedrock.js'
 import {
   getCanonicalName,
@@ -24,11 +24,12 @@ export type AgentModelOption = {
 }
 
 /**
- * Get the default subagent model. Returns 'inherit' so subagents inherit
- * the model from the parent thread.
+ * densable sY — default subagent model. `CLAUDE_CODE_SUBAGENT_MODEL` is a
+ * default, not an override: spawn and agent models win when set.
  */
 export function getDefaultSubagentModel(): string {
-  return 'inherit'
+  const e = process.env.CLAUDE_CODE_SUBAGENT_MODEL
+  return e && e !== 'inherit' ? e : 'inherit'
 }
 
 /**
@@ -102,26 +103,35 @@ function resolveWhenNotAllowed(
 /**
  * Get the effective model string for an agent.
  *
- * densable `jR` (2.1.251 #58), still using 2.1.222 family step-down:
- * - per-spawn / tool model
- * - agent frontmatter model
- * - explicit `inherit` stays on the parent
- * - `CLAUDE_CODE_SUBAGENT_MODEL` only when neither spawn nor agent set a model
+ * densable `jR` (2.1.251 #58) + 2.1.222 family step-down:
+ * - per-spawn model `r` wins (including explicit `inherit` → parent)
+ * - agent frontmatter model `e` next (concrete only; `inherit` → parent)
+ * - `sY()` / `CLAUDE_CODE_SUBAGENT_MODEL` only when neither set a concrete model
  * - bare family alias matching parent → parent exact IF allowlisted
  * - else resolve alias; if not allowlisted → newest in family (a$) else parent
  *
- * For Bedrock, if the parent model uses a cross-region inference prefix (e.g., "eu.", "us."),
- * that prefix is inherited by subagents using alias models (e.g., "sonnet", "haiku", "opus").
+ * Bedrock region-prefix rewrite is the local `nVt`/`ure` subset already present —
+ * do not invent a full densable Bedrock `jR` body beyond that.
  */
 export function getAgentModel(
   agentModel: string | undefined,
   parentModel: string,
-  toolSpecifiedModel?: ModelAlias,
+  /** densable `r` — per-spawn model (alias, full id, or `inherit`). */
+  toolSpecifiedModel?: string,
   permissionMode?: PermissionMode,
 ): string {
   // Extract Bedrock region prefix from parent model to inherit for subagents.
   const parentRegionPrefix = getBedrockRegionPrefix(parentModel)
 
+  /** densable `d()` — parent runtime main-loop model. */
+  const inheritParent = (): string =>
+    getRuntimeMainLoopModel({
+      permissionMode: permissionMode ?? 'default',
+      mainLoopModel: parentModel,
+      exceeds200kTokens: false,
+    })
+
+  /** densable `k` subset — parent Bedrock region prefix for bare / foundation ids. */
   const applyParentRegionPrefix = (
     resolvedModel: string,
     originalSpec: string,
@@ -133,23 +143,13 @@ export function getAgentModel(
     return resolvedModel
   }
 
-  const resolveSpec = (spec: string): string => {
-    if (spec === 'inherit') {
-      return getRuntimeMainLoopModel({
-        permissionMode: permissionMode ?? 'default',
-        mainLoopModel: parentModel,
-        exceeds200kTokens: false,
-      })
-    }
-
-    // densable Idp: family matches parent → return parent only when allowed
-    // (222 #8: if resolved default not allowed, step down in family)
+  const resolveConcreteSpec = (spec: string): string => {
+    // densable Idp / F$t + 222 #8 allowlist step-down (keep local a$ path)
     if (aliasMatchesParentTier(spec, parentModel)) {
       const resolvedAsDefault = parseUserSpecifiedModel(spec)
       if (isModelAllowed(resolvedAsDefault)) {
         return parentModel
       }
-      // Parent tier match but org blocks default → family step-down
       return applyParentRegionPrefix(
         resolveWhenNotAllowed(spec, parentModel, permissionMode),
         spec,
@@ -167,18 +167,24 @@ export function getAgentModel(
     return withRegion
   }
 
-  // densable jR: spawn model, then agent model, then env default.
+  // densable jR control flow:
+  //   if (r) { inherit? d() : resolve(r) }
+  //   if (e !== undefined && e !== 'inherit') resolve(e)
+  //   if (e === 'inherit') d()
+  //   else sY() → inherit? d() : resolve(env)
   if (toolSpecifiedModel) {
-    return resolveSpec(toolSpecifiedModel)
+    if (toolSpecifiedModel === 'inherit') return inheritParent()
+    return resolveConcreteSpec(toolSpecifiedModel)
   }
-  if (agentModel !== undefined) {
-    return resolveSpec(agentModel)
+  if (agentModel !== undefined && agentModel !== 'inherit') {
+    return resolveConcreteSpec(agentModel)
   }
-  const envSpec = process.env.CLAUDE_CODE_SUBAGENT_MODEL
-  if (envSpec && envSpec !== 'inherit') {
-    return resolveSpec(envSpec)
+  if (agentModel === 'inherit') {
+    return inheritParent()
   }
-  return resolveSpec(getDefaultSubagentModel())
+  const envDefault = getDefaultSubagentModel()
+  if (envDefault === 'inherit') return inheritParent()
+  return resolveConcreteSpec(envDefault)
 }
 
 export function getAgentModelDisplay(model: string | undefined): string {

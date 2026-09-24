@@ -31,10 +31,11 @@ describe('densable 2.1.251 #53 host-managed bedrock discovery', () => {
     setMainLoopModelOverride(undefined)
   })
 
-  test('alias and blank are not provider ids', () => {
+  test('Jbn: alias and NU firstParty are not provider ids', () => {
     expect(sessionModelIsProviderId(null)).toBe(false)
-    expect(sessionModelIsProviderId('')).toBe(false)
-    expect(sessionModelIsProviderId('  ')).toBe(false)
+    // gold `ro!=null&&!Jbn(ro)` — blank is not jm/NU
+    expect(sessionModelIsProviderId('')).toBe(true)
+    expect(sessionModelIsProviderId('  ')).toBe(true)
     expect(sessionModelIsProviderId('opus')).toBe(false)
     expect(sessionModelIsProviderId('Sonnet')).toBe(false)
     expect(sessionModelIsProviderId('opus[1m]')).toBe(false)
@@ -44,6 +45,7 @@ describe('densable 2.1.251 #53 host-managed bedrock discovery', () => {
     expect(sessionModelIsProviderId('claude-sonnet-4-5-20250929')).toBe(false)
     expect(sessionModelIsProviderId('claude-opus-4-6')).toBe(false)
     expect(Object.hasOwn(FIRST_PARTY_ID_TO_KEY, 'claude-opus-4-6')).toBe(true)
+    expect(FIRST_PARTY_ID_TO_KEY['claude-sonnet-4-5-20250929']).toBe('sonnet45')
   })
 
   test('S/F/R/U/B return [] on the host flag; zje returns undefined', async () => {
@@ -59,7 +61,7 @@ describe('densable 2.1.251 #53 host-managed bedrock discovery', () => {
     expect(readHostManagedAdminPin(null, {})).toBeUndefined()
   })
 
-  test('skip only when host flag is on and the model id is concrete', () => {
+  test('skip when host flag is on and !Jbn(ro)', () => {
     const host = { CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1' }
     expect(
       shouldSkipHostManagedBedrockProfileDiscovery(
@@ -70,7 +72,10 @@ describe('densable 2.1.251 #53 host-managed bedrock discovery', () => {
     expect(shouldSkipHostManagedBedrockProfileDiscovery(host, 'opus')).toBe(
       false,
     )
-    expect(shouldSkipHostManagedBedrockProfileDiscovery(host, '')).toBe(false)
+    expect(
+      shouldSkipHostManagedBedrockProfileDiscovery(host, 'claude-opus-4-6'),
+    ).toBe(false)
+    expect(shouldSkipHostManagedBedrockProfileDiscovery(host, '')).toBe(true)
     expect(shouldSkipHostManagedBedrockProfileDiscovery(host, null)).toBe(false)
     expect(
       shouldSkipHostManagedBedrockProfileDiscovery(
@@ -112,5 +117,24 @@ describe('densable 2.1.251 #53 host-managed bedrock discovery', () => {
         process.env.ANTHROPIC_MODEL = previousModel
       }
     }
+  })
+
+  test('Pbt skip arm awaits ME then gl (no ef await)', async () => {
+    const src = await Bun.file(
+      new URL('../modelStrings.ts', import.meta.url),
+    ).text()
+    expect(src).toContain('await resolveBedrockRegionMe()')
+    expect(src).toContain('seedModelStringsGl()')
+    const skip = src.indexOf(
+      'if (shouldSkipHostManagedBedrockProfileDiscovery())',
+    )
+    expect(skip).toBeGreaterThan(0)
+    const armEnd = src.indexOf('return fallback', skip)
+    const arm = src.slice(skip, armEnd + 'return fallback'.length)
+    expect(arm.indexOf('resolveBedrockRegionMe')).toBeLessThan(
+      arm.indexOf('seedModelStringsGl'),
+    )
+    expect(arm).toContain('return fallback')
+    expect(arm).not.toContain('getBedrockInferenceProfiles')
   })
 })

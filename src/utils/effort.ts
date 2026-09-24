@@ -758,12 +758,14 @@ export type EffortSettingsSlice = {
   ultracode?: unknown
 }
 
-/** densable p5e — canonical model id used as the modelSettings key. */
+/** densable p5e — `fn(Xe(Mt(e),{deterministic:!0}))` modelSettings key. */
 export function canonicalEffortModelKey(model: string): string {
   const { getCanonicalName } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('./model/model.js') as typeof import('./model/model.js')
-  return getCanonicalName(model)
+  // densable Mt is identity on the model string; Xe(...,{deterministic:!0})
+  // is getCanonicalName (overrides + _k, no profile hop); fn strips [1m].
+  return getCanonicalName(model).replace(/\[1m\]$/i, '')
 }
 
 /**
@@ -918,17 +920,40 @@ function currentMainLoopModelForEffort(): string | undefined {
 }
 
 /**
+ * densable Dan sticky prior — **userSettings only** (not merged project/policy).
+ * Prefer modelSettings[canonical].effortLevel (G3 tokens), else legacy top-level
+ * effortLevel. Prototype-key models fall back to top-level only (K write path).
+ */
+export function readUserSettingsEffortForModel(
+  model: string | undefined,
+): EffortLevel | undefined {
+  const user = getSettingsForSource('userSettings')
+  if (!user) return undefined
+  if (model && model.length > 0) {
+    const key = canonicalEffortModelKey(model)
+    if (!Object.hasOwn(Object.prototype, key) && user.modelSettings) {
+      for (const [raw, entry] of Object.entries(user.modelSettings)) {
+        if (canonicalEffortModelKey(raw) !== key) continue
+        const per = parsePersistedEffortLevel(entry?.effortLevel)
+        if (per !== undefined) return per
+      }
+    }
+  }
+  return parsePersistedEffortLevel(user.effortLevel)
+}
+
+/**
  * Decide what effort level (if any) to persist when the user selects a model
  * in ModelPicker. Keeps an explicit prior /effort choice sticky even when it
  * matches the picked model's default, while letting purely-default and
  * session-ephemeral effort (CLI --effort, EffortCallout default) fall through
  * to undefined so it follows future model-default changes.
  *
- * priorPersisted must come from userSettings on disk
- * (getSettingsForSource('userSettings')?.effortLevel), NOT merged settings
- * (project/policy layers would leak into the user's global settings.json)
- * and NOT AppState.effortValue (includes session-scoped sources that
- * deliberately do not write to settings.json).
+ * priorPersisted must come from userSettings on disk via
+ * readUserSettingsEffortForModel(pickedModel) — modelSettings[canonical] first,
+ * else legacy top-level effortLevel. NOT merged settings (project/policy would
+ * leak into ~/.claude/settings.json) and NOT AppState.effortValue (session
+ * sources that deliberately do not write to settings.json).
  */
 export function resolvePickerEffortPersistence(
   picked: EffortLevel | undefined,

@@ -243,15 +243,23 @@ export function isCacheWarmAnchor(messages: Message[]): boolean {
 }
 
 /**
- * densable gRn. Local RequestJournal has no applyResumeSeed /
- * stageResumeSeed — write path LEFT (ABSENT), not invented.
+ * densable gRn @179049328.
+ * Gold: `n().requestJournal.applyResumeSeed(e)` when sessionId===id, else
+ * `stageResumeSeed(e)`.
  */
-export function gRn(_seed: {
+export function gRn(seed: {
   sessionId?: string
   contextTokens: number
   requestAt: number | null
   ttlMs: number | null
-}): void {}
+}): void {
+  const session = getBootstrapSession()
+  if (seed.sessionId !== undefined && seed.sessionId === session.id) {
+    session.requestJournal.applyResumeSeed(seed)
+  } else {
+    session.requestJournal.stageResumeSeed(seed)
+  }
+}
 
 /** densable Ewe — jw cache fields for Pre/Post. */
 export function Ewe(
@@ -302,23 +310,65 @@ export function KSn(
   }
 }
 
-/** densable cre — profile without a resolved backing string. */
-export function cre(model: string): boolean {
-  if (!model.includes('application-inference-profile')) return false
-  const map =
-    getBootstrapSession().host.requestLatches.inferenceProfileBackingModels()
-  const backing = map.get(model)
-  return typeof backing !== 'string'
+/**
+ * densable hr — strip Bedrock ARN to profile/model id (local extractModelIdFromArn).
+ */
+function hr(model: string): string {
+  // Lazy require avoids model/hooks cycle at module load.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { extractModelIdFromArn } =
+    require('../model/bedrock.js') as typeof import('../model/bedrock.js')
+  return extractModelIdFromArn(model)
 }
 
 /**
- * densable hJ. `_I` fetch is ABSENT locally — return the cached
- * backing entry only; do not invent a Bedrock profile resolver.
+ * densable gie — resolved backing model string from the provider cache latch.
+ * Promise-in-flight is not a string (cre stays true until hJ settles).
  */
-export function hJ(model: string): unknown {
+function gie(profileKey: string): unknown {
   const map =
     getBootstrapSession().host.requestLatches.inferenceProfileBackingModels()
-  return map.get(model)
+  return map.get(profileKey)
+}
+
+/**
+ * densable cre @180584703.
+ * `e.includes("application-inference-profile")&&typeof gie(hr(e))!=="string"`.
+ */
+export function cre(model: string): boolean {
+  if (!model.includes('application-inference-profile')) return false
+  return typeof gie(hr(model)) !== 'string'
+}
+
+/**
+ * densable _I — GetInferenceProfile backing model (local async memoize).
+ */
+async function _I(profileKey: string): Promise<string | null> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getInferenceProfileBackingModel } =
+    require('../model/bedrock.js') as typeof import('../model/bedrock.js')
+  return getInferenceProfileBackingModel(profileKey)
+}
+
+/**
+ * densable hJ @180584572.
+ * `t=hr(e); o=r.get(t); if(o===void 0)o=_I(t),r.set(t,o); return o`
+ * Stores the in-flight Promise (or string) on the latch map.
+ */
+export async function hJ(model: string): Promise<unknown> {
+  const t = hr(model)
+  const r =
+    getBootstrapSession().host.requestLatches.inferenceProfileBackingModels()
+  let o = r.get(t)
+  if (o === undefined) {
+    o = _I(t).then(backing => {
+      // densable: keep resolved string|null on the same key after settle
+      r.set(t, backing)
+      return backing
+    })
+    r.set(t, o)
+  }
+  return o
 }
 
 /** densable LOe / DOe — alias or family matcher. */
@@ -327,10 +377,23 @@ export function LOe(model: string): boolean {
   return isModelAlias(t) || isModelFamilyAlias(t)
 }
 
-/** densable pEt stand-in — gold Kt(we(), GXe) is ABSENT. */
-export function modelSwitchToolUseId(): string {
+/**
+ * densable GXe — adjacent literal at pEt @179887321.
+ * Gold: `GXe="remote-settings-helper-consent"`.
+ */
+export const GXe = 'remote-settings-helper-consent'
+
+/**
+ * densable pEt @179887321. Gold: `return Kt(we(), GXe)`.
+ * `Kt` / `we` bodies still unpeeled — deterministic UUID from session id + GXe
+ * is not gold; keep randomUUID stand-in (not invented v5).
+ */
+export function pEt(): string {
   return randomUUID()
 }
+
+/** Local alias used by hdt/ydt in hooks.ts. */
+export const modelSwitchToolUseId = pEt
 
 export function getModelSwitchSession(): {
   id: string

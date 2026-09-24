@@ -155,6 +155,14 @@ describe('per-model effort settings (2.1.251 #61)', () => {
     expect(resolved.byModel[opus]).toBeUndefined()
   })
 
+  test('K patch shape is modelSettings[canonical]; clear drops entry', () => {
+    expect(effortModelSettingsPatch('Claude-Opus-5', 'xhigh')).toEqual({
+      modelSettings: { [opus]: { effortLevel: 'xhigh' } },
+    })
+    expect(canonicalEffortModelKey('claude-opus-5-20260101')).toBe(opus)
+    expect(effortModelClearPatch(opus).modelSettings?.[opus]).toBeUndefined()
+  })
+
   test('ModelPicker confirm writes per-model effort; cycle does not unpin', () => {
     const pickerSrc = readFileSync(
       join(import.meta.dir, '../../components/ModelPicker.tsx'),
@@ -171,6 +179,10 @@ describe('per-model effort settings (2.1.251 #61)', () => {
     )
     expect(confirm).toContain('effortModelSettingsPatch')
     expect(confirm).toContain('unpinAllEffortLaunchPins')
+    expect(confirm).toContain('readUserSettingsEffortForModel')
+    expect(confirm).not.toContain(
+      "getSettingsForSource('userSettings')?.effortLevel",
+    )
     expect(confirm).not.toContain('getEffort')
   })
 
@@ -189,6 +201,11 @@ describe('per-model effort settings (2.1.251 #61)', () => {
     expect(commandSrc).toContain('effortModelClearPatch')
     expect(effortSrc).toContain('getEnabledSettingSources')
     expect(effortSrc).toContain('parsePersistedEffortLevel')
+    expect(effortSrc).toContain('readUserSettingsEffortForModel')
+    // densable p5e = fn(Xe(Mt(e),{deterministic:!0})) — comment locks the gold chain
+    expect(effortSrc).toContain('fn(Xe(Mt')
+    expect(effortSrc).toContain('deterministic')
+    expect(effortSrc).toContain('[1m]')
     const constantsSrc = readFileSync(
       join(import.meta.dir, '../settings/constants.ts'),
       'utf8',

@@ -232,6 +232,23 @@ export function getDefaultOpusModel(): ModelName {
   return getModelStrings().opus5
 }
 
+/**
+ * densable bl/xt — default opus setting for gold aw's Bedrock/Vertex arm.
+ * bl: ANTHROPIC_DEFAULT_OPUS_MODEL if defined, else xt.
+ * xt: Hs("opus") ?? catalog opus5. Not 3P-lag opus47, not [1m].
+ */
+function getBuiltinDefaultOpusSetting(): ModelName {
+  const envOpus = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  if (envOpus !== undefined) {
+    return envOpus
+  }
+  const strings = getModelStrings()
+  return (
+    resolveCatalogFamilyModelString('opus', strings, getAPIProvider()) ??
+    strings.opus5
+  )
+}
+
 // @[MODEL LAUNCH]: Update the default Sonnet model (3P providers may lag so keep defaults unchanged).
 export function getDefaultSonnetModel(): ModelName {
   const provider = getAPIProvider()
@@ -411,13 +428,14 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   }
 
   // densable aw — Bedrock/Vertex default opus unless rw() (sonnet-only
-  // catalog and enforcement inactive). Foundry is not in gold aw.
+  // catalog and enforcement inactive). Foundry is not in gold aw. This
+  // arm is bl() (no Qb/[1m]): env or xt Hs("opus")??opus5, not 3P-lag opus47.
   const provider = getAPIProvider()
   if (provider === 'bedrock' || provider === 'vertex') {
     if (isSonnetOnlyUnenforcedCatalog()) {
       return getDefaultSonnetModel()
     }
-    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+    return getBuiltinDefaultOpusSetting()
   }
 
   // PAYG (1P and 3P), Team Standard, and Pro get Sonnet as default.

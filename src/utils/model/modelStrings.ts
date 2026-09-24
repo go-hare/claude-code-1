@@ -3,11 +3,16 @@ import {
   getModelStrings as getModelStringsState,
   setModelStrings as setModelStringsState,
 } from 'src/bootstrap/state.js'
+import { parseAwsIniSections } from '../aws.js'
 import { logForDebugging } from '../debug.js'
-import { getAWSRegion, isEnvTruthy } from '../envUtils.js'
+import { getAWSRegion, isEnvTruthy, sanitizeCloudRegion } from '../envUtils.js'
 import { logError } from '../log.js'
 import { sequential } from '../sequential.js'
 import { getInitialSettings } from '../settings/settings.js'
+import { getErrnoCode } from '../errors.js'
+import { readFile } from 'fs/promises'
+import { homedir } from 'os'
+import { join } from 'path'
 import {
   applyBedrockRegionPrefix,
   deriveBedrockRegionPrefixFromAwsRegion,
@@ -45,24 +50,31 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
 }
 
 /**
- * densable NU — first-party catalog id → internal key.
+ * densable NU — `Object.fromEntries(Object.entries(so).map(([e,t])=>[t.firstParty,e]))`.
  * Jbn treats Object.hasOwn(NU, id) as an alias (not a provider id).
  */
-export const FIRST_PARTY_ID_TO_KEY = CANONICAL_ID_TO_KEY
+export const FIRST_PARTY_ID_TO_KEY = Object.fromEntries(
+  Object.entries(ALL_MODEL_CONFIGS).map(([e, t]) => [t.firstParty, e]),
+) as Record<CanonicalModelId, ModelKey>
 
 /**
- * densable Jbn — alias (`jm`) or first-party catalog id (`NU`).
- * Blank is not a model id.
+ * densable Jbn — `hr(e).trim().toLowerCase()` then `jm(t)||Object.hasOwn(NU,t)`.
+ * Gold Pbt caller is `ro!=null&&!Jbn(ro)`: blank is not jm/NU, so it is a
+ * provider id. `hr` body is not in exclusive gold — trim/lower only.
+ */
+function isKnownFirstPartyOrAlias(model: string): boolean {
+  const t = model.trim().toLowerCase()
+  return isModelAlias(t) || Object.hasOwn(FIRST_PARTY_ID_TO_KEY, t)
+}
+
+/**
+ * densable Pbt `sessionModelIsProviderId:ro!=null&&!Jbn(ro)`.
  */
 export function sessionModelIsProviderId(
   model: string | null | undefined,
 ): boolean {
   if (model == null) return false
-  const trimmed = model.trim()
-  if (!trimmed) return false
-  const lowered = trimmed.toLowerCase()
-  if (isModelAlias(lowered)) return false
-  return !Object.hasOwn(FIRST_PARTY_ID_TO_KEY, lowered)
+  return !isKnownFirstPartyOrAlias(model)
 }
 
 function readBedrockSessionModelId(): string | undefined {
@@ -77,9 +89,10 @@ function readBedrockSessionModelId(): string | undefined {
 }
 
 /**
- * densable Pbt gate: host flag AND a concrete provider model id.
- * Pass `modelId` to avoid reading the session (null/'' means no model id).
- * Omit `modelId` to read override, then ANTHROPIC_MODEL, then settings.model.
+ * densable Pbt: host flag AND `ro!=null&&!Jbn(ro)`.
+ * Pass `modelId` to avoid reading the session (`null` is not a provider id;
+ * blank is `!Jbn`). Omit `modelId` to read override, then ANTHROPIC_MODEL,
+ * then settings.model.
  */
 export function shouldSkipHostManagedBedrockProfileDiscovery(
   env: NodeJS.ProcessEnv = process.env,
@@ -88,6 +101,71 @@ export function shouldSkipHostManagedBedrockProfileDiscovery(
   if (!isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) return false
   const model = modelId === undefined ? readBedrockSessionModelId() : modelId
   return sessionModelIsProviderId(model)
+}
+
+/**
+ * densable `d` in ME — env region only (no AAe fallback).
+ */
+function envAwsRegionOrUndefined(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return (
+    sanitizeCloudRegion(env.AWS_REGION) ||
+    sanitizeCloudRegion(env.AWS_DEFAULT_REGION) ||
+    undefined
+  )
+}
+
+/**
+ * densable `u().readAwsSharedConfigRegion` — default profile `region` from
+ * AWS_CONFIG_FILE or `~/.aws/config`.
+ */
+export async function readAwsSharedConfigRegion(): Promise<string | undefined> {
+  const configPath =
+    process.env.AWS_CONFIG_FILE || join(homedir(), '.aws', 'config')
+  try {
+    const raw = await readFile(configPath, 'utf8')
+    const sections = parseAwsIniSections(raw, 'config')
+    const profile = process.env.AWS_PROFILE || 'default'
+    const block = sections[profile] ?? sections.default
+    return sanitizeCloudRegion(block?.region)
+  } catch (error) {
+    if (getErrnoCode(error) !== 'ENOENT') {
+      logForDebugging(
+        `[bedrock] readAwsSharedConfigRegion failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    return undefined
+  }
+}
+
+/**
+ * densable ME @179503988 — `d() || sharedConfig || AAe()`.
+ * AAe = getAWSRegion() default us-east-1.
+ */
+export async function resolveBedrockRegionMe(): Promise<string> {
+  const fromEnv = envAwsRegionOrUndefined()
+  if (fromEnv) return fromEnv
+  const fromShared = await readAwsSharedConfigRegion()
+  if (fromShared) return fromShared
+  return getAWSRegion()
+}
+
+/**
+ * densable gl @180587669 — if modelStrings already set return; non-bedrock
+ * seeds builtins; bedrock fire-and-forgets ef (updateBedrockModelStrings).
+ * KFe = getModelStringsState(); Pkt(zr(Ne())) = set builtins for provider;
+ * ef = updateBedrockModelStrings (async, not awaited).
+ */
+export function seedModelStringsGl(): void {
+  if (getModelStringsState() !== null) return
+  const provider = getAPIProvider()
+  if (provider !== 'bedrock') {
+    setModelStringsState(getBuiltinModelStrings(provider))
+    return
+  }
+  // Fire-and-forget discovery warm (gold ef without await).
+  void updateBedrockModelStrings()
 }
 
 /** densable Bpt — rewrite/add preferred cross-region prefix on a bedrock model id. */
@@ -123,11 +201,12 @@ export async function getBedrockModelStrings(): Promise<ModelStrings> {
     }
   }
 
-  // densable Pbt: host-managed + provider model id returns before ef()
-  // (ListInferenceProfiles). ME() and gl() bodies are absent — keep the
-  // builtin fallback. S/F's host-flag-only empty return is not applied:
-  // no model id still discovers.
+  // densable Pbt: host-managed + provider model id → await ME(), gl(); return
+  // (does not await ef ListInferenceProfiles). S/F host-flag `return[]` is in
+  // hostManagedProfileLists.ts; this path still uses builtin fallback.
   if (shouldSkipHostManagedBedrockProfileDiscovery()) {
+    await resolveBedrockRegionMe()
+    seedModelStringsGl()
     return fallback
   }
 

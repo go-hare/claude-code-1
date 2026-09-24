@@ -10,14 +10,21 @@ mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 import type { AssistantMessage, Message } from '../../../types/message.js'
+import { getBootstrapSession } from '../../sessionRoot.js'
 import {
   Ewe,
+  GXe,
   Hye,
   KSn,
   LOe,
   Lsn,
   contextTokensAfterCompact,
+  cre,
+  gRn,
+  hJ,
   lastRealAssistant,
+  modelSwitchToolUseId,
+  pEt,
   yBn,
 } from '../modelSwitchHooks.js'
 import { executePreModelSwitchHooks } from '../../hooks.js'
@@ -161,5 +168,78 @@ describe('executePreModelSwitchHooks', () => {
       expect(result.skipConfirm).toBe(false)
     }
     expect(result.messages).toEqual([])
+  })
+})
+
+describe('gRn', () => {
+  test('applyResumeSeed when sessionId matches; else stageResumeSeed', () => {
+    const session = getBootstrapSession()
+    const id = session.id as string
+    gRn({
+      sessionId: id,
+      contextTokens: 42,
+      requestAt: 1000,
+      ttlMs: 300_000,
+    })
+    expect(session.requestJournal.resumeSeed()).toEqual({
+      sessionId: id,
+      contextTokens: 42,
+      requestAt: 1000,
+      ttlMs: 300_000,
+    })
+    expect(session.requestJournal.stagedResumeSeed()).toBeNull()
+
+    gRn({
+      sessionId: 'other-session',
+      contextTokens: 7,
+      requestAt: null,
+      ttlMs: null,
+    })
+    expect(session.requestJournal.stagedResumeSeed()).toEqual({
+      sessionId: 'other-session',
+      contextTokens: 7,
+      requestAt: null,
+      ttlMs: null,
+    })
+  })
+})
+
+describe('cre / hJ', () => {
+  const profile =
+    'arn:aws:bedrock:us-east-1:123:application-inference-profile/gate-251'
+  // densable hr strips ARN → profile id key
+  const profileKey = 'gate-251'
+  const map = () =>
+    getBootstrapSession().host.requestLatches.inferenceProfileBackingModels()
+
+  test('non-profile model is not an unresolved profile', () => {
+    expect(cre('claude-opus-4-6')).toBe(false)
+  })
+
+  test('profile without a cached backing string is unresolved', () => {
+    map().delete(profile)
+    map().delete(profileKey)
+    expect(cre(profile)).toBe(true)
+  })
+
+  test('cached backing string is enough — cre becomes false', async () => {
+    map().set(profileKey, 'anthropic.claude-opus-4-6')
+    try {
+      await expect(hJ(profile)).resolves.toBe('anthropic.claude-opus-4-6')
+      expect(cre(profile)).toBe(false)
+    } finally {
+      map().delete(profileKey)
+      map().delete(profile)
+    }
+  })
+})
+
+describe('pEt', () => {
+  test('GXe is the gold consent id; Kt(we(), GXe) hop stays ABSENT', () => {
+    expect(GXe).toBe('remote-settings-helper-consent')
+    expect(modelSwitchToolUseId).toBe(pEt)
+    expect(pEt()).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
   })
 })
