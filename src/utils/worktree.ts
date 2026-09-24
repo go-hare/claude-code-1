@@ -320,6 +320,25 @@ export function getCurrentWorktreeSession(): WorktreeSession | null {
   return currentWorktreeSession
 }
 
+/**
+ * densable `Fkn` — path sits in a linked git worktree (not the main working
+ * tree). Gold 2.1.251: `Fkn(e){ let t=lvt(e); return t!==null && ue(t)!==t }`
+ * (`lvt` = {@link findGitRoot}; `ue` = {@link findCanonicalGitRoot}).
+ *
+ * Used by Q$ bg write guard to allow edits under a `git worktree add` path.
+ * Do not fold bg-boot adopt (`isLinkedWorktreeCwd` / `adoptWorktreeForBgBoot`)
+ * into this — adopt keeps its own cwd/canonical/Claude-worktrees gate.
+ */
+export function isLinkedWorktree(path: string): boolean {
+  const t = findGitRoot(path)
+  return t !== null && findCanonicalGitRoot(t) !== t
+}
+
+/** densable `Fkn` — alias kept for existing call sites. */
+export function isLinkedGitWorktree(path: string): boolean {
+  return isLinkedWorktree(path)
+}
+
 // densable 2.1.216: shell shared-checkout guard reads session via provider
 // (avoids worktree ↔ worktreeGitIsolation circular import).
 registerWorktreeSessionProvider(() => currentWorktreeSession)
