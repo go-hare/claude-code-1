@@ -1186,6 +1186,8 @@ export function convertToSandboxRuntimeConfig(
     ...(strictAllowlist ? { strictAllowlist: true } : {}),
     allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
     allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
+    // densable 2.1.251 #66 qe — network.allowMachLookup (macOS XPC allowlist)
+    allowMachLookup: settings.sandbox?.network?.allowMachLookup,
     allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
     httpProxyPort:
       settings.sandbox?.network?.httpProxyPort ?? hostProxy.httpProxyPort,
@@ -1209,6 +1211,7 @@ export function convertToSandboxRuntimeConfig(
   }
 
   // densable Pa: `Nu=!1`; WeakMap.set(Ya, Nu) then return Ya
+  // densable 2.1.251 #66 qe — allowAppleEvents + enableWeaker* land on package config
   const config = {
     network,
     filesystem: {
@@ -1223,6 +1226,7 @@ export function convertToSandboxRuntimeConfig(
     enableWeakerNestedSandbox: settings.sandbox?.enableWeakerNestedSandbox,
     enableWeakerNetworkIsolation:
       settings.sandbox?.enableWeakerNetworkIsolation,
+    allowAppleEvents: settings.sandbox?.allowAppleEvents,
     ripgrep: ripgrepConfig,
   }
   rememberBuiltConfigAllowlist(config, false)

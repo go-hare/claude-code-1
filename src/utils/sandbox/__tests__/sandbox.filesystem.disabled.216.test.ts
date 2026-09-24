@@ -696,3 +696,76 @@ describe('getLinuxGlobPatternWarnings when filesystem.disabled (densable uCg)', 
     expect(SandboxManager.getLinuxGlobPatternWarnings()).toEqual([])
   })
 })
+
+describe('densable 2.1.251 #66 qe weakening keys pass-through', () => {
+  test('allowAppleEvents + network.allowMachLookup land on runtime config', () => {
+    bySource({
+      userSettings: {
+        sandbox: {
+          allowAppleEvents: true,
+          enableWeakerNestedSandbox: true,
+          enableWeakerNetworkIsolation: true,
+          network: {
+            allowMachLookup: [
+              'com.1password.*',
+              'com.apple.coreservices.launchservicesd',
+            ],
+            allowAllUnixSockets: true,
+            allowUnixSockets: ['/tmp/sock'],
+            httpProxyPort: 3128,
+            socksProxyPort: 1080,
+          },
+        },
+      },
+    })
+    platformOverride = 'macos'
+    const cfg = convertToSandboxRuntimeConfig({
+      sandbox: {
+        allowAppleEvents: true,
+        enableWeakerNestedSandbox: true,
+        enableWeakerNetworkIsolation: true,
+        network: {
+          allowMachLookup: [
+            'com.1password.*',
+            'com.apple.coreservices.launchservicesd',
+          ],
+          allowAllUnixSockets: true,
+          allowUnixSockets: ['/tmp/sock'],
+          httpProxyPort: 3128,
+          socksProxyPort: 1080,
+        },
+      },
+    })
+    expect(cfg.allowAppleEvents).toBe(true)
+    expect(cfg.enableWeakerNestedSandbox).toBe(true)
+    expect(cfg.enableWeakerNetworkIsolation).toBe(true)
+    expect(cfg.network.allowMachLookup).toEqual([
+      'com.1password.*',
+      'com.apple.coreservices.launchservicesd',
+    ])
+    expect(cfg.network.allowAllUnixSockets).toBe(true)
+    expect(cfg.network.allowUnixSockets).toEqual(['/tmp/sock'])
+    expect(cfg.network.httpProxyPort).toBe(3128)
+    expect(cfg.network.socksProxyPort).toBe(1080)
+  })
+
+  test('schema accepts allowAppleEvents + allowMachLookup', () => {
+    const { SandboxSettingsSchema } =
+      require('src/entrypoints/sandboxTypes.js') as typeof import('src/entrypoints/sandboxTypes.js')
+    const parsed = SandboxSettingsSchema().parse({
+      allowAppleEvents: true,
+      network: {
+        allowMachLookup: ['com.example.*'],
+        tlsTerminate: { caCertPath: '/tmp/ca.pem', caKeyPath: '/tmp/ca.key' },
+      },
+      enableWeakerNestedSandbox: true,
+      enableWeakerNetworkIsolation: false,
+    })
+    expect(parsed.allowAppleEvents).toBe(true)
+    expect(parsed.network?.allowMachLookup).toEqual(['com.example.*'])
+    expect(parsed.network?.tlsTerminate).toEqual({
+      caCertPath: '/tmp/ca.pem',
+      caKeyPath: '/tmp/ca.key',
+    })
+  })
+})

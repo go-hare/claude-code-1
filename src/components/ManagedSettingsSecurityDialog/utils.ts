@@ -2,16 +2,27 @@ import {
   DANGEROUS_SHELL_SETTINGS,
   isSafeManagedEnv,
 } from '../../utils/managedEnvConstants.js'
+import {
+  getSandboxNestedValue,
+  projectDangerousSandboxQeSettings,
+} from '../../utils/sandbox/dangerousSandboxQe.js'
 import { SETTINGS_KEY_ALIASES } from '../../utils/settings/settingsAliases.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { plural } from '../../utils/stringUtils.js'
 
+export {
+  DANGEROUS_SANDBOX_QE_KEYS,
+  isDangerousSandboxQeValueSet,
+  projectDangerousSandboxQeSettings,
+} from '../../utils/sandbox/dangerousSandboxQe.js'
+export type { DangerousSandboxQeKey } from '../../utils/sandbox/dangerousSandboxQe.js'
+
 /**
  * densable sJc — sandbox binary / ripgrep overrides that require managed-settings
  * approval (2.1.232 #34). Project settings cannot set these for runtime (#48);
- * when present on managed payload they still surface as dangerous shell keys
- * `sandbox.${key}` in d7e.
+ * densable VU put them in shellSettings; local 251 eAn/c5 treat them as
+ * sandboxSettings keys `sandbox.${key}`.
  */
 export const DANGEROUS_SANDBOX_BINARY_KEYS = [
   'bwrapPath',
@@ -25,22 +36,53 @@ export type DangerousSandboxBinaryKey =
 type DangerousShellSetting = (typeof DANGEROUS_SHELL_SETTINGS)[number]
 
 /**
- * densable shellSettings keys: S3l helpers + `sandbox.${sJc}` + dynamic
+ * densable shellSettings keys: S3l helpers + dynamic
  * `extraKnownMarketplaces[...]` / `policyHelpers.*` projection keys (Y_e).
+ * Sandbox qe/sJc live in sandboxSettings (251 eAn/c5).
  */
-export type DangerousShellKey =
-  | DangerousShellSetting
-  | `sandbox.${DangerousSandboxBinaryKey}`
-  | string
+export type DangerousShellKey = DangerousShellSetting | string
 
 export type DangerousSettings = {
   shellSettings: Record<string, string>
   envVars: Record<string, string>
+  /**
+   * densable 251 eAn/c5 `sandboxSettings`: `sandbox.${sJc}` binaries + `sandbox.${qe}`.
+   */
+  sandboxSettings: Record<string, string>
   hasHooks: boolean
   hooks?: unknown
   /** densable hFt hasClaudeMd — managed CLAUDE.md injection */
   hasClaudeMd: boolean
   claudeMd?: string
+}
+
+/** densable he — dotted path under sandbox (gold getSandboxNestedValue). */
+export function getSandboxQePathValue(
+  sandbox: Record<string, unknown>,
+  path: string,
+): unknown {
+  return getSandboxNestedValue(sandbox, path)
+}
+
+/**
+ * densable re({value, enabled, enabledPlatforms, allowedDomains?}) for qe bag.
+ * Call-site shape from VU; stable JSON for hash/UI.
+ */
+export function formatSandboxQeSettingValue(params: {
+  value: unknown
+  enabled?: unknown
+  enabledPlatforms?: unknown
+  allowedDomains?: unknown
+}): string {
+  const payload: Record<string, unknown> = { value: params.value }
+  if (params.enabled !== undefined) payload.enabled = params.enabled
+  if (params.enabledPlatforms !== undefined) {
+    payload.enabledPlatforms = params.enabledPlatforms
+  }
+  if (params.allowedDomains !== undefined) {
+    payload.allowedDomains = params.allowedDomains
+  }
+  return jsonStringify(payload)
 }
 
 /**
@@ -149,6 +191,7 @@ export function extractDangerousSettings(
   if (!settings) {
     return {
       shellSettings: {},
+      sandboxSettings: {},
       envVars: {},
       hasHooks: false,
       hasClaudeMd: false,
@@ -254,15 +297,24 @@ export function extractDangerousSettings(
     }
   }
 
-  // densable d7e: sandbox sJc keys → shellSettings[`sandbox.${s}`]
+  // densable VU: sandbox sJc (Je binary/path) and qe weakening keys → sandboxSettings.
+  // Pre-251 d7e put sJc into shellSettings; 251 eAn/c5/Zor use sandboxSettings.
+  const sandboxSettings: Record<string, string> = {}
   const sandbox = settingsRecord.sandbox
   if (sandbox !== null && typeof sandbox === 'object') {
     const sandboxRec = sandbox as Record<string, unknown>
+    // densable Je/sJc binary overrides (coerced string for hash/UI)
     for (const key of DANGEROUS_SANDBOX_BINARY_KEYS) {
       const coerced = coerceSandboxBinarySettingValue(sandboxRec[key])
       if (coerced) {
-        shellSettings[`sandbox.${key}`] = coerced
+        sandboxSettings[`sandbox.${key}`] = coerced
       }
+    }
+    // densable VU qe loop — so/ro/oo live in projectDangerousSandboxQeSettings
+    for (const [key, entry] of Object.entries(
+      projectDangerousSandboxQeSettings(sandboxRec),
+    )) {
+      sandboxSettings[key] = formatSandboxQeSettingValue(entry)
     }
   }
 
@@ -289,6 +341,7 @@ export function extractDangerousSettings(
 
   return {
     shellSettings,
+    sandboxSettings,
     envVars,
     hasHooks,
     hooks: hasHooks ? settings.hooks : undefined,
@@ -298,12 +351,13 @@ export function extractDangerousSettings(
 }
 
 /**
- * densable sOo — any dangerous surface present.
+ * densable c5 / sOo — any dangerous surface present, including sandboxSettings.
  */
 export function hasDangerousSettings(dangerous: DangerousSettings): boolean {
   return (
     Object.keys(dangerous.shellSettings).length > 0 ||
     Object.keys(dangerous.envVars).length > 0 ||
+    Object.keys(dangerous.sandboxSettings).length > 0 ||
     dangerous.hasHooks ||
     dangerous.hasClaudeMd
   )
@@ -317,9 +371,8 @@ export type DangerousApprovalDiff = {
 
 /**
  * densable eAn. Baseline settings are projected with extractDangerousSettings
- * (local VU). Sandbox binaries already live in shellSettings, so there is no
- * separate sandboxSettings bag. inlineHelperScriptSizes is not on the local
- * projection.
+ * (local VU). Sandbox binaries live in sandboxSettings, not shellSettings.
+ * inlineHelperScriptSizes is not on the local projection (ABSENT).
  */
 export function diffDangerousApproval(
   baseline: SettingsJson | null | undefined,
@@ -350,6 +403,14 @@ export function diffDangerousApproval(
   for (const key of Object.keys(previous.envVars)) {
     if (!Object.hasOwn(current.envVars, key)) removedCount++
   }
+  const sandboxSettings: Record<string, string> = {}
+  for (const [key, value] of Object.entries(current.sandboxSettings)) {
+    if (previous.sandboxSettings[key] === value) unchangedCount++
+    else sandboxSettings[key] = value
+  }
+  for (const key of Object.keys(previous.sandboxSettings)) {
+    if (!Object.hasOwn(current.sandboxSettings, key)) removedCount++
+  }
   if (previous.hasHooks && !current.hasHooks) removedCount++
   if (previous.hasClaudeMd && !current.hasClaudeMd) removedCount++
   const hooksChanged =
@@ -365,6 +426,7 @@ export function diffDangerousApproval(
   return {
     changed: {
       shellSettings,
+      sandboxSettings,
       envVars,
       hasHooks: hooksChanged,
       hooks: hooksChanged ? current.hooks : undefined,
@@ -429,15 +491,18 @@ export function hasDangerousSettingsChanged(
     return true
   }
 
+  // densable FLd / ve projection — sandboxSettings is its own bag (251 #66 qe).
   const oldJson = jsonStringify({
     shellSettings: oldDangerous.shellSettings,
     envVars: oldDangerous.envVars,
+    sandboxSettings: oldDangerous.sandboxSettings,
     hooks: oldDangerous.hooks,
     claudeMd: oldDangerous.claudeMd,
   })
   const newJson = jsonStringify({
     shellSettings: newDangerous.shellSettings,
     envVars: newDangerous.envVars,
+    sandboxSettings: newDangerous.sandboxSettings,
     hooks: newDangerous.hooks,
     claudeMd: newDangerous.claudeMd,
   })
@@ -478,7 +543,10 @@ export function formatDangerousSettingsList(
 ): string[] {
   const items: string[] = []
 
-  for (const [key, value] of Object.entries(dangerous.shellSettings)) {
+  for (const [key, value] of Object.entries({
+    ...dangerous.shellSettings,
+    ...dangerous.sandboxSettings,
+  })) {
     if (value === undefined) continue
     if (key.startsWith('extraKnownMarketplaces[')) {
       if (key.endsWith('.headersHelper')) {

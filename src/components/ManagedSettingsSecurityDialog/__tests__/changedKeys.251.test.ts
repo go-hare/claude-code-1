@@ -72,4 +72,23 @@ describe('densable 2.1.251 #54 managed settings changed keys', () => {
     expect(listed.unchangedCount).toBe(0)
     expect(listed.removedCount).toBe(0)
   })
+
+  test('sandbox bag is compared separately from shellSettings', () => {
+    const baseline = {
+      apiKeyHelper: 'helper',
+      sandbox: { bwrapPath: '/old/bwrap' },
+    } as SettingsJson
+    const current = extractDangerousSettings({
+      apiKeyHelper: 'helper',
+      sandbox: { bwrapPath: '/new/bwrap' },
+    } as SettingsJson)
+    expect(current.sandboxSettings['sandbox.bwrapPath']).toBe('/new/bwrap')
+    expect(current.shellSettings['sandbox.bwrapPath']).toBeUndefined()
+    const listed = listManagedSettingsForApproval(baseline, current)
+    expect(listed.items).toEqual(['sandbox.bwrapPath'])
+    expect(listed.unchangedCount).toBe(1)
+    expect(formatUnchangedApprovalCount(listed.unchangedCount)).toBe(
+      '＋ 1 other active setting unchanged since your last approval',
+    )
+  })
 })

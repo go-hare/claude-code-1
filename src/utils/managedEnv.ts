@@ -289,24 +289,26 @@ const OTEL_NON_ENDPOINT_SUFFIXES = new Set([
 const otelManagedDropWarned = new Set<string>()
 
 /**
- * densable tdr — delete process.env[key] when not claimed by managed policy map
- * and not host-orchestrated spawn-protected.
+ * densable `dropDominatedOtelKey` / `tdr` — delete process.env[key] when not
+ * claimed by managed policy map and not host-orchestrated spawn-protected.
+ * Warn format: `${claimKey} is claimed by ${claimSource}`.
  */
 function dropLowerTrustOtelEnvKey(
   key: string,
   redirectTarget: string,
-  claimSource: string,
+  claimKey: string,
   policyEnvUpper: Map<string, string>,
+  claimSource = 'managed settings',
 ): void {
   // densable: if policy map already claims this key (same value in env), keep it.
   if (policyEnvUpper.get(key) === process.env[key]) return
-  // densable ndr — host-orchestrated spawn keys are protected.
-  if (ccdSpawnEnvKeys?.has(key)) return
+  // densable hostSpawnEnvKeys?.has(t.toUpperCase()) — case-insensitive protect.
+  if (hostSpawnHasKey(key)) return
   if (process.env[key] === undefined) return
   if (!otelManagedDropWarned.has(key)) {
     otelManagedDropWarned.add(key)
     logForDebugging(
-      `Dropping ${key}: managed settings claim ${claimSource}, so lower-trust scopes cannot redirect ${redirectTarget}`,
+      `Dropping ${key}: ${claimKey} is claimed by ${claimSource}, so lower-trust scopes cannot redirect ${redirectTarget}`,
       { level: 'warn' },
     )
   }
@@ -316,6 +318,13 @@ function dropLowerTrustOtelEnvKey(
 const BETA_TRACING_ENDPOINT = 'BETA_TRACING_ENDPOINT'
 const BETA_TRACING_REDIRECT =
   'the logs and traces signals through detailed beta tracing'
+/** densable `u` — pinned claim in applyOtelFamilyClaims. */
+const CLAUDE_CODE_ENABLE_TELEMETRY = 'CLAUDE_CODE_ENABLE_TELEMETRY'
+/** densable `P` — logs/traces exporter keys that can dominate beta tracing. */
+const OTEL_LOGS_OR_TRACES_EXPORTER = new Set([
+  'OTEL_LOGS_EXPORTER',
+  'OTEL_TRACES_EXPORTER',
+])
 
 function hostSpawnHasKey(key: string): boolean {
   if (!ccdSpawnEnvKeys) return false
@@ -326,94 +335,149 @@ function hostSpawnHasKey(key: string): boolean {
   return false
 }
 
+/** densable `j` — comma list does not include the `otlp` exporter token. */
+function isNonOtlpLogsOrTracesExporter(value: string): boolean {
+  return !value
+    .split(',')
+    .map(s => s.trim())
+    .includes('otlp')
+}
+
 /**
  * densable `dropDominatedBetaTracingEndpoint` — delete BETA_TRACING_ENDPOINT
- * when a higher-trust OTLP claim is pinned. Warn text is `dropDominatedOtelKey`.
+ * via dropDominatedOtelKey when a higher-trust claim is pinned.
+ * Exported for unit tests.
  */
-function dropDominatedBetaTracingEndpoint(
+export function dropDominatedBetaTracingEndpoint(
   claimKey: string,
   policyEnvUpper: Map<string, string>,
   claimSource = 'managed settings',
 ): void {
-  if (
-    policyEnvUpper.get(BETA_TRACING_ENDPOINT) ===
-    process.env[BETA_TRACING_ENDPOINT]
-  ) {
-    return
-  }
-  if (hostSpawnHasKey(BETA_TRACING_ENDPOINT)) return
-  if (process.env[BETA_TRACING_ENDPOINT] === undefined) return
-  if (!otelManagedDropWarned.has(BETA_TRACING_ENDPOINT)) {
-    otelManagedDropWarned.add(BETA_TRACING_ENDPOINT)
-    logForDebugging(
-      `Dropping ${BETA_TRACING_ENDPOINT}: ${claimKey} is claimed by ${claimSource}, so lower-trust scopes cannot redirect ${BETA_TRACING_REDIRECT}`,
-      { level: 'warn' },
-    )
-  }
-  delete process.env[BETA_TRACING_ENDPOINT]
-}
-
-function applyOtelClaimBetaDrop(
-  keyUpper: string,
-  value: string,
-  claimKey: string,
-  policyEnvUpper: Map<string, string>,
-  claimSource: string,
-): void {
-  if (!keyUpper.startsWith(OTEL_OTLP_PREFIX)) return
-  if (value.trim() === '') return
-  if (process.env[claimKey] !== value) return
-
-  const signal = OTEL_SIGNALS.find(s =>
-    keyUpper.startsWith(`${OTEL_OTLP_PREFIX}${s}_`),
+  dropLowerTrustOtelEnvKey(
+    BETA_TRACING_ENDPOINT,
+    BETA_TRACING_REDIRECT,
+    claimKey,
+    policyEnvUpper,
+    claimSource,
   )
-  if (signal) {
-    const suffix = keyUpper.slice(`${OTEL_OTLP_PREFIX}${signal}_`.length)
-    const tracesOrLogs = signal === 'TRACES' || signal === 'LOGS'
-    if (OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)) {
-      if (tracesOrLogs) {
-        dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
-      }
-    } else if (suffix === 'ENDPOINT' && tracesOrLogs) {
-      dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
-    }
-    return
-  }
-
-  const suffix = keyUpper.slice(OTEL_OTLP_PREFIX.length)
-  const suffixesToStrip = OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)
-    ? [suffix, 'ENDPOINT']
-    : [suffix]
-  if (suffixesToStrip.includes('ENDPOINT')) {
-    dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
-  }
 }
 
-function applyHostSpawnBetaTracingDominance(
-  policyEnvUpper: Map<string, string>,
-): void {
-  if (!ccdSpawnEnvKeys) return
+/**
+ * densable `hostSpawnOtelClaims` — host-orchestrated spawn keys that may pin
+ * beta-tracing dominance (`P` exporters, `u` telemetry flag, or OTLP family
+ * when an OTLP `_ENDPOINT` / `BETA_TRACING_ENDPOINT` is already pinned).
+ */
+function hostSpawnOtelClaims(): Map<string, string> {
+  const claims = new Map<string, string>()
+  if (!ccdSpawnEnvKeys) return claims
   const pinned = [...ccdSpawnEnvKeys].some(key => {
     const upper = key.toUpperCase()
-    const value = (process.env[key] ?? '').trim()
-    if (value === '') return false
     return (
-      (upper.startsWith(OTEL_OTLP_PREFIX) && upper.endsWith('_ENDPOINT')) ||
-      upper === BETA_TRACING_ENDPOINT
+      ((upper.startsWith(OTEL_OTLP_PREFIX) && upper.endsWith('_ENDPOINT')) ||
+        upper === BETA_TRACING_ENDPOINT) &&
+      (process.env[key] ?? '').trim() !== ''
     )
   })
-  if (!pinned) return
   for (const key of ccdSpawnEnvKeys) {
-    if (!key.toUpperCase().startsWith(OTEL_OTLP_PREFIX)) continue
+    const upper = key.toUpperCase()
+    const exporterOrTelemetry =
+      OTEL_LOGS_OR_TRACES_EXPORTER.has(upper) ||
+      upper === CLAUDE_CODE_ENABLE_TELEMETRY
+    const otlpFamily = pinned && upper.startsWith(OTEL_OTLP_PREFIX)
+    if (!exporterOrTelemetry && !otlpFamily) continue
     const value = process.env[key]
-    if (value === undefined) continue
-    applyOtelClaimBetaDrop(
-      key.toUpperCase(),
-      value,
-      key,
-      policyEnvUpper,
-      'the host spawn env',
+    // densable hostSpawnOtelClaims t.set(o,C) — spawn key identity (`c` is id).
+    if (value !== undefined) claims.set(key, value)
+  }
+  return claims
+}
+
+/**
+ * densable `applyOtelFamilyClaims` — drop BETA_TRACING_ENDPOINT (and dominated
+ * OTLP signal keys) when a higher-trust claim is pinned.
+ *
+ * Exported for unit tests.
+ */
+export function applyOtelFamilyClaims(
+  claims: Map<string, string>,
+  policyEnvUpper: Map<string, string>,
+  claimSource = 'managed settings',
+): void {
+  for (const [claimKey, value] of claims) {
+    // densable `c(o)` is identity; gold hostSpawnEnvKeys are already uppercase.
+    const E = claimKey.toUpperCase()
+    if (E === CLAUDE_CODE_ENABLE_TELEMETRY) {
+      if (process.env[claimKey] === value && !isEnvTruthy(value)) {
+        dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
+      }
+      continue
+    }
+    if (OTEL_LOGS_OR_TRACES_EXPORTER.has(E)) {
+      if (
+        process.env[claimKey] === value &&
+        isNonOtlpLogsOrTracesExporter(value)
+      ) {
+        dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
+      }
+      continue
+    }
+    if (!E.startsWith(OTEL_OTLP_PREFIX)) continue
+    if (value.trim() === '') continue
+    if (process.env[claimKey] !== value) continue
+
+    const signal = OTEL_SIGNALS.find(s =>
+      E.startsWith(`${OTEL_OTLP_PREFIX}${s}_`),
     )
+    if (signal) {
+      const suffix = E.slice(`${OTEL_OTLP_PREFIX}${signal}_`.length)
+      const tracesOrLogs = signal === 'TRACES' || signal === 'LOGS'
+      if (OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)) {
+        dropLowerTrustOtelEnvKey(
+          `${OTEL_OTLP_PREFIX}${signal}_ENDPOINT`,
+          `the ${signal.toLowerCase()} signal`,
+          claimKey,
+          policyEnvUpper,
+          claimSource,
+        )
+        if (tracesOrLogs) {
+          dropDominatedBetaTracingEndpoint(
+            claimKey,
+            policyEnvUpper,
+            claimSource,
+          )
+        }
+      } else if (suffix === 'ENDPOINT' && tracesOrLogs) {
+        dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
+      }
+      continue
+    }
+
+    const suffix = E.slice(OTEL_OTLP_PREFIX.length)
+    const isNonEndpoint = OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)
+    const suffixesToStrip = isNonEndpoint ? [suffix, 'ENDPOINT'] : [suffix]
+    for (const strip of suffixesToStrip) {
+      for (const s of OTEL_SIGNALS) {
+        dropLowerTrustOtelEnvKey(
+          `${OTEL_OTLP_PREFIX}${s}_${strip}`,
+          `the ${s.toLowerCase()} signal`,
+          claimKey,
+          policyEnvUpper,
+          claimSource,
+        )
+      }
+    }
+    if (isNonEndpoint) {
+      dropLowerTrustOtelEnvKey(
+        `${OTEL_OTLP_PREFIX}ENDPOINT`,
+        'telemetry for any signal',
+        claimKey,
+        policyEnvUpper,
+        claimSource,
+      )
+    }
+    if (suffixesToStrip.includes('ENDPOINT')) {
+      dropDominatedBetaTracingEndpoint(claimKey, policyEnvUpper, claimSource)
+    }
   }
 }
 
@@ -440,10 +504,15 @@ export function applyManagedOtelEndpointSupremacy(): void {
     }
   }
 
-  applyHostSpawnBetaTracingDominance(policyEnvUpper)
+  applyOtelFamilyClaims(
+    hostSpawnOtelClaims(),
+    policyEnvUpper,
+    'the host spawn env',
+  )
   if (!env && !hasHeadersHelper) return
 
   if (hasHeadersHelper) {
+    // densable: claimKey is literal "otelHeadersHelper"; claimSource default.
     for (const signal of OTEL_SIGNALS) {
       dropLowerTrustOtelEnvKey(
         `${OTEL_OTLP_PREFIX}${signal}_ENDPOINT`,
@@ -458,61 +527,10 @@ export function applyManagedOtelEndpointSupremacy(): void {
       'otelHeadersHelper',
       policyEnvUpper,
     )
+    dropDominatedBetaTracingEndpoint('otelHeadersHelper', policyEnvUpper)
   }
 
-  for (const [key, value] of policyEnvUpper) {
-    if (!key.startsWith(OTEL_OTLP_PREFIX)) continue
-    if (value.trim() === '') continue
-    // densable: only act when process.env already holds the managed value
-    // (policy Object.assign just applied it).
-    if (process.env[key] !== value) continue
-
-    const signal = OTEL_SIGNALS.find(s =>
-      key.startsWith(`${OTEL_OTLP_PREFIX}${s}_`),
-    )
-    if (signal) {
-      // densable: signal-scoped HEADERS/CLIENT_* claims drop that signal's ENDPOINT.
-      const suffix = key.slice(`${OTEL_OTLP_PREFIX}${signal}_`.length)
-      const tracesOrLogs = signal === 'TRACES' || signal === 'LOGS'
-      if (OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)) {
-        dropLowerTrustOtelEnvKey(
-          `${OTEL_OTLP_PREFIX}${signal}_ENDPOINT`,
-          `the ${signal.toLowerCase()} signal`,
-          key,
-          policyEnvUpper,
-        )
-        if (tracesOrLogs) {
-          dropDominatedBetaTracingEndpoint(key, policyEnvUpper)
-        }
-      } else if (suffix === 'ENDPOINT' && tracesOrLogs) {
-        dropDominatedBetaTracingEndpoint(key, policyEnvUpper)
-      }
-      continue
-    }
-
-    // densable: base key OTEL_EXPORTER_OTLP_{SUFFIX}
-    const suffix = key.slice(OTEL_OTLP_PREFIX.length)
-    const isNonEndpoint = OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)
-    const suffixesToStrip = isNonEndpoint ? [suffix, 'ENDPOINT'] : [suffix]
-    for (const strip of suffixesToStrip) {
-      for (const s of OTEL_SIGNALS) {
-        dropLowerTrustOtelEnvKey(
-          `${OTEL_OTLP_PREFIX}${s}_${strip}`,
-          `the ${s.toLowerCase()} signal`,
-          key,
-          policyEnvUpper,
-        )
-      }
-    }
-    if (isNonEndpoint) {
-      dropLowerTrustOtelEnvKey(
-        `${OTEL_OTLP_PREFIX}ENDPOINT`,
-        'telemetry for any signal',
-        key,
-        policyEnvUpper,
-      )
-    }
-  }
+  applyOtelFamilyClaims(policyEnvUpper, policyEnvUpper)
 }
 
 /** Test helper — clear densable wDs warn set. */
@@ -520,13 +538,14 @@ export function clearManagedOtelDropWarnsForTests(): void {
   otelManagedDropWarned.clear()
 }
 
+/** densable `I` — strip keys present in host spawn (case-insensitive). */
 function withoutCcdSpawnEnvKeys(
   env: Record<string, string> | undefined,
 ): Record<string, string> {
   if (!env || !ccdSpawnEnvKeys) return env || {}
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (!ccdSpawnEnvKeys.has(key)) out[key] = value
+    if (!hostSpawnHasKey(key)) out[key] = value
   }
   return out
 }

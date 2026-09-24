@@ -138,9 +138,10 @@ describe('densable 2.1.218 #32 LEh/MEh / hFt', () => {
         ripgrep: '/opt/rg',
       },
     } as unknown as SettingsJson)
-    expect(d.shellSettings['sandbox.bwrapPath']).toBe('/usr/local/bin/bwrap')
-    expect(d.shellSettings['sandbox.socatPath']).toBe('/usr/bin/socat')
-    expect(d.shellSettings['sandbox.ripgrep']).toBe('/opt/rg')
+    expect(d.sandboxSettings['sandbox.bwrapPath']).toBe('/usr/local/bin/bwrap')
+    expect(d.sandboxSettings['sandbox.socatPath']).toBe('/usr/bin/socat')
+    expect(d.sandboxSettings['sandbox.ripgrep']).toBe('/opt/rg')
+    expect(d.shellSettings['sandbox.bwrapPath']).toBeUndefined()
     expect(hasDangerousSettings(d)).toBe(true)
     const list = formatDangerousSettingsList(d)
     expect(list).toContain('sandbox.bwrapPath')

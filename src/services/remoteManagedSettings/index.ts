@@ -45,6 +45,7 @@ import {
   getConsentIdentity,
   recordOrgConsent,
 } from './orgConsent.js'
+import { getPinnedStorageV5 } from '../../utils/storageV5/index.js'
 import {
   classifyRemoteManagedSettingsErrorKind,
   recordRemoteManagedSettingsFetchOutcome,
@@ -584,8 +585,12 @@ async function fetchAndLoadRemoteManagedSettings(
     const hasContent = Object.keys(newSettings).length > 0
 
     if (hasContent) {
-      // densable 2.1.224 #24: org_record baseline survives cache wipe on re-login
-      const consentBaseline = await buildConsentBaseline(cachedSettings)
+      // densable 2.1.224 #24 / 251 #43: org_record baseline; oe(r) = storageV5
+      const consentStorage = getPinnedStorageV5()
+      const consentBaseline = await buildConsentBaseline(
+        cachedSettings,
+        consentStorage,
+      )
       // densable YXd(..., e.showSecurityDialog)
       const securityResult = await checkManagedSettingsSecurity(
         cachedSettings,
@@ -625,12 +630,16 @@ async function fetchAndLoadRemoteManagedSettings(
         return newSettings
       }
 
-      // densable WXd: record org consent on approved / no_check_needed apply
+      // densable ae/WXd: record org consent on approved / no_check_needed apply
       if (
         securityResult === 'approved' ||
         securityResult === 'no_check_needed'
       ) {
-        await recordOrgConsent(getConsentIdentity(), newSettings)
+        await recordOrgConsent(
+          getConsentIdentity(),
+          newSettings,
+          consentStorage,
+        )
         markSessionCacheConsented(newSettings)
       }
 

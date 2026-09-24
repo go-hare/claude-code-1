@@ -51,6 +51,14 @@ export const SandboxNetworkConfigSchema = lazySchema(() =>
         .describe(
           'If true, allow all Unix sockets (disables blocking on both platforms).',
         ),
+      // densable 2.1.251 #66 qe — network.allowMachLookup (package NetworkConfigSchema)
+      allowMachLookup: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'macOS only: Additional XPC/Mach service names to allow looking up. Supports a single trailing "*" prefix (e.g. "com.example.*" or "*" for all services). Needed for tools like 1Password CLI, Playwright, or the iOS Simulator that communicate via XPC. ' +
+            'Weakens isolation — named Mach services can become IPC side channels out of the sandbox.',
+        ),
       allowLocalBinding: z.boolean().optional(),
       httpProxyPort: z.number().optional(),
       socksProxyPort: z.number().optional(),
@@ -464,6 +472,16 @@ export const SandboxSettingsSchema = lazySchema(() =>
             'Needed for Go-based CLI tools (gh, gcloud, terraform, etc.) to verify TLS certificates ' +
             'when using httpProxyPort with a MITM proxy and custom CA. ' +
             '**Reduces security** — opens a potential data exfiltration vector through the trustd service. Default: false',
+        ),
+      // densable 2.1.251 #66 qe — allowAppleEvents (package SandboxRuntimeConfigSchema)
+      allowAppleEvents: z
+        .boolean()
+        .optional()
+        .describe(
+          'macOS only: Allow sending Apple Events and Launch Services open requests from the sandbox. ' +
+            'Needed for open, osascript, and anything that opens URLs or scripts other apps via AppleScript. ' +
+            '**Reduces security** — removes code-execution isolation: sandboxed commands can launch other applications ' +
+            'unsandboxed with no user prompt, and can script running apps subject to TCC automation consent. Default: false',
         ),
       excludedCommands: z.array(z.string()).optional(),
       // densable 2.1.232 #48 — sJc includes ripgrep; rkt() layers only
