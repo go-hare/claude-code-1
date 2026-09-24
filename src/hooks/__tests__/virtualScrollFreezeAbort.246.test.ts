@@ -59,3 +59,19 @@ describe('densable 2.1.246 #4/#6 rg freeze abort', () => {
     )
   })
 })
+
+describe('sticky MAX_MOUNTED trim keeps the tail', () => {
+  test('source: isSticky trims from the start, not the end', async () => {
+    const src = await Bun.file(HOOK).text()
+    const idx = src.indexOf('if (effEnd - effStart > MAX_MOUNTED_ITEMS)')
+    expect(idx).toBeGreaterThan(0)
+    const slice = src.slice(idx, idx + 900)
+    expect(slice).toMatch(/if \(isSticky\)/)
+    expect(slice).toMatch(/effStart = effEnd - MAX_MOUNTED_ITEMS/)
+    const stickyArm = slice.slice(
+      slice.indexOf('if (isSticky)'),
+      slice.indexOf('} else {'),
+    )
+    expect(stickyArm).not.toContain('effEnd = effStart + MAX_MOUNTED_ITEMS')
+  })
+})

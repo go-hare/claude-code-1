@@ -686,17 +686,28 @@ export function useVirtualScroll(
   // to scroll distance). Trim the far edge — by viewport position — to keep
   // fiber count O(viewport) regardless of deferred-value scheduling.
   if (effEnd - effStart > MAX_MOUNTED_ITEMS) {
-    // Trim side is decided by viewport POSITION, not pendingDelta direction.
-    // pendingDelta drains to 0 between frames while dStart/dEnd lag under
-    // concurrent scheduling; a direction-based trim then flips from "trim
-    // tail" to "trim head" mid-settle, bumping effStart → effTopSpacer →
-    // clampMin → setClampBounds yanks scrollTop down → scrollback vanishes.
-    // Position-based: keep whichever end the viewport is closer to.
-    const mid = (offsets[effStart]! + offsets[effEnd]!) / 2
-    if (scrollTop - listOriginRef.current < mid) {
-      effEnd = effStart + MAX_MOUNTED_ITEMS
-    } else {
+    // Sticky must keep the TAIL. Zero-height cached rows let the sticky
+    // walk-back reach 0; first-paint scrollTop is still 0 before Ink pins
+    // maxScroll. Position-based trim then cuts the tail (effEnd = start+200)
+    // → first 200 messages mount, sticky follow pins to THAT content, the
+    // transcript sits at the top of a long session, and isSticky() hides
+    // Jump-to-bottom. Gold ScrollBox sticky pin + tail walk require the
+    // live end to stay mounted.
+    if (isSticky) {
       effStart = effEnd - MAX_MOUNTED_ITEMS
+    } else {
+      // Trim side is decided by viewport POSITION, not pendingDelta direction.
+      // pendingDelta drains to 0 between frames while dStart/dEnd lag under
+      // concurrent scheduling; a direction-based trim then flips from "trim
+      // tail" to "trim head" mid-settle, bumping effStart → effTopSpacer →
+      // clampMin → setClampBounds yanks scrollTop down → scrollback vanishes.
+      // Position-based: keep whichever end the viewport is closer to.
+      const mid = (offsets[effStart]! + offsets[effEnd]!) / 2
+      if (scrollTop - listOriginRef.current < mid) {
+        effEnd = effStart + MAX_MOUNTED_ITEMS
+      } else {
+        effStart = effEnd - MAX_MOUNTED_ITEMS
+      }
     }
   }
 
