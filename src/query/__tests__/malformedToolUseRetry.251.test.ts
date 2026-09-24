@@ -1,8 +1,8 @@
 /**
  * densable 2.1.251 #55 — malformed tool_use retry in query.ts.
  * CAt / bjn are local ports. x0e → executeStopFailureHooks.
- * qo → createAssistantAPIErrorMessage. Gold OS (Jh markApiFailure)
- * has no local tracker.
+ * qo → createAssistantAPIErrorMessage. OS gold body with !Jh no-op
+ * (Jh/cT ABSENT — not invented).
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
@@ -11,6 +11,7 @@ import { createAssistantMessage } from '../../utils/messages.js'
 import {
   MALFORMED_TOOL_USE_EXHAUSTED_TEXT,
   MALFORMED_TOOL_USE_RETRY_PROMPT,
+  OS,
   assistantTextHasLeakedInvoke,
   malformedToolUseRetryAction,
 } from '../../query.js'
@@ -125,7 +126,29 @@ describe('densable 2.1.251 #55 malformed tool-use retry', () => {
     expect(tail).toContain("reason: 'malformed_tool_use_exhausted'")
     expect(tail).toContain('createAssistantAPIErrorMessage')
     expect(tail).toContain('executeStopFailureHooks')
+    // gold: OS(ct,A,Li) after x0e
+    expect(tail).toContain('OS(toolUseContext, querySource, exhaustedMessage)')
     expect(tail).not.toContain('tombstone')
-    expect(tail.toLowerCase()).not.toContain('markapifailure')
+  })
+
+  test('OS short-circuits without Jh tracker (gold !Jh gate)', () => {
+    expect(() =>
+      OS({ agentId: undefined }, 'repl_main_thread', {
+        error: 'x',
+        errorDetails: 'd',
+        apiError: 'a',
+      }),
+    ).not.toThrow()
+    expect(() =>
+      OS({ agentId: 'agent-1' }, 'repl_main_thread', { error: 'x' }),
+    ).not.toThrow()
+    expect(() => OS({}, 'compact', { error: 'x' })).not.toThrow()
+    // body keeps the gold gate order as source contract
+    const osAt = querySrc.indexOf('export function OS(')
+    expect(osAt).toBeGreaterThan(0)
+    const osBody = querySrc.slice(osAt, osAt + 900)
+    expect(osBody).toContain('repl_main_thread')
+    expect(osBody).toContain('e.agentId')
+    expect(osBody).toContain('markApiFailure')
   })
 })

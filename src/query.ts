@@ -220,7 +220,7 @@ export const MALFORMED_TOOL_USE_EXHAUSTED_TEXT =
 export const THINKING_ONLY_RETRY_PROMPT =
   '[Your previous response had no visible output. Please continue and produce a user-visible response.]'
 
-/** densable `bjn` @186859505 — leaked `<antml:invoke` in last assistant text. */
+/** densable `bjn` @186859505. */
 export const LEAKED_INVOKE_RE = /<antml:invoke\b/
 
 export type MalformedToolUseRetryAction =
@@ -229,24 +229,65 @@ export type MalformedToolUseRetryAction =
   | { action: 'continue' }
 
 /**
- * densable `CAt` @186859544 — last assistant text vs `bjn`.
- * Not a line-match of the gold function (typed, no invent 3P branch).
+ * densable `CAt` @186859544.
+ * `e.flatMap((r)=>r.message.content).findLast((r)=>r.type==="text")?.text??""`
  */
 export function assistantTextHasLeakedInvoke(
   messages: readonly AssistantMessage[],
 ): boolean {
   const lastText =
     messages
-      .flatMap(message =>
-        Array.isArray(message.message.content) ? message.message.content : [],
+      .flatMap(
+        r =>
+          r.message.content as unknown as {
+            type: string
+            text?: string
+          }[],
       )
-      .findLast(
-        (block): block is { type: 'text'; text: string } =>
-          block.type === 'text' &&
-          'text' in block &&
-          typeof block.text === 'string',
-      )?.text ?? ''
+      .findLast(r => r.type === 'text')?.text ?? ''
   return LEAKED_INVOKE_RE.test(lastText)
+}
+
+/**
+ * densable `OS` @186864583 sha=`97e1299be7b26e5e`.
+ * Gold: `let o=cT(e); if(!Jh||!o||!t.startsWith("repl_main_thread")||e.agentId)return;
+ * Jh().markApiFailure(o,pu(),r.error,ex(r)??r.errorDetails??"",r.apiError).catch(()=>{})`
+ *
+ * Call site (gold-f): exhausted path `OS(ct,A,Li)` after `x0e(Li,ct)`.
+ * `Jh` / `cT` / `pu` / `ex` bodies are ABSENT across peels — gold's first gate
+ * is `!Jh`, so without a tracker this is a structured no-op (not invented Jh).
+ */
+export function OS(
+  e: { agentId?: string },
+  t: string,
+  r: {
+    error?: unknown
+    errorDetails?: unknown
+    apiError?: unknown
+  },
+): void {
+  // cT(e) ABSENT — treat as missing query-cost handle.
+  const o: unknown = undefined
+  // Jh tracker ABSENT — optional global, gold short-circuits on !Jh.
+  const Jh:
+    | undefined
+    | (() => {
+        markApiFailure: (
+          costHandle: unknown,
+          now: unknown,
+          error: unknown,
+          details: unknown,
+          apiError: unknown,
+        ) => Promise<void>
+      }) = undefined
+  if (!Jh || !o || !t.startsWith('repl_main_thread') || e.agentId) return
+  // Unreachable while Jh/cT stay ABSENT; keep gold arm shape for when a
+  // tracker lands without inventing callees here.
+  const details =
+    (typeof r.errorDetails === 'string' ? r.errorDetails : undefined) ?? ''
+  void Jh()
+    .markApiFailure(o, Date.now(), r.error, details, r.apiError)
+    .catch(() => {})
 }
 
 /**
@@ -392,6 +433,11 @@ type State = {
   stopHookActive: boolean | undefined
   stopHookBlockCount: number
   turnCount: number
+  /**
+   * densable Pe.thinkingOnlyNudged — one-shot latch on the continue bag after
+   * a jlt nudge (gold-251-g #11). Not React AppState.
+   */
+  thinkingOnlyNudged: boolean
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
   transition: Continue | undefined
@@ -728,7 +774,7 @@ async function* queryLoop(
 
   // Mutable cross-iteration state. The loop body destructures this at the top
   // of each iteration so reads stay bare-name (`messages`, `toolUseContext`).
-  // Continue sites write `state = { ... }` instead of 9 separate assignments.
+  // Continue sites write `state = { ... }` instead of N separate assignments.
   let state: State = {
     messages: params.messages,
     toolUseContext: params.toolUseContext,
@@ -742,6 +788,8 @@ async function* queryLoop(
     hasAttemptedReactiveCompact: false,
     turnCount: 1,
     pendingToolUseSummary: undefined,
+    // densable Pe.thinkingOnlyNudged — first iteration false.
+    thinkingOnlyNudged: false,
     transition: undefined,
   }
   const budgetTracker = feature('TOKEN_BUDGET') ? createBudgetTracker() : null
@@ -756,11 +804,6 @@ async function* queryLoop(
   // trigger point. Loop-local (not on State) to avoid touching the 7 continue
   // sites.
   let taskBudgetRemaining: number | undefined
-
-  // Official thinking-only nudge: one retry when end_turn has no visible text
-  // and the turn was not a successful terminal-MCP tool result (C1u).
-  // Loop-local like taskBudgetRemaining so continue sites stay untouched.
-  let thinkingOnlyNudged = false
 
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
   // for what's included and why feature() gates are intentionally excluded.
@@ -791,6 +834,7 @@ async function* queryLoop(
       stopHookActive,
       stopHookBlockCount,
       turnCount,
+      thinkingOnlyNudged,
     } = state
 
     // Skill discovery prefetch — per-iteration (uses findWritePivot guard
@@ -2701,6 +2745,7 @@ async function* queryLoop(
               stopHookActive: undefined,
               stopHookBlockCount: 0,
               turnCount,
+              thinkingOnlyNudged,
               transition: {
                 reason: 'collapse_drain_retry',
                 committed: drained.committed,
@@ -2756,6 +2801,7 @@ async function* queryLoop(
             stopHookActive: undefined,
             stopHookBlockCount: 0,
             turnCount,
+            thinkingOnlyNudged,
             transition: { reason: 'reactive_compact_retry' },
           }
           state = next
@@ -2838,6 +2884,7 @@ async function* queryLoop(
             stopHookActive: undefined,
             stopHookBlockCount: 0,
             turnCount,
+            thinkingOnlyNudged,
             transition: { reason: 'max_output_tokens_escalate' },
           }
           state = next
@@ -2868,6 +2915,7 @@ async function* queryLoop(
             stopHookActive: undefined,
             stopHookBlockCount: 0,
             turnCount,
+            thinkingOnlyNudged,
             transition: {
               reason: 'max_output_tokens_recovery',
               attempt: maxOutputTokensRecoveryCount + 1,
@@ -2914,6 +2962,7 @@ async function* queryLoop(
             stopHookActive: undefined,
             stopHookBlockCount: 0,
             turnCount,
+            thinkingOnlyNudged,
             transition: {
               reason: 'truncated_response_recovery',
               attempt: maxOutputTokensRecoveryCount + 1,
@@ -2933,10 +2982,10 @@ async function* queryLoop(
         // withheld, and was already yielded when the stream produced it.
       }
 
-      // densable: stop_reason tool_use with zero parsed tool uses. Tombstone
-      // the assistant turn and retry once with prior messages plus Blt.
-      // Exhausted: qo (api-error) + x0e (StopFailure). Gold OS
-      // (Jh().markApiFailure) has no local tracker — not invented.
+      // densable excerpt @186913600: (kn?.message.stop_reason??Bn)==="tool_use"
+      // && Ms.length===0 && !isApiErrorMessage. Bn body is not in gold-251-l/f
+      // — do not invent; nullish stop_reason is not "tool_use". Tombstone +
+      // Blt retry once. Exhausted: qo + x0e + OS(ct,A,Li).
       const rawStopReason = lastMessage?.message.stop_reason
       const malformedToolUse = malformedToolUseRetryAction({
         stopReason:
@@ -2946,50 +2995,51 @@ async function* queryLoop(
         previousReason: state.transition?.reason,
       })
       const leakedInvoke = assistantTextHasLeakedInvoke(assistantMessages)
-      if (malformedToolUse.action === 'retry') {
+      if (malformedToolUse.action !== 'continue') {
+        // Gold excerpt: one s("tengu_malformed_tool_use_response",
+        // {will_retry:ls,...}) then if(ls) retry else exhausted.
         logEvent('tengu_malformed_tool_use_response', {
-          will_retry: true,
+          will_retry: malformedToolUse.action === 'retry',
           model:
             currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           text_has_leaked_invoke: leakedInvoke,
         })
-        for (const msg of assistantMessages) {
-          yield { type: 'tombstone' as const, message: msg }
+        if (malformedToolUse.action === 'retry') {
+          for (const msg of assistantMessages) {
+            yield { type: 'tombstone' as const, message: msg }
+          }
+          const retryMessage = createUserMessage({
+            content: malformedToolUse.prompt,
+            isMeta: true,
+            turnCompanion: true,
+          })
+          yield retryMessage
+          state = {
+            messages: [...messagesForQuery, retryMessage],
+            toolUseContext,
+            autoCompactTracking: tracking,
+            maxOutputTokensRecoveryCount: 0,
+            hasAttemptedReactiveCompact: false,
+            maxOutputTokensOverride: undefined,
+            pendingToolUseSummary: undefined,
+            stopHookActive,
+            stopHookBlockCount: 0,
+            turnCount,
+            thinkingOnlyNudged,
+            transition: { reason: 'malformed_tool_use_retry' },
+          }
+          continue
         }
-        const retryMessage = createUserMessage({
-          content: malformedToolUse.prompt,
-          isMeta: true,
-          turnCompanion: true,
-        })
-        yield retryMessage
-        state = {
-          messages: [...messagesForQuery, retryMessage],
-          toolUseContext,
-          autoCompactTracking: tracking,
-          maxOutputTokensRecoveryCount: 0,
-          hasAttemptedReactiveCompact: false,
-          maxOutputTokensOverride: undefined,
-          pendingToolUseSummary: undefined,
-          stopHookActive,
-          stopHookBlockCount: 0,
-          turnCount,
-          transition: { reason: 'malformed_tool_use_retry' },
+        if (malformedToolUse.action === 'exhausted') {
+          const exhaustedMessage = createAssistantAPIErrorMessage({
+            content: malformedToolUse.text,
+          })
+          yield exhaustedMessage
+          // densable: x0e(Li,ct), OS(ct,A,Li)
+          void executeStopFailureHooks(exhaustedMessage, toolUseContext)
+          OS(toolUseContext, querySource, exhaustedMessage)
+          return { reason: 'malformed_tool_use_exhausted' }
         }
-        continue
-      }
-      if (malformedToolUse.action === 'exhausted') {
-        logEvent('tengu_malformed_tool_use_response', {
-          will_retry: false,
-          model:
-            currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          text_has_leaked_invoke: leakedInvoke,
-        })
-        const exhaustedMessage = createAssistantAPIErrorMessage({
-          content: malformedToolUse.text,
-        })
-        yield exhaustedMessage
-        void executeStopFailureHooks(exhaustedMessage, toolUseContext)
-        return { reason: 'malformed_tool_use_exhausted' }
       }
 
       // Skip stop hooks when the last message is an API error (rate limit,
@@ -3041,7 +3091,7 @@ async function* queryLoop(
         // Official: only end_turn | stop_sequence (not tool_use / max_tokens).
         if (stopReason === 'end_turn' || stopReason === 'stop_sequence') {
           if (!thinkingOnlyNudged) {
-            thinkingOnlyNudged = true
+            // densable Pe.thinkingOnlyNudged:!0 on the continue bag
             logForDebugging('query_thinking_only_response: nudged')
             const nudgeMessage = createUserMessage({
               content: THINKING_ONLY_RETRY_PROMPT,
@@ -3057,18 +3107,16 @@ async function* queryLoop(
               hasAttemptedReactiveCompact,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
-              stopHookActive: undefined,
+              stopHookActive,
               stopHookBlockCount: 0,
               turnCount,
+              thinkingOnlyNudged: true,
               transition: { reason: 'thinking_only_retry' },
             }
             continue
           }
           logForDebugging('query_thinking_only_response: nudge_exhausted')
         }
-      } else if (thinkingOnlyNudged) {
-        // Successful visible turn after a nudge — clear for subsequent turns.
-        thinkingOnlyNudged = false
       }
 
       const stopHookResult = yield* handleStopHooks(
@@ -3115,6 +3163,7 @@ async function* queryLoop(
           stopHookActive: true,
           stopHookBlockCount: stopHookBlockCount + 1,
           turnCount,
+          thinkingOnlyNudged,
           transition: { reason: 'stop_hook_blocking' },
         }
         state = next
@@ -3152,6 +3201,7 @@ async function* queryLoop(
             stopHookActive: undefined,
             stopHookBlockCount: 0,
             turnCount,
+            thinkingOnlyNudged,
             transition: { reason: 'token_budget_continuation' },
           }
           continue
@@ -3618,6 +3668,7 @@ async function* queryLoop(
       maxOutputTokensOverride: undefined,
       stopHookActive,
       stopHookBlockCount: 0,
+      thinkingOnlyNudged,
       transition: { reason: 'next_turn' },
     }
     state = next

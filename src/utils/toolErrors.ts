@@ -1,6 +1,66 @@
-import type { ZodError } from 'zod/v4'
+import type { ZodError, ZodIssue } from 'zod/v4'
 import { AbortError, ShellError } from './errors.js'
 import { INTERRUPT_MESSAGE_FOR_TOOL_USE } from './messages.js'
+
+type UnionIssue = ZodIssue & {
+  code: 'invalid_union'
+  errors: ZodIssue[][]
+}
+
+function isUnionIssue(issue: ZodIssue): issue is UnionIssue {
+  return (
+    issue.code === 'invalid_union' &&
+    'errors' in issue &&
+    Array.isArray((issue as UnionIssue).errors)
+  )
+}
+
+function flattenIssues(issues: readonly ZodIssue[]): ZodIssue[] {
+  const out: ZodIssue[] = []
+  for (const issue of issues) {
+    if (isUnionIssue(issue)) {
+      out.push(...pickClosestUnionBranch(issue.errors))
+    } else {
+      out.push(issue)
+    }
+  }
+  return out
+}
+
+function pickClosestUnionBranch(branches: ZodIssue[][]): ZodIssue[] {
+  if (branches.length === 0) return []
+  let best = flattenIssues(branches[0] ?? [])
+  let bestScore = scoreUnionBranch(best)
+  for (let i = 1; i < branches.length; i++) {
+    const candidate = flattenIssues(branches[i] ?? [])
+    const score = scoreUnionBranch(candidate)
+    if (score > bestScore) {
+      best = candidate
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/**
+ * Prefer a branch that is "missing required fields" over a discriminator
+ * mismatch (`invalid_value` on `action`). Empty Artifact `{}` then reports
+ * `file_path` instead of dumping all 20 union arms.
+ */
+function scoreUnionBranch(issues: readonly ZodIssue[]): number {
+  if (issues.length === 0) return Number.NEGATIVE_INFINITY
+  const missing = issues.filter(
+    issue =>
+      issue.code === 'invalid_type' &&
+      issue.message.includes('received undefined'),
+  )
+  const discriminators = issues.filter(issue => issue.code === 'invalid_value')
+  let score = 1000 - issues.length * 10
+  if (missing.length === issues.length) score += 200
+  else if (missing.length > 0) score += 50
+  if (discriminators.length === issues.length) score -= 80
+  return score
+}
 
 export function formatError(error: unknown): string {
   if (error instanceof AbortError) {
@@ -67,34 +127,50 @@ export function formatZodValidationError(
   toolName: string,
   error: ZodError,
 ): string {
-  const missingParams = error.issues
+  const issues = flattenIssues(error.issues)
+
+  const missingParams = issues
     .filter(
       err =>
         err.code === 'invalid_type' &&
         err.message.includes('received undefined'),
     )
     .map(err => formatValidationPath(err.path))
+    .filter(param => param.length > 0)
 
-  const unexpectedParams = error.issues
+  const unexpectedParams = issues
     .filter(err => err.code === 'unrecognized_keys')
     .flatMap(err => err.keys)
 
-  const typeMismatchParams = error.issues
-    .filter(
-      err =>
+  const typeMismatchParams = issues
+    .filter(err => {
+      if (
         err.code === 'invalid_type' &&
-        !err.message.includes('received undefined'),
-    )
+        !err.message.includes('received undefined')
+      ) {
+        return true
+      }
+      return err.code === 'invalid_value'
+    })
     .map(err => {
+      const path = formatValidationPath(err.path)
+      if (err.code === 'invalid_value') {
+        const values = (err as { values?: unknown[] }).values
+        const expected = Array.isArray(values)
+          ? values.map(v => JSON.stringify(v)).join('|')
+          : 'literal'
+        return { param: path, expected, received: 'undefined' }
+      }
       const typeErr = err as { expected: string }
       const receivedMatch = err.message.match(/received (\w+)/)
       const received = receivedMatch ? receivedMatch[1] : 'unknown'
       return {
-        param: formatValidationPath(err.path),
+        param: path,
         expected: typeErr.expected,
         received,
       }
     })
+    .filter(item => item.param.length > 0)
 
   // Default to original error message if we can't create a better one
   let errorContent = error.message
