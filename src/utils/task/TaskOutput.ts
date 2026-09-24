@@ -1,14 +1,14 @@
 import { unlink } from 'fs/promises'
 import { CircularBuffer } from '../CircularBuffer.js'
 import { logForDebugging } from '../debug.js'
-import { readFileRange, tailFile } from '../fsOperations.js'
+import { tailFile } from '../fsOperations.js'
 import { getMaxOutputLength } from '../shell/outputLimits.js'
 import { safeJoinLines } from '../stringUtils.js'
 import {
   DiskTaskOutput,
   formatLostOutputNotice,
   getTaskOutputPath,
-  resolveTaskOutputReadPath,
+  openTaskOutputRead,
 } from './diskOutput.js'
 
 const DEFAULT_MAX_MEMORY = 8 * 1024 * 1024 // 8MB
@@ -305,23 +305,42 @@ export class TaskOutput {
   async #readStdoutFromFile(): Promise<string> {
     const maxBytes = getMaxOutputLength()
     try {
-      const readable = await resolveTaskOutputReadPath(this.path)
-      if (readable === null) {
+      // densable XX — O_NOFOLLOW open after symlink/nlink leaf check.
+      const fh = await openTaskOutputRead(this.path)
+      if (fh === null) {
         this.#outputFileRedundant = true
         return ''
       }
-      const result = await readFileRange(readable, 0, maxBytes)
-      if (!result) {
-        this.#outputFileRedundant = true
-        return ''
+      try {
+        const size = (await fh.stat()).size
+        if (size === 0) {
+          this.#outputFileRedundant = true
+          return ''
+        }
+        const bytesToRead = Math.min(size, maxBytes)
+        const buffer = Buffer.allocUnsafe(bytesToRead)
+        let totalRead = 0
+        while (totalRead < bytesToRead) {
+          const { bytesRead } = await fh.read(
+            buffer,
+            totalRead,
+            bytesToRead - totalRead,
+            totalRead,
+          )
+          if (bytesRead === 0) {
+            break
+          }
+          totalRead += bytesRead
+        }
+        // If the file fits, it's fully captured inline and can be deleted.
+        // If not, return what we read — processToolResultBlock handles
+        // the <persisted-output> formatting and persistence downstream.
+        this.#outputFileSize = size
+        this.#outputFileRedundant = size <= totalRead
+        return buffer.toString('utf8', 0, totalRead)
+      } finally {
+        await fh.close()
       }
-      const { content, bytesRead, bytesTotal } = result
-      // If the file fits, it's fully captured inline and can be deleted.
-      // If not, return what we read — processToolResultBlock handles
-      // the <persisted-output> formatting and persistence downstream.
-      this.#outputFileSize = bytesTotal
-      this.#outputFileRedundant = bytesTotal <= bytesRead
-      return content
     } catch (err) {
       // Surface the error instead of silently returning empty. An ENOENT here
       // means the output file was deleted while the command was running

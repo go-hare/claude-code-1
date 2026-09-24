@@ -6,7 +6,6 @@ import {
   open,
   readdir,
   readlink,
-  stat,
   symlink,
   unlink,
 } from 'fs/promises'
@@ -14,7 +13,6 @@ import { dirname, isAbsolute, join, sep } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
-import { readFileRange, tailFile } from '../fsOperations.js'
 import { logError } from '../log.js'
 import { getProjectTempDir } from '../permissions/filesystem.js'
 
@@ -139,8 +137,9 @@ export function getTaskOutputPath(taskId: string): string {
 const TASK_OUTPUT_NOT_REGULAR = 'not a regular nlink-1 file'
 
 /**
- * densable XX leaf check. Follows one symlink hop (initTaskOutputAsSymlink);
- * refuses a second hop and unix nlink≠1. No /proc ancestor walk.
+ * densable XX leaf preflight (no V/vt). Follows one symlink hop
+ * (initTaskOutputAsSymlink); refuses a second hop and unix nlink≠1.
+ * Gold callees V / vt stay ABSENT — do not invent.
  */
 export async function resolveTaskOutputReadPath(
   path: string,
@@ -169,10 +168,175 @@ export async function resolveTaskOutputReadPath(
   if (!st.isFile()) {
     throw new Error(TASK_OUTPUT_NOT_REGULAR)
   }
+  // Gold XX: nlink≠1 refuse when hop depth is 0. After one legitimate
+  // .output → transcript hop (initTaskOutputAsSymlink), still require a
+  // plain file leaf; windows skips nlink (anyLinkCount).
   if (process.platform !== 'win32' && st.nlink !== 1) {
     throw new Error(TASK_OUTPUT_NOT_REGULAR)
   }
   return readPath
+}
+
+/**
+ * densable XX open-read. After the leaf check, open O_RDONLY|O_NOFOLLOW
+ * (windows `"r"`). Caller must close.
+ *
+ * densable `vt` @182200349 — after open, recheck handle identity:
+ * plain file + (registeredIdentity ino/dev OR nlink===1 unless anyLinkCount)
+ * + optional prior lstat match. Mismatch → throw "output file identity changed".
+ */
+export async function openTaskOutputRead(
+  path: string,
+): Promise<FileHandle | null> {
+  const readable = await resolveTaskOutputReadPath(path)
+  if (readable === null) {
+    return null
+  }
+  let st
+  try {
+    st = await lstat(readable)
+  } catch (e) {
+    if (getErrnoCode(e) === 'ENOENT') return null
+    throw e
+  }
+  try {
+    const fh =
+      process.platform === 'win32'
+        ? await open(readable, 'r')
+        : await open(
+            readable,
+            fsConstants.O_RDONLY | O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0),
+          )
+    // densable vt(handle, priorStat, path, {anyLinkCount on windows})
+    try {
+      await vt(fh, st, path, {
+        anyLinkCount: process.platform === 'win32',
+      })
+    } catch (e) {
+      await fh.close().catch(() => {})
+      throw e
+    }
+    return fh
+  } catch (e) {
+    if (getErrnoCode(e) === 'ENOENT') {
+      return null
+    }
+    throw e
+  }
+}
+
+/**
+ * densable `vt` — post-open identity recheck on the file handle.
+ * Gold: reject if not a file, wrong ino/dev vs registeredIdentity or prior
+ * lstat, or (unix default) nlink≠1.
+ */
+export async function vt(
+  handle: FileHandle,
+  prior: { ino: number | bigint; dev: number | bigint } | null,
+  pathForError: string,
+  opts?: {
+    registeredIdentity?: { ino: number | bigint; dev: number | bigint }
+    anyLinkCount?: boolean
+  },
+): Promise<void> {
+  try {
+    const r = await handle.stat()
+    const s = opts?.registeredIdentity
+    if (
+      !r.isFile() ||
+      (s !== undefined
+        ? r.ino !== s.ino || r.dev !== s.dev
+        : !opts?.anyLinkCount && r.nlink !== 1) ||
+      (prior !== null && (r.ino !== prior.ino || r.dev !== prior.dev))
+    ) {
+      throw new Error('output file identity changed')
+    }
+  } catch (r) {
+    if (r instanceof Error && r.message === 'output file identity changed') {
+      throw r
+    }
+    throw r
+  }
+}
+
+/** Read [offset, offset+maxBytes) through densable XX open-read. */
+async function readTaskOutputRange(
+  path: string,
+  offset: number,
+  maxBytes: number,
+): Promise<{ content: string; bytesRead: number; bytesTotal: number } | null> {
+  const fh = await openTaskOutputRead(path)
+  if (!fh) {
+    return null
+  }
+  try {
+    const size = (await fh.stat()).size
+    if (size <= offset) {
+      return null
+    }
+    const bytesToRead = Math.min(size - offset, maxBytes)
+    const buffer = Buffer.allocUnsafe(bytesToRead)
+    let totalRead = 0
+    while (totalRead < bytesToRead) {
+      const { bytesRead } = await fh.read(
+        buffer,
+        totalRead,
+        bytesToRead - totalRead,
+        offset + totalRead,
+      )
+      if (bytesRead === 0) {
+        break
+      }
+      totalRead += bytesRead
+    }
+    return {
+      content: buffer.toString('utf8', 0, totalRead),
+      bytesRead: totalRead,
+      bytesTotal: size,
+    }
+  } finally {
+    await fh.close()
+  }
+}
+
+/** Tail last maxBytes through densable XX open-read. */
+async function tailTaskOutput(
+  path: string,
+  maxBytes: number,
+): Promise<{ content: string; bytesRead: number; bytesTotal: number }> {
+  const fh = await openTaskOutputRead(path)
+  if (!fh) {
+    return { content: '', bytesRead: 0, bytesTotal: 0 }
+  }
+  try {
+    const size = (await fh.stat()).size
+    if (size === 0) {
+      return { content: '', bytesRead: 0, bytesTotal: 0 }
+    }
+    const offset = Math.max(0, size - maxBytes)
+    const bytesToRead = size - offset
+    const buffer = Buffer.allocUnsafe(bytesToRead)
+    let totalRead = 0
+    while (totalRead < bytesToRead) {
+      const { bytesRead } = await fh.read(
+        buffer,
+        totalRead,
+        bytesToRead - totalRead,
+        offset + totalRead,
+      )
+      if (bytesRead === 0) {
+        break
+      }
+      totalRead += bytesRead
+    }
+    return {
+      content: buffer.toString('utf8', 0, totalRead),
+      bytesRead: totalRead,
+      bytesTotal: size,
+    }
+  } finally {
+    await fh.close()
+  }
 }
 
 // Tracks fire-and-forget promises (initTaskOutput, initTaskOutputAsSymlink,
@@ -475,11 +639,11 @@ export async function getTaskOutputDelta(
   maxBytes: number = DEFAULT_MAX_READ_BYTES,
 ): Promise<{ content: string; newOffset: number }> {
   try {
-    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
-    if (readable === null) {
-      return { content: '', newOffset: fromOffset }
-    }
-    const result = await readFileRange(readable, fromOffset, maxBytes)
+    const result = await readTaskOutputRange(
+      getTaskOutputPath(taskId),
+      fromOffset,
+      maxBytes,
+    )
     if (!result) {
       return { content: '', newOffset: fromOffset }
     }
@@ -506,12 +670,8 @@ export async function getTaskOutput(
   maxBytes: number = DEFAULT_MAX_READ_BYTES,
 ): Promise<string> {
   try {
-    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
-    if (readable === null) {
-      return ''
-    }
-    const { content, bytesTotal, bytesRead } = await tailFile(
-      readable,
+    const { content, bytesTotal, bytesRead } = await tailTaskOutput(
+      getTaskOutputPath(taskId),
       maxBytes,
     )
     if (bytesTotal > bytesRead) {
@@ -533,11 +693,15 @@ export async function getTaskOutput(
  */
 export async function getTaskOutputSize(taskId: string): Promise<number> {
   try {
-    const readable = await resolveTaskOutputReadPath(getTaskOutputPath(taskId))
-    if (readable === null) {
+    const fh = await openTaskOutputRead(getTaskOutputPath(taskId))
+    if (fh === null) {
       return 0
     }
-    return (await stat(readable)).size
+    try {
+      return (await fh.stat()).size
+    } finally {
+      await fh.close()
+    }
   } catch (e) {
     const code = getErrnoCode(e)
     if (code === 'ENOENT') {
