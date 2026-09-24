@@ -1,6 +1,6 @@
 # Cross-pack residual inventory (go-hare vs densable)
 
-> 更新：**2026-09-24** — npm **2.7.53** = 248 产品面 + densable **2.1.251 leftover**（HAVE 65 / N/A 6）。**2.7.52** 仍是 #13 `GMt` hotfix。246 金标 **HAVE 59 / GAP 0 / UNKNOWN 0 / N/A 2**。**248 已入库**（HAVE 47 / N/A 2）。RC torn-pair / auth-revive 已接。  
+> 更新：**2026-09-24** — npm **2.7.54** = 248 产品面 + densable **2.1.251 leftover**（HAVE 65 / N/A 6）+ sticky clamp 对齐（gold `cn = un && !yt`，不删 clamp 字段）。**2.7.53** 是 leftover 入库；**2.7.52** 仍是 #13 `GMt` hotfix。246 金标 **HAVE 59 / GAP 0 / UNKNOWN 0 / N/A 2**。**248 已入库**（HAVE 47 / N/A 2）。RC torn-pair / auth-revive 已接。  
 > 原则：densable-first 1:1；**不 invent** VSCode/cloud-only；**不 auto commit/push/bump**。  
 > **09-15：`src/utils/storageV5/` 已全面语义化** — 该模块 219 个 `leftover*` 符号全部改成描述性英文名，官方最小化名 + 偏移移入各符号的 doc comment（`densable leftover \`Ur\`=\`R6c\`=\`Wn\` @207286302` 这种形式，156 条）。**在该模块内按 `leftoverXx` grep 已经找不到东西，改按 doc comment 里的官方名搜。** 动因：`leftover` 前缀会把仅大小写不同的官方名（`ne` vs `Ne`）塌缩成同一个标识符，已经造成过一次 TS2440，另有 `Ke`/`Dt` 两对跨模块同名是同类隐患。模块外（`sessionNameJobSidecar.ts` 的 `leftoverRv`、`sessionPersistenceSync.ts` 的 `leftoverR`）仍是旧惯例。  
 > 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。README / README_EN 计数已按本文件纠偏（229 `#12` tip=`localhost`；232 PARTIAL 2；236/238 本机 HAVE；239 leftover 已进 **2.7.47**；243+246 已进 **2.7.48**，全平台重编 **2.7.49**）。  
@@ -24,7 +24,7 @@
 | 240 / 241 | 官方无 bullets。**不**折入 |
 | **243** | SEA 已下 · HAVE **49** / PARTIAL **0** / N/A **11** / UNKNOWN **0**。见 `v2.1.243/`。 |
 | **246** | SEA 已下 · **以代码为准**。HAVE **59** / PARTIAL **0** / GAP **0** / UNKNOWN **0** / N/A **2**。见 `v2.1.246/`。**不**折入 244 空号、245 glibc。 |
-| **247** | **已入库** · SEA 已下。HAVE **31** / PARTIAL **0** / UNKNOWN **0** / N/A **2**（#23 #24 云）。#1 leftover `/config` 行 + `sr` + leftover `/feedback`/`/bug` 命令表 + `jr`/`Dfs`/`Ri`/`Nfs` + `ot` `ye`/`ogr`/`W` + `$t`=`Lwc` + `Lfs` `DE` leftover-locked。`ye`/`Ht`/`Jt` 无体 = 对齐。#8 `lre` leftover 已接（不 invent MB/stderr cap）。#19 `Yjo` aside。#25 `n0c`/`k` 打印。见 `v2.1.247/`。**已进 npm 2.7.50；248 已进 **2.7.51**；251 `#13` hotfix 进 **2.7.52**；251 leftover 进 **2.7.53**。 |
+| **247** | **已入库** · SEA 已下。HAVE **31** / PARTIAL **0** / UNKNOWN **0** / N/A **2**（#23 #24 云）。#1 leftover `/config` 行 + `sr` + leftover `/feedback`/`/bug` 命令表 + `jr`/`Dfs`/`Ri`/`Nfs` + `ot` `ye`/`ogr`/`W` + `$t`=`Lwc` + `Lfs` `DE` leftover-locked。`ye`/`Ht`/`Jt` 无体 = 对齐。#8 `lre` leftover 已接（不 invent MB/stderr cap）。#19 `Yjo` aside。#25 `n0c`/`k` 打印。见 `v2.1.247/`。**已进 npm 2.7.50；248 已进 **2.7.51**；251 `#13` hotfix 进 **2.7.52**；251 leftover 进 **2.7.53**；sticky clamp 对齐进 **2.7.54**。 |
 | **251** | **已入库** · SEA 已下。HAVE **65** / PARTIAL **0** / GAP **0** / UNKNOWN **0** / N/A **6**（Desktop / 云 / 体积 / VSCode）。见 `v2.1.251/`。不 invent `onAttachRequest` / `BackgroundGesture` / fd 祖先循环 / `Jh`/`cT`。 |
 
 **交付面：** 243 + 246 + 247 已进仓（npm **2.7.50**）。246 HAVE **59** / UNKNOWN **0** / N/A **2**。2026-09-08 升 #5 / #7 / #8 / #35 / #36 / #37 HAVE；#45 HAVE（09-15b）。#7 勿 invent `markStartupDialogBlocked`。#55 勿 invent 全文 auto-continue。窄 HAVE 勿按 changelog 扩写。#35 勿在 stream/`Owe` 合成 `toolu_`（修在 Messages UI）。#45 勿 invent JWT parse。#37 勿把空 `{}` 当 corrupt。#30 勿镜像 bash-path Te()。#46 勿 invent 切片。#52 勿 invent 全局 Q3e skill key。#40 勿 invent 交互 `my` / 空 `iX`。RC persist / `scan_torn` 官方同形；勿 invent `sK` / `Qtt` / `L`·`te`·`_e`。Desktop `useRenderInput("ToolGroup")` 同缺。勿重开 212–243 invent 表。
