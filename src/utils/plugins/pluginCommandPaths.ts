@@ -60,8 +60,21 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-function isCommandMetadata(value: unknown): value is CommandMetadata {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+export type ApplyPluginCommandSourcesOpts = {
+  pluginPath: string
+  pluginName: string
+  errorSource: string
+  mode: 'replace' | 'append'
+  origin: PluginCommandOrigin
+  resolvePath: (pluginPath: string, source: string) => string | null
+  /** densable `registerInlineContent` / `O` — truthy enables the content kind. */
+  registerInlineContent?: unknown
+  errors: PluginError[]
+}
+
+type CommandSpec = {
+  source?: unknown
+  content?: unknown
 }
 
 /**
@@ -70,15 +83,7 @@ function isCommandMetadata(value: unknown): value is CommandMetadata {
 export async function applyPluginCommandSources(
   plugin: CommandRecord,
   commands: unknown,
-  opts: {
-    pluginPath: string
-    pluginName: string
-    errorSource: string
-    mode: 'replace' | 'append'
-    origin: PluginCommandOrigin
-    errors: PluginError[]
-    registerInlineContent?: boolean
-  },
+  opts: ApplyPluginCommandSourcesOpts,
 ): Promise<void> {
   const {
     pluginPath,
@@ -86,28 +91,21 @@ export async function applyPluginCommandSources(
     errorSource,
     mode,
     origin,
+    resolvePath,
+    registerInlineContent,
     errors,
-    registerInlineContent = true,
   } = opts
   const escapesLabel =
     origin === 'manifest'
       ? 'specified in manifest but'
       : 'from marketplace entry'
   const originLabel = origin === 'manifest' ? 'manifest' : 'marketplace entry'
-  const resolvePath = resolveCommandPathWithinPlugin
-
-  const first =
-    typeof commands === 'object' &&
-    commands !== null &&
-    !Array.isArray(commands)
-      ? Object.values(commands as Record<string, unknown>)[0]
-      : undefined
-
+  const first = Object.values(commands as object)[0]
   if (
     typeof commands === 'object' &&
-    commands !== null &&
     !Array.isArray(commands) &&
-    isCommandMetadata(first) &&
+    first &&
+    typeof first === 'object' &&
     ('source' in first || 'content' in first)
   ) {
     const metadata: Record<string, CommandMetadata> =
@@ -117,21 +115,26 @@ export async function applyPluginCommandSources(
     const checks = await Promise.all(
       Object.entries(commands as Record<string, unknown>).map(
         async ([commandName, raw]) => {
-          if (!isCommandMetadata(raw)) {
+          if (!raw || typeof raw !== 'object') {
             return { commandName, metadata: raw, kind: 'skip' as const }
           }
-          if (typeof raw.source === 'string') {
-            const fullPath = resolvePath(pluginPath, raw.source)
+          const spec = raw as CommandSpec
+          if (spec.source) {
+            const fullPath = resolvePath(pluginPath, spec.source as string)
             return {
               commandName,
-              metadata: raw,
+              metadata: raw as CommandMetadata,
               kind: 'source' as const,
               fullPath,
               exists: fullPath !== null && (await pathExists(fullPath)),
             }
           }
-          if (typeof raw.content === 'string' && registerInlineContent) {
-            return { commandName, metadata: raw, kind: 'content' as const }
+          if (spec.content && registerInlineContent) {
+            return {
+              commandName,
+              metadata: raw as CommandMetadata,
+              kind: 'content' as const,
+            }
           }
           return { commandName, metadata: raw, kind: 'skip' as const }
         },
@@ -145,17 +148,15 @@ export async function applyPluginCommandSources(
         continue
       }
       if (check.fullPath === null) {
-        const sourceText =
-          typeof check.metadata.source === 'string' ? check.metadata.source : ''
         logForDebugging(
-          `Command ${check.commandName} source ${sourceText} ${escapesLabel} escapes plugin directory for ${pluginName}`,
+          `Command ${check.commandName} source ${check.metadata.source} ${escapesLabel} escapes plugin directory for ${pluginName}`,
           { level: 'error' },
         )
         errors.push({
           type: 'path-traversal',
           source: errorSource,
           plugin: pluginName,
-          path: sourceText,
+          path: check.metadata.source ?? '',
           component: 'commands',
         })
       } else if (check.exists) {
@@ -163,10 +164,8 @@ export async function applyPluginCommandSources(
         metadata[check.commandName] = check.metadata
         kept++
       } else {
-        const sourceText =
-          typeof check.metadata.source === 'string' ? check.metadata.source : ''
         logForDebugging(
-          `Command ${check.commandName} path ${sourceText} ${escapesLabel} not found at ${check.fullPath} for ${pluginName}`,
+          `Command ${check.commandName} path ${check.metadata.source} ${escapesLabel} not found at ${check.fullPath} for ${pluginName}`,
           { level: 'error' },
         )
         errors.push({

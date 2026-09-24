@@ -156,7 +156,10 @@ import {
   parsePluginIdentifier,
   SYNCED_MARKETPLACE_NAME,
 } from './pluginIdentifier.js'
-import { applyPluginCommandSources } from './pluginCommandPaths.js'
+import {
+  applyPluginCommandSources,
+  resolveCommandPathWithinPlugin,
+} from './pluginCommandPaths.js'
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
 import { calculatePluginVersion } from './pluginVersioning.js'
 import {
@@ -1831,6 +1834,8 @@ export async function createPluginFromPath(
       errorSource: source,
       mode: 'replace',
       origin: 'manifest',
+      resolvePath: resolveCommandPathWithinPlugin,
+      registerInlineContent: true,
       errors,
     })
   }
@@ -2270,14 +2275,17 @@ async function loadPluginsFromMarketplaces({
       const registryEntry = Object.hasOwn(knownMarketplaces, name)
         ? knownMarketplaces[name]
         : undefined
-      const first = await getMarketplaceCacheOnly(name)
+      // densable Ev(ke,r,{registryEntry:Pe}) then Be=Pe!==void 0&&$Y(ke,Pe)===null
+      const first = await getMarketplaceCacheOnly(name, undefined, {
+        registryEntry,
+      })
       // Skill-catalog load only: re-read a null marketplace catalog.
       // Command path traversal stays in pluginCommandPaths.ts.
       const catalog = await rereadMarketplaceCatalogIfNull({
         name,
         catalog: first,
-        hasRegistryEntry: registryEntry !== undefined,
-        read: () => getMarketplaceCacheOnly(name),
+        registryEntry,
+        read: () => getMarketplaceCacheOnly(name, undefined, { registryEntry }),
       })
       marketplaceCatalogs.set(name, catalog)
     }),
@@ -2860,6 +2868,8 @@ async function finishLoadingPluginFromPath(
         errorSource: pluginId,
         mode: 'replace',
         origin: 'marketplace',
+        resolvePath: resolveCommandPathWithinPlugin,
+        registerInlineContent: true,
         errors,
       })
     }
@@ -3002,6 +3012,8 @@ async function finishLoadingPluginFromPath(
         errorSource: pluginId,
         mode: 'append',
         origin: 'marketplace',
+        resolvePath: resolveCommandPathWithinPlugin,
+        registerInlineContent: true,
         errors,
       })
     }

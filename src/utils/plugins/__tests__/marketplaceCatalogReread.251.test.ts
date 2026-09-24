@@ -1,6 +1,7 @@
 /**
- * densable 2.1.251 #27 — qFe re-reads a null marketplace catalog.
- * $Y is named in the gold loop and its body is not in the excerpt.
+ * densable 2.1.251 #27 — qFe delays `_gr`. Be is
+ * `Pe!==void 0&&$Y(ke,Pe)===null`. `$Y`/`fke`/`zS` live on
+ * reservedMarketplaceLoadRefusal.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
@@ -18,7 +19,7 @@ describe('densable 2.1.251 #27 marketplace catalog re-read', () => {
     const catalog = await rereadMarketplaceCatalogIfNull({
       name: 'plugins',
       catalog: null,
-      hasRegistryEntry: true,
+      registryEntry: { source: { source: 'github', repo: 'acme/tools' } },
       read: async () => {
         reads += 1
         return reads < 3 ? null : { plugins: ['skill'] }
@@ -42,7 +43,7 @@ describe('densable 2.1.251 #27 marketplace catalog re-read', () => {
     const catalog = await rereadMarketplaceCatalogIfNull({
       name: 'plugins',
       catalog: { ok: true },
-      hasRegistryEntry: true,
+      registryEntry: { source: { source: 'github', repo: 'acme/tools' } },
       read: async () => {
         reads += 1
         return null
@@ -53,12 +54,28 @@ describe('densable 2.1.251 #27 marketplace catalog re-read', () => {
     expect(reads).toBe(0)
   })
 
+  test('does not re-read when $Y refuses the registry entry', async () => {
+    let reads = 0
+    const catalog = await rereadMarketplaceCatalogIfNull({
+      name: 'claude-plugins-official',
+      catalog: null,
+      registryEntry: { source: null, installLocation: '/tmp/m' },
+      read: async () => {
+        reads += 1
+        return { ok: true }
+      },
+      sleepMs: async () => {},
+    })
+    expect(catalog).toBeNull()
+    expect(reads).toBe(0)
+  })
+
   test('does not re-read when there is no registry entry', async () => {
     let reads = 0
     const catalog = await rereadMarketplaceCatalogIfNull({
       name: 'plugins',
       catalog: null,
-      hasRegistryEntry: false,
+      registryEntry: undefined,
       read: async () => {
         reads += 1
         return { ok: true }
@@ -75,7 +92,9 @@ describe('densable 2.1.251 #27 marketplace catalog re-read', () => {
       'utf8',
     )
     expect(loader).toContain('rereadMarketplaceCatalogIfNull')
-    expect(loader).toContain('hasRegistryEntry: registryEntry !== undefined')
+    expect(loader).toContain('registryEntry')
+    expect(loader).not.toContain('hasRegistryEntry')
+    expect(loader).not.toContain('reservedMarketplaceLoadRefusal')
     const paths = readFileSync(
       join(import.meta.dir, '../pluginCommandPaths.ts'),
       'utf8',

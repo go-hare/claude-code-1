@@ -853,16 +853,22 @@ function seedDirFor(installLocation: string): string | undefined {
   )
 }
 
-/** densable `Ok` — resolved seed-dir prefix. */
-function isSeedManagedInstallLocation(installLocation: string): boolean {
+/**
+ * densable `zS` (`Ok`) — official/seed installLocation.
+ * `zp` = resolve, `Zv` = getPluginSeedDirs, `W0t` = sep.
+ * Returns the matching seed dir, else undefined (falsy → $Y keeps checking source).
+ */
+export function isOfficialMarketplaceInstallLocation(
+  installLocation: string,
+): string | undefined {
   const resolved = resolve(installLocation)
-  return getPluginSeedDirs().some(dir => {
+  return getPluginSeedDirs().find(dir => {
     const seed = resolve(dir)
     return resolved === seed || resolved.startsWith(seed + sep)
   })
 }
 
-/** densable `rme` — reserved official names only; seed-managed entries pass. */
+/** densable `$Y` / `rme` — reserved official names only; zS seed entries pass. */
 export function reservedMarketplaceLoadRefusal(
   name: string,
   entry: { installLocation?: string; source?: unknown },
@@ -872,7 +878,7 @@ export function reservedMarketplaceLoadRefusal(
   }
   if (
     typeof entry.installLocation === 'string' &&
-    isSeedManagedInstallLocation(entry.installLocation)
+    isOfficialMarketplaceInstallLocation(entry.installLocation)
   ) {
     return null
   }
@@ -1034,7 +1040,7 @@ function marketplaceCatalogHint(
   source: MarketplaceSource | undefined,
   installLocation: string,
 ): MarketplaceCatalogHint | null {
-  if (isSeedManagedInstallLocation(installLocation)) {
+  if (isOfficialMarketplaceInstallLocation(installLocation)) {
     return { kind: 'hostFolder', space: 'system' }
   }
   if (source !== undefined && isLocalMarketplaceSource(source)) {
