@@ -727,6 +727,18 @@ export async function computeEnvInfo(
     ? `\n\nAssistant knowledge cutoff is ${cutoff}.`
     : ''
 
+  // densable 2.1.251 #48 BGt/yBt — agent-proxy note line inside <env>.
+  let agentProxyNoteLine = ''
+  try {
+    const { getAgentProxyNote } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../upstreamproxy/agentProxyPrompt.js') as typeof import('../upstreamproxy/agentProxyPrompt.js')
+    const note = getAgentProxyNote()
+    if (note) agentProxyNoteLine = `${note}\n`
+  } catch {
+    // optional in non-CCR builds
+  }
+
   return `Here is useful information about the environment you are running in:
 <env>
 Working directory: ${getCwd()}
@@ -734,7 +746,7 @@ Is directory a git repo: ${isGit ? 'Yes' : 'No'}
 ${additionalDirsInfo}Platform: ${env.platform}
 ${getShellInfoLine()}
 OS Version: ${unameSR}
-</env>
+${agentProxyNoteLine}</env>
 ${modelDescription}${knowledgeCutoffMessage}`
 }
 
