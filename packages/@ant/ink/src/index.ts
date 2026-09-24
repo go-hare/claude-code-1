@@ -224,6 +224,8 @@ export {
   isXtermJs,
   isGhosttyXtversion,
   getXtversionName,
+  setXtversionName,
+  setSynchronizedOutputSupported,
   hasCursorUpViewportYankBug,
   supportsExtendedKeys,
   writeDiffToTerminal,
@@ -231,6 +233,14 @@ export {
   recordSlowestWrite,
   type SlowestWrite,
 } from './core/terminal.js'
+export {
+  stampAttachTime,
+  markDetachedSinceLastAttach,
+  getAttachStampMs,
+  isAttachUnstable,
+  waitUntilAttachStable,
+  resetAttachStampForTests,
+} from './core/attachStamp.js'
 export {
   isJediTermEnv,
   isJediTermArrowFloodActive,

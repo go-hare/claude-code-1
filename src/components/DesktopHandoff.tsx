@@ -5,6 +5,8 @@ import { Box, Text, useInput, LoadingState } from '@anthropic/ink';
 import { getDesktopInstallStatus, openCurrentSessionInDesktop } from '../utils/desktopDeepLink.js';
 import { openBrowser } from '../utils/browser.js';
 
+import { requestBgDetach } from '../daemon/rendezvousServer.js';
+import { isBgSession } from '../utils/concurrentSessions.js';
 import { errorMessage } from '../utils/errors.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { flushSessionStorage } from '../utils/sessionStorage.js';
@@ -105,6 +107,8 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
       setTimeout(
         async (onDone: Props['onDone']) => {
           onDone('Session transferred to Claude Desktop', { display: 'system' });
+          // Gold: if(wt()) KW({broadcast:!0}); await Mn(0,"other")
+          if (isBgSession()) requestBgDetach({ broadcast: true });
           await gracefulShutdown(0, 'other');
         },
         500,

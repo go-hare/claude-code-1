@@ -5,9 +5,10 @@ import {
   getClearTerminalSequence,
 } from './clearTerminal.js'
 import type { Diff } from './frame.js'
+import { isJediTermEnv } from './jediTermInput.js'
 import { cursorMove, cursorTo, eraseLines } from './termio/csi.js'
 import { BSU, ESU, HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
-import { link } from './termio/osc.js'
+import { attacherCaps, link } from './termio/osc.js'
 
 export type Progress = {
   state: 'running' | 'completed' | 'error' | 'indeterminate'
@@ -65,30 +66,21 @@ export function isProgressReportingAvailable(): boolean {
 }
 
 /**
- * Checks if the terminal supports DEC mode 2026 (synchronized output).
- * When supported, BSU/ESU sequences prevent visible flicker during redraws.
+ * densable DI — DEC 2026 support.
  *
- * Official hq: CLAUDE_CODE_FORCE_SYNC_OUTPUT forces true; known modern
- * terminals (incl. mintty/rio/Tabby + KONSOLE_VERSION≥211200) enable by default.
- * Note: tmux still returns false unless FORCE is set (official allows tmux 3.4+
- * when TERM_PROGRAM=tmux; FORCE is the densable portable override).
+ * Gold 251: daemon → Al()?.syncOutput!==!1; TMUX → probed ===!0;
+ * FORCE → true; known TERM_PROGRAM / kitty / foot / WT / VTE / Konsole;
+ * then dT().synchronizedOutputSupported.
  */
-export function isSynchronizedOutputSupported(): boolean {
-  // Official FORCE_SYNC_OUTPUT — enterprise/test override past terminal heuristics.
+function heuristicSynchronizedOutputSupported(): boolean {
   const force = process.env.CLAUDE_CODE_FORCE_SYNC_OUTPUT
   if (force === '1' || force === 'true' || force === 'yes' || force === 'on') {
     return true
   }
 
-  // tmux parses and proxies every byte but doesn't implement DEC 2026.
-  // BSU/ESU pass through to the outer terminal but tmux has already
-  // broken atomicity by chunking. Skip to save 16 bytes/frame + parser work.
-  if (process.env.TMUX) return false
-
   const termProgram = process.env.TERM_PROGRAM
   const term = process.env.TERM
 
-  // Modern terminals with known DEC 2026 support (official hq list)
   if (
     termProgram === 'iTerm.app' ||
     termProgram === 'WezTerm' ||
@@ -104,39 +96,45 @@ export function isSynchronizedOutputSupported(): boolean {
     return true
   }
 
-  // kitty sets TERM=xterm-kitty or KITTY_WINDOW_ID
-  if (term?.includes('kitty') || process.env.KITTY_WINDOW_ID) return true
+  if (isJediTermEnv()) return true
 
-  // Ghostty may set TERM=xterm-ghostty without TERM_PROGRAM
-  if (term === 'xterm-ghostty') return true
-
-  // foot sets TERM=foot or TERM=foot-extra
-  if (term?.startsWith('foot')) return true
-
-  // Alacritty may set TERM containing 'alacritty'
-  if (term?.includes('alacritty')) return true
-
-  // Zed uses the alacritty_terminal crate which supports DEC 2026
-  if (process.env.ZED_TERM) return true
-
-  // Windows Terminal
-  if (process.env.WT_SESSION) return true
-
-  // Konsole 21.12+ (official KONSOLE_VERSION >= 211200)
   const konsoleVersion = process.env.KONSOLE_VERSION
   if (konsoleVersion) {
     const version = parseInt(konsoleVersion, 10)
     if (!Number.isNaN(version) && version >= 211200) return true
   }
 
-  // VTE-based terminals (GNOME Terminal, Tilix, etc.) since VTE 0.68
+  if (term?.includes('kitty') || process.env.KITTY_WINDOW_ID) return true
+  if (term === 'xterm-ghostty') return true
+  if (term?.startsWith('foot')) return true
+  if (term?.includes('alacritty')) return true
+  if (process.env.ZED_TERM) return true
+  if (process.env.WT_SESSION) return true
+
   const vteVersion = process.env.VTE_VERSION
   if (vteVersion) {
     const version = parseInt(vteVersion, 10)
     if (version >= 6800) return true
   }
 
+  if (probedSynchronizedOutputSupported) return true
   return false
+}
+
+/**
+ * densable lWn / DI.
+ * tmux: wait for DECRQM probe (undefined → skip / false).
+ * daemon: attacher caps.syncOutput !== false.
+ */
+export function isSynchronizedOutputSupported(): boolean {
+  if (process.env.CLAUDE_BG_BACKEND === 'daemon') {
+    return attacherCaps()?.syncOutput !== false
+  }
+  if (process.env.TMUX) {
+    if (probedSynchronizedOutputSupported === undefined) return false
+    return probedSynchronizedOutputSupported === true
+  }
+  return heuristicSynchronizedOutputSupported()
 }
 
 // -- XTVERSION-detected terminal name (populated async at startup) --
@@ -150,11 +148,22 @@ export function isSynchronizedOutputSupported(): boolean {
 // and fall back to env-var detection.
 
 let xtversionName: string | undefined
+/** densable dT().synchronizedOutputSupported — DECRQM(2026) probe result. */
+let probedSynchronizedOutputSupported: boolean | undefined
 
-/** Record the XTVERSION response. Called once from App.tsx when the reply
- *  arrives on stdin. No-op if already set (defend against re-probe). */
+/** densable nWn — overwrite XTVERSION name (daemon re-probe after attach). */
 export function setXtversionName(name: string): void {
-  if (xtversionName === undefined) xtversionName = name
+  xtversionName = name
+}
+
+/** densable aWn — record DECRQM(2026) status. */
+export function setSynchronizedOutputSupported(supported: boolean): void {
+  probedSynchronizedOutputSupported = supported
+}
+
+export function resetTerminalProbeForTests(): void {
+  xtversionName = undefined
+  probedSynchronizedOutputSupported = undefined
 }
 
 /** Official c4r densable — raw XTVERSION name, or undefined if not yet known. */
@@ -214,9 +223,13 @@ export function hasCursorUpViewportYankBug(): boolean {
   return process.platform === 'win32' || !!process.env.WT_SESSION
 }
 
-// Computed once at module load — terminal capabilities don't change mid-session.
-// Exported so callers can pass a sync-skip hint gated to specific modes.
-export const SYNC_OUTPUT_SUPPORTED = isSynchronizedOutputSupported()
+/**
+ * densable QQ / lWn live read — DECRQM(2026) can flip this after attach.
+ * Keep the name for skipSyncMarkers / LogUpdate callers.
+ */
+export function SYNC_OUTPUT_SUPPORTED(): boolean {
+  return isSynchronizedOutputSupported()
+}
 
 export type SlowestWrite = {
   startedMs: number

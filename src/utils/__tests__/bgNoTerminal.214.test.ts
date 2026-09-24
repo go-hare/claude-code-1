@@ -71,6 +71,8 @@ describe('densable Pte source contract #32', () => {
     const src = readFileSync(join(ROOT, 'daemon/rendezvousServer.ts'), 'utf8')
     expect(src).toContain("case 'attacher-caps'")
     expect(src).toContain('setAttacherCaps')
+    expect(src).toContain('stampAttachTime')
+    expect(src).toContain('markDetachedSinceLastAttach')
   })
 
   test('MCPRemoteServerMenu auth path checks Pte', () => {

@@ -1152,10 +1152,10 @@ export default class Ink {
       // DECSTBM needs BSU/ESU atomicity — without it the outer terminal
       // renders the scrolled-but-not-yet-repainted intermediate state.
       // tmux is the main case (re-emits DECSTBM with its own timing and
-      // doesn't implement DEC 2026, so SYNC_OUTPUT_SUPPORTED is false).
+      // doesn't implement DEC 2026, so SYNC_OUTPUT_SUPPORTED() is false).
       // densable: qq6 && !this.altScreenFullRepaint — full-repaint mode
       // disables DECSTBM scroll optimization (every frame is full damage).
-      SYNC_OUTPUT_SUPPORTED && !this.altScreenFullRepaint,
+      SYNC_OUTPUT_SUPPORTED() && !this.altScreenFullRepaint,
     );
     const diffMs = performance.now() - tDiff;
     // Swap buffers
@@ -1802,7 +1802,7 @@ export default class Ink {
    */
   skipSyncMarkers(): boolean {
     if (!this.options.stdout.isTTY) return true;
-    if (!SYNC_OUTPUT_SUPPORTED) return true;
+    if (!SYNC_OUTPUT_SUPPORTED()) return true;
     if (!this.unsubscribeTTYHandlers) return true;
     return false;
   }

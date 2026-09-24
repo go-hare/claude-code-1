@@ -26,6 +26,8 @@ import {
 } from '../cli/bg/helpers.js';
 import { settleBackgroundSeedName } from '../cli/bg/jobNameSettle.js';
 import { getOriginalCwd, getSessionId, isSessionPersistenceDisabled } from '../bootstrap/state.js';
+import { requestBgDetach } from '../daemon/rendezvousServer.js';
+import { logEvent } from '../services/analytics/index.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
@@ -265,6 +267,14 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
     started.current = true;
 
     void (async () => {
+      // Gold iEr: if(wt()) return s("tengu_background_already_bg",{}), r(), KW(), null
+      if (isBgSession()) {
+        logEvent('tengu_background_already_bg', {});
+        onDone();
+        requestBgDetach();
+        return;
+      }
+
       const cancelBgHandoffQuota = async () => {
         // densable CTo → Q6e(..., "background_handoff") cancel side-effect
         try {

@@ -58,16 +58,12 @@ export async function launchRepl(
 
   let switchToAgents = false;
   let agentsHandoff: LeftArrowAgentsHandoff = { messages: [] };
+  // Gold empty-← is XE.onBgDetach on the PromptInput instance, not onLeftArrow.
+  // Daemon must not pass onOpenAgents — that would re-enter REPL's iHt/fleet wrapper
+  // if the PromptInput `onBgDetach ?? prop` bypass were ever dropped.
   const onOpenAgents =
     process.env.CLAUDE_BG_BACKEND === 'daemon'
-      ? () => {
-          // In bg session: send detach sequence via stdout (daemon will relay to attacher)
-          const DETACH_MSG_PREFIX = '\x1B_cc-detach-msg;';
-          const DETACH_ST = '\x1B\\';
-          const DETACH_SEQ = '\x1B_cc-daemon-detach\x1B\\';
-          const msg = 'Detached — use `claude agents` to see background sessions.';
-          process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
-        }
+      ? undefined
       : (payload?: LeftArrowAgentsHandoff) => {
           // Official Szp: attribute left-arrow open to needs-input nudge window.
           void import('./utils/fleetNeedsInputNudge.js').then(m => {

@@ -19,9 +19,16 @@ import { createServer, type Server, type Socket } from 'net'
 import { basename } from 'path'
 import { unlink } from 'fs/promises'
 import { StringDecoder } from 'string_decoder'
-import { instances } from '@anthropic/ink'
+import {
+  getAttachStampMs,
+  instances,
+  markDetachedSinceLastAttach,
+  stampAttachTime,
+} from '@anthropic/ink'
+import { snapshotInFlight } from '../utils/bgNeedsInputBridge.js'
 import { enqueue } from '../utils/messageQueueManager.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
+import { plural } from '../utils/stringUtils.js'
 
 // ---------------------------------------------------------------------------
 // State
@@ -220,6 +227,68 @@ export function sendRv(msg: Record<string, unknown>): boolean {
   }
 }
 
+/** densable dSH / Hr8 / FLK — APC fallback when YK/sendRv fails. */
+const DETACH_SEQ = '\x1B_cc-daemon-detach\x1B\\'
+const DETACH_MSG_PREFIX = '\x1B_cc-detach-msg;'
+const DETACH_ST = '\x1B\\'
+
+/** densable _Nn — inFlight tasks; undefined when 0 (Ej then emits bare dSH). */
+export function detachInFlightMessage(): string | undefined {
+  const { tasks } = snapshotInFlight()
+  if (tasks === 0) return
+  return `Detached — ${tasks} ${plural(tasks, 'task')} still running. Run \`claude agents\` to see your background sessions.`
+}
+
+/** densable Ej */
+function encodeDetachApc(msg?: string): string {
+  if (!msg) return DETACH_SEQ
+  return DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ
+}
+
+/**
+ * densable KW — daemon detach.
+ * Gold: if (YK({type:"detach-request",msg,broadcast})) { Hlt(); return }
+ * else stdout.write(Ej(msg)). Hlt is sync and only on sendRv success.
+ */
+export function requestBgDetach(opts?: { broadcast?: boolean }): void {
+  if (process.env.CLAUDE_BG_BACKEND !== 'daemon') return
+  const msg = detachInFlightMessage()
+  if (
+    sendRv({
+      type: 'detach-request',
+      msg,
+      broadcast: opts?.broadcast,
+    })
+  ) {
+    markDetachedSinceLastAttach()
+    return
+  }
+  process.stdout.write(encodeDetachApc(msg))
+}
+
+/** densable fEe / pEe — onBgDetach 1s window. */
+export const BG_DETACH_DEBOUNCE_MS = 1000
+
+/**
+ * densable XE.onBgDetach — per-screen #s, not process-global.
+ * Gold: if (now-#s < fEe && U$() <= #s) return; #s=now; KW()
+ * /exit, Desktop, already-bg call requestBgDetach() and skip this gate.
+ */
+export function createOnBgDetach(): () => void {
+  let lastKwMs = 0
+  return () => {
+    const now = Date.now()
+    if (
+      now - lastKwMs < BG_DETACH_DEBOUNCE_MS &&
+      getAttachStampMs() <= lastKwMs
+    ) {
+      return
+    }
+    lastKwMs = now
+    requestBgDetach()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Message handling — official bg3
 // ---------------------------------------------------------------------------
@@ -243,11 +312,13 @@ function handleMessage(line: string): void {
       break
 
     case 'repaint': {
-      // Get the Ink instance and force a full redraw
+      // Gold C(): if(Al()!==null) Won(Date.now()); forceRedraw({flushReact:!0})
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getAttacherCaps } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      if (getAttacherCaps() !== null) stampAttachTime(Date.now())
       const ink = instances.get(process.stdout)
-      if (ink?.forceRedraw) {
-        ink.forceRedraw()
-      } else {
+      if (!ink?.forceRedraw({ flushReact: true })) {
         // Ink not ready yet — write a fallback message
         process.stdout.write(
           '\x1B[2J\x1B[H\n  \x1B[2mSession can\u2019t redraw right now \u2014 Ctrl+Z to detach\x1B[0m\n',
@@ -268,6 +339,8 @@ function handleMessage(line: string): void {
           ? (msg as { caps?: Record<string, unknown> | null }).caps
           : null
       setAttacherCaps(caps ?? null)
+      if (caps) stampAttachTime(Date.now())
+      else markDetachedSinceLastAttach()
       break
     }
 

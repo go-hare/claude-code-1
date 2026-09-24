@@ -6,6 +6,7 @@ import { getMainLoopBusy } from '../../bootstrap/state.js';
 import { ExitFlow } from '../../components/ExitFlow.js';
 import type { TaskState } from '../../tasks/types.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
+import { requestBgDetach } from '../../daemon/rendezvousServer.js';
 import { isBgSession } from '../../utils/concurrentSessions.js';
 import { listExitInFlightItems } from '../../utils/exitBackgroundItems.js';
 import { exitPromptShutdown } from '../../utils/exitPromptShutdown.js';
@@ -28,12 +29,14 @@ function getRandomGoodbyeMessage(): string {
  * Gold TTc unsent feedback-draft nudge is invent-ban (no storageV5 draft host).
  */
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext): Promise<React.ReactNode> {
-  // Inside a `claude --bg` tmux session: detach instead of kill. The REPL
-  // keeps running; `claude attach` can reconnect. Covers /exit, /quit,
-  // ctrl+c, ctrl+d — all funnel through here via REPL's handleExit.
+  // Gold Ne: if(wt()) return s(), KW(), null. KW no-ops unless daemon.
+  // tmux --bg still needs detach-client (KW is daemon-only).
   if (feature('BG_SESSIONS') && isBgSession()) {
     onDone();
-    spawnSync('tmux', ['detach-client'], { stdio: 'ignore' });
+    requestBgDetach();
+    if (process.env.CLAUDE_BG_BACKEND !== 'daemon') {
+      spawnSync('tmux', ['detach-client'], { stdio: 'ignore' });
+    }
     return null;
   }
 

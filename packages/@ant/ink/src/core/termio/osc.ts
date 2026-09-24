@@ -5,6 +5,8 @@
 import { Buffer } from 'buffer'
 import { spawn } from 'child_process'
 import { readFileSync } from 'fs'
+import { isAbsolute, win32 } from 'path'
+import { logForDebugging } from '../../utils/debug.js'
 import { BEL, ESC, ESC_TYPE, SEP } from './ansi.js'
 
 /** densable Al() snapshot — injected; ink cannot import src/bootstrap. */
@@ -12,6 +14,8 @@ export type ClipboardAttacherCaps = {
   mux?: unknown
   tmuxSocket?: unknown
   ssh?: unknown
+  /** densable Al().syncOutput — daemon attacher DEC 2026. */
+  syncOutput?: boolean
 }
 
 let attacherCapsGetter:
@@ -25,7 +29,7 @@ export function setClipboardAttacherCapsGetter(
   attacherCapsGetter = getter
 }
 
-function attacherCaps(): ClipboardAttacherCaps | null {
+export function attacherCaps(): ClipboardAttacherCaps | null {
   return attacherCapsGetter?.() ?? null
 }
 
@@ -34,6 +38,7 @@ function attacherCaps(): ClipboardAttacherCaps | null {
  *
  * Uses spawn (not execFile) so stdout/stderr:'ignore' is real (Node execFile
  * has no effective stdio option; densable yn→execa passes stdout/stderr).
+ * execa's default `windowsHide:!0` must be kept on this spawn (CREATE_NO_WINDOW).
  * Timeout via SIGKILL when exceeded.
  */
 function execFileNoThrow(
@@ -62,6 +67,10 @@ function execFileNoThrow(
         stdout === 'ignore' ? 'ignore' : 'pipe',
         stderr === 'ignore' ? 'ignore' : 'pipe',
       ],
+      // densable yn → execa default windowsHide:!0 (CREATE_NO_WINDOW).
+      // Without this, win32 `powershell` Set-Clipboard steals the console
+      // title ("Windows PowerShell") after the REPL busy-title ticker stops.
+      windowsHide: true,
       // densable yn useCwd — only pin cwd when callers opt in
       ...(useCwd ? { cwd: process.cwd() } : {}),
     })
@@ -181,26 +190,70 @@ const POWERSHELL_SET_CLIPBOARD =
 const POWERSHELL_GET_CLIPBOARD =
   '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw'
 
-/** densable p — attacher.ssh, else SSH_CONNECTION */
+/** densable p — `Al()?.ssh ?? !!SSH_CONNECTION` (nullish, not Boolean-short). */
 function isSshSession(): boolean {
-  const attacher = attacherCaps()
-  if (attacher) return Boolean(attacher.ssh)
-  return Boolean(process.env['SSH_CONNECTION'])
+  return Boolean(attacherCaps()?.ssh ?? !!process.env['SSH_CONNECTION'])
+}
+
+/** densable jn — UNC `//`/`\\` or NT `\??\` (LW / Dwe). */
+const NT_OBJECT_PREFIX = /^[\\/]\?\?[\\/]/
+function isUncOrNtObjectPath(path: string): boolean {
+  return (
+    /^[\\/]{2}/.test(path) ||
+    NT_OBJECT_PREFIX.test(path) ||
+    (path.includes('??') && NT_OBJECT_PREFIX.test(win32.normalize(path)))
+  )
+}
+
+/**
+ * densable T2 / jWe — named-pipe leaf. zVt=`LOCAL`.
+ * Rejects `.`/`..`, trailing `.` or space, and `\\?\` mixed with `/`.
+ */
+function parseWindowsNamedPipeName(path: string): string | undefined {
+  const match = /^[\\/]{2}[.?][\\/]pipe[\\/](?:(LOCAL)[\\/])?([^\\/]+)$/i.exec(
+    path,
+  )
+  if (match === null || match[2] === '.' || match[2] === '..') return undefined
+  if (/[. ]$/.test(match[2]!)) return undefined
+  if (path.startsWith('\\\\?\\') && path.includes('/')) return undefined
+  return match[1] === undefined ? match[2] : `LOCAL\\${match[2]}`
+}
+
+/** densable Tx — `!jn(e) || T2(e)!==undefined`. */
+function isLocalSocketAddress(path: string): boolean {
+  if (!isUncOrNtObjectPath(path)) return true
+  return parseWindowsNamedPipeName(path) !== undefined
 }
 
 /**
  * densable h — attacher tmux socket (`-S`) or `$TMUX` (empty prefix).
  * When Al() is set, do not fall through to `$TMUX`.
+ * `-S` only when N=`isAbsolute` and Tx=`isLocalSocketAddress`.
  */
 function tmuxLoadBufferArgs(): string[] | null {
   const attacher = attacherCaps()
   if (attacher) {
-    if (attacher.mux !== 'tmux') return null
+    if (attacher.mux !== 'tmux' || !attacher.tmuxSocket) return null
     const socket = attacher.tmuxSocket
-    if (typeof socket !== 'string' || socket.length === 0) return null
-    return ['-S', socket]
+    if (typeof socket !== 'string') return null
+    return isAbsolute(socket) && isLocalSocketAddress(socket)
+      ? ['-S', socket]
+      : null
   }
   return process.env['TMUX'] ? [] : null
+}
+
+/**
+ * densable y5e — attacher mux wins; else $TMUX / $STY / $ZELLIJ.
+ * When Al() is set, do not fall through to env (opened bg session).
+ */
+function muxFromAttacherOrEnv(): unknown {
+  const attacher = attacherCaps()
+  if (attacher) return attacher.mux
+  if (process.env['TMUX']) return 'tmux'
+  if (process.env['STY']) return 'screen'
+  if (process.env['ZELLIJ']) return 'zellij'
+  return null
 }
 
 /** @internal test-only — clear densable Wt cache for clipboard host */
@@ -239,12 +292,15 @@ export function osc(...parts: (string | number)[]): string {
  * wrapped \x07 is opaque DCS payload and tmux never sees the bell.
  */
 export function wrapForMultiplexer(sequence: string): string {
-  if (process.env['TMUX']) {
+  // densable rw — y5e mux, not raw $TMUX/$STY. screen doubles ESC.
+  const mux = muxFromAttacherOrEnv()
+  if (mux === 'tmux') {
     const escaped = sequence.replaceAll('\x1b', '\x1b\x1b')
     return `\x1bPtmux;${escaped}\x1b\\`
   }
-  if (process.env['STY']) {
-    return `\x1bP${sequence}\x1b\\`
+  if (mux === 'screen') {
+    const escaped = sequence.replaceAll('\x1b', '\x1b\x1b')
+    return `\x1bP${escaped}\x1b\\`
   }
   return sequence
 }
@@ -286,16 +342,6 @@ export function getClipboardPath(): ClipboardPath {
 }
 
 /**
- * Wrap a payload in tmux's DCS passthrough: ESC P tmux ; <payload> ESC \
- * tmux forwards the payload to the outer terminal, bypassing its own parser.
- * Inner ESCs must be doubled. Requires `set -g allow-passthrough on` in
- * ~/.tmux.conf; without it, tmux silently drops the whole DCS (no regression).
- */
-function tmuxPassthrough(payload: string): string {
-  return `${ESC}Ptmux;${payload.replaceAll(ESC, ESC + ESC)}${ST}`
-}
-
-/**
  * Load text into tmux's paste buffer via `tmux load-buffer`.
  * -w (tmux 3.2+) propagates to the outer terminal's clipboard via tmux's
  * own OSC 52 emission. -w is dropped for iTerm2: tmux's OSC 52 emission
@@ -307,17 +353,25 @@ export async function tmuxLoadBuffer(text: string): Promise<boolean> {
   const prefix = tmuxLoadBufferArgs()
   if (!prefix) return false
   const opts = { input: text, useCwd: false, timeout: 2000 }
+  const lcTerminal = process.env['LC_TERMINAL'] ?? 'unset'
+  const server = prefix.length > 0 ? 'attacher socket' : '$TMUX'
   // densable W — try load-buffer -w, then retry without -w.
-  const first = await execFileNoThrow(
+  const { code } = await execFileNoThrow(
     'tmux',
     [...prefix, 'load-buffer', '-w', '-'],
     opts,
   )
-  if (first.code === 0) return true
+  logForDebugging(
+    `clipboard: tmux load-buffer -w - → exit ${code} (server=${server} LC_TERMINAL=${lcTerminal})`,
+  )
+  if (code === 0) return true
   const retry = await execFileNoThrow(
     'tmux',
     [...prefix, 'load-buffer', '-'],
     opts,
+  )
+  logForDebugging(
+    `clipboard: retry tmux load-buffer - → exit ${retry.code} (server=${server} LC_TERMINAL=${lcTerminal})`,
   )
   return retry.code === 0
 }
@@ -381,36 +435,25 @@ export function formatScreenOsc52Clipboard(b64: string): string {
 
 export async function setClipboard(text: string): Promise<string> {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
-  const raw = osc(OSC.CLIPBOARD, 'c', b64)
 
-  // Native safety net — fire FIRST, before the tmux await, so a quick
-  // focus-switch after selecting doesn't race pbcopy. Previously this ran
-  // AFTER awaiting tmux load-buffer, adding ~50-100ms of subprocess latency
-  // before pbcopy even started — fast cmd+tab → paste would beat it
-  // (https://anthropic.slack.com/archives/C07VBSHV7EV/p1773943921788829).
-  // Gated on SSH_CONNECTION (not SSH_TTY) since tmux panes inherit SSH_TTY
-  // forever but SSH_CONNECTION is in tmux's default update-environment and
-  // clears on local attach. Fire-and-forget.
+  // densable yy: native when !p(), then W(t) (result unused), emit by y5e().
   if (!isSshSession()) copyNative(text)
+  await tmuxLoadBuffer(text)
 
-  const tmuxBufferLoaded = await tmuxLoadBuffer(text)
-
-  // Inner OSC uses BEL directly (not osc()) — ST's ESC would need doubling
-  // too, and BEL works everywhere for OSC 52.
-  if (tmuxBufferLoaded) {
-    // densable tmux: raw OSC + DCS-passthrough of the same OSC
+  const mux = muxFromAttacherOrEnv()
+  const ssh = isSshSession()
+  const emit = mux === 'tmux' ? 'raw+dcs' : mux === 'screen' ? 'dcs' : 'raw'
+  logForDebugging(
+    `clipboard: setClipboard mux=${mux ?? 'none'} ssh=${ssh} native=${!ssh} predicted=${getClipboardPath()} emit=${emit} bytes=${text.length}`,
+  )
+  if (mux === 'tmux') {
     const inner = `${ESC}]52;c;${b64}${BEL}`
-    return inner + tmuxPassthrough(inner)
+    return inner + wrapForMultiplexer(inner)
   }
-
-  // densable 2.1.219 #11: GNU screen ($STY) — chunked DCS, not wrapForMultiplexer.
-  // wrapForMultiplexer doubles ESC inside a single DCS; screen still dumps
-  // long base64. densable `$T` uses jCu=76 chunked re-open instead.
-  if (process.env['STY'] && !process.env['TMUX']) {
+  if (mux === 'screen') {
     return formatScreenOsc52Clipboard(b64)
   }
-
-  return raw
+  return osc(OSC.CLIPBOARD, 'c', b64)
 }
 
 // densable kDe — Linux clipboard tool: undefined = not yet probed, null = none.

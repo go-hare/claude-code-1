@@ -12,6 +12,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { type AppState, useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
 import type { FooterItem } from 'src/state/AppStateStore.js';
+import { createOnBgDetach } from '../../daemon/rendezvousServer.js';
 import { getCwd } from 'src/utils/cwd.js';
 import {
   clampQueueEditIndex,
@@ -303,17 +304,6 @@ type Props = {
 const PROMPT_FOOTER_LINES = 5;
 const MIN_INPUT_VIEWPORT_LINES = 3;
 
-/** Detach sequence for bg sessions — official dSH + MqH */
-const DETACH_SEQ = '\x1B_cc-daemon-detach\x1B\\';
-const DETACH_MSG_PREFIX = '\x1B_cc-detach-msg;';
-const DETACH_ST = '\x1B\\';
-
-function sendBgDetachRequest(): void {
-  if (process.env.CLAUDE_BG_BACKEND !== 'daemon') return;
-  const msg = 'Detached — use `claude agents` to see background sessions.';
-  process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
-}
-
 // densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
 
 function PromptInput({
@@ -362,6 +352,8 @@ function PromptInput({
   voiceInterimRange,
 }: Props): React.ReactNode {
   const mainLoopModel = useMainLoopModel();
+  // Gold XE.onBgDetach — per PromptInput mount (#s on the instance, not process-global).
+  const onBgDetach = useMemo(() => (process.env.CLAUDE_BG_BACKEND === 'daemon' ? createOnBgDetach() : undefined), []);
   // A local-jsx command (e.g., /mcp while agent is running) renders a full-
   // screen dialog on top of PromptInput via the immediate-command path with
   // shouldHidePromptInput: false. Those dialogs don't register in the overlay
@@ -2961,7 +2953,7 @@ function PromptInput({
     onHistoryUp: handleHistoryUp,
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
-    onLeftArrowOnEmpty: process.env.CLAUDE_BG_BACKEND === 'daemon' ? sendBgDetachRequest : onLeftArrowOnEmptyProp,
+    onLeftArrowOnEmpty: onBgDetach ?? onLeftArrowOnEmptyProp,
     // densable 2.1.218 #4: idp/sdp editing-quiet confirm (not always-on 800ms double-press)
     onLeftArrowOnEmptyMessage:
       process.env.CLAUDE_BG_BACKEND === 'daemon'

@@ -54,7 +54,9 @@ import {
 import reconciler from '../core/reconciler.js';
 import instances from '../core/instances.js';
 import { clearSelection, finishSelection, hasSelection, type SelectionState } from '../core/selection.js';
-import { isGhosttyXtversion, isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
+import { waitUntilAttachStable } from '../core/attachStamp.js';
+import { isGhosttyXtversion, isXtermJs, supportsExtendedKeys } from '../core/terminal.js';
+import { probeTerminalIdentity } from '../core/terminalProbe.js';
 import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
 import type { MouseClickResult } from '../core/events/click-event.js';
 import {
@@ -63,7 +65,7 @@ import {
   getTerminalFocusState,
   setTerminalFocused,
 } from '../core/terminal-focus-state.js';
-import { TerminalQuerier, xtversion } from '../core/terminal-querier.js';
+import { TerminalQuerier } from '../core/terminal-querier.js';
 import {
   DISABLE_KITTY_KEYBOARD,
   DISABLE_MODIFY_OTHER_KEYS,
@@ -275,9 +277,10 @@ export default class App extends PureComponent<Props, State> {
   /** densable MOUSE_PREFIX_TIMEOUT — hold split SGR mouse reports this long. */
   readonly MOUSE_PREFIX_TIMEOUT = 2000;
 
-  // Terminal query/response dispatch. Responses arrive on stdin (parsed
-  // out by parse-keypress) and are routed to pending promise resolvers.
-  querier = new TerminalQuerier(this.props.stdout);
+  // Gold: querier=stdout.isTTY&&stdin.isTTY?new jon(stdout):null
+  querier = this.props.stdout.isTTY && this.props.stdin.isTTY ? new TerminalQuerier(this.props.stdout) : null;
+  /** densable attachProbeDeferred — in-flight lock for daemon FOCUS_IN bv. */
+  attachProbeDeferred = false;
 
   // Multi-click tracking for double/triple-click text selection. A click
   // within MULTI_CLICK_TIMEOUT_MS and MULTI_CLICK_DISTANCE of the previous
@@ -464,24 +467,17 @@ export default class App extends PureComponent<Props, State> {
           this.props.stdout.write(ENABLE_KITTY_KEYBOARD);
           this.props.stdout.write(ENABLE_MODIFY_OTHER_KEYS);
         }
-        // Probe terminal identity. XTVERSION survives SSH (query/reply goes
-        // through the pty), unlike TERM_PROGRAM. Used for wheel-scroll base
-        // detection when env vars are absent. Fire-and-forget: the DA1
-        // sentinel bounds the round-trip, and if the terminal ignores the
-        // query, flush() still resolves and name stays undefined.
-        // Deferred to next tick so it fires AFTER the current synchronous
-        // init sequence completes — avoids interleaving with alt-screen/mouse
-        // tracking enable writes that may happen in the same render cycle.
-        setImmediate(() => {
-          void Promise.all([this.querier.send(xtversion()), this.querier.flush()]).then(([r]) => {
-            if (r) {
-              setXtversionName(r.name);
-              defaultCallbacks.logForDebugging(`XTVERSION: terminal identified as "${r.name}"`);
-            } else {
-              defaultCallbacks.logForDebugging('XTVERSION: no reply (terminal ignored query)');
+        // Gold 251: non-daemon first raw-mode runs full bv (XTVERSION+DECRQM).
+        // Daemon waits for FOCUS_IN attachProbeDeferred / Rlt then bv.
+        if (process.env.CLAUDE_BG_BACKEND !== 'daemon') {
+          setImmediate(() => {
+            if (this.querier && !this.hasReleasedTerminal) {
+              void probeTerminalIdentity(this.querier, message => {
+                defaultCallbacks.logForDebugging(message);
+              });
             }
           });
-        });
+        }
       }
 
       this.rawModeEnabledCount++;
@@ -741,34 +737,29 @@ export default class App extends PureComponent<Props, State> {
   }
 
   handleTerminalFocus = (isFocused: boolean): void => {
-    // densable 2.1.239 handleTerminalFocus:
-    //   if(!e||Date.now()-lastActivationInputTime>=yvf) armed=true
-    //   OKa(e); blur→focus atlas; daemon attach probe
-    // densable does NOT forceRedraw on focus — that erases the alt buffer and
-    // can leave a black screen if paint is empty/delayed (WT/Windows Esc/focus
-    // thrash). External wipe recovery is probeExternalClear (iTerm/Apple only).
-    //
-    // Local residual (intermittent white main, live footer):
-    // 1) Hosts wipe alt buffer without DECXCPR → need soft full-damage repaint.
-    // 2) FOCUS_OUT often drops (macOS app-switch) so prev stays 'focused' and
-    //    densable-only blur→focus gate never fires — repaint on every FOCUS_IN.
-    // 3) Still never forceRedraw here (no erase / black flash).
+    // Gold 251: if(!t||Date.now()-lastActivationInputTime>=xv) armed=!0
+    //   Pgn(t); t&&prev==="blurred" → proactiveAtlasResetOnFocus
+    //   daemon && querier && !attachProbeDeferred → Rlt().then(bv)
+    // densable does NOT repaintAfterFocus / forceRedraw on FOCUS_IN.
     const prev = getTerminalFocusState();
     if (!isFocused || Date.now() - this.lastActivationInputTime >= WINDOW_ACTIVATION_GRACE_MS) {
       this.windowActivationClickArmed = true;
     }
     setTerminalFocused(isFocused);
-    if (isFocused) {
-      const ink = instances.get(this.props.stdout);
-      // densable atlas reset only on true blur→focus (xterm.js color atlas)
-      if (prev === 'blurred') {
-        ink?.proactiveAtlasResetOnFocus();
-      }
-      // Soft repaint on every FOCUS_IN (unknown→focused, blur→focus, and
-      // re-FOCUS_IN while already focused when FOCUS_OUT was dropped).
-      ink?.repaintAfterFocus();
+    if (isFocused && prev === 'blurred') {
+      instances.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
     }
-    // densable I4u XTVERSION re-probe is daemon-only (CLAUDE_BG_BACKEND===daemon).
+    if (isFocused && process.env.CLAUDE_BG_BACKEND === 'daemon' && this.querier && !this.attachProbeDeferred) {
+      this.attachProbeDeferred = true;
+      void waitUntilAttachStable().then(() => {
+        this.attachProbeDeferred = false;
+        if (this.querier && !this.hasReleasedTerminal) {
+          void probeTerminalIdentity(this.querier, message => {
+            defaultCallbacks.logForDebugging(message);
+          });
+        }
+      });
+    }
   };
 
   handleSuspend = (): void => {
@@ -861,7 +852,7 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // Terminal responses (DECRPM, DA1, OSC replies, etc.) are not user
     // input — route them to the querier to resolve pending promises.
     if (item.kind === 'response') {
-      app.querier.onResponse(item.response);
+      app.querier?.onResponse(item.response);
       continue;
     }
 
