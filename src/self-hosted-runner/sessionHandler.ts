@@ -10,7 +10,6 @@
  *   push-on-release (Hjv) → Y2h on fail → M2h
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { killSessionProcessTree } from './killSessionProcessTree.js'
 import { mkdir, rm } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
@@ -21,7 +20,6 @@ import {
 } from './runnerApi.js'
 import {
   DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS,
-  DEFAULT_SESSION_STOP_GRACE_MS,
   PUSH_OUTCOME_BUDGET_MS,
   SHUTDOWN_BUDGET_PAD_MS,
   readEnvMs,
@@ -52,6 +50,10 @@ import {
   handleStderrInitMarker,
   type SessionActivityHandler,
 } from './sessionActivity.js'
+import {
+  DEFAULT_MAX_LIFETIME_GRACE_MS,
+  SessionChildSupervisor,
+} from './sessionChildSupervisor.js'
 import type { HostConfigSnapshot } from './hostConfig.js'
 import {
   assertConfigDirOutsideGlobalTemp,
@@ -410,6 +412,36 @@ export async function spawnSessionChild(
   // densable T?.("startup") — arm idle clock for startup timeout
   opts.onSessionActivity?.('startup')
 
+  const postHook =
+    opts.postSessionHookTimeoutMs ??
+    (readEnvMs('SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS') ||
+      DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS)
+  const supervisor = new SessionChildSupervisor({
+    child,
+    sessionId: opts.sessionId,
+    maxLifetimeMs: readEnvMs('SELF_HOSTED_RUNNER_MAX_LIFETIME_MS'),
+    maxLifetimeGraceMs:
+      readEnvMs('SELF_HOSTED_RUNNER_MAX_LIFETIME_GRACE_MS') ||
+      DEFAULT_MAX_LIFETIME_GRACE_MS,
+    sigkillGraceMs: Math.min(
+      Math.max(
+        readEnvMs('SELF_HOSTED_RUNNER_SIGKILL_GRACE_MS') || 30_000,
+        postHook +
+          (opts.pushOutcomeOnRelease ? PUSH_OUTCOME_BUDGET_MS : 0) +
+          SHUTDOWN_BUDGET_PAD_MS,
+      ),
+      2_147_483_647,
+    ),
+    sigkillTimeoutMs:
+      readEnvMs('SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS') ||
+      SessionChildSupervisor.SIGKILL_TIMEOUT_DEFAULT_MS,
+    onDebug: opts.onDebug,
+    onStatus: opts.onStatus,
+  })
+  const onAbort = (): void => supervisor.terminate()
+  opts.signal.addEventListener('abort', onAbort, { once: true })
+  if (opts.signal.aborted) supervisor.terminate()
+
   const activityState = createActivityPipeState()
   const onActivityLine = (line: string): void => {
     handleActivityLine(line, activityState, {
@@ -423,6 +455,21 @@ export async function spawnSessionChild(
       sessionId: opts.sessionId,
       onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
     })
+    // densable ct.noteTurnStart / noteTurnEnd (qi spawn activity)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      return
+    }
+    if (!parsed || typeof parsed !== 'object') return
+    const msg = parsed as { type?: unknown; from_subagent?: unknown }
+    if (msg.type === 'result') {
+      supervisor.noteTurnEnd()
+    } else if (msg.type === 'user' || msg.type === 'assistant') {
+      if (msg.from_subagent === true) return
+      supervisor.noteTurnStart()
+    }
   }
 
   const stderrLines: string[] = []
@@ -449,72 +496,12 @@ export async function spawnSessionChild(
     )
   }
 
-  let terminationRequested = false
-  const logKillTreeFailure = (message: string): void => {
-    opts.onDebug(message)
-  }
-  const terminate = (): void => {
-    terminationRequested = true
-    const pid = child.pid
-    if (pid === undefined) return
-    // densable session abort: win32 ug() is taskkill /T /F; else child.kill().
-    if (process.platform === 'win32') {
-      opts.onStatus(
-        `[runner:session] Abort signal received, killing process tree at pid=${pid}`,
-      )
-      void killSessionProcessTree(pid, logKillTreeFailure)
-      return
-    }
-    try {
-      process.kill(-pid, 'SIGTERM')
-    } catch {
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  const onAbort = (): void => terminate()
-  opts.signal.addEventListener('abort', onAbort, { once: true })
-  if (opts.signal.aborted) terminate()
-
-  // densable max-lifetime optional
-  const maxLifetimeMs = readEnvMs('SELF_HOSTED_RUNNER_MAX_LIFETIME_MS')
-  let lifetimeTimer: ReturnType<typeof setTimeout> | undefined
-  if (maxLifetimeMs > 0) {
-    lifetimeTimer = setTimeout(() => {
-      opts.onStatus(
-        `[runner:session] ${opts.sessionId} max lifetime ${maxLifetimeMs}ms — terminating`,
-      )
-      terminate()
-    }, maxLifetimeMs)
-  }
-
-  const stopGrace =
-    readEnvMs('SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS') ||
-    DEFAULT_SESSION_STOP_GRACE_MS
-  const postHook =
-    opts.postSessionHookTimeoutMs ??
-    (readEnvMs('SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS') ||
-      DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS)
-  const sigkillGrace = Math.min(
-    Math.max(
-      readEnvMs('SELF_HOSTED_RUNNER_SIGKILL_GRACE_MS') || 30_000,
-      postHook +
-        (opts.pushOutcomeOnRelease ? PUSH_OUTCOME_BUDGET_MS : 0) +
-        SHUTDOWN_BUDGET_PAD_MS,
-    ),
-    2_147_483_647,
-  )
-
   return await new Promise<SessionChildResult>(resolve => {
     let settled = false
     const finish = (result: SessionChildResult): void => {
       if (settled) return
       settled = true
       opts.signal.removeEventListener('abort', onAbort)
-      if (lifetimeTimer) clearTimeout(lifetimeTimer)
       // densable at("child exited", !1, !0) — drop follow-up hold on child exit
       // via dispose so onBgResultFollowUpBusy(false, true) always fires once.
       disposeActivityPipeState(
@@ -531,12 +518,16 @@ export async function spawnSessionChild(
     }
 
     child.on('close', (code, signal) => {
+      opts.signal.removeEventListener('abort', onAbort)
+      supervisor.stop()
       const tail = stderrLines.join('\n')
-      if (terminationRequested) {
+      if (supervisor.terminationRequested) {
         opts.onStatus(
           `[runner:session] ${opts.sessionId} child exited pid=${child.pid} code=${code} signal=${signal} (interrupted — we asked)`,
         )
-        finish({ result: 'interrupted', exitCode: code, stderrTail: tail })
+        void supervisor.descendantsReaped.then(() =>
+          finish({ result: 'interrupted', exitCode: code, stderrTail: tail }),
+        )
         return
       }
       if (signal === 'SIGTERM' || signal === 'SIGINT') {
@@ -560,6 +551,8 @@ export async function spawnSessionChild(
     })
 
     child.on('error', err => {
+      opts.signal.removeEventListener('abort', onAbort)
+      supervisor.stop()
       opts.onDebug(
         `[runner:session] ${opts.sessionId} spawn error: ${err.message}`,
       )
@@ -569,30 +562,6 @@ export async function spawnSessionChild(
         stderrTail: `spawn error: ${err.message}`,
       })
     })
-
-    // densable: if still running after stopGrace from terminate, SIGKILL
-    if (opts.signal.aborted) {
-      setTimeout(
-        () => {
-          if (!settled && child.pid !== undefined) {
-            if (process.platform === 'win32') {
-              void killSessionProcessTree(child.pid, logKillTreeFailure)
-              return
-            }
-            try {
-              process.kill(-child.pid, 'SIGKILL')
-            } catch {
-              try {
-                child.kill('SIGKILL')
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        },
-        Math.min(stopGrace, sigkillGrace),
-      )
-    }
   })
 }
 
