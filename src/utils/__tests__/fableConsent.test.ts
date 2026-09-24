@@ -1,4 +1,6 @@
 import { afterAll, describe, expect, mock, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import * as realConfig from '../config.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
@@ -27,6 +29,7 @@ afterAll(() => {
 
 import {
   buildFableOverageConsentPayload,
+  canShowFableOverageConsentDialog,
   classifyFableCreditsLane,
   getFableConsentCopy,
   hasFableOverageConsent,
@@ -218,11 +221,45 @@ describe('fableConsent densables', () => {
     expect(consented.reason).toBe('already_consented')
   })
 
+  test('f6e(undefined/null) is false; host true unless G5 without Nee kind', () => {
+    expect(canShowFableOverageConsentDialog(undefined)).toBe(false)
+    // query_setup passes `requestDialog ?? null` on --bg / headless.
+    expect(canShowFableOverageConsentDialog(null)).toBe(false)
+    // Gold f6e does not require a function host — only void 0 / G5+Xpe gate.
+    expect(canShowFableOverageConsentDialog({})).toBe(true)
+    expect(canShowFableOverageConsentDialog(async () => 'consent')).toBe(true)
+
+    const src = readFileSync(
+      join(import.meta.dir, '../fableConsent.ts'),
+      'utf8',
+    )
+    expect(src).toContain('export function G5(')
+    expect(src).toContain('export function Xpe(')
+    expect(src).toContain('sdkDialogHostActive')
+    expect(src).toContain('sdkSupportedDialogKinds')
+    expect(src).toContain('!(Xpe() ?? []).includes(Nee.kind)')
+    expect(src).toContain(`kind: FABLE_OVERAGE_CONSENT_DIALOG_KIND`)
+  })
+
   test('gP is false without requestDialog (bg / --bg)', () => {
     expect(
       shouldPromptFableOverageConsent({
         model: 'claude-fable-5',
         organizationUuid: 'org-missing',
+      }),
+    ).toBe(false)
+    expect(
+      shouldPromptFableOverageConsent({
+        model: 'claude-fable-5',
+        organizationUuid: 'org-missing',
+        requestDialog: undefined,
+      }),
+    ).toBe(false)
+    expect(
+      shouldPromptFableOverageConsent({
+        model: 'claude-fable-5',
+        organizationUuid: 'org-missing',
+        requestDialog: null,
       }),
     ).toBe(false)
     expect(
@@ -238,13 +275,24 @@ describe('fableConsent densables', () => {
     const flow = await runFableOverageConsentFlow({
       model: 'claude-fable-5',
       organizationUuid: 'org-missing',
-      requestDialog: null,
       fallbackModel: null,
       isFallbackAllowed: false,
     })
     expect(flow.shouldAbort).toBe(false)
     expect(flow.dialogShown).toBe(false)
     expect(flow.reason).toBe('no_dialog_fallback')
+
+    // query_setup: `toolUseContext.requestDialog ?? null` on Max --bg --model fable
+    const nullHost = await runFableOverageConsentFlow({
+      model: 'claude-fable-5',
+      organizationUuid: 'org-missing',
+      requestDialog: null,
+      fallbackModel: null,
+      isFallbackAllowed: false,
+    })
+    expect(nullHost.shouldAbort).toBe(false)
+    expect(nullHost.dialogShown).toBe(false)
+    expect(nullHost.reason).toBe('no_dialog_fallback')
   })
 
   test('runFableOverageConsentFlow consent via requestDialog', async () => {

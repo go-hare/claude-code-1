@@ -5,6 +5,7 @@
 
 import {
   getMainThreadAgentId,
+  getSdkSupportedDialogKinds,
   isReplBridgeActive,
   isSdkDialogHostActive,
 } from '../bootstrap/state.js'
@@ -16,6 +17,28 @@ import {
 } from './printRequestDialog.js'
 import { isUsageCreditsHintEnabled } from '../services/rateLimitMessages.js'
 import { getAgentId } from './teammate.js'
+
+/**
+ * densable `Nee` dialog kind for f6e allowlist.
+ * Gold: `var Nee=go({kind:"fable_overage_consent_prompt",...})`.
+ */
+export const Nee = { kind: FABLE_OVERAGE_CONSENT_DIALOG_KIND } as const
+
+/**
+ * densable `G5` @179051909.
+ * `function G5(){return n().surfaceCapabilities.sdkDialogHostActive()}`
+ */
+export function G5(): boolean {
+  return isSdkDialogHostActive()
+}
+
+/**
+ * densable `Xpe` @179052042.
+ * `function Xpe(){return n().surfaceCapabilities.sdkSupportedDialogKinds()}`
+ */
+export function Xpe(): string[] | undefined {
+  return getSdkSupportedDialogKinds()
+}
 
 /** Official model family match for Claude Fable 5. */
 export function isFableModel(model: string | null | undefined): boolean {
@@ -85,14 +108,19 @@ export type FableConsentGateInput = {
 }
 
 /**
- * densable `f6e` — requestDialog host can show `fable_overage_consent_prompt`.
- * Undefined host → false. Kind-allowlist (`G5`/`Xpe`) is ABSENT locally;
- * a present host is treated as allowing the registered kind.
+ * densable `f6e` @185027604.
+ * `if(e===void 0)return!1;if(G5()&&!(Xpe()??[]).includes(Nee.kind))return!1;return!0`
+ *
+ * Local callers often pass `requestDialog ?? null`. Treat `null` like no host
+ * (same product outcome as undefined for bg / Max fable).
  */
 export function canShowFableOverageConsentDialog(
   requestDialog: unknown,
 ): boolean {
-  return typeof requestDialog === 'function'
+  // Gold: e===void 0. Local also rejects null from `?? null` call sites.
+  if (requestDialog === undefined || requestDialog === null) return false
+  if (G5() && !(Xpe() ?? []).includes(Nee.kind)) return false
+  return true
 }
 
 /**
@@ -579,6 +607,16 @@ export async function runFableOverageConsentFlow(input: {
 
   // densable gP: f6e(requestDialog) false → do not prompt (bg / --bg / no host).
   if (!canShowFableOverageConsentDialog(input.requestDialog)) {
+    return {
+      choice: 'skipped',
+      reason: 'no_dialog_fallback',
+      dialogShown: false,
+      shouldAbort: false,
+    }
+  }
+  // f6e may pass a non-callable host (gold only gates void0 / G5+Xpe). Local
+  // showFableOverageConsentDialog still needs a function opener.
+  if (typeof input.requestDialog !== 'function') {
     return {
       choice: 'skipped',
       reason: 'no_dialog_fallback',

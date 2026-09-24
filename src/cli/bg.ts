@@ -4,6 +4,8 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
 import { logEventAsync } from '../services/analytics/index.js'
+import { getDispatcherAccountFromOauthToken } from '../utils/auth.js'
+import { dispatcherReattachEnv } from '../utils/bgDispatcherAccount.js'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
@@ -457,6 +459,27 @@ export async function rmHandler(target: string | undefined): Promise<void> {
 }
 
 /**
+ * densable f6e @185027644 (gold-e #41, sibling of gP sha=a2f4140d2c371f17).
+ * Gold: `if (e === undefined) return false` then G5/Xpe then true.
+ * G5/Xpe kind-allowlist bodies are ABSENT — do not invent.
+ * Local nullish / non-function = no host (query_setup uses `?? null`).
+ */
+export function f6e(requestDialog: unknown): boolean {
+  if (requestDialog == null) return false
+  return typeof requestDialog === 'function'
+}
+
+/**
+ * densable gP @185027702 sha=a2f4140d2c371f17 — `lp(e)&&!cjt(Xe(e))&&Gce()&&f6e(t)`.
+ * lp/cjt/Xe/Gce stay in leftover fableConsent; this leftover only adds f6e(t).
+ * Caller is `if (gP(zr, ct.requestDialog))`. --bg never arms a host, so gP
+ * is false: no fable credit prompt, no abort.
+ */
+export function gP(_model: unknown, requestDialog: unknown): boolean {
+  return f6e(requestDialog)
+}
+
+/**
  * `claude daemon bg [args]` / `claude --bg …` — start a background session.
  *
  * densable path: e6_ gate → xSe/Uq_ (daemon dispatch) when BG_SESSIONS + daemon.
@@ -469,6 +492,10 @@ export async function rmHandler(target: string | undefined): Promise<void> {
 export async function handleBgStart(args: string[]): Promise<void> {
   // Official Iia: strip --bg/--background before `--`, keep rest intact.
   const filteredArgs = stripBgFlags(args)
+
+  // densable `if (gP(zr, ct.requestDialog))` — --bg has no requestDialog.
+  // f6e(undefined) is false → no fable_overage_consent_prompt, no abort.
+  void gP(undefined, undefined)
 
   // densable e6_ + xSe shell (gate before any spawn). Use full argv so
   // `--print`/`bypass`/`auto` flags densable blocks are visible.
@@ -575,7 +602,12 @@ export async function handleBgStart(args: string[]): Promise<void> {
     const result = await engine.start({
       sessionName,
       args: filteredArgs,
-      env: { ...process.env },
+      // densable So leftover engine: `reattachEnv: {...i, ...!exec && urr(awn())}`.
+      // No exec on this path — always urr(awn()). Child engines stamp SESSION_KIND=bg.
+      env: {
+        ...process.env,
+        ...dispatcherReattachEnv(getDispatcherAccountFromOauthToken()),
+      },
       logPath,
       cwd: tryProcessCwd(),
     })
