@@ -874,6 +874,8 @@ export function formatIdleNotificationResult(
 /**
  * Creates an idle notification message to send to the team leader.
  * densable `IMe`: `result` is `lyr(...) || void 0`.
+ * `summary` is `t?.summary ? xP(t.summary) : void 0`.
+ * `failureReason` stays unwrapped: gold `e5e(...)` body was not extracted.
  */
 export function createIdleNotification(
   agentId: string,
@@ -897,7 +899,9 @@ export function createIdleNotification(
     from: agentId,
     timestamp: new Date().toISOString(),
     idleReason: options?.idleReason,
-    summary: options?.summary,
+    summary: options?.summary
+      ? sanitizeIdleResultText(options.summary)
+      : undefined,
     result,
     completedTaskId: options?.completedTaskId,
     completedStatus: options?.completedStatus,

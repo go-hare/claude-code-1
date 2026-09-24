@@ -3,7 +3,8 @@
  * Do not mock src/services/api/claude.js (process-global last-write-wins).
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 
 import type { Message } from '../../types/message.js'
@@ -231,6 +232,132 @@ describe('densable 2.1.246 generateSessionTitle fe/B', () => {
     expect(parseSessionTitleResponse('Consul RPC')).toBe('Consul RPC')
     expect(parseSessionTitleResponse('API Error: model not found')).toBeNull()
     expect(parseSessionTitleResponse('{"nope":1}')).toBeNull()
+  })
+})
+
+describe('resume hydrates ai-title into the tab (not Claude Code default)', () => {
+  test('loadTranscriptFile keeps aiTitle distinct from customTitle', () => {
+    const storage = readFileSync(join(utilsRoot, 'sessionStorage.ts'), 'utf8')
+    expect(storage).toContain('"type":"ai-title"')
+    expect(storage).toContain('aiTitles: Map<UUID, string>')
+    expect(storage).toContain('aiTitles.set(entry.sessionId, entry.aiTitle)')
+    expect(storage).toContain('aiTitle: sessionId ? aiTitles.get(sessionId)')
+    expect(storage).toContain('aiTitle: aiTitles.get(sessionId)')
+    // lite list must not fold aiTitle into customTitle — loadFullLog would
+    // then wipe the tab title on resume.
+    expect(storage).toContain(
+      "extractLastJsonStringField(tail, 'aiTitle') ??\n    extractLastJsonStringField(head, 'aiTitle')",
+    )
+    expect(storage).not.toContain(
+      "extractLastJsonStringField(head, 'customTitle') ??\n    extractLastJsonStringField(tail, 'aiTitle')",
+    )
+  })
+
+  test('listSessionsImpl lite parse keeps customTitle and aiTitle distinct', () => {
+    const list = readFileSync(join(utilsRoot, 'listSessionsImpl.ts'), 'utf8')
+    expect(list).toContain('aiTitle?: string')
+    expect(list).toContain(
+      "extractLastJsonStringField(tail, 'aiTitle') ||\n    extractLastJsonStringField(head, 'aiTitle')",
+    )
+    expect(list).not.toContain(
+      "extractLastJsonStringField(head, 'customTitle') ||\n    extractLastJsonStringField(tail, 'aiTitle')",
+    )
+    const schema = readFileSync(
+      join(srcRoot, 'entrypoints/sdk/coreSchemas.ts'),
+      'utf8',
+    )
+    expect(schema).toContain('aiTitle: z')
+  })
+
+  test('parseSessionInfoFromLite does not fold aiTitle into customTitle', async () => {
+    const { parseSessionInfoFromLite } = await import('../listSessionsImpl.js')
+    const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const head = `{"type":"user","sessionId":"${sid}","cwd":"/p","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":"hello world"}}\n`
+    const tail = `{"type":"ai-title","sessionId":"${sid}","aiTitle":"Login button"}\n{"type":"custom-title","sessionId":"${sid}","customTitle":"My rename"}\n`
+    const info = parseSessionInfoFromLite(
+      sid,
+      { head, tail, mtime: Date.now(), size: head.length + tail.length },
+      '/p',
+    )
+    expect(info).not.toBeNull()
+    expect(info!.customTitle).toBe('My rename')
+    expect(info!.aiTitle).toBe('Login button')
+    expect(info!.summary).toBe('My rename')
+
+    const aiOnly = parseSessionInfoFromLite(
+      sid,
+      {
+        head,
+        tail: `{"type":"ai-title","sessionId":"${sid}","aiTitle":"Login button"}\n`,
+        mtime: Date.now(),
+        size: head.length + 40,
+      },
+      '/p',
+    )
+    expect(aiOnly).not.toBeNull()
+    expect(aiOnly!.customTitle).toBeUndefined()
+    expect(aiOnly!.aiTitle).toBe('Login button')
+    expect(aiOnly!.summary).toBe('Login button')
+  })
+
+  test('loadConversationForResume returns aiTitle for restoreSessionMetadata', () => {
+    const recovery = readFileSync(
+      join(utilsRoot, 'conversationRecovery.ts'),
+      'utf8',
+    )
+    expect(recovery).toContain('aiTitle: log?.aiTitle ?? aiTitleFromJsonl')
+    expect(recovery).toContain('aiTitle: sessionId ? aiTitles.get(sessionId)')
+    expect(recovery).toContain('aiTitleFromJsonl = loaded.aiTitle')
+    const restore = readFileSync(join(utilsRoot, 'sessionRestore.ts'), 'utf8')
+    expect(restore).toContain('aiTitle?: string')
+    const logs = readFileSync(join(srcRoot, 'types/logs.ts'), 'utf8')
+    expect(logs).toContain('aiTitle?: string')
+  })
+
+  test('REPL resume restores session metadata then skips Haiku re-title', () => {
+    const repl = readFileSync(join(srcRoot, 'screens/REPL.tsx'), 'utf8')
+    expect(repl).toContain('restoreSessionMetadata(log)')
+    expect(repl).toContain('haikuTitleAttemptedRef.current = true')
+    expect(repl).toContain(
+      "sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code'",
+    )
+  })
+
+  test('loadTranscriptFromFile hydrates aiTitle without treating it as customTitle', async () => {
+    const { loadTranscriptFromFile } = await import('../sessionStorage.js')
+    const dir = mkdtempSync(join(tmpdir(), 'ai-title-resume-'))
+    const file = join(dir, 'session.jsonl')
+    const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const uuid = '11111111-1111-4111-8111-111111111111'
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({
+          type: 'user',
+          uuid,
+          parentUuid: null,
+          sessionId: sid,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          cwd: '/tmp/proj',
+          isSidechain: false,
+          userType: 'external',
+          version: '0',
+          message: { role: 'user', content: 'fix the login button please' },
+        }),
+        JSON.stringify({
+          type: 'ai-title',
+          sessionId: sid,
+          aiTitle: 'Login button',
+        }),
+      ].join('\n') + '\n',
+    )
+    try {
+      const log = await loadTranscriptFromFile(file)
+      expect(log.aiTitle).toBe('Login button')
+      expect(log.customTitle).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

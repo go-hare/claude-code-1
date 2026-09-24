@@ -43,6 +43,8 @@ export type SessionInfo = {
   lastModified: number
   fileSize?: number
   customTitle?: string
+  /** AI-generated tab title (`ai-title` entry). Distinct from customTitle so /rename always wins. */
+  aiTitle?: string
   firstPrompt?: string
   gitBranch?: string
   cwd?: string
@@ -99,11 +101,14 @@ export function parseSessionInfoFromLite(
   ) {
     return null
   }
-  // User title (customTitle) wins over AI title (aiTitle); distinct
-  // field names mean extractLastJsonStringField naturally disambiguates.
+  // Keep customTitle and aiTitle distinct so resume/SDK do not treat an
+  // AI tab title as a user /rename. Display summary still prefers the
+  // user title, then the AI title.
   const customTitle =
     extractLastJsonStringField(tail, 'customTitle') ||
     extractLastJsonStringField(head, 'customTitle') ||
+    undefined
+  const aiTitle =
     extractLastJsonStringField(tail, 'aiTitle') ||
     extractLastJsonStringField(head, 'aiTitle') ||
     undefined
@@ -121,6 +126,7 @@ export function parseSessionInfoFromLite(
   // Head scan is fallback for sessions without a last-prompt entry.
   const summary =
     customTitle ||
+    aiTitle ||
     extractLastJsonStringField(tail, 'lastPrompt') ||
     extractLastJsonStringField(tail, 'summary') ||
     firstPrompt
@@ -152,6 +158,7 @@ export function parseSessionInfoFromLite(
     lastModified: mtime,
     fileSize: size,
     customTitle,
+    aiTitle,
     firstPrompt,
     gitBranch,
     cwd: sessionCwd,

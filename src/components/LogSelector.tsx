@@ -293,8 +293,8 @@ export function LogSelector({
         if (isCurrentSession) {
           return true;
         }
-        // Always show sessions with custom titles (e.g., loop mode sessions)
-        if (log.customTitle) {
+        // Always show sessions with custom or AI titles (e.g., loop mode sessions)
+        if (log.customTitle || log.aiTitle) {
           return true;
         }
         // For full logs, check messages array
@@ -304,7 +304,7 @@ export function LogSelector({
         }
         // All logs reaching this component are enriched — include if
         // they have a prompt or custom title
-        if (log.firstPrompt || log.customTitle) {
+        if (log.firstPrompt || log.customTitle || log.aiTitle) {
           return true;
         }
         return false;
@@ -1258,6 +1258,7 @@ function buildSearchableText(log: LogOption): string {
 
   const metadata = [
     log.customTitle,
+    log.aiTitle,
     log.summary,
     log.firstPrompt,
     log.gitBranch,

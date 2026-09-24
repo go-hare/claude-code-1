@@ -24,6 +24,7 @@ import { parseJSONL } from './json.js'
 import { logError } from './log.js'
 import { getAttributionEmail } from './attributionEmail.js'
 import { getRealModelName } from './attributionModel.js'
+import { getAPIProvider } from './model/providers.js'
 import { getDensableCatalogModel } from './model/modelCatalogCapabilities.js'
 import {
   getCanonicalName,
@@ -31,6 +32,7 @@ import {
   getPublicModelDisplayName,
 } from './model/model.js'
 import { shouldSuppressSessionAttribution } from './residualMoreEnvGates.js'
+import { isEnvTruthy } from './envUtils.js'
 import { isMemoryFileAccess } from './sessionFileAccessHooks.js'
 import { getTranscriptPath } from './sessionPaths.js'
 import { readTranscriptForLoad } from './sessionStoragePortable.js'
@@ -65,6 +67,66 @@ function stripTrailing1mSuffix(id: string): string {
 function canonicalKnownModelId(model: string): string {
   return stripTrailing1mSuffix(getCanonicalName(model))
 }
+
+/**
+ * densable `dr` @180251741 — first-party provider.
+ * `function dr(){return Ne()==="firstParty"}`
+ */
+export function dr(): boolean {
+  return getAPIProvider() === 'firstParty'
+}
+
+/**
+ * densable `$U` / `$E` — Anthropic first-party base URL (or unset).
+ */
+function $U(): boolean {
+  const base = process.env.ANTHROPIC_BASE_URL
+  if (!base) return true
+  try {
+    return new URL(base).host === 'api.anthropic.com'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable `jo` @180252365.
+ * `if(a._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0;return $U()`
+ */
+export function jo(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)) {
+    return true
+  }
+  // Gold also checks a._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL process define.
+  return $U()
+}
+
+/**
+ * densable `GP` — env ANTHROPIC_DEFAULT_FABLE_MODEL matches after fn.
+ */
+function GP(model: string): boolean {
+  const env = process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+  if (!env) return false
+  return (
+    stripTrailing1mSuffix(model.trim().toLowerCase()) ===
+    stripTrailing1mSuffix(env.trim().toLowerCase())
+  )
+}
+
+/**
+ * densable `lp` @180763246 — fable-5 family (or env default fable).
+ * `return fn(Xe(e))==="claude-fable-5"||GP(e)`
+ */
+export function lp(model: string): boolean {
+  const id = canonicalKnownModelId(model)
+  return id === 'claude-fable-5' || GP(model)
+}
+
+/**
+ * densable `NJ` = `s(so.fable5)` — firstParty id used when BZn first arm fires.
+ * Local stand-in: catalog fable first-party id.
+ */
+export const NJ = { firstParty: 'claude-fable-5' } as const
 
 /**
  * densable rDt gate used here: VP label or baked catalog (`Zl` / `Aw`).
@@ -107,12 +169,17 @@ function isCanonicalKnownModel(model: string): boolean {
 }
 
 /**
- * densable `BZn` — known catalog / family ids use AVt, not the raw parsed id.
- * Else ZO → `Claude`. Unrecognized leftovers stay `Claude Code`.
+ * densable `BZn` @187544776.
+ * `if(lp(e)&&(!dr()||jo()||ZO(e)))return AVt(NJ.firstParty);
+ *  if(rDt(e))return AVt(e); return ZO(e)?"Claude":"Claude Code"`
  */
 export function commitTrailerModelName(model: string): string {
   const trimmed = model.trim()
   if (!trimmed) return 'Claude Code'
+  // densable first arm — fable on non-1P (or assume-1P base / known) → AVt(fable)
+  if (lp(trimmed) && (!dr() || jo() || isCanonicalKnownModel(trimmed))) {
+    return formatKnownModelTrailerName(NJ.firstParty)
+  }
   if (isKnownCommitTrailerModel(trimmed)) {
     return formatKnownModelTrailerName(trimmed)
   }

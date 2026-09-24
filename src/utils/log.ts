@@ -47,6 +47,7 @@ export function getLogDisplayTitle(
   const title =
     log.agentName ||
     log.customTitle ||
+    log.aiTitle ||
     log.summary ||
     (useFirstPrompt ? strippedFirstPrompt : undefined) ||
     defaultTitle ||

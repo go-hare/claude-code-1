@@ -37,6 +37,8 @@ export type LogOption = {
   leafUuid?: UUID // If given, this uuid must appear in the DB
   summary?: string // Optional conversation summary
   customTitle?: string // Optional user-set custom title
+  /** AI-generated tab title (`ai-title` entry). Distinct from customTitle so /rename always wins. */
+  aiTitle?: string
   tag?: string // Optional tag for the session (searchable in /resume)
   fileHistorySnapshots?: FileHistorySnapshot[] // Optional file history snapshots
   attributionSnapshots?: AttributionSnapshotMessage[] // Optional attribution snapshots

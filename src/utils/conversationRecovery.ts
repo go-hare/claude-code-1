@@ -641,12 +641,15 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   relocatedCwd?: string
   /** densable 2.1.224 #30 — non-empty bridge-session pointer (tombstone → absent). */
   bridgeSessionId?: string
+  /** AI-generated tab title (`ai-title` entry) for restoreSessionMetadata. */
+  aiTitle?: string
 }> {
   const {
     messages: byUuid,
     leafUuids,
     relocatedCwds,
     bridgeSessionIds,
+    aiTitles,
   } = await loadTranscriptFile(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
@@ -669,6 +672,7 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     sessionId,
     relocatedCwd: sessionId ? relocatedCwds.get(sessionId) : undefined,
     bridgeSessionId: sessionId ? bridgeSessionIds.get(sessionId) : undefined,
+    aiTitle: sessionId ? aiTitles.get(sessionId) : undefined,
   }
 }
 
@@ -709,6 +713,8 @@ export async function loadConversationForResume(
   agentColor?: string
   agentSetting?: string
   customTitle?: string
+  /** AI-generated tab title (`ai-title` entry) for restoreSessionMetadata. */
+  aiTitle?: string
   tag?: string
   mode?: 'coordinator' | 'normal'
   worktreeSession?: PersistedWorktreeSession | null
@@ -742,6 +748,8 @@ export async function loadConversationForResume(
     let relocatedFromJsonl: string | undefined
     /** densable 2.1.224 #30 — from jsonl path branch when no LogOption. */
     let bridgeFromJsonl: string | undefined
+    /** From jsonl path branch when no LogOption. */
+    let aiTitleFromJsonl: string | undefined
 
     if (source === undefined) {
       // --continue: most recent session, skipping live --bg/daemon sessions
@@ -778,6 +786,7 @@ export async function loadConversationForResume(
       sessionId = loaded.sessionId
       relocatedFromJsonl = loaded.relocatedCwd
       bridgeFromJsonl = loaded.bridgeSessionId
+      aiTitleFromJsonl = loaded.aiTitle
     } else if (typeof source === 'string') {
       // Load specific session by ID
       log = await getLastSessionLog(source as UUID)
@@ -858,6 +867,7 @@ export async function loadConversationForResume(
       agentColor: log?.agentColor,
       agentSetting: log?.agentSetting,
       customTitle: log?.customTitle,
+      aiTitle: log?.aiTitle ?? aiTitleFromJsonl,
       tag: log?.tag,
       mode: log?.mode,
       worktreeSession: log?.worktreeSession,

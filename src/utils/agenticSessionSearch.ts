@@ -115,8 +115,9 @@ function logContainsQuery(log: LogOption, queryLower: string): boolean {
   const title = getLogDisplayTitle(log).toLowerCase()
   if (title.includes(queryLower)) return true
 
-  // Check custom title
+  // Check custom title / AI title
   if (log.customTitle?.toLowerCase().includes(queryLower)) return true
+  if (log.aiTitle?.toLowerCase().includes(queryLower)) return true
 
   // Check tag
   if (log.tag?.toLowerCase().includes(queryLower)) return true

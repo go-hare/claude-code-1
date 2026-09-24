@@ -117,4 +117,28 @@ describe('idle notification result (2.1.251 #16)', () => {
       createIdleNotification('worker', { result: '   ' }).result,
     ).toBeUndefined()
   })
+
+  test('IMe xP(summary) strips C0; empty after xP is still a string', () => {
+    expect(createIdleNotification('worker', { summary: 'ok' }).summary).toBe(
+      'ok',
+    )
+    expect(
+      createIdleNotification('worker', {
+        summary: '\u0001shipped\u0007',
+      }).summary,
+    ).toBe('shipped')
+    expect(
+      createIdleNotification('worker', { summary: '\u0001\u0007' }).summary,
+    ).toBe('')
+    expect(createIdleNotification('worker', {}).summary).toBeUndefined()
+  })
+
+  test('IMe does not invent e5e on failureReason', () => {
+    expect(
+      createIdleNotification('worker', {
+        idleReason: 'failed',
+        failureReason: '\u0001boom\u0007',
+      }).failureReason,
+    ).toBe('\u0001boom\u0007')
+  })
 })
