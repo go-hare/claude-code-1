@@ -72,18 +72,11 @@ function isSendFeedbackEnvDisabled(): boolean {
   return value === false || value === '0' || value === 'false'
 }
 
-/** densable leftover Ufs */
+/** densable leftover Ufs / `uln` — `if(TG()!==null)return!1`. */
 export function isSendFeedbackSessionEnabled(): boolean {
-  if (
-    isEnvTruthy(process.env.DISABLE_FEEDBACK_COMMAND) ||
-    isEnvTruthy(process.env.DISABLE_BUG_COMMAND)
-  ) {
-    return false
-  }
+  if (getFeedbackCommandDisabledReason() !== null) return false
   if (isAntUserType()) return false
   if (vgr()) return false
-  if (isEssentialTrafficOnly()) return false
-  if (!isPolicyAllowed('allow_product_feedback')) return false
   if (getAPIProvider() !== 'firstParty') return false
   if (isSendFeedbackEnvDisabled()) return false
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_juniper_relay', false)

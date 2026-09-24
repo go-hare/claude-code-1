@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { getFeedbackCommandDisabledReason } from '../gates.js'
+
+const dir = dirname(fileURLToPath(import.meta.url))
 
 const KEYS = [
   'DISABLE_FEEDBACK_COMMAND',
@@ -49,6 +54,13 @@ describe('feedback disable copy names the command (2.1.251 #44)', () => {
     setEnv('DISABLE_BUG_COMMAND', undefined)
     expect(getFeedbackCommandDisabledReason()).toBe(
       '/feedback has been disabled via the DISABLE_FEEDBACK_COMMAND environment variable',
+    )
+  })
+
+  test('uln gates on TG() default /feedback', () => {
+    const src = readFileSync(join(dir, '../gates.ts'), 'utf8')
+    expect(src).toContain(
+      'if (getFeedbackCommandDisabledReason() !== null) return false',
     )
   })
 })

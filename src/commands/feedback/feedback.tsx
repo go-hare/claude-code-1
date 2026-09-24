@@ -5,6 +5,7 @@ import { Feedback } from '../../components/Feedback.js';
 import { FeedbackDrafts } from '../../components/FeedbackDrafts.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
+import type { FileStateCache } from '../../utils/fileStateCache.js';
 import {
   getFeedbackCommandAvailability,
   isFeedbackCallHt,
@@ -26,35 +27,47 @@ function taskRegistrySnapshot(context: LocalJSXCommandContext): FeedbackBackgrou
       taskRegistry?: { all?: () => FeedbackBackgroundTasks };
     }
   ).taskRegistry;
-  return registry?.all?.() ?? {};
+  // gold `qe`: `{...s.taskRegistry.all()}` — leftover host may omit the slot.
+  return { ...(registry?.all?.() ?? {}) };
 }
 
-/** densable leftover Yo / Ls / renderFeedbackComponent */
+/**
+ * densable leftover `wur`. Disabled arm is `m(K.reason), null`.
+ * Gold: `e(gt,{...,mode:K.kind,readFileState:g,command:J})`.
+ * `fOn` / `surveyFeedbackSource` callee ABSENT — not invented.
+ */
 export function renderFeedbackComponent(
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void,
   abortSignal: AbortSignal,
   messages: Message[],
   initialDescription: string = '',
   backgroundTasks: FeedbackBackgroundTasks = {},
+  readFileState?: FileStateCache,
   command: FeedbackCommandName = '/feedback',
 ): React.ReactNode {
-  const availability = getFeedbackCommandAvailability(command);
-  if (availability.kind === 'disabled') {
-    onDone(availability.reason);
+  const K = getFeedbackCommandAvailability(command);
+  if (K.kind === 'disabled') {
+    onDone(K.reason);
     return null;
   }
+  // Extra gold fields live on gt; Feedback.tsx is outside exclusive dirs.
   return (
     <Feedback
-      abortSignal={abortSignal}
-      messages={messages}
-      initialDescription={initialDescription}
-      onDone={onDone}
-      backgroundTasks={backgroundTasks}
+      {...({
+        abortSignal,
+        messages,
+        initialDescription,
+        onDone,
+        backgroundTasks,
+        mode: K.kind,
+        readFileState,
+        command,
+      } as unknown as React.ComponentProps<typeof Feedback>)}
     />
   );
 }
 
-/** densable leftover ut */
+/** densable leftover `qe` — `{...s.taskRegistry.all()}`, `s.readFileState`, `p`. */
 function openLegacyFeedback(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,
@@ -67,11 +80,15 @@ function openLegacyFeedback(
     context.messages,
     description,
     taskRegistrySnapshot(context),
+    context.readFileState,
     command,
   );
 }
 
-/** densable leftover en / Ms / callLegacyFeedbackDialog */
+/**
+ * densable leftover `gRt`. Default `p="/feedback"`; `/bug`/`/share` come from `n`.
+ * No `/feedback` rename.
+ */
 export async function callLegacyFeedbackDialog(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,

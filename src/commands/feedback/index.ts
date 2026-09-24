@@ -7,13 +7,7 @@ const feedback = {
   argumentHint: '[report]',
   // densable 2.1.232 #35: open mid-turn while Claude is responding
   immediate: true,
-  isEnabled: () => {
-    // Lazy: gates.ts → settings/http/providers would cycle commands.ts.
-    const { getFeedbackCommandAvailability } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../utils/feedbackDrafts/gates.js') as typeof import('../../utils/feedbackDrafts/gates.js')
-    return getFeedbackCommandAvailability().kind === 'post'
-  },
+  // densable leftover `jr`/`Ns` always load; disable is wur→Tie→TG default /feedback.
   load: () => import('./feedback.js'),
 } satisfies Command
 
