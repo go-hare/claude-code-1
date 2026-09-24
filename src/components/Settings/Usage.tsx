@@ -234,18 +234,21 @@ export function Usage(): React.ReactNode {
   );
 }
 
-/** densable 2.1.251 Dl — Spend limit bar from jL().overage. */
+/** densable 2.1.251 Dl — Spend limit bar / HPe empty arm from jL().overage. */
 function SpendLimitSection({ maxWidth }: { maxWidth: number }): React.ReactNode {
-  const bar = spendLimitBarProps(getRawUtilization().overage);
-  if (!bar) {
+  const model = spendLimitBarProps(getRawUtilization().overage);
+  if (!model) {
     return null;
+  }
+  if (model.type === 'placeholder') {
+    return <Text dimColor>{model.text}</Text>;
   }
   return (
     <LimitBar
-      title={bar.title}
-      limit={{ utilization: bar.utilization, resets_at: bar.resetsAtIso }}
+      title={model.title}
+      limit={{ utilization: model.utilization, resets_at: model.resetsAtIso }}
       maxWidth={maxWidth}
-      alwaysShowDateInReset={bar.alwaysShowDateInReset}
+      alwaysShowDateInReset={model.alwaysShowDateInReset}
     />
   );
 }

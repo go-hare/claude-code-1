@@ -386,7 +386,7 @@ export function buildAccountProperties(): Property[] {
   const profileActive = isProfileAuthActive({ storedClaudeAiLogin });
 
   // gold Ztt: i!==void 0&&M()?i.refreshKnownDead:wl()&&TYe()
-  // No local M() inject. wl has if(Wd())return!1 — skip expired when profile is active.
+  // No M() inject (ABSENT). wl has if(Wd())return!1 — compose !profileActive.
   if (isAnthropicAuthEnabled() && !profileActive && isStatusOauthRefreshDead()) {
     const expired: Property[] = [{ label: 'Login', value: 'Expired \u2014 log in again' }];
     const oauth = getOauthAccountInfo();
@@ -410,11 +410,13 @@ export function buildAccountProperties(): Property[] {
   if (accountInfo.subscription) {
     properties.push({
       label: 'Login method',
-      value: `${accountInfo.subscription} Account`,
+      // gold Ztt: `${e.subscription} account`
+      value: `${accountInfo.subscription} account`,
     });
   }
 
-  if (accountInfo.tokenSource) {
+  // xJ: else if(t!=="profile")r.tokenSource=t — no Auth token row under Wd
+  if (accountInfo.tokenSource && !profileActive) {
     properties.push({
       label: 'Auth token',
       value: accountInfo.tokenSource,
@@ -436,7 +438,6 @@ export function buildAccountProperties(): Property[] {
     });
   }
 
-  // Hide sensitive account info in demo mode
   if (accountInfo.organization && !process.env.IS_DEMO) {
     properties.push({
       label: 'Organization',

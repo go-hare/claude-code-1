@@ -5,6 +5,7 @@ import {
 } from '../../services/api/adminRequests.js'
 import { invalidateOverageCreditGrantCache } from '../../services/api/overageCreditGrant.js'
 import { type ExtraUsage, fetchUtilization } from '../../services/api/usage.js'
+import { getUsageCreditsAskAdminHint } from '../../services/rateLimitMessages.js'
 import { getSubscriptionType } from '../../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../../utils/billing.js'
 import { openBrowser } from '../../utils/browser.js'
@@ -33,6 +34,28 @@ export function hasBlockingPendingAdminRequest(
 ): boolean {
   if (!requests || requests.length === 0) return false
   return requests.some(r => r.status === 'pending')
+}
+
+/**
+ * densable uen @184961866 — member_* / group_zero_credit_limit copy + mhe().
+ * These are NOT spend-cap (`hqe`). Other uen overage arms
+ * (out_of_credits / inner hqe / seat_tier_* / org_service_level_disabled /
+ * den / Gj / wb progressSavedSuffix) live in rateLimitMessages
+ * `getLimitReachedText`. Do not invent BTr arms gold doesn't have.
+ */
+export function getUsageCreditsZeroLimitCopy(
+  reason: string | null | undefined,
+): string | null {
+  if (
+    reason === 'member_level_disabled' ||
+    reason === 'member_zero_credit_limit'
+  ) {
+    return `Your usage allocation has been disabled by your admin${getUsageCreditsAskAdminHint()}`
+  }
+  if (reason === 'group_zero_credit_limit') {
+    return `Your group's usage limit is set to $0${getUsageCreditsAskAdminHint()}`
+  }
+  return null
 }
 
 /**
@@ -159,6 +182,10 @@ export async function runExtraUsage(
         value:
           "Your organization's usage credit cap is reached for this period. Contact your admin to raise it.",
       }
+    }
+    const zeroLimitCopy = getUsageCreditsZeroLimitCopy(disabledReason)
+    if (zeroLimitCopy) {
+      return { type: 'message', value: zeroLimitCopy }
     }
 
     if (extraUsage?.is_enabled && extraUsage.monthly_limit === null) {

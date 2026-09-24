@@ -1,10 +1,15 @@
 import type { StatusLineCommandInput } from '../../types/statusLine.js'
 import { formatRelativeTimeAgo, formatTokens } from '../../utils/format.js'
+import {
+  estimatePromptCacheRecacheTokens,
+  resetPromptCacheSessionBagForTests,
+  summarizePromptCache,
+  type PromptCacheSummary,
+} from './promptCacheTracker.js'
 
 /**
- * Fields `oqe` / `whn` read off `c$t`. The tracker body is not in gold-251-a,
- * so production starts empty (`requests === 0`) and both functions take the
- * early return until a snapshot is supplied.
+ * Fields `oqe` / `whn` read off `c$t` (`summarizePromptCache`).
+ * Live accumulate is `xhe.record` via `D6e` / `recordPromptCacheUsage`.
  */
 export type PromptCacheTrackerSnapshot = {
   requests: number
@@ -23,41 +28,63 @@ export type PromptCacheTrackerSnapshot = {
 
 type PromptCacheStatus = NonNullable<StatusLineCommandInput['prompt_cache']>
 
-const EMPTY_SNAPSHOT: PromptCacheTrackerSnapshot = {
-  requests: 0,
-  lastRequest: null,
-  warm: false,
-  cachingObserved: false,
-  expiresAt: null,
-  misses: 0,
-  expectedRebuilds: 0,
-  hitRatio: null,
-  cacheWriteTokens: 0,
-  missRecacheTokens: 0,
-  lastMissAt: null,
-  lastActivityAt: null,
+/** Project `c$t` summary onto the oqe/whn snapshot shape. */
+export function snapshotFromSummary(
+  summary: PromptCacheSummary,
+): PromptCacheTrackerSnapshot {
+  const last = summary.lastRequest
+  return {
+    requests: summary.requests,
+    lastRequest: last === null ? null : { ttl: last.ttl, at: last.at },
+    warm: summary.warm,
+    cachingObserved: summary.cachingObserved,
+    expiresAt: summary.expiresAt,
+    misses: summary.misses,
+    expectedRebuilds: summary.expectedRebuilds,
+    hitRatio: summary.hitRatio,
+    cacheWriteTokens: summary.cacheWriteTokens,
+    missRecacheTokens: summary.missRecacheTokens,
+    lastMissAt: summary.lastMissAt,
+    lastActivityAt: summary.lastActivityAt,
+  }
 }
 
-let snapshot: PromptCacheTrackerSnapshot = EMPTY_SNAPSHOT
-let recacheTokensIfCold: number | null = null
+/**
+ * densable `c$t` + `u$t` live read — used by tests that need to pin a
+ * snapshot without going through record. Production paths always call
+ * summarizePromptCache / estimatePromptCacheRecacheTokens directly.
+ */
+let testOverride: {
+  snapshot: PromptCacheTrackerSnapshot
+  cold: number | null
+} | null = null
 
 export function setPromptCacheTrackerForTests(
   next: PromptCacheTrackerSnapshot,
   cold: number | null,
 ): void {
-  snapshot = next
-  recacheTokensIfCold = cold
+  testOverride = { snapshot: next, cold }
 }
 
 export function resetPromptCacheTrackerForTests(): void {
-  snapshot = EMPTY_SNAPSHOT
-  recacheTokensIfCold = null
+  testOverride = null
+  resetPromptCacheSessionBagForTests()
+}
+
+function liveSnapshot(now = Date.now()): PromptCacheTrackerSnapshot {
+  if (testOverride !== null) return testOverride.snapshot
+  return snapshotFromSummary(summarizePromptCache(undefined, now))
+}
+
+function liveColdTokens(): number | null {
+  if (testOverride !== null) return testOverride.cold
+  return estimatePromptCacheRecacheTokens()
 }
 
 /**
  * densable 2.1.251 `oqe` projection.
  * `expires_at` uses `Math.ceil(ms/1000)`; `last_miss_at` uses `Math.floor`.
- * `recache_tokens_if_cold` is `u$t()` (passed in; body not in the gold file).
+ * `recache_tokens_if_cold` is `u$t()`.
  */
 export function promptCacheFromTracker(
   tracker: PromptCacheTrackerSnapshot,
@@ -86,11 +113,11 @@ export function promptCacheFromTracker(
   }
 }
 
-/** `oqe()` against the session tracker. Empty tracker spreads nothing. */
-export function promptCacheCommandFields():
-  | { prompt_cache: PromptCacheStatus }
-  | Record<string, never> {
-  return promptCacheFromTracker(snapshot, recacheTokensIfCold)
+/** densable `oqe()` against the session tracker. Empty tracker spreads nothing. */
+export function promptCacheCommandFields(
+  now = Date.now(),
+): { prompt_cache: PromptCacheStatus } | Record<string, never> {
+  return promptCacheFromTracker(liveSnapshot(now), liveColdTokens())
 }
 
 /**
@@ -162,5 +189,5 @@ export function formatPromptCacheLine(
 
 /** `/cost` line from the session tracker (`whn`). */
 export function formatPromptCacheCostLine(now = Date.now()): string | null {
-  return formatPromptCacheLine(snapshot, recacheTokensIfCold, now)
+  return formatPromptCacheLine(liveSnapshot(now), liveColdTokens(), now)
 }

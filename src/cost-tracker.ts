@@ -287,6 +287,14 @@ export type SessionCostAttribution = {
   /** densable 2.1.222 #6 — only set when this request consumed MCP tool results */
   activeMcpServer?: string
   activeMcpTool?: string
+  /**
+   * densable 2.1.251 `D6e` gate — main-thread prompt-cache tracker.
+   * When set (and agent is main), records cache hit/miss into `xhe`.
+   */
+  querySource?: string
+  /** Request intended TTL (`Sr`) when ephemeral buckets are absent. */
+  intendedPromptCacheTtl?: '5m' | '1h'
+  agentContext?: { agentType?: string } | null
 }
 
 export function addToTotalSessionCost(
@@ -297,6 +305,23 @@ export function addToTotalSessionCost(
 ): number {
   const modelUsage = addToTotalModelUsage(cost, usage, model)
   addToTotalCostState(cost, modelUsage, model)
+
+  // densable 2.1.251 D6e — live prompt-cache accumulate on main-thread credit
+  if (attribution?.querySource !== undefined) {
+    try {
+      const { recordPromptCacheFromUsage } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./commands/cost/promptCacheTracker.js') as typeof import('./commands/cost/promptCacheTracker.js')
+      recordPromptCacheFromUsage(usage, {
+        querySource: attribution.querySource,
+        agentContext: attribution.agentContext,
+        intendedTtl: attribution.intendedPromptCacheTtl,
+      })
+    } catch {
+      // tracker must never break cost path
+    }
+  }
+
   if (feature('GOAL')) {
     const { getGoal, updateGoalTokens } =
       require('./services/goal/goalState.js') as typeof import('./services/goal/goalState.js')

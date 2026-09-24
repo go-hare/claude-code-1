@@ -11,6 +11,7 @@ import {
 import { hasClaudeAiBillingAccess } from '../utils/billing.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatResetTime } from '../utils/format.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
 import type { ClaudeAILimits } from './claudeAiLimits.js'
 
 const FEEDBACK_CHANNEL_ANT = '#briarpatch-cc'
@@ -25,6 +26,8 @@ export const RATE_LIMIT_ERROR_PREFIXES = [
   "You're now using extra usage",
   "You're close to",
   "You're out of extra usage",
+  "You're out of usage credits",
+  'Your org is out of usage',
 ] as const
 
 /**
@@ -151,6 +154,21 @@ const SPEND_CAP_DISABLED_REASONS = new Set([
   'org_spend_cap_reached',
 ] as const)
 
+/**
+ * densable uen Gj() @184960481 — `I("tengu_vellum_anchor", !1)`.
+ * When true, wb()/out_of_credits append " · progress saved".
+ */
+function isProgressSavedHintEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
+    'tengu_vellum_anchor',
+    false,
+  )
+}
+
+function isUsageBasedBilling(): boolean {
+  return getOauthAccountInfo()?.billingType === 'usage_based'
+}
+
 const CONSUMER_USAGE_SETTINGS_URL =
   'claude.ai/settings/usage?from=cc_cli_limit_message'
 
@@ -223,6 +241,11 @@ function formatSessionOrWeeklyResetHint(limits: ClaudeAILimits): string {
 }
 
 function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
+  const usageBased = isUsageBasedBilling()
+  const hasBillingAccess = hasClaudeAiBillingAccess()
+  const usageLimitAdminSuffix = hasBillingAccess
+    ? ''
+    : ' · contact your admin to increase it'
   const resetsAt = limits.resetsAt
   const resetTime = resetsAt ? formatResetTime(resetsAt, true) : undefined
   const overageResetTime = limits.overageResetsAt
@@ -230,16 +253,16 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     : undefined
   const resetMessage = resetTime ? ` · resets ${resetTime}` : ''
 
-  // densable 2.1.221: before generic overage-rejected copy, re-blame spend caps.
-  // Team/Enterprise org_spend_cap_reached → "individual spend limit" (not org monthly).
+  // densable 2.1.221 / uen: outer hqe spend-cap is `if(!tx() && hqe.has)`.
+  // usage_based falls through to the inner hqe arm (individual usage limit).
   const disabledReason = limits.overageDisabledReason
   if (
+    !usageBased &&
     disabledReason &&
     (SPEND_CAP_DISABLED_REASONS as Set<string>).has(disabledReason)
   ) {
     const isIndividualSpendCap = disabledReason === 'org_spend_cap_reached'
     const subscriptionType = getSubscriptionType()
-    const hasBillingAccess = hasClaudeAiBillingAccess()
     const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
     if (subscriptionType === 'team' || subscriptionType === 'enterprise') {
       const limit = isIndividualSpendCap
@@ -268,7 +291,8 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
   }
 
   // densable uen — $0 / admin-disabled allocation. mhe() is the ask-admin hint.
-  // Separate from the spend-cap branch above.
+  // Kept outside overage-rejected so non-overage rejected still surfaces it.
+  // Separate from the spend-cap branch above. Do not move/revert.
   if (
     disabledReason === 'member_level_disabled' ||
     disabledReason === 'member_zero_credit_limit'
@@ -297,34 +321,113 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     }
 
     if (limits.overageDisabledReason === 'out_of_credits') {
-      return `You're out of extra usage${overageResetMessage}`
+      // densable uen: usage_based → org out-of-usage; else credits + optional Gj.
+      if (usageBased) {
+        return hasBillingAccess
+          ? 'Your org is out of usage · add funds to continue'
+          : 'Your org is out of usage · contact your admin'
+      }
+      const progressSaved =
+        overageResetMessage !== '' && isProgressSavedHintEnabled()
+          ? ' · progress saved'
+          : ''
+      return `You're out of usage credits${overageResetMessage}${progressSaved}`
     }
 
-    return formatLimitReachedText('limit', overageResetMessage, model)
+    // densable uen remaining overage arms (inner hqe / seat_tier / org_service).
+    if (
+      disabledReason &&
+      (SPEND_CAP_DISABLED_REASONS as Set<string>).has(disabledReason)
+    ) {
+      const innerReset = overageResetTime ? ` · resets ${overageResetTime}` : ''
+      return formatLimitReachedText(
+        disabledReason === 'org_spend_cap_reached'
+          ? 'individual usage limit'
+          : "org's monthly usage limit",
+        innerReset,
+        model,
+      )
+    }
+
+    if (
+      disabledReason === 'seat_tier_level_disabled' ||
+      disabledReason === 'seat_tier_zero_credit_limit'
+    ) {
+      return `Your seat type doesn't include ${usageBased ? 'usage' : 'usage credits'}`
+    }
+
+    if (disabledReason === 'org_service_level_disabled') {
+      return 'This service is disabled for your org'
+    }
+
+    // densable uen: if (r) wb("usage limit", u); else wb("limit", B,
+    // {progressSavedSuffix: B !== "" && Gj()}).
+    if (usageBased) {
+      return formatLimitReachedText('usage limit', usageLimitAdminSuffix, model)
+    }
+    return formatLimitReachedText('limit', overageResetMessage, model, {
+      progressSavedSuffix:
+        overageResetMessage !== '' && isProgressSavedHintEnabled(),
+    })
   }
 
-  if (limits.rateLimitType === 'seven_day_sonnet') {
-    const subscriptionType = getSubscriptionType()
-    const isProOrEnterprise =
-      subscriptionType === 'pro' || subscriptionType === 'enterprise'
-    // For pro and enterprise, Sonnet limit is the same as weekly
-    const limit = isProOrEnterprise ? 'weekly limit' : 'Sonnet limit'
-    return formatLimitReachedText(limit, resetMessage, model)
+  // densable uen den(): typed five_hour / seven_day / opus / sonnet (+ Gj).
+  const typed = getTypedLimitReachedText(limits, resetMessage, model)
+  if (typed !== null) {
+    return typed
   }
-
-  if (limits.rateLimitType === 'seven_day_opus') {
-    return formatLimitReachedText('Opus limit', resetMessage, model)
+  // densable uen: if (r) wb("usage limit", u); else
+  // wb("usage limit", A, {progressSavedSuffix: A !== "" && Gj()}).
+  if (usageBased) {
+    return formatLimitReachedText('usage limit', usageLimitAdminSuffix, model)
   }
+  return formatLimitReachedText('usage limit', resetMessage, model, {
+    progressSavedSuffix: resetMessage !== '' && isProgressSavedHintEnabled(),
+  })
+}
 
-  if (limits.rateLimitType === 'seven_day') {
-    return formatLimitReachedText('weekly limit', resetMessage, model)
+/**
+ * densable uen den() @184964566 / ghe():
+ *   seven_day_sonnet → wb(ghe(), t, r, {progressSavedSuffix: Gj()})
+ *   five_hour | seven_day | seven_day_opus → wb(Ew[type], t, r, {progressSavedSuffix: Gj()})
+ *   seven_day_overage_included (Fable 5) is not in tip RateLimitType — not mapped.
+ */
+function sonnetOrWeeklyLimitName(): string {
+  const subscriptionType = getSubscriptionType()
+  return subscriptionType === 'pro' || subscriptionType === 'enterprise'
+    ? 'weekly limit'
+    : 'Sonnet limit'
+}
+
+function getTypedLimitReachedText(
+  limits: ClaudeAILimits,
+  resetMessage: string,
+  model: string,
+): string | null {
+  const progressSavedSuffix = isProgressSavedHintEnabled()
+  switch (limits.rateLimitType) {
+    case 'seven_day_sonnet':
+      return formatLimitReachedText(
+        sonnetOrWeeklyLimitName(),
+        resetMessage,
+        model,
+        { progressSavedSuffix },
+      )
+    case 'five_hour':
+      return formatLimitReachedText('session limit', resetMessage, model, {
+        progressSavedSuffix,
+      })
+    case 'seven_day':
+      return formatLimitReachedText('weekly limit', resetMessage, model, {
+        progressSavedSuffix,
+      })
+    case 'seven_day_opus':
+      return formatLimitReachedText('Opus limit', resetMessage, model, {
+        progressSavedSuffix,
+      })
+    default:
+      return null
   }
-
-  if (limits.rateLimitType === 'five_hour') {
-    return formatLimitReachedText('session limit', resetMessage, model)
-  }
-
-  return formatLimitReachedText('usage limit', resetMessage, model)
 }
 
 function getEarlyWarningText(limits: ClaudeAILimits): string | null {
@@ -465,11 +568,14 @@ function formatLimitReachedText(
   limit: string,
   resetMessage: string,
   _model: string,
+  opts?: { progressSavedSuffix?: boolean },
 ): string {
+  // densable uen wb(): o?.progressSavedSuffix ? " · progress saved" : ""
+  const progressSaved = opts?.progressSavedSuffix ? ' · progress saved' : ''
   // Enhanced messaging for Ant users
   if (process.env.USER_TYPE === 'ant') {
-    return `You've hit your ${limit}${resetMessage}. If you have feedback about this limit, post in ${FEEDBACK_CHANNEL_ANT}. You can reset your limits with /reset-limits`
+    return `You've hit your ${limit}${resetMessage}${progressSaved}. If you have feedback about this limit, post in ${FEEDBACK_CHANNEL_ANT}. You can reset your limits with /reset-limits`
   }
 
-  return `You've hit your ${limit}${resetMessage}`
+  return `You've hit your ${limit}${resetMessage}${progressSaved}`
 }

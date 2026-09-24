@@ -140,6 +140,55 @@ export let currentLimits: ClaudeAILimits = {
 }
 
 /**
+ * densable 2.1.251 `pm.limitsObserved` / `HPe`.
+ * Set true on a non-stale observation apply and on `emitStatusChange`.
+ * Cleared by `resetCurrentLimits` (account epoch bump).
+ * `/usage` Dl empty arm: `HPe() ? null : "Spend limit · shown once…"`.
+ */
+let limitsObserved = false
+let lastAppliedObservationAtMs = 0
+/** densable `pm.accountEpoch` — bumped on `resetCurrentLimits`. */
+let accountEpoch = 0
+
+/**
+ * densable `HPe` — `return pm.limitsObserved`.
+ */
+export function areLimitsObserved(): boolean {
+  return limitsObserved
+}
+
+/**
+ * densable `pm.isStaleObservation(e)`.
+ * Stale if `e < lastAppliedObservationAtMs`. Else latch observed + timestamp.
+ */
+export function isStaleObservation(observationAtMs: number): boolean {
+  if (observationAtMs < lastAppliedObservationAtMs) return true
+  lastAppliedObservationAtMs = observationAtMs
+  limitsObserved = true
+  return false
+}
+
+/**
+ * densable `pm.resetCurrentLimits`.
+ * Clears windows, bumps account epoch, rewinds the observation latch.
+ */
+export function resetCurrentLimits(): void {
+  currentLimits = {
+    status: 'allowed',
+    unifiedRateLimitFallbackAvailable: false,
+    isUsingOverage: false,
+  }
+  rawUtilization = {}
+  accountEpoch++
+  lastAppliedObservationAtMs = Date.now()
+  limitsObserved = false
+}
+
+export function getLimitsAccountEpoch(): number {
+  return accountEpoch
+}
+
+/**
  * Raw per-window utilization from response headers, tracked on every API
  * response (unlike currentLimits.utilization which is only set when a warning
  * threshold fires). Exposed to statusline scripts via getRawUtilization().
@@ -217,6 +266,8 @@ export const quotaRejectedListeners: Set<QuotaRejectedListener> = new Set()
 
 export function emitStatusChange(limits: ClaudeAILimits) {
   currentLimits = limits
+  // densable emitStatusChange: `this.limitsObserved=!0` before listeners.
+  limitsObserved = true
   statusListeners.forEach(listener => listener(limits))
   const hoursTillReset = Math.round(
     (limits.resetsAt ? limits.resetsAt - Date.now() / 1000 : 0) / (60 * 60),
@@ -505,6 +556,7 @@ function cacheExtraUsageDisabledReason(headers: globalThis.Headers): void {
 
 export function extractQuotaStatusFromHeaders(
   headers: globalThis.Headers,
+  observationAtMs: number = Date.now(),
 ): void {
   // Check if we need to process rate limits
   const isSubscriber = isClaudeAISubscriber()
@@ -526,15 +578,18 @@ export function extractQuotaStatusFromHeaders(
 
   // Process headers (applies mocks from /mock-limits command if active)
   const headersToUse = processRateLimitHeaders(headers)
+  const newLimits = computeNewLimitsFromHeaders(headersToUse)
+  // densable gold: j4e/b7u extra-usage cache BEFORE isStaleObservation.
+  // Stale still writes cachedExtraUsageDisabledReason; only raw/status skip.
+  cacheExtraUsageDisabledReason(headersToUse)
+  if (isStaleObservation(observationAtMs)) {
+    return
+  }
   rawUtilization = extractRawUtilization(headersToUse)
   updateProviderBuckets(
     'anthropic',
     anthropicAdapter.parseHeaders(headersToUse),
   )
-  const newLimits = computeNewLimitsFromHeaders(headersToUse)
-
-  // Cache extra usage status (persists across sessions)
-  cacheExtraUsageDisabledReason(headersToUse)
 
   if (!isEqual(currentLimits, newLimits)) {
     emitStatusChange(newLimits)
@@ -548,6 +603,7 @@ export function extractQuotaStatusFromHeaders(
 export function extractQuotaStatusFromError(
   error: APIError,
   querySourceBucket: QuotaRejectedQuerySourceBucket = 'other',
+  observationAtMs: number = Date.now(),
 ): void {
   if (
     !shouldProcessRateLimits(isClaudeAISubscriber()) ||
@@ -566,11 +622,15 @@ export function extractQuotaStatusFromError(
   }
 
   try {
+    // densable: `d=this.isStaleObservation(r)` — stale skips raw/emit/rejected.
+    const stale = isStaleObservation(observationAtMs)
     let newLimits = { ...currentLimits }
     if (error.headers) {
       // Process headers (applies mocks from /mock-limits command if active)
       const headersToUse = processRateLimitHeaders(error.headers)
-      rawUtilization = extractRawUtilization(headersToUse)
+      if (!stale) {
+        rawUtilization = extractRawUtilization(headersToUse)
+      }
       updateProviderBuckets(
         'anthropic',
         anthropicAdapter.parseHeaders(headersToUse),
@@ -582,6 +642,10 @@ export function extractQuotaStatusFromError(
     }
     // For errors, always set status to rejected even if headers are not present.
     newLimits.status = 'rejected'
+
+    if (stale) {
+      return
+    }
 
     // densable: quotaRejected.emit(u, t) even when statusChanged is deduped
     emitQuotaRejected(newLimits, querySourceBucket)
