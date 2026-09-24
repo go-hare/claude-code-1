@@ -36,13 +36,13 @@ import { lazySchema } from './lazySchema.js'
 import {
   githubRestApiBase,
   isGithubDotComHost,
-  resolveGithubAuthToken,
 } from './permissions/autoModeRepoVisibility.js'
 import type { PrStatusCacheEntry } from './prStatusCache.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
+import { getProxyFetchOptions } from './proxy.js'
 import { createSignal, type Signal } from './signal.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
-import { whichSync } from './which.js'
+import { which } from './which.js'
 
 /** densable mH */
 const GH_TIMEOUT_MS = 5000
@@ -101,6 +101,13 @@ export type DirectState = {
   reviewDecision: string
   lastReviewFetchAt: number
   redirectedListUrl: string | null
+}
+
+/** densable ugn / rememberBaseRepo cache row. */
+export type BaseRepoCache = {
+  forOrigin: string
+  owner: string
+  repo: string
 }
 
 export type DirectPrStatus = PrStatus & { notModified?: true }
@@ -733,7 +740,9 @@ export async function fetchDirectReviewDecision(
     variables: { o: repo.owner, r: repo.repo, n: number },
   })
   try {
+    // densable agn: fetch(o,{...Hi({url:o}), keepalive:!1, method:"POST",...})
     const resp = await fetch(url, {
+      ...Hi({ url }),
       keepalive: false,
       method: 'POST',
       headers: {
@@ -836,6 +845,8 @@ export class PrStatusShared {
   lastPersistedCacheBody = ''
   /** densable dXe.ghBackoffUntil — V$n `KX()`. */
   ghBackoffUntil = 0
+  /** densable jA().baseRepoCache — ugn fork/upstream remap. */
+  baseRepoCache: BaseRepoCache | null = null
 
   constructor() {
     const inner = this.#inner
@@ -915,7 +926,16 @@ export class PrStatusShared {
     this.lastLoggedGhAuthState = null
     this.lastPersistedCacheBody = ''
     this.ghBackoffUntil = 0
+    this.baseRepoCache = null
     this.prStatusByUrl.cache.clear()
+  }
+
+  /**
+   * densable rememberBaseRepo — `return this.baseRepoCache=e,e`
+   */
+  rememberBaseRepo(entry: BaseRepoCache): BaseRepoCache {
+    this.baseRepoCache = entry
+    return entry
   }
 }
 
@@ -1013,17 +1033,218 @@ export function isDirectApiEnabled(): boolean {
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_prism', false)
 }
 
+/**
+ * densable rW — case-insensitive host equality (GH_HOST match).
+ */
+export function hostsEqual(
+  a: string | undefined,
+  b: string | undefined,
+): boolean {
+  if (!a || !b) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * densable zo host or GH_HOST match — whether needs-auth is meaningful.
+ */
 function isGithubLikeHost(host: string): boolean {
-  const t = host.toLowerCase()
-  if (t === 'github.com' || t.endsWith('.github.com')) return true
-  const ghHost = process.env.GH_HOST
-  return Boolean(ghHost && t === ghHost.toLowerCase())
+  return isGithubDotComHost(host) || hostsEqual(process.env.GH_HOST, host)
+}
+
+/** densable Kfn return — token / gh-missing / no-token. */
+export type GithubAuthResult =
+  | { kind: 'token'; token: string }
+  | { kind: 'gh-missing' }
+  | { kind: 'no-token' }
+
+/**
+ * densable Kfn @185399858 — GH_TOKEN||GITHUB_TOKEN (github.com), else
+ * GH_ENTERPRISE_TOKEN||GITHUB_ENTERPRISE_TOKEN when GH_HOST matches, else
+ * `gh auth token --hostname` with env tokens blanked.
+ */
+export async function resolveGithubAuthResult(
+  host: string,
+): Promise<GithubAuthResult> {
+  const envToken = isGithubDotComHost(host)
+    ? process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+    : hostsEqual(process.env.GH_HOST, host)
+      ? process.env.GH_ENTERPRISE_TOKEN || process.env.GITHUB_ENTERPRISE_TOKEN
+      : undefined
+  if (envToken) return { kind: 'token', token: envToken }
+  if (!(await which('gh'))) return { kind: 'gh-missing' }
+  const { stdout, code } = await execFileNoThrow(
+    'gh',
+    ['auth', 'token', '--hostname', host],
+    {
+      timeout: GH_TIMEOUT_MS,
+      preserveOutputOnError: false,
+      env: {
+        ...process.env,
+        GH_TOKEN: '',
+        GITHUB_TOKEN: '',
+        GH_ENTERPRISE_TOKEN: '',
+        GITHUB_ENTERPRISE_TOKEN: '',
+      },
+    },
+  )
+  if (code !== 0) return { kind: 'no-token' }
+  const token = stdout.trim()
+  return token.length > 0 ? { kind: 'token', token } : { kind: 'no-token' }
+}
+
+/** densable _ke process cache of Kfn. */
+const githubAuthByHost = new Map<string, Promise<GithubAuthResult>>()
+
+/**
+ * densable _ke — process-local Kfn cache (in-flight + resolved).
+ */
+export function resolveGithubAuthCached(
+  host: string,
+): Promise<GithubAuthResult> {
+  let pending = githubAuthByHost.get(host)
+  if (!pending) {
+    pending = resolveGithubAuthResult(host)
+    githubAuthByHost.set(host, pending)
+  }
+  return pending
+}
+
+/**
+ * densable bke — drop cached Kfn for host (401 / needs-auth path).
+ */
+export function invalidateGithubAuthCache(host: string): void {
+  githubAuthByHost.delete(host)
+}
+
+/** Test helper — clear densable _ke map. */
+export function clearGithubAuthCacheForTests(): void {
+  githubAuthByHost.clear()
+}
+
+/**
+ * densable `Hi` @179500183 — fetch init for proxy/mTLS/unix/keepalive.
+ * Local stand-in is `getProxyFetchOptions` (same product arms). Gold takes
+ * `{url}` for NO_PROXY; EnvHttpProxyAgent / Bun proxy path already honor it.
+ */
+export function Hi(opts?: {
+  url?: string
+  forAnthropicAPI?: boolean
+  hasBodyIdleWatchdog?: boolean
+}): ReturnType<typeof getProxyFetchOptions> {
+  return getProxyFetchOptions({
+    forAnthropicAPI: opts?.forAnthropicAPI,
+    hasBodyIdleWatchdog: opts?.hasBodyIdleWatchdog,
+  })
+}
+
+/**
+ * densable `Itt` — parse `host/owner/repo` from a remote URL string.
+ * Gold rejects pure-IP hosts; local parseGitRemote covers the same shape.
+ */
+export function Itt(url: string): {
+  host: string
+  owner: string
+  repo: string
+} | null {
+  const parsed = parseGitRemote(url)
+  if (!parsed) return null
+  // densable: reject pure numeric / IPv host labels
+  if (/^[\d.]+$/.test(parsed.host) || /^\[?[0-9a-f:]+\]?$/i.test(parsed.host)) {
+    return null
+  }
+  return { host: parsed.host, owner: parsed.owner, repo: parsed.name }
+}
+
+/** densable `dgn` — `git config --get remote.upstream.url`. */
+export async function dgn(): Promise<string | null> {
+  const { stdout, code } = await execFileNoThrow(
+    'git',
+    ['config', '--get', 'remote.upstream.url'],
+    { timeout: 2000, preserveOutputOnError: false },
+  )
+  return code === 0 && stdout.trim() ? stdout.trim() : null
+}
+
+/** densable `cgn` — parent repo JSON for fork remap. */
+const cgn = lazySchema(() =>
+  z.object({
+    parent: z
+      .object({
+        name: z.string(),
+        owner: z.object({ login: z.string() }),
+      })
+      .nullish(),
+  }),
+)
+
+/**
+ * densable `pgn` — GET /repos/{owner}/{repo} and read `.parent` when forked.
+ */
+export async function pgn(
+  remote: { host: string; owner: string; repo: string },
+  token: string,
+): Promise<{ owner: string; repo: string } | null> {
+  const apiBase = githubRestApiBase(remote.host)
+  const href = `${apiBase}/repos/${encodeURIComponent(remote.owner)}/${encodeURIComponent(remote.repo)}`
+  try {
+    const resp = await fetch(href, {
+      ...Hi({ url: href }),
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': GITHUB_PR_API_VERSION,
+        'User-Agent': getUserAgent(),
+      },
+      redirect: 'error',
+      signal: AbortSignal.timeout(GH_TIMEOUT_MS),
+    })
+    if (!resp.ok) return null
+    const parsed = cgn().safeParse(await resp.json())
+    const parent = parsed.success ? parsed.data.parent : null
+    return parent ? { owner: parent.owner.login, repo: parent.name } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable `ugn` @185406289 — resolve base owner/repo for PR head list.
+ * Cache → upstream remote on same host → API parent → fall back to remote.
+ */
+export async function ugn(
+  remote: { host: string; owner: string; repo: string },
+  token: string,
+): Promise<{ owner: string; repo: string }> {
+  const forOrigin = `${remote.host}/${remote.owner}/${remote.repo}`
+  const poller = getPrStatusShared()
+  const cached = poller.baseRepoCache
+  if (cached?.forOrigin === forOrigin) {
+    return { owner: cached.owner, repo: cached.repo }
+  }
+  const upstreamUrl = await dgn()
+  const fromUpstream = upstreamUrl ? Itt(upstreamUrl) : null
+  if (fromUpstream && fromUpstream.host === remote.host) {
+    const entry = poller.rememberBaseRepo({
+      forOrigin,
+      owner: fromUpstream.owner,
+      repo: fromUpstream.repo,
+    })
+    return { owner: entry.owner, repo: entry.repo }
+  }
+  const fromApi = await pgn(remote, token)
+  const entry = poller.rememberBaseRepo({
+    forOrigin,
+    owner: fromApi?.owner ?? remote.owner,
+    repo: fromApi?.repo ?? remote.repo,
+  })
+  return { owner: entry.owner, repo: entry.repo }
 }
 
 /**
  * densable ign @185402726 — REST list + 304 empty-ok + agn review.
- * Harbor is not a fetch gate. Token is leftover resolveGithubAuthToken
- * (no new Kfn/_ke cache).
+ * Harbor is not a fetch gate. Token is densable Kfn via _ke; bke on 401.
+ * ugn remaps fork base; Hi spreads proxy/mTLS fetch opts.
  */
 export async function fetchDirectPrStatus(
   branch: string,
@@ -1037,21 +1258,30 @@ export async function fetchDirectPrStatus(
   const parsed = remote ? parseGitRemote(remote) : null
   if (!parsed) return null
   const poller = getPrStatusShared()
-  const token = await resolveGithubAuthToken(parsed.host)
-  if (!token) {
+  const auth = await resolveGithubAuthCached(parsed.host)
+  if (auth.kind !== 'token') {
     if (!isGithubLikeHost(parsed.host)) return null
-    const kind = whichSync('gh') === null ? 'gh-missing' : 'needs-auth'
-    poller.logAuthState(kind === 'gh-missing' ? 'gh_missing' : 'needs_auth')
-    return kind
+    poller.logAuthState(
+      auth.kind === 'gh-missing' ? 'gh_missing' : 'needs_auth',
+    )
+    invalidateGithubAuthCache(parsed.host)
+    return auth.kind === 'gh-missing' ? 'gh-missing' : 'needs-auth'
   }
   poller.logAuthState('token_present')
+  const token = auth.token
+  // densable: d=await ugn(r,u) — base owner/repo for /repos/.../pulls
+  const head = await ugn(
+    { host: parsed.host, owner: parsed.owner, repo: parsed.name },
+    token,
+  )
   const state = poller.directStateForBranch(branch)
   const prev = state.pr
     ? { ...state.pr, reviewDecision: state.reviewDecision }
     : null
   const apiBase = githubRestApiBase(parsed.host)
   const origin = new URL(apiBase).origin
-  const listUrl = `${apiBase}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}/pulls?head=${encodeURIComponent(parsed.owner)}:${encodeURIComponent(branch)}&state=open&per_page=1`
+  // Gold: `/repos/${d.owner}/${d.repo}/pulls?head=${r.owner}:branch`
+  const listUrl = `${apiBase}/repos/${encodeURIComponent(head.owner)}/${encodeURIComponent(head.repo)}/pulls?head=${encodeURIComponent(parsed.owner)}:${encodeURIComponent(branch)}&state=open&per_page=1`
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'User-Agent': getUserAgent(),
@@ -1060,8 +1290,10 @@ export async function fetchDirectPrStatus(
   let listStatus: number | undefined
   let listChanged = false
   try {
+    // densable: fetch(Be,{...Hi({url:Be}), keepalive:!1, ...})
     const getList = (href: string): Promise<Response> =>
       fetch(href, {
+        ...Hi({ url: href }),
         keepalive: false,
         method: 'GET',
         headers,
@@ -1085,7 +1317,9 @@ export async function fetchDirectPrStatus(
       json: () => resp.json(),
     })
     if (applied === 'fetch-failed') {
-      if (resp.status === 403 || resp.status === 429) {
+      if (resp.status === 401) {
+        invalidateGithubAuthCache(parsed.host)
+      } else if (resp.status === 403 || resp.status === 429) {
         poller.backOffFromResponse(resp)
       }
       logEvent('tengu_feature_bad', {
@@ -1137,7 +1371,7 @@ export async function fetchDirectPrStatus(
     Date.now() - state.lastReviewFetchAt >= PR_STATUS_REVIEW_TTL_MS
   if (reviewFetched) {
     const decision = await fetchDirectReviewDecision(
-      { host: parsed.host, owner: parsed.owner, repo: parsed.name },
+      { host: parsed.host, owner: head.owner, repo: head.repo },
       token,
       found.number,
     )

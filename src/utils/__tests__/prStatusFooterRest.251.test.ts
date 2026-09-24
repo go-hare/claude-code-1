@@ -2,20 +2,26 @@
  * densable 2.1.251 #63 — n$t always REST ign ?? glab.
  * ign: Accept + API-version, 304/etag, same-origin redirect, agn review,
  * tengu events. Harbor prism stays the official poll-interval / focus gate.
- * gh pr view stays on the URL cache. No new GitHub token.
+ * gh pr view stays on the URL cache. Kfn/_ke token + bke invalidate.
+ * ugn/Hi BODY locked — fork/upstream remap + proxy fetch spread.
  *
  * GOLD: gold-251-l.md / gold-251-f.md ign @185402726 sha=5a676d2f3cc48c37
- * agn @185405349. f=_bad g=_sad _=_ok. logAuthState tengu_gh_pr_status_auth_state.
+ * Kfn @185399858. agn @185405349. f=_bad g=_sad _=_ok.
+ * logAuthState tengu_gh_pr_status_auth_state.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
+  clearGithubAuthCacheForTests,
   createPrStatusShared,
   githubGraphqlApi,
   GITHUB_PR_API_VERSION,
+  hostsEqual,
+  invalidateGithubAuthCache,
   isDirectApiEnabled,
   PR_STATUS_REVIEW_TTL_MS,
+  resolveGithubAuthResult,
   restListConditionalHeaders,
   restReviewSchema,
   REVIEW_DECISION_QUERY,
@@ -88,8 +94,83 @@ describe('footer PR REST fetch (2.1.251 #63)', () => {
     expect(byUrl).toContain("'view'")
     expect(ign).not.toContain("'pr'")
     expect(ign).not.toContain('fetchGithubPrStatus(')
-    expect(pollerSrc).toContain('resolveGithubAuthToken')
-    expect(pollerSrc).not.toContain('GH_ENTERPRISE_TOKEN')
+  })
+
+  test('Kfn env token arms + blanked gh auth token; _ke cache + bke invalidate', async () => {
+    clearGithubAuthCacheForTests()
+    const prev = {
+      GH_TOKEN: process.env.GH_TOKEN,
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+      GH_HOST: process.env.GH_HOST,
+      GH_ENTERPRISE_TOKEN: process.env.GH_ENTERPRISE_TOKEN,
+      GITHUB_ENTERPRISE_TOKEN: process.env.GITHUB_ENTERPRISE_TOKEN,
+    }
+    try {
+      process.env.GH_TOKEN = 'dotcom-tok'
+      delete process.env.GITHUB_TOKEN
+      expect(await resolveGithubAuthResult('github.com')).toEqual({
+        kind: 'token',
+        token: 'dotcom-tok',
+      })
+      delete process.env.GH_TOKEN
+      process.env.GH_HOST = 'ghe.example.com'
+      process.env.GH_ENTERPRISE_TOKEN = 'ghe-tok'
+      expect(await resolveGithubAuthResult('ghe.example.com')).toEqual({
+        kind: 'token',
+        token: 'ghe-tok',
+      })
+      // Non-matching GHE host must not take enterprise env pair.
+      expect(await resolveGithubAuthResult('other.ghe')).not.toEqual({
+        kind: 'token',
+        token: 'ghe-tok',
+      })
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      clearGithubAuthCacheForTests()
+    }
+
+    const kfn = pollerSrc.slice(
+      pollerSrc.indexOf('export async function resolveGithubAuthResult'),
+      pollerSrc.indexOf('/** densable _ke process cache of Kfn. */'),
+    )
+    expect(kfn).toContain('GH_TOKEN')
+    expect(kfn).toContain('GITHUB_TOKEN')
+    expect(kfn).toContain('GH_ENTERPRISE_TOKEN')
+    expect(kfn).toContain('GITHUB_ENTERPRISE_TOKEN')
+    expect(kfn).toContain("'auth'")
+    expect(kfn).toContain("'token'")
+    expect(kfn).toContain("'--hostname'")
+    expect(kfn).toContain("GH_TOKEN: ''")
+    expect(kfn).toContain("GITHUB_TOKEN: ''")
+    expect(kfn).toContain("GH_ENTERPRISE_TOKEN: ''")
+    expect(kfn).toContain("GITHUB_ENTERPRISE_TOKEN: ''")
+    expect(kfn).toContain("kind: 'gh-missing'")
+    expect(kfn).toContain("kind: 'no-token'")
+
+    const ign = pollerSrc.slice(
+      pollerSrc.indexOf('export async function fetchDirectPrStatus'),
+      pollerSrc.indexOf('export async function fetchPrStatusForPoller'),
+    )
+    expect(ign).toContain('resolveGithubAuthCached')
+    expect(ign).toContain('invalidateGithubAuthCache')
+    expect(ign).toContain('resp.status === 401')
+    expect(ign).not.toContain('resolveGithubAuthToken')
+    // densable ugn + Hi — fork/upstream base remap + proxy fetch spread
+    expect(ign).toContain('await ugn(')
+    expect(ign).toContain('...Hi({ url: href })')
+    expect(pollerSrc).toContain('export async function ugn(')
+    expect(pollerSrc).toContain('export function Hi(')
+    expect(pollerSrc).toContain('getProxyFetchOptions')
+    expect(pollerSrc).toContain('rememberBaseRepo')
+    expect(pollerSrc).toContain('remote.upstream.url')
+    expect(pollerSrc).toContain('parent.owner.login')
+
+    expect(hostsEqual('GHE.Example.COM', 'ghe.example.com')).toBe(true)
+    expect(hostsEqual(undefined, 'x')).toBe(false)
+    invalidateGithubAuthCache('github.com')
   })
 })
 

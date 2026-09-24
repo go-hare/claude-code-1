@@ -81,21 +81,50 @@ function logVisibilityLookupFailed(reason: string): void {
 }
 
 /**
- * Official SJn/RTg portable — GH_TOKEN/GITHUB_TOKEN (or enterprise tokens)
- * then `gh auth token --hostname`.
+ * densable `rW` — GH_HOST matches remote host (case-insensitive).
+ * Used by Kfn enterprise env arm.
  */
-export async function resolveGithubAuthToken(
+export function isGhHostMatch(
+  ghHost: string | undefined,
+  host: string,
+): boolean {
+  if (!ghHost) return false
+  return ghHost.toLowerCase() === host.toLowerCase()
+}
+
+/** densable Kfn / _ke auth result for footer PR + visibility. */
+export type GithubAuthTokenResult =
+  | { kind: 'token'; token: string }
+  | { kind: 'gh-missing' }
+  | { kind: 'no-token' }
+
+/**
+ * densable Kfn @ gold-251-f — env token then `gh auth token --hostname`.
+ * zo = github.com; rW(GH_HOST, host) gates enterprise env tokens;
+ * qa("gh") missing → gh-missing; gh fail/empty → no-token.
+ */
+export async function resolveGithubAuthTokenKind(
   host: string,
   signal?: AbortSignal,
-): Promise<string | null> {
+  whichGh: (cmd: string) => Promise<string | null> = async cmd => {
+    const { which } = await import('../which.js')
+    return which(cmd)
+  },
+): Promise<GithubAuthTokenResult> {
+  // densable: zo(e) ? GH_TOKEN||GITHUB_TOKEN : rW(GH_HOST,e) ? enterprise : void 0
+  let envToken: string | undefined
   if (isGithubDotComHost(host)) {
-    const t = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
-    if (t) return t
-  } else {
-    const t =
-      process.env.GH_ENTERPRISE_TOKEN || process.env.GITHUB_ENTERPRISE_TOKEN
-    if (t) return t
+    envToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || undefined
+  } else if (isGhHostMatch(process.env.GH_HOST, host)) {
+    envToken =
+      process.env.GH_ENTERPRISE_TOKEN ||
+      process.env.GITHUB_ENTERPRISE_TOKEN ||
+      undefined
   }
+  if (envToken) return { kind: 'token', token: envToken }
+
+  if ((await whichGh('gh')) === null) return { kind: 'gh-missing' }
+
   const result = await execFileNoThrowWithCwd(
     'gh',
     ['auth', 'token', '--hostname', host],
@@ -107,15 +136,29 @@ export async function resolveGithubAuthToken(
       preserveOutputOnError: false,
       env: {
         ...process.env,
-        // Avoid feeding host tokens back into nested gh accidentally.
+        // densable Kfn clears all four so nested gh cannot re-feed host tokens.
         GH_TOKEN: '',
         GITHUB_TOKEN: '',
+        GH_ENTERPRISE_TOKEN: '',
+        GITHUB_ENTERPRISE_TOKEN: '',
       },
     },
   )
-  if (result.code !== 0) return null
+  if (result.code !== 0) return { kind: 'no-token' }
   const token = (result.stdout ?? '').trim()
-  return token || null
+  return token.length > 0 ? { kind: 'token', token } : { kind: 'no-token' }
+}
+
+/**
+ * Official SJn/RTg portable wrapper — token string or null.
+ * Prefer `resolveGithubAuthTokenKind` when gh-missing must be distinguished.
+ */
+export async function resolveGithubAuthToken(
+  host: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const result = await resolveGithubAuthTokenKind(host, signal)
+  return result.kind === 'token' ? result.token : null
 }
 
 /**

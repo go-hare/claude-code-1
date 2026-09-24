@@ -10,7 +10,10 @@ import { z } from 'zod'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { getOrganizationUUID } from '../../services/oauth/client.js'
-import { isPolicyAllowed } from '../../services/policyLimits/index.js'
+import {
+  isPolicyAllowed,
+  isRemotePolicyAllowed,
+} from '../../services/policyLimits/index.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
@@ -150,7 +153,7 @@ export function webSetupReuseHint(invocation: string): string {
   if (
     !isDesktopLikeEntrypointGold() &&
     !isEssentialTrafficOnly() &&
-    isPolicyAllowed('allow_remote_sessions') &&
+    isRemotePolicyAllowed('allow_remote_sessions') &&
     isPolicyAllowed('allow_quick_web_setup')
   ) {
     return `run /web-setup${invocation.startsWith('/') ? '' : ' in Claude Code'} to reuse your GitHub CLI login`
