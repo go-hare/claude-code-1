@@ -1436,6 +1436,13 @@ export class PluginsSync {
 }
 
 /** Official ce @178519637 */
+export type ModelSwitchResumeSeed = {
+  sessionId?: string
+  contextTokens: number
+  requestAt: number | null
+  ttlMs: number | null
+}
+
 export class RequestJournal {
   #e: unknown = null
   #t: unknown = null
@@ -1448,6 +1455,9 @@ export class RequestJournal {
   #d: number | null = null
   #l: number | null = null
   #c = false
+  /** densable gRn applyResumeSeed / stageResumeSeed bag (2.1.251 #1). */
+  #resumeSeed: ModelSwitchResumeSeed | null = null
+  #stagedResumeSeed: ModelSwitchResumeSeed | null = null
   lastAPIRequest(): unknown {
     return this.#e
   }
@@ -1519,6 +1529,25 @@ export class RequestJournal {
   replacePendingPostCompaction(e: boolean): void {
     this.#c = e
   }
+  /**
+   * densable gRn apply path — seed belongs to this session id.
+   */
+  applyResumeSeed(e: ModelSwitchResumeSeed): void {
+    this.#resumeSeed = e
+    this.#stagedResumeSeed = null
+  }
+  /**
+   * densable gRn stage path — seed for a different session id.
+   */
+  stageResumeSeed(e: ModelSwitchResumeSeed): void {
+    this.#stagedResumeSeed = e
+  }
+  resumeSeed(): ModelSwitchResumeSeed | null {
+    return this.#resumeSeed
+  }
+  stagedResumeSeed(): ModelSwitchResumeSeed | null {
+    return this.#stagedResumeSeed
+  }
   reset(): void {
     this.#e = null
     this.#t = null
@@ -1531,6 +1560,8 @@ export class RequestJournal {
     this.#d = null
     this.#l = null
     this.#c = false
+    this.#resumeSeed = null
+    this.#stagedResumeSeed = null
   }
 }
 

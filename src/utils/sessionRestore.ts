@@ -385,6 +385,8 @@ type ResumeLoadResult = {
   agentColor?: string
   agentSetting?: string
   customTitle?: string
+  /** AI-generated tab title (`ai-title` entry) for restoreSessionMetadata. */
+  aiTitle?: string
   tag?: string
   mode?: 'coordinator' | 'normal'
   worktreeSession?: PersistedWorktreeSession | null

@@ -9,8 +9,9 @@ import { closeSync, fstatSync, openSync, readSync } from 'fs'
 import {
   appendFile as fsAppendFile,
   copyFile as fsCopyFile,
-  open as fsOpen,
+  lutimes as fsLutimes,
   mkdir,
+  open as fsOpen,
   readdir,
   readFile,
   rename as fsRename,
@@ -2143,20 +2144,32 @@ async function tryAppendRaw(filePath: string, data: string): Promise<boolean> {
 }
 
 /**
- * densable `dpe` — move an existing same-id transcript aside before relocate.
- * Returns the aside path, or undefined when the destination is absent.
+ * densable `dpe` — HA(rename) the existing same-id dest to `.superseded-<ts>`
+ * before relocate. Y(ENOENT) → undefined. DVt(lutimes) refreshes mtime so
+ * the set-aside does not age from its old clock. `isRetentionExemptionDisabled`
+ * (Vjn) is ABSENT — lutimes is the gold default arm (`if (!r())`).
  */
 async function setAsideExistingTranscript(
   targetFile: string,
 ): Promise<string | undefined> {
+  const aside = `${targetFile}.superseded-${Date.now()}`
   try {
-    await stat(targetFile)
+    await fsRename(targetFile, aside)
   } catch (e) {
-    if (isFsInaccessible(e)) return undefined
+    if (isENOENT(e)) return
     throw e
   }
-  const aside = `${targetFile}.superseded-${Date.now()}`
-  await renamePathWithCrossDeviceFallback(targetFile, aside)
+  const now = new Date()
+  await fsLutimes(aside, now, now).catch(err => {
+    logForDebugging(
+      `relocateSessionTranscript: could not refresh the set-aside's mtime at ${aside} (it ages from its old clock): ${err}`,
+      { level: 'warn' },
+    )
+  })
+  logForDebugging(
+    `relocateSessionTranscript: existing destination set aside at ${aside}`,
+    { level: 'warn' },
+  )
   return aside
 }
 
@@ -2218,14 +2231,18 @@ export async function relocateSessionTranscript(): Promise<void> {
     await project.flush()
     await mkdir(targetProjectDir, { recursive: true, mode: 0o700 })
 
+    // densable S0e: Promise.all(ly(Mg(d), {bigint:!0}), ly(o, {bigint:!0}))
+    // compares project dirs, not jsonl. Y is ENOENT-only.
     let sameInode = false
     try {
-      const sourceStat = await stat(currentFile)
-      const destStat = await stat(targetFile)
+      const [sourceStat, destStat] = await Promise.all([
+        stat(dirname(currentFile), { bigint: true }),
+        stat(targetProjectDir, { bigint: true }),
+      ])
       sameInode =
         sourceStat.dev === destStat.dev && sourceStat.ino === destStat.ino
     } catch (e) {
-      if (!isFsInaccessible(e)) throw e
+      if (!isENOENT(e)) throw e
     }
     const setAside = sameInode
       ? undefined
@@ -2235,7 +2252,7 @@ export async function relocateSessionTranscript(): Promise<void> {
     try {
       await renamePathWithCrossDeviceFallback(currentFile, targetFile)
     } catch (e) {
-      if (isFsInaccessible(e)) {
+      if (isENOENT(e)) {
         if (setAside !== undefined) {
           await fsRename(setAside, targetFile).catch(restoreErr => {
             logForDebugging(
@@ -2267,7 +2284,7 @@ export async function relocateSessionTranscript(): Promise<void> {
       await renamePathWithCrossDeviceFallback(oldSide, newSide)
     } catch (e) {
       sideMoved = false
-      if (!isFsInaccessible(e)) {
+      if (!isENOENT(e)) {
         logError(e)
       }
     }
@@ -3297,6 +3314,7 @@ export async function loadTranscriptFromFile(
       messages,
       summaries,
       customTitles,
+      aiTitles,
       tags,
       fileHistorySnapshots,
       attributionSnapshots,
@@ -3351,6 +3369,7 @@ export async function loadTranscriptFromFile(
         undefined,
         contentReplacements.get(sessionId) ?? [],
       ),
+      aiTitle: aiTitles.get(sessionId),
       contextCollapseCommits: contextCollapseCommits.filter(
         e => e.sessionId === sessionId,
       ),
@@ -4938,6 +4957,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       messages,
       summaries,
       customTitles,
+      aiTitles,
       tags,
       agentNames,
       agentColors,
@@ -5025,6 +5045,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         ? summaries.get(mostRecentLeaf.uuid)
         : log.summary,
       customTitle: sessionId ? customTitles.get(sessionId) : log.customTitle,
+      aiTitle: sessionId ? aiTitles.get(sessionId) : log.aiTitle,
       tag: sessionId ? tags.get(sessionId) : log.tag,
       agentName: sessionId ? agentNames.get(sessionId) : log.agentName,
       agentColor: sessionId ? agentColors.get(sessionId) : log.agentColor,
@@ -5158,6 +5179,8 @@ export async function searchSessionsByCustomTitle(
 const METADATA_TYPE_MARKERS = [
   '"type":"summary"',
   '"type":"custom-title"',
+  // Session-scoped AI tab title — must survive compact-boundary skip on large transcripts
+  '"type":"ai-title"',
   // densable 2.1.214 EndConversation marker — session-scoped like custom-title
   '"type":"ended-by-model"',
   '"type":"tag"',
@@ -5602,6 +5625,8 @@ export async function loadTranscriptFile(
   messages: Map<UUID, TranscriptMessage>
   summaries: Map<UUID, string>
   customTitles: Map<UUID, string>
+  /** AI-generated tab titles (`ai-title` entries). Distinct from customTitles. */
+  aiTitles: Map<UUID, string>
   tags: Map<UUID, string>
   agentNames: Map<UUID, string>
   agentColors: Map<UUID, string>
@@ -5642,6 +5667,7 @@ export async function loadTranscriptFile(
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
   const customTitles = new Map<UUID, string>()
+  const aiTitles = new Map<UUID, string>()
   const tags = new Map<UUID, string>()
   const agentNames = new Map<UUID, string>()
   const agentColors = new Map<UUID, string>()
@@ -5752,6 +5778,8 @@ export async function loadTranscriptFile(
           summaries.set(entry.leafUuid, entry.summary)
         } else if (entry.type === 'custom-title' && entry.sessionId) {
           customTitles.set(entry.sessionId, entry.customTitle)
+        } else if (entry.type === 'ai-title' && entry.sessionId) {
+          aiTitles.set(entry.sessionId, entry.aiTitle)
         } else if (entry.type === 'ended-by-model' && entry.sessionId) {
           // densable: eKn() always false → always record marker
           endedByModelSessions.add(entry.sessionId)
@@ -5846,6 +5874,8 @@ export async function loadTranscriptFile(
         summaries.set(entry.leafUuid, entry.summary)
       } else if (entry.type === 'custom-title' && entry.sessionId) {
         customTitles.set(entry.sessionId, entry.customTitle)
+      } else if (entry.type === 'ai-title' && entry.sessionId) {
+        aiTitles.set(entry.sessionId, entry.aiTitle)
       } else if (entry.type === 'ended-by-model' && entry.sessionId) {
         // densable: if (X.type==="ended-by-model"&&X.sessionId&&!eKn()) i.add
         endedByModelSessions.add(entry.sessionId)
@@ -6007,6 +6037,7 @@ export async function loadTranscriptFile(
     messages,
     summaries,
     customTitles,
+    aiTitles,
     tags,
     agentNames,
     agentColors,
@@ -6121,6 +6152,7 @@ export async function getLastSessionLog(
     messages,
     summaries,
     customTitles,
+    aiTitles,
     tags,
     agentSettings,
     worktreeStates,
@@ -6175,6 +6207,7 @@ export async function getLastSessionLog(
       agentSetting,
       contentReplacements.get(sessionId) ?? [],
     ),
+    aiTitle: aiTitles.get(sessionId),
     worktreeSession: worktreeStates.get(sessionId),
     goal: goals.get(sessionId),
     contextCollapseCommits: contextCollapseCommits.filter(
@@ -6907,6 +6940,8 @@ type LiteMetadata = {
   relocatedCwd?: string
   teamName?: string
   customTitle?: string
+  /** Distinct from customTitle so loadFullLog can restore the tab title. */
+  aiTitle?: string
   summary?: string
   tag?: string
   agentSetting?: string
@@ -6928,6 +6963,7 @@ export async function loadAllLogsFromSessionFile(
     messages,
     summaries,
     customTitles,
+    aiTitles,
     tags,
     agentNames,
     agentColors,
@@ -7004,6 +7040,7 @@ export async function loadAllLogsFromSessionFile(
       leafUuid: leafMessage.uuid,
       summary: summaries.get(leafMessage.uuid),
       customTitle: customTitles.get(sessionId),
+      aiTitle: aiTitles.get(sessionId),
       tag: tags.get(sessionId),
       agentName: agentNames.get(sessionId),
       agentColor: agentColors.get(sessionId),
@@ -7125,12 +7162,12 @@ async function readLiteMetadata(
     ''
 
   // Extract tail metadata via string search (last occurrence wins).
-  // User titles (customTitle field, from custom-title entries) win over
-  // AI titles (aiTitle field, from ai-title entries). The distinct field
-  // names mean extractLastJsonStringField naturally disambiguates.
+  // Keep customTitle and aiTitle distinct so resume can hydrate the tab
+  // title without treating an AI title as a user /rename.
   const customTitle =
     extractLastJsonStringField(tail, 'customTitle') ??
-    extractLastJsonStringField(head, 'customTitle') ??
+    extractLastJsonStringField(head, 'customTitle')
+  const aiTitle =
     extractLastJsonStringField(tail, 'aiTitle') ??
     extractLastJsonStringField(head, 'aiTitle')
   const summary = extractLastJsonStringField(tail, 'summary')
@@ -7166,6 +7203,7 @@ async function readLiteMetadata(
     relocatedCwd,
     teamName,
     customTitle,
+    aiTitle,
     summary,
     tag,
     agentSetting,
@@ -7429,6 +7467,7 @@ async function enrichLog(
     isSidechain: meta.isSidechain,
     teamName: meta.teamName,
     customTitle: meta.customTitle,
+    aiTitle: meta.aiTitle,
     summary: meta.summary,
     tag: meta.tag,
     agentSetting: meta.agentSetting,
@@ -7448,7 +7487,7 @@ async function enrichLog(
   // prompt (e.g., large first messages that exceed the 16KB read buffer).
   // Previously these sessions were silently dropped, making them inaccessible
   // via /resume after crashes or large-context sessions.
-  if (!enriched.firstPrompt && !enriched.customTitle) {
+  if (!enriched.firstPrompt && !enriched.customTitle && !enriched.aiTitle) {
     enriched.firstPrompt = '(session)'
   }
   // Filter: skip sidechains and agent sessions
