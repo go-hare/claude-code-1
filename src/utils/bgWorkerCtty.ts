@@ -2,34 +2,14 @@
  * densable z() / L() — background daemon workers whose stdio is a pty but
  * not the controlling terminal. Editors that open /dev/tty (Emacs) need
  * login_tty(0) once at startup.
+ *
+ * Outcome switch callees rNt / _ / g / J live in
+ * `src/cli/bg/bgWorkerCttyOutcome.ts` (gold-251-k #33).
  */
 import { constants } from 'fs'
 import { open } from 'fs/promises'
-import {
-  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-  logEvent,
-} from '../services/analytics/index.js'
 import { logForDebugging } from './debug.js'
-import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getPlatform } from './platform.js'
-
-const BG_WORKER_CTTY_FEATURE =
-  'bg_worker_ctty' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-
-let ownsControllingTerminal = false
-
-/** densable rNt — host bag is not in this leftover's edit list. */
-export function markOwnsControllingTerminal(): void {
-  ownsControllingTerminal = true
-}
-
-export function doesOwnControllingTerminal(): boolean {
-  return ownsControllingTerminal
-}
-
-export function resetOwnsControllingTerminalForTests(): void {
-  ownsControllingTerminal = false
-}
 
 export type BgWorkerCttyOutcome =
   | 'acquired'
@@ -107,33 +87,4 @@ export async function ensureBgWorkerControllingTty(
 ): Promise<BgWorkerCttyOutcome> {
   if (cttyEnabled) return acquireBgWorkerControllingTty()
   return (await devTtyAlreadyOpen()) ? 'already' : 'switched_off'
-}
-
-/**
- * densable uo switch after z()/L(): J(info) then rNt/_/g by outcome.
- * J is the existing diagnostics sink — not a new analytics channel.
- */
-export function applyBgWorkerCttyOutcome(outcome: BgWorkerCttyOutcome): void {
-  logForDiagnosticsNoPII('info', 'bg_worker_ctty', { outcome })
-  switch (outcome) {
-    case 'acquired':
-      markOwnsControllingTerminal()
-      logEvent('tengu_feature_ok', { feature_name: BG_WORKER_CTTY_FEATURE })
-      break
-    case 'already':
-      markOwnsControllingTerminal()
-      break
-    case 'failed':
-    case 'ffi_unavailable':
-    case 'not_a_tty':
-      logEvent('tengu_feature_sad', {
-        feature_name: BG_WORKER_CTTY_FEATURE,
-        error_code:
-          outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      break
-    case 'unsupported':
-    case 'switched_off':
-      break
-  }
 }

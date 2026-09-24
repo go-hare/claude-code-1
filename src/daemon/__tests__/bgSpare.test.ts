@@ -155,6 +155,18 @@ describe('buildSpareHostEnv (official _mO)', () => {
     }
   })
 
+  test('pins CLAUDE_BG_BACKEND=daemon after parent env (251 #33 uo gate)', () => {
+    const prev = process.env.CLAUDE_BG_BACKEND
+    process.env.CLAUDE_BG_BACKEND = 'tmux'
+    try {
+      const env = buildSpareHostEnv()
+      expect(env.CLAUDE_BG_BACKEND).toBe('daemon')
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_BG_BACKEND
+      else process.env.CLAUDE_BG_BACKEND = prev
+    }
+  })
+
   test('embeds claim nonce when provided', () => {
     const env = buildSpareHostEnv({ claimNonce: 'deadbeef' })
     expect(env[SPARE_CLAIM_NONCE_ENV]).toBe('deadbeef')

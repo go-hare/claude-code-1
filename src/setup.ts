@@ -85,13 +85,17 @@ export async function setup(
     process.exit(1)
   }
 
-  // densable uo — daemon bg workers await z() so /dev/tty editors work.
+  // densable uo — daemon bg workers await z()/L(); rNt/_/g/J on outcome.
   if (process.env.CLAUDE_BG_BACKEND === 'daemon') {
     const { getFeatureValue_CACHED_MAY_BE_STALE } = await import(
       './services/analytics/growthbook.js'
     )
-    const { applyBgWorkerCttyOutcome, ensureBgWorkerControllingTty } =
-      await import('./utils/bgWorkerCtty.js')
+    const { ensureBgWorkerControllingTty } = await import(
+      './utils/bgWorkerCtty.js'
+    )
+    const { applyBgWorkerCttyOutcome } = await import(
+      './cli/bg/bgWorkerCttyOutcome.js'
+    )
     const cttyEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
       'tengu_bg_worker_ctty',
       true,

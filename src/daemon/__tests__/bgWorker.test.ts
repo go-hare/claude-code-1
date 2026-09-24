@@ -86,6 +86,32 @@ describe('buildPtyHostSpawnArgs', () => {
   })
 })
 
+describe('buildWorkerEnv bg_worker_ctty gate (251 #33)', () => {
+  test('pins CLAUDE_BG_BACKEND=daemon so setup uo awaits z()/L()', () => {
+    const env = buildWorkerEnv(
+      makeDispatch('prompt'),
+      '/tmp/job-dir',
+      undefined,
+      '/tmp/rv.sock',
+    )
+    expect(env.CLAUDE_BG_BACKEND).toBe('daemon')
+    expect(env.CLAUDE_CODE_SESSION_KIND).toBe('bg')
+  })
+
+  test('dispatch.env cannot override CLAUDE_BG_BACKEND off daemon', () => {
+    const env = buildWorkerEnv(
+      {
+        ...makeDispatch('prompt'),
+        env: { CLAUDE_BG_BACKEND: 'tmux' },
+      },
+      '/tmp/job-dir',
+      undefined,
+      '/tmp/rv.sock',
+    )
+    expect(env.CLAUDE_BG_BACKEND).toBe('daemon')
+  })
+})
+
 describe('buildWorkerEnv exec EXTRA_BODY (2.1.206)', () => {
   const prevBody = process.env.CLAUDE_CODE_EXTRA_BODY
   const prevMeta = process.env.CLAUDE_CODE_EXTRA_METADATA

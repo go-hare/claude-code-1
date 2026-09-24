@@ -3,11 +3,8 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
   acquireBgWorkerControllingTty,
-  applyBgWorkerCttyOutcome,
   devTtyAlreadyOpen,
-  doesOwnControllingTerminal,
   ensureBgWorkerControllingTty,
-  resetOwnsControllingTerminalForTests,
 } from '../bgWorkerCtty.js'
 import { getPlatform } from '../platform.js'
 
@@ -32,10 +29,11 @@ describe('bg worker controlling tty (251 #33)', () => {
     expect(outcome === 'already' || outcome === 'switched_off').toBe(true)
   })
 
-  test('daemon startup awaits z() when tengu_bg_worker_ctty is on', () => {
+  test('daemon startup awaits z() then gold applyBgWorkerCttyOutcome', () => {
     const setup = readFileSync(join(import.meta.dir, '../../setup.ts'), 'utf8')
     expect(setup).toContain("process.env.CLAUDE_BG_BACKEND === 'daemon'")
     expect(setup).toContain("'tengu_bg_worker_ctty'")
+    expect(setup).toContain("'./cli/bg/bgWorkerCttyOutcome.js'")
     expect(setup).toContain(
       'applyBgWorkerCttyOutcome(await ensureBgWorkerControllingTty(cttyEnabled))',
     )
@@ -49,22 +47,7 @@ describe('bg worker controlling tty (251 #33)', () => {
     expect(src).toContain('login_tty')
     expect(src).toContain("['libc.so.6', 'libutil.so.1', 'libc.so']")
     expect(src).toContain("['/usr/lib/libSystem.B.dylib', 'libSystem.B.dylib']")
-  })
-
-  test('acquired and already mark the controlling tty; sad outcomes do not', () => {
-    resetOwnsControllingTerminalForTests()
-    applyBgWorkerCttyOutcome('unsupported')
-    expect(doesOwnControllingTerminal()).toBe(false)
-    applyBgWorkerCttyOutcome('already')
-    expect(doesOwnControllingTerminal()).toBe(true)
-    resetOwnsControllingTerminalForTests()
-    applyBgWorkerCttyOutcome('acquired')
-    expect(doesOwnControllingTerminal()).toBe(true)
-    resetOwnsControllingTerminalForTests()
-    applyBgWorkerCttyOutcome('failed')
-    applyBgWorkerCttyOutcome('ffi_unavailable')
-    applyBgWorkerCttyOutcome('not_a_tty')
-    applyBgWorkerCttyOutcome('switched_off')
-    expect(doesOwnControllingTerminal()).toBe(false)
+    expect(src).not.toContain('function applyBgWorkerCttyOutcome')
+    expect(src).not.toContain('markOwnsControllingTerminal')
   })
 })
