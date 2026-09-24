@@ -1854,6 +1854,20 @@ async function* queryModel(
   })
   const useBetas = betas.length > 0
 
+  // densable 2.1.251 D6e — Sr intended TTL + main-thread querySource for xhe
+  const intendedPromptCacheTtl = should1hCacheTTL(options.querySource, {
+    agentCacheTtlOverride: options.agentCacheTtlOverride,
+  })
+    ? ('1h' as const)
+    : ('5m' as const)
+  const sessionCostAttribution = {
+    activeMcpServer: options.activeMcpServer,
+    activeMcpTool: options.activeMcpTool,
+    querySource: options.querySource,
+    intendedPromptCacheTtl,
+    agentContext: options.agentContext ?? getAgentContext(),
+  }
+
   // Build minimal context for detailed tracing (when beta tracing is enabled)
   // Note: The actual new_context message extraction is done in sessionTracing.ts using
   // hash-based tracking per querySource (agent) from the messagesForAPI array
@@ -3418,10 +3432,7 @@ async function* queryModel(
                       costUSDForPart,
                       usage as unknown as BetaUsage,
                       options.model,
-                      {
-                        activeMcpServer: options.activeMcpServer,
-                        activeMcpTool: options.activeMcpTool,
-                      },
+                      sessionCostAttribution,
                     )
                   }
                 }
@@ -3687,10 +3698,7 @@ async function* queryModel(
                       costUSDForStop,
                       usage as unknown as BetaUsage,
                       options.model,
-                      {
-                        activeMcpServer: options.activeMcpServer,
-                        activeMcpTool: options.activeMcpTool,
-                      },
+                      sessionCostAttribution,
                     )
                   }
                 }
@@ -4017,10 +4025,7 @@ async function* queryModel(
                         costUSDForPart,
                         usage as unknown as BetaUsage,
                         options.model,
-                        {
-                          activeMcpServer: options.activeMcpServer,
-                          activeMcpTool: options.activeMcpTool,
-                        },
+                        sessionCostAttribution,
                       )
                     }
                   }
@@ -4825,10 +4830,7 @@ async function* queryModel(
             fallbackCost,
             fallbackUsage as unknown as BetaUsage,
             options.model,
-            {
-              activeMcpServer: options.activeMcpServer,
-              activeMcpTool: options.activeMcpTool,
-            },
+            sessionCostAttribution,
           )
         }
       }

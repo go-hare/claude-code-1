@@ -26,10 +26,16 @@ import {
   clearGcpCredentialsCache,
   getClaudeAIOAuthTokens,
   handleOAuth401Error,
+  hasAnthropicApiKeyAuth,
   invalidateDefaultAwsProviderChainDebounced,
+  isAnthropicAuthEnabled,
   isClaudeAISubscriber,
   isEnterpriseSubscriber,
 } from '../../utils/auth.js'
+import {
+  isProfileAuthActive,
+  isUsableStoredClaudeAiLogin,
+} from '../../utils/anthropicProfile.js'
 import {
   getOAuthAccountOnHold,
   getProfileAccountOnHold,
@@ -432,17 +438,13 @@ export async function* withRetry<T>(
           // densable lt / invalidateWIFToken when profile WIF drives the request
           let handledProfileWif = false
           try {
-            const {
-              getLastIssuedWifAccessToken,
-              isProfileAuthActive,
-              invalidateWifToken,
-            } =
+            const { getLastIssuedWifAccessToken, invalidateWifToken } =
               // eslint-disable-next-line @typescript-eslint/no-require-imports
               require('../../utils/anthropicProfile.js') as typeof import('../../utils/anthropicProfile.js')
             if (
               isProfileAuthActive({
-                storedClaudeAiLogin: Boolean(
-                  getClaudeAIOAuthTokens()?.accessToken,
+                storedClaudeAiLogin: isUsableStoredClaudeAiLogin(
+                  getClaudeAIOAuthTokens(),
                 ),
               })
             ) {
@@ -1213,6 +1215,33 @@ export function shouldRetry(error: APIError): boolean {
     return true
   }
 
+  // densable odn: wl()+Xt / !$V()+Wd / AL before x-should-retry.
+  // Local wl lacks if(Wd())return!1 — compose !profileActive.
+  const oauthTokens = getClaudeAIOAuthTokens()
+  const revoked = isOAuthTokenRevokedError(error)
+  const profileActive = isProfileAuthActive({
+    storedClaudeAiLogin: isUsableStoredClaudeAiLogin(oauthTokens),
+  })
+  if (
+    isAnthropicAuthEnabled() &&
+    !profileActive &&
+    oauthTokens?.accessToken &&
+    (error.status === 401 || revoked)
+  ) {
+    return true
+  }
+  // $V = Gg().key; local probe is hasAnthropicApiKeyAuth (skip helper / CI throw).
+  if (
+    !hasAnthropicApiKeyAuth() &&
+    profileActive &&
+    (error.status === 401 || revoked)
+  ) {
+    return true
+  }
+  if (isHostAuthTokenRefreshAvailable() && error.status === 401) {
+    return true
+  }
+
   // Note this is not a standard header.
   const shouldRetryHeader = error.headers?.get('x-should-retry')
 
@@ -1261,15 +1290,15 @@ export function shouldRetry(error: APIError): boolean {
     return !isClaudeAISubscriber() || isEnterpriseSubscriber()
   }
 
+  // densable odn late: if(e.status===401)return lAe(),!0
   // Clear API key cache on 401 and allow retry.
-  // OAuth token handling is done in the main retry loop via handleOAuth401Error.
-  // Official lfa: host-managed auth token refresh also retries on 401.
+  // OAuth/profile refresh is in the main retry loop via handleOAuth401Error / lt.
   if (error.status === 401) {
     clearApiKeyHelperCache()
     return true
   }
 
-  // Retry on 403 "token revoked" (same refresh logic as 401, see above)
+  // densable odn late: if(TX(e))return!0
   if (isOAuthTokenRevokedError(error)) {
     return true
   }

@@ -1702,6 +1702,18 @@ export function classifyAPIError(error: unknown): string {
     return 'effort_thinking_disabled'
   }
 
+  // densable 2.1.251 `pte` — 400 empty text content block wording.
+  if (
+    error instanceof APIError &&
+    error.status === 400 &&
+    (error.message.includes('text content blocks must be non-empty') ||
+      error.message.includes(
+        'text content blocks must contain non-whitespace text',
+      ))
+  ) {
+    return 'empty_text_block'
+  }
+
   // Invalid model errors (400)
   if (
     error instanceof APIError &&

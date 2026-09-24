@@ -614,6 +614,43 @@ export function isPolicyAllowed(policy: string): boolean {
 }
 
 /**
+ * densable `QD(e)`: `Ot(e) ? null : cw()===null ? "cache_miss" : "org_denied"`.
+ *
+ * `allow_remote_control` / `allow_remote_sessions` are in gold `S` — eligible
+ * + empty cache is Ot=false, not fail-open. Other keys stay fail-open.
+ */
+const GOLD_S_FAIL_CLOSED_ON_ELIGIBLE_MISS = new Set([
+  'allow_remote_control',
+  'allow_remote_sessions',
+])
+
+export type PolicyDenyKind = 'cache_miss' | 'org_denied'
+
+export function getPolicyDenyKind(policy: string): PolicyDenyKind | null {
+  const restrictions = getRestrictionsFromCache()
+  if (!restrictions) {
+    if (
+      isPolicyLimitsEligible() &&
+      GOLD_S_FAIL_CLOSED_ON_ELIGIBLE_MISS.has(policy)
+    ) {
+      return 'cache_miss'
+    }
+    return null
+  }
+  if (isPolicyAllowed(policy)) return null
+  return 'org_denied'
+}
+
+/**
+ * densable `Ot` for gold `S` keys (`allow_remote_control` /
+ * `allow_remote_sessions`): QD null → allowed. Eligible + empty cache is
+ * cache_miss (denied), not isPolicyAllowed fail-open.
+ */
+export function isRemotePolicyAllowed(policy: string): boolean {
+  return getPolicyDenyKind(policy) === null
+}
+
+/**
  * Get restrictions synchronously from session cache or file
  */
 function getRestrictionsFromCache():

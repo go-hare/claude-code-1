@@ -60,7 +60,7 @@ import {
 import { prefetchPassesEligibility } from './services/api/referral.js';
 import type { McpSdkServerConfig, McpServerConfig, ScopedMcpServerConfig } from './services/mcp/types.js';
 import {
-  isPolicyAllowed,
+  isRemotePolicyAllowed,
   loadPolicyLimits,
   refreshPolicyLimits,
   waitForPolicyLimitsToLoad,
@@ -4742,7 +4742,7 @@ async function run(): Promise<CommanderCommand> {
         // Remote Control (--rc) is a separate feature gated in initReplBridge.ts.
         if (remote !== null || teleport) {
           await waitForPolicyLimitsToLoad();
-          if (!isPolicyAllowed('allow_remote_sessions')) {
+          if (!isRemotePolicyAllowed('allow_remote_sessions')) {
             return await exitWithError(root, "Error: Remote sessions are disabled by your organization's policy.", () =>
               gracefulShutdown(1),
             );
