@@ -3,11 +3,11 @@ import {
   STREAM_FLAG_DISPLAYED,
   STREAM_FLAG_HIDE_TRAILING,
   STREAM_FLAG_RAW,
-  STREAM_FLAG_SALVAGE,
   STREAMING_TEXT_MAX_CHARS,
   SALVAGE_SOFT_JOIN_WINDOW,
   appendStreamingTextDelta,
   createStreamingDisplayStore,
+  streamingPreviewRaw,
   createStreamingTextFlushBuffer,
   mergeSalvagePrefix,
   resolveStreamingDisplay,
@@ -28,23 +28,68 @@ describe('appendStreamingTextDelta densable MLp', () => {
   })
 })
 
-describe('resolveStreamingDisplay densable Qci', () => {
-  test('raw path: displayed=raw, hideTrailingLine when no transformed', () => {
+describe('streamingPreviewRaw 2.1.282 flush', () => {
+  test('an open first line is not sent', () => {
+    expect(streamingPreviewRaw('partial')).toBe(null)
+    expect(streamingPreviewRaw('')).toBe(null)
+  })
+
+  test('sends through the last newline and drops the open tail', () => {
+    expect(streamingPreviewRaw('hello\npartial')).toBe('hello\n')
+    expect(streamingPreviewRaw('hello\nworld\n')).toBe('hello\nworld\n')
+  })
+
+  test('a whitespace-only closed line is not sent', () => {
+    expect(streamingPreviewRaw('\n')).toBe(null)
+    expect(streamingPreviewRaw('   \npartial')).toBe(null)
+  })
+})
+
+describe('resolveStreamingDisplay', () => {
+  test('raw path keeps what the flush already wrote', () => {
     const r = resolveStreamingDisplay({
-      raw: 'hello\npartial',
+      raw: 'hello\n',
       transformed: null,
+      rewrite: null,
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe('hello\npartial')
+    expect(r.displayed).toBe('hello\n')
     expect(r.hideTrailingLine).toBe(true)
     expect(r.displayedHasNewline).toBe(true)
   })
 
-  test('transformed wins; hideTrailingLine false', () => {
+  test('an open line written directly is displayed; the flush is what drops it', () => {
+    expect(streamingPreviewRaw('partial line with no newline')).toBe(null)
     const r = resolveStreamingDisplay({
-      raw: 'raw',
+      raw: 'partial line with no newline',
+      transformed: null,
+      rewrite: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe('partial line with no newline')
+    expect(r.hideTrailingLine).toBe(true)
+    expect(r.displayedHasNewline).toBe(false)
+  })
+
+  test('live rewrite replaces the covered prefix and keeps the raw tail', () => {
+    const r = resolveStreamingDisplay({
+      raw: 'hello world more',
+      transformed: null,
+      rewrite: { original: 'hello world', text: 'HELLO' },
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe('HELLO more')
+    expect(r.hideTrailingLine).toBe(true)
+  })
+
+  test('transformed still wins over a live rewrite', () => {
+    const r = resolveStreamingDisplay({
+      raw: 'hello world',
       transformed: 'xform',
+      rewrite: { original: 'hello', text: 'HELLO' },
       salvage: null,
       exact: false,
     })
@@ -52,78 +97,45 @@ describe('resolveStreamingDisplay densable Qci', () => {
     expect(r.hideTrailingLine).toBe(false)
   })
 
-  test('whitespace-only displayed collapses to null (no lone ● / DISPLAYED)', () => {
-    const r = resolveStreamingDisplay({
+  test('whitespace and the no-content sentinel stay displayed', () => {
+    // 2.1.282 only treats a falsy string as empty.
+    const whitespace = resolveStreamingDisplay({
       raw: '   \n  ',
       transformed: null,
+      rewrite: null,
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe(null)
-    const store = createStreamingDisplayStore()
-    store.setRaw('  \n')
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
-    // raw still present for hideTrailing bookkeeping
-    expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
-  })
-
-  test('strip-only prompt XML collapses to null (no DISPLAYED / Cooking hide)', () => {
-    // Without store-level isEmptyMessageText, raw strip-only XML is truthy →
-    // STREAM_FLAG_DISPLAYED hides Cooking while StreamingTextPreview returns
-    // null → lone ● or empty ● window.
-    const xmlOnly =
-      '<context>hidden prompt wrapper</context>\n' +
-      '<commit_analysis>x</commit_analysis>\n'
-    const r = resolveStreamingDisplay({
-      raw: xmlOnly,
-      transformed: null,
-      salvage: null,
-      exact: false,
-    })
-    expect(r.displayed).toBe(null)
-    const store = createStreamingDisplayStore()
-    store.setRaw(xmlOnly)
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
-    expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
-  })
-
-  test('official (no content) sentinel collapses to null', () => {
-    const r = resolveStreamingDisplay({
+    expect(whitespace.displayed).toBe('   \n  ')
+    const sentinel = resolveStreamingDisplay({
       raw: '(no content)',
       transformed: null,
+      rewrite: null,
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe(null)
-    const store = createStreamingDisplayStore()
-    store.setRaw('(no content)')
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+    expect(sentinel.displayed).toBe('(no content)')
+    const empty = resolveStreamingDisplay({
+      raw: '',
+      transformed: null,
+      rewrite: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(empty.displayed).toBe(null)
   })
 
-  test('tags + (no content) after strip collapses to null', () => {
-    const raw = '<context>h</context>\n(no content)'
+  test('real content after strip stays once a line is closed', () => {
     const r = resolveStreamingDisplay({
-      raw,
+      raw: '<context>meta</context>\nvisible body\nmore',
       transformed: null,
+      rewrite: null,
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe(null)
+    expect(r.displayed).toBe('<context>meta</context>\nvisible body\nmore')
     const store = createStreamingDisplayStore()
-    store.setRaw(raw)
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
-  })
-
-  test('real content after strip stays displayed', () => {
-    const r = resolveStreamingDisplay({
-      raw: '<context>meta</context>\nvisible body',
-      transformed: null,
-      salvage: null,
-      exact: false,
-    })
-    expect(r.displayed).toBe('<context>meta</context>\nvisible body')
-    const store = createStreamingDisplayStore()
-    store.setRaw('<context>meta</context>\nvisible body')
+    store.setRaw('<context>meta</context>\nvisible body\nmore')
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
   })
 })
@@ -142,6 +154,16 @@ describe('StreamingTextFlushBuffer densable UNf', () => {
     buf.clear()
     expect(buf.peek()).toBe(null)
     expect(flushed.at(-1)).toBe(null)
+  })
+
+  test('message_start style clear drops a pending open line', () => {
+    const buf = createStreamingTextFlushBuffer({
+      scheduleTimeout: () => () => {},
+      onFlush: () => {},
+    })
+    buf.apply(() => 'partial')
+    buf.apply(current => (current !== null ? null : current))
+    expect(buf.peek()).toBe(null)
   })
 
   test('apply schedules flush of pending', () => {
@@ -180,24 +202,25 @@ describe('createStreamingDisplayStore densable WNf', () => {
     store.setRaw('hi')
     expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
-    expect(ticks).toBe(1)
+    store.setRaw('hi\n')
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
+    expect(ticks).toBe(2)
     store.setRaw(null)
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
   })
 
-  test('B2a STREAM_FLAG_HIDE_TRAILING when raw single-line (no transformed)', () => {
-    // densable getFlags: (n!==null && hideTrailing && !hasNewline) ? B2a : 0
+  test('a closed line is displayed whole; the open tail is not sliced again', () => {
     const store = createStreamingDisplayStore()
-    store.setRaw('partial line')
-    expect(store.getFlags() & STREAM_FLAG_HIDE_TRAILING).toBe(
-      STREAM_FLAG_HIDE_TRAILING,
-    )
     store.setRaw('line with\nnewline')
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
     expect(store.getFlags() & STREAM_FLAG_HIDE_TRAILING).toBe(0)
+    expect(resolveStreamingDisplay(store.getState()).displayed).toBe(
+      'line with\nnewline',
+    )
     store.setRaw('still single')
     store.setTransformed('xform')
-    // transformed → hideTrailing false → no B2a
     expect(store.getFlags() & STREAM_FLAG_HIDE_TRAILING).toBe(0)
+    expect(resolveStreamingDisplay(store.getState()).displayed).toBe('xform')
   })
 
   test('densable: salvage survives setRaw(null) / pH.clear (not desync bug)', () => {
@@ -206,13 +229,12 @@ describe('createStreamingDisplayStore densable WNf', () => {
     const store = createStreamingDisplayStore()
     store.setRaw('partial')
     store.setSalvage('kept salvage text', true)
-    expect(store.getFlags() & STREAM_FLAG_SALVAGE).toBe(STREAM_FLAG_SALVAGE)
+    expect(store.getState().salvage).toBe('kept salvage text')
 
     store.setRaw(null)
     store.setTransformed(null)
 
     expect(store.getState().salvage).toBe('kept salvage text')
-    expect(store.getFlags() & STREAM_FLAG_SALVAGE).toBe(STREAM_FLAG_SALVAGE)
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
 
     const resolved = resolveStreamingDisplay(store.getState())
@@ -239,7 +261,6 @@ describe('createStreamingDisplayStore densable WNf', () => {
     expect(bufFlushed.at(-1)).toBe(null)
     expect(store.getState().raw).toBe(null)
     expect(store.getState().salvage).toBe('prefix')
-    expect(store.getFlags() & STREAM_FLAG_SALVAGE).toBe(STREAM_FLAG_SALVAGE)
   })
 })
 

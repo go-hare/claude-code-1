@@ -51,7 +51,7 @@ import {
 import { useNotifications } from '../context/notifications.js';
 import { sendNotification } from '../services/notifier.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
-import { useTerminalNotification, hasCursorUpViewportYankBug } from '@anthropic/ink';
+import { useTerminalNotification } from '@anthropic/ink';
 import {
   createFileStateCacheWithSizeLimit,
   mergeFileStateCaches,
@@ -226,7 +226,6 @@ import { isHumanTurn } from '../utils/messagePredicates.js';
 import {
   STREAM_FLAG_DISPLAYED,
   STREAM_FLAG_HIDE_TRAILING,
-  STREAM_FLAG_SALVAGE,
   createStreamingDisplayStore,
   createStreamingTextFlushBuffer,
   mergeSalvagePrefix,
@@ -2593,18 +2592,9 @@ export function REPL({
   // must be called before the first API call so the model sees hook context.
   const awaitPendingHooks = useDeferredHookMessages(pendingHookMessages, setMessages);
 
-  // Deferred messages for the Messages component — renders at transition
-  // priority so the reconciler yields every 5ms, keeping input responsive
-  // while the expensive message processing pipeline runs.
-  // Cap at 500 messages to limit memory double-buffering. The bypass
-  // at display-time uses sync messages during streaming and non-loading,
-  // so this cap only affects reduced-motion scenarios.
-  const DEFERRED_CAP = 500;
-  const cappedMessages = React.useMemo(
-    () => (messages.length > DEFERRED_CAP ? messages.slice(-DEFERRED_CAP) : messages),
-    [messages],
-  );
-  const deferredMessages = useDeferredValue(cappedMessages);
+  // Official 2.1.150 rEH: useDeferredValue(messages), the full list.
+  // No 500-message slice — while loading, older turns stay in the deferred tree.
+  const deferredMessages = useDeferredValue(messages);
   const deferredBehind = messages.length - deferredMessages.length;
   if (deferredBehind > 0) {
     logForDebugging(
@@ -2764,12 +2754,10 @@ export function REPL({
     }
   }, []);
 
-  // densable 2.1.222 streaming path: UNf flush buffer (pH) → WNf display store
-  // (ck) → XEl StreamingTextPreview. Atomic clear on assistant land
-  // (messages.ts: onStreamingText(()=>null) then onMessage) prevents dual-●.
-  // l5 = !prefersReducedMotion && !hasCursorUpViewportYankBug (densable UZu).
+  // Flush buffer → display store → preview. Atomic clear on land avoids dual-●.
+  // 2.1.282: preview off only for reduced motion and Windows Terminal.
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
-  const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
+  const showStreamingText = !reducedMotion && !process.env.WT_SESSION;
   const showStreamingTextRef = useRef(showStreamingText);
   showStreamingTextRef.current = showStreamingText;
   // densable ck / WNf
@@ -2783,6 +2771,9 @@ export function REPL({
           return () => clearTimeout(id);
         },
         onFlush: raw => {
+          // 2.1.282 raw path (no MessageDisplay hook): the whole buffer.
+          // hideTrailingLine drops the open tail. A short first line mounts
+          // the bullet before the text; that is the official raw path.
           streamingDisplayStore.setRaw(raw);
         },
       }),
@@ -2812,16 +2803,13 @@ export function REPL({
     () => <StreamingTextPreview store={streamingDisplayStore} />,
     [streamingDisplayStore],
   );
-  // densable cX / stream clear: pH.clear only → setRaw(null).
-  // Intentionally does NOT setSalvage(null): refusal_continuation keeps
-  // salvage painted across message_start/content_block_start clears (Qci
-  // salvage-only displayed). Salvage is dropped only by densable sites:
-  // land (setSalvage null + Jpe), esc, refusal end, and !Ln && j2a effect.
-  // Local hardening vs densable cX: also setTransformed(null) to kill dual-●
-  // residuals when turn ends without a transform finalize race.
+  // densable beginTurn: clear the buffer, then drop transformed and rewrite.
+  // Salvage is not a flag bit. It is cleared on land, esc, refusal end,
+  // reset, and when loading ends while salvage is still set.
   const clearStreamingText = useCallback(() => {
     streamingFlushBuffer.clear();
     streamingDisplayStore.setTransformed(null);
+    streamingDisplayStore.setRewrite(null);
   }, [streamingFlushBuffer, streamingDisplayStore]);
 
   // densable mG / wth — MessageDisplay transform controller
@@ -2840,9 +2828,13 @@ export function REPL({
       createMessageDisplayTransform({
         getAppState: () => store.getState(),
         onStreamingDisplay: content => {
-          // densable: if (!z8.current) return — skip paint when reduced motion / yank bug
+          // densable: if (!z8.current) return — skip paint when reduced motion / WT_SESSION
           if (!showStreamingTextForTransformRef.current) return;
           streamingDisplayStore.setTransformed(content);
+        },
+        onStreamingRewrite: rewrite => {
+          if (!showStreamingTextForTransformRef.current) return;
+          streamingDisplayStore.setRewrite(rewrite);
         },
         onMessageDisplay: (apiMessageId, content) => {
           const salvage = salvageRef.current;
@@ -2869,9 +2861,9 @@ export function REPL({
       }),
     [store, setAppState, streamingDisplayStore],
   );
-  // densable: if (!Ln && (p4 & j2a) !== 0) ck.setSalvage(null)
+  // densable: preview subscribe drops salvage once the turn is no longer loading.
   useEffect(() => {
-    if (!isLoading && (streamingFlags & STREAM_FLAG_SALVAGE) !== 0) {
+    if (!isLoading && streamingDisplayStore.getState().salvage !== null) {
       streamingDisplayStore.setSalvage(null);
     }
   }, [isLoading, streamingFlags, streamingDisplayStore]);
@@ -3179,10 +3171,10 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // densable zm: (!Jbe || (p4&B2a)!==0 || Je)
-    // Hide spinner when streaming preview is up, unless raw single-line
-    // stream (B2a = hideTrailing && !newline) — then spinner+● coexist.
-    // isBriefOnly (Je) suppresses preview paint so spinner stays.
+    // 2.1.282: (!hasDisplayed || tailBlank || brief). tailBlank is a raw
+    // single line with no newline: the bullet is up, wrap-stream hides the
+    // line, and the spinner stays. Hook output is transformed, so this flag
+    // is off and the spinner hides once that sliced text is showing.
     (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
 
   // Host / gold _Zt overlays waiting for user — suppress surveys
@@ -7490,29 +7482,22 @@ export function REPL({
   const viewedTeammateTask = viewedTask && isInProcessTeammateTask(viewedTask) ? viewedTask : undefined;
   const viewedAgentTask = viewedTeammateTask ?? (viewedTask && isLocalAgentTask(viewedTask) ? viewedTask : undefined);
 
-  // Bypass useDeferredValue when streaming text is showing so Messages renders
-  // the final message in the same frame streaming text clears. Also bypass when
-  // not loading — deferredMessages only matters during streaming (keeps input
-  // responsive); after the turn ends, showing messages immediately prevents a
-  // jitter gap where the spinner is gone but the answer hasn't appeared yet.
-  // Only reducedMotion / Windows yank-bug users keep the deferred path during
-  // loading — except while the submit placeholder bridge is active (densable
-  // PKe: keep sync until deferred catches the post-submit messages so the echo
-  // line does not blank for a frame when deferred lags).
+  // Official 2.1.150: deferMessages = !viewingAgent && !previewEnabled && isLoading.
+  // previewEnabled is the default (no reduced motion, not Windows Terminal),
+  // so a normal turn passes messages through unsliced. Defer only when preview
+  // is off and the turn is still loading. Placeholder bridge still forces sync
+  // until deferred catches the submit, so the echoed input does not blank.
   if (
     placeholderBridgePendingRef.current &&
     placeholderBaseline !== undefined &&
     messages.length > placeholderBaseline
   ) {
-    const deferredCaught =
-      messages.length > DEFERRED_CAP
-        ? deferredMessages === cappedMessages
-        : deferredMessages.length > placeholderBaseline;
+    const deferredCaught = deferredMessages.length > placeholderBaseline;
     if (deferredCaught) {
       placeholderBridgePendingRef.current = false;
     }
   }
-  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== cappedMessages;
+  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== messages;
   const usesSyncMessages = showStreamingText || !isLoading || placeholderBridgeActive;
   // When viewing an agent, never fall through to leader — empty until
   // bootstrap/stream fills. Closes the see-leader-type-agent footgun.

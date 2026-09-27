@@ -4,8 +4,9 @@
  *
  * Streaming path: begin(apiMessageId) → delta(text) → entryLanded/finalize.
  * Flushes complete lines on ~100ms cadence (Sth=1000/zrv, zrv=10), max Eth=3
- * in-flight hook batches. Writes transformed via onStreamingDisplay and final
- * salvage-merged content via onMessageDisplay.
+ * in-flight hook batches. Blocking hooks write transformed via
+ * onStreamingDisplay. Live hooks (non-blocking, not a classic plugin module)
+ * splice via onStreamingRewrite. Final text goes to onMessageDisplay.
  */
 import { randomUUID } from 'crypto'
 import type { AppState } from '../state/AppStateStore.js'
@@ -259,6 +260,10 @@ type TransformSession = {
   flushedOffset: number
   index: number
   output: string
+  /** densable: non-blocking hook splices into raw instead of replacing it. */
+  isLive: boolean
+  resolvedOffset: number
+  isRewritten: boolean
   appendChain: Promise<void>
   lastFlushAt: number
   flushTimer: ReturnType<typeof setTimeout> | null
@@ -269,6 +274,11 @@ type TransformSession = {
   done: boolean
   abandoned: boolean
   stats: SessionStats
+}
+
+export type StreamingTextRewrite = {
+  original: string
+  text: string
 }
 
 export type MessageDisplayTransform = {
@@ -285,16 +295,45 @@ export type MessageDisplayTransform = {
 export function createMessageDisplayTransform(opts: {
   getAppState: () => AppState
   onStreamingDisplay: (content: string | null) => void
+  onStreamingRewrite: (rewrite: StreamingTextRewrite | null) => void
   onMessageDisplay: (apiMessageId: string, content: string) => void
 }): MessageDisplayTransform {
-  const { getAppState, onStreamingDisplay, onMessageDisplay } = opts
+  const {
+    getAppState,
+    onStreamingDisplay,
+    onStreamingRewrite,
+    onMessageDisplay,
+  } = opts
   let turnId = randomUUID()
   let session: TransformSession | null = null
 
   function emit(s: TransformSession): void {
     if (s.abandoned) return
+    if (s.isLive) {
+      emitLive(s)
+      return
+    }
     if (s.done) onMessageDisplay(s.apiMessageId, s.output)
     else onStreamingDisplay(s.output)
+  }
+
+  function emitLive(s: TransformSession): void {
+    if (!s.isRewritten) return
+    if (!s.done) {
+      onStreamingRewrite({
+        original: s.raw.slice(0, s.resolvedOffset),
+        text: s.output,
+      })
+      return
+    }
+    onMessageDisplay(
+      s.apiMessageId,
+      s.output + stripCcMemoryTags(s.raw.slice(s.resolvedOffset)),
+    )
+    if (!s.finalized) {
+      onStreamingRewrite(null)
+      onStreamingDisplay('')
+    }
   }
 
   function abandon(s: TransformSession): void {
@@ -330,6 +369,7 @@ export function createMessageDisplayTransform(opts: {
     index: number,
     isFinal: boolean,
     delta: string,
+    resolvedEnd: number,
   ): void {
     s.inFlight++
     const started = Date.now()
@@ -383,7 +423,10 @@ export function createMessageDisplayTransform(opts: {
       return out
     })()
     s.appendChain = s.appendChain.then(async () => {
-      s.output += await work
+      const out = await work
+      s.output += out
+      s.resolvedOffset = resolvedEnd
+      if (out !== delta) s.isRewritten = true
       emit(s)
     })
   }
@@ -402,7 +445,7 @@ export function createMessageDisplayTransform(opts: {
     s.lastFlushAt = Date.now()
     const idx = s.index
     s.index++
-    runFlush(s, idx, isFinal, stripCcMemoryTags(chunk))
+    runFlush(s, idx, isFinal, stripCcMemoryTags(chunk), end)
   }
 
   function schedule(s: TransformSession): void {
@@ -428,6 +471,7 @@ export function createMessageDisplayTransform(opts: {
     },
     begin(apiMessageId: string) {
       if (session && !session.finalized) abandon(session)
+      onStreamingRewrite(null)
       if (!hasHookForEvent('MessageDisplay', getAppState(), getSessionId())) {
         session = null
         onStreamingDisplay(null)
@@ -441,6 +485,9 @@ export function createMessageDisplayTransform(opts: {
         flushedOffset: 0,
         index: 0,
         output: '',
+        isLive: false,
+        resolvedOffset: 0,
+        isRewritten: false,
         appendChain: Promise.resolve(),
         lastFlushAt: 0,
         flushTimer: null,
@@ -481,7 +528,9 @@ export function createMessageDisplayTransform(opts: {
       }
       s.done = true
       emit(s)
-      onStreamingDisplay('')
+      // Live already cleared inside emitLive when the hook rewrote text.
+      // Unchanged hook output still has to drop the preview here.
+      if (!s.isLive || !s.isRewritten) onStreamingDisplay('')
     },
     finalize() {
       const s = session
@@ -489,6 +538,7 @@ export function createMessageDisplayTransform(opts: {
       s.finalized = true
       session = null
       onStreamingDisplay(null)
+      onStreamingRewrite(null)
       if (s.raw === '' && s.index === 0) return
       s.done = true
       flush(s, true)

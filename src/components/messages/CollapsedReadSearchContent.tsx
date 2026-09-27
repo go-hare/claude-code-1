@@ -14,6 +14,7 @@ import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { interruptedCall, type buildMessageLookups } from '../../utils/messages.js';
 import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
 import type { ThemeName } from '../../utils/theme.js';
+import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
 import { useSelectedMessageBg } from '../messageActions.js';
@@ -603,13 +604,11 @@ export function CollapsedReadSearchContent({
           {formatSecondsShort(message.hookTotalMs)})
         </Text>
       )}
-      {/* densable ySu pendingText — streaming tail hung on last collapse group */}
-      {isActiveGroup && pendingText !== undefined && pendingText.trim().length > 0 && (
+      {/* Official 2.1.150: active && pendingText (truthy), bullet is a4 */}
+      {isActiveGroup && pendingText && (
         <Box flexDirection="row" marginTop={1}>
           <Box width={2} flexShrink={0}>
-            <Text dimColor aria-hidden>
-              {'● '}
-            </Text>
+            <Text dimColor>{BLACK_CIRCLE}</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1}>
             <Text dimColor>{pendingText}</Text>
