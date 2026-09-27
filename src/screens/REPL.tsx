@@ -126,7 +126,45 @@ import {
   registerLeaderSetToolPermissionContext,
   unregisterLeaderSetToolPermissionContext,
   removeLeaderToolUseConfirm,
+  pushLeaderToolUseConfirm,
 } from '../utils/swarm/leaderPermissionBridge.js';
+import {
+  getRegisteredPluginAgentDefinitions,
+  setAgentSpawnHandler,
+  setCommandRunHandler,
+  setFunctionHooksAppStateReader,
+  setFunctionHooksAppStateWriter,
+  setFunctionHooksTurnReader,
+  setPromptSubmitHandler,
+  setSessionCompactHandler,
+  setToolCallHandler,
+  setFunctionHooksToolUseContext,
+  setTurnAbortHandler,
+  setUiAskHostHandler,
+  getShownPluginPane,
+  getRasterFrameVersion,
+  subscribeRasterFrames,
+} from '../utils/plugins/functionHooksModules.js';
+import {
+  PluginAbovePromptSite,
+  PluginDockGrip,
+  PluginPaneSite,
+  PluginRowGrip,
+  PluginPaneKeyResize,
+  chooseDockRoom,
+  chooseInlineRoom,
+  getDockRoomColumns,
+  getInlineRoomRows,
+  keepPluginPaneRoom,
+  pluginPaneDockColumns,
+  pluginPaneInlineRows,
+  subscribeDockRoom,
+  DOCK_GRIP_COLUMNS,
+  DOCK_KEY_COLUMNS,
+  INLINE_KEY_ROWS,
+} from '../components/PluginRasterPanes.js';
+import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
+import { AgentTool } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js';
 import { endInteractionSpan } from '../utils/telemetry/sessionTracing.js';
 import { useLogMessages } from '../hooks/useLogMessages.js';
 import { useReplBridge } from '../hooks/useReplBridge.js';
@@ -2174,6 +2212,48 @@ export function REPL({
     registerLeaderToolUseConfirmQueue(setToolUseConfirmQueue, dialogStore);
     return () => unregisterLeaderToolUseConfirmQueue();
   }, [setToolUseConfirmQueue, dialogStore]);
+
+  // densable `$.ui.ask` host: AskUserQuestion permission dialog.
+  useEffect(() => {
+    setFunctionHooksAppStateReader(() => store.getState());
+    setFunctionHooksAppStateWriter(store.setState);
+    setUiAskHostHandler(input => {
+      const toolUseID = randomUUID();
+      const questions = input.questions;
+      return new Promise(resolve => {
+        const confirm: ToolUseConfirm = {
+          assistantMessage: createAssistantMessage({ content: '' }),
+          tool: AskUserQuestionTool as never,
+          description: questions[0]?.question ?? 'AskUserQuestion',
+          input: { questions },
+          toolUseContext: {} as never,
+          toolUseID,
+          permissionResult: { behavior: 'ask', message: 'ask' },
+          permissionPromptStartTimeMs: Date.now(),
+          onUserInteraction() {},
+          onAbort() {
+            resolve({ deny: 'the dialog was dismissed' });
+          },
+          onAllow(updatedInput) {
+            const answers = (updatedInput as { answers?: Record<string, string> })?.answers;
+            resolve({ result: { answers: answers ?? {} } });
+          },
+          onReject(feedback) {
+            resolve({ deny: feedback || 'the dialog was dismissed' });
+          },
+          async recheckPermission() {},
+        };
+        if (!pushLeaderToolUseConfirm(confirm)) {
+          resolve({ deny: 'the dialog was dismissed' });
+        }
+      });
+    });
+    return () => {
+      setUiAskHostHandler(undefined);
+      setFunctionHooksAppStateReader(undefined);
+      setFunctionHooksAppStateWriter(undefined);
+    };
+  }, [store]);
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
@@ -4376,7 +4456,23 @@ export function REPL({
           isNonInteractiveSession: false,
           dynamicMcpConfig,
           theme,
-          agentDefinitions: allowedAgentTypes ? { ...s.agentDefinitions, allowedAgentTypes } : s.agentDefinitions,
+          agentDefinitions: (() => {
+            const registered = getRegisteredPluginAgentDefinitions();
+            const defs = s.agentDefinitions;
+            if (registered.length === 0) {
+              return allowedAgentTypes ? { ...defs, allowedAgentTypes } : defs;
+            }
+            const seen = new Set(defs.activeAgents.map(a => a.agentType));
+            const extra = registered.filter(a => !seen.has(a.agentType));
+            const allSeen = new Set(defs.allAgents.map(a => a.agentType));
+            const extraAll = registered.filter(a => !allSeen.has(a.agentType));
+            const merged = {
+              ...defs,
+              activeAgents: extra.length === 0 ? defs.activeAgents : [...defs.activeAgents, ...extra],
+              allAgents: extraAll.length === 0 ? defs.allAgents : [...defs.allAgents, ...extraAll],
+            };
+            return allowedAgentTypes ? { ...merged, allowedAgentTypes } : merged;
+          })(),
           customSystemPrompt,
           appendSystemPrompt,
           appendSubagentSystemPrompt,
@@ -4548,6 +4644,148 @@ export function REPL({
       strictMcpConfig,
     ],
   );
+
+  // densable `$.agent.spawn` host: Agent tool, launch-only (run_in_background).
+  useEffect(() => {
+    setAgentSpawnHandler(async input => {
+      const ctx = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
+      const model = input.model;
+      const spawnModel =
+        model === 'sonnet' || model === 'opus' || model === 'haiku' || model === 'fable' ? model : undefined;
+      try {
+        const result = await AgentTool.call(
+          {
+            prompt: String(input.prompt ?? ''),
+            description: String(input.description ?? ''),
+            run_in_background: true,
+            ...(typeof input.subagent_type === 'string'
+              ? { subagent_type: input.subagent_type }
+              : typeof input.subagentType === 'string'
+                ? { subagent_type: input.subagentType }
+                : {}),
+            ...(typeof input.name === 'string' ? { name: input.name } : {}),
+            ...(typeof input.cwd === 'string' ? { cwd: input.cwd } : {}),
+            ...(spawnModel !== undefined ? { model: spawnModel } : {}),
+          },
+          ctx as unknown as import('../Tool.js').ToolUseContext,
+          canUseTool,
+          createAssistantMessage({ content: '' }),
+        );
+        const data = result.data as {
+          status?: string;
+          agentId?: string;
+        };
+        if (data.status === 'async_launched' && typeof data.agentId === 'string') {
+          return { result: { agentId: data.agentId } };
+        }
+        return { result: data };
+      } catch (error) {
+        return {
+          isError: true,
+          text: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    return () => setAgentSpawnHandler(undefined);
+  }, [getToolUseContext, canUseTool, mainLoopModel]);
+
+  useEffect(() => {
+    setCommandRunHandler(slash => {
+      enqueue({ mode: 'prompt', value: String(slash), priority: 'next' });
+      return { queued: true, value: String(slash) };
+    });
+    return () => setCommandRunHandler(undefined);
+  }, []);
+
+  useEffect(() => {
+    setFunctionHooksTurnReader(() => {
+      const ac = abortControllerRef.current;
+      if (!ac || ac.signal.aborted) return undefined;
+      return { turnId: 'running' };
+    });
+    setTurnAbortHandler(async ({ turnId }) => {
+      const ac = abortControllerRef.current;
+      if (!ac || ac.signal.aborted) {
+        throw new Error(`$.turn.abort: no turn is running (asked for ${turnId})`);
+      }
+      ac.abort('user-cancel');
+      return { aborted: turnId };
+    });
+    setSessionCompactHandler(async ({ instructions }) => {
+      const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
+      const { getCacheSharingParams } = await import('../commands/compact/compact.js');
+      const { getMessagesAfterCompactBoundary } = await import('../utils/messages.js');
+      const msgs = getMessagesAfterCompactBoundary(messagesRef.current);
+      const ctx = getToolUseContext(msgs, [], new AbortController(), mainLoopModel);
+      const result = await compactConversation(
+        msgs,
+        ctx as unknown as import('../Tool.js').ToolUseContext,
+        await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
+        false,
+        instructions === '' ? undefined : instructions,
+        false,
+      );
+      setMessages(buildPostCompactMessages(result) as typeof msgs);
+      return { compacted: true };
+    });
+    return () => {
+      setTurnAbortHandler(undefined);
+      setFunctionHooksTurnReader(undefined);
+      setSessionCompactHandler(undefined);
+    };
+  }, [getToolUseContext, mainLoopModel, setMessages]);
+
+  useEffect(() => {
+    setPromptSubmitHandler(async ({ text }) => {
+      enqueue({ mode: 'prompt', value: text, priority: 'next' });
+      return { ok: true };
+    });
+    return () => setPromptSubmitHandler(undefined);
+  }, []);
+
+  useEffect(() => {
+    // densable XL `$3`: bind session tool-use context so $.tool.call / $.mcp.call
+    // stream runToolUse. Handler remains a test/compat stand-in when unbound.
+    setFunctionHooksToolUseContext({
+      getToolUseContext: () => getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel),
+      canUseTool,
+      getParentAssistantMessage: () => createAssistantMessage({ content: '' }),
+    });
+    setToolCallHandler(async input => {
+      const tools = store.getState().mcp?.tools
+        ? assembleToolPool(store.getState().toolPermissionContext, store.getState().mcp.tools)
+        : [];
+      const merged = mergeAndFilterTools(combinedInitialTools, tools, store.getState().toolPermissionContext.mode);
+      const name = String(input.tool ?? '');
+      const tool = merged.find(item => item.name === name);
+      if (!tool || typeof tool.call !== 'function') {
+        return {
+          isError: true,
+          text: `no tool named "${name}" in this session`,
+        };
+      }
+      const { tool: _tool, ...args } = input;
+      try {
+        const ctx = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
+        const result = await tool.call(
+          args,
+          ctx as unknown as import('../Tool.js').ToolUseContext,
+          canUseTool,
+          createAssistantMessage({ content: '' }),
+        );
+        return result;
+      } catch (error) {
+        return {
+          isError: true,
+          text: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    return () => {
+      setToolCallHandler(undefined);
+      setFunctionHooksToolUseContext(undefined);
+    };
+  }, [getToolUseContext, canUseTool, mainLoopModel, combinedInitialTools]);
 
   // densable luf/Weo: stranded pendingMessages → drain + Aye resume
   useStrandedAgentResume({
@@ -7321,7 +7559,7 @@ export function REPL({
   // wrapping). Clearing searchQuery triggers VML's setSearchQuery('')
   // which clears positionsCache + setPositions(null). Bar closes.
   // User hits / again → fresh everything.
-  const transcriptCols = useTerminalSize().columns;
+  const { columns: transcriptCols, rows: transcriptRows } = useTerminalSize();
   const prevColsRef = React.useRef(transcriptCols);
   React.useEffect(() => {
     if (prevColsRef.current !== transcriptCols) {
@@ -7830,6 +8068,24 @@ export function REPL({
     columns: transcriptCols,
     hasGitRepo: diffSidebarHasGitRepo(),
   });
+  // densable REPL: WC=Kg.useDockColumns(Pk); IU=un&&ym===0?WC:0; _g=AX?IU:0;
+  // zC=un&&WC>0 (InlinePanes docked). AX = shown pane. Skip oL grip.
+  useSyncExternalStore(subscribeRasterFrames, getRasterFrameVersion, getRasterFrameVersion);
+  const chosenDock = useSyncExternalStore(subscribeDockRoom, getDockRoomColumns, getDockRoomColumns);
+  const chosenInline = useSyncExternalStore(subscribeDockRoom, getInlineRoomRows, getInlineRoomRows);
+  const pluginDockColumns = pluginPaneDockColumns(transcriptCols, chosenDock);
+  const pluginDockOffered = isFullscreenEnvEnabled() && replDiffSidebarWidth === 0 ? pluginDockColumns : 0;
+  const shownPluginPane = getShownPluginPane();
+  const pluginDockWidth = shownPluginPane !== undefined ? pluginDockOffered : 0;
+  const panesDocked = isFullscreenEnvEnabled() && pluginDockColumns > 0;
+  const pluginInlineRequested =
+    shownPluginPane !== undefined ? shownPluginPane.bodyRows + (shownPluginPane.title ? 1 : 0) : undefined;
+  const pluginInlineRows = pluginPaneInlineRows(
+    transcriptRows,
+    isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+    chosenInline,
+    pluginInlineRequested,
+  );
   // <AlternateScreen> at the root: everything below is inside its
   // <Box height={rows}>. Handlers/contexts are zero-height so ScrollBox's
   // flexGrow in FullscreenLayout resolves against this Box. The transcript
@@ -7854,6 +8110,38 @@ export function REPL({
         />
       ) : null}
       <CommandKeybindingHandlers onSubmit={onSubmit} isActive={!toolJSX?.isLocalJSXCommand} />
+      {shownPluginPane !== undefined ? (
+        panesDocked ? (
+          <PluginPaneKeyResize
+            isActive
+            docked
+            cells={pluginDockWidth}
+            step={DOCK_KEY_COLUMNS}
+            resizeTo={next => {
+              const resized = pluginPaneDockColumns(transcriptCols, next);
+              chooseDockRoom(resized);
+              return resized;
+            }}
+          />
+        ) : (
+          <PluginPaneKeyResize
+            isActive
+            docked={false}
+            cells={pluginInlineRows}
+            step={INLINE_KEY_ROWS}
+            resizeTo={next => {
+              const resized = pluginPaneInlineRows(
+                transcriptRows,
+                isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+                next,
+                pluginInlineRequested,
+              );
+              chooseInlineRoom(resized);
+              return resized;
+            }}
+          />
+        )
+      ) : null}
       {/* ScrollKeybindingHandler must mount before CancelRequestHandler so
           ctrl+c-with-selection copies instead of cancelling the active task.
           Its raw useInput handler only stops propagation when a selection
@@ -7885,6 +8173,25 @@ export function REPL({
             sidebarWidth={replDiffSidebarWidth}
             sidebar={
               <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
+            }
+            dockWidth={pluginDockWidth}
+            dock={
+              pluginDockWidth > 0 ? (
+                <Box flexGrow={1} flexDirection="row" width={pluginDockWidth}>
+                  <PluginDockGrip
+                    columns={pluginDockWidth}
+                    onResize={next => {
+                      const resized = pluginPaneDockColumns(transcriptCols, next);
+                      chooseDockRoom(resized);
+                      return resized;
+                    }}
+                    onSettle={keepPluginPaneRoom}
+                  />
+                  <Box flexGrow={1} flexDirection="column" width={Math.max(0, pluginDockWidth - DOCK_GRIP_COLUMNS)}>
+                    <PluginPaneSite fill={true} />
+                  </Box>
+                </Box>
+              ) : undefined
             }
             onPillClick={() => {
               setCursor(null);
@@ -7928,6 +8235,36 @@ export function REPL({
                   setCursor={setCursor}
                   cursorNavRef={cursorNavRef}
                 />
+                {panesDocked ? null : shownPluginPane !== undefined ? (
+                  <Box
+                    flexDirection="column"
+                    flexShrink={0}
+                    width={transcriptCols}
+                    height={pluginInlineRows}
+                    overflow="hidden"
+                    position="relative"
+                  >
+                    <PluginPaneSite fill={false} columns={transcriptCols} rows={pluginInlineRows} />
+                    {pluginInlineRows > 0 && transcriptCols > 0 ? (
+                      <PluginRowGrip
+                        columns={transcriptCols}
+                        rows={pluginInlineRows}
+                        onResize={next => {
+                          const resized = pluginPaneInlineRows(
+                            transcriptRows,
+                            isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+                            next,
+                          );
+                          chooseInlineRoom(resized);
+                          return resized;
+                        }}
+                        onSettle={keepPluginPaneRoom}
+                      />
+                    ) : null}
+                  </Box>
+                ) : (
+                  <PluginPaneSite fill={false} />
+                )}
                 <AwsAuthStatusBox />
                 {/* Hide the processing placeholder while a modal is showing —
                   it would sit at the last visible transcript row right above
@@ -8419,6 +8756,15 @@ export function REPL({
                           inputValue={inputValue}
                           setInputValue={setInputValue}
                           onOpenFeedback={handleSurveyRequestFeedback}
+                        />
+                        <PluginAbovePromptSite
+                          isWorking={isLoading}
+                          hasSurvey={
+                            postCompactSurvey.state !== 'closed' ||
+                            memorySurvey.state !== 'closed' ||
+                            feedbackSurvey.state !== 'closed' ||
+                            frustrationDetection.state !== 'closed'
+                          }
                         />
                         <PromptInput
                           debug={debug}

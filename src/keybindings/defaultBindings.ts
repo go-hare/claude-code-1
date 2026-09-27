@@ -185,6 +185,34 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     },
   },
   {
+    // densable Pane: tab ring + scroll + grow/shrink + ctrl+x x close.
+    context: 'Pane',
+    bindings: {
+      tab: 'abovePrompt:next',
+      'shift+tab': 'abovePrompt:previous',
+      enter: 'abovePrompt:press',
+      escape: 'abovePrompt:leave',
+      up: 'pane:scrollUp',
+      down: 'pane:scrollDown',
+      pageup: 'pane:pageUp',
+      pagedown: 'pane:pageDown',
+      home: 'pane:top',
+      end: 'pane:bottom',
+      'ctrl+x left': 'pane:grow',
+      'ctrl+x up': 'pane:grow',
+      'ctrl+x right': 'pane:shrink',
+      'ctrl+x down': 'pane:shrink',
+      'ctrl+x x': 'pane:close',
+    },
+  },
+  {
+    // densable PaneField: only ctrl+x x close (Input/Select focused).
+    context: 'PaneField',
+    bindings: {
+      'ctrl+x x': 'pane:close',
+    },
+  },
+  {
     context: 'HistorySearch',
     bindings: {
       'ctrl+r': 'historySearch:next',

@@ -16,6 +16,10 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { executeMessageDisplayHooks, hasHookForEvent } from './hooks.js'
+import {
+  hasClassicFunctionHook,
+  hasMatchingFunctionHook,
+} from './plugins/functionHooksModules.js'
 import { logForDebugging } from './debug.js'
 import { getSessionId } from '../bootstrap/state.js'
 
@@ -472,11 +476,28 @@ export function createMessageDisplayTransform(opts: {
     begin(apiMessageId: string) {
       if (session && !session.finalized) abandon(session)
       onStreamingRewrite(null)
-      if (!hasHookForEvent('MessageDisplay', getAppState(), getSessionId())) {
+      const appState = getAppState()
+      const sessionId = getSessionId()
+      // densable zk = vAt || U5. vAt is a settings/callback hook.
+      // U5 is a loaded function-hooks module whose hooks() match
+      // classic.MessageDisplay. Exact `patterns.includes` is cLo, which
+      // is the same set for a literal registration.
+      const settingsHook = hasHookForEvent(
+        'MessageDisplay',
+        appState,
+        sessionId,
+      )
+      const classicModule = hasClassicFunctionHook('MessageDisplay')
+      const functionHook = hasMatchingFunctionHook('MessageDisplay')
+      if (!settingsHook && !functionHook) {
         session = null
         onStreamingDisplay(null)
         return
       }
+      // densable isLive = !vAt && !cLo. A settings hook or an exact
+      // classic.MessageDisplay pattern replaces the preview. A wildcard
+      // module match (classic.*, *) is zk but not cLo, so it splices.
+      const isLive = !settingsHook && !classicModule
       session = {
         apiMessageId,
         messageId: randomUUID(),
@@ -485,7 +506,7 @@ export function createMessageDisplayTransform(opts: {
         flushedOffset: 0,
         index: 0,
         output: '',
-        isLive: false,
+        isLive,
         resolvedOffset: 0,
         isRewritten: false,
         appendChain: Promise.resolve(),
@@ -504,7 +525,7 @@ export function createMessageDisplayTransform(opts: {
           summaryEmitted: false,
         },
       }
-      onStreamingDisplay('')
+      onStreamingDisplay(isLive ? null : '')
     },
     delta(text: string) {
       if (session === null || session.finalized) return

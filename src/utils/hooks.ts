@@ -28,6 +28,10 @@ import {
 } from './plugins/pluginOptionsStorage.js'
 import { getPluginDataDir } from './plugins/pluginDirectories.js'
 import {
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from './plugins/functionHooksModules.js'
+import {
   getSessionId,
   getProjectRoot,
   getIsNonInteractiveSession,
@@ -2585,6 +2589,8 @@ async function* executeHooks({
   messages,
   forceSyncExecution,
   suppressPerInvocationTelemetry,
+  /** densable classicChainMember — set while next() runs the settings hooks. */
+  classicChainMember,
   requestPrompt,
   toolInputSummary,
   storageV5,
@@ -2598,6 +2604,8 @@ async function* executeHooks({
   toolUseContext?: ToolUseContext
   messages?: Message[]
   forceSyncExecution?: boolean
+  /** densable classicChainMember — set while next() runs the settings hooks. */
+  classicChainMember?: boolean
   /**
    * densable suppressPerInvocationTelemetry — when true, skip tengu_run_hook
    * per-invocation telemetry (MessageDisplay streaming hot path).
@@ -2627,6 +2635,157 @@ async function* executeHooks({
 
   // Bind the prompt callback to this hook's name and tool input summary so the UI can display context
   const boundRequestPrompt = requestPrompt?.(hookName, toolInputSummary)
+
+  // densable Zv: a matching function-hooks module runs first. next() is the
+  // settings executor. PreToolUse stays on the settings path. A chain member
+  // must not enter again.
+  if (
+    !classicChainMember &&
+    hookEvent !== 'PreToolUse' &&
+    hasMatchingFunctionHook(hookEvent)
+  ) {
+    const eventRecord = hookInput as unknown as Record<string, unknown>
+    const chained = await runFunctionHookChain(
+      hookEvent,
+      eventRecord,
+      async event => {
+        const results: AggregatedHookResult[] = []
+        for await (const result of executeHooks({
+          hookInput: event as typeof hookInput,
+          toolUseID,
+          matchQuery,
+          signal,
+          timeoutMs,
+          toolUseContext,
+          messages,
+          forceSyncExecution,
+          suppressPerInvocationTelemetry,
+          classicChainMember: true,
+          requestPrompt,
+          toolInputSummary,
+          storageV5,
+          credentials,
+        })) {
+          results.push(result)
+        }
+        const display = results.find(
+          result => result.displayContent !== undefined,
+        )
+        if (display?.displayContent !== undefined) {
+          return { ...event, delta: display.displayContent }
+        }
+        return event
+      },
+    )
+    const returned =
+      chained && typeof chained === 'object'
+        ? (chained as Record<string, unknown>)
+        : eventRecord
+    const originalDelta =
+      typeof eventRecord.delta === 'string' ? eventRecord.delta : undefined
+    // densable mXe / wSn: yield only keys the function-hook result changed.
+    if (
+      typeof returned.delta === 'string' &&
+      returned.delta !== originalDelta
+    ) {
+      yield { displayContent: returned.delta }
+    }
+    if (typeof returned.displayContent === 'string') {
+      yield { displayContent: returned.displayContent }
+    }
+    if (typeof returned.additionalContext === 'string') {
+      yield { additionalContexts: [returned.additionalContext] }
+    }
+    if (Array.isArray(returned.additionalContexts)) {
+      yield {
+        additionalContexts: returned.additionalContexts.filter(
+          (item): item is string => typeof item === 'string',
+        ),
+      }
+    }
+    if (returned.preventContinuation === true) {
+      yield {
+        preventContinuation: true,
+        stopReason:
+          typeof returned.stopReason === 'string'
+            ? returned.stopReason
+            : undefined,
+      }
+    }
+    if (typeof returned.stopReason === 'string') {
+      yield { stopReason: returned.stopReason }
+    }
+    if (typeof returned.sessionTitle === 'string') {
+      yield { sessionTitle: returned.sessionTitle }
+    }
+    if (returned.suppressOriginalPrompt === true) {
+      yield { suppressOriginalPrompt: true }
+    }
+    if (typeof returned.initialUserMessage === 'string') {
+      yield { initialUserMessage: returned.initialUserMessage }
+    }
+    if (Array.isArray(returned.watchPaths)) {
+      yield {
+        watchPaths: returned.watchPaths.filter(
+          (item): item is string => typeof item === 'string',
+        ),
+      }
+    }
+    if (returned.reloadSkills === true) {
+      yield { reloadSkills: true }
+    }
+    if (returned.updatedToolOutput !== undefined) {
+      yield { updatedMCPToolOutput: returned.updatedToolOutput }
+    }
+    if (returned.updatedMCPToolOutput !== undefined) {
+      yield { updatedMCPToolOutput: returned.updatedMCPToolOutput }
+    }
+    if (returned.retry === true) {
+      yield { retry: true }
+    }
+    if (returned.updatedInput && typeof returned.updatedInput === 'object') {
+      yield {
+        updatedInput: returned.updatedInput as Record<string, unknown>,
+      }
+    }
+    if (returned.block !== undefined) {
+      yield {
+        blockingError: {
+          blockingError: String(returned.block),
+          command: `classic.${hookEvent} hook`,
+        },
+        ...(hookEvent === 'PreModelSwitch'
+          ? {}
+          : {
+              permissionBehavior: 'deny' as const,
+            }),
+      }
+    }
+    if (
+      returned.permissionBehavior === 'ask' ||
+      returned.permissionBehavior === 'deny' ||
+      returned.permissionBehavior === 'allow' ||
+      returned.permissionBehavior === 'passthrough' ||
+      returned.permissionBehavior === 'defer'
+    ) {
+      yield {
+        permissionBehavior: returned.permissionBehavior,
+        ...(typeof returned.hookPermissionDecisionReason === 'string'
+          ? {
+              hookPermissionDecisionReason:
+                returned.hookPermissionDecisionReason,
+            }
+          : {}),
+      }
+    }
+    if (returned.permissionRequestResult !== undefined) {
+      yield {
+        permissionRequestResult:
+          returned.permissionRequestResult as AggregatedHookResult['permissionRequestResult'],
+      }
+    }
+    return
+  }
 
   // SECURITY: ALL hooks require workspace trust in interactive mode
   // This centralized check prevents RCE vulnerabilities for all current and future hooks

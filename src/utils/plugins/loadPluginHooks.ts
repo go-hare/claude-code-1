@@ -15,6 +15,10 @@ import {
 import type { PluginHookMatcher } from '../settings/types.js'
 import { jsonStringify } from '../slowOperations.js'
 import { clearPluginCache, loadAllPluginsCacheOnly } from './pluginLoader.js'
+import {
+  listBuiltinFunctionHookPlugins,
+  loadFunctionHooksModules,
+} from './functionHooksModules.js'
 
 // Track if hot reload subscription is set up
 let hotReloadSubscribed = false
@@ -177,6 +181,10 @@ async function registerPluginHooksOnce(): Promise<void> {
   // atomic — old hooks stay valid until this point, new hooks take over.
   clearRegisteredPluginHooks()
   registerHookCallbacks(allPluginHooks)
+  await loadFunctionHooksModules([
+    ...listBuiltinFunctionHookPlugins(),
+    ...enabled.map(plugin => ({ name: plugin.name, path: plugin.path })),
+  ])
 
   const totalHooks = Object.values(allPluginHooks).reduce(
     (sum, matchers) => sum + matchers.reduce((s, m) => s + m.hooks.length, 0),

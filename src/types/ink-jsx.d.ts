@@ -63,6 +63,7 @@ declare module 'react' {
         rawText?: string
         rawWidth?: number
         rawHeight?: number
+        ref?: unknown
       }
     }
   }
