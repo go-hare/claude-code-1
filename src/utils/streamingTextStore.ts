@@ -141,11 +141,19 @@ export function resolveStreamingDisplay(
   // Falsy *or* visually empty (whitespace / strip-only XML / "(no content)").
   // Gold Sy is falsy-only, but that paints a lone ● while Cooking — same
   // empty rule as AssistantTextMessage / StreamingTextPreview.
-  const displayed =
-    merged !== null && !isEmptyMessageText(merged) ? merged : null
+  const hideTrailingLine = transformed === null && !!raw
+  let displayed = merged !== null && !isEmptyMessageText(merged) ? merged : null
+  // wrap-stream pops the incomplete last visual line. If nothing closed
+  // before that line is visible (`\nopen…`, or no newline yet), the row
+  // would paint ● with an empty body — treat as not displayed.
+  if (displayed !== null && hideTrailingLine) {
+    const lastNl = displayed.lastIndexOf('\n')
+    const closed = lastNl >= 0 ? displayed.slice(0, lastNl) : ''
+    if (isEmptyMessageText(closed)) displayed = null
+  }
   const resolved: StreamingDisplayResolved = {
     displayed,
-    hideTrailingLine: transformed === null && !!raw,
+    hideTrailingLine,
     displayedHasNewline: displayed !== null && displayed.includes('\n'),
   }
   resolveCache.set(state, resolved)

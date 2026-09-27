@@ -23,11 +23,10 @@ type Props = {
 
 export function StreamingTextPreview({ store }: Props): React.ReactNode {
   const state = useSyncExternalStore(store.subscribe, store.getState);
-  const { displayed, hideTrailingLine, displayedHasNewline } = resolveStreamingDisplay(state);
-  // densable: if (!KEl) return null. Local: also hide empty-after-strip,
-  // and skip wrap-stream's empty first line (● with no body).
+  const { displayed, hideTrailingLine } = resolveStreamingDisplay(state);
+  // densable: if (!KEl) return null. Local: also hide empty-after-strip.
+  // wrap-stream empty first-line skip lives in resolveStreamingDisplay.
   if (!displayed || isEmptyMessageText(displayed)) return null;
-  if (hideTrailingLine && !displayedHasNewline) return null;
 
   return (
     <Box alignItems="flex-start" flexDirection="row" marginTop={1} width="100%">

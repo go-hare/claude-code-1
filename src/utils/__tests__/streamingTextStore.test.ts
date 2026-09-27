@@ -59,7 +59,7 @@ describe('resolveStreamingDisplay', () => {
     expect(r.displayedHasNewline).toBe(true)
   })
 
-  test('an open line written directly is displayed; the flush is what drops it', () => {
+  test('an open first line is not displayed (wrap-stream would pop it)', () => {
     expect(streamingPreviewRaw('partial line with no newline')).toBe(null)
     const r = resolveStreamingDisplay({
       raw: 'partial line with no newline',
@@ -68,9 +68,19 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe('partial line with no newline')
+    expect(r.displayed).toBe(null)
     expect(r.hideTrailingLine).toBe(true)
-    expect(r.displayedHasNewline).toBe(false)
+  })
+
+  test('a leading newline plus open second line is not displayed', () => {
+    const r = resolveStreamingDisplay({
+      raw: '\n主包 PUT 成功',
+      transformed: null,
+      rewrite: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe(null)
   })
 
   test('live rewrite replaces the covered prefix and keeps the raw tail', () => {
@@ -81,7 +91,8 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe('HELLO more')
+    // wrap-stream would pop the open tail; no closed prefix → hide.
+    expect(r.displayed).toBe(null)
     expect(r.hideTrailingLine).toBe(true)
   })
 
@@ -209,7 +220,7 @@ describe('createStreamingDisplayStore densable WNf', () => {
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
     store.setRaw('hi')
     expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
     store.setRaw('hi\n')
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
     expect(ticks).toBe(2)

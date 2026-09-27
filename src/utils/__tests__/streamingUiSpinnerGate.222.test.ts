@@ -49,9 +49,6 @@ describe('densable zm streaming spinner gate', () => {
     expect(src).toContain(
       'if (!displayed || isEmptyMessageText(displayed)) return null',
     )
-    expect(src).toContain(
-      'if (hideTrailingLine && !displayedHasNewline) return null',
-    )
     expect(src).toContain('hideTrailingLine={hideTrailingLine}')
   })
 
