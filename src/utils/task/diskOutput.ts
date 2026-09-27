@@ -6,10 +6,13 @@ import {
   open,
   readdir,
   readlink,
+  realpath,
+  stat,
   symlink,
   unlink,
 } from 'fs/promises'
-import { dirname, isAbsolute, join, sep } from 'path'
+import { tmpdir } from 'os'
+import { dirname, isAbsolute, join, normalize, sep } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
@@ -120,10 +123,96 @@ export async function repointTaskOutputSymlinks(
 }
 
 /**
+ * densable `P` @252 — `task output swap refused (${reason}): ${path}` plus
+ * optional `. To recover: ${recover}.`
+ */
+export class TaskOutputSwapRefusedError extends Error {
+  constructor(path: string, reason: string, recover?: string) {
+    super(
+      `task output swap refused (${reason}): ${path}` +
+        (recover === undefined ? '' : `. To recover: ${recover}.`),
+    )
+    this.name = 'TaskOutputSwapRefusedError'
+  }
+}
+
+/**
+ * densable `P`/`q` @252 recover clause. Strip trailing `/` or `\` from
+ * tmpRoot (gold `Vv().replace(/[\\/]+$/, "")`).
+ */
+export function formatTaskOutputSwapRecover(tmpRoot: string): string {
+  const root = tmpRoot.replace(/[\\/]+$/, '')
+  return (
+    'restart Claude Code with CLAUDE_CODE_TMPDIR set to a fresh ' +
+    `directory; or, if ${root} is a stray directory or a ` +
+    'symbolic link that should not be there, remove that entry ' +
+    'itself (not what it points to) and restart'
+  )
+}
+
+function throwTasksDirMovedOrLinked(dir: string): never {
+  throw new TaskOutputSwapRefusedError(
+    dir,
+    'tasks dir moved or linked',
+    formatTaskOutputSwapRecover(process.env.CLAUDE_CODE_TMPDIR || tmpdir()),
+  )
+}
+
+/**
+ * densable `Fk` @252 pinWriteTarget. After mkdir, refuse a tasks dir that
+ * is not the same directory by a link-free route — except Mac realpath
+ * aliases (different path, same device+inode). Windows gold arm is `y()`;
+ * skip alias/refuse. Do not invent linux `/proc/self/fd` or O_DIRECTORY
+ * hold cache `q`.
+ */
+export async function pinWriteTarget(dir: string): Promise<void> {
+  if (process.platform === 'win32') {
+    return
+  }
+
+  // Exists as a directory entry (gold Fk lstat after mkdir).
+  await lstat(dir)
+
+  let resolved: string
+  try {
+    resolved = await realpath(dir)
+  } catch (e) {
+    // densable ELOOP → A(t) @252
+    if (getErrnoCode(e) === 'ELOOP') {
+      throwTasksDirMovedOrLinked(dir)
+    }
+    throw e
+  }
+
+  if (normalize(dir) === normalize(resolved)) {
+    return
+  }
+
+  // densable Fk @252: else stat both; same device+inode → alias.
+  const [given, canon] = await Promise.all([stat(dir), stat(resolved)])
+  if (given.dev === canon.dev && given.ino === canon.ino) {
+    logForDebugging(
+      `pinWriteTarget: ${dir} is rendered ${resolved} by realpath; ` +
+        'same directory (device and inode), treated as an alias',
+    )
+    return
+  }
+
+  logForDebugging(
+    `pinWriteTarget: ${dir} resolves to ${resolved}: not the same ` +
+      'directory by a link-free route; refused',
+    { level: 'warn' },
+  )
+  throwTasksDirMovedOrLinked(dir)
+}
+
+/**
  * Ensure the task output directory exists
  */
 async function ensureOutputDir(): Promise<void> {
-  await mkdir(getTaskOutputDir(), { recursive: true })
+  const dir = getTaskOutputDir()
+  await mkdir(dir, { recursive: true })
+  await pinWriteTarget(dir)
 }
 
 /**

@@ -17,6 +17,7 @@ import type {
   QueuePriority,
 } from '../types/textInputTypes.js'
 import type { PastedContent } from './config.js'
+import { logForDebugging } from './debug.js'
 import { extractTextContent, isHumanLikeOrigin } from './messages.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
@@ -168,6 +169,87 @@ function withMainThreadAgentId(command: QueuedCommand): QueuedCommand {
   return { ...command, agentId: getMainThreadAgentId() }
 }
 
+// ============================================================================
+// densable 2.1.252 Sn/ap — task-notification value cap
+// ============================================================================
+
+/** densable Q8n — cap passed to ap for task-notification. */
+export const TASK_NOTIFICATION_CHAR_CAP = 100_000
+/** densable jYt — hysteresis: skip truncate when length <= cap + jYt. */
+const TASK_NOTIFICATION_CAP_HYSTERESIS = 1024
+/** densable HVe — ap default when Sn is not passing Q8n. */
+const DEFAULT_TRUNCATE_CHAR_CAP = 10_000
+/** densable WYt — nested truncation markers in the omitted middle. */
+const NESTED_TRUNCATION_MARKER =
+  /\n\n\.\.\. \[(\d+) characters truncated\] \.\.\.\n\n/g
+
+/** densable zYt */
+function formatTruncationMarker(omitted: number): string {
+  return `\n\n... [${omitted} characters truncated] ...\n\n`
+}
+
+/** densable ce — prefix slice; drop trailing high surrogate U+D800–DBFF. */
+function slicePrefixUtf16(text: string, max: number): string {
+  if (max <= 0) return ''
+  if (text.length <= max) return text
+  const sliced = text.slice(0, max)
+  const last = sliced.charCodeAt(max - 1)
+  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced
+}
+
+/** densable vg — suffix slice; drop leading low surrogate U+DC00–DFFF. */
+function sliceSuffixUtf16(text: string, max: number): string {
+  if (max <= 0) return ''
+  if (text.length <= max) return text
+  const sliced = text.slice(-max)
+  const first = sliced.charCodeAt(0)
+  return first >= 0xdc00 && first <= 0xdfff ? sliced.slice(1) : sliced
+}
+
+/** densable Mve */
+function truncateHeadTail(
+  text: string,
+  head: number,
+  tail: number,
+  marker: (omitted: number) => string,
+): string {
+  if (text.length <= head + tail) return text
+  const prefix = head > 0 ? slicePrefixUtf16(text, head) : ''
+  const suffix = tail > 0 ? sliceSuffixUtf16(text, tail) : ''
+  const omitted = text.length - prefix.length - suffix.length
+  return `${prefix}${marker(omitted)}${suffix}`
+}
+
+/** densable ap */
+function truncateWithHysteresis(
+  text: string,
+  cap: number = DEFAULT_TRUNCATE_CHAR_CAP,
+): string {
+  if (text.length <= cap + TASK_NOTIFICATION_CAP_HYSTERESIS) {
+    return text
+  }
+  const head = Math.floor(cap / 2)
+  const tail = cap - head
+  return truncateHeadTail(text, head, tail, omitted => {
+    // Gold slices the requested halves, not surrogate-adjusted lengths.
+    const middle = text.slice(head, text.length - tail)
+    let nestedExtra = 0
+    for (const match of middle.matchAll(NESTED_TRUNCATION_MARKER)) {
+      const digits = match[1]!
+      const nested = digits.length <= 15 ? Number(digits) : Number.NaN
+      if (Number.isSafeInteger(nested) && nested >= match[0].length) {
+        nestedExtra += nested - match[0].length
+      }
+    }
+    return formatTruncationMarker(omitted + nestedExtra)
+  })
+}
+
+/** densable ap(value, Q8n) */
+export function capTaskNotificationValue(value: string): string {
+  return truncateWithHysteresis(value, TASK_NOTIFICATION_CHAR_CAP)
+}
+
 /**
  * Add a command to the queue.
  * Used for user-initiated commands (prompt, bash, orphaned-permission).
@@ -192,7 +274,24 @@ export function enqueue(command: QueuedCommand): void {
  * Explicit agentId (owner / subagent) is preserved.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
-  const stamped = withMainThreadAgentId(command)
+  // densable Sn: cap task-notification strings via ap(..., Q8n) before push.
+  // Local has no At/admitted gate — do not invent one.
+  let queued = command
+  if (
+    command.mode === 'task-notification' &&
+    typeof command.value === 'string'
+  ) {
+    const capped = capTaskNotificationValue(command.value)
+    if (capped !== command.value) {
+      logForDebugging(
+        'enqueuePendingNotification: task-notification capped from ' +
+          `${command.value.length} to ${capped.length} chars`,
+        { level: 'warn' },
+      )
+      queued = { ...command, value: capped }
+    }
+  }
+  const stamped = withMainThreadAgentId(queued)
   commandQueue.push({ ...stamped, priority: stamped.priority ?? 'later' })
   notifySubscribers()
   logOperation(

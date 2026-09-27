@@ -874,7 +874,8 @@ function loadExistingSettingsForWrite(
         throw e
       }
     }
-    if (content !== null) {
+    // densable 2.1.252 `di` empty-file skip
+    if (content !== null && content.trim() !== '') {
       const rawData = safeParseJSON(content)
       if (rawData === null) {
         return {
