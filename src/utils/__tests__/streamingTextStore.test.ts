@@ -97,8 +97,8 @@ describe('resolveStreamingDisplay', () => {
     expect(r.hideTrailingLine).toBe(false)
   })
 
-  test('whitespace and the no-content sentinel stay displayed', () => {
-    // 2.1.282 only treats a falsy string as empty.
+  test('whitespace, strip-only XML, and the no-content sentinel do not display', () => {
+    // Visually empty preview would paint a lone ● above Cooking.
     const whitespace = resolveStreamingDisplay({
       raw: '   \n  ',
       transformed: null,
@@ -106,7 +106,7 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(whitespace.displayed).toBe('   \n  ')
+    expect(whitespace.displayed).toBe(null)
     const sentinel = resolveStreamingDisplay({
       raw: '(no content)',
       transformed: null,
@@ -114,7 +114,15 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(sentinel.displayed).toBe('(no content)')
+    expect(sentinel.displayed).toBe(null)
+    const xmlOnly = resolveStreamingDisplay({
+      raw: '<context>meta</context>\n',
+      transformed: null,
+      rewrite: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(xmlOnly.displayed).toBe(null)
     const empty = resolveStreamingDisplay({
       raw: '',
       transformed: null,

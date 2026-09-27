@@ -138,8 +138,11 @@ export function resolveStreamingDisplay(
     (salvage !== null
       ? mergeSalvagePrefix(salvage, base ?? '', exact)
       : base) || null
-  // 2.1.282: falsy only. Whitespace / "(no content)" still display.
-  const displayed = merged || null
+  // Falsy *or* visually empty (whitespace / strip-only XML / "(no content)").
+  // Gold Sy is falsy-only, but that paints a lone ● while Cooking — same
+  // empty rule as AssistantTextMessage / StreamingTextPreview.
+  const displayed =
+    merged !== null && !isEmptyMessageText(merged) ? merged : null
   const resolved: StreamingDisplayResolved = {
     displayed,
     hideTrailingLine: transformed === null && !!raw,

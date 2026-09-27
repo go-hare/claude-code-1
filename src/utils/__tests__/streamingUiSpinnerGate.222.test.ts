@@ -46,7 +46,9 @@ describe('densable zm streaming spinner gate', () => {
       join(ROOT, 'src/components/StreamingTextPreview.tsx'),
       'utf8',
     ).replace(/\r\n/g, '\n')
-    expect(src).toContain('if (!displayed) return null')
+    expect(src).toContain(
+      'if (!displayed || isEmptyMessageText(displayed)) return null',
+    )
     expect(src).toContain('hideTrailingLine={hideTrailingLine}')
   })
 
