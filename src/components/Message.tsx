@@ -311,7 +311,12 @@ function UserMessage({
 }): React.ReactNode {
   const { columns } = useTerminalSize();
   switch (param.type) {
-    case 'text':
+    case 'text': {
+      const stored = message.origin;
+      const originKind = stored?.kind;
+      const origin = stored !== undefined && (originKind === 'plugin' || originKind === 'channel') ? stored : undefined;
+      const task = 'task' in message ? message.task : undefined;
+      const from = 'from' in message ? message.from : undefined;
       return (
         <UserTextMessage
           addMargin={addMargin}
@@ -320,8 +325,14 @@ function UserMessage({
           planContent={message.planContent as string | undefined}
           isTranscriptMode={isTranscriptMode}
           timestamp={message.timestamp as string | undefined}
+          requestId={message.uuid}
+          origin={origin}
+          isExpanded={isTranscriptMode}
+          {...(task !== undefined && { task })}
+          {...(from !== undefined && { from })}
         />
       );
+    }
     case 'image':
       // If previous message is user (text or image), this is a continuation - use connector
       // Otherwise this image starts a new user turn - use margin

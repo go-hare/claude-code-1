@@ -851,6 +851,14 @@ export type GlobalConfig = {
   // CURRENT_MIGRATION_VERSION, runMigrations() skips all sync migrations
   // (avoiding 11× saveGlobalConfig lock+re-read on every startup).
   migrationVersion?: number
+
+  /**
+   * densable `pluginPanes` — dock/inline room from pane grip `keepRoom` (`iL`/`T4`).
+   */
+  pluginPanes?: {
+    dockColumns?: number | null
+    inlineRows?: number | null
+  }
 }
 
 /**

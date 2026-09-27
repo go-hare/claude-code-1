@@ -25,11 +25,16 @@ describe('densable PKe submit placeholder baseline', () => {
 
   test('forces sync Messages while placeholder bridge active (Windows deferred)', () => {
     expect(replSrc).toContain('placeholderBridgeActive')
+    // 2.1.150 deferMessages = !viewingAgent && !previewEnabled && isLoading.
+    // preview on (showStreamingText) → sync, same as not-loading or the bridge.
     expect(replSrc).toContain(
       'showStreamingText || !isLoading || placeholderBridgeActive',
     )
     expect(replSrc).toContain('placeholderBridgePendingRef')
-    expect(replSrc).toContain('deferredMessages !== cappedMessages')
+    expect(replSrc).toContain('deferredMessages !== messages')
+    // 2.1.150 defers the full list. formatDeferCap* is a different left-arrow toast.
+    expect(replSrc).not.toContain('const DEFERRED_CAP')
+    expect(replSrc).not.toContain('cappedMessages')
   })
 
   test('latches echo dismissed after first past-baseline render (compact-safe)', () => {

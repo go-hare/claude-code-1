@@ -194,10 +194,6 @@ import {
   truncateIdeSelectionContent,
 } from './stringUtils.js'
 import { appendStreamingTextDelta } from './streamingTextStore.js'
-import {
-  clearStreamingToolJsonPreview,
-  updateStreamingToolJsonPreview,
-} from './streamingToolJsonPreview.js'
 import { isTodoV2Enabled } from './tasks.js'
 
 // Lazy import to avoid circular dependency (teammateMailbox -> teammate -> ... -> messages)
@@ -4321,6 +4317,128 @@ export function getContentText(
   return null
 }
 
+/**
+ * 2.1.282 `Pet` — a landed thinking block is narration when its signature
+ * decodes to the tag "narration" and the thinking text is non-empty.
+ * Stream handling clears the live thinking row for that case instead of
+ * leaving an ended timestamp.
+ */
+export function isNarrationThinkingBlock(block: {
+  type?: string
+  thinking?: string
+  signature?: string
+}): boolean {
+  if (!block.thinking?.trim()) return false
+  return thinkingSignatureTag(block) === 'narration'
+}
+
+function thinkingSignatureTag(block: {
+  type?: string
+  signature?: string
+}): string | undefined {
+  try {
+    if (block.type !== 'thinking' || !block.signature) return undefined
+    const decoded = decodeSignatureTag(block.signature)
+    return decoded
+  } catch {
+    return undefined
+  }
+}
+
+/** 2.1.282 `FEt`: base64 → field 2 bytes → field 1 bytes → field 8 utf8. */
+function decodeSignatureTag(signature: string): string | undefined {
+  let binary: string
+  try {
+    binary = atob(signature)
+  } catch {
+    return undefined
+  }
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  const field2 = protobufBytesField(bytes, 2)
+  if (field2 === undefined) return undefined
+  const field1 = protobufBytesField(field2, 1)
+  if (field1 === undefined) return undefined
+  return protobufUtf8Field(field1, 8)
+}
+
+function protobufBytesField(
+  bytes: Uint8Array,
+  field: number,
+): Uint8Array | undefined {
+  return walkProtobuf(bytes, field, 'bytes')
+}
+
+function protobufUtf8Field(
+  bytes: Uint8Array,
+  field: number,
+): string | undefined {
+  const value = walkProtobuf(bytes, field, 'bytes')
+  if (value === undefined) return undefined
+  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(value)
+}
+
+function walkProtobuf(
+  bytes: Uint8Array,
+  field: number,
+  want: 'bytes',
+): Uint8Array | undefined {
+  let found: Uint8Array | undefined
+  let offset = 0
+  while (offset < bytes.length) {
+    const key = readVarint(bytes, offset)
+    if (key === undefined) return undefined
+    const wire = key.value & 7
+    const number = Math.floor(key.value / 8)
+    offset = key.next
+    if (wire === 2) {
+      const len = readVarint(bytes, offset)
+      if (len === undefined || len.value > bytes.length - len.next)
+        return undefined
+      const start = len.next
+      const end = start + len.value
+      if (number === field) found = bytes.subarray(start, end)
+      offset = end
+      continue
+    }
+    if (wire === 0) {
+      const v = readVarint(bytes, offset)
+      if (v === undefined) return undefined
+      offset = v.next
+      continue
+    }
+    if (wire === 1) {
+      if (offset + 8 > bytes.length) return undefined
+      offset += 8
+      continue
+    }
+    if (wire === 5) {
+      if (offset + 4 > bytes.length) return undefined
+      offset += 4
+      continue
+    }
+    return undefined
+  }
+  return want === 'bytes' ? found : undefined
+}
+
+function readVarint(
+  bytes: Uint8Array,
+  offset: number,
+): { value: number; next: number } | undefined {
+  let value = 0
+  let mul = 1
+  for (let i = 0; i < 10; i++) {
+    const at = offset + i
+    if (at >= bytes.length) return undefined
+    const byte = bytes[at]!
+    value += (byte & 127) * mul
+    if ((byte & 128) === 0) return { value, next: at + 1 }
+    mul *= 128
+  }
+  return undefined
+}
+
 export type StreamingToolUse = {
   index: number
   contentBlock: BetaToolUseBlock
@@ -4558,11 +4676,16 @@ export function handleMessageFromStream(
         thinkingBlock.type === 'thinking'
       ) {
         const tb = thinkingBlock as ThinkingBlock
-        onStreamingThinking?.(() => ({
-          thinking: tb.thinking,
-          isStreaming: false,
-          streamingEndedAt: Date.now(),
-        }))
+        // 2.1.282 Pet: narration clears the live row; otherwise stamp ended.
+        if (isNarrationThinkingBlock(tb)) {
+          onStreamingThinking?.(() => null)
+        } else {
+          onStreamingThinking?.(() => ({
+            thinking: tb.thinking,
+            isStreaming: false,
+            streamingEndedAt: Date.now(),
+          }))
+        }
       }
       // densable yEt: displayTransform.entryLanded before clear + onMessage
       displayTransform?.entryLanded(message as AssistantMessage)
@@ -4604,6 +4727,9 @@ export function handleMessageFromStream(
     [key: string]: unknown
   }
 
+  // 2.1.282 Koe: a ping event does not move the spinner.
+  if (streamMsg.event.type === 'ping') return
+
   if (streamMsg.event.type === 'message_start') {
     if (streamMsg.ttftMs != null) {
       const msgId = (
@@ -4620,8 +4746,6 @@ export function handleMessageFromStream(
     }
     // densable qQs: clear tool list only when non-empty
     onStreamingToolUses(d => (d.length > 0 ? [] : d))
-    // densable CLp — clear REPL partial-json preview buffers
-    clearStreamingToolJsonPreview()
     // densable qQs: clear streaming text only when non-null (avoid no-op churn)
     onStreamingText?.(d => (d !== null ? null : d))
     // densable qQs: displayTransform.begin(message.id)
@@ -4671,13 +4795,14 @@ export function handleMessageFromStream(
           } catch {
             return
           }
+          if (typeof contentBlock.name !== 'string') return
           onStreamingToolUses(_ => {
             const existing = _.findIndex(t => t.index === index)
+            // 2.1.282 replaces the same index with the new block as-is.
             const next = {
               index,
               contentBlock,
-              unparsedToolInput:
-                existing !== -1 ? (_[existing]!.unparsedToolInput ?? '') : '',
+              unparsedToolInput: '',
             }
             if (existing !== -1) {
               const copy = _.slice()
@@ -4717,24 +4842,9 @@ export function handleMessageFromStream(
           return
         }
         case 'input_json_delta': {
+          // 2.1.282: length only. Partial JSON is not accumulated here.
           const delta = streamMsg.event.delta.partial_json
-          const index = streamMsg.event.index
           onUpdateLength(delta.length)
-          onStreamingToolUses(_ => {
-            const element = _.find(t => t.index === index)
-            if (!element) {
-              return _
-            }
-            return [
-              ..._.filter(t => t !== element),
-              {
-                ...element,
-                unparsedToolInput: element.unparsedToolInput + delta,
-              },
-            ]
-          })
-          // densable xLp — REPL verbose code preview from partial JSON
-          updateStreamingToolJsonPreview(index, delta, onStreamingToolUses)
           return
         }
         case 'thinking_delta': {

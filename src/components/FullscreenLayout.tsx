@@ -97,11 +97,18 @@ type Props = {
   onPillClick?: () => void;
   /**
    * densable Tyn `sidebar` / `sidebarWidth`. Main column is
-   * `max(1, columns - sidebarWidth)`. Always mount `sidebar` (even at
-   * width 0) so nhu auto-open + keybinding hooks stay alive.
+   * `max(1, columns - sidebarWidth - dockWidth)`. Always mount `sidebar`
+   * (even at width 0) so nhu auto-open + keybinding hooks stay alive.
    */
   sidebar?: ReactNode;
   sidebarWidth?: number;
+  /**
+   * densable U8e `dock` / `dockWidth` — gold iZ PaneDock sibling column
+   * (right of scroll+sidebar). Width 0 hides the column. Not the Tyn
+   * `sidebar` slot (ReplDiffSidebar lives there).
+   */
+  dock?: ReactNode;
+  dockWidth?: number;
 };
 
 /**
@@ -326,6 +333,8 @@ export function FullscreenLayout({
   onPillClick,
   sidebar,
   sidebarWidth = 0,
+  dock,
+  dockWidth = 0,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
   // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
@@ -399,7 +408,8 @@ export function FullscreenLayout({
     const sticky = hideSticky ? null : stickyPrompt;
     const headerPrompt = sticky != null && sticky !== 'clicked' ? sticky : null;
     const padCollapsed = sticky != null;
-    const mainColumns = Math.max(1, columns - sidebarWidth);
+    const mainColumns = Math.max(1, columns - sidebarWidth - dockWidth);
+    const dockVisible = dock != null && dockWidth > 0;
     const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
       <NewMessagesPill
@@ -416,34 +426,51 @@ export function FullscreenLayout({
     return (
       <PromptOverlayProvider>
         <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
-          {/* $xc — scroll + sidebar row */}
+          {/* densable U8e: scroll+sidebar row, then dock sibling (iZ). */}
           <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
-            <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
-              {headerPrompt != null && <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />}
-              <ScrollBox
-                ref={scrollRef}
-                flexGrow={1}
-                flexDirection="column"
-                paddingTop={padCollapsed ? 0 : 1}
-                stickyScroll
-                followGrowth={getAutoScrollEnabled()}
-              >
-                {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
-                <ScrollChromeContext value={chromeCtx}>
-                  {scrollable}
-                  <AxcScrollAnchor />
-                </ScrollChromeContext>
-              </ScrollBox>
-              {pillNode}
-              {bottomFloat != null && (
-                <Box position="absolute" bottom={0} right={0} opaque>
-                  {bottomFloat}
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
+              <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
+                <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
+                  {headerPrompt != null && (
+                    <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
+                  )}
+                  <ScrollBox
+                    ref={scrollRef}
+                    flexGrow={1}
+                    flexDirection="column"
+                    paddingTop={padCollapsed ? 0 : 1}
+                    stickyScroll
+                    followGrowth={getAutoScrollEnabled()}
+                  >
+                    {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
+                    <ScrollChromeContext value={chromeCtx}>
+                      {scrollable}
+                      <AxcScrollAnchor />
+                    </ScrollChromeContext>
+                  </ScrollBox>
+                  {pillNode}
+                  {bottomFloat != null && (
+                    <Box position="absolute" bottom={0} right={0} opaque>
+                      {bottomFloat}
+                    </Box>
+                  )}
                 </Box>
-              )}
+                {sidebar != null && (
+                  <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
+                    {sidebar}
+                  </Box>
+                )}
+              </Box>
             </Box>
-            {sidebar != null && (
-              <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
-                {sidebar}
+            {dock != null && (
+              <Box
+                flexDirection="column"
+                width={dockWidth}
+                flexShrink={0}
+                overflow="hidden"
+                display={dockVisible ? 'flex' : 'none'}
+              >
+                {dock}
               </Box>
             )}
           </Box>

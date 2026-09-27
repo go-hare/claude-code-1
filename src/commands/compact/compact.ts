@@ -277,7 +277,7 @@ export function resolveMainThreadAgentDefinition(
     : undefined
 }
 
-async function getCacheSharingParams(
+export async function getCacheSharingParams(
   context: ToolUseContext,
   forkContextMessages: Message[],
 ): Promise<{

@@ -24,11 +24,17 @@ export const STREAMING_TEXT_FLUSH_MS = 100
 export const STREAM_FLAG_RAW = 1
 export const STREAM_FLAG_DISPLAYED = 2
 export const STREAM_FLAG_HIDE_TRAILING = 4
-export const STREAM_FLAG_SALVAGE = 8
+
+/** densable live MessageDisplay: prefix of raw replaced by hook text. */
+export type StreamingTextRewrite = {
+  original: string
+  text: string
+}
 
 export type StreamingDisplayState = {
   raw: string | null
   transformed: string | null
+  rewrite: StreamingTextRewrite | null
   salvage: string | null
   exact: boolean
 }
@@ -42,6 +48,7 @@ export type StreamingDisplayResolved = {
 export type StreamingDisplayStore = {
   setRaw: (raw: string | null) => void
   setTransformed: (transformed: string | null) => void
+  setRewrite: (rewrite: StreamingTextRewrite | null) => void
   setSalvage: (salvage: string | null, exact?: boolean) => void
   getState: () => StreamingDisplayState
   getFlags: () => number
@@ -98,24 +105,41 @@ function softJoinSalvage(prefix: string, next: string): string {
 
 const resolveCache = new WeakMap<object, StreamingDisplayResolved>()
 
-/** densable Qci */
+/**
+ * Completed-line slice used by tests of the newline rule.
+ *
+ * The live hook flush is `messageDisplayTransform` (`lastIndexOf('\\n')+1`,
+ * empty slice skipped). The raw REPL flush does not call this: it writes the
+ * whole buffer and lets `hideTrailingLine` drop the open tail.
+ */
+export function streamingPreviewRaw(text: string): string | null {
+  const end = text.lastIndexOf('\n') + 1
+  if (end <= 0) return null
+  const sliced = text.slice(0, end)
+  if (isEmptyMessageText(sliced)) return null
+  return sliced
+}
+
+/** densable Sy */
 export function resolveStreamingDisplay(
   state: StreamingDisplayState,
 ): StreamingDisplayResolved {
   const cached = resolveCache.get(state)
   if (cached) return cached
-  const { raw, transformed, salvage, exact } = state
-  const base = transformed ?? (raw || null)
-  // densable: (salvage?r7o:base)||null — falsy only. Whitespace / strip-only
-  // XML / "(no content)" still truthy there and would paint a lone ● + set
-  // STREAM_FLAG_DISPLAYED (hiding Cooking). Use the same isEmptyMessageText
-  // gate as AssistantTextMessage / StreamingTextPreview.
+  const { raw, transformed, rewrite, salvage, exact } = state
+  // Live hook: if raw still starts with the replaced prefix, show hook text
+  // plus the tail the hook has not covered yet.
+  const rewritten =
+    rewrite !== null && raw?.startsWith(rewrite.original)
+      ? rewrite.text + raw.slice(rewrite.original.length)
+      : raw || null
+  const base = transformed ?? rewritten
   const merged =
     (salvage !== null
       ? mergeSalvagePrefix(salvage, base ?? '', exact)
       : base) || null
-  const displayed =
-    merged !== null && !isEmptyMessageText(merged) ? merged : null
+  // 2.1.282: falsy only. Whitespace / "(no content)" still display.
+  const displayed = merged || null
   const resolved: StreamingDisplayResolved = {
     displayed,
     hideTrailingLine: transformed === null && !!raw,
@@ -130,6 +154,7 @@ export function createStreamingDisplayStore(): StreamingDisplayStore {
   let state: StreamingDisplayState = {
     raw: null,
     transformed: null,
+    rewrite: null,
     salvage: null,
     exact: false,
   }
@@ -151,6 +176,7 @@ export function createStreamingDisplayStore(): StreamingDisplayStore {
   return {
     setRaw: raw => setField('raw', raw),
     setTransformed: transformed => setField('transformed', transformed),
+    setRewrite: rewrite => setField('rewrite', rewrite),
     setSalvage: (salvage, exact) => {
       const nextExact = exact ?? state.exact
       if (state.salvage === salvage && state.exact === nextExact) return
@@ -166,8 +192,7 @@ export function createStreamingDisplayStore(): StreamingDisplayStore {
         (displayed !== null ? STREAM_FLAG_DISPLAYED : 0) |
         (displayed !== null && hideTrailingLine && !displayedHasNewline
           ? STREAM_FLAG_HIDE_TRAILING
-          : 0) |
-        (state.salvage !== null ? STREAM_FLAG_SALVAGE : 0)
+          : 0)
       )
     },
     subscribe(listener) {

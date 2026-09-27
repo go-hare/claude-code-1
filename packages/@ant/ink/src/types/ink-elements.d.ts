@@ -48,6 +48,7 @@ declare global {
         rawText?: string
         rawWidth?: number
         rawHeight?: number
+        ref?: unknown
       }
     }
   }

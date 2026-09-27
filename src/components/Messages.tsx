@@ -8,11 +8,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { every } from 'src/utils/set.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
-import { BLACK_CIRCLE } from '../constants/figures.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import type { ScrollBoxHandle } from '@anthropic/ink';
 import { useTerminalNotification } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import { Box } from '@anthropic/ink';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
@@ -62,7 +61,6 @@ import { renderableSearchText } from '../utils/transcriptSearch.js';
 import { Divider } from '@anthropic/ink';
 import type { UnseenDivider } from './FullscreenLayout.js';
 import { LogoV2 } from './LogoV2/LogoV2.js';
-import { StreamingMarkdown } from './Markdown.js';
 import { hasContentAfterIndex, MessageRow } from './MessageRow.js';
 import {
   InVirtualListContext,
@@ -295,13 +293,11 @@ type Props = {
   hidePastThinking?: boolean;
   /** Streaming thinking content (live updates, not frozen) */
   streamingThinking?: StreamingThinking | null;
-  /** Streaming text preview string (legacy / tests). Prefer streamingPreview. */
-  streamingText?: string | null;
   /**
-   * densable streamingPreview (XEl element). When set, rendered instead of the
-   * inline streamingText row. Mounted for the whole isLoading window; XEl
-   * itself returns null when the store has no displayed text. Do not use
-   * truthiness of this prop for collapsed-group past-tense (use hasStreamingText).
+   * Official 2.1.150 preview row (`P && !brief`). Mounted for the whole
+   * isLoading window; the row itself returns null until a completed line
+   * exists. Do not use truthiness of this prop for collapsed-group past-tense
+   * (use hasStreamingText).
    */
   streamingPreview?: React.ReactNode;
   /**
@@ -434,7 +430,6 @@ const MessagesImpl = ({
   isLoading,
   hidePastThinking = false,
   streamingThinking,
-  streamingText,
   streamingPreview,
   hasStreamingText,
   isBriefOnly = false,
@@ -876,11 +871,9 @@ const MessagesImpl = ({
   const renderMessageRow = (msg: RenderableMessage, index: number) => {
     const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
     const isUserContinuation = msg.type === 'user' && prevType === 'user';
-    // densable: Tt = collapsed_read_search && (y || aem(...))
-    // y = hasStreamingText only (U2a / STREAM_FLAG_DISPLAYED). Do NOT OR
-    // streamingPreview — preview element is mounted for the whole isLoading
-    // window while XEl may still return null, which falsely past-tenses
-    // "Ran N bash commands" and leaves a lone ● before Cooking.
+    // Official 2.1.150: collapsed && (!!streamingText || hasContentAfter).
+    // hasStreamingText is that string (null until a completed line), not the
+    // preview element — the element stays mounted for the whole isLoading window.
     const hasContentAfter =
       msg.type === 'collapsed_read_search' &&
       (!!hasStreamingText || hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
@@ -1040,21 +1033,8 @@ const MessagesImpl = ({
         renderableMessages.flatMap(renderMessageRow)
       )}
 
-      {/* densable: streamingPreview (XEl) preferred; fallback string path for tests */}
-      {!isBriefOnly && streamingPreview
-        ? streamingPreview
-        : streamingText && (
-            <Box alignItems="flex-start" flexDirection="row" marginTop={1} width="100%">
-              <Box flexDirection="row">
-                <Box minWidth={2}>
-                  <Text color="text">{BLACK_CIRCLE}</Text>
-                </Box>
-                <Box flexDirection="column">
-                  <StreamingMarkdown>{streamingText}</StreamingMarkdown>
-                </Box>
-              </Box>
-            </Box>
-          )}
+      {/* Official 2.1.150: one preview row. Null until a completed line. */}
+      {!isBriefOnly && streamingPreview}
 
       {isStreamingThinkingVisible && streamingThinking && !isBriefOnly && (
         <Box marginTop={1}>

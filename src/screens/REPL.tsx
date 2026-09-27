@@ -51,7 +51,7 @@ import {
 import { useNotifications } from '../context/notifications.js';
 import { sendNotification } from '../services/notifier.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
-import { useTerminalNotification, hasCursorUpViewportYankBug } from '@anthropic/ink';
+import { useTerminalNotification } from '@anthropic/ink';
 import {
   createFileStateCacheWithSizeLimit,
   mergeFileStateCaches,
@@ -126,7 +126,45 @@ import {
   registerLeaderSetToolPermissionContext,
   unregisterLeaderSetToolPermissionContext,
   removeLeaderToolUseConfirm,
+  pushLeaderToolUseConfirm,
 } from '../utils/swarm/leaderPermissionBridge.js';
+import {
+  getRegisteredPluginAgentDefinitions,
+  setAgentSpawnHandler,
+  setCommandRunHandler,
+  setFunctionHooksAppStateReader,
+  setFunctionHooksAppStateWriter,
+  setFunctionHooksTurnReader,
+  setPromptSubmitHandler,
+  setSessionCompactHandler,
+  setToolCallHandler,
+  setFunctionHooksToolUseContext,
+  setTurnAbortHandler,
+  setUiAskHostHandler,
+  getShownPluginPane,
+  getRasterFrameVersion,
+  subscribeRasterFrames,
+} from '../utils/plugins/functionHooksModules.js';
+import {
+  PluginAbovePromptSite,
+  PluginDockGrip,
+  PluginPaneSite,
+  PluginRowGrip,
+  PluginPaneKeyResize,
+  chooseDockRoom,
+  chooseInlineRoom,
+  getDockRoomColumns,
+  getInlineRoomRows,
+  keepPluginPaneRoom,
+  pluginPaneDockColumns,
+  pluginPaneInlineRows,
+  subscribeDockRoom,
+  DOCK_GRIP_COLUMNS,
+  DOCK_KEY_COLUMNS,
+  INLINE_KEY_ROWS,
+} from '../components/PluginRasterPanes.js';
+import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
+import { AgentTool } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js';
 import { endInteractionSpan } from '../utils/telemetry/sessionTracing.js';
 import { useLogMessages } from '../hooks/useLogMessages.js';
 import { useReplBridge } from '../hooks/useReplBridge.js';
@@ -226,7 +264,6 @@ import { isHumanTurn } from '../utils/messagePredicates.js';
 import {
   STREAM_FLAG_DISPLAYED,
   STREAM_FLAG_HIDE_TRAILING,
-  STREAM_FLAG_SALVAGE,
   createStreamingDisplayStore,
   createStreamingTextFlushBuffer,
   mergeSalvagePrefix,
@@ -2176,6 +2213,48 @@ export function REPL({
     return () => unregisterLeaderToolUseConfirmQueue();
   }, [setToolUseConfirmQueue, dialogStore]);
 
+  // densable `$.ui.ask` host: AskUserQuestion permission dialog.
+  useEffect(() => {
+    setFunctionHooksAppStateReader(() => store.getState());
+    setFunctionHooksAppStateWriter(store.setState);
+    setUiAskHostHandler(input => {
+      const toolUseID = randomUUID();
+      const questions = input.questions;
+      return new Promise(resolve => {
+        const confirm: ToolUseConfirm = {
+          assistantMessage: createAssistantMessage({ content: '' }),
+          tool: AskUserQuestionTool as never,
+          description: questions[0]?.question ?? 'AskUserQuestion',
+          input: { questions },
+          toolUseContext: {} as never,
+          toolUseID,
+          permissionResult: { behavior: 'ask', message: 'ask' },
+          permissionPromptStartTimeMs: Date.now(),
+          onUserInteraction() {},
+          onAbort() {
+            resolve({ deny: 'the dialog was dismissed' });
+          },
+          onAllow(updatedInput) {
+            const answers = (updatedInput as { answers?: Record<string, string> })?.answers;
+            resolve({ result: { answers: answers ?? {} } });
+          },
+          onReject(feedback) {
+            resolve({ deny: feedback || 'the dialog was dismissed' });
+          },
+          async recheckPermission() {},
+        };
+        if (!pushLeaderToolUseConfirm(confirm)) {
+          resolve({ deny: 'the dialog was dismissed' });
+        }
+      });
+    });
+    return () => {
+      setUiAskHostHandler(undefined);
+      setFunctionHooksAppStateReader(undefined);
+      setFunctionHooksAppStateWriter(undefined);
+    };
+  }, [store]);
+
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
   // densable je/Wt — turn-start snapshot for idle-fork nzu(replyOnResume).
@@ -2593,18 +2672,9 @@ export function REPL({
   // must be called before the first API call so the model sees hook context.
   const awaitPendingHooks = useDeferredHookMessages(pendingHookMessages, setMessages);
 
-  // Deferred messages for the Messages component — renders at transition
-  // priority so the reconciler yields every 5ms, keeping input responsive
-  // while the expensive message processing pipeline runs.
-  // Cap at 500 messages to limit memory double-buffering. The bypass
-  // at display-time uses sync messages during streaming and non-loading,
-  // so this cap only affects reduced-motion scenarios.
-  const DEFERRED_CAP = 500;
-  const cappedMessages = React.useMemo(
-    () => (messages.length > DEFERRED_CAP ? messages.slice(-DEFERRED_CAP) : messages),
-    [messages],
-  );
-  const deferredMessages = useDeferredValue(cappedMessages);
+  // Official 2.1.150 rEH: useDeferredValue(messages), the full list.
+  // No 500-message slice — while loading, older turns stay in the deferred tree.
+  const deferredMessages = useDeferredValue(messages);
   const deferredBehind = messages.length - deferredMessages.length;
   if (deferredBehind > 0) {
     logForDebugging(
@@ -2764,12 +2834,10 @@ export function REPL({
     }
   }, []);
 
-  // densable 2.1.222 streaming path: UNf flush buffer (pH) → WNf display store
-  // (ck) → XEl StreamingTextPreview. Atomic clear on assistant land
-  // (messages.ts: onStreamingText(()=>null) then onMessage) prevents dual-●.
-  // l5 = !prefersReducedMotion && !hasCursorUpViewportYankBug (densable UZu).
+  // Flush buffer → display store → preview. Atomic clear on land avoids dual-●.
+  // 2.1.282: preview off only for reduced motion and Windows Terminal.
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
-  const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
+  const showStreamingText = !reducedMotion && !process.env.WT_SESSION;
   const showStreamingTextRef = useRef(showStreamingText);
   showStreamingTextRef.current = showStreamingText;
   // densable ck / WNf
@@ -2783,6 +2851,9 @@ export function REPL({
           return () => clearTimeout(id);
         },
         onFlush: raw => {
+          // 2.1.282 raw path (no MessageDisplay hook): the whole buffer.
+          // hideTrailingLine drops the open tail. A short first line mounts
+          // the bullet before the text; that is the official raw path.
           streamingDisplayStore.setRaw(raw);
         },
       }),
@@ -2812,16 +2883,13 @@ export function REPL({
     () => <StreamingTextPreview store={streamingDisplayStore} />,
     [streamingDisplayStore],
   );
-  // densable cX / stream clear: pH.clear only → setRaw(null).
-  // Intentionally does NOT setSalvage(null): refusal_continuation keeps
-  // salvage painted across message_start/content_block_start clears (Qci
-  // salvage-only displayed). Salvage is dropped only by densable sites:
-  // land (setSalvage null + Jpe), esc, refusal end, and !Ln && j2a effect.
-  // Local hardening vs densable cX: also setTransformed(null) to kill dual-●
-  // residuals when turn ends without a transform finalize race.
+  // densable beginTurn: clear the buffer, then drop transformed and rewrite.
+  // Salvage is not a flag bit. It is cleared on land, esc, refusal end,
+  // reset, and when loading ends while salvage is still set.
   const clearStreamingText = useCallback(() => {
     streamingFlushBuffer.clear();
     streamingDisplayStore.setTransformed(null);
+    streamingDisplayStore.setRewrite(null);
   }, [streamingFlushBuffer, streamingDisplayStore]);
 
   // densable mG / wth — MessageDisplay transform controller
@@ -2840,9 +2908,13 @@ export function REPL({
       createMessageDisplayTransform({
         getAppState: () => store.getState(),
         onStreamingDisplay: content => {
-          // densable: if (!z8.current) return — skip paint when reduced motion / yank bug
+          // densable: if (!z8.current) return — skip paint when reduced motion / WT_SESSION
           if (!showStreamingTextForTransformRef.current) return;
           streamingDisplayStore.setTransformed(content);
+        },
+        onStreamingRewrite: rewrite => {
+          if (!showStreamingTextForTransformRef.current) return;
+          streamingDisplayStore.setRewrite(rewrite);
         },
         onMessageDisplay: (apiMessageId, content) => {
           const salvage = salvageRef.current;
@@ -2869,9 +2941,9 @@ export function REPL({
       }),
     [store, setAppState, streamingDisplayStore],
   );
-  // densable: if (!Ln && (p4 & j2a) !== 0) ck.setSalvage(null)
+  // densable: preview subscribe drops salvage once the turn is no longer loading.
   useEffect(() => {
-    if (!isLoading && (streamingFlags & STREAM_FLAG_SALVAGE) !== 0) {
+    if (!isLoading && streamingDisplayStore.getState().salvage !== null) {
       streamingDisplayStore.setSalvage(null);
     }
   }, [isLoading, streamingFlags, streamingDisplayStore]);
@@ -3179,10 +3251,10 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // densable zm: (!Jbe || (p4&B2a)!==0 || Je)
-    // Hide spinner when streaming preview is up, unless raw single-line
-    // stream (B2a = hideTrailing && !newline) — then spinner+● coexist.
-    // isBriefOnly (Je) suppresses preview paint so spinner stays.
+    // 2.1.282: (!hasDisplayed || tailBlank || brief). tailBlank is a raw
+    // single line with no newline: the bullet is up, wrap-stream hides the
+    // line, and the spinner stays. Hook output is transformed, so this flag
+    // is off and the spinner hides once that sliced text is showing.
     (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
 
   // Host / gold _Zt overlays waiting for user — suppress surveys
@@ -4384,7 +4456,23 @@ export function REPL({
           isNonInteractiveSession: false,
           dynamicMcpConfig,
           theme,
-          agentDefinitions: allowedAgentTypes ? { ...s.agentDefinitions, allowedAgentTypes } : s.agentDefinitions,
+          agentDefinitions: (() => {
+            const registered = getRegisteredPluginAgentDefinitions();
+            const defs = s.agentDefinitions;
+            if (registered.length === 0) {
+              return allowedAgentTypes ? { ...defs, allowedAgentTypes } : defs;
+            }
+            const seen = new Set(defs.activeAgents.map(a => a.agentType));
+            const extra = registered.filter(a => !seen.has(a.agentType));
+            const allSeen = new Set(defs.allAgents.map(a => a.agentType));
+            const extraAll = registered.filter(a => !allSeen.has(a.agentType));
+            const merged = {
+              ...defs,
+              activeAgents: extra.length === 0 ? defs.activeAgents : [...defs.activeAgents, ...extra],
+              allAgents: extraAll.length === 0 ? defs.allAgents : [...defs.allAgents, ...extraAll],
+            };
+            return allowedAgentTypes ? { ...merged, allowedAgentTypes } : merged;
+          })(),
           customSystemPrompt,
           appendSystemPrompt,
           appendSubagentSystemPrompt,
@@ -4556,6 +4644,148 @@ export function REPL({
       strictMcpConfig,
     ],
   );
+
+  // densable `$.agent.spawn` host: Agent tool, launch-only (run_in_background).
+  useEffect(() => {
+    setAgentSpawnHandler(async input => {
+      const ctx = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
+      const model = input.model;
+      const spawnModel =
+        model === 'sonnet' || model === 'opus' || model === 'haiku' || model === 'fable' ? model : undefined;
+      try {
+        const result = await AgentTool.call(
+          {
+            prompt: String(input.prompt ?? ''),
+            description: String(input.description ?? ''),
+            run_in_background: true,
+            ...(typeof input.subagent_type === 'string'
+              ? { subagent_type: input.subagent_type }
+              : typeof input.subagentType === 'string'
+                ? { subagent_type: input.subagentType }
+                : {}),
+            ...(typeof input.name === 'string' ? { name: input.name } : {}),
+            ...(typeof input.cwd === 'string' ? { cwd: input.cwd } : {}),
+            ...(spawnModel !== undefined ? { model: spawnModel } : {}),
+          },
+          ctx as unknown as import('../Tool.js').ToolUseContext,
+          canUseTool,
+          createAssistantMessage({ content: '' }),
+        );
+        const data = result.data as {
+          status?: string;
+          agentId?: string;
+        };
+        if (data.status === 'async_launched' && typeof data.agentId === 'string') {
+          return { result: { agentId: data.agentId } };
+        }
+        return { result: data };
+      } catch (error) {
+        return {
+          isError: true,
+          text: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    return () => setAgentSpawnHandler(undefined);
+  }, [getToolUseContext, canUseTool, mainLoopModel]);
+
+  useEffect(() => {
+    setCommandRunHandler(slash => {
+      enqueue({ mode: 'prompt', value: String(slash), priority: 'next' });
+      return { queued: true, value: String(slash) };
+    });
+    return () => setCommandRunHandler(undefined);
+  }, []);
+
+  useEffect(() => {
+    setFunctionHooksTurnReader(() => {
+      const ac = abortControllerRef.current;
+      if (!ac || ac.signal.aborted) return undefined;
+      return { turnId: 'running' };
+    });
+    setTurnAbortHandler(async ({ turnId }) => {
+      const ac = abortControllerRef.current;
+      if (!ac || ac.signal.aborted) {
+        throw new Error(`$.turn.abort: no turn is running (asked for ${turnId})`);
+      }
+      ac.abort('user-cancel');
+      return { aborted: turnId };
+    });
+    setSessionCompactHandler(async ({ instructions }) => {
+      const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
+      const { getCacheSharingParams } = await import('../commands/compact/compact.js');
+      const { getMessagesAfterCompactBoundary } = await import('../utils/messages.js');
+      const msgs = getMessagesAfterCompactBoundary(messagesRef.current);
+      const ctx = getToolUseContext(msgs, [], new AbortController(), mainLoopModel);
+      const result = await compactConversation(
+        msgs,
+        ctx as unknown as import('../Tool.js').ToolUseContext,
+        await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
+        false,
+        instructions === '' ? undefined : instructions,
+        false,
+      );
+      setMessages(buildPostCompactMessages(result) as typeof msgs);
+      return { compacted: true };
+    });
+    return () => {
+      setTurnAbortHandler(undefined);
+      setFunctionHooksTurnReader(undefined);
+      setSessionCompactHandler(undefined);
+    };
+  }, [getToolUseContext, mainLoopModel, setMessages]);
+
+  useEffect(() => {
+    setPromptSubmitHandler(async ({ text }) => {
+      enqueue({ mode: 'prompt', value: text, priority: 'next' });
+      return { ok: true };
+    });
+    return () => setPromptSubmitHandler(undefined);
+  }, []);
+
+  useEffect(() => {
+    // densable XL `$3`: bind session tool-use context so $.tool.call / $.mcp.call
+    // stream runToolUse. Handler remains a test/compat stand-in when unbound.
+    setFunctionHooksToolUseContext({
+      getToolUseContext: () => getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel),
+      canUseTool,
+      getParentAssistantMessage: () => createAssistantMessage({ content: '' }),
+    });
+    setToolCallHandler(async input => {
+      const tools = store.getState().mcp?.tools
+        ? assembleToolPool(store.getState().toolPermissionContext, store.getState().mcp.tools)
+        : [];
+      const merged = mergeAndFilterTools(combinedInitialTools, tools, store.getState().toolPermissionContext.mode);
+      const name = String(input.tool ?? '');
+      const tool = merged.find(item => item.name === name);
+      if (!tool || typeof tool.call !== 'function') {
+        return {
+          isError: true,
+          text: `no tool named "${name}" in this session`,
+        };
+      }
+      const { tool: _tool, ...args } = input;
+      try {
+        const ctx = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
+        const result = await tool.call(
+          args,
+          ctx as unknown as import('../Tool.js').ToolUseContext,
+          canUseTool,
+          createAssistantMessage({ content: '' }),
+        );
+        return result;
+      } catch (error) {
+        return {
+          isError: true,
+          text: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    return () => {
+      setToolCallHandler(undefined);
+      setFunctionHooksToolUseContext(undefined);
+    };
+  }, [getToolUseContext, canUseTool, mainLoopModel, combinedInitialTools]);
 
   // densable luf/Weo: stranded pendingMessages → drain + Aye resume
   useStrandedAgentResume({
@@ -7329,7 +7559,7 @@ export function REPL({
   // wrapping). Clearing searchQuery triggers VML's setSearchQuery('')
   // which clears positionsCache + setPositions(null). Bar closes.
   // User hits / again → fresh everything.
-  const transcriptCols = useTerminalSize().columns;
+  const { columns: transcriptCols, rows: transcriptRows } = useTerminalSize();
   const prevColsRef = React.useRef(transcriptCols);
   React.useEffect(() => {
     if (prevColsRef.current !== transcriptCols) {
@@ -7490,29 +7720,22 @@ export function REPL({
   const viewedTeammateTask = viewedTask && isInProcessTeammateTask(viewedTask) ? viewedTask : undefined;
   const viewedAgentTask = viewedTeammateTask ?? (viewedTask && isLocalAgentTask(viewedTask) ? viewedTask : undefined);
 
-  // Bypass useDeferredValue when streaming text is showing so Messages renders
-  // the final message in the same frame streaming text clears. Also bypass when
-  // not loading — deferredMessages only matters during streaming (keeps input
-  // responsive); after the turn ends, showing messages immediately prevents a
-  // jitter gap where the spinner is gone but the answer hasn't appeared yet.
-  // Only reducedMotion / Windows yank-bug users keep the deferred path during
-  // loading — except while the submit placeholder bridge is active (densable
-  // PKe: keep sync until deferred catches the post-submit messages so the echo
-  // line does not blank for a frame when deferred lags).
+  // Official 2.1.150: deferMessages = !viewingAgent && !previewEnabled && isLoading.
+  // previewEnabled is the default (no reduced motion, not Windows Terminal),
+  // so a normal turn passes messages through unsliced. Defer only when preview
+  // is off and the turn is still loading. Placeholder bridge still forces sync
+  // until deferred catches the submit, so the echoed input does not blank.
   if (
     placeholderBridgePendingRef.current &&
     placeholderBaseline !== undefined &&
     messages.length > placeholderBaseline
   ) {
-    const deferredCaught =
-      messages.length > DEFERRED_CAP
-        ? deferredMessages === cappedMessages
-        : deferredMessages.length > placeholderBaseline;
+    const deferredCaught = deferredMessages.length > placeholderBaseline;
     if (deferredCaught) {
       placeholderBridgePendingRef.current = false;
     }
   }
-  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== cappedMessages;
+  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== messages;
   const usesSyncMessages = showStreamingText || !isLoading || placeholderBridgeActive;
   // When viewing an agent, never fall through to leader — empty until
   // bootstrap/stream fills. Closes the see-leader-type-agent footgun.
@@ -7845,6 +8068,24 @@ export function REPL({
     columns: transcriptCols,
     hasGitRepo: diffSidebarHasGitRepo(),
   });
+  // densable REPL: WC=Kg.useDockColumns(Pk); IU=un&&ym===0?WC:0; _g=AX?IU:0;
+  // zC=un&&WC>0 (InlinePanes docked). AX = shown pane. Skip oL grip.
+  useSyncExternalStore(subscribeRasterFrames, getRasterFrameVersion, getRasterFrameVersion);
+  const chosenDock = useSyncExternalStore(subscribeDockRoom, getDockRoomColumns, getDockRoomColumns);
+  const chosenInline = useSyncExternalStore(subscribeDockRoom, getInlineRoomRows, getInlineRoomRows);
+  const pluginDockColumns = pluginPaneDockColumns(transcriptCols, chosenDock);
+  const pluginDockOffered = isFullscreenEnvEnabled() && replDiffSidebarWidth === 0 ? pluginDockColumns : 0;
+  const shownPluginPane = getShownPluginPane();
+  const pluginDockWidth = shownPluginPane !== undefined ? pluginDockOffered : 0;
+  const panesDocked = isFullscreenEnvEnabled() && pluginDockColumns > 0;
+  const pluginInlineRequested =
+    shownPluginPane !== undefined ? shownPluginPane.bodyRows + (shownPluginPane.title ? 1 : 0) : undefined;
+  const pluginInlineRows = pluginPaneInlineRows(
+    transcriptRows,
+    isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+    chosenInline,
+    pluginInlineRequested,
+  );
   // <AlternateScreen> at the root: everything below is inside its
   // <Box height={rows}>. Handlers/contexts are zero-height so ScrollBox's
   // flexGrow in FullscreenLayout resolves against this Box. The transcript
@@ -7869,6 +8110,38 @@ export function REPL({
         />
       ) : null}
       <CommandKeybindingHandlers onSubmit={onSubmit} isActive={!toolJSX?.isLocalJSXCommand} />
+      {shownPluginPane !== undefined ? (
+        panesDocked ? (
+          <PluginPaneKeyResize
+            isActive
+            docked
+            cells={pluginDockWidth}
+            step={DOCK_KEY_COLUMNS}
+            resizeTo={next => {
+              const resized = pluginPaneDockColumns(transcriptCols, next);
+              chooseDockRoom(resized);
+              return resized;
+            }}
+          />
+        ) : (
+          <PluginPaneKeyResize
+            isActive
+            docked={false}
+            cells={pluginInlineRows}
+            step={INLINE_KEY_ROWS}
+            resizeTo={next => {
+              const resized = pluginPaneInlineRows(
+                transcriptRows,
+                isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+                next,
+                pluginInlineRequested,
+              );
+              chooseInlineRoom(resized);
+              return resized;
+            }}
+          />
+        )
+      ) : null}
       {/* ScrollKeybindingHandler must mount before CancelRequestHandler so
           ctrl+c-with-selection copies instead of cancelling the active task.
           Its raw useInput handler only stops propagation when a selection
@@ -7900,6 +8173,25 @@ export function REPL({
             sidebarWidth={replDiffSidebarWidth}
             sidebar={
               <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
+            }
+            dockWidth={pluginDockWidth}
+            dock={
+              pluginDockWidth > 0 ? (
+                <Box flexGrow={1} flexDirection="row" width={pluginDockWidth}>
+                  <PluginDockGrip
+                    columns={pluginDockWidth}
+                    onResize={next => {
+                      const resized = pluginPaneDockColumns(transcriptCols, next);
+                      chooseDockRoom(resized);
+                      return resized;
+                    }}
+                    onSettle={keepPluginPaneRoom}
+                  />
+                  <Box flexGrow={1} flexDirection="column" width={Math.max(0, pluginDockWidth - DOCK_GRIP_COLUMNS)}>
+                    <PluginPaneSite fill={true} />
+                  </Box>
+                </Box>
+              ) : undefined
             }
             onPillClick={() => {
               setCursor(null);
@@ -7943,6 +8235,36 @@ export function REPL({
                   setCursor={setCursor}
                   cursorNavRef={cursorNavRef}
                 />
+                {panesDocked ? null : shownPluginPane !== undefined ? (
+                  <Box
+                    flexDirection="column"
+                    flexShrink={0}
+                    width={transcriptCols}
+                    height={pluginInlineRows}
+                    overflow="hidden"
+                    position="relative"
+                  >
+                    <PluginPaneSite fill={false} columns={transcriptCols} rows={pluginInlineRows} />
+                    {pluginInlineRows > 0 && transcriptCols > 0 ? (
+                      <PluginRowGrip
+                        columns={transcriptCols}
+                        rows={pluginInlineRows}
+                        onResize={next => {
+                          const resized = pluginPaneInlineRows(
+                            transcriptRows,
+                            isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+                            next,
+                          );
+                          chooseInlineRoom(resized);
+                          return resized;
+                        }}
+                        onSettle={keepPluginPaneRoom}
+                      />
+                    ) : null}
+                  </Box>
+                ) : (
+                  <PluginPaneSite fill={false} />
+                )}
                 <AwsAuthStatusBox />
                 {/* Hide the processing placeholder while a modal is showing —
                   it would sit at the last visible transcript row right above
@@ -8434,6 +8756,15 @@ export function REPL({
                           inputValue={inputValue}
                           setInputValue={setInputValue}
                           onOpenFeedback={handleSurveyRequestFeedback}
+                        />
+                        <PluginAbovePromptSite
+                          isWorking={isLoading}
+                          hasSurvey={
+                            postCompactSurvey.state !== 'closed' ||
+                            memorySurvey.state !== 'closed' ||
+                            feedbackSurvey.state !== 'closed' ||
+                            frustrationDetection.state !== 'closed'
+                          }
                         />
                         <PromptInput
                           debug={debug}

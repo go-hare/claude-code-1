@@ -10,18 +10,18 @@ import { join } from 'path'
 const ROOT = join(import.meta.dir, '../../..')
 
 describe('densable zm streaming spinner gate', () => {
-  test('REPL showSpinner uses STREAM_FLAG_HIDE_TRAILING (B2a)', () => {
+  test('REPL showSpinner stays while the open line is hidden', () => {
     const src = readFileSync(
       join(ROOT, 'src/screens/REPL.tsx'),
       'utf8',
     ).replace(/\r\n/g, '\n')
-    expect(src).toContain('STREAM_FLAG_HIDE_TRAILING')
-    // densable: (!Jbe || (p4&B2a)!==0 || Je)
     expect(src).toContain('!hasStreamingText ||')
     expect(src).toContain(
       '(streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 ||',
     )
     expect(src).toContain('isBriefOnly);')
+    expect(src).toContain('!reducedMotion && !process.env.WT_SESSION')
+    expect(src).not.toContain('hasCursorUpViewportYankBug')
   })
 
   test('Messages hasContentAfter is densable y||aem only (no streamingPreview invent)', () => {
@@ -46,24 +46,17 @@ describe('densable zm streaming spinner gate', () => {
       join(ROOT, 'src/components/StreamingTextPreview.tsx'),
       'utf8',
     ).replace(/\r\n/g, '\n')
-    expect(src).toContain('isEmptyMessageText')
-    expect(src).toContain(
-      'if (!displayed || isEmptyMessageText(displayed)) return null',
-    )
+    expect(src).toContain('if (!displayed) return null')
+    expect(src).toContain('hideTrailingLine={hideTrailingLine}')
   })
 
-  test('streamingTextStore resolve uses isEmptyMessageText (DISPLAYED matches visible)', () => {
-    // A: store-level gate so STREAM_FLAG_DISPLAYED is not set for strip-only
-    // / (no content) — otherwise zm hides Cooking while XEl paints nothing.
+  test('raw flush writes the whole buffer', () => {
     const src = readFileSync(
-      join(ROOT, 'src/utils/streamingTextStore.ts'),
+      join(ROOT, 'src/screens/REPL.tsx'),
       'utf8',
     ).replace(/\r\n/g, '\n')
-    expect(src).toContain("from './emptyMessageText.js'")
-    expect(src).toContain('!isEmptyMessageText(merged)')
-    expect(src).toContain(
-      'merged !== null && !isEmptyMessageText(merged) ? merged : null',
-    )
+    expect(src).toContain('streamingDisplayStore.setRaw(raw)')
+    expect(src).not.toContain('streamingPreviewRaw(raw)')
   })
 
   test('gold handleTerminalFocus: atlas on blur→focus, no FOCUS_IN repaint', () => {
@@ -122,7 +115,7 @@ describe('densable zm streaming spinner gate', () => {
     const body = m![0]
     expect(body).toContain('streamingFlushBuffer.clear()')
     expect(body).toContain('setTransformed(null)')
-    // densable: salvage survives pH.clear; only land/esc/refusal/!Ln drop it
+    expect(body).toContain('setRewrite(null)')
     expect(body).not.toContain('setSalvage')
   })
 
@@ -133,7 +126,7 @@ describe('densable zm streaming spinner gate', () => {
     ).replace(/\r\n/g, '\n')
     // !Ln && j2a effect
     expect(src).toContain(
-      '!isLoading && (streamingFlags & STREAM_FLAG_SALVAGE) !== 0',
+      '!isLoading && streamingDisplayStore.getState().salvage !== null',
     )
     // land + esc + refusal end still call setSalvage(null)
     const setSalvageNullCount = (

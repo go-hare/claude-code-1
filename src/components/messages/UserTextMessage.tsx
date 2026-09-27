@@ -14,6 +14,7 @@ import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { extractTag, INTERRUPT_MESSAGE, INTERRUPT_MESSAGE_FOR_TOOL_USE } from '../../utils/messages.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { MessageResponse } from '../MessageResponse.js';
+import { PluginUserMessageSite } from '../PluginRasterPanes.js';
 import { UserAgentNotificationMessage } from './UserAgentNotificationMessage.js';
 import { UserBashInputMessage } from './UserBashInputMessage.js';
 import { UserBashOutputMessage } from './UserBashOutputMessage.js';
@@ -32,6 +33,16 @@ type Props = {
   planContent?: string;
   isTranscriptMode?: boolean;
   timestamp?: string;
+  /** densable `xI("UserMessage")` requestId (`URe` messageId). */
+  requestId?: string;
+  /** densable `kLo` origin — only stored plugin/channel, never invented. */
+  origin?: { kind: string; name?: string; [key: string]: unknown };
+  /** densable `URe` `isExpanded`. */
+  isExpanded?: boolean;
+  /** densable `URe` `task` — omit when unset. */
+  task?: unknown;
+  /** densable `URe` `from` — omit when unset. */
+  from?: unknown;
 };
 
 export function UserTextMessage({
@@ -41,6 +52,11 @@ export function UserTextMessage({
   planContent,
   isTranscriptMode,
   timestamp,
+  requestId,
+  origin,
+  isExpanded,
+  task,
+  from,
 }: Props): React.ReactNode {
   if (param.text.trim() === NO_CONTENT_MESSAGE) {
     return null;
@@ -166,7 +182,20 @@ export function UserTextMessage({
   }
 
   // User prompts>
-  return (
+  const prompt = (
     <UserPromptMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} timestamp={timestamp} />
+  );
+  if (requestId === undefined) return prompt;
+  return (
+    <PluginUserMessageSite
+      requestId={requestId}
+      text={param.text}
+      origin={origin}
+      isExpanded={isExpanded}
+      task={task}
+      from={from}
+    >
+      {prompt}
+    </PluginUserMessageSite>
   );
 }
