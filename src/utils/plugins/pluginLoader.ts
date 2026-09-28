@@ -32,6 +32,7 @@
  * - Error collection and reporting
  */
 
+import type { Dirent } from 'fs'
 import {
   copyFile,
   readdir,
@@ -163,6 +164,7 @@ import {
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
 import { calculatePluginVersion } from './pluginVersioning.js'
 import {
+  collectUnknownPluginHooksJsonKeyWarnings,
   PluginHooksSchema,
   PluginIdSchema,
   PluginManifestSchema,
@@ -435,8 +437,11 @@ export async function copyDir(src: string, dest: string): Promise<void> {
         const relativeLinkPath = relative(dirname(destPath), destTargetPath)
         await symlink(relativeLinkPath, destPath)
       } else {
-        // Target is outside source tree - use absolute resolved path
-        await symlink(resolvedTarget, destPath)
+        // densable ER: skip symlink whose resolved target leaves the source
+        // (containment) root — do not copy an absolute escape into the cache.
+        logForDebugging(
+          `copyDir: skipping symlink escaping containment root: ${srcPath} -> ${resolvedTarget}`,
+        )
       }
     }
   }
@@ -1649,8 +1654,15 @@ async function loadPluginHooks(
   // The hooks.json file has a wrapper structure with description and hooks
   // Use PluginHooksSchema to validate and extract the hooks property
   const validatedPluginHooks = PluginHooksSchema().parse(rawHooksConfig)
+  for (const message of collectUnknownPluginHooksJsonKeyWarnings(
+    rawHooksConfig,
+  )) {
+    logForDebugging(`Plugin ${pluginName}: ${message} (${hooksConfigPath})`, {
+      level: "warn",
+    })
+  }
 
-  return validatedPluginHooks.hooks as HooksSettings
+  return (validatedPluginHooks.hooks ?? {}) as HooksSettings
 }
 
 /**
@@ -3164,7 +3176,16 @@ async function loadOneZpfPathPlugin(
     marketplace === SYNCED_MARKETPLACE_NAME,
   )
   if (aff) {
-    return { plugin: undefined, errors: [aff, ...errors], warnings }
+    return {
+      plugin: undefined,
+      errors: [
+        aff.type === 'manifest-validation-error'
+          ? { ...aff, path: resolvedPath }
+          : aff,
+        ...errors,
+      ],
+      warnings,
+    }
   }
 
   stripUnprintablePluginVersion(plugin)
@@ -3194,6 +3215,118 @@ async function loadOneZpfPathPlugin(
   return { plugin, errors, warnings }
 }
 
+const PLUGIN_DIR_COLLECTION_SKIP = new Set(['__MACOSX', '.DS_Store'])
+
+/**
+ * densable Tfn / L5 — a directory is one plugin when `.claude-plugin/plugin.json`
+ * or a component marker other than a marketplace-only `.claude-plugin/` is at
+ * the top. Otherwise it is a folder of plugins (mQo collection).
+ */
+async function pluginDirTopMarker(dir: string): Promise<string | undefined> {
+  if (await pathExists(join(dir, '.claude-plugin', 'plugin.json'))) {
+    return '.claude-plugin/plugin.json'
+  }
+  for (const name of [
+    'commands',
+    'skills',
+    'agents',
+    'hooks',
+    'themes',
+    'output-styles',
+    'monitors',
+    'workflows',
+    'SKILL.md',
+    '.mcp.json',
+    '.lsp.json',
+  ]) {
+    if (await pathExists(join(dir, name))) return name
+  }
+  return undefined
+}
+
+type PluginDirCollectionClass =
+  | { kind: 'plugin'; marker: string }
+  | {
+      kind: 'collection'
+      children: string[]
+      skipped: string[]
+      isMarketplaceRoot: boolean
+    }
+  | { kind: 'unreadable' }
+
+/** densable L5 — classify a --plugin-dir path as one plugin vs a folder of plugins. */
+export async function classifyPluginDirCollection(
+  dir: string,
+): Promise<PluginDirCollectionClass> {
+  let entries: Dirent<string>[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return { kind: 'unreadable' }
+  }
+  const isMarketplaceRoot =
+    (await pathExists(join(dir, '.claude-plugin', 'marketplace.json'))) &&
+    !(await pathExists(join(dir, '.claude-plugin', 'plugin.json')))
+  const marker = await pluginDirTopMarker(dir)
+  if (marker !== undefined) {
+    return { kind: 'plugin', marker }
+  }
+  const childNames = entries
+    .filter(
+      e =>
+        (e.isDirectory() || e.isSymbolicLink()) &&
+        !e.name.startsWith('.') &&
+        !PLUGIN_DIR_COLLECTION_SKIP.has(e.name),
+    )
+    .map(e => e.name)
+    .toSorted()
+  const presence = await Promise.all(
+    childNames.map(name =>
+      pathExists(join(dir, name, '.claude-plugin', 'plugin.json')),
+    ),
+  )
+  return {
+    kind: 'collection',
+    children: childNames.filter((_, i) => presence[i]),
+    skipped: childNames.filter((_, i) => !presence[i]),
+    isMarketplaceRoot,
+  }
+}
+
+/** densable mQo — zip stays one entry; a folder of plugins expands to children. */
+export async function expandPluginDirCollectionEntries<
+  T extends { value: string },
+>(entries: T[]): Promise<T[]> {
+  const expanded = await Promise.all(
+    entries.map(async entry => {
+      if (isZpfZipPath(entry.value)) return [entry]
+      const abs = resolve(entry.value)
+      const classified = await classifyPluginDirCollection(abs)
+      if (classified.kind === 'plugin') {
+        logForDebugging(
+          `--plugin-dir ${abs} is one plugin: ${classified.marker} at its top marks it`,
+        )
+      }
+      if (classified.kind !== 'collection') return [entry]
+      logForDebugging(
+        `--plugin-dir ${abs} is a folder of plugins` +
+          (classified.isMarketplaceRoot
+            ? ` (its marketplace.json lists plugins and is not read here; with no plugin.json beside it the folder is not itself a plugin)`
+            : ' (nothing at its top marks it as one plugin)') +
+          `: loading ${classified.children.join(', ') || 'none'}` +
+          (classified.skipped.length > 0
+            ? `; no manifest in ${classified.skipped.join(', ')}`
+            : ''),
+      )
+      return classified.children.map(child => ({
+        ...entry,
+        value: join(abs, child),
+      }))
+    }),
+  )
+  return expanded.flat()
+}
+
 async function loadSessionOnlyPlugins(
   sessionPluginPaths: Array<string>,
   options?: { skipMcpDiscovery?: boolean },
@@ -3207,22 +3340,30 @@ async function loadSessionOnlyPlugins(
   }
 
   const skipMcp = options?.skipMcpDiscovery === true
+  // densable mQo: a --plugin-dir folder of plugins loads each child that has
+  // .claude-plugin/plugin.json; a zip or a plugin-shaped root stays one entry.
+  const expanded = await expandPluginDirCollectionEntries(
+    sessionPluginPaths.map(pluginPath => ({
+      value: pluginPath,
+      skipMcp,
+    })),
+  )
   // densable Zpf: Promise.all(e.map) then flatMap plugins/errors/warnings
   const items = await Promise.all(
-    sessionPluginPaths.map(async (pluginPath, index) => {
+    expanded.map(async (entry, index) => {
       try {
         return await loadOneZpfPathPlugin(
-          resolve(pluginPath),
+          resolve(entry.value),
           index,
           'inline',
           {
-            skipMcp,
+            skipMcp: entry.skipMcp,
           },
         )
       } catch (error) {
         const errorMsg = errorMessage(error)
         logForDebugging(
-          `Failed to load session plugin from ${pluginPath}: ${errorMsg}`,
+          `Failed to load session plugin from ${entry.value}: ${errorMsg}`,
           { level: 'warn' },
         )
         return {
@@ -3232,6 +3373,7 @@ async function loadSessionOnlyPlugins(
               type: 'generic-error' as const,
               source: `inline[${index}]`,
               error: `Failed to load plugin: ${errorMsg}`,
+              path: resolve(entry.value),
             },
           ],
           warnings: [],
@@ -3340,6 +3482,7 @@ export async function loadSyncedPlugins(
               type: 'generic-error' as const,
               source: `${SYNCED_MARKETPLACE_NAME}[${index}]`,
               error: `Failed to load plugin: ${errorMsg}`,
+              path: resolve(pluginPath),
             },
           ],
           warnings: [],

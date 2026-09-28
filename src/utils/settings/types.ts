@@ -69,6 +69,12 @@ export const PermissionsSchema = lazySchema(() =>
               .describe('Disable auto mode'),
           }
         : {}),
+      blockReadsOutsideWorkingDirectories: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, file tools refuse reads outside the working directories',
+        ),
       additionalDirectories: z
         .array(z.string())
         .transform(dirs => dirs.filter(dir => !dir.includes('\0')))
@@ -412,6 +418,19 @@ export const SettingsSchema = lazySchema(() =>
             'If undefined, all models are available. If empty array, only the default model is available. ' +
             'Typically set in managed settings by enterprise administrators.',
         ),
+      // densable 2.1.283 availableModelsMatch — managed policySettings only
+      availableModelsMatch: z
+        .enum(['prefix', 'exact'])
+        .optional()
+        .describe(
+          'How availableModels entries match model IDs. "prefix" (the default) lets an entry also allow any model ID that extends it, so "claude-opus-5" allows "claude-opus-5-5". "exact" keeps that matching but stops a model ID entry from allowing other versions: "claude-opus-5" allows Opus 5 and its dated and -fast IDs, but not Opus 5.5 or a later release until it is listed, and a -latest ID needs a -latest entry. Family aliases ("opus") still allow the whole family; aliases whose model depends on the release or settings (best, opusplan, default) are ignored. With "exact" and a list that names at least one model, the Default option also uses only a listed model; if none can be used, Claude Code will not start. Haiku background models, and hooks and other helper requests that pick their own model, are not restricted (deniedModels covers them; allowManagedHooksOnly limits hooks). Read from managed settings only.',
+        ),
+      deniedModels: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Models users cannot select, even when availableModels allows them. A family alias ("opus") blocks that family. A model ID blocks that version in every spelling: dates, -fast and provider prefixes are ignored, so "claude-opus-5-5" blocks every Opus 5.5 ID but not Opus 5. An ID with no minor version ("claude-opus-5") also blocks later minor versions, as it allows them in availableModels. Aliases whose model depends on the release or settings (best, opusplan, default) are ignored. The Default option steps down past a blocked model; if the Default has no allowed model to step down to, Claude Code will not start. Read from managed settings only.',
+        ),
       // densable enforceAvailableModels — constrain Default selection to allowlist
       enforceAvailableModels: z
         .boolean()
@@ -667,6 +686,33 @@ export const SettingsSchema = lazySchema(() =>
           'Whether Claude responds after an input-box ! bash command runs. ' +
             'Set to false to add the command output to context without a response. ' +
             'Default: true.',
+        ),
+      // densable 2.1.283 y5t — Bash file-edit diffs in tool_response
+      bashEditDiffEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether the Bash tool shows a diff of the files a Bash command changed (PostToolUse Bash hooks get the changed-file list in tool_response). Set to false to turn that off. Default: on when the Bash tool handles file edits. Only user, flag or policy settings can turn it on outside auto and bypassPermissions modes.',
+        ),
+      // densable 2.1.283 zae / Uqe — inline Bash/PowerShell output cap
+      bashOutputMaxChars: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .catch(undefined)
+        .describe(
+          "How many characters of a successful Bash or PowerShell command's output Claude receives inline (default 30000; values clamp to 4000-128000). Output past this is saved to a file and Claude receives a short preview plus the path. When set, this also replaces BASH_MAX_OUTPUT_LENGTH, which on its own only sizes the read-back window.",
+        ),
+      // densable 2.1.283 — no-op after TaskOutput removal; do not revive the tool
+      taskOutputMaxChars: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .catch(undefined)
+        .describe(
+          "Deprecated: no longer has any effect (the TaskOutput tool was removed). Read a background task's output file with the Read tool instead.",
         ),
       // Official 2.1.200: AskUserQuestion no longer auto-continues by default.
       askUserQuestionTimeout: z
@@ -1136,6 +1182,16 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Whether to disable syntax highlighting in diffs'),
+      // densable 2.1.282/283 maxProseWidth (C().int().min(40).optional().catch(void 0))
+      maxProseWidth: z
+        .number()
+        .int()
+        .min(40)
+        .optional()
+        .catch(undefined)
+        .describe(
+          "Maximum width, in terminal columns, of the prose in Claude's responses (paragraphs, headings, lists, blockquotes). In a wider terminal the prose wraps at this width while tables and code blocks keep the full width; only the display wraps, the response text itself gains no line breaks. Minimum 40. Unset (the default) uses the full terminal width.",
+        ),
       // densable 2.1.235 #1 — underline-as-you-type spellcheck (aspell/hunspell/ispell).
       // Whole block from highest-precedence of user/flag/managed only; project/local ignored.
       spellcheck: z
@@ -1226,6 +1282,25 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
+      maxEffortLevel: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          "Maximum effort level. Anything above it (an /effort or /model pick, --effort, CLAUDE_CODE_EFFORT_LEVEL, a model default) is clamped to it, on every provider including Bedrock, Vertex and Foundry. Combines with an organization's per-model effort cap by taking the lower of the two; across settings files the lowest value wins, and modelSettings.<model>.maxEffortLevel replaces it per model. Enforced client-side: an effort supplied through CLAUDE_CODE_EXTRA_BODY is not clamped.",
+        ),
+      // densable 2.1.277 /config "Project instructions" — agents-md compositor mode.
+      instructionFiles: z
+        .enum([
+          'claude-md',
+          'claude-md-or-agents-md',
+          'claude-md-and-agents-md',
+          'managed-only',
+        ])
+        .optional()
+        .describe(
+          '"claude-md": CLAUDE.md only, loaded by the engine as today. "claude-md-or-agents-md" (default): a project with no CLAUDE.md of its own gets its AGENTS.md files instead, loaded exactly where and how CLAUDE.md would be. "claude-md-and-agents-md": AGENTS.md files are loaded beside CLAUDE.md (a file CLAUDE.md already imports or links to is not loaded twice). "managed-only": the project\'s and your own instruction files are dropped; the organization\'s managed CLAUDE.md and memory stay.',
+        ),
       modelSettings: z
         .record(
           z.string(),
@@ -1238,17 +1313,22 @@ export const SettingsSchema = lazySchema(() =>
                     : ['low', 'medium', 'high', 'xhigh'],
                 )
                 .optional()
-                .catch(undefined),
+                .catch(undefined)
+                .describe('Persisted effort level for this model.'),
+              maxEffortLevel: z
+                .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+                .optional()
+                .catch(undefined)
+                .describe(
+                  'Maximum effort level for this model. Within one settings file it replaces the top-level maxEffortLevel for the model ("max" exempts it); across settings files the lowest applicable value wins. Keyed like effortLevel: the canonical model name also matches its dated, [1m], Bedrock and Vertex spellings.',
+                ),
             })
             .optional()
             .catch(undefined),
         )
         .optional()
         .catch(undefined)
-        .describe(
-          'Per-model settings. modelSettings[canonicalModel].effortLevel ' +
-            'is the saved effort for that model.',
-        ),
+        .describe('Per-model settings keyed by canonical model name.'),
       // densable settings.ultracode — session-scoped via --settings / apply_flag_settings.
       // Interactive /effort ultracode never persists this; bootstrap maps it to wire
       // effort (catalog top tier; densable hardcodes xhigh) + AppState.ultracode.
@@ -1540,6 +1620,22 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Reduce or disable animations for accessibility (spinner shimmer, flash effects, etc.)',
+        ),
+      // densable 2.1.283 h1e / timeFormat ($e([G(h1e),o()]))
+      timeFormat: z
+        .union([
+          z.enum(['auto', '12-hour', '24-hour', '24-hour-utc']),
+          z.string(),
+        ])
+        .optional()
+        .describe(
+          'Clock format for times shown in the UI: "auto" (default, follows the locale), "12-hour", "24-hour", "24-hour-utc" ("18:05Z"), or a strftime pattern such as "%H:%M" (any value containing "%"; other values read as "auto"). A pattern replaces the time everywhere; message timestamps show only the pattern, so include %Y-%m-%d for the date. /config offers the presets; a pattern is set here.',
+        ),
+      timeZone: z
+        .string()
+        .optional()
+        .describe(
+          'IANA time zone for times shown in the UI, e.g. "UTC" or "Europe/Dublin". Default: the system time zone. An unknown name falls back to the system time zone.',
         ),
       /**
        * Official axScreenReader — render screen-reader friendly output.

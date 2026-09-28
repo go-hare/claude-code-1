@@ -81,6 +81,7 @@ export function getBuiltinPlugins(): {
         name,
         description: definition.description,
         version: definition.version,
+        ...(definition.userConfig ? { userConfig: definition.userConfig } : {}),
       },
       path: BUILTIN_MARKETPLACE_NAME, // sentinel — no filesystem path
       source: pluginId,

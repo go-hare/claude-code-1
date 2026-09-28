@@ -21,24 +21,23 @@ describe('resolveCatalogFamilyModelString (official SZo)', () => {
     resetModelStringsForTestingOnly()
   })
 
-  test('fable maps to modelStrings.fable5', () => {
+  test('fable maps to modelStrings.fable51 (densable 2.1.283)', () => {
     const strings = getModelStrings()
     expect(
       resolveCatalogFamilyModelString('fable', strings, 'firstParty'),
-    ).toBe(strings.fable5)
-    expect(strings.fable5).toBe(ALL_MODEL_CONFIGS.fable5.firstParty)
+    ).toBe(strings.fable51)
+    expect(strings.fable51).toBe(ALL_MODEL_CONFIGS.fable51.firstParty)
   })
 
-  test('fable on bedrock uses fable5 bedrock id', () => {
+  test('fable on gateway uses fable5 (283 aliases.per_provider)', () => {
     const strings = getModelStrings()
-    // SZo reads t[i] from the strings object passed in (already provider-resolved)
-    const bedrockStrings = {
+    const gatewayStrings = {
       ...strings,
-      fable5: ALL_MODEL_CONFIGS.fable5.bedrock,
+      fable5: ALL_MODEL_CONFIGS.fable5.gateway,
     }
     expect(
-      resolveCatalogFamilyModelString('fable', bedrockStrings, 'bedrock'),
-    ).toBe(ALL_MODEL_CONFIGS.fable5.bedrock)
+      resolveCatalogFamilyModelString('fable', gatewayStrings, 'gateway'),
+    ).toBe(ALL_MODEL_CONFIGS.fable5.gateway)
   })
 
   test('unknown alias is undefined (Ema falls through to e.fable5)', () => {

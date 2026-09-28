@@ -144,6 +144,9 @@ const TEAMMATE_ENV_VARS = [
   'ANTHROPIC_BASE_URL',
   // Model pin via Anthropic-compatible / settings.env path (not only GROK_MODEL)
   'ANTHROPIC_MODEL',
+  // densable Lzo / Rs — FORCE must follow spawned teammates
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',

@@ -1941,14 +1941,16 @@ export function ManagePlugins({
         configSchema={viewState.schema}
         initialValues={loadPluginOptions(pluginId)}
         onSave={values => {
-          try {
-            savePluginOptions(pluginId, values, viewState.schema);
-            clearAllCaches();
-            setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
-          } catch (err) {
-            setProcessError(`Failed to save configuration: ${errorMessage(err)}`);
-          }
-          setViewState('plugin-details');
+          void (async () => {
+            try {
+              await savePluginOptions(pluginId, values, viewState.schema);
+              clearAllCaches();
+              setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
+            } catch (err) {
+              setProcessError(`Failed to save configuration: ${errorMessage(err)}`);
+            }
+            setViewState('plugin-details');
+          })();
         }}
         onCancel={() => setViewState('plugin-details')}
       />

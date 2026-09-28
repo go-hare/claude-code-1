@@ -416,6 +416,13 @@ export function registerCliHostCommands(
   const coworkOption = () =>
     new Option('--cowork', 'Use cowork_plugins directory').hideHelp()
 
+  // densable `--accept-command <sha256>` (conflicts --yes)
+  const acceptCommandOption = () =>
+    new Option(
+      '--accept-command <sha256>',
+      'Accept the marketplace-declared command (a command-source install, or the headersHelper that fetches the archive) whose sha256 a previous --json run reported as shownCommand.sha256; counts as -y for exactly that command, for that plugin and marketplace catalog, and nothing else. If either changed (a refresh that moved the catalog counts), the run refuses and reports the command again, to be shown to a person again',
+    ).conflicts('yes')
+
   const pluginSpec = getCliCommandGraphNode(['plugin'])
   const pluginCmd = applyAliases(
     program
@@ -428,13 +435,149 @@ export function registerCliHostCommands(
   pluginCmd
     .command('validate <path>')
     .description(describe(['plugin', 'validate']))
+    .option(
+      '--strict',
+      'Treat warnings as errors (exit 1). Use in CI to fail on unrecognized fields, missing metadata, and other issues that the runtime tolerates.',
+    )
+    .option('--json', 'Output the validation report as JSON (same exit codes)')
     .addOption(coworkOption())
     .action(
-      async (manifestPath: string, commandOptions: { cowork?: boolean }) => {
+      async (
+        manifestPath: string,
+        commandOptions: { cowork?: boolean; json?: boolean; strict?: boolean },
+      ) => {
         const { pluginValidateHandler } = await import(
           '../cli/handlers/plugins.js'
         )
         await pluginValidateHandler(manifestPath, commandOptions)
+      },
+    )
+
+  const pluginEvalCmd = pluginCmd
+    .command('eval [target]')
+    .description(describe(['plugin', 'eval']))
+    .option(
+      '--eval-dir <dir>',
+      'Directory name (below the plugin) that holds the eval cases',
+    )
+    .option(
+      '--json [path]',
+      'Print the full run result (prompts, graders, per-run scores) as JSON to stdout, or write it to this .json file',
+    )
+    .option(
+      '--trust-plugin',
+      "Assert that you trust this plugin's code and eval suite, and skip the first-run trust prompt (for CI)",
+    )
+    .option(
+      '--ablation <mode>',
+      'Run a no-plugin baseline arm and report the score delta (none | with-without)',
+    )
+    .option('--case <glob>', 'Run only cases whose name matches this glob')
+    .option(
+      '--tag <tag>',
+      'Run only cases with this tag (repeatable)',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--runs <n>', 'Repeats per case')
+    .option('-j, --concurrency <n>', 'Max cases to run at once (1–8)')
+    .option('--model <model>', 'Model for the agent under test')
+    .option('--judge-model <model>', 'Model for llm graders')
+    .option('--max-cost-usd <n>', 'Abort the suite after this USD spend')
+    .option('--output-dir <dir>', 'Write results under this directory')
+    .option('--threshold <n>', 'Pass bar 0–1 (default 1)')
+    .option(
+      '--allow-tools <tools>',
+      'Extra tools the case may use (repeatable)',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--scaffold', 'Run each case scaffold_script as you')
+    .option('--no-scaffold', 'Do not run scaffold_script (default)')
+    .option('--mocks <mode>', 'Mock responders: record | off')
+    .option('--allow-real-servers', 'Let cases reach real MCP/network servers')
+    .option('--keep-temp', 'Keep each run sandbox after the suite')
+    .option('--verbose', 'Print per-run grader detail')
+    .option('--report [path]', 'Write an HTML report')
+    .option('--publish-report', 'Publish the HTML report')
+    .option('--no-publish', 'Do not publish the HTML report')
+    .action(
+      async (
+        target: string | undefined,
+        commandOptions: {
+          evalDir?: string
+          json?: boolean | string
+          trustPlugin?: boolean
+          ablation?: string
+          case?: string
+          tag?: string[]
+          runs?: string
+          concurrency?: string
+          model?: string
+          judgeModel?: string
+          maxCostUsd?: string
+          outputDir?: string
+          threshold?: string
+          allowTools?: string[]
+          scaffold?: boolean
+          noScaffold?: boolean
+          mocks?: string
+          allowRealServers?: boolean
+          keepTemp?: boolean
+          verbose?: boolean
+          report?: string
+          publishReport?: boolean
+          publish?: boolean
+        },
+      ) => {
+        const { ensurePluginEvalAvailable, pluginEvalHandler } = await import(
+          '../cli/handlers/pluginEval.js'
+        )
+        await ensurePluginEvalAvailable()
+        if (
+          commandOptions.ablation !== undefined &&
+          commandOptions.ablation !== 'none' &&
+          commandOptions.ablation !== 'with-without'
+        ) {
+          console.error('--ablation must be "none" or "with-without"')
+          process.exit(1)
+        }
+        await pluginEvalHandler(target, commandOptions)
+      },
+    )
+
+  pluginEvalCmd
+    .command('init [name]')
+    .description(describe(['plugin', 'eval', 'init']))
+    .option(
+      '--bare',
+      'Write a blank template (prompt.md + graders/criteria.md) instead of running the interview',
+    )
+    .option(
+      '-i, --interactive',
+      'Run the authoring interview (already the default in a terminal); requires an interactive terminal',
+    )
+    .option(
+      '--eval-dir <dir>',
+      'Directory (below the current directory) to write cases into (default: experimental.evals from the plugin.json in the current directory, else evals/)',
+    )
+    .action(
+      async (
+        name: string | undefined,
+        commandOptions: {
+          bare?: boolean
+          interactive?: boolean
+          evalDir?: string
+        },
+      ) => {
+        const { ensurePluginEvalAvailable, pluginEvalInitHandler } =
+          await import('../cli/handlers/pluginEval.js')
+        await ensurePluginEvalAvailable()
+        await pluginEvalInitHandler(name, {
+          bare: commandOptions.bare,
+          forceInteractive: commandOptions.interactive,
+          evalDir: commandOptions.evalDir,
+        })
       },
     )
 
@@ -551,13 +694,24 @@ export function registerCliHostCommands(
     )
     .option(
       '-y, --yes',
-      'Accept command-source plugin install without prompting',
+      'Accept the displayed marketplace-declared command without the confirmation prompt — a plugin installed by running a command, or one whose archive is fetched through a headersHelper command (required when stdin or stdout is not a TTY)',
+    )
+    .addOption(acceptCommandOption())
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes; a marketplace-declared command is still shown and must be confirmed — pass -y when not interactive)',
     )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string,
-        commandOptions: { scope?: string; cowork?: boolean; yes?: boolean },
+        commandOptions: {
+          scope?: string
+          cowork?: boolean
+          yes?: boolean
+          json?: boolean
+          acceptCommand?: string
+        },
       ) => {
         const { pluginInstallHandler } = await import(
           '../cli/handlers/plugins.js'
@@ -580,6 +734,10 @@ export function registerCliHostCommands(
       '--keep-data',
       'Preserve the plugin persistent data directory (~/.claude/plugins/data/{id}/)',
     )
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes; not with --prune)',
+    )
     .addOption(coworkOption())
     .action(
       async (
@@ -588,6 +746,7 @@ export function registerCliHostCommands(
           scope?: string
           cowork?: boolean
           keepData?: boolean
+          json?: boolean
         },
       ) => {
         const { pluginUninstallHandler } = await import(
@@ -604,11 +763,15 @@ export function registerCliHostCommands(
       '-s, --scope <scope>',
       `Installation scope: ${VALID_INSTALLABLE_SCOPES.join(', ')} (default: auto-detect)`,
     )
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes)',
+    )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string,
-        commandOptions: { scope?: string; cowork?: boolean },
+        commandOptions: { scope?: string; cowork?: boolean; json?: boolean },
       ) => {
         const { pluginEnableHandler } = await import(
           '../cli/handlers/plugins.js'
@@ -625,11 +788,20 @@ export function registerCliHostCommands(
       '-s, --scope <scope>',
       `Installation scope: ${VALID_INSTALLABLE_SCOPES.join(', ')} (default: auto-detect)`,
     )
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes)',
+    )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string | undefined,
-        commandOptions: { scope?: string; cowork?: boolean; all?: boolean },
+        commandOptions: {
+          scope?: string
+          cowork?: boolean
+          all?: boolean
+          json?: boolean
+        },
       ) => {
         const { pluginDisableHandler } = await import(
           '../cli/handlers/plugins.js'
@@ -647,13 +819,24 @@ export function registerCliHostCommands(
     )
     .option(
       '-y, --yes',
-      'Accept command-source plugin update without prompting',
+      'Accept the displayed marketplace-declared command without the confirmation prompt — a changed install command, or the headersHelper command that fetches its archive (required when stdin or stdout is not a TTY)',
+    )
+    .addOption(acceptCommandOption())
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes; a marketplace-declared command is still shown and must be confirmed — pass -y when not interactive)',
     )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string,
-        commandOptions: { scope?: string; cowork?: boolean; yes?: boolean },
+        commandOptions: {
+          scope?: string
+          cowork?: boolean
+          yes?: boolean
+          json?: boolean
+          acceptCommand?: string
+        },
       ) => {
         const { pluginUpdateHandler } = await import(
           '../cli/handlers/plugins.js'

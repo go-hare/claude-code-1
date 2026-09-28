@@ -187,6 +187,7 @@ export type PluginError =
       source: string
       marketplace: string
       reason: string
+      catalogReadFailed?: boolean
     }
   | {
       type: 'mcp-config-invalid'
@@ -438,6 +439,6 @@ export function getPluginErrorMessage(error: PluginError): string {
       return `Dependency "${error.dependency}" is ${hint}`
     }
     case 'plugin-cache-miss':
-      return `Plugin "${error.plugin}" not cached at ${error.installPath} — run /plugins to refresh`
+      return `Plugin "${error.plugin}" not cached at ${error.installPath} — run /plugin to refresh`
   }
 }

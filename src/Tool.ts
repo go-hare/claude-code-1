@@ -148,6 +148,11 @@ export type ToolPermissionContext = DeepImmutable<{
    * densable 2.1.248 #1 rrn `...o&&{restricted:o}`
    */
   restricted?: boolean
+  /**
+   * official tke / blockReadsOutsideWorkingDirectories — refuse file-tool
+   * reads outside working directories when the setting is on.
+   */
+  blockReadsOutsideWorkingDirectories?: boolean
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -238,6 +243,11 @@ export type ToolUseContext = {
      * map before findToolByName so resume does not miss a renamed tool.
      */
     toolAliases?: Record<string, string>
+    /**
+     * densable Fl / pe — omitClaudeMd kept only managed policy CLAUDE.md.
+     * Nested memory inject filters to type==="Managed" when this is set.
+     */
+    managedInstructionsOnly?: boolean
     /**
      * densable 2.1.222 #6 — sticky MCP attribution stamps set by MCP tool
      * `call` wrap. Captured + cleared at next main/subagent API request so

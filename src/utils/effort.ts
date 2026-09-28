@@ -26,6 +26,7 @@ import {
   clampEffortToOrgLimit,
   filterEffortLevelsByOrgLimit,
   getCatalogDefaultEffort,
+  getCombinedMaxEffortLevel,
   getOrgMaxEffortLevel,
   isEffortDenyListed,
   isEffortLaunchPinned,
@@ -368,16 +369,16 @@ export function formatOrgEffortExceedMessage(
   if (typeof requested !== 'string' || !isEffortLevel(requested)) {
     return null
   }
-  const cap = getOrgMaxEffortLevel(model)
+  const cap = getCombinedMaxEffortLevel(model)
   if (cap === null) return null
   // densable: HQe(e) <= HQe(r) → null
   const order = EFFORT_LEVELS as readonly EffortLevel[]
   if (order.indexOf(requested) <= order.indexOf(cap)) {
     return null
   }
-  // densable: n = cme(t, e) ?? r
+  // densable APo: n = Tw(n,e) ?? r
   const using = resolveAppliedEffort(model, requested) ?? cap
-  return `Effort '${requested}' exceeds your organization's limit for ${model}; using '${using}'.`
+  return `Effort '${requested}' exceeds the cap for ${model} set by your settings or organization; using '${using}'.`
 }
 
 /**

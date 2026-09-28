@@ -111,6 +111,7 @@ const AgentJsonSchema = lazySchema(() =>
       .string()
       .optional()
       .transform(e => (e && e.trim() ? e : undefined)),
+    omitClaudeMd: z.boolean().optional(),
   }),
 )
 
@@ -147,10 +148,8 @@ export type BaseAgentDefinition = {
   /** Official: supplemental postamble appended to each observer activity digest. */
   observerMessage?: string
   pendingSnapshotUpdate?: { snapshotTimestamp: string }
-  /** Omit CLAUDE.md hierarchy from the agent's userContext. Read-only agents
-   * (Explore, Plan) don't need commit/PR/lint guidelines — the main agent has
-   * full CLAUDE.md and interprets their output. Saves ~5-15 Gtok/week across
-   * 34M+ Explore spawns. Kill-switch: tengu_slim_subagent_claudemd. */
+  /** densable omitClaudeMd: drop user/project/local CLAUDE.md when this agent
+   * runs as a subagent; managed policy files are kept for non-built-in. */
   omitClaudeMd?: boolean
 }
 
@@ -560,6 +559,7 @@ export function parseAgentFromJson(
       ...(parsed.observerMessage
         ? { observerMessage: parsed.observerMessage }
         : {}),
+      ...(parsed.omitClaudeMd ? { omitClaudeMd: true } : {}),
     }
 
     return agent
@@ -800,6 +800,11 @@ export function parseAgentFromMarkdown(
         ? observerMessageRaw
         : undefined
 
+    // densable ye: omitClaudeMd === "true" || === true
+    const omitClaudeMdRaw = frontmatter['omitClaudeMd']
+    const omitClaudeMd =
+      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
+
     const systemPrompt = content.trim()
     const agentDef: CustomAgentDefinition = {
       baseDir,
@@ -837,6 +842,7 @@ export function parseAgentFromMarkdown(
       ...(isolation ? { isolation } : {}),
       ...(observer ? { observer } : {}),
       ...(observerMessage ? { observerMessage } : {}),
+      ...(omitClaudeMd ? { omitClaudeMd } : {}),
     }
     return agentDef
   } catch (error) {

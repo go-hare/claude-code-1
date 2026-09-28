@@ -835,6 +835,12 @@ export async function promptCommandSourceConsent(
   options: {
     yes?: boolean
     acceptedCommand?: string
+    acceptCommand?: string
+    onShown?: (
+      shown: import('./pluginAcceptCommand.js').MarketplaceShownCommandWithSha & {
+        previousAcceptance?: 'changed' | 'unreliable'
+      },
+    ) => void
     write?: (text: string) => void
   } = {},
 ): Promise<PromptCommandSourceConsentResult | undefined> {
@@ -889,32 +895,31 @@ export async function promptCommandSourceConsent(
     `"${nameDisp}" is installed by running a command from marketplace "${mktDisp}" on this machine${changeNote}:\n  ${command}\n  (${describeCommandPluginMode(entry.source)})\n`,
   )
 
-  const isTty = Boolean(process.stdout.isTTY && process.stdin.isTTY)
-  const yes = options.yes === true
-  if (yes) {
-    // densable: -y is ignored inside a Claude Code child/session unless TTY
-    const inSession = Boolean(
-      process.env.CLAUDE_CODE_CHILD_SESSION || process.env.CLAUDECODE,
-    )
-    if (!inSession) {
-      return { kind: 'accepted', grantKey }
-    }
-    if (!isTty) {
-      write(
-        '-y/--yes is ignored inside a Claude Code session: run this in your own terminal to accept the command shown above.\n',
-      )
-      return undefined
-    }
-  }
-  if (!isTty) {
-    write(
-      'Not an interactive terminal, so the command was only displayed, not accepted. Re-run in a terminal to confirm it, or pass -y/--yes to accept the command shown above.\n',
-    )
-    return undefined
-  }
-  write('Run this command now? [y/N] ')
-  const ok = await readYesFromStdin()
-  return ok ? { kind: 'accepted', grantKey } : { kind: 'declined' }
+  const { confirmMarketplaceDeclaredCommand, describeCommandSourceShown, withAcceptCommandMatched } =
+    await import('./pluginAcceptCommand.js')
+  const shown = await describeCommandSourceShown({
+    pluginId,
+    command,
+    mode: entry.source.mode === 'link' ? 'link' : 'copy',
+  })
+  options.onShown?.({
+    ...withAcceptCommandMatched(shown, options.acceptCommand),
+    ...(acceptedCommand !== undefined && {
+      previousAcceptance:
+        acceptedCommand !== grantKey ? ('changed' as const) : ('unreliable' as const),
+    }),
+  })
+  const verdict = await confirmMarketplaceDeclaredCommand({
+    yes: options.yes,
+    acceptCommand: options.acceptCommand,
+    shown,
+    write,
+  })
+  return verdict === 'accepted'
+    ? { kind: 'accepted', grantKey }
+    : verdict === 'declined'
+      ? { kind: 'declined' }
+      : undefined
 }
 
 /**
@@ -983,7 +988,11 @@ export async function announceCommandSourceForInstall(
   plugin: string,
   options: {
     yes?: boolean
+    acceptCommand?: string
     scope?: 'user' | 'project' | 'local'
+    onShown?: (
+      shown: import('./pluginAcceptCommand.js').MarketplaceShownCommandWithSha,
+    ) => void
   } = {},
 ): Promise<PromptCommandSourceConsentResult | undefined> {
   const { getPluginById } = await import('./marketplaceManager.js')
@@ -1073,6 +1082,8 @@ export async function announceCommandSourceForInstall(
     {
       yes: options.yes,
       acceptedCommand,
+      acceptCommand: options.acceptCommand,
+      onShown: options.onShown,
     },
   )
 }

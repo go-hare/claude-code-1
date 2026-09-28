@@ -30,6 +30,7 @@ import {
   isValidImagePaste,
   type PromptInputMode,
   type QueuedCommand,
+  type QueuePriority,
 } from '../types/textInputTypes.js'
 import { createAbortController } from './abortController.js'
 import type { PastedContent } from './config.js'
@@ -164,6 +165,12 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
    * Mid-turn / idle submit no-ops when the wait is no longer stale (hSl).
    */
   resumesStaleQuotaWait?: boolean
+  /**
+   * densable 2.1.283 send-now — enqueue with priority now (interrupt + flush).
+   */
+  queuePriority?: QueuePriority
+  /** densable chat:queueSubmit — enqueue even when the query is idle. */
+  forceQueue?: boolean
 }
 
 export async function handlePromptSubmit(
@@ -397,7 +404,7 @@ export async function handlePromptSubmit(
     }
   }
 
-  if (queryGuard.isActive || isExternalLoading) {
+  if (queryGuard.isActive || isExternalLoading || params.forceQueue) {
     // Only allow prompt and bash mode commands to be queued
     if (mode !== 'prompt' && mode !== 'bash') {
       return
@@ -440,6 +447,7 @@ export async function handlePromptSubmit(
       origin: { kind: 'human' },
       uuid: queuedUuid,
       historyEntry,
+      ...(params.queuePriority ? { priority: params.queuePriority } : {}),
     })
 
     onInputChange('')

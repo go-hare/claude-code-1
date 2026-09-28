@@ -1,11 +1,11 @@
-import { mock, describe, expect, test, afterEach } from 'bun:test'
+import { mock, describe, expect, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug'
 
 // Mock debug.ts to cut the bootstrap/state dependency chain
 mock.module('src/utils/debug.ts', debugMock)
 
 const {
-  getMaxOutputLength,
+  resolveMaxOutputLength,
   BASH_MAX_OUTPUT_UPPER_LIMIT,
   BASH_MAX_OUTPUT_DEFAULT,
 } = await import('../outputLimits')
@@ -20,36 +20,24 @@ describe('outputLimits constants', () => {
   })
 })
 
-describe('getMaxOutputLength', () => {
-  const saved = process.env.BASH_MAX_OUTPUT_LENGTH
-
-  afterEach(() => {
-    if (saved === undefined) delete process.env.BASH_MAX_OUTPUT_LENGTH
-    else process.env.BASH_MAX_OUTPUT_LENGTH = saved
-  })
-
+describe('resolveMaxOutputLength', () => {
   test('returns default when env not set', () => {
-    delete process.env.BASH_MAX_OUTPUT_LENGTH
-    expect(getMaxOutputLength()).toBe(30_000)
+    expect(resolveMaxOutputLength(undefined, undefined)).toBe(30_000)
   })
 
   test('returns parsed value when valid', () => {
-    process.env.BASH_MAX_OUTPUT_LENGTH = '50000'
-    expect(getMaxOutputLength()).toBe(50_000)
+    expect(resolveMaxOutputLength(undefined, '50000')).toBe(50_000)
   })
 
   test('caps at upper limit', () => {
-    process.env.BASH_MAX_OUTPUT_LENGTH = '999999'
-    expect(getMaxOutputLength()).toBe(150_000)
+    expect(resolveMaxOutputLength(undefined, '999999')).toBe(150_000)
   })
 
   test('returns default for invalid value', () => {
-    process.env.BASH_MAX_OUTPUT_LENGTH = 'not-a-number'
-    expect(getMaxOutputLength()).toBe(30_000)
+    expect(resolveMaxOutputLength(undefined, 'not-a-number')).toBe(30_000)
   })
 
   test('returns default for negative value', () => {
-    process.env.BASH_MAX_OUTPUT_LENGTH = '-1'
-    expect(getMaxOutputLength()).toBe(30_000)
+    expect(resolveMaxOutputLength(undefined, '-1')).toBe(30_000)
   })
 })

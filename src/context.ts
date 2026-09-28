@@ -9,7 +9,13 @@ import {
   filterInjectedMemoryFiles,
   getClaudeMds,
   getMemoryFiles,
+  type MemoryFileInfo,
 } from './utils/claudemd.js'
+import { instructionFileOf, memoryFileOf } from './utils/instructionFiles.js'
+import {
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from './utils/plugins/functionHooksModules.js'
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { execFileNoThrow } from './utils/execFileNoThrow.js'
@@ -181,6 +187,32 @@ export const getSystemContext = memoize(
 )
 
 /**
+ * densable rgn / J3 — `prompt.context` may rewrite instructionFiles (agents-md).
+ * A failed dispatch keeps the GEn CLAUDE.md walk.
+ */
+export async function applyPromptContextInstructionFiles(
+  files: MemoryFileInfo[],
+): Promise<MemoryFileInfo[]> {
+  if (!hasMatchingFunctionHook('prompt.context')) return files
+  const instructionFiles = files.map(instructionFileOf)
+  try {
+    const returned = (await runFunctionHookChain(
+      'prompt.context',
+      { blocks: [], instructionFiles },
+      async event => ({
+        blocks: event.blocks,
+        instructionFiles: event.instructionFiles,
+      }),
+    )) as { instructionFiles?: unknown }
+    const next = returned?.instructionFiles
+    if (!Array.isArray(next)) return files
+    return next.map(file => memoryFileOf(file, files))
+  } catch {
+    return files
+  }
+}
+
+/**
  * This context is prepended to each conversation, and cached for the duration of the conversation.
  */
 export const getUserContext = memoize(
@@ -211,7 +243,11 @@ export const getUserContext = memoize(
     // loop yields naturally at the first fs.readFile.
     const claudeMd = shouldDisableClaudeMd
       ? null
-      : getClaudeMds(filterInjectedMemoryFiles(await getMemoryFiles()))
+      : getClaudeMds(
+          await applyPromptContextInstructionFiles(
+            filterInjectedMemoryFiles(await getMemoryFiles()),
+          ),
+        )
     // Cache for the auto-mode classifier (yoloClassifier.ts reads this
     // instead of importing claudemd.ts directly, which would create a
     // cycle through permissions/filesystem → permissions → yoloClassifier).

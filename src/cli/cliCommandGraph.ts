@@ -177,6 +177,26 @@ export const cliCommandGraph = [
       capability: 'plugins',
     },
   ),
+  command(
+    'plugin.eval',
+    ['plugin', 'eval'],
+    'Run eval cases (<eval dir>/**/case.yaml or prompt.md + graders/*.md; the eval dir is evals/ unless --eval-dir or the manifest says otherwise) against a plugin and report scored results',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'plugins',
+    },
+  ),
+  command(
+    'plugin.eval.init',
+    ['plugin', 'eval', 'init'],
+    'Author an eval suite under the eval dir (evals/ unless --eval-dir or the manifest says otherwise) via an interview that sources inputs and designs graders. Use --bare <name> for a blank single-case template',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'plugins',
+    },
+  ),
   command('plugin.list', ['plugin', 'list'], 'List installed plugins', {
     ownership: 'product-operation',
     reuse: 'reuse-as-is',

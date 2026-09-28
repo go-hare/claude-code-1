@@ -104,6 +104,7 @@ import {
   sweepAndDetectLiveAgentChildren,
 } from './agentToolUtils.js';
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js';
+import { applySubagentModelForce, isSubagentModelForceEnabled, resolveForcedSpawnModel } from './subagentModelForce.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
 import { shouldSkipTeammateSpawnForWebFetch } from './built-in/webFetchAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
@@ -258,9 +259,12 @@ export const inputSchema = lazySchema(() => {
   // by forceAsync) or "schema hides a param that would've worked" (gate
   // flips off mid-session: everything still runs async via memoized
   // forceAsync). No Zod rejection, no crash — unlike required→optional.
-  return isBackgroundTasksDisabled || isForkSubagentEnabled()
-    ? schemaWithTaskFields.omit({ run_in_background: true })
-    : schemaWithTaskFields;
+  const schemaWithBackground =
+    isBackgroundTasksDisabled || isForkSubagentEnabled()
+      ? schemaWithTaskFields.omit({ run_in_background: true })
+      : schemaWithTaskFields;
+  // densable Jtr — FORCE omits the per-call model parameter from the schema
+  return isSubagentModelForceEnabled() ? schemaWithBackground.omit({ model: true }) : schemaWithBackground;
 });
 type InputSchema = ReturnType<typeof inputSchema>;
 
@@ -410,6 +414,8 @@ export const AgentTool = buildTool({
     const startTime = Date.now();
     const model = isCoordinatorMode() ? undefined : modelParam;
 
+    // densable Rs — FORCE zeros tool model unless inherit (applied at getAgentModel / spawn)
+
     // densable 2.1.212 #42: Task/Agent `mode` param is deprecated and ignored.
     // Keep the field on the schema so old tool calls still validate, but never
     // read `_deprecatedSpawnMode` — parent session mode + agent frontmatter win.
@@ -514,7 +520,7 @@ export const AgentTool = buildTool({
           // densable: plan_mode_required:_==="plan" where _ is parent session mode
           // (input `mode` is deprecated/ignored).
           plan_mode_required: permissionMode === 'plan',
-          model: model ?? agentDef?.model,
+          model: resolveForcedSpawnModel(agentDef?.model, model),
           agent_type: subagent_type,
           invokingRequestId: assistantMessage?.requestId as string | undefined,
         },
@@ -786,10 +792,14 @@ export const AgentTool = buildTool({
 
     // Resolve agent params for logging (these are already resolved in runAgent).
     // Official $6e: built-in Explore may rewrite model to opus cap before getAgentModel.
-    const resolvedAgentModel = getAgentModel(
+    const [forcedFrontmatter, forcedToolModel] = applySubagentModelForce(
       resolveAgentDefinitionModel(selectedAgent, toolUseContext.options.mainLoopModel),
-      toolUseContext.options.mainLoopModel,
       isForkPath ? undefined : model,
+    );
+    const resolvedAgentModel = getAgentModel(
+      forcedFrontmatter,
+      toolUseContext.options.mainLoopModel,
+      forcedToolModel,
       permissionMode,
     );
 
@@ -1068,7 +1078,7 @@ export const AgentTool = buildTool({
       querySource:
         toolUseContext.options.querySource ??
         getQuerySourceForAgent(selectedAgent.agentType, isBuiltInAgent(selectedAgent)),
-      model: isForkPath ? undefined : model,
+      model: isForkPath ? undefined : applySubagentModelForce(undefined, model)[1],
       // Fork path: pass parent's system prompt AND parent's exact tool
       // array (cache-identical prefix). workerTools is rebuilt under
       // permissionMode 'bubble' which differs from the parent's mode, so

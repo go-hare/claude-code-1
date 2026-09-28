@@ -31,6 +31,12 @@ import {
   logEvent,
 } from '../analytics/index.js'
 import {
+  printPluginCliJsonLine,
+  withShownCommandSha256,
+  type MarketplaceShownCommand,
+  type PluginCliJsonCommand,
+} from '../../utils/plugins/pluginAcceptCommand.js'
+import {
   disableAllPluginsOp,
   disablePluginOp,
   enablePluginOp,
@@ -57,12 +63,53 @@ type PluginCliCommand =
  * tengu_plugin_command_failed before exit so dashboards can compute a
  * success rate against the corresponding success events.
  */
-function handlePluginCommandError(
+export type PluginCliJsonOptions = {
+  json?: boolean
+  scope?: string
+  shownCommand?: MarketplaceShownCommand
+}
+
+function jsonCommandName(
+  command: PluginCliCommand,
+): PluginCliJsonCommand | undefined {
+  if (command === 'disable-all') return 'disable'
+  if (
+    command === 'install' ||
+    command === 'uninstall' ||
+    command === 'enable' ||
+    command === 'disable' ||
+    command === 'update'
+  ) {
+    return command
+  }
+  return undefined
+}
+
+async function handlePluginCommandError(
   error: unknown,
   command: PluginCliCommand,
   plugin?: string,
-): never {
+  jsonOptions?: PluginCliJsonOptions,
+): Promise<never> {
   logError(error)
+  const failureCode =
+    error instanceof PluginCommandRefusedError
+      ? classifyPluginCommandRefusal(error).code
+      : classifyPluginCommandError(error)
+  const jsonCmd = jsonCommandName(command)
+  if (jsonOptions?.json && jsonCmd) {
+    await printPluginCliJsonLine({
+      command: jsonCmd,
+      outcome: 'failed',
+      ...(command === 'disable-all' ? { all: true } : { plugin }),
+      scope: jsonOptions.scope,
+      message: errorMessage(error),
+      failureCode,
+      shownCommand: jsonOptions.shownCommand
+        ? withShownCommandSha256(jsonOptions.shownCommand)
+        : undefined,
+    })
+  }
   const operation = plugin
     ? `${command} plugin "${plugin}"`
     : command === 'disable-all'
@@ -92,11 +139,8 @@ function handlePluginCommandError(
   logEvent('tengu_plugin_command_failed', {
     command:
       command as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    error_category: (error instanceof PluginCommandRefusedError
-      ? classifyPluginCommandRefusal(error).code
-      : classifyPluginCommandError(
-          error,
-        )) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    error_category:
+      failureCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     ...telemetryFields,
   })
   // eslint-disable-next-line custom-rules/no-process-exit
@@ -116,9 +160,12 @@ export async function installPlugin(
   configEntries?: readonly string[],
   shownSourceCommand?: string,
   shownEntryHelper?: { command: string; archiveUrl: string },
+  jsonOptions: PluginCliJsonOptions = {},
 ): Promise<void> {
   try {
-    console.log(re(`Installing plugin "${plugin}"...`))
+    if (!jsonOptions.json) {
+      console.log(re(`Installing plugin "${plugin}"...`))
+    }
 
     const result = await installPluginOp(plugin, scope, {
       shownSourceCommand,
@@ -129,7 +176,9 @@ export async function installPlugin(
       throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
-    console.log(Io(`${figures.tick} ${result.message}`))
+    if (!jsonOptions.json) {
+      console.log(Io(`${figures.tick} ${result.message}`))
+    }
 
     // densable $Jy — apply --config / report unset userConfig (soft on failure)
     const { formatPostInstallUserConfigNotice } = await import(
@@ -139,8 +188,21 @@ export async function installPlugin(
       result.pluginId || plugin,
       configEntries,
     )
-    if (notice) {
+    if (notice && !jsonOptions.json) {
       console.log(Io(notice))
+    }
+    const combined = notice ? `${result.message}\n${notice}` : result.message
+    if (jsonOptions.json) {
+      await printPluginCliJsonLine({
+        command: 'install',
+        outcome: 'ok',
+        plugin,
+        pluginId: result.pluginId,
+        scope: result.scope || scope,
+        message: combined,
+        configApplied:
+          configEntries && configEntries.length > 0 ? true : undefined,
+      })
     }
 
     // _PROTO_* routes to PII-tagged plugin_name/marketplace_name BQ columns.
@@ -167,7 +229,7 @@ export async function installPlugin(
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   } catch (error) {
-    handlePluginCommandError(error, 'install', plugin)
+    await handlePluginCommandError(error, 'install', plugin, jsonOptions)
   }
 }
 
@@ -180,6 +242,7 @@ export async function uninstallPlugin(
   plugin: string,
   scope: InstallableScope = 'user',
   keepData = false,
+  jsonOptions: PluginCliJsonOptions = {},
 ): Promise<void> {
   try {
     const result = await uninstallPluginOp(plugin, scope, !keepData)
@@ -188,7 +251,19 @@ export async function uninstallPlugin(
       throw new Error(result.message)
     }
 
-    console.log(Io(`${figures.tick} ${result.message}`))
+    if (jsonOptions.json) {
+      await printPluginCliJsonLine({
+        command: 'uninstall',
+        outcome: 'ok',
+        plugin,
+        pluginId: result.pluginId,
+        scope: result.scope || scope,
+        keptData: keepData,
+        message: result.message,
+      })
+    } else {
+      console.log(Io(`${figures.tick} ${result.message}`))
+    }
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -208,7 +283,7 @@ export async function uninstallPlugin(
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   } catch (error) {
-    handlePluginCommandError(error, 'uninstall', plugin)
+    await handlePluginCommandError(error, 'uninstall', plugin, jsonOptions)
   }
 }
 
@@ -220,6 +295,7 @@ export async function uninstallPlugin(
 export async function enablePlugin(
   plugin: string,
   scope?: InstallableScope,
+  jsonOptions: PluginCliJsonOptions = {},
 ): Promise<void> {
   try {
     await hydrateSyncedPluginDirsFromDisk()
@@ -229,7 +305,18 @@ export async function enablePlugin(
       throw new Error(result.message)
     }
 
-    console.log(Io(`${figures.tick} ${result.message}`))
+    if (jsonOptions.json) {
+      await printPluginCliJsonLine({
+        command: 'enable',
+        outcome: 'ok',
+        plugin,
+        pluginId: result.pluginId,
+        scope: result.scope ?? scope,
+        message: result.message,
+      })
+    } else {
+      console.log(Io(`${figures.tick} ${result.message}`))
+    }
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -249,7 +336,7 @@ export async function enablePlugin(
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   } catch (error) {
-    handlePluginCommandError(error, 'enable', plugin)
+    await handlePluginCommandError(error, 'enable', plugin, jsonOptions)
   }
 }
 
@@ -261,6 +348,7 @@ export async function enablePlugin(
 export async function disablePlugin(
   plugin: string,
   scope?: InstallableScope,
+  jsonOptions: PluginCliJsonOptions = {},
 ): Promise<void> {
   try {
     await hydrateSyncedPluginDirsFromDisk()
@@ -270,7 +358,18 @@ export async function disablePlugin(
       throw new Error(result.message)
     }
 
-    console.log(Io(`${figures.tick} ${result.message}`))
+    if (jsonOptions.json) {
+      await printPluginCliJsonLine({
+        command: 'disable',
+        outcome: 'ok',
+        plugin,
+        pluginId: result.pluginId,
+        scope: result.scope ?? scope,
+        message: result.message,
+      })
+    } else {
+      console.log(Io(`${figures.tick} ${result.message}`))
+    }
 
     const { name, marketplace } = parsePluginIdentifier(
       result.pluginId || plugin,
@@ -290,14 +389,16 @@ export async function disablePlugin(
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   } catch (error) {
-    handlePluginCommandError(error, 'disable', plugin)
+    await handlePluginCommandError(error, 'disable', plugin, jsonOptions)
   }
 }
 
 /**
  * CLI command: Disable all enabled plugins non-interactively
  */
-export async function disableAllPlugins(): Promise<void> {
+export async function disableAllPlugins(
+  jsonOptions: PluginCliJsonOptions = {},
+): Promise<void> {
   try {
     await hydrateSyncedPluginDirsFromDisk()
     const result = await disableAllPluginsOp()
@@ -306,14 +407,23 @@ export async function disableAllPlugins(): Promise<void> {
       throw new Error(result.message)
     }
 
-    console.log(Io(`${figures.tick} ${result.message}`))
+    if (jsonOptions.json) {
+      await printPluginCliJsonLine({
+        command: 'disable',
+        outcome: 'ok',
+        all: true,
+        message: result.message,
+      })
+    } else {
+      console.log(Io(`${figures.tick} ${result.message}`))
+    }
 
     logEvent('tengu_plugin_disabled_all_cli', {})
 
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   } catch (error) {
-    handlePluginCommandError(error, 'disable-all')
+    await handlePluginCommandError(error, 'disable-all', undefined, jsonOptions)
   }
 }
 
@@ -327,12 +437,15 @@ export async function disableAllPlugins(): Promise<void> {
 export async function updatePluginCli(
   plugin: string,
   scope: PluginScope,
-  options: { yes?: boolean } = {},
+  options: { yes?: boolean; json?: boolean; acceptCommand?: string } = {},
 ): Promise<void> {
+  let shownCommand: MarketplaceShownCommand | undefined
   try {
-    writeToStdout(
-      `${re(`Checking for updates for plugin "${plugin}" at ${scope} scope…`)}\n`,
-    )
+    if (!options.json) {
+      writeToStdout(
+        `${re(`Checking for updates for plugin "${plugin}" at ${scope} scope…`)}\n`,
+      )
+    }
 
     const { promptCommandSourceConsent } = await import(
       '../../utils/plugins/pluginCommandSource.js'
@@ -345,16 +458,39 @@ export async function updatePluginCli(
     const result = await updatePluginOp(plugin, scope, {
       // SEA nyh: explicit:!0 + onEntryHelperDisclosure → bl + f3l
       explicit: true,
-      onEntryHelperDisclosure: async disclosure => {
+      onEntryHelperDisclosure: async (disclosure, helper, helperPluginId) => {
         writeToStdout(`${Io(disclosure)}\n`)
-        return promptEntryHeadersHelperConfirm({ yes: options.yes === true })
+        const { describeEntryHelperShown, withAcceptCommandMatched } =
+          await import('../../utils/plugins/pluginAcceptCommand.js')
+        const shown = await describeEntryHelperShown({
+          pluginId: helperPluginId,
+          command: helper.command,
+          archiveUrl: helper.archiveUrl,
+        })
+        shownCommand = withAcceptCommandMatched(shown, options.acceptCommand)
+        const verdict = await promptEntryHeadersHelperConfirm({
+          yes: options.yes === true,
+          acceptCommand: options.acceptCommand,
+          shown,
+        })
+        if (verdict === 'accepted') {
+          shownCommand = undefined
+        }
+        return verdict
       },
       // densable R0v announceCommandSource → ptm; declined aborts
       announceCommandSource: async (pluginId, entry, acceptedCommand) => {
         const consent = await promptCommandSourceConsent(pluginId, entry, {
           yes: options.yes === true,
           acceptedCommand,
+          acceptCommand: options.acceptCommand,
+          onShown: shown => {
+            shownCommand = shown
+          },
         })
+        if (consent?.kind === 'accepted') {
+          shownCommand = undefined
+        }
         if (consent?.kind === 'declined') {
           throw new Error('Aborted — the command was not run.')
         }
@@ -366,7 +502,21 @@ export async function updatePluginCli(
       throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
-    writeToStdout(`${Io(`${figures.tick} ${result.message}`)}\n`)
+    if (options.json) {
+      await printPluginCliJsonLine({
+        command: 'update',
+        outcome: 'ok',
+        plugin,
+        pluginId: result.pluginId,
+        scope: result.scope ?? scope,
+        message: result.message,
+        updateOutcome: result.alreadyUpToDate ? 'up_to_date' : 'updated',
+        oldVersion: result.oldVersion,
+        newVersion: result.newVersion,
+      })
+    } else {
+      writeToStdout(`${Io(`${figures.tick} ${result.message}`)}\n`)
+    }
 
     if (!result.alreadyUpToDate) {
       const { name, marketplace } = parsePluginIdentifier(
@@ -393,6 +543,10 @@ export async function updatePluginCli(
 
     await gracefulShutdown(0)
   } catch (error) {
-    handlePluginCommandError(error, 'update', plugin)
+    await handlePluginCommandError(error, 'update', plugin, {
+      json: options.json,
+      scope,
+      shownCommand,
+    })
   }
 }

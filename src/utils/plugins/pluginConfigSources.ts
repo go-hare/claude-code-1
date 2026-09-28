@@ -3,6 +3,7 @@
  * managed sources — never project `.claude/settings.json` or
  * `.claude/settings.local.json` (secrets must not be repo-committed).
  */
+import { BUILTIN_MARKETPLACE_NAME } from '../../plugins/builtinPlugins.js'
 import { getEnabledSettingSources } from '../settings/constants.js'
 import { getSettingsForSource } from '../settings/settings.js'
 
@@ -19,6 +20,17 @@ export type PluginConfigOptions = Record<string, PluginConfigOptionValue>
 export type PluginConfigEntry = {
   options?: PluginConfigOptions
   mcpServers?: Record<string, PluginConfigOptions>
+}
+
+/**
+ * densable `tce` — `@builtin` pluginConfigs are also keyed by the bare name.
+ */
+export function pluginConfigIdAliases(pluginId: string): string[] {
+  const suffix = `@${BUILTIN_MARKETPLACE_NAME}`
+  const bare = pluginId.endsWith(suffix)
+    ? pluginId.slice(0, -suffix.length)
+    : ''
+  return bare !== '' && !bare.includes('@') ? [bare, pluginId] : [pluginId]
 }
 
 /**

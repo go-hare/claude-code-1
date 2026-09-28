@@ -49,6 +49,11 @@ type Props = {
     | 'truncate'
     | 'truncate-middle'
     | 'truncate-start';
+  /**
+   * densable xi capProseWidth — when true, prose (not tables/code) wraps at
+   * settings.maxProseWidth. Assistant/streaming paths pass true.
+   */
+  capProseWidth?: boolean;
 };
 
 // Module-level token cache — marked.lexer is the hot cost on virtual-scroll
@@ -169,12 +174,15 @@ function MarkdownBody({
   stripPromptTags,
   skipTokenCache,
   tailWrap,
+  capProseWidth,
   highlight,
 }: Props & { highlight: CliHighlight | null }): React.ReactNode {
   const [theme] = useTheme();
+  const settings = useSettings();
   configureMarked();
   // densable w0l: stripPromptTags defaults true, but promptMode skips stripping.
   const shouldStrip = (stripPromptTags ?? true) && !promptMode;
+  const maxProseWidth = capProseWidth ? settings.maxProseWidth : undefined;
 
   const elements = useMemo(() => {
     const source = shouldStrip ? stripPromptXMLTags(children) : children;
@@ -183,25 +191,37 @@ function MarkdownBody({
     let nonTableContent = '';
 
     // densable Sh: only the final non-table flush gets tailWrap
+    function pushAnsiBlock(text: string, wrap?: Props['tailWrap'], kind: 'prose' | 'code' = 'prose'): void {
+      const ansi = (
+        <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
+          {text}
+        </Ansi>
+      );
+      const inner = color ? (
+        <Text key={elements.length} color={color} wrap={wrap}>
+          {ansi}
+        </Text>
+      ) : (
+        ansi
+      );
+      // densable Lr: maxWidth only on prose; tables/code keep full width.
+      elements.push(
+        kind === 'prose' && maxProseWidth !== undefined ? (
+          <Box key={elements.length} maxWidth={maxProseWidth}>
+            {inner}
+          </Box>
+        ) : (
+          inner
+        ),
+      );
+    }
+
     function flushNonTableContent(wrap?: Props['tailWrap']): void {
       if (nonTableContent) {
         const trimmed = nonTableContent.replace(/^\n+/, '').trimEnd();
         nonTableContent = '';
         if (!trimmed) return;
-        const ansi = (
-          <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
-            {trimmed}
-          </Ansi>
-        );
-        elements.push(
-          color ? (
-            <Text key={elements.length} color={color} wrap={wrap}>
-              {ansi}
-            </Text>
-          ) : (
-            ansi
-          ),
-        );
+        pushAnsiBlock(trimmed, wrap, 'prose');
       }
     }
 
@@ -223,8 +243,13 @@ function MarkdownBody({
             highlight={highlight}
             dimColor={dimColor}
             tailWrap={index === lastNonSpaceIndex ? tailWrap : undefined}
+            maxProseWidth={maxProseWidth}
           />,
         );
+      } else if (maxProseWidth !== undefined && token.type === 'code') {
+        flushNonTableContent();
+        const rendered = formatToken(token, theme, 0, null, null, highlight, promptMode);
+        pushAnsiBlock(rendered.replace(/\n$/, ''), index === lastNonSpaceIndex ? tailWrap : undefined, 'code');
       } else {
         nonTableContent += formatToken(token, theme, 0, null, null, highlight, promptMode);
       }
@@ -237,7 +262,7 @@ function MarkdownBody({
       flushNonTableContent(tailWrap);
     }
     return elements;
-  }, [children, color, dimColor, highlight, theme, skipTokenCache, tailWrap, promptMode, shouldStrip]);
+  }, [children, color, dimColor, highlight, theme, skipTokenCache, tailWrap, promptMode, shouldStrip, maxProseWidth]);
 
   return (
     <Box flexDirection="column" gap={1}>
@@ -373,7 +398,9 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     const markdownSource = state.openFence !== null ? `${state.openFence}\n${frozenSlice}` : frozenSlice;
     state.chunks.push(
       <Box key={state.chunks.length} marginTop={state.chunks.length > 0 && state.gapAfterChunks ? 1 : 0}>
-        <Markdown skipTokenCache>{markdownSource}</Markdown>
+        <Markdown skipTokenCache capProseWidth>
+          {markdownSource}
+        </Markdown>
       </Box>,
     );
     state.openFence = updateOpenFence(state.openFence, frozenSlice);
@@ -425,7 +452,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
   const incompleteLiveLine = !unstableSuffix.endsWith('\n');
   const tailWrap = hideTrailingLine && incompleteLiveLine ? ('wrap-stream' as const) : undefined;
   const unstableEl = unstableSuffix ? (
-    <Markdown skipTokenCache tailWrap={tailWrap}>
+    <Markdown skipTokenCache tailWrap={tailWrap} capProseWidth>
       {unstableForRender}
     </Markdown>
   ) : null;
@@ -433,7 +460,11 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
   if (state.chunks.length === 0) {
     return (
       <Box flexDirection="column" gap={1}>
-        {hasStable && <Markdown skipTokenCache>{stablePrefix}</Markdown>}
+        {hasStable && (
+          <Markdown skipTokenCache capProseWidth>
+            {stablePrefix}
+          </Markdown>
+        )}
         {unstableEl}
       </Box>
     );
@@ -445,7 +476,9 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
       {state.chunks}
       {hasStable && (
         <Box marginTop={gap}>
-          <Markdown skipTokenCache>{stablePrefix}</Markdown>
+          <Markdown skipTokenCache capProseWidth>
+            {stablePrefix}
+          </Markdown>
         </Box>
       )}
       {unstableEl && <Box marginTop={hasStable ? 1 : gap}>{unstableEl}</Box>}

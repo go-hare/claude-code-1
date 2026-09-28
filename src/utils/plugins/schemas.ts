@@ -400,24 +400,130 @@ const PluginManifestMetadataSchema = lazySchema(() =>
   }),
 )
 
+const HOOKS_JSON_KNOWN_KEYS = new Set([
+  '$schema',
+  'description',
+  'hooks',
+  'modules',
+  'surface',
+])
+
+const HOOKS_MODULE_CODE_EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.jsx',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+] as const
+
+const HOOKS_MODULE_CODE_EXTENSIONS_LIST = `${HOOKS_MODULE_CODE_EXTENSIONS.slice(0, -1).join(', ')} or ${HOOKS_MODULE_CODE_EXTENSIONS.at(-1)}`
+
+function formatHooksJsonKey(key: string): string {
+  return `"${key.length <= 40 ? key : `${key.slice(0, 40)}...`}"`
+}
+
+/**
+ * densable `t6e` — unknown keys on hooks.json (not a parse failure).
+ * Allowlist: $schema, description, hooks, modules, surface.
+ */
+export function collectUnknownPluginHooksJsonKeyWarnings(
+  raw: unknown,
+): string[] {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return []
+  }
+  const record = raw as Record<string, unknown>
+  const unknownKeys: string[] = []
+  for (const key of Object.keys(record)) {
+    if (!HOOKS_JSON_KNOWN_KEYS.has(key)) {
+      unknownKeys.push(formatHooksJsonKey(key))
+    }
+  }
+  const hooks = record.hooks
+  if (hooks !== null && typeof hooks === 'object' && !Array.isArray(hooks)) {
+    for (const [event, matchers] of Object.entries(
+      hooks as Record<string, unknown>,
+    )) {
+      const list = Array.isArray(matchers) ? matchers : []
+      list.forEach((matcher, index) => {
+        if (matcher === null || typeof matcher !== 'object') {
+          return
+        }
+        const loc = `hooks.${event.length <= 40 ? event : `${event.slice(0, 40)}...`}[${index}]`
+        for (const key of Object.keys(matcher as Record<string, unknown>)) {
+          if (key !== 'matcher' && key !== 'hooks') {
+            unknownKeys.push(`${formatHooksJsonKey(key)} in ${loc}`)
+          }
+        }
+      })
+    }
+  }
+  if (unknownKeys.length === 0) {
+    return []
+  }
+  const shown = unknownKeys.slice(0, 5)
+  const extra = unknownKeys.length - shown.length
+  const noun = unknownKeys.length === 1 ? 'key' : 'keys'
+  return [
+    `hooks.json: unknown ${noun} ${shown.join(', ')}${
+      extra > 0 ? ` and ${extra} more` : ''
+    } ignored`,
+  ]
+}
+
 /**
  * Schema for plugin hooks configuration (hooks.json)
  *
- * Defines the hooks that a plugin can provide to intercept and modify
- * Claude Code behavior at various lifecycle events.
+ * densable 2.1.283 `Xmn`: `$schema` (ignored at load), description, hooks,
+ * modules (max 1), surface (gone). Refine requires hooks and/or modules.
  */
 export const PluginHooksSchema = lazySchema(() =>
-  z.object({
-    description: z
-      .string()
-      .optional()
-      .describe('Brief, user-facing explanation of what these hooks provide'),
-    hooks: z
-      .lazy(() => HooksSchema())
-      .describe(
-        'The hooks provided by the plugin, in the same format as the one used for settings',
-      ),
-  }),
+  z
+    .object({
+      $schema: z
+        .string()
+        .optional()
+        .catch(undefined)
+        .describe(
+          'JSON Schema reference for editor autocomplete/validation; ignored at load time',
+        ),
+      description: z
+        .string()
+        .optional()
+        .describe('Brief, user-facing explanation of what these hooks provide'),
+      hooks: z
+        .lazy(() => HooksSchema())
+        .optional()
+        .describe(
+          'The hooks provided by the plugin, in the same format as the one used for settings',
+        ),
+      modules: z
+        .array(z.string())
+        .max(1, {
+          message:
+            'hooks.json `modules` names one hooks module per plugin; a second entry is refused',
+        })
+        .optional()
+        .describe(
+          `The hooks module: one path, relative to this hooks.json, of a module exporting register(on). The module, and every file it imports from the plugin, is named like code (${HOOKS_MODULE_CODE_EXTENSIONS_LIST}; a file named otherwise is not loaded) and is an ES module whatever its suffix. What it hooks and calls is read from its source before it loads; \`claude plugin validate\` shows the result.`,
+        ),
+      surface: z
+        .never({
+          error:
+            'hooks.json `surface` is gone: name the module in the Client element, `Client({ module: "./board.tsx", key })`, a path relative to the file that builds it',
+        })
+        .optional(),
+    })
+    .refine(
+      value => value.hooks !== undefined || (value.modules?.length ?? 0) > 0,
+      {
+        message:
+          'hooks.json must have `hooks` (the hook matchers) or `modules` (hooks modules), or both',
+      },
+    ),
 )
 
 /**
@@ -671,6 +777,12 @@ const PluginUserConfigOptionSchema = lazySchema(() =>
       type: z
         .enum(['string', 'number', 'boolean', 'directory', 'file'])
         .describe('Type of the configuration value'),
+      options: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Allowed values for a string option (densable agents-md modes)',
+        ),
       title: z
         .string()
         .describe('Human-readable label shown in the config dialog'),

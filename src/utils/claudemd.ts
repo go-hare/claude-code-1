@@ -1171,6 +1171,26 @@ export function filterInjectedMemoryFiles(
   return files.filter(f => f.type !== 'AutoMem' && f.type !== 'TeamMem')
 }
 
+/**
+ * densable 2.1.283 `HEn` — exists check for AGENTS.md beside a walk directory.
+ * Not the loader; agents-md compositor injects files on prompt.context.
+ */
+export async function directoryHasAgentsMd(dir: string): Promise<boolean> {
+  const filePath = join(dir, 'AGENTS.md')
+  if (isUnsafeNetworkOrNtIncludePath(filePath)) return false
+  try {
+    const fs = getFsImplementation()
+    const resolved = safeResolvePath(fs, filePath)
+    if (isUnsafeNetworkOrNtIncludePath(resolved.resolvedPath)) {
+      return false
+    }
+    const stats = fs.lstatSync(filePath)
+    return stats.isFile() || stats.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
 export const getClaudeMds = (
   memoryFiles: MemoryFileInfo[],
   filter?: (type: MemoryType) => boolean,

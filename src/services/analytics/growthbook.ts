@@ -475,7 +475,6 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_turtle_carbon: true, // Ultrathink extended thinking
   tengu_amber_stoat: true, // Built-in Explore/Plan agents
   tengu_amber_flint: true, // Agent teams/swarms
-  tengu_slim_subagent_claudemd: true, // Slim CLAUDE.md for subagents
   tengu_birch_trellis: true, // Tree-sitter bash security analysis
   tengu_collage_kaleidoscope: true, // macOS clipboard image reading
   tengu_compact_cache_prefix: true, // Reuse prompt cache during compaction

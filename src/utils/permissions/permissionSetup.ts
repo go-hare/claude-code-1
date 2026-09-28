@@ -15,7 +15,10 @@ import type {
 import { getCwd } from '../cwd.js'
 import { isEnvTruthy } from '../envUtils.js'
 import type { SettingSource } from '../settings/constants.js'
-import { SETTING_SOURCES } from '../settings/constants.js'
+import {
+  isSettingSourceEnabled,
+  SETTING_SOURCES,
+} from '../settings/constants.js'
 import { isAdminManagedPolicyOrigin } from '../forceLoginMethod.js'
 import { isRemoteManagedSettingsVerified } from '../../services/remoteManagedSettings/syncCacheState.js'
 import {
@@ -36,6 +39,7 @@ import {
 import { isAutoDefaultLaunchEnabled } from '../../services/mcp/vscodeIdeBridgeCallbacks.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
+import { settingsHaveBlockReadsOutsideWorkingDirectories } from './outsideReads.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 import { collectUngatedAdditionalDirectories } from './projectGrantsGate.js'
@@ -918,6 +922,21 @@ export function initialPermissionModeFromCLI({
         mode: settingsMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
     }
+    // official O(): only policy/user/flag may grant bypassPermissions (257#89)
+    else if (settingsMode === 'bypassPermissions') {
+      if (!trustedSourceGrantsDefaultMode('bypassPermissions')) {
+        logForDebugging(
+          'settings defaultMode "bypassPermissions" ignored — only policy/user/flag settings may grant bypass mode (projectSettings and localSettings are repo-controllable)',
+          { level: 'warn' },
+        )
+        logEvent('tengu_settings_bypass_mode_untrusted_source_ignored', {})
+        if (!agentPermissionMode) {
+          orderedModes.push('default')
+        }
+      } else {
+        orderedModes.push(settingsMode)
+      }
+    }
     // auto from settings requires the same gate check as from CLI
     else if (feature('TRANSCRIPT_CLASSIFIER') && settingsMode === 'auto') {
       if (autoModeCircuitBrokenSync) {
@@ -1055,6 +1074,7 @@ export async function initializeToolPermissionContext({
   permissionMode,
   allowDangerouslySkipPermissions: _allowDangerouslySkipPermissions,
   addDirs,
+  shouldAvoidPermissionPrompts = false,
 }: {
   allowedToolsCli: string[]
   disallowedToolsCli: string[]
@@ -1064,6 +1084,8 @@ export async function initializeToolPermissionContext({
   permissionMode: PermissionMode
   allowDangerouslySkipPermissions: boolean
   addDirs: string[]
+  /** official vfe — --permission-prompts none latches local deny */
+  shouldAvoidPermissionPrompts?: boolean
 }): Promise<{
   toolPermissionContext: ToolPermissionContext
   warnings: string[]
@@ -1205,6 +1227,12 @@ export async function initializeToolPermissionContext({
       alwaysAskRules: {},
       isBypassPermissionsModeAvailable,
       ...(restricted ? { restricted: true } : {}),
+      ...(settingsHaveBlockReadsOutsideWorkingDirectories()
+        ? { blockReadsOutsideWorkingDirectories: true }
+        : {}),
+      ...(shouldAvoidPermissionPrompts
+        ? { shouldAvoidPermissionPrompts: true }
+        : {}),
       mcpPermissionModeOverrides: {},
       chromeClassifierFloorEnabled,
       previewClassifierFloorEnabled,
@@ -1643,6 +1671,20 @@ export function getAutoModeEnabledStateIfCached():
 export function hasAutoModeOptInAnySource(): boolean {
   if (autoModeStateModule?.getAutoModeFlagCli() ?? false) return true
   return hasAutoModeOptIn()
+}
+
+/** official _e — sources that may grant bypass/auto defaultMode */
+const TRUSTED_DEFAULT_MODE_SOURCES: SettingSource[] = [
+  'policySettings',
+  'flagSettings',
+  'userSettings',
+]
+
+/** official O(e) — a trusted enabled source sets permissions.defaultMode */
+export function trustedSourceGrantsDefaultMode(mode: PermissionMode): boolean {
+  return TRUSTED_DEFAULT_MODE_SOURCES.filter(isSettingSourceEnabled).some(
+    source => getSettingsForSource(source)?.permissions?.defaultMode === mode,
+  )
 }
 
 /**

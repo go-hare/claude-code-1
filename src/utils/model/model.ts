@@ -35,7 +35,10 @@ import {
   isFirstPartyProviderWithFirstPartyBase,
 } from './providers.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
-import { isModelAllowed } from './modelAllowlist.js'
+import {
+  isModelAllowed,
+  stepDownBlockedDefaultModel,
+} from './modelAllowlist.js'
 import { getModelPickerLabel } from './modelPickerSetting.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
 import { capitalize } from '../stringUtils.js'
@@ -145,7 +148,8 @@ export function getMainLoopModel(): ModelName {
 }
 
 export function getBestModel(): ModelName {
-  return getDefaultOpusModel()
+  // densable 2.1.283 HO: catalog best is "fable" → Fu()/fable51 (gateway still fable5)
+  return getDefaultFableModel()
 }
 
 /**
@@ -223,13 +227,13 @@ export function getDefaultOpusModel(): ModelName {
   // when the user configured a third-party provider.
   const primaryModel = getProviderPrimaryModel()
   if (primaryModel) return primaryModel
-  // densable 2.1.219 getDefaultOpusModel:
-  //   firstParty → zm().opus5 (claude-opus-5)
+  // densable 2.1.283 getDefaultOpusModel:
+  //   firstParty → zm().opus55 (claude-opus-5-5)
   //   else (3P lag) → zm().opus47
   if (provider !== 'firstParty') {
     return getModelStrings().opus47
   }
-  return getModelStrings().opus5
+  return getModelStrings().opus55
 }
 
 /**
@@ -245,7 +249,7 @@ function getBuiltinDefaultOpusSetting(): ModelName {
   const strings = getModelStrings()
   return (
     resolveCatalogFamilyModelString('opus', strings, getAPIProvider()) ??
-    strings.opus5
+    strings.opus55
   )
 }
 
@@ -323,7 +327,8 @@ export function getDefaultHaikuModel(): ModelName {
 /**
  * Official XNn / Ema — default Fable family model.
  *   env ANTHROPIC_DEFAULT_FABLE_MODEL ?? Ema()
- *   Ema: SZo("fable", zv()) ?? zv().fable5; UV strips `[1m]` (tle)
+ *   Ema: SZo("fable", zv()) ?? zv().fable51; UV strips `[1m]` (tle)
+ *   Gateway catalog alias still pins fable-5 (283 WC / aliases.per_provider).
  */
 export function getDefaultFableModel(): ModelName {
   const resolved =
@@ -333,7 +338,7 @@ export function getDefaultFableModel(): ModelName {
     : resolved
 }
 
-/** Official Ema — SZo("fable") ?? modelStrings.fable5; UV strips `[1m]`. */
+/** Official Fu — SZo("fable") ?? modelStrings.fable51; UV strips `[1m]`. */
 function getBuiltinDefaultFableModel(): ModelName {
   const strings = getModelStrings()
   const fromCatalog = resolveCatalogFamilyModelString(
@@ -341,7 +346,7 @@ function getBuiltinDefaultFableModel(): ModelName {
     strings,
     getAPIProvider(),
   )
-  const builtin = fromCatalog ?? strings.fable5
+  const builtin = fromCatalog ?? strings.fable51
   return isFirstPartyProviderWithFirstPartyBase()
     ? builtin.replace(/\[1m\]/gi, '')
     : builtin
@@ -392,55 +397,45 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { resolveOrgDefaultSetting, resolveAnthropicDefaultModelEnv } =
     require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
+  let setting: ModelName | ModelAlias
   const orgDefault = resolveOrgDefaultSetting()
   if (orgDefault) {
-    return orgDefault
-  }
-  const envDefault = resolveAnthropicDefaultModelEnv()
-  if (envDefault) {
-    return envDefault
-  }
-
-  // Ants default to defaultModel from flag config, or Opus 1M if not configured
-  if (process.env.USER_TYPE === 'ant') {
-    return (
-      (getAntModelOverrideConfig()?.defaultModel as string) ??
-      getDefaultOpusModel() + '[1m]'
-    )
-  }
-
-  // Max users get Opus as default
-  if (isMaxSubscriber()) {
-    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
-  }
-
-  // Team Premium gets Opus (same as Max)
-  if (isTeamPremiumSubscriber()) {
-    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
-  }
-
-  // densable 2.1.251 Xbt: non-max enterprise uses the same opus default as Max
-  // (ANTHROPIC_DEFAULT_OPUS_MODEL or catalog opus, else opus5) unless the
-  // catalog is sonnet-only and available-models enforcement is off.
-  // Usage-based enterprise (enterprise_usage_based) is included.
-  if (isEnterpriseOpusDefault()) {
-    return getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
-  }
-
-  // densable aw — Bedrock/Vertex default opus unless rw() (sonnet-only
-  // catalog and enforcement inactive). Foundry is not in gold aw. This
-  // arm is bl() (no Qb/[1m]): env or xt Hs("opus")??opus5, not 3P-lag opus47.
-  const provider = getAPIProvider()
-  if (provider === 'bedrock' || provider === 'vertex') {
-    if (isSonnetOnlyUnenforcedCatalog()) {
-      return getDefaultSonnetModel()
+    setting = orgDefault
+  } else {
+    const envDefault = resolveAnthropicDefaultModelEnv()
+    if (envDefault) {
+      setting = envDefault
+    } else if (process.env.USER_TYPE === 'ant') {
+      // Ants default to defaultModel from flag config, or Opus 1M if not configured
+      setting =
+        (getAntModelOverrideConfig()?.defaultModel as string) ??
+        getDefaultOpusModel() + '[1m]'
+    } else if (isMaxSubscriber()) {
+      setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+    } else if (isTeamPremiumSubscriber()) {
+      setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+    } else if (isEnterpriseOpusDefault()) {
+      // densable 2.1.251 Xbt: non-max enterprise uses the same opus default as Max
+      // unless the catalog is sonnet-only and available-models enforcement is off.
+      setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
+    } else {
+      // densable aw — Bedrock/Vertex default opus unless rw() (sonnet-only
+      // catalog and enforcement inactive). Foundry is not in gold aw. This
+      // arm is bl() (no Qb/[1m]): env or xt Hs("opus")??opus5, not 3P-lag opus47.
+      const provider = getAPIProvider()
+      if (provider === 'bedrock' || provider === 'vertex') {
+        setting = isSonnetOnlyUnenforcedCatalog()
+          ? getDefaultSonnetModel()
+          : getBuiltinDefaultOpusSetting()
+      } else {
+        // PAYG (1P and 3P), Team Standard, and Pro get Sonnet as default.
+        setting = getDefaultSonnetModel()
+      }
     }
-    return getBuiltinDefaultOpusSetting()
   }
-
-  // PAYG (1P and 3P), Team Standard, and Pro get Sonnet as default.
-  // Note that PAYG (3P) may default to an older Sonnet model.
-  return getDefaultSonnetModel()
+  // densable Gu: deniedModels / exact availableModels step the default down
+  // (RH at bootstrap fatals only when no substitute remains).
+  return stepDownBlockedDefaultModel(setting) ?? setting
 }
 
 /**
@@ -460,16 +455,24 @@ export function getDefaultMainLoopModel(): ModelName {
  */
 export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   name = name.toLowerCase()
-  // densable QO(e): fable/mythos before opus (explicit includes, not generic regex)
+  // densable ix(e): more-specific 5-1/5-5 before unsuffixed family
+  if (name.includes('claude-fable-5-1')) {
+    return 'claude-fable-5-1'
+  }
   if (name.includes('claude-fable-5')) {
     return 'claude-fable-5'
+  }
+  if (name.includes('claude-mythos-5-1')) {
+    return 'claude-mythos-5-1'
   }
   if (name.includes('claude-mythos-5')) {
     return 'claude-mythos-5'
   }
   // Special cases for Claude 4+ models to differentiate versions
-  // Order matters: check more specific versions first (4-8 before 4-7 before 4)
-  // densable 2.1.219: claude-opus-5 before 4.x fallthrough
+  // Order matters: check more specific versions first (5-5 before 5, 4-8 before 4)
+  if (name.includes('claude-opus-5-5')) {
+    return 'claude-opus-5-5'
+  }
   if (name.includes('claude-opus-5')) {
     return 'claude-opus-5'
   }
@@ -922,6 +925,10 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   const has1m = modelId.toLowerCase().includes('[1m]')
   const canonical = getCanonicalName(modelId)
 
+  // densable 2.1.283 catalog display_name; gx 1M set includes opus-5 / opus-5-5
+  if (canonical.includes('claude-opus-5-5')) {
+    return has1m ? 'Opus 5.5 (1M context)' : 'Opus 5.5'
+  }
   // densable 2.1.219: Opus 5 marketing; merged 1M row is "Opus (1M context)"
   if (canonical.includes('claude-opus-5')) {
     return has1m ? 'Opus (1M context)' : 'Opus 5'
@@ -967,6 +974,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   }
   if (canonical.includes('claude-3-5-haiku')) {
     return 'Claude 3.5 Haiku'
+  }
+  if (canonical.includes('claude-fable-5-1')) {
+    return has1m ? 'Fable 5.1 (with 1M context)' : 'Fable 5.1'
   }
   if (canonical.includes('claude-fable-5')) {
     return has1m ? 'Fable 5 (with 1M context)' : 'Fable 5'

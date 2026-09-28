@@ -1060,46 +1060,19 @@ export function formatEntryHelperDisclosure(options: {
  */
 export async function promptEntryHeadersHelperConfirm(options: {
   yes?: boolean
+  acceptCommand?: string
+  shown?: import('./pluginAcceptCommand.js').MarketplaceShownCommand
   write?: (text: string) => void
 }): Promise<EntryHelperConfirmVerdict> {
-  const { readYesFromStdin } = await import('./pluginCommandSource.js')
-  const write =
-    options.write ??
-    ((text: string) => {
-      try {
-        process.stdout.write(text)
-      } catch {
-        // ignore
-      }
-    })
-
-  const isTty = Boolean(process.stdout.isTTY && process.stdin.isTTY)
-  const yes = options.yes === true
-  const inSession = Boolean(
-    process.env.CLAUDE_CODE_CHILD_SESSION || process.env.CLAUDECODE,
+  const { confirmMarketplaceDeclaredCommand } = await import(
+    './pluginAcceptCommand.js'
   )
-  if (yes) {
-    if (!inSession) {
-      return 'accepted'
-    }
-    if (!isTty) {
-      write(
-        '-y/--yes is ignored inside a Claude Code session: run this in your own terminal to accept the command shown above.\n',
-      )
-      return 'unconfirmed'
-    }
-  }
-  if (!isTty) {
-    write(
-      inSession
-        ? 'Not an interactive terminal, so the command was only displayed, not accepted. Run this in your own terminal (outside the Claude Code session) to confirm the command shown above.\n'
-        : 'Not an interactive terminal, so the command was only displayed, not accepted. Re-run in a terminal to confirm it, or pass -y/--yes to accept the command shown above.\n',
-    )
-    return 'unconfirmed'
-  }
-  write('Run this command now? [y/N] ')
-  const ok = await readYesFromStdin()
-  return ok ? 'accepted' : 'declined'
+  return confirmMarketplaceDeclaredCommand({
+    yes: options.yes,
+    acceptCommand: options.acceptCommand,
+    shown: options.shown,
+    write: options.write,
+  })
 }
 
 /**
@@ -1108,9 +1081,14 @@ export async function promptEntryHeadersHelperConfirm(options: {
  */
 export async function promptEntryHeadersHelperConsent(options: {
   pluginName: string
+  pluginId?: string
   command: string
   archiveUrl: string
   yes?: boolean
+  acceptCommand?: string
+  onShown?: (
+    shown: import('./pluginAcceptCommand.js').MarketplaceShownCommandWithSha,
+  ) => void
   write?: (text: string) => void
 }): Promise<HeadersHelperConsentResult> {
   const write =
@@ -1125,8 +1103,20 @@ export async function promptEntryHeadersHelperConsent(options: {
 
   write(`${formatEntryHelperDisclosure(options)}\n`)
 
+  const { describeEntryHelperShown, withAcceptCommandMatched } = await import(
+    './pluginAcceptCommand.js'
+  )
+  const shown = await describeEntryHelperShown({
+    pluginId: options.pluginId ?? options.pluginName,
+    command: options.command,
+    archiveUrl: options.archiveUrl,
+  })
+  options.onShown?.(withAcceptCommandMatched(shown, options.acceptCommand))
+
   const verdict = await promptEntryHeadersHelperConfirm({
     yes: options.yes,
+    acceptCommand: options.acceptCommand,
+    shown,
     write,
   })
   if (verdict === 'accepted') {
@@ -1146,7 +1136,13 @@ export async function promptEntryHeadersHelperConsent(options: {
  */
 export async function announceEntryHeadersHelperForInstall(
   plugin: string,
-  options: { yes?: boolean } = {},
+  options: {
+    yes?: boolean
+    acceptCommand?: string
+    onShown?: (
+      shown: import('./pluginAcceptCommand.js').MarketplaceShownCommandWithSha,
+    ) => void
+  } = {},
 ): Promise<HeadersHelperConsentResult | undefined> {
   const { getPluginById, loadKnownMarketplacesConfig, getMarketplace } =
     await import('./marketplaceManager.js')
@@ -1206,9 +1202,12 @@ export async function announceEntryHeadersHelperForInstall(
 
   return promptEntryHeadersHelperConsent({
     pluginName: name,
+    pluginId,
     command: helper.command,
     archiveUrl: helper.archiveUrl,
     yes: options.yes,
+    acceptCommand: options.acceptCommand,
+    onShown: options.onShown,
   })
 }
 

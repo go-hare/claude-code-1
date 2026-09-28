@@ -60,6 +60,49 @@ describe('parsePluginArgs', () => {
     })
   })
 
+  test('parses /plugin install --marketplace source', () => {
+    expect(
+      parsePluginArgs('install demo --marketplace owner/repo'),
+    ).toEqual({
+      type: 'install-from-source',
+      plugin: 'demo',
+      marketplaceSource: 'owner/repo',
+    })
+    expect(
+      parsePluginArgs('install --marketplace=https://example.com/mkt demo'),
+    ).toEqual({
+      type: 'install-from-source',
+      plugin: 'demo',
+      marketplaceSource: 'https://example.com/mkt',
+    })
+  })
+
+  test('--marketplace usage errors', () => {
+    const missingSource = parsePluginArgs('install demo --marketplace')
+    expect(missingSource.type).toBe('usage-error')
+    if (missingSource.type === 'usage-error') {
+      expect(missingSource.message).toContain(
+        '--marketplace needs a marketplace source',
+      )
+    }
+    const tooMany = parsePluginArgs(
+      'install demo extra --marketplace owner/repo',
+    )
+    expect(tooMany.type).toBe('usage-error')
+    if (tooMany.type === 'usage-error') {
+      expect(tooMany.message).toContain(
+        '--marketplace needs exactly one plugin name',
+      )
+    }
+    const namedTwice = parsePluginArgs(
+      'install demo@mkt --marketplace owner/repo',
+    )
+    expect(namedTwice.type).toBe('usage-error')
+    if (namedTwice.type === 'usage-error') {
+      expect(namedTwice.message).toContain('Name the marketplace once')
+    }
+  })
+
   test('install without target returns type only', () => {
     expect(parsePluginArgs('install')).toEqual({ type: 'install' })
   })

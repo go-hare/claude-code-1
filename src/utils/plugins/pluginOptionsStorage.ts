@@ -28,7 +28,10 @@ import {
   type UserConfigValues,
   validateUserConfig,
 } from './mcpbHandler.js'
-import { loadPluginConfigFromAllowedSources } from './pluginConfigSources.js'
+import {
+  loadPluginConfigFromAllowedSources,
+  pluginConfigIdAliases,
+} from './pluginConfigSources.js'
 import { getPluginDataDir } from './pluginDirectories.js'
 
 export type PluginOptionValues = UserConfigValues
@@ -86,17 +89,34 @@ export const loadPluginOptions = memoize(
 )
 
 /**
- * densable Nw(pluginId, credentials) @212276680 / nyo.
- * Settings options + `eo().readAsync(credentials)` pluginSecrets.
- * densable Nw: eo().readAsync(credentials) via getSecureStorage().
+ * densable `q0` / `ct` — settings options + `Un().readAsync(credentials)`
+ * pluginSecrets. Promise-memoized per pluginId (`dt().optionValues`); reject
+ * drops the cache entry so the next call retries.
  */
-export async function loadPluginOptionsNw(
+const optionValues = new Map<string, Promise<PluginOptionValues>>()
+
+export function loadPluginOptionsNw(
   pluginId: string,
   credentials?: unknown,
 ): Promise<PluginOptionValues> {
-  if (credentials === undefined) {
-    return loadPluginOptions(pluginId)
+  const cached = optionValues.get(pluginId)
+  if (cached !== undefined) {
+    return cached
   }
+  const pending = loadPluginOptionsCt(pluginId, credentials)
+  optionValues.set(pluginId, pending)
+  pending.catch(() => {
+    if (optionValues.get(pluginId) === pending) {
+      optionValues.delete(pluginId)
+    }
+  })
+  return pending
+}
+
+async function loadPluginOptionsCt(
+  pluginId: string,
+  credentials?: unknown,
+): Promise<PluginOptionValues> {
   const nonSensitive =
     loadPluginConfigFromAllowedSources(pluginId).options ??
     ({} as PluginOptionValues)
@@ -113,20 +133,47 @@ export async function loadPluginOptionsNw(
 
 export function clearPluginOptionsCache(): void {
   loadPluginOptions.cache?.clear?.()
+  optionValues.clear()
+}
+
+async function mutatePluginSecrets(
+  mutator: (data: {
+    pluginSecrets?: Record<string, unknown>
+  }) => {
+    pluginSecrets?: Record<string, unknown>
+  },
+  credentials?: unknown,
+): Promise<{ success: boolean; warning?: string }> {
+  const storage = getSecureStorage()
+  const mutate = storage.mutate as
+    | ((
+        fn: typeof mutator,
+        creds?: unknown,
+      ) => Promise<{ success: boolean; warning?: string }> | { success: boolean; warning?: string })
+    | undefined
+  if (typeof mutate === 'function') {
+    return await mutate(mutator, credentials)
+  }
+  const existing = storage.read() ?? {}
+  const next = mutator(existing)
+  if (next === existing) {
+    return { success: true }
+  }
+  return storage.update(next)
 }
 
 /**
- * Save option values, splitting by `schema[key].sensitive`. Non-sensitive go
- * to userSettings; sensitive go to secureStorage. Writes are skipped if nothing
- * in that category is present.
- *
- * Clears the load cache on success so the next `loadPluginOptions` sees fresh.
+ * densable `BVe` — save option values, splitting by `schema[key].sensitive`.
+ * Sensitive → `Un().mutate(..., credentials)`; non-sensitive →
+ * `persistSettingsForSource('userSettings', …, storageV5)` with `tce` aliases.
  */
-export function savePluginOptions(
+export async function savePluginOptions(
   pluginId: string,
   values: PluginOptionValues,
   schema: PluginOptionSchema,
-): void {
+  storageV5?: unknown,
+  credentials?: unknown,
+): Promise<void> {
   const nonSensitive: PluginOptionValues = {}
   const sensitive: Record<string, string> = {}
 
@@ -138,87 +185,82 @@ export function savePluginOptions(
     }
   }
 
-  // Scrub sets — see saveMcpServerUserConfig (mcpbHandler.ts) for the
-  // rationale. Only keys in THIS save are scrubbed from the other store,
-  // so partial reconfigures don't lose data.
   const sensitiveKeysInThisSave = new Set(Object.keys(sensitive))
   const nonSensitiveKeysInThisSave = new Set(Object.keys(nonSensitive))
 
-  // secureStorage FIRST — if keychain fails, throw before touching
-  // settings.json so old plaintext (if any) stays as fallback.
-  const storage = getSecureStorage()
-  const existingInSecureStorage =
-    storage.read()?.pluginSecrets?.[pluginId] ?? undefined
-  const secureScrubbed = existingInSecureStorage
-    ? Object.fromEntries(
-        Object.entries(existingInSecureStorage).filter(
-          ([k]) => !nonSensitiveKeysInThisSave.has(k),
-        ),
-      )
-    : undefined
-  const needSecureScrub =
-    secureScrubbed &&
-    existingInSecureStorage &&
-    Object.keys(secureScrubbed).length !==
-      Object.keys(existingInSecureStorage).length
-  if (Object.keys(sensitive).length > 0 || needSecureScrub) {
-    const existing = storage.read() ?? {}
-    if (!existing.pluginSecrets) {
-      existing.pluginSecrets = {}
+  const result = await mutatePluginSecrets(data => {
+    const existing = data.pluginSecrets?.[pluginId] as
+      | Record<string, string>
+      | undefined
+    const scrubbed = existing
+      ? Object.fromEntries(
+          Object.entries(existing).filter(
+            ([k]) => !nonSensitiveKeysInThisSave.has(k),
+          ),
+        )
+      : undefined
+    const needSecureScrub =
+      scrubbed !== undefined &&
+      existing !== undefined &&
+      Object.keys(scrubbed).length !== Object.keys(existing).length
+    if (Object.keys(sensitive).length === 0 && !needSecureScrub) {
+      return data
     }
-    existing.pluginSecrets[pluginId] = {
-      ...secureScrubbed,
-      ...sensitive,
-    }
-    const result = storage.update(existing)
-    if (!result.success) {
-      const err = new Error(
-        `Failed to save sensitive plugin options for ${pluginId} to secure storage`,
-      )
-      logError(err)
-      throw err
-    }
-    if (result.warning) {
-      logForDebugging(`Plugin secrets save warning: ${result.warning}`, {
-        level: 'warn',
-      })
-    }
-  }
-
-  // settings.json AFTER secureStorage — scrub sensitive keys via explicit
-  // undefined (mergeWith deletion pattern).
-  //
-  // Official 2.1.207: only userSettings holds pluginConfigs writes. Read
-  // existing options from userSettings alone (not merged project/local) and
-  // pass a minimal patch so updateSettingsForSource cannot promote other
-  // scopes' pluginConfigs into ~/.claude/settings.json.
-  const userSettings = getSettingsForSource('userSettings') ?? {}
-  const existingInSettings =
-    userSettings.pluginConfigs?.[pluginId]?.options ?? {}
-  const keysToScrubFromSettings = Object.keys(existingInSettings).filter(k =>
-    sensitiveKeysInThisSave.has(k),
-  )
-  if (
-    Object.keys(nonSensitive).length > 0 ||
-    keysToScrubFromSettings.length > 0
-  ) {
-    const scrubbed = Object.fromEntries(
-      keysToScrubFromSettings.map(k => [k, undefined]),
-    ) as Record<string, undefined>
-    const result = updateSettingsForSource('userSettings', {
-      pluginConfigs: {
+    return {
+      ...data,
+      pluginSecrets: {
+        ...data.pluginSecrets,
         [pluginId]: {
-          options: {
-            ...nonSensitive,
-            ...scrubbed,
-          } as PluginOptionValues,
+          ...scrubbed,
+          ...sensitive,
         },
       },
+    }
+  }, credentials)
+  if (!result.success) {
+    const err = new Error(
+      `Failed to save sensitive plugin options for ${pluginId} to secure storage`,
+    )
+    logError(err)
+    throw err
+  }
+  if (result.warning) {
+    logForDebugging(`Plugin secrets save warning: ${result.warning}`, {
+      level: 'warn',
     })
-    if (result.error) {
-      logError(result.error)
+  }
+
+  const pluginConfigs = getSettingsForSource('userSettings')?.pluginConfigs
+  const patch: Record<string, { options: PluginOptionValues }> = {}
+  for (const alias of pluginConfigIdAliases(pluginId)) {
+    const keysToScrub = Object.keys(
+      pluginConfigs?.[alias]?.options ?? {},
+    ).filter(k => sensitiveKeysInThisSave.has(k))
+    const scrubbed = Object.fromEntries(keysToScrub.map(k => [k, undefined]))
+    const written = alias === pluginId ? nonSensitive : {}
+    if (Object.keys(written).length > 0 || keysToScrub.length > 0) {
+      patch[alias] = {
+        options: {
+          ...written,
+          ...scrubbed,
+        } as PluginOptionValues,
+      }
+    }
+  }
+  if (Object.keys(patch).length > 0) {
+    const persisted = await persistSettingsForSource(
+      'userSettings',
+      { pluginConfigs: patch },
+      undefined,
+      storageV5,
+    )
+    if (persisted.error) {
+      logForDebugging(
+        `Failed to save plugin options for ${pluginId} to settings.json: ${errorMessage(persisted.error)}`,
+        { level: 'error' },
+      )
       throw new Error(
-        `Failed to save plugin options for ${pluginId}: ${result.error.message}`,
+        `Failed to save plugin options for ${pluginId}: ${persisted.error.message}`,
       )
     }
   }
@@ -341,36 +383,32 @@ export async function deletePluginOptions(
 }
 
 /**
- * Find option keys whose saved values don't satisfy the schema — i.e., what to
- * prompt for. Returns the schema slice for those keys, or empty if everything
- * validates. Empty manifest.userConfig → empty result.
- *
- * Used by PluginOptionsFlow to decide whether to show the prompt after enable.
+ * densable `sst` — schema slice for keys that still need prompting.
+ * Sensitive fields are unconfigured only when missing/empty; non-sensitive
+ * also re-validate via `Rme` / `validateUserConfig`.
  */
-export function getUnconfiguredOptions(
+export async function getUnconfiguredOptions(
   plugin: LoadedPlugin,
-): PluginOptionSchema {
+  credentials?: unknown,
+): Promise<PluginOptionSchema> {
   const manifestSchema = plugin.manifest.userConfig
   if (!manifestSchema || Object.keys(manifestSchema).length === 0) {
     return {}
   }
 
-  const saved = loadPluginOptions(getPluginStorageId(plugin))
-  const validation = validateUserConfig(saved, manifestSchema)
-  if (validation.valid) {
-    return {}
-  }
-
-  // Return only the fields that failed. validateUserConfig reports errors as
-  // strings keyed by title/key — simpler to just re-check each field here than
-  // parse error strings.
+  const saved = await loadPluginOptionsNw(getPluginStorageId(plugin), credentials)
   const unconfigured: PluginOptionSchema = {}
   for (const [key, fieldSchema] of Object.entries(manifestSchema)) {
-    const single = validateUserConfig(
-      { [key]: saved[key] } as PluginOptionValues,
-      { [key]: fieldSchema },
-    )
-    if (!single.valid) {
+    const value = saved[key]
+    if (
+      value === undefined ||
+      value === '' ||
+      (fieldSchema.sensitive !== true &&
+        !validateUserConfig(
+          { [key]: value } as PluginOptionValues,
+          { [key]: fieldSchema },
+        ).valid)
+    ) {
       unconfigured[key] = fieldSchema
     }
   }

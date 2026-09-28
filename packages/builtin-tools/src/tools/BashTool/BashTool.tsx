@@ -7,6 +7,7 @@ import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
 import { getKairosActive } from 'src/bootstrap/state.js';
+import { getCwd } from 'src/utils/cwd.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -76,6 +77,13 @@ import {
   HOOK_IF_FALLBACK_NODE_TYPES,
   matchBashHookIfPattern,
 } from './hookIfFallback.js';
+import {
+  diffBashEditDiffSnapshot,
+  formatBashEditDiffForToolResult,
+  isBashEditDiffEnabled,
+  isGitStateSwitchCommand,
+  takeBashEditDiffSnapshot,
+} from './bashEditDiff.js';
 import {
   BackgroundHint,
   renderToolResultMessage,
@@ -440,6 +448,39 @@ const outputSchema = lazySchema(() =>
       .number()
       .optional()
       .describe('Total size of the output in bytes (set when output is too large for inline)'),
+    bashEditDiff: z
+      .object({
+        files: z.array(
+          z.object({
+            filePath: z.string(),
+            hunks: z.array(
+              z.object({
+                oldStart: z.number(),
+                oldLines: z.number(),
+                newStart: z.number(),
+                newLines: z.number(),
+                lines: z.array(z.string()),
+              }),
+            ),
+            created: z.boolean().optional(),
+            deleted: z.boolean().optional(),
+          }),
+        ),
+        moreFiles: z.number(),
+        changedFiles: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Absolute paths of every changed file known, shown or not, at most 200; for PostToolUse Bash hooks',
+          ),
+        skipped: z.boolean().optional(),
+        unavailable: z.boolean().optional(),
+        shared: z.boolean().optional(),
+      })
+      .optional()
+      .describe(
+        'Diff of files a Bash command changed (PostToolUse hooks get changedFiles). Not always shown to the model.',
+      ),
   }),
 );
 
@@ -727,6 +768,7 @@ export const BashTool = buildTool({
       structuredContent,
       persistedOutputPath,
       persistedOutputSize,
+      bashEditDiff,
     },
     toolUseID,
   ): ToolResultBlockParam {
@@ -787,7 +829,9 @@ export const BashTool = buildTool({
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: [processedStdout, errorMessage, backgroundInfo].filter(Boolean).join('\n'),
+      content: [processedStdout, errorMessage, backgroundInfo, formatBashEditDiffForToolResult(bashEditDiff)]
+        .filter(Boolean)
+        .join('\n'),
       is_error: interrupted,
     };
   },
@@ -817,6 +861,11 @@ export const BashTool = buildTool({
 
     const isMainThread = !toolUseContext.agentId;
     const preventCwdChanges = !isMainThread;
+    const permissionMode = getAppState().toolPermissionContext.mode;
+    const captureEditDiff =
+      isBashEditDiffEnabled(permissionMode) && !input.run_in_background && !input._simulatedSedEdit;
+    const skipGitSwitch = captureEditDiff && isGitStateSwitchCommand(input.command);
+    const editDiffSnapshot = captureEditDiff && !skipGitSwitch ? await takeBashEditDiffSnapshot(getCwd()) : null;
     const coordinatorWriteValidation = await validateCoordinatorBashWriteAccess(input.command, toolUseContext.agentId);
     if (!coordinatorWriteValidation.result) {
       return {
@@ -1019,6 +1068,13 @@ export const BashTool = buildTool({
         'dangerouslyDisableSandbox' in input ? (input.dangerouslyDisableSandbox as boolean | undefined) : undefined,
       persistedOutputPath,
       persistedOutputSize,
+      bashEditDiff: skipGitSwitch
+        ? { files: [], moreFiles: 0, skipped: true }
+        : editDiffSnapshot === 'unavailable'
+          ? { files: [], moreFiles: 0, unavailable: true }
+          : editDiffSnapshot && !wasInterrupted && !result.backgroundTaskId
+            ? await diffBashEditDiffSnapshot(editDiffSnapshot)
+            : undefined,
     };
 
     return {

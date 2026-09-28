@@ -15,7 +15,10 @@ import {
   getMainLoopModel,
   parseUserSpecifiedModel,
 } from './model.js'
-import { isModelAllowed } from './modelAllowlist.js'
+import {
+  formatDeniedModelsBlockMessage,
+  isModelAllowed,
+} from './modelAllowlist.js'
 import { getModelOptions } from './modelOptions.js'
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
 
@@ -237,7 +240,11 @@ export type PrintSetModelDecision =
   | {
       ok: false
       error: string
-      analytics: 'invalid_model_type' | 'unrecognized_model' | 'not_allowed'
+      analytics:
+        | 'invalid_model_type'
+        | 'unrecognized_model'
+        | 'not_allowed'
+        | 'denied_by_managed_settings'
       recognitionShape?: ModelRecognitionShape
       hadSuggestion?: boolean
     }
@@ -263,6 +270,18 @@ export function decidePrintSetModel(
   const requestedArg = typeof rawModel === 'string' ? rawModel : 'default'
   const isDefault = requestedArg.trim().toLowerCase() === 'default'
   const candidate = isDefault ? getDefaultMainLoopModel() : requestedArg
+
+  // densable RH(bl(), "switch") when set_model asks for default.
+  if (isDefault) {
+    const blocked = formatDeniedModelsBlockMessage(candidate, 'switch')
+    if (blocked !== null) {
+      return {
+        ok: false,
+        error: blocked,
+        analytics: 'denied_by_managed_settings',
+      }
+    }
+  }
 
   const recognition = isDefault
     ? ({ recognized: true } as const)
@@ -342,6 +361,18 @@ export function decideReplBridgeSetModel(
   const candidate: string = isDefault
     ? getDefaultMainLoopModel()
     : (rawModel as string)
+
+  // densable RH(bl(), "switch") on default/null — same gate as print set_model.
+  if (isDefault) {
+    const blocked = formatDeniedModelsBlockMessage(candidate, 'switch')
+    if (blocked !== null) {
+      return {
+        ok: false,
+        error: blocked,
+        analytics: 'denied_by_managed_settings',
+      }
+    }
+  }
 
   const needsAllowCheck =
     !isDefault &&

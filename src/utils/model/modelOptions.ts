@@ -233,15 +233,15 @@ function getCustomOpusOption(): ModelOption | undefined {
   }
 }
 
-/** densable 2.1.219 jUc — default Opus row (Opus 5). */
+/** densable 2.1.283 jUc — default Opus row (Opus 5.5). */
 function getOpus5Option(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
-  const model = getModelStrings().opus5
+  const model = getModelStrings().opus55
   return {
     value: is3P ? model : 'opus',
     label: 'Opus',
-    description: `Opus 5 · Best for everyday, complex tasks${getOpusPricingSuffix(fastMode, model)}`,
-    descriptionForModel: 'Opus 5 - best for everyday, complex tasks',
+    description: `Opus 5.5 · Best for everyday, complex tasks${getOpusPricingSuffix(fastMode, model)}`,
+    descriptionForModel: 'Opus 5.5 - best for everyday, complex tasks',
   }
 }
 
@@ -307,14 +307,14 @@ export function getSonnet46_1MOption(): ModelOption {
 
 export function getOpus47_1MOption(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
-  const model = getModelStrings().opus5
+  const model = getModelStrings().opus55
   return {
     value: is3P ? model + '[1m]' : 'opus[1m]',
-    // densable 2.1.219 #10
+    // densable 2.1.219 #10 / 2.1.283 live Opus 5.5
     label: 'Opus (1M context)',
-    description: `Opus 5 for long sessions${getOpusPricingSuffix(fastMode, model)}`,
+    description: `Opus 5.5 for long sessions${getOpusPricingSuffix(fastMode, model)}`,
     descriptionForModel:
-      'Opus 5 with 1M context window - for long sessions with large codebases',
+      'Opus 5.5 with 1M context window - for long sessions with large codebases',
   }
 }
 
@@ -394,12 +394,12 @@ function getHaikuOption(): ModelOption {
 }
 
 function getMaxOpusOption(fastMode = false): ModelOption {
-  // densable 2.1.219: alias "opus" → Opus 5
-  const model = getModelStrings().opus5
+  // densable 2.1.283: alias "opus" → Opus 5.5
+  const model = getModelStrings().opus55
   return {
     value: 'opus',
     label: 'Opus',
-    description: `Opus 5 · Best for everyday, complex tasks${fastMode ? getOpusPricingSuffix(true, model) : ''}`,
+    description: `Opus 5.5 · Best for everyday, complex tasks${fastMode ? getOpusPricingSuffix(true, model) : ''}`,
   }
 }
 
@@ -424,25 +424,25 @@ export function getMaxOpus47_1MOption(fastMode = false): ModelOption {
   const billingInfo = isClaudeAISubscriber()
     ? DRAWS_FROM_USAGE_CREDITS_SUFFIX
     : ''
-  const model = getModelStrings().opus5
+  const model = getModelStrings().opus55
   return {
     value: 'opus[1m]',
-    // densable 2.1.219 #10 — merged Opus row label
+    // densable 2.1.219 #10 / 2.1.283 live Opus 5.5
     label: 'Opus (1M context)',
-    description: `Opus 5 with 1M context${billingInfo}${getOpusPricingSuffix(fastMode, model)}`,
+    description: `Opus 5.5 with 1M context${billingInfo}${getOpusPricingSuffix(fastMode, model)}`,
   }
 }
 
 function getMergedOpus1MOption(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
-  const model = getModelStrings().opus5
+  const model = getModelStrings().opus55
   return {
-    // densable 2.1.219: merged default Opus 1M = opus5[1m] / opus[1m]
+    // densable 2.1.283: merged default Opus 1M = opus55[1m] / opus[1m]
     value: is3P ? model + '[1m]' : 'opus[1m]',
     label: 'Opus (1M context)',
-    description: `Opus 5 for long sessions${!is3P && fastMode ? getOpusPricingSuffix(fastMode, model) : ''}`,
+    description: `Opus 5.5 for long sessions${!is3P && fastMode ? getOpusPricingSuffix(fastMode, model) : ''}`,
     descriptionForModel:
-      'Opus 5 with 1M context window - for long sessions with large codebases',
+      'Opus 5.5 with 1M context window - for long sessions with large codebases',
   }
 }
 

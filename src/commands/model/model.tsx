@@ -36,7 +36,10 @@ import {
   parseUserSpecifiedModel,
   renderDefaultModelSetting,
 } from '../../utils/model/model.js';
-import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
+import {
+  formatDeniedModelsBlockMessage,
+  isModelAllowed,
+} from '../../utils/model/modelAllowlist.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { validateModel } from '../../utils/model/validateModel.js';
 
@@ -67,6 +70,18 @@ function ModelPickerWrapper({
   }
 
   async function commitModel(model: string | null, effort: EffortLevel | undefined): Promise<void> {
+    // densable ye: RH(_y(), "switch") before PreModelSwitch when picking Default.
+    if (model === null) {
+      const blocked = formatDeniedModelsBlockMessage(getDefaultMainLoopModelSetting(), 'switch');
+      if (blocked !== null) {
+        logEvent('tengu_feature_bad', {
+          feature_name: 'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code: 'denied_by_managed_settings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        onDone(blocked, { display: 'system' });
+        return;
+      }
+    }
     const fromModel = mainLoopModel ? parseUserSpecifiedModel(mainLoopModel) : getMainLoopModel();
     const toModel = model ? parseUserSpecifiedModel(model) : getDefaultMainLoopModel();
     const pre = await executePreModelSwitchHooks({
@@ -268,6 +283,18 @@ function SetModelAndClose({
     }
 
     async function setModel(modelValue: string | null): Promise<void> {
+      // densable Hpe: RH(_y(), "switch") when `/model default`.
+      if (modelValue === null) {
+        const blocked = formatDeniedModelsBlockMessage(getDefaultMainLoopModelSetting(), 'switch');
+        if (blocked !== null) {
+          logEvent('tengu_feature_bad', {
+            feature_name: 'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_code: 'denied_by_managed_settings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          onDone(blocked, { display: 'system' });
+          return;
+        }
+      }
       const fromModel = getMainLoopModel();
       const toModel = modelValue ? parseUserSpecifiedModel(modelValue) : getDefaultMainLoopModel();
       const pre = await executePreModelSwitchHooks({

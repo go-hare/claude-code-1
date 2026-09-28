@@ -276,6 +276,8 @@ type Props = {
       pastedContentsOverride?: Record<number, PastedContent>;
       /** densable resumesStaleQuotaWait — empty Enter substituted A4f. */
       resumesStaleQuotaWait?: boolean;
+      sendNow?: boolean;
+      queueSubmit?: boolean;
     },
   ) => Promise<void>;
   onAgentSubmit?: (
@@ -1467,7 +1469,11 @@ function PromptInput({
   }, [addNotification, onModeChange, queuedCommands, setPastedContents, setQueueEditIndex, store, trackAndSetInput]);
 
   const onSubmit = useCallback(
-    async (inputParam: string, isSubmittingSlashCommand = false) => {
+    async (
+      inputParam: string,
+      isSubmittingSlashCommand = false,
+      submitOptions?: { sendNow?: boolean; queueSubmit?: boolean },
+    ) => {
       // densable N1 / live dual-write: paste insert updates liveInputRef same tick;
       // useTextInput liveValueRef lags until value prop re-renders. Prefer live
       // when caller is empty or missing paste pills (flash + swallow otherwise).
@@ -1648,6 +1654,8 @@ function PromptInput({
         {
           pastedContentsOverride: livePastedContents,
           ...(resumesStaleQuotaWait ? { resumesStaleQuotaWait: true } : {}),
+          ...(submitOptions?.sendNow ? { sendNow: true } : {}),
+          ...(submitOptions?.queueSubmit ? { queueSubmit: true } : {}),
         },
       );
     },
@@ -2174,6 +2182,14 @@ function PromptInput({
     });
   }, [keybindingContext, isModalOverlayActive, onSubmit]);
 
+  const handleQueueSubmit = useCallback(() => {
+    void onSubmit(liveInputRef.current, false, { queueSubmit: true });
+  }, [onSubmit]);
+
+  const handleSendNow = useCallback(() => {
+    void onSubmit(liveInputRef.current, false, { sendNow: true });
+  }, [onSubmit]);
+
   // Chat context keybindings for editing shortcuts
   // Note: history:previous/history:next are NOT handled here. They are passed as
   // onHistoryUp/onHistoryDown props to TextInput, so that useTextInput's
@@ -2191,6 +2207,8 @@ function PromptInput({
       'chat:thinkingToggle': handleThinkingToggle,
       'chat:cycleMode': handleCycleMode,
       'chat:imagePaste': handleImagePaste,
+      'chat:queueSubmit': handleQueueSubmit,
+      'chat:sendNow': handleSendNow,
     }),
     [
       handleUndo,
@@ -2202,6 +2220,8 @@ function PromptInput({
       handleThinkingToggle,
       handleCycleMode,
       handleImagePaste,
+      handleQueueSubmit,
+      handleSendNow,
     ],
   );
 

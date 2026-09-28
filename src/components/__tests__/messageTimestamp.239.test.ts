@@ -54,8 +54,10 @@ describe('densable 2.1.239 cko / Kkc / jkc', () => {
     expect(shouldShowMessageTimestamp(user, false, true, true)).toBe(false)
   })
 
-  test('jkc formats setting stamps as YYYY-MM-DD HH:mm:ss TZ', () => {
+  test('jkc formats setting stamps via timeFormat (auto + UTC override)', () => {
     const formatted = formatSettingMessageTimestamp(TS, 'UTC')
-    expect(formatted).toMatch(/^2026-09-01 04:08:00 UTC$/)
+    expect(formatted).toContain('2026')
+    expect(formatted).toContain('UTC')
+    expect(formatted).toMatch(/04:08:00/)
   })
 })

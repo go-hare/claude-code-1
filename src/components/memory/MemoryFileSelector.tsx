@@ -99,9 +99,9 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
     // Format label based on type
     let label: string;
     if (file.type === 'User' && !file.isNested && file.path === userMemoryPath) {
-      label = `User memory`;
+      label = `User instructions`;
     } else if (file.type === 'Project' && !file.isNested && file.path === projectMemoryPath) {
-      label = `Project memory`;
+      label = `Project instructions`;
     } else if (depth > 0) {
       // For child nodes (imported files), show indented with L
       label = `${indent}L ${displayPath}${existsLabel}`;

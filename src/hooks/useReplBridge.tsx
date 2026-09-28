@@ -1067,8 +1067,9 @@ export function useReplBridge(
                 logEvent('tengu_feature_bad', {
                   feature_name:
                     'model_switch' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  error_code:
-                    'not_allowed' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code: (decision.analytics === 'denied_by_managed_settings'
+                    ? 'denied_by_managed_settings'
+                    : 'not_allowed') as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 });
                 return { ok: false as const, error: decision.error };
               }

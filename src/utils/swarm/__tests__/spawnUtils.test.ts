@@ -11,6 +11,8 @@ const ENV_KEYS = [
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
 ] as const
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -64,5 +66,13 @@ describe('buildInheritedEnvVars', () => {
     expect(env).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL=grok-4.5')
     expect(env).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL=grok-4.5')
     expect(env).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL=grok-4.5')
+  })
+
+  test('forwards CLAUDE_CODE_SUBAGENT_MODEL_FORCE to teammates', () => {
+    process.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE = '1'
+    process.env.CLAUDE_CODE_SUBAGENT_MODEL = 'haiku'
+    const env = buildInheritedEnvVars()
+    expect(env).toContain('CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1')
+    expect(env).toContain('CLAUDE_CODE_SUBAGENT_MODEL=haiku')
   })
 })

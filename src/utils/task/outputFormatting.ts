@@ -1,17 +1,15 @@
-import { validateBoundedIntEnvVar } from '../envValidation.js'
 import { getTaskOutputPath } from './diskOutput.js'
 
 export const TASK_MAX_OUTPUT_UPPER_LIMIT = 160_000
 export const TASK_MAX_OUTPUT_DEFAULT = 32_000
 
+/**
+ * densable 2.1.283 — TaskOutput removed; taskOutputMaxChars and
+ * TASK_MAX_OUTPUT_LENGTH no longer have any effect. Keep a fixed default so
+ * leftover formatTaskOutput callers still bound inline previews.
+ */
 export function getMaxTaskOutputLength(): number {
-  const result = validateBoundedIntEnvVar(
-    'TASK_MAX_OUTPUT_LENGTH',
-    process.env.TASK_MAX_OUTPUT_LENGTH,
-    TASK_MAX_OUTPUT_DEFAULT,
-    TASK_MAX_OUTPUT_UPPER_LIMIT,
-  )
-  return result.effective
+  return TASK_MAX_OUTPUT_DEFAULT
 }
 
 /**

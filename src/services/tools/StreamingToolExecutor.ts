@@ -9,10 +9,15 @@ import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import {
+  createAbortController,
   createChildAbortController,
   isRemoteCancelAbortReason,
 } from '../../utils/abortController.js'
 import { runToolUse } from './toolExecution.js'
+import {
+  queryForegroundSession,
+  registerForegroundToolCall,
+} from '../../utils/foregroundToolCalls.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
 import { logEvent } from '../analytics/index.js'
@@ -411,14 +416,24 @@ export class StreamingToolExecutor {
       // the query controller so the query loop's post-tool abort check ends
       // the turn. Without bubble-up, ExitPlanMode "clear context + auto"
       // sends REJECT_MESSAGE to the model instead of aborting (#21056 regression).
-      const toolAbortController = createChildAbortController(
-        this.siblingAbortController,
+      const toolAbortController = createAbortController()
+      let detached = false
+      const queryLinked = createChildAbortController(this.siblingAbortController)
+      queryLinked.signal.addEventListener(
+        'abort',
+        () => {
+          if (!detached) {
+            toolAbortController.abort(queryLinked.signal.reason)
+          }
+        },
+        { once: true },
       )
       toolAbortController.signal.addEventListener(
         'abort',
         () => {
           if (
             toolAbortController.signal.reason !== 'sibling_error' &&
+            !detached &&
             !this.toolUseContext.abortController.signal.aborted &&
             !this.discarded
           ) {
@@ -428,6 +443,18 @@ export class StreamingToolExecutor {
           }
         },
         { once: true },
+      )
+
+      const unregisterForeground = registerForegroundToolCall(
+        queryForegroundSession,
+        {
+          toolUseId: tool.id,
+          backgroundNow: () => {
+            if (detached || toolAbortController.signal.aborted) return false
+            detached = true
+            return true
+          },
+        },
       )
 
       const generator = runToolUse(
@@ -447,10 +474,12 @@ export class StreamingToolExecutor {
       // message when it is the one that caused the error.
       let thisToolErrored = false
 
-      for await (const update of generator) {
+      try {
+        for await (const update of generator) {
         // Check if we were aborted by a sibling tool error or user interruption.
         // Only add the synthetic error if THIS tool didn't produce the error.
-        const abortReason = this.getAbortReason(tool)
+        // densable send-now: detached tools ignore the query abort (do not cancel).
+        const abortReason = detached ? null : this.getAbortReason(tool)
         if (abortReason === 'remote_cancel' && !thisToolErrored) {
           break
         }
@@ -504,6 +533,9 @@ export class StreamingToolExecutor {
         if (update.contextModifier) {
           contextModifiers.push(update.contextModifier.modifyContext)
         }
+      }
+      } finally {
+        unregisterForeground()
       }
       tool.results = messages
       tool.contextModifiers = contextModifiers

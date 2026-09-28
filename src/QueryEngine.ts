@@ -725,11 +725,29 @@ export class QueryEngine {
     // ref-tracked plugins. CCR populates the cache via CLAUDE_CODE_SYNC_PLUGIN_INSTALL
     // (headlessPluginInstall) or CLAUDE_CODE_PLUGIN_SEED_DIR before this runs;
     // SDK callers that need fresh source can call /reload-plugins.
-    const [skills, { enabled: enabledPlugins }] = await Promise.all([
+    const [skills, pluginLoad] = await Promise.all([
       getSlashCommandToolSkills(getCwd()),
       loadAllPluginsCacheOnly(),
     ])
     headlessProfilerCheckpoint('after_skills_plugins')
+    const { enabled: enabledPlugins, errors: pluginLoadErrors } = pluginLoad
+    const { getPluginErrorMessage, pluginErrorInitPath } = await import(
+      './types/plugin.js'
+    )
+    const pluginErrors = pluginLoadErrors.map(err => {
+      const rec = err as {
+        plugin?: string
+        source: string
+        type: string
+      }
+      const path = pluginErrorInitPath(err)
+      return {
+        plugin: rec.plugin ?? rec.source,
+        type: rec.type,
+        message: getPluginErrorMessage(err),
+        ...(path !== undefined ? { path } : {}),
+      }
+    })
 
     yield buildSystemInitMessage({
       tools,
@@ -744,6 +762,7 @@ export class QueryEngine {
       fastMode: initialAppState.fastMode,
       // densable 2.1.219 #4 — yEm() soft-skip store → mcp_server_errors
       mcpServerErrors: getMcpConfigServerErrors(),
+      pluginErrors,
     })
 
     // Record when system message is yielded for headless latency tracking

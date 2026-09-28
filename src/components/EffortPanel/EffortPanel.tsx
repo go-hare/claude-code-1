@@ -40,7 +40,7 @@ const MIN_SEGMENT = 12;
 
 // densable help row (plain + ripple). densable 2.1.233 #15 — keep full hint
 // visible (do not truncate mid-sentence for narrow panels).
-const HELP_TEXT = '←/→ to adjust · Enter to confirm · Esc to cancel';
+const HELP_TEXT = '←/→ to adjust · Enter to save · s for this session only · Esc to cancel';
 
 // 淡入淡出每帧步长：60ms 间隔下 5 帧达到目标 ≈ 300ms 动画时长。
 const FADE_STEP = 0.2;
@@ -153,20 +153,26 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
     });
   }, [time, isOnUltracode, showingRipple]);
 
-  const handleConfirm = React.useCallback(() => {
-    if (done) return;
-    setDone(true);
-    // Pass model so ultracode / unsupported levels follow catalog ladder.
-    const outcome = computeConfirmOutcome(cursor, arg => executeEffort(arg, model));
-    if (outcome.kind === 'apply' && outcome.effortUpdate) {
-      setAppState(prev => ({
-        ...prev,
-        effortValue: outcome.effortUpdate!.value,
-        ultracode: outcome.effortUpdate!.ultracode ?? false,
-      }));
-    }
-    onDone(outcome.message);
-  }, [cursor, done, model, onDone, setAppState]);
+  const handleConfirm = React.useCallback(
+    (persistAsDefault = true) => {
+      if (done) return;
+      setDone(true);
+      // Pass model so ultracode / unsupported levels follow catalog ladder.
+      // densable EffortSlider s → persistAsDefault false (session-only like /model s).
+      const outcome = computeConfirmOutcome(cursor, arg =>
+        executeEffort(arg, model, undefined, persistAsDefault),
+      );
+      if (outcome.kind === 'apply' && outcome.effortUpdate) {
+        setAppState(prev => ({
+          ...prev,
+          effortValue: outcome.effortUpdate!.value,
+          ultracode: outcome.effortUpdate!.ultracode ?? false,
+        }));
+      }
+      onDone(outcome.message);
+    },
+    [cursor, done, model, onDone, setAppState],
+  );
 
   const handleCancel = React.useCallback(() => {
     if (done) return;
@@ -180,7 +186,8 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
       'effortPanel:increase': () => setCursor(c => moveRight(c, positions)),
       'effortPanel:home': () => setCursor(positions[0] ?? 'low'),
       'effortPanel:end': () => setCursor(positions[positions.length - 1] ?? 'ultracode'),
-      'effortPanel:confirm': handleConfirm,
+      'effortPanel:confirm': () => handleConfirm(true),
+      'effortPanel:thisSessionOnly': () => handleConfirm(false),
       'effortPanel:cancel': handleCancel,
     },
     { context: 'EffortPanel' },

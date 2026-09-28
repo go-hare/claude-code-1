@@ -57,6 +57,11 @@ function setEffortValue(
      * - non-interactive: session-only AppState; no settings write; no N9
      */
     interactive?: boolean;
+    /**
+     * densable EffortSlider `s` / persistAsDefault. Default true.
+     * false = session-only (like /model s): write AppState, N9, no settings.
+     */
+    persistAsDefault?: boolean;
     /** Model for densable oLy launch-pin gate. */
     model?: string;
     /**
@@ -73,16 +78,22 @@ function setEffortValue(
   },
 ): EffortCommandResult {
   const interactive = opts?.interactive ?? getIsInteractive();
+  const persistAsDefault = opts?.persistAsDefault ?? true;
   const model = opts?.model ?? '';
   const ultracode = opts?.ultracode === true;
   // densable QLr: if (t) N9(); sLy non-interactive pin rejects earlier.
+  // Session-only `s` still unpins when writing session effort (N9 on write).
   const shouldUnpin = opts?.unpin ?? interactive;
 
   // densable: non-ultracode effort writes clear the ultracode flag.
   // densable QLr: only persist when interactive (t) and value is f4e-able.
+  // persistAsDefault=false (EffortSlider s) is session-only like /model s.
   // Persist before env/pin messaging so interactive writes still land when
   // env will override the session (densable QLr then env then pin).
-  const persistable = ultracode || !interactive ? undefined : toPersistableEffort(effortValue);
+  const persistable =
+    ultracode || !interactive || persistAsDefault === false
+      ? undefined
+      : toPersistableEffort(effortValue);
   if (persistable !== undefined) {
     const patch = model.length > 0 ? effortModelSettingsPatch(model, persistable) : { effortLevel: persistable };
     const result = updateSettingsForSource('userSettings', patch);
@@ -146,7 +157,7 @@ function setEffortValue(
   // densable oLy: i = wve(e) !== e → org exceed message (not capability clamp).
   if (opts?.orgClampedFrom !== undefined && opts.orgClampedFrom !== effortValue && typeof effortValue === 'string') {
     return {
-      message: `Effort '${opts.orgClampedFrom}' exceeds your organization's limit for ${model}; set to '${effortValue}' instead${suffix}: ${description}`,
+      message: `Effort '${opts.orgClampedFrom}' exceeds the cap for ${model} set by your settings or organization; set to '${effortValue}' instead${suffix}: ${description}`,
       effortUpdate: { value: effortValue, ultracode: false },
     };
   }
@@ -260,6 +271,7 @@ export function executeEffort(
   args: string,
   model = '',
   interactive: boolean = getIsInteractive(),
+  persistAsDefault = true,
 ): EffortCommandResult {
   const normalized = args.toLowerCase();
   if (normalized === 'auto' || normalized === 'unset') {
@@ -301,6 +313,7 @@ export function executeEffort(
     interactive,
     model,
     orgClampedFrom,
+    persistAsDefault,
   });
 }
 

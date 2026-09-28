@@ -455,6 +455,8 @@ export type GlobalConfig = {
 
   // First start time tracking
   firstStartTime?: string // ISO timestamp when Claude Code was first started on this machine
+  // densable mzo — CLI version at first start (string MACRO.VERSION, not MACRO blob)
+  firstStartVersion?: string
 
   messageIdleNotifThresholdMs: number // How long the user has to have been idle to get a notification that Claude is done generating
 
@@ -2292,10 +2294,15 @@ export function recordFirstStartTime(): void {
   const config = getGlobalConfig()
   if (!config.firstStartTime) {
     const firstStartTime = new Date().toISOString()
-    saveGlobalConfig(current => ({
-      ...current,
-      firstStartTime: current.firstStartTime ?? firstStartTime,
-    }))
+    saveGlobalConfig(current => {
+      // densable mzo: only persist on a truly first start
+      if (current.firstStartTime) return current
+      return {
+        ...current,
+        firstStartTime,
+        firstStartVersion: MACRO.VERSION,
+      }
+    })
   }
 }
 

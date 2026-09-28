@@ -22,7 +22,7 @@ import {
 import { getPluginDataDir } from './pluginDirectories.js'
 import {
   getPluginStorageId,
-  loadPluginOptions,
+  loadPluginOptionsNw,
   substitutePluginVariables,
   substituteUserConfigVariables,
 } from './pluginOptionsStorage.js'
@@ -292,9 +292,10 @@ export type UnconfiguredChannel = {
  * `UserConfigSchema` because the Zod schema in schemas.ts matches
  * `McpbUserConfigurationOption` field-for-field.
  */
-export function getUnconfiguredChannels(
+export async function getUnconfiguredChannels(
   plugin: LoadedPlugin,
-): UnconfiguredChannel[] {
+  credentials?: unknown,
+): Promise<UnconfiguredChannel[]> {
   const channels = plugin.manifest.channels
   if (!channels || channels.length === 0) {
     return []
@@ -309,7 +310,9 @@ export function getUnconfiguredChannels(
     if (!channel.userConfig || Object.keys(channel.userConfig).length === 0) {
       continue
     }
-    const saved = loadMcpServerUserConfig(pluginId, channel.server) ?? {}
+    const saved =
+      (await loadMcpServerUserConfig(pluginId, channel.server, credentials)) ??
+      {}
     const validation = validateUserConfig(saved, channel.userConfig)
     if (!validation.valid) {
       unconfigured.push({
@@ -328,15 +331,22 @@ export function getUnconfiguredChannels(
  * or channels without a userConfig schema — resolvePluginMcpEnvironment will
  * then skip ${user_config.X} substitution for that server.
  */
-function loadChannelUserConfig(
+async function loadChannelUserConfig(
   plugin: LoadedPlugin,
   serverName: string,
-): UserConfigValues | undefined {
+  credentials?: unknown,
+): Promise<UserConfigValues | undefined> {
   const channel = plugin.manifest.channels?.find(c => c.server === serverName)
   if (!channel?.userConfig) {
     return undefined
   }
-  return loadMcpServerUserConfig(plugin.repository, serverName) ?? undefined
+  return (
+    (await loadMcpServerUserConfig(
+      plugin.repository,
+      serverName,
+      credentials,
+    )) ?? undefined
+  )
 }
 
 /**
@@ -390,7 +400,7 @@ export async function extractMcpServersFromPlugins(
       // config doesn't crash the whole plugin load via Promise.all.
       const resolvedServers: Record<string, McpServerConfig> = {}
       for (const [name, config] of Object.entries(servers)) {
-        const userConfig = buildMcpUserConfig(plugin, name)
+        const userConfig = await buildMcpUserConfig(plugin, name)
         try {
           resolvedServers[name] = resolvePluginMcpEnvironment(
             config,
@@ -445,10 +455,11 @@ export async function extractMcpServersFromPlugins(
  * Returns undefined when neither source has anything — resolvePluginMcpEnvironment
  * skips substituteUserConfigVariables in that case.
  */
-function buildMcpUserConfig(
+async function buildMcpUserConfig(
   plugin: LoadedPlugin,
   serverName: string,
-): UserConfigValues | undefined {
+  credentials?: unknown,
+): Promise<UserConfigValues | undefined> {
   // Gate on manifest.userConfig. loadPluginOptions always returns at least {}
   // (it spreads two `?? {}` fallbacks), so without this guard topLevel is never
   // undefined — the `!topLevel` check below is dead, we return {} for
@@ -457,9 +468,13 @@ function buildMcpUserConfig(
   // ${user_config.X} ref. The manifest check also skips the unconditional
   // keychain read (~50-100ms on macOS) for plugins that don't use options.
   const topLevel = plugin.manifest.userConfig
-    ? loadPluginOptions(getPluginStorageId(plugin))
+    ? await loadPluginOptionsNw(getPluginStorageId(plugin), credentials)
     : undefined
-  const channelSpecific = loadChannelUserConfig(plugin, serverName)
+  const channelSpecific = await loadChannelUserConfig(
+    plugin,
+    serverName,
+    credentials,
+  )
 
   if (!topLevel && !channelSpecific) return undefined
   return { ...topLevel, ...channelSpecific }
@@ -660,7 +675,7 @@ export async function getPluginMcpServers(
   // uncaught throw crashes all plugin MCP loading.
   const resolvedServers: Record<string, McpServerConfig> = {}
   for (const [name, config] of Object.entries(servers)) {
-    const userConfig = buildMcpUserConfig(plugin, name)
+    const userConfig = await buildMcpUserConfig(plugin, name)
     try {
       resolvedServers[name] = resolvePluginMcpEnvironment(
         config,

@@ -1716,7 +1716,19 @@ export const SDKSystemMessageSchema = lazySchema(() =>
     ),
     // densable 2.1.219 #4 — plugin / MCP config validation errors on init
     plugin_errors: z
-      .array(z.record(z.string(), z.unknown()))
+      .array(
+        z.object({
+          plugin: z.string(),
+          type: z.string(),
+          message: z.string(),
+          path: z
+            .string()
+            .optional()
+            .describe(
+              'Present only when a --plugin-dir, SDK `plugins` or synced directory entry did not load at all: the path of that entry, resolved against the cwd. `plugin` is then the positional `inline[N]` / `synced[N]` tag.',
+            ),
+        }),
+      )
       .optional()
       .describe(
         'Plugin load/validation errors surfaced on headless stream-json init.',

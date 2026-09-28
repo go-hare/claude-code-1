@@ -1241,6 +1241,21 @@ function loadSettingsFromDisk(): SettingsWithErrors {
             mergedSettings.enforceAvailableModels =
               policySettings.enforceAvailableModels
           }
+          // densable Nzo: exact match copies when exact, or when both match+list set
+          if (
+            policySettings.availableModelsMatch === 'exact' ||
+            (policySettings.availableModelsMatch !== undefined &&
+              policySettings.availableModels !== undefined)
+          ) {
+            mergedSettings.availableModelsMatch =
+              policySettings.availableModelsMatch
+          }
+          if (
+            policySettings.deniedModels !== undefined &&
+            policySettings.deniedModels.length > 0
+          ) {
+            mergedSettings.deniedModels = policySettings.deniedModels
+          }
         }
         for (const error of policyErrors) {
           const errorKey = `${error.file}:${error.path}:${error.message}`

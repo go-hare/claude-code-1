@@ -408,7 +408,7 @@ import type { MCPServerConnection } from '../services/mcp/types.js';
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js';
 import { randomUUID, type UUID } from 'crypto';
 import { processSessionStartHooks } from '../utils/sessionStart.js';
-import { executeSessionEndHooks, getSessionEndHookTimeoutMs } from '../utils/hooks.js';
+import { executeSessionEndHooks, getSessionEndHookTimeoutMs, getSessionEndHooksBoundMs } from '../utils/hooks.js';
 import { type IDESelection, useIdeSelection } from '../hooks/useIdeSelection.js';
 import { getTools, assembleToolPool } from '../tools.js';
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
@@ -559,9 +559,14 @@ import {
   getCommandQueue,
   getCommandQueueLength,
   getMainThreadQueueLength,
+  promoteMainThreadQueueToNow,
   removeByFilter,
   someInFlightDrainCommand,
 } from '../utils/messageQueueManager.js';
+import {
+  backgroundForegroundToolCalls,
+  queryForegroundSession,
+} from '../utils/foregroundToolCalls.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
@@ -3369,10 +3374,11 @@ export function REPL({
         // Fire SessionEnd hooks for the current session before starting the
         // resumed one, mirroring the /clear flow in conversation.ts.
         const sessionEndTimeoutMs = getSessionEndHookTimeoutMs();
+        const sessionEndBoundMs = getSessionEndHooksBoundMs();
         await executeSessionEndHooks('resume', {
           getAppState: () => store.getState(),
           setAppState,
-          signal: AbortSignal.timeout(sessionEndTimeoutMs),
+          signal: AbortSignal.timeout(sessionEndBoundMs),
           timeoutMs: sessionEndTimeoutMs,
         });
 
@@ -6181,6 +6187,10 @@ export function REPL({
          */
         pastedContentsOverride?: Record<number, PastedContent>;
         resumesStaleQuotaWait?: boolean;
+        /** densable 2.1.283 chat:sendNow — interrupt, flush queue, background tools. */
+        sendNow?: boolean;
+        /** densable 2.1.283 chat:queueSubmit — always enqueue even if idle. */
+        queueSubmit?: boolean;
       },
     ) => {
       // Union paste maps: PromptInput dual-write override backfills lagging parent
@@ -6191,6 +6201,14 @@ export function REPL({
         options?.pastedContentsOverride != null
           ? { ...pastedContents, ...options.pastedContentsOverride }
           : pastedContents;
+
+      // densable YD: empty send-now still flushes the queue (no cancel of tools).
+      if (options?.sendNow && input.trim() === '') {
+        backgroundForegroundToolCalls(queryForegroundSession);
+        abortControllerRef.current?.abort('interrupt');
+        promoteMainThreadQueueToNow();
+        return;
+      }
 
       // Re-pin scroll to bottom on submit so the user always sees the new
       // exchange. force=true: autoScroll-off still pins on submit (SEA
@@ -6379,10 +6397,23 @@ export function REPL({
       // densable 2.1.234 #20: build historyEntry at submit; flush on drain (JDr).
       // Mid-turn queue must NOT addToHistory here — otherwise ↑ shows still-queued text.
       const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
+      // densable 2.1.283 send-now: interrupt + flush queue + background running tools.
+      // Do not cancel tools (backgroundNow, not abort of tool children).
+      if (options?.sendNow) {
+        backgroundForegroundToolCalls(queryForegroundSession);
+        abortControllerRef.current?.abort('interrupt');
+        promoteMainThreadQueueToNow();
+      }
       // Submit runs "now" (not queued) when not already loading, or when
       // accepting speculation, or in remote mode (which sends via WS and
       // returns early without calling handlePromptSubmit).
-      const submitsNow = !isLoading || speculationAccept || activeRemote.isRemoteMode;
+      // queueSubmit always enqueues. sendNow enqueues only while a turn is
+      // running so the flushed batch drains together after interrupt.
+      const submitsNow = options?.queueSubmit
+        ? false
+        : options?.sendNow
+          ? !(isLoading || queryGuard.isActive)
+          : !isLoading || speculationAccept || activeRemote.isRemoteMode;
       const historyEntry =
         options?.fromKeybinding || speculationAccept
           ? undefined
@@ -6587,6 +6618,8 @@ export function REPL({
         // densable 2.1.234 #20: defer history + reset bang mode on mid-turn queue
         historyEntry,
         onSubmitProceed: submitsNow ? undefined : () => setInputMode('prompt'),
+        queuePriority: options?.sendNow ? 'now' : options?.queueSubmit ? 'next' : undefined,
+        forceQueue: Boolean(options?.queueSubmit || (options?.sendNow && (isLoading || queryGuard.isActive))),
         resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
       });
 

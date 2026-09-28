@@ -1075,6 +1075,14 @@ describe('densable effort catalog matrix', () => {
     ).toBe('medium')
   })
 
+  test('densable re(): live default claude-fable-5-1 is not launch-pinned', () => {
+    resetEffortLaunchPinsForTests()
+    expect(isEffortLaunchPinned('claude-fable-5')).toBe(true)
+    expect(isEffortLaunchPinned('claude-fable-5-1')).toBe(false)
+    expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
+    expect(isEffortLaunchPinned('claude-opus-4-8')).toBe(true)
+  })
+
   test('resolveBootstrapUltracodeFlag: cli ultracode or settings.ultracode unpins', () => {
     resetEffortLaunchPinsForTests()
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
@@ -1219,7 +1227,7 @@ describe('clampEffortToOrgLimit (densable S8t/wve)', () => {
     ]
     const { formatOrgEffortExceedMessage } = await import('src/utils/effort.js')
     expect(formatOrgEffortExceedMessage('max', 'claude-opus-4-7')).toBe(
-      "Effort 'max' exceeds your organization's limit for claude-opus-4-7; using 'high'.",
+      "Effort 'max' exceeds the cap for claude-opus-4-7 set by your settings or organization; using 'high'.",
     )
     expect(formatOrgEffortExceedMessage('high', 'claude-opus-4-7')).toBeNull()
     expect(

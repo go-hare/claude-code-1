@@ -70,6 +70,10 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       'meta+o': 'chat:fastMode',
       'meta+t': 'chat:thinkingToggle',
       enter: 'chat:submit',
+      // densable 2.1.275/283 send-now / queue-submit (ctrl+l stays clearInput)
+      'ctrl+x enter': 'chat:queueSubmit',
+      'ctrl+x ctrl+s': 'chat:sendNow',
+      'ctrl+enter': 'chat:sendNow',
       // densable 2.1.212: ctrl+j → chat:newline (extended key reporting / agent dispatch)
       'ctrl+j': 'chat:newline',
       // densable 2.1.238 #36: Chat ctrl+l / cmd+k only forceRedraw (not /clear).
@@ -380,6 +384,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       home: 'effortPanel:home',
       end: 'effortPanel:end',
       enter: 'effortPanel:confirm',
+      s: 'effortPanel:thisSessionOnly',
       escape: 'effortPanel:cancel',
       q: 'effortPanel:cancel',
       'ctrl+c': 'effortPanel:cancel',

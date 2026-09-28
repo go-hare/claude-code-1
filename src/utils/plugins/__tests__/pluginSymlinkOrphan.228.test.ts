@@ -17,6 +17,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  isInsideOfficialPluginCacheRoot,
   listPluginCacheSubdirs,
   markPluginVersionOrphaned,
 } from '../cacheUtils.js'
@@ -73,7 +74,21 @@ describe('densable 2.1.228 #9 plugin symlink orphan skip', () => {
     await markPluginVersionOrphaned(versionPath)
 
     const entries = await readdir(versionPath)
-    expect(entries).toContain('.orphaned_at')
+    // densable VZ / Ym: tmp dirs are outside the official plugin cache root,
+    // so the marker is not written. Inside the cache root it still is.
+    if (isInsideOfficialPluginCacheRoot(versionPath)) {
+      expect(entries).toContain('.orphaned_at')
+    } else {
+      expect(entries).not.toContain('.orphaned_at')
+    }
+  })
+
+  test('markPluginVersionOrphaned skips unclassifiable .. paths (densable ZA)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cc-plugin-za-'))
+    temps.push(root)
+    await markPluginVersionOrphaned(join(root, '..', 'nope'))
+    const entries = await readdir(root)
+    expect(entries).not.toContain('.orphaned_at')
   })
 
   test('listPluginCacheSubdirs includes symlink version entries', async () => {

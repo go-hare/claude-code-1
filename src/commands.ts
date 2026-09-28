@@ -55,6 +55,10 @@ import review, {
 import session from './commands/session/index.js'
 import share from './commands/share/index.js'
 import skills from './commands/skills/index.js'
+import skillDoctor, {
+  isSkillDoctorEnabled,
+  skillDoctorNonInteractive,
+} from './commands/skill-doctor/index.js'
 import status from './commands/status/index.js'
 import tasks from './commands/tasks/index.js'
 import teleport from './commands/teleport/index.js'
@@ -302,7 +306,9 @@ import exit from './commands/exit/index.js'
 import exportCommand from './commands/export/index.js'
 import model from './commands/model/index.js'
 import tag from './commands/tag/index.js'
-import outputStyle from './commands/output-style/index.js'
+import outputStyle, {
+  outputStyleMapleAlias,
+} from './commands/output-style/index.js'
 import remoteEnv from './commands/remote-env/index.js'
 import upgrade from './commands/upgrade/index.js'
 import updateCommand from './commands/update/index.js'
@@ -420,6 +426,7 @@ const COMMANDS = memoize((): Command[] => [
   mode,
   model,
   outputStyle,
+  outputStyleMapleAlias,
   remoteEnv,
   plugin,
   pr_comments,
@@ -433,6 +440,8 @@ const COMMANDS = memoize((): Command[] => [
   resume,
   session,
   skills,
+  // densable `skillDoctor:{open:()=>JP(),whenOpen:[q0e,Nae],whenClosed:[]}`
+  ...(isSkillDoctorEnabled() ? [skillDoctor, skillDoctorNonInteractive] : []),
   status,
   statusline,
   stickers,

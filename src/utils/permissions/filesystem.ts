@@ -58,6 +58,11 @@ import type { PermissionUpdate } from './PermissionUpdateSchema.js'
 import { getRuleByContentsForToolName } from './permissions.js'
 import { matchWildcardPattern } from './shellRuleMatching.js'
 import { restrictedFileToolOutsideMessage } from '../restricted.js'
+import {
+  blockedOutsideReadFileToolMessage,
+  contextBlocksOutsideReads,
+  OUTSIDE_READS_BLOCKED_REASON,
+} from './outsideReads.js'
 
 declare const MACRO: { VERSION: string }
 
@@ -811,6 +816,29 @@ export function denyRestrictedFileToolOutsideCwd(
   }
 }
 
+/** official cke / file-tool deny when permissions.blockReadsOutsideWorkingDirectories */
+export function denyBlockedOutsideReadsForFileTool(
+  path: string,
+  context: ToolPermissionContext,
+  precomputedPathsToCheck?: readonly string[],
+  internalAllow?: () => PermissionResult,
+): PermissionDenyDecision | null {
+  if (!contextBlocksOutsideReads(context)) return null
+  if (pathInAllowedWorkingPath(path, context, precomputedPathsToCheck)) {
+    return null
+  }
+  if (internalAllow?.().behavior === 'allow') return null
+  return {
+    behavior: 'deny',
+    message: blockedOutsideReadFileToolMessage(path),
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: OUTSIDE_READS_BLOCKED_REASON,
+      classifierApprovable: false,
+    },
+  }
+}
+
 export function pathInWorkingPath(path: string, workingPath: string): boolean {
   const absolutePath = expandPath(path)
   const absoluteWorkingPath = expandPath(workingPath)
@@ -1385,6 +1413,15 @@ export function checkReadPermissionForTool(
   )
   if (restrictedReadDeny) {
     return restrictedReadDeny
+  }
+  const blockedOutsideReadDeny = denyBlockedOutsideReadsForFileTool(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    () => internalReadResult,
+  )
+  if (blockedOutsideReadDeny) {
+    return blockedOutsideReadDeny
   }
   if (internalReadResult.behavior !== 'passthrough') {
     return internalReadResult

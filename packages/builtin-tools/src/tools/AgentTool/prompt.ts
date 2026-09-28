@@ -7,6 +7,7 @@ import {
   resolveAgentListInMessagesEnvOverride,
 } from 'src/utils/residualFinalEnvGates.js'
 import { isTeammate } from 'src/utils/teammate.js'
+import { isSubagentModelForceEnabled } from './subagentModelForce.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
 import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
@@ -115,6 +116,7 @@ When you need to delegate work that benefits from full conversation context (e.g
 
 ${forkEnabled ? 'When spawning an agent without `fork: true`, it starts with zero context. ' : ''}Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
 - Explain what you're trying to accomplish and why, what you've already learned or ruled out, and enough context for the agent to make judgment calls.
+- Each agent type's model, reasoning effort, and tool access are set in its definition (\`.claude/agents/*.md\` frontmatter, or the SDK \`agents\` option)${isSubagentModelForceEnabled() ? '' : '; the `model` parameter here overrides the definition for this one call'}.
 - If you need a short response, say so ("report in under 200 words").
 - Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead weight when the premise is wrong.
 

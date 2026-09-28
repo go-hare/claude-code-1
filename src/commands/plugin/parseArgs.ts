@@ -3,6 +3,8 @@ export type ParsedCommand =
   | { type: 'menu' }
   | { type: 'help' }
   | { type: 'install'; marketplace?: string; plugin?: string }
+  | { type: 'install-from-source'; plugin: string; marketplaceSource: string }
+  | { type: 'usage-error'; message: string }
   | { type: 'manage' }
   | { type: 'uninstall'; plugin?: string }
   | { type: 'enable'; plugin?: string }
@@ -13,6 +15,52 @@ export type ParsedCommand =
       action?: 'add' | 'remove' | 'update' | 'list'
       target?: string
     }
+
+const INSTALL_MARKETPLACE_USAGE =
+  'Usage: /plugin install <plugin> --marketplace <source>'
+
+/** densable `o` — slash `/plugin install --marketplace`. */
+function parseInstallMarketplaceFlag(
+  tokens: string[],
+): ParsedCommand | undefined {
+  const index = tokens.findIndex(
+    token => token === '--marketplace' || token.startsWith('--marketplace='),
+  )
+  if (index === -1) return undefined
+  const flag = tokens[index]
+  const inline = flag !== '--marketplace'
+  const source = inline ? flag.slice(14) : tokens[index + 1]
+  if (!source || source.startsWith('-')) {
+    return {
+      type: 'usage-error',
+      message: `--marketplace needs a marketplace source (owner/repo or a URL). ${INSTALL_MARKETPLACE_USAGE}`,
+    }
+  }
+  const rest = tokens.filter(
+    (_token, i) => i !== index && (inline || i !== index + 1),
+  )
+  const plugin = rest[0]
+  if (rest.length !== 1 || !plugin || plugin.startsWith('-')) {
+    return {
+      type: 'usage-error',
+      message: `--marketplace needs exactly one plugin name. ${INSTALL_MARKETPLACE_USAGE}`,
+    }
+  }
+  if (plugin.lastIndexOf('@') > 0) {
+    return {
+      type: 'usage-error',
+      message: `Name the marketplace once: <plugin>@<marketplace>, or ${INSTALL_MARKETPLACE_USAGE.slice(7)}`,
+    }
+  }
+  return { type: 'install-from-source', plugin, marketplaceSource: source }
+}
+
+export function formatInstallFromMarketplaceSource(options: {
+  plugin: string
+  marketplaceSource: string
+}): string {
+  return `/plugin install ${options.plugin} --marketplace ${options.marketplaceSource}`
+}
 
 export function parsePluginArgs(args?: string): ParsedCommand {
   if (!args) {
@@ -30,15 +78,21 @@ export function parsePluginArgs(args?: string): ParsedCommand {
 
     case 'install':
     case 'i': {
+      const fromMarketplace = parseInstallMarketplaceFlag(parts.slice(1))
+      if (fromMarketplace) return fromMarketplace
       const target = parts[1]
       if (!target) {
         return { type: 'install' }
       }
 
       // Check if it's in format plugin@marketplace
-      if (target.includes('@')) {
-        const [plugin, marketplace] = target.split('@')
-        return { type: 'install', plugin, marketplace }
+      const at = target.lastIndexOf('@')
+      if (at > 0) {
+        return {
+          type: 'install',
+          plugin: target.slice(0, at),
+          marketplace: target.slice(at + 1),
+        }
       }
 
       // Check if the target looks like a marketplace (URL or path)

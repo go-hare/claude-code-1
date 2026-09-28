@@ -67,6 +67,7 @@ import { isSupportedTerminal, hasAccessToIDEExtensionDiffFeature } from '../../u
 import {
   getInitialSettings,
   getSettingsForSource,
+  persistSettingsForSource,
   updateSettingsForSource,
   type CrossSessionInbound,
   type DialogExpiry,
@@ -75,6 +76,7 @@ import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
+import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
 import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
 import { sortConfigCatalog } from 'src/utils/configCatalog.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
@@ -122,6 +124,16 @@ import { type FeedbackDraftsSetting } from '../../utils/feedbackDrafts/constants
 import { isSendFeedbackSessionEnabled, setFeedbackDraftsSetting } from '../../utils/feedbackDrafts/gates.js';
 import { isLeftArrowFleetEnabled } from '../../utils/leftArrowVia.js';
 import { isRefusalFallbackEnabled } from '../../utils/refusalFallback.js';
+import { uniq } from '../../utils/array.js';
+import type { LoadedPlugin } from '../../types/plugin.js';
+import { re } from '../../utils/plugins/escapeSafeText.js';
+import {
+  loadPluginConfigFromAllowedSources,
+  pluginConfigIdAliases,
+  type PluginConfigOptionValue,
+} from '../../utils/plugins/pluginConfigSources.js';
+import { clearPluginOptionsCache, getPluginStorageId } from '../../utils/plugins/pluginOptionsStorage.js';
+import { jsonStringify } from '../../utils/slowOperations.js';
 
 /**
  * densable `rDa` — hide /config row when the key is set by a non-user source
@@ -180,7 +192,7 @@ type Setting =
       options: string[];
       onChange(value: string): void;
       type: 'enum';
-      // densable: only crossSessionInbound sets pickToCommit; opens EnumPicker.
+      // densable: pickToCommit opens EnumPicker (crossSessionInbound + IRn string+options).
       pickToCommit?: boolean;
       // densable row flag; panel does not consume it (CLI key=value host does).
       consentGated?: boolean;
@@ -192,6 +204,178 @@ type Setting =
       onChange(value: string): void;
       type: 'managedEnum';
     });
+
+/** densable IRn `je` — plugin /config rows cannot be written over Remote Control. */
+export const PLUGIN_CONFIG_REMOTE_REFUSAL =
+  "a plugin's settings can't be changed over Remote Control or from a relayed message — open /config in the session itself";
+
+const PLUGIN_CONFIG_POLICY_LOCK = "Set by your organization's managed settings (pluginConfigs)";
+const PLUGIN_CONFIG_FLAG_LOCK = 'Set by --settings for this session (pluginConfigs)';
+
+type PluginUserConfigField = {
+  type?: string;
+  title?: string;
+  description?: string;
+  sensitive?: boolean;
+  multiple?: boolean;
+  default?: PluginConfigOptionValue;
+  options?: unknown;
+  min?: number;
+  max?: number;
+};
+
+export type PluginConfigSettingsOpts = {
+  storageV5?: unknown;
+  refusal?: string;
+  onPersisted?: () => void;
+};
+
+export { pluginConfigIdAliases };
+
+function pluginConfigOptionLockReason(pluginId: string, key: string): string | undefined {
+  const aliases = pluginConfigIdAliases(pluginId);
+  const setIn = (source: 'policySettings' | 'flagSettings'): boolean => {
+    const configs = getSettingsForSource(source)?.pluginConfigs;
+    return aliases.some(id => configs?.[id]?.options?.[key] !== undefined);
+  };
+  if (setIn('policySettings')) return PLUGIN_CONFIG_POLICY_LOCK;
+  if (setIn('flagSettings')) return PLUGIN_CONFIG_FLAG_LOCK;
+  return undefined;
+}
+
+const pluginConfigPersistInFlight = new Map<string, PluginConfigOptionValue>();
+
+function samePluginConfigValue(a: unknown, b: unknown): boolean {
+  return jsonStringify(a) === jsonStringify(b);
+}
+
+/**
+ * densable Eo — write one plugin option under userSettings.pluginConfigs.
+ * Reload-after-save (gold vo) is omitted: those helpers are not on this exclusive set.
+ */
+export async function persistPluginConfigOption(
+  plugin: LoadedPlugin,
+  key: string,
+  value: PluginConfigOptionValue,
+  storageV5?: unknown,
+): Promise<{ error?: Error } | undefined> {
+  const pluginId = getPluginStorageId(plugin);
+  const next = Array.isArray(value) ? [...value] : value;
+  const inflightKey = `${pluginId}\0${key}`;
+  const previous = pluginConfigPersistInFlight.has(inflightKey)
+    ? pluginConfigPersistInFlight.get(inflightKey)
+    : getSettingsForSource('userSettings')?.pluginConfigs?.[pluginId]?.options?.[key];
+  if (samePluginConfigValue(previous, next)) return;
+  pluginConfigPersistInFlight.set(inflightKey, next);
+  const result = await persistSettingsForSource(
+    'userSettings',
+    {
+      pluginConfigs: {
+        [pluginId]: {
+          options: {
+            [key]: next,
+          },
+        },
+      },
+    },
+    undefined,
+    storageV5,
+  ).finally(() => {
+    if (pluginConfigPersistInFlight.get(inflightKey) === next) {
+      pluginConfigPersistInFlight.delete(inflightKey);
+    }
+  });
+  if (result.error) return { error: result.error };
+  clearPluginOptionsCache();
+  return;
+}
+
+/**
+ * densable IRn / pluginConfigSettings — enabled plugins' non-sensitive,
+ * non-multiple userConfig fields as /config rows. Label is userConfig.title
+ * (agents-md.instructionFiles → "Project instructions"). Id is
+ * `${pluginName}.${key}`, disambiguated with pluginId on name collision.
+ * Do not invent SettingsJson.instructionFiles.
+ */
+export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: PluginConfigSettingsOpts = {}): Setting[] {
+  const rows: Setting[] = [];
+  for (const plugin of plugins) {
+    if (plugin.enabled === false) continue;
+    const userConfig = (plugin.manifest.userConfig ?? {}) as Record<string, PluginUserConfigField>;
+    const pluginId = getPluginStorageId(plugin);
+    const safeName = re(plugin.name);
+    const displayId = plugins.some(
+      other => other !== plugin && other.enabled !== false && re(other.name).toLowerCase() === safeName.toLowerCase(),
+    )
+      ? pluginId
+      : plugin.name;
+    for (const [key, field] of Object.entries(userConfig)) {
+      if (field.sensitive === true || field.multiple === true) continue;
+      const id = `${displayId}.${key}`;
+      const lockReason = pluginConfigOptionLockReason(pluginId, key) ?? opts.refusal;
+      const title = re(field.title ?? key);
+      const description = re(field.description ?? '');
+      const current = loadPluginConfigFromAllowedSources(pluginId).options?.[key] ?? field.default;
+      const persist = async (next: PluginConfigOptionValue): Promise<void> => {
+        if (lockReason !== undefined) return;
+        await persistPluginConfigOption(plugin, key, next, opts.storageV5);
+        opts.onPersisted?.();
+      };
+      const base = {
+        id,
+        label: title,
+        searchText: `${title} ${plugin.name} ${description}`,
+      };
+      if (field.type === 'boolean') {
+        rows.push({
+          ...base,
+          value: current === true || current === 'true',
+          type: 'boolean',
+          onChange(value: boolean) {
+            void persist(value);
+          },
+        });
+        continue;
+      }
+      if (field.type === 'string' && Array.isArray(field.options)) {
+        const options = uniq(field.options.map(option => re(String(option)))).filter(option => option !== '');
+        rows.push({
+          ...base,
+          value: current === undefined ? '' : String(current),
+          options,
+          type: 'enum',
+          pickToCommit: true,
+          onChange(value: string) {
+            void persist(value);
+          },
+        });
+        continue;
+      }
+      rows.push({
+        ...base,
+        value: current === undefined ? '' : String(current),
+        type: 'managedEnum',
+        onChange(value: string) {
+          if (field.type === 'number') {
+            const trimmed = value.trim();
+            const parsed = Number(trimmed);
+            if (
+              trimmed !== '' &&
+              Number.isFinite(parsed) &&
+              (field.min === undefined || parsed >= field.min) &&
+              (field.max === undefined || parsed <= field.max)
+            ) {
+              void persist(parsed);
+            }
+            return;
+          }
+          void persist(value);
+        },
+      });
+    }
+  }
+  return rows;
+}
 
 type SubMenu =
   | 'Theme'
@@ -253,6 +437,8 @@ export function Config({
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
   const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled);
+  const enabledPlugins = useAppState(s => s.plugins.enabled);
+  const [pluginConfigEpoch, setPluginConfigEpoch] = useState(0);
   const currentDefaultPermissionMode = permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default');
   // Show auto in the default-mode dropdown when the user has opted in OR the
   // config is fully 'enabled' — even if currently circuit-broken ('disabled'),
@@ -438,1355 +624,1386 @@ export function Config({
 
   // TODO: Add MCP servers
   // densable U_c — section-order the rows we already have; do not invent.
-  const settingsItems: Setting[] = sortConfigCatalog([
-    // Global settings
-    {
-      id: 'autoCompact',
-      label: 'Auto-compact',
-      value: globalConfig.autoCompactEnabled,
-      type: 'boolean' as const,
-      onChange(autoCompactEnabled: boolean) {
-        W(current => ({ ...current, autoCompactEnabled }));
-        setGlobalConfig({ ...getGlobalConfig(), autoCompactEnabled });
-        logEvent('tengu_auto_compact_setting_changed', {
-          enabled: autoCompactEnabled,
-        });
+  // densable Ee/IRn: append enabled-plugin userConfig rows after the core catalog.
+  void pluginConfigEpoch;
+  const settingsItems: Setting[] = [
+    ...sortConfigCatalog([
+      // Global settings
+      {
+        id: 'autoCompact',
+        label: 'Auto-compact',
+        value: globalConfig.autoCompactEnabled,
+        type: 'boolean' as const,
+        onChange(autoCompactEnabled: boolean) {
+          W(current => ({ ...current, autoCompactEnabled }));
+          setGlobalConfig({ ...getGlobalConfig(), autoCompactEnabled });
+          logEvent('tengu_auto_compact_setting_changed', {
+            enabled: autoCompactEnabled,
+          });
+        },
       },
-    },
-    // densable 2.1.234: ...S?[{id:"autoContinueAtUsageLimit",...}] gated by vgt/tengu_maple_sundial
-    ...(isAutoContinueAtUsageLimitToggleable()
-      ? [
-          {
-            id: 'autoContinueAtUsageLimit',
-            label: 'Continue automatically at usage limit',
-            value: settingsData?.autoContinueAtUsageLimit ?? true,
-            type: 'boolean' as const,
-            consentGated: true,
-            onChange(autoContinueAtUsageLimit: boolean) {
-              setSettingsData(prev => ({
-                ...prev,
-                autoContinueAtUsageLimit,
-              }));
-              const result = setAutoContinueAtUsageLimitSetting(autoContinueAtUsageLimit);
-              if (result.error) {
-                const restored = isAutoContinueAtUsageLimitEffective();
+      // densable 2.1.234: ...S?[{id:"autoContinueAtUsageLimit",...}] gated by vgt/tengu_maple_sundial
+      ...(isAutoContinueAtUsageLimitToggleable()
+        ? [
+            {
+              id: 'autoContinueAtUsageLimit',
+              label: 'Continue automatically at usage limit',
+              value: settingsData?.autoContinueAtUsageLimit ?? true,
+              type: 'boolean' as const,
+              consentGated: true,
+              onChange(autoContinueAtUsageLimit: boolean) {
                 setSettingsData(prev => ({
                   ...prev,
-                  autoContinueAtUsageLimit: restored,
+                  autoContinueAtUsageLimit,
                 }));
-              }
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    // densable E6i()=DX() — refusal-fallback lane. Label pUm.
-    ...(isRefusalFallbackEnabled()
-      ? [
-          {
-            id: 'switchModelsOnFlag',
-            label: 'Switch models when a message is flagged',
-            value: settingsData?.switchModelsOnFlag ?? true,
-            type: 'boolean' as const,
-            onChange(switchModelsOnFlag: boolean) {
-              F({ switchModelsOnFlag });
-              setSettingsData(prev => ({
-                ...prev,
-                switchModelsOnFlag,
-              }));
-              logEvent('tengu_refusal_fallback_setting_changed', {
-                enabled: switchModelsOnFlag,
-              });
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    {
-      id: 'tips',
-      label: 'Show tips',
-      value: settingsData?.spinnerTipsEnabled ?? true,
-      type: 'boolean' as const,
-      onChange(spinnerTipsEnabled: boolean) {
-        updateSettingsForSource('localSettings', {
-          spinnerTipsEnabled,
-        });
-        // Update local state to reflect the change immediately
-        setSettingsData(prev => ({
-          ...prev,
-          spinnerTipsEnabled,
-        }));
-        logEvent('tengu_tips_setting_changed', {
-          enabled: spinnerTipsEnabled,
-        });
-      },
-    },
-    // densable leftover Co()?[{id:"feedbackDrafts"...}] after Show tips.
-    // Co() leftover-wired as Ufs — row stays when the setting is off.
-    ...(isSendFeedbackSessionEnabled()
-      ? [
-          {
-            id: 'feedbackDrafts',
-            label: 'Claude-drafted feedback',
-            value: settingsData?.feedbackDrafts ?? 'notify',
-            options: ['notify', 'quiet', 'off'],
-            type: 'enum' as const,
-            onChange(value: string) {
-              const feedbackDrafts = value as FeedbackDraftsSetting;
-              setFeedbackDraftsSetting(feedbackDrafts, {
-                storageV5,
-                via: 'config',
-              });
-              setSettingsData(prev => ({
-                ...prev,
-                feedbackDrafts,
-              }));
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    {
-      id: 'cacheWarningEnabled',
-      label: 'Cache warnings',
-      value: settingsData?.cacheWarningEnabled ?? true,
-      type: 'boolean' as const,
-      onChange(cacheWarningEnabled: boolean) {
-        updateSettingsForSource('localSettings', {
-          cacheWarningEnabled,
-        });
-        setSettingsData(prev => ({
-          ...prev,
-          cacheWarningEnabled,
-        }));
-        logEvent('tengu_cache_warning_setting_changed', {
-          enabled: cacheWarningEnabled,
-        });
-      },
-    },
-    {
-      id: 'reduceMotion',
-      label: 'Reduce motion',
-      value: settingsData?.prefersReducedMotion ?? false,
-      type: 'boolean' as const,
-      onChange(prefersReducedMotion: boolean) {
-        updateSettingsForSource('localSettings', {
-          prefersReducedMotion,
-        });
-        setSettingsData(prev => ({
-          ...prev,
-          prefersReducedMotion,
-        }));
-        // Sync to AppState so components react immediately
-        setAppState(prev => ({
-          ...prev,
-          settings: { ...prev.settings, prefersReducedMotion },
-        }));
-        logEvent('tengu_reduce_motion_setting_changed', {
-          enabled: prefersReducedMotion,
-        });
-      },
-    },
-    {
-      id: 'thinking',
-      label: 'Thinking mode',
-      value: thinkingEnabled ?? true,
-      type: 'boolean' as const,
-      onChange(enabled: boolean) {
-        setAppState(prev => ({ ...prev, thinkingEnabled: enabled }));
-        F({
-          alwaysThinkingEnabled: enabled ? undefined : false,
-        });
-        logEvent('tengu_thinking_toggled', { enabled });
-      },
-    },
-    // Fast mode toggle (ant-only, eliminated from external builds)
-    ...(isFastModeEnabled() && isFastModeAvailable()
-      ? [
-          {
-            id: 'fast',
-            label: `Fast mode (${FAST_MODE_MODEL_DISPLAY} only)`,
-            value: !!isFastMode,
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              clearFastModeCooldown();
-              F({
-                fastMode: enabled ? true : undefined,
-              });
-              if (enabled) {
-                setAppState(prev => ({
+                const result = setAutoContinueAtUsageLimitSetting(autoContinueAtUsageLimit);
+                if (result.error) {
+                  const restored = isAutoContinueAtUsageLimitEffective();
+                  setSettingsData(prev => ({
+                    ...prev,
+                    autoContinueAtUsageLimit: restored,
+                  }));
+                }
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      // densable E6i()=DX() — refusal-fallback lane. Label pUm.
+      ...(isRefusalFallbackEnabled()
+        ? [
+            {
+              id: 'switchModelsOnFlag',
+              label: 'Switch models when a message is flagged',
+              value: settingsData?.switchModelsOnFlag ?? true,
+              type: 'boolean' as const,
+              onChange(switchModelsOnFlag: boolean) {
+                F({ switchModelsOnFlag });
+                setSettingsData(prev => ({
                   ...prev,
-                  mainLoopModel: getFastModeModel(),
-                  mainLoopModelForSession: null,
-                  fastMode: true,
+                  switchModelsOnFlag,
                 }));
-                setChanges(prev => ({
-                  ...prev,
-                  model: getFastModeModel(),
-                  'Fast mode': 'ON',
-                }));
-              } else {
-                setAppState(prev => ({
-                  ...prev,
-                  fastMode: false,
-                }));
-                setChanges(prev => ({ ...prev, 'Fast mode': 'OFF' }));
-              }
-            },
-          },
-        ]
-      : []),
-    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_chomp_inflection', false)
-      ? [
-          {
-            id: 'promptSuggestionEnabled',
-            label: 'Prompt suggestions',
-            value: promptSuggestionEnabled,
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              setAppState(prev => ({
-                ...prev,
-                promptSuggestionEnabled: enabled,
-              }));
-              F({
-                promptSuggestionEnabled: enabled ? undefined : false,
-              });
-            },
-          },
-        ]
-      : []),
-    // densable 2.1.217 #1 — absent/true = on
-    {
-      id: 'emojiCompletionEnabled',
-      label: 'Emoji shortcode completion',
-      value: settingsData.emojiCompletionEnabled !== false,
-      type: 'boolean' as const,
-      onChange(enabled: boolean) {
-        F({
-          emojiCompletionEnabled: enabled ? undefined : false,
-        });
-        setSettingsData(getInitialSettings());
-      },
-    },
-    {
-      id: 'recap',
-      label: 'Session recap',
-      value: settingsData?.awaySummaryEnabled !== false,
-      type: 'boolean' as const,
-      onChange(enabled: boolean) {
-        setAppState(prev => ({
-          ...prev,
-          awaySummaryEnabled: enabled,
-        }));
-        F({ awaySummaryEnabled: enabled ? undefined : false });
-        setSettingsData(prev => ({
-          ...prev,
-          awaySummaryEnabled: enabled ? undefined : false,
-        }));
-      },
-    },
-    // densable 2.1.219 #5 — Dynamic workflow size (/config).
-    // densable: E && (_ || L0()) where E = !YNt() (settings key absent).
-    // Hidden when a settings file provides workflowSizeGuideline.
-    // Build flag WORKFLOW_SCRIPTS stands in for densable workflows surface;
-    // L0-equivalent: isWorkflowFeatureEnabled (or always when flag on so
-    // users can set a default before enabling workflows).
-    ...(feature('WORKFLOW_SCRIPTS') && !isWorkflowSizeGuidelineProvidedBySettings()
-      ? [
-          {
-            id: 'workflowSizeGuideline',
-            label: 'Dynamic workflow size',
-            value: resolveSessionWorkflowSizeGuideline(globalConfig.workflowSizeGuideline).size,
-            options: [...WORKFLOW_SIZE_GUIDELINE_ENUM_OPTIONS],
-            type: 'enum' as const,
-            onChange(next: string) {
-              const parsed = parseWorkflowSizeGuidelineEnum(next) ?? 'unrestricted';
-              W(current => {
-                if (current.workflowSizeGuideline === parsed) return current;
-                return { ...current, workflowSizeGuideline: parsed };
-              });
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                workflowSizeGuideline: parsed,
-              });
-              logEvent('tengu_config_changed', {
-                setting: 'workflowSizeGuideline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                value: parsed as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    // Official bvr: workflows + keyword when that surface is toggleable.
-    ...(feature('WORKFLOW_SCRIPTS') && isWorkflowsAvailable()
-      ? [
-          {
-            id: 'workflows',
-            label: 'Dynamic workflows',
-            value:
-              settingsData?.disableWorkflows === true
-                ? false
-                : (settingsData?.enableWorkflows ?? resolveWorkflowsAvailability().defaultOn),
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              const fallback = resolveWorkflowsAvailability().defaultOn;
-              const next = enabled === fallback ? undefined : enabled;
-              F({ enableWorkflows: next, disableWorkflows: undefined });
-              setSettingsData(prev => ({
-                ...prev,
-                enableWorkflows: next,
-                disableWorkflows: undefined,
-              }));
-              setChanges(prev => ({
-                ...prev,
-                workflows: enabled ? 'on' : 'off',
-              }));
-            },
-          },
-          {
-            id: 'workflowKeywordTriggerEnabled',
-            label: 'Ultracode keyword trigger',
-            value: settingsData?.workflowKeywordTriggerEnabled ?? true,
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              const next = enabled ? undefined : false;
-              F({ workflowKeywordTriggerEnabled: next });
-              setSettingsData(prev => ({
-                ...prev,
-                workflowKeywordTriggerEnabled: next,
-              }));
-              setChanges(prev => ({
-                ...prev,
-                ultracodeKeywordTrigger: enabled ? 'on' : 'off',
-              }));
-            },
-          },
-        ]
-      : []),
-    ...(isArtifactToolRegistered()
-      ? [
-          {
-            id: 'artifacts',
-            label: 'Artifacts',
-            value: settingsData?.disableArtifact === true ? false : (settingsData?.enableArtifact ?? true),
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              const next = enabled === true ? undefined : enabled;
-              F({ enableArtifact: next, disableArtifact: undefined });
-              setSettingsData(prev => ({
-                ...prev,
-                enableArtifact: next,
-                disableArtifact: undefined,
-              }));
-              setChanges(prev => ({
-                ...prev,
-                artifacts: enabled ? 'on' : 'off',
-              }));
-            },
-          },
-        ]
-      : []),
-    ...(feature('POOR')
-      ? [
-          {
-            id: 'poorMode',
-            label: 'Poor mode (save tokens)',
-            value: (() => {
-              const PoorMode =
-                require('../../commands/poor/poorMode.js') as typeof import('../../commands/poor/poorMode.js');
-              return PoorMode.isPoorModeActive();
-            })(),
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              const PoorMode =
-                require('../../commands/poor/poorMode.js') as typeof import('../../commands/poor/poorMode.js');
-              PoorMode.setPoorMode(enabled);
-              setAppState(prev => ({
-                ...prev,
-                promptSuggestionEnabled: !enabled,
-              }));
-            },
-          },
-        ]
-      : []),
-    // Speculation toggle (ant-only)
-    ...(process.env.USER_TYPE === 'ant'
-      ? [
-          {
-            id: 'speculationEnabled',
-            label: 'Speculative execution',
-            value: globalConfig.speculationEnabled ?? true,
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              W(current => {
-                if (current.speculationEnabled === enabled) return current;
-                return {
-                  ...current,
-                  speculationEnabled: enabled,
-                };
-              });
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                speculationEnabled: enabled,
-              });
-              logEvent('tengu_speculation_setting_changed', {
-                enabled,
-              });
-            },
-          },
-        ]
-      : []),
-    ...(isFileCheckpointingAvailable
-      ? [
-          {
-            id: 'checkpoints',
-            label: 'Rewind code (checkpoints)',
-            value: globalConfig.fileCheckpointingEnabled,
-            type: 'boolean' as const,
-            onChange(enabled: boolean) {
-              W(current => ({
-                ...current,
-                fileCheckpointingEnabled: enabled,
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                fileCheckpointingEnabled: enabled,
-              });
-              logEvent('tengu_file_history_snapshots_setting_changed', {
-                enabled: enabled,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'verbose',
-      label: 'Verbose output',
-      value: verbose,
-      type: 'boolean',
-      onChange: onChangeVerbose,
-    },
-    {
-      id: 'progressBar',
-      label: 'Terminal progress bar',
-      value: globalConfig.terminalProgressBarEnabled,
-      type: 'boolean' as const,
-      onChange(terminalProgressBarEnabled: boolean) {
-        W(current => ({
-          ...current,
-          terminalProgressBarEnabled,
-        }));
-        setGlobalConfig({ ...getGlobalConfig(), terminalProgressBarEnabled });
-        logEvent('tengu_terminal_progress_bar_setting_changed', {
-          enabled: terminalProgressBarEnabled,
-        });
-      },
-    },
-    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_sidebar', false)
-      ? [
-          {
-            id: 'showStatusInTerminalTab',
-            label: 'Show status in terminal tab',
-            value: globalConfig.showStatusInTerminalTab ?? false,
-            type: 'boolean' as const,
-            onChange(showStatusInTerminalTab: boolean) {
-              W(current => ({
-                ...current,
-                showStatusInTerminalTab,
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                showStatusInTerminalTab,
-              });
-              logEvent('tengu_terminal_tab_status_setting_changed', {
-                enabled: showStatusInTerminalTab,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'turnDuration',
-      label: 'Show turn duration',
-      value: globalConfig.showTurnDuration,
-      type: 'boolean' as const,
-      onChange(showTurnDuration: boolean) {
-        W(current => ({ ...current, showTurnDuration }));
-        setGlobalConfig({ ...getGlobalConfig(), showTurnDuration });
-        logEvent('tengu_show_turn_duration_setting_changed', {
-          enabled: showTurnDuration,
-        });
-      },
-    },
-    // densable UJr /config — tengu_sepia_moth. Default LJr()=false.
-    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_sepia_moth', false)
-      ? [
-          {
-            id: 'precomputeCompactionEnabled',
-            label: 'Precompute compaction',
-            value: settingsData?.precomputeCompactionEnabled ?? false,
-            type: 'boolean' as const,
-            onChange(precomputeCompactionEnabled: boolean) {
-              F({ precomputeCompactionEnabled });
-              setSettingsData(prev => ({
-                ...prev,
-                precomputeCompactionEnabled,
-              }));
-              logEvent('tengu_precompute_compaction_setting_changed', {
-                enabled: precomputeCompactionEnabled,
-              });
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    // densable timestamps /config — tengu_silk_hinge. Persist B + global + AppState.
-    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false)
-      ? [
-          {
-            id: 'timestamps',
-            label: 'Show message timestamps',
-            value: globalConfig.showMessageTimestamps ?? false,
-            type: 'boolean' as const,
-            onChange(showMessageTimestamps: boolean) {
-              B('showMessageTimestamps', showMessageTimestamps);
-              W(current => ({ ...current, showMessageTimestamps }));
-              setGlobalConfig({ ...getGlobalConfig(), showMessageTimestamps });
-              setAppState(prev => ({ ...prev, showMessageTimestamps }));
-              logEvent('tengu_show_message_timestamps_setting_changed', {
-                enabled: showMessageTimestamps,
-              });
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    {
-      id: 'permissionMode',
-      label: 'Default permission mode',
-      value: currentDefaultPermissionMode,
-      options: (() => {
-        const priorityOrder: PermissionMode[] = ['default', 'plan'];
-        return [...priorityOrder, ...PERMISSION_MODES.filter(m => !priorityOrder.includes(m))];
-      })(),
-      type: 'enum' as const,
-      onChange(mode: string) {
-        // Official 2.1.207: auto is a first-class external mode — no special-case mapping.
-        const parsedMode = permissionModeFromString(mode);
-        const validatedMode = isExternalPermissionMode(parsedMode) ? toExternalPermissionMode(parsedMode) : parsedMode;
-        const result = F({
-          permissions: {
-            ...settingsData?.permissions,
-            defaultMode: validatedMode as (typeof PERMISSION_MODES)[number],
-          },
-        });
-
-        if (result.error) {
-          logError(result.error);
-          return;
-        }
-
-        // Update local state to reflect the change immediately.
-        // validatedMode is typed as the wide PermissionMode union but at
-        // runtime is always a PERMISSION_MODES member (the options dropdown
-        // is built from that array above), so this narrowing is sound.
-        setSettingsData(prev => ({
-          ...prev,
-          permissions: {
-            ...prev?.permissions,
-            defaultMode: validatedMode as (typeof PERMISSION_MODES)[number],
-          },
-        }));
-        // Track changes
-        setChanges(prev => ({ ...prev, defaultPermissionMode: mode }));
-        logEvent('tengu_config_changed', {
-          setting: 'defaultPermissionMode' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          value: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-      },
-    },
-    ...(feature('TRANSCRIPT_CLASSIFIER') && showAutoInDefaultModePicker
-      ? [
-          {
-            id: 'useAutoModeDuringPlan',
-            label: 'Use auto mode during plan',
-            value: (settingsData as { useAutoModeDuringPlan?: boolean } | undefined)?.useAutoModeDuringPlan ?? true,
-            type: 'boolean' as const,
-            onChange(useAutoModeDuringPlan: boolean) {
-              F({
-                useAutoModeDuringPlan,
-              });
-              setSettingsData(prev => ({
-                ...prev,
-                useAutoModeDuringPlan,
-              }));
-              // Internal writes suppress the file watcher, so
-              // applySettingsChange won't fire. Reconcile directly so
-              // mid-plan toggles take effect immediately.
-              setAppState(prev => {
-                const next = transitionPlanAutoMode(prev.toolPermissionContext);
-                if (next === prev.toolPermissionContext) return prev;
-                return { ...prev, toolPermissionContext: next };
-              });
-              setChanges(prev => ({
-                ...prev,
-                'Use auto mode during plan': useAutoModeDuringPlan,
-              }));
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'worktreeBaseRef',
-      label: 'Worktree base ref',
-      value: settingsData?.worktree?.baseRef ?? 'fresh',
-      options: ['fresh', 'head'],
-      type: 'enum' as const,
-      onChange(value: string) {
-        const next = value === 'head' ? 'head' : 'fresh';
-        const previous = settingsData?.worktree?.baseRef;
-        setSettingsData(prev => ({
-          ...prev,
-          worktree: { ...prev?.worktree, baseRef: next },
-        }));
-        setChanges(prev => ({ ...prev, worktreeBaseRef: next }));
-        const result = F({ worktree: { baseRef: next } });
-        if (result.error) {
+                logEvent('tengu_refusal_fallback_setting_changed', {
+                  enabled: switchModelsOnFlag,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      {
+        id: 'tips',
+        label: 'Show tips',
+        value: settingsData?.spinnerTipsEnabled ?? true,
+        type: 'boolean' as const,
+        onChange(spinnerTipsEnabled: boolean) {
+          updateSettingsForSource('localSettings', {
+            spinnerTipsEnabled,
+          });
+          // Update local state to reflect the change immediately
           setSettingsData(prev => ({
             ...prev,
-            worktree: { ...prev?.worktree, baseRef: previous },
+            spinnerTipsEnabled,
           }));
-          setChanges(prev => {
-            const { worktreeBaseRef: _dropped, ...rest } = prev;
-            return rest;
+          logEvent('tengu_tips_setting_changed', {
+            enabled: spinnerTipsEnabled,
           });
-          logError(result.error);
-        }
-      },
-    },
-    {
-      id: 'gitignore',
-      label: 'Respect .gitignore in file picker',
-      value: globalConfig.respectGitignore,
-      type: 'boolean' as const,
-      onChange(respectGitignore: boolean) {
-        W(current => ({ ...current, respectGitignore }));
-        setGlobalConfig({ ...getGlobalConfig(), respectGitignore });
-        logEvent('tengu_respect_gitignore_setting_changed', {
-          enabled: respectGitignore,
-        });
-      },
-    },
-    {
-      id: 'copyFullResponse',
-      label: 'Always copy full response (skip /copy picker)',
-      value: globalConfig.copyFullResponse,
-      type: 'boolean' as const,
-      onChange(copyFullResponse: boolean) {
-        W(current => ({ ...current, copyFullResponse }));
-        setGlobalConfig({ ...getGlobalConfig(), copyFullResponse });
-        logEvent('tengu_config_changed', {
-          setting: 'copyFullResponse' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          value: String(copyFullResponse) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-      },
-    },
-    // Copy-on-select is only meaningful with in-app selection (fullscreen
-    // alt-screen mode). In inline mode the terminal emulator owns selection.
-    ...(isFullscreenEnvEnabled()
-      ? [
-          {
-            id: 'copyOnSelect',
-            label: 'Copy on select',
-            value: globalConfig.copyOnSelect ?? true,
-            type: 'boolean' as const,
-            onChange(copyOnSelect: boolean) {
-              W(current => ({ ...current, copyOnSelect }));
-              setGlobalConfig({ ...getGlobalConfig(), copyOnSelect });
-              logEvent('tengu_config_changed', {
-                setting: 'copyOnSelect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                value: String(copyOnSelect) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-          // densable autoScroll (fullscreen only). Dual-write settings + global.
-          {
-            id: 'autoScroll',
-            label: 'Auto-scroll',
-            value: settingsData?.autoScrollEnabled ?? globalConfig.autoScrollEnabled ?? true,
-            type: 'boolean' as const,
-            onChange(autoScrollEnabled: boolean) {
-              const result = B('autoScrollEnabled', autoScrollEnabled);
-              if (result.error) return;
-              W(current => ({ ...current, autoScrollEnabled }));
-              setGlobalConfig({ ...getGlobalConfig(), autoScrollEnabled });
-              setSettingsData(getInitialSettings());
-              logEvent('tengu_config_changed', {
-                setting: 'autoScrollEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                value: String(autoScrollEnabled) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-          // Official wheelScrollAccelerationEnabled (2.1.210 settings densable).
-          // Only meaningful in fullscreen where app-side wheel accel runs.
-          {
-            id: 'wheelScrollAccelerationEnabled',
-            label: 'Wheel scroll acceleration',
-            value: settingsData?.wheelScrollAccelerationEnabled ?? true,
-            type: 'boolean' as const,
-            onChange(wheelScrollAccelerationEnabled: boolean) {
-              const result = F({
-                wheelScrollAccelerationEnabled,
-              });
-              if (result.error) return;
-              setSettingsData(getInitialSettings());
-              logEvent('tengu_config_changed', {
-                setting: 'wheelScrollAccelerationEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                value: String(
-                  wheelScrollAccelerationEnabled,
-                ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    // densable w0t/z4/JEt agents rows. z4=isLeftArrowFleetEnabled; JEt=z4&&!Jl.
-    ...(() => {
-      const z4 = isLeftArrowFleetEnabled();
-      const jet = z4 && !getIsRemoteMode();
-      if (mapleSundial) {
-        if (!(z4 || jet)) return [];
-        return [
-          {
-            id: 'agentsView',
-            label: 'Agents view',
-            value:
-              (jet && (globalConfig.leftArrowOpensAgents ?? true)) ||
-              (z4 && (globalConfig.defaultToAgentsView ?? false))
-                ? 'on'
-                : 'off',
-            type: 'managedEnum' as const,
-            onChange() {},
-          } satisfies Setting,
-        ];
-      }
-      return [
-        ...(z4
-          ? [
-              {
-                id: 'defaultToAgentsView',
-                label: 'Open agents view by default',
-                value: globalConfig.defaultToAgentsView ?? false,
-                type: 'boolean' as const,
-                onChange(defaultToAgentsView: boolean) {
-                  W(current => ({ ...current, defaultToAgentsView }));
-                  setGlobalConfig({
-                    ...getGlobalConfig(),
-                    defaultToAgentsView,
-                  });
-                },
-              } satisfies Setting,
-            ]
-          : []),
-        ...(jet
-          ? [
-              {
-                id: 'leftArrowOpensAgents',
-                label: '← opens agents',
-                value: globalConfig.leftArrowOpensAgents ?? true,
-                type: 'boolean' as const,
-                onChange(leftArrowOpensAgents: boolean) {
-                  W(current => ({ ...current, leftArrowOpensAgents }));
-                  setGlobalConfig({
-                    ...getGlobalConfig(),
-                    leftArrowOpensAgents,
-                  });
-                },
-              } satisfies Setting,
-            ]
-          : []),
-      ];
-    })(),
-    // autoUpdates setting is hidden - use DISABLE_AUTOUPDATER env var to control
-    autoUpdaterDisabledReason
-      ? {
-          id: 'autoUpdatesChannel',
-          label: 'Auto-update channel',
-          value: 'disabled',
-          type: 'managedEnum' as const,
-          onChange() {},
-        }
-      : {
-          id: 'autoUpdatesChannel',
-          label: 'Auto-update channel',
-          value: settingsData?.autoUpdatesChannel ?? 'latest',
-          type: 'managedEnum' as const,
-          onChange() {
-            // Handled via toggleSetting -> 'ChannelDowngrade'
-          },
         },
-    {
-      id: 'theme',
-      label: 'Theme',
-      value: themeSetting,
-      type: 'managedEnum',
-      onChange: setTheme,
-    },
-    {
-      id: 'notifChannel',
-      label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? 'Local notifications' : 'Notifications',
-      value: globalConfig.preferredNotifChannel,
-      options: ['auto', 'iterm2', 'terminal_bell', 'iterm2_with_bell', 'kitty', 'ghostty', 'notifications_disabled'],
-      type: 'enum',
-      onChange(notifChannel: GlobalConfig['preferredNotifChannel']) {
-        W(current => ({
-          ...current,
-          preferredNotifChannel: notifChannel,
-        }));
-        setGlobalConfig({
-          ...getGlobalConfig(),
-          preferredNotifChannel: notifChannel,
-        });
       },
-    },
-    ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
-      ? [
-          {
-            id: 'taskCompleteNotifEnabled',
-            label: 'Push when idle',
-            value: globalConfig.taskCompleteNotifEnabled ?? false,
-            type: 'boolean' as const,
-            onChange(taskCompleteNotifEnabled: boolean) {
-              W(current => ({
-                ...current,
-                taskCompleteNotifEnabled,
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                taskCompleteNotifEnabled,
-              });
-            },
-          },
-          {
-            id: 'inputNeededNotifEnabled',
-            label: 'Push when input needed',
-            value: globalConfig.inputNeededNotifEnabled ?? false,
-            type: 'boolean' as const,
-            onChange(inputNeededNotifEnabled: boolean) {
-              W(current => ({
-                ...current,
-                inputNeededNotifEnabled,
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                inputNeededNotifEnabled,
-              });
-            },
-          },
-          {
-            id: 'agentPushNotifEnabled',
-            label: 'Push when Claude decides',
-            value: globalConfig.agentPushNotifEnabled ?? false,
-            type: 'boolean' as const,
-            onChange(agentPushNotifEnabled: boolean) {
-              W(current => ({
-                ...current,
-                agentPushNotifEnabled,
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                agentPushNotifEnabled,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'outputStyle',
-      label: 'Output style',
-      value: currentOutputStyle,
-      type: 'managedEnum' as const,
-      onChange: () => {}, // handled by OutputStylePicker submenu
-    },
-    ...(showDefaultViewPicker
-      ? [
-          {
-            id: 'defaultView',
-            label: 'What you see by default',
-            // 'default' means the setting is unset — currently resolves to
-            // transcript (main.tsx falls through when defaultView !== 'chat').
-            // String() narrows the conditional-schema-spread union to string.
-            value: settingsData?.defaultView === undefined ? 'default' : String(settingsData.defaultView),
-            options: ['transcript', 'chat', 'default'],
-            type: 'enum' as const,
-            onChange(selected: string) {
-              const defaultView = selected === 'default' ? undefined : (selected as 'chat' | 'transcript');
-              updateSettingsForSource('localSettings', { defaultView });
-              setSettingsData(prev => ({ ...prev, defaultView }));
-              const nextBrief = defaultView === 'chat';
-              setAppState(prev => {
-                if (prev.isBriefOnly === nextBrief) return prev;
-                return { ...prev, isBriefOnly: nextBrief };
-              });
-              // Keep userMsgOptIn in sync so the tool list follows the view.
-              // Two-way now (same as /brief) — accepting a cache invalidation
-              // is better than leaving the tool on after switching away.
-              // Reverted on Escape via initialUserMsgOptIn snapshot.
-              setUserMsgOptIn(nextBrief);
-              setChanges(prev => ({ ...prev, 'Default view': selected }));
-              logEvent('tengu_default_view_setting_changed', {
-                value: (defaultView ?? 'unset') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'language',
-      label: 'Language',
-      value: currentLanguage ?? 'Default (English)',
-      type: 'managedEnum' as const,
-      onChange: () => {}, // handled by LanguagePicker submenu
-    },
-    {
-      id: 'editor',
-      label: 'Editor mode',
-      // Convert 'emacs' to 'normal' for backward compatibility
-      value: globalConfig.editorMode === 'emacs' ? 'normal' : globalConfig.editorMode || 'normal',
-      options: ['normal', 'vim'],
-      type: 'enum',
-      onChange(value: string) {
-        W(current => ({
-          ...current,
-          editorMode: value as GlobalConfig['editorMode'],
-        }));
-        setGlobalConfig({
-          ...getGlobalConfig(),
-          editorMode: value as GlobalConfig['editorMode'],
-        });
-
-        logEvent('tengu_editor_mode_changed', {
-          mode: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-      },
-    },
-    {
-      id: 'askUserQuestionTimeout',
-      label: 'Question auto-continue timeout',
-      // Official 2.1.200: default never (no auto-continue unless configured)
-      consentGated: true,
-      value: settingsData?.askUserQuestionTimeout ?? 'never',
-      options: ['60s', '5m', '10m', 'never'],
-      type: 'enum' as const,
-      onChange(value: string) {
-        const next = value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : 'never';
-        setSettingsData(prev => ({
-          ...prev,
-          askUserQuestionTimeout: next,
-        }));
-        F({
-          askUserQuestionTimeout: next,
-        });
-        logEvent('tengu_ask_user_question_timeout_changed', {
-          value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-      },
-    },
-    ...(isProposeGoalGrowthBookEnabled()
-      ? [
-          {
-            id: 'modelProposedGoals',
-            label: 'Claude-proposed goals',
-            consentGated: true,
-            value: settingsData?.modelProposedGoals ?? getModelProposedGoalsSetting(),
-            options: ['auto', 'alwaysAsk', 'disabled'] satisfies ModelProposedGoalsSetting[],
-            type: 'enum' as const,
-            onChange(value: string) {
-              const next = (['auto', 'alwaysAsk', 'disabled'] as const).find(item => item === value);
-              if (!next) return;
-              setSettingsData(prev => ({
-                ...prev,
-                modelProposedGoals: next,
-              }));
-              const result = F({ modelProposedGoals: next });
-              if (result.error) {
-                logError(result.error);
-                return;
-              }
-              logEvent('tengu_model_proposed_goals_changed', {
-                value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          } satisfies Setting,
-        ]
-      : []),
-    // densable 2.1.232 #5 / 2.1.224: Dialog expiry (l9p) — hide when managed outside userSettings (rDa)
-    ...(!isConfigSettingManagedOutsideUser('dialogExpiry')
-      ? [
-          {
-            id: 'dialogExpiry',
-            label: 'Dialog expiry',
-            consentGated: true,
-            value: settingsData?.dialogExpiry ?? 'default',
-            options: ['default', '60s', '5m', '10m', 'never'],
-            type: 'enum' as const,
-            onChange(value: string) {
-              const next: DialogExpiry | undefined =
-                value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : undefined;
-              setSettingsData(prev => ({
-                ...prev,
-                dialogExpiry: next,
-              }));
-              F({
-                dialogExpiry: next,
-              });
-              logEvent('tengu_dialog_expiry_changed', {
-                value: (value === 'default'
-                  ? 'default'
-                  : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    // densable: Messages from your other sessions (c9p) — gated by ig + rDa
-    ...(isCrossSessionInboxConfigRowVisible() && !isConfigSettingManagedOutsideUser('crossSessionInbound')
-      ? [
-          {
-            id: 'crossSessionInbound',
-            label: 'Messages from your other sessions',
-            consentGated: true,
-            pickToCommit: true,
-            value: settingsData?.crossSessionInbound ?? 'default',
-            options: ['default', 'accept', 'hold', 'refuse'],
-            type: 'enum' as const,
-            onChange(value: string) {
-              const next: CrossSessionInbound | undefined =
-                value === 'accept' || value === 'hold' || value === 'refuse' ? value : undefined;
-              setSettingsData(prev => ({
-                ...prev,
-                crossSessionInbound: next,
-              }));
-              F({
-                crossSessionInbound: next,
-              });
-              logEvent('tengu_cross_session_inbound_changed', {
-                value: (value === 'default'
-                  ? 'default'
-                  : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'externalEditorContext',
-      label: mapleSundial ? 'Show responses in IDE' : 'Show last response in external editor',
-      value: globalConfig.externalEditorContext ?? false,
-      type: 'boolean' as const,
-      onChange(externalEditorContext: boolean) {
-        W(current => ({ ...current, externalEditorContext }));
-        setGlobalConfig({ ...getGlobalConfig(), externalEditorContext });
-        logEvent('tengu_external_editor_context_changed', {
-          enabled: externalEditorContext,
-        });
-      },
-    },
-    {
-      id: 'prStatus',
-      label: mapleSundial ? 'Show PR status' : 'Show PR status footer',
-      value: globalConfig.prStatusFooterEnabled ?? true,
-      type: 'boolean' as const,
-      onChange(enabled: boolean) {
-        W(current => {
-          if (current.prStatusFooterEnabled === enabled) return current;
-          return {
-            ...current,
-            prStatusFooterEnabled: enabled,
-          };
-        });
-        setGlobalConfig({
-          ...getGlobalConfig(),
-          prStatusFooterEnabled: enabled,
-        });
-        logEvent('tengu_pr_status_footer_setting_changed', {
-          enabled,
-        });
-      },
-    },
-    {
-      id: 'model',
-      label: 'Model',
-      value: mainLoopModel === null ? 'Default (recommended)' : mainLoopModel,
-      type: 'managedEnum' as const,
-      onChange: onChangeMainModelConfig,
-    },
-    ...(isConnectedToIde
-      ? [
-          {
-            id: 'diffTool',
-            label: 'Diff tool',
-            value: globalConfig.diffTool ?? 'auto',
-            options: ['terminal', 'auto'],
-            type: 'enum' as const,
-            onChange(diffTool: string) {
-              W(current => ({
-                ...current,
-                diffTool: diffTool as GlobalConfig['diffTool'],
-              }));
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                diffTool: diffTool as GlobalConfig['diffTool'],
-              });
-
-              logEvent('tengu_diff_tool_changed', {
-                tool: diffTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    ...(!isSupportedTerminal()
-      ? [
-          {
-            id: 'autoConnectIde',
-            label: 'Auto-connect to IDE (external terminal)',
-            value: globalConfig.autoConnectIde ?? false,
-            type: 'boolean' as const,
-            onChange(autoConnectIde: boolean) {
-              W(current => ({ ...current, autoConnectIde }));
-              setGlobalConfig({ ...getGlobalConfig(), autoConnectIde });
-
-              logEvent('tengu_auto_connect_ide_changed', {
-                enabled: autoConnectIde,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    ...(isSupportedTerminal()
-      ? [
-          {
-            id: 'autoInstallIdeExtension',
-            label: 'Auto-install IDE extension',
-            value: globalConfig.autoInstallIdeExtension ?? true,
-            type: 'boolean' as const,
-            onChange(autoInstallIdeExtension: boolean) {
-              W(current => ({
-                ...current,
-                autoInstallIdeExtension,
-              }));
-              setGlobalConfig({ ...getGlobalConfig(), autoInstallIdeExtension });
-
-              logEvent('tengu_auto_install_ide_extension_changed', {
-                enabled: autoInstallIdeExtension,
-                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            },
-          },
-        ]
-      : []),
-    {
-      id: 'chrome',
-      label: 'Claude in Chrome enabled by default',
-      value: globalConfig.claudeInChromeDefaultEnabled ?? false, // densable: undefined → false
-      type: 'boolean' as const,
-      onChange(enabled: boolean) {
-        W(current => ({
-          ...current,
-          claudeInChromeDefaultEnabled: enabled,
-        }));
-        setGlobalConfig({
-          ...getGlobalConfig(),
-          claudeInChromeDefaultEnabled: enabled,
-        });
-        logEvent('tengu_claude_in_chrome_setting_changed', {
-          enabled,
-        });
-      },
-    },
-    // Teammate mode (only shown when agent swarms are enabled)
-    ...(isAgentSwarmsEnabled()
-      ? (() => {
-          const cliOverride = getCliTeammateModeOverride();
-          const label = cliOverride ? `Teammate mode [overridden: ${cliOverride}]` : 'Teammate mode';
-          const isWindows = getPlatform() === 'windows';
-          const teammateModeOptions = isWindows
-            ? ['auto', 'tmux', 'windows-terminal', 'in-process']
-            : ['auto', 'tmux', 'in-process'];
-          return [
+      // densable leftover Co()?[{id:"feedbackDrafts"...}] after Show tips.
+      // Co() leftover-wired as Ufs — row stays when the setting is off.
+      ...(isSendFeedbackSessionEnabled()
+        ? [
             {
-              id: 'teammateMode',
-              label,
-              value: globalConfig.teammateMode ?? 'auto',
-              options: teammateModeOptions,
+              id: 'feedbackDrafts',
+              label: 'Claude-drafted feedback',
+              value: settingsData?.feedbackDrafts ?? 'notify',
+              options: ['notify', 'quiet', 'off'],
               type: 'enum' as const,
-              onChange(mode: string) {
-                if (mode !== 'auto' && mode !== 'tmux' && mode !== 'windows-terminal' && mode !== 'in-process') {
-                  return;
-                }
-                if (mode === 'windows-terminal' && !isWindows) {
-                  return;
-                }
-                // Clear CLI override and set new mode (pass mode to avoid race condition)
-                clearCliTeammateModeOverride(mode);
-                W(current => ({
-                  ...current,
-                  teammateMode: mode,
-                }));
-                setGlobalConfig({
-                  ...getGlobalConfig(),
-                  teammateMode: mode,
+              onChange(value: string) {
+                const feedbackDrafts = value as FeedbackDraftsSetting;
+                setFeedbackDraftsSetting(feedbackDrafts, {
+                  storageV5,
+                  via: 'config',
                 });
-                logEvent('tengu_teammate_mode_changed', {
-                  mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                setSettingsData(prev => ({
+                  ...prev,
+                  feedbackDrafts,
+                }));
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      {
+        id: 'cacheWarningEnabled',
+        label: 'Cache warnings',
+        value: settingsData?.cacheWarningEnabled ?? true,
+        type: 'boolean' as const,
+        onChange(cacheWarningEnabled: boolean) {
+          updateSettingsForSource('localSettings', {
+            cacheWarningEnabled,
+          });
+          setSettingsData(prev => ({
+            ...prev,
+            cacheWarningEnabled,
+          }));
+          logEvent('tengu_cache_warning_setting_changed', {
+            enabled: cacheWarningEnabled,
+          });
+        },
+      },
+      {
+        id: 'reduceMotion',
+        label: 'Reduce motion',
+        value: settingsData?.prefersReducedMotion ?? false,
+        type: 'boolean' as const,
+        onChange(prefersReducedMotion: boolean) {
+          updateSettingsForSource('localSettings', {
+            prefersReducedMotion,
+          });
+          setSettingsData(prev => ({
+            ...prev,
+            prefersReducedMotion,
+          }));
+          // Sync to AppState so components react immediately
+          setAppState(prev => ({
+            ...prev,
+            settings: { ...prev.settings, prefersReducedMotion },
+          }));
+          logEvent('tengu_reduce_motion_setting_changed', {
+            enabled: prefersReducedMotion,
+          });
+        },
+      },
+      {
+        id: 'thinking',
+        label: 'Thinking mode',
+        value: thinkingEnabled ?? true,
+        type: 'boolean' as const,
+        onChange(enabled: boolean) {
+          setAppState(prev => ({ ...prev, thinkingEnabled: enabled }));
+          F({
+            alwaysThinkingEnabled: enabled ? undefined : false,
+          });
+          logEvent('tengu_thinking_toggled', { enabled });
+        },
+      },
+      // Fast mode toggle (ant-only, eliminated from external builds)
+      ...(isFastModeEnabled() && isFastModeAvailable()
+        ? [
+            {
+              id: 'fast',
+              label: `Fast mode (${FAST_MODE_MODEL_DISPLAY} only)`,
+              value: !!isFastMode,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                clearFastModeCooldown();
+                F({
+                  fastMode: enabled ? true : undefined,
+                });
+                if (enabled) {
+                  setAppState(prev => ({
+                    ...prev,
+                    mainLoopModel: getFastModeModel(),
+                    mainLoopModelForSession: null,
+                    fastMode: true,
+                  }));
+                  setChanges(prev => ({
+                    ...prev,
+                    model: getFastModeModel(),
+                    'Fast mode': 'ON',
+                  }));
+                } else {
+                  setAppState(prev => ({
+                    ...prev,
+                    fastMode: false,
+                  }));
+                  setChanges(prev => ({ ...prev, 'Fast mode': 'OFF' }));
+                }
+              },
+            },
+          ]
+        : []),
+      ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_chomp_inflection', false)
+        ? [
+            {
+              id: 'promptSuggestionEnabled',
+              label: 'Prompt suggestions',
+              value: promptSuggestionEnabled,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                setAppState(prev => ({
+                  ...prev,
+                  promptSuggestionEnabled: enabled,
+                }));
+                F({
+                  promptSuggestionEnabled: enabled ? undefined : false,
                 });
               },
             },
-            // densable 2.1.234 #47: removed "Default teammate model" — teammates
-            // follow the leader unless the spawn names a model.
-          ];
-        })()
-      : []),
-    // Remote at startup toggle — gated on build flag + GrowthBook + policy
-    ...(feature('BRIDGE_MODE') && isBridgeEnabled()
-      ? [
-          {
-            id: 'remoteControl',
-            label: 'Enable Remote Control for all sessions',
-            value:
-              globalConfig.remoteControlAtStartup === undefined
-                ? 'default'
-                : String(globalConfig.remoteControlAtStartup),
-            options: ['true', 'false', 'default'],
-            type: 'enum' as const,
-            onChange(selected: string) {
-              if (selected === 'default') {
-                // Unset the config key so it falls back to the platform default
+          ]
+        : []),
+      // densable 2.1.217 #1 — absent/true = on
+      {
+        id: 'emojiCompletionEnabled',
+        label: 'Emoji shortcode completion',
+        value: settingsData.emojiCompletionEnabled !== false,
+        type: 'boolean' as const,
+        onChange(enabled: boolean) {
+          F({
+            emojiCompletionEnabled: enabled ? undefined : false,
+          });
+          setSettingsData(getInitialSettings());
+        },
+      },
+      {
+        id: 'recap',
+        label: 'Session recap',
+        value: settingsData?.awaySummaryEnabled !== false,
+        type: 'boolean' as const,
+        onChange(enabled: boolean) {
+          setAppState(prev => ({
+            ...prev,
+            awaySummaryEnabled: enabled,
+          }));
+          F({ awaySummaryEnabled: enabled ? undefined : false });
+          setSettingsData(prev => ({
+            ...prev,
+            awaySummaryEnabled: enabled ? undefined : false,
+          }));
+        },
+      },
+      // densable 2.1.219 #5 — Dynamic workflow size (/config).
+      // densable: E && (_ || L0()) where E = !YNt() (settings key absent).
+      // Hidden when a settings file provides workflowSizeGuideline.
+      // Build flag WORKFLOW_SCRIPTS stands in for densable workflows surface;
+      // L0-equivalent: isWorkflowFeatureEnabled (or always when flag on so
+      // users can set a default before enabling workflows).
+      ...(feature('WORKFLOW_SCRIPTS') && !isWorkflowSizeGuidelineProvidedBySettings()
+        ? [
+            {
+              id: 'workflowSizeGuideline',
+              label: 'Dynamic workflow size',
+              value: resolveSessionWorkflowSizeGuideline(globalConfig.workflowSizeGuideline).size,
+              options: [...WORKFLOW_SIZE_GUIDELINE_ENUM_OPTIONS],
+              type: 'enum' as const,
+              onChange(next: string) {
+                const parsed = parseWorkflowSizeGuidelineEnum(next) ?? 'unrestricted';
                 W(current => {
-                  if (current.remoteControlAtStartup === undefined) return current;
-                  const next = { ...current };
-                  delete next.remoteControlAtStartup;
-                  return next;
+                  if (current.workflowSizeGuideline === parsed) return current;
+                  return { ...current, workflowSizeGuideline: parsed };
                 });
                 setGlobalConfig({
                   ...getGlobalConfig(),
-                  remoteControlAtStartup: undefined,
+                  workflowSizeGuideline: parsed,
                 });
-              } else {
-                const enabled = selected === 'true';
-                W(current => {
-                  if (current.remoteControlAtStartup === enabled) return current;
-                  return { ...current, remoteControlAtStartup: enabled };
+                logEvent('tengu_config_changed', {
+                  setting: 'workflowSizeGuideline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: parsed as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 });
-                setGlobalConfig({
-                  ...getGlobalConfig(),
-                  remoteControlAtStartup: enabled,
-                });
-              }
-              // Sync to AppState so useReplBridge reacts immediately
-              const resolved = getRemoteControlAtStartup();
-              setAppState(prev => {
-                if (prev.replBridgeEnabled === resolved && !prev.replBridgeOutboundOnly) return prev;
-                return {
-                  ...prev,
-                  replBridgeEnabled: resolved,
-                  replBridgeOutboundOnly: false,
-                };
-              });
+              },
             },
-          },
-        ]
-      : []),
-    ...(shouldShowExternalIncludesToggle
-      ? [
-          {
-            id: 'showExternalIncludesDialog',
-            label: 'External CLAUDE.md includes',
-            value: (() => {
-              const projectConfig = getCurrentProjectConfig();
-              if (projectConfig.hasClaudeMdExternalIncludesApproved) {
-                return 'true';
-              } else {
-                return 'false';
-              }
-            })(),
+          ]
+        : []),
+      // Official bvr: workflows + keyword when that surface is toggleable.
+      ...(feature('WORKFLOW_SCRIPTS') && isWorkflowsAvailable()
+        ? [
+            {
+              id: 'workflows',
+              label: 'Dynamic workflows',
+              value:
+                settingsData?.disableWorkflows === true
+                  ? false
+                  : (settingsData?.enableWorkflows ?? resolveWorkflowsAvailability().defaultOn),
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const fallback = resolveWorkflowsAvailability().defaultOn;
+                const next = enabled === fallback ? undefined : enabled;
+                F({ enableWorkflows: next, disableWorkflows: undefined });
+                setSettingsData(prev => ({
+                  ...prev,
+                  enableWorkflows: next,
+                  disableWorkflows: undefined,
+                }));
+                setChanges(prev => ({
+                  ...prev,
+                  workflows: enabled ? 'on' : 'off',
+                }));
+              },
+            },
+            {
+              id: 'workflowKeywordTriggerEnabled',
+              label: 'Ultracode keyword trigger',
+              value: settingsData?.workflowKeywordTriggerEnabled ?? true,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const next = enabled ? undefined : false;
+                F({ workflowKeywordTriggerEnabled: next });
+                setSettingsData(prev => ({
+                  ...prev,
+                  workflowKeywordTriggerEnabled: next,
+                }));
+                setChanges(prev => ({
+                  ...prev,
+                  ultracodeKeywordTrigger: enabled ? 'on' : 'off',
+                }));
+              },
+            },
+          ]
+        : []),
+      ...(isArtifactToolRegistered()
+        ? [
+            {
+              id: 'artifacts',
+              label: 'Artifacts',
+              value: settingsData?.disableArtifact === true ? false : (settingsData?.enableArtifact ?? true),
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const next = enabled === true ? undefined : enabled;
+                F({ enableArtifact: next, disableArtifact: undefined });
+                setSettingsData(prev => ({
+                  ...prev,
+                  enableArtifact: next,
+                  disableArtifact: undefined,
+                }));
+                setChanges(prev => ({
+                  ...prev,
+                  artifacts: enabled ? 'on' : 'off',
+                }));
+              },
+            },
+          ]
+        : []),
+      ...(feature('POOR')
+        ? [
+            {
+              id: 'poorMode',
+              label: 'Poor mode (save tokens)',
+              value: (() => {
+                const PoorMode =
+                  require('../../commands/poor/poorMode.js') as typeof import('../../commands/poor/poorMode.js');
+                return PoorMode.isPoorModeActive();
+              })(),
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                const PoorMode =
+                  require('../../commands/poor/poorMode.js') as typeof import('../../commands/poor/poorMode.js');
+                PoorMode.setPoorMode(enabled);
+                setAppState(prev => ({
+                  ...prev,
+                  promptSuggestionEnabled: !enabled,
+                }));
+              },
+            },
+          ]
+        : []),
+      // Speculation toggle (ant-only)
+      ...(process.env.USER_TYPE === 'ant'
+        ? [
+            {
+              id: 'speculationEnabled',
+              label: 'Speculative execution',
+              value: globalConfig.speculationEnabled ?? true,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                W(current => {
+                  if (current.speculationEnabled === enabled) return current;
+                  return {
+                    ...current,
+                    speculationEnabled: enabled,
+                  };
+                });
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  speculationEnabled: enabled,
+                });
+                logEvent('tengu_speculation_setting_changed', {
+                  enabled,
+                });
+              },
+            },
+          ]
+        : []),
+      ...(isFileCheckpointingAvailable
+        ? [
+            {
+              id: 'checkpoints',
+              label: 'Rewind code (checkpoints)',
+              value: globalConfig.fileCheckpointingEnabled,
+              type: 'boolean' as const,
+              onChange(enabled: boolean) {
+                W(current => ({
+                  ...current,
+                  fileCheckpointingEnabled: enabled,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  fileCheckpointingEnabled: enabled,
+                });
+                logEvent('tengu_file_history_snapshots_setting_changed', {
+                  enabled: enabled,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'verbose',
+        label: 'Verbose output',
+        value: verbose,
+        type: 'boolean',
+        onChange: onChangeVerbose,
+      },
+      {
+        id: 'progressBar',
+        label: 'Terminal progress bar',
+        value: globalConfig.terminalProgressBarEnabled,
+        type: 'boolean' as const,
+        onChange(terminalProgressBarEnabled: boolean) {
+          W(current => ({
+            ...current,
+            terminalProgressBarEnabled,
+          }));
+          setGlobalConfig({ ...getGlobalConfig(), terminalProgressBarEnabled });
+          logEvent('tengu_terminal_progress_bar_setting_changed', {
+            enabled: terminalProgressBarEnabled,
+          });
+        },
+      },
+      ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_sidebar', false)
+        ? [
+            {
+              id: 'showStatusInTerminalTab',
+              label: 'Show status in terminal tab',
+              value: globalConfig.showStatusInTerminalTab ?? false,
+              type: 'boolean' as const,
+              onChange(showStatusInTerminalTab: boolean) {
+                W(current => ({
+                  ...current,
+                  showStatusInTerminalTab,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  showStatusInTerminalTab,
+                });
+                logEvent('tengu_terminal_tab_status_setting_changed', {
+                  enabled: showStatusInTerminalTab,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'turnDuration',
+        label: 'Show turn duration',
+        value: globalConfig.showTurnDuration,
+        type: 'boolean' as const,
+        onChange(showTurnDuration: boolean) {
+          W(current => ({ ...current, showTurnDuration }));
+          setGlobalConfig({ ...getGlobalConfig(), showTurnDuration });
+          logEvent('tengu_show_turn_duration_setting_changed', {
+            enabled: showTurnDuration,
+          });
+        },
+      },
+      // densable UJr /config — tengu_sepia_moth. Default LJr()=false.
+      ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_sepia_moth', false)
+        ? [
+            {
+              id: 'precomputeCompactionEnabled',
+              label: 'Precompute compaction',
+              value: settingsData?.precomputeCompactionEnabled ?? false,
+              type: 'boolean' as const,
+              onChange(precomputeCompactionEnabled: boolean) {
+                F({ precomputeCompactionEnabled });
+                setSettingsData(prev => ({
+                  ...prev,
+                  precomputeCompactionEnabled,
+                }));
+                logEvent('tengu_precompute_compaction_setting_changed', {
+                  enabled: precomputeCompactionEnabled,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      // densable timestamps /config — tengu_silk_hinge. Persist B + global + AppState.
+      ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false)
+        ? [
+            {
+              id: 'timestamps',
+              label: 'Show message timestamps',
+              value: globalConfig.showMessageTimestamps ?? false,
+              type: 'boolean' as const,
+              onChange(showMessageTimestamps: boolean) {
+                B('showMessageTimestamps', showMessageTimestamps);
+                W(current => ({ ...current, showMessageTimestamps }));
+                setGlobalConfig({ ...getGlobalConfig(), showMessageTimestamps });
+                setAppState(prev => ({ ...prev, showMessageTimestamps }));
+                logEvent('tengu_show_message_timestamps_setting_changed', {
+                  enabled: showMessageTimestamps,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      {
+        id: 'timeFormat',
+        label: 'Time format',
+        value: String(settingsData?.timeFormat ?? 'auto'),
+        options: [...TIME_FORMAT_PRESETS],
+        type: 'enum' as const,
+        pickToCommit: true,
+        onChange(timeFormat: string) {
+          const preset = TIME_FORMAT_PRESETS.find(p => p === timeFormat);
+          if (!preset) return;
+          F({ timeFormat: preset });
+          setSettingsData(prev => ({ ...prev, timeFormat: preset }));
+          logEvent('tengu_time_format_setting_changed', {
+            value: preset as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        },
+      } satisfies Setting,
+      {
+        id: 'permissionMode',
+        label: 'Default permission mode',
+        value: currentDefaultPermissionMode,
+        options: (() => {
+          const priorityOrder: PermissionMode[] = ['default', 'plan'];
+          return [...priorityOrder, ...PERMISSION_MODES.filter(m => !priorityOrder.includes(m))];
+        })(),
+        type: 'enum' as const,
+        onChange(mode: string) {
+          // Official 2.1.207: auto is a first-class external mode — no special-case mapping.
+          const parsedMode = permissionModeFromString(mode);
+          const validatedMode = isExternalPermissionMode(parsedMode)
+            ? toExternalPermissionMode(parsedMode)
+            : parsedMode;
+          const result = F({
+            permissions: {
+              ...settingsData?.permissions,
+              defaultMode: validatedMode as (typeof PERMISSION_MODES)[number],
+            },
+          });
+
+          if (result.error) {
+            logError(result.error);
+            return;
+          }
+
+          // Update local state to reflect the change immediately.
+          // validatedMode is typed as the wide PermissionMode union but at
+          // runtime is always a PERMISSION_MODES member (the options dropdown
+          // is built from that array above), so this narrowing is sound.
+          setSettingsData(prev => ({
+            ...prev,
+            permissions: {
+              ...prev?.permissions,
+              defaultMode: validatedMode as (typeof PERMISSION_MODES)[number],
+            },
+          }));
+          // Track changes
+          setChanges(prev => ({ ...prev, defaultPermissionMode: mode }));
+          logEvent('tengu_config_changed', {
+            setting: 'defaultPermissionMode' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            value: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        },
+      },
+      ...(feature('TRANSCRIPT_CLASSIFIER') && showAutoInDefaultModePicker
+        ? [
+            {
+              id: 'useAutoModeDuringPlan',
+              label: 'Use auto mode during plan',
+              value: (settingsData as { useAutoModeDuringPlan?: boolean } | undefined)?.useAutoModeDuringPlan ?? true,
+              type: 'boolean' as const,
+              onChange(useAutoModeDuringPlan: boolean) {
+                F({
+                  useAutoModeDuringPlan,
+                });
+                setSettingsData(prev => ({
+                  ...prev,
+                  useAutoModeDuringPlan,
+                }));
+                // Internal writes suppress the file watcher, so
+                // applySettingsChange won't fire. Reconcile directly so
+                // mid-plan toggles take effect immediately.
+                setAppState(prev => {
+                  const next = transitionPlanAutoMode(prev.toolPermissionContext);
+                  if (next === prev.toolPermissionContext) return prev;
+                  return { ...prev, toolPermissionContext: next };
+                });
+                setChanges(prev => ({
+                  ...prev,
+                  'Use auto mode during plan': useAutoModeDuringPlan,
+                }));
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'worktreeBaseRef',
+        label: 'Worktree base ref',
+        value: settingsData?.worktree?.baseRef ?? 'fresh',
+        options: ['fresh', 'head'],
+        type: 'enum' as const,
+        onChange(value: string) {
+          const next = value === 'head' ? 'head' : 'fresh';
+          const previous = settingsData?.worktree?.baseRef;
+          setSettingsData(prev => ({
+            ...prev,
+            worktree: { ...prev?.worktree, baseRef: next },
+          }));
+          setChanges(prev => ({ ...prev, worktreeBaseRef: next }));
+          const result = F({ worktree: { baseRef: next } });
+          if (result.error) {
+            setSettingsData(prev => ({
+              ...prev,
+              worktree: { ...prev?.worktree, baseRef: previous },
+            }));
+            setChanges(prev => {
+              const { worktreeBaseRef: _dropped, ...rest } = prev;
+              return rest;
+            });
+            logError(result.error);
+          }
+        },
+      },
+      {
+        id: 'gitignore',
+        label: 'Respect .gitignore in file picker',
+        value: globalConfig.respectGitignore,
+        type: 'boolean' as const,
+        onChange(respectGitignore: boolean) {
+          W(current => ({ ...current, respectGitignore }));
+          setGlobalConfig({ ...getGlobalConfig(), respectGitignore });
+          logEvent('tengu_respect_gitignore_setting_changed', {
+            enabled: respectGitignore,
+          });
+        },
+      },
+      {
+        id: 'copyFullResponse',
+        label: 'Always copy full response (skip /copy picker)',
+        value: globalConfig.copyFullResponse,
+        type: 'boolean' as const,
+        onChange(copyFullResponse: boolean) {
+          W(current => ({ ...current, copyFullResponse }));
+          setGlobalConfig({ ...getGlobalConfig(), copyFullResponse });
+          logEvent('tengu_config_changed', {
+            setting: 'copyFullResponse' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            value: String(copyFullResponse) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        },
+      },
+      // Copy-on-select is only meaningful with in-app selection (fullscreen
+      // alt-screen mode). In inline mode the terminal emulator owns selection.
+      ...(isFullscreenEnvEnabled()
+        ? [
+            {
+              id: 'copyOnSelect',
+              label: 'Copy on select',
+              value: globalConfig.copyOnSelect ?? true,
+              type: 'boolean' as const,
+              onChange(copyOnSelect: boolean) {
+                W(current => ({ ...current, copyOnSelect }));
+                setGlobalConfig({ ...getGlobalConfig(), copyOnSelect });
+                logEvent('tengu_config_changed', {
+                  setting: 'copyOnSelect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: String(copyOnSelect) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+            // densable autoScroll (fullscreen only). Dual-write settings + global.
+            {
+              id: 'autoScroll',
+              label: 'Auto-scroll',
+              value: settingsData?.autoScrollEnabled ?? globalConfig.autoScrollEnabled ?? true,
+              type: 'boolean' as const,
+              onChange(autoScrollEnabled: boolean) {
+                const result = B('autoScrollEnabled', autoScrollEnabled);
+                if (result.error) return;
+                W(current => ({ ...current, autoScrollEnabled }));
+                setGlobalConfig({ ...getGlobalConfig(), autoScrollEnabled });
+                setSettingsData(getInitialSettings());
+                logEvent('tengu_config_changed', {
+                  setting: 'autoScrollEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: String(autoScrollEnabled) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+            // Official wheelScrollAccelerationEnabled (2.1.210 settings densable).
+            // Only meaningful in fullscreen where app-side wheel accel runs.
+            {
+              id: 'wheelScrollAccelerationEnabled',
+              label: 'Wheel scroll acceleration',
+              value: settingsData?.wheelScrollAccelerationEnabled ?? true,
+              type: 'boolean' as const,
+              onChange(wheelScrollAccelerationEnabled: boolean) {
+                const result = F({
+                  wheelScrollAccelerationEnabled,
+                });
+                if (result.error) return;
+                setSettingsData(getInitialSettings());
+                logEvent('tengu_config_changed', {
+                  setting:
+                    'wheelScrollAccelerationEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: String(
+                    wheelScrollAccelerationEnabled,
+                  ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      // densable w0t/z4/JEt agents rows. z4=isLeftArrowFleetEnabled; JEt=z4&&!Jl.
+      ...(() => {
+        const z4 = isLeftArrowFleetEnabled();
+        const jet = z4 && !getIsRemoteMode();
+        if (mapleSundial) {
+          if (!(z4 || jet)) return [];
+          return [
+            {
+              id: 'agentsView',
+              label: 'Agents view',
+              value:
+                (jet && (globalConfig.leftArrowOpensAgents ?? true)) ||
+                (z4 && (globalConfig.defaultToAgentsView ?? false))
+                  ? 'on'
+                  : 'off',
+              type: 'managedEnum' as const,
+              onChange() {},
+            } satisfies Setting,
+          ];
+        }
+        return [
+          ...(z4
+            ? [
+                {
+                  id: 'defaultToAgentsView',
+                  label: 'Open agents view by default',
+                  value: globalConfig.defaultToAgentsView ?? false,
+                  type: 'boolean' as const,
+                  onChange(defaultToAgentsView: boolean) {
+                    W(current => ({ ...current, defaultToAgentsView }));
+                    setGlobalConfig({
+                      ...getGlobalConfig(),
+                      defaultToAgentsView,
+                    });
+                  },
+                } satisfies Setting,
+              ]
+            : []),
+          ...(jet
+            ? [
+                {
+                  id: 'leftArrowOpensAgents',
+                  label: '← opens agents',
+                  value: globalConfig.leftArrowOpensAgents ?? true,
+                  type: 'boolean' as const,
+                  onChange(leftArrowOpensAgents: boolean) {
+                    W(current => ({ ...current, leftArrowOpensAgents }));
+                    setGlobalConfig({
+                      ...getGlobalConfig(),
+                      leftArrowOpensAgents,
+                    });
+                  },
+                } satisfies Setting,
+              ]
+            : []),
+        ];
+      })(),
+      // autoUpdates setting is hidden - use DISABLE_AUTOUPDATER env var to control
+      autoUpdaterDisabledReason
+        ? {
+            id: 'autoUpdatesChannel',
+            label: 'Auto-update channel',
+            value: 'disabled',
+            type: 'managedEnum' as const,
+            onChange() {},
+          }
+        : {
+            id: 'autoUpdatesChannel',
+            label: 'Auto-update channel',
+            value: settingsData?.autoUpdatesChannel ?? 'latest',
             type: 'managedEnum' as const,
             onChange() {
-              // Will be handled by toggleSetting function
+              // Handled via toggleSetting -> 'ChannelDowngrade'
             },
           },
-        ]
-      : []),
-    ...(process.env.ANTHROPIC_API_KEY && !isRunningOnHomespace()
-      ? [
-          {
-            id: 'apiKey',
-            label: (
-              <Text>
-                Use custom API key: <Text bold>{normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY)}</Text>
-              </Text>
-            ),
-            searchText: 'Use custom API key',
-            value: Boolean(
-              process.env.ANTHROPIC_API_KEY &&
-                globalConfig.customApiKeyResponses?.approved?.includes(
-                  normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY),
-                ),
-            ),
-            type: 'boolean' as const,
-            onChange(useCustomKey: boolean) {
-              W(current => {
-                const updated = { ...current };
-                if (!updated.customApiKeyResponses) {
-                  updated.customApiKeyResponses = {
-                    approved: [],
-                    rejected: [],
-                  };
+      {
+        id: 'theme',
+        label: 'Theme',
+        value: themeSetting,
+        type: 'managedEnum',
+        onChange: setTheme,
+      },
+      {
+        id: 'notifChannel',
+        label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? 'Local notifications' : 'Notifications',
+        value: globalConfig.preferredNotifChannel,
+        options: ['auto', 'iterm2', 'terminal_bell', 'iterm2_with_bell', 'kitty', 'ghostty', 'notifications_disabled'],
+        type: 'enum',
+        onChange(notifChannel: GlobalConfig['preferredNotifChannel']) {
+          W(current => ({
+            ...current,
+            preferredNotifChannel: notifChannel,
+          }));
+          setGlobalConfig({
+            ...getGlobalConfig(),
+            preferredNotifChannel: notifChannel,
+          });
+        },
+      },
+      ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
+        ? [
+            {
+              id: 'taskCompleteNotifEnabled',
+              label: 'Push when idle',
+              value: globalConfig.taskCompleteNotifEnabled ?? false,
+              type: 'boolean' as const,
+              onChange(taskCompleteNotifEnabled: boolean) {
+                W(current => ({
+                  ...current,
+                  taskCompleteNotifEnabled,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  taskCompleteNotifEnabled,
+                });
+              },
+            },
+            {
+              id: 'inputNeededNotifEnabled',
+              label: 'Push when input needed',
+              value: globalConfig.inputNeededNotifEnabled ?? false,
+              type: 'boolean' as const,
+              onChange(inputNeededNotifEnabled: boolean) {
+                W(current => ({
+                  ...current,
+                  inputNeededNotifEnabled,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  inputNeededNotifEnabled,
+                });
+              },
+            },
+            {
+              id: 'agentPushNotifEnabled',
+              label: 'Push when Claude decides',
+              value: globalConfig.agentPushNotifEnabled ?? false,
+              type: 'boolean' as const,
+              onChange(agentPushNotifEnabled: boolean) {
+                W(current => ({
+                  ...current,
+                  agentPushNotifEnabled,
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  agentPushNotifEnabled,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'outputStyle',
+        label: 'Output style',
+        value: currentOutputStyle,
+        type: 'managedEnum' as const,
+        onChange: () => {}, // handled by OutputStylePicker submenu
+      },
+      ...(showDefaultViewPicker
+        ? [
+            {
+              id: 'defaultView',
+              label: 'What you see by default',
+              // 'default' means the setting is unset — currently resolves to
+              // transcript (main.tsx falls through when defaultView !== 'chat').
+              // String() narrows the conditional-schema-spread union to string.
+              value: settingsData?.defaultView === undefined ? 'default' : String(settingsData.defaultView),
+              options: ['transcript', 'chat', 'default'],
+              type: 'enum' as const,
+              onChange(selected: string) {
+                const defaultView = selected === 'default' ? undefined : (selected as 'chat' | 'transcript');
+                updateSettingsForSource('localSettings', { defaultView });
+                setSettingsData(prev => ({ ...prev, defaultView }));
+                const nextBrief = defaultView === 'chat';
+                setAppState(prev => {
+                  if (prev.isBriefOnly === nextBrief) return prev;
+                  return { ...prev, isBriefOnly: nextBrief };
+                });
+                // Keep userMsgOptIn in sync so the tool list follows the view.
+                // Two-way now (same as /brief) — accepting a cache invalidation
+                // is better than leaving the tool on after switching away.
+                // Reverted on Escape via initialUserMsgOptIn snapshot.
+                setUserMsgOptIn(nextBrief);
+                setChanges(prev => ({ ...prev, 'Default view': selected }));
+                logEvent('tengu_default_view_setting_changed', {
+                  value: (defaultView ?? 'unset') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'language',
+        label: 'Language',
+        value: currentLanguage ?? 'Default (English)',
+        type: 'managedEnum' as const,
+        onChange: () => {}, // handled by LanguagePicker submenu
+      },
+      {
+        id: 'editor',
+        label: 'Editor mode',
+        // Convert 'emacs' to 'normal' for backward compatibility
+        value: globalConfig.editorMode === 'emacs' ? 'normal' : globalConfig.editorMode || 'normal',
+        options: ['normal', 'vim'],
+        type: 'enum',
+        onChange(value: string) {
+          W(current => ({
+            ...current,
+            editorMode: value as GlobalConfig['editorMode'],
+          }));
+          setGlobalConfig({
+            ...getGlobalConfig(),
+            editorMode: value as GlobalConfig['editorMode'],
+          });
+
+          logEvent('tengu_editor_mode_changed', {
+            mode: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        },
+      },
+      {
+        id: 'askUserQuestionTimeout',
+        label: 'Question auto-continue timeout',
+        // Official 2.1.200: default never (no auto-continue unless configured)
+        consentGated: true,
+        value: settingsData?.askUserQuestionTimeout ?? 'never',
+        options: ['60s', '5m', '10m', 'never'],
+        type: 'enum' as const,
+        onChange(value: string) {
+          const next = value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : 'never';
+          setSettingsData(prev => ({
+            ...prev,
+            askUserQuestionTimeout: next,
+          }));
+          F({
+            askUserQuestionTimeout: next,
+          });
+          logEvent('tengu_ask_user_question_timeout_changed', {
+            value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        },
+      },
+      ...(isProposeGoalGrowthBookEnabled()
+        ? [
+            {
+              id: 'modelProposedGoals',
+              label: 'Claude-proposed goals',
+              consentGated: true,
+              value: settingsData?.modelProposedGoals ?? getModelProposedGoalsSetting(),
+              options: ['auto', 'alwaysAsk', 'disabled'] satisfies ModelProposedGoalsSetting[],
+              type: 'enum' as const,
+              onChange(value: string) {
+                const next = (['auto', 'alwaysAsk', 'disabled'] as const).find(item => item === value);
+                if (!next) return;
+                setSettingsData(prev => ({
+                  ...prev,
+                  modelProposedGoals: next,
+                }));
+                const result = F({ modelProposedGoals: next });
+                if (result.error) {
+                  logError(result.error);
+                  return;
                 }
-                if (!updated.customApiKeyResponses.approved) {
-                  updated.customApiKeyResponses = {
-                    ...updated.customApiKeyResponses,
-                    approved: [],
-                  };
+                logEvent('tengu_model_proposed_goals_changed', {
+                  value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
+      // densable 2.1.232 #5 / 2.1.224: Dialog expiry (l9p) — hide when managed outside userSettings (rDa)
+      ...(!isConfigSettingManagedOutsideUser('dialogExpiry')
+        ? [
+            {
+              id: 'dialogExpiry',
+              label: 'Dialog expiry',
+              consentGated: true,
+              value: settingsData?.dialogExpiry ?? 'default',
+              options: ['default', '60s', '5m', '10m', 'never'],
+              type: 'enum' as const,
+              onChange(value: string) {
+                const next: DialogExpiry | undefined =
+                  value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : undefined;
+                setSettingsData(prev => ({
+                  ...prev,
+                  dialogExpiry: next,
+                }));
+                F({
+                  dialogExpiry: next,
+                });
+                logEvent('tengu_dialog_expiry_changed', {
+                  value: (value === 'default'
+                    ? 'default'
+                    : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      // densable: Messages from your other sessions (c9p) — gated by ig + rDa
+      ...(isCrossSessionInboxConfigRowVisible() && !isConfigSettingManagedOutsideUser('crossSessionInbound')
+        ? [
+            {
+              id: 'crossSessionInbound',
+              label: 'Messages from your other sessions',
+              consentGated: true,
+              pickToCommit: true,
+              value: settingsData?.crossSessionInbound ?? 'default',
+              options: ['default', 'accept', 'hold', 'refuse'],
+              type: 'enum' as const,
+              onChange(value: string) {
+                const next: CrossSessionInbound | undefined =
+                  value === 'accept' || value === 'hold' || value === 'refuse' ? value : undefined;
+                setSettingsData(prev => ({
+                  ...prev,
+                  crossSessionInbound: next,
+                }));
+                F({
+                  crossSessionInbound: next,
+                });
+                logEvent('tengu_cross_session_inbound_changed', {
+                  value: (value === 'default'
+                    ? 'default'
+                    : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'externalEditorContext',
+        label: mapleSundial ? 'Show responses in IDE' : 'Show last response in external editor',
+        value: globalConfig.externalEditorContext ?? false,
+        type: 'boolean' as const,
+        onChange(externalEditorContext: boolean) {
+          W(current => ({ ...current, externalEditorContext }));
+          setGlobalConfig({ ...getGlobalConfig(), externalEditorContext });
+          logEvent('tengu_external_editor_context_changed', {
+            enabled: externalEditorContext,
+          });
+        },
+      },
+      {
+        id: 'prStatus',
+        label: mapleSundial ? 'Show PR status' : 'Show PR status footer',
+        value: globalConfig.prStatusFooterEnabled ?? true,
+        type: 'boolean' as const,
+        onChange(enabled: boolean) {
+          W(current => {
+            if (current.prStatusFooterEnabled === enabled) return current;
+            return {
+              ...current,
+              prStatusFooterEnabled: enabled,
+            };
+          });
+          setGlobalConfig({
+            ...getGlobalConfig(),
+            prStatusFooterEnabled: enabled,
+          });
+          logEvent('tengu_pr_status_footer_setting_changed', {
+            enabled,
+          });
+        },
+      },
+      {
+        id: 'model',
+        label: 'Model',
+        value: mainLoopModel === null ? 'Default (recommended)' : mainLoopModel,
+        type: 'managedEnum' as const,
+        onChange: onChangeMainModelConfig,
+      },
+      ...(isConnectedToIde
+        ? [
+            {
+              id: 'diffTool',
+              label: 'Diff tool',
+              value: globalConfig.diffTool ?? 'auto',
+              options: ['terminal', 'auto'],
+              type: 'enum' as const,
+              onChange(diffTool: string) {
+                W(current => ({
+                  ...current,
+                  diffTool: diffTool as GlobalConfig['diffTool'],
+                }));
+                setGlobalConfig({
+                  ...getGlobalConfig(),
+                  diffTool: diffTool as GlobalConfig['diffTool'],
+                });
+
+                logEvent('tengu_diff_tool_changed', {
+                  tool: diffTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      ...(!isSupportedTerminal()
+        ? [
+            {
+              id: 'autoConnectIde',
+              label: 'Auto-connect to IDE (external terminal)',
+              value: globalConfig.autoConnectIde ?? false,
+              type: 'boolean' as const,
+              onChange(autoConnectIde: boolean) {
+                W(current => ({ ...current, autoConnectIde }));
+                setGlobalConfig({ ...getGlobalConfig(), autoConnectIde });
+
+                logEvent('tengu_auto_connect_ide_changed', {
+                  enabled: autoConnectIde,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      ...(isSupportedTerminal()
+        ? [
+            {
+              id: 'autoInstallIdeExtension',
+              label: 'Auto-install IDE extension',
+              value: globalConfig.autoInstallIdeExtension ?? true,
+              type: 'boolean' as const,
+              onChange(autoInstallIdeExtension: boolean) {
+                W(current => ({
+                  ...current,
+                  autoInstallIdeExtension,
+                }));
+                setGlobalConfig({ ...getGlobalConfig(), autoInstallIdeExtension });
+
+                logEvent('tengu_auto_install_ide_extension_changed', {
+                  enabled: autoInstallIdeExtension,
+                  source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'chrome',
+        label: 'Claude in Chrome enabled by default',
+        value: globalConfig.claudeInChromeDefaultEnabled ?? false, // densable: undefined → false
+        type: 'boolean' as const,
+        onChange(enabled: boolean) {
+          W(current => ({
+            ...current,
+            claudeInChromeDefaultEnabled: enabled,
+          }));
+          setGlobalConfig({
+            ...getGlobalConfig(),
+            claudeInChromeDefaultEnabled: enabled,
+          });
+          logEvent('tengu_claude_in_chrome_setting_changed', {
+            enabled,
+          });
+        },
+      },
+      // Teammate mode (only shown when agent swarms are enabled)
+      ...(isAgentSwarmsEnabled()
+        ? (() => {
+            const cliOverride = getCliTeammateModeOverride();
+            const label = cliOverride ? `Teammate mode [overridden: ${cliOverride}]` : 'Teammate mode';
+            const isWindows = getPlatform() === 'windows';
+            const teammateModeOptions = isWindows
+              ? ['auto', 'tmux', 'windows-terminal', 'in-process']
+              : ['auto', 'tmux', 'in-process'];
+            return [
+              {
+                id: 'teammateMode',
+                label,
+                value: globalConfig.teammateMode ?? 'auto',
+                options: teammateModeOptions,
+                type: 'enum' as const,
+                onChange(mode: string) {
+                  if (mode !== 'auto' && mode !== 'tmux' && mode !== 'windows-terminal' && mode !== 'in-process') {
+                    return;
+                  }
+                  if (mode === 'windows-terminal' && !isWindows) {
+                    return;
+                  }
+                  // Clear CLI override and set new mode (pass mode to avoid race condition)
+                  clearCliTeammateModeOverride(mode);
+                  W(current => ({
+                    ...current,
+                    teammateMode: mode,
+                  }));
+                  setGlobalConfig({
+                    ...getGlobalConfig(),
+                    teammateMode: mode,
+                  });
+                  logEvent('tengu_teammate_mode_changed', {
+                    mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
+                },
+              },
+              // densable 2.1.234 #47: removed "Default teammate model" — teammates
+              // follow the leader unless the spawn names a model.
+            ];
+          })()
+        : []),
+      // Remote at startup toggle — gated on build flag + GrowthBook + policy
+      ...(feature('BRIDGE_MODE') && isBridgeEnabled()
+        ? [
+            {
+              id: 'remoteControl',
+              label: 'Enable Remote Control for all sessions',
+              value:
+                globalConfig.remoteControlAtStartup === undefined
+                  ? 'default'
+                  : String(globalConfig.remoteControlAtStartup),
+              options: ['true', 'false', 'default'],
+              type: 'enum' as const,
+              onChange(selected: string) {
+                if (selected === 'default') {
+                  // Unset the config key so it falls back to the platform default
+                  W(current => {
+                    if (current.remoteControlAtStartup === undefined) return current;
+                    const next = { ...current };
+                    delete next.remoteControlAtStartup;
+                    return next;
+                  });
+                  setGlobalConfig({
+                    ...getGlobalConfig(),
+                    remoteControlAtStartup: undefined,
+                  });
+                } else {
+                  const enabled = selected === 'true';
+                  W(current => {
+                    if (current.remoteControlAtStartup === enabled) return current;
+                    return { ...current, remoteControlAtStartup: enabled };
+                  });
+                  setGlobalConfig({
+                    ...getGlobalConfig(),
+                    remoteControlAtStartup: enabled,
+                  });
                 }
-                if (!updated.customApiKeyResponses.rejected) {
-                  updated.customApiKeyResponses = {
-                    ...updated.customApiKeyResponses,
-                    rejected: [],
+                // Sync to AppState so useReplBridge reacts immediately
+                const resolved = getRemoteControlAtStartup();
+                setAppState(prev => {
+                  if (prev.replBridgeEnabled === resolved && !prev.replBridgeOutboundOnly) return prev;
+                  return {
+                    ...prev,
+                    replBridgeEnabled: resolved,
+                    replBridgeOutboundOnly: false,
                   };
+                });
+              },
+            },
+          ]
+        : []),
+      ...(shouldShowExternalIncludesToggle
+        ? [
+            {
+              id: 'showExternalIncludesDialog',
+              label: 'External CLAUDE.md includes',
+              value: (() => {
+                const projectConfig = getCurrentProjectConfig();
+                if (projectConfig.hasClaudeMdExternalIncludesApproved) {
+                  return 'true';
+                } else {
+                  return 'false';
                 }
-                if (process.env.ANTHROPIC_API_KEY) {
-                  const truncatedKey = normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY);
-                  if (useCustomKey) {
+              })(),
+              type: 'managedEnum' as const,
+              onChange() {
+                // Will be handled by toggleSetting function
+              },
+            },
+          ]
+        : []),
+      ...(process.env.ANTHROPIC_API_KEY && !isRunningOnHomespace()
+        ? [
+            {
+              id: 'apiKey',
+              label: (
+                <Text>
+                  Use custom API key: <Text bold>{normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY)}</Text>
+                </Text>
+              ),
+              searchText: 'Use custom API key',
+              value: Boolean(
+                process.env.ANTHROPIC_API_KEY &&
+                  globalConfig.customApiKeyResponses?.approved?.includes(
+                    normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY),
+                  ),
+              ),
+              type: 'boolean' as const,
+              onChange(useCustomKey: boolean) {
+                W(current => {
+                  const updated = { ...current };
+                  if (!updated.customApiKeyResponses) {
                     updated.customApiKeyResponses = {
-                      ...updated.customApiKeyResponses,
-                      approved: [
-                        ...(updated.customApiKeyResponses.approved ?? []).filter(k => k !== truncatedKey),
-                        truncatedKey,
-                      ],
-                      rejected: (updated.customApiKeyResponses.rejected ?? []).filter(k => k !== truncatedKey),
-                    };
-                  } else {
-                    updated.customApiKeyResponses = {
-                      ...updated.customApiKeyResponses,
-                      approved: (updated.customApiKeyResponses.approved ?? []).filter(k => k !== truncatedKey),
-                      rejected: [
-                        ...(updated.customApiKeyResponses.rejected ?? []).filter(k => k !== truncatedKey),
-                        truncatedKey,
-                      ],
+                      approved: [],
+                      rejected: [],
                     };
                   }
-                }
-                return updated;
-              });
-              setGlobalConfig(getGlobalConfig());
+                  if (!updated.customApiKeyResponses.approved) {
+                    updated.customApiKeyResponses = {
+                      ...updated.customApiKeyResponses,
+                      approved: [],
+                    };
+                  }
+                  if (!updated.customApiKeyResponses.rejected) {
+                    updated.customApiKeyResponses = {
+                      ...updated.customApiKeyResponses,
+                      rejected: [],
+                    };
+                  }
+                  if (process.env.ANTHROPIC_API_KEY) {
+                    const truncatedKey = normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY);
+                    if (useCustomKey) {
+                      updated.customApiKeyResponses = {
+                        ...updated.customApiKeyResponses,
+                        approved: [
+                          ...(updated.customApiKeyResponses.approved ?? []).filter(k => k !== truncatedKey),
+                          truncatedKey,
+                        ],
+                        rejected: (updated.customApiKeyResponses.rejected ?? []).filter(k => k !== truncatedKey),
+                      };
+                    } else {
+                      updated.customApiKeyResponses = {
+                        ...updated.customApiKeyResponses,
+                        approved: (updated.customApiKeyResponses.approved ?? []).filter(k => k !== truncatedKey),
+                        rejected: [
+                          ...(updated.customApiKeyResponses.rejected ?? []).filter(k => k !== truncatedKey),
+                          truncatedKey,
+                        ],
+                      };
+                    }
+                  }
+                  return updated;
+                });
+                setGlobalConfig(getGlobalConfig());
+              },
             },
-          },
-        ]
-      : []),
-  ]);
+          ]
+        : []),
+    ]),
+    ...pluginConfigSettings(enabledPlugins, {
+      storageV5,
+      ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
+      onPersisted() {
+        setPluginConfigEpoch(n => n + 1);
+      },
+    }),
+  ];
 
   // Filter settings based on search query
   const filteredSettingsItems = React.useMemo(() => {

@@ -244,6 +244,7 @@ import {
   normalizeModelStringForAPI,
   parseUserSpecifiedModel,
 } from './utils/model/model.js';
+import { formatDeniedModelsBlockMessage } from './utils/model/modelAllowlist.js';
 import { ensureModelStringsInitialized } from './utils/model/modelStrings.js';
 import { PERMISSION_MODES } from './utils/permissions/PermissionMode.js';
 import {
@@ -1527,6 +1528,14 @@ async function run(): Promise<CommanderCommand> {
         .argParser(String)
         .hideHelp(),
     )
+    .addOption(
+      new Option(
+        '--permission-prompts <target>',
+        'Who answers permission prompts with --print: "host" (the SDK host or --permission-prompt-tool) or "none" (nobody: anything that would prompt is denied automatically; the permission mode still decides everything else)',
+      )
+        .choices(['host', 'none'] as const)
+        .default('host'),
+    )
     .addOption(new Option('--system-prompt <prompt>', 'System prompt to use for the session').argParser(String))
     .addOption(new Option('--system-prompt-file <file>', 'Read system prompt from a file').argParser(String).hideHelp())
     .addOption(
@@ -1671,7 +1680,7 @@ async function run(): Promise<CommanderCommand> {
     // --plugin-dir takes exactly one arg; repeat the flag for multiple dirs.
     .option(
       '--plugin-dir <path>',
-      'Load plugins from a directory for this session only (repeatable: --plugin-dir A --plugin-dir B)',
+      'Load a plugin from a directory or .zip for this session only; a folder of plugins loads each child (repeatable: --plugin-dir A --plugin-dir B.zip)',
       (val: string, prev: string[]) => [...prev, val],
       [] as string[],
     )
@@ -2704,6 +2713,12 @@ async function run(): Promise<CommanderCommand> {
       // This await replaces blocking existsSync/statSync calls that were already in
       // the startup path. Wall-clock time is unchanged; we just yield to the event
       // loop during the fs I/O instead of blocking it. See #19661.
+      const permissionPromptsNone = options.permissionPrompts === 'none';
+      if (permissionPromptsNone && (options.permissionPromptTool || sdkUrl)) {
+        logForDebugging(
+          `--permission-prompts none: permission prompts are answered with a local deny; the ${sdkUrl ? 'SDK host' : '--permission-prompt-tool'} is not consulted`,
+        );
+      }
       const initResult = await initializeToolPermissionContext({
         allowedToolsCli: allowedTools,
         disallowedToolsCli: disallowedTools,
@@ -2712,6 +2727,7 @@ async function run(): Promise<CommanderCommand> {
         permissionMode,
         allowDangerouslySkipPermissions,
         addDirs: addDir,
+        shouldAvoidPermissionPrompts: permissionPromptsNone,
       });
       let toolPermissionContext = initResult.toolPermissionContext;
       const { warnings, dangerousPermissions, overlyBroadBashPermissions } = initResult;
@@ -3145,6 +3161,13 @@ async function run(): Promise<CommanderCommand> {
       }
       const initialMainLoopModel = getInitialMainLoopModel();
       const resolvedInitialModel = parseUserSpecifiedModel(initialMainLoopModel ?? getDefaultMainLoopModel());
+      // densable RH(je) / Sx(Bn): after cs() resolves the initial model, start
+      // copy fatals when deniedModels / exact availableModels leave no default.
+      const deniedAtStart = formatDeniedModelsBlockMessage(resolvedInitialModel, 'start');
+      if (deniedAtStart !== null) {
+        console.error(chalk.red(deniedAtStart));
+        process.exit(1);
+      }
 
       let advisorModel: string | undefined;
       if (isAdvisorEnabled()) {
@@ -5743,8 +5766,13 @@ async function run(): Promise<CommanderCommand> {
   pluginCmd
     .command('validate <path>')
     .description('Validate a plugin or marketplace manifest')
+    .option(
+      '--strict',
+      'Treat warnings as errors (exit 1). Use in CI to fail on unrecognized fields, missing metadata, and other issues that the runtime tolerates.',
+    )
+    .option('--json', 'Output the validation report as JSON (same exit codes)')
     .addOption(coworkOption())
-    .action(async (manifestPath: string, options: { cowork?: boolean }) => {
+    .action(async (manifestPath: string, options: { cowork?: boolean; json?: boolean; strict?: boolean }) => {
       const { pluginValidateHandler } = await import('./cli/handlers/plugins.js');
       await pluginValidateHandler(manifestPath, options);
     });

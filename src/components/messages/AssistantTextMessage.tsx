@@ -271,7 +271,7 @@ export function AssistantTextMessage({
               </NoSelect>
             )}
             <Box flexDirection="column">
-              <Markdown>{text}</Markdown>
+              <Markdown capProseWidth>{text}</Markdown>
             </Box>
           </Box>
         </Box>

@@ -248,6 +248,11 @@ export type PermissionAskDecision<
    * message in the tool result. Used when users paste images as feedback.
    */
   contentBlocks?: ContentBlockParam[]
+  /**
+   * official yBt — first auto-mode outside-working-dir read; host dialog
+   * kind auto_mode_outside_reads (Yes / Block / ask_again).
+   */
+  offersBlockOutsideReads?: boolean
 }
 
 /**

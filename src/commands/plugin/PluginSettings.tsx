@@ -1,6 +1,12 @@
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { getBootstrapSession } from '../../utils/sessionRoot.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { Byline, Pane, Tab, Tabs } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -27,6 +33,30 @@ import type { PluginSettingsProps, ViewState } from './types.js';
 import { ValidatePlugin } from './ValidatePlugin.js';
 
 type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors';
+
+/** densable `_l` — queued reload toast when the main query is still running. */
+export const PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE =
+  'Plugin changes apply when the current response finishes (/reload-plugins is queued).';
+
+function isMainQueryRunning(): boolean {
+  return getBootstrapSession().surfaceCapabilities.mainLoopBusy();
+}
+
+/**
+ * densable `Ll` — auto-reload on `/plugin` close when Layer-2 changed.
+ * Keep `/reload-plugins`; do not invent a second eval runner.
+ */
+export function pluginMenuCloseReloadOutcome(
+  needsRefresh: boolean,
+  queryRunning: boolean = isMainQueryRunning(),
+): 'none' | 'deferred' | 'queued' {
+  if (!needsRefresh) return 'none';
+  const outcome = queryRunning ? 'deferred' : 'queued';
+  logEvent('tengu_plugin_menu_auto_reload', {
+    outcome: outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+  return outcome;
+}
 
 function MarketplaceList({ onComplete }: { onComplete: (result?: string) => void }): React.ReactNode {
   useEffect(() => {
@@ -579,6 +609,13 @@ function getInitialViewState(parsedCommand: ParsedCommand): ViewState {
         };
       }
       return { type: 'discover-plugins' };
+    case 'usage-error':
+      return { type: 'menu' };
+    case 'install-from-source':
+      return {
+        type: 'add-marketplace',
+        initialValue: parsedCommand.marketplaceSource,
+      };
     case 'manage':
       return { type: 'manage-plugins' };
     case 'uninstall':
@@ -647,7 +684,9 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   );
   const [cursorOffset, setCursorOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(
+    parsedCommand.type === 'usage-error' ? parsedCommand.message : null,
+  );
   const [childSearchActive, setChildSearchActive] = useState(false);
   const setAppState = useSetAppState();
 
@@ -673,7 +712,8 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
    * Interactive mode is used when arguments are missing, allowing the user to input them.
    */
   const cliMode =
-    parsedCommand.type === 'marketplace' && parsedCommand.action === 'add' && parsedCommand.target !== undefined;
+    (parsedCommand.type === 'marketplace' && parsedCommand.action === 'add' && parsedCommand.target !== undefined) ||
+    parsedCommand.type === 'install-from-source';
 
   // Signal that plugin state has changed on disk (Layer 2) and active
   // components (Layer 3) are stale. User runs /reload-plugins to apply.
@@ -682,11 +722,42 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   // Layer-3 refresh flows through the unified refreshActivePlugins()
   // primitive via /reload-plugins, giving one consistent mental model:
   // plugin changes require /reload-plugins.
+  const pluginsChangedThisVisit = useRef(false);
+  const closeReloadOnce = useRef(false);
+  const needsRefresh = useAppState(s => s.plugins.needsRefresh);
+  const autoReloadOnClose = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_plugin_menu_close_reload',
+    true,
+  );
+
   const markPluginsChanged = useCallback(() => {
+    pluginsChangedThisVisit.current = true;
     setAppState(prev =>
       prev.plugins.needsRefresh ? prev : { ...prev, plugins: { ...prev.plugins, needsRefresh: true } },
     );
   }, [setAppState]);
+
+  const completePluginMenu = useCallback(
+    (message?: string) => {
+      if (closeReloadOnce.current) {
+        return;
+      }
+      closeReloadOnce.current = true;
+      const outcome =
+        autoReloadOnClose && pluginsChangedThisVisit.current
+          ? pluginMenuCloseReloadOutcome(needsRefresh)
+          : 'none';
+      if (outcome === 'none') {
+        onComplete(message);
+        return;
+      }
+      onComplete(outcome === 'deferred' ? PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE : message, {
+        nextInput: '/reload-plugins',
+        submitNextInput: true,
+      });
+    },
+    [autoReloadOnClose, needsRefresh, onComplete],
+  );
 
   // Handle tab switching (called by Tabs component)
   const handleTabChange = useCallback((tabId: string) => {
@@ -716,9 +787,9 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   // the close AND delivers the message to the transcript.
   useEffect(() => {
     if (viewState.type === 'menu' && !result) {
-      onComplete();
+      completePluginMenu();
     }
-  }, [viewState.type, result, onComplete]);
+  }, [viewState.type, result, completePluginMenu]);
 
   // Sync activeTab when viewState changes to a different tab's content
   // This handles cases like AddMarketplace navigating to browse-marketplace
@@ -744,16 +815,16 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
 
   useEffect(() => {
     if (result) {
-      onComplete(result);
+      completePluginMenu(result);
     }
-  }, [result, onComplete]);
+  }, [result, completePluginMenu]);
 
   // Handle help view completion
   useEffect(() => {
     if (viewState.type === 'help') {
-      onComplete();
+      completePluginMenu();
     }
-  }, [viewState.type, onComplete]);
+  }, [viewState.type, completePluginMenu]);
 
   // Render different views based on state
   if (viewState.type === 'help') {
@@ -766,6 +837,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         <Text> /plugin install &lt;marketplace&gt; - Install from specific marketplace</Text>
         <Text> /plugin install &lt;plugin&gt; - Install specific plugin</Text>
         <Text> /plugin install &lt;plugin&gt;@&lt;market&gt; - Install plugin from marketplace</Text>
+        <Text> /plugin install &lt;plugin&gt; --marketplace &lt;source&gt; - Install plugin from a marketplace source, adding it first</Text>
         <Text> </Text>
         <Text dimColor>Management:</Text>
         <Text> /plugin manage - Manage installed plugins</Text>
@@ -795,7 +867,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   }
 
   if (viewState.type === 'validate') {
-    return <ValidatePlugin onComplete={onComplete} path={viewState.path} />;
+    return <ValidatePlugin onComplete={completePluginMenu} path={viewState.path} />;
   }
 
   if (viewState.type === 'marketplace-menu') {
@@ -805,7 +877,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   }
 
   if (viewState.type === 'marketplace-list') {
-    return <MarketplaceList onComplete={onComplete} />;
+    return <MarketplaceList onComplete={completePluginMenu} />;
   }
 
   if (viewState.type === 'add-marketplace') {

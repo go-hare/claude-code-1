@@ -10,7 +10,7 @@
  */
 
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
-import { getCanonicalName } from './model.js'
+import { getCanonicalName, parseUserSpecifiedModel } from './model.js'
 import { getAPIProvider } from './providers.js'
 
 export type EffortCatalogEntry = {
@@ -81,8 +81,18 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
       xhighEffort: true,
     },
   },
+  // densable 2.1.283: more-specific 5-5 / 5-1 before unsuffixed (longest match)
+  // Ave launch pin remains opus-4-7 / 4-8 / fable-5 only — not 5-1/5-5
+  {
+    match: 'claude-opus-5-5',
+    entry: {
+      defaultEffort: 'medium',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: true,
+    },
+  },
   // densable EHl 2.1.219: claude-opus-5 default_effort high + effort/max/xhigh
-  // (Ave launch pin remains 4-7 / 4-8 / fable-5 only — not opus-5)
   {
     match: 'claude-opus-5',
     entry: {
@@ -93,7 +103,25 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
     },
   },
   {
+    match: 'claude-fable-5-1',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: true,
+    },
+  },
+  {
     match: 'claude-fable-5',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: true,
+    },
+  },
+  {
+    match: 'claude-mythos-5-1',
     entry: {
       defaultEffort: 'high',
       effort: true,
@@ -576,13 +604,59 @@ function readLaunchPinFlags(): {
   }
 }
 
-/** densable Ave — true while launch default is pinned for this model family. */
+function fableEnvIdentity(env: string): string {
+  try {
+    return getCanonicalName(parseUserSpecifiedModel(env)).toLowerCase()
+  } catch {
+    return env.toLowerCase()
+  }
+}
+
+/**
+ * densable `re()` pin list: empty when firstStartVersion is set; else exact
+ * `claude-opus-4-7` / `claude-opus-4-8` / `claude-fable-5`, plus env Fable
+ * identity when it does not start with `claude-fable-`.
+ */
+export function launchPinModels(): string[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getGlobalConfig } =
+      require('../config.js') as typeof import('../config.js')
+    const e = getGlobalConfig()
+    if (e.firstStartVersion !== undefined) return []
+    const n: string[] = []
+    if (!e.unpinOpus47LaunchEffort) n.push('claude-opus-4-7')
+    if (!e.unpinOpus48LaunchEffort) n.push('claude-opus-4-8')
+    if (!e.unpinFable5LaunchEffort) {
+      n.push('claude-fable-5')
+      const r = process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+      if (r) {
+        const identity = fableEnvIdentity(r)
+        if (!identity.startsWith('claude-fable-')) n.push(identity)
+      }
+    }
+    return n
+  } catch {
+    return ['claude-opus-4-7', 'claude-opus-4-8', 'claude-fable-5']
+  }
+}
+
+/**
+ * densable `re()` membership: exact `claude-opus-4-7` / `claude-opus-4-8` /
+ * `claude-fable-5` (plus env extra pin). Live default `claude-fable-5-1`
+ * is not pinned.
+ */
 export function isEffortLaunchPinned(model: string): boolean {
-  const flags = readLaunchPinFlags()
+  const pins = launchPinModels()
+  if (pins.length === 0) return false
   const c = getEffortCanonical(model)
-  if (c.includes('opus-4-7')) return !flags.unpinOpus47LaunchEffort
-  if (c.includes('opus-4-8')) return !flags.unpinOpus48LaunchEffort
-  if (c.includes('fable-5')) return !flags.unpinFable5LaunchEffort
+  if (pins.includes(c)) return true
+  if (pins.includes('claude-opus-4-7') && c.includes('opus-4-7')) {
+    return true
+  }
+  if (pins.includes('claude-opus-4-8') && c.includes('opus-4-8')) {
+    return true
+  }
   return false
 }
 
@@ -631,12 +705,15 @@ export function resetEffortLaunchPinsForTests(): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { saveGlobalConfig } =
       require('../config.js') as typeof import('../config.js')
-    saveGlobalConfig(e => ({
-      ...e,
-      unpinOpus47LaunchEffort: false,
-      unpinOpus48LaunchEffort: false,
-      unpinFable5LaunchEffort: false,
-    }))
+    saveGlobalConfig(e => {
+      delete e.firstStartVersion
+      return {
+        ...e,
+        unpinOpus47LaunchEffort: false,
+        unpinOpus48LaunchEffort: false,
+        unpinFable5LaunchEffort: false,
+      }
+    })
   } catch {
     // isolated tests without config
   }
@@ -673,6 +750,72 @@ export function getModelAccessCache(): ModelAccessCacheEntry[] {
   }
 }
 
+function isEffortLevelToken(value: unknown): value is EffortLevel {
+  return (
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  )
+}
+
+function stripEffortModelKey(model: string): string {
+  return getCanonicalName(model).replace(/\[1m\]$/i, '')
+}
+
+/**
+ * densable Y — lowest settings maxEffortLevel across sources.
+ * Per-model modelSettings.<id>.maxEffortLevel replaces the top-level cap
+ * for that model ("max" exempts). Settings cap applies on every provider.
+ */
+export function getSettingsMaxEffortLevel(model: string): EffortLevel | null {
+  try {
+    const { getEnabledSettingSources } =
+      require('../settings/constants.js') as typeof import('../settings/constants.js')
+    const { getSettingsForSource } =
+      require('../settings/settings.js') as typeof import('../settings/settings.js')
+    const sources = [
+      ...getEnabledSettingSources().map(s => getSettingsForSource(s)),
+    ]
+    const hasPerModel = sources.some(d =>
+      Object.values(d?.modelSettings ?? {}).some(
+        u => u?.maxEffortLevel !== undefined,
+      ),
+    )
+    const target = hasPerModel ? stripEffortModelKey(model) : undefined
+    let lowest: EffortLevel | null = null
+    for (const d of sources) {
+      if (!d) continue
+      let u: EffortLevel | undefined
+      if (target !== undefined) {
+        for (const [key, row] of Object.entries(d.modelSettings ?? {})) {
+          const E = row?.maxEffortLevel
+          if (
+            E !== undefined &&
+            isEffortLevelToken(E) &&
+            (u === undefined || effortLadderRank(E) < effortLadderRank(u)) &&
+            stripEffortModelKey(key) === target
+          ) {
+            u = E
+          }
+        }
+      }
+      u ??= isEffortLevelToken(d.maxEffortLevel) ? d.maxEffortLevel : undefined
+      if (
+        u !== undefined &&
+        u !== 'max' &&
+        (lowest === null || effortLadderRank(u) < effortLadderRank(lowest))
+      ) {
+        lowest = u
+      }
+    }
+    return lowest
+  } catch {
+    return null
+  }
+}
+
 /**
  * densable S8t — org maxEffortLevel for model, only firstParty/gateway.
  * Match densable: canonical(See(model)) === canonical(See(apiName)).
@@ -687,16 +830,28 @@ export function getOrgMaxEffortLevel(model: string): EffortLevel | null {
     o => getCanonicalName(o.apiName.trim().toLowerCase()) === target,
   )
   const n = row?.maxEffortLevel
-  if (
-    n === 'low' ||
-    n === 'medium' ||
-    n === 'high' ||
-    n === 'xhigh' ||
-    n === 'max'
-  ) {
+  if (isEffortLevelToken(n)) {
     return n
   }
   return null
+}
+
+/**
+ * densable RMt — min of settings cap (all providers) and org cap
+ * (firstParty/gateway). "max" org/settings token is treated as no cap.
+ */
+export function getCombinedMaxEffortLevel(model: string): EffortLevel | null {
+  const settingsCap = getSettingsMaxEffortLevel(model)
+  const orgCap = getOrgMaxEffortLevel(model)
+  const combined =
+    orgCap === null
+      ? settingsCap
+      : settingsCap === null
+        ? orgCap
+        : effortLadderRank(settingsCap) < effortLadderRank(orgCap)
+          ? settingsCap
+          : orgCap
+  return combined === 'max' ? null : combined
 }
 
 /**
@@ -713,7 +868,7 @@ export function isEffortWithinOrgLimit(
   level: EffortLevel,
   model: string,
 ): boolean {
-  const cap = getOrgMaxEffortLevel(model)
+  const cap = getCombinedMaxEffortLevel(model)
   if (cap === null) return true
   return effortLadderRank(level) <= effortLadderRank(cap)
 }
@@ -738,7 +893,7 @@ export function clampEffortToOrgLimit(
   level: EffortLevel,
   model: string,
 ): EffortLevel {
-  const cap = getOrgMaxEffortLevel(model)
+  const cap = getCombinedMaxEffortLevel(model)
   if (cap === null) return level
   if (effortLadderRank(level) > effortLadderRank(cap)) {
     return cap

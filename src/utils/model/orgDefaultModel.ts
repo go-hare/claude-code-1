@@ -18,7 +18,10 @@ import {
 } from '../../bootstrap/state.js'
 import { getGlobalConfig } from '../config.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
-import { isModelAllowed } from './modelAllowlist.js'
+import {
+  isModelAllowed,
+  stepDownBlockedDefaultModel,
+} from './modelAllowlist.js'
 import { getAPIProvider } from './providers.js'
 
 export type OrgModelDefaultCache = {
@@ -34,6 +37,7 @@ export type ModelDefaultAttribution =
   | 'org'
   | 'enforced'
   | 'entitlement'
+  | 'managed_deny'
   | 'env'
   | 'tier'
 
@@ -91,7 +95,10 @@ export function getResolvedOrgDefaultModel(): string | null {
     return null
   }
   const name = cached.name.trim()
-  return name.length > 0 ? name : null
+  if (name.length === 0) return null
+  // densable Z_: Gu(n) ?? n — keep the org spelling when no substitute exists
+  // (bootstrap RH then fatals). Do not drop the org default here.
+  return stepDownBlockedDefaultModel(name) ?? name
 }
 
 /**
@@ -120,7 +127,11 @@ export function getDefaultModelAttributionBadge(
   if (attribution === 'org') {
     return ' · Org default'
   }
-  if (attribution === 'enforced' || attribution === 'entitlement') {
+  if (
+    attribution === 'enforced' ||
+    attribution === 'entitlement' ||
+    attribution === 'managed_deny'
+  ) {
     return ' · Set by your organization'
   }
   if (attribution === 'env') {

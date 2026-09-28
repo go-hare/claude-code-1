@@ -55,6 +55,7 @@ import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js'
 import type { PluginSource } from '../../utils/plugins/schemas.js'
 import {
   type ValidationResult,
+  pluginValidationOutcome,
   validateManifest,
   validatePluginContents,
 } from '../../utils/plugins/validatePlugin.js'
@@ -100,47 +101,83 @@ function printValidationResult(result: ValidationResult): void {
   }
 }
 
+function serializeValidationReport(
+  results: ValidationResult[],
+  options: { success: boolean; strict: boolean },
+): Record<string, unknown> {
+  return {
+    success: options.success,
+    strict: options.strict,
+    results: results.map(r => ({
+      filePath: r.filePath,
+      fileType: r.fileType,
+      success: r.success,
+      errors: r.errors,
+      warnings: r.warnings,
+      ...(r.notes !== undefined && r.notes.length > 0
+        ? { notes: r.notes }
+        : {}),
+    })),
+  }
+}
+
 // plugin validate
 export async function pluginValidateHandler(
   manifestPath: string,
-  options: { cowork?: boolean },
+  options: { cowork?: boolean; json?: boolean; strict?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
+  const strict = options.strict === true
   try {
     const result = await validateManifest(manifestPath)
-
-    printCli(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
-    printValidationResult(result)
-
-    // If this is a plugin manifest located inside a .claude-plugin directory,
-    // also validate the plugin's content files (skills, agents, commands,
-    // hooks). Works whether the user passed a directory or the plugin.json
-    // path directly.
     let contentResults: ValidationResult[] = []
     if (result.fileType === 'plugin') {
       const manifestDir = dirname(result.filePath)
       if (basename(manifestDir) === '.claude-plugin') {
         contentResults = await validatePluginContents(dirname(manifestDir))
-        for (const r of contentResults) {
-          printCli(`Validating ${r.fileType}: ${r.filePath}\n`)
-          printValidationResult(r)
-        }
+      } else if (result.errors[0]?.code === 'NO_MANIFEST') {
+        printCli(`Validating components in: ${result.filePath}\n`)
+        contentResults = await validatePluginContents(result.filePath)
       }
     }
 
-    const allSuccess = result.success && contentResults.every(r => r.success)
-    const hasWarnings =
-      result.warnings.length > 0 ||
-      contentResults.some(r => r.warnings.length > 0)
+    const results = [result, ...contentResults]
+    const outcome = pluginValidationOutcome(results, { strict })
 
-    if (allSuccess) {
+    if (options.json) {
+      process.stdout.write(
+        jsonStringify(
+          serializeValidationReport(results, {
+            success: outcome.allSuccess,
+            strict,
+          }),
+        ) + '\n',
+      )
+      process.exit(outcome.allSuccess ? 0 : 1)
+      return
+    }
+
+    if (result.errors[0]?.code !== 'NO_MANIFEST') {
+      printCli(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
+      printValidationResult(result)
+    }
+    for (const r of contentResults) {
+      printCli(`Validating ${r.fileType}: ${r.filePath}\n`)
+      printValidationResult(r)
+    }
+
+    if (outcome.allSuccess) {
       cliOk(
-        hasWarnings
+        outcome.hasWarnings
           ? `${figures.tick} Validation passed with warnings`
           : `${figures.tick} Validation passed`,
       )
     } else {
-      printCli(`${figures.cross} Validation failed`)
+      printCli(
+        strict
+          ? `${figures.cross} Validation failed (--strict treats warnings as errors)`
+          : `${figures.cross} Validation failed`,
+      )
       process.exit(1)
     }
   } catch (error) {
@@ -298,7 +335,7 @@ export async function pluginListHandler(options: {
         version: 'unknown',
         scope: 'session',
         enabled: false,
-        installPath: 'path' in e ? e.path : '',
+        installPath: 'path' in e && typeof e.path === 'string' ? e.path : '',
         errors: [getPluginErrorMessage(e)],
       })
     }
@@ -330,7 +367,7 @@ export async function pluginListHandler(options: {
         version: 'unknown',
         scope: SYNCED_MARKETPLACE_NAME,
         enabled: false,
-        installPath: 'path' in e ? e.path : '',
+        installPath: 'path' in e && typeof e.path === 'string' ? e.path : '',
         errors: [getPluginErrorMessage(e)],
       })
     }
@@ -743,6 +780,8 @@ export async function pluginInstallHandler(
     cowork?: boolean
     config?: string[]
     yes?: boolean
+    json?: boolean
+    acceptCommand?: string
   },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
@@ -774,14 +813,40 @@ export async function pluginInstallHandler(
   })
 
   // densable ftm/DCv — command-source consent before materialize
+  let shownCommand:
+    | import('../../utils/plugins/pluginAcceptCommand.js').MarketplaceShownCommand
+    | undefined
   const { announceCommandSourceForInstall } = await import(
     '../../utils/plugins/pluginCommandSource.js'
   )
   const consent = await announceCommandSourceForInstall(plugin, {
     yes: options.yes === true,
+    acceptCommand: options.acceptCommand,
     scope: scope as 'user' | 'project' | 'local',
+    onShown: shown => {
+      shownCommand = shown
+    },
   })
+  if (consent?.kind === 'accepted') {
+    shownCommand = undefined
+  }
   if (consent?.kind === 'declined') {
+    if (options.json) {
+      const { printPluginCliJsonLine, withShownCommandSha256 } = await import(
+        '../../utils/plugins/pluginAcceptCommand.js'
+      )
+      await printPluginCliJsonLine({
+        command: 'install',
+        outcome: 'failed',
+        plugin,
+        scope,
+        message: 'Aborted.',
+        failureCode: 'command_source_declined',
+        shownCommand: shownCommand
+          ? withShownCommandSha256(shownCommand)
+          : undefined,
+      })
+    }
     console.log('Aborted.')
     process.exit(1)
   }
@@ -793,14 +858,42 @@ export async function pluginInstallHandler(
   } = await import('../../utils/plugins/marketplaceHeadersHelper.js')
   const headersHelperConsent = await announceEntryHeadersHelperForInstall(
     plugin,
-    { yes: options.yes === true },
+    {
+      yes: options.yes === true,
+      acceptCommand: options.acceptCommand,
+      onShown: shown => {
+        shownCommand = shown
+      },
+    },
   )
+  if (headersHelperConsent?.kind === 'accepted') {
+    shownCommand = undefined
+  }
   // SEA Oyw: Vgh declined|unconfirmed → abort copy (not command-source
   // `Aborted.`). Se("cli_plugin_install", entry_helper_*) is not ported.
   if (
     headersHelperConsent?.kind === 'declined' ||
     headersHelperConsent?.kind === 'unconfirmed'
   ) {
+    if (options.json) {
+      const { printPluginCliJsonLine, withShownCommandSha256 } = await import(
+        '../../utils/plugins/pluginAcceptCommand.js'
+      )
+      await printPluginCliJsonLine({
+        command: 'install',
+        outcome: 'failed',
+        plugin,
+        scope,
+        message: ENTRY_HELPER_INSTALL_ABORT_MESSAGE,
+        failureCode:
+          headersHelperConsent.kind === 'declined'
+            ? 'entry_helper_declined'
+            : 'entry_helper_unconfirmed',
+        shownCommand: shownCommand
+          ? withShownCommandSha256(shownCommand)
+          : undefined,
+      })
+    }
     console.log(ENTRY_HELPER_INSTALL_ABORT_MESSAGE)
     process.exit(1)
   }
@@ -819,13 +912,19 @@ export async function pluginInstallHandler(
           archiveUrl: headersHelperConsent.archiveUrl,
         }
       : undefined,
+    { json: options.json, scope, shownCommand },
   )
 }
 
 // plugin uninstall (lines 5738–5769)
 export async function pluginUninstallHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean; keepData?: boolean },
+  options: {
+    scope?: string
+    cowork?: boolean
+    keepData?: boolean
+    json?: boolean
+  },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const scope = options.scope || 'user'
@@ -855,13 +954,14 @@ export async function pluginUninstallHandler(
     plugin,
     scope as 'user' | 'project' | 'local',
     options.keepData,
+    { json: options.json, scope },
   )
 }
 
 // plugin enable (lines 5783–5818)
 export async function pluginEnableHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean },
+  options: { scope?: string; cowork?: boolean; json?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   let scope: (typeof VALID_INSTALLABLE_SCOPES)[number] | undefined
@@ -897,13 +997,13 @@ export async function pluginEnableHandler(
       'auto') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
-  await enablePlugin(plugin, scope)
+  await enablePlugin(plugin, scope, { json: options.json, scope })
 }
 
 // plugin disable (lines 5833–5902)
 export async function pluginDisableHandler(
   plugin: string | undefined,
-  options: { scope?: string; cowork?: boolean; all?: boolean },
+  options: { scope?: string; cowork?: boolean; all?: boolean; json?: boolean },
 ): Promise<void> {
   if (options.all && plugin) {
     cliError('Cannot use --all with a specific plugin')
@@ -924,7 +1024,7 @@ export async function pluginDisableHandler(
     // Distinguishable from the specific-plugin branch by plugin_name IS NULL.
     logEvent('tengu_plugin_disable_command', {})
 
-    await disableAllPlugins()
+    await disableAllPlugins({ json: options.json })
     return
   }
 
@@ -961,14 +1061,20 @@ export async function pluginDisableHandler(
       'auto') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
-  await disablePlugin(plugin!, scope)
+  await disablePlugin(plugin!, scope, { json: options.json, scope })
 }
 
 // plugin update (lines 5918–5948)
 // densable 2.1.229 #4: -y/--yes + ptm command-source consent via updatePluginCli
 export async function pluginUpdateHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean; yes?: boolean },
+  options: {
+    scope?: string
+    cowork?: boolean
+    yes?: boolean
+    json?: boolean
+    acceptCommand?: string
+  },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const { name, marketplace } = parsePluginIdentifier(plugin)
@@ -999,5 +1105,9 @@ export async function pluginUpdateHandler(
 
   // densable 2.1.238 nyh — disclosure+confirm lives on updatePluginCli
   // (explicit:!0 + onEntryHelperDisclosure). Do not pre-prompt here.
-  await updatePluginCli(plugin, scope, { yes: options.yes === true })
+  await updatePluginCli(plugin, scope, {
+    yes: options.yes === true,
+    json: options.json,
+    acceptCommand: options.acceptCommand,
+  })
 }

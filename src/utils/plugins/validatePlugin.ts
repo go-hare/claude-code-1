@@ -6,14 +6,117 @@ import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
 import { FRONTMATTER_REGEX } from '../frontmatterParser.js'
 import { stripBOM } from '../jsonRead.js'
 import { jsonParse } from '../slowOperations.js'
+import type { HooksSettings } from '../settings/types.js'
 import { parseYaml } from '../yaml.js'
 import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
 import {
+  collectUnknownPluginHooksJsonKeyWarnings,
   PluginHooksSchema,
   PluginManifestSchema,
   PluginMarketplaceEntrySchema,
   PluginMarketplaceSchema,
 } from './schemas.js'
+
+const PLUGIN_PATH_PLACEHOLDERS = [
+  'CLAUDE_PLUGIN_ROOT',
+  'CLAUDE_PLUGIN_DATA',
+  'CLAUDE_PROJECT_DIR',
+] as const
+
+/**
+ * densable `ut` — unquoted `${VAR}` / `$VAR` outside quotes/escapes.
+ */
+export function findUnquotedPluginPlaceholders(command: string): string[] {
+  const found = new Set<string>()
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+    if (!inSingle && ch === '\\') {
+      i++
+      continue
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle
+      continue
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble
+      continue
+    }
+    if (ch !== '$' || inSingle || inDouble) {
+      continue
+    }
+    for (const name of PLUGIN_PATH_PLACEHOLDERS) {
+      const braced = command.startsWith(`{${name}}`, i + 1)
+      const bare =
+        command.startsWith(name, i + 1) &&
+        !/[A-Za-z0-9_]/.test(command.charAt(i + 1 + name.length))
+      if (braced || bare) {
+        found.add(`\${${name}}`)
+        break
+      }
+    }
+  }
+  return [...found]
+}
+
+/**
+ * densable `Fe` — command hooks (skip exec-form args and powershell).
+ */
+export function warnUnquotedPluginPlaceholders(
+  hooks:
+    | HooksSettings
+    | Record<string, Array<{ hooks: unknown[] }> | undefined>,
+): Array<{ event: string; command: string; placeholders: string[] }> {
+  const hits: Array<{
+    event: string
+    command: string
+    placeholders: string[]
+  }> = []
+  for (const [event, matchers] of Object.entries(hooks)) {
+    for (const matcher of matchers ?? []) {
+      for (const hook of matcher.hooks) {
+        const commandHook = hook as {
+          type?: string
+          args?: unknown
+          shell?: string
+          command?: string
+        }
+        if (
+          commandHook.type !== 'command' ||
+          commandHook.args !== undefined ||
+          commandHook.shell === 'powershell' ||
+          typeof commandHook.command !== 'string'
+        ) {
+          continue
+        }
+        const placeholders = findUnquotedPluginPlaceholders(commandHook.command)
+        if (placeholders.length > 0) {
+          hits.push({
+            event,
+            command: commandHook.command,
+            placeholders,
+          })
+        }
+      }
+    }
+  }
+  return hits
+}
+
+function unquotedPluginPlaceholderWarningMessage(
+  placeholders: string[],
+  command: string,
+): string {
+  const shown = command.length <= 200 ? command : command.slice(0, 200)
+  return (
+    `Shell command uses ${placeholders.join(', ')} without quotes: ${shown}. ` +
+    'If the expanded path contains a space the command can split into several words and fail. ' +
+    'Wrap the placeholder in double quotes, or use exec form: ' +
+    '{"command": "<executable>", "args": ["${CLAUDE_PLUGIN_ROOT}/..."]}.'
+  )
+}
 
 /**
  * Fields that belong in marketplace.json entries (PluginMarketplaceEntrySchema)
@@ -37,6 +140,21 @@ export type ValidationResult = {
   warnings: ValidationWarning[]
   filePath: string
   fileType: 'plugin' | 'marketplace' | 'skill' | 'agent' | 'command' | 'hooks'
+  notes?: string[]
+}
+
+/** densable `n9r`. */
+export function pluginValidationOutcome(
+  results: ValidationResult[],
+  options: { strict?: boolean },
+): { noErrors: boolean; hasWarnings: boolean; allSuccess: boolean } {
+  const noErrors = results.every(r => r.success)
+  const hasWarnings = results.some(r => r.warnings.length > 0)
+  return {
+    noErrors,
+    hasWarnings,
+    allSuccess: options.strict ? noErrors && !hasWarnings : noErrors,
+  }
 }
 
 export type ValidationError = {
@@ -705,10 +823,24 @@ async function validateHooksJson(filePath: string): Promise<ValidationResult> {
     }
   }
 
+  const warnings: ValidationWarning[] = []
+  for (const message of collectUnknownPluginHooksJsonKeyWarnings(parsed)) {
+    warnings.push({ path: 'hooks.json', message })
+  }
+  for (const hit of warnUnquotedPluginPlaceholders(result.data.hooks ?? {})) {
+    warnings.push({
+      path: `hooks.${hit.event}`,
+      message: unquotedPluginPlaceholderWarningMessage(
+        hit.placeholders,
+        hit.command,
+      ),
+    })
+  }
+
   return {
     success: true,
     errors: [],
-    warnings: [],
+    warnings,
     filePath,
     fileType: 'hooks',
   }

@@ -32,8 +32,9 @@ const DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024 // 8MB
  * file size and kills the process. In pipe mode (hooks), DiskTaskOutput
  * drops chunks past this limit. Shared so both caps stay in sync.
  */
-export const MAX_TASK_OUTPUT_BYTES = 5 * 1024 * 1024 * 1024
-export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '5GB'
+/** densable 2.1.283 vLo — 1GB disk cap (was 5GB locally; gold differs). Keep 252 pinWriteTarget. */
+export const MAX_TASK_OUTPUT_BYTES = 1_073_741_824
+export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '1GB'
 
 /** densable 2.1.247 RTe — queued when the output file cannot be written. */
 export const UNWRITTEN_OUTPUT_NOTICE = `

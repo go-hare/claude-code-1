@@ -144,9 +144,9 @@ export async function applyPostInstallPluginUserConfig(
   }
   if (configEntries && configEntries.length > 0) {
     const values = parsePluginCliConfigFlags(configEntries, userConfig)
-    savePluginOptions(getPluginStorageId(plugin), values, userConfig)
+    await savePluginOptions(getPluginStorageId(plugin), values, userConfig)
   }
-  const unconfigured = getUnconfiguredOptions(plugin)
+  const unconfigured = await getUnconfiguredOptions(plugin)
   const keys = Object.keys(unconfigured)
   if (keys.length === 0) return ''
   const required = keys.filter(k => userConfig[k]?.required === true)

@@ -406,6 +406,11 @@ export type QueryParams = {
   /** densable 2.1.248 #2 — per-agent experimental.cacheTtl → Ivt/jTt. */
   agentCacheTtlOverride?: PromptCacheTtl
   /**
+   * densable Fl / pe — omitClaudeMd kept only managed policy CLAUDE.md.
+   * Memory inject filters to type==="Managed" when this is set.
+   */
+  managedInstructionsOnly?: boolean
+  /**
    * Official drain: when the dequeued turn carried stopHookActive (stop-hook
    * continuation / concurrent re-queue), seed the loop so nested stop hooks
    * see stop_hook_active=true. Undefined on normal keyboard turns.
@@ -769,12 +774,17 @@ async function* queryLoop(
     maxTurns,
     skipCacheWrite,
     agentCacheTtlOverride,
+    managedInstructionsOnly,
   } = params
   const deps = params.deps ?? productionDeps()
 
   // Mutable cross-iteration state. The loop body destructures this at the top
   // of each iteration so reads stay bare-name (`messages`, `toolUseContext`).
   // Continue sites write `state = { ... }` instead of N separate assignments.
+  if (managedInstructionsOnly) {
+    params.toolUseContext.options.managedInstructionsOnly = true
+  }
+
   let state: State = {
     messages: params.messages,
     toolUseContext: params.toolUseContext,

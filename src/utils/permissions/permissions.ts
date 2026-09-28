@@ -55,6 +55,7 @@ import {
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
 import { isBroadRule, isAutoModeFilteringActive } from './broadRuleFilter.js'
+import { shouldOfferBlockOutsideReads } from './outsideReads.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
@@ -638,6 +639,24 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     const appState = context.getAppState()
     // densable bn: sticky permission layers overlay mode/rules for this turn
     const layeredPermissionContext = getToolPermissionContextFromLayers(context)
+
+    if (
+      shouldOfferBlockOutsideReads({
+        toolName: tool.name,
+        hasPath:
+          typeof tool.getPath === 'function' &&
+          Boolean(tool.getPath(input as { [key: string]: unknown })),
+        behavior: result.behavior,
+        decisionReasonType: result.decisionReason?.type,
+        context: layeredPermissionContext,
+        isNonInteractiveSession: context.options.isNonInteractiveSession,
+      })
+    ) {
+      return {
+        ...result,
+        offersBlockOutsideReads: true,
+      }
+    }
 
     if (layeredPermissionContext.mode === 'dontAsk') {
       return {

@@ -1485,6 +1485,25 @@ describe('function-hooks classic pattern', () => {
     expect(Array.isArray(listBuiltinFunctionHookPlugins())).toBe(true)
   })
 
+  test('builtin agents-md register.ts is plain JS the VM can load', async () => {
+    const previous = process.env.CLAUDE_CODE_HOOKS_SAME_THREAD
+    process.env.CLAUDE_CODE_HOOKS_SAME_THREAD = '1'
+    try {
+      const plugins = listBuiltinFunctionHookPlugins()
+      const agents = plugins.find(plugin => plugin.name === 'builtin:agents-md')
+      expect(agents).toBeDefined()
+      await loadFunctionHooksModules(
+        plugins.filter(p => p.name === 'builtin:agents-md'),
+      )
+      expect(hasMatchingFunctionHook('prompt.context')).toBe(true)
+      expect(hasMatchingFunctionHook('session.start')).toBe(true)
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLAUDE_CODE_HOOKS_SAME_THREAD
+      else process.env.CLAUDE_CODE_HOOKS_SAME_THREAD = previous
+    }
+  })
+
   test('evaluateUiRender stores the hook tree on the xI site', async () => {
     setLoadedFunctionHooksModules([
       {

@@ -28,24 +28,26 @@ import {
 import { DENSABLE_EHL_CATALOG } from '../densableEhlCatalog.219.js'
 
 describe('densable 2.1.219 full EHl catalog', () => {
-  test('SQ: schema_version 1, 17 models, 6 pricing tiers', () => {
+  test('SQ: schema_version 1, 19 models, 8 pricing tiers', () => {
     const sq = getDensableModelCatalog()
     expect(sq.schema_version).toBe(1)
-    expect(sq.models).toHaveLength(17)
+    expect(sq.models).toHaveLength(19)
     expect(Object.keys(sq.pricing_tiers).sort()).toEqual(
       [
         'haiku_35',
         'haiku_45',
         'tier_10_50',
+        'tier_10_50_cache_read_0_25',
         'tier_15_75',
         'tier_3_15',
+        'tier_4_20_cache_read_0_20',
         'tier_5_25',
       ].sort(),
     )
     expect(sq.best).toBe('fable')
     expect(sq.latest_per_family).toEqual({
-      fable: 'claude-fable-5',
-      opus: 'claude-opus-5',
+      fable: 'claude-fable-5-1',
+      opus: 'claude-opus-5-5',
       sonnet: 'claude-sonnet-5',
       haiku: 'claude-haiku-4-5',
     })
@@ -85,6 +87,7 @@ describe('densable 2.1.219 full EHl catalog', () => {
       'claude-opus-4-7',
       'claude-opus-4-8',
       'claude-opus-5',
+      'claude-opus-5-5',
     ])
   })
 
@@ -126,18 +129,19 @@ describe('densable 2.1.219 full EHl catalog', () => {
   })
 
   test('AHl aliases', () => {
-    expect(resolveCatalogAlias('opus')).toBe('claude-opus-5')
+    expect(resolveCatalogAlias('opus')).toBe('claude-opus-5-5')
     expect(resolveCatalogAlias('sonnet')).toBe('claude-sonnet-5')
     expect(resolveCatalogAlias('haiku')).toBe('claude-haiku-4-5')
-    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5')
+    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-1')
+    expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
     expect(resolveCatalogAlias('opus', 'foundry')).toBe('claude-opus-4-6')
     expect(resolveCatalogAlias('sonnet', 'bedrock')).toBe('claude-sonnet-4-5')
     expect(resolveCatalogAlias('nope')).toBeUndefined()
   })
 
-  test('Tig expands all 17 models', () => {
+  test('Tig expands all 19 models', () => {
     const tig = expandTigModelCosts()
-    expect(Object.keys(tig)).toHaveLength(17)
+    expect(Object.keys(tig)).toHaveLength(19)
     expect(tig['claude-opus-5']).toEqual(COST_TIER_5_25)
     expect(tig['claude-opus-4-0']).toEqual(COST_TIER_15_75)
     expect(tig['claude-fable-5']).toEqual(COST_TIER_10_50)
@@ -163,8 +167,8 @@ describe('densable 2.1.219 full EHl catalog', () => {
   })
 
   test('back-compat DENSABLE_CATALOG_MODELS / CAPABILITIES', () => {
-    expect(Object.keys(DENSABLE_CATALOG_MODELS)).toHaveLength(17)
-    expect(Object.keys(DENSABLE_CATALOG_CAPABILITIES)).toHaveLength(17)
+    expect(Object.keys(DENSABLE_CATALOG_MODELS)).toHaveLength(19)
+    expect(Object.keys(DENSABLE_CATALOG_CAPABILITIES)).toHaveLength(19)
     expect(DENSABLE_CATALOG_MODELS['claude-opus-5']!.pricing).toBe('tier_5_25')
   })
 })

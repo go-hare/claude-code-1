@@ -27,6 +27,7 @@ export const KEYBINDING_CONTEXTS = [
   'MessageSelector',
   'DiffDialog',
   'ModelPicker',
+  'EffortPanel',
   'Select',
   'Plugin',
 ] as const
@@ -54,6 +55,7 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
   MessageSelector: 'When the message selector (rewind) is open',
   DiffDialog: 'When the diff dialog is open',
   ModelPicker: 'When the model picker is open',
+  EffortPanel: 'When the /effort slider is open',
   Select: 'When a select/list component is focused',
   Plugin: 'When the plugin dialog is open',
 }
@@ -88,6 +90,8 @@ export const KEYBINDING_ACTIONS = [
   'chat:fastMode',
   'chat:thinkingToggle',
   'chat:submit',
+  'chat:queueSubmit',
+  'chat:sendNow',
   'chat:newline',
   'chat:clearScreen',
   'chat:undo',
@@ -165,6 +169,7 @@ export const KEYBINDING_ACTIONS = [
   'effortPanel:home',
   'effortPanel:end',
   'effortPanel:confirm',
+  'effortPanel:thisSessionOnly',
   'effortPanel:cancel',
   // Select component actions (distinct from confirm: to avoid collisions)
   'select:next',

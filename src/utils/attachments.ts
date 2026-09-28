@@ -2324,8 +2324,15 @@ async function getNestedMemoryAttachmentsForFile(
       filePath,
       processedPaths,
     )
+    const managedOnly = toolUseContext.options.managedInstructionsOnly === true
     attachments.push(
-      ...memoryFilesToAttachments(managedUserRules, toolUseContext, filePath),
+      ...memoryFilesToAttachments(
+        managedOnly
+          ? managedUserRules.filter(f => f.type === 'Managed')
+          : managedUserRules,
+        toolUseContext,
+        filePath,
+      ),
     )
 
     // Phase 2: Get directories to process
@@ -2347,7 +2354,9 @@ async function getNestedMemoryAttachmentsForFile(
       const memoryFiles = (
         await getMemoryFilesForNestedDirectory(dir, filePath, processedPaths)
       ).filter(
-        f => !skipProjectLevel || (f.type !== 'Project' && f.type !== 'Local'),
+        f =>
+          (!skipProjectLevel || (f.type !== 'Project' && f.type !== 'Local')) &&
+          (!managedOnly || f.type === 'Managed'),
       )
       attachments.push(
         ...memoryFilesToAttachments(memoryFiles, toolUseContext, filePath),
@@ -2364,7 +2373,9 @@ async function getNestedMemoryAttachmentsForFile(
           processedPaths,
         )
       ).filter(
-        f => !skipProjectLevel || (f.type !== 'Project' && f.type !== 'Local'),
+        f =>
+          (!skipProjectLevel || (f.type !== 'Project' && f.type !== 'Local')) &&
+          (!managedOnly || f.type === 'Managed'),
       )
       attachments.push(
         ...memoryFilesToAttachments(conditionalRules, toolUseContext, filePath),

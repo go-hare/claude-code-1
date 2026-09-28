@@ -140,8 +140,13 @@ export function getErrorGuidance(error: PluginError): string | null {
     case 'lsp-request-failed':
       return 'Check LSP server logs with --debug for details';
     case 'plugin-cache-miss':
-      return 'Run /plugins to refresh the plugin cache';
+      return 'Run /plugin to refresh the plugin cache';
     case 'marketplace-load-failed':
+      return error.reason === 'cache-miss'
+        ? error.catalogReadFailed
+          ? 'The cached marketplace catalog could not be read; run /reload-plugins to refresh it'
+          : 'Run /reload-plugins to refresh the marketplace cache'
+        : null;
     case 'generic-error':
       return null;
     case 'synced-plugin-shadowed':

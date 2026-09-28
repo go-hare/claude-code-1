@@ -14,11 +14,13 @@
  * 2. Call registerBuiltinPlugin() with the plugin definition here
  */
 
+import { registerAgentsMdBuiltinPlugin } from './agentsMd.js'
 import { registerWeixinBuiltinPlugin } from './weixin.js'
 
 /**
  * Initialize built-in plugins. Called during CLI startup.
  */
 export function initBuiltinPlugins(): void {
+  registerAgentsMdBuiltinPlugin()
   registerWeixinBuiltinPlugin()
 }

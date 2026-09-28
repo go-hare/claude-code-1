@@ -39,6 +39,7 @@ type MarkdownListProps = {
   dimColor?: boolean;
   italic?: boolean;
   tailWrap?: WrapMode;
+  maxProseWidth?: number;
 };
 
 type ListShared = {
@@ -48,9 +49,10 @@ type ListShared = {
   italic?: boolean;
   minContentWidth: number;
   tailWrap?: WrapMode;
+  maxProseWidth?: number;
 };
 
-export function MarkdownList({ token, highlight, dimColor, italic, tailWrap }: MarkdownListProps): React.ReactNode {
+export function MarkdownList({ token, highlight, dimColor, italic, tailWrap, maxProseWidth }: MarkdownListProps): React.ReactNode {
   const [theme] = useTheme();
   const { columns } = useTerminalSize();
   const minContentWidth = Math.max(
@@ -65,8 +67,9 @@ export function MarkdownList({ token, highlight, dimColor, italic, tailWrap }: M
       italic,
       minContentWidth,
       tailWrap,
+      maxProseWidth,
     }),
-    [theme, highlight, dimColor, italic, minContentWidth, tailWrap],
+    [theme, highlight, dimColor, italic, minContentWidth, tailWrap, maxProseWidth],
   );
   return (
     <Box flexDirection="column">
@@ -169,7 +172,12 @@ function MarkdownListItem({
         return null;
       }
       const node = (
-        <Box key={index} flexDirection="row" marginTop={marginPending || (index > 0 && startsWithNewline) ? 1 : 0}>
+        <Box
+          key={index}
+          flexDirection="row"
+          marginTop={marginPending || (index > 0 && startsWithNewline) ? 1 : 0}
+          maxWidth={shared.maxProseWidth}
+        >
           <Box flexShrink={1} width={indent} />
           <Box flexShrink={1} width={markerCellWidth} minWidth={LIST_MARKER_MIN_WIDTH}>
             {index === 0 ? (

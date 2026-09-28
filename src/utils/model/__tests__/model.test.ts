@@ -29,6 +29,22 @@ describe('firstPartyNameToCanonical', () => {
     )
   })
 
+  test('maps 283 more-specific 5-1/5-5 before unsuffixed family', () => {
+    expect(firstPartyNameToCanonical('claude-fable-5-1')).toBe(
+      'claude-fable-5-1',
+    )
+    expect(firstPartyNameToCanonical('us.anthropic.claude-fable-5-1')).toBe(
+      'claude-fable-5-1',
+    )
+    expect(firstPartyNameToCanonical('claude-opus-5-5')).toBe('claude-opus-5-5')
+    expect(firstPartyNameToCanonical('claude-opus-5-5[1m]')).toBe(
+      'claude-opus-5-5',
+    )
+    expect(firstPartyNameToCanonical('claude-mythos-5-1')).toBe(
+      'claude-mythos-5-1',
+    )
+  })
+
   test('maps haiku-4-5', () => {
     expect(firstPartyNameToCanonical('claude-haiku-4-5-20251001')).toBe(
       'claude-haiku-4-5',

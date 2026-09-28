@@ -63,8 +63,8 @@ describe('getDefaultOpusModel', () => {
     resetProviderState()
   })
 
-  test('returns Opus 5 for firstParty (densable 2.1.219)', () => {
-    expect(getDefaultOpusModel()).toBe(ALL_MODEL_CONFIGS.opus5.firstParty)
+  test('returns Opus 5.5 for firstParty (densable 2.1.283)', () => {
+    expect(getDefaultOpusModel()).toBe(ALL_MODEL_CONFIGS.opus55.firstParty)
   })
 
   test('returns Opus 4.7 for bedrock (3P lag)', () => {

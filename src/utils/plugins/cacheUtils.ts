@@ -1,5 +1,5 @@
 import { lstat, readdir, rm, stat, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { clearCommandsCache } from '../../commands.js'
 import { clearAllOutputStylesCache } from '../../constants/outputStyles.js'
 import { clearAgentDefinitionsCache } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
@@ -86,13 +86,51 @@ function officialPluginCacheRoot(): string {
   return join(getClaudeConfigHomeDir(), 'plugins', 'cache')
 }
 
+/**
+ * densable ZA (subset): `..` in the path or an empty/relative-escape is
+ * unclassifiable — VZ must not write `.orphaned_at` there.
+ */
+export function classifyPluginVersionPath(versionPath: string): {
+  absolute: string
+  suspect: boolean
+} {
+  const trimmed = versionPath.trim()
+  const absolute = trimmed === '' ? versionPath : resolve(trimmed)
+  const parts = trimmed.split(/[\\/]/)
+  const absParts = absolute.split(/[\\/]/)
+  const suspect =
+    trimmed === '' || parts.includes('..') || absParts.includes('..')
+  return { absolute, suspect }
+}
+
+/** densable Ym(B5o(), …) — `.orphaned_at` only inside the official plugin cache root. */
+export function isInsideOfficialPluginCacheRoot(absolute: string): boolean {
+  const root = officialPluginCacheRoot()
+  const prefix = root.endsWith(sep) ? root : root + sep
+  return absolute === root || absolute.startsWith(prefix)
+}
+
 export async function markPluginVersionOrphaned(
   versionPath: string,
   storageV5?: unknown,
 ): Promise<void> {
+  // densable VZ / ZA: unclassifiable path short-circuit
+  const { absolute, suspect } = classifyPluginVersionPath(versionPath)
+  if (suspect) {
+    logForDebugging(
+      `Not marking an unclassifiable plugin version path: ${absolute}`,
+    )
+    return
+  }
   // densable: if (await YEt(e)) { w(`Not marking a symlinked plugin version: ${e}`); return }
-  if (await isSymlinkedPluginVersion(versionPath)) {
-    logForDebugging(`Not marking a symlinked plugin version: ${versionPath}`)
+  if (await isSymlinkedPluginVersion(absolute)) {
+    logForDebugging(`Not marking a symlinked plugin version: ${absolute}`)
+    return
+  }
+  if (!isInsideOfficialPluginCacheRoot(absolute)) {
+    logForDebugging(
+      `Not writing .orphaned_at outside the plugin cache root: ${absolute}`,
+    )
     return
   }
   const cacheRoot = getPluginCacheRoot()
@@ -101,7 +139,7 @@ export async function markPluginVersionOrphaned(
     isHoverRestOn() &&
     storageV5 !== undefined &&
     cacheRoot === officialPluginCacheRoot()
-      ? isPluginCacheVersionDirPath(versionPath, cacheRoot)
+      ? isPluginCacheVersionDirPath(absolute, cacheRoot)
       : null
   if (isHoverRestOn() && storageV5 !== undefined && parsed !== null) {
     const written = await (storageV5 as PluginCacheStorageV5).write(
@@ -117,15 +155,15 @@ export async function markPluginVersionOrphaned(
     )
     if (!written.ok) {
       logForDebugging(
-        `Failed to write .orphaned_at: ${versionPath}: ${errorMessage(written.error)}`,
+        `Failed to write .orphaned_at: ${absolute}: ${errorMessage(written.error)}`,
       )
     }
     return
   }
   try {
-    await writeFile(getOrphanedAtPath(versionPath), `${Date.now()}`, 'utf-8')
+    await writeFile(getOrphanedAtPath(absolute), `${Date.now()}`, 'utf-8')
   } catch (error) {
-    logForDebugging(`Failed to write .orphaned_at: ${versionPath}: ${error}`)
+    logForDebugging(`Failed to write .orphaned_at: ${absolute}: ${error}`)
   }
 }
 

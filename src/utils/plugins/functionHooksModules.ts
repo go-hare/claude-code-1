@@ -142,7 +142,7 @@ export function functionHookPatternMatches(
 
 /** densable `zk` module half: some loaded hook's pattern matches the event. */
 export function hasMatchingFunctionHook(event: string): boolean {
-  const needle = `classic.${event}`
+  const needle = event.includes('.') ? event : `classic.${event}`
   return loadedModules.some(mod =>
     (mod.hooks ?? []).some(hook =>
       functionHookPatternMatches(hook.pattern, needle),
@@ -7639,8 +7639,9 @@ export async function loadFunctionHooksModules(
         ...(Array.isArray(
           (mod as { surfaceModules?: unknown }).surfaceModules,
         ) && {
-          surfaceModules: (mod as { surfaceModules: SurfaceModuleScan[] })
-            .surfaceModules,
+          surfaceModules: (
+            mod as unknown as { surfaceModules: SurfaceModuleScan[] }
+          ).surfaceModules,
         }),
       })
     }
@@ -7810,15 +7811,47 @@ export function listBuiltinFunctionHookPlugins(): FunctionHookPlugin[] {
     return readdirSync(BUILTIN_MODS_DIR)
       .filter(name => {
         try {
-          return statSync(join(BUILTIN_MODS_DIR, name, REGISTER_FILE)).isFile()
+          if (!statSync(join(BUILTIN_MODS_DIR, name, REGISTER_FILE)).isFile()) {
+            return false
+          }
         } catch {
           return false
         }
+        if (name === 'agents-md') {
+          try {
+            const { getFeatureValue_CACHED_MAY_BE_STALE } =
+              require('../../services/analytics/growthbook.js') as typeof import('../../services/analytics/growthbook.js')
+            return getFeatureValue_CACHED_MAY_BE_STALE(
+              'tengu_agents_md_mod',
+              true,
+            )
+          } catch {
+            return true
+          }
+        }
+        return true
       })
-      .map(name => ({
-        name: `builtin:${name}`,
-        path: join(BUILTIN_MODS_DIR, name),
-      }))
+      .map(name => {
+        const plugin: FunctionHookPlugin = {
+          name: `builtin:${name}`,
+          path: join(BUILTIN_MODS_DIR, name),
+        }
+        if (name === 'agents-md') {
+          try {
+            const { getInitialSettings } =
+              require('../settings/settings.js') as typeof import('../settings/settings.js')
+            const settings = getInitialSettings() ?? {}
+            plugin.options = {
+              ...(typeof settings.instructionFiles === 'string' && {
+                instructionFiles: settings.instructionFiles,
+              }),
+            }
+          } catch {
+            // settings optional during early boot
+          }
+        }
+        return plugin
+      })
   } catch {
     return []
   }

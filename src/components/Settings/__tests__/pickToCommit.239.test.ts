@@ -11,14 +11,19 @@ import { join } from 'path'
 const source = readFileSync(join(import.meta.dir, '../Config.tsx'), 'utf8')
 
 describe('densable 2.1.239 pickToCommit EnumPicker', () => {
-  test('only crossSessionInbound is pickToCommit', () => {
-    expect([...source.matchAll(/pickToCommit:\s*true/g)]).toHaveLength(1)
+  test('crossSessionInbound and IRn string+options set pickToCommit', () => {
+    const matches = [...source.matchAll(/pickToCommit:\s*true/g)]
+    expect(matches.length).toBeGreaterThanOrEqual(2)
     const inboundAt = source.indexOf("id: 'crossSessionInbound'")
     const expiryAt = source.indexOf("id: 'dialogExpiry'")
     expect(source.slice(inboundAt, inboundAt + 400)).toContain(
       'pickToCommit: true',
     )
     expect(source.slice(expiryAt, inboundAt)).not.toContain('pickToCommit')
+    expect(source).toContain('pickToCommit: true,')
+    expect(source).toContain(
+      "field.type === 'string' && Array.isArray(field.options)",
+    )
   })
 
   test('toggle opens EnumPicker instead of cycling', () => {

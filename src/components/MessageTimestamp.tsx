@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, stringWidth } from '@anthropic/ink';
 import { isHumanLikeOrigin, isMetaVisibleOrigin } from '../utils/messages.js';
+import { formatClockTime, formatFullTimestamp } from '../utils/timeFormat.js';
 
 export type TimestampMessage = {
   type?: string;
@@ -29,17 +30,6 @@ type Props = {
   isSplitUserContinuation?: boolean;
 };
 
-const SETTING_STAMP: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-  timeZoneName: 'short',
-};
-
 /** densable Kkc — queued_command prefers attachment.timestamp */
 export function messageTimestampValue(message: TimestampMessage): unknown {
   if (message.type === 'attachment' && message.attachment?.type === 'queued_command') {
@@ -48,16 +38,11 @@ export function messageTimestampValue(message: TimestampMessage): unknown {
   return message.timestamp;
 }
 
-/** densable jkc — silk_hinge setting uses full datetime + tz */
+/** densable jkc — silk_hinge setting uses full datetime via timeFormat/timeZone. */
 export function formatSettingMessageTimestamp(raw: string, timeZone?: string): string {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
-  const opts = timeZone ? { ...SETTING_STAMP, timeZone } : SETTING_STAMP;
-  const parts = new Intl.DateTimeFormat('en-US', opts).formatToParts(date);
-  const byType: Record<string, string> = {};
-  for (const part of parts) byType[part.type] = part.value;
-  const tz = byType.timeZoneName ? ` ${byType.timeZoneName}` : '';
-  return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}${tz}`;
+  return formatFullTimestamp(date, timeZone);
 }
 
 function queuedPromptText(prompt: unknown): string {
@@ -129,13 +114,13 @@ export function MessageTimestamp({
   }
 
   const raw = String(messageTimestampValue(message) ?? '');
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
   const formattedTimestamp = showMessageTimestamps
     ? formatSettingMessageTimestamp(raw)
-    : new Date(raw).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
+    : formatClockTime(date);
 
   if (!formattedTimestamp) {
     return null;

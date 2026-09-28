@@ -22,6 +22,10 @@ import {
   pathInAllowedWorkingPath,
   pathInWorkingPath,
 } from './filesystem.js'
+import {
+  contextBlocksOutsideReads,
+  OUTSIDE_READS_BLOCKED_REASON,
+} from './outsideReads.js'
 import type { PermissionDecisionReason } from './PermissionResult.js'
 
 const MAX_DIRS_TO_LIST = 5
@@ -266,6 +270,22 @@ export function isPathAllowed(
       decisionReason: restrictedDeny.decisionReason ?? {
         type: 'other',
         reason: restrictedDeny.message,
+      },
+    }
+  }
+
+  // official uH/jx: blockReads fences later Bash/cwd reads as a safetyCheck
+  if (
+    operationType === 'read' &&
+    contextBlocksOutsideReads(context) &&
+    !isInWorkingDir
+  ) {
+    return {
+      allowed: false,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: OUTSIDE_READS_BLOCKED_REASON,
+        classifierApprovable: false,
       },
     }
   }

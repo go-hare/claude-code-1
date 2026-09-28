@@ -202,16 +202,66 @@ import { resolveSessionEndHooksTimeoutMs } from './residualMsEnvGates.js'
 
 const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
 
+/** densable `ygo` — SessionEnd per-hook / bound floor. */
+const SESSIONEND_HOOKS_TIMEOUT_FLOOR_MS = 1500
+/** densable `ARo` — SessionEnd bound ceiling when env is unset. */
+const SESSIONEND_HOOKS_TIMEOUT_CEILING_MS = 60_000
+
 /**
- * SessionEnd hooks run during shutdown/clear and need a much tighter bound
- * than TOOL_HOOK_EXECUTION_TIMEOUT_MS. This value is used by callers as both
- * the per-hook default timeout AND the overall AbortSignal cap (hooks run in
- * parallel, so one value suffices). Overridable via env var for users whose
- * teardown scripts need more time.
- * Official fXr densable via resolveSessionEndHooksTimeoutMs.
+ * densable `_go`. Per-hook SessionEnd timeout: env
+ * CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS if a positive int, else 1500.
+ * Not the overall AbortSignal bound — see getSessionEndHooksBoundMs.
  */
 export function getSessionEndHookTimeoutMs(): number {
   return resolveSessionEndHooksTimeoutMs()
+}
+
+function sessionEndHooksTimeoutEnvMs(): number | undefined {
+  const raw = process.env.CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS
+  const parsed = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+/**
+ * densable `Kfe` body. Env if set; else max(matcher hook.timeout*1000)
+ * clamped to [1500, 60000].
+ */
+export function computeSessionEndHooksBoundMs(
+  envMs: number | undefined,
+  sessionEndMatchers: ReadonlyArray<{
+    hooks: ReadonlyArray<{ timeout?: number }>
+  }>,
+): number {
+  if (envMs !== undefined) {
+    return envMs
+  }
+  let maxTimeoutMs = 0
+  for (const matcher of sessionEndMatchers) {
+    for (const hook of matcher.hooks) {
+      if (hook.timeout && hook.timeout * 1000 > maxTimeoutMs) {
+        maxTimeoutMs = hook.timeout * 1000
+      }
+    }
+  }
+  return Math.max(
+    SESSIONEND_HOOKS_TIMEOUT_FLOOR_MS,
+    Math.min(maxTimeoutMs, SESSIONEND_HOOKS_TIMEOUT_CEILING_MS),
+  )
+}
+
+/**
+ * densable `Kfe`. Overall SessionEnd AbortSignal bound.
+ * Env if set; else max(SessionEnd matcher hook.timeout*1000) clamped to
+ * [1500, 60000]. Do not pass this as timeoutMs — that is `_go`.
+ */
+export function getSessionEndHooksBoundMs(): number {
+  const agentSessionEnd = shouldAllowManagedHooksOnly()
+    ? []
+    : (getMainThreadAgentHooks()?.SessionEnd ?? [])
+  return computeSessionEndHooksBoundMs(sessionEndHooksTimeoutEnvMs(), [
+    ...(getHooksConfigFromSnapshot()?.SessionEnd ?? []),
+    ...agentSessionEnd,
+  ])
 }
 
 function executeInBackground({

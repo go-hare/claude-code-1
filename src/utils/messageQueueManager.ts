@@ -267,6 +267,22 @@ export function enqueue(command: QueuedCommand): void {
 }
 
 /**
+ * densable promoteToNow — send-now flushes the main-thread queue to priority now.
+ * Does not cancel tools; REPL abort + backgroundNow handles the running turn.
+ */
+export function promoteMainThreadQueueToNow(): number {
+  let n = 0
+  for (const cmd of commandQueue) {
+    if (!isMainThreadQueuedCommand(cmd)) continue
+    if (cmd.priority === 'now') continue
+    cmd.priority = 'now'
+    n++
+  }
+  if (n > 0) notifySubscribers()
+  return n
+}
+
+/**
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.

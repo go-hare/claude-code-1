@@ -13,7 +13,6 @@ import type { QuerySource } from 'src/constants/querySource.js'
 import { getSystemContext, getUserContext } from 'src/context.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { query } from 'src/query.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -78,6 +77,7 @@ import {
   normalizeMessages,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
+import { applySubagentModelForce } from './subagentModelForce.js'
 import { getStreamJsonStdoutWriter } from 'src/utils/streamJsonStdoutWriter.js'
 import { normalizeMessage } from 'src/utils/queryHelpers.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
@@ -121,6 +121,44 @@ import {
 import { resolveAgentTools } from './agentToolUtils.js'
 import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
+import {
+  filterInjectedMemoryFiles,
+  getClaudeMds,
+  getMemoryFiles,
+} from 'src/utils/claudemd.js'
+
+/**
+ * densable Fl — keep managed policy CLAUDE.md when omitClaudeMd is set on a
+ * non-built-in, non-policySettings agent. Built-in/policySettings drop claudeMd.
+ */
+async function omitClaudeMdUserContext(
+  agent: AgentDefinition,
+  userContext: { [k: string]: string },
+): Promise<{
+  userContext: { [k: string]: string }
+  managedInstructionsOnly: boolean
+}> {
+  const { claudeMd: _dropped, ...withoutClaudeMd } = userContext
+  const dropped: { [k: string]: string } = withoutClaudeMd
+  if (agent.source === 'built-in' || agent.source === 'policySettings') {
+    return { userContext: dropped, managedInstructionsOnly: false }
+  }
+  try {
+    const managed = getClaudeMds(
+      filterInjectedMemoryFiles(await getMemoryFiles()),
+      type => type === 'Managed',
+    )
+    if (managed === '') {
+      return { userContext: dropped, managedInstructionsOnly: false }
+    }
+    return {
+      userContext: { ...userContext, claudeMd: managed },
+      managedInstructionsOnly: true,
+    }
+  } catch {
+    return { userContext, managedInstructionsOnly: false }
+  }
+}
 
 /**
  * Initialize agent-specific MCP servers
@@ -444,13 +482,18 @@ export async function* runAgent({
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
 
   // Official $6e before getAgentModel — Explore firstParty cap-to-opus.
-  const resolvedAgentModel = getAgentModel(
+  // densable Rs — FORCE zeros frontmatter/tool model before jR.
+  const [forcedFrontmatter, forcedToolModel] = applySubagentModelForce(
     resolveAgentDefinitionModel(
       agentDefinition,
       toolUseContext.options.mainLoopModel,
     ),
-    toolUseContext.options.mainLoopModel,
     model,
+  )
+  const resolvedAgentModel = getAgentModel(
+    forcedFrontmatter,
+    toolUseContext.options.mainLoopModel,
+    forcedToolModel,
     permissionMode,
   )
 
@@ -494,20 +537,14 @@ export async function* runAgent({
     override?.systemContext ?? getSystemContext(),
   ])
 
-  // Read-only agents (Explore, Plan) don't act on commit/PR/lint rules from
-  // CLAUDE.md — the main agent has full context and interprets their output.
-  // Dropping claudeMd here saves ~5-15 Gtok/week across 34M+ Explore spawns.
-  // Explicit override.userContext from callers is preserved untouched.
-  // Kill-switch defaults true; flip tengu_slim_subagent_claudemd=false to revert.
-  const shouldOmitClaudeMd =
-    agentDefinition.omitClaudeMd &&
-    !override?.userContext &&
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_slim_subagent_claudemd', true)
-  const { claudeMd: _omittedClaudeMd, ...userContextNoClaudeMd } =
-    baseUserContext
-  const resolvedUserContext = shouldOmitClaudeMd
-    ? userContextNoClaudeMd
-    : baseUserContext
+  // densable Fl: omitClaudeMd drops user/project/local CLAUDE.md. Built-in and
+  // policySettings agents drop the whole claudeMd blob. Custom/plugin agents
+  // keep managed policy files (managedInstructionsOnly). Explicit
+  // override.userContext is preserved.
+  const { userContext: resolvedUserContext, managedInstructionsOnly } =
+    agentDefinition.omitClaudeMd && !override?.userContext
+      ? await omitClaudeMdUserContext(agentDefinition, baseUserContext)
+      : { userContext: baseUserContext, managedInstructionsOnly: false }
 
   // Explore/Plan are read-only search agents — the parent-session-start
   // gitStatus (up to 40KB, explicitly labeled stale) is dead weight. If they
@@ -997,6 +1034,7 @@ export async function* runAgent({
       maxTurns: maxTurns ?? agentDefinition.maxTurns,
       fallbackModel: firstFallbackModel(toolUseContext.options.fallbackModel),
       agentCacheTtlOverride: agentDefinition.cacheTtl,
+      ...(managedInstructionsOnly && { managedInstructionsOnly: true }),
     })) {
       onQueryProgress?.()
       // Forward subagent API request starts to parent's metrics display

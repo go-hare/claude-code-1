@@ -15,6 +15,7 @@ import {
   CLAUDE_OPUS_4_8_CONFIG,
   CLAUDE_OPUS_4_CONFIG,
   CLAUDE_OPUS_5_CONFIG,
+  CLAUDE_OPUS_5_5_CONFIG,
   CLAUDE_SONNET_4_5_CONFIG,
   CLAUDE_SONNET_4_6_CONFIG,
   CLAUDE_SONNET_4_CONFIG,
@@ -143,6 +144,18 @@ export function getOpus46CostTier(
     return COST_TIER_10_50
   }
   const shortName = toCostCanonical(model)
+  const opus55 = firstPartyNameToCanonical(CLAUDE_OPUS_5_5_CONFIG.firstParty)
+  if (shortName === opus55) {
+    // densable Qg — opus-5-5 fast ($8/$40)
+    return {
+      inputTokens: 8,
+      outputTokens: 40,
+      promptCacheWriteTokens: 10,
+      promptCacheWrite1hTokens: 16,
+      promptCacheReadTokens: 0.4,
+      webSearchRequests: 0.01,
+    }
+  }
   const opus5 = firstPartyNameToCanonical(CLAUDE_OPUS_5_CONFIG.firstParty)
   const opus48 = firstPartyNameToCanonical(CLAUDE_OPUS_4_8_CONFIG.firstParty)
   if (shortName === opus5 || shortName === opus48) {

@@ -1,14 +1,17 @@
 /**
  * Post-install/post-enable config prompt.
  *
- * Given a LoadedPlugin, checks both the top-level manifest.userConfig and the
- * channel-specific userConfig. Walks PluginOptionsDialog through each
- * unconfigured item, saving via the appropriate storage function. Calls
- * onDone('skipped') immediately if nothing needs filling.
+ * densable 2.1.283 `ci`: `ve()` `{storageV5,credentials}` then `sst`/`$Hn`
+ * (`getUnconfiguredOptions` / `getUnconfiguredChannels`) and step load/save
+ * via `q0`/`BVe`/`QDe`/`mtn`. Empty schema short-circuits to `{steps:[]}`.
  */
 
+import { Text } from '@anthropic/ink';
 import * as React from 'react';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { useSessionServices } from '../../context/sessionServices.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { errorMessage } from '../../utils/errors.js';
 import { re } from '../../utils/plugins/escapeSafeText.js';
 import { loadMcpServerUserConfig, saveMcpServerUserConfig } from '../../utils/plugins/mcpbHandler.js';
@@ -16,7 +19,7 @@ import { getUnconfiguredChannels, type UnconfiguredChannel } from '../../utils/p
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
 import {
   getUnconfiguredOptions,
-  loadPluginOptions,
+  loadPluginOptionsNw,
   type PluginOptionSchema,
   type PluginOptionValues,
   savePluginOptions,
@@ -47,8 +50,13 @@ type ConfigStep = {
   schema: PluginOptionSchema;
   /** Returns any already-saved values so PluginOptionsDialog can pre-fill and
    *  skip unchanged sensitive fields on reconfigure. */
-  load: () => PluginOptionValues | undefined;
-  save: (values: PluginOptionValues) => void;
+  load: () => PluginOptionValues | undefined | Promise<PluginOptionValues | undefined>;
+  save: (values: PluginOptionValues) => void | Promise<void>;
+};
+
+type LoadedSteps = {
+  steps: ConfigStep[];
+  error?: string;
 };
 
 type Props = {
@@ -62,90 +70,143 @@ type Props = {
   onDone: (outcome: 'configured' | 'skipped' | 'error', detail?: string) => void;
 };
 
-export function PluginOptionsFlow({ plugin, pluginId, onDone }: Props): React.ReactNode {
-  // Build the step list once at mount. Re-calling after a save would drop the
-  // item we just configured.
-  const [steps] = React.useState<ConfigStep[]>(() => {
-    const result: ConfigStep[] = [];
+function channelNeedsConfig(channel: { userConfig?: PluginOptionSchema }): boolean {
+  return Boolean(channel.userConfig && Object.keys(channel.userConfig).length > 0);
+}
 
-    // Top-level manifest.userConfig
-    const unconfigured = getUnconfiguredOptions(plugin);
-    if (Object.keys(unconfigured).length > 0) {
-      result.push({
-        key: 'top-level',
-        title: `Configure ${re(plugin.name)}`,
-        subtitle: 'Plugin options',
-        schema: unconfigured,
-        load: () => loadPluginOptions(pluginId),
-        save: values => savePluginOptions(pluginId, values, plugin.manifest.userConfig!),
-      });
-    }
+function LoadingSkip({ onDone }: { onDone: Props['onDone'] }): React.ReactNode {
+  const cancelled = React.useRef(false);
+  useKeybinding(
+    'confirm:no',
+    () => {
+      if (cancelled.current) return;
+      cancelled.current = true;
+      onDone('skipped');
+    },
+    { context: 'Settings' },
+  );
+  return <Text dimColor={true}>Loading…</Text>;
+}
 
-    // Per-channel userConfig (assistant-mode channels)
-    const channels: UnconfiguredChannel[] = getUnconfiguredChannels(plugin);
-    for (const channel of channels) {
-      result.push({
-        key: `channel:${channel.server}`,
-        title: `Configure ${re(channel.displayName)}`,
-        subtitle: `Plugin: ${re(plugin.name)}`,
-        schema: channel.configSchema,
-        load: () => loadMcpServerUserConfig(pluginId, channel.server) ?? undefined,
-        save: values => saveMcpServerUserConfig(pluginId, channel.server, values, channel.configSchema),
-      });
-    }
-
-    return result;
-  });
-
+function PluginOptionsWalk({ loaded, onDone }: { loaded: LoadedSteps; onDone: Props['onDone'] }): React.ReactNode {
   const [index, setIndex] = React.useState(0);
-
-  // Latest-ref: lets the effect close over the current onDone without
-  // re-running when the parent re-renders.
   const onDoneRef = React.useRef(onDone);
   onDoneRef.current = onDone;
 
-  // Nothing to configure → tell the caller and render nothing. Effect,
-  // not inline call: calling setState in the parent during our render
-  // is a React rules-of-hooks violation.
   React.useEffect(() => {
-    if (steps.length === 0) {
+    if (loaded.error) {
+      onDoneRef.current('error', loaded.error);
+      return;
+    }
+    if (loaded.steps.length === 0) {
       onDoneRef.current('skipped');
     }
-  }, [steps.length]);
+  }, [loaded.error, loaded.steps.length]);
 
-  if (steps.length === 0) {
+  if (loaded.error || loaded.steps.length === 0) {
     return null;
   }
 
-  const current = steps[index]!;
+  const current = loaded.steps[index]!;
+  const initialValues = React.use(React.useMemo(() => Promise.resolve().then(() => current.load()), [current.key]));
 
-  function handleSave(values: PluginOptionValues): void {
+  async function handleSave(values: PluginOptionValues): Promise<void> {
     try {
-      current.save(values);
+      await current.save(values);
     } catch (err) {
       onDone('error', errorMessage(err));
       return;
     }
     const next = index + 1;
-    if (next < steps.length) {
+    if (next < loaded.steps.length) {
       setIndex(next);
     } else {
       onDone('configured');
     }
   }
 
-  // key forces a remount when advancing to the next step — React would
-  // otherwise reuse the instance and carry PluginOptionsDialog's
-  // internal useState (field index, typed values) over.
   return (
     <PluginOptionsDialog
       key={current.key}
       title={current.title}
       subtitle={current.subtitle}
       configSchema={current.schema}
-      initialValues={current.load()}
-      onSave={handleSave}
+      initialValues={initialValues}
+      onSave={values => {
+        void handleSave(values);
+      }}
       onCancel={() => onDone('skipped')}
     />
+  );
+}
+
+function PluginOptionsFlowInner({ plugin, pluginId, onDone }: Props): React.ReactNode {
+  const { storageV5, credentials } = useSessionServices();
+  const hasSchema =
+    Object.keys(plugin.manifest.userConfig ?? {}).length > 0 ||
+    (plugin.manifest.channels ?? []).some(channelNeedsConfig);
+
+  // densable `ci`: no userConfig/channels → sync `{steps:[]}` (not a Promise).
+  if (!hasSchema) {
+    return <PluginOptionsWalk loaded={{ steps: [] }} onDone={onDone} />;
+  }
+
+  const loaded = React.use(
+    React.useMemo(
+      () =>
+        (async (): Promise<LoadedSteps> => {
+          try {
+            const result: ConfigStep[] = [];
+            const unconfigured = await getUnconfiguredOptions(plugin, credentials);
+            if (Object.keys(unconfigured).length > 0) {
+              result.push({
+                key: 'top-level',
+                title: `Configure ${re(plugin.name)}`,
+                subtitle: 'Plugin options',
+                schema: unconfigured,
+                load: () => loadPluginOptionsNw(pluginId, credentials),
+                save: values =>
+                  savePluginOptions(pluginId, values, plugin.manifest.userConfig!, storageV5, credentials),
+              });
+            }
+            const channels: UnconfiguredChannel[] = await getUnconfiguredChannels(plugin, credentials);
+            for (const channel of channels) {
+              result.push({
+                key: `channel:${channel.server}`,
+                title: `Configure ${re(channel.displayName)}`,
+                subtitle: `Plugin: ${re(plugin.name)}`,
+                schema: channel.configSchema,
+                load: async () => (await loadMcpServerUserConfig(pluginId, channel.server, credentials)) ?? undefined,
+                save: values =>
+                  saveMcpServerUserConfig(
+                    pluginId,
+                    channel.server,
+                    values,
+                    channel.configSchema,
+                    storageV5,
+                    credentials,
+                  ),
+              });
+            }
+            return { steps: result };
+          } catch (err) {
+            logForDebugging(`Failed to read saved plugin options (${pluginId}): ${errorMessage(err)}`, {
+              level: 'error',
+            });
+            return { steps: [], error: errorMessage(err) };
+          }
+        })(),
+      [plugin, pluginId, credentials, storageV5],
+    ),
+  );
+
+  return <PluginOptionsWalk loaded={loaded} onDone={onDone} />;
+}
+
+export function PluginOptionsFlow(props: Props): React.ReactNode {
+  return (
+    <React.Suspense fallback={<LoadingSkip onDone={props.onDone} />}>
+      <PluginOptionsFlowInner {...props} />
+    </React.Suspense>
   );
 }

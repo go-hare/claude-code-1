@@ -4390,6 +4390,13 @@ function runHeadlessStreaming(
                   error_code:
                     'not_allowed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 })
+              } else if (decision.analytics === 'denied_by_managed_settings') {
+                logEvent('tengu_feature_bad', {
+                  feature_name:
+                    'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code:
+                    'denied_by_managed_settings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
               }
               sendControlResponseError(msg, decision.error)
               continue

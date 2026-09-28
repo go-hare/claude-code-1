@@ -102,6 +102,9 @@ describe('orgDefaultModel', () => {
     expect(getDefaultModelAttributionBadge('entitlement')).toBe(
       ' · Set by your organization',
     )
+    expect(getDefaultModelAttributionBadge('managed_deny')).toBe(
+      ' · Set by your organization',
+    )
     expect(getDefaultModelAttributionBadge('env')).toBe(
       ' · Set by ANTHROPIC_DEFAULT_MODEL',
     )

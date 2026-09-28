@@ -2,9 +2,10 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { chordToString } from '@anthropic/ink'
 import { loadKeybindingsSync } from './loadUserBindings.js'
 import { getBindingDisplayText } from './resolver.js'
-import type { KeybindingContextName } from './types.js'
+import type { KeybindingContextName, ParsedKeystroke } from './types.js'
 
 // TODO(keybindings-migration): Remove fallback parameter after migration is
 // complete and we've confirmed no 'keybinding_fallback_used' events are being
@@ -60,4 +61,34 @@ export function getShortcutDisplay(
     return fallback
   }
   return resolved
+}
+
+/**
+ * densable Beo — skip chords that look like newline (super, or enter+ctrl/shift)
+ * so Windows Terminal shows ctrl+x ctrl+s instead of ctrl+enter.
+ */
+export function isNewlineLikeSendNowChord(chord: ParsedKeystroke[]): boolean {
+  return chord.some(
+    stroke =>
+      stroke.super || (stroke.key === 'enter' && (stroke.ctrl || stroke.shift)),
+  )
+}
+
+/**
+ * densable Feo — pick a send-now hint chord.
+ * When skipNewlineLike is true (WinTerm / WT_SESSION), prefer the last chord
+ * that is not newline-like.
+ */
+export function formatSendNowHint(
+  bindings = loadKeybindingsSync(),
+  skipNewlineLike = Boolean(process.env.WT_SESSION),
+): string {
+  const chords = bindings
+    .filter(b => b.action === 'chat:sendNow' && b.context === 'Chat')
+    .map(b => b.chord)
+  const chosen =
+    (skipNewlineLike
+      ? chords.findLast(chord => !isNewlineLikeSendNowChord(chord))
+      : undefined) ?? chords.at(-1)
+  return chosen ? chordToString(chosen) : ''
 }

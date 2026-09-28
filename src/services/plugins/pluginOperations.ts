@@ -1130,6 +1130,8 @@ export type PluginUpdateCommandSourceOptions = {
    */
   onEntryHelperDisclosure?: (
     disclosure: string,
+    helper?: { command: string; archiveUrl: string },
+    pluginId?: string,
   ) => Promise<'accepted' | 'declined' | 'unconfirmed'>
   /**
    * SEA pane `_in(..., {consentedEntryHelper: pinned()})`. CLI update uses
@@ -1421,6 +1423,8 @@ async function performPluginUpdate({
         if (options?.onEntryHelperDisclosure) {
           const verdict = await options.onEntryHelperDisclosure(
             formatEntryHelperDisclosure(helper),
+            helper,
+            pluginId,
           )
           if (verdict !== 'accepted') {
             return {

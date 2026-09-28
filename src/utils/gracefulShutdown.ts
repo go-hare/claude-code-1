@@ -584,10 +584,13 @@ export async function gracefulShutdown(
   // failsafe can scale with it. Without this, a user-configured 10s hook
   // budget is silently truncated by the 5s failsafe (gh-32712 follow-up).
   // Import AFTER terminal cleanup so module load latency cannot leak mouse bytes.
-  const { executeSessionEndHooks, getSessionEndHookTimeoutMs } = await import(
-    './hooks.js'
-  )
+  const {
+    executeSessionEndHooks,
+    getSessionEndHookTimeoutMs,
+    getSessionEndHooksBoundMs,
+  } = await import('./hooks.js')
   const sessionEndTimeoutMs = getSessionEndHookTimeoutMs()
+  const sessionEndBoundMs = getSessionEndHooksBoundMs()
 
   // Failsafe: guarantee process exits even if cleanup hangs (e.g., MCP connections).
   // Runs cleanupTerminalModes first so a hung cleanup doesn't leave the terminal dirty.
@@ -611,7 +614,7 @@ export async function gracefulShutdown(
     },
     Math.max(
       5000,
-      sessionEndTimeoutMs + 3500,
+      sessionEndBoundMs + 3500,
       drainBudgetMs + FAILSAFE_DRAIN_HEADROOM_MS,
     ),
     exitCode,
@@ -659,13 +662,12 @@ export async function gracefulShutdown(
     clearTimeout(cleanupTimeoutId)
   }
 
-  // Execute SessionEnd hooks. Bound both the per-hook default timeout and the
-  // overall execution via a single budget (CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS,
-  // default 1.5s). hook.timeout in settings is respected up to this cap.
+  // Execute SessionEnd hooks. Per-hook default is `_go` (env ?? 1500);
+  // overall AbortSignal is `Kfe` (env if set, else matcher timeout clamp).
   try {
     await executeSessionEndHooks(reason, {
       ...options,
-      signal: AbortSignal.timeout(sessionEndTimeoutMs),
+      signal: AbortSignal.timeout(sessionEndBoundMs),
       timeoutMs: sessionEndTimeoutMs,
     })
   } catch {

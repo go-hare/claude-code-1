@@ -221,6 +221,13 @@ export function supportsPersistence(
  */
 export function persistPermissionUpdate(update: PermissionUpdate): void {
   if (!supportsPersistence(update.destination)) return
+  // official nf: setMode bypassPermissions is session-scoped
+  if (update.type === 'setMode' && update.mode === 'bypassPermissions') {
+    logForDebugging(
+      `setMode:'bypassPermissions' is session-scoped; not persisting as defaultMode to ${update.destination}`,
+    )
+    return
+  }
 
   logForDebugging(
     `Persisting permission update: ${update.type} to source '${update.destination}'`,
