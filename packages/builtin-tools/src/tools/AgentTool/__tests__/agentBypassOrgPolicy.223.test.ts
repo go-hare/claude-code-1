@@ -23,5 +23,9 @@ describe('densable 2.1.223 agent bypassPermissions org policy', () => {
     expect(src).toContain(
       'Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode',
     )
+    expect(src).toContain('isEvalConfined')
+    expect(src).toContain(
+      'inside a confined evaluation run; keeping parent mode',
+    )
   })
 })

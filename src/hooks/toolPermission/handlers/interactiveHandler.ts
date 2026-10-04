@@ -55,6 +55,13 @@ import {
   isPermissionHookReprompt,
 } from '../PermissionContext.js'
 import { notifyBridgeFromDooResult } from '../notifyBridgeFromDooResult.js'
+import {
+  blockedOutsideReadUserChoiceMessage,
+  getOutsideReadPrompt,
+  markSeenAutoModeOutsideReadPrompt,
+  outsideReadAskAgainDecision,
+  persistBlockReadsOutsideWorkingDirectories,
+} from '../../../utils/permissions/outsideReads.js'
 
 type InteractivePermissionParams = {
   ctx: PermissionContext
@@ -166,7 +173,15 @@ function handleInteractivePermission(
     channelCallbacks,
   } = params
 
-  const { resolve: resolveOnce, isResolved, claim } = createResolveOnce(resolve)
+  // gold USt: every winning resolve closeFor's the yBt latch (not DualInk-only).
+  const {
+    resolve: resolveOnce,
+    isResolved,
+    claim,
+  } = createResolveOnce((decision: PermissionDecision) => {
+    getOutsideReadPrompt().closeFor(ctx.toolUseID)
+    resolve(decision)
+  })
   let userInteracted = false
   let checkmarkTransitionTimer: ReturnType<typeof setTimeout> | undefined
   // Hoisted so onDismissCheckmark (Esc during checkmark window) can also
@@ -490,9 +505,18 @@ function handleInteractivePermission(
           // densable W() settles the turn; tip queue must clear or REPL keeps
           // a phantom tool-permission after typing-suppress Esc abort.
           ctx.removeFromQueue()
+          const outsideReadPrompt = getOutsideReadPrompt()
+          outsideReadPrompt.closeFor(ctx.toolUseID)
 
           switch (result.behavior) {
             case 'allow': {
+              if (
+                toolUseConfirm.permissionResult.behavior === 'ask' &&
+                toolUseConfirm.permissionResult.offersBlockOutsideReads === true
+              ) {
+                outsideReadPrompt.markAnswered()
+                markSeenAutoModeOutsideReadPrompt()
+              }
               resolveOnce(
                 await ctx.handleUserAllow(
                   (result.updatedInput as Record<string, unknown>) ??
@@ -506,7 +530,6 @@ function handleInteractivePermission(
               return
             }
             case 'deny': {
-              popQueuedCommandsOnPermissionDeny()
               ctx.logDecision(
                 {
                   decision: 'reject',
@@ -517,6 +540,41 @@ function handleInteractivePermission(
                 },
                 { permissionPromptStartTimeMs, input: displayInput },
               )
+              if (result.blockOutsideReads === true) {
+                popQueuedCommandsOnPermissionDeny()
+                const persisted = persistBlockReadsOutsideWorkingDirectories({
+                  setSessionToolPermissionContext:
+                    ctx.toolUseContext.setSessionToolPermissionContext,
+                })
+                resolveOnce({
+                  behavior: 'deny',
+                  message: blockedOutsideReadUserChoiceMessage({
+                    saveError: persisted.error?.message,
+                    sandboxRefreshed: persisted.sandboxRefreshed,
+                  }),
+                  decisionReason: {
+                    type: 'other',
+                    reason:
+                      'Reads outside the working directories are blocked (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.',
+                  },
+                })
+                return
+              }
+              // official W(): DualInk deny without blockOutsideReads, while
+              // offersBlockOutsideReads, is ask-again — not cancelAndAbort.
+              if (
+                toolUseConfirm.permissionResult.behavior === 'ask' &&
+                toolUseConfirm.permissionResult.offersBlockOutsideReads === true
+              ) {
+                resolveOnce(
+                  outsideReadAskAgainDecision({
+                    feedback: result.feedback,
+                    contentBlocks: result.contentBlocks as never,
+                  }),
+                )
+                return
+              }
+              popQueuedCommandsOnPermissionDeny()
               resolveOnce(
                 ctx.cancelAndAbort(
                   result.feedback,

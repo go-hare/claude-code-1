@@ -245,6 +245,14 @@ interface RetryOptions {
    * regardless of which request mode hit the overload.
    */
   initialConsecutive529Errors?: number
+  /**
+   * densable `r.onError` @184899103.
+   * Classifier returns a unique `retry:…` token once; withRetry latches it
+   * in a Set and immediately continues (no delay). Duplicate tokens are ignored.
+   */
+  onError?: (
+    error: unknown,
+  ) => string | null | undefined | Promise<string | null | undefined>
 }
 
 export class CannotRetryError extends Error {
@@ -352,6 +360,8 @@ export async function* withRetry<T>(
   let streamNoResponseRetryCount = 0
   // densable y3b `h` — report mTLS material failure analytics at most once
   let mtlsReloadFailureReported = false
+  // densable `Fe=new Set` @184899103 — each onError retry token fires once.
+  const consumedOnErrorRetryTokens = new Set<string>()
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
       throw new APIUserAbortError()
@@ -508,6 +518,18 @@ export async function* withRetry<T>(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
       )
+
+      // densable `await r.onError?.(St)` @184899103 — unique token, `tt--`, continue.
+      const onErrorToken = await options.onError?.(error)
+      if (onErrorToken && !consumedOnErrorRetryTokens.has(onErrorToken)) {
+        consumedOnErrorRetryTokens.add(onErrorToken)
+        logForDebugging(
+          `API onError retry (${onErrorToken}) attempt ${attempt}/${maxRetries + 1}`,
+          { level: 'warn' },
+        )
+        attempt--
+        continue
+      }
 
       // densable 2.1.243 #22: first-byte StreamNoResponse retries once (UYo=1).
       if (

@@ -46,6 +46,11 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
         : {}),
       'ctrl+shift+o': 'app:toggleTeammatePreview',
       'ctrl+r': 'history:search',
+      // densable 2.1.283 uncommitted panel list window (bX=8)
+      'ctrl+up': 'app:diffFileListUp',
+      'ctrl+down': 'app:diffFileListDown',
+      'meta+up': 'app:diffFileListUp',
+      'meta+down': 'app:diffFileListDown',
       // File navigation. cmd+ bindings only fire on kitty-protocol terminals;
       // ctrl+shift is the portable fallback.
       ...(feature('QUICK_SEARCH')
@@ -57,6 +62,13 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
           }
         : {}),
       ...(feature('TERMINAL_PANEL') ? { 'meta+j': 'app:toggleTerminal' } : {}),
+    },
+  },
+  {
+    context: 'DiffPanel',
+    bindings: {
+      // densable 2.1.283 `{context:"DiffPanel",bindings:{"ctrl+x b":"app:cycleDiffBase"}}`
+      'ctrl+x b': 'app:cycleDiffBase',
     },
   },
   {

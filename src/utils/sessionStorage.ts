@@ -58,6 +58,7 @@ import {
   type LogOption,
   type PersistedWorktreeSession,
   type RelocatedEntry,
+  type CostStateEntry,
   type SerializedMessage,
   sortLogs,
   type TranscriptMessage,
@@ -83,13 +84,9 @@ import {
   isValidStoragePathSegment,
 } from './sessionNameJobSidecar.js'
 import { isHoverRestOn } from './storageV5/hoverRestPin.js'
-import {
-  isPrecompactSkipDisabled,
-  shouldSkipPromptHistory,
-} from './residualFinalEnvGates.js'
+import { isPrecompactSkipDisabled } from './residualFinalEnvGates.js'
 import {
   getPersistenceSuppressCause,
-  isNestedMarkerSuppressingPersistence,
   isPersistenceSuppressed,
 } from './sessionPersistenceStatus.js'
 import { repointTaskOutputSymlinks } from './task/diskOutput.js'
@@ -131,7 +128,6 @@ import {
   SKIP_PRECOMPACT_THRESHOLD,
   slugCollisionGuardFoldsCase,
 } from './sessionStoragePortable.js'
-import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
@@ -271,15 +267,10 @@ export async function appendObserverRef(input: {
 }
 
 export function isTranscriptPersistenceDisabled(): boolean {
-  const allowTestPersistence = isEnvTruthy(
-    process.env.TEST_ENABLE_SESSION_PERSISTENCE,
-  )
-  return (
-    (getNodeEnv() === 'test' && !allowTestPersistence) ||
-    getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
-    isSessionPersistenceDisabled() ||
-    shouldSkipPromptHistory()
-  )
+  // densable 2.1.283 wZt/Gsn @ 186828148 — test_env | explicit_disable |
+  // skip_prompt_history | nested_marker. cleanupPeriodDays is retention
+  // only (gold schema: "Never … disables writes").
+  return getPersistenceSuppressCause() !== null
 }
 
 function getEntrypoint(): string | undefined {
@@ -334,6 +325,16 @@ export function resetProjectForTesting(): void {
 
 export function setSessionFileForTesting(path: string): void {
   getProject().setSessionFile(path)
+}
+
+/**
+ * densable Bbr — register a stdout SessionStore transcript_mirror callback.
+ * Fired after each successful local transcript appendToFile.
+ */
+export function addTranscriptMirror(
+  cb: (filePath: string, entries: Entry[]) => void,
+): void {
+  getProject().addMirror(cb)
 }
 
 type InternalEventWriter = (
@@ -931,6 +932,8 @@ class Project {
   private activeDrain: Promise<void> | null = null
   private FLUSH_INTERVAL_MS = 100
   private readonly MAX_CHUNK_BYTES = 100 * 1024 * 1024
+  /** densable Project.mirrors — SessionStore transcript_mirror callbacks. */
+  private mirrors: Array<(filePath: string, entries: Entry[]) => void> = []
 
   constructor() {}
 
@@ -943,6 +946,27 @@ class Project {
     this.activeDrain = null
     this.writeQueues = new Map()
     this.existingSessionFiles = new Map()
+    // densable _resetFlushState also clears mirrors[]
+    this.mirrors = []
+  }
+
+  addMirror(cb: (filePath: string, entries: Entry[]) => void): void {
+    this.mirrors.push(cb)
+  }
+
+  fireMirror(filePath: string, entries: Entry[]): void {
+    for (const mirror of this.mirrors) {
+      try {
+        mirror(filePath, entries)
+      } catch (err) {
+        logForDebugging(
+          `[SessionMirror] mirror failed for ${filePath}: ${err}`,
+          {
+            level: 'error',
+          },
+        )
+      }
+    }
   }
 
   private incrementPendingWrites(): void {
@@ -1033,6 +1057,8 @@ class Project {
 
       let content = ''
       const resolvers: Array<() => void> = []
+      const mirrored: Entry[] | undefined =
+        this.mirrors.length > 0 ? [] : undefined
 
       for (const { entry, resolve } of batch) {
         const line = jsonStringify(entry) + '\n'
@@ -1040,6 +1066,10 @@ class Project {
         if (content.length + line.length >= this.MAX_CHUNK_BYTES) {
           // Flush chunk and resolve its entries before starting a new one
           await this.appendToFile(filePath, content)
+          if (mirrored) {
+            this.fireMirror(filePath, mirrored.slice())
+            mirrored.length = 0
+          }
           for (const r of resolvers) {
             r()
           }
@@ -1049,10 +1079,14 @@ class Project {
 
         content += line
         resolvers.push(resolve)
+        mirrored?.push(entry)
       }
 
       if (content.length > 0) {
         await this.appendToFile(filePath, content)
+        if (mirrored) {
+          this.fireMirror(filePath, mirrored)
+        }
         for (const r of resolvers) {
           r()
         }
@@ -1321,6 +1355,12 @@ class Project {
   }
 
   async flush(): Promise<void> {
+    // SDK/print result can race the first user/assistant write. If the
+    // session pointer is still null, drain pendingEntries to disk so
+    // get_session_info can find a JSONL with an extractable summary.
+    if (this.sessionFile === null && this.pendingEntries.length > 0) {
+      await this.materializeSessionFile()
+    }
     // Cancel pending timer
     if (this.flushTimer) {
       clearTimeout(this.flushTimer)
@@ -1433,25 +1473,16 @@ class Project {
   }
 
   /**
-   * True when test env / cleanupPeriodDays=0 / --no-session-persistence /
-   * CLAUDE_CODE_SKIP_PROMPT_HISTORY should suppress all transcript writes.
-   * Shared guard for appendEntry and materializeSessionFile so both skip
-   * consistently. The env var is set by tmuxSocket.ts so Tungsten-spawned
-   * test sessions don't pollute the user's --resume list.
+   * True when densable Gsn (test_env | explicit_disable | skip_prompt_history |
+   * nested_marker) should suppress all transcript writes. Shared guard for
+   * appendEntry and materializeSessionFile so both skip consistently. The env
+   * var is set by tmuxSocket.ts so Tungsten-spawned test sessions don't pollute
+   * the user's --resume list. cleanupPeriodDays is retention, not a write skip.
    */
   private shouldSkipPersistence(): boolean {
-    const allowTestPersistence = isEnvTruthy(
-      process.env.TEST_ENABLE_SESSION_PERSISTENCE,
-    )
-    // densable Gsn: test_env | explicit_disable | skip_prompt_history | nested_marker
-    // + local cleanupPeriodDays===0 (not in densable Gsn, retained)
-    return (
-      (getNodeEnv() === 'test' && !allowTestPersistence) ||
-      getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
-      isSessionPersistenceDisabled() ||
-      shouldSkipPromptHistory() ||
-      isNestedMarkerSuppressingPersistence()
-    )
+    // densable 2.1.283 wZt/Gsn @ 186828148 — same four causes as
+    // getPersistenceSuppressCause. cleanupPeriodDays is retention only.
+    return getPersistenceSuppressCause() !== null
   }
 
   /**
@@ -5663,6 +5694,8 @@ export async function loadTranscriptFile(
   bridgeOwnerAccountUuids: Map<UUID, string>
   bridgeOwnerOrganizationUuids: Map<UUID, string>
   historySuppressed: Set<UUID>
+  /** densable costStates — last-wins `type:"cost-state"` per sessionId. */
+  costStates: Map<UUID, CostStateEntry>
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -5686,6 +5719,7 @@ export async function loadTranscriptFile(
   const bridgeOwnerAccountUuids = new Map<UUID, string>()
   const bridgeOwnerOrganizationUuids = new Map<UUID, string>()
   const historySuppressed = new Set<UUID>()
+  const costStates = new Map<UUID, CostStateEntry>()
   const fileHistorySnapshots = new Map<UUID, FileHistorySnapshotMessage>()
   const attributionSnapshots = new Map<UUID, AttributionSnapshotMessage>()
   const contentReplacements = new Map<UUID, ContentReplacementRecord[]>()
@@ -5822,6 +5856,8 @@ export async function loadTranscriptFile(
           )
         } else if (entry.type === 'history-suppression' && entry.sessionId) {
           historySuppressed.add(entry.sessionId)
+        } else if (entry.type === 'cost-state' && entry.sessionId) {
+          costStates.set(entry.sessionId as UUID, entry)
         }
       }
     }
@@ -5939,6 +5975,8 @@ export async function loadTranscriptFile(
         )
       } else if (entry.type === 'history-suppression' && entry.sessionId) {
         historySuppressed.add(entry.sessionId)
+      } else if (entry.type === 'cost-state' && entry.sessionId) {
+        costStates.set(entry.sessionId as UUID, entry)
       }
     }
   } catch {
@@ -6065,6 +6103,7 @@ export async function loadTranscriptFile(
     bridgeOwnerAccountUuids,
     bridgeOwnerOrganizationUuids,
     historySuppressed,
+    costStates,
   }
 }
 

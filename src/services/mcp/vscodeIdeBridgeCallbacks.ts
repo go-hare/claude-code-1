@@ -10,6 +10,7 @@
  * - `hUe` → `isClaudeVscodeHostSession`
  */
 
+import { readMergedClientData } from 'src/cli/clientDataUrl.js'
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isModelAllowed } from 'src/utils/model/modelAllowlist.js'
@@ -54,7 +55,7 @@ export function isRefusalFallbackLaneEnabled(
  */
 function readClientDataMeadowLantern(): boolean {
   try {
-    const cache = getGlobalConfig().clientDataCache
+    const cache = readMergedClientData()
     if (!cache || typeof cache !== 'object') return false
     return cache.meadow_lantern === true
   } catch {

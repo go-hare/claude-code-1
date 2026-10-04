@@ -74,7 +74,6 @@ const SubscribePRTool = feature('KAIROS_GITHUB_WEBHOOKS')
       .SubscribePRTool
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-import { TaskOutputTool } from '@claude-code/builtin-tools/tools/TaskOutputTool/TaskOutputTool.js'
 import { WebSearchTool } from '@claude-code/builtin-tools/tools/WebSearchTool/WebSearchTool.js'
 import { TodoWriteTool } from '@claude-code/builtin-tools/tools/TodoWriteTool/TodoWriteTool.js'
 import { ExitPlanModeV2Tool } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
@@ -241,7 +240,6 @@ export function getToolsForDefaultPreset(): string[] {
 export function getAllBaseTools(): Tools {
   return [
     AgentTool,
-    TaskOutputTool,
     BashTool,
     // Ant-native builds have bfs/ugrep embedded in the bun binary (same ARGV0
     // trick as ripgrep). When available, find/grep in Claude's shell are aliased
@@ -333,10 +331,13 @@ export function filterToolsByDenyRules<
   },
 >(tools: readonly T[], permissionContext: ToolPermissionContext): T[] {
   // Official 2.1.x: also strip org-blocked MCP tools (effectiveMaxPermission).
+  // StructuredOutput is appended after getTools for --json-schema / SDK
+  // json_schema and must survive `--tools ""` deny-all (densable 2.1.283).
   return tools.filter(
     tool =>
-      !getDenyRuleForTool(permissionContext, tool) &&
-      tool.mcpInfo?.effectiveMaxPermission !== 'blocked',
+      tool.name === SYNTHETIC_OUTPUT_TOOL_NAME ||
+      (!getDenyRuleForTool(permissionContext, tool) &&
+        tool.mcpInfo?.effectiveMaxPermission !== 'blocked'),
   )
 }
 

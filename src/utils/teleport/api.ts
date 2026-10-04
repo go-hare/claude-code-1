@@ -1,6 +1,18 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { randomUUID } from 'crypto'
+import { extractBridge403Resource } from 'src/bridge/codeSessionApi.js'
+import { extractErrorDetail } from 'src/bridge/debugUtils.js'
+import {
+  getTrustedDeviceToken,
+  isTrustedDeviceGateEnabled,
+  recoverTrustedDeviceTokenAfterUntrusted,
+} from 'src/bridge/trustedDevice.js'
 import { getOauthConfig } from 'src/constants/oauth.js'
+import { isViolinWoodEnabled } from 'src/cli/violinWood.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
 import z from 'zod/v4'
 import {
@@ -146,6 +158,10 @@ export type SessionResource = {
   session_context: SessionContext
   /** densable Q_r `startup_failure` — j8(last_init_error) or provision failed. */
   startup_failure?: string
+  /** densable Yo/EXn `bound_device_uuid` — kXn attach binding. */
+  bound_device_uuid?: string
+  /** densable Ztr @200266163 — `S(session.tags)`. */
+  tags?: string[]
 }
 
 export type ListSessionsResponse = {
@@ -360,6 +376,7 @@ export function ccrSessionToResource(
     created_at: string
     updated_at?: string
     last_event_at?: string
+    bound_device_uuid?: string
     config?: {
       sources?: SessionContextSource[]
       outcomes?: Outcome[] | null
@@ -401,6 +418,7 @@ export function ccrSessionToResource(
       },
       opts?.serverNow ?? Date.now(),
     ),
+    ...(raw.bound_device_uuid && { bound_device_uuid: raw.bound_device_uuid }),
   }
 }
 
@@ -823,4 +841,294 @@ export async function reportClientPresence(
     logForDebugging(`[reportClientPresence] Error: ${errorMessage(error)}`)
     return null
   }
+}
+
+/** densable `Ve` — header name only; token comes from existing `getTrustedDeviceToken`. */
+export const TRUSTED_DEVICE_TOKEN_HEADER = 'X-Trusted-Device-Token'
+
+/** densable `nht` — default `/events` page size for hPe/pBe. */
+export const LATEST_CLOUD_EVENTS_PAGE = 5
+
+/**
+ * densable `MWt`. 403 `untrusted_device` after optional device-token renew.
+ * No Far/device-key store — wrap existing OAuth + trusted-device header host.
+ */
+export class UntrustedDeviceError extends Error {
+  constructor(
+    message = 'the service does not accept a trusted-device token from this computer',
+  ) {
+    super(message)
+    this.name = 'UntrustedDeviceError'
+  }
+}
+
+export type CloudEventsSession = {
+  sessionUrl: string
+  headers: Record<string, string>
+  headersForRenewedDeviceToken?: (
+    token: string,
+  ) => Promise<Record<string, string>>
+}
+
+export type CloudSessionEventRow = {
+  payload: unknown
+  createdAt: unknown
+  source: unknown
+  sequenceNum: number | undefined
+}
+
+export type CloudSessionEventsPage = {
+  events: CloudSessionEventRow[]
+  firstId: string | null
+  hasMore: boolean
+  droppedRows: number
+  newestSequenceNum: number | undefined
+}
+
+type CloudEventsHttpRow = {
+  payload?: unknown
+  created_at?: unknown
+  source?: unknown
+  sequence_num?: unknown
+}
+
+type CloudEventsHttpBody = {
+  data?: CloudEventsHttpRow[]
+  next_cursor?: string | null
+}
+
+/** densable `ESn`. */
+function eventSequenceNum(
+  row: CloudEventsHttpRow | undefined,
+): number | undefined {
+  const n =
+    row?.sequence_num === undefined
+      ? undefined
+      : parseInt(String(row.sequence_num), 10)
+  return n !== undefined && !Number.isNaN(n) ? n : undefined
+}
+
+/** densable `O5e` / `DV` — OAuth headers plus existing trusted-device token. */
+async function oauthHeadersWithTrustedDevice(
+  accessToken: string,
+): Promise<Record<string, string>> {
+  const headers = { ...getOAuthHeaders(accessToken) }
+  const token = getTrustedDeviceToken()
+  if (token) {
+    headers[TRUSTED_DEVICE_TOKEN_HEADER] = token
+  }
+  return headers
+}
+
+/**
+ * densable `PJ` @202122311 — session URL + OAuth headers for GET `/events`.
+ * `recoverDeviceProof` only attaches a header-rewriter; no device-key store.
+ */
+export async function openCloudEventsSession(
+  sessionId: string,
+  _credentials?: unknown,
+  { recoverDeviceProof = false }: { recoverDeviceProof?: boolean } = {},
+): Promise<CloudEventsSession> {
+  if (getAPIProvider() !== 'firstParty') {
+    throw new Error(
+      'Cloud sessions are only available on the first-party Anthropic API provider.',
+    )
+  }
+  const { accessToken } = await prepareApiRequest()
+  const sessionUrl = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}`
+  const headers = await oauthHeadersWithTrustedDevice(accessToken)
+  if (!recoverDeviceProof) {
+    return { sessionUrl, headers }
+  }
+  return {
+    sessionUrl,
+    headers,
+    headersForRenewedDeviceToken: async token => ({
+      ...getOAuthHeaders((await prepareApiRequest()).accessToken),
+      [TRUSTED_DEVICE_TOKEN_HEADER]: token,
+    }),
+  }
+}
+
+/**
+ * densable `Le` — GET `${sessionUrl}/events` (15s, never-throw status, catch→null).
+ */
+export function getCloudSessionEventsPage(
+  sessionUrl: string,
+  headers: Record<string, string>,
+  params: Record<string, unknown>,
+  maxContentLength?: number,
+): Promise<AxiosResponse<CloudEventsHttpBody> | null> {
+  return axios
+    .get<CloudEventsHttpBody>(`${sessionUrl}/events`, {
+      headers,
+      params,
+      timeout: 15000,
+      validateStatus: () => true,
+      maxContentLength: maxContentLength ?? -1,
+    })
+    .catch(() => null)
+}
+
+/**
+ * densable `ypn` wrap — retry 403 `untrusted_device` via leftover `Xle`
+ * (`recoverTrustedDeviceTokenAfterUntrusted`). No Far key store.
+ */
+async function renewCloudEventsAfter403(
+  response: AxiosResponse<CloudEventsHttpBody>,
+  currentToken: string | undefined,
+  retry: (token: string) => Promise<AxiosResponse<CloudEventsHttpBody> | null>,
+): Promise<AxiosResponse<CloudEventsHttpBody>> {
+  if (response.status !== 403) return response
+  if (!(await isViolinWoodEnabled().catch(() => false))) return response
+  const reason = extractBridge403Resource(
+    response.data,
+    extractErrorDetail(response.data),
+  )
+  if (reason !== 'untrusted_device') return response
+  const renewed = await recoverTrustedDeviceTokenAfterUntrusted(currentToken)
+  if (!renewed) return response
+  const retried = await retry(renewed).catch(() => undefined)
+  return retried ?? response
+}
+
+/**
+ * densable `We` — GET events, optional 403 device-token renew, reverse `data`.
+ */
+export async function loadCloudSessionEvents(
+  session: CloudEventsSession,
+  params: Record<string, unknown>,
+  label: string,
+  maxContentLength?: number,
+): Promise<CloudSessionEventsPage | null> {
+  let response = await getCloudSessionEventsPage(
+    session.sessionUrl,
+    session.headers,
+    params,
+    maxContentLength,
+  )
+  const renew = session.headersForRenewedDeviceToken
+  if (response?.status === 403 && renew !== undefined) {
+    let noAnswer = false
+    const retried = await renewCloudEventsAfter403(
+      response,
+      session.headers[TRUSTED_DEVICE_TOKEN_HEADER],
+      async token => {
+        const next = await renew(token).then(
+          headers =>
+            getCloudSessionEventsPage(
+              session.sessionUrl,
+              headers,
+              params,
+              maxContentLength,
+            ),
+          () => null,
+        )
+        if (next === null) {
+          noAnswer = true
+          throw new Error('no answer')
+        }
+        return next
+      },
+    )
+    if (noAnswer) {
+      logForDebugging(`[${label}] no answer after renewing the device token`)
+      return null
+    }
+    const untrusted = extractBridge403Resource(
+      retried.data,
+      extractErrorDetail(retried.data),
+    )
+    if (
+      retried.status === 403 &&
+      isTrustedDeviceGateEnabled() &&
+      untrusted === 'untrusted_device'
+    ) {
+      logForDebugging(`[${label}] HTTP 403 untrusted_device`)
+      throw new UntrustedDeviceError()
+    }
+    response = retried
+  }
+  if (!response || response.status !== 200) {
+    logForDebugging(`[${label}] HTTP ${response?.status ?? 'error'}`)
+    return null
+  }
+  if (response.data === null || typeof response.data !== 'object') {
+    logForDebugging(`[${label}] non-object 200 body`)
+    return null
+  }
+  const rows = Array.isArray(response.data.data) ? response.data.data : []
+  const events: CloudSessionEventRow[] = []
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (row?.payload) {
+      events.push({
+        payload: row.payload,
+        createdAt: row.created_at,
+        source: row.source,
+        sequenceNum: eventSequenceNum(row),
+      })
+    }
+  }
+  const firstId = response.data.next_cursor ?? null
+  return {
+    events,
+    firstId,
+    hasMore: firstId !== null,
+    droppedRows: rows.length - events.length,
+    newestSequenceNum: eventSequenceNum(rows[0]),
+  }
+}
+
+/**
+ * densable `hPe` @202123784 — We `{limit, sort_order:"desc"}` + assistant_history_load.
+ * Accepts a PJ handle or session id (cloudSession `fetchLatestCloudEvents` host).
+ */
+export async function fetchLatestCloudEvents(
+  session: CloudEventsSession | string,
+  limit = LATEST_CLOUD_EVENTS_PAGE,
+  opts?: { reportFeatureHealth?: boolean; recoverDeviceProof?: boolean },
+): Promise<CloudSessionEventsPage | null> {
+  const handle =
+    typeof session === 'string'
+      ? await openCloudEventsSession(session, undefined, {
+          recoverDeviceProof: opts?.recoverDeviceProof,
+        })
+      : session
+  const page = await loadCloudSessionEvents(
+    handle,
+    { limit, sort_order: 'desc' },
+    'fetchLatestEvents',
+  )
+  if (opts?.reportFeatureHealth !== false) {
+    if (page === null) {
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'assistant_history_load' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'http_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } else {
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'assistant_history_load' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+  }
+  return page
+}
+
+/** densable `pBe` — We cursor fetchOlderEvents. */
+export async function fetchOlderCloudEvents(
+  session: CloudEventsSession,
+  cursor: string,
+  limit = LATEST_CLOUD_EVENTS_PAGE,
+  maxContentLength?: number,
+): Promise<CloudSessionEventsPage | null> {
+  return loadCloudSessionEvents(
+    session,
+    { limit, sort_order: 'desc', cursor },
+    'fetchOlderEvents',
+    maxContentLength,
+  )
 }

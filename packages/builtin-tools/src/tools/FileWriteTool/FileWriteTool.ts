@@ -228,7 +228,7 @@ export const FileWriteTool = buildTool({
     return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.file_path)
+    noteApprovedFileToolPath(input.file_path, context.toolUseId)
     const appState = context.getAppState()
     return checkWritePermissionForTool(
       FileWriteTool,
@@ -444,7 +444,11 @@ export const FileWriteTool = buildTool({
 
     await diagnosticTracker.beforeFileEdited(fullFilePath)
 
-    const approved = takeApprovedFileToolPath(fullFilePath)
+    const approved = takeApprovedFileToolPath(
+      fullFilePath,
+      toolUseContext.toolUseId,
+      'write',
+    )
     const openedWrite = await openApprovedWrite(fullFilePath, approved, {
       createParents: true,
     })

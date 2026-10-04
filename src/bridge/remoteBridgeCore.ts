@@ -78,7 +78,10 @@ import {
   enrollTrustedDevice,
   clearTrustedDeviceTokenCache,
   getTrustedDeviceToken,
+  getTrustedDeviceTokenIfGateOn,
   isTrustedDeviceActiveForOrg,
+  isTrustedDeviceGateEnabled,
+  retryAfterTrustedDeviceRenew,
 } from './trustedDevice.js'
 import {
   getEnvLessBridgeConfig,
@@ -2275,19 +2278,35 @@ import { getBridgeBaseUrlOverride } from './bridgeConfig.js'
 // CLI-side wrapper that applies the CLAUDE_BRIDGE_BASE_URL dev override and
 // injects the trusted-device token (both are env/GrowthBook reads that the
 // SDK-facing codeSessionApi.ts export must stay free of).
+// densable `Ra` @198068113: `gy` then `cdt` on 403 untrusted_device.
 export async function fetchRemoteCredentials(
   sessionId: string,
   baseUrl: string,
   accessToken: string,
   timeoutMs: number,
 ): Promise<BridgeCredentialResult> {
-  const creds = await fetchRemoteCredentialsRaw(
-    sessionId,
-    baseUrl,
-    accessToken,
-    timeoutMs,
-    getTrustedDeviceToken(),
-  )
+  const token = await getTrustedDeviceTokenIfGateOn()
+  const once = (deviceToken?: string) =>
+    fetchRemoteCredentialsRaw(
+      sessionId,
+      baseUrl,
+      accessToken,
+      timeoutMs,
+      deviceToken,
+    )
+  let creds = await once(token)
+  if (isTerminalBridgeFailure(creds) && creds.reason === 'untrusted_device') {
+    creds =
+      (await retryAfterTrustedDeviceRenew(token, next => once(next))) ?? creds
+  }
+  if (!creds) return null
+  if (isNonTerminalBridgeFailure(creds)) return creds
+  if (isTerminalBridgeFailure(creds)) {
+    if (creds.reason === 'untrusted_device' && !isTrustedDeviceGateEnabled()) {
+      return { terminal: true, reason: 'request_rejected', status: 403 }
+    }
+    return creds
+  }
   if (!isRemoteCredentials(creds)) return creds
   return getBridgeBaseUrlOverride()
     ? { ...creds, api_base_url: baseUrl }

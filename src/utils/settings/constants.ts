@@ -82,7 +82,8 @@ export function getSettingSourceDisplayNameLowercase(
     | 'command'
     | 'session'
     | 'mcpServerPolicy'
-    | 'toolsNarrowing',
+    | 'toolsNarrowing'
+    | 'hostCredential',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -105,6 +106,8 @@ export function getSettingSourceDisplayNameLowercase(
       return 'MCP server policy'
     case 'toolsNarrowing':
       return 'restricted tools'
+    case 'hostCredential':
+      return 'cloud-session credential guard'
   }
 }
 
@@ -120,7 +123,8 @@ export function getSettingSourceDisplayNameCapitalized(
     | 'command'
     | 'session'
     | 'mcpServerPolicy'
-    | 'toolsNarrowing',
+    | 'toolsNarrowing'
+    | 'hostCredential',
 ): string {
   switch (source) {
     case 'userSettings':
@@ -143,6 +147,8 @@ export function getSettingSourceDisplayNameCapitalized(
       return 'MCP server policy'
     case 'toolsNarrowing':
       return 'Restricted tools'
+    case 'hostCredential':
+      return 'Cloud-session credential guard'
   }
 }
 

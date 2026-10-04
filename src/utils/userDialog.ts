@@ -16,6 +16,10 @@ export const DEFAULT_DIALOG_ACTION_DESCRIPTIONS: Readonly<
   Record<string, string>
 > = {
   refusal_fallback_prompt: 'choose: retry on fallback model or edit prompt',
+  auto_mode_server_fallback:
+    'acknowledge the classifier billing notice (Enter continues in auto mode)',
+  auto_mode_outside_reads:
+    'choose: keep allowing reads outside the working directories, or block them',
 }
 
 export type UserDialogResponseBehavior = 'completed' | 'cancelled'

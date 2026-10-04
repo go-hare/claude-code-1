@@ -50,6 +50,7 @@ const jobClassifierModule = feature('TEMPLATES')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 import type { QuerySource } from '../constants/querySource.js'
+import type { ToolEndTurnSource } from './endTurnFromToolResult.js'
 import type { GoalCheckinActiveGoal } from '../services/goal/goalCheckin.js'
 import { executeAutoDream } from '../services/autoDream/autoDream.js'
 import { executePromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js'
@@ -73,6 +74,12 @@ export async function* handleStopHooks(
   toolUseContext: ToolUseContext,
   querySource: QuerySource,
   stopHookActive?: boolean,
+  /**
+   * densable 2.1.283 Br last arg `w` @ 190672336. When the turn already ended
+   * via StructuredOutput / MCP claude/endTurn, Stop-hook blocks are discarded
+   * (no model re-invoke).
+   */
+  endTurnSource?: ToolEndTurnSource,
 ): AsyncGenerator<
   | StreamEvent
   | RequestStartEvent
@@ -450,29 +457,40 @@ export async function* handleStopHooks(
           }
         }
       }
-      if (result.blockingError) {
-        const userMessage = createUserMessage({
-          content: getStopHookMessage(result.blockingError),
-          isMeta: true, // Hide from UI (shown in summary message instead)
-        })
-        blockingErrors.push(userMessage)
-        yield userMessage
-        hasOutput = true
-        // Add to hookErrors so it appears in the summary
-        hookErrors.push(result.blockingError.blockingError)
-      }
-      // Check if hook wants to prevent continuation
-      if (result.preventContinuation) {
-        preventedContinuation = true
-        stopReason = result.stopReason || 'Stop hook prevented continuation'
-        // Create attachment to track the stopped continuation (for structured data)
-        yield createAttachmentMessage({
-          type: 'hook_stopped_continuation',
-          message: stopReason,
-          hookName: 'Stop',
-          toolUseID: stopHookToolUseID,
-          hookEvent: 'Stop',
-        })
+      if (result.blockingError || result.preventContinuation) {
+        if (endTurnSource) {
+          // densable Br @ 190672336: discard Stop-hook block when the turn
+          // already ended (tool result / MCP end-turn) — no model re-invoke.
+          const why = endTurnSource === 'tool' ? 'tool result' : 'MCP end-turn'
+          logForDebugging(
+            `[end-turn] Stop hook block discarded (turn ended by ${why}, no model re-invoke): ${result.blockingError?.blockingError ?? result.stopReason ?? 'preventContinuation'}`,
+          )
+        } else {
+          if (result.blockingError) {
+            const userMessage = createUserMessage({
+              content: getStopHookMessage(result.blockingError),
+              isMeta: true, // Hide from UI (shown in summary message instead)
+            })
+            blockingErrors.push(userMessage)
+            yield userMessage
+            hasOutput = true
+            // Add to hookErrors so it appears in the summary
+            hookErrors.push(result.blockingError.blockingError)
+          }
+          // Check if hook wants to prevent continuation
+          if (result.preventContinuation) {
+            preventedContinuation = true
+            stopReason = result.stopReason || 'Stop hook prevented continuation'
+            // Create attachment to track the stopped continuation (for structured data)
+            yield createAttachmentMessage({
+              type: 'hook_stopped_continuation',
+              message: stopReason,
+              hookName: 'Stop',
+              toolUseID: stopHookToolUseID,
+              hookEvent: 'Stop',
+            })
+          }
+        }
       }
 
       // Check if we were aborted during hook execution

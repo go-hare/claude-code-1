@@ -153,6 +153,19 @@ export type ToolPermissionContext = DeepImmutable<{
    * reads outside working directories when the setting is on.
    */
   blockReadsOutsideWorkingDirectories?: boolean
+  /**
+   * densable 2.1.283 `servedCall` — CCR/remote served permission context
+   * (`servedCall:!0` @200392185). yBt skips DualInk first-ask; lL xa second
+   * arg; outside-read deny→ask + circuitBreaker:"outsideReadsBlocked"; KDt
+   * skips implicit allows. Do not invent the CCR producer (honorLocalRules /
+   * launchDir).
+   */
+  servedCall?: boolean
+  /**
+   * densable 2.1.283 `trustedNetworkDirectories` — flagSettings mapped-drive
+   * aliases (`Ier` @190949411). Key = additionalDirectory; value = `[drive, unc]`.
+   */
+  trustedNetworkDirectories?: Map<string, readonly string[]>
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -165,6 +178,7 @@ export const getEmptyToolPermissionContext: () => ToolPermissionContext =
     isBypassPermissionsModeAvailable: true,
     // Official 2.1.x: empty map so control-channel overrides can merge cleanly.
     mcpPermissionModeOverrides: {},
+    trustedNetworkDirectories: new Map(),
   })
 
 export type CompactProgressEvent =
@@ -257,6 +271,12 @@ export type ToolUseContext = {
     activeMcpTool?: string
   }
   abortController: AbortController
+  /**
+   * densable 2.1.283 `forRemoteExecution` — this hasPermissionsToUseTool
+   * run is for a remote agent, not the local REPL. yBt skips DualInk.
+   * Dialog hosts already duck-type this field (permissionQueueBehind / xSl).
+   */
+  forRemoteExecution?: boolean
   /**
    * densable persist handles (official tool context `storageV5` / `credentials`).
    * Pinned createLocalFsBackend from pinStorageV5.
@@ -425,6 +445,24 @@ export type ToolUseContext = {
    * speculation also sets it for overlay file path rewriting.
    */
   requireCanUseTool?: boolean
+  /**
+   * densable `hookAskFloor` @184443170 — PreToolUse hook asked AND a rule/safety
+   * ask still requires the permission pipeline. NHo keeps the ask even when
+   * the classifier would allow ("a classifier allow re-surfaces as this ask").
+   */
+  hookAskFloor?: boolean
+  /**
+   * densable `hookCaller` — plugin that invoked this tool on the main thread.
+   * `tqn` skips the auto classifier when this is set (`plugin-origin`).
+   */
+  hookCaller?: string
+  /**
+   * densable `desktopForwardToolUseId` — SendMessage→Claude Desktop synthetic
+   * tool_use id. NHo skips the classifier when this equals the current
+   * toolUseID (`fastPath: desktop_forward`). Producer `Qe` is not invented;
+   * tool.call always clears the stamp (gold @184489530).
+   */
+  desktopForwardToolUseId?: string
   messages: Message[]
   /**
    * Official sameTurnToolUses — prior tool_use blocks from the same assistant
@@ -549,10 +587,15 @@ export type ToolResult<T> = {
     _meta?: Record<string, unknown>
     structuredContent?: Record<string, unknown>
   }
+  /**
+   * densable 2.1.283 `oo.endsTurn` @ 184495149 — successful StructuredOutput
+   * (and MCP `_meta["claude/endTurn"]`) ask query not to recurse.
+   */
+  endsTurn?: boolean
 }
 
 export type ToolCallProgress<P extends ToolProgressData = ToolProgressData> = (
-  progress: ToolProgress<P>,
+  progress: ToolProgress<P> | { type: string; [key: string]: unknown },
 ) => void
 
 // Type for any schema that outputs an object with string keys

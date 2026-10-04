@@ -36,13 +36,24 @@ export type PromptCommand = {
    * change detection (JoS). Optional; missing treated as "".
    */
   contentHash?: string
+  /**
+   * densable `UP` — unqualified skill name for week-token map lookup.
+   * When set on a prompt command, DZr keys tokens under this instead of `name`.
+   */
+  unqualifiedName?: string
   argNames?: string[]
   allowedTools?: string[]
   disallowedTools?: string[]
   /** Official Lto `e.getAllowedTools?.()` — async override of allowedTools. */
   getAllowedTools?(): Promise<string[] | undefined>
   model?: string
-  source: SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
+  source:
+    | SettingSource
+    | 'builtin'
+    | 'mcp'
+    | 'plugin'
+    | 'bundled'
+    | 'memoryStore'
   pluginInfo?: {
     pluginManifest: PluginManifest
     repository: string
@@ -119,6 +130,15 @@ export type LocalJSXCommandContext = ToolUseContext & {
    * mid-turn immediate path (`ARt` / REPL / handlePromptSubmit).
    */
   dispatchedAsImmediate?: boolean
+  /**
+   * densable REPL `presentation` (`"fullscreen"` | `"inline"`). `/diff` G0t
+   * uses this as the first arg; VLe/ARt passes it as immediate()'s second arg.
+   */
+  presentation?: 'fullscreen' | 'inline'
+  /**
+   * densable `toggleDiffPanel` — fullscreen `/diff` toast path (Z6t/s8r).
+   */
+  toggleDiffPanel?: () => Promise<string>
   /**
    * densable `submissionOrigin` / WGw `t.submissionOrigin` (`bve` =
    * `kind==="human"`). Threaded from processUserInput.origin.
@@ -262,6 +282,7 @@ export type CommandBase = {
     | 'bundled'
     | 'mcp'
     | 'syncedSkills' // densable 2.1.228 #12 — claude.ai synced skills
+    | 'memoryStore' // densable sN loadedFrom:"memoryStore"
   kind?: 'workflow' // Distinguishes workflow-backed commands (badged in autocomplete)
   /**
    * densable 2.1.234 ARt — if true (or `(args)=>true`), command executes
@@ -269,7 +290,9 @@ export type CommandBase = {
    * predicate of the invocation args (e.g. /add-dir path always, dialog only
    * when fullscreen; /config empty-args needs RVr).
    */
-  immediate?: boolean | ((args: string) => boolean)
+  immediate?:
+    | boolean
+    | ((args: string, presentation?: 'fullscreen' | 'inline') => boolean)
   isSensitive?: boolean // If true, args are redacted from the conversation history
   /** Defaults to `name`. Only override when the displayed name differs (e.g. plugin prefix stripping). */
   userFacingName?: () => string

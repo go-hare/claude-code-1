@@ -661,7 +661,7 @@ export class SessionOnceLatches {
     rejectedThisProcess: boolean
     persistedLatchChecked: boolean
     persistedLatchInEffect: boolean
-    telemetryByClientRequestId: LRUCache<string, unknown>
+    telemetryByClientRequestId: LRUCache<string, object>
     ccrWorkerSkipReasonsLogged: Set<unknown>
   } = {
     latchedOff: false,
@@ -695,7 +695,7 @@ export class SessionOnceLatches {
     excuse: new WeakMap(),
   }
   keepForeignThinkingOnUpgrade: unknown
-  streamFirstByteArmedRequestIds = new LRUCache<string, unknown>({
+  streamFirstByteArmedRequestIds = new LRUCache<string, object>({
     max: STREAM_FIRST_BYTE_ARMED_MAX,
   })
   skillHealthMap: unknown
@@ -1837,12 +1837,27 @@ export class WorkflowUsageConsent {
   }
 }
 
-/** Official Re / Qt @178531158 */
+/** densable `Be` / `vUe` @175513091 — consume miss after eviction. */
+export const WRITE_STASH_EXPIRED: unique symbol = Symbol(
+  'writePermissionStashExpired',
+)
+
+const WRITE_STASH_CAP = 256
+const WRITE_STASH_EVICTED_CAP = 1_048_576
+
+function stashKey(toolUseId: string, path: string): string {
+  return `${toolUseId}\0${path}`
+}
+
+/** Official Re / Qt @178531158 — gold `Be` write lane (read lane unused here). */
 export class WritePermissionStash {
   pathsByToolUse = new Map<string, string[]>()
+  evicted = new Set<string>()
+  poisoned = false
   stash(e: string | undefined, t: string, o: string[]): void {
     if (e === undefined) return
-    const r = `${e}\0${t}`
+    const r = stashKey(e, t)
+    if (this.evicted.has(r)) return
     const i = this.pathsByToolUse.get(r)
     if (i !== undefined) {
       const s = new Set(o)
@@ -1852,19 +1867,34 @@ export class WritePermissionStash {
       )
       return
     }
-    if (this.pathsByToolUse.size >= 256) {
+    if (this.pathsByToolUse.size >= WRITE_STASH_CAP) {
       const s = this.pathsByToolUse.keys().next().value
-      if (s !== undefined) this.pathsByToolUse.delete(s)
+      if (s !== undefined) {
+        this.pathsByToolUse.delete(s)
+        this.evicted.add(s)
+        if (this.evicted.size > WRITE_STASH_EVICTED_CAP) {
+          this.poisoned = true
+          const oldest = this.evicted.values().next().value
+          if (oldest !== undefined) this.evicted.delete(oldest)
+        }
+      }
     }
     this.pathsByToolUse.set(r, o)
   }
-  consume(e: string | undefined, t: string): string[] | undefined {
+  consume(
+    e: string | undefined,
+    t: string,
+  ): string[] | typeof WRITE_STASH_EXPIRED | undefined {
     if (e === undefined) return
-    const o = this.pathsByToolUse.get(`${e}\0${t}`)
-    const r = `${e}\0`
+    const key = stashKey(e, t)
+    const o = this.pathsByToolUse.get(key)
+    const expired =
+      o === undefined && (this.evicted.delete(key) || this.poisoned)
+    const prefix = `${e}\0`
     for (const i of this.pathsByToolUse.keys()) {
-      if (i.startsWith(r)) this.pathsByToolUse.delete(i)
+      if (i.startsWith(prefix)) this.pathsByToolUse.delete(i)
     }
+    if (expired) return WRITE_STASH_EXPIRED
     return o
   }
 }
@@ -2064,6 +2094,13 @@ export class RequestLatches {
   #a = false
   #s = new Map<unknown, unknown>()
   #d = new Map<unknown, unknown>()
+  #l = false
+  /** densable `xYn`/`R3r` @175576214. */
+  #c = false
+  /** densable `lq.markRelayThinkingStripRecorded` / Zue. */
+  #u: string | null = null
+  /** densable `lq.relayStoppedInLastDispatch` @184980422. */
+  #g = false
   promptCache1hAllowlist(): string[] | null {
     return this.#e
   }
@@ -2115,6 +2152,30 @@ export class RequestLatches {
   foundryDeploymentCapabilities(): Map<unknown, unknown> {
     return this.#d
   }
+  thinkingHighlightsRefused(): boolean {
+    return this.#l
+  }
+  markThinkingHighlightsRefused(): void {
+    this.#l = true
+  }
+  thinkingResumptionRefused(): boolean {
+    return this.#c
+  }
+  markThinkingResumptionRefused(): void {
+    this.#c = true
+  }
+  relayThinkingStripRecorded(): string | null {
+    return this.#u
+  }
+  markRelayThinkingStripRecorded(reason: string): void {
+    this.#u = reason
+  }
+  relayStoppedInLastDispatch(): boolean {
+    return this.#g
+  }
+  markRelayStoppedInLastDispatch(): void {
+    this.#g = true
+  }
   reset(): void {
     this.#e = null
     this.#t = new Map()
@@ -2125,6 +2186,10 @@ export class RequestLatches {
     this.#a = false
     this.#s = new Map()
     this.#d = new Map()
+    this.#l = false
+    this.#c = false
+    this.#u = null
+    this.#g = false
   }
 }
 

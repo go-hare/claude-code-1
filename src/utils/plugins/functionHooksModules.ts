@@ -2871,9 +2871,11 @@ async function runHostToolCallXL(
         once: true,
       })
     }
+    // gold gyt: `{...toolContext, hookCaller: plugin}` so tqn can skip classifier.
     const toolUseContext = {
       ...baseCtx,
       abortController: localAbort,
+      ...(plugin !== '' ? { hookCaller: plugin } : {}),
     }
     let text = ''
     let result: unknown

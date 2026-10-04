@@ -54,6 +54,7 @@ import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
 import { applyTurnStartOriginFraming } from './messages.js'
 import { isCommandImmediate } from './immediateCommand.js'
+import { isFullscreenEnvEnabled } from './fullscreen.js'
 import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
@@ -328,7 +329,11 @@ export async function handlePromptSubmit(
     // densable ARt(cmd, args) — resolve boolean | (args)=>boolean
     const immediateCommand = commands.find(
       cmd =>
-        isCommandImmediate(cmd, commandArgs) &&
+        isCommandImmediate(
+          cmd,
+          commandArgs,
+          isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+        ) &&
         isCommandEnabled(cmd) &&
         (cmd.name === commandName ||
           cmd.aliases?.includes(commandName) ||

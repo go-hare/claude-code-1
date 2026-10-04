@@ -19,10 +19,12 @@ export type Output = z.infer<OutputSchema>
 
 export const SYNTHETIC_OUTPUT_TOOL_NAME = 'StructuredOutput'
 
+/** densable 2.1.283 `Vko` @ 181129558 */
 export function isSyntheticOutputToolEnabled(opts: {
   isNonInteractiveSession: boolean
+  isBgSession?: boolean
 }): boolean {
-  return opts.isNonInteractiveSession
+  return opts.isNonInteractiveSession || opts.isBgSession === true
 }
 
 export const SyntheticOutputTool = buildTool({
@@ -61,6 +63,9 @@ export const SyntheticOutputTool = buildTool({
     return {
       data: 'Structured output provided successfully',
       structured_output: input,
+      // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570 — smo ends the
+      // query loop so max_turns=1 StructuredOutput does not recurse.
+      endsTurn: true,
     }
   },
   async checkPermissions(input): Promise<PermissionResult> {
@@ -153,6 +158,8 @@ function buildSyntheticOutputTool(
           return {
             data: 'Structured output provided successfully',
             structured_output: input,
+            // densable 2.1.283 pe/ze `endsTurn:!0` @ 181130570
+            endsTurn: true,
           }
         },
       },

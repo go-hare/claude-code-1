@@ -2079,14 +2079,23 @@ async function reset(): Promise<void> {
  * Add a command to the excluded commands list (commands that should not be sandboxed)
  * This is a Claude CLI-specific function that updates local settings.
  */
+/**
+ * densable `Ge.isStrictSandboxModeConfigured` — policy/flag sandbox lock.
+ * Local twin is `areSandboxSettingsLockedByPolicy`.
+ */
+export function isStrictSandboxModeConfigured(): boolean {
+  return areSandboxSettingsLockedByPolicy()
+}
+
 export function addToExcludedCommands(
   command: string,
   permissionUpdates?: Array<{
     type: string
     rules: Array<{ toolName: string; ruleContent?: string }>
   }>,
+  source: 'localSettings' | 'userSettings' = 'localSettings',
 ): string {
-  const existingSettings = getSettingsForSource('localSettings')
+  const existingSettings = getSettingsForSource(source)
   const existingExcludedCommands =
     existingSettings?.sandbox?.excludedCommands || []
 
@@ -2116,7 +2125,7 @@ export function addToExcludedCommands(
 
   // Add to excludedCommands if not already present
   if (!existingExcludedCommands.includes(commandPattern)) {
-    updateSettingsForSource('localSettings', {
+    updateSettingsForSource(source, {
       sandbox: {
         ...existingSettings?.sandbox,
         excludedCommands: [...existingExcludedCommands, commandPattern],
@@ -2143,6 +2152,7 @@ export interface ISandboxManager {
   areUnsandboxedCommandsAllowed(): boolean
   isSandboxRequired(): boolean
   areSandboxSettingsLockedByPolicy(): boolean
+  isStrictSandboxModeConfigured(): boolean
   setSandboxSettings(options: {
     enabled?: boolean
     autoAllowBashIfSandboxed?: boolean
@@ -2274,6 +2284,7 @@ export const SandboxManager: ISandboxManager = {
   areUnsandboxedCommandsAllowed,
   isSandboxRequired,
   areSandboxSettingsLockedByPolicy,
+  isStrictSandboxModeConfigured,
   setSandboxSettings,
   getExcludedCommands,
   wrapWithSandbox,

@@ -69,8 +69,8 @@ const MAX_FILES = 50
 const MAX_DIFF_SIZE_BYTES = 1_000_000 // 1 MB - skip files larger than this
 const MAX_LINES_PER_FILE = 400 // GitHub's auto-load limit
 const MAX_FILES_FOR_DETAILS = 500 // Skip per-file details if more files than this
-/** densable `yzS` — lstat cap before AzS filter. */
-const UNTRACKED_LSTAT_CAP = 200
+/** densable `_t=500` — lstat cap before AzS filter. */
+const UNTRACKED_LSTAT_CAP = 500
 
 function gitOpts(abort?: AbortSignal) {
   return {

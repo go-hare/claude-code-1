@@ -50,6 +50,9 @@ import {
   scrollPluginPane,
   getShownPluginPane,
 } from '../plugins/functionHooksModules.js'
+import { executePreToolHooks } from '../hooks.js'
+import type { ToolUseContext } from '../../Tool.js'
+import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
 
 const hookStoreHome = mkdtempSync(join(tmpdir(), 'fh-store-'))
 const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -267,6 +270,117 @@ describe('function-hooks classic pattern', () => {
       async event => event,
     )
     expect(value).toEqual({ delta: 'AB', tool: 'Read', plugin: 'wild' })
+  })
+
+  test('gold Rze: executePreToolHooks runs classic.PreToolUse then QLn', async () => {
+    const prevInteractive = getIsInteractive()
+    setIsInteractive(false)
+    let ran = 0
+    setLoadedFunctionHooksModules([
+      {
+        name: 'pre',
+        patterns: ['classic.PreToolUse'],
+        hooks: [
+          {
+            pattern: 'classic.PreToolUse',
+            hook: async (_api, event) => {
+              ran++
+              return { ...event, permissionBehavior: 'allow' }
+            },
+          },
+        ],
+      },
+    ])
+    expect(hasMatchingFunctionHook('PreToolUse')).toBe(true)
+    const ctx = {
+      getAppState: () =>
+        ({ sessionHooks: new Map() }) as unknown as ReturnType<
+          ToolUseContext['getAppState']
+        >,
+      abortController: new AbortController(),
+    } as unknown as ToolUseContext
+    const yielded: Array<{ permissionBehavior?: string }> = []
+    const confined: Array<{ permissionBehavior?: string }> = []
+    try {
+      for await (const result of executePreToolHooks(
+        'Bash',
+        'tu_1',
+        { command: 'ls' },
+        ctx,
+      )) {
+        yielded.push(result)
+      }
+      expect(ran).toBe(1)
+      expect(yielded.some(r => r.permissionBehavior === 'allow')).toBe(true)
+
+      process.env.CLAUDE_CODE_EVAL_CONFINED = '1'
+      ran = 0
+      for await (const result of executePreToolHooks(
+        'Bash',
+        'tu_2',
+        { command: 'ls' },
+        ctx,
+      )) {
+        confined.push(result)
+      }
+      expect(ran).toBe(1)
+      expect(confined.some(r => r.permissionBehavior === 'allow')).toBe(false)
+    } finally {
+      delete process.env.CLAUDE_CODE_EVAL_CONFINED
+      setIsInteractive(prevInteractive)
+    }
+  })
+
+  test('gold tVn: matcher { tool } hits executePreToolHooks payload', async () => {
+    const prevInteractive = getIsInteractive()
+    setIsInteractive(false)
+    let bash = 0
+    let read = 0
+    setLoadedFunctionHooksModules([
+      {
+        name: 'pre',
+        patterns: ['classic.PreToolUse'],
+        hooks: [
+          {
+            pattern: 'classic.PreToolUse',
+            matcher: { tool: 'Bash' },
+            hook: async (_api, event) => {
+              bash++
+              return event
+            },
+          },
+          {
+            pattern: 'classic.PreToolUse',
+            matcher: { tool: 'Read' },
+            hook: async (_api, event) => {
+              read++
+              return event
+            },
+          },
+        ],
+      },
+    ])
+    const ctx = {
+      getAppState: () =>
+        ({ sessionHooks: new Map() }) as unknown as ReturnType<
+          ToolUseContext['getAppState']
+        >,
+      abortController: new AbortController(),
+    } as unknown as ToolUseContext
+    try {
+      for await (const _ of executePreToolHooks(
+        'Bash',
+        'tu_bash',
+        { command: 'ls' },
+        ctx,
+      )) {
+        // drain
+      }
+      expect(bash).toBe(1)
+      expect(read).toBe(0)
+    } finally {
+      setIsInteractive(prevInteractive)
+    }
   })
 
   test('a matcher that misses the event is not called', async () => {

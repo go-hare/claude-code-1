@@ -19,9 +19,10 @@ import {
 import { syncPermissionRulesFromDisk } from '../permissions/permissions.js'
 import { loadAllPermissionRulesFromDisk } from '../permissions/permissionsLoader.js'
 import { collectUngatedAdditionalDirectories } from '../permissions/projectGrantsGate.js'
+import { rewriteFlagSettingsTrustedNetworkDirectories } from '../permissions/trustedNetworkDirectories.js'
 import type { SettingsChangeExtra } from './changeDetector.js'
 import type { SettingSource } from './constants.js'
-import { getInitialSettings } from './settings.js'
+import { getInitialSettings, getSettingsForSource } from './settings.js'
 
 /**
  * densable apply `C` — session-owned add-dir sources are not reconciled on
@@ -47,8 +48,7 @@ function resolveAdditionalDirectory(dir: string, cwd?: string): string[] {
 /**
  * densable apply `be` — swap project additionalDirectories on `/cd` (`prevCwd`)
  * or after an explicit trust flip. Official flagSettings
- * `trustedNetworkDirectories` rewrite is omitted: that field is not on the
- * local ToolPermissionContext.
+ * `trustedNetworkDirectories` rewrite is gold `Ier` @190949411.
  */
 export function reconcileAdditionalDirectories(
   context: ToolPermissionContext,
@@ -87,6 +87,25 @@ export function reconcileAdditionalDirectories(
     return context
   }
   let next = context
+  if (source === 'flagSettings') {
+    const flagDirs = new Set(
+      (
+        getSettingsForSource('flagSettings')?.permissions
+          ?.additionalDirectories ?? []
+      ).flatMap(dir => resolveAdditionalDirectory(dir)),
+    )
+    const rewritten = rewriteFlagSettingsTrustedNetworkDirectories(
+      next,
+      flagDirs,
+      { toRemove, toAdd },
+    )
+    if (rewritten) {
+      next = {
+        ...next,
+        trustedNetworkDirectories: rewritten.trustedNetworkDirectories,
+      }
+    }
+  }
   if (toRemove.length > 0) {
     next = applyPermissionUpdate(next, {
       type: 'removeDirectories',

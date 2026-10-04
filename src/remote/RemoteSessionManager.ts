@@ -497,6 +497,14 @@ export class RemoteSessionManager {
   }
 
   /**
+   * leftover `gPe.postControlRequest` host — wrap existing SessionsWebSocket
+   * `sendControlRequest`. Interrupt stays `cancelSession`.
+   */
+  sendControl(request: SDKControlRequestInner): void {
+    this.websocket?.sendControlRequest(request)
+  }
+
+  /**
    * Get the session ID
    */
   getSessionId(): string {

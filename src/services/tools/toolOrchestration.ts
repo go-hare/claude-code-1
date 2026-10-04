@@ -4,7 +4,12 @@ import { findToolByName, type ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { all } from '../../utils/generators.js'
 import { resolveMaxToolUseConcurrency } from '../../utils/residualMsEnvGates.js'
-import { type MessageUpdateLazy, runToolUse } from './toolExecution.js'
+import {
+  isToolBridgeEvent,
+  type MessageUpdateLazy,
+  runToolUse,
+  type ToolBridgeEvent,
+} from './toolExecution.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 
 function getMaxToolUseConcurrency(): number {
@@ -13,8 +18,8 @@ function getMaxToolUseConcurrency(): number {
 
 export type MessageUpdate = {
   message?: Message
-  newContext: ToolUseContext
-}
+  newContext?: ToolUseContext
+} & Partial<ToolBridgeEvent>
 
 export async function* runTools(
   toolUseMessages: ToolUseBlock[],
@@ -51,6 +56,10 @@ export async function* runTools(
         canUseTool,
         currentContext,
       )) {
+        if (isToolBridgeEvent(update)) {
+          yield update
+          continue
+        }
         if (update.contextModifier) {
           const { toolUseID, modifyContext } = update.contextModifier
           if (!queuedContextModifiers[toolUseID]) {
@@ -81,6 +90,10 @@ export async function* runTools(
         canUseTool,
         currentContext,
       )) {
+        if (isToolBridgeEvent(update)) {
+          yield update
+          continue
+        }
         if (update.newContext) {
           currentContext = update.newContext
         }
@@ -171,6 +184,10 @@ async function* runToolsSerially(
         ? { ...currentContext, sameTurnToolUses }
         : currentContext,
     )) {
+      if (isToolBridgeEvent(update)) {
+        yield update
+        continue
+      }
       if (update.contextModifier) {
         currentContext = update.contextModifier.modifyContext(currentContext)
       }
@@ -189,7 +206,7 @@ async function* runToolsConcurrently(
   assistantMessages: AssistantMessage[],
   canUseTool: CanUseToolFn,
   toolUseContext: ToolUseContext,
-): AsyncGenerator<MessageUpdateLazy, void> {
+): AsyncGenerator<MessageUpdateLazy | ToolBridgeEvent, void> {
   yield* all(
     toolUseMessages.map(async function* (toolUse, index) {
       toolUseContext.setInProgressToolUseIDs(prev =>

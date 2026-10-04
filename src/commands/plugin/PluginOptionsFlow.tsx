@@ -92,16 +92,54 @@ function PluginOptionsWalk({ loaded, onDone }: { loaded: LoadedSteps; onDone: Pr
   const [index, setIndex] = React.useState(0);
   const onDoneRef = React.useRef(onDone);
   onDoneRef.current = onDone;
+  // densable ui: D.current finishes the walk; V.current is in-flight save.
+  const finished = React.useRef(false);
+  const saving = React.useRef(false);
+  const [pending, setPending] = React.useState<{
+    index: number;
+    values: PluginOptionValues;
+    saveOutcome: Promise<unknown>;
+  } | null>(null);
+
+  const finish = React.useCallback((...args: Parameters<Props['onDone']>) => {
+    if (finished.current) return;
+    finished.current = true;
+    onDoneRef.current(...args);
+  }, []);
 
   React.useEffect(() => {
     if (loaded.error) {
-      onDoneRef.current('error', loaded.error);
+      finish('error', loaded.error);
       return;
     }
     if (loaded.steps.length === 0) {
-      onDoneRef.current('skipped');
+      finish('skipped');
     }
-  }, [loaded.error, loaded.steps.length]);
+  }, [loaded.error, loaded.steps.length, finish]);
+
+  React.useEffect(() => {
+    if (pending === null) return;
+    let cancelled = false;
+    void pending.saveOutcome.then(
+      () => {
+        if (cancelled) return;
+        saving.current = false;
+        setPending(null);
+        const next = pending.index + 1;
+        if (next < loaded.steps.length) setIndex(next);
+        else finish('configured');
+      },
+      err => {
+        if (cancelled) return;
+        saving.current = false;
+        setPending(null);
+        finish('error', errorMessage(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pending, loaded.steps.length, finish]);
 
   if (loaded.error || loaded.steps.length === 0) {
     return null;
@@ -109,21 +147,6 @@ function PluginOptionsWalk({ loaded, onDone }: { loaded: LoadedSteps; onDone: Pr
 
   const current = loaded.steps[index]!;
   const initialValues = React.use(React.useMemo(() => Promise.resolve().then(() => current.load()), [current.key]));
-
-  async function handleSave(values: PluginOptionValues): Promise<void> {
-    try {
-      await current.save(values);
-    } catch (err) {
-      onDone('error', errorMessage(err));
-      return;
-    }
-    const next = index + 1;
-    if (next < loaded.steps.length) {
-      setIndex(next);
-    } else {
-      onDone('configured');
-    }
-  }
 
   return (
     <PluginOptionsDialog
@@ -133,9 +156,18 @@ function PluginOptionsWalk({ loaded, onDone }: { loaded: LoadedSteps; onDone: Pr
       configSchema={current.schema}
       initialValues={initialValues}
       onSave={values => {
-        void handleSave(values);
+        if (finished.current || saving.current || pending !== null) return;
+        saving.current = true;
+        setPending({
+          index,
+          values,
+          saveOutcome: Promise.resolve().then(() => current.save(values)),
+        });
       }}
-      onCancel={() => onDone('skipped')}
+      onCancel={() => {
+        if (saving.current) return;
+        finish('skipped');
+      }}
     />
   );
 }

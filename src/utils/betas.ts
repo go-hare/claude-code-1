@@ -19,9 +19,15 @@ import {
   TOKEN_EFFICIENT_TOOLS_BETA_HEADER,
   SEARCH_EXTRA_TOOLS_BETA_HEADER_1P,
   SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
+  DANGEROUS_TOOL_USE_BETA_HEADER,
+  THINKING_BINDING_CONTROLS_BETA_HEADER,
+  THINKING_TOKEN_COUNT_BETA_HEADER,
   WEB_SEARCH_BETA_HEADER,
 } from '../constants/betas.js'
-import { shouldUseMidConversationSystem } from './midConversationSystem.js'
+import {
+  isHipaaPolicy,
+  shouldUseMidConversationSystem,
+} from './midConversationSystem.js'
 import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import { isClaudeAISubscriber } from './auth.js'
 import { has1mContext } from './context.js'
@@ -296,6 +302,31 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(INTERLEAVED_THINKING_BETA_HEADER)
   }
 
+  // densable eP Hx.when @178437146 — thinking-token-count with interleaved thinking.
+  if (
+    modelSupportsISP(model) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
+    !isHipaaPolicy() &&
+    (provider === 'firstParty' ||
+      ((provider === 'bedrock' || provider === 'mantle') &&
+        getCanonicalName(model) !== 'claude-opus-4-7'))
+  ) {
+    betaHeaders.push(THINKING_TOKEN_COUNT_BETA_HEADER)
+  }
+
+  // densable Gv @184956502 — `_N(Ee,Gv)` only when serverClassifier sticky-sends.
+  // Gold `p1e()` is thirdParty ∧ Gv on the request (`gue` unnamed arm).
+  // Local has no serverClassifier compositor; send Gv on 3P so gue can fire.
+  if (
+    provider !== 'firstParty' &&
+    provider !== 'anthropicAws' &&
+    provider !== 'gateway' &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
+    !isHipaaPolicy()
+  ) {
+    betaHeaders.push(DANGEROUS_TOOL_USE_BETA_HEADER)
+  }
+
   // Skip the API-side Haiku thinking summarizer — the summary is only used
   // for ctrl+o display, which interactive users rarely open. The API returns
   // redacted_thinking blocks instead; AssistantRedactedThinkingMessage already
@@ -404,6 +435,8 @@ export const THIRD_PARTY_BETA_ALLOWLIST = new Set<string>([
   SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
   OAUTH_BETA_HEADER,
   MID_CONVERSATION_SYSTEM_BETA_HEADER,
+  THINKING_TOKEN_COUNT_BETA_HEADER,
+  THINKING_BINDING_CONTROLS_BETA_HEADER,
 ])
 
 /**

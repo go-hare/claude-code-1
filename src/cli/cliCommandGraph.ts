@@ -106,6 +106,72 @@ export const cliCommandGraph = [
       capability: 'mcp',
     },
   ),
+  command(
+    'edit-permission-rules',
+    ['edit-permission-rules'],
+    'Apply one permission-rule edit read as JSON from stdin (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
+  command(
+    'edit-memory-settings',
+    ['edit-memory-settings'],
+    'Apply one memory-settings edit read as JSON from stdin (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
+  command(
+    'edit-skill-overrides',
+    ['edit-skill-overrides'],
+    'Apply one skill state edit read as JSON from stdin (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
+  command(
+    'edit-sandbox-settings',
+    ['edit-sandbox-settings'],
+    'Apply one sandbox settings edit read as JSON from stdin (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
+  command(
+    'design-login',
+    ['design-login'],
+    'Run the Claude Design sign-in, or report its state, as JSON lines (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
+  command(
+    'edit-chrome-settings',
+    ['edit-chrome-settings'],
+    'Apply one Claude in Chrome settings edit read as JSON from stdin (used by the VS Code extension)',
+    {
+      ownership: 'host-utility',
+      reuse: 'reuse-as-is',
+      capability: 'vscode-host',
+      hidden: true,
+    },
+  ),
   command('server', ['server'], 'Start a Claude Code session server', {
     ownership: 'runtime-capability',
     reuse: 'rewrite-required',

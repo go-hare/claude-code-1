@@ -27,4 +27,25 @@ describe('isCommandImmediate (densable ARt)', () => {
   test('function that returns false is not immediate', () => {
     expect(isCommandImmediate({ immediate: () => false }, 'x')).toBe(false)
   })
+
+  test('function form receives presentation as second arg (densable VLe)', () => {
+    expect(
+      isCommandImmediate(
+        {
+          immediate: (_args, presentation) => presentation === 'fullscreen',
+        },
+        '',
+        'fullscreen',
+      ),
+    ).toBe(true)
+    expect(
+      isCommandImmediate(
+        {
+          immediate: (_args, presentation) => presentation === 'fullscreen',
+        },
+        '',
+        'inline',
+      ),
+    ).toBe(false)
+  })
 })

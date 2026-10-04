@@ -120,6 +120,10 @@ async function loadAgentFromFile(
     const backgroundRaw = frontmatter.background
     const background =
       backgroundRaw === 'true' || backgroundRaw === true ? true : undefined
+    // densable He: omitClaudeMd === "true" || === true
+    const omitClaudeMdRaw = frontmatter.omitClaudeMd
+    const omitClaudeMd =
+      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
     // Substitute ${CLAUDE_PLUGIN_ROOT} so agents can reference bundled files,
     // and ${user_config.X} (non-sensitive only) so they can embed configured
     // usernames, endpoints, etc. Sensitive refs resolve to a placeholder.
@@ -231,6 +235,7 @@ async function loadAgentFromFile(
       filename: baseAgentName,
       plugin: sourceName,
       ...(background ? { background } : {}),
+      ...(omitClaudeMd ? { omitClaudeMd } : {}),
       ...(memory ? { memory } : {}),
       ...(isolation ? { isolation } : {}),
       ...(effort !== undefined ? { effort } : {}),

@@ -33,6 +33,9 @@ import { jsonStringify } from '../utils/slowOperations.js'
 const TRUSTED_DEVICE_GATE = 'tengu_sessions_elevated_auth_enforcement'
 /** densable nFn — org policy that requires a trusted device for elevated RC. */
 const REQUIRE_TRUSTED_DEVICES_POLICY = 'require_trusted_devices'
+/** densable `C` @180888501 — `qle()`. */
+const DISABLE_PROACTIVE_ENROLLMENT =
+  'tengu_sessions_elevated_auth_disable_proactive_enrollment'
 
 /**
  * densable cei / CLOUD_CANNOT_REACH_ELEVATED_HINT.
@@ -73,6 +76,123 @@ export function formatUnreachableElevatedRefusal(displayName: string): string {
 
 function isGateEnabled(): boolean {
   return getFeatureValue_CACHED_MAY_BE_STALE(TRUSTED_DEVICE_GATE, false)
+}
+
+/**
+ * densable `wV` @180889346 — GB gate then `isPolicyAllowed(require_trusted_devices)`.
+ */
+export function isTrustedDeviceGateEnabled(): boolean {
+  if (!isGateEnabled()) return false
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { isPolicyAllowed } =
+    require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return isPolicyAllowed(REQUIRE_TRUSTED_DEVICES_POLICY)
+}
+
+/**
+ * densable `qle` @180889346.
+ */
+export function isProactiveEnrollmentDisabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    DISABLE_PROACTIVE_ENROLLMENT,
+    false,
+  )
+}
+
+/**
+ * densable `hLt` / `U` @180890334 — env then secure-storage token, no GB gate.
+ */
+export async function readStoredTrustedDeviceToken(): Promise<
+  string | undefined
+> {
+  const envToken = process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
+  if (envToken) return envToken
+  return getSecureStorage().read()?.trustedDeviceToken
+}
+
+/**
+ * densable `gy` @180890594 — `wV()` then `hLt()`.
+ */
+export async function getTrustedDeviceTokenIfGateOn(): Promise<
+  string | undefined
+> {
+  if (!isTrustedDeviceGateEnabled()) return
+  return readStoredTrustedDeviceToken()
+}
+
+/** densable `L` @180888481 — `Xle` enroll cooldown. */
+const TRUSTED_DEVICE_ENROLL_RETRY_MS = 300_000
+
+/** densable `k.lastEnrollAttemptAtMs` @180888421. */
+let lastEnrollAttemptAtMs = 0
+
+/**
+ * densable `Xle` @180891056. 403 `untrusted_device`: bust cache, enroll once
+ * per cooldown if the token is missing or unchanged, then return the new
+ * token so the caller retries. NEVER `export function Xle`. No Far key store.
+ */
+export async function recoverTrustedDeviceTokenAfterUntrusted(
+  previousToken?: string,
+  credentials?: unknown,
+): Promise<string | undefined> {
+  if (!isTrustedDeviceGateEnabled()) return
+  clearTrustedDeviceTokenCache()
+  let n = await getTrustedDeviceTokenIfGateOn()
+  if (!n || n === previousToken) {
+    if (Date.now() - lastEnrollAttemptAtMs >= TRUSTED_DEVICE_ENROLL_RETRY_MS) {
+      lastEnrollAttemptAtMs = Date.now()
+      await enrollTrustedDevice({ trigger: 'server_denied', credentials })
+      n = await getTrustedDeviceTokenIfGateOn()
+    }
+  }
+  if (!n || n === previousToken) return
+  logForDebugging(
+    '[trusted-device] Token changed after untrusted_device 403 (cache bust or lazy enrollment); caller will retry',
+  )
+  return n
+}
+
+/**
+ * densable `cdt` @180891452 — `Xle` then `retry(newToken)`.
+ * NEVER `export function cdt`.
+ */
+export async function retryAfterTrustedDeviceRenew<T>(
+  previousToken: string | undefined,
+  retry: (token: string) => Promise<T>,
+  credentials?: unknown,
+): Promise<T | undefined> {
+  const o = await recoverTrustedDeviceTokenAfterUntrusted(
+    previousToken,
+    credentials,
+  )
+  if (!o) return
+  return retry(o)
+}
+
+/**
+ * densable `d5o` @180891821 — bind-path enroll.
+ */
+export async function trustedDeviceTokenForBind(
+  credentials?: unknown,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isTrustedDeviceGateEnabled()) {
+    return { ok: false, error: 'trusted_devices_off' }
+  }
+  clearTrustedDeviceTokenCache()
+  if (await readStoredTrustedDeviceToken()) {
+    return { ok: true }
+  }
+  if (isProactiveEnrollmentDisabled()) {
+    return { ok: false, error: 'enrollment_paused' }
+  }
+  logForDebugging(
+    '[trusted-device] Not enrolled, enrolling for a device-bound session',
+  )
+  await enrollTrustedDevice({ trigger: 'device_bind', credentials })
+  return (await getTrustedDeviceTokenIfGateOn())
+    ? { ok: true }
+    : { ok: false, error: 'not_given' }
 }
 
 // Memoized — secureStorage.read() spawns a macOS `security` subprocess (~40ms).
@@ -134,7 +254,11 @@ export function clearTrustedDeviceToken(): void {
  * this must be called immediately after a fresh /login. Calling it later
  * (e.g. lazy enrollment on /bridge 403) will fail with 403 stale_session.
  */
-export async function enrollTrustedDevice(): Promise<void> {
+export async function enrollTrustedDevice(opts?: {
+  trigger?: 'proactive' | 'device_bind' | 'server_denied'
+  credentials?: unknown
+}): Promise<void> {
+  const trigger = opts?.trigger ?? 'proactive'
   try {
     // checkGate_CACHED_OR_BLOCKING awaits any in-flight GrowthBook re-init
     // (triggered by refreshGrowthBookAfterAuthChange in login.tsx) before
@@ -142,6 +266,12 @@ export async function enrollTrustedDevice(): Promise<void> {
     if (!(await checkGate_CACHED_OR_BLOCKING(TRUSTED_DEVICE_GATE))) {
       logForDebugging(
         `[trusted-device] Gate ${TRUSTED_DEVICE_GATE} is off, skipping enrollment`,
+      )
+      return
+    }
+    if (isProactiveEnrollmentDisabled()) {
+      logForDebugging(
+        `[trusted-device] Proactive enrollment disabled via ${DISABLE_PROACTIVE_ENROLLMENT}, skipping`,
       )
       return
     }
@@ -158,9 +288,43 @@ export async function enrollTrustedDevice(): Promise<void> {
     // (config → file → permissions → sessionStorage → commands). Daemon callers
     // of getTrustedDeviceToken() don't need this; only /login does.
     /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getClaudeAIOAuthTokens } =
-      require('../utils/auth.js') as typeof import('../utils/auth.js')
+    const {
+      checkAndRefreshOAuthTokenIfNeeded,
+      getClaudeAIOAuthTokens,
+      isClaudeAISubscriber,
+      isConsumerSubscriber,
+    } = require('../utils/auth.js') as typeof import('../utils/auth.js')
+    const { getAPIProvider } =
+      require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
+    const { waitForPolicyLimitsToLoad, isPolicyEnforced, isPolicyAllowed } =
+      require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
+    if (getAPIProvider() !== 'firstParty' || !isClaudeAISubscriber()) {
+      return
+    }
+    await waitForPolicyLimitsToLoad()
+    const orgEnforced = isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY)
+    const bindOrDenied =
+      trigger === 'server_denied' ||
+      (trigger === 'device_bind' && isConsumerSubscriber())
+    if (
+      !(
+        orgEnforced ||
+        (bindOrDenied && isPolicyAllowed(REQUIRE_TRUSTED_DEVICES_POLICY))
+      )
+    ) {
+      logForDebugging(
+        `[trusted-device] Org has not enabled ${REQUIRE_TRUSTED_DEVICES_POLICY}, skipping enrollment`,
+      )
+      return
+    }
+    if (isEssentialTrafficOnly()) {
+      logForDebugging(
+        '[trusted-device] Essential traffic only, skipping enrollment',
+      )
+      return
+    }
+    await checkAndRefreshOAuthTokenIfNeeded(0, false, opts?.credentials)
     const accessToken = getClaudeAIOAuthTokens()?.accessToken
     if (!accessToken) {
       logForDebugging('[trusted-device] No OAuth token, skipping enrollment')
@@ -170,13 +334,6 @@ export async function enrollTrustedDevice(): Promise<void> {
     // different account (account-switch without /logout). Skipping enrollment
     // would send the old account's token on the new account's bridge calls.
     const secureStorage = getSecureStorage()
-
-    if (isEssentialTrafficOnly()) {
-      logForDebugging(
-        '[trusted-device] Essential traffic only, skipping enrollment',
-      )
-      return
-    }
 
     const baseUrl = getOauthConfig().BASE_API_URL
     let response

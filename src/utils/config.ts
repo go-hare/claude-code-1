@@ -340,6 +340,8 @@ export type GlobalConfig = {
    * (vscodeSdkMcp Fjc). Once true, further nudge events are ignored.
    */
   hasSeenAutoDefaultNudge?: boolean
+  /** densable `hasSeenAutoModeOutsideReadPrompt` — first auto-mode outside-read Yes/Block latch. */
+  hasSeenAutoModeOutsideReadPrompt?: boolean
 
   // Transcript share prompt tracking ("Don't ask again")
   transcriptShareDismissed?: boolean

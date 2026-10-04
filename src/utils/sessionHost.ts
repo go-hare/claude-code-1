@@ -21,12 +21,14 @@ import {
   RequestLatches,
   TelemetryHandles,
 } from './sessionSlots.js'
+import { createSignal, type Signal } from './signal.js'
 
 /** Official `kei` / `Iei` object on `Ie.#L`. */
 export type LaunchForkReplayConfig = {
   appendSystemPrompt?: string
   agent?: string
   agents?: string
+  systemPromptSnapshot?: boolean
 }
 
 /**
@@ -59,12 +61,17 @@ export class LaunchOptions {
   #k = false
   #y = false
   #x = true
-  #A: boolean | null = null
+  #A: 'forward' | null = null
   #T = false
   #P: unknown = null
   #M = false
   #w = false
   #L: LaunchForkReplayConfig = {}
+  /** densable spareClaimState — parked | claiming | claimed | failed. */
+  #spareClaim: 'parked' | 'claiming' | 'claimed' | 'failed' | undefined
+  #spareParkedAtMs: number | undefined
+  /** densable Mcn / markWarmSpareClaimed @179677493 */
+  #warmSpareClaimed = false
 
   isInteractive(): boolean {
     return this.#e
@@ -210,10 +217,10 @@ export class LaunchOptions {
   replaceMayForwardHomeSettings(e: boolean): void {
     this.#x = e
   }
-  homeSettingsHostConsent(): boolean | null {
+  homeSettingsHostConsent(): 'forward' | null {
     return this.#A
   }
-  replaceHomeSettingsHostConsent(e: boolean | null): void {
+  replaceHomeSettingsHostConsent(e: 'forward' | null): void {
     this.#A = e
   }
   scheduledTasksEnabled(): boolean {
@@ -246,6 +253,26 @@ export class LaunchOptions {
   replaceForkReplayLaunchConfig(e: LaunchForkReplayConfig): void {
     this.#L = e
   }
+  spareClaimState(): 'parked' | 'claiming' | 'claimed' | 'failed' | undefined {
+    return this.#spareClaim
+  }
+  replaceSpareClaimState(
+    e: 'parked' | 'claiming' | 'claimed' | 'failed' | undefined,
+  ): void {
+    this.#spareClaim = e
+  }
+  spareParkedAtMs(): number | undefined {
+    return this.#spareParkedAtMs
+  }
+  replaceSpareParkedAtMs(e: number | undefined): void {
+    this.#spareParkedAtMs = e
+  }
+  markWarmSpareClaimed(): void {
+    this.#warmSpareClaimed = true
+  }
+  wasWarmSpareClaimed(): boolean {
+    return this.#warmSpareClaimed
+  }
   reset(): void {
     this.#e = false
     this.#t = null
@@ -277,6 +304,9 @@ export class LaunchOptions {
     this.#M = false
     this.#w = false
     this.#L = {}
+    this.#spareClaim = undefined
+    this.#spareParkedAtMs = undefined
+    this.#warmSpareClaimed = false
   }
 }
 
@@ -481,6 +511,8 @@ export class SessionHost {
   requestLatches: RequestLatches
   accountCreditLatches: AccountCreditLatches
   proactivity: Proactivity
+  /** densable qhe @178133390 — process-env change emit (Fc/IE). */
+  envChange: Signal = createSignal()
 
   constructor(e: {
     backgroundHousekeeping: BackgroundHousekeeping
@@ -535,3 +567,31 @@ export {
   getReplDiffHost,
   resetSessionHostForTests,
 } from './sessionRoot.js'
+
+
+function bootstrapHost(): SessionHost {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (
+    require('./sessionRoot.js') as typeof import('./sessionRoot.js')
+  ).getBootstrapSessionHost()
+}
+
+/** densable qhe @178133390 `Fc().emit()` */
+export function emitProcessEnvChange(): void {
+  bootstrapHost().envChange.emit()
+}
+
+/** densable dHo @178133417 */
+export function subscribeProcessEnvChange(listener: () => void): () => void {
+  return bootstrapHost().envChange.subscribe(listener)
+}
+
+/** densable Mcn @179677493 */
+export function markWarmSpareClaimed(): void {
+  bootstrapHost().launchOptions.markWarmSpareClaimed()
+}
+
+/** densable sIo @179677540 */
+export function wasWarmSpareClaimed(): boolean {
+  return bootstrapHost().launchOptions.wasWarmSpareClaimed()
+}

@@ -379,6 +379,15 @@ describe('getSettingSourceDisplayNameLowercase', () => {
       'current session',
     )
   })
+
+  test('maps hostCredential to gold cloud-session credential guard', () => {
+    expect(getSettingSourceDisplayNameLowercase('hostCredential')).toBe(
+      'cloud-session credential guard',
+    )
+    expect(getSettingSourceDisplayNameCapitalized('hostCredential')).toBe(
+      'Cloud-session credential guard',
+    )
+  })
 })
 
 describe('getSettingSourceDisplayNameCapitalized', () => {

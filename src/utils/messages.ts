@@ -711,6 +711,7 @@ export function createUserMessage({
   summarizeMetadata,
   toolUseResult,
   mcpMeta,
+  toolEndsTurn,
   uuid,
   timestamp,
   imagePasteIds,
@@ -734,6 +735,11 @@ export function createUserMessage({
     _meta?: Record<string, unknown>
     structuredContent?: Record<string, unknown>
   }
+  /**
+   * densable 2.1.283 `toolEndsTurn` / smo @ 184413938. Successful StructuredOutput
+   * (and MCP claude/endTurn) ask query not to recurse.
+   */
+  toolEndsTurn?: boolean
   uuid?: UUID | string
   timestamp?: string
   imagePasteIds?: number[]
@@ -774,6 +780,7 @@ export function createUserMessage({
     timestamp: timestamp ?? new Date().toISOString(),
     toolUseResult,
     mcpMeta,
+    toolEndsTurn,
     imagePasteIds,
     sourceToolAssistantUUID,
     permissionMode,

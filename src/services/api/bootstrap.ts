@@ -164,7 +164,17 @@ export async function fetchBootstrapData(): Promise<void> {
     const response = await fetchBootstrapAPI()
     if (!response) return
 
-    const clientData = response.client_data ?? null
+    // gold Iso @190505174 via QFr setClientDataOverride — merge signed
+    // --client-data-url document over bootstrap client_data for this model.
+    let clientData = response.client_data ?? null
+    try {
+      const { mergeLoadedClientDataInto } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../cli/clientDataUrl.js') as typeof import('../../cli/clientDataUrl.js')
+      clientData = mergeLoadedClientDataInto(clientData) ?? null
+    } catch {
+      // isolation — optional
+    }
     const additionalModelOptions = response.additional_model_options ?? []
     // densable model_access → modelAccessCache (S8t). Absent field leaves
     // prior cache; null/[] clears. Validate maxEffortLevel against EffortLevel.

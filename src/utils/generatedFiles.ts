@@ -126,6 +126,44 @@ export function isGeneratedFile(filePath: string): boolean {
 }
 
 /**
+ * densable `LTr` — test/spec paths treated as noise in the REPL diff panel.
+ */
+const TEST_DIRECTORIES = [
+  '/test/',
+  '/tests/',
+  '/spec/',
+  '/specs/',
+  '/__tests__/',
+  '/__mocks__/',
+  '/__snapshots__/',
+  '/__fixtures__/',
+  '/fixtures/',
+  '/testdata/',
+]
+
+const TEST_FILENAME_PATTERNS = [
+  /\.test\.[a-z]+$/i,
+  /\.spec\.[a-z]+$/i,
+  /_test\.[a-z]+$/i,
+  /_spec\.[a-z]+$/i,
+  /\.snap$/i,
+]
+
+/** densable `LTr(e)`. */
+export function isTestFile(filePath: string): boolean {
+  const normalizedPath =
+    posix.sep + filePath.split(sep).join(posix.sep).replace(/^\/+/, '')
+  const fileName = basename(filePath)
+  for (const dir of TEST_DIRECTORIES) {
+    if (normalizedPath.includes(dir)) return true
+  }
+  for (const pattern of TEST_FILENAME_PATTERNS) {
+    if (pattern.test(fileName)) return true
+  }
+  return false
+}
+
+/**
  * Filter a list of files to exclude generated files.
  *
  * @param files - Array of file paths

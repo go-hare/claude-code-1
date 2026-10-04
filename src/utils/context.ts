@@ -1,6 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
-import { getGlobalConfig } from './config.js'
+import { readMergedClientData } from '../cli/clientDataUrl.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
@@ -337,7 +337,7 @@ export function getSonnet1mExpTreatmentEnabled(model: string): boolean {
   if (!getCanonicalName(model).includes('sonnet-4-6')) {
     return false
   }
-  return getGlobalConfig().clientDataCache?.['coral_reef_sonnet'] === 'true'
+  return readMergedClientData()?.['coral_reef_sonnet'] === 'true'
 }
 
 /**

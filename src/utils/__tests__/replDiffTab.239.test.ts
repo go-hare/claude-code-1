@@ -16,6 +16,7 @@ import {
   openReplDiffTabFromAutoOpen,
   REPL_DIFF_EMPTY_SESSION,
   REPL_DIFF_EMPTY_UNCOMMITTED,
+  REPL_DIFF_LIST_WINDOW,
   replDiffEmptyCopy,
   replDiffPreSessionStats,
   replDiffTerminalWidthBucket,
@@ -62,20 +63,21 @@ describe('densable 2.1.239 willow crate source lock', () => {
     expect(src).toContain('findGitRootUncached(getCwd())')
     expect(src).toContain('tab: next as AnalyticsMetadata')
     expect(src).toContain('tengu_repl_diff_panel_shown')
+    expect(REPL_DIFF_LIST_WINDOW).toBe(8)
+    expect(REPL_DIFF_EMPTY_SESSION).toBe('No changes this session')
   })
 
-  test('jDl description + immediate + uH0 branch', () => {
+  test('D$e description + G0t immediate + toggleDiffPanel call', () => {
     expect(cmd).toContain('Toggle the diff panel showing uncommitted changes')
     expect(cmd).toContain('View uncommitted changes and per-turn diffs')
-    expect(cmd).toContain('if (getIsRemoteMode()) return false')
-    expect(cmd).toContain('isWillowCrateEnabled()')
+    expect(cmd).toContain('resolveDiffPresentation')
     expect(cmd).toContain('isFullscreenEnvEnabled()')
+    expect(cmd).not.toContain('isWillowCrateEnabled')
     expect(call).toContain('dispatchedAsImmediate')
-    expect(call).toContain('ToggleDiffSidebar')
+    expect(call).toContain('toggleDiffPanel')
     expect(call).toContain('DiffDialog')
     expect(toggle).toContain("replTab !== 'diff'")
-    expect(toggle).toContain("display: 'system'")
-    expect(toggle).toContain("display: 'skip'")
+    expect(src).toContain('toggleDiffPanelForSlash')
   })
 })
 
@@ -199,29 +201,33 @@ describe('densable Zmu visible stats + empty copy', () => {
   })
 
   test('empty copy follows baseMode / source', () => {
-    expect(replDiffEmptyCopy('uncommitted', { kind: 'working-tree' })).toBe(
-      REPL_DIFF_EMPTY_UNCOMMITTED,
-    )
-    expect(replDiffEmptyCopy('session', { kind: 'working-tree' })).toBe(
-      REPL_DIFF_EMPTY_SESSION,
-    )
+    expect(replDiffEmptyCopy('uncommitted', { kind: 'working-tree' })).toEqual({
+      headline: REPL_DIFF_EMPTY_UNCOMMITTED,
+      hint: null,
+    })
+    expect(replDiffEmptyCopy('session', { kind: 'working-tree' })).toEqual({
+      headline: REPL_DIFF_EMPTY_SESSION,
+      hint: null,
+    })
     expect(
       replDiffEmptyCopy('branch', {
         kind: 'branch',
         baseBranch: 'main',
       }),
-    ).toBe('No changes vs main')
+    ).toEqual({ headline: 'No changes vs main', hint: null })
   })
 
-  test('ReplDiffPanel uses visible stats and mode empty copy', () => {
+  test('ReplDiffPanel uses partition + Obe empty copy', () => {
     const panel = readFileSync(
       join(import.meta.dir, '../../components/diff/ReplDiffPanel.tsx'),
       'utf8',
     )
-    expect(panel).toContain('replDiffVisibleFiles')
-    expect(panel).toContain('replDiffVisibleStats')
+    expect(panel).toContain('partitionReplDiffFiles')
     expect(panel).toContain('replDiffPreSessionStats')
     expect(panel).toContain('replDiffEmptyCopy')
+    expect(panel).toContain('replDiffHiddenEmptyCopy')
+    expect(panel).toContain('app:toggleDiffNoiseFilter')
+    expect(panel).toContain('app:toggleDiffPreSession')
     expect(panel).not.toContain('No uncommitted changes')
   })
 
@@ -252,6 +258,6 @@ describe('densable Zmu visible stats + empty copy', () => {
     expect(panel).toContain('fileHistory.snapshotSequence')
     expect(panel).toContain('useDiffData(')
     expect(panel).toContain('requestedMode')
-    expect(panel).toContain('replDiffEmptyCopy(displayMode, source)')
+    expect(panel).toContain('replDiffEmptyCopy')
   })
 })

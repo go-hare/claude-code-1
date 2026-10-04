@@ -23,6 +23,8 @@ export type ForkReplayLaunchConfig = {
   agent?: string
   /** Raw CLI `--agents` JSON string. */
   agents?: string
+  /** densable 2.1.283 `--system-prompt-snapshot`. */
+  systemPromptSnapshot?: boolean
 }
 /**
  * densable `Dt.settingsEffortAtStartup` / M_s — settings-derived effort at

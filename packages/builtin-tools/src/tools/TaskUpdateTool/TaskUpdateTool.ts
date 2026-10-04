@@ -1,7 +1,12 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
+import {
+  buildTool,
+  type ToolCallProgress,
+  type ToolDef,
+  type ToolUseContext,
+} from 'src/Tool.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import {
   executeTaskCompletedHooks,
@@ -137,13 +142,17 @@ export const TaskUpdateTool = buildTool({
       metadata,
     },
     context,
+    _canUseTool,
+    _parentMessage,
+    onProgress?: ToolCallProgress,
   ) {
     const taskListId = getTaskListId()
 
-    // Auto-expand task list when updating tasks
-    context.setAppState(prev => {
-      if (prev.expandedView === 'tasks') return prev
-      return { ...prev, expandedView: 'tasks' as const }
+    // densable: 5th-arg onProgress({type:"set_expanded_view"}) before getTask.
+    // Gold CLI host onQueryEvent drops this; do not setAppState here.
+    onProgress?.({
+      type: 'set_expanded_view',
+      expandedView: 'tasks',
     })
 
     // Check if task exists

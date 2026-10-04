@@ -52,16 +52,27 @@ export function shouldFullscreenInferenceCommandBeImmediate(): boolean {
 }
 
 /**
- * densable ARt(cmd, args) — resolve Command.immediate which may be boolean or
- * `(args: string) => boolean`. Only `true` / function returning true is immediate.
+ * densable VLe(cmd, args, presentation) — resolve Command.immediate which may
+ * be boolean or `(args, presentation) => boolean`. Only `true` / function
+ * returning true is immediate.
  */
 export function isCommandImmediate(
   command:
-    | { immediate?: boolean | ((args: string) => boolean) }
+    | {
+        immediate?:
+          | boolean
+          | ((
+              args: string,
+              presentation?: 'fullscreen' | 'inline',
+            ) => boolean)
+      }
     | null
     | undefined,
   args: string,
+  presentation: 'fullscreen' | 'inline' = 'inline',
 ): boolean {
   const immediate = command?.immediate
-  return typeof immediate === 'function' ? immediate(args) : immediate === true
+  return typeof immediate === 'function'
+    ? immediate(args, presentation)
+    : immediate === true
 }

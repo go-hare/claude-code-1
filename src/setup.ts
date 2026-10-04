@@ -423,9 +423,31 @@ export async function setup(
       m.registerSessionFileAccessHooks(),
     ) // Register session file access analytics hooks
     if (feature('TEAMMEM')) {
-      void import('./services/teamMemorySync/watcher.js').then(m =>
-        m.startTeamMemoryWatcher(),
-      ) // Start team memory sync watcher
+      void import('./services/teamMemorySync/watcher.js').then(async m => {
+        await m.startTeamMemoryWatcher()
+        const skills = await import('./utils/memoryStoreSkills.js')
+        const { getTeamMemPath } = await import('./memdir/teamMemPaths.js')
+        const mountDir = getTeamMemPath().replace(/[/\\]+$/, '')
+        const { getPinnedStorageV5 } = await import(
+          './utils/storageV5/index.js'
+        )
+        skills.getMemoryStoresHost().reset({
+          storeSkillConfigs: [
+            { scope: 'team', mount: 'team', skillsDirs: ['skills'] },
+          ],
+          multiStoreState: {
+            stores: [
+              {
+                mountName: 'team',
+                mountDir,
+                partitionId: 'team',
+              },
+            ],
+          },
+          storageV5: getPinnedStorageV5(),
+        })
+        skills.getMemoryStoresHost().refreshStoreSkills()
+      })
     }
   }
   initSinks() // Attach error log + analytics sinks and drain queued events

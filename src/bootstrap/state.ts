@@ -1319,6 +1319,60 @@ export function setThinkingDisplayExplicit(value: boolean): void {
 }
 
 /**
+ * densable `j2t` @175576313
+ * `function j2t(){return n().host.requestLatches.thinkingHighlightsRefused()}`
+ */
+export function getThinkingHighlightsRefused(): boolean {
+  return getBootstrapSessionHost().requestLatches.thinkingHighlightsRefused()
+}
+
+/**
+ * densable `x3r` @175576396
+ * `function x3r(){n().host.requestLatches.markThinkingHighlightsRefused()}`
+ */
+export function markThinkingHighlightsRefused(): void {
+  getBootstrapSessionHost().requestLatches.markThinkingHighlightsRefused()
+}
+
+/**
+ * densable `xYn` @175576214
+ * `function xYn(){return n().host.requestLatches.thinkingResumptionRefused()}`
+ */
+export function getThinkingResumptionRefused(): boolean {
+  return getBootstrapSessionHost().requestLatches.thinkingResumptionRefused()
+}
+
+/**
+ * densable `R3r` @175576242
+ * `function R3r(){n().host.requestLatches.markThinkingResumptionRefused()}`
+ */
+export function markThinkingResumptionRefused(): void {
+  getBootstrapSessionHost().requestLatches.markThinkingResumptionRefused()
+}
+
+/** densable `lq.markRelayThinkingStripRecorded` @184980597 */
+export function markRelayThinkingStripRecorded(reason: string): void {
+  getBootstrapSessionHost().requestLatches.markRelayThinkingStripRecorded(
+    reason,
+  )
+}
+
+/** densable `lq.relayThinkingStripRecorded` */
+export function getRelayThinkingStripRecorded(): string | null {
+  return getBootstrapSessionHost().requestLatches.relayThinkingStripRecorded()
+}
+
+/** densable `lq.relayStoppedInLastDispatch` */
+export function relayStoppedInLastDispatch(): boolean {
+  return getBootstrapSessionHost().requestLatches.relayStoppedInLastDispatch()
+}
+
+/** densable mark for Zue `qn` */
+export function markRelayStoppedInLastDispatch(): void {
+  getBootstrapSessionHost().requestLatches.markRelayStoppedInLastDispatch()
+}
+
+/**
  * official W$ @178563384 cluster
  * `function W$(){return n().host.launchOptions.permissionPromptToolName()}`
  * export alias `W$ as getPermissionPromptToolName`

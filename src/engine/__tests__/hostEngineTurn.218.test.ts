@@ -134,6 +134,43 @@ describe('densable 2.1.218 HWf runHostEngineTurn', () => {
     inputRef.current?.done()
   })
 
+  test('HWf drops set_expanded_view (gold CLI host onQueryEvent has no arm)', async () => {
+    async function* expandTurn(
+      _p: HostTurnIntent,
+      _ac: AbortController,
+    ): AsyncGenerator<unknown> {
+      yield { type: 'set_expanded_view', expandedView: 'tasks' }
+      yield { type: 'assistant', text: 'visible' }
+      yield { type: 'result', subtype: 'success', is_error: false }
+      return { reason: 'completed' }
+    }
+
+    const engine: HostEngine = createHostEngine({
+      prepareTurn: async intent => intent,
+      runTurn: expandTurn,
+    })
+    const events: unknown[] = []
+    const inputRef: { current: Stream<Record<string, unknown>> | null } = {
+      current: null,
+    }
+    const pendingQueryParamsRef = {
+      current: [] as Array<Record<string, unknown>>,
+    }
+
+    await runHostEngineTurn({
+      engine,
+      inputRef,
+      pendingQueryParamsRef,
+      turnInput: { uuid: 'u1' },
+      newMessages: [{ type: 'user', message: { role: 'user', content: 'x' } }],
+      onQueryEvent: e => events.push(e),
+    })
+
+    expect(events).toEqual([{ type: 'assistant', text: 'visible' }])
+    engine.close()
+    inputRef.current?.done()
+  })
+
   test('system/notification routes to addNotification', async () => {
     async function* notifTurn(
       _p: HostTurnIntent,

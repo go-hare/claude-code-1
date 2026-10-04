@@ -862,6 +862,24 @@ export function hasAccessToIDEExtensionDiffFeature(
   )
 }
 
+/**
+ * densable `Otn` @181203843 — builtin plugin `eee="diff"` is available, enabled,
+ * and live. Local builtin registry has no `diff` plugin, so this is false until
+ * one is registered (do not invent the plugin).
+ */
+export function isDiffBuiltinPluginAvailable(): boolean {
+  try {
+    const { getBuiltinPluginDefinition, getBuiltinPlugins } =
+      require('../plugins/builtinPlugins.js') as typeof import('../plugins/builtinPlugins.js')
+    const def = getBuiltinPluginDefinition('diff')
+    if (def === undefined) return false
+    if (def.isAvailable && !def.isAvailable()) return false
+    return getBuiltinPlugins().enabled.some(e => e.name === 'diff')
+  } catch {
+    return false
+  }
+}
+
 const EXTENSION_ID =
   process.env.USER_TYPE === 'ant'
     ? 'anthropic.claude-code-internal'

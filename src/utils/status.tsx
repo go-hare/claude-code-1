@@ -21,6 +21,7 @@ import { getDisplayPath } from './file.js';
 import { formatNumber } from './format.js';
 import { getGatewayAuth } from './gatewayEnv.js';
 import { getIdeClientName, type IDEExtensionInstallationStatus, isJetBrainsIde, toIDEDisplayName } from './ide.js';
+import { describeLoadedClientDataStatus } from '../cli/clientDataUrl.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
 import { getAPIProvider, getBedrockMantleOverrideProvider } from './model/providers.js';
 import { getMTLSConfig } from './mtls.js';
@@ -265,6 +266,10 @@ export function buildSettingSourcesProperties(): Property[] {
           },
         ]
       : []),
+    ...(() => {
+      const clientData = describeLoadedClientDataStatus();
+      return clientData !== undefined ? [{ label: 'Client data', value: clientData }] : [];
+    })(),
   ];
 }
 

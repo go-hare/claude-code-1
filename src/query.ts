@@ -63,6 +63,7 @@ import {
   createToolUseSummaryMessage,
   createMicrocompactBoundaryMessage,
   isHumanLikeOrigin,
+  isThinkingMessage,
   stripSignatureBlocks,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
@@ -74,6 +75,10 @@ import {
   startRelevantMemoryPrefetch,
 } from './utils/attachments.js'
 import { injectBatchingReminder } from './utils/batchingReminder.js'
+import {
+  emitRelayThinkingStripped,
+  takePendingThinkingStripped,
+} from './utils/thinking.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (require('./services/skillSearch/prefetch.js') as typeof import('./services/skillSearch/prefetch.js'))
@@ -121,9 +126,17 @@ import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
+import {
+  isToolBridgeEvent,
+  type ToolBridgeEvent,
+} from './services/tools/toolExecution.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks } from './query/stopHooks.js'
+import {
+  endTurnSourceFromToolResult,
+  type ToolEndTurnSource,
+} from './query/endTurnFromToolResult.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
@@ -455,7 +468,8 @@ export async function* query(
   | RequestStartEvent
   | Message
   | TombstoneMessage
-  | ToolUseSummaryMessage,
+  | ToolUseSummaryMessage
+  | ToolBridgeEvent,
   Terminal
 > {
   const consumedCommandUuids: string[] = []
@@ -760,7 +774,8 @@ async function* queryLoop(
   | RequestStartEvent
   | Message
   | TombstoneMessage
-  | ToolUseSummaryMessage,
+  | ToolUseSummaryMessage
+  | ToolBridgeEvent,
   Terminal
 > {
   // Immutable params — never reassigned during the query loop.
@@ -1158,6 +1173,9 @@ async function* queryLoop(
     // loop-exit signal. If false after streaming, we're done (modulo stop-hook retry).
     const toolUseBlocks: ToolUseBlock[] = []
     let needsFollowUp = false
+    // densable 2.1.283 smo / ee.toolRequestedEndTurn — must be in scope for
+    // both streaming mid-turn results and the post-stream tool loop.
+    let toolRequestedEndTurn: ToolEndTurnSource | false = false
 
     queryCheckpoint('query_setup_start')
     const useStreamingToolExecution = config.gates.streamingToolExecution
@@ -2220,8 +2238,16 @@ async function* queryLoop(
               !toolUseContext.abortController.signal.aborted
             ) {
               for (const result of streamingToolExecutor.getCompletedResults()) {
+                // densable jR @190742729: yield control events mid-stream
+                if (isToolBridgeEvent(result)) {
+                  yield result
+                  continue
+                }
                 if (result.message) {
                   yield result.message
+                  // densable 2.1.283 lr/smo — streaming tool_result can end the turn
+                  const endTurn = endTurnSourceFromToolResult(result.message)
+                  if (endTurn) toolRequestedEndTurn = endTurn
                   // densable 2.1.228 St: keep tool attachments (e.g. skill
                   // deferred_tools_delta) in toolResults for mid-turn scan.
                   accumulateToolResultForMidTurn(
@@ -2236,6 +2262,17 @@ async function* queryLoop(
             }
           }
           queryCheckpoint('query_api_streaming_end')
+          // densable Zue() @184980379 — Xue stash, else relay-stopped strip
+          {
+            const stripped =
+              takePendingThinkingStripped() ??
+              emitRelayThinkingStripped(
+                assistantMessages.some(m => isThinkingMessage(m)),
+              )
+            if (stripped) {
+              yield createAttachmentMessage(stripped)
+            }
+          }
 
           // Yield deferred microcompact boundary message using actual API-reported
           // token deletion count instead of client-side estimates.
@@ -2655,6 +2692,10 @@ async function* queryLoop(
           // Consume remaining results - executor generates synthetic tool_results for
           // aborted tools since it checks the abort signal in executeTool()
           for await (const update of streamingToolExecutor.getRemainingResults()) {
+            if (isToolBridgeEvent(update)) {
+              yield update
+              continue
+            }
             if (update.message) {
               yield update.message
             }
@@ -3259,8 +3300,18 @@ async function* queryLoop(
       : runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)
 
     for await (const update of toolUpdates) {
+      // densable jR: yield control events (set_expanded_view) onto the query
+      // stream. Gold CLI host onQueryEvent drops them; SDK QueryEngine skips.
+      if (isToolBridgeEvent(update)) {
+        yield update
+        continue
+      }
       if (update.message) {
         yield update.message
+
+        // densable 2.1.283 lr @ 190733487: smo(g) → ee.toolRequestedEndTurn
+        const endTurn = endTurnSourceFromToolResult(update.message)
+        if (endTurn) toolRequestedEndTurn = endTurn
 
         if (update.message.type === 'attachment') {
           if (update.message.attachment!.type === 'hook_stopped_continuation') {
@@ -3421,6 +3472,28 @@ async function* queryLoop(
     }
     if (shouldPreventContinuation) {
       return { reason: 'hook_stopped' }
+    }
+    // densable 2.1.283 Ud @ 190790198 — StructuredOutput / MCP claude/endTurn
+    // completes without a recursive query turn (max_turns=1 one-shot).
+    if (toolRequestedEndTurn) {
+      logEvent('tengu_mcp_tool_result_ended_turn', {
+        queryChainId: queryChainIdForAnalytics,
+        queryDepth: queryTracking.depth,
+        source:
+          toolRequestedEndTurn as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      yield* handleStopHooks(
+        messagesForQuery,
+        assistantMessages,
+        systemPrompt,
+        userContext,
+        systemContext,
+        updatedToolUseContext,
+        querySource,
+        stopHookActive,
+        toolRequestedEndTurn,
+      )
+      return { reason: 'completed' }
     }
 
     if (tracking?.compacted) {

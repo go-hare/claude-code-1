@@ -2619,6 +2619,7 @@ export const fetchToolsForClient = memoizeWithLRU(
               return mcpToolCheckPermissionsResult(
                 requiresUserInteraction,
                 fullyQualifiedName,
+                client.name,
               )
             },
             async call(

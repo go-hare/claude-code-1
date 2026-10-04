@@ -318,7 +318,10 @@ export function createRootSession(e: {
 export function createBootstrapSession(): Session {
   let e = ''
   if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
-    const t = cwd()
+    // bun scripts/dev.ts pins spawn cwd to the repo; SDK/caller's directory
+    // is CLAUDE_CODE_CALLER_CWD. Official binary has no wrapper pin.
+    const caller = process.env.CLAUDE_CODE_CALLER_CWD?.trim()
+    const t = caller && caller.length > 0 ? caller : cwd()
     try {
       e = nfcPath(realpathSync(t))
     } catch {

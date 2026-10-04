@@ -39,7 +39,8 @@ import {
   setTracerProvider,
 } from 'src/bootstrap/state.js'
 import {
-  getOtelHeadersFromHelper,
+  getOtelHeadersFromHelperAsync,
+  prefetchOtelHeadersFromHelper,
   getSubscriptionType,
   is1PApiCustomer,
   isClaudeAISubscriber,
@@ -158,7 +159,7 @@ async function getOtlpReaders() {
         process.env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL?.trim() ||
         process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
 
-      const httpConfig = getOTLPExporterConfig()
+      const httpConfig = getOTLPExporterConfig(protocol)
 
       switch (protocol) {
         case 'grpc': {
@@ -233,7 +234,7 @@ async function getOtlpLogExporters() {
     if (exporterType === 'console') {
       exporters.push(new ConsoleLogRecordExporter())
     } else if (exporterType === 'otlp') {
-      const httpConfig = getOTLPExporterConfig()
+      const httpConfig = getOTLPExporterConfig(protocol)
 
       switch (protocol) {
         case 'grpc': {
@@ -284,7 +285,7 @@ async function getOtlpTraceExporters() {
         process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL?.trim() ||
         process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
 
-      const httpConfig = getOTLPExporterConfig()
+      const httpConfig = getOTLPExporterConfig(protocol)
 
       switch (protocol) {
         case 'grpc': {
@@ -776,11 +777,12 @@ function parseOtelHeadersEnvVar(): Record<string, string> {
 }
 
 /**
- * densable JAo — OTLP exporter config:
- * - headers (static env / otelHeadersHelper)
+ * densable Ne / JAo — OTLP exporter config:
+ * - headers (static env / otelHeadersHelper H3n)
+ * - $Nr prefetch when helper + http/json|http/protobuf
  * - httpAgentOptions always = Mvd(endpoint) so YAo sets Content-Length (#31)
  */
-function getOTLPExporterConfig() {
+function getOTLPExporterConfig(protocol?: string) {
   const settings = getSettings_DEPRECATED()
 
   // Build base config
@@ -793,8 +795,11 @@ function getOTLPExporterConfig() {
   // Otherwise just return static headers if any exist
   if (settings?.otelHeadersHelper) {
     config.headers = async (): Promise<Record<string, string>> => {
-      const dynamicHeaders = getOtelHeadersFromHelper()
+      const dynamicHeaders = await getOtelHeadersFromHelperAsync()
       return { ...staticHeaders, ...dynamicHeaders }
+    }
+    if (protocol === 'http/json' || protocol === 'http/protobuf') {
+      prefetchOtelHeadersFromHelper()
     }
   } else if (Object.keys(staticHeaders).length > 0) {
     config.headers = async (): Promise<Record<string, string>> => staticHeaders

@@ -45,6 +45,8 @@ export class OAuthService {
        * not this process.
        */
       skipBrowserOpen?: boolean
+      /** densable Iqt `skipProfileFetch:!0` @195245230 */
+      skipProfileFetch?: boolean
     },
   ): Promise<OAuthTokens> {
     // Create OAuth callback listener and start it
@@ -103,9 +105,15 @@ export class OAuthService {
       // Fetch profile info (subscription type and rate limit tier) for the
       // returned OAuthTokens. Logout and account storage are handled by the
       // caller (installOAuthTokens in auth.ts).
-      const profileInfo = await client.fetchProfileInfo(
-        tokenResponse.access_token,
-      )
+      // densable Iqt skipProfileFetch:!0 — Design login does not need profile.
+      const profileInfo = options?.skipProfileFetch
+        ? {
+            subscriptionType: null,
+            rateLimitTier: null,
+            hasExtraUsageEnabled: null,
+            billingType: null,
+          }
+        : await client.fetchProfileInfo(tokenResponse.access_token)
 
       // Handle success redirect for automatic flow
       if (isAutomaticFlow) {

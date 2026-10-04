@@ -2,8 +2,8 @@ import { memoize } from 'lodash-es'
 import type { Command } from 'src/commands.js'
 import {
   getCommandName,
-  getSkillToolCommands,
   getSlashCommandToolSkills,
+  mergeSkillToolCommands,
 } from 'src/commands.js'
 import { COMMAND_NAME_TAG } from 'src/constants/xml.js'
 import { stringWidth } from '@anthropic/ink'
@@ -209,19 +209,23 @@ export async function getSkillToolInfo(cwd: string): Promise<{
   totalCommands: number
   includedCommands: number
 }> {
-  const agentCommands = await getSkillToolCommands(cwd)
-
+  const { merged, included } = await mergeSkillToolCommands()
+  void cwd
   return {
-    totalCommands: agentCommands.length,
-    includedCommands: agentCommands.length,
+    totalCommands: merged.length,
+    includedCommands: included.length,
   }
 }
 
 // Returns the commands included in the SkillTool prompt.
 // All commands are always included (descriptions may be truncated to fit budget).
 // Used by analyzeContext to count skill tokens.
-export function getLimitedSkillToolCommands(cwd: string): Promise<Command[]> {
-  return getSkillToolCommands(cwd)
+export async function getLimitedSkillToolCommands(
+  cwd: string,
+): Promise<Command[]> {
+  const { included } = await mergeSkillToolCommands()
+  void cwd
+  return included
 }
 
 export function clearPromptCache(): void {

@@ -28,6 +28,7 @@ import {
 } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { sleep } from 'src/utils/sleep.js'
 import {
   formatSyncPluginInstallTimeoutLog,
   isSyncPluginsOrInstallEnabled,
@@ -117,6 +118,25 @@ import {
   writeToStdout,
   registerProcessOutputErrorHandlers,
 } from 'src/utils/process.js'
+import { setCwd } from 'src/utils/Shell.js'
+import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
+import {
+  buildErrorDuringExecutionResult,
+  buildNotClaimedExecutionResult,
+  isClaimSessionRequest,
+  isSpareUnclaimed,
+  getSpareClaimState,
+  markSpareClaimFailed,
+  parkedControlRejectMessage,
+  SANDBOX_FAIL_IF_UNAVAILABLE_HINT,
+  SANDBOX_REQUIRED_UNAVAILABLE,
+  shouldRejectParkedControl,
+  takeHeldBackMcpConfigs,
+} from 'src/cli/spareClaim.js'
+import {
+  applyClaimWorkspaceTrust,
+  handleClaimSessionRequest,
+} from 'src/cli/claimSession.js'
 import type { Stream } from 'src/utils/stream.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import {
@@ -185,7 +205,6 @@ import type {
 } from 'src/entrypoints/sdk/controlTypes.js'
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { PermissionMode as InternalPermissionMode } from 'src/types/permissions.js'
-import { cwd } from 'process'
 import { getCwd } from 'src/utils/cwd.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
@@ -255,7 +274,11 @@ import {
   getAutoModeUnavailableReason,
   isBypassPermissionsModeDisabled,
   transitionPermissionMode,
+  setPermissionModeWithGuards,
 } from 'src/utils/permissions/permissionSetup.js'
+import { PERMISSION_MODES } from 'src/types/permissions.js'
+import { sanitizeSessionTitle } from 'src/utils/sessionTitleSanitize.js'
+import { hasUnsafePathChars } from 'src/commands/cd/cdPermission.js'
 import { parseMcpPermissionModeOverride } from 'src/utils/permissions/mcpPermissionMode.js'
 import {
   tryGenerateSuggestion,
@@ -280,7 +303,10 @@ import {
   getAdditionalDirectoriesForClaudeMd,
   setAdditionalDirectoriesForClaudeMd,
 } from 'src/bootstrap/state.js'
-import { createSyntheticOutputTool } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import {
+  createSyntheticOutputTool,
+  SYNTHETIC_OUTPUT_TOOL_NAME,
+} from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { parseSessionIdentifier } from 'src/utils/sessionUrl.js'
 import {
   hydrateRemoteSession,
@@ -293,6 +319,8 @@ import {
   saveMode,
   saveAiGeneratedTitle,
   restoreSessionMetadata,
+  addTranscriptMirror,
+  cacheSessionTitle,
 } from 'src/utils/sessionStorage.js'
 import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
 import { incrementPromptCount } from 'src/utils/commitAttribution.js'
@@ -305,6 +333,7 @@ import {
   reconnectMcpServerImpl,
   cleanupConnectedMcpClients,
   seedMcpIdentityCheck,
+  getMcpToolsCommandsAndResources,
 } from 'src/services/mcp/client.js'
 import {
   doesEnterpriseMcpConfigExist,
@@ -498,7 +527,6 @@ import {
 } from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
-import { sleep } from '../utils/sleep.js'
 import { isExtractModeActive } from '../memdir/paths.js'
 
 // Dead code elimination: conditional imports
@@ -646,6 +674,8 @@ export async function runHeadless(
     sdkUrl: string | undefined
     replayUserMessages: boolean | undefined
     includePartialMessages: boolean | undefined
+    /** densable 2.1.283 — SDK sessionStore transcript_mirror frames */
+    sessionMirror?: boolean | undefined
     /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
     forwardSubagentText?: boolean | undefined
     forkSession: boolean | undefined
@@ -950,6 +980,24 @@ export async function runHeadless(
   const sandboxUnavailableReason = SandboxManager.getSandboxUnavailableReason()
   if (sandboxUnavailableReason) {
     if (SandboxManager.isSandboxRequired()) {
+      // densable @199034114: stream-json writes O6 then stderr/yo(1).
+      // Tg(e) omits host detail when the process is a confined eval child.
+      if (options.outputFormat === 'stream-json') {
+        const prefix = isEvalConfined()
+          ? SANDBOX_REQUIRED_UNAVAILABLE
+          : `${SANDBOX_REQUIRED_UNAVAILABLE}: ${sandboxUnavailableReason}`
+        if (isEvalConfined()) {
+          logForDebugging(
+            `sandbox unavailable detail: ${sandboxUnavailableReason}`,
+            { level: 'error' },
+          )
+        }
+        await structuredIO.write(
+          buildErrorDuringExecutionResult(getSessionId(), [
+            `${prefix}. ${SANDBOX_FAIL_IF_UNAVAILABLE_HINT}`,
+          ]) as StdoutMessage,
+        )
+      }
       process.stderr.write(
         `\nError: sandbox required but unavailable: ${sandboxUnavailableReason}\n` +
           `  sandbox.failIfUnavailable is set — refusing to start without a working sandbox.\n\n`,
@@ -1357,6 +1405,7 @@ export async function runHeadless(
       message.type !== 'command_lifecycle' &&
       message.type !== 'stream_event' &&
       message.type !== 'keep_alive' &&
+      message.type !== 'transcript_mirror' &&
       message.type !== 'streamlined_text' &&
       message.type !== 'streamlined_tool_use_summary' &&
       message.type !== 'prompt_suggestion'
@@ -1466,6 +1515,8 @@ function runHeadlessStreaming(
     fallbackModel: string | undefined
     replayUserMessages?: boolean | undefined
     includePartialMessages?: boolean | undefined
+    /** densable 2.1.283 — SDK sessionStore transcript_mirror frames */
+    sessionMirror?: boolean | undefined
     /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
     forwardSubagentText?: boolean | undefined
     enableAuthStatus?: boolean | undefined
@@ -1481,6 +1532,11 @@ function runHeadlessStreaming(
     planModeOnResume?: PlanModeOnResume
     /** Official JNs `F` — `$2l` attachment from resume, consumed on first ask. */
     deferredToolUse?: HookDeferredToolAttachment
+    /**
+     * Official `fu` — CLI `--permission-mode` supplied this invocation.
+     * densable ne host reads this on claim_session.
+     */
+    permissionModeSuppliedOnInvocation?: boolean
   },
   turnInterruptionState?: TurnInterruptionState,
   /**
@@ -1517,6 +1573,11 @@ function runHeadlessStreaming(
     | 'finally_post_flush'
     | undefined
   let inputClosed = false
+  /** densable bo @199137587 — claim SessionStart prepend wait. */
+  let claimFirstTurnAck:
+    | ((et: { queued?: string } | { cannotQueue: string }) => void)
+    | undefined
+  const CLAIM_SESSION_START_QUEUE_WAIT_MS = 30_000
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
   let abortController: AbortController | undefined
@@ -1526,6 +1587,17 @@ function runHeadlessStreaming(
     null
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
+
+  // densable Bbr — stream-json sessionStore parent peels transcript_mirror frames
+  if (options.outputFormat === 'stream-json' && options.sessionMirror) {
+    addTranscriptMirror((filePath, entries) => {
+      output.enqueue({
+        type: 'transcript_mirror',
+        filePath,
+        entries,
+      })
+    })
+  }
 
   // densable print/SDK signal ownership (uxs / Vwo):
   // SIGINT → Vwo user_abort + abort turn + gracefulShutdown(0)
@@ -1691,7 +1763,7 @@ function runHeadlessStreaming(
   // relies on this as a global state.
   let readFileState = extractReadFilesFromMessages(
     initialMessages,
-    cwd(),
+    getCwd(),
     READ_FILE_STATE_CACHE_SIZE,
   )
 
@@ -2181,11 +2253,19 @@ function runHeadlessStreaming(
         tool => !toolMatchesName(tool, options.permissionPromptToolName!),
       )
     }
+    // densable 2.1.283: CLI `--json-schema` / SDK init schema must survive
+    // `tools=[]` merge. Always (re)append StructuredOutput if missing by name.
     const initJsonSchema = getInitJsonSchema()
-    if (initJsonSchema && !options.jsonSchema) {
-      const syntheticOutputResult = createSyntheticOutputTool(initJsonSchema)
+    const schemaForOutput = options.jsonSchema ?? initJsonSchema
+    if (schemaForOutput) {
+      const syntheticOutputResult = createSyntheticOutputTool(schemaForOutput)
       if ('tool' in syntheticOutputResult) {
-        allTools = [...allTools, syntheticOutputResult.tool]
+        const alreadyPresent = allTools.some(tool =>
+          toolMatchesName(tool, SYNTHETIC_OUTPUT_TOOL_NAME),
+        )
+        if (!alreadyPresent) {
+          allTools = [...allTools, syntheticOutputResult.tool]
+        }
       }
     }
     return allTools
@@ -2475,7 +2555,7 @@ function runHeadlessStreaming(
     // Headless-specific: currentCommands/currentAgents are local mutable refs
     // captured by the query loop (REPL uses AppState instead). getCommands is
     // fresh because refreshActivePlugins cleared its cache.
-    currentCommands = await getCommands(cwd())
+    currentCommands = await getCommands(getCwd())
 
     // Preserve SDK-provided agents (--agents CLI flag or SDK initialize
     // control_request) — both inject via parseAgentsFromJson with
@@ -2563,7 +2643,7 @@ function runHeadlessStreaming(
   // Subscribe to skill changes for hot reloading
   const unsubscribeSkillChanges = skillChangeDetector.subscribe(() => {
     clearCommandsCache()
-    void getCommands(cwd())
+    void getCommands(getCwd())
       .then(newCommands => {
         currentCommands = newCommands
         emitCommandsChanged(newCommands)
@@ -2588,7 +2668,7 @@ function runHeadlessStreaming(
             void (async () => {
               const commands = await createProactiveAutonomyCommands({
                 basePrompt: `<${TICK_TAG}>${new Date().toLocaleTimeString()}</${TICK_TAG}>`,
-                currentDir: cwd(),
+                currentDir: getCwd(),
                 shouldCreate: () => !inputClosed,
               })
               if (inputClosed) {
@@ -2926,11 +3006,12 @@ function runHeadlessStreaming(
                   isMeta: cmd.isMeta,
                   // densable 2.1.221: cron fire stamps (skipSlash + modelScheduled + wakeup)
                   skipSlashCommands: cmd.skipSlashCommands,
+                  skipAttachments: cmd.skipAttachments,
                   bridgeOrigin: cmd.bridgeOrigin,
                   modelScheduledOrigin: cmd.modelScheduledOrigin,
                   wakeupSource: cmd.wakeupSource,
                   origin: cmd.origin,
-                  cwd: cwd(),
+                  cwd: getCwd(),
                   tools: allTools,
                   verbose: options.verbose,
                   mcpClients: allMcpClients,
@@ -3053,7 +3134,7 @@ function runHeadlessStreaming(
                   type: 'failed',
                   message: 'ask() returned an error result',
                 },
-                currentDir: cwd(),
+                currentDir: getCwd(),
                 priority: 'later',
                 workload: cmd.workload ?? options.workload,
               })
@@ -3061,7 +3142,7 @@ function runHeadlessStreaming(
               const nextCommands = await finalizeAutonomyCommandsForTurn({
                 commands: claimedAutonomyCommands,
                 outcome: { type: 'completed' },
-                currentDir: cwd(),
+                currentDir: getCwd(),
                 priority: 'later',
                 workload: cmd.workload ?? options.workload,
               })
@@ -3076,7 +3157,7 @@ function runHeadlessStreaming(
             await finalizeAutonomyCommandsForTurn({
               commands: claimedAutonomyCommands,
               outcome: { type: 'failed', error },
-              currentDir: cwd(),
+              currentDir: getCwd(),
               priority: 'later',
               workload: cmd.workload ?? options.workload,
             })
@@ -3989,7 +4070,7 @@ function runHeadlessStreaming(
         const command = await createAutonomyQueuedPromptIfNoActiveSource({
           basePrompt: expanded,
           trigger: 'scheduled-task',
-          currentDir: cwd(),
+          currentDir: getCwd(),
           sourceId: params.sourceId,
           sourceLabel: params.sourceLabel,
           workload: WORKLOAD_CRON,
@@ -4250,6 +4331,11 @@ function runHeadlessStreaming(
         }
         void completeControlLifecycleImmediately
         try {
+          // densable `MYe() && !my(subtype)` then `je(..., Vmt()==="failed"?cy:uy)`.
+          if (shouldRejectParkedControl(msg.request.subtype)) {
+            sendControlResponseError(msg, parkedControlRejectMessage())
+            continue
+          }
           if (msg.request.subtype === 'interrupt') {
             // Track escapes for attribution (ant-only feature)
             if (feature('COMMIT_ATTRIBUTION')) {
@@ -4551,6 +4637,306 @@ function runHeadlessStreaming(
             sendControlResponseSuccess(msg, {
               cancelled: removed.length > 0,
             })
+          } else if (isClaimSessionRequest(req)) {
+            // densable ne @210326103 + print host @199134207
+            try {
+              const claim = await handleClaimSessionRequest(req, {
+                isBusy: () =>
+                  (running && runPhase !== 'waiting_for_agents') ||
+                  getMainThreadQueueLength() > 0,
+                isFreshSession: () => !initialized,
+                permissionModeSuppliedOnInvocation:
+                  options.permissionModeSuppliedOnInvocation !== false,
+                getToolPermissionContext: () =>
+                  getAppState().toolPermissionContext,
+                setToolPermissionContext: ctx => {
+                  setAppState(prev =>
+                    prev.toolPermissionContext === ctx
+                      ? prev
+                      : { ...prev, toolPermissionContext: ctx },
+                  )
+                },
+                retireDepartedAdditionalDirectories: directories => {
+                  setAppState(prev => {
+                    const next = retireDepartedAdditionalDirectories(
+                      prev.toolPermissionContext,
+                      directories,
+                    )
+                    return next === prev.toolPermissionContext
+                      ? prev
+                      : { ...prev, toolPermissionContext: next }
+                  })
+                },
+                startDeferredMcpServers: async () => {
+                  // densable A.startDeferredMcpServers / Xt @192086918
+                  const held = takeHeldBackMcpConfigs()
+                  const already = new Set([
+                    ...getAppState().mcp.clients.map(c => c.name),
+                    ...dynamicMcpState.clients.map(c => c.name),
+                    ...Object.keys(dynamicMcpState.configs),
+                  ])
+                  const toStart = Object.fromEntries(
+                    Object.entries(held).filter(([name]) => !already.has(name)),
+                  )
+                  if (Object.keys(toStart).length === 0) return
+                  await getMcpToolsCommandsAndResources(
+                    ({ client, tools, commands }) => {
+                      setAppState(prev => ({
+                        ...prev,
+                        mcp: {
+                          ...prev.mcp,
+                          clientsInitialized: true,
+                          clients: prev.mcp.clients.some(
+                            c => c.name === client.name,
+                          )
+                            ? prev.mcp.clients.map(c =>
+                                c.name === client.name ? client : c,
+                              )
+                            : [...prev.mcp.clients, client],
+                          tools: uniqBy([...prev.mcp.tools, ...tools], 'name'),
+                          commands: uniqBy(
+                            [...prev.mcp.commands, ...commands],
+                            'name',
+                          ),
+                        },
+                      }))
+                    },
+                    toStart,
+                  )
+                },
+                rehomePluginsAndMcp: async () => {
+                  try {
+                    await refreshActivePlugins(setAppState, {
+                      applyStagedInstalls: false,
+                    })
+                  } catch (e) {
+                    logForDebugging(
+                      `claim_session: re-homing plugins/MCP for the claimed directory failed (continuing): ${errorMessage(e)}`,
+                      { level: 'error' },
+                    )
+                  }
+                },
+                applyPromptOptions: se => {
+                  if (se.systemPrompt !== undefined) {
+                    options.systemPrompt =
+                      Array.isArray(se.systemPrompt) &&
+                      se.systemPrompt.length === 1 &&
+                      se.systemPrompt[0] === ''
+                        ? ''
+                        : Array.isArray(se.systemPrompt)
+                          ? se.systemPrompt.join('\n')
+                          : se.systemPrompt
+                  }
+                  if (se.appendSystemPrompt !== undefined) {
+                    options.appendSystemPrompt = se.appendSystemPrompt
+                  }
+                  if (typeof se.title === 'string') {
+                    const title = sanitizeSessionTitle(se.title)
+                    if (title) {
+                      cacheSessionTitle(title)
+                    }
+                  }
+                  if (se.agents) {
+                    const stdinAgents = parseAgentsFromJson(
+                      se.agents as Parameters<typeof parseAgentsFromJson>[0],
+                      'flagSettings',
+                    )
+                    const seen = new Set(currentAgents.map(a => a.agentType))
+                    currentAgents = [
+                      ...currentAgents,
+                      ...stdinAgents.filter(a => !seen.has(a.agentType)),
+                    ]
+                  }
+                },
+                currentPermissionMode: () =>
+                  getAppState().toolPermissionContext.mode,
+                checkPermissionMode: se => {
+                  if (!(PERMISSION_MODES as readonly string[]).includes(se)) {
+                    return `Invalid permission mode '${se}'. Valid modes: ${PERMISSION_MODES.join(', ')}`
+                  }
+                  const ctx = getAppState().toolPermissionContext
+                  const result = setPermissionModeWithGuards(
+                    se as InternalPermissionMode,
+                    ctx,
+                    () => {},
+                  )
+                  return result.ok ? undefined : result.error
+                },
+                applyPermissionMode: se => {
+                  let error: string | undefined
+                  const result = setPermissionModeWithGuards(
+                    se as InternalPermissionMode,
+                    getAppState().toolPermissionContext,
+                    updater => {
+                      setAppState(prev => {
+                        const next = updater(prev.toolPermissionContext)
+                        return next === prev.toolPermissionContext
+                          ? prev
+                          : {
+                              ...prev,
+                              toolPermissionContext: next,
+                              isUltraplanMode: false,
+                            }
+                      })
+                    },
+                  )
+                  if (!result.ok) error = result.error
+                  return error
+                },
+                recheckAutoModeGate: () => {
+                  if (
+                    getAppState().toolPermissionContext.mode === 'auto' &&
+                    !isAutoModeGateEnabled()
+                  ) {
+                    setAppState(prev => ({
+                      ...prev,
+                      toolPermissionContext: {
+                        ...prev.toolPermissionContext,
+                        mode: 'default',
+                      },
+                    }))
+                  }
+                },
+                setSdkMcpServers: se => {
+                  const keep = new Set(se)
+                  for (const name of Object.keys(sdkMcpConfigs)) {
+                    if (!keep.has(name)) delete sdkMcpConfigs[name]
+                  }
+                  for (const name of se) {
+                    sdkMcpConfigs[name] ??= { type: 'sdk', name }
+                  }
+                  void updateSdkMcp()
+                },
+                sdkMcpSettled: () =>
+                  Object.keys(sdkMcpConfigs).every(name =>
+                    sdkClients.some(
+                      c => c.name === name && c.type === 'connected',
+                    ),
+                  ),
+                startSessionStartHooks: () => {
+                  void processSessionStartHooks('startup')
+                    .then(messages => {
+                      const texts: string[] = []
+                      for (const m of messages) {
+                        const att = (
+                          m as { attachment?: { content?: unknown } }
+                        ).attachment
+                        if (
+                          att &&
+                          typeof att.content === 'string' &&
+                          att.content
+                        ) {
+                          texts.push(att.content)
+                        } else if (att && Array.isArray(att.content)) {
+                          texts.push(
+                            att.content
+                              .filter(x => typeof x === 'string')
+                              .join('\n'),
+                          )
+                        }
+                      }
+                      const initial = takeInitialUserMessage()
+                      if (initial) texts.push(initial)
+                      return texts.filter(Boolean)
+                    })
+                    .catch(ve => {
+                      logForDebugging(
+                        `claim_session: SessionStart hooks failed (continuing without their output): ${errorMessage(ve)}`,
+                        { level: 'error' },
+                      )
+                      return [] as string[]
+                    })
+                    .then(async texts => {
+                      if (texts.length === 0) return
+                      const remaining = [...texts]
+                      const queued = new Promise<string | undefined>(
+                        resolve => {
+                          claimFirstTurnAck = et => {
+                            if ('cannotQueue' in et) {
+                              resolve(et.cannotQueue)
+                              return
+                            }
+                            const queuedText =
+                              typeof et.queued === 'string' ? et.queued : ''
+                            const i = remaining.indexOf(queuedText)
+                            if (i !== -1) remaining.splice(i, 1)
+                            if (remaining.length === 0) resolve(undefined)
+                          }
+                        },
+                      )
+                      for (const t of texts) {
+                        structuredIO.prependUserMessage(t)
+                      }
+                      const raced = await Promise.race([
+                        queued,
+                        sleep(CLAIM_SESSION_START_QUEUE_WAIT_MS, undefined, {
+                          unref: true,
+                        }).then(
+                          () =>
+                            `not queued after ${CLAIM_SESSION_START_QUEUE_WAIT_MS}ms`,
+                        ),
+                      ])
+                      claimFirstTurnAck = undefined
+                      if (raced !== undefined) {
+                        logForDebugging(
+                          `claim_session: the session's own first-turn messages will not run ahead of the host's messages (${raced}); releasing the host's messages`,
+                          { level: 'warn' },
+                        )
+                      }
+                    })
+                    .catch(ve => {
+                      claimFirstTurnAck = undefined
+                      logForDebugging(
+                        `claim_session: queueing the session's own first-turn messages failed (continuing): ${errorMessage(ve)}`,
+                        { level: 'error' },
+                      )
+                    })
+                },
+                applyWorkspaceTrust: se =>
+                  applyClaimWorkspaceTrust(se, { cwd: getCwd() }),
+                announceStartingChange: () => {},
+                buildInitializePayload: async workspaceTrustRecorded => {
+                  const payload = await buildSdkInitializeResponse(
+                    currentCommands,
+                    currentAgents,
+                    modelInfos,
+                    options,
+                    getAppState,
+                  )
+                  return {
+                    ...payload,
+                    ...(workspaceTrustRecorded !== undefined
+                      ? { workspace_trust_recorded: workspaceTrustRecorded }
+                      : {}),
+                  }
+                },
+              })
+              if (claim.kind === 'ok') {
+                sendControlResponseSuccess(
+                  msg,
+                  claim.response as Record<string, unknown>,
+                )
+              } else {
+                sendControlResponseError(msg, claim.message)
+              }
+            } catch (ie) {
+              const detail = errorMessage(ie)
+              const safe = hasUnsafePathChars(detail)
+                ? '(error detail withheld)'
+                : detail
+              if (getSpareClaimState() === 'claiming') {
+                markSpareClaimFailed()
+                sendControlResponseError(
+                  msg,
+                  `claim_failed: ${safe} — discard this spare`,
+                )
+              } else {
+                sendControlResponseError(
+                  msg,
+                  `rejected: ${safe} — the spare is still parked`,
+                )
+              }
+            }
           } else if (msg.request.subtype === 'set_cwd') {
             // densable 2.1.218 fCb — headless /cd twin for SDK hosts.
             // Busy = running && runPhase !== waiting_for_agents || mainThreadQueue > 0
@@ -4816,7 +5202,7 @@ function runHeadlessStreaming(
               // allSettled so one failure doesn't discard the others.
               let plugins: SDKControlReloadPluginsResponse['plugins'] = []
               const [cmdsR, mcpR, pluginsR] = await Promise.allSettled([
-                getCommands(cwd()),
+                getCommands(getCwd()),
                 applyPluginMcpDiff(),
                 loadAllPluginsCacheOnly(),
               ])
@@ -6109,6 +6495,14 @@ function runHeadlessStreaming(
       if (message.type !== 'user') {
         continue
       }
+      // densable MYe() unclaimed user @199187468 — O6 error_during_execution
+      if (isSpareUnclaimed()) {
+        claimFirstTurnAck?.({ cannotQueue: 'refused, the claim failed' })
+        output.enqueue(
+          buildNotClaimedExecutionResult(getSessionId()) as StdoutMessage,
+        )
+        continue
+      }
       // Type assertion: after the type guard, message is a user message.
       // The union with SDKMessage (any) prevents proper narrowing.
       const userMsg = message as SDKUserMessage
@@ -6168,7 +6562,21 @@ function runHeadlessStreaming(
         uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
         priority: (userMsg as { priority?: string })
           .priority as import('src/types/textInputTypes.js').QueuePriority,
+        // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
+        // seeded_summon → skipAttachments.
+        ...(userMsg.client_composed === true
+          ? { skipSlashCommands: true, skipAttachments: true }
+          : userMsg.seeded_summon === true
+            ? { skipAttachments: true }
+            : {}),
       })
+      // densable afterEnqueue hp/bo @199194235 — claim SessionStart wait
+      {
+        const content = (userMsg.message as { content?: unknown })?.content
+        if (typeof content === 'string') {
+          claimFirstTurnAck?.({ queued: content })
+        }
+      }
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction
       if (feature('COMMIT_ATTRIBUTION')) {
@@ -6184,6 +6592,7 @@ function runHeadlessStreaming(
       void run()
     }
     inputClosed = true
+    claimFirstTurnAck?.({ cannotQueue: 'the input ended first' })
     cronScheduler?.stop()
     if (!running) {
       // If a push-suggestion is in-flight, wait for it to emit before closing

@@ -18,6 +18,11 @@ import { Yot } from '@anthropic/ink'
 import { getControlSocketPath } from './controlSocket.js'
 import { createDecModeTracker } from './bgWorker.js'
 import { jsonStringify, jsonParse } from '../utils/slowOperations.js'
+import {
+  ATTACH_WAITING_REDRAW,
+  COLD_ATTACH_ONCE_READY,
+  COLD_ATTACH_SHOWING_TRANSCRIPT,
+} from './attachTranscriptPreview.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,10 +38,39 @@ const CTRL_Z = 0x1a
 /** 'd' — secondary detach after Ctrl+B */
 const CHAR_D = 100
 
-/** Focus In report: CSI I — filter from input (terminal sends on window focus) */
-const FOCUS_IN = Buffer.from('\x1B[I', 'ascii')
-/** Focus Out report: CSI O — filter from input */
-const FOCUS_OUT = Buffer.from('\x1B[O', 'ascii')
+/**
+ * gold `Wt` @188315353 — CSI-only class including `|I|O|` (focus in/out).
+ * Not a FOCUS_IN identifier (gold count 0).
+ */
+const ATTACH_CSI_ONLY_RE =
+  /\x1b\[(?:<\d+;\d+;\d+[Mm]|M[\s\S]{3}|I|O|\??\d+;\d+(?:;\d+)*R|[?>]\d+(?:;\d+)*c|\?\d+(?:;\d+)*\$y|\?997;[12]n|\?\d+u)|\x1bP[^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+
+/** gold `Wr` @188315353 */
+const ATTACH_CSI_HOLD_CAP = 64
+
+/** gold `Vr` @188315353 */
+const ATTACH_CSI_INCOMPLETE_RE =
+  /^\x1b(?:$|\[(?:[<?>]?\d*(?:;\d*)*\$?|M[\s\S]{0,2})$|P(?:$|[>01][^\x1b]*\x1b?$)|\](?:$|\d[^\x07\x1b]*\x1b?$))/
+
+/** gold `y8r` @188315741 — true iff chunk (plus hold) is CSI-only. */
+export function createAttachCsiOnlyGate(): (chunk: string) => boolean {
+  let hold = ''
+  return (chunk: string): boolean => {
+    const combined = hold + chunk
+    hold = ''
+    if (!combined.includes('\x1B')) return false
+    const rest = combined.replace(ATTACH_CSI_ONLY_RE, '')
+    if (rest.length === 0) return true
+    if (
+      rest.length <= ATTACH_CSI_HOLD_CAP &&
+      ATTACH_CSI_INCOMPLETE_RE.test(rest)
+    ) {
+      hold = rest
+      return true
+    }
+    return false
+  }
+}
 
 /** Kitty protocol Ctrl+Z: CSI 122;5u */
 const KITTY_CTRL_Z = Buffer.from('\x1B[122;5u', 'ascii')
@@ -72,6 +106,25 @@ const ACK_TIMEOUT_MS = 10_000
 
 export type AttachOutcome = 'detached' | 'disconnected' | 'error'
 
+/**
+ * Keep Node's errno word in the attach error so densable zot
+ * (`/\bE(?:NOENT|CONNREFUSED|CONNRESET)\b|control socket closed/`) matches.
+ * Do not rewrite ENOENT → "socket missing" (that's dispatch Ar, not attach).
+ */
+export function attachSocketErrorMsg(err: unknown): string {
+  const e = err as NodeJS.ErrnoException & { message?: string }
+  const msg =
+    typeof e?.message === 'string'
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : String(err)
+  if (e?.code === 'ENOENT' && !/\bENOENT\b/.test(msg)) {
+    return msg ? `${msg} ENOENT` : 'ENOENT'
+  }
+  return msg
+}
+
 export interface AttachResult {
   outcome: AttachOutcome
   msg?: string
@@ -96,6 +149,11 @@ export interface AttachOptions {
   holdScreenOnDisconnect?: boolean
   /** If true, tell daemon we're holding a frame (suppress "waiting" message) */
   holdingFrame?: boolean
+  /**
+   * gold `gateStdinUntilFirstFrame` @188792458 —
+   * drop CSI-only (and other stdin) until the first PTY frame.
+   */
+  gateStdinUntilFirstFrame?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +248,12 @@ export async function attachToSession(
   let ackMs: number | undefined
   let via: string | undefined
   let tempo: string | undefined
+  let socket: Socket | undefined
+  const wasRaw = 'isRaw' in stdin ? Boolean(stdin.isRaw) : false
+  /** gold `me` — first PTY frame seen; Se drops CSI-only until then when gated. */
+  let firstFrame = false
+  /** gold `y8r` / `Cr` */
+  const isCsiOnly = createAttachCsiOnlyGate()
 
   // Windows: filter show-cursor sequences from PTY output to prevent flicker
   const isWindows = process.platform === 'win32'
@@ -245,27 +309,45 @@ export async function attachToSession(
     if (stdout.removeListener) stdout.removeListener('resize', onResize)
     clearTimeout(resizeTimer)
 
-    socket.destroy()
+    socket?.destroy()
     resolveResult({ outcome, msg })
   }
 
   // --- Detach key state machine ---
   let escapeMode = false // After Ctrl+B, next byte is literal or detach
 
+  /**
+   * gold `Se` @188792458 — CSI-only drop until first frame when gated;
+   * otherwise forward including CSI I/O.
+   */
+  function writeInput(chunk: Buffer): void {
+    if (!ackReceived || done || !socket || chunk.length === 0) return
+    const gated = opts.gateStdinUntilFirstFrame === true
+    const csiOnly = isCsiOnly(chunk.toString('latin1'))
+    if (gated && !firstFrame) {
+      void csiOnly
+      return
+    }
+    socket.write(chunk)
+  }
+
   function processInput(data: Buffer): void {
     if (done) return
+    const buf = data
+    if (buf.length === 0) return
+
     let writeStart = 0
 
-    for (let i = 0; i < data.length; i++) {
-      const byte = data[i]!
+    for (let i = 0; i < buf.length; i++) {
+      const byte = buf[i]!
 
       if (escapeMode) {
         escapeMode = false
         // After Ctrl+B: 'd' = detach, anything else = send literally
-        if (i > writeStart) socket.write(data.subarray(writeStart, i))
+        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
         if (byte === CHAR_D) return finish('detached')
         // Send the escaped byte literally (skip the Ctrl+B itself)
-        socket.write(Buffer.from([byte]))
+        writeInput(Buffer.from([byte]))
         writeStart = i + 1
         continue
       }
@@ -273,38 +355,24 @@ export async function attachToSession(
       // Check for detach keys
       if (
         byte === CTRL_Z ||
-        bufferMatchesAt(data, i, KITTY_CTRL_Z) ||
-        bufferMatchesAt(data, i, XTERM_CTRL_Z)
+        bufferMatchesAt(buf, i, KITTY_CTRL_Z) ||
+        bufferMatchesAt(buf, i, XTERM_CTRL_Z)
       ) {
-        if (i > writeStart) socket.write(data.subarray(writeStart, i))
+        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
         return finish('detached')
-      }
-
-      // Filter focus in/out reports (terminal sends these on window focus change)
-      if (bufferMatchesAt(data, i, FOCUS_IN)) {
-        if (i > writeStart) socket.write(data.subarray(writeStart, i))
-        i += FOCUS_IN.length - 1
-        writeStart = i + 1
-        continue
-      }
-      if (bufferMatchesAt(data, i, FOCUS_OUT)) {
-        if (i > writeStart) socket.write(data.subarray(writeStart, i))
-        i += FOCUS_OUT.length - 1
-        writeStart = i + 1
-        continue
       }
 
       // Check for escape prefix
       const escLen =
         byte === CTRL_B
           ? 1
-          : bufferMatchesAt(data, i, KITTY_CTRL_B)
+          : bufferMatchesAt(buf, i, KITTY_CTRL_B)
             ? KITTY_CTRL_B.length
-            : bufferMatchesAt(data, i, XTERM_CTRL_B)
+            : bufferMatchesAt(buf, i, XTERM_CTRL_B)
               ? XTERM_CTRL_B.length
               : 0
       if (escLen) {
-        if (i > writeStart) socket.write(data.subarray(writeStart, i))
+        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
         i += escLen - 1
         writeStart = i + 1
         escapeMode = true
@@ -312,8 +380,8 @@ export async function attachToSession(
     }
 
     // Write remaining bytes
-    if (writeStart < data.length) {
-      socket.write(data.subarray(writeStart))
+    if (writeStart < buf.length) {
+      writeInput(buf.subarray(writeStart))
     }
   }
 
@@ -369,6 +437,14 @@ export async function attachToSession(
     const filtered = stripShowCursor(data)
     if (filtered.length === 0) return
     const text = filtered.toString('utf8')
+    // gold `me` is worker PTY first frame (Lt/qe), not daemon stall overlay.
+    if (
+      !text.includes(ATTACH_WAITING_REDRAW) &&
+      !text.includes(COLD_ATTACH_ONCE_READY) &&
+      !text.includes(COLD_ATTACH_SHOWING_TRANSCRIPT)
+    ) {
+      firstFrame = true
+    }
     stdout.write(text)
     decModes.feed(text)
   }
@@ -500,12 +576,12 @@ export async function attachToSession(
   }
 
   // --- Connect to daemon ---
+  // gold e2e @188799749: connect + attach JSON only. No raw / no stdin before ack.
   const socketPath = getControlSocketPath()
-  let socket: Socket
   try {
     socket = connect(socketPath)
   } catch (err) {
-    return { outcome: 'error', msg: String(err) }
+    return { outcome: 'error', msg: attachSocketErrorMsg(err) }
   }
 
   // Ack timeout
@@ -513,9 +589,6 @@ export async function attachToSession(
     if (!ackReceived)
       finish('error', 'daemon did not respond — it may be stalled')
   })
-
-  // Track raw mode state
-  const wasRaw = 'isRaw' in stdin ? Boolean(stdin.isRaw) : false
 
   // --- Socket event handlers ---
   let ackBuffer = Buffer.alloc(0)
@@ -556,15 +629,20 @@ export async function attachToSession(
     via = ack.via as string | undefined
     tempo = ack.tempo as string | undefined
 
-    // Seed DEC modes from ack
+    // gold ack @188798622: o.ref(); fC(o,true) THEN write modeSeq (1004h while raw)
     const ackModes = (ack.decModes as number[] | undefined) ?? []
     const modeSeq = ackModes.map(decSet).join('')
     decModes.feed(modeSeq)
+    if (stdin.ref) stdin.ref()
+    if (stdin.setRawMode) stdin.setRawMode(true)
+    stdin.removeAllListeners('readable')
+    stdin.on('readable', onReadable)
+    if ('resume' in stdin && 'pause' in stdin) {
+      ;(stdin as NodeJS.ReadStream).resume()
+      ;(stdin as NodeJS.ReadStream).pause()
+    }
+    stdin.once('end', onEnd)
 
-    // Write initial screen setup
-    // On Windows, hide cursor to prevent the visible block/bar cursor that
-    // survives FleetView handoff + clear (official: b ? op : ''). Must apply
-    // on both paths — agents view always attaches with alreadyInAlt:true.
     const hideCursor = isWindows ? HIDE_CURSOR : ''
     if (opts.alreadyInAlt) {
       // Already in alt screen (FleetView handed off) — set modes + clear for fresh repaint
@@ -578,26 +656,15 @@ export async function attachToSession(
       )
     }
 
-    // Enable raw mode on stdin (official: EN(q,!0) then readable + resume/pause)
-    if (stdin.ref) stdin.ref()
-    if (stdin.setRawMode) stdin.setRawMode(true)
     if (stdout.on) stdout.on('resize', onResize)
-    // Remove any stale readable listeners (Ink may leave one behind after unmount)
-    stdin.removeAllListeners('readable')
-    // Use readable + read() pattern (paused mode) — matches official
-    stdin.on('readable', onReadable)
-    if ('resume' in stdin && 'pause' in stdin) {
-      ;(stdin as NodeJS.ReadStream).resume()
-      ;(stdin as NodeJS.ReadStream).pause()
-    }
-    stdin.once('end', onEnd)
+    onReadable()
 
     // Process any data that came after the ack line
     if (remainder.length > 0) processOutput(remainder)
   })
 
   socket.on('error', (err: Error) => {
-    finish('error', err.message)
+    finish('error', attachSocketErrorMsg(err))
   })
 
   socket.once('close', () => {

@@ -107,6 +107,11 @@ export type AppState = DeepImmutable<{
    * Toggle/reset always clear this to null.
    */
   panelFileView: { path: string } | null
+  /**
+   * densable `diffPanelVisible` (`ruo`/`auo`) — toast-hold latch while
+   * the Obe panel is mounted. Distinct from `replTab`.
+   */
+  diffPanelVisible: boolean
   isBriefOnly: boolean
   // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
   showTeammateMessagePreview?: boolean
@@ -629,9 +634,10 @@ export function getDefaultAppState(): AppState {
     mainLoopModelForSession: null,
     statusLineText: undefined,
     expandedView: 'none',
-    // densable defaults: replTab:"convo", panelFileView:null
+    // densable defaults: replTab:"convo", panelFileView:null, diffPanelVisible:!1
     replTab: 'convo',
     panelFileView: null,
+    diffPanelVisible: false,
     isBriefOnly: false,
     showTeammateMessagePreview: false,
     selectedIPAgentIndex: -1,

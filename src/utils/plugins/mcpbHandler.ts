@@ -31,6 +31,10 @@ export type McpbUserConfigurationOption = {
   description?: string // 帮助说明
   sensitive?: boolean // true 时写入安全存储而非明文 settings
   multiple?: boolean // string 类型时是否允许多值（数组）
+  /** densable Ao/zs — string+options → select. */
+  options?: string[]
+  /** densable Ao initial buffer prefers default when in options. */
+  default?: string | number | boolean | string[]
   min?: number // 数值下限
   max?: number // 数值上限
 }

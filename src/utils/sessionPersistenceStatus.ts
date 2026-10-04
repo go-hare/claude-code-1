@@ -10,22 +10,29 @@
  *     if (x0t()) return "nested_marker"
  *     return null
  *   }
- *   function x0t(){
+ *   function x0t(){  // leftover P$e @ 178053668
  *     if (FORCE_SESSION_PERSISTENCE) return false
- *     if (!(CHILD_SESSION && G1() && !Og())) return false
- *     return !iGh()  // tmux global env exception
+ *     if (!(CHILD_SESSION && _u() && !nl())) return false
+ *     return !isChildSessionMarkerAmbientInTmux()
  *   }
+ *   _u = launchOptions.isInteractive(); nl = teammate (agentId+teamName).
+ *   SDK/print isInteractive=false → inherited CHILD_SESSION does NOT skip writes.
  *
  * UI copy (densable gIf / SIf):
  * - skip_prompt_history / nested_marker startup warnings
  * - writer degraded live warning (separate module)
  */
 
-import { isSessionPersistenceDisabled } from 'src/bootstrap/state.js'
+import { spawnSync } from 'node:child_process'
+import {
+  getIsInteractive,
+  isSessionPersistenceDisabled,
+} from 'src/bootstrap/state.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isForceSessionPersistenceEnabled } from 'src/utils/forceSessionPersistence.js'
 import { shouldSkipPromptHistory } from 'src/utils/residualFinalEnvGates.js'
 import { isChildSession } from 'src/utils/sessionRoleEnv.js'
+import { isTeammate } from 'src/utils/teammate.js'
 
 /** Match sessionStorage.getNodeEnv without circular import. */
 function getNodeEnv(): string {
@@ -39,22 +46,53 @@ export type PersistenceSuppressCause =
   | 'nested_marker'
 
 /**
- * densable x0t — inherited CHILD_SESSION marker suppresses persistence
- * unless FORCE is set. densable also gates on G1()&&!Og() and tmux iGh();
- * product 1:1 for the env surface: CHILD_SESSION truthy + not FORCE.
+ * densable C / vzo @ 178053668 — tmux `show-environment -g` lists
+ * CLAUDE_CODE_CHILD_SESSION= as ambient (inherited into every pane).
+ * Ambient marker must not suppress writes (gold P$e `return !ambient`).
+ */
+function isChildSessionMarkerAmbientInTmux(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!env.TMUX) return false
+  try {
+    const result = spawnSync('tmux', ['show-environment', '-g'], {
+      encoding: 'utf8',
+      timeout: 250,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    })
+    if (result.status !== 0 || typeof result.stdout !== 'string') return false
+    return result.stdout
+      .split('\n')
+      .some(line => line.startsWith('CLAUDE_CODE_CHILD_SESSION='))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable P$e / x0t @ 178053668.
+ * CHILD_SESSION suppresses only when the session is interactive AND not a
+ * teammate. SDK/print (`isInteractive=false`) still writes JSONL so
+ * get_session_info / get_session_messages can read the just-finished sid.
  */
 export function isNestedMarkerSuppressingPersistence(
   env: NodeJS.ProcessEnv = process.env,
+  opts?: { interactive?: boolean; isTeammate?: boolean },
 ): boolean {
   if (isForceSessionPersistenceEnabled(env)) return false
   if (!isChildSession(env)) return false
+  const interactive = opts?.interactive ?? getIsInteractive()
+  if (!interactive) return false
+  const teammate = opts?.isTeammate ?? isTeammate()
+  if (teammate) return false
+  if (isChildSessionMarkerAmbientInTmux(env)) return false
   return true
 }
 
 /**
  * densable Gsn — why session transcript writes are suppressed, or null.
- * Note: local also has cleanupPeriodDays===0 in SessionFileManager; that is
- * orthogonal and not part of densable Gsn (not user-warned the same way).
+ * cleanupPeriodDays is retention only (gold schema: never disables writes).
  */
 export function getPersistenceSuppressCause(
   env: NodeJS.ProcessEnv = process.env,

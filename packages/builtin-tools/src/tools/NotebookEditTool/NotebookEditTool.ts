@@ -11,6 +11,11 @@ import { getCwd } from 'src/utils/cwd.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
+import {
+  noteApprovedFileToolPath,
+  openApprovedWrite,
+  takeApprovedFileToolPath,
+} from 'src/utils/fileToolApprovedOpen.js'
 import { readFileSyncWithMetadata } from 'src/utils/fileRead.js'
 import { safeParseJSON } from 'src/utils/json.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -147,6 +152,7 @@ export const NotebookEditTool = buildTool({
     return (pattern: string) => matchesPathRule(pattern, notebook_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
+    noteApprovedFileToolPath(input.notebook_path, context.toolUseId)
     const appState = context.getAppState()
     return checkWritePermissionForTool(
       NotebookEditTool,
@@ -335,29 +341,40 @@ export const NotebookEditTool = buildTool({
       cell_type,
       edit_mode: originalEditMode,
     },
-    { readFileState, updateFileHistoryState },
+    toolUseContext: ToolUseContext,
     _,
     parentMessage,
   ) {
+    const { readFileState, updateFileHistoryState } = toolUseContext
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path)
-
-    if (fileHistoryEnabled()) {
-      await fileHistoryTrackEdit(
-        updateFileHistoryState,
-        fullPath,
-        parentMessage.uuid,
-      )
-    }
+    const approved = takeApprovedFileToolPath(
+      fullPath,
+      toolUseContext.toolUseId,
+      'write',
+    )
+    const openedWrite = await openApprovedWrite(fullPath, approved, {
+      createParents: true,
+      leaf: 'replace',
+    })
 
     try {
+      if (fileHistoryEnabled()) {
+        await fileHistoryTrackEdit(
+          updateFileHistoryState,
+          fullPath,
+          parentMessage.uuid,
+        )
+      }
+
       // readFileSyncWithMetadata gives content + encoding + line endings in
       // one safeResolvePath + readFileSync pass, replacing the previous
       // detectFileEncoding + readFile + detectLineEndings chain (each of
       // which redid safeResolvePath and/or a 4KB readSync).
-      const { content, encoding, lineEndings } =
-        readFileSyncWithMetadata(fullPath)
+      const { content, encoding, lineEndings } = readFileSyncWithMetadata(
+        openedWrite.ioPath,
+      )
       // Must use non-memoized jsonParse here: safeParseJSON caches by content
       // string and returns a shared object reference, but we mutate the
       // notebook in place below (cells.splice, targetCell.source = ...).
@@ -466,7 +483,13 @@ export const NotebookEditTool = buildTool({
       // Write back to file
       const IPYNB_INDENT = 1
       const updatedContent = jsonStringify(notebook, null, IPYNB_INDENT)
-      writeTextContent(fullPath, updatedContent, encoding, lineEndings)
+      await openedWrite.recheckBeforeWrite()
+      writeTextContent(
+        openedWrite.ioPath,
+        updatedContent,
+        encoding,
+        lineEndings,
+      )
       // Update readFileState with post-write mtime (matches FileEditTool/
       // FileWriteTool). offset:undefined breaks FileReadTool's dedup match —
       // without this, Read→NotebookEdit→Read in the same millisecond would
@@ -522,6 +545,8 @@ export const NotebookEditTool = buildTool({
       return {
         data,
       }
+    } finally {
+      await openedWrite.close()
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

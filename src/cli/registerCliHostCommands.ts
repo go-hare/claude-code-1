@@ -28,6 +28,7 @@ import {
   getCliCommandGraphNode,
   type CliCommandPath,
 } from './cliCommandGraph.js'
+import { registerVscodeExtensionHostCommands } from './handlers/vscodeExtensionHost.js'
 
 type SortedHelpConfig = {
   sortSubcommands: true
@@ -65,6 +66,9 @@ export function registerCliHostCommands(
   program: CommanderCommand,
   options: CliHostRegistrationOptions,
 ): void {
+  // densable 2.1.283 AXn — hidden VS Code extension stdin JSON commands.
+  registerVscodeExtensionHostCommands(program)
+
   const mcp = program
     .command('mcp')
     .description(describe(['mcp']))
@@ -501,35 +505,7 @@ export function registerCliHostCommands(
     .option('--report [path]', 'Write an HTML report')
     .option('--publish-report', 'Publish the HTML report')
     .option('--no-publish', 'Do not publish the HTML report')
-    .action(
-      async (
-        target: string | undefined,
-        commandOptions: {
-          evalDir?: string
-          json?: boolean | string
-          trustPlugin?: boolean
-          ablation?: string
-          case?: string
-          tag?: string[]
-          runs?: string
-          concurrency?: string
-          model?: string
-          judgeModel?: string
-          maxCostUsd?: string
-          outputDir?: string
-          threshold?: string
-          allowTools?: string[]
-          scaffold?: boolean
-          noScaffold?: boolean
-          mocks?: string
-          allowRealServers?: boolean
-          keepTemp?: boolean
-          verbose?: boolean
-          report?: string
-          publishReport?: boolean
-          publish?: boolean
-        },
-      ) => {
+    .action(async (target, commandOptions) => {
         const { ensurePluginEvalAvailable, pluginEvalHandler } = await import(
           '../cli/handlers/pluginEval.js'
         )

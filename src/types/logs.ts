@@ -503,6 +503,24 @@ export type RelocatedEntry = {
   relocatedCwd: string
 }
 
+/**
+ * densable `cost-state` JSONL (`HY` parse / `dRn` write). `rf` reads
+ * `costState.totalCostUSD`.
+ */
+export type CostStateEntry = {
+  type: 'cost-state'
+  sessionId: string
+  totalCostUSD: number
+  totalAPIDuration?: number
+  totalAPIDurationWithoutRetries?: number
+  totalToolDuration?: number
+  totalLinesAdded?: number
+  totalLinesRemoved?: number
+  totalDuration?: number
+  startTime?: number
+  modelUsage?: Record<string, unknown>
+}
+
 export type Entry =
   | TranscriptMessage
   | SummaryMessage
@@ -532,6 +550,7 @@ export type Entry =
   | ObserverRefEntry
   | ArtifactAutoreactLedgerEntry
   | RelocatedEntry
+  | CostStateEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {
   return logs.sort((a, b) => {

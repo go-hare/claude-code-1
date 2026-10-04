@@ -647,6 +647,13 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When set, opt into/out of dynamic workflows. Unset uses the product default.',
         ),
+      // densable tKn — skip the Workflow usage-consent prompt.
+      skipWorkflowUsageWarning: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, skip the one-time Workflow usage-consent prompt (densable tKn).',
+        ),
       // densable 2.1.219 #5/#18 — settings key; /config row hidden while set.
       // "medium" (the default) aims for fewer than 15 agents; large < 50.
       workflowSizeGuideline: z

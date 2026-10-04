@@ -75,6 +75,7 @@ export type LoadedFrom =
   | 'bundled'
   | 'mcp'
   | 'syncedSkills' // densable 2.1.228 #12 — claude.ai sync
+  | 'memoryStore' // densable sN loadedFrom:"memoryStore" @181327164
 
 /**
  * Returns a claude config directory path for a given source.
@@ -845,10 +846,7 @@ export const getSkillDirCommands = memoize(
       ),
     )
 
-    const seenFileIds = new Map<
-      string,
-      SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
-    >()
+    const seenFileIds = new Map<string, string>()
     const deduplicatedSkills: Command[] = []
 
     for (let i = 0; i < allSkillsWithPaths.length; i++) {

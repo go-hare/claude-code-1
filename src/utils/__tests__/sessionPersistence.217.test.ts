@@ -17,17 +17,34 @@ import {
 } from '../transcriptWriterHealth.js'
 
 describe('sessionPersistence densable 2.1.217 #2', () => {
-  test('x0t: CHILD_SESSION suppresses unless FORCE', () => {
+  test('P$e: CHILD_SESSION suppresses only when interactive and not teammate', () => {
     expect(
-      isNestedMarkerSuppressingPersistence({
-        CLAUDE_CODE_CHILD_SESSION: '1',
-      }),
+      isNestedMarkerSuppressingPersistence(
+        { CLAUDE_CODE_CHILD_SESSION: '1' },
+        { interactive: true, isTeammate: false },
+      ),
     ).toBe(true)
+    // SDK/print: isInteractive=false — inherited CHILD_SESSION must still write
     expect(
-      isNestedMarkerSuppressingPersistence({
-        CLAUDE_CODE_CHILD_SESSION: '1',
-        CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1',
-      }),
+      isNestedMarkerSuppressingPersistence(
+        { CLAUDE_CODE_CHILD_SESSION: '1' },
+        { interactive: false, isTeammate: false },
+      ),
+    ).toBe(false)
+    expect(
+      isNestedMarkerSuppressingPersistence(
+        { CLAUDE_CODE_CHILD_SESSION: '1' },
+        { interactive: true, isTeammate: true },
+      ),
+    ).toBe(false)
+    expect(
+      isNestedMarkerSuppressingPersistence(
+        {
+          CLAUDE_CODE_CHILD_SESSION: '1',
+          CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1',
+        },
+        { interactive: true, isTeammate: false },
+      ),
     ).toBe(false)
     expect(isNestedMarkerSuppressingPersistence({})).toBe(false)
   })

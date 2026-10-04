@@ -8,7 +8,7 @@
  */
 
 import type { Dirent } from 'fs'
-import { readdir, stat } from 'fs/promises'
+import { readFile, readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import type { LiteSessionFile } from './sessionStoragePortable.js'
@@ -26,6 +26,7 @@ import {
   readSessionLite,
   recordedCwdCollidesWithProjectResolved,
   recordedCwdIsWithinOwnWorktrees,
+  resolveSessionFilePath,
   sanitizePath,
   sanitizePathRaw,
   slugCollisionGuardFoldsCase,
@@ -522,4 +523,50 @@ export async function listSessionsImpl(
 
   if (!doStat) return readAllAndSort(candidates)
   return applySortAndLimit(candidates, limit, off)
+}
+
+/**
+ * SDK get_session_info — resolve the JSONL on disk, lite-read it, then
+ * parseSessionInfoFromLite. Returns null when the file is missing, a
+ * sidechain, or metadata-only (no extractable summary). Python/TS SDK
+ * callers read this same file; this is not an RPC.
+ */
+export async function getSessionInfoImpl(
+  sessionId: string,
+  dir?: string,
+): Promise<SessionInfo | null> {
+  const resolved = await resolveSessionFilePath(sessionId, dir)
+  if (!resolved) return null
+  const lite = await readSessionLite(resolved.filePath)
+  if (!lite) return null
+  return parseSessionInfoFromLite(sessionId, lite, resolved.projectPath)
+}
+
+/**
+ * SDK get_session_messages — parse the JSONL on disk. Missing file → null.
+ * Python does its own JSONL parse; this helper exists so CLI-side tests
+ * and the TS SDK share resolveSessionFilePath.
+ */
+export async function getSessionMessagesImpl(
+  sessionId: string,
+  dir?: string,
+): Promise<unknown[] | null> {
+  const resolved = await resolveSessionFilePath(sessionId, dir)
+  if (!resolved) return null
+  let raw: string
+  try {
+    raw = await readFile(resolved.filePath, 'utf8')
+  } catch {
+    return null
+  }
+  const messages: unknown[] = []
+  for (const line of raw.split('\n')) {
+    if (!line) continue
+    try {
+      messages.push(JSON.parse(line) as unknown)
+    } catch {
+      // skip malformed / truncated lines
+    }
+  }
+  return messages
 }

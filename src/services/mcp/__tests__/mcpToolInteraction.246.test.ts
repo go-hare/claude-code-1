@@ -55,4 +55,24 @@ describe('mcpToolCheckPermissionsResult (official checkPermissions)', () => {
       'suppressAlwaysAllowRule' in result && result.suppressAlwaysAllowRule,
     ).toBeFalsy()
   })
+
+  test('gold s8t: Claude Preview stamps hostHandlesOriginConsent', () => {
+    const result = mcpToolCheckPermissionsResult(
+      false,
+      'mcp__Claude Preview__read',
+      'Claude Preview',
+    )
+    expect(result.behavior).toBe('ask')
+    if (result.behavior !== 'ask') throw new Error('expected ask')
+    expect(result.message).toBe('Claude Preview requires permission.')
+    expect(result.metadata).toEqual({
+      command: {
+        name: 'mcp__Claude Preview__read',
+        chrome: { hostHandlesOriginConsent: true },
+      },
+    })
+    expect(result.suggestions?.[0]).toMatchObject({
+      destination: 'session',
+    })
+  })
 })

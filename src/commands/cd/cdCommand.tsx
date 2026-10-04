@@ -8,14 +8,22 @@ import { realpath, stat } from 'fs/promises';
 import { basename, dirname, parse as pathParse, resolve } from 'path';
 import { randomUUID } from 'crypto';
 import React from 'react';
-import { getOriginalCwd, setCwdState, setOriginalCwd } from '../../bootstrap/state.js';
+import {
+  clearSystemPromptSectionState,
+  getOriginalCwd,
+  resetStickyBetas,
+  setCachedClaudeMdContent,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+} from '../../bootstrap/state.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import { getGlobalConfig, getProjectPathForConfig, isPathTrusted, saveGlobalConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { findCanonicalGitRootUncached, findGitRootUncached, getIsGit } from '../../utils/git.js';
-import { reanchorGitFileWatcher } from '../../utils/git/gitFilesystem.js';
+import { clearResolveGitDirCache, reanchorGitFileWatcher } from '../../utils/git/gitFilesystem.js';
 import { uniq } from '../../utils/array.js';
 import { expandPath, normalizePathForConfigKey } from '../../utils/path.js';
 import { getSettingsForSource } from '../../utils/settings/settings.js';
@@ -33,6 +41,7 @@ import {
   getClaudeMds,
   getMemoryFiles,
   getMemoryFilesForNestedDirectory,
+  resetGetMemoryFilesCache,
 } from '../../utils/claudemd.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { wrapInSystemReminder } from '../../utils/messages.js';
@@ -44,7 +53,7 @@ import { skillChangeDetector } from '../../utils/skills/skillChangeDetector.js';
 import { addSkillDirectories } from '../../skills/loadSkillsDir.js';
 import { clearPluginCache } from '../../utils/plugins/pluginLoader.js';
 import { escapeXmlForSystemReminder } from '../../utils/xml.js';
-import { getGitStatus } from '../../context.js';
+import { getGitStatus, getUserContext } from '../../context.js';
 import { CdUntrustedMoveFlow, replaceGatedNotice } from './CdUntrustedMoveFlow.js';
 import { readCdDisclosures } from './cdDisclosures.js';
 import {
@@ -214,13 +223,15 @@ function collectDepartedAdditionalDirectories(originalCwd: string, cwd: string):
 
 export async function relocateSessionCwd(
   directory: string,
-  source: 'cd_command' | 'set_cwd' = 'cd_command',
+  source: 'cd_command' | 'set_cwd' | 'claim_session' = 'cd_command',
+  opts?: { freshSession?: boolean },
 ): Promise<{
   modelMessage: string;
   transcriptRelocated: boolean;
   projectGrantsGated: boolean;
   gatedNotice: string;
   departedAdditionalDirectories: string[];
+  freshSession?: boolean;
 }> {
   const previous = getCwd();
   const previousOriginal = getOriginalCwd();
@@ -290,13 +301,20 @@ export async function relocateSessionCwd(
       level: 'error',
     });
   }
-  try {
-    // densable ke(de("skills", cwd)) = iXe(o3("skills", getCwd()))
-    await addSkillDirectories(getProjectDirsUpToHome('skills', getCwd()));
-  } catch (e) {
-    logForDebugging(`directory move: registering the new directory's skills failed (continuing without them): ${e}`, {
-      level: 'error',
-    });
+  const fresh = Boolean(opts?.freshSession);
+  // densable $7e: if(f)$de(oe()); else Hxt skills. Claim freshSession skips
+  // dest skill register and re-derives start-of-session state instead.
+  if (fresh) {
+    setProjectRoot(getCwd());
+  } else {
+    try {
+      // densable ke(de("skills", cwd)) = iXe(o3("skills", getCwd()))
+      await addSkillDirectories(getProjectDirsUpToHome('skills', getCwd()));
+    } catch (e) {
+      logForDebugging(`directory move: registering the new directory's skills failed (continuing without them): ${e}`, {
+        level: 'error',
+      });
+    }
   }
   try {
     await skillChangeDetector.rehome();
@@ -320,7 +338,42 @@ export async function relocateSessionCwd(
   }
   invalidateAllRenders();
 
-  logEvent('tengu_cd_command', { source: meta(source) });
+  logEvent('tengu_cd_command', {
+    source: meta(source),
+    fresh_session: Boolean(opts?.freshSession) as never,
+  });
+
+  // densable $7e @210305767 — claim_session freshSession skips the move notice
+  // and re-derives start-of-session state (VG/nTt/dJt/b2t/HUt/zUt/wEe/dv).
+  if (fresh) {
+    try {
+      clearSystemPromptSectionState();
+      resetStickyBetas();
+      resetGetMemoryFilesCache('session_start');
+      getUserContext.cache?.clear?.();
+      setCachedClaudeMdContent(null);
+      clearResolveGitDirCache();
+      getIsGit.cache?.clear?.();
+      getGitStatus.cache?.clear?.();
+      if (!process.env.CLAUDE_CODE_REMOTE) {
+        void getGitStatus();
+      }
+      void getUserContext();
+    } catch (p) {
+      logForDebugging(
+        `directory move: re-deriving start-of-session state for the new directory failed (continuing): ${p}`,
+        { level: 'error' },
+      );
+    }
+    return {
+      modelMessage: '',
+      transcriptRelocated,
+      projectGrantsGated: false,
+      gatedNotice: '',
+      departedAdditionalDirectories,
+      freshSession: true,
+    };
+  }
 
   let memory = '';
   try {

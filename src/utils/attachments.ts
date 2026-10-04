@@ -81,7 +81,7 @@ import {
   getDefaultHaikuModel,
   getDefaultOpusModel,
 } from './model/model.js'
-import { getSkillToolCommands, getMcpSkillCommands } from '../commands.js'
+import { mergeSkillToolCommands } from '../commands.js'
 import type { ReadResourceResult } from 'src/services/mcp/types.js'
 import type { Command } from '../types/command.js'
 import uniqBy from 'lodash-es/uniqBy.js'
@@ -857,6 +857,12 @@ export type Attachment =
       type: 'companion_intro'
       name: string
       species: string
+    }
+  | {
+      /** densable on({type:"thinking_stripped"}) @184764480 */
+      type: 'thinking_stripped'
+      scope: 'all' | 'partial'
+      from?: { messageId: string; thinkingIndex: number }
     }
   | {
       type: 'bagel_console'
@@ -3259,15 +3265,10 @@ async function getSkillListingAttachments(
     return []
   }
 
-  const cwd = getProjectRoot()
-  const localCommands = await getSkillToolCommands(cwd)
-  const mcpSkills = getMcpSkillCommands(
+  const { included } = await mergeSkillToolCommands(
     toolUseContext.getAppState().mcp.commands,
   )
-  let allCommands =
-    mcpSkills.length > 0
-      ? uniqBy([...localCommands, ...mcpSkills], 'name')
-      : localCommands
+  let allCommands = [...included]
 
   // When skill search is active, filter to bundled + MCP instead of full
   // suppression. Resolves the turn-0 gap: main thread gets turn-0 discovery

@@ -25,6 +25,7 @@ import {
   SDKPostTurnSummaryMessageSchema,
   SDKStreamlinedTextMessageSchema,
   SDKStreamlinedToolUseSummaryMessageSchema,
+  SDKTranscriptMirrorMessageSchema,
   SDKUserMessageSchema,
   SlashCommandSchema,
 } from './coreSchemas.js'
@@ -865,6 +866,90 @@ export const SDKControlRequestUserDialogResponseSchema = lazySchema(() =>
 // Control Request/Response Wrappers
 // ============================================================================
 
+/**
+ * densable ofn @177714320 — claim_session control request.
+ */
+export const SDKControlClaimSessionRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('claim_session'),
+      cwd: z
+        .string()
+        .describe(
+          "The session's working directory. Tilde-expanded and realpath-canonicalized; treated exactly like the cwd a process is spawned in (no trust prompt, no Cd(...) rule check) — the host chose it, as it chooses a spawn cwd.",
+        ),
+      env: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          "Per-session environment additions. Only keys on the claim allow-list are accepted (keys the process has already consumed — config dir, base URL, proxy/TLS, provider, telemetry, entrypoint — must be part of the spare's spawn env); any other key rejects the claim and leaves the spare parked.",
+        ),
+      additional_directories: z
+        .array(z.string())
+        .optional()
+        .describe('Extra directories the session may access, as --add-dir.'),
+      permission_mode: z
+        .string()
+        .optional()
+        .describe(
+          "Session permission mode, as --permission-mode. Part of the claim (not a follow-up set_permission_mode) so that a mode the process cannot take — bypassPermissions on a spare spawned without --allow-dangerously-skip-permissions, a mode this build does not know, one the claimed directory's settings disable — refuses or fails the claim instead of letting the first turn run under the spare's mode.",
+        ),
+      system_prompt: z
+        .array(z.string())
+        .optional()
+        .describe('As initialize.systemPrompt.'),
+      append_system_prompt: z
+        .string()
+        .optional()
+        .describe('As initialize.appendSystemPrompt.'),
+      agents: z
+        .record(z.string(), AgentDefinitionSchema())
+        .optional()
+        .describe('As initialize.agents.'),
+      title: z.string().optional().describe('As initialize.title.'),
+      sdk_mcp_servers: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "The session's final set of in-process SDK MCP server names. Diffed against the set registered while parked: new names are connected, missing ones disconnected. Omitted: the parked set stays.",
+        ),
+      include_initialize: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true the ok response also carries the payload an initialize response would (commands, agents, models, account …) computed for the claimed directory, for hosts that render them.',
+        ),
+      workspace_trust: z
+        .object({
+          accepted: z.boolean(),
+          directory: z.string(),
+        })
+        .optional()
+        .describe(
+          "As initialize.workspaceTrust, for a claimed spare: the host's attestation that the user accepted a trust dialog for the session's folder.",
+        ),
+    })
+    .describe(
+      '@internal Binds a parked spare (a process started with --await-claim) to its session.',
+    ),
+)
+
+export const SDKControlClaimSessionResponseSchema = lazySchema(() =>
+  z
+    .object({
+      status: z.literal('ok'),
+      cwd: z.string().optional(),
+      session_id: z.string(),
+      parked_ms: z.number().optional(),
+      sdk_mcp_settled: z.boolean(),
+      initialize: z.record(z.string(), z.unknown()).optional(),
+      workspace_trust_recorded: z.boolean().optional(),
+    })
+    .describe(
+      '@internal Result of a successful claim_session. Failures arrive as a control_response error whose message starts with a reason token (not_a_spare, already_claimed, busy, turn_started, env_key_not_claimable:<KEY>, cwd_not_found, cwd_not_a_directory, …); the spare stays parked after any of them.',
+    ),
+)
+
 export const SDKControlRequestInnerSchema = lazySchema(() =>
   z.union([
     SDKControlInterruptRequestSchema(),
@@ -882,6 +967,7 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlSeedReadStateRequestSchema(),
     SDKControlRegisterRepoRootRequestSchema(),
     SDKControlSetCwdRequestSchema(),
+    SDKControlClaimSessionRequestSchema(),
     SDKControlMcpSetServersRequestSchema(),
     SDKControlReloadPluginsRequestSchema(),
     SDKControlMcpReconnectRequestSchema(),
@@ -984,6 +1070,7 @@ export const StdoutMessageSchema = lazySchema(() =>
     SDKControlRequestSchema(),
     SDKControlCancelRequestSchema(),
     SDKKeepAliveMessageSchema(),
+    SDKTranscriptMirrorMessageSchema(),
   ]),
 )
 

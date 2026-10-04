@@ -71,6 +71,45 @@ if (SHOULD_PROFILE) {
 }
 
 /**
+ * densable `Zo` / `recordPhase` @179674022.
+ * `await_initialize_ms` is recorded from main preAction after zqr.
+ */
+const recordedPhases: Record<string, number> = {}
+const recordedPhaseStarts: Record<string, number> = {}
+let recordedPhasesConsumed = false
+
+export function recordStartupPhase(
+  name: string,
+  durationMs: number,
+  startMs?: number,
+): void {
+  if (recordedPhasesConsumed) return
+  if (name === 'skills_load_ms' && recordedPhases[name] !== undefined) return
+  recordedPhases[name] = Math.round(durationMs)
+  if (startMs !== undefined) {
+    recordedPhaseStarts[name] = Math.round(startMs)
+  }
+}
+
+export function getRecordedStartupPhase(name: string): number | undefined {
+  return recordedPhases[name]
+}
+
+export function getRecordedStartupPhaseStart(name: string): number | undefined {
+  return recordedPhaseStarts[name]
+}
+
+export function resetRecordedStartupPhasesForTesting(): void {
+  recordedPhasesConsumed = false
+  for (const key of Object.keys(recordedPhases)) {
+    delete recordedPhases[key]
+  }
+  for (const key of Object.keys(recordedPhaseStarts)) {
+    delete recordedPhaseStarts[key]
+  }
+}
+
+/**
  * Record a checkpoint with the given name
  */
 export function profileCheckpoint(name: string): void {
@@ -82,6 +121,40 @@ export function profileCheckpoint(name: string): void {
   // Only capture memory when detailed profiling enabled (env var)
   if (DETAILED_PROFILING) {
     memorySnapshots.push(process.memoryUsage())
+  }
+}
+
+/**
+ * densable `Ur(e,{once})` @176644790 — `ne` claim_received / claim_validated / spare_claimed.
+ */
+const onceMarkedCheckpoints = new Set<string>()
+
+export function profileCheckpointOnce(name: string): boolean {
+  if (!SHOULD_PROFILE) return false
+  if (onceMarkedCheckpoints.has(name)) return false
+  onceMarkedCheckpoints.add(name)
+  profileCheckpoint(name)
+  return true
+}
+
+/**
+ * densable `dN` @176644790 — merge into startupContext for tengu_spare_claimed extras.
+ */
+const startupContext: Record<string, unknown> = {}
+
+export function assignStartupContext(fields: Record<string, unknown>): void {
+  if (!SHOULD_PROFILE) return
+  Object.assign(startupContext, fields)
+}
+
+export function getStartupContext(): Record<string, unknown> {
+  return startupContext
+}
+
+export function resetClaimProfilerForTests(): void {
+  onceMarkedCheckpoints.clear()
+  for (const key of Object.keys(startupContext)) {
+    delete startupContext[key]
   }
 }
 

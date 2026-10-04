@@ -13,7 +13,8 @@ import {
   createChildAbortController,
   isRemoteCancelAbortReason,
 } from '../../utils/abortController.js'
-import { runToolUse } from './toolExecution.js'
+import { isToolBridgeEvent, runToolUse } from './toolExecution.js'
+import type { ToolBridgeEvent } from './toolExecution.js'
 import {
   queryForegroundSession,
   registerForegroundToolCall,
@@ -25,7 +26,7 @@ import { logEvent } from '../analytics/index.js'
 type MessageUpdate = {
   message?: Message
   newContext?: ToolUseContext
-}
+} & Partial<ToolBridgeEvent>
 
 type ToolStatus = 'queued' | 'executing' | 'completed' | 'yielded'
 
@@ -39,6 +40,8 @@ type TrackedTool = {
   results?: Message[]
   // Progress messages are stored separately and yielded immediately
   pendingProgress: Message[]
+  // densable pendingBridgeEvents — jR control events (set_expanded_view)
+  pendingBridgeEvents: ToolBridgeEvent[]
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
 }
 
@@ -119,6 +122,7 @@ export class StreamingToolExecutor {
         status: 'completed',
         isConcurrencySafe: true,
         pendingProgress: [],
+        pendingBridgeEvents: [],
         results: [
           createUserMessage({
             content: [
@@ -154,6 +158,7 @@ export class StreamingToolExecutor {
       status: 'queued',
       isConcurrencySafe,
       pendingProgress: [],
+      pendingBridgeEvents: [],
     })
 
     void this.processQueue()
@@ -418,7 +423,9 @@ export class StreamingToolExecutor {
       // sends REJECT_MESSAGE to the model instead of aborting (#21056 regression).
       const toolAbortController = createAbortController()
       let detached = false
-      const queryLinked = createChildAbortController(this.siblingAbortController)
+      const queryLinked = createChildAbortController(
+        this.siblingAbortController,
+      )
       queryLinked.signal.addEventListener(
         'abort',
         () => {
@@ -476,64 +483,73 @@ export class StreamingToolExecutor {
 
       try {
         for await (const update of generator) {
-        // Check if we were aborted by a sibling tool error or user interruption.
-        // Only add the synthetic error if THIS tool didn't produce the error.
-        // densable send-now: detached tools ignore the query abort (do not cancel).
-        const abortReason = detached ? null : this.getAbortReason(tool)
-        if (abortReason === 'remote_cancel' && !thisToolErrored) {
-          break
-        }
-        if (
-          abortReason &&
-          abortReason !== 'remote_cancel' &&
-          !thisToolErrored
-        ) {
-          messages.push(
-            this.createSyntheticErrorMessage(
-              tool.id,
-              abortReason,
-              tool.assistantMessage,
-            ),
-          )
-          break
-        }
-
-        const isErrorResult =
-          update.message.type === 'user' &&
-          Array.isArray(update.message.message!.content) &&
-          update.message.message!.content.some(
-            _ => _.type === 'tool_result' && _.is_error === true,
-          )
-
-        if (isErrorResult) {
-          thisToolErrored = true
-          // Only Bash errors cancel siblings. Bash commands often have implicit
-          // dependency chains (e.g. mkdir fails → subsequent commands pointless).
-          // Read/WebFetch/etc are independent — one failure shouldn't nuke the rest.
-          if (tool.block.name === BASH_TOOL_NAME) {
-            this.hasErrored = true
-            this.erroredToolDescription = this.getToolDescription(tool)
-            this.siblingAbortController.abort('sibling_error')
-          }
-        }
-
-        if (update.message) {
-          // Progress messages go to pendingProgress for immediate yielding
-          if (update.message.type === 'progress') {
-            tool.pendingProgress.push(update.message)
-            // Signal that progress is available
+          // densable jR: control events (set_expanded_view) skip the message path
+          if (isToolBridgeEvent(update)) {
+            tool.pendingBridgeEvents.push(update)
             if (this.progressAvailableResolve) {
               this.progressAvailableResolve()
               this.progressAvailableResolve = undefined
             }
-          } else {
-            messages.push(update.message)
+            continue
+          }
+          // Check if we were aborted by a sibling tool error or user interruption.
+          // Only add the synthetic error if THIS tool didn't produce the error.
+          // densable send-now: detached tools ignore the query abort (do not cancel).
+          const abortReason = detached ? null : this.getAbortReason(tool)
+          if (abortReason === 'remote_cancel' && !thisToolErrored) {
+            break
+          }
+          if (
+            abortReason &&
+            abortReason !== 'remote_cancel' &&
+            !thisToolErrored
+          ) {
+            messages.push(
+              this.createSyntheticErrorMessage(
+                tool.id,
+                abortReason,
+                tool.assistantMessage,
+              ),
+            )
+            break
+          }
+
+          const isErrorResult =
+            update.message.type === 'user' &&
+            Array.isArray(update.message.message!.content) &&
+            update.message.message!.content.some(
+              _ => _.type === 'tool_result' && _.is_error === true,
+            )
+
+          if (isErrorResult) {
+            thisToolErrored = true
+            // Only Bash errors cancel siblings. Bash commands often have implicit
+            // dependency chains (e.g. mkdir fails → subsequent commands pointless).
+            // Read/WebFetch/etc are independent — one failure shouldn't nuke the rest.
+            if (tool.block.name === BASH_TOOL_NAME) {
+              this.hasErrored = true
+              this.erroredToolDescription = this.getToolDescription(tool)
+              this.siblingAbortController.abort('sibling_error')
+            }
+          }
+
+          if (update.message) {
+            // Progress messages go to pendingProgress for immediate yielding
+            if (update.message.type === 'progress') {
+              tool.pendingProgress.push(update.message)
+              // Signal that progress is available
+              if (this.progressAvailableResolve) {
+                this.progressAvailableResolve()
+                this.progressAvailableResolve = undefined
+              }
+            } else {
+              messages.push(update.message)
+            }
+          }
+          if (update.contextModifier) {
+            contextModifiers.push(update.contextModifier.modifyContext)
           }
         }
-        if (update.contextModifier) {
-          contextModifiers.push(update.contextModifier.modifyContext)
-        }
-      }
       } finally {
         unregisterForeground()
       }
@@ -572,6 +588,9 @@ export class StreamingToolExecutor {
     }
 
     for (const tool of this.tools) {
+      while (tool.pendingBridgeEvents.length > 0) {
+        yield tool.pendingBridgeEvents.shift()!
+      }
       // Always yield pending progress messages immediately, regardless of tool status
       while (tool.pendingProgress.length > 0) {
         const progressMessage = tool.pendingProgress.shift()!
@@ -600,7 +619,9 @@ export class StreamingToolExecutor {
    * Check if any tool has pending progress messages
    */
   private hasPendingProgress(): boolean {
-    return this.tools.some(t => t.pendingProgress.length > 0)
+    return this.tools.some(
+      t => t.pendingProgress.length > 0 || t.pendingBridgeEvents.length > 0,
+    )
   }
 
   /**

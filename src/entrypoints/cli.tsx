@@ -119,6 +119,17 @@ async function main(): Promise<void> {
 
   // For all other paths, load the startup profiler
   const { profileCheckpoint } = await import('../utils/startupProfiler.js');
+  // bun scripts/dev.ts pins spawn cwd + PWD to the repo so `src/` aliases
+  // resolve. Do NOT process.chdir() here — later `src/` imports still consult
+  // process.cwd(). createBootstrapSession reads CLAUDE_CODE_CALLER_CWD so
+  // JSONL lands under ~/.claude/projects/<sanitize(options.cwd)>. Restore
+  // PWD for child processes after the first `src/` import.
+  {
+    const callerCwd = process.env.CLAUDE_CODE_CALLER_CWD;
+    if (callerCwd) {
+      process.env.PWD = callerCwd;
+    }
+  }
   profileCheckpoint('cli_entry');
 
   // densable pinStorageV5FromEnv after cli_entry — skip --preload / --bg-spare.
@@ -153,6 +164,18 @@ async function main(): Promise<void> {
     const { getSystemPrompt } = await import('../constants/prompts.js');
     const prompt = await getSystemPrompt([], model);
     console.log(prompt.join('\n'));
+    return;
+  }
+
+  if (process.argv[2] === '--eval-mock-server') {
+    profileCheckpoint('cli_eval_mock_server_path');
+    const { runEvalMockServer } = await import('../utils/plugins/pluginEval/evalMockServer.js');
+    try {
+      await runEvalMockServer(process.argv[3], process.argv[4]);
+    } catch (error) {
+      console.error(`--eval-mock-server: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
     return;
   }
 

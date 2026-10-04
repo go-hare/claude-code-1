@@ -4,9 +4,15 @@ import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
 import { getClaudeAIOAuthTokens } from '../auth.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { logForDebugging } from '../debug.js'
 import { toError } from '../errors.js'
 import { logError } from '../log.js'
-import { getOAuthHeaders } from './api.js'
+import { getAPIProvider } from '../model/providers.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from '../../services/analytics/index.js'
+import { axiosGetWithRetry, CCR_BYOC_BETA, getOAuthHeaders } from './api.js'
 
 export type EnvironmentKind = 'anthropic_cloud' | 'byoc' | 'bridge'
 export type EnvironmentState = 'active'
@@ -135,6 +141,101 @@ export async function fetchEnvironments(): Promise<EnvironmentResource[]> {
       throw err
     }
     throw new Error(`Failed to fetch environments: ${err.message}`)
+  }
+}
+
+export type SelfHostedPool = {
+  kind: 'self_hosted_pool'
+  pool_id: string
+  name: string
+  created_at?: string
+  alive_runner_count: number
+}
+
+/**
+ * densable `Unn` @179768597 — GET /v1/code/runners/self-hosted/pools.
+ * firstParty only; empty on missing token/org or any error.
+ */
+export async function fetchSelfHostedPools(
+  accessToken?: string,
+  _credentials?: unknown,
+): Promise<SelfHostedPool[]> {
+  void _credentials
+  if (getAPIProvider() !== 'firstParty') return []
+  const token = accessToken ?? getClaudeAIOAuthTokens()?.accessToken
+  if (!token) return []
+  const orgUUID = await getOrganizationUUID()
+  if (!orgUUID) return []
+  const url = `${getOauthConfig().BASE_API_URL}/v1/code/runners/self-hosted/pools`
+  try {
+    const response = await axiosGetWithRetry<{
+      pools?: Array<{
+        pool_id?: string
+        name?: string
+        created_at?: string
+        alive_runner_count?: number
+      }>
+    }>(url, {
+      headers: {
+        ...getOAuthHeaders(token),
+        'anthropic-beta': CCR_BYOC_BETA,
+        'x-organization-uuid': orgUUID,
+      },
+      timeout: 15000,
+    })
+    if (response.status !== 200) {
+      logForDebugging(
+        `fetchSelfHostedPools: ${response.status} ${response.statusText}`,
+        { level: 'error' },
+      )
+      logEvent('tengu_feature_sad', {
+        feature_name:
+          'teleport_self_hosted_pool_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'non_200' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return []
+    }
+    return (response.data.pools ?? [])
+      .filter(
+        (
+          y,
+        ): y is {
+          pool_id: string
+          name: string
+          created_at?: string
+          alive_runner_count?: number
+        } => typeof y.pool_id === 'string' && typeof y.name === 'string',
+      )
+      .map(y => ({
+        kind: 'self_hosted_pool' as const,
+        pool_id: y.pool_id,
+        name: y.name,
+        created_at: y.created_at,
+        alive_runner_count: y.alive_runner_count ?? 0,
+      }))
+  } catch (error) {
+    const err = toError(error)
+    if (axios.isAxiosError(error)) {
+      logForDebugging(`fetchSelfHostedPools failed: ${err.message}`, {
+        level: 'error',
+      })
+      logEvent('tengu_feature_sad', {
+        feature_name:
+          'teleport_self_hosted_pool_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'api_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } else {
+      logError(err)
+      logEvent('tengu_feature_sad', {
+        feature_name:
+          'teleport_self_hosted_pool_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'unexpected' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+    return []
   }
 }
 

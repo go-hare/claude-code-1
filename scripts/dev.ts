@@ -44,6 +44,11 @@ const inspectArgs = process.env.BUN_INSPECT
   ? ['--inspect-wait=' + process.env.BUN_INSPECT]
   : []
 
+// Pin spawn cwd to the repo so `src/` path aliases and node_modules resolve.
+// Official binary has no such pin. Keep PWD=repo so Bun finds tsconfig.json.
+// Pass the caller's cwd as CLAUDE_CODE_CALLER_CWD so createBootstrapSession
+// snapshots originalCwd to the SDK tempfile, not the repo.
+const callerCwd = process.cwd()
 const result = Bun.spawnSync(
   [
     'bun',
@@ -54,7 +59,15 @@ const result = Bun.spawnSync(
     cliPath,
     ...process.argv.slice(2),
   ],
-  { stdio: ['inherit', 'inherit', 'inherit'], cwd: projectRoot },
+  {
+    stdio: ['inherit', 'inherit', 'inherit'],
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PWD: projectRoot,
+      CLAUDE_CODE_CALLER_CWD: callerCwd,
+    },
+  },
 )
 
 process.exit(result.exitCode ?? 0)

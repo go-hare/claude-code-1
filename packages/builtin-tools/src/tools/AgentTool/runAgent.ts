@@ -3,6 +3,7 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
+import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
 import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
 import { getCommand, getSkillToolCommands, hasCommand } from 'src/commands.js'
 import {
@@ -77,7 +78,6 @@ import {
   normalizeMessages,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
-import { applySubagentModelForce } from './subagentModelForce.js'
 import { getStreamJsonStdoutWriter } from 'src/utils/streamJsonStdoutWriter.js'
 import { normalizeMessage } from 'src/utils/queryHelpers.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
@@ -121,44 +121,7 @@ import {
 import { resolveAgentTools } from './agentToolUtils.js'
 import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
-import {
-  filterInjectedMemoryFiles,
-  getClaudeMds,
-  getMemoryFiles,
-} from 'src/utils/claudemd.js'
-
-/**
- * densable Fl — keep managed policy CLAUDE.md when omitClaudeMd is set on a
- * non-built-in, non-policySettings agent. Built-in/policySettings drop claudeMd.
- */
-async function omitClaudeMdUserContext(
-  agent: AgentDefinition,
-  userContext: { [k: string]: string },
-): Promise<{
-  userContext: { [k: string]: string }
-  managedInstructionsOnly: boolean
-}> {
-  const { claudeMd: _dropped, ...withoutClaudeMd } = userContext
-  const dropped: { [k: string]: string } = withoutClaudeMd
-  if (agent.source === 'built-in' || agent.source === 'policySettings') {
-    return { userContext: dropped, managedInstructionsOnly: false }
-  }
-  try {
-    const managed = getClaudeMds(
-      filterInjectedMemoryFiles(await getMemoryFiles()),
-      type => type === 'Managed',
-    )
-    if (managed === '') {
-      return { userContext: dropped, managedInstructionsOnly: false }
-    }
-    return {
-      userContext: { ...userContext, claudeMd: managed },
-      managedInstructionsOnly: true,
-    }
-  } catch {
-    return { userContext, managedInstructionsOnly: false }
-  }
-}
+import { omitClaudeMdUserContext } from 'src/utils/omitClaudeMd.js'
 
 /**
  * Initialize agent-specific MCP servers
@@ -482,18 +445,13 @@ export async function* runAgent({
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
 
   // Official $6e before getAgentModel — Explore firstParty cap-to-opus.
-  // densable Rs — FORCE zeros frontmatter/tool model before jR.
-  const [forcedFrontmatter, forcedToolModel] = applySubagentModelForce(
+  const resolvedAgentModel = getAgentModel(
     resolveAgentDefinitionModel(
       agentDefinition,
       toolUseContext.options.mainLoopModel,
     ),
-    model,
-  )
-  const resolvedAgentModel = getAgentModel(
-    forcedFrontmatter,
     toolUseContext.options.mainLoopModel,
-    forcedToolModel,
+    model,
     permissionMode,
   )
 
@@ -540,7 +498,7 @@ export async function* runAgent({
   // densable Fl: omitClaudeMd drops user/project/local CLAUDE.md. Built-in and
   // policySettings agents drop the whole claudeMd blob. Custom/plugin agents
   // keep managed policy files (managedInstructionsOnly). Explicit
-  // override.userContext is preserved.
+  // override.userContext is preserved. Main session agent never calls this.
   const { userContext: resolvedUserContext, managedInstructionsOnly } =
     agentDefinition.omitClaudeMd && !override?.userContext
       ? await omitClaudeMdUserContext(agentDefinition, baseUserContext)
@@ -584,6 +542,20 @@ export async function* runAgent({
     ) {
       logForDebugging(
         `Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode '${state.toolPermissionContext.mode}'.`,
+        { level: 'warn' },
+      )
+      agentPermissionMode = undefined
+    }
+
+    // densable Qlt @190121722 — confined eval child keeps parent mode.
+    if (
+      isEvalConfined() &&
+      (agentPermissionMode === 'bypassPermissions' ||
+        agentPermissionMode === 'acceptEdits' ||
+        agentPermissionMode === 'auto')
+    ) {
+      logForDebugging(
+        `Subagent declared permissionMode: ${agentPermissionMode} inside a confined evaluation run; keeping parent mode '${state.toolPermissionContext.mode}'.`,
         { level: 'warn' },
       )
       agentPermissionMode = undefined

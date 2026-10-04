@@ -110,3 +110,18 @@ describe('O3 runForkedAgent default (densable 2.1.222 #2)', () => {
     )
   })
 })
+
+describe('hookAskFloor (densable 2.1.283 EQn)', () => {
+  test('hook ask + rule ask stamps hookAskFloor on canUseTool context', () => {
+    const src = readFileSync(join(import.meta.dir, '../toolHooks.ts'), 'utf8')
+    expect(src).toContain('hookAskFloor: true')
+    expect(src).toContain(
+      'hookAskFloor — a classifier allow re-surfaces as this ask',
+    )
+    const toolSrc = readFileSync(
+      join(import.meta.dir, '../../../Tool.ts'),
+      'utf8',
+    )
+    expect(toolSrc).toContain('hookAskFloor?: boolean')
+  })
+})

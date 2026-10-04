@@ -163,6 +163,10 @@ export async function runHostEngineTurn(
       if (type === 'rate_limit_event') continue
       if (type === 'conversation_reset') continue
       if (type === 'command_lifecycle') continue
+      // densable CLI host onQueryEvent @204905001 — no set_expanded_view arm.
+      // TaskCreate/TaskUpdate emit it via onProgress; HWf must drop it so
+      // TaskCreate does not auto-expand the spinner TaskList.
+      if (type === 'set_expanded_view') continue
       // densable: assistant with parent_tool_use_id skipped in HWf
       if (
         type === 'assistant' &&

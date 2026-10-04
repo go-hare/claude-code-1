@@ -128,6 +128,16 @@ export type UserMessage = Message & {
   interruptedMessageId?: string
   /** densable: abort reason was shutdown (resume treats as interrupted_turn). */
   interruptedByShutdown?: boolean
+  /**
+   * densable 2.1.283 `toolEndsTurn` / smo @ 184413938. Set from ToolResult.endsTurn
+   * so query ends the turn instead of recursing (StructuredOutput + max_turns=1).
+   */
+  toolEndsTurn?: boolean
+  /** MCP protocol metadata (never sent to the model). */
+  mcpMeta?: {
+    _meta?: Record<string, unknown>
+    structuredContent?: Record<string, unknown>
+  }
 }
 export type NormalizedUserMessage = UserMessage
 export type RequestStartEvent = { type: string; [key: string]: unknown }

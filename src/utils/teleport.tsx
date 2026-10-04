@@ -67,9 +67,13 @@ import {
   isTransientNetworkError,
   type SessionResource,
 } from './teleport/api.js';
-import { createDefaultCloudEnvironment, fetchEnvironments } from './teleport/environments.js';
+import { createDefaultCloudEnvironment, fetchEnvironments, fetchSelfHostedPools } from './teleport/environments.js';
 import { createAndUploadGitBundle } from './teleport/gitBundle.js';
-import { isTrustedPoolEnvironment, resolveDefaultPoolEnvironment } from './teleport/pool.js';
+import {
+  isTrustedPoolEnvironment,
+  resolveDefaultPoolEnvironment,
+  sessionCreateEnvironmentFields,
+} from './teleport/pool.js';
 
 export type TeleportResult = {
   messages: Message[];
@@ -107,6 +111,8 @@ function createTeleportResumeUserMessage() {
 type TeleportToRemoteResponse = {
   id: string;
   title: string;
+  /** densable Qre `homeSeed` when dir-sync seed starts. Local wrap: unset without seed engine. */
+  homeSeed?: unknown;
 };
 
 type TeleportCreateEvent = {
@@ -191,6 +197,23 @@ function buildTeleportCreateEvents(opts: {
     });
   }
   return events;
+}
+
+/** densable `zGt` @185900700 + Qre `effort_level`. */
+function cloudCreateSessionContextExtras(e: {
+  customSystemPrompt?: string;
+  maxBudgetUsd?: number;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  effort?: string;
+}): Record<string, unknown> {
+  return {
+    ...(e.effort && { effort_level: e.effort }),
+    ...(e.customSystemPrompt && { custom_system_prompt: e.customSystemPrompt }),
+    ...(e.maxBudgetUsd !== undefined && e.maxBudgetUsd > 0 && { max_budget_usd: e.maxBudgetUsd }),
+    ...(e.allowedTools && e.allowedTools.length > 0 && { allowed_tools: e.allowedTools }),
+    ...(e.disallowedTools && e.disallowedTools.length > 0 && { disallowed_tools: e.disallowedTools }),
+  };
 }
 
 /**
@@ -1188,6 +1211,29 @@ export async function teleportToRemote(options: {
    * densable Qre correlationId → session_context.correlation_id.
    */
   correlationId?: string;
+  /**
+   * densable zGt @185900700 extras + zo @202423559 CCR slots.
+   * seedDirSync / staysAttached / deviceBinding / firstUpload are accepted;
+   * local has no folder-engine / device-key POST — leave unbound / no homeSeed.
+   */
+  customSystemPrompt?: string;
+  appendSubagentSystemPrompt?: string;
+  maxBudgetUsd?: number;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  effort?: string;
+  fallbackModel?: string;
+  thinking?: { type?: string; budgetTokens?: number; display?: string };
+  proactivityLevel?: string;
+  deviceBinding?: {
+    onBound?: (deviceId: string) => void;
+    onUnbound?: (reason?: string) => void;
+  };
+  seedDirSync?: boolean;
+  staysAttached?: boolean;
+  forwardHomeSettings?: boolean;
+  homeSettingsConsent?: string;
+  onBundleNotice?: (message: string) => void;
 }): Promise<TeleportToRemoteResponse | null> {
   const { initialMessage, signal } = options;
   // densable: n = e.cwd ?? Ct()
@@ -1357,12 +1403,13 @@ export async function teleportToRemote(options: {
           ...(options.appendSystemPrompt && {
             append_system_prompt: options.appendSystemPrompt,
           }),
+          ...cloudCreateSessionContextExtras(options),
           ...(options.outputSchema && { output_schema: options.outputSchema }),
           ...(options.correlationId && {
             correlation_id: options.correlationId,
           }),
         },
-        environment_id: options.environmentId,
+        ...sessionCreateEnvironmentFields(options.environmentId),
         ...(options.tags && { tags: options.tags }),
       };
       logForDebugging(
@@ -1442,13 +1489,30 @@ export async function teleportToRemote(options: {
         : resolveDefaultPoolEnvironment();
     if (poolResolution.ignoredUntrustedPool) {
       logForDebugging(
-        `Ignoring self-hosted pool default ${poolResolution.ignoredUntrustedPool.id} from ${poolResolution.ignoredUntrustedPool.source} — pool placement is only honoured from user/policy/flag settings. Run /remote-env to set your pool.`,
+        `Ignoring self-hosted environment default ${poolResolution.ignoredUntrustedPool.id} from ${poolResolution.ignoredUntrustedPool.source} — environment placement is only honoured from user/policy/flag settings. Run /remote-env to set your environment.`,
         { level: 'warn' },
       );
     }
     const poolPreferredId = poolResolution.id;
     // densable d = wqr(u) — 212 stub always false
     const poolTrusted = isTrustedPoolEnvironment(poolPreferredId);
+    if (poolTrusted && options.poolId === undefined) {
+      void fetchSelfHostedPools().then(
+        pools => {
+          if (pools.length > 0 && !pools.some(p => p.pool_id === poolPreferredId)) {
+            logForDebugging(
+              `Configured default environment ${poolPreferredId} is not in the org's environment list — sending it anyway; server validates at CreateSession`,
+              { level: 'warn' },
+            );
+          }
+        },
+        err => {
+          logForDebugging(`fetchSelfHostedPools rejected: ${toError(err).message}`, {
+            level: 'warn',
+          });
+        },
+      );
+    }
 
     // Kick title gen in parallel with env-select when both title + outcome
     // branch are not already provided (densable P1g).
@@ -1835,6 +1899,7 @@ export async function teleportToRemote(options: {
       ...(options.appendSystemPrompt && {
         append_system_prompt: options.appendSystemPrompt,
       }),
+      ...cloudCreateSessionContextExtras(options),
       ...(options.outputSchema && { output_schema: options.outputSchema }),
       ...(options.correlationId && {
         correlation_id: options.correlationId,
@@ -1852,7 +1917,7 @@ export async function teleportToRemote(options: {
       title: options.ultraplan ? `ultraplan: ${sessionTitle}` : sessionTitle,
       events,
       session_context: sessionContext,
-      environment_id: environmentId,
+      ...sessionCreateEnvironmentFields(environmentId),
       ...(options.tags && { tags: options.tags }),
     };
 

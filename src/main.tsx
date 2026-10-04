@@ -6,7 +6,7 @@
 //    key) in parallel — isRemoteManagedSettingsEligible() otherwise reads them
 //    sequentially via sync spawn inside applySafeConfigEnvironmentVariables()
 //    (~65ms on every macOS startup)
-import { profileCheckpoint, profileReport } from './utils/startupProfiler.js';
+import { profileCheckpoint, profileReport, recordStartupPhase } from './utils/startupProfiler.js';
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 profileCheckpoint('main_tsx_entry');
@@ -34,9 +34,33 @@ import { getSystemContext, getUserContext } from './context.js';
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js';
 import { addToHistory } from './history.js';
 import { registerCliHostCommands } from './cli/registerCliHostCommands.js';
+import {
+  applyHomeSettingsHostConsent,
+  applyMayForwardHomeSettings,
+  CLOUD_ATTACH_DISABLED_ERROR,
+  CLOUD_REQUIRES_DESCRIPTION_ERROR,
+  ENVIRONMENT_PIPED_STDIN_ERROR,
+  HEADLESS_CLOUD_STDIN_TTY_ERROR,
+  NON_INTERACTIVE_ENVIRONMENT_PROMPT_ERROR,
+  UNABLE_TO_CREATE_CLOUD_SESSION_ERROR,
+  cloudSessionViewUrl,
+  formatCreatedCloudSession,
+  formatHeadlessCloudPrintSuccess,
+  isCloudRemoteLaunch,
+  parseCloudLaunch,
+  parseCloudSessionId,
+  registerCloudCliOptions,
+  runHeadlessCloudAttach,
+  runHeadlessCloudCreate,
+  runHeadlessCloudPrintAttach,
+  type CloudCliOptions,
+} from './cli/cloudSession.js';
+import { isViolinWoodEnabled } from './cli/violinWood.js';
+import { registerVscodeExtensionHostCommands } from './cli/handlers/vscodeExtensionHost.js';
 import type { Root } from '@anthropic/ink';
 import { preloadCommandAssembly, primeBundledCommandSources, resolveCommandAssembly } from './cli/commandAssembly.js';
 import { determineMainLaunchMode } from './cli/modeDispatch.js';
+import { fatalDeniedAtStart } from './cli/deniedAtStart.js';
 import {
   determineSetupTrigger,
   runSessionStartupSideEffects,
@@ -326,7 +350,7 @@ import { logContextMetrics } from 'src/utils/api.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
 import { eagerHasCliFlag, eagerParseCliFlag } from 'src/utils/cliArgs.js';
 import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
-import { countConcurrentSessions, registerSession, updateSessionName } from 'src/utils/concurrentSessions.js';
+import { countConcurrentSessions, isBgSession, registerSession, updateSessionName } from 'src/utils/concurrentSessions.js';
 import { getCwd } from 'src/utils/cwd.js';
 import { logForDebugging, setHasFormattedOutput } from 'src/utils/debug.js';
 import {
@@ -377,8 +401,23 @@ import {
   setStrictMcpConfig,
   setTodoToolsOptIn,
   setUserMsgOptIn,
+  setThinkingDisplayExplicit,
   switchSession,
 } from './bootstrap/state.js';
+import {
+  concatPluginDirs,
+  startAwaitInitializeStdinRead,
+  streamJsonStdinChunks,
+  waitForAwaitInitialize,
+} from './cli/awaitInitialize.js';
+import {
+  holdBackMcpConfigsForClaim,
+  isSpareParked,
+  isSubprocessEnvScrubEnabled,
+  markSpareParked,
+} from './cli/spareClaim.js';
+import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from './utils/claudeInChrome/common.js';
+import { COMPUTER_USE_MCP_SERVER_NAME } from './utils/computerUse/common.js';
 import { resolveQuestionPreviewFormat } from './utils/residualUiEnvGates.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -418,11 +457,20 @@ import { fetchSession, prepareApiRequest } from './utils/teleport/api.js';
 import {
   checkOutTeleportedSessionBranch,
   processMessagesForTeleportResume,
+  teleportToRemote,
   teleportToRemoteWithErrorHandling,
   validateGitState,
   validateSessionRepository,
 } from './utils/teleport.js';
-import { shouldEnableThinkingByDefault, type ThinkingConfig } from './utils/thinking.js';
+import {
+  isThinkingDisplay,
+  isThinkingDisplayOmittedByDefault,
+  resolveThinkingDisplay,
+  shouldEnableThinkingByDefault,
+  THINKING_DISPLAY_CHOICES,
+  type ThinkingConfig,
+  type ThinkingDisplay,
+} from './utils/thinking.js';
 import { initUser, resetUserCache } from './utils/user.js';
 import { getTmuxInstallInstructions, isTmuxAvailable, parsePRReference } from './utils/worktree.js';
 
@@ -1286,6 +1334,15 @@ async function run(): Promise<CommanderCommand> {
   // not when displaying help. This avoids the need for env variable signaling.
   program.hook('preAction', async thisCommand => {
     profileCheckpoint('preAction_start');
+    // densable Gqr(DXn) — start reading initialize before init/plugin work.
+    if (
+      thisCommand.getOptionValue('awaitInitialize') === true &&
+      thisCommand.getOptionValue('inputFormat') === 'stream-json' &&
+      thisCommand.getOptionValue('sdkUrl') === undefined &&
+      !process.stdin.isTTY
+    ) {
+      startAwaitInitializeStdinRead(streamJsonStdinChunks);
+    }
     // Await async subprocess loads started at module evaluation (lines 12-20).
     // Nearly free — subprocesses complete during the ~135ms of imports above.
     // Must resolve before init() which triggers the first settings read
@@ -1323,6 +1380,17 @@ async function run(): Promise<CommanderCommand> {
     initSinks();
     profileCheckpoint('preAction_after_sinks');
 
+    const awaitInitializeStartedAt = performance.now();
+    const awaitInitializeResult = await waitForAwaitInitialize();
+    if (awaitInitializeResult) {
+      recordStartupPhase('await_initialize_ms', performance.now() - awaitInitializeStartedAt, awaitInitializeStartedAt);
+    }
+    if (awaitInitializeResult?.kind === 'violation') {
+      writeToStderr(awaitInitializeResult.message);
+      process.exit(1);
+    }
+    const appliedInitialize = awaitInitializeResult?.kind === 'applied' ? awaitInitializeResult : undefined;
+
     // gh-33508: --plugin-dir is a top-level program option. The default
     // action reads it from its own options destructure, but subcommands
     // (plugin list, plugin install, mcp *) have their own actions and
@@ -1331,19 +1399,18 @@ async function run(): Promise<CommanderCommand> {
     // before .option('--plugin-dir', ...) in the chain — extra-typings
     // builds the type as options are added. Narrow with a runtime guard;
     // the collect accumulator + [] default guarantee string[] in practice.
-    const pluginDir = thisCommand.getOptionValue('pluginDir');
-    if (Array.isArray(pluginDir) && pluginDir.length > 0 && pluginDir.every(p => typeof p === 'string')) {
+    const pluginDir = concatPluginDirs(thisCommand.getOptionValue('pluginDir'), appliedInitialize?.pluginDirs);
+    if (pluginDir.length > 0) {
       setInlinePlugins(pluginDir);
       clearPluginCache('preAction: --plugin-dir inline plugins');
     }
     // densable: pluginDirNoMcp → setInlinePluginsNoMcp (Hfe / mxr)
-    const pluginDirNoMcp = thisCommand.getOptionValue('pluginDirNoMcp');
-    if (
-      Array.isArray(pluginDirNoMcp) &&
-      pluginDirNoMcp.length > 0 &&
-      pluginDirNoMcp.every((p: unknown) => typeof p === 'string')
-    ) {
-      setInlinePluginsNoMcp(pluginDirNoMcp as string[]);
+    const pluginDirNoMcp = concatPluginDirs(
+      thisCommand.getOptionValue('pluginDirNoMcp'),
+      appliedInitialize?.pluginDirsNoMcp,
+    );
+    if (pluginDirNoMcp.length > 0) {
+      setInlinePluginsNoMcp(pluginDirNoMcp);
       clearPluginCache('preAction: --plugin-dir-no-mcp inline plugins');
     }
     const pluginUrl = thisCommand.getOptionValue('pluginUrl');
@@ -1440,9 +1507,27 @@ async function run(): Promise<CommanderCommand> {
     )
     .addOption(
       new Option(
+        '--session-mirror',
+        'Emit transcript_mirror frames on stdout (SDK-internal; set by ProcessTransport when sessionStore is configured)',
+      ).hideHelp(),
+    )
+    .addOption(
+      new Option(
+        '--await-claim',
+        'Start as a pre-warmed spare for an SDK host: boot with host-level options in a neutral directory, skip session-scoped start-up work, and wait for a claim_session control request that binds the process to its session (SDK-internal; requires --print with stream-json input and output)',
+      ).hideHelp(),
+    )
+    .addOption(
+      new Option(
         '--input-format <format>',
         'Input format (only works with --print): "text" (default), or "stream-json" (realtime streaming input)',
       ).choices(['text', 'stream-json']),
+    )
+    .addOption(
+      new Option(
+        '--await-initialize',
+        'Read the initialize control request from stdin during startup so its launch-scoped fields (plugins) apply exactly like their command-line flags. Pass it only from the process that writes that request as the first stdin line at spawn (only works with --input-format=stream-json)',
+      ).hideHelp(),
     )
     .option(
       '--mcp-debug',
@@ -1462,6 +1547,11 @@ async function run(): Promise<CommanderCommand> {
     .addOption(
       new Option('--thinking <mode>', 'Thinking mode: enabled (equivalent to adaptive), disabled')
         .choices(['enabled', 'adaptive', 'disabled'])
+        .hideHelp(),
+    )
+    .addOption(
+      new Option('--thinking-display <display>', 'How thinking content appears in the response')
+        .choices([...THINKING_DISPLAY_CHOICES])
         .hideHelp(),
     )
     .addOption(
@@ -1553,6 +1643,20 @@ async function run(): Promise<CommanderCommand> {
     )
     .addOption(
       new Option(
+        '--system-prompt-snapshot <on|off>',
+        "Record the system prompt once per conversation and reuse it verbatim on every request and resume. on (the default): the prompt is rendered on the conversation's first request — a --system-prompt or --append-system-prompt included — sent, and recorded; every later request and resume sends the record as-is, even when a later launch passes different text, until the conversation is compacted. off: never record; the prompt is rendered fresh every request (for iterating on prompt text). No effect where system-prompt recording is not yet enabled.",
+      )
+        .choices(['on', 'off'])
+        .argParser((w: string) => {
+          if (w !== 'on' && w !== 'off') {
+            throw new Error('Allowed choices are on, off.');
+          }
+          return w === 'on';
+        })
+        .hideHelp(),
+    )
+    .addOption(
+      new Option(
         '--append-subagent-system-prompt <prompt>',
         "Append a system prompt to every Task-tool subagent's system prompt, propagated to nested subagents (only works with --print). Implies CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT=1.",
       ).argParser(String),
@@ -1561,6 +1665,15 @@ async function run(): Promise<CommanderCommand> {
       new Option('--permission-mode <mode>', 'Permission mode to use for the session')
         .argParser(String)
         .choices(PERMISSION_MODES),
+    )
+    .addOption(
+      new Option(
+        '--inherit-permission-mode <mode>',
+        'Permission mode carried from a parent session, used only when nothing else configures one',
+      )
+        .argParser(String)
+        .choices(PERMISSION_MODES)
+        .hideHelp(),
     )
     .addOption(
       new Option(
@@ -1579,6 +1692,13 @@ async function run(): Promise<CommanderCommand> {
       'When resuming, create a new session ID instead of reusing the original (use with --resume or --continue)',
       () => true,
     )
+    .addOption(
+      new Option(
+        '--watch-artifact <artifact>',
+        'Watch a Claude artifact (id or URL) in this session and hear about new versions and comments',
+      ).hideHelp(),
+    )
+    .addOption(new Option('--watch-artifact-no-autoreact <artifact>').hideHelp())
     .option(
       '--reply-on-resume',
       'When resuming, immediately query if the loaded transcript ends in a user-role message (set by /background mid-turn so the fork continues the in-flight turn)',
@@ -1657,6 +1777,10 @@ async function run(): Promise<CommanderCommand> {
     .option(
       '--settings <file-or-json>',
       'Path to a settings JSON file or a JSON string to load additional settings from',
+    )
+    .option(
+      '--client-data-url <url>',
+      'URL for a signed configuration document. Claude Code exits if it cannot load it or it does not cover the selected model. Setting CLAUDE_CODE_CLIENT_DATA_URL instead keeps the URL out of the process list',
     )
     .option('--managed-settings <json>', 'Policy-tier settings JSON from a spawning parent process (SDK use only)')
     .option('--add-dir <directories...>', 'Additional directories to allow tool access to')
@@ -1804,6 +1928,7 @@ async function run(): Promise<CommanderCommand> {
         sessionId,
         includeHookEvents,
         includePartialMessages,
+        sessionMirror,
         forwardSubagentText,
         restricted: restrictedOpt,
       } = options;
@@ -1839,6 +1964,9 @@ async function run(): Promise<CommanderCommand> {
         // densable Rwn / Iei
         setForkReplayLaunchConfig({
           ...(typeof rawAppend === 'string' && rawAppend !== '' && { appendSystemPrompt: rawAppend }),
+          ...((options as { systemPromptSnapshot?: boolean }).systemPromptSnapshot !== undefined && {
+            systemPromptSnapshot: (options as { systemPromptSnapshot?: boolean }).systemPromptSnapshot,
+          }),
           ...(typeof agentCli === 'string' && agentCli !== '' && { agent: agentCli }),
           ...(typeof agentsJson === 'string' && agentsJson !== '' && { agents: agentsJson }),
         });
@@ -2059,9 +2187,27 @@ async function run(): Promise<CommanderCommand> {
       // Extract teleport option
       const teleport = (options as { teleport?: string | true }).teleport ?? null;
 
-      // Extract remote option (can be true if no description provided, or a string)
-      const remoteOption = (options as { remote?: string | true }).remote;
-      const remote = remoteOption === true ? '' : (remoteOption ?? null);
+      // densable os() @191780828 — `--cloud` / `--remote` alias / `--environment`
+      const cloudParsed = await parseCloudLaunch(options as CloudCliOptions, {
+        prompt: typeof prompt === 'string' ? prompt : undefined,
+        sessionId,
+        outputFormat,
+        inputFormat,
+        hasSdkUrl: Boolean(sdkUrl),
+        nonInteractive: getIsNonInteractiveSession(),
+        hasConnect: Boolean(_pendingConnect?.url),
+        hasSSH: Boolean(_pendingSSH?.host),
+        hasAssistant: Boolean(_pendingAssistantChat),
+        isViolinWoodEnabled,
+      });
+      if (!cloudParsed.ok) {
+        process.stderr.write(`${cloudParsed.error}\n`);
+        process.exit(1);
+      }
+      const cloudLaunch = cloudParsed.value;
+      applyMayForwardHomeSettings(cloudLaunch.forwardHomeSettings);
+      applyHomeSettingsHostConsent(cloudLaunch.homeSettingsConsent);
+      const remote = cloudLaunch.remote;
 
       // Extract --remote-control / --rc flag (enable bridge in interactive session)
       const remoteControlOption =
@@ -2071,6 +2217,37 @@ async function run(): Promise<CommanderCommand> {
       let remoteControl = false;
       const remoteControlName =
         typeof remoteControlOption === 'string' && remoteControlOption.length > 0 ? remoteControlOption : undefined;
+
+      const watchArtifactRaw =
+        (options as { watchArtifact?: string }).watchArtifact ??
+        (options as { watchArtifactNoAutoreact?: string }).watchArtifactNoAutoreact;
+      if (watchArtifactRaw !== undefined) {
+        const { parseWatchArtifactArg, setPendingWatchArtifact, WATCH_ARTIFACT_REMOTE, WATCH_ARTIFACT_INTERACTIVE } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./cli/watchArtifactCli.js') as typeof import('./cli/watchArtifactCli.js');
+        if (process.env.CLAUDE_CODE_REMOTE) {
+          console.error(WATCH_ARTIFACT_REMOTE);
+          process.exit(1);
+        }
+        if (getIsNonInteractiveSession()) {
+          console.error(WATCH_ARTIFACT_INTERACTIVE);
+          process.exit(1);
+        }
+        const parsedWatch = parseWatchArtifactArg(watchArtifactRaw);
+        if ('error' in parsedWatch) {
+          console.error(parsedWatch.error);
+          process.exit(1);
+        }
+        setPendingWatchArtifact({
+          ...parsedWatch,
+          autoReactDisarmed: typeof (options as { watchArtifactNoAutoreact?: string }).watchArtifactNoAutoreact === 'string',
+        });
+      }
+
+      const clientDataUrl = (options as { clientDataUrl?: string }).clientDataUrl;
+      if (clientDataUrl) {
+        process.env.CLAUDE_CODE_CLIENT_DATA_URL = clientDataUrl;
+      }
 
       // Validate session ID if provided
       if (sessionId) {
@@ -2226,8 +2403,10 @@ async function run(): Promise<CommanderCommand> {
       // so a temporary server-side disable cannot stick after later fetches fail.
       await awaitGrowthBookBeforePermissionMode();
 
+      const inheritPermissionModeCli = (options as { inheritPermissionMode?: string }).inheritPermissionMode;
       const { mode: permissionMode, notification: permissionModeNotification } = initialPermissionModeFromCLI({
         permissionModeCli,
+        inheritPermissionModeCli,
         dangerouslySkipPermissions,
       });
 
@@ -2247,7 +2426,7 @@ async function run(): Promise<CommanderCommand> {
         process.exit(1);
       }
       // leftover host-refuse path only — do not invent a cloud host
-      if (restricted && (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host))) {
+      if (restricted && (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host) || isCloudRemoteLaunch(cloudLaunch))) {
         process.stderr.write(chalk.red(`${RESTRICTED_CLOUD_SSH_REFUSE}\n`));
         process.exit(1);
       }
@@ -2814,6 +2993,37 @@ async function run(): Promise<CommanderCommand> {
         }
       }
 
+      // densable 2.1.283 gates @191846271 — nn strings 1:1
+      if (options.awaitInitialize) {
+        if (inputFormat !== 'stream-json') {
+          writeToStderr('Error: --await-initialize requires --input-format=stream-json.');
+          process.exit(1);
+        }
+        if (sdkUrl) {
+          writeToStderr('Error: --await-initialize cannot be used with --sdk-url.');
+          process.exit(1);
+        }
+      }
+      if (options.awaitClaim) {
+        if (inputFormat !== 'stream-json' || outputFormat !== 'stream-json') {
+          writeToStderr(
+            'Error: --await-claim requires --print with --input-format=stream-json and --output-format=stream-json.',
+          );
+          process.exit(1);
+        }
+        if (options.continue || options.resume || options.forkSession) {
+          writeToStderr('Error: --await-claim cannot be combined with --continue, --resume or --fork-session.');
+          process.exit(1);
+        }
+        if (isSubprocessEnvScrubEnabled()) {
+          writeToStderr(
+            'Error: --await-claim cannot be used with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: the subprocess sandbox pins its protected paths to the launch directory at start-up.',
+          );
+          process.exit(1);
+        }
+        markSpareParked();
+      }
+
       // Validate replayUserMessages is only used with stream-json formats
       if (options.replayUserMessages) {
         if (inputFormat !== 'stream-json' || outputFormat !== 'stream-json') {
@@ -2871,9 +3081,25 @@ async function run(): Promise<CommanderCommand> {
 
       profileCheckpoint('action_tools_loaded');
 
+      // densable 2.1.283: `Vko` then `X(o.jsonSchema)` try/catch (`nn` / `Fi`).
       let jsonSchema: ToolInputJSONSchema | undefined;
-      if (isSyntheticOutputToolEnabled({ isNonInteractiveSession }) && options.jsonSchema) {
-        jsonSchema = jsonParse(options.jsonSchema) as ToolInputJSONSchema;
+      if (
+        isSyntheticOutputToolEnabled({
+          isNonInteractiveSession,
+          isBgSession: isBgSession(),
+        }) &&
+        options.jsonSchema
+      ) {
+        try {
+          jsonSchema = jsonParse(options.jsonSchema) as ToolInputJSONSchema;
+        } catch (s) {
+          writeToStderr(`Error: --json-schema is not valid JSON: ${errorMessage(s)}`);
+          process.exit(1);
+        }
+        if (typeof jsonSchema !== 'object' || jsonSchema === null || Array.isArray(jsonSchema)) {
+          writeToStderr('Error: --json-schema must be a JSON object');
+          process.exit(1);
+        }
       }
 
       if (jsonSchema) {
@@ -2895,6 +3121,8 @@ async function run(): Promise<CommanderCommand> {
           logEvent('tengu_structured_output_failure', {
             error: 'Invalid JSON schema' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           });
+          writeToStderr(`Error: --json-schema is not a valid JSON Schema: ${syntheticOutputResult.error}`);
+          process.exit(1);
         }
       }
 
@@ -3161,12 +3389,40 @@ async function run(): Promise<CommanderCommand> {
       }
       const initialMainLoopModel = getInitialMainLoopModel();
       const resolvedInitialModel = parseUserSpecifiedModel(initialMainLoopModel ?? getDefaultMainLoopModel());
+
+      {
+        // gold xso then Pso (SEA 191853774 / 191854295). Flag already copied
+        // to CLAUDE_CODE_CLIENT_DATA_URL; env-only is the other gold source.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { coverLoadedClientDataDocument, loadClientDataUrl } =
+          require('./cli/clientDataUrl.js') as typeof import('./cli/clientDataUrl.js');
+        const clientDataLoadError = await loadClientDataUrl({
+          // gold Cr: cloud/remote/ssh/environment run on another machine.
+          // Do not invent a --cloud host; env + pending attach is the local twin.
+          runsOnAnotherMachine:
+            isRemoteEnvEnabled() ||
+            Boolean(_pendingConnect?.url) ||
+            Boolean(_pendingSSH?.host) ||
+            Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY),
+        });
+        if (clientDataLoadError !== undefined) {
+          process.stderr.write(`${clientDataLoadError}
+`);
+          process.exit(1);
+        }
+        const clientDataCoverError = coverLoadedClientDataDocument(resolvedInitialModel);
+        if (clientDataCoverError !== undefined) {
+          process.stderr.write(`${clientDataCoverError}
+`);
+          process.exit(1);
+        }
+      }
+
       // densable RH(je) / Sx(Bn): after cs() resolves the initial model, start
       // copy fatals when deniedModels / exact availableModels leave no default.
       const deniedAtStart = formatDeniedModelsBlockMessage(resolvedInitialModel, 'start');
       if (deniedAtStart !== null) {
-        console.error(chalk.red(deniedAtStart));
-        process.exit(1);
+        await fatalDeniedAtStart(deniedAtStart);
       }
 
       let advisorModel: string | undefined;
@@ -3582,6 +3838,31 @@ async function run(): Promise<CommanderCommand> {
         }
       }
 
+      const thinkingDisplay = isThinkingDisplay(options.thinkingDisplay)
+        ? (options.thinkingDisplay as ThinkingDisplay)
+        : undefined;
+      if (thinkingConfig.type !== 'disabled') {
+        if (thinkingDisplay) setThinkingDisplayExplicit(true);
+        const display = resolveThinkingDisplay({
+          explicitDisplay: thinkingDisplay,
+          isNonInteractive: isNonInteractiveSession,
+          outputFormat: outputFormat ?? 'text',
+          verbose: Boolean(verbose),
+          showThinkingSummaries: getInitialSettings().showThinkingSummaries,
+        });
+        if (display) thinkingConfig.display = display;
+        if (
+          display === 'omitted' &&
+          isThinkingDisplayOmittedByDefault({
+            isNonInteractive: isNonInteractiveSession,
+            outputFormat: outputFormat ?? 'text',
+            verbose: Boolean(verbose),
+          })
+        ) {
+          thinkingConfig.displayExplicit = false;
+        }
+      }
+
       logForDiagnosticsNoPII('info', 'started', {
         version: MACRO.VERSION,
         is_native_binary: isInBundledMode(),
@@ -3687,6 +3968,133 @@ async function run(): Promise<CommanderCommand> {
 
       // --print mode
       if (isNonInteractiveSession) {
+        if (cloudLaunch.headlessCloud && process.stdin.isTTY) {
+          process.stderr.write(`${HEADLESS_CLOUD_STDIN_TTY_ERROR}\n`);
+          process.exit(1);
+        }
+        // gold Gr() @192080xxx: `if(rt){… return C===null?EVo:vVo}` before print-attach.
+        if (cloudLaunch.headlessCloud) {
+          const { getBootstrapSessionHost } = await import('./utils/sessionHost.js');
+          const sessionHost = getBootstrapSessionHost();
+          setHasFormattedOutput(true);
+          setIsRemoteMode(true);
+          const headlessArgs = {
+            inputPrompt,
+            effectiveReplayUserMessages,
+            effectiveIncludePartialMessages,
+            effectiveModel,
+            tools,
+            sessionNameArg,
+            permissionModeCli,
+            systemPrompt,
+            appendSystemPrompt,
+            appendSubagentSystemPrompt,
+            poolOnBranch: cloudLaunch.poolOnBranch,
+            poolRef: cloudLaunch.poolRef,
+            remote: cloudLaunch.remote,
+            forwardHomeSettings: cloudLaunch.forwardHomeSettings,
+            homeSettingsConsent: cloudLaunch.homeSettingsConsent,
+          };
+          if (cloudLaunch.cloudAttachId === null) {
+            await runHeadlessCloudCreate(headlessArgs, tools, sessionHost);
+          } else {
+            await runHeadlessCloudAttach(
+              headlessArgs,
+              tools,
+              cloudLaunch.cloudAttachId,
+              sessionHost,
+              { serveOnly: cloudLaunch.serveOnly },
+            );
+          }
+          return;
+        }
+        if (cloudLaunch.cloudAttachId !== null) {
+          const printed = await runHeadlessCloudPrintAttach({
+            sessionId: cloudLaunch.cloudAttachId,
+            prompt: typeof inputPrompt === 'string' ? inputPrompt : null,
+            outputFormat,
+          });
+          if (printed.kind === 'error') {
+            logEvent('tengu_remote_send_headless_error', {
+              entry_point: 'cloud_attach_headless' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+            if (outputFormat === 'json' && printed.json) {
+              process.stdout.write(`${JSON.stringify(printed.json)}\n`);
+            }
+            process.stderr.write(`${printed.message}\n`);
+            process.exit(1);
+          }
+          logEvent('tengu_remote_send_headless_success', {
+            entry_point: 'cloud_attach_headless' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          if (outputFormat === 'json') {
+            process.stdout.write(`${JSON.stringify({ ok: true, session_id: printed.sessionId, url: printed.url })}\n`);
+          } else {
+            process.stdout.write(formatHeadlessCloudPrintSuccess(printed));
+          }
+          await gracefulShutdown(0);
+          return;
+        }
+        if (cloudLaunch.poolId !== null) {
+          const poolPrompt = typeof inputPrompt === 'string' && inputPrompt.trim() !== '' ? inputPrompt : null;
+          if (poolPrompt === null) {
+            process.stderr.write(`${NON_INTERACTIVE_ENVIRONMENT_PROMPT_ERROR}\n`);
+            process.exit(1);
+          }
+          logEvent('tengu_remote_create_session', {
+            has_initial_prompt: 'true' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            entry_point: 'pool_headless' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          const createdPool = await teleportToRemote({
+            initialMessage: poolPrompt,
+            signal: new AbortController().signal,
+            source: 'remote',
+            branchName: cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? ((await getBranch()) || undefined),
+            reuseOutcomeBranch: cloudLaunch.poolOnBranch ?? undefined,
+            explicitRef: cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? undefined,
+            poolId: cloudLaunch.poolId,
+            correlationId: cloudLaunch.correlationId ?? undefined,
+            onCreateFail: message => {
+              process.stderr.write(`Error: ${message}\n`);
+            },
+          });
+          if (!createdPool) {
+            logEvent('tengu_remote_create_session_error', {
+              error: 'unable_to_create_session' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              entry_point: 'pool_headless' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+            if (outputFormat === 'json') {
+              process.stdout.write(`${JSON.stringify({ ok: false, error: 'Unable to create cloud session' })}\n`);
+            }
+            process.stderr.write(`${UNABLE_TO_CREATE_CLOUD_SESSION_ERROR}\n`);
+            process.exit(1);
+          }
+          logEvent('tengu_remote_create_session_success', {
+            session_id: createdPool.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            entry_point: 'pool_headless' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          if (outputFormat === 'json') {
+            process.stdout.write(
+              `${JSON.stringify({
+                ok: true,
+                session_id: createdPool.id,
+                title: createdPool.title,
+                url: cloudSessionViewUrl(createdPool.id),
+                pool_id: cloudLaunch.poolId,
+              })}\n`,
+            );
+          } else {
+            process.stdout.write(
+              formatCreatedCloudSession({
+                id: createdPool.id,
+                title: createdPool.title,
+                includeSessionId: true,
+              }),
+            );
+          }
+          await gracefulShutdown(0);
+          return;
+        }
         if (outputFormat === 'stream-json' || outputFormat === 'json') {
           setHasFormattedOutput(true);
         }
@@ -3866,7 +4274,25 @@ async function run(): Promise<CommanderCommand> {
         // fetch was kicked off early (line ~2558) so only residual time blocks
         // here. --bare skips claude.ai entirely for perf-sensitive scripts.
         profileCheckpoint('before_connectMcp');
-        await connectMcpBatch(regularMcpConfigs, 'regular');
+        // densable Xt @192086918 — parked spare holds stdio MCP (not chrome /
+        // computer-use, not project/local) until claim startDeferredMcpServers.
+        let mcpConfigsToConnect = regularMcpConfigs;
+        if (isSpareParked()) {
+          const held: Record<string, ScopedMcpServerConfig> = {};
+          const connectNow: Record<string, ScopedMcpServerConfig> = {};
+          for (const [name, config] of Object.entries(regularMcpConfigs)) {
+            const isStdio = config.type === 'stdio' || config.type === undefined;
+            const isHostLocal = name === CLAUDE_IN_CHROME_MCP_SERVER_NAME || name === COMPUTER_USE_MCP_SERVER_NAME;
+            if (isStdio && !isHostLocal && config.scope !== 'project' && config.scope !== 'local') {
+              held[name] = config;
+            } else {
+              connectNow[name] = config;
+            }
+          }
+          holdBackMcpConfigsForClaim(held);
+          mcpConfigsToConnect = connectNow;
+        }
+        await connectMcpBatch(mcpConfigsToConnect, 'regular');
         profileCheckpoint('after_connectMcp');
         // Dedup: suppress plugin MCP servers that duplicate a claude.ai
         // connector (connector wins), then connect claude.ai servers.
@@ -4005,6 +4431,7 @@ async function run(): Promise<CommanderCommand> {
             }),
             replayUserMessages: effectiveReplayUserMessages,
             includePartialMessages: effectiveIncludePartialMessages,
+            sessionMirror: Boolean(sessionMirror),
             forwardSubagentText: effectiveForwardSubagentText,
             forkSession: options.forkSession || false,
             replyOnResume: options.replyOnResume || false,
@@ -4131,9 +4558,10 @@ async function run(): Promise<CommanderCommand> {
           : getGlobalConfig().showExpandedTodos
             ? 'tasks'
             : 'none',
-        // densable replTab:"convo", panelFileView:null
+        // densable replTab:"convo", panelFileView:null, diffPanelVisible:!1
         replTab: 'convo',
         panelFileView: null,
+        diffPanelVisible: false,
         showTeammateMessagePreview: isAgentSwarmsEnabled() ? false : undefined,
         selectedIPAgentIndex: -1,
         selectedBgAgentIndex: -1,
@@ -4387,7 +4815,14 @@ async function run(): Promise<CommanderCommand> {
         hasPendingAssistantChat: feature('KAIROS')
           ? !!_pendingAssistantChat && !!(_pendingAssistantChat.sessionId || _pendingAssistantChat.discover)
           : false,
-        hasResumeLikeRequest: !!(options.resume || options.fromPr || teleport || remote !== null),
+        hasResumeLikeRequest: !!(
+          options.resume ||
+          options.fromPr ||
+          teleport ||
+          remote !== null ||
+          cloudLaunch.cloudAttachId !== null ||
+          cloudLaunch.poolId !== null
+        ),
       });
 
       if (launchMode === 'continue') {
@@ -4773,47 +5208,147 @@ async function run(): Promise<CommanderCommand> {
         }
 
         if (remote !== null) {
-          // Create remote session (optionally with initial prompt)
-          const hasInitialPrompt = remote.length > 0;
-
-          // Check if TUI mode is enabled - description is only optional in TUI mode
+          // densable interactive `--cloud` / `--remote` @192151632
+          const attachId = cloudLaunch.cloudAttachId ?? parseCloudSessionId(remote);
           const isRemoteTuiEnabled = getFeatureValue_CACHED_MAY_BE_STALE('tengu_remote_backend', false);
-          if (!isRemoteTuiEnabled && !hasInitialPrompt) {
-            return await exitWithError(
-              root,
-              'Error: --remote requires a description.\nUsage: claude --remote "your task description"',
-              () => gracefulShutdown(1),
+          if (
+            cloudLaunch.poolId !== null &&
+            !attachId &&
+            typeof prompt === 'string' &&
+            prompt.length > 0 &&
+            !cloudLaunch.poolPromotedRemote &&
+            !process.stdin.isTTY
+          ) {
+            return await exitWithError(root, ENVIRONMENT_PIPED_STDIN_ERROR, () => gracefulShutdown(1));
+          }
+          if (attachId && !isRemoteTuiEnabled) {
+            return await exitWithError(root, CLOUD_ATTACH_DISABLED_ERROR, () => gracefulShutdown(1));
+          }
+          const hasInitialPrompt = !attachId && remote.length > 0;
+          if (!isRemoteTuiEnabled && !hasInitialPrompt && cloudLaunch.poolId === null) {
+            return await exitWithError(root, CLOUD_REQUIRES_DESCRIPTION_ERROR, () => gracefulShutdown(1));
+          }
+
+          if (attachId) {
+            logEvent('tengu_remote_attach_session', {
+              session_id: attachId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+            setIsRemoteMode(true);
+            switchSession(asSessionId(attachId), null, 'remote_attach');
+            let attachCreds: { accessToken: string; orgUUID: string };
+            try {
+              attachCreds = await prepareApiRequest();
+            } catch (error) {
+              logError(toError(error));
+              return await exitWithError(root, `Couldn't attach to cloud session: ${errorMessage(error)}`, () =>
+                gracefulShutdown(1),
+              );
+            }
+            const { getClaudeAIOAuthTokens: getTokensForAttach } = await import('./utils/auth.js');
+            const getAccessTokenForAttach = (): string => getTokensForAttach()?.accessToken ?? attachCreds.accessToken;
+            const attachSessionConfig = createRemoteSessionConfig(
+              attachId,
+              getAccessTokenForAttach,
+              attachCreds.orgUUID,
+              false,
             );
+            const attachUrl = cloudSessionViewUrl(attachId);
+            const attachInfoMessage = createSystemMessage(
+              `/remote-control is active. Code in CLI or at ${attachUrl}`,
+              'info',
+            );
+            const attachInitialState = {
+              ...initialState,
+              remoteSessionUrl: attachUrl,
+            };
+            const attachCommands = filterCommandsForRemoteMode(commands);
+            await launchRepl(
+              root,
+              {
+                getFpsMetrics,
+                stats,
+                initialState: attachInitialState,
+              },
+              {
+                debug: debug || debugToStderr,
+                commands: attachCommands,
+                initialTools: [],
+                initialMessages: [attachInfoMessage],
+                mcpClients: [],
+                autoConnectIdeFlag: ide,
+                mainThreadAgentDefinition,
+                disableSlashCommands,
+                remoteSessionConfig: attachSessionConfig,
+                thinkingConfig,
+              },
+              renderAndRun,
+            );
+            return;
           }
 
           logEvent('tengu_remote_create_session', {
             has_initial_prompt: String(hasInitialPrompt) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(cloudLaunch.poolId !== null && {
+              entry_point: 'pool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }),
           });
 
-          // Pass current branch so CCR clones the repo at the right revision
-          const currentBranch = await getBranch();
-          const createdSession = await teleportToRemoteWithErrorHandling(
-            root,
-            hasInitialPrompt ? remote : null,
-            new AbortController().signal,
-            currentBranch || undefined,
-          );
+          const currentBranch = cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? ((await getBranch()) || undefined);
+          let poolCreateFailMessage: string | undefined;
+          const createdSession = cloudLaunch.poolId
+            ? await teleportToRemote({
+                initialMessage: hasInitialPrompt ? remote : null,
+                signal: new AbortController().signal,
+                source: 'remote',
+                branchName: currentBranch,
+                reuseOutcomeBranch: cloudLaunch.poolOnBranch ?? undefined,
+                explicitRef: cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? undefined,
+                poolId: cloudLaunch.poolId,
+                correlationId: cloudLaunch.correlationId ?? undefined,
+                onCreateFail: message => {
+                  poolCreateFailMessage = message;
+                  process.stderr.write(`\n${message}\n`);
+                },
+              })
+            : await teleportToRemoteWithErrorHandling(
+                root,
+                hasInitialPrompt ? remote : null,
+                new AbortController().signal,
+                currentBranch,
+              );
           if (!createdSession) {
             logEvent('tengu_remote_create_session_error', {
               error: 'unable_to_create_session' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              ...(cloudLaunch.poolId !== null && {
+                entry_point: 'pool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              }),
             });
-            return await exitWithError(root, 'Error: Unable to create remote session', () => gracefulShutdown(1));
+            return await exitWithError(
+              root,
+              poolCreateFailMessage
+                ? `Error: ${poolCreateFailMessage}`
+                : cloudLaunch.poolId !== null
+                  ? UNABLE_TO_CREATE_CLOUD_SESSION_ERROR
+                  : 'Error: Unable to create remote session',
+              () => gracefulShutdown(1),
+            );
           }
           logEvent('tengu_remote_create_session_success', {
             session_id: createdSession.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(cloudLaunch.poolId !== null && {
+              entry_point: 'pool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }),
           });
 
           // Check if new remote TUI mode is enabled via feature gate
           if (!isRemoteTuiEnabled) {
-            // Original behavior: print session info and exit
-            process.stdout.write(`Created remote session: ${createdSession.title}\n`);
-            process.stdout.write(`View: ${getRemoteSessionUrl(createdSession.id)}?m=0\n`);
-            process.stdout.write(`Resume with: claude --teleport ${createdSession.id}\n`);
+            process.stdout.write(
+              formatCreatedCloudSession({
+                id: createdSession.id,
+                title: createdSession.title,
+                includeSessionId: cloudLaunch.poolId !== null,
+              }),
+            );
             await gracefulShutdown(0);
             process.exit(0);
           }
@@ -5382,14 +5917,10 @@ async function run(): Promise<CommanderCommand> {
       'Use remote WebSocket endpoint for SDK I/O streaming (only with -p and stream-json format)',
     ).hideHelp(),
   );
-
   // Enable teleport/remote flags for all builds but keep them undocumented until GA
-  program.addOption(
-    new Option('--teleport [session]', 'Resume a teleport session, optionally specify session ID').hideHelp(),
-  );
-  program.addOption(
-    new Option('--remote [description]', 'Create a remote session with the given description').hideHelp(),
-  );
+  program.addOption(new Option('--teleport [session]', 'Resume a teleport session, optionally specify session ID'));
+  // densable 2.1.283 `--cloud` public; `--remote` hidden alias @192115985
+  registerCloudCliOptions(program);
   if (feature('BRIDGE_MODE')) {
     program.addOption(
       new Option(
@@ -5426,6 +5957,9 @@ async function run(): Promise<CommanderCommand> {
     profileCheckpoint('run_after_parse');
     return program;
   }
+
+  // densable 2.1.283 AXn — hidden VS Code extension stdin JSON commands.
+  registerVscodeExtensionHostCommands(program);
 
   // claude mcp
 

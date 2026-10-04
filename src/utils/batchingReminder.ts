@@ -20,7 +20,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import { getGlobalConfig } from './config.js'
+import { readMergedClientData } from '../cli/clientDataUrl.js'
 import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { logError } from './log.js'
@@ -208,7 +208,7 @@ export function resolveBatchingReminderText(
 function resolveToastyThimble(model: string): ResolvedReminder | null {
   const envText = process.env[TOASTY_THIMBLE_ENV]
   if (envText !== undefined) return resolveEnvReminder(envText)
-  const raw = getGlobalConfig().clientDataCache?.[TOASTY_THIMBLE_FEATURE]
+  const raw = readMergedClientData()?.[TOASTY_THIMBLE_FEATURE]
   if (raw === undefined || raw === null) return null
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     warnBadClientData(

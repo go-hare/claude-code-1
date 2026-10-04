@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from 'src/Tool.js'
+import { buildTool, type ToolCallProgress, type ToolDef } from 'src/Tool.js'
 import {
   executeTaskCreatedHooks,
   getTaskCreatedHookMessage,
@@ -78,7 +78,13 @@ export const TaskCreateTool = buildTool({
   renderToolUseMessage() {
     return null
   },
-  async call({ subject, description, activeForm, metadata }, context) {
+  async call(
+    { subject, description, activeForm, metadata },
+    context,
+    _canUseTool,
+    _parentMessage,
+    onProgress?: ToolCallProgress,
+  ) {
     const taskId = await createTask(getTaskListId(), {
       subject,
       description,
@@ -113,10 +119,10 @@ export const TaskCreateTool = buildTool({
       throw new Error(blockingErrors.join('\n'))
     }
 
-    // Auto-expand task list when creating tasks
-    context.setAppState(prev => {
-      if (prev.expandedView === 'tasks') return prev
-      return { ...prev, expandedView: 'tasks' as const }
+    // densable: 5th-arg onProgress({type:"set_expanded_view"}). Host drops it.
+    onProgress?.({
+      type: 'set_expanded_view',
+      expandedView: 'tasks',
     })
 
     return {

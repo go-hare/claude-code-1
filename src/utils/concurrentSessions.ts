@@ -218,7 +218,7 @@ export const BG_NO_TERMINAL_INSTALL_GITHUB_APP_MSG =
  * Returns true if registered, false if skipped.
  * Errors logged to debug, never thrown.
  */
-export async function registerSession(): Promise<boolean> {
+export async function registerSession(storageV5?: unknown): Promise<boolean> {
   if (getAgentId() != null) return false
 
   const kind: SessionKind = envSessionKind() ?? 'interactive'
@@ -269,37 +269,47 @@ export async function registerSession(): Promise<boolean> {
         })
       : undefined
     const jobId = registryJobIdFromEnv()
-    await writeFile(
-      pidFile,
-      jsonStringify({
-        pid: process.pid,
-        sessionId: getSessionId(),
-        cwd: getOriginalCwd(),
-        startedAt: Date.now(),
-        kind,
-        // Official `_2t` + mapper jobId @181016699
-        peerProtocol: PEER_PROTOCOL,
-        ...(jobId ? { jobId } : {}),
-        entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
-        ...processStartFields,
-        ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
-        ...(feature('UDS_INBOX')
-          ? {
-              messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET,
-              // densable tqo voucher — peers read this to accept notify_when_idle.
-              features: [SESSION_FEATURE_NOTIFY_IDLE],
-            }
-          : {}),
-        ...(feature('BG_SESSIONS')
-          ? {
-              name: process.env.CLAUDE_CODE_SESSION_NAME,
-              logPath: process.env.CLAUDE_CODE_SESSION_LOG,
-              agent: process.env.CLAUDE_CODE_AGENT,
-            }
-          : {}),
-        ...(spare ? { spare: true } : {}),
-      }),
-    )
+    const record: Record<string, unknown> = {
+      pid: process.pid,
+      sessionId: getSessionId(),
+      cwd: getOriginalCwd(),
+      startedAt: Date.now(),
+      kind,
+      peerProtocol: PEER_PROTOCOL,
+      ...(jobId ? { jobId } : {}),
+      entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+      ...processStartFields,
+      ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
+      ...(feature('UDS_INBOX')
+        ? {
+            messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET,
+            features: [SESSION_FEATURE_NOTIFY_IDLE],
+          }
+        : {}),
+      ...(feature('BG_SESSIONS')
+        ? {
+            name: process.env.CLAUDE_CODE_SESSION_NAME,
+            logPath: process.env.CLAUDE_CODE_SESSION_LOG,
+            agent: process.env.CLAUDE_CODE_AGENT,
+          }
+        : {}),
+      ...(spare ? { spare: true } : {}),
+    }
+    const v5 = asPidStorageV5(storageV5)
+    if (v5) {
+      const written = await v5.write(
+        concurrentSessionPidFileKey(),
+        jsonStringify(record),
+        { publishDiscipline: 'inPlace' },
+      )
+      if (!written.ok) {
+        throw new Error(
+          `[concurrentSessions] v5 pid-file write failed: ${written.error?.code ?? 'write'}`,
+        )
+      }
+    } else {
+      await writeFile(pidFile, jsonStringify(record))
+    }
     // --resume / /resume mutates getSessionId() via switchSession. Without
     // this, the PID file's sessionId goes stale and `claude ps` sparkline
     // reads the wrong transcript.

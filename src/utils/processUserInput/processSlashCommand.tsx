@@ -1094,7 +1094,11 @@ async function getMessagesForSlashCommand(
                   ...context,
                   canUseTool,
                   // densable dispatchedAsImmediate: E$t(cmd, args)
-                  dispatchedAsImmediate: isCommandImmediate(command, argsForDispatch),
+                  dispatchedAsImmediate: isCommandImmediate(
+                    command,
+                    argsForDispatch,
+                    context.presentation ?? 'inline',
+                  ),
                   submissionOrigin,
                 },
                 argsForDispatch,
@@ -1124,7 +1128,11 @@ async function getMessagesForSlashCommand(
                 showSpinner: false,
                 isLocalJSXCommand: true,
                 // densable ARt — resolve function-form immediate with args
-                isImmediate: isCommandImmediate(command, argsForDispatch),
+                isImmediate: isCommandImmediate(
+                  command,
+                  argsForDispatch,
+                  context.presentation ?? 'inline',
+                ),
               });
             })
             .catch(e => {

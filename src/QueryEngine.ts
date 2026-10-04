@@ -56,8 +56,7 @@ import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
 import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
-import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
-import { isEagerFlushEnabled } from './utils/residualUiEnvGates.js'
+import { isBareMode } from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
 import {
   type FileHistoryState,
@@ -258,6 +257,7 @@ export class QueryEngine {
       uuid?: string
       isMeta?: boolean
       skipSlashCommands?: boolean
+      skipAttachments?: boolean
       bridgeOrigin?: boolean
       /** densable 2.1.221 modelScheduledOrigin fire stamp */
       modelScheduledOrigin?: boolean
@@ -563,6 +563,7 @@ export class QueryEngine {
       isMeta: options?.isMeta,
       // densable 2.1.221: headless cron fire stamps thread through ask → submitMessage
       skipSlashCommands: options?.skipSlashCommands,
+      skipAttachments: options?.skipAttachments,
       bridgeOrigin: options?.bridgeOrigin,
       modelScheduledOrigin: options?.modelScheduledOrigin,
       wakeupSource: options?.wakeupSource,
@@ -615,9 +616,7 @@ export class QueryEngine {
         void transcriptPromise
       } else {
         await transcriptPromise
-        if (isEagerFlushEnabled()) {
-          await flushSessionStorage()
-        }
+        await flushSessionStorage()
       }
     }
 
@@ -830,9 +829,7 @@ export class QueryEngine {
 
       if (persistSession) {
         await recordTranscript(messages)
-        if (isEagerFlushEnabled()) {
-          await flushSessionStorage()
-        }
+        await flushSessionStorage()
       }
 
       yield {
@@ -911,6 +908,16 @@ export class QueryEngine {
       maxTurns,
       taskBudget,
     })) {
+      // densable CLI host / SDK: set_expanded_view is a tool-bridge control
+      // event, not a transcript message. Skip it here (HWf also drops it).
+      if (
+        message &&
+        typeof message === 'object' &&
+        'type' in message &&
+        (message as { type: string }).type === 'set_expanded_view'
+      ) {
+        continue
+      }
       // Record assistant, user, and compact boundary messages
       if (
         message.type === 'assistant' ||
@@ -1146,9 +1153,7 @@ export class QueryEngine {
           // Handle max turns reached signal from query.ts
           else if (attachment.type === 'max_turns_reached') {
             if (persistSession) {
-              if (isEagerFlushEnabled()) {
-                await flushSessionStorage()
-              }
+              await flushSessionStorage()
             }
             yield {
               type: 'result',
@@ -1319,9 +1324,7 @@ export class QueryEngine {
       // Check if USD budget has been exceeded
       if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
         if (persistSession) {
-          if (isEagerFlushEnabled()) {
-            await flushSessionStorage()
-          }
+          await flushSessionStorage()
         }
         yield {
           type: 'result',
@@ -1361,9 +1364,7 @@ export class QueryEngine {
         )
         if (callsThisQuery >= maxRetries) {
           if (persistSession) {
-            if (isEagerFlushEnabled()) {
-              await flushSessionStorage()
-            }
+            await flushSessionStorage()
           }
           yield {
             type: 'result',
@@ -1418,9 +1419,7 @@ export class QueryEngine {
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
-      if (isEagerFlushEnabled()) {
-        await flushSessionStorage()
-      }
+      await flushSessionStorage()
     }
 
     if (!isResultSuccessful(result, lastStopReason)) {
@@ -1581,6 +1580,7 @@ export async function* ask({
   promptUuid,
   isMeta,
   skipSlashCommands,
+  skipAttachments,
   bridgeOrigin,
   modelScheduledOrigin,
   wakeupSource,
@@ -1622,6 +1622,7 @@ export async function* ask({
   isMeta?: boolean
   /** densable 2.1.221 QueuedCommand fire stamps for headless processUserInput */
   skipSlashCommands?: boolean
+  skipAttachments?: boolean
   bridgeOrigin?: boolean
   modelScheduledOrigin?: boolean
   wakeupSource?: string
@@ -1704,6 +1705,7 @@ export async function* ask({
       uuid: promptUuid,
       isMeta,
       skipSlashCommands,
+      skipAttachments,
       bridgeOrigin,
       modelScheduledOrigin,
       wakeupSource,

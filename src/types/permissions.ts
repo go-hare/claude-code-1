@@ -67,6 +67,8 @@ export type PermissionRuleSource =
   | 'mcpServerPolicy'
   /** densable 2.1.248 #1 rrn toolsNarrowing — restricted / --tools deny bucket. */
   | 'toolsNarrowing'
+  /** densable hostCredential — cloud-session credential guard. */
+  | 'hostCredential'
 
 /**
  * The value of a permission rule - specifies which tool and optional content
@@ -253,6 +255,10 @@ export type PermissionAskDecision<
    * kind auto_mode_outside_reads (Yes / Block / ask_again).
    */
   offersBlockOutsideReads?: boolean
+  /**
+   * official W() ask-again — DualInk feedback copied onto the re-ask.
+   */
+  userFeedback?: string
 }
 
 /**
@@ -263,6 +269,11 @@ export type PermissionDenyDecision = {
   message: string
   decisionReason: PermissionDecisionReason
   toolUseID?: string
+  /**
+   * densable `kl` `blockedPath` — requested path, or the symlink landing
+   * when the spelling is inside the working-dir set and the landing is not.
+   */
+  blockedPath?: string
 }
 
 /**
@@ -363,6 +374,7 @@ export type PermissionDecisionReason =
         | 'dangerousRemoval'
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
+        | 'outsideReadsBlocked'
     }
   | {
       type: 'other'

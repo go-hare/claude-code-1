@@ -9,6 +9,7 @@ import { PermissionDialog } from 'src/components/permissions/PermissionDialog.js
 import { PermissionPrompt, type PermissionPromptOption } from 'src/components/permissions/PermissionPrompt.js';
 import type { PermissionRequestProps } from 'src/components/permissions/PermissionRequest.js';
 import { PermissionRuleExplanation } from 'src/components/permissions/PermissionRuleExplanation.js';
+import { recordWorkflowUsageConsent } from 'src/utils/permissions/workflowUsageConsent.js';
 
 type OptionValue = 'yes' | 'yes-dont-ask-again' | 'no';
 
@@ -82,6 +83,7 @@ export function WorkflowPermissionRequest({
               platform: env.platform,
             },
           });
+          void recordWorkflowUsageConsent();
           toolUseConfirm.onAllow(toolUseConfirm.input, [], feedback);
           onDone();
           break;
@@ -95,6 +97,7 @@ export function WorkflowPermissionRequest({
               platform: env.platform,
             },
           });
+          void recordWorkflowUsageConsent();
           toolUseConfirm.onAllow(toolUseConfirm.input, [
             {
               type: 'addRules',

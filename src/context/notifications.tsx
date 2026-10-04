@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import { useCallback, useEffect } from 'react';
 import { useAppStateStore, useSetAppState } from '../state/AppState.js';
+import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import type { Theme } from '../utils/theme.js';
 
 type Priority = 'low' | 'medium' | 'high' | 'immediate';
@@ -33,6 +34,18 @@ type BaseNotification = {
    * Returns the merged notification (should carry fold forward for future merges).
    */
   fold?: (accumulator: Notification, incoming: Notification) => Notification;
+  /**
+   * densable `exemptFromDiffPanelHold` — toast may fire while `WJ`
+   * (`diffPanelVisible`) holds the queue.
+   */
+  exemptFromDiffPanelHold?: boolean;
+  /**
+   * densable `heldDuringDiffPanel` — immediate toast queued while the
+   * Obe panel latch is on; promoted when `auo` clears it.
+   */
+  heldDuringDiffPanel?: boolean;
+  /** densable `requeueOnPreempt` — keep an immediate toast when preempted. */
+  requeueOnPreempt?: boolean;
 };
 
 type TextNotification = BaseNotification & {
@@ -58,9 +71,20 @@ const DEFAULT_TIMEOUT_MS = 8000;
 // Track current timeout to clear it when immediate notifications arrive
 let currentTimeoutId: NodeJS.Timeout | null = null;
 
+/** densable `p(u,r)` — keep preempted toast unless immediate without hold/requeue. */
+export function shouldRequeueOnPreempt(existing: Notification, incoming: Notification): boolean {
+  return (
+    (existing.priority !== 'immediate' ||
+      existing.requeueOnPreempt === true ||
+      existing.heldDuringDiffPanel === true) &&
+    !incoming.invalidates?.includes(existing.key)
+  );
+}
+
 export function useNotifications(): {
   addNotification: AddNotificationFn;
   removeNotification: RemoveNotificationFn;
+  processQueue: () => void;
 } {
   const store = useAppStateStore();
   const setAppState = useSetAppState();
@@ -68,8 +92,22 @@ export function useNotifications(): {
   // Process queue when current notification finishes or queue changes
   const processQueue = useCallback(() => {
     setAppState(prev => {
-      const next = getNext(prev.notifications.queue);
-      if (prev.notifications.current !== null || !next) {
+      // densable `WJ` — while Obe is mounted, only exempt toasts dequeue.
+      const pool = notificationsHoldToasts(prev)
+        ? prev.notifications.queue.filter(n => n.exemptFromDiffPanelHold)
+        : prev.notifications.queue;
+      const next = getNext(pool);
+      if (!next) {
+        return prev;
+      }
+      const requeueCurrent =
+        prev.notifications.current !== null &&
+        next.priority === 'immediate' &&
+        next.heldDuringDiffPanel === true &&
+        prev.notifications.current.priority !== 'immediate'
+          ? prev.notifications.current
+          : null;
+      if (prev.notifications.current !== null && requeueCurrent === null) {
         return prev;
       }
 
@@ -100,8 +138,11 @@ export function useNotifications(): {
       return {
         ...prev,
         notifications: withPinned(prev.notifications, {
-          queue: prev.notifications.queue.filter(_ => _ !== next),
-          current: next,
+          queue: [
+            ...(requeueCurrent !== null && shouldRequeueOnPreempt(requeueCurrent, next) ? [requeueCurrent] : []),
+            ...prev.notifications.queue.filter(_ => _ !== next),
+          ],
+          current: next.heldDuringDiffPanel ? { ...next, heldDuringDiffPanel: undefined } : next,
         }),
       };
     });
@@ -128,6 +169,23 @@ export function useNotifications(): {
 
       // Handle immediate priority notifications
       if (notif.priority === 'immediate') {
+        // densable `!WJ` — Obe latch queues immediate as heldDuringDiffPanel.
+        if (notificationsHoldToasts(store.getState())) {
+          const held = { ...notif, heldDuringDiffPanel: true };
+          setAppState(prev => {
+            const applied = applyNonImmediateNotification(prev.notifications, held);
+            if (
+              applied.notifications.current === prev.notifications.current &&
+              applied.notifications.queue === prev.notifications.queue
+            ) {
+              return prev;
+            }
+            return { ...prev, notifications: applied.notifications };
+          });
+          processQueue();
+          return;
+        }
+
         // Clear any existing timeout since we're showing a new immediate notification
         if (currentTimeoutId) {
           clearTimeout(currentTimeoutId);
@@ -164,11 +222,10 @@ export function useNotifications(): {
           ...prev,
           notifications: withPinned(prev.notifications, {
             current: notif,
-            queue:
-              // Only re-queue the current notification if it's not immediate
-              [...(prev.notifications.current ? [prev.notifications.current] : []), ...prev.notifications.queue].filter(
-                _ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key),
-              ),
+            queue: [
+              ...(prev.notifications.current ? [prev.notifications.current] : []),
+              ...prev.notifications.queue,
+            ].filter(_ => shouldRequeueOnPreempt(_, notif)),
           }),
         }));
         return; // IMPORTANT: Exit addNotification for immediate notifications
@@ -223,7 +280,7 @@ export function useNotifications(): {
       // Process queue after adding the notification
       processQueue();
     },
-    [setAppState, processQueue],
+    [setAppState, processQueue, store],
   );
 
   const removeNotification = useCallback<RemoveNotificationFn>(
@@ -267,7 +324,7 @@ export function useNotifications(): {
     }
   }, []);
 
-  return { addNotification, removeNotification };
+  return { addNotification, removeNotification, processQueue };
 }
 
 const PRIORITIES: Record<Priority, number> = {

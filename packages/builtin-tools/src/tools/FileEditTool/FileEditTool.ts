@@ -157,7 +157,7 @@ export const FileEditTool = buildTool({
     return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
-    noteApprovedFileToolPath(input.file_path)
+    noteApprovedFileToolPath(input.file_path, context.toolUseId)
     const appState = context.getAppState()
     return checkWritePermissionForTool(
       FileEditTool,
@@ -516,7 +516,11 @@ export const FileEditTool = buildTool({
 
     await diagnosticTracker.beforeFileEdited(absoluteFilePath)
 
-    const approved = takeApprovedFileToolPath(absoluteFilePath)
+    const approved = takeApprovedFileToolPath(
+      absoluteFilePath,
+      toolUseContext.toolUseId,
+      'write',
+    )
     const openedWrite = await openApprovedWrite(absoluteFilePath, approved, {
       // densable DH: Edit replaces the leaf — recheck ao(dirname).map(join leaf)
       createParents: true,

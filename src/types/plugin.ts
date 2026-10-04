@@ -77,6 +77,12 @@ export type LoadedPlugin = {
   skillsPaths?: string[] // Additional skill paths from manifest
   outputStylesPath?: string
   outputStylesPaths?: string[] // Additional output style paths from manifest
+  /** densable `p()` persistent surfaces — skip disuse tips. */
+  themesPath?: string
+  themesPaths?: string[]
+  monitors?: unknown[]
+  workflowsPath?: string
+  workflowsPaths?: string[]
   hooksConfig?: HooksSettings
   mcpServers?: Record<string, McpServerConfig>
   /**

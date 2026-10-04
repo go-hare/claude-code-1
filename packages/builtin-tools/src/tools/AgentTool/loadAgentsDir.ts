@@ -148,8 +148,11 @@ export type BaseAgentDefinition = {
   /** Official: supplemental postamble appended to each observer activity digest. */
   observerMessage?: string
   pendingSnapshotUpdate?: { snapshotTimestamp: string }
-  /** densable omitClaudeMd: drop user/project/local CLAUDE.md when this agent
-   * runs as a subagent; managed policy files are kept for non-built-in. */
+  /**
+   * densable omitClaudeMd: drop user/project/local CLAUDE.md when this agent
+   * runs as a subagent; managed policy files are kept. No effect on the main
+   * session agent.
+   */
   omitClaudeMd?: boolean
 }
 
@@ -665,6 +668,11 @@ export function parseAgentFromMarkdown(
     const background =
       backgroundRaw === 'true' || backgroundRaw === true ? true : undefined
 
+    // densable ye/He: omitClaudeMd === "true" || === true
+    const omitClaudeMdRaw = frontmatter['omitClaudeMd']
+    const omitClaudeMd =
+      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
+
     // Parse memory scope
     const VALID_MEMORY_SCOPES: AgentMemoryScope[] = ['user', 'project', 'local']
     const memoryRaw = frontmatter['memory'] as string | undefined
@@ -799,11 +807,6 @@ export function parseAgentFromMarkdown(
       typeof observerMessageRaw === 'string' && observerMessageRaw.trim()
         ? observerMessageRaw
         : undefined
-
-    // densable ye: omitClaudeMd === "true" || === true
-    const omitClaudeMdRaw = frontmatter['omitClaudeMd']
-    const omitClaudeMd =
-      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
 
     const systemPrompt = content.trim()
     const agentDef: CustomAgentDefinition = {

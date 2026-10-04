@@ -18,6 +18,17 @@ export const PROMPT_CACHING_SCOPE_BETA_HEADER =
   'prompt-caching-scope-2026-01-05'
 export const FAST_MODE_BETA_HEADER = 'fast-mode-2026-02-01'
 export const REDACT_THINKING_BETA_HEADER = 'redact-thinking-2026-02-12'
+/** densable `$ce` @177390746 — thinking-display-updates-2026-08-18. */
+export const THINKING_DISPLAY_UPDATES_BETA_HEADER =
+  'thinking-display-updates-2026-08-18'
+/** densable `OL` @177390824 — thinking-binding-controls-2026-08-01. */
+export const THINKING_BINDING_CONTROLS_BETA_HEADER =
+  'thinking-binding-controls-2026-08-01'
+/** densable `Hx` @177389538 — thinking-token-count-2026-05-13. */
+export const THINKING_TOKEN_COUNT_BETA_HEADER =
+  'thinking-token-count-2026-05-13'
+/** densable `ipt` @177389477 — thinking-resumption-2026-07-17. */
+export const THINKING_RESUMPTION_BETA_HEADER = 'thinking-resumption-2026-07-17'
 export const TOKEN_EFFICIENT_TOOLS_BETA_HEADER =
   'token-efficient-tools-2026-03-28'
 export const AFK_MODE_BETA_HEADER = feature('TRANSCRIPT_CLASSIFIER')
@@ -32,6 +43,8 @@ export const ADVISOR_BETA_HEADER = 'advisor-tool-2026-03-01'
  */
 export const AUTO_MODE_CLASSIFIER_BETA_HEADER =
   'auto-mode-classifier-2026-07-16'
+/** densable `Gv` @177390705 — dangerous-tool-use-2026-09-03. */
+export const DANGEROUS_TOOL_USE_BETA_HEADER = 'dangerous-tool-use-2026-09-03'
 /** Official mid-conversation-system-2026-04-07 — mid_conversation_system beta. */
 export const MID_CONVERSATION_SYSTEM_BETA_HEADER =
   'mid-conversation-system-2026-04-07'
@@ -63,6 +76,23 @@ export const BEDROCK_EXTRA_PARAMS_HEADERS = new Set([
   CONTEXT_1M_BETA_HEADER,
   SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
 ])
+
+/**
+ * densable `Joe(e,n,r)` @184913475 — copy n.header into extraBody.anthropic_beta
+ * when r is true and the array already exists.
+ */
+export function copyBetaHeaderToExtraBody(
+  extraBody: Record<string, unknown>,
+  header: { header: string } | string,
+  shouldCopy: boolean,
+): void {
+  if (!shouldCopy) return
+  const name = typeof header === 'string' ? header : header.header
+  const s = extraBody.anthropic_beta
+  if (Array.isArray(s) && !s.includes(name)) {
+    extraBody.anthropic_beta = [...s, name]
+  }
+}
 
 /**
  * Betas allowed on Vertex countTokens API.

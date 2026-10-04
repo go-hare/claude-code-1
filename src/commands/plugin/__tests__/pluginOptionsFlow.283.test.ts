@@ -21,6 +21,9 @@ describe('PluginOptionsFlow densable ci async (2.1.283)', () => {
     expect(src).toContain('credentials')
     expect(src).toContain('Failed to read saved plugin options')
     expect(src).toContain('Loading…')
+    expect(src).toContain('saving.current')
+    expect(src).toContain('finished.current')
+    expect(src).toContain('saveOutcome')
   })
 
   test('getUnconfiguredChannels is async QDe', () => {

@@ -285,6 +285,12 @@ import { logError } from './utils/log.js'
 import { toError } from './utils/errors.js'
 import { logForDebugging } from './utils/debug.js'
 import { getIsNonInteractiveSession } from './bootstrap/state.js'
+import { getCwd } from './utils/cwd.js'
+import {
+  filterCommandsBySkillAllowlist,
+  invocableMemoryStoreSkillCommands,
+  sessionSkillAllowlist,
+} from './utils/memoryStoreSkills.js'
 import {
   getSkillDirCommands,
   clearSkillCaches,
@@ -299,6 +305,7 @@ import {
   clearPluginSkillsCache,
 } from './utils/plugins/loadPluginCommands.js'
 import memoize from 'lodash-es/memoize.js'
+import uniqBy from 'lodash-es/uniqBy.js'
 import { isUsing3PServices, isClaudeAISubscriber } from './utils/auth.js'
 import { isFirstPartyAnthropicBaseUrl } from './utils/model/providers.js'
 import env from './commands/env/index.js'
@@ -855,6 +862,29 @@ export function getMcpSkillCommands(
   return []
 }
 
+/**
+ * densable `xMn(e, n, r)` merge: local SkillTool commands + Eae() memory-store
+ * + MCP skills. Default allowlist is gold `Z$()` when `n === undefined`.
+ */
+export async function mergeSkillToolCommands(
+  mcpCommands: readonly Command[] = [],
+  allowlist?: readonly string[],
+): Promise<{ merged: Command[]; included: Command[] }> {
+  const cwd = getCwd()
+  const local = await getSkillToolCommands(cwd)
+  const memory = invocableMemoryStoreSkillCommands()
+  const mcp = getMcpSkillCommands(mcpCommands)
+  const merged =
+    mcp.length > 0
+      ? uniqBy([...local, ...memory, ...mcp], 'name')
+      : uniqBy([...local, ...memory], 'name')
+  const included = filterCommandsBySkillAllowlist(
+    merged,
+    allowlist === undefined ? sessionSkillAllowlist() : allowlist,
+  )
+  return { merged, included }
+}
+
 // SkillTool shows ALL prompt-based commands that the model can invoke
 // This includes both skills (from /skills/) and commands (from /commands/)
 // Official Lqe densable — skillOverrides / disableBundledSkills may hide items.
@@ -1079,6 +1109,10 @@ export function formatDescriptionWithSource(cmd: Command): string {
 
   if (cmd.source === 'bundled') {
     return `${cmd.description} (bundled)`
+  }
+
+  if (cmd.source === 'memoryStore') {
+    return `${cmd.description} (memory)`
   }
 
   return `${cmd.description} (${getSettingSourceName(cmd.source)})`

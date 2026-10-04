@@ -1504,6 +1504,16 @@ const SDKUserMessageContentSchema = lazySchema(() =>
       .describe(
         'ISO timestamp when the message was created on the originating process. Older emitters omit it; consumers should fall back to receive time.',
       ),
+    client_composed: z
+      .literal(true)
+      .optional()
+      .describe(
+        'The client composed this turn from content the user did not type; the CLI delivers its text as written, with no `@path` file-mention expansion and no slash-command dispatch. On current CLIs the turn-start attachment pass is skipped as a whole.',
+      ),
+    seeded_summon: z
+      .literal(true)
+      .optional()
+      .describe("@internal Desktop host only: the host's own seeded summon."),
   }),
 )
 
@@ -2097,6 +2107,19 @@ export const SDKThinkingTokensMessageSchema = lazySchema(() =>
     })
     .describe(
       'Live thinking-token estimate during redacted-thinking (where the API otherwise streams only pings). estimated_tokens is cumulative for the current assistant message; estimated_tokens_delta is the increment from this thinking_delta.',
+    ),
+)
+
+/** densable 2.1.283 sn — SDK-internal SessionStore transcript_mirror stdout frame. */
+export const SDKTranscriptMirrorMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('transcript_mirror'),
+      filePath: z.string(),
+      entries: z.array(z.unknown()),
+    })
+    .describe(
+      '@internal Emitted after each successful local transcript write. The parent peels these off the stdout stream and batches them to the SessionStore adapter. Not exposed to public SDK consumers.',
     ),
 )
 
