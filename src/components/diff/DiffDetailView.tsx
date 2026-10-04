@@ -6,6 +6,7 @@ import { Box, Text } from '@anthropic/ink';
 import { getCwd } from '../../utils/cwd.js';
 import { readFileSafe } from '../../utils/file.js';
 import { Divider } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { StructuredDiff } from '../StructuredDiff.js';
 
 type Props = {
@@ -15,6 +16,8 @@ type Props = {
   isBinary?: boolean;
   isTruncated?: boolean;
   isUntracked?: boolean;
+  isRestricted?: boolean;
+  width?: number;
 };
 
 /**
@@ -29,13 +32,18 @@ export function DiffDetailView({
   isBinary,
   isTruncated,
   isUntracked,
+  isRestricted,
+  width,
 }: Props): React.ReactNode {
   const { columns } = useTerminalSize();
+  const screenReader = isScreenReaderModeEnabled();
+  const viewWidth = width ?? columns - 4;
 
   // Read file content for syntax detection and multiline construct handling.
   // Only computed when this component is rendered (detail view mode).
   const { firstLine, fileContent } = useMemo(() => {
-    if (!filePath) {
+    // densable sPe: skip read for empty/binary/large/untracked/restricted/ax.
+    if (!filePath || isBinary || isLargeFile || isUntracked || isRestricted || screenReader) {
       return { firstLine: null, fileContent: undefined };
     }
     const fullPath = resolve(getCwd(), filePath);
@@ -44,7 +52,23 @@ export function DiffDetailView({
       firstLine: content?.split('\n')[0] ?? null,
       fileContent: content ?? undefined,
     };
-  }, [filePath]);
+  }, [filePath, isBinary, isLargeFile, isRestricted, isUntracked, screenReader]);
+
+  if (isRestricted) {
+    return (
+      <Box flexDirection="column" width="100%">
+        <Box>
+          <Text bold>{filePath}</Text>
+        </Box>
+        <Divider padding={4} />
+        <Box flexDirection="column">
+          <Text dimColor italic>
+            Content restricted by read-permission rules
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
 
   // Handle untracked files
   if (isUntracked) {
@@ -59,9 +83,11 @@ export function DiffDetailView({
           <Text dimColor italic>
             New file not yet staged.
           </Text>
-          <Text dimColor italic>
-            Run `git add {filePath}` to see line counts.
-          </Text>
+          {!screenReader && (
+            <Text dimColor italic>
+              Run `git add :/{filePath}` to see line counts.
+            </Text>
+          )}
         </Box>
       </Box>
     );
@@ -94,15 +120,12 @@ export function DiffDetailView({
         <Divider padding={4} />
         <Box flexDirection="column">
           <Text dimColor italic>
-            Large file - diff exceeds 1 MB limit
+            {screenReader ? 'Diff too large to display.' : 'Large file - diff exceeds 1 MB limit'}
           </Text>
         </Box>
       </Box>
     );
   }
-
-  const outerPaddingX = 1;
-  const outerBorderWidth = 1;
 
   return (
     <Box flexDirection="column" width="100%">
@@ -124,7 +147,7 @@ export function DiffDetailView({
               firstLine={firstLine}
               fileContent={fileContent}
               dim={false}
-              width={columns - 2 * outerPaddingX - 2 * outerBorderWidth}
+              width={viewWidth}
             />
           ))
         )}

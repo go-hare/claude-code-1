@@ -19,9 +19,9 @@ describe('densable 2.1.247 #15 formatAttachError EHOSTDEAD', () => {
     )
   })
 
-  test('keeps ENOJOB on the existing still-starting path', () => {
+  test('maps ENOJOB to lost-track, not still-starting', () => {
     expect(formatAttachError('ENOJOB: job not found')).toBe(
-      'Session is still starting \u2014 try again in a moment',
+      'Session lost track of this job \u2014 press Enter to respawn it',
     )
   })
 })

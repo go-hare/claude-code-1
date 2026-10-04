@@ -52,7 +52,14 @@ type ListShared = {
   maxProseWidth?: number;
 };
 
-export function MarkdownList({ token, highlight, dimColor, italic, tailWrap, maxProseWidth }: MarkdownListProps): React.ReactNode {
+export function MarkdownList({
+  token,
+  highlight,
+  dimColor,
+  italic,
+  tailWrap,
+  maxProseWidth,
+}: MarkdownListProps): React.ReactNode {
   const [theme] = useTheme();
   const { columns } = useTerminalSize();
   const minContentWidth = Math.max(

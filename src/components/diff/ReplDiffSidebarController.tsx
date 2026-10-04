@@ -17,19 +17,27 @@ import {
   toggleReplDiffTab,
 } from '../../utils/replDiffTab.js';
 import { ReplDiffPanel } from './ReplDiffPanel.js';
+import type { DiffSelectionAttach } from '../../utils/replDiffMouseHost.js';
 
 type Props = {
   width: number;
   autoOpenBaseline: number | null;
   /** Official `isThinClient`. Local has no thin-client host — always false. */
   isThinClient?: boolean;
+  /** densable LX `onAskAboutSelection`. Optional — no REPL invent. */
+  onAskAboutSelection?: (payload: DiffSelectionAttach) => void;
 };
 
 /**
  * densable `nhu` — auto-open on tracked-file growth, Global
  * `app:toggleReplTab`, shown telemetry, and the sidebar body when width > 0.
  */
-export function ReplDiffSidebarController({ width, autoOpenBaseline, isThinClient = false }: Props): React.ReactNode {
+export function ReplDiffSidebarController({
+  width,
+  autoOpenBaseline,
+  isThinClient = false,
+  onAskAboutSelection,
+}: Props): React.ReactNode {
   const replTab = useAppState(s => s.replTab);
   const trackedFileCount = useAppState(s => s.fileHistory.trackedFiles.size);
   const setAppState = useSetAppState();
@@ -94,5 +102,8 @@ export function ReplDiffSidebarController({ width, autoOpenBaseline, isThinClien
   if (!shown) {
     return null;
   }
-  return <ReplDiffPanel width={width} />;
+  // densable LX `minCol: columns - width`
+  return (
+    <ReplDiffPanel width={width} minCol={Math.max(0, columns - width)} onAskAboutSelection={onAskAboutSelection} />
+  );
 }

@@ -71,6 +71,8 @@ import {
   computeFleetColumnWidths,
   sessionArtifactLabel,
   formatAttachError,
+  ATTACH_SOCKET_UNREACHABLE_RE,
+  ATTACH_STILL_STARTING_RE,
   buildTerminalHolders,
   terminalHolderOf,
   decideFleetOpenGate,
@@ -2646,7 +2648,7 @@ function AgentViewApp({
       return;
     }
     if (decision.kind === 'wait-starting') {
-      setError(formatAttachError('still starting'));
+      setError(formatAttachError('ESTARTING'));
       return;
     }
     forceExit();
@@ -3859,7 +3861,38 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   if (forceFresh) forceFreshNextShort = null;
 
   // Official flow: try attach → if ENOJOB → respawn → retry attach
-  let result = await attachToSession(short, { alreadyInAlt: true });
+  let result = await attachToSession(short, {
+    alreadyInAlt: true,
+    gateStdinUntilFirstFrame: true,
+  });
+  // densable vZn @188812447: zot (ENOENT/ECONNREFUSED/ECONNRESET/control socket
+  // closed) → F2({forceTransient:true}) then re-attach. Do not invent a new
+  // compositor — reuse ensureDaemonRunning next to this attach host.
+  if (
+    result.outcome === 'error' &&
+    result.msg &&
+    ATTACH_SOCKET_UNREACHABLE_RE.test(result.msg)
+  ) {
+    const started = await ensureDaemonRunning({ forceTransient: true });
+    if (started.ok) {
+      result = await attachToSession(short, {
+        alreadyInAlt: true,
+        gateStdinUntilFirstFrame: true,
+      });
+    }
+  }
+  // gold vZn: after zot retry, wait while Got (ERESPAWNING|ESTARTING), 20 * 500ms
+  for (
+    let w = 0;
+    result.msg && ATTACH_STILL_STARTING_RE.test(result.msg) && w < 20;
+    w++
+  ) {
+    await new Promise(r => setTimeout(r, 500));
+    result = await attachToSession(short, {
+      alreadyInAlt: true,
+      gateStdinUntilFirstFrame: true,
+    });
+  }
   let respawned = false;
   let waitedForBoot = false;
 
@@ -3879,7 +3912,10 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           waitedForBoot = true;
           for (let i = 0; i < 20; i++) {
             await new Promise(r => setTimeout(r, 500));
-            result = await attachToSession(attachShort, { alreadyInAlt: true });
+            result = await attachToSession(attachShort, {
+              alreadyInAlt: true,
+              gateStdinUntilFirstFrame: true,
+            });
             if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) {
               break;
             }
@@ -3996,7 +4032,10 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           respawned = true;
           for (let i = 0; i < 20; i++) {
             await new Promise(r => setTimeout(r, 500));
-            result = await attachToSession(attachShort, { alreadyInAlt: true });
+            result = await attachToSession(attachShort, {
+              alreadyInAlt: true,
+              gateStdinUntilFirstFrame: true,
+            });
             if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
           }
         } else {
@@ -4030,10 +4069,6 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     return {};
   }
   if (result.outcome === 'error') {
-    // Official: after respawn retries still ENOJOB → still-starting settle copy.
-    if ((respawned || waitedForBoot) && result.msg?.includes('ENOJOB')) {
-      return { error: 'Session is still starting \u2014 try again in a moment' };
-    }
     return { error: formatAttachError(result.msg) };
   }
   return {};

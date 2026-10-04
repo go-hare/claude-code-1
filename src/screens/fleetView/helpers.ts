@@ -1995,23 +1995,36 @@ export function repoGroupLabel(session: SessionEntry): string {
 // Attach settle copy (official jC6 / wtK / FV-attach)
 // ---------------------------------------------------------------------------
 
+/** gold Got @182746927 — ERESPAWNING|ESTARTING, no /i */
+export const ATTACH_STILL_STARTING_RE = /ERESPAWNING|ESTARTING/
+
+/** gold zot @182746927 — transient socket / connect class */
+export const ATTACH_NO_RESPOND_RE =
+  /\bE(?:NOENT|CONNREFUSED|CONNRESET)\b|control socket closed/
+
+/** Alias of zot — AgentView forceTransient retry. */
+export const ATTACH_SOCKET_UNREACHABLE_RE = ATTACH_NO_RESPOND_RE
+
+export const SESSION_STILL_STARTING_COPY =
+  'Session is still starting \u2014 try again in a moment'
+export const SESSION_DIDNT_RESPOND_COPY =
+  "Session didn't respond after starting \u2014 try again in a moment"
+export const SESSION_LOST_TRACK_COPY =
+  'Session lost track of this job \u2014 press Enter to respawn it'
+
 /**
  * Map raw attach/respawn errors to FleetView remount strings.
- * - ENOJOB / still-starting class → "Session is still starting — try again…"
- * - other failures → "Couldn't attach — …"
+ * gold vZn ternary @188812447 + ENOJOB includes() orphaned branch.
+ * EHOSTDEAD stays first via formatHostDeadAttachError.
  */
 export function formatAttachError(msg: string | undefined): string {
   if (!msg) return "Couldn't attach to that session"
   // densable 2.1.247 ah: EHOSTDEAD:… is not "Couldn't attach — …"
   const hostDead = formatHostDeadAttachError(msg)
   if (hostDead !== undefined) return hostDead
-  if (
-    /ENOJOB|not found|restarting|estarting|still starting|socket missing|ENOTCONN|ENOCONN/i.test(
-      msg,
-    )
-  ) {
-    return 'Session is still starting \u2014 try again in a moment'
-  }
+  if (ATTACH_STILL_STARTING_RE.test(msg)) return SESSION_STILL_STARTING_COPY
+  if (ATTACH_NO_RESPOND_RE.test(msg)) return SESSION_DIDNT_RESPOND_COPY
+  if (msg.includes('ENOJOB')) return SESSION_LOST_TRACK_COPY
   if (/^Couldn't attach/i.test(msg)) return msg
   return `Couldn't attach \u2014 ${msg}`
 }

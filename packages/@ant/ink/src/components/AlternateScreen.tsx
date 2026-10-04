@@ -66,9 +66,16 @@ export function AlternateScreen({ children, mouseTracking = true }: Props): Reac
   // run in the mutation phase on unmount, before resetAfterCommit.
   useInsertionEffect(() => {
     const ink = instances.get(process.stdout);
-    if (!writeRaw) return;
+    const write = (data: string): void => {
+      if (!data) return;
+      if (writeRaw) writeRaw(data);
+      else if (process.stdout.isTTY) process.stdout.write(data);
+    };
 
-    writeRaw(enterAltScreenSequence(supportsExtendedKeys()) + enableMouseTracking(mode));
+    // 1049h+2J belongs HERE (once), before setAltScreenActive. Gold Ink
+    // setAltScreenActive only resetFrames — writing 1049h there too double-
+    // erases and flashes white until the next paint.
+    write(enterAltScreenSequence(supportsExtendedKeys()) + enableMouseTracking(mode));
     ink?.setAltScreenActive(true, mode);
 
     return () => {
@@ -79,10 +86,10 @@ export function AlternateScreen({ children, mouseTracking = true }: Props): Reac
       ink?.setAltScreenActive(false);
       ink?.clearTextSelection();
       if (alreadyInactive) {
-        writeRaw(trackingOn ? DISABLE_MOUSE_TRACKING : '');
+        write(trackingOn ? DISABLE_MOUSE_TRACKING : '');
         return;
       }
-      writeRaw(
+      write(
         (trackingOn ? DISABLE_MOUSE_TRACKING : '') +
           exitAltScreenSequence() +
           (ink?.hasUnmounted || !supportsExtendedKeys()

@@ -442,12 +442,43 @@ describe('sessionArtifactLabel + computeFleetColumnWidths', () => {
 })
 
 describe('formatAttachError', () => {
-  test('maps ENOJOB / still-starting class to settle copy', () => {
-    expect(formatAttachError('ENOJOB: job not found')).toBe(
+  test('maps ESTARTING / ERESPAWNING to still-starting copy', () => {
+    expect(formatAttachError('ESTARTING')).toBe(
       'Session is still starting \u2014 try again in a moment',
     )
-    expect(formatAttachError('socket missing')).toBe(
+    expect(formatAttachError('ERESPAWNING')).toBe(
       'Session is still starting \u2014 try again in a moment',
+    )
+  })
+
+  test('maps connect ENOENT / ECONN* / control socket closed to didn\'t-respond', () => {
+    expect(
+      formatAttachError(
+        'connect ENOENT /Users/apple/.claude/daemon/bg/control.sock',
+      ),
+    ).toBe(
+      "Session didn't respond after starting \u2014 try again in a moment",
+    )
+    expect(formatAttachError('connect ECONNREFUSED')).toBe(
+      "Session didn't respond after starting \u2014 try again in a moment",
+    )
+    expect(formatAttachError('connect ECONNRESET')).toBe(
+      "Session didn't respond after starting \u2014 try again in a moment",
+    )
+    expect(formatAttachError('control socket closed')).toBe(
+      "Session didn't respond after starting \u2014 try again in a moment",
+    )
+  })
+
+  test('maps ENOJOB to lost-track copy', () => {
+    expect(formatAttachError('ENOJOB: job not found')).toBe(
+      'Session lost track of this job \u2014 press Enter to respawn it',
+    )
+  })
+
+  test('socket missing is Ar label, not a classifier', () => {
+    expect(formatAttachError('socket missing')).toBe(
+      "Couldn't attach \u2014 socket missing",
     )
   })
 

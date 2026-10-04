@@ -4,19 +4,19 @@ import { join } from 'node:path'
 import { ORPHAN_SHELL_STOPPED_SUMMARY } from '../../../utils/orphanAgentResume.js'
 
 describe('UserAgentNotificationMessage wrap', () => {
-  test('long summaries wrap in a width-constrained column (not one unbounded Text)', () => {
+  test('gold Sp is one Text [circle, space, summary] — not a grow-column', () => {
     const src = readFileSync(
       join(import.meta.dir, '../UserAgentNotificationMessage.tsx'),
       'utf8',
     )
-    expect(src).toContain('width="100%"')
-    expect(src).toContain('flexDirection="row"')
     expect(src).toContain('flexDirection="column"')
-    expect(src).toContain('flexShrink={1}')
-    // Guard against the old one-line layout that ConPTY overwrites.
-    expect(src).not.toMatch(
-      /<Text>\s*<Text color=\{color\}>\{BLACK_CIRCLE\}<\/Text> \{summary\}/,
-    )
+    expect(src).toContain('aria-hidden')
+    expect(src).toContain('{BLACK_CIRCLE}')
+    expect(src).toContain("{' '}")
+    expect(src).toContain('{summary}')
+    expect(src).not.toMatch(/flexGrow=\{/)
+    expect(src).not.toContain('width="100%"')
+    expect(src).not.toContain('flexDirection="row"')
   })
 
   test('orphan shell summary stays a single long paragraph for the wrap path', () => {

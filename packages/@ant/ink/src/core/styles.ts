@@ -660,7 +660,8 @@ const applyDimensionStyles = (node: LayoutNode, style: Styles): void => {
     if (typeof style.minWidth === 'string') {
       node.setMinWidthPercent(Number.parseInt(style.minWidth, 10))
     } else {
-      node.setMinWidth(style.minWidth ?? 0)
+      // undefined = unconstrained. `?? 0` would clamp wrapping text to 0.
+      node.setMinWidth(style.minWidth)
     }
   }
 
@@ -668,7 +669,7 @@ const applyDimensionStyles = (node: LayoutNode, style: Styles): void => {
     if (typeof style.minHeight === 'string') {
       node.setMinHeightPercent(Number.parseInt(style.minHeight, 10))
     } else {
-      node.setMinHeight(style.minHeight ?? 0)
+      node.setMinHeight(style.minHeight)
     }
   }
 
@@ -676,7 +677,7 @@ const applyDimensionStyles = (node: LayoutNode, style: Styles): void => {
     if (typeof style.maxWidth === 'string') {
       node.setMaxWidthPercent(Number.parseInt(style.maxWidth, 10))
     } else {
-      node.setMaxWidth(style.maxWidth ?? 0)
+      node.setMaxWidth(style.maxWidth)
     }
   }
 
@@ -684,7 +685,7 @@ const applyDimensionStyles = (node: LayoutNode, style: Styles): void => {
     if (typeof style.maxHeight === 'string') {
       node.setMaxHeightPercent(Number.parseInt(style.maxHeight, 10))
     } else {
-      node.setMaxHeight(style.maxHeight ?? 0)
+      node.setMaxHeight(style.maxHeight)
     }
   }
 }

@@ -563,10 +563,7 @@ import {
   removeByFilter,
   someInFlightDrainCommand,
 } from '../utils/messageQueueManager.js';
-import {
-  backgroundForegroundToolCalls,
-  queryForegroundSession,
-} from '../utils/foregroundToolCalls.js';
+import { backgroundForegroundToolCalls, queryForegroundSession } from '../utils/foregroundToolCalls.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
@@ -674,8 +671,13 @@ import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
-import { computeDiffSidebarWidth, diffSidebarHasGitRepo, useReplDiffAutoOpenBaseline } from '../utils/replDiffTab.js';
-import { isWillowCrateEnabled } from '../utils/willowCrate.js';
+import {
+  computeDiffSidebarWidth,
+  diffSidebarHasGitRepo,
+  toggleDiffPanelForSlash,
+  useReplDiffAutoOpenBaseline,
+} from '../utils/replDiffTab.js';
+import { isDiffPanelEnabled } from '../utils/willowCrate.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
 import { isCommandImmediate } from '../utils/immediateCommand.js';
 import { AlternateScreen, MainScreenShell } from '@anthropic/ink';
@@ -1336,10 +1338,11 @@ export function REPL({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const setAppState = useSetAppState();
   // densable NDr / TZt / H$y — willow crate diff tab baseline
-  const willowCrateEnabled = isWillowCrateEnabled();
+  const willowCrateEnabled = isDiffPanelEnabled();
   const replTab = useAppState(s => s.replTab);
   const trackedFilesForDiff = useAppState(s => (willowCrateEnabled ? s.fileHistory.trackedFiles.size : 0));
   const replDiffAutoOpenBaseline = useReplDiffAutoOpenBaseline(willowCrateEnabled, trackedFilesForDiff, setAppState);
+  const { columns: replDiffColumns } = useTerminalSize();
 
   // Bootstrap: retained local_agent that hasn't loaded disk yet → read
   // sidechain JSONL and UUID-merge with whatever stream has appended so far.
@@ -1576,6 +1579,19 @@ export function REPL({
       }
       if (process.env.CLAUDE_CODE_REMOTE) {
         void ar.refreshRestoredDurableWatches();
+      }
+      const { takePendingWatchArtifact } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../cli/watchArtifactCli.js') as typeof import('../cli/watchArtifactCli.js');
+      const pending = takePendingWatchArtifact();
+      if (pending && !cancelled) {
+        void ar.callArtifactWatch({
+          url: pending.url,
+          context: {
+            abortController: new AbortController(),
+          },
+          setAppState,
+        });
       }
     });
     return () => {
@@ -2856,9 +2872,9 @@ export function REPL({
           return () => clearTimeout(id);
         },
         onFlush: raw => {
-          // 2.1.282 raw path (no MessageDisplay hook): the whole buffer.
-          // hideTrailingLine drops the open tail. A short first line mounts
-          // the bullet before the text; that is the official raw path.
+          // gold Zge / Ty: the whole buffer. wrap-stream pops the last
+          // visual row at paint; a long first paragraph without `\n` still
+          // shows its wrapped prefix. Empty-after-strip is the lone-● gate.
           streamingDisplayStore.setRaw(raw);
         },
       }),
@@ -3256,10 +3272,10 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // 2.1.282: (!hasDisplayed || tailBlank || brief). tailBlank is a raw
-    // single line with no newline: the bullet is up, wrap-stream hides the
-    // line, and the spinner stays. Hook output is transformed, so this flag
-    // is off and the spinner hides once that sliced text is showing.
+    // gold zht: (!hasDisplayed || tailBlank || brief). tailBlank = displayed
+    // with hideTrailingLine and no source `\n` (va). wrap-stream pops the last
+    // visual row; a long first paragraph still paints the wrapped prefix.
+    // Spinner stays until a source newline (or transformed hook text).
     (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
 
   // Host / gold _Zt overlays waiting for user — suppress surveys
@@ -4618,6 +4634,9 @@ export function REPL({
         requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
         // densable PBr / We() — session services Provider, not lastPinned.
         storageV5,
+        presentation: isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
+        toggleDiffPanel: async () =>
+          toggleDiffPanelForSlash(getReplDiffHost(), setAppState, () => store.getState().replTab, replDiffColumns),
       };
     },
     [
@@ -4648,6 +4667,7 @@ export function REPL({
       fallbackModel,
       setConversationId,
       strictMcpConfig,
+      replDiffColumns,
     ],
   );
 
@@ -5196,11 +5216,18 @@ export function REPL({
             }
           },
           onExpandedView: expandedView => {
+            // densable 2.1.283 host: teammates → none. CLI HWf onQueryEvent
+            // drops set_expanded_view entirely; this path is leftover yEt.
+            if (expandedView === 'teammates') {
+              setAppState(prev => (prev.expandedView === 'none' ? prev : { ...prev, expandedView: 'none' }));
+              return;
+            }
             if (typeof expandedView === 'string' || expandedView === null) {
-              setAppState(prev => ({
-                ...prev,
-                expandedView: expandedView as typeof prev.expandedView,
-              }));
+              setAppState(prev =>
+                prev.expandedView === expandedView
+                  ? prev
+                  : { ...prev, expandedView: expandedView as typeof prev.expandedView },
+              );
             }
           },
           onActiveGoal: value => {
@@ -6267,7 +6294,9 @@ export function REPL({
 
         // densable ARt(cmd, args): immediate may be boolean | (args)=>boolean
         const shouldTreatAsImmediate =
-          queryGuard.isActive && (isCommandImmediate(matchingCommand, commandArgs) || options?.fromKeybinding);
+          queryGuard.isActive &&
+          (isCommandImmediate(matchingCommand, commandArgs, isFullscreenEnvEnabled() ? 'fullscreen' : 'inline') ||
+            options?.fromKeybinding);
 
         if (matchingCommand && shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') {
           // densable aQr(cmd, endedByModel) — toast + return, do not run the command.
@@ -8205,7 +8234,11 @@ export function REPL({
             newMessageCount={unseenDivider?.count ?? 0}
             sidebarWidth={replDiffSidebarWidth}
             sidebar={
-              <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
+              <ReplDiffSidebarController
+                width={replDiffSidebarWidth}
+                autoOpenBaseline={replDiffAutoOpenBaseline}
+                onAskAboutSelection={kZt ? undefined : setIDESelection}
+              />
             }
             dockWidth={pluginDockWidth}
             dock={

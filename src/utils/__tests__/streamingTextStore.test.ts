@@ -59,7 +59,7 @@ describe('resolveStreamingDisplay', () => {
     expect(r.displayedHasNewline).toBe(true)
   })
 
-  test('an open first line is not displayed (wrap-stream would pop it)', () => {
+  test('an open first line is still displayed (gold Ty; wrap-stream pops last visual row)', () => {
     expect(streamingPreviewRaw('partial line with no newline')).toBe(null)
     const r = resolveStreamingDisplay({
       raw: 'partial line with no newline',
@@ -68,11 +68,11 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe(null)
+    expect(r.displayed).toBe('partial line with no newline')
     expect(r.hideTrailingLine).toBe(true)
   })
 
-  test('a leading newline plus open second line is not displayed', () => {
+  test('a leading newline plus open second line stays displayed (gold Ty)', () => {
     const r = resolveStreamingDisplay({
       raw: '\n主包 PUT 成功',
       transformed: null,
@@ -80,7 +80,21 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    expect(r.displayed).toBe(null)
+    expect(r.displayed).toBe('\n主包 PUT 成功')
+    expect(r.hideTrailingLine).toBe(true)
+  })
+
+  test('a closed line plus open tail stays displayed', () => {
+    const r = resolveStreamingDisplay({
+      raw: 'hello\npartial',
+      transformed: null,
+      rewrite: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe('hello\npartial')
+    expect(r.hideTrailingLine).toBe(true)
+    expect(r.displayedHasNewline).toBe(true)
   })
 
   test('live rewrite replaces the covered prefix and keeps the raw tail', () => {
@@ -91,8 +105,7 @@ describe('resolveStreamingDisplay', () => {
       salvage: null,
       exact: false,
     })
-    // wrap-stream would pop the open tail; no closed prefix → hide.
-    expect(r.displayed).toBe(null)
+    expect(r.displayed).toBe('HELLO more')
     expect(r.hideTrailingLine).toBe(true)
   })
 
@@ -220,9 +233,14 @@ describe('createStreamingDisplayStore densable WNf', () => {
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
     store.setRaw('hi')
     expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
-    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+    // gold Ty: open first line is displayed; wrap-stream hides the last visual row
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
+    expect(store.getFlags() & STREAM_FLAG_HIDE_TRAILING).toBe(
+      STREAM_FLAG_HIDE_TRAILING,
+    )
     store.setRaw('hi\n')
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
+    expect(store.getFlags() & STREAM_FLAG_HIDE_TRAILING).toBe(0)
     expect(ticks).toBe(2)
     store.setRaw(null)
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)

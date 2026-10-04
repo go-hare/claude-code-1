@@ -138,19 +138,14 @@ export function resolveStreamingDisplay(
     (salvage !== null
       ? mergeSalvagePrefix(salvage, base ?? '', exact)
       : base) || null
-  // Falsy *or* visually empty (whitespace / strip-only XML / "(no content)").
-  // Gold Sy is falsy-only, but that paints a lone ● while Cooking — same
-  // empty rule as AssistantTextMessage / StreamingTextPreview.
+  // densable Ty @203124302: displayed is the merged buffer; hideTrailingLine
+  // is wrap-stream on the unfinished tail (`u===null && !!l`). Ink wrap-stream
+  // pops the last *visual* row — a long first paragraph without `\n` still
+  // paints the wrapped prefix. Nulling displayed until a closed `\n` prefix
+  // blanks the whole stream (白屏) until the model emits a newline.
   const hideTrailingLine = transformed === null && !!raw
-  let displayed = merged !== null && !isEmptyMessageText(merged) ? merged : null
-  // wrap-stream pops the incomplete last visual line. If nothing closed
-  // before that line is visible (`\nopen…`, or no newline yet), the row
-  // would paint ● with an empty body — treat as not displayed.
-  if (displayed !== null && hideTrailingLine) {
-    const lastNl = displayed.lastIndexOf('\n')
-    const closed = lastNl >= 0 ? displayed.slice(0, lastNl) : ''
-    if (isEmptyMessageText(closed)) displayed = null
-  }
+  const displayed =
+    merged !== null && !isEmptyMessageText(merged) ? merged : null
   const resolved: StreamingDisplayResolved = {
     displayed,
     hideTrailingLine,

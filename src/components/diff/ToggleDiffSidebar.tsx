@@ -10,7 +10,7 @@ import {
   getReplDiffHost,
   toggleReplDiffTab,
 } from '../../utils/replDiffTab.js';
-import { isWillowCrateEnabled } from '../../utils/willowCrate.js';
+import { isDiffPanelEnabled } from '../../utils/willowCrate.js';
 
 type Props = {
   onDone: LocalJSXCommandOnDone;
@@ -34,7 +34,7 @@ export function ToggleDiffSidebar({ onDone }: Props): null {
     }
     ran.current = true;
     if (replTab !== 'diff') {
-      if (!isWillowCrateEnabled()) {
+      if (!isDiffPanelEnabled()) {
         onDone(DIFF_PANEL_UNAVAILABLE_MESSAGE, { display: 'system' });
         return;
       }

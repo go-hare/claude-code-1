@@ -1810,6 +1810,10 @@ export default class Ink {
   /**
    * Official densable setAltScreenActive(active, mode="off").
    * `mouseTracking` accepts boolean (legacy) or densable mode string.
+   *
+   * Gold does NOT write DEC 1049 here — that is AlternateScreen's insertion
+   * effect (iTerm ?1049h flicker if Ink also 2J). This only flags alt-screen
+   * + seeds blank frames so the first onRender diffs against a known buffer.
    */
   setAltScreenActive(active: boolean, mouseTracking: boolean | MouseTrackingMode = 'off'): void {
     if (this.altScreenActive === active) return;
@@ -2027,6 +2031,14 @@ export default class Ink {
     // Fresh frontFrame is blank rows×cols — blitting from it would copy
     // blanks over content. Next alt-screen frame must full-render.
     this.prevFrameContaminated = true;
+  }
+
+  /**
+   * densable `Xk().getSelectedText` — screen-buffer selection, no clipboard.
+   */
+  getSelectedText(): string {
+    if (!hasSelection(this.selection)) return '';
+    return getSelectedText(this.selection, this.frontFrame.screen);
   }
 
   /**

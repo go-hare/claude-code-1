@@ -29,18 +29,16 @@ export function UserAgentNotificationMessage({ addMargin, param: { text } }: Pro
   const status = extractTag(text, 'status');
   const color = getStatusColor(status);
 
-  // width=100% + column split matches UserTeammateMessage / AssistantTextMessage.
-  // A single unbounded <Text> measures as one row; ConPTY then hard-wraps the
-  // long orphan summary and the next message (Interrupted) overwrites the
-  // middle of the sentence.
+  // gold Sp @202967xxx: column + one Text children [circle, " ", summary].
+  // No width 100% — yoga stretch on the parent column sizes the leaf.
   return (
-    <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
-      <Box minWidth={2} flexShrink={0}>
-        <Text color={color}>{BLACK_CIRCLE}</Text>
-      </Box>
-      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-        <Text color={color}>{summary}</Text>
-      </Box>
+    <Box flexDirection="column" marginTop={addMargin ? 1 : 0}>
+      <Text>
+        <Text aria-hidden color={color}>
+          {BLACK_CIRCLE}
+        </Text>{' '}
+        {summary}
+      </Text>
     </Box>
   );
 }

@@ -15,6 +15,8 @@ export function useSelection(): {
   copySelection: () => string
   /** Copy without clearing the highlight (for copy-on-select). */
   copySelectionNoClear: () => string
+  /** densable `Xk().getSelectedText` — no clipboard write. */
+  getSelectedText: () => string
   clearSelection: () => void
   hasSelection: () => boolean
   /** Read the raw mutable selection state (for drag-to-scroll). */
@@ -56,6 +58,7 @@ export function useSelection(): {
       return {
         copySelection: () => '',
         copySelectionNoClear: () => '',
+        getSelectedText: () => '',
         clearSelection: () => {},
         hasSelection: () => false,
         getState: () => null,
@@ -70,6 +73,7 @@ export function useSelection(): {
     return {
       copySelection: () => ink.copySelection(),
       copySelectionNoClear: () => ink.copySelectionNoClear(),
+      getSelectedText: () => ink.getSelectedText(),
       clearSelection: () => ink.clearTextSelection(),
       hasSelection: () => ink.hasTextSelection(),
       getState: () => ink.selection,

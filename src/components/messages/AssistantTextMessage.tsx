@@ -255,24 +255,27 @@ export function AssistantTextMessage({
       if (shouldRenderClientGeneratedErrorLine(isApiError, text)) {
         return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} />;
       }
+      // gold @202887955: one row, width 100%, children [dot, column].
+      // Completed AND streaming (gold yi @203236672) columns have NO flexGrow.
+      // 202890377 flexGrow:1 is the thinking row (Ss), not streaming.
+      // No inner row — yoga min-content would wrap at ~word width.
       return (
         <Box
           alignItems="flex-start"
           flexDirection="row"
-          justifyContent="space-between"
           marginTop={addMargin ? 1 : 0}
           width="100%"
           backgroundColor={isSelected ? 'messageActionsBackground' : undefined}
         >
-          <Box flexDirection="row">
-            {shouldShowDot && (
-              <NoSelect fromLeftEdge minWidth={2}>
-                <Text color={isSelected ? 'suggestion' : 'text'}>{BLACK_CIRCLE}</Text>
-              </NoSelect>
-            )}
-            <Box flexDirection="column">
-              <Markdown capProseWidth>{text}</Markdown>
-            </Box>
+          {shouldShowDot && (
+            <NoSelect fromLeftEdge minWidth={2}>
+              <Text aria-label="claude:" color={isSelected ? 'suggestion' : 'text'}>
+                {BLACK_CIRCLE}
+              </Text>
+            </NoSelect>
+          )}
+          <Box flexDirection="column">
+            <Markdown capProseWidth>{text}</Markdown>
           </Box>
         </Box>
       );
