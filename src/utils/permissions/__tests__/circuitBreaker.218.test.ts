@@ -117,8 +117,9 @@ describe('isPermissionContextAutoMode (densable ctn)', () => {
     ).toBe(false)
   })
 
-  // densable 2.1.218 #30 / ctn: plan + auto-mode active (without bypass) counts
-  // as auto context so circuitBreaker / plan_mode_floor can reach the classifier.
+  // densable BTe @177386524: plan + Jf() is auto-context only when bypass
+  // is NOT listable (`!isBypassPermissionsModeAvailable`). getEmpty defaults
+  // that flag to true.
   // When TRANSCRIPT_CLASSIFIER is off at load time, autoModeStateModule is null
   // and plan never becomes auto — skip rather than false-fail.
   test('true for plan when auto-mode active and bypass unavailable', async () => {
@@ -129,13 +130,12 @@ describe('isPermissionContextAutoMode (densable ctn)', () => {
     const planNoBypass = isPermissionContextAutoMode({
       ...getEmptyToolPermissionContext(),
       mode: 'plan',
-      isBypassPermissionsModeAvailable: true,
+      isBypassPermissionsModeAvailable: false,
     })
     const planWithBypass = isPermissionContextAutoMode({
       ...getEmptyToolPermissionContext(),
       mode: 'plan',
       isBypassPermissionsModeAvailable: true,
-      prePlanMode: 'bypassPermissions',
     })
 
     if (!planNoBypass && !planWithBypass) {
@@ -218,7 +218,8 @@ describe('bypassPermissions still blocks non-approvable safetyCheck', () => {
     circuitBreaker?:
       | 'dangerousRemoval'
       | 'backgroundOperator'
-      | 'suspiciousWindowsPath',
+      | 'suspiciousWindowsPath'
+      | 'outsideReadsBlocked',
   ): Tool {
     return {
       name: 'Write',

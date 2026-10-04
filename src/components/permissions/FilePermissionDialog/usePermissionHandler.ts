@@ -17,6 +17,12 @@ import {
   logUnaryEvent,
 } from '../../../utils/unaryLogging.js'
 import type { ToolUseConfirm } from '../PermissionRequest.js'
+import {
+  blockedOutsideReadUserChoiceMessage,
+  markSeenAutoModeOutsideReadPrompt,
+  outsideReadAskAgainMessage,
+  persistBlockReadsOutsideWorkingDirectories,
+} from '../../../utils/permissions/outsideReads.js'
 import type {
   FileOperationType,
   PermissionOption,
@@ -79,6 +85,13 @@ function handleAcceptOnce(
     instructions_length: options?.feedback?.length ?? 0,
     entered_feedback_mode: options?.enteredFeedbackMode ?? false,
   })
+
+  if (
+    toolUseConfirm.permissionResult.behavior === 'ask' &&
+    toolUseConfirm.permissionResult.offersBlockOutsideReads === true
+  ) {
+    markSeenAutoModeOutsideReadPrompt()
+  }
 
   onDone()
   toolUseConfirm.onAllow(toolUseConfirm.input, [], options?.feedback)
@@ -175,6 +188,57 @@ function handleReject(
   toolUseConfirm.onReject(options?.feedback)
 }
 
+function handleBlockOutsideReads(
+  params: PermissionHandlerParams,
+  _options?: PermissionHandlerOptions,
+): void {
+  const {
+    messageId,
+    toolUseConfirm,
+    onDone,
+    onReject,
+    completionType,
+    languageName,
+  } = params
+  logPermissionEvent('reject', completionType, languageName, messageId)
+  const persisted = persistBlockReadsOutsideWorkingDirectories({
+    setSessionToolPermissionContext:
+      toolUseConfirm.toolUseContext.setSessionToolPermissionContext,
+  })
+  const message = blockedOutsideReadUserChoiceMessage({
+    saveError: persisted.error?.message,
+    sandboxRefreshed: persisted.sandboxRefreshed,
+  })
+  markSeenAutoModeOutsideReadPrompt()
+  onDone()
+  onReject()
+  toolUseConfirm.onReject(message)
+}
+
+function handleAskAgainOutsideReads(
+  params: PermissionHandlerParams,
+  options?: PermissionHandlerOptions,
+): void {
+  const {
+    messageId,
+    toolUseConfirm,
+    onDone,
+    onReject,
+    completionType,
+    languageName,
+  } = params
+  logPermissionEvent(
+    'reject',
+    completionType,
+    languageName,
+    messageId,
+    options?.hasFeedback,
+  )
+  onDone()
+  onReject()
+  toolUseConfirm.onReject(outsideReadAskAgainMessage(options?.feedback))
+}
+
 export const PERMISSION_HANDLERS: Record<
   PermissionOption['type'],
   (params: PermissionHandlerParams, options?: PermissionHandlerOptions) => void
@@ -182,4 +246,6 @@ export const PERMISSION_HANDLERS: Record<
   'accept-once': handleAcceptOnce,
   'accept-session': handleAcceptSession,
   reject: handleReject,
+  'block-outside-reads': handleBlockOutsideReads,
+  'ask-again-outside-reads': handleAskAgainOutsideReads,
 }

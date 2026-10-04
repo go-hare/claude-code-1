@@ -93,4 +93,38 @@ describe('densable 2.1.246 FS Cr&&Tr pause-memory', () => {
     expect(checkReadableInternalPath(other, {}).behavior).not.toBe('deny')
     expect(checkEditableInternalPath(other, {}).behavior).not.toBe('deny')
   })
+
+  test('ute T-gate + readBlockFence: tasks deny, user CLAUDE.md allow', () => {
+    const { getClaudeConfigHomeDir } =
+      require('../../envUtils.js') as typeof import('../../envUtils.js')
+    const home = getClaudeConfigHomeDir()
+    const tasks = join(home, 'tasks', 'job.json')
+    const memory = join(home, 'CLAUDE.md')
+    const skills = join(home, 'skills', 'foo.md')
+    expect(checkReadableInternalPath(tasks, {}).behavior).toBe('allow')
+    expect(
+      checkReadableInternalPath(tasks, {}, false, {
+        blockOutsideReads: true,
+        readBlockFence: true,
+      }).behavior,
+    ).toBe('passthrough')
+    expect(
+      checkReadableInternalPath(memory, {}, false, {
+        blockOutsideReads: true,
+        readBlockFence: true,
+      }).behavior,
+    ).toBe('allow')
+    expect(
+      checkReadableInternalPath(skills, {}, false, {
+        blockOutsideReads: true,
+        readBlockFence: true,
+      }).behavior,
+    ).toBe('allow')
+    expect(
+      checkReadableInternalPath(memory, {}, true, {
+        blockOutsideReads: true,
+        readBlockFence: true,
+      }).behavior,
+    ).toBe('passthrough')
+  })
 })

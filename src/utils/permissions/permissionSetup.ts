@@ -66,6 +66,7 @@ import {
 } from '../../services/analytics/index.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import {
@@ -784,10 +785,12 @@ export function permissionModeSuppliedOnInvocationFromKo({
  */
 export function subprocessEnvScrubNotification({
   permissionModeCli,
+  inheritPermissionModeCli,
   dangerouslySkipPermissions,
   agentPermissionMode,
 }: {
   permissionModeCli: string | undefined
+  inheritPermissionModeCli?: string
   dangerouslySkipPermissions?: boolean
   agentPermissionMode?: string
 }): string | undefined {
@@ -797,9 +800,13 @@ export function subprocessEnvScrubNotification({
   const requestedMode = permissionModeCli
     ? permissionModeFromString(permissionModeCli)
     : undefined
+  const inheritedMode = inheritPermissionModeCli
+    ? permissionModeFromString(inheritPermissionModeCli)
+    : undefined
   const nonDefaultRequested =
     Boolean(dangerouslySkipPermissions) ||
     (requestedMode !== undefined && requestedMode !== 'default') ||
+    (inheritedMode !== undefined && inheritedMode !== 'default') ||
     Boolean(agentPermissionMode && agentPermissionMode !== 'default')
   return nonDefaultRequested
     ? 'Permission mode forced to default — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set (allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.'
@@ -814,10 +821,12 @@ export function subprocessEnvScrubNotification({
  */
 export function initialPermissionModeFromCLI({
   permissionModeCli,
+  inheritPermissionModeCli,
   dangerouslySkipPermissions,
   agentPermissionMode,
 }: {
   permissionModeCli: string | undefined
+  inheritPermissionModeCli?: string
   dangerouslySkipPermissions: boolean | undefined
   agentPermissionMode?: string
 }): {
@@ -836,6 +845,7 @@ export function initialPermissionModeFromCLI({
   if (isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
     const notification = subprocessEnvScrubNotification({
       permissionModeCli,
+      inheritPermissionModeCli,
       dangerouslySkipPermissions,
       agentPermissionMode,
     })
@@ -896,6 +906,10 @@ export function initialPermissionModeFromCLI({
     } else {
       orderedModes.push(parsedMode)
     }
+  }
+  // gold inheritPermissionMode: parent session mode, only when nothing else configures one
+  if (!permissionModeCli && inheritPermissionModeCli) {
+    orderedModes.push(permissionModeFromString(inheritPermissionModeCli))
   }
   if (settings.permissions?.defaultMode) {
     const settingsMode = settings.permissions.defaultMode as PermissionMode
@@ -1108,7 +1122,12 @@ export async function initializeToolPermissionContext({
     // base tool lists using old names still match canonical names.
     const baseToolsSet = new Set(baseToolsResult.map(normalizeLegacyToolName))
     const allToolNames = getToolsForDefaultPreset()
-    const toolsToDisallow = allToolNames.filter(tool => !baseToolsSet.has(tool))
+    // densable 2.1.283: `--tools ""` denies the default preset, but
+    // StructuredOutput is an implementation detail for `--json-schema` / SDK
+    // output_format json_schema — never put it on the disallow list.
+    const toolsToDisallow = allToolNames.filter(
+      tool => tool !== SYNTHETIC_OUTPUT_TOOL_NAME && !baseToolsSet.has(tool),
+    )
     parsedDisallowedToolsCli = [...parsedDisallowedToolsCli, ...toolsToDisallow]
   }
 

@@ -80,6 +80,13 @@ describe('isAutoModeFilteringActive', () => {
     expect(isAutoModeFilteringActive('plan', undefined)).toBe(false)
   })
 
+  test('densable lL xa(servedCall): plan+auto does not filter when served', () => {
+    expect(isAutoModeFilteringActive('plan', true, true)).toBe(false)
+    expect(isAutoModeFilteringActive('plan', true, false)).toBe(true)
+    expect(isAutoModeFilteringActive('auto', true, true)).toBe(true)
+    expect(isAutoModeFilteringActive('auto', false, true)).toBe(true)
+  })
+
   test('false for other modes', () => {
     expect(isAutoModeFilteringActive('default', true)).toBe(false)
     expect(isAutoModeFilteringActive('acceptEdits', true)).toBe(false)

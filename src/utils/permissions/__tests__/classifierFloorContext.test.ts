@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { getEmptyToolPermissionContext } from '../../../Tool.js'
 import {
   getEffectivePermissionMode,
+  isChromeFamilyClassifierEligible,
   parseMcpPermissionModeOverride,
 } from '../mcpPermissionMode.js'
 
@@ -63,23 +64,21 @@ describe('classifier floor + canAutoClassifierRun integration', () => {
     ).toBe('auto')
   })
 
-  test('preview floor is independent of chrome floor flag', () => {
-    expect(
-      getEffectivePermissionMode(previewTool, {
-        mode: 'auto',
-        chromeClassifierFloorEnabled: true,
-        previewClassifierFloorEnabled: false,
-        canAutoClassifierRun: true,
-      }),
-    ).toBe('auto')
+  test('preview floors when elevated even if chrome floor flag is off (gold Dc)', () => {
     expect(
       getEffectivePermissionMode(previewTool, {
         mode: 'auto',
         chromeClassifierFloorEnabled: false,
-        previewClassifierFloorEnabled: true,
         canAutoClassifierRun: false,
       }),
     ).toBe('default')
+    expect(
+      getEffectivePermissionMode(previewTool, {
+        mode: 'auto',
+        chromeClassifierFloorEnabled: false,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe('auto')
   })
 
   test('per-server override still wins over floor', () => {
@@ -91,6 +90,21 @@ describe('classifier floor + canAutoClassifierRun integration', () => {
         canAutoClassifierRun: true,
       }),
     ).toBe('default')
+  })
+
+  test('xHo eligible is independent of XH override (Fe host)', () => {
+    expect(
+      isChromeFamilyClassifierEligible(chromeTool, {
+        chromeClassifierFloorEnabled: true,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe(true)
+    expect(
+      isChromeFamilyClassifierEligible(previewTool, {
+        chromeClassifierFloorEnabled: false,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe(true)
   })
 })
 

@@ -20,12 +20,16 @@ import {
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
+import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { getCwd } from '../cwd.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { isEvalConfined } from './evalConfined.js'
 import {
   getFsImplementation,
   getPathsForPermissionCheck,
+  walkPermissionPaths,
 } from '../fsOperations.js'
+import { getErrnoCode } from '../errors.js'
 import {
   getCommandProducerScanRoots,
   isPathUnderDeniedCommandProducer,
@@ -45,9 +49,21 @@ import {
   getSettingsRootPathForSource,
 } from '../settings/settings.js'
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
+import {
+  isAutomountMapPath,
+  isKernelRedirectPath,
+  isNetRootPath,
+  isNetworkBrowsePath,
+  isTrustedNetworkPath,
+  isUncOrNtPath,
+  isWslUncPath,
+  suspiciousWindowsSpelling,
+  type TrustedNetworkDirectories,
+} from './trustedNetworkDirectories.js'
 import { getToolResultsDir } from '../toolResultStorage.js'
 import { windowsPathToPosixPath } from '../windowsPaths.js'
 import type {
+  PermissionAskDecision,
   PermissionDecision,
   PermissionDenyDecision,
   PermissionResult,
@@ -62,6 +78,7 @@ import {
   blockedOutsideReadFileToolMessage,
   contextBlocksOutsideReads,
   OUTSIDE_READS_BLOCKED_REASON,
+  settingsHaveBlockReadsOutsideWorkingDirectories,
 } from './outsideReads.js'
 
 declare const MACRO: { VERSION: string }
@@ -673,6 +690,43 @@ function hasSuspiciousWindowsPathPattern(path: string): boolean {
 }
 
 /**
+ * densable `TX` @179639062 — `act(e,n)!==void 0`. Trusted UNC aliases
+ * are not suspicious (gold `act` last clause skips Le).
+ */
+function hasSuspiciousWindowsPathPatternForTrust(
+  path: string,
+  trusted: TrustedNetworkDirectories | undefined,
+): boolean {
+  return suspiciousWindowsSpelling(path, trusted) !== undefined
+}
+
+/**
+ * densable `Xa` @179637804 — `.claude` segments after the cwd prefix
+ * (`bl`). Nested `.claude/.claude/...` is >1 and must not take the
+ * session `.claude/**` allow fast-path.
+ */
+function claudeSegmentCountAfterCwd(path: string): number {
+  const segs = expandPath(path).split(sep).filter(Boolean)
+  const cwdSegs = expandPath(getOriginalCwd()).split(sep).filter(Boolean)
+  let prefix = 0
+  while (
+    prefix < cwdSegs.length &&
+    prefix < segs.length &&
+    (segs[prefix] === cwdSegs[prefix] ||
+      (prefix === 0 &&
+        /^[a-z]:$/i.test(segs[prefix] ?? '') &&
+        segs[prefix]!.toLowerCase() === cwdSegs[prefix]!.toLowerCase()))
+  ) {
+    prefix++
+  }
+  let count = 0
+  for (let i = prefix; i < segs.length; i++) {
+    if (segs[i] === '.claude') count++
+  }
+  return count
+}
+
+/**
  * Checks if a path is safe for auto-editing (acceptEdits mode).
  * Returns information about why the path is unsafe, or null if all checks pass.
  *
@@ -691,6 +745,7 @@ function hasSuspiciousWindowsPathPattern(path: string): boolean {
 export function checkPathSafetyForAutoEdit(
   path: string,
   precomputedPathsToCheck?: readonly string[],
+  trustedNetworkDirectories?: TrustedNetworkDirectories,
 ):
   | { safe: true }
   | {
@@ -701,15 +756,22 @@ export function checkPathSafetyForAutoEdit(
         | 'dangerousRemoval'
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
+        | 'outsideReadsBlocked'
     } {
   // Get all paths to check (original + symlink resolved paths)
   const pathsToCheck =
     precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
 
   // Check for suspicious Windows path patterns on all paths
-  // densable yat: circuitBreaker:"suspiciousWindowsPath" (2.1.218 #26)
+  // densable yat / uK TX: circuitBreaker:"suspiciousWindowsPath"; pass
+  // trustedNetworkDirectories so Le aliases are not TX.
   for (const pathToCheck of pathsToCheck) {
-    if (hasSuspiciousWindowsPathPattern(pathToCheck)) {
+    if (
+      hasSuspiciousWindowsPathPatternForTrust(
+        pathToCheck,
+        trustedNetworkDirectories,
+      )
+    ) {
       return {
         safe: false,
         message: `Claude requested permissions to write to ${path}, which contains a suspicious Windows path pattern that requires manual approval.`,
@@ -745,12 +807,30 @@ export function checkPathSafetyForAutoEdit(
   return { safe: true }
 }
 
+/** densable `Aw` — originalCwd + every additional working directory. */
 export function allWorkingDirectories(
   context: ToolPermissionContext,
 ): Set<string> {
   return new Set([
     getOriginalCwd(),
     ...context.additionalWorkingDirectories.keys(),
+  ])
+}
+
+/**
+ * densable `Aln` @179641351 — originalCwd + additional dirs **except**
+ * `source==="projectSettings"`. The outside-read fence uses this set so a
+ * repo `.claude/settings.json` additionalDirectories grant cannot keep
+ * `Read /secrets` allowed while `blockReadsOutsideWorkingDirectories` is on.
+ */
+export function workingDirectoriesForOutsideReadFence(
+  context: ToolPermissionContext,
+): Set<string> {
+  return new Set([
+    getOriginalCwd(),
+    ...Array.from(context.additionalWorkingDirectories.values())
+      .filter(dir => dir.source !== 'projectSettings')
+      .map(dir => dir.path),
   ])
 }
 
@@ -761,29 +841,179 @@ export function allWorkingDirectories(
 // Exported for test/preload.ts cache clearing (shard-isolation).
 export const getResolvedWorkingDirPaths = memoize(getPathsForPermissionCheck)
 
+/**
+ * densable `lke` — plugin-eval child (`CLAUDE_CODE_EVAL_CONFINED`) keeps
+ * `originalCwd` (`we()`) as the sandbox spelling and does not realpath it.
+ * Other working dirs still resolve.
+ */
+export function workingDirPathsForPermission(path: string): string[] {
+  if (isEvalConfined() && path === getOriginalCwd()) {
+    return [path]
+  }
+  return getResolvedWorkingDirPaths(path)
+}
+
+function pathInWorkingDirectorySet(
+  path: string,
+  directories: Set<string>,
+  precomputedPathsToCheck?: readonly string[],
+): boolean {
+  const pathsToCheck =
+    precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
+  const workingPaths = Array.from(directories).flatMap(wp =>
+    workingDirPathsForPermission(wp),
+  )
+  return pathsToCheck.every(pathToCheck =>
+    workingPaths.some(workingPath =>
+      pathInWorkingPath(pathToCheck, workingPath, {
+        caseFold: false,
+        uncShapeParity: true,
+      }),
+    ),
+  )
+}
+
+type SymlinkCarry = {
+  landing: string
+  landingOutside: boolean
+  spellingInside: boolean
+  carriedOut: boolean
+}
+
+/**
+ * densable `dKe` @179664143 — landing differs from requested; carriedOut
+ * when the spelling is inside the working-dir set and the landing is not.
+ */
+function symlinkCarryForWorkingDirectorySet(
+  path: string,
+  directories: Set<string>,
+  precomputedPathsToCheck?: readonly string[],
+): SymlinkCarry | null {
+  const requested = expandPath(path)
+  const spellings = precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
+  const landing = spellings
+    .map(spelling => expandPath(spelling))
+    .find(spelling => spelling !== requested)
+  if (landing === undefined) return null
+  const spellingInside = pathInWorkingDirectorySet(requested, directories, [
+    requested,
+  ])
+  const landingOutside = !pathInWorkingDirectorySet(landing, directories, [
+    landing,
+  ])
+  return {
+    landing,
+    landingOutside,
+    spellingInside,
+    carriedOut: spellingInside && landingOutside,
+  }
+}
+
+/**
+ * densable `dKe`/`kl` blockedPath: symlink landing when carriedOut;
+ * otherwise the requested path.
+ */
+function blockedPathForWorkingDirectorySet(
+  path: string,
+  directories: Set<string>,
+  precomputedPathsToCheck?: readonly string[],
+): string {
+  const carry = symlinkCarryForWorkingDirectorySet(
+    path,
+    directories,
+    precomputedPathsToCheck,
+  )
+  return carry?.carriedOut ? carry.landing : path
+}
+
+/** densable `Tl` + `Tln` */
+function symlinkCarrySentence(requested: string, carry: SymlinkCarry): string {
+  return `${requested} resolves through a symlink to ${carry.landing}${
+    carry.landingOutside
+      ? ', which is outside the allowed working directories'
+      : ''
+  }`
+}
+
+const PATH_OUTSIDE_WORKING_DIR_REASON =
+  'Path is outside allowed working directories'
+
+/**
+ * densable `xl` @179664800 — default ask. Carried-out write is a
+ * non-classifier safetyCheck; carried-out read stays workingDir.
+ */
+function defaultPathAccessAsk(
+  verb: 'read from' | 'write to',
+  path: string,
+  context: ToolPermissionContext,
+  pathsToCheck: readonly string[],
+  suggestions: PermissionUpdate[],
+): PermissionAskDecision {
+  const base = `Claude requested permissions to ${verb} ${path}, but you haven't granted it yet.`
+  const carry = symlinkCarryForWorkingDirectorySet(
+    path,
+    allWorkingDirectories(context),
+    pathsToCheck,
+  )
+  if (carry === null || !carry.carriedOut) {
+    return {
+      behavior: 'ask',
+      message: base,
+      suggestions,
+      decisionReason: {
+        type: 'workingDir',
+        reason: PATH_OUTSIDE_WORKING_DIR_REASON,
+      },
+    }
+  }
+  const sentence = symlinkCarrySentence(path, carry)
+  if (verb === 'write to') {
+    return {
+      behavior: 'ask',
+      message: `${base} ${sentence}.`,
+      suggestions,
+      blockedPath: carry.landing,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: sentence,
+        classifierApprovable: false,
+      },
+    }
+  }
+  return {
+    behavior: 'ask',
+    message: `${base} ${sentence}.`,
+    suggestions,
+    blockedPath: carry.landing,
+    decisionReason: {
+      type: 'workingDir',
+      reason: sentence,
+    },
+  }
+}
+
 export function pathInAllowedWorkingPath(
   path: string,
   toolPermissionContext: ToolPermissionContext,
   precomputedPathsToCheck?: readonly string[],
 ): boolean {
-  // Check both the original path and the resolved symlink path
-  const pathsToCheck =
-    precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
-
-  // Resolve working directories the same way we resolve input paths so
-  // comparisons are symmetric. Without this, a resolved input path
-  // (e.g. /System/Volumes/Data/home/... on macOS) would not match an
-  // unresolved working directory (/home/...), causing false denials.
-  const workingPaths = Array.from(
+  return pathInWorkingDirectorySet(
+    path,
     allWorkingDirectories(toolPermissionContext),
-  ).flatMap(wp => getResolvedWorkingDirPaths(wp))
+    precomputedPathsToCheck,
+  )
+}
 
-  // All paths must be within allowed working paths
-  // If any resolved path is outside, deny access
-  return pathsToCheck.every(pathToCheck =>
-    workingPaths.some(workingPath =>
-      pathInWorkingPath(pathToCheck, workingPath),
-    ),
+/** densable `Vy(..., Aln)` — membership for the outside-read fence. */
+export function pathInOutsideReadFenceWorkingPath(
+  path: string,
+  toolPermissionContext: ToolPermissionContext,
+  precomputedPathsToCheck?: readonly string[],
+): boolean {
+  return pathInWorkingDirectorySet(
+    path,
+    workingDirectoriesForOutsideReadFence(toolPermissionContext),
+    precomputedPathsToCheck,
   )
 }
 
@@ -813,7 +1043,24 @@ export function denyRestrictedFileToolOutsideCwd(
       type: 'other',
       reason: '--restricted confines the file tools to the working directory.',
     },
+    blockedPath: blockedPathForWorkingDirectorySet(
+      path,
+      allWorkingDirectories(context),
+      precomputedPathsToCheck,
+    ),
   }
+}
+
+/**
+ * densable KDt @179666652 — `return !(n.servedCall===true && e.behavior==="allow")`.
+ * Served CCR/remote must not keep implicit internal-path allows (plan files,
+ * session memory, etc.); those fall through to the next permission check.
+ */
+export function shouldHonorAllowForServedCall(
+  result: { behavior: string },
+  context: { servedCall?: boolean },
+): boolean {
+  return !(context.servedCall === true && result.behavior === 'allow')
 }
 
 /** official cke / file-tool deny when permissions.blockReadsOutsideWorkingDirectories */
@@ -822,13 +1069,15 @@ export function denyBlockedOutsideReadsForFileTool(
   context: ToolPermissionContext,
   precomputedPathsToCheck?: readonly string[],
   internalAllow?: () => PermissionResult,
-): PermissionDenyDecision | null {
+): PermissionDenyDecision | PermissionAskDecision | null {
   if (!contextBlocksOutsideReads(context)) return null
-  if (pathInAllowedWorkingPath(path, context, precomputedPathsToCheck)) {
+  if (
+    pathInOutsideReadFenceWorkingPath(path, context, precomputedPathsToCheck)
+  ) {
     return null
   }
   if (internalAllow?.().behavior === 'allow') return null
-  return {
+  const deny: PermissionDenyDecision = {
     behavior: 'deny',
     message: blockedOutsideReadFileToolMessage(path),
     decisionReason: {
@@ -836,12 +1085,55 @@ export function denyBlockedOutsideReadsForFileTool(
       reason: OUTSIDE_READS_BLOCKED_REASON,
       classifierApprovable: false,
     },
+    blockedPath: blockedPathForWorkingDirectorySet(
+      path,
+      workingDirectoriesForOutsideReadFence(context),
+      precomputedPathsToCheck,
+    ),
   }
+  // densable @179659900: served && !restricted && deny && !qWn() → ask +
+  // circuitBreaker:"outsideReadsBlocked". Gold qWn = fu().some(permissions
+  // .blockReadsOutsideWorkingDirectories===true) = tke host
+  // settingsHaveBlockReadsOutsideWorkingDirectories().
+  if (
+    context.servedCall === true &&
+    !context.restricted &&
+    !settingsHaveBlockReadsOutsideWorkingDirectories()
+  ) {
+    return {
+      behavior: 'ask',
+      message: deny.message,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: OUTSIDE_READS_BLOCKED_REASON,
+        classifierApprovable: false,
+        circuitBreaker: 'outsideReadsBlocked',
+      },
+      blockedPath: deny.blockedPath,
+    }
+  }
+  return deny
 }
 
-export function pathInWorkingPath(path: string, workingPath: string): boolean {
+export function pathInWorkingPath(
+  path: string,
+  workingPath: string,
+  opts?: { caseFold?: boolean; uncShapeParity?: boolean },
+): boolean {
+  const caseFold = opts?.caseFold ?? true
+  const uncShapeParity = opts?.uncShapeParity ?? false
   const absolutePath = expandPath(path)
   const absoluteWorkingPath = expandPath(workingPath)
+
+  // gold Tp uncShapeParity: original and expanded UNC/NT shapes must match
+  // pairwise. Host: isUncOrNtPath (gold Ln).
+  if (
+    uncShapeParity &&
+    (isUncOrNtPath(absolutePath) !== isUncOrNtPath(absoluteWorkingPath) ||
+      isUncOrNtPath(path) !== isUncOrNtPath(workingPath))
+  ) {
+    return false
+  }
 
   // On macOS, handle common symlink issues:
   // - /var -> /private/var
@@ -853,12 +1145,14 @@ export function pathInWorkingPath(path: string, workingPath: string): boolean {
     .replace(/^\/private\/var\//, '/var/')
     .replace(/^\/private\/tmp(\/|$)/, '/tmp$1')
 
-  // Normalize case for case-insensitive comparison to prevent bypassing security
-  // checks on case-insensitive filesystems (macOS/Windows) like .cLauDe/CoMmAnDs
-  const caseNormalizedPath = normalizeCaseForComparison(normalizedPath)
-  const caseNormalizedWorkingPath = normalizeCaseForComparison(
-    normalizedWorkingPath,
-  )
+  // gold Vy membership uses caseFold:false. Default remains fold for
+  // add-dir / claudemd callers on case-insensitive volumes.
+  const caseNormalizedPath = caseFold
+    ? normalizeCaseForComparison(normalizedPath)
+    : normalizedPath
+  const caseNormalizedWorkingPath = caseFold
+    ? normalizeCaseForComparison(normalizedWorkingPath)
+    : normalizedWorkingPath
 
   // Use cross-platform relative path helper
   const relative = relativePath(caseNormalizedWorkingPath, caseNormalizedPath)
@@ -883,6 +1177,7 @@ function rootPathForSource(source: PermissionRuleSource): string {
     case 'session':
     case 'mcpServerPolicy':
     case 'toolsNarrowing':
+    case 'hostCredential':
       return expandPath(getOriginalCwd())
     case 'userSettings':
     case 'policySettings':
@@ -1272,6 +1567,148 @@ export function matchesPathRule(pattern: string, path: string): boolean {
   return false
 }
 
+function askOther(message: string, reason: string): PermissionAskDecision {
+  return {
+    behavior: 'ask',
+    message,
+    decisionReason: { type: 'other', reason },
+  }
+}
+
+function isUntrustedUncForRead(
+  spelling: string,
+  trusted: ToolPermissionContext['trustedNetworkDirectories'],
+): boolean {
+  return (
+    isUncOrNtPath(spelling) &&
+    !isWslUncPath(spelling) &&
+    !isTrustedNetworkPath(spelling, trusted)
+  )
+}
+
+function isUntrustedNetAutomount(
+  spelling: string,
+  trusted: ToolPermissionContext['trustedNetworkDirectories'],
+): boolean {
+  return (
+    (isAutomountMapPath(spelling) || isNetRootPath(spelling)) &&
+    !isTrustedNetworkPath(spelling, trusted)
+  )
+}
+
+function isUntrustedNetworkBrowse(
+  spelling: string,
+  trusted: ToolPermissionContext['trustedNetworkDirectories'],
+): boolean {
+  return (
+    isNetworkBrowsePath(spelling) && !isTrustedNetworkPath(spelling, trusted)
+  )
+}
+
+function isUntrustedKernelRedirect(
+  spelling: string,
+  trusted: ToolPermissionContext['trustedNetworkDirectories'],
+): boolean {
+  return (
+    isKernelRedirectPath(spelling) && !isTrustedNetworkPath(spelling, trusted)
+  )
+}
+
+/**
+ * densable `a6n` @179653234 — network-shape ask after deny+kl.
+ */
+function askNetworkReadDefense(
+  tool: Tool,
+  input: { [key: string]: unknown },
+  path: string,
+  context: ToolPermissionContext,
+  pathsToCheck: readonly string[],
+): PermissionAskDecision | null {
+  const trusted = context.trustedNetworkDirectories
+  if (isUntrustedNetAutomount(path, trusted)) {
+    return askOther(
+      `Claude requested permissions to read from ${path}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
+      'Automount -hosts path detected (defense-in-depth check)',
+    )
+  }
+  if (isUntrustedNetworkBrowse(path, trusted)) {
+    return askOther(
+      `Claude requested permissions to read from ${path}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
+      'Automount browse surface detected (defense-in-depth check)',
+    )
+  }
+  if (isUntrustedKernelRedirect(path, trusted)) {
+    return askOther(
+      `Claude requested permissions to read from ${path}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
+      'Kernel-resolved path prefix (/.vol etc.) detected (defense-in-depth check)',
+    )
+  }
+  for (const spelling of pathsToCheck) {
+    if (isUntrustedUncForRead(spelling, trusted)) {
+      return askOther(
+        `Claude requested permissions to read from ${path}, which appears to be a UNC path that could access network resources.`,
+        'UNC path detected (defense-in-depth check)',
+      )
+    }
+    if (isUntrustedNetAutomount(spelling, trusted)) {
+      return askOther(
+        `Claude requested permissions to read from ${path}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
+        'Automount -hosts path detected (defense-in-depth check)',
+      )
+    }
+    if (isUntrustedNetworkBrowse(spelling, trusted)) {
+      return askOther(
+        `Claude requested permissions to read from ${path}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
+        'Automount browse surface detected (defense-in-depth check)',
+      )
+    }
+    if (isUntrustedKernelRedirect(spelling, trusted)) {
+      return askOther(
+        `Claude requested permissions to read from ${path}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
+        'Kernel-resolved path prefix (/.vol etc.) detected (defense-in-depth check)',
+      )
+    }
+  }
+  if (tool.name === GLOB_TOOL_NAME) {
+    const pattern = input.pattern
+    if (typeof pattern === 'string') {
+      if (isUntrustedUncForRead(pattern, trusted)) {
+        return askOther(
+          `Claude requested permissions to glob ${pattern}, which appears to be a UNC pattern that could access network resources.`,
+          'UNC glob pattern detected (defense-in-depth check)',
+        )
+      }
+      if (isUntrustedNetAutomount(pattern, trusted)) {
+        return askOther(
+          `Claude requested permissions to glob ${pattern}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
+          'Automount -hosts glob pattern detected (defense-in-depth check)',
+        )
+      }
+      if (isUntrustedNetworkBrowse(pattern, trusted)) {
+        return askOther(
+          `Claude requested permissions to glob ${pattern}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
+          'Automount browse surface glob pattern detected (defense-in-depth check)',
+        )
+      }
+      if (isUntrustedKernelRedirect(pattern, trusted)) {
+        return askOther(
+          `Claude requested permissions to glob ${pattern}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
+          'Kernel-resolved path prefix (/.vol etc.) glob pattern detected (defense-in-depth check)',
+        )
+      }
+    }
+  }
+  for (const spelling of pathsToCheck) {
+    if (hasSuspiciousWindowsPathPatternForTrust(spelling, trusted)) {
+      return askOther(
+        `Claude requested permissions to read from ${path}, which contains a suspicious Windows path pattern that requires manual approval.`,
+        'Path contains suspicious Windows-specific patterns (alternate data streams, short names, long path prefixes, or three or more consecutive dots) that require manual verification',
+      )
+    }
+  }
+  return null
+}
+
 /**
  * Permission result for read permission for the specified tool & tool input
  */
@@ -1293,38 +1730,8 @@ export function checkReadPermissionForTool(
   // checkPathSafetyForAutoEdit → pathInAllowedWorkingPath to avoid redundant
   // existsSync/lstatSync/realpathSync syscalls on the same path (previously
   // 6× = 30 syscalls per Read permission check).
-  const pathsToCheck = getPathsForPermissionCheck(path)
-
-  // 1. Defense-in-depth: Block UNC paths early (before other checks)
-  // This catches paths starting with \\ or // that could access network resources
-  // This may catch some UNC patterns not detected by containsVulnerableUncPath
-  for (const pathToCheck of pathsToCheck) {
-    if (pathToCheck.startsWith('\\\\') || pathToCheck.startsWith('//')) {
-      return {
-        behavior: 'ask',
-        message: `Claude requested permissions to read from ${path}, which appears to be a UNC path that could access network resources.`,
-        decisionReason: {
-          type: 'other',
-          reason: 'UNC path detected (defense-in-depth check)',
-        },
-      }
-    }
-  }
-
-  // 2. Check for suspicious Windows path patterns (defense in depth)
-  for (const pathToCheck of pathsToCheck) {
-    if (hasSuspiciousWindowsPathPattern(pathToCheck)) {
-      return {
-        behavior: 'ask',
-        message: `Claude requested permissions to read from ${path}, which contains a suspicious Windows path pattern that requires manual approval.`,
-        decisionReason: {
-          type: 'other',
-          reason:
-            'Path contains suspicious Windows-specific patterns (alternate data streams, short names, long path prefixes, or three or more consecutive dots) that require manual verification',
-        },
-      }
-    }
-  }
+  const walk = walkPermissionPaths(path)
+  const pathsToCheck = walk.paths
 
   // 3. Check for READ-SPECIFIC deny rules first - check both the original path and resolved symlink path
   // SECURITY: This must come before any allow checks (including "edit access implies read access")
@@ -1346,6 +1753,61 @@ export function checkReadPermissionForTool(
         },
       }
     }
+  }
+
+  // gold checkRead: after deny rules, `restricted||blockReads` runs `kl`
+  // with Aln (when blockReads) **before** ask rules, edit-implies-read, and
+  // Aw working-dir allow. ProjectSettings additionalDirectories must not
+  // skip the fence.
+  const absolutePath = expandPath(path)
+  const outsideReads = contextBlocksOutsideReads(toolPermissionContext)
+  const internalReadResult = checkReadableInternalPath(
+    absolutePath,
+    input,
+    toolPermissionContext.restricted,
+    {
+      blockOutsideReads: outsideReads,
+      readBlockFence: outsideReads,
+    },
+  )
+  const restrictedReadDeny = denyRestrictedFileToolOutsideCwd(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    () => internalReadResult,
+  )
+  if (restrictedReadDeny) {
+    return restrictedReadDeny
+  }
+  const blockedOutsideReadDeny = denyBlockedOutsideReadsForFileTool(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    () => internalReadResult,
+  )
+  if (blockedOutsideReadDeny) {
+    return blockedOutsideReadDeny
+  }
+
+  // gold Iv: `else if (h.unresolved) return Cl("read from", g)` — only when
+  // restricted/blockReads fence did not already return. EACCES-without-hop
+  // is not unresolved (gold Rt `j`).
+  if (walk.unresolved) {
+    return unresolvedPathDeny('read from', path)
+  }
+
+  // gold a6n @179653234 — after deny+kl, before ask rules. UNC / automount /
+  // kernel-redirect ask unless Le(trustedNetworkDirectories). WSL UNC (Il)
+  // is not a network share. Suspicious Windows TX is last in a6n.
+  const networkAsk = askNetworkReadDefense(
+    tool,
+    input,
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+  )
+  if (networkAsk) {
+    return networkAsk
   }
 
   // 4. Check for READ-SPECIFIC ask rules - check both the original path and resolved symlink path
@@ -1399,31 +1861,10 @@ export function checkReadPermissionForTool(
   }
 
   // 7. Allow reads from internal harness paths (session-memory, plans, tool-results)
-  const absolutePath = expandPath(path)
-  const internalReadResult = checkReadableInternalPath(
-    absolutePath,
-    input,
-    toolPermissionContext.restricted,
-  )
-  const restrictedReadDeny = denyRestrictedFileToolOutsideCwd(
-    path,
-    toolPermissionContext,
-    pathsToCheck,
-    () => internalReadResult,
-  )
-  if (restrictedReadDeny) {
-    return restrictedReadDeny
-  }
-  const blockedOutsideReadDeny = denyBlockedOutsideReadsForFileTool(
-    path,
-    toolPermissionContext,
-    pathsToCheck,
-    () => internalReadResult,
-  )
-  if (blockedOutsideReadDeny) {
-    return blockedOutsideReadDeny
-  }
-  if (internalReadResult.behavior !== 'passthrough') {
+  if (
+    internalReadResult.behavior !== 'passthrough' &&
+    shouldHonorAllowForServedCall(internalReadResult, toolPermissionContext)
+  ) {
     return internalReadResult
   }
 
@@ -1446,21 +1887,14 @@ export function checkReadPermissionForTool(
   }
 
   // 12. Default to asking for permission
-  // At this point, isInWorkingDir is false (from step #6), so path is outside working directories
-  return {
-    behavior: 'ask',
-    message: `Claude requested permissions to read from ${path}, but you haven't granted it yet.`,
-    suggestions: generateSuggestions(
-      path,
-      'read',
-      toolPermissionContext,
-      pathsToCheck,
-    ),
-    decisionReason: {
-      type: 'workingDir',
-      reason: 'Path is outside allowed working directories',
-    },
-  }
+  // gold xl("read from") — carried-out symlink stamps blockedPath.
+  return defaultPathAccessAsk(
+    'read from',
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    generateSuggestions(path, 'read', toolPermissionContext, pathsToCheck),
+  )
 }
 
 /**
@@ -1478,6 +1912,24 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   toolPermissionContext: ToolPermissionContext,
   precomputedPathsToCheck?: readonly string[],
 ): PermissionDecision {
+  const ns = nsWritePermissionForTool(
+    tool,
+    input,
+    toolPermissionContext,
+    precomputedPathsToCheck,
+  )
+  // gold FileWrite/Edit/NotebookEdit: `h=NS(…); return h.behavior==="deny"?h:pct(s,g)??h`
+  if (ns.behavior === 'deny') return ns
+  if (typeof tool.getPath !== 'function') return ns
+  return denySymlinkLeafWrite(tool.getPath(input)) ?? ns
+}
+
+function nsWritePermissionForTool<Input extends AnyObject>(
+  tool: Tool<Input>,
+  input: z.infer<Input>,
+  toolPermissionContext: ToolPermissionContext,
+  precomputedPathsToCheck?: readonly string[],
+): PermissionDecision {
   if (typeof tool.getPath !== 'function') {
     return {
       behavior: 'ask',
@@ -1487,8 +1939,10 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   const path = tool.getPath(input)
 
   // 1. Check for deny rules - check both the original path and resolved symlink path
-  const pathsToCheck =
-    precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
+  const walk = precomputedPathsToCheck
+    ? { paths: [...precomputedPathsToCheck], unresolved: false }
+    : walkPermissionPaths(path)
+  const pathsToCheck = walk.paths
   for (const pathToCheck of pathsToCheck) {
     const denyRule = matchingRuleForInput(
       pathToCheck,
@@ -1516,7 +1970,10 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
     input,
     toolPermissionContext.restricted,
   )
-  if (internalEditResult.behavior !== 'passthrough') {
+  if (
+    internalEditResult.behavior !== 'passthrough' &&
+    shouldHonorAllowForServedCall(internalEditResult, toolPermissionContext)
+  ) {
     return internalEditResult
   }
   const restrictedWriteDeny = denyRestrictedFileToolOutsideCwd(
@@ -1526,6 +1983,12 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   )
   if (restrictedWriteDeny) {
     return restrictedWriteDeny
+  }
+
+  // gold NS: after zo/UNC early returns, before session .claude allow.
+  // `if (h.unresolved) return Cl("write to", g)`
+  if (walk.unresolved) {
+    return unresolvedPathDeny('write to', path)
   }
 
   // 1.6. Check for .claude/** allow rules BEFORE safety checks
@@ -1560,8 +2023,19 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
     const ruleContent = claudeFolderAllowRule.ruleValue.ruleContent
     // densable wit: session .claude allow is skipped while mode==="plan"
     // (plan must not auto-write via Edit(.claude/**) allow).
+    // gold NS: skip session .claude allow when TX(trusted) or Xa>1
+    // (.claude nested after cwd). Plan already skipped above.
+    const skipSessionClaudeAllow =
+      pathsToCheck.some(spelling =>
+        hasSuspiciousWindowsPathPatternForTrust(
+          spelling,
+          toolPermissionContext.trustedNetworkDirectories,
+        ),
+      ) ||
+      pathsToCheck.some(spelling => claudeSegmentCountAfterCwd(spelling) > 1)
     if (
       toolPermissionContext.mode !== 'plan' &&
+      !skipSessionClaudeAllow &&
       ruleContent &&
       (ruleContent.startsWith(CLAUDE_FOLDER_PERMISSION_PATTERN.slice(0, -2)) ||
         ruleContent.startsWith(
@@ -1584,7 +2058,11 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   // 1.7. Check comprehensive safety validations (Windows patterns, Claude config, dangerous files)
   // This MUST come before checking allow rules to prevent users from accidentally granting
   // permission to edit protected files
-  const safetyCheck = checkPathSafetyForAutoEdit(path, pathsToCheck)
+  const safetyCheck = checkPathSafetyForAutoEdit(
+    path,
+    pathsToCheck,
+    toolPermissionContext.trustedNetworkDirectories,
+  )
   if (!safetyCheck.safe) {
     // SDK suggestion: if under .claude/skills/{name}/, emit the narrowed
     // session-scoped addRules that step 1.6 will honor on the next call.
@@ -1615,15 +2093,29 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
         | 'dangerousRemoval'
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
+        | 'outsideReadsBlocked'
     }
+    // gold c6n: append Tl/Tln landing sentence and blockedPath.
+    const carry = symlinkCarryForWorkingDirectorySet(
+      path,
+      allWorkingDirectories(toolPermissionContext),
+      pathsToCheck,
+    )
+    const sentence = carry ? symlinkCarrySentence(path, carry) : null
+    const message = sentence
+      ? `${failedCheck.message} ${sentence}.`
+      : failedCheck.message
     return {
       behavior: 'ask',
-      message: failedCheck.message,
+      message,
       suggestions: safetySuggestions,
+      ...(carry !== null ? { blockedPath: carry.landing } : {}),
       decisionReason: {
         type: 'safetyCheck',
-        reason: failedCheck.message,
-        classifierApprovable: failedCheck.classifierApprovable,
+        reason: message,
+        classifierApprovable: carry?.carriedOut
+          ? false
+          : failedCheck.classifierApprovable,
         ...(failedCheck.circuitBreaker
           ? { circuitBreaker: failedCheck.circuitBreaker }
           : {}),
@@ -1707,21 +2199,74 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   }
 
   // 5. Default to asking for permission
+  // gold xl("write to") — carried-out symlink is safetyCheck, not workingDir.
+  return defaultPathAccessAsk(
+    'write to',
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+    generateSuggestions(path, 'write', toolPermissionContext, pathsToCheck),
+  )
+}
+
+/**
+ * densable `Cl` @179665171 — hop walk could not determine the landing.
+ * `e==="write to"?"write":"read"`. decisionReason type other, gold `Rln`.
+ */
+export function unresolvedPathDeny(
+  verb: 'read from' | 'write to',
+  path: string,
+): PermissionDenyDecision {
+  const action = verb === 'write to' ? 'write' : 'read'
   return {
-    behavior: 'ask',
-    message: `Claude requested permissions to write to ${path}, but you haven't granted it yet.`,
-    suggestions: generateSuggestions(
-      path,
-      'write',
-      toolPermissionContext,
-      pathsToCheck,
-    ),
-    decisionReason: !isInWorkingDir
-      ? {
-          type: 'workingDir',
-          reason: 'Path is outside allowed working directories',
-        }
-      : undefined,
+    behavior: 'deny',
+    message: `Refusing to ${action} ${path}: where it leads on disk could not be determined (a link on the way could not be examined, or the links do not resolve).`,
+    decisionReason: {
+      type: 'other',
+      reason: 'Unresolved symlink hop during permission path walk',
+    },
+  }
+}
+
+/**
+ * densable `pct` @179663773 — permission-layer deny when the write spelling
+ * is a symlink leaf. Opener DH is not equivalent (Linux hops include the
+ * spelling so parentApproved succeeds and skips the lstat).
+ */
+export function denySymlinkLeafWrite(
+  filePath: string,
+): PermissionDenyDecision | null {
+  const requested = expandPath(filePath)
+  const fsImpl = getFsImplementation()
+  let leafIsSymlink = false
+  try {
+    leafIsSymlink = fsImpl.lstatSync(requested).isSymbolicLink()
+  } catch (error) {
+    const code = getErrnoCode(error)
+    if (code === 'ENOENT') return null
+    // unreadable leaf: gold pct still fires when leafIsSymlink was set by the
+    // hop walker; lstat failure here is not a hop. Do not invent deny.
+    return null
+  }
+  if (!leafIsSymlink) return null
+  let landing: string | undefined
+  let unresolved = false
+  try {
+    landing = fsImpl.realpathSync(requested)
+  } catch {
+    unresolved = true
+  }
+  const target = unresolved
+    ? 'a target that could not be determined'
+    : (landing ?? requested)
+  return {
+    behavior: 'deny',
+    message: `Refusing to write ${requested}: it is a symbolic link. Write to the link's target path instead: ${target}.`,
+    decisionReason: {
+      type: 'other',
+      reason: 'Write target is a symbolic link',
+    },
+    ...(!unresolved && landing !== undefined ? { blockedPath: landing } : {}),
   }
 }
 
@@ -1950,6 +2495,7 @@ export function checkReadableInternalPath(
   absolutePath: string,
   input: { [key: string]: unknown },
   restricted?: boolean,
+  fence?: { blockOutsideReads?: boolean; readBlockFence?: boolean },
 ): PermissionResult {
   // SECURITY: Normalize path to prevent traversal bypasses via .. segments
   // This is defense-in-depth; individual helper functions also normalize
@@ -1959,6 +2505,11 @@ export function checkReadableInternalPath(
   if (pausedRead) {
     return pausedRead
   }
+  // densable ute @179667744: T = restricted || blockOutsideReads gates
+  // agent-mem / tasks / teams. readBlockFence && !restricted carves user
+  // CLAUDE.md + skills/plugins/rules/agents/commands.
+  const remoteOrRestricted = restricted === true
+  const tGate = remoteOrRestricted || fence?.blockOutsideReads === true
 
   // Session memory directory
   if (isSessionMemoryPath(normalizedPath)) {
@@ -2046,7 +2597,8 @@ export function checkReadableInternalPath(
   }
 
   // Agent memory directory (for self-improving agents)
-  if (isAgentMemoryPath(normalizedPath)) {
+  // gold ute: if (!T && tct(g))
+  if (!tGate && isAgentMemoryPath(normalizedPath)) {
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -2058,7 +2610,8 @@ export function checkReadableInternalPath(
   }
 
   // Memdir directory (persistent memory for cross-session learning)
-  if (isAutoMemPath(normalizedPath)) {
+  // gold: if (!R && UV(g) && !(blockOutsideReads && TDt())) — TDt invent-ban
+  if (!remoteOrRestricted && isAutoMemPath(normalizedPath)) {
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -2072,8 +2625,9 @@ export function checkReadableInternalPath(
   // Tasks directory (~/.claude/tasks/) for swarm task coordination
   const tasksDir = join(getClaudeConfigHomeDir(), 'tasks') + sep
   if (
-    normalizedPath === tasksDir.slice(0, -1) ||
-    normalizedPath.startsWith(tasksDir)
+    !tGate &&
+    (normalizedPath === tasksDir.slice(0, -1) ||
+      normalizedPath.startsWith(tasksDir))
   ) {
     return {
       behavior: 'allow',
@@ -2088,8 +2642,9 @@ export function checkReadableInternalPath(
   // Teams directory (~/.claude/teams/) for swarm coordination
   const teamsReadDir = join(getClaudeConfigHomeDir(), 'teams') + sep
   if (
-    normalizedPath === teamsReadDir.slice(0, -1) ||
-    normalizedPath.startsWith(teamsReadDir)
+    !tGate &&
+    (normalizedPath === teamsReadDir.slice(0, -1) ||
+      normalizedPath.startsWith(teamsReadDir))
   ) {
     return {
       behavior: 'allow',
@@ -2098,6 +2653,42 @@ export function checkReadableInternalPath(
         type: 'other',
         reason: 'Team files are allowed for reading',
       },
+    }
+  }
+
+  if (fence?.readBlockFence === true && !remoteOrRestricted) {
+    const home = getClaudeConfigHomeDir()
+    if (normalizedPath === join(home, 'CLAUDE.md')) {
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionReason: {
+          type: 'other',
+          reason: 'The user memory file is allowed for reading',
+        },
+      }
+    }
+    for (const dir of [
+      'skills',
+      'plugins',
+      'rules',
+      'agents',
+      'commands',
+    ] as const) {
+      const base = join(home, dir) + sep
+      if (
+        normalizedPath === base.slice(0, -1) ||
+        normalizedPath.startsWith(base)
+      ) {
+        return {
+          behavior: 'allow',
+          updatedInput: input,
+          decisionReason: {
+            type: 'other',
+            reason: `User ${dir} files are allowed for reading`,
+          },
+        }
+      }
     }
   }
 

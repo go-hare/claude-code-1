@@ -36,6 +36,12 @@ describe('densable 2.1.251 #6 fileToolApprovedOpen', () => {
   const roots: string[] = []
   afterEach(async () => {
     clearApprovedFileToolPathsForTests()
+    const { getBootstrapSession } =
+      require('../sessionRoot.js') as typeof import('../sessionRoot.js')
+    const stash = getBootstrapSession().writePermissionStash
+    stash.pathsByToolUse.clear()
+    stash.evicted.clear()
+    stash.poisoned = false
     for (const root of roots.splice(0)) {
       await rm(root, { recursive: true, force: true })
     }
@@ -148,6 +154,33 @@ describe('densable 2.1.251 #6 fileToolApprovedOpen', () => {
     } finally {
       await opened.close()
     }
+  })
+
+  test('i3 consume expired stash throws permission-check-expired', () => {
+    const { PermissionCheckExpiredError, permissionCheckExpiredWriteMessage } =
+      require('../fileToolApprovedOpen.js') as typeof import('../fileToolApprovedOpen.js')
+    const { getBootstrapSession } =
+      require('../sessionRoot.js') as typeof import('../sessionRoot.js')
+    const stash = getBootstrapSession().writePermissionStash
+    const file = '/tmp/expired-write.txt'
+    const key = `tu-keep\0${file}`
+    stash.evicted.add(key)
+    expect(() => takeApprovedFileToolPath(file, 'tu-keep', 'write')).toThrow(
+      PermissionCheckExpiredError,
+    )
+    expect(permissionCheckExpiredWriteMessage(file)).toContain(
+      'permission check expired before it ran',
+    )
+  })
+  test('stash+consume by toolUseId returns hops and clears sibling keys', () => {
+    const { getBootstrapSession } =
+      require('../sessionRoot.js') as typeof import('../sessionRoot.js')
+    const stash = getBootstrapSession().writePermissionStash
+    stash.stash('tu-a', '/tmp/a.txt', ['/tmp/a.txt', '/tmp/a-hop'])
+    stash.stash('tu-a', '/tmp/b.txt', ['/tmp/b.txt'])
+    const hops = takeApprovedFileToolPath('/tmp/a.txt', 'tu-a', 'write')
+    expect([...hops]).toEqual(['/tmp/a.txt', '/tmp/a-hop'])
+    expect(stash.consume('tu-a', '/tmp/b.txt')).toBeUndefined()
   })
 
   test('DH createParents makes the missing parent under the approved set', async () => {

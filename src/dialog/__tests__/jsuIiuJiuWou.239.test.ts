@@ -62,11 +62,16 @@ import {
   CLAUDE_FOLDER_STANDING_LABEL,
   type FilePermissionPayload,
   filePermissionDialogTitle,
+  filePermissionOffersBlockOutsideReads,
   formatFilePermissionQuestion,
   isFileStandingRowVetoed,
   mintFileStandingRow,
   resolveFilePermissionAnswer,
 } from '../permissionFile.js'
+import {
+  OUTSIDE_READS_DIALOG_TITLE,
+  outsideReadAskAgainDecision,
+} from '../../utils/permissions/outsideReads.js'
 import {
   buildMonitorSuggestionsRow,
   isMonitorAlwaysAllowVetoed,
@@ -873,6 +878,57 @@ describe('Mhy Y$A E$A', () => {
         filePayload({ showingDiffInIDE: true, ideName: 'VS Code' }),
       ),
     ).toBe('Opened changes in VS Code ⧉')
+  })
+
+  test('yBt Block/ask_again morph DualInk permission_file', () => {
+    const payload = filePayload({
+      permissionResult: { behavior: 'ask', offersBlockOutsideReads: true },
+    })
+    expect(filePermissionOffersBlockOutsideReads(payload)).toBe(true)
+    expect(filePermissionDialogTitle(payload)).toBe(OUTSIDE_READS_DIALOG_TITLE)
+    expect(
+      resolveFilePermissionAnswer('block-outside-reads', payload, null),
+    ).toEqual({ behavior: 'deny', blockOutsideReads: true })
+    expect(
+      resolveFilePermissionAnswer('ask-again-outside-reads', payload, null),
+    ).toEqual({ behavior: 'deny' })
+    expect(
+      resolveFilePermissionAnswer(
+        'ask-again-outside-reads',
+        payload,
+        null,
+        'stay in cwd',
+      ),
+    ).toEqual({ behavior: 'deny', feedback: 'stay in cwd' })
+    expect(resolveFilePermissionAnswer('yes', payload, null).behavior).toBe(
+      'allow',
+    )
+    const dual = resolveFilePermissionAnswer(
+      'ask-again-outside-reads',
+      payload,
+      null,
+    )
+    expect(dual.feedback).toBeUndefined()
+    const converted = outsideReadAskAgainDecision({ feedback: dual.feedback })
+    expect(converted.message).toBe(
+      'The user did not allow this read outside the working directories.',
+    )
+    expect(converted.userFeedback).toBeUndefined()
+    const convertedTyped = outsideReadAskAgainDecision({
+      feedback: 'stay in cwd',
+    })
+    expect(convertedTyped.message).toBe(
+      'The user did not allow this read outside the working directories: stay in cwd',
+    )
+  })
+
+  test('Esc/onCancel is cancelled, not deny (W() abort, not ask-again)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../dialogs/PermissionFileDialog.tsx'),
+      'utf8',
+    )
+    expect(src).toContain("answer({ behavior: 'cancelled' })")
+    expect(src).not.toContain("answer({ behavior: 'deny' })")
   })
 })
 

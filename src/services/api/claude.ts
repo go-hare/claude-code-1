@@ -78,6 +78,7 @@ import {
   isStickyBetaRejected,
   isStickyBetaSentActive,
   stickySendBeta,
+  markRelayThinkingStripRecorded,
 } from '../../bootstrap/state.js'
 import {
   isStreamPingEvent,
@@ -126,6 +127,7 @@ import {
   stripToolReferenceBlocksFromUserMessage,
 } from '../../utils/messages.js'
 import {
+  firstPartyNameToCanonical,
   getDefaultOpusModel,
   getDefaultSonnetModel,
   getSmallFastModel,
@@ -170,6 +172,11 @@ import {
   getPromptCache1hAllowlist,
   getPromptCache1hEligible,
   getSessionId,
+  getThinkingDisplayExplicit,
+  getThinkingHighlightsRefused,
+  getThinkingResumptionRefused,
+  getThinkingTypeOverride,
+  isEffortUnsupported,
   setAfkModeHeaderLatched,
   setCacheEditingHeaderLatched,
   setFastModeHeaderLatched,
@@ -179,6 +186,7 @@ import {
 } from 'src/bootstrap/state.js'
 import {
   AFK_MODE_BETA_HEADER,
+  copyBetaHeaderToExtraBody,
   CONTEXT_1M_BETA_HEADER,
   CONTEXT_MANAGEMENT_BETA_HEADER,
   EFFORT_BETA_HEADER,
@@ -187,6 +195,11 @@ import {
   REDACT_THINKING_BETA_HEADER,
   STRUCTURED_OUTPUTS_BETA_HEADER,
   TASK_BUDGETS_BETA_HEADER,
+  DANGEROUS_TOOL_USE_BETA_HEADER,
+  THINKING_BINDING_CONTROLS_BETA_HEADER,
+  THINKING_DISPLAY_UPDATES_BETA_HEADER,
+  THINKING_RESUMPTION_BETA_HEADER,
+  THINKING_TOKEN_COUNT_BETA_HEADER,
 } from 'src/constants/betas.js'
 import type { QuerySource } from 'src/constants/querySource.js'
 import type { Notification } from 'src/context/notifications.js'
@@ -207,7 +220,7 @@ import {
   modelSupportsAdvisor,
 } from 'src/utils/advisor.js'
 import { type AgentContext, getAgentContext } from 'src/utils/agentContext.js'
-import { isClaudeAISubscriber } from 'src/utils/auth.js'
+import { getAnthropicApiKey, isClaudeAISubscriber } from 'src/utils/auth.js'
 import {
   modelSupportsStructuredOutputs,
   shouldIncludeFirstPartyOnlyBetas,
@@ -241,10 +254,22 @@ import { isMcpInstructionsDeltaEnabled } from 'src/utils/mcpInstructionsDelta.js
 import { calculateUSDCost } from 'src/utils/modelCost.js'
 import { endQueryProfile, queryCheckpoint } from 'src/utils/queryProfiler.js'
 import {
+  classifyThinkingDisplayRetry,
+  setPendingThinkingStripped,
+  densableExperimentalCapabilityBetas,
   isThinkingActiveForToolChoice,
   modelRejectsDisabledThinking,
-  modelSupportsAdaptiveThinking,
   modelSupportsThinking,
+  resolveAdaptiveThinkingType,
+  providerSupportsThinkingBindingOn3P,
+  resolveOutgoingThinkingDisplay,
+  resolvePrefixMismatchBehavior,
+  resolveThinkingDisplayMode,
+  shouldSendThinkingBindingControls,
+  shouldSendThinkingDisplayUpdates,
+  shouldSendThinkingResumptionBeta,
+  type PrefixMismatchBehavior,
+  type ThinkingApiDisplay,
   type ThinkingConfig,
 } from 'src/utils/thinking.js'
 import {
@@ -609,6 +634,9 @@ function configureEffortParams(
   model: string,
 ): void {
   if (!modelSupportsEffort(model) || 'effort' in outputConfig) {
+    return
+  }
+  if (isEffortUnsupported(model)) {
     return
   }
 
@@ -1140,6 +1168,10 @@ export async function* executeNonStreamingRequest(
     signal: AbortSignal
     initialConsecutive529Errors?: number
     querySource?: QuerySource
+    /** densable `onApiError` / `Kue` @184975200. */
+    onError?: (
+      error: unknown,
+    ) => string | null | undefined | Promise<string | null | undefined>
   },
   paramsFromContext: (context: RetryContext) => BetaMessageStreamParams,
   onAttempt: (attempt: number, start: number, maxOutputTokens: number) => void,
@@ -1228,6 +1260,7 @@ export async function* executeNonStreamingRequest(
       signal: retryOptions.signal,
       initialConsecutive529Errors: retryOptions.initialConsecutive529Errors,
       querySource: retryOptions.querySource,
+      onError: retryOptions.onError,
     },
   )
 
@@ -1401,8 +1434,19 @@ async function* queryModel(
   let betas = getMergedBetas(options.model, { isAgenticQuery }).filter(
     b =>
       !(
-        b === MID_CONVERSATION_SYSTEM_BETA_HEADER &&
-        isStickyBetaRejected(MID_CONVERSATION_SYSTEM_BETA_HEADER)
+        (b === MID_CONVERSATION_SYSTEM_BETA_HEADER &&
+          isStickyBetaRejected(MID_CONVERSATION_SYSTEM_BETA_HEADER)) ||
+        (b === THINKING_DISPLAY_UPDATES_BETA_HEADER &&
+          isStickyBetaRejected(THINKING_DISPLAY_UPDATES_BETA_HEADER)) ||
+        (b === THINKING_BINDING_CONTROLS_BETA_HEADER &&
+          isStickyBetaRejected(THINKING_BINDING_CONTROLS_BETA_HEADER)) ||
+        (b === THINKING_TOKEN_COUNT_BETA_HEADER &&
+          isStickyBetaRejected(THINKING_TOKEN_COUNT_BETA_HEADER)) ||
+        (b === THINKING_RESUMPTION_BETA_HEADER &&
+          (isStickyBetaRejected(THINKING_RESUMPTION_BETA_HEADER) ||
+            getThinkingResumptionRefused())) ||
+        (b === DANGEROUS_TOOL_USE_BETA_HEADER &&
+          isStickyBetaRejected(DANGEROUS_TOOL_USE_BETA_HEADER))
       ),
   )
 
@@ -2029,13 +2073,82 @@ async function* queryModel(
   // Capture the betas sent in the last API request, including the ones that
   // were dynamically added, so we can log and send it to telemetry.
   let lastRequestBetas: string[] | undefined
+  // densable `O1e` @184960115 — last thinking.display actually put on the wire.
+  let lastSentThinkingDisplay: string | undefined
+  // densable `sT`/`JR` @184946314 — last request carried OL + block_binding.
+  let lastSentBindingControls = false
+  let lastSentTokenCount = false
+  let lastBindingControlsOnThirdParty = false
+  let prefixLockStripAttempt = 0
+
+  /**
+   * densable aggregator @184994549: zue → Kue → Vue → dY → dGe on unique
+   * `r.onError` tokens. Yue `surface:resume-prefill` is not a retry token.
+   */
+  const onThinkingDisplayApiError = (
+    error: unknown,
+  ): ReturnType<typeof classifyThinkingDisplayRetry> => {
+    const lastBetas = lastRequestBetas ?? []
+    const token = classifyThinkingDisplayRetry(
+      error,
+      lastSentThinkingDisplay,
+      lastBetas,
+      options.model,
+      {
+        carriedBindingControls: lastSentBindingControls,
+        carriedTokenCount: lastSentTokenCount,
+        bindingControlsOnThirdParty: lastBindingControlsOnThirdParty,
+        messages: messagesForAPI as Message[],
+        onMessagesHealed: (next, kind) => {
+          // densable od(stripped, "error_recovery", true)
+          void kind
+          messagesForAPI = next as typeof messagesForAPI
+        },
+        onThinkingStripped: att => {
+          // densable Xue(Ps.from) then Zue() yield after message_stop
+          setPendingThinkingStripped(att)
+          markRelayThinkingStripRecorded('marker')
+        },
+        prefixLockAttempt: prefixLockStripAttempt + 1,
+      },
+    )
+    if (token === 'retry:thinking-display-updates') {
+      betas = betas.filter(b => b !== THINKING_DISPLAY_UPDATES_BETA_HEADER)
+    }
+    if (token === 'retry:thinking-binding-controls') {
+      lastSentBindingControls = false
+      betas = betas.filter(b => b !== THINKING_BINDING_CONTROLS_BETA_HEADER)
+    }
+    if (token === 'retry:thinking-token-count-beta') {
+      lastSentTokenCount = false
+      betas = betas.filter(b => b !== THINKING_TOKEN_COUNT_BETA_HEADER)
+    }
+    if (token === 'retry:thinking-resumption-beta') {
+      betas = betas.filter(b => b !== THINKING_RESUMPTION_BETA_HEADER)
+    }
+    // densable aQ @184994206 — d3r latch is in classifyThinkingTypeRetry;
+    // paramsFromContext reads Lyn(h.model) on the retry.
+    if (token === 'retry:thinking-type') {
+      void token
+    }
+    if (token?.startsWith('retry:prefix-lock-strip')) {
+      prefixLockStripAttempt += 1
+    }
+    if (
+      token === 'retry:safeguards' ||
+      token === 'retry:safeguards-unclaimed'
+    ) {
+      betas = betas.filter(b => b !== DANGEROUS_TOOL_USE_BETA_HEADER)
+    }
+    return token
+  }
 
   // densable `n2` — log the effort clamp once per queryModel call (retries
   // reuse paramsFromContext).
   let loggedEffortClamp = false
 
   const paramsFromContext = (retryContext: RetryContext) => {
-    const betasParams = [...betas]
+    let betasParams = [...betas]
 
     // Append 1M beta dynamically for the Sonnet 1M experiment.
     if (
@@ -2051,6 +2164,23 @@ async function* queryModel(
         ? [...getBedrockExtraBodyParamsBetas(retryContext.model)]
         : []
     const extraBodyParams = getExtraBodyParams(bedrockBetas)
+    const isBedrock = getAPIProvider() === 'bedrock'
+    // densable Joe @184955815 / @184955861 / @184956555 / @184957363
+    copyBetaHeaderToExtraBody(
+      extraBodyParams,
+      THINKING_TOKEN_COUNT_BETA_HEADER,
+      isBedrock && betasParams.includes(THINKING_TOKEN_COUNT_BETA_HEADER),
+    )
+    copyBetaHeaderToExtraBody(
+      extraBodyParams,
+      DANGEROUS_TOOL_USE_BETA_HEADER,
+      isBedrock && betasParams.includes(DANGEROUS_TOOL_USE_BETA_HEADER),
+    )
+    copyBetaHeaderToExtraBody(
+      extraBodyParams,
+      THINKING_BINDING_CONTROLS_BETA_HEADER,
+      isBedrock,
+    )
 
     const outputConfig: BetaOutputConfig = {
       ...((extraBodyParams.output_config as BetaOutputConfig) ?? {}),
@@ -2107,7 +2237,17 @@ async function* queryModel(
     // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
     const effortName = typeof effort === 'string' ? effort : undefined
-    let thinking: BetaMessageStreamParams['thinking'] | undefined
+    let thinking:
+      | (BetaMessageStreamParams['thinking'] & {
+          display?: ThinkingApiDisplay | null
+        })
+      | undefined
+    const extraBodyHasThinking = 'thinking' in extraBodyParams
+    const wireDisplay = resolveOutgoingThinkingDisplay(
+      thinkingConfig.display,
+      options.model,
+      getThinkingHighlightsRefused(),
+    )
 
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
     // without notifying the model launch DRI and research. This is a sensitive
@@ -2118,15 +2258,20 @@ async function* queryModel(
     // server defaults adaptive). Gold firstParty explicit-disabled branch:
     // `r.type==="disabled" && Ne()==="firstParty" && !Mc && tSn(F) && !NOe(F)`.
     if (hasThinking && modelSupportsThinking(options.model)) {
-      if (
-        !adaptiveThinkingDisabled &&
-        modelSupportsAdaptiveThinking(options.model)
-      ) {
+      // densable `p3n({runtimeOverride:Lyn(h.model), resolvedModel:ye, canonicalModel:Pe})`
+      const thinkingType = resolveAdaptiveThinkingType({
+        runtimeOverride: getThinkingTypeOverride(options.model),
+        resolvedModel,
+        canonicalModel: firstPartyNameToCanonical(resolvedModel),
+        disableAdaptiveEnv: adaptiveThinkingDisabled,
+      })
+      if (thinkingType === 'adaptive') {
         // For models that support adaptive thinking, always use adaptive
         // thinking without a budget.
         thinking = {
           type: 'adaptive',
-        } satisfies BetaMessageStreamParams['thinking']
+          display: wireDisplay,
+        } as BetaMessageStreamParams['thinking']
       } else {
         // For models that do not support adaptive thinking, use the default
         // thinking budget unless explicitly specified.
@@ -2141,7 +2286,8 @@ async function* queryModel(
         thinking = {
           budget_tokens: thinkingBudget,
           type: 'enabled',
-        } satisfies BetaMessageStreamParams['thinking']
+          display: wireDisplay,
+        } as BetaMessageStreamParams['thinking']
       }
     } else if (
       thinkingConfig.type === 'disabled' &&
@@ -2151,6 +2297,148 @@ async function* queryModel(
       !modelRejectsDisabledThinking(options.model)
     ) {
       thinking = { type: 'disabled' }
+    }
+
+    const displayForMode =
+      thinkingConfig.type === 'disabled' ? undefined : thinkingConfig.display
+    let displayMode: ReturnType<typeof resolveThinkingDisplayMode> = 'none'
+    try {
+      displayMode = resolveThinkingDisplayMode(
+        displayForMode,
+        thinkingConfig.displayExplicit ?? getThinkingDisplayExplicit(),
+      )
+    } catch (err) {
+      logError(err)
+    }
+    const dropRedactThinkingBeta = (): void => {
+      const idx = betasParams.indexOf(REDACT_THINKING_BETA_HEADER)
+      if (idx !== -1) betasParams.splice(idx, 1)
+    }
+    // densable `if(Td&&Zg)DT()` — any display on the thinking param drops redact.
+    if (thinking && wireDisplay) dropRedactThinkingBeta()
+    switch (displayMode) {
+      case 'thinking_and_connector_text':
+      case 'none':
+        break
+      case 'connector_text': {
+        if (
+          shouldSendThinkingDisplayUpdates({
+            thinkingType: thinking?.type,
+            model: options.model,
+            extraBodyHasThinking,
+            simulateProxy: shouldSimulateProxyUsage(),
+            oauthWithoutApiKey:
+              getAnthropicApiKey() === null && isClaudeAISubscriber(),
+            displayUpdatesRejected: isStickyBetaRejected(
+              THINKING_DISPLAY_UPDATES_BETA_HEADER,
+            ),
+          })
+        ) {
+          thinking = {
+            ...thinking,
+            display: 'updates',
+          } as typeof thinking
+          if (!betasParams.includes(THINKING_DISPLAY_UPDATES_BETA_HEADER)) {
+            betasParams.push(THINKING_DISPLAY_UPDATES_BETA_HEADER)
+          }
+          dropRedactThinkingBeta()
+        }
+        break
+      }
+    }
+
+    // densable `sT`/`JR` @184946314 + `Td.block_binding` @184957400.
+    lastSentBindingControls = false
+    lastBindingControlsOnThirdParty = false
+    let prefixMismatchBehavior: PrefixMismatchBehavior | undefined
+    try {
+      const mechanicalDisabled =
+        thinkingConfig.type === 'disabled' && thinkingConfig.mechanical === true
+      const bindingEligible =
+        !mechanicalDisabled &&
+        !shouldSimulateProxyUsage() &&
+        (getAnthropicApiKey() !== null ||
+          !isClaudeAISubscriber() ||
+          process.env.ANTHROPIC_BASE_URL !== undefined)
+      const provider = getAPIProvider()
+      if (bindingEligible && densableExperimentalCapabilityBetas()) {
+        if (thinkingConfig.type !== 'disabled') {
+          prefixMismatchBehavior = resolvePrefixMismatchBehavior()
+          if (shouldSendThinkingBindingControls(prefixMismatchBehavior)) {
+            stickySendBeta(THINKING_BINDING_CONTROLS_BETA_HEADER)
+          }
+        }
+        lastSentBindingControls = isStickyBetaSentActive(
+          THINKING_BINDING_CONTROLS_BETA_HEADER,
+        )
+      } else if (
+        bindingEligible &&
+        !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+      ) {
+        if (
+          (provider === 'bedrock' ||
+            provider === 'mantle' ||
+            provider === 'vertex') &&
+          (provider === 'vertex'
+            ? process.env.ANTHROPIC_VERTEX_BASE_URL === undefined
+            : provider === 'bedrock'
+              ? process.env.ANTHROPIC_BEDROCK_BASE_URL === undefined
+              : process.env.ANTHROPIC_BEDROCK_MANTLE_BASE_URL === undefined) &&
+          providerSupportsThinkingBindingOn3P(provider, options.model)
+        ) {
+          if (thinkingConfig.type !== 'disabled') {
+            stickySendBeta(THINKING_BINDING_CONTROLS_BETA_HEADER)
+          }
+          lastSentBindingControls = isStickyBetaSentActive(
+            THINKING_BINDING_CONTROLS_BETA_HEADER,
+          )
+        }
+      }
+    } catch (err) {
+      logError(err)
+      prefixMismatchBehavior = undefined
+      lastSentBindingControls = false
+    }
+    if (!lastSentBindingControls && getAPIProvider() !== 'firstParty') {
+      betasParams = betasParams.filter(
+        b => b !== THINKING_BINDING_CONTROLS_BETA_HEADER,
+      )
+    }
+    if (
+      lastSentBindingControls &&
+      !isStickyBetaRejected(THINKING_BINDING_CONTROLS_BETA_HEADER)
+    ) {
+      if (!betasParams.includes(THINKING_BINDING_CONTROLS_BETA_HEADER)) {
+        betasParams.push(THINKING_BINDING_CONTROLS_BETA_HEADER)
+      }
+      if (
+        prefixMismatchBehavior !== undefined &&
+        (thinking?.type === 'adaptive' || thinking?.type === 'enabled') &&
+        !extraBodyHasThinking
+      ) {
+        thinking = {
+          ...thinking,
+          block_binding: {
+            prefix_mismatch_behavior: prefixMismatchBehavior,
+          },
+        } as unknown as typeof thinking
+      }
+    }
+    lastBindingControlsOnThirdParty =
+      lastSentBindingControls &&
+      getAPIProvider() !== 'firstParty' &&
+      betasParams.includes(THINKING_BINDING_CONTROLS_BETA_HEADER)
+
+    lastSentTokenCount =
+      !isStickyBetaRejected(THINKING_TOKEN_COUNT_BETA_HEADER) &&
+      betasParams.includes(THINKING_TOKEN_COUNT_BETA_HEADER)
+
+    // densable `JPe(ye)` @184958046 — thinking-resumption header.
+    if (
+      shouldSendThinkingResumptionBeta(options.model) &&
+      !betasParams.includes(THINKING_RESUMPTION_BETA_HEADER)
+    ) {
+      betasParams.push(THINKING_RESUMPTION_BETA_HEADER)
     }
 
     // densable 2.1.251 #13 — `ga.effort=Wht` when outgoing thinking is
@@ -2301,6 +2589,13 @@ async function* queryModel(
       )
     }
     lastRequestBetas = filteredBetas
+    lastSentThinkingDisplay =
+      thinking !== undefined &&
+      thinking !== null &&
+      typeof thinking === 'object' &&
+      'display' in thinking
+        ? ((thinking as { display?: string | null }).display ?? undefined)
+        : undefined
     // Official: send betas when useBetas and (!simulate || remaining > 0)
     const sendBetas = useBetas && (!simulateProxy || filteredBetas.length > 0)
 
@@ -2629,6 +2924,7 @@ async function* queryModel(
             ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
             signal,
             querySource: options.querySource,
+            onError: onThinkingDisplayApiError,
           },
         )
 
@@ -4284,6 +4580,7 @@ async function* queryModel(
               signal,
               initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
               querySource: options.querySource,
+              onError: onThinkingDisplayApiError,
             },
             paramsFromContext,
             (attempt, _startTime, tokens) => {
@@ -4531,6 +4828,7 @@ async function* queryModel(
                 thinkingConfig,
                 ...(isFastModeEnabled() && { fastMode: isFastMode }),
                 signal,
+                onError: onThinkingDisplayApiError,
               },
               paramsFromContext,
               (attempt, _startTime, tokens) => {

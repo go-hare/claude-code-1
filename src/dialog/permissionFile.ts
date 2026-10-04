@@ -1,7 +1,8 @@
 /**
  * densable Mhy / Y$A / yhy / E$A / X$A / J$A.
  *
- * Gold 2.1.239: jsu `vM(S4t,Mhy)`. Esc/onCancel → reject → deny.
+ * Gold 2.1.283: jsu `vM(S4t,Mhy)`. Esc/onCancel → `{behavior:"cancelled"}`
+ * (spec default). Ask-again is DualInk `deny` without default feedback.
  * E$A mints standing row (S3 + PYe + Yxs + w$A). Y$A uses minted
  * applies. standingRowVetoed omits accept-session. Host answer only.
  */
@@ -34,6 +35,7 @@ import type {
   FilePermissionQuestion,
 } from './filePermissionPreview.js'
 import type { PermissionRequestSource } from './permissionRequestSource.js'
+import { OUTSIDE_READS_DIALOG_TITLE } from '../utils/permissions/outsideReads.js'
 import type { PermissionPromptResult } from './specs/permissionKinds.js'
 
 export const CLAUDE_FOLDER_STANDING_LABEL =
@@ -72,6 +74,19 @@ export type FilePermissionChoice =
   | 'yes-session'
   | 'yes-claude-folder'
   | 'no'
+  | 'block-outside-reads'
+  | 'ask-again-outside-reads'
+
+/** official yBt stamp on permission_file descriptor. */
+export function filePermissionOffersBlockOutsideReads(
+  payload: Pick<FilePermissionPayload, 'permissionResult'>,
+): boolean {
+  const result = payload.permissionResult as {
+    behavior?: string
+    offersBlockOutsideReads?: boolean
+  } | null
+  return result?.behavior === 'ask' && result.offersBlockOutsideReads === true
+}
 
 /** densable Mhy `_` standingRowVetoed. */
 export function isFileStandingRowVetoed(
@@ -96,6 +111,9 @@ export function filePermissionDialogTitle(
 ): string {
   if (payload.showingDiffInIDE) {
     return `Opened changes in ${payload.ideName ?? 'IDE'} ⧉`
+  }
+  if (filePermissionOffersBlockOutsideReads(payload)) {
+    return OUTSIDE_READS_DIALOG_TITLE
   }
   return payload.title
 }
@@ -242,6 +260,18 @@ export function resolveFilePermissionAnswer(
       }
     }
     case 'no':
+      return {
+        behavior: 'deny',
+        ...(feedback ? { feedback } : {}),
+      }
+    case 'block-outside-reads':
+      return {
+        behavior: 'deny',
+        blockOutsideReads: true,
+      }
+    case 'ask-again-outside-reads':
+      // gold DualInk: M({behavior:"deny"}) — no default feedback.
+      // W() prefixes typed feedback; empty stays the no-feedback copy.
       return {
         behavior: 'deny',
         ...(feedback ? { feedback } : {}),

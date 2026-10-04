@@ -1,29 +1,46 @@
 /**
  * densable 2.1.283 skill-doctor scan: `fqt` / `$je` / `Pbe`.
  *
- * Week-token transcript walk (`DZr`) is gated by HIPAA
- * `allow_skill_doctor_transcript_scan`. When the policy refuses, week tokens
- * are omitted (gold `qbt` reason) rather than inventing a transcript walker.
+ * Week-token transcript walk (`DZr`) is gated by HIPAA `qbt`
+ * (`allow_skill_doctor_transcript_scan`). When allowed, `fqt` awaits
+ * `DZr(storageV5)` and keys `weekTokens` via `UP(cmd)` / alias.
  */
 
 import { uniq } from '../../utils/array.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { re } from '../../utils/plugins/escapeSafeText.js'
-import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
-import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js'
+import {
+  isOfficialMarketplaceName,
+  parsePluginIdentifier,
+} from '../../utils/plugins/pluginIdentifier.js'
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js'
+import { getPluginSeedDirs } from '../../utils/plugins/pluginDirectories.js'
+import { getManagedPluginNames } from '../../utils/plugins/managedPlugins.js'
+import { getStrictKnownMarketplaces } from '../../utils/plugins/marketplaceHelpers.js'
+import { hasPendingPluginUsage } from '../../utils/plugins/pluginUsagePending.js'
+import { getEnabledVia } from '../../utils/telemetry/pluginTelemetry.js'
 import { getSkillUsageSnapshot } from '../../utils/suggestions/skillUsageTracking.js'
+import { getPolicyDenyKind } from '../../services/policyLimits/index.js'
+import { isHipaaPolicy } from '../../utils/midConversationSystem.js'
 import {
-  getPolicyDenyKind,
-  isPolicyAllowed,
-} from '../../services/policyLimits/index.js'
+  isPolicyLimitsAllowed,
+  leftoverPolicyLimitsHost,
+  policyLimitsFeatureCopy,
+} from '../../cli/leftoverTulip.js'
 import { roughTokenCountEstimation } from '../../services/tokenEstimation.js'
+import { getContextWindowForModel } from '../../utils/context.js'
 import {
-  getCommandName,
+  formatCommandsWithinBudget,
+  MAX_LISTING_DESC_CHARS,
+} from '@claude-code/builtin-tools/tools/SkillTool/prompt.js'
+import { resolveSkillOverrideMode } from '../../utils/residualFinalEnvGates.js'
+import {
   type Command,
   type LocalJSXCommandContext,
 } from '../../types/command.js'
+import type { LoadedPlugin } from '../../types/plugin.js'
+import { scanSkillWeekTokens, skillWeekTokenKey } from './weekTokens.js'
 
 export class SkillDoctorStageError extends Error {
   featureErrorCode: string
@@ -70,39 +87,80 @@ const DISUSE_STARTUPS = 10
 const HIPAA_SKILL_DOCTOR_REASON =
   'Not shown for HIPAA-regulated organizations: measured by scanning the session transcripts saved on this machine.'
 
+const SKILL_DOCTOR_TRANSCRIPT_SCAN = 'allow_skill_doctor_transcript_scan'
+
+/**
+ * gold `fRe().includes("hipaa")` — current/host taints, not leftover
+ * `HipaaEvidence.seen` (hashed principals). NEVER export gold `fRe`.
+ */
+function skillDoctorHasHipaaTaint(): boolean {
+  if (isHipaaPolicy()) return true
+  const host = leftoverPolicyLimitsHost()
+  return (
+    host.complianceTaints.includes('hipaa') ||
+    host.hintedTaints.includes('hipaa')
+  )
+}
+
+/**
+ * densable `B`/`qbt` @194898866. leftover `Jt` allow; HIPAA copy only when
+ * `Iw==="org_denied"` AND hipaa taint; else leftover `PK` catalog copy.
+ */
 export function skillDoctorTranscriptScanAllowed(): {
   allowed: boolean
   reason?: string
 } {
-  if (isPolicyAllowed('allow_skill_doctor_transcript_scan')) {
+  if (isPolicyLimitsAllowed(SKILL_DOCTOR_TRANSCRIPT_SCAN)) {
     return { allowed: true }
   }
   if (
-    getPolicyDenyKind('allow_skill_doctor_transcript_scan') === 'org_denied'
+    getPolicyDenyKind(SKILL_DOCTOR_TRANSCRIPT_SCAN) === 'org_denied' &&
+    skillDoctorHasHipaaTaint()
   ) {
     return { allowed: false, reason: HIPAA_SKILL_DOCTOR_REASON }
   }
+  const { featureLabel, verb } = policyLimitsFeatureCopy(
+    SKILL_DOCTOR_TRANSCRIPT_SCAN,
+  )
   return {
     allowed: false,
-    reason: 'Skill token counts are unavailable right now.',
+    reason: `${featureLabel} ${verb} unavailable right now.`,
   }
 }
 
+/** densable `wrt` slice used when SkillTool budget did not emit a line. */
 function listingLine(cmd: Command, nameOnly: boolean): string {
-  const name = getCommandName(cmd)
-  if (nameOnly) return `- ${name}`
+  if (nameOnly) return `- ${cmd.name}`
   const blurb = (cmd.whenToUse ?? cmd.description ?? '').replace(/\s+/g, ' ')
-  return `- ${name}: ${blurb.slice(0, 160)}`
+  return `- ${cmd.name}: ${blurb.slice(0, MAX_LISTING_DESC_CHARS)}`
 }
 
-function listingTokenMap(
+function listingLineForCommand(cmd: Command, formattedLines: string[]): string {
+  const nameOnly = resolveSkillOverrideMode(cmd) === 'name-only'
+  if (nameOnly) return `- ${cmd.name}`
+  const prefix = `- ${cmd.name}`
+  const fromBudget = formattedLines.find(
+    line => line === prefix || line.startsWith(`${prefix}:`),
+  )
+  return fromBudget ?? listingLine(cmd, false)
+}
+
+/** densable `RMn` — per-cmd.name tokens; name-only / budget-truncated stay `- name`. */
+export function listingTokenMap(
   commands: Command[],
-  nameOnly: Set<string>,
+  model: string,
 ): Map<string, number> {
+  const formatted = formatCommandsWithinBudget(
+    commands,
+    getContextWindowForModel(model),
+  )
+  const lines = formatted === '' ? [] : formatted.split('\n')
   const map = new Map<string, number>()
   for (const cmd of commands) {
-    const line = listingLine(cmd, nameOnly.has(cmd.name))
-    map.set(cmd.name, roughTokenCountEstimation(line))
+    map.set(
+      cmd.name,
+      roughTokenCountEstimation(listingLineForCommand(cmd, lines)),
+    )
   }
   return map
 }
@@ -112,31 +170,42 @@ function mcpServerName(name: string): string | undefined {
   return i > 0 ? name.slice(0, i) : undefined
 }
 
-function hasPersistentSurfaces(plugin: {
-  outputStylesPath?: string
-  outputStylesPaths?: string[]
-}): boolean {
+/** densable `p` — themes / output-styles / monitors / workflows skip disuse. */
+function hasPersistentSurfaces(plugin: LoadedPlugin): boolean {
   return Boolean(
-    plugin.outputStylesPath || (plugin.outputStylesPaths?.length ?? 0) > 0,
+    plugin.themesPath ||
+      plugin.themesPaths?.length ||
+      plugin.outputStylesPath ||
+      plugin.outputStylesPaths?.length ||
+      plugin.monitors?.length ||
+      plugin.workflowsPath ||
+      plugin.workflowsPaths?.length,
   )
 }
 
 /** densable `a0e` — user-install plugins unused ≥14d and ≥10 startups. */
 export async function listDisusedPlugins(): Promise<DisusedPlugin[]> {
   try {
+    // densable JO(): managed strictKnownMarketplaces present → no disuse tips
+    if (getStrictKnownMarketplaces() !== null) return []
     const { enabled } = await loadAllPlugins()
     if (enabled.length === 0) return []
+    const managed = getManagedPluginNames()
+    const seedDirs = getPluginSeedDirs()
     const config = getGlobalConfig()
     const startups = config.numStartups
     const now = Date.now()
     const out: DisusedPlugin[] = []
     for (const plugin of enabled) {
       const { marketplace } = parsePluginIdentifier(plugin.repository)
-      if (!marketplace || marketplace === OFFICIAL_MARKETPLACE_NAME) continue
-      if (plugin.isBuiltin) continue
+      if (!marketplace || isOfficialMarketplaceName(marketplace)) continue
+      // densable Ihr !== "user-install"
+      if (getEnabledVia(plugin, managed, seedDirs) !== 'user-install') continue
       if (hasPersistentSurfaces(plugin)) continue
       const usage = config.pluginUsage?.[plugin.repository]
       if (!usage) continue
+      // densable Rhr — pending in-memory usage is still "in use"
+      if (hasPendingPluginUsage(plugin.repository)) continue
       const days = Math.floor((now - usage.lastUsedAt) / 86_400_000)
       const sessionsSince = startups - (usage.lastUsedNumStartups ?? startups)
       if (days >= DISUSE_DAYS && sessionsSince >= DISUSE_STARTUPS) {
@@ -163,6 +232,12 @@ export async function scanSkillDoctor(
   const disusedP = listDisusedPlugins()
   disusedP.catch(() => {})
   const weekGate = skillDoctorTranscriptScanAllowed()
+  const weekP = weekGate.allowed
+    ? scanSkillWeekTokens(context.storageV5).catch(error => {
+        throw new SkillDoctorStageError('scan_failed', error)
+      })
+    : Promise.resolve(new Map<string, number>())
+  weekP.catch(() => {})
   const commands = context.options.commands
   const mcpClients = context.options.mcpClients ?? []
   const prompts = commands.filter(c => c.type === 'prompt')
@@ -182,9 +257,19 @@ export async function scanSkillDoctor(
       suffixCounts.set(i, (suffixCounts.get(i) ?? 0) + 1)
     }
   }
-  const nameOnly = new Set<string>()
   const rows: SkillDoctorRow[] = []
-  const listing = listingTokenMap(prompts, nameOnly)
+  // densable `xMn` → `included` then `RMn(included)` listing tokens
+  const { mergeSkillToolCommands } = await import('../../commands.js')
+  const mcpCommands = commands.filter(
+    cmd => cmd.source === 'mcp' && cmd.loadedFrom === 'mcp',
+  )
+  const { included: skillSet } = await mergeSkillToolCommands(
+    mcpCommands,
+  ).catch((error: unknown) => {
+    throw new SkillDoctorStageError('skill_set_failed', error)
+  })
+  const listing = listingTokenMap(skillSet, context.options.mainLoopModel)
+  const weekMap = await weekP
   for (const cmd of prompts) {
     if (
       cmd.source === 'bundled' ||
@@ -223,7 +308,10 @@ export async function scanSkillDoctor(
       usageCount: snap?.usageCount ?? 0,
       daysSinceUse: snap?.daysSinceUse ?? null,
       listingTokens: listing.get(cmd.name) ?? null,
-      weekTokens: null,
+      weekTokens:
+        weekMap.get(skillWeekTokenKey(cmd)) ??
+        (alias ? weekMap.get(alias) : undefined) ??
+        null,
     })
   }
   rows.sort(

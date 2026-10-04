@@ -167,11 +167,15 @@ const POWERSHELL_BROAD_PATTERNS: readonly string[] = [
 const broadRuleCache = new Map<string, boolean>()
 
 /**
- * Auto-mode detection (official `PL4`).
+ * Auto-mode detection (official `PL4` / densable xa @177386583).
  *
  * Returns true when permission rules should be filtered for auto-mode safety,
  * i.e. when `mode === 'auto'` or when plan mode is acting as auto-mode
  * (`mode === 'plan'` and the auto-mode flag is active).
+ *
+ * densable lL @179623813: `xa(e.mode, e.servedCall===true)` — a served
+ * plan+auto context does **not** take the auto allow-filter path (`!s`).
+ * `mode === 'auto'` still filters regardless of `servedCall`.
  *
  * `autoModeStateModule` is required lazily so this module stays loadable
  * without `TRANSCRIPT_CLASSIFIER` enabled.
@@ -179,8 +183,10 @@ const broadRuleCache = new Map<string, boolean>()
 export function isAutoModeFilteringActive(
   mode: string,
   isAutoModeActive?: boolean,
+  servedCall?: boolean,
 ): boolean {
   if (mode === 'auto') return true
+  if (mode === 'plan' && servedCall === true) return false
   if (mode === 'plan') return isAutoModeActive ?? false
   return false
 }

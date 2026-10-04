@@ -2,6 +2,8 @@
  * densable 2.1.219 IQt / HQt / T5i — adaptive_thinking + rejects_disabled_thinking.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
 import * as realSettings from 'src/utils/settings/settings.js'
 import {
@@ -42,6 +44,7 @@ import {
   modelRejectsDisabledThinking,
   modelSupportsAdaptiveThinking,
   modelSupportsThinking,
+  resolveAdaptiveThinkingType,
 } from '../thinking.js'
 
 afterEach(() => {
@@ -140,5 +143,75 @@ describe('densable 2.1.219 T5i modelSupportsThinking', () => {
     expect(modelSupportsThinking('claude-opus-5')).toBe(true)
     expect(modelSupportsThinking('claude-haiku-4-5')).toBe(true)
     expect(modelSupportsThinking('claude-3-5-sonnet')).toBe(false)
+  })
+})
+
+describe('densable 2.1.283 p3n resolveAdaptiveThinkingType', () => {
+  test('runtimeOverride wins even when model would not adapt', () => {
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: 'enabled',
+        resolvedModel: 'claude-opus-4-6',
+        canonicalModel: 'claude-opus-4-6',
+        disableAdaptiveEnv: false,
+      }),
+    ).toBe('enabled')
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: 'adaptive',
+        resolvedModel: 'claude-opus-4-0',
+        canonicalModel: 'claude-opus-4-0',
+        disableAdaptiveEnv: false,
+      }),
+    ).toBe('adaptive')
+  })
+
+  test('DISABLE_ADAPTIVE only on opus-4-6 / sonnet-4-6 canonical', () => {
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: undefined,
+        resolvedModel: 'claude-opus-4-6',
+        canonicalModel: 'claude-opus-4-6',
+        disableAdaptiveEnv: true,
+      }),
+    ).toBe('enabled')
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: undefined,
+        resolvedModel: 'claude-opus-4-7',
+        canonicalModel: 'claude-opus-4-7',
+        disableAdaptiveEnv: true,
+      }),
+    ).toBe('adaptive')
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: undefined,
+        resolvedModel: 'claude-sonnet-4-6',
+        canonicalModel: 'claude-sonnet-4-6',
+        disableAdaptiveEnv: true,
+      }),
+    ).toBe('enabled')
+  })
+
+  test('capability probe uses resolvedModel, not options.model', () => {
+    expect(
+      resolveAdaptiveThinkingType({
+        runtimeOverride: undefined,
+        resolvedModel: 'claude-opus-4-6',
+        canonicalModel: 'application-inference-profile',
+        disableAdaptiveEnv: false,
+      }),
+    ).toBe('adaptive')
+  })
+
+  test('claude.ts paramsFromContext calls p3n with resolvedModel', () => {
+    const claude = readFileSync(
+      join(import.meta.dir, '../../services/api/claude.ts'),
+      'utf8',
+    )
+    expect(claude).toContain('resolveAdaptiveThinkingType')
+    expect(claude).toContain('resolvedModel,')
+    expect(claude).toContain('firstPartyNameToCanonical(resolvedModel)')
+    expect(claude).not.toContain('modelSupportsAdaptiveThinking(options.model)')
   })
 })

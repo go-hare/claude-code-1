@@ -17,6 +17,7 @@ import type { WorkerBadgeProps } from '../WorkerBadge.js';
 import type { IDEDiffSupport } from './ideDiffConfig.js';
 import type { FileOperationType, PermissionOption } from './permissionOptions.js';
 import { type ToolInput, useFilePermissionDialog } from './useFilePermissionDialog.js';
+import { OUTSIDE_READS_DIALOG_QUESTION, OUTSIDE_READS_DIALOG_TITLE } from '../../../utils/permissions/outsideReads.js';
 
 export type FilePermissionDialogProps<T extends ToolInput = ToolInput> = {
   // Required props from PermissionRequestProps
@@ -101,6 +102,10 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     return null;
   }, [path, operationType]);
 
+  const offersBlockOutsideReads =
+    toolUseConfirm.permissionResult.behavior === 'ask' &&
+    toolUseConfirm.permissionResult.offersBlockOutsideReads === true;
+
   const fileDialogResult = useFilePermissionDialog({
     filePath: path || '',
     completionType,
@@ -111,6 +116,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     parseInput,
     operationType,
     contentWithheld,
+    offersBlockOutsideReads,
   });
 
   // Use file dialog results for options
@@ -216,11 +222,22 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
 
   return (
     <>
-      <PermissionDialog title={title} subtitle={subtitle} innerPaddingX={0} workerBadge={workerBadge}>
+      <PermissionDialog
+        title={offersBlockOutsideReads ? OUTSIDE_READS_DIALOG_TITLE : title}
+        subtitle={subtitle}
+        innerPaddingX={0}
+        workerBadge={workerBadge}
+      >
         {symlinkWarning}
         {content}
         <Box flexDirection="column" paddingX={1}>
-          {typeof question === 'string' ? <Text>{question}</Text> : question}
+          {offersBlockOutsideReads ? (
+            <Text>{OUTSIDE_READS_DIALOG_QUESTION}</Text>
+          ) : typeof question === 'string' ? (
+            <Text>{question}</Text>
+          ) : (
+            question
+          )}
           <Select
             options={options}
             inlineDescriptions

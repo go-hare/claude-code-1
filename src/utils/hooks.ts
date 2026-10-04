@@ -132,6 +132,7 @@ import type {
 } from './settings/types.js'
 import { getHookDisplayText } from './hooks/hooksSettings.js'
 import { logForDebugging } from './debug.js'
+import { stripEvalConfinedHookAllow } from './permissions/evalConfined.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { firstLineOf } from './stringUtils.js'
 import {
@@ -2687,13 +2688,11 @@ async function* executeHooks({
   const boundRequestPrompt = requestPrompt?.(hookName, toolInputSummary)
 
   // densable Zv: a matching function-hooks module runs first. next() is the
-  // settings executor. PreToolUse stays on the settings path. A chain member
-  // must not enter again.
-  if (
-    !classicChainMember &&
-    hookEvent !== 'PreToolUse' &&
-    hasMatchingFunctionHook(hookEvent)
-  ) {
+  // settings executor. Gold AC/Zv still skips PreToolUse; gold Rze
+  // @185182837 is the PreToolUse host and runs uwn then QLn. Local Rze is
+  // executePreToolHooks → executeHooks, so PreToolUse must enter this chain.
+  // A chain member must not enter again.
+  if (!classicChainMember && hasMatchingFunctionHook(hookEvent)) {
     const eventRecord = hookInput as unknown as Record<string, unknown>
     const chained = await runFunctionHookChain(
       hookEvent,
@@ -2811,15 +2810,26 @@ async function* executeHooks({
             }),
       }
     }
+    const confinedFn = stripEvalConfinedHookAllow(
+      {
+        permissionBehavior: returned.permissionBehavior,
+        permissionRequestResult: returned.permissionRequestResult as
+          | { behavior?: unknown }
+          | undefined,
+      },
+      hookEvent === 'PreToolUse'
+        ? 'PreToolUse function-hook chain'
+        : `Hook ${hookEvent} (function-hook chain)`,
+    )
     if (
-      returned.permissionBehavior === 'ask' ||
-      returned.permissionBehavior === 'deny' ||
-      returned.permissionBehavior === 'allow' ||
-      returned.permissionBehavior === 'passthrough' ||
-      returned.permissionBehavior === 'defer'
+      confinedFn.permissionBehavior === 'ask' ||
+      confinedFn.permissionBehavior === 'deny' ||
+      confinedFn.permissionBehavior === 'allow' ||
+      confinedFn.permissionBehavior === 'passthrough' ||
+      confinedFn.permissionBehavior === 'defer'
     ) {
       yield {
-        permissionBehavior: returned.permissionBehavior,
+        permissionBehavior: confinedFn.permissionBehavior,
         ...(typeof returned.hookPermissionDecisionReason === 'string'
           ? {
               hookPermissionDecisionReason:
@@ -2828,10 +2838,10 @@ async function* executeHooks({
           : {}),
       }
     }
-    if (returned.permissionRequestResult !== undefined) {
+    if (confinedFn.permissionRequestResult !== undefined) {
       yield {
         permissionRequestResult:
-          returned.permissionRequestResult as AggregatedHookResult['permissionRequestResult'],
+          confinedFn.permissionRequestResult as AggregatedHookResult['permissionRequestResult'],
       }
     }
     return
@@ -3764,6 +3774,12 @@ async function* executeHooks({
       }
     }
 
+    // densable QLn @185141233 — void allow before Y aggregation.
+    stripEvalConfinedHookAllow(
+      result,
+      `Hook ${hookEvent} (${getHookDisplayText(result.hook)})`,
+    )
+
     // Official Y: deny > defer > ask > allow
     if (result.permissionBehavior) {
       logForDebugging(
@@ -4380,7 +4396,13 @@ export async function* executePreToolHooks<ToolInput>(
 ): AsyncGenerator<AggregatedHookResult> {
   const appState = toolUseContext.getAppState()
   const sessionId = toolUseContext.agentId ?? getSessionId()
-  if (!hasHookForEvent('PreToolUse', appState, sessionId)) {
+  // gold Rze @185182837: early-return only when settings/session AND
+  // classic.PreToolUse function-hooks are both absent. hasHookForEvent is
+  // gold hT (settings/session); Vp("classic.PreToolUse") is hasMatchingFunctionHook.
+  if (
+    !hasHookForEvent('PreToolUse', appState, sessionId) &&
+    !hasMatchingFunctionHook('PreToolUse')
+  ) {
     return
   }
 
@@ -4388,10 +4410,13 @@ export async function* executePreToolHooks<ToolInput>(
     level: 'verbose',
   })
 
-  const hookInput: PreToolUseHookInput = {
+  // gold tVn/uo @178849954: `{...input, tool: name, tool_use_id}` so
+  // matcher `{ tool: 'Bash' }` hits. Keep tool_name for settings hooks.
+  const hookInput = {
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
-    hook_event_name: 'PreToolUse',
+    hook_event_name: 'PreToolUse' as const,
     tool_name: toolName,
+    tool: toolName,
     tool_input: toolInput,
     tool_use_id: toolUseID,
   }

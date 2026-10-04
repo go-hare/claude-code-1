@@ -26,6 +26,10 @@ import { isENOENT } from '../utils/errors.js'
 import { readFileSync } from '../utils/fileRead.js'
 import { getFsImplementation, safeResolvePath } from '../utils/fsOperations.js'
 import {
+  OUTSIDE_READS_DIALOG_QUESTION,
+  OUTSIDE_READS_DIALOG_TITLE,
+} from '../utils/permissions/outsideReads.js'
+import {
   buildPermissionDescriptorBase,
   type PermissionDescriptorBase,
 } from './permissionDescriptor.js'
@@ -383,9 +387,21 @@ export async function buildFilePermissionDescriptor(input: {
     operationType,
     remoteWorkspace,
   )
+  const offersBlockOutsideReads =
+    confirm.permissionResult.behavior === 'ask' &&
+    confirm.permissionResult.offersBlockOutsideReads === true
   return {
     ...base,
     ...preview,
+    ...(offersBlockOutsideReads
+      ? {
+          title: OUTSIDE_READS_DIALOG_TITLE,
+          question: {
+            kind: 'plain' as const,
+            text: OUTSIDE_READS_DIALOG_QUESTION,
+          },
+        }
+      : {}),
     filePath,
     operationType,
     symlinkTarget,

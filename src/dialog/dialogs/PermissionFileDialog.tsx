@@ -4,7 +4,8 @@
  * Gold 2.1.239: jsu `vM(S4t,Mhy)`. yhy + E$A standing mint. Y$A
  * minted applies. X$A bold fileName. J$A notebook verbose/120 +
  * `_ou` remoteOldContent/skipLocalRead. Th symlink. Esc/onCancel →
- * reject → deny. showingDiffInIDE doo KEEP. confirm:cycleMode
+ * `{behavior:"cancelled"}` (gold permission_file default; W() abort, not
+ * ask-again). showingDiffInIDE doo KEEP. confirm:cycleMode
  * PermissionPrompt. Mut footer hint outside Cm. Host answer; no dequeue.
  */
 import { relative } from 'path';
@@ -27,11 +28,18 @@ import {
   type FilePermissionChoice,
   type FilePermissionPayload,
   filePermissionDialogTitle,
+  filePermissionOffersBlockOutsideReads,
   filePermissionQuestionNode,
   isFileStandingRowVetoed,
   mintFileStandingRow,
   resolveFilePermissionAnswer,
 } from '../permissionFile.js';
+import {
+  OUTSIDE_READS_DIALOG_QUESTION,
+  OUTSIDE_READS_OPTION_ALLOW,
+  OUTSIDE_READS_OPTION_ASK_AGAIN,
+  OUTSIDE_READS_OPTION_BLOCK,
+} from '../../utils/permissions/outsideReads.js';
 
 function notebookCellType(raw: string | undefined): NotebookCellType | undefined {
   if (raw === 'code' || raw === 'markdown' || raw === 'raw') {
@@ -130,7 +138,11 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
   const [showAmendHint, setShowAmendHint] = useState(false);
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const standingRowVetoed = isFileStandingRowVetoed(p);
-  const standing = standingRowVetoed ? null : mintFileStandingRow(p.filePath, p.operationType, toolPermissionContext);
+  const offersBlockOutsideReads = filePermissionOffersBlockOutsideReads(p);
+  const standing =
+    standingRowVetoed || offersBlockOutsideReads
+      ? null
+      : mintFileStandingRow(p.filePath, p.operationType, toolPermissionContext);
   const cycleShortcut = getShortcutDisplay('confirm:cycleMode', 'Confirmation', 'shift+tab');
   const standingLabel =
     standing === null ? null : standing.value === 'yes-session' && p.operationType !== 'read' ? (
@@ -141,11 +153,22 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
       standing.row.node
     );
 
-  const options: PermissionPromptOption<FilePermissionChoice>[] = [
-    { label: 'Yes', value: 'yes', feedbackConfig: { type: 'accept' } },
-    ...(standing !== null && standingLabel !== null ? [{ label: standingLabel, value: standing.value }] : []),
-    { label: 'No', value: 'no', feedbackConfig: { type: 'reject' } },
-  ];
+  const options: PermissionPromptOption<FilePermissionChoice>[] = offersBlockOutsideReads
+    ? [
+        { label: OUTSIDE_READS_OPTION_ALLOW, value: 'yes', feedbackConfig: { type: 'accept' } },
+        { label: OUTSIDE_READS_OPTION_BLOCK, value: 'block-outside-reads' },
+        { label: OUTSIDE_READS_OPTION_ASK_AGAIN, value: 'ask-again-outside-reads' },
+      ]
+    : [
+        { label: 'Yes', value: 'yes', feedbackConfig: { type: 'accept' } },
+        ...(standing !== null && standingLabel !== null ? [{ label: standingLabel, value: standing.value }] : []),
+        { label: 'No', value: 'no', feedbackConfig: { type: 'reject' } },
+      ];
+  const question = offersBlockOutsideReads ? (
+    <Text>{OUTSIDE_READS_DIALOG_QUESTION}</Text>
+  ) : (
+    filePermissionQuestionNode(p.question)
+  );
 
   const showingDiffInIDE = p.showingDiffInIDE === true;
 
@@ -175,18 +198,18 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
             hostChrome
             onAmendHintChange={setShowAmendHint}
             options={options}
-            question={filePermissionQuestionNode(p.question)}
+            question={question}
             onSelect={(choice, feedback) => {
               answer(resolveFilePermissionAnswer(choice, p, standing, feedback));
             }}
             onCancel={() => {
-              answer({ behavior: 'deny' });
+              answer({ behavior: 'cancelled' });
             }}
             toolAnalyticsContext={{
               toolName: p.toolName,
               isMcp: p.isMcp === true,
             }}
-            cycleModeAction={cycleModeAction}
+            cycleModeAction={offersBlockOutsideReads ? undefined : cycleModeAction}
           />
         </Box>
       </PermissionDialog>

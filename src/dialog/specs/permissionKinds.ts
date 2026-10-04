@@ -45,6 +45,8 @@ export type PermissionPromptResult = {
   permissionUpdates?: unknown[]
   feedback?: string
   contentBlocks?: unknown[]
+  /** official yBt Block — persist permissions.blockReadsOutsideWorkingDirectories */
+  blockOutsideReads?: boolean
 }
 
 const permissionResultSchema = () =>
@@ -54,6 +56,7 @@ const permissionResultSchema = () =>
     permissionUpdates: z.array(z.unknown()).optional(),
     feedback: z.string().optional(),
     contentBlocks: z.array(z.unknown()).optional(),
+    blockOutsideReads: z.boolean().optional(),
   })
 
 const permissionResultDefault = {

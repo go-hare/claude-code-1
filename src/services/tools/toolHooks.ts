@@ -28,6 +28,7 @@ import {
   type PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
 import { checkRuleBasedPermissions } from '../../utils/permissions/permissions.js'
+import { stripEvalConfinedHookAllow } from '../../utils/permissions/evalConfined.js'
 import { formatError } from '../../utils/toolErrors.js'
 import { isMcpTool } from '../mcp/utils.js'
 import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
@@ -397,9 +398,10 @@ export async function resolveHookPermissionDecision(
       )
       return { decision: ruleCheck, input: hookInput }
     }
-    // ask rule — dialog required despite hook approval
+    // ask rule — dialog required despite hook approval. Gold ge=D==="ask"
+    // is false on hook-allow, so this is not hookAskFloor.
     logForDebugging(
-      `Hook approved tool use for ${tool.name}, but ask rule requires prompt`,
+      `Hook returned 'allow' for ${tool.name}, but ask rule/safety check requires full permission pipeline`,
     )
     return {
       decision: await canUseTool(
@@ -418,15 +420,44 @@ export async function resolveHookPermissionDecision(
     return { decision: hookPermissionResult, input }
   }
 
-  // No hook decision or 'ask' — normal permission flow, possibly with
-  // forceDecision so the dialog shows the hook's ask message.
-  const forceDecision =
-    hookPermissionResult?.behavior === 'ask' ? hookPermissionResult : undefined
+  // Hook ask (or no decision). Gold EQn runs FR then, when both hook and
+  // rule ask, stamps hookAskFloor so a classifier allow re-surfaces as ask.
   const askInput =
     hookPermissionResult?.behavior === 'ask' &&
     hookPermissionResult.updatedInput
       ? hookPermissionResult.updatedInput
       : input
+  if (hookPermissionResult?.behavior === 'ask') {
+    const ruleCheck = await checkRuleBasedPermissions(
+      tool,
+      askInput,
+      toolUseContext,
+    )
+    if (ruleCheck?.behavior === 'deny') {
+      logForDebugging(
+        `Hook returned 'ask' for ${tool.name}, but deny rule overrides: ${ruleCheck.message}`,
+      )
+      return { decision: ruleCheck, input: askInput }
+    }
+    if (ruleCheck?.behavior === 'ask') {
+      logForDebugging(
+        `Hook returned 'ask' for ${tool.name}, but ask rule/safety check requires full permission pipeline (hookAskFloor — a classifier allow re-surfaces as this ask)`,
+      )
+      return {
+        decision: await canUseTool(
+          tool,
+          askInput,
+          { ...toolUseContext, hookAskFloor: true },
+          assistantMessage,
+          toolUseID,
+        ),
+        input: askInput,
+      }
+    }
+  }
+
+  const forceDecision =
+    hookPermissionResult?.behavior === 'ask' ? hookPermissionResult : undefined
   return {
     decision: await canUseTool(
       tool,
@@ -531,6 +562,8 @@ export async function* runPreToolUseHooks(
             yield { type: 'stopReason', stopReason: result.stopReason }
           }
         }
+        // densable QLn — confined child ignores PreToolUse allow grants
+        stripEvalConfinedHookAllow(result, `PreToolUse:${tool.name}`)
         // Check for hook-defined permission behavior
         if (result.permissionBehavior !== undefined) {
           logForDebugging(

@@ -36,6 +36,8 @@ export type UseFilePermissionDialogProps<T extends ToolInput> = {
   operationType?: FileOperationType
   /** densable contentWithheld — omit accept-session when true. */
   contentWithheld?: boolean
+  /** official yBt — Yes / Block / ask_again. */
+  offersBlockOutsideReads?: boolean
 }
 
 export type UseFilePermissionDialogResult<T> = {
@@ -63,6 +65,7 @@ export function useFilePermissionDialog<T extends ToolInput>({
   parseInput,
   operationType = 'write',
   contentWithheld = false,
+  offersBlockOutsideReads = false,
 }: UseFilePermissionDialogProps<T>): UseFilePermissionDialogResult<T> {
   const suppressPersistentAllow =
     (toolUseConfirm.permissionResult.behavior === 'ask' &&
@@ -93,6 +96,7 @@ export function useFilePermissionDialog<T extends ToolInput>({
         noInputMode,
         contentWithheld,
         suppressPersistentAllow,
+        offersBlockOutsideReads,
       }),
     [
       filePath,
@@ -102,6 +106,7 @@ export function useFilePermissionDialog<T extends ToolInput>({
       noInputMode,
       contentWithheld,
       suppressPersistentAllow,
+      offersBlockOutsideReads,
     ],
   )
 

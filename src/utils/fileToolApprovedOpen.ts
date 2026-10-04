@@ -24,6 +24,8 @@ import {
   isWslUncPath,
 } from './path.js'
 import { getPlatform, type Platform } from './platform.js'
+import { getBootstrapSession } from './sessionRoot.js'
+import { WRITE_STASH_EXPIRED } from './sessionSlots.js'
 
 export class SymlinkResolutionChangedError extends Error {
   constructor(message: string) {
@@ -101,15 +103,58 @@ export function pathIsApproved(
 
 const pendingApproval = new Map<string, Set<string>>()
 
-/** Call from checkPermissions so call() can see the pre-open snapshot. */
-export function noteApprovedFileToolPath(filePath: string): void {
-  const absolute = expandPath(filePath)
-  pendingApproval.set(absolute, approvedPathSetFor(absolute))
+/** densable i3 expired throw @176443388 */
+export function permissionCheckExpiredWriteMessage(filePath: string): string {
+  return `Refusing to write ${filePath}: its permission check expired before it ran (too many concurrent file operations). Retry.`
 }
 
-/** Snapshot from checkPermissions, or a fresh set when call() runs alone. */
-export function takeApprovedFileToolPath(filePath: string): Set<string> {
+export class PermissionCheckExpiredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PermissionCheckExpiredError'
+  }
+}
+
+/** Call from checkPermissions so call() can see the pre-open snapshot. */
+export function noteApprovedFileToolPath(
+  filePath: string,
+  toolUseId?: string,
+): void {
   const absolute = expandPath(filePath)
+  const hops = approvedPathSetFor(absolute)
+  pendingApproval.set(absolute, hops)
+  if (toolUseId !== undefined) {
+    getBootstrapSession().writePermissionStash.stash(toolUseId, absolute, [
+      ...hops,
+    ])
+  }
+}
+
+/**
+ * densable `i3` @176443367 — consume writePermissionStash, else pending Map,
+ * else fresh hops (`Ao`).
+ */
+export function takeApprovedFileToolPath(
+  filePath: string,
+  toolUseId?: string,
+  lane: 'write' | 'read' = 'read',
+): Set<string> {
+  const absolute = expandPath(filePath)
+  if (toolUseId !== undefined && lane === 'write') {
+    const consumed = getBootstrapSession().writePermissionStash.consume(
+      toolUseId,
+      absolute,
+    )
+    if (consumed === WRITE_STASH_EXPIRED) {
+      throw new PermissionCheckExpiredError(
+        permissionCheckExpiredWriteMessage(absolute),
+      )
+    }
+    if (consumed !== undefined) {
+      pendingApproval.delete(absolute)
+      return new Set(consumed)
+    }
+  }
   const snap = pendingApproval.get(absolute)
   if (snap) {
     pendingApproval.delete(absolute)

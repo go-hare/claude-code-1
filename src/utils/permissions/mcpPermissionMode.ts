@@ -5,7 +5,7 @@
  */
 
 import type { PermissionMode } from '../../types/permissions.js'
-import { isSessionBypassClass } from './planBypass.js'
+import { getIsInteractive } from '../../bootstrap/state.js'
 
 /** Official jDu: preview/browser server display names. */
 const PREVIEW_BROWSER_SERVERS = new Set(['Claude Preview', 'Claude Browser'])
@@ -35,13 +35,17 @@ export type McpPermissionModeContext = {
 }
 
 /**
- * Whether the session mode is "elevated" enough for MCP overrides / floors
- * (bypassPermissions, auto, or plan with bypass available).
+ * densable XH elevated @176056210:
+ * `bypassPermissions || auto || t2(mode, isBypassPermissionsModeAvailable)`
+ * gold t2 @176056748: `plan && n===true && !Ae()` (Ae = !isInteractive).
+ * Do not substitute prePlanMode inherit.
  */
 function isElevatedMode(ctx: McpPermissionModeContext): boolean {
+  if (ctx.mode === 'auto' || ctx.mode === 'bypassPermissions') return true
   return (
-    ctx.mode === 'auto' ||
-    isSessionBypassClass({ mode: ctx.mode, prePlanMode: ctx.prePlanMode })
+    ctx.mode === 'plan' &&
+    ctx.isBypassPermissionsModeAvailable === true &&
+    getIsInteractive()
   )
 }
 
@@ -64,18 +68,70 @@ export function getEffectivePermissionMode(
     return override
   }
 
-  if (
-    elevated &&
-    serverName !== undefined &&
-    CHROME_CLASSIFIER_FLOOR_SERVERS.has(serverName) &&
-    (PREVIEW_BROWSER_SERVERS.has(serverName)
-      ? ctx.previewClassifierFloorEnabled === true
-      : ctx.chromeClassifierFloorEnabled === true)
-  ) {
-    return ctx.canAutoClassifierRun === true ? 'auto' : 'default'
+  // gold XH @176056210: i && (Dc(preview) || Mc(chrome) && chromeClassifierFloorEnabled).
+  // Preview (c8e/Dc) floors whenever elevated — gold has 0 previewClassifierFloorEnabled.
+  // Chrome (Zs/Mc) still needs chromeClassifierFloorEnabled. Do not invent remote-devices tr().
+  if (elevated && serverName !== undefined) {
+    const preview = PREVIEW_BROWSER_SERVERS.has(serverName)
+    const chrome = CHROME_CLASSIFIER_FLOOR_SERVERS.has(serverName)
+    if (preview || (chrome && ctx.chromeClassifierFloorEnabled === true)) {
+      return ctx.canAutoClassifierRun === true ? 'auto' : 'default'
+    }
   }
 
   return ctx.mode
+}
+
+/**
+ * densable xHo @185571872:
+ *   chrome-family Ug prefix && (preview JNe || chromeClassifierFloorEnabled)
+ *   && canAutoClassifierRun
+ * Wraps the existing PREVIEW/CHROME server-name hosts used by XH's floor.
+ * Gold NHo Fe also ORs chrome-metadata (`domainAllowed` /
+ * `hostHandlesOriginConsent`) produced by Preview/Browser `s8t`.
+ */
+export function isChromeFamilyClassifierEligible(
+  tool: { mcpInfo?: { serverName?: string } } | null | undefined,
+  ctx: Pick<
+    McpPermissionModeContext,
+    'chromeClassifierFloorEnabled' | 'canAutoClassifierRun'
+  >,
+): boolean {
+  const serverName = tool?.mcpInfo?.serverName
+  if (serverName === undefined) return false
+  const preview = PREVIEW_BROWSER_SERVERS.has(serverName)
+  const chrome = CHROME_CLASSIFIER_FLOOR_SERVERS.has(serverName)
+  if (!chrome) return false
+  return (
+    (preview || ctx.chromeClassifierFloorEnabled === true) &&
+    ctx.canAutoClassifierRun === true
+  )
+}
+
+/** densable JNe / `pHe` — Claude Preview / Claude Browser display names. */
+export function isPreviewBrowserServer(
+  serverName: string | undefined,
+): serverName is string {
+  return serverName !== undefined && PREVIEW_BROWSER_SERVERS.has(serverName)
+}
+
+/**
+ * densable NHo Fe chrome-metadata arm @185578944:
+ * `Ne?.domainAllowed===true || Ne?.hostHandlesOriginConsent===true`.
+ * `PermissionCommandMetadata` is an index signature; read chrome via unknown.
+ */
+export function chromeCommandBypassesDontAsk(result: {
+  metadata?: { command?: { name?: string; [key: string]: unknown } }
+}): boolean {
+  const command = result.metadata?.command
+  if (command === null || typeof command !== 'object') return false
+  const chrome = command.chrome
+  if (chrome === null || typeof chrome !== 'object') return false
+  const rec = chrome as {
+    domainAllowed?: unknown
+    hostHandlesOriginConsent?: unknown
+  }
+  return rec.domainAllowed === true || rec.hostHandlesOriginConsent === true
 }
 
 /** Parse override string from config (official WDu). */
@@ -97,4 +153,7 @@ export const mcpPermissionModeInternals = {
   PREVIEW_BROWSER_SERVERS,
   CHROME_CLASSIFIER_FLOOR_SERVERS,
   isElevatedMode,
+  isChromeFamilyClassifierEligible,
+  isPreviewBrowserServer,
+  chromeCommandBypassesDontAsk,
 }

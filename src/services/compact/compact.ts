@@ -35,6 +35,12 @@ import type {
   SystemMessage,
   UserMessage,
 } from '../../types/message.js'
+import { getMainLoopModelFromLayers } from '../../engine/permissionLayerReaders.js'
+import {
+  carryThinkingStripFromSummarized,
+  resolveCompactThinkingStrip,
+  thinkingStrippedAttachment,
+} from '../../utils/thinking.js'
 import {
   createAttachmentMessage,
   generateFileAttachment,
@@ -886,6 +892,35 @@ export async function partialCompactConversation(
                 !(m.type === 'user' && m.isCompactSummary),
             )
         : allMessages.slice(0, pivotIndex).filter(m => m.type !== 'progress')
+
+    // densable `igo`: `up_to` → `xPe(Ee,r)` with gold `qf` = last-wins
+    // permissionLayers model. `from` → `WNn(Ee,ve)` when KEEP has assistant.
+    const compactModel = getMainLoopModelFromLayers(context)
+    if (direction === 'up_to') {
+      const compactStrip = resolveCompactThinkingStrip(
+        messagesToKeep,
+        compactModel,
+      )
+      if (compactStrip.thinkingBlockCount > 0) {
+        logForDebugging(
+          `compact: kept tail holds ${compactStrip.thinkingBlockCount} thinking block(s); strip=${compactStrip.strip ? 'on' : 'off'} (decided by ${compactStrip.source}; model=${compactModel}, thinking=${compactStrip.thinkingType})`,
+          { level: 'info' },
+        )
+      }
+      if (compactStrip.strip) {
+        messagesToKeep.push(
+          createAttachmentMessage(thinkingStrippedAttachment('all')),
+        )
+      }
+    } else if (messagesToKeep.some(m => m.type === 'assistant')) {
+      const carried = carryThinkingStripFromSummarized(
+        messagesToKeep,
+        messagesToSummarize,
+      )
+      if (carried) {
+        messagesToKeep.push(createAttachmentMessage(carried))
+      }
+    }
 
     if (messagesToSummarize.length === 0) {
       throw new Error(

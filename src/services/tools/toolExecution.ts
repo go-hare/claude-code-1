@@ -227,6 +227,27 @@ export type MessageUpdateLazy<M extends Message = Message> = {
   }
 }
 
+/**
+ * densable `jR` @184467129 — `"type" in e`. Tool onProgress may enqueue a
+ * control event (`set_expanded_view`, `set_in_progress_tool_use_ids`) that is
+ * not a `{message}` update. Gold `ve`: `if(ze.type!=="progress") ye.enqueue(ze)`.
+ */
+export type ToolBridgeEvent = {
+  type: string
+  [key: string]: unknown
+}
+
+const TOOL_BRIDGE_TYPES = new Set([
+  'set_expanded_view',
+  'set_in_progress_tool_use_ids',
+])
+
+export function isToolBridgeEvent(update: object): update is ToolBridgeEvent {
+  if (!('type' in update) || 'message' in update) return false
+  const type = (update as { type: unknown }).type
+  return typeof type === 'string' && TOOL_BRIDGE_TYPES.has(type)
+}
+
 export type McpServerType =
   | 'stdio'
   | 'sse'
@@ -297,7 +318,7 @@ export async function* runToolUse(
   assistantMessage: AssistantMessage,
   canUseTool: CanUseToolFn,
   toolUseContext: ToolUseContext,
-): AsyncGenerator<MessageUpdateLazy, void> {
+): AsyncGenerator<MessageUpdateLazy | ToolBridgeEvent, void> {
   const toolName = toolUse.name
   // First try to find in the available tools (what the model sees)
   let tool = findToolByName(toolUseContext.options.tools, toolName)
@@ -458,13 +479,13 @@ function streamedCheckPermissionsAndCallTool(
   requestId: string | undefined,
   mcpServerType: McpServerType,
   mcpServerBaseUrl: ReturnType<typeof getLoggingSafeMcpBaseUrl>,
-): AsyncIterable<MessageUpdateLazy> {
+): AsyncIterable<MessageUpdateLazy | ToolBridgeEvent> {
   // This is a bit of a hack to get progress events and final results
   // into a single async iterable.
   //
   // Ideally the progress reporting and tool call reporting would
   // be via separate mechanisms.
-  const stream = new Stream<MessageUpdateLazy>()
+  const stream = new Stream<MessageUpdateLazy | ToolBridgeEvent>()
   checkPermissionsAndCallTool(
     tool,
     toolUseID,
@@ -477,6 +498,10 @@ function streamedCheckPermissionsAndCallTool(
     mcpServerType,
     mcpServerBaseUrl,
     progress => {
+      if (isToolBridgeEvent(progress)) {
+        stream.enqueue(progress)
+        return
+      }
       logEvent('tengu_tool_use_progress', {
         messageID:
           messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -571,7 +596,10 @@ async function checkPermissionsAndCallTool(
   mcpServerType: McpServerType,
   mcpServerBaseUrl: ReturnType<typeof getLoggingSafeMcpBaseUrl>,
   onToolProgress: (
-    progress: ToolProgress<ToolProgressData> | ProgressMessage<HookProgress>,
+    progress:
+      | ToolProgress<ToolProgressData>
+      | ProgressMessage<HookProgress>
+      | ToolBridgeEvent,
   ) => void,
 ): Promise<MessageUpdateLazy[]> {
   // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
@@ -1375,10 +1403,16 @@ async function checkPermissionsAndCallTool(
           ...toolUseContext,
           toolUseId: toolUseID,
           userModified: permissionDecision.userModified ?? false,
+          // gold @184489530 — call never inherits the Desktop-forward stamp.
+          desktopForwardToolUseId: undefined,
         },
         canUseTool,
         assistantMessage,
         progress => {
+          if (isToolBridgeEvent(progress)) {
+            onToolProgress(progress)
+            return
+          }
           onToolProgress({
             toolUseID: progress.toolUseID,
             data: progress.data,
@@ -1589,6 +1623,8 @@ async function checkPermissionsAndCallTool(
     const hookResults = []
     const toolContextModifier = result.contextModifier
     const mcpMeta = result.mcpMeta
+    // densable 2.1.283 `mr=oo.endsTurn` @ 184495149 → createUserMessage.toolEndsTurn
+    const endsTurn = result.endsTurn
 
     async function addToolResult(
       toolUseResult: unknown,
@@ -1652,6 +1688,7 @@ async function checkPermissionsAndCallTool(
               ? undefined
               : toolUseResult,
           mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
+          toolEndsTurn: endsTurn,
           sourceToolAssistantUUID: assistantMessage.uuid,
         }),
         contextModifier: toolContextModifier

@@ -20,7 +20,9 @@ import {
   denyRestrictedFileToolOutsideCwd,
   matchingRuleForInput,
   pathInAllowedWorkingPath,
+  pathInOutsideReadFenceWorkingPath,
   pathInWorkingPath,
+  shouldHonorAllowForServedCall,
 } from './filesystem.js'
 import {
   contextBlocksOutsideReads,
@@ -188,7 +190,10 @@ export function isPathAllowed(
       {},
       context.restricted,
     )
-    if (internalEditResult.behavior === 'allow') {
+    if (
+      internalEditResult.behavior === 'allow' &&
+      shouldHonorAllowForServedCall(internalEditResult, context)
+    ) {
       return {
         allowed: true,
         decisionReason: internalEditResult.decisionReason,
@@ -203,6 +208,7 @@ export function isPathAllowed(
     const safetyCheck = checkPathSafetyForAutoEdit(
       resolvedPath,
       precomputedPathsToCheck,
+      context.trustedNetworkDirectories,
     )
     if (!safetyCheck.safe) {
       const failedCheck = safetyCheck as {
@@ -213,6 +219,7 @@ export function isPathAllowed(
           | 'dangerousRemoval'
           | 'backgroundOperator'
           | 'suspiciousWindowsPath'
+          | 'outsideReadsBlocked'
       }
       return {
         allowed: false,
@@ -236,26 +243,26 @@ export function isPathAllowed(
     context,
     precomputedPathsToCheck,
   )
-  if (isInWorkingDir) {
-    if (operationType === 'read' || context.mode === 'acceptEdits') {
-      return { allowed: true }
-    }
-    // Write/create without acceptEdits mode falls through to check allow rules
-  }
 
   // 3.5. For read operations, check internal readable paths (project temp dir, session memory, etc.)
   // This allows reading agent output files without explicit permission
+  let internalReadAllowed = false
   if (operationType === 'read') {
+    const outsideReads = contextBlocksOutsideReads(context)
     const internalReadResult = checkReadableInternalPath(
       resolvedPath,
       {},
       context.restricted,
+      {
+        blockOutsideReads: outsideReads,
+        readBlockFence: outsideReads,
+      },
     )
-    if (internalReadResult.behavior === 'allow') {
-      return {
-        allowed: true,
-        decisionReason: internalReadResult.decisionReason,
-      }
+    if (
+      internalReadResult.behavior === 'allow' &&
+      shouldHonorAllowForServedCall(internalReadResult, context)
+    ) {
+      internalReadAllowed = true
     }
   }
 
@@ -274,11 +281,17 @@ export function isPathAllowed(
     }
   }
 
-  // official uH/jx: blockReads fences later Bash/cwd reads as a safetyCheck
+  // gold cke: !Vy(Aln) && internal !== allow. Fence before Aw allow so a
+  // projectSettings additionalDirectories grant cannot skip the read block.
   if (
     operationType === 'read' &&
     contextBlocksOutsideReads(context) &&
-    !isInWorkingDir
+    !pathInOutsideReadFenceWorkingPath(
+      resolvedPath,
+      context,
+      precomputedPathsToCheck,
+    ) &&
+    !internalReadAllowed
   ) {
     return {
       allowed: false,
@@ -286,8 +299,20 @@ export function isPathAllowed(
         type: 'safetyCheck',
         reason: OUTSIDE_READS_BLOCKED_REASON,
         classifierApprovable: false,
+        circuitBreaker: 'outsideReadsBlocked',
       },
     }
+  }
+
+  if (internalReadAllowed) {
+    return { allowed: true }
+  }
+
+  if (isInWorkingDir) {
+    if (operationType === 'read' || context.mode === 'acceptEdits') {
+      return { allowed: true }
+    }
+    // Write/create without acceptEdits mode falls through to check allow rules
   }
 
   // 3.7. For write/create operations to paths OUTSIDE the working directory,

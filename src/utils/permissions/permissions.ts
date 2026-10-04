@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
+  buildMcpToolName,
   getToolNameForPermissionCheck,
   mcpInfoFromString,
 } from '../../services/mcp/mcpStringUtils.js'
@@ -9,7 +10,20 @@ import {
   isChromeMcpReadOnlyTool,
   isChromeMcpSafeForAutoMode,
 } from '../claudeInChrome/chromeMcpReadOnly.js'
-import { getEffectivePermissionMode } from './mcpPermissionMode.js'
+import {
+  chromeCommandBypassesDontAsk,
+  getEffectivePermissionMode,
+  isChromeFamilyClassifierEligible,
+} from './mcpPermissionMode.js'
+import {
+  autoModeHasDenyRules,
+  hasClassifierRoutedSafetyCheck,
+  isDesktopForwardSkipClassifier,
+  isServerHeldClassifierAsk,
+  pluginOriginCaller,
+  shouldHoldConsecutiveDenials,
+} from './nhoGates.js'
+import { workflowNeedsUsageConsentPrompt } from './workflowUsageConsent.js'
 import { isSessionBypassClass } from './planBypass.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
@@ -55,7 +69,12 @@ import {
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
 import { isBroadRule, isAutoModeFilteringActive } from './broadRuleFilter.js'
-import { shouldOfferBlockOutsideReads } from './outsideReads.js'
+import {
+  getOutsideReadPrompt,
+  isAutoModeOrPlanActingAsAuto,
+  shouldOfferBlockOutsideReads,
+} from './outsideReads.js'
+import { isEvalConfined } from './evalConfined.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
@@ -127,12 +146,42 @@ const PERMISSION_RULE_SOURCES = [
   'mcpServerPolicy',
   // densable 2.1.248 #1 rrn toolsNarrowing
   'toolsNarrowing',
+  // densable hostCredential — cloud-session credential guard
+  'hostCredential',
 ] as const satisfies readonly PermissionRuleSource[]
 
 export function permissionRuleSourceDisplayString(
   source: PermissionRuleSource,
 ): string {
   return getSettingSourceDisplayNameLowercase(source)
+}
+
+export { isEvalConfined } from './evalConfined.js'
+
+/**
+ * densable `pNo` @177781217 / `t6n` @179623476 — CCR hearthbot MCP leaves
+ * whose whole-tool allow is dropped while xa auto-filter is on (`fa(Pc,e)`
+ * with `Pc="hearthbot"`). Wrap `buildMcpToolName`; do not invent chrome FQNs.
+ */
+const HEARTHBOT_AUTO_DROPPED_ALLOW_TOOLS = new Set(
+  [
+    'update_memory',
+    'update_message',
+    'set_thread_resolved',
+    'switch_model',
+    'pin_artifact',
+    'unpin_artifact',
+    'report_issue',
+    'set_time_zone',
+    'cookie_sign_in_request',
+    'post_widget',
+    'suggest_connectors',
+  ].map(leaf => buildMcpToolName('hearthbot', leaf)),
+)
+
+/** densable `t6n` — hearthbot FQN whole-tool allow skip under xa. */
+export function isAutoModeDroppedHearthbotAllow(toolName: string): boolean {
+  return HEARTHBOT_AUTO_DROPPED_ALLOW_TOOLS.has(toolName)
 }
 
 export function getAllowRules(
@@ -144,13 +193,18 @@ export function getAllowRules(
   const filterBroadRules = isAutoModeFilteringActive(
     context.mode,
     autoModeStateModule?.isAutoModeActive() ?? false,
+    context.servedCall === true,
   )
-  return PERMISSION_RULE_SOURCES.flatMap(source =>
+  const sources = isEvalConfined()
+    ? (['cliArg'] as const satisfies readonly PermissionRuleSource[])
+    : PERMISSION_RULE_SOURCES
+  return sources.flatMap(source =>
     (context.alwaysAllowRules[source] || []).flatMap(ruleString => {
       const ruleValue = permissionRuleValueFromString(ruleString)
       if (
         filterBroadRules &&
-        isBroadRule(ruleValue.toolName, ruleValue.ruleContent)
+        (isBroadRule(ruleValue.toolName, ruleValue.ruleContent) ||
+          isAutoModeDroppedHearthbotAllow(ruleValue.toolName))
       ) {
         return []
       }
@@ -179,6 +233,7 @@ export function findSafetyCheckDecision(
       | 'dangerousRemoval'
       | 'backgroundOperator'
       | 'suspiciousWindowsPath'
+      | 'outsideReadsBlocked'
   }) => boolean = () => true,
 ):
   | {
@@ -189,6 +244,7 @@ export function findSafetyCheckDecision(
         | 'dangerousRemoval'
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
+        | 'outsideReadsBlocked'
     }
   | undefined {
   if (!decisionReason) return undefined
@@ -205,7 +261,9 @@ export function findSafetyCheckDecision(
 }
 
 /**
- * densable ctn — auto mode (or plan acting as auto without bypass inherit).
+ * densable BTe @177386524 — auto, or plan acting as auto:
+ * `plan && servedCall!==true && Jf() && !isBypassPermissionsModeAvailable`.
+ * Do not substitute prePlanMode inherit (that's plan+bypass class, not BTe).
  */
 export function isPermissionContextAutoMode(
   context: ToolPermissionContext,
@@ -213,8 +271,9 @@ export function isPermissionContextAutoMode(
   if (context.mode === 'auto') return true
   if (
     context.mode === 'plan' &&
+    context.servedCall !== true &&
     (autoModeStateModule?.isAutoModeActive() ?? false) &&
-    context.prePlanMode !== 'bypassPermissions'
+    context.isBypassPermissionsModeAvailable !== true
   ) {
     return true
   }
@@ -551,6 +610,10 @@ async function runPermissionRequestHooksForHeadlessAgent(
         continue
       }
       const decision = hookResult.permissionRequestResult
+      // densable QLn — confined child ignores PermissionRequest allow
+      if (isEvalConfined() && decision.behavior === 'allow') {
+        continue
+      }
       if (decision.behavior === 'allow') {
         const finalInput = decision.updatedInput ?? input
         // Persist permission updates if provided
@@ -617,14 +680,18 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   if (result.behavior === 'allow') {
     const appState = context.getAppState()
     // densable bn: sticky permission_mode layers affect auto-mode bookkeeping
-    const layeredMode = getToolPermissionContextFromLayers(context).mode
+    const layeredPermissionContext = getToolPermissionContextFromLayers(context)
+    // gold NHo @185578200: XH(e, me(D))==="auto" — consecutive-denial reset
+    // uses effective mode, not session mode (MCP override default must not
+    // clear the streak).
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       const currentDenialState =
         context.localDenialTracking ?? appState.denialTracking
       if (
-        layeredMode === 'auto' &&
+        getEffectivePermissionMode(tool, layeredPermissionContext) === 'auto' &&
         currentDenialState &&
-        currentDenialState.consecutiveDenials > 0
+        currentDenialState.consecutiveDenials > 0 &&
+        !shouldHoldConsecutiveDenials(context)
       ) {
         const newDenialState = recordSuccess(currentDenialState)
         persistDenialState(context, newDenialState)
@@ -640,25 +707,22 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     // densable bn: sticky permission layers overlay mode/rules for this turn
     const layeredPermissionContext = getToolPermissionContextFromLayers(context)
 
-    if (
-      shouldOfferBlockOutsideReads({
-        toolName: tool.name,
-        hasPath:
-          typeof tool.getPath === 'function' &&
-          Boolean(tool.getPath(input as { [key: string]: unknown })),
-        behavior: result.behavior,
-        decisionReasonType: result.decisionReason?.type,
-        context: layeredPermissionContext,
-        isNonInteractiveSession: context.options.isNonInteractiveSession,
-      })
-    ) {
-      return {
-        ...result,
-        offersBlockOutsideReads: true,
-      }
-    }
-
-    if (layeredPermissionContext.mode === 'dontAsk') {
+    // gold NHo @185579131: xe=XH(e,Ee) once; dontAsk uses xe not session mode.
+    // Official snt(): chrome classifier floor / per-server overrides demote
+    // elevated modes. Only the *effective* mode may enter auto / dontAsk paths.
+    const effectiveModeForAuto = getEffectivePermissionMode(
+      tool,
+      layeredPermissionContext,
+    )
+    // gold NHo Fe @185578925: xHo && (chrome-metadata OR Ale).
+    // Metadata host: Preview/Browser s8t `hostHandlesOriginConsent` /
+    // chrome `domainAllowed`. Ale = toolAlwaysAllowedRule.
+    const chromeAlwaysAllowAuto = feature('TRANSCRIPT_CLASSIFIER')
+      ? isChromeFamilyClassifierEligible(tool, layeredPermissionContext) &&
+        (chromeCommandBypassesDontAsk(result) ||
+          toolAlwaysAllowedRule(layeredPermissionContext, tool) !== null)
+      : false
+    if (effectiveModeForAuto === 'dontAsk' && !chromeAlwaysAllowAuto) {
       return {
         behavior: 'deny',
         decisionReason: {
@@ -670,23 +734,15 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     }
     // Apply auto mode: use AI classifier instead of prompting user
     // Check this BEFORE shouldAvoidPermissionPrompts so classifiers work in headless mode.
-    // Official snt(): chrome classifier floor / per-server overrides demote elevated
-    // modes. Only the *effective* mode may enter auto paths — OR-ing the raw
-    // global mode===auto would ignore server override `default` and auto-approve
-    // tools the user explicitly pinned to ask.
-    const effectiveModeForAuto = getEffectivePermissionMode(
-      tool,
-      layeredPermissionContext,
-    )
-    // Plan mode can act as auto when the auto-mode flag is active, but still
-    // must not override a per-server effective demotion to `default`.
-    const planActingAsAuto =
-      layeredPermissionContext.mode === 'plan' &&
-      (autoModeStateModule?.isAutoModeActive() ?? false) &&
-      effectiveModeForAuto !== 'default'
+    // gold NHo @185579131: xa(xe, Ee.servedCall===true)||Fe where xe is XH
+    // effective mode. auto still enters when served; plan+Jf does not.
     if (
       feature('TRANSCRIPT_CLASSIFIER') &&
-      (effectiveModeForAuto === 'auto' || planActingAsAuto)
+      (isAutoModeOrPlanActingAsAuto(
+        effectiveModeForAuto,
+        layeredPermissionContext.servedCall === true,
+      ) ||
+        chromeAlwaysAllowAuto)
     ) {
       // densable 2.1.218 W9 + ctn:
       //   v = W9(decisionReason, V => !V.classifierApprovable &&
@@ -774,6 +830,45 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         return result
       }
 
+      // gold pHo?.workflowNeedsUsageConsentPrompt — Workflow first-run ask.
+      if (workflowNeedsUsageConsentPrompt(tool.name, context)) {
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'workflow_usage_consent' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
+        return result
+      }
+
+      // gold NHo yBt @185448964 is inside xa(xe)||Fe, after
+      // requiresUserInteraction and workflow usage consent. DualInk first-ask
+      // must not stamp when XH demotes the session out of auto.
+      if (
+        shouldOfferBlockOutsideReads({
+          toolName: tool.name,
+          hasPath:
+            typeof tool.getPath === 'function' &&
+            Boolean(tool.getPath(input as { [key: string]: unknown })),
+          behavior: result.behavior,
+          decisionReasonType: result.decisionReason?.type,
+          context: layeredPermissionContext,
+          isNonInteractiveSession: context.options?.isNonInteractiveSession,
+          toolUseId: toolUseID,
+          forRemoteExecution: context.forRemoteExecution === true,
+        })
+      ) {
+        getOutsideReadPrompt().open(toolUseID)
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'outside_read_first_prompt' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
+        return {
+          ...result,
+          offersBlockOutsideReads: true,
+        }
+      }
+
       // Use local denial tracking for async subagents (whose setAppState
       // is a no-op), otherwise read from appState as before.
       const denialState =
@@ -827,18 +922,17 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         tool.name,
         context.options.mainLoopModel,
       )
-      // densable 2.1.212: `$=u==="plan"` — never acceptEdits-fastpath while
-      // effective/session mode is plan (incl. planActingAsAuto). Otherwise
-      // Bash touch/rm/mkdir auto-run via modeValidation acceptEdits allow.
+      // gold NHo br=xe==="plan"&&!hn — skip acceptEdits when effective plan
+      // OR hn (E1t server-held classifier ask).
       const skipAcceptEditsFastPathForPlan =
-        layeredPermissionContext.mode === 'plan' ||
-        effectiveModeForAuto === 'plan'
+        effectiveModeForAuto === 'plan' || isServerHeldClassifierAsk(result)
       if (
         result.behavior === 'ask' &&
         tool.name !== REPL_TOOL_NAME &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
         !editClassificationGated &&
-        !skipAcceptEditsFastPathForPlan
+        !skipAcceptEditsFastPathForPlan &&
+        context.hookAskFloor !== true
       ) {
         try {
           const parsedInput = tool.inputSchema.parse(input)
@@ -856,8 +950,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             },
           })
           if (acceptEditsResult.behavior === 'allow') {
-            const newDenialState = recordSuccess(denialState)
-            persistDenialState(context, newDenialState)
+            persistDenialStateUnlessHeld(context, denialState)
             logForDebugging(
               `Skipping auto mode classifier for ${tool.name}: would be allowed in acceptEdits mode`,
             )
@@ -893,10 +986,42 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         }
       }
 
+      // gold tqn pluginOrigin: skip classifier, allow with plugin-origin reason.
+      // gold also requires !prt() and `_p(reason, e3)===void 0` — classifier-routed
+      // circuitBreaker (dangerousRemoval / backgroundOperator /
+      // suspiciousWindowsPath) must hit the classifier, not plugin-origin allow.
+      const pluginOrigin = pluginOriginCaller(context)
+      if (
+        pluginOrigin !== undefined &&
+        context.hookAskFloor !== true &&
+        !isServerHeldClassifierAsk(result) &&
+        !autoModeHasDenyRules() &&
+        !hasClassifierRoutedSafetyCheck(result.decisionReason) &&
+        // gold xa(Ee.mode)&&xa(xe): session auto AND XH effective auto.
+        // MCP override default/dontAsk must not plugin-origin-allow.
+        isAutoModeOrPlanActingAsAuto(layeredPermissionContext.mode) &&
+        isAutoModeOrPlanActingAsAuto(effectiveModeForAuto)
+      ) {
+        logForDebugging(
+          `Skipping auto mode classifier for ${tool.name}: called by plugin ${pluginOrigin}`,
+        )
+        const newDenialState = recordSuccess(denialState)
+        persistDenialState(context, newDenialState)
+        return {
+          behavior: 'allow',
+          updatedInput: input,
+          decisionReason: {
+            type: 'other',
+            reason: `plugin-origin: ${pluginOrigin}`,
+          },
+        }
+      }
+
       // Allowlisted tools are safe and don't need YOLO classification.
       // Official: static safe builtins OR chrome MCP safe-for-auto (NDu).
       // Fast-path-excluded tools never auto-allow via this path.
       if (
+        context.hookAskFloor !== true &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
         (classifierDecisionModule!.isAutoModeAllowlistedTool(tool.name) ||
           isChromeMcpSafeForAutoMode(
@@ -904,8 +1029,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             input,
           ))
       ) {
-        const newDenialState = recordSuccess(denialState)
-        persistDenialState(context, newDenialState)
+        persistDenialStateUnlessHeld(context, denialState)
         logForDebugging(
           `Skipping auto mode classifier for ${tool.name}: tool is on the safe allowlist`,
         )
@@ -928,6 +1052,62 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             type: 'mode',
             mode: 'auto',
           },
+        }
+      }
+
+      // gold NHo desktop_forward: Qe producer is not invented; consume stamp only.
+      if (isDesktopForwardSkipClassifier(context, toolUseID, result, tool)) {
+        const nowMode = getEffectivePermissionMode(
+          tool,
+          getToolPermissionContextFromLayers(context),
+        )
+        if (nowMode !== effectiveModeForAuto) {
+          logEvent('tengu_auto_mode_fallback_to_ask', {
+            reason:
+              'mode_changed_while_queued' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            toolName: sanitizeToolNameForAnalytics(tool.name),
+          })
+          if (nowMode === 'dontAsk') {
+            return {
+              behavior: 'deny',
+              decisionReason: { type: 'mode', mode: 'dontAsk' },
+              message: DONT_ASK_REJECT_MESSAGE(tool.name),
+            }
+          }
+          if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+            return {
+              behavior: 'deny',
+              decisionReason: {
+                type: 'asyncAgent',
+                reason: 'Permission prompts are not available in this context',
+              },
+              message: AUTO_REJECT_MESSAGE(tool.name),
+            }
+          }
+          return result
+        }
+        if (!shouldHoldConsecutiveDenials(context)) {
+          persistDenialState(context, recordSuccess(denialState))
+        }
+        logForDebugging(
+          `Skipping auto mode classifier for ${tool.name}: this is SendMessage's forward to Claude Desktop, and the classifier already allowed that SendMessage`,
+        )
+        logEvent('tengu_auto_mode_decision', {
+          decision:
+            'allowed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+          inProtectedNamespace: isInProtectedNamespace(),
+          agentMsgId: assistantMessage.message
+            .id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          confidence:
+            'high' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          fastPath:
+            'desktop_forward' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        return {
+          behavior: 'allow',
+          updatedInput: result.updatedInput ?? input,
+          decisionReason: { type: 'mode', mode: 'auto' },
         }
       }
 
@@ -1233,6 +1413,22 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       const newDenialState = recordSuccess(denialState)
       persistDenialState(context, newDenialState)
 
+      // gold NHo tt @185579970: hookAskFloor — classifier allow re-surfaces
+      // as the original ask (dontAsk still denies).
+      if (context.hookAskFloor === true) {
+        if (effectiveModeForAuto === 'dontAsk') {
+          return {
+            behavior: 'deny',
+            decisionReason: {
+              type: 'mode',
+              mode: 'dontAsk',
+            },
+            message: DONT_ASK_REJECT_MESSAGE(tool.name),
+          }
+        }
+        return result
+      }
+
       return {
         behavior: 'allow',
         updatedInput: input,
@@ -1278,6 +1474,15 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
  * mutate the local state in place (since setAppState is a no-op). Otherwise,
  * write to appState as usual.
  */
+/** densable NHo `if(!k0(requestDialog)) bM` on acceptEdits / allowlist. */
+function persistDenialStateUnlessHeld(
+  context: ToolUseContext,
+  denialState: DenialTrackingState,
+): void {
+  if (shouldHoldConsecutiveDenials(context)) return
+  persistDenialState(context, recordSuccess(denialState))
+}
+
 function persistDenialState(
   context: ToolUseContext,
   newState: DenialTrackingState,
@@ -1742,7 +1947,8 @@ export async function deletePermissionRule({
     }
     case 'cliArg':
     case 'session':
-    case 'toolsNarrowing': {
+    case 'toolsNarrowing':
+    case 'hostCredential': {
       // No action needed for in-memory sources - not persisted to disk
       break
     }

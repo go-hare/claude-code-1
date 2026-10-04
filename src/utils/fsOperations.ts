@@ -338,23 +338,18 @@ export function resolveDeepestExistingAncestorSync(
   return undefined
 }
 
+export type PermissionPathWalk = {
+  paths: string[]
+  unresolved: boolean
+}
+
 /**
- * Gets all paths that should be checked for permissions.
- * This includes the original path, all intermediate symlink targets in the chain,
- * and the final resolved path.
- *
- * For example, if test.txt -> /etc/passwd -> /private/etc/passwd:
- * - test.txt (original path)
- * - /etc/passwd (intermediate symlink target)
- * - /private/etc/passwd (final resolved path)
- *
- * This is important for security: a deny rule for /etc/passwd should block
- * access even if the file is actually at /private/etc/passwd (as on macOS).
- *
- * @param path - The path to check (will be converted to absolute)
- * @returns An array of absolute paths to check permissions for
+ * densable `Rt`/`Ba` permission walk. Spellings for deny/ask rules plus
+ * `unresolved` when a symlink hop started and the next lstat/readlink threw.
+ * Gold `j`: EACCES/EPERM/ENAMETOOLONG **without** a hop is canonicalize, not
+ * unresolved. Do not invent gold `opendirNofollow` / Uh / PBt.
  */
-export function getPathsForPermissionCheck(inputPath: string): string[] {
+export function walkPermissionPaths(inputPath: string): PermissionPathWalk {
   // Expand tilde notation defensively - tools should do this in getPath(),
   // but we normalize here as defense in depth for permission checking
   let path = inputPath
@@ -373,8 +368,11 @@ export function getPathsForPermissionCheck(inputPath: string): string[] {
   // Block UNC paths before any filesystem access to prevent network
   // requests (DNS/SMB) during validation on Windows
   if (path.startsWith('//') || path.startsWith('\\\\')) {
-    return Array.from(pathSet)
+    return { paths: Array.from(pathSet), unresolved: false }
   }
+
+  let hopStarted = false
+  let unresolved = false
 
   // Follow the symlink chain, collecting ALL intermediate targets
   // This handles cases like: test.txt -> /etc/passwd -> /private/etc/passwd
@@ -391,24 +389,25 @@ export function getPathsForPermissionCheck(inputPath: string): string[] {
       }
       visited.add(currentPath)
 
-      if (!fsImpl.existsSync(currentPath)) {
-        // Path doesn't exist (new file case). existsSync follows symlinks,
-        // so this is also reached for DANGLING symlinks (link entry exists,
-        // target doesn't). Resolve symlinks in the path and its ancestors
-        // so permission checks see the real destination. Without this,
-        // `./data -> /etc/cron.d/` (live parent symlink) or
-        // `./evil.txt -> ~/.ssh/authorized_keys2` (dangling file symlink)
-        // would allow writes that escape the working directory.
-        if (currentPath === path) {
-          const resolved = resolveDeepestExistingAncestorSync(fsImpl, path)
-          if (resolved !== undefined) {
-            pathSet.add(resolved)
+      let stats: fs.Stats
+      try {
+        // gold C() lstat/readlink — do not existsSync-skip after a hop:
+        // EACCES on the landing is unresolved, ENOENT is still the new-file
+        // / dangling case (ancestor resolve only on the original spelling).
+        stats = fsImpl.lstatSync(currentPath)
+      } catch (error) {
+        const code = getErrnoCode(error)
+        if (code === 'ENOENT') {
+          if (currentPath === path) {
+            const resolved = resolveDeepestExistingAncestorSync(fsImpl, path)
+            if (resolved !== undefined) {
+              pathSet.add(resolved)
+            }
           }
+          break
         }
-        break
+        throw error
       }
-
-      const stats = fsImpl.lstatSync(currentPath)
 
       // Skip special file types that can cause issues
       if (
@@ -424,6 +423,7 @@ export function getPathsForPermissionCheck(inputPath: string): string[] {
         break
       }
 
+      hopStarted = true
       // Get the immediate symlink target
       const target = fsImpl.readlinkSync(currentPath)
 
@@ -436,18 +436,46 @@ export function getPathsForPermissionCheck(inputPath: string): string[] {
       pathSet.add(absoluteTarget)
       currentPath = absoluteTarget
     }
-  } catch {
-    // If anything fails during chain traversal, continue with what we have
+  } catch (error) {
+    // gold Rt `k()`: hop+fail → unresolved. No-hop EACCES/EPERM/ENAMETOOLONG
+    // is canonicalize (`j`), not Cl.
+    const code = getErrnoCode(error)
+    const canonicalizeNoHop =
+      !hopStarted &&
+      (code === 'ENAMETOOLONG' || code === 'EACCES' || code === 'EPERM')
+    unresolved = !canonicalizeNoHop
   }
 
-  // Also add the final resolved path using realpathSync for completeness
-  // This handles any remaining symlinks in directory components
-  const { resolvedPath, isSymlink } = safeResolvePath(fsImpl, path)
-  if (isSymlink && resolvedPath !== path) {
-    pathSet.add(resolvedPath)
+  if (!unresolved) {
+    // Also add the final resolved path using realpathSync for completeness
+    // This handles any remaining symlinks in directory components
+    const { resolvedPath, isSymlink } = safeResolvePath(fsImpl, path)
+    if (isSymlink && resolvedPath !== path) {
+      pathSet.add(resolvedPath)
+    }
   }
 
-  return Array.from(pathSet)
+  return { paths: Array.from(pathSet), unresolved }
+}
+
+/**
+ * Gets all paths that should be checked for permissions.
+ * This includes the original path, all intermediate symlink targets in the chain,
+ * and the final resolved path.
+ *
+ * For example, if test.txt -> /etc/passwd -> /private/etc/passwd:
+ * - test.txt (original path)
+ * - /etc/passwd (intermediate symlink target)
+ * - /private/etc/passwd (final resolved path)
+ *
+ * This is important for security: a deny rule for /etc/passwd should block
+ * access even if the file is actually at /private/etc/passwd (as on macOS).
+ *
+ * @param path - The path to check (will be converted to absolute)
+ * @returns An array of absolute paths to check permissions for
+ */
+export function getPathsForPermissionCheck(inputPath: string): string[] {
+  return walkPermissionPaths(inputPath).paths
 }
 
 export const NodeFsOperations: FsOperations = {

@@ -35,4 +35,23 @@ describe('getFilePermissionOptions contentWithheld (2.1.235)', () => {
     })
     expect(options.some(o => o.option.type === 'accept-session')).toBe(true)
   })
+
+  test('offersBlockOutsideReads is gold Yes/Block/ask_again', () => {
+    const options = getFilePermissionOptions({
+      filePath: '/etc/hosts',
+      toolPermissionContext: getEmptyToolPermissionContext(),
+      operationType: 'read',
+      offersBlockOutsideReads: true,
+    })
+    expect(options.map(o => o.option.type)).toEqual([
+      'accept-once',
+      'block-outside-reads',
+      'ask-again-outside-reads',
+    ])
+    expect(options.map(o => o.label)).toEqual([
+      'Yes, keep allowing reads outside the working directories',
+      'No, block reads outside the working directories from now on',
+      'No, ask again next time',
+    ])
+  })
 })

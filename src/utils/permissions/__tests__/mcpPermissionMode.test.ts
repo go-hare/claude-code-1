@@ -1,14 +1,27 @@
 /**
  * Official 2.1.x snt(): MCP effective permission mode.
  */
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { getIsInteractive, setIsInteractive } from '../../../bootstrap/state.js'
 import {
+  chromeCommandBypassesDontAsk,
   getEffectivePermissionMode,
+  isChromeFamilyClassifierEligible,
+  isPreviewBrowserServer,
   mcpPermissionModeInternals,
   parseMcpPermissionModeOverride,
 } from '../mcpPermissionMode.js'
 
 describe('getEffectivePermissionMode (snt)', () => {
+  let prevInteractive: boolean
+  beforeEach(() => {
+    prevInteractive = getIsInteractive()
+    setIsInteractive(true)
+  })
+  afterEach(() => {
+    setIsInteractive(prevInteractive)
+  })
+
   test('non-MCP tool returns context mode', () => {
     expect(
       getEffectivePermissionMode(
@@ -46,6 +59,44 @@ describe('getEffectivePermissionMode (snt)', () => {
     ).toBe('default')
   })
 
+  test('server override dontAsk under global auto is effective dontAsk (NHo xe)', () => {
+    const tool = { mcpInfo: { serverName: 'acme' } }
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'auto',
+        mcpPermissionModeOverrides: { acme: 'dontAsk' },
+      }),
+    ).toBe('dontAsk')
+  })
+
+  test('server override auto under global plan is effective auto (NHo br)', () => {
+    const tool = { mcpInfo: { serverName: 'acme' } }
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'plan',
+        isBypassPermissionsModeAvailable: true,
+        mcpPermissionModeOverrides: { acme: 'auto' },
+      }),
+    ).toBe('auto')
+  })
+  test('plan is elevated when bypass is listable (gold t2)', () => {
+    const tool = { mcpInfo: { serverName: 'acme' } }
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'plan',
+        isBypassPermissionsModeAvailable: true,
+        mcpPermissionModeOverrides: { acme: 'default' },
+      }),
+    ).toBe('default')
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'plan',
+        isBypassPermissionsModeAvailable: false,
+        mcpPermissionModeOverrides: { acme: 'default' },
+      }),
+    ).toBe('plan')
+  })
+
   test('chrome classifier floor demotes elevated mode', () => {
     const tool = { mcpInfo: { serverName: 'claude-in-chrome' } }
     expect(
@@ -64,23 +115,33 @@ describe('getEffectivePermissionMode (snt)', () => {
     ).toBe('default')
   })
 
-  test('preview floor uses previewClassifierFloorEnabled', () => {
+  test('preview floors when elevated without previewClassifierFloorEnabled (gold Dc)', () => {
     const tool = { mcpInfo: { serverName: 'Claude Preview' } }
     expect(
       getEffectivePermissionMode(tool, {
         mode: 'auto',
-        chromeClassifierFloorEnabled: true,
-        previewClassifierFloorEnabled: false,
-        canAutoClassifierRun: true,
-      }),
-    ).toBe('auto') // floor not enabled for preview
-    expect(
-      getEffectivePermissionMode(tool, {
-        mode: 'auto',
-        previewClassifierFloorEnabled: true,
+        chromeClassifierFloorEnabled: false,
         canAutoClassifierRun: false,
       }),
     ).toBe('default')
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'auto',
+        chromeClassifierFloorEnabled: false,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe('auto')
+  })
+
+  test('chrome still needs chromeClassifierFloorEnabled (gold Mc)', () => {
+    const tool = { mcpInfo: { serverName: 'claude-in-chrome' } }
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'auto',
+        chromeClassifierFloorEnabled: false,
+        canAutoClassifierRun: false,
+      }),
+    ).toBe('auto')
   })
 
   test('override wins over chrome floor', () => {
@@ -95,23 +156,16 @@ describe('getEffectivePermissionMode (snt)', () => {
     ).toBe('auto')
   })
 
-  test('plan is elevated only when prePlanMode is bypass', () => {
+  test('plan inherit (prePlanMode) without listable bypass is not t2-elevated', () => {
     const tool = { mcpInfo: { serverName: 'acme' } }
     expect(
       getEffectivePermissionMode(tool, {
         mode: 'plan',
-        isBypassPermissionsModeAvailable: true,
-        mcpPermissionModeOverrides: { acme: 'default' },
-      }),
-    ).toBe('plan')
-    expect(
-      getEffectivePermissionMode(tool, {
-        mode: 'plan',
-        isBypassPermissionsModeAvailable: true,
+        isBypassPermissionsModeAvailable: false,
         prePlanMode: 'bypassPermissions',
         mcpPermissionModeOverrides: { acme: 'default' },
       }),
-    ).toBe('default')
+    ).toBe('plan')
   })
 })
 
@@ -156,5 +210,97 @@ describe('server name sets', () => {
     expect(
       mcpPermissionModeInternals.PREVIEW_BROWSER_SERVERS.has('Claude Preview'),
     ).toBe(true)
+  })
+})
+
+describe('isChromeFamilyClassifierEligible (gold xHo)', () => {
+  test('preview is eligible when canAutoClassifierRun, without chrome floor flag', () => {
+    expect(
+      isChromeFamilyClassifierEligible(
+        { mcpInfo: { serverName: 'Claude Preview' } },
+        {
+          chromeClassifierFloorEnabled: false,
+          canAutoClassifierRun: true,
+        },
+      ),
+    ).toBe(true)
+    expect(
+      isChromeFamilyClassifierEligible(
+        { mcpInfo: { serverName: 'Claude Preview' } },
+        {
+          chromeClassifierFloorEnabled: false,
+          canAutoClassifierRun: false,
+        },
+      ),
+    ).toBe(false)
+  })
+
+  test('chrome needs chromeClassifierFloorEnabled and canAutoClassifierRun', () => {
+    const tool = { mcpInfo: { serverName: 'claude-in-chrome' } }
+    expect(
+      isChromeFamilyClassifierEligible(tool, {
+        chromeClassifierFloorEnabled: false,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe(false)
+    expect(
+      isChromeFamilyClassifierEligible(tool, {
+        chromeClassifierFloorEnabled: true,
+        canAutoClassifierRun: false,
+      }),
+    ).toBe(false)
+    expect(
+      isChromeFamilyClassifierEligible(tool, {
+        chromeClassifierFloorEnabled: true,
+        canAutoClassifierRun: true,
+      }),
+    ).toBe(true)
+  })
+
+  test('non-chrome MCP and missing mcpInfo are not eligible', () => {
+    expect(
+      isChromeFamilyClassifierEligible(
+        { mcpInfo: { serverName: 'acme' } },
+        {
+          chromeClassifierFloorEnabled: true,
+          canAutoClassifierRun: true,
+        },
+      ),
+    ).toBe(false)
+    expect(
+      isChromeFamilyClassifierEligible(
+        {},
+        {
+          chromeClassifierFloorEnabled: true,
+          canAutoClassifierRun: true,
+        },
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('chromeCommandBypassesDontAsk (gold NHo Fe metadata)', () => {
+  test('Preview/Browser s8t hostHandlesOriginConsent bypasses dontAsk', () => {
+    expect(isPreviewBrowserServer('Claude Preview')).toBe(true)
+    expect(isPreviewBrowserServer('Claude Browser')).toBe(true)
+    expect(isPreviewBrowserServer('claude-in-chrome')).toBe(false)
+    expect(
+      chromeCommandBypassesDontAsk({
+        metadata: {
+          command: { chrome: { hostHandlesOriginConsent: true } },
+        },
+      }),
+    ).toBe(true)
+    expect(
+      chromeCommandBypassesDontAsk({
+        metadata: { command: { chrome: { domainAllowed: true } } },
+      }),
+    ).toBe(true)
+    expect(
+      chromeCommandBypassesDontAsk({
+        metadata: { command: { chrome: { domainAllowed: false } } },
+      }),
+    ).toBe(false)
+    expect(chromeCommandBypassesDontAsk({})).toBe(false)
   })
 })

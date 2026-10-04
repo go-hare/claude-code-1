@@ -9,6 +9,14 @@ import {
   getEnabledSettingSources,
   isSettingSourceEnabled,
 } from '../settings/constants.js'
+import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { SandboxManager } from '../sandbox/sandbox-adapter.js'
+import { isAutoModeActive } from './autoModeState.js'
+import { isBgSession } from '../concurrentSessions.js'
+import { isTeammate } from '../teammate.js'
+import type { ToolPermissionContext } from '../../Tool.js'
+import type { PermissionAskDecision } from '../../types/permissions.js'
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 
 /** official jx */
 export const OUTSIDE_READS_BLOCKED_REASON =
@@ -117,29 +125,126 @@ export function blockedOutsideReadUserChoiceMessage(opts?: {
   return message
 }
 
+/** official W() ask-again decisionReason.reason */
+export const OUTSIDE_READS_ASK_AGAIN_REASON =
+  'outside read declined, ask again next time'
+
+export function outsideReadAskAgainMessage(feedback?: string): string {
+  return feedback
+    ? `The user did not allow this read outside the working directories: ${feedback}`
+    : 'The user did not allow this read outside the working directories.'
+}
+
+/**
+ * official W() DualInk deny without blockOutsideReads → ask (not cancelAndAbort).
+ */
+export function outsideReadAskAgainDecision(opts?: {
+  feedback?: string
+  contentBlocks?: ContentBlockParam[]
+}): PermissionAskDecision {
+  const feedback = opts?.feedback
+  return {
+    behavior: 'ask',
+    message: outsideReadAskAgainMessage(feedback),
+    decisionReason: {
+      type: 'other',
+      reason: OUTSIDE_READS_ASK_AGAIN_REASON,
+    },
+    ...(opts?.contentBlocks ? { contentBlocks: opts.contentBlocks } : {}),
+    ...(feedback ? { userFeedback: feedback } : {}),
+  }
+}
+
 export function blockedOutsideReadCwdMoveMessage(command: string): string {
   return `${command} moves later reads to a directory outside the working directories, which the read block does not allow without asking (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.`
 }
 
-/** official Rfo persist to userSettings */
-export function persistBlockReadsOutsideWorkingDirectories(): {
+/** official Tfo — latch so the first-ask dialog does not repeat. */
+export function markSeenAutoModeOutsideReadPrompt(): void {
+  saveGlobalConfig(current =>
+    current.hasSeenAutoModeOutsideReadPrompt
+      ? current
+      : { ...current, hasSeenAutoModeOutsideReadPrompt: true },
+  )
+}
+
+export function hasSeenAutoModeOutsideReadPrompt(): boolean {
+  return getGlobalConfig().hasSeenAutoModeOutsideReadPrompt === true
+}
+
+/**
+ * official `class Te` — session latch so only one outside-read first-ask
+ * is open; a second Read/Grep in the same turn does not stamp.
+ */
+export class OutsideReadPrompt {
+  openToolUseId: string | undefined
+  answeredThisSession = false
+  get answered(): boolean {
+    return this.answeredThisSession
+  }
+  markAnswered(): void {
+    this.answeredThisSession = true
+  }
+  isOpenElsewhere(toolUseId: string | undefined): boolean {
+    return this.openToolUseId !== undefined && this.openToolUseId !== toolUseId
+  }
+  open(toolUseId: string | undefined): void {
+    this.openToolUseId = toolUseId
+  }
+  closeFor(toolUseId: string | undefined): void {
+    if (toolUseId !== undefined && this.openToolUseId === toolUseId) {
+      this.openToolUseId = undefined
+    }
+  }
+}
+
+const sessionOutsideReadPrompt = new OutsideReadPrompt()
+
+export function getOutsideReadPrompt(): OutsideReadPrompt {
+  return sessionOutsideReadPrompt
+}
+
+export function resetOutsideReadPromptForTests(): void {
+  sessionOutsideReadPrompt.openToolUseId = undefined
+  sessionOutsideReadPrompt.answeredThisSession = false
+}
+
+/**
+ * official Rfo — session fence + userSettings persist + sandbox refresh.
+ */
+export function persistBlockReadsOutsideWorkingDirectories(opts?: {
+  setSessionToolPermissionContext?: (
+    update: (prev: ToolPermissionContext) => ToolPermissionContext,
+  ) => void
+}): {
   error: Error | null
+  sandboxRefreshed: boolean
 } {
+  opts?.setSessionToolPermissionContext?.(prev => ({
+    ...prev,
+    blockReadsOutsideWorkingDirectories: true,
+  }))
   if (!isSettingSourceEnabled('userSettings')) {
     return {
       error: new Error(
         'user settings are not a setting source of this session',
       ),
+      sandboxRefreshed: false,
     }
   }
   try {
     updateSettingsForSource('userSettings', {
       permissions: { blockReadsOutsideWorkingDirectories: true },
     })
-    return { error: null }
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
-    return { error }
+    return { error, sandboxRefreshed: false }
+  }
+  try {
+    SandboxManager.refreshConfig()
+    return { error: null, sandboxRefreshed: true }
+  } catch {
+    return { error: null, sandboxRefreshed: false }
   }
 }
 
@@ -147,6 +252,26 @@ export type OutsideReadFirstPromptContext = {
   mode: string
   shouldAvoidPermissionPrompts?: boolean
   blockReadsOutsideWorkingDirectories?: boolean
+  /**
+   * densable `g.servedCall` — CCR/remote served permission context.
+   * yBt: `if(s.forRemoteExecution===!0||g.servedCall===!0)return!1`
+   */
+  servedCall?: boolean
+}
+
+/**
+ * densable xa @ 177386583 — `e==="auto"||e==="plan"&&!s&&Jf()`.
+ * yBt calls `xa(g.mode)` so the second arg stays false (plan counts only
+ * while auto-mode is active). lL/`getAllowRules` passes `servedCall===true`
+ * so a served plan+auto context does **not** take the auto allow-filter path.
+ * Not ctn/`isPermissionContextAutoMode` (that one also checks bypass inherit).
+ */
+export function isAutoModeOrPlanActingAsAuto(
+  mode: string,
+  servedCall = false,
+): boolean {
+  if (mode === 'auto') return true
+  return mode === 'plan' && servedCall !== true && isAutoModeActive()
 }
 
 /**
@@ -160,6 +285,9 @@ export function shouldOfferBlockOutsideReads(opts: {
   decisionReasonType?: string
   context: OutsideReadFirstPromptContext
   isNonInteractiveSession?: boolean
+  toolUseId?: string
+  /** densable `s.forRemoteExecution` — remote-agent permission check. */
+  forRemoteExecution?: boolean
 }): boolean {
   if (opts.behavior !== 'ask' || opts.decisionReasonType !== 'workingDir') {
     return false
@@ -168,10 +296,23 @@ export function shouldOfferBlockOutsideReads(opts: {
     return false
   }
   const { context } = opts
-  if (context.mode !== 'auto') return false
+  // gold yBt: if(!xa(g.mode)||…) — plan + Jf() (auto-mode active) stamps DualInk
+  if (!isAutoModeOrPlanActingAsAuto(context.mode)) return false
   if (context.shouldAvoidPermissionPrompts) return false
   if (context.blockReadsOutsideWorkingDirectories === true) return false
+  // gold yBt: if(s.forRemoteExecution===!0||g.servedCall===!0)return!1
+  // DualInk first-ask is local TTY only — remote/CCR has its own relay.
+  if (opts.forRemoteExecution === true || context.servedCall === true) {
+    return false
+  }
   if (opts.isNonInteractiveSession) return false
+  // gold yBt: if(Et()||QCe()) return false. Et = session kind bg; QCe = swarm worker.
+  if (isBgSession() || isTeammate()) return false
   if (!isSettingSourceEnabled('userSettings')) return false
+  const prompt = getOutsideReadPrompt()
+  // gold yBt: !isOpenElsewhere(toolUseId) && !answered && !hasSeen
+  if (prompt.isOpenElsewhere(opts.toolUseId)) return false
+  if (prompt.answered) return false
+  if (hasSeenAutoModeOutsideReadPrompt()) return false
   return true
 }

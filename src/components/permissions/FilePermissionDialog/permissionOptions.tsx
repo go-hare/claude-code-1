@@ -49,7 +49,9 @@ export function isInGlobalClaudeFolder(filePath: string): boolean {
 export type PermissionOption =
   | { type: 'accept-once' }
   | { type: 'accept-session'; scope?: 'claude-folder' | 'global-claude-folder' }
-  | { type: 'reject' };
+  | { type: 'reject' }
+  | { type: 'block-outside-reads' }
+  | { type: 'ask-again-outside-reads' };
 
 export type PermissionOptionWithLabel = OptionWithDescription<string> & {
   option: PermissionOption;
@@ -67,6 +69,7 @@ export function getFilePermissionOptions({
   noInputMode = false,
   contentWithheld = false,
   suppressPersistentAllow = false,
+  offersBlockOutsideReads = false,
 }: {
   filePath: string;
   toolPermissionContext: ToolPermissionContext;
@@ -82,10 +85,31 @@ export function getFilePermissionOptions({
    * or tool.suppressesAlwaysAllowRule(input) is set.
    */
   suppressPersistentAllow?: boolean;
+  /** official yBt — Yes / Block / ask_again instead of session allow. */
+  offersBlockOutsideReads?: boolean;
 }): PermissionOptionWithLabel[] {
   const options: PermissionOptionWithLabel[] = [];
   // densable: session-row shows confirm:cycleMode (Confirmation), not chat:cycleMode
   const modeCycleShortcut = getShortcutDisplay('confirm:cycleMode', 'Confirmation', 'shift+tab');
+
+  if (offersBlockOutsideReads) {
+    options.push({
+      label: 'Yes, keep allowing reads outside the working directories',
+      value: 'yes',
+      option: { type: 'accept-once' },
+    });
+    options.push({
+      label: 'No, block reads outside the working directories from now on',
+      value: 'block-outside-reads',
+      option: { type: 'block-outside-reads' },
+    });
+    options.push({
+      label: 'No, ask again next time',
+      value: 'ask-again-outside-reads',
+      option: { type: 'ask-again-outside-reads' },
+    });
+    return options;
+  }
 
   // When in input mode, show input field
   if (yesInputMode && onAcceptFeedbackChange) {
