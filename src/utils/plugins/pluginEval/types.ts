@@ -12,13 +12,13 @@ export type PluginEvalHandlerOptions = {
   ablation?: string
   case?: string
   tag?: string[]
-  runs?: number
+  runs?: string
   concurrency?: string
   model?: string
   judgeModel?: string
-  maxCostUsd?: number
+  maxCostUsd?: string
   outputDir?: string
-  threshold?: number
+  threshold?: string
   allowTools?: string[]
   scaffold?: boolean
   noScaffold?: boolean
@@ -26,7 +26,7 @@ export type PluginEvalHandlerOptions = {
   allowRealServers?: boolean
   keepTemp?: boolean
   verbose?: boolean
-  report?: string
+  report?: boolean | string
   publishReport?: boolean
   publish?: boolean
 }
@@ -187,6 +187,8 @@ export type ToolCallRecord = {
   inputText: string
   output?: string
   isError?: boolean
+  deniedByChild?: boolean
+  mock?: { responder?: string; verdict: string }
 }
 
 export type AgentRunResult = {
@@ -197,6 +199,8 @@ export type AgentRunResult = {
   costUsd: number
   error: string | null
   timedOut: boolean
+  /** densable `vp` `killedInFlight:n` — timeout/abort/oversize kill. */
+  killedInFlight?: boolean
   aborted: { server: string; tool: string; reason: string } | null
   mockSetupFailure: string | null
   mockTally: { total: number; errors: number; unmocked: string[] } | null
@@ -233,6 +237,19 @@ export type CaseReport = {
   delta?: number
 }
 
+export type PluginIdentity = {
+  name: string
+  path: string
+  version?: string
+  problem?:
+    | 'manifest_invalid'
+    | 'identity_unverified'
+    | 'disabled_by_default'
+    | 'archive_not_probed'
+    | 'will_not_load'
+  problemDetail?: string
+}
+
 export type AggregateReport = {
   started_at: string
   version: string
@@ -240,6 +257,7 @@ export type AggregateReport = {
   partial?: boolean
   partial_reason?: string
   cases: CaseReport[]
+  plugins?: PluginIdentity[]
 }
 
 export type SuiteOutcome = {
@@ -253,4 +271,106 @@ export type SuiteOutcome = {
   harnessFailures: number
   ablation: AblationMode
   suite: string | null
+}
+
+export type AuthPreflightResult =
+  | { ok: true; warning?: string }
+  | { ok: false; message: string }
+
+export type PluginEvalTrustState = {
+  realCwd?: Promise<string>
+  consentRoot?: string
+}
+
+export type RunPluginEvalSuiteParams = {
+  rootPath: string
+  evalDirSegments: string[]
+  frameRoot: string | null
+  adoptionDecided: boolean
+  trust: PluginEvalTrustState
+  targetScreened: boolean
+  consentDecided: boolean
+  caseGlob?: string
+  tags?: string[]
+  runs?: number
+  concurrency: number
+  model?: string
+  judgeModel?: string
+  maxCostUsd?: number
+  threshold: number
+  allowTools: string[]
+  /** densable `mc` `n.artifactPublish` — operator opt-in for gold `Ji`. */
+  artifactPublish?: boolean
+  /** densable `mc` `n.allowFlagOverrides` — gold `lg` GB key allowlist. */
+  allowFlagOverrides?: string[]
+  noScaffold: boolean
+  keepTemp: boolean
+  mocks: MocksMode
+  allowRealServers: boolean
+  keepFailedRuns: boolean
+  verbose: boolean
+  ablation: AblationMode | 'auto'
+  onLine: (line: string) => void
+  onNotice: (line: string) => void
+  signal: AbortSignal
+  authPreflight: () => Promise<AuthPreflightResult>
+  credentials?: unknown
+}
+
+export type EvalSandbox = {
+  root: string
+  cwd: string
+  configDir: string
+  home: string
+  outDir: string
+  tmpDir: string
+  operatorConfigDir: string
+  cleanup: () => Promise<void>
+}
+
+export type ScreenedEvalTarget = {
+  targetDir: string
+  pluginRoot: string | null
+  untrustedManifestDir: string | null
+  targetResolved: boolean
+  enclosingVerdict: {
+    adopted: string | null
+    refused: string | null
+    namedOnly: string | null
+  } | null
+  targetIsCaseFile: boolean
+}
+
+export type TrustDecision =
+  | { trusted: true; source: TrustSource }
+  | { trusted: false; reason: 'no_prompt' | 'declined'; message: string }
+
+export type MockServerBinding = {
+  kind: 'shadow' | 'standalone'
+  registeredName: string
+  segment: string
+  withheld?: boolean
+  loaded: {
+    dirName: string
+    tools: Map<
+      string,
+      {
+        kind: 'fixed' | 'agent'
+        prompt?: string
+        sourceHash?: string
+        sourceFile?: string
+        abortWhen?: string | null
+        expect?: Record<string, unknown> | null
+      }
+    >
+    listings: Map<string, unknown>
+    recordings: Record<string, string>
+    replayDir?: string
+    pinNotes?: string[]
+  }
+}
+
+export type PreparedMocks = {
+  servers: MockServerBinding[]
+  notes: string[]
 }

@@ -113,9 +113,23 @@ export function evalDirDisplay(value: EvalDirValue | string): string {
   return (typeof value === 'string' ? value : value.dir).replaceAll('\\', '/')
 }
 
-function readManifestEvals(
-  pluginRoot: string | null,
-): { source: EvalDirSource; dir: string; segments: string[]; manifestPath?: string } {
+export function evalDirSourceLabel(value: EvalDirValue): string {
+  switch (value.source) {
+    case 'flag':
+      return 'from --eval-dir'
+    case 'manifest':
+      return `from ${value.manifestPath}; pass --eval-dir to override`
+    case 'default':
+      return 'the default'
+  }
+}
+
+function readManifestEvals(pluginRoot: string | null): {
+  source: EvalDirSource
+  dir: string
+  segments: string[]
+  manifestPath?: string
+} {
   if (pluginRoot === null) {
     return {
       source: 'default',

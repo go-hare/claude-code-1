@@ -53,3 +53,21 @@ export const OWNERSHIP_REFUSE =
   'is not owned by you, is writable by other users, is a symlink, or could not be fully examined (see --debug)'
 export const SHELL_UNCONFINED =
   'A shell tool (Bash or PowerShell) was granted but this machine cannot confine it (no sandbox backend on this platform, or it is not installed), so the run was refused rather than run unconfined — drop the shell grant, or on Linux/macOS install the backend.'
+export const EVAL_ENV_KEY = /^EVAL_[A-Za-z0-9_]+$/
+/** densable `fbt` @193066570 — abort prefix written by the stand-in. */
+export const EVAL_ABORTED_BY_MOCK = 'eval aborted by mock'
+/** densable `Hi` @212302665 — agent mock call budget = 4 × max_turns. */
+export const EVAL_AGENT_MOCK_BUDGET_PER_TURN = 4
+export const NEVER_IN_EVAL = new Set([
+  'Monitor',
+  'EnterWorktree',
+  'ExitWorktree',
+])
+/** densable `aa`. */
+export const EVAL_WALK_MAX_DEPTH = 16
+/** densable `pa`. */
+export const EVAL_WALK_BUDGET = 100_000
+export const GIT_SANDBOX_CONFIG = `[core]
+	repositoryformatversion = 0
+	bare = false
+`
