@@ -47,7 +47,6 @@ import {
   TASK_NOTIFICATION_TAG,
   TEAMMATE_MESSAGE_TAG,
   TICK_TAG,
-  ULTRAPLAN_TAG,
 } from '../constants/xml.js'
 
 // ─── Type guards ─────────────────────────────────────────────────────────────
@@ -186,7 +185,6 @@ const RUNNING_STATE_META_TAGS = new Set([
   TASK_NOTIFICATION_TAG,
   TEAMMATE_MESSAGE_TAG,
   TICK_TAG,
-  ULTRAPLAN_TAG,
 ])
 
 function extractUserMessageText(message: Message): string {

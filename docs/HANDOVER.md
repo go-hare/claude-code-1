@@ -1310,7 +1310,7 @@ React commit → Yoga calculateLayout → render-node-to-output → Screen buffe
 settings/display、agent 选择索引、`toolPermissionContext`、会话元信息、
 remote/bridge（12 个 `replBridge*` 字段）、tasks/agents、mcp/plugins、files/memory、
 notifications、hooks/goals、tungsten/bagel/CU、REPL VM、inbox/swarm 权限、
-prompt/speculation、ultraplan/ultrareview、callbacks、UI 协调
+prompt/speculation、ultrareview、callbacks、UI 协调
 
 **三层状态的划分原则**
 - 跨渲染的**会话事实** → `src/bootstrap/state.ts`（模块全局）
@@ -1542,8 +1542,10 @@ SSH_REMOTE  AUTOFIX_PR  NATIVE_CLIPBOARD_IMAGE  GOAL
 ```
 
 **刻意关闭**（`defines.ts` 里注释掉的）：
-`ULTRAPLAN`、`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`、
+`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`、
 `FORK_SUBAGENT`、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
+
+**已产品拆除**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession 已删，不是 `FEATURE_ULTRAPLAN=1` 残留门）
 
 > ⚠️ **CLAUDE.md 说"65+ 个"，实测是 42 个。以 `scripts/defines.ts` 为准。**
 
@@ -1555,7 +1557,7 @@ SSH_REMOTE  AUTOFIX_PR  NATIVE_CLIPBOARD_IMAGE  GOAL
 | dev | `scripts/dev.ts` 传 `--feature <NAME>` | 同上 |
 | 裸运行（无 flag） | 无注入 | **返回 `false`** |
 
-覆盖方式：`FEATURE_<NAME>=1`（build/dev 时），例如 `FEATURE_ULTRAPLAN=1 bun run dev`。
+覆盖方式：`FEATURE_<NAME>=1`（build/dev 时），例如 `FEATURE_VOICE_MODE=1 bun run dev`。
 
 ### 11.4 编译器限制（**必须遵守**）
 
@@ -2100,14 +2102,11 @@ CLAUDE.md 记载有 `ci.yml`（lint + 构建 + 测试）、`release-rcs.yml`、
 **接手第一件事：确认远端 / 默认分支上的 CI 配置在哪。**
 预期流程是 `bunx biome ci .` → typecheck → build → test。
 
-### 13.8 ⚠️ 失效的 npm scripts
+### 13.8 已删除的失效 npm scripts
 
-`package.json` 引用了两个**不存在的文件**：
-- `"health": "bun run scripts/health-check.ts"` → `scripts/health-check.ts` 缺失
-- `"test:production*": "bun run scripts/production-test.ts"` → `scripts/production-test.ts` 缺失
-
-所以 `bun run health` 和 `bun run test:production` 目前**跑不起来**。
-要么补文件，要么删 script。
+`scripts/health-check.ts` / `scripts/production-test.ts` 从未落地。对应的
+`bun run health` 和 `bun run test:production*` 已从 `package.json` 删除，
+不要再加回来。
 
 ### 13.9 `scripts/` 目录
 
@@ -2130,7 +2129,7 @@ CLAUDE.md 记载有 `ci.yml`（lint + 构建 + 测试）、`release-rcs.yml`、
 | `upstream-extract/extract-readable.mjs` | 可读片段格式化 |
 | `extract-ehl-219.py` | 一次性上游提取辅助 |
 | `__tests__/defaultBuildFeatures.teamUds.228.test.ts` | 默认 feature 回归 |
-| `__tests__/ultraplanProductOff.222.test.ts` | 确保 Ultraplan 保持关闭 |
+| `__tests__/ultraplanProductOff.222.test.ts` | 确保 Ultraplan 产品拆除（模块删除，不是残留门） |
 
 主构建入口是根目录的 `build.ts`（不在 `scripts/` 下）。
 
@@ -2237,8 +2236,8 @@ docs/upstream-extraction/v2.1.238/
 | workspace 包数 | AGENTS.md：15 | **17** |
 | `docs/testing-spec.md` | CLAUDE.md 引用 | **文件不存在**（测试规范实际在 CLAUDE.md 里） |
 | CI workflows | 有 3 个 workflow | **`.github/` 目录不在工作树** |
-| `bun run health` | 可用 | `scripts/health-check.ts` **缺失** |
-| `bun run test:production` | 可用 | `scripts/production-test.ts` **缺失** |
+| `bun run health` | 已从 `package.json` 删除 | `scripts/health-check.ts` 从未落地 |
+| `bun run test:production` | 已从 `package.json` 删除 | `scripts/production-test.ts` 从未落地 |
 | 已删除包 | AGENTS.md 列 `packages/shell/`、`swarm/`、`mcp-server/`、`cc-knowledge/`、`langfuse-dashboard/` 为存在 | 已移除或非 workspace |
 
 **建议第一周就把 `CLAUDE.md` 校正一遍、`AGENTS.md` 处理掉** ——

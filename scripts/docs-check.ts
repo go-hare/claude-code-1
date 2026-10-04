@@ -27,14 +27,29 @@ const ASSET_DIRS = new Set(['images', 'logo', 'diagrams'])
 const KNOWN_ABSENT = new Map([
   [
     'scripts/health-check.ts',
-    'package.json 的 `bun run health` 指向缺失文件，build-system 页在记录这个坑',
+    '脚本不存在；`bun run health` 已从 package.json 删除。文档若仍提及该路径，记录的是历史坑',
   ],
-  ['scripts/production-test.ts', '同上，`bun run test:production` 系列缺失'],
+  [
+    'scripts/production-test.ts',
+    '脚本不存在；`bun run test:production*` 已从 package.json 删除',
+  ],
   [
     'src/migrations/migrateAutoUpdatesToSettings.ts',
     '已删除，逻辑并入 config.ts；auto-updater 页在说明这次搬迁',
   ],
-  ['src/commands/ultraplan', '早期文档误记的空目录，ultraplan 页在证伪它'],
+  [
+    'src/commands/ultraplan',
+    'densable 2.1.222 #21 产品拆除；命令/对话框已删除，不是残留门',
+  ],
+  [
+    'src/commands/ultraplan.tsx',
+    'densable 2.1.222 #21 产品拆除；autofix-pr 页仍作历史模板对照',
+  ],
+  ['src/components/ultraplan', 'densable 2.1.222 #21 产品拆除'],
+  [
+    'src/utils/ultraplan',
+    'densable 2.1.222 #21 产品拆除；ultracode/ultrareview keyword 迁到 workflowKeyword.ts',
+  ],
 ])
 
 const quiet = process.argv.includes('--quiet')

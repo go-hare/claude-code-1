@@ -43,7 +43,7 @@ export function formatReviewStageCounts(
   return found > 0 ? `${found} found` : 'finding';
 }
 
-// Per-character rainbow gradient, same treatment as the ultraplan keyword.
+// Per-character rainbow gradient, same treatment as the ultrareview keyword.
 // The phase offset lets the gradient cycle — so the colors sweep along the
 // text on each animation frame instead of being static.
 function RainbowText({ text, phase = 0 }: { text: string; phase?: number }): React.ReactNode {
@@ -146,7 +146,7 @@ function ReviewRainbowLine({ session }: { session: DeepImmutable<RemoteAgentTask
 }
 
 export function RemoteSessionProgress({ session }: { session: DeepImmutable<RemoteAgentTaskState> }): React.ReactNode {
-  // Lite-review: rainbow gradient over the full line, ultraplan-style.
+  // Lite-review: rainbow gradient over the full line.
   // BackgroundTask.tsx delegates the whole <Text> wrapper here so the
   // gradient spans the title, not just the trailing status.
   if (session.isRemoteReview) {

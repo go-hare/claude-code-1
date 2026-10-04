@@ -131,7 +131,6 @@ function buildTeleportCreateEvents(opts: {
   initialMessage: string | null | undefined;
   initialMessageUuid?: string;
   permissionMode?: PermissionMode;
-  ultraplan?: boolean;
 }): TeleportCreateEvent[] {
   const events: TeleportCreateEvent[] = [];
   if (opts.permissionMode) {
@@ -143,7 +142,6 @@ function buildTeleportCreateEvents(opts: {
         request: {
           subtype: 'set_permission_mode',
           mode: opts.permissionMode,
-          ultraplan: opts.ultraplan,
         },
       },
     });
@@ -1070,7 +1068,6 @@ export async function teleportToRemote(options: {
   description?: string;
   model?: string;
   permissionMode?: PermissionMode;
-  ultraplan?: boolean;
   signal: AbortSignal;
   useDefaultEnvironment?: boolean;
   /**
@@ -1159,7 +1156,7 @@ export async function teleportToRemote(options: {
   /**
    * Identifies which command/flow originated this teleport. CCR backend
    * uses this for routing/observability. Known values: 'autofix_pr',
-   * 'ultrareview', 'ultraplan'. Pass-through field — not interpreted
+   * 'ultrareview'. Pass-through field — not interpreted
    * client-side; if backend doesn't recognize it, it's silently ignored.
    */
   source?: string;
@@ -1389,7 +1386,6 @@ export async function teleportToRemote(options: {
         initialMessage,
         initialMessageUuid: options.initialMessageUuid,
         permissionMode: options.permissionMode,
-        ultraplan: options.ultraplan,
       });
       const requestBody = {
         title: options.title || options.description || 'Remote task',
@@ -1910,11 +1906,10 @@ export async function teleportToRemote(options: {
       initialMessage,
       initialMessageUuid: options.initialMessageUuid,
       permissionMode: options.permissionMode,
-      ultraplan: options.ultraplan,
     });
 
     const requestBody = {
-      title: options.ultraplan ? `ultraplan: ${sessionTitle}` : sessionTitle,
+      title: sessionTitle,
       events,
       session_context: sessionContext,
       ...sessionCreateEnvironmentFields(environmentId),

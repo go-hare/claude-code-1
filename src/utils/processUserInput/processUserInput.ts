@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import type {
   Base64ImageSource,
   ContentBlockParam,
@@ -57,10 +56,6 @@ import {
 import { logForDebugging } from '../debug.js'
 import { queryCheckpoint } from '../queryProfiler.js'
 import { parseSlashCommand } from '../slashCommandParsing.js'
-import {
-  hasUltraplanKeyword,
-  replaceUltraplanKeyword,
-} from '../ultraplan/keyword.js'
 import { processTextPrompt } from './processTextPrompt.js'
 export type ProcessUserInputContext = ToolUseContext & LocalJSXCommandContext
 
@@ -185,9 +180,9 @@ export async function processUserInput({
 }: {
   input: string | Array<ContentBlockParam>
   /**
-   * Input before [Pasted text #N] expansion. Used for ultraplan keyword
-   * detection so pasted content containing the word cannot trigger. Falls
-   * back to the string `input` when unset.
+   * Input before [Pasted text #N] expansion. Used for ultracode/ultrareview
+   * keyword detection so pasted content containing the word cannot trigger.
+   * Falls back to the string `input` when unset.
    */
   preExpansionInput?: string
   mode: PromptInputMode
@@ -666,49 +661,6 @@ async function processUserInputBase(
         slashInputForProcess = slashCandidate
       }
     }
-  }
-
-  // Ultraplan keyword — route through /ultraplan. Detect on the
-  // pre-expansion input so pasted content containing the word cannot
-  // trigger a CCR session; replace with "plan" in the expanded input so
-  // the CCR prompt receives paste contents and stays grammatical. See
-  // keyword.ts for the quote/path exclusions. Interactive prompt mode +
-  // non-slash-prefixed only:
-  // headless/print mode filters local-jsx commands out of context.options,
-  // so routing to /ultraplan there yields "Unknown skill" — and there's no
-  // rainbow animation in print mode anyway.
-  // Runs before attachment extraction so this path matches the slash-command
-  // path below (no await between setUserInputOnProcessing and setAppState —
-  // React batches both into one render, no flash).
-  if (
-    feature('ULTRAPLAN') &&
-    mode === 'prompt' &&
-    !context.options.isNonInteractiveSession &&
-    inputString !== null &&
-    !effectiveSkipSlash &&
-    !inputString.startsWith('/') &&
-    !context.getAppState().ultraplanSessionUrl &&
-    !context.getAppState().ultraplanLaunching &&
-    hasUltraplanKeyword(preExpansionInput ?? inputString)
-  ) {
-    logEvent('tengu_ultraplan_keyword', {})
-    const rewritten = replaceUltraplanKeyword(inputString).trim()
-    const { processSlashCommand } = await import('./processSlashCommand.js')
-    const slashResult = await processSlashCommand(
-      `/ultraplan ${rewritten}`,
-      precedingInputBlocks,
-      imageContentBlocks,
-      [],
-      context,
-      setToolJSX,
-      uuid,
-      isAlreadyProcessing,
-      canUseTool,
-      autonomy,
-      modelScheduledOrigin,
-      origin,
-    )
-    return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
 
   // For slash commands, attachments will be extracted within getMessagesForSlashCommand.

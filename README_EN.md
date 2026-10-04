@@ -178,7 +178,7 @@ Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship
 | **233 MCP v2** | product path **`@modelcontextprotocol/client@2` + `server@2` single stack** (listen reopen/park, BVa probe, string handlers, `mcpServerKeyHash`); v2 type re-exports; structural auth guards | **no apps gateway invent**; transitive agent-sdk may still pull sdk 1.x |
 | **233 harden / UX** | cgroup `TOOL_MEMORY_LIMIT`; `WEBFETCH_CACHE_TTL_MS`; argument double-expand sentinels; `\??\` UNC; bare skills validate; `/effort` screen-reader list; Todo/Tds opt-in; hide GitHub tip on non-GH remotes; `cd && >` discard targets | — |
 | **233 official reverts** | **Revert 232 Cygwin symlink write gate + Bash `< file` product gate**; `TREE_SITTER_BASH` not in DEFAULT; keep `validateInputRedirections` residual, do not call from product path | wait for densable narrower gate; **do not re-enable by default for checklist** |
-| **Feature defaults** | inherit 229: **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip/ULTRAPLAN still OFF; compile `FORK_SUBAGENT` still optional |
+| **Feature defaults** | inherit 229: **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip still OFF; `ULTRAPLAN` product-cut; compile `FORK_SUBAGENT` still optional |
 
 #### densable 2.1.229 alignment (2.7.39, included)
 
@@ -192,7 +192,7 @@ Source of truth: `docs/upstream-extraction/v2.1.229/official-229-checklist.md` (
 | **plugins / peers / stream** | #4 marketplace `command`+`link`; #5 ListAgents offline/cloud; #6 VirtualMessageList keys; #16 plugin in-use markers | — |
 | **tools / paths / blank** | #7 safeToolInput non-string; #8 ProgressBar/MarkdownTable clamp; #9 Windows `\\?\`/UNC strip; #19 stream-json blank gate | — |
 | **workflow / other** | #17 host-core concurrency; #24 prefix stagger; #26 IPv6 doctor; #27 login OAUTH re-warn; #28 commit-push-pr deny; #13/#14/#15/#18 RC/GH/diagnostics/cron | **#3** SSE host ping, **#21** Desktop OTEL, **#30–#32** VSCode **N/A** invent-ban |
-| **Feature defaults** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip/ULTRAPLAN still OFF |
+| **Feature defaults** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip still OFF; `ULTRAPLAN` product-cut |
 
 #### densable 2.1.228 alignment (2.7.37, included)
 
@@ -205,7 +205,7 @@ Source of truth: `docs/upstream-extraction/v2.1.228/official-228-checklist.md` (
 | **UDS / LAN / RC** | `key_publish_failed` hard-fail start + `CLAUDE_CODE_MESSAGING_TOKEN`; LAN TCP pre-auth + timing-safe compare; RC reattach owner meta / noHistoryBackfill; left-arrow stash bridge | no dual UDS token / pairing invent |
 | **skills / tools / cloud** | syncedSkills harden core (shadow/sanitize/no `!`/`@`); Write/Edit Jqy/MCt + l8t `errorCode:13` (validateInput+call); Vertex fail-fast + Bedrock GKd wiring; St mid-turn attachments | #12 **core only** (no full claude.ai ingest); #3 `/tui` Bxa `--model` pin only |
 | **other** | cleanup keeps memory; plugin symlink not orphaned; marketplace ssn whole-entry; title ◐/◑; auto-mode drop expensive sentence; cross-session from-name; local PR subscription store | **223 #3 teleport** invent-ban; **221 #12** DEP-HAVE (srt) |
-| **Feature defaults** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** DEFAULT_BUILD **ON** | **ULTRAPLAN** still OFF; `tengu_ccr_bridge` not default true |
+| **Feature defaults** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** DEFAULT_BUILD **ON** | `ULTRAPLAN` product-cut; `tengu_ccr_bridge` not default true |
 
 #### densable 2.1.222 alignment (2.7.36, included)
 
@@ -217,7 +217,7 @@ Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (
 | **streaming UI / reliability** | UNf/BNf/WNf/Qci streaming store; salvage survives pH.clear; close-after-complete no false mid-response; gateway keep-alive ping; preflight proxy + 10s timeout; file watcher error teardown; SR EOL delete; **2.7.36: empty streaming `●` / false past-tense “Ran N…”** | — |
 | **RC / settings / host** | `remoteControlAtStartup`: project/local cannot enable (can disable); `flagSettings` + `projectSettingsAliasesUserSettings`; host model overlay beats stale managed-settings | — |
 | **tools / cost / git** | MCP usage only when tools truly consumed; SendMessage summary truncate; tool-gone still rendered; post-push PR link; raw git diff `--no-textconv`/`--no-ext-diff`; agent family alias step-down | — |
-| **Feature defaults** | **ULTRAPLAN** product default OFF (`FEATURE_ULTRAPLAN=1` revives residual) | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON; **ULTRAPLAN** still OFF |
+| **Feature defaults** | **ULTRAPLAN** product-cut (command / dialogs / ccrSession deleted; not a `FEATURE_ULTRAPLAN=1` residual gate) | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON |
 
 #### densable 2.1.219–2.1.221 alignment (2.7.37, included)
 

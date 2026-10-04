@@ -76,8 +76,6 @@ function makeContext(commands: Command[]) {
     getAppState: () => ({
       toolPermissionContext: { mode: 'default' },
       endedByModel: false,
-      ultraplanSessionUrl: undefined,
-      ultraplanLaunching: false,
       sessionHooks: new Map(),
     }),
     setAppState: () => {},

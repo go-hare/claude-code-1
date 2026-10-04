@@ -128,11 +128,6 @@ describe('m0n / DPo workflow auto-mode', () => {
     expect(teu).toContain(
       "logPermissionModeChanged('plan', keepContextMode, EXIT_PLAN_MODE_TRIGGER)",
     )
-    const ultraplan = teu.slice(
-      teu.indexOf("if (value === 'ultraplan')"),
-      teu.indexOf('// V1: pass plan'),
-    )
-    expect(ultraplan).not.toContain('logPermissionModeChanged')
     const stay = teu.slice(
       teu.indexOf("// Handle 'no'"),
       teu.indexOf('const editor = getExternalEditor'),

@@ -55,7 +55,7 @@ const { getWorkflowKeywordAttachments } = await import(
   'src/utils/attachments.js'
 )
 const { hasUltracodeKeyword, findUltracodeTriggerPositions } = await import(
-  'src/utils/ultraplan/keyword.js'
+  'src/utils/workflowKeyword.js'
 )
 
 describe('hasUltracodeKeyword (densable fSs/vCd)', () => {

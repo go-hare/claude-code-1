@@ -139,9 +139,6 @@ const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
 const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
   ? require('./commands/subscribe-pr.js').default
   : null
-const ultraplan = feature('ULTRAPLAN')
-  ? require('./commands/ultraplan.js').default
-  : null
 const torch = feature('TORCH') ? require('./commands/torch.js').default : null
 const daemonCmd =
   feature('DAEMON') || feature('BG_SESSIONS')
@@ -516,7 +513,6 @@ const COMMANDS = memoize((): Command[] => [
   ...(claimMainCmd ? [claimMainCmd] : []),
   tasks,
   ...(workflowsCmd ? [workflowsCmd] : []),
-  ...(ultraplan ? [ultraplan] : []),
   ...(torch ? [torch] : []),
   ...(daemonCmd ? [daemonCmd] : []),
   ...(jobCmd ? [jobCmd] : []),

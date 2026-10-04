@@ -2,7 +2,7 @@
  * Teleported /ultrareview execution. Creates a CCR session with the current repo,
  * sends the review prompt as the initial message, and registers a
  * RemoteAgentTask so the polling loop pipes results back into the local
- * session via task-notification. Mirrors the /ultraplan → CCR flow.
+ * session via task-notification. Mirrors the CCR teleport flow.
  *
  * densable 2.1.212 #15–18:
  * - PR arg normalize (yqr + #/PR N)

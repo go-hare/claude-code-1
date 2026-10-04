@@ -97,8 +97,8 @@ export function offerExitPlanResumeAuto(
 }
 
 /**
- * densable Lcy keep-context slot. Clear-context / ultraplan / No stay
- * DualInk. offerResumeAuto is gold `p` (auto ∧ gate).
+ * densable Lcy keep-context slot. Clear-context / No stay DualInk.
+ * offerResumeAuto is gold `p` (auto ∧ gate).
  */
 export function buildExitPlanKeepContext(input: {
   isBypassPermissionsModeAvailable?: boolean

@@ -30,7 +30,6 @@ import type { DeepImmutable } from 'src/types/utils.js';
 import { intersperse } from 'src/utils/array.js';
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js';
 import { IDLE_WINDOW_KEEPALIVE_REASON } from 'src/utils/task/framework.js';
-import { stopUltraplan } from '../../commands/ultraplan.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import type { ExitState } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -466,11 +465,7 @@ export function BackgroundTasksDialog({
       } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
         void killAutoModeScanTask(currentSelection.id);
       } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
-        if (currentSelection.task.isUltraplan) {
-          void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
-        } else {
-          void killRemoteAgentTask(currentSelection.id);
-        }
+        void killRemoteAgentTask(currentSelection.id);
       }
     }
 
@@ -636,13 +631,7 @@ export function BackgroundTasksDialog({
             onDone={onDone}
             toolUseContext={toolUseContext}
             onBack={goBackToList}
-            onKill={
-              task.status !== 'running'
-                ? undefined
-                : task.isUltraplan
-                  ? () => void stopUltraplan(task.id, task.sessionId, setAppState)
-                  : () => void killRemoteAgentTask(task.id)
-            }
+            onKill={task.status !== 'running' ? undefined : () => void killRemoteAgentTask(task.id)}
             key={`session-${task.id}`}
           />
         );

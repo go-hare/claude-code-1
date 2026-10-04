@@ -5,7 +5,7 @@
  * Local function is DualInk ExitPlanModePermissionRequest (Lcy options,
  * disk plan via getPlan/getPlanFilePath, Ctrl+G, feedback, images).
  * Do not invent storageV5 / gold tn / credentials / remote publish.
- * Ultraplan stays DualInk FEATURE_ULTRAPLAN. Host answer is store.answer.
+ * Host answer is store.answer.
  */
 import React, { useCallback, useMemo, useRef } from 'react';
 import { ExitPlanModeV2Tool } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';

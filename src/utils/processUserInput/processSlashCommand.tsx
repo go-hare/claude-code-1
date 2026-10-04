@@ -1044,8 +1044,8 @@ async function getMessagesForSlashCommand(
             // to the model), so skipping them doesn't affect model context.
             // Outside fullscreen keep them so scrollback shows what ran.
             // Only skip "<Name> dismissed" modal-close notifications —
-            // commands that early-exit before showing a modal (/ultraplan
-            // usage, /rename, /proactive) use display:system for actual
+            // commands that early-exit before showing a modal (/rename,
+            // /proactive) use display:system for actual
             // output that must reach the transcript.
             const skipTranscript =
               isFullscreenEnvEnabled() && typeof result === 'string' && result.endsWith(' dismissed');
@@ -1094,11 +1094,7 @@ async function getMessagesForSlashCommand(
                   ...context,
                   canUseTool,
                   // densable dispatchedAsImmediate: E$t(cmd, args)
-                  dispatchedAsImmediate: isCommandImmediate(
-                    command,
-                    argsForDispatch,
-                    context.presentation ?? 'inline',
-                  ),
+                  dispatchedAsImmediate: isCommandImmediate(command, argsForDispatch, context.presentation ?? 'inline'),
                   submissionOrigin,
                 },
                 argsForDispatch,
@@ -1128,11 +1124,7 @@ async function getMessagesForSlashCommand(
                 showSpinner: false,
                 isLocalJSXCommand: true,
                 // densable ARt — resolve function-form immediate with args
-                isImmediate: isCommandImmediate(
-                  command,
-                  argsForDispatch,
-                  context.presentation ?? 'inline',
-                ),
+                isImmediate: isCommandImmediate(command, argsForDispatch, context.presentation ?? 'inline'),
               });
             })
             .catch(e => {

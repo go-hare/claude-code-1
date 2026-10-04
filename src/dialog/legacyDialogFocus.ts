@@ -33,8 +33,6 @@ const UQC_FOCUS_ALLOWLIST = new Set<string>([
   'left-arrow-confirm',
   'worker-sandbox-permission',
   'elicitation',
-  'ultraplan-choice',
-  'ultraplan-launch',
   'remote-callout',
   'fullscreen-upsell',
   'lsp-recommendation',

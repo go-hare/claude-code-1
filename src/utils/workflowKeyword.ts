@@ -15,19 +15,19 @@ const OPEN_TO_CLOSE: Record<string, string> = {
  * launch directive:
  *
  * - Inside paired delimiters: backticks, double quotes, angle brackets
- *   (tag-like only, so `n < 5 ultraplan n > 10` is not a phantom range),
+ *   (tag-like only, so `n < 5 ultracode n > 10` is not a phantom range),
  *   curly braces, square brackets (innermost — preExpansionInput has
  *   `[Pasted text #N]` placeholders), parentheses. Single quotes are
  *   delimiters only when not an apostrophe — the opening quote must be
  *   preceded by a non-word char (or start) and the closing quote must be
- *   followed by a non-word char (or end), so "let's ultraplan it's"
+ *   followed by a non-word char (or end), so "let's ultracode it's"
  *   still triggers.
  *
  * - Path/identifier-like context: immediately preceded or followed by
  *   `/`, `\`, or `-`, or followed by `.` + word char (file extension).
- *   `\b` sees a boundary at `-`, so `ultraplan-s` would otherwise
- *   match. This keeps `src/ultraplan/foo.ts`, `ultraplan.tsx`, and
- *   `--ultraplan-mode` from triggering while `ultraplan.` at a sentence
+ *   `\b` sees a boundary at `-`, so `ultracode-s` would otherwise
+ *   match. This keeps `src/ultracode/foo.ts`, `ultracode.tsx`, and
+ *   `--ultracode-mode` from triggering while `ultracode.` at a sentence
  *   end still does.
  *
  * - Followed by `?`: a question about the feature shouldn't invoke it.
@@ -35,10 +35,7 @@ const OPEN_TO_CLOSE: Record<string, string> = {
  *
  * - Slash command input: text starting with `/` is a slash command
  *   invocation (processUserInput.ts routes it to processSlashCommand,
- *   not keyword detection), so `/rename ultraplan foo` never triggers.
- *   Without this, PromptInput would rainbow-highlight the word and show
- *   the "will launch ultraplan" notification even though submitting the
- *   input runs /rename, not /ultraplan.
+ *   not keyword detection), so `/rename ultracode foo` never triggers.
  *
  * Shape matches findThinkingTriggerPositions (thinking.ts) so
  * PromptInput treats both trigger types uniformly.
@@ -94,10 +91,6 @@ function findKeywordTriggerPositions(
   return positions
 }
 
-export function findUltraplanTriggerPositions(text: string): TriggerPosition[] {
-  return findKeywordTriggerPositions(text, 'ultraplan')
-}
-
 export function findUltrareviewTriggerPositions(
   text: string,
 ): TriggerPosition[] {
@@ -109,28 +102,10 @@ export function findUltracodeTriggerPositions(text: string): TriggerPosition[] {
   return findKeywordTriggerPositions(text, 'ultracode')
 }
 
-export function hasUltraplanKeyword(text: string): boolean {
-  return findUltraplanTriggerPositions(text).length > 0
-}
-
 export function hasUltrareviewKeyword(text: string): boolean {
   return findUltrareviewTriggerPositions(text).length > 0
 }
 
 export function hasUltracodeKeyword(text: string): boolean {
   return findUltracodeTriggerPositions(text).length > 0
-}
-
-/**
- * Replace the first triggerable "ultraplan" with "plan" so the forwarded
- * prompt stays grammatical ("please ultraplan this" → "please plan this").
- * Preserves the user's casing of the "plan" suffix.
- */
-export function replaceUltraplanKeyword(text: string): string {
-  const [trigger] = findUltraplanTriggerPositions(text)
-  if (!trigger) return text
-  const before = text.slice(0, trigger.start)
-  const after = text.slice(trigger.end)
-  if (!(before + after).trim()) return ''
-  return before + trigger.word.slice('ultra'.length) + after
 }

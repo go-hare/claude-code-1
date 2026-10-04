@@ -1759,7 +1759,7 @@ export function getWorkflowKeywordAttachments(
     const { getInitialSettings } =
       require('./settings/settings.js') as typeof import('./settings/settings.js')
     const { hasUltracodeKeyword } =
-      require('./ultraplan/keyword.js') as typeof import('./ultraplan/keyword.js')
+      require('./workflowKeyword.js') as typeof import('./workflowKeyword.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     const settings = getInitialSettings()

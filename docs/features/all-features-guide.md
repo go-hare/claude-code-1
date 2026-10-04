@@ -13,7 +13,7 @@
 5. [Chrome 浏览器控制](#5-chrome-浏览器控制)
 6. [Computer Use 屏幕操控](#6-computer-use-屏幕操控)
 7. [Feature Flags 与 GrowthBook](#7-feature-flags-与-growthbook)
-8. [/ultraplan 高级规划](#8-ultraplan-高级规划)
+8. ~~/ultraplan 高级规划~~（已拆除）
 9. [Daemon 后台守护](#9-daemon-后台守护)
 10. [Pipe IPC 多实例协作](#10-pipe-ipc-多实例协作)
 11. [LAN Pipes 局域网群控](#11-lan-pipes-局域网群控)
@@ -198,24 +198,10 @@ FEATURE_PROACTIVE=1 bun run dev
 
 ---
 
-## 8. /ultraplan 高级规划
+## 8. /ultraplan 高级规划（已拆除）
 
-**PR**: #156 `feat: enable /ultraplan and harden GrowthBook fallback chain`
-**Feature Flag**: `ULTRAPLAN`
-
-### 说明
-高级多 agent 规划模式。将复杂任务分解为多个阶段，每阶段可分配给不同 agent 并行执行。
-
-### 使用
-```
-/ultraplan 实现一个完整的用户认证系统，包括注册、登录、密码重置、OAuth 集成
-```
-
-AI 会生成：
-1. 任务分解（多阶段）
-2. 每阶段的 agent 分配
-3. 依赖关系图
-4. 并行执行计划
+densable 2.1.222 #21 产品拆除。命令 / 对话框 / ccrSession / AppState 字段已删除，
+不是 `FEATURE_ULTRAPLAN=1` 残留门。详见 [`docs/features/ultraplan.md`](./ultraplan.md)。
 
 ---
 
@@ -536,7 +522,7 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `SHOT_STATS` | ✅ dev+build | API 统计 |
 | `TOKEN_BUDGET` | ✅ dev+build | Token 预算 |
 | `PROMPT_CACHE_BREAK_DETECTION` | ✅ dev+build | 缓存检测 |
-| `ULTRAPLAN` | ✅ dev+build | 高级规划 |
+| `ULTRAPLAN` | ❌ 已拆除 | densable 2.1.222 #21 产品拆除，不是残留门 |
 | `DAEMON` | ✅ dev+build | 后台守护 |
 | `UDS_INBOX` | ✅ dev+build | Pipe IPC / peers / inbox（densable 228 默认 ON） |
 | `LAN_PIPES` | ✅ dev+build | LAN 群控 TCP + beacon（依赖 UDS；默认 ON） |

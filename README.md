@@ -178,7 +178,7 @@
 | **233 MCP v2** | 产品路径 **`@modelcontextprotocol/client@2` + `server@2` 单栈**（listen reopen/park、BVa probe、string handlers、`mcpServerKeyHash`）；类型 re-export v2；auth 结构守卫 | **不 invent apps gateway**；agent-sdk 传递依赖仍可能带 sdk 1.x |
 | **233 硬化 / UX** | cgroup `TOOL_MEMORY_LIMIT`；`WEBFETCH_CACHE_TTL_MS`；参数二次展开哨兵；`\??\` UNC；bare skills validate；`/effort` 读屏列表；Todo/Tds opt-in；GitHub tip 非 GH 隐藏；`cd && >` discard 目标 | — |
 | **233 官方回滚** | **回滚 232 Cygwin symlink 写门 + Bash `< file` 产品门**；`TREE_SITTER_BASH` 不进 DEFAULT；`validateInputRedirections` residual 保留勿产品调用 | 待 densable narrower 版再接；**勿为 checklist 默认开回** |
-| **Feature 默认** | 继承 229：**REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip/ULTRAPLAN 仍 OFF；`FORK_SUBAGENT` compile 仍 optional |
+| **Feature 默认** | 继承 229：**REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip 仍 OFF；`ULTRAPLAN` 已产品拆除；`FORK_SUBAGENT` compile 仍 optional |
 
 #### densable 2.1.229 对齐说明（2.7.39，已并入）
 
@@ -192,7 +192,7 @@
 | **插件 / 列表 / 流** | #4 marketplace `command`+`link`；#5 ListAgents offline/cloud；#6 VirtualMessageList keys；#16 plugin in-use markers | — |
 | **工具 / 路径 / 空白** | #7 safeToolInput non-string；#8 ProgressBar/MarkdownTable clamp；#9 Windows `\\?\`/UNC strip；#19 stream-json blank gate | — |
 | **工作流 / 其它** | #17 host cores 并发；#24 prefix stagger；#26 IPv6 doctor；#27 login OAUTH 复告；#28 commit-push-pr deny；#13/#14/#15/#18 RC/GH/diagnostics/cron | **#3** SSE host ping、**#21** Desktop OTEL、**#30–#32** VSCode **N/A** invent-ban |
-| **Feature 默认** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip/ULTRAPLAN 仍 OFF |
+| **Feature 默认** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip 仍 OFF；`ULTRAPLAN` 已产品拆除 |
 
 #### densable 2.1.228 对齐说明（2.7.37，已并入）
 
@@ -205,7 +205,7 @@
 | **UDS / LAN / RC** | `key_publish_failed` 启动硬失败 + `CLAUDE_CODE_MESSAGING_TOKEN`；LAN TCP pre-auth + timing-safe；RC reattach owner meta / noHistoryBackfill；left-arrow stash bridge | 不 invent dual UDS token / pairing code |
 | **技能 / 工具 / 云** | syncedSkills harden core（shadow/sanitize/no `!`/`@`）；Write/Edit Jqy/MCt + l8t `errorCode:13`（validateInput+call）；Vertex fail-fast + Bedrock GKd 接线；St mid-turn attachments | #12 **core only**（无完整 claude.ai ingest）；#3 `/tui` 仅 Bxa `--model` pin |
 | **其它** | cleanup 保 memory；plugin symlink 不 orphan；marketplace ssn whole-entry；title ◐/◑；auto-mode 去掉 expensive 句；cross-session from-name；PR 本地订阅 store | **223 #3 teleport** invent-ban；**221 #12** DEP-HAVE（srt） |
-| **Feature 默认** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** DEFAULT_BUILD **ON** | **ULTRAPLAN** 仍 OFF；`tengu_ccr_bridge` 不默认 true |
+| **Feature 默认** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** DEFAULT_BUILD **ON** | `ULTRAPLAN` 已产品拆除；`tengu_ccr_bridge` 不默认 true |
 
 #### densable 2.1.222 对齐说明（2.7.36，已并入）
 
@@ -217,7 +217,7 @@
 | **流式 UI / 可靠性** | UNf/BNf/WNf/Qci streaming store；salvage 在 pH.clear 保留；close-after-complete 不误报 mid-response；gateway keep-alive ping；preflight proxy + 10s 超时；file watcher error teardown；SR EOL 删除；**2.7.36：空 streaming `●` / 假 past-tense “Ran N…”** | — |
 | **RC / 设置 / host** | `remoteControlAtStartup`：project/local 不能开、可关；`flagSettings` + `projectSettingsAliasesUserSettings`；host model overlay 优先于 stale managed-settings | — |
 | **工具 / 成本 / git** | MCP 份额仅计真消费；SendMessage summary 截断；tool-gone 仍展示；post-push PR link；raw git diff `--no-textconv`/`--no-ext-diff`；agent 族别名 step-down | — |
-| **Feature 默认** | **ULTRAPLAN** 产品默认 OFF（`FEATURE_ULTRAPLAN=1` 可复活 residual） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 ON（2026-08-12）；**KAIROS 外围** channels/push/webhook 默认 ON；**ULTRAPLAN** 仍 OFF |
+| **Feature 默认** | **ULTRAPLAN** 产品拆除（命令 / 对话框 / ccrSession 已删，不是 `FEATURE_ULTRAPLAN=1` 残留门） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 ON（2026-08-12）；**KAIROS 外围** channels/push/webhook 默认 ON |
 
 #### densable 2.1.219–2.1.221 对齐说明（2.7.37，已并入）
 

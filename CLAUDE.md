@@ -74,9 +74,8 @@ bun run rcs
 bun run docs:dev
 ```
 
-**注意：`bun run health` 和 `bun run test:production` 系列脚本指向的
-`scripts/health-check.ts` / `scripts/production-test.ts` 当前不存在**，跑了会直接失败。
-要么补上脚本，要么把这些条目从 `package.json` 删掉。
+**注意：`scripts/health-check.ts` / `scripts/production-test.ts` 不存在。**
+对应的 `bun run health` / `test:production*` 条目已从 `package.json` 删掉，不要再加回来。
 
 ## Architecture
 
@@ -249,9 +248,11 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - 模式: `POOR`, `SSH_REMOTE`
 - 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`, `GOAL`
 
-**已注释禁用（7 个）**——每条上方都有注释写明原因，**不要随手加回来**：
+**已注释禁用（6 个）**——每条上方都有注释写明原因，**不要随手加回来**：
 
-`ULTRAPLAN`（densable 2.1.222 #21 产品拆除，残留模块留作 `FEATURE_ULTRAPLAN=1` 复活，注释明确要求不得重新加入）、`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
+`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
+
+**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 

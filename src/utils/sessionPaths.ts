@@ -514,7 +514,6 @@ export type RemoteAgentMetadata = {
   spawnedAt: number
   toolUseId?: string
   isLongRunning?: boolean
-  isUltraplan?: boolean
   isRemoteReview?: boolean
   /** densable 2.1.218 — apply findings locally when review completes */
   applyFixesOnComplete?: boolean

@@ -662,9 +662,6 @@ import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
 import { CompanionSprite, CompanionFloatingBubble, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
 import { isBuddyEnabled } from '../buddy/enabled.js';
 import { DevBar } from '../components/DevBar.js';
-import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDialog.js';
-import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
-import { launchUltraplan } from '../commands/ultraplan.js';
 // Session manager removed - using AppState now
 import type { RemoteSessionConfig } from '../remote/RemoteSessionManager.js';
 import { REMOTE_SAFE_COMMANDS } from '../commands.js';
@@ -1333,8 +1330,6 @@ export function REPL({
   const tasks = useAppState(s => s.tasks);
   const workerSandboxPermissions = useAppState(s => s.workerSandboxPermissions);
   const elicitation = useAppState(s => s.elicitation);
-  const ultraplanPendingChoice = useAppState(s => s.ultraplanPendingChoice);
-  const ultraplanLaunchPending = useAppState(s => s.ultraplanLaunchPending);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const setAppState = useSetAppState();
   // densable NDr / TZt / H$y — willow crate diff tab baseline
@@ -3053,17 +3048,6 @@ export function REPL({
   const [isSearchingHistory, setIsSearchingHistory] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
-  // showBashesDialog is REPL-level so it survives PromptInput unmounting.
-  // When ultraplan approval fires while the pill dialog is open, PromptInput
-  // unmounts (focusedInputDialog → 'ultraplan-choice') but this stays true;
-  // after accepting, PromptInput remounts into an empty "No tasks" dialog
-  // (the completed ultraplan task has been filtered out). Close it here.
-  useEffect(() => {
-    if (ultraplanPendingChoice && showBashesDialog) {
-      setShowBashesDialog(false);
-    }
-  }, [ultraplanPendingChoice, showBashesDialog]);
-
   const isTerminalFocused = useTerminalFocus();
   const terminalFocusRef = useRef(isTerminalFocused);
   terminalFocusRef.current = isTerminalFocused;
@@ -3869,8 +3853,6 @@ export function REPL({
     | 'lsp-recommendation'
     | 'plugin-hint'
     | 'fullscreen-upsell'
-    | 'ultraplan-choice'
-    | 'ultraplan-launch'
     | undefined {
     // densable _Zt: if(pke.kind!=="none")return
     if (pke.kind !== 'none') return undefined;
@@ -3893,13 +3875,7 @@ export function REPL({
     // Gbt mcp_url_elicitation is a separate print/SDK mailbox kind.
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
 
-    if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice)
-      return 'ultraplan-choice';
-
-    if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending)
-      return 'ultraplan-launch';
-
-    // densable _Zt remaining gold ids (after ultraplan):
+    // densable _Zt remaining gold ids:
     //   if(As()){if(nr&&vr)return"remote-callout";return}
     //   if(nr&&Ur)return"fullscreen-upsell"
     //   if(nr&&vr)return"remote-callout"
@@ -7937,9 +7913,7 @@ export function REPL({
           // exists — without one, ctrl+c falls through to CancelRequestHandler.
           <ScrollKeybindingHandler
             scrollRef={scrollRef}
-            // Yield wheel/ctrl+u/d to UltraplanChoiceDialog's own scroll
-            // handler while the modal is showing.
-            isActive={focusedInputDialog !== 'ultraplan-choice'}
+            isActive={true}
             // g/G/j/k/ctrl+u/ctrl+d would eat keystrokes the search bar
             // wants. Off while searching.
             isModal={!searchOpen}
@@ -8664,79 +8638,6 @@ export function REPL({
                   {focusedInputDialog === 'fullscreen-upsell' && (
                     <FullscreenUpsellDialog onDone={() => setShowFullscreenUpsell(false)} />
                   )}
-
-                  {feature('ULTRAPLAN')
-                    ? focusedInputDialog === 'ultraplan-choice' &&
-                      ultraplanPendingChoice && (
-                        <UltraplanChoiceDialog
-                          plan={ultraplanPendingChoice.plan}
-                          sessionId={ultraplanPendingChoice.sessionId}
-                          taskId={ultraplanPendingChoice.taskId}
-                          setMessages={setMessages}
-                          readFileState={readFileState.current}
-                          getAppState={() => store.getState()}
-                          setConversationId={setConversationId}
-                        />
-                      )
-                    : null}
-
-                  {feature('ULTRAPLAN')
-                    ? focusedInputDialog === 'ultraplan-launch' &&
-                      ultraplanLaunchPending && (
-                        <UltraplanLaunchDialog
-                          onChoice={(choice, opts) => {
-                            const blurb = ultraplanLaunchPending.blurb;
-                            setAppState(prev =>
-                              prev.ultraplanLaunchPending ? { ...prev, ultraplanLaunchPending: undefined } : prev,
-                            );
-                            if (choice === 'cancel') return;
-                            // Command's onDone used display:'skip', so add the
-                            // echo here — gives immediate feedback before the
-                            // ~5s teleportToRemote resolves.
-                            setMessages(prev => [
-                              ...prev,
-                              createCommandInputMessage(formatCommandInputTags('ultraplan', blurb)),
-                            ]);
-                            const appendStdout = (msg: string) =>
-                              setMessages(prev => [
-                                ...prev,
-                                createCommandInputMessage(
-                                  `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(msg)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
-                                ),
-                              ]);
-                            // Defer the second message if a query is mid-turn
-                            // so it lands after the assistant reply, not
-                            // between the user's prompt and the reply.
-                            const appendWhenIdle = (msg: string) => {
-                              if (!queryGuard.isActive) {
-                                appendStdout(msg);
-                                return;
-                              }
-                              const unsub = queryGuard.subscribe(() => {
-                                if (queryGuard.isActive) return;
-                                unsub();
-                                // Skip if the user stopped ultraplan while we
-                                // were waiting — avoids a stale "Monitoring
-                                // <url>" message for a session that's gone.
-                                if (!store.getState().ultraplanSessionUrl) return;
-                                appendStdout(msg);
-                              });
-                            };
-                            void launchUltraplan({
-                              blurb,
-                              promptIdentifier: opts?.promptIdentifier,
-                              getAppState: () => store.getState(),
-                              setAppState,
-                              signal: createAbortController().signal,
-                              disconnectedBridge: opts?.disconnectedBridge,
-                              onSessionReady: appendWhenIdle,
-                            })
-                              .then(appendStdout)
-                              .catch(logError);
-                          }}
-                        />
-                      )
-                    : null}
 
                   {mrRender()}
 

@@ -95,8 +95,6 @@ describe('processUserInput endedByModel gate', () => {
       getAppState: () => ({
         toolPermissionContext: { mode: 'default' },
         endedByModel,
-        ultraplanSessionUrl: undefined,
-        ultraplanLaunching: false,
         sessionHooks: new Map(),
       }),
       setAppState: () => {},

@@ -48,7 +48,6 @@ import { enqueueSdkEvent } from './sdkEventQueue.js'
 // externalMetadataToAppState.
 export type SessionExternalMetadata = {
   permission_mode?: string | null
-  is_ultraplan_mode?: boolean | null
   model?: string | null
   pending_action?: RequiresActionDetails | null
   automation_state?: AutomationStateMetadata | null

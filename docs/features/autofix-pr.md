@@ -195,7 +195,6 @@ function cancelledResult() {
 以下三个文件已确认完整工作，是本次实现的"参考答案"：
 
 - `src/commands/review/reviewRemote.ts`（317 行）—— **主模板**，照抄改造
-- `src/commands/ultraplan.tsx`（525 行）
 - `src/commands/review/ultrareviewCommand.tsx`（89 行）
 
 ---
@@ -208,7 +207,7 @@ function cancelledResult() {
 
 **选 `LocalJSXCommand`**，因为：
 - 需要 spawn 远端 session 并显示进度面板
-- 兄弟命令 `ultraplan` / `ultrareview` 都用 local-jsx
+- 兄弟命令 `ultrareview` 用 local-jsx
 - 接口签名：`call(onDone, context, args) => Promise<React.ReactNode>`
 
 ### 4.2 `index.ts` 完整形状
@@ -566,7 +565,7 @@ function errorResult(message: string, code: string) {
 +  /**
 +   * Identifies which command/flow originated this teleport. CCR backend
 +   * uses this for routing/billing/observability. Known values: 'autofix_pr',
-+   * 'ultrareview', 'ultraplan'. Pass-through field — not interpreted client-side.
++   * 'ultrareview'. Pass-through field — not interpreted client-side.
 +   */
 +  source?: string
    model?: string
@@ -575,7 +574,7 @@ function errorResult(message: string, code: string) {
  })
 ```
 
-并在内部构造 request 时透传到 session_context（具体字段名按现有 review/ultraplan 调用结构对齐）。
+并在内部构造 request 时透传到 session_context（具体字段名按现有 review 调用结构对齐）。
 
 ---
 
