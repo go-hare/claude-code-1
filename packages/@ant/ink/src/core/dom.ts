@@ -378,6 +378,17 @@ const measureTextNode = function (
   // Expand tabs for measurement (worst case: 8 spaces each).
   // Actual tab expansion happens in output.ts based on screen position.
   const text = expandTabs(rawText)
+  const textWrap = node.style?.textWrap ?? 'wrap'
+
+  // densable h1: wrap-stream ALWAYS wraps then drops the last visual row,
+  // before the "fits in container" return. A short first sentence is one
+  // visual row → height 0 (gold lWy). Local used to return height 1 when
+  // the unwrapped line fit, so paint popped an empty body next to ●.
+  if (textWrap === 'wrap-stream') {
+    const fullyWrapped = wrapText(text, width, 'wrap')
+    const dims = measureText(fullyWrapped, width)
+    return { width: dims.width, height: Math.max(0, dims.height - 1) }
+  }
 
   const dimensions = measureText(text, width)
 
@@ -405,13 +416,6 @@ const measureTextNode = function (
     return measureText(text, effectiveWidth)
   }
 
-  const textWrap = node.style?.textWrap ?? 'wrap'
-  // densable lWy: wrap-stream measures as wrap then drops the incomplete last row
-  if (textWrap === 'wrap-stream') {
-    const fullyWrapped = wrapText(text, width, 'wrap')
-    const dims = measureText(fullyWrapped, width)
-    return { width: dims.width, height: Math.max(0, dims.height - 1) }
-  }
   const wrappedText = wrapText(text, width, textWrap)
 
   return measureText(wrappedText, width)

@@ -294,10 +294,9 @@ type Props = {
   /** Streaming thinking content (live updates, not frozen) */
   streamingThinking?: StreamingThinking | null;
   /**
-   * Official 2.1.150 preview row (`P && !brief`). Mounted for the whole
-   * isLoading window; the row itself returns null until a completed line
-   * exists. Do not use truthiness of this prop for collapsed-group past-tense
-   * (use hasStreamingText).
+   * Official preview row (`C && !brief`). Mounted for the whole isLoading
+   * window; gold yi returns null only when displayed is empty. Do not use
+   * truthiness of this prop for collapsed-group past-tense (use hasStreamingText).
    */
   streamingPreview?: React.ReactNode;
   /**
@@ -1033,7 +1032,7 @@ const MessagesImpl = ({
         renderableMessages.flatMap(renderMessageRow)
       )}
 
-      {/* Official 2.1.150: one preview row. Null until a completed line. */}
+      {/* gold Messages: C && !brief && turn → yi(store). yi returns null if !displayed. */}
       {!isBriefOnly && streamingPreview}
 
       {isStreamingThinkingVisible && streamingThinking && !isBriefOnly && (

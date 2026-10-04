@@ -193,6 +193,7 @@ export function createStreamingDisplayStore(): StreamingDisplayStore {
     getFlags() {
       const { displayed, hideTrailingLine, displayedHasNewline } =
         resolveStreamingDisplay(state)
+      // gold va: displayed && hideTrailingLine && !source `\n`.
       return (
         (state.raw !== null ? STREAM_FLAG_RAW : 0) |
         (displayed !== null ? STREAM_FLAG_DISPLAYED : 0) |

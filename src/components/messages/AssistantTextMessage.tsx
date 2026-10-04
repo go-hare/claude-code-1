@@ -256,9 +256,9 @@ export function AssistantTextMessage({
         return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} />;
       }
       // gold @202887955: one row, width 100%, children [dot, column].
-      // Completed AND streaming (gold yi @203236672) columns have NO flexGrow.
-      // 202890377 flexGrow:1 is the thinking row (Ss), not streaming.
-      // No inner row — yoga min-content would wrap at ~word width.
+      // Streaming (gold yi @203236672) is a nested inner row — do not flatten
+      // this completed path to match it. Column has NO flexGrow (202890377 is
+      // thinking). No inner row here — yoga min-content would wrap at ~word width.
       return (
         <Box
           alignItems="flex-start"
