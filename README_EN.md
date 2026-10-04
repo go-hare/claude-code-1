@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current npm: **`2.7.57`** (248 surface + densable **2.1.251** leftover HAVE 65 / N/A 6 + sticky clamp + empty-content display path + empty-preview ● gate + wrap-stream empty first-line skip + densable **2.1.252** hotfix #1/#2/#4). `npm i -g @go-hare/claude-code`
+> Current npm: **`2.7.58`** (248 surface + densable **2.1.251** leftover HAVE 65 / N/A 6 + sticky clamp + empty-content display path + empty-preview ● gate + wrap-stream empty first-line skip + densable **2.1.252** hotfix #1/#2/#4 + densable **2.1.283** leftover wrap + gold `h1`/`yi` streaming preview). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,9 +45,9 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.57** = 243+246+247+248 + 251 leftover + sticky clamp + empty-content display path + empty-preview ● gate + wrap-stream empty first-line skip + 252 hotfix) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.58** = 243+246+247+248 + 251 leftover + sticky clamp + empty-content display path + empty-preview ● gate + wrap-stream empty first-line skip + 252 hotfix + 283 leftover wrap + gold `h1`/`yi`) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.251 leftover (2.7.53 / 2.7.54 / 2.7.55 / 2.7.56 / 2.7.57)
+#### densable 2.1.251 leftover (2.7.53 / 2.7.54 / 2.7.55 / 2.7.56 / 2.7.57 / 2.7.58)
 
 Stacked on landed **2.1.248** + **2.7.52 #13 `GMt` hotfix**. Source of truth: `docs/upstream-extraction/v2.1.251/official-251-checklist.md` (**HAVE 65 / PARTIAL 0 / GAP 0 / N/A 6**). Includes daemon attach probe (Rlt/bv) + KW detach / per-screen `#s`, eBt/`Mn=200`, file-tool O_NOFOLLOW, RC `policy_disabled`, Chrome permission pipeline, teleport `startupFailure`, etc. N/A: Desktop / cloud / install size / VSCode. Do not invent `onAttachRequest` / `BackgroundGesture` / fd ancestor loops / `Jh`/`cT`.
 
@@ -314,10 +314,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.57)
+### Recent updates (2.7.5 → 2.7.58)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.58** | **densable 2.1.283 leftover wrap** + **gold `h1`/`yi` streaming preview**: plugin-eval sandbox fence (`af` Te..Zn), DualInk permissions, leftover unique/cloud/headless, print/tools wiring. wrap-stream **measure subtracts the last visual row first** (short open sentence height 0); `yi` inner row clips the ● to leftover height so a lone bullet is not painted. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.57** | **wrap-stream empty first-line skip** + **densable 2.1.252 hotfix**: do not paint a lone `●` for an open first line (`hideTrailingLine && !displayedHasNewline`). 252 #1 `Fk` pinWriteTarget Mac realpath same-inode alias + recover clause; #2 `di` empty `settings.local.json` treated as missing; #4 `Sn`/`ap` task-notification 100k-char cap + hysteresis. #3 Desktop/VS Code RC stall **N/A**. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.56** | **hide visually empty streaming preview ●**: whitespace / strip-only XML / `(no content)` no longer paint a lone bullet (`isEmptyMessageText` restored on `resolveStreamingDisplay` + `StreamingTextPreview`). 2.7.55's falsy-only gate mounted an empty `●` over Cooking. All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
 | **2.7.55** | **streaming empty-content display path**: keep the full deferred-message list + salvage / placeholder bridge for empty-content streams; **does not** ship the function-hook compositor (parked on `feat/plugin-function-hooks-282`). All-platform rebuild of 8 `@go-hare/claude-code-*` targets. |
@@ -394,7 +395,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.57`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.58`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---

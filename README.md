@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前 npm：**`2.7.57`**（248 产品面 + densable **2.1.251** leftover HAVE 65 / N/A 6 + sticky clamp + empty-content 显示路径 + 空预览 ● 门 + wrap-stream 空首行 skip + densable **2.1.252** hotfix #1/#2/#4）。`npm i -g @go-hare/claude-code`
+> 当前 npm：**`2.7.58`**（248 产品面 + densable **2.1.251** leftover HAVE 65 / N/A 6 + sticky clamp + empty-content 显示路径 + 空预览 ● 门 + wrap-stream 空首行 skip + densable **2.1.252** hotfix #1/#2/#4 + densable **2.1.283** leftover wrap + gold `h1`/`yi` 流式预览）。`npm i -g @go-hare/claude-code`
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,9 +45,9 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.57** = 243+246+247+248 + 251 leftover + sticky clamp + empty-content 显示路径 + 空预览 ● 门 + wrap-stream 空首行 skip + 252 hotfix），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.58** = 243+246+247+248 + 251 leftover + sticky clamp + empty-content 显示路径 + 空预览 ● 门 + wrap-stream 空首行 skip + 252 hotfix + 283 leftover wrap + gold `h1`/`yi`），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.251 leftover（2.7.53 / 2.7.54 / 2.7.55 / 2.7.56 / 2.7.57）
+#### densable 2.1.251 leftover（2.7.53 / 2.7.54 / 2.7.55 / 2.7.56 / 2.7.57 / 2.7.58）
 
 叠在已入库的 **2.1.248** + **2.7.52 #13 `GMt` hotfix** 上。对照 `docs/upstream-extraction/v2.1.251/official-251-checklist.md`（**HAVE 65 / PARTIAL 0 / GAP 0 / N/A 6**）。含 daemon attach probe（Rlt/bv）+ KW detach / per-screen `#s`、eBt/`Mn=200`、file-tool O_NOFOLLOW、RC `policy_disabled`、Chrome 权限管道、teleport `startupFailure` 等。N/A：Desktop / 云 / 体积 / VSCode。不 invent `onAttachRequest` / `BackgroundGesture` / fd 祖先循环 / `Jh`/`cT`。
 
@@ -314,10 +314,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.57）
+### 近期更新（2.7.5 → 2.7.58）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.58** | **densable 2.1.283 leftover wrap** + **gold `h1`/`yi` 流式预览**：plugin-eval sandbox fence（`af` Te..Zn）、DualInk 权限、leftover unique/cloud/headless、print/tools 接线。wrap-stream **测高先减最后一行**（短句高度 0）；`yi` 内层 row 把 ● 裁到正文高度，不再画孤点。全平台重编 8 个 `@go-hare/claude-code-*`。 |
 | **2.7.57** | **wrap-stream 空首行 skip** + **densable 2.1.252 hotfix**：未换行第一行不再画空 `●`（`hideTrailingLine && !displayedHasNewline`）。252 #1 `Fk` pinWriteTarget Mac realpath 同 inode alias + recover 句；#2 `di` 空 `settings.local.json` 当缺失；#4 `Sn`/`ap` task-notification 10 万字 cap + hysteresis。#3 Desktop/VS Code RC stall **N/A**。全平台重编 8 个 `@go-hare/claude-code-*`。 |
 | **2.7.56** | **hide visually empty streaming preview ●**：空白 / 纯 XML / `(no content)` 不再画单独子弹（`isEmptyMessageText` 门加回 `resolveStreamingDisplay` + `StreamingTextPreview`）。2.7.55 的 falsy-only 门会让空预览挂 `●` 盖住 Cooking。全平台重编 8 个 `@go-hare/claude-code-*`。 |
 | **2.7.55** | **streaming empty-content 显示路径**：空 content 流式消息保留完整列表 + salvage / placeholder bridge，**不含** function-hook compositor（画板停在 `feat/plugin-function-hooks-282`）。全平台重编 8 个 `@go-hare/claude-code-*`。 |
@@ -394,7 +395,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.57`）。  
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.58`）。  
 旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
 ---
