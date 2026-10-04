@@ -9,7 +9,6 @@ import {
   getParentManagedSettings,
   getUseCoworkPlugins,
 } from '../../bootstrap/state.js'
-import { getRemoteManagedSettingsSyncFromCache } from '../../services/remoteManagedSettings/syncCacheState.js'
 import { uniq } from '../array.js'
 import { logForDebugging } from '../debug.js'
 import { stripProjectScopedTracingSettings } from '../projectScopedTracingStrip.js'
@@ -33,11 +32,7 @@ import {
   type SettingSource,
 } from './constants.js'
 import { markInternalWrite } from './internalWrites.js'
-import {
-  getManagedFilePath,
-  getManagedSettingsDropInDir,
-} from './managedPath.js'
-import { getHkcuSettings, getMdmSettings } from './mdm/settings.js'
+import { getManagedFilePath } from './managedPath.js'
 import {
   getCachedParsedFile,
   getCachedSettingsForSource,
@@ -164,75 +159,11 @@ export function mergeManagedEnvPerKey(
  * densable 2.1.223 #11 — collect machine-local managed env sources under remote.
  * Order: hkcu (lowest) → file → MDM (higher among local), then remote wins keys.
  */
-function collectMachineLocalManagedSettings(): {
-  mdm: SettingsJson | null
-  file: SettingsJson | null
-  hkcu: SettingsJson | null
-} {
-  const mdmResult = getMdmSettings()
-  const mdm =
-    Object.keys(mdmResult.settings).length > 0 ? mdmResult.settings : null
-  const { settings: fileSettings } = loadManagedFileSettings()
-  const hkcuResult = getHkcuSettings()
-  const hkcu =
-    Object.keys(hkcuResult.settings).length > 0 ? hkcuResult.settings : null
-  return { mdm, file: fileSettings, hkcu }
-}
-
-/**
- * densable 2.1.223 #11 — first-source-wins for policy fields, but env always
- * merges per-key across remote + machine-local admin sources.
- */
 function resolvePolicySettingsWithEnvMerge(): {
   policySettings: SettingsJson | null
   policyErrors: ValidationError[]
 } {
-  const policyErrors: ValidationError[] = []
-  let winner: SettingsJson | null = null
-  let winnerKind: 'remote' | 'mdm' | 'file' | 'hkcu' | null = null
-
-  const remoteSettings = getRemoteManagedSettingsSyncFromCache()
-  if (remoteSettings && Object.keys(remoteSettings).length > 0) {
-    const result = SettingsSchema().safeParse(remoteSettings)
-    if (result.success) {
-      winner = result.data
-      winnerKind = 'remote'
-    } else {
-      policyErrors.push(
-        ...formatZodError(result.error, 'remote managed settings'),
-      )
-    }
-  }
-
-  const local = collectMachineLocalManagedSettings()
-  if (!winner && local.mdm) {
-    winner = local.mdm
-    winnerKind = 'mdm'
-  } else if (local.mdm) {
-    // MDM errors only matter when we fall through; still surface parse path later
-  }
-
-  if (!winner && local.file) {
-    winner = local.file
-    winnerKind = 'file'
-  }
-
-  if (!winner && local.hkcu) {
-    winner = local.hkcu
-    winnerKind = 'hkcu'
-  }
-
-  // Always merge env from machine-local under remote (or among locals).
-  // densable: server-delivered must not wipe local managed env.
-  if (winnerKind === 'remote') {
-    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file, local.mdm])
-  } else if (winnerKind === 'mdm') {
-    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file])
-  } else if (winnerKind === 'file') {
-    winner = mergeManagedEnvPerKey(winner, [local.hkcu])
-  }
-
-  return { policySettings: winner, policyErrors }
+  return { policySettings: null, policyErrors: [] }
 }
 
 /**
@@ -243,93 +174,14 @@ function getManagedSettingsFilePath(): string {
 }
 
 /**
- * Load file-based managed settings: managed-settings.json + managed-settings.d/*.json.
- *
- * managed-settings.json is merged first (lowest precedence / base), then drop-in
- * files are sorted alphabetically and merged on top (higher precedence, later
- * files win). This matches the systemd/sudoers drop-in convention: the base
- * file provides defaults, drop-ins customize. Separate teams can ship
- * independent policy fragments (e.g. 10-otel.json, 20-security.json) without
- * coordinating edits to a single admin-owned file.
- *
- * Exported for testing.
+ * Anthropic managed-settings.json / drop-ins are product-cut.
+ * Host overlay still finishes policy via finishPolicySettingsForHost.
  */
 export function loadManagedFileSettings(): {
   settings: SettingsJson | null
   errors: ValidationError[]
 } {
-  const errors: ValidationError[] = []
-  let merged: SettingsJson = {}
-  let found = false
-
-  const { settings, errors: baseErrors } = parseSettingsFile(
-    getManagedSettingsFilePath(),
-  )
-  errors.push(...baseErrors)
-  if (settings && Object.keys(settings).length > 0) {
-    merged = mergeWith(merged, settings, settingsMergeCustomizer)
-    found = true
-  }
-
-  const dropInDir = getManagedSettingsDropInDir()
-  try {
-    const entries = getFsImplementation()
-      .readdirSync(dropInDir)
-      .filter(
-        d =>
-          (d.isFile() || d.isSymbolicLink()) &&
-          d.name.endsWith('.json') &&
-          !d.name.startsWith('.'),
-      )
-      .map(d => d.name)
-      .sort()
-    for (const name of entries) {
-      const { settings, errors: fileErrors } = parseSettingsFile(
-        join(dropInDir, name),
-      )
-      errors.push(...fileErrors)
-      if (settings && Object.keys(settings).length > 0) {
-        merged = mergeWith(merged, settings, settingsMergeCustomizer)
-        found = true
-      }
-    }
-  } catch (e) {
-    const code = getErrnoCode(e)
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-      logError(e)
-    }
-  }
-
-  return { settings: found ? merged : null, errors }
-}
-
-/**
- * Check which file-based managed settings sources are present.
- * Used by /status to show "(file)", "(drop-ins)", or "(file + drop-ins)".
- */
-export function getManagedFileSettingsPresence(): {
-  hasBase: boolean
-  hasDropIns: boolean
-} {
-  const { settings: base } = parseSettingsFile(getManagedSettingsFilePath())
-  const hasBase = !!base && Object.keys(base).length > 0
-
-  let hasDropIns = false
-  const dropInDir = getManagedSettingsDropInDir()
-  try {
-    hasDropIns = getFsImplementation()
-      .readdirSync(dropInDir)
-      .some(
-        d =>
-          (d.isFile() || d.isSymbolicLink()) &&
-          d.name.endsWith('.json') &&
-          !d.name.startsWith('.'),
-      )
-  } catch {
-    // dir doesn't exist
-  }
-
-  return { hasBase, hasDropIns }
+  return { settings: null, errors: [] }
 }
 
 /**
@@ -649,7 +501,7 @@ export function getAdminManagedPolicyLoadErrors(): ValidationError[] {
     return cached as ValidationError[]
   }
   const { errors: fileErrors } = loadManagedFileSettings()
-  const errors = [...fileErrors, ...getMdmSettings().errors]
+  const errors = [...fileErrors]
   owner.policy.adminLoadErrors = errors
   return errors
 }
@@ -683,9 +535,7 @@ export function hasAdminPolicySurvivor(): boolean {
   if (cached !== undefined) {
     return cached as boolean
   }
-  const survivor =
-    adminSettingsSurvived(getMdmSettings().settings) ||
-    adminSettingsSurvived(loadManagedFileSettings().settings)
+  const survivor = adminSettingsSurvived(loadManagedFileSettings().settings)
   owner.policy.adminSurvivor = survivor
   return survivor
 }
@@ -735,25 +585,8 @@ export function getPolicySettingsOrigin():
   | 'hkcu'
   | 'parent'
   | null {
-  // densable YZn: helper > remote > plist/hklm > file > parent (slice/overlay) > hkcu
-  // 1. Remote (highest)
-  const remoteSettings = getRemoteManagedSettingsSyncFromCache()
-  if (remoteSettings && Object.keys(remoteSettings).length > 0) {
-    return 'remote'
-  }
-
-  // 2. Admin-only MDM (HKLM / macOS plist)
-  const mdmResult = getMdmSettings()
-  if (Object.keys(mdmResult.settings).length > 0) {
-    return getPlatform() === 'macos' ? 'plist' : 'hklm'
-  }
-
-  // 3. managed-settings.json + managed-settings.d/ (file-based, requires admin)
-  const { settings: fileSettings } = loadManagedFileSettings()
-  if (fileSettings) {
-    return 'file'
-  }
-
+  // densable YZn: helper > remote > plist/hklm > file > parent > hkcu.
+  // Anthropic remote/MDM/file/hkcu sources are product-cut.
   // densable: parentSlice || hostModelOverlay → "parent" (before hkcu)
   const { parentSettings, hostModelOverlay } = loadParentManagedAndHostOverlay()
   if (
@@ -761,12 +594,6 @@ export function getPolicySettingsOrigin():
     hostModelOverlay
   ) {
     return 'parent'
-  }
-
-  // 4. HKCU (lowest — user-writable)
-  const hkcu = getHkcuSettings()
-  if (Object.keys(hkcu.settings).length > 0) {
-    return 'hkcu'
   }
 
   return null
@@ -1214,12 +1041,8 @@ function loadSettingsFromDisk(): SettingsWithErrors {
       if (source === 'policySettings') {
         const { policySettings: resolved, policyErrors } =
           resolvePolicySettingsWithEnvMerge()
-        // Surface MDM / file / hkcu validation errors even when remote wins fields.
-        const mdmResult = getMdmSettings()
-        policyErrors.push(...mdmResult.errors)
         const { errors: fileErrors } = loadManagedFileSettings()
         policyErrors.push(...fileErrors)
-        policyErrors.push(...getHkcuSettings().errors)
 
         // densable nfc hostManagedProvider: b6i + hostModelOverlay (Gfg)
         // even when only overlay exists (no admin/hkcu).

@@ -18,7 +18,6 @@ import {
   getEnabledSettingSources,
   type SettingSource,
 } from './settings/constants.js'
-import { getMdmSettings } from './settings/mdm/settings.js'
 import {
   getInitialSettings,
   getPolicySettingsOrigin,
@@ -227,7 +226,7 @@ export function isManagedSettingsGatewaySignIn(): boolean {
  * Official: V(p()).errors + M().errors + X().errors. Not hkcu (`Re`).
  */
 function getAdminPolicyLoadErrors() {
-  return [...getMdmSettings().errors, ...loadManagedFileSettings().errors]
+  return [...loadManagedFileSettings().errors]
 }
 
 /**

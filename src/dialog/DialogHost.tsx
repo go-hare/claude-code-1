@@ -6,7 +6,6 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, useTerminalNotification } from '@anthropic/ink';
-import { ManagedSettingsSecurityDialog } from '../components/ManagedSettingsSecurityDialog/ManagedSettingsSecurityDialog.js';
 import { useNotifyAfterTimeout } from '../hooks/useNotifyAfterTimeout.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { useDialogStore, useTopDialog } from './DialogStoreContext.js';
@@ -34,10 +33,6 @@ import {
   PEER_INBOUND_APPROVAL_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
 } from './specs/jsuKinds.js';
-import {
-  MANAGED_SETTINGS_SECURITY_KIND,
-  type ManagedSettingsSecurityPayload,
-} from './specs/managedSettingsSecurity.js';
 import {
   isPermissionDialogKind,
   PERMISSION_ASK_USER_QUESTION_KIND,
@@ -151,33 +146,6 @@ export function isFullscreenModalChromeActive(opts: {
   return kaVisible || opts.toolJsxCentered === true;
 }
 /**
- * densable h2A — managed_settings_security → zko
- * densable Host answer goes through c_y debounce (same as permission kinds).
- */
-const managedSettingsSecurityRenderer: DialogRenderer = ({ payload, answer }) => {
-  const { settings, reveal } = payload as ManagedSettingsSecurityPayload;
-  return (
-    <ManagedSettingsSecurityDialog
-      key={`managed-settings-security:${reveal}`}
-      settings={settings}
-      reveal={reveal}
-      onAccept={() => {
-        void import('../utils/bgNeedsInputBridge.js').then(m => {
-          m.emitBgNeedsInput(null, 'managed-settings');
-        });
-        answer('approved');
-      }}
-      onReject={() => {
-        void import('../utils/bgNeedsInputBridge.js').then(m => {
-          m.emitBgNeedsInput(null, 'managed-settings');
-        });
-        answer('rejected');
-      }}
-    />
-  );
-};
-
-/**
  * densable nau — WRr(message, "permission_prompt") + claimIfChanged("ax-bell")
  * then aAr (screen-reader + lastBellAt 500ms + notifyBell). Returns null.
  * Process-singleton bag (no Ink WeakMap host API).
@@ -195,9 +163,8 @@ function DialogHostNotification({ dialogId, message }: { dialogId: string; messa
   return null;
 }
 
-/** densable jsu — GSn + permission_* + pealed non-permission arms */
+/** densable jsu — permission_* + pealed non-permission arms */
 const DIALOG_COMPONENTS: Record<string, DialogRenderer> = {
-  [MANAGED_SETTINGS_SECURITY_KIND]: managedSettingsSecurityRenderer,
   [PERMISSION_PROMPT_KIND]: PermissionPromptDialog,
   [PERMISSION_BASH_KIND]: PermissionBashDialog,
   [PERMISSION_FILE_KIND]: PermissionFileDialog,
@@ -289,22 +256,6 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     };
   }, [suppressReason, top?.kind, top?.id, top?.payload]);
 
-  // tip bg needs-input when managed-settings is top (old REPL register path)
-  useEffect(() => {
-    if (suppressReason != null) return;
-    if (top?.kind !== MANAGED_SETTINGS_SECURITY_KIND) return;
-    let cancelled = false;
-    void import('../utils/bgNeedsInputBridge.js').then(m => {
-      if (cancelled) return;
-      if (!m.isBgJobSession()) return;
-      m.ensureBgNeedsPermissionBridge();
-      m.emitBgNeedsInput(m.MANAGED_SETTINGS_NEEDS, 'managed-settings');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [suppressReason, top?.kind, top?.id]);
-
   // densable dQc
   if (suppressReason != null || !top) return null;
 
@@ -337,11 +288,6 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
       <Renderer payload={payload} answer={answer} />
     </Box>
   );
-}
-
-/** For focusedInputDialog / waitingFor — densable y2A[GSn]="dialog open" */
-export function isManagedSettingsSecurityDialog(kind: string | undefined): boolean {
-  return kind === MANAGED_SETTINGS_SECURITY_KIND;
 }
 
 export function isPermissionPromptDialog(kind: string | undefined): boolean {

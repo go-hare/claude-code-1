@@ -527,11 +527,7 @@ async function main(): Promise<void> {
   // main.tsx still starts them at top-level (idempotent no-ops if already fired).
   const { startCapturingEarlyInput } = await import('../utils/earlyInput.js');
   startCapturingEarlyInput();
-  const [{ startMdmRawRead }, { startKeychainPrefetch }] = await Promise.all([
-    import('../utils/settings/mdm/rawRead.js'),
-    import('../utils/secureStorage/keychainPrefetch.js'),
-  ]);
-  startMdmRawRead();
+  const { startKeychainPrefetch } = await import('../utils/secureStorage/keychainPrefetch.js');
   startKeychainPrefetch();
   profileCheckpoint('cli_before_main_import');
   const { main: cliMain } = await import('../main.jsx');

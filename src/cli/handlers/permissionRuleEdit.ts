@@ -110,10 +110,10 @@ function formatEditError(error: z.ZodError): string {
 
 function managedEditRefusal(): string | null {
   if (shouldAllowManagedPermissionRulesOnly()) {
-    return 'enterprise managed settings allow only managed permission rules; rules cannot be added or removed'
+    return 'host managed settings allow only managed permission rules; rules cannot be added or removed'
   }
   if (getAdminManagedPolicyUnreadableError() !== null) {
-    return 'enterprise managed settings could not be read, so permission rules cannot be edited'
+    return 'host managed settings could not be read, so permission rules cannot be edited'
   }
   return null
 }

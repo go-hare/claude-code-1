@@ -230,11 +230,11 @@ describe('densable 2.1.248 /update Mhr + gateway le (GC #w)', () => {
     ).toBe(true)
   })
 
-  test('login wires capturePolicySnapshot + le', () => {
+  test('login does not wire remote managed-settings relaunch', () => {
     const login = src('../../commands/login/login.tsx')
-    expect(login).toContain('capturePolicySnapshot()')
-    expect(login).toContain('relaunchAfterGatewayLogin')
-    expect(login).toContain('shouldRelaunchAfterGatewayManagedSettings')
+    expect(login).not.toContain('capturePolicySnapshot()')
+    expect(login).not.toContain('shouldRelaunchAfterGatewayManagedSettings')
+    expect(login).toContain('void refreshPolicyLimits()')
     expect(login).not.toContain('isRestrictedSession()')
   })
 

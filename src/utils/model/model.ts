@@ -21,10 +21,6 @@ import {
 } from '../context.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { resolveCatalogFamilyModelString } from './catalogFamilyDefault.js'
-import {
-  isEnterpriseOpusDefault,
-  isSonnetOnlyUnenforcedCatalog,
-} from './enterpriseDefaultModel.js'
 import { getModelStrings, resolveOverriddenModel } from './modelStrings.js'
 import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
@@ -414,17 +410,22 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
       setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
     } else if (isTeamPremiumSubscriber()) {
       setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
-    } else if (isEnterpriseOpusDefault()) {
-      // densable 2.1.251 Xbt: non-max enterprise uses the same opus default as Max
-      // unless the catalog is sonnet-only and available-models enforcement is off.
-      setting = getDefaultOpusModel() + (isOpus1mMergeEnabled() ? '[1m]' : '')
     } else {
-      // densable aw — Bedrock/Vertex default opus unless rw() (sonnet-only
-      // catalog and enforcement inactive). Foundry is not in gold aw. This
-      // arm is bl() (no Qb/[1m]): env or xt Hs("opus")??opus5, not 3P-lag opus47.
+      // densable aw — Bedrock/Vertex default opus unless sonnet-only catalog.
       const provider = getAPIProvider()
       if (provider === 'bedrock' || provider === 'vertex') {
-        setting = isSonnetOnlyUnenforcedCatalog()
+        const sonnetOnly =
+          resolveCatalogFamilyModelString(
+            'sonnet',
+            getModelStrings(),
+            provider,
+          ) !== undefined &&
+          resolveCatalogFamilyModelString(
+            'opus',
+            getModelStrings(),
+            provider,
+          ) === undefined
+        setting = sonnetOnly
           ? getDefaultSonnetModel()
           : getBuiltinDefaultOpusSetting()
       } else {
@@ -568,11 +569,7 @@ export function getCanonicalName(fullModelName: ModelName): ModelShortName {
 export function getClaudeAiUserDefaultModelDescription(
   fastMode = false,
 ): string {
-  if (
-    isMaxSubscriber() ||
-    isTeamPremiumSubscriber() ||
-    isEnterpriseOpusDefault()
-  ) {
+  if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
     // densable o=bE() default opus; i=mb(Gu(o))??"Opus"; slogan always everyday.
     const defaultOpus = getDefaultOpusModel()
     const marketing =

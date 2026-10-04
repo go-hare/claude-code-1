@@ -1,6 +1,6 @@
 /**
  * Minimal module for firing macOS keychain reads in parallel with main.tsx
- * module evaluation, same pattern as startMdmRawRead() in settings/mdm/rawRead.ts.
+ * module evaluation, so keychain reads overlap remaining imports.
  *
  * densable 2.1.238 (`joa` / `Akd` / `LDn` / `F8o` / `$8o` / `Uoa`):
  *   - no `process.platform === 'darwin'` guard (missing `security` → Akd catch null)
@@ -85,7 +85,7 @@ function spawnSecurity(
 
 /**
  * densable `joa` — fire both keychain reads in parallel. Called at main.tsx
- * top-level immediately after startMdmRawRead(). Bare mode is a no-op.
+ * top-level. Bare mode is a no-op.
  * Missing `security` (non-darwin) is swallowed by Akd try/catch → null.
  */
 export function startKeychainPrefetch(): void {

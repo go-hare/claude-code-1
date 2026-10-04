@@ -8,11 +8,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import {
-  extractDangerousSettings,
-  hasDangerousSettings,
-} from '../../components/ManagedSettingsSecurityDialog/utils.js'
-import type { SettingsJson } from '../settings/types.js'
 import { isSafeManagedEnv, SAFE_ENV_VARS } from '../managedEnvConstants.js'
 
 const LEH_248 = [
@@ -60,21 +55,5 @@ describe('densable 2.1.248 #42 managed-env LEh watchdog', () => {
       expect(lehSrc).not.toContain(needle)
       expect(SAFE_ENV_VARS.has(needle.toUpperCase())).toBe(false)
     }
-  })
-
-  test('248 LEh env alone does not trigger managed-settings approval', () => {
-    const settings: SettingsJson = {
-      env: {
-        MCP_CONNECTION_NONBLOCKING: 'true',
-        CLAUDE_ENABLE_BYTE_WATCHDOG: '1',
-        CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK: '0',
-        CLAUDE_ENABLE_STREAM_WATCHDOG: '0',
-        API_TIMEOUT_MS: '60000',
-        CLAUDE_STREAM_IDLE_TIMEOUT_MS: '300000',
-      },
-    }
-    const dangerous = extractDangerousSettings(settings)
-    expect(hasDangerousSettings(dangerous)).toBe(false)
-    expect(Object.keys(dangerous.envVars)).toEqual([])
   })
 })

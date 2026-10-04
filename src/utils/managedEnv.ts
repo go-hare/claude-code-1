@@ -1,4 +1,3 @@
-import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettings/syncCache.js'
 import { clearCACertsCache } from './caCerts.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
@@ -631,14 +630,6 @@ export function applySafeConfigEnvironmentVariables(): void {
       filterSettingsEnv(getSettingsForSource(source)?.env, source),
     )
   }
-
-  // Compute remote-managed-settings eligibility now, with userSettings and
-  // flagSettings env applied. Eligibility reads CLAUDE_CODE_USE_BEDROCK,
-  // ANTHROPIC_BASE_URL — both settable via settings.env.
-  // getSettingsForSource('policySettings') below consults the remote cache,
-  // which guards on this. The two-phase structure makes the ordering
-  // dependency visible: non-policy env → eligibility → policy env.
-  isRemoteManagedSettingsEligible()
 
   Object.assign(
     process.env,

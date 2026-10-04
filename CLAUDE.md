@@ -252,7 +252,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 `TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
 
-**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）
+**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）；Anthropic Team/Enterprise 控制面（`remoteManagedSettings`、MDM、org tips、CRI policy webhook、managed-settings security 对话框）。`policyLimits` 永远允许。
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 

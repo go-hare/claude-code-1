@@ -65,7 +65,6 @@ import {
   RESUME_RETURN_KIND,
   SANDBOX_NETWORK_ACCESS_KIND,
 } from '../specs/jsuKinds.js'
-import { MANAGED_SETTINGS_SECURITY_KIND } from '../specs/managedSettingsSecurity.js'
 import {
   PERMISSION_ASK_USER_QUESTION_KIND,
   PERMISSION_BASH_KIND,
@@ -158,7 +157,7 @@ describe('Usu (DIALOG_NOTIFICATIONS)', () => {
     )
 
     for (const kind of [
-      MANAGED_SETTINGS_SECURITY_KIND,
+      'managed_settings_security',
       COST_THRESHOLD_KIND,
       RESUME_RETURN_KIND,
       IDE_ONBOARDING_KIND,

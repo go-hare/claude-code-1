@@ -4,11 +4,6 @@
  */
 import { describe, expect, test } from 'bun:test'
 import {
-  extractDangerousSettings,
-  hasDangerousSettings,
-} from '../../components/ManagedSettingsSecurityDialog/utils.js'
-import type { SettingsJson } from '../settings/types.js'
-import {
   customHeadersRequireApproval,
   HEADER_NAME_TOKEN_RE,
   inspectCustomHeaderValue,
@@ -76,21 +71,5 @@ describe('densable 2.1.251 #67 custom header approval', () => {
     expect(
       customHeadersRequireApproval('X-Request-Id: abc\r\nX-Trace: 1'),
     ).toBe(false)
-  })
-
-  test('managed settings project the sensitive block into envVars', () => {
-    const sensitive = extractDangerousSettings({
-      env: { ANTHROPIC_CUSTOM_HEADERS: 'Authorization: Bearer x' },
-    } as SettingsJson)
-    expect(hasDangerousSettings(sensitive)).toBe(true)
-    expect(sensitive.envVars.ANTHROPIC_CUSTOM_HEADERS).toContain(
-      'Authorization',
-    )
-
-    const safe = extractDangerousSettings({
-      env: { ANTHROPIC_CUSTOM_HEADERS: 'X-Request-Id: abc' },
-    } as SettingsJson)
-    expect(hasDangerousSettings(safe)).toBe(false)
-    expect(safe.envVars.ANTHROPIC_CUSTOM_HEADERS).toBeUndefined()
   })
 })

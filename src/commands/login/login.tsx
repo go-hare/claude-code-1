@@ -10,12 +10,6 @@ import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
 import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
-import {
-  holdConsentHandoff,
-  registerConsentNeededRelease,
-  yieldConsentMacrotask,
-} from '../../services/remoteManagedSettings/consentRequester.js';
-import { refreshRemoteManagedSettings } from '../../services/remoteManagedSettings/index.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { createSystemMessage, stripSignatureBlocks } from '../../utils/messages.js';
 import type { Message } from '../../types/message.js';
@@ -74,65 +68,6 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
           } catch {
             gatewayActive = false;
           }
-          // densable b6 / CHn / PKt — gateway login holds handoff during LKt
-          if (gatewayActive) {
-            const releaseBox: { release: (() => void) | null } = { release: null };
-            const disposeHandoff = registerConsentNeededRelease(() => {
-              releaseBox.release ??= holdConsentHandoff();
-              consentNeeded = true;
-              onDone(LOGIN_HANDOFF_SIGNED_IN, { display: 'system' });
-              return yieldConsentMacrotask();
-            });
-            let gatewayRelaunchMessage: string | undefined;
-            try {
-              // official BJe before LKt — baseline for LNe / hasPolicyDiverged
-              const { capturePolicySnapshot, shouldRelaunchAfterGatewayManagedSettings, relaunchAfterGatewayLogin } =
-                await import('../../utils/gatewayLoginRelaunch.js');
-              capturePolicySnapshot();
-              await refreshRemoteManagedSettings();
-              const { zre } = await import('../../services/remoteManagedSettings/loadStatus.js');
-              const status = zre();
-              // official !fetchSucceeded || LNe() → le(...)
-              if (status && shouldRelaunchAfterGatewayManagedSettings(status) && !consentNeeded) {
-                let hostname = 'gateway';
-                try {
-                  const { getGatewayAuth } = await import('../../utils/gatewayEnv.js');
-                  const auth = getGatewayAuth();
-                  if (auth?.url) hostname = new URL(auth.url).hostname;
-                } catch {
-                  // keep default
-                }
-                const failure =
-                  status.state === 'failed' || status.state === 'stale_cache' ? status.failure : undefined;
-                const currentAccount = getOauthAccountInfoFromDisk();
-                const sameAccount =
-                  previousAccount?.accountUuid === currentAccount?.accountUuid &&
-                  previousAccount?.organizationUuid === currentAccount?.organizationUuid;
-                const accountSwitched = previousAccount?.accountUuid !== undefined && !sameAccount;
-                const appState = context.getAppState();
-                const result = await relaunchAfterGatewayLogin({
-                  hostname,
-                  failure,
-                  accountSwitched,
-                  toolPermissionContext: appState.toolPermissionContext,
-                  proactivityLevel: context.getProactivityLevel?.() ?? appState.proactivityLevel,
-                });
-                if (result.kind === 'ended') {
-                  gatewayRelaunchMessage = result.message;
-                }
-              }
-            } finally {
-              disposeHandoff();
-              releaseBox.release?.();
-            }
-            if (gatewayRelaunchMessage) {
-              onDone(gatewayRelaunchMessage, { display: 'system' });
-              return;
-            }
-          } else {
-            void refreshRemoteManagedSettings();
-          }
-          // Refresh policy limits after login (non-blocking)
           void refreshPolicyLimits();
           // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
           resetUserCache();

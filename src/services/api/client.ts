@@ -49,7 +49,6 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
-import { criPolicyPrecheckFetchInput } from '../../utils/criPolicyWebhook.js'
 import { applyGzipRequestBodyInit } from '../../utils/gzipRequestBodies.js'
 import {
   formatGatewaySessionExpiredError,
@@ -914,7 +913,6 @@ function buildFetch(
     }
     const nextInit = { ...init, headers }
     // densable En_ — real path/body; before gzip so webhook sees JSON.
-    await criPolicyPrecheckFetchInput(url || input, nextInit)
     // Official x_h: compress eligible first-party request bodies with gzip
     // and pad JSON body whitespace for length fingerprint resistance.
     const withGzip = applyGzipRequestBodyInit(url, nextInit, { storageV5 })

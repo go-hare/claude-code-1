@@ -63,9 +63,9 @@ describe('resolveHostWaitingFor (densable y2A)', () => {
     )
   })
 
-  test('managed / soft → dialog open', () => {
+  test('soft NMs → dialog open; GSn kind is product-cut', () => {
     expect(resolveHostWaitingFor('managed_settings_security', {})).toBe(
-      'dialog open',
+      undefined,
     )
     expect(resolveHostWaitingFor('cost_threshold', {})).toBe('dialog open')
   })

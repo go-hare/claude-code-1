@@ -14,7 +14,12 @@
  */
 
 import { isSessionPersistenceDisabled } from '../bootstrap/state.js'
-import type { RemoteManagedSettingsFailure } from '../services/remoteManagedSettings/loadStatus.js'
+type RemoteManagedSettingsFailure = {
+  kind?: string
+  message?: string
+  errorKind?: string
+  httpStatus?: number
+}
 import {
   acceptTuiRelaunch,
   flushStreamsBeforeRelaunchExit,
@@ -34,7 +39,7 @@ let policySnapshot: SettingsJson | null | undefined
 
 /**
  * official BJe / capturePolicySnapshot.
- * Call before refreshRemoteManagedSettings on gateway login.
+ * Call before policy refresh on gateway login.
  */
 export function capturePolicySnapshot(): void {
   try {

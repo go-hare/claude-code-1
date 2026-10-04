@@ -454,10 +454,10 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     const initSrc = src('../../entrypoints/init.ts')
     expect(initSrc).toContain('seedUserSettings')
     expect(initSrc).toContain('settingsPrime')
-    expect(initSrc).toContain('primeRemoteSettingsBackendView')
+    expect(initSrc).not.toContain('primeRemoteSettingsBackendView')
     expect(initSrc).toContain('getPinnedStorageV5()')
     expect(initSrc).toContain('getSettingsOwner()')
-    expect(initSrc).toContain('init_remote_settings_primed')
+    expect(initSrc).not.toContain('init_remote_settings_primed')
     expect(initSrc).toContain(
       'await settingsPrime(getPinnedStorageV5(), getSettingsOwner())',
     )
@@ -553,7 +553,7 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     expect(primerSrc).toContain('ownershipProbeAhead')
     expect(primerSrc).toContain('seedAttestedSystemTier')
     expect(primerSrc).toContain('parseSettingsFileContent')
-    expect(primerSrc).toContain('primeRemoteSettingsBackendView')
+    expect(primerSrc).not.toContain('primeRemoteSettingsBackendView')
     expect(primerSrc).toContain('export async function loadSettingsUnderPrime')
     expect(primerSrc).toContain('export async function seedUserSettings')
     expect(primerSrc).toContain('legacyLocalSettingsPath')
@@ -571,17 +571,6 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     expect(primerSrc).not.toContain('// UNKNOWN @179534300')
     expect(primerSrc).not.toContain('// UNKNOWN @179529582')
     expect(primerSrc).not.toContain('// UNKNOWN @179162866')
-
-    const utSrc = src('../settings/remoteSettingsBackendView.ts')
-    expect(utSrc).toContain('export class RemoteSettingsBackendView')
-    expect(utSrc).toContain(
-      'export async function primeRemoteSettingsBackendView',
-    )
-    expect(utSrc).toContain(
-      'export async function runRemoteSettingsBackendPrime',
-    )
-    expect(utSrc).toContain('Official Yv(){return}')
-    expect(utSrc).toContain('Official Ut @179163791')
 
     const cache = src('../settings/settingsCache.ts')
     expect(cache).toContain('primer: SettingsPrimer | undefined')
@@ -693,13 +682,11 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     owner.primer!.dispose()
   })
 
-  test('settingsPrime calls primeRemoteSettingsBackendView (_Ke path)', async () => {
+  test('settingsPrime does not prime a remote managed-settings backend', async () => {
     const primerSrc = src('../settings/settingsPrimer.ts')
-    expect(primerSrc).toContain('primeRemoteSettingsBackendView')
+    expect(primerSrc).not.toContain('primeRemoteSettingsBackendView')
     expect(primerSrc).toContain('void primeStorageBackendView(storageV5)')
-    const utSrc = src('../settings/remoteSettingsBackendView.ts')
-    expect(utSrc).toContain('Official _Ke @179162866')
-    expect(utSrc).toContain('new RemoteSettingsBackendView')
+    expect(primerSrc).toContain('return undefined')
   })
 
   test('SettingsOwner retain skips restore when D on but primer unset', () => {
@@ -825,7 +812,7 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     owner.primer.dispose()
   })
 
-  test('seedAttestedSystemTier seeds empty policy tier when system serving absent', async () => {
+  test('seedAttestedSystemTier does not seed OS managed-settings after product-cut', async () => {
     pinHoverRest(true)
     const owner = getSettingsOwner()
     const managedRoot = getManagedFilePath()
@@ -855,14 +842,9 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     }
     owner.primer = new SettingsPrimer(storageV5 as never, owner)
     await owner.primer.whenIdle()
-    expect(owner.systemSpaceServingLogged).toBe(true)
-    expect(owner.systemAttestationContradicted).toBe(false)
-    expect(owner.folderListings.get(dropInDir)).toEqual([])
-    expect(owner.parsedFiles.get(basePath)).toEqual({
-      settings: null,
-      errors: [],
-    })
-    expect(owner.primedFiles.has(basePath)).toBe(true)
+    expect(owner.folderListings.get(dropInDir)).toBeUndefined()
+    expect(owner.parsedFiles.get(basePath)).toBeUndefined()
+    expect(owner.primedFiles.has(basePath)).toBe(false)
     owner.primer.dispose()
   })
 })

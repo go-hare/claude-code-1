@@ -13,7 +13,6 @@ import {
   KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS,
   ensureKeychainPrefetchCompleted,
 } from './secureStorage/keychainPrefetch.js'
-import { ensureMdmSettingsLoaded } from './settings/mdm/settings.js'
 
 let settingsLoaded = false
 let policyCached: { error: string | null } | null = null
@@ -28,7 +27,6 @@ export async function ensureFastPathSettingsLoaded(): Promise<void> {
   if (settingsLoaded) return
   settingsLoaded = true
   enableConfigs()
-  await ensureMdmSettingsLoaded()
   await ensureKeychainPrefetchCompleted(KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS)
   applySafeConfigEnvironmentVariables()
 }

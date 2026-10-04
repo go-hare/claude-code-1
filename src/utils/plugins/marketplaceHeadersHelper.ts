@@ -7,7 +7,6 @@
 
 import { getAllowedSettingSources } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { isRemoteManagedPolicyConsented } from '../../services/remoteManagedSettings/syncCacheState.js'
 import { checkHasTrustDialogAccepted } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
@@ -674,8 +673,7 @@ export function overlayTrustedSettingsEntryAuth(options: {
     }
     if (
       trusted.headersHelper !== undefined &&
-      trusted.operatorTier === 'policySettings' &&
-      !isRemoteManagedPolicyConsented()
+      trusted.operatorTier === 'policySettings'
     ) {
       throw new EntryHelperPolicyError(
         `This plugin's headersHelper was not run: ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}.`,
@@ -847,10 +845,7 @@ export async function resolveUrlMarketplaceHeaders(
     return staticHeaders
   }
 
-  if (
-    trusted.authoredBy === 'policySettings' &&
-    !isRemoteManagedPolicyConsented()
-  ) {
+  if (trusted.authoredBy === 'policySettings') {
     throw new PluginCommandRefusedError(
       `${label}: headersHelper not run — ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}. The marketplace was not fetched.`,
       'marketplace headersHelper from remote managed settings not yet verified and consented',

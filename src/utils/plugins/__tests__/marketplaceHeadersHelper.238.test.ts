@@ -107,16 +107,10 @@ import {
   headersHelperPolicyRefusal,
   isHeadersHelperDisabledByPolicy,
 } from '../pluginPolicy.js'
-import {
-  resetSyncCache,
-  setSessionCache,
-} from '../../../services/remoteManagedSettings/syncCacheState.js'
-import type { SettingsJson } from '../../../utils/settings/types.js'
 
 describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
   beforeEach(() => {
     clearMarketplaceHeadersHelperMemo()
-    resetSyncCache()
     execMock.mockClear()
     execMock.mockImplementation(async () => ({
       stdout: '{"Authorization":"Bearer minted"}',
@@ -127,7 +121,6 @@ describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
 
   afterEach(() => {
     clearMarketplaceHeadersHelperMemo()
-    resetSyncCache()
   })
 
   test('mintHeadersFromHelper parses JSON string headers', async () => {
@@ -285,19 +278,6 @@ describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
   })
 
   test('policySettings trusted helper throws when remote policy is unconsented', async () => {
-    // Drive tip psr false without inventing Z_e/sIn: populated sessionCache
-    // that is not Qxn (verified+consented) → !isRemoteManagedPolicyConsented.
-    const remote: SettingsJson = {
-      extraKnownMarketplaces: {
-        demo: {
-          source: {
-            source: 'url',
-            url: 'https://example.com/marketplace.json',
-          },
-        },
-      },
-    }
-    setSessionCache(remote)
     execMock.mockClear()
     await expect(
       resolveUrlMarketplaceHeaders(
@@ -758,11 +738,7 @@ describe('P5r/mqS archive header origin (densable 2.1.238)', () => {
 
 describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
   beforeEach(() => {
-    resetSyncCache()
     execMock.mockClear()
-  })
-  afterEach(() => {
-    resetSyncCache()
   })
 
   const archiveUrl = 'https://cdn.example.com/demo.zip'
@@ -804,17 +780,6 @@ describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
   })
 
   test('overlay policySettings helper throws O3n before q9 when !psr', () => {
-    const remote: SettingsJson = {
-      extraKnownMarketplaces: {
-        ops: {
-          source: {
-            source: 'url',
-            url: 'https://cdn.example.com/marketplace.json',
-          },
-        },
-      },
-    }
-    setSessionCache(remote)
     const options = {
       entry: catalogEntry,
       archiveUrl,

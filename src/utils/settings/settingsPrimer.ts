@@ -31,7 +31,6 @@ import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { FLAG_SETTINGS_MAX_BYTES } from './constants.js'
 import type { SettingSource } from './constants.js'
 import { getManagedFilePath } from './managedPath.js'
-import { primeRemoteSettingsBackendView } from './remoteSettingsBackendView.js'
 import {
   getSettingsOwner,
   resetSettingsCache,
@@ -341,72 +340,18 @@ const EMPTY_MANAGED_LISTING: readonly string[] = Object.freeze([])
  * walk/seed/clear, emptyParsedSettings (Fte).
  * Gold: gold-248-wKn-v-seed.txt
  */
+/** Product-cut: do not seed OS managed-settings.json / drop-ins. */
 function seedAttestedSystemTier(
-  storageV5: StorageV5,
-  store: SettingsOwner,
-  epoch: number,
+  _storageV5: StorageV5,
+  _store: SettingsOwner,
+  _epoch: number,
 ):
   | {
       listings: { dir: string; names: readonly string[] }[]
       layers: { path: string; parsed: ParsedSettings }[]
     }
   | undefined {
-  if (
-    storageV5.hostFiles.serving('system') !== 'absent' ||
-    store.systemAttestationContradicted
-  ) {
-    return
-  }
-  if (explicitManagedSettingsPath() !== undefined) {
-    if (!store.systemSpaceServingLogged) {
-      store.systemSpaceServingLogged = true
-      logForDebugging(
-        "settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself",
-      )
-    }
-    return
-  }
-  const i = managedSettingsRoots().map(r => ({
-    dropInDir: join(r, 'managed-settings.d'),
-    basePath: join(r, 'managed-settings.json'),
-  }))
-  if (
-    i.some(({ basePath: r, dropInDir: a }) => store.walkReadManagedFileIn(r, a))
-  ) {
-    store.systemAttestationContradicted = true
-    for (const { basePath: r, dropInDir: a } of i) {
-      store.clearFolderListing(a, epoch)
-      store.unseedParsedFile(r, 'policySettings', epoch)
-    }
-    logError(
-      Error(
-        "settings: a managed-settings file was read from a folder the host attested absent ('system' space); the attestation is ignored for the rest of this process and the policy walk reads the host's files itself",
-      ),
-    )
-    return
-  }
-  if (!store.systemSpaceServingLogged) {
-    store.systemSpaceServingLogged = true
-    logForDebugging(
-      "settingsPrime: the host attests this machine has no OS policy folder ('system' absent); the policy walk is served an empty managed-settings file tier without reading the host",
-    )
-  }
-  for (const { basePath: r, dropInDir: a } of i) {
-    store.seedFolderListing(a, [...EMPTY_MANAGED_LISTING], epoch)
-    if (!store.walkRead(r)) {
-      store.seedParsedFile(r, 'policySettings', emptyParsedSettings(), epoch)
-    }
-  }
-  return {
-    listings: i.map(({ dropInDir: r }) => ({
-      dir: r,
-      names: EMPTY_MANAGED_LISTING,
-    })),
-    layers: i.map(({ basePath: r }) => ({
-      path: r,
-      parsed: emptyParsedSettings(),
-    })),
-  }
+  return undefined
 }
 
 /**
@@ -991,24 +936,13 @@ function installManagedLayerSeeds(
   }
 }
 
-/** Official O @179531012 — managed-settings seedLogged. */
+/** Official O @179531012 — managed-settings seedLogged. Product-cut: no OS policy files. */
 async function seedManagedSettingsTier(
-  storageV5: StorageV5,
+  _storageV5: StorageV5,
   store: SettingsOwner,
   epoch: number,
 ): Promise<boolean> {
-  if (seedAttestedSystemTier(storageV5, store, epoch) !== undefined) {
-    return store.epoch === epoch
-  }
-  const i = await readManagedSettingsTierAhead(storageV5, store)
-  if (i === undefined) {
-    clearManagedSettingsSeeds(store, epoch)
-    return true
-  }
-  const r = await i.reads
-  if (store.epoch !== epoch) return false
-  const { verdicts: a } = installManagedFolderListings(store, i, epoch)
-  installManagedLayerSeeds(store, i, r, a, epoch)
+  clearManagedSettingsSeeds(store, epoch)
   return true
 }
 
@@ -1126,63 +1060,14 @@ async function reseedAndRetainLayer(
 
 /**
  * Official N @179533672 — managed-settings re-seed + retain disposers.
+ * Product-cut: no OS policy files.
  */
 async function reseedManagedSettingsForRetain(
-  storageV5: StorageV5,
+  _storageV5: StorageV5,
   store: SettingsOwner,
 ): Promise<Array<() => void>> {
-  if (!isHoverRestOn()) return []
-  const s = store.epoch
-  try {
-    const i = seedAttestedSystemTier(storageV5, store, s)
-    if (i !== undefined) {
-      return [
-        ...i.listings.map(({ dir: g, names: d }) =>
-          store.retainFolderListing(g, [...d]),
-        ),
-        ...i.layers.map(({ path: g, parsed: d }) => store.retainLayer(g, d)),
-      ]
-    }
-    const r = await readManagedSettingsTierAhead(storageV5, store)
-    if (r === undefined) {
-      clearManagedSettingsSeeds(store, s)
-      return []
-    }
-    const a = await r.reads
-    if (store.epoch !== s) return []
-    const { kept, verdicts: o } = installManagedFolderListings(store, r, s)
-    const retainedLayers: Array<() => void> = []
-    // Mirror official B: install then retain successfully seeded layers.
-    const before = new Set(store.managedFileReads.keys())
-    installManagedLayerSeeds(store, r, a, o, s)
-    for (const g of kept) {
-      retainedLayers.push(store.retainFolderListing(g.dir, g.names))
-    }
-    for (const layer of r.layers) {
-      const parsed = store.parsedFiles.get(layer.path)
-      if (parsed === undefined) continue
-      if (
-        !store.primedFiles.has(layer.path) &&
-        !before.has(layer.path) &&
-        !store.managedFileReads.has(layer.path)
-      ) {
-        continue
-      }
-      if (
-        store.managedFileReads.has(layer.path) ||
-        store.primedFiles.has(layer.path)
-      ) {
-        retainedLayers.push(store.retainLayer(layer.path, parsed))
-      }
-    }
-    return retainedLayers
-  } catch (i) {
-    logForDebugging(
-      `settings: managed settings not re-seeded: ${errorMessage(i)}; the file reads serve`,
-      { level: 'warn' },
-    )
-    return []
-  }
+  clearManagedSettingsSeeds(store, store.epoch)
+  return []
 }
 
 /**
@@ -1246,10 +1131,12 @@ export const resetSettingsCacheWithBackendRead = loadSettingsUnderPrime
 
 /**
  * Official _Ke @179162866 — storage backendView priming before SKn.
- * Leftover → primeRemoteSettingsBackendView (Ut/uo).
+ * Product-cut: no remote managed-settings backend view.
  */
-async function primeStorageBackendView(storageV5: StorageV5): Promise<unknown> {
-  return primeRemoteSettingsBackendView(storageV5)
+async function primeStorageBackendView(
+  _storageV5: StorageV5,
+): Promise<unknown> {
+  return undefined
 }
 
 /**
@@ -1562,7 +1449,7 @@ export async function seedUserSettings(
 /**
  * Official `$pn` @179527115 — leftover settingsPrime.
  * Gate: D() && storageV5 defined; second prime ignored if other backend.
- * `_Ke` → primeRemoteSettingsBackendView before construct.
+ * `_Ke` product-cut: no remote backend view.
  * Official export alias: primeSettings.
  */
 export async function settingsPrime(

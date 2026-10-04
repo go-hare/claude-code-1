@@ -207,11 +207,11 @@ bin/claude.exe (原生二进制)
 | 19 | `--tmux` + `-w/--worktree` | — | exec 进 tmux worktree |
 | 20 | `--update` / `--upgrade` 单独出现 | — | 改写 argv 为 `update` |
 | 21 | `--bare` | — | 提前设 `CLAUDE_CODE_SIMPLE=1` |
-| 22 | **默认** | — | earlyInput + MDM/keychain 预取 → `main.tsx` |
+| 22 | **默认** | — | earlyInput + keychain 预取 → `main.tsx` |
 
 默认路径细节（`cli.tsx` L485–500）：
 1. `startCapturingEarlyInput()` — 在重型 import 之前抢先捕获 stdin
-2. 并行 `startMdmRawRead()` + `startKeychainPrefetch()`
+2. `startKeychainPrefetch()`
 3. 动态 `import('../main.jsx')` → `await cliMain()`
 
 ### 3.4 `src/main.tsx` — Commander 层
@@ -230,12 +230,12 @@ bin/claude.exe (原生二进制)
 9. `eagerLoadSettings()` → `await run()`（Commander）
 
 **Commander `preAction` hook**（每个被执行的命令都跑，`--help` 除外）：
-1. 等 MDM + keychain 预取完成
+1. 等 keychain 预取完成
 2. **`await init()`**（见下）
 3. `initSinks()` — analytics sink
 4. `--plugin-dir` 写入 bootstrap
 5. **`runMigrations()`** — 配置迁移
-6. fire-and-forget：`loadRemoteManagedSettings()`、`loadPolicyLimits()`
+6. fire-and-forget：`loadPolicyLimits()`
 
 ### 3.5 `src/entrypoints/init.ts` — 一次性初始化
 
@@ -1437,7 +1437,7 @@ GrowthBook kill-switch）、`useVoice`/`useVoiceIntegration`、`VoiceProvider`�
 3. `projectSettings` → `.claude/settings.json`
 4. `localSettings` → `.claude/settings.local.json`
 5. `flagSettings` → `--settings <path>` + SDK inline
-6. `policySettings` → 企业/managed（**多数字段最高**）
+6. `policySettings` → host overlay only（Anthropic 企业源已产品拆除）
 
 **特殊合并规则**
 - 数组（除 `fallbackModel`）：拼接/求并（`mergeArrays`）
@@ -1445,15 +1445,11 @@ GrowthBook kill-switch）、`useVoice`/`useVoiceIntegration`、`VoiceProvider`�
 - `extraKnownMarketplaces`：按条目浅合并
 - `availableModels` / `enforceAvailableModels`：policy 合并后**再以替换语义重新应用**
 
-**policy 内部解析**（字段首源胜出；`env` 按键合并）
-1. 远程 managed settings（API）
-2. MDM（HKLM / macOS plist）
-3. 文件 `managed-settings.json` + `managed-settings.d/*.json`
-4. 父/host overlay（`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`）
-5. HKCU（policy 内最低）
+**policy 内部解析**（Anthropic 企业源已产品拆除）
+1. 远程 managed settings / MDM / `managed-settings.json` / HKCU：**不再读取**
+2. 父/host overlay（`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`）仍可贡献 `policySettings`
 
-> 2.1.223+ 起：远程 + 机器本地 `env` 块**按键合并** —— 服务端下发的 settings
-> 不再抹掉本地管理员 env。
+`policyLimits` 永远允许、永不 enforce。
 
 **安全敏感键**（`getSecuritySensitiveSetting`）只走 **policy → flag → user**，
 project/local 被排除（如 `skipDangerousModePermissionPrompt`）。

@@ -6,7 +6,6 @@
  * marketplaceManager.ts which transitively reaches most of the plugin subsystem.
  */
 
-import { isRemoteManagedPolicyConsented } from '../../services/remoteManagedSettings/syncCacheState.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import type { MarketplaceSource } from './schemas.js'
 
@@ -43,53 +42,6 @@ export type HeadersHelperPolicyRefusal =
   | 'lockdown'
   | 'remote_policy_unconsented'
 
-// densable psr = Z_e()!=="remote" || Qxn() — imported from the leaf
-// syncCacheState (not syncCache) to avoid the auth SCC. No env stand-in.
-
-/**
- * densable `JLa`-style structural equality for policy declaration matching.
- * Mirrors marketplaceHelpers `areSourcesEqual` without importing that module
- * (circular risk via marketplaceManager).
- */
-function policySourcesEqual(
-  a: MarketplaceSource,
-  b: MarketplaceSource,
-): boolean {
-  if (a.source !== b.source) return false
-  switch (a.source) {
-    case 'url':
-      return a.url === (b as typeof a).url
-    case 'github': {
-      const other = b as typeof a
-      return (
-        a.repo === other.repo &&
-        (a.ref || undefined) === (other.ref || undefined) &&
-        (a.path || undefined) === (other.path || undefined)
-      )
-    }
-    case 'git': {
-      const other = b as typeof a
-      return (
-        a.url === other.url &&
-        (a.ref || undefined) === (other.ref || undefined) &&
-        (a.path || undefined) === (other.path || undefined)
-      )
-    }
-    case 'npm':
-      return a.package === (b as typeof a).package
-    case 'file':
-    case 'directory':
-      return a.path === (b as typeof a).path
-    case 'settings':
-      return a.name === (b as typeof a).name
-    case 'hostPattern':
-    case 'pathPattern':
-      return false
-    default:
-      return false
-  }
-}
-
 /**
  * densable `fgt` / `headersHelperPolicyRefusal`.
  * Returns null when helper may run; otherwise refusal kind.
@@ -104,26 +56,10 @@ export function headersHelperPolicyRefusal(
   if (source === undefined) {
     return 'lockdown'
   }
-  if (!isRemoteManagedPolicyConsented()) {
-    return 'remote_policy_unconsented'
-  }
-  const policy = getSettingsForSource('policySettings')
-  const extra = policy?.extraKnownMarketplaces ?? {}
-  if (source.source === 'settings' && marketplaceName !== undefined) {
-    const declared = Object.hasOwn(extra, marketplaceName)
-      ? extra[marketplaceName]
-      : undefined
-    const declaredSource = declared?.source as MarketplaceSource | undefined
-    if (declaredSource?.source !== 'settings') {
-      return 'lockdown'
-    }
-    return null
-  }
-  const allowed = Object.values(extra).some(entry => {
-    const declared = entry?.source as MarketplaceSource | undefined
-    return declared !== undefined && policySourcesEqual(source, declared)
-  })
-  return allowed ? null : 'lockdown'
+  // densable fgt: when command sources are disabled, a concrete marketplace
+  // source is remote-policy-unconsented (extraKnownMarketplaces compare is
+  // unreachable after Anthropic remote consent was product-cut).
+  return 'remote_policy_unconsented'
 }
 
 /**

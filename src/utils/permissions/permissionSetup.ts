@@ -20,7 +20,6 @@ import {
   SETTING_SOURCES,
 } from '../settings/constants.js'
 import { isAdminManagedPolicyOrigin } from '../forceLoginMethod.js'
-import { isRemoteManagedSettingsVerified } from '../../services/remoteManagedSettings/syncCacheState.js'
 import {
   canTrustAdminPolicyCascade,
   getPolicySettingsOrigin,
@@ -1855,11 +1854,7 @@ export function managedPolicyDisablesAutoMode(): boolean {
  */
 export function managedPolicyDisablesAutoModeFromTrustedOrigin(): boolean {
   const origin = getPolicySettingsOrigin()
-  return (
-    (isAdminManagedPolicyOrigin(origin) ||
-      (origin === 'remote' && isRemoteManagedSettingsVerified())) &&
-    managedPolicyDisablesAutoMode()
-  )
+  return isAdminManagedPolicyOrigin(origin) && managedPolicyDisablesAutoMode()
 }
 
 /**

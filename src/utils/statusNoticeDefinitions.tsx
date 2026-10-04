@@ -17,7 +17,6 @@ import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/Ag
 import { getAgentDescriptionsTotalTokens, AGENT_DESCRIPTIONS_THRESHOLD } from './statusNoticeHelpers.js';
 import { isSupportedJetBrainsTerminal, toIDEDisplayName, getTerminalIdeType } from './ide.js';
 import { isJetBrainsPluginInstalledCachedSync } from './jetbrains.js';
-import { formatRemoteManagedSettingsStartupWarning } from '../services/remoteManagedSettings/loadStatus.js';
 import { getUdsStartFailureCause, getUdsStartFailureReason } from './udsMessaging.js';
 
 // Types
@@ -205,32 +204,6 @@ const crossSessionMessagingOffNotice: StatusNoticeDefinition = {
   ),
 };
 
-/**
- * Official Gf @201568447 — startup warning when remote managed settings
- * failed / stale_cache. Same StatusNotices table as Bf / Uf.
- */
-const remoteManagedSettingsLoadFailNotice: StatusNoticeDefinition = {
-  id: 'remote-managed-settings-load-fail',
-  type: 'warning',
-  isActive: () => formatRemoteManagedSettingsStartupWarning() !== undefined,
-  render: () => {
-    const text = formatRemoteManagedSettingsStartupWarning();
-    if (!text) return null;
-    const dimMark = ' \u00b7 /status for details';
-    const dimAt = text.endsWith(dimMark) ? text.length - dimMark.length : -1;
-    const main = dimAt === -1 ? text : text.slice(0, dimAt);
-    return (
-      <Box flexDirection="row">
-        <Text color="warning">{figures.warning}</Text>
-        <Text color="warning">
-          {main}
-          {dimAt === -1 ? null : <Text dimColor>{dimMark}</Text>}
-        </Text>
-      </Box>
-    );
-  },
-};
-
 const jetbrainsPluginNotice: StatusNoticeDefinition = {
   id: 'jetbrains-plugin-install',
   type: 'info',
@@ -272,7 +245,6 @@ export const statusNoticeDefinitions: StatusNoticeDefinition[] = [
   bothAuthMethodsNotice,
   jetbrainsPluginNotice,
   crossSessionMessagingOffNotice,
-  remoteManagedSettingsLoadFailNotice,
 ];
 
 // Helper functions for external use

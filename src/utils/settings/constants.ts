@@ -95,7 +95,7 @@ export function getSettingSourceDisplayNameLowercase(
     case 'flagSettings':
       return 'command line arguments'
     case 'policySettings':
-      return 'enterprise managed settings'
+      return 'host managed settings'
     case 'cliArg':
       return 'CLI argument'
     case 'command':
@@ -136,7 +136,7 @@ export function getSettingSourceDisplayNameCapitalized(
     case 'flagSettings':
       return 'Command line arguments'
     case 'policySettings':
-      return 'Enterprise managed settings'
+      return 'Host managed settings'
     case 'cliArg':
       return 'CLI argument'
     case 'command':

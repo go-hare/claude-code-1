@@ -36,7 +36,6 @@ import {
   PERMISSION_SKILL_KIND,
   PERMISSION_WEBFETCH_KIND,
 } from '../specs/permissionKinds.js'
-import { MANAGED_SETTINGS_SECURITY_KIND } from '../specs/managedSettingsSecurity.js'
 import {
   createDialogMailbox,
   createDialogStore,
@@ -237,8 +236,8 @@ describe('permission + jsu kind registry', () => {
     for (const kind of PERMISSION_DIALOG_KINDS) {
       expect(DIALOG_COMPONENTS_KINDS_FOR_TEST).toContain(kind)
     }
-    expect(DIALOG_COMPONENTS_KINDS_FOR_TEST).toContain(
-      MANAGED_SETTINGS_SECURITY_KIND,
+    expect(DIALOG_COMPONENTS_KINDS_FOR_TEST).not.toContain(
+      'managed_settings_security',
     )
   })
 

@@ -30,15 +30,9 @@ import { formatProcessWrapperStatusLines, PROCESS_WRAPPER_ENV_KEY } from './proc
 import { getProxyUrl } from './proxy.js';
 import { shouldSkipAnthropicAwsAuth, shouldSkipMantleAuth } from './residualFinalEnvGates.js';
 import { SandboxManager } from './sandbox/sandbox-adapter.js';
-import {
-  formatRemoteManagedSettingsStartupWarning,
-  formatRemoteManagedSettingsStatusValue,
-  zre,
-} from '../services/remoteManagedSettings/loadStatus.js';
-import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettings/syncCache.js';
 import { getSettingsWithAllErrors } from './settings/allErrors.js';
 import { getEnabledSettingSources, getSettingSourceDisplayNameCapitalized } from './settings/constants.js';
-import { getManagedFileSettingsPresence, getPolicySettingsOrigin, getSettingsForSource } from './settings/settings.js';
+import { getPolicySettingsOrigin, getSettingsForSource } from './settings/settings.js';
 import type { ThemeName } from './theme.js';
 import { isHarborKiteEnabled } from './teleport/cloudPeerAccess.js';
 import { getUdsStartFailureReason } from './udsMessaging.js';
@@ -207,97 +201,34 @@ export function buildSettingSourcesProperties(): Property[] {
     return settings !== null && Object.keys(settings).length > 0;
   });
 
-  // Map internal names to user-friendly names
-  // For policySettings, distinguish between remote and local (or skip if neither exists)
+  // Map internal names to user-friendly names.
+  // policySettings only surfaces parent/host overlay after the enterprise cut.
   const sourceNames = sourcesWithSettings
     .map(source => {
       if (source === 'policySettings') {
         const origin = getPolicySettingsOrigin();
         if (origin === null) {
-          return null; // Skip - no policy settings exist
+          return null;
         }
-        switch (origin) {
-          case 'remote':
-            return 'Enterprise managed settings (remote)';
-          case 'plist':
-            return 'Enterprise managed settings (plist)';
-          case 'hklm':
-            return 'Enterprise managed settings (HKLM)';
-          case 'file': {
-            const { hasBase, hasDropIns } = getManagedFileSettingsPresence();
-            if (hasBase && hasDropIns) {
-              return 'Enterprise managed settings (file + drop-ins)';
-            }
-            if (hasDropIns) {
-              return 'Enterprise managed settings (drop-ins)';
-            }
-            return 'Enterprise managed settings (file)';
-          }
-          case 'hkcu':
-            return 'Enterprise managed settings (HKCU)';
+        if (origin === 'parent') {
+          return 'Host managed settings';
         }
+        return null;
       }
       return getSettingSourceDisplayNameCapitalized(source);
     })
     .filter((name): name is string => name !== null);
-
-  const skipped = getSkippedManagedSettingSources();
-  isRemoteManagedSettingsEligible();
-  const remoteManagedValue = formatRemoteManagedSettingsStatusValue();
 
   return [
     {
       label: 'Setting sources',
       value: sourceNames,
     },
-    ...(skipped.length > 0
-      ? [
-          {
-            label: 'Skipped sources',
-            value: skipped,
-          },
-        ]
-      : []),
-    ...(remoteManagedValue
-      ? [
-          {
-            label: 'Managed settings (remote)',
-            value: remoteManagedValue,
-          },
-        ]
-      : []),
     ...(() => {
       const clientData = describeLoadedClientDataStatus();
       return clientData !== undefined ? [{ label: 'Client data', value: clientData }] : [];
     })(),
   ];
-}
-
-/**
- * densable 2.1.243 #6 — managed sources present but not applied because a
- * higher-precedence managed source won first-source-wins.
- */
-function getSkippedManagedSettingSources(): string[] {
-  const origin = getPolicySettingsOrigin();
-  if (origin === null) {
-    return [];
-  }
-
-  const skipped: string[] = [];
-  const { hasBase, hasDropIns } = getManagedFileSettingsPresence();
-  const filePresent = hasBase || hasDropIns;
-  const fileLabel =
-    hasBase && hasDropIns
-      ? 'managed-settings.json + drop-ins'
-      : hasDropIns
-        ? 'managed-settings.d'
-        : 'managed-settings.json';
-
-  if (origin === 'remote' || origin === 'plist' || origin === 'hklm') {
-    if (filePresent) skipped.push(fileLabel);
-  }
-
-  return skipped;
 }
 
 export async function buildInstallationDiagnostics(): Promise<Diagnostic[]> {
@@ -308,12 +239,6 @@ export async function buildInstallationDiagnostics(): Promise<Diagnostic[]> {
 export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]> {
   const diagnostic = await getDoctorDiagnostic();
   const items: Diagnostic[] = [];
-
-  isRemoteManagedSettingsEligible();
-  const remoteLoadWarning = formatRemoteManagedSettingsStartupWarning(zre());
-  if (remoteLoadWarning) {
-    items.push(remoteLoadWarning);
-  }
 
   const { errors: validationErrors } = getSettingsWithAllErrors();
   if (validationErrors.length > 0) {

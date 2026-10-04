@@ -6,7 +6,6 @@ import {
   downloadUserSettings,
   redownloadUserSettings,
 } from 'src/services/settingsSync/index.js'
-import { waitForRemoteManagedSettingsToLoad } from 'src/services/remoteManagedSettings/index.js'
 import { StructuredIO } from 'src/cli/structuredIO.js'
 import { RemoteIO } from 'src/cli/remoteIO.js'
 import {
@@ -2499,9 +2498,7 @@ function runHeadlessStreaming(
               downloadUserSettings(),
             )
           : Promise.resolve(),
-        withDiagnosticsTiming('headless_managed_settings_wait', () =>
-          waitForRemoteManagedSettingsToLoad(),
-        ),
+        Promise.resolve(),
       ])
 
       const pluginsInstalled = await installPluginsForHeadless()

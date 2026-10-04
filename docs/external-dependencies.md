@@ -187,7 +187,6 @@ WebSearch 工具支持直接抓取 Bing 搜索结果页面，也支持通过 Bra
 | `/api/oauth/organizations/{id}/admin_requests` | 管理请求 | `src/services/api/adminRequests.ts` |
 | `/api/web/domain_info?domain={}` | 域名安全检查 | `packages/builtin-tools/src/tools/WebFetchTool/utils.ts` |
 | `/api/claude_code/settings` | 设置同步 | `src/services/settingsSync/index.ts` |
-| `/api/claude_code/managed_settings` | 企业托管设置 (1h 轮询) | `src/services/remoteManagedSettings/index.ts` |
 | `/api/claude_code/team_memory?repo={}` | 团队记忆同步 | `src/services/teamMemorySync/index.ts` |
 | `/api/auth/trusted_devices` | 可信设备注册 | `src/bridge/trustedDevice.ts` |
 | `/api/organizations/{id}/claude_code/buddy_react` | Companion 反应 | `src/buddy/companionReact.ts` |

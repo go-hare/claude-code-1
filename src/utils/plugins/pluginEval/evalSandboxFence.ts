@@ -30,7 +30,6 @@ import { permissionRuleValueFromString } from '../../permissions/permissionRuleP
 import { getPlatform } from '../../platform.js'
 import { SandboxManager } from '../../sandbox/sandbox-adapter.js'
 import { getSettingsForSource } from '../../settings/settings.js'
-import { getSessionCache } from '../../../services/remoteManagedSettings/syncCacheState.js'
 import { jsonStringify } from '../../slowOperations.js'
 import { EVAL_ARTIFACTS_DIR, SHELL_UNCONFINED } from './constants.js'
 import {
@@ -486,22 +485,11 @@ export function pickEvalPolicySnapshot(
 }
 
 function defaultPolicyCache(): Record<string, unknown> | null {
-  const cache = getSessionCache()
-  if (cache && typeof cache === 'object') {
-    return cache as Record<string, unknown>
-  }
   return null
 }
 
 function defaultPolicyEligible(): boolean {
-  try {
-    const { isRemoteManagedSettingsEligible } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../../services/remoteManagedSettings/syncCache.js') as typeof import('../../../services/remoteManagedSettings/syncCache.js')
-    return isRemoteManagedSettingsEligible()
-  } catch {
-    return false
-  }
+  return false
 }
 
 /**

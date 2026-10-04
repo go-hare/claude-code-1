@@ -1,20 +1,11 @@
 // These side-effects must run before all other imports:
 // 1. profileCheckpoint marks entry before heavy module evaluation begins
-// 2. startMdmRawRead fires MDM subprocesses (plutil/reg query) so they run in
-//    parallel with the remaining ~135ms of imports below
-// 3. startKeychainPrefetch fires both macOS keychain reads (OAuth + legacy API
-//    key) in parallel — isRemoteManagedSettingsEligible() otherwise reads them
-//    sequentially via sync spawn inside applySafeConfigEnvironmentVariables()
-//    (~65ms on every macOS startup)
+// 2. startKeychainPrefetch fires both macOS keychain reads (OAuth + legacy API
+//    key) in parallel with the remaining ~135ms of imports below
 import { profileCheckpoint, profileReport, recordStartupPhase } from './utils/startupProfiler.js';
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 profileCheckpoint('main_tsx_entry');
-
-import { startMdmRawRead } from './utils/settings/mdm/rawRead.js';
-
-// eslint-disable-next-line custom-rules/no-top-level-side-effects
-startMdmRawRead();
 
 import { ensureKeychainPrefetchCompleted, startKeychainPrefetch } from './utils/secureStorage/keychainPrefetch.js';
 
@@ -89,7 +80,6 @@ import {
   refreshPolicyLimits,
   waitForPolicyLimitsToLoad,
 } from './services/policyLimits/index.js';
-import { loadRemoteManagedSettings, refreshRemoteManagedSettings } from './services/remoteManagedSettings/index.js';
 import type { ToolInputJSONSchema } from './Tool.js';
 import {
   createSyntheticOutputTool,
@@ -307,7 +297,6 @@ import {
   searchSessionsByCustomTitle,
   sessionIdExists,
 } from './utils/sessionStorage.js';
-import { ensureMdmSettingsLoaded } from './utils/settings/mdm/settings.js';
 import {
   getInitialSettings,
   getManagedSettingsKeysForLogging,
@@ -350,7 +339,12 @@ import { logContextMetrics } from 'src/utils/api.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
 import { eagerHasCliFlag, eagerParseCliFlag } from 'src/utils/cliArgs.js';
 import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
-import { countConcurrentSessions, isBgSession, registerSession, updateSessionName } from 'src/utils/concurrentSessions.js';
+import {
+  countConcurrentSessions,
+  isBgSession,
+  registerSession,
+  updateSessionName,
+} from 'src/utils/concurrentSessions.js';
 import { getCwd } from 'src/utils/cwd.js';
 import { logForDebugging, setHasFormattedOutput } from 'src/utils/debug.js';
 import {
@@ -1343,13 +1337,10 @@ async function run(): Promise<CommanderCommand> {
     ) {
       startAwaitInitializeStdinRead(streamJsonStdinChunks);
     }
-    // Await async subprocess loads started at module evaluation (lines 12-20).
+    // Await async subprocess loads started at module evaluation.
     // Nearly free — subprocesses complete during the ~135ms of imports above.
-    // Must resolve before init() which triggers the first settings read
-    // (applySafeConfigEnvironmentVariables → getSettingsForSource('policySettings')
-    // → isRemoteManagedSettingsEligible → sync keychain reads otherwise ~65ms).
-    await Promise.all([ensureMdmSettingsLoaded(), ensureKeychainPrefetchCompleted()]);
-    profileCheckpoint('preAction_after_mdm');
+    await ensureKeychainPrefetchCompleted();
+    profileCheckpoint('preAction_after_keychain');
     await init();
     profileCheckpoint('preAction_after_init');
 
@@ -1426,7 +1417,6 @@ async function run(): Promise<CommanderCommand> {
     // Fails open - if fetch fails, continues without remote settings
     // Settings are applied via hot-reload when they arrive
     // Must happen after init() to ensure config reading is allowed
-    void loadRemoteManagedSettings();
     void loadPolicyLimits();
 
     profileCheckpoint('preAction_after_remote_settings');
@@ -2240,7 +2230,8 @@ async function run(): Promise<CommanderCommand> {
         }
         setPendingWatchArtifact({
           ...parsedWatch,
-          autoReactDisarmed: typeof (options as { watchArtifactNoAutoreact?: string }).watchArtifactNoAutoreact === 'string',
+          autoReactDisarmed:
+            typeof (options as { watchArtifactNoAutoreact?: string }).watchArtifactNoAutoreact === 'string',
         });
       }
 
@@ -2426,7 +2417,10 @@ async function run(): Promise<CommanderCommand> {
         process.exit(1);
       }
       // leftover host-refuse path only — do not invent a cloud host
-      if (restricted && (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host) || isCloudRemoteLaunch(cloudLaunch))) {
+      if (
+        restricted &&
+        (Boolean(_pendingConnect?.url) || Boolean(_pendingSSH?.host) || isCloudRemoteLaunch(cloudLaunch))
+      ) {
         process.stderr.write(chalk.red(`${RESTRICTED_CLOUD_SSH_REFUSE}\n`));
         process.exit(1);
       }
@@ -3648,7 +3642,6 @@ async function run(): Promise<CommanderCommand> {
         if (onboardingShown) {
           // Refresh auth-dependent services now that the user has logged in during onboarding.
           // Keep in sync with the post-login logic in src/commands/login.tsx
-          void refreshRemoteManagedSettings();
           void refreshPolicyLimits();
           // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
           resetUserCache();
@@ -3998,13 +3991,9 @@ async function run(): Promise<CommanderCommand> {
           if (cloudLaunch.cloudAttachId === null) {
             await runHeadlessCloudCreate(headlessArgs, tools, sessionHost);
           } else {
-            await runHeadlessCloudAttach(
-              headlessArgs,
-              tools,
-              cloudLaunch.cloudAttachId,
-              sessionHost,
-              { serveOnly: cloudLaunch.serveOnly },
-            );
+            await runHeadlessCloudAttach(headlessArgs, tools, cloudLaunch.cloudAttachId, sessionHost, {
+              serveOnly: cloudLaunch.serveOnly,
+            });
           }
           return;
         }

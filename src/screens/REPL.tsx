@@ -199,7 +199,6 @@ import {
   createDialogMailbox,
   createRequestDialog,
   DialogHost,
-  installManagedSettingsSxg,
   isFullscreenModalChromeActive,
   isPermissionPromptDialog,
   isTopDialogModalLayout,
@@ -2118,13 +2117,6 @@ export function REPL({
       void updateSessionActivity({ status: sessionStatus, waitingFor });
     }
   }, [sessionStatus, waitingFor]);
-
-  // densable sXg(Gm): cMl → Bgp(GSn, s_A, {queueBehind:true})
-  // useLayoutEffect: register before paint so fetch waiters drain to NMs
-  // instead of timing out into standalone Ink (236 #11 first-key race).
-  React.useLayoutEffect(() => {
-    return installManagedSettingsSxg(requestDialog);
-  }, [requestDialog]);
 
   // densable Gm(qSn,{currentMode},{queueBehind:!0})
   useEffect(() => {

@@ -12,7 +12,6 @@
  */
 import { formatPermissionNeeds } from '../utils/bgNeedsInputBridge.js'
 import { getPermissionConfirm } from './permissionConfirmRegistry.js'
-import { MANAGED_SETTINGS_SECURITY_KIND } from './specs/managedSettingsSecurity.js'
 import {
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
@@ -78,7 +77,7 @@ export function resolveHostWaitingFor(
   if (!kind) return undefined
   const y2a = GOLD_Y2A_WAITING[kind]
   if (y2a) return y2a
-  if (kind === MANAGED_SETTINGS_SECURITY_KIND || isSoftNmsDialogKind(kind)) {
+  if (isSoftNmsDialogKind(kind)) {
     return 'dialog open'
   }
   if (isPermissionDialogKind(kind)) {

@@ -55,7 +55,7 @@ grep -rn "api.anthropic.com" src/ packages/
 grep -rn "logEvent\|trackDatadogEvent\|logEventTo1P" src/
 
 # 查找所有远程配置拉取
-grep -rn "growthbook\|remoteManagedSettings\|settingsSync" src/
+grep -rn "growthbook\|settingsSync" src/
 ```
 
 完整的 12 个通道清单、文件路径、端点 URL、触发条件、数据字段，我都记在 [遥测与远程配置下发系统审计](https://ccb.agent-aura.top/docs/telemetry-remote-config-audit) 里了，基于源码逐行分析，你可以自己复核。
@@ -162,7 +162,6 @@ cp ~/.claude/settings.json ~/claude-settings.backup.json 2>/dev/null || true
 # 清理官方缓存
 rm -f ~/.claude.json                  # GrowthBook 远程配置缓存
 rm -rf ~/.claude/logs/                # 1P 事件重试队列
-rm -rf ~/.claude/remoteManagedSettings/  # 企业远程配置缓存
 ```
 
 > `~/.claude/settings.json` 建议留着，CCB 项目会复用它存 `/login` 配置。真遇到冲突了再删也不迟。

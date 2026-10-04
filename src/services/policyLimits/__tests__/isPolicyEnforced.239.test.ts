@@ -1,15 +1,12 @@
 /**
- * densable eya — isPolicyEnforced is restrictions[policy].allowed === true.
+ * densable eya — fork product-cut: org policy never enforces.
  */
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
-import { join } from 'path'
-
-const src = readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')
+import { isPolicyEnforced } from '../index.js'
 
 describe('densable eya isPolicyEnforced', () => {
-  test('fail-closed allowed===true (not isPolicyAllowed fail-open)', () => {
-    expect(src).toContain('export function isPolicyEnforced')
-    expect(src).toContain('restrictions?.[policy]?.allowed === true')
+  test('product-cut never enforces org policy', () => {
+    expect(isPolicyEnforced('require_trusted_devices')).toBe(false)
+    expect(isPolicyEnforced('allow_remote_control')).toBe(false)
   })
 })

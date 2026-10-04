@@ -11,7 +11,6 @@
  * Predicate scans the whole open stack (not just top) so soft-on-blocking
  * still hides the prompt.
  */
-import { MANAGED_SETTINGS_SECURITY_KIND } from './specs/managedSettingsSecurity.js'
 import { isSoftNmsDialogKind } from './specs/jsuKinds.js'
 import { isPermissionDialogKind } from './specs/permissionKinds.js'
 
@@ -22,7 +21,6 @@ export function isHardPromptBlockingDialogKind(
   if (!kind) return false
   if (isSoftNmsDialogKind(kind)) return false
   if (isPermissionDialogKind(kind)) return false
-  if (kind === MANAGED_SETTINGS_SECURITY_KIND) return false
   return true
 }
 

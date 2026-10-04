@@ -139,7 +139,6 @@ const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
 const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
   ? require('./commands/subscribe-pr.js').default
   : null
-const torch = feature('TORCH') ? require('./commands/torch.js').default : null
 const daemonCmd =
   feature('DAEMON') || feature('BG_SESSIONS')
     ? require('./commands/daemon/index.js').default
@@ -513,7 +512,6 @@ const COMMANDS = memoize((): Command[] => [
   ...(claimMainCmd ? [claimMainCmd] : []),
   tasks,
   ...(workflowsCmd ? [workflowsCmd] : []),
-  ...(torch ? [torch] : []),
   ...(daemonCmd ? [daemonCmd] : []),
   ...(jobCmd ? [jobCmd] : []),
   ...(forceSnip ? [forceSnip] : []),

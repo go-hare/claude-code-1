@@ -366,7 +366,7 @@ describe('getSourceDisplayName', () => {
 describe('getSettingSourceDisplayNameLowercase', () => {
   test('maps policySettings correctly', () => {
     expect(getSettingSourceDisplayNameLowercase('policySettings')).toBe(
-      'enterprise managed settings',
+      'host managed settings',
     )
   })
 

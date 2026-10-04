@@ -2,7 +2,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import { getRemoteManagedSettingsSyncFromCache } from '../services/remoteManagedSettings/syncCacheState.js'
 import { logForDebugging } from './debug.js'
 import type { ModelCosts } from './modelCost.js'
 import {
@@ -52,14 +51,7 @@ export function resetOrgPricingCache(): void {
 function isModelPricingOriginTrusted(
   origin: ReturnType<typeof getPolicySettingsOrigin>,
 ): boolean {
-  if (origin === 'file' || origin === 'plist' || origin === 'hklm') {
-    return true
-  }
-  if (origin === 'remote') {
-    const remote = getRemoteManagedSettingsSyncFromCache()
-    return remote !== null && Object.keys(remote).length > 0
-  }
-  return false
+  return origin === 'file' || origin === 'plist' || origin === 'hklm'
 }
 
 /** densable `Rx(e, t)` — compile managed modelPricing overrides. */

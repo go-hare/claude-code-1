@@ -43,7 +43,6 @@ export {
   getDialogHostLayout,
   getModalChromeVisibility,
   isFullscreenModalChromeActive,
-  isManagedSettingsSecurityDialog,
   isPermissionPromptDialog,
   isTopDialogModalLayout,
   shouldOccupyFullscreenModalSlot,
@@ -150,12 +149,6 @@ export {
   wt,
 } from './shouldShowAutoDefaultNudge.js'
 export { nhtHidesPromptInput } from './nhtPrompt.js'
-export {
-  MANAGED_SETTINGS_SECURITY_KIND,
-  managedSettingsSecuritySpec,
-  managedSettingsSecurityUpdates,
-  installManagedSettingsSxg,
-} from './specs/managedSettingsSecurity.js'
 export {
   openPermissionDoo,
   startPermissionDoo,

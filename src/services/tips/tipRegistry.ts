@@ -4,10 +4,6 @@ import { fileHistoryEnabled } from 'src/utils/fileHistory.js'
 import { getPluginSuggestionMarketplaces } from '../../utils/plugins/marketplaceHelpers.js'
 import type { KnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js'
 import {
-  loadOrgSpinnerTips,
-  shouldExcludeDefaultSpinnerTips,
-} from './orgTips.js'
-import {
   getInitialSettings,
   getSettings_DEPRECATED,
   getSettingsForSource,
@@ -828,13 +824,7 @@ export async function getRelevantTips(context: TipContext): Promise<Tip[]> {
   // `o>0&&Wt()` returns only `s`. Built-ins Joi, then `[...filtered, ...s]`.
   const host = context.session.host
   const t = spinnerTipHosts.of(host)
-  const { tips: customTips, trustedCount } = await loadOrgSpinnerTips(host)
-  const orgTips = customTips.filter(
-    tip => getSessionsSinceLastShown(tip.id) >= tip.cooldownSessions,
-  )
-  if (shouldExcludeDefaultSpinnerTips() && trustedCount > 0) {
-    return orgTips
-  }
+  const orgTips: Tip[] = []
 
   const marketplaceTips = await t.getMarketplacePluginTips(context.storageV5)
   const tips = [...externalTips, ...internalOnlyTips, ...marketplaceTips]

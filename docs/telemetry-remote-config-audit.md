@@ -36,18 +36,11 @@
   - 控制 sink killswitch（`tengu_frond_boric`）
   - 控制 BQ batch 配置（`tengu_1p_event_batch_config`）
   - 控制版本上限/自动更新 kill switch
-  - 控制远程管理设置的安全检查 gate
 - **用户属性**: 发送 deviceId, sessionId, organizationUUID, accountUUID, email, subscriptionType 等
 
-## 4. Remote Managed Settings（企业远程配置下发）
+## 4. Remote Managed Settings（已产品拆除）
 
-**文件**: `src/services/remoteManagedSettings/index.ts`
-
-- **端点**: `{BASE_API_URL}/api/claude_code/settings`
-- **行为**: 企业用户配置下发，支持 ETag/304 缓存，每小时后台轮询
-- **安全**: 变更包含"危险设置"时弹窗让用户确认
-- **适用**: API key 用户全部可拉取；OAuth 用户仅 Enterprise/C4E/Team
-- **Fail-open**: 请求失败时使用本地缓存，无缓存则跳过
+Anthropic Team/Enterprise 远程托管设置、MDM、org tips、CRI policy webhook 已从本 fork 物理删除。`policyLimits` 永远允许、永不 enforce。用户/项目/本地 `settings.json` 仍正常合并。
 
 ## 5. Settings Sync（设置同步）
 
