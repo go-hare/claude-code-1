@@ -160,18 +160,20 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
       // Pass model so ultracode / unsupported levels follow catalog ladder.
       // densable EffortSlider s → persistAsDefault false (session-only like /model s).
       const outcome = computeConfirmOutcome(cursor, arg =>
-        executeEffort(arg, model, undefined, persistAsDefault),
+        executeEffort(arg, model, undefined, persistAsDefault, appStateEffort),
       );
       if (outcome.kind === 'apply' && outcome.effortUpdate) {
         setAppState(prev => ({
           ...prev,
           effortValue: outcome.effortUpdate!.value,
-          ultracode: outcome.effortUpdate!.ultracode ?? false,
+          // densable 2.1.289: omit ultracode when unset so normal effort
+          // confirm leaves the session flag alone.
+          ...(outcome.effortUpdate!.ultracode !== undefined ? { ultracode: outcome.effortUpdate!.ultracode } : {}),
         }));
       }
       onDone(outcome.message);
     },
-    [cursor, done, model, onDone, setAppState],
+    [appStateEffort, cursor, done, model, onDone, setAppState],
   );
 
   const handleCancel = React.useCallback(() => {
@@ -189,6 +191,13 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
       'effortPanel:confirm': () => handleConfirm(true),
       'effortPanel:thisSessionOnly': () => handleConfirm(false),
       'effortPanel:cancel': handleCancel,
+      // densable 2.1.289 EffortSlider aliases
+      'effortSlider:decreaseEffort': () => setCursor(c => moveLeft(c, positions)),
+      'effortSlider:increaseEffort': () => setCursor(c => moveRight(c, positions)),
+      'effortSlider:thisSessionOnly': () => handleConfirm(false),
+      'effortSlider:toggleUltracode': () => {
+        if (positions.includes('ultracode')) setCursor('ultracode');
+      },
     },
     { context: 'EffortPanel' },
   );

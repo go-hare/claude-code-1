@@ -397,6 +397,8 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       end: 'effortPanel:end',
       enter: 'effortPanel:confirm',
       s: 'effortPanel:thisSessionOnly',
+      // densable 2.1.289 EffortSlider names (alias to panel handlers)
+      tab: 'effortSlider:toggleUltracode',
       escape: 'effortPanel:cancel',
       q: 'effortPanel:cancel',
       'ctrl+c': 'effortPanel:cancel',

@@ -64,23 +64,20 @@ export type EffortValue = EffortLevel | number
  * ## Same-packet conflict order (fixed)
  *
  * Keys are applied **effortLevel first, then ultracode** (later key wins for
- * the flag field; ultracode may also overwrite effortValue to catalog wire).
+ * the flag field). densable 2.1.289: ultracode no longer overwrites effortValue.
  * This is intentional and stable — Hosts must not rely on JSON key order.
  *
  * | Same-packet keys | Result |
  * |------------------|--------|
- * | only effortLevel normal | wire=that level, ultracode=false, N9 |
- * | only effortLevel null | clear effort, ultracode=false, N9 |
- * | only effortLevel "ultracode" | if wire: top+flag+N9; else **no-op** + note |
- * | only effortLevel unparseable | **no-op** + `effort_level_ignored` note |
- * | only ultracode:true | if wire: top+flag+N9; else force false + note |
+ * densable 2.1.289 (orthogonal ultracode — prefer over pre-289 table above):
+ * | only effortLevel normal | wire=that level, ultracode untouched, N9 |
+ * | only effortLevel null | clear effort, ultracode untouched, N9 |
+ * | only effortLevel "ultracode" | if offerable: flag+N9 (no wire force); else **no-op** + note |
+ * | only ultracode:true | if offerable: flag+N9 (effortValue untouched); else force false + note |
  * | only ultracode:false | flag=false (effortValue untouched) |
- * | effortLevel normal + ultracode:false | wire + flag false (idempotent) |
- * | effortLevel normal + ultracode:true | ultracode block **overwrites** → top wire + flag |
- * | effortLevel "ultracode" + ultracode:false | alias opens then false **wins** → wire top kept, flag false |
- * | effortLevel "ultracode" + ultracode:true | same as open (wire+flag) |
- * | effortLevel null + ultracode:true | clear then ultra open → top+flag if wire |
- * | effortLevel garbage + ultracode:true | ignore effort + open ultra if wire |
+ * | effortLevel normal + ultracode:true | keep wire + flag on (+ note) |
+ * | effortLevel "ultracode" + ultracode:false | alias opens then false **wins** |
+ * | effortLevel null + ultracode:true | clear effort + flag on |
  *
  * ## No-wire Host feedback (product decision)
  *
@@ -167,29 +164,27 @@ export function resolveHostEffortFlagPatch(args: {
   if (hasEffort) {
     const raw = args.effortLevel
     if (raw == null) {
+      // densable 2.1.289: clear effort only — leave ultracode alone.
       patch.clearEffort = true
-      patch.ultracode = false
       patch.unpin = true
     } else if (isUltracodeEffortAlias(raw)) {
-      const wire = getUltracodeEffortForModel(args.model)
-      if (wire !== undefined) {
-        patch.effortValue = wire
+      // densable 2.1.289: alias opens flag without forcing wire effort.
+      if (isUltracodeOfferable(args.model)) {
         patch.ultracode = true
         patch.unpin = true
         effortOpenedUltraAlias = true
       } else {
-        // no wire → refuse empty ultracode flag (matches bootstrap/settings)
         pushNote(
           patch,
           'ultracode_alias_no_wire',
-          `effortLevel "ultracode" ignored: model ${args.model} has no effort catalog wire (no empty ultracode flag).`,
+          `effortLevel "ultracode" ignored: model ${args.model} cannot run ultracode (no empty ultracode flag).`,
         )
       }
     } else {
       const wire = parseEffortValue(raw)
       if (wire !== undefined) {
+        // densable 2.1.289: normal effort does not clear ultracode.
         patch.effortValue = wire
-        patch.ultracode = false
         patch.unpin = true
         effortSetNormalLevel = true
       } else {
@@ -204,25 +199,20 @@ export function resolveHostEffortFlagPatch(args: {
     }
   }
 
-  // ultracode key always runs second — later key wins for the flag; may
-  // overwrite effortValue when turning on with wire.
+  // ultracode key always runs second — later key wins for the flag.
+  // densable 2.1.289: ultracode:true does not overwrite effortValue.
   if (hasUltra) {
     const on = args.ultracode === true
     if (on) {
-      const wire = getUltracodeEffortForModel(args.model)
-      if (wire !== undefined) {
-        if (
-          effortSetNormalLevel &&
-          patch.effortValue !== undefined &&
-          patch.effortValue !== wire
-        ) {
+      if (isUltracodeOfferable(args.model)) {
+        if (effortSetNormalLevel) {
+          // Same packet: effort level kept; flag turns on (orthogonal).
           pushNote(
             patch,
             'same_packet_ultracode_overrode_effort',
-            `Same packet: ultracode:true overrode effortLevel to catalog wire "${wire}" (effortLevel applied first, ultracode second).`,
+            'Same packet: ultracode:true left effortLevel wire unchanged (orthogonal flag; effort applied first, ultracode second).',
           )
         }
-        patch.effortValue = wire
         patch.ultracode = true
         patch.unpin = true
       } else {
@@ -230,7 +220,7 @@ export function resolveHostEffortFlagPatch(args: {
         pushNote(
           patch,
           'ultracode_true_no_wire',
-          `ultracode:true refused: model ${args.model} has no effort catalog wire; forced ultracode=false (soft success, not control error).`,
+          `ultracode:true refused: model ${args.model} cannot run ultracode; forced ultracode=false (soft success, not control error).`,
         )
       }
     } else {
@@ -239,7 +229,7 @@ export function resolveHostEffortFlagPatch(args: {
         pushNote(
           patch,
           'same_packet_ultracode_false_after_alias',
-          'Same packet: effortLevel "ultracode" opened wire+flag, then ultracode:false cleared the flag (wire effort may remain at catalog top).',
+          'Same packet: effortLevel "ultracode" opened the flag, then ultracode:false cleared it (effortValue untouched).',
         )
       }
     }
@@ -548,21 +538,18 @@ export function isUltracodeOfferable(model: string): boolean {
 }
 
 /**
- * densable Dee(model, appStateEffort, ultracodeFlag) adapted for catalog:
- * flag on + workflows on + resolved wire effort equals catalog ultracode tier.
- * densable required cme === "xhigh"; we require the model-specific top tier.
+ * densable 2.1.289: ultracode is orthogonal to effort — active when the
+ * session flag is on and the model can run ultracode, at any effort level.
+ * Pre-289 Dee required applied effort === catalog wire (xhigh/top); that
+ * forced `/effort ultracode` to pin wire effort. appStateEffort is unused.
  */
 export function isUltracodeModeActive(
   model: string,
-  appStateEffort: EffortValue | undefined,
+  _appStateEffort: EffortValue | undefined,
   ultracodeFlag: boolean | undefined,
 ): boolean {
   if (ultracodeFlag !== true) return false
-  if (!isUltracodeOfferable(model)) return false
-  const wire = getUltracodeEffortForModel(model)
-  if (wire === undefined) return false
-  const applied = resolveAppliedEffort(model, appStateEffort)
-  return applied === wire
+  return isUltracodeOfferable(model)
 }
 
 /**

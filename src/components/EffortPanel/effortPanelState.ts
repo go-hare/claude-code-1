@@ -180,7 +180,7 @@ export type ApplyFn = (cursor: PanelPosition) => {
  * this static hint mirrors that shape when wire is model-unknown (tests / fallback).
  */
 export const ULTRACODE_HINT =
-  'Set effort level to ultracode (this session only): catalog top effort + dynamic workflow orchestration'
+  'Ultracode on (this session only): effort stays at the current level'
 
 export const CANCEL_MESSAGE = 'Effort unchanged.'
 

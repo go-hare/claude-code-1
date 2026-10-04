@@ -958,21 +958,15 @@ describe('densable effort catalog matrix', () => {
     expect(getUltracodeEffortForModel('claude-haiku-4-5')).toBeUndefined()
   })
 
-  test('isUltracodeModeActive requires flag + matching wire tier', () => {
-    // Flag off → inactive even at xhigh
+  test('isUltracodeModeActive is orthogonal to effort (densable 2.1.289)', () => {
     expect(isUltracodeModeActive('claude-opus-4-7', 'xhigh', false)).toBe(false)
-    // Flag on + wire matches catalog ultracode tier → active
-    // (workflows available via default GB mock; pin/env unset)
     delete process.env.CLAUDE_CODE_EFFORT_LEVEL
-    // Launch pin can force model default (xhigh) over session low — unpin
-    // so we test pure resolveAppliedEffort matching.
     unpinAllEffortLaunchPins()
     expect(isUltracodeModeActive('claude-opus-4-7', 'xhigh', true)).toBe(true)
-    // Flag on but session effort not at ultracode wire tier → inactive
-    expect(isUltracodeModeActive('claude-opus-4-7', 'low', true)).toBe(false)
-    // Grok tops at high — ultracode active when effort is high + flag
+    // Flag on at any effort level
+    expect(isUltracodeModeActive('claude-opus-4-7', 'low', true)).toBe(true)
     expect(isUltracodeModeActive('grok-4.5', 'high', true)).toBe(true)
-    expect(isUltracodeModeActive('grok-4.5', 'medium', true)).toBe(false)
+    expect(isUltracodeModeActive('grok-4.5', 'medium', true)).toBe(true)
   })
 
   test('getEffortSuffix densable OQe: wire level even when ultracode active', () => {
@@ -1240,7 +1234,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
   const model = 'claude-opus-4-7'
   const noWireModel = 'claude-haiku-4-5-20251001'
 
-  test('normal effortLevel clears ultracode and unpins', () => {
+  test('normal effortLevel unpins without clearing ultracode (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: 'medium',
@@ -1248,14 +1242,14 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     })
     expect(p).toMatchObject({
       effortValue: 'medium',
-      ultracode: false,
       unpin: true,
     })
+    expect(p.ultracode).toBeUndefined()
     expect(p.clearEffort).toBeUndefined()
     expect(p.notes).toBeUndefined()
   })
 
-  test('null effortLevel clears effort + ultracode + unpins', () => {
+  test('null effortLevel clears effort only + unpins (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: null,
@@ -1263,19 +1257,18 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     })
     expect(p).toEqual({
       clearEffort: true,
-      ultracode: false,
       unpin: true,
     })
   })
 
-  test('effortLevel ultracode with wire sets flag + top tier', () => {
+  test('effortLevel ultracode with wire sets flag without forcing wire (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: 'ultracode',
       hasEffortLevel: true,
     })
     expect(p.ultracode).toBe(true)
-    expect(p.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(p.effortValue).toBeUndefined()
     expect(p.unpin).toBe(true)
     expect(p.notes).toBeUndefined()
   })
@@ -1309,14 +1302,14 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     ])
   })
 
-  test('ultracode true with wire sets wire + flag + unpin', () => {
+  test('ultracode true with wire sets flag only + unpin (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       ultracode: true,
       hasUltracode: true,
     })
     expect(p.ultracode).toBe(true)
-    expect(p.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(p.effortValue).toBeUndefined()
     expect(p.unpin).toBe(true)
   })
 
@@ -1344,9 +1337,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
 
   // ── Same-packet conflict order: effort first, ultracode second ──
 
-  test('same packet: medium + ultracode true → ultracode overwrites wire + note', () => {
-    const wire = getUltracodeEffortForModel(model)
-    expect(wire).toBeDefined()
+  test('same packet: medium + ultracode true → keep medium + flag + note (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: 'medium',
@@ -1354,7 +1345,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
       ultracode: true,
       hasUltracode: true,
     })
-    expect(p.effortValue).toBe(wire)
+    expect(p.effortValue).toBe('medium')
     expect(p.ultracode).toBe(true)
     expect(p.unpin).toBe(true)
     expect(p.notes).toEqual([
@@ -1364,8 +1355,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     ])
   })
 
-  test('same packet: ultracode alias + ultracode false → flag off, wire may remain', () => {
-    const wire = getUltracodeEffortForModel(model)
+  test('same packet: ultracode alias + ultracode false → flag off, effort untouched (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: 'ultracode',
@@ -1373,7 +1363,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
       ultracode: false,
       hasUltracode: true,
     })
-    expect(p.effortValue).toBe(wire)
+    expect(p.effortValue).toBeUndefined()
     expect(p.ultracode).toBe(false)
     expect(p.unpin).toBe(true)
     expect(p.notes).toEqual([
@@ -1383,8 +1373,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     ])
   })
 
-  test('same packet: null effort + ultracode true with wire → open ultra', () => {
-    const wire = getUltracodeEffortForModel(model)
+  test('same packet: null effort + ultracode true with wire → clear effort + flag (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: null,
@@ -1392,9 +1381,8 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
       ultracode: true,
       hasUltracode: true,
     })
-    // clearEffort runs first, then ultra overwrites effortValue + flag
     expect(p.clearEffort).toBe(true)
-    expect(p.effortValue).toBe(wire)
+    expect(p.effortValue).toBeUndefined()
     expect(p.ultracode).toBe(true)
     expect(p.unpin).toBe(true)
   })
@@ -1429,8 +1417,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
     ])
   })
 
-  test('same packet: ignored effortLevel + ultracode true still opens ultra', () => {
-    const wire = getUltracodeEffortForModel(model)
+  test('same packet: ignored effortLevel + ultracode true still opens ultra (289)', () => {
     const p = resolveHostEffortFlagPatch({
       model,
       effortLevel: 'garbage',
@@ -1438,17 +1425,16 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
       ultracode: true,
       hasUltracode: true,
     })
-    expect(p.effortValue).toBe(wire)
+    expect(p.effortValue).toBeUndefined()
     expect(p.ultracode).toBe(true)
     expect(p.unpin).toBe(true)
     expect(p.notes?.some(n => n.code === 'effort_level_ignored')).toBe(true)
-    // No same_packet override note — effort never set a normal level
     expect(
       p.notes?.some(n => n.code === 'same_packet_ultracode_overrode_effort'),
     ).toBe(false)
   })
 
-  test('same-packet model switch contract: wire uses the model argument only', () => {
+  test('same-packet model switch contract: flag uses the model argument only', () => {
     // print.ts must pass post-override getMainLoopModel() here; pure patch
     // itself has no global model state. Document the two outcomes Hosts see.
     const onWire = resolveHostEffortFlagPatch({
@@ -1462,7 +1448,7 @@ describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
       hasUltracode: true,
     })
     expect(onWire.ultracode).toBe(true)
-    expect(onWire.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(onWire.effortValue).toBeUndefined()
     expect(onNoWire.ultracode).toBe(false)
     expect(onNoWire.notes?.some(n => n.code === 'ultracode_true_no_wire')).toBe(
       true,

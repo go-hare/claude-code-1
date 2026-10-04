@@ -177,6 +177,11 @@ export const KEYBINDING_ACTIONS = [
   'effortPanel:confirm',
   'effortPanel:thisSessionOnly',
   'effortPanel:cancel',
+  // densable 2.1.289 EffortSlider aliases (same handlers as effortPanel:*)
+  'effortSlider:decreaseEffort',
+  'effortSlider:increaseEffort',
+  'effortSlider:toggleUltracode',
+  'effortSlider:thisSessionOnly',
   // Select component actions (distinct from confirm: to avoid collisions)
   'select:next',
   'select:previous',

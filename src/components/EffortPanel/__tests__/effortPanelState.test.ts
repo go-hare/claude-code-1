@@ -162,8 +162,8 @@ describe('computeConfirmOutcome', () => {
 
 test('常量字符串', () => {
   expect(CANCEL_MESSAGE).toBe('Effort unchanged.')
-  expect(ULTRACODE_HINT).toContain('ultracode')
-  expect(ULTRACODE_HINT).toContain('dynamic workflow orchestration')
+  expect(ULTRACODE_HINT).toContain('Ultracode')
+  expect(ULTRACODE_HINT).toContain('effort stays')
 })
 
 describe('getPanelPositionsForModel', () => {
