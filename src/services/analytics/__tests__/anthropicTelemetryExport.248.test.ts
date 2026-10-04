@@ -170,14 +170,20 @@ describe('densable 2.1.248 #47 QO wrapAnthropicTelemetryExporter', () => {
 })
 
 describe('densable 2.1.248 #47 landing wiring', () => {
-  test('1P logger wraps exporter with Oht("1P event logging")', () => {
+  test('1P logger initialize does not attach Anthropic exporter', () => {
     const src = readFileSync(
       join(import.meta.dir, '../firstPartyEventLogger.ts'),
       'utf8',
     )
-    expect(src).toContain('wrapAnthropicTelemetryExporter')
-    expect(src).toContain('new AnthropicTelemetryExportCounter')
-    expect(src).toContain('1P event logging')
+    const init = src.slice(
+      src.indexOf('export function initialize1PEventLogging'),
+      src.indexOf(
+        'export async function reinitialize1PEventLoggingIfConfigChanged',
+      ),
+    )
+    expect(init).not.toContain('wrapAnthropicTelemetryExporter')
+    expect(init).not.toContain('new AnthropicTelemetryExportCounter')
+    expect(src).toContain('is1PEventLoggingEnabled')
   })
 
   test('3P OTEL diag prefix is unchanged', () => {

@@ -326,7 +326,7 @@ Effort 解析对齐 densable 2.1.211 的 model-driven 链路：`resolveAppliedEf
 | OpenAI/Gemini/Grok 兼容层 | Restored |
 | Remote Control Server | Restored — 自托管 RCS + Web UI |
 | `packages/shell/`, `packages/swarm/`, `packages/mcp-server/`, `packages/cc-knowledge/` | Removed — 功能合并或废弃 |
-| Analytics / GrowthBook / Sentry | Empty implementations |
+| Analytics / GrowthBook / Sentry | 产品拆除发送口：Datadog/1P/BQ/Sentry/Perfetto 不发；GB 无 adapter 不联网。`logEvent` 调用点 + `LOCAL_GATE_DEFAULTS` + 用户 OTEL 保留 |
 | Magic Docs / LSP Server | Restored — Magic Docs 自动更新 + LSP 服务器管理器 |
 | Plugins / Marketplace | Restored — 插件安装/卸载/启用/禁用 + Marketplace 浏览（`src/services/plugins` + `src/utils/plugins`） |
 | MCP OAuth | **完整 densable 客户端**（`src/services/mcp/auth.ts`：浏览器 OAuth、refresh、step-up、XAA 实验路径）。旧文档 “Simplified” 已过时；边角：XAA GA 锁 / IDE lockfile token |

@@ -76,18 +76,10 @@ export class BigQueryMetricsExporter implements PushMetricExporter {
       return
     }
 
-    const exportPromise = this.doExport(metrics, resultCallback)
-    this.pendingExports.push(exportPromise)
-
-    // Clean up completed exports
-    void exportPromise.finally(() => {
-      const index = this.pendingExports.indexOf(exportPromise)
-      if (index > -1) {
-        void this.pendingExports.splice(index, 1)
-      }
-    })
+    resultCallback({ code: ExportResultCode.SUCCESS })
   }
 
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: product-cut export() no longer POSTs
   private async doExport(
     metrics: ResourceMetrics,
     resultCallback: (result: ExportResult) => void,

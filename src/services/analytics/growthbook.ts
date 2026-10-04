@@ -42,10 +42,7 @@ import { registerFileGateReader } from '../../utils/file.js'
 import { i_ } from '../../utils/toolSchemaCache.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
-import {
-  is1PEventLoggingEnabled,
-  logGrowthBookExperimentTo1P,
-} from './firstPartyEventLogger.js'
+import { logGrowthBookExperimentTo1P } from './firstPartyEventLogger.js'
 
 /**
  * User attributes sent to GrowthBook for targeting.
@@ -581,9 +578,9 @@ export function isGrowthBookEnabled(): boolean {
   if (isGrowthBookBlockedByProviderOrPrivacy()) {
     return false
   }
-  // Tip: NODE_ENV=test and remaining analytics opt-outs (1P logger).
-  // 3P/telemetry already covered above; this keeps test isolation.
-  return is1PEventLoggingEnabled()
+  // Product-cut: never phone home to Anthropic GrowthBook. A self-hosted
+  // adapter (CLAUDE_GB_ADAPTER_URL) is the only remaining remote path.
+  return Boolean(process.env.CLAUDE_GB_ADAPTER_URL)
 }
 
 /**
@@ -815,6 +812,9 @@ const getGrowthBookClient = memoize(
  */
 export const initializeGrowthBook = memoize(
   async (): Promise<GrowthBook | null> => {
+    if (!isGrowthBookEnabled()) {
+      return null
+    }
     const hasTrust =
       checkHasTrustDialogAccepted() ||
       getSessionTrustAccepted() ||

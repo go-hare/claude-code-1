@@ -3,11 +3,6 @@ import { createHash } from 'crypto'
 import memoize from 'lodash-es/memoize.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import { logError } from '../../utils/log.js'
-import { getCanonicalName } from '../../utils/model/model.js'
-import { getAPIProvider } from '../../utils/model/providers.js'
-import { MODEL_COSTS } from '../../utils/modelCost.js'
-import { isAnalyticsDisabled } from './config.js'
-import { getEventMetadata } from './metadata.js'
 
 /**
  * Datadog endpoint and token are configurable via environment variables.
@@ -134,25 +129,8 @@ function scheduleFlush(): void {
 }
 
 export const initializeDatadog = memoize(async (): Promise<boolean> => {
-  if (isAnalyticsDisabled()) {
-    datadogInitialized = false
-    return false
-  }
-
-  // No custom endpoint configured — skip Datadog entirely
-  if (!DATADOG_LOGS_ENDPOINT || !DATADOG_CLIENT_TOKEN) {
-    datadogInitialized = false
-    return false
-  }
-
-  try {
-    datadogInitialized = true
-    return true
-  } catch (error) {
-    logError(error)
-    datadogInitialized = false
-    return false
-  }
+  datadogInitialized = false
+  return false
 })
 
 /**
@@ -170,135 +148,9 @@ export async function shutdownDatadog(): Promise<void> {
 
 // NOTE: use via src/services/analytics/index.ts > logEvent
 export async function trackDatadogEvent(
-  eventName: string,
-  properties: { [key: string]: boolean | number | undefined },
-): Promise<void> {
-  if (process.env.NODE_ENV !== 'production') {
-    return
-  }
-
-  // Don't send events for 3P providers (Bedrock, Vertex, Foundry) unless
-  // official CLAUDE_CODE_BYOC_ENABLE_DATADOG densable is on.
-  if (getAPIProvider() !== 'firstParty') {
-    let byocDatadog = false
-    try {
-      const { isByocDatadogEnabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-      byocDatadog = isByocDatadogEnabled()
-    } catch {
-      // densable optional
-    }
-    if (!byocDatadog) return
-  }
-
-  // Fast path: use cached result if available to avoid await overhead
-  let initialized = datadogInitialized
-  if (initialized === null) {
-    initialized = await initializeDatadog()
-  }
-  if (!initialized || !DATADOG_ALLOWED_EVENTS.has(eventName)) {
-    return
-  }
-
-  try {
-    const metadata = await getEventMetadata({
-      model: properties.model,
-      betas: properties.betas,
-    })
-    // Destructure to avoid duplicate envContext (once nested, once flattened)
-    const { envContext, ...restMetadata } = metadata
-    const allData: Record<string, unknown> = {
-      ...restMetadata,
-      ...envContext,
-      ...properties,
-      userBucket: getUserBucket(),
-    }
-
-    // Normalize MCP tool names to "mcp" for cardinality reduction
-    if (
-      typeof allData.toolName === 'string' &&
-      allData.toolName.startsWith('mcp__')
-    ) {
-      allData.toolName = 'mcp'
-    }
-
-    // Normalize model names for cardinality reduction (external users only)
-    if (true && typeof allData.model === 'string') {
-      const shortName = getCanonicalName(allData.model.replace(/\[1m]$/i, ''))
-      allData.model = shortName in MODEL_COSTS ? shortName : 'other'
-    }
-
-    // Truncate dev version to base + date (remove timestamp and sha for cardinality reduction)
-    // e.g. "2.0.53-dev.20251124.t173302.sha526cc6a" -> "2.0.53-dev.20251124"
-    if (typeof allData.version === 'string') {
-      allData.version = allData.version.replace(
-        /^(\d+\.\d+\.\d+-dev\.\d{8})\.t\d+\.sha[a-f0-9]+$/,
-        '$1',
-      )
-    }
-
-    // Transform status to http_status and http_status_range to avoid Datadog reserved field
-    if (allData.status !== undefined && allData.status !== null) {
-      const statusCode = String(allData.status)
-      allData.http_status = statusCode
-
-      // Determine status range (1xx, 2xx, 3xx, 4xx, 5xx)
-      const firstDigit = statusCode.charAt(0)
-      if (firstDigit >= '1' && firstDigit <= '5') {
-        allData.http_status_range = `${firstDigit}xx`
-      }
-
-      // Remove original status field to avoid conflict with Datadog's reserved field
-      delete allData.status
-    }
-
-    // Build ddtags with high-cardinality fields for filtering.
-    // event:<name> is prepended so the event name is searchable via the
-    // log search API — the `message` field (where eventName also lives)
-    // is a DD reserved field and is NOT queryable from dashboard widget
-    // queries or the aggregation API. See scripts/release/MONITORING.md.
-    const allDataRecord = allData
-    const tags = [
-      `event:${eventName}`,
-      ...TAG_FIELDS.filter(
-        field =>
-          allDataRecord[field] !== undefined && allDataRecord[field] !== null,
-      ).map(field => `${camelToSnakeCase(field)}:${allDataRecord[field]}`),
-    ]
-
-    const log: DatadogLog = {
-      ddsource: 'nodejs',
-      ddtags: tags.join(','),
-      message: eventName,
-      service: 'claude-code',
-      hostname: 'claude-code',
-      env: process.env.USER_TYPE,
-    }
-
-    // Add all fields as searchable attributes (not duplicated in tags)
-    for (const [key, value] of Object.entries(allData)) {
-      if (value !== undefined && value !== null) {
-        log[camelToSnakeCase(key)] = value
-      }
-    }
-
-    logBatch.push(log)
-
-    // Flush immediately if batch is full, otherwise schedule
-    if (logBatch.length >= MAX_BATCH_SIZE) {
-      if (flushTimer) {
-        clearTimeout(flushTimer)
-        flushTimer = null
-      }
-      void flushLogs()
-    } else {
-      scheduleFlush()
-    }
-  } catch (error) {
-    logError(error)
-  }
-}
+  _eventName: string,
+  _properties: { [key: string]: boolean | number | undefined },
+): Promise<void> {}
 
 const NUM_USER_BUCKETS = 30
 

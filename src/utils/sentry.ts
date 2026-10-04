@@ -17,79 +17,9 @@ let initialized = false
  * Only activates when SENTRY_DSN environment variable is set.
  */
 export function initSentry(): void {
-  if (initialized) {
-    return
-  }
-
-  const dsn = process.env.SENTRY_DSN
-  if (!dsn) {
-    logForDebugging('[sentry] SENTRY_DSN not set, skipping initialization')
-    return
-  }
-
-  Sentry.init({
-    dsn,
-    release: typeof MACRO !== 'undefined' ? MACRO.VERSION : undefined,
-    environment:
-      typeof BUILD_ENV !== 'undefined'
-        ? (BUILD_ENV as string)
-        : process.env.NODE_ENV || 'development',
-
-    // Limit breadcrumbs and attachments to control payload size
-    maxBreadcrumbs: 20,
-
-    // Sample rate for error events (1.0 = capture all)
-    sampleRate: 1.0,
-
-    // Filter sensitive information before sending
-    beforeSend(event) {
-      // Strip auth headers from request data
-      const request = event.request
-      if (request?.headers) {
-        const sensitiveHeaders = [
-          'authorization',
-          'x-api-key',
-          'cookie',
-          'set-cookie',
-        ]
-        for (const key of Object.keys(request.headers)) {
-          if (sensitiveHeaders.includes(key.toLowerCase())) {
-            delete request.headers[key]
-          }
-        }
-      }
-
-      return event
-    },
-
-    // Ignore specific error patterns
-    ignoreErrors: [
-      // Network errors from unreachable hosts — not actionable
-      'ECONNREFUSED',
-      'ECONNRESET',
-      'ENOTFOUND',
-      'ETIMEDOUT',
-      // User-initiated aborts
-      'AbortError',
-      'The user aborted a request',
-      // Interactive cancellation signals
-      'CancelError',
-    ],
-
-    beforeSendTransaction(_event) {
-      // Don't send performance transactions for now — errors only
-      return null
-    },
-  })
-
-  initialized = true
-  logForDebugging('[sentry] Initialized successfully')
+  // Product-cut: never initialize Anthropic/Sentry error reporting.
 }
 
-/**
- * Capture an exception and send it to Sentry.
- * No-op if Sentry has not been initialized.
- */
 export function captureException(
   error: unknown,
   context?: Record<string, unknown>,

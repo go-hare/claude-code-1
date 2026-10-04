@@ -275,18 +275,10 @@ export class FirstPartyEventLoggingExporter implements LogRecordExporter {
       return
     }
 
-    const exportPromise = this.doExport(logs, resultCallback)
-    this.pendingExports.push(exportPromise)
-
-    // Clean up completed exports
-    void exportPromise.finally(() => {
-      const index = this.pendingExports.indexOf(exportPromise)
-      if (index > -1) {
-        void this.pendingExports.splice(index, 1)
-      }
-    })
+    resultCallback({ code: ExportResultCode.SUCCESS })
   }
 
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: product-cut export() no longer POSTs
   private async doExport(
     logs: ReadableLogRecord[],
     resultCallback: (result: ExportResult) => void,

@@ -10,37 +10,10 @@
 
 import { trackDatadogEvent } from './datadog.js'
 import { logEventTo1P, shouldSampleEvent } from './firstPartyEventLogger.js'
-import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from './growthbook.js'
 import { attachAnalyticsSink, stripProtoFields } from './index.js'
-import { isSinkKilled } from './sinkKillswitch.js'
 
 // Local type matching the logEvent metadata signature
 type LogEventMetadata = { [key: string]: boolean | number | undefined }
-
-const DATADOG_GATE_NAME = 'tengu_log_datadog_events'
-
-// Module-level gate state - starts undefined, initialized during startup
-let isDatadogGateEnabled: boolean | undefined
-
-/**
- * Check if Datadog tracking is enabled.
- * Falls back to cached value from previous session if not yet initialized.
- */
-function shouldTrackDatadog(): boolean {
-  if (isSinkKilled('datadog')) {
-    return false
-  }
-  if (isDatadogGateEnabled !== undefined) {
-    return isDatadogGateEnabled
-  }
-
-  // Fallback to cached value from previous session
-  try {
-    return checkStatsigFeatureGate_CACHED_MAY_BE_STALE(DATADOG_GATE_NAME)
-  } catch {
-    return false
-  }
-}
 
 /**
  * Log an event (synchronous implementation)
@@ -60,14 +33,7 @@ function logEventImpl(eventName: string, metadata: LogEventMetadata): void {
       ? { ...metadata, sample_rate: sampleResult }
       : metadata
 
-  if (shouldTrackDatadog()) {
-    // Datadog is a general-access backend — strip _PROTO_* keys
-    // (unredacted PII-tagged values meant only for the 1P privileged column).
-    void trackDatadogEvent(eventName, stripProtoFields(metadataWithSampleRate))
-  }
-
-  // 1P receives the full payload including _PROTO_* — the exporter
-  // destructures and routes those keys to proto fields itself.
+  void trackDatadogEvent(eventName, stripProtoFields(metadataWithSampleRate))
   logEventTo1P(eventName, metadataWithSampleRate)
 }
 
@@ -93,10 +59,7 @@ function logEventAsyncImpl(
  *
  * Called from main.tsx during setupBackend().
  */
-export function initializeAnalyticsGates(): void {
-  isDatadogGateEnabled =
-    checkStatsigFeatureGate_CACHED_MAY_BE_STALE(DATADOG_GATE_NAME)
-}
+export function initializeAnalyticsGates(): void {}
 
 /**
  * Initialize the analytics sink.

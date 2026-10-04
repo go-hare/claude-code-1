@@ -10,7 +10,7 @@
 - **事件白名单**: `tengu_*` 系列事件（启动、错误、OAuth、工具调用等 ~35 种）
 - **基线数据**: 收集 model、platform、arch、version、userBucket（用户 hash 到 30 个桶）等
 - **仅限**: `NODE_ENV === 'production'`
-- **配置示例**: `DATADOG_LOGS_ENDPOINT=https://http-intake.logs.datadoghq.com/api/v2/logs DATADOG_API_KEY=xxx bun run dev`
+- **产品拆除**: `trackDatadogEvent` / `initializeDatadog` 为空实现，不再发送。`logEvent` 调用点保留。
 
 ## 2. 1P 事件日志（BigQuery）
 
@@ -22,6 +22,7 @@
 - **弹性**: 本地磁盘持久化失败事件（JSONL），二次退避重试，最多 8 次尝试
 - **Proto schema**: 事件序列化为 `ClaudeCodeInternalEvent` / `GrowthbookExperimentEvent` protobuf 格式
 - **Auth fallback**: 401 时自动去掉 auth header 重试
+- **产品拆除**: `is1PEventLoggingEnabled()` 恒为 false；`initialize1PEventLogging` 不建 exporter。`logEvent` 调用点保留。
 
 ## 3. GrowthBook 远程 Feature Flags / 动态配置
 
@@ -37,6 +38,7 @@
   - 控制 BQ batch 配置（`tengu_1p_event_batch_config`）
   - 控制版本上限/自动更新 kill switch
 - **用户属性**: 发送 deviceId, sessionId, organizationUUID, accountUUID, email, subscriptionType 等
+- **产品拆除**: `isGrowthBookEnabled()` 仅在设置 `CLAUDE_GB_ADAPTER_URL` 时为 true。无 adapter 时走 `LOCAL_GATE_DEFAULTS` + env/config override，不打 Anthropic GB。
 
 ## 4. Remote Managed Settings（已产品拆除）
 
@@ -70,6 +72,7 @@ Anthropic Team/Enterprise 远程托管设置、MDM、org tips、CRI policy webho
 - **行为**: 定期（5min 间隔）导出 OTel metrics 到内部 BQ
 - **适用**: API 客户、C4E/Team 订阅者
 - **组织级 opt-out**: 通过 `checkMetricsEnabled()` API 查询（见下方第 8 项）
+- **产品拆除**: `isBigQueryMetricsEnabled()` 恒为 false；exporter `export()` 立刻 SUCCESS，不 POST。
 
 ## 8. 组织级 Metrics Opt-out 查询
 
@@ -78,6 +81,7 @@ Anthropic Team/Enterprise 远程托管设置、MDM、org tips、CRI policy webho
 - **端点**: `https://api.anthropic.com/api/claude_code/organizations/metrics_enabled`
 - **行为**: 查询组织是否启用了 metrics，二级缓存（内存 1h + 磁盘 24h）
 - **作用**: 控制 BigQuery metrics exporter 是否导出
+- **产品拆除**: `checkMetricsEnabled()` 立刻返回 `{enabled:false}`，不打网络。
 
 ## 9. Startup Profiling
 
