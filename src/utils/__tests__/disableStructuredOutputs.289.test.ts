@@ -12,6 +12,7 @@ describe('densable 2.1.289 CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS', () => {
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
     delete process.env.CLAUDE_CODE_USE_FOUNDRY
+    delete process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS
     delete process.env.CLAUDE_CODE_USE_MANTLE
     delete process.env.CLAUDE_CODE_USE_GATEWAY
     delete process.env.CLAUDE_CODE_USE_OPENAI
@@ -56,5 +57,34 @@ describe('densable 2.1.289 CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS', () => {
     // Prior 4.x still admitted
     expect(modelSupportsStructuredOutputs('claude-opus-4-1')).toBe(true)
     expect(modelSupportsStructuredOutputs('claude-sonnet-4-5')).toBe(true)
+  })
+
+  test('mCn denylist admits CURRENT picker ids sonnet-5 / opus-4-8', async () => {
+    const { modelSupportsStructuredOutputs } = await import('../betas.js')
+    // Gold: absent from Sv (sonnet-5) or at/after opus-4-1 cutoff (opus-4-8)
+    expect(modelSupportsStructuredOutputs('claude-sonnet-5')).toBe(true)
+    expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(true)
+    // Gold sr denies strictly-before cutoff / claude-3-*
+    expect(modelSupportsStructuredOutputs('claude-opus-4-0')).toBe(false)
+    expect(modelSupportsStructuredOutputs('claude-sonnet-4-0')).toBe(false)
+    expect(modelSupportsStructuredOutputs('claude-3-haiku')).toBe(false)
+  })
+
+  test('mCn y$ provider gate admits anthropicAws / mantle', async () => {
+    const { modelSupportsStructuredOutputs } = await import('../betas.js')
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS = '1'
+    expect(modelSupportsStructuredOutputs('claude-sonnet-5')).toBe(true)
+    expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(true)
+    delete process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS
+
+    process.env.CLAUDE_CODE_USE_MANTLE = '1'
+    expect(modelSupportsStructuredOutputs('claude-haiku-4-5')).toBe(true)
+    expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(true)
+    delete process.env.CLAUDE_CODE_USE_MANTLE
+
+    // Bedrock / Vertex remain outside gold y$
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(false)
+    delete process.env.CLAUDE_CODE_USE_BEDROCK
   })
 })

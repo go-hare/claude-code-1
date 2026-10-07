@@ -151,37 +151,76 @@ export function modelSupportsContextManagement(model: string): boolean {
   )
 }
 
-// @[MODEL LAUNCH]: Add the new model ID to this list if it supports structured outputs.
-// densable mCn — also force-off under JK() and CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS.
+// densable Sv — ordered family list for sr(canonical, cutoff) compares.
+// Models strictly before claude-opus-4-1 are denied; absent ids are admitted.
+const STRUCTURED_OUTPUTS_MODEL_ORDER = [
+  'claude-opus-4-0',
+  'claude-sonnet-4-0',
+  'claude-opus-4-1',
+  'claude-sonnet-4-5',
+  'claude-haiku-4-5',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+] as const
+
+const STRUCTURED_OUTPUTS_DENY_BEFORE = 'claude-opus-4-1'
+
+/**
+ * densable sr(canonical, "claude-opus-4-1"):
+ * deny claude-3-* and any Sv member strictly before the cutoff.
+ */
+function isStructuredOutputsDeniedByModelFamily(canonical: string): boolean {
+  if (canonical.includes('claude-3-')) {
+    return true
+  }
+  const idx = (STRUCTURED_OUTPUTS_MODEL_ORDER as readonly string[]).indexOf(
+    canonical,
+  )
+  if (idx === -1) {
+    return false
+  }
+  return (
+    idx <
+    (STRUCTURED_OUTPUTS_MODEL_ORDER as readonly string[]).indexOf(
+      STRUCTURED_OUTPUTS_DENY_BEFORE,
+    )
+  )
+}
+
+/**
+ * densable y$ — firstParty || h$(anthropicAws) || foundry || mantle.
+ * Local has no anthropicGoogleCloud enum; anthropicAws covers the live h$ arm.
+ */
+export function providerSupportsStructuredOutputsCapability(
+  provider: APIProvider = getAPIProvider(),
+): boolean {
+  return (
+    provider === 'firstParty' ||
+    provider === 'anthropicAws' ||
+    provider === 'foundry' ||
+    provider === 'mantle'
+  )
+}
+
+// densable mCn — y$(provider) then JK()/DISABLE then !sr(canonical,"claude-opus-4-1").
 export function modelSupportsStructuredOutputs(model: string): boolean {
   const canonical = getCanonicalName(model)
   const provider = getAPIProvider()
-  // Structured outputs only supported on firstParty and Foundry (not Bedrock/Vertex yet)
-  if (provider !== 'firstParty' && provider !== 'foundry') {
+  if (!providerSupportsStructuredOutputsCapability(provider)) {
     return false
   }
   // densable JK() — DISABLE_EXPERIMENTAL_BETAS || HIPAA
   if (isExperimentalBetasDisabled() || isHipaaPolicy()) {
     return false
   }
-  // densable 2.1.289 — Mantle/gateway proxies that reject structured outputs
+  // densable CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS
   if (isStructuredOutputsDisabled()) {
     return false
   }
-  // densable 2.1.289 mCn-like: admit current defaults (sonnet-5-5 /
-  // opus-5* / fable*) while keeping the prior 4.x allowlist entries.
-  return (
-    canonical.includes('claude-sonnet-4-6') ||
-    canonical.includes('claude-sonnet-4-5') ||
-    canonical.includes('claude-sonnet-5-5') ||
-    canonical.includes('claude-opus-4-1') ||
-    canonical.includes('claude-opus-4-5') ||
-    canonical.includes('claude-opus-4-6') ||
-    canonical.includes('claude-opus-4-7') ||
-    canonical.includes('claude-opus-5') ||
-    canonical.includes('claude-haiku-4-5') ||
-    canonical.includes('claude-fable-5')
-  )
+  return !isStructuredOutputsDeniedByModelFamily(canonical)
 }
 
 /**
@@ -376,11 +415,10 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(CONTEXT_MANAGEMENT_BETA_HEADER)
   }
   // Add strict tool use beta if experiment is enabled.
-  // Gate on includeFirstPartyOnlyBetas: CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
-  // already strips schema.strict from tool bodies at api.ts's choke point, but
-  // this header was escaping that kill switch. Proxy gateways that look like
-  // firstParty but forward to Vertex reject this header with 400.
-  // github.com/deshaw/anthropic-issues/issues/5
+  // densable nee when: firstPartyCapabilityBetas(=y$&&!JK) && mCn(model) &&
+  // tengu_tool_pear. modelSupportsStructuredOutputs already encodes y$/JK/
+  // DISABLE/sr — do NOT re-gate on the narrower firstParty|foundry
+  // includeFirstPartyOnlyBetas (would FN anthropicAws/mantle).
   const strictToolsEnabled =
     checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_tool_pear')
   // 3P default: false. API rejects strict + token-efficient-tools together
@@ -388,11 +426,7 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   const tokenEfficientToolsEnabled =
     !strictToolsEnabled &&
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_json_tools', false)
-  if (
-    includeFirstPartyOnlyBetas &&
-    modelSupportsStructuredOutputs(model) &&
-    strictToolsEnabled
-  ) {
+  if (modelSupportsStructuredOutputs(model) && strictToolsEnabled) {
     betaHeaders.push(STRUCTURED_OUTPUTS_BETA_HEADER)
   }
   // JSON tool_use format (FC v3) — ~4.5% output token reduction vs ANTML.
