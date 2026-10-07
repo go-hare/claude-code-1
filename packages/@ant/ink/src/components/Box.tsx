@@ -5,6 +5,7 @@ import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { PasteEvent } from '../core/events/paste-event.js';
+import type { WheelEvent } from '../core/events/wheel-event.js';
 import type { Styles } from '../core/styles.js';
 import * as warn from '../core/warn.js';
 
@@ -50,6 +51,13 @@ export type Props = Except<Styles, 'textWrap'> & {
   onPaste?: (event: PasteEvent) => void;
   onPasteCapture?: (event: PasteEvent) => void;
   /**
+   * densable `onWheel` / `Wd` — SGR wheel. Dispatched via Ink.dispatchWheelEvent
+   * (continuous). Only fires when a handler is on this node or an ancestor
+   * (`VC` walk); otherwise wheel stays on the InputEvent keybinding path.
+   */
+  onWheel?: (event: WheelEvent) => void;
+  onWheelCapture?: (event: WheelEvent) => void;
+  /**
    * Fired when the mouse moves into this Box's rendered rect. Like DOM
    * `mouseenter`, does NOT bubble — moving between children does not
    * re-fire on the parent. Only works inside `<AlternateScreen>` where
@@ -58,6 +66,12 @@ export type Props = Except<Styles, 'textWrap'> & {
   onMouseEnter?: () => void;
   /** Fired when the mouse moves out of this Box's rendered rect. */
   onMouseLeave?: () => void;
+  /**
+   * densable `elementKey` / `elementPlugin` — plugin drawing identity for
+   * Ide `keyRows` (cEe yoga walk). Written onto ink-box attributes.
+   */
+  elementKey?: string;
+  elementPlugin?: string;
 };
 
 /**
@@ -85,6 +99,10 @@ function Box({
   onKeyDownCapture,
   onPaste,
   onPasteCapture,
+  onWheel,
+  onWheelCapture,
+  elementKey,
+  elementPlugin,
   ...style
 }: PropsWithChildren<Props>): React.ReactNode {
   // Warn if spacing values are not integers to prevent fractional layout dimensions
@@ -126,6 +144,10 @@ function Box({
       onKeyDownCapture={onKeyDownCapture as unknown as (event: React.KeyboardEvent<Element>) => void}
       onPaste={onPaste}
       onPasteCapture={onPasteCapture}
+      onWheel={onWheel}
+      onWheelCapture={onWheelCapture}
+      {...(elementKey !== undefined && { elementKey })}
+      {...(elementPlugin !== undefined && { elementPlugin })}
       style={{
         flexWrap,
         flexDirection,

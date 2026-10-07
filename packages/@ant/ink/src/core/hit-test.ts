@@ -55,9 +55,17 @@ export function hitTest(
  * per handler; a handler that calls `allowDefault()` does not count as
  * handled. `stopImmediatePropagation` returns `!defaultAllowed`.
  */
-export function bubbleClick(root: DOMElement, event: ClickEvent): boolean {
+export function bubbleClick(
+  root: DOMElement,
+  event: ClickEvent,
+  hit?: DOMElement | null,
+): boolean {
   const { col, row } = event
-  let target: DOMElement | undefined = hitTest(root, col, row) ?? undefined
+  // densable dispatchMouseClick: R6 once, then listeners, then bubble.
+  let target: DOMElement | undefined =
+    hit !== undefined
+      ? (hit ?? undefined)
+      : (hitTest(root, col, row) ?? undefined)
   if (!target) return false
 
   // Click-to-focus: find the closest focusable ancestor and focus it.
@@ -91,6 +99,20 @@ export function bubbleClick(root: DOMElement, event: ClickEvent): boolean {
     target = target.parentNode
   }
   return handled
+}
+
+/**
+ * densable `VC` — true if this node or an ancestor has onWheel.
+ */
+export function nodeHasWheelHandler(
+  node: DOMElement | null | undefined,
+): boolean {
+  let walk: DOMElement | undefined = node ?? undefined
+  while (walk) {
+    if (walk._eventHandlers?.onWheel) return true
+    walk = walk.parentNode
+  }
+  return false
 }
 
 /**

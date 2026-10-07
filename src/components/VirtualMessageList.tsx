@@ -25,6 +25,14 @@ import { plural } from '../utils/stringUtils.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
 import type { RenderableMessage } from '../types/message.js';
 import {
+  messageHasUuid,
+  messageRowSpan,
+  messageSelectionRequestId,
+  requestIdHoldingSelection,
+  setUiSelectionRowHolding,
+} from '../utils/plugins/uiSelectionRowHolding.js';
+import { setTranscriptRevealHost, type TranscriptRevealBlock } from '../utils/plugins/transcriptReveal.js';
+import {
   isNavigableMessage,
   type MessageActionsNav,
   type MessageActionsState,
@@ -32,6 +40,42 @@ import {
   stripSystemReminders,
   toolCallOf,
 } from './messageActions.js';
+
+/** densable `_H` — uuid prefix fallback match length. */
+const UUID_REVEAL_PREFIX = 24;
+/** densable `U0` — settle window after first land (ms). */
+const REVEAL_SETTLE_MS = 2000;
+/** densable `B0` — give-up timeout (ms). */
+const REVEAL_GIVE_UP_MS = 3000;
+
+/**
+ * densable `$0` — requestId matches message uuid / tool_use id / grouped.
+ */
+function messageMatchesRevealRequestId(msg: RenderableMessage, requestId: string): boolean {
+  if ('uuid' in msg && (msg as { uuid?: string }).uuid === requestId) return true;
+  if (messageSelectionRequestId(msg) === requestId) return true;
+  const row = msg as {
+    type?: string;
+    messages?: Array<{
+      type?: string;
+      uuid?: string;
+      message?: { content?: Array<{ id?: string; tool_use_id?: string }> };
+    }>;
+  };
+  if (row.type === 'grouped_tool_use' && Array.isArray(row.messages)) {
+    return row.messages.some(inner => {
+      const content = inner?.message?.content?.[0];
+      return content?.id === requestId;
+    });
+  }
+  if (row.type === 'collapsed_read_search' && Array.isArray(row.messages)) {
+    return row.messages.some(
+      inner =>
+        (inner?.type === 'assistant' || inner?.type === 'user') && messageSelectionRequestId(inner) === requestId,
+    );
+  }
+  return false;
+}
 
 /**
  * densable mfT cache — incremental itemKeys with collision counts.
@@ -479,6 +523,205 @@ export function VirtualMessageList({
     messages,
     scrollToIndex,
   };
+
+  // densable 2.1.289 VirtualMessageList `rowHolding` → FH `$.ui.selection` instance_id.
+  useEffect(() => {
+    setUiSelectionRowHolding(selection => {
+      const scroll = scrollRef.current;
+      if (!scroll) return undefined;
+      const node = scroll.getDomElement();
+      const first = scroll.getViewportTop();
+      const last = first + scroll.getViewportHeight() - 1;
+      const { messages: msgs, getItemElement: getEl } = jumpState.current;
+      const rows = msgs.flatMap((msg, index) => {
+        const el = getEl(index);
+        if (!el || !messageHasUuid(msg)) return [];
+        const span = messageRowSpan(messageSelectionRequestId(msg), el);
+        return span ? [span] : [];
+      });
+      return requestIdHoldingSelection(selection, { node, first, last }, rows);
+    });
+    return () => setUiSelectionRowHolding(undefined);
+  }, [scrollRef]);
+
+  // densable 2.1.289 VML `reveal(requestId, block)` → FH vat / Xi.reveal.
+  const revealPendingRef = useRef<{
+    requestId: string;
+    block: TranscriptRevealBlock;
+    idx: number;
+    messages: RenderableMessage[];
+    landed?: { at: number; top: number; height: number; viewport: number };
+    done: (ok: boolean) => void;
+    cancelGiveUp: () => void;
+  } | null>(null);
+  const revealBusyRef = useRef(false);
+  // Bumped when a reveal starts so the paint-tick effect re-arms rAF.
+  const [revealEpoch, setRevealEpoch] = useState(0);
+
+  const indexByRevealRequestId = useCallback((msgs: RenderableMessage[], requestId: string): number => {
+    const exact = msgs.findIndex(msg => msg !== undefined && messageMatchesRevealRequestId(msg, requestId));
+    if (exact >= 0) return exact;
+    return msgs.findIndex(
+      msg =>
+        messageHasUuid(msg) &&
+        requestId.length === msg.uuid.length &&
+        msg.uuid.slice(0, UUID_REVEAL_PREFIX) === requestId.slice(0, UUID_REVEAL_PREFIX),
+    );
+  }, []);
+
+  const releaseReveal = useCallback(() => {
+    const pending = revealPendingRef.current;
+    if (pending) {
+      pending.cancelGiveUp();
+      pending.done(false);
+      revealPendingRef.current = null;
+    }
+    revealBusyRef.current = false;
+  }, []);
+
+  const tickReveal = useCallback(
+    (allowRemount: boolean) => {
+      const pending = revealPendingRef.current;
+      if (!pending) return;
+      const scroll = scrollRef.current;
+      if (!scroll) {
+        // densable: missing viewport handle → fail reveal immediately.
+        revealPendingRef.current = null;
+        revealBusyRef.current = false;
+        pending.cancelGiveUp();
+        pending.done(false);
+        return;
+      }
+      if (scroll.getPendingDelta() !== 0) {
+        revealBusyRef.current = true;
+        return;
+      }
+      const { messages: msgs, getItemElement, scrollToIndex } = jumpState.current;
+      if (msgs !== pending.messages) {
+        pending.messages = msgs;
+        pending.idx = indexByRevealRequestId(msgs, pending.requestId);
+      }
+      if (pending.idx < 0) {
+        // densable settle: lost Eb index → done(false) immediately (not only give-up).
+        revealPendingRef.current = null;
+        revealBusyRef.current = false;
+        pending.cancelGiveUp();
+        pending.done(false);
+        return;
+      }
+      const now = performance.now();
+      const { landed } = pending;
+      if (landed && now - landed.at >= REVEAL_SETTLE_MS) {
+        // First land already resolved the Promise; drop settle tracking.
+        revealPendingRef.current = null;
+        revealBusyRef.current = false;
+        return;
+      }
+      const el = getItemElement(pending.idx);
+      if (!el) {
+        if (allowRemount) {
+          scrollToIndex(pending.idx);
+          pending.landed = landed && { ...landed, top: -1, height: -1 };
+        }
+        return;
+      }
+      const yoga = el.yogaNode;
+      if (!yoga || yoga.getComputedWidth() === 0) return;
+      const height = yoga.getComputedHeight();
+      const top = yoga.getComputedTop();
+      // height===0: wait for layout — do NOT scrollToElement (clears sticky
+      // without a real land). Next paint tick will retry.
+      if (height === 0) {
+        return;
+      }
+      const viewport = scroll.getViewportHeight();
+      if (landed && landed.top === top && landed.height === height && landed.viewport === viewport) {
+        return;
+      }
+      scroll.scrollToElement(el, 0, { block: pending.block });
+      pending.landed = {
+        at: landed?.at ?? now,
+        top,
+        height,
+        viewport,
+      };
+      if (!landed) {
+        pending.cancelGiveUp();
+        pending.done(true);
+      }
+    },
+    [scrollRef, indexByRevealRequestId],
+  );
+
+  useEffect(() => {
+    setTranscriptRevealHost({
+      reveal: (requestId, block) => {
+        // Concurrent reveal: release prior pending Promise/timeout first.
+        releaseReveal();
+        revealBusyRef.current = true;
+        const { messages: msgs } = jumpState.current;
+        const idx = indexByRevealRequestId(msgs, requestId);
+        if (!scrollRef.current || idx < 0) {
+          revealBusyRef.current = false;
+          return null;
+        }
+        return new Promise<boolean>(resolve => {
+          let settled = false;
+          const done = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            revealBusyRef.current = false;
+            resolve(ok);
+          };
+          const timeout = setTimeout(() => {
+            const cur = revealPendingRef.current;
+            if (cur) {
+              revealPendingRef.current = null;
+              revealBusyRef.current = false;
+              cur.done(false);
+            } else {
+              revealBusyRef.current = false;
+            }
+          }, REVEAL_GIVE_UP_MS);
+          revealPendingRef.current = {
+            requestId,
+            block,
+            idx,
+            messages: msgs,
+            landed: undefined,
+            done,
+            cancelGiveUp: () => clearTimeout(timeout),
+          };
+          setRevealEpoch(n => n + 1);
+          tickReveal(true);
+        });
+      },
+      release: releaseReveal,
+    });
+    return () => {
+      releaseReveal();
+      setTranscriptRevealHost(undefined);
+    };
+  }, [scrollRef, indexByRevealRequestId, releaseReveal, tickReveal]);
+
+  // densable paint tick — rAF while pending (not every React render).
+  useEffect(() => {
+    if (!revealPendingRef.current) return;
+    let raf = 0;
+    let alive = true;
+    const loop = () => {
+      if (!alive || !revealPendingRef.current) return;
+      tickReveal(true);
+      if (alive && revealPendingRef.current) {
+        raf = requestAnimationFrame(loop);
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      alive = false;
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [tickReveal, revealEpoch]);
 
   // Keep cursor-selected message visible. offsets rebuilds every render
   // — as a bare dep this re-pinned on every mousewheel tick. Read through

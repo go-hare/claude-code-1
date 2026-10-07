@@ -6,6 +6,7 @@ import type { ClickEvent } from '../core/events/click-event.js'
 import type { FocusEvent } from '../core/events/focus-event.js'
 import type { KeyboardEvent } from '../core/events/keyboard-event.js'
 import type { PasteEvent } from '../core/events/paste-event.js'
+import type { WheelEvent } from '../core/events/wheel-event.js'
 import type { Styles, TextStyles } from '../core/styles.js'
 import type { DOMAccessibility, DOMElement } from '../core/dom.js'
 
@@ -28,6 +29,11 @@ declare global {
         onKeyDownCapture?: (event: KeyboardEvent) => void
         onPaste?: (event: PasteEvent) => void
         onPasteCapture?: (event: PasteEvent) => void
+        onWheel?: (event: WheelEvent) => void
+        onWheelCapture?: (event: WheelEvent) => void
+        /** densable plugin drawing identity for Ide keyRows (cEe). */
+        elementKey?: string
+        elementPlugin?: string
         style?: Styles
         stickyScroll?: boolean
         /** Official 2.1.207: default true; false disables non-sticky growth follow. */

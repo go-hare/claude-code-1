@@ -822,16 +822,42 @@ function renderNodeToOutput(
           const anchorTop = anchorYoga?.getComputedTop()
           if (anchorTop != null && anchorYoga) {
             const offset = node.scrollAnchor.offset
-            if (node.scrollAnchor.nearest) {
-              node.scrollTop = resolveNearestScrollTop({
-                currentScrollTop: node.scrollTop ?? 0,
-                elementTop: anchorTop,
-                elementHeight: anchorYoga.getComputedHeight(),
-                viewportHeight: innerHeight,
-                offset,
-              })
+            const elH = anchorYoga.getComputedHeight()
+            // densable ScrollBox block align (SEA ~193325900):
+            // Be = top+offset (start), _t = top+height-viewport (end).
+            // Tall items clamp end/center to Be so the top stays reachable.
+            const startTarget = anchorTop + offset
+            const endTarget = anchorTop + elH - innerHeight
+            const block =
+              node.scrollAnchor.block ??
+              (node.scrollAnchor.nearest ? 'nearest' : 'start')
+            // Clamp to [0, maxScroll] BEFORE write — near-bottom overshoot
+            // must not land past max and falsely trip followGrowth re-stick.
+            const clampAnchor = (y: number): number =>
+              Math.max(0, Math.min(maxScroll, y))
+            if (block === 'nearest' || node.scrollAnchor.nearest) {
+              // gold: min(max(current, endTarget), startTarget)
+              const cur = node.scrollTop ?? 0
+              node.scrollTop = clampAnchor(
+                Math.min(Math.max(cur, endTarget), startTarget),
+              )
+            } else if (block === 'end') {
+              node.scrollTop = clampAnchor(
+                Math.max(0, Math.min(endTarget, startTarget)),
+              )
+            } else if (block === 'center') {
+              node.scrollTop = clampAnchor(
+                Math.max(
+                  0,
+                  Math.min(
+                    Math.floor((endTarget + startTarget) / 2),
+                    startTarget,
+                  ),
+                ),
+              )
             } else {
-              node.scrollTop = anchorTop + offset
+              // start
+              node.scrollTop = clampAnchor(startTarget)
             }
             node.pendingScrollDelta = undefined
           }

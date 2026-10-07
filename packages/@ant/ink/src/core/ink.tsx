@@ -18,7 +18,8 @@ import { KeyboardEvent } from './events/keyboard-event.js';
 import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
 import { emptyFrame, type Diff, type Frame, type FrameEvent } from './frame.js';
-import { bubbleClick, dispatchHover } from './hit-test.js';
+import { WheelEvent } from './events/wheel-event.js';
+import { bubbleClick, dispatchHover, hitTest, nodeHasWheelHandler } from './hit-test.js';
 import instances from './instances.js';
 import { LogUpdate } from './log-update.js';
 import { nodeCache } from './node-cache.js';
@@ -388,6 +389,37 @@ export default class Ink {
   // Fired alongside the terminal repaint whenever the selection mutates
   // so UI (e.g. footer hints) can react to selection appearing/clearing.
   private readonly selectionListeners = new Set<() => void>();
+  /**
+   * densable `clickListeners` / `subscribeClicks` — ITt click-away bus.
+   * Notified on every alt-screen click *before* onClick bubble.
+   */
+  private readonly clickListeners = new Set<
+    (node: dom.DOMElement | null | undefined, event: ClickEvent | null) => void
+  >();
+  /**
+   * densable `subscribeClicks=(n)=>(this.clickListeners.add(n),()=>{...})`.
+   * Arrow so AppContext / ITt can pass it as a stable Twe field.
+   */
+  subscribeClicks = (
+    listener: (node: dom.DOMElement | null | undefined, event: ClickEvent | null) => void,
+  ): (() => void) => {
+    this.clickListeners.add(listener);
+    return () => {
+      this.clickListeners.delete(listener);
+    };
+  };
+  /**
+   * densable `tellClickedNowhere` — alt-screen exit delivers `(null,null)`
+   * on a microtask so ITt click-away can drop pane focus.
+   */
+  private tellClickedNowhere(): void {
+    const listeners = [...this.clickListeners];
+    queueMicrotask(() => {
+      for (const listener of listeners) {
+        if (this.clickListeners.has(listener)) listener(null, null);
+      }
+    });
+  }
   // DOM nodes currently under the pointer (mode-1003 motion). Held here
   // so App.tsx's handleMouseEvent is stateless — dispatchHover diffs
   // against this set and mutates it in place.
@@ -1531,6 +1563,7 @@ export default class Ink {
   handoffAltScreen(): void {
     this.isPaused = true;
     this.altScreenActive = false;
+    this.tellClickedNowhere();
   }
 
   resume(): void {
@@ -1831,6 +1864,7 @@ export default class Ink {
       this.ensureInteractive();
       this.resetFramesForAltScreen();
     } else {
+      this.tellClickedNowhere();
       this.repaint();
     }
   }
@@ -2311,7 +2345,9 @@ export default class Ink {
     const blank = isEmptyCellAt(this.frontFrame.screen, col, row);
     const hyperlinkUrl = this.getHyperlinkAt(col, row);
     const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation);
-    const handled = bubbleClick(this.rootNode, event);
+    const hit = hitTest(this.rootNode, col, row);
+    for (const listener of this.clickListeners) listener(hit, event);
+    const handled = bubbleClick(this.rootNode, event, hit);
     if (event.droppedAsStray) return 'stray';
     return handled ? 'handled' : 'unhandled';
   }
@@ -2347,6 +2383,31 @@ export default class Ink {
     const event = new PasteEvent(text);
     dispatcher.dispatchDiscrete(target, event);
   }
+
+  /**
+   * densable `dispatchWheelEvent` — SGR wheel → WheelEvent on the hit
+   * node that has onWheel (`VC`), else focused/root. Returns whether
+   * preventDefault ran (caller skips InputEvent keybinding path).
+   */
+  dispatchWheelEvent = (parsed: ParsedKey): boolean => {
+    const seq = parsed.sequence ?? '';
+    const payload = seq.startsWith('\x1b') ? seq.slice(1) : seq;
+    const match = payload.match(/^\[<(\d+);(\d+);(\d+)[Mm]$/);
+    const col = match ? Number(match[2]) - 1 : undefined;
+    const row = match ? Number(match[3]) - 1 : undefined;
+    const cell =
+      col !== undefined && row !== undefined && Number.isFinite(col) && Number.isFinite(row) ? { col, row } : null;
+    const hit = cell ? hitTest(this.rootNode, cell.col, cell.row) : null;
+    const target = (hit && nodeHasWheelHandler(hit) ? hit : null) ?? this.focusManager.activeElement ?? this.rootNode;
+    const event = new WheelEvent(parsed.name === 'wheeldown' ? 1 : -1, {
+      ctrl: parsed.ctrl,
+      shift: parsed.shift,
+      meta: parsed.meta || parsed.option,
+      ...(cell !== null && { col: cell.col, row: cell.row }),
+    });
+    dispatcher.dispatchContinuous(target, event);
+    return event.defaultPrevented;
+  };
   /**
    * Look up the URL at (col, row) in the current front frame. Checks for
    * an OSC 8 hyperlink first, then falls back to scanning the row for a
@@ -2581,6 +2642,8 @@ export default class Ink {
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
         dispatchPasteEvent={this.dispatchPasteEvent}
+        dispatchWheelEvent={this.dispatchWheelEvent}
+        subscribeClicks={this.subscribeClicks}
         focusManager={this.focusManager}
         rootNode={this.rootNode}
         getMouseMode={this.getMouseMode}

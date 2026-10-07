@@ -172,11 +172,26 @@ type Props = {
   // Official densable lag: bracketed paste → PasteEvent on focused node.
   readonly dispatchPasteEvent: (text: string) => void;
   /**
+   * densable `dispatchWheelEvent` — SGR wheel DOM path. Optional so
+   * windowActivation stubs don't need it. Returns true if preventDefault.
+   */
+  readonly dispatchWheelEvent?: (parsedKey: ParsedKey) => boolean;
+  /**
    * densable Twe.focusManager / rootNode — provided via AppContext for lRc
    * reclaim and other Twe consumers (not getFocusManager(wrap)).
    */
   readonly focusManager: import('../core/focus.js').FocusManager;
   readonly rootNode: import('../core/dom.js').DOMElement;
+  /**
+   * densable `ib.subscribeClicks` — Ink clickListeners bus. Optional so
+   * testing.tsx / windowActivation stubs don't need to wire it.
+   */
+  readonly subscribeClicks?: (
+    listener: (
+      node: import('../core/dom.js').DOMElement | null | undefined,
+      event: import('../core/events/click-event.js').ClickEvent | null,
+    ) => void,
+  ) => () => void;
   /**
    * Official densable getMouseMode — "off" | "scroll" | "full".
    * Scroll mode skips click/drag selection (wheel still routes).
@@ -337,6 +352,7 @@ export default class App extends PureComponent<Props, State> {
             focusManager: this.props.focusManager,
             rootNode: this.props.rootNode,
             dispatchPasteEvent: this.props.dispatchPasteEvent,
+            subscribeClicks: this.props.subscribeClicks ?? (() => () => {}),
           }}
         >
           <StdinContext.Provider
@@ -932,6 +948,12 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // tokenizer.buffer() until NORMAL_TIMEOUT flush. Progressive desync residue
     // empties in KeyboardEvent xM_ / isSgrMouseResidue (fork under-strip).
     if (item.name === 'wheelup' || item.name === 'wheeldown' || item.name === 'mouse') {
+      // densable: wheel → dispatchWheelEvent (never keydown). Fork still
+      // emits InputEvent when DOM onWheel did not preventDefault so
+      // scroll:lineUp keybindings keep working outside pane onWheel.
+      if (item.name !== 'mouse' && app.props.dispatchWheelEvent?.(item)) {
+        continue;
+      }
       const event = new InputEvent(item);
       app.internal_eventEmitter.emit('input', event);
       continue;

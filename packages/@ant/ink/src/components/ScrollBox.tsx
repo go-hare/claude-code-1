@@ -21,10 +21,11 @@ export type ScrollBoxHandle = {
    * render fires, this defers the position read to render time —
    * render-node-to-output reads `el.yogaNode.getComputedTop()` in the
    * SAME Yoga pass that computes scrollHeight. Deterministic. One-shot.
-   * @param opts.block "nearest" keeps the element in view without jumping
-   * when it is already fully visible (official 2.1.207).
+   * @param opts.block densable 2.1.289 start|center|end|nearest.
+   * "nearest" keeps the element in view without jumping when already visible
+   * (official 2.1.207). Default aligns top (start).
    */
-  scrollToElement: (el: DOMElement, offset?: number, opts?: { block?: 'nearest' }) => void;
+  scrollToElement: (el: DOMElement, offset?: number, opts?: { block?: 'start' | 'center' | 'end' | 'nearest' }) => void;
   scrollToBottom: () => void;
   getScrollTop: () => number;
   getPendingDelta: () => number;
@@ -153,16 +154,18 @@ function ScrollBox({
         el.scrollTop = Math.max(0, Math.floor(y));
         scrollMutated(el);
       },
-      scrollToElement(el: DOMElement, offset = 0, opts?: { block?: 'nearest' }) {
+      scrollToElement(el: DOMElement, offset = 0, opts?: { block?: 'start' | 'center' | 'end' | 'nearest' }) {
         const box = domRef.current;
         if (!box) return;
         box.stickyScroll = false;
         box.scrollHeightHwm = undefined;
         box.pendingScrollDelta = undefined;
+        const block = opts?.block ?? 'start';
         box.scrollAnchor = {
           el,
           offset,
-          nearest: opts?.block === 'nearest',
+          nearest: block === 'nearest',
+          block,
         };
         scrollMutated(box);
       },

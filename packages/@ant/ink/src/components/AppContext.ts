@@ -1,10 +1,17 @@
 import { createContext } from 'react'
 import type { DOMElement } from '../core/dom.js'
+import type { ClickEvent } from '../core/events/click-event.js'
 import type { FocusManager } from '../core/focus.js'
 
+/** densable `subscribeClicks` listener — hit node (or null) + ClickEvent (or null). */
+export type ClickSubscribeListener = (
+  node: DOMElement | null | undefined,
+  event: ClickEvent | null,
+) => void
+
 /**
- * densable `Twe` — App context.
- * Gold: `{exit, focusManager, rootNode, dispatchPasteEvent}`.
+ * densable `Twe` / `ib` — App context.
+ * Gold: `{exit, focusManager, rootNode, dispatchPasteEvent, subscribeClicks, ...}`.
  */
 export type Props = {
   /**
@@ -17,6 +24,12 @@ export type Props = {
   readonly rootNode: DOMElement | null
   /** densable Twe.dispatchPasteEvent */
   readonly dispatchPasteEvent: ((text: string) => void) | null
+  /**
+   * densable `ib.subscribeClicks` — notified on every alt-screen click
+   * *before* onClick bubble (`dispatchMouseClick` → listeners → `bubbleClick`).
+   * `tellClickedNowhere` delivers `(null, null)` on alt-screen exit.
+   */
+  readonly subscribeClicks: (listener: ClickSubscribeListener) => () => void
 }
 
 /**
@@ -28,6 +41,7 @@ const AppContext = createContext<Props>({
   focusManager: null,
   rootNode: null,
   dispatchPasteEvent: null,
+  subscribeClicks: () => () => {},
 })
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects

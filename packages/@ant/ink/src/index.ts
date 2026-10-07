@@ -167,6 +167,7 @@ export {
 } from './core/events/terminal-focus-event.js'
 export { KeyboardEvent } from './core/events/keyboard-event.js'
 export { PasteEvent } from './core/events/paste-event.js'
+export { WheelEvent } from './core/events/wheel-event.js'
 export { FocusEvent } from './core/events/focus-event.js'
 export { FocusManager, getFocusManager } from './core/focus.js'
 export type {

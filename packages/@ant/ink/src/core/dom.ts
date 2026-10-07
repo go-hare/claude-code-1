@@ -102,11 +102,13 @@ export type DOMElement = {
   // imperative scrollTo(N) which bakes in a number that's stale by the
   // time the throttled render fires, the element ref defers the position
   // read to paint time. One-shot.
-  // nearest: keep the element in view without jumping if already visible.
+  // densable scrollToElement block: start|center|end|nearest.
+  // nearest: keep in view without jumping if already visible (legacy bool).
   scrollAnchor?: {
     el: DOMElement
     offset: number
     nearest?: boolean
+    block?: 'start' | 'center' | 'end' | 'nearest'
   }
   // Only set on ink-root. The document owns focus — any node can
   // reach it by walking parentNode, like browser getRootNode().
