@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import {
+  checkDangerousRmAfterEutPeel,
   checkDangerousRmInShellDashC,
   detectPossiblyEmptyVariableRm,
   extractShellDashCScripts,
@@ -223,5 +224,28 @@ describe('densable 2.1.289 shell -c dangerous rm', () => {
     expect(
       checkDangerousRmInShellDashC('chroot / bash -c "rm -rf /"'),
     ).toBeNull()
+  })
+
+  test('checkDangerousRmAfterEutPeel asks on bare P6o rm (no inner shell -c)', () => {
+    // Gold eut→RH: flock/script -c/--command and env -S rewrite to bare rm
+    // before RH; shellDashC returns null without hadShellDashC.
+    for (const cmd of [
+      'flock -c "rm -rf /"',
+      'flock --command="rm -rf /"',
+      'script -c "rm -rf /" /dev/null',
+      'env -S "rm -rf /"',
+      'rm -rf /',
+    ]) {
+      expect(checkDangerousRmInShellDashC(cmd)).toBeNull()
+      const r = checkDangerousRmAfterEutPeel(cmd)
+      expect(r?.behavior).toBe('ask')
+      expect(r?.decisionReason).toMatchObject({
+        type: 'safetyCheck',
+        circuitBreaker: 'dangerousRemoval',
+      })
+    }
+    // invent-ban: xargs/su/chroot remain unpeeled (no RH hit via eut)
+    expect(checkDangerousRmAfterEutPeel('xargs rm -rf /')).toBeNull()
+    expect(checkDangerousRmAfterEutPeel('su -c "rm -rf /"')).toBeNull()
   })
 })

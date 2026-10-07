@@ -159,5 +159,28 @@ describe('artifactGates', () => {
     expect(isArtifactSdkDefaultAllowed({ CLAUDE_CODE_ENTRYPOINT: 'cli' })).toBe(
       true,
     )
+
+    // densable Ss(ARTIFACT) before CHILD — defined-falsy withholds as
+    // artifact_env_off even when BRIDGE_CHILD_ARTIFACT is stamped.
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
+        CLAUDE_CODE_ARTIFACT: '0',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+      }),
+    ).toBe('artifact_env_off')
+    expect(
+      isArtifactSdkDefaultAllowed({
+        CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
+        CLAUDE_CODE_ARTIFACT: '0',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+      }),
+    ).toBe(false)
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_ENTRYPOINT: 'cli',
+        CLAUDE_CODE_ARTIFACT: 'false',
+      }),
+    ).toBe('artifact_env_off')
   })
 })

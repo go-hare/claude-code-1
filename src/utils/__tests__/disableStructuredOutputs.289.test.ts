@@ -86,5 +86,15 @@ describe('densable 2.1.289 CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS', () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
     expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(false)
     delete process.env.CLAUDE_CODE_USE_BEDROCK
+
+    // densable gc/$Ee: bedrock + USE_MANTLE promotes to mantle for mCn
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.CLAUDE_CODE_USE_MANTLE = '1'
+    expect(modelSupportsStructuredOutputs('claude-opus-4-8')).toBe(true)
+    expect(
+      modelSupportsStructuredOutputs('anthropic.claude-opus-4-8'),
+    ).toBe(true)
+    delete process.env.CLAUDE_CODE_USE_BEDROCK
+    delete process.env.CLAUDE_CODE_USE_MANTLE
   })
 })

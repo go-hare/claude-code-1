@@ -41,6 +41,7 @@ import {
 import {
   type APIProvider,
   getAPIProvider,
+  getBedrockMantleOverrideProvider,
   isFirstPartyAnthropicBaseUrl,
 } from './model/providers.js'
 import { getInitialSettings } from './settings/settings.js'
@@ -205,10 +206,22 @@ export function providerSupportsStructuredOutputsCapability(
   )
 }
 
-// densable mCn — y$(provider) then JK()/DISABLE then !sr(canonical,"claude-opus-4-1").
+/**
+ * densable `gc(model)` / `$Ee` capability provider for mCn.
+ * Under He()==="bedrock" + CLAUDE_CODE_USE_MANTLE, gold promotes to mantle so
+ * y$ admits (client `G(e)` still routes anthropic.* foundation ids).
+ * Bare getAPIProvider() ranks bedrock above mantle and falsely denies.
+ */
+export function getStructuredOutputsAPIProvider(
+  _model?: string,
+): APIProvider {
+  return getBedrockMantleOverrideProvider() ?? getAPIProvider()
+}
+
+// densable mCn — y$(gc(model)) then JK()/DISABLE then !sr(canonical,"claude-opus-4-1").
 export function modelSupportsStructuredOutputs(model: string): boolean {
   const canonical = getCanonicalName(model)
-  const provider = getAPIProvider()
+  const provider = getStructuredOutputsAPIProvider(model)
   if (!providerSupportsStructuredOutputsCapability(provider)) {
     return false
   }

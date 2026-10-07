@@ -28,21 +28,25 @@ export function isSdkArtifactDefaultOffEntrypoint(
 }
 
 /**
- * densable `D()` sdk_default_off arm only (tip keeps third_party / essential
- * traffic / cobalt in artifactUrl ASe). Returns `sdk_default_off` when an SDK
- * entrypoint has neither CLAUDE_CODE_ARTIFACT nor BRIDGE_CHILD_ARTIFACT.
- * CHILD_ARTIFACT is an enable bypass of SDK default-off — not a general ASe ON.
+ * densable `D()` withhold arms that tip/ASe consumers share:
+ * 1. `Ss(CLAUDE_CODE_ARTIFACT)` → `artifact_env_off` (defined-falsy 0/false/no/off)
+ * 2. I7n && !Le(ARTIFACT) && !Le(BRIDGE_CHILD_ARTIFACT) → `sdk_default_off`
+ *
+ * CHILD_ARTIFACT bypasses only the sdk_default_off arm — never artifact_env_off,
+ * and never a general ASe/cobalt ON.
  */
 export function getArtifactSdkDefaultOffReason(
   env: NodeJS.ProcessEnv = process.env,
-): 'sdk_default_off' | null {
+): 'artifact_env_off' | 'sdk_default_off' | null {
+  // densable Ss(CLAUDE_CODE_ARTIFACT) — checked before CHILD / I7n.
+  if (isEnvDefinedFalsy(env.CLAUDE_CODE_ARTIFACT)) return 'artifact_env_off'
   if (!isSdkArtifactDefaultOffEntrypoint(env)) return null
   if (isEnvTruthy(env.CLAUDE_CODE_ARTIFACT)) return null
   if (isEnvTruthy(env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT)) return null
   return 'sdk_default_off'
 }
 
-/** densable `ne()` for the sdk_default_off arm — true when D arm is clear. */
+/** densable `ne()` for D withhold arms — true when D() === null. */
 export function isArtifactSdkDefaultAllowed(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

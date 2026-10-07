@@ -2313,6 +2313,77 @@ function detectDangerousLiteralRmInCommand(
 }
 
 /**
+ * densable eut → RH: after A6o/P6o/M6o peel, if argv head is rm/rmdir, ask on
+ * dangerous literal / empty-expansion targets. shellDashC only covers bodies
+ * that still contain an inner shell -c; bare `flock -c "rm -rf /"` /
+ * `env -S "rm -rf /"` rewrites to bare rm and must hit this gate.
+ */
+export function checkDangerousRmAfterEutPeel(
+  command: string,
+): PermissionResult | null {
+  const parts = (() => {
+    const split = splitCommand(command)
+    return split.length > 0 ? split : [command]
+  })()
+  for (const unit of parts) {
+    const stripped = stripSafeWrappers(unit)
+    const parsed = tryParseShellCommand(stripped)
+    if (!parsed.success) continue
+    let tokens = parsed.tokens.filter(
+      (t): t is string => typeof t === 'string' && t.length > 0,
+    )
+    while (tokens.length > 0 && ENV_VAR_ASSIGN_RE.test(tokens[0]!)) {
+      tokens = tokens.slice(1)
+    }
+    for (let round = 0; round < 8; round++) {
+      const peeled = peelPrivilegePrefixes(tokens)
+      const wrapperStripped = stripWrappersFromArgv(peeled)
+      if (
+        wrapperStripped.length === tokens.length &&
+        wrapperStripped.every((t, i) => t === tokens[i])
+      ) {
+        tokens = wrapperStripped
+        break
+      }
+      tokens = wrapperStripped
+    }
+    if (tokens.length === 0) continue
+    {
+      const applet = basenameCommand(tokens[0]!)
+      if (
+        (applet === 'busybox' || applet === 'toybox') &&
+        tokens[1] &&
+        SHELL_INLINE_NAMES.has(basenameCommand(tokens[1]!))
+      ) {
+        tokens = tokens.slice(1)
+      }
+    }
+    if (tokens.length === 0) continue
+    const name = basenameCommand(tokens[0]!)
+    if (name !== 'rm' && name !== 'rmdir') continue
+
+    const peeledCommand = tokens.join(' ')
+    const emptyVar = detectPossiblyEmptyVariableRm(peeledCommand)
+    if (emptyVar) {
+      return dangerousRemovalAsk(
+        emptyVar.command,
+        `Dangerous ${emptyVar.command} operation detected: '${emptyVar.target}'\n\nThis target is a shell variable expansion that points at the filesystem root (or a top-level directory) when the variable is unset or empty. e.g. \`rm -rf $UNSET/*\` becomes \`rm -rf /*\`. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+        `on possibly-empty variable path: ${emptyVar.target}`,
+      )
+    }
+    const literal = detectDangerousLiteralRmInCommand(peeledCommand)
+    if (literal) {
+      return dangerousRemovalAsk(
+        literal.command,
+        `Dangerous ${literal.command} operation detected: '${literal.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+        `on critical path: ${literal.path}`,
+      )
+    }
+  }
+  return null
+}
+
+/**
  * densable 2.1.289 — ask before dangerous rm inside bash/sh -c, even under
  * bypassPermissions or a whole-shell allow rule.
  */
@@ -2508,6 +2579,12 @@ export async function bashToolHasPermission(
   const shellDashCDanger = checkDangerousRmInShellDashC(input.command)
   if (shellDashCDanger) {
     return shellDashCDanger
+  }
+
+  // densable eut→RH — bare rm/rmdir after A6o/P6o/M6o peel (flock/script/env -S).
+  const eutPeeledDanger = checkDangerousRmAfterEutPeel(input.command)
+  if (eutPeeledDanger) {
+    return eutPeeledDanger
   }
 
   const result = await bashToolHasPermissionInner(
