@@ -24,8 +24,16 @@ const CLOCK_MIN_MS = 16
 const SURFACE_READY_MS = 10_000
 /** densable `fe` — `le()` cap before ellipsis. */
 const CLIENT_FAIL_CHARS = 500
+/** densable `DS` / `mO` — ui.fault reason line before ellipsis. */
+const CLIENT_FAULT_REASON_CHARS = 200
+/** densable `f8n`. */
+export const CLIENT_FAULT_EMPTY_REASON = 'the module failed without a message'
 /** densable `ez.placeholder` U+10EEEE. */
 const CLIENT_FAIL_PLACEHOLDER = 0x10eeee
+/** densable `pO` — U+2028/U+2029 treated as spaces in fault reason. */
+function isClientFaultLineSep(cp: number): boolean {
+  return cp === 0x2028 || cp === 0x2029
+}
 
 /**
  * densable `a4` classes: tab/LF/CR, `\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f`,
@@ -54,6 +62,31 @@ export type ClientSnapshot =
   | { status: 'loading' }
   | { status: 'drawn'; tree: unknown }
   | { status: 'failed'; text: string }
+
+/** densable ui.fault / ui_client_fault `phase`. */
+export type ClientFaultPhase = 'load' | 'render' | 'run'
+
+export type ClientFaultReport = {
+  plugin: string
+  surface: string
+  component: string
+  requestId: string
+  element: string
+  module: string
+  phase: ClientFaultPhase
+  reason: string
+}
+
+type ClientFaultReporter = (report: ClientFaultReport) => void
+
+let clientFaultReporter: ClientFaultReporter | undefined
+
+/** densable 2.1.289 — modules installs the owning-plugin `ui.fault` dispatcher. */
+export function setClientFaultReporter(
+  reporter: ClientFaultReporter | undefined,
+): void {
+  clientFaultReporter = reporter
+}
 
 export type ClientInstance = {
   id: string
@@ -119,6 +152,8 @@ type ClientRecord = {
   element: string
   requestId: string
   surfaceName: string
+  /** densable fault.component — Pane/AbovePrompt when known; else `Client`. */
+  component: string
   props: unknown
   columns: number
   rows: number
@@ -203,11 +238,58 @@ function clientDetail(plugin: string, module: string, message: string): string {
   return stripped.startsWith(client) ? stripped : `${client}${stripped}`
 }
 
-function failRecord(record: ClientRecord, detail: string): void {
+/**
+ * densable `m8n` then `mO` — scrub plugin/module prefixes, line seps, cap 200.
+ * Empty → `the module failed without a message`.
+ */
+export function scrubClientFaultReason(
+  plugin: string,
+  module: string,
+  message: string,
+): string {
+  let sanitized = sanitizeClientFailMessage(message)
+  {
+    let rebuilt = ''
+    for (const ch of sanitized) {
+      const cp = ch.codePointAt(0) ?? 0
+      rebuilt += isClientFaultLineSep(cp) ? ' ' : ch
+    }
+    sanitized = rebuilt
+  }
+  const prefix = `${plugin}: `
+  const client = `Client ${module}: `
+  const withoutPlugin = sanitized.startsWith(prefix)
+    ? sanitized.slice(prefix.length)
+    : sanitized
+  const withoutClient = withoutPlugin.startsWith(client)
+    ? withoutPlugin.slice(client.length)
+    : withoutPlugin
+  const trimmed = withoutClient.trim()
+  const body = trimmed === '' ? CLIENT_FAULT_EMPTY_REASON : trimmed
+  if (body.length <= CLIENT_FAULT_REASON_CHARS) return body
+  return `${truncateUtf16(body, CLIENT_FAULT_REASON_CHARS - 1)}…`
+}
+
+function failRecord(
+  record: ClientRecord,
+  detail: string,
+  phase: ClientFaultPhase,
+): void {
   unmountSurface(record)
   setSnapshot(record, {
     status: 'failed',
     text: `${record.plugin}: ${clientDetail(record.plugin, record.module, detail)}`,
+  })
+  // densable 2.1.289: owning plugin's `ui.fault` chain alone (terminal surface).
+  clientFaultReporter?.({
+    plugin: record.plugin,
+    surface: record.surfaceName,
+    component: record.component,
+    requestId: record.requestId,
+    element: record.element,
+    module: record.module,
+    phase,
+    reason: scrubClientFaultReason(record.plugin, record.module, detail),
   })
 }
 
@@ -241,7 +323,7 @@ function paint(record: ClientRecord): void {
     const tree = stampHeldPress(record.plugin, surface.render())
     setSnapshot(record, { status: 'drawn', tree })
   } catch (err) {
-    failRecord(record, errorMessage(err))
+    failRecord(record, errorMessage(err), 'render')
   } finally {
     record.isRendering = false
   }
@@ -252,7 +334,7 @@ function schedule(record: ClientRecord): void {
   if (record.unpromptedRenders >= UNPROMPTED_RENDER_CAP) {
     const err = `set its state again after each of ${record.unpromptedRenders} renders, nothing heard between; set state on a pointer or key event, a tick, a press or new props, and let a render settle`
     if (record.isRendering) throw new Error(err)
-    failRecord(record, err)
+    failRecord(record, err, 'render')
     return
   }
   record.isDirty = true
@@ -1056,7 +1138,7 @@ function attach(record: ClientRecord): ClientInstance {
       try {
         record.surface?.setProps(next)
       } catch (err) {
-        failRecord(record, errorMessage(err))
+        failRecord(record, errorMessage(err), 'run')
         return
       }
       paint(record)
@@ -1078,7 +1160,7 @@ function attach(record: ClientRecord): ClientInstance {
       try {
         record.surface?.pointer(event)
       } catch (err) {
-        failRecord(record, errorMessage(err))
+        failRecord(record, errorMessage(err), 'run')
       }
     },
     key(event) {
@@ -1086,7 +1168,7 @@ function attach(record: ClientRecord): ClientInstance {
       try {
         record.surface?.key(event)
       } catch (err) {
-        failRecord(record, errorMessage(err))
+        failRecord(record, errorMessage(err), 'run')
       }
     },
     acceptsPointer: () => record.surface?.hasPointerListener() === true,
@@ -1096,7 +1178,7 @@ function attach(record: ClientRecord): ClientInstance {
       try {
         record.surface?.runHeld(handle, event)
       } catch (err) {
-        failRecord(record, errorMessage(err))
+        failRecord(record, errorMessage(err), 'run')
       }
     },
     dropHeld(handles) {
@@ -1149,12 +1231,12 @@ function mountWhenReady(record: ClientRecord): void {
         record.surface.resize(record.columns, record.rows)
         paint(record)
       } catch (err) {
-        failRecord(record, errorMessage(err))
+        failRecord(record, errorMessage(err), 'load')
       }
     },
     err => {
       if (generation !== record.mountGeneration || record.isDestroyed) return
-      failRecord(record, errorMessage(err))
+      failRecord(record, errorMessage(err), 'load')
     },
   )
 }
@@ -1165,6 +1247,7 @@ function createRecord(input: {
   requestId: string
   key: string
   module: string
+  component: string
   props: unknown
 }): ClientRecord {
   const id = clientInstanceKey(input)
@@ -1175,6 +1258,7 @@ function createRecord(input: {
     element: input.key,
     requestId: input.requestId,
     surfaceName: input.surface,
+    component: input.component,
     props: input.props,
     columns: 0,
     rows: 0,
@@ -1249,6 +1333,7 @@ export function acquirePluginClient(input: {
     requestId,
     key: input.key,
     module: input.module,
+    component: input.component ?? 'Client',
     props: input.props,
   })
   instances.set(id, created)

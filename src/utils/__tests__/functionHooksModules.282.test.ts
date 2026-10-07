@@ -49,6 +49,15 @@ import {
   closePluginPane,
   scrollPluginPane,
   getShownPluginPane,
+  ABOVE_PROMPT_REQUEST_ID,
+  registerPluginScrollSite,
+  updatePluginScrollSite,
+  unregisterPluginScrollSite,
+  getPluginScrollSite,
+  noteDrawnElement,
+  logUiScrollSettled,
+  commitPluginScrollSite,
+  dispatchPersonUiScroll,
 } from '../plugins/functionHooksModules.js'
 import { executePreToolHooks } from '../hooks.js'
 import type { ToolUseContext } from '../../Tool.js'
@@ -922,6 +931,7 @@ describe('function-hooks classic pattern', () => {
         { id: 'pane_1', title: 'Demo' },
       ]),
     ).toEqual({ isPlaced: true })
+    // densable b: open without focus:true does not write focusedId.
     expect(
       await callPluginInterface('demo', { name: 'ui', method: 'panes' }, []),
     ).toEqual([
@@ -929,7 +939,7 @@ describe('function-hooks classic pattern', () => {
         id: 'pane_1',
         title: 'Demo',
         isShown: true,
-        isFocused: true,
+        isFocused: false,
         isPlaced: true,
       },
     ])
@@ -1990,6 +2000,151 @@ describe('function-hooks classic pattern', () => {
     await closePluginPane('pane_scroll')
   })
 
+  test('register/update/unregisterPluginScrollSite Ide PARTIAL HAVE', () => {
+    const registered = registerPluginScrollSite(
+      'band-owner',
+      ABOVE_PROMPT_REQUEST_ID,
+      'AbovePrompt',
+      {
+        offset: 1,
+        maxOffset: 4,
+        bodyRows: 8,
+        contentRows: 12,
+      },
+    )
+    expect(registered).toEqual({
+      plugin: 'band-owner',
+      owner: 'band-owner',
+      requestId: ABOVE_PROMPT_REQUEST_ID,
+      component: 'AbovePrompt',
+      offset: 1,
+      maxOffset: 4,
+      bodyRows: 8,
+      contentRows: 12,
+      keyCount: 0,
+      followEnd: false,
+    })
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+    ).toMatchObject({
+      component: 'AbovePrompt',
+      owner: 'band-owner',
+      offset: 1,
+      maxOffset: 4,
+      bodyRows: 8,
+      contentRows: 12,
+      followEnd: false,
+    })
+    expect(
+      updatePluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, {
+        offset: 3,
+        maxOffset: 5,
+        bodyRows: 9,
+        contentRows: 14,
+      }),
+    ).toMatchObject({
+      offset: 3,
+      maxOffset: 5,
+      bodyRows: 9,
+      contentRows: 14,
+    })
+    noteDrawnElement('band-owner', ABOVE_PROMPT_REQUEST_ID, 'box-a')
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.keyCount,
+    ).toBe(1)
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.component,
+    ).toBe('AbovePrompt')
+    unregisterPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+    ).toBeUndefined()
+    expect(
+      updatePluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, {
+        offset: 0,
+      }),
+    ).toBeUndefined()
+  })
+
+  test('logUiScrollSettled / commitPluginScrollSite / dispatchPersonUiScroll Hde QLt PARTIAL HAVE', async () => {
+    expect(commitPluginScrollSite('missing', 'above-prompt', 2)).toEqual({
+      deny: 'no such site',
+    })
+    registerPluginScrollSite(
+      'band-owner',
+      ABOVE_PROMPT_REQUEST_ID,
+      'AbovePrompt',
+      {
+        offset: 0,
+        maxOffset: 4,
+        bodyRows: 8,
+        contentRows: 12,
+      },
+    )
+    expect(
+      commitPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 9, {
+        kind: 'person',
+      }),
+    ).toEqual({})
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.offset,
+    ).toBe(4)
+
+    const settled = await logUiScrollSettled(
+      'ui.scroll AbovePrompt above-prompt',
+      Promise.reject(new Error('boom')),
+    )
+    expect(settled).toBeUndefined()
+
+    const moved = await dispatchPersonUiScroll({
+      component: 'AbovePrompt',
+      requestId: ABOVE_PROMPT_REQUEST_ID,
+      offset: 2,
+      by: -2,
+      bodyRows: 7,
+      contentRows: 11,
+      plugin: 'band-owner',
+    })
+    expect(moved).toEqual({})
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+    ).toMatchObject({
+      offset: 2,
+      bodyRows: 7,
+      contentRows: 11,
+    })
+
+    const denied = await dispatchPersonUiScroll({
+      component: 'AbovePrompt',
+      requestId: ABOVE_PROMPT_REQUEST_ID,
+      offset: 1,
+      by: 1,
+      bodyRows: 7,
+      contentRows: 11,
+      plugin: 'ghost',
+    })
+    expect(denied).toEqual({ deny: 'no such site' })
+
+    const src = readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(src).toContain('export function logUiScrollSettled')
+    expect(src).toContain('export function commitPluginScrollSite')
+    expect(src).toContain('export function dispatchPersonUiScroll')
+    expect(src).toContain("runFunctionHookChain('ui.scroll'")
+    expect(src).not.toMatch(
+      /\bexport\s+(?:const|function|let|class|var)\s+Hde\b/,
+    )
+    expect(src).not.toMatch(
+      /\bexport\s+(?:const|function|let|class|var)\s+QLt\b/,
+    )
+    expect(src).not.toMatch(
+      /\bexport\s+(?:const|function|let|class|var)\s+Ide\b/,
+    )
+    unregisterPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)
+  })
+
   test('defaultBindings Pane and PaneField match gold chords', () => {
     const bindings = readFileSync(
       join(import.meta.dir, '../../keybindings/defaultBindings.ts'),
@@ -2371,7 +2526,7 @@ export function Board() { return { type: 'Box', children: [String(n)] } }
     )
     expect(
       panes.includes(
-        "rebuild(drawn, '', ABOVE_PROMPT_REQUEST_ID, undefined, 'AbovePrompt')",
+        "rebuild(drawn, '', BAND_REQUEST_ID, undefined, 'AbovePrompt')",
       ),
     ).toBe(true)
     expect(

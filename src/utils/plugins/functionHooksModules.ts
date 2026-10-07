@@ -25,16 +25,30 @@ import type { EffortValue } from '../effort.js'
 import { densableThinkingForceParams } from '../thinking.js'
 import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
-import { stringWidth } from '@anthropic/ink'
+import { instances, stringWidth } from '@anthropic/ink'
 import { invalidateRender } from '../render/invalidateAllRenders.js'
 import {
   disposePluginClients,
   forgetPluginSurfaceModules,
   loadScannedSurfaceModules,
   scanClientModulePaths,
+  setClientFaultReporter,
   setPluginSurfaceModules,
+  type ClientFaultReport,
   type SurfaceModuleScan,
 } from './functionHooksClient.js'
+import { logForDebugging } from '../debug.js'
+import { createSignal } from '../signal.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
+import {
+  getUiSelectionRowHolding,
+  selectionAnswer,
+} from './uiSelectionRowHolding.js'
+import {
+  scrollTranscriptByRequestId,
+  type TranscriptRevealBlock,
+} from './transcriptReveal.js'
+import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
 
 export type FunctionHookHandler = (
   api: Record<string, unknown>,
@@ -84,10 +98,23 @@ export function setLoadedFunctionHooksModules(
   configOverlay.clear()
   settingsOverlay.clear()
   pluginPanes.length = 0
+  paneOpenIds.clear()
+  shownPaneId = null
+  focusedPaneId = null
   paneClosing.clear()
+  unplacedPanes.length = 0
+  askedPanes.length = 0
+  paneFocusRequest = null
+  panePlacements = 0
+  askedPanesSeeded = false
+  panesTerminalColumns = undefined
+  paneRemountGeneration.clear()
+  notifyPanesListeners()
   pluginDrawings.length = 0
   lastUiRenderPlugin = ''
   pluginSites.length = 0
+  pluginFocusSites.clear()
+  focusSiteDraws.clear()
   pressHandlers.clear()
   resolvedTables.clear()
   resolvedByKey.clear()
@@ -115,6 +142,14 @@ function replaceLoadedFunctionHooksModules(
   for (const mod of loadedModules) {
     setPluginSurfaceModules(mod.name, mod.root, mod.surfaceModules ?? [])
   }
+  // densable 2.1.289: load/reload pushes ui_invalidate for ui.render so mounted
+  // Pane/AbovePrompt/UserMessage sites re-ask (gold E1e.onInvalidate → Vi).
+  invalidateRender('ui.render')
+  bumpRasterFrames()
+  // densable 2.1.289: Client fail → owning plugin ui.fault only
+  setClientFaultReporter(
+    loadedModules.length > 0 ? dispatchClientFault : undefined,
+  )
 }
 
 /** densable `cLo` — exact `classic.<event>` on a loaded module. */
@@ -222,8 +257,21 @@ export async function runFunctionHookChain(
     const step = matched[index]
     if (step === undefined) return tail(value)
     enterModule(step.mod.name)
-    const next = (passed?: unknown) =>
-      callAt(index + 1, isEventRecord(passed) ? passed : value)
+    const next = (passed?: unknown) => {
+      const onward = isEventRecord(passed) ? passed : value
+      // densable tn/Ht — Pane/AbovePrompt rewrite must not drift props.view.
+      if (
+        (event === 'ui.render' || needle === 'classic.ui.render') &&
+        isEventRecord(passed) &&
+        isEventRecord(value)
+      ) {
+        const viewReason = uiRenderViewRewriteCheck(value, passed)
+        if (viewReason !== undefined) {
+          throw new Error(viewReason)
+        }
+      }
+      return callAt(index + 1, onward)
+    }
     const engine = pluginEngine(step.mod)
     if (event === 'plugin.register') {
       const current = isEventRecord(value) ? { ...value } : {}
@@ -1535,6 +1583,14 @@ function pluginEngine(
         ])
       },
       panes: () => hostOp(environmentId, 'ui.panes', [{}]),
+      // densable 2.1.289: selection:()=>t("ui.selection",{})
+      async selection() {
+        const raw = await hostOp(environmentId, 'ui.selection', [{}])
+        if (!raw || typeof raw !== 'object') return undefined
+        const text = (raw as { text?: unknown }).text
+        if (typeof text !== 'string' || text === '') return undefined
+        return raw
+      },
       scroll(input: unknown) {
         const rec = isEventRecord(input) ? input : {}
         return hostOp(environmentId, 'ui.scroll', [
@@ -2207,6 +2263,7 @@ export async function handleHostOp(
     op === 'ui.scroll' ||
     op === 'ui.focus' ||
     op === 'ui.copy' ||
+    op === 'ui.selection' ||
     op === 'ui.blit' ||
     op === 'ui.resolve' ||
     op === 'ui.invalidate'
@@ -3671,16 +3728,571 @@ const pluginPanes: Array<{
   columns?: number
 }> = []
 
-/** densable pane dock: `open` / `shownId` / `focusedId`. */
+/**
+ * densable Chat panes shape (`Si`/`JSn` / `EMPTY_PANES`) — semantic store over
+ * the local plugin pane dock. Fields mirror gold: open / unplaced / asked /
+ * shownId / focusedId / focusRequest / placements / closing. Backed by
+ * `pluginPanes` + dock ids for open/shown/focused/closing. Column/remote
+ * placeWaiting + asked latch HAVE; soft persist via `GlobalConfig.pluginPanes.asked`
+ * (`mL`/`keepAsked`/`keptAsked`). ui.open uses `placementAtOpen` → unplaced when
+ * below openFloor. Minify names stay in comments only.
+ */
+export type PluginPaneEntry = {
+  id: string
+  plugin: string
+  title: string
+  closeOnEscape?: boolean
+  holdToasts?: boolean
+  rows?: number
+  columns?: number
+}
+
+export type AskedPaneRef = { plugin: string; id: string }
+
+export type PanesState = {
+  open: PluginPaneEntry[]
+  unplaced: PluginPaneEntry[]
+  asked: AskedPaneRef[]
+  shownId: string | null
+  focusedId: string | null
+  focusRequest: string | null
+  placements: number
+  closing: string[]
+}
+
+/** densable `JSn` EMPTY_PANES — reset seed for the semantic panes store. */
+export const EMPTY_PANES: PanesState = Object.freeze({
+  open: Object.freeze([]) as unknown as PluginPaneEntry[],
+  unplaced: Object.freeze([]) as unknown as PluginPaneEntry[],
+  asked: Object.freeze([]) as unknown as AskedPaneRef[],
+  shownId: null,
+  focusedId: null,
+  focusRequest: null,
+  placements: 0,
+  closing: Object.freeze([]) as unknown as string[],
+})
+
 const paneOpenIds = new Set<string>()
 let shownPaneId: string | null = null
 let focusedPaneId: string | null = null
 /** densable `closing` — `aTt` re-entry while the ui.close chain runs. */
 const paneClosing = new Set<string>()
+/** densable `unplaced` — waiters placed by `placeWaitingPanes` / remote. */
+const unplacedPanes: PluginPaneEntry[] = []
+/** densable `asked` — ask latch (+ soft persist via pluginPanes.asked). */
+const askedPanes: AskedPaneRef[] = []
+/**
+ * densable askedLatch `H` — one-shot seed gate. Soft persist via
+ * `GlobalConfig.pluginPanes.asked` (`mL` / `keptAsked` / `keepAsked`).
+ */
+let askedPanesSeeded = false
+/** densable `ASKED_MAX` / `G` — soft-persist asked rows cap. */
+export const PANE_ASKED_MAX = 64
+/** densable `d3` terminal columns — last known width for placeWaiting. */
+let panesTerminalColumns: number | undefined
+/** densable `focusRequest` — pending id for `settleFocusRequest` (`a4n`). */
+let paneFocusRequest: string | null = null
+/** densable `placements` — refcount from `offerPlacement` (`QFt`). */
+let panePlacements = 0
 
-/** densable Ex/gH site registry — panes this plugin opened, plus blit keys. */
+/** densable `D9` — openFloor when the person has asked this pane before. */
+export const PANE_OPEN_FLOOR_ASKED = 110
+/** densable `C8e` — openFloor for unasked panes. */
+export const PANE_OPEN_FLOOR_DEFAULT = 144
+
+type PanesListener = () => void
+const panesListeners = new Set<PanesListener>()
+
+function notifyPanesListeners(): void {
+  for (const listener of panesListeners) listener()
+}
+
+function clonePaneEntry(pane: PluginPaneEntry): PluginPaneEntry {
+  return {
+    id: pane.id,
+    plugin: pane.plugin,
+    title: pane.title,
+    ...(pane.closeOnEscape === true && { closeOnEscape: true }),
+    ...(pane.holdToasts === true && { holdToasts: true }),
+    ...(pane.rows !== undefined && { rows: pane.rows }),
+    ...(pane.columns !== undefined && { columns: pane.columns }),
+  }
+}
+
+/** Snapshot of densable `JSn`-shaped panes state. */
+export function getPanesState(): PanesState {
+  return {
+    open: pluginPanes
+      .filter(pane => paneOpenIds.has(pane.id))
+      .map(clonePaneEntry),
+    unplaced: unplacedPanes.map(clonePaneEntry),
+    asked: askedPanes.map(row => ({ plugin: row.plugin, id: row.id })),
+    shownId: shownPaneId,
+    focusedId: focusedPaneId,
+    focusRequest: paneFocusRequest,
+    placements: panePlacements,
+    closing: [...paneClosing],
+  }
+}
+
+export function subscribePanes(listener: PanesListener): () => void {
+  panesListeners.add(listener)
+  return () => {
+    panesListeners.delete(listener)
+  }
+}
+
+/**
+ * Replace panes state (gold `Si().setState`). Open entries sync into
+ * `pluginPanes` / `paneOpenIds` so ui.open/close/panes stay coherent.
+ */
+export function setPanesState(
+  next: PanesState | ((prev: PanesState) => PanesState),
+): void {
+  const state = typeof next === 'function' ? next(getPanesState()) : next
+  pluginPanes.length = 0
+  paneOpenIds.clear()
+  for (const pane of state.open) {
+    const entry = clonePaneEntry(pane)
+    pluginPanes.push(entry)
+    paneOpenIds.add(entry.id)
+  }
+  unplacedPanes.length = 0
+  for (const pane of state.unplaced) unplacedPanes.push(clonePaneEntry(pane))
+  askedPanes.length = 0
+  for (const row of state.asked) {
+    askedPanes.push({ plugin: row.plugin, id: row.id })
+  }
+  shownPaneId = state.shownId
+  focusedPaneId = state.focusedId
+  paneFocusRequest = state.focusRequest
+  panePlacements = state.placements
+  paneClosing.clear()
+  for (const id of state.closing) paneClosing.add(id)
+  notifyPanesListeners()
+  bumpRasterFrames()
+}
+
+/** densable `u3` focusPane — set focusedId/shownId, clear focusRequest. */
+export function focusPane(id: string | null): void {
+  const openHas = id === null || pluginPanes.some(pane => pane.id === id)
+  const nextFocused = openHas ? id : focusedPaneId
+  const nextShown = openHas && id !== null ? id : shownPaneId
+  if (
+    focusedPaneId === nextFocused &&
+    shownPaneId === nextShown &&
+    paneFocusRequest === null
+  ) {
+    return
+  }
+  focusedPaneId = nextFocused
+  shownPaneId = nextShown
+  paneFocusRequest = null
+  notifyPanesListeners()
+  bumpRasterFrames()
+}
+
+/** densable `$Fr` nextPaneId — next open id after focusedId. */
+export function nextFocusedPaneId(
+  state: PanesState = getPanesState(),
+): string | null {
+  const at = state.open.findIndex(pane => pane.id === state.focusedId)
+  return state.open[at + 1]?.id ?? null
+}
+
+/**
+ * densable `ZLo(state, delta)` — wrap shownId among open when open.length>1.
+ */
+export function cycleShownPaneId(
+  delta: number,
+  state: PanesState = getPanesState(),
+): string | null {
+  const count = state.open.length
+  const at = state.open.findIndex(pane => pane.id === state.shownId)
+  return count > 1 && at >= 0
+    ? (state.open[(at + delta + count) % count]?.id ?? null)
+    : null
+}
+
+/** densable `h` hasAsked — asked.some(plugin+id). */
+export function hasAskedPane(
+  state: PanesState,
+  paneRef: AskedPaneRef | Pick<PluginPaneEntry, 'plugin' | 'id'>,
+): boolean {
+  return state.asked.some(
+    row => row.id === paneRef.id && row.plugin === paneRef.plugin,
+  )
+}
+
+/** densable `I` openFloor — asked → D9(110), else C8e(144). */
+export function paneOpenFloor(
+  state: PanesState,
+  paneRef: AskedPaneRef | Pick<PluginPaneEntry, 'plugin' | 'id'>,
+): number {
+  return hasAskedPane(state, paneRef)
+    ? PANE_OPEN_FLOOR_ASKED
+    : PANE_OPEN_FLOOR_DEFAULT
+}
+
+/**
+ * densable `b` placedPanes — move/update pane into open, drop from unplaced.
+ * Keeps plugin ownership when replacing an already-open id.
+ */
+function placedPanes(
+  state: PanesState,
+  pane: PluginPaneEntry,
+  focusRequest: string | null | undefined,
+): PanesState {
+  const already = state.open.some(row => row.id === pane.id)
+  const open = already
+    ? state.open.map(row =>
+        row.id === pane.id ? { ...pane, plugin: row.plugin } : row,
+      )
+    : [...state.open, pane]
+  return {
+    open,
+    unplaced: state.unplaced.filter(row => row.id !== pane.id),
+    asked: state.asked,
+    shownId: already ? state.shownId : (state.focusedId ?? pane.id),
+    focusedId: state.focusedId,
+    focusRequest: focusRequest ?? null,
+    placements: state.placements,
+    closing: state.closing,
+  }
+}
+
+/**
+ * densable `FFr` / `isToastHoldShown` — placements>0 && shown pane holdToasts.
+ */
+export function isToastHoldShown(state: PanesState = getPanesState()): boolean {
+  if (state.placements <= 0) return false
+  const shown = state.open.find(pane => pane.id === state.shownId)
+  return shown?.holdToasts === true
+}
+
+/**
+ * densable `Q` / `withKeptAsked` — pure GlobalConfig-shaped patch helper.
+ */
+export function withKeptAsked(
+  config: {
+    pluginPanes?: { asked?: AskedPaneRef[] } & Record<string, unknown>
+  },
+  asked: AskedPaneRef[],
+): { pluginPanes: { asked: AskedPaneRef[] } & Record<string, unknown> } {
+  return {
+    ...config,
+    pluginPanes: {
+      ...config.pluginPanes,
+      asked,
+    },
+  }
+}
+
+/**
+ * densable `R` / `keptAsked` — read `pluginPanes.asked` from GlobalConfig.
+ */
+export function keptAskedPanesFromConfig(): AskedPaneRef[] {
+  try {
+    // Lazy require avoids cycles with config → plugins.
+    const { getGlobalConfig } =
+      require('../config.js') as typeof import('../config.js')
+    const raw = getGlobalConfig().pluginPanes?.asked
+    if (!Array.isArray(raw)) return []
+    return raw.flatMap(row => {
+      if (
+        row === null ||
+        typeof row !== 'object' ||
+        typeof (row as { plugin?: unknown }).plugin !== 'string' ||
+        typeof (row as { id?: unknown }).id !== 'string'
+      ) {
+        return []
+      }
+      return [
+        {
+          plugin: (row as { plugin: string }).plugin,
+          id: (row as { id: string }).id,
+        },
+      ]
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * densable `M` seedAsked — one-shot load of persisted asked into state.asked.
+ * Default source: `keptAskedPanesFromConfig()` (`mL` disk).
+ */
+export function seedAskedPanes(persisted?: readonly AskedPaneRef[]): void {
+  if (askedPanesSeeded) return
+  askedPanesSeeded = true
+  const rows = persisted ?? keptAskedPanesFromConfig()
+  if (rows.length === 0) return
+  setPanesState(state => ({
+    ...state,
+    asked: [...rows.filter(row => !hasAskedPane(state, row)), ...state.asked],
+  }))
+}
+
+/**
+ * densable `A`/`keepAsked` — write `pluginPanes.asked` via saveGlobalConfig (`mL`).
+ * Cap at PANE_ASKED_MAX. Fire-and-forget; same-ref early exit.
+ * Gold: on change → `y("plugin_function_hooks_pane_ask")` or
+ * `p("plugin_function_hooks_pane_ask","not_persisted")`.
+ */
+function keepAskedPaneSoftPersist(
+  pane: AskedPaneRef,
+  mode: 'asked' | 'dismissed',
+): void {
+  const wantAsked = mode === 'asked'
+  void import('../config.js')
+    .then(({ saveGlobalConfig }) => {
+      let changed = false
+      saveGlobalConfig(current => {
+        const held = current.pluginPanes
+        const prev = Array.isArray(held?.asked) ? held.asked : []
+        const filtered = prev.filter(
+          row =>
+            !(
+              typeof row === 'object' &&
+              row !== null &&
+              (row as { plugin?: string }).plugin === pane.plugin &&
+              (row as { id?: string }).id === pane.id
+            ),
+        )
+        const nextAsked = wantAsked
+          ? [...filtered, { plugin: pane.plugin, id: pane.id }].slice(
+              -PANE_ASKED_MAX,
+            )
+          : filtered
+        const same =
+          prev.length === nextAsked.length &&
+          prev.every((row, i) => {
+            const n = nextAsked[i]
+            return (
+              typeof row === 'object' &&
+              row !== null &&
+              n !== undefined &&
+              (row as { plugin?: string }).plugin === n.plugin &&
+              (row as { id?: string }).id === n.id
+            )
+          })
+        if (same) return current
+        changed = true
+        return {
+          ...current,
+          pluginPanes: {
+            ...held,
+            asked: nextAsked,
+          },
+        }
+      })
+      if (!changed) return
+      void import('../../services/analytics/index.js')
+        .then(({ logEvent }) => {
+          logEvent(
+            'plugin_function_hooks_pane_ask' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            {
+              plugin:
+                pane.plugin as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            },
+          )
+        })
+        .catch(() => {
+          /* hollow analytics optional */
+        })
+    })
+    .catch(() => {
+      void import('../../services/analytics/index.js')
+        .then(({ logEvent }) => {
+          logEvent(
+            'plugin_function_hooks_pane_ask' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            {
+              status:
+                'not_persisted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              plugin:
+                pane.plugin as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            },
+          )
+        })
+        .catch(() => {
+          /* hollow analytics optional */
+        })
+    })
+}
+
+/**
+ * densable `sNo` rememberAsked — seed + append asked if new + soft persist.
+ */
+export function rememberAskedPane(pane: AskedPaneRef): void {
+  seedAskedPanes()
+  let added = false
+  setPanesState(state => {
+    added = !hasAskedPane(state, pane)
+    return added ? { ...state, asked: [...state.asked, { ...pane }] } : state
+  })
+  if (added) keepAskedPaneSoftPersist(pane, 'asked')
+}
+
+/**
+ * densable `Y` forgetAsked — remove from asked + soft persist dismissed.
+ */
+export function forgetAskedPane(pane: AskedPaneRef): void {
+  setPanesState(state =>
+    hasAskedPane(state, pane)
+      ? {
+          ...state,
+          asked: state.asked.filter(
+            row => row.plugin !== pane.plugin || row.id !== pane.id,
+          ),
+        }
+      : state,
+  )
+  keepAskedPaneSoftPersist(pane, 'dismissed')
+}
+
+/**
+ * densable `ee` placementAtOpen — decide place vs unplaced from columns + floor.
+ * `force` (person-origin) always places. Unknown columns → densable `Epn` via
+ * `placementFromAttachedSurfaces()` (empty tip registry → undefined → place).
+ * Desktop ui_attach/Fco still invent-ban.
+ * focusSites HAVE as `pluginFocusSites` (g9e/Tq); XHo HAVE via bindPluginFocusHost.
+ * vat/transcript.reveal for ui.scroll `{to:{requestId}}` is HAVE.
+ */
+export function placementAtOpen(
+  state: PanesState,
+  pane: AskedPaneRef,
+  force = false,
+): { isPlaced: true } | { isPlaced: false; reason: string } {
+  const columns = panesTerminalColumns
+  const floor = paneOpenFloor(state, pane)
+  if (columns === undefined) {
+    // densable: Epn() ?? { isPlaced: true }
+    return placementFromAttachedSurfaces() ?? { isPlaced: true }
+  }
+  if (force || columns >= floor) return { isPlaced: true }
+  return {
+    isPlaced: false,
+    reason: `unasked below ${floor} columns (${columns} now${
+      floor === PANE_OPEN_FLOOR_ASKED ? ', an id the person opened before' : ''
+    }): placed when the person opens it, or when the terminal is widened to ${floor} columns`,
+  }
+}
+
+/**
+ * densable `oNo` placeWaiting — filter unplaced where columns >= openFloor,
+ * place into open via reduce `b()`, log placed.
+ */
+export function placeWaitingPanes(columns: number): void {
+  panesTerminalColumns = columns
+  // gold logs each placed waiter via `t(\`ui.open … (waiting, ${columns} columns): placed\`)`
+  setPanesState(state =>
+    state.unplaced
+      .filter(pane => columns >= paneOpenFloor(state, pane))
+      .reduce(
+        (next, pane) => placedPanes(next, pane, next.focusRequest),
+        state,
+      ),
+  )
+}
+
+/**
+ * densable `i4n` placeWaitingRemote — place ALL unplaced into open.
+ */
+export function placeWaitingPanesRemote(_reason?: string): void {
+  if (getPanesState().unplaced.length === 0) return
+  // gold logs each placed waiter via `t(\`ui.open … (waiting, ${reason}): placed\`)`
+  setPanesState(state =>
+    state.unplaced.reduce(
+      (next, pane) => placedPanes(next, pane, next.focusRequest),
+      state,
+    ),
+  )
+}
+
+/**
+ * Record known terminal columns and place any waiters that now fit.
+ * Call from UI columns settle hosts (`useTerminalSize` / stdout).
+ */
+export function settlePanesTerminalColumns(columns: number): void {
+  if (!Number.isFinite(columns) || !Number.isInteger(columns) || columns <= 0) {
+    return
+  }
+  placeWaitingPanes(columns)
+}
+
+/** densable `QFt` offerPlacement — placements++ with disposer placements--. */
+export function offerPlacement(): () => void {
+  panePlacements += 1
+  notifyPanesListeners()
+  if (panesTerminalColumns !== undefined) {
+    placeWaitingPanes(panesTerminalColumns)
+  }
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    panePlacements -= 1
+    notifyPanesListeners()
+  }
+}
+
+/** densable `a4n` settleFocusRequest — ok? focusPane(req) : clear. */
+export function settleFocusRequest(ok: boolean): void {
+  const request = paneFocusRequest
+  if (request === null) return
+  if (ok) focusPane(request)
+  else {
+    paneFocusRequest = null
+    notifyPanesListeners()
+  }
+}
+
+/** Semantic alias for `offerPlacement` (`QFt`). */
+export const offerPanePlacement = offerPlacement
+
+/** Semantic alias for `settleFocusRequest` (`a4n`). */
+export const settlePaneFocusRequest = settleFocusRequest
+
+/**
+ * densable `Si` panesStore shape (semantic) — get/set/subscribe over JSn fields.
+ * Never export minify `Si` / `panesStore`.
+ */
+export function getPanesStore(): {
+  getState: typeof getPanesState
+  setState: typeof setPanesState
+  subscribe: typeof subscribePanes
+} {
+  return {
+    getState: getPanesState,
+    setState: setPanesState,
+    subscribe: subscribePanes,
+  }
+}
+
+/** densable `l4n` showPane — set shownId; keep/move focusedId when already set. */
+export function showPane(id: string): void {
+  if (shownPaneId === id || !pluginPanes.some(pane => pane.id === id)) return
+  shownPaneId = id
+  if (focusedPaneId !== null) focusedPaneId = id
+  notifyPanesListeners()
+  bumpRasterFrames()
+}
+
+/**
+ * densable Ex/gH / Ide PARTIAL HAVE — local `pluginSites` registry for
+ * offset/maxOffset/bodyRows/contentRows/keys (gold `Ide=et(dt().scrollSites)`).
+ * Hde/`QLt` person-origin `ui.scroll` PARTIAL HAVE as semantic
+ * `logUiScrollSettled` + `commitPluginScrollSite` + `dispatchPersonUiScroll`
+ * (no minify Ide/Hde/QLt/iZ export). Hook-chain HAVE via
+ * `dispatchPersonUiScroll` → `runFunctionHookChain('ui.scroll')` when no
+ * handlers are registered.
+ */
 type PluginSite = {
   plugin: string
+  /** densable Ide site `owner` — same as plugin. */
+  owner: string
   requestId: string
   component: 'Pane' | 'AbovePrompt'
   keys: Set<string>
@@ -3688,8 +4300,242 @@ type PluginSite = {
   maxOffset: number
   bodyRows: number
   contentRows: number
+  /**
+   * densable Ide site `followEnd` latch — after wat scroll-to-end success,
+   * keep offset pinned to maxOffset on dim updates.
+   */
+  followEnd: boolean
+  /**
+   * densable Ide `keyRows` host — Ink content root for cEe yoga walk.
+   * Absent → membership-only `{top:0,bottom:0}` until the site binds a tree.
+   */
+  contentRoot?: ScrollSiteLayoutNode
+}
+
+/**
+ * densable yoga DOM subset used by `cEe` / `ZV` (no minify names).
+ * Matches Ink `DOMElement` shape: attributes + childNodes + yogaNode + parent.
+ */
+export type ScrollSiteLayoutNode = {
+  attributes?: Record<string, unknown>
+  childNodes?: readonly unknown[]
+  nodeName?: string
+  parentNode?: ScrollSiteLayoutNode | undefined
+  yogaNode?: {
+    getComputedTop(): number
+    getComputedHeight(): number
+  }
 }
 const pluginSites: PluginSite[] = []
+
+/**
+ * densable `g9e` / `dt().focusSites` — separate from scrollSites (`pluginSites`).
+ * Keyed `component:requestId`. XHo HAVE via `bindPluginFocusHost` /
+ * `usePluginFocusHost` (Pane + AbovePrompt). Fallback hold maps shown/focused pane.
+ */
+export type PluginFocusCommitInput = {
+  plugin: string
+  element?: string
+  origin: { kind: string; name?: string }
+}
+
+export type PluginFocusHostBind = {
+  component: PluginSite['component']
+  requestId: string
+  owner?: string
+  isHeldNow: () => boolean
+  holderNow: () => string | undefined
+  hasElement: (plugin: string, element: string) => boolean
+  commit: (input: PluginFocusCommitInput) => string | undefined
+}
+
+type PluginFocusSite = {
+  plugin: string
+  owner: string
+  requestId: string
+  component: PluginSite['component']
+  keys: Set<string>
+  /** densable holderNow — last plugin that committed focus, else owner. */
+  holder?: string
+  /** densable XHo live handle — Pane/AbovePrompt keyboard host. */
+  host?: PluginFocusHostBind
+}
+
+const focusSiteDraws = createSignal()
+
+const pluginFocusSites = new Map<string, PluginFocusSite>()
+
+function focusSiteMapKey(
+  component: PluginSite['component'],
+  requestId: string,
+): string {
+  return `${component}:${requestId}`
+}
+
+function holdPluginFocusSite(
+  plugin: string,
+  requestId: string,
+  component: PluginSite['component'],
+  keys: Set<string>,
+): PluginFocusSite {
+  const mapKey = focusSiteMapKey(component, requestId)
+  const held = pluginFocusSites.get(mapKey)
+  if (held) {
+    held.plugin = plugin
+    held.owner = plugin
+    held.keys = keys
+    return held
+  }
+  const next: PluginFocusSite = {
+    plugin,
+    owner: plugin,
+    requestId,
+    component,
+    keys,
+  }
+  pluginFocusSites.set(mapKey, next)
+  focusSiteDraws.emit()
+  return next
+}
+
+function dropPluginFocusSite(plugin: string, requestId: string): void {
+  let dropped = false
+  for (const [mapKey, site] of pluginFocusSites) {
+    if (site.plugin === plugin && site.requestId === requestId) {
+      pluginFocusSites.delete(mapKey)
+      dropped = true
+    }
+  }
+  if (dropped) focusSiteDraws.emit()
+}
+
+function focusSiteIsHeldNow(site: PluginFocusSite): boolean {
+  if (site.host) return site.host.isHeldNow()
+  if (site.component === 'AbovePrompt') return focusedPaneId === null
+  if (focusedPaneId !== null) return focusedPaneId === site.requestId
+  if (shownPaneId !== null) return shownPaneId === site.requestId
+  return true
+}
+
+function focusSiteHolderNow(site: PluginFocusSite): string | undefined {
+  if (site.host) return site.host.holderNow()
+  if (!focusSiteIsHeldNow(site)) return undefined
+  return site.holder ?? site.owner
+}
+
+/**
+ * densable XHo `g9e().set` — Pane/AbovePrompt keyboard host binds live
+ * isHeldNow / holderNow / hasElement / commit. Returns unbind.
+ */
+export function bindPluginFocusHost(bind: PluginFocusHostBind): () => void {
+  const mapKey = focusSiteMapKey(bind.component, bind.requestId)
+  const owner = bind.owner ?? ''
+  const held = pluginFocusSites.get(mapKey)
+  const keys = held?.keys ?? new Set<string>()
+  const site: PluginFocusSite = {
+    plugin: owner,
+    owner,
+    requestId: bind.requestId,
+    component: bind.component,
+    keys,
+    holder: held?.holder,
+    host: bind,
+  }
+  pluginFocusSites.set(mapKey, site)
+  focusSiteDraws.emit()
+  return () => {
+    // densable XHo cleanup: `g9e().delete(Ge)` — drop the live host entry.
+    if (pluginFocusSites.get(mapKey)?.host === bind) {
+      pluginFocusSites.delete(mapKey)
+      focusSiteDraws.emit()
+    }
+  }
+}
+
+/** densable `ZLt` / `focusSiteDraws` — waiters abort when sites change. */
+export function subscribePluginFocusSiteDraws(
+  listener: () => void,
+): () => void {
+  return focusSiteDraws.subscribe(listener)
+}
+
+/** densable `yat` — foreign plugin origin vs site owner. */
+function isForeignPluginFocusSite(
+  site: PluginFocusSite,
+  origin: { kind: string; name?: string } | undefined,
+  caller: string,
+): boolean {
+  return (
+    origin?.kind === 'plugin' &&
+    site.owner !== undefined &&
+    site.owner !== '' &&
+    origin.name !== undefined &&
+    site.owner !== origin.name &&
+    caller !== origin.name
+  )
+}
+
+/** densable focus `x$` — holderNow defined and ≠ origin plugin. */
+function isForeignFocusHolder(
+  site: PluginFocusSite,
+  origin: { kind: string; name?: string } | undefined,
+): boolean {
+  if (origin?.kind !== 'plugin' || origin.name === undefined) return false
+  const holder = focusSiteHolderNow(site)
+  return holder !== undefined && holder !== origin.name
+}
+
+export type PluginFocusSiteSnapshot = {
+  plugin: string
+  owner: string
+  requestId: string
+  component: PluginSite['component']
+  keyCount: number
+  holder?: string
+  isHeldNow: boolean
+}
+
+export function getPluginFocusSite(
+  plugin: string,
+  requestId: string,
+): PluginFocusSiteSnapshot | undefined {
+  for (const site of pluginFocusSites.values()) {
+    if (site.plugin === plugin && site.requestId === requestId) {
+      return {
+        plugin: site.plugin,
+        owner: site.owner,
+        requestId: site.requestId,
+        component: site.component,
+        keyCount: site.keys.size,
+        holder: site.holder,
+        isHeldNow: focusSiteIsHeldNow(site),
+      }
+    }
+  }
+  return undefined
+}
+
+/** Public scroll-site dims (gold Ide().set body; commit/Sat/followEnd HAVE). */
+export type PluginScrollSiteDims = {
+  offset?: number
+  maxOffset?: number
+  bodyRows?: number
+  contentRows?: number
+  followEnd?: boolean
+}
+
+export type PluginScrollSiteSnapshot = {
+  plugin: string
+  owner: string
+  requestId: string
+  component: 'Pane' | 'AbovePrompt'
+  offset: number
+  maxOffset: number
+  bodyRows: number
+  contentRows: number
+  keyCount: number
+  followEnd: boolean
+}
 
 /** densable drawing trees from ui.resolve — rendered as Ink `wo`/`xo` children. */
 export type PluginDrawingTree = {
@@ -4527,6 +5373,7 @@ export function getShownPluginPane():
       columns?: number
       offset: number
       bodyRows: number
+      closeOnEscape?: boolean
     }
   | undefined {
   if (shownPaneId === null) return undefined
@@ -4542,21 +5389,46 @@ export function getShownPluginPane():
     ...(pane.columns !== undefined && { columns: pane.columns }),
     offset: site?.offset ?? 0,
     bodyRows: pane.rows ?? site?.bodyRows ?? 0,
+    ...(pane.closeOnEscape === true && { closeOnEscape: true }),
   }
+}
+
+/** densable `ift`/`NFr` — Pane remount generation for QT/BO resetKey. */
+const paneRemountGeneration = new Map<string, number>()
+
+/** densable `ift("Pane", id)` — host key / ErrorBoundary resetKey. */
+export function getPaneRemountGeneration(id: string): number {
+  return paneRemountGeneration.get(id) ?? 0
+}
+
+function bumpPaneRemountGeneration(id: string): void {
+  paneRemountGeneration.set(id, (paneRemountGeneration.get(id) ?? 0) + 1)
 }
 
 function dropPluginPane(id: string): void {
   const at = pluginPanes.findIndex(pane => pane.id === id)
   if (at >= 0) pluginPanes.splice(at, 1)
   paneOpenIds.delete(id)
+  // densable V/JFt: shownId falls back to open.at(-1); focusedId/focusRequest
+  // are membership-only → null when the closed id was focused/pending.
   if (shownPaneId === id) {
     shownPaneId = paneOpenIds.size ? [...paneOpenIds].at(-1)! : null
   }
-  if (focusedPaneId === id) focusedPaneId = shownPaneId
+  if (focusedPaneId === id) focusedPaneId = null
+  if (paneFocusRequest === id) paneFocusRequest = null
+  for (let i = unplacedPanes.length - 1; i >= 0; i--) {
+    if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
+  }
   for (let i = pluginSites.length - 1; i >= 0; i--) {
     if (pluginSites[i]?.requestId === id) pluginSites.splice(i, 1)
   }
+  for (const [mapKey, site] of pluginFocusSites) {
+    if (site.requestId === id) pluginFocusSites.delete(mapKey)
+  }
+  // densable JFt → NFr("Pane", id) — bump remount gen so BO resets.
+  bumpPaneRemountGeneration(id)
   unmountRequest(id)
+  notifyPanesListeners()
   bumpRasterFrames()
 }
 
@@ -4586,13 +5458,20 @@ export async function closePluginPane(
   )
   if (!hasCloseHook) {
     if (!unload) dropPluginPane(target)
+    // densable `j` forgetDismissed — person close forgets asked latch.
+    if (origin.kind === 'person' && owner !== undefined) {
+      forgetAskedPane({ plugin: owner, id: target })
+    }
     return
   }
   paneClosing.add(target)
+  notifyPanesListeners()
   try {
+    let closedId: string | undefined
     await runFunctionHookChain('ui.close', { id: target, origin }, event => {
       const nextId = typeof event.id === 'string' ? event.id : target
       dropPluginPane(nextId)
+      closedId = nextId
       return Promise.resolve({ value: undefined })
     })
     if (
@@ -4600,9 +5479,16 @@ export async function closePluginPane(
       pluginPanes.some(item => item.id === target)
     ) {
       /* gold: kept open by a hook that never called next */
+    } else if (
+      origin.kind === 'person' &&
+      owner !== undefined &&
+      closedId !== undefined
+    ) {
+      forgetAskedPane({ plugin: owner, id: closedId })
     }
   } finally {
     paneClosing.delete(target)
+    notifyPanesListeners()
   }
 }
 
@@ -5019,7 +5905,7 @@ function walkUiMounts(
       },
     }
     mountRaster(raster)
-    holdPluginSite(owner, req, 'Pane').keys.add(key)
+    holdPluginSite(owner, req, scrollSiteComponent(req)).keys.add(key)
   }
   if (type === 'Image' && key && req) {
     const cols = Math.min(Math.max(1, columns), RASTER_MAX_COLUMNS)
@@ -5039,7 +5925,7 @@ function walkUiMounts(
       },
     }
     mountImage(image)
-    holdPluginSite(owner, req, 'Pane').keys.add(key)
+    holdPluginSite(owner, req, scrollSiteComponent(req)).keys.add(key)
   }
   if (node.children !== undefined) walkUiMounts(node.children, owner, req)
   if (props !== node && props.children !== undefined) {
@@ -5080,9 +5966,14 @@ function holdPluginSite(
   const held = pluginSites.find(
     site => site.plugin === plugin && site.requestId === requestId,
   )
-  if (held) return held
+  if (held) {
+    held.component = component
+    holdPluginFocusSite(plugin, requestId, component, held.keys)
+    return held
+  }
   const next: PluginSite = {
     plugin,
+    owner: plugin,
     requestId,
     component,
     keys: new Set(),
@@ -5090,18 +5981,450 @@ function holdPluginSite(
     maxOffset: 0,
     bodyRows: 0,
     contentRows: 0,
+    followEnd: false,
   }
   pluginSites.push(next)
+  holdPluginFocusSite(plugin, requestId, component, next.keys)
   return next
 }
 
-/** Record a drawn element key so ui.focus can hit it (gold focusSiteDraws). */
+function applyPluginScrollSiteDims(
+  site: PluginSite,
+  dims?: PluginScrollSiteDims,
+): void {
+  if (dims === undefined) return
+  if (dims.maxOffset !== undefined) site.maxOffset = dims.maxOffset
+  if (dims.bodyRows !== undefined) site.bodyRows = dims.bodyRows
+  if (dims.contentRows !== undefined) site.contentRows = dims.contentRows
+  if (dims.followEnd !== undefined) site.followEnd = dims.followEnd
+  if (dims.offset !== undefined) site.offset = dims.offset
+  // densable followEnd latch — pin to end after wat success / dim growth.
+  if (site.followEnd) {
+    const pinned = Math.max(0, site.maxOffset)
+    if (site.offset !== pinned) {
+      site.offset = pinned
+      bumpRasterFrames()
+    } else {
+      site.offset = pinned
+    }
+  }
+}
+
+function snapshotPluginScrollSite(site: PluginSite): PluginScrollSiteSnapshot {
+  return {
+    plugin: site.plugin,
+    owner: site.owner,
+    requestId: site.requestId,
+    component: site.component,
+    offset: site.offset,
+    maxOffset: site.maxOffset,
+    bodyRows: site.bodyRows,
+    contentRows: site.contentRows,
+    keyCount: site.keys.size,
+    followEnd: site.followEnd,
+  }
+}
+
+/**
+ * densable `ZV(node, root)` — sum yoga computedTop from node up to root.
+ * Walk off the tree → -1 (cEe then returns undefined).
+ */
+export function layoutOffsetTop(
+  node: ScrollSiteLayoutNode,
+  root: ScrollSiteLayoutNode,
+): number {
+  let top = 0
+  let cur: ScrollSiteLayoutNode | undefined = node
+  while (cur !== undefined && cur !== root) {
+    top += cur.yogaNode?.getComputedTop() ?? 0
+    cur = cur.parentNode
+  }
+  return cur === root ? top : -1
+}
+
+/**
+ * densable `cEe(root, key, plugin)` — DFS walk of Ink tree for elementKey.
+ * Skip the root itself; plugin match is optional when elementPlugin is absent.
+ */
+export function layoutKeyRows(
+  root: ScrollSiteLayoutNode,
+  key: string,
+  plugin: string,
+): { top: number; bottom: number } | undefined {
+  const stack: ScrollSiteLayoutNode[] = [root]
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const attrs = node.attributes
+    const elementKey =
+      typeof attrs?.elementKey === 'string' ? attrs.elementKey : undefined
+    const elementPlugin =
+      typeof attrs?.elementPlugin === 'string' ? attrs.elementPlugin : undefined
+    if (
+      node !== root &&
+      elementKey === key &&
+      (elementPlugin === undefined || elementPlugin === plugin)
+    ) {
+      const top = layoutOffsetTop(node, root)
+      const height = node.yogaNode?.getComputedHeight() ?? 0
+      return top < 0 ? undefined : { top, bottom: top + height }
+    }
+    const kids = node.childNodes ?? []
+    for (let i = kids.length - 1; i >= 0; i -= 1) {
+      const child = kids[i]
+      if (
+        child &&
+        typeof child === 'object' &&
+        (child as ScrollSiteLayoutNode).nodeName !== '#text'
+      ) {
+        stack.push(child as ScrollSiteLayoutNode)
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * densable `OMr` — nearest block: keep in view if already visible, else
+ * clamp start so the window covers as much of [top,bottom) as possible.
+ */
+export function nearestScrollOffset(input: {
+  offset: number
+  bodyRows: number
+  top: number
+  bottom: number
+}): number {
+  const { offset, bodyRows, top, bottom } = input
+  const fit =
+    bottom > offset + bodyRows
+      ? Math.max(0, Math.min(top, bottom - bodyRows))
+      : offset
+  return top < offset ? top : fit
+}
+
+/**
+ * densable `kat` — map key rows + bodyRows + block to a target offset.
+ * Taller-than-viewport keys (`bottom-top > bodyRows`) always start at `top`.
+ */
+export function alignScrollToKeyRows(
+  input: {
+    offset: number
+    bodyRows: number
+    top: number
+    bottom: number
+  },
+  block: TranscriptRevealBlock,
+): number {
+  const { bodyRows, top, bottom } = input
+  if (bottom - top > bodyRows) return top
+  switch (block) {
+    case 'start':
+      return top
+    case 'end':
+      return bottom - bodyRows
+    case 'center':
+      return top - Math.floor((bodyRows - (bottom - top)) / 2)
+    case 'nearest':
+      return nearestScrollOffset(input)
+  }
+}
+
+/**
+ * densable Ide `keyRows(plugin, key)` — yoga walk when contentRoot is bound;
+ * else membership-only `{top:0,bottom:0}` (tests / pre-layout).
+ */
+export function scrollSiteKeyRows(
+  site: PluginScrollSiteSnapshot | PluginSite,
+  plugin: string,
+  key: string,
+): { top: number; bottom: number } | undefined {
+  const held =
+    'keys' in site
+      ? site
+      : pluginSites.find(
+          row => row.plugin === site.plugin && row.requestId === site.requestId,
+        )
+  if (!held || held.plugin !== plugin) return undefined
+  // densable yEe keyRows = cEe(content, key, plugin) — yoga first, no keys.has.
+  if (held.contentRoot !== undefined) {
+    return layoutKeyRows(held.contentRoot, key, plugin)
+  }
+  if (!held.keys.has(key)) return undefined
+  return { top: 0, bottom: 0 }
+}
+
+/** densable Ide site binds the Ink content root used by `keyRows`. */
+export function bindPluginScrollSiteLayout(
+  plugin: string,
+  requestId: string,
+  root: ScrollSiteLayoutNode | null,
+): void {
+  const held = pluginSites.find(
+    site => site.plugin === plugin && site.requestId === requestId,
+  )
+  if (held === undefined) return
+  if (root === null) {
+    held.contentRoot = undefined
+    return
+  }
+  held.contentRoot = root
+}
+
+/**
+ * densable Ide site `followEnd()` — latch + snap offset to maxOffset.
+ * Bump raster so Pane/AbovePrompt hosts that paint site offset re-render.
+ */
+export function followPluginScrollSiteEnd(
+  plugin: string,
+  requestId: string,
+): boolean {
+  const held = pluginSites.find(
+    site => site.plugin === plugin && site.requestId === requestId,
+  )
+  if (held === undefined) return false
+  held.followEnd = true
+  held.offset = Math.max(0, held.maxOffset)
+  bumpRasterFrames()
+  return true
+}
+
+/**
+ * densable `Jq` — held focused Ink node edge in content coords.
+ * Stale index / missing content / walk-off → -1.
+ */
+export function heldFocusEdge(
+  input: {
+    held: { node: ScrollSiteLayoutNode; index: number } | null
+    index: number | null
+    content: ScrollSiteLayoutNode | null
+  },
+  edge: 'top' | 'bottom',
+): number {
+  const { held, index, content } = input
+  if (
+    held === null ||
+    index === null ||
+    held.index !== index ||
+    content === null
+  ) {
+    return -1
+  }
+  const top = layoutOffsetTop(held.node, content)
+  const height = held.node.yogaNode?.getComputedHeight() ?? 0
+  return top < 0 ? -1 : top + (edge === 'bottom' ? height : 0)
+}
+
+function scrollSiteComponent(
+  requestId: string,
+  component?: PluginSite['component'],
+): PluginSite['component'] {
+  if (component !== undefined) return component
+  return requestId === ABOVE_PROMPT_REQUEST_ID ? 'AbovePrompt' : 'Pane'
+}
+
+/**
+ * densable Ide().set lite — register/hold a scroll site in `pluginSites`
+ * (PARTIAL HAVE). Person-origin commit/dispatch is
+ * `commitPluginScrollSite` / `dispatchPersonUiScroll`.
+ */
+export function registerPluginScrollSite(
+  plugin: string,
+  requestId: string,
+  component: PluginSite['component'],
+  dims?: PluginScrollSiteDims,
+): PluginScrollSiteSnapshot {
+  const site = holdPluginSite(plugin, requestId, component)
+  applyPluginScrollSiteDims(site, dims)
+  return snapshotPluginScrollSite(site)
+}
+
+/** densable Ide().set field sync — update dims on an existing held site. */
+export function updatePluginScrollSite(
+  plugin: string,
+  requestId: string,
+  dims: PluginScrollSiteDims,
+): PluginScrollSiteSnapshot | undefined {
+  const held = pluginSites.find(
+    site => site.plugin === plugin && site.requestId === requestId,
+  )
+  if (held === undefined) return undefined
+  applyPluginScrollSiteDims(held, dims)
+  return snapshotPluginScrollSite(held)
+}
+
+/** densable Ide().delete lite — drop a held scroll site. */
+export function unregisterPluginScrollSite(
+  plugin: string,
+  requestId: string,
+): void {
+  for (let i = pluginSites.length - 1; i >= 0; i--) {
+    const site = pluginSites[i]
+    if (site?.plugin === plugin && site.requestId === requestId) {
+      pluginSites.splice(i, 1)
+    }
+  }
+  dropPluginFocusSite(plugin, requestId)
+}
+
+export function getPluginScrollSite(
+  plugin: string,
+  requestId: string,
+): PluginScrollSiteSnapshot | undefined {
+  const held = pluginSites.find(
+    site => site.plugin === plugin && site.requestId === requestId,
+  )
+  return held === undefined ? undefined : snapshotPluginScrollSite(held)
+}
+
+/**
+ * densable `Hde` — thin promise error swallow + debug log.
+ * Semantic export only (never `Hde`).
+ */
+export function logUiScrollSettled<T>(
+  label: string,
+  promise: Promise<T>,
+): Promise<T | undefined> {
+  return promise.catch((err: unknown) => {
+    const why = err instanceof Error ? err.message : String(err)
+    logForDebugging(`${label}: ${why}`, { level: 'error' })
+    return undefined
+  })
+}
+
+/** densable scroll origin — person vs plugin (vq/Sat). */
+export type PluginScrollOrigin =
+  | { kind: 'person' }
+  | { kind: 'plugin'; name: string }
+
+/**
+ * densable `Sat(site, origin)` — foreign plugin origin cannot move this site.
+ * `Sat=(e,n)=>n.kind==="plugin"&&e.owner!==void 0&&e.owner!==n.name`
+ */
+export function isForeignPluginScrollOrigin(
+  siteOwner: string | undefined,
+  origin: PluginScrollOrigin | undefined,
+): boolean {
+  return (
+    origin?.kind === 'plugin' &&
+    siteOwner !== undefined &&
+    siteOwner !== '' &&
+    siteOwner !== origin.name
+  )
+}
+
+/**
+ * densable Ide site `commit` / `vq` — clamp offset; Sat ownership deny.
+ * Returns `{ deny: 'no such site' }` / `{ deny: "not this plugin's site" }`.
+ */
+export function commitPluginScrollSite(
+  plugin: string,
+  requestId: string,
+  offset: number,
+  origin?: PluginScrollOrigin,
+): { deny?: string } {
+  const held = pluginSites.find(
+    site => site.plugin === plugin && site.requestId === requestId,
+  )
+  if (held === undefined) return { deny: 'no such site' }
+  if (isForeignPluginScrollOrigin(held.owner ?? held.plugin, origin)) {
+    return { deny: "not this plugin's site" }
+  }
+  const max = Math.max(0, held.maxOffset)
+  const next = Math.max(0, Math.min(max, Math.floor(offset)))
+  held.offset = next
+  // densable Ide commit (Vt): always We(!1). Only wat / followEnd() arms.
+  held.followEnd = false
+  return {}
+}
+
+export type PersonUiScrollInput = {
+  component: PluginSite['component']
+  requestId: string
+  offset: number
+  by: number
+  bodyRows: number
+  contentRows: number
+  plugin?: string
+  pointer?: unknown
+}
+
+/**
+ * densable yEe person-origin path — `Hde(label, QLt({input}))`.
+ * Gold: handlers empty → `vq` commit; else `iZ` = function-hook chain with
+ * bottom = commit. Local: `runFunctionHookChain('ui.scroll', …, vqTail)`.
+ */
+export function dispatchPersonUiScroll(
+  input: PersonUiScrollInput,
+): Promise<{ deny?: string } | undefined> {
+  const plugin = input.plugin ?? ''
+  const label = `ui.scroll ${input.component} ${input.requestId}`
+  const scrollInput = {
+    component: input.component,
+    requestId: input.requestId,
+    offset: input.offset,
+    by: input.by,
+    bodyRows: input.bodyRows,
+    contentRows: input.contentRows,
+    origin: { kind: 'person' as const },
+    ...(input.pointer !== undefined && { pointer: input.pointer }),
+  }
+  const vqCommit = (): { deny?: string } => {
+    const committed = commitPluginScrollSite(
+      plugin,
+      input.requestId,
+      input.offset,
+      { kind: 'person' },
+    )
+    if (committed.deny !== undefined) return committed
+    updatePluginScrollSite(plugin, input.requestId, {
+      bodyRows: input.bodyRows,
+      contentRows: input.contentRows,
+    })
+    // densable yEe local Me re-renders immediately; Pane host reads
+    // getShownPluginPane().offset from pluginSites — bump like scrollPluginPane.
+    bumpRasterFrames()
+    return {}
+  }
+  return logUiScrollSettled(
+    label,
+    runFunctionHookChain('ui.scroll', scrollInput, async () => {
+      const result = vqCommit()
+      logForDebugging(
+        `ui.scroll ${input.component} ${input.requestId} (person) by ${input.by} to ${input.offset}: ${
+          result.deny === undefined ? 'moved' : `denied (${result.deny})`
+        }`,
+      )
+      return result
+    }).then(value => {
+      if (
+        value !== null &&
+        typeof value === 'object' &&
+        'deny' in value &&
+        typeof (value as { deny?: unknown }).deny === 'string'
+      ) {
+        return value as { deny: string }
+      }
+      return (value as { deny?: string } | undefined) ?? {}
+    }),
+  )
+}
+
+/**
+ * Record a drawn element key so ui.focus can hit it (gold focusSiteDraws).
+ * Defaults Pane; AbovePrompt requestId (or explicit component) keeps Ide component.
+ * Gold `g9e` focusSites Map (separate from scrollSites). XHo host overrides
+ * hasElement/commit when bound; keys are the CLI fallback membership.
+ */
 export function noteDrawnElement(
   plugin: string,
   requestId: string,
   key: string,
+  component?: PluginSite['component'],
 ): void {
-  holdPluginSite(plugin, requestId, 'Pane').keys.add(key)
+  holdPluginSite(
+    plugin,
+    requestId,
+    scrollSiteComponent(requestId, component),
+  ).keys.add(key)
+  focusSiteDraws.emit()
 }
 
 function paneIdCheck(id: unknown): string | undefined {
@@ -5230,6 +6553,33 @@ function uiRenderArgCheck(input: unknown): string | undefined {
     : `takes a ui.render argument (e.component "${component}" is not a component the engine draws)`
 }
 
+/**
+ * densable tn — rewrite of Pane/AbovePrompt must keep the surface's props.view.
+ * Gold: Bn(e.view)!==Bn(t.props.view) → reject.
+ */
+function uiRenderViewRewriteCheck(
+  original: Record<string, unknown>,
+  rewritten: Record<string, unknown>,
+): string | undefined {
+  const component = String(original.component ?? '')
+  if (component !== 'Pane' && component !== 'AbovePrompt') return undefined
+  const originalProps = isEventRecord(original.props) ? original.props : {}
+  const originalView = originalProps.view
+  const rewrittenView = Object.hasOwn(rewritten, 'view')
+    ? rewritten.view
+    : isEventRecord(rewritten.props)
+      ? rewritten.props.view
+      : undefined
+  try {
+    if (JSON.stringify(originalView) === JSON.stringify(rewrittenView)) {
+      return undefined
+    }
+  } catch {
+    if (originalView === rewrittenView) return undefined
+  }
+  return 'a props.view other than the surface drew (the person chooses the transcript in view; a rewrite changes the drawing alone)'
+}
+
 function runInterfaceCall(
   input: Record<string, unknown>,
   plugin?: string,
@@ -5300,31 +6650,64 @@ function runUiHost(
         )
       }
     }
+    // densable eNo + ee — seed asked, placementAtOpen column gate, unplaced waiters.
+    seedAskedPanes()
     const id = String(input.id)
     const owner = plugin ?? ''
     const title = typeof input.title === 'string' ? input.title : id
-    const held = pluginPanes.find(pane => pane.id === id)
-    const next = {
+    const askedRef = { plugin: owner, id }
+    // densable dZ force: person-origin / ui.press|input|select. Local hostOp
+    // has no hookOrigin bag — treat explicit force:true as person open.
+    const force = input.force === true
+    // densable eNo: already in open → skip ee (`x=ie?{isPlaced:!0}:ee`).
+    const alreadyOpen = paneOpenIds.has(id)
+    const placement = alreadyOpen
+      ? ({ isPlaced: true } as const)
+      : placementAtOpen(getPanesState(), askedRef, force)
+    const next: PluginPaneEntry = {
       id,
-      plugin: held?.plugin ?? owner,
+      plugin: owner,
       title,
       ...(input.closeOnEscape === true && { closeOnEscape: true }),
       ...(input.holdToasts === true && { holdToasts: true }),
       ...(typeof input.rows === 'number' && { rows: input.rows }),
       ...(typeof input.columns === 'number' && { columns: input.columns }),
     }
-    if (held) {
-      const at = pluginPanes.indexOf(held)
-      pluginPanes[at] = next
-    } else {
-      pluginPanes.push(next)
+    if (!hasAskedPane(getPanesState(), askedRef) && force) {
+      rememberAskedPane(askedRef)
     }
-    holdPluginSite(next.plugin, id, 'Pane')
-    paneOpenIds.add(id)
-    shownPaneId = id
-    focusedPaneId = id
+    if (placement.isPlaced) {
+      // densable `b(e,r,n)`: already-open keeps shownId; new open uses
+      // focusedId ?? id. focusedId is never written here — only focus:true
+      // queues focusRequest for AbovePrompt a4n settle.
+      const held = pluginPanes.find(pane => pane.id === id)
+      if (held) {
+        const at = pluginPanes.indexOf(held)
+        pluginPanes[at] = { ...next, plugin: held.plugin }
+      } else {
+        pluginPanes.push(next)
+      }
+      holdPluginSite(next.plugin, id, 'Pane')
+      paneOpenIds.add(id)
+      if (!alreadyOpen) {
+        shownPaneId = focusedPaneId ?? id
+      }
+      if (input.focus === true) paneFocusRequest = id
+      for (let i = unplacedPanes.length - 1; i >= 0; i--) {
+        if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
+      }
+      notifyPanesListeners()
+      bumpRasterFrames()
+      return { isPlaced: true }
+    }
+    // Below openFloor — park in unplaced; placeWaiting when columns widen.
+    // already-open never reaches here (gold short-circuit).
+    const atUnplaced = unplacedPanes.findIndex(pane => pane.id === id)
+    if (atUnplaced >= 0) unplacedPanes[atUnplaced] = next
+    else unplacedPanes.push(next)
+    notifyPanesListeners()
     bumpRasterFrames()
-    return { isPlaced: true }
+    return { isPlaced: false, reason: placement.reason }
   }
   if (op === 'ui.close') {
     const origin = input.origin
@@ -5337,19 +6720,32 @@ function runUiHost(
     const at = pluginPanes.findIndex(pane => pane.id === id)
     if (at >= 0) pluginPanes.splice(at, 1)
     paneOpenIds.delete(id)
+    // densable V/JFt — shownId fallback; focusedId null when closed id held.
     if (shownPaneId === id)
       shownPaneId = paneOpenIds.size ? [...paneOpenIds].at(-1)! : null
-    if (focusedPaneId === id) focusedPaneId = shownPaneId
+    if (focusedPaneId === id) focusedPaneId = null
+    if (paneFocusRequest === id) paneFocusRequest = null
+    for (let i = unplacedPanes.length - 1; i >= 0; i--) {
+      if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
+    }
     for (let i = pluginSites.length - 1; i >= 0; i--) {
       if (pluginSites[i]?.requestId === id) pluginSites.splice(i, 1)
     }
+    for (const [mapKey, site] of pluginFocusSites) {
+      if (site.requestId === id) pluginFocusSites.delete(mapKey)
+    }
+    // densable JFt → NFr — remount gen for QT/BO reset.
+    bumpPaneRemountGeneration(id)
     unmountRequest(id)
+    notifyPanesListeners()
     bumpRasterFrames()
     return undefined
   }
   if (op === 'ui.panes') {
+    // densable `rNo` / `fue` — open ∪ unplaced; isPlaced = open membership.
+    // Never export minify `rNo`/`fue`.
     const owner = plugin ?? ''
-    return pluginPanes
+    return [...pluginPanes, ...unplacedPanes]
       .filter(pane => pane.plugin === owner)
       .map(pane => ({
         id: pane.id,
@@ -5421,7 +6817,12 @@ function runUiHost(
         plugin,
       )
     }
-    return runUiFocus(input, plugin)
+    return runUiFocus({ ...input, plugin: plugin ?? input.plugin }, plugin)
+  }
+  if (op === 'ui.selection') {
+    // densable 2.1.289 AAt/Ga text-only: { text } or undefined when empty.
+    // instance_id/requestId row mapping deferred (no local rowHolding host yet).
+    return runUiSelection()
   }
   if (op === 'ui.copy') {
     if (typeof input.text !== 'string') {
@@ -6190,10 +7591,99 @@ function runAudioSpeak(
   throw new Error(`$.audio.speak: no speech synthesizer on ${process.platform}`)
 }
 
+function asScrollResult(value: unknown): { deny?: string } {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    'deny' in value &&
+    typeof (value as { deny?: unknown }).deny === 'string'
+  ) {
+    return { deny: (value as { deny: string }).deny }
+  }
+  return (value as { deny?: string } | undefined) ?? {}
+}
+
+/**
+ * densable `h` / `QLt` — clamp offset, plugin-origin hook chain then vq commit.
+ */
+function dispatchPluginScrollOffset(
+  site: PluginSite,
+  next: number,
+  owner: string,
+): { deny?: string } | Promise<{ deny?: string }> {
+  const clamped = Math.max(0, Math.min(site.maxOffset, next))
+  const by = clamped - site.offset
+  const origin = { kind: 'plugin' as const, name: owner }
+  const vqCommit = (): { deny?: string } => {
+    const committed = commitPluginScrollSite(
+      owner,
+      site.requestId,
+      clamped,
+      origin,
+    )
+    if (committed.deny !== undefined) return committed
+    updatePluginScrollSite(owner, site.requestId, {
+      bodyRows: site.bodyRows,
+      contentRows: site.contentRows,
+    })
+    // densable yEe Vt/Ie updates Me for plugin origin too; Pane needs bump.
+    bumpRasterFrames()
+    return {}
+  }
+  if (!hasMatchingFunctionHook('ui.scroll')) {
+    const result = vqCommit()
+    logForDebugging(
+      `ui.scroll ${site.component} ${site.requestId} (plugin) by ${by} to ${clamped}: ${
+        result.deny === undefined ? 'moved' : `denied (${result.deny})`
+      }`,
+    )
+    return result
+  }
+  return runFunctionHookChain(
+    'ui.scroll',
+    {
+      component: site.component,
+      requestId: site.requestId,
+      offset: clamped,
+      by,
+      bodyRows: site.bodyRows,
+      contentRows: site.contentRows,
+      origin,
+    },
+    async () => vqCommit(),
+  ).then(asScrollResult)
+}
+
+function armFollowEndAfterWat(
+  site: PluginSite,
+  owner: string,
+  result: { deny?: string } | Promise<{ deny?: string }>,
+): { deny?: string } | Promise<{ deny?: string }> {
+  const arm = (): void => {
+    const live = pluginSites.find(
+      row => row.plugin === owner && row.requestId === site.requestId,
+    )
+    if (
+      live !== undefined &&
+      live.offset === Math.min(live.maxOffset, live.maxOffset)
+    ) {
+      followPluginScrollSiteEnd(owner, live.requestId)
+    }
+  }
+  if (result instanceof Promise) {
+    return result.then(row => {
+      if (row.deny === undefined) arm()
+      return row
+    })
+  }
+  if (result.deny === undefined) arm()
+  return result
+}
+
 function runUiScroll(
   input: Record<string, unknown>,
   plugin?: string,
-): { deny?: string } {
+): { deny?: string } | Promise<{ deny?: string }> {
   const owner = plugin ?? ''
   const to = input.to
   const inn = typeof input.in === 'string' ? input.in : undefined
@@ -6204,44 +7694,405 @@ function runUiScroll(
   if (to === 'start' || to === 'end') {
     const [site] = owned
     if (!site) return { deny: "not this plugin's site" }
-    site.offset = to === 'start' ? 0 : site.maxOffset
-    return {}
+    if (to === 'start') return dispatchPluginScrollOffset(site, 0, owner)
+    // densable wat — QLt to maxOffset then followEnd() when still at end.
+    return armFollowEndAfterWat(
+      site,
+      owner,
+      dispatchPluginScrollOffset(site, site.maxOffset, owner),
+    )
   }
   if (isEventRecord(to) && typeof to.key === 'string') {
-    const site = owned.find(item => item.keys.has(to.key as string))
-    if (!site) return { deny: 'no element of its own is drawn under that key' }
-    return {}
+    // densable bat + kat + QLt — keyRows yoga walk, then commit offset.
+    const key = to.key
+    const hit = owned
+      .map(site => {
+        const rows = scrollSiteKeyRows(site, owner, key)
+        return rows === undefined ? undefined : { site, rows }
+      })
+      .find(row => row !== undefined)
+    if (!hit) return { deny: 'no element of its own is drawn under that key' }
+    const rawBlock = input.block
+    const block: TranscriptRevealBlock =
+      rawBlock === 'start' ||
+      rawBlock === 'center' ||
+      rawBlock === 'end' ||
+      rawBlock === 'nearest'
+        ? rawBlock
+        : 'nearest'
+    const target = alignScrollToKeyRows(
+      {
+        offset: hit.site.offset,
+        bodyRows: hit.site.bodyRows,
+        ...hit.rows,
+      },
+      block,
+    )
+    return dispatchPluginScrollOffset(hit.site, target, owner)
   }
   if (isEventRecord(to) && typeof to.requestId === 'string') {
+    // densable s0n: own plugin site → cannot scroll "around" it; else vat.
     if (sitesOf(owner, to.requestId).length > 0) {
       return { deny: 'nothing around that site scrolls' }
     }
-    return { deny: 'nothing drawn under that requestId' }
+    const rawBlock = input.block
+    const block: TranscriptRevealBlock =
+      rawBlock === 'start' ||
+      rawBlock === 'center' ||
+      rawBlock === 'end' ||
+      rawBlock === 'nearest'
+        ? rawBlock
+        : 'nearest'
+    // densable vat — person gate (dZ) + transcript.reveal alphabet.
+    // Gold stamps origin/rootEvent via hostOps; local press ALS supplies
+    // rootEvent via getLivePressEvent() when $.ui.scroll runs inside
+    // ui.press|input|select answering.
+    const livePress = getLivePressEvent()
+    const rootEvent =
+      typeof input.rootEvent === 'string' ? input.rootEvent : livePress
+    const isPersonInput = input.isPersonInput === true
+    const origin =
+      input.origin !== undefined
+        ? input.origin
+        : [{ kind: 'plugin', name: owner }]
+    return scrollTranscriptByRequestId(to.requestId, block, {
+      plugin: owner,
+      origin,
+      isPersonInput,
+      rootEvent,
+    })
   }
   return { deny: "not this plugin's site" }
 }
 
-function runUiFocus(
+/** densable `K$t` — lSo/X$t wait budget for ui.focus site draws. */
+const FOCUS_SITE_WAIT_MS = 3000
+
+type PluginFocusDispatchInput = {
+  component: PluginSite['component']
+  requestId: string
+  plugin?: string
+  element?: string
+  origin: { kind: string; name?: string }
+}
+
+type PluginFocusHookCtx = {
+  plugin: string
+  origin?: unknown
+  signal?: AbortSignal
+  rootEvent?: string
+}
+
+function lookupFocusSite(
+  component: PluginSite['component'],
+  requestId: string,
+): PluginFocusSite | undefined {
+  return pluginFocusSites.get(focusSiteMapKey(component, requestId))
+}
+
+function siteHasElement(
+  site: PluginFocusSite,
+  plugin: string,
+  element: string,
+): boolean {
+  if (site.host) return site.host.hasElement(plugin, element)
+  return site.keys.has(element)
+}
+
+/** densable `dUe` — plugins whose `ui.render` matcher matches `{component}`. */
+function pluginsWithUiRenderComponent(component: string): string[] {
+  return loadedModules
+    .filter(mod =>
+      (mod.hooks ?? []).some(
+        hook =>
+          (functionHookPatternMatches(hook.pattern, 'ui.render') ||
+            functionHookPatternMatches(hook.pattern, 'classic.ui.render')) &&
+          matcherAllows(hook.matcher, { component }, 'ui.render'),
+      ),
+    )
+    .map(mod => mod.name)
+}
+
+/**
+ * densable `Rae` — map requestId + plugin to Pane/AbovePrompt site identity.
+ * Pane if that plugin has the id open; AbovePrompt if requestId is vG and
+ * dUe("AbovePrompt") includes the plugin. Else undefined (do not invent g9e).
+ */
+function resolveFocusSiteTarget(
+  requestId: string,
+  plugin: string,
+): { component: PluginSite['component']; requestId: string } | undefined {
+  const paneOpen = getPanesState().open.some(
+    pane => pane.plugin === plugin && pane.id === requestId,
+  )
+  const above =
+    requestId === ABOVE_PROMPT_REQUEST_ID &&
+    pluginsWithUiRenderComponent('AbovePrompt').includes(plugin)
+  const component: PluginSite['component'] | undefined = paneOpen
+    ? 'Pane'
+    : above
+      ? 'AbovePrompt'
+      : undefined
+  if (component === undefined) return undefined
+  return { component, requestId }
+}
+
+/**
+ * densable `V$t` — lSo waiter ready predicate.
+ * Identity missing / nested ui.render|ui.focus / unshown pane with no
+ * placements → ready (do not wait). Else wait until held+hasElement.
+ */
+function isFocusSiteReady(
+  input: { requestId: string; key: string },
+  ctx: PluginFocusHookCtx,
+): boolean {
+  const target = resolveFocusSiteTarget(input.requestId, ctx.plugin)
+  const site = target
+    ? lookupFocusSite(target.component, target.requestId)
+    : undefined
+  const panes = getPanesState()
+  const aboveExists =
+    lookupFocusSite('AbovePrompt', ABOVE_PROMPT_REQUEST_ID) !== undefined
+  const pendingFocus = panes.focusRequest === input.requestId && aboveExists
+  const isPane = target?.component === 'Pane'
+  if (
+    target === undefined ||
+    ctx.rootEvent === 'ui.render' ||
+    ctx.rootEvent === 'ui.focus' ||
+    (isPane
+      ? panes.placements === 0 ||
+        (panes.shownId !== input.requestId && !pendingFocus)
+      : site === undefined)
+  ) {
+    return true
+  }
+  if (site === undefined || pendingFocus) return false
+  const origin = { kind: 'plugin' as const, name: ctx.plugin }
+  return (
+    !focusSiteIsHeldNow(site) ||
+    isForeignFocusHolder(site, origin) ||
+    siteHasElement(site, ctx.plugin, input.key)
+  )
+}
+
+/**
+ * densable `Y$t`/`X$t` — wait until `ready` or timeout, woken by focusSiteDraws + panes.
+ */
+async function waitForFocusSiteDraw(
+  ready: () => boolean,
+  signal?: AbortSignal,
+  budgetMs = FOCUS_SITE_WAIT_MS,
+): Promise<void> {
+  const deadline = Date.now() + budgetMs
+  while (!ready() && signal?.aborted !== true) {
+    const left = deadline - Date.now()
+    if (left <= 0) return
+    await new Promise<void>(resolve => {
+      const ac = new AbortController()
+      const finish = (): void => {
+        ac.abort()
+        resolve()
+      }
+      const unsubDraw = subscribePluginFocusSiteDraws(finish)
+      const unsubPanes = subscribePanes(finish)
+      const timer = setTimeout(finish, left)
+      const onAbort = (): void => finish()
+      signal?.addEventListener('abort', onAbort, { once: true })
+      ac.signal.addEventListener(
+        'abort',
+        () => {
+          unsubDraw()
+          unsubPanes()
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+        },
+        { once: true },
+      )
+    })
+  }
+}
+
+function asFocusResult(value: unknown): { deny?: string } {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    'deny' in value &&
+    typeof (value as { deny?: unknown }).deny === 'string'
+  ) {
+    return { deny: (value as { deny: string }).deny }
+  }
+  return (value as { deny?: string } | undefined) ?? {}
+}
+
+function fallbackFocusCommit(
+  site: PluginFocusSite,
+  input: PluginFocusDispatchInput,
+): string | undefined {
+  const omitted = input.element === undefined || input.element === ''
+  if (omitted) return 'no element named'
+  if (!site.keys.has(input.element)) {
+    return `no element of ${input.plugin ?? ''} is drawn under that key`
+  }
+  focusedPaneId = site.requestId
+  if (site.component === 'Pane') shownPaneId = site.requestId
+  site.holder = input.plugin ?? site.holder
+  paneFocusRequest = null
+  notifyPanesListeners()
+  bumpRasterFrames()
+  return undefined
+}
+
+/**
+ * densable `Tq` — g9e lookup, yat, isHeldNow, x$, commit.
+ */
+function commitUiFocus(input: PluginFocusDispatchInput): { deny?: string } {
+  const site = lookupFocusSite(input.component, input.requestId)
+  if (!site) return { deny: 'no such site' }
+  if (isForeignPluginFocusSite(site, input.origin, input.plugin ?? '')) {
+    return { deny: "not this plugin's site" }
+  }
+  if (!focusSiteIsHeldNow(site)) {
+    return { deny: 'that site does not hold the keyboard' }
+  }
+  if (isForeignFocusHolder(site, input.origin)) {
+    return { deny: "another plugin's element holds the keyboard" }
+  }
+  const deny = site.host
+    ? site.host.commit({
+        plugin: input.plugin ?? '',
+        element: input.element,
+        origin: input.origin,
+      })
+    : fallbackFocusCommit(site, input)
+  if (deny !== undefined) return { deny }
+  if (site.host && input.plugin !== undefined && input.plugin !== '') {
+    site.holder = input.plugin
+  }
+  return {}
+}
+
+/**
+ * densable `idn` — ui.focus hook chain then Tq. Empty handlers → sync Tq
+ * (XHo `ve` treats non-Promise as already settled). Abort on the hook path
+ * → `{ deny: "the move was abandoned" }`.
+ */
+export function dispatchUiFocus(
+  input: PluginFocusDispatchInput,
+  options?: { signal?: AbortSignal },
+): Promise<{ deny?: string }> | { deny?: string } {
+  const signal = options?.signal
+  const hasHooks = hasMatchingFunctionHook('ui.focus')
+  const apply = (event: PluginFocusDispatchInput): { deny?: string } => {
+    if (signal?.aborted === true && hasHooks) {
+      return { deny: 'the move was abandoned' }
+    }
+    return commitUiFocus(event)
+  }
+  if (!hasHooks) return apply(input)
+  return runFunctionHookChain(
+    'ui.focus',
+    {
+      component: input.component,
+      requestId: input.requestId,
+      ...(input.plugin !== undefined && { plugin: input.plugin }),
+      ...(input.element !== undefined && { element: input.element }),
+      origin: input.origin,
+    },
+    async event =>
+      apply({
+        component:
+          event.component === 'AbovePrompt' || event.component === 'Pane'
+            ? event.component
+            : input.component,
+        requestId:
+          typeof event.requestId === 'string'
+            ? event.requestId
+            : input.requestId,
+        plugin: typeof event.plugin === 'string' ? event.plugin : input.plugin,
+        element:
+          typeof event.element === 'string' ? event.element : input.element,
+        origin: input.origin,
+      }),
+  ).then(asFocusResult)
+}
+
+/**
+ * densable `lSo` — plugin `ui.focus` `{requestId,key}`: wait V$t, then
+ * Rae/mO gates, then idn/Tq. Missing identity → `"not this plugin's site"`.
+ * Missing key after wait → `"no element of its own is drawn under that key"`.
+ */
+async function runUiFocus(
   input: Record<string, unknown>,
   plugin?: string,
-): { deny?: string } {
-  const owner = plugin ?? ''
-  const requestId = String(input.requestId)
-  const key = String(input.key)
-  const site = sitesOf(owner, requestId)[0]
+): Promise<{ deny?: string }> {
+  const caller =
+    (typeof input.plugin === 'string' && input.plugin !== ''
+      ? input.plugin
+      : plugin) ?? ''
+  const requestId = String(input.requestId ?? '')
+  const key = String(input.key ?? '')
+  const signal = input.signal instanceof AbortSignal ? input.signal : undefined
+  const ctx: PluginFocusHookCtx = {
+    plugin: caller,
+    origin: input.origin,
+    signal,
+    ...(typeof input.rootEvent === 'string' && { rootEvent: input.rootEvent }),
+  }
+  await waitForFocusSiteDraw(
+    () => isFocusSiteReady({ requestId, key }, ctx),
+    signal,
+  )
+  const target = resolveFocusSiteTarget(requestId, caller)
+  const site = target
+    ? lookupFocusSite(target.component, target.requestId)
+    : undefined
+  const origin = { kind: 'plugin' as const, name: caller }
   if (!site) return { deny: "not this plugin's site" }
-  if (!site.keys.has(key)) {
+  if (!focusSiteIsHeldNow(site)) {
+    return { deny: 'that site does not hold the keyboard' }
+  }
+  if (isForeignFocusHolder(site, origin)) {
+    return { deny: "another plugin's element holds the keyboard" }
+  }
+  if (!siteHasElement(site, caller, key)) {
     return { deny: 'no element of its own is drawn under that key' }
   }
-  focusedPaneId = requestId
-  shownPaneId = requestId
-  bumpRasterFrames()
-  return {}
+  return dispatchUiFocus(
+    {
+      component: site.component,
+      requestId: site.requestId,
+      plugin: caller,
+      element: key,
+      origin,
+    },
+    { signal },
+  )
 }
 
 function osc52Payload(text: string): string {
   const encoded = Buffer.from(text, 'utf8').toString('base64')
   return `\x1b]52;c;${encoded}\x07`
+}
+
+/**
+ * densable 2.1.289 `ui.selection` terminal core (`Ga`).
+ * Gold: `iqn(text, rowHolding(selection))` → `{ text }` or `{ text, requestId }`.
+ * Product field for the row id is `instance_id` (ui_read_selection schema name).
+ */
+function runUiSelection(): { text: string; instance_id?: string } | undefined {
+  const ink = instances.get(process.stdout)
+  if (!ink || typeof ink.getSelectedText !== 'function') return undefined
+  const text =
+    typeof ink.hasTextSelection === 'function' && !ink.hasTextSelection()
+      ? ''
+      : ink.getSelectedText()
+  if (typeof text !== 'string' || text === '') return undefined
+  const holding = getUiSelectionRowHolding()
+  const requestId =
+    holding !== undefined && ink.selection !== undefined
+      ? holding(ink.selection)
+      : undefined
+  return selectionAnswer(text, requestId)
 }
 
 /** densable `_Xn` — terminal OSC-52 (and native path is a success even if OSC is empty). */
@@ -7420,6 +9271,48 @@ function isEventRecord(value: unknown): value is Record<string, unknown> {
  * densable `FCe(event).checkMatcher`. Field equality, plus ui.render's
  * engine-alone component (`AskUserQuestion`).
  */
+/**
+ * densable 2.1.289 `dO` / `iO` (terminal): run the owning plugin's `ui.fault`
+ * hooks alone. Matcher throw → taken as heard (include hook). Fire-and-forget.
+ */
+function dispatchClientFault(report: ClientFaultReport): void {
+  const event: Record<string, unknown> = {
+    surface: report.surface,
+    component: report.component,
+    requestId: report.requestId,
+    element: report.element,
+    module: report.module,
+    phase: report.phase,
+    reason: report.reason,
+  }
+  const needle = 'ui.fault'
+  const matched = loadedModules.flatMap(mod => {
+    if (mod.name !== report.plugin) return []
+    if (mod.status === 'unloaded') return []
+    if (
+      mod.status === 'retiring' &&
+      (inFlightByModule.get(mod.name) ?? 0) === 0
+    ) {
+      return []
+    }
+    return (mod.hooks ?? [])
+      .filter(hook => {
+        if (!functionHookPatternMatches(hook.pattern, needle)) return false
+        try {
+          return matcherAllows(hook.matcher, event, needle)
+        } catch {
+          // densable iO: on('ui.fault') matcher threw on the host; taken as heard
+          return true
+        }
+      })
+      .map(hook => ({ mod, hook }))
+  })
+  if (matched.length === 0) return
+  void runFunctionHookChain('ui.fault', event, async () => ({})).catch(
+    () => undefined,
+  )
+}
+
 function checkMatcher(event: string, matcher: unknown): string | undefined {
   if (!isEventRecord(matcher)) return undefined
   const body = event.startsWith('classic.')
@@ -7465,6 +9358,7 @@ const FUNCTION_HOOK_EVENTS = [
   'ui.input',
   'ui.select',
   'ui.message',
+  'ui.fault',
   'ui.scroll',
   'ui.focus',
   'agent.offer',

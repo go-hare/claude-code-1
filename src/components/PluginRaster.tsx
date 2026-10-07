@@ -153,7 +153,7 @@ export function PluginRaster(props: PluginRasterProps): ReactNode {
 
   const ansi = paintedAnsi ?? rasterWordsToAnsi(initialWords, columns, rows, palette);
   return (
-    <Box flexShrink={0} width={columns} height={rows} overflow="hidden">
+    <Box flexShrink={0} width={columns} height={rows} overflow="hidden" elementKey={elementKey} elementPlugin={plugin}>
       <ink-raw-ansi ref={bindRaw} rawText={ansi} rawWidth={columns} rawHeight={rows} />
     </Box>
   );
@@ -206,10 +206,21 @@ export function PluginImage(props: PluginImageProps): ReactNode {
 
   // densable `xo`: no id → dim alt; else sized overflow box + ink-raw-ansi placeholders.
   if (kittyId === undefined) {
-    return <Text dimColor>{alt}</Text>;
+    return (
+      <Box
+        flexShrink={0}
+        width={columns}
+        height={rows}
+        overflow="hidden"
+        elementKey={elementKey}
+        elementPlugin={plugin}
+      >
+        <Text dimColor>{alt}</Text>
+      </Box>
+    );
   }
   return (
-    <Box flexShrink={0} width={columns} height={rows} overflow="hidden">
+    <Box flexShrink={0} width={columns} height={rows} overflow="hidden" elementKey={elementKey} elementPlugin={plugin}>
       <ink-raw-ansi rawText={placeholder} rawWidth={columns} rawHeight={rows} />
     </Box>
   );

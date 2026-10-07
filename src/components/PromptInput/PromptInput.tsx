@@ -103,6 +103,11 @@ import {
 import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
+import {
+  clearHeldClearedDraft,
+  holdCleared,
+  restoreCleared,
+} from '../../utils/clearedDraftHold.js';
 import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
@@ -1324,6 +1329,23 @@ function PromptInput({
       ) {
         return;
       }
+    }
+
+    // densable 2.1.289: restoreCleared before history when prompt empty
+    const restored = restoreCleared(liveInputRef.current);
+    if (restored) {
+      trackAndSetInput(restored.text);
+      setCursorOffset(restored.text.length);
+      setPastedContents(restored.pastedContents);
+      pastedContentsRef.current = restored.pastedContents;
+      if (restored.mode !== mode) onModeChange(restored.mode);
+      addNotification({
+        key: 'stash-restored',
+        text: 'Draft restored',
+        priority: 'high',
+        timeoutMs: 5000,
+      });
+      return;
     }
 
     onHistoryUp();
@@ -2934,6 +2956,17 @@ function PromptInput({
     onHistoryUp: handleHistoryUp,
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
+    onHoldCleared: () => {
+      holdCleared({
+        text: liveInputRef.current,
+        mode,
+        pastedContents: pastedContentsRef.current,
+      });
+    },
+    // densable outside-empty clear drops the Ctrl+C hold
+    onClearInput: () => {
+      clearHeldClearedDraft();
+    },
     onLeftArrowOnEmpty: onBgDetach ?? onLeftArrowOnEmptyProp,
     // densable 2.1.218 #4: idp/sdp editing-quiet confirm (not always-on 800ms double-press)
     onLeftArrowOnEmptyMessage:
