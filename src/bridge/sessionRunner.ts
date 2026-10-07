@@ -307,7 +307,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
       // densable 2.1.238 #21 NDl: Vso/MDl/Eot/wot. Do not apply mrn.
       // Tip extras POST_FOR_SESSION_INGRESS_V2 / USE_CCR_V2 overlay after NDl.
       // densable RQt spawn stamps (spawn-only; attach must not set these).
-      // ARTIFACT spawn stamp-alone stays Drop — attach already stamps parent.
+      // Gold sbr: if(a) AUTO_DEFAULT; if(f) ARTIFACT; if(b) MACHINE_SETTINGS.
       const env: NodeJS.ProcessEnv = {
         ...buildSessionChildEnv(deps.env, {
           accessToken: opts.accessToken,
@@ -322,6 +322,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         ...(opts.autoDefault
           ? { CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT: '1' }
           : {}),
+        ...(opts.artifact ? { CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1' } : {}),
         ...(opts.machineSettings
           ? { CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS: '1' }
           : {}),

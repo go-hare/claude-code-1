@@ -1,9 +1,53 @@
 /**
  * Official Artifact tool env gates (portable).
  * Consumers: ArtifactTool isEnabled (force-on) + call (auto-open browser).
+ *
+ * densable SEA 2.1.289 `D()` / `I7n()` / `j$()` — SDK default-off withhold
+ * with `CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT` bypass.
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+
+/** densable `j$` — SDK host entrypoints. */
+const SDK_ARTIFACT_ENTRYPOINTS = new Set(['sdk-ts', 'sdk-py', 'sdk-cli'])
+
+/**
+ * densable `I7n()` — SDK default-off surface:
+ * j$() || entrypoint ∈ {claude-code-github-action, mcp}.
+ */
+export function isSdkArtifactDefaultOffEntrypoint(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const entry = env.CLAUDE_CODE_ENTRYPOINT
+  if (typeof entry !== 'string') return false
+  return (
+    SDK_ARTIFACT_ENTRYPOINTS.has(entry) ||
+    entry === 'claude-code-github-action' ||
+    entry === 'mcp'
+  )
+}
+
+/**
+ * densable `D()` sdk_default_off arm only (tip keeps third_party / essential
+ * traffic / cobalt in artifactUrl ASe). Returns `sdk_default_off` when an SDK
+ * entrypoint has neither CLAUDE_CODE_ARTIFACT nor BRIDGE_CHILD_ARTIFACT.
+ * CHILD_ARTIFACT is an enable bypass of SDK default-off — not a general ASe ON.
+ */
+export function getArtifactSdkDefaultOffReason(
+  env: NodeJS.ProcessEnv = process.env,
+): 'sdk_default_off' | null {
+  if (!isSdkArtifactDefaultOffEntrypoint(env)) return null
+  if (isEnvTruthy(env.CLAUDE_CODE_ARTIFACT)) return null
+  if (isEnvTruthy(env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT)) return null
+  return 'sdk_default_off'
+}
+
+/** densable `ne()` for the sdk_default_off arm — true when D arm is clear. */
+export function isArtifactSdkDefaultAllowed(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return getArtifactSdkDefaultOffReason(env) === null
+}
 
 /** Official awy — entrypoints that force direct/inline artifact upload. */
 export const ARTIFACT_DIRECT_UPLOAD_ENTRYPOINTS = new Set([

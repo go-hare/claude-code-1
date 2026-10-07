@@ -1116,8 +1116,9 @@ export async function runBridgeLoop(
               ` dir=${sessionDir}` +
               ` accessToken=${secret.session_ingress_token ? secret.session_ingress_token.slice(0, 8) + '...' : 'NONE'}`,
           )
-          // densable RQt autoDefault/machineSettings — stamp child env on spawn only.
+          // densable RQt autoDefault/artifact/machineSettings — stamp child env on spawn only.
           let autoDefault = false
+          let artifact = false
           let machineSettings = false
           try {
             const tags = await readBridgeSessionTags(sessionId, {
@@ -1132,6 +1133,7 @@ export async function runBridgeLoop(
               modePinned,
             })
             autoDefault = grantRoles.autoDefault
+            artifact = grantRoles.artifact
             machineSettings = grantRoles.machineSettings
           } catch (err) {
             logForDebugging(
@@ -1148,6 +1150,7 @@ export async function runBridgeLoop(
               useCcrV2,
               workerEpoch,
               autoDefault,
+              artifact,
               machineSettings,
               onFirstUserMessage: text => {
                 // Server-set titles (--name, web rename) win. fetchSessionTitle

@@ -10,6 +10,7 @@ import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import {
   isArtifactEnvForceEnabled,
+  isArtifactSdkDefaultAllowed,
   isArtifactToolDisabled,
 } from 'src/utils/artifactGates.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -330,6 +331,8 @@ function isTipCloudArtifactsUploadOpen(): boolean {
     /* settings optional in tests */
   }
   if (isArtifactToolDisabled(process.env, settingsDisable)) return false
+  // densable D()/I7n sdk_default_off — CHILD_ARTIFACT / ARTIFACT bypass only.
+  if (!isArtifactSdkDefaultAllowed()) return false
   if (isArtifactEnvForceEnabled()) return true
   return enable ?? true
 }

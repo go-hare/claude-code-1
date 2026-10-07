@@ -230,6 +230,12 @@ export type SessionSpawnOpts = {
    */
   machineSettings?: boolean
   /**
+   * densable RQt artifact → spawn stamps
+   * `CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT=1` (attended|projectThreadChild + gate).
+   * Attach stamps only under I7n(); spawn stamps the role without I7n.
+   */
+  artifact?: boolean
+  /**
    * Fires once with the text of the first real user message seen on the
    * child's stdout (via --replay-user-messages). Lets the caller derive a
    * session title when none exists yet. Tool-result and synthetic user

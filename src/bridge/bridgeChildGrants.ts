@@ -24,6 +24,7 @@ import {
 import { settingsChangeDetector } from '../utils/settings/changeDetector.js'
 import { getSettingsForSource } from '../utils/settings/settings.js'
 import type { SettingsJson } from '../utils/settings/types.js'
+import { isSdkArtifactDefaultOffEntrypoint } from '../utils/artifactGates.js'
 import { getBridgeBaseUrl } from './bridgeConfig.js'
 import {
   parseSessionOriginRoles,
@@ -396,8 +397,10 @@ export async function attachBridgeChildGrants(
     }
   }
 
+  // densable attach: E.artifact && I7n() — stamp only on SDK default-off
+  // surfaces. Spawn stamps RQt.artifact without I7n (sessionRunner overlay).
   let artifact = false
-  if (grantRoles.artifact) {
+  if (grantRoles.artifact && isSdkArtifactDefaultOffEntrypoint()) {
     process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT = '1'
     artifact = true
   }

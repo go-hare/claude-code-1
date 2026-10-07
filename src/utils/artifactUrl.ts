@@ -12,6 +12,7 @@
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isArtifactSdkDefaultAllowed } from './artifactGates.js'
 import { getAPIProvider } from './model/providers.js'
 import { isEnvTruthy } from './envUtils.js'
 
@@ -126,9 +127,14 @@ function resolveEnableArtifactSetting(): boolean | undefined {
  * Official `ASe` — Artifact tool registration.
  * densable: X4n → S$ stub → opi → eEp(tengu_cobalt_plinth) → zNt??true.
  * Without cobalt plinth this stays false — do not invent cobalt ON.
+ *
+ * densable `D()` sdk_default_off arm (SEA 2.1.289): under I7n, require
+ * CLAUDE_CODE_ARTIFACT or CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT. Outside I7n this
+ * is a no-op; CHILD_ARTIFACT is not a general cobalt enable.
  */
 export function isArtifactToolRegistered(): boolean {
   if (isArtifactHardDisabled()) return false
+  if (!isArtifactSdkDefaultAllowed()) return false
   if (getArtifactPublishStubDir() !== null) {
     return resolveEnableArtifactSetting() ?? true
   }

@@ -145,7 +145,21 @@ describe('buildSessionChildEnv densable 2.1.238 NDl', () => {
       ...(true ? { CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT: '1' } : {}),
     }
     expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT).toBe('1')
-    // ARTIFACT must not be written by spawn overlay (Drop stamp-alone).
-    expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
+  })
+
+  test('spawn artifact overlay stamps CHILD_ARTIFACT (sessionRunner shape)', () => {
+    // Gold sbr: if(f)M.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT="1" from RQt.artifact.
+    const base = buildSessionChildEnv(parentEnv(), { accessToken: 't' })
+    const withStamp: NodeJS.ProcessEnv = {
+      ...base,
+      ...(true ? { CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1' } : {}),
+    }
+    const without: NodeJS.ProcessEnv = {
+      ...base,
+      ...(false ? { CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1' } : {}),
+    }
+    expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBe('1')
+    expect(without.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
+    expect(base.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
   })
 })

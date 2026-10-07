@@ -274,4 +274,43 @@ describe('densable 2.1.289 bridgeChildGrants (ne/ae)', () => {
     ).not.toContain(fact)
     expect(handle.undo()).toBeNull()
   })
+
+  test('attach stamps CHILD_ARTIFACT only under I7n + attended', async () => {
+    const permission = makePermission('default')
+    const savedEntrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+    delete process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT
+
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'cli'
+    const noI7n = await attachBridgeChildGrants({
+      sessionId: 'cse_art_cli',
+      autoModeEnvironment: [],
+      permission,
+      stillWanted: () => true,
+      keepChosenMode: () => false,
+      // attended role (projectThreadChild) → RQt.artifact true
+      readTags: async () => [HEARTH_RC_CHILD_TAG],
+      setMode: () => ({ ok: true, mode: 'auto' }),
+    })
+    expect(noI7n.granted.artifact).toBe(false)
+    expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
+    noI7n.undo()
+
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts'
+    const withI7n = await attachBridgeChildGrants({
+      sessionId: 'cse_art_sdk',
+      autoModeEnvironment: [],
+      permission,
+      stillWanted: () => true,
+      keepChosenMode: () => false,
+      readTags: async () => [HEARTH_RC_CHILD_TAG],
+      setMode: () => ({ ok: true, mode: 'auto' }),
+    })
+    expect(withI7n.granted.artifact).toBe(true)
+    expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBe('1')
+    withI7n.undo()
+    expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
+
+    if (savedEntrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT
+    else process.env.CLAUDE_CODE_ENTRYPOINT = savedEntrypoint
+  })
 })

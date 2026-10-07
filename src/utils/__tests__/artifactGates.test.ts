@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  getArtifactSdkDefaultOffReason,
   isArtifactAutoOpenEnabled,
   isArtifactDirectUploadEnabled,
   isArtifactEnvForceEnabled,
+  isArtifactSdkDefaultAllowed,
   isArtifactToolDisabled,
+  isSdkArtifactDefaultOffEntrypoint,
   planArtifactAutoOpenSkip,
 } from '../artifactGates.js'
 
@@ -106,5 +109,55 @@ describe('artifactGates', () => {
         gbValue: true,
       }),
     ).toBe(false)
+  })
+
+  test('densable D()/I7n sdk_default_off + CHILD_ARTIFACT bypass', () => {
+    expect(isSdkArtifactDefaultOffEntrypoint({})).toBe(false)
+    expect(
+      isSdkArtifactDefaultOffEntrypoint({ CLAUDE_CODE_ENTRYPOINT: 'cli' }),
+    ).toBe(false)
+    expect(
+      isSdkArtifactDefaultOffEntrypoint({ CLAUDE_CODE_ENTRYPOINT: 'sdk-ts' }),
+    ).toBe(true)
+    expect(
+      isSdkArtifactDefaultOffEntrypoint({
+        CLAUDE_CODE_ENTRYPOINT: 'claude-code-github-action',
+      }),
+    ).toBe(true)
+    expect(
+      isSdkArtifactDefaultOffEntrypoint({ CLAUDE_CODE_ENTRYPOINT: 'mcp' }),
+    ).toBe(true)
+
+    expect(
+      getArtifactSdkDefaultOffReason({ CLAUDE_CODE_ENTRYPOINT: 'sdk-py' }),
+    ).toBe('sdk_default_off')
+    expect(
+      isArtifactSdkDefaultAllowed({ CLAUDE_CODE_ENTRYPOINT: 'sdk-py' }),
+    ).toBe(false)
+
+    // CLAUDE_CODE_ARTIFACT bypass
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
+        CLAUDE_CODE_ARTIFACT: '1',
+      }),
+    ).toBeNull()
+    // CHILD_ARTIFACT bypass (sdk_default_off only — not general ASe ON)
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_ENTRYPOINT: 'sdk-ts',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+      }),
+    ).toBeNull()
+    // Outside I7n, stamp is ignored by D arm
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_ENTRYPOINT: 'cli',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+      }),
+    ).toBeNull()
+    expect(isArtifactSdkDefaultAllowed({ CLAUDE_CODE_ENTRYPOINT: 'cli' })).toBe(
+      true,
+    )
   })
 })
