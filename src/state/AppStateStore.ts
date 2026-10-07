@@ -112,6 +112,12 @@ export type AppState = DeepImmutable<{
    * the Obe panel is mounted. Distinct from `replTab`.
    */
   diffPanelVisible: boolean
+  /**
+   * densable `paneHoldsToasts` — toast-hold latch while a shown pane has
+   * `holdToasts` and placements>0 (`FFr`/`usePaneToastHold`). Distinct from
+   * `diffPanelVisible`; gold `Pte` ORs both.
+   */
+  paneHoldsToasts: boolean
   isBriefOnly: boolean
   // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
   showTeammateMessagePreview?: boolean
@@ -616,10 +622,11 @@ export function getDefaultAppState(): AppState {
     mainLoopModelForSession: null,
     statusLineText: undefined,
     expandedView: 'none',
-    // densable defaults: replTab:"convo", panelFileView:null, diffPanelVisible:!1
+    // densable defaults: replTab:"convo", panelFileView:null, diffPanelVisible:!1, paneHoldsToasts:!1
     replTab: 'convo',
     panelFileView: null,
     diffPanelVisible: false,
+    paneHoldsToasts: false,
     isBriefOnly: false,
     showTeammateMessagePreview: false,
     selectedIPAgentIndex: -1,

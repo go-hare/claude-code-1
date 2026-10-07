@@ -34,10 +34,6 @@ import {
   logEvent,
 } from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import {
-  isPolicyEnforced,
-  isPolicyLimitsEligible,
-} from '../services/policyLimits/index.js'
 import { createHash } from 'crypto'
 import {
   closeSync,
@@ -56,6 +52,18 @@ import { jsonStringify } from '../utils/slowOperations.js'
 
 /** leftover `u` @180888421 next leftover `Yle` */
 export const REQUIRE_TRUSTED_DEVICES = 'require_trusted_devices'
+
+/**
+ * Local stand-ins for deleted `services/policyLimits` product-cut stubs.
+ * Org policy never enforces; eligibility stays false (fail-open).
+ */
+function isPolicyEnforced(_policy: string): boolean {
+  return false
+}
+
+function isPolicyLimitsEligible(): boolean {
+  return false
+}
 
 /** leftover `jtr` @202143707 — `x("tengu_breezy_fairy", false)` else tulip. */
 const TENGU_BREEZY_FAIRY = 'tengu_breezy_fairy'

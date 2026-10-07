@@ -239,6 +239,33 @@ function handleAskAgainOutsideReads(
   toolUseConfirm.onReject(outsideReadAskAgainMessage(options?.feedback))
 }
 
+/**
+ * densable 2.1.289 one-off Yes: allow this outside read, but do not
+ * markSeenAutoModeOutsideReadPrompt — later outside reads still dialog.
+ */
+function handleAllowOutsideReadOnce(
+  params: PermissionHandlerParams,
+  options?: PermissionHandlerOptions,
+): void {
+  const { messageId, toolUseConfirm, onDone, completionType, languageName } =
+    params
+
+  logPermissionEvent('accept', completionType, languageName, messageId)
+
+  logEvent('tengu_accept_submitted', {
+    toolName: sanitizeToolNameForAnalytics(
+      toolUseConfirm.tool.name,
+    ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    isMcp: toolUseConfirm.tool.isMcp ?? false,
+    has_instructions: !!options?.feedback,
+    instructions_length: options?.feedback?.length ?? 0,
+    entered_feedback_mode: options?.enteredFeedbackMode ?? false,
+  })
+
+  onDone()
+  toolUseConfirm.onAllow(toolUseConfirm.input, [], options?.feedback)
+}
+
 export const PERMISSION_HANDLERS: Record<
   PermissionOption['type'],
   (params: PermissionHandlerParams, options?: PermissionHandlerOptions) => void
@@ -248,4 +275,5 @@ export const PERMISSION_HANDLERS: Record<
   reject: handleReject,
   'block-outside-reads': handleBlockOutsideReads,
   'ask-again-outside-reads': handleAskAgainOutsideReads,
+  'allow-outside-read-once': handleAllowOutsideReadOnce,
 }

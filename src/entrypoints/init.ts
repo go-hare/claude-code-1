@@ -8,7 +8,6 @@ import type { AttributedCounter } from '../bootstrap/state.js'
 import { getSessionCounter, setMeter } from '../bootstrap/state.js'
 import { shutdownLspServerManager } from '../services/lsp/manager.js'
 import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.js'
-import { initializePolicyLimitsLoadingPromise } from '../services/policyLimits/index.js'
 import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
@@ -185,11 +184,6 @@ export const init = memoize(async (): Promise<void> => {
 
     // Detect GitHub repository asynchronously (populates cache for gitDiff PR linking)
     void detectCurrentRepository()
-
-    // Initialize the loading promise early so that other systems (like plugin
-    // hooks) can await it. Product-cut: no remote managed settings fetch.
-    initializePolicyLimitsLoadingPromise()
-    profileCheckpoint('init_after_policy_limits_check')
 
     // Record the first start time
     recordFirstStartTime()

@@ -493,6 +493,21 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_attribution_header: true, // API request attribution header
   tengu_slate_prism: true, // Agent progress summaries
 
+  // densable 2.1.289 Qbn / silent auto-default: k("tengu_harbor_willow", !0) and
+  // k("tengu_moss_anchor", !0). Without local true, hollow GB leaves no-defaultMode
+  // sessions on `default` instead of auto (fork / 3P / telemetry-off parity).
+  tengu_harbor_willow: true,
+  tengu_moss_anchor: true,
+
+  // densable 2.1.289 kBe / TQt / RQt child grant gates (SXn/$6r/bXn/wXn/EXn).
+  // Hollow GB must not disable sdk-host lane apply or RC-child grants.
+  tengu_bridge_apply_server_session_config: true,
+  tengu_bridge_child_auto_mode: true,
+  tengu_bridge_child_auto_over_settings: true,
+  tengu_bridge_rc_child_artifact: true,
+  tengu_bridge_child_machine_settings: true,
+  tengu_bridge_rc_child_auto_compact: true,
+
   // ── Ultrareview (cloud code review via CCR) ─────────────────────
   tengu_review_bughunter_config: { enabled: true }, // /ultrareview command visibility
   tengu_ccr_bundle_seed_enabled: true, // Bundle seed: skip GitHub App check for branch mode

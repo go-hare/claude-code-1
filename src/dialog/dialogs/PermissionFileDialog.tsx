@@ -37,6 +37,7 @@ import {
 import {
   OUTSIDE_READS_DIALOG_QUESTION,
   OUTSIDE_READS_OPTION_ALLOW,
+  OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
   OUTSIDE_READS_OPTION_ASK_AGAIN,
   OUTSIDE_READS_OPTION_BLOCK,
 } from '../../utils/permissions/outsideReads.js';
@@ -158,6 +159,11 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
         { label: OUTSIDE_READS_OPTION_ALLOW, value: 'yes', feedbackConfig: { type: 'accept' } },
         { label: OUTSIDE_READS_OPTION_BLOCK, value: 'block-outside-reads' },
         { label: OUTSIDE_READS_OPTION_ASK_AGAIN, value: 'ask-again-outside-reads' },
+        {
+          label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
+          value: 'allow-outside-read-once',
+          feedbackConfig: { type: 'accept' },
+        },
       ]
     : [
         { label: 'Yes', value: 'yes', feedbackConfig: { type: 'accept' } },

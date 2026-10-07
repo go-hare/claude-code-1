@@ -7,6 +7,12 @@ import { getShortcutDisplay } from '../../../keybindings/shortcutFormat.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { expandPath, getDirectoryForPath } from '../../../utils/path.js';
 import { normalizeCaseForComparison, pathInAllowedWorkingPath } from '../../../utils/permissions/filesystem.js';
+import {
+  OUTSIDE_READS_OPTION_ALLOW,
+  OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
+  OUTSIDE_READS_OPTION_ASK_AGAIN,
+  OUTSIDE_READS_OPTION_BLOCK,
+} from '../../../utils/permissions/outsideReads.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 /**
  * Check if a path is within the project's .claude/ folder.
@@ -51,7 +57,9 @@ export type PermissionOption =
   | { type: 'accept-session'; scope?: 'claude-folder' | 'global-claude-folder' }
   | { type: 'reject' }
   | { type: 'block-outside-reads' }
-  | { type: 'ask-again-outside-reads' };
+  | { type: 'ask-again-outside-reads' }
+  /** densable 2.1.289 — allow this outside read only; do not markSeen. */
+  | { type: 'allow-outside-read-once' };
 
 export type PermissionOptionWithLabel = OptionWithDescription<string> & {
   option: PermissionOption;
@@ -94,19 +102,24 @@ export function getFilePermissionOptions({
 
   if (offersBlockOutsideReads) {
     options.push({
-      label: 'Yes, keep allowing reads outside the working directories',
+      label: OUTSIDE_READS_OPTION_ALLOW,
       value: 'yes',
       option: { type: 'accept-once' },
     });
     options.push({
-      label: 'No, block reads outside the working directories from now on',
+      label: OUTSIDE_READS_OPTION_BLOCK,
       value: 'block-outside-reads',
       option: { type: 'block-outside-reads' },
     });
     options.push({
-      label: 'No, ask again next time',
+      label: OUTSIDE_READS_OPTION_ASK_AGAIN,
       value: 'ask-again-outside-reads',
       option: { type: 'ask-again-outside-reads' },
+    });
+    options.push({
+      label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
+      value: 'allow-outside-read-once',
+      option: { type: 'allow-outside-read-once' },
     });
     return options;
   }

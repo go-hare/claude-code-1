@@ -37,6 +37,7 @@ import {
 } from './PermissionMode.js'
 import { isAutoDefaultLaunchEnabled } from '../../services/mcp/vscodeIdeBridgeCallbacks.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
+import { isBridgeChildAutoDefaultEnabled } from '../residualFinalEnvGates.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from './outsideReads.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
@@ -1003,6 +1004,7 @@ export function initialPermissionModeFromCLI({
         isNonInteractiveSession: getIsNonInteractiveSession(),
         mossAnchor:
           checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_moss_anchor'),
+        bridgeChildAutoDefault: isBridgeChildAutoDefaultEnabled(),
       })
       mode = planned.mode
       fromAutoFallback = planned.fromAutoFallback

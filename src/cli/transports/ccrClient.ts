@@ -277,6 +277,8 @@ type WorkerStateResponse = {
     external_metadata?: Record<string, unknown>
     internal_metadata?: Record<string, unknown>
   }
+  /** densable hearth projects binding assertion when include_hearth=true. */
+  hearth?: unknown
 }
 
 /**
@@ -581,8 +583,12 @@ export class CCRClient {
 
   // Control_requests are marked processed and not re-delivered on
   // restart, so read back what the prior worker wrote.
-  private async getWorkerState(): Promise<{
+  private async getWorkerState(
+    context = 'worker_state',
+    includeHearth = false,
+  ): Promise<{
     metadata: NonNullable<RestoredWorkerState>
+    projectsAssertion: unknown
     durationMs: number
   }> {
     const startMs = Date.now()
@@ -590,13 +596,16 @@ export class CCRClient {
     if (Object.keys(authHeaders).length === 0) {
       return {
         metadata: { external: null, internal: null, readFailed: true },
+        projectsAssertion: undefined,
         durationMs: 0,
       }
     }
+    // densable lt(includeHearth) — ?include_hearth=true for projects binding.
+    const qs = includeHearth ? '?include_hearth=true' : ''
     const data = await this.getWithRetry<WorkerStateResponse>(
-      `${this.sessionBaseUrl}/worker`,
+      `${this.sessionBaseUrl}/worker${qs}`,
       authHeaders,
-      'worker_state',
+      context,
     )
     return {
       metadata: {
@@ -604,8 +613,77 @@ export class CCRClient {
         internal: data?.worker?.internal_metadata ?? null,
         ...(data === null ? { readFailed: true } : {}),
       },
+      // densable dt(body) — e?.hearth
+      projectsAssertion: data?.hearth,
       durationMs: Date.now() - startMs,
     }
+  }
+
+  /**
+   * densable `readProjectsBinding` — GET /worker?include_hearth=true and
+   * return `{read, assertion}` for hearth reply mount converge.
+   */
+  async readProjectsBinding(): Promise<
+    { read: false } | { read: true; assertion: unknown }
+  > {
+    const { metadata, projectsAssertion } = await this.getWorkerState(
+      'projects_binding',
+      true,
+    )
+    if (metadata.readFailed) return { read: false }
+    return { read: true, assertion: projectsAssertion }
+  }
+
+  /**
+   * densable `CCRClient.readProjectsBindingFor(sessionUrl, getAuthHeaders)`.
+   * Used by headless work-secret session `le()` before a live CCRClient exists.
+   */
+  static async readProjectsBindingFor(
+    sessionUrl: URL,
+    getAuthHeaders: () => Record<string, string>,
+  ): Promise<{ read: false } | { read: true; assertion: unknown }> {
+    const headers = getAuthHeaders()
+    if (Object.keys(headers).length === 0) return { read: false }
+    const sessionBaseUrl = `${sessionUrl.protocol}//${sessionUrl.host}${sessionUrl.pathname.replace(/\/$/, '')}`
+    const http = createAxiosInstance({ keepAlive: true })
+    try {
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        try {
+          const response = await http.get(`${sessionBaseUrl}/worker`, {
+            headers: {
+              ...headers,
+              'anthropic-version': '2023-06-01',
+              'User-Agent': getClaudeCodeUserAgent(),
+            },
+            params: { include_hearth: true },
+            validateStatus: alwaysValidStatus,
+            timeout: 30_000,
+          })
+          if (response.status >= 200 && response.status < 300) {
+            const data = response.data as WorkerStateResponse & {
+              hearth?: unknown
+            }
+            return {
+              read: true,
+              assertion: data?.hearth,
+            }
+          }
+        } catch (error) {
+          logForDebugging(
+            `CCRClient: readProjectsBindingFor failed (attempt ${attempt}/10): ${errorMessage(error)}`,
+            { level: 'warn' },
+          )
+        }
+        if (attempt < 10) {
+          const delay =
+            Math.min(500 * 2 ** (attempt - 1), 30_000) + Math.random() * 500
+          await sleep(delay)
+        }
+      }
+    } finally {
+      // axios keepAlive agent — no explicit close required for one-shot
+    }
+    return { read: false }
   }
 
   /**

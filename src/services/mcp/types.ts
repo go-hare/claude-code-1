@@ -109,6 +109,8 @@ export const McpStdioServerConfigSchema = lazySchema(() =>
     // Official 2.1.187: per-server silent-run idle timeout (ms). Overrides
     // CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT for this server only.
     timeout: z.number().int().nonnegative().optional(),
+    // densable 2.1.289: Java MCP SDK ≤0.17.0 rejects form/url elicitation bags.
+    bareElicitationCapability: z.boolean().optional(),
   }),
 )
 
@@ -158,6 +160,8 @@ export const McpSSEServerConfigSchema = lazySchema(() =>
       // Official 2.1.206: CCR wire alias → folded into timeout at parse.
       request_timeout_ms: requestTimeoutMsField(),
       alwaysLoad: z.boolean().optional(),
+      // densable 2.1.289: Java MCP SDK ≤0.17.0 rejects form/url elicitation bags.
+      bareElicitationCapability: z.boolean().optional(),
       // Official: org max permission map keyed by upstream tool name.
       toolPermissions: z
         .record(z.string(), McpToolPermissionSchema())
@@ -200,6 +204,13 @@ export const McpHTTPServerConfigSchema = lazySchema(() =>
       // Official 2.1.206: CCR wire alias → folded into timeout at parse.
       request_timeout_ms: requestTimeoutMsField(),
       alwaysLoad: z.boolean().optional(),
+      // densable 2.1.289: Java MCP SDK ≤0.17.0 rejects form/url elicitation bags.
+      bareElicitationCapability: z.boolean().optional(),
+      /**
+       * densable bridge projects reply mount stamps `role:"comms"` on the
+       * CLI-owned hearthbot HTTP config (`OEe` / markCliOwnedConfig).
+       */
+      role: z.literal('comms').optional(),
       // Official: org max permission map keyed by upstream tool name.
       toolPermissions: z
         .record(z.string(), McpToolPermissionSchema())
@@ -216,6 +227,8 @@ export const McpWebSocketServerConfigSchema = lazySchema(() =>
     headersHelper: z.string().optional(),
     // Official 2.1.187: per-server silent-run idle timeout (ms).
     timeout: z.number().int().nonnegative().optional(),
+    // densable 2.1.289: Java MCP SDK ≤0.17.0 rejects form/url elicitation bags.
+    bareElicitationCapability: z.boolean().optional(),
   }),
 )
 

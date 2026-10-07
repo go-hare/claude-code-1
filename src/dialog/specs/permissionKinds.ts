@@ -47,6 +47,11 @@ export type PermissionPromptResult = {
   contentBlocks?: unknown[]
   /** official yBt Block — persist permissions.blockReadsOutsideWorkingDirectories */
   blockOutsideReads?: boolean
+  /**
+   * densable 2.1.289 one-off Yes — allow this outside read without latching
+   * hasSeenAutoModeOutsideReadPrompt (later outside reads still dialog).
+   */
+  askAgainOutsideReads?: boolean
 }
 
 const permissionResultSchema = () =>
@@ -57,6 +62,7 @@ const permissionResultSchema = () =>
     feedback: z.string().optional(),
     contentBlocks: z.array(z.unknown()).optional(),
     blockOutsideReads: z.boolean().optional(),
+    askAgainOutsideReads: z.boolean().optional(),
   })
 
 const permissionResultDefault = {

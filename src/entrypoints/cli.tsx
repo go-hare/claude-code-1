@@ -143,11 +143,9 @@ async function main(): Promise<void> {
         ? pinStorageV5FromEnv()
         : undefined;
     const pinned = pinStorageV5(hoverRestSnapshot);
-    // densable A() && l !== void 0 — credentialsStoreFor + primePolicyLimitsCache.
+    // densable A() && l !== void 0 — credentialsStoreFor (policy limits product-cut).
     if (isHoverRestOn() && pinned !== undefined) {
       pinCredentialsStore(credentialsStoreFor(pinned));
-      const { primePolicyLimitsCache } = await import('../services/policyLimits/index.js');
-      await primePolicyLimitsCache(pinned);
     }
   }
 

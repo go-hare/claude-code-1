@@ -21,12 +21,41 @@ const LEVEL_PARAMS = {
 const SWEEP_MAX = 8
 
 const RAW_ARGS = (typeof args === "string" ? args : "").trim()
-const FIRST = RAW_ARGS.split(/\s+/)[0] || ""
+// densable 2.1.289 — optional --max-findings <n>|all override before level token
+const MAX_FINDINGS_RE =
+  /(^|\s)--max-findings(?:(?:\s*=\s*|\s+)(?!--)(\S+)|\s*=\S*)?(?=\s|$)/g
+let maxFindingsOverride
+const ARGS_WITHOUT_MAX = RAW_ARGS.replace(
+  MAX_FINDINGS_RE,
+  (_m, _lead, value) => {
+    if (value !== undefined) {
+      const v = String(value).trim().toLowerCase()
+      if (v === "all") maxFindingsOverride = "all"
+      else if (/^\d+$/.test(String(value).trim())) {
+        const n = Number(String(value).trim())
+        if (Number.isSafeInteger(n) && n > 0) maxFindingsOverride = n
+      }
+    }
+    return " "
+  },
+)
+  .replace(/\s+/g, " ")
+  .trim()
+const FIRST = ARGS_WITHOUT_MAX.split(/\s+/)[0] || ""
 // Own-property check so Object.prototype keys ("constructor", "toString") never parse as a level.
 const FIRST_IS_LEVEL = Object.prototype.hasOwnProperty.call(LEVEL_PARAMS, FIRST)
 const LEVEL = FIRST_IS_LEVEL ? FIRST : "high"
-const TARGET = FIRST_IS_LEVEL ? RAW_ARGS.slice(FIRST.length).trim() : RAW_ARGS
-const P = LEVEL_PARAMS[LEVEL]
+const TARGET = FIRST_IS_LEVEL
+  ? ARGS_WITHOUT_MAX.slice(FIRST.length).trim()
+  : ARGS_WITHOUT_MAX
+const P = {
+  ...LEVEL_PARAMS[LEVEL],
+  ...(maxFindingsOverride === "all"
+    ? { maxFindings: Number.MAX_SAFE_INTEGER }
+    : typeof maxFindingsOverride === "number"
+      ? { maxFindings: maxFindingsOverride }
+      : {}),
+}
 
 // Prompt fragments shared with the inline /code-review cells (one source of truth).
 const CORRECTNESS_ANGLES = [{"label": "angle-A", "text": "### Angle A — line-by-line diff scan\n\nRead every hunk in the diff, line by line. Then Read the enclosing function for\neach hunk — bugs in unchanged lines of a touched function are in scope (the PR\nre-exposes or fails to fix them). For every line ask: what input, state, timing,\nor platform makes this line wrong? Look for inverted/wrong conditions,\noff-by-one, null/undefined deref, missing `await`, falsy-zero checks,\nwrong-variable copy-paste, error swallowed in catch, unescaped regex metachars.\n"}, {"label": "angle-B", "text": "### Angle B — removed-behavior auditor\n\nFor every line the diff DELETES or replaces, name the invariant or behavior it\nenforced, then search the new code for where that invariant is re-established.\nIf you can't find it, that's a candidate: a removed guard, a dropped error\npath, a narrowed validation, a deleted test that was covering a real case.\n"}, {"label": "angle-C", "text": "### Angle C — cross-file tracer\n\nFor each function the diff changes, find its callers (Grep for the symbol) and\ncheck whether the change breaks any call site: a new precondition, a changed\nreturn shape, a new exception, a timing/ordering dependency. Also check callees:\ndoes a parallel change in the same PR make a call unsafe?\n"}, {"label": "angle-D", "text": "### Angle D — language-pitfall specialist\n\nScan for the classic pitfalls of the diff's language/framework — for example:\nJS falsy-zero, `==` coercion, closure-captured loop var; Python mutable default\nargs, late-binding closures; Go nil-map write, range-var capture; SQL injection;\ntimezone/DST drift; float equality. Flag any instance the diff introduces.\n"}, {"label": "angle-E", "text": "### Angle E — wrapper/proxy correctness\n\nWhen the PR adds or modifies a type that wraps another (cache, proxy, decorator,\nadapter): check that every method routes to the wrapped instance and not back\nthrough a registry/session/global — e.g. a caching provider holding a\n`delegate` field that resolves IDs via `session.get(...)` instead of\n`delegate.get(...)` will re-enter the cache or recurse. Also check that the\nwrapper forwards all the methods the callers actually use.\n"}]

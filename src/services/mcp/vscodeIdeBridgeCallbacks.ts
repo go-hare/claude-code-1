@@ -25,7 +25,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 import { isFeedbackSurveyEnvDisabled } from 'src/utils/residualFinalEnvGates.js'
 
 /** densable B8E — 60s debounce for survey appeared → lastShownTime. */
@@ -64,7 +63,9 @@ function readClientDataMeadowLantern(): boolean {
 }
 
 /**
- * densable `HIn`: `et("tengu_harbor_willow", false) || sZs()?.meadow_lantern === true`.
+ * densable 2.1.289 `Qbn`: `k("tengu_harbor_willow", !0) || meadow_lantern===true`.
+ * (Older HIn notes said default false; silent auto-default path is Qbn default true.)
+ * Local gate default for tengu_harbor_willow is true when GB is hollow.
  */
 export function isAutoDefaultLaunchEnabled(): boolean {
   return (
@@ -154,7 +155,7 @@ export function isClaudeVscodeHostSession(
 function canAcceptProductFeedbackSurvey(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (!isPolicyAllowed('allow_product_feedback')) return false
+  // Product-cut: policy limits always allow product feedback.
   if (isFeedbackSurveyDisabled()) return false
   if (isFeedbackSurveyEnvDisabled(env)) return false
   return true

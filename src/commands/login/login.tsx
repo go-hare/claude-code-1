@@ -9,7 +9,6 @@ import { Box, Dialog, PANE_PADDING_X_INLINE, PANE_PADDING_X_MODAL, useInput, use
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
-import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { createSystemMessage, stripSignatureBlocks } from '../../utils/messages.js';
 import type { Message } from '../../types/message.js';
@@ -68,7 +67,6 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
           } catch {
             gatewayActive = false;
           }
-          void refreshPolicyLimits();
           // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
           resetUserCache();
           // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)

@@ -64,8 +64,10 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
       return <MCPSettings onComplete={onDone} />;
     }
 
-    if (parts[0] === 'reconnect' && parts[1]) {
-      return <MCPReconnect serverName={parts.slice(1).join(' ')} onComplete={onDone} />;
+    if (parts[0] === 'reconnect') {
+      // densable 2.1.289: bare `/mcp reconnect` and `/mcp reconnect all` both mean all
+      const target = parts.slice(1).join(' ') || 'all';
+      return <MCPReconnect serverName={target} onComplete={onDone} />;
     }
 
     // densable: enable/disable stay available without terminal (steer without panel)

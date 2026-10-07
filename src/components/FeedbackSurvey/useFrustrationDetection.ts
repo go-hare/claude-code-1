@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react'
 import type { Message } from '../../types/message.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
-import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { submitTranscriptShare } from './submitTranscriptShare.js'
 
 /**
@@ -39,14 +38,12 @@ export function useFrustrationDetection(
   const [state, setState] = useState<FrustrationState>('closed')
 
   const config = getGlobalConfig() as { transcriptShareDismissed?: boolean }
-  // densable / sibling surveys: allow_product_feedback (not product_feedback)
-  const policyAllowed = isPolicyAllowed('allow_product_feedback')
+  // Product-cut: policy limits always allow product feedback.
   // Gate only *opening* the prompt (densable sibling surveys). Terminal share
   // states must stay visible — shouldSkip must not mask submitting / submitted /
   // share_failed (densable #16 fail surface).
   const shouldSkip =
     config.transcriptShareDismissed ||
-    !policyAllowed ||
     isLoading ||
     hasActivePrompt ||
     otherSurveyOpen

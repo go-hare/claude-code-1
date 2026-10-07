@@ -892,6 +892,17 @@ export function getBridgeSessionId(
   return raw && raw.length > 0 ? raw : undefined
 }
 
+/**
+ * densable 2.1.289 — `Le(r.CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT)`.
+ * Bridge/RC child sessions OR this into the silent auto-default path when no
+ * permissions.defaultMode is set (alongside harbor_willow / moss_anchor).
+ */
+export function isBridgeChildAutoDefaultEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT)
+}
+
 export function getProxyUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
@@ -2051,6 +2062,17 @@ export function isExperimentalBetasDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+}
+
+/**
+ * densable 2.1.289 CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS — force-off
+ * output_config.format / structured-outputs beta for Mantle/gateway proxies
+ * that reject structured outputs (session title, memory recall, prompt hooks).
+ */
+export function isStructuredOutputsDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS)
 }
 
 /** Official DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL densable. */

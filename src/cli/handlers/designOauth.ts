@@ -3,7 +3,6 @@
  * Gold names: `upe` / `xqt` / `Pqt` / `Nbe` / `uwt` / `Iqt` / `BO`.
  */
 import { isHipaaPolicy } from '../../utils/midConversationSystem.js'
-import { isRemotePolicyAllowed } from '../../services/policyLimits/index.js'
 import { isRemoteEnvEnabled } from '../../utils/residualFinalEnvGates.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
@@ -57,11 +56,10 @@ export function isDesignLoginRemote(): boolean {
 
 /**
  * densable `BO()` @182628406
- * `if(!Jt("allow_design_sync"))return!1;if(It())return!1;return Gn()`
- * `Gn` = firstParty. `It` = HIPAA. `Jt` = policy `allow_design_sync`.
+ * Product-cut: policy limits always allow design sync.
+ * `Gn` = firstParty. `It` = HIPAA.
  */
 export function isDesignLoginAvailable(): boolean {
-  if (!isRemotePolicyAllowed('allow_design_sync')) return false
   if (isHipaaPolicy()) return false
   return getAPIProvider() === 'firstParty'
 }

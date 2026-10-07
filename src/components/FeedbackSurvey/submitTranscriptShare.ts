@@ -2,7 +2,6 @@ import axios from 'axios'
 import { readFile, stat } from 'fs/promises'
 import { getIsRemoteMode, getLastAPIRequest } from '../../bootstrap/state.js'
 import type { Message } from '../../types/message.js'
-import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { checkAndRefreshOAuthTokenIfNeeded } from '../../utils/auth.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { classifyAxiosError, errorMessage } from '../../utils/errors.js'
@@ -223,9 +222,7 @@ export async function submitTranscriptShare(
     if (isEssentialTrafficOnly()) {
       return { success: false, errorCode: 'essential_traffic_only' }
     }
-    if (!isPolicyAllowed('allow_product_feedback')) {
-      return { success: false, errorCode: 'policy_blocked' }
-    }
+    // Product-cut: policy limits always allow product feedback.
 
     logForDebugging('Collecting transcript for sharing', { level: 'info' })
 

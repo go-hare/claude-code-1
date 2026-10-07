@@ -65,6 +65,11 @@ export type UseTextInputProps = {
   onHistoryDown?: () => void
   onHistoryReset?: () => void
   onClearInput?: () => void
+  /**
+   * densable 2.1.289 holdCleared — called immediately before Ctrl+C clears a
+   * non-empty value so the draft (incl. pastes) can be restored on Up.
+   */
+  onHoldCleared?: () => void
   focus?: boolean
   mask?: string
   /** densable historyOnClear — default true. Masked fields still skip history. */
@@ -110,6 +115,7 @@ export function useTextInput({
   onHistoryDown,
   onHistoryReset,
   onClearInput,
+  onHoldCleared,
   mask = '',
   historyOnClear = true,
   multiline = false,
@@ -181,6 +187,8 @@ export function useTextInput({
     () => onExit?.(),
     () => {
       if (originalValue) {
+        // densable: holdCleared before clear — Up on empty restores the draft
+        onHoldCleared?.()
         onChange('')
         setOffset(0)
         onHistoryReset?.()

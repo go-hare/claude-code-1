@@ -254,6 +254,7 @@ export type GlobalConfig = {
   workspaceApiKey?: string
   hasAcknowledgedCostThreshold?: boolean
   hasSeenUndercoverAutoNotice?: boolean // ant-only: whether the one-time auto-undercover explainer has been shown
+  hasSeenUltraplanTerms?: boolean // ant-only: whether the one-time CCR terms notice has been shown in the ultraplan launch dialog
   hasResetAutoModeOptInForDefaultOffer?: boolean // ant-only: one-shot migration guard, re-prompts churned auto-mode users
   oauthAccount?: AccountInfo
   iterm2KeyBindingInstalled?: boolean // Legacy - keeping for backward compatibility
@@ -619,6 +620,12 @@ export type GlobalConfig = {
    * on `/code-review` (or alias `/review`). Reused when no level is given.
    */
   codeReviewLastEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  /**
+   * densable 2.1.289 `codeReviewLastMaxFindings` — last `--max-findings` the user
+   * typed on `/code-review`. Reused until `--max-findings default` clears it.
+   * `all` = no cap; number = report up to n.
+   */
+  codeReviewLastMaxFindings?: number | 'all'
   // Official marketplace auto-install tracking
   officialMarketplaceAutoInstallAttempted?: boolean // Whether auto-install was attempted
   officialMarketplaceAutoInstalled?: boolean // Whether auto-install succeeded
@@ -856,11 +863,14 @@ export type GlobalConfig = {
   migrationVersion?: number
 
   /**
-   * densable `pluginPanes` — dock/inline room from pane grip `keepRoom` (`iL`/`T4`).
+   * densable `pluginPanes` — dock/inline room from pane grip `keepRoom` (`iL`/`T4`)
+   * + asked latch soft persist (`mL` / `keepAsked` / `keptAsked`).
    */
   pluginPanes?: {
     dockColumns?: number | null
     inlineRows?: number | null
+    /** densable `pluginPanes.asked` — max 64 `{plugin,id}` rows. */
+    asked?: Array<{ plugin: string; id: string }>
   }
 }
 

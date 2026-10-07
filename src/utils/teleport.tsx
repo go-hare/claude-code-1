@@ -17,7 +17,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js';
 import { z } from 'zod/v4';
 import { getTeleportErrors, TeleportError, type TeleportLocalErrorType } from '../components/TeleportError.js';
 import { getOauthConfig } from '../constants/oauth.js';
@@ -268,8 +267,8 @@ function sessionGroupingCreateFailMessage(
 
 /** densable _8("allow_remote_sessions","Cloud sessions","are") deny copy. */
 function remoteSessionsPolicyDenyMessage(): string | null {
-  if (isRemotePolicyAllowed('allow_remote_sessions')) return null;
-  return "Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them.";
+  // Product-cut: policy limits always allow remote sessions.
+  return null;
 }
 
 const SESSION_TITLE_AND_BRANCH_PROMPT = `You are coming up with a succinct title and git branch name for a coding session based on the provided description. The title should be clear, concise, and accurately reflect the content of the coding task.
@@ -639,10 +638,7 @@ export async function teleportResumeCodeSession(
   sessionId: string,
   onProgress?: TeleportProgressCallback,
 ): Promise<TeleportRemoteResponse> {
-  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
-    throw new Error("Remote sessions are disabled by your organization's policy.");
-  }
-
+  // Product-cut: policy limits always allow remote sessions.
   logForDebugging(`Resuming code session ID: ${sessionId}`);
 
   try {

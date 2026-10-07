@@ -880,7 +880,7 @@ describe('Mhy Y$A E$A', () => {
     ).toBe('Opened changes in VS Code ⧉')
   })
 
-  test('yBt Block/ask_again morph DualInk permission_file', () => {
+  test('yBt Block/ask_again/one-off Yes morph DualInk permission_file', () => {
     const payload = filePayload({
       permissionResult: { behavior: 'ask', offersBlockOutsideReads: true },
     })
@@ -903,6 +903,17 @@ describe('Mhy Y$A E$A', () => {
     expect(resolveFilePermissionAnswer('yes', payload, null).behavior).toBe(
       'allow',
     )
+    expect(
+      resolveFilePermissionAnswer(
+        'allow-outside-read-once',
+        payload,
+        null,
+      ),
+    ).toEqual({
+      behavior: 'allow',
+      updatedInput: payload.input,
+      askAgainOutsideReads: true,
+    })
     const dual = resolveFilePermissionAnswer(
       'ask-again-outside-reads',
       payload,

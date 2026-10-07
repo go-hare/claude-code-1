@@ -362,6 +362,24 @@ export class RemoteIO extends StructuredIO {
   }
 
   /**
+   * densable headless hearth mount deps — `r.readProjectsBinding()` /
+   * `r.workerEpoch()` for `createHeadlessHearthMount` when sdkUrl is set.
+   */
+  getHearthMountWorker(): {
+    readProjectsBinding: () => Promise<
+      { read: false } | { read: true; assertion: unknown }
+    >
+    workerEpoch: () => number
+  } | null {
+    if (!this.ccrClient) return null
+    const client = this.ccrClient
+    return {
+      readProjectsBinding: () => client.readProjectsBinding(),
+      workerEpoch: () => client.getWorkerEpoch(),
+    }
+  }
+
+  /**
    * Send output to the transport.
    * In bridge mode, control_request messages are always echoed to stdout so the
    * bridge parent can detect permission requests. Other messages are echoed only

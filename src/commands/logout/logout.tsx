@@ -3,7 +3,6 @@ import { clearTrustedDeviceTokenCache } from '../../bridge/trustedDevice.js';
 import { Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
 import { getGroveNoticeConfig, getGroveSettings } from '../../services/api/grove.js';
-import { clearPolicyLimitsCache } from '../../services/policyLimits/index.js';
 // flushTelemetry is loaded lazily to avoid pulling in ~1.1MB of OpenTelemetry at startup
 import { removeChatGPTAuth } from '../../services/api/openai/chatgptAuth.js';
 import { getClaudeAIOAuthTokens, removeApiKey } from '../../utils/auth.js';
@@ -101,9 +100,6 @@ export async function clearAuthRelatedCaches(): Promise<void> {
   // Clear Grove config cache
   getGroveNoticeConfig.cache?.clear?.();
   getGroveSettings.cache?.clear?.();
-
-  // Clear policy limits cache
-  await clearPolicyLimitsCache();
 }
 
 export async function call(): Promise<React.ReactNode> {

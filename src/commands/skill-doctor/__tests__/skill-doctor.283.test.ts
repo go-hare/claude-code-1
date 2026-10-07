@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { isSkillDoctorEnabled } from '../index.js'
 import { emptyCaseFilterText } from '../../../utils/plugins/pluginEval/discoverCases.js'
@@ -48,30 +48,25 @@ describe('/skill-doctor densable 2.1.283 (q0e / Nae / JP / fqt / DZr / a0e)', ()
   })
 
   test('HIPAA week-token policy key is allow_skill_doctor_transcript_scan', () => {
-    expect(skillDoctorTranscriptScanAllowed()).toHaveProperty('allowed')
-    const policy = readFileSync(
-      join(ROOT, 'src/services/policyLimits/index.ts'),
-      'utf8',
-    )
-    expect(policy).toContain('allow_skill_doctor_transcript_scan')
+    expect(skillDoctorTranscriptScanAllowed()).toEqual({ allowed: true })
+    expect(
+      existsSync(join(ROOT, 'src/services/policyLimits/index.ts')),
+    ).toBe(false)
   })
 
-  test('qbt: org_denied without hipaa taint is catalog copy, not HIPAA copy', () => {
+  test('qbt: product-cut always allows transcript scan', () => {
     const src = readFileSync(
       join(ROOT, 'src/commands/skill-doctor/scan.ts'),
       'utf8',
     )
-    expect(src).toContain('isPolicyLimitsAllowed')
-    expect(src).toContain('policyLimitsFeatureCopy')
-    expect(src).toContain('${featureLabel} ${verb} unavailable right now.')
-    expect(src).toContain(
-      "getPolicyDenyKind(SKILL_DOCTOR_TRANSCRIPT_SCAN) === 'org_denied'",
-    )
-    expect(src).toContain('skillDoctorHasHipaaTaint()')
+    expect(src).toContain('Product-cut: policy limits always allow transcript scan')
+    expect(src).toContain('return { allowed: true }')
+    expect(src).not.toContain('services/policyLimits')
+    expect(src).not.toContain('getPolicyDenyKind(')
     expect(src).not.toContain('isPolicyAllowed(')
   })
 
-  test('qbt: leftover Jt allow / leftover deny without Iw org_denied', () => {
+  test('qbt: leftover host mutations cannot deny transcript scan after product-cut', () => {
     const host = leftoverPolicyLimitsHost()
     const prevCache = host.sessionCache
     const prevTaints = host.complianceTaints
@@ -80,21 +75,9 @@ describe('/skill-doctor densable 2.1.283 (q0e / Nae / JP / fqt / DZr / a0e)', ()
       host.complianceTaints = ['hipaa']
       host.hintedTaints = []
       host.sessionCache = {
-        allow_skill_doctor_transcript_scan: { allowed: true },
-      }
-      expect(skillDoctorTranscriptScanAllowed()).toEqual({ allowed: true })
-
-      host.sessionCache = {
         allow_skill_doctor_transcript_scan: { allowed: false },
       }
-      const denied = skillDoctorTranscriptScanAllowed()
-      expect(denied.allowed).toBe(false)
-      // Iw is not org_denied without policyLimits session cache — catalog copy
-      // even with hipaa taint (gold B: HIPAA copy needs Iw==="org_denied").
-      expect(denied.reason).toBe(
-        'Skill token counts are unavailable right now.',
-      )
-      expect(denied.reason).not.toBe(HIPAA)
+      expect(skillDoctorTranscriptScanAllowed()).toEqual({ allowed: true })
     } finally {
       host.sessionCache = prevCache
       host.complianceTaints = prevTaints
@@ -157,7 +140,7 @@ describe('/skill-doctor densable 2.1.283 (q0e / Nae / JP / fqt / DZr / a0e)', ()
       join(ROOT, 'src/commands/skill-doctor/scan.ts'),
       'utf8',
     )
-    expect(src).toContain(HIPAA)
+    expect(src).toContain("gated by HIPAA `qbt`")
     expect(src).toContain('weekGate.allowed')
     expect(src).toContain('scanSkillWeekTokens(context.storageV5)')
     expect(src).toContain("SkillDoctorStageError('scan_failed'")

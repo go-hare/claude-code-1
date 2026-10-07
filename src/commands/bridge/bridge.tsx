@@ -229,13 +229,7 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
  * or the flag just launched) gets an accurate result on the first try.
  */
 async function checkBridgePrerequisites(): Promise<string | null> {
-  // Check organization policy — remote control may be disabled
-  const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import('../../services/policyLimits/index.js');
-  await waitForPolicyLimitsToLoad();
-  if (!isRemotePolicyAllowed('allow_remote_control')) {
-    return "Remote Control is disabled by your organization's policy.";
-  }
-
+  // Product-cut: policy limits always allow remote control.
   const disabledReason = await getBridgeDisabledReason();
   if (disabledReason) {
     return disabledReason;

@@ -45,6 +45,16 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
     },
   },
   {
+    // densable 2.1.289: longer match wins over bare claude-sonnet-5
+    match: 'claude-sonnet-5-5',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: true,
+    },
+  },
+  {
     match: 'claude-sonnet-5',
     entry: {
       defaultEffort: 'high',

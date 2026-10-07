@@ -108,7 +108,7 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
     }
   })
 
-  test('dialog copy is gold auto_mode_outside_reads Yes/Block/ask_again', () => {
+  test('dialog copy is gold auto_mode_outside_reads Yes/Block/ask_again/one-off Yes (2.1.289)', () => {
     expect(AUTO_MODE_OUTSIDE_READS_KIND).toBe('auto_mode_outside_reads')
     const payload = outsideReadsDialogPayload({
       toolName: FILE_READ_TOOL_NAME,
@@ -117,16 +117,25 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
     })
     expect(payload.title).toBe(OUTSIDE_READS_DIALOG_TITLE)
     expect(payload.question).toBe(OUTSIDE_READS_DIALOG_QUESTION)
+    expect(payload.title).toBe('Read outside the working directories')
+    expect(payload.question).toBe(
+      'Allow this read outside the working directories?',
+    )
     expect(payload.options.map(o => o.value)).toEqual([
       'allow',
       'block',
       'ask_again',
+      'allow_once',
     ])
     expect(payload.options[0]?.label).toBe(OUTSIDE_READS_OPTION_ALLOW)
     expect(payload.options[1]?.label).toBe(OUTSIDE_READS_OPTION_BLOCK)
     expect(payload.options[2]?.label).toBe(OUTSIDE_READS_OPTION_ASK_AGAIN)
+    expect(payload.options[3]?.label).toBe('Yes, but ask again next time')
     expect(payload.explainer).toContain(
       'Auto mode and the sandbox read outside the working directories without asking',
+    )
+    expect(payload.explainer).toContain(
+      'Yes or No answers for this read; the rest is for later reads.',
     )
     expect(payload.explainer).toContain(
       'permissions.blockReadsOutsideWorkingDirectories',

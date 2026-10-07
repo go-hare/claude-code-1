@@ -9,6 +9,7 @@ import {
   getRuleByContentsForTool,
 } from 'src/utils/permissions/permissions.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import {
   isWebFetchArtifactExceptionEnabled,
   OFFICIAL_ARTIFACT_TOOL_NAME,
@@ -106,6 +107,11 @@ export const WebFetchTool = buildTool({
   },
   get outputSchema(): OutputSchema {
     return outputSchema()
+  },
+  // densable 2.1.289: isEnabled(){return!a.CLAUDE_CODE_DISABLE_WEB_FETCH&&sn(mwe)}
+  // mwe = allow_web_fetch (policy/GB). Env alone is the product kill switch for forks.
+  isEnabled() {
+    return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_WEB_FETCH)
   },
   isConcurrencySafe() {
     return true

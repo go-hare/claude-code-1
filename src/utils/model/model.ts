@@ -278,8 +278,8 @@ export function getDefaultSonnetModel(): ModelName {
   if (provider !== 'firstParty') {
     return getModelStrings().sonnet45
   }
-  // Official 2.1.197+: Sonnet 5 is the default Sonnet family model.
-  return getModelStrings().sonnet5
+  // densable 2.1.289: Sonnet 5.5 is the default Sonnet family model.
+  return getModelStrings().sonnet55
 }
 
 // @[MODEL LAUNCH]: Update the default Haiku model (3P providers may lag so keep defaults unchanged).
@@ -503,6 +503,10 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   if (/claude-opus-4(?!-\d(?!\d))/.test(name)) {
     return 'claude-opus-4-0'
   }
+  // densable QO / 2.1.289: 5-5 before bare sonnet-5 (includes would mis-hit)
+  if (name.includes('claude-sonnet-5-5')) {
+    return 'claude-sonnet-5-5'
+  }
   if (name.includes('claude-sonnet-5')) {
     return 'claude-sonnet-5'
   }
@@ -680,6 +684,10 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Opus 4.1'
     case getModelStrings().opus40:
       return 'Opus 4'
+    case getModelStrings().sonnet55 + '[1m]':
+      return 'Sonnet 5.5 (1M context)'
+    case getModelStrings().sonnet55:
+      return 'Sonnet 5.5'
     case getModelStrings().sonnet5 + '[1m]':
       return 'Sonnet 5 (1M context)'
     case getModelStrings().sonnet5:
@@ -947,6 +955,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   }
   if (canonical.includes('claude-opus-4')) {
     return 'Opus 4'
+  }
+  if (canonical.includes('claude-sonnet-5-5')) {
+    return has1m ? 'Sonnet 5.5 (1M context)' : 'Sonnet 5.5'
   }
   if (canonical.includes('claude-sonnet-5')) {
     return has1m ? 'Sonnet 5 (with 1M context)' : 'Sonnet 5'

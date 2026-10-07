@@ -11,6 +11,9 @@
  * densable 2.1.223:
  * - aliases: ['review'] — `/review` is `/code-review`
  * - codeReviewLastEffort — no-level reuses last typed effort
+ *
+ * densable 2.1.289:
+ * - `--max-findings <n>|all|default` — persist as codeReviewLastMaxFindings
  */
 
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
@@ -21,6 +24,52 @@ import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 type EffortLevel = (typeof EFFORT_LEVELS)[number]
+
+/** densable 2.1.289 — parsed `--max-findings` value (default clears persist). */
+export type CodeReviewMaxFindings = number | 'all' | 'default'
+
+const MAX_FINDINGS_FLAG_RE =
+  /(^|\s)--max-findings(?:(?:\s*=\s*|\s+)(?!--)(\S+)|\s*=\S*)?(?=\s|$)/g
+
+/**
+ * densable 2.1.289 — strip `--max-findings` and parse its value.
+ * Valid: whole number > 0, `all`, `default`. Anything else → ignored.
+ */
+export function parseCodeReviewMaxFindingsFlag(args: string): {
+  rest: string
+  /** Parsed value when the flag was present and valid (includes `default`). */
+  maxFindings?: CodeReviewMaxFindings
+  /** Flag present but value not valid. */
+  maxFindingsIgnored: boolean
+} {
+  let captured: string | undefined
+  let sawFlag = false
+  const rest = args
+    .replace(MAX_FINDINGS_FLAG_RE, (_m, _lead: string, value?: string) => {
+      sawFlag = true
+      if (value !== undefined) captured = value
+      return ' '
+    })
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!sawFlag) {
+    return { rest: args.trim(), maxFindingsIgnored: false }
+  }
+  if (captured === undefined) {
+    return { rest, maxFindingsIgnored: true }
+  }
+  const v = captured.trim().toLowerCase()
+  if (v === 'all' || v === 'default') {
+    return { rest, maxFindings: v, maxFindingsIgnored: false }
+  }
+  if (/^\d+$/.test(captured.trim())) {
+    const n = Number(captured.trim())
+    if (Number.isSafeInteger(n) && n > 0) {
+      return { rest, maxFindings: n, maxFindingsIgnored: false }
+    }
+  }
+  return { rest, maxFindingsIgnored: true }
+}
 
 const COMMENT_INSTRUCTIONS = `
 ## Posting to GitHub (--comment)
@@ -81,12 +130,15 @@ function parseEffortLevelToken(token: string): EffortLevel | undefined {
 }
 
 /**
- * densable xol — parse effort / ultra / --comment / --fix / target.
+ * densable xol — parse effort / ultra / --comment / --fix / --max-findings / target.
  * First token `ultra` → ultraFallback (subcommand redirect handles real launch;
  * this is for getPrompt when ultra is not redirected).
  *
  * densable 2.1.223: when no explicit level, prefer `lastEffort` (codeReviewLastEffort)
  * over hard-coded medium.
+ *
+ * densable 2.1.289: `--max-findings` parsed before effort tokens; invalid values
+ * set `maxFindingsIgnored` and leave the flag out of `rest`.
  */
 export function parseCodeReviewArgs(
   args: string,
@@ -102,12 +154,24 @@ export function parseCodeReviewArgs(
   explicit?: EffortLevel
   /** densable: last stored effort reused when user typed no level. */
   reusedLastEffort?: EffortLevel
+  /**
+   * densable 2.1.289 — flag value when present and valid (`default` included).
+   * Absent when the flag was omitted.
+   */
+  maxFindings?: CodeReviewMaxFindings
+  /** densable 2.1.289 — flag present but value not valid. */
+  maxFindingsIgnored: boolean
 } {
-  const { rawFirstToken, flags, rest } = parseCodeReviewFlagArgs(args)
+  const maxFlag = parseCodeReviewMaxFindingsFlag(args)
+  const { rawFirstToken, flags, rest } = parseCodeReviewFlagArgs(maxFlag.rest)
   const comment = flags.has('comment')
   const fix = flags.has('fix')
   const tokens = rest.split(/\s+/).filter(Boolean)
   const first = tokens[0] ?? ''
+  const maxFields = {
+    maxFindings: maxFlag.maxFindings,
+    maxFindingsIgnored: maxFlag.maxFindingsIgnored,
+  }
 
   // densable: ultra is detected on raw first token (before flag strip)
   if (rawFirstToken.toLowerCase() === 'ultra') {
@@ -117,6 +181,7 @@ export function parseCodeReviewArgs(
       comment,
       fix,
       ultraFallback: true,
+      ...maxFields,
     }
   }
 
@@ -130,6 +195,7 @@ export function parseCodeReviewArgs(
       comment,
       fix,
       ultraFallback: false,
+      ...maxFields,
     }
   }
 
@@ -146,6 +212,7 @@ export function parseCodeReviewArgs(
     ultraFallback: false,
     unrecognizedLevel,
     reusedLastEffort: lastEffort,
+    ...maxFields,
   }
 }
 
@@ -157,6 +224,85 @@ export function rememberCodeReviewEffort(level: EffortLevel): void {
     if (current.codeReviewLastEffort === level) return current
     return { ...current, codeReviewLastEffort: level }
   })
+}
+
+/**
+ * densable 2.1.289 — persist last `--max-findings`. `default` clears the field.
+ */
+export function rememberCodeReviewMaxFindings(
+  value: CodeReviewMaxFindings,
+): void {
+  const next = value === 'default' ? undefined : value
+  saveGlobalConfig(current => {
+    if (current.codeReviewLastMaxFindings === next) return current
+    return { ...current, codeReviewLastMaxFindings: next }
+  })
+}
+
+/**
+ * densable `on` — resolve asked/stated/reused max-findings for this review.
+ * Reuses stored last when the flag was omitted.
+ */
+export function resolveCodeReviewMaxFindings(options: {
+  maxFindings?: CodeReviewMaxFindings
+  maxFindingsIgnored: boolean
+  lastMaxFindings?: number | 'all'
+}): {
+  asked?: number | 'all'
+  stated?: number | 'all'
+  reused: boolean
+  ignored: boolean
+} {
+  const { maxFindings, maxFindingsIgnored, lastMaxFindings } = options
+  const canReuse =
+    maxFindings === undefined &&
+    !maxFindingsIgnored &&
+    (lastMaxFindings === 'all' ||
+      (typeof lastMaxFindings === 'number' &&
+        Number.isSafeInteger(lastMaxFindings) &&
+        lastMaxFindings > 0))
+  const asked = canReuse
+    ? lastMaxFindings
+    : maxFindings === 'default'
+      ? undefined
+      : maxFindings
+  return {
+    asked,
+    stated: asked,
+    reused: canReuse,
+    ignored: maxFindingsIgnored,
+  }
+}
+
+/** densable `nn` — user-visible max-findings notice for the prompt. */
+export function formatCodeReviewMaxFindingsNotice(options: {
+  asked?: number | 'all'
+  reused: boolean
+  ignored: boolean
+}): string {
+  const { asked, reused, ignored } = options
+  const parts: string[] = []
+  if (ignored) {
+    parts.push(
+      `\`--max-findings\` was ignored: type a whole number above zero, \`all\`, or \`default\` after it.${
+        reused ? '' : ' Using the usual limit.'
+      }`,
+    )
+  }
+  if (reused && asked !== undefined) {
+    parts.push(
+      asked === 'all'
+        ? 'Reporting every finding, as you chose last time with `--max-findings all`. Pass `--max-findings default` to go back to the usual limit.'
+        : `Reporting up to ${asked} finding${asked === 1 ? '' : 's'}, the limit you set last time with \`--max-findings ${asked}\`. Pass \`--max-findings default\` to go back to the usual limit.`,
+    )
+  } else if (!reused && asked !== undefined && !ignored) {
+    parts.push(
+      asked === 'all'
+        ? 'Reporting every finding (`--max-findings all`). The choice stays until you pass `--max-findings default`.'
+        : `Reporting up to ${asked} finding${asked === 1 ? '' : 's'} (\`--max-findings ${asked}\`). The choice stays until you pass \`--max-findings default\`.`,
+    )
+  }
+  return parts.length ? `(${parts.join(' ')})\n` : ''
 }
 
 /**
@@ -181,6 +327,13 @@ export function formatCodeReviewEffortNotice(options: {
   return ''
 }
 
+function defaultMaxFindingsForLevel(level: EffortLevel): number {
+  if (level === 'low') return 5
+  if (level === 'medium') return 8
+  if (level === 'high') return 10
+  return 15
+}
+
 function buildPrompt(
   level: EffortLevel,
   target: string,
@@ -188,12 +341,19 @@ function buildPrompt(
   fix: boolean,
   ultraFallbackNote = '',
   unrecognizedNote = '',
+  maxFindingsNote = '',
+  maxFindingsCap?: number | 'all',
 ): string {
   const header = `You are performing a thorough code review at **${level}** effort level.`
 
   const targetInstr = target
     ? `Review target: \`${target}\`\n\nIf this is a PR number, run \`gh pr diff ${target}\` to get the diff. If it's a file path, read the file. If empty, review the current git diff (\`git diff HEAD\`).`
     : 'Review the current changes: run `git diff HEAD` (or `git diff --cached` if staged).'
+
+  const cap =
+    maxFindingsCap === 'all'
+      ? 'every confirmed finding (no cap)'
+      : String(maxFindingsCap ?? defaultMaxFindingsForLevel(level))
 
   const phases = `
 ## Review Process
@@ -236,12 +396,13 @@ Present confirmed findings as a numbered list:
    Description of the issue and how to fix it.
 \`\`\`
 
-Cap at ${level === 'low' ? '5' : level === 'medium' ? '8' : '10'} findings. Prioritize bugs over style.
+Cap at ${cap} findings. Prioritize bugs over style.
 If no issues found, say so clearly.`
 
   return [
     ultraFallbackNote,
     unrecognizedNote,
+    maxFindingsNote,
     header,
     targetInstr,
     phases,
@@ -304,7 +465,7 @@ const codeReview = {
   description:
     'Review the current diff for bugs and cleanups; use ultra for multi-agent cloud review',
   argumentHint:
-    '[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<target>]',
+    '[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<pr#>|<branch>|<path>] [--max-findings <n>|all]',
   userInvocable: true,
   // densable 2.1.218: fork by default → background subagent + task-notification
   context: 'fork' as const,
@@ -333,11 +494,23 @@ const codeReview = {
       unrecognizedLevel,
       explicit,
       reusedLastEffort,
+      maxFindings,
+      maxFindingsIgnored,
     } = parseCodeReviewArgs(args, lastEffort)
     // densable onUserTypedArgs / uYT — only persist when user named a valid level
     if (explicit !== undefined) {
       rememberCodeReviewEffort(explicit)
     }
+    // densable 2.1.289 — persist --max-findings when present and valid (default clears)
+    if (maxFindings !== undefined) {
+      rememberCodeReviewMaxFindings(maxFindings)
+    }
+    const maxResolved = resolveCodeReviewMaxFindings({
+      maxFindings,
+      maxFindingsIgnored,
+      lastMaxFindings: getGlobalConfig().codeReviewLastMaxFindings,
+    })
+    const maxFindingsNote = formatCodeReviewMaxFindingsNotice(maxResolved)
     const ultraEnabled = isUltrareviewEnabled()
     const ultraCommandAvailable =
       context.options?.commands?.some(
@@ -367,6 +540,8 @@ const codeReview = {
       fix,
       ultraNote,
       effortNote,
+      maxFindingsNote,
+      maxResolved.asked,
     )
     return [{ type: 'text', text: prompt }]
   },

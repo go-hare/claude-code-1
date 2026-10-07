@@ -24,24 +24,32 @@ export const OUTSIDE_READS_BLOCKED_REASON =
 
 export const AUTO_MODE_OUTSIDE_READS_KIND = 'auto_mode_outside_reads' as const
 
-export const OUTSIDE_READS_DIALOG_TITLE =
-  'Read outside the working directories,'
+export const OUTSIDE_READS_DIALOG_TITLE = 'Read outside the working directories'
 export const OUTSIDE_READS_DIALOG_QUESTION =
-  'Allow reads outside the working directories?'
+  'Allow this read outside the working directories?'
 
 export const OUTSIDE_READS_OPTION_ALLOW =
-  'Yes, keep allowing reads outside the working directories'
+  'Yes, and keep allowing any reads outside the working directories'
 export const OUTSIDE_READS_OPTION_BLOCK =
-  'No, block reads outside the working directories from now on'
-export const OUTSIDE_READS_OPTION_ASK_AGAIN = 'No, ask again next time'
+  'No, and block reads outside the working directories from now on'
+export const OUTSIDE_READS_OPTION_ASK_AGAIN = 'No, and ask again next time'
+/** densable 2.1.289 — allow this read only; do not latch hasSeen. */
+export const OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN =
+  'Yes, but ask again next time'
 
-export const OUTSIDE_READS_CHOICES = ['allow', 'block', 'ask_again'] as const
+export const OUTSIDE_READS_CHOICES = [
+  'allow',
+  'block',
+  'ask_again',
+  'allow_once',
+] as const
 export type OutsideReadsChoice = (typeof OUTSIDE_READS_CHOICES)[number]
 
 export const OUTSIDE_READS_OPTION_LABELS: Record<OutsideReadsChoice, string> = {
   allow: OUTSIDE_READS_OPTION_ALLOW,
   block: OUTSIDE_READS_OPTION_BLOCK,
   ask_again: OUTSIDE_READS_OPTION_ASK_AGAIN,
+  allow_once: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
 }
 
 const FILE_TOOLS_OFFERING_OUTSIDE_READ_BLOCK = new Set([
@@ -72,7 +80,7 @@ export function isOutsideReadFileToolName(toolName: string): boolean {
 /** official Jnr */
 export function outsideReadsExplainer(sandboxFenced: boolean): string {
   return (
-    'Auto mode and the sandbox read outside the working directories without asking. Yes or Block settles this question; Ask again asks on the next outside read. Block: the file tools refuse reads outside the working directories in every project. ' +
+    'Auto mode and the sandbox read outside the working directories without asking. Yes or No answers for this read; the rest is for later reads. Block: the file tools refuse reads outside the working directories in every project. ' +
     (sandboxFenced
       ? 'Sandboxed commands lose your home directory (SSH keys, home-installed tools) until you re-open paths with sandbox.filesystem.allowRead.'
       : 'Sandboxed commands are not changed on this machine (the sandbox is off, its filesystem rules are relaxed, a managed read-path lock is on, or the working directory name has glob characters).') +

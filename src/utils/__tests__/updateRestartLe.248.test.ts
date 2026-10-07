@@ -206,12 +206,12 @@ describe('densable 2.1.248 /update Mhr + gateway le (GC #w)', () => {
     expect(
       formatGatewayRestartFailedMessage(
         'gw.example',
-        { errorKind: 'timeout' },
+        undefined,
         'a background session cannot restart itself',
         false,
         true,
       ),
-    ).toContain('has to restart to retry')
+    ).toContain('has to restart to apply')
   })
 
   test('LNe / hasPolicyDiverged: undefined snapshot ⇒ true', () => {
@@ -234,7 +234,8 @@ describe('densable 2.1.248 /update Mhr + gateway le (GC #w)', () => {
     const login = src('../../commands/login/login.tsx')
     expect(login).not.toContain('capturePolicySnapshot()')
     expect(login).not.toContain('shouldRelaunchAfterGatewayManagedSettings')
-    expect(login).toContain('void refreshPolicyLimits()')
+    expect(login).not.toContain('void refreshPolicyLimits()')
+    expect(login).not.toContain('services/policyLimits')
     expect(login).not.toContain('isRestrictedSession()')
   })
 

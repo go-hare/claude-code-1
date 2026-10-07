@@ -214,7 +214,7 @@ describe('densable 2.1.283 Obe mouse host', () => {
     expect(clampedScrollTop(unbounded)).toBe(4)
   })
 
-  test('SGR wheel deltaY + 0-indexed row; Box has no onWheel type', () => {
+  test('SGR wheel deltaY + 0-indexed row; Ink EventHandlerProps has onWheel', () => {
     expect(parseSgrWheel('\x1b[<64;10;20M', { wheelUp: true })).toEqual({
       deltaY: -1,
       row: 19,
@@ -228,7 +228,8 @@ describe('densable 2.1.283 Obe mouse host', () => {
       row: null,
     })
     expect(parseSgrWheel('\x1b[<64;1;1M', {})).toBeNull()
-    expect(handlers).not.toContain('onWheel')
+    // densable Wd — EventHandlerProps now includes onWheel (pane host uses it).
+    expect(handlers).toContain('onWheel?: WheelEventHandler')
     expect(panel).toContain('useReplDiffSelectionAttach')
     expect(panel).toContain('parseSgrWheel')
     expect(panel).toContain('scrollBy(deltaY * 3)')
@@ -240,7 +241,13 @@ describe('densable 2.1.283 Obe mouse host', () => {
   test('ruo/auo diffPanelVisible is a separate AppState latch', () => {
     expect(store).toContain('diffPanelVisible: boolean')
     expect(store).toContain('diffPanelVisible: false')
-    const closed = { diffPanelVisible: false } as AppState
+    // densable paneHoldsToasts + Pte OR with diffPanelVisible.
+    expect(store).toContain('paneHoldsToasts: boolean')
+    expect(store).toContain('paneHoldsToasts: false')
+    const closed = {
+      diffPanelVisible: false,
+      paneHoldsToasts: false,
+    } as AppState
     const opened = showDiffPanelLatch(closed)
     expect(opened.diffPanelVisible).toBe(true)
     expect(opened).not.toBe(closed)
@@ -249,6 +256,12 @@ describe('densable 2.1.283 Obe mouse host', () => {
     expect(hideDiffPanelLatch(closed)).toBe(closed)
     expect(notificationsHoldToasts(opened)).toBe(true)
     expect(notificationsHoldToasts(closed)).toBe(false)
+    expect(
+      notificationsHoldToasts({
+        diffPanelVisible: false,
+        paneHoldsToasts: true,
+      } as AppState),
+    ).toBe(true)
     expect(panel).toContain('showDiffPanelLatch')
     expect(panel).toContain('hideDiffPanelLatch')
     expect(sidebar).toContain(

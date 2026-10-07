@@ -514,8 +514,12 @@ function handleInteractivePermission(
                 toolUseConfirm.permissionResult.behavior === 'ask' &&
                 toolUseConfirm.permissionResult.offersBlockOutsideReads === true
               ) {
-                outsideReadPrompt.markAnswered()
-                markSeenAutoModeOutsideReadPrompt()
+                // densable 2.1.289: one-off Yes sets askAgainOutsideReads and
+                // must not latch hasSeen / session answered.
+                if (result.askAgainOutsideReads !== true) {
+                  outsideReadPrompt.markAnswered()
+                  markSeenAutoModeOutsideReadPrompt()
+                }
               }
               resolveOnce(
                 await ctx.handleUserAllow(

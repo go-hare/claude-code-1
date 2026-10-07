@@ -677,6 +677,12 @@ export function registerCliHostCommands(
       '--json',
       'Print one machine-readable result line on stdout instead of the human message (same exit codes; a marketplace-declared command is still shown and must be confirmed — pass -y when not interactive)',
     )
+    .option(
+      '--config <key=value>',
+      "Set a userConfig option declared in the plugin's manifest, or a bundled .mcpb server's own user_config field as <server>.<key>=<value> (a bare key works when only one bundled server declares it). Repeatable. Values are validated against the schema and stored via the same path as the interactive /plugin configure flow.",
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
     .addOption(coworkOption())
     .action(
       async (
@@ -687,6 +693,7 @@ export function registerCliHostCommands(
           yes?: boolean
           json?: boolean
           acceptCommand?: string
+          config?: string[]
         },
       ) => {
         const { pluginInstallHandler } = await import(
@@ -818,6 +825,35 @@ export function registerCliHostCommands(
           '../cli/handlers/plugins.js'
         )
         await pluginUpdateHandler(plugin, commandOptions)
+      },
+    )
+
+  // densable 2.1.289 — plugin configure <plugin> [--values-stdin]
+  pluginCmd
+    .command('configure <plugin>')
+    .description(describe(['plugin', 'configure']))
+    .option(
+      '--values-stdin',
+      'Read option values from stdin as a JSON object of single-line strings; options left out keep their values',
+    )
+    .option(
+      '--json',
+      'Print one machine-readable result line on stdout instead of the human message (same exit codes)',
+    )
+    .addOption(coworkOption())
+    .action(
+      async (
+        plugin: string,
+        commandOptions: {
+          cowork?: boolean
+          json?: boolean
+          valuesStdin?: boolean
+        },
+      ) => {
+        const { pluginConfigureHandler } = await import(
+          '../cli/handlers/pluginConfigure.js'
+        )
+        await pluginConfigureHandler(plugin, commandOptions)
       },
     )
 
@@ -1050,6 +1086,57 @@ export function registerCliHostCommands(
       const root = await createRoot(getBaseRenderOptions(false))
       await doctorHandler(root)
     })
+
+
+  // densable 2.1.289: `claude purge` (+ hidden `claude project purge` alias)
+  {
+    const registerPurge = (
+      parent: CommanderCommand,
+      alias: boolean,
+    ): void => {
+      parent
+        .command('purge [path]', { hidden: alias })
+        .description(
+          alias ? describe(['project', 'purge']) : describe(['purge']),
+        )
+        .allowExcessArguments(alias)
+        .option(
+          '--dry-run',
+          'List what would be deleted without deleting anything',
+        )
+        .option('-y, --yes', 'Skip confirmation prompt')
+        .option(
+          '-i, --interactive',
+          'Prompt for each item before deleting',
+        )
+        .option(
+          '--all',
+          'Purge state for every project (mutually exclusive with [path])',
+        )
+        .action(
+          async (
+            pathArg: string | undefined,
+            commandOptions: {
+              dryRun?: boolean
+              yes?: boolean
+              interactive?: boolean
+              all?: boolean
+            },
+          ) => {
+            const { purgeProjectHandler } = await import(
+              './handlers/purgeProject.js'
+            )
+            await purgeProjectHandler(commandOptions, pathArg, alias)
+          },
+        )
+    }
+    registerPurge(program, false)
+    const project = program
+      .command('project', { hidden: true })
+      .description(describe(['project']))
+    registerPurge(project, true)
+  }
+
 
   if (process.env.USER_TYPE === 'ant') {
     program

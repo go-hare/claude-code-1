@@ -11,6 +11,7 @@ import {
   getBestModel,
   getDefaultFableModel,
   getDefaultOpusModel,
+  getDefaultSonnetModel,
   getMarketingNameForModel,
 } from '../model.js'
 import { resolveCatalogAlias } from '../modelCatalogCapabilities.js'
@@ -25,6 +26,11 @@ const envKeys = [
   'CLAUDE_CODE_USE_GATEWAY',
   'ANTHROPIC_DEFAULT_FABLE_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  // 3P primary-model fallbacks — must not leak into firstParty default asserts
+  'OPENAI_MODEL',
+  'GEMINI_MODEL',
+  'GROK_MODEL',
 ] as const
 
 const savedEnv: Record<string, string | undefined> = {}
@@ -52,11 +58,13 @@ describe('densable 2.1.283 catalog ids', () => {
     resetProviderState()
   })
 
-  test('keeps unsuffixed fable-5 / opus-5 and adds 5-1 / 5-5', () => {
+  test('keeps unsuffixed fable-5 / opus-5 / sonnet-5 and adds 5-1 / 5-5', () => {
     expect(ALL_MODEL_CONFIGS.fable5.firstParty).toBe('claude-fable-5')
     expect(ALL_MODEL_CONFIGS.fable51.firstParty).toBe('claude-fable-5-1')
     expect(ALL_MODEL_CONFIGS.opus5.firstParty).toBe('claude-opus-5')
     expect(ALL_MODEL_CONFIGS.opus55.firstParty).toBe('claude-opus-5-5')
+    expect(ALL_MODEL_CONFIGS.sonnet5.firstParty).toBe('claude-sonnet-5')
+    expect(ALL_MODEL_CONFIGS.sonnet55.firstParty).toBe('claude-sonnet-5-5')
   })
 
   test('ix() tests 5-1/5-5 before unsuffixed family', () => {
@@ -66,18 +74,25 @@ describe('densable 2.1.283 catalog ids', () => {
     expect(firstPartyNameToCanonical('claude-fable-5')).toBe('claude-fable-5')
     expect(firstPartyNameToCanonical('claude-opus-5-5')).toBe('claude-opus-5-5')
     expect(firstPartyNameToCanonical('claude-opus-5')).toBe('claude-opus-5')
+    expect(firstPartyNameToCanonical('claude-sonnet-5-5')).toBe(
+      'claude-sonnet-5-5',
+    )
+    expect(firstPartyNameToCanonical('claude-sonnet-5')).toBe('claude-sonnet-5')
   })
 
-  test('firstParty live defaults are fable51 / opus55', () => {
+  test('firstParty live defaults are fable51 / opus55 / sonnet55', () => {
     expect(getDefaultFableModel()).toBe('claude-fable-5-1')
     expect(getDefaultOpusModel()).toBe('claude-opus-5-5')
+    expect(getDefaultSonnetModel()).toBe('claude-sonnet-5-5')
   })
 
-  test('gateway fable/best still Fable 5 per 283 aliases', () => {
+  test('gateway fable/best still Fable 5 per 283 aliases; sonnet default 5.5', () => {
     expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
     expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-1')
     expect(resolveCatalogAlias('opus')).toBe('claude-opus-5-5')
     expect(resolveCatalogAlias('opus', 'gateway')).toBe('claude-opus-4-7')
+    expect(resolveCatalogAlias('sonnet')).toBe('claude-sonnet-5-5')
+    expect(resolveCatalogAlias('sonnet', 'bedrock')).toBe('claude-sonnet-4-5')
   })
 
   test('best alias is Fable (catalog best:"fable")', () => {
@@ -95,8 +110,13 @@ describe('densable 2.1.283 catalog ids', () => {
     expect(getMarketingNameForModel('claude-opus-5-5[1m]')).toBe(
       'Opus 5.5 (1M context)',
     )
+    expect(getMarketingNameForModel('claude-sonnet-5-5')).toBe('Sonnet 5.5')
+    expect(getMarketingNameForModel('claude-sonnet-5-5[1m]')).toBe(
+      'Sonnet 5.5 (1M context)',
+    )
     expect(getMarketingNameForModel('claude-fable-5-1')).toBe('Fable 5.1')
     expect(getMarketingNameForModel('claude-opus-5')).toBe('Opus 5')
+    expect(getMarketingNameForModel('claude-sonnet-5')).toBe('Sonnet 5')
     expect(getMarketingNameForModel('claude-fable-5')).toBe('Fable 5')
   })
 })

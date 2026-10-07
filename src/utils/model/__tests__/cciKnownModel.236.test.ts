@@ -50,7 +50,7 @@ mock.module('src/utils/model/providers.js', () => ({
 }))
 mock.module('src/utils/model/model.js', () => ({
   ...modelSnap,
-  getDefaultSonnetModel: () => ALL_MODEL_CONFIGS.sonnet5.firstParty,
+  getDefaultSonnetModel: () => ALL_MODEL_CONFIGS.sonnet55.firstParty,
   getDefaultOpusModel: () => ALL_MODEL_CONFIGS.opus5.firstParty,
   getDefaultFableModel: () => ALL_MODEL_CONFIGS.fable5.firstParty,
   getDefaultHaikuModel: () => ALL_MODEL_CONFIGS.haiku45.firstParty,
@@ -99,9 +99,9 @@ describe('Cci getKnownModelOption (236 #24)', () => {
   afterEach(resetAllowlist)
 
   test('newest sonnet uses slogan, not Newer version', () => {
-    const opt = getKnownModelOption(ALL_MODEL_CONFIGS.sonnet5.firstParty)
+    const opt = getKnownModelOption(ALL_MODEL_CONFIGS.sonnet55.firstParty)
     expect(opt?.description).toBe(
-      `Efficient for routine tasks (${ALL_MODEL_CONFIGS.sonnet5.firstParty})`,
+      `Most efficient for simpler tasks (${ALL_MODEL_CONFIGS.sonnet55.firstParty})`,
     )
     expect(opt?.description).not.toContain('Newer version available')
   })
@@ -109,7 +109,7 @@ describe('Cci getKnownModelOption (236 #24)', () => {
   test('older sonnet before alias in catalog shows Newer version', () => {
     const older = ALL_MODEL_CONFIGS.sonnet40.firstParty
     const newestName = getKnownModelOption(
-      ALL_MODEL_CONFIGS.sonnet5.firstParty,
+      ALL_MODEL_CONFIGS.sonnet55.firstParty,
     )?.label
     const opt = getKnownModelOption(older)
     expect(opt?.description).toBe(

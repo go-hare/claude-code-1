@@ -9,7 +9,9 @@
  *   - `N_f`: send-intercept initialize / server/discover; swallow notifications/initialized
  *   - `F_f`: GET to the proxy endpoint → 405 (suppress SSE)
  *
- * **Never** wrap stdio. **Never** invent cliOwnedConfigs / vbe.
+ * **Never** wrap stdio. Ownership WeakSet lives in `cliOwnedConfigs.ts`
+ * (`markCliOwnedConfig` / densable `OEe`) with bridge mount callers — SEA
+ * `vbe` is path-`..`, not that WeakSet.
  */
 import {
   type DiscoverResult,

@@ -2200,15 +2200,15 @@ async function* queryModel(
       betasParams,
     )
 
-    // Merge outputFormat into extraBodyParams.output_config alongside effort
-    // Requires structured-outputs beta header per SDK (see parse() in messages.mjs)
-    if (options.outputFormat && !('format' in outputConfig)) {
+    // densable wGo — attach format only when mCn supports structured outputs
+    // (CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS / JK / provider / model gates).
+    if (
+      options.outputFormat &&
+      !('format' in outputConfig) &&
+      modelSupportsStructuredOutputs(options.model)
+    ) {
       outputConfig.format = options.outputFormat as BetaJSONOutputFormat
-      // Add beta header if not already present and provider supports it
-      if (
-        modelSupportsStructuredOutputs(options.model) &&
-        !betasParams.includes(STRUCTURED_OUTPUTS_BETA_HEADER)
-      ) {
+      if (!betasParams.includes(STRUCTURED_OUTPUTS_BETA_HEADER)) {
         betasParams.push(STRUCTURED_OUTPUTS_BETA_HEADER)
       }
     }

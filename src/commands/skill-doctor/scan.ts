@@ -21,13 +21,6 @@ import { getStrictKnownMarketplaces } from '../../utils/plugins/marketplaceHelpe
 import { hasPendingPluginUsage } from '../../utils/plugins/pluginUsagePending.js'
 import { getEnabledVia } from '../../utils/telemetry/pluginTelemetry.js'
 import { getSkillUsageSnapshot } from '../../utils/suggestions/skillUsageTracking.js'
-import { getPolicyDenyKind } from '../../services/policyLimits/index.js'
-import { isHipaaPolicy } from '../../utils/midConversationSystem.js'
-import {
-  isPolicyLimitsAllowed,
-  leftoverPolicyLimitsHost,
-  policyLimitsFeatureCopy,
-} from '../../cli/leftoverTulip.js'
 import { roughTokenCountEstimation } from '../../services/tokenEstimation.js'
 import { getContextWindowForModel } from '../../utils/context.js'
 import {
@@ -84,48 +77,15 @@ export type DisusedPlugin = {
 const DISUSE_DAYS = 14
 const DISUSE_STARTUPS = 10
 
-const HIPAA_SKILL_DOCTOR_REASON =
-  'Not shown for HIPAA-regulated organizations: measured by scanning the session transcripts saved on this machine.'
-
-const SKILL_DOCTOR_TRANSCRIPT_SCAN = 'allow_skill_doctor_transcript_scan'
-
 /**
- * gold `fRe().includes("hipaa")` — current/host taints, not leftover
- * `HipaaEvidence.seen` (hashed principals). NEVER export gold `fRe`.
- */
-function skillDoctorHasHipaaTaint(): boolean {
-  if (isHipaaPolicy()) return true
-  const host = leftoverPolicyLimitsHost()
-  return (
-    host.complianceTaints.includes('hipaa') ||
-    host.hintedTaints.includes('hipaa')
-  )
-}
-
-/**
- * densable `B`/`qbt` @194898866. leftover `Jt` allow; HIPAA copy only when
- * `Iw==="org_denied"` AND hipaa taint; else leftover `PK` catalog copy.
+ * densable `B`/`qbt` @194898866.
+ * Product-cut: policy limits always allow transcript scan.
  */
 export function skillDoctorTranscriptScanAllowed(): {
   allowed: boolean
   reason?: string
 } {
-  if (isPolicyLimitsAllowed(SKILL_DOCTOR_TRANSCRIPT_SCAN)) {
-    return { allowed: true }
-  }
-  if (
-    getPolicyDenyKind(SKILL_DOCTOR_TRANSCRIPT_SCAN) === 'org_denied' &&
-    skillDoctorHasHipaaTaint()
-  ) {
-    return { allowed: false, reason: HIPAA_SKILL_DOCTOR_REASON }
-  }
-  const { featureLabel, verb } = policyLimitsFeatureCopy(
-    SKILL_DOCTOR_TRANSCRIPT_SCAN,
-  )
-  return {
-    allowed: false,
-    reason: `${featureLabel} ${verb} unavailable right now.`,
-  }
+  return { allowed: true }
 }
 
 /** densable `wrt` slice used when SkillTool budget did not emit a line. */

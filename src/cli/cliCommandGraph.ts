@@ -363,6 +363,17 @@ export const cliCommandGraph = [
       capability: 'plugins',
     },
   ),
+  // densable 2.1.289
+  command(
+    'plugin.configure',
+    ['plugin', 'configure'],
+    "Show a plugin's options and which are unset, or save values from stdin with --values-stdin",
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'plugins',
+    },
+  ),
   command(
     'setup-token',
     ['setup-token'],
@@ -523,6 +534,38 @@ export const cliCommandGraph = [
       ownership: 'product-operation',
       reuse: 'reuse-as-is',
       capability: 'support',
+    },
+  ),
+  command(
+    'purge',
+    ['purge'],
+    'Delete all Claude Code state for a project (transcripts, tasks, file history, config entry)',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'support',
+    },
+  ),
+  command(
+    'project',
+    ['project'],
+    '`claude project purge` is now `claude purge`',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'support',
+      hidden: true,
+    },
+  ),
+  command(
+    'project.purge',
+    ['project', 'purge'],
+    '`claude project purge` is now `claude purge`. Delete all Claude Code state for a project (transcripts, tasks, file history, config entry)',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'support',
+      hidden: true,
     },
   ),
   command(

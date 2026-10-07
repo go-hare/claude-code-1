@@ -20,7 +20,11 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
-import { createDensableMcpClient } from './mcpV2Client.js'
+import {
+  createDensableMcpClient,
+  isJavaMcpFormUrlElicitationReject,
+  JAVA_MCP_BARE_ELICITATION_HINT,
+} from './mcpV2Client.js'
 import type {
   ElicitRequestURLParams,
   ElicitResult,
@@ -116,6 +120,7 @@ import {
   getWebSocketProxyUrl,
 } from '../../utils/proxy.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
+import { getCliOwnedBearerProvider } from './cliOwnedConfigs.js'
 import {
   getRegisteredUpstreamProxyEnv,
   subprocessEnv,
@@ -1026,6 +1031,16 @@ export const connectToServer = memoize(
         // CCR proxy URLs (ccr_shttp_mcp) have no stored OAuth, so they still
         // get the ingress token. See PR #24454 discussion.
         const hasOAuthTokens = !!(await authProvider?.tokens())
+        // densable cliOwnedBearerProviders — bridge projects/meta mounts.
+        // Prefer owned bearer; do not overwrite Authorization already in headers.
+        const cliOwnedBearer = getCliOwnedBearerProvider(serverRef)?.()
+        const hasAuthHeader = Object.keys(combinedHeaders).some(
+          k => k.toLowerCase() === 'authorization',
+        )
+        const bearerToken =
+          !hasOAuthTokens && !hasAuthHeader
+            ? cliOwnedBearer || sessionIngressToken
+            : undefined
 
         // Use the auth provider with StreamableHTTPClientTransport
         const proxyOptions = getProxyFetchOptions()
@@ -1044,10 +1059,9 @@ export const connectToServer = memoize(
             ...proxyOptions,
             headers: {
               'User-Agent': getMCPUserAgent(),
-              ...(sessionIngressToken &&
-                !hasOAuthTokens && {
-                  Authorization: `Bearer ${sessionIngressToken}`,
-                }),
+              ...(bearerToken && {
+                Authorization: `Bearer ${bearerToken}`,
+              }),
               ...combinedHeaders,
             },
           },
@@ -1279,10 +1293,15 @@ export const connectToServer = memoize(
         serverRef,
       )
       // densable k(Z) — factory takes versionNegotiation plan (BVa)
+      // densable ze capability ternary + Lr initialize rewrite live in factory.
+      let bareElicitationRetry = false
       const createMcpSdkClient = (
         plan: typeof protocolPlan = protocolPlan,
+        opts: { forceBare?: boolean } = {},
       ): Client => {
-        const c = createDensableMcpClient(plan)
+        const c = createDensableMcpClient(plan, serverRef, {
+          forceBare: opts.forceBare === true || bareElicitationRetry,
+        })
         // densable: setRequestHandler("roots/list", ...)
         c.setRequestHandler('roots/list', async () => {
           logMCPDebug(name, `Received ListRoots request from server`)
@@ -1297,7 +1316,7 @@ export const connectToServer = memoize(
         return c
       }
 
-      // densable C — reassigned on pinned-legacy reconnect.
+      // densable C — reassigned on pinned-legacy reconnect / bare elicitation retry.
       let client = createMcpSdkClient()
 
       // Add debug logging for client events if available
@@ -1512,46 +1531,22 @@ export const connectToServer = memoize(
         )
       }
 
-      try {
-        try {
-          await raceConnect(
-            client,
-            transport,
-            initializeTimeoutMs,
-            outerTimeoutMs,
-          )
-        } catch (firstError) {
-          const decision = classifyMcpAutoProbeFallback(
-            protocolPlan,
-            firstError,
-            {
-              transportType: serverRef.type,
-              transport: transport as McpProbeTimedOutTransport,
-              canRecreateTransport: canRecreateForPinnedLegacy,
-            },
-          )
-          if (!decision.shouldFallback) {
-            throw firstError
-          }
-          probeFellBack = decision.reason
-          logMCPDebug(
-            name,
-            formatMcpProbeFallbackDebugMessage(
-              decision.reason,
-              serverRef.type || 'stdio',
-            ),
-          )
-          if (decision.reason === 'closed' && stderrOutput) {
-            logMCPDebug(name, `Probe-closed server stderr: ${stderrOutput}`)
-            stderrOutput = ''
-          }
+      const recreateTransportAndClientForBareElicitation =
+        async (): Promise<void> => {
+          bareElicitationRetry = true
           await transport.close().catch(() => {})
           if (stderrHandler) {
             const stdioT = transport as StdioClientTransport
             stdioT.stderr?.off('data', stderrHandler)
           }
+          if (stderrOutput) {
+            logMCPDebug(
+              name,
+              `stderr of the stdio server that refused elicitation form and url, before restarting it: ${stderrOutput}`,
+            )
+            stderrOutput = ''
+          }
           transport = await recreateTransportForPinnedLegacy()
-          // densable reconnect `_9a(u,M)` — init intercept only (discover omitted).
           if (serverRef.type === 'claudeai-proxy') {
             wrapStatelessClaudeAiProxyTransport(
               transport,
@@ -1576,58 +1571,171 @@ export const connectToServer = memoize(
             }
             transport.stderr.on('data', stderrHandler)
           }
-          // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
-          client = createMcpSdkClient({ mode: 'legacy' })
-          const retryTimeoutMs =
-            getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
-          let outerTimedOut = false
-          try {
-            // densable: race remaining budget; oMf message still cites y0()
-            const connectPromise = client.connect(transport, {
-              timeout: retryTimeoutMs,
-            })
-            await Promise.race([
-              connectPromise,
-              new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                  outerTimedOut = true
-                  transport.close().catch(() => {})
-                  reject(
-                    createMcpConnectionTimeoutError(
-                      `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
-                    ),
-                  )
-                }, retryTimeoutMs)
-                connectPromise.then(
-                  () => clearTimeout(timeoutId),
-                  () => clearTimeout(timeoutId),
-                )
-              }),
-            ])
-          } catch (retryError) {
+          // densable ze(Ee?TDt()) — bare elicitation bag on Java reject retry.
+          client = createMcpSdkClient({ mode: 'legacy' }, { forceBare: true })
+        }
+
+      try {
+        try {
+          await raceConnect(
+            client,
+            transport,
+            initializeTimeoutMs,
+            outerTimeoutMs,
+          )
+        } catch (firstError) {
+          const decision = classifyMcpAutoProbeFallback(
+            protocolPlan,
+            firstError,
+            {
+              transportType: serverRef.type,
+              transport: transport as McpProbeTimedOutTransport,
+              canRecreateTransport: canRecreateForPinnedLegacy,
+            },
+          )
+          if (!decision.shouldFallback) {
+            // densable bn → reconnect once without elicitation form/url.
             if (
-              shouldPreserveConnectTimeoutAfterPinnedLegacyRetry(
-                decision.reason,
-                retryError,
-                { outerTimedOut },
+              canRecreateForPinnedLegacy &&
+              !bareElicitationRetry &&
+              isJavaMcpFormUrlElicitationReject(
+                firstError,
+                serverRef,
+                transport,
               )
             ) {
-              const snippet = truncateMcpErrorSnippet(
-                retryError instanceof Error
-                  ? retryError.message
-                  : String(retryError),
-              )
               logMCPDebug(
                 name,
-                formatPinnedLegacyRetryPreserveTimeoutLog(snippet),
+                'server rejected elicitation form and url at initialize (Java MCP SDK 0.17.0 or older); reconnecting once without elicitation form and url',
               )
+              await recreateTransportAndClientForBareElicitation()
+              const bareTimeoutMs =
+                getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+              await raceConnect(client, transport, bareTimeoutMs, bareTimeoutMs)
+            } else {
               throw firstError
             }
-            throw retryError
+          } else {
+            probeFellBack = decision.reason
+            logMCPDebug(
+              name,
+              formatMcpProbeFallbackDebugMessage(
+                decision.reason,
+                serverRef.type || 'stdio',
+              ),
+            )
+            if (decision.reason === 'closed' && stderrOutput) {
+              logMCPDebug(name, `Probe-closed server stderr: ${stderrOutput}`)
+              stderrOutput = ''
+            }
+            await transport.close().catch(() => {})
+            if (stderrHandler) {
+              const stdioT = transport as StdioClientTransport
+              stdioT.stderr?.off('data', stderrHandler)
+            }
+            transport = await recreateTransportForPinnedLegacy()
+            // densable reconnect `_9a(u,M)` — init intercept only (discover omitted).
+            if (serverRef.type === 'claudeai-proxy') {
+              wrapStatelessClaudeAiProxyTransport(
+                transport,
+                serverRef,
+                msg => logMCPDebug(name, msg),
+                { includeDiscover: false },
+              )
+            }
+            if (
+              (serverRef.type === 'stdio' || !serverRef.type) &&
+              transport instanceof StdioClientTransport &&
+              transport.stderr
+            ) {
+              stderrHandler = (data: Buffer) => {
+                if (stderrOutput.length < 64 * 1024 * 1024) {
+                  try {
+                    stderrOutput += data.toString()
+                  } catch {
+                    // ignore
+                  }
+                }
+              }
+              transport.stderr.on('data', stderrHandler)
+            }
+            // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
+            client = createMcpSdkClient({ mode: 'legacy' })
+            const retryTimeoutMs =
+              getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+            let outerTimedOut = false
+            try {
+              // densable: race remaining budget; oMf message still cites y0()
+              const connectPromise = client.connect(transport, {
+                timeout: retryTimeoutMs,
+              })
+              await Promise.race([
+                connectPromise,
+                new Promise<never>((_, reject) => {
+                  const timeoutId = setTimeout(() => {
+                    outerTimedOut = true
+                    transport.close().catch(() => {})
+                    reject(
+                      createMcpConnectionTimeoutError(
+                        `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
+                      ),
+                    )
+                  }, retryTimeoutMs)
+                  connectPromise.then(
+                    () => clearTimeout(timeoutId),
+                    () => clearTimeout(timeoutId),
+                  )
+                }),
+              ])
+            } catch (retryError) {
+              if (
+                canRecreateForPinnedLegacy &&
+                !bareElicitationRetry &&
+                isJavaMcpFormUrlElicitationReject(
+                  retryError,
+                  serverRef,
+                  transport,
+                )
+              ) {
+                logMCPDebug(
+                  name,
+                  'server rejected elicitation form and url on the reconnect (Java MCP SDK 0.17.0 or older); reconnecting once more without elicitation form and url',
+                )
+                await recreateTransportAndClientForBareElicitation()
+                const bareTimeoutMs =
+                  getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+                await raceConnect(
+                  client,
+                  transport,
+                  bareTimeoutMs,
+                  bareTimeoutMs,
+                )
+              } else if (
+                shouldPreserveConnectTimeoutAfterPinnedLegacyRetry(
+                  decision.reason,
+                  retryError,
+                  { outerTimedOut },
+                )
+              ) {
+                const snippet = truncateMcpErrorSnippet(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                )
+                logMCPDebug(
+                  name,
+                  formatPinnedLegacyRetryPreserveTimeoutLog(snippet),
+                )
+                throw firstError
+              } else {
+                throw retryError
+              }
+            }
           }
         }
         // silence unused until analytics wiring; densable passes probeFellBack out.
         void probeFellBack
+        void bareElicitationRetry
 
         if (stderrOutput) {
           logMCPError(name, `Server stderr: ${stderrOutput}`)
@@ -1638,8 +1746,14 @@ export const connectToServer = memoize(
           name,
           `Successfully connected (transport: ${serverRef.type || 'stdio'}) in ${elapsed}ms`,
         )
-      } catch (error) {
+      } catch (caught) {
         const elapsed = Date.now() - connectStartTime
+        // densable: !Ee && bn → rewrite failed-connect message to Java bare hint.
+        const error =
+          !bareElicitationRetry &&
+          isJavaMcpFormUrlElicitationReject(caught, serverRef, transport)
+            ? new Error(JAVA_MCP_BARE_ELICITATION_HINT, { cause: caught })
+            : caught
         // SSE-specific error logging
         if (serverRef.type === 'sse' && error instanceof Error) {
           logMCPDebug(

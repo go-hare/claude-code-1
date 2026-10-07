@@ -142,7 +142,10 @@ import {
   setTurnAbortHandler,
   setUiAskHostHandler,
   getShownPluginPane,
+  getPanesState,
+  getPluginScrollSite,
   getRasterFrameVersion,
+  offerPlacement,
   subscribeRasterFrames,
 } from '../utils/plugins/functionHooksModules.js';
 import {
@@ -151,11 +154,13 @@ import {
   PluginPaneSite,
   PluginRowGrip,
   PluginPaneKeyResize,
+  usePaneToastHold,
   chooseDockRoom,
   chooseInlineRoom,
   getDockRoomColumns,
   getInlineRoomRows,
   keepPluginPaneRoom,
+  paneTitleChromeRows,
   pluginPaneDockColumns,
   pluginPaneInlineRows,
   subscribeDockRoom,
@@ -561,7 +566,9 @@ import {
   promoteMainThreadQueueToNow,
   removeByFilter,
   someInFlightDrainCommand,
+  isPoppableEditableCommand,
 } from '../utils/messageQueueManager.js';
+import { isVimModeEnabled } from '../components/PromptInput/utils.js';
 import { backgroundForegroundToolCalls, queryForegroundSession } from '../utils/foregroundToolCalls.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
@@ -1330,6 +1337,7 @@ export function REPL({
   const workerSandboxPermissions = useAppState(s => s.workerSandboxPermissions);
   const elicitation = useAppState(s => s.elicitation);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  const queueEditIndex = useAppState(s => s.queueEditIndex);
   const setAppState = useSetAppState();
   // densable NDr / TZt / H$y — willow crate diff tab baseline
   const willowCrateEnabled = isDiffPanelEnabled();
@@ -8106,8 +8114,26 @@ export function REPL({
   const shownPluginPane = getShownPluginPane();
   const pluginDockWidth = shownPluginPane !== undefined ? pluginDockOffered : 0;
   const panesDocked = isFullscreenEnvEnabled() && pluginDockColumns > 0;
+  // densable Ree We=!docked; Mee isOffered → mx.offerPlacement() (QFt semantic).
+  const inlineHostOffered = !panesDocked;
+  const dockHostOffered = pluginDockWidth > 0;
+  useEffect(() => (inlineHostOffered ? offerPlacement() : undefined), [inlineHostOffered]);
+  useEffect(() => (dockHostOffered ? offerPlacement() : undefined), [dockHostOffered]);
+  // densable Uh.usePaneToastHold() next to useDockColumns (FEe → paneHoldsToasts).
+  usePaneToastHold();
   const pluginInlineRequested =
-    shownPluginPane !== undefined ? shownPluginPane.bodyRows + (shownPluginPane.title ? 1 : 0) : undefined;
+    shownPluginPane !== undefined
+      ? shownPluginPane.bodyRows + paneTitleChromeRows(getPanesState().open.length > 1, false)
+      : undefined;
+  // densable yh / inputOwnsEscape → mee promptOwnsEscape.
+  const [inlineGripLit, setInlineGripLit] = useState(false);
+  const promptOwnsEscape =
+    (isVimModeEnabled() && vimMode !== 'NORMAL') ||
+    isSearchingHistory ||
+    isHelpOpen ||
+    inputMode !== 'prompt' ||
+    queueEditIndex !== null ||
+    queuedCommands.some(cmd => isPoppableEditableCommand(cmd, inputValue === ''));
   const pluginInlineRows = pluginPaneInlineRows(
     transcriptRows,
     isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
@@ -8145,6 +8171,8 @@ export function REPL({
             docked
             cells={pluginDockWidth}
             step={DOCK_KEY_COLUMNS}
+            // densable pee owns mEe via yEe scrollBy — PluginPaneSite binds pixel chords.
+            pixelScroll={false}
             resizeTo={next => {
               const resized = pluginPaneDockColumns(transcriptCols, next);
               chooseDockRoom(resized);
@@ -8157,6 +8185,8 @@ export function REPL({
             docked={false}
             cells={pluginInlineRows}
             step={INLINE_KEY_ROWS}
+            // densable pee owns mEe via yEe scrollBy — PluginPaneSite binds pixel chords.
+            pixelScroll={false}
             resizeTo={next => {
               const resized = pluginPaneInlineRows(
                 transcriptRows,
@@ -8220,7 +8250,13 @@ export function REPL({
                     onSettle={keepPluginPaneRoom}
                   />
                   <Box flexGrow={1} flexDirection="column" width={Math.max(0, pluginDockWidth - DOCK_GRIP_COLUMNS)}>
-                    <PluginPaneSite fill={true} />
+                    <PluginPaneSite
+                      fill={true}
+                      isWorking={isLoading}
+                      promptEmpty={inputValue === ''}
+                      queueEditing={queueEditIndex !== null}
+                      promptOwnsEscape={promptOwnsEscape}
+                    />
                   </Box>
                 </Box>
               ) : undefined
@@ -8276,11 +8312,21 @@ export function REPL({
                     overflow="hidden"
                     position="relative"
                   >
-                    <PluginPaneSite fill={false} columns={transcriptCols} rows={pluginInlineRows} />
+                    <PluginPaneSite
+                      fill={false}
+                      columns={transcriptCols}
+                      rows={pluginInlineRows}
+                      isWorking={isLoading}
+                      promptEmpty={inputValue === ''}
+                      queueEditing={queueEditIndex !== null}
+                      promptOwnsEscape={promptOwnsEscape}
+                      lit={inlineGripLit}
+                    />
                     {pluginInlineRows > 0 && transcriptCols > 0 ? (
                       <PluginRowGrip
                         columns={transcriptCols}
                         rows={pluginInlineRows}
+                        onLit={setInlineGripLit}
                         onResize={next => {
                           const resized = pluginPaneInlineRows(
                             transcriptRows,
@@ -8295,7 +8341,13 @@ export function REPL({
                     ) : null}
                   </Box>
                 ) : (
-                  <PluginPaneSite fill={false} />
+                  <PluginPaneSite
+                    fill={false}
+                    isWorking={isLoading}
+                    promptEmpty={inputValue === ''}
+                    queueEditing={queueEditIndex !== null}
+                    promptOwnsEscape={promptOwnsEscape}
+                  />
                 )}
                 <AwsAuthStatusBox />
                 {/* Hide the processing placeholder while a modal is showing —
@@ -8718,6 +8770,7 @@ export function REPL({
                         />
                         <PluginAbovePromptSite
                           isWorking={isLoading}
+                          promptEmpty={inputValue === ''}
                           hasSurvey={
                             postCompactSurvey.state !== 'closed' ||
                             memorySurvey.state !== 'closed' ||

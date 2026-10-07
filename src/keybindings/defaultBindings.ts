@@ -103,6 +103,10 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       'ctrl+x ctrl+e': 'chat:externalEditor',
       'ctrl+g': 'chat:externalEditor',
       'ctrl+s': 'chat:stash',
+      // densable 2.1.289 — AbovePrompt band collapse (gold Go("abovePrompt:toggle","Chat","ctrl+x ctrl+a"))
+      'ctrl+x ctrl+a': 'abovePrompt:toggle',
+      // densable Chat ctrl+x tab → abovePrompt:focus (gold Go ~185082382)
+      'ctrl+x tab': 'abovePrompt:focus',
       // Image paste shortcut (platform-specific key defined above)
       [IMAGE_PASTE_KEY]: 'chat:imagePaste',
       ...(feature('MESSAGE_ACTIONS')
@@ -198,6 +202,49 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // q — pager convention (less, tmux copy-mode). Transcript is a modal
       // reading view with no prompt, so q-as-literal-char has no owner.
       q: 'transcript:exit',
+    },
+  },
+  {
+    // densable AbovePrompt: ring + scroll (gold Go ~185085373).
+    context: 'AbovePrompt',
+    bindings: {
+      tab: 'abovePrompt:next',
+      right: 'abovePrompt:next',
+      'shift+tab': 'abovePrompt:previous',
+      left: 'abovePrompt:previous',
+      enter: 'abovePrompt:press',
+      space: 'abovePrompt:press',
+      escape: 'abovePrompt:leave',
+      up: 'pane:scrollUp',
+      down: 'pane:scrollDown',
+      pageup: 'pane:pageUp',
+      pagedown: 'pane:pageDown',
+      home: 'pane:top',
+      end: 'pane:bottom',
+    },
+  },
+  {
+    // densable AbovePromptInput: leave field via ring, no scroll chords.
+    context: 'AbovePromptInput',
+    bindings: {
+      tab: 'abovePrompt:next',
+      down: 'abovePrompt:next',
+      'shift+tab': 'abovePrompt:previous',
+      up: 'abovePrompt:previous',
+      enter: 'abovePrompt:press',
+      escape: 'abovePrompt:leave',
+    },
+  },
+  {
+    // densable AbovePromptSelect: highlight within select, ring on tab.
+    context: 'AbovePromptSelect',
+    bindings: {
+      tab: 'abovePrompt:next',
+      'shift+tab': 'abovePrompt:previous',
+      down: 'abovePrompt:highlightNext',
+      up: 'abovePrompt:highlightPrevious',
+      enter: 'abovePrompt:press',
+      escape: 'abovePrompt:leave',
     },
   },
   {

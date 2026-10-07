@@ -96,7 +96,7 @@ type Props = {
   onSearchModeChange?: (isActive: boolean) => void;
   targetPlugin?: string;
   targetMarketplace?: string;
-  action?: 'enable' | 'disable' | 'uninstall';
+  action?: 'enable' | 'disable' | 'uninstall' | 'configure';
 };
 
 type FlaggedPluginInfo = {
@@ -593,7 +593,7 @@ export function ManagePlugins({
   // Auto-action (enable/disable/uninstall) to fire after auto-navigation lands.
   // Ref, not state: it's consumed by a one-shot effect that already re-runs on
   // viewState/selectedPlugin, so a render-triggering state var would be redundant.
-  const pendingAutoActionRef = useRef<'enable' | 'disable' | 'uninstall' | undefined>(undefined);
+  const pendingAutoActionRef = useRef<'enable' | 'disable' | 'uninstall' | 'configure' | undefined>(undefined);
 
   // MCP toggle hook
   const toggleMcpServer = useMcpToggleEnabled();
@@ -1360,15 +1360,24 @@ export function ManagePlugins({
   const handleSingleOperationRef = useRef(handleSingleOperation);
   handleSingleOperationRef.current = handleSingleOperation;
 
-  // Auto-execute the action prop (/plugin uninstall X, /plugin enable X, etc.)
-  // once auto-navigation has landed on plugin-details.
+  // Auto-execute the action prop (/plugin uninstall X, /plugin enable X,
+  // /plugin configure X, etc.) once auto-navigation has landed on plugin-details.
   useEffect(() => {
     if (viewState === 'plugin-details' && selectedPlugin && pendingAutoActionRef.current) {
       const pending = pendingAutoActionRef.current;
       pendingAutoActionRef.current = undefined;
+      if (pending === 'configure') {
+        const schema = selectedPlugin.plugin.manifest.userConfig;
+        if (schema && Object.keys(schema).length > 0) {
+          setViewState({ type: 'configuring-options', schema });
+        } else {
+          setResult(re(`${selectedPlugin.plugin.name} has no options to set.`));
+        }
+        return;
+      }
       void handleSingleOperationRef.current(pending);
     }
-  }, [viewState, selectedPlugin]);
+  }, [viewState, selectedPlugin, setResult]);
 
   // Handle toggle enable/disable
   const handleToggle = React.useCallback(() => {

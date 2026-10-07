@@ -18,7 +18,7 @@ export type ViewState =
       type: 'manage-plugins' // 已安装插件管理（启用/禁用/卸载）
       targetPlugin?: string // 可选：聚焦某插件
       targetMarketplace?: string // 可选：与 targetPlugin 联用的市场
-      action?: 'uninstall' | 'enable' | 'disable' // 可选：打开时直接执行的操作
+      action?: 'uninstall' | 'enable' | 'disable' | 'configure' // 可选：打开时直接执行的操作
     }
   | { type: 'marketplace-list' } // 列出已配置市场
   | { type: 'marketplace-menu' } // 市场相关子菜单

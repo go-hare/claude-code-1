@@ -636,6 +636,12 @@ function getInitialViewState(parsedCommand: ParsedCommand): ViewState {
         targetPlugin: parsedCommand.plugin,
         action: 'disable',
       };
+    case 'configure':
+      return {
+        type: 'manage-plugins',
+        targetPlugin: parsedCommand.plugin,
+        action: 'configure',
+      };
     case 'marketplace':
       if (parsedCommand.action === 'list') {
         return { type: 'marketplace-list' };

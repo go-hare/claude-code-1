@@ -85,11 +85,10 @@ export function agentsTrustDecision(): AgentsTrustDecision {
 async function primeAfterTrust(): Promise<void> {
   // densable primePlanSlugCollisions + capturePolicySnapshot — optional best-effort.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const policy = require('../utils/permissions/policyLimits.js') as {
-      capturePolicySnapshot?: () => void;
-    };
-    policy.capturePolicySnapshot?.();
+    const { capturePolicySnapshot } = await import(
+      '../utils/gatewayLoginRelaunch.js'
+    );
+    capturePolicySnapshot();
   } catch {
     // optional
   }

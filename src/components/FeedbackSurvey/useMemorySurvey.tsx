@@ -6,7 +6,6 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js';
 import { isAutoMemoryEnabled } from '../../memdir/paths.js';
-import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js';
 import type { Message } from '../../types/message.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
@@ -106,9 +105,7 @@ export function useMemorySurvey(
     if (getGlobalConfig().transcriptShareDismissed) {
       return false;
     }
-    if (!isPolicyAllowed('allow_product_feedback')) {
-      return false;
-    }
+    // Product-cut: policy limits always allow product feedback.
     return true;
   }, []);
 
@@ -197,9 +194,7 @@ export function useMemorySurvey(
       return;
     }
 
-    if (!isPolicyAllowed('allow_product_feedback')) {
-      return;
-    }
+    // Product-cut: policy limits always allow product feedback.
 
     if (isFeedbackSurveyEnvDisabled()) {
       return;

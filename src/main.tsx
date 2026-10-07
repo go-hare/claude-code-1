@@ -74,12 +74,6 @@ import {
 } from './services/api/filesApi.js';
 import { prefetchPassesEligibility } from './services/api/referral.js';
 import type { McpSdkServerConfig, McpServerConfig, ScopedMcpServerConfig } from './services/mcp/types.js';
-import {
-  isRemotePolicyAllowed,
-  loadPolicyLimits,
-  refreshPolicyLimits,
-  waitForPolicyLimitsToLoad,
-} from './services/policyLimits/index.js';
 import type { ToolInputJSONSchema } from './Tool.js';
 import {
   createSyntheticOutputTool,
@@ -1413,12 +1407,6 @@ async function run(): Promise<CommanderCommand> {
     runMigrations();
     profileCheckpoint('preAction_after_migrations');
 
-    // Load remote managed settings for enterprise customers (non-blocking)
-    // Fails open - if fetch fails, continues without remote settings
-    // Settings are applied via hot-reload when they arrive
-    // Must happen after init() to ensure config reading is allowed
-    void loadPolicyLimits();
-
     profileCheckpoint('preAction_after_remote_settings');
 
     // Load settings sync (non-blocking, fail-open)
@@ -2467,6 +2455,8 @@ async function run(): Promise<CommanderCommand> {
         const fatalErrors: ValidationError[] = [];
         const skipEntries: Array<{ name: string; type: string; message: string }> = [];
 
+        // densable W=$e?V:void 0 — bridgeSessionId only when sdkUrl (carrier child).
+        const bridgeSessionId = sdkUrl ? (sessionId as string | undefined) : undefined;
         for (const configItem of processedConfigs) {
           let configs: Record<string, McpServerConfig> | null = null;
           let errors: ValidationError[] = [];
@@ -2479,6 +2469,7 @@ async function run(): Promise<CommanderCommand> {
               filePath: 'command line',
               expandVars: true,
               scope: 'dynamic',
+              bridgeSessionId,
             });
             if (result.config) {
               configs = result.config.mcpServers;
@@ -2491,6 +2482,7 @@ async function run(): Promise<CommanderCommand> {
               filePath: configPath,
               expandVars: true,
               scope: 'dynamic',
+              bridgeSessionId,
             });
             if (result.config) {
               configs = result.config.mcpServers;
@@ -2563,17 +2555,12 @@ async function run(): Promise<CommanderCommand> {
           // densable 2.1.219: reserved names are soft-skipped inside parseMcpConfig
           // (skipReason reserved_name). No hard-exit here.
 
-          // Add dynamic scope to all configs. type:'sdk' entries pass through
-          // unchanged — they're extracted into sdkMcpConfigs downstream and
-          // passed to print.ts. The Python SDK relies on this path (it doesn't
-          // send sdkMcpServers in the initialize message). Dropping them here
-          // broke Coworker (inc-5122). The policy filter below already exempts
-          // type:'sdk', and the entries are inert without an SDK transport on
-          // stdin, so there's no bypass risk from letting them through.
-          const scopedConfigs = mapValues(allConfigs, config => ({
-            ...config,
-            scope: 'dynamic' as const,
-          }));
+          // Add dynamic scope to all configs. densable REMOTE arm: mpn/NSn +
+          // nf(fo)?OEe(ar):ar so already-cliOwned sources stay owned on the clone.
+          // type:'sdk' entries pass through unchanged — they're extracted into
+          // sdkMcpConfigs downstream and passed to print.ts.
+          const { rewriteRemoteDynamicMcpConfig } = await import('./services/mcp/ccrInjectedMcp.js');
+          const scopedConfigs = mapValues(allConfigs, (config, name) => rewriteRemoteDynamicMcpConfig(name, config));
 
           // Enforce managed policy (allowedMcpServers / deniedMcpServers) on
           // --mcp-config servers. Without this, the CLI flag bypasses the
@@ -3642,7 +3629,6 @@ async function run(): Promise<CommanderCommand> {
         if (onboardingShown) {
           // Refresh auth-dependent services now that the user has logged in during onboarding.
           // Keep in sync with the post-login logic in src/commands/login.tsx
-          void refreshPolicyLimits();
           // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
           resetUserCache();
           // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)
@@ -4547,10 +4533,11 @@ async function run(): Promise<CommanderCommand> {
           : getGlobalConfig().showExpandedTodos
             ? 'tasks'
             : 'none',
-        // densable replTab:"convo", panelFileView:null, diffPanelVisible:!1
+        // densable replTab:"convo", panelFileView:null, diffPanelVisible:!1, paneHoldsToasts:!1
         replTab: 'convo',
         panelFileView: null,
         diffPanelVisible: false,
+        paneHoldsToasts: false,
         showTeammateMessagePreview: isAgentSwarmsEnabled() ? false : undefined,
         selectedIPAgentIndex: -1,
         selectedBgAgentIndex: -1,
@@ -5187,14 +5174,7 @@ async function run(): Promise<CommanderCommand> {
 
         // --remote and --teleport both create/resume Claude Code Web (CCR) sessions.
         // Remote Control (--rc) is a separate feature gated in initReplBridge.ts.
-        if (remote !== null || teleport) {
-          await waitForPolicyLimitsToLoad();
-          if (!isRemotePolicyAllowed('allow_remote_sessions')) {
-            return await exitWithError(root, "Error: Remote sessions are disabled by your organization's policy.", () =>
-              gracefulShutdown(1),
-            );
-          }
-        }
+        // Product-cut: policy limits always allow remote sessions.
 
         if (remote !== null) {
           // densable interactive `--cloud` / `--remote` @192151632

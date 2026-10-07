@@ -83,6 +83,7 @@ export function resolveConnectAuthFlags(
 /**
  * Official `k=ce||re||L||me?void 0:new EFe`. Leftover has no cliOwned / first-
  * party auto-auth host — only land the Authorization-already-set pair.
+ * Dig 2026-10-04: still no densable `class h` cliOwned* / OEe mount host.
  */
 export function shouldSkipOAuthAuthProvider(flags: ConnectAuthFlags): boolean {
   return flags.hasUserAuthHeader || flags.helperMintsAuthHeader

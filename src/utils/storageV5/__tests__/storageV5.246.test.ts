@@ -430,7 +430,7 @@ describe('storageV5 factory / pin (2.1.246)', () => {
     expect(cli).toContain("args[0] !== '--preload'")
     expect(cli).toContain("args[0] !== '--bg-spare'")
     expect(cli).toContain('credentialsStoreFor(pinned)')
-    expect(cli).toContain('primePolicyLimitsCache(pinned)')
+    expect(cli).not.toContain('primePolicyLimitsCache(pinned)')
     expect(cli).not.toContain('tryCreateLocalV5Backend()')
   })
 

@@ -95,11 +95,15 @@ export function hideDiffPanelLatch(state: AppState): AppState {
   return state.diffPanelVisible ? { ...state, diffPanelVisible: false } : state
 }
 
-/** densable `WJ` — toast hold while the Obe panel is mounted. */
+/**
+ * densable `WJ` / `Pte` — toast hold while Obe is mounted OR pane toast-hold
+ * latch is on (`diffPanelVisible || paneHoldsToasts`).
+ */
 export function notificationsHoldToasts(state: {
   diffPanelVisible?: boolean
+  paneHoldsToasts?: boolean
 }): boolean {
-  return Boolean(state.diffPanelVisible)
+  return Boolean(state.diffPanelVisible || state.paneHoldsToasts)
 }
 
 export type DiffSelectionAttach = {

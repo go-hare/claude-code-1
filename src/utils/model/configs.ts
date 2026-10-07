@@ -246,6 +246,20 @@ export const CLAUDE_SONNET_5_CONFIG = {
   grok: 'claude-sonnet-5',
 } as const satisfies ModelConfig
 
+// densable 2.1.289: Claude Sonnet 5.5 (live default Sonnet; native 1M).
+export const CLAUDE_SONNET_5_5_CONFIG = {
+  firstParty: 'claude-sonnet-5-5',
+  bedrock: 'us.anthropic.claude-sonnet-5-5',
+  vertex: 'claude-sonnet-5-5',
+  foundry: 'claude-sonnet-5-5',
+  anthropicAws: 'claude-sonnet-5-5',
+  mantle: 'anthropic.claude-sonnet-5-5',
+  gateway: 'claude-sonnet-5-5',
+  openai: 'claude-sonnet-5-5',
+  gemini: 'claude-sonnet-5-5',
+  grok: 'claude-sonnet-5-5',
+} as const satisfies ModelConfig
+
 // @[MODEL LAUNCH]: Register the new config here.
 export const ALL_MODEL_CONFIGS = {
   haiku35: CLAUDE_3_5_HAIKU_CONFIG,
@@ -256,6 +270,8 @@ export const ALL_MODEL_CONFIGS = {
   sonnet45: CLAUDE_SONNET_4_5_CONFIG,
   sonnet46: CLAUDE_SONNET_4_6_CONFIG,
   sonnet5: CLAUDE_SONNET_5_CONFIG,
+  // densable 2.1.289 live Sonnet
+  sonnet55: CLAUDE_SONNET_5_5_CONFIG,
   opus40: CLAUDE_OPUS_4_CONFIG,
   opus41: CLAUDE_OPUS_4_1_CONFIG,
   opus45: CLAUDE_OPUS_4_5_CONFIG,

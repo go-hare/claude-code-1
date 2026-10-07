@@ -43,13 +43,6 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   getFeatureValue_CACHED_MAY_BE_STALE: () => true,
 }))
 
-const realPolicy = await import('src/services/policyLimits/index.js')
-const policySnap = snapshotModuleExports(realPolicy)
-mock.module('src/services/policyLimits/index.js', () => ({
-  ...policySnap,
-  isPolicyAllowed: () => true,
-}))
-
 // Restore after snaps are declared (afterAll callback runs post-suite; order
 // still kept below declarations for readability / no TDZ confusion).
 afterAll(() => {
@@ -57,7 +50,6 @@ afterAll(() => {
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookSnap,
   }))
-  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
 })
 
 // Narrow mock for the side-effectful entries in `src/constants/oauth.js`.

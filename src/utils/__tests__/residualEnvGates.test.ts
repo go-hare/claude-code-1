@@ -240,6 +240,7 @@ import {
   isPolicySkillsDisabled,
   isNonstreamingFallbackDisabled,
   isExperimentalBetasDisabled,
+  isStructuredOutputsDisabled,
   isOfficialMarketplaceAutoinstallDisabled,
   isFastModeDisabled,
   isVirtualScrollDisabled,
@@ -2882,6 +2883,12 @@ describe('DISABLE_CRON + BRIEF_UPLOAD densables', () => {
         CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
       }),
     ).toBe(true)
+    expect(
+      isStructuredOutputsDisabled({
+        CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS: '1',
+      }),
+    ).toBe(true)
+    expect(isStructuredOutputsDisabled({})).toBe(false)
     expect(
       isOfficialMarketplaceAutoinstallDisabled({
         CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: '1',

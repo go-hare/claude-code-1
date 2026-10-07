@@ -3,7 +3,6 @@ import { z } from 'zod/v4'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
-import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import {
@@ -59,10 +58,8 @@ export const RemoteTriggerTool = buildTool({
     return outputSchema()
   },
   isEnabled() {
-    return (
-      getFeatureValue_CACHED_MAY_BE_STALE('tengu_surreal_dali', false) &&
-      isRemotePolicyAllowed('allow_remote_sessions')
-    )
+    // Product-cut: policy limits always allow remote sessions.
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_surreal_dali', false)
   },
   isConcurrencySafe() {
     return true

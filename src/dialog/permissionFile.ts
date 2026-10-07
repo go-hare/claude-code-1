@@ -76,6 +76,8 @@ export type FilePermissionChoice =
   | 'no'
   | 'block-outside-reads'
   | 'ask-again-outside-reads'
+  /** densable 2.1.289 — allow this outside read; skip markSeen latch. */
+  | 'allow-outside-read-once'
 
 /** official yBt stamp on permission_file descriptor. */
 export function filePermissionOffersBlockOutsideReads(
@@ -241,6 +243,14 @@ export function resolveFilePermissionAnswer(
       return {
         behavior: 'allow',
         updatedInput: payload.input,
+        ...(feedback ? { feedback } : {}),
+      }
+    case 'allow-outside-read-once':
+      // densable 2.1.289: allow this read; interactiveHandler skips markSeen.
+      return {
+        behavior: 'allow',
+        updatedInput: payload.input,
+        askAgainOutsideReads: true,
         ...(feedback ? { feedback } : {}),
       }
     case 'yes-claude-folder':

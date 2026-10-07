@@ -21,7 +21,6 @@ import { logError } from '../utils/log.js'
 import { getAPIProvider, type APIProvider } from '../utils/model/providers.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { atomicWriteFile } from '../utils/storageV5/atomicWrite.js'
-import { isPolicyAllowed } from '../services/policyLimits/index.js'
 import {
   CLIENT_DATA_URL_ERROR_PREFIX,
   CLIENT_DATA_URL_ERROR_SUFFIX,
@@ -923,7 +922,7 @@ export async function loadClientDataUrl(
     if (resolution.kind === 'unset') return
     const result = await loadDocument(resolution, runsOnAnotherMachine, {
       getProvider: deps?.getProvider ?? getAPIProvider,
-      isCatalogAllowed: deps?.isCatalogAllowed ?? isPolicyAllowed,
+      isCatalogAllowed: deps?.isCatalogAllowed ?? (() => true),
       fetchHosted:
         deps?.fetchHosted ?? hostedFetchOverride ?? defaultHostedFetch,
     })

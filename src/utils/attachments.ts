@@ -1759,7 +1759,7 @@ export function getWorkflowKeywordAttachments(
     const { getInitialSettings } =
       require('./settings/settings.js') as typeof import('./settings/settings.js')
     const { hasUltracodeKeyword } =
-      require('./workflowKeyword.js') as typeof import('./workflowKeyword.js')
+      require('./ultraplan/keyword.js') as typeof import('./ultraplan/keyword.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     const settings = getInitialSettings()
@@ -4638,6 +4638,7 @@ function isFileReadDenied(
   filePath: string,
   toolPermissionContext: ToolPermissionContext,
 ): boolean {
+  // densable IG: Vbe(e,n,[e]) — raw spelling only (FileRead walks via Ro/pathsToCheck).
   const denyRule = matchingRuleForInput(
     filePath,
     toolPermissionContext,

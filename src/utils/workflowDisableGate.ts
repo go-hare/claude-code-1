@@ -70,22 +70,14 @@ export function isWorkflowKeywordTriggerEnabled(
 
 /**
  * densable zBn — Wi("allow_workflows") via policy limits (fail open).
- * Injectable via input.policyAllow for tests.
+ * Product-cut: policy limits always allow workflows. Injectable via
+ * input.policyAllow for tests.
  */
 function resolveWorkflowsPolicyAllow(
   policyAllow: boolean | null | undefined,
 ): boolean {
   if (policyAllow === false) return false
-  if (policyAllow === true) return true
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { isPolicyAllowed } =
-      require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
-    return isPolicyAllowed('allow_workflows')
-  } catch {
-    // densable fail-open when policy service unavailable
-    return true
-  }
+  return true
 }
 
 /**

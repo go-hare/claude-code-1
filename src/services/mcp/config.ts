@@ -4,7 +4,14 @@ import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import { dirname, join, parse } from 'path'
 import { getPlatform } from 'src/utils/platform.js'
+import {
+  BRIDGE_CARRIER_DROP_MESSAGES,
+  isBridgeCarrierChild,
+  rewriteBridgeCarrierMcpEntry,
+} from '../../bridge/bridgeCarrier.js'
+import { createRemoteMetaHttpConfig } from '../../bridge/hearthbotMcp.js'
 import type { PluginError } from '../../types/plugin.js'
+import { markCliOwnedConfig } from './cliOwnedConfigs.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
 import {
   CLAUDE_IN_CHROME_MCP_SERVER_NAME,
@@ -1640,11 +1647,23 @@ export function parseMcpConfig(params: {
   expandVars: boolean
   scope: ConfigScope
   filePath?: string
+  /** densable `bridgeSessionId` — carrier-child rewrite. */
+  bridgeSessionId?: string
+  /** densable `hostCarrier` — force carrier-child arm. */
+  hostCarrier?: boolean
 }): {
   config: McpJsonConfig | null
   errors: ValidationError[]
 } {
-  const { configObject, expandVars, scope, filePath } = params
+  const {
+    configObject,
+    expandVars,
+    scope,
+    filePath,
+    bridgeSessionId,
+    hostCarrier,
+  } = params
+  const carrierChild = isBridgeCarrierChild({ hostCarrier })
   // densable: v.object({mcpServers:v.record(v.string(),v.unknown())})
   const topLevel = z
     .object({ mcpServers: z.record(z.string(), z.unknown()) })
@@ -1780,6 +1799,28 @@ export function parseMcpConfig(params: {
 
     let configToCheck = parsed.data as McpServerConfig
 
+    // densable eft carrier arm: scope==="dynamic" && isBridgeCarrierChild
+    if (scope === 'dynamic' && carrierChild) {
+      const rewritten = rewriteBridgeCarrierMcpEntry(
+        name,
+        configToCheck,
+        bridgeSessionId,
+      )
+      if ('drop' in rewritten) {
+        pushSkip(
+          name,
+          `"${name}" ${BRIDGE_CARRIER_DROP_MESSAGES[rewritten.drop]}`,
+          undefined,
+          rewritten.drop,
+        )
+        continue
+      }
+      validatedServers[name] = markCliOwnedConfig(
+        createRemoteMetaHttpConfig(rewritten.url, rewritten.sessionId),
+      ) as McpServerConfig
+      continue
+    }
+
     // densable `$It` — reserved names soft-skip (sdk exempt)
     if (isReservedMcpServerName(name) && configToCheck.type !== 'sdk') {
       const reserved = isClaudeInChromeMCPServer(name)
@@ -1869,11 +1910,15 @@ export function parseMcpConfigFromFilePath(params: {
   filePath: string
   expandVars: boolean
   scope: ConfigScope
+  /** densable `bridgeSessionId` — carrier-child rewrite. */
+  bridgeSessionId?: string
+  /** densable `hostCarrier` — force carrier-child arm. */
+  hostCarrier?: boolean
 }): {
   config: McpJsonConfig | null
   errors: ValidationError[]
 } {
-  const { filePath, expandVars, scope } = params
+  const { filePath, expandVars, scope, bridgeSessionId, hostCarrier } = params
   const fs = getFsImplementation()
 
   let configContent: string
@@ -1948,6 +1993,8 @@ export function parseMcpConfigFromFilePath(params: {
     expandVars,
     scope,
     filePath,
+    bridgeSessionId,
+    hostCarrier,
   })
 }
 

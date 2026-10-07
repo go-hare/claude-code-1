@@ -24,6 +24,10 @@ export const KEYBINDING_CONTEXTS = [
   // New contexts for keybindings migration
   'Attachments',
   'Footer',
+  // densable 2.1.289 Mods AbovePrompt focus-ring contexts (gold CUt)
+  'AbovePrompt',
+  'AbovePromptInput',
+  'AbovePromptSelect',
   'MessageSelector',
   'DiffDialog',
   'DiffPanel',
@@ -53,6 +57,12 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
   Tabs: 'When tab navigation is active',
   Attachments: 'When navigating image attachments in a select dialog',
   Footer: 'When footer indicators are focused',
+  AbovePrompt:
+    "When a plugin's panel above the prompt, or a button in it, has keyboard focus",
+  AbovePromptInput:
+    "When a plugin's input field above the prompt has keyboard focus",
+  AbovePromptSelect:
+    "When a plugin's select above the prompt has keyboard focus",
   MessageSelector: 'When the message selector (rewind) is open',
   DiffDialog: 'When the diff dialog is open',
   DiffPanel: 'When the fullscreen uncommitted diff panel is open',
@@ -106,6 +116,27 @@ export const KEYBINDING_ACTIONS = [
   'chat:clearInput',
   'chat:imagePaste',
   'chat:messageActions',
+  // densable 2.1.289 AbovePrompt band collapse + focus ring (gold l$ / Go)
+  'abovePrompt:toggle',
+  'abovePrompt:focus',
+  'abovePrompt:next',
+  'abovePrompt:previous',
+  'abovePrompt:press',
+  'abovePrompt:leave',
+  'abovePrompt:highlightNext',
+  'abovePrompt:highlightPrevious',
+  // densable Pane scroll / room / close (defaults already use these)
+  'pane:scrollUp',
+  'pane:scrollDown',
+  'pane:pageUp',
+  'pane:pageDown',
+  'pane:top',
+  'pane:bottom',
+  'pane:grow',
+  'pane:shrink',
+  'pane:close',
+  'pane:next',
+  'pane:previous',
   // Autocomplete menu actions
   'autocomplete:accept',
   'autocomplete:dismiss',

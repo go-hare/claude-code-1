@@ -14,6 +14,11 @@ import { getDeepSeekModelContextWindow } from './model/deepseekModels.js'
 import { getGrokModelContextWindow } from './model/grokModels.js'
 import { getKimiModelContextWindow } from './model/kimiModels.js'
 import { getModelCapability } from './model/modelCapabilities.js'
+import {
+  getDensableCatalogModel,
+  resolveCatalogIdFromProviderId,
+} from './model/modelCatalogCapabilities.js'
+import { firstPartyNameToCanonical } from './model/model.js'
 
 // Model context window size (200k tokens for all models right now)
 export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
@@ -71,6 +76,28 @@ export function has1mContext(model: string): boolean {
     return false
   }
   return /\[1m\]/i.test(model)
+}
+
+/**
+ * densable 2.1.289 `cw` / `P9r` / `hv` — catalog `context.native_1m` (or mythos
+ * preview id) without requiring a `[1m]` suffix or beta header. Used for the
+ * default window on Bedrock/Vertex/Foundry/gateway and custom base URLs.
+ */
+export function catalogDeclaresNative1mWindow(model: string): boolean {
+  if (is1mContextDisabled()) {
+    return false
+  }
+  const stripped = model.replace(/\[1m\]/gi, '').trim()
+  const entry =
+    getDensableCatalogModel(stripped) ??
+    getDensableCatalogModel(firstPartyNameToCanonical(stripped)) ??
+    (() => {
+      const via = resolveCatalogIdFromProviderId(stripped)
+      return via ? getDensableCatalogModel(via) : undefined
+    })()
+  return (
+    entry?.context?.native_1m === true || stripped === 'claude-mythos-preview'
+  )
 }
 
 // @[MODEL LAUNCH]: Update this pattern if the new model supports 1M context
@@ -251,6 +278,12 @@ export function getContextWindowForModel(
 
   // [1m] suffix — explicit client-side opt-in, respected over all detection
   if (has1mContext(model)) {
+    return applyDisable1mClamp(1_000_000)
+  }
+
+  // densable 2.1.289 cw(): catalog native_1m → 1M with no [1m] suffix (Opus 4.7+,
+  // Fable, Sonnet 5 native rows; Bedrock/Vertex/Foundry/gateway + custom URL).
+  if (catalogDeclaresNative1mWindow(model)) {
     return applyDisable1mClamp(1_000_000)
   }
 

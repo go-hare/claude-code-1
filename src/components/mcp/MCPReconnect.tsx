@@ -4,7 +4,12 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Text, useTheme } from '@anthropic/ink';
 import { useMcpReconnect } from '../../services/mcp/MCPConnectionManager.js';
 import { isMcpServerDisabled } from '../../services/mcp/config.js';
-import { reconnectDisabledElsewhereResult } from '../../services/mcp/mcpReconnectRemedy.js';
+import {
+  formatMcpReconnectOutcome,
+  missingMcpReconnectTarget,
+  planMcpReconnect,
+  reconnectDisabledElsewhereResult,
+} from '../../services/mcp/mcpReconnectRemedy.js';
 import { useAppStateStore } from '../../state/AppState.js';
 import { Spinner } from '../Spinner.js';
 
@@ -19,14 +24,45 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
   const reconnectMcpServer = useMcpReconnect();
   const [isReconnecting, setIsReconnecting] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusLabel, setStatusLabel] = useState(serverName === 'all' ? 'all MCP servers' : serverName);
 
   useEffect(() => {
     async function attemptReconnect() {
       try {
-        // Check if server exists. Read via store.getState() instead of a
-        // reactive selector so this effect does not re-fire when
-        // reconnectMcpServer updates mcp.clients via onConnectionAttempt.
-        const server = store.getState().mcp.clients.find(c => c.name === serverName);
+        // Read via store.getState() instead of a reactive selector so this
+        // effect does not re-fire when reconnectMcpServer updates mcp.clients
+        // via onConnectionAttempt.
+        const clients = store.getState().mcp.clients;
+
+        if (serverName === 'all') {
+          const plan = planMcpReconnect(clients, 'all', isMcpServerDisabled);
+          if (plan.kind === 'missing') {
+            setIsReconnecting(false);
+            onComplete(missingMcpReconnectTarget('all'));
+            return;
+          }
+          if (plan.kind === 'text') {
+            setIsReconnecting(false);
+            onComplete(plan.text);
+            return;
+          }
+
+          setStatusLabel(plan.names.length === 1 ? plan.names[0]! : `${plan.names.length} MCP servers`);
+          const settled = await Promise.allSettled(plan.names.map(name => reconnectMcpServer(name)));
+          const results: Array<{ ok: true; type: string } | { ok: false }> = settled.map(entry =>
+            entry.status === 'fulfilled' ? { ok: true, type: entry.value.client.type } : { ok: false },
+          );
+          const text = formatMcpReconnectOutcome('all', results, plan.appendix);
+          setIsReconnecting(false);
+          if (!results.some(result => result.ok && result.type === 'connected')) {
+            setError(text);
+          }
+          onComplete(text);
+          return;
+        }
+
+        // Check if server exists.
+        const server = clients.find(c => c.name === serverName);
         if (!server) {
           setError(`MCP server "${serverName}" not found`);
           setIsReconnecting(false);
@@ -93,7 +129,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
     return (
       <Box flexDirection="column" gap={1} padding={1}>
         <Text color="text">
-          Reconnecting to <Text bold>{serverName}</Text>
+          Reconnecting to <Text bold>{statusLabel}</Text>
         </Text>
         <Box>
           <Spinner />
@@ -108,7 +144,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
       <Box flexDirection="column" gap={1} padding={1}>
         <Box>
           <Text>{color('error', theme)(figures.cross)} </Text>
-          <Text color="error">Failed to reconnect to {serverName}</Text>
+          <Text color="error">Failed to reconnect to {statusLabel}</Text>
         </Box>
         <Text dimColor>Error: {error}</Text>
       </Box>

@@ -14,7 +14,7 @@
  *         `nHe`; deeplink L0n invent-ban.
  */
 import { createHash } from 'crypto'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, join, resolve } from 'path'
 import { getOriginalCwd } from '../../bootstrap/state.js'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
@@ -30,7 +30,6 @@ import type {
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { FLAG_SETTINGS_MAX_BYTES } from './constants.js'
 import type { SettingSource } from './constants.js'
-import { getManagedFilePath } from './managedPath.js'
 import {
   getSettingsOwner,
   resetSettingsCache,
@@ -324,23 +323,10 @@ async function ownershipProbeAhead(
 }
 
 /**
- * Official nyn @179416890 — densable stub returns undefined.
- * Leftover: no separate override getter beyond getManagedFilePath env gate.
- */
-function explicitManagedSettingsPath(): string | undefined {
-  return undefined
-}
-
-/** Official F @179529xxx — empty drop-in listing for attested-absent seed. */
-const EMPTY_MANAGED_LISTING: readonly string[] = Object.freeze([])
-
-/**
  * Official v @179529582 — seed attested system-absent managed tier into store.
- * Leftover: hostFiles.serving, managedSettingsRoots ($Me/nx), SettingsOwner
- * walk/seed/clear, emptyParsedSettings (Fte).
+ * Product-cut: do not seed OS managed-settings.json / drop-ins.
  * Gold: gold-248-wKn-v-seed.txt
  */
-/** Product-cut: do not seed OS managed-settings.json / drop-ins. */
 function seedAttestedSystemTier(
   _storageV5: StorageV5,
   _store: SettingsOwner,
@@ -352,13 +338,6 @@ function seedAttestedSystemTier(
     }
   | undefined {
   return undefined
-}
-
-/**
- * Official $Me(nx()) @179438431 — when wslInherits unset → `[T_()]` = getManagedFilePath.
- */
-function managedSettingsRoots(): string[] {
-  return [getManagedFilePath()]
 }
 
 /**
@@ -462,68 +441,6 @@ async function readUserNamedSettingsFile(
   )
 }
 
-/**
- * Official On @179503602 — managed settings via system space.
- */
-async function readSystemManagedSettingsFile(
-  hostFiles: StorageV5['hostFiles'],
-  path: string,
-  prior: { contentHash: string; parsed: ParsedSettings } | undefined,
-): Promise<PrimerState> {
-  const o = await readHostFileBytes(hostFiles, hostPath('system', path))
-  if (o.kind !== 'bytes') return o
-  const parsed =
-    prior !== undefined && prior.contentHash === o.contentHash
-      ? prior.parsed
-      : await parseSettingsContent(decodeSettingsBytes(o.bytes), path)
-  return {
-    kind: 'seeded',
-    contentHash: o.contentHash,
-    size: o.size,
-    parsed,
-  }
-}
-
-/** Official Gyt @179438486. */
-function isManagedDropInName(name: string): boolean {
-  return name.endsWith('.json') && !name.startsWith('.')
-}
-
-/**
- * Official _Xn @179504453 — list managed-settings.d through system space.
- */
-async function listManagedDropIns(
-  hostFiles: StorageV5['hostFiles'],
-  dir: string,
-): Promise<
-  | { kind: 'listed'; names: string[] }
-  | { kind: 'failing'; code: string; failureClass?: string }
-> {
-  const r = await hostFiles.listFolder(hostPath('system', dir))
-  if (!r.ok) {
-    if (r.error.code === 'Failed' && r.error.telemetryCode === 'ENOTDIR') {
-      return { kind: 'listed', names: [] }
-    }
-    return failingFromHostError(r.error) as {
-      kind: 'failing'
-      code: string
-      failureClass?: string
-    }
-  }
-  if (!r.value.found) return { kind: 'listed', names: [] }
-  return {
-    kind: 'listed',
-    names: r.value.entries
-      .filter(
-        o =>
-          (o.kind === 'file' || o.kind === 'link') &&
-          isManagedDropInName(o.name),
-      )
-      .map(o => o.name)
-      .sort(),
-  }
-}
-
 type LayerReader = {
   source: SettingSource
   path: string
@@ -545,27 +462,6 @@ function projectLocalLayerReader(
     label,
     whenAbsent: 'seedAbsence',
     read: () => readUserNamedSettingsFile(storageV5.hostFiles, path),
-  }
-}
-
-/** Official Lgn @179505162. */
-function managedLayerReader(
-  storageV5: StorageV5,
-  path: string,
-  label: string,
-  store: SettingsOwner,
-): LayerReader {
-  return {
-    source: 'policySettings',
-    path,
-    label,
-    whenAbsent: 'fileServes',
-    read: () => {
-      const prior = store.managedFileReads.get(path) as
-        | { contentHash: string; parsed: ParsedSettings }
-        | undefined
-      return readSystemManagedSettingsFile(storageV5.hostFiles, path, prior)
-    },
   }
 }
 
@@ -752,187 +648,6 @@ function clearManagedSettingsSeeds(store: SettingsOwner, epoch: number): void {
   for (const s of [...store.managedFileReads.keys()]) {
     store.managedFileReads.delete(s)
     store.unseedParsedFile(s, 'policySettings', epoch)
-  }
-  for (const s of managedSettingsRoots()) {
-    store.clearFolderListing(join(s, 'managed-settings.d'), epoch)
-  }
-}
-
-/**
- * Official vKn @179528210 — managed-settings file tier read-ahead via system space.
- */
-async function readManagedSettingsTierAhead(
-  storageV5: StorageV5,
-  store: SettingsOwner,
-): Promise<
-  | {
-      listings: { dir: string; names: string[] }[]
-      unlisted: string[]
-      layers: LayerReader[]
-      walksAtReadStart: number
-      reads: Promise<PrimerState[]>
-    }
-  | undefined
-> {
-  const s = storageV5.hostFiles
-  if (!s.serves('system')) {
-    if (!store.systemSpaceServingLogged) {
-      store.systemSpaceServingLogged = true
-      logForDebugging(
-        "settingsPrime: the managed-settings file tier is not read ahead (the backend does not serve 'system'); the policy walk reads the host's files itself",
-      )
-    }
-    return undefined
-  }
-  const i = managedSettingsRoots()
-  const r = store.policyWalkCount
-  const a = i.map(c =>
-    managedLayerReader(
-      storageV5,
-      join(c, 'managed-settings.json'),
-      'managed settings',
-      store,
-    ),
-  )
-  const [o, g] = await Promise.all([
-    Promise.all(
-      i.map(c => listManagedDropIns(s, join(c, 'managed-settings.d'))),
-    ),
-    Promise.all(a.map(c => c.read())),
-  ])
-  const d: {
-    listings: { dir: string; names: string[] }[]
-    unlisted: string[]
-    layers: LayerReader[]
-    walksAtReadStart: number
-  } = {
-    listings: [],
-    unlisted: [],
-    layers: [...a],
-    walksAtReadStart: r,
-  }
-  const u: LayerReader[] = []
-  for (const [c, m] of i.entries()) {
-    const h = o[c]!
-    const p = join(m, 'managed-settings.d')
-    if (h.kind === 'failing') {
-      logForDebugging(
-        `settingsPrime: ${p} not listed through the backend (backend listing failed: ${h.code}${h.failureClass ? ` (${h.failureClass})` : ''}); the folder read serves`,
-      )
-      d.unlisted.push(p)
-      continue
-    }
-    if (h.names.length === 0) {
-      logForDebugging(
-        `settingsPrime: ${p} has no drop-ins to read ahead; the folder read confirms`,
-      )
-      d.unlisted.push(p)
-      continue
-    }
-    d.listings.push({ dir: p, names: h.names })
-    for (const C of h.names) {
-      u.push(
-        managedLayerReader(
-          storageV5,
-          join(p, C),
-          'managed settings drop-in',
-          store,
-        ),
-      )
-    }
-  }
-  d.layers.push(...u)
-  return {
-    ...d,
-    reads: Promise.all(u.map(c => c.read())).then(c => [...g, ...c]),
-  }
-}
-
-/** Official A @179532476. */
-function installManagedFolderListings(
-  store: SettingsOwner,
-  bag: {
-    listings: { dir: string; names: string[] }[]
-    unlisted: string[]
-    walksAtReadStart: number
-  },
-  epoch: number,
-): { kept: { dir: string; names: string[] }[]; verdicts: Map<string, string> } {
-  for (const a of bag.unlisted) store.clearFolderListing(a, epoch)
-  const i: { dir: string; names: string[] }[] = []
-  const r = new Map<string, string>()
-  for (const a of bag.listings) {
-    const o = store.folderInstallVerdict(a.dir, a.names, bag.walksAtReadStart)
-    r.set(a.dir, o)
-    if (o === 'raced') {
-      store.clearFolderListing(a.dir, epoch)
-      logForDebugging(
-        `settingsPrime: ${a.dir} listing not installed (a read this generation went by another membership while it was in flight); the walk's membership or its own folder read serves until the next reset`,
-      )
-    } else if (o === 'deferred') {
-      logForDebugging(
-        `settingsPrime: ${a.dir} membership changed after this generation's policy walk; it applies from the next reset, as today`,
-      )
-      i.push(a)
-    } else if (store.seedFolderListing(a.dir, a.names, epoch)) {
-      i.push(a)
-    }
-  }
-  return { kept: i, verdicts: r }
-}
-
-/** Official B @179531220. */
-function installManagedLayerSeeds(
-  store: SettingsOwner,
-  bag: {
-    layers: LayerReader[]
-    walksAtReadStart: number
-  },
-  results: PrimerState[],
-  verdicts: Map<string, string>,
-  epoch: number,
-): void {
-  const o = new Set<string>()
-  for (const [g, d] of bag.layers.entries()) {
-    const u = results[g]!
-    if (u.kind !== 'seeded') {
-      logForDebugging(
-        `settingsPrime: ${d.label} not seeded (${describePrimeReadKind(u)}); the file read serves`,
-      )
-      store.managedFileReads.delete(d.path)
-      store.unseedParsedFile(d.path, d.source, epoch)
-      continue
-    }
-    o.add(d.path)
-    store.managedFileReads.set(d.path, {
-      contentHash: u.contentHash,
-      parsed: u.parsed,
-    })
-    const c = verdicts.get(dirname(d.path))
-    const m =
-      c !== undefined && c !== 'install'
-        ? c
-        : store.policyInstallVerdict(d.path, u.parsed, bag.walksAtReadStart)
-    if (m === 'raced') {
-      store.dropRetainedLayer(d.path)
-      logForDebugging(
-        `settingsPrime: ${d.label} not installed (the walk read different content while this read was in flight); re-verified next generation`,
-      )
-      continue
-    }
-    if (m === 'deferred') {
-      logForDebugging(
-        `settingsPrime: ${d.label} changed after this generation's policy walk; it applies from the next reset, as today`,
-      )
-      continue
-    }
-    store.seedParsedFile(d.path, d.source, u.parsed, epoch)
-  }
-  for (const g of [...store.managedFileReads.keys()]) {
-    if (!o.has(g)) {
-      store.managedFileReads.delete(g)
-      store.unseedParsedFile(g, 'policySettings', epoch)
-    }
   }
 }
 
@@ -1128,16 +843,6 @@ export async function loadSettingsUnderPrime(
 
 /** Official export alias Gqe as resetSettingsCacheWithBackendRead. */
 export const resetSettingsCacheWithBackendRead = loadSettingsUnderPrime
-
-/**
- * Official _Ke @179162866 — storage backendView priming before SKn.
- * Product-cut: no remote managed-settings backend view.
- */
-async function primeStorageBackendView(
-  _storageV5: StorageV5,
-): Promise<unknown> {
-  return undefined
-}
 
 /**
  * Official SKn — leftover SettingsPrimer.
@@ -1449,7 +1154,6 @@ export async function seedUserSettings(
 /**
  * Official `$pn` @179527115 — leftover settingsPrime.
  * Gate: D() && storageV5 defined; second prime ignored if other backend.
- * `_Ke` product-cut: no remote backend view.
  * Official export alias: primeSettings.
  */
 export async function settingsPrime(
@@ -1465,9 +1169,6 @@ export async function settingsPrime(
     }
     return
   }
-  void primeStorageBackendView(storageV5).catch(err => {
-    logError(err instanceof Error ? err : new Error(errorMessage(err)))
-  })
   store.primer = new SettingsPrimer(storageV5, store)
   await store.primer.whenIdle()
 }

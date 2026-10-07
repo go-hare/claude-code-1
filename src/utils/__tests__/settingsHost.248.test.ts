@@ -685,8 +685,7 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
   test('settingsPrime does not prime a remote managed-settings backend', async () => {
     const primerSrc = src('../settings/settingsPrimer.ts')
     expect(primerSrc).not.toContain('primeRemoteSettingsBackendView')
-    expect(primerSrc).toContain('void primeStorageBackendView(storageV5)')
-    expect(primerSrc).toContain('return undefined')
+    expect(primerSrc).not.toContain('primeStorageBackendView')
   })
 
   test('SettingsOwner retain skips restore when D on but primer unset', () => {

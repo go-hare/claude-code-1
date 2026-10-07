@@ -56,10 +56,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import {
-  isRemotePolicyAllowed,
-  waitForPolicyLimitsToLoad,
-} from 'src/services/policyLimits/index.js'
 import { getBootstrapSessionHost } from '../utils/sessionHost.js'
 import {
   isTrustedDeviceActiveForOrg,
@@ -1633,9 +1629,6 @@ export function describeCloudHostedControlRoute(
   }
   return { route, telemetrySubtype: request.subtype ?? 'unknown' }
 }
-
-const HEADLESS_CLOUD_REMOTE_POLICY_DENY =
-  "Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them."
 
 export type HeadlessCloudNotice = {
   level: 'warning' | 'notice'
@@ -3245,9 +3238,7 @@ export async function askHostDeviceMcpConsent(opts: {
       (
         opts.seams?.egressDenied ??
         (() =>
-          isEssentialTrafficOnly() ||
-          getAPIProvider() !== 'firstParty' ||
-          !isRemotePolicyAllowed('allow_remote_sessions'))
+          isEssentialTrafficOnly() || getAPIProvider() !== 'firstParty')
       )()
     ) {
       return mapOutcome()
@@ -4760,9 +4751,8 @@ export function cloudEgressDenyReason(): 'egress' | 'policy_org' | undefined {
   if (isEssentialTrafficOnly() || getAPIProvider() !== 'firstParty') {
     return 'egress'
   }
-  return isRemotePolicyAllowed('allow_remote_sessions')
-    ? undefined
-    : 'policy_org'
+  // Product-cut: policy limits always allow remote sessions.
+  return undefined
 }
 
 /** densable `RJ` @191773300 — `cse_` → `session_`, clip 128. */
@@ -5517,14 +5507,7 @@ export async function refuseHeadlessCloudLaunch(
   if (!org.valid) {
     return { kind: 'refused', code: 'org_pin', message: org.message }
   }
-  await waitForPolicyLimitsToLoad()
-  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
-    return {
-      kind: 'refused',
-      code: 'unavailable',
-      message: `Error: ${HEADLESS_CLOUD_REMOTE_POLICY_DENY}`,
-    }
-  }
+  // Product-cut: policy limits always allow remote sessions.
   const argvReject = classifyHeadlessCloudArgvPolicy(
     args.argvPolicyReject,
     args.argvPolicyMessage,

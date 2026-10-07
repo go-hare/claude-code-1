@@ -114,6 +114,11 @@ export type BaseTextInputProps = {
   readonly onClearInput?: () => void
 
   /**
+   * densable 2.1.289 holdCleared — before Ctrl+C clears a non-empty value.
+   */
+  readonly onHoldCleared?: () => void
+
+  /**
    * Number of columns to wrap text at
    */
   readonly columns: number

@@ -9,6 +9,7 @@ export type ParsedCommand =
   | { type: 'uninstall'; plugin?: string }
   | { type: 'enable'; plugin?: string }
   | { type: 'disable'; plugin?: string }
+  | { type: 'configure'; plugin?: string }
   | { type: 'validate'; path?: string }
   | {
       type: 'marketplace'
@@ -123,6 +124,9 @@ export function parsePluginArgs(args?: string): ParsedCommand {
 
     case 'disable':
       return { type: 'disable', plugin: parts[1] }
+
+    case 'configure':
+      return { type: 'configure', plugin: parts[1] }
 
     case 'validate': {
       const target = parts.slice(1).join(' ').trim()

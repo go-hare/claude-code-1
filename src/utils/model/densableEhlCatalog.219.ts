@@ -323,6 +323,58 @@ export const DENSABLE_EHL_CATALOG = {
       },
       advisor_rank: 3,
     },
+    // densable 2.1.289 live Sonnet
+    {
+      id: 'claude-sonnet-5-5',
+      family: 'sonnet',
+      display_name: 'Sonnet 5.5',
+      knowledge_cutoff: 'June 2026',
+      provider_ids: {
+        first_party: 'claude-sonnet-5-5',
+        bedrock: 'us.anthropic.claude-sonnet-5-5',
+        vertex: 'claude-sonnet-5-5',
+        foundry: 'claude-sonnet-5-5',
+        anthropic_aws: 'claude-sonnet-5-5',
+        anthropic_google_cloud: 'claude-sonnet-5-5',
+        mantle: 'anthropic.claude-sonnet-5-5',
+        gateway: 'claude-sonnet-5-5',
+      },
+      eager_input_streaming: {
+        bedrock: true,
+        vertex: true,
+      },
+      vertex_region_env_var: 'VERTEX_REGION_CLAUDE_5_5_SONNET',
+      fallback_3p: 'claude-sonnet-5',
+      context: {
+        window: 1000000.0,
+        native_1m: true,
+        supports_1m_beta: true,
+      },
+      max_output_tokens: {
+        default: 128000,
+        upper: 128000,
+      },
+      pricing: 'tier_2_10',
+      capabilities: [
+        'effort',
+        'max_effort',
+        'xhigh_effort',
+        'adaptive_thinking',
+        'mid_conv_system',
+        'mid_conv_tool_change',
+        'context_management',
+        'rejects_disabled_thinking',
+        'per_turn_effort',
+        'per_turn_timing',
+        'lean_prompt',
+      ],
+      default_effort: 'high',
+      image_limits: {
+        maxWidth: 2000,
+        maxHeight: 2000,
+      },
+      advisor_rank: 4,
+    },
     {
       id: 'claude-opus-4-0',
       family: 'opus',
@@ -798,7 +850,8 @@ export const DENSABLE_EHL_CATALOG = {
       },
     },
     sonnet: {
-      default: 'claude-sonnet-5',
+      // densable 2.1.289: firstParty default Sonnet 5.5; 3P per_provider lag
+      default: 'claude-sonnet-5-5',
       per_provider: {
         bedrock: 'claude-sonnet-4-5',
         vertex: 'claude-sonnet-4-5',
@@ -823,7 +876,7 @@ export const DENSABLE_EHL_CATALOG = {
   latest_per_family: {
     fable: 'claude-fable-5-1',
     opus: 'claude-opus-5-5',
-    sonnet: 'claude-sonnet-5',
+    sonnet: 'claude-sonnet-5-5',
     haiku: 'claude-haiku-4-5',
   },
   alias_migration: {},

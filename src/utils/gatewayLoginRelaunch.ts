@@ -9,17 +9,11 @@
  *   extraArgs `[...o5(c,wle(o)),...i5(c,AL())]` env `$B()` (not Yk,
  *   not TUI_JUST_SWITCHED)
  *
- * Wired from /login when clientType==="gateway" after managed-settings fetch
- * fails or policy diverged. Not Yk/#l.
+ * Wired from /login when clientType==="gateway" after policy diverged.
+ * Remote managed-settings failure detail arms product-cut. Not Yk/#l.
  */
 
 import { isSessionPersistenceDisabled } from '../bootstrap/state.js'
-type RemoteManagedSettingsFailure = {
-  kind?: string
-  message?: string
-  errorKind?: string
-  httpStatus?: number
-}
 import {
   acceptTuiRelaunch,
   flushStreamsBeforeRelaunchExit,
@@ -80,53 +74,12 @@ function deepEqualsJson(a: unknown, b: unknown): boolean {
   }
 }
 
-function formatGatewayFailureDetail(
-  failure: RemoteManagedSettingsFailure | undefined,
-  accountSwitched: boolean,
-): string | undefined {
-  if (!failure) return undefined
-  switch (failure.errorKind) {
-    case 'timeout':
-      return 'the request timed out'
-    case 'network_error':
-      return "couldn't connect to the gateway"
-    case 'http_401':
-    case 'http_403':
-      return accountSwitched
-        ? 'the gateway did not accept the new credential'
-        : "the gateway did not accept this session's credential"
-    case 'no_auth_available':
-      return 'no credential was on hand for the request'
-    case 'http_4xx':
-    case 'http_5xx':
-      return failure.httpStatus === undefined
-        ? 'the gateway answered with an unexpected status'
-        : `the gateway answered HTTP ${failure.httpStatus}`
-    case 'parse_error':
-    case 'invalid_settings':
-      return "the gateway's response was not valid managed settings"
-    case 'gateway_cert_mismatch':
-      return "the gateway's TLS certificate did not match the one you trusted"
-    case 'gateway_pin_refused':
-      return "the credentials file that keeps the gateway's TLS pin is a symlink, which is not followed"
-    case 'gateway_pin_unreadable':
-      return "the credentials file that keeps the gateway's TLS pin could not be read (try again)"
-    case 'unknown_error':
-      return 'something unexpected went wrong (details with --debug)'
-  }
-}
-
 function formatGatewaySignedInLine(
   hostname: string,
-  failure: RemoteManagedSettingsFailure | undefined,
   accountSwitched: boolean,
 ): string {
-  const detail = formatGatewayFailureDetail(failure, accountSwitched)
-  if (detail) {
-    return accountSwitched
-      ? `Signed in to Cloud gateway ${hostname}, but couldn't load your organization's managed settings (${detail})`
-      : `Couldn't reload your organization's managed settings from Cloud gateway ${hostname} (${detail})`
-  }
+  // Product-cut: remote managed-settings fetch is gone; failure detail arms trimmed.
+  // Callers keep failure === undefined.
   return accountSwitched
     ? `Signed in to Cloud gateway ${hostname}`
     : `Your organization's managed settings on Cloud gateway ${hostname} changed`
@@ -137,17 +90,15 @@ function formatGatewaySignedInLine(
  */
 export function formatGatewayRestartingMessage(
   hostname: string,
-  failure: RemoteManagedSettingsFailure | undefined,
+  failure: undefined,
   accountSwitched: boolean,
   sessionPersistenceDisabled: boolean = isSessionPersistenceDisabled(),
 ): string {
-  const body = formatGatewaySignedInLine(hostname, failure, accountSwitched)
+  void failure
+  const body = formatGatewaySignedInLine(hostname, accountSwitched)
   const suffix = sessionPersistenceDisabled
     ? '…'
     : ' (this conversation is not saved, so it starts fresh)…'
-  if (failure) {
-    return `${body}. Restarting Claude Code to retry${suffix}`
-  }
   return `${body}. Restarting Claude Code to apply ${
     accountSwitched ? "your organization's managed settings" : 'them'
   }${suffix}`
@@ -158,17 +109,16 @@ export function formatGatewayRestartingMessage(
  */
 export function formatGatewayRestartFailedMessage(
   hostname: string,
-  failure: RemoteManagedSettingsFailure | undefined,
+  failure: undefined,
   reason: string,
   accountSwitched: boolean,
   sessionPersistenceDisabled: boolean = isSessionPersistenceDisabled(),
 ): string {
-  const body = formatGatewaySignedInLine(hostname, failure, accountSwitched)
-  const apply = failure
-    ? 'Claude Code has to restart to retry'
-    : `Claude Code has to restart to apply ${
-        accountSwitched ? "your organization's managed settings" : 'them'
-      }`
+  void failure
+  const body = formatGatewaySignedInLine(hostname, accountSwitched)
+  const apply = `Claude Code has to restart to apply ${
+    accountSwitched ? "your organization's managed settings" : 'them'
+  }`
   const continueHint = sessionPersistenceDisabled
     ? ''
     : ' (add --continue to return to this conversation)'
@@ -177,7 +127,8 @@ export function formatGatewayRestartFailedMessage(
 
 export type GatewayLoginRelaunchInput = {
   hostname: string
-  failure?: RemoteManagedSettingsFailure
+  /** Product-cut: remote managed-settings failure arms removed; keep undefined. */
+  failure?: undefined
   accountSwitched: boolean
   /** densable he(o) — defaults to empty permission ctx. */
   toolPermissionContext?: RelaunchPermissionCtx

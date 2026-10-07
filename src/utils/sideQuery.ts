@@ -294,12 +294,10 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
   for (const extra of extraBetas ?? []) {
     if (!betas.includes(extra)) betas.push(extra)
   }
-  // Add structured-outputs beta if using output_format and provider supports it
-  if (
-    output_format &&
-    modelSupportsStructuredOutputs(model) &&
-    !betas.includes(STRUCTURED_OUTPUTS_BETA_HEADER)
-  ) {
+  // densable sideQuery Ft/wGo — only attach format + beta when supported
+  const useStructuredOutputs =
+    Boolean(output_format) && modelSupportsStructuredOutputs(model)
+  if (useStructuredOutputs && !betas.includes(STRUCTURED_OUTPUTS_BETA_HEADER)) {
     betas.push(STRUCTURED_OUTPUTS_BETA_HEADER)
   }
 
@@ -388,7 +386,8 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     messages,
     ...(tools && { tools }),
     ...(tool_choice && { tool_choice }),
-    ...(output_format && { output_config: { format: output_format } }),
+    ...(useStructuredOutputs &&
+      output_format && { output_config: { format: output_format } }),
     ...(temperature !== undefined && { temperature }),
     ...(stop_sequences && { stop_sequences }),
     ...(thinkingConfig && { thinking: thinkingConfig }),
