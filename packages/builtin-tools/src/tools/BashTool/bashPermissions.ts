@@ -25,10 +25,15 @@ import {
 } from 'src/utils/bash/commands.js'
 import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
+import { isAbsolute, resolve as resolvePath } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isCommandInjectionCheckDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { AbortError } from 'src/utils/errors.js'
+import {
+  expandTilde,
+  isDangerousRemovalPath,
+} from 'src/utils/permissions/pathValidation.js'
 import type {
   ClassifierBehavior,
   ClassifierResult,
@@ -684,13 +689,19 @@ export function stripWrappersFromArgv(argv: string[]): string[] {
       const i = skipTimeoutFlags(a)
       if (i < 0 || !a[i] || !/^\d+(?:\.\d+)?[smhd]?$/.test(a[i]!)) return a
       a = a.slice(i + 1)
-    } else if (
-      a[0] === 'nice' &&
-      a[1] === '-n' &&
-      a[2] &&
-      /^-?\d+$/.test(a[2])
-    ) {
-      a = a.slice(a[3] === '--' ? 4 : 3)
+    } else if (a[0] === 'nice') {
+      // Match SAFE_WRAPPER_PATTERNS: bare `nice`, `nice -n N`, `nice -N`.
+      if (a[1] === '-n' && a[2] && /^-?\d+$/.test(a[2])) {
+        a = a.slice(a[3] === '--' ? 4 : 3)
+      } else if (a[1] && /^-\d+$/.test(a[1]!)) {
+        a = a.slice(a[2] === '--' ? 3 : 2)
+      } else {
+        a = a.slice(a[1] === '--' ? 2 : 1)
+      }
+    } else if (a[0] === 'stdbuf' && a[1] && /^-[ioe][LN0-9]+$/.test(a[1]!)) {
+      let i = 1
+      while (i < a.length && /^-[ioe][LN0-9]+$/.test(a[i]!)) i++
+      a = a.slice(a[i] === '--' ? i + 1 : i)
     } else {
       return a
     }
@@ -1734,6 +1745,655 @@ export function detectPossiblyEmptyVariableRm(
   return null
 }
 
+/** Shells whose `-c` / `-lc` argument is an inline script (densable 2.1.289). */
+const SHELL_INLINE_NAMES = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'ash'])
+
+function basenameCommand(token: string): string {
+  const base = token.split(/[/\\]/).pop() ?? token
+  return base.toLowerCase().replace(/\.exe$/i, '')
+}
+
+/**
+ * densable A6o bare wrappers (beyond sudo/doas/pkexec/command/env) that hide
+ * `bash -c`. Gold eut uses per-wrapper value-flag sets (A6o) + P6o inline
+ * `-c/--command` rewrite (flock/script) + M6o positional consume
+ * (flock/script lockfile|typescript, taskset mask, chrt priority). Do **not**
+ * invent xargs/su/chroot peels.
+ */
+const A6O_BARE_WRAPPERS = new Set([
+  'watch',
+  'ionice',
+  'setsid',
+  'taskset',
+  'chrt',
+  'strace',
+  'ltrace',
+  'flock',
+  'script',
+  'unshare',
+  'nsenter',
+  'exec',
+  'builtin',
+  'noglob',
+  'nocorrect',
+])
+
+/** densable A6o value-taking flags — only these consume the next argv token. */
+const A6O_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
+  watch: new Set(['-n', '--interval', '--equexit']),
+  ionice: new Set([
+    '-c',
+    '-n',
+    '-p',
+    '-P',
+    '-u',
+    '--class',
+    '--classdata',
+    '--pid',
+    '--pgid',
+    '--uid',
+  ]),
+  setsid: new Set(),
+  taskset: new Set(['-c', '--cpu-list']),
+  chrt: new Set([
+    '-p',
+    '--pid',
+    '-T',
+    '-P',
+    '-D',
+    '--sched-runtime',
+    '--sched-period',
+    '--sched-deadline',
+  ]),
+  strace: new Set([
+    '-e',
+    '-o',
+    '-p',
+    '-s',
+    '-E',
+    '-P',
+    '-S',
+    '-a',
+    '-b',
+    '-I',
+    '-u',
+    '-X',
+    '-O',
+    '-U',
+    '--output',
+    '--trace',
+    '--expr',
+    '--attach',
+    '--string-limit',
+    '--env',
+    '--trace-path',
+    '--columns',
+    '--user',
+    '--interruptible',
+    '--detach-on',
+    '--const-print-style',
+    '--summary-sort-by',
+    '--summary-syscall-overhead',
+    '--summary-columns',
+  ]),
+  ltrace: new Set([
+    '-a',
+    '-A',
+    '-e',
+    '-l',
+    '-n',
+    '-o',
+    '-p',
+    '-s',
+    '-u',
+    '-x',
+    '-D',
+    '-F',
+    '--align',
+    '--config',
+    '--debug',
+    '--indent',
+    '--library',
+    '--output',
+    '--string-max',
+    '-w',
+    '--where',
+  ]),
+  flock: new Set(['-w', '-E', '--timeout', '--wait', '--conflict-exit-code']),
+  script: new Set([
+    '-E',
+    '-T',
+    '-m',
+    '-o',
+    '-O',
+    '-B',
+    '-I',
+    '--echo',
+    '--log-timing',
+    '--logging-format',
+    '--output-limit',
+    '--log-out',
+    '--log-io',
+    '--log-in',
+  ]),
+  unshare: new Set([
+    '-R',
+    '-w',
+    '-S',
+    '-G',
+    '--setuid',
+    '--setgid',
+    '--root',
+    '--wd',
+    '--propagation',
+    '--setgroups',
+    '--monotonic',
+    '--boottime',
+  ]),
+  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
+  exec: new Set(['-a']),
+  builtin: new Set(),
+  noglob: new Set(),
+  nocorrect: new Set(),
+}
+
+/**
+ * densable P6o — flags whose next token is an inline command body to rewrite
+ * into argv (not a mere value to skip). env -S/--split-string is handled in
+ * the env branch; flock/script -c/--command here.
+ */
+const A6O_P6O_COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
+  flock: new Set(['-c', '--command']),
+  script: new Set(['-c', '--command']),
+}
+
+/** densable M6o — consume one positional (lockfile / typescript / mask / priority). */
+const A6O_M6O_POSITIONAL: Record<string, (token: string) => boolean> = {
+  flock: () => true,
+  script: () => true,
+  taskset: token => /^(0x[\da-f]+|\d+)$/i.test(token),
+  chrt: token => /^\d+$/.test(token),
+}
+
+/**
+ * densable eut P6o body rewrite: prefer shell-quote reparse so
+ * `bash -c "rm -rf /"` stays a proper -c script token; fall back to gold's
+ * whitespace split only when parse fails.
+ */
+function rewriteP6oCommandBody(body: string): string[] | null {
+  const trimmed = body.trim()
+  if (trimmed === '') return null
+  const parsed = tryParseShellCommand(trimmed)
+  if (parsed.success) {
+    const toks = parsed.tokens.filter(
+      (t): t is string => typeof t === 'string' && t.length > 0,
+    )
+    if (toks.length > 0 && toks[0] !== '') return toks
+    return null
+  }
+  const split = trimmed.split(/\s+/).filter(t => t.length > 0)
+  if (split.length === 0 || split[0] === '') return null
+  return split
+}
+
+/**
+ * Peel privilege / dispatcher prefixes that hide `bash -c` from a leading
+ * argv match: `sudo`, `doas`, `pkexec`, `command`, `env`, plus gold A6o
+ * wrappers (per-wrapper value flags + P6o rewrite + M6o positional). Safe
+ * wrappers (timeout/nice/…) are already removed by stripSafeWrappers /
+ * stripWrappersFromArgv.
+ */
+function peelPrivilegePrefixes(tokens: string[]): string[] {
+  let cur = tokens
+  let i = 0
+  while (i < cur.length) {
+    // sudo/doas/pkexec accept `VAR=val` before the command
+    // (`sudo FOO=1 bash -c …`). Also re-peel mid-stack assigns left after
+    // wrapper strip (`env timeout 5 BAR=2 bash -c …`).
+    if (ENV_VAR_ASSIGN_RE.test(cur[i]!)) {
+      i++
+      continue
+    }
+    const name = basenameCommand(cur[i]!)
+    if (name === 'sudo' || name === 'doas' || name === 'pkexec') {
+      i++
+      while (i < cur.length && cur[i]!.startsWith('-')) {
+        const flag = cur[i]!
+        // Common value-taking short/long flags — consume the next token.
+        if (
+          flag === '-u' ||
+          flag === '-g' ||
+          flag === '-C' ||
+          flag === '-p' ||
+          flag === '--user' ||
+          flag === '--group' ||
+          flag === '--prompt' ||
+          flag === '--role' ||
+          flag === '--type'
+        ) {
+          i += 2
+        } else {
+          i++
+        }
+      }
+      continue
+    }
+    if (name === 'command') {
+      i++
+      while (i < cur.length && /^-[pvV]+$/.test(cur[i]!)) i++
+      continue
+    }
+    if (name === 'env') {
+      // densable P6o for env: -S/--split-string rewrites the body into argv.
+      const envP6o = new Set(['-S', '--split-string'])
+      const envValueFlags = new Set(['-u', '--unset', '-C', '--chdir'])
+      i++
+      while (i < cur.length) {
+        const t = cur[i]!
+        if (ENV_VAR_ASSIGN_RE.test(t)) {
+          i++
+          continue
+        }
+        if (!t.startsWith('-')) break
+        // -- ends env options
+        if (t === '--') {
+          i++
+          break
+        }
+        if (envP6o.has(t) && cur[i + 1] !== undefined) {
+          const body = rewriteP6oCommandBody(cur[i + 1]!)
+          if (body === null) return tokens
+          cur = body
+          i = 0
+          break
+        }
+        const eq = t.indexOf('=')
+        if (eq > 0 && envP6o.has(t.slice(0, eq))) {
+          const body = rewriteP6oCommandBody(t.slice(eq + 1))
+          if (body === null) return tokens
+          cur = body
+          i = 0
+          break
+        }
+        if (t.length > 2 && t[1] !== '-' && envP6o.has(t.slice(0, 2))) {
+          const body = rewriteP6oCommandBody(t.slice(2))
+          if (body === null) return tokens
+          cur = body
+          i = 0
+          break
+        }
+        if (envValueFlags.has(t)) {
+          i += 2
+        } else {
+          i++
+        }
+      }
+      continue
+    }
+    if (A6O_BARE_WRAPPERS.has(name)) {
+      const valueFlags = A6O_VALUE_FLAGS[name] ?? new Set<string>()
+      const p6oFlags = A6O_P6O_COMMAND_FLAGS[name]
+      const m6o = A6O_M6O_POSITIONAL[name]
+      let b = i + 1
+      let commandBody: string | undefined
+      let consumedPositional = false
+      while (b < cur.length) {
+        const tok = cur[b]!
+        if (tok === '--') {
+          b++
+          if (
+            !consumedPositional &&
+            m6o !== undefined &&
+            b + 1 < cur.length &&
+            m6o(cur[b]!)
+          ) {
+            consumedPositional = true
+            b++
+            continue
+          }
+          break
+        }
+        if (p6oFlags !== undefined) {
+          if (p6oFlags.has(tok) && cur[b + 1] !== undefined) {
+            const body = cur[b + 1]!.trim()
+            if (body !== '') {
+              commandBody = body
+              break
+            }
+            b += 2
+            continue
+          }
+          const eq = tok.indexOf('=')
+          if (eq > 0 && p6oFlags.has(tok.slice(0, eq))) {
+            const body = tok.slice(eq + 1).trim()
+            if (body !== '') {
+              commandBody = body
+              break
+            }
+            b++
+            continue
+          }
+          if (
+            tok.length > 2 &&
+            tok[1] !== '-' &&
+            p6oFlags.has(tok.slice(0, 2))
+          ) {
+            const body = tok.slice(2).trim()
+            if (body !== '') {
+              commandBody = body
+              break
+            }
+            b++
+            continue
+          }
+        }
+        // Flag peel: only A6o value-flag set consumes next token. Boolean
+        // flags like nsenter/unshare `-m` must NOT eat the shell.
+        if (tok.startsWith('-') && (tok !== '-' || m6o === undefined)) {
+          b += valueFlags.has(tok) && b + 1 < cur.length ? 2 : 1
+          continue
+        }
+        if (!consumedPositional && m6o?.(tok) && b + 1 < cur.length) {
+          consumedPositional = true
+          b++
+          continue
+        }
+        break
+      }
+      if (commandBody !== undefined) {
+        const body = rewriteP6oCommandBody(commandBody)
+        if (body === null) return tokens
+        cur = body
+        i = 0
+        continue
+      }
+      if (b >= cur.length) return cur.slice(b)
+      i = b
+      continue
+    }
+    break
+  }
+  return cur.slice(i)
+}
+
+function extractShellDashCFromSimple(
+  command: string,
+  depth: number,
+): { scripts: string[]; hadShellDashC: boolean; unreadable: boolean } {
+  const stripped = stripSafeWrappers(command)
+  const parsed = tryParseShellCommand(stripped)
+  if (!parsed.success) {
+    const looksLike =
+      /\b(?:bash|sh|zsh|dash|ksh|ash)\b/.test(stripped) &&
+      /-[a-zA-Z]*c/.test(stripped)
+    if (looksLike && /\brm(?:dir)?\b/.test(stripped)) {
+      return { scripts: [], hadShellDashC: true, unreadable: true }
+    }
+    return { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  const rawTokens = parsed.tokens.filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+  // Skip leading VAR=val (same as detectDangerousLiteralRmInCommand) so
+  // `FOO=1 bash -c "rm -rf /"` still unwraps — stripSafeWrappers only
+  // removes safe-list assigns, leaving arbitrary assigns as tokens[0].
+  // peelPrivilegePrefixes also strips VAR=val after sudo/doas/pkexec and
+  // mid-stack after wrapper peel (`sudo FOO=1 …`, `timeout 5 BAR=2 …`).
+  let tokens = rawTokens
+  while (tokens.length > 0 && ENV_VAR_ASSIGN_RE.test(tokens[0]!)) {
+    tokens = tokens.slice(1)
+  }
+  // Alternate privilege peel (sudo/env/command + VAR=val) with argv wrapper
+  // strip (timeout/nice/nohup/time) until stable — `sudo timeout 5 bash -c …`
+  // otherwise leaves `timeout` in front of bash and misses -c.
+  for (let round = 0; round < 8; round++) {
+    const peeled = peelPrivilegePrefixes(tokens)
+    const stripped = stripWrappersFromArgv(peeled)
+    if (
+      stripped.length === tokens.length &&
+      stripped.every((t, i) => t === tokens[i])
+    ) {
+      tokens = stripped
+      break
+    }
+    tokens = stripped
+  }
+  if (tokens.length === 0) {
+    return { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  // densable d5o — peel busybox|toybox when next token is an inline shell.
+  {
+    const applet = basenameCommand(tokens[0]!)
+    if (
+      (applet === 'busybox' || applet === 'toybox') &&
+      tokens[1] &&
+      SHELL_INLINE_NAMES.has(basenameCommand(tokens[1]!))
+    ) {
+      tokens = tokens.slice(1)
+    }
+  }
+  if (tokens.length === 0) {
+    return { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  const name = basenameCommand(tokens[0]!)
+  if (!SHELL_INLINE_NAMES.has(name)) {
+    return { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  let script: string | undefined
+  for (let j = 1; j < tokens.length; j++) {
+    const arg = tokens[j]!
+    if (arg === '-c' || /^-[A-Za-z]*c[A-Za-z]*$/.test(arg)) {
+      script = tokens[j + 1]
+      break
+    }
+  }
+  if (script === undefined) {
+    return { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  if (script === '') {
+    return { scripts: [], hadShellDashC: true, unreadable: true }
+  }
+  const nested = extractShellDashCScripts(script, depth + 1)
+  // Nested -c quote collapse (outer parse yields `bash -c bash -c "rm` /
+  // `bash`) — if we still see nested -c + rm but lost critical path
+  // markers, fail closed. Also fail closed when nesting remains after
+  // depth budget (L3+) and rm is present.
+  let nestedUnreadable = nested.unreadable
+  if (nested.hadShellDashC && /\brm(?:dir)?\b/.test(script)) {
+    const joined = nested.scripts.join(' ')
+    const lostCriticalPath =
+      /(?:\/|\$HOME|~)/.test(script) && !/(?:\/|\$HOME|~)/.test(joined)
+    const stillLooksNested =
+      /\b(?:bash|sh|zsh|dash|ksh|ash)\b/.test(joined) &&
+      /-[a-zA-Z]*c/.test(joined)
+    if (lostCriticalPath || stillLooksNested) {
+      nestedUnreadable = true
+    }
+  }
+  return {
+    scripts: [script, ...nested.scripts],
+    hadShellDashC: true,
+    unreadable: nestedUnreadable,
+  }
+}
+
+/**
+ * densable 2.1.289 — unwrap `bash -c` / `sh -c` / `bash -lc` script bodies so
+ * dangerous-rm checks see the inner command (bypassPermissions / Bash allow
+ * rules must not skip them).
+ *
+ * Walks every simple command from `;` / `&&` / `||` / `|` compounds and peels
+ * `sudo` / `command` / `env` prefixes so
+ * `echo hi; sudo bash -c "rm -rf /"` still asks.
+ */
+export function extractShellDashCScripts(
+  command: string,
+  depth = 0,
+): { scripts: string[]; hadShellDashC: boolean; unreadable: boolean } {
+  if (depth > 3) {
+    return { scripts: [], hadShellDashC: true, unreadable: true }
+  }
+  // Always try the whole string first — splitCommand mangles nested quotes
+  // inside a leading `bash -c "…"` and would lose critical paths.
+  const results = [extractShellDashCFromSimple(command, depth)]
+  // Also walk ;/&&/||/| sides for `echo; bash -c …` / pipes.
+  const parts = splitCommand(command)
+  if (parts.length > 1) {
+    for (const part of parts) {
+      results.push(extractShellDashCFromSimple(part, depth))
+    }
+  }
+  const scripts: string[] = []
+  let hadShellDashC = false
+  let unreadable = false
+  for (const one of results) {
+    hadShellDashC = hadShellDashC || one.hadShellDashC
+    unreadable = unreadable || one.unreadable
+    for (const s of one.scripts) {
+      if (!scripts.includes(s)) scripts.push(s)
+    }
+  }
+  return { scripts, hadShellDashC, unreadable }
+}
+
+function shellQuoteTokenText(token: unknown): string | null {
+  if (typeof token === 'string') return token
+  if (
+    token &&
+    typeof token === 'object' &&
+    'op' in token &&
+    (token as { op?: string }).op === 'glob' &&
+    'pattern' in token &&
+    typeof (token as { pattern?: unknown }).pattern === 'string'
+  ) {
+    return (token as { pattern: string }).pattern
+  }
+  return null
+}
+
+function detectDangerousLiteralRmInCommand(
+  command: string,
+): { command: 'rm' | 'rmdir'; path: string } | null {
+  const stripped = stripSafeWrappers(command)
+  const parsed = tryParseShellCommand(stripped)
+  if (!parsed.success) return null
+  const tokens = parsed.tokens
+    .map(shellQuoteTokenText)
+    .filter((t): t is string => t !== null && t.length > 0)
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]!
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+      i++
+      continue
+    }
+    break
+  }
+  if (i >= tokens.length) return null
+  const name = basenameCommand(tokens[i]!)
+  if (name !== 'rm' && name !== 'rmdir') return null
+  const cmd = name === 'rmdir' ? 'rmdir' : 'rm'
+  const cwd = getCwd()
+  for (let j = i + 1; j < tokens.length; j++) {
+    let token = tokens[j]!
+    if (token === '--') {
+      continue
+    }
+    if (token.startsWith('-') && token !== '-') continue
+    token = token.replace(/^['"]|['"]$/g, '')
+    if (token === '' || token.includes('$') || token.includes('`')) continue
+    const absolute = isAbsolute(expandTilde(token))
+      ? expandTilde(token)
+      : resolvePath(cwd, expandTilde(token))
+    if (isDangerousRemovalPath(absolute)) {
+      return { command: cmd, path: absolute }
+    }
+  }
+  return null
+}
+
+/**
+ * densable 2.1.289 — ask before dangerous rm inside bash/sh -c, even under
+ * bypassPermissions or a whole-shell allow rule.
+ */
+export function checkDangerousRmInShellDashC(
+  command: string,
+): PermissionResult | null {
+  const { scripts, hadShellDashC, unreadable } =
+    extractShellDashCScripts(command)
+  if (!hadShellDashC) return null
+
+  if (unreadable && /\brm(?:dir)?\b/.test(command)) {
+    return dangerousRemovalAsk(
+      'rm',
+      'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+      'in a shell -c script that could not be checked',
+    )
+  }
+
+  for (const script of scripts) {
+    // Walk ;/&&/||/| inside the -c body — leading `echo` must not hide `rm`.
+    const units = (() => {
+      const parts = splitCommand(script)
+      return parts.length > 0 ? parts : [script]
+    })()
+    for (const unit of units) {
+      // Nested shell -c inside the script body.
+      const nested = extractShellDashCScripts(unit)
+      if (nested.unreadable && /\brm(?:dir)?\b/.test(unit)) {
+        return dangerousRemovalAsk(
+          'rm',
+          'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+          'in a shell -c script that could not be checked',
+        )
+      }
+      const emptyVar = detectPossiblyEmptyVariableRm(unit)
+      if (emptyVar) {
+        return dangerousRemovalAsk(
+          emptyVar.command,
+          `Dangerous ${emptyVar.command} operation in a shell -c script: its target is built from a variable or command output known only when it runs, and if that is empty the ${emptyVar.command} can reach a directory like / or your home directory. This requires explicit approval and cannot be auto-allowed by permission rules. Pass a literal path, or guard the value with \${NAME:?}.`,
+          `in a shell -c script, on a target built from a value known only when it runs (${emptyVar.target})`,
+        )
+      }
+      const literal = detectDangerousLiteralRmInCommand(unit)
+      if (literal) {
+        return dangerousRemovalAsk(
+          literal.command,
+          `Dangerous ${literal.command} operation detected inside a shell -c script: '${literal.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+          `in a shell -c script on critical path: ${literal.path}`,
+        )
+      }
+      // Nested scripts already unwrapped into `scripts` by extractShellDashCScripts;
+      // also scan nested units' own simple commands for literal/empty-var rm.
+      for (const nestedScript of nested.scripts) {
+        const nestedUnits = (() => {
+          const parts = splitCommand(nestedScript)
+          return parts.length > 0 ? parts : [nestedScript]
+        })()
+        for (const nestedUnit of nestedUnits) {
+          const nestedEmpty = detectPossiblyEmptyVariableRm(nestedUnit)
+          if (nestedEmpty) {
+            return dangerousRemovalAsk(
+              nestedEmpty.command,
+              `Dangerous ${nestedEmpty.command} operation in a shell -c script: its target is built from a variable or command output known only when it runs, and if that is empty the ${nestedEmpty.command} can reach a directory like / or your home directory. This requires explicit approval and cannot be auto-allowed by permission rules. Pass a literal path, or guard the value with \${NAME:?}.`,
+              `in a shell -c script, on a target built from a value known only when it runs (${nestedEmpty.target})`,
+            )
+          }
+          const nestedLiteral = detectDangerousLiteralRmInCommand(nestedUnit)
+          if (nestedLiteral) {
+            return dangerousRemovalAsk(
+              nestedLiteral.command,
+              `Dangerous ${nestedLiteral.command} operation detected inside a shell -c script: '${nestedLiteral.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+              `in a shell -c script on critical path: ${nestedLiteral.path}`,
+            )
+          }
+        }
+      }
+    }
+  }
+  return null
+}
+
 /**
  * densable Ize helper for dangerous-rm family.
  */
@@ -1842,6 +2502,12 @@ export async function bashToolHasPermission(
       `Dangerous ${emptyVarRm.command} operation detected: '${emptyVarRm.target}'\n\nThis target is a shell variable expansion that points at the filesystem root (or a top-level directory) when the variable is unset or empty. e.g. \`rm -rf $UNSET/*\` becomes \`rm -rf /*\`. This requires explicit approval and cannot be auto-allowed by permission rules.`,
       `on possibly-empty variable path: ${emptyVarRm.target}`,
     )
+  }
+
+  // densable 2.1.289 — unwrap bash/sh -c before allow/bypass can skip rm checks.
+  const shellDashCDanger = checkDangerousRmInShellDashC(input.command)
+  if (shellDashCDanger) {
+    return shellDashCDanger
   }
 
   const result = await bashToolHasPermissionInner(
