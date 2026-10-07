@@ -60,6 +60,11 @@ mock.module(
       if (source === 'flagSettings') return flagInline ?? undefined
       return undefined
     }) as typeof realSettings.getSettingsForSource,
+    // densable Yo merge for compact gates: flagSettings inline is live.
+    getInitialSettings: (() =>
+      (flagInline ?? {}) as ReturnType<
+        typeof realSettings.getInitialSettings
+      >) as typeof realSettings.getInitialSettings,
   }),
 )
 
@@ -312,5 +317,47 @@ describe('densable 2.1.289 bridgeChildGrants (ne/ae)', () => {
 
     if (savedEntrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT
     else process.env.CLAUDE_CODE_ENTRYPOINT = savedEntrypoint
+  })
+
+  test('projectThreadChild stamps live flagSettings autoCompactEnabled (not dead env)', async () => {
+    const permission = makePermission('default')
+    const { isAutoCompactEnabled } = await import(
+      '../../services/compact/autoCompact.js'
+    )
+    const { getGlobalConfig, saveGlobalConfig } = await import(
+      '../../utils/config.js'
+    )
+    const prior = getGlobalConfig().autoCompactEnabled
+    saveGlobalConfig(current => ({ ...current, autoCompactEnabled: false }))
+    try {
+      expect(isAutoCompactEnabled()).toBe(false)
+      const handle = await attachBridgeChildGrants({
+        sessionId: 'cse_autocompact',
+        autoModeEnvironment: [],
+        permission,
+        stillWanted: () => true,
+        keepChosenMode: () => false,
+        readTags: async () => [HEARTH_RC_CHILD_TAG],
+        setMode: () => ({ ok: true, mode: 'auto' }),
+      })
+      expect(handle.granted.autoCompact).toBe(true)
+      expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_AUTO_COMPACT).toBeUndefined()
+      expect(
+        (flagInline as { autoCompactEnabled?: boolean } | null)
+          ?.autoCompactEnabled,
+      ).toBe(true)
+      expect(isAutoCompactEnabled()).toBe(true)
+      handle.undo()
+      expect(
+        (flagInline as { autoCompactEnabled?: boolean } | null)
+          ?.autoCompactEnabled,
+      ).toBeUndefined()
+      expect(isAutoCompactEnabled()).toBe(false)
+    } finally {
+      saveGlobalConfig(current => ({
+        ...current,
+        autoCompactEnabled: prior,
+      }))
+    }
   })
 })

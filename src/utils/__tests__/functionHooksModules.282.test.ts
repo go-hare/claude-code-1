@@ -634,6 +634,98 @@ describe('function-hooks classic pattern', () => {
         name: 'reviewer',
       },
     ])
+
+    // densable PAt/GTe:
+    // - local_agent running+isIdle → waiting (PAt uses isIdle as waiting signal)
+    // - teammate running+isIdle (no plan approval) → idle; GTe upgrades idle→waiting
+    //   when backgrounded local_bash/monitor_* is attached
+    // - completed+non-idle-window keepalive → waiting
+    // - teammate awaitingPlanApproval → waiting
+    setFunctionHooksAppStateReader(
+      () =>
+        ({
+          tasks: {
+            localIdle: {
+              type: 'local_agent',
+              id: 'localIdle',
+              agentId: 'localIdle',
+              agentType: 'general-purpose',
+              status: 'running',
+              isIdle: true,
+              description: 'local idle → waiting',
+            },
+            mateIdle: {
+              type: 'in_process_teammate',
+              id: 'mateIdle',
+              agentId: 'mateIdle',
+              agentType: 'general-purpose',
+              status: 'running',
+              isIdle: true,
+              awaitingPlanApproval: false,
+              description: 'teammate idle',
+              identity: { agentName: 'mate-idle' },
+            },
+            mateBg: {
+              type: 'in_process_teammate',
+              id: 'mateBg',
+              agentId: 'mateBg',
+              agentType: 'general-purpose',
+              status: 'running',
+              isIdle: true,
+              awaitingPlanApproval: false,
+              description: 'teammate idle + bg bash',
+              identity: { agentName: 'mate-bg' },
+            },
+            bash1: {
+              type: 'local_bash',
+              id: 'bash1',
+              agentId: 'mateBg',
+              status: 'running',
+              isBackgrounded: true,
+              description: 'bg',
+            },
+            park1: {
+              type: 'local_agent',
+              id: 'park1',
+              agentId: 'park1',
+              agentType: 'general-purpose',
+              status: 'completed',
+              keepaliveReasons: new Set(['agent:child']),
+              description: 'parked',
+            },
+            idleWindow: {
+              type: 'local_agent',
+              id: 'idleWindow',
+              agentId: 'idleWindow',
+              agentType: 'general-purpose',
+              status: 'completed',
+              keepaliveReasons: new Set(['flag:idle-window']),
+              description: 'idle-window only',
+            },
+            mate1: {
+              type: 'in_process_teammate',
+              id: 'mate1',
+              agentId: 'mate1',
+              agentType: 'general-purpose',
+              status: 'running',
+              awaitingPlanApproval: true,
+              description: 'plan wait',
+              identity: { agentName: 'mate' },
+            },
+          },
+        }) as unknown as AppState,
+    )
+    const remapped = (await handleHostOp('agent.list', [{}])) as Array<{
+      id: string
+      status: string
+    }>
+    expect(remapped.find(a => a.id === 'localIdle')?.status).toBe('waiting')
+    expect(remapped.find(a => a.id === 'mateIdle')?.status).toBe('idle')
+    expect(remapped.find(a => a.id === 'mateBg')?.status).toBe('waiting')
+    expect(remapped.find(a => a.id === 'park1')?.status).toBe('waiting')
+    expect(remapped.find(a => a.id === 'idleWindow')?.status).toBe('idle')
+    expect(remapped.find(a => a.id === 'mate1')?.status).toBe('waiting')
+
     await expect(
       callPluginInterface('demo', { name: 'agent', method: 'spawn' }, [{}]),
     ).rejects.toThrow('takes { prompt, ... } (a non-empty prompt)')

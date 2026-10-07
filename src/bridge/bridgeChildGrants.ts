@@ -405,15 +405,24 @@ export async function attachBridgeChildGrants(
     artifact = true
   }
 
+  // densable ne: E.autoCompact && flagSettings.autoCompactEnabled===undefined →
+  // tN({..._y(), autoCompactEnabled:true}) + ea.notifyChange('flagSettings').
+  // Do not stamp unread CLAUDE_CODE_BRIDGE_CHILD_AUTO_COMPACT — isAutoCompactEnabled
+  // consults settings (Yo) over GlobalConfig, and setFlagSettingsInline is live.
   let autoCompact = false
+  let stampedAutoCompactInline = false
   if (
     grantRoles.autoCompact &&
     getSettingsForSource('flagSettings')?.autoCompactEnabled === undefined
   ) {
-    // densable tN flagSettings autoCompactEnabled — local flagSettings write is
-    // a no-op in updateSettingsForSource; env stamp for session visibility.
-    process.env.CLAUDE_CODE_BRIDGE_CHILD_AUTO_COMPACT = '1'
+    const inline = (getFlagSettingsInline() ?? {}) as SettingsJson
+    setFlagSettingsInline({
+      ...inline,
+      autoCompactEnabled: true,
+    } as Record<string, unknown>)
+    settingsChangeDetector.notifyChange('flagSettings')
     autoCompact = true
+    stampedAutoCompactInline = true
   }
 
   let undone = false
@@ -429,7 +438,18 @@ export async function attachBridgeChildGrants(
       undone = true
       unsubscribe?.()
       if (artifact) delete process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT
-      if (autoCompact) delete process.env.CLAUDE_CODE_BRIDGE_CHILD_AUTO_COMPACT
+      if (stampedAutoCompactInline) {
+        const inline = (getFlagSettingsInline() ?? {}) as SettingsJson
+        if (inline.autoCompactEnabled === true) {
+          const { autoCompactEnabled: _cleared, ...rest } = inline
+          setFlagSettingsInline(
+            Object.keys(rest).length > 0
+              ? (rest as Record<string, unknown>)
+              : null,
+          )
+          settingsChangeDetector.notifyChange('flagSettings')
+        }
+      }
       if (restoredMode !== null) {
         const cur = deps.permission.get()
         if (cur.mode === 'auto') {

@@ -223,9 +223,13 @@ export function isAutoCompactEnabled(): boolean {
   if (isEnvTruthy(process.env.DISABLE_AUTO_COMPACT)) {
     return false
   }
-  // Check if user has disabled auto-compact in their settings
-  const userConfig = getGlobalConfig()
-  return userConfig.autoCompactEnabled
+  // densable Yo("autoCompactEnabled", true): merged settings (incl. flagSettings
+  // inline from bridge ne / tN) beat legacy GlobalConfig when defined.
+  const fromSettings = getInitialSettings().autoCompactEnabled
+  if (fromSettings !== undefined) {
+    return fromSettings
+  }
+  return getGlobalConfig().autoCompactEnabled
 }
 
 /** densable LJr — precompute setting default is off. */
@@ -268,10 +272,10 @@ export function isPrecomputeCompactionEnabled(): boolean {
  * `legacyGlobalConfig` → `getEnabledSettingSources().includes('userSettings')`;
  * else false.
  *
- * Local Config persists `autoCompactEnabled` only via GlobalConfig (densable
- * legacyGlobalConfig path), so when off return
- * `getEnabledSettingSources().includes('userSettings')`. Do not overload
- * `isAutoCompactEnabled`.
+ * Local Config still persists the durable toggle via GlobalConfig (densable
+ * legacyGlobalConfig path). Bridge/session flagSettings can force-on via
+ * `isAutoCompactEnabled`; when that path is on, hide the hint. When off,
+ * return `getEnabledSettingSources().includes('userSettings')`.
  */
 export function shouldShowAutoCompactOffHint(): boolean {
   if (
@@ -281,7 +285,7 @@ export function shouldShowAutoCompactOffHint(): boolean {
     return false
   }
 
-  if (getGlobalConfig().autoCompactEnabled) {
+  if (isAutoCompactEnabled()) {
     return false
   }
 

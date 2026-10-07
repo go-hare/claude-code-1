@@ -1364,6 +1364,15 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Auto-compact window in tokens (100000–1000000). Omit for model-tuned auto. Overridden by CLAUDE_CODE_AUTO_COMPACT_WINDOW.',
         ),
+      // densable Yo("autoCompactEnabled", true) / bridge ne tN flagSettings stamp.
+      // Session-inline via setFlagSettingsInline; not a durable userSettings key.
+      // When set, beats legacy GlobalConfig.autoCompactEnabled for compact gates.
+      autoCompactEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Enable automatic conversation compaction. Session/flag settings beat the legacy global config default when set.',
+        ),
       fastMode: z
         .boolean()
         .optional()

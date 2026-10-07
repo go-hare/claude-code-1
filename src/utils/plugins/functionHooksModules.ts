@@ -3131,6 +3131,74 @@ function pluginAgentSpecError(
   return undefined
 }
 
+/** densable yG — keepalive reason that alone means idle-window hold. */
+const PLUGIN_AGENT_IDLE_WINDOW_REASON = 'flag:idle-window'
+
+/**
+ * densable PAt — remap raw task.status for $.agent.list.
+ * running → waiting/idle via awaitingPlanApproval/isIdle;
+ * completed → running/waiting/idle via finalizing/keepaliveReasons (+ named);
+ * paused → idle.
+ */
+function remapPluginAgentListStatus(
+  task: Record<string, unknown>,
+  named: boolean,
+): string {
+  const status = String(task.status ?? '')
+  const isTeammate = task.type === 'in_process_teammate'
+  switch (status) {
+    case 'running': {
+      const waiting =
+        (isTeammate ? task.awaitingPlanApproval : task.isIdle) === true
+      const idle = task.isIdle === true
+      return waiting ? 'waiting' : idle ? 'idle' : 'running'
+    }
+    case 'completed': {
+      if (isTeammate) return 'completed'
+      const reasons =
+        task.keepaliveReasons instanceof Set
+          ? [...(task.keepaliveReasons as Set<string>)]
+          : Array.isArray(task.keepaliveReasons)
+            ? (task.keepaliveReasons as string[])
+            : []
+      const finalizing = task.finalizing === true
+      const hasNonIdleWindow = reasons.some(
+        reason => reason !== PLUGIN_AGENT_IDLE_WINDOW_REASON,
+      )
+      const idleHold = named || reasons.length > 0
+      return finalizing
+        ? 'running'
+        : hasNonIdleWindow
+          ? 'waiting'
+          : idleHold
+            ? 'idle'
+            : 'completed'
+    }
+    case 'paused':
+      return 'idle'
+    default:
+      return status
+  }
+}
+
+/**
+ * densable GTe — idle→waiting when a running backgrounded local_bash /
+ * monitor_mcp / monitor_ws is still attached to this agentId.
+ */
+function pluginAgentHasActiveBackgroundWork(
+  agentId: string,
+  tasks: Record<string, unknown>,
+): boolean {
+  for (const task of Object.values(tasks)) {
+    if (!isEventRecord(task) || task.status !== 'running') continue
+    if (task.agentId !== agentId) continue
+    const type = task.type
+    if (type === 'monitor_mcp' || type === 'monitor_ws') return true
+    if (type === 'local_bash' && Boolean(task.isBackgrounded)) return true
+  }
+  return false
+}
+
 function listPluginAgents(): Array<Record<string, unknown>> {
   const tasks = functionHooksAppStateReader?.()?.tasks ?? {}
   const listed: Array<Record<string, unknown>> = []
@@ -3155,11 +3223,18 @@ function listPluginAgents(): Array<Record<string, unknown>> {
           ? identity.agentName
           : undefined
     const spawnedBy = pluginSpawnCallers.get(id)
+    let status = remapPluginAgentListStatus(task, name !== undefined)
+    if (
+      status === 'idle' &&
+      pluginAgentHasActiveBackgroundWork(id, tasks as Record<string, unknown>)
+    ) {
+      status = 'waiting'
+    }
     listed.push({
       id,
       description: String(task.description ?? ''),
       type: typeof task.agentType === 'string' ? task.agentType : String(type),
-      status: String(task.status ?? ''),
+      status,
       ...(parentId !== undefined && { parentId }),
       ...(spawnedBy !== undefined && { spawnedBy }),
       ...(name !== undefined && { name }),

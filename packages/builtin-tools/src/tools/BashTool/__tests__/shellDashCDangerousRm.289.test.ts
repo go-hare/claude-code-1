@@ -234,6 +234,10 @@ describe('densable 2.1.289 shell -c dangerous rm', () => {
       'flock --command="rm -rf /"',
       'script -c "rm -rf /" /dev/null',
       'env -S "rm -rf /"',
+      'flock /tmp/l rm -rf /',
+      'sudo rm -rf /',
+      'doas rm -rf /',
+      'command rm -rf /',
       'rm -rf /',
     ]) {
       expect(checkDangerousRmInShellDashC(cmd)).toBeNull()
@@ -247,5 +251,58 @@ describe('densable 2.1.289 shell -c dangerous rm', () => {
     // invent-ban: xargs/su/chroot remain unpeeled (no RH hit via eut)
     expect(checkDangerousRmAfterEutPeel('xargs rm -rf /')).toBeNull()
     expect(checkDangerousRmAfterEutPeel('su -c "rm -rf /"')).toBeNull()
+    expect(checkDangerousRmAfterEutPeel('chroot / rm -rf /')).toBeNull()
+  })
+
+  test('hasPermissionsToUseTool asks under bypassPermissions for eut-peeled rm', async () => {
+    const { getEmptyToolPermissionContext } = await import('src/Tool.js')
+    const { hasPermissionsToUseTool } = await import(
+      'src/utils/permissions/permissions.js'
+    )
+    const { BashTool } = await import('../BashTool.js')
+    const toolPermissionContext = {
+      ...getEmptyToolPermissionContext(),
+      mode: 'bypassPermissions' as const,
+      isBypassPermissionsModeAvailable: true,
+    }
+    const context = {
+      getAppState: () =>
+        ({
+          toolPermissionContext,
+          mcp: { tools: [] },
+        }) as never,
+      abortController: new AbortController(),
+    } as never
+
+    for (const command of [
+      'flock -c "rm -rf /"',
+      'env -S "rm -rf /"',
+      'flock /tmp/l rm -rf /',
+      'sudo rm -rf /',
+      'script -c "rm -rf /" /dev/null',
+    ]) {
+      const result = await hasPermissionsToUseTool(
+        BashTool,
+        { command },
+        context,
+        {} as never,
+        'tu_eut_rm',
+      )
+      expect(result.behavior).toBe('ask')
+      expect(result.decisionReason).toMatchObject({
+        type: 'safetyCheck',
+        circuitBreaker: 'dangerousRemoval',
+      })
+    }
+
+    // invent-ban: xargs stays allow(mode) under bypass — gold A6o has no peel
+    const xargs = await hasPermissionsToUseTool(
+      BashTool,
+      { command: 'xargs rm -rf /' },
+      context,
+      {} as never,
+      'tu_xargs_rm',
+    )
+    expect(xargs.behavior).toBe('allow')
   })
 })
