@@ -19,15 +19,6 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   },
 }))
 
-const realPolicy = await import('../../services/policyLimits/index.js')
-const policySnap = snapshotModuleExports(realPolicy)
-let enforced = false
-mock.module('src/services/policyLimits/index.js', () => ({
-  ...policySnap,
-  isPolicyEnforced: (policy: string) =>
-    policy === 'require_trusted_devices' ? enforced : false,
-}))
-
 const {
   CLOUD_CANNOT_REACH_ELEVATED_HINT,
   formatUnreachableElevatedRefusal,
@@ -38,7 +29,6 @@ afterAll(() => {
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookSnap,
   }))
-  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
 })
 
 const prevRemote = process.env.CLAUDE_CODE_REMOTE
@@ -46,7 +36,6 @@ const prevToken = process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
 
 afterEach(() => {
   gateOn = false
-  enforced = false
   if (prevRemote === undefined) delete process.env.CLAUDE_CODE_REMOTE
   else process.env.CLAUDE_CODE_REMOTE = prevRemote
   if (prevToken === undefined) delete process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
@@ -63,15 +52,14 @@ describe('densable 2.1.239 H9b / P9b elevated RC unreachable', () => {
     )
   })
 
-  test('H9b is false unless remote + no token + iFn', () => {
+  test('H9b stays false after policyLimits product-cut (iFn never enforces)', () => {
     delete process.env.CLAUDE_CODE_REMOTE
     delete process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
     gateOn = true
-    enforced = true
     expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
 
     process.env.CLAUDE_CODE_REMOTE = 'true'
-    expect(isRemoteControlPeerUnreachableFromHere()).toBe(true)
+    expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
 
     process.env.CLAUDE_TRUSTED_DEVICE_TOKEN = 'tok'
     expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
@@ -81,20 +69,15 @@ describe('densable 2.1.239 H9b / P9b elevated RC unreachable', () => {
     process.env.CLAUDE_CODE_REMOTE = '1'
     delete process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
     gateOn = true
-    enforced = true
     expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
   })
 
-  test('iFn requires GB gate and require_trusted_devices enforced', () => {
+  test('iFn product-cut never makes peer unreachable', () => {
     process.env.CLAUDE_CODE_REMOTE = 'true'
     delete process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
     gateOn = false
-    enforced = true
     expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
     gateOn = true
-    enforced = false
     expect(isRemoteControlPeerUnreachableFromHere()).toBe(false)
-    enforced = true
-    expect(isRemoteControlPeerUnreachableFromHere()).toBe(true)
   })
 })

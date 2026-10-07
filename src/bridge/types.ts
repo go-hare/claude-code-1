@@ -41,6 +41,8 @@ export type WorkSecret = {
   auth: Array<{ type: string; token: string }>
   claude_code_args?: Record<string, string> | null
   mcp_config?: unknown | null
+  /** densable auto_mode_environment facts for sdk-host lane grants. */
+  auto_mode_environment?: string[] | null
   environment_variables?: Record<string, string> | null
   /**
    * Server-driven CCR v2 selector. Set by prepare_work_secret() when the
@@ -215,6 +217,18 @@ export type SessionSpawnOpts = {
   useCcrV2?: boolean
   /** Required when useCcrV2 is true. Obtained from POST /worker/register. */
   workerEpoch?: number
+  /**
+   * densable RQt autoDefault → spawn stamps
+   * `CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT=1` (rcChild + !modePinned + gate).
+   * Attach path must NOT stamp this env.
+   */
+  autoDefault?: boolean
+  /**
+   * densable RQt machineSettings → spawn stamps
+   * `CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS=1` (projectThreadChild + gate).
+   * Attach path must NOT stamp this env.
+   */
+  machineSettings?: boolean
   /**
    * Fires once with the text of the first real user message seen on the
    * child's stdout (via --replay-user-messages). Lets the caller derive a

@@ -62,6 +62,35 @@ describe('planHarborWillowAutoFallback', () => {
       planHarborWillowAutoFallback({ ...base, hasResolvedMode: true }),
     ).toEqual({ mode: 'default', fromAutoFallback: false })
   })
+
+  test('densable 2.1.289 BRIDGE_CHILD_AUTO_DEFAULT ORs auto when harbor off', () => {
+    expect(
+      planHarborWillowAutoFallback({
+        ...base,
+        harborWillow: false,
+        bridgeChildAutoDefault: true,
+      }),
+    ).toEqual({ mode: 'auto', fromAutoFallback: true })
+  })
+
+  test('BRIDGE_CHILD_AUTO_DEFAULT still blocked by circuit/disableAutoMode', () => {
+    expect(
+      planHarborWillowAutoFallback({
+        ...base,
+        harborWillow: false,
+        bridgeChildAutoDefault: true,
+        circuitBroken: true,
+      }),
+    ).toEqual({ mode: 'default', fromAutoFallback: false })
+    expect(
+      planHarborWillowAutoFallback({
+        ...base,
+        harborWillow: false,
+        bridgeChildAutoDefault: true,
+        disableAutoMode: true,
+      }),
+    ).toEqual({ mode: 'default', fromAutoFallback: false })
+  })
 })
 
 describe('kgn Uht wiring (251 #12)', () => {
@@ -79,5 +108,20 @@ describe('kgn Uht wiring (251 #12)', () => {
     const end = src.indexOf('export function parseToolListFromCLI')
     const body = src.slice(start, end)
     expect(body).toContain('harborWillow: isAutoDefaultLaunchEnabled()')
+  })
+
+  test('densable 2.1.289 wires bridgeChildAutoDefault from residual env gate', () => {
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { join } = require('path') as typeof import('path')
+    const src = readFileSync(
+      join(import.meta.dir, '../permissionSetup.ts'),
+      'utf8',
+    )
+    expect(src).toContain(
+      "import { isBridgeChildAutoDefaultEnabled } from '../residualFinalEnvGates.js'",
+    )
+    expect(src).toContain(
+      'bridgeChildAutoDefault: isBridgeChildAutoDefaultEnabled()',
+    )
   })
 })

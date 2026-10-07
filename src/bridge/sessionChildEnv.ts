@@ -9,10 +9,17 @@
  * after this builder.
  */
 
-/** Keys restored from parent after the Vso wipe. */
+/**
+ * Keys restored from parent after the Vso wipe.
+ *
+ * `CLAUDE_CODE_BRIDGE_MCP_CARRIER` is also KEEP: parent may pass the carrier
+ * gate into a child (or an override may set it after scrub). Scrub first so a
+ * stale parent value is cleared unless KEEP/override restores it.
+ */
 export const SESSION_CHILD_KEEP_KEYS = [
   'CLAUDECODE',
   'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_BRIDGE_MCP_CARRIER',
 ] as const
 
 /** Session/host keys scrubbed to undefined before overrides. */
@@ -26,6 +33,8 @@ export const SESSION_CHILD_SCRUB_KEYS = [
   'CLAUDE_CODE_SESSION_ID',
   'CLAUDE_CODE_SYNC_SESSION_REFS',
   'CLAUDE_CODE_REMOTE_SESSION_ID',
+  // densable carrier-child MCP rewrite gate — scrub parent, then KEEP/override may set.
+  'CLAUDE_CODE_BRIDGE_MCP_CARRIER',
   'CLAUDE_CODE_TRIGGER_ID',
   'CLAUDE_CODE_BASE_REF',
   'CLAUDE_CODE_BASE_REFS',
@@ -39,6 +48,10 @@ export const SESSION_CHILD_SCRUB_KEYS = [
   'CLAUDE_CODE_EVAL_ALLOW_ARTIFACT_PUBLISH',
   'CLAUDE_CODE_EVAL_ALLOW_FLAG_OVERRIDES',
   'CLAUDE_RUNNER_ACTIVITY_FD',
+  // densable NDl/esr — void CHILD_* trio before spawn role stamp overlay.
+  'CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT',
+  'CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT',
+  'CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS',
 ] as const
 
 /** densable UKT — case-insensitive delete after the merge. */

@@ -27,6 +27,7 @@ import {
 } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { getSessionIngressAuthToken } from 'src/utils/sessionIngressAuth.js'
 import { sleep } from 'src/utils/sleep.js'
 import {
   formatSyncPluginInstallTimeoutLog,
@@ -207,10 +208,6 @@ import type { PermissionMode as InternalPermissionMode } from 'src/types/permiss
 import { getCwd } from 'src/utils/cwd.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
-import {
-  isRemotePolicyAllowed,
-  waitForPolicyLimitsToLoad,
-} from 'src/services/policyLimits/index.js'
 import type { ReplBridgeHandle } from 'src/bridge/replBridge.js'
 import { forwardParentToolUseSdkFrame } from 'src/bridge/subagentSdkFrames.js'
 import { getRemoteSessionUrl } from 'src/constants/product.js'
@@ -413,8 +410,11 @@ import {
   resolveAppliedEffort,
   isUltracodeModeActive,
   isUltracodeOfferable,
+  isUltracodeEffortAlias,
+  parseEffortValue,
   getSupportedEffortLevels,
   resolveHostEffortFlagPatch,
+  getUltracodeEffortForModel,
   unpinAllEffortLaunchPins,
 } from 'src/utils/effort.js'
 import { resolveAppliedAdvisorModel } from 'src/utils/advisor.js'
@@ -1536,6 +1536,11 @@ function runHeadlessStreaming(
      * densable ne host reads this on claim_session.
      */
     permissionModeSuppliedOnInvocation?: boolean
+    /**
+     * densable `D.sdkUrl` — when set, headless wires
+     * `createHeadlessHearthMount` (Ga) + sync("startup").
+     */
+    sdkUrl?: string | undefined
   },
   turnInterruptionState?: TurnInterruptionState,
   /**
@@ -2207,6 +2212,7 @@ function runHeadlessStreaming(
       reregisterChannelHandlerAfterReconnect(client)
     },
   })
+
   const withControlReconnect = async <T>(
     name: string,
     run: () => Promise<T>,
@@ -2274,6 +2280,62 @@ function runHeadlessStreaming(
   // Mirrors the REPL's useReplBridge hook: the handle is created when
   // `remote_control` is enabled and torn down when disabled.
   let bridgeHandle: ReplBridgeHandle | null = null
+  // densable createHeadlessWorkSecretSession (`vt`) — meta/hearth MCP mounts
+  // for headless RC. Constructed lazily on first remote_control enable.
+  let workSecretSession: Awaited<
+    ReturnType<
+      typeof import('src/bridge/serverConfigSession.js')['createHeadlessWorkSecretSession']
+    >
+  > | null = null
+  // densable Ga = createHeadlessHearthMount when sdkUrl parses (uur alias).
+  // Gold: parseBridgeSdkUrl(D.sdkUrl) → Ga.sync("startup"); bridge env waits.
+  let hearthMount: Awaited<
+    ReturnType<
+      typeof import('src/bridge/projectsReplyMount.js')['createHeadlessHearthMount']
+    >
+  > | null = null
+  let hearthMountStartup: Promise<void> | null = null
+
+  // densable Ga = createHeadlessHearthMount when sdkUrl parses (uur).
+  // Gold: parseBridgeSdkUrl(D.sdkUrl) → Ga.sync("startup"); when
+  // CLAUDE_CODE_ENVIRONMENT_KIND==="bridge", hold that promise (bu).
+  // runHeadlessStreaming is sync — use require like other densable optional hosts.
+  try {
+    const { parseBridgeSdkUrl } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/bridge/hearthBinding.js') as typeof import('src/bridge/hearthBinding.js')
+    const parsedSdk = parseBridgeSdkUrl(options.sdkUrl)
+    const remote =
+      structuredIO instanceof RemoteIO ? (structuredIO as RemoteIO) : undefined
+    const worker = remote?.getHearthMountWorker?.() ?? null
+    if (parsedSdk && worker) {
+      const { createHeadlessHearthMount } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/bridge/projectsReplyMount.js') as typeof import('src/bridge/projectsReplyMount.js')
+      hearthMount = createHeadlessHearthMount({
+        stores: {
+          getAppState,
+          setAppState,
+          getDynamicMcpState: () => dynamicMcpState,
+        },
+        sessionId: parsedSdk.sessionId,
+        apiBaseUrl: parsedSdk.apiBaseUrl,
+        getBearerToken: () => getSessionIngressAuthToken(),
+        getWorkerEpoch: () => worker.workerEpoch(),
+        readHearthBinding: () => worker.readProjectsBinding(),
+        sdkHostConfigs: () => sdkMcpConfigs as Record<string, unknown>,
+      })
+      hearthMountStartup = hearthMount.sync('startup')
+      // densable bu — hold Ga.sync("startup") under bridge; join before
+      // first ask via takeFirstTurnJoins (do not void / race).
+      if (process.env.CLAUDE_CODE_ENVIRONMENT_KIND !== 'bridge') {
+        hearthMountStartup = null
+      }
+    }
+  } catch {
+    // densable optional — sdkUrl / CCR worker may be unavailable
+  }
+
   // Cursor into mutableMessages — tracks how far we've forwarded.
   // Same index-based diff as useReplBridge's lastWrittenIndexRef.
   let bridgeLastForwardedIndex = 0
@@ -2758,6 +2820,9 @@ function runHeadlessStreaming(
       let printBgWaitDeadline: number | null = null
       let printBgWaitSwept = false
       let printBgWaitCeilingWarned = false
+      // densable firstCommandMountJoin — one-shot await of hearth/grants
+      // startup before the first ask(). takeFirstTurnJoins nulls its slots.
+      let firstTurnJoinsPending = true
 
       // Extract command processing into a named function for the do-while pattern.
       // Drains the queue, batching consecutive prompt-mode commands into one
@@ -2979,6 +3044,20 @@ function runHeadlessStreaming(
           const turnStartTime = feature('FILE_PERSISTENCE')
             ? Date.now()
             : undefined
+
+          // densable firstCommandMountJoin — await held hearth/grants once
+          // before the first ask(); subsequent turns no-op (slots nulled).
+          if (firstTurnJoinsPending) {
+            firstTurnJoinsPending = false
+            const joins = workSecretSession?.takeFirstTurnJoins()
+            const heldHearth = hearthMountStartup
+            hearthMountStartup = null
+            await Promise.all([
+              heldHearth ?? Promise.resolve(),
+              joins?.replyMount ?? Promise.resolve(),
+              joins?.grants ?? Promise.resolve(),
+            ])
+          }
 
           headlessProfilerCheckpoint('before_ask')
           startQueryProfile()
@@ -5136,6 +5215,31 @@ function runHeadlessStreaming(
             }
             sendControlResponseSuccess(msg)
           } else if (msg.request.subtype === 'mcp_set_servers') {
+            // densable: if hint===HEARTH_BINDING_CHANGED_HINT, sync hearth
+            // reply mount(s) with binding_changed; empty servers short-circuit.
+            const { HEARTH_BINDING_CHANGED_HINT } = await import(
+              'src/bridge/hearthBinding.js'
+            )
+            const hearthHint = (msg.request as { hint?: string }).hint
+            if (hearthHint === HEARTH_BINDING_CHANGED_HINT) {
+              workSecretSession?.resyncProjectsReplyMount()
+              // densable Ga?.sync("binding_changed") when sdkUrl hearth mount lives.
+              void hearthMount?.sync('binding_changed')
+              const servers = msg.request.servers as Record<string, unknown>
+              if (
+                servers !== null &&
+                typeof servers === 'object' &&
+                !Array.isArray(servers) &&
+                Object.keys(servers).length === 0
+              ) {
+                sendControlResponseSuccess(msg, {
+                  added: [],
+                  removed: [],
+                  errors: {},
+                })
+                continue
+              }
+            }
             const { response, sdkServersChanged } = await applyMcpServerChanges(
               msg.request.servers as Record<
                 string,
@@ -6285,10 +6389,106 @@ function runHeadlessStreaming(
                   const { getReplDiffHost } = await import(
                     'src/utils/replDiffTab.js'
                   )
+                  if (!workSecretSession) {
+                    const { createHeadlessWorkSecretSession } = await import(
+                      'src/bridge/serverConfigSession.js'
+                    )
+                    // densable print La/du + permission into createHeadlessWorkSecretSession.
+                    const effortSeedLatch = { seedSetUltracode: false }
+                    workSecretSession = createHeadlessWorkSecretSession({
+                      stores: {
+                        getAppState,
+                        setAppState,
+                        getDynamicMcpState: () => dynamicMcpState,
+                      },
+                      getAppendSystemPrompt: () => options.appendSystemPrompt,
+                      setAppendSystemPrompt: value => {
+                        options.appendSystemPrompt = value
+                      },
+                      sdkHostConfigs: () => sdkMcpConfigs,
+                      awaitHostApplyQuiescence: async () => {},
+                      permission: {
+                        get: () => getAppState().toolPermissionContext,
+                        set: updater => {
+                          setAppState(prev => ({
+                            ...prev,
+                            toolPermissionContext: updater(
+                              prev.toolPermissionContext,
+                            ),
+                          }))
+                        },
+                      },
+                      applyModelPick: model => {
+                        const decision = decideReplBridgeSetModel(
+                          model,
+                          activeUserSpecifiedModel,
+                        )
+                        if (!decision.ok) {
+                          return {
+                            ok: false as const,
+                            error: decision.error,
+                          }
+                        }
+                        activeUserSpecifiedModel = decision.model
+                        setMainLoopModelOverride(decision.model)
+                        setAppState(prev => ({
+                          ...prev,
+                          mainLoopModelForSession: decision.model,
+                        }))
+                        return { ok: true as const }
+                      },
+                      applyEffortSeed: effort => {
+                        // densable RSo — parse level; unrecognized refuses.
+                        // Seed path must NOT N9 (invent-ban); Host apply_flag
+                        // remains orthogonal and keeps its own N9 sites.
+                        const parsed = parseEffortValue(effort)
+                        const ultracode = isUltracodeEffortAlias(effort)
+                        if (parsed === undefined && !ultracode) {
+                          return {
+                            ok: false as const,
+                            error: 'unrecognized effort',
+                          }
+                        }
+                        const clearUltracode =
+                          !ultracode && effortSeedLatch.seedSetUltracode
+                        effortSeedLatch.seedSetUltracode = ultracode
+                        // Gold RSo: ultracode alias still writes sessionEffort
+                        // (xhigh / catalog top) + latch — not blank wire.
+                        const ultracodeWire = ultracode
+                          ? getUltracodeEffortForModel(getMainLoopModel())
+                          : undefined
+                        setAppState(prev => {
+                          let next = prev
+                          if (
+                            parsed !== undefined &&
+                            prev.effortValue !== parsed
+                          ) {
+                            next = { ...next, effortValue: parsed }
+                          } else if (
+                            ultracodeWire !== undefined &&
+                            prev.effortValue !== ultracodeWire
+                          ) {
+                            next = { ...next, effortValue: ultracodeWire }
+                          }
+                          if (ultracode && !next.ultracode) {
+                            next = { ...next, ultracode: true }
+                          } else if (clearUltracode && next.ultracode) {
+                            next = { ...next, ultracode: false }
+                          }
+                          return next
+                        })
+                        return { ok: true as const }
+                      },
+                      getSessionEffort: () => getAppState().effortValue,
+                    })
+                  }
                   const handle = await initReplBridge({
                     host: getReplDiffHost(),
                     workspaceDiffComputeBudget:
                       HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
+                    onProjectsBindingHint: () => {
+                      workSecretSession?.resyncProjectsReplyMount()
+                    },
                     getToolPermissionContext: () =>
                       getAppState().toolPermissionContext,
                     onInboundMessage(msg) {
@@ -6400,6 +6600,15 @@ function runHeadlessStreaming(
                   } else {
                     bridgeHandle = handle
                     bridgeLastForwardedIndex = mutableMessages.length
+                    // densable vt.apply — seed meta/hearth mounts for this RC session.
+                    workSecretSession?.apply(
+                      {},
+                      {
+                        bridgeSessionId: handle.bridgeSessionId,
+                        getWorkerBearerToken: () =>
+                          getSessionIngressAuthToken(),
+                      },
+                    )
                     // Forward permission requests to the bridge
                     structuredIO.setOnControlRequestSent(request => {
                       handle.sendControlRequest(request)
@@ -6432,6 +6641,9 @@ function runHeadlessStreaming(
                 structuredIO.setOnControlRequestResolved(undefined)
                 await bridgeHandle.teardown()
                 bridgeHandle = null
+              }
+              if (workSecretSession) {
+                await workSecretSession.undo()
               }
               sendControlResponseSuccess(msg)
             }
@@ -7652,13 +7864,6 @@ async function loadInitialMessages(
   // Handle teleport in print mode
   if (options.teleport) {
     try {
-      await waitForPolicyLimitsToLoad()
-      if (!isRemotePolicyAllowed('allow_remote_sessions')) {
-        throw new Error(
-          "Remote sessions are disabled by your organization's policy.",
-        )
-      }
-
       logEvent('tengu_teleport_print', {})
 
       if (typeof options.teleport !== 'string') {

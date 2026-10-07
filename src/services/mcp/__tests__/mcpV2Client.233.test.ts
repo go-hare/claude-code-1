@@ -12,7 +12,8 @@ import {
 } from '../mcpV2Client.js'
 
 describe('createDensableMcpClient densable k() surface', () => {
-  test('capabilities match densable KPb (roots.listChanged + elicitation)', () => {
+  test('capabilities match densable bare bag (roots.listChanged + elicitation:{})', () => {
+    // densable 2.1.289: default/projection payload stays bare; form/url is Idt/cln.
     const caps = densableClientCapabilities()
     expect(caps.roots).toEqual({ listChanged: true })
     expect(caps.elicitation).toEqual({})

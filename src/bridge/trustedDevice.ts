@@ -45,14 +45,10 @@ export const CLOUD_CANNOT_REACH_ELEVATED_HINT =
 
 /**
  * densable iFn / isTrustedDeviceActiveForOrg — GB gate then eya(nFn).
+ * Product-cut: policy limits never enforce require_trusted_devices.
  */
 export function isTrustedDeviceActiveForOrg(): boolean {
-  if (!isGateEnabled()) return false
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { isPolicyEnforced } =
-    require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  return isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY)
+  return false
 }
 
 /**
@@ -79,15 +75,11 @@ function isGateEnabled(): boolean {
 }
 
 /**
- * densable `wV` @180889346 — GB gate then `isPolicyAllowed(require_trusted_devices)`.
+ * densable `wV` @180889346 — GB gate then policy allow.
+ * Product-cut: policy limits always allow require_trusted_devices.
  */
 export function isTrustedDeviceGateEnabled(): boolean {
-  if (!isGateEnabled()) return false
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { isPolicyAllowed } =
-    require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  return isPolicyAllowed(REQUIRE_TRUSTED_DEVICES_POLICY)
+  return isGateEnabled()
 }
 
 /**
@@ -296,23 +288,16 @@ export async function enrollTrustedDevice(opts?: {
     } = require('../utils/auth.js') as typeof import('../utils/auth.js')
     const { getAPIProvider } =
       require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
-    const { waitForPolicyLimitsToLoad, isPolicyEnforced, isPolicyAllowed } =
-      require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
     if (getAPIProvider() !== 'firstParty' || !isClaudeAISubscriber()) {
       return
     }
-    await waitForPolicyLimitsToLoad()
-    const orgEnforced = isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY)
+    // Product-cut: policy limits never enforce require_trusted_devices.
+    // Keep densable bind/deny trigger path (policy allow is always true).
     const bindOrDenied =
       trigger === 'server_denied' ||
       (trigger === 'device_bind' && isConsumerSubscriber())
-    if (
-      !(
-        orgEnforced ||
-        (bindOrDenied && isPolicyAllowed(REQUIRE_TRUSTED_DEVICES_POLICY))
-      )
-    ) {
+    if (!bindOrDenied) {
       logForDebugging(
         `[trusted-device] Org has not enabled ${REQUIRE_TRUSTED_DEVICES_POLICY}, skipping enrollment`,
       )

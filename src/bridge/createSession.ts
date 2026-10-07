@@ -166,6 +166,11 @@ export type BridgeSessionInfo = {
   /** densable XBo / #28 placeholder sweep — untouched iff equal to updated_at. */
   created_at?: string
   updated_at?: string
+  /**
+   * densable session origin tags (`kLe`/`abr` / `t3e`). Present when the
+   * sessions API returns a `tags` array (rc-child / hearth-rc-child / …).
+   */
+  tags?: string[]
 }
 
 export async function getBridgeSession(
@@ -243,7 +248,15 @@ export async function getBridgeSessionWithNotFound(
     return { session: null, notFound: false }
   }
 
-  return { session: response.data, notFound: false }
+  // densable abr — only keep a real tags array; drop malformed payloads.
+  const raw = response.data ?? {}
+  const session: BridgeSessionInfo = { ...raw }
+  if (Array.isArray(raw.tags)) {
+    session.tags = raw.tags.filter((t): t is string => typeof t === 'string')
+  } else {
+    delete session.tags
+  }
+  return { session, notFound: false }
 }
 
 export async function archiveBridgeSession(

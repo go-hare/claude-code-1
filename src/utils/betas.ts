@@ -35,6 +35,10 @@ import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import {
+  isExperimentalBetasDisabled,
+  isStructuredOutputsDisabled,
+} from './residualFinalEnvGates.js'
+import {
   type APIProvider,
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
@@ -148,6 +152,7 @@ export function modelSupportsContextManagement(model: string): boolean {
 }
 
 // @[MODEL LAUNCH]: Add the new model ID to this list if it supports structured outputs.
+// densable mCn — also force-off under JK() and CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS.
 export function modelSupportsStructuredOutputs(model: string): boolean {
   const canonical = getCanonicalName(model)
   const provider = getAPIProvider()
@@ -155,14 +160,27 @@ export function modelSupportsStructuredOutputs(model: string): boolean {
   if (provider !== 'firstParty' && provider !== 'foundry') {
     return false
   }
+  // densable JK() — DISABLE_EXPERIMENTAL_BETAS || HIPAA
+  if (isExperimentalBetasDisabled() || isHipaaPolicy()) {
+    return false
+  }
+  // densable 2.1.289 — Mantle/gateway proxies that reject structured outputs
+  if (isStructuredOutputsDisabled()) {
+    return false
+  }
+  // densable 2.1.289 mCn-like: admit current defaults (sonnet-5-5 /
+  // opus-5* / fable*) while keeping the prior 4.x allowlist entries.
   return (
     canonical.includes('claude-sonnet-4-6') ||
     canonical.includes('claude-sonnet-4-5') ||
+    canonical.includes('claude-sonnet-5-5') ||
     canonical.includes('claude-opus-4-1') ||
     canonical.includes('claude-opus-4-5') ||
     canonical.includes('claude-opus-4-6') ||
     canonical.includes('claude-opus-4-7') ||
-    canonical.includes('claude-haiku-4-5')
+    canonical.includes('claude-opus-5') ||
+    canonical.includes('claude-haiku-4-5') ||
+    canonical.includes('claude-fable-5')
   )
 }
 

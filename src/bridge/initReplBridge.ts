@@ -28,10 +28,6 @@ import {
   getFeatureValue_CACHED_WITH_REFRESH,
 } from '../services/analytics/growthbook.js'
 import { getOrganizationUUID } from '../services/oauth/client.js'
-import {
-  getPolicyDenyKind,
-  waitForPolicyLimitsToLoad,
-} from '../services/policyLimits/index.js'
 import type { Message } from '../types/message.js'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.js'
 import {
@@ -119,6 +115,12 @@ import type { BridgeWorkerType } from './types.js'
 
 export type InitBridgeOptions = {
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
+  /**
+   * densable `onProjectsBindingHint` — fire when CCR worker state implies a
+   * hearth binding change so headless `createServerConfigSession` can
+   * `resyncProjectsReplyMount`.
+   */
+  onProjectsBindingHint?: () => void
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
   onStopTask?: (taskId: string) => Promise<unknown>
@@ -310,6 +312,9 @@ export async function initReplBridge(
 ): Promise<ReplBridgeHandle | null> {
   const {
     onInboundMessage,
+    // onProjectsBindingHint: kept on InitBridgeOptions for print.ts host;
+    // densable Zo?.( empty-inject fire is Desktop/RC-inject-disabled locally.
+    // Headless hearth resync uses mcp_set_servers hint arm in print.ts instead.
     onPermissionResponse,
     onInterrupt,
     onStopTask,
@@ -668,35 +673,7 @@ export async function initReplBridge(
     }
   }
 
-  // 3. densable QD("allow_remote_control"):
-  //   cache_miss → Xb("policy_unverified") + W?.("failed", nbn(...), "terminal")
-  //   org_denied → Xb("policy_denied") + W?.("policy_disabled", v_n())
-  await waitForPolicyLimitsToLoad()
-  const remoteControlPolicy = getPolicyDenyKind('allow_remote_control')
-  if (remoteControlPolicy === 'cache_miss') {
-    logBridgeSkip(
-      'policy_unverified',
-      '[bridge:repl] Skipping: allow_remote_control policy unverified (cache miss)',
-    )
-    // nbn fallback when no compliance taints: short "disabled by … policy"
-    onStateChange?.(
-      'failed',
-      "disabled by your organization's policy",
-      'terminal',
-    )
-    return null
-  }
-  if (remoteControlPolicy === 'org_denied') {
-    logBridgeSkip(
-      'policy_denied',
-      '[bridge:repl] Skipping: allow_remote_control policy not allowed',
-    )
-    onStateChange?.(
-      'policy_disabled',
-      "Remote Control is disabled by your organization's policy. Contact your organization admin for access.",
-    )
-    return null
-  }
+  // 3. Product-cut: policy limits always allow remote control.
 
   // densable 2.1.243 #58 / 2.1.246 qn — occupancy `sn&&qn&&T&&Mr()`.
   // Zn latches takeover; Ye fires immediately before Yr, not here
@@ -1354,6 +1331,10 @@ export async function initReplBridge(
         // initial history flush the same way (server already has events).
         // densable noHistoryBackfill:ie — q5o/NO_BACKFILL forces Ge skip (#5).
         onInboundMessage,
+        // densable onProjectsBindingHint is consumed by headless print.ts
+        // mcp_set_servers hearth-hint arm (workSecretSession.resync). Bridge
+        // core's empty inject Zo?.( is DESKTOP/RC-inject disabled locally —
+        // keep the option on InitBridgeOptions for the print host only.
         onUserMessage,
         onPermissionResponse,
         onInterrupt,

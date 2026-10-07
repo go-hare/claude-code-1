@@ -45,7 +45,13 @@ import { getPollIntervalConfig } from './pollConfig.js'
 import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
 import { createTitleWriteScheduler } from './titleWriteScheduler.js'
 import { createSessionSpawner, safeFilenameId } from './sessionRunner.js'
+import { deriveBridgeChildGrantRoles } from './bridgeChildGrants.js'
+import {
+  parseSessionOriginRoles,
+  readBridgeSessionTags,
+} from './sessionOriginTags.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
+import { getSettingsForSource } from '../utils/settings/settings.js'
 import {
   BRIDGE_LOGIN_ERROR,
   type BridgeApiClient,
@@ -1110,6 +1116,29 @@ export async function runBridgeLoop(
               ` dir=${sessionDir}` +
               ` accessToken=${secret.session_ingress_token ? secret.session_ingress_token.slice(0, 8) + '...' : 'NONE'}`,
           )
+          // densable RQt autoDefault/machineSettings — stamp child env on spawn only.
+          let autoDefault = false
+          let machineSettings = false
+          try {
+            const tags = await readBridgeSessionTags(sessionId, {
+              baseUrl: config.apiBaseUrl,
+            })
+            const roles = parseSessionOriginRoles(tags)
+            const modePinned =
+              getSettingsForSource('policySettings')?.permissions
+                ?.defaultMode !== undefined
+            const grantRoles = deriveBridgeChildGrantRoles({
+              roles,
+              modePinned,
+            })
+            autoDefault = grantRoles.autoDefault
+            machineSettings = grantRoles.machineSettings
+          } catch (err) {
+            logForDebugging(
+              `[bridge:session] child grant derive failed: ${errorMessage(err)}`,
+              { level: 'warn' },
+            )
+          }
           const spawnResult = safeSpawn(
             spawner,
             {
@@ -1118,6 +1147,8 @@ export async function runBridgeLoop(
               accessToken: secret.session_ingress_token,
               useCcrV2,
               workerEpoch,
+              autoDefault,
+              machineSettings,
               onFirstUserMessage: text => {
                 // Server-set titles (--name, web rename) win. fetchSessionTitle
                 // runs concurrently; if it already populated titledSessions,

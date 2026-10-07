@@ -11,6 +11,7 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
+import { isCliOwnedConfig } from './cliOwnedConfigs.js'
 
 /** densable y0 default when MCP_TIMEOUT unset / non-positive. */
 export const DEFAULT_MCP_TIMEOUT_MS = 30_000
@@ -181,6 +182,11 @@ export function resetMcpCcrIngressCapture(
   capturedCcrIngressBase = env.SESSION_INGRESS_URL ?? env.ANTHROPIC_BASE_URL
 }
 
+/** densable `M_.atStartup` ingress base — for carrier `oFn` / `xet`. */
+export function getCapturedCcrIngressBase(): string | undefined {
+  return capturedCcrIngressBase
+}
+
 function originForCcrCompare(url: URL): string {
   if (url.protocol === 'wss:') return `https://${url.host}`
   if (url.protocol === 'ws:') return `http://${url.host}`
@@ -209,12 +215,19 @@ export function isMcpCcrProxyUrl(url: string): boolean {
 }
 
 /**
- * densable `pMn` URL arm: `"url"in e && typeof e.url==="string" && Cke(e.url)`.
- * SEA `vbe` (`cliOwnedConfigs` WeakSet) has no local equivalent — **do not invent**.
+ * densable `pMn` / gold `HEe`:
+ *   (`"url"in e && typeof e.url==="string" && qS/Cke(e.url)`) OR `nf(e)`
+ * where `nf` = `isCliOwnedConfig` (`markCliOwnedConfig` / densable `OEe`).
+ * Product callers: bridge projects reply mount, server-config meta mount,
+ * bridgeCarrierChild, CLAUDE_CODE_REMOTE `nf?OEe`. SEA `vbe` is path-`..`,
+ * not the ownership WeakSet.
  */
 export function isMcpCcrProxyServerConfig(
   serverConfig: object | undefined,
 ): boolean {
+  if (serverConfig !== undefined && isCliOwnedConfig(serverConfig)) {
+    return true
+  }
   if (
     serverConfig !== undefined &&
     'url' in serverConfig &&

@@ -91,11 +91,61 @@ describe('buildSessionChildEnv densable 2.1.238 NDl', () => {
     expect(env.CLAUDE_CODE_WORKER_EPOCH).toBe('2')
   })
 
+  test('keeps CLAUDE_CODE_BRIDGE_MCP_CARRIER from parent after scrub', () => {
+    const env = buildSessionChildEnv(
+      parentEnv({ CLAUDE_CODE_BRIDGE_MCP_CARRIER: '1' }),
+      { accessToken: 't' },
+    )
+    expect(env.CLAUDE_CODE_BRIDGE_MCP_CARRIER).toBe('1')
+  })
+
   test('sandbox stamps FORCE_SANDBOX', () => {
     const env = buildSessionChildEnv(parentEnv(), {
       accessToken: 't',
       sandbox: true,
     })
     expect(env.CLAUDE_CODE_FORCE_SANDBOX).toBe('1')
+  })
+
+  test('spawn machineSettings overlay stamps MACHINE_SETTINGS (sessionRunner shape)', () => {
+    // Mirrors sessionRunner.spawn overlay after buildSessionChildEnv —
+    // attach path must never set this; only spawn opts.machineSettings.
+    const base = buildSessionChildEnv(parentEnv(), { accessToken: 't' })
+    const withStamp: NodeJS.ProcessEnv = {
+      ...base,
+      ...(true ? { CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS: '1' } : {}),
+    }
+    const without: NodeJS.ProcessEnv = {
+      ...base,
+      ...(false ? { CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS: '1' } : {}),
+    }
+    expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS).toBe('1')
+    expect(without.CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS).toBeUndefined()
+    expect(base.CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS).toBeUndefined()
+  })
+
+  test('scrubs CHILD_* trio from parent before spawn overlay', () => {
+    const env = buildSessionChildEnv(
+      parentEnv({
+        CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT: '1',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+        CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS: '1',
+      }),
+      { accessToken: 't' },
+    )
+    expect(env.CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT).toBeUndefined()
+    expect(env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
+    expect(env.CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS).toBeUndefined()
+  })
+
+  test('spawn autoDefault overlay stamps AUTO_DEFAULT (sessionRunner shape)', () => {
+    const base = buildSessionChildEnv(parentEnv(), { accessToken: 't' })
+    const withStamp: NodeJS.ProcessEnv = {
+      ...base,
+      ...(true ? { CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT: '1' } : {}),
+    }
+    expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT).toBe('1')
+    // ARTIFACT must not be written by spawn overlay (Drop stamp-alone).
+    expect(withStamp.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
   })
 })
