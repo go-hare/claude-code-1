@@ -68,6 +68,10 @@ export type Props = {
   /** densable accessibility bag — forwarded to base Text. */
   readonly accessibility?: DOMAccessibility;
 
+  readonly onMouseEnter?: () => void;
+  readonly onMouseLeave?: () => void;
+  readonly hoverFollowsPaint?: boolean;
+
   readonly children?: ReactNode;
 };
 
@@ -100,6 +104,9 @@ export default function ThemedText({
   wrap = 'wrap',
   'aria-preserve-whitespace': ariaPreserveWhitespace,
   accessibility,
+  onMouseEnter,
+  onMouseLeave,
+  hoverFollowsPaint,
   children,
 }: Props): React.ReactNode {
   const [themeName] = useTheme();
@@ -127,6 +134,9 @@ export default function ThemedText({
       wrap={wrap}
       aria-preserve-whitespace={ariaPreserveWhitespace}
       accessibility={accessibility}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      hoverFollowsPaint={hoverFollowsPaint}
     >
       {children}
     </Text>

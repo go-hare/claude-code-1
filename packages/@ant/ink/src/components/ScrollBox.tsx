@@ -316,6 +316,8 @@ function ScrollBox({
         flexDirection: style.flexDirection ?? 'row',
         flexGrow: style.flexGrow ?? 0,
         flexShrink: style.flexShrink ?? 1,
+        // densable DA: selectionScope:!0 before ...f so callers can override.
+        selectionScope: true,
         ...style,
         overflowX: 'scroll',
         overflowY: 'scroll',

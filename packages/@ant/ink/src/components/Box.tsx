@@ -4,6 +4,7 @@ import type { DOMAccessibility, DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { MouseActionEvent } from '../core/events/mouse-action-event.js';
 import type { PasteEvent } from '../core/events/paste-event.js';
 import type { WheelEvent } from '../core/events/wheel-event.js';
 import type { Styles } from '../core/styles.js';
@@ -38,6 +39,11 @@ export type Props = Except<Styles, 'textWrap'> & {
    * ancestors; call `event.stopImmediatePropagation()` to stop bubbling.
    */
   onClick?: (event: ClickEvent) => void;
+  onMouseDown?: (event: MouseActionEvent) => void;
+  onMouseUp?: (event: MouseActionEvent) => void;
+  onMouseDrag?: (event: MouseActionEvent) => void;
+  /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+  onPointer?: (event: MouseActionEvent) => void;
   onFocus?: (event: FocusEvent) => void;
   onFocusCapture?: (event: FocusEvent) => void;
   onBlur?: (event: FocusEvent) => void;
@@ -67,6 +73,16 @@ export type Props = Except<Styles, 'textWrap'> & {
   /** Fired when the mouse moves out of this Box's rendered rect. */
   onMouseLeave?: () => void;
   /**
+   * densable `hoverIgnoresBlankCells` — Vd: hover handlers do not fire on
+   * blank cells of this node.
+   */
+  hoverIgnoresBlankCells?: boolean;
+  /**
+   * densable `hoverFollowsPaint` — hover enter/leave follows paint even
+   * when the hit walk would skip this node.
+   */
+  hoverFollowsPaint?: boolean;
+  /**
    * densable `elementKey` / `elementPlugin` — plugin drawing identity for
    * Ide `keyRows` (cEe yoga walk). Written onto ink-box attributes.
    */
@@ -89,12 +105,18 @@ function Box({
   accessibility: accessibilityProp,
   'aria-preserve-whitespace': ariaPreserveWhitespace,
   onClick,
+  onMouseDown,
+  onMouseUp,
+  onMouseDrag,
+  onPointer,
   onFocus,
   onFocusCapture,
   onBlur,
   onBlurCapture,
   onMouseEnter,
   onMouseLeave,
+  hoverIgnoresBlankCells,
+  hoverFollowsPaint,
   onKeyDown,
   onKeyDownCapture,
   onPaste,
@@ -134,18 +156,24 @@ function Box({
       autoFocus={autoFocus}
       accessibility={accessibility}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onMouseDrag={onMouseDrag}
+      onPointer={onPointer}
       onFocus={onFocus as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onFocusCapture={onFocusCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onBlur={onBlur as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onBlurCapture={onBlurCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      hoverIgnoresBlankCells={hoverIgnoresBlankCells}
+      hoverFollowsPaint={hoverFollowsPaint}
       onKeyDown={onKeyDown as unknown as (event: React.KeyboardEvent<Element>) => void}
       onKeyDownCapture={onKeyDownCapture as unknown as (event: React.KeyboardEvent<Element>) => void}
       onPaste={onPaste}
       onPasteCapture={onPasteCapture}
-      onWheel={onWheel}
-      onWheelCapture={onWheelCapture}
+      onWheel={onWheel as unknown as (event: React.WheelEvent<Element>) => void}
+      onWheelCapture={onWheelCapture as unknown as (event: React.WheelEvent<Element>) => void}
       {...(elementKey !== undefined && { elementKey })}
       {...(elementPlugin !== undefined && { elementPlugin })}
       style={{

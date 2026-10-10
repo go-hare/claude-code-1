@@ -54,6 +54,8 @@ export type Theme = {
   clawd_background: string
   userMessageBackground: string
   userMessageBackgroundHover: string
+  /** densable Tyn `Hr` sidebar fill — gold palette, not invented. */
+  composerSidebarBackground: string
   /** Message-actions selection. Cool shift toward `suggestion` blue; distinct from default AND userMessageBackground. */
   messageActionsBackground: string
   /** Text-selection highlight background (alt-screen mouse selection). Solid

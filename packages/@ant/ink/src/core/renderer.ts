@@ -5,9 +5,11 @@ import type { Frame } from './frame.js'
 import { consumeAbsoluteRemovedFlag } from './node-cache.js'
 import Output from './output.js'
 import renderNodeToOutput, {
+  getAbsolutePaintCut,
   getScrollDrainNode,
   getScrollHint,
   resetRenderFrameContext,
+  vanishedOverflowingAbsoluteBlit,
 } from './render-node-to-output.js'
 import { createScreen, type StylePool } from './screen.js'
 
@@ -131,11 +133,10 @@ export default function createRenderer(
     // node's pixels. hasRemovedChild only shields direct siblings.
     // Normal-flow removals don't paint cross-subtree and are fine.
     const absoluteRemoved = consumeAbsoluteRemovedFlag()
+    const blitPrevScreen =
+      absoluteRemoved || options.prevFrameContaminated ? undefined : prevScreen
     renderNodeToOutput(node, output, {
-      prevScreen:
-        absoluteRemoved || options.prevFrameContaminated
-          ? undefined
-          : prevScreen,
+      prevScreen: blitPrevScreen,
     })
 
     const renderedScreen = output.get()
@@ -150,6 +151,9 @@ export default function createRenderer(
     return {
       scrollHint: options.altScreen ? getScrollHint() : null,
       scrollDrainPending: drainNode !== null,
+      staleAbsolutePaint:
+        blitPrevScreen !== undefined &&
+        (getAbsolutePaintCut() || vanishedOverflowingAbsoluteBlit(output)),
       screen: renderedScreen,
       viewport: {
         width: terminalWidth,

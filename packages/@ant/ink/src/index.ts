@@ -155,7 +155,9 @@ export type { Progress } from './core/terminal.js'
 // ============================================================
 export {
   ClickEvent,
+  EMPTY_CLICK_MODS,
   MOUNT_SETTLE_MS,
+  type ClickMods,
   type MouseClickResult,
 } from './core/events/click-event.js'
 export { EventEmitter } from './core/events/emitter.js'
@@ -168,6 +170,7 @@ export {
 export { KeyboardEvent } from './core/events/keyboard-event.js'
 export { PasteEvent } from './core/events/paste-event.js'
 export { WheelEvent } from './core/events/wheel-event.js'
+export { MouseActionEvent } from './core/events/mouse-action-event.js'
 export { FocusEvent } from './core/events/focus-event.js'
 export { FocusManager, getFocusManager } from './core/focus.js'
 export type {

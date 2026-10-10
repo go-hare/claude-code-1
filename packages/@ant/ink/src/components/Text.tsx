@@ -50,6 +50,10 @@ type BaseProps = {
   /** densable accessibility bag (alternative to individual aria-* props). */
   readonly accessibility?: DOMAccessibility;
 
+  readonly onMouseEnter?: () => void;
+  readonly onMouseLeave?: () => void;
+  readonly hoverFollowsPaint?: boolean;
+
   readonly children?: ReactNode;
 };
 
@@ -134,6 +138,9 @@ export default function Text({
   wrap = 'wrap',
   'aria-preserve-whitespace': ariaPreserveWhitespace,
   accessibility: accessibilityProp,
+  onMouseEnter,
+  onMouseLeave,
+  hoverFollowsPaint,
   children,
 }: Props): React.ReactNode {
   if (children === undefined || children === null) {
@@ -157,7 +164,14 @@ export default function Text({
     accessibilityProp ?? (ariaPreserveWhitespace ? { preserveWhitespace: true } : undefined);
 
   return (
-    <ink-text style={memoizedStylesForWrap[wrap]} textStyles={textStyles} accessibility={accessibility}>
+    <ink-text
+      style={memoizedStylesForWrap[wrap]}
+      textStyles={textStyles}
+      {...(onMouseEnter && { onMouseEnter })}
+      {...(onMouseLeave && { onMouseLeave })}
+      {...(hoverFollowsPaint && { hoverFollowsPaint })}
+      accessibility={accessibility}
+    >
       {children}
     </ink-text>
   );

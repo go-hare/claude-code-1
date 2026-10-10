@@ -1,13 +1,42 @@
-import { useEffect, type RefObject } from 'react'
+import { useLayoutEffect, type RefObject } from 'react'
 import type { DOMElement } from '../core/dom.js'
 import { getFocusManager } from '../core/focus.js'
 
+type FocusHost = {
+  activeElement: DOMElement | null
+  focus: (node: DOMElement) => void
+}
+
 /**
- * Official densable 2.1.210 `nR(ref, isActive, blurWhenInactive=false)`:
+ * Gold Yt / rfo nR `d()`:
+ * reclaim when activeElement is null or an ancestor. Never steal a descendant.
+ */
+export function reclaimIfNullOrAncestor(fm: FocusHost, node: DOMElement): void {
+  if (fm.activeElement === node) return
+  if (!fm.activeElement) {
+    fm.focus(node)
+    return
+  }
+  let parent = node.parentNode
+  while (parent) {
+    if (parent === fm.activeElement) {
+      fm.focus(node)
+      return
+    }
+    parent = parent.parentNode
+  }
+}
+
+/**
+ * Official densable 2.1.289 rfo `nR` (Xt layout):
  *
  * When active, claim FocusManager focus and subscribe to reclaim when:
  * - activeElement becomes null, or
- * - activeElement is an ancestor of this node (focus landed on a parent)
+ * - activeElement is an ancestor of this node (parent tabIndex steal)
+ *
+ * Gold Yt inlines the same `d()` without the mount `focus(self)` — a
+ * focused descendant (prompt tabIndex 0) must stay. Do not pass Yt
+ * through this hook (parent layout runs after the child).
  *
  * Without this, dispatchKeyboardEvent / dispatchPasteEvent target root
  * and BaseTextInput onKeyDown/onPaste never fire.
@@ -17,7 +46,7 @@ export function useFocusReclaim(
   isActive: boolean,
   blurWhenInactive = false,
 ): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = ref.current
     if (!node) return
 
@@ -39,20 +68,8 @@ export function useFocusReclaim(
 
     return fm.subscribe(() => {
       const current = ref.current
-      if (!current || fm.activeElement === current) return
-      if (!fm.activeElement) {
-        fm.focus(current)
-        return
-      }
-      // Reclaim if focus is on an ancestor (parent tabIndex steal).
-      let parent = current.parentNode
-      while (parent) {
-        if (parent === fm.activeElement) {
-          fm.focus(current)
-          return
-        }
-        parent = parent.parentNode
-      }
+      if (!current) return
+      reclaimIfNullOrAncestor(fm, current)
     })
   }, [isActive, ref, blurWhenInactive])
 }

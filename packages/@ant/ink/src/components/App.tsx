@@ -55,8 +55,14 @@ import reconciler from '../core/reconciler.js';
 import instances from '../core/instances.js';
 import { clearSelection, finishSelection, hasSelection, type SelectionState } from '../core/selection.js';
 import { waitUntilAttachStable } from '../core/attachStamp.js';
-import { isGhosttyXtversion, isXtermJs, supportsExtendedKeys } from '../core/terminal.js';
-import { probeTerminalIdentity } from '../core/terminalProbe.js';
+import {
+  getCellPixels,
+  getMousePixelsSupported,
+  isGhosttyXtversion,
+  isXtermJs,
+  supportsExtendedKeys,
+} from '../core/terminal.js';
+import { probeTerminalIdentity, reprobeCellPixels as queryCellPixels } from '../core/terminalProbe.js';
 import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
 import type { MouseClickResult } from '../core/events/click-event.js';
 import {
@@ -122,15 +128,23 @@ type Props = {
   // so the handler is always wired but dormant until tracking is on.
   readonly selection: SelectionState;
   readonly onSelectionChange: () => void;
+  /** densable `onSelectionTakeDown` — announce BEFORE Il/clearSelection. */
+  readonly onSelectionTakeDown: () => void;
   // Dispatch a click at (col, row) — hit-tests the DOM tree and bubbles
   // onClick handlers. Returns true if a DOM handler consumed the click.
   // No-op (returns false) outside fullscreen mode (Ink.dispatchClick
   // gates on altScreenActive).
-  readonly onClickAt: (col: number, row: number, isWindowActivation?: boolean) => MouseClickResult;
+  readonly onClickAt: (
+    col: number,
+    row: number,
+    isWindowActivation?: boolean,
+    mods?: { shift: boolean; alt: boolean; ctrl: boolean },
+  ) => MouseClickResult;
   // Dispatch hover (onMouseEnter/onMouseLeave) as the pointer moves over
   // DOM elements. Called for mode-1003 motion events with no button held.
   // No-op outside fullscreen (Ink.dispatchHover gates on altScreenActive).
   readonly onHoverAt: (col: number, row: number) => void;
+  readonly onHoverLost?: () => void;
   // Look up the OSC 8 hyperlink at (col, row) synchronously at click
   // time. Returns the URL or undefined. The browser-open is deferred by
   // MULTI_CLICK_TIMEOUT_MS so double-click can cancel it.
@@ -173,9 +187,50 @@ type Props = {
   readonly dispatchPasteEvent: (text: string) => void;
   /**
    * densable `dispatchWheelEvent` — SGR wheel DOM path. Optional so
-   * windowActivation stubs don't need it. Returns true if preventDefault.
+   * windowActivation stubs don't need it. Gold returns void; Yt capture
+   * synthesizes wheelup/wheeldown unless eo.
    */
-  readonly dispatchWheelEvent?: (parsedKey: ParsedKey) => boolean;
+  readonly dispatchWheelEvent?: (parsedKey: ParsedKey) => void;
+  /**
+   * DualInk `Jhr` mouse-action bubble (grips / PluginClient onMouseDown).
+   * Optional so windowActivation stubs don't need it. Return is unused for
+   * consume — gold x1 consume is `onPointerPress` Xd.
+   */
+  readonly onMouseAction?: (
+    col: number,
+    row: number,
+    button: number,
+    type: 'mousedown' | 'mouseup' | 'mousedrag',
+  ) => boolean | undefined;
+  /**
+   * densable `onPointerPress` — Xd + Wl kind down. True skips selection.
+   */
+  readonly onPointerPress?: (
+    col: number,
+    row: number,
+    button: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ) => boolean;
+  /**
+   * densable `onPointerDrag` — captured node Wl kind move. True skips
+   * selection-drag.
+   */
+  readonly onPointerDrag?: (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ) => boolean;
+  /**
+   * densable `onPointerRelease` — Wl kind up. True skips finishSelection.
+   */
+  readonly onPointerRelease?: (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ) => boolean;
   /**
    * densable Twe.focusManager / rootNode — provided via AppContext for lRc
    * reclaim and other Twe consumers (not getFocusManager(wrap)).
@@ -193,10 +248,49 @@ type Props = {
     ) => void,
   ) => () => void;
   /**
+   * densable `ib.subscribeLayout` — Ink layoutListeners bus. Optional so
+   * windowActivation stubs don't need to wire it.
+   */
+  readonly subscribeLayout?: (listener: () => void) => () => void;
+  /**
+   * densable `ib.subscribeFrames` — Ink frameListeners bus. Optional so
+   * windowActivation stubs don't need to wire it.
+   */
+  readonly subscribeFrames?: (listener: () => void) => () => void;
+  /**
+   * densable `ib.subscribeHoverTracked` — Ink hoverTrackedListeners bus.
+   */
+  readonly subscribeHoverTracked?: (listener: () => void) => () => void;
+  /**
+   * densable Twe `isHoverTracked` — `altScreen && mouseTracking==="full"`.
+   */
+  readonly isHoverTracked?: () => boolean;
+  /**
    * Official densable getMouseMode — "off" | "scroll" | "full".
    * Scroll mode skips click/drag selection (wheel still routes).
    */
   readonly getMouseMode?: () => MouseTrackingMode;
+  /**
+   * densable `mouseReportsInPixels` — true while DEC 1016 is live.
+   */
+  readonly mouseReportsInPixels?: () => boolean;
+  /**
+   * densable `onPointerHover` — DualInk Xd+Wl hover with optional `fine`.
+   */
+  readonly onPointerHover?: (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ) => boolean;
+  /**
+   * densable `retainFinePointer` — bump 1016 hold; returns release.
+   */
+  readonly retainFinePointer?: () => () => void;
+  /**
+   * densable `onCellPixels` — DualInk calls after `p1` so Ink can `syncMousePixels`.
+   */
+  readonly onCellPixels?: () => void;
 };
 
 // Multi-click detection thresholds. 500ms is the macOS default; a small
@@ -257,6 +351,45 @@ export default class App extends PureComponent<Props, State> {
 
   // Count how many components enabled raw mode to avoid disabling
   // raw mode until all components don't need it anymore
+  /**
+   * densable `cellReprobe` — idle | asking | again. Overlapping p1 coalesces.
+   */
+  cellReprobe: 'idle' | 'asking' | 'again' = 'idle';
+
+  /**
+   * densable `p1` / `reprobeCellPixels` — CSI 16 t again when 1016 is capable.
+   */
+  reprobeCellPixels(): void {
+    if (
+      !(this.querier !== null && this.rawModeEnabledCount > 0 && !this.hasReleasedTerminal && getMousePixelsSupported())
+    ) {
+      return;
+    }
+    if (this.cellReprobe === 'idle') {
+      this.cellReprobe = 'asking';
+      void this.runCellReprobe();
+      return;
+    }
+    this.cellReprobe = 'again';
+  }
+
+  /** densable `runCellReprobe`. */
+  async runCellReprobe(): Promise<void> {
+    if (this.querier) {
+      await queryCellPixels(this.querier, message => {
+        defaultCallbacks.logForDebugging(message);
+      });
+    }
+    if (this.hasReleasedTerminal || !this.querier) return;
+    this.props.onCellPixels?.();
+    if (this.cellReprobe === 'again') {
+      this.cellReprobe = 'asking';
+      await this.runCellReprobe();
+      return;
+    }
+    this.cellReprobe = 'idle';
+  }
+
   rawModeEnabledCount = 0;
 
   internal_eventEmitter = new EventEmitter();
@@ -325,6 +458,12 @@ export default class App extends PureComponent<Props, State> {
   // repeat events (drag-then-release at same cell, etc.).
   lastHoverCol = -1;
   lastHoverRow = -1;
+  lastHoverOnTarget = false;
+  /**
+   * densable `pendingPastePress` — middle/right paste fires on release (gold `E1`).
+   * Gold `Os=1` is MULTI_CLICK_DISTANCE.
+   */
+  pendingPastePress: { button: number; col: number; row: number } | null = null;
 
   // Timestamp of last stdin chunk (performance.now(), same clock as
   // incompleteEscapeTimer / byteRunDeadlineAt — official 2.1.210 App).
@@ -352,7 +491,12 @@ export default class App extends PureComponent<Props, State> {
             focusManager: this.props.focusManager,
             rootNode: this.props.rootNode,
             dispatchPasteEvent: this.props.dispatchPasteEvent,
+            subscribeLayout: this.props.subscribeLayout ?? (() => () => {}),
+            subscribeFrames: this.props.subscribeFrames ?? (() => () => {}),
             subscribeClicks: this.props.subscribeClicks ?? (() => () => {}),
+            isHoverTracked: this.props.isHoverTracked ?? (() => false),
+            subscribeHoverTracked: this.props.subscribeHoverTracked ?? (() => () => {}),
+            retainFinePointer: this.props.retainFinePointer ?? (() => () => {}),
           }}
         >
           <StdinContext.Provider
@@ -490,6 +634,8 @@ export default class App extends PureComponent<Props, State> {
             if (this.querier && !this.hasReleasedTerminal) {
               void probeTerminalIdentity(this.querier, message => {
                 defaultCallbacks.logForDebugging(message);
+              }).then(() => {
+                instances.get(this.props.stdout)?.syncMousePixels();
               });
             }
           });
@@ -763,6 +909,7 @@ export default class App extends PureComponent<Props, State> {
     }
     setTerminalFocused(isFocused);
     if (isFocused && prev === 'blurred') {
+      this.reprobeCellPixels();
       instances.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
     }
     if (isFocused && process.env.CLAUDE_BG_BACKEND === 'daemon' && this.querier && !this.attachProbeDeferred) {
@@ -772,6 +919,8 @@ export default class App extends PureComponent<Props, State> {
         if (this.querier && !this.hasReleasedTerminal) {
           void probeTerminalIdentity(this.querier, message => {
             defaultCallbacks.logForDebugging(message);
+          }).then(() => {
+            instances.get(this.props.stdout)?.syncMousePixels();
           });
         }
       });
@@ -876,10 +1025,20 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // Terminal sends 1-indexed col/row; convert to 0-indexed for the
     // screen buffer. Button bit 0x20 = drag (motion while button held).
     if (item.kind === 'mouse') {
+      // densable: press && !Yd(button) && !cAe() → handleTerminalFocus(true)
+      // Gold Yd = (button&32)!==0 && (button&3)===3; cAe = terminalFocus!=="blurred".
+      if (
+        item.action === 'press' &&
+        !((item.button & 0x20) !== 0 && (item.button & 0x03) === 3) &&
+        !getTerminalFocused()
+      ) {
+        app.handleTerminalFocus(true);
+      }
       // Official densable: getMouseMode()==="scroll" skips left-button click
       // handling (button&3===0) so selection/cursor don't fight wheel-only mode.
       const mode = app.props.getMouseMode?.() ?? 'full';
       if (mode === 'scroll' && (item.button & 3) === 0) {
+        app.pendingPastePress = null;
         continue;
       }
       handleMouseEvent(app, item);
@@ -931,8 +1090,8 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     //   else if (wheel/mouse) dispatchWheelEvent  // NEVER keydown
     //   else dispatchKeyboardEvent
     // Bracketed paste is a separate PasteEvent — never keydown insert.
-    // Fork keeps InputEvent emit for useInput / useKeybindings/chords
-    // (official has no peer emitter; scroll uses dispatchWheelEvent only).
+    // Keyboard InputEvent is Yt `G` (kmo + L). Wheel InputEvent is Yt `N`.
+    // Mouse still emits InputEvent here (no Yt analog).
     if (!item.isPasted) {
       app.handleInput(sequence);
     }
@@ -941,17 +1100,15 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
       continue;
     }
     // Official: wheel/mouse never enter KeyboardEvent / insert path.
-    // Fork has no dispatchWheelEvent prop — scroll:lineUp/lineDown keybindings
-    // listen on the InputEvent emitter, so emit only that for wheel/mouse.
     // densable: no post-wheel multi-key absorb of lone M/m.
     // parse-keypress kTd = whole-token re-ESC only; incomplete CSI lives in
     // tokenizer.buffer() until NORMAL_TIMEOUT flush. Progressive desync residue
     // empties in KeyboardEvent xM_ / isSgrMouseResidue (fork under-strip).
     if (item.name === 'wheelup' || item.name === 'wheeldown' || item.name === 'mouse') {
-      // densable: wheel → dispatchWheelEvent (never keydown). Fork still
-      // emits InputEvent when DOM onWheel did not preventDefault so
-      // scroll:lineUp keybindings keep working outside pane onWheel.
-      if (item.name !== 'mouse' && app.props.dispatchWheelEvent?.(item)) {
+      // densable lag: wheel → dispatchWheelEvent only (never InputEvent).
+      // Yt onWheelCapture synthesizes wheelup/wheeldown unless eo.
+      if (item.name !== 'mouse') {
+        app.props.dispatchWheelEvent?.(convertWheelIfPixels(app, item));
         continue;
       }
       const event = new InputEvent(item);
@@ -959,11 +1116,87 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
       continue;
     }
     // Official: keyboard DOM path (onKeyDown / focus tree).
+    // densable Yt `G` (kmo + L) is the InputEvent source — not a second emit here.
     app.props.dispatchKeyboardEvent(item);
-    // Fork-only: legacy InputEvent for useInput / useKeybindings.
-    const event = new InputEvent(item);
-    app.internal_eventEmitter.emit('input', event);
   }
+}
+
+/**
+ * densable `Qx`/`Fd` — pixel SGR → 1-indexed cells + unfloored `fine`.
+ * `Math.max(1, Math.floor(n/f.width)+1)` analog.
+ */
+export function pixelToCellCoords(
+  n: number,
+  u: number,
+  f: { width: number; height: number },
+): { col: number; row: number; fine: { col: number; row: number } } {
+  const fine = { col: n / f.width, row: u / f.height };
+  return {
+    col: Math.max(1, Math.floor(fine.col) + 1),
+    row: Math.max(1, Math.floor(fine.row) + 1),
+    fine,
+  };
+}
+
+/** densable `b1` — rewrite ParsedMouse when DEC 1016 is live. */
+function convertMouseIfPixels(app: App, u: ParsedMouse): ParsedMouse {
+  const f = getCellPixels();
+  if (!app.props.mouseReportsInPixels?.() || f === undefined) return u;
+  return { ...u, ...pixelToCellCoords(u.col, u.row, f) };
+}
+
+/** densable `S1` — wheel col/row via Fd, drop fine. */
+function convertWheelIfPixels(app: App, u: ParsedKey): ParsedKey {
+  const f = getCellPixels();
+  const { col, row } = u;
+  if (!app.props.mouseReportsInPixels?.() || f === undefined || col === undefined || row === undefined) {
+    return u;
+  }
+  const g = pixelToCellCoords(col, row, f);
+  return { ...u, col: g.col, row: g.row };
+}
+
+/**
+ * densable `E1` — consume `pendingPastePress` on release.
+ * Match stored button or X10 `button===3`; distance gold `Os=1`.
+ */
+function consumePendingMousePaste(app: App, baseButton: number, col: number, row: number): void {
+  const pending = app.pendingPastePress;
+  app.pendingPastePress = null;
+  if (
+    pending == null ||
+    (baseButton !== pending.button && baseButton !== 3) ||
+    Math.abs(col - pending.col) > MULTI_CLICK_DISTANCE ||
+    Math.abs(row - pending.row) > MULTI_CLICK_DISTANCE
+  ) {
+    return;
+  }
+  const sel = app.props.selection;
+  const platform = _getClipboardHostPlatform();
+  if (pending.button === 2 && (platform === 'windows' || platform === 'wsl' || platform === 'linux')) {
+    if (hasSelection(sel)) {
+      app.props.onSelectionTakeDown();
+      clearSelection(sel);
+      app.props.onSelectionChange();
+    } else if (!isXtermJs()) {
+      void readNativeClipboard('clipboard').then(text => {
+        if (text) app.props.dispatchPasteEvent(text);
+      });
+    }
+  } else if (pending.button === 1 && platform === 'linux') {
+    void readNativeClipboard('primary').then(text => {
+      if (text) app.props.dispatchPasteEvent(text);
+    });
+  }
+}
+
+/** densable `Ir` — SGR button bits 0x04/0x08/0x10. */
+function sgrButtonMods(button: number): { shift: boolean; alt: boolean; ctrl: boolean } {
+  return {
+    shift: (button & 4) !== 0,
+    alt: (button & 8) !== 0,
+    ctrl: (button & 16) !== 0,
+  };
 }
 
 /** Exported for testing. Mutates app.props.selection and click/hover state. */
@@ -972,14 +1205,38 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
   // through the keybinding system as 'wheelup'/'wheeldown', not here).
   if (defaultCallbacks.isMouseClicksDisabled()) return;
 
+  // densable `x1(n,b1(n,T))` — convert pixel SGR before the 1-indexed → 0-indexed step.
+  m = convertMouseIfPixels(app, m);
+
   const sel = app.props.selection;
   // Terminal coords are 1-indexed; screen buffer is 0-indexed
   const col = m.col - 1;
   const row = m.row - 1;
   const baseButton = m.button & 0x03;
+  // densable `Yd`: press + motion + no button. Gold `x1` returns before DualInk press/drag.
+  const isHoverMotion = m.action === 'press' && (m.button & 0x20) !== 0 && baseButton === 3;
+  // densable x1: DualInk Jhr still fires; consume is onPointerPress/Drag/Release (Xd).
+  // Gold packs left as `0` and middle/right as `g=button&3`; mods via `Ir(u.button)`.
+  const consumeDualInk = (type: 'mousedown' | 'mouseup' | 'mousedrag'): boolean => {
+    app.props.onMouseAction?.(col, row, m.button, type);
+    const mods = sgrButtonMods(m.button);
+    if (type === 'mousedown') {
+      return app.props.onPointerPress?.(col, row, baseButton, mods, m.fine) === true;
+    }
+    if (type === 'mousedrag') {
+      return app.props.onPointerDrag?.(col, row, mods, m.fine) === true;
+    }
+    return app.props.onPointerRelease?.(col, row, mods, m.fine) === true;
+  };
+  if (!isHoverMotion && app.lastHoverCol !== -1 && (col !== app.lastHoverCol || row !== app.lastHoverRow)) {
+    app.lastHoverCol = -1;
+    app.lastHoverRow = -1;
+    app.lastHoverOnTarget = false;
+    app.props.onHoverLost?.();
+  }
 
   if (m.action === 'press') {
-    if ((m.button & 0x20) !== 0 && baseButton === 3) {
+    if (isHoverMotion) {
       // Mode-1003 motion with no button held. Dispatch hover; skip the
       // rest of this handler (no selection, no click-count side effects).
       // Lost-release recovery: no-button motion while isDragging=true means
@@ -993,40 +1250,36 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
         finishSelection(sel);
         app.props.onSelectionChange();
       }
-      if (col === app.lastHoverCol && row === app.lastHoverRow) return;
-      app.lastHoverCol = col;
-      app.lastHoverRow = row;
-      app.props.onHoverAt(col, row);
+      const sameCell = col === app.lastHoverCol && row === app.lastHoverRow;
+      if (!sameCell) {
+        app.lastHoverCol = col;
+        app.lastHoverRow = row;
+        app.props.onHoverAt(col, row);
+      }
+      // densable x1: if (!M || u.fine!==void 0 && n.lastHoverOnTarget)
+      if (!sameCell || (m.fine !== undefined && app.lastHoverOnTarget)) {
+        app.lastHoverOnTarget = app.props.onPointerHover?.(col, row, sgrButtonMods(m.button), m.fine) ?? false;
+      }
       return;
     }
+    // densable x1: non-motion clears a leftover pending paste (left press cancels).
+    if ((m.button & 0x20) === 0) {
+      app.pendingPastePress = null;
+    }
+    // densable x1: DualInk drag consume before selection-drag / non-left paste.
+    if ((m.button & 0x20) !== 0 && consumeDualInk('mousedrag')) return;
     if (baseButton !== 0) {
-      // Non-left press breaks the multi-click chain.
+      // densable x1 comma: `clickCount=0,(u.button&32)===0&&(g===1||g===2)&&onPointerPress`.
       app.clickCount = 0;
+      if ((m.button & 0x20) === 0 && (baseButton === 1 || baseButton === 2) && consumeDualInk('mousedown')) {
+        return;
+      }
       if ((m.button & 0x20) === 0) {
         app.consumeWindowActivationLatch(Date.now());
       }
-      // densable mouse paste on press (not motion bit 0x20):
-      // right(2) windows|wsl|linux: clear selection OR Ksn("clipboard") paste
-      // middle(1) linux only: Ksn("primary") paste
-      // densable SEA 2.1.224: sC()≡isXtermJs() guards **right-click clipboard only**
-      // (`else if(!sC())Ksn("clipboard")`). Middle primary has **no** sC gate —
-      // invent-ban: do not add isXtermJs() on middle.
-      if ((m.button & 0x20) === 0) {
-        const platform = _getClipboardHostPlatform();
-        if (baseButton === 2 && (platform === 'windows' || platform === 'wsl' || platform === 'linux')) {
-          if (hasSelection(sel)) {
-            clearSelection(sel);
-            app.props.onSelectionChange();
-          } else if (!isXtermJs()) {
-            void readNativeClipboard('clipboard').then(text => {
-              if (text) app.props.dispatchPasteEvent(text);
-            });
-          }
-        } else if (baseButton === 1 && platform === 'linux') {
-          void readNativeClipboard('primary').then(text => {
-            if (text) app.props.dispatchPasteEvent(text);
-          });
-        }
+      // densable x1: store middle/right press; gold `E1` pastes on release.
+      if ((m.button & 0x20) === 0 && (baseButton === 1 || baseButton === 2)) {
+        app.pendingPastePress = { button: baseButton, col, row };
       }
       return;
     }
@@ -1044,6 +1297,11 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     if (sel.isDragging) {
       finishSelection(sel);
       app.props.onSelectionChange();
+    }
+    // densable x1: onPointerPress left → clickCount=0; return (no selection).
+    if (consumeDualInk('mousedown')) {
+      app.clickCount = 0;
+      return;
     }
     // Fresh left press. Detect multi-click HERE (not on release) so the
     // word/line highlight appears immediately and a subsequent drag can
@@ -1087,6 +1345,10 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     return;
   }
 
+  // densable x1: gold `E1` then onPointerRelease. Paste on release, not press.
+  consumePendingMousePaste(app, baseButton, col, row);
+  if (consumeDualInk('mouseup')) return;
+
   // Release: end the drag even for non-zero button codes. Some terminals
   // encode release with the motion bit or button=3 "no button" (carried
   // over from pre-SGR X10 encoding) — filtering those would orphan
@@ -1116,8 +1378,8 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     // Single click: dispatch DOM click immediately (cursor repositioning
     // etc. are latency-sensitive). If no DOM handler consumed it, defer
     // the hyperlink check so a second click can cancel it.
-    const clickResult = app.props.onClickAt(col, row, app.pressIsWindowActivation);
-    if (clickResult === 'stray') {
+    const clickResult = app.props.onClickAt(col, row, app.pressIsWindowActivation, sgrButtonMods(m.button));
+    if (clickResult === 'stray' || clickResult === 'repeat') {
       app.clickCount = 0;
       app.lastClickTime = 0;
     }

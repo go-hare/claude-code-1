@@ -3,7 +3,16 @@ import { Event } from './event.js'
 /** densable `_Yn` — Button/Select mount-settle window (ms). */
 export const MOUNT_SETTLE_MS = 300
 
-export type MouseClickResult = 'stray' | 'handled' | 'unhandled'
+export type ClickMods = { shift: boolean; alt: boolean; ctrl: boolean }
+
+/** densable `h0` — default SGR mods on ClickEvent. */
+export const EMPTY_CLICK_MODS: ClickMods = {
+  shift: false,
+  alt: false,
+  ctrl: false,
+}
+
+export type MouseClickResult = 'stray' | 'handled' | 'unhandled' | 'repeat'
 
 /**
  * Mouse click event. Fired on left-button release without drag, only when
@@ -42,10 +51,17 @@ export class ClickEvent extends Event {
    * window back into focus (`yvf=400` grace after `Jhf()`).
    */
   readonly isWindowActivation: boolean
+  /** densable `mods` — SGR Ir bits on the click (`hDn` 6th ctor arg). */
+  readonly mods: ClickMods
   /** densable `defaultAllowed` — handler called `allowDefault()`. */
   defaultAllowed = false
   /** densable `droppedAsStray` — handler called `dropAsStray()`. */
   droppedAsStray = false
+  /**
+   * densable `endsClickChain` — handler called `endClickChain()`.
+   * Gold dispatchMouseClick: handled && endsClickChain → `"repeat"`.
+   */
+  endsClickChain = false
 
   constructor(
     col: number,
@@ -53,6 +69,7 @@ export class ClickEvent extends Event {
     cellIsBlank: boolean,
     hyperlinkUrl?: string,
     isWindowActivation = false,
+    mods: ClickMods = EMPTY_CLICK_MODS,
   ) {
     super()
     this.col = col
@@ -60,6 +77,7 @@ export class ClickEvent extends Event {
     this.cellIsBlank = cellIsBlank
     this.hyperlinkUrl = hyperlinkUrl
     this.isWindowActivation = isWindowActivation
+    this.mods = mods
   }
 
   /** densable `allowDefault` — treat the click as unhandled (e.g. hyperlink). */
@@ -70,5 +88,10 @@ export class ClickEvent extends Event {
   /** densable `dropAsStray` — discard this click (focus-activation / mount settle). */
   dropAsStray(): void {
     this.droppedAsStray = true
+  }
+
+  /** densable `endClickChain` — handled click also resets the multi-click chain. */
+  endClickChain(): void {
+    this.endsClickChain = true
   }
 }

@@ -40,6 +40,8 @@ export type EventHandlerProps = {
   onMouseDown?: MouseActionEventHandler
   onMouseUp?: MouseActionEventHandler
   onMouseDrag?: MouseActionEventHandler
+  /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+  onPointer?: MouseActionEventHandler
   onMouseEnter?: HoverEventHandler
   onMouseLeave?: HoverEventHandler
 
@@ -88,6 +90,7 @@ export const EVENT_HANDLER_PROPS = new Set<string>([
   'onMouseDown',
   'onMouseUp',
   'onMouseDrag',
+  'onPointer',
   'onMouseEnter',
   'onMouseLeave',
 ])

@@ -59,6 +59,9 @@ const KITTY_FLAGS_RE = /^\x1b\[\?(\d+)u$/
 // Ctrl+F3 = CSI 1;5 R, etc.) — plain CSI row;col R is genuinely ambiguous.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CURSOR_POSITION_RE = /^\x1b\[\?(\d+);(\d+)R$/
+// XTWINOPS cell size: CSI 6 ; height ; width t  — answer to CSI 16 t.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const CELL_SIZE_RE = /^\x1b\[6;(\d+);(\d+)t$/
 // OSC response: OSC code ; data (BEL|ST)
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const OSC_RESPONSE_RE = /^\x1b\](\d+);(.*?)(?:\x07|\x1b\\)$/s
@@ -68,6 +71,9 @@ const OSC_RESPONSE_RE = /^\x1b\](\d+);(.*?)(?:\x07|\x1b\\)$/s
 // goes through the pty, not the environment.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const XTVERSION_RE = /^\x1bP>\|(.*?)(?:\x07|\x1b\\)$/s
+// densable `rx` — kitty APC graphics reply ESC _ G … i=id … ; message ST
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const KITTY_GRAPHICS_RE = /^\x1b_G(?:[^;]*,)?i=(\d+)[^;]*;(.*?)\x1b\\$/s
 // SGR mouse event: CSI < button ; col ; row M (press) or m (release)
 // Button codes: 64=wheel-up, 65=wheel-down (0x40 | wheel-bit).
 // Button 32=left-drag (0x20 | motion-bit). Plain 0/1/2 = left/mid/right click.
@@ -214,6 +220,10 @@ export type TerminalResponse =
   /** XTVERSION: terminal name/version string (answer to CSI > 0 q).
    *  Example values: "xterm.js(5.5.0)", "ghostty 1.2.0", "iTerm2 3.6". */
   | { type: 'xtversion'; name: string }
+  /** densable `cellSize` — XTWINOPS CSI 16 t reply (`CSI 6 ; height ; width t`). */
+  | { type: 'cellSize'; height: number; width: number }
+  /** densable `kittyGraphics` — APC `_G` query reply (`igo` id=31). */
+  | { type: 'kittyGraphics'; id: number; message: string }
 
 /**
  * Try to recognize a sequence token as a terminal response.
@@ -257,6 +267,14 @@ function parseTerminalResponse(s: string): TerminalResponse | null {
       }
     }
 
+    if ((m = CELL_SIZE_RE.exec(s))) {
+      return {
+        type: 'cellSize',
+        height: parseInt(m[1]!, 10),
+        width: parseInt(m[2]!, 10),
+      }
+    }
+
     return null
   }
 
@@ -273,6 +291,18 @@ function parseTerminalResponse(s: string): TerminalResponse | null {
     const m = XTVERSION_RE.exec(s)
     if (m) {
       return { type: 'xtversion', name: m[1]! }
+    }
+  }
+
+  // densable APC `_G` kitty graphics query reply
+  if (s.startsWith('\x1b_')) {
+    const m = KITTY_GRAPHICS_RE.exec(s)
+    if (m) {
+      return {
+        type: 'kittyGraphics',
+        id: parseInt(m[1]!, 10),
+        message: m[2]!,
+      }
     }
   }
 
@@ -1073,6 +1103,12 @@ export type ParsedKey = {
   raw: string | undefined
   code?: string
   isPasted: boolean
+  /**
+   * densable SGR wheel `col` — 1-indexed. Pixel reports stay raw until App `S1`.
+   */
+  col?: number
+  /** densable SGR wheel `row` — 1-indexed. */
+  row?: number
 }
 
 /** A terminal response sequence (DECRPM, DA1, OSC reply, etc.) parsed
@@ -1100,6 +1136,12 @@ export type ParsedMouse = {
   /** 1-indexed row (from terminal) */
   row: number
   sequence: string
+  /**
+   * densable `fine` — unfloored cell-space coords after App `b1`/`Fd`.
+   * Parser itself does not convert; SGR-Pixels still fills col/row as the
+   * three CSI fields (pixels when DEC 1016 is live).
+   */
+  fine?: { col: number; row: number }
 }
 
 /** Everything that can come out of the input parser: a user keypress/paste,
@@ -1260,10 +1302,16 @@ function parseKeypress(s: string = ''): ParsedKey {
   // should still be recognized as wheelup/wheeldown.
   if ((match = SGR_MOUSE_RE.exec(s))) {
     const button = parseInt(match[1]!, 10)
-    if ((button & 0x43) === 0x40) return createNavKey(s, 'wheelup', false)
-    if ((button & 0x43) === 0x41) return createNavKey(s, 'wheeldown', false)
+    const col = parseInt(match[2]!, 10)
+    const row = parseInt(match[3]!, 10)
+    if ((button & 0x43) === 0x40) {
+      return createNavKey(s, 'wheelup', false, col, row)
+    }
+    if ((button & 0x43) === 0x41) {
+      return createNavKey(s, 'wheeldown', false, col, row)
+    }
     // Shouldn't reach here (parseMouseEvent catches non-wheel) but be safe
-    return createNavKey(s, 'mouse', false)
+    return createNavKey(s, 'mouse', false, col, row)
   }
 
   // X10 mouse: CSI M + 3 raw bytes (Cb+32, Cx+32, Cy+32). Terminals that
@@ -1364,7 +1412,13 @@ function parseKeypress(s: string = ''): ParsedKey {
   return key
 }
 
-function createNavKey(s: string, name: string, ctrl: boolean): ParsedKey {
+function createNavKey(
+  s: string,
+  name: string,
+  ctrl: boolean,
+  col?: number,
+  row?: number,
+): ParsedKey {
   return {
     kind: 'key',
     name,
@@ -1377,5 +1431,6 @@ function createNavKey(s: string, name: string, ctrl: boolean): ParsedKey {
     sequence: s,
     raw: s,
     isPasted: false,
+    ...(col !== undefined && row !== undefined ? { col, row } : {}),
   }
 }

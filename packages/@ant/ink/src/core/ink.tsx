@@ -13,13 +13,24 @@ import App from '../components/App.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from '../components/CursorDeclarationContext.js';
 import { FRAME_INTERVAL_MS } from './constants.js';
 import * as dom from './dom.js';
-import { ClickEvent, type MouseClickResult } from './events/click-event.js';
+import { ClickEvent, EMPTY_CLICK_MODS, type ClickMods, type MouseClickResult } from './events/click-event.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
 import { emptyFrame, type Diff, type Frame, type FrameEvent } from './frame.js';
 import { WheelEvent } from './events/wheel-event.js';
-import { bubbleClick, dispatchHover, hitTest, nodeHasWheelHandler } from './hit-test.js';
+import {
+  bubbleClick,
+  cellIsBlankForHover,
+  dispatchHover,
+  followHover as applyFollowHover,
+  dispatchMouseAction as hitDispatchMouseAction,
+  dispatchPointer,
+  findPointerHoverTarget,
+  hitPointerHover,
+  hitTest,
+  nodeHasWheelHandler,
+} from './hit-test.js';
 import instances from './instances.js';
 import { LogUpdate } from './log-update.js';
 import { nodeCache } from './node-cache.js';
@@ -90,7 +101,10 @@ import {
 } from './screenReaderTree.js';
 import { stringWidth } from './stringWidth.js';
 import {
+  getCellPixels,
+  getMousePixelsSupported,
   isXtermJs,
+  subscribeMousePixelsSupported,
   SYNC_OUTPUT_SUPPORTED,
   supportsExtendedKeys,
   type Terminal,
@@ -125,6 +139,9 @@ import {
 } from './xtermAtlas.js';
 import {
   DBP,
+  DEC,
+  decreset,
+  decset,
   DFE,
   DISABLE_MOUSE_TRACKING,
   EFE,
@@ -390,6 +407,22 @@ export default class Ink {
   // so UI (e.g. footer hints) can react to selection appearing/clearing.
   private readonly selectionListeners = new Set<() => void>();
   /**
+   * densable `selectionTakeDown` bus — announce BEFORE Il/clearSelection.
+   * Gold `notifySelectionTakeDown`: altScreenActive && hasSelection then announce.
+   */
+  private readonly selectionTakeDown = {
+    listeners: new Set<() => void>(),
+    subscribe(n: () => void): () => void {
+      this.listeners.add(n);
+      return () => {
+        this.listeners.delete(n);
+      };
+    },
+    announce(): void {
+      for (const n of this.listeners) n();
+    },
+  };
+  /**
    * densable `clickListeners` / `subscribeClicks` — ITt click-away bus.
    * Notified on every alt-screen click *before* onClick bubble.
    */
@@ -409,6 +442,62 @@ export default class Ink {
     };
   };
   /**
+   * densable `layoutListeners` / `subscribeLayout` — yoga-pass bus for `$l`.
+   * Notified after `runLayoutPass` in `onComputeLayout`.
+   */
+  private readonly layoutListeners = new Set<() => void>();
+  private layoutListenersPaused = false;
+  private reportedLayoutListenerFault = false;
+  private layoutListenerFaultDebugLines = 0;
+  /**
+   * densable `subscribeLayout=(n)=>(this.layoutListeners.add(n),()=>{...})`.
+   * Arrow so AppContext / `$l` can pass it as a stable Twe field.
+   */
+  subscribeLayout = (listener: () => void): (() => void) => {
+    this.layoutListeners.add(listener);
+    return () => {
+      this.layoutListeners.delete(listener);
+    };
+  };
+  /**
+   * densable `hoverTrackedListeners` / `subscribeHoverTracked`.
+   * Notified on `setAltScreenActive` via `queueMicrotask`.
+   */
+  private readonly hoverTrackedListeners = new Set<() => void>();
+  /**
+   * densable `subscribeHoverTracked=(n)=>(this.hoverTrackedListeners.add(n),()=>{...})`.
+   */
+  subscribeHoverTracked = (listener: () => void): (() => void) => {
+    this.hoverTrackedListeners.add(listener);
+    return () => {
+      this.hoverTrackedListeners.delete(listener);
+    };
+  };
+  /**
+   * densable `isHoverTracked=()=>this.altScreenActive&&this.altScreenMouseTracking==="full"`.
+   */
+  isHoverTracked = (): boolean => this.altScreenActive && this.altScreenMouseTracking === 'full';
+  /**
+   * densable `frameListeners` / `subscribeFrames` — paint bus for `mDn`.
+   * `tellFrameListeners()` after onRender paint, immediately before `onFrame`.
+   */
+  private readonly frameListeners = new Set<() => void>();
+  /**
+   * densable `subscribeFrames=(n)=>(this.frameListeners.add(n),()=>{...})`.
+   */
+  subscribeFrames = (listener: () => void): (() => void) => {
+    this.frameListeners.add(listener);
+    return () => {
+      this.frameListeners.delete(listener);
+    };
+  };
+  /**
+   * densable `tellFrameListeners(){for(let n of this.frameListeners)n()}`.
+   */
+  private tellFrameListeners(): void {
+    for (const listener of this.frameListeners) listener();
+  }
+  /**
    * densable `tellClickedNowhere` — alt-screen exit delivers `(null,null)`
    * on a microtask so ITt click-away can drop pane focus.
    */
@@ -424,6 +513,21 @@ export default class Ink {
   // so App.tsx's handleMouseEvent is stateless — dispatchHover diffs
   // against this set and mutates it in place.
   private readonly hoveredNodes = new Set<dom.DOMElement>();
+  private hoverCol = -1;
+  private hoverRow = -1;
+  private hoverFollowStreak = 0;
+  private hoverFollowHeldUntil = 0;
+  /**
+   * densable `pointerCapture` — Xd node + button while a DualInk pointer
+   * press is held. Drag/release Wl the captured node, not a fresh hit.
+   */
+  private pointerCapture: {
+    node: dom.DOMElement;
+    button: number;
+    col: number;
+    row: number;
+  } | null = null;
+  private readonly appRef = React.createRef<App>();
   /**
    * densable `frameSink` — installed by AxcStickyHost (`xxc`). When truthy
    * (`true` | `"tick"`), onRender swaps frames and skips cell-diff write;
@@ -576,6 +680,7 @@ export default class Ink {
       if (yoga) {
         this.runLayoutPass(yoga);
       }
+      this.notifyLayoutListeners();
     };
 
     this.container = reconciler.createContainer(
@@ -604,6 +709,7 @@ export default class Ink {
   }
 
   private handleResume = () => {
+    this.forgetPointer();
     if (!this.options.stdout.isTTY) {
       return;
     }
@@ -643,7 +749,7 @@ export default class Ink {
     // Gold syncTerminalSize only re-asserts mouse on alt resize; SIGCONT is
     // not a resize.
     if (this.altScreenMouseTracking !== 'off') {
-      this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
+      this.options.stdout.write(this.mouseOnSeq());
     }
   };
 
@@ -662,6 +768,7 @@ export default class Ink {
   // clear the screen, then the debounce fires and clears again (double
   // blank→paint flicker).
   private handleResize = () => {
+    this.appRef.current?.reprobeCellPixels();
     if (!this.syncTerminalSize()) return;
     if (this.currentNode !== null) {
       this.render(this.currentNode);
@@ -682,7 +789,7 @@ export default class Ink {
     this.resetScreenReaderDiffState();
     if (this.altScreenActive && !this.isPaused && this.options.stdout.isTTY) {
       if (this.altScreenMouseTracking !== 'off') {
-        this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
+        this.options.stdout.write(this.mouseOnSeq());
       }
       this.resetFramesForAltScreen();
       this.needsEraseBeforePaint = true;
@@ -702,7 +809,12 @@ export default class Ink {
    */
   prepareTerminalForHandoff(): void {
     this.pause();
-    this.options.stdout.write((this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + DFE);
+    this.forgetPointer();
+    this.options.stdout.write(
+      (this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') +
+        (this.pixelReportsLive ? decreset(DEC.MOUSE_PIXELS) : '') +
+        DFE,
+    );
     this.suspendStdin();
   }
 
@@ -712,7 +824,7 @@ export default class Ink {
    */
   restoreTerminalAfterHandoff(): void {
     this.resumeStdin();
-    this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking) + EFE);
+    this.options.stdout.write(this.mouseOnSeq() + EFE);
     this.resume();
   }
 
@@ -724,6 +836,7 @@ export default class Ink {
    */
   enterAlternateScreen(): void {
     this.pause();
+    this.forgetPointer();
     this.suspendStdin();
     this.options.stdout.write(
       // Disable extended key reporting first — editors that don't speak
@@ -732,6 +845,7 @@ export default class Ink {
       DISABLE_KITTY_KEYBOARD +
         DISABLE_MODIFY_OTHER_KEYS +
         (this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + // disable mouse (no-op if off)
+        (this.pixelReportsLive ? decreset(DEC.MOUSE_PIXELS) : '') +
         (this.altScreenActive ? '' : '\x1b[?1049h') + // enter alt (already in alt if fullscreen)
         '\x1b[?1004l' + // disable focus reporting
         '\x1b[0m' + // reset attributes
@@ -758,7 +872,7 @@ export default class Ink {
       (this.altScreenActive ? ENTER_ALT_SCREEN : '') + // re-enter alt — vim's rmcup dropped us to main
         '\x1b[2J' + // clear screen (now alt if fullscreen)
         '\x1b[H' + // cursor home
-        enableMouseTracking(this.altScreenMouseTracking) + // re-enable mouse (skip if off)
+        this.mouseOnSeq() + // re-enable mouse (skip if off; reassert 1016)
         (this.altScreenActive ? '' : '\x1b[?1049l') + // exit alt (non-fullscreen only)
         '\x1b[?25l', // hide cursor (Ink manages)
     );
@@ -918,6 +1032,57 @@ export default class Ink {
     this.logger.error(new Error('ink layout pass still throwing after many consecutive commits, frames dropped'));
   }
 
+  /**
+   * densable notifyLayoutListeners — after yoga pass; one throw pauses until
+   * this flush unwinds (`queueMicrotask` unpause).
+   */
+  private notifyLayoutListeners(): void {
+    if (this.layoutListenersPaused) return;
+    for (const listener of this.layoutListeners) {
+      try {
+        listener();
+      } catch (err) {
+        this.pauseLayoutListeners();
+        this.reportLayoutListenerFault(Ink.describeLayoutFault(err));
+        return;
+      }
+    }
+  }
+
+  private pauseLayoutListeners(): void {
+    this.layoutListenersPaused = true;
+    queueMicrotask(() => {
+      this.layoutListenersPaused = false;
+    });
+  }
+
+  private reportLayoutListenerFault(fault: Error): void {
+    try {
+      this.reportLayoutFaultErrorOnce(fault);
+      if (!this.reportedLayoutListenerFault) {
+        this.reportedLayoutListenerFault = true;
+        this.reportLayoutListenersPaused();
+      }
+      this.logLayoutListenerFaultForDebugging(fault);
+    } catch {
+      // never throw from reporting
+    }
+  }
+
+  private reportLayoutListenersPaused(): void {
+    this.logger.error(new Error('ink layout listener threw; layout listeners paused until this flush unwinds'));
+  }
+
+  private logLayoutListenerFaultForDebugging(fault: Error): void {
+    try {
+      if (this.layoutListenerFaultDebugLines >= 5) return;
+      this.layoutListenerFaultDebugLines++;
+      this.logger.debug(`ink layout listener threw (${fault.name}: ${fault.message})`, { level: 'error' });
+    } catch {
+      // ignore
+    }
+  }
+
   /** densable Fwd=5 debug log cap */
   private logLayoutFaultForDebugging(fault: Error, retryFault: Error | undefined): void {
     try {
@@ -996,10 +1161,12 @@ export default class Ink {
         this.backFrame = this.frontFrame;
         this.frontFrame = frame;
         this.prevFrameContaminated = false;
+        this.repaintAfterStaleAbsolutePaint(frame);
         this.maybeResetPools(renderStart);
         if (sinkResult === 'tick') {
           this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
         }
+        this.tellFrameListeners();
         this.options.onFrame?.({
           durationMs: performance.now() - renderStart,
           flickers: [],
@@ -1341,6 +1508,7 @@ export default class Ink {
     // selection overlay, that buffer has inverted cells. selActive/hlActive
     // are only ever true in alt-screen; in main-screen this is false→false.
     this.prevFrameContaminated = selActive || hlActive;
+    this.repaintAfterStaleAbsolutePaint(frame);
 
     // A ScrollBox has pendingScrollDelta left to drain — schedule the next
     // frame. MUST NOT call this.scheduleRender() here: we're inside a
@@ -1370,6 +1538,8 @@ export default class Ink {
       cacheHits: 0,
       live: 0,
     };
+    if (hasDiff || didLayoutShift()) this.followHover();
+    this.tellFrameListeners();
     this.options.onFrame?.({
       durationMs: performance.now() - renderStart,
       phases: {
@@ -1563,6 +1733,7 @@ export default class Ink {
   handoffAltScreen(): void {
     this.isPaused = true;
     this.altScreenActive = false;
+    this.endPointerCapture();
     this.tellClickedNowhere();
   }
 
@@ -1859,11 +2030,19 @@ export default class Ink {
           ? 'off'
           : mouseTracking;
     this.altScreenMouseTracking = mode;
+    if (!active) this.forgetPointer();
+    this.syncMousePixels();
+    // densable: queueMicrotask hoverTrackedListeners even when toggling
+    queueMicrotask(() => {
+      if (this.isUnmounted) return;
+      for (const listener of this.hoverTrackedListeners) listener();
+    });
     // densable: if(H)this.ensureInteractive(),this.resetFramesForAltScreen()
     if (active) {
       this.ensureInteractive();
       this.resetFramesForAltScreen();
     } else {
+      this.endPointerCapture();
       this.tellClickedNowhere();
       this.repaint();
     }
@@ -1871,6 +2050,158 @@ export default class Ink {
 
   /** Official densable getMouseMode — current alt-screen tracking mode. */
   getMouseMode = (): MouseTrackingMode => this.altScreenMouseTracking;
+
+  /**
+   * densable `pixelReportsLive` — DEC 1016 currently asserted.
+   */
+  pixelReportsLive = false;
+  /** densable `finePointerHolds` — retainFinePointer refcount. */
+  private finePointerHolds = 0;
+
+  /** densable `mouseReportsInPixels=()=>this.pixelReportsLive`. */
+  mouseReportsInPixels = (): boolean => this.pixelReportsLive;
+
+  /**
+   * densable `syncMousePixels` — on iff holds>0 && alt && full && capability && cellPixels.
+   * Capability is DECRPM 1016 (not GrowthBook `tD().now`).
+   */
+  syncMousePixels = (): void => {
+    const on =
+      this.finePointerHolds > 0 &&
+      this.altScreenActive &&
+      this.altScreenMouseTracking === 'full' &&
+      getMousePixelsSupported() &&
+      getCellPixels() !== undefined;
+    if (on === this.pixelReportsLive) return;
+    // densable `$mo` off: 1016l then reassert SGR 1006h. On: 1016h only.
+    this.options.stdout.write(on ? decset(DEC.MOUSE_PIXELS) : decreset(DEC.MOUSE_PIXELS) + decset(DEC.MOUSE_SGR));
+    this.pixelReportsLive = on;
+  };
+
+  /**
+   * densable `retainFinePointer` — bump hold, settle-subscribe mousePixels, sync.
+   * Gold `tD().onSettle("mousePixels", sync)` — probe store, not GrowthBook.
+   */
+  private cancelFinePointerSettle: (() => void) | undefined;
+
+  retainFinePointer = (): (() => void) => {
+    this.finePointerHolds++;
+    this.cancelFinePointerSettle ??= subscribeMousePixelsSupported(() => this.syncMousePixels());
+    this.syncMousePixels();
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      this.finePointerHolds--;
+      this.syncMousePixels();
+    };
+  };
+
+  /**
+   * densable `handlePointerHover` — Xd + Wl kind move. Skips if not alt-screen.
+   */
+  handlePointerHover = (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ): boolean => {
+    if (!this.altScreenActive) return false;
+    // densable: releasePointerCapture then Xd. forgetPointer does not drop capture.
+    this.releasePointerCapture(col, row, mods, fine);
+    return hitPointerHover(this.rootNode, col, row, mods, fine);
+  };
+
+  /**
+   * densable `releasePointerCapture` — Wl kind up on the captured node.
+   */
+  private releasePointerCapture(
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ): boolean {
+    const capture = this.pointerCapture;
+    if (!capture) return false;
+    this.pointerCapture = null;
+    dispatchPointer(capture.node, 'up', col, row, capture.button, mods, fine);
+    return true;
+  }
+
+  /**
+   * densable `handlePointerPress` — Xd hit → capture + Wl kind down.
+   * True skips App selection (independent of DualInk onMouseDown).
+   */
+  handlePointerPress = (
+    col: number,
+    row: number,
+    button: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ): boolean => {
+    if (!this.altScreenActive) return false;
+    this.releasePointerCapture(col, row, mods, fine);
+    const target = findPointerHoverTarget(this.rootNode, col, row);
+    if (!target) return false;
+    this.pointerCapture = { node: target, button, col, row };
+    dispatchPointer(target, 'down', col, row, button, mods, fine);
+    return true;
+  };
+
+  /**
+   * densable `handlePointerDrag` — captured node Wl kind move.
+   */
+  handlePointerDrag = (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ): boolean => {
+    const capture = this.pointerCapture;
+    if (!capture) return false;
+    capture.col = col;
+    capture.row = row;
+    dispatchPointer(capture.node, 'move', col, row, capture.button, mods, fine);
+    return true;
+  };
+
+  /**
+   * densable `handlePointerRelease` — releasePointerCapture Wl kind up.
+   */
+  handlePointerRelease = (
+    col: number,
+    row: number,
+    mods: { shift?: boolean; alt?: boolean; ctrl?: boolean },
+    fine?: { col: number; row: number },
+  ): boolean => {
+    return this.releasePointerCapture(col, row, mods, fine);
+  };
+
+  /** densable `isPointerCaptured` — DualInk capture is live. */
+  isPointerCaptured(): boolean {
+    return this.pointerCapture !== null;
+  }
+
+  /**
+   * densable `endPointerCapture` — release at the last captured cell with
+   * empty mods. Used when leaving alt-screen / handoff (gold forgetPointer
+   * does not drop capture).
+   */
+  endPointerCapture(): void {
+    const capture = this.pointerCapture;
+    if (capture) {
+      this.releasePointerCapture(capture.col, capture.row, {
+        shift: false,
+        alt: false,
+        ctrl: false,
+      });
+    }
+  }
+
+  /** densable `mouseOnSeq` — tracking enable + reassert 1016 if live. */
+  private mouseOnSeq(): string {
+    return enableMouseTracking(this.altScreenMouseTracking) + (this.pixelReportsLive ? decset(DEC.MOUSE_PIXELS) : '');
+  }
 
   /**
    * Main-screen mouse tracking (Axc sticky / MainScreenShell). Does not
@@ -1955,7 +2286,7 @@ export default class Ink {
     // Must run before the altScreenActive early-return: sleep-wake
     // (eventLoopStallDetector) calls this with includeAltScreen=false.
     if (this.altScreenMouseTracking !== 'off') {
-      this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
+      this.options.stdout.write(this.mouseOnSeq());
     }
     if (!this.altScreenActive) return;
     // Alt-screen re-entry — destructive (ERASE_SCREEN). Only for callers that
@@ -2025,9 +2356,7 @@ export default class Ink {
    * black message area after resume/focus recovery.
    */
   private reenterAltScreen(): void {
-    this.options.stdout.write(
-      ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + enableMouseTracking(this.altScreenMouseTracking),
-    );
+    this.options.stdout.write(ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + this.mouseOnSeq());
     this.resetFramesForAltScreen();
     this.onRender();
   }
@@ -2100,6 +2429,7 @@ export default class Ink {
   copySelection(): string {
     if (!hasSelection(this.selection)) return '';
     const text = this.copySelectionNoClear();
+    this.notifySelectionTakeDown();
     clearSelection(this.selection);
     this.notifySelectionChange();
     return text;
@@ -2108,6 +2438,7 @@ export default class Ink {
   /** Clear the current text selection without copying. */
   clearTextSelection(): void {
     if (!hasSelection(this.selection)) return;
+    this.notifySelectionTakeDown();
     clearSelection(this.selection);
     this.notifySelectionChange();
   }
@@ -2315,6 +2646,20 @@ export default class Ink {
     return () => this.selectionListeners.delete(cb);
   }
 
+  /** densable `subscribeToSelectionTakeDown(n){return this.selectionTakeDown.subscribe(n)}`. */
+  subscribeToSelectionTakeDown(cb: () => void): () => void {
+    return this.selectionTakeDown.subscribe(cb);
+  }
+
+  /**
+   * densable `notifySelectionTakeDown` — announce before Il/clearSelection.
+   * Gold: if (!altScreenActive || !hasSelection) return; then announce.
+   */
+  private notifySelectionTakeDown(): void {
+    if (!this.altScreenActive || !hasSelection(this.selection)) return;
+    this.selectionTakeDown.announce();
+  }
+
   private notifySelectionChange(): void {
     // Skip during/after unmount: AlternateScreen cleanup may clearTextSelection
     // after 1049l. scheduleRender.cancel() already ran, but notifySelectionChange
@@ -2337,24 +2682,97 @@ export default class Ink {
   }
 
   /**
-   * densable `dispatchMouseClick` — returns stray | handled | unhandled.
+   * densable `dispatchMouseClick` — stray | handled | unhandled | repeat.
    * `stray` wins even if a handler fired (Button/Select dropAsStray).
+   * Gold: handled && endsClickChain → `"repeat"`.
    */
-  dispatchMouseClick(col: number, row: number, isWindowActivation = false): MouseClickResult {
+  dispatchMouseClick(col: number, row: number, isWindowActivation = false, mods?: ClickMods): MouseClickResult {
     if (!this.altScreenActive) return 'unhandled';
-    const blank = isEmptyCellAt(this.frontFrame.screen, col, row);
-    const hyperlinkUrl = this.getHyperlinkAt(col, row);
-    const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation);
     const hit = hitTest(this.rootNode, col, row);
+    // Gold: g=Ls(...)&&!litWhereClicked(y,n,u). Ls is cellIsBlankForHover.
+    const blank =
+      cellIsBlankForHover(this.rootNode, this.frontFrame.screen, hit, col, row) && !this.litWhereClicked(hit, col, row);
+    const hyperlinkUrl = this.getHyperlinkAt(col, row);
+    const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation, mods ?? EMPTY_CLICK_MODS);
     for (const listener of this.clickListeners) listener(hit, event);
     const handled = bubbleClick(this.rootNode, event, hit);
     if (event.droppedAsStray) return 'stray';
+    if (handled && event.endsClickChain) return 'repeat';
     return handled ? 'handled' : 'unhandled';
+  }
+
+  /**
+   * densable `litWhereClicked` — empty cell under a hoverIgnoresBlankCells
+   * ancestor that is already hovered is not blank for the click.
+   */
+  private litWhereClicked(hit: dom.DOMElement | null, col: number, row: number): boolean {
+    if (col !== this.hoverCol || row !== this.hoverRow) return false;
+    let node: dom.DOMElement | undefined = hit ?? undefined;
+    while (node) {
+      if (node.attributes.hoverIgnoresBlankCells && this.hoveredNodes.has(node)) {
+        return true;
+      }
+      node = node.parentNode;
+    }
+    return false;
+  }
+
+  /**
+   * densable `repaintAfterStaleAbsolutePaint` — overlay blit poisoned
+   * prevScreen; contaminate the next frame and schedule.
+   */
+  private repaintAfterStaleAbsolutePaint(frame: Frame): void {
+    if (!frame.staleAbsolutePaint) return;
+    this.prevFrameContaminated = true;
+    this.scheduleRender();
   }
 
   dispatchHover(col: number, row: number): void {
     if (!this.altScreenActive) return;
-    dispatchHover(this.rootNode, col, row, this.hoveredNodes);
+    this.hoverCol = col;
+    this.hoverRow = row;
+    this.hoverFollowStreak = 0;
+    this.hoverFollowHeldUntil = 0;
+    dispatchHover(this.rootNode, col, row, this.hoveredNodes, this.frontFrame.screen);
+  }
+
+  forgetPointer(): void {
+    this.hoverCol = -1;
+    this.hoverRow = -1;
+    this.hoverFollowStreak = 0;
+    this.hoverFollowHeldUntil = 0;
+    const app = this.appRef.current;
+    if (app !== null) {
+      app.lastHoverCol = -1;
+      app.lastHoverRow = -1;
+      app.lastHoverOnTarget = false;
+    }
+  }
+
+  followHover(): void {
+    if (!this.altScreenActive || this.hoverCol < 0 || performance.now() < this.hoverFollowHeldUntil) return;
+    const changed = applyFollowHover(
+      this.rootNode,
+      this.hoverCol,
+      this.hoverRow,
+      this.hoveredNodes,
+      this.frontFrame.screen,
+    );
+    this.hoverFollowStreak = changed ? this.hoverFollowStreak + 1 : 0;
+    if (this.hoverFollowStreak >= 4) {
+      this.hoverFollowStreak = 0;
+      this.hoverFollowHeldUntil = performance.now() + 1000;
+    }
+  }
+
+  /**
+   * DualInk `Jhr` mouse-action bubble (onMouseDown/Up/Drag + onPointer alias).
+   * Grips / PluginClient onMouseDown live here. Return is unused for consume —
+   * gold x1 consume is `handlePointerPress` Xd, not any DualInk hit.
+   */
+  dispatchMouseAction(col: number, row: number, button: number, type: 'mousedown' | 'mouseup' | 'mousedrag'): boolean {
+    if (!this.altScreenActive) return false;
+    return hitDispatchMouseAction(this.rootNode, col, row, button, type) !== null;
   }
 
   dispatchKeyboardEvent(parsedKey: ParsedKey): void {
@@ -2386,18 +2804,21 @@ export default class Ink {
 
   /**
    * densable `dispatchWheelEvent` — SGR wheel → WheelEvent on the hit
-   * node that has onWheel (`VC`), else focused/root. Returns whether
-   * preventDefault ran (caller skips InputEvent keybinding path).
+   * node that has onWheel (`VC`), else focused/root. Gold: no return;
+   * `pointerCapture` skips. Yt `onWheelCapture` synthesizes keybindings.
    */
-  dispatchWheelEvent = (parsed: ParsedKey): boolean => {
+  dispatchWheelEvent = (parsed: ParsedKey): void => {
+    if (this.pointerCapture) return;
     const seq = parsed.sequence ?? '';
     const payload = seq.startsWith('\x1b') ? seq.slice(1) : seq;
     const match = payload.match(/^\[<(\d+);(\d+);(\d+)[Mm]$/);
-    const col = match ? Number(match[2]) - 1 : undefined;
-    const row = match ? Number(match[3]) - 1 : undefined;
+    // densable S1: prefer ParsedKey col/row (already cell-converted when 1016 live).
+    const col = parsed.col != null ? parsed.col - 1 : match ? Number(match[2]) - 1 : undefined;
+    const row = parsed.row != null ? parsed.row - 1 : match ? Number(match[3]) - 1 : undefined;
     const cell =
       col !== undefined && row !== undefined && Number.isFinite(col) && Number.isFinite(row) ? { col, row } : null;
     const hit = cell ? hitTest(this.rootNode, cell.col, cell.row) : null;
+    // Gold: y=(f&&VC(f)?f:null)??focus??root. VC is ancestor-only.
     const target = (hit && nodeHasWheelHandler(hit) ? hit : null) ?? this.focusManager.activeElement ?? this.rootNode;
     const event = new WheelEvent(parsed.name === 'wheeldown' ? 1 : -1, {
       ctrl: parsed.ctrl,
@@ -2406,7 +2827,6 @@ export default class Ink {
       ...(cell !== null && { col: cell.col, row: cell.row }),
     });
     dispatcher.dispatchContinuous(target, event);
-    return event.defaultPrevented;
   };
   /**
    * Look up the URL at (col, row) in the current front frame. Checks for
@@ -2483,6 +2903,11 @@ export default class Ink {
   handleSelectionDrag(col: number, row: number): void {
     if (!this.altScreenActive) return;
     const sel = this.selection;
+    // Analog: some terminals emit the first hold as motion (button|0x20)
+    // without a prior press-only event. Seed Cy so updateSelection can run.
+    if (!sel.isDragging) {
+      startSelection(sel, col, row, selectionScopeAt(this.rootNode, col, row));
+    }
     if (sel.anchorSpan) {
       extendSelection(sel, this.frontFrame.screen, col, row);
     } else {
@@ -2621,6 +3046,7 @@ export default class Ink {
 
     const tree = (
       <App
+        ref={this.appRef}
         stdin={this.options.stdin}
         stdout={this.options.stdout}
         stderr={this.options.stderr}
@@ -2630,8 +3056,18 @@ export default class Ink {
         terminalRows={this.terminalRows}
         selection={this.selection}
         onSelectionChange={this.notifySelectionChange}
+        onSelectionTakeDown={this.notifySelectionTakeDown}
         onClickAt={this.dispatchMouseClick}
         onHoverAt={this.dispatchHover}
+        onHoverLost={this.forgetPointer}
+        onMouseAction={this.dispatchMouseAction}
+        onPointerPress={this.handlePointerPress}
+        onPointerDrag={this.handlePointerDrag}
+        onPointerRelease={this.handlePointerRelease}
+        mouseReportsInPixels={this.mouseReportsInPixels}
+        onPointerHover={this.handlePointerHover}
+        retainFinePointer={this.retainFinePointer}
+        onCellPixels={this.syncMousePixels}
         getHyperlinkAt={this.getHyperlinkAt}
         onOpenHyperlink={this.openHyperlink}
         onMultiClick={this.handleMultiClick}
@@ -2644,6 +3080,10 @@ export default class Ink {
         dispatchPasteEvent={this.dispatchPasteEvent}
         dispatchWheelEvent={this.dispatchWheelEvent}
         subscribeClicks={this.subscribeClicks}
+        subscribeLayout={this.subscribeLayout}
+        subscribeFrames={this.subscribeFrames}
+        subscribeHoverTracked={this.subscribeHoverTracked}
+        isHoverTracked={this.isHoverTracked}
         focusManager={this.focusManager}
         rootNode={this.rootNode}
         getMouseMode={this.getMouseMode}
@@ -2717,6 +3157,7 @@ export default class Ink {
       // stale if AlternateScreen's unmount (which flips the flag) raced a
       // blocked event loop + SIGINT. No-op if tracking was never enabled.
       writeSync(1, DISABLE_MOUSE_TRACKING);
+      if (this.pixelReportsLive) writeSync(1, decreset(DEC.MOUSE_PIXELS));
       // Drain stdin so in-flight mouse events don't leak to the shell
       this.drainStdin();
       // Disable extended key reporting (both kitty and modifyOtherKeys)
@@ -2742,6 +3183,8 @@ export default class Ink {
     // selection clear cannot schedule a main-buffer onRender after 1049l.
     // (May already be true from the alt-screen exit path above.)
     this.isUnmounted = true;
+    this.cancelFinePointerSettle?.();
+    this.cancelFinePointerSettle = undefined;
 
     // Cancel any pending throttled renders to prevent accessing freed Yoga nodes
     this.scheduleRender.cancel?.();

@@ -6,7 +6,15 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { createNode, type DOMElement } from '../dom.js'
 import { nodeCache } from '../node-cache.js'
-import { selectionScopeAt } from '../selection.js'
+import {
+  createSelectionState,
+  isCellSelected,
+  selectLineAt,
+  selectionScopeAt,
+  startSelection,
+  updateSelection,
+} from '../selection.js'
+import type { Screen } from '../screen.js'
 
 const inkSrc = readFileSync(join(import.meta.dir, '../ink.tsx'), 'utf8')
 const selSrc = readFileSync(join(import.meta.dir, '../selection.ts'), 'utf8')
@@ -60,5 +68,32 @@ describe('densable 2.1.246 Cy selectionScopeAt', () => {
 
   test('source-locks official x2>x1 drop', () => {
     expect(selSrc).toContain('scope && scope.x2 > scope.x1 ? scope : undefined')
+  })
+
+  test('densable DA ScrollBox defaults selectionScope:!0', () => {
+    const scrollBox = readFileSync(
+      join(import.meta.dir, '../../components/ScrollBox.tsx'),
+      'utf8',
+    )
+    expect(scrollBox).toContain('selectionScope: true')
+  })
+
+  test('densable Ur: middle-row highlight stays in Cy pane, not sibling', () => {
+    const s = createSelectionState()
+    startSelection(s, 3, 1, { x1: 0, x2: 40 })
+    updateSelection(s, 10, 3)
+    expect(isCellSelected(s, 5, 2)).toBe(true)
+    expect(isCellSelected(s, 50, 2)).toBe(false)
+    expect(isCellSelected(s, 39, 2)).toBe(true)
+    expect(isCellSelected(s, 40, 2)).toBe(false)
+  })
+
+  test('densable Cg selectLineAt uses Ur, not 0..width-1', () => {
+    const s = createSelectionState()
+    s.scope = { x1: 0, x2: 40 }
+    selectLineAt(s, { width: 80, height: 10 } as Screen, 2)
+    expect(s.anchor).toEqual({ col: 0, row: 2 })
+    expect(s.focus).toEqual({ col: 39, row: 2 })
+    expect(isCellSelected(s, 50, 2)).toBe(false)
   })
 })

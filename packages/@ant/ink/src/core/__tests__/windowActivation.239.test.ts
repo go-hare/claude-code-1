@@ -51,11 +51,13 @@ function stubApp(onClickAt?: App['props']['onClickAt']) {
   app.pendingHyperlinkOpensInPanel = false
   app.lastHoverCol = -1
   app.lastHoverRow = -1
+  app.pendingPastePress = null
   app.consumeWindowActivationLatch = App.prototype.consumeWindowActivationLatch
   const selection = createSelectionState()
   ;(app as { props: App['props'] }).props = {
     selection,
     onSelectionChange: () => {},
+    onSelectionTakeDown: () => {},
     onHoverAt: () => {},
     onSelectionDrag: () => {},
     onMultiClick: () => {},
@@ -126,13 +128,32 @@ describe('densable 2.1.239 #33 window-activation click', () => {
     expect(app.lastClickTime).toBe(0)
   })
 
-  test('ClickEvent dropAsStray / allowDefault', () => {
+  test('repeat result resets clickCount', () => {
+    setTerminalFocused(true)
+    const { app } = stubApp(() => 'repeat')
+    handleMouseEvent(app, mouse('press', 3, 4))
+    app.clickCount = 2
+    handleMouseEvent(app, mouse('release', 3, 4))
+    expect(app.clickCount).toBe(0)
+    expect(app.lastClickTime).toBe(0)
+  })
+
+  test('ClickEvent dropAsStray / allowDefault / endClickChain / mods', () => {
     const e = new ClickEvent(1, 2, false, 'https://x', true)
     expect(e.isWindowActivation).toBe(true)
     expect(e.hyperlinkUrl).toBe('https://x')
+    expect(e.mods).toEqual({ shift: false, alt: false, ctrl: false })
     e.dropAsStray()
     e.allowDefault()
+    e.endClickChain()
     expect(e.droppedAsStray).toBe(true)
     expect(e.defaultAllowed).toBe(true)
+    expect(e.endsClickChain).toBe(true)
+    const shifted = new ClickEvent(0, 0, false, undefined, false, {
+      shift: true,
+      alt: false,
+      ctrl: false,
+    })
+    expect(shifted.mods.shift).toBe(true)
   })
 })

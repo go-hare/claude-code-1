@@ -150,6 +150,17 @@ export function isSynchronizedOutputSupported(): boolean {
 let xtversionName: string | undefined
 /** densable dT().synchronizedOutputSupported — DECRQM(2026) probe result. */
 let probedSynchronizedOutputSupported: boolean | undefined
+/** densable `Jk().cellPixels` — cell size in pixels for DEC 1016 conversion. */
+let cellPixels: { width: number; height: number } | undefined
+/**
+ * densable `tD().now("mousePixels")` analog — DECRPM 1016 status in {1,2,3}.
+ * Not GrowthBook; probe store only.
+ */
+let mousePixelsSupported = false
+/** densable DualInk `kittyGraphics` probe (`igo` + `lgo`). */
+let kittyGraphicsSupported = false
+/** densable `tD().onSettle("mousePixels")` listeners. */
+const mousePixelsSupportedListeners = new Set<() => void>()
 
 /** densable nWn — overwrite XTVERSION name (daemon re-probe after attach). */
 export function setXtversionName(name: string): void {
@@ -164,6 +175,75 @@ export function setSynchronizedOutputSupported(supported: boolean): void {
 export function resetTerminalProbeForTests(): void {
   xtversionName = undefined
   probedSynchronizedOutputSupported = undefined
+  cellPixels = undefined
+  mousePixelsSupported = false
+  kittyGraphicsSupported = false
+  mousePixelsSupportedListeners.clear()
+}
+
+/** densable `qg` / `Jk().cellPixels` setter. No graphics probe here. */
+export function setCellPixels(
+  size: { width: number; height: number } | undefined,
+): void {
+  if (size && size.width > 0 && size.height > 0) {
+    cellPixels = { width: size.width, height: size.height }
+  }
+}
+
+/** densable `Jk().cellPixels`. */
+export function getCellPixels(): { width: number; height: number } | undefined {
+  return cellPixels
+}
+
+/** densable mousePixels capability from DECRPM 1016. */
+export function setMousePixelsSupported(supported: boolean): void {
+  if (mousePixelsSupported === supported) return
+  mousePixelsSupported = supported
+  for (const listener of mousePixelsSupportedListeners) listener()
+}
+
+export function getMousePixelsSupported(): boolean {
+  return mousePixelsSupported
+}
+
+/** densable `tD().onSettle("mousePixels")` — probe store, not GrowthBook. */
+export function subscribeMousePixelsSupported(
+  listener: () => void,
+): () => void {
+  mousePixelsSupportedListeners.add(listener)
+  return () => {
+    mousePixelsSupportedListeners.delete(listener)
+  }
+}
+
+/** densable `lgo` — XTVERSION allows kitty graphics (kitty ≥0.28 / ghostty). */
+export function xtversionAllowsKittyGraphics(
+  name: string | undefined,
+): boolean {
+  if (name === undefined || name === '') return false
+  if (name.startsWith('kitty(')) {
+    const close = name.indexOf(')')
+    const raw = close === -1 ? name.slice(6) : name.slice(6, close)
+    const version = raw.split('.').map(part => Number.parseInt(part, 10))
+    const major = version[0] ?? Number.NaN
+    const minor = version[1] ?? 0
+    if (!Number.isFinite(major)) return false
+    return major > 0 || (major === 0 && minor >= 28)
+  }
+  return (
+    name === 'kitty' ||
+    name === 'ghostty' ||
+    name.startsWith('kitty ') ||
+    name.startsWith('ghostty ')
+  )
+}
+
+export function setKittyGraphicsSupported(supported: boolean): void {
+  kittyGraphicsSupported = supported
+}
+
+export function getKittyGraphicsSupported(): boolean {
+  return kittyGraphicsSupported
 }
 
 /** Official c4r densable — raw XTVERSION name, or undefined if not yet known. */

@@ -5,15 +5,23 @@
  * wrapper. App-specific dependencies (binding loading, change subscription,
  * warning display, debug logging) are injected via props.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { InputEvent } from '../core/events/input-event.js';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Box from '../components/Box.js';
+import { InputEvent, type Key } from '../core/events/input-event.js';
+import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { WheelEvent } from '../core/events/wheel-event.js';
+import { getFocusManager } from '../core/focus.js';
+import { wheelCaptureOwnedByDescendant } from '../core/hit-test.js';
+import type { ParsedKey } from '../core/parse-keypress.js';
+import type { DOMElement } from '../core/dom.js';
+import { reclaimIfNullOrAncestor } from '../hooks/use-focus-reclaim.js';
+import useStdin from '../hooks/use-stdin.js';
+import { KeybindingProvider } from './KeybindingContext.js';
+import { resolveKeyWithChordState } from './resolver.js';
 // ChordInterceptor intentionally uses useInput to intercept all keystrokes before
 // other handlers process them - this is required for chord sequence support
 // eslint-disable-next-line custom-rules/prefer-use-keybindings
 import useInput from '../hooks/use-input.js';
-import type { Key } from '../core/events/input-event.js';
-import { KeybindingProvider } from './KeybindingContext.js';
-import { resolveKeyWithChordState } from './resolver.js';
 import type {
   KeybindingContextName,
   KeybindingsLoadResult,
@@ -27,6 +35,63 @@ import type {
  * If the user doesn't complete the chord within this time, it's cancelled.
  */
 const CHORD_TIMEOUT_MS = 1000;
+
+/** densable kmo `J` — KeyboardEvent.name → Key flag. */
+const KEYBOARD_NAME_TO_FLAG: Record<string, keyof Key> = {
+  up: 'upArrow',
+  down: 'downArrow',
+  left: 'leftArrow',
+  right: 'rightArrow',
+  pagedown: 'pageDown',
+  pageup: 'pageUp',
+  home: 'home',
+  end: 'end',
+  return: 'return',
+  escape: 'escape',
+  tab: 'tab',
+  backspace: 'backspace',
+  delete: 'delete',
+};
+
+/**
+ * densable `kmo` — KeyboardEvent → InputEvent `{input,key}` for Yt `G`.
+ * Gold: enter → "\\n"; else `[...key].length===1 ? key : ""`.
+ */
+function kmo(event: KeyboardEvent): { input: string; key: Key } {
+  const flag = KEYBOARD_NAME_TO_FLAG[event.name];
+  const key: Key = {
+    upArrow: flag === 'upArrow',
+    downArrow: flag === 'downArrow',
+    leftArrow: flag === 'leftArrow',
+    rightArrow: flag === 'rightArrow',
+    pageDown: flag === 'pageDown',
+    pageUp: flag === 'pageUp',
+    wheelUp: false,
+    wheelDown: false,
+    home: flag === 'home',
+    end: flag === 'end',
+    return: flag === 'return',
+    escape: flag === 'escape',
+    tab: flag === 'tab',
+    backspace: flag === 'backspace',
+    delete: flag === 'delete',
+    ctrl: event.ctrl,
+    shift: event.shift,
+    fn: event.fn,
+    super: event.superKey,
+    meta: event.meta,
+  };
+  return {
+    input: event.name === 'enter' ? '\n' : [...event.key].length === 1 ? event.key : '',
+    key,
+  };
+}
+
+/** densable Yt `it` — consume KeyboardEvent after G/N chord path. */
+function it(event: KeyboardEvent | WheelEvent): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
 
 export type KeybindingSetupProps = {
   children: React.ReactNode;
@@ -157,6 +222,85 @@ export function KeybindingSetup({
     };
   }, [subscribeToChanges, initWatcher, clearChordTimeout, onDebugLog]);
 
+  const { internal_eventEmitter } = useStdin();
+  // densable Yt nR — Xt `d()` then subscribe. Gold never focus(self) while a
+  // descendant (prompt tabIndex 0) is focused. Parent layout runs after child.
+  const keybindingRootRef = useRef<DOMElement | null>(null);
+  useLayoutEffect(() => {
+    const node = keybindingRootRef.current;
+    if (!node) return;
+    let fm: ReturnType<typeof getFocusManager>;
+    try {
+      fm = getFocusManager(node);
+    } catch {
+      return;
+    }
+    const reclaim = (): void => {
+      const current = keybindingRootRef.current;
+      if (!current) return;
+      reclaimIfNullOrAncestor(fm, current);
+    };
+    reclaim();
+    return fm.subscribe(reclaim);
+  }, []);
+  // densable Yt `G` — kmo + L. Fork L is ChordInterceptor via InputEvent;
+  // only `it()` when the chord path consumes (stopImmediate). Empty capture
+  // would eat keys. App keyboard path is dispatchKeyboardEvent only (no
+  // second InputEvent emit).
+  const handleKeyDownCapture = useCallback(
+    (event: KeyboardEvent) => {
+      const { input, key } = kmo(event);
+      void input;
+      void key;
+      const parsed: ParsedKey = {
+        kind: 'key',
+        name: event.name,
+        fn: event.fn,
+        ctrl: event.ctrl,
+        meta: event.meta,
+        shift: event.shift,
+        option: false,
+        super: event.superKey,
+        sequence: event.sequence,
+        raw: event.sequence,
+        isPasted: false,
+      };
+      const inputEvent = new InputEvent(parsed);
+      internal_eventEmitter.emit('input', inputEvent);
+      if (inputEvent.didStopImmediatePropagation()) {
+        it(event);
+      }
+    },
+    [internal_eventEmitter],
+  );
+  // densable Yt `N` — onWheelCapture synthesizes wheelup/wheeldown unless
+  // eo: a descendant onWheel owns the hit (ReplDiff / plugin panes).
+  const handleWheelCapture = useCallback(
+    (event: WheelEvent) => {
+      if (wheelCaptureOwnedByDescendant(event.target, event.currentTarget, event.col, event.row)) {
+        return;
+      }
+      const name = event.deltaY < 0 ? 'wheelup' : 'wheeldown';
+      const parsed: ParsedKey = {
+        kind: 'key',
+        name,
+        fn: false,
+        ctrl: event.ctrl,
+        meta: event.meta,
+        shift: event.shift,
+        option: false,
+        super: false,
+        sequence: '',
+        raw: '',
+        isPasted: false,
+      };
+      const inputEvent = new InputEvent(parsed);
+      internal_eventEmitter.emit('input', inputEvent);
+      it(event);
+    },
+    [internal_eventEmitter],
+  );
+
   return (
     <KeybindingProvider
       bindings={bindings}
@@ -168,14 +312,23 @@ export function KeybindingSetup({
       unregisterActiveContext={unregisterActiveContext}
       handlerRegistryRef={handlerRegistryRef}
     >
-      <ChordInterceptor
-        bindings={bindings}
-        pendingChordRef={pendingChordRef}
-        setPendingChord={setPendingChord}
-        activeContexts={activeContextsRef.current}
-        handlerRegistryRef={handlerRegistryRef}
-      />
-      {children}
+      <Box
+        ref={keybindingRootRef}
+        tabIndex={-1}
+        flexDirection="column"
+        flexGrow={1}
+        onKeyDownCapture={handleKeyDownCapture}
+        onWheelCapture={handleWheelCapture}
+      >
+        <ChordInterceptor
+          bindings={bindings}
+          pendingChordRef={pendingChordRef}
+          setPendingChord={setPendingChord}
+          activeContexts={activeContextsRef.current}
+          handlerRegistryRef={handlerRegistryRef}
+        />
+        {children}
+      </Box>
     </KeybindingProvider>
   );
 }

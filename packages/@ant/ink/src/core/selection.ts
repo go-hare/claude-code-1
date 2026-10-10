@@ -345,8 +345,9 @@ export function selectWordAt(
 ): void {
   const b = wordBoundsAt(screen, col, row)
   if (!b) return
-  const lo = { col: b.lo, row }
-  const hi = { col: b.hi, row }
+  // densable Fr — word bounds stay inside Cy pane.
+  const lo = { col: clampSelectionCol(s, b.lo), row }
+  const hi = { col: clampSelectionCol(s, b.hi), row }
   s.anchor = lo
   s.focus = hi
   s.isDragging = true
@@ -460,10 +461,10 @@ export function findPlainTextUrlAt(
 
 /**
  * Select the entire row. Sets isDragging=true and anchorSpan so a
- * subsequent drag extends the selection line-by-line. The anchor/focus
- * span from col 0 to width-1; getSelectedText handles noSelect skipping
- * and trailing-whitespace trimming so the copied text is just the visible
- * line content.
+ * subsequent drag extends the selection line-by-line. densable Cg uses
+ * Ur (selectionColRange) so a `/diff` line select cannot wrap into the
+ * sibling pane. getSelectedText still skips noSelect and trims trailing
+ * whitespace.
  */
 export function selectLineAt(
   s: SelectionState,
@@ -471,8 +472,9 @@ export function selectLineAt(
   row: number,
 ): void {
   if (row < 0 || row >= screen.height) return
-  const lo = { col: 0, row }
-  const hi = { col: screen.width - 1, row }
+  const range = selectionColRange(s, screen.width)
+  const lo = { col: range.lo, row }
+  const hi = { col: range.hi, row }
   s.anchor = lo
   s.focus = hi
   s.isDragging = true
@@ -498,12 +500,13 @@ export function extendSelection(
   let mHi: Point
   if (span.kind === 'word') {
     const b = wordBoundsAt(screen, col, row)
-    mLo = { col: b ? b.lo : col, row }
-    mHi = { col: b ? b.hi : col, row }
+    mLo = { col: clampSelectionCol(s, b ? b.lo : col), row }
+    mHi = { col: clampSelectionCol(s, b ? b.hi : col), row }
   } else {
     const r = clamp(row, 0, screen.height - 1)
-    mLo = { col: 0, row: r }
-    mHi = { col: screen.width - 1, row: r }
+    const range = selectionColRange(s, screen.width)
+    mLo = { col: range.lo, row: r }
+    mHi = { col: range.hi, row: r }
   }
   if (comparePoints(mHi, span.lo) < 0) {
     // Mouse target ends before anchor span: extend backward.
@@ -810,8 +813,19 @@ export function isCellSelected(
   if (!b) return false
   const { start, end } = b
   if (row < start.row || row > end.row) return false
-  if (row === start.row && col < start.col) return false
-  if (row === end.row && col > end.col) return false
+  // densable _g overlay: middle rows use Ur [x1, x2), not 0..width-1.
+  const lo = s.scope ? s.scope.x1 : 0
+  const hi = s.scope ? s.scope.x2 - 1 : Number.POSITIVE_INFINITY
+  if (row === start.row) {
+    if (col < Math.max(start.col, lo)) return false
+  } else if (col < lo) {
+    return false
+  }
+  if (row === end.row) {
+    if (col > Math.min(end.col, hi)) return false
+  } else if (col > hi) {
+    return false
+  }
   return true
 }
 
@@ -888,9 +902,12 @@ export function getSelectedText(s: SelectionState, screen: Screen): string {
     joinRows(lines, s.scrolledOffAbove[i]!, s.scrolledOffAboveSW[i])
   }
 
+  const range = selectionColRange(s, screen.width)
   for (let row = start.row; row <= end.row; row++) {
-    const rowStart = row === start.row ? start.col : 0
-    const rowEnd = row === end.row ? end.col : screen.width - 1
+    // densable Ur: middle rows stay in the Cy pane, not 0..width-1.
+    const rowStart =
+      row === start.row ? Math.max(start.col, range.lo) : range.lo
+    const rowEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
     const packed = sw[row]!
     const isCont = isSoftWrapContinuation(packed)
     // densable iv: reinsert elided leading space at soft-wrap joins
@@ -914,7 +931,7 @@ export function getSelectedText(s: SelectionState, screen: Screen): string {
  * drag-to-scroll, BEFORE scrollBy overwrites them. Only the rows that
  * intersect the selection are captured, using the selection's col bounds
  * for the anchor-side boundary row. After capturing the anchor row, the
- * anchor.col AND anchorSpan cols are reset to the full-width boundary so
+ * anchor.col AND anchorSpan cols are reset to the Ur pane edge so
  * subsequent captures and the final getSelectedText don't re-apply a stale
  * col constraint to content that's no longer under the original anchor.
  * Both span cols are reset (not just the near side): after a blocked
@@ -943,11 +960,13 @@ export function captureScrolledRows(
 
   const width = screen.width
   const sw = screen.softWrap
+  const range = selectionColRange(s, width)
   const captured: string[] = []
   const capturedSW: boolean[] = []
   for (let row = lo; row <= hi; row++) {
-    const colStart = row === start.row ? start.col : 0
-    const colEnd = row === end.row ? end.col : width - 1
+    const colStart =
+      row === start.row ? Math.max(start.col, range.lo) : range.lo
+    const colEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
     captured.push(extractRowText(screen, row, colStart, colEnd))
     capturedSW.push(isSoftWrapContinuation(sw[row]!))
   }
@@ -957,17 +976,15 @@ export function captureScrolledRows(
     // the on-screen content in reading order).
     s.scrolledOffAbove.push(...captured)
     s.scrolledOffAboveSW.push(...capturedSW)
-    // We just captured the top of the selection. The anchor (=start when
-    // dragging down) is now pointing at content that will scroll out; its
-    // col constraint was applied to the captured row. Reset to col 0 so
-    // the NEXT tick and the final getSelectedText read the full row.
+    // densable zd: reset to Ur lo/hi (not 0/width-1) so the next tick
+    // stays in the Cy pane.
     if (s.anchor && s.anchor.row === start.row && lo === start.row) {
-      s.anchor = { col: 0, row: s.anchor.row }
+      s.anchor = { col: range.lo, row: s.anchor.row }
       if (s.anchorSpan) {
         s.anchorSpan = {
           kind: s.anchorSpan.kind,
-          lo: { col: 0, row: s.anchorSpan.lo.row },
-          hi: { col: width - 1, row: s.anchorSpan.hi.row },
+          lo: { col: range.lo, row: s.anchorSpan.lo.row },
+          hi: { col: range.hi, row: s.anchorSpan.hi.row },
         }
       }
     }
@@ -977,12 +994,12 @@ export function captureScrolledRows(
     s.scrolledOffBelow.unshift(...captured)
     s.scrolledOffBelowSW.unshift(...capturedSW)
     if (s.anchor && s.anchor.row === end.row && hi === end.row) {
-      s.anchor = { col: width - 1, row: s.anchor.row }
+      s.anchor = { col: range.hi, row: s.anchor.row }
       if (s.anchorSpan) {
         s.anchorSpan = {
           kind: s.anchorSpan.kind,
-          lo: { col: 0, row: s.anchorSpan.lo.row },
-          hi: { col: width - 1, row: s.anchorSpan.hi.row },
+          lo: { col: range.lo, row: s.anchorSpan.lo.row },
+          hi: { col: range.hi, row: s.anchorSpan.hi.row },
         }
       }
     }
@@ -1015,9 +1032,13 @@ export function applySelectionOverlay(
   const { start, end } = b
   const width = screen.width
   const noSelect = screen.noSelect
+  const range = selectionColRange(selection, width)
   for (let row = start.row; row <= end.row && row < screen.height; row++) {
-    const colStart = row === start.row ? start.col : 0
-    const colEnd = row === end.row ? Math.min(end.col, width - 1) : width - 1
+    // densable _g: middle rows Ur [x1,x2), not 0..width-1 (left drag
+    // wrapping into the /diff sibling pane).
+    const colStart =
+      row === start.row ? Math.max(start.col, range.lo) : range.lo
+    const colEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
     const rowOff = row * width
     for (let col = colStart; col <= colEnd; col++) {
       const idx = rowOff + col

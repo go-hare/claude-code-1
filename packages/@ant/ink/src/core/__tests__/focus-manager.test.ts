@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { DOMElement } from '../dom.js'
 import { FocusEvent } from '../events/focus-event.js'
 import { FocusManager } from '../focus.js'
+import { reclaimIfNullOrAncestor } from '../../hooks/use-focus-reclaim.js'
 
 function makeNode(attrs: Record<string, unknown> = {}): DOMElement {
   return {
@@ -109,6 +110,22 @@ describe('FocusManager (official densable 2.1.210)', () => {
     expect(fm.activeElement).toBe(a)
   })
 
+  test('nR-style reclaim: parent does not steal from a focused descendant', () => {
+    const yt = makeNode({ id: 'yt', tabIndex: -1 })
+    const prompt = makeNode({ id: 'prompt', tabIndex: 0 })
+    attach(yt, prompt)
+    const fm = new FocusManager(() => true)
+    fm.focus(prompt)
+    reclaimIfNullOrAncestor(fm, yt)
+    expect(fm.activeElement).toBe(prompt)
+    fm.focus(yt)
+    reclaimIfNullOrAncestor(fm, prompt)
+    expect(fm.activeElement).toBe(prompt)
+    fm.blur()
+    reclaimIfNullOrAncestor(fm, yt)
+    expect(fm.activeElement).toBe(yt)
+  })
+
   test('nR-style reclaim: subscribe fires when focus moves to ancestor', () => {
     const root = makeNode({ id: 'root', tabIndex: 0 })
     const child = makeNode({ id: 'child', tabIndex: 0 })
@@ -147,6 +164,19 @@ describe('FocusManager (official densable 2.1.210)', () => {
     expect(reclaimed).toBe(2)
 
     unsub()
+  })
+
+  test('handleClickFocus focuses any tabIndex number including -1', () => {
+    const fm = new FocusManager(() => true)
+    const prompt = makeNode({ id: 'prompt', tabIndex: 0, autoFocus: true })
+    const shell = makeNode({ id: 'shell', tabIndex: -1 })
+    fm.handleAutoFocus(prompt)
+    expect(fm.activeElement).toBe(prompt)
+    fm.handleClickFocus(shell)
+    expect(fm.activeElement).toBe(shell)
+    const other = makeNode({ id: 'other', tabIndex: 0 })
+    fm.handleClickFocus(other)
+    expect(fm.activeElement).toBe(other)
   })
 
   test('FocusEvent types are blur/focus', () => {

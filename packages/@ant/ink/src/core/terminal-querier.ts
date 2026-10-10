@@ -21,6 +21,7 @@
  */
 
 import type { TerminalResponse } from './parse-keypress.js'
+import { ESC, ESC_TYPE } from './termio/ansi.js'
 import { csi } from './termio/csi.js'
 import { osc } from './termio/osc.js'
 
@@ -41,6 +42,11 @@ type KittyResponse = Extract<TerminalResponse, { type: 'kittyKeyboard' }>
 type CursorPosResponse = Extract<TerminalResponse, { type: 'cursorPosition' }>
 type OscResponse = Extract<TerminalResponse, { type: 'osc' }>
 type XtversionResponse = Extract<TerminalResponse, { type: 'xtversion' }>
+type CellSizeResponse = Extract<TerminalResponse, { type: 'cellSize' }>
+type KittyGraphicsResponse = Extract<
+  TerminalResponse,
+  { type: 'kittyGraphics' }
+>
 
 // -- Query builders --
 
@@ -109,6 +115,29 @@ export function xtversion(): TerminalQuery<XtversionResponse> {
   return {
     request: csi('>0q'),
     match: (r): r is XtversionResponse => r.type === 'xtversion',
+  }
+}
+
+/** densable `gyr` — XTWINOPS CSI 16 t; reply `CSI 6 ; height ; width t`. */
+export function cellSize(): TerminalQuery<CellSizeResponse> {
+  return {
+    request: csi('16t'),
+    match: (r): r is CellSizeResponse => r.type === 'cellSize',
+  }
+}
+
+const KITTY_GRAPHICS_QUERY_ID = 31
+
+/** densable `igo` — APC `_G` query id=31 dummy AAAA. */
+export function kittyGraphicsQuery(
+  id = KITTY_GRAPHICS_QUERY_ID,
+): TerminalQuery<KittyGraphicsResponse> {
+  const apc = ESC + String.fromCharCode(ESC_TYPE.APC)
+  const st = ESC + String.fromCharCode(ESC_TYPE.ST)
+  return {
+    request: `${apc}Gi=${id},s=1,v=1,a=q,t=d,f=24;AAAA${st}`,
+    match: (r): r is KittyGraphicsResponse =>
+      r.type === 'kittyGraphics' && r.id === id,
   }
 }
 

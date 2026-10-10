@@ -87,7 +87,7 @@ export function Divider({
     const leftWidth = titleAlign === 'start' ? Math.min(4, sideWidth) : Math.floor(sideWidth / 2);
     const rightWidth = sideWidth - leftWidth;
     return (
-      <Text color={color} dimColor={!color}>
+      <Text color={color} dimColor={!color} wrap="truncate">
         {char.repeat(leftWidth)}{' '}
         <Text dimColor>
           <Ansi>{title}</Ansi>
@@ -98,7 +98,7 @@ export function Divider({
   }
 
   return (
-    <Text color={color} dimColor={!color}>
+    <Text color={color} dimColor={!color} wrap="truncate">
       {char.repeat(effectiveWidth)}
     </Text>
   );

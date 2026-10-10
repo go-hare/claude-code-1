@@ -113,7 +113,7 @@ describe('resetRenderFrameContext (densable oSf)', () => {
 
   test('rotates absolute rects: prev = cur, cur = []', () => {
     const ctx = createRenderFrameContext()
-    const cur = [{ x: 0, y: 0, width: 1, height: 1 }]
+    const cur = [{ x: 0, y: 0, width: 1, height: 1, withinParent: true }]
     ctx.absoluteRectsCur = cur
     ctx.absoluteRectsPrev = []
 
@@ -123,6 +123,7 @@ describe('resetRenderFrameContext (densable oSf)', () => {
 
     expect(ctx.absoluteRectsPrev).toBe(cur)
     expect(ctx.absoluteRectsCur).toEqual([])
+    expect(ctx.absolutePaintCut).toBe(false)
   })
 
   test('a followScroll nobody consumed does not survive the next frame', () => {

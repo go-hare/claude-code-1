@@ -5,6 +5,7 @@ import type { ReactNode, Ref } from 'react'
 import type { ClickEvent } from '../core/events/click-event.js'
 import type { FocusEvent } from '../core/events/focus-event.js'
 import type { KeyboardEvent } from '../core/events/keyboard-event.js'
+import type { MouseActionEvent } from '../core/events/mouse-action-event.js'
 import type { PasteEvent } from '../core/events/paste-event.js'
 import type { WheelEvent } from '../core/events/wheel-event.js'
 import type { Styles, TextStyles } from '../core/styles.js'
@@ -19,12 +20,18 @@ declare global {
         autoFocus?: boolean
         accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
+        onMouseDown?: (event: MouseActionEvent) => void
+        onMouseUp?: (event: MouseActionEvent) => void
+        onMouseDrag?: (event: MouseActionEvent) => void
+        onPointer?: (event: MouseActionEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
         onBlur?: (event: FocusEvent) => void
         onBlurCapture?: (event: FocusEvent) => void
         onMouseEnter?: () => void
         onMouseLeave?: () => void
+        hoverIgnoresBlankCells?: boolean
+        hoverFollowsPaint?: boolean
         onKeyDown?: (event: KeyboardEvent) => void
         onKeyDownCapture?: (event: KeyboardEvent) => void
         onPaste?: (event: PasteEvent) => void
@@ -44,6 +51,9 @@ declare global {
         style?: Styles
         textStyles?: TextStyles
         accessibility?: DOMAccessibility
+        onMouseEnter?: () => void
+        onMouseLeave?: () => void
+        hoverFollowsPaint?: boolean
         children?: ReactNode
       }
       'ink-link': {

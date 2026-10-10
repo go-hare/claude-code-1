@@ -52,14 +52,18 @@ export type FollowScroll = {
   viewportBottom: number
 }
 
+/** densable `uf` — absolute overlay rect + whether it sits inside parent yoga. */
+export type AbsoluteRect = Rectangle & { withinParent: boolean }
+
 export type RenderFrameContext = {
   overlayActive: boolean
   layoutShifted: boolean
   scrollHint: ScrollHint | null
   scrollDrainNode: DOMElement | null
   followScroll: FollowScroll | null
-  absoluteRectsPrev: Rectangle[]
-  absoluteRectsCur: Rectangle[]
+  absolutePaintCut: boolean
+  absoluteRectsPrev: AbsoluteRect[]
+  absoluteRectsCur: AbsoluteRect[]
   segmentMapScratch: Uint32Array
   rawBgRewriteCache: WeakMap<object, unknown>
   consumeClears: boolean
@@ -74,6 +78,7 @@ export function createRenderFrameContext(opts?: {
     scrollHint: null,
     scrollDrainNode: null,
     followScroll: null,
+    absolutePaintCut: false,
     absoluteRectsPrev: [],
     absoluteRectsCur: [],
     segmentMapScratch: new Uint32Array(0),
@@ -104,6 +109,7 @@ export function resetRenderFrameContext(): void {
   ctx.scrollHint = null
   ctx.scrollDrainNode = null
   ctx.followScroll = null
+  ctx.absolutePaintCut = false
   ctx.absoluteRectsPrev = ctx.absoluteRectsCur
   ctx.absoluteRectsCur = []
 }
@@ -425,6 +431,70 @@ function wrapWithSoftWrap(
   return { wrapped: outLines.join('\n'), softWrap }
 }
 
+/**
+ * densable `tC` — some ancestor is also `position:absolute`. Nested
+ * overlays always count as overflowing for `uf`.
+ */
+function hasAbsoluteAncestor(node: DOMElement): boolean {
+  for (let walk = node.parentNode; walk !== undefined; walk = walk.parentNode) {
+    if (walk.style.position === 'absolute') return true
+  }
+  return false
+}
+
+/**
+ * densable `uf` — stamp an absolute overlay rect. `withinParent` is yoga
+ * parent containment and no absolute ancestor.
+ */
+function stampAbsoluteRect(
+  node: DOMElement,
+  rect: Rectangle,
+  parentX?: number,
+  parentY?: number,
+): AbsoluteRect {
+  const parentYoga = node.parentNode?.yogaNode
+  const withinParent =
+    parentYoga !== undefined &&
+    !hasAbsoluteAncestor(node) &&
+    parentX !== undefined &&
+    parentY !== undefined &&
+    rect.x >= parentX &&
+    rect.y >= parentY &&
+    rect.x + rect.width <= parentX + parentYoga.getComputedWidth() &&
+    rect.y + rect.height <= parentY + parentYoga.getComputedHeight()
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    withinParent,
+  }
+}
+
+export function getAbsolutePaintCut(): boolean {
+  return ctx.absolutePaintCut
+}
+
+/**
+ * densable `Nv` — a prev overflowing absolute vanished and a blit still
+ * covers that rect.
+ */
+export function vanishedOverflowingAbsoluteBlit(output: Output): boolean {
+  const cur = ctx.absoluteRectsCur
+  return ctx.absoluteRectsPrev.some(
+    prev =>
+      !prev.withinParent &&
+      !cur.some(
+        next =>
+          next.x === prev.x &&
+          next.y === prev.y &&
+          next.width === prev.width &&
+          next.height === prev.height,
+      ) &&
+      output.blitsOver(prev),
+  )
+}
+
 // If parent container is `<Box>`, text nodes will be treated as separate nodes in
 // the tree and will have their own coordinates in the layout.
 // To ensure text nodes are aligned correctly, take X and Y of the first text node
@@ -548,7 +618,9 @@ function renderNodeToOutput(
       const fh = Math.floor(height)
       output.blit(prevScreen, fx, fy, fw, fh)
       if (node.style.position === 'absolute') {
-        ctx.absoluteRectsCur.push(cached)
+        ctx.absoluteRectsCur.push(
+          stampAbsoluteRect(node, cached, offsetX, offsetY),
+        )
       }
       // Absolute descendants can paint outside this node's layout bounds
       // (e.g. a slash menu with position='absolute' bottom='100%' floats
@@ -1224,6 +1296,7 @@ function renderNodeToOutput(
             // overlay's own re-render covers them. Wipe and re-render
             // ScrollBox content so the diff writes correct cells.
             const spaces = ctx.absoluteRectsPrev.length ? ' '.repeat(w) : ''
+            const absBeforeRepair = ctx.absoluteRectsCur.length
             for (const r of ctx.absoluteRectsPrev) {
               if (r.y >= bottom + 1 || r.y + r.height <= top) continue
               const shiftedTop = Math.max(top, Math.floor(r.y) - delta)
@@ -1259,6 +1332,16 @@ function renderNodeToOutput(
                 depth,
               )
               output.unclip()
+            }
+            for (
+              let i = absBeforeRepair;
+              i < ctx.absoluteRectsCur.length;
+              i++
+            ) {
+              if (!ctx.absoluteRectsCur[i]!.withinParent) {
+                ctx.absolutePaintCut = true
+                break
+              }
             }
           } else {
             // Full path. Two sub-cases:
@@ -1381,7 +1464,7 @@ function renderNodeToOutput(
     const rect = { x, y, width, height, top: yogaTop }
     nodeCache.set(node, rect)
     if (node.style.position === 'absolute') {
-      ctx.absoluteRectsCur.push(rect)
+      ctx.absoluteRectsCur.push(stampAbsoluteRect(node, rect, offsetX, offsetY))
     }
     node.dirty = false
   }
@@ -1514,7 +1597,10 @@ function blitEscapingAbsoluteDescendants(
     if (elem.style.position === 'absolute') {
       const cached = nodeCache.get(elem)
       if (cached) {
-        ctx.absoluteRectsCur.push(cached)
+        const parentLayout = nodeCache.get(node)
+        ctx.absoluteRectsCur.push(
+          stampAbsoluteRect(elem, cached, parentLayout?.x, parentLayout?.y),
+        )
         const cx = Math.floor(cached.x)
         const cy = Math.floor(cached.y)
         const cw = Math.floor(cached.width)

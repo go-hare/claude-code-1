@@ -18,6 +18,8 @@ export const DEC = {
   MOUSE_BUTTON: 1002,
   MOUSE_ANY: 1003,
   MOUSE_SGR: 1006,
+  /** densable `MOUSE_SGR_PIXELS` — DEC 1016 SGR-Pixels (CSI < btn;x;y in pixels). */
+  MOUSE_PIXELS: 1016,
   FOCUS_EVENTS: 1004,
   BRACKETED_PASTE: 2004,
   SYNCHRONIZED_UPDATE: 2026,
@@ -88,6 +90,7 @@ export const ENABLE_MOUSE_TRACKING_SCROLL =
 
 /** Official densable vge — disable all mouse modes we enable. */
 export const DISABLE_MOUSE_TRACKING =
+  decreset(DEC.MOUSE_PIXELS) +
   decreset(DEC.MOUSE_SGR) +
   decreset(DEC.MOUSE_ANY) +
   decreset(DEC.MOUSE_BUTTON) +

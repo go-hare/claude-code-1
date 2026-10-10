@@ -218,6 +218,24 @@ export default class Output {
   }
 
   /**
+   * densable `blitsOver` — some blit op overlaps `rect`.
+   */
+  blitsOver(rect: Rectangle): boolean {
+    for (const operation of this.operations) {
+      if (
+        operation.type === 'blit' &&
+        operation.x < rect.x + rect.width &&
+        rect.x < operation.x + operation.width &&
+        operation.y < rect.y + rect.height &&
+        rect.y < operation.y + operation.height
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
    * Shift full-width rows within [top, bottom] by n. n > 0 = up. Mirrors
    * what DECSTBM + SU/SD does to the terminal. Paired with blit() to reuse
    * prevScreen content during pure scroll, avoiding full child re-render.

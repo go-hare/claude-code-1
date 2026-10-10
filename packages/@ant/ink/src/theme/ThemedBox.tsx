@@ -4,7 +4,9 @@ import type { DOMAccessibility, DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { MouseActionEvent } from '../core/events/mouse-action-event.js';
 import type { PasteEvent } from '../core/events/paste-event.js';
+import type { WheelEvent } from '../core/events/wheel-event.js';
 import type { Color, Styles } from '../core/styles.js';
 import { getTheme, type Theme } from './theme-types.js';
 import { useTheme } from './ThemeProvider.js';
@@ -41,6 +43,11 @@ export type Props = BaseStylesWithoutColors &
     /** densable aria-preserve-whitespace shorthand */
     'aria-preserve-whitespace'?: boolean;
     onClick?: (event: ClickEvent) => void;
+    onMouseDown?: (event: MouseActionEvent) => void;
+    onMouseUp?: (event: MouseActionEvent) => void;
+    onMouseDrag?: (event: MouseActionEvent) => void;
+    /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+    onPointer?: (event: MouseActionEvent) => void;
     onFocus?: (event: FocusEvent) => void;
     onFocusCapture?: (event: FocusEvent) => void;
     onBlur?: (event: FocusEvent) => void;
@@ -50,8 +57,15 @@ export type Props = BaseStylesWithoutColors &
     /** Official densable: bracketed paste → PasteEvent on focused node. */
     onPaste?: (event: PasteEvent) => void;
     onPasteCapture?: (event: PasteEvent) => void;
+    onWheel?: (event: WheelEvent) => void;
+    onWheelCapture?: (event: WheelEvent) => void;
     onMouseEnter?: () => void;
     onMouseLeave?: () => void;
+    hoverIgnoresBlankCells?: boolean;
+    hoverFollowsPaint?: boolean;
+    /** densable plugin drawing identity for Ide keyRows (cEe). */
+    elementKey?: string;
+    elementPlugin?: string;
   };
 
 /**
