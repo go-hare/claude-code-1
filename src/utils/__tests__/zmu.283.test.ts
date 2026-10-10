@@ -145,6 +145,14 @@ describe('densable 2.1.283 Obe leftover', () => {
     expect(bindings).toContain("'ctrl+l': 'chat:clearInput'")
   })
 
+  test('Obe T() latch imports useEffect (resume mounts ReplDiffPanel)', () => {
+    expect(panel).toMatch(
+      /import \{[^}]*\buseEffect\b[^}]*\} from 'react'/,
+    )
+    expect(panel).toContain('useEffect(() => {')
+    expect(panel).toContain('setAppState(showDiffPanelLatch)')
+  })
+
   test('sPe file-detail copy', () => {
     expect(detail).toContain('Content restricted by read-permission rules')
     expect(detail).toContain('New file not yet staged.')

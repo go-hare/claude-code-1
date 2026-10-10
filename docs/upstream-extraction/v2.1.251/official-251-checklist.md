@@ -1,7 +1,7 @@
 # densable 2.1.251 — 官方更新清单 × tip 对照
 
 > 来源：CHANGELOG **2.1.251**（71 bullets）。SEA **已下**（`%TEMP%\official-251\package\claude.exe`，217360032 bytes，`--version` 2.1.251）。  
-> 基线：本地 tip npm **2.7.289**（densable 2.1.289 产品对齐叠在 2.7.58 线上）。**本 pack 只盘点 2.1.251**（勿折入 249 跳号 / 250 stub / 252 hotfix / 283 leftover / 289）。  
+> 基线：本地 tip npm **2.7.290**（2.7.289 产品对齐 + resume `useEffect` hotfix）。**本 pack 只盘点 2.1.251**（勿折入 249 跳号 / 250 stub / 252 hotfix / 283 leftover / 289）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 更新：2026-09-24 — leftover dig：#46 `eBt`+`Mn=200`+fullscreen append-or-move → **HAVE**。  
 > 口径：本地实现 + 已锁 SEA 函数体是合同。changelog 字面大于代码 → **不升桶、不 invent**。

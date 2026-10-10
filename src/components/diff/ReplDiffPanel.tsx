@@ -9,7 +9,7 @@ import {
   type ScrollBoxHandle,
   type WheelEvent,
 } from '@anthropic/ink';
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { StructuredPatchHunk } from 'diff';
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js';
 import { useDiffData, type DiffFile } from '../../hooks/useDiffData.js';

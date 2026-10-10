@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current npm: **`2.7.289`** (densable **2.1.289** product wrap: print extras / Mods / Ink DualInk+Tyn / telemetry send **fork default-off**). `npm i -g @go-hare/claude-code`
+> Current npm: **`2.7.290`** (densable **2.1.289** product wrap + resume `ReplDiffPanel` `useEffect` import hotfix). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,9 +45,11 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 leftover unique English none / wrapable extras·paint empty / telemetry BODY + fork default-off**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **Published npm version is whatever `package.json` says** (currently **2.7.289** = 2.7.58 line + densable **2.1.289** product wrap) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 leftover unique English none / wrapable extras·paint empty / telemetry BODY + fork default-off**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **Published npm version is whatever `package.json` says** (currently **2.7.290** = 2.7.289 line + resume `ReplDiffPanel` `useEffect` import hotfix) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.289 (2.7.289)
+#### densable 2.1.289 (2.7.289 / 2.7.290)
+
+**2.7.290** hotfix: `ReplDiffPanel` Obe latch `useEffect` missing import; resume mounts the sidebar and `RootREPLBoundary` throws `useEffect is not defined`.
 
 Gold SEA `/tmp/official-289/package/claude`. leftover unique English **none**; wrapable extras/paint **empty**. Includes print extras / poll_events / agent.spawn, Mods functionHooks+panes+viewport, Ink DualInk/Tyn, MCP reconnect-all, artifact `D()` withhold, telemetry send **HAVE** + **fork default-off** (`DISABLE_TELEMETRY=0` to opt in). **Not** minify 1:1. N/A / Drop: Desktop overlay, `registerBandFieldBridge`, minify public names, enterprise control plane. Do not pack 284–288.
 
