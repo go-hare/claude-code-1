@@ -6,49 +6,36 @@ const HOOK = join(
   fileURLToPath(new URL('.', import.meta.url)),
   '../useVirtualScroll.ts',
 )
+const VML = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '../../components/VirtualMessageList.tsx',
+)
 
 /**
- * Structural gates for blank-until-scroll first-paint settle.
- * Runtime Ink e2e is heavy; these lock the dual-wake path that fixes:
- *   sticky pin to real Yoga scrollHeight while spacers still use
- *   DEFAULT_ESTIMATE + viewportH=0 cold start until user scrolls.
+ * densable 2.1.289 `wb`/`qd`/`Ab` first-paint vs analog microtask wake.
+ *
+ * Gold `wb` returns `onLayout:ut`. Gold `qd` mounts `e(Ab,{onLayout:Wt})`.
+ * Gold `Ab`: `x(() => subscribeLayout(onLayout), [subscribeLayout, onLayout])`.
+ * Gold `ut` sticky/vh=0 early-return — does not setState. Do not invent
+ * `needsViewportWake` / 32× `queueMicrotask(tryWake)` as gold.
  */
-describe('useVirtualScroll first-paint settle (blank-until-scroll)', () => {
-  test('source: dual settle flags + viewport wake effect + height settle remeasure', async () => {
+describe('useVirtualScroll densable 2.1.289 onLayout (wb/Ab)', () => {
+  test('source: wb returns onLayout; no analog viewport-wake microtask', async () => {
     const src = await Bun.file(HOOK).text()
 
-    expect(src).toMatch(/needsViewportWakeRef\s*=\s*useRef\(true\)/)
-    expect(src).toMatch(/needsHeightSettleRef\s*=\s*useRef\(true\)/)
-
-    // Transcript swap re-arms both
+    expect(src).toContain('onLayout: () => void')
+    expect(src).toMatch(/const onLayout = useCallback\(\(\) => \{/)
     expect(src).toMatch(
-      /needsViewportWakeRef\.current\s*=\s*true[\s\S]*?needsHeightSettleRef\.current\s*=\s*true/,
+      /if\s*\(\s*!handle\s*\|\|\s*handle\.isSticky\(\)\s*\|\|\s*handle\.getViewportHeight\(\)\s*===\s*0\s*\)/,
     )
+    expect(src).toMatch(/clampBoundsRef\.current/)
+    expect(src).toMatch(/onLayout,/)
 
-    // Height measure: only first batch forces commit (not every streaming tweak)
-    expect(src).toMatch(
-      /if\s*\(needsHeightSettleRef\.current\)\s*\{[\s\S]*?setRemeasureTick/,
-    )
-
-    // Viewport wake after Ink paint (useEffect, not layout — vh written post-layout)
-    const effectIdx = src.indexOf(
-      'viewportHeight is written by render-node-to-output',
-    )
-    expect(effectIdx).toBeGreaterThan(0)
-    const effectSlice = src.slice(effectIdx, effectIdx + 1400)
-    expect(effectSlice).toMatch(/useEffect\s*\(/)
-    expect(effectSlice).toMatch(/getViewportHeight\(\)\s*>\s*0/)
-    expect(effectSlice).toMatch(/needsViewportWakeRef\.current\s*=\s*false/)
-    expect(effectSlice).toMatch(/setRemeasureTick/)
-    // vh=0 first paint: microtask retry until Ink layout lands
-    expect(effectSlice).toMatch(/queueMicrotask\(tryWake\)/)
-    expect(effectSlice).toMatch(/attempts\s*<\s*32/)
-    // Must not clear height settle on viewport wake
-    expect(effectSlice).not.toMatch(/needsHeightSettleRef\.current\s*=\s*false/)
-
-    // layoutEpoch expand/collapse re-arms height settle
-    expect(src).toMatch(
-      /scrollHeightHwm\s*=\s*undefined[\s\S]*?needsHeightSettleRef\.current\s*=\s*true/,
+    expect(src).not.toMatch(/needsViewportWakeRef/)
+    expect(src).not.toMatch(/needsHeightSettleRef/)
+    expect(src).not.toMatch(/queueMicrotask\(tryWake\)/)
+    expect(src).not.toMatch(
+      /viewportHeight is written by render-node-to-output/,
     )
   })
 
@@ -60,5 +47,26 @@ describe('useVirtualScroll first-paint settle (blank-until-scroll)', () => {
     expect(slice).toMatch(/queueMicrotask\(tryAttach\)/)
     expect(slice).toMatch(/listener\(\)/)
     expect(slice).toMatch(/attempts\s*<\s*32/)
+  })
+
+  test('source: origin jump >1 row after first land forces a commit (gold Xt be)', async () => {
+    const src = await Bun.file(HOOK).text()
+    expect(src).toMatch(/if \(prev !== 0 && Math\.abs\(next - prev\) > 1\)/)
+    expect(src).toMatch(/setRemeasureTick\(t => t \+ 1\)/)
+  })
+})
+
+describe('VirtualMessageList densable 2.1.289 Ab LayoutPass', () => {
+  test('source: mounts Ab after bottom spacer; subscribeLayout(onLayout)', async () => {
+    const src = await Bun.file(VML).text()
+    expect(src).toMatch(/onLayout: onVirtualLayout/)
+    expect(src).toMatch(/tickReveal\(false\)/)
+    expect(src).toMatch(/onVirtualLayout\(\)/)
+    expect(src).toMatch(/<VirtualListLayoutPass onLayout=\{onLayout\} \/>/)
+    expect(src).toMatch(/function VirtualListLayoutPass/)
+    expect(src).toMatch(
+      /useEffect\(\(\) => subscribeLayout\(onLayout\), \[subscribeLayout, onLayout\]\)/,
+    )
+    expect(src).not.toMatch(/needsViewportWake/)
   })
 })

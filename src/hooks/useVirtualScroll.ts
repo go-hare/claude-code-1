@@ -117,6 +117,12 @@ export type VirtualScrollResult = {
    * the DOM. Follow with getItemTop(i) for the precise position.
    */
   scrollToIndex: (i: number) => void
+  /**
+   * densable `wb` `onLayout` (`ut`). VML `Ab` subscribes this to Ink
+   * `subscribeLayout` after `runLayoutPass`. Reanchor + widen clampMax by
+   * the reanchor delta. Gold does **not** setState here.
+   */
+  onLayout: () => void
 }
 
 /**
@@ -225,17 +231,9 @@ export function useVirtualScroll(
   const prevLayoutEpoch = useRef(layoutEpoch)
   const pendingRemeasureRef = useRef(false)
   const needsOffsetRebuildRef = useRef(false)
-  // First-paint settle: cold-start spacers use DEFAULT_ESTIMATE while sticky
-  // pins to real Yoga scrollHeight. Measure updates heightCache without
-  // setState (anti-flicker), so without one post-paint remeasure commit the
-  // viewport can land in inflated topSpacer — blank until the user scrolls
-  // (scroll notify is the first natural React re-render).
-  // needsViewportWake: one commit after Ink first writes viewportHeight>0
-  // (leave COLD_START). needsHeightSettle: one commit after the first real
-  // Yoga measure batch rebuilds spacers. Cleared independently — do not clear
-  // height settle on viewport wake or measure never forces the second commit.
-  const needsViewportWakeRef = useRef(true)
-  const needsHeightSettleRef = useRef(true)
+  // densable `Ye` — last non-sticky clamp written in layout effect; `onLayout`
+  // (`ut`) widens max by the post-yoga reanchor delta.
+  const clampBoundsRef = useRef<{ min: number; max: number } | null>(null)
   // List origin in content-wrapper coords. scrollTop is content-wrapper-
   // relative, but offsets[] are list-local (0 = first virtualized item).
   // Siblings that render BEFORE this list inside the ScrollBox — Logo,
@@ -293,9 +291,6 @@ export function useVirtualScroll(
     if (el) {
       el.scrollHeightHwm = undefined
     }
-    // Collapse/expand cleared heights — need a height-settle commit again
-    // once post-toggle Yoga lands (layoutEpoch path also uses needsOffsetRebuild).
-    needsHeightSettleRef.current = true
   }
   // densable `F`: item tail identity — abort freeze + drop the pinned
   // range so a mid-resize append remounts the live tail (also disables
@@ -425,10 +420,6 @@ export function useVirtualScroll(
       if (!live.has(k)) refCache.current.delete(k)
     }
     if (dirty) offsetVersionRef.current++
-    // Transcript identity swap (agent view enter, /clear, compaction) —
-    // re-run first-paint settle so spacers rebuild after new heights land.
-    needsViewportWakeRef.current = true
-    needsHeightSettleRef.current = true
   }, [itemKeys])
 
   // Offsets cached across renders, invalidated by offsetVersion ref bump.
@@ -732,40 +723,44 @@ export function useVirtualScroll(
   // render's clamp differs → scrollTop clamp-adjusts → content shifts.
   const effTopSpacer = offsets[effStart]!
 
-  // Official 2.1.207 scroll anchoring: if the previously-chosen anchor
-  // item's Yoga top moved (content above grew after measure), compensate
-  // scrollTop with preserveHwm so stored HWM still covers the prior
-  // position and the transcript does not jump above the answer.
-  useLayoutEffect(() => {
-    reanchorDeltaRef.current = 0
-    if (isSticky || scrollTop < 0 || viewportH === 0) {
-      scrollAnchorRef.current = null
-      return
-    }
-    let nextScrollTop = scrollRef.current?.getScrollTop() ?? scrollTop
-    const pending = scrollRef.current?.getPendingDelta() ?? 0
-    const hasScrollAnchor = Boolean(
-      scrollRef.current?.getDomElement()?.scrollAnchor,
-    )
+  // densable `yt` — if the previously-chosen anchor item's Yoga top moved
+  // (content above grew after measure), compensate scrollTop with preserveHwm.
+  const applyReanchor = useCallback((): number => {
+    const handle = scrollRef.current
+    let nextScrollTop = handle?.getScrollTop() ?? 0
+    const pending = handle?.getPendingDelta() ?? 0
+    const hasScrollAnchor = Boolean(handle?.getDomElement()?.scrollAnchor)
     const prevAnchor = scrollAnchorRef.current
-    if (prevAnchor && pending === 0 && !hasScrollAnchor) {
-      const yoga = itemRefs.current.get(prevAnchor.key)?.yogaNode
-      if (yoga && yoga.getComputedWidth() > 0) {
-        const delta = yoga.getComputedTop() - prevAnchor.yogaTop
-        if (delta !== 0) {
-          nextScrollTop = nextScrollTop + delta
-          reanchorDeltaRef.current = delta
-          scrollRef.current?.scrollTo(nextScrollTop, { preserveHwm: true })
-          const dom = scrollRef.current?.getDomElement()
-          if (dom && delta > 0) {
-            const fresh = scrollRef.current?.getFreshScrollHeight() ?? 0
-            dom.scrollHeightHwm = Math.max(dom.scrollHeightHwm ?? 0, fresh)
-            dom.scrollHeight = Math.max(dom.scrollHeight ?? 0, fresh)
-          }
-        }
-      }
+    if (!prevAnchor || pending !== 0 || hasScrollAnchor) {
+      return nextScrollTop
     }
-    // Pick new anchor: topmost mounted item whose top is at/above scrollTop.
+    const yoga = itemRefs.current.get(prevAnchor.key)?.yogaNode
+    if (!yoga || yoga.getComputedWidth() === 0) {
+      return nextScrollTop
+    }
+    const delta = yoga.getComputedTop() - prevAnchor.yogaTop
+    if (delta === 0) {
+      return nextScrollTop
+    }
+    nextScrollTop = nextScrollTop + delta
+    reanchorDeltaRef.current += delta
+    prevAnchor.yogaTop += delta
+    handle?.scrollTo(nextScrollTop, { preserveHwm: true })
+    if (freezeRendersRef.current > 0) {
+      const freezeAnchor = freezeAnchorRef.current
+      if (freezeAnchor) freezeAnchor.scrollTop += delta
+    }
+    const dom = handle?.getDomElement()
+    if (dom && delta > 0) {
+      const fresh = handle?.getFreshScrollHeight() ?? 0
+      dom.scrollHeightHwm = Math.max(dom.scrollHeightHwm ?? 0, fresh)
+      dom.scrollHeight = Math.max(dom.scrollHeight ?? 0, fresh)
+    }
+    return nextScrollTop
+  }, [scrollRef])
+
+  // densable `Ke` — topmost mounted item whose Yoga top is at/above scrollY.
+  const pickAnchor = useCallback((scrollY: number): void => {
     let bestKey: string | undefined
     let bestTop = -Infinity
     for (const [key, el] of itemRefs.current) {
@@ -778,25 +773,60 @@ export function useVirtualScroll(
         continue
       }
       const top = yoga.getComputedTop()
-      if (top <= nextScrollTop && top > bestTop) {
+      if (top <= scrollY && top > bestTop) {
         bestTop = top
         bestKey = key
       }
     }
     scrollAnchorRef.current =
       bestKey !== undefined ? { key: bestKey, yogaTop: bestTop } : null
-  })
+  }, [])
+
+  // densable `ut` / `onLayout`. Gold `Ab` runs this after yoga, not via
+  // queueMicrotask. Sticky / vh=0 early-return — no analog first-paint wake.
+  const onLayout = useCallback(() => {
+    const handle = scrollRef.current
+    if (!handle || handle.isSticky() || handle.getViewportHeight() === 0) {
+      scrollAnchorRef.current = null
+      return
+    }
+    const next = applyReanchor()
+    const bounds = clampBoundsRef.current
+    if (bounds !== null && bounds.max !== Infinity) {
+      handle.setClampBounds(
+        bounds.min,
+        bounds.max + Math.max(0, reanchorDeltaRef.current),
+      )
+    }
+    pickAnchor(next)
+  }, [scrollRef, applyReanchor, pickAnchor])
 
   useLayoutEffect(() => {
-    // Keep listOrigin fresh for clamp math (and range math next commit).
+    if (isSticky || scrollTop < 0 || viewportH === 0) {
+      scrollAnchorRef.current = null
+      return
+    }
+    pickAnchor(applyReanchor())
+  })
+
+  // densable `Xt` — origin + clamp + measure in one layout pass (gold `wb`).
+  // Origin jump >1 row after first land forces a commit (`be`). Heights stay
+  // no-setState except skip/epoch paths (local layoutEpoch, not gold streaming).
+  useLayoutEffect(() => {
     const spacerYoga = spacerRef.current?.yogaNode
     if (spacerYoga && spacerYoga.getComputedWidth() > 0) {
-      listOriginRef.current = spacerYoga.getComputedTop()
+      const next = spacerYoga.getComputedTop()
+      const prev = listOriginRef.current
+      listOriginRef.current = next
+      if (prev !== 0 && Math.abs(next - prev) > 1) {
+        setRemeasureTick(t => t + 1)
+      }
     }
+    const origin = listOriginRef.current
     if (isSticky) {
+      clampBoundsRef.current = null
       scrollRef.current?.setClampBounds(undefined, undefined)
     } else {
-      const origin = listOriginRef.current
       const reanchor = reanchorDeltaRef.current
       const min = effStart === 0 ? 0 : effTopSpacer + origin
       const max =
@@ -805,35 +835,10 @@ export function useVirtualScroll(
           : Math.max(effTopSpacer, offsets[effEnd]! - viewportH) +
             origin +
             Math.max(0, reanchor)
+      clampBoundsRef.current = { min, max }
       scrollRef.current?.setClampBounds(min, max)
     }
-  })
-
-  // Measure heights from the PREVIOUS Ink render. Runs every commit (no
-  // deps) because Yoga recomputes layout without React knowing. yogaNode
-  // heights for items mounted ≥1 frame ago are valid; brand-new items
-  // haven't been laid out yet (that happens in resetAfterCommit → onRender,
-  // after this effect).
-  //
-  // Distinguishing "h=0: Yoga hasn't run" (transient, skip) from "h=0:
-  // MessageRow rendered null" (permanent, cache it): getComputedWidth() > 0
-  // proves Yoga HAS laid out this node (width comes from the container,
-  // always non-zero for a Box in a column). If width is set and height is
-  // 0, the item is genuinely empty — cache 0 so the start-advance gate
-  // doesn't block on it forever. Without this, a null-rendering message
-  // at the start boundary freezes the range (seen as blank viewport when
-  // scrolling down after scrolling up).
-  //
-  // NO setState. A setState here would schedule a second commit with
-  // shifted offsets, and since Ink writes stdout on every commit
-  // (reconciler.resetAfterCommit → onRender), that's two writes with
-  // different spacer heights → visible flicker. Heights propagate to
-  // offsets on the next natural render. One-frame lag, absorbed by overscan.
-  useLayoutEffect(() => {
-    const spacerYoga = spacerRef.current?.yogaNode
-    if (spacerYoga && spacerYoga.getComputedWidth() > 0) {
-      listOriginRef.current = spacerYoga.getComputedTop()
-    }
+    reanchorDeltaRef.current = 0
     if (skipMeasurementRef.current) {
       skipMeasurementRef.current = false
       // Expand/collapse: after this commit Ink lays out post-toggle content.
@@ -850,26 +855,19 @@ export function useVirtualScroll(
       const yoga = el.yogaNode
       if (!yoga) continue
       const h = yoga.getComputedHeight()
-      const prev = heightCache.current.get(key)
+      const prevH = heightCache.current.get(key)
       if (h > 0) {
-        if (prev !== h) {
+        if (prevH !== h) {
           heightCache.current.set(key, h)
           anyChanged = true
         }
-      } else if (yoga.getComputedWidth() > 0 && prev !== 0) {
+      } else if (yoga.getComputedWidth() > 0 && prevH !== 0) {
         heightCache.current.set(key, 0)
         anyChanged = true
       }
     }
     if (anyChanged) {
       offsetVersionRef.current++
-      // First measure batch after cold start / transcript swap: one forced
-      // commit so topSpacer/bottomSpacer leave DEFAULT_ESTIMATE and match the
-      // sticky pin. Streaming height tweaks keep the no-setState path.
-      if (needsHeightSettleRef.current) {
-        needsHeightSettleRef.current = false
-        queueMicrotask(() => setRemeasureTick(t => t + 1))
-      }
     }
     // Intentional layoutEpoch path only (not streaming markdown freeze):
     // force a commit so offsets rebuild from freshly written heights, and
@@ -879,9 +877,6 @@ export function useVirtualScroll(
     // Must NOT run for every measure — that would defeat scrollHeightHwm.
     if (needsOffsetRebuildRef.current) {
       needsOffsetRebuildRef.current = false
-      // Always rebuild offsets after epoch remeasure, even if Yoga heights
-      // matched DEFAULT_ESTIMATE (anyChanged false) — spacers still need
-      // the post-toggle commit path for HWM/scroll clamp.
       queueMicrotask(() => setRemeasureTick(t => t + 1))
       if (!isSticky) {
         const s = scrollRef.current
@@ -896,36 +891,6 @@ export function useVirtualScroll(
           }
         }
       }
-    }
-  })
-
-  // Post-paint: viewportHeight is written by render-node-to-output AFTER
-  // useLayoutEffect, so the first commit often still sees viewportH=0 and
-  // stays on COLD_START range forever until scroll notify. One effect after
-  // Ink paints with a positive viewport forces the sticky/real-range path.
-  // Does NOT clear needsHeightSettle — measure must still force a second
-  // commit after real Yoga heights land in the cache.
-  //
-  // Retry: first paint can still report vh=0 (ScrollBox flex not resolved yet
-  // or ref late). Microtask retries cover the common "vh lands one paint
-  // later without a React commit" window without polling forever.
-  useEffect(() => {
-    if (!needsViewportWakeRef.current) return
-    let active = true
-    let attempts = 0
-    const tryWake = (): void => {
-      if (!active || !needsViewportWakeRef.current) return
-      const s = scrollRef.current
-      if (s && s.getViewportHeight() > 0) {
-        needsViewportWakeRef.current = false
-        setRemeasureTick(t => t + 1)
-        return
-      }
-      if (++attempts < 32) queueMicrotask(tryWake)
-    }
-    tryWake()
-    return () => {
-      active = false
     }
   })
 
@@ -1001,6 +966,7 @@ export function useVirtualScroll(
     getItemTop,
     getItemElement,
     getItemHeight,
+    onLayout,
     scrollToIndex,
   }
 }

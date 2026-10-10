@@ -22,4 +22,14 @@ describe('densable 2.1.289 VML reveal host', () => {
       /useEffect\(\(\) => \{\s*if \(revealPendingRef\.current\) tickReveal\(true\);\s*\}\);/,
     )
   })
+
+  test('qd mounts Ab LayoutPass after bottom spacer (subscribeLayout)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../VirtualMessageList.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('<VirtualListLayoutPass onLayout={onLayout} />')
+    expect(src).toContain('subscribeLayout(onLayout)')
+    expect(src).toContain('tickReveal(false)')
+  })
 })

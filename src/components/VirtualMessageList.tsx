@@ -11,7 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
-import { Box, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
+import { Box, useApp, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
 import { TextHoverColorContext } from './design-system/ThemedText.js';
 import { ScrollChromeContext } from './FullscreenLayout.js';
 
@@ -453,6 +453,7 @@ export function VirtualMessageList({
     getItemTop,
     getItemElement,
     getItemHeight,
+    onLayout: onVirtualLayout,
     scrollToIndex,
   } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
   const [start, end] = range;
@@ -652,6 +653,12 @@ export function VirtualMessageList({
     },
     [scrollRef, indexByRevealRequestId],
   );
+
+  // densable `Wt` — layout-pass listener: reveal tick then `wb` `ut`.
+  const onLayout = useCallback(() => {
+    tickReveal(false);
+    onVirtualLayout();
+  }, [tickReveal, onVirtualLayout]);
 
   useEffect(() => {
     setTranscriptRevealHost({
@@ -1162,6 +1169,7 @@ export function VirtualMessageList({
         );
       })}
       {bottomSpacer > 0 && <Box height={bottomSpacer} flexShrink={0} />}
+      <VirtualListLayoutPass onLayout={onLayout} />
       {trackStickyPrompt && (
         <StickyTracker
           messages={messages}
@@ -1178,6 +1186,17 @@ export function VirtualMessageList({
 }
 
 const NOOP_UNSUB = () => {};
+
+/**
+ * densable `Ab` — `useEffect(() => subscribeLayout(onLayout), [subscribeLayout, onLayout])`.
+ * Gold `qd` mounts this after the bottom spacer, before `z0` StickyTracker.
+ * Ink notifies after `runLayoutPass`; do not invent rAF/microtask as this path.
+ */
+function VirtualListLayoutPass({ onLayout }: { onLayout: () => void }): null {
+  const { subscribeLayout } = useApp();
+  useEffect(() => subscribeLayout(onLayout), [subscribeLayout, onLayout]);
+  return null;
+}
 
 /**
  * Effect-only child that tracks the last user-prompt scrolled above the
