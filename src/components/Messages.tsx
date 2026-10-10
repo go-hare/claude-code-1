@@ -201,6 +201,8 @@ type FocusFilterOptions = {
   isLoading?: boolean;
   /** Remote reply channel path — keep all text. */
   keepAllText?: boolean;
+  /** densable yMr transcriptV2 skip (default false). */
+  transcriptV2?: boolean;
   /** Async agent toolStats lookup. */
   getAgentToolStats?: (agentId: string) => BriefToolStats | undefined;
 };
@@ -213,9 +215,10 @@ export function filterForFocusTranscript<T extends FocusTranscriptMessage>(
   messages: T[],
   options: FocusFilterOptions = {},
 ): T[] {
-  const { tools, isLoading = false, keepAllText = false, getAgentToolStats } = options;
+  const { tools, isLoading = false, keepAllText = false, transcriptV2 = false, getAgentToolStats } = options;
   return collapseFocusTranscript(messages, tools, getAgentToolStats, isLoading, {
     keepAllText,
+    transcriptV2,
   });
 }
 

@@ -267,6 +267,16 @@ describe('FullscreenLayout densable Tyn visible gate', () => {
     expect(layoutSrc).not.toContain('axcOverlayRef')
   })
 
+  test('Tyn jg wraps transcript column so Ec/Qa use mainColumns not full terminal', () => {
+    expect(layoutSrc).toContain(
+      '<TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>',
+    )
+    expect(layoutSrc).toContain(
+      'position="absolute" bottom={0} left={0} right={0} justifyContent="center"',
+    )
+    expect(layoutSrc).not.toContain('left={left}')
+  })
+
   test('Qvt IKe is C9t{[b9t, pyn]} — kxc in chrome ctx, no overlay-in-ScrollBox', () => {
     const qvtStart = layoutSrc.indexOf('if (axcSticky)')
     const elseStart = layoutSrc.indexOf('// Gold else:')

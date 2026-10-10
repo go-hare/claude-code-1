@@ -75,6 +75,11 @@ export type FocusTranscriptOptions = {
   /** Keep all text (remote reply channel path) */
   keepAllText?: boolean
   /**
+   * densable `yMr(...,{transcriptV2:r=!1})` — skip collapse/segmenter.
+   * Gold default false; when true, return messages unchanged.
+   */
+  transcriptV2?: boolean
+  /**
    * Resolve async agent toolStats from the task registry.
    */
   getAgentToolStats?: (agentId: string) => BriefToolStats | undefined
@@ -586,8 +591,10 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
     | ((agentId: string) => BriefToolStats | undefined)
     | undefined,
   isLoading = false,
-  options: { keepAllText?: boolean } = {},
+  options: { keepAllText?: boolean; transcriptV2?: boolean } = {},
 ): T[] {
+  // densable yMr: if (transcriptV2) return g.reset(), e
+  if (options.transcriptV2) return messages
   const keepAllText = options.keepAllText === true
   const out: T[] = []
   let a = 0

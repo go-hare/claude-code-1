@@ -5,26 +5,29 @@ import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Ansi, stringWidth, useTheme, wrapAnsi } from '@anthropic/ink';
 import type { CliHighlight } from '../utils/cliHighlight.js';
 import { formatToken, padAligned } from '../utils/markdown.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { plural } from '../utils/stringUtils.js';
 
-/** Accounts for parent indentation (e.g. message dot prefix) and terminal
- *  resize races. Without enough margin the table overflows its layout box
- *  and Ink's clip truncates differently on alternating frames, causing an
- *  infinite flicker loop in scrollback. */
+/** densable 2.1.289 `be` — parent indent + resize-race margin. */
 const SAFETY_MARGIN = 4;
 
-/** Minimum column width to prevent degenerate layouts */
+/** densable 2.1.289 `we` — minimum column width. */
 const MIN_COLUMN_WIDTH = 3;
 
 /**
- * Maximum number of lines per row before switching to vertical format.
- * When wrapping would make rows taller than this, vertical (key-value)
- * format provides better readability.
+ * densable 2.1.289 `Ao` — max wrapped lines per row before vertical
+ * (key-value) format. Gold HAS this fallback; unique English is minify-hidden.
  */
 const MAX_ROW_LINES = 4;
+
+/** densable 2.1.289 `cr` — cap rendered table body rows. */
+export const MAX_TABLE_ROWS = 200;
 
 /** ANSI escape codes for text formatting */
 const ANSI_BOLD_START = '\x1b[1m';
 const ANSI_BOLD_END = '\x1b[22m';
+
+const SENTENCE_END_RE = /[.!?…]["')\]]*$/;
 
 type Props = {
   token: Tokens.Table;
@@ -32,6 +35,39 @@ type Props = {
   /** Override terminal width (useful for testing) */
   forceWidth?: number;
 };
+
+/**
+ * densable 2.1.289 `Be` — truncation footer after `cr` body rows.
+ */
+export function markdownTableTruncationFooter(hidden: number): string {
+  return `… ${hidden.toLocaleString()} more ${plural(hidden, 'row')} not shown`;
+}
+
+/**
+ * densable 2.1.289 `xhr` — screen-reader table: "Header: value." sentences.
+ */
+export function formatScreenReaderTable(headers: string[], rows: string[][]): string {
+  function clean(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+  }
+  function withSentenceEnd(text: string): string {
+    return SENTENCE_END_RE.test(text) ? text : `${text}.`;
+  }
+  function formatRow(row: string[]): string {
+    return row
+      .map((cell, colIndex) => {
+        const label = clean(headers[colIndex] ?? '');
+        const value = clean(cell);
+        if (!label && !value) return null;
+        return withSentenceEnd(label ? `${label}: ${value}` : value);
+      })
+      .filter((part): part is string => part !== null)
+      .join(' ');
+  }
+  const lines =
+    rows.length > 0 ? rows.map(formatRow) : [headers.map(clean).filter(Boolean).map(withSentenceEnd).join(' ')];
+  return lines.filter(line => line.length > 0).join('\n');
+}
 
 /**
  * Wrap text to fit within a given width, returning array of lines.
@@ -79,6 +115,11 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   const [theme] = useTheme();
   const { columns: actualTerminalWidth } = useTerminalSize();
   const terminalWidth = forceWidth ?? actualTerminalWidth;
+  const screenReader = isScreenReaderModeEnabled();
+
+  // densable wr `u` / `d` — slice body to cr before measuring or drawing.
+  const truncatedCount = Math.max(0, token.rows.length - MAX_TABLE_ROWS);
+  const rows = truncatedCount > 0 ? token.rows.slice(0, MAX_TABLE_ROWS) : token.rows;
 
   // Per-render caches — Token[] references are stable within a single token
   // prop (from LRU cache in Markdown.tsx), so reference equality is sufficient.
@@ -101,6 +142,17 @@ export const MarkdownTable = React.memo(function MarkdownTable({
     return result;
   }
 
+  if (screenReader) {
+    let text = formatScreenReaderTable(
+      token.header.map(h => getPlainText(h.tokens)),
+      rows.map(row => row.map(cell => getPlainText(cell?.tokens))),
+    );
+    if (truncatedCount > 0) {
+      text += `\n${markdownTableTruncationFooter(truncatedCount)}`;
+    }
+    return <Ansi>{text}</Ansi>;
+  }
+
   // Get the longest word width in a cell (minimum width to avoid breaking words)
   function getMinWidth(tokens: Token[] | undefined): number {
     const text = getPlainText(tokens);
@@ -118,7 +170,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   // Step 1: Get minimum (longest word) and ideal (full content) widths
   const minWidths = token.header.map((header, colIndex) => {
     let maxMinWidth = getMinWidth(header.tokens);
-    for (const row of token.rows) {
+    for (const row of rows) {
       maxMinWidth = Math.max(maxMinWidth, getMinWidth(row[colIndex]?.tokens));
     }
     return maxMinWidth;
@@ -126,7 +178,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
 
   const idealWidths = token.header.map((header, colIndex) => {
     let maxIdeal = getIdealWidth(header.tokens);
-    for (const row of token.rows) {
+    for (const row of rows) {
       maxIdeal = Math.max(maxIdeal, getIdealWidth(row[colIndex]?.tokens));
     }
     return maxIdeal;
@@ -189,7 +241,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   for (let i = 0; i < token.header.length; i++) {
     maxRowLines = Math.max(maxRowLines, getWrappedLines(token.header[i]!.tokens, i).length);
   }
-  for (const row of token.rows) {
+  for (const row of rows) {
     for (let i = 0; i < row.length; i++) {
       maxRowLines = Math.max(maxRowLines, getWrappedLines(row[i]?.tokens, i).length);
     }
@@ -247,8 +299,8 @@ export const MarkdownTable = React.memo(function MarkdownTable({
     return line;
   }
 
-  // Render vertical format (key-value pairs) for extra-narrow terminals
-  // Uses formatCell cache; wrapping uses terminal-width params (not column widths)
+  // densable 2.1.289 `ct` — vertical (key-value) format for extra-narrow /
+  // tall-wrap tables. Gold HAS this; CJK unspaced cells trip Ao=4 easily.
   function renderVerticalFormat(): string {
     const lines: string[] = [];
     const headers = token.header.map(h => getPlainText(h.tokens));
@@ -256,23 +308,19 @@ export const MarkdownTable = React.memo(function MarkdownTable({
     // '─'.repeat throws RangeError (also on --continue/--resume at startup).
     const separatorWidth = Math.max(0, Math.min(terminalWidth - 1, 40));
     const separator = '─'.repeat(separatorWidth);
-    // Small indent for wrapped lines (just 2 spaces)
-    const wrapIndent = '  ';
 
-    token.rows.forEach((row, rowIndex) => {
-      if (rowIndex > 0) {
-        lines.push(separator);
-      }
-
+    rows.forEach((row, rowIndex) => {
+      const rowLines: string[] = [];
       row.forEach((cell, colIndex) => {
-        const label = headers[colIndex] || `Column ${colIndex + 1}`;
+        const label = headers[colIndex] || '';
         // Clean value: trim, remove extra internal whitespace/newlines
         const rawValue = formatCell(cell.tokens).trimEnd();
         const value = rawValue.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!label && !value) return;
 
         // Wrap value to fit terminal, accounting for label on first line
-        const firstLineWidth = terminalWidth - stringWidth(label) - 3;
-        const subsequentLineWidth = terminalWidth - wrapIndent.length - 1;
+        const firstLineWidth = label ? terminalWidth - stringWidth(label) - 3 : terminalWidth - 1;
+        const subsequentLineWidth = terminalWidth - 3;
 
         // Two-pass wrap: first line is narrower (label takes space),
         // continuation lines get the full width minus indent.
@@ -292,17 +340,29 @@ export const MarkdownTable = React.memo(function MarkdownTable({
           wrappedValue = [firstLine, ...rewrapped];
         }
 
-        // First line: bold label + value
-        lines.push(`${ANSI_BOLD_START}${label}:${ANSI_BOLD_END} ${wrappedValue[0] || ''}`);
+        // First line: bold label + value (gold omits "Column N" fallback)
+        rowLines.push(
+          label ? `${ANSI_BOLD_START}${label}:${ANSI_BOLD_END} ${wrappedValue[0] || ''}` : wrappedValue[0] || '',
+        );
 
-        // Subsequent lines with small indent (skip empty lines)
+        // Subsequent lines (gold ct: no wrap indent)
         for (let i = 1; i < wrappedValue.length; i++) {
           const line = wrappedValue[i]!;
           if (!line.trim()) continue;
-          lines.push(`${wrapIndent}${line}`);
+          rowLines.push(line);
         }
       });
+      if (rowLines.length === 0) return;
+      if (rowIndex > 0 || lines.length > 0) {
+        lines.push(separator);
+      }
+      lines.push(...rowLines);
     });
+
+    if (truncatedCount > 0) {
+      if (lines.length > 0) lines.push(separator);
+      lines.push(markdownTableTruncationFooter(truncatedCount));
+    }
 
     return lines.join('\n');
   }
@@ -317,9 +377,9 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   tableLines.push(renderBorderLine('top'));
   tableLines.push(...renderRowLines(token.header, true));
   tableLines.push(renderBorderLine('middle'));
-  token.rows.forEach((row, rowIndex) => {
+  rows.forEach((row, rowIndex) => {
     tableLines.push(...renderRowLines(row, false));
-    if (rowIndex < token.rows.length - 1) {
+    if (rowIndex < rows.length - 1) {
       tableLines.push(renderBorderLine('middle'));
     }
   });
@@ -334,6 +394,10 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   // to account for terminal resize race conditions.
   if (maxLineWidth > terminalWidth - SAFETY_MARGIN) {
     return <Ansi>{renderVerticalFormat()}</Ansi>;
+  }
+
+  if (truncatedCount > 0) {
+    tableLines.push(markdownTableTruncationFooter(truncatedCount));
   }
 
   // Render as a single Ansi block to prevent Ink from wrapping mid-row

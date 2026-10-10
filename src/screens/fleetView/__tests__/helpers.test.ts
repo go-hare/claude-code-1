@@ -48,6 +48,8 @@ import {
   shouldFleetViewSimpleViewSkipLeftover,
   shouldFleetViewTabToggleAllAgents,
   shouldFleetViewCycleGroupMode,
+  fleetAgentsFindQuery,
+  jumpFleetViewGroupHeader,
   shouldFleetViewEnterBashFromBang,
   shouldFleetViewToggleHelp,
   isFleetComposerActive,
@@ -451,14 +453,12 @@ describe('formatAttachError', () => {
     )
   })
 
-  test('maps connect ENOENT / ECONN* / control socket closed to didn\'t-respond', () => {
+  test("maps connect ENOENT / ECONN* / control socket closed to didn't-respond", () => {
     expect(
       formatAttachError(
         'connect ENOENT /Users/apple/.claude/daemon/bg/control.sock',
       ),
-    ).toBe(
-      "Session didn't respond after starting \u2014 try again in a moment",
-    )
+    ).toBe("Session didn't respond after starting \u2014 try again in a moment")
     expect(formatAttachError('connect ECONNREFUSED')).toBe(
       "Session didn't respond after starting \u2014 try again in a moment",
     )
@@ -1329,5 +1329,37 @@ describe('densable 2.1.239 JIy Ouu / aVA / page keys', () => {
     expect(fleetViewPageJump('end', 4, 10, 20)).toBe(9)
     expect(fleetViewPageJump('pageup', 8, 10, 20)).toBe(0)
     expect(fleetViewPageJump('pagedown', 0, 10, 20)).toBe(9)
+  })
+
+  test('densable Er agents:find toggles n: prefix', () => {
+    expect(fleetAgentsFindQuery('', false)).toBe('n:')
+    expect(fleetAgentsFindQuery('foo', false)).toBe('n:foo')
+    expect(fleetAgentsFindQuery('n:foo', false)).toBe('foo')
+    expect(fleetAgentsFindQuery('a:review', false)).toBeNull()
+    expect(fleetAgentsFindQuery('!ls', true)).toBeNull()
+  })
+
+  test('densable ef jumps to next/previous header', () => {
+    const rows = [
+      { kind: 'header' as const, group: 'a' },
+      { kind: 'job' as const, session: session({ pid: 1, status: 'busy' }) },
+      { kind: 'header' as const, group: 'b' },
+      { kind: 'job' as const, session: session({ pid: 2, status: 'idle' }) },
+    ]
+    const opts = {
+      suggestionCount: 0,
+      previewOpen: false,
+      hasComposedDispatch: false,
+    }
+    expect(jumpFleetViewGroupHeader(rows, 'agents:nextGroup', 0, opts)).toBe(2)
+    expect(
+      jumpFleetViewGroupHeader(rows, 'agents:previousGroup', 2, opts),
+    ).toBe(0)
+    expect(
+      jumpFleetViewGroupHeader(rows, 'agents:nextGroup', 0, {
+        ...opts,
+        suggestionCount: 1,
+      }),
+    ).toBeNull()
   })
 })

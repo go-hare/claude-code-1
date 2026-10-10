@@ -8,6 +8,20 @@ import { readFileSafe } from '../../utils/file.js';
 import { Divider } from '@anthropic/ink';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { StructuredDiff } from '../StructuredDiff.js';
+import { sanitizeInvisibleText } from '../../utils/plugins/escapeSafeText.js';
+import stripAnsi from 'strip-ansi';
+
+/**
+ * densable `vge` — `Cpe(tn(h)).text.replace(/[\t\n]+/g," ")`.
+ * `tn` analog is `strip-ansi` (gold `Bun.stripANSI`); `Cpe` analog is
+ * `sanitizeInvisibleText` (bidi/zero-width). Flatten tab/newline first so
+ * expand-tabs cannot swallow `\t`. Disk reads still use the raw `filePath`.
+ * Do not export minify `vge`.
+ */
+export function flattenDiffFilename(filePath: string): string {
+  const flattened = filePath.replace(/[\t\n]+/g, ' ');
+  return sanitizeInvisibleText(stripAnsi(flattened), '');
+}
 
 type Props = {
   filePath: string;
@@ -38,6 +52,7 @@ export function DiffDetailView({
   const { columns } = useTerminalSize();
   const screenReader = isScreenReaderModeEnabled();
   const viewWidth = width ?? columns - 4;
+  const paintedPath = flattenDiffFilename(filePath);
 
   // Read file content for syntax detection and multiline construct handling.
   // Only computed when this component is rendered (detail view mode).
@@ -58,9 +73,9 @@ export function DiffDetailView({
     return (
       <Box flexDirection="column" width="100%">
         <Box>
-          <Text bold>{filePath}</Text>
+          <Text bold>{paintedPath}</Text>
         </Box>
-        <Divider padding={4} />
+        <Divider width={viewWidth} />
         <Box flexDirection="column">
           <Text dimColor italic>
             Content restricted by read-permission rules
@@ -75,17 +90,17 @@ export function DiffDetailView({
     return (
       <Box flexDirection="column" width="100%">
         <Box>
-          <Text bold>{filePath}</Text>
+          <Text bold>{paintedPath}</Text>
           <Text dimColor> (untracked)</Text>
         </Box>
-        <Divider padding={4} />
+        <Divider width={viewWidth} />
         <Box flexDirection="column">
           <Text dimColor italic>
             New file not yet staged.
           </Text>
           {!screenReader && (
             <Text dimColor italic>
-              Run `git add :/{filePath}` to see line counts.
+              Run `git add :/{paintedPath}` to see line counts.
             </Text>
           )}
         </Box>
@@ -98,9 +113,9 @@ export function DiffDetailView({
     return (
       <Box flexDirection="column" width="100%">
         <Box>
-          <Text bold>{filePath}</Text>
+          <Text bold>{paintedPath}</Text>
         </Box>
-        <Divider padding={4} />
+        <Divider width={viewWidth} />
         <Box flexDirection="column">
           <Text dimColor italic>
             Binary file - cannot display diff
@@ -115,9 +130,9 @@ export function DiffDetailView({
     return (
       <Box flexDirection="column" width="100%">
         <Box>
-          <Text bold>{filePath}</Text>
+          <Text bold>{paintedPath}</Text>
         </Box>
-        <Divider padding={4} />
+        <Divider width={viewWidth} />
         <Box flexDirection="column">
           <Text dimColor italic>
             {screenReader ? 'Diff too large to display.' : 'Large file - diff exceeds 1 MB limit'}
@@ -130,11 +145,11 @@ export function DiffDetailView({
   return (
     <Box flexDirection="column" width="100%">
       <Box>
-        <Text bold>{filePath}</Text>
+        <Text bold>{paintedPath}</Text>
         {isTruncated && <Text dimColor> (truncated)</Text>}
       </Box>
 
-      <Divider padding={4} />
+      <Divider width={viewWidth} />
       <Box flexDirection="column">
         {hunks.length === 0 ? (
           <Text dimColor>No diff content</Text>

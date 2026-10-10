@@ -141,6 +141,7 @@ import {
   setFunctionHooksToolUseContext,
   setTurnAbortHandler,
   setUiAskHostHandler,
+  setUiToastShowHandler,
   getShownPluginPane,
   getPanesState,
   getPluginScrollSite,
@@ -150,7 +151,7 @@ import {
 } from '../utils/plugins/functionHooksModules.js';
 import {
   PluginAbovePromptSite,
-  PluginDockGrip,
+  PluginPaneDockHost,
   PluginPaneSite,
   PluginRowGrip,
   PluginPaneKeyResize,
@@ -164,7 +165,6 @@ import {
   pluginPaneDockColumns,
   pluginPaneInlineRows,
   subscribeDockRoom,
-  DOCK_GRIP_COLUMNS,
   DOCK_KEY_COLUMNS,
   INLINE_KEY_ROWS,
 } from '../components/PluginRasterPanes.js';
@@ -272,6 +272,7 @@ import {
   createStreamingTextFlushBuffer,
   mergeSalvagePrefix,
 } from '../utils/streamingTextStore.js';
+import { resolveFocusFoldHoldsPreview } from '../utils/streamingUiGate.js';
 import { createMessageDisplayTransform, pruneDisplayedMessageContent } from '../utils/messageDisplayTransform.js';
 import { StreamingTextPreview } from '../components/StreamingTextPreview.js';
 import { logError } from '../utils/log.js';
@@ -1441,6 +1442,7 @@ export function REPL({
   // /brief mid-session leaves the stale tool list (no SendUserMessage) and
   // the model emits plain text the brief filter hides.
   const isBriefOnly = useAppState(s => s.isBriefOnly);
+  const briefTranscript = useAppState(s => s.briefTranscript);
 
   const localTools = useMemo(
     () => getTools(toolPermissionContext),
@@ -2233,6 +2235,19 @@ export function REPL({
   useEffect(() => {
     setFunctionHooksAppStateReader(() => store.getState());
     setFunctionHooksAppStateWriter(store.setState);
+    setUiToastShowHandler(toast => {
+      addNotification({
+        key: `plugin-toast-${randomUUID()}`,
+        kind: 'event',
+        text: `${toast.plugin}: ${toast.text}`,
+        priority: 'immediate',
+        timeoutMs: toast.timeoutMs ?? 4000,
+      });
+      const { current, queue } = store.getState().notifications;
+      logForDebugging(
+        `$.ui.toast: shown as ${current?.key ?? 'nothing'} (${queue.length} queued)`,
+      );
+    });
     setUiAskHostHandler(input => {
       const toolUseID = randomUUID();
       const questions = input.questions;
@@ -2266,10 +2281,11 @@ export function REPL({
     });
     return () => {
       setUiAskHostHandler(undefined);
+      setUiToastShowHandler(undefined);
       setFunctionHooksAppStateReader(undefined);
       setFunctionHooksAppStateWriter(undefined);
     };
-  }, [store]);
+  }, [store, addNotification]);
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
@@ -2894,6 +2910,17 @@ export function REPL({
   // densable Jbe = l5 && (flags & U2a)
   const streamingFlags = useSyncExternalStore(streamingDisplayStore.subscribe, streamingDisplayStore.getFlags);
   const hasStreamingText = showStreamingText && (streamingFlags & STREAM_FLAG_DISPLAYED) !== 0;
+  // densable Skt.focusFoldHoldsPreview — brief+fullscreen loading holds Oa
+  // so collapse can hang pendingText. Spinner also || yu.
+  const focusFoldHoldsPreview = resolveFocusFoldHoldsPreview({
+    isLoading,
+    briefTranscript: Boolean(briefTranscript),
+    screen,
+    fullscreen: isFullscreenEnvEnabled(),
+    tailBlank: (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0,
+    streamingToolUseCount: streamingToolUses.length,
+    messages,
+  });
   // densable d5 = <XEl store={ck} />
   const streamingPreviewEl = useMemo(
     () => <StreamingTextPreview store={streamingDisplayStore} />,
@@ -3256,11 +3283,12 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // gold zht: (!hasDisplayed || tailBlank || brief). tailBlank = displayed
-    // with hideTrailingLine and no source `\n` (va). wrap-stream pops the last
-    // visual row; a long first paragraph still paints the wrapped prefix.
-    // Spinner stays until a source newline (or transformed hook text).
-    (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
+    // gold zht: (!hasDisplayed || tailBlank || brief || yu). tailBlank = displayed
+    // with hideTrailingLine and no source `\n` (va). yu = Skt.focusFoldHoldsPreview.
+    // wrap-stream pops the last visual row; a long first paragraph still paints
+    // the wrapped prefix. Spinner stays until a source newline (or transformed
+    // hook text), and while focus-fold holds Oa.
+    (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly || focusFoldHoldsPreview);
 
   // Host / gold _Zt overlays waiting for user — suppress surveys
   const hasActivePrompt =
@@ -8112,11 +8140,12 @@ export function REPL({
   const pluginDockColumns = pluginPaneDockColumns(transcriptCols, chosenDock);
   const pluginDockOffered = isFullscreenEnvEnabled() && replDiffSidebarWidth === 0 ? pluginDockColumns : 0;
   const shownPluginPane = getShownPluginPane();
+  // densable kf=Tb?jP:0 — dock *width* only when a pane is shown.
   const pluginDockWidth = shownPluginPane !== undefined ? pluginDockOffered : 0;
   const panesDocked = isFullscreenEnvEnabled() && pluginDockColumns > 0;
-  // densable Ree We=!docked; Mee isOffered → mx.offerPlacement() (QFt semantic).
+  // densable Ree We=!docked; Mee qP=jP>0 (isOffered) even when kf=0 / no shown pane.
   const inlineHostOffered = !panesDocked;
-  const dockHostOffered = pluginDockWidth > 0;
+  const dockHostOffered = pluginDockOffered > 0;
   useEffect(() => (inlineHostOffered ? offerPlacement() : undefined), [inlineHostOffered]);
   useEffect(() => (dockHostOffered ? offerPlacement() : undefined), [dockHostOffered]);
   // densable Uh.usePaneToastHold() next to useDockColumns (FEe → paneHoldsToasts).
@@ -8239,26 +8268,19 @@ export function REPL({
             dockWidth={pluginDockWidth}
             dock={
               pluginDockWidth > 0 ? (
-                <Box flexGrow={1} flexDirection="row" width={pluginDockWidth}>
-                  <PluginDockGrip
-                    columns={pluginDockWidth}
-                    onResize={next => {
-                      const resized = pluginPaneDockColumns(transcriptCols, next);
-                      chooseDockRoom(resized);
-                      return resized;
-                    }}
-                    onSettle={keepPluginPaneRoom}
-                  />
-                  <Box flexGrow={1} flexDirection="column" width={Math.max(0, pluginDockWidth - DOCK_GRIP_COLUMNS)}>
-                    <PluginPaneSite
-                      fill={true}
-                      isWorking={isLoading}
-                      promptEmpty={inputValue === ''}
-                      queueEditing={queueEditIndex !== null}
-                      promptOwnsEscape={promptOwnsEscape}
-                    />
-                  </Box>
-                </Box>
+                <PluginPaneDockHost
+                  width={pluginDockWidth}
+                  isWorking={isLoading}
+                  promptEmpty={inputValue === ''}
+                  queueEditing={queueEditIndex !== null}
+                  promptOwnsEscape={promptOwnsEscape}
+                  onResize={next => {
+                    const resized = pluginPaneDockColumns(transcriptCols, next);
+                    chooseDockRoom(resized);
+                    return resized;
+                  }}
+                  onSettle={keepPluginPaneRoom}
+                />
               ) : undefined
             }
             onPillClick={() => {
@@ -8293,8 +8315,12 @@ export function REPL({
                   agentDefinitions={agentDefinitions}
                   onOpenRateLimitOptions={handleOpenRateLimitOptions}
                   isLoading={isLoading}
-                  hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText}
-                  streamingPreview={isLoading && !viewedAgentTask && showStreamingText ? streamingPreviewEl : null}
+                  hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview}
+                  streamingPreview={
+                    isLoading && !viewedAgentTask && showStreamingText && !focusFoldHoldsPreview
+                      ? streamingPreviewEl
+                      : null
+                  }
                   isBriefOnly={viewedAgentTask ? false : isBriefOnly}
                   unseenDivider={viewedAgentTask ? undefined : unseenDivider}
                   scrollRef={isFullscreenEnvEnabled() ? scrollRef : undefined}
@@ -8303,12 +8329,12 @@ export function REPL({
                   setCursor={setCursor}
                   cursorNavRef={cursorNavRef}
                 />
-                {panesDocked ? null : shownPluginPane !== undefined ? (
+                {panesDocked ? null : (
                   <Box
                     flexDirection="column"
                     flexShrink={0}
                     width={transcriptCols}
-                    height={pluginInlineRows}
+                    {...(shownPluginPane !== undefined ? { height: pluginInlineRows } : {})}
                     overflow="hidden"
                     position="relative"
                   >
@@ -8322,7 +8348,7 @@ export function REPL({
                       promptOwnsEscape={promptOwnsEscape}
                       lit={inlineGripLit}
                     />
-                    {pluginInlineRows > 0 && transcriptCols > 0 ? (
+                    {shownPluginPane !== undefined && pluginInlineRows > 0 && transcriptCols > 0 ? (
                       <PluginRowGrip
                         columns={transcriptCols}
                         rows={pluginInlineRows}
@@ -8340,14 +8366,6 @@ export function REPL({
                       />
                     ) : null}
                   </Box>
-                ) : (
-                  <PluginPaneSite
-                    fill={false}
-                    isWorking={isLoading}
-                    promptEmpty={inputValue === ''}
-                    queueEditing={queueEditIndex !== null}
-                    promptOwnsEscape={promptOwnsEscape}
-                  />
                 )}
                 <AwsAuthStatusBox />
                 {/* Hide the processing placeholder while a modal is showing —

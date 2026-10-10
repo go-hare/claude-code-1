@@ -7,6 +7,7 @@ import { join } from 'path'
 import type { DOMElement } from '@anthropic/ink'
 import { shouldRequeueOnPreempt } from '../../context/notifications.js'
 import type { AppState } from '../../state/AppStateStore.js'
+import { flattenDiffFilename } from '../../components/diff/DiffDetailView.js'
 import { isGeneratedFile, isTestFile } from '../generatedFiles.js'
 import {
   clampedScrollTop,
@@ -152,6 +153,34 @@ describe('densable 2.1.283 Obe leftover', () => {
     expect(detail).toContain('Large file - diff exceeds 1 MB limit')
     expect(detail).toContain('Diff too large to display.')
     expect(detail).toContain('isRestricted')
+    expect(detail).toContain('width={viewWidth}')
+    expect(detail).not.toContain('<Divider padding={4} />')
+    expect(detail).toContain('flattenDiffFilename')
+    expect(detail).toContain("filePath.replace(/[\\t\\n]+/g, ' ')")
+    expect(detail).toContain('sanitizeInvisibleText')
+    expect(detail).toContain('stripAnsi')
+    expect(flattenDiffFilename('a\tb\nc')).toBe('a b c')
+    expect(flattenDiffFilename('src/app.ts')).toBe('src/app.ts')
+    expect(detail).toContain('<Text bold>{paintedPath}</Text>')
+    expect(detail).toContain('filePath={filePath}')
+    expect(detail).toContain('resolve(getCwd(), filePath)')
+    expect(detail).not.toContain('export function vge')
+    const layout = readFileSync(
+      join(import.meta.dir, '../../components/FullscreenLayout.tsx'),
+      'utf8',
+    )
+    expect(layout).toContain('backgroundColor="composerSidebarBackground"')
+    const theme = readFileSync(join(import.meta.dir, '../theme.ts'), 'utf8')
+    expect(theme).toContain("composerSidebarBackground: 'rgb(245, 245, 245)'")
+    expect(theme).toContain("composerSidebarBackground: 'ansi:white'")
+    expect(theme).toContain("composerSidebarBackground: 'ansi:blackBright'")
+    expect(theme).toContain("composerSidebarBackground: 'rgb(235, 235, 235)'")
+    expect(theme).toContain("composerSidebarBackground: 'rgb(38, 38, 38)'")
+  })
+
+  test('Obe body puts Qa before FMe (gold e(Qa,{width:Xo}))', () => {
+    expect(panel).toContain('<Divider width={inner} />')
+    expect(panel).toContain('<Divider width={width} />')
   })
 })
 
@@ -172,6 +201,10 @@ describe('densable 2.1.283 Obe mouse host', () => {
       import.meta.dir,
       '../../components/diff/ReplDiffSidebarController.tsx',
     ),
+    'utf8',
+  )
+  const layout = readFileSync(
+    join(import.meta.dir, '../../components/FullscreenLayout.tsx'),
     'utf8',
   )
 
@@ -231,11 +264,39 @@ describe('densable 2.1.283 Obe mouse host', () => {
     // densable Wd — EventHandlerProps now includes onWheel (pane host uses it).
     expect(handlers).toContain('onWheel?: WheelEventHandler')
     expect(panel).toContain('useReplDiffSelectionAttach')
-    expect(panel).toContain('parseSgrWheel')
-    expect(panel).toContain('scrollBy(deltaY * 3)')
+    expect(panel).toContain('onWheel={handlePanelWheel}')
+    expect(panel).toContain('scrollBy(event.deltaY * 3)')
+    expect(panel).toContain('event.preventDefault()')
     expect(panel).toContain('ref={stripRef}')
     expect(panel).toContain('scrollToFile')
     expect(sidebar).toContain('minCol={Math.max(0, columns - width)}')
+    expect(layout).toContain('height="100%"')
+    expect(layout).toContain('alignSelf="stretch"')
+    expect(layout).toContain('alignItems="stretch"')
+    expect(layout).not.toContain('onWheel={onReplDiffShellWheel}')
+    expect(layout).toContain('sidebarWidth > 0')
+    expect(panel).not.toContain('setReplDiffShellWheel')
+    expect(layout).not.toContain('onClick={() => {}}')
+    expect(layout).not.toContain('tabIndex={-1}')
+  })
+
+  test('tot Hr only wraps sidebar when width>0 (zero-width Box blanks transcript)', () => {
+    const layout = readFileSync(
+      join(import.meta.dir, '../../components/FullscreenLayout.tsx'),
+      'utf8',
+    )
+    expect(layout).toContain('sidebarWidth > 0 ? (')
+  })
+
+  test('gold Tyn Hr has no shell onWheel; Obe panel onWheel stays', () => {
+    expect(layout).not.toContain('onReplDiffShellWheel')
+    expect(panel).toContain('onWheel={handlePanelWheel}')
+    const host = readFileSync(
+      join(import.meta.dir, '../replDiffMouseHost.ts'),
+      'utf8',
+    )
+    expect(host).not.toContain('setReplDiffShellWheel')
+    expect(host).not.toContain('onReplDiffShellWheel')
   })
 
   test('ruo/auo diffPanelVisible is a separate AppState latch', () => {

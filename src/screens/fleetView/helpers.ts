@@ -699,6 +699,54 @@ export function shouldFleetViewCycleGroupMode(simpleView: boolean): boolean {
   return !simpleView
 }
 
+/** densable `ba` — dispatch tag at start (`a:`/`s:`/`o:`/`n:`). */
+const FLEET_DISPATCH_TAG_RE = /(?:^|\s)(?:[aso]:|n:(?!\\))/i
+
+/**
+ * densable `Er` — agents:find toggles `n:` name-filter prefix.
+ */
+export function fleetAgentsFindQuery(
+  query: string,
+  bashMode: boolean,
+): string | null {
+  const trimmed = query.trimStart()
+  if (trimmed.search(FLEET_DISPATCH_TAG_RE) === 0) {
+    return trimmed[0]?.toLowerCase() === 'n' ? trimmed.slice(2) : null
+  }
+  if (bashMode && trimmed.startsWith('!')) return null
+  return `n:${trimmed}`
+}
+
+/**
+ * densable `ef` — agents:nextGroup / previousGroup jump to the next header row.
+ */
+export function jumpFleetViewGroupHeader(
+  rows: readonly FleetFlatRow[],
+  action: 'agents:nextGroup' | 'agents:previousGroup',
+  focusedIdx: number,
+  opts: {
+    suggestionCount: number
+    previewOpen: boolean
+    hasComposedDispatch: boolean
+  },
+): number | null {
+  if (action !== 'agents:nextGroup' && action !== 'agents:previousGroup') {
+    return null
+  }
+  if (
+    opts.suggestionCount > 0 ||
+    opts.previewOpen ||
+    opts.hasComposedDispatch ||
+    !rows.some(row => row.kind === 'header')
+  ) {
+    return null
+  }
+  const dir = action === 'agents:nextGroup' ? 1 : -1
+  let i = focusedIdx + dir
+  while (rows[i] && rows[i]?.kind !== 'header') i += dir
+  return rows[i] ? i : focusedIdx
+}
+
 /**
  * densable JIy `!` → bash: `vgn()&&!simpleView` + empty prompt.
  */

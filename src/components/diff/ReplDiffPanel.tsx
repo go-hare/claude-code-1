@@ -1,14 +1,15 @@
 import {
   Box,
+  Divider,
   ProgressBar,
   ScrollBox,
   Text,
   wrapText,
-  useInput,
   type DOMElement,
   type ScrollBoxHandle,
+  type WheelEvent,
 } from '@anthropic/ink';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { StructuredPatchHunk } from 'diff';
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js';
 import { useDiffData, type DiffFile } from '../../hooks/useDiffData.js';
@@ -47,12 +48,14 @@ import { DiffDetailView } from './DiffDetailView.js';
 import {
   hideDiffPanelLatch,
   nodeScreenRect,
-  parseSgrWheel,
   resolveDiffFileAtY,
   showDiffPanelLatch,
   useReplDiffSelectionAttach,
   type DiffSelectionAttach,
 } from '../../utils/replDiffMouseHost.js';
+
+/** Stable empty todos — `?? []` inside useAppState Object.is-fails (same class as o$ #185). */
+const EMPTY_SESSION_TODOS: never[] = [];
 
 type Props = {
   width: number;
@@ -181,6 +184,7 @@ function ReplDiffPreSessionSection({
           ) : (
             files.map(file => (
               <Box key={`hunk:${file.path}`} flexDirection="column">
+                <Divider width={width} />
                 <DiffDetailView
                   filePath={file.path}
                   hunks={hunks.get(file.path) ?? []}
@@ -208,7 +212,9 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
   const revision = useAppState(s => s.fileHistory.snapshotSequence);
   const permissionContext = useAppState(s => s.toolPermissionContext);
   const sessionId = getSessionId();
-  const sessionTodos = useAppState(s => s.todos[sessionId] ?? []);
+  // densable SSo: `rp.todos[Ve()]` — index inside the selector (store array or
+  // undefined). Never `?? []` here: a fresh [] Object.is-fails every snapshot.
+  const sessionTodos = useAppState(s => s.todos[sessionId]) ?? EMPTY_SESSION_TODOS;
   const { files, loading, source, baseMode, stats, hunks, noCommits } = useDiffData(requestedMode, revision);
   const setAppState = useSetAppState();
   const host = getReplDiffHost();
@@ -320,29 +326,21 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
   const resolveFile = useCallback((y: number) => resolveDiffFileAtY(y, bodyRef.current, fileNodeMap.current), []);
   useReplDiffSelectionAttach(minCol, getMaxRow, onAskAboutSelection, resolveFile);
 
-  // densable Obe `onWheel`: Box has no onWheel type. Wheel is InputEvent
-  // (`wheelup`/`wheeldown`) + SGR row. Gold: strip `Ls(deltaY)` when ls>0;
-  // body `scrollBy(deltaY*3)`.
-  useInput(
-    (_input, key, event) => {
-      const wheel = parseSgrWheel(event.keypress.sequence, key);
-      if (!wheel) return;
-      const { deltaY, row } = wheel;
-      if (maxOffset > 0) {
-        const strip = nodeScreenRect(stripRef.current);
-        if (strip && row !== null && row >= strip.top && row < strip.top + strip.height) {
-          setListOffset(v => Math.max(0, Math.min(maxOffset, Math.min(v, maxOffset) + deltaY)));
-          event.stopImmediatePropagation();
-          return;
-        }
-      }
-      const body = nodeScreenRect(bodyRef.current);
-      if (body && (row === null || (row >= body.top && row < body.top + body.height))) {
-        scrollRef.current?.scrollBy(deltaY * 3);
-        event.stopImmediatePropagation();
-      }
+  // densable Obe `onWheel` on the panel Box (`Ir`) + strip (`zl`). Hit-tested
+  // dispatchWheelEvent preventDefault skips InputEvent scroll:lineUp/Down so
+  // the left transcript does not dual-scroll. Gold: body `scrollBy(deltaY*3)`.
+  const handlePanelWheel = useCallback((event: WheelEvent) => {
+    scrollRef.current?.scrollBy(event.deltaY * 3);
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  const handleStripWheel = useCallback(
+    (event: WheelEvent) => {
+      setListOffset(v => Math.max(0, Math.min(maxOffset, Math.min(v, maxOffset) + event.deltaY)));
+      event.preventDefault();
+      event.stopPropagation();
     },
-    { isActive: true, prepend: true },
+    [maxOffset],
   );
 
   const completedTodos = sessionTodos.filter(t => t.status === 'completed').length;
@@ -380,7 +378,15 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
       ));
 
   return (
-    <Box ref={panelRef} flexDirection="column" width={width} height="100%" overflow="hidden" selectionScope>
+    <Box
+      ref={panelRef}
+      flexDirection="column"
+      width={width}
+      height="100%"
+      overflow="hidden"
+      selectionScope
+      onWheel={handlePanelWheel}
+    >
       <Box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
         <Box flexDirection="row">
           {headerStats}
@@ -402,7 +408,12 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
           </Box>
         )}
         {(windowFiles.length > 0 || noiseCount > 0) && (
-          <Box ref={stripRef} flexDirection="column" marginTop={1}>
+          <Box
+            ref={stripRef}
+            flexDirection="column"
+            marginTop={1}
+            onWheel={maxOffset > 0 ? handleStripWheel : undefined}
+          >
             {moreAbove > 0 && (
               <Text dimColor>
                 {REPL_DIFF_ARROW_UP} {moreAbove} more above
@@ -462,6 +473,7 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
                         else fileNodeMap.current.delete(file.path);
                       }}
                     >
+                      <Divider width={inner} />
                       <DiffDetailView
                         filePath={file.path}
                         hunks={hunks.get(file.path) ?? []}

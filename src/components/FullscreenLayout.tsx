@@ -22,6 +22,7 @@ import {
   Divider,
   ScrollBox,
   type ScrollBoxHandle,
+  TerminalSizeContext,
   Text,
   instances,
   stringWidth,
@@ -426,40 +427,58 @@ export function FullscreenLayout({
     return (
       <PromptOverlayProvider>
         <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
-          {/* densable U8e: scroll+sidebar row, then dock sibling (iZ). */}
+          {/* $xc — scroll + sidebar row */}
           <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
-              <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
-                <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
-                  {headerPrompt != null && (
-                    <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
-                  )}
-                  <ScrollBox
-                    ref={scrollRef}
-                    flexGrow={1}
-                    flexDirection="column"
-                    paddingTop={padCollapsed ? 0 : 1}
-                    stickyScroll
-                    followGrowth={getAutoScrollEnabled()}
-                  >
-                    {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
-                    <ScrollChromeContext value={chromeCtx}>
-                      {scrollable}
-                      <AxcScrollAnchor />
-                    </ScrollChromeContext>
-                  </ScrollBox>
-                  {pillNode}
-                  {bottomFloat != null && (
-                    <Box position="absolute" bottom={0} right={0} opaque>
-                      {bottomFloat}
-                    </Box>
-                  )}
-                </Box>
-                {sidebar != null && (
-                  <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
-                    {sidebar}
+              <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%" alignItems="stretch">
+                {/* densable tot `jg`/`Me` — left column sees columns=mainColumns
+                    so Ec Jump-to-bottom centers in the transcript, not the
+                    full terminal (sidebar is a sibling outside this context). */}
+                <TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>
+                  <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
+                    {headerPrompt != null && (
+                      <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
+                    )}
+                    <ScrollBox
+                      ref={scrollRef}
+                      flexGrow={1}
+                      flexDirection="column"
+                      paddingTop={padCollapsed ? 0 : 1}
+                      stickyScroll
+                      followGrowth={getAutoScrollEnabled()}
+                    >
+                      {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
+                      <ScrollChromeContext value={chromeCtx}>
+                        {scrollable}
+                        <AxcScrollAnchor />
+                      </ScrollChromeContext>
+                    </ScrollBox>
+                    {pillNode}
+                    {bottomFloat != null && (
+                      <Box position="absolute" bottom={0} right={0} opaque>
+                        {bottomFloat}
+                      </Box>
+                    )}
                   </Box>
-                )}
+                </TerminalSizeContext>
+                {sidebar != null &&
+                  (sidebarWidth > 0 ? (
+                    <TerminalSizeContext value={{ columns: Math.max(1, sidebarWidth), rows: terminalRows }}>
+                      <Box
+                        flexDirection="column"
+                        width={sidebarWidth}
+                        height="100%"
+                        alignSelf="stretch"
+                        flexShrink={0}
+                        overflow="hidden"
+                        backgroundColor="composerSidebarBackground"
+                      >
+                        {sidebar}
+                      </Box>
+                    </TerminalSizeContext>
+                  ) : (
+                    sidebar
+                  ))}
               </Box>
             </Box>
             {dock != null && (
@@ -578,21 +597,11 @@ export function FullscreenLayout({
   );
 }
 
-// Slack-style pill. Absolute overlay at bottom={0} of the scrollwrap — floats
-// over the ScrollBox's last content row, only obscuring the centered pill
-// text (the rest of the row shows ScrollBox content). Scroll-smear from
-// DECSTBM shifting the pill's pixels is repaired at the Ink layer
-// (absoluteRectsPrev third-pass in render-node-to-output.ts, #23939). Shows
-// "Jump to bottom" when count is 0 (scrolled away but no new messages yet —
-// the dead zone where users previously thought chat stalled).
-//
-// Official 2.1.210 densable Bta: adaptive label (click / shortcut / pageDown
-// / bare ↓), Badge (Ey) with textColor+padded+truncate-end, noSelect on the
-// hit box. Official still uses left/right=0 full-width absolute — we keep
-// content-width + computed left: dirty absolute nodes clear their full cached
-// rect before re-paint (output.clear fromAbsolute), so a full-width wrapper
-// would wipe the entire last transcript row on hover (backgroundColor flip),
-// blanking text under the transparent gaps (e.g. "价值" under "意图").
+// densable Ec / Bta — absolute overlay at bottom of the transcript column.
+// Gold: left=0 right=0 justifyContent=center. Tyn wraps this column in
+// TerminalSizeContext {columns: mainColumns}, so "center" is the left pane
+// (not the full terminal once /diff is open). Shows "Jump to bottom" when
+// count is 0 (scrolled away but no new messages yet).
 function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => void }): React.ReactNode {
   const [hover, setHover] = useState(false);
   const { columns } = useTerminalSize();
@@ -624,8 +633,6 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
   const label = [preferred, bare, base].find(s => stringWidth(s) <= maxWidth) ?? base;
   // Badge (Ey densable): padded spaces + text color + truncate-end.
   const text = ` ${label} `;
-  const width = stringWidth(text);
-  const left = Math.max(0, Math.floor((columns - width) / 2));
   const bg = hover ? 'userMessageBackgroundHover' : 'userMessageBackground';
   // Official Bta densable: wLi() then onClick — pill clicks only, not
   // scroll:bottom keybindings.
@@ -634,7 +641,7 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
     onClick?.();
   };
   return (
-    <Box position="absolute" bottom={0} left={left}>
+    <Box position="absolute" bottom={0} left={0} right={0} justifyContent="center">
       <Box noSelect onClick={handleClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <Text backgroundColor={bg} color="text" wrap="truncate-end">
           {text}

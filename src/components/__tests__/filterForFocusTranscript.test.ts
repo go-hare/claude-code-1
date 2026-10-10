@@ -414,6 +414,32 @@ describe('filterForFocusTranscript full collapse', () => {
     expect(td?.briefHiddenCount).toBeUndefined()
   })
 
+  test('transcriptV2 skips collapse (gold yMr default skip)', () => {
+    const msgs: Msg[] = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        message: { content: [{ type: 'text', text: 'hi' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'tu',
+        message: {
+          content: [{ type: 'tool_use', name: 'Bash', id: 'tu1', input: {} }],
+        },
+      },
+      {
+        type: 'system',
+        subtype: 'turn_duration',
+        uuid: 'td',
+      },
+    ]
+    const skipped = filterForFocusTranscript(msgs, { transcriptV2: true })
+    expect(skipped).toBe(msgs)
+    const collapsed = filterForFocusTranscript(msgs)
+    expect(collapsed).not.toBe(msgs)
+  })
+
   test('re-collapse folds Edit into editFileCount', () => {
     const msgs: Msg[] = [
       {

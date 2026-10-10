@@ -261,3 +261,17 @@ describe('densable Zmu visible stats + empty copy', () => {
     expect(panel).toContain('replDiffEmptyCopy')
   })
 })
+
+describe('densable 2.1.289 ReplDiffPanel todos Object.is', () => {
+  test('SSo indexes todos[sessionId]; EMPTY_SESSION_TODOS outside useAppState', () => {
+    const panel = readFileSync(
+      join(import.meta.dir, '../../components/diff/ReplDiffPanel.tsx'),
+      'utf8',
+    )
+    expect(panel).toContain('const EMPTY_SESSION_TODOS')
+    expect(panel).toContain(
+      'useAppState(s => s.todos[sessionId]) ?? EMPTY_SESSION_TODOS',
+    )
+    expect(panel).not.toContain('s.todos[sessionId] ?? []')
+  })
+})
