@@ -22,6 +22,7 @@ import {
   Box,
   Text,
   useInput,
+  useKeybindings,
   useSelection,
   AlternateScreen,
   ThemeProvider,
@@ -113,6 +114,8 @@ import {
   shouldFleetViewRightOpenFocusedRow,
   shouldFleetViewSimpleViewSkipLeftover,
   shouldFleetViewCycleGroupMode,
+  fleetAgentsFindQuery,
+  jumpFleetViewGroupHeader,
   shouldFleetViewEnterBashFromBang,
   shouldFleetViewToggleHelp,
   isFleetComposerActive,
@@ -2677,6 +2680,87 @@ function AgentViewApp({
     setSelectedIndex(idx);
   }, []);
 
+  const clearPending = useCallback(() => {
+    // densable Esc on armed: bte.add(id) then cO(null)
+    if (deleteConfirmSessionId) {
+      escCancelledDeleteIdsRef.current.add(deleteConfirmSessionId);
+    }
+    if (ungroupConfirmSessionId) {
+      escCancelledDeleteIdsRef.current.add(ungroupConfirmSessionId);
+    }
+    clearDeleteArm();
+  }, [clearDeleteArm, deleteConfirmSessionId, ungroupConfirmSessionId]);
+
+  // densable 2.1.289 CUt Agents (gold eb=["Agents"] @197646250)
+  useKeybindings(
+    {
+      'agents:switchView': () => {
+        if (!shouldFleetViewCycleGroupMode(simpleView)) return;
+        clearPending();
+        cycleGroupMode();
+      },
+      'agents:togglePin': () => {
+        clearPending();
+        void handlePin();
+      },
+      'agents:rename': () => {
+        if (focusArea !== 'list') return;
+        clearPending();
+        handleRenameStart();
+      },
+      'agents:setGroup': () => {
+        if (focusArea !== 'list') return;
+        clearPending();
+        handleGroupStart();
+      },
+      'agents:find': () => {
+        if (dispatchMode !== 'prompt') return;
+        const next = fleetAgentsFindQuery(dispatchInput, false);
+        if (next === null) return;
+        const trimmed = dispatchInput.trimStart();
+        const trimmedOff = Math.max(0, cursorOffset - (dispatchInput.length - trimmed.length));
+        setDispatchInput(next);
+        setCursorOffset(Math.max(0, trimmedOff + next.length - trimmed.length));
+        clearPending();
+      },
+      'agents:previousGroup': () => {
+        const idx = jumpFleetViewGroupHeader(flatRows, 'agents:previousGroup', selectedIndex, {
+          suggestionCount: suggestions.length,
+          previewOpen,
+          hasComposedDispatch: hasComposedDispatch(
+            parseDispatch(
+              dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput,
+              fleetTemplates.map(t => ({ name: t.name })),
+              buildCwdBasenameMap(sessions),
+              fleetRoutines.map(r => ({ name: r.name })),
+            ),
+          ),
+        });
+        if (idx === null) return;
+        clearPending();
+        if (idx !== selectedIndex) selectRowByKeyboard(idx);
+      },
+      'agents:nextGroup': () => {
+        const idx = jumpFleetViewGroupHeader(flatRows, 'agents:nextGroup', selectedIndex, {
+          suggestionCount: suggestions.length,
+          previewOpen,
+          hasComposedDispatch: hasComposedDispatch(
+            parseDispatch(
+              dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput,
+              fleetTemplates.map(t => ({ name: t.name })),
+              buildCwdBasenameMap(sessions),
+              fleetRoutines.map(r => ({ name: r.name })),
+            ),
+          ),
+        });
+        if (idx === null) return;
+        clearPending();
+        if (idx !== selectedIndex) selectRowByKeyboard(idx);
+      },
+    },
+    { context: 'Agents' },
+  );
+
   // densable JIy leftover `u(t)` → GP({honorEditorMode:!0}).
   const dispatchVim = useVimInput({
     value: dispatchInput,
@@ -2698,17 +2782,6 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   useInput((input, key) => {
-    const clearPending = () => {
-      // densable Esc on armed: bte.add(id) then cO(null)
-      if (deleteConfirmSessionId) {
-        escCancelledDeleteIdsRef.current.add(deleteConfirmSessionId);
-      }
-      if (ungroupConfirmSessionId) {
-        escCancelledDeleteIdsRef.current.add(ungroupConfirmSessionId);
-      }
-      clearDeleteArm();
-    };
-
     // densable /resume past-session overlay key handling
     if (resumePicker) {
       if (key.escape) {
@@ -2914,26 +2987,12 @@ function AgentViewApp({
       return;
     }
 
-    // Global chords available from list or dispatch
+    // Global chords available from list or dispatch.
+    // densable CUt Agents (ctrl+s/t/f/r/↑↓) go through useKeybindings.
+    // ctrl+e group is fork (gold dF has no agents:setGroup default).
     if (input === 'e' && key.ctrl && focusArea === 'list') {
       clearPending();
       handleGroupStart();
-      return;
-    }
-    if (input === 's' && key.ctrl) {
-      if (!shouldFleetViewCycleGroupMode(simpleView)) return;
-      clearPending();
-      cycleGroupMode();
-      return;
-    }
-    if (input === 't' && key.ctrl) {
-      clearPending();
-      void handlePin();
-      return;
-    }
-    if (input === 'r' && key.ctrl && focusArea === 'list') {
-      clearPending();
-      handleRenameStart();
       return;
     }
     // Official alt/meta+1..9 open slot
@@ -3868,11 +3927,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   // densable vZn @188812447: zot (ENOENT/ECONNREFUSED/ECONNRESET/control socket
   // closed) → F2({forceTransient:true}) then re-attach. Do not invent a new
   // compositor — reuse ensureDaemonRunning next to this attach host.
-  if (
-    result.outcome === 'error' &&
-    result.msg &&
-    ATTACH_SOCKET_UNREACHABLE_RE.test(result.msg)
-  ) {
+  if (result.outcome === 'error' && result.msg && ATTACH_SOCKET_UNREACHABLE_RE.test(result.msg)) {
     const started = await ensureDaemonRunning({ forceTransient: true });
     if (started.ok) {
       result = await attachToSession(short, {
@@ -3882,11 +3937,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     }
   }
   // gold vZn: after zot retry, wait while Got (ERESPAWNING|ESTARTING), 20 * 500ms
-  for (
-    let w = 0;
-    result.msg && ATTACH_STILL_STARTING_RE.test(result.msg) && w < 20;
-    w++
-  ) {
+  for (let w = 0; result.msg && ATTACH_STILL_STARTING_RE.test(result.msg) && w < 20; w++) {
     await new Promise(r => setTimeout(r, 500));
     result = await attachToSession(short, {
       alreadyInAlt: true,

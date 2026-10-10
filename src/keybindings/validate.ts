@@ -4,7 +4,11 @@ import {
   getReservedShortcuts,
   normalizeKeyForComparison,
 } from './reservedShortcuts.js'
-import { isKnownKeybindingAction, KEYBINDING_ACTIONS } from './schema.js'
+import {
+  isKnownKeybindingAction,
+  KEYBINDING_ACTIONS,
+  KEYBINDING_CONTEXTS,
+} from './schema.js'
 import type {
   KeybindingBlock,
   KeybindingContextName,
@@ -56,31 +60,9 @@ function isKeybindingBlockArray(arr: unknown): arr is KeybindingBlock[] {
 
 /**
  * Valid context names for keybindings.
- * Must match KeybindingContextName in types.ts
+ * densable CUt + fork FormField/MessageActions/EffortPanel — from schema.
  */
-const VALID_CONTEXTS: KeybindingContextName[] = [
-  'Global',
-  'Chat',
-  'Autocomplete',
-  'Confirmation',
-  'Help',
-  'Transcript',
-  'HistorySearch',
-  'Task',
-  'ThemePicker',
-  'Settings',
-  'Tabs',
-  'Attachments',
-  'Footer',
-  'FormField',
-  'MessageActions',
-  'MessageSelector',
-  'DiffDialog',
-  'ModelPicker',
-  'Scroll',
-  'Select',
-  'Plugin',
-]
+const VALID_CONTEXTS: KeybindingContextName[] = [...KEYBINDING_CONTEXTS]
 
 /**
  * Type guard to check if a string is a valid context name.

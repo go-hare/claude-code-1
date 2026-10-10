@@ -432,7 +432,17 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       space: 'modelPicker:toggle1M',
     },
   },
-  // Effort panel (slash /effort without args)
+  // densable 2.1.289 CUt EffortSlider (gold Go left/right/tab/s)
+  {
+    context: 'EffortSlider',
+    bindings: {
+      left: 'effortSlider:decreaseEffort',
+      right: 'effortSlider:increaseEffort',
+      tab: 'effortSlider:toggleUltracode',
+      s: 'effortSlider:thisSessionOnly',
+    },
+  },
+  // fork EffortPanel — slash /effort without args (not gold CUt)
   {
     context: 'EffortPanel',
     bindings: {
@@ -444,11 +454,24 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       end: 'effortPanel:end',
       enter: 'effortPanel:confirm',
       s: 'effortPanel:thisSessionOnly',
-      // densable 2.1.289 EffortSlider names (alias to panel handlers)
       tab: 'effortSlider:toggleUltracode',
       escape: 'effortPanel:cancel',
       q: 'effortPanel:cancel',
       'ctrl+c': 'effortPanel:cancel',
+    },
+  },
+  // densable 2.1.289 CUt Agents (gold Go)
+  {
+    context: 'Agents',
+    bindings: {
+      'ctrl+s': 'agents:switchView',
+      'ctrl+t': 'agents:togglePin',
+      'ctrl+f': 'agents:find',
+      'ctrl+r': 'agents:rename',
+      'ctrl+up': 'agents:previousGroup',
+      'meta+up': 'agents:previousGroup',
+      'ctrl+down': 'agents:nextGroup',
+      'meta+down': 'agents:nextGroup',
     },
   },
   // Select component navigation (used by /model, /resume, permission prompts, etc.)

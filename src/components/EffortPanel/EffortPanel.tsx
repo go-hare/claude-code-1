@@ -182,6 +182,14 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
     onDone(CANCEL_MESSAGE);
   }, [done, onDone]);
 
+  const effortSliderHandlers = {
+    'effortSlider:decreaseEffort': () => setCursor(c => moveLeft(c, positions)),
+    'effortSlider:increaseEffort': () => setCursor(c => moveRight(c, positions)),
+    'effortSlider:thisSessionOnly': () => handleConfirm(false),
+    'effortSlider:toggleUltracode': () => {
+      if (positions.includes('ultracode')) setCursor('ultracode');
+    },
+  };
   useKeybindings(
     {
       'effortPanel:decrease': () => setCursor(c => moveLeft(c, positions)),
@@ -191,16 +199,12 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
       'effortPanel:confirm': () => handleConfirm(true),
       'effortPanel:thisSessionOnly': () => handleConfirm(false),
       'effortPanel:cancel': handleCancel,
-      // densable 2.1.289 EffortSlider aliases
-      'effortSlider:decreaseEffort': () => setCursor(c => moveLeft(c, positions)),
-      'effortSlider:increaseEffort': () => setCursor(c => moveRight(c, positions)),
-      'effortSlider:thisSessionOnly': () => handleConfirm(false),
-      'effortSlider:toggleUltracode': () => {
-        if (positions.includes('ultracode')) setCursor('ultracode');
-      },
+      ...effortSliderHandlers,
     },
     { context: 'EffortPanel' },
   );
+  // densable 2.1.289 CUt EffortSlider (gold Go left/right/tab/s)
+  useKeybindings(effortSliderHandlers, { context: 'EffortSlider' });
 
   const envActive = envOverride !== null && envOverride !== undefined;
   const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;

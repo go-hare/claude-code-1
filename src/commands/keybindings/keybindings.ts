@@ -5,15 +5,15 @@ import {
   isKeybindingCustomizationEnabled,
 } from '../../keybindings/loadUserBindings.js'
 import { generateKeybindingsTemplate } from '../../keybindings/template.js'
-import { getErrnoCode } from '../../utils/errors.js'
+import { errorMessage, getErrnoCode } from '../../utils/errors.js'
 import { editFileInEditor } from '../../utils/promptEditor.js'
+import { isSafeModeEnabled, safeModeDisableHint } from '../../utils/safeMode.js'
 
 export async function call(): Promise<{ type: 'text'; value: string }> {
   if (!isKeybindingCustomizationEnabled()) {
     return {
       type: 'text',
-      value:
-        'Keybinding customization is not enabled. This feature is currently in preview.',
+      value: 'Keybinding customization is disabled in this environment.',
     }
   }
 
@@ -32,7 +32,7 @@ export async function call(): Promise<{ type: 'text'; value: string }> {
     if (getErrnoCode(e) === 'EEXIST') {
       fileExists = true
     } else {
-      throw e
+      throw new Error(`keybindings template write failed: ${errorMessage(e)}`)
     }
   }
 
@@ -44,10 +44,13 @@ export async function call(): Promise<{ type: 'text'; value: string }> {
       value: `${fileExists ? 'Opened' : 'Created'} ${keybindingsPath}. Could not open in editor: ${result.error}`,
     }
   }
+  const safeSuffix = isSafeModeEnabled()
+    ? ` (Safe mode: custom keybindings are disabled this session — changes take effect after you ${safeModeDisableHint()}.)`
+    : ''
   return {
     type: 'text',
     value: fileExists
-      ? `Opened ${keybindingsPath} in your editor.`
-      : `Created ${keybindingsPath} with template. Opened in your editor.`,
+      ? `Opened ${keybindingsPath} in your editor.${safeSuffix}`
+      : `Created ${keybindingsPath} with template. Opened in your editor.${safeSuffix}`,
   }
 }

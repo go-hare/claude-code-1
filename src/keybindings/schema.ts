@@ -10,31 +10,39 @@ import { lazySchema } from '../utils/lazySchema.js'
  * Valid context names where keybindings can be applied.
  */
 export const KEYBINDING_CONTEXTS = [
+  // densable 2.1.289 CUt (gold SEA ~185090465) — order matches e2o
   'Global',
   'Chat',
   'Autocomplete',
   'Confirmation',
   'Help',
+  'ProactivityMenu',
   'Transcript',
   'HistorySearch',
   'Task',
   'ThemePicker',
   'Settings',
   'Tabs',
-  // New contexts for keybindings migration
   'Attachments',
   'Footer',
-  // densable 2.1.289 Mods AbovePrompt focus-ring contexts (gold CUt)
   'AbovePrompt',
   'AbovePromptInput',
   'AbovePromptSelect',
+  'Pane',
+  'PaneField',
   'MessageSelector',
   'DiffDialog',
   'DiffPanel',
   'ModelPicker',
-  'EffortPanel',
+  'EffortSlider',
   'Select',
   'Plugin',
+  'Scroll',
+  'Agents',
+  // fork — not gold CUt. defaultBindings + ConsoleOAuthFlow / MessageActions / EffortPanel.
+  'FormField',
+  'MessageActions',
+  'EffortPanel',
 ] as const
 
 /**
@@ -49,6 +57,7 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
   Autocomplete: 'When autocomplete menu is visible',
   Confirmation: 'When a confirmation/permission dialog is shown',
   Help: 'When the help overlay is open',
+  ProactivityMenu: 'When the proactivity dialog is open',
   Transcript: 'When viewing the transcript',
   HistorySearch: 'When searching command history (ctrl+r)',
   Task: 'When a task/agent is running in the foreground',
@@ -63,13 +72,22 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
     "When a plugin's input field above the prompt has keyboard focus",
   AbovePromptSelect:
     "When a plugin's select above the prompt has keyboard focus",
+  Pane: "When a plugin's pane has keyboard focus",
+  PaneField:
+    "When an input field or select in a plugin's pane has keyboard focus",
   MessageSelector: 'When the message selector (rewind) is open',
   DiffDialog: 'When the diff dialog is open',
-  DiffPanel: 'When the fullscreen uncommitted diff panel is open',
+  DiffPanel: 'When the diff sidebar panel is open',
   ModelPicker: 'When the model picker is open',
-  EffortPanel: 'When the /effort slider is open',
+  EffortSlider: 'When the effort slider is open',
   Select: 'When a select/list component is focused',
   Plugin: 'When the plugin dialog is open',
+  Scroll: 'When a scrollable view is focused (fullscreen layout)',
+  Agents: 'When the agents view (`claude agents`) is open',
+  // fork descriptions — not gold e2o
+  FormField: 'When a form field (login/setup) is focused',
+  MessageActions: 'When the message-actions cursor is active',
+  EffortPanel: 'When the /effort slider is open',
 }
 
 /**
@@ -116,6 +134,18 @@ export const KEYBINDING_ACTIONS = [
   'chat:clearInput',
   'chat:imagePaste',
   'chat:messageActions',
+  // fork MESSAGE_ACTIONS cursor (not gold Mxe)
+  'messageActions:prev',
+  'messageActions:next',
+  'messageActions:top',
+  'messageActions:bottom',
+  'messageActions:prevUser',
+  'messageActions:nextUser',
+  'messageActions:escape',
+  'messageActions:ctrlc',
+  'messageActions:enter',
+  'messageActions:c',
+  'messageActions:p',
   // densable 2.1.289 AbovePrompt band collapse + focus ring (gold l$ / Go)
   'abovePrompt:toggle',
   'abovePrompt:focus',
@@ -169,6 +199,9 @@ export const KEYBINDING_ACTIONS = [
   'theme:toggleSyntaxHighlighting',
   // Help menu actions
   'help:dismiss',
+  // densable 2.1.289 Mxe — ProactivityMenu
+  'proactivityMenu:previousMode',
+  'proactivityMenu:nextMode',
   // Attachment navigation (select dialog image attachments)
   'attachments:next',
   'attachments:previous',
@@ -231,6 +264,15 @@ export const KEYBINDING_ACTIONS = [
   'select:nextValue',
   // Voice actions
   'voice:pushToTalk',
+  // densable ScrollBox context (defaultBindings already host these)
+  'scroll:pageUp',
+  'scroll:pageDown',
+  'scroll:lineUp',
+  'scroll:lineDown',
+  'scroll:top',
+  'scroll:bottom',
+  'selection:copy',
+  'selection:clear',
   // densable 2.1.239 #30 — Scroll selection extend (after selection:copy/clear)
   'selection:extendLeft',
   'selection:extendRight',
@@ -238,6 +280,14 @@ export const KEYBINDING_ACTIONS = [
   'selection:extendDown',
   'selection:extendLineStart',
   'selection:extendLineEnd',
+  // densable 2.1.289 Mxe — Agents CUt
+  'agents:switchView',
+  'agents:togglePin',
+  'agents:find',
+  'agents:nextGroup',
+  'agents:previousGroup',
+  'agents:rename',
+  'agents:setGroup',
 ] as const
 
 const KNOWN_KEYBINDING_ACTIONS = new Set<string>(KEYBINDING_ACTIONS)
