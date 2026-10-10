@@ -182,5 +182,20 @@ describe('artifactGates', () => {
         CLAUDE_CODE_ARTIFACT: 'false',
       }),
     ).toBe('artifact_env_off')
+
+    // densable He/Tt before CHILD — see artifactGates.289.test.ts
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+        CLAUDE_CODE_ARTIFACT: '1',
+      }),
+    ).toBe('third_party_provider')
+    expect(
+      getArtifactSdkDefaultOffReason({
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT: '1',
+      }),
+    ).toBe('essential_traffic_only')
   })
 })

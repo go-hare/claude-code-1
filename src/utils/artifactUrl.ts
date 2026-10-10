@@ -128,9 +128,9 @@ function resolveEnableArtifactSetting(): boolean | undefined {
  * densable: X4n → S$ stub → opi → eEp(tengu_cobalt_plinth) → zNt??true.
  * Without cobalt plinth this stays false — do not invent cobalt ON.
  *
- * densable `D()` sdk_default_off arm (SEA 2.1.289): under I7n, require
- * CLAUDE_CODE_ARTIFACT or CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT. Outside I7n this
- * is a no-op; CHILD_ARTIFACT is not a general cobalt enable.
+ * densable `D()` (SEA 2.1.289) is the first ASe withhold: He/Tt/Ss then I7n
+ * sdk_default_off. CHILD_ARTIFACT bypasses only sdk_default_off — not He/Tt/Ss
+ * and not a general cobalt enable.
  */
 export function isArtifactToolRegistered(): boolean {
   if (isArtifactHardDisabled()) return false

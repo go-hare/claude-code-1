@@ -2,14 +2,21 @@
  * Official Artifact tool env gates (portable).
  * Consumers: ArtifactTool isEnabled (force-on) + call (auto-open browser).
  *
- * densable SEA 2.1.289 `D()` / `I7n()` / `j$()` — SDK default-off withhold
- * with `CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT` bypass.
+ * densable SEA 2.1.289 `D()` / `I7n()` / `j$()` — withhold chain plus
+ * `CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT` bypass of the sdk_default_off arm only.
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 /** densable `j$` — SDK host entrypoints. */
 const SDK_ARTIFACT_ENTRYPOINTS = new Set(['sdk-ts', 'sdk-py', 'sdk-cli'])
+
+/** densable `D()` withhold strings (SEA 2.1.289). */
+export type ArtifactDWithholdReason =
+  | 'third_party_provider'
+  | 'essential_traffic_only'
+  | 'artifact_env_off'
+  | 'sdk_default_off'
 
 /**
  * densable `I7n()` — SDK default-off surface:
@@ -28,17 +35,59 @@ export function isSdkArtifactDefaultOffEntrypoint(
 }
 
 /**
- * densable `D()` withhold arms that tip/ASe consumers share:
- * 1. `Ss(CLAUDE_CODE_ARTIFACT)` → `artifact_env_off` (defined-falsy 0/false/no/off)
- * 2. I7n && !Le(ARTIFACT) && !Le(BRIDGE_CHILD_ARTIFACT) → `sdk_default_off`
+ * densable `He()!=="firstParty"` for `D()`. Gold `He` is the USE_* cloud-vendor
+ * ladder (plus gateway pin) — JS-truthy env, not isEnvTruthy. OpenAI/Gemini/Grok
+ * are not on this gold `He` — do not invent them here.
+ */
+function isArtifactDThirdPartyProvider(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (
+    env.CLAUDE_CODE_USE_BEDROCK ||
+    env.CLAUDE_CODE_USE_FOUNDRY ||
+    env.CLAUDE_CODE_USE_ANTHROPIC_AWS ||
+    env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD ||
+    env.CLAUDE_CODE_USE_MANTLE ||
+    env.CLAUDE_CODE_USE_VERTEX
+  ) {
+    return true
+  }
+  if (env !== process.env) return false
+  try {
+    const { getGatewayAuth } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./gatewayEnv.js') as typeof import('./gatewayEnv.js')
+    return Boolean(getGatewayAuth())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable `Tt()` / `Ivt()==="essential-traffic"` for `D()`.
+ * JS-truthy `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` only.
+ */
+function isArtifactDEssentialTrafficOnly(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+}
+
+/**
+ * densable `D()`:
+ * 1. He()!=="firstParty" → `third_party_provider`
+ * 2. Tt() → `essential_traffic_only`
+ * 3. Ss(CLAUDE_CODE_ARTIFACT) → `artifact_env_off`
+ * 4. I7n && !Le(ARTIFACT) && !Le(BRIDGE_CHILD_ARTIFACT) → `sdk_default_off`
  *
- * CHILD_ARTIFACT bypasses only the sdk_default_off arm — never artifact_env_off,
- * and never a general ASe/cobalt ON.
+ * CHILD_ARTIFACT bypasses only the sdk_default_off arm — never He/Tt/Ss, and
+ * never a general ASe/cobalt ON.
  */
 export function getArtifactSdkDefaultOffReason(
   env: NodeJS.ProcessEnv = process.env,
-): 'artifact_env_off' | 'sdk_default_off' | null {
-  // densable Ss(CLAUDE_CODE_ARTIFACT) — checked before CHILD / I7n.
+): ArtifactDWithholdReason | null {
+  if (isArtifactDThirdPartyProvider(env)) return 'third_party_provider'
+  if (isArtifactDEssentialTrafficOnly(env)) return 'essential_traffic_only'
   if (isEnvDefinedFalsy(env.CLAUDE_CODE_ARTIFACT)) return 'artifact_env_off'
   if (!isSdkArtifactDefaultOffEntrypoint(env)) return null
   if (isEnvTruthy(env.CLAUDE_CODE_ARTIFACT)) return null
@@ -46,7 +95,7 @@ export function getArtifactSdkDefaultOffReason(
   return 'sdk_default_off'
 }
 
-/** densable `ne()` for D withhold arms — true when D() === null. */
+/** densable `ne()` — true when D() === null. */
 export function isArtifactSdkDefaultAllowed(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
