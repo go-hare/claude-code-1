@@ -1,4 +1,4 @@
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 /**
  * Privacy level controls how much nonessential network traffic and telemetry
@@ -12,10 +12,15 @@ import { isEnvTruthy } from './envUtils.js'
  * - essential-traffic:  ALL nonessential network traffic disabled
  *                       (telemetry + auto-updates, grove, release notes, model capabilities, etc.).
  *
- * The resolved level is the most restrictive signal from (densable Gdu order):
+ * The resolved level is the most restrictive signal from (densable Gdu order,
+ * then fork default-off):
  *   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC  →  essential-traffic
- *   DISABLE_TELEMETRY                         →  no-telemetry
+ *   DISABLE_TELEMETRY unset/truthy            →  no-telemetry  (fork: off by default)
+ *   DISABLE_TELEMETRY=0/false/no/off          →  allow (unless DO_NOT_TRACK)
  *   DO_NOT_TRACK (truthy)                     →  no-telemetry
+ *
+ * Pipeline bodies stay. Opt in with DISABLE_TELEMETRY=0. Never invent
+ * isAnthropicTelemetrySendEnabled.
  */
 
 type PrivacyLevel = 'default' | 'no-telemetry' | 'essential-traffic'
@@ -24,7 +29,9 @@ export function getPrivacyLevel(): PrivacyLevel {
   if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
     return 'essential-traffic'
   }
-  if (process.env.DISABLE_TELEMETRY) {
+  // Fork: telemetry off unless DISABLE_TELEMETRY is defined-falsy.
+  // Gold Gdu treats unset as default-on; this fork inverts that one arm.
+  if (!isEnvDefinedFalsy(process.env.DISABLE_TELEMETRY)) {
     return 'no-telemetry'
   }
   // densable Gdu / Hn(DO_NOT_TRACK)
@@ -69,7 +76,7 @@ export function getPrivacyDisableReason(): string | null {
   if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
     return 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
   }
-  if (process.env.DISABLE_TELEMETRY) {
+  if (!isEnvDefinedFalsy(process.env.DISABLE_TELEMETRY)) {
     return 'DISABLE_TELEMETRY'
   }
   if (isEnvTruthy(process.env.DO_NOT_TRACK)) {

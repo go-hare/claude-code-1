@@ -8,47 +8,130 @@
  * Usage: Call initializeAnalyticsSink() during app startup to attach the sink.
  */
 
+import { logForDebugging } from '../../utils/debug.js'
 import { trackDatadogEvent } from './datadog.js'
-import { logEventTo1P, shouldSampleEvent } from './firstPartyEventLogger.js'
+import {
+  logEventTo1P,
+  logEventTo1PPromise,
+  shouldSampleEvent,
+} from './firstPartyEventLogger.js'
+import {
+  checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
+  initializeGrowthBook,
+  isGrowthBookEnabled,
+} from './growthbook.js'
 import { attachAnalyticsSink, stripProtoFields } from './index.js'
+import { isSinkKilled } from './sinkKillswitch.js'
 
 // Local type matching the logEvent metadata signature
 type LogEventMetadata = { [key: string]: boolean | number | undefined }
 
-/**
- * Log an event (synchronous implementation)
- */
-function logEventImpl(eventName: string, metadata: LogEventMetadata): void {
-  // Check if this event should be sampled
-  const sampleResult = shouldSampleEvent(eventName)
+const DATADOG_GATE_NAME = 'tengu_log_datadog_events'
 
-  // If sample result is 0, the event was not selected for logging
-  if (sampleResult === 0) {
-    return
+// Module-level gate state - starts undefined, initialized during startup
+let isDatadogGateEnabled: boolean | undefined
+
+/** densable `i` — drop reentrant logEvent while collecting metadata. */
+let logEventCollectingMetadata = false
+
+/**
+ * Check if Datadog tracking is enabled.
+ * Falls back to cached value from previous session if not yet initialized.
+ */
+function shouldTrackDatadog(): boolean {
+  if (isSinkKilled('datadog')) {
+    return false
+  }
+  if (isDatadogGateEnabled !== undefined) {
+    return isDatadogGateEnabled
   }
 
-  // If sample result is a positive number, add it to metadata
+  // Fallback to cached value from previous session
+  try {
+    return checkStatsigFeatureGate_CACHED_MAY_BE_STALE(DATADOG_GATE_NAME)
+  } catch {
+    return false
+  }
+}
+
+function dispatchEvent(
+  eventName: string,
+  metadata: LogEventMetadata,
+  sampleResult: number | null,
+): void {
   const metadataWithSampleRate =
     sampleResult !== null
       ? { ...metadata, sample_rate: sampleResult }
       : metadata
 
-  void trackDatadogEvent(eventName, stripProtoFields(metadataWithSampleRate))
+  if (shouldTrackDatadog()) {
+    void trackDatadogEvent(eventName, stripProtoFields(metadataWithSampleRate))
+  }
   logEventTo1P(eventName, metadataWithSampleRate)
 }
 
 /**
- * Log an event (asynchronous implementation)
- *
- * With Segment removed the two remaining sinks are fire-and-forget, so this
- * just wraps the sync impl — kept to preserve the sink interface contract.
+ * densable `m` — sample, then wait for GrowthBook init unless GB is already off.
+ * Reentry while collecting metadata is dropped (gold unique English).
  */
-function logEventAsyncImpl(
+function logEventImpl(eventName: string, metadata: LogEventMetadata): void {
+  if (logEventCollectingMetadata) {
+    logForDebugging(
+      `logEvent reentered while collecting metadata — dropped ${eventName}. A getEventMetadata dependency (model/betas/auth) called logEvent synchronously; defer it (queueMicrotask) or move it out of the metadata path.`,
+      { level: 'error' },
+    )
+    return
+  }
+  logEventCollectingMetadata = true
+  try {
+    const sampleResult = shouldSampleEvent(eventName)
+    if (sampleResult === 0) {
+      return
+    }
+    if (!isGrowthBookEnabled()) {
+      dispatchEvent(eventName, metadata, sampleResult)
+      return
+    }
+    const run = () => {
+      logEventCollectingMetadata = true
+      try {
+        dispatchEvent(eventName, metadata, sampleResult)
+      } finally {
+        logEventCollectingMetadata = false
+      }
+    }
+    void initializeGrowthBook().then(run, run)
+  } finally {
+    logEventCollectingMetadata = false
+  }
+}
+
+/**
+ * densable `c` — await GrowthBook init, then Datadog + 1P in parallel.
+ */
+async function logEventAsyncImpl(
   eventName: string,
   metadata: LogEventMetadata,
 ): Promise<void> {
-  logEventImpl(eventName, metadata)
-  return Promise.resolve()
+  const sampleResult = shouldSampleEvent(eventName)
+  if (sampleResult === 0) {
+    return
+  }
+  if (isGrowthBookEnabled()) {
+    await initializeGrowthBook()
+  }
+  const metadataWithSampleRate =
+    sampleResult !== null
+      ? { ...metadata, sample_rate: sampleResult }
+      : metadata
+  const pending: Promise<void>[] = []
+  if (shouldTrackDatadog()) {
+    pending.push(
+      trackDatadogEvent(eventName, stripProtoFields(metadataWithSampleRate)),
+    )
+  }
+  pending.push(logEventTo1PPromise(eventName, metadataWithSampleRate))
+  await Promise.all(pending)
 }
 
 /**
@@ -59,7 +142,10 @@ function logEventAsyncImpl(
  *
  * Called from main.tsx during setupBackend().
  */
-export function initializeAnalyticsGates(): void {}
+export function initializeAnalyticsGates(): void {
+  isDatadogGateEnabled =
+    checkStatsigFeatureGate_CACHED_MAY_BE_STALE(DATADOG_GATE_NAME)
+}
 
 /**
  * Initialize the analytics sink.

@@ -29,9 +29,16 @@ describe('getPrivacyLevel', () => {
     }
   })
 
-  test("returns 'default' when no env vars set", () => {
+  test("returns 'no-telemetry' when no env vars set (fork default-off)", () => {
     delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
     delete process.env.DISABLE_TELEMETRY
+    delete process.env.DO_NOT_TRACK
+    expect(getPrivacyLevel()).toBe('no-telemetry')
+  })
+
+  test("returns 'default' when DISABLE_TELEMETRY is defined-falsy", () => {
+    delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    process.env.DISABLE_TELEMETRY = '0'
     delete process.env.DO_NOT_TRACK
     expect(getPrivacyLevel()).toBe('default')
   })
@@ -81,7 +88,7 @@ describe('isEssentialTrafficOnly', () => {
 
   test("returns false for 'default' level", () => {
     delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-    delete process.env.DISABLE_TELEMETRY
+    process.env.DISABLE_TELEMETRY = '0'
     expect(isEssentialTrafficOnly()).toBe(false)
   })
 
@@ -109,7 +116,12 @@ describe('isTelemetryDisabled', () => {
     expect(isTelemetryDisabled()).toBe(true)
   })
 
-  test("returns false for 'default' level", () => {
+  test('returns true when no env is set (fork default-off)', () => {
+    expect(isTelemetryDisabled()).toBe(true)
+  })
+
+  test('returns false when DISABLE_TELEMETRY is defined-falsy', () => {
+    process.env.DISABLE_TELEMETRY = '0'
     expect(isTelemetryDisabled()).toBe(false)
   })
 })
@@ -154,11 +166,17 @@ describe('getPrivacyDisableReason (densable IOo)', () => {
   })
 
   test('returns DO_NOT_TRACK when that is the signal', () => {
+    process.env.DISABLE_TELEMETRY = '0'
     process.env.DO_NOT_TRACK = 'yes'
     expect(getPrivacyDisableReason()).toBe('DO_NOT_TRACK')
   })
 
-  test('returns null when unrestricted', () => {
+  test('returns DISABLE_TELEMETRY when unset (fork default-off)', () => {
+    expect(getPrivacyDisableReason()).toBe('DISABLE_TELEMETRY')
+  })
+
+  test('returns null when DISABLE_TELEMETRY is defined-falsy', () => {
+    process.env.DISABLE_TELEMETRY = '0'
     expect(getPrivacyDisableReason()).toBeNull()
   })
 })
@@ -176,6 +194,7 @@ describe('isTelemetryDisabled DO_NOT_TRACK', () => {
   })
 
   test('falsy DO_NOT_TRACK does not disable telemetry alone', () => {
+    process.env.DISABLE_TELEMETRY = '0'
     process.env.DO_NOT_TRACK = '0'
     expect(isTelemetryDisabled()).toBe(false)
   })

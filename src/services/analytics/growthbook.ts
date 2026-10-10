@@ -26,6 +26,7 @@ import {
   processRemoteEvalFeatures,
 } from '../../utils/growthbookRemoteEvalPayload.js'
 import { getAuthHeaders } from '../../utils/http.js'
+import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import { logError } from '../../utils/log.js'
 import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
 import { createSignal } from '../../utils/signal.js'
@@ -42,7 +43,10 @@ import { registerFileGateReader } from '../../utils/file.js'
 import { i_ } from '../../utils/toolSchemaCache.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
-import { logGrowthBookExperimentTo1P } from './firstPartyEventLogger.js'
+import {
+  is1PEventLoggingEnabled,
+  logGrowthBookExperimentTo1P,
+} from './firstPartyEventLogger.js'
 
 /**
  * User attributes sent to GrowthBook for targeting.
@@ -63,6 +67,10 @@ export type GrowthBookUserAttributes = {
   email?: string
   appVersion?: string
   github?: GitHubActionsMetadata
+  /** densable GB cacheKeyAttributes / targeting. */
+  slackTagConnected?: boolean
+  atisPin?: boolean
+  ccrDerivedSurface?: string
 }
 
 let client: GrowthBook | null = null
@@ -498,6 +506,9 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   // sessions on `default` instead of auto (fork / 3P / telemetry-off parity).
   tengu_harbor_willow: true,
   tengu_moss_anchor: true,
+  // densable 2.1.289 k("tengu_gentle_hummingbird", !0) — linux remote
+  // list_directory /proc/self/fd host. Default true matches gold.
+  tengu_gentle_hummingbird: true,
 
   // densable 2.1.289 kBe / TQt / RQt child grant gates (SXn/$6r/bXn/wXn/EXn).
   // Hollow GB must not disable sdk-host lane apply or RC-child grants.
@@ -593,9 +604,9 @@ export function isGrowthBookEnabled(): boolean {
   if (isGrowthBookBlockedByProviderOrPrivacy()) {
     return false
   }
-  // Product-cut: never phone home to Anthropic GrowthBook. A self-hosted
-  // adapter (CLAUDE_GB_ADAPTER_URL) is the only remaining remote path.
-  return Boolean(process.env.CLAUDE_GB_ADAPTER_URL)
+  // Tip: NODE_ENV=test and remaining analytics opt-outs (1P logger).
+  // 3P/telemetry already covered above; this keeps test isolation.
+  return is1PEventLoggingEnabled()
 }
 
 /**
@@ -678,6 +689,8 @@ function getUserAttributes(): GrowthBookUserAttributes {
     ...(user.githubActionsMetadata && {
       githubActionsMetadata: user.githubActionsMetadata,
     }),
+    slackTagConnected: false,
+    atisPin: false,
   }
   return attributes
 }
@@ -693,10 +706,11 @@ const getGrowthBookClient = memoize(
 
     const attributes = getUserAttributes()
     const clientKey = getGrowthBookClientKey()
-    // Do not phone home to api.anthropic.com for GrowthBook. Only hit a host
-    // when CLAUDE_GB_ADAPTER_URL is set (self-hosted adapter). Empty apiHost
-    // prevents remoteEval against official Anthropic.
-    const baseUrl = process.env.CLAUDE_GB_ADAPTER_URL || ''
+    const baseUrl =
+      process.env.CLAUDE_GB_ADAPTER_URL ||
+      (false
+        ? process.env.CLAUDE_CODE_GB_BASE_URL || 'https://api.anthropic.com/'
+        : 'https://api.anthropic.com/')
     const isAdapterMode = !!(
       process.env.CLAUDE_GB_ADAPTER_URL && process.env.CLAUDE_GB_ADAPTER_KEY
     )
@@ -752,12 +766,20 @@ const getGrowthBookClient = memoize(
       remoteEval: !isAdapterMode,
       // cacheKeyAttributes only valid with remoteEval
       ...(!isAdapterMode
-        ? { cacheKeyAttributes: ['id', 'organizationUUID'] }
+        ? {
+            cacheKeyAttributes: [
+              'id',
+              'organizationUUID',
+              'slackTagConnected',
+              'atisPin',
+              'ccrDerivedSurface',
+            ],
+          }
         : {}),
-      // Add auth headers if available
-      ...(authHeaders.error
-        ? {}
-        : { apiHostRequestHeaders: authHeaders.headers }),
+      apiHostRequestHeaders: {
+        'User-Agent': getClaudeCodeUserAgent(),
+        ...(!authHeaders.error ? authHeaders.headers : {}),
+      },
       // Debug logging for Ants
       ...(false
         ? {
@@ -769,10 +791,9 @@ const getGrowthBookClient = memoize(
     })
     client = thisClient
 
-    if (!hasAuth || !baseUrl) {
-      // No auth, or apiHost deliberately empty (no official GB phone-home) —
-      // skip HTTP init; rely on LOCAL_GATE_DEFAULTS + disk-cached values.
-      // initializeGrowthBook() will reset and re-create when auth/adapter is available.
+    if (!hasAuth) {
+      // No auth available yet — skip HTTP init, rely on disk-cached values.
+      // initializeGrowthBook() will reset and re-create with auth when available.
       return { client: thisClient, initialized: Promise.resolve() }
     }
 
@@ -1485,10 +1506,6 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
   if (!isGrowthBookEnabled()) {
     return
   }
-  // No remote host (official apiHost emptied) — nothing to refresh over the wire.
-  if (!process.env.CLAUDE_GB_ADAPTER_URL) {
-    return
-  }
 
   try {
     // densable X8n: if (q8n) { checkAndRefreshOAuth…; if Authorization rotated → Iwe }
@@ -1585,10 +1602,6 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
  */
 export function setupPeriodicGrowthBookRefresh(): void {
   if (!isGrowthBookEnabled()) {
-    return
-  }
-  // Skip timer when there is no remote GrowthBook host to poll.
-  if (!process.env.CLAUDE_GB_ADAPTER_URL) {
     return
   }
 

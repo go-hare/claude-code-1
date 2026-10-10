@@ -11,12 +11,12 @@
 | 3 | Google Vertex AI | `{region}-aiplatform.googleapis.com` | HTTPS | 需 `CLAUDE_CODE_USE_VERTEX=1` |
 | 4 | Azure Foundry | `{resource}.services.ai.azure.com` | HTTPS | 需 `CLAUDE_CODE_USE_FOUNDRY=1` |
 | 5 | OAuth (Anthropic) | `platform.claude.com`, `claude.com`, `claude.ai` | HTTPS | 用户登录时 |
-| 6 | GrowthBook | `CLAUDE_GB_ADAPTER_URL` only | HTTPS | 产品拆除官方 remoteEval；无 adapter 不联网 |
-| 7 | Sentry | — | — | 产品拆除，`initSentry` 空实现 |
-| 8 | Datadog | — | — | 产品拆除，`trackDatadogEvent` 空实现 |
+| 6 | GrowthBook | `api.anthropic.com` (remoteEval) | HTTPS | fork 默认关；`DISABLE_TELEMETRY=0` 才开；`DISABLE_GROWTHBOOK` 可关 |
+| 7 | Sentry | 可配置 (`SENTRY_DSN`) | HTTPS | 需设环境变量 |
+| 8 | Datadog | `http-intake.logs.us5.datadoghq.com` | HTTPS | fork 默认关（1P 管线保留）；`DISABLE_TELEMETRY=0` 才开 |
 | 9 | OpenTelemetry Collector | 可配置 (`OTEL_EXPORTER_OTLP_ENDPOINT`) | gRPC/HTTP | 需设环境变量（用户自己的 collector） |
-| 10 | 1P Event Logging | — | — | 产品拆除，`is1PEventLoggingEnabled()` 恒 false |
-| 11 | BigQuery Metrics | — | — | 产品拆除，不再 attach exporter |
+| 10 | 1P Event Logging | `api.anthropic.com/api/event_logging/batch` | HTTPS | fork 默认关；`DISABLE_TELEMETRY=0` 才开 |
+| 11 | BigQuery Metrics | `api.anthropic.com/api/claude_code/metrics` | HTTPS | 默认启用（1P/C4E/Team）；`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 可关 |
 | 12 | MCP Proxy | `mcp-proxy.anthropic.com` | HTTPS+WS | 使用 MCP 工具时 |
 | 13 | MCP Registry | `api.anthropic.com/mcp-registry` | HTTPS | 查询 MCP 服务器时 |
 | 14 | Web Search Pages | `www.bing.com`, `search.brave.com` | HTTPS | WebSearch 工具，可通过 `WEB_SEARCH_ADAPTER=bing|brave` 切换 |
@@ -74,18 +74,22 @@ OAuth 2.0 + PKCE 授权码流程。
 
 ### 6. GrowthBook (功能开关)
 
-- **端点**: 仅 `CLAUDE_GB_ADAPTER_URL`（自建 adapter）。官方 `api.anthropic.com` remoteEval 已产品拆除。
-- **无 adapter**: `LOCAL_GATE_DEFAULTS` + env/config override，不联网。
+- **端点**: `https://api.anthropic.com/` (remoteEval 模式) 或 `CLAUDE_GB_ADAPTER_URL`
+- **SDK Keys**: `sdk-zAZezfDKGoZuXXKe` (外部), `sdk-xRVcrliHIlrg4og4` (ant prod), `sdk-yZQvlplybuXjYh6L` (ant dev)
+- **关闭**: fork 默认关（`DISABLE_TELEMETRY` unset）。`DISABLE_TELEMETRY=0` 才开。`DISABLE_GROWTHBOOK` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 仍关
 - **文件**: `src/services/analytics/growthbook.ts`, `src/constants/keys.ts`
 
 ### 7. Sentry (错误追踪)
 
-- **产品拆除**: `initSentry()` 空实现，即使设置 `SENTRY_DSN` 也不初始化。
+- **激活**: 设置 `SENTRY_DSN` (默认未配置)
+- **行为**: 仅错误上报，自动过滤敏感 header
 - **文件**: `src/utils/sentry.ts`
 
 ### 8. Datadog (日志)
 
-- **产品拆除**: `trackDatadogEvent` / `initializeDatadog` 空实现。
+- **入口**: densable 2.1.289 硬编码 US5 `https://http-intake.logs.us5.datadoghq.com/api/v2/logs` + pub token（无 `DATADOG_*` 覆盖）
+- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`isAnalyticsDisabled()` / 3P provider（`He()!=="firstParty"`）仍关
+- **gzip**: 默认 gzip；拒绝后本进程改 uncompressed（`CLAUDE_CODE_GZIP_DATADOG_LOGS=0` 可关）
 - **文件**: `src/services/analytics/datadog.ts`
 
 ### 9. OpenTelemetry Collector
@@ -96,12 +100,15 @@ OAuth 2.0 + PKCE 授权码流程。
 
 ### 10. 1P Event Logging (内部事件)
 
-- **产品拆除**: `is1PEventLoggingEnabled()` 恒 false，exporter `export()` 立刻 SUCCESS。
+- **端点**: `https://api.anthropic.com/api/event_logging/batch`
+- **协议**: 批量导出 (10s 间隔, 每批 200 事件)
+- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`DO_NOT_TRACK` → `isAnalyticsDisabled()`
 - **文件**: `src/services/analytics/firstPartyEventLoggingExporter.ts`
 
 ### 11. BigQuery Metrics
 
-- **产品拆除**: 不再 attach Anthropic BQ exporter。
+- **端点**: `https://api.anthropic.com/api/claude_code/metrics`
+- **关闭**: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`（组织 opt-out 查询同样走这条）
 - **文件**: `src/utils/telemetry/bigqueryExporter.ts`
 
 ### 12. MCP Proxy
@@ -175,8 +182,8 @@ WebSearch 工具支持直接抓取 Bing 搜索结果页面，也支持通过 Bra
 
 | 端点路径 | 用途 | 文件 |
 |---|---|---|
-| `/api/event_logging/batch` | 事件批量上报（产品拆除，不再发送） | `src/services/analytics/firstPartyEventLoggingExporter.ts` |
-| `/api/claude_code/metrics` | BigQuery 指标导出（产品拆除，不再发送） | `src/utils/telemetry/bigqueryExporter.ts` |
+| `/api/event_logging/batch` | 事件批量上报 | `src/services/analytics/firstPartyEventLoggingExporter.ts` |
+| `/api/claude_code/metrics` | BigQuery 指标导出 | `src/utils/telemetry/bigqueryExporter.ts` |
 | `/api/oauth/claude_cli/create_api_key` | 创建 API Key | `src/constants/oauth.ts` |
 | `/api/oauth/claude_cli/roles` | 获取用户角色 | `src/constants/oauth.ts` |
 | `/api/oauth/accounts/grove` | 通知设置 | `src/services/api/grove.ts` |

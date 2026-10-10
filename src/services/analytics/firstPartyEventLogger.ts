@@ -21,6 +21,7 @@ import {
   AnthropicTelemetryExportCounter,
   wrapAnthropicTelemetryExporter,
 } from './anthropicTelemetryExport.js'
+import { isAnalyticsDisabled } from './config.js'
 import { FirstPartyEventLoggingExporter } from './firstPartyEventLoggingExporter.js'
 import type { GrowthBookUserAttributes } from './growthbook.js'
 import { getDynamicConfig_CACHED_MAY_BE_STALE } from './growthbook.js'
@@ -139,8 +140,8 @@ export async function shutdown1PEventLogging(): Promise<void> {
  * metrics opt-out via API. It follows the same pattern as Statsig event logging.
  */
 export function is1PEventLoggingEnabled(): boolean {
-  // Product-cut: never send Anthropic 1P event_logging batches.
-  return false
+  // Respect standard analytics opt-outs
+  return !isAnalyticsDisabled()
 }
 
 /**
@@ -221,6 +222,20 @@ export function logEventTo1P(
   void logEventTo1PAsync(firstPartyEventLogger, eventName, metadata)
 }
 
+/** densable oC — same emit as logEventTo1P, awaited by gold logEventAsync. */
+export function logEventTo1PPromise(
+  eventName: string,
+  metadata: Record<string, number | boolean | undefined> = {},
+): Promise<void> {
+  if (!is1PEventLoggingEnabled()) {
+    return Promise.resolve()
+  }
+  if (!firstPartyEventLogger || isSinkKilled('firstParty')) {
+    return Promise.resolve()
+  }
+  return logEventTo1PAsync(firstPartyEventLogger, eventName, metadata)
+}
+
 /**
  * GrowthBook experiment event data for logging
  */
@@ -297,8 +312,101 @@ const DEFAULT_MAX_QUEUE_SIZE = 8192
  */
 export function initialize1PEventLogging(): void {
   profileCheckpoint('1p_event_logging_start')
+  const enabled = is1PEventLoggingEnabled()
+
+  if (!enabled) {
+    return
+  }
+
+  // Fetch batch processor configuration from GrowthBook dynamic config
+  // Uses cached value if available, refreshes in background
+  const batchConfig = getBatchConfig()
+  lastBatchConfig = batchConfig
+  profileCheckpoint('1p_event_after_growthbook_config')
+
+  const scheduledDelayMillis =
+    batchConfig.scheduledDelayMillis ||
+    parseInt(
+      process.env.OTEL_LOGS_EXPORT_INTERVAL ||
+        DEFAULT_LOGS_EXPORT_INTERVAL_MS.toString(),
+      10,
+    )
+
+  const maxExportBatchSize =
+    batchConfig.maxExportBatchSize || DEFAULT_MAX_EXPORT_BATCH_SIZE
+
+  const maxQueueSize = batchConfig.maxQueueSize || DEFAULT_MAX_QUEUE_SIZE
+
+  // Build our own resource for 1P event logging with minimal attributes
+  const platform = getPlatform()
+  const attributes: Record<string, string> = {
+    [ATTR_SERVICE_NAME]: 'claude-code',
+    [ATTR_SERVICE_VERSION]: MACRO.VERSION,
+  }
+
+  // Add WSL-specific attributes if running on WSL
+  if (platform === 'wsl') {
+    const wslVersion = getWslVersion()
+    if (wslVersion) {
+      attributes['wsl.version'] = wslVersion
+    }
+  }
+
+  const resource = resourceFromAttributes(attributes)
+
+  // Create a new LoggerProvider with the EventLoggingExporter
+  // NOTE: This is kept separate from customer telemetry logs to ensure
+  // internal events don't leak to customer endpoints and vice versa.
+  // We don't register this globally - it's only used for internal event logging.
+  // densable 2.1.248 QO(new op(...), new Oht("1P event logging"))
+  const eventLoggingExporter = wrapAnthropicTelemetryExporter(
+    new FirstPartyEventLoggingExporter({
+      maxBatchSize: maxExportBatchSize,
+      skipAuth: batchConfig.skipAuth,
+      maxAttempts: batchConfig.maxAttempts,
+      path: batchConfig.path,
+      baseUrl: batchConfig.baseUrl,
+      isKilled: () => isSinkKilled('firstParty'),
+    }),
+    new AnthropicTelemetryExportCounter('1P event logging'),
+  )
+  firstPartyEventLoggerProvider = new LoggerProvider({
+    resource,
+    processors: [
+      new BatchLogRecordProcessor(eventLoggingExporter, {
+        scheduledDelayMillis,
+        maxExportBatchSize,
+        maxQueueSize,
+      }),
+    ],
+  })
+
+  // Initialize event logger from our internal provider (NOT from global API)
+  // IMPORTANT: We must get the logger from our local provider, not logs.getLogger()
+  // because logs.getLogger() returns a logger from the global provider, which is
+  // separate and used for customer telemetry.
+  firstPartyEventLogger = firstPartyEventLoggerProvider.getLogger(
+    'com.anthropic.claude_code.events',
+    MACRO.VERSION,
+  )
 }
 
+/**
+ * Rebuild the 1P event logging pipeline if the batch config changed.
+ * Register this with onGrowthBookRefresh so long-running sessions pick up
+ * changes to batch size, delay, endpoint, etc.
+ *
+ * Event-loss safety:
+ * 1. Null the logger first — concurrent logEventTo1P() calls hit the
+ *    !firstPartyEventLogger guard and bail during the swap window. This drops
+ *    a handful of events but prevents emitting to a draining provider.
+ * 2. forceFlush() drains the old BatchLogRecordProcessor buffer to the
+ *    exporter. Export failures go to disk at getCurrentBatchFilePath() which
+ *    is keyed by module-level BATCH_UUID + sessionId — unchanged across
+ *    reinit — so the NEW exporter's disk-backed retry picks them up.
+ * 3. Swap to new provider/logger; old provider shutdown runs in background
+ *    (buffer already drained, just cleanup).
+ */
 export async function reinitialize1PEventLoggingIfConfigChanged(): Promise<void> {
   if (!is1PEventLoggingEnabled() || !firstPartyEventLoggerProvider) {
     return

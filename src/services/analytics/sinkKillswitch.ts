@@ -11,7 +11,9 @@ export type SinkName = 'datadog' | 'firstParty'
  * A value of true for a key stops all dispatch to that sink.
  * Default {} (nothing killed). Fail-open: missing/malformed config = sink stays on.
  *
- * Call at per-event dispatch sites. Do not recurse through GrowthBook init.
+ * NOTE: Must NOT be called from inside is1PEventLoggingEnabled() -
+ * growthbook.ts:isGrowthBookEnabled() calls that, so a lookup here would recurse.
+ * Call at per-event dispatch sites instead.
  */
 export function isSinkKilled(sink: SinkName): boolean {
   const config = getDynamicConfig_CACHED_MAY_BE_STALE<
