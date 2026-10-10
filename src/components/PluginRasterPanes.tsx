@@ -9,8 +9,10 @@ import {
   useOptionalKeybindingContext,
   useApp,
   useRegisterKeybindingContext,
+  measureElement,
   type DOMElement,
   type Key,
+  type MouseActionEvent,
   type WheelEvent,
 } from '@anthropic/ink';
 import {
@@ -21,6 +23,7 @@ import {
   useLayoutEffect,
   useCallback,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -60,16 +63,35 @@ import {
   settlePaneFocusRequest,
   settlePanesTerminalColumns,
   isToastHoldShown,
+  pluginFieldSeatKey,
+  pluginFieldSeatGeneration,
+  bumpPluginFieldSeatGeneration,
+  getPluginInputSeatStore,
+  getPluginSelectSeatStore,
+  getPluginFieldSeatGenerationStore,
+  setPluginBandExpanded,
   subscribePanes,
   subscribeRasterFrames,
   unregisterPluginScrollSite,
   updatePluginScrollSite,
 } from '../utils/plugins/functionHooksModules.js';
-import { acquirePluginClient, DETACHED_CLIENT, type ClientInstance } from '../utils/plugins/functionHooksClient.js';
+import {
+  acquirePluginClient,
+  clientInstanceKey,
+  DETACHED_CLIENT,
+  type ClientInstance,
+} from '../utils/plugins/functionHooksClient.js';
 import { useIsOverlayActive } from '../context/overlayContext.js';
 import { useHasOpenDialogs } from '../dialog/DialogStoreContext.js';
+import { logForDebugging } from '../utils/debug.js';
 import { useNotifications } from '../context/notifications.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
+import { createStore } from '../state/store.js';
+import {
+  getPromptInputStoreValue,
+  setPromptInputStoreValue,
+  subscribePromptInputCursorStore,
+} from '../utils/promptInputCursorStore.js';
 import TextInput from './TextInput.js';
 import { HighlightedCode } from './HighlightedCode.js';
 import { Markdown } from './Markdown.js';
@@ -83,8 +105,26 @@ import {
   type WheelProfile,
 } from './ScrollKeybindingHandler.js';
 
-/** densable Select `it=8` — open list window. */
+/** densable Select `at=8` — open list window (`FMn` / `s$`). */
 const SELECT_WINDOW = 8;
+/**
+ * densable `lEe` — AZERTY unshifted digit row → ASCII digit, for Wm.
+ * Gold: `&→1 é→2 "→3 '→4 (→5 -→6 è→7 _→8 ç→9 à→0`.
+ */
+const AZERTY_DIGIT: ReadonlyMap<string, string> = new Map([
+  ['&', '1'],
+  ['é', '2'],
+  ['"', '3'],
+  ["'", '4'],
+  ['(', '5'],
+  ['-', '6'],
+  ['è', '7'],
+  ['_', '8'],
+  ['ç', '9'],
+  ['à', '0'],
+]);
+const BAND_DIGIT_DEBOUNCE_MS = 400;
+const BAND_DIGIT_MOUNT_DELAY_MS = 600;
 /** densable `yy.DOCK_GRIP_COLUMNS` / `XN`. */
 export const DOCK_GRIP_COLUMNS = 1;
 /** densable `dL` — CloseMark inset from the pane edge. */
@@ -162,6 +202,80 @@ export function hotkeyMapOfDrawing(drawn: unknown): Map<string, HotkeyPress> {
   return map;
 }
 
+/**
+ * densable `LZ({hasCue,content,offset,windowRows}, seatsOf(digit))`.
+ * Without yoga seats, a digit is visible when the cue is off (gold `!M→true`)
+ * or when the hotkey map has that digit (cue on, seats empty → false).
+ */
+export function hotkeyDigitVisible(hasCue: boolean, seats: Map<string, HotkeyPress>, digit: string): boolean {
+  if (!hasCue) return true;
+  if (seats.size === 0) return false;
+  return seats.has(digit);
+}
+
+/**
+ * densable `BZ(h,v,M)` — if press exists and `v()` (visible), `M()` then fire.
+ */
+export function pressShownDigit(press: HotkeyPress | undefined, visible: () => boolean, clear: () => void): void {
+  if (press !== undefined && visible()) {
+    clear();
+    firePress(press.plugin, press.handle);
+  }
+}
+
+/**
+ * densable `Wm` — single-digit prompt debounce (MZ=400, cp=600, enterConfirms:!1).
+ * Gold: `h.length===1` (does not trim the prompt); `onDigit` then `M("")`.
+ * Local: `setPromptInputStoreValue('')` is gold `M("")`.
+ */
+export function useBandDigitHotkey(input: {
+  inputValue: string;
+  enabled: boolean;
+  isValidDigit: (char: string) => boolean;
+  onDigit: (digit: string) => void;
+  debounceMs?: number;
+  mountDelayMs?: number;
+}): void {
+  const { inputValue, enabled, isValidDigit, onDigit } = input;
+  const debounceMs = input.debounceMs ?? BAND_DIGIT_DEBOUNCE_MS;
+  const mountDelayMs = input.mountDelayMs ?? BAND_DIGIT_MOUNT_DELAY_MS;
+  const initialValue = useRef(inputValue);
+  const triggered = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enabledAt = useRef<number | null>(enabled ? Date.now() : null);
+  const latest = useRef({ isValidDigit, onDigit });
+  latest.current = { isValidDigit, onDigit };
+  useEffect(() => {
+    if (enabled) enabledAt.current = Date.now();
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled || triggered.current) return;
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const mounting = mountDelayMs > 0 && enabledAt.current !== null && Date.now() - enabledAt.current < mountDelayMs;
+    if (mounting) return;
+    if (inputValue !== initialValue.current && inputValue.length === 1) {
+      const nfkc = inputValue.normalize('NFKC');
+      const mapped = latest.current.isValidDigit(nfkc) ? nfkc : (AZERTY_DIGIT.get(inputValue) ?? nfkc);
+      if (latest.current.isValidDigit(mapped)) {
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          triggered.current = true;
+          latest.current.onDigit(mapped);
+        }, debounceMs);
+      }
+    }
+    return () => {
+      if (timer.current !== null) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+    };
+  }, [inputValue, enabled, debounceMs, mountDelayMs]);
+}
+
 /** densable `hL` — printable, no ctrl/meta/super/escape/tab/return. */
 export function isHotkeyType(input: string, key: Key): boolean {
   return (
@@ -183,12 +297,12 @@ export function resolveHotkeyPresses(input: string, key: Key, seats: Map<string,
 /**
  * densable band chrome (AbovePrompt) — SEA 2.1.289 `_Ee` / `EZ` / `n$` / `OM` /
  * `IZ` / `a$` / `gL` / `yEe`. Soft remainder `l$`/`xze`/`d$`/`m$` HAVE.
- * `m$` exported densable-shaped (BDe + vhr + textOf/edit/textNow/submit); PluginSiteFields
- * hosts the Map; bandRingHandlers receives fields.submit via bandFieldBridge.
+ * `m$` HAVE: `usePluginInputSeat` lifted as `_Ee`/`pee` `rr` into g$ `inputs`.
  *
- * `y$` PARTIAL HAVE: selectHighlightHandlers (`qZ`) + selectKeysIntercept.
- * `g$` PARTIAL HAVE on PluginAbovePromptSite: isAhead(Ne!==Me), handler bag from
- * `l$`/`y$`, selectKeys=`y$.intercept` (keep effortSlider:* untouched).
+ * `y$` HAVE: `usePluginSelectSeat` `{fields, handlers, intercept}` over kL(YFt)+Pc.
+ * `g$` HAVE on PluginAbovePromptSite and pee (Pane bag + isAhead).
+ * `$l` HAVE via `useYogaMeasure` (subscribeLayout).
+ * Keep effortSlider:* untouched. DualInk `onPointer` HAVE (named then alias).
  *
  * densable Chat panes (`Si`/`JSn`/`EMPTY_PANES`) HAVE as semantic store in
  * `functionHooksModules` (`getPanesState`/`getPanesStore`/`setPanesState`/
@@ -202,9 +316,8 @@ export function resolveHotkeyPresses(input: string, key: Key, seats: Map<string,
  * pending `focusRequest` is only auto-settled by the a4n effect.
  * Columns settle calls `settlePanesTerminalColumns` → `placeWaitingPanes`.
  *
- * `pluginSites` = Ide PARTIAL HAVE via `registerPluginScrollSite` /
- * `updatePluginScrollSite` / `unregisterPluginScrollSite` (gold
- * `Ide=et(dt().scrollSites)`). Hde/`QLt` person-origin `ui.scroll` HAVE via
+ * `pluginSites` = Ide HAVE via `registerPluginScrollSite` keyed
+ * `component:requestId` (gold `Fj`). Hde/`QLt` person-origin `ui.scroll` HAVE via
  * `dispatchPersonUiScroll` → `runFunctionHookChain('ui.scroll')` + vq commit
  * (no minify Ide/Hde/QLt/iZ export). asked soft persist + ui.open→unplaced
  * column gate HAVE on panes store. Leave `dialogStore.open` alone. Keep
@@ -230,6 +343,8 @@ type PaneErrorBoundaryProps = {
   children: ReactNode;
   resetKey: string | number;
   onError: (error: Error, info: ErrorInfo) => void;
+  /** densable Client BO fallback — empty sized box. Pane QT omits (null). */
+  fallback?: ReactNode;
 };
 
 type PaneErrorBoundaryState = {
@@ -259,27 +374,206 @@ class PaneErrorBoundary extends Component<PaneErrorBoundaryProps, PaneErrorBound
   }
 
   render(): ReactNode {
-    if (this.state.hasError) return null;
+    if (this.state.hasError) return this.props.fallback ?? null;
     return this.props.children;
   }
 }
 
-/** densable o$/SEe — viewingAgentTaskId → { agentId } for ui.render props.view. */
-function viewingAgentViewProps(state: {
-  viewingAgentTaskId?: string;
-  tasks: Record<string, { type?: string; agentId?: string; identity?: { agentId?: string } }>;
-}): { agentId: string } | Record<string, never> {
-  const taskId = state.viewingAgentTaskId;
-  if (taskId === undefined) return {};
-  const task = state.tasks[taskId];
-  if (task === undefined) return {};
-  if (task.type === 'in_process_teammate' && typeof task.identity?.agentId === 'string') {
-    return { agentId: task.identity.agentId };
-  }
+/**
+ * densable `h_e` lite for o$/SEe — identity id from a task.
+ * Gold: local_agent → agentId; in_process_teammate → resumableAgentId ?? agentId.
+ */
+export function teammateViewId(task: {
+  type?: string;
+  agentId?: string;
+  identity?: { agentId?: string; resumableAgentId?: string };
+}): string | undefined {
   if (task.type === 'local_agent' && typeof task.agentId === 'string') {
-    return { agentId: task.agentId };
+    return task.agentId;
   }
-  return {};
+  if (task.type === 'in_process_teammate') {
+    const resumable = task.identity?.resumableAgentId;
+    if (typeof resumable === 'string') return resumable;
+    if (typeof task.identity?.agentId === 'string') return task.identity.agentId;
+  }
+  return undefined;
+}
+
+/** densable SEe — viewingAgentTaskId → h_e(task)?.id. */
+function viewingAgentIdFromState(state: {
+  viewingAgentTaskId?: string;
+  tasks: Record<
+    string,
+    { type?: string; agentId?: string; identity?: { agentId?: string; resumableAgentId?: string } }
+  >;
+}): string | undefined {
+  const taskId = state.viewingAgentTaskId;
+  if (taskId === undefined) return undefined;
+  const task = state.tasks[taskId];
+  return task === undefined ? undefined : teammateViewId(task);
+}
+
+/**
+ * densable o$: `h=V(SEe); return Q(()=>h===void 0?{}:{agentId:h},[h])`.
+ * Selector stays a primitive — a fresh `{}` inside useAppState Object.is-fails
+ * every snapshot → RootREPLBoundary #185.
+ */
+function useViewingAgentView(): { agentId: string } | Record<string, never> {
+  const agentId = useAppState(s => viewingAgentIdFromState(s));
+  return useMemo(
+    () => (agentId === undefined ? {} : { agentId }) as { agentId: string } | Record<string, never>,
+    [agentId],
+  );
+}
+
+/**
+ * densable `FZ` — both lists non-empty and no shared plugin (drawer identity flip).
+ */
+export function isOtherDrawer(previous: Array<{ plugin: string }>, next: Array<{ plugin: string }>): boolean {
+  return previous.length > 0 && next.length > 0 && !next.some(row => previous.some(was => was.plugin === row.plugin));
+}
+
+/**
+ * densable `NLe` / `DQt` / `hSo` — Client surface focusedId mutex.
+ * Gold: `NLe=et({focusedId:null}); DQt=(r)=>set if changed; hSo=(r)=>clear if current`.
+ */
+const pluginClientFocusStore = createStore<{ focusedId: string | null }>({
+  focusedId: null,
+});
+
+export { pluginFieldSeatKey, pluginFieldSeatGeneration, bumpPluginFieldSeatGeneration };
+
+function deleteSeatKeys(map: Map<string, string>, keys: readonly string[]): Map<string, string> {
+  if (keys.length === 0) return map;
+  const next = new Map(map);
+  for (const key of keys) next.delete(key);
+  return next;
+}
+
+const EMPTY_SEAT_MAP: Map<string, string> = new Map();
+
+/**
+ * densable `kL(store, component, requestId)` — subscribe the sft bucket.
+ * Persist into the module store only while `ift` generation is unchanged.
+ */
+export function usePluginFieldSeatMap(
+  kind: 'input' | 'select',
+  component: string,
+  requestId: string,
+): [Map<string, string>, (updater: (current: Map<string, string>) => Map<string, string>) => void] {
+  const store = kind === 'input' ? getPluginInputSeatStore() : getPluginSelectSeatStore();
+  const generationStore = getPluginFieldSeatGenerationStore();
+  const seatKey = pluginFieldSeatKey(component, requestId);
+  const generation = useSyncExternalStore(
+    generationStore.subscribe,
+    () => pluginFieldSeatGeneration(component, requestId),
+    () => pluginFieldSeatGeneration(component, requestId),
+  );
+  const map = useSyncExternalStore(
+    store.subscribe,
+    () => store.getState().get(seatKey) ?? EMPTY_SEAT_MAP,
+    () => store.getState().get(seatKey) ?? EMPTY_SEAT_MAP,
+  );
+  const setMap = useCallback(
+    (updater: (current: Map<string, string>) => Map<string, string>) => {
+      store.setState(prev => {
+        const current = prev.get(seatKey) ?? new Map<string, string>();
+        const nextMap = updater(current);
+        if (nextMap === current) return prev;
+        const next = new Map(prev);
+        next.set(seatKey, nextMap);
+        return next;
+      });
+    },
+    [store, seatKey],
+  );
+  useEffect(() => {
+    if (pluginFieldSeatGeneration(component, requestId) !== generation) return;
+    store.setState(prev => {
+      const held = prev.get(seatKey);
+      if (held === map) return prev;
+      const next = new Map(prev);
+      next.set(seatKey, map);
+      return next;
+    });
+  }, [store, seatKey, map, generation, component, requestId]);
+  return [map, setMap];
+}
+
+/**
+ * densable `yL(focusables, tag, onStale)` — when a tagged element's `value`
+ * changed vs the last seen Map, report those BDe keys so the seat can prune.
+ */
+export function usePluginFieldValuePrune(
+  focusables: readonly DrawingFocusable[] | undefined,
+  tag: 'Input' | 'Select',
+  onStale: (keys: string[]) => void,
+): void {
+  const seen = useRef(new Map<string, string | undefined>());
+  const onStaleRef = useRef(onStale);
+  onStaleRef.current = onStale;
+  useEffect(() => {
+    if (focusables === undefined) return;
+    const stale: string[] = [];
+    for (const row of focusables) {
+      if (row.tag !== tag) continue;
+      if (typeof row.element !== 'string' || row.element === '') continue;
+      const key = pluginInputFieldKey(row.plugin, row.element);
+      const value = typeof row.value === 'string' ? row.value : undefined;
+      if (seen.current.has(key) && seen.current.get(key) !== value) stale.push(key);
+      seen.current.set(key, value);
+    }
+    if (stale.length > 0) onStaleRef.current(stale);
+  }, [focusables, tag]);
+}
+
+/**
+ * densable `$l(read)` — `useSyncExternalStore(subscribeLayout, read)` then
+ * layout-effect `Object.is` bump. Gold returns a number (width or height).
+ */
+export function useYogaMeasure(read: () => number): number {
+  const { subscribeLayout } = useApp();
+  const snapshot = useSyncExternalStore(subscribeLayout, read, read);
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useLayoutEffect(() => {
+    if (!Object.is(read(), snapshot)) bump();
+  });
+  return snapshot;
+}
+
+export function getPluginClientFocusedId(): string | null {
+  return pluginClientFocusStore.getState().focusedId;
+}
+
+export function subscribePluginClientFocus(listener: () => void): () => void {
+  return pluginClientFocusStore.subscribe(listener);
+}
+
+/** densable `DQt` — set Client focusedId. */
+export function setPluginClientFocusedId(id: string | null): void {
+  pluginClientFocusStore.setState(prev => (prev.focusedId === id ? prev : { focusedId: id }));
+}
+
+/** densable `hSo` — clear Client focusedId if it still holds `id`. */
+export function clearPluginClientFocusedId(id: string): void {
+  pluginClientFocusStore.setState(prev => (prev.focusedId === id ? { focusedId: null } : prev));
+}
+
+/**
+ * densable `jZ(as, Me??hs, ss)` — while band or pane is held, prompt draft
+ * value change from the hold-start snapshot → away (Ie(null)+u3(null)).
+ * Gold: `if(v===null)return; let N=h.getState().value; subscribe value!==N → M()`.
+ */
+export function useDraftHeldAway(held: number | 'band' | string | null, away: () => void): void {
+  const awayRef = useRef(away);
+  awayRef.current = away;
+  useEffect(() => {
+    if (held === null) return;
+    const origin = getPromptInputStoreValue();
+    return subscribePromptInputCursorStore(() => {
+      if (getPromptInputStoreValue() !== origin) awayRef.current();
+    });
+  }, [held]);
 }
 /** densable `NZ` — height settle debounce for band layout. */
 export const HEIGHT_SETTLE_MS = 150;
@@ -321,6 +615,7 @@ export function getBandCollapsed(): boolean {
 export function setBandCollapsed(next: boolean): void {
   if (bandCollapsedValue === next) return;
   bandCollapsedValue = next;
+  setPluginBandExpanded(!next);
   for (const listener of bandCollapsedListeners) listener();
 }
 
@@ -359,6 +654,33 @@ export function subscribeSettledBudget(listener: SettledBudgetListener): () => v
 
 function useSettledBudget(): number | undefined {
   return useSyncExternalStore(subscribeSettledBudget, getSettledBudget, getSettledBudget);
+}
+
+type OpenListRowsListener = () => void;
+/** densable `s$` / `nr` — open Select extra rows into band maxHeight. */
+let openListRowsValue = 0;
+const openListRowsListeners = new Set<OpenListRowsListener>();
+
+export function getOpenListRows(): number {
+  return openListRowsValue;
+}
+
+export function setOpenListRows(next: number): void {
+  const rows = Math.max(0, next);
+  if (openListRowsValue === rows) return;
+  openListRowsValue = rows;
+  for (const listener of openListRowsListeners) listener();
+}
+
+export function subscribeOpenListRows(listener: OpenListRowsListener): () => void {
+  openListRowsListeners.add(listener);
+  return () => {
+    openListRowsListeners.delete(listener);
+  };
+}
+
+function useOpenListRows(): number {
+  return useSyncExternalStore(subscribeOpenListRows, getOpenListRows, getOpenListRows);
 }
 
 /**
@@ -445,7 +767,7 @@ export const floorBandOffset = floorOffset;
 
 /**
  * densable `yEe` lite — offset / followEnd / scrollBy (in-flight queue) / place.
- * Ide PARTIAL HAVE: PluginAbovePromptSite syncs dims into `pluginSites` via
+ * Ide HAVE: PluginAbovePromptSite syncs dims into `pluginSites` via
  * `registerPluginScrollSite` / `updatePluginScrollSite` (no minify Ide export).
  * Hde/`QLt` person-origin HAVE: `fireScroll`/`commit` void
  * `dispatchPersonUiScroll` → `runFunctionHookChain('ui.scroll')` when the
@@ -517,7 +839,7 @@ export function useBandScrollPlace(input: {
     const siteMeta = personScrollRef.current;
     // densable yEe commits for Pane + AbovePrompt once Ide site is registered.
     if (siteMeta.plugin === '' || siteMeta.requestId === '') return Promise.resolve();
-    if (getPluginScrollSite(siteMeta.plugin, siteMeta.requestId) === undefined) {
+    if (getPluginScrollSite(siteMeta.plugin, siteMeta.requestId, siteMeta.component) === undefined) {
       return Promise.resolve();
     }
     // densable `Hde(\`ui.scroll …\`, QLt(...))` — await settles inFlight.
@@ -531,7 +853,7 @@ export function useBandScrollPlace(input: {
       plugin: siteMeta.plugin,
     }).then(() => undefined);
   };
-  const commit = (next: number): number => {
+  const commit = useCallback((next: number): number => {
     const before = liveOffset();
     const clamped = clamp(next);
     followEndRef.current = false;
@@ -539,13 +861,17 @@ export function useBandScrollPlace(input: {
     setFollowEnd(false);
     setPlaced(clamped);
     return clamped - before;
-  };
-  const place = (fn: (prev: number) => number): void => {
-    const by = commit(fn(placedRef.current));
-    if (by !== 0) {
-      void dispatchPersonIfRegistered(placedRef.current, by);
-    }
-  };
+  }, []);
+  // densable yEe `io=ce((no)=>Vt(no(Ne())),[Vt,Ne])` — stable place identity.
+  const place = useCallback(
+    (fn: (prev: number) => number): void => {
+      const by = commit(fn(placedRef.current));
+      if (by !== 0) {
+        void dispatchPersonIfRegistered(placedRef.current, by);
+      }
+    },
+    [commit],
+  );
   const fireScroll = (delta: number): void => {
     inFlightRef.current = true;
     const by = commit(liveOffset() + delta);
@@ -762,10 +1088,7 @@ function setPaneFieldHeld(next: boolean): void {
 }
 
 /** densable `XP(focusable, site)` — Input/Select remap to AbovePrompt* else the site. */
-export function pluginFieldContext(
-  tag: string | undefined,
-  site: 'Pane' | 'AbovePrompt',
-): 'Pane' | 'AbovePrompt' | 'AbovePromptInput' | 'AbovePromptSelect' {
+export function pluginFieldContext(tag: string | undefined, site: 'Pane' | 'AbovePrompt'): PluginBandKeyContext {
   if (tag === 'Input') return 'AbovePromptInput';
   if (tag === 'Select') return 'AbovePromptSelect';
   return site;
@@ -929,21 +1252,25 @@ export function PluginRowGrip({
       height={1}
       onMouseEnter={() => setGripLit(true)}
       onMouseLeave={() => setGripLit(false)}
-      onMouseDown={event => {
-        if (event.button !== 0) return;
-        drag.current = { at: event.row, cells: rows, now: rows };
-        setGripLit(true);
-      }}
-      onMouseDrag={event => {
-        const held = drag.current;
-        if (held === undefined || held === null) return;
-        held.now = onResize(held.cells + held.at - event.row);
-      }}
-      onMouseUp={() => {
-        const held = drag.current;
-        drag.current = null;
-        setGripLit(false);
-        if (held !== null && held.now !== held.cells) onSettle();
+      onPointer={event => {
+        if (event.type === 'mousedown') {
+          if (event.button !== 0) return;
+          drag.current = { at: event.row, cells: rows, now: rows };
+          setGripLit(true);
+          return;
+        }
+        if (event.type === 'mousedrag') {
+          const held = drag.current;
+          if (held === undefined || held === null) return;
+          held.now = onResize(held.cells + held.at - event.row);
+          return;
+        }
+        if (event.type === 'mouseup') {
+          const held = drag.current;
+          drag.current = null;
+          setGripLit(false);
+          if (held !== null && held.now !== held.cells) onSettle();
+        }
       }}
     >
       <Text dimColor={!lit}> </Text>
@@ -981,21 +1308,25 @@ export function PluginDockGrip({
       onMouseLeave={() => {
         setLit(false);
       }}
-      onMouseDown={event => {
-        if (event.button !== 0) return;
-        drag.current = { at: event.col, cells: columns, now: columns };
-        setLit(true);
-      }}
-      onMouseDrag={event => {
-        const held = drag.current;
-        if (held === undefined || held === null) return;
-        held.now = onResize(held.cells + held.at - event.col);
-      }}
-      onMouseUp={() => {
-        const held = drag.current;
-        drag.current = null;
-        setLit(false);
-        if (held !== null && held.now !== held.cells) onSettle();
+      onPointer={event => {
+        if (event.type === 'mousedown') {
+          if (event.button !== 0) return;
+          drag.current = { at: event.col, cells: columns, now: columns };
+          setLit(true);
+          return;
+        }
+        if (event.type === 'mousedrag') {
+          const held = drag.current;
+          if (held === undefined || held === null) return;
+          held.now = onResize(held.cells + held.at - event.col);
+          return;
+        }
+        if (event.type === 'mouseup') {
+          const held = drag.current;
+          drag.current = null;
+          setLit(false);
+          if (held !== null && held.now !== held.cells) onSettle();
+        }
       }}
     />
   );
@@ -1169,6 +1500,51 @@ export function bandRingHandlers(input: {
       // Select press owned by y$/qZ selectHighlightHandlers on AbovePromptSelect.
     },
     'abovePrompt:leave': input.leave,
+  };
+}
+
+/**
+ * densable `mEe` — pixel scroll bag. Page step is live `bodyRows` (gold `v` / `ro`).
+ */
+export function paneScrollHandlers(input: {
+  bodyRows: number;
+  contentRows: number;
+  scrollBy: (delta: number) => void;
+}): {
+  'pane:scrollUp': () => void;
+  'pane:scrollDown': () => void;
+  'pane:pageUp': () => void;
+  'pane:pageDown': () => void;
+  'pane:top': () => void;
+  'pane:bottom': () => void;
+} {
+  const { bodyRows, contentRows, scrollBy } = input;
+  return {
+    'pane:scrollUp': () => scrollBy(-1),
+    'pane:scrollDown': () => scrollBy(1),
+    'pane:pageUp': () => scrollBy(-bodyRows),
+    'pane:pageDown': () => scrollBy(bodyRows),
+    'pane:top': () => scrollBy(-contentRows),
+    'pane:bottom': () => scrollBy(contentRows),
+  };
+}
+
+/**
+ * densable `AZ(h,v,M)` — ring + mEe(scroll); `!hasCue` remaps ↑↓ onto the ring.
+ * Gold `Zt(Yi,{context:"AbovePrompt",isActive:is})` binds the whole bag.
+ */
+export function bandKeysWithScroll<H extends Record<string, () => void>>(
+  ring: H,
+  scroll: ReturnType<typeof paneScrollHandlers>,
+  hasCue: boolean,
+): H & ReturnType<typeof paneScrollHandlers> {
+  return {
+    ...ring,
+    ...scroll,
+    ...(!hasCue && {
+      'pane:scrollUp': ring['abovePrompt:previous'] as () => void,
+      'pane:scrollDown': ring['abovePrompt:next'] as () => void,
+    }),
   };
 }
 
@@ -1426,6 +1802,242 @@ export function selectKeysIntercept(
   return false;
 }
 
+/** densable y$ `bt` — Select at a ring index. */
+export type PluginSelectFocusable = {
+  plugin: string;
+  handle: unknown;
+  element: string;
+  options: Array<{ value: string; label?: string }>;
+  value?: string;
+};
+
+/** densable y$ `Pc` / `Kt` — `{key,isOpen,highlight}`. */
+export type PluginSelectSeatState = {
+  key: string | null;
+  isOpen: boolean;
+  highlight: number;
+};
+
+export function selectFocusableAt(
+  focusables: readonly DrawingFocusable[] | undefined,
+  index: number | 'band' | null | undefined,
+): PluginSelectFocusable | null {
+  const row = focusableAt(focusables ?? [], typeof index === 'number' ? index : null);
+  if (row === null || row.tag !== 'Select' || typeof row.element !== 'string' || row.element === '') {
+    return null;
+  }
+  return {
+    plugin: row.plugin,
+    handle: row.handle,
+    element: row.element,
+    options: selectOptionsOf(row),
+    ...(typeof row.value === 'string' && { value: row.value }),
+  };
+}
+
+function selectSeatKeyOf(row: PluginSelectFocusable | null): string | null {
+  return row === null ? null : pluginInputFieldKey(row.plugin, row.element);
+}
+
+/**
+ * densable y$ `Kt(io)` — identity reset: Select → `{key, isOpen:true, highlight}`;
+ * none → `{key:null, isOpen:false, highlight:0}`.
+ */
+export function resetPluginSelectSeat(
+  row: PluginSelectFocusable | null,
+  picked: Map<string, string>,
+): PluginSelectSeatState {
+  if (row === null) return { key: null, isOpen: false, highlight: 0 };
+  const key = pluginInputFieldKey(row.plugin, row.element);
+  const shown = picked.get(key) ?? row.value;
+  const at = row.options.findIndex(option => option.value === shown);
+  return { key, isOpen: true, highlight: Math.max(0, at) };
+}
+
+export type PluginSelectSeatRing = {
+  focusIndex: number | 'band' | null;
+  focusIndexNow: () => number | 'band' | null;
+  setFocusIndex: (next: number | 'band' | null) => void;
+  working?: boolean;
+};
+
+/**
+ * densable `y$(h)` — `{fields, handlers, intercept}` over kL(YFt)+Pc.
+ * Identity `qe.key!==Rt(Me)` resets during render (gold `We(Kt(Me))`).
+ */
+export function usePluginSelectSeat(
+  focusables: readonly DrawingFocusable[] | undefined,
+  component: string,
+  requestId: string,
+  ring?: PluginSelectSeatRing,
+): {
+  fields: {
+    pickedOf: (plugin: string, element: string) => string | undefined;
+    open: SelectOpen | null;
+  };
+  handlers: ReturnType<typeof selectHighlightHandlers>;
+  intercept: (input: string, key: Key) => boolean;
+  focusedSelect: PluginSelectFocusable | null;
+  move: (delta: number) => void;
+  press: () => void;
+  typeahead: (letter: string) => void;
+  close: () => void;
+  toggle: (ref: {
+    plugin: string;
+    handle: unknown;
+    element: string;
+    options: Array<{ value: string; label?: string }>;
+    value?: string;
+  }) => void;
+  focus: (ref: PluginSelectFocusable) => void;
+  unfocus: () => void;
+} {
+  const [picked, setPicked] = usePluginFieldSeatMap('select', component, requestId);
+  usePluginFieldValuePrune(focusables, 'Select', keys => {
+    setPicked(current => deleteSeatKeys(current, keys));
+  });
+  const me = selectFocusableAt(focusables, ring?.focusIndex);
+  const meKey = selectSeatKeyOf(me);
+  const [seat, setSeat] = useState<PluginSelectSeatState>(() => resetPluginSelectSeat(null, picked));
+  const seatNow = seat.key !== meKey ? resetPluginSelectSeat(me, picked) : seat;
+  useLayoutEffect(() => {
+    if (seat.key === meKey) return;
+    setSeat(resetPluginSelectSeat(me, picked));
+  }, [me, meKey, picked, seat.key]);
+  const optionCount = me?.options.length ?? 0;
+  const isOpen = me !== null && seatNow.isOpen;
+  const highlight = Math.min(seatNow.highlight, Math.max(0, optionCount - 1));
+  const open: SelectOpen | null =
+    isOpen && me !== null
+      ? {
+          plugin: me.plugin,
+          handle: me.handle,
+          highlight,
+          element: me.element,
+          options: me.options,
+        }
+      : null;
+
+  const rowNow = (): PluginSelectFocusable | null =>
+    selectFocusableAt(focusables, ring?.focusIndexNow() ?? ring?.focusIndex);
+
+  const ensureSeat = (row: PluginSelectFocusable): PluginSelectSeatState => {
+    const key = pluginInputFieldKey(row.plugin, row.element);
+    if (seatNow.key === key) return seatNow;
+    const next = resetPluginSelectSeat(row, picked);
+    setSeat(next);
+    return next;
+  };
+
+  const move = (delta: number): void => {
+    // densable y$ Vt — closed Select opens on move; open cycles highlight.
+    const row = rowNow();
+    if (row === null) return;
+    const now = ensureSeat(row);
+    const count = Math.max(1, row.options.length);
+    const at = Math.min(now.highlight, Math.max(0, row.options.length - 1));
+    setSeat(now.isOpen ? { ...now, highlight: (at + delta + count) % count } : { ...now, isOpen: true });
+  };
+
+  const press = (): void => {
+    const row = rowNow();
+    if (row === null) return;
+    const now = ensureSeat(row);
+    const key = pluginInputFieldKey(row.plugin, row.element);
+    const choice = row.options[Math.min(now.highlight, Math.max(0, row.options.length - 1))];
+    if (!now.isOpen || choice === undefined) {
+      setSeat({ ...now, isOpen: true });
+      return;
+    }
+    setPicked(current => new Map(current).set(key, choice.value));
+    setSeat({ ...now, isOpen: false });
+    void firePressAnswer(row.plugin, row.handle, { value: choice.value }).then(reply => {
+      if (reply !== undefined && typeof reply === 'object' && reply !== null && 'value' in reply) {
+        const next = (reply as { value: unknown }).value;
+        if (typeof next === 'string') {
+          setPicked(current => (current.get(key) === choice.value ? new Map(current).set(key, next) : current));
+        }
+      }
+    });
+  };
+
+  const typeahead = (letter: string): void => {
+    const row = rowNow();
+    if (row === null) return;
+    const now = ensureSeat(row);
+    const next = pluginSelectTypeaheadNext(
+      now.isOpen
+        ? {
+            plugin: row.plugin,
+            handle: row.handle,
+            element: row.element,
+            options: row.options,
+            highlight: now.highlight,
+          }
+        : null,
+      row,
+      letter,
+    );
+    if (next === null) return;
+    setSeat({ ...now, highlight: next.highlight, isOpen: true });
+  };
+
+  const close = (): void => {
+    setSeat(current => ({ ...current, isOpen: false }));
+  };
+
+  const unfocus = (): void => {
+    close();
+    ring?.setFocusIndex(null);
+  };
+
+  const intercept = (input: string, key: Key): boolean =>
+    selectKeysIntercept(
+      input,
+      key,
+      {
+        focusedSelect: rowNow(),
+        open,
+        close,
+        unfocus,
+        typeahead,
+      },
+      { working: ring?.working === true },
+    );
+
+  return {
+    fields: {
+      pickedOf: (plugin, element) => picked.get(pluginInputFieldKey(plugin, element)),
+      open,
+    },
+    handlers: selectHighlightHandlers({ move, press }),
+    intercept,
+    focusedSelect: me,
+    move,
+    press,
+    typeahead,
+    close,
+    toggle(ref) {
+      const key = pluginInputFieldKey(ref.plugin, ref.element);
+      const same = open !== null && open.plugin === ref.plugin && open.handle === ref.handle;
+      if (!same) {
+        const shown = picked.get(key) ?? ref.value;
+        const at = ref.options.findIndex(option => option.value === shown);
+        setSeat({ key, isOpen: true, highlight: at < 0 ? 0 : at });
+        return;
+      }
+      press();
+    },
+    focus() {
+      /* densable Me is the ring index; mouse lands via clickedPress. */
+    },
+    unfocus,
+  };
+}
+
+/** densable y$ return — `{fields, handlers, intercept}` plus SiteFields hosts. */
+export type PluginSelectSeat = ReturnType<typeof usePluginSelectSeat>;
+
 /** densable `Ode(list, index)` — focusable at ring index. */
 export function focusableAt(focusables: DrawingFocusable[], index: number | null | undefined): DrawingFocusable | null {
   if (typeof index !== 'number') return null;
@@ -1678,7 +2290,7 @@ export function usePluginFocusHost(input: {
   return { act, moveByPerson, forget };
 }
 
-export type PluginBandKeyContext = 'AbovePrompt' | 'AbovePromptInput' | 'AbovePromptSelect';
+export type PluginBandKeyContext = 'AbovePrompt' | 'AbovePromptInput' | 'AbovePromptSelect' | 'Pane';
 
 export type PluginBandKeysBag = {
   isAhead: () => boolean;
@@ -1762,7 +2374,7 @@ export function pluginBandKeys(
 
 /**
  * densable `g$` hook — `Yl()` resolve + `sb(..., {prepend:true})`.
- * PARTIAL invent-ban: no Si()/Ide hosts; caller supplies bag from local ring/bridge.
+ * Caller supplies bag from local ring/bridge (Si panes store already HAVE).
  */
 export function usePluginBandKeys(bag: PluginBandKeysBag, options: { isActive: boolean }): void {
   const keys = useOptionalKeybindingContext();
@@ -1776,77 +2388,6 @@ export function usePluginBandKeys(bag: PluginBandKeysBag, options: { isActive: b
     },
     { isActive: options.isActive, prepend: true },
   );
-}
-
-/** Bridge ring focus index → PluginSiteFields Input/Select hosts (`m$`/`y$`). */
-type BandFieldBridge = {
-  landInput: (ref: { plugin: string; handle: unknown; element: string; value?: string }) => void;
-  landSelect: (ref: {
-    plugin: string;
-    handle: unknown;
-    element: string;
-    options: Array<{ value: string; label?: string }>;
-  }) => void;
-  clear: () => void;
-  moveSelect: (delta: number) => void;
-  /** densable `qZ`/`Jt` — open closed Select or commit highlighted option via `_mo`. */
-  pressSelect: () => void;
-  submitInput: (ref: { plugin: string; handle: unknown; element: string; value?: string }) => void;
-  /** densable `y$.intercept` for site `g$` / `sb(selectKeys)`. */
-  selectKeys: (input: string, key: Key) => boolean;
-  /** densable `m$` textNow/edit for site `g$` Input branch. */
-  textNow: (ref: { plugin: string; element: string; value?: string }) => string;
-  edit: (ref: { plugin: string; handle: unknown; element: string }, value: string) => void;
-};
-
-let bandFieldBridge: BandFieldBridge | null = null;
-
-export function registerBandFieldBridge(next: BandFieldBridge | null): void {
-  bandFieldBridge = next;
-}
-
-function selectOptionsOf(focusable: DrawingFocusable): Array<{ value: string; label?: string }> {
-  const raw = focusable.options;
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap(item => {
-    if (!isRecord(item) || typeof item.value !== 'string') return [];
-    return [
-      {
-        value: item.value,
-        ...(typeof item.label === 'string' && { label: item.label }),
-      },
-    ];
-  });
-}
-
-function landBandFocusable(focusable: DrawingFocusable | null | undefined): void {
-  if (focusable === null || focusable === undefined) {
-    bandFieldBridge?.clear();
-    return;
-  }
-  if (typeof focusable.element !== 'string' || focusable.element === '') {
-    bandFieldBridge?.clear();
-    return;
-  }
-  if (focusable.tag === 'Input') {
-    bandFieldBridge?.landInput({
-      plugin: focusable.plugin,
-      handle: focusable.handle,
-      element: focusable.element,
-      ...(typeof focusable.value === 'string' && { value: focusable.value }),
-    });
-    return;
-  }
-  if (focusable.tag === 'Select') {
-    bandFieldBridge?.landSelect({
-      plugin: focusable.plugin,
-      handle: focusable.handle,
-      element: focusable.element,
-      options: selectOptionsOf(focusable),
-    });
-    return;
-  }
-  bandFieldBridge?.clear();
 }
 
 /** densable `n_e` → `ui.press` via local recordPress/invokePress. */
@@ -1898,7 +2439,7 @@ export type PluginInputMapApi = {
 /**
  * densable `m$(focusables, component, requestId)`.
  * Gold body: live Map + submitting Set + BDe + vhr change/submit + textOf/edit/textNow/submit.
- * kL/yL prune optional — invent-ban: no local KFt/YFt seat store; caller owns texts Map.
+ * `usePluginInputSeat` owns kL/yL; this is the map half.
  */
 export function createPluginInputMap(
   _focusables: readonly DrawingFocusable[] | undefined,
@@ -1946,6 +2487,37 @@ export function createPluginInputMap(
       );
     },
   };
+}
+
+/**
+ * densable `m$(h,v,M)` — kL(KFt) + yL Input prune + live/submitting + vhr.
+ * `_Ee`/`pee` lift this as `rr` into g$ `inputs`.
+ */
+export function usePluginInputSeat(
+  focusables: readonly DrawingFocusable[] | undefined,
+  component: string,
+  requestId: string,
+): PluginInputMapApi {
+  const [texts, setTexts] = usePluginFieldSeatMap('input', component, requestId);
+  const live = useRef(new Map<string, string>());
+  const submitting = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    if (live.current.size === 0 && texts.size > 0) live.current = new Map(texts);
+  }, [texts]);
+  usePluginFieldValuePrune(focusables, 'Input', keys => {
+    for (const key of keys) live.current.delete(key);
+    setTexts(current => deleteSeatKeys(current, keys));
+  });
+  return useMemo(
+    () =>
+      createPluginInputMap(focusables, component, requestId, {
+        texts,
+        setTexts,
+        live,
+        submitting,
+      }),
+    [texts, component, requestId, focusables, setTexts],
+  );
 }
 
 function stringProp(props: Record<string, unknown>, node: Record<string, unknown>, key: string): string | undefined {
@@ -2065,12 +2637,26 @@ function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   return out;
 }
 
-/** densable Select `v_n` window of `it=8`. */
-function selectWindow(count: number, highlight: number): { first: number; size: number; hidden: number } {
+/**
+ * densable `FMn(o,i)` — open Select window of `at=8`.
+ * `rows = size + (hidden>0 ? 1 : 0)` for the overflow cue line.
+ */
+export function selectWindow(
+  count: number,
+  highlight: number,
+): { first: number; size: number; hidden: number; rows: number } {
   const first = Math.max(0, highlight - SELECT_WINDOW + 1);
   const size = Math.max(0, Math.min(SELECT_WINDOW, count - first));
   const hidden = count - first - size;
-  return { first, size, hidden };
+  return { first, size, hidden, rows: size + (hidden > 0 ? 1 : 0) };
+}
+
+/**
+ * densable `s$=(h,v)=>h===null?0:FMn(v,h.highlight).rows`.
+ * Open Select extra rows into band maxHeight (`nr=s$(ts,Gn)`).
+ */
+export function openListRows(open: { highlight: number } | null, optionCount: number): number {
+  return open === null ? 0 : selectWindow(optionCount, open.highlight).rows;
 }
 
 function PluginPressButton({
@@ -2293,6 +2879,30 @@ type FocusedInput = {
   element: string;
   value?: string;
 };
+
+/** densable `_Ee` owns Input focus in the same closure as y$/m$ — no Mods singleton. */
+type BandInputFocusHost = {
+  focused: FocusedInput | null;
+  setFocused: (next: FocusedInput | null) => void;
+};
+
+function landBandInputFocus(
+  focusable: DrawingFocusable | null | undefined,
+  setInput: (next: FocusedInput | null) => void,
+  closeSelect: () => void,
+): void {
+  if (focusable?.tag === 'Input' && typeof focusable.element === 'string' && focusable.element !== '') {
+    closeSelect();
+    setInput({
+      plugin: focusable.plugin,
+      handle: focusable.handle,
+      element: focusable.element,
+      ...(typeof focusable.value === 'string' && { value: focusable.value }),
+    });
+    return;
+  }
+  setInput(null);
+}
 
 const FocusedInputContext = createContext<{
   focused: FocusedInput | null;
@@ -2522,12 +3132,76 @@ function PluginMarkdown({
   );
 }
 
+/** densable `to` — Ink Key flags → surface key names. */
+const PLUGIN_CLIENT_KEY_NAMES: Array<[keyof Key, string]> = [
+  ['upArrow', 'up'],
+  ['downArrow', 'down'],
+  ['leftArrow', 'left'],
+  ['rightArrow', 'right'],
+  ['pageUp', 'pageup'],
+  ['pageDown', 'pagedown'],
+  ['home', 'home'],
+  ['end', 'end'],
+  ['return', 'return'],
+  ['tab', 'tab'],
+  ['backspace', 'backspace'],
+  ['delete', 'delete'],
+];
+
+/**
+ * densable `ro` — skip wheel; named key or space; empty input drops.
+ */
+export function pluginClientKeyFromInput(
+  input: string,
+  key: Key,
+): { key: string; ctrl?: true; shift?: true; meta?: true } | undefined {
+  if (key.wheelUp || key.wheelDown) return undefined;
+  const named = PLUGIN_CLIENT_KEY_NAMES.find(([flag]) => key[flag])?.[1] ?? (input === ' ' ? 'space' : input);
+  if (named === '') return undefined;
+  return {
+    key: named,
+    ...(key.ctrl ? { ctrl: true as const } : {}),
+    ...(key.shift ? { shift: true as const } : {}),
+    ...(key.meta ? { meta: true as const } : {}),
+  };
+}
+
+function pluginClientPointerKind(type: MouseActionEvent['type']): 'down' | 'up' | 'move' {
+  if (type === 'mousedown') return 'down';
+  if (type === 'mouseup') return 'up';
+  return 'move';
+}
+
+/**
+ * densable `eo` — isolate pointer button names. DualInk packs SGR mods in
+ * high bits; mask 0x03 so 0/1/2 still map left/middle/right.
+ */
+export function pluginClientPointerButton(button: number | undefined): 'left' | 'middle' | 'right' | undefined {
+  if (button === undefined) return undefined;
+  switch (button & 0x03) {
+    case 0:
+      return 'left';
+    case 1:
+      return 'middle';
+    case 2:
+      return 'right';
+    default:
+      return undefined;
+  }
+}
+
+function measurePluginClientBox(node: DOMElement | null): { width: number; height: number } {
+  if (node === null) return { width: 0, height: 0 };
+  return measureElement(node);
+}
+
 function PluginClient({
   plugin,
   moduleName,
   elementKey,
   requestId,
   props,
+  drawn,
   width,
   height,
   flexGrow,
@@ -2538,6 +3212,8 @@ function PluginClient({
   elementKey?: string;
   requestId?: string;
   props?: unknown;
+  /** densable `o.drawn` — Client node props identity (`x(()=>i.drawnAgain(),[i,o.drawn])`). */
+  drawn?: unknown;
   width?: number;
   height?: number;
   flexGrow?: number;
@@ -2545,7 +3221,9 @@ function PluginClient({
 }): ReactNode {
   const instanceRef = useRef<ClientInstance>(DETACHED_CLIENT);
   const [snapshot, setSnapshot] = useState(() => DETACHED_CLIENT.getSnapshot());
-  const boxRef = useRef<{ width?: number; height?: number } | null>(null);
+  const boxRef = useRef<DOMElement | null>(null);
+  const measuredWidth = useYogaMeasure(() => measurePluginClientBox(boxRef.current).width);
+  const measuredHeight = useYogaMeasure(() => measurePluginClientBox(boxRef.current).height);
   useLayoutEffect(() => {
     const instance = acquirePluginClient({
       plugin,
@@ -2568,34 +3246,145 @@ function PluginClient({
     instance.setProps(props);
   }, [props]);
   useLayoutEffect(() => {
-    const box = boxRef.current;
-    const columns = typeof box?.width === 'number' ? box.width : (width ?? 0);
-    const rows = typeof box?.height === 'number' ? box.height : (height ?? 0);
-    instanceRef.current.resize(columns, rows);
-  }, [width, height, snapshot]);
-  const drawn = snapshot.status === 'drawn';
-  return (
+    // densable `Xt(()=>{i.laidOut()})` — layout mark, not snapshot-driven.
+    instanceRef.current.laidOut();
+  });
+  useLayoutEffect(() => {
+    // densable `x(()=>{i.resize(R,T)},[i,R,T])` — size only; snapshot in this
+    // dep list remount-paints in a loop (RootREPLBoundary #185).
+    instanceRef.current.resize(measuredWidth, measuredHeight);
+  }, [measuredWidth, measuredHeight]);
+  useEffect(() => {
+    // densable `x(()=>{i.drawnAgain()},[i,o.drawn])` — Client node props identity.
+    instanceRef.current.drawnAgain();
+  }, [drawn]);
+  const isDrawn = snapshot.status === 'drawn';
+  // densable `Z` / `i.id` — same key as acquirePluginClient.
+  const clientId = clientInstanceKey({
+    plugin,
+    surface: 'terminal',
+    requestId: requestId ?? 'detached',
+    key: elementKey ?? '',
+  });
+  const panesFocusedId = useSyncExternalStore(subscribePanes, () => getPanesState().focusedId);
+  const clientHeld =
+    useSyncExternalStore(subscribePluginClientFocus, getPluginClientFocusedId, getPluginClientFocusedId) === clientId;
+  useEffect(() => {
+    // densable oo: pane focusedId + this client held → DQt(null).
+    if (panesFocusedId !== null && clientHeld) setPluginClientFocusedId(null);
+  }, [panesFocusedId, clientHeld]);
+  const clientAway = useCallback(() => {
+    clearPluginClientFocusedId(clientId);
+  }, [clientId]);
+  const clientAwayRef = usePaneClickAway(clientAway);
+  useEffect(() => () => clearPluginClientFocusedId(clientId), [clientId]);
+  const pointerAt = useRef({ x: 0, y: 0 });
+  const acceptsPointer = isDrawn && instanceRef.current.acceptsPointer();
+  const acceptsKeys = isDrawn && instanceRef.current.acceptsKeys();
+  const pointerLive = acceptsPointer || acceptsKeys;
+  const { retainFinePointer } = useApp();
+  useEffect(() => {
+    // densable fDn(F): retainFinePointer while Client acceptsPointer.
+    if (!acceptsPointer) return;
+    return retainFinePointer();
+  }, [acceptsPointer, retainFinePointer]);
+  useInput(
+    (input, key, event) => {
+      // densable oo `sb`: only while NLe.focusedId===id.
+      const live = instanceRef.current;
+      if (getPluginClientFocusedId() !== clientId) return;
+      if (!live.acceptsKeys()) {
+        clientAway();
+        return;
+      }
+      const leave = key.escape || (key.ctrl && (input === 'c' || input === 'd'));
+      if (leave) {
+        setPluginClientFocusedId(null);
+        if (key.escape) event.stopImmediatePropagation();
+        return;
+      }
+      const mapped = pluginClientKeyFromInput(input === '' ? event.input : input, key);
+      if (mapped === undefined) return;
+      live.key(mapped);
+      event.stopImmediatePropagation();
+    },
+    { isActive: clientHeld, prepend: true },
+  );
+  const firePointer = (kind: 'down' | 'up' | 'move' | 'enter' | 'leave', event?: MouseActionEvent): void => {
+    const live = instanceRef.current;
+    if (kind === 'down' && live.acceptsKeys()) {
+      focusPane(null);
+      setPluginClientFocusedId(clientId);
+    }
+    const x = event?.localCol ?? pointerAt.current.x;
+    const y = event?.localRow ?? pointerAt.current.y;
+    pointerAt.current = { x, y };
+    const namedButton = pluginClientPointerButton(event?.button);
+    live.pointer({
+      type: kind,
+      x,
+      y,
+      ...(namedButton !== undefined ? { button: namedButton } : {}),
+      ...(event?.shift ? { shift: true } : {}),
+      ...(event?.alt ? { alt: true } : {}),
+      ...(event?.ctrl ? { ctrl: true } : {}),
+      ...(event?.fine ? { fine: { x: event.fine.col, y: event.fine.row } } : {}),
+    });
+  };
+  const clientResetKey = snapshot.status === 'failed' ? `failed:${snapshot.text}` : snapshot.status;
+  const clientFallback = (
     <Box
-      ref={node => {
-        boxRef.current = node as { width?: number; height?: number } | null;
-      }}
-      flexDirection="column"
       flexShrink={0}
       overflow="hidden"
-      {...(elementKey !== undefined && { elementKey, elementPlugin: plugin })}
       {...(width !== undefined && { width })}
       {...(height !== undefined && { height })}
       {...(flexGrow !== undefined && { flexGrow })}
     >
-      {drawn ? (
-        <DrawingNode node={snapshot.tree} plugin={plugin} requestId={requestId} index={0} engine={engine} />
-      ) : null}
-      {snapshot.status === 'failed' && (
-        <Text dimColor wrap="truncate-end">
-          {snapshot.text}
-        </Text>
-      )}
+      <Text> </Text>
     </Box>
+  );
+  return (
+    <PaneErrorBoundary
+      resetKey={clientResetKey}
+      onError={error => {
+        instanceRef.current.threw(error);
+      }}
+      fallback={clientFallback}
+    >
+      <Box
+        ref={node => {
+          boxRef.current = node;
+          clientAwayRef.current = node;
+        }}
+        flexDirection="column"
+        flexShrink={0}
+        overflow="hidden"
+        {...(elementKey !== undefined && { elementKey, elementPlugin: plugin })}
+        {...(width !== undefined && { width })}
+        {...(height !== undefined && { height })}
+        {...(flexGrow !== undefined && { flexGrow })}
+        {...(pointerLive
+          ? {
+              onPointer: (event: MouseActionEvent) => firePointer(pluginClientPointerKind(event.type), event),
+              onMouseEnter: () => {
+                instanceRef.current.pointer({ type: 'enter', ...pointerAt.current });
+              },
+              onMouseLeave: () => {
+                instanceRef.current.pointer({ type: 'leave', ...pointerAt.current });
+              },
+            }
+          : {})}
+      >
+        {isDrawn ? (
+          <DrawingNode node={snapshot.tree} plugin={plugin} requestId={requestId} index={0} engine={engine} />
+        ) : null}
+        {snapshot.status === 'failed' && (
+          <Text dimColor wrap="truncate-end">
+            {snapshot.text}
+          </Text>
+        )}
+      </Box>
+    </PaneErrorBoundary>
   );
 }
 
@@ -2757,6 +3546,7 @@ export function DrawingNode({
         elementKey={key}
         requestId={req}
         props={props.props}
+        drawn={props}
         width={numberProp(props, node, 'width')}
         height={numberProp(props, node, 'height')}
         flexGrow={numberProp(props, node, 'flexGrow')}
@@ -2866,17 +3656,22 @@ function useRenderDrawing(input: Record<string, unknown> | null, inputKey: strin
       setDrawn(undefined);
       return;
     }
-    let cancelled = false;
-    void evaluateUiRender(current).then(
+    const abort = new AbortController();
+    void evaluateUiRender(current, abort.signal).then(
       tree => {
-        if (!cancelled) setDrawn(isEngineDrawing(tree) ? undefined : tree);
+        if (!abort.signal.aborted) setDrawn(isEngineDrawing(tree) ? undefined : tree);
       },
-      () => {
-        if (!cancelled) setDrawn(undefined);
+      err => {
+        // densable `mr` — site failed log then engine fallback (`RZ`).
+        logForDebugging(
+          `ui.render (${String(current.component)} ${String(current.requestId ?? '')}): site failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        );
+        if (!abort.signal.aborted) setDrawn(undefined);
       },
     );
     return () => {
-      cancelled = true;
+      abort.abort();
     };
   }, [inputKey, version]);
   return drawn;
@@ -2885,186 +3680,76 @@ function useRenderDrawing(input: Record<string, unknown> | null, inputKey: strin
 function PluginSiteFields({
   children,
   site = 'Pane',
+  requestId,
+  focusables,
+  selectSeat,
+  inputSeat,
+  inputFocusHost,
 }: {
   children: ReactNode;
   /** densable `$q` `XP(focusable, site)` — Pane vs AbovePrompt. */
   site?: 'Pane' | 'AbovePrompt';
+  /** densable `kL` requestId — Pane id or above-prompt. */
+  requestId?: string;
+  focusables?: readonly DrawingFocusable[];
+  /** densable `_Ee`/`pee` lifted y$ — same object as g$ `fr`. */
+  selectSeat: PluginSelectSeat;
+  /** densable `_Ee`/`pee` lifted m$ — same object as g$ `rr`/`inputs`. */
+  inputSeat: PluginInputMapApi;
+  /** densable `_Ee` Input focus — parent ring land, not a process bridge. */
+  inputFocusHost?: BandInputFocusHost;
 }): ReactNode {
-  const [texts, setTexts] = useState(() => new Map<string, string>());
-  const live = useRef(new Map<string, string>());
-  const submitting = useRef(new Set<string>());
-  const [picked, setPicked] = useState(() => new Map<string, string>());
-  const [open, setOpen] = useState<SelectOpen | null>(null);
-  const [selectFocus, setSelectFocus] = useState<{
-    plugin: string;
-    handle: unknown;
-    element: string;
-    options: Array<{ value: string; label?: string }>;
-  } | null>(null);
-  const [focused, setFocused] = useState<FocusedInput | null>(null);
+  const ySelect = selectSeat;
+  const open = ySelect.fields.open;
+  const [localFocused, setLocalFocused] = useState<FocusedInput | null>(null);
+  const focused = inputFocusHost !== undefined ? inputFocusHost.focused : localFocused;
+  const setFocused = inputFocusHost?.setFocused ?? setLocalFocused;
   const fieldsRef = useRef<InputFields | null>(null);
   const selectRef = useRef<SelectFields | null>(null);
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
-  // densable `m$(focusables, component, requestId)` — live Map + submitting Set + vhr.
-  const fields = useMemo<InputFields>(() => {
-    const api = createPluginInputMap(undefined, site, site === 'AbovePrompt' ? BAND_REQUEST_ID : 'Pane', {
-      texts,
-      setTexts,
-      live,
-      submitting,
-    });
-    return {
-      textOf: api.fields.textOf,
-      edit: api.fields.edit,
-      textNow: api.textNow,
-      submit: api.submit,
-    };
-  }, [texts, site]);
-  const select = useMemo<SelectFields>(
-    () => ({
-      pickedOf: (plugin, element) => picked.get(inputFieldKey(plugin, element)),
-      open,
-      toggle({ plugin, handle, element, options, value }) {
-        const key = inputFieldKey(plugin, element);
-        const isOpen = open !== null && open.plugin === plugin && open.handle === handle;
-        if (!isOpen) {
-          const shown = picked.get(key) ?? value;
-          const at = options.findIndex(option => option.value === shown);
-          setFocused(null);
-          setOpen({ plugin, handle, highlight: at < 0 ? 0 : at, element, options });
-          return;
-        }
-        const choice = options[Math.min(open.highlight, Math.max(0, options.length - 1))];
-        if (choice === undefined) {
-          setOpen(null);
-          return;
-        }
-        setPicked(current => new Map(current).set(key, choice.value));
-        setOpen(null);
-        void firePressAnswer(plugin, handle, { value: choice.value }).then(
-          reply => {
-            if (reply !== undefined && typeof reply === 'object' && reply !== null && 'value' in reply) {
-              const next = (reply as { value: unknown }).value;
-              if (typeof next === 'string') {
-                setPicked(current => (current.get(key) === choice.value ? new Map(current).set(key, next) : current));
-              }
-            }
-          },
-          () => undefined,
-        );
-      },
-      move(delta) {
-        // densable y$ Vt — closed Select opens on move; open cycles highlight.
-        setOpen(current => {
-          if (current !== null) {
-            const count = Math.max(1, current.options.length);
-            return { ...current, highlight: (current.highlight + delta + count) % count };
-          }
-          const focused = selectFocus;
-          if (focused === null) return current;
-          const shown = picked.get(inputFieldKey(focused.plugin, focused.element));
-          const at = focused.options.findIndex(option => option.value === shown);
-          return {
-            plugin: focused.plugin,
-            handle: focused.handle,
-            element: focused.element,
-            options: focused.options,
-            highlight: at < 0 ? 0 : at,
-          };
-        });
-      },
-      typeahead(letter) {
-        setOpen(current => pluginSelectTypeaheadNext(current, selectFocus, letter));
-      },
-      close() {
-        setOpen(null);
-      },
-      focusedSelect: selectFocus,
-      focus(ref) {
-        setFocused(null);
-        setSelectFocus(ref);
-      },
-      unfocus() {
-        setSelectFocus(null);
-        setOpen(null);
-      },
-    }),
-    [picked, open, selectFocus],
-  );
+  const fields: InputFields = {
+    textOf: inputSeat.fields.textOf,
+    edit: inputSeat.fields.edit,
+    textNow: inputSeat.textNow,
+    submit: inputSeat.submit,
+  };
+  const select: SelectFields = {
+    pickedOf: ySelect.fields.pickedOf,
+    open,
+    toggle: ySelect.toggle,
+    move: ySelect.move,
+    typeahead: ySelect.typeahead,
+    close: ySelect.close,
+    focusedSelect: ySelect.focusedSelect,
+    focus: ySelect.focus,
+    unfocus: ySelect.unfocus,
+  };
   fieldsRef.current = fields;
   selectRef.current = select;
+  // densable `nr=s$(ts,Gn)` — open Select extra rows into *band* maxHeight.
+  // Gold `_Ee` only; Pane Select must not bump the AbovePrompt store.
+  const openOptionCount = open?.options.length ?? 0;
+  useEffect(() => {
+    if (site !== 'AbovePrompt') return;
+    setOpenListRows(openListRows(open, openOptionCount));
+    return () => setOpenListRows(0);
+  }, [open, openOptionCount, site]);
   const focusApi = useMemo(
     () => ({
       focused,
       setFocused: (next: FocusedInput | null) => {
-        if (next !== null) {
-          setOpen(null);
-          setSelectFocus(null);
-        }
+        if (next !== null) ySelect.close();
         setFocused(next);
       },
     }),
-    [focused],
+    [focused, setFocused, ySelect],
   );
-  // densable ring → PluginSiteFields: AbovePrompt focus index lands Input/Select hosts.
-  useLayoutEffect(() => {
-    registerBandFieldBridge({
-      landInput: ref => {
-        setOpen(null);
-        setSelectFocus(null);
-        setFocused(ref);
-      },
-      landSelect: ref => {
-        setFocused(null);
-        setSelectFocus(ref);
-      },
-      clear: () => {
-        setFocused(null);
-        setSelectFocus(null);
-        setOpen(null);
-      },
-      moveSelect: delta => {
-        selectRef.current?.move(delta);
-      },
-      pressSelect: () => {
-        const now = selectRef.current;
-        const focused = now?.focusedSelect;
-        if (now === null || now === undefined || focused === null || focused === undefined) return;
-        now.toggle({
-          plugin: focused.plugin,
-          handle: focused.handle,
-          element: focused.element,
-          options: focused.options,
-        });
-      },
-      submitInput: ref => {
-        fieldsRef.current?.submit(ref);
-      },
-      // densable `y$.intercept` — ctrl+c / typeahead for site g$.
-      selectKeys: (input, key) => {
-        const selectNow = selectRef.current;
-        if (selectNow === null || selectNow === undefined) return false;
-        return selectKeysIntercept(input, key, {
-          focusedSelect: selectNow.focusedSelect,
-          open: selectNow.open,
-          close: () => selectNow.close(),
-          unfocus: () => selectNow.unfocus(),
-          typeahead: letter => selectNow.typeahead(letter),
-        });
-      },
-      textNow: ref => fieldsRef.current?.textNow(ref) ?? ref.value ?? '',
-      edit: (ref, value) => {
-        fieldsRef.current?.edit(ref, value);
-      },
-    });
-    return () => registerBandFieldBridge(null);
-  }, []);
   const keys = useOptionalKeybindingContext();
-  const fieldHeld = focused !== null || open !== null || selectFocus !== null;
-  const renderedFocus = useRef({ focused, select: selectFocus });
+  const fieldHeld = focused !== null || open !== null || ySelect.focusedSelect !== null;
+  const renderedFocus = useRef({ focused, select: ySelect.focusedSelect });
   useEffect(() => {
-    renderedFocus.current = { focused, select: selectFocus };
+    renderedFocus.current = { focused, select: ySelect.focusedSelect };
   });
   useLayoutEffect(() => {
     setPaneFieldHeld(fieldHeld);
@@ -3094,15 +3779,7 @@ function PluginSiteFields({
       let selectIntercepted = false;
       if (focusedSelect !== null && selectNow !== null) {
         // densable y$.intercept → g$ selectKeys (site usePluginBandKeys + local useInput).
-        if (
-          selectKeysIntercept(input, key, {
-            focusedSelect,
-            open: openNow,
-            close: () => selectNow.close(),
-            unfocus: () => selectNow.unfocus(),
-            typeahead: letter => selectNow.typeahead(letter),
-          })
-        ) {
+        if (ySelect.intercept(input, key)) {
           event.stopImmediatePropagation();
           return;
         }
@@ -3179,35 +3856,75 @@ function PluginSiteFields({
   );
 }
 
+function PluginSiteFieldsOwned({
+  children,
+  site = 'Pane',
+  requestId,
+  focusables,
+  selectRing,
+}: {
+  children: ReactNode;
+  site?: 'Pane' | 'AbovePrompt';
+  requestId?: string;
+  focusables?: readonly DrawingFocusable[];
+  selectRing?: PluginSelectSeatRing;
+}): ReactNode {
+  const seatRequestId = requestId ?? (site === 'AbovePrompt' ? BAND_REQUEST_ID : 'Pane');
+  const selectSeat = usePluginSelectSeat(focusables, site, seatRequestId, selectRing);
+  const inputSeat = usePluginInputSeat(focusables, site, seatRequestId);
+  return (
+    <PluginSiteFields
+      site={site}
+      requestId={requestId}
+      focusables={focusables}
+      selectSeat={selectSeat}
+      inputSeat={inputSeat}
+    >
+      {children}
+    </PluginSiteFields>
+  );
+}
+
 function rebuild(
   drawn: unknown,
   plugin: string,
   requestId: string,
   engine?: ReactNode,
   site: 'Pane' | 'AbovePrompt' = 'Pane',
+  focusables?: readonly DrawingFocusable[],
+  selectSeat?: PluginSelectSeat,
+  inputSeat?: PluginInputMapApi,
+  inputFocusHost?: BandInputFocusHost,
 ): ReactNode {
   if (drawn === undefined || isEngineDrawing(drawn)) return engine ?? null;
+  const node = <DrawingNode node={drawn} plugin={plugin} requestId={requestId} index={0} engine={engine} />;
+  if (selectSeat !== undefined && inputSeat !== undefined) {
+    return (
+      <PluginSiteFields
+        site={site}
+        requestId={requestId}
+        focusables={focusables}
+        selectSeat={selectSeat}
+        inputSeat={inputSeat}
+        inputFocusHost={inputFocusHost}
+      >
+        {node}
+      </PluginSiteFields>
+    );
+  }
   return (
-    <PluginSiteFields site={site}>
-      <DrawingNode node={drawn} plugin={plugin} requestId={requestId} index={0} engine={engine} />
-    </PluginSiteFields>
+    <PluginSiteFieldsOwned site={site} requestId={requestId} focusables={focusables}>
+      {node}
+    </PluginSiteFieldsOwned>
   );
 }
 
 /**
- * densable `cv` / `Zq`: `nWt(xI("Pane", factory, deps), () => null)`.
- * Hosts `Ho.node` — plugin `wo`/`xo` sit in this Ink site, not a dump slot.
+ * densable `cv` / `Zq` / QT gate: light host around pee.
+ * Gold QT: `if(!(N!==void 0&&h.rows>0&&h.columns>0))return null` then mount pee.
+ * Empty REPL hosts must NOT run pee hooks — that boot #185 under RootREPLBoundary.
  */
-export function PluginPaneSite({
-  fill = false,
-  columns,
-  rows,
-  isWorking = false,
-  promptEmpty = true,
-  queueEditing = false,
-  promptOwnsEscape = false,
-  lit = false,
-}: {
+export type PluginPaneSiteProps = {
   fill?: boolean;
   columns?: number;
   rows?: number;
@@ -3224,12 +3941,130 @@ export function PluginPaneSite({
   promptOwnsEscape?: boolean;
   /** densable pee `Ie` — RowGrip hover lights inline round-border top. */
   lit?: boolean;
-} = {}): ReactNode {
+};
+
+/**
+ * densable `Mee` — dock row host. `he=$l(Js(ref).height)` then QT
+ * `rows:he, fill:!0`. First frame he=0 → QT gate keeps pee unmounted.
+ */
+export function PluginPaneDockHost({
+  width,
+  isWorking = false,
+  promptEmpty = true,
+  queueEditing = false,
+  promptOwnsEscape = false,
+  onResize,
+  onSettle,
+}: {
+  width: number;
+  isWorking?: boolean;
+  promptEmpty?: boolean;
+  queueEditing?: boolean;
+  promptOwnsEscape?: boolean;
+  onResize: (next: number) => number;
+  onSettle: () => void;
+}): ReactNode {
+  const hostRef = useRef<DOMElement | null>(null);
+  const hostRows = useYogaMeasure(() => measurePluginClientBox(hostRef.current).height);
+  if (width <= 0) return null;
+  const columns = Math.max(0, width - DOCK_GRIP_COLUMNS);
+  return (
+    <Box ref={hostRef} flexGrow={1} flexDirection="row" width={width}>
+      <PluginDockGrip columns={width} onResize={onResize} onSettle={onSettle} />
+      <Box flexGrow={1} flexDirection="column" width={columns}>
+        <PluginPaneSite
+          fill
+          columns={columns}
+          rows={hostRows}
+          isWorking={isWorking}
+          promptEmpty={promptEmpty}
+          queueEditing={queueEditing}
+          promptOwnsEscape={promptOwnsEscape}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+export function PluginPaneSite({
+  fill = false,
+  columns,
+  rows,
+  isWorking = false,
+  promptEmpty = true,
+  queueEditing = false,
+  promptOwnsEscape = false,
+  lit = false,
+}: PluginPaneSiteProps = {}): ReactNode {
   const shownId = useSyncExternalStore(subscribePanes, () => getPanesState().shownId);
-  const focusedId = useSyncExternalStore(subscribePanes, () => getPanesState().focusedId);
   const pane = shownId === null ? undefined : getShownPluginPane();
-  const paneIdRef = useRef(pane?.id);
-  paneIdRef.current = pane?.id;
+  const { addNotification } = useNotifications();
+  const paneId = pane?.id;
+  const resetKey = useSyncExternalStore(
+    subscribePanes,
+    () => (paneId === undefined ? '0' : `${paneId} ${getPaneRemountGeneration(paneId)}`),
+    () => '0',
+  );
+  // densable QT: `x(()=>{if(M)u3(null)},[M])` + unmount `u3(null)`.
+  const dialogOpen = useHasOpenDialogs();
+  useEffect(() => {
+    if (dialogOpen) focusPane(null);
+  }, [dialogOpen]);
+  useEffect(() => () => focusPane(null), []);
+  // densable QT: `if(!(N!==void 0&&h.rows>0&&h.columns>0))return null` then pee.
+  // Host rows/columns only — never fall back to pane.rows/columns.
+  if (pane === undefined) return null;
+  if (!((rows ?? 0) > 0 && (columns ?? 0) > 0)) return null;
+  const onPaneDrawError = (error: Error): void => {
+    // densable BO onError: u3(null) + l8e(id,{kind:"unload"}) + Jmn toast.
+    focusPane(null);
+    void closePluginPane(pane.id, { kind: 'unload' });
+    addNotification({
+      key: `pane-threw-while-drawn:${pane.id}`,
+      text: `ui.render (Pane) threw while drawn: ${error.message}; the pane was closed`,
+      priority: 'immediate',
+      kind: 'warning',
+      color: 'error',
+    });
+  };
+  // densable QT: BO wraps pee (gate then e(BO,{children:e(pee,...)})).
+  return (
+    <PaneErrorBoundary key={resetKey} resetKey={resetKey} onError={onPaneDrawError}>
+      <PluginPaneSiteBody
+        fill={fill}
+        columns={columns}
+        rows={rows}
+        isWorking={isWorking}
+        promptEmpty={promptEmpty}
+        queueEditing={queueEditing}
+        promptOwnsEscape={promptOwnsEscape}
+        lit={lit}
+        pane={pane}
+      />
+    </PaneErrorBoundary>
+  );
+}
+
+type ShownPluginPane = NonNullable<ReturnType<typeof getShownPluginPane>>;
+
+/**
+ * densable `pee` — Pane body. Only mounted when QT gate passes.
+ */
+function PluginPaneSiteBody({
+  fill = false,
+  columns,
+  rows,
+  isWorking = false,
+  promptEmpty = true,
+  queueEditing = false,
+  promptOwnsEscape = false,
+  lit = false,
+  pane,
+}: PluginPaneSiteProps & { pane: ShownPluginPane }): ReactNode {
+  const shownId = pane.id;
+  const focusedId = useSyncExternalStore(subscribePanes, () => getPanesState().focusedId);
+  const paneIdRef = useRef(pane.id);
+  paneIdRef.current = pane.id;
   const [paneFocusIndex, setPaneFocusIndex] = useState<number | null>(null);
   const paneFocusIndexRef = useRef(paneFocusIndex);
   paneFocusIndexRef.current = paneFocusIndex;
@@ -3249,20 +4084,9 @@ export function PluginPaneSite({
   const [focusBottom, setFocusBottom] = useState(-1);
   const [paneTreeRows, setPaneTreeRows] = useState(0);
   const [dockHostRows, setDockHostRows] = useState(0);
-  const panePluginRef = useRef(pane?.plugin);
-  panePluginRef.current = pane?.plugin;
-  const viewingAgentView = useAppState(s =>
-    viewingAgentViewProps({
-      viewingAgentTaskId: s.viewingAgentTaskId,
-      tasks: s.tasks as Record<string, { type?: string; agentId?: string; identity?: { agentId?: string } }>,
-    }),
-  );
-  const { addNotification } = useNotifications();
-  const remountGen = useSyncExternalStore(
-    subscribePanes,
-    () => (pane === undefined ? 0 : getPaneRemountGeneration(pane.id)),
-    () => 0,
-  );
+  const panePluginRef = useRef(pane.plugin);
+  panePluginRef.current = pane.plugin;
+  const viewingAgentView = useViewingAgentView();
   const openCount = useSyncExternalStore(subscribePanes, () => getPanesState().open.length);
   const titleChromeRows = paneTitleChromeRows(openCount > 1, fill);
   // densable `Ao=max(0,Pe-lL(ro,io))` — chrome-subtracted allocation (clip only).
@@ -3272,7 +4096,7 @@ export function PluginPaneSite({
       ? Math.max(0, rows - titleChromeRows)
       : fill && dockHostRows > 0
         ? Math.max(0, dockHostRows - titleChromeRows)
-        : (pane?.rows ?? (pane !== undefined && pane.bodyRows > 0 ? pane.bodyRows : 0));
+        : (pane.rows ?? (pane.bodyRows > 0 ? pane.bodyRows : 0));
   // densable `ao=Me?Ao:Math.min(Ao,pt)` — yEe bodyRows / maxOffset only.
   // pt=0 first layout → inline ao=0; clip stays on Ao so measure can grow.
   const paneViewport = fill ? paneAllocated : Math.min(paneAllocated, paneTreeRows);
@@ -3285,33 +4109,28 @@ export function PluginPaneSite({
     scrollBy: paneScrollBy,
   } = useBandScrollPlace({
     component: 'Pane',
-    requestId: pane?.id ?? '',
-    plugin: pane?.plugin ?? '',
+    requestId: pane.id,
+    plugin: pane.plugin,
     bodyRows: paneViewport,
     contentRows: paneTreeRows,
     maxOffset: paneMaxOffset,
   });
-  const input =
-    pane === undefined
-      ? null
-      : {
-          surface: 'terminal',
-          component: 'Pane',
-          requestId: pane.id,
-          props: {
-            title: pane.title,
-            isFocused: pane.isFocused,
-            bodyColumns: pane.columns,
-            placement: fill ? 'dock' : 'inline',
-            scroll: { offset: paneScrollOffset, bodyRows: paneViewport },
-            view: viewingAgentView,
-          },
-        };
+  const input = {
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: pane.id,
+    props: {
+      title: pane.title,
+      isFocused: pane.isFocused,
+      bodyColumns: pane.columns,
+      placement: fill ? 'dock' : 'inline',
+      scroll: { offset: paneScrollOffset, bodyRows: paneViewport },
+      view: viewingAgentView,
+    },
+  };
   const drawn = useRenderDrawing(
     input,
-    pane === undefined
-      ? ''
-      : `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${JSON.stringify(viewingAgentView)}`,
+    `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${JSON.stringify(viewingAgentView)}`,
   );
   useLayoutEffect(() => {
     const contentH = paneContentRef.current?.yogaNode?.getComputedHeight() ?? 0;
@@ -3340,7 +4159,6 @@ export function PluginPaneSite({
     setFocusBottom(prev => (prev === bottom ? prev : bottom));
   });
   useEffect(() => {
-    if (pane === undefined) return;
     registerPluginScrollSite(pane.plugin, pane.id, 'Pane', {
       offset: paneScrollOffset,
       bodyRows: paneViewport,
@@ -3350,16 +4168,15 @@ export function PluginPaneSite({
     return () => {
       unregisterPluginScrollSite(panePluginRef.current ?? pane.plugin, pane.id);
     };
-  }, [pane?.plugin, pane?.id]);
+  }, [pane.plugin, pane.id]);
   useEffect(() => {
-    if (pane === undefined) return;
     updatePluginScrollSite(pane.plugin, pane.id, {
       offset: paneScrollOffset,
       bodyRows: paneViewport,
       contentRows: paneTreeRows,
       maxOffset: paneMaxOffset,
     });
-  }, [pane?.plugin, pane?.id, paneScrollOffset, paneViewport, paneTreeRows, paneMaxOffset]);
+  }, [pane.plugin, pane.id, paneScrollOffset, paneViewport, paneTreeRows, paneMaxOffset]);
   // densable pee `if(To>So)an(()=>So)`.
   useEffect(() => {
     if (panePlaced > paneMaxOffset) panePlace(() => paneMaxOffset);
@@ -3380,28 +4197,29 @@ export function PluginPaneSite({
     const index = paneFocusIndexRef.current;
     heldFocusRef.current = node !== null && index !== null ? { node, index } : null;
   }, []);
-  const paneFocusables = useMemo(() => (pane === undefined ? [] : focusablesOfDrawing(drawn)), [pane, drawn]);
-  // densable `h$` — prune focus index when it is past the live focusables list.
+  const paneFocusables = useMemo(() => focusablesOfDrawing(drawn), [pane, drawn]);
+  // densable `h$` — prune with ht(null), not Un/land (no Vt place bump).
   useEffect(() => {
     if (paneFocusIndex !== null && paneFocusIndex >= paneFocusables.length) {
-      landPaneFocusIndex(null);
+      setPaneFocusIndex(null);
     }
-  }, [paneFocusIndex, paneFocusables.length, landPaneFocusIndex]);
+  }, [paneFocusIndex, paneFocusables.length]);
   const [engineHeld, setEngineHeld] = useState<number | null>(null);
   const engineHeldRef = useRef<number | null>(null);
   engineHeldRef.current = engineHeld;
   // densable `N` / `bn`: isHeld from render; isHeldNow reads live focusedId.
-  const paneHeld = pane !== undefined && focusedId === pane.id;
+  const paneHeld = focusedId === pane.id;
+  const paneIsHeldNow = (): boolean => {
+    const id = paneIdRef.current;
+    return id !== undefined && getPanesState().focusedId === id;
+  };
   const paneHost = usePluginFocusHost({
     component: 'Pane',
-    requestId: pane?.id ?? '',
-    owner: pane?.plugin,
+    requestId: pane.id,
+    owner: pane.plugin,
     focusables: paneFocusables,
     isHeld: paneHeld,
-    isHeldNow: () => {
-      const id = paneIdRef.current;
-      return id !== undefined && getPanesState().focusedId === id;
-    },
+    isHeldNow: paneIsHeldNow,
     indexNow: () => paneFocusIndexRef.current,
     isEmptyNow: () => paneFocusIndexRef.current === null && engineHeldRef.current === null,
     land: landPaneFocusIndex,
@@ -3419,19 +4237,22 @@ export function PluginPaneSite({
   );
   const openPanes = useMemo(() => getPanesState().open, [openKey]);
   const otherTabs = useMemo(
-    () => (openCount > 1 && pane !== undefined ? openPanes.filter(row => row.id !== pane.id) : []),
+    () => (openCount > 1 ? openPanes.filter(row => row.id !== pane.id) : []),
     [openCount, openPanes, pane],
   );
   const tabCount = otherTabs.length;
   const closeMarkHeld = engineHeld === tabCount;
   const heldTabId = engineHeld !== null && engineHeld < tabCount ? (otherTabs[engineHeld]?.id ?? null) : null;
+  // densable pee `x(()=>{if(!N)ht(null),Rt(null)},[N])` — clear without Un/Vt.
+  // Boot hosts mount PluginPaneSite with shownId=null → paneHeld=false forever;
+  // landPaneFocusIndex(null) would bump focusPlace every effect and #185.
   useEffect(() => {
     if (!paneHeld) {
-      landPaneFocusIndex(null);
+      setPaneFocusIndex(null);
       setEngineHeld(null);
       heldFocusRef.current = null;
     }
-  }, [paneHeld, landPaneFocusIndex]);
+  }, [paneHeld]);
   const focusByPerson = useCallback(
     (index: number) => {
       const id = paneIdRef.current;
@@ -3444,15 +4265,19 @@ export function PluginPaneSite({
     },
     [paneHost, landPaneFocusIndex],
   );
+  // densable pee Jt — ht(null)+Rt(null)+u3(null); no Un/Vt place bump on clear.
+  const clearPaneFocusLocal = useCallback(() => {
+    setPaneFocusIndex(null);
+    setEngineHeld(null);
+    heldFocusRef.current = null;
+  }, []);
   const clickAway = useCallback(() => {
     const id = paneIdRef.current;
     if (id !== undefined && getPanesState().focusedId === id) {
-      landPaneFocusIndex(null);
-      setEngineHeld(null);
-      heldFocusRef.current = null;
+      clearPaneFocusLocal();
       focusPane(null);
     }
-  }, [landPaneFocusIndex]);
+  }, [clearPaneFocusLocal]);
   const paneAwayRef = usePaneClickAway(clickAway);
   const paneWheelAccel = useRef<WheelAccelState | null>(null);
   const paneWheelProfile = useRef<WheelProfile | null>(null);
@@ -3467,9 +4292,7 @@ export function PluginPaneSite({
   }, [shownId, clickAway]);
   const leavePaneRing = useCallback(() => {
     paneHost.forget();
-    landPaneFocusIndex(null);
-    setEngineHeld(null);
-    heldFocusRef.current = null;
+    clearPaneFocusLocal();
     const id = paneIdRef.current;
     if (id === undefined) return;
     if (getShownPluginPane()?.closeOnEscape === true) {
@@ -3477,7 +4300,7 @@ export function PluginPaneSite({
       return;
     }
     focusPane(null);
-  }, [paneHost, landPaneFocusIndex]);
+  }, [paneHost, clearPaneFocusLocal]);
   const clickedPress = useMemo(() => clickFocusByPress(paneFocusables, focusByPerson), [paneFocusables, focusByPerson]);
   const paneRing = useMemo(() => {
     const base = bandRingHandlers({
@@ -3528,6 +4351,59 @@ export function PluginPaneSite({
     context: paneRingContext,
     isActive: paneHeld && (paneFocusIndex !== null || engineHeld !== null),
   });
+  const paneRenderedFocusIndex = useRef(paneFocusIndex);
+  useEffect(() => {
+    paneRenderedFocusIndex.current = paneFocusIndex;
+  });
+  // densable pee `hn` — last painted engine tab (dn()!==hn).
+  const paneRenderedEngineHeld = useRef(engineHeld);
+  useEffect(() => {
+    paneRenderedEngineHeld.current = engineHeld;
+  });
+  // densable pee `fr=y$({...})` / `rr=m$({...})` — same objects as SiteFields / g$.
+  const paneSelect = usePluginSelectSeat(paneFocusables, 'Pane', pane.id, {
+    focusIndex: paneFocusIndex,
+    focusIndexNow: () => paneFocusIndexRef.current,
+    setFocusIndex: next => {
+      landPaneFocusIndex(typeof next === 'number' ? next : null);
+    },
+    working: isWorking,
+  });
+  const paneInput = usePluginInputSeat(paneFocusables, 'Pane', pane.id);
+  const paneKeysBag = useMemo<PluginBandKeysBag>(
+    () => ({
+      // densable pee `bn()!==N||Ln()!==eo||dn()!==hn`
+      isAhead: () =>
+        paneIsHeldNow() !== paneHeld ||
+        paneFocusIndexRef.current !== paneRenderedFocusIndex.current ||
+        engineHeldRef.current !== paneRenderedEngineHeld.current,
+      contextNow: () => {
+        if (paneFocusIndexRef.current === null) return null;
+        return pluginFieldContext(focusableAt(paneFocusables, paneFocusIndexRef.current)?.tag, 'Pane');
+      },
+      focusedNow: () => focusableAt(paneFocusables, paneFocusIndexRef.current),
+      contextRendered: () => {
+        if (paneRenderedFocusIndex.current === null) return null;
+        return pluginFieldContext(paneFocusables[paneRenderedFocusIndex.current]?.tag, 'Pane');
+      },
+      focusedRendered: () =>
+        typeof paneRenderedFocusIndex.current === 'number'
+          ? (paneFocusables[paneRenderedFocusIndex.current] ?? null)
+          : null,
+      handlers: {
+        Pane: paneRing,
+        AbovePromptInput: paneRing,
+        AbovePromptSelect: { ...paneRing, ...paneSelect.handlers },
+      },
+      inputs: {
+        textNow: paneInput.textNow,
+        fields: paneInput.fields,
+      },
+      selectKeys: (input, key) => paneSelect.intercept(input, key),
+    }),
+    [paneFocusables, paneRing, paneSelect, paneInput, paneHeld],
+  );
+  usePluginBandKeys(paneKeysBag, { isActive: paneHeld });
   // densable iee/mEe: pixel scroll via yEe scrollBy when maxOffset>0;
   // aee We focus-cycle only when the pane is not scrollable.
   const panePixelActive = paneHeld && paneMaxOffset > 0;
@@ -3589,16 +4465,11 @@ export function PluginPaneSite({
     },
     { context: 'Global', isActive: openCount > 1 },
   );
-  const closingNow = useSyncExternalStore(subscribePanes, () => getPanesState().closing.includes(pane?.id ?? ''));
+  const closingNow = useSyncExternalStore(subscribePanes, () => getPanesState().closing.includes(pane.id));
   // densable mee overlay gates: zCe=dialogStore.open.length>0, u7t=overlay,
   // viewSelectionMode==="viewing-agent", footerSelection!==null,
   // promptOwnsEscape = draft.inputOwnsEscape (REPL host).
   const dialogOpen = useHasOpenDialogs();
-  // densable QT: `x(()=>{if(M)u3(null)},[M])` + unmount `u3(null)`.
-  useEffect(() => {
-    if (dialogOpen) clickAway();
-  }, [dialogOpen, clickAway]);
-  useEffect(() => () => clickAway(), [clickAway]);
   const overlayActive = useIsOverlayActive();
   const viewingAgent = useAppState(s => s.viewSelectionMode === 'viewing-agent');
   const footerSelected = useAppState(s => s.footerSelection !== null);
@@ -3614,7 +4485,6 @@ export function PluginPaneSite({
       context: 'Chat',
       prepend: true,
       isActive:
-        pane !== undefined &&
         pane.closeOnEscape === true &&
         !paneHeld &&
         !isWorking &&
@@ -3628,8 +4498,7 @@ export function PluginPaneSite({
         !footerSelected,
     },
   );
-  if (pane === undefined) return null;
-  const node = rebuild(drawn, pane.plugin, pane.id, undefined, 'Pane');
+  const node = rebuild(drawn, pane.plugin, pane.id, undefined, 'Pane', paneFocusables, paneSelect, paneInput);
   if (node === null) return null;
   const focusedPress =
     typeof paneFocusIndex === 'number'
@@ -3644,136 +4513,118 @@ export function PluginPaneSite({
         ? (columns ?? pane.columns ?? 0)
         : Math.max(0, (columns ?? pane.columns ?? 0) - INLINE_PANE_CHROME_COLUMNS)
       : null;
-  const onPaneDrawError = (error: Error): void => {
-    // densable BO onError: u3(null) + l8e(id,{kind:"unload"}) + Jmn toast.
-    focusPane(null);
-    void closePluginPane(pane.id, { kind: 'unload' });
-    addNotification({
-      key: `pane-threw-while-drawn:${pane.id}`,
-      text: `ui.render (Pane) threw while drawn: ${error.message}; the pane was closed`,
-      priority: 'immediate',
-      kind: 'warning',
-      color: 'error',
-    });
-  };
   return (
     <ClickedPressContext.Provider value={clickedPress}>
       <FocusedPressContext.Provider value={focusedPress}>
         <HeldFocusRefContext.Provider value={reportHeldFocusNode}>
-          <PaneErrorBoundary
-            key={`${pane.id} ${remountGen}`}
-            resetKey={`${pane.id} ${remountGen}`}
-            onError={onPaneDrawError}
-          >
-            <PaneBodyColumnsContext.Provider value={paneBodyColumns}>
-              <Box
-                ref={node => {
-                  paneAwayRef.current = node;
-                  dockHostRef.current = node;
-                }}
-                position="relative"
-                flexShrink={0}
-                flexGrow={fill ? 1 : 0}
-                flexDirection="column"
-                overflow="hidden"
-                selectionScope
-                onWheel={
-                  dialogOpen
-                    ? undefined
-                    : (event: WheelEvent) => {
-                        // densable gEe(yEe, dEe) — scrollBy via local Me; no paneWheelScroll bypass.
-                        const sign: 1 | -1 = event.deltaY < 0 ? -1 : 1;
-                        const rows = computeWheelStep(
-                          ensurePaneWheelAccel(paneWheelAccel, paneWheelProfile),
-                          sign,
-                          performance.now(),
-                        );
-                        if (rows === 0) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          return;
-                        }
-                        paneScrollBy(sign * rows);
+          <PaneBodyColumnsContext.Provider value={paneBodyColumns}>
+            <Box
+              ref={node => {
+                paneAwayRef.current = node;
+                dockHostRef.current = node;
+              }}
+              position="relative"
+              flexShrink={0}
+              flexGrow={fill ? 1 : 0}
+              flexDirection="column"
+              overflow="hidden"
+              selectionScope
+              onWheel={
+                dialogOpen
+                  ? undefined
+                  : (event: WheelEvent) => {
+                      // densable gEe(yEe, dEe) — scrollBy via local Me; no paneWheelScroll bypass.
+                      const sign: 1 | -1 = event.deltaY < 0 ? -1 : 1;
+                      const rows = computeWheelStep(
+                        ensurePaneWheelAccel(paneWheelAccel, paneWheelProfile),
+                        sign,
+                        performance.now(),
+                      );
+                      if (rows === 0) {
                         event.preventDefault();
                         event.stopPropagation();
+                        return;
                       }
-                }
-                onClick={() => {
-                  // densable hs: skip person-focus while a dialog is open (`l1`).
-                  if (dialogOpen) return;
-                  focusPane(pane.id);
-                }}
-                {...((columns ?? pane.columns) !== undefined && { width: columns ?? pane.columns })}
-                {...(!fill && rows !== undefined ? { height: rows } : {})}
-                {...(!fill && rows === undefined && (pane.bodyRows > 0 ? pane.bodyRows : pane.rows) !== undefined
-                  ? { height: pane.bodyRows > 0 ? pane.bodyRows : pane.rows }
-                  : {})}
+                      paneScrollBy(sign * rows);
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }
+              }
+              onClick={() => {
+                // densable hs: skip person-focus while a dialog is open (`l1`).
+                if (dialogOpen) return;
+                focusPane(pane.id);
+              }}
+              {...((columns ?? pane.columns) !== undefined && { width: columns ?? pane.columns })}
+              {...(rows !== undefined ? { height: rows } : {})}
+              {...(!fill && rows === undefined && (pane.bodyRows > 0 ? pane.bodyRows : pane.rows) !== undefined
+                ? { height: pane.bodyRows > 0 ? pane.bodyRows : pane.rows }
+                : {})}
+            >
+              <Box
+                flexDirection="column"
+                flexShrink={0}
+                selectionScope
+                {...(!fill && {
+                  borderStyle: 'round',
+                  borderDimColor: !paneHeld,
+                  borderTopDimColor: !paneHeld && !lit,
+                  borderTopColor: lit ? 'suggestion' : undefined,
+                  paddingX: 1,
+                })}
+                {...((columns ?? pane.columns) !== undefined && {
+                  width: fill
+                    ? (columns ?? pane.columns)
+                    : Math.max(0, (columns ?? pane.columns ?? 0) - INLINE_PANE_CHROME_COLUMNS),
+                })}
               >
+                {openCount > 1 ? (
+                  <PluginPaneTitleStrip
+                    open={openPanes}
+                    shownId={pane.id}
+                    heldId={heldTabId}
+                    columns={
+                      fill
+                        ? Math.max(0, (columns ?? pane.columns ?? 0) - CLOSE_MARK_COLUMNS - MARK_EDGE_COLUMNS)
+                        : Math.max(0, (columns ?? pane.columns ?? 0) - INLINE_PANE_CHROME_COLUMNS)
+                    }
+                    onPick={showPane}
+                  />
+                ) : fill ? (
+                  <Box flexShrink={0} height={1} />
+                ) : null}
+                {/* densable pee clip: height:fill?Ao, maxHeight:Ao, overflowY:hidden > fEe(offset). */}
                 <Box
                   flexDirection="column"
-                  flexShrink={0}
-                  selectionScope
-                  {...(!fill && {
-                    borderStyle: 'round',
-                    borderDimColor: !paneHeld,
-                    borderTopDimColor: !paneHeld && !lit,
-                    borderTopColor: lit ? 'suggestion' : undefined,
-                    paddingX: 1,
-                  })}
-                  {...((columns ?? pane.columns) !== undefined && {
-                    width: fill
-                      ? (columns ?? pane.columns)
-                      : Math.max(0, (columns ?? pane.columns ?? 0) - INLINE_PANE_CHROME_COLUMNS),
-                  })}
+                  flexShrink={fill ? 1 : 0}
+                  flexGrow={fill ? 1 : 0}
+                  {...(fill ? { height: paneAllocated } : {})}
+                  maxHeight={paneAllocated}
+                  overflowY="hidden"
                 >
-                  {openCount > 1 ? (
-                    <PluginPaneTitleStrip
-                      open={openPanes}
-                      shownId={pane.id}
-                      heldId={heldTabId}
-                      columns={
-                        fill
-                          ? Math.max(0, (columns ?? pane.columns ?? 0) - CLOSE_MARK_COLUMNS - MARK_EDGE_COLUMNS)
-                          : Math.max(0, (columns ?? pane.columns ?? 0) - INLINE_PANE_CHROME_COLUMNS)
-                      }
-                      onPick={showPane}
-                    />
-                  ) : fill ? (
-                    <Box flexShrink={0} height={1} />
-                  ) : null}
-                  {/* densable pee clip: height:fill?Ao, maxHeight:Ao, overflowY:hidden > fEe(offset). */}
                   <Box
                     flexDirection="column"
-                    flexShrink={fill ? 1 : 0}
-                    flexGrow={fill ? 1 : 0}
-                    {...(fill ? { height: paneAllocated } : {})}
-                    maxHeight={paneAllocated}
-                    overflowY="hidden"
+                    flexShrink={0}
+                    marginTop={-paneScrollOffset}
+                    marginRight={0}
+                    ref={node => {
+                      paneContentRef.current = node;
+                      bindPluginScrollSiteLayout(pane.plugin, pane.id, node, 'Pane');
+                    }}
                   >
-                    <Box
-                      flexDirection="column"
-                      flexShrink={0}
-                      marginTop={-paneScrollOffset}
-                      marginRight={0}
-                      ref={node => {
-                        paneContentRef.current = node;
-                        bindPluginScrollSiteLayout(pane.plugin, pane.id, node);
-                      }}
-                    >
-                      {node}
-                    </Box>
+                    {node}
                   </Box>
                 </Box>
-                <PluginPaneCloseMark
-                  inset={fill ? MARK_EDGE_COLUMNS : BORDER_MARK_INSET}
-                  isHeld={closeMarkHeld}
-                  onClose={() => {
-                    void closePluginPane(pane.id, { kind: 'person' });
-                  }}
-                />
               </Box>
-            </PaneBodyColumnsContext.Provider>
-          </PaneErrorBoundary>
+              <PluginPaneCloseMark
+                inset={fill ? MARK_EDGE_COLUMNS : BORDER_MARK_INSET}
+                isHeld={closeMarkHeld}
+                onClose={() => {
+                  void closePluginPane(pane.id, { kind: 'person' });
+                }}
+              />
+            </Box>
+          </PaneBodyColumnsContext.Provider>
         </HeldFocusRefContext.Provider>
       </FocusedPressContext.Provider>
     </ClickedPressContext.Provider>
@@ -3795,6 +4646,8 @@ export function PluginAbovePromptSite({
   promptEmpty?: boolean;
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
+  const { addNotification } = useNotifications();
+  const [aboveResetKey, setAboveResetKey] = useState(0);
   const bandCollapsed = useBandCollapsed();
   const panesFocusRequest = useSyncExternalStore(subscribePanes, () => getPanesState().focusRequest);
   const contentRef = useRef<DOMElement | null>(null);
@@ -3810,14 +4663,17 @@ export function PluginAbovePromptSite({
   const [focusIndex, setFocusIndex] = useState<number | 'band' | null>(null);
   const focusIndexRef = useRef(focusIndex);
   focusIndexRef.current = focusIndex;
+  const [bandInputFocused, setBandInputFocused] = useState<FocusedInput | null>(null);
+  const bandSelectRef = useRef<PluginSelectSeat | null>(null);
+  const bandInputRef = useRef<PluginInputMapApi | null>(null);
   const toggleShortcut = getShortcutDisplay('abovePrompt:toggle', 'Chat', 'ctrl+x ctrl+a');
   // densable `Wr=l1()` — dialog open blocks auto-settle.
   const dialogOpen = useHasOpenDialogs();
 
-  // densable `oNo` columns settle — place waiters once terminal width is known.
+  // densable `sst(h,v,M)` — write d3 then oNo. Chrome = CollapseHandle columns.
   useEffect(() => {
-    settlePanesTerminalColumns(columns);
-  }, [columns]);
+    settlePanesTerminalColumns(columns, rows, COLLAPSE_HANDLE_COLUMNS);
+  }, [columns, rows]);
 
   // densable a4n mount/unmount clear pending focusRequest.
   useEffect(() => {
@@ -3861,7 +4717,8 @@ export function PluginAbovePromptSite({
     settledBudget,
     treeRows,
   });
-  // densable Ide PARTIAL HAVE — owner from AbovePrompt drawing when known; else ''.
+  const listRows = useOpenListRows();
+  // densable Ide — owner from AbovePrompt drawing when known; else ''.
   // Hde/`QLt` person-origin HAVE via useBandScrollPlace → dispatchPersonUiScroll.
   const scrollOwner =
     getPluginDrawingTrees().find(
@@ -3887,16 +4744,21 @@ export function PluginAbovePromptSite({
       contentRows: treeRows,
     });
     return () => {
-      unregisterPluginScrollSite(scrollOwnerRef.current, BAND_REQUEST_ID);
+      unregisterPluginScrollSite(scrollOwnerRef.current, BAND_REQUEST_ID, 'AbovePrompt');
     };
   }, [scrollOwner]);
   useEffect(() => {
-    updatePluginScrollSite(scrollOwner, BAND_REQUEST_ID, {
-      offset,
-      maxOffset,
-      bodyRows: windowRows,
-      contentRows: treeRows,
-    });
+    updatePluginScrollSite(
+      scrollOwner,
+      BAND_REQUEST_ID,
+      {
+        offset,
+        maxOffset,
+        bodyRows: windowRows,
+        contentRows: treeRows,
+      },
+      'AbovePrompt',
+    );
   }, [scrollOwner, offset, maxOffset, windowRows, treeRows]);
   // densable `_Ee` / pee `if(To>So)an(()=>So)`.
   useEffect(() => {
@@ -3919,12 +4781,7 @@ export function PluginAbovePromptSite({
     heldFocusRef.current = node !== null && index !== null ? { node, index } : null;
   }, []);
 
-  const viewingAgentView = useAppState(s =>
-    viewingAgentViewProps({
-      viewingAgentTaskId: s.viewingAgentTaskId,
-      tasks: s.tasks as Record<string, { type?: string; agentId?: string; identity?: { agentId?: string } }>,
-    }),
-  );
+  const viewingAgentView = useViewingAgentView();
   const aboveBodyColumns = Math.max(0, columns - COLLAPSE_HANDLE_COLUMNS);
   const drawn = useRenderDrawing(
     {
@@ -3957,17 +4814,84 @@ export function PluginAbovePromptSite({
   const inputFocused = ringActive && focusedTag === 'Input';
   const selectFocused = ringActive && focusedTag === 'Select';
 
-  // densable `Zt(l$(...), contexts)` — ring when hasPluginTree && !bandCollapsed.
+  // densable lr=`ce(($r)=>{Ie($r),Jt(es=>es+1)})` — person land bumps place.
+  // densable Ie(null)/Ie("band") clears do NOT Vt.
   const landFocusIndex = (index: number | 'band' | null): void => {
     setFocusIndex(index);
     setFocusPlaceBump(n => n + 1);
     if (typeof index === 'number') {
-      landBandFocusable(focusables[index]);
+      landBandInputFocus(focusables[index], setBandInputFocused, () => bandSelectRef.current?.close());
       return;
     }
     heldFocusRef.current = null;
-    bandFieldBridge?.clear();
+    setBandInputFocused(null);
+    bandSelectRef.current?.close();
   };
+  const clearFocusIndex = useCallback((next: number | 'band' | null): void => {
+    setFocusIndex(next);
+    if (typeof next !== 'number') {
+      heldFocusRef.current = null;
+      setBandInputFocused(null);
+      bandSelectRef.current?.close();
+    }
+  }, []);
+  // densable `sr=!h&&(Nn.length>0||no)` then `x(()=>{if(!sr)Ie(null)},[sr])`.
+  const bandLiveGate = !hasSurvey && (focusables.length > 0 || hasCue);
+  useEffect(() => {
+    if (!bandLiveGate) clearFocusIndex(null);
+  }, [bandLiveGate, clearFocusIndex]);
+  // densable `hs=xe(Si(), focusedId)` then `x(()=>{if(hs!==null)Ie(null)},[hs])`.
+  const panesFocusedId = useSyncExternalStore(subscribePanes, () => getPanesState().focusedId);
+  useEffect(() => {
+    if (panesFocusedId !== null) clearFocusIndex(null);
+  }, [panesFocusedId, clearFocusIndex]);
+  // densable `x(ss,[h,ss])` — survey *flip* (not mount): Ie(null)+u3(null).
+  const prevSurveyRef = useRef(hasSurvey);
+  useEffect(() => {
+    if (prevSurveyRef.current !== hasSurvey) {
+      clearFocusIndex(null);
+      focusPane(null);
+    }
+    prevSurveyRef.current = hasSurvey;
+  }, [hasSurvey, clearFocusIndex]);
+  // densable `h$(eo,Nn.length,()=>Ie("band"))`.
+  useEffect(() => {
+    if (typeof focusIndex === 'number' && focusIndex >= focusables.length) {
+      clearFocusIndex('band');
+    }
+  }, [focusIndex, focusables.length, clearFocusIndex]);
+  // densable FZ identity flip: Oo(()=>0), Ie(null).
+  const prevFocusablesRef = useRef(focusables);
+  useEffect(() => {
+    if (isOtherDrawer(prevFocusablesRef.current, focusables)) {
+      place(() => 0);
+      clearFocusIndex(null);
+    }
+    prevFocusablesRef.current = focusables;
+  }, [focusables, place, clearFocusIndex]);
+  const bandAway = useCallback(() => {
+    clearFocusIndex(null);
+    focusPane(null);
+  }, [clearFocusIndex]);
+  // densable ITt(ce(()=>Ie(null),[])) — click-away clears band focus only (not u3).
+  const bandClickAway = useCallback(() => {
+    clearFocusIndex(null);
+  }, [clearFocusIndex]);
+  const bandAwayRef = usePaneClickAway(bandClickAway);
+  // densable jZ(as, Me??hs, ss): prompt draft change while band/pane held → Ie(null)+u3(null).
+  useDraftHeldAway(focusIndex ?? panesFocusedId, bandAway);
+  // densable ks=xe(NLe, focusedId) → Ie(null); io=Me!==null → DQt(null).
+  const clientFocusedId = useSyncExternalStore(
+    subscribePluginClientFocus,
+    getPluginClientFocusedId,
+    getPluginClientFocusedId,
+  );
+  useEffect(() => {
+    if (clientFocusedId !== null) clearFocusIndex(null);
+  }, [clientFocusedId, clearFocusIndex]);
+  useEffect(() => {
+    if (focusIndex !== null) setPluginClientFocusedId(null);
+  }, [focusIndex]);
 
   // densable XHo on AbovePrompt — bind after landFocusIndex exists.
   const bandHost = usePluginFocusHost({
@@ -3996,7 +4920,7 @@ export function PluginAbovePromptSite({
     () => {
       if (!hasPluginTree) return;
       setBandCollapsed(!getBandCollapsed());
-      landFocusIndex(null);
+      clearFocusIndex(null);
     },
     { context: 'Chat', isActive: hasPluginTree },
   );
@@ -4019,11 +4943,11 @@ export function PluginAbovePromptSite({
           },
           leave: () => {
             bandHost.forget();
-            landFocusIndex(null);
+            clearFocusIndex(null);
           },
           submit: focusable => {
             if (typeof focusable.element !== 'string' || focusable.element === '') return;
-            bandFieldBridge?.submitInput({
+            bandInputRef.current?.submit({
               plugin: focusable.plugin,
               handle: focusable.handle,
               element: focusable.element,
@@ -4071,7 +4995,7 @@ export function PluginAbovePromptSite({
       }
       if (panes.open.length > 0) {
         // densable Ie(null), u3($Fr($r)) — $Fr with focusedId null → open[0].
-        landFocusIndex(null);
+        clearFocusIndex(null);
         focusPane(nextFocusedPaneId(panes));
         return;
       }
@@ -4106,59 +5030,65 @@ export function PluginAbovePromptSite({
     context: ringContext,
     isActive: ringActive && focusIndex !== null,
   });
-  // densable `qZ` / y$ handlers on AbovePromptSelect (bindings already exist).
-  const selectHandlers = useMemo(
-    () =>
-      selectHighlightHandlers({
-        move: delta => bandFieldBridge?.moveSelect(delta),
-        press: () => bandFieldBridge?.pressSelect(),
-      }),
-    [],
+  // densable `_Ee` `fr=y$({...})` / `rr=m$({...})` — same objects as SiteFields / g$.
+  const bandSelect = usePluginSelectSeat(focusables, 'AbovePrompt', BAND_REQUEST_ID, {
+    focusIndex,
+    focusIndexNow: () => focusIndexRef.current,
+    setFocusIndex: landFocusIndex,
+    working: isWorking,
+  });
+  const bandInput = usePluginInputSeat(focusables, 'AbovePrompt', BAND_REQUEST_ID);
+  bandSelectRef.current = bandSelect;
+  bandInputRef.current = bandInput;
+  const bandInputFocusHost = useMemo<BandInputFocusHost>(
+    () => ({
+      focused: bandInputFocused,
+      setFocused: next => {
+        if (next !== null) bandSelect.close();
+        setBandInputFocused(next);
+      },
+    }),
+    [bandInputFocused, bandSelect],
   );
-  useKeybinding('abovePrompt:highlightNext', selectHandlers['abovePrompt:highlightNext'], {
+  useKeybinding('abovePrompt:highlightNext', bandSelect.handlers['abovePrompt:highlightNext'], {
     context: 'AbovePromptSelect',
     isActive: selectFocused,
   });
-  useKeybinding('abovePrompt:highlightPrevious', selectHandlers['abovePrompt:highlightPrevious'], {
+  useKeybinding('abovePrompt:highlightPrevious', bandSelect.handlers['abovePrompt:highlightPrevious'], {
     context: 'AbovePromptSelect',
     isActive: selectFocused,
   });
-  useKeybinding('abovePrompt:press', selectHandlers['abovePrompt:press'], {
+  useKeybinding('abovePrompt:press', bandSelect.handlers['abovePrompt:press'], {
     context: 'AbovePromptSelect',
     isActive: selectFocused,
   });
 
   // densable `g$({isAhead:()=>Ne()!==Me, handlers:{AbovePrompt|Input|Select}, inputs, selectKeys})`.
-  // PARTIAL invent-ban: no Si()/Ide; Me=rendered focusIndex via effect; Ne=held ref.
+  // densable isAhead(Ne!==Me) — Me=rendered focusIndex via effect; Ne=held ref.
   const renderedFocusIndex = useRef(focusIndex);
   useEffect(() => {
     renderedFocusIndex.current = focusIndex;
   });
   const scrollHandlers = useMemo(
-    () => ({
-      'pane:scrollUp': () => scrollBy(-1),
-      'pane:scrollDown': () => scrollBy(1),
-      // densable page step uses live windowRows (ro), not settled Ao.
-      'pane:pageUp': () => scrollBy(-windowRows),
-      'pane:pageDown': () => scrollBy(windowRows),
-      'pane:top': () => scrollBy(-treeRows),
-      'pane:bottom': () => scrollBy(treeRows),
-    }),
+    () =>
+      paneScrollHandlers({
+        bodyRows: windowRows,
+        contentRows: treeRows,
+        scrollBy,
+      }),
     [scrollBy, windowRows, treeRows],
   );
+  // densable AZ(ds, ao, no) — Yi bound on AbovePrompt while `is`.
   const abovePromptHandlers = useMemo(
-    () => ({
-      ...ring,
-      ...(hasCue ? scrollHandlers : {}),
-    }),
-    [ring, hasCue, scrollHandlers],
+    () => bandKeysWithScroll(ring, scrollHandlers, hasCue),
+    [ring, scrollHandlers, hasCue],
   );
   const selectBagHandlers = useMemo(
     () => ({
       ...ring,
-      ...selectHandlers,
+      ...bandSelect.handlers,
     }),
-    [ring, selectHandlers],
+    [ring, bandSelect.handlers],
   );
   const bandKeysBag = useMemo<PluginBandKeysBag>(
     () => ({
@@ -4180,51 +5110,47 @@ export function PluginAbovePromptSite({
         AbovePromptSelect: selectBagHandlers,
       },
       inputs: {
-        textNow: ref => bandFieldBridge?.textNow(ref) ?? ref.value ?? '',
-        fields: {
-          edit: (ref, value) => {
-            bandFieldBridge?.edit(ref, value);
-          },
-        },
+        textNow: bandInput.textNow,
+        fields: bandInput.fields,
       },
-      selectKeys: (input, key) => bandFieldBridge?.selectKeys(input, key) ?? false,
+      selectKeys: (input, key) => bandSelect.intercept(input, key),
     }),
-    [focusables, focused, ring, abovePromptHandlers, selectBagHandlers],
+    [focusables, focused, ring, abovePromptHandlers, selectBagHandlers, bandSelect, bandInput],
   );
   usePluginBandKeys(bandKeysBag, { isActive: ringActive });
   // densable `sb(fr.intercept,{isActive:Os})` — Select intercept also prepends alone.
   useInput(
     (input, key, event) => {
-      if (bandFieldBridge?.selectKeys(input, key)) event.stopImmediatePropagation();
+      if (bandSelect.intercept(input, key)) event.stopImmediatePropagation();
     },
     { isActive: selectFocused, prepend: true },
   );
 
-  // densable `mEe`: {"pane:scrollUp":()=>N(-1), ... "pane:bottom":()=>N(contentRows)}.
-  const scrollActive = hasPluginTree && !bandCollapsed && hasCue;
-  useKeybinding('pane:scrollUp', () => scrollBy(-1), {
+  // densable `Zt(Yi,{context:"AbovePrompt",isActive:is})` — `is` = held && !Input && !Select.
+  const abovePromptIsActive = ringActive && !inputFocused && !selectFocused;
+  useKeybinding('pane:scrollUp', abovePromptHandlers['pane:scrollUp'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
-  useKeybinding('pane:scrollDown', () => scrollBy(1), {
+  useKeybinding('pane:scrollDown', abovePromptHandlers['pane:scrollDown'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
-  useKeybinding('pane:pageUp', () => scrollBy(-windowRows), {
+  useKeybinding('pane:pageUp', abovePromptHandlers['pane:pageUp'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
-  useKeybinding('pane:pageDown', () => scrollBy(windowRows), {
+  useKeybinding('pane:pageDown', abovePromptHandlers['pane:pageDown'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
-  useKeybinding('pane:top', () => scrollBy(-treeRows), {
+  useKeybinding('pane:top', abovePromptHandlers['pane:top'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
-  useKeybinding('pane:bottom', () => scrollBy(treeRows), {
+  useKeybinding('pane:bottom', abovePromptHandlers['pane:bottom'], {
     context: 'AbovePrompt',
-    isActive: scrollActive,
+    isActive: abovePromptIsActive,
   });
 
   // densable `u$` / `HZ` — Button hotkeys while band ring (not Input/Select).
@@ -4242,59 +5168,140 @@ export function PluginAbovePromptSite({
     },
   );
 
-  // densable: collapsed → CollapsedHint only (drawn withheld while To).
+  // densable `Wm({inputValue:Un,enabled:!h&&Xo.size>0,enterConfirms:!1,…})`.
+  const promptValue = useSyncExternalStore(
+    subscribePromptInputCursorStore,
+    getPromptInputStoreValue,
+    getPromptInputStoreValue,
+  );
+  const bandWheelAccel = useRef<WheelAccelState | null>(null);
+  const bandWheelProfile = useRef<WheelProfile | null>(null);
+  const digitEnabled = !hasSurvey && bandHotkeys.size > 0;
+  const digitVisible = (digit: string): boolean => hotkeyDigitVisible(hasCue, bandHotkeys, digit);
+  useBandDigitHotkey({
+    inputValue: promptValue,
+    enabled: digitEnabled,
+    isValidDigit: char => /^[0-9]$/.test(char) && bandHotkeys.has(char) && digitVisible(char),
+    onDigit: digit =>
+      pressShownDigit(
+        bandHotkeys.get(digit),
+        () => digitVisible(digit),
+        () => setPromptInputStoreValue(''),
+      ),
+  });
+  const bandWheel = useCallback(
+    (event: WheelEvent) => {
+      const sign: 1 | -1 = event.deltaY < 0 ? -1 : 1;
+      const step = computeWheelStep(ensurePaneWheelAccel(bandWheelAccel, bandWheelProfile), sign, performance.now());
+      if (step === 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      scrollBy(sign * step);
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [scrollBy],
+  );
+
+  // densable: collapsed → n$ inside We (ITt host stays bound).
   if (bandCollapsed) {
     if (!hasPluginTree) return null;
     return (
-      <PluginBandCollapsedHint
-        shortcut={toggleShortcut}
-        onExpand={() => {
-          setBandCollapsed(false);
-          setFocusIndex(null);
-          bandFieldBridge?.clear();
+      <Box
+        ref={node => {
+          bandAwayRef.current = node;
         }}
-      />
+        flexShrink={0}
+        flexDirection="column"
+        onWheel={hasCue && !dialogOpen ? bandWheel : undefined}
+      >
+        <PluginBandCollapsedHint
+          shortcut={toggleShortcut}
+          onExpand={() => {
+            setBandCollapsed(false);
+            setFocusIndex(null);
+            setBandInputFocused(null);
+            bandSelectRef.current?.close();
+          }}
+        />
+      </Box>
     );
   }
 
-  const node = rebuild(drawn, '', BAND_REQUEST_ID, undefined, 'AbovePrompt');
+  const node = rebuild(
+    drawn,
+    '',
+    BAND_REQUEST_ID,
+    undefined,
+    'AbovePrompt',
+    focusables,
+    bandSelect,
+    bandInput,
+    bandInputFocusHost,
+  );
   if (node === null) return null;
   const focusedPress = focused === null ? null : { plugin: focused.plugin, handle: focused.handle };
+  const onAboveDrawError = (error: Error): void => {
+    // densable Jmn/NBr + Ymn.AbovePrompt; L1t unique English on the debug log.
+    logForDebugging(`ui.render (AbovePrompt): a plugin's tree threw while drawn (plugin unattributed, unattributed)`);
+    addNotification({
+      key: `above-threw-while-drawn:${aboveResetKey}`,
+      text: `ui.render (AbovePrompt) threw while drawn: ${error.message}; nothing was drawn`,
+      priority: 'immediate',
+      kind: 'warning',
+      color: 'error',
+    });
+    setAboveResetKey(n => n + 1);
+  };
   return (
-    <ClickedPressContext.Provider value={bandClickedPress}>
-      <FocusedPressContext.Provider value={focusedPress}>
-        <HeldFocusRefContext.Provider value={reportHeldFocusNode}>
-          <PaneBodyColumnsContext.Provider value={aboveBodyColumns}>
-            <Box position="relative" flexShrink={0} flexDirection="column" maxHeight={rows}>
-              <Box flexDirection="column" flexShrink={0} maxHeight={windowRows} overflowY="hidden">
-                {/* densable `fEe` — marginTop=-offset; keptColumns=DZ under CollapseHandle. */}
-                <Box
-                  ref={node => {
-                    contentRef.current = node;
-                    if (scrollOwner) bindPluginScrollSiteLayout(scrollOwner, BAND_REQUEST_ID, node);
-                  }}
-                  flexDirection="column"
-                  flexShrink={0}
-                  marginTop={-offset}
-                  marginRight={COLLAPSE_HANDLE_COLUMNS}
-                >
-                  {node}
+    <PaneErrorBoundary resetKey={aboveResetKey} onError={onAboveDrawError}>
+      <ClickedPressContext.Provider value={bandClickedPress}>
+        <FocusedPressContext.Provider value={focusedPress}>
+          <HeldFocusRefContext.Provider value={reportHeldFocusNode}>
+            <PaneBodyColumnsContext.Provider value={aboveBodyColumns}>
+              <Box
+                ref={node => {
+                  bandAwayRef.current = node;
+                }}
+                position="relative"
+                flexShrink={0}
+                flexDirection="column"
+                maxHeight={rows + listRows}
+                overflowY="hidden"
+                onWheel={hasCue && !dialogOpen ? bandWheel : undefined}
+              >
+                <Box flexDirection="column" flexShrink={0} maxHeight={windowRows} overflowY="hidden">
+                  {/* densable `fEe` — marginTop=-offset; keptColumns=DZ under CollapseHandle. */}
+                  <Box
+                    ref={node => {
+                      contentRef.current = node;
+                      if (scrollOwner) bindPluginScrollSiteLayout(scrollOwner, BAND_REQUEST_ID, node, 'AbovePrompt');
+                    }}
+                    flexDirection="column"
+                    flexShrink={0}
+                    marginTop={-offset}
+                    marginRight={COLLAPSE_HANDLE_COLUMNS}
+                  >
+                    {node}
+                  </Box>
                 </Box>
+                {hasCue ? <PluginBandOverflowCue above={offset} below={Math.max(0, maxOffset - offset)} /> : null}
+                {hasPluginTree ? (
+                  <PluginBandCollapseHandle
+                    onCollapse={() => {
+                      setBandCollapsed(true);
+                      setFocusIndex(null);
+                    }}
+                  />
+                ) : null}
               </Box>
-              {hasCue ? <PluginBandOverflowCue above={offset} below={Math.max(0, maxOffset - offset)} /> : null}
-              {hasPluginTree ? (
-                <PluginBandCollapseHandle
-                  onCollapse={() => {
-                    setBandCollapsed(true);
-                    setFocusIndex(null);
-                  }}
-                />
-              ) : null}
-            </Box>
-          </PaneBodyColumnsContext.Provider>
-        </HeldFocusRefContext.Provider>
-      </FocusedPressContext.Provider>
-    </ClickedPressContext.Provider>
+            </PaneBodyColumnsContext.Provider>
+          </HeldFocusRefContext.Provider>
+        </FocusedPressContext.Provider>
+      </ClickedPressContext.Provider>
+    </PaneErrorBoundary>
   );
 }
 

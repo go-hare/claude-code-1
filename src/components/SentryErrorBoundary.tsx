@@ -7,6 +7,8 @@ interface Props {
   children: React.ReactNode;
   /** Optional label for identifying which component boundary caught the error */
   name?: string;
+  /** densable toast-stack AX/EX — optional host notify. */
+  onError?: (error: Error, info: React.ErrorInfo) => void;
 }
 
 interface State {
@@ -42,6 +44,7 @@ export class SentryErrorBoundary extends React.Component<Props, State> {
       componentBoundary: boundary,
       componentStack: errorInfo.componentStack,
     });
+    this.props.onError?.(error, errorInfo);
   }
 
   render(): React.ReactNode {

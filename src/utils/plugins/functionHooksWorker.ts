@@ -18,6 +18,7 @@ import {
   releasePresses,
   retireFunctionHooksModule,
   runFunctionHookChain,
+  setFunctionHooksHost,
   setOwnedTable,
   storeResolvedTables,
   unbindHostOpPort,
@@ -40,6 +41,8 @@ type DispatchMessage = {
   event: string
   payload: Record<string, unknown>
   environments: string[]
+  /** densable u8e `{only}` — owning plugin alone (N1t / dO). */
+  only?: string
 }
 type NextResult = {
   type: 'next_result'
@@ -107,6 +110,11 @@ function isTable(
 
 if (parentPort) {
   const port = parentPort
+  setFunctionHooksHost({
+    log: (text, level) => port.postMessage({ type: 'log', text, level }),
+    hookFailed: report =>
+      port.postMessage({ type: 'hook_failed', ...report }),
+  })
   const environments = new Map<string, { port?: MessagePort }>()
   const tails = new Map<string, (value: unknown) => void>()
   const inFlight = new Map<number, AbortController>()
@@ -362,6 +370,8 @@ if (parentPort) {
               argument: event,
             })
           }),
+        message.only,
+        message.environments,
       )
       port.postMessage({ type: 'result', id: message.id, returned: value })
     } finally {

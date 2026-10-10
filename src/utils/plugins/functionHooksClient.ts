@@ -15,6 +15,7 @@ import {
   installSurfaceRuntime,
   type SurfaceRuntime,
 } from './functionHooksSurfaceRuntime.js'
+import { logForDebugging } from '../debug.js'
 
 const LOADING = Object.freeze({ status: 'loading' as const })
 const UNPROMPTED_RENDER_CAP = 3
@@ -88,6 +89,43 @@ export function setClientFaultReporter(
   clientFaultReporter = reporter
 }
 
+/** densable `tgn` / `N1t` — Client `host.post` → owning plugin `ui.message`. */
+export type ClientMessagePost = {
+  plugin: string
+  surface: string
+  component: string
+  requestId: string
+  element: string
+  module: string
+  data: unknown
+}
+
+/**
+ * densable `Je.post(e.id, tgn(...), reply)` / `f.cancel(e.id)` on unmount.
+ * `id` is `re()` (`clientInstanceKey`).
+ */
+export type ClientMessageEnqueue = ClientMessagePost & { id: string }
+
+type ClientMessagePostHandler = (
+  post: ClientMessageEnqueue,
+  reply: (value: unknown) => void,
+) => void
+
+let clientMessagePostHandler: ClientMessagePostHandler | undefined
+let clientMessageCancelHandler: ((id: string) => void) | undefined
+
+export function setClientMessagePostHandler(
+  handler: ClientMessagePostHandler | undefined,
+): void {
+  clientMessagePostHandler = handler
+}
+
+export function setClientMessageCancelHandler(
+  handler: ((id: string) => void) | undefined,
+): void {
+  clientMessageCancelHandler = handler
+}
+
 export type ClientInstance = {
   id: string
   plugin: string
@@ -95,11 +133,22 @@ export type ClientInstance = {
   subscribe: (listener: () => void) => () => void
   getSnapshot: () => ClientSnapshot
   setProps: (props: unknown) => void
+  /** densable `Xt(()=>i.laidOut())` — marks the host as laid out for Z() budget. */
+  laidOut: () => void
   resize: (columns: number, rows: number) => void
   pointer: (event: Record<string, unknown>) => void
   key: (event: Record<string, unknown>) => void
   acceptsPointer: () => boolean
   acceptsKeys: () => boolean
+  /**
+   * densable `threw` — React BO onError. Stamps `thrownAt=P(e,renderedAt)` after fail.
+   */
+  threw: (error: unknown) => void
+  /**
+   * densable `drawnAgain` — remount via `B(e)` when thrownAt is set, holders>0,
+   * and `P(e,L())` moved (terminal size / props).
+   */
+  drawnAgain: () => void
   runHeld: (handle: number, event: unknown) => void
   dropHeld: (handles: number[]) => void
   release: () => void
@@ -168,9 +217,91 @@ type ClientRecord = {
   renderTimer: ReturnType<typeof setImmediate> | undefined
   mountGeneration: number
   destroyTimer: ReturnType<typeof setTimeout> | undefined
+  /** densable `renderedAt` — last successful paint's `L()` stamp. */
+  renderedAt: string
+  /** densable `thrownAt` — `P(e, renderedAt)` after React BO `threw`. */
+  thrownAt: string | undefined
+  /** densable `terminal` — last `L()` seen by Z(). */
+  terminal: string
+  /** densable `measurings` — in-frame box-size paints. */
+  measurings: number
+  /** densable `isUnsettled` — skipped a paint this measure window. */
+  isUnsettled: boolean
+  /** densable `frameOutcome`. */
+  frameOutcome: 'unmeasured' | 'measured' | 'passed over'
 }
 
 const instances = new Map<string, ClientRecord>()
+/** densable `se` — per-instance measurings cap before skip. */
+const MEASURE_INSTANCE_CAP = 8
+/** densable `ne` — frame-wide pass-over cap after laidOut. */
+const MEASURE_FRAME_CAP = 20
+/** densable factory `u` — host called `laidOut()` this measure window. */
+let laidOutLive = false
+/** densable factory `a` — pass-overs counted after laidOut. */
+let measurePassOvers = 0
+/** densable `m` — reset measurings at end of frame. */
+let measureResetTimer: ReturnType<typeof setImmediate> | undefined
+
+/**
+ * densable `d3` slice used by Client `L()`.
+ * Gold: `[r?.columns, r?.rows, r?.conversationColumns].join("x")`.
+ */
+export type ClientTerminalSize = {
+  columns: number
+  rows: number
+  conversationColumns: number
+}
+
+let clientTerminalSize: ClientTerminalSize | undefined
+
+/** densable `sst` / `d3.set` — panes host writes the three-part `L()` stamp. */
+export function setClientTerminalSize(
+  next: ClientTerminalSize | undefined,
+): void {
+  clientTerminalSize = next
+}
+
+/**
+ * densable `L()` — three-part stamp for thrownAt / Z skip.
+ */
+export function clientTerminalStamp(): string {
+  const r = clientTerminalSize
+  if (r !== undefined) {
+    return [r.columns, r.rows, r.conversationColumns].join('x')
+  }
+  const columns = process.stdout.columns ?? 0
+  const rows = process.stdout.rows ?? 0
+  return [columns, rows, Math.max(1, columns)].join('x')
+}
+
+/** densable `Bn({props})` slice of `P(e,o)`. */
+function clientPropsStamp(props: unknown): string {
+  try {
+    return JSON.stringify(props) ?? ''
+  } catch {
+    return Object.prototype.toString.call(props)
+  }
+}
+
+/** densable `P(e,o)` — `${o} ${Bn({props:e.handedProps})}`. */
+function clientThrowStamp(record: ClientRecord, size: string): string {
+  return `${size} ${clientPropsStamp(record.props)}`
+}
+
+function scheduleMeasureReset(): void {
+  measureResetTimer ??= setImmediate(() => {
+    measureResetTimer = undefined
+    measurePassOvers = 0
+    for (const record of instances.values()) {
+      // densable Y: `isUnsettled &&= frameOutcome!=="measured"`
+      record.isUnsettled =
+        record.isUnsettled && record.frameOutcome !== 'measured'
+      record.measurings = 0
+      record.frameOutcome = 'unmeasured'
+    }
+  })
+}
 const environments = new Map<string, { loading: Promise<SurfaceEnvironment> }>()
 const pluginSurfaces = new Map<
   string,
@@ -194,6 +325,15 @@ export function forgetPluginSurfaceModules(plugin?: string): void {
   }
   pluginSurfaces.delete(plugin)
   environments.delete(plugin)
+}
+
+/** densable `FS.moduleFor` lookup of scanned surface modules. */
+export function getPluginSurfaceModules(
+  plugin: string,
+): { root: string; modules: SurfaceModuleScan[] } | undefined {
+  const held = pluginSurfaces.get(plugin)
+  if (held === undefined || held.modules.length === 0) return undefined
+  return { root: held.root, modules: [...held.modules] }
 }
 
 /** densable `Z` — plugin, surface, requestId, key. */
@@ -306,6 +446,8 @@ function unmountSurface(record: ClientRecord): void {
     /* gold T() swallows into fail */
   }
   record.surface = undefined
+  // densable `v()`: `f.cancel(e.id)` after surface.unmount
+  clientMessageCancelHandler?.(record.id)
 }
 
 function resetUnprompted(plugin: string): void {
@@ -321,12 +463,103 @@ function paint(record: ClientRecord): void {
   record.isRendering = true
   try {
     const tree = stampHeldPress(record.plugin, surface.render())
+    record.renderedAt = clientTerminalStamp()
     setSnapshot(record, { status: 'drawn', tree })
   } catch (err) {
     failRecord(record, errorMessage(err), 'render')
   } finally {
     record.isRendering = false
   }
+}
+
+/** densable `de` — skip reason for in-frame measure storm. */
+function measureSkipReason(
+  record: ClientRecord,
+): 'instance' | 'frame' | undefined {
+  if (record.measurings >= (record.isUnsettled ? 1 : MEASURE_INSTANCE_CAP)) {
+    return 'instance'
+  }
+  if (record.measurings > 0 && measurePassOvers > MEASURE_FRAME_CAP) {
+    return 'frame'
+  }
+  return undefined
+}
+
+/**
+ * densable `Z` — resize. After `laidOut`, extra same-terminal measures can
+ * skip paint (`le` pass-over). Terminal `L()` change always paints.
+ */
+function resizeRecord(
+  record: ClientRecord,
+  columns: number,
+  rows: number,
+): void {
+  if (columns === record.columns && rows === record.rows) return
+  const stamp = clientTerminalStamp()
+  const terminalChanged = stamp !== record.terminal
+  const afterLayout = laidOutLive && !terminalChanged && record.measurings > 0
+  record.terminal = stamp
+  record.columns = columns
+  record.rows = rows
+  if (afterLayout) {
+    measurePassOvers += 1
+    laidOutLive = false
+  }
+  const skip = terminalChanged ? undefined : measureSkipReason(record)
+  if (skip !== undefined) {
+    record.frameOutcome = 'passed over'
+    try {
+      record.surface?.resize(columns, rows)
+    } catch {
+      /* gold T */
+    }
+    if (!record.isUnsettled) record.isUnsettled = true
+    // densable `Re` / `yo(e,o)` unique English (not telemetry yo).
+    logForDebugging(
+      skip === 'instance'
+        ? `Client: its region changed size on each of ${MEASURE_INSTANCE_CAP} measurings in one frame, so it is drawn as last measured; give the Client a height and a width, or draw no more than surface.rows and surface.columns`
+        : `Client: the Clients on screen were measured again in ${MEASURE_FRAME_CAP} passes of one frame, this one in the next, so it is drawn as last measured; some change their region at every measuring: give each a height and a width, or draw no more than surface.rows and surface.columns`,
+      { level: 'warn' },
+    )
+    return
+  }
+  if (!terminalChanged) record.measurings += 1
+  if (record.frameOutcome === 'unmeasured') record.frameOutcome = 'measured'
+  scheduleMeasureReset()
+  if (terminalChanged) resetUnprompted(record.plugin)
+  if (!record.surface) return
+  try {
+    record.surface.resize(columns, rows)
+  } catch {
+    /* gold T */
+  }
+  paint(record)
+}
+
+function markLaidOut(): void {
+  laidOutLive = true
+}
+
+function threwRecord(record: ClientRecord, error: unknown): void {
+  if (record.surface === undefined || record.isDestroyed) return
+  failRecord(record, errorMessage(error), 'render')
+  record.thrownAt = clientThrowStamp(record, record.renderedAt)
+}
+
+/** densable `drawnAgain` — remount when throw stamp moved and holders>0. */
+function drawnAgainRecord(record: ClientRecord): void {
+  if (
+    record.thrownAt === undefined ||
+    record.holders <= 0 ||
+    record.isDestroyed
+  ) {
+    return
+  }
+  if (record.thrownAt === clientThrowStamp(record, clientTerminalStamp())) {
+    return
+  }
+  if (record.surface) return
+  mountWhenReady(record)
 }
 
 function schedule(record: ClientRecord): void {
@@ -1143,17 +1376,15 @@ function attach(record: ClientRecord): ClientInstance {
       }
       paint(record)
     },
+    laidOut: () => markLaidOut(),
     resize(columns, rows) {
-      if (columns === record.columns && rows === record.rows) return
-      record.columns = columns
-      record.rows = rows
-      resetUnprompted(record.plugin)
-      try {
-        record.surface?.resize(columns, rows)
-      } catch {
-        /* gold T */
-      }
-      paint(record)
+      resizeRecord(record, columns, rows)
+    },
+    threw(error) {
+      threwRecord(record, error)
+    },
+    drawnAgain() {
+      drawnAgainRecord(record)
     },
     pointer(event) {
       resetUnprompted(record.plugin)
@@ -1215,13 +1446,62 @@ function mountWhenReady(record: ClientRecord): void {
     env => {
       if (generation !== record.mountGeneration || record.isDestroyed) return
       if (record.surface) return
+      // densable ue: same throw stamp as current L() → do not remount.
+      if (
+        record.thrownAt !== undefined &&
+        record.thrownAt === clientThrowStamp(record, clientTerminalStamp())
+      ) {
+        return
+      }
+      record.thrownAt = undefined
       try {
         record.surface = env.mount({
           module: record.module,
           props: record.props,
           host: {
             schedule: () => schedule(record),
-            post: () => undefined,
+            post: data => {
+              // densable `pe`: `f.post(e.id, tgn(...), s => V(e, s.props))`
+              const generation = record.mountGeneration
+              clientMessagePostHandler?.(
+                {
+                  id: record.id,
+                  plugin: record.plugin,
+                  surface: record.surfaceName,
+                  component: record.component,
+                  requestId: record.requestId,
+                  element: record.element,
+                  module: record.module,
+                  data,
+                },
+                reply => {
+                  if (
+                    record.isDestroyed ||
+                    record.mountGeneration !== generation
+                  ) {
+                    return
+                  }
+                  if (
+                    typeof reply !== 'object' ||
+                    reply === null ||
+                    Array.isArray(reply) ||
+                    !Object.hasOwn(reply, 'props')
+                  ) {
+                    return
+                  }
+                  const next = (reply as { props: unknown }).props
+                  record.props = next
+                  resetUnprompted(record.plugin)
+                  try {
+                    record.surface?.setProps(next)
+                  } catch (err) {
+                    failRecord(record, errorMessage(err), 'run')
+                    return
+                  }
+                  paint(record)
+                },
+              )
+            },
             startTimer: (ms, tick) => {
               const id = setInterval(tick, Math.max(ms, CLOCK_MIN_MS))
               return () => clearInterval(id)
@@ -1273,6 +1553,12 @@ function createRecord(input: {
     renderTimer: undefined,
     mountGeneration: 0,
     destroyTimer: undefined,
+    renderedAt: clientTerminalStamp(),
+    thrownAt: undefined,
+    terminal: clientTerminalStamp(),
+    measurings: 0,
+    isUnsettled: false,
+    frameOutcome: 'unmeasured',
   }
 }
 
@@ -1283,11 +1569,14 @@ const DETACHED: ClientInstance = {
   subscribe: () => () => undefined,
   getSnapshot: () => LOADING,
   setProps: () => undefined,
+  laidOut: () => undefined,
   resize: () => undefined,
   pointer: () => undefined,
   key: () => undefined,
   acceptsPointer: () => false,
   acceptsKeys: () => false,
+  threw: () => undefined,
+  drawnAgain: () => undefined,
   runHeld: () => undefined,
   dropHeld: () => undefined,
   release: () => undefined,

@@ -103,13 +103,10 @@ import {
 import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
-import {
-  clearHeldClearedDraft,
-  holdCleared,
-  restoreCleared,
-} from '../../utils/clearedDraftHold.js';
+import { clearHeldClearedDraft, holdCleared, restoreCleared } from '../../utils/clearedDraftHold.js';
 import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
+import { createPromptEditComposer, hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
 import { type EffortLevel, isUltracodeModeActive } from '../../utils/effort.js';
 import { env } from '../../utils/env.js';
@@ -417,6 +414,10 @@ function PromptInput({
       setPromptInputStoreVimMode('INSERT');
     }
   }, [vimEnabled]);
+  // densable composer Cc("prompt.edit") + Wie setHooked + Xco.record.
+  // Init after liveInputRef / cursorOffsetRef (below).
+  const promptEditHooked = hasMatchingFunctionHook('prompt.edit');
+  const promptEditComposerRef = useRef<ReturnType<typeof createPromptEditComposer> | null>(null);
   const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
   /** densable odp/idp/sdp gesture state (2.1.218 editing-quiet confirm) */
   const leftArrowGestureRef = useRef(createLeftArrowGestureState());
@@ -454,6 +455,29 @@ function PromptInput({
   // densable 2.1.211 ze.current — cursor offset mirror for N1-style insert.
   const cursorOffsetRef = React.useRef(cursorOffset);
   cursorOffsetRef.current = cursorOffset;
+  if (promptEditComposerRef.current === null) {
+    promptEditComposerRef.current = createPromptEditComposer({
+      read: () => ({
+        text: liveInputRef.current,
+        cursor: cursorOffsetRef.current,
+      }),
+      commit: box => {
+        lastInternalInputRef.current = box.text;
+        liveInputRef.current = box.text;
+        onInputChange(box.text);
+        setCursorOffset(box.cursor);
+      },
+    });
+  }
+  useEffect(() => {
+    promptEditComposerRef.current?.setHooked(promptEditHooked);
+    logForDebugging(
+      promptEditHooked
+        ? 'prompt.edit: hooked; the composer relays its edits to the chain'
+        : 'prompt.edit: unhooked; the composer relays nothing',
+    );
+  }, [promptEditHooked]);
+  useEffect(() => () => promptEditComposerRef.current?.dispose(), []);
   // densable 2.1.211 ht dual-write for N1 / multi-paste / submit. densable also
   // assigns ht.current=H every render; that would wipe dual-write when a sibling
   // setAppState (cacheImagePath) re-renders with still-empty parent state.
@@ -467,9 +491,14 @@ function PromptInput({
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
+      const before = { text: liveInputRef.current, cursor: cursorOffsetRef.current };
       lastInternalInputRef.current = value;
       liveInputRef.current = value;
       onInputChange(value);
+      promptEditComposerRef.current?.record({
+        before,
+        after: { text: value, cursor: cursorOffsetRef.current },
+      });
     },
     [onInputChange],
   );
@@ -3173,14 +3202,14 @@ function PromptInput({
               );
             })()}
           </Text>
-          <Box flexDirection="row" width="100%">
+          <Box flexDirection="row" width="100%" tabIndex={-1} onClick={handleInputClick}>
             <PromptInputModeIndicator
               mode={mode}
               isLoading={isLoading}
               viewingAgentName={viewingAgentName}
               viewingAgentColor={viewingAgentColor}
             />
-            <Box flexGrow={1} flexShrink={1} onClick={handleInputClick}>
+            <Box flexGrow={1} flexShrink={1}>
               {textInputElement}
             </Box>
           </Box>
@@ -3197,6 +3226,8 @@ function PromptInput({
           borderRight={false}
           borderBottom
           width="100%"
+          tabIndex={-1}
+          onClick={handleInputClick}
           borderText={buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive)}
         >
           <PromptInputModeIndicator
@@ -3205,7 +3236,7 @@ function PromptInput({
             viewingAgentName={viewingAgentName}
             viewingAgentColor={viewingAgentColor}
           />
-          <Box flexGrow={1} flexShrink={1} onClick={handleInputClick}>
+          <Box flexGrow={1} flexShrink={1}>
             {textInputElement}
           </Box>
         </Box>

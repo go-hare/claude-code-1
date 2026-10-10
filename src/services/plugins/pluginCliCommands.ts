@@ -180,14 +180,24 @@ export async function installPlugin(
       console.log(Io(`${figures.tick} ${result.message}`))
     }
 
-    // densable $Jy — apply --config / report unset userConfig (soft on failure)
-    const { formatPostInstallUserConfigNotice } = await import(
-      '../../utils/plugins/parsePluginCliConfig.js'
-    )
-    const notice = await formatPostInstallUserConfigNotice(
-      result.pluginId || plugin,
-      configEntries,
-    )
+    // densable Kao: nothingWritten skips --config save (gold `$Jy` only on write).
+    let configApplied: boolean | undefined =
+      configEntries && configEntries.length > 0 ? true : undefined
+    let notice = ''
+    if (result.nothingWritten) {
+      if (configApplied) {
+        notice = `${figures.warning} --config values were not saved, because this command changed nothing. To set them, run /plugin configure ${result.pluginId || plugin} in Claude Code.`
+        configApplied = false
+      }
+    } else {
+      const { formatPostInstallUserConfigNotice } = await import(
+        '../../utils/plugins/parsePluginCliConfig.js'
+      )
+      notice = await formatPostInstallUserConfigNotice(
+        result.pluginId || plugin,
+        configEntries,
+      )
+    }
     if (notice && !jsonOptions.json) {
       console.log(Io(notice))
     }
@@ -200,8 +210,7 @@ export async function installPlugin(
         pluginId: result.pluginId,
         scope: result.scope || scope,
         message: combined,
-        configApplied:
-          configEntries && configEntries.length > 0 ? true : undefined,
+        configApplied,
       })
     }
 

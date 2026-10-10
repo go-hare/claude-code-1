@@ -22,6 +22,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js';
 import { formatDuration } from '../../utils/format.js';
 import { setEnvHookNotifier } from '../../utils/hooks/fileChangedWatcher.js';
 import { toIDEDisplayName } from '../../utils/ide.js';
+import { logError } from '../../utils/log.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
 import { AutoUpdaterWrapper } from '../AutoUpdaterWrapper.js';
@@ -234,8 +235,14 @@ export function Notifications({
     }
   }, [autoUpdaterResult, isAutoUpdating, addNotification]);
 
+  const onToastStackError = (error: Error): void => {
+    // densable AX/EX toast-stack BO unique English. Distinct from FEe pane hold.
+    logError(new Error('ui.toast: the toast stack threw while drawn'));
+    logError(new Error(`ui.toast threw while drawn: ${error.message}; no toast is drawn until the stack changes`));
+  };
+
   return (
-    <SentryErrorBoundary>
+    <SentryErrorBoundary name="ui.toast" onError={onToastStackError}>
       {/* densable Notifications column: alignItems flex-end, flexShrink 1, overflowX hidden. isNarrow is 0-hit in 239 SEA. */}
       <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
         <NotificationContent

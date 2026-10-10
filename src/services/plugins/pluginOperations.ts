@@ -193,6 +193,11 @@ export type PluginOperationResult = {
   reverseDependents?: string[]
   /** densable vun / w0i — typed i0/cwe classification when present. */
   failureCode?: string
+  /**
+   * densable `s.nothingWritten` — already installed in this scope; Kao skips
+   * `--config` save and prints the unchanged-values notice.
+   */
+  nothingWritten?: boolean
 }
 
 /**
@@ -519,6 +524,17 @@ export async function installPluginOp(
   const entry = foundPlugin
   const pluginId = `${entry.name}@${foundMarketplace}`
 
+  // densable TFt/Ot: already-installed still runs (re-enable / consent).
+  // Do not return nothingWritten before that. Snapshot for Kao after.
+  const projectPath = getProjectPathForScope(scope)
+  const wasInstalled = (loadInstalledPluginsV2().plugins[pluginId] ?? []).some(
+    row => row.scope === scope && row.projectPath === projectPath,
+  )
+  const wasEnabled =
+    getSettingsForSource(scopeToSettingSource(scope))?.enabledPlugins?.[
+      pluginId
+    ] === true
+
   // densable ctm: shownSourceCommand → {kind:"shown"} else x0v recorded
   let commandSourceConsent: CommandSourceConsent | undefined
   if (options?.shownSourceCommand !== undefined) {
@@ -604,10 +620,31 @@ export async function installPluginOp(
   const staleInstallWarning = preInstallRefreshWarning
     ? `. Warning: ${preInstallRefreshWarning} — installed from the cached catalog, so the version may be stale`
     : ''
+  const depNote = (result as Extract<typeof result, { ok: true }>).depNote
+
+  if (wasInstalled && wasEnabled) {
+    return {
+      success: true,
+      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope})${depNote}${staleInstallWarning}`,
+      pluginId,
+      pluginName: entry.name,
+      scope,
+      nothingWritten: true,
+    }
+  }
+  if (wasInstalled) {
+    return {
+      success: true,
+      message: `Plugin "${re(pluginId)}" is already installed (scope: ${scope}). It was disabled, so it is enabled again.${depNote}${staleInstallWarning}`,
+      pluginId,
+      pluginName: entry.name,
+      scope,
+    }
+  }
 
   return {
     success: true,
-    message: `Successfully installed plugin: ${re(pluginId)} (scope: ${scope})${(result as Extract<typeof result, { ok: true }>).depNote}${staleInstallWarning}`,
+    message: `Successfully installed plugin: ${re(pluginId)} (scope: ${scope})${depNote}${staleInstallWarning}`,
     pluginId,
     pluginName: entry.name,
     scope,

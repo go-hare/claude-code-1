@@ -29,7 +29,11 @@ describe('densable 2.1.289 mods CloseMark + load invalidate', () => {
     const start = src.indexOf('function replaceLoadedFunctionHooksModules')
     expect(start).toBeGreaterThan(0)
     const body = src.slice(start, start + 900)
-    expect(body).toContain("invalidateRender('ui.render')")
+    // gold E1e.onInvalidate → Vi; analog is bumpFaultRenderFv → invalidateRender
+    expect(body).toContain('bumpFaultRenderFv()')
     expect(body).toContain('bumpRasterFrames()')
+    const bump = src.indexOf('function bumpFaultRenderFv')
+    expect(bump).toBeGreaterThan(0)
+    expect(src.slice(bump, bump + 400)).toContain("invalidateRender('ui.render')")
   })
 })

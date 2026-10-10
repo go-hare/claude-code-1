@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   EMPTY_PANES,
+  bumpPluginFieldSeatGeneration,
   focusPane,
   forgetAskedPane,
+  getPaneRemountGeneration,
   getPanesState,
   getPanesStore,
+  getPanesTerminalSize,
+  getPluginScrollSite,
   handleHostOp,
   hasAskedPane,
   nextFocusedPaneId,
@@ -16,6 +20,8 @@ import {
   paneOpenFloor,
   placeWaitingPanes,
   placeWaitingPanesRemote,
+  pluginFieldSeatGeneration,
+  registerPluginScrollSite,
   rememberAskedPane,
   seedAskedPanes,
   setLoadedFunctionHooksModules,
@@ -26,6 +32,10 @@ import {
   showPane,
   subscribePanes,
 } from '../functionHooksModules.js'
+import {
+  clientTerminalStamp,
+  setClientTerminalSize,
+} from '../functionHooksClient.js'
 
 afterEach(() => {
   setLoadedFunctionHooksModules([])
@@ -430,15 +440,58 @@ describe('densable 2.1.289 EMPTY_PANES-shaped semantic panes store', () => {
   test('drop bumps Pane remount generation (gold JFt→NFr/ift)', async () => {
     settlePanesTerminalColumns(200)
     await handleHostOp('ui.open', [{ id: 'r1', title: 'R' }], 'plugin.p')
-    const { getPaneRemountGeneration } = await import(
-      '../functionHooksModules.js'
-    )
     const before = getPaneRemountGeneration('r1')
+    const seatBefore = pluginFieldSeatGeneration('Pane', 'r1')
     await handleHostOp(
       'ui.close',
       [{ id: 'r1', origin: { kind: 'plugin' } }],
       'plugin.p',
     )
     expect(getPaneRemountGeneration('r1')).toBe(before + 1)
+    expect(pluginFieldSeatGeneration('Pane', 'r1')).toBe(seatBefore + 1)
+  })
+
+  test('sst writes d3 three-part size then L() stamp (gold sst/L)', () => {
+    settlePanesTerminalColumns(80, 24, 5)
+    expect(getPanesTerminalSize()).toEqual({
+      columns: 80,
+      rows: 24,
+      conversationColumns: 75,
+    })
+    expect(clientTerminalStamp()).toBe('80x24x75')
+    // oNo must not clobber sst chrome-subtracted conversationColumns.
+    placeWaitingPanes(144)
+    expect(getPanesTerminalSize()).toEqual({
+      columns: 80,
+      rows: 24,
+      conversationColumns: 75,
+    })
+    expect(clientTerminalStamp()).toBe('80x24x75')
+    setClientTerminalSize(undefined)
+  })
+
+  test('ui.close drops Ide Map site (gold JFt + Fj)', async () => {
+    settlePanesTerminalColumns(200)
+    await handleHostOp('ui.open', [{ id: 'ide_1', title: 'I' }], 'plugin.p')
+    registerPluginScrollSite('plugin.p', 'ide_1', 'Pane', { bodyRows: 3 })
+    registerPluginScrollSite('plugin.p', 'ide_1', 'AbovePrompt', {
+      bodyRows: 4,
+    })
+    expect(getPluginScrollSite('plugin.p', 'ide_1', 'Pane')?.bodyRows).toBe(3)
+    await handleHostOp(
+      'ui.close',
+      [{ id: 'ide_1', origin: { kind: 'plugin' } }],
+      'plugin.p',
+    )
+    expect(getPluginScrollSite('plugin.p', 'ide_1', 'Pane')).toBeUndefined()
+    expect(
+      getPluginScrollSite('plugin.p', 'ide_1', 'AbovePrompt')?.bodyRows,
+    ).toBe(4)
+  })
+
+  test('NFr bump is callable independently of pane remount gen', () => {
+    const before = pluginFieldSeatGeneration('AbovePrompt', 'band')
+    bumpPluginFieldSeatGeneration('AbovePrompt', 'band')
+    expect(pluginFieldSeatGeneration('AbovePrompt', 'band')).toBe(before + 1)
   })
 })

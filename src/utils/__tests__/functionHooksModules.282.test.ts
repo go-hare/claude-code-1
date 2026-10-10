@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -31,6 +31,7 @@ import {
   isOwnedTableFinalized,
   getOwnedTable,
   setUiAskHostHandler,
+  setUiToastShowHandler,
   setAgentSpawnHandler,
   setCommandRunHandler,
   setFunctionHooksAppStateReader,
@@ -45,6 +46,7 @@ import {
   getRegisteredPluginAgentDefinitions,
   listBuiltinFunctionHookPlugins,
   evaluateUiRender,
+  releasePresses,
   stopFunctionHooksWorker,
   closePluginPane,
   scrollPluginPane,
@@ -58,7 +60,21 @@ import {
   logUiScrollSettled,
   commitPluginScrollSite,
   dispatchPersonUiScroll,
+  uiRenderMatcherNeverRuns,
+  uiRenderTreeCheck,
+  uiRenderDrawingPlainCheck,
+  uiRenderHoverCheck,
+  sessionCompactMessagesCheck,
+  dispatchClientMessage,
+  dispatchClientFault,
+  cancelClientMessage,
+  enqueueClientMessage,
+  getClientMessagesDispatched,
+  getPluginFaultRunsSize,
+  getPluginFaultRenderStateSize,
+  createPromptEditComposer,
 } from '../plugins/functionHooksModules.js'
+import * as debug from '../debug.js'
 import { executePreToolHooks } from '../hooks.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
@@ -76,6 +92,7 @@ afterAll(() => {
 afterEach(async () => {
   setLoadedFunctionHooksModules([])
   setUiAskHostHandler(undefined)
+  setUiToastShowHandler(undefined)
   setAgentSpawnHandler(undefined)
   setCommandRunHandler(undefined)
   setFunctionHooksAppStateReader(undefined)
@@ -965,6 +982,35 @@ describe('function-hooks classic pattern', () => {
         { text: 'go' },
       ]),
     ).toEqual({ ok: true })
+    await expect(
+      callPluginInterface('demo', { name: 'prompt', method: 'submit' }, [
+        { text: 'go', attachments: [{}] },
+      ]),
+    ).rejects.toThrow(
+      '$.prompt.submit takes text alone; attachments cannot be submitted',
+    )
+    await expect(
+      handleHostOp(
+        'prompt.submit',
+        [{ text: 'go', attachments: [{}] }],
+        'demo',
+      ),
+    ).rejects.toThrow(
+      'prompt.submit: takes text alone; attachments cannot be submitted (host check)',
+    )
+    // densable Boo: empty → slash → attachments. Slash wins when both are wrong.
+    await expect(
+      callPluginInterface('demo', { name: 'prompt', method: 'submit' }, [
+        { text: '/foo', attachments: [{}] },
+      ]),
+    ).rejects.toThrow(
+      '$.prompt.submit submits a prompt to the model; a text beginning with / would run a command as the user; run one with $.command.run({ command })',
+    )
+    await expect(
+      callPluginInterface('demo', { name: 'prompt', method: 'submit' }, [
+        { text: '/foo' },
+      ]),
+    ).rejects.toThrow('a text beginning with / would run a command as the user')
 
     const timer = (await callPluginInterface(
       'demo',
@@ -1039,7 +1085,18 @@ describe('function-hooks classic pattern', () => {
       handleHostOp('interface.call', [{ name: 'x', method: 'y' }]),
     ).rejects.toThrow('takes { owner, name, method, args }')
     expect(await handleHostOp('ui.log', [{ text: 'hello' }])).toBeUndefined()
-    expect(await handleHostOp('ui.toast', [{ text: 'hi' }])).toBeUndefined()
+    const shown: Array<{ plugin: string; text: string; timeoutMs?: number }> =
+      []
+    setUiToastShowHandler(toast => {
+      shown.push(toast)
+    })
+    expect(
+      await handleHostOp('ui.toast', [{ text: 'hi' }], 'demo'),
+    ).toBeUndefined()
+    expect(shown).toEqual([{ plugin: 'demo', text: 'hi' }])
+    await expect(
+      handleHostOp('ui.toast', [{ text: 'hi', timeoutMs: 0 }], 'demo'),
+    ).rejects.toThrow('timeoutMs is a whole number of ms, 1 to 60000')
     expect(await handleHostOp('ui.status', [{}])).toBeUndefined()
     await expect(handleHostOp('ui.notice', [{}])).rejects.toThrow(
       'takes the tool_use_id of an open call',
@@ -1406,6 +1463,13 @@ describe('function-hooks classic pattern', () => {
     expect(
       await handleHostOp('session.compact', [{ instructions: 'keep' }], 'demo'),
     ).toEqual({ compacted: true })
+    await expect(
+      handleHostOp(
+        'session.compact',
+        [{ instructions: 'keep', messages: [] }],
+        'demo',
+      ),
+    ).rejects.toThrow('an empty messages (a compaction leaves at least one)')
     setFunctionHooksAppStateReader(
       () =>
         ({
@@ -1554,6 +1618,40 @@ describe('function-hooks classic pattern', () => {
     expect(
       await handleHostOp('ui.copy', [{ text: 'hi', surface: 'terminal' }]),
     ).toEqual({ isCopied: true })
+    // densable Jko stamps Y7()[0]; no Ink on stdout → still no-surface.
+    expect(await handleHostOp('ui.copy', [{ text: 'hi' }])).toEqual({
+      isCopied: false,
+      reason: 'no-surface',
+    })
+    const copySrc = readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(copySrc).toContain('function stampUiCopy')
+    expect(copySrc).toContain('input.surface ?? attachedCopySurfaces()[0]')
+    expect(copySrc).toContain(
+      'no surface draws (none attached); nothing copied',
+    )
+    expect(copySrc).toContain('no client there took it; nothing copied')
+    expect(copySrc).toContain('over the write bound')
+    {
+      let box = { text: 'hi', cursor: 2 }
+      const composer = createPromptEditComposer({
+        read: () => box,
+        commit: next => {
+          box = next
+        },
+      })
+      composer.setHooked(true)
+      composer.record({
+        before: { text: 'h', cursor: 1 },
+        after: { text: 'hi', cursor: 2 },
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(box).toEqual({ text: 'hi', cursor: 2 })
+      composer.dispose()
+    }
     setLoadedFunctionHooksModules([
       {
         name: 'demo',
@@ -1581,6 +1679,569 @@ describe('function-hooks classic pattern', () => {
         'export function register(on) { on("ui.render", { component: "AskUserQuestion" }, () => {}) }',
       ).ok,
     ).toBe(true)
+  })
+
+  test('densable 2.1.289 SITE_RULES unique English', () => {
+    expect(uiRenderTreeCheck({ type: 'Box' })).toBeUndefined()
+    expect(uiRenderTreeCheck('nope')).toBe(
+      'something that is not a tree element',
+    )
+    expect(sessionCompactMessagesCheck([])).toBe(
+      'an empty messages (a compaction leaves at least one)',
+    )
+    expect(sessionCompactMessagesCheck('nope')).toBe(
+      'messages that are not a list',
+    )
+    expect(sessionCompactMessagesCheck([{ role: 'user' }])).toBeUndefined()
+    const never = uiRenderMatcherNeverRuns({
+      component: 'AbovePrompt',
+      surface: 'mobile',
+    })
+    expect(never).toContain('AbovePrompt is raised on')
+    expect(never).toContain('; this hook names mobile')
+    expect(never).toContain(', so it never runs')
+    expect(uiRenderMatcherNeverRuns({ component: 'UserMessag' })).toBe(
+      'no component is named UserMessag (did you mean UserMessage?), so it never runs',
+    )
+  })
+
+  test('densable drawing-plainness unique English', () => {
+    expect(
+      uiRenderDrawingPlainCheck({ type: 'Box', props: {} }, 'demo'),
+    ).toBeUndefined()
+    expect(
+      uiRenderDrawingPlainCheck(new Proxy({ type: 'Box' }, {}), 'demo'),
+    ).toContain('returned a drawing that holds a Proxy')
+    expect(
+      uiRenderDrawingPlainCheck({ type: 'Box', extra: () => {} }, 'demo'),
+    ).toContain('returned a drawing with a function where plain data goes')
+    expect(
+      uiRenderDrawingPlainCheck({ type: 'Button', onPress: () => {} }, 'demo'),
+    ).toBeUndefined()
+    expect(
+      uiRenderDrawingPlainCheck({ type: 'Box', extra: new Date() }, 'demo'),
+    ).toContain('not plain data (a class instance)')
+  })
+
+  test('densable q9n hover-prop deny unique English', () => {
+    const keyed = (
+      hover: Record<string, unknown>,
+      inner?: Record<string, unknown>,
+    ) => ({
+      type: 'Box',
+      props: { key: 'k' },
+      children: [{ type: 'Box', hover, ...(inner ?? {}) }],
+    })
+    expect(uiRenderHoverCheck(keyed({ color: 'red' }))).toBe(
+      'Box hover prop "color" is not allowed',
+    )
+    expect(uiRenderHoverCheck(keyed({ display: 'none' }))).toContain(
+      'would hide it under the pointer',
+    )
+    expect(
+      uiRenderHoverCheck(
+        keyed({ display: 'flex' }, { props: { display: 'flex' } }),
+      ),
+    ).toContain('this Box is already shown')
+    expect(uiRenderHoverCheck(keyed({ borderStyle: 'single' }))).toContain(
+      'give the Box a borderStyle for the hover to restyle',
+    )
+    expect(uiRenderHoverCheck(keyed({ top: 1 }))).toContain(
+      'a hover moves only a Box drawn position "absolute"',
+    )
+    expect(
+      uiRenderHoverCheck({
+        type: 'Box',
+        hover: { display: 'flex' },
+        props: { display: 'none' },
+      }),
+    ).toContain('hover has no Box with a key around it')
+    expect(
+      uiRenderHoverCheck({
+        type: 'Box',
+        props: { key: 'self', display: 'none' },
+        hover: { display: 'flex' },
+      }),
+    ).toContain('hover is scoped to a keyed Box drawn display "none"')
+    expect(
+      uiRenderHoverCheck({
+        type: 'Box',
+        props: { key: 'outer', display: 'none' },
+        children: [
+          {
+            type: 'Box',
+            hover: { display: 'flex' },
+          },
+        ],
+      }),
+    ).toContain('hover is scoped to a keyed Box drawn display "none"')
+    expect(
+      uiRenderHoverCheck({
+        type: 'Box',
+        hover: { scope: '' },
+      }),
+    ).toContain('hover scope')
+    expect(
+      uiRenderHoverCheck({
+        type: 'Box',
+        hover: { scope: '' },
+      }),
+    ).toContain('is not a string of 1 to 64 characters')
+  })
+
+  test('agent.spawn hook that never nexts is wis/Rat refuse', async () => {
+    let launched = 0
+    setAgentSpawnHandler(async () => {
+      launched += 1
+      return { result: { agentId: 'spawned-hook' } }
+    })
+    setLoadedFunctionHooksModules([
+      {
+        name: 'blocker',
+        patterns: ['agent.spawn'],
+        hooks: [
+          {
+            pattern: 'agent.spawn',
+            hook: () => ({ deny: 'nope' }),
+          },
+        ],
+      },
+    ])
+    expect(
+      await handleHostOp(
+        'agent.spawn',
+        [{ tool: 'Agent', prompt: 'go' }],
+        'demo',
+      ),
+    ).toEqual({ deny: 'nope' })
+    expect(launched).toBe(0)
+
+    setLoadedFunctionHooksModules([
+      {
+        name: 'silent',
+        patterns: ['agent.spawn'],
+        hooks: [
+          {
+            pattern: 'agent.spawn',
+            hook: () => ({ text: 'held' }),
+          },
+        ],
+      },
+    ])
+    expect(
+      await handleHostOp(
+        'agent.spawn',
+        [{ tool: 'Agent', prompt: 'go' }],
+        'demo',
+      ),
+    ).toEqual({
+      deny: 'agent.spawn: a hook answered without passing the spawn on',
+    })
+    expect(launched).toBe(0)
+
+    setLoadedFunctionHooksModules([
+      {
+        name: 'pass',
+        patterns: ['agent.spawn'],
+        hooks: [
+          {
+            pattern: 'agent.spawn',
+            hook: (_api, event, next) => next(event),
+          },
+        ],
+      },
+    ])
+    expect(
+      await handleHostOp(
+        'agent.spawn',
+        [{ tool: 'Agent', prompt: 'go' }],
+        'demo',
+      ),
+    ).toEqual({ result: { agentId: 'spawned-hook' } })
+    expect(launched).toBe(1)
+  })
+
+  test('dispatchClientMessage runs ui.message then core {} (N1t)', async () => {
+    const seen: unknown[] = []
+    setLoadedFunctionHooksModules([
+      {
+        name: 'demo',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: (_api, event, next) => {
+              seen.push(event)
+              return next(event)
+            },
+          },
+        ],
+      },
+    ])
+    expect(
+      await dispatchClientMessage({
+        plugin: 'demo',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'k',
+        module: './board',
+        data: { ping: 1 },
+      }),
+    ).toEqual({})
+    expect(seen).toEqual([
+      {
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'k',
+        module: './board',
+        data: { ping: 1 },
+      },
+    ])
+  })
+
+  test('dispatchClientMessage N1t {only: owning plugin} then core {}', async () => {
+    const seen: string[] = []
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: async (_api, _event, next) => {
+              seen.push('owner')
+              const onward = await next()
+              seen.push(`owner-next:${JSON.stringify(onward)}`)
+              return { from: 'owner', next: onward }
+            },
+          },
+        ],
+      },
+      {
+        name: 'other',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: () => {
+              seen.push('other')
+              return { from: 'other', leaked: true }
+            },
+          },
+        ],
+      },
+      {
+        name: 'star',
+        patterns: ['*'],
+        hooks: [
+          {
+            pattern: '*',
+            hook: () => {
+              seen.push('star')
+              return { from: 'star' }
+            },
+          },
+        ],
+      },
+    ])
+    expect(
+      await dispatchClientMessage({
+        plugin: 'owner',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'board',
+        module: './board',
+        data: { ping: 1 },
+      }),
+    ).toEqual({ from: 'owner', next: {} })
+    expect(seen).toEqual(['owner', 'owner-next:{}'])
+  })
+
+  test('dispatchClientMessage N1t throw rejects (Wbr warn is drain)', async () => {
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: () => {
+              throw new Error('boom')
+            },
+          },
+        ],
+      },
+    ])
+    await expect(
+      dispatchClientMessage({
+        plugin: 'owner',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'board',
+        module: './board',
+        data: { ping: 1 },
+      }),
+    ).rejects.toThrow('boom')
+  })
+
+  test('enqueueClientMessage cancel(e.id) drops pending Wbr post', async () => {
+    const seen: unknown[] = []
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: (_api, event) => {
+              seen.push(event)
+              return { from: 'owner' }
+            },
+          },
+        ],
+      },
+    ])
+    let replied: unknown
+    enqueueClientMessage(
+      {
+        id: 'owner terminal pane_1 board',
+        plugin: 'owner',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'board',
+        module: './board',
+        data: { ping: 1 },
+      },
+      value => {
+        replied = value
+      },
+    )
+    cancelClientMessage('owner terminal pane_1 board')
+    await Bun.sleep(20)
+    expect(seen).toEqual([])
+    expect(replied).toBeUndefined()
+  })
+
+  test('enqueueClientMessage last-write-wins by instance id then N1t', async () => {
+    const seen: unknown[] = []
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.message'],
+        hooks: [
+          {
+            pattern: 'ui.message',
+            hook: (_api, event) => {
+              seen.push(event.data)
+              return { from: 'owner' }
+            },
+          },
+        ],
+      },
+    ])
+    const replies: unknown[] = []
+    enqueueClientMessage(
+      {
+        id: 'inst',
+        plugin: 'owner',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'board',
+        module: './board',
+        data: { n: 1 },
+      },
+      value => {
+        replies.push(value)
+      },
+    )
+    enqueueClientMessage(
+      {
+        id: 'inst',
+        plugin: 'owner',
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_1',
+        element: 'board',
+        module: './board',
+        data: { n: 2 },
+      },
+      value => {
+        replies.push(value)
+      },
+    )
+    await Bun.sleep(20)
+    expect(seen).toEqual([{ n: 2 }])
+    expect(replies).toEqual([{ from: 'owner' }])
+    expect(getClientMessagesDispatched()).toBeGreaterThanOrEqual(1)
+  })
+
+  test('runFunctionHookChain {only} skips other plugins for ui.fault (dO)', async () => {
+    const seen: string[] = []
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.fault'],
+        hooks: [
+          {
+            pattern: 'ui.fault',
+            hook: (_api, _event, next) => {
+              seen.push('owner')
+              return next()
+            },
+          },
+        ],
+      },
+      {
+        name: 'other',
+        patterns: ['ui.fault'],
+        hooks: [
+          {
+            pattern: 'ui.fault',
+            hook: () => {
+              seen.push('other')
+              return { leaked: true }
+            },
+          },
+        ],
+      },
+    ])
+    expect(
+      await runFunctionHookChain(
+        'ui.fault',
+        { element: 'k', phase: 'render' },
+        async () => ({ core: true }),
+        'owner',
+      ),
+    ).toEqual({ core: true })
+    expect(seen).toEqual(['owner'])
+  })
+
+  test('dispatchClientFault dO logs settle even with no ui.fault hook', async () => {
+    setLoadedFunctionHooksModules([{ name: 'owner', patterns: [] }])
+    const logs: string[] = []
+    const spy = spyOn(debug, 'logForDebugging').mockImplementation(msg => {
+      logs.push(String(msg))
+    })
+    try {
+      expect(
+        await dispatchClientFault({
+          plugin: 'owner',
+          surface: 'terminal',
+          component: 'Pane',
+          requestId: 'pane_1',
+          element: 'board',
+          module: './board',
+          phase: 'render',
+          reason: 'boom',
+        }),
+      ).toEqual({})
+      expect(logs.some(line => line.includes('Client rejection'))).toBe(true)
+      const settle = logs.find(line => line.includes('dispatched, settled in'))
+      expect(settle).toMatch(
+        /^ui\.fault owner\/board \(\.\/board\) in Pane from terminal, render: dispatched, settled in \d+\.\d+ms$/,
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test('dispatchClientFault throw rejects (reporter logs chain-threw)', async () => {
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.fault'],
+        hooks: [
+          {
+            pattern: 'ui.fault',
+            hook: () => {
+              throw new Error('boom')
+            },
+          },
+        ],
+      },
+    ])
+    const logs: string[] = []
+    const spy = spyOn(debug, 'logForDebugging').mockImplementation(msg => {
+      logs.push(String(msg))
+    })
+    try {
+      await expect(
+        dispatchClientFault({
+          plugin: 'owner',
+          surface: 'terminal',
+          component: 'Pane',
+          requestId: 'pane_1',
+          element: 'board',
+          module: './board',
+          phase: 'load',
+          reason: 'boom',
+        }),
+      ).rejects.toThrow('boom')
+      expect(logs.some(line => line.includes('dispatched, settled in'))).toBe(
+        false,
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test('dispatchClientFault cO records faultRuns; sO skips same Lue', async () => {
+    setLoadedFunctionHooksModules([
+      {
+        name: 'owner',
+        patterns: ['ui.fault'],
+        hooks: [
+          {
+            pattern: 'ui.fault',
+            hook: (_api, _event, next) => next(),
+          },
+        ],
+      },
+    ])
+    expect(getPluginFaultRunsSize()).toBe(0)
+    expect(getPluginFaultRenderStateSize()).toBe(0)
+    await dispatchClientFault({
+      plugin: 'owner',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'pane_1',
+      element: 'board',
+      module: './board',
+      phase: 'render',
+      reason: 'boom',
+    })
+    expect(getPluginFaultRunsSize()).toBe(1)
+    expect(getPluginFaultRenderStateSize()).toBe(1)
+    await dispatchClientFault({
+      plugin: 'owner',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'pane_1',
+      element: 'board',
+      module: './board',
+      phase: 'render',
+      reason: 'boom',
+    })
+    expect(getPluginFaultRunsSize()).toBe(1)
+    expect(getPluginFaultRenderStateSize()).toBe(1)
+    await dispatchClientFault({
+      plugin: 'owner',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'pane_2',
+      element: 'board',
+      module: './board',
+      phase: 'render',
+      reason: 'boom',
+    })
+    expect(getPluginFaultRunsSize()).toBe(2)
+    expect(getPluginFaultRenderStateSize()).toBe(2)
   })
 
   test('ui.resolve returns the constructor table after di (yOt, not classic)', async () => {
@@ -1762,6 +2423,92 @@ describe('function-hooks classic pattern', () => {
           drawing.component === 'Pane' && drawing.requestId === 'pane_1',
       ),
     ).toBe(true)
+  })
+
+  test('evaluateUiRender refuses something that is not a tree element', async () => {
+    setLoadedFunctionHooksModules([
+      {
+        name: 'demo',
+        patterns: ['ui.render'],
+        hooks: [
+          {
+            pattern: 'ui.render',
+            matcher: { component: 'Pane' },
+            hook: () => 'not-a-tree',
+          },
+        ],
+      },
+    ])
+    await expect(
+      evaluateUiRender({
+        surface: 'terminal',
+        component: 'Pane',
+        requestId: 'pane_tree',
+        props: {},
+      }),
+    ).rejects.toThrow('something that is not a tree element')
+  })
+
+  test('densable leftover unique English: refuse / Buttons / AskUserQuestion rewrite', async () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(src).toContain('refused: ${problem}; the engine drew its own')
+    expect(src).toContain('drew Buttons but is not loaded; nothing to release')
+    expect(src).toContain(
+      "rewritten questions do not match the tool's input schema",
+    )
+    expect(src).toContain('a rewrite may relabel the questions but not')
+    const panes = readFileSync(
+      join(import.meta.dir, '../../components/PluginRasterPanes.tsx'),
+      'utf8',
+    )
+    expect(panes).toContain('): site failed:')
+
+    setLoadedFunctionHooksModules([])
+    releasePresses('gone', ['h1'], { component: 'Pane', requestId: 'pane_1' })
+
+    const original = [
+      {
+        question: 'A',
+        options: [{ label: '1', preview: 'p' }],
+      },
+    ]
+    setLoadedFunctionHooksModules([
+      {
+        name: 'demo',
+        patterns: ['ui.render'],
+        hooks: [
+          {
+            pattern: 'ui.render',
+            hook: () => ({
+              type: 'AskUserQuestion',
+              props: {
+                questions: [
+                  {
+                    question: 'A',
+                    options: [{ label: '2', preview: 'p' }],
+                  },
+                ],
+              },
+            }),
+          },
+        ],
+      },
+    ])
+    const tree = await evaluateUiRender({
+      surface: 'terminal',
+      component: 'AskUserQuestion',
+      requestId: 'ask_1',
+      props: { questions: original },
+    })
+    expect(tree).toEqual(
+      expect.objectContaining({
+        type: 'AskUserQuestion',
+        props: expect.objectContaining({ questions: original }),
+      }),
+    )
   })
 
   test('Client acquire fails gold when the plugin loaded no surface module', async () => {
@@ -2092,7 +2839,7 @@ describe('function-hooks classic pattern', () => {
     await closePluginPane('pane_scroll')
   })
 
-  test('register/update/unregisterPluginScrollSite Ide PARTIAL HAVE', () => {
+  test('register/update/unregisterPluginScrollSite Ide HAVE', () => {
     const registered = registerPluginScrollSite(
       'band-owner',
       ABOVE_PROMPT_REQUEST_ID,
@@ -2117,7 +2864,7 @@ describe('function-hooks classic pattern', () => {
       followEnd: false,
     })
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt'),
     ).toMatchObject({
       component: 'AbovePrompt',
       owner: 'band-owner',
@@ -2128,12 +2875,17 @@ describe('function-hooks classic pattern', () => {
       followEnd: false,
     })
     expect(
-      updatePluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, {
-        offset: 3,
-        maxOffset: 5,
-        bodyRows: 9,
-        contentRows: 14,
-      }),
+      updatePluginScrollSite(
+        'band-owner',
+        ABOVE_PROMPT_REQUEST_ID,
+        {
+          offset: 3,
+          maxOffset: 5,
+          bodyRows: 9,
+          contentRows: 14,
+        },
+        'AbovePrompt',
+      ),
     ).toMatchObject({
       offset: 3,
       maxOffset: 5,
@@ -2142,23 +2894,34 @@ describe('function-hooks classic pattern', () => {
     })
     noteDrawnElement('band-owner', ABOVE_PROMPT_REQUEST_ID, 'box-a')
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.keyCount,
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt')
+        ?.keyCount,
     ).toBe(1)
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.component,
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt')
+        ?.component,
     ).toBe('AbovePrompt')
-    unregisterPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)
+    unregisterPluginScrollSite(
+      'band-owner',
+      ABOVE_PROMPT_REQUEST_ID,
+      'AbovePrompt',
+    )
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt'),
     ).toBeUndefined()
     expect(
-      updatePluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, {
-        offset: 0,
-      }),
+      updatePluginScrollSite(
+        'band-owner',
+        ABOVE_PROMPT_REQUEST_ID,
+        {
+          offset: 0,
+        },
+        'AbovePrompt',
+      ),
     ).toBeUndefined()
   })
 
-  test('logUiScrollSettled / commitPluginScrollSite / dispatchPersonUiScroll Hde QLt PARTIAL HAVE', async () => {
+  test('logUiScrollSettled / commitPluginScrollSite / dispatchPersonUiScroll Hde QLt HAVE', async () => {
     expect(commitPluginScrollSite('missing', 'above-prompt', 2)).toEqual({
       deny: 'no such site',
     })
@@ -2174,12 +2937,19 @@ describe('function-hooks classic pattern', () => {
       },
     )
     expect(
-      commitPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 9, {
-        kind: 'person',
-      }),
+      commitPluginScrollSite(
+        'band-owner',
+        ABOVE_PROMPT_REQUEST_ID,
+        9,
+        {
+          kind: 'person',
+        },
+        'AbovePrompt',
+      ),
     ).toEqual({})
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID)?.offset,
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt')
+        ?.offset,
     ).toBe(4)
 
     const settled = await logUiScrollSettled(
@@ -2199,16 +2969,33 @@ describe('function-hooks classic pattern', () => {
     })
     expect(moved).toEqual({})
     expect(
-      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID),
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt'),
     ).toMatchObject({
       offset: 2,
       bodyRows: 7,
       contentRows: 11,
     })
 
-    const denied = await dispatchPersonUiScroll({
+    // densable Fj(component, requestId) — person origin still commits even if
+    // the caller plugin string differs; Sat only denies foreign plugin origin.
+    const ghostPerson = await dispatchPersonUiScroll({
       component: 'AbovePrompt',
       requestId: ABOVE_PROMPT_REQUEST_ID,
+      offset: 1,
+      by: 1,
+      bodyRows: 7,
+      contentRows: 11,
+      plugin: 'ghost',
+    })
+    expect(ghostPerson).toEqual({})
+    expect(
+      getPluginScrollSite('band-owner', ABOVE_PROMPT_REQUEST_ID, 'AbovePrompt')
+        ?.offset,
+    ).toBe(1)
+
+    const denied = await dispatchPersonUiScroll({
+      component: 'AbovePrompt',
+      requestId: 'missing-req',
       offset: 1,
       by: 1,
       bodyRows: 7,
@@ -2616,13 +3403,71 @@ export function Board() { return { type: 'Box', children: [String(n)] } }
       join(import.meta.dir, '../../components/PluginRasterPanes.tsx'),
       'utf8',
     )
+    expect(panes).toContain("'AbovePrompt'")
+    expect(panes).toContain('bandInputFocusHost')
+    expect(panes).toContain('function landBandInputFocus')
+    expect(panes).not.toContain('bandFieldBridge')
+    expect(panes).not.toContain('registerBandFieldBridge')
     expect(
       panes.includes(
-        "rebuild(drawn, '', BAND_REQUEST_ID, undefined, 'AbovePrompt')",
+        "rebuild(drawn, pane.plugin, pane.id, undefined, 'Pane', paneFocusables, paneSelect, paneInput)",
       ),
     ).toBe(true)
-    expect(
-      panes.includes("rebuild(drawn, pane.plugin, pane.id, undefined, 'Pane')"),
-    ).toBe(true)
+  })
+})
+
+describe('densable 2.1.289 ui.toast show + worker environments', () => {
+  test('REPL wires budgets.toasts.show analog', () => {
+    const repl = readFileSync(
+      join(import.meta.dir, '../../screens/REPL.tsx'),
+      'utf8',
+    )
+    expect(repl).toContain('setUiToastShowHandler')
+    expect(repl).toContain('$.ui.toast: shown as')
+    expect(repl).toContain('plugin-toast-${randomUUID()}')
+    expect(repl).toContain('timeoutMs: toast.timeoutMs ?? 4000')
+    expect(repl).toContain('${toast.plugin}: ${toast.text}')
+  })
+
+  test('worker dispatch passes message.environments into the chain', () => {
+    const worker = readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksWorker.ts'),
+      'utf8',
+    )
+    const modules = readFileSync(
+      join(import.meta.dir, '../plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(worker).toContain('message.environments')
+    expect(modules).toContain(
+      'environments !== undefined && !environments.includes(mod.name)',
+    )
+    expect(modules).toContain('HOOKS_WORKER_OVERRUN_CAP = 2')
+    expect(modules).toContain('clearOverruns')
+    expect(modules).toContain('this.overruns.delete(plugin)')
+    expect(modules).toContain(
+      'ignored its signal ${count} times in a row: a runaway plugin in the hooks worker',
+    )
+    expect(modules).toContain('job.failed.add(plugin)')
+    expect(modules).toContain('job.environments.some')
+    expect(modules).toContain('!job.failed.has(plugin)')
+    expect(modules).toContain("message.type === 'hook_failed'")
+    expect(worker).toContain("type: 'hook_failed'")
+    expect(worker).toContain('setFunctionHooksHost')
+    expect(worker).toContain('hookFailed:')
+    expect(modules).toContain('the rest of its rewrite went on')
+    expect(modules).toContain('hook skipped:')
+    expect(modules).toContain('${event} hook:')
+    expect(modules).toContain("event === 'engine.create'")
+    expect(modules).toContain('if (s !== 1) return')
+    expect(modules).toContain(
+      "`${plugin}#${environmentId ?? ''} ${event} ${kind}`",
+    )
+    expect(modules).toContain('#${environmentId')
+    expect(modules).toContain('skipPersistOnce')
+    expect(modules).toContain('${plugin}: ${h}')
+    expect(modules.indexOf('noteHookSkipFirst(report)')).toBeLessThan(
+      modules.indexOf('job.failed.add(plugin)'),
+    )
   })
 })

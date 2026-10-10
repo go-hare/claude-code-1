@@ -18,6 +18,7 @@ import { createHash } from 'crypto'
 import { MessageChannel, Worker, type MessagePort } from 'worker_threads'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
+import { isProxy } from 'node:util/types'
 import { SourceTextModule, SyntheticModule, createContext } from 'vm'
 import { HOOK_EVENTS } from '../../entrypoints/sdk/coreSchemas.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
@@ -26,15 +27,24 @@ import { densableThinkingForceParams } from '../thinking.js'
 import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import { instances, stringWidth } from '@anthropic/ink'
-import { invalidateRender } from '../render/invalidateAllRenders.js'
+import {
+  getRenderVersion,
+  invalidateRender,
+} from '../render/invalidateAllRenders.js'
 import {
   disposePluginClients,
   forgetPluginSurfaceModules,
+  getPluginSurfaceModules,
   loadScannedSurfaceModules,
   scanClientModulePaths,
   setClientFaultReporter,
+  setClientMessagePostHandler,
+  setClientMessageCancelHandler,
+  setClientTerminalSize,
   setPluginSurfaceModules,
   type ClientFaultReport,
+  type ClientMessagePost,
+  type ClientMessageEnqueue,
   type SurfaceModuleScan,
 } from './functionHooksClient.js'
 import { logForDebugging } from '../debug.js'
@@ -49,6 +59,8 @@ import {
   type TranscriptRevealBlock,
 } from './transcriptReveal.js'
 import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
+import { SURFACE_LIMITS } from './functionHooksSurfaceRuntime.js'
+import { createStore } from '../../state/store.js'
 
 export type FunctionHookHandler = (
   api: Record<string, unknown>,
@@ -78,6 +90,32 @@ let loadedModules: LoadedFunctionHooksModule[] = []
 /** densable last hook that returned a `ui.render` tree (`Te` restamp). */
 let lastUiRenderPlugin = ''
 
+/**
+ * densable `za` / `cV` — ui.render drawing ALS. `$.state.get` fills
+ * `versionsRead`; `jC` after the chain if requestId !== ''.
+ */
+type UiRenderDrawing = {
+  instanceKey: string
+  instance: ClientFaultSite
+  versionsRead: Map<string, number>
+  isEnded: boolean
+}
+
+const uiRenderDrawingAls = new AsyncLocalStorage<UiRenderDrawing>()
+
+/** densable `Yer` / `gSt` — occupancy of an in-flight hook-chain eval. */
+const hookEvalAls = new AsyncLocalStorage<true>()
+
+function isInsideHookEval(): boolean {
+  return hookEvalAls.getStore() !== undefined
+}
+
+function noteStateRead(key: string, version: number): void {
+  const store = uiRenderDrawingAls.getStore()
+  if (!store || store.isEnded) return
+  if (!store.versionsRead.has(key)) store.versionsRead.set(key, version)
+}
+
 export function getLoadedFunctionHooksModules(): readonly LoadedFunctionHooksModule[] {
   return loadedModules
 }
@@ -92,6 +130,8 @@ export function setLoadedFunctionHooksModules(
   forgetPluginCommands()
   pluginRegisteredTools.clear()
   pluginStore.clear()
+  skipFirstLog.clear()
+  skipPersistOnce.clear()
   promptBoxText = ''
   for (const entry of clockCallbacks) entry.cancel()
   clockCallbacks.length = 0
@@ -107,9 +147,16 @@ export function setLoadedFunctionHooksModules(
   paneFocusRequest = null
   panePlacements = 0
   askedPanesSeeded = false
-  panesTerminalColumns = undefined
+  panesTerminalSize = undefined
+  setClientTerminalSize(undefined)
+  ideSites.clear()
   paneRemountGeneration.clear()
+  pluginInputSeatStore.setState(() => new Map())
+  pluginSelectSeatStore.setState(() => new Map())
+  pluginFieldSeatGenerationStore.setState(() => new Map())
   notifyPanesListeners()
+  resetClientFaultRuns()
+  resetClientMessageQueue()
   pluginDrawings.length = 0
   lastUiRenderPlugin = ''
   pluginSites.length = 0
@@ -144,11 +191,26 @@ function replaceLoadedFunctionHooksModules(
   }
   // densable 2.1.289: load/reload pushes ui_invalidate for ui.render so mounted
   // Pane/AbovePrompt/UserMessage sites re-ask (gold E1e.onInvalidate → Vi).
-  invalidateRender('ui.render')
+  bumpFaultRenderFv()
   bumpRasterFrames()
   // densable 2.1.289: Client fail → owning plugin ui.fault only
   setClientFaultReporter(
-    loadedModules.length > 0 ? dispatchClientFault : undefined,
+    loadedModules.length > 0
+      ? report => {
+          void dispatchClientFault(report).catch(err => {
+            logForDebugging(
+              `ui.fault ${report.plugin}/${report.element}: the chain threw (${describeThrown(err)}); no reply`,
+              { level: 'warn' },
+            )
+          })
+        }
+      : undefined,
+  )
+  setClientMessagePostHandler(
+    loadedModules.length > 0 ? enqueueClientMessage : undefined,
+  )
+  setClientMessageCancelHandler(
+    loadedModules.length > 0 ? cancelClientMessage : undefined,
   )
 }
 
@@ -185,9 +247,313 @@ export function hasMatchingFunctionHook(event: string): boolean {
   )
 }
 
+/**
+ * densable `iVn` / `CLt.perform` — AgentTool.call is the launch core.
+ * `$.agent.spawn` already ran the chain; skip a second `bn` wrap.
+ */
+let agentSpawnLaunchDepth = 0
+
+export function isInsideAgentSpawnLaunch(): boolean {
+  return agentSpawnLaunchDepth > 0
+}
+
+export type PromptEditBox = { text: string; cursor: number }
+
+type PromptEditRecord = {
+  before: PromptEditBox
+  after: PromptEditBox
+}
+
+function clampPromptEditBox(box: PromptEditBox): PromptEditBox {
+  return {
+    text: box.text,
+    cursor: Math.max(0, Math.min(box.cursor, box.text.length)),
+  }
+}
+
+function asPromptEditBox(
+  value: unknown,
+  fallback: PromptEditBox,
+): PromptEditBox {
+  if (!isEventRecord(value) || typeof value.text !== 'string') return fallback
+  const cursor =
+    typeof value.cursor === 'number' && Number.isFinite(value.cursor)
+      ? value.cursor
+      : fallback.cursor
+  return clampPromptEditBox({ text: value.text, cursor })
+}
+
+/**
+ * densable `Xco` / `Wie` — composer relays prompt.edit when hooked.
+ * Unique English: hooked/unhooked logs live on PromptInput; throw / "moved
+ * meanwhile" report here.
+ */
+export function createPromptEditComposer(host: {
+  read: () => PromptEditBox
+  commit: (box: PromptEditBox) => void
+}): {
+  setHooked: (hooked: boolean) => void
+  record: (edit: PromptEditRecord) => void
+  dispose: () => void
+} {
+  const abort = new AbortController()
+  let hooked = false
+  let queued: PromptEditRecord[] = []
+  let inFlight: PromptEditRecord | undefined
+  let scheduled = false
+
+  const flush = (): void => {
+    scheduled = false
+    if (queued.length === 0 || inFlight !== undefined) return
+    const first = queued[0]!
+    const last = queued.at(-1)!
+    const batch: PromptEditRecord = { before: first.before, after: last.after }
+    queued = []
+    inFlight = batch
+    const payload: Record<string, unknown> = {
+      origin: 'typed',
+      text: batch.before.text,
+      cursor: batch.before.cursor,
+      after: batch.after,
+    }
+    void runFunctionHookChain('prompt.edit', payload, async () => batch.after)
+      .then(answered => {
+        settle(batch, asPromptEditBox(answered, batch.after))
+      })
+      .catch(err => {
+        logForDebugging(
+          `prompt.edit: ${describeThrown(err)}; the editor's edit stands`,
+          { level: 'error' },
+        )
+        settle(batch, batch.after)
+      })
+  }
+
+  const settle = (batch: PromptEditRecord, answered: PromptEditBox): void => {
+    inFlight = undefined
+    if (abort.signal.aborted) return
+    const original = batch.after
+    const current = host.read()
+    if (
+      answered.text === original.text &&
+      answered.cursor === original.cursor
+    ) {
+      /* gold lr: no rewrite */
+    } else if (
+      current.text === original.text &&
+      current.cursor === original.cursor
+    ) {
+      host.commit(answered)
+    } else {
+      logForDebugging(
+        "prompt.edit: a rewrite no longer fits the draft (it moved meanwhile); the person's typing stands",
+        { level: 'info' },
+      )
+    }
+    flush()
+  }
+
+  return {
+    setHooked(next: boolean) {
+      hooked = next
+    },
+    record(edit: PromptEditRecord) {
+      if (!hooked) return
+      queued.push(edit)
+      if (!scheduled && inFlight === undefined) {
+        scheduled = true
+        queueMicrotask(flush)
+      }
+    },
+    dispose() {
+      queued = []
+      abort.abort()
+    },
+  }
+}
+
 export type FunctionHookTail = (
   event: Record<string, unknown>,
 ) => Promise<unknown>
+
+/** densable `Twe` — hook budget before `hasOverrun`. */
+const HOOK_BUDGET_MS = 5000
+
+/**
+ * densable `pc().hookFailed` payload. Worker `oGt` posts `{type:'hook_failed',...}`.
+ */
+export type FunctionHookFailedReport = {
+  plugin: string
+  environmentId?: string
+  event?: string
+  reason?: string
+  effect?: string
+  hasOverrun?: boolean
+  skip?: { kind?: string; why?: string }
+}
+
+type FunctionHooksHost = {
+  log: (text: string, level?: string) => void
+  hookFailed: (report: FunctionHookFailedReport) => void
+}
+
+/**
+ * densable `Xae` — first unique skip English per gold `LLe` key
+ * (`${plugin}#${environmentId ?? ''} ${event} ${kind}`).
+ */
+const skipFirstLog = new Map<string, number>()
+
+/**
+ * densable `NLe` — persist skip English once per
+ * `${plugin} ${event} ${hook|hook skipped}` (not per environmentId).
+ */
+const skipPersistOnce = new Set<string>()
+
+/** densable `Aa` unapplied rewrite effect. */
+const UNAPPLIED_REWRITE_EFFECT = 'the rest of its rewrite went on'
+
+function fillUnappliedRewriteEffect(
+  report: FunctionHookFailedReport,
+): FunctionHookFailedReport {
+  if (report.skip?.kind !== 'unapplied') return report
+  if (report.skip.why === undefined) return report
+  if (report.effect !== undefined && report.effect !== '') return report
+  report.effect = UNAPPLIED_REWRITE_EFFECT
+  return report
+}
+
+/**
+ * densable `LLe` — skip-first Map key. Not exported (minify name).
+ */
+function skipFirstKey(
+  report: FunctionHookFailedReport,
+  kind: string | undefined,
+): string {
+  const plugin = report.plugin
+  const environmentId = report.environmentId
+  const event = report.event
+  return `${plugin}#${environmentId ?? ''} ${event} ${kind}`
+}
+
+/**
+ * densable `T2` analog — write `${plugin}: ${h}` once to the plugin store
+ * file when the plugin is loaded or already has a store file. Not tengu/`yo`.
+ */
+function persistHookSkipOnce(
+  plugin: string,
+  label: string,
+  line: string,
+): void {
+  if (skipPersistOnce.has(label)) return
+  const known = loadedModules.some(mod => mod.name === plugin)
+  if (!known && !existsSync(pluginStorePath(plugin))) return
+  skipPersistOnce.add(label)
+  try {
+    const data = readPluginStoreFile(plugin)
+    const key = '__hookSkip'
+    const prev = data[key]
+    const lines = Array.isArray(prev)
+      ? prev.filter((item): item is string => typeof item === 'string')
+      : typeof prev === 'string' && prev !== ''
+        ? [prev]
+        : []
+    if (lines.includes(line)) return
+    lines.push(line)
+    const next = { ...data, [key]: lines }
+    writePluginStoreFile(plugin, next)
+    pluginStore.set(pluginStoreSlot(plugin, key), lines)
+  } catch {
+    // skip persist must not fail the hook
+  }
+}
+
+/**
+ * densable `xBt` — skip defined and not `engine.create`; first `s !== 1`
+ * unique English via host log (gold `fSe`; analog `logForDebugging`).
+ * Then gold `T2` analog persist (not `yo`/tengu).
+ */
+function noteHookSkipFirst(report: FunctionHookFailedReport): void {
+  const skip = report.skip
+  const event = report.event
+  if (skip === undefined || event === 'engine.create') return
+  const kind = skip.kind
+  const r = skipFirstKey(report, kind)
+  const s = (skipFirstLog.get(r) ?? 0) + 1
+  skipFirstLog.set(r, s)
+  if (s !== 1) return
+  const why = skip.why ?? ''
+  const g = kind === 'unapplied' ? 'hook' : 'hook skipped'
+  const h =
+    kind === 'unapplied'
+      ? `${event} hook: ${why}`
+      : `${event} hook skipped: ${why}`
+  functionHooksHost.log(h, 'error')
+  logForDebugging(h, { level: 'error' })
+  const plugin = report.plugin
+  const b = `${plugin} ${event} ${g}`
+  persistHookSkipOnce(plugin, b, `${plugin}: ${h}`)
+}
+
+/** densable `pc` / `oGt`. In-process default runs `xBt`; worker host posts. */
+let functionHooksHost: FunctionHooksHost = {
+  log() {},
+  hookFailed(report) {
+    noteHookSkipFirst(fillUnappliedRewriteEffect(report))
+  },
+}
+
+export function setFunctionHooksHost(host: FunctionHooksHost): void {
+  functionHooksHost = host
+}
+
+function prefixPluginReason(plugin: string, reason: string): string {
+  return reason.startsWith(`${plugin}: `) ? reason : `${plugin}: ${reason}`
+}
+
+function watchHookBudget(
+  pending: Promise<unknown>,
+  plugin: string,
+  event: string,
+): void {
+  let settled = false
+  pending.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    },
+  )
+  const timer = setTimeout(() => {
+    if (settled) return
+    const reason = prefixPluginReason(
+      plugin,
+      `still running ${HOOK_BUDGET_MS}ms after its budget ran out; ignores its signal`,
+    )
+    functionHooksHost.log(`hook overran: ${reason} (${event})`, 'error')
+    functionHooksHost.hookFailed({
+      plugin,
+      event,
+      reason,
+      effect: 'counted toward a runaway',
+      hasOverrun: true,
+    })
+  }, HOOK_BUDGET_MS)
+  timer.unref?.()
+}
+
+function notifyHookFailed(
+  report: FunctionHookFailedReport,
+  thrown: string,
+): void {
+  fillUnappliedRewriteEffect(report)
+  functionHooksHost.log(
+    `hook failed: ${report.plugin}: ${thrown} ` +
+      `(${report.event}; ${report.effect})`,
+    'error',
+  )
+  functionHooksHost.hookFailed(report)
+}
 
 /**
  * densable `F0` / `r1` for one classic event.
@@ -196,11 +562,16 @@ export type FunctionHookTail = (
  * rest of that chain, and the tail is the settings executor. `$` is
  * `{ plugin: { name, root } }`. A matcher object must equal the same
  * fields on the event. A hook that throws fails the chain.
+ *
+ * densable `u8e` `{only}`: when set, only that plugin's hooks run
+ * (`N1t` `qP("ui.message", void 0, {only:e})` / `dO` `{only:r}`).
  */
 export async function runFunctionHookChain(
   event: string,
   payload: Record<string, unknown>,
   tail: FunctionHookTail,
+  only?: string,
+  environments?: readonly string[],
 ): Promise<unknown> {
   // densable F0/r1: classic events are `classic.<HookEvent>`; yOt
   // function events (`plugin.register`, `tool.call`, …) are the dotted name.
@@ -208,7 +579,18 @@ export async function runFunctionHookChain(
   if (event === 'ui.render' || needle === 'classic.ui.render') {
     lastUiRenderPlugin = ''
   }
+  if (
+    (event === 'session.compact' || needle === 'classic.session.compact') &&
+    Object.hasOwn(payload, 'messages')
+  ) {
+    const compactReason = sessionCompactMessagesCheck(payload.messages)
+    if (compactReason !== undefined) throw new Error(compactReason)
+  }
   const matched = loadedModules.flatMap(mod => {
+    // densable u8e: g.name !== (n ?? g.name)
+    if (only !== undefined && mod.name !== only) return []
+    if (environments !== undefined && !environments.includes(mod.name))
+      return []
     if (mod.status === 'unloaded') return []
     if (
       mod.status === 'retiring' &&
@@ -216,11 +598,18 @@ export async function runFunctionHookChain(
     )
       return []
     return (mod.hooks ?? [])
-      .filter(
-        hook =>
-          functionHookPatternMatches(hook.pattern, needle) &&
-          matcherAllows(hook.matcher, payload, needle),
-      )
+      .filter(hook => {
+        if (!functionHookPatternMatches(hook.pattern, needle)) return false
+        if (event === 'ui.fault' || needle === 'classic.ui.fault') {
+          try {
+            return matcherAllows(hook.matcher, payload, needle)
+          } catch {
+            // densable iO: on('ui.fault') matcher threw on the host; taken as heard
+            return true
+          }
+        }
+        return matcherAllows(hook.matcher, payload, needle)
+      })
       .map(hook => ({ mod, hook }))
   })
   if (workerOwnsDispatch && functionHooksWorker) {
@@ -232,8 +621,10 @@ export async function runFunctionHookChain(
       payload,
       loadedModules
         .filter(mod => mod.status !== 'unloaded')
+        .filter(mod => only === undefined || mod.name === only)
         .map(mod => mod.name),
       tail,
+      only,
     )
     if (event === 'ui.render' || needle === 'classic.ui.render') {
       lastUiRenderPlugin =
@@ -279,7 +670,9 @@ export async function runFunctionHookChain(
         next(isEventRecord(rewritten) ? rewritten : current)
       Object.assign(next, { to })
     }
-    return Promise.resolve(step.hook.hook(engine, value, next))
+    const running = Promise.resolve(step.hook.hook(engine, value, next))
+    watchHookBudget(running, step.mod.name, event)
+    return running
       .then(returned => {
         traces.push({
           plugin: step.mod.name,
@@ -296,6 +689,18 @@ export async function runFunctionHookChain(
         return returned
       })
       .catch(err => {
+        const thrown = describeThrown(err)
+        notifyHookFailed(
+          {
+            plugin: step.mod.name,
+            environmentId: step.mod.name,
+            event,
+            reason: prefixPluginReason(step.mod.name, thrown),
+            effect: 'skipped; what is below it ran in its place',
+            hasOverrun: false,
+          },
+          thrown,
+        )
         if (!step.hook.catch) throw err
         return Promise.resolve(step.hook.catch(engine, value, next)).then(
           returned => {
@@ -317,20 +722,79 @@ export async function runFunctionHookChain(
       })
       .finally(() => leaveModule(step.mod.name))
   }
-  return callAt(0, payload).then(returned => {
-    if (event === 'plugin.register' && isEventRecord(returned)) {
-      Object.defineProperty(returned, '__pluginRegisterTrace', {
-        value: traces,
-        enumerable: false,
-      })
-    }
-    return returned
-  })
+  // densable `gSt`: nested evaluateUiRender from a hook skips sBo cache.
+  return hookEvalAls.run(true, () =>
+    callAt(0, payload).then(returned => {
+      if (event === 'plugin.register' && isEventRecord(returned)) {
+        Object.defineProperty(returned, '__pluginRegisterTrace', {
+          value: traces,
+          enumerable: false,
+        })
+      }
+      return returned
+    }),
+  )
 }
 
 type StateRef = { plugin: string; key: string; id?: string }
 
 const pluginState = new Map<string, { value: unknown; version: number }>()
+
+/** densable MD site `{surface, component, requestId}`. */
+type ClientFaultSite = {
+  surface: string
+  component: string
+  requestId: string
+}
+
+type ClientFaultRun = {
+  site: ClientFaultSite
+  versions: Set<string>
+  bornAt: string
+}
+
+/** densable `jC` reader row: `{instance, plugins, reads}`. */
+type DrawingReaderRecord = {
+  instance: ClientFaultSite
+  plugins: string[]
+  reads: Set<string>
+}
+
+type ClientFaultFoldPace = 'live' | 'steady'
+
+/** densable nqr `folds.{live,steady}`: stale instanceKeys + last flush + timer. */
+type ClientFaultFold = {
+  stale: Set<string>
+  lastAt: number
+  pending: ReturnType<typeof setTimeout> | undefined
+}
+
+function emptyClientFaultFold(): ClientFaultFold {
+  return {
+    stale: new Set(),
+    lastAt: Number.NEGATIVE_INFINITY,
+    pending: undefined,
+  }
+}
+
+/**
+ * densable `dt().pluginState` / `nqr()` / `Q_()`.
+ * `values` is `$.state`; `faultRuns`/`mounted`/`bumps` are cO/uO/BC.
+ * `folds` is Amt/Zc live=34ms / steady=100ms debounce.
+ */
+const pluginSession = {
+  values: pluginState,
+  readers: new Map<string, DrawingReaderRecord>(),
+  readersOf: new Map<string, Set<string>>(),
+  mounted: new Map<string, number>(),
+  faultRuns: new Map<string, ClientFaultRun>(),
+  bumps: 0,
+  versionFloor: 0,
+  folds: {
+    steady: emptyClientFaultFold(),
+    live: emptyClientFaultFold(),
+  },
+}
 
 function stateKey(ref: StateRef): string {
   return `${ref.plugin}\0${ref.key}\0${ref.id ?? ''}`
@@ -411,6 +875,9 @@ const MODEL_FORK_MAX_TURNS = 2
 const ENGINE_ALONE_UI_RENDER = 'AskUserQuestion'
 const AGENT_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const AGENT_TOOL_NAME = 'Agent'
+/** densable `Rat` — hook returned without calling next / core.perform. */
+const AGENT_SPAWN_HOOK_REFUSE =
+  'agent.spawn: a hook answered without passing the spawn on'
 const AGENT_SPAWN_DESC_WORDS = 5
 const HOST_TEXT_LIMIT = 4096
 const AGENT_REGISTER_KEYS = [
@@ -1021,16 +1488,35 @@ function promptFillPayload(
 /** densable `Sg` — `$.prompt`. */
 function Sg(plugin: string, environmentId: string): Record<string, unknown> {
   return {
-    submit: (input: unknown) =>
-      _t(input, plugin, 'prompt.submit').then(text =>
-        text.trim() === ''
-          ? Promise.reject(
-              new Error(
-                `${plugin}: $.prompt.submit takes { text } (a non-empty prompt)`,
-              ),
-            )
-          : hostOp(environmentId, 'prompt.submit', [{ text }]),
-      ),
+    submit: (input: unknown) => {
+      const rec = isEventRecord(input) ? input : undefined
+      const attachments = rec?.attachments
+      // densable `Boo`: empty → slash (`JMe`) → attachments (`n&&n.length>0`).
+      return _t(input, plugin, 'prompt.submit').then(text => {
+        if (text.trim() === '') {
+          return Promise.reject(
+            new Error(
+              `${plugin}: $.prompt.submit takes { text } (a non-empty prompt)`,
+            ),
+          )
+        }
+        if (text.trimStart().startsWith('/')) {
+          return Promise.reject(
+            new Error(
+              `${plugin}: $.prompt.submit submits a prompt to the model; a text beginning with / would run a command as the user; run one with $.command.run({ command })`,
+            ),
+          )
+        }
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          return Promise.reject(
+            new Error(
+              `${plugin}: $.prompt.submit takes text alone; attachments cannot be submitted`,
+            ),
+          )
+        }
+        return hostOp(environmentId, 'prompt.submit', [{ text }])
+      })
+    },
     read: () => hostOp(environmentId, 'prompt.read', [{}]),
     fill: (input: unknown) =>
       promptFillPayload(input, plugin).then(payload =>
@@ -1465,11 +1951,14 @@ function pluginEngine(
     plugin: { name: mod.name, root: mod.root ?? '' },
     state: {
       async get(ref: unknown) {
-        const slot = pluginState.get(stateKey(readStateRef(ref, 'get')))
+        const key = stateKey(readStateRef(ref, 'get'))
+        const slot = pluginState.get(key)
         // densable Gpr: missing key is { value: undefined, version: 0 }
+        const version = slot?.version ?? 0
+        noteStateRead(key, version)
         return {
           value: slot?.value,
-          version: slot?.version ?? 0,
+          version,
         }
       },
       async set(ref: unknown, value: unknown, opts?: { ifVersion?: number }) {
@@ -1483,6 +1972,7 @@ function pluginEngine(
         }
         const version = (current?.version ?? 0) + 1
         pluginState.set(key, { value, version })
+        notifyDrawingReadersOfKeys([key])
         return { isSet: true, version }
       },
     },
@@ -2019,6 +2509,10 @@ export async function handleHostOp(
     if (instructions !== undefined && typeof instructions !== 'string') {
       hostCheck(op, 'takes { instructions } (a string)', plugin)
     }
+    if (rec !== undefined && Object.hasOwn(rec, 'messages')) {
+      const compactReason = sessionCompactMessagesCheck(rec.messages)
+      if (compactReason !== undefined) hostCheck(op, compactReason, plugin)
+    }
     return runSessionCompact(
       typeof instructions === 'string' ? instructions : '',
       plugin,
@@ -2039,6 +2533,27 @@ export async function handleHostOp(
   if (op === 'ui.toast') {
     const textCheck = hostTextCheck(rec?.text)
     if (textCheck !== undefined) hostCheck(op, textCheck, plugin)
+    const timeoutMs = rec?.timeoutMs
+    if (
+      timeoutMs !== undefined &&
+      !(
+        typeof timeoutMs === 'number' &&
+        Number.isInteger(timeoutMs) &&
+        timeoutMs > 0 &&
+        timeoutMs <= UI_TOAST_TIMEOUT_MS_MAX
+      )
+    ) {
+      hostCheck(
+        op,
+        `timeoutMs is a whole number of ms, 1 to ${UI_TOAST_TIMEOUT_MS_MAX}`,
+        plugin,
+      )
+    }
+    uiToastShowHandler?.({
+      plugin: plugin ?? '',
+      text: String(rec?.text ?? ''),
+      ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
+    })
     return undefined
   }
   if (op === 'ui.status') {
@@ -2143,6 +2658,10 @@ export async function handleHostOp(
         'submits a prompt to the model; a text beginning with / would run a command as the user; run one with $.command.run({ command })',
         plugin,
       )
+    }
+    const attachments = rec?.attachments
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      hostCheck(op, 'takes text alone; attachments cannot be submitted', plugin)
     }
     return runPromptSubmit(rec ?? {}, plugin)
   }
@@ -2309,11 +2828,14 @@ export async function handleHostOp(
     return typeof path === 'string' ? existsSync(path) : false
   }
   if (op === 'state.get') {
-    const slot = pluginState.get(stateKey(readStateRef(args[0], 'get')))
+    const key = stateKey(readStateRef(args[0], 'get'))
+    const slot = pluginState.get(key)
     // densable Gpr: missing key is { value: undefined, version: 0 }
+    const version = slot?.version ?? 0
+    noteStateRead(key, version)
     return {
       value: slot?.value,
-      version: slot?.version ?? 0,
+      version,
     }
   }
   if (op === 'state.set') {
@@ -2331,6 +2853,7 @@ export async function handleHostOp(
     }
     const version = (current?.version ?? 0) + 1
     pluginState.set(key, { value, version })
+    notifyDrawingReadersOfKeys([key])
     return { isSet: true, version }
   }
   // densable ECe: e.ops[op].run — missing op throws TypeError reading 'run'
@@ -3430,13 +3953,37 @@ function waitForSpawnedAgent(agentId: string): Promise<void> {
   })
 }
 
-async function runAgentSpawn(
+/**
+ * densable `wis` — hook answered without passing the spawn on (or deny).
+ * Abort + deny → throw (gold `Ye`); else `{ deny }`.
+ */
+function agentSpawnHookRefuse(
+  result: unknown,
+  input: Record<string, unknown>,
+  signal?: AbortSignal,
+): { deny: string } {
+  const rec = isEventRecord(result) ? result : undefined
+  const deny =
+    typeof rec?.deny === 'string' ? rec.deny : AGENT_SPAWN_HOOK_REFUSE
+  if (signal?.aborted === true) {
+    throw new Error(deny)
+  }
+  const kind =
+    typeof input.subagent_type === 'string'
+      ? input.subagent_type
+      : typeof input.subagentType === 'string'
+        ? input.subagentType
+        : ''
+  logForDebugging(`agent.spawn ${kind}: refused by a hook (${deny})`, {
+    level: 'info',
+  })
+  return { deny }
+}
+
+async function launchAgentSpawn(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
-  if (input.tool !== AGENT_TOOL_NAME) {
-    hostCheck('agent.spawn', "takes the Agent tool's input", plugin)
-  }
   if (!agentSpawnHandler) {
     return {
       isError: true,
@@ -3460,6 +4007,7 @@ async function runAgentSpawn(
     pluginAgentSpawns.set(key, (pluginAgentSpawns.get(key) ?? 1) - 1)
   }
   let handedOff = false
+  agentSpawnLaunchDepth += 1
   try {
     const raw = await agentSpawnHandler(input)
     const reply = isEventRecord(raw) ? raw : undefined
@@ -3483,8 +4031,38 @@ async function runAgentSpawn(
     }
     return raw
   } finally {
+    agentSpawnLaunchDepth -= 1
     if (!handedOff) release()
   }
+}
+
+async function runAgentSpawn(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<unknown> {
+  if (input.tool !== AGENT_TOOL_NAME) {
+    hostCheck('agent.spawn', "takes the Agent tool's input", plugin)
+  }
+  if (!hasMatchingFunctionHook('agent.spawn')) {
+    return launchAgentSpawn(input, plugin)
+  }
+  // densable Cc("agent.spawn") → CLt/vLt race: core.perform = launch.
+  // Hook that never calls next → wis/Rat deny. Core never arriving → vis.
+  let launched: unknown
+  let arrived = false
+  const result = await runFunctionHookChain(
+    'agent.spawn',
+    input,
+    async event => {
+      arrived = true
+      launched = await launchAgentSpawn(event, plugin)
+      return launched
+    },
+  )
+  if (!arrived) {
+    return agentSpawnHookRefuse(result, input)
+  }
+  return launched
 }
 
 let toolCallHandler:
@@ -3784,6 +4362,32 @@ const UI_RENDER_COMPONENTS = {
   AbovePrompt: 'AbovePromptSite',
   Pane: 'PaneSite',
 } as const
+/** densable `ye` — every surface name (`Object.keys(Nz)`). */
+const UI_SURFACE_NAMES = Object.freeze(Object.keys(UI_SURFACES))
+/**
+ * densable `ze` — which surfaces raise each ui.render component.
+ * `ye` = every surface; ToolProgress/TurnDuration/InfoNotice = terminal only;
+ * Spinner/SessionMode/PromptHint/AbovePrompt = terminal+desktop; Pane = ye.
+ */
+const UI_RENDER_COMPONENT_SURFACES: Readonly<
+  Record<keyof typeof UI_RENDER_COMPONENTS, readonly string[]>
+> = Object.freeze({
+  AskUserQuestion: UI_SURFACE_NAMES,
+  UserMessage: UI_SURFACE_NAMES,
+  AssistantMessage: UI_SURFACE_NAMES,
+  ToolUse: UI_SURFACE_NAMES,
+  ToolResult: UI_SURFACE_NAMES,
+  ToolGroup: UI_SURFACE_NAMES,
+  ToolProgress: ['terminal'],
+  CommandOutput: UI_SURFACE_NAMES,
+  Spinner: ['terminal', 'desktop'],
+  TurnDuration: ['terminal'],
+  InfoNotice: ['terminal'],
+  SessionMode: ['terminal', 'desktop'],
+  PromptHint: ['terminal', 'desktop'],
+  AbovePrompt: ['terminal', 'desktop'],
+  Pane: UI_SURFACE_NAMES,
+})
 const UI_INVALIDATE_EVENTS = [
   'ui.render',
   'prompt.section',
@@ -3863,8 +4467,18 @@ const askedPanes: AskedPaneRef[] = []
 let askedPanesSeeded = false
 /** densable `ASKED_MAX` / `G` — soft-persist asked rows cap. */
 export const PANE_ASKED_MAX = 64
-/** densable `d3` terminal columns — last known width for placeWaiting. */
-let panesTerminalColumns: number | undefined
+/** densable `d3` — columns / rows / conversationColumns for placeWaiting + Client `L()`. */
+export type PanesTerminalSize = {
+  columns: number
+  rows: number
+  conversationColumns: number
+}
+
+let panesTerminalSize: PanesTerminalSize | undefined
+
+export function getPanesTerminalSize(): PanesTerminalSize | undefined {
+  return panesTerminalSize
+}
 /** densable `focusRequest` — pending id for `settleFocusRequest` (`a4n`). */
 let paneFocusRequest: string | null = null
 /** densable `placements` — refcount from `offerPlacement` (`QFt`). */
@@ -4240,7 +4854,7 @@ export function placementAtOpen(
   pane: AskedPaneRef,
   force = false,
 ): { isPlaced: true } | { isPlaced: false; reason: string } {
-  const columns = panesTerminalColumns
+  const columns = panesTerminalSize?.columns
   const floor = paneOpenFloor(state, pane)
   if (columns === undefined) {
     // densable: Epn() ?? { isPlaced: true }
@@ -4260,7 +4874,16 @@ export function placementAtOpen(
  * place into open via reduce `b()`, log placed.
  */
 export function placeWaitingPanes(columns: number): void {
-  panesTerminalColumns = columns
+  // densable oNo — place waiters only. d3 is sst's write; bootstrap L() if unset.
+  if (panesTerminalSize === undefined) {
+    const rows = process.stdout.rows ?? 0
+    panesTerminalSize = {
+      columns,
+      rows,
+      conversationColumns: Math.max(1, columns),
+    }
+    setClientTerminalSize(panesTerminalSize)
+  }
   // gold logs each placed waiter via `t(\`ui.open … (waiting, ${columns} columns): placed\`)`
   setPanesState(state =>
     state.unplaced
@@ -4287,13 +4910,25 @@ export function placeWaitingPanesRemote(_reason?: string): void {
 }
 
 /**
- * Record known terminal columns and place any waiters that now fit.
- * Call from UI columns settle hosts (`useTerminalSize` / stdout).
+ * densable `sst(h,v,M)` — write d3 `{columns, rows, conversationColumns}` then oNo.
+ * `conversationColumns = max(1, columns - chrome)`. Gold chrome is band collapse
+ * columns; DualInk host passes 0 when unknown.
  */
-export function settlePanesTerminalColumns(columns: number): void {
+export function settlePanesTerminalColumns(
+  columns: number,
+  rows?: number,
+  chromeColumns = 0,
+): void {
   if (!Number.isFinite(columns) || !Number.isInteger(columns) || columns <= 0) {
     return
   }
+  const terminalRows =
+    rows !== undefined && Number.isFinite(rows) && rows > 0
+      ? Math.floor(rows)
+      : (process.stdout.rows ?? 0)
+  const conversationColumns = Math.max(1, columns - Math.max(0, chromeColumns))
+  panesTerminalSize = { columns, rows: terminalRows, conversationColumns }
+  setClientTerminalSize(panesTerminalSize)
   placeWaitingPanes(columns)
 }
 
@@ -4301,8 +4936,8 @@ export function settlePanesTerminalColumns(columns: number): void {
 export function offerPlacement(): () => void {
   panePlacements += 1
   notifyPanesListeners()
-  if (panesTerminalColumns !== undefined) {
-    placeWaitingPanes(panesTerminalColumns)
+  if (panesTerminalSize !== undefined) {
+    placeWaitingPanes(panesTerminalSize.columns)
   }
   let disposed = false
   return () => {
@@ -4356,9 +4991,59 @@ export function showPane(id: string): void {
 }
 
 /**
- * densable Ex/gH / Ide PARTIAL HAVE — local `pluginSites` registry for
+ * densable `ck(wd(Si().getState()))` — wire roster for CLI `ui_panes`.
+ */
+export function wirePanesState(state: PanesState = getPanesState()): {
+  panes: Array<{
+    id: string
+    title: string
+    plugin: string
+    close_on_escape?: boolean
+    hold_toasts?: boolean
+    rows?: number
+    columns?: number
+  }>
+  shown_id: string | null
+  focused_id: string | null
+  focus_requested_id: string | null
+} {
+  return {
+    panes: state.open.map(pane => ({
+      id: pane.id,
+      title: pane.title,
+      plugin: pane.plugin,
+      ...(pane.closeOnEscape && { close_on_escape: pane.closeOnEscape }),
+      ...(pane.holdToasts && { hold_toasts: pane.holdToasts }),
+      ...(pane.rows !== undefined && { rows: pane.rows }),
+      ...(pane.columns !== undefined && { columns: pane.columns }),
+    })),
+    shown_id: state.shownId,
+    focused_id: state.focusedId,
+    focus_requested_id: state.focusRequest,
+  }
+}
+
+/**
+ * densable `fue` — open + unplaced ids (ui_close membership).
+ */
+export function panesIncludingUnplaced(
+  state: PanesState = getPanesState(),
+): PluginPaneEntry[] {
+  return [...state.open, ...state.unplaced]
+}
+
+/**
+ * densable `XS` — remote client keyboard stamp after pane show/focus.
+ * CLI has no Gt remote window map; still a call-site so print matches gold.
+ */
+export function syncRemotePaneKeyboard(_clientId: string): void {
+  void _clientId
+}
+
+/**
+ * densable Ex/gH / Ide HAVE — local `pluginSites` registry for
  * offset/maxOffset/bodyRows/contentRows/keys (gold `Ide=et(dt().scrollSites)`).
- * Hde/`QLt` person-origin `ui.scroll` PARTIAL HAVE as semantic
+ * Hde/`QLt` person-origin `ui.scroll` HAVE as semantic
  * `logUiScrollSettled` + `commitPluginScrollSite` + `dispatchPersonUiScroll`
  * (no minify Ide/Hde/QLt/iZ export). Hook-chain HAVE via
  * `dispatchPersonUiScroll` → `runFunctionHookChain('ui.scroll')` when no
@@ -4402,6 +5087,22 @@ export type ScrollSiteLayoutNode = {
   }
 }
 const pluginSites: PluginSite[] = []
+/** densable `Ide` / `Fj(component, requestId)` — Map index over `pluginSites`. */
+const ideSites = new Map<string, PluginSite>()
+
+function ideSiteKey(
+  component: PluginSite['component'],
+  requestId: string,
+): string {
+  return `${component}:${requestId}`
+}
+
+function ideGet(
+  component: PluginSite['component'],
+  requestId: string,
+): PluginSite | undefined {
+  return ideSites.get(ideSiteKey(component, requestId))
+}
 
 /**
  * densable `g9e` / `dt().focusSites` — separate from scrollSites (`pluginSites`).
@@ -4688,12 +5389,111 @@ function stampPluginOnDrawing(node: unknown, plugin: string): unknown {
   return node
 }
 
+/** densable `BBr`. */
+const UI_RENDER_EVAL_CAP = 500
+
+type UiRenderEvalRecord = {
+  propsKey: string
+  version: string
+  settled: unknown
+  /** densable `oBo` `versions: HD()` — Map identity, not a copy. */
+  versions: Map<string, number>
+  /** densable `oBo` `engineVersion: HD().get(Fv) ?? 0`. */
+  engineVersion: number
+}
+
+/** densable `sBo` — per-MD eval cache; drop on abort if still this record. */
+const uiRenderEvalCache = new Map<string, UiRenderEvalRecord>()
+/** densable `sBo` `n` — last stamped HD Map identity. */
+let uiRenderEvalHd: Map<string, number> | undefined
+/** densable `sBo` `r` — last stamped Fv engineVersion. */
+let uiRenderEvalEngineVersion = 0
+/** densable `sBo` `s` / `reused()`. */
+let uiRenderEvalReuseCount = 0
+
+/** densable `d8n` — `props.onScreen` `{first,last,of}` or null. */
+function uiRenderOnScreen(input: Record<string, unknown>): unknown {
+  const props = isEventRecord(input.props) ? input.props : undefined
+  if (props === undefined || !Object.hasOwn(props, 'onScreen')) return undefined
+  const n = props.onScreen
+  if (n === null) return null
+  if (!isEventRecord(n)) return undefined
+  const first = n.first
+  const last = n.last
+  const of = n.of
+  if (
+    typeof first === 'number' &&
+    typeof last === 'number' &&
+    typeof of === 'number'
+  ) {
+    return { first, last, of }
+  }
+  return undefined
+}
+
+/** densable `egn` / `u8n` propsKey (viewport + props). */
+function uiRenderPropsKey(input: Record<string, unknown>): string {
+  const viewport = isEventRecord(input.viewport) ? input.viewport : undefined
+  const columns = viewport?.columns ?? ''
+  const isFullscreen = viewport?.isFullscreen ?? ''
+  const props = isEventRecord(input.props) ? input.props : {}
+  return [
+    columns,
+    isFullscreen,
+    JSON.stringify(props),
+    JSON.stringify(uiRenderOnScreen(input) ?? null),
+  ].join('\0')
+}
+
+/** densable `l8n` — settled + propsKey + HD identity + Lue version. */
+function uiRenderEvalFits(
+  rec: UiRenderEvalRecord,
+  propsKey: string,
+  version: string,
+): boolean {
+  return (
+    rec.settled !== undefined &&
+    rec.propsKey === propsKey &&
+    rec.versions === faultRenderVersions &&
+    rec.version === version
+  )
+}
+
+/** densable `sBo` `countReuse`. */
+function countReuse(): void {
+  uiRenderEvalReuseCount += 1
+}
+
+function rememberUiRenderEval(md: string, rec: UiRenderEvalRecord): void {
+  if (
+    rec.versions !== uiRenderEvalHd ||
+    rec.engineVersion !== uiRenderEvalEngineVersion
+  ) {
+    uiRenderEvalCache.clear()
+    uiRenderEvalHd = rec.versions
+    uiRenderEvalEngineVersion = rec.engineVersion
+  }
+  uiRenderEvalCache.delete(md)
+  uiRenderEvalCache.set(md, rec)
+  for (const key of uiRenderEvalCache.keys()) {
+    if (uiRenderEvalCache.size <= UI_RENDER_EVAL_CAP) break
+    uiRenderEvalCache.delete(key)
+  }
+}
+
 function rememberUiRenderDrawing(
   plugin: string,
   component: string,
   requestId: string,
   tree: unknown,
 ): void {
+  const outgoing = pluginDrawings.filter(
+    drawing =>
+      drawing.component === component && drawing.requestId === requestId,
+  )
+  for (const drawing of outgoing) {
+    releaseDrawingButtons(drawing.tree, drawing.plugin, component, requestId)
+  }
   pluginDrawings.splice(
     0,
     pluginDrawings.length,
@@ -4728,21 +5528,222 @@ function rememberUiRenderDrawing(
  */
 export async function evaluateUiRender(
   input: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const reason = uiRenderArgCheck(input)
   if (reason !== undefined) throw new Error(reason)
   const component = String(input.component)
   const requestId = typeof input.requestId === 'string' ? input.requestId : ''
+  const surface = typeof input.surface === 'string' ? input.surface : 'terminal'
+  // densable `gSt()`: already inside a hook-chain eval → skip sBo, dispatch FBr.
+  const skipCache = isInsideHookEval()
+  const drawingSite: ClientFaultSite = { surface, component, requestId }
+  const drawing: UiRenderDrawing = {
+    instanceKey: clientFaultSiteKey(drawingSite),
+    instance: drawingSite,
+    versionsRead: new Map(),
+    isEnded: false,
+  }
+  const md = clientFaultSiteKey(drawingSite)
+  const propsKey = uiRenderPropsKey(input)
+  const version = clientFaultLue(drawingSite)
+  const previous =
+    skipCache || requestId === '' ? undefined : uiRenderEvalCache.get(md)
+  if (
+    !skipCache &&
+    previous !== undefined &&
+    uiRenderEvalFits(previous, propsKey, version)
+  ) {
+    countReuse()
+    logForDebugging(
+      `ui.render (${component} ${requestId}): ${surface} reuses its settled evaluation (one dispatch per draw)`,
+    )
+    return previous.settled
+  }
   // densable `Wkt` false → `Fhe`/`sMe`. Empty classic chain's tail is that.
-  const drawn = await runFunctionHookChain(
-    'ui.render',
-    input,
-    async () => UI_RENDER_ENGINE_FALLBACK,
-  )
+  // densable `jBr` `D=Date.now()` around `FBr`; `U2` after settle when live;
+  // `W2` on abort if `!Q.settled`.
+  const startedAt = Date.now()
+  const liveNames =
+    clientFaultPace(drawingSite) === 'live'
+      ? uiRenderPluginNames(drawingSite)
+      : []
+  let settled = false
+  const evalRecord: UiRenderEvalRecord | undefined =
+    skipCache || requestId === ''
+      ? undefined
+      : {
+          propsKey,
+          version,
+          settled: undefined,
+          versions: faultRenderVersions,
+          engineVersion:
+            faultRenderVersions.get(FAULT_RENDER_FV) ??
+            getRenderVersion(FAULT_RENDER_FV) ??
+            0,
+        }
+  if (evalRecord !== undefined) rememberUiRenderEval(md, evalRecord)
+  const onAbort = (): void => {
+    if (!settled) {
+      if (
+        evalRecord !== undefined &&
+        uiRenderEvalCache.get(md) === evalRecord
+      ) {
+        uiRenderEvalCache.delete(md)
+      }
+      noteAbortedUiRender(liveNames, Date.now() - startedAt)
+    }
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  let drawn: unknown
+  try {
+    drawn = await uiRenderDrawingAls.run(drawing, () =>
+      runFunctionHookChain(
+        'ui.render',
+        input,
+        async () => UI_RENDER_ENGINE_FALLBACK,
+      ),
+    )
+  } finally {
+    drawing.isEnded = true
+  }
+  settled = true
+  signal?.removeEventListener('abort', onAbort)
+  // densable FBr: `if(e.requestId!==""&&!n.aborted)jC(g)` after the chain.
+  if (requestId !== '' && !signal?.aborted) recordDrawingReaders(drawing)
   const plugin = lastUiRenderPlugin
   const tree = stampPluginOnDrawing(drawn, plugin)
-  rememberUiRenderDrawing(plugin, component, requestId, tree)
+  const treeReason = uiRenderTreeCheck(tree)
+  if (treeReason !== undefined) {
+    logUiRenderRefused(component, treeReason)
+    throw new Error(treeReason)
+  }
+  const drawingReason = uiRenderDrawingPlainCheck(tree, plugin)
+  if (drawingReason !== undefined) {
+    logUiRenderRefused(component, drawingReason)
+    throw new Error(drawingReason)
+  }
+  const hoverReason = uiRenderHoverCheck(tree)
+  if (hoverReason !== undefined) {
+    logUiRenderRefused(component, hoverReason)
+    throw new Error(hoverReason)
+  }
+  const accepted = acceptAskUserQuestionRewrite(tree, input, component)
+  rememberUiRenderDrawing(plugin, component, requestId, accepted)
+  if (evalRecord !== undefined && !signal?.aborted) {
+    evalRecord.settled = accepted
+  }
+  // densable `!V` U2 — previous cache occupied this MD (stale replace).
+  if (liveNames.length > 0 && !signal?.aborted && previous !== undefined) {
+    noteSlowUiRender(liveNames, Date.now() - startedAt)
+  }
+  return accepted
+}
+
+/** densable `DBr` / `tBo` — refusal still lets the engine draw its own. */
+function logUiRenderRefused(component: string, problem: string): void {
+  logForDebugging(
+    `ui.render (${component}) refused: ${problem}; the engine drew its own`,
+  )
+}
+
+function describeThrown(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * densable `YXe` / `Meo` — AskUserQuestion rewrite may relabel, not reshape.
+ * Invalid rewrite logs unique English and keeps the original questions.
+ */
+function acceptAskUserQuestionRewrite(
+  tree: unknown,
+  input: Record<string, unknown>,
+  component: string,
+): unknown {
+  if (component !== 'AskUserQuestion' || !isEventRecord(tree)) return tree
+  const props = isEventRecord(input.props) ? input.props : input
+  const original = Array.isArray(props.questions) ? props.questions : undefined
+  if (original === undefined) return tree
+  const treeProps = isEventRecord(tree.props) ? tree.props : tree
+  const rewritten = treeProps.questions
+  if (rewritten === original || rewritten === undefined) return tree
+  const problem = askUserQuestionRewriteProblem(rewritten, original)
+  if (problem === 'schema') {
+    logForDebugging(
+      `ui.render (AskUserQuestion): rewritten questions do not match the tool's input schema (questions must be a list of questions); drawing the original`,
+      { level: 'warn' },
+    )
+    return restoreAskUserQuestionQuestions(tree, original)
+  }
+  if (problem !== undefined) {
+    logForDebugging(
+      `ui.render (AskUserQuestion): a rewrite may relabel the questions but not ${problem}; drawing the original`,
+      { level: 'warn' },
+    )
+    return restoreAskUserQuestionQuestions(tree, original)
+  }
   return tree
+}
+
+function restoreAskUserQuestionQuestions(
+  tree: Record<string, unknown>,
+  original: unknown[],
+): Record<string, unknown> {
+  if (isEventRecord(tree.props)) {
+    return { ...tree, props: { ...tree.props, questions: original } }
+  }
+  return { ...tree, questions: original }
+}
+
+function askUserQuestionRewriteProblem(
+  rewritten: unknown,
+  original: unknown[],
+): string | undefined {
+  if (!Array.isArray(rewritten)) return 'schema'
+  if (rewritten.length !== original.length) {
+    return `change how many questions there are (${original.length} asked, ${rewritten.length} drawn)`
+  }
+  const labelsOf = (question: unknown): string[] => {
+    if (!isEventRecord(question) || !Array.isArray(question.options)) return []
+    return question.options.map(option =>
+      isEventRecord(option) ? String(option.label ?? '') : '',
+    )
+  }
+  const previewsOf = (question: unknown): string[] => {
+    if (!isEventRecord(question) || !Array.isArray(question.options)) return []
+    return question.options.map(option =>
+      isEventRecord(option) ? String(option.preview ?? '') : '',
+    )
+  }
+  const stamp = (values: string[]): string => values.join('\0')
+  for (const [index, asked] of original.entries()) {
+    const drawn = rewritten[index]
+    if (drawn === undefined) return `leave question ${index + 1} out`
+    if (!isEventRecord(asked) || !isEventRecord(drawn)) return 'schema'
+    if ((drawn.multiSelect ?? false) !== (asked.multiSelect ?? false)) {
+      return `change whether question ${index + 1} is multi-select`
+    }
+    const askedLabels = labelsOf(asked)
+    const drawnLabels = labelsOf(drawn)
+    if (stamp(drawnLabels) !== stamp(askedLabels)) {
+      return `change question ${index + 1}'s options (asked ${stamp(askedLabels)}, drawn ${stamp(drawnLabels)})`
+    }
+    if (stamp(previewsOf(drawn)) !== stamp(previewsOf(asked))) {
+      return `change question ${index + 1}'s previews`
+    }
+    const text = String(drawn.question ?? '')
+    const sameText = (row: unknown, skip: number): boolean => {
+      if (skip === index || !isEventRecord(row)) return false
+      return String(row.question ?? '') === text
+    }
+    if (rewritten.some((row, i) => i !== index && sameText(row, i))) {
+      return `give two questions one text (${text})`
+    }
+    if (original.some((row, i) => i !== index && sameText(row, i))) {
+      return `give question ${index + 1} another question's text (${text})`
+    }
+  }
+  return undefined
 }
 
 /** densable `ZHt` join for Raster/Image site keys: plugin, requestId, key. */
@@ -5454,7 +6455,7 @@ export function getShownPluginPane():
   if (shownPaneId === null) return undefined
   const pane = pluginPanes.find(item => item.id === shownPaneId)
   if (pane === undefined) return undefined
-  const site = pluginSites.find(item => item.requestId === pane.id)
+  const site = ideGet('Pane', pane.id)
   return {
     id: pane.id,
     plugin: pane.plugin,
@@ -5466,6 +6467,71 @@ export function getShownPluginPane():
     bodyRows: pane.rows ?? site?.bodyRows ?? 0,
     ...(pane.closeOnEscape === true && { closeOnEscape: true }),
   }
+}
+
+/** densable `sft(component, requestId)` — Input/Select + remount seat key. */
+export function pluginFieldSeatKey(
+  component: string,
+  requestId: string,
+): string {
+  return `${component}\0${requestId}`
+}
+
+type PluginFieldSeatBucket = Map<string, Map<string, string>>
+
+const pluginInputSeatStore = createStore<PluginFieldSeatBucket>(new Map())
+const pluginSelectSeatStore = createStore<PluginFieldSeatBucket>(new Map())
+const pluginFieldSeatGenerationStore = createStore<Map<string, number>>(
+  new Map(),
+)
+
+export function pluginFieldSeatGeneration(
+  component: string,
+  requestId: string,
+): number {
+  return (
+    pluginFieldSeatGenerationStore
+      .getState()
+      .get(pluginFieldSeatKey(component, requestId)) ?? 0
+  )
+}
+
+/**
+ * densable `NFr` — bump generation and drop Input/Select seats for that site.
+ */
+export function bumpPluginFieldSeatGeneration(
+  component: string,
+  requestId: string,
+): void {
+  const key = pluginFieldSeatKey(component, requestId)
+  const nextGen = pluginFieldSeatGeneration(component, requestId) + 1
+  pluginInputSeatStore.setState(prev => {
+    if (!prev.has(key)) return prev
+    const next = new Map(prev)
+    next.delete(key)
+    return next
+  })
+  pluginSelectSeatStore.setState(prev => {
+    if (!prev.has(key)) return prev
+    const next = new Map(prev)
+    next.delete(key)
+    return next
+  })
+  pluginFieldSeatGenerationStore.setState(prev =>
+    new Map(prev).set(key, nextGen),
+  )
+}
+
+export function getPluginInputSeatStore(): typeof pluginInputSeatStore {
+  return pluginInputSeatStore
+}
+
+export function getPluginSelectSeatStore(): typeof pluginSelectSeatStore {
+  return pluginSelectSeatStore
+}
+
+export function getPluginFieldSeatGenerationStore(): typeof pluginFieldSeatGenerationStore {
+  return pluginFieldSeatGenerationStore
 }
 
 /** densable `ift`/`NFr` — Pane remount generation for QT/BO resetKey. */
@@ -5494,14 +6560,30 @@ function dropPluginPane(id: string): void {
   for (let i = unplacedPanes.length - 1; i >= 0; i--) {
     if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
   }
+  // densable JFt — Ide/Fj + g9e keyed Pane:id only; shared requestId
+  // AbovePrompt sites stay (gold Fj(component, requestId)).
   for (let i = pluginSites.length - 1; i >= 0; i--) {
-    if (pluginSites[i]?.requestId === id) pluginSites.splice(i, 1)
+    const site = pluginSites[i]
+    if (site?.requestId === id && site.component === 'Pane') {
+      releaseClientFaultMount(
+        clientFaultSiteKey({
+          surface: 'terminal',
+          component: 'Pane',
+          requestId: id,
+        }),
+      )
+      pluginSites.splice(i, 1)
+    }
   }
   for (const [mapKey, site] of pluginFocusSites) {
-    if (site.requestId === id) pluginFocusSites.delete(mapKey)
+    if (site.requestId === id && site.component === 'Pane') {
+      pluginFocusSites.delete(mapKey)
+    }
   }
   // densable JFt → NFr("Pane", id) — bump remount gen so BO resets.
   bumpPaneRemountGeneration(id)
+  bumpPluginFieldSeatGeneration('Pane', id)
+  ideSites.delete(ideSiteKey('Pane', id))
   unmountRequest(id)
   notifyPanesListeners()
   bumpRasterFrames()
@@ -5572,7 +6654,7 @@ export function scrollPluginPane(
   to: 'up' | 'down' | 'pageUp' | 'pageDown' | 'top' | 'bottom',
 ): void {
   if (shownPaneId === null) return
-  const site = pluginSites.find(item => item.requestId === shownPaneId)
+  const site = ideGet('Pane', shownPaneId)
   if (site === undefined) return
   const max = Math.max(0, site.contentRows - site.bodyRows, site.maxOffset)
   const page = Math.max(1, site.bodyRows)
@@ -6038,11 +7120,10 @@ function holdPluginSite(
   requestId: string,
   component: PluginSite['component'] = 'Pane',
 ): PluginSite {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
+  const held = ideGet(component, requestId)
   if (held) {
-    held.component = component
+    held.plugin = plugin
+    held.owner = plugin
     holdPluginFocusSite(plugin, requestId, component, held.keys)
     return held
   }
@@ -6059,6 +7140,14 @@ function holdPluginSite(
     followEnd: false,
   }
   pluginSites.push(next)
+  ideSites.set(ideSiteKey(component, requestId), next)
+  holdClientFaultMount(
+    clientFaultSiteKey({
+      surface: 'terminal',
+      component,
+      requestId,
+    }),
+  )
   holdPluginFocusSite(plugin, requestId, component, next.keys)
   return next
 }
@@ -6211,12 +7300,7 @@ export function scrollSiteKeyRows(
   plugin: string,
   key: string,
 ): { top: number; bottom: number } | undefined {
-  const held =
-    'keys' in site
-      ? site
-      : pluginSites.find(
-          row => row.plugin === site.plugin && row.requestId === site.requestId,
-        )
+  const held = 'keys' in site ? site : ideGet(site.component, site.requestId)
   if (!held || held.plugin !== plugin) return undefined
   // densable yEe keyRows = cEe(content, key, plugin) — yoga first, no keys.has.
   if (held.contentRoot !== undefined) {
@@ -6231,11 +7315,10 @@ export function bindPluginScrollSiteLayout(
   plugin: string,
   requestId: string,
   root: ScrollSiteLayoutNode | null,
+  component?: PluginSite['component'],
 ): void {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
-  if (held === undefined) return
+  const held = ideGet(scrollSiteComponent(requestId, component), requestId)
+  if (held === undefined || held.plugin !== plugin) return
   if (root === null) {
     held.contentRoot = undefined
     return
@@ -6250,11 +7333,10 @@ export function bindPluginScrollSiteLayout(
 export function followPluginScrollSiteEnd(
   plugin: string,
   requestId: string,
+  component?: PluginSite['component'],
 ): boolean {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
-  if (held === undefined) return false
+  const held = ideGet(scrollSiteComponent(requestId, component), requestId)
+  if (held === undefined || held.plugin !== plugin) return false
   held.followEnd = true
   held.offset = Math.max(0, held.maxOffset)
   bumpRasterFrames()
@@ -6296,8 +7378,8 @@ function scrollSiteComponent(
 }
 
 /**
- * densable Ide().set lite — register/hold a scroll site in `pluginSites`
- * (PARTIAL HAVE). Person-origin commit/dispatch is
+ * densable Ide().set — register/hold a scroll site in `pluginSites`
+ * keyed `component:requestId` (gold `Fj`). Person-origin commit/dispatch is
  * `commitPluginScrollSite` / `dispatchPersonUiScroll`.
  */
 export function registerPluginScrollSite(
@@ -6316,11 +7398,10 @@ export function updatePluginScrollSite(
   plugin: string,
   requestId: string,
   dims: PluginScrollSiteDims,
+  component?: PluginSite['component'],
 ): PluginScrollSiteSnapshot | undefined {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
-  if (held === undefined) return undefined
+  const held = ideGet(scrollSiteComponent(requestId, component), requestId)
+  if (held === undefined || held.plugin !== plugin) return undefined
   applyPluginScrollSiteDims(held, dims)
   return snapshotPluginScrollSite(held)
 }
@@ -6329,24 +7410,37 @@ export function updatePluginScrollSite(
 export function unregisterPluginScrollSite(
   plugin: string,
   requestId: string,
+  component?: PluginSite['component'],
 ): void {
   for (let i = pluginSites.length - 1; i >= 0; i--) {
     const site = pluginSites[i]
-    if (site?.plugin === plugin && site.requestId === requestId) {
+    if (
+      site?.plugin === plugin &&
+      site.requestId === requestId &&
+      (component === undefined || site.component === component)
+    ) {
+      ideSites.delete(ideSiteKey(site.component, site.requestId))
+      releaseClientFaultMount(
+        clientFaultSiteKey({
+          surface: 'terminal',
+          component: site.component,
+          requestId: site.requestId,
+        }),
+      )
       pluginSites.splice(i, 1)
     }
   }
-  dropPluginFocusSite(plugin, requestId)
+  if (component === undefined) dropPluginFocusSite(plugin, requestId)
 }
 
 export function getPluginScrollSite(
   plugin: string,
   requestId: string,
+  component?: PluginSite['component'],
 ): PluginScrollSiteSnapshot | undefined {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
-  return held === undefined ? undefined : snapshotPluginScrollSite(held)
+  const held = ideGet(scrollSiteComponent(requestId, component), requestId)
+  if (held === undefined || held.plugin !== plugin) return undefined
+  return snapshotPluginScrollSite(held)
 }
 
 /**
@@ -6394,11 +7488,12 @@ export function commitPluginScrollSite(
   requestId: string,
   offset: number,
   origin?: PluginScrollOrigin,
+  component?: PluginSite['component'],
 ): { deny?: string } {
-  const held = pluginSites.find(
-    site => site.plugin === plugin && site.requestId === requestId,
-  )
-  if (held === undefined) return { deny: 'no such site' }
+  const held = ideGet(scrollSiteComponent(requestId, component), requestId)
+  if (held === undefined || held.plugin !== plugin) {
+    return { deny: 'no such site' }
+  }
   if (isForeignPluginScrollOrigin(held.owner ?? held.plugin, origin)) {
     return { deny: "not this plugin's site" }
   }
@@ -6429,7 +7524,6 @@ export type PersonUiScrollInput = {
 export function dispatchPersonUiScroll(
   input: PersonUiScrollInput,
 ): Promise<{ deny?: string } | undefined> {
-  const plugin = input.plugin ?? ''
   const label = `ui.scroll ${input.component} ${input.requestId}`
   const scrollInput = {
     component: input.component,
@@ -6442,17 +7536,26 @@ export function dispatchPersonUiScroll(
     ...(input.pointer !== undefined && { pointer: input.pointer }),
   }
   const vqCommit = (): { deny?: string } => {
+    // densable QLt person path — Ide Fj(component, requestId), not caller plugin.
+    const held = ideGet(input.component, input.requestId)
+    if (held === undefined) return { deny: 'no such site' }
     const committed = commitPluginScrollSite(
-      plugin,
+      held.plugin,
       input.requestId,
       input.offset,
       { kind: 'person' },
+      input.component,
     )
     if (committed.deny !== undefined) return committed
-    updatePluginScrollSite(plugin, input.requestId, {
-      bodyRows: input.bodyRows,
-      contentRows: input.contentRows,
-    })
+    updatePluginScrollSite(
+      held.plugin,
+      input.requestId,
+      {
+        bodyRows: input.bodyRows,
+        contentRows: input.contentRows,
+      },
+      input.component,
+    )
     // densable yEe local Me re-renders immediately; Pane host reads
     // getShownPluginPane().offset from pluginSites — bump like scrollPluginPane.
     bumpRasterFrames()
@@ -6480,6 +7583,272 @@ export function dispatchPersonUiScroll(
       return (value as { deny?: string } | undefined) ?? {}
     }),
   )
+}
+
+export type RemoteUiScrollInput = {
+  clientId: string
+  component: PluginSite['component']
+  requestId: string
+  offset: number
+  by: number
+  bodyRows: number
+  contentRows: number
+  pointer?: unknown
+  keyed?: unknown
+}
+
+/**
+ * densable `JC` / `ok` — CLI `ui_scroll` person-origin QLt.
+ */
+export async function runRemoteUiScroll(input: RemoteUiScrollInput): Promise<{
+  result: { deny?: string }
+  offset: number
+  isFollowingEnd: boolean
+}> {
+  const held = ideGet(input.component, input.requestId)
+  if (held === undefined) {
+    return {
+      result: { deny: 'no such site' },
+      offset: input.offset,
+      isFollowingEnd: false,
+    }
+  }
+  const max = Math.max(0, held.contentRows - held.bodyRows, held.maxOffset)
+  const before = held.followEnd ? max : Math.min(held.offset, max)
+  const next = Math.min(Math.max(0, before + input.by), max)
+  const result =
+    (await dispatchPersonUiScroll({
+      component: input.component,
+      requestId: input.requestId,
+      offset: next,
+      by: input.by,
+      bodyRows: input.bodyRows,
+      contentRows: input.contentRows,
+      plugin: held.plugin,
+      ...(input.pointer !== undefined && { pointer: input.pointer }),
+    })) ?? {}
+  const after = ideGet(input.component, input.requestId)
+  return {
+    result,
+    offset: result.deny !== undefined ? before : (after?.offset ?? next),
+    isFollowingEnd: after?.followEnd === true,
+  }
+}
+
+export type RemoteUiFocusInput = {
+  clientId: string
+  component: PluginSite['component']
+  requestId: string
+  isHeld: boolean
+  element?: { plugin: string; key: string } | null
+  by: 'person' | 'auto'
+}
+
+/**
+ * densable `vC` — CLI `ui_focus`. Absent element reports hold only.
+ */
+export async function runRemoteUiFocus(input: RemoteUiFocusInput): Promise<{
+  result: { deny?: string }
+  element: { plugin: string; key: string } | null
+}> {
+  void input.clientId
+  void input.isHeld
+  const site = lookupFocusSite(input.component, input.requestId)
+  if (input.element === undefined) {
+    return {
+      result: {},
+      element:
+        site?.holder !== undefined ? { plugin: site.holder, key: '' } : null,
+    }
+  }
+  if (site === undefined) {
+    return {
+      result: { deny: 'no such site' },
+      element: input.element,
+    }
+  }
+  const origin =
+    input.by === 'auto' && input.element !== null
+      ? { kind: 'plugin' as const, name: input.element.plugin }
+      : { kind: 'person' as const }
+  const result = await Promise.resolve(
+    dispatchUiFocus({
+      component: input.component,
+      requestId: input.requestId,
+      origin,
+      ...(input.element !== null && {
+        plugin: input.element.plugin,
+        element: input.element.key,
+      }),
+    }),
+  )
+  const after = lookupFocusSite(input.component, input.requestId)
+  return {
+    result,
+    element:
+      input.element !== null
+        ? input.element
+        : after?.holder !== undefined
+          ? { plugin: after.holder, key: '' }
+          : null,
+  }
+}
+
+/**
+ * densable `FS.moduleFor` / `EO` analog — scanned modules as the CLI payload.
+ * Full import-map compile stays in the surface runtime; do not invent minify EO.
+ */
+export function clientModuleFor(plugin: string):
+  | {
+      plugin: string
+      hash: string
+      modules: Array<{ module: string; entry: string; component: string }>
+      runtime: string
+      limits: typeof SURFACE_LIMITS
+      files: Array<{ key: string; source: string }>
+    }
+  | undefined {
+  const mod = loadedModules.find(
+    item => item.name === plugin && item.status !== 'unloaded',
+  )
+  const scanned =
+    mod?.surfaceModules ?? getPluginSurfaceModules(plugin)?.modules
+  if (mod === undefined || scanned === undefined || scanned.length === 0) {
+    return undefined
+  }
+  const files = scanned.map(row => ({
+    key: `surface:///${row.module.replaceAll('\\', '/')}`,
+    source: row.source,
+  }))
+  const digest = createHash('sha256')
+  digest.update(JSON.stringify(SURFACE_LIMITS))
+  for (const file of files) {
+    digest.update(file.key)
+    digest.update('\0')
+    digest.update(file.source)
+  }
+  return {
+    plugin,
+    hash: digest.digest('hex'),
+    modules: scanned.map(row => ({
+      module: row.module.replaceAll('\\', '/'),
+      entry: `surface:///${row.module.replaceAll('\\', '/')}`,
+      component: row.component,
+    })),
+    runtime: 'claude:surface-runtime',
+    limits: SURFACE_LIMITS,
+    files,
+  }
+}
+
+export type RemoteClientPressInput = {
+  plugin: string
+  component: string
+  requestId: string
+  key: string
+  module: string
+  element: string
+  event:
+    | { type: 'press' }
+    | { type: 'input'; kind: 'change' | 'submit'; value: string }
+    | { type: 'select'; value: string }
+}
+
+/**
+ * densable `I3` — CLI `ui_client_press`. Missing plugin → undefined.
+ */
+export async function runRemoteClientPress(
+  input: RemoteClientPressInput,
+): Promise<{ reached?: unknown } | undefined> {
+  const loaded = loadedModules.some(
+    item => item.name === input.plugin && item.status !== 'unloaded',
+  )
+  if (!loaded) {
+    logForDebugging(
+      `ui.${input.event.type}: no desktop Client ${input.plugin}/${input.key} (${input.module}) is drawn in ${input.component} ${input.requestId}; nothing ran`,
+    )
+    return undefined
+  }
+  let reached: unknown
+  const base = {
+    plugin: input.plugin,
+    component: input.component,
+    requestId: input.requestId,
+    key: input.key,
+    module: input.module,
+    element: input.element,
+    surface: 'desktop',
+  }
+  if (input.event.type === 'press') {
+    await runFunctionHookChain('ui.press', base, async event => {
+      reached = event
+      return { element: (event as { element?: unknown }).element }
+    })
+  } else if (input.event.type === 'input') {
+    await runFunctionHookChain(
+      'ui.input',
+      { ...base, kind: input.event.kind, value: input.event.value },
+      async event => {
+        reached = event
+        return {
+          element: (event as { element?: unknown }).element,
+          value: (event as { value?: unknown }).value,
+        }
+      },
+    )
+  } else {
+    await runFunctionHookChain(
+      'ui.select',
+      { ...base, value: input.event.value },
+      async event => {
+        reached = event
+        return {
+          element: (event as { element?: unknown }).element,
+          value: (event as { value?: unknown }).value,
+        }
+      },
+    )
+  }
+  return reached !== undefined ? { reached } : {}
+}
+
+export type RemoteClientMessageInput = {
+  plugin: string
+  component: string
+  requestId: string
+  key: string
+  module: string
+  data: unknown
+}
+
+/**
+ * densable `O3` / `N1t` — CLI `ui_message`. Missing plugin → undefined.
+ */
+export async function runRemoteClientMessage(
+  input: RemoteClientMessageInput,
+): Promise<{ props?: unknown } | undefined> {
+  const loaded = loadedModules.some(
+    item => item.name === input.plugin && item.status !== 'unloaded',
+  )
+  if (!loaded) return undefined
+  const answered = await dispatchClientMessage({
+    plugin: input.plugin,
+    surface: 'desktop',
+    component: input.component,
+    requestId: input.requestId,
+    element: input.key,
+    module: input.module,
+    data: input.data,
+  })
+  if (
+    answered !== null &&
+    typeof answered === 'object' &&
+    !Array.isArray(answered) &&
+    'props' in answered
+  ) {
+    return { props: (answered as { props: unknown }).props }
+  }
+  return {}
 }
 
 /**
@@ -6629,6 +7998,428 @@ function uiRenderArgCheck(input: unknown): string | undefined {
 }
 
 /**
+ * densable `Li.check` — ui.render answer is a tree element (`{ type }`).
+ */
+export function uiRenderTreeCheck(tree: unknown): string | undefined {
+  return isEventRecord(tree) && typeof tree.type === 'string'
+    ? undefined
+    : 'something that is not a tree element'
+}
+
+function valueIsProxy(value: unknown): boolean {
+  if (
+    value === null ||
+    (typeof value !== 'object' && typeof value !== 'function')
+  ) {
+    return false
+  }
+  // densable `ge(p)` — Node util.types.isProxy.
+  return isProxy(value)
+}
+
+function isPlainDataObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+const HOVER_BOX_PROPS = new Set([
+  'borderStyle',
+  'borderColor',
+  'borderDimColor',
+  'backgroundColor',
+  'display',
+  'top',
+  'left',
+  'right',
+  'bottom',
+])
+const HOVER_TEXT_PROPS = new Set([
+  'color',
+  'backgroundColor',
+  'dimColor',
+  'bold',
+  'italic',
+  'underline',
+  'strikethrough',
+  'inverse',
+])
+const HOVER_SHIFT_PROPS = new Set(['top', 'left', 'right', 'bottom'])
+const HOVER_SCOPE_MAX = 64
+
+type HoverScopeKind = 'none' | 'hidden' | 'live'
+
+function hoverScopeLabel(value: unknown): string {
+  let raw = ''
+  for (const ch of String(value)) {
+    raw += ch.charCodeAt(0) < 32 ? '?' : ch
+  }
+  return raw.length <= 40 ? raw : `${raw.slice(0, 40)}...`
+}
+
+function hoverScopeHoldsControl(value: string): boolean {
+  for (const ch of value) {
+    if (ch.charCodeAt(0) < 32) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable `pBr` unique English. Plugin-chain stamp (`SUe`) is minify
+ * collision — omit that arm unless press/group is a string list.
+ */
+function hoverScopeCheck(
+  scope: unknown,
+  held: unknown,
+  label: string,
+): string | undefined {
+  const quoted = hoverScopeLabel(scope)
+  const lead = `${label} hover scope "${quoted}"`
+  if (
+    typeof scope !== 'string' ||
+    scope === '' ||
+    scope.length > HOVER_SCOPE_MAX
+  ) {
+    return `${lead} is not a string of 1 to ${HOVER_SCOPE_MAX} characters`
+  }
+  if (hoverScopeHoldsControl(scope)) {
+    return `${lead} holds a control character`
+  }
+  if (Array.isArray(held) && !held.includes(scope)) {
+    return `${lead} is not held by a plugin of this chain`
+  }
+  return undefined
+}
+
+/**
+ * densable drawing-plainness walker (`i`/`n` next to Te).
+ * Unique English: Proxy / function-not-plain / class instance.
+ */
+export function uiRenderDrawingPlainCheck(
+  tree: unknown,
+  plugin: string,
+): string | undefined {
+  const seen = new WeakMap<object, true>()
+  const lead = plugin === '' ? 'ui.render' : plugin
+  const walk = (
+    value: unknown,
+    key: string | undefined,
+  ): string | undefined => {
+    if (value === null || value === undefined) return undefined
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return undefined
+    }
+    if (valueIsProxy(value)) {
+      return `${lead}: returned a drawing that holds a Proxy; an element, its props and its hover are plain objects and arrays`
+    }
+    if (typeof value === 'function') {
+      if (key === 'onPress' || key === 'onEvent') return undefined
+      return `${lead}: returned a drawing with a function where plain data goes; a closure rides only in an element's onPress or onEvent`
+    }
+    if (typeof value !== 'object') return undefined
+    if (seen.has(value)) return undefined
+    seen.set(value, true)
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        const reason = walk(child, undefined)
+        if (reason !== undefined) return reason
+      }
+      return undefined
+    }
+    if (!isPlainDataObject(value)) {
+      return `${lead}: returned a drawing that holds an object that is not plain data (a class instance); an element, its props and its hover are plain objects and arrays`
+    }
+    for (const [field, child] of Object.entries(value)) {
+      if (field === '__proto__') continue
+      const reason = walk(child, field)
+      if (reason !== undefined) return reason
+    }
+    return undefined
+  }
+  return walk(tree, undefined)
+}
+
+/**
+ * densable `q9n` hover-prop deny unique English. Walks Box/Text/Button hover.
+ */
+export function uiRenderHoverCheck(tree: unknown): string | undefined {
+  const walk = (
+    node: unknown,
+    hoverScope: HoverScopeKind,
+  ): string | undefined => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const reason = walk(child, hoverScope)
+        if (reason !== undefined) return reason
+      }
+      return undefined
+    }
+    if (!isEventRecord(node)) return undefined
+    const type = typeof node.type === 'string' ? node.type : undefined
+    const drawn = isEventRecord(node.props) ? node.props : node
+    const hover = isEventRecord(node.hover)
+      ? node.hover
+      : isEventRecord(drawn.hover)
+        ? drawn.hover
+        : undefined
+    const boxKey = type === 'Box' ? drawn.key : undefined
+    const skipHidden =
+      isEventRecord(hover) &&
+      hover.scope !== undefined &&
+      hover.display !== undefined
+    // densable `mr`: keyed Box computes scope for **this** node and children.
+    const nodeScope: HoverScopeKind =
+      typeof boxKey !== 'string'
+        ? hoverScope
+        : drawn.display === 'none' && !skipHidden
+          ? 'hidden'
+          : 'live'
+    if (hover !== undefined) {
+      const label = type ?? 'Box'
+      if (!(type === 'Box' || type === 'Text' || type === 'Button')) {
+        return `${label} takes no hover; Box, Text and Button do`
+      }
+      if (!isEventRecord(hover)) {
+        return `${label} hover is ${typeof hover}, not an object of style props`
+      }
+      if (hover.scope !== undefined) {
+        const held = type === 'Button' ? node.press : node.group
+        const scopeDeny = hoverScopeCheck(hover.scope, held, label)
+        if (scopeDeny !== undefined) return scopeDeny
+      } else if (nodeScope === 'none') {
+        return `${label} hover has no Box with a key around it; the nearest keyed Box is what the pointer hovers, or a scope names its group`
+      } else if (nodeScope === 'hidden') {
+        return `${label} hover is scoped to a keyed Box drawn display "none", which the pointer can never be over; keep the keyed Box visible and put display "none" with hover { display: "flex" } on a Box inside it`
+      }
+      const allowed = type === 'Box' ? HOVER_BOX_PROPS : HOVER_TEXT_PROPS
+      for (const [field, value] of Object.entries(hover)) {
+        if (field === 'scope') continue
+        const propLabel = `${label} hover prop "${field}"`
+        if (!allowed.has(field)) return `${propLabel} is not allowed`
+        if (
+          typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          typeof value !== 'boolean'
+        ) {
+          return `${propLabel} is ${typeof value}`
+        }
+        if (field === 'display' && value !== 'flex') {
+          return `${label} hover display "${String(value)}" would hide it under the pointer; a hover only reveals (display "flex" on a Box drawn display "none")`
+        }
+        if (field === 'display' && drawn.display !== 'none') {
+          return `${label} hover display "flex" reveals a Box drawn display "none"; this Box is already shown`
+        }
+        if (field === 'borderStyle' && drawn.borderStyle === undefined) {
+          return `${label} hover borderStyle would add a border and move what is around it; give the Box a borderStyle for the hover to restyle`
+        }
+        if (HOVER_SHIFT_PROPS.has(field) && drawn.position !== 'absolute') {
+          return `${propLabel} would shift a Box still in the flow over its siblings; a hover moves only a Box drawn position "absolute"`
+        }
+      }
+    }
+    const childScope = nodeScope
+    if (node.children !== undefined) {
+      const reason = walk(node.children, childScope)
+      if (reason !== undefined) return reason
+    }
+    const props = isEventRecord(node.props) ? node.props : undefined
+    if (props?.children !== undefined) return walk(props.children, childScope)
+    return undefined
+  }
+  return walk(tree, 'none')
+}
+
+/**
+ * densable `So` — session.compact messages (empty compaction is refused).
+ * Per-row `cn` is not invented; unique English is the empty / not-a-list gate.
+ */
+export function sessionCompactMessagesCheck(
+  messages: unknown,
+): string | undefined {
+  if (!Array.isArray(messages)) return 'messages that are not a list'
+  if (messages.length === 0) {
+    return 'an empty messages (a compaction leaves at least one)'
+  }
+  return undefined
+}
+
+function matcherNamedStrings(
+  matcher: unknown,
+  key: string,
+): string[] | undefined {
+  if (!isEventRecord(matcher) || !Object.hasOwn(matcher, key)) return undefined
+  const value = matcher[key]
+  if (typeof value === 'string') return [value]
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(item => typeof item === 'string')
+  ) {
+    return value
+  }
+  return undefined
+}
+
+function uiRenderSurfacePhrase(component: string): string {
+  const surfaces =
+    UI_RENDER_COMPONENT_SURFACES[
+      component as keyof typeof UI_RENDER_COMPONENT_SURFACES
+    ]
+  if (surfaces === undefined) return 'every surface'
+  const every = UI_SURFACE_NAMES.every(name => surfaces.includes(name))
+  if (every) return 'every surface'
+  if (surfaces.length === 1) return `the ${surfaces[0]} surface only`
+  return `the ${surfaces.slice(0, -1).join(', ')} and ${surfaces.at(-1)} surfaces only`
+}
+
+/**
+ * densable `BY` — Damerau–Levenshtein (insert/delete/replace + transposition).
+ */
+function namedEditDistance(left: string, right: string): number {
+  if (left === right) return 0
+  const rows = left.length
+  const cols = right.length
+  const table: number[][] = Array.from({ length: rows + 1 }, (_, row) =>
+    Array.from({ length: cols + 1 }, (_, col) =>
+      row === 0 ? col : col === 0 ? row : 0,
+    ),
+  )
+  for (let row = 1; row <= rows; row++) {
+    for (let col = 1; col <= cols; col++) {
+      const cost = left[row - 1] === right[col - 1] ? 0 : 1
+      table[row]![col] = Math.min(
+        table[row - 1]![col]! + 1,
+        table[row]![col - 1]! + 1,
+        table[row - 1]![col - 1]! + cost,
+      )
+      if (
+        row > 1 &&
+        col > 1 &&
+        left[row - 1] === right[col - 2] &&
+        left[row - 2] === right[col - 1]
+      ) {
+        table[row]![col] = Math.min(
+          table[row]![col]!,
+          table[row - 2]![col - 2]! + 1,
+        )
+      }
+    }
+  }
+  return table[rows]![cols]!
+}
+
+/**
+ * densable `JEe(e,n,s)` — names within edit distance 2, length delta ≤ 2.
+ */
+function nearestNamed(
+  query: string,
+  known: readonly string[],
+  take = 1,
+): string[] {
+  const seen = new Set<string>()
+  const hits: Array<{ name: string; distance: number }> = []
+  for (const name of known) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (Math.abs(name.length - query.length) > 2) continue
+    const distance = namedEditDistance(query, name)
+    if (distance <= 2) hits.push({ name, distance })
+  }
+  return hits
+    .sort((left, right) => left.distance - right.distance)
+    .slice(0, take)
+    .map(hit => hit.name)
+}
+
+function unknownNamedReason(
+  named: readonly string[],
+  known: readonly string[],
+  kind: 'component' | 'surface',
+): string[] {
+  return [...new Set(named)]
+    .filter(name => !known.includes(name))
+    .map(name => {
+      const hint = nearestNamed(name, known, 1)[0]
+      const suffix = hint === undefined ? '' : ` (did you mean ${hint}?)`
+      return `no ${kind} is named ${name}${suffix}`
+    })
+}
+
+function matcherPairsOn(
+  matcher: unknown,
+): Array<{ component: string; surface: string }> {
+  return Object.keys(UI_RENDER_COMPONENTS).flatMap(component => {
+    const surfaces =
+      UI_RENDER_COMPONENT_SURFACES[
+        component as keyof typeof UI_RENDER_COMPONENT_SURFACES
+      ] ?? []
+    return surfaces
+      .filter(
+        surface =>
+          matcherFieldAllows(matcher, 'component', component) &&
+          matcherFieldAllows(matcher, 'surface', surface),
+      )
+      .map(surface => ({ component, surface }))
+  })
+}
+
+function matcherFieldAllows(
+  matcher: unknown,
+  key: string,
+  expected: string,
+): boolean {
+  if (!isEventRecord(matcher) || !Object.hasOwn(matcher, key)) return true
+  const value = matcher[key]
+  if (typeof value === 'string') return value === expected
+  if (Array.isArray(value)) return value.includes(expected)
+  return false
+}
+
+/**
+ * densable `ltr` — ui.render matcher that can never run (wrong surface /
+ * unknown name). Gold register warns; it does not fail the load.
+ */
+export function uiRenderMatcherNeverRuns(matcher: unknown): string | undefined {
+  const matchers = Array.isArray(matcher) ? matcher : [matcher]
+  const components = matchers.flatMap(
+    row => matcherNamedStrings(row, 'component') ?? [],
+  )
+  const surfaces = matchers.flatMap(
+    row => matcherNamedStrings(row, 'surface') ?? [],
+  )
+  const namedComponents = Object.keys(UI_RENDER_COMPONENTS).filter(name =>
+    components.includes(name),
+  )
+  const namedSurfaces = UI_SURFACE_NAMES.filter(name => surfaces.includes(name))
+  const noneRun = matchers.every(row => matcherPairsOn(row).length === 0)
+  const crossed =
+    noneRun && namedComponents.length > 0 && namedSurfaces.length > 0
+      ? [
+          `${namedComponents
+            .map(name => `${name} is raised on ${uiRenderSurfacePhrase(name)}`)
+            .join(', ')}; this hook names ${namedSurfaces.join(', ')}`,
+        ]
+      : []
+  const parts = [
+    ...unknownNamedReason(
+      components,
+      Object.keys(UI_RENDER_COMPONENTS),
+      'component',
+    ),
+    ...unknownNamedReason(surfaces, UI_SURFACE_NAMES, 'surface'),
+    ...crossed,
+  ]
+  return parts.length > 0
+    ? `${parts.join('; ')}${noneRun ? ', so it never runs' : ''}`
+    : undefined
+}
+
+/**
  * densable tn — rewrite of Pane/AbovePrompt must keep the surface's props.view.
  * Gold: Bn(e.view)!==Bn(t.props.view) → reject.
  */
@@ -6695,8 +8486,12 @@ function runUiHost(
       )
     }
     if (event === 'ui.render') {
-      invalidateRender('ui.render')
+      bumpFaultRenderFv()
       bumpRasterFrames()
+      // densable `budgets.renders.invalidate(r.plugin)` (`jis`).
+      if (typeof plugin === 'string' && plugin !== '') {
+        invalidatePluginRender(plugin)
+      }
     }
     return undefined
   }
@@ -6791,29 +8586,8 @@ function runUiHost(
       hostCheck(op, paneIdCheck(input.id) ?? '', plugin)
     }
     if (!originOk) hostCheck(op, "origin is the engine's to set", plugin)
-    const id = String(input.id)
-    const at = pluginPanes.findIndex(pane => pane.id === id)
-    if (at >= 0) pluginPanes.splice(at, 1)
-    paneOpenIds.delete(id)
-    // densable V/JFt — shownId fallback; focusedId null when closed id held.
-    if (shownPaneId === id)
-      shownPaneId = paneOpenIds.size ? [...paneOpenIds].at(-1)! : null
-    if (focusedPaneId === id) focusedPaneId = null
-    if (paneFocusRequest === id) paneFocusRequest = null
-    for (let i = unplacedPanes.length - 1; i >= 0; i--) {
-      if (unplacedPanes[i]?.id === id) unplacedPanes.splice(i, 1)
-    }
-    for (let i = pluginSites.length - 1; i >= 0; i--) {
-      if (pluginSites[i]?.requestId === id) pluginSites.splice(i, 1)
-    }
-    for (const [mapKey, site] of pluginFocusSites) {
-      if (site.requestId === id) pluginFocusSites.delete(mapKey)
-    }
-    // densable JFt → NFr — remount gen for QT/BO reset.
-    bumpPaneRemountGeneration(id)
-    unmountRequest(id)
-    notifyPanesListeners()
-    bumpRasterFrames()
+    // densable JFt — single drop path (NFr + Ide Map + shown/focused).
+    dropPluginPane(String(input.id))
     return undefined
   }
   if (op === 'ui.panes') {
@@ -6903,7 +8677,8 @@ function runUiHost(
     if (typeof input.text !== 'string') {
       hostCheck(op, 'takes { text, surface? } (a string text)', plugin)
     }
-    const surface = input.surface
+    const stamped = stampUiCopy(input)
+    const surface = stamped.surface
     if (
       surface !== undefined &&
       (typeof surface !== 'string' || !Object.hasOwn(UI_SURFACES, surface))
@@ -6914,7 +8689,7 @@ function runUiHost(
         plugin,
       )
     }
-    return runUiCopy(input, plugin)
+    return runUiCopy(stamped, plugin)
   }
   if (op === 'ui.blit') {
     const requestOk =
@@ -7695,12 +9470,18 @@ function dispatchPluginScrollOffset(
       site.requestId,
       clamped,
       origin,
+      site.component,
     )
     if (committed.deny !== undefined) return committed
-    updatePluginScrollSite(owner, site.requestId, {
-      bodyRows: site.bodyRows,
-      contentRows: site.contentRows,
-    })
+    updatePluginScrollSite(
+      owner,
+      site.requestId,
+      {
+        bodyRows: site.bodyRows,
+        contentRows: site.contentRows,
+      },
+      site.component,
+    )
     // densable yEe Vt/Ie updates Me for plugin origin too; Pane needs bump.
     bumpRasterFrames()
     return {}
@@ -7735,14 +9516,13 @@ function armFollowEndAfterWat(
   result: { deny?: string } | Promise<{ deny?: string }>,
 ): { deny?: string } | Promise<{ deny?: string }> {
   const arm = (): void => {
-    const live = pluginSites.find(
-      row => row.plugin === owner && row.requestId === site.requestId,
-    )
+    const live = ideGet(site.component, site.requestId)
     if (
       live !== undefined &&
+      live.plugin === owner &&
       live.offset === Math.min(live.maxOffset, live.maxOffset)
     ) {
-      followPluginScrollSiteEnd(owner, live.requestId)
+      followPluginScrollSiteEnd(owner, live.requestId, live.component)
     }
   }
   if (result instanceof Promise) {
@@ -8170,22 +9950,47 @@ function runUiSelection(): { text: string; instance_id?: string } | undefined {
   return selectionAnswer(text, requestId)
 }
 
+/**
+ * densable `Y7` — attached surfaces. CLI REPL is terminal when Ink is on stdout.
+ * Desktop/vscode surfaces stay Drop.
+ */
+function attachedCopySurfaces(): string[] {
+  return instances.get(process.stdout) !== undefined ? ['terminal'] : []
+}
+
+/** densable `Jko` stamp: fill surface from Y7()[0] when omitted. */
+function stampUiCopy(input: Record<string, unknown>): Record<string, unknown> {
+  const surface = input.surface ?? attachedCopySurfaces()[0]
+  return surface === undefined ? input : { ...input, surface }
+}
+
 /** densable `_Xn` — terminal OSC-52 (and native path is a success even if OSC is empty). */
 function runUiCopy(
   input: Record<string, unknown>,
-  _plugin?: string,
+  plugin?: string,
 ): { isCopied: boolean; reason?: string } {
+  const name = plugin && plugin !== '' ? plugin : 'unattributed'
   const surface = input.surface
-  if (surface !== undefined && surface !== 'terminal') {
-    return { isCopied: false, reason: 'no-clipboard' }
-  }
   if (surface === undefined) {
+    logForDebugging(
+      `$.ui.copy (${name}): no surface draws (none attached); nothing copied`,
+    )
     return { isCopied: false, reason: 'no-surface' }
+  }
+  if (surface !== 'terminal') {
+    const chars = String(input.text).length
+    logForDebugging(
+      `$.ui.copy (${name}): ${chars} chars to ${String(surface)}: no client there took it; nothing copied`,
+    )
+    return { isCopied: false, reason: 'no-clipboard' }
   }
   const text = String(input.text)
   const payload = osc52Payload(text)
   const within = payload !== '' && payload.length <= OSC52_WRITE_BOUND
   if (within) process.stdout.write(payload)
+  logForDebugging(
+    `$.ui.copy (${name}): ${text.length} chars, path osc52, OSC 52 ${within ? 'written' : 'over the write bound'}; ${within ? 'copied' : 'nothing copied'}`,
+  )
   return within
     ? { isCopied: true }
     : { isCopied: false, reason: 'no-clipboard' }
@@ -8582,13 +10387,66 @@ export function holdPress(
   pressHandlers.set(pressSlot(environmentId, handle), fn)
 }
 
-/** densable worker `releasePresses`. */
+/** densable worker `releasePresses` / `Lmn`. */
 export function releasePresses(
   environmentId: string,
   handles: unknown[],
+  site?: { component: string; requestId: string },
 ): void {
+  if (handles.length === 0) return
+  const loaded = loadedModules.some(
+    mod => mod.name === environmentId && mod.status !== 'unloaded',
+  )
+  if (!loaded) {
+    const component = site?.component ?? 'Pane'
+    const requestId = site?.requestId ?? ''
+    logForDebugging(
+      `ui.render (${component} ${requestId}): ${environmentId} drew Buttons but is not loaded; nothing to release`,
+    )
+    return
+  }
   for (const handle of handles) {
     pressHandlers.delete(pressSlot(environmentId, handle))
+  }
+}
+
+function collectButtonHandles(tree: unknown): Map<string, unknown[]> {
+  const byPlugin = new Map<string, unknown[]>()
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child)
+      return
+    }
+    if (!isEventRecord(node)) return
+    if (node.type === 'Button') {
+      const press = isEventRecord(node.press) ? node.press : undefined
+      const plugin = typeof press?.plugin === 'string' ? press.plugin : ''
+      if (plugin !== '' && press?.handle !== undefined) {
+        const held = byPlugin.get(plugin) ?? []
+        held.push(press.handle)
+        byPlugin.set(plugin, held)
+      }
+    }
+    if (node.children !== undefined) walk(node.children)
+    const props = isEventRecord(node.props) ? node.props : undefined
+    if (props?.children !== undefined) walk(props.children)
+  }
+  walk(tree)
+  return byPlugin
+}
+
+function releaseDrawingButtons(
+  tree: unknown,
+  plugin: string,
+  component: string,
+  requestId: string,
+): void {
+  const grouped = collectButtonHandles(tree)
+  if (grouped.size === 0 && plugin !== '') {
+    return
+  }
+  for (const [name, handles] of grouped) {
+    releasePresses(name, handles, { component, requestId })
   }
 }
 
@@ -8616,6 +10474,13 @@ let uiAskHostHandler:
   | ((input: UiAskHostInput) => Promise<UiAskHostResult>)
   | undefined
 
+let uiToastShowHandler:
+  | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
+  | undefined
+
+/** densable `dLe` — ui.toast timeoutMs upper bound. */
+const UI_TOAST_TIMEOUT_MS_MAX = 60_000
+
 let functionHooksAppStateReader: (() => AppState | undefined) | undefined
 
 let functionHooksAppStateWriter:
@@ -8639,6 +10504,15 @@ export function setUiAskHostHandler(
   handler: ((input: UiAskHostInput) => Promise<UiAskHostResult>) | undefined,
 ): void {
   uiAskHostHandler = handler
+}
+
+/** densable `budgets.toasts.show(plugin, n)` — Notifications host. */
+export function setUiToastShowHandler(
+  handler:
+    | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
+    | undefined,
+): void {
+  uiToastShowHandler = handler
 }
 
 export function setFunctionHooksAppStateReader(
@@ -8920,6 +10794,14 @@ type WorkerReply = {
   pressId?: number
   resolveId?: number
   value?: unknown
+  plugin?: string
+  event?: string
+  reason?: string
+  effect?: string
+  hasOverrun?: boolean
+  skip?: { kind?: string; why?: string }
+  text?: string
+  level?: string
 }
 
 type PendingJob = {
@@ -8927,12 +10809,21 @@ type PendingJob = {
   reject: (err: Error) => void
   abort: AbortController
   tail?: FunctionHookTail
+  environments: string[]
+  failed: Set<string>
 }
+
+/** densable `dTo`. */
+const HOOKS_WORKER_OVERRUN_CAP = 2
 
 class FunctionHooksWorkerClient {
   died: string | undefined
   private readonly worker: Worker
   private nextId = 0
+  /** densable `names` — environmentId → plugin. */
+  private readonly names = new Map<string, string>()
+  /** densable `overruns` — consecutive ignored-signal counts. */
+  private readonly overruns = new Map<string, number>()
   private readonly inFlight = new Map<number, PendingJob>()
   private readonly pendingCalls = new Map<
     number,
@@ -8977,6 +10868,18 @@ class FunctionHooksWorkerClient {
     })
     this.worker.on('message', (message: WorkerReply) => {
       if (this.died !== undefined) return
+      if (message.type === 'log') {
+        const level =
+          message.level === 'error' || message.level === 'warn'
+            ? message.level
+            : 'debug'
+        logForDebugging(String(message.text ?? ''), { level })
+        return
+      }
+      if (message.type === 'hook_failed') {
+        this.noteHookFailed(message)
+        return
+      }
       if (message.type === 'next') {
         const job = this.inFlight.get(message.id ?? -1)
         void Promise.resolve(
@@ -8995,9 +10898,10 @@ class FunctionHooksWorkerClient {
         const load = this.loads.get(message.environmentId ?? '')
         if (!load) return
         this.loads.delete(message.environmentId ?? '')
-        if (message.type === 'load_error')
+        if (message.type === 'load_error') {
+          this.names.delete(message.environmentId ?? '')
           load.reject(new Error(message.error ?? 'load_error'))
-        else load.resolve(message)
+        } else load.resolve(message)
         return
       }
       if (message.type === 'built' || message.type === 'built_error') {
@@ -9042,8 +10946,63 @@ class FunctionHooksWorkerClient {
       this.inFlight.delete(message.id ?? -1)
       if (message.type === 'error')
         job.reject(new Error(message.error ?? 'hooks worker failed'))
-      else job.resolve(message)
+      else {
+        // densable `Yae` — successful dispatch clears overruns for live envs.
+        this.clearOverruns(job)
+        job.resolve(message)
+      }
     })
+  }
+
+  /** densable `Yae`. */
+  private clearOverruns(job: PendingJob): void {
+    for (const environmentId of job.environments) {
+      const plugin = this.names.get(environmentId)
+      if (plugin !== undefined && !job.failed.has(plugin)) {
+        this.overruns.delete(plugin)
+      }
+    }
+  }
+
+  /**
+   * densable `hook_failed`: `A8e` is this post handler; then `xBt` then
+   * `uBt`. Unique English: `ignored its signal ${n} times in a row: a
+   * runaway plugin in the hooks worker`.
+   */
+  private noteHookFailed(message: WorkerReply): void {
+    const plugin = message.plugin
+    if (typeof plugin !== 'string' || plugin === '') return
+    // densable `A8e` — worker already posted; do not re-emit hookFailed.
+    const report = fillUnappliedRewriteEffect({
+      plugin,
+      environmentId: message.environmentId,
+      event: message.event,
+      reason: message.reason,
+      effect: message.effect,
+      hasOverrun: message.hasOverrun,
+      skip: message.skip,
+    })
+    noteHookSkipFirst(report)
+    // densable `uBt` — skip.kind === 'unapplied' does not taint the job.
+    const applied = message.skip?.kind !== 'unapplied'
+    for (const job of this.inFlight.values()) {
+      if (
+        applied &&
+        job.environments.some(
+          environmentId => this.names.get(environmentId) === plugin,
+        )
+      ) {
+        job.failed.add(plugin)
+      }
+    }
+    if (!message.hasOverrun) return
+    const count = (this.overruns.get(plugin) ?? 0) + 1
+    this.overruns.set(plugin, count)
+    if (count >= HOOKS_WORKER_OVERRUN_CAP) {
+      this.markDied(
+        `${plugin} ignored its signal ${count} times in a row: a runaway plugin in the hooks worker`,
+      )
+    }
   }
 
   private rejectAll(
@@ -9068,6 +11027,8 @@ class FunctionHooksWorkerClient {
       job.reject(new Error(reason))
     }
     this.inFlight.clear()
+    this.overruns.clear()
+    this.names.clear()
     this.rejectAll(this.pendingCalls, reason)
     this.rejectAll(this.pendingPresses, reason)
     this.rejectAll(this.pendingBuilds, reason)
@@ -9088,6 +11049,7 @@ class FunctionHooksWorkerClient {
     if (this.died !== undefined) return Promise.reject(new Error(this.died))
     const channel = new MessageChannel()
     this.ports.get(plugin.name)?.close()
+    this.names.set(plugin.name, plugin.name)
     this.ports.set(plugin.name, channel.port1)
     channel.port1.start()
     channel.port1.on('message', (raw: unknown) => {
@@ -9129,6 +11091,9 @@ class FunctionHooksWorkerClient {
   }
 
   unload(name: string): void {
+    const plugin = this.names.get(name)
+    if (plugin !== undefined) this.overruns.delete(plugin)
+    this.names.delete(name)
     this.ports.get(name)?.close()
     this.ports.delete(name)
     this.post({ type: 'unload', environmentId: name })
@@ -9139,18 +11104,27 @@ class FunctionHooksWorkerClient {
     payload: Record<string, unknown>,
     environments: string[],
     tail: FunctionHookTail,
+    only?: string,
   ): Promise<WorkerReply> {
     if (this.died !== undefined) return Promise.reject(new Error(this.died))
     const id = ++this.nextId
     const abort = new AbortController()
     return new Promise((resolve, reject) => {
-      this.inFlight.set(id, { resolve, reject, abort, tail })
+      this.inFlight.set(id, {
+        resolve,
+        reject,
+        abort,
+        tail,
+        environments,
+        failed: new Set(),
+      })
       this.post({
         type: 'dispatch',
         id,
         event,
         payload,
         environments,
+        only,
       })
     })
   }
@@ -9343,14 +11317,17 @@ function isEventRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * densable `FCe(event).checkMatcher`. Field equality, plus ui.render's
- * engine-alone component (`AskUserQuestion`).
- */
-/**
  * densable 2.1.289 `dO` / `iO` (terminal): run the owning plugin's `ui.fault`
  * hooks alone. Matcher throw → taken as heard (include hook). Fire-and-forget.
+ * Gold always qT(only+core) and logs settle even with no plugin hook.
  */
-function dispatchClientFault(report: ClientFaultReport): void {
+/**
+ * densable `dO` — qT(only+core), settle unique English, return `g??{}`.
+ * Chain throw propagates; gold `ko` / local reporter catch it.
+ */
+export async function dispatchClientFault(
+  report: ClientFaultReport,
+): Promise<unknown> {
   const event: Record<string, unknown> = {
     surface: report.surface,
     component: report.component,
@@ -9360,34 +11337,632 @@ function dispatchClientFault(report: ClientFaultReport): void {
     phase: report.phase,
     reason: report.reason,
   }
-  const needle = 'ui.fault'
-  const matched = loadedModules.flatMap(mod => {
-    if (mod.name !== report.plugin) return []
-    if (mod.status === 'unloaded') return []
-    if (
-      mod.status === 'retiring' &&
-      (inFlightByModule.get(mod.name) ?? 0) === 0
-    ) {
-      return []
+  try {
+    logForDebugging(`${report.plugin}: Client rejection`)
+  } catch (err) {
+    logForDebugging(
+      `${report.plugin}: the fault could not be said: ${describeThrown(err)}`,
+      { level: 'error' },
+    )
+  }
+  const started = performance.now()
+  try {
+    const answered = await runFunctionHookChain(
+      'ui.fault',
+      event,
+      async () => ({}),
+      report.plugin,
+    )
+    logForDebugging(
+      `ui.fault ${report.plugin}/${report.element} (${report.module}) in ${report.component} from ${report.surface}, ${report.phase}: dispatched, settled in ${(performance.now() - started).toFixed(1)}ms`,
+    )
+    return answered ?? {}
+  } finally {
+    finishClientFault(report)
+  }
+}
+
+/**
+ * densable `Q_()` / `HD()` / `lO=4096` / `uO` / `cO` / `sO` / `BC` / `kS` / `Rh`.
+ * `Fv` is `"ui.render"` (`getRenderVersion`). `Qc` writes `${MD}\0state` into HD.
+ * `Rh`/`Lue` skip `HC` (`\0state`), `_Y` (` live`), and `Tmn` (`ui.render viewport`).
+ * `xS` = Qc + bumpRasterFrames (staleListeners); does not bump Fv. Evict `kS`
+ * deletes `\0state` only when the site is not in `Q_().mounted`.
+ */
+const FAULT_RUNS_CAP = 4096
+/** densable `kh`. */
+const FAULT_RENDER_STATE_SUFFIX = '\0state'
+/** densable `Fv`. */
+const FAULT_RENDER_FV = 'ui.render'
+/** densable `Tmn`. */
+const FAULT_RENDER_VIEWPORT = `${FAULT_RENDER_FV} viewport`
+/** densable `Sh`. */
+const FAULT_RENDER_LIVE = ' live'
+/** densable `eh`. */
+const FAULT_RENDER_LIVE_MS = 34
+/** densable `Cmt`. */
+const FAULT_RENDER_STEADY_MS = 100
+/** densable `WP` — abort cooldown threshold for `W2`. */
+const FAULT_RENDER_ABORT_MS = 16
+/** densable `UP`. */
+const PLUGIN_RENDER_COOLDOWN_MS = 1000
+/** densable `RS`. */
+const FAULT_RENDER_FOLD_MS = {
+  steady: FAULT_RENDER_STEADY_MS,
+  live: FAULT_RENDER_LIVE_MS,
+} as const
+/** densable `Qm`. */
+const pluginRenderCooldownUntil = new Map<string, number>()
+/** densable `HD()` / `dt().renderVersions`. */
+const faultRenderVersions = new Map<string, number>()
+
+function pluginSessionState(): typeof pluginSession {
+  return pluginSession
+}
+
+/** densable `bh` / `E1t(plugin, pace)` — HD plugin live/steady keys. Lue still reads them. */
+function bumpHdPlugin(name: string, pace: 'live' | 'steady'): void {
+  const key = pace === 'live' ? `${name}${FAULT_RENDER_LIVE}` : name
+  faultRenderVersions.set(key, (faultRenderVersions.get(key) ?? 0) + 1)
+}
+
+/** densable `Zm`. */
+function notePluginRenderCooldown(
+  names: readonly string[],
+  now = Date.now(),
+): void {
+  for (const name of names) {
+    pluginRenderCooldownUntil.set(name, now + PLUGIN_RENDER_COOLDOWN_MS)
+  }
+}
+
+/** densable `jP`. */
+function pluginOnCooldown(name: string, now: number): boolean {
+  const until = pluginRenderCooldownUntil.get(name)
+  return until !== undefined && now < until
+}
+
+/** densable `U2` — slow live render (> eh) cools HD plugin bumps. */
+function noteSlowUiRender(
+  names: readonly string[],
+  durationMs: number,
+  now = Date.now(),
+): void {
+  if (durationMs > FAULT_RENDER_LIVE_MS) notePluginRenderCooldown(names, now)
+}
+
+/** densable `W2` — aborted render (> WP) cools HD plugin bumps. */
+function noteAbortedUiRender(
+  names: readonly string[],
+  durationMs: number,
+  now = Date.now(),
+): void {
+  if (durationMs > FAULT_RENDER_ABORT_MS) notePluginRenderCooldown(names, now)
+}
+
+type HdPluginBump = {
+  bump: (plugin: string, at?: number) => void
+  call: (plugin: string) => boolean
+}
+
+/**
+ * densable `bS` — pace-gated `E1t`. Immediate bump, else unref timer.
+ * `call` true iff bumped now; false if pending/scheduled.
+ */
+function scheduleHdPluginBump(
+  pace: 'live' | 'steady',
+  opts?: {
+    now?: () => number
+    intervalMs?: number
+    onBump?: (plugin: string, at: number) => void
+  },
+): HdPluginBump {
+  const lastAt = new Map<string, number>()
+  const pending = new Map<string, ReturnType<typeof setTimeout>>()
+  const nowFn = opts?.now ?? Date.now
+  const intervalMs =
+    opts?.intervalMs ??
+    (pace === 'live' ? FAULT_RENDER_LIVE_MS : FAULT_RENDER_STEADY_MS)
+
+  function bump(plugin: string, at = nowFn()): void {
+    const timer = pending.get(plugin)
+    if (timer !== undefined) clearTimeout(timer)
+    pending.delete(plugin)
+    lastAt.set(plugin, at)
+    bumpHdPlugin(plugin, pace)
+    opts?.onBump?.(plugin, at)
+  }
+
+  function call(plugin: string): boolean {
+    if (pending.has(plugin)) return false
+    const t = nowFn()
+    const prev = lastAt.get(plugin) ?? Number.NEGATIVE_INFINITY
+    const delay = intervalMs - Math.max(0, t - prev)
+    if (delay <= 0) {
+      bump(plugin, t)
+      return true
     }
-    return (mod.hooks ?? [])
-      .filter(hook => {
-        if (!functionHookPatternMatches(hook.pattern, needle)) return false
-        try {
-          return matcherAllows(hook.matcher, event, needle)
-        } catch {
-          // densable iO: on('ui.fault') matcher threw on the host; taken as heard
-          return true
-        }
-      })
-      .map(hook => ({ mod, hook }))
+    const timer = setTimeout(() => bump(plugin, nowFn()), delay)
+    timer.unref?.()
+    pending.set(plugin, timer)
+    return false
+  }
+
+  return { bump, call }
+}
+
+/** densable `jis()` live/steady pair; steady `onBump` is live.bump. */
+const hdPluginLiveBump = scheduleHdPluginBump('live')
+const hdPluginSteadyBump = scheduleHdPluginBump('steady', {
+  onBump: (plugin, at) => hdPluginLiveBump.bump(plugin, at),
+})
+
+/** densable `Amt` — flush one fold: Qc `\0state` then one staleListener bump. */
+function flushClientFaultFolds(pace: ClientFaultFoldPace, now: number): void {
+  const session = pluginSessionState()
+  const fold = session.folds[pace]
+  if (fold.pending !== undefined) clearTimeout(fold.pending)
+  fold.pending = undefined
+  fold.lastAt = now
+  const readers = new Map(
+    [...fold.stale].flatMap(instanceKey => {
+      const rec = session.readers.get(instanceKey)
+      return rec === undefined ? [] : [[instanceKey, rec] as const]
+    }),
+  )
+  fold.stale.clear()
+  if (readers.size === 0) return
+  for (const instanceKey of readers.keys()) qcFaultSite(instanceKey)
+  bumpRasterFrames()
+}
+
+/** densable `Zc` — enqueue instanceKeys into live/steady folds; debounce Amt. */
+function noteClientFaultStale(instanceKeys: readonly string[]): void {
+  const session = pluginSessionState()
+  const paces = new Set<ClientFaultFoldPace>()
+  for (const instanceKey of instanceKeys) {
+    const rec = session.readers.get(instanceKey)
+    if (rec === undefined) continue
+    const pace = clientFaultPace(rec.instance)
+    session.folds[pace].stale.add(instanceKey)
+    paces.add(pace)
+  }
+  for (const pace of paces) {
+    const fold = session.folds[pace]
+    if (fold.pending !== undefined) continue
+    const now = Date.now()
+    const delay = FAULT_RENDER_FOLD_MS[pace] - Math.max(0, now - fold.lastAt)
+    if (delay <= 0) flushClientFaultFolds(pace, now)
+    else {
+      const timer = setTimeout(
+        () => flushClientFaultFolds(pace, Date.now()),
+        delay,
+      )
+      timer.unref?.()
+      fold.pending = timer
+    }
+  }
+}
+
+/** densable `$C` — readersOf lookup then `Zc` (`noteClientFaultStale`). */
+function notifyDrawingReadersOfKeys(keys: readonly string[]): void {
+  const session = pluginSessionState()
+  for (const key of keys) {
+    const of = session.readersOf.get(key)
+    if (of !== undefined && of.size > 0) noteClientFaultStale([...of])
+  }
+}
+
+const DRAWING_READERS_CAP = 4000
+
+function dropDrawingReader(instanceKey: string): void {
+  const session = pluginSessionState()
+  const rec = session.readers.get(instanceKey)
+  if (rec === undefined) return
+  for (const key of rec.reads) {
+    const of = session.readersOf.get(key)
+    of?.delete(instanceKey)
+    if (of?.size === 0) session.readersOf.delete(key)
+  }
+  session.readers.delete(instanceKey)
+}
+
+/** densable `jC` after ui.render when requestId !== ''. */
+function recordDrawingReaders(drawing: UiRenderDrawing): void {
+  const session = pluginSessionState()
+  dropDrawingReader(drawing.instanceKey)
+  if (drawing.versionsRead.size === 0) return
+  const plugins = uiRenderPluginNames(drawing.instance)
+  session.readers.set(drawing.instanceKey, {
+    instance: drawing.instance,
+    plugins,
+    reads: new Set(drawing.versionsRead.keys()),
   })
-  if (matched.length === 0) return
-  void runFunctionHookChain('ui.fault', event, async () => ({})).catch(
-    () => undefined,
+  let stale = false
+  for (const [key, version] of drawing.versionsRead) {
+    const of = session.readersOf.get(key) ?? new Set<string>()
+    of.add(drawing.instanceKey)
+    session.readersOf.set(key, of)
+    if ((pluginState.get(key)?.version ?? 0) !== version) stale = true
+  }
+  for (const key of [...session.readers.keys()]) {
+    if (session.readers.size <= DRAWING_READERS_CAP) break
+    if (!session.mounted.has(key)) dropDrawingReader(key)
+  }
+  if (stale) noteClientFaultStale([drawing.instanceKey])
+}
+
+/** densable `bh(Fv)` / `E1t()` — bump HD `ui.render`; React observes via invalidateRender. */
+function bumpFaultRenderFv(): void {
+  faultRenderVersions.set(
+    FAULT_RENDER_FV,
+    (faultRenderVersions.get(FAULT_RENDER_FV) ?? 0) + 1,
+  )
+  invalidateRender('ui.render')
+}
+
+function clientFaultSiteKey(site: ClientFaultSite): string {
+  return `${site.surface}\0${site.component}\0${site.requestId}`
+}
+
+function clientFaultStateKey(md: string): string {
+  return `${md}${FAULT_RENDER_STATE_SUFFIX}`
+}
+
+/** densable `Qc([MD], pluginState)` — write `\0state`; `Lue` ignores it. */
+function qcFaultSite(md: string): void {
+  const session = pluginSessionState()
+  session.bumps += 1
+  faultRenderVersions.set(clientFaultStateKey(md), session.bumps)
+}
+
+/**
+ * densable `Xm` — band not collapsed. Default true (`v1t.get()!==!0`).
+ */
+let pluginBandExpanded = true
+
+export function setPluginBandExpanded(next: boolean): void {
+  pluginBandExpanded = next
+}
+
+function uiRenderMatcherMatches(
+  matcher: unknown,
+  site: ClientFaultSite,
+): boolean {
+  if (Array.isArray(matcher)) {
+    return matcher.some(item => uiRenderMatcherMatches(item, site))
+  }
+  return matcherAllows(
+    matcher,
+    {
+      surface: site.surface,
+      component: site.component,
+      requestId: site.requestId,
+    },
+    'ui.render',
   )
 }
 
+/** densable `Amn`/`uUe` — ui.render hook plugins matching the site. */
+function uiRenderPluginNames(site: ClientFaultSite): string[] {
+  return loadedModules
+    .filter(mod => mod.status !== 'unloaded')
+    .filter(mod =>
+      (mod.hooks ?? []).some(
+        hook =>
+          functionHookPatternMatches(hook.pattern, 'ui.render') &&
+          uiRenderMatcherMatches(hook.matcher, site),
+      ),
+    )
+    .map(mod => mod.name)
+}
+
+/**
+ * densable `I2` — plugin is live-visible: expanded AbovePrompt, shown
+ * Pane, or PromptHint (`dUe`/`uUe`).
+ */
+function pluginVisibleLive(name: string): boolean {
+  const above =
+    pluginBandExpanded &&
+    uiRenderPluginNames({
+      surface: 'terminal',
+      component: 'AbovePrompt',
+      requestId: '',
+    }).includes(name)
+  const pane =
+    shownPaneId !== null &&
+    uiRenderPluginNames({
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: shownPaneId,
+    }).includes(name)
+  const hint = uiRenderPluginNames({
+    surface: 'terminal',
+    component: 'PromptHint',
+    requestId: '',
+  }).includes(name)
+  return above || pane || hint
+}
+
+/**
+ * densable `jis.invalidate`: steady.call first; live.call only when
+ * steady did not bump now (`!s.call`) AND `!jP` AND `I2`.
+ */
+function invalidatePluginRender(plugin: string): void {
+  if (
+    !hdPluginSteadyBump.call(plugin) &&
+    !pluginOnCooldown(plugin, Date.now()) &&
+    pluginVisibleLive(plugin)
+  ) {
+    hdPluginLiveBump.call(plugin)
+  }
+}
+
+/** densable `cS` — live vs steady HD key pace. */
+function clientFaultPace(site: ClientFaultSite): 'live' | 'steady' {
+  if (site.surface !== 'terminal') return 'steady'
+  const above = site.component === 'AbovePrompt' && pluginBandExpanded
+  const hint = site.component === 'PromptHint'
+  const pane = site.component === 'Pane' && shownPaneId === site.requestId
+  return above || hint || pane ? 'live' : 'steady'
+}
+
+/**
+ * densable `Lue` = `EUe(HD, site)` = `DY(Rh(HD, uUe(site), cS(site)), HD, MD)`.
+ * `Rh` with names: `Fv` then `\0${plugin}\0${wh(plugin,pace)}`.
+ * `DY`: if `${MD}\0state` exists, append `\0\0${s}`.
+ */
+function clientFaultLue(site: ClientFaultSite): string {
+  const hd = faultRenderVersions
+  const names = uiRenderPluginNames(site)
+  const pace = clientFaultPace(site)
+  let stamp = String(
+    hd.get(FAULT_RENDER_FV) ?? getRenderVersion(FAULT_RENDER_FV),
+  )
+  for (const name of names) {
+    const key = pace === 'live' ? `${name}${FAULT_RENDER_LIVE}` : name
+    stamp += `\0${name}\0${hd.get(key) ?? 0}`
+  }
+  const state = hd.get(clientFaultStateKey(clientFaultSiteKey(site)))
+  return state === undefined ? stamp : `${stamp}\0\0${state}`
+}
+
+function clientFaultSiteMounted(site: ClientFaultSite): boolean {
+  return (pluginSessionState().mounted.get(clientFaultSiteKey(site)) ?? 0) > 0
+}
+
+/** densable `FUo` increment. */
+function holdClientFaultMount(md: string): void {
+  const mounted = pluginSessionState().mounted
+  mounted.set(md, (mounted.get(md) ?? 0) + 1)
+}
+
+/** densable `FUo` release: last drop + !readers → `kS`. */
+function releaseClientFaultMount(md: string): void {
+  const session = pluginSessionState()
+  const next = (session.mounted.get(md) ?? 1) - 1
+  if (next > 0) {
+    session.mounted.set(md, next)
+    return
+  }
+  session.mounted.delete(md)
+  if (!session.readers.has(md)) {
+    faultRenderVersions.delete(clientFaultStateKey(md))
+  }
+}
+
+/** densable `xS` — `Qc` then staleListeners (`bumpRasterFrames`). */
+function invalidateClientFaultSite(site: ClientFaultSite): void {
+  qcFaultSite(clientFaultSiteKey(site))
+  bumpRasterFrames()
+}
+
+/** densable `BC` — `kS` iff `!(mounted || readers)`. */
+function dropClientFaultRenderKey(site: ClientFaultSite): void {
+  const md = clientFaultSiteKey(site)
+  const session = pluginSessionState()
+  if ((session.mounted.get(md) ?? 0) > 0 || session.readers.has(md)) return
+  faultRenderVersions.delete(clientFaultStateKey(md))
+}
+
+function resetClientFaultRuns(): void {
+  const session = pluginSessionState()
+  for (const pace of ['live', 'steady'] as const) {
+    const fold = session.folds[pace]
+    if (fold.pending !== undefined) clearTimeout(fold.pending)
+    session.folds[pace] = emptyClientFaultFold()
+  }
+  session.faultRuns.clear()
+  session.mounted.clear()
+  session.readers.clear()
+  session.readersOf.clear()
+  session.bumps = 0
+  session.versionFloor = 0
+  faultRenderVersions.clear()
+  pluginRenderCooldownUntil.clear()
+  uiRenderEvalCache.clear()
+  uiRenderEvalHd = undefined
+  uiRenderEvalEngineVersion = 0
+  uiRenderEvalReuseCount = 0
+}
+
+/** densable `Q_().faultRuns.size`. */
+export function getPluginFaultRunsSize(): number {
+  return pluginSessionState().faultRuns.size
+}
+
+/** densable HD `\0state` occupancy after `Qc` / `kS`. */
+export function getPluginFaultRenderStateSize(): number {
+  let count = 0
+  for (const key of faultRenderVersions.keys()) {
+    if (key.endsWith(FAULT_RENDER_STATE_SUFFIX)) count += 1
+  }
+  return count
+}
+
+function ownerHeardUiFault(report: ClientFaultReport): boolean {
+  const needle = 'ui.fault'
+  return loadedModules.some(mod => {
+    if (mod.name !== report.plugin) return false
+    if (mod.status === 'unloaded') return false
+    return (mod.hooks ?? []).some(hook => {
+      if (!functionHookPatternMatches(hook.pattern, needle)) return false
+      try {
+        return matcherAllows(
+          hook.matcher,
+          {
+            surface: report.surface,
+            component: report.component,
+            requestId: report.requestId,
+            element: report.element,
+            module: report.module,
+            phase: report.phase,
+            reason: report.reason,
+          },
+          needle,
+        )
+      } catch {
+        return true
+      }
+    })
+  })
+}
+
+function recordClientFaultRun(site: ClientFaultSite, bornAt: string): void {
+  const runs = pluginSessionState().faultRuns
+  const key = clientFaultSiteKey(site)
+  const held = runs.get(key)
+  const now = clientFaultLue(site)
+  const keep = held?.versions.has(now) === true
+  try {
+    invalidateClientFaultSite(site)
+  } finally {
+    const after = clientFaultLue(site)
+    const versions = new Set(keep && held !== undefined ? held.versions : [])
+    versions.add(after)
+    runs.delete(key)
+    runs.set(key, {
+      site,
+      versions,
+      bornAt: held?.bornAt ?? bornAt,
+    })
+    if (runs.size > FAULT_RUNS_CAP) {
+      const oldest = runs.keys().next().value
+      if (oldest !== undefined) {
+        const evicted = runs.get(oldest)
+        runs.delete(oldest)
+        if (evicted !== undefined) dropClientFaultRenderKey(evicted.site)
+      }
+    }
+  }
+}
+
+function finishClientFault(report: ClientFaultReport): void {
+  if (report.requestId === '') return
+  if (!ownerHeardUiFault(report)) return
+  const site: ClientFaultSite = {
+    surface: report.surface,
+    component: report.component,
+    requestId: report.requestId,
+  }
+  const key = clientFaultSiteKey(site)
+  const held = pluginSessionState().faultRuns.get(key)
+  const now = clientFaultLue(site)
+  const bornAt = held?.bornAt ?? now
+  // densable sO: skip when both bornAt and current Lue are already recorded.
+  if (held?.versions.has(bornAt) === true && held.versions.has(now)) return
+  recordClientFaultRun(site, bornAt)
+}
+
+/**
+ * densable `Wbr`/`Je` — coalesce by instance id; drain then `N1t`.
+ * `cancel(e.id)` drops a pending post and clears the timer when empty.
+ */
+type ClientMessageQueued = {
+  post: ClientMessageEnqueue
+  reply: (value: unknown) => void
+}
+const clientMessagePosts = new Map<string, ClientMessageQueued>()
+let clientMessageDrain: ReturnType<typeof setTimeout> | undefined
+let clientMessagesDispatched = 0
+
+function drainClientMessages(): void {
+  clientMessageDrain = undefined
+  const batch = [...clientMessagePosts.values()]
+  clientMessagePosts.clear()
+  for (const item of batch) {
+    clientMessagesDispatched += 1
+    void dispatchClientMessage(item.post).then(item.reply, err => {
+      logForDebugging(
+        `ui.message ${item.post.plugin}/${item.post.element}: the chain threw (${describeThrown(err)}); no reply`,
+        { level: 'warn' },
+      )
+    })
+  }
+}
+
+export function enqueueClientMessage(
+  post: ClientMessageEnqueue,
+  reply: (value: unknown) => void,
+): void {
+  clientMessagePosts.set(post.id, { post, reply })
+  clientMessageDrain ??= setTimeout(drainClientMessages, 0)
+}
+
+export function cancelClientMessage(id: string): void {
+  clientMessagePosts.delete(id)
+  if (clientMessagePosts.size === 0 && clientMessageDrain !== undefined) {
+    clearTimeout(clientMessageDrain)
+    clientMessageDrain = undefined
+  }
+}
+
+function resetClientMessageQueue(): void {
+  clientMessagePosts.clear()
+  if (clientMessageDrain !== undefined) {
+    clearTimeout(clientMessageDrain)
+    clientMessageDrain = undefined
+  }
+  clientMessagesDispatched = 0
+}
+
+/** densable `Wbr().dispatched()`. */
+export function getClientMessagesDispatched(): number {
+  return clientMessagesDispatched
+}
+
+/**
+ * densable `N1t` / `tgn` — owning plugin `ui.message` alone, then core {}.
+ * Chain throw is Wbr's warn (`the chain threw`); N1t itself rejects.
+ */
+export async function dispatchClientMessage(
+  post: ClientMessagePost,
+): Promise<unknown> {
+  const started = performance.now()
+  const message: Record<string, unknown> = {
+    surface: post.surface,
+    component: post.component,
+    requestId: post.requestId,
+    element: post.element,
+    module: post.module,
+    data: post.data,
+  }
+  const answered = await runFunctionHookChain(
+    'ui.message',
+    message,
+    async () => ({}),
+    post.plugin,
+  )
+  logForDebugging(
+    `ui.message ${post.plugin}/${post.element} (${post.module}) in ${post.component} from ${post.surface}: dispatched, settled in ${(performance.now() - started).toFixed(1)}ms`,
+  )
+  return answered ?? {}
+}
+
+/**
+ * densable `FCe(event).checkMatcher`. Field equality, plus ui.render's
+ * engine-alone component (`AskUserQuestion`).
+ */
 function checkMatcher(event: string, matcher: unknown): string | undefined {
   if (!isEventRecord(matcher)) return undefined
   const body = event.startsWith('classic.')
@@ -9571,11 +12146,19 @@ export async function recordFunctionHookPlugins(
 export async function loadFunctionHooksInProcess(
   plugins: readonly FunctionHookPlugin[],
 ): Promise<LoadedFunctionHooksModule[]> {
-  const next = await recordFunctionHookPlugins(plugins)
+  const recorded = await recordFunctionHookPlugins(plugins)
   const ownedByWorker = workerOwnsDispatch
-  replaceLoadedFunctionHooksModules(next)
+  // densable worker load is per-plugin; merge so {only} isolation still
+  // sees every live module (not last-write-wins).
+  const byName = new Map(
+    loadedModules
+      .filter(mod => mod.status !== 'unloaded')
+      .map(mod => [mod.name, mod] as const),
+  )
+  for (const mod of recorded) byName.set(mod.name, mod)
+  replaceLoadedFunctionHooksModules([...byName.values()])
   workerOwnsDispatch = ownedByWorker
-  return next
+  return recorded
 }
 
 /**
@@ -9868,6 +12451,19 @@ async function recordRegisterPatterns(
     const matcherReason = checkMatcher(pattern, matcher)
     if (matcherReason !== undefined) {
       throw new Error(`${plugin.name}: ${pattern}: ${matcherReason}`)
+    }
+    // densable `ltr` — warn, do not fail the load.
+    if (
+      (pattern === 'ui.render' || pattern === 'classic.ui.render') &&
+      matcher !== undefined
+    ) {
+      const never = uiRenderMatcherNeverRuns(matcher)
+      if (never !== undefined) {
+        logForDebugging(
+          `hooks module ${plugin.name}: on("ui.render", ${JSON.stringify(matcher)}) ${never}`,
+          { level: 'warn' },
+        )
+      }
     }
     const isWildcard =
       pattern === '*' || pattern.endsWith('.*') || pattern.startsWith('!')

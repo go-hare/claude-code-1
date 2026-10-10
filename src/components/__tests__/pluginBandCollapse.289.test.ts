@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   pluginInputFieldKey,
+  bandKeysWithScroll,
   bandRingHandlers,
   bandWindow,
   focusableAt,
@@ -11,6 +12,9 @@ import {
   createPluginInputMap,
   nextBandFocus,
   overflowCueText,
+  paneScrollHandlers,
+  isOtherDrawer,
+  teammateViewId,
   pluginBandKeys,
   selectHighlightHandlers,
   selectKeysIntercept,
@@ -26,6 +30,12 @@ import {
   titleTabColumns,
   paneTitleChromeRows,
   paneWheelScroll,
+  pluginClientKeyFromInput,
+  pluginClientPointerButton,
+  openListRows,
+  selectWindow,
+  hotkeyDigitVisible,
+  resetPluginSelectSeat,
 } from '../PluginRasterPanes.js'
 import { computeWheelStep, initWheelAccel } from '../ScrollKeybindingHandler.js'
 
@@ -54,7 +64,7 @@ describe('densable 2.1.289 Mods band CollapseHandle slice', () => {
     const src = readFileSync(PANES, 'utf8')
     const start = src.indexOf('export function PluginAbovePromptSite')
     expect(start).toBeGreaterThan(0)
-    const body = src.slice(start, start + 20000)
+    const body = src.slice(start)
     expect(body).toContain('useBandCollapsed')
     expect(body).toContain('<PluginBandCollapseHandle')
     expect(body).toContain('<PluginBandCollapsedHint')
@@ -62,6 +72,7 @@ describe('densable 2.1.289 Mods band CollapseHandle slice', () => {
     expect(body).toContain('requestId: BAND_REQUEST_ID')
     expect(body).toContain('bandWindow(')
     expect(body).toContain('<PluginBandOverflowCue')
+    expect(src).toContain('): site failed:')
   })
 
   test('Chat default binding registers abovePrompt:toggle', () => {
@@ -134,6 +145,87 @@ describe('densable 2.1.289 Mods band OverflowCue / bandWindow / nextBandFocus', 
   })
 })
 
+describe('densable 2.1.289 AZ !hasCue remap', () => {
+  test('!hasCue remaps pane:scrollUp/Down onto ring previous/next', () => {
+    const ran: string[] = []
+    const ring = {
+      'abovePrompt:next': () => {
+        ran.push('next')
+      },
+      'abovePrompt:previous': () => {
+        ran.push('prev')
+      },
+      'abovePrompt:press': () => undefined,
+      'abovePrompt:leave': () => undefined,
+    }
+    const scroll = paneScrollHandlers({
+      bodyRows: 8,
+      contentRows: 20,
+      scrollBy: delta => {
+        ran.push(`scroll:${delta}`)
+      },
+    })
+    const idle = bandKeysWithScroll(ring, scroll, false)
+    idle['pane:scrollUp']()
+    idle['pane:scrollDown']()
+    expect(ran).toEqual(['prev', 'next'])
+    const overflow = bandKeysWithScroll(ring, scroll, true)
+    overflow['pane:scrollUp']()
+    overflow['pane:scrollDown']()
+    overflow['pane:pageUp']()
+    expect(ran).toEqual(['prev', 'next', 'scroll:-1', 'scroll:1', 'scroll:-8'])
+  })
+
+  test('AbovePrompt Zt binds AZ bag while held, not only hasCue', () => {
+    const src = readFileSync(PANES, 'utf8')
+    expect(src).toContain('export function bandKeysWithScroll')
+    expect(src).toContain('export function paneScrollHandlers')
+    expect(src).toContain('bandKeysWithScroll(ring, scrollHandlers, hasCue)')
+    expect(src).toContain(
+      'const abovePromptIsActive = ringActive && !inputFocused && !selectFocused',
+    )
+    expect(src).toContain(
+      "useKeybinding('pane:scrollUp', abovePromptHandlers['pane:scrollUp']",
+    )
+    expect(src).not.toContain(
+      'const scrollActive = hasPluginTree && !bandCollapsed && hasCue',
+    )
+  })
+})
+
+describe('densable 2.1.289 s$ / FMn / _Ee onWheel / Wm', () => {
+  test('s$ openListRows is FMn.rows; closed Select is 0', () => {
+    expect(openListRows(null, 20)).toBe(0)
+    expect(selectWindow(20, 0)).toEqual({
+      first: 0,
+      size: 8,
+      hidden: 12,
+      rows: 9,
+    })
+    expect(openListRows({ highlight: 0 }, 20)).toBe(9)
+    expect(selectWindow(3, 0).rows).toBe(3)
+  })
+
+  test('PluginAbovePromptSite outer Box onWheel when hasCue && !dialogOpen', () => {
+    const src = readFileSync(PANES, 'utf8')
+    const site = src.slice(src.indexOf('export function PluginAbovePromptSite'))
+    expect(site).toContain(
+      'onWheel={hasCue && !dialogOpen ? bandWheel : undefined}',
+    )
+    expect(site).toContain('maxHeight={rows + listRows}')
+    expect(site).toContain('useBandDigitHotkey')
+    expect(site).toContain('enterConfirms:!1')
+  })
+
+  test('Wm digit visibility: !hasCue always; cue requires a seat', () => {
+    const seats = new Map([['1', { plugin: 'p', handle: 1 }]])
+    expect(hotkeyDigitVisible(false, seats, '1')).toBe(true)
+    expect(hotkeyDigitVisible(true, new Map(), '1')).toBe(false)
+    expect(hotkeyDigitVisible(true, seats, '1')).toBe(true)
+    expect(hotkeyDigitVisible(true, seats, '2')).toBe(false)
+  })
+})
+
 describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
   test('useBandScrollPlace wires offset/marginTop (no deferred offset=0 stub)', () => {
     const src = readFileSync(PANES, 'utf8')
@@ -143,23 +235,25 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(src).toContain('export const floorBandOffset = floorOffset')
     expect(src).toContain('useBandScrollPlace({')
     expect(src).toContain('marginTop={-offset}')
-    expect(src).toContain('scrollBy(treeRows)')
+    expect(src).toContain('paneScrollHandlers({')
+    expect(src).toContain('contentRows: treeRows')
     expect(src).not.toContain(
       'densable scroll place (`yEe`) deferred — offset stays 0',
     )
     const site = src.slice(src.indexOf('export function PluginAbovePromptSite'))
     expect(site).not.toMatch(/const offset = 0/)
     expect(site).toContain("context: 'AbovePrompt'")
-    // Ide PARTIAL HAVE — register/update/unregister ABOVE_PROMPT site (no Ide/Hde).
+    // Ide HAVE — register/update/unregister ABOVE_PROMPT site (no Ide/Hde minify).
     expect(src).toContain('registerPluginScrollSite')
     expect(src).toContain('updatePluginScrollSite')
     expect(src).toContain('unregisterPluginScrollSite')
     expect(site).toContain(
       "registerPluginScrollSite(scrollOwner, BAND_REQUEST_ID, 'AbovePrompt'",
     )
-    expect(site).toContain(
-      'updatePluginScrollSite(scrollOwner, BAND_REQUEST_ID',
-    )
+    expect(site).toContain('updatePluginScrollSite(')
+    expect(site).toContain('scrollOwner,')
+    expect(site).toContain('BAND_REQUEST_ID')
+    expect(site).toContain("'AbovePrompt'")
     // Hde/`QLt` person-origin HAVE — dispatchPersonUiScroll → ui.scroll chain.
     expect(src).toContain('dispatchPersonUiScroll')
     expect(src).toContain('getPluginScrollSite')
@@ -181,14 +275,76 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(site).toContain(
       'nearestScrollOffset({\n        offset: prev,\n        bodyRows: windowRows',
     )
-    expect(site).toContain('scrollBy(-windowRows)')
-    expect(site).toContain('scrollBy(windowRows)')
+    expect(site).toContain('bodyRows: windowRows')
+    expect(site).toContain('contentRows: treeRows')
+    expect(site).toContain('bandKeysWithScroll(ring, scrollHandlers, hasCue)')
     expect(site).toContain('scroll: { offset, bodyRows }')
     expect(site).toContain('maxHeight={windowRows}')
     // densable fEe keptColumns=DZ + XXt body columns + o$ view.
     expect(site).toContain('marginRight={COLLAPSE_HANDLE_COLUMNS}')
     expect(site).toContain('PaneBodyColumnsContext.Provider')
     expect(site).toContain('view: viewingAgentView')
+    // densable o$: primitive SEe via useAppState, object via useMemo — never
+    // return {} from the selector (Object.is loop → RootREPLBoundary #185).
+    expect(src).toContain('function useViewingAgentView')
+    expect(src).toContain('useAppState(s => viewingAgentIdFromState(s))')
+    expect(src).not.toContain('useAppState(s =>\n    viewingAgentViewProps')
+    expect(src).toContain('agentId === undefined ? {} : { agentId }')
+    expect(src).toContain('export function teammateViewId')
+    expect(src).toContain('resumableAgentId')
+    expect(src).toContain('export function isOtherDrawer')
+    expect(site).toContain('const clearFocusIndex')
+    expect(site).toContain('if (!bandLiveGate) clearFocusIndex(null)')
+    expect(site).toContain('if (panesFocusedId !== null) clearFocusIndex(null)')
+    expect(site).toContain("clearFocusIndex('band')")
+    expect(site).toContain(
+      'isOtherDrawer(prevFocusablesRef.current, focusables)',
+    )
+    expect(site).toContain('usePaneClickAway(bandClickAway)')
+    expect(site).toContain('clearFocusIndex(null);')
+    expect(site).toContain(
+      'useDraftHeldAway(focusIndex ?? panesFocusedId, bandAway)',
+    )
+    expect(src).toContain('retainFinePointer()')
+    expect(src).toContain('event?.shift')
+    expect(src).toContain('bandCollapsed')
+    expect(src).toContain('bandAwayRef.current = node')
+    expect(site).not.toMatch(/landFocusIndex\(null\)/)
+    // densable jZ + NLe/DQt mutex
+    expect(src).toContain('export function useDraftHeldAway')
+    expect(src).toContain('export function setPluginClientFocusedId')
+    expect(src).toContain('export function clearPluginClientFocusedId')
+    expect(site).toContain(
+      'useDraftHeldAway(focusIndex ?? panesFocusedId, bandAway)',
+    )
+    expect(src).toContain('if (held === null) return')
+    expect(src).toContain('getPromptInputStoreValue() !== origin')
+    expect(site).toContain('getPluginClientFocusedId')
+    expect(site).toContain(
+      'if (clientFocusedId !== null) clearFocusIndex(null)',
+    )
+    expect(site).toContain(
+      'if (focusIndex !== null) setPluginClientFocusedId(null)',
+    )
+    // densable QT BO wraps pee
+    const qt = src.slice(
+      src.indexOf('export function PluginPaneSite'),
+      src.indexOf('function PluginPaneSiteBody'),
+    )
+    expect(qt).toContain('<PaneErrorBoundary')
+    const pee = src.slice(
+      src.indexOf('function PluginPaneSiteBody'),
+      src.indexOf('export function PluginAbovePromptSite'),
+    )
+    expect(pee).not.toContain('<PaneErrorBoundary')
+    const replInline = readFileSync(
+      join(import.meta.dir, '../../screens/REPL.tsx'),
+      'utf8',
+    )
+    expect(replInline).toContain('{panesDocked ? null : (')
+    expect(replInline).not.toContain(
+      '{panesDocked ? null : shownPluginPane !== undefined ? (',
+    )
     // densable yEe Kt/QLt.finally lives in useBandScrollPlace (shared).
     expect(src).toContain('aliveRef')
     expect(src).toContain('.finally(after)')
@@ -241,7 +397,10 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(src).toContain('function PluginSiteFields')
     expect(src).toContain('InputFieldsContext')
     expect(src).toContain('SelectFieldsContext')
-    expect(src).toContain('registerBandFieldBridge')
+    expect(src).toContain('function landBandInputFocus')
+    expect(src).not.toContain('registerBandFieldBridge')
+    expect(src).not.toContain('bandFieldBridge')
+    expect(src).toContain("if (site !== 'AbovePrompt') return")
     expect(src).toContain("'abovePrompt:focus'")
     expect(src).toContain(
       'nextBandFocus({ focus: focusIndex, count: focusables.length })',
@@ -287,6 +446,21 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(body).toContain('usePaneClickAway')
     expect(body).toContain('promptOwnsEscape')
     expect(body).toContain("borderStyle: 'round'")
+    // densable pee unfocus/prune: ht(null) only — never Un/Vt (#185 boot).
+    expect(body).toContain('clearPaneFocusLocal')
+    expect(body).toMatch(
+      /if \(!paneHeld\) \{\s*setPaneFocusIndex\(null\);\s*setEngineHeld\(null\);/,
+    )
+    expect(body).not.toMatch(/if \(!paneHeld\) \{\s*landPaneFocusIndex\(null\)/)
+    expect(body).not.toMatch(
+      /paneFocusIndex >= paneFocusables\.length\) \{\s*landPaneFocusIndex\(null\)/,
+    )
+    // densable QT gate: empty host must not mount pee body hooks.
+    expect(body).toContain('function PluginPaneSiteBody')
+    expect(body).toContain('if (pane === undefined) return null')
+    expect(body).toContain(
+      'if (!((rows ?? 0) > 0 && (columns ?? 0) > 0)) return null',
+    )
     expect(body).toContain('tabs: otherTabs')
     expect(body).toContain('pick: showPane')
     expect(body).toContain('heldTabId')
@@ -311,7 +485,8 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(body).toContain('HeldFocusRefContext.Provider')
     expect(body).toContain('FocusedPressContext.Provider')
     expect(body).toContain('borderTopColor: lit')
-    expect(body).toContain('if (dialogOpen) clickAway()')
+    // densable QT: dialog/unmount clear via u3(null) on the light gate.
+    expect(body).toContain('if (dialogOpen) focusPane(null)')
     expect(body).toContain(
       'prev !== null && shownId !== null && prev !== shownId',
     )
@@ -321,12 +496,12 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
       join(import.meta.dir, '../../screens/REPL.tsx'),
       'utf8',
     )
-    const dockSite = repl.slice(
-      repl.indexOf('fill={true}'),
-      repl.indexOf('fill={true}') + 280,
-    )
-    expect(dockSite).not.toContain('rows={transcriptRows}')
-    expect(dockSite).toContain('promptOwnsEscape={promptOwnsEscape}')
+    // densable Mee: PluginPaneDockHost measures yoga then QT rows=hostRows.
+    expect(src).toContain('export function PluginPaneDockHost')
+    expect(src).toContain('rows={hostRows}')
+    expect(src).not.toContain('rows={transcriptRows}')
+    expect(repl).toContain('<PluginPaneDockHost')
+    expect(repl).toContain('promptOwnsEscape={promptOwnsEscape}')
     expect(repl).toContain('pixelScroll={false}')
     // densable Ree/Mee offerPlacement from REPL hosts (not PluginPaneSite).
     expect(repl).toContain('offerPlacement')
@@ -334,12 +509,60 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(repl).toContain('dockHostOffered')
     expect(repl).toContain('inlineHostOffered ? offerPlacement()')
     expect(repl).toContain('dockHostOffered ? offerPlacement()')
+    expect(repl).toContain('const dockHostOffered = pluginDockOffered > 0')
+    expect(repl).not.toContain('const dockHostOffered = pluginDockWidth > 0')
     // densable Uh.usePaneToastHold() (FEe) next to dock/offer wiring.
     expect(src).toContain('export function usePaneToastHold')
     expect(src).toContain('paneHoldsToasts: true')
     expect(repl).toContain('usePaneToastHold()')
+    // densable 2.1.289 gold `$.ui.toast: shown as` CLI host (non-stacksToasts).
+    expect(repl).toContain('$.ui.toast: shown as')
+    expect(repl).toContain('plugin-toast-${randomUUID()}')
+    expect(repl).toContain('timeoutMs: toast.timeoutMs ?? 4000')
+    expect(repl).toContain('${toast.plugin}: ${toast.text}')
+    expect(repl).toContain("kind: 'event'")
+    expect(src).toContain('nothing was drawn')
+    expect(src).toContain(
+      "ui.render (AbovePrompt): a plugin's tree threw while drawn",
+    )
+    const prompt = readFileSync(
+      join(import.meta.dir, '../PromptInput/PromptInput.tsx'),
+      'utf8',
+    )
+    expect(prompt).toContain(
+      'prompt.edit: hooked; the composer relays its edits to the chain',
+    )
+    expect(prompt).toContain(
+      'prompt.edit: unhooked; the composer relays nothing',
+    )
+    const toasts = readFileSync(
+      join(import.meta.dir, '../PromptInput/Notifications.tsx'),
+      'utf8',
+    )
+    expect(toasts).toContain('ui.toast: the toast stack threw while drawn')
+    expect(toasts).toContain('no toast is drawn until the stack changes')
     expect(body).not.toContain('isHeldNow: () => paneHeld')
     expect(body).not.toContain('local Ink has no subscribeClicks bus')
+    // densable pee g$ isAhead: bn()!==N || Ln()!==eo || dn()!==hn
+    expect(body).toContain('paneIsHeldNow() !== paneHeld')
+    expect(body).toContain(
+      'paneFocusIndexRef.current !== paneRenderedFocusIndex.current',
+    )
+    expect(body).toContain(
+      'engineHeldRef.current !== paneRenderedEngineHeld.current',
+    )
+    expect(prompt).toContain('createPromptEditComposer')
+    expect(prompt).toContain('setHooked(promptEditHooked)')
+    expect(prompt).toContain('promptEditComposerRef.current?.record')
+    const modules = readFileSync(
+      join(import.meta.dir, '../../utils/plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(modules).toContain('export function createPromptEditComposer')
+    expect(modules).toContain("the editor's edit stands")
+    expect(modules).toContain(
+      'a rewrite no longer fits the draft (it moved meanwhile)',
+    )
     expect(body).not.toMatch(
       /\bexport\s+(?:const|function|let)\s+(?:lL|mee|ITt|zCe|u7t|yEe|pee|gEe|OMr|Jq|QFt|FEe|FFr|Pte)\b/,
     )
@@ -775,14 +998,14 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
     expect(src).toContain('Soft remainder `l$`/`xze`/`d$`/`m$` HAVE')
     expect(src).toContain('focusablesOfDrawing(drawn)')
     expect(src).toContain('bandRingHandlers({')
-    expect(src).toContain('bandFieldBridge?.submitInput')
+    expect(src).toContain('bandInputRef.current?.submit')
     expect(src).toContain("useRegisterKeybindingContext('AbovePromptInput'")
     expect(src).toContain("useRegisterKeybindingContext('AbovePromptSelect'")
     expect(src).toContain('abovePrompt:next')
     expect(src).toContain('abovePrompt:previous')
     expect(src).toContain('abovePrompt:press')
     expect(src).toContain('abovePrompt:leave')
-    expect(src).toContain('registerBandFieldBridge')
+    expect(src).toContain('bandInputFocusHost')
     expect(src).toContain("'abovePrompt:focus'")
     expect(src).toContain('settlePaneFocusRequest')
     // densable u$ on AbovePrompt — Button hotkeys while ring (not Input/Select).
@@ -805,15 +1028,23 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
   })
 })
 
-describe('densable 2.1.289 y$ PARTIAL select highlight / selectKeys', () => {
+describe('densable 2.1.289 y$ select highlight / selectKeys', () => {
   test('exports qZ selectHighlightHandlers and y$.intercept selectKeysIntercept', () => {
     const src = readFileSync(PANES, 'utf8')
     expect(src).toContain('export function selectHighlightHandlers')
     expect(src).toContain('export function selectKeysIntercept')
-    expect(src).toContain('`y$` PARTIAL HAVE')
-    expect(src).toContain('`g$` PARTIAL HAVE')
-    expect(src).toContain('pressSelect')
+    expect(src).toContain('export function usePluginSelectSeat')
+    expect(src).toContain('export function resetPluginSelectSeat')
+    expect(src).toContain('`y$` HAVE')
+    expect(src).toContain('`g$` HAVE')
+    expect(src).toContain('DualInk `onPointer` HAVE')
+    expect(src).toContain('press: () => void')
+    expect(src).toContain('function landBandInputFocus')
     expect(src).toContain('closed Select opens on move')
+    expect(src).toContain('onPointer={event => {')
+    expect(src).toContain(
+      'onPointer: (event: MouseActionEvent) => firePointer(pluginClientPointerKind(event.type), event)',
+    )
   })
 
   test('selectHighlightHandlers mirrors gold qZ move/press shape', () => {
@@ -910,11 +1141,14 @@ describe('densable 2.1.289 y$ PARTIAL select highlight / selectKeys', () => {
     const src = readFileSync(PANES, 'utf8')
     const defaults = readFileSync(DEFAULTS, 'utf8')
     const schema = readFileSync(SCHEMA, 'utf8')
-    expect(src).toContain("selectHandlers['abovePrompt:highlightNext']")
-    expect(src).toContain("selectHandlers['abovePrompt:highlightPrevious']")
-    expect(src).toContain("selectHandlers['abovePrompt:press']")
+    expect(src).toContain("bandSelect.handlers['abovePrompt:highlightNext']")
+    expect(src).toContain(
+      "bandSelect.handlers['abovePrompt:highlightPrevious']",
+    )
+    expect(src).toContain("bandSelect.handlers['abovePrompt:press']")
     expect(src).toContain("context: 'AbovePromptSelect'")
-    expect(src).toContain('selectKeysIntercept(input, key')
+    expect(src).toContain('bandSelect.intercept(input, key')
+    expect(src).toContain('export function selectKeysIntercept')
     expect(defaults).toContain("down: 'abovePrompt:highlightNext'")
     expect(defaults).toContain("up: 'abovePrompt:highlightPrevious'")
     expect(schema).toContain("'abovePrompt:highlightNext'")
@@ -923,15 +1157,42 @@ describe('densable 2.1.289 y$ PARTIAL select highlight / selectKeys', () => {
     expect(schema).toContain("'effortSlider:toggleUltracode'")
     expect(defaults).toContain("tab: 'effortSlider:toggleUltracode'")
   })
+
+  test('resetPluginSelectSeat is gold Kt identity: Select opens, none closes', () => {
+    const picked = new Map([[pluginInputFieldKey('p', 's1'), 'b']])
+    expect(resetPluginSelectSeat(null, picked)).toEqual({
+      key: null,
+      isOpen: false,
+      highlight: 0,
+    })
+    expect(
+      resetPluginSelectSeat(
+        {
+          plugin: 'p',
+          handle: 1,
+          element: 's1',
+          options: [
+            { value: 'a', label: 'A' },
+            { value: 'b', label: 'B' },
+          ],
+        },
+        picked,
+      ),
+    ).toEqual({
+      key: pluginInputFieldKey('p', 's1'),
+      isOpen: true,
+      highlight: 1,
+    })
+  })
 })
 
-describe('densable 2.1.289 g$ PARTIAL key intercept on PluginAbovePromptSite', () => {
+describe('densable 2.1.289 g$ key intercept on PluginAbovePromptSite', () => {
   test('exports pluginBandKeys / usePluginBandKeys / focusableAt and wires site bag', () => {
     const src = readFileSync(PANES, 'utf8')
     expect(src).toContain('export function pluginBandKeys')
     expect(src).toContain('export function usePluginBandKeys')
     expect(src).toContain('export function focusableAt')
-    expect(src).toContain('`g$` PARTIAL HAVE')
+    expect(src).toContain('`g$` HAVE')
     expect(src).toContain(
       'isAhead: () => focusIndexRef.current !== renderedFocusIndex.current',
     )
@@ -940,8 +1201,10 @@ describe('densable 2.1.289 g$ PARTIAL key intercept on PluginAbovePromptSite', (
     expect(src).toContain('AbovePromptInput:')
     expect(src).toContain('AbovePromptSelect:')
     expect(src).toContain(
-      'selectKeys: (input, key) => bandFieldBridge?.selectKeys',
+      'selectKeys: (input, key) => bandSelect.intercept(input, key)',
     )
+    expect(src).toContain('textNow: bandInput.textNow')
+    expect(src).toContain('fields: bandInput.fields')
     expect(src).toContain('usePluginBandKeys(bandKeysBag')
     expect(src).toContain('sb(fr.intercept,{isActive:Os})')
     expect(src).toContain('settlePaneFocusRequest')
@@ -1155,5 +1418,176 @@ describe('densable 2.1.289 Si panes semantic store (EMPTY_PANES-shaped)', () => 
       fh.indexOf('export function dispatchPersonUiScroll') + 1800,
     )
     expect(personVq).toContain('bumpRasterFrames()')
+  })
+})
+
+describe('densable 2.1.289 o$ SEe / FZ / _Ee Ie(null) polarity', () => {
+  test('teammateViewId matches gold h_e id (local_agent vs resumable teammate)', () => {
+    expect(teammateViewId({ type: 'local_agent', agentId: 'local-1' })).toBe(
+      'local-1',
+    )
+    expect(
+      teammateViewId({
+        type: 'in_process_teammate',
+        identity: { agentId: 'live', resumableAgentId: 'resume' },
+      }),
+    ).toBe('resume')
+    expect(
+      teammateViewId({
+        type: 'in_process_teammate',
+        identity: { agentId: 'live' },
+      }),
+    ).toBe('live')
+    expect(teammateViewId({ type: 'other' })).toBeUndefined()
+  })
+
+  test('isOtherDrawer is gold FZ (both nonempty, no shared plugin)', () => {
+    expect(isOtherDrawer([], [{ plugin: 'a' }])).toBe(false)
+    expect(isOtherDrawer([{ plugin: 'a' }], [{ plugin: 'a' }])).toBe(false)
+    expect(isOtherDrawer([{ plugin: 'a' }], [{ plugin: 'b' }])).toBe(true)
+  })
+})
+
+describe('densable 2.1.289 PluginClient oo / ro', () => {
+  test('pluginClientKeyFromInput mirrors gold ro', () => {
+    const base = {
+      ctrl: false,
+      meta: false,
+      super: false,
+      escape: false,
+      tab: false,
+      return: false,
+      leftArrow: false,
+      rightArrow: false,
+      upArrow: false,
+      downArrow: false,
+      home: false,
+      end: false,
+      delete: false,
+      pageUp: false,
+      pageDown: false,
+      backspace: false,
+      wheelUp: false,
+      wheelDown: false,
+      shift: false,
+      fn: false,
+    }
+    expect(pluginClientKeyFromInput('g', base as never)).toEqual({ key: 'g' })
+    expect(pluginClientKeyFromInput(' ', base as never)).toEqual({
+      key: 'space',
+    })
+    expect(pluginClientKeyFromInput('', base as never)).toBeUndefined()
+    expect(
+      pluginClientKeyFromInput('x', { ...base, upArrow: true } as never),
+    ).toEqual({ key: 'up' })
+    expect(
+      pluginClientKeyFromInput('c', { ...base, ctrl: true } as never),
+    ).toEqual({ key: 'c', ctrl: true })
+    expect(
+      pluginClientKeyFromInput('x', { ...base, wheelUp: true } as never),
+    ).toBeUndefined()
+  })
+
+  test('PluginClient wires gold oo pointer-down DQt and sb keys', () => {
+    const src = readFileSync(PANES, 'utf8')
+    expect(src).toContain("kind === 'down' && live.acceptsKeys()")
+    expect(src).toContain('live.key(mapped)')
+    expect(src).toContain('live.pointer({')
+    expect(src).toContain('onPointer:')
+    expect(src).toContain('export function PluginPaneDockHost')
+    expect(src).toContain('instanceRef.current.laidOut()')
+    expect(src).toContain('instanceRef.current.drawnAgain()')
+    expect(src).toContain('instanceRef.current.threw(error)')
+    expect(src).toContain('drawn={props}')
+    expect(src).toContain('}, [drawn])')
+    expect(src).toContain('height: rows')
+    expect(src).toContain('retainFinePointer()')
+    expect(src).toContain('usePaneClickAway(bandClickAway)')
+    expect(src).toContain('measureElement(node)')
+    expect(src).toContain(
+      'instanceRef.current.resize(measuredWidth, measuredHeight)',
+    )
+    expect(src).toContain('pluginClientPointerButton(event?.button)')
+    expect(src).not.toContain('box?.width')
+    expect(src).not.toContain('[width, height, snapshot]')
+  })
+
+  test('pluginClientPointerButton is gold eo 0/1/2 plus SGR mask', () => {
+    expect(pluginClientPointerButton(undefined)).toBeUndefined()
+    expect(pluginClientPointerButton(0)).toBe('left')
+    expect(pluginClientPointerButton(1)).toBe('middle')
+    expect(pluginClientPointerButton(2)).toBe('right')
+    expect(pluginClientPointerButton(3)).toBeUndefined()
+    expect(pluginClientPointerButton(0x04)).toBe('left')
+    expect(pluginClientPointerButton(0x05)).toBe('middle')
+  })
+})
+
+describe('densable 2.1.289 kL/yL/$l/g$ wrap', () => {
+  test('PluginRasterPanes wires kL seats, yL prune, $l subscribeLayout, pee g$', () => {
+    const src = readFileSync(PANES, 'utf8')
+    expect(src).toContain(
+      'export { pluginFieldSeatKey, pluginFieldSeatGeneration, bumpPluginFieldSeatGeneration }',
+    )
+    expect(src).toContain('export function usePluginFieldSeatMap')
+    expect(src).toContain('export function usePluginFieldValuePrune')
+    expect(src).toContain('export function useYogaMeasure')
+    expect(src).toContain('export function usePluginInputSeat')
+    expect(src).toContain("usePluginFieldSeatMap('input'")
+    expect(src).toContain("usePluginFieldSeatMap('select'")
+    expect(src).toContain("usePluginFieldValuePrune(focusables, 'Input'")
+    expect(src).toContain("usePluginFieldValuePrune(focusables, 'Select'")
+    expect(src).toContain('const { subscribeLayout } = useApp()')
+    expect(src).toContain('useSyncExternalStore(subscribeLayout, read, read)')
+    expect(src).toContain('if (!Object.is(read(), snapshot)) bump()')
+    expect(src).toContain(
+      'useYogaMeasure(() => measurePluginClientBox(boxRef.current).width)',
+    )
+    expect(src).toContain(
+      'useYogaMeasure(() => measurePluginClientBox(hostRef.current).height)',
+    )
+    expect(src).toContain(
+      'usePluginBandKeys(paneKeysBag, { isActive: paneHeld })',
+    )
+    expect(src).toContain('paneSelect')
+    expect(src).toContain('...paneSelect.handlers')
+    expect(src).toContain('paneSelect.intercept(input, key)')
+    expect(src).toContain('textNow: paneInput.textNow')
+    expect(src).toContain('fields: paneInput.fields')
+    expect(src).toContain('working: isWorking')
+    expect(src).not.toContain('export function KFt')
+    expect(src).not.toContain('export function YFt')
+    expect(src).not.toContain('export function $l')
+  })
+
+  test('pluginFieldSeatKey is gold sft component NUL requestId', async () => {
+    const {
+      pluginFieldSeatKey,
+      bumpPluginFieldSeatGeneration,
+      pluginFieldSeatGeneration,
+    } = await import('../PluginRasterPanes.js')
+    expect(pluginFieldSeatKey('AbovePrompt', 'above-prompt')).toBe(
+      'AbovePrompt\0above-prompt',
+    )
+    const before = pluginFieldSeatGeneration('Pane', 'p1')
+    bumpPluginFieldSeatGeneration('Pane', 'p1')
+    expect(pluginFieldSeatGeneration('Pane', 'p1')).toBe(before + 1)
+  })
+})
+
+describe('densable 2.1.289 NLe/DQt client mutex store', () => {
+  test('DQt sets and hSo clears only the current id', async () => {
+    const {
+      getPluginClientFocusedId,
+      setPluginClientFocusedId,
+      clearPluginClientFocusedId,
+    } = await import('../PluginRasterPanes.js')
+    setPluginClientFocusedId(null)
+    setPluginClientFocusedId('a')
+    expect(getPluginClientFocusedId()).toBe('a')
+    clearPluginClientFocusedId('b')
+    expect(getPluginClientFocusedId()).toBe('a')
+    clearPluginClientFocusedId('a')
+    expect(getPluginClientFocusedId()).toBe(null)
   })
 })
