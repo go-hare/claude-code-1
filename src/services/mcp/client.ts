@@ -34,6 +34,7 @@ import type {
 } from './types.js'
 import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
 import { readClientProtocolEra } from './channelPermissions.js'
+import { listMcpCursorPages, listMcpToolsAggregated } from './listPagination.js'
 import {
   classifyMcpAutoProbeFallback,
   createMcpConnectionTimeoutError,
@@ -2617,11 +2618,19 @@ export const fetchToolsForClient = memoizeWithLRU(
         return []
       }
 
-      // densable: Client.listTools aggregates pages (KdS uses cacheMode refresh).
-      const listResult = await client.client.listTools(undefined, {
-        cacheMode: 'refresh',
-      })
-      const listedTools = listResult.tools ?? []
+      // densable 2.1.289: modern `ai` listTools aggregate; else `$n` 20-page walk.
+      const listedTools = (
+        readClientProtocolEra(client.client) === 'modern'
+          ? await listMcpToolsAggregated(client.client, client.name)
+          : await listMcpCursorPages(
+              client.client,
+              client.name,
+              'tools/list',
+              page => (Array.isArray(page.tools) ? page.tools : undefined),
+            )
+      ) as NonNullable<
+        Awaited<ReturnType<typeof client.client.listTools>>['tools']
+      >
 
       // densable: successful tools/list clears discovery degradation flags
       client.toolsListError = undefined
@@ -3196,11 +3205,15 @@ export const fetchResourcesForClient = memoizeWithLRU(
         return []
       }
 
-      // densable: Client.listResources aggregates pages.
-      const listResult = await client.client.listResources(undefined, {
-        cacheMode: 'refresh',
-      })
-      const resources = listResult.resources ?? []
+      // densable 2.1.289 `$n` resources/list — 20-page clamp, not SDK 64 throw.
+      const resources = (await listMcpCursorPages(
+        client.client,
+        client.name,
+        'resources/list',
+        page => (Array.isArray(page.resources) ? page.resources : undefined),
+      )) as NonNullable<
+        Awaited<ReturnType<typeof client.client.listResources>>['resources']
+      >
 
       if (resources.length === 0) return []
 
@@ -3232,11 +3245,15 @@ export const fetchCommandsForClient = memoizeWithLRU(
         return []
       }
 
-      // densable: Client.listPrompts aggregates pages.
-      const listResult = await client.client.listPrompts(undefined, {
-        cacheMode: 'refresh',
-      })
-      const listedPrompts = listResult.prompts ?? []
+      // densable 2.1.289 `$n` prompts/list — 20-page clamp, not SDK 64 throw.
+      const listedPrompts = (await listMcpCursorPages(
+        client.client,
+        client.name,
+        'prompts/list',
+        page => (Array.isArray(page.prompts) ? page.prompts : undefined),
+      )) as NonNullable<
+        Awaited<ReturnType<typeof client.client.listPrompts>>['prompts']
+      >
 
       if (listedPrompts.length === 0) return []
 

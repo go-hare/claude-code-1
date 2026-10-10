@@ -20,12 +20,37 @@ const RECONNECT_TSX = join(root, 'components/mcp/MCPReconnect.tsx')
 describe('densable 2.1.289 /mcp reconnect all wiring', () => {
   test('mcp.tsx mounts MCPReconnect for bare reconnect as all', () => {
     const src = readFileSync(MCP_TSX, 'utf8')
-    expect(src).toContain("if (parts[0] === 'reconnect')")
+    expect(src).toContain("if (action === 'reconnect')")
     expect(src).toContain("const target = parts.slice(1).join(' ') || 'all'")
     expect(src).toContain(
       '<MCPReconnect serverName={target} onComplete={onDone} />',
     )
     expect(src).not.toContain("parts[0] === 'reconnect' && parts[1]")
+  })
+
+  test('mcp.tsx Be unknown-action / usage / session-view copy', async () => {
+    const {
+      MCP_INLINE_USAGE,
+      formatUnrecognizedMcpAction,
+      MCP_INLINE_SESSION_UNAVAILABLE,
+      MCP_INLINE_VIEW_UNAVAILABLE,
+    } = await import('../mcp.js')
+    expect(MCP_INLINE_USAGE).toBe(
+      'Usage: /mcp [reconnect|enable|disable [<server>|all]]. With no server name, applies to all.',
+    )
+    expect(formatUnrecognizedMcpAction('foo')).toBe(
+      `"foo" isn't a recognized /mcp action. Try reconnect, enable, or disable.`,
+    )
+    expect(MCP_INLINE_SESSION_UNAVAILABLE).toBe(
+      "Reconnect, enable, and disable aren't available in this session.",
+    )
+    expect(MCP_INLINE_VIEW_UNAVAILABLE).toBe(
+      "MCP controls aren't available right now — the terminal is still starting up or is showing another view.",
+    )
+    const src = readFileSync(MCP_TSX, 'utf8')
+    expect(src).toContain('formatUnrecognizedMcpAction(action)')
+    expect(src).toContain('isBgSessionWithoutTerminal()')
+    expect(src).toContain('getIsInteractive()')
   })
 
   test('argumentHint documents reconnect|enable|disable [<server>|all]', () => {
