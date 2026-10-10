@@ -19,7 +19,9 @@ describe('densable zm streaming spinner gate', () => {
     expect(src).toContain(
       '(streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 ||',
     )
-    expect(src).toContain('isBriefOnly);')
+    expect(src).toContain(
+      '!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly || focusFoldHoldsPreview',
+    )
     expect(src).toContain('!reducedMotion && !process.env.WT_SESSION')
     expect(src).not.toContain('hasCursorUpViewportYankBug')
   })

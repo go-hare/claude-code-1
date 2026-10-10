@@ -922,6 +922,126 @@ export async function partialCompactConversation(
       }
     }
 
+    // densable compact-path `lXn` — remint poll_events envelopes on the kept tail.
+    {
+      const { remintPollEventsAttachmentEnvelopes } = await import(
+        '../../cli/printControlExtras.js'
+      )
+      for (let i = 0; i < messagesToKeep.length; i++) {
+        const msg = messagesToKeep[i]
+        if (msg?.type !== 'attachment') {
+          continue
+        }
+        const attachment = msg.attachment
+        if (attachment?.type !== 'poll_events') {
+          continue
+        }
+        const envelopes = Array.isArray(attachment.envelopes)
+          ? attachment.envelopes.filter(
+              (envelope): envelope is string => typeof envelope === 'string',
+            )
+          : []
+        const kinds = Array.isArray(attachment.kinds)
+          ? attachment.kinds.filter(
+              (kind): kind is string => typeof kind === 'string',
+            )
+          : []
+        const provenance = Array.isArray(attachment.provenance)
+          ? attachment.provenance
+          : []
+        const media = Array.isArray(attachment.media) ? attachment.media : []
+        const merged: Array<{
+          envelope: string
+          kind: string
+          provenance: unknown
+          media: unknown[]
+          at: string
+        }> = envelopes.map((envelope, index) => {
+          const atMatch = /^<event\b[^>]*?\bat="([^"]*)"/.exec(envelope)
+          return {
+            envelope,
+            kind: kinds[index] ?? 'unknown',
+            provenance: provenance[index] ?? null,
+            media: (media[index] as unknown[] | undefined) ?? [],
+            at: (() => {
+              if (atMatch?.[1]) {
+                return atMatch[1]
+              }
+              if (typeof attachment.timestamp === 'string') {
+                return attachment.timestamp
+              }
+              if (typeof msg.timestamp === 'string') {
+                return msg.timestamp
+              }
+              return ''
+            })(),
+          }
+        })
+        const queued = messagesToKeep.flatMap(entry => {
+          if (entry?.type !== 'attachment') {
+            return []
+          }
+          const queuedAttachment = entry.attachment
+          if (queuedAttachment?.type !== 'queued_command') {
+            return []
+          }
+          const at = entry.timestamp
+          if (typeof at !== 'string') {
+            return []
+          }
+          const prompt = queuedAttachment.prompt
+          const text =
+            typeof prompt === 'string'
+              ? prompt
+              : Array.isArray(prompt)
+                ? prompt
+                    .filter(
+                      (block): block is { type: 'text'; text: string } =>
+                        Boolean(block) &&
+                        typeof block === 'object' &&
+                        (block as { type?: string }).type === 'text' &&
+                        typeof (block as { text?: unknown }).text === 'string',
+                    )
+                    .map(block => block.text)
+                    .join('\n')
+                : ''
+          if (text === '') {
+            return []
+          }
+          return [
+            {
+              envelope: text,
+              kind: 'unknown',
+              provenance: null,
+              media: [] as unknown[],
+              at,
+            },
+          ]
+        })
+        const rows = [...merged, ...queued].sort((left, right) => {
+          const leftAt = Date.parse(left.at)
+          const rightAt = Date.parse(right.at)
+          if (Number.isNaN(leftAt) || Number.isNaN(rightAt)) {
+            return 0
+          }
+          return leftAt - rightAt
+        })
+        const hasMedia = rows.some(row => row.media.length > 0)
+        messagesToKeep[i] = {
+          ...msg,
+          attachment: {
+            ...attachment,
+            envelopes: remintPollEventsAttachmentEnvelopes(
+              rows.map(row => row.envelope),
+            ),
+            kinds: rows.map(row => row.kind),
+            provenance: rows.map(row => row.provenance),
+            ...(hasMedia && { media: rows.map(row => row.media) }),
+          },
+        }
+      }
+    }
+
     if (messagesToSummarize.length === 0) {
       throw new Error(
         direction === 'up_to'

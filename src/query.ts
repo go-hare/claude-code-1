@@ -43,6 +43,7 @@ import type {
   TombstoneMessage,
 } from './types/message.js'
 import { logError } from './utils/log.js'
+import { isAbortError } from './utils/errors.js'
 import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   isPromptTooLongMessage,
@@ -72,6 +73,7 @@ import {
   createAttachmentMessage,
   filterDuplicateMemoryAttachments,
   getAttachmentMessages,
+  getQueuedCommandAttachments,
   startRelevantMemoryPrefetch,
 } from './utils/attachments.js'
 import { injectBatchingReminder } from './utils/batchingReminder.js'
@@ -842,6 +844,43 @@ async function* queryLoop(
     state.messages,
     state.toolUseContext,
   )
+
+  // densable turn-start t1e fold — poll-event commands become poll_events
+  // attachments before the first API call. Abort leaves them queued.
+  {
+    const isMainThread =
+      querySource.startsWith('repl_main_thread') || querySource === 'sdk'
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isMainThreadQueuedCommand } =
+      require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+    const turnStartPoll = getCommandsByMaxPriority('next').filter(cmd => {
+      if (cmd.mode !== 'poll-event') return false
+      if (isMainThread) return isMainThreadQueuedCommand(cmd)
+      return cmd.agentId === state.toolUseContext.agentId
+    })
+    if (turnStartPoll.length > 0) {
+      try {
+        const built = await getQueuedCommandAttachments(turnStartPoll)
+        if (built.some(attachment => attachment.type === 'poll_events')) {
+          for (const att of built) {
+            const msg = createAttachmentMessage(att)
+            state.messages = [...state.messages, msg]
+            yield msg
+          }
+          removeFromQueue(turnStartPoll)
+        }
+      } catch (err) {
+        if (isAbortError(err)) {
+          const { QUERY_TURN_START_POLL_EVENTS_ABORTED } = await import(
+            './cli/printControlExtras.js'
+          )
+          logForDebugging(QUERY_TURN_START_POLL_EVENTS_ABORTED)
+        } else {
+          logError(err)
+        }
+      }
+    }
+  }
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -3549,9 +3588,12 @@ async function* queryLoop(
     ).filter(cmd => {
       if (isSlashCommand(cmd)) return false
       if (isMainThread) return isMainThreadQueuedCommand(cmd)
-      // Subagents only drain task-notifications addressed to them — never
-      // user prompts, even if someone stamps an agentId on one.
-      return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
+      // Subagents drain task-notifications and poll-events addressed to them —
+      // never user prompts, even if someone stamps an agentId on one.
+      return (
+        (cmd.mode === 'task-notification' || cmd.mode === 'poll-event') &&
+        cmd.agentId === currentAgentId
+      )
     })
     const queuedAutonomyClaim = await claimConsumableQueuedAutonomyCommands(
       queuedCommandsSnapshot,
@@ -3561,7 +3603,10 @@ async function* queryLoop(
     }
 
     const claimedConsumedCommands = queuedAutonomyClaim.claimedCommands.filter(
-      cmd => cmd.mode === 'prompt' || cmd.mode === 'task-notification',
+      cmd =>
+        cmd.mode === 'prompt' ||
+        cmd.mode === 'task-notification' ||
+        cmd.mode === 'poll-event',
     )
     if (claimedConsumedCommands.length > 0) {
       consumedAutonomyCommands.push(...claimedConsumedCommands)
@@ -3591,16 +3636,29 @@ async function* queryLoop(
       }
     }
 
-    for await (const attachment of getAttachmentMessages(
-      null,
-      updatedToolUseContext,
-      null,
-      queuedAutonomyClaim.attachmentCommands,
-      messagesForQuery.concat(assistantMessages, toolResults),
-      querySource,
-    )) {
-      yield attachment
-      toolResults.push(attachment)
+    let pollEventsBuildAborted = false
+    try {
+      for await (const attachment of getAttachmentMessages(
+        null,
+        updatedToolUseContext,
+        null,
+        queuedAutonomyClaim.attachmentCommands,
+        messagesForQuery.concat(assistantMessages, toolResults),
+        querySource,
+      )) {
+        yield attachment
+        toolResults.push(attachment)
+      }
+    } catch (err) {
+      if (isAbortError(err)) {
+        const { QUERY_TURN_START_POLL_EVENTS_ABORTED } = await import(
+          './cli/printControlExtras.js'
+        )
+        logForDebugging(QUERY_TURN_START_POLL_EVENTS_ABORTED)
+      } else {
+        logError(err)
+      }
+      pollEventsBuildAborted = true
     }
 
     // Memory prefetch consume: only if settled and not already consumed on
@@ -3658,7 +3716,9 @@ async function* queryLoop(
     const claimedCommandSet = new Set(claimedConsumedCommands)
     const consumedCommands = queuedAutonomyClaim.attachmentCommands.filter(
       cmd =>
-        (cmd.mode === 'prompt' || cmd.mode === 'task-notification') &&
+        (cmd.mode === 'prompt' ||
+          cmd.mode === 'task-notification' ||
+          (cmd.mode === 'poll-event' && !pollEventsBuildAborted)) &&
         !claimedCommandSet.has(cmd),
     )
     if (consumedCommands.length > 0) {

@@ -9,6 +9,7 @@ import {
   normalizeMessagesForAPI,
   SCHEDULED_TASK_DISCLAIMER_PREFIX,
   shouldShowUserMessage,
+  stampQueueOriginOnUserMessages,
   TASK_NOTIFICATION_DISCLAIMER_PREFIX,
   wrapCommandText,
   wrapPeerOriginText,
@@ -242,6 +243,70 @@ describe('shouldShowUserMessage densable IDd', () => {
     })
     expect(shouldShowUserMessage(onlyTx as never, false)).toBe(false)
     expect(shouldShowUserMessage(onlyTx as never, true)).toBe(true)
+  })
+
+  test('image metadata isMeta stays hidden even if origin is human', () => {
+    const meta = createUserMessage({
+      content: [
+        {
+          type: 'text',
+          text: '[Image: source: /tmp/5.png]',
+        },
+      ],
+      isMeta: true,
+      turnCompanion: true,
+      origin: { kind: 'human' } as never,
+    })
+    expect(shouldShowUserMessage(meta as never, false)).toBe(false)
+    expect(shouldShowUserMessage(meta as never, true)).toBe(false)
+  })
+})
+
+describe('stampQueueOriginOnUserMessages densable cun', () => {
+  test('skips human-like origin (jy) so Qt image metadata stays origin-less', () => {
+    const prompt = createUserMessage({ content: 'hi' })
+    const imageMeta = createUserMessage({
+      content: [{ type: 'text', text: '[Image: source: /tmp/5.png]' }],
+      isMeta: true,
+      turnCompanion: true,
+    })
+    stampQueueOriginOnUserMessages([prompt, imageMeta], { kind: 'human' })
+    expect(prompt.origin).toBeUndefined()
+    expect(imageMeta.origin).toBeUndefined()
+  })
+
+  test('fills origin only when unset (gold cun, including Qt companion)', () => {
+    const prompt = createUserMessage({ content: 'from peer' })
+    const imageMeta = createUserMessage({
+      content: [{ type: 'text', text: '[Image: source: /tmp/5.png]' }],
+      isMeta: true,
+      turnCompanion: true,
+    })
+    const already = createUserMessage({
+      content: 'kept',
+      origin: { kind: 'channel' } as never,
+    })
+    stampQueueOriginOnUserMessages([prompt, imageMeta, already], {
+      kind: 'peer',
+      senderTaskId: 'a-1',
+    })
+    expect(prompt.origin).toEqual({ kind: 'peer', senderTaskId: 'a-1' })
+    expect(imageMeta.origin).toEqual({ kind: 'peer', senderTaskId: 'a-1' })
+    expect(already.origin).toEqual({ kind: 'channel' })
+  })
+
+  test('strips projects-relay / session-inbox subkind (u8r)', () => {
+    const prompt = createUserMessage({ content: 'n' })
+    stampQueueOriginOnUserMessages([prompt], {
+      kind: 'task-notification',
+      subkind: 'projects-relay',
+      source: 'owner',
+    })
+    expect(prompt.origin).toEqual({
+      kind: 'task-notification',
+      source: 'owner',
+    })
+    expect(prompt.origin).not.toHaveProperty('subkind')
   })
 })
 

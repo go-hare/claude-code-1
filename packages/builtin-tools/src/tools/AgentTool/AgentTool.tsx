@@ -391,8 +391,9 @@ export const AgentTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema();
   },
-  async call(
-    {
+  async call(input: AgentToolInput, toolUseContext, canUseTool, assistantMessage, onProgress?) {
+    // densable `bn` may rewrite spawn fields; keep lets so `D.arrived` applies.
+    let {
       prompt,
       subagent_type,
       description,
@@ -405,14 +406,9 @@ export const AgentTool = buildTool({
       mode: _deprecatedSpawnMode,
       isolation,
       cwd,
-    }: AgentToolInput,
-    toolUseContext,
-    canUseTool,
-    assistantMessage,
-    onProgress?,
-  ) {
+    } = input;
     const startTime = Date.now();
-    const model = isCoordinatorMode() ? undefined : modelParam;
+    let model = isCoordinatorMode() ? undefined : modelParam;
 
     // densable Rs — FORCE zeros tool model unless inherit (applied at getAgentModel / spawn)
 
@@ -435,6 +431,101 @@ export const AgentTool = buildTool({
     }
     // densable `_ = y.mode` — parent session permission mode
     const permissionMode = appState.toolPermissionContext.mode;
+
+    // densable 2.1.289 `bn` / `Cc("agent.spawn")` / `wis` / `Eis` / `fn` / `Rat`.
+    // Tail pass-on is `arrived` (rewritten spawn). Hook without next → Rat.
+    // Gold then applies `D.arrived` onto prompt/description/cwd/model/background
+    // and remaps `subagentType` via `fn` (unknown type → deny).
+    {
+      const { hasMatchingFunctionHook, isInsideAgentSpawnLaunch, runFunctionHookChain } = await import(
+        'src/utils/plugins/functionHooksModules.js'
+      );
+      if (hasMatchingFunctionHook('agent.spawn') && !isInsideAgentSpawnLaunch()) {
+        const spawn: Record<string, unknown> = {
+          prompt,
+          description,
+          subagentType: subagent_type,
+          model,
+          permissionMode,
+          background: run_in_background,
+          ...(name !== undefined && { name }),
+          ...(cwd !== undefined && { cwd }),
+        };
+        let arrivedSpawn: Record<string, unknown> | undefined;
+        const answered = await runFunctionHookChain('agent.spawn', spawn, async event => {
+          arrivedSpawn =
+            event !== null && typeof event === 'object' && !Array.isArray(event)
+              ? (event as Record<string, unknown>)
+              : spawn;
+          return arrivedSpawn;
+        });
+        if (arrivedSpawn === undefined) {
+          if (toolUseContext.abortController.signal.aborted) {
+            throw new AbortError();
+          }
+          const rec =
+            answered !== null && typeof answered === 'object' && !Array.isArray(answered)
+              ? (answered as Record<string, unknown>)
+              : undefined;
+          const reason =
+            typeof rec?.deny === 'string' ? rec.deny : 'agent.spawn: a hook answered without passing the spawn on';
+          logForDebugging(`agent.spawn ${subagent_type}: refused by a hook (${reason})`);
+          throw new Error(`Subagent spawn denied by a plugin: ${reason}`);
+        }
+        // densable Eis — log field rewrites (skip Q6t + model has its own line).
+        const skipRewriteLog = new Set([
+          'tool_use_id',
+          'name',
+          'fork',
+          'isTeammate',
+          'parentModel',
+          'permissionMode',
+          'parentAgentId',
+          'provider',
+        ]);
+        const rewrittenKeys = [...new Set([...Object.keys(spawn), ...Object.keys(arrivedSpawn)])].filter(
+          key => !skipRewriteLog.has(key) && key !== 'model' && spawn[key] !== arrivedSpawn[key],
+        );
+        if (rewrittenKeys.length > 0) {
+          logForDebugging(`agent.spawn ${subagent_type}: ${rewrittenKeys.join(', ')} rewritten by a hook`);
+        }
+        if (arrivedSpawn.model !== spawn.model) {
+          logForDebugging(
+            `agent.spawn ${subagent_type}: model ${spawn.model ?? '(inherit)'} -> ${arrivedSpawn.model ?? '(inherit)'} by a hook`,
+          );
+        }
+        // densable fn — unknown subagentType is a deny, not a silent pass-through.
+        if (typeof arrivedSpawn.subagentType === 'string') {
+          const agents = toolUseContext.options.agentDefinitions.activeAgents;
+          const known =
+            arrivedSpawn.subagentType === subagent_type ||
+            agents.some(agent => agent.agentType === arrivedSpawn.subagentType);
+          if (!known) {
+            const listed = agents.map(agent => agent.agentType);
+            const reason = `a hook's subagentType '${arrivedSpawn.subagentType}' names no agent this call can dispatch (${listed.length > 0 ? `available: ${listed.join(', ')}` : 'none is available'})`;
+            throw new Error(`Subagent spawn denied by a plugin: ${reason}`);
+          }
+          subagent_type = arrivedSpawn.subagentType;
+        }
+        if (typeof arrivedSpawn.prompt === 'string') {
+          prompt = arrivedSpawn.prompt;
+        }
+        if (typeof arrivedSpawn.description === 'string') {
+          description = arrivedSpawn.description.replace(/\s+/g, ' ').trim();
+        }
+        if (arrivedSpawn.cwd === undefined || typeof arrivedSpawn.cwd === 'string') {
+          cwd = arrivedSpawn.cwd as string | undefined;
+        }
+        if (arrivedSpawn.model === undefined || typeof arrivedSpawn.model === 'string') {
+          modelParam = arrivedSpawn.model as typeof modelParam;
+          model = isCoordinatorMode() ? undefined : modelParam;
+        }
+        if (typeof arrivedSpawn.background === 'boolean') {
+          run_in_background = arrivedSpawn.background;
+        }
+      }
+    }
+
     // In-process teammates get a no-op setAppState; setAppStateForTasks
     // reaches the root store so task registration/progress/kill stay visible.
     const rootSetAppState = toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState;

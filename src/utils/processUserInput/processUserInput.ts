@@ -174,6 +174,7 @@ export async function processUserInput({
   wakeupSource,
   isMeta,
   skipAttachments,
+  skipSubmissionHooks,
   autonomy,
   origin,
   suppressWorkflowKeyword,
@@ -225,6 +226,8 @@ export async function processUserInput({
    */
   isMeta?: boolean
   skipAttachments?: boolean
+  /** densable skipSubmissionHooks — attachment-only poll empty prompt. */
+  skipSubmissionHooks?: boolean
   autonomy?: QueuedCommand['autonomy']
   /**
    * densable Dfr origin — Wzn(origin) gates ultracode keyword (p2y).
@@ -292,6 +295,10 @@ export async function processUserInput({
   queryCheckpoint('query_process_user_input_base_end')
 
   if (!result.shouldQuery) {
+    return result
+  }
+
+  if (skipSubmissionHooks) {
     return result
   }
 
@@ -669,8 +676,11 @@ async function processUserInputBase(
   const slashLooksLikeCommand =
     (slashInputForProcess?.startsWith('/') ?? false) ||
     (inputString?.startsWith('/') ?? false)
+  // densable `ddt`: poll-event | task-notification | skipAttachments skip extract
   const shouldExtractAttachments =
     !skipAttachments &&
+    mode !== 'poll-event' &&
+    mode !== 'task-notification' &&
     inputString !== null &&
     (mode !== 'prompt' || effectiveSkipSlash || !slashLooksLikeCommand)
 
@@ -778,7 +788,7 @@ async function processUserInputBase(
   )
 }
 
-// Adds image metadata texts as isMeta message to result
+// densable Qt — isMeta + turnCompanion, no origin (cun fills origin later).
 function addImageMetadataMessage(
   result: ProcessUserInputBaseResult,
   imageMetadataTexts: string[],
@@ -788,6 +798,7 @@ function addImageMetadataMessage(
       createUserMessage({
         content: imageMetadataTexts.map(text => ({ type: 'text', text })),
         isMeta: true,
+        turnCompanion: true,
       }),
     )
   }

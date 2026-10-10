@@ -52,7 +52,11 @@ import type { ProcessUserInputContext } from './processUserInput/processUserInpu
 import { processUserInput } from './processUserInput/processUserInput.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
-import { applyTurnStartOriginFraming } from './messages.js'
+import {
+  applyTurnStartOriginFraming,
+  isHumanLikeOrigin,
+  stampQueueOriginOnUserMessages,
+} from './messages.js'
 import { isCommandImmediate } from './immediateCommand.js'
 import { isFullscreenEnvEnabled } from './fullscreen.js'
 import { runWithWorkload } from './workloadContext.js'
@@ -659,7 +663,11 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             modelScheduledOrigin: cmd.modelScheduledOrigin,
             wakeupSource: cmd.wakeupSource,
             isMeta: cmd.isMeta,
-            skipAttachments: cmd.skipAttachments === true || !isFirst,
+            skipAttachments:
+              cmd.skipAttachments === true ||
+              cmd.mode === 'poll-event' ||
+              cmd.mode === 'task-notification' ||
+              !isFirst,
             autonomy: cmd.autonomy,
             // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
             origin: cmd.origin,
@@ -668,11 +676,10 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           if (runId && result.deferAutonomyCompletion) {
             deferredAutonomyRunIds.add(runId)
           }
-          // Stamp origin here rather than threading another arg through
-          // processUserInput → processUserInputBase → processTextPrompt → createUserMessage.
-          // densable Dfr/HXd instead passes origin into HXd and runs Fws there
-          // (turn-start peer/observer framing). We stamp + Fws after process
-          // so content is framed before the model sees it.
+          // densable cun after Art: skip human-like (jy); fill origin only when
+          // unset. Image metadata (Qt) must stay origin-less so IDd hides it.
+          // densable Dfr/HXd runs Fws inside HXd; we Fws !isMeta users after
+          // stamp so peer/observer prompts still get turn-start framing.
           // Derive origin from mode for task-notifications — mirrors the origin
           // derivation at messages.ts (case 'queued_command'); intentionally
           // does NOT mirror its isMeta:true so idle-dequeued notifications stay
@@ -683,14 +690,15 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               ? ({ kind: 'task-notification' } as const)
               : undefined)
           if (origin) {
-            for (const m of result.messages) {
-              if (m.type === 'user') {
-                m.origin = origin as typeof m.origin
-                // densable Fws(message, origin) — midTurn:false peer/observer
-                applyTurnStartOriginFraming(
-                  m,
-                  origin as { kind?: string; from?: string },
-                )
+            stampQueueOriginOnUserMessages(result.messages, origin)
+            if (!isHumanLikeOrigin(origin)) {
+              for (const m of result.messages) {
+                if (m.type === 'user' && !m.isMeta) {
+                  applyTurnStartOriginFraming(
+                    m,
+                    origin as { kind?: string; from?: string },
+                  )
+                }
               }
             }
           }

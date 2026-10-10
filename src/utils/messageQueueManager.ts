@@ -540,6 +540,7 @@ export function someInFlightDrainCommand(
 
 const NON_EDITABLE_MODES = new Set<PromptInputMode>([
   'task-notification',
+  'poll-event',
 ] satisfies Permutations<Exclude<PromptInputMode, EditablePromptInputMode>>)
 
 export function isPromptInputModeEditable(
@@ -845,6 +846,24 @@ export function getCommandsByMaxPriority(
 }
 
 /**
+ * densable `ks` / `countRemainingWakePollEventsAfter` — wake poll-events
+ * still queued after `taken` (same agent as the first poll-event in taken).
+ */
+export function countRemainingWakePollEventsAfter(
+  taken: readonly QueuedCommand[],
+): number {
+  const takenSet = new Set(taken)
+  const agentId = taken.find(cmd => cmd.mode === 'poll-event')?.agentId
+  return commandQueue.filter(
+    cmd =>
+      cmd.mode === 'poll-event' &&
+      cmd.pollEvent?.wake === true &&
+      !takenSet.has(cmd) &&
+      (agentId === undefined || cmd.agentId === agentId),
+  ).length
+}
+
+/**
  * Returns true if the command is a slash command that should be routed through
  * processSlashCommand rather than sent to the model as text.
  *
@@ -853,6 +872,9 @@ export function getCommandsByMaxPriority(
  * through isBridgeSafeCommand().
  */
 export function isSlashCommand(cmd: QueuedCommand): boolean {
+  if (cmd.mode === 'poll-event') {
+    return false
+  }
   return (
     typeof cmd.value === 'string' &&
     cmd.value.trim().startsWith('/') &&

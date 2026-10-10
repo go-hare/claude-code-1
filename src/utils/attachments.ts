@@ -871,6 +871,17 @@ export type Attachment =
       sample: string
     }
   | {
+      /** densable `Mpr` / `t1e` poll_events attachment. */
+      type: 'poll_events'
+      envelopes: string[]
+      kinds: string[]
+      remainingWakeCount: number
+      provenance: unknown[]
+      timestamp?: string
+      /** densable `KXe` media blocks. */
+      media?: unknown[][]
+    }
+  | {
       type: 'goal_status'
       met: boolean
       sentinel?: boolean
@@ -1363,6 +1374,18 @@ export async function getQueuedCommandAttachments(
   if (!queuedCommands) {
     return []
   }
+  // densable `t1e`/`Mpr`: poll-event commands become a poll_events attachment
+  // prepended to prompt/task-notification queued_command rows.
+  const { countRemainingWakePollEventsAfter } = await import(
+    './messageQueueManager.js'
+  )
+  const { synthesizePollEventsAttachment } = await import(
+    'src/cli/printControlExtras.js'
+  )
+  const pollEvents = synthesizePollEventsAttachment(
+    queuedCommands,
+    countRemainingWakePollEventsAfter(queuedCommands),
+  )
   // Include both 'prompt' and 'task-notification' commands as attachments.
   // During proactive agentic loops, task-notification commands would otherwise
   // stay in the queue permanently (useQueueProcessor can't run while a query
@@ -1371,7 +1394,7 @@ export async function getQueuedCommandAttachments(
   const filtered = queuedCommands.filter(_ =>
     INLINE_NOTIFICATION_MODES.has(_.mode),
   )
-  return Promise.all(
+  const queued = await Promise.all(
     filtered.map(async _ => {
       // densable: ImageResizeError drops images for this queued command only,
       // keeps its text (I3 already degrades per-image; this is the outer net).
@@ -1410,6 +1433,7 @@ export async function getQueuedCommandAttachments(
       }
     }),
   )
+  return pollEvents ? [pollEvents, ...queued] : queued
 }
 
 export function getAgentPendingMessageAttachments(

@@ -295,10 +295,11 @@ export type PromptInputMode =
   | 'prompt'
   | 'orphaned-permission'
   | 'task-notification'
+  | 'poll-event'
 
 export type EditablePromptInputMode = Exclude<
   PromptInputMode,
-  `${string}-notification`
+  `${string}-notification` | 'poll-event'
 >
 
 /**
@@ -354,6 +355,16 @@ export type QueuedCommand = {
    * carried-over shell finish).
    */
   skipAttachments?: boolean
+  /**
+   * densable `skipSubmissionHooks` — attachment-only poll empty prompt
+   * skips UserPromptSubmit.
+   */
+  skipSubmissionHooks?: boolean
+  /**
+   * densable `pollEmptyDispatch` — attachment-only empty prompt synthesized
+   * by takeHead. Not a minify class.
+   */
+  pollEmptyDispatch?: boolean
   /**
    * When true, the input is treated as plain text even if it starts with `/`.
    * Used for remotely-received messages (e.g. bridge/CCR) that should not
@@ -466,6 +477,42 @@ export type QueuedCommand = {
    * Omitted = active (same as official undefined).
    */
   passive?: boolean
+  /**
+   * densable 2.1.289 poll_event enqueue bag. Drain treats mode==='poll-event'
+   * (not a user prompt / slash). envelope is the event string (value).
+   */
+  pollEvent?: {
+    kind: string
+    envelope: string
+    wake: boolean
+    provenance?: unknown
+    /** densable `V3` settleDropped callback. */
+    settleDropped?: (error: Error) => void
+    media?: unknown[]
+  }
+  /**
+   * densable `mv` `handedOffTurn` on orphaned-permission enqueue.
+   * `continues` = gold continues (prefer this orphan while !holdsBack).
+   */
+  handedOffTurn?: {
+    toolUseIDs: string[]
+    continues?: boolean
+    kind?: 'run' | 'history' | 'stopped'
+    messages?: unknown
+    relayMarker?: { uuid: string; content: string } | 'malformed'
+    fileNames?: Array<{ fileUuid: string; name: string }> | 'malformed'
+    memoryLine?: {
+      type: 'cowork_memory_context'
+      uuid: string
+      version: string | null
+      content: string | null
+    }
+  }
+  /**
+   * densable `shouldQuery===false` — odo: orphan with handedOffTurn &&
+   * !continues dequeues a queued-before prompt with this flag first.
+   */
+  shouldQuery?: boolean
 }
 
 /**

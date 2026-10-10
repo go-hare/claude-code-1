@@ -1,7 +1,9 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
+import stripAnsi from 'strip-ansi'
 import { readFile, stat } from 'fs/promises'
 import { dirname } from 'path'
+import { homedir } from 'os'
 import {
   downloadUserSettings,
   redownloadUserSettings,
@@ -78,11 +80,13 @@ import {
   dequeue,
   dequeueAllMatching,
   enqueue,
+  getCommandQueue,
   hasCommandsInQueue,
   peek,
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
   getMainThreadQueueLength,
+  countRemainingWakePollEventsAfter,
 } from 'src/utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
@@ -134,9 +138,48 @@ import {
   takeHeldBackMcpConfigs,
 } from 'src/cli/spareClaim.js'
 import {
+  attachRemoteUiSurface,
+  defaultClientIdForSurface,
+  detachRemoteUiSurface,
+  listDrawingSurfaces,
+  listSurfaceViewportClients,
+  parseUiAttachControlRequest,
+  parseUiClientFaultControlRequest,
+  parseUiClientModuleControlRequest,
+  parseUiClientPressControlRequest,
+  parseUiCloseControlRequest,
+  parseUiDetachControlRequest,
+  parseUiFocusControlRequest,
+  parseUiInputControlRequest,
+  parseUiMessageControlRequest,
+  parseUiPaneFocusControlRequest,
+  parseUiPaneShowControlRequest,
+  parseUiPanesControlRequest,
+  parseUiPressControlRequest,
+  parseUiPromptEditControlRequest,
+  parseUiRenderControlRequest,
+  parseUiScrollControlRequest,
+  parseUiSelectControlRequest,
+  uiClientModuleMissingError,
+  UI_CLIENT_MODULE_PARSE_ERROR,
+  UI_CLIENT_PRESS_PARSE_ERROR,
+  UI_CLOSE_PARSE_ERROR,
+  UI_FOCUS_PARSE_ERROR,
+  UI_INPUT_PARSE_ERROR,
+  UI_MESSAGE_PARSE_ERROR,
+  UI_PANES_PARSE_ERROR,
+  UI_PANE_FOCUS_PARSE_ERROR,
+  UI_PANE_SHOW_PARSE_ERROR,
+  UI_PRESS_PARSE_ERROR,
+  UI_PROMPT_EDIT_PARSE_ERROR,
+  UI_SCROLL_PARSE_ERROR,
+  UI_SELECT_PARSE_ERROR,
+} from 'src/utils/plugins/surfaceViewportClients.js'
+import {
   applyClaimWorkspaceTrust,
   handleClaimSessionRequest,
 } from 'src/cli/claimSession.js'
+import { dispatchPrintControlExtra } from 'src/cli/printControlExtras.js'
 import type { Stream } from 'src/utils/stream.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import {
@@ -206,6 +249,7 @@ import type {
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { PermissionMode as InternalPermissionMode } from 'src/types/permissions.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { getMainThreadAgentId } from 'src/bootstrap/state.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
 import type { ReplBridgeHandle } from 'src/bridge/replBridge.js'
@@ -250,6 +294,7 @@ import {
   getSettings_DEPRECATED,
   getSettingsWithErrors,
   getSettingsWithSources,
+  updateSettingsForSource,
 } from 'src/utils/settings/settings.js'
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
 import {
@@ -298,6 +343,8 @@ import {
   setSdkAgentProgressSummariesEnabled,
   getAdditionalDirectoriesForClaudeMd,
   setAdditionalDirectoriesForClaudeMd,
+  getRegisteredHooks,
+  getOriginalCwd,
 } from 'src/bootstrap/state.js'
 import {
   createSyntheticOutputTool,
@@ -412,6 +459,7 @@ import {
   isUltracodeOfferable,
   isUltracodeEffortAlias,
   parseEffortValue,
+  isEffortLevel,
   getSupportedEffortLevels,
   resolveHostEffortFlagPatch,
   getUltracodeEffortForModel,
@@ -1585,6 +1633,11 @@ function runHeadlessStreaming(
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
   let abortController: AbortController | undefined
+  // densable `g.drainingHandoff` — currently-running handed-off turn.
+  // Print-scope so extras `peekRunningHandoff` (outside `run`) can see it.
+  let drainingHandoff: QueuedCommand | undefined
+  // densable `r.recoveredToolUseIds` — print-scope set (empty until recovery).
+  const recoveredToolUseIds = new Set<string>()
   // Declared early so run() finally can settle aPt/XKu + checkNow (assigned
   // when kairos cron starts below; null when cron gate is off).
   let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
@@ -1823,6 +1876,49 @@ function runHeadlessStreaming(
     // deserialization layer transforms them into interrupted_prompt by
     // appending a synthetic "Continue from where you left off." message.
     removeInterruptedMessage(mutableMessages, turnInterruptionState.message)
+    {
+      const answered = new Set<string>()
+      let lastAssistantUses: string[] = []
+      for (const message of mutableMessages) {
+        if (message.type === 'user') {
+          const content = message.message?.content
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (
+                block !== null &&
+                typeof block === 'object' &&
+                (block as { type?: unknown }).type === 'tool_result' &&
+                typeof (block as { tool_use_id?: unknown }).tool_use_id ===
+                  'string'
+              ) {
+                answered.add((block as { tool_use_id: string }).tool_use_id)
+              }
+            }
+          }
+        }
+        if (message.type === 'assistant') {
+          const content = message.message?.content
+          lastAssistantUses = []
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (
+                block !== null &&
+                typeof block === 'object' &&
+                (block as { type?: unknown }).type === 'tool_use' &&
+                typeof (block as { id?: unknown }).id === 'string'
+              ) {
+                lastAssistantUses.push((block as { id: string }).id)
+              }
+            }
+          }
+        }
+      }
+      for (const id of lastAssistantUses) {
+        if (!answered.has(id)) {
+          recoveredToolUseIds.add(id)
+        }
+      }
+    }
     enqueue({
       mode: 'prompt',
       value: turnInterruptionState.message.message!.content as
@@ -2823,25 +2919,194 @@ function runHeadlessStreaming(
       // densable firstCommandMountJoin — one-shot await of hearth/grants
       // startup before the first ask(). takeFirstTurnJoins nulls its slots.
       let firstTurnJoinsPending = true
+      // densable `Rl.pollEmptyDispatchStalled` analog — no class.
+      let pollEmptyDispatchStalled = false
+      let pollDispatchTarget: QueuedCommand | undefined
+      let lastDispatchAborted = false
 
       // Extract command processing into a named function for the do-while pattern.
       // Drains the queue, batching consecutive prompt-mode commands into one
       // ask() call so messages that queued up during a long turn coalesce
       // into a single follow-up turn instead of N separate turns.
       const drainCommandQueue = async () => {
-        while ((command = dequeue(isMainThread))) {
+        while (true) {
+          // densable `odo`/`dequeueOrphansFirst`: continues===true && !holdsBack,
+          // then orphans without handedOffTurn, then any !holdsBack orphan —
+          // peek BEFORE dequeue so a prompt head is not spliced out.
+          const {
+            deferredToolUsePendingFromMessages,
+            holdsBackHandoff,
+            isWakePollEventHead,
+            isReservedPollEventKind,
+            POLL_EVENT_RESERVED_KIND_REFUSED,
+            POLL_EVENT_DISCARDED_UNDELIVERED,
+            pollEventDiscardedUndelivered,
+            POLL_EMPTY_DISPATCH_STALLED,
+            orphanedPermissionPrioritizeLog,
+          } = await import('src/cli/printControlExtras.js')
+          const pending = deferredToolUsePendingFromMessages(mutableMessages)
+          const isOrphan = (cmd: QueuedCommand): boolean =>
+            isMainThread(cmd) && cmd.mode === 'orphaned-permission'
+          const isLegalMode = (mode: QueuedCommand['mode']): boolean =>
+            mode === 'prompt' ||
+            mode === 'orphaned-permission' ||
+            mode === 'task-notification' ||
+            mode === 'poll-event'
+          // densable `Rl.takeHead` 1:1: stall log, then YOo empty prompt
+          // BEFORE odo. Synthetic is {value:[],mode:prompt,isMeta,pollEmptyDispatch,
+          // skipSubmissionHooks} — do not dequeue the wake poll.
+          if (
+            pollDispatchTarget !== undefined &&
+            peek(cmd => cmd === pollDispatchTarget) === pollDispatchTarget &&
+            !lastDispatchAborted
+          ) {
+            pollEmptyDispatchStalled = true
+            logError(new Error(POLL_EMPTY_DISPATCH_STALLED))
+          }
+          pollDispatchTarget = undefined
+          lastDispatchAborted = false
+          // densable `Rl.takeHead` `if(this.holdsEvalSettles())return`
+          // after stall clear. Print inject is gold `s??(()=>!1)` — never
+          // bind `waitingForAgents` (do-while latch). True → no dequeue
+          // (gold takeHead undefined); outer `while (waitingForAgents)`
+          // may loop. Do not invent `export class Rl`.
+          const holdsEvalSettles = (): boolean => false
+          if (holdsEvalSettles()) {
+            command = undefined
+            break
+          }
+          const prioritizeOrphan = (): void => {
+            const handedOffOrphan =
+              peek(
+                cmd =>
+                  isOrphan(cmd) &&
+                  cmd.handedOffTurn?.continues === true &&
+                  !holdsBackHandoff(cmd, pending),
+              ) ??
+              peek(cmd => isOrphan(cmd) && cmd.handedOffTurn === undefined) ??
+              peek(cmd => isOrphan(cmd) && !holdsBackHandoff(cmd, pending))
+            if (
+              handedOffOrphan?.handedOffTurn !== undefined &&
+              handedOffOrphan.handedOffTurn.continues !== true
+            ) {
+              const queued = getCommandQueue()
+              const before = queued.slice(0, queued.indexOf(handedOffOrphan))
+              const noQuery = before.find(
+                cmd =>
+                  isMainThread(cmd) &&
+                  cmd.mode === 'prompt' &&
+                  cmd.shouldQuery === false,
+              )
+              if (noQuery) {
+                command = dequeue(cmd => cmd === noQuery)
+                return
+              }
+            }
+            if (handedOffOrphan) {
+              command = dequeue(cmd => cmd === handedOffOrphan)
+              logForDebugging(
+                orphanedPermissionPrioritizeLog(
+                  (() => {
+                    const result =
+                      handedOffOrphan.orphanedPermission?.permissionResult
+                    const fromPermission =
+                      result &&
+                      'toolUseID' in result &&
+                      typeof result.toolUseID === 'string'
+                        ? result.toolUseID
+                        : undefined
+                    return (
+                      fromPermission ??
+                      handedOffOrphan.handedOffTurn?.toolUseIDs.join(',') ??
+                      undefined
+                    )
+                  })(),
+                ),
+              )
+            } else {
+              command = dequeue(isMainThread)
+            }
+          }
+          const head = peek(isMainThread)
+          const deferredHuman = peek(
+            cmd =>
+              isMainThread(cmd) &&
+              cmd.verifiedSlackHumanTurn === true &&
+              cmd.priority !== 'now',
+          )
+          if (
+            isWakePollEventHead(head, pollEmptyDispatchStalled) &&
+            peek(isOrphan) === undefined &&
+            deferredHuman === undefined
+          ) {
+            const other = peek(
+              cmd =>
+                isMainThread(cmd) &&
+                cmd.mode !== 'poll-event' &&
+                isLegalMode(cmd.mode),
+            )
+            if (other) {
+              command = dequeue(cmd => cmd === other)
+            } else {
+              pollDispatchTarget = head
+              command = {
+                value: [],
+                mode: 'prompt',
+                isMeta: true,
+                pollEmptyDispatch: true,
+                skipSubmissionHooks: true,
+                agentId: head?.agentId,
+              }
+              // densable `m6r`/`O6o` — pollEmptyDispatch stamps delivery guard.
+              setAppState(prev => ({
+                ...prev,
+                toolPermissionContext: {
+                  ...prev.toolPermissionContext,
+                  alwaysAllowRules: {
+                    ...prev.toolPermissionContext.alwaysAllowRules,
+                    command: undefined,
+                  },
+                  pollEventDeliveryGuard: true,
+                } as typeof prev.toolPermissionContext,
+              }))
+            }
+          } else {
+            prioritizeOrphan()
+          }
+          if (!command) {
+            break
+          }
+
+          if (command.mode === 'poll-event') {
+            if (isReservedPollEventKind(command.pollEvent?.kind)) {
+              const reason = pollEventDiscardedUndelivered(
+                POLL_EVENT_RESERVED_KIND_REFUSED,
+              )
+              logForDebugging(reason)
+              const dropped = new Error(reason)
+              dropped.name = POLL_EVENT_DISCARDED_UNDELIVERED
+              command.pollEvent?.settleDropped?.(dropped)
+              continue
+            }
+            if (pollEmptyDispatchStalled) {
+              pollEmptyDispatchStalled = false
+            }
+          }
+
+          // densable `aVn`: prompt | orphaned-permission | task-notification | poll-event
           if (
             command.mode !== 'prompt' &&
             command.mode !== 'orphaned-permission' &&
-            command.mode !== 'task-notification'
+            command.mode !== 'task-notification' &&
+            command.mode !== 'poll-event'
           ) {
             throw new Error(
               'only prompt commands are supported in streaming mode',
             )
           }
 
-          // Non-prompt commands (task-notification, orphaned-permission) carry
-          // side effects or orphanedPermission state, so they process singly.
+          // Non-prompt commands (task-notification, orphaned-permission, poll-event)
+          // carry side effects or envelope state, so they process singly.
           // Prompt commands greedily collect followers with matching workload.
           let batch: QueuedCommand[] = [command]
           if (command.mode === 'prompt') {
@@ -2856,6 +3121,54 @@ function runHeadlessStreaming(
             continue
           }
           command = batch[0]!
+          drainingHandoff = command.handedOffTurn ? command : undefined
+          // densable recovery set analog: unanswered last-assistant tool_use
+          // ids are the unrun calls a restarted worker would set aside.
+          {
+            const answered = new Set<string>()
+            let lastAssistantUses: string[] = []
+            for (const message of mutableMessages) {
+              if (message.type === 'user') {
+                const content = message.message?.content
+                if (Array.isArray(content)) {
+                  for (const block of content) {
+                    if (
+                      block !== null &&
+                      typeof block === 'object' &&
+                      (block as { type?: unknown }).type === 'tool_result' &&
+                      typeof (block as { tool_use_id?: unknown })
+                        .tool_use_id === 'string'
+                    ) {
+                      answered.add(
+                        (block as { tool_use_id: string }).tool_use_id,
+                      )
+                    }
+                  }
+                }
+              }
+              if (message.type === 'assistant') {
+                const content = message.message?.content
+                lastAssistantUses = []
+                if (Array.isArray(content)) {
+                  for (const block of content) {
+                    if (
+                      block !== null &&
+                      typeof block === 'object' &&
+                      (block as { type?: unknown }).type === 'tool_use' &&
+                      typeof (block as { id?: unknown }).id === 'string'
+                    ) {
+                      lastAssistantUses.push((block as { id: string }).id)
+                    }
+                  }
+                }
+              }
+            }
+            for (const id of lastAssistantUses) {
+              if (!answered.has(id)) {
+                recoveredToolUseIds.add(id)
+              }
+            }
+          }
           if (command.mode === 'prompt' && batch.length > 1) {
             command = {
               ...command,
@@ -3002,7 +3315,30 @@ function runHeadlessStreaming(
             // No continue -- fall through to ask() so the model processes the result
           }
 
-          const input = command.value
+          // densable `zXe` + `lXn` + `z3`: poll-event prompt is reminted envelopes
+          let input: typeof command.value
+          if (command.mode === 'poll-event') {
+            const envelope = command.pollEvent?.envelope
+            if (envelope === undefined) {
+              const { POLL_EVENT_MISSING_PAYLOAD } = await import(
+                'src/cli/printControlExtras.js'
+              )
+              logForDebugging(POLL_EVENT_MISSING_PAYLOAD)
+              input = command.value
+            } else {
+              const { formatPollEventsPrompt, remintPollEventEnvelope } =
+                await import('src/cli/printControlExtras.js')
+              input = formatPollEventsPrompt(
+                [remintPollEventEnvelope(envelope).envelope],
+                countRemainingWakePollEventsAfter([command]),
+                command.pollEvent?.kind !== undefined
+                  ? [command.pollEvent.kind]
+                  : undefined,
+              )
+            }
+          } else {
+            input = command.value
+          }
           const claimedAutonomyCommands = queuedAutonomyClaim.claimedCommands
 
           if (structuredIO instanceof RemoteIO && command.mode === 'prompt') {
@@ -3082,7 +3418,13 @@ function runHeadlessStreaming(
                   isMeta: cmd.isMeta,
                   // densable 2.1.221: cron fire stamps (skipSlash + modelScheduled + wakeup)
                   skipSlashCommands: cmd.skipSlashCommands,
-                  skipAttachments: cmd.skipAttachments,
+                  skipAttachments:
+                    cmd.skipAttachments === true ||
+                    cmd.mode === 'poll-event' ||
+                    cmd.mode === 'task-notification',
+                  skipSubmissionHooks:
+                    cmd.skipSubmissionHooks === true ||
+                    cmd.mode === 'poll-event',
                   bridgeOrigin: cmd.bridgeOrigin,
                   modelScheduledOrigin: cmd.modelScheduledOrigin,
                   wakeupSource: cmd.wakeupSource,
@@ -3237,6 +3579,8 @@ function runHeadlessStreaming(
               priority: 'later',
               workload: cmd.workload ?? options.workload,
             })
+            lastDispatchAborted = true
+            drainingHandoff = undefined
             throw error
           }
 
@@ -3373,6 +3717,7 @@ function runHeadlessStreaming(
           logHeadlessProfilerTurn()
           logQueryProfileReport()
           headlessProfilerStartTurn()
+          drainingHandoff = undefined
         }
       }
 
@@ -4245,6 +4590,20 @@ function runHeadlessStreaming(
     cronScheduler.start()
   }
 
+  const isMissingPressHandler = (err: unknown): boolean =>
+    errorMessage(err).includes('no handler is held under handle')
+
+  const pressControlResponse = (
+    ue: unknown,
+    withValue: boolean,
+  ): Record<string, unknown> => {
+    if (ue === undefined) return { handled: false }
+    const rec = ue as { element?: unknown; value?: unknown }
+    return withValue
+      ? { handled: true, element: rec.element, value: rec.value }
+      : { handled: true, element: rec.element }
+  }
+
   const sendControlResponseSuccess = function (
     message: { request_id: string } | SDKControlRequest,
     response?: Record<string, unknown>,
@@ -4690,6 +5049,42 @@ function runHeadlessStreaming(
               )
             }
             sendControlResponseSuccess(msg)
+          } else if (req.subtype === 'rewind_conversation') {
+            // densable print @206543667
+            const { rewindTargetUuidError, findRewindCut } = await import(
+              './printControlHosts.js'
+            )
+            if (typeof req.target_message_uuid !== 'string') {
+              sendControlResponseError(msg, rewindTargetUuidError())
+              continue
+            }
+            const busy = running || getMainThreadQueueLength() > 0
+            if (busy && req.interrupt_if_running !== true) {
+              sendControlResponseSuccess(msg, {
+                rewound: false,
+                reason: 'turn_running',
+              })
+              continue
+            }
+            const cut = findRewindCut(mutableMessages, req.target_message_uuid)
+            if ('refuse' in cut) {
+              sendControlResponseSuccess(msg, {
+                rewound: false,
+                reason: cut.refuse,
+              })
+              continue
+            }
+            mutableMessages.length = cut.index + 1
+            sendControlResponseSuccess(msg, {
+              rewound: true,
+              targetMessageUuid: cut.echoUuid,
+              ...(cut.prefillText !== undefined && {
+                prefillText: cut.prefillText,
+              }),
+              ...(cut.precedingAssistantUuid !== undefined && {
+                precedingAssistantUuid: cut.precedingAssistantUuid,
+              }),
+            })
           } else if (msg.request.subtype === 'rewind_files') {
             const appState = getAppState()
             const result = await handleRewindFiles(
@@ -5344,6 +5739,105 @@ function runHeadlessStreaming(
             } catch (error) {
               sendControlResponseError(msg, errorMessage(error))
             }
+          } else if (req.subtype === 'reload_skills') {
+            // densable print @206564194
+            try {
+              const { getSkillDirCommands } = await import(
+                'src/skills/loadSkillsDir.js'
+              )
+              getSkillDirCommands.cache?.clear?.()
+              const reloaded = await getSkillDirCommands(getOriginalCwd())
+              const names = new Set(reloaded.map(cmd => cmd.name))
+              currentCommands = [
+                ...currentCommands.filter(cmd => !names.has(cmd.name)),
+                ...reloaded,
+              ]
+              sendControlResponseSuccess(msg, {
+                commands: currentCommands
+                  .filter(cmd => cmd.userInvocable !== false)
+                  .map(cmd => ({
+                    name: getCommandName(cmd),
+                    description: formatDescriptionWithSource(cmd),
+                    argumentHint: cmd.argumentHint || '',
+                  })),
+              })
+            } catch (err) {
+              sendControlResponseError(msg, errorMessage(err))
+            }
+          } else if (req.subtype === 'mcp_call') {
+            // densable print @206564468 — Ns-style: completed now, work continues.
+            const {
+              mcpCallToolMustBeString,
+              mcpCallNotFullyQualified,
+              mcpCallServerNotConnected,
+              mcpCallStagedDisabled,
+              mcpCallSdkUnsupported,
+              parseMcpCallTool,
+              isStagedMcpCall,
+            } = await import('./printControlHosts.js')
+            if (typeof req.tool !== 'string') {
+              sendControlResponseError(msg, mcpCallToolMustBeString())
+              continue
+            }
+            const parsedTool = parseMcpCallTool(req.tool)
+            if (!parsedTool) {
+              sendControlResponseError(msg, mcpCallNotFullyQualified(req.tool))
+              continue
+            }
+            completeControlLifecycleImmediately(async () => {
+              try {
+                if (isStagedMcpCall(req)) {
+                  sendControlResponseError(msg, mcpCallStagedDisabled())
+                  return
+                }
+                const clients = [
+                  ...getAppState().mcp.clients,
+                  ...dynamicMcpState.clients,
+                ]
+                const client = clients.find(
+                  c => c.name === parsedTool.serverName,
+                )
+                if (!client || client.type !== 'connected') {
+                  sendControlResponseError(
+                    msg,
+                    mcpCallServerNotConnected(parsedTool.serverName),
+                  )
+                  return
+                }
+                if (client.config.type === 'sdk') {
+                  sendControlResponseError(
+                    msg,
+                    mcpCallSdkUnsupported(parsedTool.serverName),
+                  )
+                  return
+                }
+                const { callMCPToolWithUrlElicitationRetry } = await import(
+                  'src/services/mcp/client.js'
+                )
+                const args =
+                  req.arguments !== null &&
+                  typeof req.arguments === 'object' &&
+                  !Array.isArray(req.arguments)
+                    ? (req.arguments as Record<string, unknown>)
+                    : {}
+                const result = await callMCPToolWithUrlElicitationRetry({
+                  client,
+                  clientConnection: client,
+                  tool: parsedTool.toolName,
+                  args,
+                  signal: (abortController ?? new AbortController()).signal,
+                  setAppState,
+                })
+                sendControlResponseSuccess(msg, {
+                  isError: result.isError === true,
+                  content: result.content,
+                  structuredContent: result.structuredContent,
+                  _meta: result._meta,
+                })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            })
           } else if (msg.request.subtype === 'mcp_reconnect') {
             const currentAppState = getAppState()
             const { serverName } = msg.request
@@ -6172,6 +6666,77 @@ function runHeadlessStreaming(
                 ? { effortNotes }
                 : undefined,
             )
+          } else if (req.subtype === 'get_memory_dialog') {
+            sendControlResponseError(
+              msg,
+              'get_memory_dialog is not available on this connection',
+            )
+          } else if (req.subtype === 'get_skills_dialog') {
+            sendControlResponseError(
+              msg,
+              'get_skills_dialog is not available on this connection',
+            )
+          } else if (req.subtype === 'get_hooks_listing') {
+            const { listHooksForControl } = await import(
+              './printControlHosts.js'
+            )
+            sendControlResponseSuccess(
+              msg,
+              listHooksForControl(getRegisteredHooks()),
+            )
+          } else if (req.subtype === 'update_settings') {
+            const {
+              validateUpdateSettingsRequest,
+              isSettingSourceEnabledForUpdate,
+            } = await import('./printControlHosts.js')
+            const source = req.source
+            const settings = req.settings
+            const err = validateUpdateSettingsRequest(
+              structuredIO instanceof RemoteIO,
+              typeof source === 'string'
+                ? isSettingSourceEnabledForUpdate(
+                    source as Parameters<
+                      typeof isSettingSourceEnabledForUpdate
+                    >[0],
+                  )
+                : false,
+              source,
+              settings,
+            )
+            if (err) {
+              sendControlResponseError(msg, err)
+              continue
+            }
+            const bag = settings as Record<string, string>
+            if (source === 'userSettings') {
+              const effortRaw = String(bag.effortLevel).trim().toLowerCase()
+              if (!isEffortLevel(effortRaw)) {
+                sendControlResponseError(
+                  msg,
+                  `update_settings: effortLevel must be one of ${EFFORT_LEVELS.join(', ')}`,
+                )
+                continue
+              }
+              const result = updateSettingsForSource('userSettings', {
+                effortLevel: effortRaw,
+              })
+              if (result.error) {
+                sendControlResponseError(msg, result.error.message)
+              } else {
+                applySettingsChange('userSettings', setAppState)
+                sendControlResponseSuccess(msg, {})
+              }
+              continue
+            }
+            const result = updateSettingsForSource('localSettings', {
+              outputStyle: bag.outputStyle,
+            })
+            if (result.error) {
+              sendControlResponseError(msg, result.error.message)
+            } else {
+              applySettingsChange('localSettings', setAppState)
+              sendControlResponseSuccess(msg, {})
+            }
           } else if (msg.request.subtype === 'get_settings') {
             const currentAppState = getAppState()
             const model = getMainLoopModel()
@@ -6646,6 +7211,877 @@ function runHeadlessStreaming(
                 await workSecretSession.undo()
               }
               sendControlResponseSuccess(msg)
+            }
+          } else if (req.subtype === 'ui_attach') {
+            // densable `jAn` + `Fco` @205787852 / handler @206547763.
+            // Overlay footer is Desktop-only — this is the CLI control host.
+            const parsed = parseUiAttachControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, parsed.error)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const pending = attachRemoteUiSurface(
+                    {
+                      surface: parsed.surface,
+                      clientId: parsed.clientId,
+                      ...(parsed.viewport !== undefined && {
+                        viewport: parsed.viewport,
+                      }),
+                    },
+                    parsed.answers,
+                  )
+                  sendControlResponseSuccess(msg, {
+                    surfaces: [...listDrawingSurfaces()],
+                  })
+                  await pending
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_detach') {
+            // densable `WAn` + `U9t` @205788154 / handler @206548411.
+            const parsed = parseUiDetachControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, parsed.error)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const wasAttached = listSurfaceViewportClients().some(
+                    client => client.clientId === parsed.clientId,
+                  )
+                  const pending = detachRemoteUiSurface(
+                    parsed.clientId,
+                    'detach',
+                  )
+                  sendControlResponseSuccess(msg, {
+                    detached: wasAttached,
+                    surfaces: [...listDrawingSurfaces()],
+                  })
+                  await pending
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_render') {
+            // densable `GAn` + `E1e.run` @206548504. Overlay footer is
+            // Desktop-only — this is the CLI control host.
+            const parsed = parseUiRenderControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, parsed.error)
+            } else {
+              const benchKey = `${parsed.instanceId}#${parsed.bench?.seq ?? 0}`
+              logForDebugging(
+                `BENCH ui_render key=${benchKey} rid=${msg.request_id} C0=${Date.now()}`,
+              )
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const clientId =
+                    parsed.clientId ?? defaultClientIdForSurface(parsed.surface)
+                  void attachRemoteUiSurface({
+                    surface: parsed.surface,
+                    clientId,
+                    ...(parsed.viewport !== undefined && {
+                      viewport: parsed.viewport,
+                    }),
+                  })
+                  const { evaluateUiRender } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const tree = await evaluateUiRender({
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    surface: parsed.surface,
+                    props: parsed.props,
+                    ...(parsed.viewport !== undefined && {
+                      viewport: parsed.viewport,
+                    }),
+                  })
+                  sendControlResponseSuccess(msg, { tree })
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_press') {
+            // densable `zAn` + `E1e.press` @206550686. Overlay footer is
+            // Desktop-only — this is the CLI control host. Missing press
+            // site answers `{handled: false}` (gold `ue===void 0`).
+            const parsed = parseUiPressControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_PRESS_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { invokePress } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await invokePress(parsed.plugin, parsed.handle, {
+                    surface: parsed.surface,
+                    ...(parsed.key !== undefined && {
+                      key: parsed.key,
+                      element: parsed.key,
+                    }),
+                    ...(parsed.href !== undefined && {
+                      href: parsed.href,
+                      link: { href: parsed.href },
+                    }),
+                  })
+                  sendControlResponseSuccess(
+                    msg,
+                    pressControlResponse(ue, false),
+                  )
+                } catch (err) {
+                  if (isMissingPressHandler(err)) {
+                    sendControlResponseSuccess(msg, { handled: false })
+                  } else {
+                    sendControlResponseError(msg, errorMessage(err))
+                  }
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_input') {
+            // densable `XAn` + `E1e.input` @206551269.
+            const parsed = parseUiInputControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_INPUT_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { invokePress } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await invokePress(parsed.plugin, parsed.handle, {
+                    surface: parsed.surface,
+                    kind: parsed.kind,
+                    value: parsed.value,
+                    ...(parsed.key !== undefined && {
+                      key: parsed.key,
+                      element: parsed.key,
+                    }),
+                    ...(parsed.component !== undefined && {
+                      component: parsed.component,
+                    }),
+                    ...(parsed.instanceId !== undefined && {
+                      requestId: parsed.instanceId,
+                    }),
+                  })
+                  sendControlResponseSuccess(
+                    msg,
+                    pressControlResponse(ue, true),
+                  )
+                } catch (err) {
+                  if (isMissingPressHandler(err)) {
+                    sendControlResponseSuccess(msg, { handled: false })
+                  } else {
+                    sendControlResponseError(msg, errorMessage(err))
+                  }
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_prompt_edit') {
+            // densable `okn` + `rp.edit`/`rp.adopt` @206552047. Print has no
+            // composer box; still parse and dispatch `prompt.edit`.
+            const parsed = parseUiPromptEditControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_PROMPT_EDIT_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const clientId =
+                    parsed.clientId ?? defaultClientIdForSurface(parsed.surface)
+                  const box = { text: parsed.text, cursor: parsed.cursor }
+                  const { runFunctionHookChain } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ve = await runFunctionHookChain(
+                    'prompt.edit',
+                    {
+                      origin: parsed.by === 'app' ? 'app' : 'typed',
+                      text: box.text,
+                      cursor: box.cursor,
+                      clientKey: clientId,
+                      ...(parsed.key !== undefined && { key: parsed.key }),
+                    },
+                    async () => box,
+                  )
+                  sendControlResponseSuccess(
+                    msg,
+                    ve !== null && typeof ve === 'object' && !Array.isArray(ve)
+                      ? { ...(ve as Record<string, unknown>) }
+                      : { ...box },
+                  )
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_select') {
+            // densable `JAn` + `E1e.select` @206552765.
+            const parsed = parseUiSelectControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_SELECT_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { invokePress } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await invokePress(parsed.plugin, parsed.handle, {
+                    surface: parsed.surface,
+                    value: parsed.value,
+                    ...(parsed.key !== undefined && {
+                      key: parsed.key,
+                      element: parsed.key,
+                    }),
+                    ...(parsed.component !== undefined && {
+                      component: parsed.component,
+                    }),
+                    ...(parsed.instanceId !== undefined && {
+                      requestId: parsed.instanceId,
+                    }),
+                  })
+                  sendControlResponseSuccess(
+                    msg,
+                    pressControlResponse(ue, true),
+                  )
+                } catch (err) {
+                  if (isMissingPressHandler(err)) {
+                    sendControlResponseSuccess(msg, { handled: false })
+                  } else {
+                    sendControlResponseError(msg, errorMessage(err))
+                  }
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_panes') {
+            // densable `QAn` + `ck(wd(Si()))` @206553490.
+            const parsed = parseUiPanesControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_PANES_PARSE_ERROR)
+            } else {
+              try {
+                const { wirePanesState } = await import(
+                  'src/utils/plugins/functionHooksModules.js'
+                )
+                sendControlResponseSuccess(msg, wirePanesState())
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'ui_pane_show') {
+            // densable `ZAn` + `l4n` @206553804.
+            const parsed = parseUiPaneShowControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_PANE_SHOW_PARSE_ERROR)
+            } else {
+              try {
+                const { getPanesState, showPane, syncRemotePaneKeyboard } =
+                  await import('src/utils/plugins/functionHooksModules.js')
+                const before = getPanesState().focusedId
+                showPane(parsed.id)
+                if (getPanesState().focusedId !== before) {
+                  syncRemotePaneKeyboard(
+                    parsed.clientId ??
+                      defaultClientIdForSurface(parsed.surface),
+                  )
+                }
+                sendControlResponseSuccess(msg, {
+                  shown_id: getPanesState().shownId,
+                })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'ui_pane_focus') {
+            // densable `ekn` + `u3` + `XS` @206554175.
+            const parsed = parseUiPaneFocusControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_PANE_FOCUS_PARSE_ERROR)
+            } else {
+              try {
+                const { focusPane, getPanesState, syncRemotePaneKeyboard } =
+                  await import('src/utils/plugins/functionHooksModules.js')
+                focusPane(parsed.id)
+                syncRemotePaneKeyboard(
+                  parsed.clientId ?? defaultClientIdForSurface(parsed.surface),
+                )
+                sendControlResponseSuccess(msg, {
+                  focused_id: getPanesState().focusedId,
+                })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'ui_close') {
+            // densable `tkn` + `l8e` @206554541. Missing id → {closed:true}.
+            const parsed = parseUiCloseControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_CLOSE_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { closePluginPane, panesIncludingUnplaced } =
+                    await import('src/utils/plugins/functionHooksModules.js')
+                  const stillOpen = (): boolean =>
+                    panesIncludingUnplaced().some(pane => pane.id === parsed.id)
+                  if (!stillOpen()) {
+                    sendControlResponseSuccess(msg, { closed: true })
+                    return
+                  }
+                  await closePluginPane(parsed.id, { kind: 'person' })
+                  sendControlResponseSuccess(msg, { closed: !stillOpen() })
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_scroll') {
+            // densable `nkn` + `JC`/`ok` @206554911.
+            const parsed = parseUiScrollControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_SCROLL_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { runRemoteUiScroll } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await runRemoteUiScroll({
+                    clientId:
+                      parsed.clientId ??
+                      defaultClientIdForSurface(parsed.surface),
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    offset: parsed.offset,
+                    by: parsed.by,
+                    bodyRows: parsed.bodyRows,
+                    contentRows: parsed.contentRows,
+                    ...(parsed.pointer !== undefined && {
+                      pointer: parsed.pointer,
+                    }),
+                    ...(parsed.keyed !== undefined && { keyed: parsed.keyed }),
+                  })
+                  sendControlResponseSuccess(msg, {
+                    moved: ue.result.deny === undefined,
+                    offset: ue.offset,
+                    ...(ue.result.deny !== undefined && {
+                      deny: ue.result.deny,
+                    }),
+                    ...(ue.isFollowingEnd && { follow_end: true }),
+                  })
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_focus') {
+            // densable `rkn` + `vC` @206555819.
+            const parsed = parseUiFocusControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_FOCUS_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { runRemoteUiFocus } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await runRemoteUiFocus({
+                    clientId:
+                      parsed.clientId ??
+                      defaultClientIdForSurface(parsed.surface),
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    isHeld: parsed.isHeld,
+                    by: parsed.by,
+                    ...(parsed.element !== undefined && {
+                      element: parsed.element,
+                    }),
+                  })
+                  sendControlResponseSuccess(msg, {
+                    moved: ue.result.deny === undefined,
+                    element: ue.element,
+                    ...(ue.result.deny !== undefined && {
+                      deny: ue.result.deny,
+                    }),
+                  })
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_client_module') {
+            // densable `VAn` + `E1e.clientModule`/`FS.moduleFor` @206556627.
+            const parsed = parseUiClientModuleControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_CLIENT_MODULE_PARSE_ERROR)
+            } else {
+              try {
+                const { clientModuleFor } = await import(
+                  'src/utils/plugins/functionHooksModules.js'
+                )
+                const ce = clientModuleFor(parsed.plugin)
+                if (ce === undefined) {
+                  sendControlResponseError(
+                    msg,
+                    uiClientModuleMissingError(parsed.plugin),
+                  )
+                } else {
+                  sendControlResponseSuccess(msg, ce)
+                }
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'ui_client_press') {
+            // densable `qAn` + `E1e.clientPress`/`I3` @206556940.
+            const parsed = parseUiClientPressControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_CLIENT_PRESS_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { runRemoteClientPress } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await runRemoteClientPress({
+                    plugin: parsed.plugin,
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    key: parsed.client,
+                    module: parsed.module,
+                    element: parsed.element,
+                    event: parsed.event,
+                  })
+                  sendControlResponseSuccess(
+                    msg,
+                    ue === undefined
+                      ? { handled: false }
+                      : {
+                          handled: true,
+                          ...(ue.reached !== undefined && {
+                            reached: ue.reached,
+                          }),
+                        },
+                  )
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_message') {
+            // densable `KAn` + `E1e.clientMessage`/`O3` @206557563.
+            const parsed = parseUiMessageControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, UI_MESSAGE_PARSE_ERROR)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { runRemoteClientMessage } = await import(
+                    'src/utils/plugins/functionHooksModules.js'
+                  )
+                  const ue = await runRemoteClientMessage({
+                    plugin: parsed.plugin,
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    key: parsed.client,
+                    module: parsed.module,
+                    data: parsed.data,
+                  })
+                  sendControlResponseSuccess(
+                    msg,
+                    ue === undefined
+                      ? { handled: false }
+                      : {
+                          handled: true,
+                          ...(ue.props !== undefined && { props: ue.props }),
+                        },
+                  )
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'ui_client_fault') {
+            // densable `YAn` + `_v`/`WX`/`dO` @206558071.
+            const parsed = parseUiClientFaultControlRequest(req)
+            if (!parsed.ok) {
+              sendControlResponseError(msg, parsed.error)
+            } else {
+              deferControlLifecycleUntilDone(async () => {
+                try {
+                  const { dispatchClientFault, getLoadedFunctionHooksModules } =
+                    await import('src/utils/plugins/functionHooksModules.js')
+                  const loaded = getLoadedFunctionHooksModules().some(
+                    item =>
+                      item.name === parsed.plugin && item.status !== 'unloaded',
+                  )
+                  if (!loaded) {
+                    sendControlResponseSuccess(msg, { handled: false })
+                    return
+                  }
+                  await dispatchClientFault({
+                    plugin: parsed.plugin,
+                    surface: 'desktop',
+                    component: parsed.component,
+                    requestId: parsed.instanceId,
+                    element: parsed.client,
+                    module: parsed.module,
+                    phase: parsed.phase,
+                    reason: parsed.reason,
+                  })
+                  sendControlResponseSuccess(msg, { handled: true })
+                } catch (err) {
+                  sendControlResponseError(msg, errorMessage(err))
+                }
+              })
+            }
+          } else if (req.subtype === 'get_workspace_diff') {
+            // densable print `buildWorkspaceDiffResponse` after ui_client_fault.
+            deferControlLifecycleUntilDone(async () => {
+              try {
+                const { buildWorkspaceDiffResponse } = await import(
+                  'src/bridge/buildWorkspaceDiffResponse.js'
+                )
+                const host = getAppState()
+                sendControlResponseSuccess(
+                  msg,
+                  await buildWorkspaceDiffResponse(
+                    host,
+                    host.toolPermissionContext,
+                  ),
+                )
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            })
+          } else if (req.subtype === 'stage_file') {
+            // densable print `stageFile` @206558753 (gold Xcs).
+            deferControlLifecycleUntilDone(async () => {
+              try {
+                const {
+                  stageFile,
+                  stageFileWireResult,
+                  STAGE_FILE_OUTPUTS_MOUNT_PREFIX,
+                } = await import('src/utils/stageFile.js')
+                const mountPath =
+                  typeof req.mount_path === 'string' ? req.mount_path : ''
+                if (
+                  mountPath.startsWith(`${STAGE_FILE_OUTPUTS_MOUNT_PREFIX}/`)
+                ) {
+                  // Gold `Uy` effort-attribution probe; CLI analog is a no-op.
+                }
+                const result = await stageFile(
+                  {
+                    mount_path: mountPath,
+                    force: req.force === true,
+                    ...(typeof req.filestore_path === 'string' && {
+                      filestore_path: req.filestore_path,
+                    }),
+                  },
+                  undefined,
+                  'off',
+                )
+                if (result.ok) {
+                  sendControlResponseSuccess(msg, stageFileWireResult(result))
+                } else {
+                  logForDebugging(`stage_file: ${result.error}`, {
+                    level: 'error',
+                  })
+                  sendControlResponseError(
+                    msg,
+                    result.error || 'stage_file failed',
+                  )
+                }
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            })
+          } else if (req.subtype === 'get_plan') {
+            try {
+              const { getPlan, getPlanFilePath } = await import(
+                'src/utils/plans.js'
+              )
+              const content = getPlan()
+              sendControlResponseSuccess(
+                msg,
+                content !== null
+                  ? { exists: true, content, path: getPlanFilePath() }
+                  : { exists: false },
+              )
+            } catch (err) {
+              sendControlResponseError(msg, errorMessage(err))
+            }
+          } else if (req.subtype === 'add_directory') {
+            // densable `Xb` @206521996 — stage mount_path then add dest.
+            deferControlLifecycleUntilDone(async () => {
+              try {
+                const { stageFile, addDirectoryDestFromMountPath } =
+                  await import('src/utils/stageFile.js')
+                const { isAdditionalDirectoriesClaudeMdEnabled } = await import(
+                  'src/utils/residualFinalEnvGates.js'
+                )
+                const mountPath =
+                  typeof req.mount_path === 'string' ? req.mount_path : ''
+                let dest: string
+                try {
+                  dest = addDirectoryDestFromMountPath(mountPath)
+                } catch (err) {
+                  logForDebugging(`add_directory dest: ${errorMessage(err)}`, {
+                    level: 'error',
+                  })
+                  sendControlResponseError(
+                    msg,
+                    errorMessage(err) || 'add_directory failed',
+                  )
+                  return
+                }
+                if (!isAdditionalDirectoriesClaudeMdEnabled()) {
+                  sendControlResponseError(
+                    msg,
+                    'add_directory requires CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD to be set in the container environment',
+                  )
+                  return
+                }
+                const staged = await stageFile({
+                  mount_path: mountPath,
+                  force: true,
+                })
+                if (!staged.ok) {
+                  logForDebugging(`add_directory stage: ${staged.error}`, {
+                    level: 'error',
+                  })
+                  sendControlResponseError(
+                    msg,
+                    staged.error || 'add_directory failed',
+                  )
+                  return
+                }
+                const { realpath } = await import('fs/promises')
+                const directory = await realpath(dest).catch(() => dest)
+                const currentDirs = getAdditionalDirectoriesForClaudeMd()
+                if (!currentDirs.includes(directory)) {
+                  setAdditionalDirectoriesForClaudeMd([
+                    ...currentDirs,
+                    directory,
+                  ])
+                }
+                setAppState(prev => ({
+                  ...prev,
+                  toolPermissionContext: applyPermissionUpdate(
+                    prev.toolPermissionContext,
+                    {
+                      type: 'addDirectories',
+                      directories: [directory],
+                      destination: 'session',
+                    },
+                  ),
+                }))
+                SandboxManager.refreshConfig()
+                // DirectoryAdded source stays the SDK twin (gold print
+                // `pT(...,"directory_added")` is not this string union).
+                await executeDirectoryAddedHooks(
+                  directory,
+                  'register_repo_root',
+                )
+                logForDebugging(`add_directory staged: ${dest} (${directory})`)
+                sendControlResponseSuccess(msg, {
+                  staged_path: dest,
+                  directory,
+                })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            })
+          } else if (
+            typeof req.subtype === 'string' &&
+            dispatchPrintControlExtra(req.subtype, req, {
+              getMcpClients: () =>
+                (getAppState().mcp.clients as Array<{
+                  name: string
+                  type: string
+                }>) ?? [],
+              getPermissionContext: () => getAppState().toolPermissionContext,
+              setPromptSuggestionEnabled: enabled => {
+                setAppState(prev => ({
+                  ...prev,
+                  promptSuggestionEnabled: enabled,
+                }))
+              },
+              sendSuccess: response =>
+                sendControlResponseSuccess(msg, response),
+              sendError: error => sendControlResponseError(msg, error),
+              defer: deferControlLifecycleUntilDone,
+              isRemoteTransport: Boolean(bridgeHandle),
+              errorMessage,
+              abortSignal: abortController?.signal,
+              setAppState: setAppState as never,
+              exportConversation: async () => {
+                const { renderMessagesToPlainText } = await import(
+                  'src/utils/exportRenderer.js'
+                )
+                const text = await renderMessagesToPlainText(
+                  mutableMessages,
+                  tools,
+                )
+                return { text }
+              },
+              getChromeClient: () => {
+                const found = getAppState().mcp.clients.find(
+                  client =>
+                    client.name === 'claude-in-chrome' &&
+                    client.type === 'connected',
+                )
+                if (!found) return undefined
+                return found as {
+                  name: string
+                  type: string
+                  config: { type: string }
+                }
+              },
+              enqueuePollEvent: command => {
+                enqueue({
+                  ...command,
+                  uuid: command.uuid as never,
+                })
+              },
+              enqueueHandoff: command => {
+                enqueue({
+                  mode: command.mode,
+                  value: command.value,
+                  isMeta: command.isMeta,
+                  agentId: command.agentId ?? getMainThreadAgentId(),
+                  handedOffTurn: command.handedOffTurn,
+                })
+              },
+              peekHandoff: () => peek(cmd => cmd.handedOffTurn !== undefined),
+              convertHandoff: handedOffTurn => {
+                const pending = peek(cmd => cmd.handedOffTurn !== undefined)
+                if (pending?.handedOffTurn) {
+                  pending.handedOffTurn = {
+                    ...pending.handedOffTurn,
+                    ...handedOffTurn,
+                  }
+                }
+              },
+              peekRunningHandoff: () =>
+                drainingHandoff
+                  ? {
+                      handedOffTurn: drainingHandoff.handedOffTurn,
+                      messages: drainingHandoff.handedOffTurn?.messages,
+                    }
+                  : undefined,
+              stopRunningHandoff: () => {
+                if (abortController && !abortController.signal.aborted) {
+                  abortController.abort(createAbortErrorReason('remote-cancel'))
+                }
+                for (const t of getRunningTasks(getAppState())) {
+                  if (
+                    t.status === 'running' &&
+                    t.type !== 'in_process_teammate'
+                  ) {
+                    void stopTask(t.id, {
+                      getAppState,
+                      setAppState,
+                      source: 'user',
+                      killedBy: 'system',
+                    })
+                  }
+                }
+              },
+              getMainThreadAgentId,
+              recoveredToolUseIds: () => recoveredToolUseIds,
+              knownTools: tools.map(tool => tool.name),
+              carriedWrites: () => {
+                const mode = getAppState().toolPermissionContext.mode
+                return {
+                  switchedOn: true,
+                  cwd: getCwd(),
+                  home: homedir(),
+                  permissionMode: mode,
+                  writeTool: true,
+                }
+              },
+              getSdkUrl: () => options.sdkUrl,
+              getMessages: () => mutableMessages,
+              isCloudHosted: () =>
+                process.env.CLAUDE_CODE_ENVIRONMENT_KIND !== undefined,
+              createForkSession: async input => {
+                const { createBridgeSession } = await import(
+                  'src/bridge/createSession.js'
+                )
+                const { detectCurrentRepositoryWithHost } = await import(
+                  'src/utils/detectRepository.js'
+                )
+                const { getBranch, getDefaultBranch } = await import(
+                  'src/utils/git.js'
+                )
+                const repo = await detectCurrentRepositoryWithHost()
+                const gitRepoUrl = repo
+                  ? `https://${repo.host}/${repo.owner}/${repo.name}`
+                  : null
+                const branch =
+                  (await getBranch()) || (await getDefaultBranch()) || 'main'
+                const environmentId =
+                  bridgeHandle?.environmentId ??
+                  process.env.CLAUDE_CODE_ENVIRONMENT_ID
+                if (!environmentId) {
+                  throw new Error('unsupported')
+                }
+                const sessionId = await createBridgeSession({
+                  environmentId,
+                  title: input.title,
+                  events: [],
+                  gitRepoUrl,
+                  branch,
+                  signal:
+                    abortController?.signal ?? new AbortController().signal,
+                  baseUrl: input.sdkUrl,
+                })
+                if (!sessionId) {
+                  throw new Error('unsupported')
+                }
+                return sessionId
+              },
+              // densable VLe → LFn analog: snapshot ToolUseContext, else print
+              // locals so first-turn proceed can still call launchRemoteReview.
+              getToolUseContext: () => {
+                const saved = getLastCacheSafeParams()?.toolUseContext
+                if (saved) {
+                  return saved
+                }
+                return {
+                  getAppState,
+                  setAppState,
+                  abortController:
+                    abortController && !abortController.signal.aborted
+                      ? abortController
+                      : createAbortController(),
+                  options: { tools: buildAllTools(getAppState()) },
+                }
+              },
+            })
+          ) {
+            // densable extras; rewind_conversation / mcp_call / dialogs /
+            // update_settings / reload_skills stay owned elsewhere.
+          } else if (req.subtype === 'file_suggestions') {
+            try {
+              const query =
+                typeof (req as { query?: unknown }).query === 'string'
+                  ? (req as { query: string }).query
+                  : ''
+              const { generateFileSuggestions } = await import(
+                'src/hooks/fileSuggestions.js'
+              )
+              const items = await generateFileSuggestions(query, true)
+              sendControlResponseSuccess(msg, {
+                suggestions: items.map(item => ({ path: item.displayText })),
+                cwd: getCwd(),
+              })
+            } catch (err) {
+              sendControlResponseError(msg, errorMessage(err))
             }
           } else {
             // Unknown control request subtype — send an error response so

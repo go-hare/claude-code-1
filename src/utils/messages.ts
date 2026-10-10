@@ -6337,6 +6337,38 @@ You have exited auto mode. The user may now want to interact more directly. You 
         createUserMessage({ content: escaped, isMeta: true }),
       ])
     }
+    case 'poll_events': {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { formatPollEventsPrompt, visiblePollEventsMedia } =
+        require('../cli/printControlExtras.js') as typeof import('../cli/printControlExtras.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const text = formatPollEventsPrompt(
+        attachment.envelopes,
+        attachment.remainingWakeCount,
+        attachment.kinds,
+      )
+      // densable `HRr` = `KXe(HZe(e).text, HZe(e).media)` — media follows nX.
+      const media = visiblePollEventsMedia(
+        attachment.media as unknown[][] | undefined,
+        attachment.kinds,
+        attachment.envelopes.length,
+      )
+      if (text === '' && media.length === 0) {
+        return []
+      }
+      if (media.length === 0) {
+        return [createUserMessage({ content: text, isMeta: true })]
+      }
+      return [
+        createUserMessage({
+          content: [
+            { type: 'text' as const, text },
+            ...(media as ContentBlockParam[]),
+          ],
+          isMeta: true,
+        }),
+      ]
+    }
     case 'already_read_file':
     case 'command_permissions':
     case 'edited_image_file':
@@ -8028,6 +8060,48 @@ export function isHumanLikeOrigin(
     origin.kind === 'human' ||
     origin.kind === 'auto-continuation'
   )
+}
+
+/**
+ * densable u8r — strip these task-notification subkinds when stamping origin.
+ */
+const TASK_NOTIFICATION_ORIGIN_STRIP_SUBKINDS = new Set([
+  'projects-relay',
+  'session-inbox',
+])
+
+type QueueOriginStamp = {
+  kind?: string
+  subkind?: string
+  from?: string
+  senderTaskId?: string
+  [key: string]: unknown
+}
+
+/**
+ * densable cun — skip human-like origin (jy); only fill `origin === undefined`.
+ * Image metadata (Qt) stays origin-less so IDd / BLr hide it.
+ */
+export function stampQueueOriginOnUserMessages(
+  messages: Array<{ type: string; origin?: MessageOrigin }>,
+  origin: QueueOriginStamp | undefined,
+): void {
+  if (isHumanLikeOrigin(origin)) return
+  if (!origin?.kind) return
+  const stamp: MessageOrigin =
+    origin.kind === 'task-notification' &&
+    origin.subkind !== undefined &&
+    TASK_NOTIFICATION_ORIGIN_STRIP_SUBKINDS.has(origin.subkind)
+      ? (() => {
+          const { subkind: _stripped, ...rest } = origin
+          return rest as MessageOrigin
+        })()
+      : (origin as MessageOrigin)
+  for (const message of messages) {
+    if (message.type === 'user' && message.origin === undefined) {
+      message.origin = stamp
+    }
+  }
 }
 
 /**

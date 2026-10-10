@@ -56,6 +56,8 @@ const NULL_RENDERING_TYPES = [
   'date_change',
   // densable read_truncation_notice — model-facing only (normalizeAttachmentForAPI)
   'read_truncation_notice',
+  // densable poll_events — model-facing (HZe / z3); UI null
+  'poll_events',
 ] as const satisfies readonly Attachment['type'][]
 
 export type NullRenderingAttachmentType = (typeof NULL_RENDERING_TYPES)[number]

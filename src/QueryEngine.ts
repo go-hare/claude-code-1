@@ -73,6 +73,8 @@ import { getInMemoryErrors } from './utils/log.js'
 import {
   applyTurnStartOriginFraming,
   countToolCalls,
+  isHumanLikeOrigin,
+  stampQueueOriginOnUserMessages,
   SYNTHETIC_MESSAGES,
 } from './utils/messages.js'
 import {
@@ -258,6 +260,7 @@ export class QueryEngine {
       isMeta?: boolean
       skipSlashCommands?: boolean
       skipAttachments?: boolean
+      skipSubmissionHooks?: boolean
       bridgeOrigin?: boolean
       /** densable 2.1.221 modelScheduledOrigin fire stamp */
       modelScheduledOrigin?: boolean
@@ -564,6 +567,7 @@ export class QueryEngine {
       // densable 2.1.221: headless cron fire stamps thread through ask → submitMessage
       skipSlashCommands: options?.skipSlashCommands,
       skipAttachments: options?.skipAttachments,
+      skipSubmissionHooks: options?.skipSubmissionHooks,
       bridgeOrigin: options?.bridgeOrigin,
       modelScheduledOrigin: options?.modelScheduledOrigin,
       wakeupSource: options?.wakeupSource,
@@ -571,21 +575,22 @@ export class QueryEngine {
       querySource: 'sdk',
     })
 
-    // Mirror handlePromptSubmit: stamp origin + Fws (RZn for scheduled-task)
-    // so headless/SDK fires keep densable #20 assigned-task banner even when
-    // processTextPrompt produced bare content (e.g. slash re-open body).
+    // densable cun after Art: skip human-like (jy); fill origin only when unset.
+    // Fws on !isMeta users so scheduled-task RZn still lands on the prompt.
     if (options?.origin) {
-      for (const m of messagesFromUserInput) {
-        if (m.type === 'user') {
-          m.origin = options.origin as typeof m.origin
-          applyTurnStartOriginFraming(
-            m,
-            options.origin as {
-              kind?: string
-              from?: string
-              trigger?: string
-            },
-          )
+      stampQueueOriginOnUserMessages(messagesFromUserInput, options.origin)
+      if (!isHumanLikeOrigin(options.origin)) {
+        for (const m of messagesFromUserInput) {
+          if (m.type === 'user' && !m.isMeta) {
+            applyTurnStartOriginFraming(
+              m,
+              options.origin as {
+                kind?: string
+                from?: string
+                trigger?: string
+              },
+            )
+          }
         }
       }
     }
@@ -1581,6 +1586,7 @@ export async function* ask({
   isMeta,
   skipSlashCommands,
   skipAttachments,
+  skipSubmissionHooks,
   bridgeOrigin,
   modelScheduledOrigin,
   wakeupSource,
@@ -1623,6 +1629,7 @@ export async function* ask({
   /** densable 2.1.221 QueuedCommand fire stamps for headless processUserInput */
   skipSlashCommands?: boolean
   skipAttachments?: boolean
+  skipSubmissionHooks?: boolean
   bridgeOrigin?: boolean
   modelScheduledOrigin?: boolean
   wakeupSource?: string
@@ -1706,6 +1713,7 @@ export async function* ask({
       isMeta,
       skipSlashCommands,
       skipAttachments,
+      skipSubmissionHooks,
       bridgeOrigin,
       modelScheduledOrigin,
       wakeupSource,

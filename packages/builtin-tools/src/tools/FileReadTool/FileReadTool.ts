@@ -959,7 +959,11 @@ async function callInner(
       data,
       ...(metadataText && {
         newMessages: [
-          createUserMessage({ content: metadataText, isMeta: true }),
+          createUserMessage({
+            content: metadataText,
+            isMeta: true,
+            turnCompanion: true,
+          }),
         ],
       }),
     }
@@ -1014,7 +1018,11 @@ async function callInner(
         data: extractResult.data,
         ...(imageBlocks.length > 0 && {
           newMessages: [
-            createUserMessage({ content: imageBlocks, isMeta: true }),
+            createUserMessage({
+              content: imageBlocks,
+              isMeta: true,
+              turnCompanion: true,
+            }),
           ],
         }),
       }
@@ -1086,6 +1094,7 @@ async function callInner(
             },
           ],
           isMeta: true,
+          turnCompanion: true,
         }),
       ],
     }
