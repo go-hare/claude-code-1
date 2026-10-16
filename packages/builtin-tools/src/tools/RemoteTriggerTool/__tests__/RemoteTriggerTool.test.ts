@@ -82,6 +82,10 @@ mock.module('src/utils/remoteTriggerAudit.js', () => ({
 beforeEach(() => {
   requestStatus = 200
   auditRecords.length = 0
+  axiosHandle.stubs.request = async () => ({
+    status: requestStatus,
+    data: { ok: requestStatus >= 200 && requestStatus < 300 },
+  })
 })
 
 afterEach(() => {
@@ -122,5 +126,37 @@ describe('RemoteTriggerTool audit', () => {
       ok: false,
       error: 'run requires trigger_id',
     })
+  })
+
+  test('list_runs GETs /v1/code/sessions and trims an empty page', async () => {
+    axiosHandle.stubs.request = async (config: {
+      method?: string
+      url?: string
+    }) => {
+      expect(config.method).toBe('GET')
+      expect(config.url).toContain('/v1/code/sessions?')
+      expect(config.url).toContain('trigger_id=trigger-1')
+      expect(config.url).toContain('limit=10')
+      return { status: 200, data: { data: [] } }
+    }
+    const { RemoteTriggerTool } = await import('../RemoteTriggerTool')
+    const result = await RemoteTriggerTool.call(
+      { action: 'list_runs', trigger_id: 'trigger-1' },
+      { abortController: new AbortController() } as any,
+    )
+    expect(result.data.status).toBe(200)
+    expect(result.data.json).toContain('trigger-1')
+    expect(result.data.summary).toContain(
+      'no run sessions recorded for this routine',
+    )
+  })
+
+  test('get_run_log requires session_id', async () => {
+    const { RemoteTriggerTool } = await import('../RemoteTriggerTool')
+    await expect(
+      RemoteTriggerTool.call({ action: 'get_run_log' }, {
+        abortController: new AbortController(),
+      } as any),
+    ).rejects.toThrow('get_run_log requires session_id')
   })
 })

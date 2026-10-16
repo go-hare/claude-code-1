@@ -5,7 +5,8 @@ import { countCharInString } from 'src/utils/stringUtils.js';
 import type { Input, Output } from './RemoteTriggerTool.js';
 
 export function renderToolUseMessage(input: Partial<Input>): React.ReactNode {
-  return `${input.action ?? ''}${input.trigger_id ? ` ${input.trigger_id}` : ''}`;
+  const id = input.session_id ?? input.trigger_id;
+  return `${input.action ?? ''}${id ? ` ${id}` : ''}`;
 }
 
 export function renderToolResultMessage(output: Output): React.ReactNode {

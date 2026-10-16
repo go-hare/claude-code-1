@@ -339,12 +339,21 @@ export async function postInterClaudeMessage(
     } catch {
       // optional
     }
-    const { wrapCrossSessionMessage } = await import(
+    const { wrapCrossSessionMessage, parseCrossSessionHopChain } = await import(
       '../utils/crossSessionMessage.js'
+    )
+    const { appendHopChain, hashAddressToHopToken } = await import(
+      '../utils/peerAdmission.js'
+    )
+    // Gold Tkn(U, m?cBe(xEe(m)):void 0) — HMAC of bridge:session, not UDS token.
+    const hopChain = appendHopChain(
+      parseCrossSessionHopChain(message),
+      hashAddressToHopToken(`bridge:${from}`),
     )
     const content = wrapCrossSessionMessage(message, {
       from: `bridge:${from}`,
       ...(fromName !== undefined ? { fromName } : {}),
+      ...(hopChain !== undefined ? { hopChain } : {}),
     })
 
     const url = `${baseUrl}/v1/sessions/${encodeURIComponent(compatTarget)}/messages`
