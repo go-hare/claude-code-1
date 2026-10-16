@@ -66,7 +66,7 @@ type UseRemoteSessionProps = {
   setStreamingToolUses?: React.Dispatch<
     React.SetStateAction<StreamingToolUse[]>
   >
-  setStreamMode?: React.Dispatch<React.SetStateAction<SpinnerMode>>
+  setStreamMode?: (mode: SpinnerMode) => void
   setInProgressToolUseIDs?: (f: (prev: Set<string>) => Set<string>) => void
   /**
    * densable wEf requestDialog — host for request_user_dialog (EEf).

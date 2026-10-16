@@ -154,7 +154,9 @@ Your response must be a JSON object matching one of the following schemas:
         }
       }
 
-      // Failed to meet condition
+      // densable: ok:false is not_met — blockingError + stopReason, NO
+      // preventContinuation (query continues). preventContinuation would
+      // end the turn (gold not_met re-invokes).
       if (!parsed.data.ok) {
         logForDebugging(
           `Hooks: Prompt hook condition was not met: ${parsed.data.reason}`,
@@ -166,7 +168,6 @@ Your response must be a JSON object matching one of the following schemas:
             blockingError: `Prompt hook condition was not met: ${parsed.data.reason}`,
             command: hook.prompt,
           },
-          preventContinuation: true,
           stopReason: parsed.data.reason,
         }
       }

@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle';
 import { type FSWatcher, watch } from 'fs';
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
+  getReplBridgeSessionId,
   getSessionId,
   onInteraction,
   setMainLoopModelOverride,
@@ -79,6 +80,7 @@ import {
   hasMatchingQueuedSdkEvent,
   isBridgeForwardableSdkEvent,
   setSdkEventEnqueueListener,
+  setSdkEventQueueKey,
 } from '../utils/sdkEventQueue.js';
 import { buildTaskStateMessage, getTaskStateSnapshotKey, shouldPublishTaskState } from '../utils/taskStateMessage.js';
 import omit from 'lodash-es/omit.js';
@@ -195,6 +197,18 @@ export function useReplBridge(
   commands: readonly Command[],
   mainLoopModel: string,
 ): { sendBridgeResult: () => void } {
+  // densable jUt(Sjt) — K2r HMAC of bridge:${cse_*}; cleanup jUt(void 0).
+  useEffect(() => {
+    if (!feature('BRIDGE_MODE')) return;
+    const { setOwnBridgeHopAddressResolver } =
+      require('../utils/peerAdmission.js') as typeof import('../utils/peerAdmission.js');
+    setOwnBridgeHopAddressResolver(() => {
+      const id = getReplBridgeSessionId();
+      return id ? `bridge:${id}` : undefined;
+    });
+    return () => setOwnBridgeHopAddressResolver(undefined);
+  }, []);
+
   const handleRef = useRef<ReplBridgeHandle | null>(null);
   const teardownPromiseRef = useRef<Promise<void> | undefined>(undefined);
   const lastWrittenIndexRef = useRef(0);
@@ -1904,6 +1918,8 @@ export function useReplBridge(
       leftoverA_e(handle);
     };
 
+    // densable 2.1.289 setQueueKey — pin SDK event lane to session while bridge drains.
+    setSdkEventQueueKey(() => getSessionId());
     setSdkEventEnqueueListener(drainTaskEventsToBridge);
     // Catch anything queued before the listener was registered.
     drainTaskEventsToBridge();

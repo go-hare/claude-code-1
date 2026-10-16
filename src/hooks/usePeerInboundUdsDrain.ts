@@ -273,6 +273,21 @@ export function usePeerInboundUdsDrain(
         // Never trust wire meta.selfSent; never key on forgeable message.from
         // (densable: from is sender-authored, reply routing only). Without peer-cred
         // (no Bun.ant here / Windows / unverifiable) leave selfSent unset — fail-closed.
+        // densable F$E/O$E: copy mli pid onto origin so yr htt / zo.admit still
+        // fire when the sender omitted `from`.
+        const verifiedPeerPid =
+          typeof entry.peerPid === 'number' && entry.peerPid > 0
+            ? entry.peerPid
+            : undefined
+        // densable dOe — hop-chain from the envelope onto origin for yr/K2r.
+        let hopChain: string[] | undefined
+        try {
+          const { parseCrossSessionHopChain } =
+            require('../utils/crossSessionMessage.js') as typeof import('../utils/crossSessionMessage.js')
+          hopChain = parseCrossSessionHopChain(value)
+        } catch {
+          hopChain = undefined
+        }
 
         const command = {
           mode: 'prompt' as const,
@@ -282,6 +297,8 @@ export function usePeerInboundUdsDrain(
             kind: 'peer' as const,
             from,
             ...(fromMode !== undefined ? { fromMode } : {}),
+            ...(verifiedPeerPid !== undefined ? { verifiedPeerPid } : {}),
+            ...(hopChain !== undefined ? { hopChain } : {}),
             ...(typeof meta?.msg_id === 'string'
               ? { msg_id: meta.msg_id }
               : typeof entry.message.msg_id === 'string'

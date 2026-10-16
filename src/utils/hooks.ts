@@ -88,6 +88,7 @@ import type {
   NotificationHookInput,
   PostToolUseHookInput,
   PostToolUseFailureHookInput,
+  PostToolBatchHookInput,
   PermissionDeniedHookInput,
   PreCompactHookInput,
   PostCompactHookInput,
@@ -110,6 +111,7 @@ import type {
   DirectoryAddedHookInput,
   InstructionsLoadedHookInput,
   UserPromptSubmitHookInput,
+  UserPromptExpansionHookInput,
   PermissionRequestHookInput,
   ElicitationHookInput,
   ElicitationResultHookInput,
@@ -147,6 +149,8 @@ import type { PermissionResult } from './permissions/PermissionResult.js'
 import { registerPendingAsyncHook } from './hooks/AsyncHookRegistry.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
 import {
+  createSystemMessage,
+  createUserMessage,
   extractTextContent,
   getLastAssistantMessage,
   wrapInSystemReminder,
@@ -160,8 +164,16 @@ import { createAttachmentMessage } from './attachments.js'
 import { noteHookFailure } from './bgNeedsInputBridge.js'
 import { all } from './generators.js'
 import { findToolByName, type Tools, type ToolUseContext } from '../Tool.js'
+import { getPluginHookRunner } from './hooks/pluginHookRunner.js'
 import { execPromptHook } from './hooks/execPromptHook.js'
-import type { Message, AssistantMessage } from '../types/message.js'
+import type {
+  AssistantMessage,
+  AttachmentMessage,
+  Message,
+  ProgressMessage,
+  SystemMessage,
+  UserMessage,
+} from '../types/message.js'
 import { execAgentHook } from './hooks/execAgentHook.js'
 import { execHttpHook } from './hooks/execHttpHook.js'
 import type { ShellCommand } from './ShellCommand.js'
@@ -428,6 +440,8 @@ export interface HookResult {
   systemMessage?: string
   blockingError?: HookBlockingError
   outcome: 'success' | 'blocking' | 'non_blocking_error' | 'cancelled'
+  /** densable Mo.timedOut — prompt Stop timeout, not parent abort. */
+  timedOut?: boolean
   preventContinuation?: boolean
   stopReason?: string
   permissionBehavior?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
@@ -461,7 +475,7 @@ export type AggregatedHookResult = {
   initialUserMessage?: string // 会话启动等场景预置的首条用户侧文案，供首轮上下文使用
   sessionTitle?: string // SessionStart / UserPromptSubmit 设置的会话标题
   reloadSkills?: boolean // SessionStart 请求重扫 skill/command 目录
-  suppressOriginalPrompt?: boolean // UserPromptSubmit block 时是否省略原始 prompt
+  suppressOriginalPrompt?: boolean // UserPromptSubmit / UserPromptExpansion block 时是否省略原始 prompt
   updatedInput?: Record<string, unknown> // 钩子改写后的工具入参；可在 allow/ask 时与权限一起产出，也可单独改参
   updatedMCPToolOutput?: unknown // PostToolUse 钩子对 MCP 工具原始输出的替换内容
   permissionRequestResult?: PermissionRequestResult // PermissionRequest 事件钩子的 allow/deny 及可选改参
@@ -471,6 +485,10 @@ export type AggregatedHookResult = {
   retry?: boolean // PermissionDenied 等场景是否建议用户重试当前操作
   /** densable 2.1.222 MessageDisplay — hookSpecificOutput.displayContent */
   displayContent?: string
+  /** densable ae.hook — Stop goal matching (`prompt === activeGoal.condition`). */
+  hook?: HookCommand | HookCallback | FunctionHook
+  /** densable ae.timedOut — prompt Stop timeout (parent abort is not a timeout). */
+  timedOut?: boolean
 }
 
 /**
@@ -611,6 +629,11 @@ export function kwt(): string {
         'for UserPromptSubmit': {
           hookEventName: '"UserPromptSubmit"',
           additionalContext: 'string (optional)',
+        },
+        'for UserPromptExpansion': {
+          hookEventName: '"UserPromptExpansion"',
+          additionalContext: 'string (optional)',
+          suppressOriginalPrompt: 'boolean (optional)',
         },
         'for PostToolUse': {
           hookEventName: '"PostToolUse"',
@@ -800,6 +823,11 @@ interface TypedSyncHookOutput {
         suppressOriginalPrompt?: boolean
       }
     | {
+        hookEventName: 'UserPromptExpansion'
+        additionalContext?: string
+        suppressOriginalPrompt?: boolean
+      }
+    | {
         hookEventName: 'SessionStart'
         additionalContext?: string
         initialUserMessage?: string
@@ -822,6 +850,10 @@ interface TypedSyncHookOutput {
       }
     | {
         hookEventName: 'PostToolUseFailure'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PostToolBatch'
         additionalContext?: string
       }
     | {
@@ -1014,6 +1046,11 @@ function processHookJSONOutput({
         result.suppressOriginalPrompt =
           json.hookSpecificOutput.suppressOriginalPrompt
         break
+      case 'UserPromptExpansion':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        result.suppressOriginalPrompt =
+          json.hookSpecificOutput.suppressOriginalPrompt
+        break
       case 'SessionStart':
         result.additionalContext = json.hookSpecificOutput.additionalContext
         result.initialUserMessage = json.hookSpecificOutput.initialUserMessage
@@ -1041,6 +1078,9 @@ function processHookJSONOutput({
         }
         break
       case 'PostToolUseFailure':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'PostToolBatch':
         result.additionalContext = json.hookSpecificOutput.additionalContext
         break
       case 'PermissionDenied':
@@ -2084,6 +2124,97 @@ type MatchedHook = {
   pluginId?: string
   skillRoot?: string
   hookSource?: string
+  /** densable TVt asOwnTool — plugin matcher hit the remapped own tool. */
+  asOwnTool?: boolean
+  /** densable TVt asStandIn — matcher also hits the original tool_name. */
+  asStandIn?: boolean
+}
+
+/**
+ * densable TVt — remap hook input tool_name via Jve()?.ownTool.
+ * No runner → undefined (no-op). PostToolBatch remaps each tool_calls[].
+ */
+export function remapHookInputForOwnTool(
+  hookInput: HookInput,
+): { hookInput: HookInput; tools: Tools } | undefined {
+  const ownTool = getPluginHookRunner()?.ownTool
+  if (ownTool === undefined) return undefined
+  if (hookInput.hook_event_name === 'PostToolBatch') {
+    return {
+      hookInput: {
+        ...hookInput,
+        tool_calls: hookInput.tool_calls.map(call => ({
+          ...call,
+          tool_name: ownTool(call.tool_name)?.name ?? call.tool_name,
+        })),
+      },
+      tools: [],
+    }
+  }
+  if (!('tool_name' in hookInput)) return undefined
+  const mapped = ownTool(hookInput.tool_name)
+  if (mapped === undefined) return undefined
+  return {
+    hookInput: {
+      ...hookInput,
+      tool_name: mapped.name,
+      mcp_server: undefined,
+    } as HookInput,
+    tools: [mapped],
+  }
+}
+
+function getHookMatchQuery(hookInput: HookInput): string | undefined {
+  switch (hookInput.hook_event_name) {
+    case 'PreToolUse':
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+    case 'PermissionRequest':
+    case 'PermissionDenied':
+      return hookInput.tool_name as string
+    case 'PostToolBatch':
+      return undefined
+    case 'UserPromptExpansion':
+      return hookInput.command_name
+    case 'SessionStart':
+      return hookInput.source as string
+    case 'Setup':
+      return hookInput.trigger as string
+    case 'PreCompact':
+    case 'PostCompact':
+      return hookInput.trigger as string
+    case 'PreModelSwitch':
+    case 'PostModelSwitch':
+      return LOe(hookInput.to_model) ? hookInput.to_model : undefined
+    case 'Notification':
+      return hookInput.notification_type as string
+    case 'SessionEnd':
+      return hookInput.reason as string
+    case 'StopFailure':
+      return hookInput.error as string
+    case 'SubagentStart':
+      return hookInput.agent_type as string
+    case 'SubagentStop':
+      return hookInput.agent_type as string
+    case 'TeammateIdle':
+    case 'TaskCreated':
+    case 'TaskCompleted':
+      return undefined
+    case 'Elicitation':
+      return hookInput.mcp_server_name as string
+    case 'ElicitationResult':
+      return hookInput.mcp_server_name as string
+    case 'ConfigChange':
+      return hookInput.source as string
+    case 'InstructionsLoaded':
+      return hookInput.load_reason as string
+    case 'FileChanged':
+      return basename(hookInput.file_path as string)
+    case 'DirectoryAdded':
+      return (hookInput as { source?: string }).source
+    default:
+      return undefined
+  }
 }
 
 function isInternalHook(matched: MatchedHook): boolean {
@@ -2278,72 +2409,32 @@ export async function getMatchingHooks(
 
     // If you change the criteria below, then you must change
     // src/utils/hooks/hooksConfigManager.ts as well.
-    let matchQuery: string | undefined
-    switch (hookInput.hook_event_name) {
-      case 'PreToolUse':
-      case 'PostToolUse':
-      case 'PostToolUseFailure':
-      case 'PermissionRequest':
-      case 'PermissionDenied':
-        matchQuery = hookInput.tool_name as string
-        break
-      case 'SessionStart':
-        matchQuery = hookInput.source as string
-        break
-      case 'Setup':
-        matchQuery = hookInput.trigger as string
-        break
-      case 'PreCompact':
-      case 'PostCompact':
-        matchQuery = hookInput.trigger as string
-        break
-      case 'PreModelSwitch':
-      case 'PostModelSwitch':
-        matchQuery = LOe(hookInput.to_model) ? hookInput.to_model : undefined
-        break
-      case 'Notification':
-        matchQuery = hookInput.notification_type as string
-        break
-      case 'SessionEnd':
-        matchQuery = hookInput.reason as string
-        break
-      case 'StopFailure':
-        matchQuery = hookInput.error as string
-        break
-      case 'SubagentStart':
-        matchQuery = hookInput.agent_type as string
-        break
-      case 'SubagentStop':
-        matchQuery = hookInput.agent_type as string
-        break
-      case 'TeammateIdle':
-      case 'TaskCreated':
-      case 'TaskCompleted':
-        break
-      case 'Elicitation':
-        matchQuery = hookInput.mcp_server_name as string
-        break
-      case 'ElicitationResult':
-        matchQuery = hookInput.mcp_server_name as string
-        break
-      case 'ConfigChange':
-        matchQuery = hookInput.source as string
-        break
-      case 'InstructionsLoaded':
-        matchQuery = hookInput.load_reason as string
-        break
-      case 'FileChanged':
-        matchQuery = basename(hookInput.file_path as string)
-        break
-      // densable 2.1.219 DirectoryAdded — matcher matches source
-      // (slash_command | register_repo_root). Outside-REPL path also
-      // passes matchQuery: source explicitly.
-      case 'DirectoryAdded':
-        matchQuery = (hookInput as { source?: string }).source
-        break
-      default:
-        break
-    }
+    // densable d0e: PostToolBatch has no single matchQuery — undefined
+    // so every matcher fires (TKo `n===void 0` → true).
+    const matchQuery = getHookMatchQuery(hookInput)
+    const remapped = remapHookInputForOwnTool(hookInput)
+    const runner = getPluginHookRunner()
+    const remappedQuery = remapped
+      ? getHookMatchQuery(remapped.hookInput)
+      : undefined
+    const matcherHits = (
+      matcher: { matcher?: string },
+      query: string | undefined,
+    ): boolean =>
+      !matcher.matcher ||
+      query === undefined ||
+      matchesPattern(query, matcher.matcher)
+    const ownToolMatchers = new Set(
+      remapped === undefined
+        ? []
+        : hookMatchers.filter(
+            matcher =>
+              'pluginId' in matcher &&
+              runner?.holds?.((matcher as { pluginId: string }).pluginId) ===
+                true &&
+              matcherHits(matcher, remappedQuery),
+          ),
+    )
 
     logForDebugging(
       `Getting matching hook commands for ${hookEvent} with query: ${matchQuery}`,
@@ -2359,12 +2450,10 @@ export async function getMatchingHooks(
     }
 
     // Extract hooks with their plugin context (if any)
-    const filteredMatchers = matchQuery
-      ? hookMatchers.filter(
-          matcher =>
-            !matcher.matcher || matchesPattern(matchQuery, matcher.matcher),
-        )
-      : hookMatchers
+    const filteredMatchers = hookMatchers.filter(
+      matcher =>
+        ownToolMatchers.has(matcher) || matcherHits(matcher, matchQuery),
+    )
 
     const matchedHooks: MatchedHook[] = filteredMatchers.flatMap(matcher => {
       // Check if this is a PluginHookMatcher (has pluginRoot) or SkillHookMatcher (has skillRoot)
@@ -2381,12 +2470,17 @@ export async function getMatchingHooks(
             ? `skill:${matcher.skillName}`
             : 'skill'
           : 'settings'
+      const asOwnTool = ownToolMatchers.has(matcher)
       return matcher.hooks.map(hook => ({
         hook,
         pluginRoot,
         pluginId,
         skillRoot,
         hookSource,
+        ...(asOwnTool && {
+          asOwnTool: true,
+          asStandIn: matcherHits(matcher, matchQuery),
+        }),
       }))
     })
 
@@ -2618,6 +2712,15 @@ export function getUserPromptSubmitHookBlockingMessage(
   blockingError: HookBlockingError,
 ): string {
   return `UserPromptSubmit operation blocked by hook:\n${blockingError.blockingError}`
+}
+
+/**
+ * densable Ze — format a blocking error from a UserPromptExpansion hook.
+ */
+export function getUserPromptExpansionHookBlockingMessage(
+  blockingError: HookBlockingError,
+): string {
+  return `UserPromptExpansion operation blocked by hook:\n${blockingError.blockingError}`
 }
 /**
  * Common logic for executing hooks
@@ -2986,23 +3089,37 @@ async function* executeHooks({
     | { ok: true; value: string }
     | { ok: false; error: unknown }
     | undefined
-  function getJsonInput() {
-    if (jsonInputResult !== undefined) {
-      return jsonInputResult
+  let jsonInputOwnToolResult:
+    | { ok: true; value: string }
+    | { ok: false; error: unknown }
+    | undefined
+  function getJsonInput(forOwnTool = false) {
+    const cached = forOwnTool ? jsonInputOwnToolResult : jsonInputResult
+    if (cached !== undefined) {
+      return cached
     }
     try {
-      return (jsonInputResult = { ok: true, value: jsonStringify(hookInput) })
+      const payload = forOwnTool
+        ? (remapHookInputForOwnTool(hookInput)?.hookInput ?? hookInput)
+        : hookInput
+      const next = { ok: true as const, value: jsonStringify(payload) }
+      if (forOwnTool) jsonInputOwnToolResult = next
+      else jsonInputResult = next
+      return next
     } catch (error) {
       logError(
         Error(`Failed to stringify hook ${hookName} input`, { cause: error }),
       )
-      return (jsonInputResult = { ok: false, error })
+      const next = { ok: false as const, error }
+      if (forOwnTool) jsonInputOwnToolResult = next
+      else jsonInputResult = next
+      return next
     }
   }
 
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(async function* (
-    { hook, pluginRoot, pluginId, skillRoot },
+    { hook, pluginRoot, pluginId, skillRoot, asOwnTool },
     hookIndex,
   ): AsyncGenerator<HookResult> {
     if (hook.type === 'callback') {
@@ -3062,7 +3179,7 @@ async function* executeHooks({
     const hookCommand = getHookDisplayText(hook)
 
     try {
-      const jsonInputRes = getJsonInput()
+      const jsonInputRes = getJsonInput(asOwnTool === true)
       if (!jsonInputRes.ok) {
         yield {
           message: createAttachmentMessage({
@@ -3109,7 +3226,12 @@ async function* executeHooks({
             att.durationMs = Date.now() - hookStartMs
           }
         }
-        yield promptResult
+        // densable timedOut:!h?.aborted — parent abort is cancelled, not timeout.
+        if (promptResult.outcome === 'cancelled' && !signal?.aborted) {
+          yield { ...promptResult, timedOut: true }
+        } else {
+          yield promptResult
+        }
         cleanup?.()
         return
       }
@@ -3637,6 +3759,7 @@ async function* executeHooks({
       yield {
         preventContinuation: true,
         stopReason: result.stopReason,
+        hook: result.hook,
       }
     }
 
@@ -3644,11 +3767,22 @@ async function* executeHooks({
     if (result.blockingError) {
       yield {
         blockingError: result.blockingError,
+        stopReason: result.stopReason,
+        hook: result.hook,
       }
     }
 
     if (result.message) {
-      yield { message: result.message }
+      yield { message: result.message, hook: result.hook }
+    }
+
+    // densable: Mo.timedOut && prompt && Stop → yield {hook, timedOut:true}
+    if (
+      result.timedOut &&
+      result.hook.type === 'prompt' &&
+      hookEvent === 'Stop'
+    ) {
+      yield { hook: result.hook, timedOut: true }
     }
 
     // densable 2.1.248 rA.noteHookFailure(o, wwt(ue, stderr))
@@ -4524,6 +4658,44 @@ export async function* executePostToolUseFailureHooks<ToolInput>(
   })
 }
 
+/**
+ * densable Acn — PostToolBatch after every tool in a batch has resolved.
+ * Gold does not pass matchQuery (d0e has no PostToolBatch case).
+ */
+export async function* executePostToolBatchHooks(
+  toolCalls: Array<{
+    tool_name: string
+    tool_input: unknown
+    tool_use_id: string
+    tool_response?: unknown
+  }>,
+  toolUseID: string,
+  toolUseContext: ToolUseContext,
+  permissionMode?: string,
+  signal?: AbortSignal,
+  timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+): AsyncGenerator<AggregatedHookResult> {
+  const appState = toolUseContext.getAppState()
+  const sessionId = toolUseContext.agentId ?? getSessionId()
+  if (!hasHookForEvent('PostToolBatch', appState, sessionId)) {
+    return
+  }
+
+  const hookInput: PostToolBatchHookInput = {
+    ...createBaseHookInput(permissionMode, undefined, toolUseContext),
+    hook_event_name: 'PostToolBatch',
+    tool_calls: toolCalls,
+  }
+
+  yield* executeHooks({
+    hookInput,
+    toolUseID,
+    signal,
+    timeoutMs,
+    toolUseContext,
+  })
+}
+
 export async function* executePermissionDeniedHooks<ToolInput>(
   toolName: string,
   toolUseID: string,
@@ -4865,6 +5037,158 @@ export async function* executeUserPromptSubmitHooks(
     toolUseContext,
     requestPrompt,
   })
+}
+
+/**
+ * densable AMr — UserPromptExpansion command hooks.
+ */
+export async function* executeUserPromptExpansionHooks(
+  expansionType: 'slash_command' | 'mcp_prompt',
+  commandName: string,
+  commandArgs: string,
+  commandSource: string | undefined,
+  prompt: string,
+  permissionMode: string,
+  toolUseContext: ToolUseContext,
+): AsyncGenerator<AggregatedHookResult> {
+  const appState = toolUseContext.getAppState()
+  const sessionId = toolUseContext.agentId ?? getSessionId()
+  if (!hasHookForEvent('UserPromptExpansion', appState, sessionId)) {
+    return
+  }
+
+  const hookInput: UserPromptExpansionHookInput = {
+    ...createBaseHookInput(permissionMode, undefined, toolUseContext),
+    hook_event_name: 'UserPromptExpansion',
+    expansion_type: expansionType,
+    command_name: commandName,
+    command_args: commandArgs,
+    command_source: commandSource,
+    prompt,
+  }
+
+  yield* executeHooks({
+    hookInput,
+    toolUseID: randomUUID(),
+    signal: toolUseContext.abortController.signal,
+    timeoutMs: TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+    toolUseContext,
+  })
+}
+
+export type UserPromptExpansionMessage =
+  | UserMessage
+  | AssistantMessage
+  | AttachmentMessage
+  | SystemMessage
+  | ProgressMessage
+
+export type UserPromptExpansionBlocked<T> = {
+  blocked: {
+    messages: UserPromptExpansionMessage[]
+    shouldQuery: false
+    resultText: string
+    command: T
+  }
+}
+
+export type UserPromptExpansionOk = {
+  hookMessages: UserPromptExpansionMessage[]
+}
+
+/**
+ * densable Ze — run UserPromptExpansion around a slash / MCP prompt expansion.
+ */
+export async function runUserPromptExpansionHook<
+  T extends { name: string; source?: string },
+>(
+  command: T,
+  args: string,
+  toolUseContext: ToolUseContext,
+): Promise<UserPromptExpansionBlocked<T> | UserPromptExpansionOk> {
+  const hookMessages: UserPromptExpansionMessage[] = []
+  const prompt = args ? `/${command.name} ${args}` : `/${command.name}`
+  try {
+    const permissionMode =
+      toolUseContext.getAppState().toolPermissionContext.mode
+    for await (const result of executeUserPromptExpansionHooks(
+      command.source === 'mcp' ? 'mcp_prompt' : 'slash_command',
+      command.name,
+      args,
+      command.source,
+      prompt,
+      permissionMode,
+      toolUseContext,
+    )) {
+      if (result.message?.type === 'progress') {
+        continue
+      }
+      if (result.blockingError) {
+        const blockingMessage = getUserPromptExpansionHookBlockingMessage(
+          result.blockingError,
+        )
+        const blockText = result.suppressOriginalPrompt
+          ? blockingMessage
+          : `${blockingMessage}\n\nOriginal prompt: ${prompt}`
+        return {
+          blocked: {
+            messages: [
+              createSystemMessage(blockText, 'warning', undefined, true),
+            ],
+            shouldQuery: false,
+            resultText: blockText,
+            command,
+          },
+        }
+      }
+      if (result.preventContinuation) {
+        const stopText = result.stopReason
+          ? `Operation stopped by hook: ${result.stopReason}`
+          : 'Operation stopped by hook'
+        return {
+          blocked: {
+            messages: [
+              createUserMessage({ content: stopText, isMeta: true }),
+              createSystemMessage(stopText, 'warning', undefined, true),
+            ],
+            shouldQuery: false,
+            resultText: stopText,
+            command,
+          },
+        }
+      }
+      if (result.additionalContexts?.length) {
+        hookMessages.push(
+          createAttachmentMessage({
+            type: 'hook_additional_context',
+            content: result.additionalContexts,
+            hookName: 'UserPromptExpansion',
+            toolUseID: `hook-${randomUUID()}`,
+            hookEvent: 'UserPromptExpansion',
+          }),
+        )
+      }
+      const hookMessage = result.message
+      if (
+        hookMessage &&
+        !(
+          hookMessage.type === 'attachment' &&
+          hookMessage.attachment?.type === 'hook_success' &&
+          hookMessage.attachment.content === ''
+        )
+      ) {
+        hookMessages.push(hookMessage as UserPromptExpansionMessage)
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof ControlStreamClosedError)) {
+      throw err
+    }
+    logForDebugging(
+      'UserPromptExpansion hooks cancelled (control stream closed)',
+    )
+  }
+  return { hookMessages }
 }
 
 /**

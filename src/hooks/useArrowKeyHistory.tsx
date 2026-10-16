@@ -3,12 +3,26 @@ import { getModeFromInput } from 'src/components/PromptInput/inputModes.js';
 import { useNotifications } from 'src/context/notifications.js';
 import { ConfigurableShortcutHint } from '../components/ConfigurableShortcutHint.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT } from '../components/PromptInput/Notifications.js';
-import { getHistory, renumberHistoryEntryPastes } from '../history.js';
+import { countHistoryForProject, getHistory, renumberHistoryEntryPastes } from '../history.js';
 import { Text } from '@anthropic/ink';
 import type { PromptInputMode } from '../types/textInputTypes.js';
 import type { HistoryEntry, PastedContent } from '../utils/config.js';
 
 export type HistoryMode = PromptInputMode;
+
+/**
+ * densable Gie — prompt-border History chip while arrow-browsing.
+ * index===0 or edited → hide; total still loading → "History"; else N/M.
+ */
+export function formatHistoryBorderLabel(
+  historyIndex: number,
+  historyTotal: number | null,
+  historyEdited: boolean,
+): string | undefined {
+  if (historyIndex === 0 || historyEdited) return undefined;
+  if (historyTotal === null) return 'History';
+  return `History ${Math.max(1, historyTotal - historyIndex + 1)}/${historyTotal}`;
+}
 
 // Load history entries in chunks to reduce disk reads on rapid keypresses
 const HISTORY_CHUNK_SIZE = 10;
@@ -72,6 +86,8 @@ export function useArrowKeyHistory(
   currentMode?: HistoryMode,
 ): {
   historyIndex: number;
+  historyTotal: number | null;
+  historyEdited: boolean;
   setHistoryIndex: (index: number) => void;
   onHistoryUp: () => void;
   onHistoryDown: () => boolean;
@@ -79,6 +95,7 @@ export function useArrowKeyHistory(
   dismissSearchHint: () => void;
 } {
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [historyTotal, setHistoryTotal] = useState<number | null>(null);
   const [lastShownHistoryEntry, setLastShownHistoryEntry] = useState<
     (HistoryEntry & { mode?: HistoryMode }) | undefined
   >(undefined);
@@ -97,6 +114,9 @@ export function useArrowKeyHistory(
   // Track the mode filter that was active when history navigation started
   // This is set on the first arrow press and stays fixed until reset
   const initialModeFilterRef = useRef<HistoryMode | undefined>(undefined);
+  // densable Kt — last recalled input; he!==Kt → historyEdited hides Gie.
+  const lastRecalledValueRef = useRef<string | null>(null);
+  const historyCountGenRef = useRef(0);
 
   // Refs to track current input values for draft preservation
   // These ensure we capture the draft with the latest values, not stale closure values
@@ -111,8 +131,11 @@ export function useArrowKeyHistory(
 
   const setInputWithCursor = useCallback(
     (value: string, mode: HistoryMode, contents: Record<number, PastedContent>, cursorToStart = false): void => {
-      onSetInput(value, mode, contents);
-      setCursorOffset?.(cursorToStart ? 0 : value.length);
+      // densable ro: tab-normalize then Kt = last recalled/set value.
+      const normalized = value.replaceAll('\t', '    ');
+      lastRecalledValueRef.current = normalized;
+      onSetInput(normalized, mode, contents);
+      setCursorOffset?.(cursorToStart ? 0 : normalized.length);
     },
     [onSetInput, setCursorOffset],
   );
@@ -175,6 +198,17 @@ export function useArrowKeyHistory(
               mode: modeAtPress,
             }
           : undefined,
+      );
+
+      const gen = ++historyCountGenRef.current;
+      const countFilter = initialModeFilterRef.current;
+      setHistoryTotal(null);
+      // densable _Fo(Fo?(un)=>o_(un)===Fo:void 0)
+      void countHistoryForProject(countFilter ? display => getModeFromInput(display) === countFilter : undefined).then(
+        n => {
+          if (historyCountGenRef.current !== gen) return;
+          setHistoryTotal(n);
+        },
       );
     }
 
@@ -252,6 +286,9 @@ export function useArrowKeyHistory(
     setHistoryIndex(0);
     historyIndexRef.current = 0;
     initialModeFilterRef.current = undefined;
+    lastRecalledValueRef.current = null;
+    historyCountGenRef.current++;
+    setHistoryTotal(null);
     removeNotification('search-history-hint');
     historyCache.current = [];
     historyCacheModeFilter.current = undefined;
@@ -261,8 +298,12 @@ export function useArrowKeyHistory(
     removeNotification('search-history-hint');
   }, [removeNotification]);
 
+  const historyEdited = historyIndex > 0 && currentInput !== lastRecalledValueRef.current;
+
   return {
     historyIndex,
+    historyTotal,
+    historyEdited,
     setHistoryIndex,
     onHistoryUp,
     onHistoryDown,

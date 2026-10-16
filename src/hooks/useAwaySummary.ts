@@ -9,17 +9,63 @@ import { isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { isAwaySummaryEnvEnabled } from '../utils/residualFinalEnvGates.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
 
-const BLUR_DELAY_MS = 5 * 60_000
+/** densable hrt=180000 — generate recap while blurred (not on focus). */
+const BLUR_DELAY_MS = 180_000
+/** densable xgo=30000 — Lgo floor for GB delayMs. */
+const MIN_RECAP_DELAY_MS = 30_000
+/** densable Dgo=3 — first N recaps append disable-in-/config trailer. */
+const RECAP_TRAILER_COUNT = 3
+const RECAP_TRAILER = ' (disable recaps in /config)'
+/** densable Igo=3 / Ego=2 — human turns before first recap / between recaps. */
+const MIN_USERS_BEFORE_FIRST_RECAP = 3
+const MIN_USERS_SINCE_LAST_RECAP = 2
 
 type SetMessages = (updater: (prev: Message[]) => Message[]) => void
 
+function isHumanUserTurn(m: Message): boolean {
+  return m.type === 'user' && !m.isMeta && !m.isCompactSummary && !m.isVirtual
+}
+
 function hasSummarySinceLastUserTurn(messages: readonly Message[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
+  const last = messages.at(-1)
+  return last?.type === 'system' && last.subtype === 'away_summary'
+}
+
+/** densable Ogo — enough human turns to warrant a recap. */
+export function shouldRecapByTurnCount(messages: readonly Message[]): boolean {
+  let users = 0
+  let lastRecap = -1
+  for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!
-    if (m.type === 'user' && !m.isMeta && !m.isCompactSummary) return false
-    if (m.type === 'system' && m.subtype === 'away_summary') return true
+    if (isHumanUserTurn(m)) users++
+    if (m.type === 'system' && m.subtype === 'away_summary') lastRecap = i
   }
-  return false
+  if (users < MIN_USERS_BEFORE_FIRST_RECAP) return false
+  if (lastRecap === -1) return true
+  let since = 0
+  for (let i = lastRecap + 1; i < messages.length; i++) {
+    if (isHumanUserTurn(messages[i]!)) since++
+  }
+  return since >= MIN_USERS_SINCE_LAST_RECAP
+}
+
+/**
+ * densable Lgo — GB `tengu_sedge_lantern_config.delayMs`, floor xgo, else hrt.
+ */
+export function resolveRecapDelayMs(
+  config?: { delayMs?: unknown } | null,
+): number {
+  const resolved =
+    config !== undefined
+      ? config
+      : getFeatureValue_CACHED_MAY_BE_STALE('tengu_sedge_lantern_config', {
+          delayMs: BLUR_DELAY_MS,
+        })
+  const delay = resolved?.delayMs
+  if (typeof delay === 'number' && Number.isFinite(delay)) {
+    return Math.max(MIN_RECAP_DELAY_MS, delay)
+  }
+  return BLUR_DELAY_MS
 }
 
 /**
@@ -36,7 +82,7 @@ export function isAwaySummaryLiveEnabled(opts: {
   if (isEnvDefinedFalsy(env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY)) return false
   if (isAwaySummaryEnvEnabled(env)) return true
   if (!opts.featureOn) return false
-  if (!opts.gbEnabled) return false
+  // densable Ube: enabled = awaySummaryEnabled (GB only tunes delayMs).
   if (opts.awaySummaryEnabled === false) return false
   return true
 }
@@ -53,13 +99,13 @@ export function shouldGenerateAwaySummary(opts: {
 }): boolean {
   if (!isAwaySummaryLiveEnabled(opts)) return false
   if (hasSummarySinceLastUserTurn(opts.messages)) return false
+  if (!shouldRecapByTurnCount(opts.messages)) return false
   return true
 }
 
 /**
- * Appends a "while you were away" summary message after the terminal has been
- * blurred for 5 minutes. Fires only when (a) 5min since blur, (b) no turn in
- * progress, and (c) no existing away_summary since the last user message.
+ * densable Hbe: generate recap while blurred (~3 min, hrt). Do not abort on
+ * focus — the recap must already be in the transcript when the user returns.
  *
  * For terminals that don't support DECSET 1004 focus events (CMD, PowerShell),
  * falls back to idle-based detection: starts an idle timer after each turn
@@ -75,7 +121,11 @@ export function useAwaySummary(
   const messagesRef = useRef(messages)
   const isLoadingRef = useRef(isLoading)
   const pendingRef = useRef(false)
+  const recapCountRef = useRef(0)
+  const lastTurnEndRef = useRef<number | null>(null)
+  const wasLoadingRef = useRef(isLoading)
   const generateRef = useRef<(() => Promise<void>) | null>(null)
+  const armAwayTimerRef = useRef<(() => void) | null>(null)
   const awaySummaryEnabled = useAppState(s => s.awaySummaryEnabled)
   const awaySummaryEnabledRef = useRef(awaySummaryEnabled)
 
@@ -141,29 +191,48 @@ export function useAwaySummary(
       ) {
         return
       }
-      setMessages(prev => [...prev, createAwaySummaryMessage(text)])
+      const n = recapCountRef.current
+      recapCountRef.current = n + 1
+      const content = n < RECAP_TRAILER_COUNT ? `${text}${RECAP_TRAILER}` : text
+      setMessages(prev => [...prev, createAwaySummaryMessage(content)])
     }
 
-    function onBlurTimerFire(): void {
-      timerRef.current = null
-      if (isLoadingRef.current) {
-        pendingRef.current = true
-        return
-      }
-      void generate()
+    function armAwayTimer(): void {
+      clearTimer()
+      if (isLoadingRef.current) return
+      // densable #P: #r null → no wait. Remaining = Lgo − elapsed since turn-end.
+      const turnEnd = lastTurnEndRef.current
+      if (turnEnd === null) return
+      const remaining = Math.max(
+        0,
+        resolveRecapDelayMs() - (Date.now() - turnEnd),
+      )
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        if (isLoadingRef.current) {
+          pendingRef.current = true
+          return
+        }
+        const focus = getTerminalFocusState()
+        if (focus !== 'blurred' && focus !== 'unknown') return
+        void generate()
+      }, remaining)
     }
 
     function onFocusChange(): void {
       const state = getTerminalFocusState()
-      if (state === 'blurred' || state === 'unknown') {
-        // For 'unknown' terminals (CMD, PowerShell), treat mount as
-        // potentially away — start idle timer. The isLoading effect
-        // below resets the timer on each turn transition.
+      if (state === 'blurred') {
+        // densable #M blurred → #P
+        armAwayTimer()
+        return
+      }
+      if (state === 'unknown') {
+        // no DECSET 1004: turn-end effect arms idle timer
+        return
+      }
+      if (state === 'focused') {
+        // densable #M focused: clear wait timer; do NOT abort in-flight generate.
         clearTimer()
-        timerRef.current = setTimeout(onBlurTimerFire, BLUR_DELAY_MS)
-      } else if (state === 'focused') {
-        clearTimer()
-        abortInFlight()
         pendingRef.current = false
       }
     }
@@ -172,38 +241,25 @@ export function useAwaySummary(
     // Handle the case where we're already blurred when the effect mounts
     onFocusChange()
     generateRef.current = generate
+    armAwayTimerRef.current = armAwayTimer
 
     return () => {
       unsubscribe()
       clearTimer()
       abortInFlight()
       generateRef.current = null
+      armAwayTimerRef.current = null
     }
   }, [gbEnabled, setMessages, awaySummaryEnabled, featureOn])
 
-  // Timer fired mid-turn → fire when turn ends (if still away)
+  // densable setInputs: turn-end (#o false) → #P if still away.
+  // unknown terminals KEEP idle-after-turn (gold #P fire is blurred-only).
   useEffect(() => {
-    if (isLoading) return
-    if (!pendingRef.current) return
-    if (
-      !isAwaySummaryLiveEnabled({
-        awaySummaryEnabled: awaySummaryEnabledRef.current,
-        gbEnabled,
-        featureOn,
-      })
-    ) {
-      return
+    if (wasLoadingRef.current && !isLoading) {
+      lastTurnEndRef.current = Date.now()
     }
-    const state = getTerminalFocusState()
-    if (state !== 'blurred' && state !== 'unknown') return
-    void generateRef.current?.()
-  }, [isLoading, gbEnabled, featureOn])
+    wasLoadingRef.current = isLoading
 
-  // For 'unknown' terminals: use isLoading transitions as presence signal.
-  // User starts a turn → they're present, cancel idle timer.
-  // Turn ends → restart idle timer.
-  useEffect(() => {
-    if (getTerminalFocusState() !== 'unknown') return
     if (
       !isAwaySummaryLiveEnabled({
         awaySummaryEnabled: awaySummaryEnabledRef.current,
@@ -215,27 +271,24 @@ export function useAwaySummary(
     }
 
     if (isLoading) {
-      // User is actively using — cancel idle timer
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
-      abortRef.current?.abort()
-      abortRef.current = null
+      return
+    }
+
+    const state = getTerminalFocusState()
+    if (pendingRef.current) {
       pendingRef.current = false
-    } else {
-      // Turn ended — restart idle timer
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current)
-      }
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        if (isLoadingRef.current) {
-          pendingRef.current = true
-          return
-        }
+      if (state === 'blurred' || state === 'unknown') {
         void generateRef.current?.()
-      }, BLUR_DELAY_MS)
+      }
+      return
+    }
+
+    if (state === 'blurred' || state === 'unknown') {
+      armAwayTimerRef.current?.()
     }
   }, [isLoading, gbEnabled, awaySummaryEnabled, featureOn])
 }
