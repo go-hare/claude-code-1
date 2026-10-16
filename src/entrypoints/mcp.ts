@@ -13,12 +13,14 @@ import {
 import { getTools } from '../tools.js'
 import { createAbortController } from '../utils/abortController.js'
 import { createFileStateCacheWithSizeLimit } from '../utils/fileStateCache.js'
+import { ToolStateSlots } from '../utils/toolState.js'
 import { logError } from '../utils/log.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import { getMainLoopModel } from '../utils/model/model.js'
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
 import { setCwd } from '../utils/Shell.js'
 import { jsonStringify } from '../utils/slowOperations.js'
+import { credentialsStoreFor } from '../utils/storageV5/credentialsStore.js'
 import { formatZodValidationError, getErrorParts } from '../utils/toolErrors.js'
 import { zodToJsonSchema } from '../utils/zodToJsonSchema.js'
 
@@ -38,17 +40,36 @@ type McpToolOutputSchema = {
 
 const MCP_COMMANDS: Command[] = [review]
 
+/**
+ * densable Ee persist pair. `storageV5` is caller parameter `s`
+ * (mcp serve passes "raw", and Ee does not rebind `s`). credentials
+ * is Nx(s) via credentialsStoreFor, computed once for the server.
+ */
+export function mcpServeToolStorage(storageV5: unknown): {
+  storageV5: unknown
+  credentials: ReturnType<typeof credentialsStoreFor>
+} {
+  return {
+    storageV5,
+    credentials: credentialsStoreFor(storageV5),
+  }
+}
+
 export async function startMCPServer(
   cwd: string,
   debug: boolean,
   verbose: boolean,
+  // densable Ee `s`. mcp serve passes the literal "raw".
+  storageV5: unknown,
 ): Promise<void> {
+  const persist = mcpServeToolStorage(storageV5)
   // Use size-limited LRU cache for readFileState to prevent unbounded memory growth
   // 100 files and 25MB limit should be sufficient for MCP server operations
   const READ_FILE_STATE_CACHE_SIZE = 100
   const readFileStateCache = createFileStateCacheWithSizeLimit(
     READ_FILE_STATE_CACHE_SIZE,
   )
+  const toolState = new ToolStateSlots()
   setCwd(cwd)
   const server = new Server(
     {
@@ -149,10 +170,13 @@ export async function startMCPServer(
         setSessionToolPermissionContext: () => {},
         messages: [],
         readFileState: readFileStateCache,
+        toolState,
         setInProgressToolUseIDs: () => {},
         setResponseLength: () => {},
         updateFileHistoryState: () => {},
         updateAttributionState: () => {},
+        storageV5: persist.storageV5,
+        credentials: persist.credentials,
       }
 
       // densable main loop (toolExecution): coerceInput → safeParse → validateInput → call.

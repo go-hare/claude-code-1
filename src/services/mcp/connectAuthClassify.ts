@@ -81,9 +81,10 @@ export function resolveConnectAuthFlags(
 }
 
 /**
- * Official `k=ce||re||L||me?void 0:new EFe`. Leftover has no cliOwned / first-
- * party auto-auth host — only land the Authorization-already-set pair.
- * Dig 2026-10-04: still no densable `class h` cliOwned* / OEe mount host.
+ * Official `k=ce||re||L||me?void 0:new EFe` Authorization pair only (ce||re).
+ * `me` (Ste / cliOwnedBearerProviders) is applied at resolveRemoteConnectAuth
+ * via getCliOwnedBearerProvider. `L` (o$ / Jn / Bt) is shouldUseFirstPartyAutoAuth
+ * — not Design jo. Do not fold jo into this leftover.
  */
 export function shouldSkipOAuthAuthProvider(flags: ConnectAuthFlags): boolean {
   return flags.hasUserAuthHeader || flags.helperMintsAuthHeader

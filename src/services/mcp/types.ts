@@ -132,6 +132,8 @@ const McpOAuthConfigSchema = lazySchema(() =>
       })
       .optional(),
     xaa: McpXaaConfigSchema().optional(),
+    /** densable oauth.scopes — space-separated allowed step-up scopes. */
+    scopes: z.string().optional(),
   }),
 )
 

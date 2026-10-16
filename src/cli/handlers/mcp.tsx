@@ -171,7 +171,7 @@ export async function mcpServeHandler({ debug, verbose }: { debug?: boolean; ver
     const { setup } = await import('../../setup.js');
     await setup(providedCwd, 'default', false, false, undefined, false);
     const { startMCPServer } = await import('../../entrypoints/mcp.js');
-    await startMCPServer(providedCwd, debug ?? false, verbose ?? false);
+    await startMCPServer(providedCwd, debug ?? false, verbose ?? false, 'raw');
   } catch (error) {
     cliError(`Error: Failed to start MCP server: ${error}`);
   }

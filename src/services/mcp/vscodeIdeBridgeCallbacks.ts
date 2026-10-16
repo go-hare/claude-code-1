@@ -17,10 +17,7 @@ import { isModelAllowed } from 'src/utils/model/modelAllowlist.js'
 import { isRefusalFallbackEnabled } from 'src/utils/refusalFallback.js'
 import { updateSettingsForSource } from 'src/utils/settings/settings.js'
 import { isFeedbackSurveyDisabled } from 'src/services/analytics/config.js'
-import {
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
-  getFeatureValue_CACHED_MAY_BE_STALE,
-} from 'src/services/analytics/growthbook.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -64,12 +61,12 @@ function readClientDataMeadowLantern(): boolean {
 
 /**
  * densable 2.1.289 `Qbn`: `k("tengu_harbor_willow", !0) || meadow_lantern===true`.
- * (Older HIn notes said default false; silent auto-default path is Qbn default true.)
- * Local gate default for tengu_harbor_willow is true when GB is hollow.
+ * Gold `k` miss-default is true. `checkStatsig` miss is false and would leave
+ * no-CLI-mode sessions on `default`, so Ut never arms SubagentHandback (Image 34).
  */
 export function isAutoDefaultLaunchEnabled(): boolean {
   return (
-    checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_harbor_willow') ||
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_willow', true) ||
     readClientDataMeadowLantern()
   )
 }

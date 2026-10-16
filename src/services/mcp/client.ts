@@ -46,8 +46,10 @@ import {
   isMcpCcrProxyServerConfig,
   resolveMcpNegotiationTransportKind,
   resolveMcpProtocolNegotiationPlan,
+  shouldApplyLegacyHttpSseGet401Guard,
   shouldPreserveConnectTimeoutAfterPinnedLegacyRetry,
   truncateMcpErrorSnippet,
+  wrapLegacyHttpSseGet401Guard,
   type McpProbeFallbackReason,
   type McpProbeTimedOutTransport,
 } from './mcpConnectTimeout.js'
@@ -121,7 +123,13 @@ import {
   getWebSocketProxyUrl,
 } from '../../utils/proxy.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
-import { getCliOwnedBearerProvider } from './cliOwnedConfigs.js'
+import {
+  getCliOwnedAsyncBearerProvider,
+  getCliOwnedBearerProvider,
+  isCliOwnedBearerConfig,
+  isCliOwnedConfig,
+  wrapCliOwnedFetch,
+} from './cliOwnedConfigs.js'
 import {
   getRegisteredUpstreamProxyEnv,
   subprocessEnv,
@@ -142,6 +150,12 @@ import {
   runElicitationHooks,
   runElicitationResultHooks,
 } from './elicitationHandler.js'
+import {
+  applyConnectorDesignMembership,
+  connectorDesignOmitsPersistentAllow,
+  connectorDesignTokenlessWriteDeny,
+  isFirstPartyDesignMcpServer,
+} from './connectorDesign.js'
 import {
   isMcpRequiresUserInteraction,
   mcpToolCheckPermissionsResult,
@@ -224,6 +238,14 @@ import {
   type ConnectAuthHeaderRejection,
 } from './connectAuthClassify.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
+import {
+  classifyFirstPartyAuthRejection,
+  isFirstPartyAnthropicMcpUrl,
+  shouldUseFirstPartyAutoAuth,
+  wrapFirstPartyAutoAuthFetch,
+  type FirstPartyAuthRejection,
+  type FirstPartyBearerBag,
+} from './mcpFirstPartyAutoAuth.js'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
@@ -241,10 +263,25 @@ import type {
  */
 export class McpAuthError extends Error {
   serverName: string
-  constructor(serverName: string, message: string) {
+  authErrorKind: 'token_expired' | 'insufficient_scope' | 'not_connected'
+  firstPartyBearer?: unknown
+  requestedScope?: string
+  constructor(
+    serverName: string,
+    message: string,
+    authErrorKind:
+      | 'token_expired'
+      | 'insufficient_scope'
+      | 'not_connected' = 'token_expired',
+    firstPartyBearer?: unknown,
+    requestedScope?: string,
+  ) {
     super(message)
     this.name = 'McpAuthError'
     this.serverName = serverName
+    this.authErrorKind = authErrorKind
+    this.firstPartyBearer = firstPartyBearer
+    this.requestedScope = requestedScope
   }
 }
 
@@ -441,18 +478,28 @@ function mcpBaseUrlAnalytics(serverRef: ScopedMcpServerConfig): {
  */
 function wrapRemoteMcpFetch(
   authProvider: ClaudeAuthProvider | undefined,
+  firstPartyBag?: FirstPartyBearerBag,
+  serverRef?: object,
 ): FetchLike {
   const base = createFetchWithInit()
-  return wrapFetchWithTimeout(
-    authProvider ? wrapFetchWithStepUpDetection(base, authProvider) : base,
-  )
+  let fetch: FetchLike = authProvider
+    ? wrapFetchWithStepUpDetection(base, authProvider)
+    : base
+  // Gold: if(k) U=jZe(U,k); U=St(U,t); if(L) U=Gt(U,d).
+  // Gt = Hr — per-request Ukn/Bkn/jkn on cli-owned configs (not Bt).
+  fetch = wrapFetchWithTimeout(fetch)
+  if (firstPartyBag) fetch = wrapFirstPartyAutoAuthFetch(fetch, firstPartyBag)
+  if (serverRef && isCliOwnedConfig(serverRef)) {
+    fetch = wrapCliOwnedFetch(fetch, serverRef)
+  }
+  return fetch
 }
 
 function connectAuthRejectedResult(
   name: string,
   serverRef: ScopedMcpServerConfig,
   transportType: 'sse' | 'http',
-  classified: ConnectAuthHeaderRejection,
+  classified: ConnectAuthHeaderRejection | FirstPartyAuthRejection,
 ): MCPServerConnection {
   logEvent('tengu_mcp_server_connection_failed', {
     transportType:
@@ -468,7 +515,7 @@ function connectAuthRejectedResult(
     config: serverRef,
     error: classified.message,
     errorCode: classified.errorCode,
-    ...(classified.displayDetail !== undefined
+    ...('displayDetail' in classified && classified.displayDetail !== undefined
       ? { displayDetail: classified.displayDetail }
       : {}),
   }
@@ -487,17 +534,40 @@ function maybeConnectAuthHeaderRejection(
   })
 }
 
-function resolveRemoteConnectAuth(
+async function resolveRemoteConnectAuth(
   name: string,
   serverRef: ScopedMcpServerConfig,
   combinedHeaders: Record<string, string>,
-): {
+): Promise<{
   flags: ConnectAuthFlags
   authProvider: ClaudeAuthProvider | undefined
-} {
+  useFirstPartyAuth: boolean
+}> {
   const flags = resolveConnectAuthFlags(serverRef, combinedHeaders)
-  // Official `k=ce||re||…?void 0:new EFe` — no authProvider → no OAuth discovery.
-  const authProvider = shouldSkipOAuthAuthProvider(flags)
+  // Official `k=ce||re||L||me?void 0:new EFe`.
+  // ce/re = Authorization already set. me skip EFe stays Ste (sync bearer).
+  // L !me uses bOe (sync or async). L = o$+Jn+mn token || (Vx && e9), not jo.
+  const cliOwned =
+    getCliOwnedBearerProvider(serverRef) !== undefined ||
+    getCliOwnedAsyncBearerProvider(serverRef) !== undefined
+  const useFirstPartyAuth = await shouldUseFirstPartyAutoAuth({
+    type: serverRef.type,
+    url: 'url' in serverRef ? serverRef.url : undefined,
+    flags,
+    cliOwned,
+  })
+  if (useFirstPartyAuth) {
+    logEvent('tengu_mcp_first_party_auto_auth', {
+      transportType:
+        serverRef.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...mcpBaseUrlAnalytics(serverRef),
+    })
+  }
+  const skipOAuth =
+    shouldSkipOAuthAuthProvider(flags) ||
+    isCliOwnedBearerConfig(serverRef) ||
+    useFirstPartyAuth
+  const authProvider = skipOAuth
     ? undefined
     : new ClaudeAuthProvider(
         name,
@@ -505,7 +575,7 @@ function resolveRemoteConnectAuth(
           | import('./types.js').McpSSEServerConfig
           | import('./types.js').McpHTTPServerConfig,
       )
-  return { flags, authProvider }
+  return { flags, authProvider, useFirstPartyAuth }
 }
 
 function handleRemoteAuthFailure(
@@ -827,6 +897,8 @@ export const connectToServer = memoize(
     try {
       let transport: Transport
       let connectAuthFlags: ConnectAuthFlags | undefined
+      let useFirstPartyAuth = false
+      const firstPartyBearerBag: FirstPartyBearerBag = { last: 'none' }
 
       // If we have the session ingress JWT, we will connect via the session ingress rather than
       // to remote MCP's directly.
@@ -835,13 +907,17 @@ export const connectToServer = memoize(
       if (serverRef.type === 'sse') {
         // Get combined headers (static + dynamic) before deciding on OAuth.
         const combinedHeaders = await getMcpServerHeaders(name, serverRef)
-        const remoteAuth = resolveRemoteConnectAuth(
+        const remoteAuth = await resolveRemoteConnectAuth(
           name,
           serverRef,
           combinedHeaders,
         )
         connectAuthFlags = remoteAuth.flags
+        useFirstPartyAuth = remoteAuth.useFirstPartyAuth
         const authProvider = remoteAuth.authProvider
+        const firstPartyBag = useFirstPartyAuth
+          ? firstPartyBearerBag
+          : undefined
 
         // Use the auth provider with SSEClientTransport
         const transportOptions: SSEClientTransportOptions = {
@@ -849,7 +925,7 @@ export const connectToServer = memoize(
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
-          fetch: wrapRemoteMcpFetch(authProvider),
+          fetch: wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
           requestInit: {
             headers: {
               'User-Agent': getMCPUserAgent(),
@@ -863,29 +939,33 @@ export const connectToServer = memoize(
         // to receive server-sent events), so applying a 60-second timeout would kill it.
         // The timeout is only meant for individual API requests (POST, auth refresh), not
         // the persistent SSE stream.
-        transportOptions.eventSourceInit = {
-          fetch: async (url: string | URL, init?: RequestInit) => {
-            // Get auth headers from the auth provider
-            const authHeaders: Record<string, string> = {}
-            const tokens = await authProvider?.tokens()
-            if (tokens) {
-              authHeaders.Authorization = `Bearer ${tokens.access_token}`
-            }
+        const sseEventSourceFetch: FetchLike = async (url, init) => {
+          // Get auth headers from the auth provider
+          const authHeaders: Record<string, string> = {}
+          const tokens = await authProvider?.tokens()
+          if (tokens) {
+            authHeaders.Authorization = `Bearer ${tokens.access_token}`
+          }
 
-            const proxyOptions = getProxyFetchOptions()
-            // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-            return fetch(url, {
-              ...init,
-              ...proxyOptions,
-              headers: {
-                'User-Agent': getMCPUserAgent(),
-                ...authHeaders,
-                ...init?.headers,
-                ...combinedHeaders,
-                Accept: 'text/event-stream',
-              },
-            })
-          },
+          const proxyOptions = getProxyFetchOptions()
+          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+          return fetch(url, {
+            ...init,
+            ...proxyOptions,
+            headers: {
+              'User-Agent': getMCPUserAgent(),
+              ...authHeaders,
+              ...init?.headers,
+              ...combinedHeaders,
+              Accept: 'text/event-stream',
+            },
+          })
+        }
+        // Gold: v?Trn(ve,v):X?Bt(ve,u,he):ve — L wrap, not timeout (GET SSE).
+        transportOptions.eventSourceInit = {
+          fetch: firstPartyBag
+            ? wrapFirstPartyAutoAuthFetch(sseEventSourceFetch, firstPartyBag)
+            : sseEventSourceFetch,
         }
 
         transport = new SSEClientTransport(
@@ -1018,13 +1098,17 @@ export const connectToServer = memoize(
 
         // Get combined headers (static + dynamic) before deciding on OAuth.
         const combinedHeaders = await getMcpServerHeaders(name, serverRef)
-        const remoteAuth = resolveRemoteConnectAuth(
+        const remoteAuth = await resolveRemoteConnectAuth(
           name,
           serverRef,
           combinedHeaders,
         )
         connectAuthFlags = remoteAuth.flags
+        useFirstPartyAuth = remoteAuth.useFirstPartyAuth
         const authProvider = remoteAuth.authProvider
+        const firstPartyBag = useFirstPartyAuth
+          ? firstPartyBearerBag
+          : undefined
 
         // Check if this server has stored OAuth tokens. If so, the SDK's
         // authProvider will set Authorization — don't override with the
@@ -1050,12 +1134,22 @@ export const connectToServer = memoize(
           `Proxy options: ${proxyOptions.dispatcher ? 'custom dispatcher' : 'default'}`,
         )
 
+        const httpFetch = wrapLegacyHttpSseGet401Guard(
+          wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+          shouldApplyLegacyHttpSseGet401Guard({
+            isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
+            isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
+              serverRef.url,
+            ),
+            isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
+          }),
+        )
         const transportOptions: StreamableHTTPClientTransportOptions = {
           ...(authProvider ? { authProvider } : {}),
           // Use fresh timeout per request to avoid stale AbortSignal bug.
           // Step-up detection wraps innermost so the 403 is seen before the
           // SDK's handler calls auth() → tokens().
-          fetch: wrapRemoteMcpFetch(authProvider),
+          fetch: httpFetch,
           requestInit: {
             ...proxyOptions,
             headers: {
@@ -1401,18 +1495,32 @@ export const connectToServer = memoize(
         // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
         if (serverRef.type === 'http') {
           const combinedHeaders = await getMcpServerHeaders(name, serverRef)
-          const remoteAuth = resolveRemoteConnectAuth(
+          const remoteAuth = await resolveRemoteConnectAuth(
             name,
             serverRef,
             combinedHeaders,
           )
           connectAuthFlags = remoteAuth.flags
+          useFirstPartyAuth = remoteAuth.useFirstPartyAuth
           const authProvider = remoteAuth.authProvider
+          const firstPartyBag = useFirstPartyAuth
+            ? firstPartyBearerBag
+            : undefined
           const hasOAuthTokens = !!(await authProvider?.tokens())
           const proxyOptions = getProxyFetchOptions()
+          const httpFetch = wrapLegacyHttpSseGet401Guard(
+            wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+            shouldApplyLegacyHttpSseGet401Guard({
+              isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
+              isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
+                serverRef.url,
+              ),
+              isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
+            }),
+          )
           const transportOptions: StreamableHTTPClientTransportOptions = {
             ...(authProvider ? { authProvider } : {}),
-            fetch: wrapRemoteMcpFetch(authProvider),
+            fetch: httpFetch,
             requestInit: {
               ...proxyOptions,
               headers: {
@@ -1775,6 +1883,22 @@ export const connectToServer = memoize(
           if (classified) {
             return connectAuthRejectedResult(name, serverRef, 'sse', classified)
           }
+          if (useFirstPartyAuth) {
+            const firstParty = classifyFirstPartyAuthRejection({
+              error,
+              statusCode: connectAuthStatusCode(error),
+              serverRef,
+              firstPartyBearer: firstPartyBearerBag.last,
+            })
+            if (firstParty) {
+              return connectAuthRejectedResult(
+                name,
+                serverRef,
+                'sse',
+                firstParty,
+              )
+            }
+          }
           if (error instanceof UnauthorizedError) {
             return handleRemoteAuthFailure(name, serverRef, 'sse')
           }
@@ -1802,6 +1926,22 @@ export const connectToServer = memoize(
               'http',
               classified,
             )
+          }
+          if (useFirstPartyAuth) {
+            const firstParty = classifyFirstPartyAuthRejection({
+              error,
+              statusCode: connectAuthStatusCode(error),
+              serverRef,
+              firstPartyBearer: firstPartyBearerBag.last,
+            })
+            if (firstParty) {
+              return connectAuthRejectedResult(
+                name,
+                serverRef,
+                'http',
+                firstParty,
+              )
+            }
           }
           if (error instanceof UnauthorizedError) {
             return handleRemoteAuthFailure(name, serverRef, 'http')
@@ -2672,6 +2812,11 @@ export const fetchToolsForClient = memoizeWithLRU(
         config: client.config,
       })
 
+      // densable jo — sse/http Design MCP on api.anthropic.com, no Authorization.
+      const isFirstPartyDesignServer = isFirstPartyDesignMcpServer(
+        client.config,
+      )
+
       // Convert MCP tools to our Tool format
       return listedAfterSchema
         .map((tool): Tool => {
@@ -2736,13 +2881,29 @@ export const fetchToolsForClient = memoizeWithLRU(
             requiresUserInteraction() {
               return requiresUserInteraction
             },
-            suppressesAlwaysAllowRule: () => requiresUserInteraction,
+            suppressesAlwaysAllowRule: () =>
+              requiresUserInteraction ||
+              connectorDesignOmitsPersistentAllow(
+                isFirstPartyDesignServer,
+                tool.name,
+              ),
             inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
-            async checkPermissions() {
+            async checkPermissions(input: unknown) {
+              // densable Gr/Ui — tokenless writes are native-tool-only here.
+              const denied = connectorDesignTokenlessWriteDeny(
+                isFirstPartyDesignServer,
+                tool.name,
+                input,
+              )
+              if (denied) return denied
               return mcpToolCheckPermissionsResult(
                 requiresUserInteraction,
                 fullyQualifiedName,
                 client.name,
+                connectorDesignOmitsPersistentAllow(
+                  isFirstPartyDesignServer,
+                  tool.name,
+                ),
               )
             },
             async call(
@@ -2752,6 +2913,27 @@ export const fetchToolsForClient = memoizeWithLRU(
               parentMessage,
               onProgress?: ToolCallProgress<MCPProgress>,
             ) {
+              // densable Vr/Fi — one local path for both gold connector copies.
+              applyConnectorDesignMembership(
+                isFirstPartyDesignServer,
+                tool.name,
+                args,
+                (operation, projectId) => {
+                  // Lazy: designProjectGrant pulls function-hook modules.
+                  // A static import here would load that graph for every MCP client.
+                  const {
+                    designSessionState,
+                    noteDesignProjectMembershipChange,
+                  } =
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    require('../designProjectGrant.js') as typeof import('../designProjectGrant.js')
+                  noteDesignProjectMembershipChange(
+                    designSessionState(context),
+                    operation,
+                    projectId,
+                  )
+                },
+              )
               // densable 2.1.222 #6 — stamp active MCP for next API cost share
               // (cleared after one attributed main/subagent request).
               context.options.activeMcpServer = client.name
@@ -2856,6 +3038,8 @@ export const fetchToolsForClient = memoizeWithLRU(
                           : undefined,
                       handleElicitation: context.handleElicitation,
                       requestDialog: context.requestDialog,
+                      canUseTool: _canUseTool,
+                      toolUseContext: context,
                     })
 
                   const mcpResult =
@@ -4226,6 +4410,8 @@ export async function callMCPToolWithUrlElicitationRetry({
   callToolFn = callMCPTool,
   handleElicitation,
   requestDialog,
+  canUseTool,
+  toolUseContext,
 }: {
   client: ConnectedMCPServer
   clientConnection: MCPServerConnection
@@ -4270,8 +4456,11 @@ export async function callMCPToolWithUrlElicitationRetry({
     payload: unknown,
     options?: { signal?: AbortSignal },
   ) => Promise<unknown>
+  canUseTool?: import('../../hooks/useCanUseTool.js').CanUseToolFn
+  toolUseContext?: import('../../Tool.js').ToolUseContext
 }): Promise<MCPToolCallResult> {
   const MAX_URL_ELICITATION_RETRIES = 3
+  let didStepUp = false
   for (let attempt = 0; ; attempt++) {
     try {
       return await callToolFn({
@@ -4285,6 +4474,62 @@ export async function callMCPToolWithUrlElicitationRetry({
         hasResultSizeAnnotation,
       })
     } catch (error) {
+      if (
+        error instanceof McpAuthError &&
+        error.requestedScope !== undefined &&
+        canUseTool !== undefined &&
+        toolUseContext !== undefined &&
+        clientConnection.config.type === 'http'
+      ) {
+        const {
+          shouldOfferMcpStepUpReauth,
+          requestMcpStepUpReauth,
+          isMcpStepUpReauthExhausted,
+          markMcpStepUpReauthExhausted,
+        } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./mcpStepUpReauth.js') as typeof import('./mcpStepUpReauth.js')
+        const cacheKey = getServerCacheKey(
+          clientConnection.name,
+          clientConnection.config,
+        )
+        if (didStepUp) {
+          markMcpStepUpReauthExhausted(
+            cacheKey,
+            error.requestedScope,
+            error.requestedScope,
+          )
+        }
+        if (
+          !isMcpStepUpReauthExhausted(cacheKey, error.requestedScope) &&
+          shouldOfferMcpStepUpReauth({
+            requestedScope: error.requestedScope,
+            config: clientConnection.config,
+            canUseTool,
+            toolUseContext,
+            alreadyRetried: didStepUp,
+          })
+        ) {
+          const outcome = await requestMcpStepUpReauth({
+            serverName: clientConnection.name,
+            config: clientConnection.config,
+            requestedScope: error.requestedScope,
+            canUseTool,
+            toolUseContext,
+            signal,
+            cacheKey,
+          })
+          if (outcome === 'reauthenticated') {
+            didStepUp = true
+            logMCPDebug(
+              clientConnection.name,
+              `Retrying tool '${tool}' after the consented step-up re-auth`,
+            )
+            continue
+          }
+        }
+        throw error
+      }
       // densable / v2: UrlElicitationRequiredError or ProtocolErrorCode.
       const code =
         error && typeof error === 'object' && 'code' in error
@@ -4686,6 +4931,27 @@ async function callMCPTool({
           name,
           `MCP server "${name}" requires re-authorization (token expired)`,
         )
+      }
+
+      if (errorCode === 403) {
+        const { extractInsufficientScope } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./mcpStepUpReauth.js') as typeof import('./mcpStepUpReauth.js')
+        const scope = extractInsufficientScope(e)
+        if (scope) {
+          logMCPDebug(
+            name,
+            `Tool call returned 403 insufficient_scope (scope: ${scope})`,
+          )
+          logEvent('tengu_mcp_tool_call_auth_error', {})
+          throw new McpAuthError(
+            name,
+            `MCP server "${name}" needs additional permissions (scope: "${scope}") — run /mcp to re-authenticate`,
+            'insufficient_scope',
+            undefined,
+            scope,
+          )
+        }
       }
 
       // Official WZe expired arm:

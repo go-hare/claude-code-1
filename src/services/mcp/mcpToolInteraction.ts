@@ -29,12 +29,14 @@ export function isMcpRequiresUserInteraction(meta: unknown): boolean {
  * densable MCP `checkPermissions` interaction branch.
  * `W` → ask + empty suggestions + `suppressAlwaysAllowRule`.
  * Gold `s8t` Preview/Browser: ask + `chrome.hostHandlesOriginConsent`.
- * else passthrough + whole-tool allow suggestion (official `U2t` omit not ported).
+ * else passthrough + whole-tool allow suggestion, unless the caller
+ * omits it (gold yo/br on a first-party Design connector).
  */
 export function mcpToolCheckPermissionsResult(
   requiresUserInteraction: boolean,
   fullyQualifiedName: string,
   serverName?: string,
+  omitPersistentAllow = false,
 ): PermissionResult {
   if (isPreviewBrowserServer(serverName)) {
     return {
@@ -72,18 +74,20 @@ export function mcpToolCheckPermissionsResult(
   return {
     behavior: 'passthrough',
     message: MCP_PERMISSION_MESSAGE,
-    suggestions: [
-      {
-        type: 'addRules',
-        rules: [
+    suggestions: omitPersistentAllow
+      ? []
+      : [
           {
-            toolName: fullyQualifiedName,
-            ruleContent: undefined,
+            type: 'addRules',
+            rules: [
+              {
+                toolName: fullyQualifiedName,
+                ruleContent: undefined,
+              },
+            ],
+            behavior: 'allow',
+            destination: 'localSettings',
           },
         ],
-        behavior: 'allow',
-        destination: 'localSettings',
-      },
-    ],
   }
 }

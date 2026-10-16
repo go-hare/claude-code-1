@@ -430,16 +430,19 @@ describe('vscodeIdeBridgeCallbacks densable helpers', () => {
     ).toBe(false)
   })
 
-  test('HIn: meadow_lantern from clientDataCache ORs harbor_willow', () => {
-    cachedSg.tengu_harbor_willow = false
+  test('Qbn: k(harbor_willow, true) miss-default; meadow_lantern ORs', () => {
+    // gold k miss-default true — analog must not use checkStatsig miss=false
+    delete cachedGb.tengu_harbor_willow
     clientDataCache = null
+    expect(isAutoDefaultLaunchEnabled()).toBe(true)
+    cachedGb.tengu_harbor_willow = false
     expect(isAutoDefaultLaunchEnabled()).toBe(false)
     clientDataCache = { meadow_lantern: true }
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
     clientDataCache = { meadow_lantern: 'true' } // SEA === true only
     expect(isAutoDefaultLaunchEnabled()).toBe(false)
     clientDataCache = null
-    cachedSg.tengu_harbor_willow = true
+    cachedGb.tengu_harbor_willow = true
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
   })
 

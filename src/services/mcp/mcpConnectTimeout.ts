@@ -240,6 +240,57 @@ export function isMcpCcrProxyServerConfig(
 }
 
 /**
+ * densable HTTP→SSE fallback GET 401 unique English.
+ * Gold `ce` factory on Streamable HTTP: first GET 401 when initialize POST
+ * was not 405 must not start OAuth against this URL.
+ */
+export const LEGACY_HTTP_SSE_GET_401_MESSAGE =
+  'legacy HTTP+SSE stream GET answered 401 after the initialize POST was not a 405; not starting OAuth against this URL'
+
+/** Gold `!HEe && !o$ && !Ae` — CCR / first-party Anthropic MCP / cli-owned bearer skip. */
+export function shouldApplyLegacyHttpSseGet401Guard(opts: {
+  isCcrProxy: boolean
+  isFirstPartyAnthropicMcp: boolean
+  isCliOwnedBearer: boolean
+}): boolean {
+  return (
+    !opts.isCcrProxy && !opts.isFirstPartyAnthropicMcp && !opts.isCliOwnedBearer
+  )
+}
+
+/**
+ * densable `St` inside `ce` — wrap fetch so the first GET 401 (before a 405
+ * initialize POST) throws LEGACY_HTTP_SSE_GET_401_MESSAGE and cancels the body.
+ */
+export function wrapLegacyHttpSseGet401Guard<
+  F extends (url: string | URL, init?: RequestInit) => Promise<Response>,
+>(fetchImpl: F, enabled: boolean): F {
+  if (!enabled) return fetchImpl
+  let initializePostWas405 = false
+  let firstGetOk = false
+  const wrapped = async (
+    url: string | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    const res = await fetchImpl(url, init)
+    if (method !== 'GET' && res.status === 405) {
+      initializePostWas405 = true
+    }
+    // Gold: if(!Pe&&!Ct){ if(401) throw; Ct=Gt.ok }
+    if (method === 'GET' && !initializePostWas405 && !firstGetOk) {
+      if (res.status === 401) {
+        await res.body?.cancel?.().catch(() => {})
+        throw new Error(LEGACY_HTTP_SSE_GET_401_MESSAGE)
+      }
+      firstGetOk = res.ok
+    }
+    return res
+  }
+  return wrapped as F
+}
+
+/**
  * densable `n_f(e, {inProcess, ccrProxy})` — Pwi transport kind.
  * `http` + ccrProxy → `ccr-proxy` (GB `tengu_mcp_protocol_negotiation_ccr`).
  */

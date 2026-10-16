@@ -16,11 +16,30 @@ export type CliOwnedAsyncBearerProvider = () => Promise<
   string | null | undefined
 >
 
-export type CliOwnedResponseObserver = (response: unknown) => void
+/** densable Bkn request bag `{method, body}`. */
+export type CliOwnedRequestInfo = {
+  method: string
+  body?: unknown
+}
 
-export type CliOwnedRequestHeaderProvider = () =>
-  | Record<string, string>
-  | undefined
+export type CliOwnedRequestHeaderProvider = (
+  request?: CliOwnedRequestInfo,
+) => Record<string, string> | undefined
+
+export type CliOwnedResponseInfo = {
+  method: string
+  status: number
+  headers: Headers
+  requestHeaders: { get: (name: string) => string | null }
+  bearerFingerprint?: string | null
+}
+
+export type CliOwnedResponseObserver = (response: CliOwnedResponseInfo) => void
+
+type FetchLike = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>
 
 export type MarkCliOwnedConfigOpts = {
   getBearerToken?: CliOwnedBearerProvider
@@ -129,4 +148,125 @@ export function isCcrInjectedConfig(config: object): boolean {
 /** Tests only — rebuild WeakSet/Maps (cannot clear WeakSet). */
 export function resetCliOwnedConfigsForTests(): void {
   registry = createRegistry()
+}
+
+/**
+ * densable `bOe(e)` — owned when sync OR async bearer provider is registered.
+ */
+export function isCliOwnedBearerConfig(config: unknown): boolean {
+  if (typeof config !== 'object' || config === null) return false
+  const host = getCliOwnedRegistry()
+  return (
+    host.cliOwnedBearerProviders.has(config) ||
+    host.cliOwnedAsyncBearerProviders.has(config)
+  )
+}
+
+/**
+ * densable `I(e)` — sync cli-owned bearer. Catch → null.
+ */
+export function resolveCliOwnedSyncBearerToken(config: unknown): string | null {
+  if (typeof config !== 'object' || config === null) return null
+  const provider = getCliOwnedRegistry().cliOwnedBearerProviders.get(config)
+  if (!provider) return null
+  try {
+    return provider() || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable `Ukn(e)` — await async resolver; if none, fall back to `I(e)`.
+ */
+export async function resolveCliOwnedBearerToken(
+  config: unknown,
+): Promise<string | null> {
+  if (typeof config !== 'object' || config === null) return null
+  const asyncProvider =
+    getCliOwnedRegistry().cliOwnedAsyncBearerProviders.get(config)
+  if (!asyncProvider) return resolveCliOwnedSyncBearerToken(config)
+  try {
+    return (await asyncProvider()) || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable `Bkn(e,r)` — extra request headers except Authorization (Hr skips that).
+ */
+export function collectCliOwnedRequestHeaders(
+  config: unknown,
+  request: CliOwnedRequestInfo,
+): Record<string, string> {
+  if (typeof config !== 'object' || config === null) return {}
+  const provider =
+    getCliOwnedRegistry().cliOwnedRequestHeaderProviders.get(config)
+  if (!provider) return {}
+  try {
+    return provider(request) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * densable `jkn(e,r)` — response observer; swallow throws.
+ */
+export function notifyCliOwnedResponse(
+  config: unknown,
+  info: CliOwnedResponseInfo,
+): void {
+  if (typeof config !== 'object' || config === null) return
+  const observer = getCliOwnedRegistry().cliOwnedResponseObservers.get(config)
+  if (!observer) return
+  try {
+    observer(info)
+  } catch {
+    // gold jkn swallows
+  }
+}
+
+/**
+ * densable `Hr(e,r)` — per-request cli-owned header + async bearer wrap.
+ * Gold: extra headers then `await Ukn(r)` when Authorization is missing.
+ */
+export function wrapCliOwnedFetch(inner: FetchLike, config: object): FetchLike {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers)
+    const extras = collectCliOwnedRequestHeaders(config, {
+      method: (init?.method ?? 'GET').toUpperCase(),
+      body: init?.body,
+    })
+    for (const [name, value] of Object.entries(extras)) {
+      if (!headers.has(name) && name.toLowerCase() !== 'authorization') {
+        headers.set(name, value)
+      }
+    }
+    let bearerFingerprint: string | null = null
+    if (!headers.has('Authorization')) {
+      const token = await resolveCliOwnedBearerToken(config)
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`)
+        bearerFingerprint = token
+      }
+    }
+    const response = await inner(input, {
+      ...init,
+      headers,
+      redirect: 'error',
+    })
+    notifyCliOwnedResponse(config, {
+      method: (init?.method ?? 'GET').toUpperCase(),
+      status: response.status,
+      headers: response.headers,
+      requestHeaders: {
+        get: name =>
+          name.toLowerCase() === 'authorization' ? null : headers.get(name),
+      },
+      bearerFingerprint,
+    })
+    return response
+  }
 }
