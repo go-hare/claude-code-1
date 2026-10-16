@@ -513,6 +513,40 @@ export type QueuedCommand = {
    * !continues dequeues a queued-before prompt with this flag first.
    */
   shouldQuery?: boolean
+  /**
+   * densable 2.1.289 print task-notification coalesce — head held its model
+   * query because a coalescable follower notification is next. Paired with
+   * `shouldQuery:false` so processUserInput still records the notification
+   * without starting a query turn.
+   */
+  queryHeldForNextTurn?: boolean
+  /**
+   * densable `$c` / Ph extras — optional stamps copied when print merges a
+   * prompt batch. Absent = gold undefined.
+   */
+  drainOnly?: boolean
+  resumedTurnUserMessageUuid?: string
+  seededSummon?: boolean
+  hearthRelayRows?: unknown
+  hearthRelayThreadTs?: unknown
+  hearthRelayMessageIds?: unknown
+  inlinedImagePaths?: string[]
+  taskDelivery?: unknown
+  hostInitiator?: unknown
+  localStdinOrigin?: boolean
+  sessionChannelPersonTyped?: boolean
+  projectsUserTurn?: boolean
+  fileAttachments?: unknown[]
+  ccrTurnId?: unknown
+  traceContext?: { traceparent: string }
+  linkedTraceContexts?: Array<{ traceparent: string }>
+  turnAttributionKey?: unknown
+  /** densable `inheritedTurnAttributionKey` — xbt for task-notification. */
+  inheritedTurnAttributionKey?: string
+  frameTiming?: { enqueuedWallMs: number }
+  stampThreadState?: boolean
+  attachmentSourceUuid?: unknown
+  deliveryId?: unknown
 }
 
 /**

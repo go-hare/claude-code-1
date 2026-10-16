@@ -22,8 +22,8 @@ export type LocalCommandResult =
     }
   | { type: 'skip' } // Skip messages
   /**
-   * densable headless local command that seeds a follow-up model turn
-   * (e.g. /ultrareview non-interactive launch acknowledgement).
+   * densable local command that seeds a follow-up model turn
+   * (`/goal` set → `Xbn` prompt; `/ultrareview` headless launch).
    */
   | { type: 'query'; value: string; prompt?: string }
 
@@ -57,8 +57,15 @@ export type PromptCommand = {
   pluginInfo?: {
     pluginManifest: PluginManifest
     repository: string
+    /** densable `ije` Vu `id` — same string as repository at the ije call. */
+    id?: string
     /** densable 2.1.246 `serverPluginId` copy from LoadedPlugin. */
     serverPluginId?: string
+    /** densable `ije` Vu — claude.ai synced plugin attestation. */
+    officiallyAttested?: boolean
+    marketplaceSource?: unknown
+    npmResolution?: unknown
+    home?: unknown
   }
   disableNonInteractive?: boolean
   // Hooks to register when this skill is invoked
@@ -69,6 +76,29 @@ export type PromptCommand = {
   // 'inline' = skill content expands into the current conversation
   // 'fork' = skill runs in a sub-agent with separate context and token budget
   context?: 'inline' | 'fork'
+  /**
+   * densable `k_n` — dynamic fork vs inline. When set, overrides static
+   * `context` (`getContext?.(args, ctx) ?? context ?? "inline"`).
+   */
+  getContext?(args: string, context: ToolUseContext): 'inline' | 'fork'
+  /**
+   * densable `e.getEffort?.(args, ctx)` — skill/command pin. Le / fork
+   * resolve `getEffort ?? getDefaultEffort?.value ?? effort`. User slash
+   * shows `getDefaultEffort?.notice` only when getEffort is undefined.
+   * Do not N9 from this hook (289 user-slash dropped that 247 site).
+   */
+  getEffort?(args: string, context: ToolUseContext): EffortValue | undefined
+  getDefaultEffort?(
+    args: string,
+    context: ToolUseContext,
+  ): { value?: EffortValue; notice?: string } | undefined
+  /** densable `onUserTypedArgs` — user-slash typed-args persist hook. */
+  onUserTypedArgs?(args: string, context: ToolUseContext): void
+  /**
+   * densable `argsMayContainSlashCommands` — first prompt owns its args;
+   * stacked slash expansion (`kt`) does not peel nested `/skill` tokens.
+   */
+  argsMayContainSlashCommands?: boolean
   // Agent type to use when forked (e.g., 'Bash', 'general-purpose')
   // Only applicable when context is 'fork'
   agent?: string
@@ -266,8 +296,27 @@ export type CommandBase = {
    * command dispatch so `/code-review ultra` launches the cloud path.
    */
   subcommands?: Record<string, string>
+  /**
+   * densable `subcommandsBareOnly` — redirect only when the first token is
+   * the whole args string (`/design consent`, not `/design consent extra`).
+   */
+  subcommandsBareOnly?: boolean
   isMcp?: boolean
   argumentHint?: string // Hint text for command arguments (displayed in gray after command)
+  /**
+   * densable getArgumentCompletions — `/config key=value` gps host.
+   */
+  getArgumentCompletions?: (
+    args: string,
+    context: LocalJSXCommandContext,
+  ) => Promise<
+    Array<{
+      value: string
+      description?: string
+      isFinal?: boolean
+      appendSpace?: boolean
+    }>
+  >
   /** Official menu/typeahead blurb (Fmr menuDescription). Distinct from whenToUse. */
   menuDescription?: string
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command

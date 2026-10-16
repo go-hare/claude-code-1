@@ -59,6 +59,9 @@ export const CHANNEL_TAG = 'channel'
 // XML tag name for cross-session UDS messages (another Claude session's inbox)
 export const CROSS_SESSION_MESSAGE_TAG = 'cross-session-message'
 
+/** densable ZKt — in-session peer/handback envelope (`fme`). */
+export const AGENT_MESSAGE_TAG = 'agent-message'
+
 // XML tag wrapping the rules/format boilerplate in a fork child's first message.
 // Lets the transcript renderer collapse the boilerplate and show only the directive.
 export const FORK_BOILERPLATE_TAG = 'fork-boilerplate'

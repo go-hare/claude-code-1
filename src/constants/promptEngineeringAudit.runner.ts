@@ -222,353 +222,109 @@ async function getFullPrompt(
 // =====================================================================
 
 describe('Opus 4.7 Prompt Engineering Audit', () => {
-  // ------------------------------------------------------------------
-  // #1 决策树结构 (Decision Tree)
-  // TXT 来源: {request_evaluation_checklist} — Step 0→1→2→3
-  // ------------------------------------------------------------------
-  describe('#1 Decision tree for tool selection', () => {
-    test('prompt contains tool selection guidance via dedicated tools', async () => {
+  // densable 2.1.289 rgo/ago/lgo/dgo/ugo/mgo anchors (fork-added copy removed)
+  describe('#1 Dedicated tools over shell', () => {
+    test('prefers dedicated tools when one fits', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('Prefer dedicated tools')
-      expect(prompt).toContain('Reserve')
-      expect(prompt).toContain('shell operations')
+      expect(prompt).toContain('Prefer dedicated tools over')
+      expect(prompt).toContain('when one fits')
+      expect(prompt).toContain('shell-only operations')
     })
 
-    test('guidance distinguishes dedicated tools from Bash', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('dedicated tool')
-    })
-
-    test('lists core tools as directly callable', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Core tools')
-      expect(prompt).toContain('can be called directly')
-    })
-
-    test('provides concrete tool preference examples', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('over cat')
-      expect(prompt).toContain('over sed')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #2 反模式先行 (Anti-Pattern First)
-  // TXT 来源: {unnecessary_computer_use_avoidance}, {artifact_usage_criteria}
-  // ------------------------------------------------------------------
-  describe('#2 Anti-pattern guidance (when NOT to use tools)', () => {
-    test('prompt says when NOT to use tools', async () => {
-      const prompt = await getFullPrompt()
-      const hasAntiPattern =
-        prompt.includes('Do NOT use') ||
-        prompt.includes('Reserve') ||
-        prompt.includes('do not re-attempt')
-      expect(hasAntiPattern).toBe(true)
-    })
-
-    test('guidance covers Bash misuse', async () => {
-      const prompt = await getFullPrompt()
-      const hasBashGuidance =
-        prompt.includes('Reserve') && prompt.includes('shell operations')
-      expect(hasBashGuidance).toBe(true)
-    })
-
-    test('anti-pattern covers file creation', async () => {
-      const prompt = await getFullPrompt()
-      const hasFileAntiPattern =
-        prompt.includes('Do not create files unless') ||
-        prompt.includes('prefer editing an existing file')
-      expect(hasFileAntiPattern).toBe(true)
-    })
-
-    test('includes file creation anti-pattern', async () => {
-      const prompt = await getFullPrompt()
-      const hasFileAntiPattern =
-        prompt.includes('Do not create files unless') ||
-        prompt.includes('prefer editing an existing file')
-      expect(hasFileAntiPattern).toBe(true)
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #6 渐进式回退链 (Progressive Fallback Chain)
-  // TXT 来源: {core_search_behaviors}, {past_chats_tools}
-  // ------------------------------------------------------------------
-  describe('#6 Progressive fallback chain', () => {
-    test('prompt encourages searching before asking user', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('search with')
-    })
-
-    test('search tools are available for discovery', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Grep')
-      expect(prompt).toContain('Glob')
-    })
-
-    test('fallback includes escalating to user via AskUserQuestion', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('AskUserQuestion')
-    })
-
-    test('search before saying unknown is present', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Search before saying unknown')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #3 Few-Shot 场景示例 (Few-Shot Examples)
-  // TXT 来源: {examples}, {visualizer_examples}, {past_chats_tools}
-  // ------------------------------------------------------------------
-  describe('#3 Few-shot examples', () => {
-    test('contains concrete tool preference examples', async () => {
-      const prompt = await getFullPrompt()
-      const hasExamples =
-        prompt.includes('over cat') || prompt.includes('over sed')
-      expect(hasExamples).toBe(true)
-    })
-
-    test('examples cover different tool types', async () => {
+    test('lists dedicated tool names that fit', async () => {
       const prompt = await getFullPrompt()
       expect(prompt).toContain('Read')
       expect(prompt).toContain('Edit')
-      expect(prompt).toContain('Grep')
+      expect(prompt).toContain('Write')
     })
 
-    test('examples include negative cases (what NOT to use)', async () => {
+    test('does not enumerate a Core tools catalog', async () => {
       const prompt = await getFullPrompt()
-      const hasNegative =
-        prompt.includes('over cat') ||
-        prompt.includes('over sed') ||
-        prompt.includes('over find') ||
-        prompt.includes('over grep')
-      expect(hasNegative).toBe(true)
-    })
-
-    test('core tools are enumerated', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Core tools')
+      expect(prompt).not.toContain('Core tools')
     })
   })
 
-  // ------------------------------------------------------------------
-  // #4 语言信号识别 (Linguistic Signal Detection)
-  // TXT 来源: {past_chats_tools}, {file_creation_advice}
-  // ------------------------------------------------------------------
-  describe('#4 Linguistic signal detection', () => {
-    test('file creation signals teach when to create vs inline', async () => {
+  describe('#2 Anti-pattern / deny / file creation', () => {
+    test('denied tool calls are not retried verbatim', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('Linguistic signals')
-      expect(prompt).toContain('write a script')
-      expect(prompt).toContain('create a config')
+      expect(prompt).toContain('do not re-attempt the exact same tool call')
     })
 
-    test('inline answer signals are listed', async () => {
+    test('prefers editing existing files', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('show me how')
-      expect(prompt).toContain('answer inline')
-    })
-
-    test('20-line threshold for file creation', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('20 lines')
+      expect(prompt).toContain(
+        'Prefer editing existing files to creating new ones',
+      )
     })
   })
 
-  // ------------------------------------------------------------------
-  // #5 成本不对称分析 (Asymmetric Cost Analysis)
-  // TXT 来源: {tool_discovery} "treat tool_search as essentially free"
-  // ------------------------------------------------------------------
-  describe('#5 Cost asymmetry framing', () => {
-    test('prompt has cost asymmetry for actions (existing)', async () => {
+  describe('#3 Parallel tool calls', () => {
+    test('instructs independent tools in one response', async () => {
+      const prompt = await getFullPrompt()
+      expect(prompt).toContain(
+        'You can call multiple tools in a single response',
+      )
+      expect(prompt).toContain('do NOT call these tools in parallel')
+    })
+  })
+
+  describe('#4 Exploratory questions', () => {
+    test('2-3 sentence recommendation before implementing', async () => {
+      const prompt = await getFullPrompt()
+      expect(prompt).toContain('For exploratory questions')
+      expect(prompt).toContain("Don't implement until the user agrees")
+    })
+  })
+
+  describe('#5 Cost asymmetry', () => {
+    test('pausing to confirm is cheap vs unwanted action', async () => {
       const prompt = await getFullPrompt()
       expect(prompt).toContain('cost of pausing to confirm is low')
     })
+  })
 
-    test('guidance encourages searching over guessing', async () => {
+  describe('#6 Git / stash caution', () => {
+    test('git status before discard and stash -u', async () => {
       const prompt = await getFullPrompt()
-      const hasSearchGuidance =
-        prompt.includes('Search before saying unknown') ||
-        prompt.includes('search with')
-      expect(hasSearchGuidance).toBe(true)
-    })
-
-    test('expanded cost asymmetry with multiple scenarios', async () => {
-      const prompt = await getFullPrompt()
-      // Simplified prompt conveys cost via "search before saying unknown"
-      expect(prompt).toContain('search with')
+      expect(prompt).toContain('git status')
+      expect(prompt).toContain('stash (with `-u` for untracked)')
     })
   })
 
-  // ------------------------------------------------------------------
-  // #7 反过度解释 (Anti-Over-Explanation)
-  // TXT 来源: {sharing_files}, {request_evaluation_checklist}
-  // ------------------------------------------------------------------
-  describe('#7 Anti-over-explanation', () => {
-    test('prompt contains no-machinery-narration rule (existing)', async () => {
+  describe('#7 Tone and style (mgo)', () => {
+    test('uses gold heading not Communication style', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain("Don't narrate internal machinery")
-    })
-
-    test('includes anti-postamble guidance', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain("don't restate")
-      expect(prompt).toContain('report the outcome')
-    })
-
-    test('discourages offering unchosen approach', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('unchosen approach')
+      expect(prompt).toContain('# Tone and style')
+      expect(prompt).not.toContain('# Communication style')
+      expect(prompt).toContain('Your responses should be short and concise')
+      expect(prompt).toContain('Do not use a colon before tool calls')
     })
   })
 
-  // ------------------------------------------------------------------
-  // #8 查询构造教学 (Query Construction Teaching)
-  // TXT 来源: {search_usage_guidelines}, {past_chats_tools}
-  // ------------------------------------------------------------------
-  describe('#8 Query construction guidance', () => {
-    test('Grep is mentioned as a search tool', async () => {
+  describe('#8 Query construction', () => {
+    test('Grep and Glob named in dedicated-fits list', async () => {
       const prompt = await getFullPrompt()
       expect(prompt).toContain('Grep')
-    })
-
-    test('Glob is mentioned as a search tool', async () => {
-      const prompt = await getFullPrompt()
       expect(prompt).toContain('Glob')
-    })
-
-    test('search tools are referenced in "Search before saying unknown"', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Search before saying unknown')
-    })
-
-    test('dedicated tools are preferred over Bash equivalents', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Prefer dedicated tools')
     })
   })
 
-  // ------------------------------------------------------------------
-  // #9 Prompt 注入防御 (Prompt Injection Defense)
-  // TXT 来源: {anthropic_reminders}, {request_evaluation_checklist}
-  // ------------------------------------------------------------------
   describe('#9 Prompt injection defense', () => {
-    test('prompt warns about prompt injection in tool results (existing)', async () => {
+    test('warns about prompt injection in tool results', async () => {
       const prompt = await getFullPrompt()
       expect(prompt).toContain('prompt injection')
     })
+  })
 
-    test('distinguishes file instructions from user instructions', async () => {
+  describe('#10 UI verification', () => {
+    test('start the dev server for frontend changes', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('not from the user')
+      expect(prompt).toContain(
+        'start the dev server and use the feature in a browser',
+      )
     })
   })
 
-  // =====================================================================
-  // 第二部分: 行为规则验证
-  // 对应审计文档 第二部分 #11-#18
-  // =====================================================================
-
-  // ------------------------------------------------------------------
-  // #11 格式化纪律 (Formatting Discipline)
-  // TXT 来源: {lists_and_bullets}
-  // ------------------------------------------------------------------
-  // ------------------------------------------------------------------
-  // #10 分步搜索策略 (Multi-Step Search Strategy)
-  // TXT 来源: {tool_discovery}, {core_search_behaviors}
-  // ------------------------------------------------------------------
-  describe('#10 Multi-step search strategy', () => {
-    test('encourages searching before concluding', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Search before saying unknown')
-    })
-
-    test('provides multiple search tools for different scopes', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Grep')
-      expect(prompt).toContain('Glob')
-    })
-  })
-
-  describe('#11 Formatting discipline', () => {
-    test('prompt contains prose-first guidance (existing)', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('prose paragraphs')
-    })
-
-    test('discourages over-formatting', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('over-formatting')
-      expect(prompt).toContain('simple answers')
-    })
-
-    test('bullet points must be 1-2 sentences, not fragments', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('1-2 sentences')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #22 先搜再说不知道 (Search Before Saying Unknown)
-  // TXT 来源: {tool_discovery}
-  // ------------------------------------------------------------------
-  describe('#22 Search before saying unknown', () => {
-    test('instructs to search before claiming something does not exist', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Search before saying unknown')
-    })
-
-    test('core tools are listed as always available', async () => {
-      const prompt = await getFullPrompt()
-      // densable 2.1.221: system bullets dropped ExecuteExtra two-step copy;
-      // Using-your-tools section uses "can be called directly as needed".
-      expect(prompt).toContain('can be called directly as needed')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #12 温暖语气 (Warm Tone)
-  // TXT 来源: {tone_and_formatting}
-  // ------------------------------------------------------------------
-  describe('#12 Warm tone', () => {
-    test('avoids negative assumptions about user abilities', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('negative assumptions')
-    })
-
-    test('pushback should be constructive', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('constructively')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #20 风险感知时说得更少 (Say Less When Risky)
-  // TXT 来源: {refusal_handling}
-  // ------------------------------------------------------------------
-  describe('#20 Say less when risky', () => {
-    test('security-sensitive code should say less about details', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('saying less about implementation details')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #23 不解释为什么搜索 (Don't Justify Search)
-  // TXT 来源: {search_usage_guidelines}
-  // ------------------------------------------------------------------
-  describe("#23 Don't justify search", () => {
-    test('instructs not to justify why searching', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain("Don't justify why you're searching")
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #13 产品线信息 (Product Information)
-  // TXT 来源: {product_information}
-  // ------------------------------------------------------------------
   describe('#13 Product information', () => {
     test('env info contains Claude Code product description', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
@@ -578,7 +334,8 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
 
     test('env info contains model family', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
-      expect(envInfo).toContain('Claude 4.5/4.6/4.7')
+      expect(envInfo).toContain('Claude 5 family')
+      expect(envInfo).toContain('Haiku 4.5')
     })
 
     test('env info contains correct model IDs', async () => {
@@ -588,88 +345,39 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
       expect(envInfo).toContain('claude-haiku-4-5')
     })
 
-    test('mentions Chrome/Excel/Cowork products', async () => {
+    test('mentions CLI surfaces and Fast mode Opus', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
-      expect(envInfo).toContain('Chrome')
-      expect(envInfo).toContain('Excel')
-      expect(envInfo).toContain('Cowork')
+      expect(envInfo).toContain('claude.ai/code')
+      expect(envInfo).toContain('does not downgrade')
+      expect(envInfo).toContain('/fast')
     })
   })
-
-  // ------------------------------------------------------------------
-  // #15 对话结束尊重 (Conversation End Respect)
-  // TXT 来源: {refusal_handling} line 51
-  // ------------------------------------------------------------------
-  describe('#15 Conversation end respect', () => {
-    test('discourages "anything else?" appendages', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('Do not append')
-      expect(prompt).toContain('Is there anything else?')
-    })
-  })
-
-  // ------------------------------------------------------------------
-  // #16 每回复最多一个问题 (One Question Per Response)
-  // TXT 来源: {tone_and_formatting} line 71
-  // ------------------------------------------------------------------
-  describe('#16 One question per response', () => {
-    test('limits questions per response', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('one question per response')
-    })
-  })
-
-  // =====================================================================
-  // 第三部分: 已存在功能的回归测试
-  // 确保现有的从 TXT 对齐的锚点不被破坏
-  // =====================================================================
 
   describe('Existing behavioral anchors (regression)', () => {
-    test('default_stance: default to helping', async () => {
+    test('fork-added Default to helping copy is gone', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('Default to helping')
-      expect(prompt).toContain('concrete, specific risk of serious harm')
-    })
-
-    test('anti-collapse: no self-abasement', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('self-abasement')
-      expect(prompt).toContain('maintain self-respect')
-    })
-
-    test('cutoff silence: do not proactively mention cutoff', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain(
+      expect(prompt).not.toContain('Default to helping')
+      expect(prompt).not.toContain('self-abasement')
+      expect(prompt).not.toContain(
         "Don't proactively mention your knowledge cutoff",
       )
+      expect(prompt).not.toContain("Don't narrate internal machinery")
+      expect(prompt).not.toContain('Search before saying unknown')
     })
 
-    test('no-machinery-narration: describe in user terms', async () => {
+    test('gold iIt dynamic sections are present', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain("Don't narrate internal machinery")
-      expect(prompt).toContain('describe the action in user terms')
-    })
-
-    test('tool_discovery: search before saying unavailable', async () => {
-      const prompt = await getFullPrompt()
-      // densable 2.1.221: deferred-tool discovery lives in ToolSearch (tCo)
-      // prompt, not system bullets. System-side residual is search-before-unknown
-      // + core tools callable-directly (no ExecuteExtra two-step narrative).
-      expect(prompt).toContain('Search before saying unknown')
-      expect(prompt).toContain('can be called directly as needed')
-      expect(prompt).not.toContain(
-        'Only state something is unavailable after SearchExtraTools returns no match',
-      )
-    })
-
-    test('false-claims mitigation: report outcomes faithfully', async () => {
-      const prompt = await getFullPrompt()
-      expect(prompt).toContain('report the outcome')
+      expect(prompt).toContain('# Text output (does not apply to tool calls)')
+      expect(prompt).toContain('use they/them')
+      expect(prompt).toContain('When a task has been agreed')
+      expect(prompt).toContain('# Context management')
+      expect(prompt).toContain('# Delivering work')
+      expect(prompt).toContain('# Corrections')
+      expect(prompt).toContain('never write parameter-tag markup')
     })
 
     test('CYBER_RISK_INSTRUCTION: allows security testing', async () => {
       const prompt = await getFullPrompt()
-      // TS 允许安全测试 (TXT 完全禁止 — 这是有意的差异)
       expect(prompt).not.toContain(
         'does not write or explain or work on malicious code',
       )

@@ -57,7 +57,10 @@ afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
 })
 
-const { CORE_TOOLS } = await import('../tools.js')
+const { ASYNC_AGENT_ALLOWED_TOOLS, CORE_TOOLS } = await import('../tools.js')
+const { SEND_MESSAGE_TOOL_NAME } = await import(
+  '@claude-code/builtin-tools/tools/SendMessageTool/constants.js'
+)
 const { isDeferredTool, getNonDeferrableBuiltins } = await import(
   '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 )
@@ -126,6 +129,28 @@ describe('CORE_TOOLS', () => {
     // but we verify the cast was applied by checking it's a Set
     expect(CORE_TOOLS).toBeInstanceOf(Set)
     // The `as ReadonlySet<string>` ensures type-level immutability
+  })
+})
+
+describe('ASYNC_AGENT_ALLOWED_TOOLS Image 34 SendMessage', () => {
+  test('background Explore/general-purpose keep SendMessage for Wr', () => {
+    expect(ASYNC_AGENT_ALLOWED_TOOLS.has(SEND_MESSAGE_TOOL_NAME)).toBe(true)
+  })
+
+  test('async pool keeps SubagentHandback after Ut splice', async () => {
+    const { SUBAGENT_HANDBACK_TOOL_NAME } = await import(
+      '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
+    )
+    expect(ASYNC_AGENT_ALLOWED_TOOLS.has(SUBAGENT_HANDBACK_TOOL_NAME)).toBe(
+      true,
+    )
+  })
+
+  test('async pool includes Artifact for gold bms cn', async () => {
+    const { ARTIFACT_TOOL_NAME } = await import(
+      '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
+    )
+    expect(ASYNC_AGENT_ALLOWED_TOOLS.has(ARTIFACT_TOOL_NAME)).toBe(true)
   })
 })
 

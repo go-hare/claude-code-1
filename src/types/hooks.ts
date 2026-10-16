@@ -91,6 +91,17 @@ export const syncHookResponseSchema = lazySchema(() =>
               'When decision is "block", omit the original prompt from the block message',
             ),
         }),
+        // densable 2.1.289 NK — UserPromptExpansion (Ze)
+        z.object({
+          hookEventName: z.literal('UserPromptExpansion'),
+          additionalContext: z.string().optional(),
+          suppressOriginalPrompt: z
+            .boolean()
+            .optional()
+            .describe(
+              'When decision is "block", omit the original prompt from the block message',
+            ),
+        }),
         z.object({
           hookEventName: z.literal('SessionStart'),
           additionalContext: z.string().optional(),
@@ -127,6 +138,10 @@ export const syncHookResponseSchema = lazySchema(() =>
         }),
         z.object({
           hookEventName: z.literal('PostToolUseFailure'),
+          additionalContext: z.string().optional(),
+        }),
+        z.object({
+          hookEventName: z.literal('PostToolBatch'),
           additionalContext: z.string().optional(),
         }),
         z.object({

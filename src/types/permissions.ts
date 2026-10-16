@@ -229,6 +229,15 @@ export type PermissionAskDecision<
    */
   localDisplayOnly?: boolean
   /**
+   * densable 2.1.289 serverApprovalWatch. Only the durable project-grant ask
+   * sets this. The open dialog polls until the website grant is newer, then
+   * accepts with `__projectGrantServerObserved`.
+   */
+  serverApprovalWatch?: {
+    kind: 'design_project_grant'
+    projectId: string
+  }
+  /**
    * densable matchedAskRule — set when a user-configured ask RULE forced this
    * prompt but the ask carries the tool's own decisionReason.
    */
@@ -259,6 +268,17 @@ export type PermissionAskDecision<
    * official W() ask-again — DualInk feedback copied onto the re-ask.
    */
   userFeedback?: string
+  /**
+   * densable 2.1.289 WKe / `_o` `forcedByCaller`. Engine confirmWithUser
+   * stamps this on the AskUserQuestion ask so the descriptor can set
+   * `isEngineConfirm`.
+   */
+  forcedByCaller?: boolean
+  /**
+   * densable 2.1.289 WKe `personOnly:!0`. Classifier / auto-approve must
+   * not answer this ask.
+   */
+  personOnly?: true
 }
 
 /**
@@ -411,6 +431,11 @@ export type YoloClassifierResult = {
   thinking?: string
   shouldBlock: boolean
   reason: string
+  /**
+   * densable H3t `classifierRan:!1` — empty toAutoClassifierInput skipped the
+   * model. classifierOnly tools deny when this is false (gold `Xe&&ir.classifierRan===!1`).
+   */
+  classifierRan?: boolean
   unavailable?: boolean
   /**
    * densable 2.1.225 — API stop_reason==="refusal" (safety safeguard) on an
@@ -558,4 +583,9 @@ export type ToolPermissionContext = {
    * densable 2.1.248 #1 rrn `...o&&{restricted:o}` @185220424
    */
   readonly restricted?: boolean
+  /**
+   * densable W — `--tools` provided, not a preset, keeps zero tools.
+   * Session takes no built-in tools and none from plugins either.
+   */
+  readonly builtInToolsDisabled?: boolean
 }
