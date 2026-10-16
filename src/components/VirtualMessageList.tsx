@@ -1188,9 +1188,8 @@ export function VirtualMessageList({
 const NOOP_UNSUB = () => {};
 
 /**
- * densable `Ab` — `useEffect(() => subscribeLayout(onLayout), [subscribeLayout, onLayout])`.
- * Gold `qd` mounts this after the bottom spacer, before `z0` StickyTracker.
- * Ink notifies after `runLayoutPass`; do not invent rAF/microtask as this path.
+ * densable `Ab` — gold `x(() => subscribeLayout(onLayout), [subscribeLayout, onLayout])`.
+ * `x` is useEffect. Subscribe only; do not call onLayout() this commit.
  */
 function VirtualListLayoutPass({ onLayout }: { onLayout: () => void }): null {
   const { subscribeLayout } = useApp();

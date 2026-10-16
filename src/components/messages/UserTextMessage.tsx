@@ -11,7 +11,13 @@ import {
   TICK_TAG,
 } from '../../constants/xml.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
-import { extractTag, INTERRUPT_MESSAGE, INTERRUPT_MESSAGE_FOR_TOOL_USE } from '../../utils/messages.js';
+import {
+  extractTag,
+  INTERRUPT_MESSAGE,
+  INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  isInSessionPeerOrObserverOrigin,
+  peerOrObserverDisplayName,
+} from '../../utils/messages.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { MessageResponse } from '../MessageResponse.js';
 import { PluginUserMessageSite } from '../PluginRasterPanes.js';
@@ -25,6 +31,7 @@ import { UserPlanMessage } from './UserPlanMessage.js';
 import { UserPromptMessage } from './UserPromptMessage.js';
 import { UserResourceUpdateMessage } from './UserResourceUpdateMessage.js';
 import { UserTeammateMessage } from './UserTeammateMessage.js';
+import { UserCrossSessionMessage } from './UserCrossSessionMessage.js';
 
 type Props = {
   addMargin: boolean;
@@ -35,8 +42,15 @@ type Props = {
   timestamp?: string;
   /** densable `xI("UserMessage")` requestId (`URe` messageId). */
   requestId?: string;
-  /** densable `kLo` origin — only stored plugin/channel, never invented. */
-  origin?: { kind: string; name?: string; [key: string]: unknown };
+  /** densable Wr origin — plugin / channel / peer (subagent). */
+  origin?: {
+    kind: string;
+    name?: string;
+    from?: string;
+    fromName?: string;
+    senderTaskId?: string;
+    [key: string]: unknown;
+  };
   /** densable `URe` `isExpanded`. */
   isExpanded?: boolean;
   /** densable `URe` `task` — omit when unset. */
@@ -60,6 +74,22 @@ export function UserTextMessage({
 }: Props): React.ReactNode {
   if (param.text.trim() === NO_CONTENT_MESSAGE) {
     return null;
+  }
+
+  // densable Fg/zX — routed by uM(origin) only; prompt text never decides.
+  if (isInSessionPeerOrObserverOrigin(origin)) {
+    return (
+      <UserCrossSessionMessage
+        addMargin={addMargin}
+        param={param}
+        isTranscriptMode={isTranscriptMode}
+        verbose={verbose}
+        fromName={peerOrObserverDisplayName(origin)}
+        fallbackLabel="agent"
+        origin={origin}
+        messageId={requestId}
+      />
+    );
   }
 
   // Plan to implement message (cleared context flow)

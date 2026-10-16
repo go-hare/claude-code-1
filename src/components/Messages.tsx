@@ -49,10 +49,10 @@ import {
   hasUnresolvedHooksFromLookup,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
+  isPeerInboundExpandClickable,
   isNotEmptyMessage,
   normalizeMessages,
   reorderMessagesInUI,
-  type StreamingThinking,
   type StreamingToolUse,
   shouldShowUserMessage,
 } from '../utils/messages.js';
@@ -68,7 +68,6 @@ import {
   MessageActionsSelectedContext,
   type MessageActionsState,
 } from './messageActions.js';
-import { AssistantThinkingMessage } from './messages/AssistantThinkingMessage.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { StatusNotices } from './StatusNotices.js';
@@ -269,6 +268,48 @@ export function dropTextInBriefTurns<
   });
 }
 
+type LastThinkingId = string | ReadonlySet<string> | null;
+
+/**
+ * Last thinking block id per human turn (uuid:index).
+ * Transcript ctrl+o expands EACH turn — session-last-only blanked earlier turns.
+ */
+export function collectLastThinkingIdsPerTurn(
+  messages: ReadonlyArray<{
+    type: string;
+    uuid?: string;
+    message?: { content?: string | ReadonlyArray<{ type: string }> };
+  }>,
+): LastThinkingId {
+  const blocksOf = (content: string | ReadonlyArray<{ type: string }> | undefined) =>
+    typeof content === 'string' || content === undefined ? [] : content;
+  const perTurn = new Set<string>();
+  let lastInTurn: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.type === 'user') {
+      const content = blocksOf(msg.message?.content);
+      const hasToolResult = content.some(block => block.type === 'tool_result');
+      if (!hasToolResult) {
+        if (lastInTurn) perTurn.add(lastInTurn);
+        lastInTurn = null;
+      }
+    } else if (msg?.type === 'assistant' && lastInTurn === null) {
+      const content = blocksOf(msg.message?.content);
+      for (let j = content.length - 1; j >= 0; j--) {
+        if (content[j]?.type === 'thinking' && msg.uuid) {
+          lastInTurn = `${msg.uuid}:${j}`;
+          break;
+        }
+      }
+    }
+  }
+  if (lastInTurn) perTurn.add(lastInTurn);
+  if (perTurn.size === 0) return 'no-thinking';
+  if (perTurn.size === 1) return [...perTurn][0]!;
+  return perTurn;
+}
+
 type Props = {
   messages: MessageType[];
   tools: Tools;
@@ -294,8 +335,6 @@ type Props = {
   isLoading: boolean;
   /** In transcript mode, hide all thinking blocks except the last one */
   hidePastThinking?: boolean;
-  /** Streaming thinking content (live updates, not frozen) */
-  streamingThinking?: StreamingThinking | null;
   /**
    * Official preview row (`C && !brief`). Mounted for the whole isLoading
    * window; gold yi returns null only when displayed is empty. Do not use
@@ -431,7 +470,6 @@ const MessagesImpl = ({
   hideLogo = false,
   isLoading,
   hidePastThinking = false,
-  streamingThinking,
   streamingPreview,
   hasStreamingText,
   isBriefOnly = false,
@@ -462,66 +500,32 @@ const MessagesImpl = ({
 
   const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
 
-  // Check if streaming thinking should be visible (streaming or within 30s timeout)
-  const isStreamingThinkingVisible = useMemo(() => {
-    if (!streamingThinking) return false;
-    if (streamingThinking.isStreaming) return true;
-    if (streamingThinking.streamingEndedAt) {
-      return Date.now() - streamingThinking.streamingEndedAt < 30000;
-    }
-    return false;
-  }, [streamingThinking]);
-
-  // Find the last thinking block and latest bash output in a single backward pass.
-  // Merged from two separate reverse iterations to reduce total traversals.
+  // Last thinking block per human turn + latest bash output.
   const { lastThinkingBlockId, latestBashOutputUUID } = useMemo(() => {
-    let thinkingId: string | null = null;
     let bashUUID: string | null = null;
-    const needThinkingScan = hidePastThinking && !isStreamingThinkingVisible;
-    if (hidePastThinking && isStreamingThinkingVisible) {
-      thinkingId = 'streaming';
-    }
     for (let i = normalizedMessages.length - 1; i >= 0; i--) {
       const msg = normalizedMessages[i];
-      if (msg?.type === 'user') {
-        const content = msg.message!.content as Array<{ type: string; text?: string }>;
-        // Bash output detection
-        if (!bashUUID) {
-          for (const block of content) {
-            if (block.type === 'text') {
-              const text = block.text ?? '';
-              if (text.startsWith('<bash-stdout') || text.startsWith('<bash-stderr')) {
-                bashUUID = msg.uuid;
-                break;
-              }
-            }
-          }
-        }
-        // Thinking stop condition — reached a previous user turn without tool result
-        if (needThinkingScan && !thinkingId) {
-          const hasToolResult = content.some(block => block.type === 'tool_result');
-          if (!hasToolResult) {
-            thinkingId = 'no-thinking';
-          }
-        }
-      } else if (msg?.type === 'assistant') {
-        if (needThinkingScan && !thinkingId) {
-          const content = msg.message!.content as Array<{ type: string }>;
-          for (let j = content.length - 1; j >= 0; j--) {
-            if (content[j]?.type === 'thinking') {
-              thinkingId = `${msg.uuid}:${j}`;
-              break;
-            }
+      if (msg?.type !== 'user') continue;
+      const content = msg.message!.content as Array<{ type: string; text?: string }>;
+      for (const block of content) {
+        if (block.type === 'text') {
+          const text = block.text ?? '';
+          if (text.startsWith('<bash-stdout') || text.startsWith('<bash-stderr')) {
+            bashUUID = msg.uuid;
+            break;
           }
         }
       }
-      if (thinkingId !== null && bashUUID) break;
+      if (bashUUID) break;
     }
     if (!hidePastThinking) {
-      thinkingId = null;
+      return { lastThinkingBlockId: null, latestBashOutputUUID: bashUUID };
     }
-    return { lastThinkingBlockId: thinkingId, latestBashOutputUUID: bashUUID };
-  }, [normalizedMessages, hidePastThinking, isStreamingThinkingVisible]);
+    return {
+      lastThinkingBlockId: collectLastThinkingIdsPerTurn(normalizedMessages),
+      latestBashOutputUUID: bashUUID,
+    };
+  }, [normalizedMessages, hidePastThinking]);
 
   // streamingToolUses updates on every input_json_delta while normalizedMessages
   // stays stable — precompute the Set so the filter is O(k) not O(n×k) per chunk.
@@ -822,6 +826,11 @@ const MessagesImpl = ({
   const isItemClickable = useCallback(
     (msg: RenderableMessage): boolean => {
       if (msg.type === 'collapsed_read_search') return true;
+      // densable tx: queued_command + uM (or envelope) is clickable in
+      // default REPL. Session verbose/transcript already paints Fg — skip.
+      if (!(verbose || isTranscriptMode) && isPeerInboundExpandClickable(msg)) {
+        return true;
+      }
       if (msg.type === 'assistant') {
         const content = msg.message!.content;
         const b = (Array.isArray(content) ? content[0] : undefined) as unknown as AdvisorBlock | undefined;
@@ -843,7 +852,7 @@ const MessagesImpl = ({
       const tool = name ? findToolByName(tools, name) : undefined;
       return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
-    [columns, tools],
+    [columns, tools, verbose, isTranscriptMode],
   );
 
   const canAnimate =
@@ -1037,21 +1046,6 @@ const MessagesImpl = ({
 
       {/* gold Messages: C && !brief && turn → yi(store). yi returns null if !displayed. */}
       {!isBriefOnly && streamingPreview}
-
-      {isStreamingThinkingVisible && streamingThinking && !isBriefOnly && (
-        <Box marginTop={1}>
-          <AssistantThinkingMessage
-            param={{
-              type: 'thinking',
-              thinking: streamingThinking.thinking,
-            }}
-            addMargin={false}
-            isTranscriptMode={true}
-            verbose={verbose}
-            hideInTranscript={false}
-          />
-        </Box>
-      )}
     </SentryErrorBoundary>
   );
 };
@@ -1116,7 +1110,6 @@ function expandKey(msg: RenderableMessage): string {
 // Default React.memo does shallow comparison which fails when:
 // 1. onOpenRateLimitOptions callback is recreated (doesn't affect render output)
 // 2. streamingToolUses array is recreated on every delta, but only contentBlock matters for rendering
-// 3. streamingThinking changes on every delta - we DO want to re-render for this
 function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
   for (const item of a) {
@@ -1167,8 +1160,6 @@ export const Messages = React.memo(MessagesImpl, (prev, next) => {
           continue;
         }
       }
-      // streamingThinking changes frequently - always re-render when it changes
-      // (no special handling needed, default behavior is correct)
       return false;
     }
   }

@@ -94,7 +94,7 @@ export function UserToolSuccessMessage({
   }
 
   // Ink requires text strings to be inside <Text>. Tools that return plain
-  // multi-line strings (e.g. GoalTool's usage report) crash without the wrap.
+  // multi-line strings crash without the wrap.
   // React elements from UI.tsx files pass through unchanged.
   const wrappedMessage = typeof renderedMessage === 'string' ? <Text>{renderedMessage}</Text> : renderedMessage;
 

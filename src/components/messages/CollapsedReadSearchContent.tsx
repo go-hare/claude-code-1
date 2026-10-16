@@ -17,6 +17,7 @@ import type { ThemeName } from '../../utils/theme.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
+import { AssistantThinkingMessage } from './AssistantThinkingMessage.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { PrBadge } from '../PrBadge.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
@@ -31,7 +32,6 @@ const teamMemCollapsed = feature('TEAMMEM')
 // (bash commands, file reads, search patterns) are actually readable instead
 // of flickering past in a single frame.
 const MIN_HINT_DISPLAY_MS = 700;
-const MIN_THINKING_SUMMARY_DISPLAY_MS = 3000;
 
 type Props = {
   message: CollapsedReadSearchGroup;
@@ -177,6 +177,9 @@ export function CollapsedReadSearchContent({
     otherToolCount > 0 ||
     frameCount > 0;
 
+  const thoughtForMs = message.thoughtForMs ?? 0;
+  const hasThoughtFor = thoughtForMs > 0 || message.latestThinkingSummary !== undefined;
+
   const readPaths = message.readFilePaths;
   const searchArgs = message.searchArgs;
   let incomingHint = message.latestDisplayHint;
@@ -209,11 +212,13 @@ export function CollapsedReadSearchContent({
 
   const displayedHint = useMinDisplayTime(incomingHint, MIN_HINT_DISPLAY_MS);
 
-  // Thinking summary: show the model's thinking summary with a 3-second minimum
-  // display time so it stays readable. Prefer it over the regular hint when active.
-  const thinkingSummaryRaw = isActiveGroup ? (message.latestThinkingSummary as string | undefined) : undefined;
-  const thinkingSummary = useMinDisplayTime(thinkingSummaryRaw, MIN_THINKING_SUMMARY_DISPLAY_MS);
-  const effectiveHint = thinkingSummary ?? displayedHint;
+  // densable 2.1.289 hd: lead is Io "Thinking"|"Thought" for duration. The ⎿
+  // hint is tool display (aB) unless gold has Tr(tn(thinking)) summary, which
+  // paints italic oa — not the raw thinking body. Analog absorb still stores
+  // the body in latestThinkingSummary; feeding that into effectiveHint first-
+  // paints 字 then unmounts on fold (analog markDirty walks ancestors).
+  // Do not prefer latestThinkingSummary over displayedHint.
+  const effectiveHint = displayedHint;
 
   // In verbose mode, render each tool use with its 1-line result summary
   if (verbose) {
@@ -226,51 +231,78 @@ export function CollapsedReadSearchContent({
       }
     }
 
+    // densable 2.1.289: verbose map uses content[0] only —
+    // thinking && thinking → Ss; else if not tool_use → skip; else Qc.
+    // Empty / redacted / summary fallbacks are analog — invent-ban for 1:1.
+    const verboseRows: React.ReactNode[] = [];
+    for (const msg of toolUses) {
+      const blocks = msg.message.content as Array<{
+        type: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+        thinking?: string;
+      }>;
+      const content = blocks[0];
+      if (content?.type === 'thinking' && content.thinking) {
+        verboseRows.push(
+          <Box key={`${msg.uuid}-thinking`} marginTop={1}>
+            <AssistantThinkingMessage
+              param={{ type: 'thinking', thinking: content.thinking }}
+              addMargin={false}
+              isTranscriptMode={true}
+              verbose={true}
+            />
+          </Box>,
+        );
+        continue;
+      }
+      if (content?.type !== 'tool_use' || !content.id) continue;
+      verboseRows.push(
+        <VerboseToolUse
+          key={content.id}
+          content={content as { type: 'tool_use'; id: string; name: string; input: unknown }}
+          tools={tools}
+          lookups={lookups}
+          inProgressToolUseIDs={inProgressToolUseIDs}
+          shouldAnimate={shouldAnimate}
+          theme={theme}
+        />,
+      );
+    }
+    const hookBlock =
+      message.hookInfos && message.hookInfos.length > 0 ? (
+        <>
+          <Text dimColor>
+            {'  ⎿  '}Ran {message.hookCount} PreToolUse {message.hookCount === 1 ? 'hook' : 'hooks'} (
+            {formatSecondsShort(message.hookTotalMs ?? 0)})
+          </Text>
+          {message.hookInfos.map((info, idx) => (
+            <Text key={`hook-${idx}`} dimColor>
+              {'     ⎿ '}
+              {info.command} ({formatSecondsShort(info.durationMs ?? 0)})
+            </Text>
+          ))}
+        </>
+      ) : null;
+    const memoryRows = message.relevantMemories?.map(m => (
+      <Box key={m.path} flexDirection="column" marginTop={1}>
+        <Text dimColor>
+          {'  ⎿  '}Recalled {basename(m.path)}
+        </Text>
+        <Box paddingLeft={5}>
+          <Text>
+            <Ansi>{m.content}</Ansi>
+          </Text>
+        </Box>
+      </Box>
+    ));
+    // densable always returns the verbose column (may be empty Ss list).
     return (
       <Box flexDirection="column">
-        {toolUses.map(msg => {
-          const content = (
-            msg.message.content as Array<{ type: string; id?: string; name?: string; input?: unknown }>
-          )[0];
-          if (content?.type !== 'tool_use') return null;
-          return (
-            <VerboseToolUse
-              key={content.id!}
-              content={content as { type: 'tool_use'; id: string; name: string; input: unknown }}
-              tools={tools}
-              lookups={lookups}
-              inProgressToolUseIDs={inProgressToolUseIDs}
-              shouldAnimate={shouldAnimate}
-              theme={theme}
-            />
-          );
-        })}
-        {message.hookInfos && message.hookInfos.length > 0 && (
-          <>
-            <Text dimColor>
-              {'  ⎿  '}Ran {message.hookCount} PreToolUse {message.hookCount === 1 ? 'hook' : 'hooks'} (
-              {formatSecondsShort(message.hookTotalMs ?? 0)})
-            </Text>
-            {message.hookInfos.map((info, idx) => (
-              <Text key={`hook-${idx}`} dimColor>
-                {'     ⎿ '}
-                {info.command} ({formatSecondsShort(info.durationMs ?? 0)})
-              </Text>
-            ))}
-          </>
-        )}
-        {message.relevantMemories?.map(m => (
-          <Box key={m.path} flexDirection="column" marginTop={1}>
-            <Text dimColor>
-              {'  ⎿  '}Recalled {basename(m.path)}
-            </Text>
-            <Box paddingLeft={5}>
-              <Text>
-                <Ansi>{m.content}</Ansi>
-              </Text>
-            </Box>
-          </Box>
-        ))}
+        {verboseRows}
+        {hookBlock}
+        {memoryRows}
       </Box>
     );
   }
@@ -280,7 +312,7 @@ export function CollapsedReadSearchContent({
 
   // Defensive: If all counts are 0, don't render the collapsed group
   // This shouldn't happen in normal operation, but handles edge cases
-  if (!hasMemoryOps && !hasTeamMemoryOps && !hasNonMemoryOps) {
+  if (!hasMemoryOps && !hasTeamMemoryOps && !hasNonMemoryOps && !hasThoughtFor) {
     return null;
   }
 
@@ -324,6 +356,17 @@ export function CollapsedReadSearchContent({
       <Text key={key}>
         {verbText}
         {body != null ? <> {body}</> : null}
+      </Text>,
+    );
+  }
+
+  // densable Io: Thought/Thinking for <duration> leads the collapsed line.
+  if (hasThoughtFor) {
+    const label = isActiveGroup ? 'Thinking' : 'Thought';
+    const durationMs = Math.max(1000, thoughtForMs);
+    nonMemParts.push(
+      <Text key="thought">
+        {label} for <Text bold>{formatDuration(durationMs)}</Text>
       </Text>,
     );
   }
@@ -580,21 +623,17 @@ export function CollapsedReadSearchContent({
         // Row layout: 5-wide gutter for ⎿, then a flex column for the text.
         // Ink's wrap stays inside the right column so continuation lines
         // indent under ⎿. MAX_HINT_CHARS in commandAsHint caps total at ~5 lines.
-        // Thinking summaries cap at 10 lines.
         <Box flexDirection="row">
           <Box width={5} flexShrink={0}>
             <Text dimColor>{'  ⎿  '}</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1}>
-            {effectiveHint
-              .split('\n')
-              .slice(0, thinkingSummary ? 10 : undefined)
-              .map((line, i, arr) => (
-                <Text key={`hint-${i}`} dimColor>
-                  {line}
-                  {i === arr.length - 1 && shellProgressSuffix}
-                </Text>
-              ))}
+            {effectiveHint.split('\n').map((line, i, arr) => (
+              <Text key={`hint-${i}`} dimColor>
+                {line}
+                {i === arr.length - 1 && shellProgressSuffix}
+              </Text>
+            ))}
           </Box>
         </Box>
       )}

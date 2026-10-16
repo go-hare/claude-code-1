@@ -25,13 +25,11 @@ import type {
   SystemMemorySavedMessage,
 } from '../../types/message.js';
 import { SystemAPIErrorMessage } from './SystemAPIErrorMessage.js';
-import { formatDuration, formatNumber, formatResetTime, formatSecondsShort } from '../../utils/format.js';
+import { formatDuration, formatNumber, formatSecondsShort } from '../../utils/format.js';
+import { formatTurnDoneAt } from '../../utils/timeFormat.js';
 import { getGlobalConfig } from '../../utils/config.js';
 import ThemedText from '../design-system/ThemedText.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
-import { useAppStateStore } from '../../state/AppState.js';
-import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
-import { getPillLabel } from '../../tasks/pillLabel.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 
 type Props = {
@@ -49,16 +47,26 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
   }
 
   if (message.subtype === 'memory_saved') {
-    return <MemorySavedMessage message={message} addMargin={addMargin} />;
+    // densable Pg: file rows only when verbose || transcript (h||!!M).
+    return <MemorySavedMessage message={message} addMargin={addMargin} verbose={verbose || !!isTranscriptMode} />;
   }
 
   if (message.subtype === 'away_summary') {
     return (
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
         <Box minWidth={2}>
-          <Text dimColor>{REFERENCE_MARK}</Text>
+          <Text dimColor aria-hidden>
+            {REFERENCE_MARK}
+          </Text>
         </Box>
-        <Text dimColor>{String(message.content ?? '')}</Text>
+        <Text dimColor>
+          <Text dimColor bold>
+            recap:{' '}
+          </Text>
+          <Text dimColor italic>
+            {String(message.content ?? '')}
+          </Text>
+        </Text>
       </Box>
     );
   }
@@ -294,25 +302,25 @@ function TurnDurationMessage({
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
   const [verb] = useState(() => sample(TURN_COMPLETION_VERBS) ?? 'Worked');
-  const store = useAppStateStore();
-  const [backgroundTaskSummary] = useState(() => {
-    const tasks = store.getState().tasks;
-    const running = (Object.values(tasks ?? {}) as TaskState[]).filter(isBackgroundTask);
-    return running.length > 0 ? getPillLabel(running) : null;
-  });
+  const pending = message as unknown as { pendingBackgroundAgentCount?: unknown; pendingWorkflowCount?: unknown };
+  const pendingAgents =
+    typeof pending.pendingBackgroundAgentCount === 'number' ? pending.pendingBackgroundAgentCount : 0;
+  const pendingWorkflows = typeof pending.pendingWorkflowCount === 'number' ? pending.pendingWorkflowCount : 0;
+  const waitingForBg = pendingAgents > 0 || pendingWorkflows > 0;
 
   const showTurnDuration = getGlobalConfig().showTurnDuration ?? true;
 
   const duration = formatDuration(message.durationMs as number);
-  // densable 2.1.246 #3 Vs(timestamp) → ` · done ${TN}` (official L/ct).
+  // densable 2.1.289 kVe(timestamp) → ` · done ${j}` (today: hour numeric, no am/pm).
   const rawTimestamp = message.timestamp;
-  const timestamp =
+  const timestampDate =
     typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number'
-      ? rawTimestamp
+      ? new Date(rawTimestamp)
       : rawTimestamp instanceof Date
         ? rawTimestamp
         : undefined;
-  const doneAt = timestamp !== undefined ? formatResetTime(Math.floor(new Date(timestamp).getTime() / 1000)) : '';
+  const doneAt =
+    timestampDate !== undefined && !Number.isNaN(timestampDate.getTime()) ? formatTurnDoneAt(timestampDate) : '';
   const hasBudget = message.budgetLimit !== undefined;
   const budgetSuffix = (() => {
     if (!hasBudget) return '';
@@ -335,26 +343,60 @@ function TurnDurationMessage({
   const briefHidden = typeof briefHiddenRaw === 'number' && Number.isFinite(briefHiddenRaw) ? briefHiddenRaw : 0;
   const briefHiddenSuffix =
     briefHidden > 0
-      ? `${showTurnDuration || hasBudget || backgroundTaskSummary ? ' \u00B7 ' : ''}${briefHidden} ${
+      ? `${showTurnDuration || hasBudget ? ' \u00B7 ' : ''}${briefHidden} ${
           briefHidden === 1 ? 'message' : 'messages'
         } hidden (/focus to show)`
       : '';
 
-  if (!showTurnDuration && !hasBudget && !briefHiddenSuffix) {
+  const hasCrunched = Boolean(showTurnDuration || hasBudget || briefHiddenSuffix);
+  if (!hasCrunched && !waitingForBg) {
     return null;
   }
 
   return (
-    <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-      <Box minWidth={2}>
-        <Text dimColor>{TEARDROP_ASTERISK}</Text>
-      </Box>
-      <Text dimColor>
-        {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
-        {budgetSuffix}
-        {backgroundTaskSummary && ` \u00B7 ${backgroundTaskSummary} still running`}
-        {briefHiddenSuffix}
-      </Text>
+    <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+      {hasCrunched && (
+        <Box flexDirection="row" width="100%">
+          <Box minWidth={2}>
+            <Text dimColor>{TEARDROP_ASTERISK}</Text>
+          </Box>
+          <Text dimColor>
+            {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
+            {budgetSuffix}
+            {briefHiddenSuffix}
+          </Text>
+        </Box>
+      )}
+      {waitingForBg && (
+        <Box flexDirection="row" width="100%" marginTop={hasCrunched ? 1 : 0}>
+          <Box minWidth={2}>
+            <Text dimColor>{TEARDROP_ASTERISK}</Text>
+          </Box>
+          <Text dimColor>
+            Waiting for
+            {pendingAgents > 0 && (
+              <>
+                {' '}
+                <Text bold dimColor>
+                  {pendingAgents}
+                </Text>
+                {` background ${pendingAgents === 1 ? 'agent' : 'agents'}`}
+              </>
+            )}
+            {pendingAgents > 0 && pendingWorkflows > 0 && ' and'}
+            {pendingWorkflows > 0 && (
+              <>
+                {' '}
+                <Text bold dimColor>
+                  {pendingWorkflows}
+                </Text>
+                {` ${pendingWorkflows === 1 ? 'dynamic workflow' : 'dynamic workflows'}`}
+              </>
+            )}{' '}
+            to finish
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -362,9 +404,11 @@ function TurnDurationMessage({
 function MemorySavedMessage({
   message,
   addMargin,
+  verbose,
 }: {
   message: SystemMemorySavedMessage;
   addMargin: boolean;
+  verbose: boolean;
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
   const writtenPaths = (message.writtenPaths ?? []) as string[];
@@ -378,15 +422,15 @@ function MemorySavedMessage({
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Box flexDirection="row">
         <Box minWidth={2}>
-          <Text dimColor>{BLACK_CIRCLE}</Text>
+          <Text dimColor aria-hidden>
+            {BLACK_CIRCLE}
+          </Text>
         </Box>
         <Text>
           {(message.verb as string) ?? 'Saved'} {parts.join(' \u00B7 ')}
         </Text>
       </Box>
-      {writtenPaths.map(p => (
-        <MemoryFileRow key={p} path={p} />
-      ))}
+      {verbose ? writtenPaths.map(p => <MemoryFileRow key={p} path={p} />) : null}
     </Box>
   );
 }

@@ -26,7 +26,12 @@ import type {
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { logError } from '../utils/log.js';
-import type { buildMessageLookups } from '../utils/messages.js';
+import {
+  getContentText,
+  isInSessionPeerOrObserverOrigin,
+  peerOrObserverDisplayName,
+  type buildMessageLookups,
+} from '../utils/messages.js';
 import { CompactSummary } from './CompactSummary.js';
 import { AdvisorMessage } from './messages/AdvisorMessage.js';
 import { AssistantRedactedThinkingMessage } from './messages/AssistantRedactedThinkingMessage.js';
@@ -38,6 +43,7 @@ import { CollapsedReadSearchContent } from './messages/CollapsedReadSearchConten
 import { CompactBoundaryMessage } from './messages/CompactBoundaryMessage.js';
 import { GroupedToolUseContent } from './messages/GroupedToolUseContent.js';
 import { SystemTextMessage } from './messages/SystemTextMessage.js';
+import { UserCrossSessionMessage } from './messages/UserCrossSessionMessage.js';
 import { UserImageMessage } from './messages/UserImageMessage.js';
 import { UserTextMessage } from './messages/UserTextMessage.js';
 import { UserToolResultMessage } from './messages/UserToolResultMessage/UserToolResultMessage.js';
@@ -71,8 +77,8 @@ export type Props = {
   onOpenRateLimitOptions?: () => void;
   isActiveCollapsedGroup?: boolean;
   isUserContinuation?: boolean;
-  /** ID of the last thinking block (uuid:index) to show, used for hiding past thinking in transcript mode */
-  lastThinkingBlockId?: string | null;
+  /** Last thinking block(s) (uuid:index) visible in transcript; Set = one per turn. */
+  lastThinkingBlockId?: string | ReadonlySet<string> | null;
   /** UUID of the latest user bash output message (for auto-expanding) */
   latestBashOutputUUID?: string | null;
 };
@@ -99,15 +105,38 @@ function MessageImpl({
   latestBashOutputUUID,
 }: Props): React.ReactNode {
   switch (message.type) {
-    case 'attachment':
+    case 'attachment': {
+      // densable oC: queued_command + uM(origin) paints Wr here — AttachmentMessage
+      // never sees in-session peer/observer drains.
+      const att = message.attachment as import('../utils/attachments.js').Attachment;
+      if (att.type === 'queued_command') {
+        const promptText = typeof att.prompt === 'string' ? att.prompt : (getContentText(att.prompt) ?? '');
+        if (isInSessionPeerOrObserverOrigin(att.origin)) {
+          return (
+            <Box flexDirection="column" width={containerWidth ?? '100%'}>
+              <UserCrossSessionMessage
+                addMargin={addMargin}
+                param={{ type: 'text', text: promptText }}
+                fromName={peerOrObserverDisplayName(att.origin)}
+                fallbackLabel="agent"
+                isTranscriptMode={isTranscriptMode}
+                verbose={verbose}
+                origin={att.origin}
+                messageId={message.uuid}
+              />
+            </Box>
+          );
+        }
+      }
       return (
         <AttachmentMessage
           addMargin={addMargin}
-          attachment={message.attachment as import('../utils/attachments.js').Attachment}
+          attachment={att}
           verbose={verbose}
           isTranscriptMode={isTranscriptMode}
         />
       );
+    }
     case 'assistant': {
       // densable SFa — prefer MessageDisplay transformed first *text* when !verbose
       // (Tth writes displayContent onto the first text block; thinking/tool may
@@ -256,8 +285,7 @@ function MessageImpl({
           shouldAnimate={shouldAnimate}
         />
       );
-    case 'collapsed_read_search':
-      // OffscreenFreeze: the verb flips "Reading…"→"Read" when tools complete.
+    case 'collapsed_read_search': // OffscreenFreeze: the verb flips "Reading…"→"Read" when tools complete.
       // If the group has scrolled into scrollback by then, the update triggers
       // a full terminal reset (CC-1155). This component is never marked static
       // in prompt mode (shouldRenderStatically returns false to allow live
@@ -313,8 +341,14 @@ function UserMessage({
   switch (param.type) {
     case 'text': {
       const stored = message.origin;
+      // densable oC: Wr is decided in UserTextMessage via uM. Forward plugin /
+      // channel / peer / observer so BX still sees origin (bare peer = UDS).
       const originKind = stored?.kind;
-      const origin = stored !== undefined && (originKind === 'plugin' || originKind === 'channel') ? stored : undefined;
+      const origin =
+        stored !== undefined &&
+        (originKind === 'plugin' || originKind === 'channel' || originKind === 'peer' || originKind === 'observer')
+          ? stored
+          : undefined;
       const task = 'task' in message ? message.task : undefined;
       const from = 'from' in message ? message.from : undefined;
       return (
@@ -402,8 +436,8 @@ function AssistantMessageBlock({
   onOpenRateLimitOptions?: () => void;
   /** ID of this content block's message:index for thinking block comparison */
   thinkingBlockId: string;
-  /** ID of the last thinking block to show, null means show all */
-  lastThinkingBlockId?: string | null;
+  /** Last thinking block(s); Set = one per turn. null means show all. */
+  lastThinkingBlockId?: string | ReadonlySet<string> | null;
   advisorModel?: string;
   /** densable bFa — API message id for displayedMessageContent lookup */
   apiMessageId?: string;
@@ -475,11 +509,15 @@ function AssistantMessageBlock({
       }
       return <AssistantRedactedThinkingMessage addMargin={addMargin} />;
     case 'thinking': {
+      // densable: if (!U && !R) return null — hide unless transcript or verbose.
       if (!isTranscriptMode && !verbose) {
         return null;
       }
-      // In transcript mode with hidePastThinking, only show the last thinking block
-      const isLastThinking = !lastThinkingBlockId || thinkingBlockId === lastThinkingBlockId;
+      const isLastThinking =
+        !lastThinkingBlockId ||
+        (typeof lastThinkingBlockId === 'string'
+          ? thinkingBlockId === lastThinkingBlockId
+          : lastThinkingBlockId.has(thinkingBlockId));
       return (
         <AssistantThinkingMessage
           addMargin={addMargin}
@@ -523,7 +561,7 @@ export function areMessagePropsEqual(prev: Props, next: Props): boolean {
   if (prev.message.uuid !== next.message.uuid) return false;
   // Only re-render on lastThinkingBlockId change if this message actually
   // has thinking content — otherwise every message in scrollback re-renders
-  // whenever streaming thinking starts/stops (CC-941).
+  // whenever hidePastThinking last-id changes (CC-941).
   if (
     prev.lastThinkingBlockId !== next.lastThinkingBlockId &&
     hasThinkingContent(next.message as Parameters<typeof hasThinkingContent>[0])

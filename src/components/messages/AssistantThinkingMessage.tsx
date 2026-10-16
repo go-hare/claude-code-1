@@ -1,11 +1,11 @@
 import type { ThinkingBlock, ThinkingBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import { CtrlOToExpand } from '../CtrlOToExpand.js';
+import { THEREFORE } from '../../constants/figures.js';
 import { Markdown } from '../Markdown.js';
+import { stripPromptXMLTags } from '../../utils/emptyMessageText.js';
 
 type Props = {
-  // Accept either full ThinkingBlock/ThinkingBlockParam or a minimal shape with just type and thinking
   param: ThinkingBlock | ThinkingBlockParam | { type: 'thinking'; thinking: string };
   addMargin: boolean;
   isTranscriptMode: boolean;
@@ -14,6 +14,10 @@ type Props = {
   hideInTranscript?: boolean;
 };
 
+/**
+ * densable 2.1.289 Ss — `∴` + thinking body.
+ * Default: one italic collapsed line. Transcript/verbose: Markdown column.
+ */
 export function AssistantThinkingMessage({
   param: { thinking },
   addMargin = false,
@@ -21,34 +25,35 @@ export function AssistantThinkingMessage({
   verbose,
   hideInTranscript = false,
 }: Props): React.ReactNode {
-  if (!thinking) {
-    return null;
-  }
-
   if (hideInTranscript) {
     return null;
   }
 
-  const shouldShowFullThinking = isTranscriptMode || verbose;
-  const label = '∴ Thinking';
-
-  if (!shouldShowFullThinking) {
-    return (
-      <Box marginTop={addMargin ? 1 : 0}>
-        <Text dimColor italic>
-          {label} <CtrlOToExpand />
-        </Text>
-      </Box>
-    );
+  const stripped = stripPromptXMLTags(thinking).trim();
+  if (!stripped) {
+    return null;
   }
 
+  const expanded = isTranscriptMode || verbose;
+  const body = expanded ? (
+    <Markdown dimColor capProseWidth>
+      {stripped}
+    </Markdown>
+  ) : (
+    <Text dimColor italic>
+      {stripped.replace(/\s+/g, ' ')}
+    </Text>
+  );
+
   return (
-    <Box flexDirection="column" gap={1} marginTop={addMargin ? 1 : 0} width="100%">
-      <Text dimColor italic>
-        {label}…
-      </Text>
-      <Box paddingLeft={2}>
-        <Markdown dimColor>{thinking}</Markdown>
+    <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
+      <Box minWidth={2}>
+        <Text aria-label="thinking:" dimColor italic>
+          {THEREFORE}
+        </Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1}>
+        {body}
       </Box>
     </Box>
   );

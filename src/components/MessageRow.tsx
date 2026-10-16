@@ -57,7 +57,7 @@ export type Props = {
   screen: Screen;
   canAnimate: boolean;
   onOpenRateLimitOptions?: () => void;
-  lastThinkingBlockId: string | null;
+  lastThinkingBlockId: string | ReadonlySet<string> | null;
   latestBashOutputUUID: string | null;
   columns: number;
   isLoading: boolean;
@@ -326,7 +326,7 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
 
   // lastThinkingBlockId affects thinking block visibility — but only for
   // messages that HAVE thinking content. Checking unconditionally busts the
-  // memo for every scrollback message whenever thinking starts/stops (CC-941).
+  // memo for every scrollback message whenever hidePastThinking last-id changes (CC-941).
   if (
     prev.lastThinkingBlockId !== next.lastThinkingBlockId &&
     hasThinkingContent(next.message as Parameters<typeof hasThinkingContent>[0])

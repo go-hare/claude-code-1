@@ -29,7 +29,10 @@ describe('densable 2.1.289 VML reveal host', () => {
       'utf8',
     )
     expect(src).toContain('<VirtualListLayoutPass onLayout={onLayout} />')
-    expect(src).toContain('subscribeLayout(onLayout)')
+    expect(src).toContain(
+      'useEffect(() => subscribeLayout(onLayout), [subscribeLayout, onLayout])',
+    )
     expect(src).toContain('tickReveal(false)')
+    expect(src).not.toContain('useLayoutEffect(() => {')
   })
 })

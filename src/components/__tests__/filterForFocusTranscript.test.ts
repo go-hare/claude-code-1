@@ -440,6 +440,45 @@ describe('filterForFocusTranscript full collapse', () => {
     expect(collapsed).not.toBe(msgs)
   })
 
+  test('keeps peer queued_command attachments (Image 34 Wr)', () => {
+    const msgs: Msg[] = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        message: { content: [{ type: 'text', text: 'spawn' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'tu',
+        message: {
+          content: [{ type: 'tool_use', name: 'Agent', id: 'tu1', input: {} }],
+        },
+      },
+      {
+        type: 'attachment',
+        uuid: 'qc1',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          isMeta: true,
+          prompt:
+            '<agent-message from="Explore">\nExplore sub-agent test OK\n</agent-message>',
+          origin: { kind: 'peer', senderTaskId: 'a-1', name: 'Explore' },
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        message: {
+          content: [{ type: 'text', text: 'Explore 子 agent 测试通过' }],
+          stop_reason: 'end_turn',
+        },
+      },
+    ]
+    const out = filterForFocusTranscript(msgs)
+    expect(out.some(m => m.uuid === 'qc1')).toBe(true)
+  })
+
   test('re-collapse folds Edit into editFileCount', () => {
     const msgs: Msg[] = [
       {

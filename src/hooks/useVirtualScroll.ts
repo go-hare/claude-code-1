@@ -782,11 +782,12 @@ export function useVirtualScroll(
       bestKey !== undefined ? { key: bestKey, yogaTop: bestTop } : null
   }, [])
 
-  // densable `ut` / `onLayout`. Gold `Ab` runs this after yoga, not via
-  // queueMicrotask. Sticky / vh=0 early-return — no analog first-paint wake.
+  // densable `ut` / `onLayout`. Gold sticky / getViewportHeight()===0
+  // early-return — no setState. Do not invent 0→>0 remeasure.
   const onLayout = useCallback(() => {
     const handle = scrollRef.current
-    if (!handle || handle.isSticky() || handle.getViewportHeight() === 0) {
+    const vh = handle?.getViewportHeight() ?? 0
+    if (!handle || handle.isSticky() || vh === 0) {
       scrollAnchorRef.current = null
       return
     }

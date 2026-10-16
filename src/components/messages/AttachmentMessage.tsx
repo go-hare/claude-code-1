@@ -1,13 +1,13 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import React, { useMemo } from 'react';
-import { Ansi, Box, Text } from '@anthropic/ink';
+import { Ansi, Box, StatusIcon, Text } from '@anthropic/ink';
 import { FilePathLink } from '../FilePathLink.js';
 import { toInkColor } from '../../utils/ink.js';
 import type { Attachment } from 'src/utils/attachments.js';
 import type { NullRenderingAttachmentType } from './nullRenderingAttachments.js';
 import { useAppState } from '../../state/AppState.js';
 import { getDisplayPath } from 'src/utils/file.js';
-import { formatFileSize } from 'src/utils/format.js';
+import { formatDuration, formatFileSize, formatNumber } from 'src/utils/format.js';
 import { MessageResponse } from '../MessageResponse.js';
 import { basename, sep } from 'path';
 import { UserTextMessage } from './UserTextMessage.js';
@@ -298,6 +298,7 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
     case 'queued_command': {
       const text = typeof attachment.prompt === 'string' ? attachment.prompt : getContentText(attachment.prompt) || '';
       const hasImages = attachment.imagePasteIds && attachment.imagePasteIds.length > 0;
+      const origin = attachment.origin;
       return (
         <Box flexDirection="column">
           <UserTextMessage
@@ -305,6 +306,7 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
             param={{ text, type: 'text' }}
             verbose={verbose}
             isTranscriptMode={isTranscriptMode}
+            origin={origin}
           />
           {hasImages && attachment.imagePasteIds?.map(id => <UserImageMessage key={id} imageId={id} />)}
         </Box>
@@ -416,42 +418,64 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
         </Box>
       );
     case 'goal_status': {
+      // densable 2.1.289 AttachmentMessage Ul `case"goal_status"`:
+      // StatusIcon + label + (duration · turns · tokens); Goal:/Reason: only when verbose.
       if (attachment.sentinel) return null;
       const failed = attachment.failed === true;
       const stats: string[] = [];
       if (attachment.met || failed) {
         if (attachment.durationMs !== undefined) {
-          const sec = Math.floor(attachment.durationMs / 1000);
-          stats.push(sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m`);
+          stats.push(formatDuration(attachment.durationMs, { mostSignificantOnly: true }));
         }
         if (attachment.iterations !== undefined) {
           stats.push(`${attachment.iterations} ${plural(attachment.iterations, 'turn')}`);
         }
+        if (attachment.tokens !== undefined) {
+          stats.push(`${formatNumber(attachment.tokens)} tokens`);
+        }
       }
-      const suffix = stats.length > 0 ? ` (${stats.join(' \u00b7 ')})` : '';
+      const suffix = stats.length > 0 ? ` (${stats.join(' · ')})` : '';
       const label = failed
         ? 'Goal could not be achieved'
         : attachment.met
           ? 'Goal achieved'
-          : 'Goal not yet met\u2026 continuing';
+          : 'Goal not yet met… continuing';
+      const iconStatus = failed ? 'error' : attachment.met ? 'success' : 'pending';
+      // densable Ul verbose:h; ctrl+o transcript also expands (screenshot 6).
+      const expanded = verbose || Boolean(isTranscriptMode);
       return (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor={!attachment.met && !failed} color={failed ? 'error' : undefined}>
-            {failed ? '\u2717 ' : attachment.met ? '\u2713 ' : '\u25cb '}
-            {label}
-            {suffix}
+          <Text>
+            <StatusIcon status={iconStatus} withSpace />
+            <Text dimColor={!attachment.met && !failed} color={failed ? 'error' : undefined}>
+              {label}
+            </Text>
+            {suffix ? <Text dimColor>{suffix}</Text> : null}
+            {!expanded ? (
+              <>
+                {' '}
+                <CtrlOToExpand />
+              </>
+            ) : null}
           </Text>
-          {attachment.met && attachment.condition ? (
+          {failed && attachment.reason ? (
+            <Box paddingLeft={2}>
+              <Text dimColor wrap="wrap">
+                {attachment.reason}
+              </Text>
+            </Box>
+          ) : null}
+          {expanded ? (
             <Box paddingLeft={2}>
               <Text dimColor wrap="wrap">
                 Goal: {attachment.condition}
               </Text>
             </Box>
           ) : null}
-          {failed && attachment.reason ? (
+          {expanded && !failed && attachment.reason ? (
             <Box paddingLeft={2}>
               <Text dimColor wrap="wrap">
-                {attachment.reason}
+                Reason: {attachment.reason}
               </Text>
             </Box>
           ) : null}
