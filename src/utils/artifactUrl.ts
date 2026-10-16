@@ -19,12 +19,21 @@ import { isEnvTruthy } from './envUtils.js'
 /** Official `bv`. */
 export const OFFICIAL_ARTIFACT_TOOL_NAME = 'Artifact'
 
-/** Official `q2r`. */
-const ARTIFACT_SLUG =
+/** Official `q2r` — hex class widens when `caseInsensitive`. */
+const ARTIFACT_SLUG_SENSITIVE =
   '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const ARTIFACT_SLUG_INSENSITIVE =
+  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 
-/** Official `Hya`. */
-const ARTIFACT_PATH = `/code/(?:artifact|frame)/(?:[A-Za-z0-9_-]*-)?(${ARTIFACT_SLUG})(?:[/?#]|$)`
+/** Official `K2r` / densable stub prefix for `hWe`. */
+export const EVAL_STUB_ARTIFACT_URL_PREFIX = 'eval-stub://artifact/'
+
+function artifactPathPattern(caseInsensitive: boolean): string {
+  const slug = caseInsensitive
+    ? ARTIFACT_SLUG_INSENSITIVE
+    : ARTIFACT_SLUG_SENSITIVE
+  return `/code/(?:artifact|frame)/(?:[A-Za-z0-9_-]*-)?(${slug})(?:[/?#]|$)`
+}
 
 export type ParsedArtifactUrl = {
   slug: string
@@ -39,6 +48,15 @@ function artifactCustomHost(): string | undefined {
 /** Official `S$` — tip has no publish stub dir. */
 export function getArtifactPublishStubDir(): string | null {
   return null
+}
+
+/**
+ * densable `Jc` — eval harness stub-publish dir is set.
+ * Distinct from tip `getArtifactPublishStubDir()` (always null).
+ */
+export function isEvalArtifactStubDirSet(): boolean {
+  const dir = process.env.CLAUDE_CODE_EVAL_ARTIFACT_STUB_DIR
+  return typeof dir === 'string' && dir.length > 0
 }
 
 /** Official `X4n` — env or settings disable. */
@@ -147,6 +165,43 @@ export function isArtifactToolRegistered(): boolean {
 export const ASe = isArtifactToolRegistered
 
 /**
+ * Official `Vht` — claude.ai subscriber (`ft`), or env-quad federation with no
+ * API key that also holds a claude.ai OAuth login (`de`).
+ */
+function isArtifactAccountEligible(): boolean {
+  try {
+    const { getAnthropicApiKey, getClaudeAIOAuthTokens, isClaudeAISubscriber } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./auth.js') as typeof import('./auth.js')
+    if (isClaudeAISubscriber()) return true
+    const { getAnthropicProfileSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
+    if (getAnthropicProfileSource() !== 'env-quad') return false
+    if (getAnthropicApiKey() !== null) return false
+    const { shouldUseClaudeAIAuth } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/oauth/client.js') as typeof import('../services/oauth/client.js')
+    const tokens = getClaudeAIOAuthTokens()
+    return shouldUseClaudeAIAuth(tokens?.scopes) && !!tokens?.accessToken
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official `Rms` (`isArtifactToolEligible`) — not switched off, `Vht`, not a
+ * surface-excluded entrypoint, and `D()` clear. Unlike ASe it skips the
+ * cobalt-plinth / admin arm, so it can be true while the tool is unregistered.
+ */
+export function isArtifactToolEligible(): boolean {
+  if (isArtifactHardDisabled()) return false
+  if (!isArtifactAccountEligible()) return false
+  if (isArtifactEntrypointExcluded()) return false
+  return isArtifactSdkDefaultAllowed()
+}
+
+/**
  * densable `nDa` — once-per-session log when Artifact is disabled.
  * Tip: no GrowthBook event bus required; marks evaluated on the autoReact store.
  */
@@ -196,42 +251,118 @@ export function canonicalizeArtifactUrlInput(url: string): string {
   }
 }
 
-/** Official `El`. `mFn()` is empty so the custom-host arm never matches. */
-export function parseArtifactUrl(url: string): ParsedArtifactUrl | null {
+/**
+ * densable `q(e,n)` — parse with optional case-insensitive host/path/slug.
+ * Official `El` / `Bt` is `parseArtifactUrlLoose(url, false)`.
+ * `mFn()` is empty so the custom-host arm never matches.
+ */
+export function parseArtifactUrlLoose(
+  url: string,
+  caseInsensitive: boolean,
+): ParsedArtifactUrl | null {
+  const path = artifactPathPattern(caseInsensitive)
+  const flags = caseInsensitive ? 'i' : undefined
+  const slugClass = caseInsensitive
+    ? ARTIFACT_SLUG_INSENSITIVE
+    : ARTIFACT_SLUG_SENSITIVE
   const prod = url.match(
-    new RegExp(`^https://(?:[a-z0-9-]+\\.)?claude\\.ai${ARTIFACT_PATH}`),
+    new RegExp(`^https://(?:[a-z0-9-]+\\.)?claude\\.ai${path}`, flags),
   )
-  if (prod?.[1]) return { slug: prod[1], env: 'prod' }
+  if (prod?.[1]) {
+    return {
+      slug: caseInsensitive ? prod[1].toLowerCase() : prod[1],
+      env: 'prod',
+    }
+  }
   const staging = url.match(
     new RegExp(
-      `^https://(?:preview\\.)?claude-ai\\.staging\\.ant\\.dev${ARTIFACT_PATH}`,
+      `^https://(?:preview\\.)?claude-ai\\.staging\\.ant\\.dev${path}`,
+      flags,
     ),
   )
-  if (staging?.[1]) return { slug: staging[1], env: 'staging' }
+  if (staging?.[1]) {
+    return {
+      slug: caseInsensitive ? staging[1].toLowerCase() : staging[1],
+      env: 'staging',
+    }
+  }
   const frame = url.match(
     new RegExp(
-      `^https://(${ARTIFACT_SLUG})\\.frame\\.(staging\\.)?claudeusercontent\\.com(?:[/?#]|$)`,
+      `^https://(${slugClass})\\.frame\\.(staging\\.)?claudeusercontent\\.com(?:[/?#]|$)`,
+      flags,
     ),
   )
   if (frame?.[1]) {
-    return { slug: frame[1], env: frame[2] ? 'staging' : 'prod' }
+    return {
+      slug: caseInsensitive ? frame[1].toLowerCase() : frame[1],
+      env: frame[2] ? 'staging' : 'prod',
+    }
   }
   const custom = artifactCustomHost()
   if (custom) {
-    const match = url.match(new RegExp(`^https?://([^/?#]+)${ARTIFACT_PATH}`))
+    const match = url.match(new RegExp(`^https?://([^/?#]+)${path}`, flags))
     if (match?.[2] && match[1] === new URL(custom).host) {
-      return { slug: match[2], env: 'prod' }
+      return {
+        slug: caseInsensitive ? match[2].toLowerCase() : match[2],
+        env: 'prod',
+      }
     }
   }
   return null
 }
 
-/** Official `UCe`. */
+/** Official `El` / densable `Bt(e)=q(e,false)`. */
+export function parseArtifactUrl(url: string): ParsedArtifactUrl | null {
+  return parseArtifactUrlLoose(url, false)
+}
+
+/**
+ * densable `n4` — canonicalize, strict parse, then case-insensitive fallback.
+ * Prefer for user-facing URL inputs (permissions / save / grants).
+ */
+export function parseArtifactUrlAnyCase(url: string): ParsedArtifactUrl | null {
+  const canonical = canonicalizeArtifactUrlInput(url)
+  return (
+    parseArtifactUrlLoose(canonical, false) ??
+    parseArtifactUrlLoose(canonical.toLowerCase(), true)
+  )
+}
+
+/** Official `UCe` / densable `Jx`. */
 export function parseArtifactUrlInput(url: unknown): ParsedArtifactUrl | null {
   return typeof url === 'string'
     ? parseArtifactUrl(canonicalizeArtifactUrlInput(url))
     : null
 }
+
+/**
+ * densable `hWe` — `eval-stub://artifact/{uuid}` → `{ slug }`.
+ * Shared with pluginEval publish-trace (`_$e`).
+ */
+export function parseEvalStubArtifactUrl(url: string): { slug: string } | null {
+  const slug = ARTIFACT_SLUG_SENSITIVE
+  const match = url.match(
+    new RegExp(
+      `^${EVAL_STUB_ARTIFACT_URL_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(${slug})(?:[/?#]|$)`,
+    ),
+  )
+  return match?.[1] ? { slug: match[1] } : null
+}
+
+/**
+ * densable `Pa` — strict slug, else eval-stub slug when Jc env is set.
+ */
+export function artifactSlugFromUrl(url: string): string | null {
+  return (
+    parseArtifactUrl(url)?.slug ??
+    (isEvalArtifactStubDirSet()
+      ? (parseEvalStubArtifactUrl(url)?.slug ?? null)
+      : null)
+  )
+}
+
+// densable 2.1.289: probeToolUseId / gatePublicRead boot cache landed in
+// artifactAutoReact mint/store. list_files O7 thickness is sibling-owned.
 
 /** Official `Gp`. */
 export function artifactViewerUrlFor(parsed: ParsedArtifactUrl): string {

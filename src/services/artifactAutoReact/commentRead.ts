@@ -8,7 +8,8 @@ import { frameControlPlaneHeaders, fetchFrameBoot } from './mint.js'
 import { isValidArtifactSlug } from './arm.js'
 import { un } from './store.js'
 
-const THREAD_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
+/** densable Xn — comment thread id. */
+export const THREAD_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 const COMMENT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 
 export type ArtifactComment = {
@@ -267,7 +268,12 @@ function aAmFromResponse(
 export async function readArtifactComments(
   slug: string,
   signal: AbortSignal,
-  opts: { env?: string; controlPlaneReadBeforeBoot?: boolean } = {},
+  opts: {
+    env?: string
+    controlPlaneReadBeforeBoot?: boolean
+    /** densable Tce probeToolUseId — reuse shareStatus.probeBoots. */
+    probeToolUseId?: string
+  } = {},
 ): Promise<CommentsReadOk | CommentsReadErr> {
   if (!isValidArtifactSlug(slug)) {
     return { err: 'invalid slug' }
@@ -285,7 +291,13 @@ export async function readArtifactComments(
     if (earlyCp.err === null) return earlyCp
   }
 
-  const boot = await fetchFrameBoot(slug, signal)
+  // densable Tce: aT(..., { probeToolUseId }) — default gatePublicRead true.
+  const boot = await fetchFrameBoot(slug, signal, {
+    kind: 'comments',
+    ...(opts.probeToolUseId !== undefined
+      ? { probeToolUseId: opts.probeToolUseId }
+      : {}),
+  })
   if (boot.err !== null) {
     // densable returns boot err; tip falls back to control-plane so comment
     // monitors still work when content-host boot is unavailable.

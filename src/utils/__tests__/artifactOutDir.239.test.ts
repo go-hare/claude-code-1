@@ -1,17 +1,22 @@
 /**
  * densable read_file / read_asset out_dir path (2.1.239).
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
+import { getEmptyToolPermissionContext } from '../../Tool.js'
+import { getCwd } from '../cwd.js'
 import {
   callArtifactReadAsset,
   callArtifactReadFile,
+  defaultArtifactFilesDir,
   extensionForContentType,
   isWindowsReservedPublishedSegment,
   normalizePublishedPath,
   resolveAssetOutStem,
   resolveFileOutDest,
+  resetArtifactAutoReactStoreForTests,
+  un,
   writeBytesExclusive,
 } from '../../services/artifactAutoReact/index.js'
 import { checkArtifactActionPermissions } from '../../../packages/builtin-tools/src/tools/ArtifactTool/permissions.js'
@@ -34,18 +39,15 @@ function scratchDir(name: string): string {
   return dir
 }
 
-afterEach(() => {
-  delete process.env.CLAUDE_CODE_ARTIFACT_FILES_DIR
-})
-
 function fakeContext() {
   return {
     abortController: new AbortController(),
     toolUseId: 'tu-out',
     getAppState: () => ({
-      toolPermissionContext: { mode: 'default' },
+      toolPermissionContext: getEmptyToolPermissionContext(),
     }),
     setAppState: () => {},
+    messages: [],
   } as never
 }
 
@@ -108,14 +110,12 @@ describe('AWt / EWt out_dir resolve (239)', () => {
     }
   })
 
-  test('EWt omitted out_dir uses artifact-files/<slug>', () => {
+  test('EWt omitted out_dir uses b5 default dir, else cwd', () => {
     const stem = resolveAssetOutStem({
       url: URL,
       asset_id: ASSET_ID,
     })
-    expect(stem).toBeDefined()
-    expect(stem).toContain(SLUG)
-    expect(stem).toContain(ASSET_ID)
+    expect(stem).toBe(join(defaultArtifactFilesDir(SLUG) ?? getCwd(), ASSET_ID))
   })
 
   test('writeBytesExclusive uses wx then rename', async () => {
@@ -140,18 +140,29 @@ describe('permissions ask/deny for out_dir (239)', () => {
     expect('message' in r ? String(r.message) : '').toContain('path')
   })
 
-  test('read_file stamps __outDirPin on ask', async () => {
+  test('read_file stamps the asset target pin on ask', async () => {
     const base = scratchDir('art-perm')
+    un().shareStatus.bySlug.set(SLUG, {
+      mode: 'org',
+      isSharedLive: false,
+      role: 'owner',
+      lastProbeToolUseId: 'tu-out',
+      lastProbeIssuedAt: Date.now(),
+    } as never)
     try {
       const r = await checkArtifactActionPermissions(
         { action: 'read_file', url: URL, path: 'a.txt', out_dir: base },
         fakeContext(),
       )
       expect(r.behavior).toBe('ask')
-      const pin = (r as { updatedInput?: { __outDirPin?: { stem: string } } })
-        .updatedInput?.__outDirPin
+      const pin = (
+        r as {
+          updatedInput?: { __artifactAssetTargetPin?: { stem: string } }
+        }
+      ).updatedInput?.__artifactAssetTargetPin
       expect(pin?.stem).toBe(join(base, 'a.txt'))
     } finally {
+      resetArtifactAutoReactStoreForTests()
       rmSync(base, { recursive: true, force: true })
     }
   })
@@ -202,8 +213,8 @@ describe('save call body with mocked content-host (239)', () => {
         },
       })
       if (!('data' in r)) throw new Error(r.error)
-      expect(r.data.file_read.dest).toBe(join(base, 'docs', 'a.md'))
-      expect(readFileSync(r.data.file_read.dest, 'utf8')).toBe('file-body')
+      expect(r.data.file_read.saved_to).toBe(join(base, 'docs', 'a.md'))
+      expect(readFileSync(r.data.file_read.saved_to, 'utf8')).toBe('file-body')
     } finally {
       globalThis.fetch = prev
       rmSync(base, { recursive: true, force: true })

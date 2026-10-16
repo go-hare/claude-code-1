@@ -6,7 +6,7 @@
  */
 import { stat, readFile } from 'fs/promises'
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
+import type { Tool, ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import {
   isArtifactEnvForceEnabled,
@@ -14,10 +14,19 @@ import {
   isArtifactToolDisabled,
 } from 'src/utils/artifactGates.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { qcEnvelopePatterns } from 'src/utils/confusableTagScrub.js'
+import { AbortError } from 'src/utils/errors.js'
 import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
 import {
+  type ArtifactInput,
+  type InputSchema,
+  inputSchema,
+} from './artifactInputSchemas.js'
+import {
   maybeLogArtifactDisabledSession,
+  artifactViewerUrlFor,
   parseArtifactUrl,
+  parseArtifactUrlAnyCase,
   isArtifactToolRegistered,
 } from 'src/utils/artifactUrl.js'
 import {
@@ -29,198 +38,42 @@ import { getArtifactsToken, getUploadUrl } from './config.js'
 import { uploadArtifact } from './client.js'
 import { markdownToHtml } from './markdown.js'
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js'
+import {
+  gNe,
+  md,
+  PAr,
+} from 'src/services/artifactAutoReact/readPerm/consent.js'
+import {
+  ARTIFACT_ASSET_TARGET_PIN,
+  type ArtifactAssetTargetPin,
+  hasForeignArtifactPin,
+  readFileInputFields,
+  resolveAssetOutTarget,
+  resolveFileOutDest,
+  resolveFileOutDests,
+} from 'src/services/artifactAutoReact/outDirPaths.js'
+import { getCwd } from 'src/utils/cwd.js'
+import {
+  getAgentContext,
+  isDelegatedObservation,
+} from 'src/utils/agentContext.js'
 import { renderToolResultMessage } from './UI.js'
 import {
+  ARTIFACT_DELETE_PIN,
   checkArtifactActionPermissions,
   isArtifactActionConcurrencySafe,
+  isArtifactActionDestructive,
   isArtifactActionReadOnly,
 } from './permissions.js'
-
-const uploadInputSchema = z.strictObject({
-  file_path: z
-    .string()
-    .describe(
-      'Absolute path to a local HTML (.html/.htm) or Markdown (.md/.markdown) file to upload. Markdown is converted to styled HTML before upload.',
-    ),
-  hash: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{1,128}$/, 'must match ^[A-Za-z0-9_-]{1,128}$')
-    .optional()
-    .describe(
-      'If provided, overwrites the existing artifact with this hash (URL stays stable). If omitted, a new random id is generated.',
-    ),
-  ttl: z
-    .union([z.literal(7), z.literal(30)])
-    .default(7)
-    .describe('Lifetime in days. Must be 7 or 30. Default 7.'),
-})
-
-const listInputSchema = z.strictObject({
-  action: z.literal('list'),
-  limit: z.number().int().min(1).max(200).optional(),
-  scope: z.enum(['mine', 'shared', 'all']).optional(),
-})
-
-const readInputSchema = z.strictObject({
-  action: z.literal('read'),
-  url: z.string(),
-  prompt: z.string().optional(),
-})
-
-const commentsInputSchema = z.strictObject({
-  action: z.literal('comments'),
-  url: z.string(),
-  thread_id: z.string().optional(),
-})
-
-const replyInputSchema = z.strictObject({
-  action: z.literal('reply'),
-  url: z.string().describe('Published artifact viewer or frame URL.'),
-  thread_id: z.string().describe('Comment thread id to reply on.'),
-  text: z.string().describe('Reply text to publish on the thread.'),
-  answers_summon: z.boolean().optional(),
-  continues_reply_id: z.string().optional(),
-})
-
-const resolveInputSchema = z.strictObject({
-  action: z.literal('resolve'),
-  url: z.string(),
-  thread_id: z.string(),
-})
-
-const liveEditInputSchema = z.strictObject({
-  action: z.literal('live-edit'),
-  url: z.string().describe('Published artifact viewer or frame URL.'),
-  html: z.string().describe('Full HTML document to publish.'),
-})
-
-const watchInputSchema = z.strictObject({
-  action: z.literal('watch'),
-  url: z.string(),
-})
-
-const unwatchInputSchema = z.strictObject({
-  action: z.literal('unwatch'),
-  url: z.string(),
-})
-
-const statusInputSchema = z.strictObject({
-  action: z.literal('status'),
-  url: z.string().optional(),
-})
-
-const listAssetsInputSchema = z.strictObject({
-  action: z.literal('list_assets'),
-  url: z.string(),
-  after: z.string().optional(),
-})
-
-const uploadAssetInputSchema = z.strictObject({
-  action: z.literal('upload_asset'),
-  url: z.string(),
-  file_path: z.string(),
-})
-
-const deleteAssetInputSchema = z.strictObject({
-  action: z.literal('delete_asset'),
-  url: z.string(),
-  asset_id: z.string(),
-})
-
-const listFilesInputSchema = z.strictObject({
-  action: z.literal('list_files'),
-  url: z.string(),
-})
-
-const readFileInputSchema = z.strictObject({
-  action: z.literal('read_file'),
-  url: z.string(),
-  path: z.string().describe('Published path from list_files.'),
-  out_dir: z
-    .string()
-    .optional()
-    .describe('Local directory to save into (default: artifact-files/<slug>).'),
-  __outDirPin: z
-    .object({
-      action: z.literal('read_file'),
-      slug: z.string(),
-      stem: z.string(),
-      path: z.string().optional(),
-    })
-    .optional(),
-})
-
-const readAssetInputSchema = z.strictObject({
-  action: z.literal('read_asset'),
-  url: z.string(),
-  asset_id: z.string(),
-  out_dir: z
-    .string()
-    .optional()
-    .describe('Local directory; file saved as <asset_id>.<ext>.'),
-  __outDirPin: z
-    .object({
-      action: z.literal('read_asset'),
-      slug: z.string(),
-      stem: z.string(),
-      assetId: z.string().optional(),
-    })
-    .optional(),
-})
-
-const verifyInputSchema = z.strictObject({
-  action: z.literal('verify'),
-  url: z.string().optional(),
-})
-
-const readPageDataInputSchema = z.strictObject({
-  action: z.literal('read_page_data'),
-  url: z.string(),
-  schema: z.string(),
-})
-
-const deleteInputSchema = z.strictObject({
-  action: z.literal('delete'),
-  url: z.string(),
-  __deleteConfirm: z
-    .object({ slug: z.string() })
-    .optional()
-    .describe('Permission-pin stamped on user confirm (densable Utn).'),
-})
-
-const roomSendInputSchema = z.strictObject({
-  action: z.literal('room_send'),
-  url: z.string(),
-  topic: z.string(),
-  data: z.unknown().optional(),
-})
-
-const inputSchema = lazySchema(() =>
-  z.union([
-    uploadInputSchema,
-    listInputSchema,
-    readInputSchema,
-    commentsInputSchema,
-    replyInputSchema,
-    resolveInputSchema,
-    liveEditInputSchema,
-    watchInputSchema,
-    unwatchInputSchema,
-    statusInputSchema,
-    listAssetsInputSchema,
-    uploadAssetInputSchema,
-    deleteAssetInputSchema,
-    listFilesInputSchema,
-    readFileInputSchema,
-    readAssetInputSchema,
-    verifyInputSchema,
-    readPageDataInputSchema,
-    deleteInputSchema,
-    roomSendInputSchema,
-  ]),
-)
-type InputSchema = ReturnType<typeof inputSchema>
-type ArtifactInput = z.infer<InputSchema>
+import {
+  ArtifactQuickstartUnavailableError,
+  callQuickstart as runGoldQuickstart,
+  classifyQuickstartInput,
+  describeQuickstartLookup,
+  summarizeQuickstartUse,
+  validateQuickstartInput,
+} from './quickstart.js'
+import { formatQuickstartResult } from './quickstartResult.js'
 
 const outputSchema = lazySchema(() =>
   z.object({
@@ -250,6 +103,7 @@ const outputSchema = lazySchema(() =>
     truncated: z.boolean().optional(),
     scope: z.string().optional(),
     threads: z.array(z.unknown()).optional(),
+    scoped_dispatch: z.boolean().optional(),
     threads_dropped: z.boolean().optional(),
     thread_filter: z.string().optional(),
     thread_resolved: z.boolean().optional(),
@@ -286,23 +140,67 @@ const outputSchema = lazySchema(() =>
     filter_url: z.string().optional(),
     asset_list: z.unknown().optional(),
     asset_upload: z.unknown().optional(),
+    asset_uploads: z.unknown().optional(),
+    written: z.unknown().optional(),
     asset_delete: z.unknown().optional(),
     file_list: z.unknown().optional(),
     file_read: z.unknown().optional(),
+    files_read: z.unknown().optional(),
     asset_read: z.unknown().optional(),
     verify: z.unknown().optional(),
     page_data: z.unknown().optional(),
     artifact_delete: z.unknown().optional(),
     room_send: z.unknown().optional(),
+    /** Gold `iy` result bag — not a public `types[]` invent. */
+    quickstart: z.unknown().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
 export type ArtifactOutput = z.infer<OutputSchema>
 
-function isUploadInput(
-  input: ArtifactInput,
-): input is z.infer<typeof uploadInputSchema> {
-  return !('action' in input) || input.action === undefined
+/** Gold mapToolResult `artifact_delete` @211325340. */
+export function formatArtifactDeleteResult(del: unknown): string {
+  const rec =
+    typeof del === 'object' && del !== null
+      ? (del as Record<string, unknown>)
+      : {}
+  const url =
+    typeof rec.url === 'string' && rec.url
+      ? rec.url
+      : 'an artifact (unrecognized address)'
+  if (rec.deleted === true) {
+    const lead =
+      rec.already_gone === true
+        ? `The Artifact at ${url} was already deleted`
+        : `Artifact deleted: ${url}`
+    return `${lead}. Its link no longer works for anyone, its comments and version history are gone, and it cannot be restored. Do not pass this url again — publishing the same file again creates a new Artifact at a new URL. If the user still wants the content, give it to them the way they asked (for example, the local file).`
+  }
+  return `This record of an Artifact deletion is unreadable — whether ${url} was deleted is unknown; action "list" shows what the user still has.`
+}
+
+/** Gold mapToolResult `asset_delete` @211326007. */
+export function formatAssetDeleteResult(del: unknown): string {
+  const rec =
+    typeof del === 'object' && del !== null
+      ? (del as Record<string, unknown>)
+      : {}
+  const id = typeof rec.id === 'string' ? rec.id : ''
+  const blob = id === '' ? 'it' : `_blob/${id}`
+  if (rec.deleted === true) {
+    return `Asset deleted: ${blob} is gone from the artifact's asset store; pages and database rows that still reference it will fail to load it.`
+  }
+  if (rec.deleted === false) {
+    return `Nothing deleted: the artifact's asset store has no asset with ${
+      id === '' ? 'that id' : `id ${id}`
+    } (already deleted, or never there).`
+  }
+  return `This record of an asset deletion is unreadable — whether ${
+    id === '' ? 'the asset' : blob
+  } was deleted is unknown; action "list_assets" shows what is still there.`
+}
+
+function isUploadInput(input: ArtifactInput): boolean {
+  return input.action === undefined
 }
 
 /**
@@ -344,7 +242,7 @@ export const ArtifactTool = buildTool({
   // tip lowercase kept for existing transcripts / cloud upload callers
   aliases: ['artifact'],
   searchHint:
-    'artifact list read comments reply resolve live-edit watch unwatch status assets files verify delete room_send upload html markdown share publish',
+    'artifact list read comments reply resolve live-edit watch unwatch status assets files verify delete room_send quickstart upload html markdown share publish',
   briefStandalone: true,
   maxResultSizeChars: 2_000,
   shouldDefer: true,
@@ -361,6 +259,7 @@ export const ArtifactTool = buildTool({
           )
         },
       )
+      void import('./quickstartCatalog.js').then(m => m.freezeArtifactTypes())
     }
     return inputSchema()
   },
@@ -394,7 +293,7 @@ export const ArtifactTool = buildTool({
         case 'upload_asset':
           return 'Upload a binary asset to a published artifact.'
         case 'delete_asset':
-          return 'Delete an asset from a published artifact.'
+          return "Permanently delete one file from a published artifact's asset store — pages and database rows that reference it break, and it cannot be restored; every delete asks separately."
         case 'list_files':
           return 'List files on a published artifact.'
         case 'read_file':
@@ -406,9 +305,11 @@ export const ArtifactTool = buildTool({
         case 'read_page_data':
           return 'Read structured page-data islands from a published artifact.'
         case 'delete':
-          return 'Permanently delete a published artifact.'
+          return 'Permanently delete a published artifact the user owns (irreversible); every delete asks the user.'
         case 'room_send':
           return 'Send a live room event to current artifact viewers.'
+        case 'quickstart':
+          return describeQuickstartLookup(input)
       }
     }
     return describeArtifactTool()
@@ -432,11 +333,52 @@ export const ArtifactTool = buildTool({
   isReadOnly(input) {
     return isArtifactActionReadOnly(input as { action?: string })
   },
+  isDestructive(input) {
+    return isArtifactActionDestructive(input as { action?: string })
+  },
+  getPath(input) {
+    const fields = input as Record<string, unknown>
+    if (fields.action === 'read_asset') {
+      return resolveAssetOutTarget(fields)?.stem ?? getCwd()
+    }
+    if (fields.action === 'read_file') {
+      if (readFileInputFields(fields).paths !== undefined) {
+        const batch = resolveFileOutDests(fields)
+        return 'base' in batch ? batch.base : getCwd()
+      }
+      const single = resolveFileOutDest(fields)
+      return 'dest' in single ? single.dest : getCwd()
+    }
+    return typeof fields.file_path === 'string' && fields.file_path !== ''
+      ? expandPath(fields.file_path)
+      : getCwd()
+  },
   requiresUserInteraction() {
     return true
   },
   userFacingName() {
     return 'Artifact'
+  },
+
+  async validateInput(input: ArtifactInput) {
+    if (input && 'action' in input && input.action === 'quickstart') {
+      return validateQuickstartInput(input)
+    }
+    return { result: true as const }
+  },
+
+  toAutoClassifierInput(input: ArtifactInput) {
+    if (input && 'action' in input && input.action === 'quickstart') {
+      return classifyQuickstartInput(input)
+    }
+    return ''
+  },
+
+  getToolUseSummary(input: Partial<ArtifactInput> | undefined) {
+    if (input && 'action' in input && input.action === 'quickstart') {
+      return summarizeQuickstartUse(input)
+    }
+    return null
   },
 
   async checkPermissions(input: ArtifactInput, context) {
@@ -498,6 +440,8 @@ export const ArtifactTool = buildTool({
           return `Delete ${'url' in input ? input.url : '…'}`
         case 'room_send':
           return `Room send ${'topic' in input ? input.topic : '…'}`
+        case 'quickstart':
+          return `Quickstart ${'intent' in input ? input.intent : '…'}`
       }
     }
     const hashPart =
@@ -601,16 +545,37 @@ export const ArtifactTool = buildTool({
         }),
       }
     }
+    if (content.quickstart) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: formatQuickstartResult(content),
+      }
+    }
+    if (content.artifact_delete) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: formatArtifactDeleteResult(content.artifact_delete),
+      }
+    }
+    if (content.asset_delete) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: formatAssetDeleteResult(content.asset_delete),
+      }
+    }
     if (
       content.asset_list ||
       content.asset_upload ||
-      content.asset_delete ||
+      content.asset_uploads ||
       content.file_list ||
       content.file_read ||
+      content.files_read ||
       content.asset_read ||
       content.verify ||
       content.page_data ||
-      content.artifact_delete ||
       content.room_send
     ) {
       return {
@@ -648,11 +613,18 @@ export const ArtifactTool = buildTool({
           },
         }
       }
+      if (context?.getAppState !== undefined && md()) {
+        PAr({
+          getAppState: context.getAppState,
+          toolUseId: context.toolUseId,
+          toolDecisions: context.toolDecisions,
+        })
+      }
       switch (input.action) {
         case 'list':
           return callList(input, signal)
         case 'read':
-          return callRead(input, signal)
+          return callRead(input, signal, context)
         case 'comments':
           return callComments(input, signal, context)
         case 'reply':
@@ -686,17 +658,17 @@ export const ArtifactTool = buildTool({
         case 'status':
           return callStatus(input)
         case 'list_assets':
-          return callListAssets(input, signal)
+          return callListAssets(input, signal, context)
         case 'upload_asset':
-          return callUploadAsset(input, signal)
+          return callUploadAsset(input, signal, context)
         case 'delete_asset':
           return callDeleteAsset(input, signal)
         case 'list_files':
-          return callListFiles(input, signal)
+          return callListFiles(input, signal, context)
         case 'read_file':
-          return callReadFile(input, signal)
+          return callReadFile(input, signal, context)
         case 'read_asset':
-          return callReadAsset(input, signal)
+          return callReadAsset(input, signal, context)
         case 'verify':
           return callVerify(input, signal)
         case 'read_page_data':
@@ -705,9 +677,32 @@ export const ArtifactTool = buildTool({
           return callDelete(input, signal)
         case 'room_send':
           return callRoomSend(input)
+        case 'quickstart':
+          try {
+            return await runGoldQuickstart(input, context)
+          } catch (error) {
+            if (
+              error instanceof ArtifactQuickstartUnavailableError ||
+              (error instanceof Error &&
+                (error.name === 'ArtifactInputError' ||
+                  ('reasonCode' in error &&
+                    (error as { reasonCode?: string }).reasonCode ===
+                      'quickstart_unavailable')))
+            ) {
+              return {
+                data: {
+                  id: '',
+                  url: '',
+                  expiresAt: '',
+                  error: error.message,
+                },
+              }
+            }
+            throw error
+          }
       }
     }
-    return callUpload(input as z.infer<typeof uploadInputSchema>)
+    return callUpload(input)
   },
 })
 
@@ -731,8 +726,16 @@ function emptyErr(error: string): { data: ArtifactOutput } {
   return { data: { id: '', url: '', expiresAt: '', error } }
 }
 
+function parsedInputUrl(url: string | undefined) {
+  return typeof url === 'string' ? parseArtifactUrl(url) : null
+}
+
+function parsedInputUrlAnyCase(url: string | undefined) {
+  return typeof url === 'string' ? parseArtifactUrlAnyCase(url) : null
+}
+
 async function callWatch(
-  input: z.infer<typeof watchInputSchema>,
+  input: ArtifactInput,
   context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
   const { callArtifactWatch } = await import(
@@ -748,7 +751,7 @@ async function callWatch(
     context as { taskRegistry?: WtTaskRegistry } | undefined
   )?.taskRegistry
   const r = await callArtifactWatch({
-    url: input.url,
+    url: input.url ?? '',
     context: {
       abortController: abort,
       ...(taskRegistry ? { taskRegistry } : {}),
@@ -769,7 +772,7 @@ async function callWatch(
 }
 
 async function callUnwatch(
-  input: z.infer<typeof unwatchInputSchema>,
+  input: ArtifactInput,
   context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
   const { callArtifactUnwatch } = await import(
@@ -780,7 +783,7 @@ async function callUnwatch(
     context as { taskRegistry?: WtTaskRegistry } | undefined
   )?.taskRegistry
   const r = await callArtifactUnwatch({
-    url: input.url,
+    url: input.url ?? '',
     context: {
       abortController: abort,
       ...(taskRegistry ? { taskRegistry } : {}),
@@ -798,7 +801,7 @@ async function callUnwatch(
 }
 
 async function callStatus(
-  input: z.infer<typeof statusInputSchema>,
+  input: ArtifactInput,
 ): Promise<{ data: ArtifactOutput }> {
   const { callArtifactStatus } = await import(
     'src/services/artifactAutoReact/watchActions.js'
@@ -818,13 +821,16 @@ async function callStatus(
 }
 
 async function callListAssets(
-  input: z.infer<typeof listAssetsInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "list_assets"')
   }
+  const { artifactReadGrant } = await import('./readSaveHooks.js')
+  ;(await artifactReadGrant(input, context))?.()
   const { listArtifactAssets } = await import(
     'src/services/artifactAutoReact/restApis.js'
   )
@@ -862,20 +868,795 @@ async function callListAssets(
   }
 }
 
-async function callUploadAsset(
-  input: z.infer<typeof uploadAssetInputSchema>,
-  signal?: AbortSignal,
+type ArtifactAssetUploadPin = {
+  slug?: string
+  real?: unknown
+  identity?: unknown
+  batch?: unknown
+  otherCommentSeq?: unknown
+}
+
+async function openApprovedUpload(
+  filePath: string,
+  pin: { real?: unknown; identity?: unknown; digest?: unknown } | undefined,
+  context?: Partial<ToolUseContext>,
+): Promise<
+  | {
+      kind: 'opened'
+      opened: import('src/services/artifactAutoReact/readPerm/uploadReadGate.js').OpenedUpload
+    }
+  | { kind: 'error'; message: string; reason: string }
+> {
+  const { extname } = await import('path')
+  const { ARTIFACT_ASSET_CONTENT_TYPES } = await import(
+    'src/services/artifactAutoReact/outDirPaths.js'
+  )
+  const { assetUploadByteLimit } = await import(
+    'src/services/artifactAutoReact/assetRxl.js'
+  )
+  const { openPinnedUpload } = await import(
+    'src/services/artifactAutoReact/readPerm/uploadReadGate.js'
+  )
+  const ext = extname(filePath).toLowerCase()
+  const contentType = ARTIFACT_ASSET_CONTENT_TYPES.get(ext)
+  if (contentType === undefined) {
+    return {
+      kind: 'error',
+      reason: 'unsupported_type',
+      message: `unsupported asset type "${ext}"`,
+    }
+  }
+  const { checkReadPermissionForTool } = await import(
+    'src/utils/permissions/filesystem.js'
+  )
+  const { FileReadTool } = await import('../FileReadTool/FileReadTool.js')
+  const { de } = await import(
+    'src/services/artifactAutoReact/readPerm/rules.js'
+  )
+  const perms = context?.getAppState === undefined ? undefined : de(context)
+  if (perms !== undefined) {
+    const { getDenyRuleForTool } = await import(
+      'src/utils/permissions/permissions.js'
+    )
+    if (getDenyRuleForTool(perms, FileReadTool) !== null) {
+      return {
+        kind: 'error',
+        reason: 'read_denied',
+        message:
+          'reading file_path is blocked by a Read permission rule — the upload was not attempted',
+      }
+    }
+  }
+  const { getAskRuleForTool } = await import(
+    'src/utils/permissions/permissions.js'
+  )
+  const wholeToolAsk =
+    perms !== undefined && getAskRuleForTool(perms, FileReadTool) !== null
+  const opened = openPinnedUpload({
+    spelled: filePath,
+    pin,
+    byteLimit: assetUploadByteLimit(contentType),
+    readVerdict(path) {
+      if (perms === undefined) return 'allow'
+      const verdict = checkReadPermissionForTool(
+        FileReadTool,
+        { file_path: path },
+        perms,
+      )
+      const behavior =
+        verdict.behavior === 'deny'
+          ? 'deny'
+          : verdict.behavior === 'ask'
+            ? 'ask'
+            : 'allow'
+      return behavior === 'allow' && wholeToolAsk ? 'ask' : behavior
+    },
+  })
+  if (opened.kind !== 'opened') {
+    return { kind: 'error', reason: opened.reason, message: opened.message }
+  }
+  return { kind: 'opened', opened }
+}
+
+async function readApprovedUpload(
+  filePath: string,
+  pin: { real?: unknown; identity?: unknown; digest?: unknown } | undefined,
+  context?: Partial<ToolUseContext>,
+): Promise<{ kind: 'ok'; bytes: Buffer } | { kind: 'error'; message: string }> {
+  const { readOpenedUpload } = await import(
+    'src/services/artifactAutoReact/readPerm/uploadReadGate.js'
+  )
+  const opened = await openApprovedUpload(filePath, pin, context)
+  if (opened.kind === 'error') return opened
+  const read = readOpenedUpload(opened.opened)
+  if (read.kind === 'error') return { kind: 'error', message: read.message }
+  return { kind: 'ok', bytes: read.bytes }
+}
+function uploadBatchPins(
+  pin: ArtifactAssetUploadPin | undefined,
+  count: number,
+):
+  | { kind: 'none' }
+  | { kind: 'bad' }
+  | { kind: 'rows'; rows: Array<{ real: string; identity: string }> } {
+  if (pin === undefined) return { kind: 'none' }
+  if (!Array.isArray(pin.batch) || pin.batch.length !== count) {
+    return { kind: 'bad' }
+  }
+  const rows: Array<{ real: string; identity: string }> = []
+  for (const row of pin.batch) {
+    if (row === null || typeof row !== 'object') return { kind: 'bad' }
+    const real = Reflect.get(row, 'real')
+    const identity = Reflect.get(row, 'identity')
+    if (typeof real !== 'string' || typeof identity !== 'string') {
+      return { kind: 'bad' }
+    }
+    rows.push({ real, identity })
+  }
+  return { kind: 'rows', rows }
+}
+
+async function uploadReadDenied(
+  filePath: string,
+  context?: Partial<ToolUseContext>,
+): Promise<string | null> {
+  if (context?.getAppState === undefined) return null
+  const { checkReadPermissionForTool } = await import(
+    'src/utils/permissions/filesystem.js'
+  )
+  const { FileReadTool } = await import('../FileReadTool/FileReadTool.js')
+  const { de } = await import(
+    'src/services/artifactAutoReact/readPerm/rules.js'
+  )
+  const perms = de(context)
+  const { getDenyRuleForTool } = await import(
+    'src/utils/permissions/permissions.js'
+  )
+  if (getDenyRuleForTool(perms, FileReadTool) !== null) {
+    return 'asset_upload_read_denied'
+  }
+  const verdict = checkReadPermissionForTool(
+    FileReadTool,
+    { file_path: filePath },
+    perms,
+  )
+  return verdict.behavior === 'deny' ? 'asset_upload_read_denied' : null
+}
+
+async function recordUploadGrantIfPinned(
+  input: ArtifactInput,
+  context: Partial<ToolUseContext> | undefined,
+  slug: string,
+  pin: ArtifactAssetUploadPin | undefined,
+): Promise<void> {
+  if (context?.getAppState === undefined || context.setAppState === undefined) {
+    return
+  }
+  if (typeof pin?.real !== 'string' && !Array.isArray(pin?.batch)) return
+  const { recordArtifactAssetUploadGrant } = await import(
+    'src/services/artifactAutoReact/readPerm/grants.js'
+  )
+  recordArtifactAssetUploadGrant(
+    input as Record<string, unknown>,
+    {
+      getAppState: context.getAppState,
+      setAppState: context.setAppState,
+      toolUseId: context.toolUseId,
+      toolDecisions: context.toolDecisions,
+      permissionLayers: context.permissionLayers,
+    },
+    slug,
+  )
+}
+
+const BATCH_CONTINUE_CODES = new Set([
+  'invalid_request',
+  'too_large',
+  'unsupported_type',
+])
+const BATCH_CONTINUE_LIMIT = 6
+const BATCH_CONTINUE_WAIT_MS = 1300
+const BATCH_RATE_LIMIT =
+  'the store is rate limiting this artifact — wait a minute before sending the rest'
+const STORE_CODES_NOT_MAYBE = new Set([
+  'invalid_request',
+  'too_large',
+  'unsupported_type',
+  'quota_or_state',
+  'rate_limited',
+  'upstream_auth',
+  'capability_disabled',
+  'not_found',
+  'not_writer',
+  'credential_rejected',
+  'policy_denied',
+  'unavailable_to_account',
+])
+const STORE_REASONS_NOT_MAYBE = new Set([
+  'relay_unavailable',
+  'relay_not_served',
+  'probe_request_error',
+  'probe_unvouched',
+  'proxy_refused',
+  'unrouted',
+  'no_auth',
+])
+
+function uploadMayBeStored(code: string, reason: string): boolean {
+  return (
+    !STORE_CODES_NOT_MAYBE.has(code) && !STORE_REASONS_NOT_MAYBE.has(reason)
+  )
+}
+
+async function paceBatchUpload(signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) throw new AbortError()
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new AbortError())
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, BATCH_CONTINUE_WAIT_MS)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function batchFileLabel(index: number, filePath: string): string {
+  const base = filePath.split(/[/\\]/).pop()
+  return `file_paths[${index}] ${base && base.length > 0 ? base : filePath}`
+}
+
+/** densable gne — o0 / aC budget for the none-stored path list. */
+const NONE_STORED_PATH_CHARS = 1024
+const JOINER_RIDE_CAP = 8
+const VERTICAL_SPACE = /^[\n\r\t\v\f\u0085\u2028\u2029]$/
+const KEYCAP_CHAR = /^[#*0-9]$/
+const PICTOGRAPH = /^[\p{Extended_Pictographic}\p{Emoji_Modifier}]$/u
+const HAN_CHAR = /^\p{Script=Han}$/u
+const JOINING_SCRIPT =
+  /^[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Mongolian}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Myanmar}\p{Script=Tibetan}\p{Script=Khmer}]$/u
+const IGNORABLE_ONE =
+  /^[\p{Default_Ignorable_Code_Point}\u2800\u{1D159}\u{13441}\u{13442}\uFFFC]$/u
+
+/** densable Zx */
+function isInvisibleCodePoint(cp: number): boolean {
+  return (
+    cp <= 31 ||
+    (cp >= 127 && cp <= 159) ||
+    cp === 173 ||
+    cp === 1564 ||
+    (cp >= 8203 && cp <= 8207) ||
+    cp === 8232 ||
+    cp === 8233 ||
+    (cp >= 8234 && cp <= 8238) ||
+    (cp >= 8288 && cp <= 8297) ||
+    (cp >= 65024 && cp <= 65039) ||
+    cp === 65279 ||
+    (cp >= 65529 && cp <= 65531) ||
+    cp === 94180 ||
+    (cp >= 917504 && cp <= 917999)
+  )
+}
+
+/** densable De / Q / SWe */
+function isJoinerCodePoint(cp: number): boolean {
+  return (
+    cp === 8204 ||
+    cp === 8205 ||
+    (cp >= 65024 && cp <= 65039) ||
+    (cp >= 917760 && cp <= 917999)
+  )
+}
+
+/** densable E7o — dropped, and not counted, unless it is a joiner. */
+function isDroppedCodePoint(cp: number): boolean {
+  return (
+    !isJoinerCodePoint(cp) &&
+    (isInvisibleCodePoint(cp) ||
+      (cp > 127 && IGNORABLE_ONE.test(String.fromCodePoint(cp))))
+  )
+}
+
+/** densable hkn */
+function joinerState(ch: string): string {
+  const cp = ch.codePointAt(0) ?? 0
+  if (cp < 128) return KEYCAP_CHAR.test(ch) ? 'keycap' : 'plain'
+  if (PICTOGRAPH.test(ch)) return 'pictograph'
+  if (KEYCAP_CHAR.test(ch)) return 'keycap'
+  if (HAN_CHAR.test(ch)) return 'han'
+  if (JOINING_SCRIPT.test(ch)) return 'joining'
+  return 'plain'
+}
+
+/** densable ykn */
+function joinerRide(
+  cp: number,
+  state: string,
+): { rides: boolean; after: string } {
+  if ((cp >= 65024 && cp <= 65039) || (cp >= 917760 && cp <= 917999)) {
+    const rides =
+      cp <= 65039
+        ? state === 'pictograph' ||
+          state === 'han' ||
+          (state === 'keycap' && cp === 65039)
+        : state === 'han'
+    return {
+      rides,
+      after: rides && state === 'pictograph' ? 'selector' : 'none',
+    }
+  }
+  return {
+    rides:
+      cp === 8205
+        ? state === 'pictograph' || state === 'selector' || state === 'joining'
+        : state === 'joining',
+    after: 'none',
+  }
+}
+
+const ULS_PHRASES = [
+  '[Request interrupted by user for tool use]',
+  '[Tool call did not complete: the turn was ended to deliver the message that follows. Nothing refused it; re-run it if still needed.]',
+  "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]",
+  "[Tool call result not in this copy: this session was copied from another session before that session recorded this call's result. The call may have finished there, may still be running there, or may never have run. Check whether it took effect before relying on it or running it again.]",
+]
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+const ULS_RE = new RegExp(
+  ULS_PHRASES.map(
+    phrase =>
+      `${escapeRegExp(phrase.slice(0, 1))}(?=${escapeRegExp(phrase.slice(1))})`,
+  ).join('|'),
+  'g',
+)
+
+/** densable Qc — te().envelopes, then Uls, before the ellipsis. */
+function quotePathForModel(text: string): string {
+  let quoted = text
+  for (const pattern of qcEnvelopePatterns()) {
+    quoted = quoted.replace(pattern, open => `${open}\\`)
+  }
+  return quoted.replace(ULS_RE, open => `${open}\\`)
+}
+
+/**
+ * densable KZe + aC. Code points of toWellFormed. A joiner rides only in
+ * ykn's state, up to 8. Vertical whitespace becomes one space. Over the
+ * budget, aC keeps n-1 units and appends `…`. Qc runs on the kept units
+ * before that ellipsis.
+ */
+function truncatePathUnits(
+  filePath: string,
+  budget: number,
+): { kept: string; cut: boolean } {
+  const units: string[] = []
+  let seen = 0
+  let cut = false
+  let riders = 0
+  let state = 'none'
+  for (const unit of filePath.toWellFormed()) {
+    if (++seen > 16 * budget || units.length >= budget + 1) {
+      cut = true
+      break
+    }
+    const cp = unit.codePointAt(0) ?? 0
+    if (isJoinerCodePoint(cp)) {
+      const ride = joinerRide(cp, state)
+      if (ride.rides && riders < JOINER_RIDE_CAP) {
+        units.push(unit)
+        riders += 1
+        state = ride.after
+      } else {
+        state = 'none'
+      }
+    } else if (VERTICAL_SPACE.test(unit)) {
+      if (units.length > 0 && units.at(-1) !== ' ') units.push(' ')
+      state = 'none'
+    } else if (!isDroppedCodePoint(cp)) {
+      units.push(unit)
+      state = joinerState(unit)
+    } else {
+      state = 'none'
+    }
+  }
+  if (units.length > budget) cut = true
+  return {
+    kept: quotePathForModel(units.slice(0, cut ? budget - 1 : budget).join('')),
+    cut,
+  }
+}
+
+/** densable o0 — S(nq(path, gne)), S is JSON.stringify, nq is aC. */
+function capNoneStoredPath(filePath: string): string {
+  const { kept, cut } = truncatePathUnits(filePath, NONE_STORED_PATH_CHARS)
+  return JSON.stringify(cut ? `${kept}\u2026` : kept)
+}
+
+export function noneStoredMessage(
+  results: Array<{
+    file_path: string
+    status: string
+    message?: string
+    may_be_stored?: boolean
+  }>,
+): string {
+  const failed = results.filter(row => row.status !== 'uploaded')
+  const knownNot = failed.filter(row => row.may_be_stored !== true)
+  const detail = failed
+    .map((row, index) => {
+      const prefix =
+        row.status === 'not_attempted'
+          ? 'not attempted, '
+          : row.may_be_stored === true
+            ? 'failed, but may be stored, '
+            : ''
+      return `${batchFileLabel(index, row.file_path)}: ${prefix}${(row.message ?? '').slice(0, 300)}`
+    })
+    .join('; ')
+  const knownNotPaths = knownNot
+    .map(row => capNoneStoredPath(row.file_path))
+    .join(', ')
+  const tail =
+    knownNot.length === failed.length
+      ? ''
+      : knownNot.length === 0
+        ? ' Before sending again, list the assets to see what is stored.'
+        : ` Before sending again, list the assets to see what is stored; only these are known not to be: [${knownNotPaths}].`
+  return `No file is confirmed stored. ${detail}.${tail}`
+}
+
+/**
+ * densable Kf — open every file before any byte is sent. The first open
+ * failure aborts the call. After the first successful read, one upload
+ * grant is recorded, then the store is called. Uf codes continue until
+ * Bl resent replies; anything else marks the rest not_attempted.
+ */
+export async function uploadAssetBatch(
+  input: ArtifactInput,
+  slug: string,
+  pin: ArtifactAssetUploadPin | undefined,
+  signal: AbortSignal | undefined,
+  context: Partial<ToolUseContext> | undefined,
+  pageUrl: string,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
-  if (!parsed) {
-    return emptyErr('`url` must be an artifact URL for action "upload_asset"')
+  const paths = input.file_paths ?? []
+  const rows = uploadBatchPins(pin, paths.length)
+  if (rows.kind === 'bad') {
+    return emptyErr(
+      'the call no longer names the files that were approved (one file where a list was approved, a list of another length, or a file whose identity was not recorded) — retry so it is checked again',
+    )
   }
   const { uploadArtifactAsset } = await import(
     'src/services/artifactAutoReact/restApis.js'
   )
+  const { closePinnedUpload, readOpenedUpload } = await import(
+    'src/services/artifactAutoReact/readPerm/uploadReadGate.js'
+  )
+  type Opened =
+    import('src/services/artifactAutoReact/readPerm/uploadReadGate.js').OpenedUpload
+  const opened: Array<Opened | undefined> = []
+  const results: Array<Record<string, unknown>> = []
+  try {
+    for (let index = 0; index < paths.length; index++) {
+      const filePath = paths[index] ?? ''
+      const expanded = expandPath(filePath)
+      const row = rows.kind === 'rows' ? rows.rows[index] : undefined
+      const approved = await openApprovedUpload(expanded, row, context)
+      if (approved.kind === 'error') {
+        const body =
+          approved.reason === 'missing'
+            ? 'the file was not found'
+            : approved.message
+                .replaceAll('file_path', 'this file')
+                .replace(/[.\s]+$/, '')
+        return emptyErr(
+          `${batchFileLabel(index, filePath)}: ${body}. Nothing was sent.`,
+        )
+      }
+      if (opened.some(item => item?.real === approved.opened.real)) {
+        closePinnedUpload(approved.opened.fd)
+        return emptyErr(
+          `${batchFileLabel(index, filePath)}: names the same file as an earlier entry — list each file once. Nothing was sent.`,
+        )
+      }
+      opened.push(approved.opened)
+      await Promise.resolve()
+      if (signal?.aborted) throw new AbortError()
+    }
+    let granted = false
+    let stoppedAt: string | undefined
+    let resentCount = 0
+    for (let index = 0; index < paths.length; index++) {
+      const filePath = paths[index] ?? ''
+      if (stoppedAt !== undefined) {
+        results.push({
+          file_path: filePath,
+          status: 'not_attempted',
+          reason: 'stopped',
+          message: `the call stopped at ${stoppedAt}`,
+        })
+        continue
+      }
+      if (resentCount > 0) await paceBatchUpload(signal)
+      const slot = opened[index]
+      opened[index] = undefined
+      if (slot === undefined) {
+        results.push({
+          file_path: filePath,
+          status: 'failed',
+          reason: 'asset_upload_unexpected',
+          message:
+            'an unexpected error stopped this upload before anything was sent',
+        })
+        stoppedAt = batchFileLabel(index, filePath)
+        continue
+      }
+      const denied = await uploadReadDenied(slot.real, context)
+      if (denied !== null) {
+        closePinnedUpload(slot.fd)
+        const message =
+          'reading this file is blocked by a Read permission rule — the upload was not attempted'
+        results.push({
+          file_path: filePath,
+          status: 'failed',
+          reason: denied,
+          message,
+        })
+        stoppedAt = batchFileLabel(index, filePath)
+        continue
+      }
+      const read = readOpenedUpload(slot)
+      if (read.kind === 'error') {
+        results.push({
+          file_path: filePath,
+          status: 'failed',
+          reason:
+            read.reason === 'missing'
+              ? 'asset_upload_file_not_found'
+              : `asset_upload_${read.reason}`,
+          message:
+            read.reason === 'missing'
+              ? 'the file could not be read'
+              : read.message.replaceAll('file_path', 'this file'),
+        })
+        stoppedAt = batchFileLabel(index, filePath)
+        continue
+      }
+      if (!granted && rows.kind === 'rows') {
+        granted = true
+        await recordUploadGrantIfPinned(input, context, slug, pin)
+      }
+      let stored = false
+      try {
+        stored = true
+        const uploaded = await uploadArtifactAsset({
+          slug,
+          filePath: expandPath(filePath),
+          bytes: read.bytes,
+          signal,
+        })
+        if (uploaded.resent === true) resentCount += 1
+        if (signal?.aborted) throw new AbortError()
+        if (uploaded.kind === 'error') {
+          const continuable =
+            BATCH_CONTINUE_CODES.has(uploaded.code) &&
+            uploaded.reason !== 'invalid_slug'
+          const row = {
+            file_path: filePath,
+            status: 'failed' as const,
+            reason: `asset_upload_${uploaded.reason}`,
+            message: uploaded.message,
+            ...(uploadMayBeStored(uploaded.code, uploaded.reason)
+              ? { may_be_stored: true }
+              : {}),
+          }
+          results.push(row)
+          if (continuable && resentCount < BATCH_CONTINUE_LIMIT) continue
+          stoppedAt = batchFileLabel(index, filePath)
+          if (continuable) stoppedAt = `${stoppedAt} (${BATCH_RATE_LIMIT})`
+          continue
+        }
+        const base = filePath.split(/[/\\]/).pop()
+        results.push({
+          file_path: filePath,
+          status: 'uploaded',
+          id: uploaded.asset.id,
+          url: uploaded.asset.url,
+          size_bytes: uploaded.asset.sizeBytes,
+          content_type: uploaded.asset.contentType,
+          ...(uploaded.asset.sha256 !== undefined
+            ? { sha256: uploaded.asset.sha256 }
+            : {}),
+          file_name: base && base.length > 0 ? base : filePath,
+        })
+        if (resentCount >= BATCH_CONTINUE_LIMIT) {
+          stoppedAt = `${batchFileLabel(index, filePath)} (stored; ${BATCH_RATE_LIMIT})`
+        }
+      } catch (error) {
+        // Gold rethrows when the signal is aborted (AbortError, else new Ye).
+        // DOMException is not the runner's AbortError, so wrap it.
+        if (error instanceof AbortError || signal?.aborted) {
+          if (error instanceof AbortError) throw error
+          throw new AbortError()
+        }
+        results.push({
+          file_path: filePath,
+          status: 'failed',
+          reason: 'asset_upload_unexpected',
+          message: stored
+            ? 'an unexpected error stopped this upload before the store answered — whether this file was stored is unknown; list the assets to check'
+            : 'an unexpected error stopped this upload before anything was sent',
+          ...(stored ? { may_be_stored: true } : {}),
+        })
+        stoppedAt = batchFileLabel(index, filePath)
+      }
+    }
+  } finally {
+    for (const slot of opened) {
+      if (slot !== undefined) closePinnedUpload(slot.fd)
+    }
+  }
+  if (!results.some(row => row.status === 'uploaded')) {
+    return emptyErr(
+      noneStoredMessage(
+        results as Array<{
+          file_path: string
+          status: string
+          message?: string
+          may_be_stored?: boolean
+        }>,
+      ),
+    )
+  }
+  return {
+    data: {
+      id: '',
+      url: '',
+      expiresAt: '',
+      written: { url: pageUrl },
+      asset_uploads: {
+        url: pageUrl,
+        results,
+      },
+    },
+  }
+}
+
+async function callUploadAsset(
+  input: ArtifactInput,
+  signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
+): Promise<{ data: ArtifactOutput }> {
+  const parsed = parsedInputUrl(input.url)
+  if (!parsed) {
+    return emptyErr('`url` must be an artifact URL for action "upload_asset"')
+  }
+  if (input.file_path !== undefined && input.file_paths !== undefined) {
+    return emptyErr(
+      'action "upload_asset" takes `file_path` (one file) or `file_paths` (several), not both.',
+    )
+  }
+  const publishSource =
+    context === undefined
+      ? undefined
+      : Reflect.get(context, 'publishSourceSha256')
+  if (input.file_paths !== undefined) {
+    const { uploadBatchEntryError, uploadBatchShapeError } = await import(
+      'src/services/artifactAutoReact/readPerm/uploadBatchList.js'
+    )
+    const shapeError = uploadBatchShapeError(input.file_paths)
+    if (shapeError !== null) return emptyErr(shapeError)
+    if (publishSource !== undefined) {
+      const { UPLOAD_BATCH_FROM_SCRIPT } = await import(
+        'src/services/artifactAutoReact/readPerm/uploadReadGate.js'
+      )
+      return emptyErr(UPLOAD_BATCH_FROM_SCRIPT)
+    }
+    const listError = uploadBatchEntryError(input.file_paths)
+    if (listError !== null) return emptyErr(listError)
+  }
+  const pin = Reflect.get(input, gNe) as ArtifactAssetUploadPin | undefined
+  if (
+    hasForeignArtifactPin(input, gNe) ||
+    (pin !== undefined && pin.slug !== parsed.slug)
+  ) {
+    return emptyErr(
+      '`action` or `url` no longer names the artifact upload that was approved — retry so it is checked again',
+    )
+  }
+  const { uploadArtifactAsset } = await import(
+    'src/services/artifactAutoReact/restApis.js'
+  )
+  const pageUrl = artifactViewerUrlFor(parsed)
+  if (input.file_paths !== undefined) {
+    return uploadAssetBatch(input, parsed.slug, pin, signal, context, pageUrl)
+  }
+  if (input.file_path === undefined) {
+    return emptyErr('file_path is required for action "upload_asset"')
+  }
+  if (pin?.batch !== undefined) {
+    return emptyErr(
+      'the call no longer names the files that were approved (one file where a list was approved) — retry so it is checked again',
+    )
+  }
+  const expanded = expandPath(input.file_path)
+  const denied = await uploadReadDenied(expanded, context)
+  if (denied !== null) {
+    return emptyErr(
+      'reading file_path is blocked by a Read permission rule — the upload was not attempted',
+    )
+  }
+  if (publishSource !== undefined) {
+    const { readAdmittedUploadBytes, UPLOAD_PIN_SOURCE_UNVERIFIED } =
+      await import('src/services/artifactAutoReact/readPerm/uploadReadGate.js')
+    const { extname } = await import('path')
+    const { ARTIFACT_ASSET_CONTENT_TYPES } = await import(
+      'src/services/artifactAutoReact/outDirPaths.js'
+    )
+    const { assetUploadByteLimit } = await import(
+      'src/services/artifactAutoReact/assetRxl.js'
+    )
+    const ext = extname(expanded).toLowerCase()
+    const contentType = ARTIFACT_ASSET_CONTENT_TYPES.get(ext)
+    if (contentType === undefined) {
+      return emptyErr(`unsupported asset type "${ext}"`)
+    }
+    const admitted =
+      typeof publishSource === 'string'
+        ? readAdmittedUploadBytes(expanded, publishSource)
+        : { kind: 'unverified' as const }
+    if (admitted.kind !== 'ok') return emptyErr(UPLOAD_PIN_SOURCE_UNVERIFIED)
+    const limit = assetUploadByteLimit(contentType)
+    if (admitted.bytes.length === 0 || admitted.bytes.length > limit) {
+      return emptyErr(
+        admitted.bytes.length === 0
+          ? 'the file is empty — nothing to upload'
+          : `too large: ${Math.ceil((admitted.bytes.length * 10) / 1024 / 1024) / 10}MB (max ${limit / 1024 / 1024}MB)`,
+      )
+    }
+    if (typeof pin?.real === 'string') {
+      await recordUploadGrantIfPinned(input, context, parsed.slug, pin)
+    }
+    const admittedUpload = await uploadArtifactAsset({
+      slug: parsed.slug,
+      filePath: expanded,
+      bytes: admitted.bytes,
+      signal,
+    })
+    if (admittedUpload.kind === 'error') return emptyErr(admittedUpload.message)
+    return {
+      data: {
+        id: '',
+        url: '',
+        expiresAt: '',
+        written: { url: pageUrl },
+        asset_upload: {
+          id: admittedUpload.asset.id,
+          url: admittedUpload.asset.url,
+          size_bytes: admittedUpload.asset.sizeBytes,
+          content_type: admittedUpload.asset.contentType,
+          ...(admittedUpload.asset.sha256 !== undefined
+            ? { sha256: admittedUpload.asset.sha256 }
+            : {}),
+          file_name: admittedUpload.fileName,
+        },
+      },
+    }
+  }
+  const approved = await readApprovedUpload(expanded, pin, context)
+  if (approved.kind === 'error') return emptyErr(approved.message)
+  if (typeof pin?.real === 'string') {
+    await recordUploadGrantIfPinned(input, context, parsed.slug, pin)
+  }
   const r = await uploadArtifactAsset({
     slug: parsed.slug,
-    filePath: expandPath(input.file_path),
+    filePath: expanded,
+    bytes: approved.bytes,
     signal,
   })
   if (r.kind === 'error') return emptyErr(r.message)
@@ -884,6 +1665,7 @@ async function callUploadAsset(
       id: '',
       url: '',
       expiresAt: '',
+      written: { url: pageUrl },
       asset_upload: {
         id: r.asset.id,
         url: r.asset.url,
@@ -897,19 +1679,36 @@ async function callUploadAsset(
 }
 
 async function callDeleteAsset(
-  input: z.infer<typeof deleteAssetInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "delete_asset"')
+  }
+  // densable eH @211244084 — checkPermissions stamps
+  // `{action:"delete_asset", slug, assetId}`; call must refuse without it
+  // (same class as Tat on action "delete" / gNe on upload_asset).
+  const pin = Reflect.get(input, ARTIFACT_ASSET_TARGET_PIN) as
+    | ArtifactAssetTargetPin
+    | undefined
+  const assetId = typeof input.asset_id === 'string' ? input.asset_id : ''
+  if (
+    hasForeignArtifactPin(input, ARTIFACT_ASSET_TARGET_PIN) ||
+    pin?.action !== 'delete_asset' ||
+    pin.slug !== parsed.slug ||
+    pin.assetId !== assetId
+  ) {
+    return emptyErr(
+      'This asset delete was not confirmed by the user, so nothing was deleted; retry so the confirmation is shown.',
+    )
   }
   const { deleteArtifactAsset } = await import(
     'src/services/artifactAutoReact/restApis.js'
   )
   const r = await deleteArtifactAsset({
     slug: parsed.slug,
-    id: input.asset_id,
+    id: assetId,
     signal,
   })
   if (r.kind === 'error') return emptyErr(r.message)
@@ -924,18 +1723,37 @@ async function callDeleteAsset(
 }
 
 async function callListFiles(
-  input: z.infer<typeof listFilesInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  // densable n4 — case-insensitive artifact URL for list_files inputs.
+  const parsed = parsedInputUrlAnyCase(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "list_files"')
   }
+  const { artifactAdmitPublicRead, artifactReadGrant } = await import(
+    './readSaveHooks.js'
+  )
+  ;(await artifactReadGrant(input, context))?.()
   const { listArtifactFiles } = await import(
     'src/services/artifactAutoReact/restApis.js'
   )
   const { artifactViewerUrlFor } = await import('src/utils/artifactUrl.js')
-  const r = await listArtifactFiles({ slug: parsed.slug, signal })
+  // densable O7(D, signal, credentials, { admitPublicRead:()=>mKe(...,"files"), probeToolUseId:n.toolUseId })
+  const r = await listArtifactFiles({
+    slug: parsed.slug,
+    signal,
+    admitPublicRead: await artifactAdmitPublicRead(
+      input as Record<string, unknown>,
+      context,
+      'files',
+    ),
+    ...(context?.toolUseId !== undefined
+      ? { probeToolUseId: context.toolUseId }
+      : {}),
+  })
+  // Gold single_page / public_refused messages are already in r.message.
   if (r.kind === 'error') return emptyErr(r.message)
   return {
     data: {
@@ -950,26 +1768,49 @@ async function callListFiles(
           content_type: f.contentType,
           size_bytes: f.sizeBytes,
           sha256: f.sha256,
+          ...(f.live ? { live: true } : {}),
         })),
         ...(r.cowritten ? { cowritten: true } : {}),
+        ...(r.publicRead ? { publicRead: true } : {}),
+        ...(r.narrowed ? { narrowed: true } : {}),
       },
     },
   }
 }
 
 async function callReadFile(
-  input: z.infer<typeof readFileInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
-  const { callArtifactReadFile } = await import(
+  const { callArtifactReadFileAction } = await import(
     'src/services/artifactAutoReact/saveActions.js'
   )
-  const r = await callArtifactReadFile({
-    url: input.url,
+  const { artifactAdmitPublicRead, artifactReadSaveHooks } = await import(
+    './readSaveHooks.js'
+  )
+  const r = await callArtifactReadFileAction({
+    url: input.url ?? '',
     path: input.path,
+    paths: input.paths,
     out_dir: input.out_dir,
-    pin: input.__outDirPin,
+    pin: Reflect.get(input, ARTIFACT_ASSET_TARGET_PIN) as
+      | ArtifactAssetTargetPin
+      | undefined,
+    toolInput: input,
     signal,
+    agentId: context?.agentId,
+    agentWorktree: context?.agentWorktree,
+    hooks: await artifactReadSaveHooks(
+      ArtifactTool as unknown as Tool,
+      input,
+      context,
+    ),
+    // densable: admitPublicRead:()=>mKe(g,n,D.slug,"files")
+    admitPublicRead: await artifactAdmitPublicRead(input, context, 'files'),
+    ...(context?.toolUseId !== undefined
+      ? { probeToolUseId: context.toolUseId }
+      : {}),
   })
   if ('error' in r) return emptyErr(r.error)
   return {
@@ -977,24 +1818,43 @@ async function callReadFile(
       id: '',
       url: '',
       expiresAt: '',
-      file_read: r.data.file_read,
+      ...r.data,
     },
   }
 }
 
 async function callReadAsset(
-  input: z.infer<typeof readAssetInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
   const { callArtifactReadAsset } = await import(
     'src/services/artifactAutoReact/saveActions.js'
   )
+  const { artifactAdmitPublicRead, artifactReadSaveHooks } = await import(
+    './readSaveHooks.js'
+  )
   const r = await callArtifactReadAsset({
-    url: input.url,
-    asset_id: input.asset_id,
+    url: input.url ?? '',
+    asset_id: input.asset_id ?? '',
     out_dir: input.out_dir,
-    pin: input.__outDirPin,
+    pin: Reflect.get(input, ARTIFACT_ASSET_TARGET_PIN) as
+      | ArtifactAssetTargetPin
+      | undefined,
+    toolInput: input,
     signal,
+    agentId: context?.agentId,
+    agentWorktree: context?.agentWorktree,
+    hooks: await artifactReadSaveHooks(
+      ArtifactTool as unknown as Tool,
+      input,
+      context,
+    ),
+    // densable: admitPublicRead:()=>mKe(g,n,D.slug,"assets")
+    admitPublicRead: await artifactAdmitPublicRead(input, context, 'assets'),
+    ...(context?.toolUseId !== undefined
+      ? { probeToolUseId: context.toolUseId }
+      : {}),
   })
   if ('error' in r) return emptyErr(r.error)
   return {
@@ -1008,7 +1868,7 @@ async function callReadAsset(
 }
 
 async function callVerify(
-  input: z.infer<typeof verifyInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
   const { isArtifactVerifyGateOpen, fetchArtifactVerifyDiagnostics } =
@@ -1021,7 +1881,7 @@ async function callVerify(
       "Nothing to verify: pass the artifact url, or publish first. Without `url`, verify targets this session's most recent publish.",
     )
   }
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "verify"')
   }
@@ -1049,15 +1909,15 @@ async function callVerify(
 }
 
 async function callReadPageData(
-  input: z.infer<typeof readPageDataInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
   const { runReadPageData } = await import(
     'src/services/artifactAutoReact/readPageData.js'
   )
   const r = await runReadPageData({
-    url: input.url,
-    schema: input.schema,
+    url: input.url ?? '',
+    schema: input.schema ?? '',
     signal,
   })
   if (!r.ok) return emptyErr(r.message)
@@ -1072,14 +1932,16 @@ async function callReadPageData(
 }
 
 async function callDelete(
-  input: z.infer<typeof deleteInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "delete"')
   }
-  const pin = input.__deleteConfirm
+  const pin = Reflect.get(input, ARTIFACT_DELETE_PIN) as
+    | { slug: string }
+    | undefined
   if (!pin || pin.slug !== parsed.slug) {
     return emptyErr(
       'This delete was not confirmed by the user, so nothing was deleted; retry so the confirmation is shown.',
@@ -1106,9 +1968,9 @@ async function callDelete(
 }
 
 async function callRoomSend(
-  input: z.infer<typeof roomSendInputSchema>,
+  input: ArtifactInput,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return emptyErr('`url` must be an artifact URL for action "room_send"')
   }
@@ -1116,7 +1978,7 @@ async function callRoomSend(
     'src/services/artifactAutoReact/restApis.js'
   )
   const { artifactViewerUrlFor } = await import('src/utils/artifactUrl.js')
-  const r = sendArtifactRoomEvent(parsed.slug, input.topic, input.data)
+  const r = sendArtifactRoomEvent(parsed.slug, input.topic ?? '', input.data)
   if (!r.ok && (r.reason === 'invalid_topic' || r.reason === 'invalid_data')) {
     return emptyErr(
       `room_send refused after permission or hook rewrites: ${r.reason}`,
@@ -1129,7 +1991,7 @@ async function callRoomSend(
       expiresAt: '',
       room_send: {
         url: artifactViewerUrlFor(parsed),
-        topic: input.topic,
+        topic: input.topic ?? '',
         delivered: r.ok,
         ...(r.ok ? { peers: r.peers } : { reason: r.reason }),
       },
@@ -1138,7 +2000,7 @@ async function callRoomSend(
 }
 
 async function callList(
-  input: z.infer<typeof listInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
   const { listArtifactFrames } = await import(
@@ -1164,12 +2026,15 @@ async function callList(
   }
 }
 
+// densable 2.1.289 DualInk workingCopyPath lives on AppState.liveReplicas
+// (gold void 0; se/also never assign). Do not invent a read host here.
 async function callRead(
-  input: z.infer<typeof readInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
   const started = Date.now()
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return {
       data: {
@@ -1183,10 +2048,24 @@ async function callRead(
   const { readArtifactHtml } = await import(
     'src/services/artifactAutoReact/edit.js'
   )
+  const { artifactAdmitPublicRead, artifactPageReadGrant } = await import(
+    './readSaveHooks.js'
+  )
   const r = await readArtifactHtml(
     parsed.slug,
     signal ?? new AbortController().signal,
     parsed.env,
+    {
+      // densable: admitPublicRead:()=>mKe(g,n,te.slug,"page")
+      admitPublicRead: await artifactAdmitPublicRead(
+        input as Record<string, unknown>,
+        context,
+        'page',
+      ),
+      ...(context?.toolUseId !== undefined
+        ? { probeToolUseId: context.toolUseId }
+        : {}),
+    },
   )
   if (!r.html) {
     return {
@@ -1201,6 +2080,12 @@ async function callRead(
       },
     }
   }
+  // densable: if(Ae)NCo(g,n,te.slug) — only when Wu was stamped at ask time.
+  const grantPage = await artifactPageReadGrant(
+    input as Record<string, unknown>,
+    context,
+  )
+  grantPage?.()
   const result = r.html
   return {
     data: {
@@ -1208,7 +2093,7 @@ async function callRead(
       url: '',
       expiresAt: '',
       read: {
-        url: input.url,
+        url: input.url ?? '',
         bytes: Buffer.byteLength(result),
         code: 200,
         codeText: 'OK',
@@ -1220,11 +2105,11 @@ async function callRead(
 }
 
 async function callComments(
-  input: z.infer<typeof commentsInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
   context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return {
       data: {
@@ -1267,9 +2152,12 @@ async function callComments(
       }
     }
   }
-  // densable: lTm only when agentId is unset and not gb(agentContext).
-  // Local has no delegatedObservation (gb); skip on subagent agentId only.
-  if (context?.agentId === undefined) {
+  // Gold @210885112: s.agentId===void 0&&!Xo(s.agentContext) then HEo/lTm.
+  // Tip Xo via ALS; ToolUseContext has no agentContext (KEEP).
+  if (
+    context?.agentId === undefined &&
+    !isDelegatedObservation(getAgentContext())
+  ) {
     const { markCommentsReadForCensus } = await import(
       'src/services/artifactAutoReact/commentCensus.js'
     )
@@ -1288,15 +2176,18 @@ async function callComments(
       threads,
       ...(input.thread_id ? { thread_filter: input.thread_id } : {}),
       ...(r.threadsDropped ? { threads_dropped: true } : {}),
+      ...(isDelegatedObservation(getAgentContext())
+        ? { scoped_dispatch: true }
+        : {}),
     },
   }
 }
 
 async function callResolve(
-  input: z.infer<typeof resolveInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   if (!parsed) {
     return {
       data: {
@@ -1312,7 +2203,7 @@ async function callResolve(
   )
   const r = await resolveArtifactCommentThread({
     slug: parsed.slug,
-    threadId: input.thread_id,
+    threadId: input.thread_id ?? '',
     signal,
   })
   if (r.kind === 'ok') {
@@ -1375,10 +2266,10 @@ async function callResolve(
 }
 
 async function callReply(
-  input: z.infer<typeof replyInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   const slug = parsed?.slug
   if (!slug) {
     return {
@@ -1396,8 +2287,8 @@ async function callReply(
   )
   const posted = await postArtifactCommentReply({
     slug,
-    threadId: input.thread_id,
-    text: input.text,
+    threadId: input.thread_id ?? '',
+    text: input.text ?? '',
     signal,
     answersSummon: input.answers_summon === true,
     continuesReplyId: input.continues_reply_id,
@@ -1442,10 +2333,10 @@ async function callReply(
 }
 
 async function callLiveEdit(
-  input: z.infer<typeof liveEditInputSchema>,
+  input: ArtifactInput,
   signal?: AbortSignal,
 ): Promise<{ data: ArtifactOutput }> {
-  const parsed = parseArtifactUrl(input.url)
+  const parsed = parsedInputUrl(input.url)
   const slug = parsed?.slug
   if (!slug) {
     return {
@@ -1463,7 +2354,7 @@ async function callLiveEdit(
   )
   const r = await publishArtifactHtml({
     slug,
-    html: input.html,
+    html: input.html ?? '',
     signal: signal ?? new AbortController().signal,
   })
   if (!r.ok) {
@@ -1489,9 +2380,14 @@ async function callLiveEdit(
 }
 
 async function callUpload(
-  input: z.infer<typeof uploadInputSchema>,
+  input: ArtifactInput,
 ): Promise<{ data: ArtifactOutput }> {
-  const { file_path, hash, ttl } = input
+  const file_path = input.file_path
+  if (typeof file_path !== 'string' || file_path === '') {
+    return emptyErr('file_path is required to upload')
+  }
+  const { hash } = input
+  const ttl = input.ttl ?? 7
 
   const expanded = expandPath(file_path)
   if (

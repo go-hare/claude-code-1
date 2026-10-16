@@ -27,6 +27,38 @@ export function Lge(): boolean {
 }
 
 /**
+ * densable Fr @194392935 — comment responder-dispatch opt-in (analyst Ur).
+ * Gold: `optIn ??= ENV ?? k("tengu_bracken_sluice", false)`.
+ */
+export function isCommentResponderDispatchEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const ar = un().autoReact
+  if (ar.responderDispatchOptIn === null) {
+    const raw = env.CLAUDE_CODE_ARTIFACT_COMMENT_RESPONDER
+    if (raw !== undefined && raw !== '') {
+      const lower = raw.toLowerCase()
+      ar.responderDispatchOptIn = !(
+        lower === '0' ||
+        lower === 'false' ||
+        lower === 'no' ||
+        lower === 'off'
+      )
+    } else {
+      // Lazy: avoid gates ↔ growthbook cycle at module init
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getFeatureValue_CACHED_MAY_BE_STALE } =
+        require('../analytics/growthbook.js') as typeof import('../analytics/growthbook.js')
+      ar.responderDispatchOptIn = getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_bracken_sluice',
+        false,
+      )
+    }
+  }
+  return ar.responderDispatchOptIn === true
+}
+
+/**
  * densable Gso — opt-in for artifact comment auto-react.
  * Gold: `optIn ??= ENV ?? it("tengu_sorrel_trellis", false)`.
  * Tip: env string coerce when set; else GrowthBook cached gate (lazy import).

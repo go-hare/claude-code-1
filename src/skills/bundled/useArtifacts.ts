@@ -1,8 +1,10 @@
+import { parseFrontmatter } from '../../utils/frontmatterParser.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 import {
   applyDatavizCallout,
   DATAVIZ_CALLOUT_PLACEHOLDER,
 } from './datavizCallout.js'
+import { ARTIFACT_DESIGN_MD } from './goldSkillMarkdown.js'
 
 const USE_ARTIFACTS_PROMPT = `# Using Artifacts
 
@@ -113,6 +115,16 @@ The hosting service serves the HTML verbatim (including any \`<script>\` you inc
 
 ${DATAVIZ_CALLOUT_PLACEHOLDER}
 `
+
+/**
+ * Gold `Est` analog — prefer registered `artifact-design` SKILL.md; fork
+ * `use-artifacts` still stands in when that skill is not registered.
+ */
+export function getUseArtifactsSkillBody(): string {
+  const body = parseFrontmatter(ARTIFACT_DESIGN_MD).content.trimStart()
+  if (body) return applyDatavizCallout(body)
+  return applyDatavizCallout(USE_ARTIFACTS_PROMPT).trimStart()
+}
 
 export function registerUseArtifactsSkill(): void {
   registerBundledSkill({

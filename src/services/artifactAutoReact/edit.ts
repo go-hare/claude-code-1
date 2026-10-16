@@ -6,6 +6,7 @@
 import { parseArtifactUrl } from '../../utils/artifactUrl.js'
 import type { ArtifactComment, ArtifactThread } from './commentRead.js'
 import { fetchFrameBoot, frameControlPlaneHeaders } from './mint.js'
+import { Yw } from './readPerm/consent.js'
 import { postArtifactCommentReply } from './commentReply.js'
 import { un } from './store.js'
 
@@ -89,6 +90,7 @@ export async function readArtifactHtml(
   slug: string,
   signal: AbortSignal,
   env: string = 'prod',
+  opts?: { admitPublicRead?: () => boolean; probeToolUseId?: string },
 ): Promise<
   | {
       editable: true
@@ -96,17 +98,41 @@ export async function readArtifactHtml(
       ver: string
       bytes: number
       favicon?: string
+      publicRead?: boolean
     }
   | { editable: false; html?: string; ver?: string; reason?: string }
 > {
-  const boot = await fetchFrameBoot(slug, signal)
-  if (boot.err !== null || boot.assetToken === undefined) {
-    return { editable: false, reason: boot.err ?? 'no-asset-token' }
+  const boot = await fetchFrameBoot(slug, signal, {
+    // densable page content path: gatePublicRead:!1 — admitPublicRead stays after Yw.
+    gatePublicRead: false,
+    kind: 'read',
+    ...(opts?.probeToolUseId !== undefined
+      ? { probeToolUseId: opts.probeToolUseId }
+      : {}),
+  })
+  if (boot.err !== null) {
+    return { editable: false, reason: boot.err }
+  }
+  const tokenless = boot.assetToken === undefined
+  // densable page path: Yw off → no-asset-token; Yw on without admit → public_unasked
+  if (tokenless && !Yw()) {
+    return { editable: false, reason: 'no-asset-token' }
+  }
+  if (tokenless && opts?.admitPublicRead?.() !== true) {
+    return {
+      editable: false,
+      reason:
+        'this is a public artifact from outside your organization, and no person has approved reading it here — nothing was fetched',
+    }
   }
   const envKey = env === 'staging' ? 'staging' : 'prod'
   const servedPath = `/_f/${encodeURIComponent(boot.ver)}/index.html`
   const host = `${slug}.frame.${env === 'staging' ? 'staging.' : ''}claudeusercontent.com`
-  const url = `https://${host}${servedPath}?__frame_t=${encodeURIComponent(boot.assetToken)}`
+  const tokenQ =
+    boot.assetToken !== undefined
+      ? `?__frame_t=${encodeURIComponent(boot.assetToken)}`
+      : ''
+  const url = `https://${host}${servedPath}${tokenQ}`
 
   const finish = (
     html: string,
@@ -155,10 +181,13 @@ export async function readArtifactHtml(
     const { isArtifactFrameRelayOpen, fetchViaArtifactFrameRelay } =
       await import('./frameRelay.js')
     if (!isArtifactFrameRelayOpen()) return null
+    if (boot.assetToken === undefined) {
+      return { editable: false, reason: 'no-asset-token' }
+    }
     const via = await fetchViaArtifactFrameRelay({
       slug,
       servedPath,
-      assetToken: boot.assetToken!,
+      assetToken: boot.assetToken,
       signal,
       maxBytes: 8_000_000,
     })
@@ -214,6 +243,8 @@ export async function composeEditDecision(input: {
   html: string
   signal: AbortSignal
   allowRewrite?: boolean
+  /** densable Pd analystBrief from Ur. */
+  analystBrief?: string
 }): Promise<EditDecision | null> {
   try {
     const { queryWithModel } = await import('../api/claude.js')
@@ -229,9 +260,13 @@ export async function composeEditDecision(input: {
     const sourceCap = Math.min(input.html.length, 120_000)
     const source = input.html.slice(0, sourceCap)
     const rewriteArm = input.allowRewrite !== false
+    const analystBlock =
+      input.analystBrief !== undefined && input.analystBrief !== ''
+        ? `\nAnalyst brief:\n${input.analystBrief}\n`
+        : ''
     const prompt = `Artifact URL: ${input.url}
 Thread: ${input.thread.id}
-
+${analystBlock}
 Newest comments:
 ${threadBlock}
 
@@ -400,6 +435,25 @@ export async function defaultAttemptEdit(input: {
     return 'unavailable'
   }
 
+  let analystBrief: string | undefined
+  const { isCommentResponderDispatchEnabled } = await import('./gates.js')
+  if (isCommentResponderDispatchEnabled()) {
+    const trigger =
+      input.summons[0] ??
+      input.thread.comments.find(c => c.toClaudeAt !== undefined)
+    if (trigger !== undefined) {
+      const { spawnCommentThreadAnalyst } = await import('./commentAnalyst.js')
+      analystBrief =
+        (await spawnCommentThreadAnalyst({
+          url: input.url,
+          slug: input.slug,
+          thread: input.thread,
+          triggerComment: trigger,
+          signal: input.signal,
+        })) ?? undefined
+    }
+  }
+
   const decision = await composeEditDecision({
     slug: input.slug,
     url: input.url,
@@ -407,6 +461,7 @@ export async function defaultAttemptEdit(input: {
     summons: input.summons,
     html: read.html,
     signal: input.signal,
+    ...(analystBrief !== undefined ? { analystBrief } : {}),
   })
   if (!decision) return 'unavailable'
 

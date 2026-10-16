@@ -544,4 +544,8 @@ export const DL = {
   post: frameDlPost,
   getRelayOnly: frameDlGetRelayOnly,
   postRelayOnly: frameDlPostRelayOnly,
+  /** densable Ed.getRelayBound analog — same as get. */
+  getRelayBound: frameDlGet,
+  /** densable Ed.postRelayBound analog — same as post. */
+  postRelayBound: frameDlPost,
 }

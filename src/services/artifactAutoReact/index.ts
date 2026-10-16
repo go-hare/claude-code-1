@@ -13,6 +13,9 @@ export {
   type AutoReactWiring,
   type BootingWiredArm,
   type CommentMonitorIntentLine,
+  type CommentTargetCacheEntry,
+  type CommentThreadPreview,
+  type CommentThreadPreviewBy,
   type DurableWatchRow,
   type LedgerArtifactSnapshot,
   type LedgerThreadSnapshot,
@@ -25,6 +28,7 @@ export {
 export {
   disarmAutoReactUser,
   Gso,
+  isCommentResponderDispatchEnabled,
   Jj,
   Lge,
   M2,
@@ -230,11 +234,33 @@ export {
   parseFrameCommentsPayload,
   readArtifactComments,
   readArtifactCommentsControlPlane,
+  THREAD_ID_RE,
   type ArtifactComment,
   type ArtifactThread,
   type CommentsReadErr,
   type CommentsReadOk,
 } from './commentRead.js'
+
+export {
+  commentAnalystCanUseTool,
+  COMMENT_ANALYST_BRIEF_CAP,
+  spawnCommentThreadAnalyst,
+  type SpawnCommentThreadAnalystInput,
+} from './commentAnalyst.js'
+
+export {
+  COMMENT_PREVIEW_EXCERPT_MAX,
+  COMMENT_PREVIEW_TIMEOUT_MS,
+  COMMENT_TARGET_CACHE_MAX,
+  commentPreviewExcerpt,
+  commentThreadCacheKey,
+  commentThreadOpeningTarget,
+  fetchCommentThreadPreview,
+  formatCommentTargetAsk,
+  formatCommentThreadAsk,
+  jAr,
+  type ThreadPreviewContext,
+} from './threadPreview.js'
 
 export {
   postArtifactCommentReply,
@@ -467,6 +493,7 @@ export {
   Jgl,
   Kgl,
   ownershipSuffix,
+  YBe,
   probeArtifactOwnership,
   Sqe,
   Tgr,
@@ -474,6 +501,29 @@ export {
   type ArtifactShareRole,
   type OwnershipProbeResult,
 } from './ownership.js'
+
+export {
+  noteArtifactAccountChanged,
+  type ArtifactAccountChangeReason,
+} from './accountBoundary.js'
+
+export {
+  artifactReadObserversFromVersions,
+  clearedArtifactConversationAppState,
+  emptyResumedArtifactFrameSeed,
+  noteArtifactConversationReset,
+  restoreResumedArtifactFrameState,
+  type ArtifactConversationResetOpts,
+  type ArtifactFrameUrlEntry,
+  type ArtifactRefEntry,
+  type ResumedArtifactFrameSeed,
+} from './conversationBoundary.js'
+
+export {
+  extractArtifactFrameSeedFromTranscript,
+  extractResumedArtifactFrameSeed,
+  isArtifactResumeSeedEligible,
+} from './resumeFrameExtract.js'
 
 export {
   artifactRelayAssetHeaders,

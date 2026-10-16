@@ -3,7 +3,7 @@ import { Box, Link, Text } from '@anthropic/ink';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js';
-import type { ArtifactOutput } from './ArtifactTool.js';
+import { formatArtifactDeleteResult, formatAssetDeleteResult, type ArtifactOutput } from './ArtifactTool.js';
 
 export function renderToolResultMessage(
   content: ArtifactOutput,
@@ -92,17 +92,31 @@ export function renderToolResultMessage(
       </Box>
     );
   }
+  if (content.artifact_delete) {
+    return (
+      <Box>
+        <Text>{formatArtifactDeleteResult(content.artifact_delete)}</Text>
+      </Box>
+    );
+  }
+  if (content.asset_delete) {
+    return (
+      <Box>
+        <Text>{formatAssetDeleteResult(content.asset_delete)}</Text>
+      </Box>
+    );
+  }
   if (
     content.asset_list ||
     content.asset_upload ||
-    content.asset_delete ||
     content.file_list ||
     content.file_read ||
+    content.files_read ||
     content.asset_read ||
     content.verify ||
     content.page_data ||
-    content.artifact_delete ||
-    content.room_send
+    content.room_send ||
+    content.quickstart
   ) {
     return (
       <Box>

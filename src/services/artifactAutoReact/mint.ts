@@ -7,7 +7,10 @@
 import { getOauthConfig } from '../../constants/oauth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
+import { logForDebugging } from '../../utils/debug.js'
 import type { MintSubscriptionResult } from './arm.js'
+import { Yw } from './readPerm/consent.js'
+import { un } from './store.js'
 
 /** densable yJr — boot / renew version shape. */
 export const FRAME_VER_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -53,6 +56,8 @@ type FrameBootOk = {
   data: Record<string, unknown>
   ver: string
   assetToken: string | undefined
+  route?: 'direct' | 'relay'
+  reused?: boolean
 }
 
 type FrameBootErr = {
@@ -60,6 +65,44 @@ type FrameBootErr = {
   status?: number
   errorCode?: string
 }
+
+/** densable Ze — probeBoots TTL (ms). */
+export const PROBE_BOOT_TTL_MS = 60_000
+
+export type FetchFrameBootKind = 'probe' | 'read' | 'subscribe' | 'comments'
+
+export type FetchFrameBootOpts = {
+  relayOnly?: boolean
+  /** densable bk=probe query; also implies kind "probe" when kind omitted. */
+  probe?: boolean
+  readBack?: boolean
+  /**
+   * densable aT kind — reuse allows any kind when cached boot has
+   * `data.typeInstance === false`, else only `"probe"`.
+   */
+  kind?: FetchFrameBootKind
+  /**
+   * densable gatePublicRead — default true (probe arm). Content fetch paths
+   * pass false and keep admitPublicRead after Yw.
+   */
+  gatePublicRead?: boolean
+  /** densable probeToolUseId — reuse shareStatus.probeBoots for this tool use. */
+  probeToolUseId?: string
+  /**
+   * densable agentPeer / actorId / syncLive / watchBoot / speculative /
+   * lean — when any of these would skip reuse in gold, tip skips reuse too.
+   * Pass-through flags only; no host invent.
+   */
+  agentPeer?: boolean
+  actorId?: boolean
+  syncLive?: boolean
+  watchBoot?: boolean
+  speculative?: boolean
+  lean?: unknown
+}
+
+const PUBLIC_READ_DISABLED_ERR =
+  'artifact read failed: this artifact is served to you as a public (non-member) reader, and reading public artifacts that way is not enabled yet'
 
 /** densable Jem */
 export function extractSubscriptionToken(
@@ -89,12 +132,123 @@ function isEditorFromBoot(boot: FrameBootOk): boolean {
 /**
  * densable Zem — GET /api/frame/${slug}?via=model_read via DL.get / getRelayOnly.
  */
+/** densable Ft */
+const BOOT_OTHER_ORG_MESSAGE =
+  "this Artifact is in another of the user's organizations, not the one this session is signed in to \u2014 it opens here only after the user runs /login and signs in to that organization"
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** densable It — `{error, reason: "org_mismatch", owner_org: <uuid>}`. */
+function isOrgMismatchBody(data: unknown): boolean {
+  if (data === null || typeof data !== 'object') return false
+  const error = Reflect.get(data, 'error')
+  const reason = Reflect.get(data, 'reason')
+  const ownerOrg = Reflect.get(data, 'owner_org')
+  return (
+    typeof error === 'string' &&
+    reason === 'org_mismatch' &&
+    typeof ownerOrg === 'string' &&
+    UUID_RE.test(ownerOrg)
+  )
+}
+
+function pruneExpiredProbeBoots(now = Date.now()): void {
+  const { probeBoots } = un().shareStatus
+  for (const [slug, entry] of probeBoots) {
+    if (now - entry.issuedAt > PROBE_BOOT_TTL_MS) probeBoots.delete(slug)
+  }
+}
+
+/**
+ * densable WHt live-behind check — KEEP stubbed: tip has no live supervisors
+ * bag wired for this gate. Reuse still checks toolUseId + typeInstance.
+ */
+function isProbeBootLiveBehind(_slug: string, _ver: string): boolean {
+  // KEEP: no WHt / live supervisors bag — do not invent behind=true.
+  return false
+}
+
+function tryReuseProbeBoot(
+  slug: string,
+  opts: FetchFrameBootOpts,
+  kind: FetchFrameBootKind,
+  debugLabel: string,
+): FrameBootOk | undefined {
+  const probeToolUseId = opts.probeToolUseId
+  if (
+    probeToolUseId === undefined ||
+    opts.agentPeer === true ||
+    opts.actorId === true ||
+    opts.syncLive === true ||
+    opts.watchBoot === true ||
+    opts.lean !== undefined ||
+    opts.speculative === true
+  ) {
+    return undefined
+  }
+  const now = Date.now()
+  pruneExpiredProbeBoots(now)
+  const cached = un().shareStatus.probeBoots.get(slug)
+  if (cached === undefined || cached.toolUseId !== probeToolUseId) {
+    return undefined
+  }
+  if (!(kind === 'probe' || cached.boot.data.typeInstance === false)) {
+    return undefined
+  }
+  // densable: !(relayOnly && Li() && boot.route !== "relay")
+  // Li ≈ isAnthropicHostedRemoteSession
+  if (opts.relayOnly === true) {
+    // Lazy to keep mint free of frameRelay cycles at module load.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isAnthropicHostedRemoteSession } =
+      require('./frameRelay.js') as typeof import('./frameRelay.js')
+    if (
+      isAnthropicHostedRemoteSession() &&
+      cached.boot.route !== undefined &&
+      cached.boot.route !== 'relay'
+    ) {
+      return undefined
+    }
+  }
+  if (isProbeBootLiveBehind(slug, cached.boot.ver)) return undefined
+  logForDebugging(
+    `[artifact] ${debugLabel}: ${kind}-kind boot served from this tool use's share probe (probe issued ${now - cached.issuedAt}ms ago) slug=${slug}`,
+  )
+  return { ...cached.boot, reused: true }
+}
+
+/**
+ * densable aT / kin portable — GET /api/frame/${slug}?via=model_read via DL,
+ * with probeBoots reuse + gatePublicRead.
+ */
 export async function fetchFrameBoot(
   slug: string,
   signal: AbortSignal,
-  opts: { relayOnly?: boolean } = {},
+  opts: FetchFrameBootOpts = {},
 ): Promise<FrameBootOk | FrameBootErr> {
-  const path = `/api/frame/${encodeURIComponent(slug)}?via=model_read`
+  const kind: FetchFrameBootKind =
+    opts.kind ?? (opts.probe === true ? 'probe' : 'read')
+  const gatePublicRead = opts.gatePublicRead !== false
+  const asProbe = opts.probe === true || kind === 'probe'
+  const reused = tryReuseProbeBoot(
+    slug,
+    opts,
+    kind,
+    asProbe ? 'artifact_share_probe' : 'artifact_frame_boot',
+  )
+  if (reused !== undefined) {
+    if (gatePublicRead && reused.assetToken === undefined && !Yw()) {
+      return {
+        err: PUBLIC_READ_DISABLED_ERR,
+        errorCode: 'public_read_disabled',
+      }
+    }
+    return reused
+  }
+
+  const query = `via=model_read${asProbe ? '&bk=probe' : ''}${opts.readBack ? '&readback=1' : ''}`
+  const path = `/api/frame/${encodeURIComponent(slug)}?${query}`
   // Lazy: frameDl imports frameRelay; keep mint free of cycles at load
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { DL } = require('./frameDl.js') as typeof import('./frameDl.js')
@@ -149,6 +303,13 @@ export async function fetchFrameBoot(
       errorCode: 'boot_404',
     }
   }
+  if (u.status === 403 && isOrgMismatchBody(u.data)) {
+    return {
+      err: BOOT_OTHER_ORG_MESSAGE,
+      status: 403,
+      errorCode: 'boot_org_mismatch',
+    }
+  }
   if (u.status < 200 || u.status >= 300) {
     return {
       err: `artifact read failed (HTTP ${u.status})`,
@@ -177,7 +338,26 @@ export async function fetchFrameBoot(
       errorCode: 'boot_bad_ver',
     }
   }
-  return { err: null, data, ver, assetToken }
+  const boot: FrameBootOk = {
+    err: null,
+    data,
+    ver,
+    assetToken,
+    route: u.route,
+  }
+  // densable kin: drop probeBoots when cached ver ≠ fresh boot ver.
+  // (Avoid ownership import — ownership → mint cycle.)
+  const cachedProbe = un().shareStatus.probeBoots.get(slug)
+  if (cachedProbe !== undefined && cachedProbe.boot.ver !== ver) {
+    un().shareStatus.probeBoots.delete(slug)
+  }
+  if (gatePublicRead && boot.assetToken === undefined && !Yw()) {
+    return {
+      err: PUBLIC_READ_DISABLED_ERR,
+      errorCode: 'public_read_disabled',
+    }
+  }
+  return boot
 }
 
 /**

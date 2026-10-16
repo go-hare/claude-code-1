@@ -128,7 +128,7 @@ describe('ArtifactTool.call reply', () => {
         text: 'hello from tool',
       })
       // Tip upload opens the tool; official REST stays ASe-gated.
-      expect(result.data.replied).toBeUndefined()
+      expect((result.data as Record<string, unknown>).replied).toBeUndefined()
       expect(result.data.error).toContain('cobalt registration is closed')
     } finally {
       globalThis.fetch = prevFetch

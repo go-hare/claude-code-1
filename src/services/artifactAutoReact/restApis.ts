@@ -32,7 +32,14 @@ import {
   mapAssetHttpToFail,
 } from './assetRxl.js'
 import { fetchFrameBoot, frameControlPlaneHeaders } from './mint.js'
+import { Yw } from './readPerm/consent.js'
 import { un } from './store.js'
+
+/** densable VQ — tokenless public content without admitPublicRead. */
+const PUBLIC_UNASKED = 'public_unasked'
+/** densable Jjt — message body for PUBLIC_UNASKED (prefixed by err helpers). */
+const PUBLIC_UNASKED_DETAIL =
+  'this is a public artifact from outside your organization, and no person has approved reading it here — nothing was fetched'
 
 const ASSET_ID_RE = /^[0-9a-f]{32}$/
 /** densable vWt — list_assets cursor. */
@@ -62,6 +69,8 @@ export type FileRow = {
   contentType: string
   sizeBytes: number
   sha256: string
+  /** densable O7 — path appears in boot livePaths. */
+  live?: boolean
 }
 
 function authHeaders(): Record<string, string> | null {
@@ -263,13 +272,27 @@ export async function uploadArtifactAsset(input: {
   slug: string
   filePath: string
   signal?: AbortSignal
+  /**
+   * densable mlt bytes. When set, the caller already read the pinned file
+   * and this function must not open `filePath` again.
+   */
+  bytes?: Buffer
+  /** densable qIt — after local bytes are accepted, before the store answers. */
+  onLocalRead?: () => void | Promise<void>
 }): Promise<
-  | { kind: 'ok'; asset: AssetRow; fileName: string }
-  | { kind: 'error'; message: string; reason: string }
+  | { kind: 'ok'; asset: AssetRow; fileName: string; resent?: boolean }
+  | {
+      kind: 'error'
+      message: string
+      reason: string
+      code: string
+      resent?: boolean
+    }
 > {
   if (!isValidArtifactSlug(input.slug)) {
     return {
       kind: 'error',
+      code: 'invalid_request',
       message: 'not a valid artifact id',
       reason: 'invalid_slug',
     }
@@ -279,24 +302,31 @@ export async function uploadArtifactAsset(input: {
   if (!ASSET_EXTS.has(ext) || contentType === undefined) {
     return {
       kind: 'error',
+      code: 'unsupported_type',
       message: `unsupported asset type "${ext}"`,
       reason: 'unsupported_type',
     }
   }
   let bytes: Buffer
-  try {
-    bytes = Buffer.from(await readFile(input.filePath))
-  } catch {
-    return {
-      kind: 'error',
-      message: `cannot read file_path: ${input.filePath}`,
-      reason: 'read_error',
+  if (input.bytes !== undefined) {
+    bytes = input.bytes
+  } else {
+    try {
+      bytes = Buffer.from(await readFile(input.filePath))
+    } catch {
+      return {
+        kind: 'error',
+        code: 'store_unavailable',
+        message: `cannot read file_path: ${input.filePath}`,
+        reason: 'read_error',
+      }
     }
   }
   const limit = assetUploadByteLimit(contentType)
   if (bytes.length === 0 || bytes.length > limit) {
     return {
       kind: 'error',
+      code: bytes.length === 0 ? 'invalid_request' : 'too_large',
       message:
         bytes.length === 0
           ? 'the file is empty'
@@ -306,6 +336,7 @@ export async function uploadArtifactAsset(input: {
       reason: 'size',
     }
   }
+  if (input.onLocalRead) await input.onLocalRead()
   const fileName = basename(input.filePath)
   const marks: Record<string, boolean> = {}
   const rxl = await assetRxl(
@@ -320,16 +351,25 @@ export async function uploadArtifactAsset(input: {
     },
     input.signal,
   )
+  const resent = marks.retried === true
   if (!rxl.replied) {
     return {
       kind: 'error',
+      code: rxl.failure.code,
       message: rxl.failure.message,
       reason: rxl.failure.reason,
+      ...(resent ? { resent: true } : {}),
     }
   }
   if (rxl.status !== 200) {
     const fail = mapAssetHttpToFail(rxl, 'upload')
-    return { kind: 'error', message: fail.message, reason: fail.reason }
+    return {
+      kind: 'error',
+      code: fail.code,
+      message: fail.message,
+      reason: fail.reason,
+      ...(resent ? { resent: true } : {}),
+    }
   }
   const data = (rxl.data ?? {}) as Record<string, unknown>
   const id = typeof data.opaque_id === 'string' ? data.opaque_id : ''
@@ -348,9 +388,11 @@ export async function uploadArtifactAsset(input: {
   if (!echoOk) {
     return {
       kind: 'error',
+      code: 'upstream_error',
       message:
         'the upload probably succeeded but the reply was unreadable — retry at most once; if it repeats, stop and report it',
       reason: 'malformed_echo',
+      ...(resent ? { resent: true } : {}),
     }
   }
   // densable hMw: sha256 optional but must match yHe when present
@@ -360,14 +402,17 @@ export async function uploadArtifactAsset(input: {
   ) {
     return {
       kind: 'error',
+      code: 'upstream_error',
       message:
         'the upload probably succeeded but the reply was unreadable — retry at most once; if it repeats, stop and report it',
       reason: 'malformed_echo',
+      ...(resent ? { resent: true } : {}),
     }
   }
   un().assetsOnRoster = true
   return {
     kind: 'ok',
+    ...(resent ? { resent: true } : {}),
     fileName,
     asset: {
       id,
@@ -432,23 +477,286 @@ export async function deleteArtifactAsset(input: {
   return { kind: 'ok', deleted: data.deleted }
 }
 
-/** densable XCm — list published files on a frame. */
+/** densable O7 single_page (member / non-public). */
+const SINGLE_PAGE_MESSAGE =
+  'this artifact is a single page with no separately published files, so there is no file list; read the page itself'
+/** densable O7 single_page (publicRead + te). */
+const PUBLIC_SINGLE_PAGE_MESSAGE =
+  'this public artifact is a single page with no separately published files, so there is no file list; read the page itself'
+/** densable O7 public_refused. */
+const PUBLIC_REFUSED_MESSAGE =
+  "this public artifact's files are not available to readers outside its organization right now — it may no longer be public, or it was taken down"
+
+/** densable M relay_unavailable (Y). */
+const LIST_RELAY_UNAVAILABLE_MESSAGE =
+  'published-file reads run only from a local session or an Anthropic-hosted cloud session with its gateway relay enabled; retrying from here will not help'
+/** densable M relay_not_served (ee). */
+const LIST_RELAY_NOT_SERVED_MESSAGE =
+  "published-file reads aren't available from this kind of session; retrying from here will not help"
+
+/** densable Oce — writerClass is boolean owner||writer. */
+function isOwnerOrWriterRole(role: unknown): boolean {
+  return role === 'owner' || role === 'writer'
+}
+
+/**
+ * densable Ppe — typeLocked from boot.type object or shareStatus.
+ * Semantic helper only (invent-ban `export function Ppe`).
+ */
+function isTypeLockedFromBoot(
+  data: Record<string, unknown>,
+  share?: { typeLocked?: boolean; typeLock?: unknown } | undefined,
+): boolean {
+  const t = data.type
+  return (
+    (t !== null && typeof t === 'object') ||
+    share?.typeLocked === true ||
+    share?.typeLock != null
+  )
+}
+
+/** densable aIr — orgRelation from boot. */
+function orgRelationFromBoot(boot: {
+  data: Record<string, unknown>
+  assetToken: string | undefined
+}): 'external' | 'public' | 'unproven' | 'own' | 'same' {
+  const mode = boot.data.mode
+  const perm =
+    boot.data.perm !== null && typeof boot.data.perm === 'object'
+      ? (boot.data.perm as Record<string, unknown>)
+      : undefined
+  if (mode === 'external') return 'external'
+  if (boot.assetToken === undefined) return 'public'
+  if (mode !== undefined) return 'unproven'
+  if (perm?.role === 'owner') return 'own'
+  return typeof perm?.mode === 'string' && perm.mode !== ''
+    ? 'same'
+    : 'unproven'
+}
+
+function livePathsFromBootData(data: Record<string, unknown>): string[] {
+  const raw = data.livePaths
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const row of raw) {
+    if (typeof row === 'string' && row.length > 0) out.push(row)
+    else if (row && typeof row === 'object') {
+      const path = Reflect.get(row, 'path')
+      if (typeof path === 'string' && path.length > 0) out.push(path)
+    }
+  }
+  return out
+}
+
+function filesCountedFromBootData(data: Record<string, unknown>): boolean {
+  const n = data.fileCount
+  return typeof n === 'number' && Number.isSafeInteger(n) && n > 0
+}
+
+/**
+ * densable te — HEAD content-host `/_f/{ver}/`; 200 means the page itself is
+ * still served (public single-page), otherwise list 403 is public_refused.
+ * Semantic helper only (invent-ban `export function te`).
+ */
+async function probeArtifactPageHead(input: {
+  slug: string
+  ver: string
+  signal?: AbortSignal
+}): Promise<boolean> {
+  const url = `${contentHostBase(input.slug)}/_f/${encodeURIComponent(input.ver)}/`
+  try {
+    const res = await fetch(url, {
+      method: 'HEAD',
+      signal: input.signal,
+      redirect: 'manual',
+    })
+    return res.status === 200
+  } catch (e) {
+    if (
+      input.signal?.aborted ||
+      (e instanceof DOMException && e.name === 'AbortError')
+    ) {
+      throw e instanceof DOMException
+        ? e
+        : new DOMException('Aborted', 'AbortError')
+    }
+    return false
+  }
+}
+
+/**
+ * densable O7 / XCm — boot then list published files on a frame.
+ * Semantic export only (invent-ban `export function O7`).
+ */
 export async function listArtifactFiles(input: {
   slug: string
   signal?: AbortSignal
+  /**
+   * densable admitPublicRead — mKe(…, "files"); gates tokenless public after Yw.
+   */
+  admitPublicRead?: () => boolean
+  /** densable probeToolUseId — reuse shareStatus.probeBoots via fetchFrameBoot. */
+  probeToolUseId?: string
 }): Promise<
   | {
       kind: 'ok'
       ver: string
       files: FileRow[]
       cowritten?: boolean
+      publicRead?: boolean
+      narrowed?: boolean
+      relay?: boolean
+      agentDirect?: boolean
+      typeLocked?: boolean
+      writerClass?: boolean
+      foreign?: boolean
+      outsideOrg?: boolean
+      orgRelation?: 'external' | 'public' | 'unproven' | 'own' | 'same'
+      title?: string
+      favicon?: unknown
+      publishPreconditions?: boolean
+      reused?: boolean
     }
-  | { kind: 'error'; message: string; reason: string }
+  | {
+      kind: 'error'
+      message: string
+      reason: string
+      ver?: string
+      cowritten?: boolean
+      typeLocked?: boolean
+    }
 > {
   if (!isValidArtifactSlug(input.slug)) {
     return { kind: 'error', message: 'invalid slug', reason: 'input' }
   }
   try {
+    const {
+      isArtifactFrameRelayOpen,
+      isClaudeCodeRemoteEnv,
+      isAnthropicHostedRemoteSession,
+    } = await import('./frameRelay.js')
+    // densable M: remote without gateway relay → relay_unavailable.
+    if (isClaudeCodeRemoteEnv() && !isArtifactFrameRelayOpen()) {
+      return {
+        kind: 'error',
+        reason: 'relay_unavailable',
+        message: LIST_RELAY_UNAVAILABLE_MESSAGE,
+      }
+    }
+    // densable M relay_not_served / tx(XWn): KEEP omit — tip has no bound-host
+    // probe; remote-without-relay is covered by relay_unavailable above.
+    void LIST_RELAY_NOT_SERVED_MESSAGE
+    const agentDirect = isAnthropicHostedRemoteSession()
+    const remoteRelay = isClaudeCodeRemoteEnv() && isArtifactFrameRelayOpen()
+    // densable M: aT(..., { gatePublicRead:!1, probeToolUseId }) then admit after Yw.
+    const boot = await fetchFrameBoot(
+      input.slug,
+      input.signal ?? new AbortController().signal,
+      {
+        // densable M/O7: gatePublicRead:!1 — admitPublicRead stays after Yw.
+        gatePublicRead: false,
+        kind: 'read',
+        // densable relayOnly:!o — only when remote+relay open (not local).
+        ...(remoteRelay ? { relayOnly: true } : {}),
+        ...(input.probeToolUseId !== undefined
+          ? { probeToolUseId: input.probeToolUseId }
+          : {}),
+      },
+    )
+    if (boot.err !== null) {
+      if (boot.errorCode === 'boot_relay_error') {
+        if (boot.status === 403 || boot.status === 404) {
+          return {
+            kind: 'error',
+            reason: 'relay_refused',
+            message:
+              "file list failed: published-file reads from a cloud session go through the session gateway's artifact relay, which is not enabled for this session yet; retrying from here will not help",
+          }
+        }
+        if (boot.status === 401) {
+          return {
+            kind: 'error',
+            reason: 'relay_unauthorized',
+            message:
+              "file list failed: the session gateway did not accept this session's credential for the artifact relay; retrying from here will not help",
+          }
+        }
+      }
+      return {
+        kind: 'error',
+        message: boot.err.replace(/^artifact read/, 'file list'),
+        reason:
+          boot.errorCode === 'public_read_disabled'
+            ? 'public_read_disabled'
+            : boot.status === 404
+              ? 'boot_404'
+              : 'boot',
+      }
+    }
+    const tokenless = boot.assetToken === undefined
+    // densable publicRead = tokenless after M/aT prelude.
+    const publicRead = tokenless
+    // densable M prelude: tokenless + !Yw → refuse; then admitPublicRead gate.
+    if (tokenless && !Yw()) {
+      return {
+        kind: 'error',
+        reason: 'tokenless',
+        message:
+          'this artifact is served to you as a public (non-member) reader, and its files are not readable that way',
+        ver: boot.ver,
+      }
+    }
+    if (tokenless && input.admitPublicRead?.() !== true) {
+      return {
+        kind: 'error',
+        reason: PUBLIC_UNASKED,
+        message: `file list failed: ${PUBLIC_UNASKED_DETAIL}`,
+        ver: boot.ver,
+      }
+    }
+    const filesCounted = filesCountedFromBootData(boot.data)
+    const livePaths = livePathsFromBootData(boot.data)
+    const cowritten =
+      boot.data.cowritten === true || boot.data.artifactKind === 'live-doc'
+    const perm =
+      boot.data.perm !== null && typeof boot.data.perm === 'object'
+        ? (boot.data.perm as Record<string, unknown>)
+        : undefined
+    const role = perm?.role
+    // Lazy yt — avoid cycle at module load; shareStatus may hold typeLocked.
+    let share:
+      | {
+          typeLocked?: boolean
+          typeLock?: unknown
+          authoredByOthers?: boolean
+          outsideWriter?: boolean
+        }
+      | undefined
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { yt } =
+        require('./readPerm/provenance.js') as typeof import('./readPerm/provenance.js')
+      share = yt(input.slug)
+    } catch {
+      share = undefined
+    }
+    const typeLocked = isTypeLockedFromBoot(boot.data, share)
+    // densable LPe(role==="owner", Obe(outsideWriter), yt?.outsideWriter)
+    const outsideOrgFlag =
+      boot.data.outsideWriter === true || share?.outsideWriter === true
+    const writerClass = isOwnerOrWriterRole(role)
+    const authoredByOthers =
+      boot.data.authoredByOthers === true || share?.authoredByOthers === true
+    const foreign =
+      authoredByOthers ||
+      role !== 'owner' ||
+      cowritten ||
+      typeLocked ||
+      outsideOrgFlag
+    const orgRelation = orgRelationFromBoot(boot)
+    // densable relay: F && !tokenless
+    const relay = isArtifactFrameRelayOpen() && !tokenless
+
     const res = await frameCpGet(
       `/api/frame/files/${encodeURIComponent(input.slug)}`,
       input.signal,
@@ -461,19 +769,64 @@ export async function listArtifactFiles(input: {
             ? 'no-auth'
             : `file list failed (${res.reason})`,
         reason: res.reason === 'no-auth' ? 'no_auth' : 'http',
+        ver: boot.ver,
+        ...(cowritten ? { cowritten: true } : {}),
       }
     }
     if (res.status < 200 || res.status >= 300) {
+      // densable: 404 + !filesCounted (+ !relay || frameNotFound) → single_page
+      if (res.status === 404 && !filesCounted) {
+        return {
+          kind: 'error',
+          reason: 'single_page',
+          message: SINGLE_PAGE_MESSAGE,
+          ver: boot.ver,
+          ...(cowritten ? { cowritten: true } : {}),
+          ...(typeLocked ? { typeLocked: true } : {}),
+        }
+      }
+      // densable: publicRead + 403 → te()? single_page : public_refused.
+      if (publicRead && res.status === 403) {
+        if (
+          await probeArtifactPageHead({
+            slug: input.slug,
+            ver: boot.ver,
+            signal: input.signal,
+          })
+        ) {
+          return {
+            kind: 'error',
+            reason: 'single_page',
+            message: PUBLIC_SINGLE_PAGE_MESSAGE,
+            ver: boot.ver,
+            ...(cowritten ? { cowritten: true } : {}),
+            ...(typeLocked ? { typeLocked: true } : {}),
+          }
+        }
+        return {
+          kind: 'error',
+          reason: 'public_refused',
+          message: PUBLIC_REFUSED_MESSAGE,
+          ver: boot.ver,
+          ...(cowritten ? { cowritten: true } : {}),
+        }
+      }
       return {
         kind: 'error',
-        message: `file list failed (HTTP ${res.status})`,
-        reason: 'http',
+        reason: `http_${res.status}`,
+        message:
+          res.status === 404
+            ? 'the artifact has published files, but the artifact service does not offer their list yet; retrying from here will not help'
+            : `file list failed (HTTP ${res.status})`,
+        ver: boot.ver,
+        ...(cowritten ? { cowritten: true } : {}),
       }
     }
     const data = (res.data ?? {}) as {
       ver?: unknown
       files?: unknown
       cowritten?: unknown
+      narrowed?: unknown
     }
     const files: FileRow[] = []
     if (Array.isArray(data.files)) {
@@ -481,6 +834,7 @@ export async function listArtifactFiles(input: {
         if (!row || typeof row !== 'object') continue
         const r = row as Record<string, unknown>
         if (typeof r.path !== 'string') continue
+        const live = livePaths.includes(r.path)
         files.push({
           path: r.path,
           contentType: String(
@@ -488,15 +842,38 @@ export async function listArtifactFiles(input: {
           ),
           sizeBytes: Number(r.size_bytes ?? r.sizeBytes ?? 0),
           sha256: String(r.sha256 ?? ''),
+          ...(live ? { live: true } : {}),
         })
       }
     }
+    const listCowritten = data.cowritten === true || cowritten
     return {
       kind: 'ok',
       ver:
-        typeof data.ver === 'string' ? data.ver : 'unrecognized-version-shape',
+        typeof data.ver === 'string'
+          ? data.ver
+          : boot.ver || 'unrecognized-version-shape',
       files,
-      ...(data.cowritten === true ? { cowritten: true } : {}),
+      ...(listCowritten ? { cowritten: true } : {}),
+      ...(publicRead ? { publicRead: true } : {}),
+      ...(publicRead && data.narrowed === true ? { narrowed: true } : {}),
+      ...(relay ? { relay: true } : {}),
+      ...(agentDirect ? { agentDirect: true } : {}),
+      ...(typeLocked ? { typeLocked: true } : {}),
+      ...(writerClass ? { writerClass: true } : {}),
+      ...(foreign ? { foreign: true } : {}),
+      ...(outsideOrgFlag ? { outsideOrg: true } : {}),
+      orgRelation,
+      ...(typeof boot.data.title === 'string'
+        ? { title: boot.data.title }
+        : {}),
+      ...(boot.data.favicon !== undefined
+        ? { favicon: boot.data.favicon }
+        : {}),
+      ...(boot.data.publishPreconditions === true
+        ? { publishPreconditions: true }
+        : {}),
+      ...(boot.reused === true ? { reused: true } : {}),
     }
   } catch {
     return {
@@ -722,6 +1099,32 @@ function errAsset(
   }
 }
 
+/** densable pe — content-type before `;`, trimmed, lowercased. */
+function contentHostMediaType(headers: Headers): string {
+  const raw = headers.get('content-type')
+  if (raw === null) return ''
+  const semi = raw.indexOf(';')
+  return (semi === -1 ? raw : raw.slice(0, semi)).trim().toLowerCase()
+}
+
+/**
+ * densable Ibe — content-host plain-text forbidden without proxy/deny headers.
+ * Semantic helper only (invent-ban `export function Ibe`).
+ */
+function isPublicAssetForbiddenPlain(headers: Headers, body: string): boolean {
+  const deny = headers.get('x-deny-reason')
+  return (
+    contentHostMediaType(headers) === 'text/plain' &&
+    body.trim() === 'forbidden' &&
+    headers.get('x-proxy-error') === null &&
+    !(deny !== null && deny.length <= 64 && /^[a-z0-9_]+$/.test(deny))
+  )
+}
+
+/** densable wko public_refused copy for tokenless asset 403 + Ibe. */
+const ASSET_PUBLIC_REFUSED_MESSAGE =
+  'this public artifact serves no asset with that id to readers outside its organization, or it is no longer public'
+
 function errFile(
   reason: string,
   detail: string,
@@ -734,14 +1137,19 @@ function errFile(
 }
 
 /**
- * densable TCm portable — boot → content-host `/_f/{ver}/_blob/{assetId}`
- * or remote Fdw via frame relay when sEe().
+ * densable TCm / wko portable — boot → content-host `/_f/{ver}/_blob/{assetId}`
+ * or remote Fdw via frame relay when sEe(). Gold `admitPublicRead` (mKe kind
+ * assets/files) gates tokenless public content after Yw.
  */
 export async function fetchArtifactAssetBytes(input: {
   slug: string
   assetId: string
   env?: 'prod' | 'staging'
   signal?: AbortSignal
+  /** densable admitPublicRead — mKe(…, "assets"|"files"); omit → refuse public. */
+  admitPublicRead?: () => boolean
+  /** densable probeToolUseId — reuse shareStatus.probeBoots for this tool use. */
+  probeToolUseId?: string
 }): Promise<
   | {
       kind: 'ok'
@@ -749,6 +1157,7 @@ export async function fetchArtifactAssetBytes(input: {
       contentType: string
       ver: string
       relay?: boolean
+      publicRead?: boolean
     }
   | { kind: 'error'; message: string; reason: string }
 > {
@@ -772,19 +1181,37 @@ export async function fetchArtifactAssetBytes(input: {
   const boot = await fetchFrameBoot(
     input.slug,
     input.signal ?? new AbortController().signal,
+    {
+      // densable wko: gatePublicRead:!1 — admitPublicRead stays after Yw.
+      gatePublicRead: false,
+      kind: 'read',
+      ...(input.probeToolUseId !== undefined
+        ? { probeToolUseId: input.probeToolUseId }
+        : {}),
+    },
   )
   if (boot.err !== null) {
     return {
       kind: 'error',
       message: boot.err.replace(/^artifact read/, 'asset read'),
-      reason: boot.status === 404 ? 'boot_404' : 'boot',
+      reason:
+        boot.errorCode === 'public_read_disabled'
+          ? 'public_read_disabled'
+          : boot.status === 404
+            ? 'boot_404'
+            : 'boot',
     }
   }
-  if (boot.assetToken === undefined) {
+  const tokenless = boot.assetToken === undefined
+  // densable: if(h&&!Yw()) tokenless; if(h&&admit?.()!==!0) public_unasked
+  if (tokenless && !Yw()) {
     return errAsset(
       'tokenless',
       'this artifact is served to you as a public (non-member) reader, and assets are not readable that way',
     )
+  }
+  if (tokenless && input.admitPublicRead?.() !== true) {
+    return errAsset(PUBLIC_UNASKED, PUBLIC_UNASKED_DETAIL)
   }
   const servedPath = `/_f/${encodeURIComponent(boot.ver)}/_blob/${encodeURIComponent(input.assetId.toLowerCase())}`
 
@@ -799,6 +1226,7 @@ export async function fetchArtifactAssetBytes(input: {
         contentType: string
         ver: string
         relay?: boolean
+        publicRead?: boolean
       }
     | { kind: 'error'; message: string; reason: string } => {
     const contentType =
@@ -823,14 +1251,16 @@ export async function fetchArtifactAssetBytes(input: {
       contentType,
       ver: boot.ver,
       ...(relay ? { relay: true } : {}),
+      ...(tokenless ? { publicRead: true } : {}),
     }
   }
 
-  if (isClaudeCodeRemoteEnv() && isArtifactFrameRelayOpen()) {
+  // densable: relay only when member-token path (g = remote && !tokenless)
+  if (!tokenless && isClaudeCodeRemoteEnv() && isArtifactFrameRelayOpen()) {
     const via = await fetchViaArtifactFrameRelay({
       slug: input.slug,
       servedPath,
-      assetToken: boot.assetToken,
+      assetToken: boot.assetToken!,
       signal: input.signal,
       maxBytes: ARTIFACT_SAVE_MAX_BYTES + 1,
       // densable TCm: 404 → http_404, do not Xeo/decline (same latch skip as fileRead).
@@ -858,7 +1288,11 @@ export async function fetchArtifactAssetBytes(input: {
     )
   }
 
-  const url = `${contentHostBase(input.slug, input.env)}${servedPath}?__frame_t=${encodeURIComponent(boot.assetToken)}`
+  const tokenQ =
+    boot.assetToken !== undefined
+      ? `?__frame_t=${encodeURIComponent(boot.assetToken)}`
+      : ''
+  const url = `${contentHostBase(input.slug, input.env)}${servedPath}${tokenQ}`
   try {
     const res = await fetch(url, {
       method: 'GET',
@@ -870,6 +1304,19 @@ export async function fetchArtifactAssetBytes(input: {
         'http_404',
         'no asset with that id in this artifact (it may have been deleted) — a writer of the artifact can check the id with action "list_assets"',
       )
+    }
+    if (res.status === 403 && tokenless) {
+      // densable wko: Ibe(headers, jQ(...)) → public_refused (not bare http_403).
+      let body = ''
+      try {
+        body = await res.text()
+      } catch {
+        body = ''
+      }
+      if (isPublicAssetForbiddenPlain(res.headers, body)) {
+        return errAsset('public_refused', ASSET_PUBLIC_REFUSED_MESSAGE)
+      }
+      return errAsset('http_403', ASSET_PUBLIC_REFUSED_MESSAGE)
     }
     if (res.status === 401 || res.status === 403) {
       return errAsset(
@@ -896,13 +1343,18 @@ export async function fetchArtifactAssetBytes(input: {
 }
 
 /**
- * densable JCm portable — boot → content-host `/_f/{ver}/{published/path}`.
+ * densable JCm / q0t portable — boot → content-host `/_f/{ver}/{published/path}`.
+ * Gold `admitPublicRead` (mKe kind files) gates tokenless public content after Yw.
  */
 export async function fetchArtifactFileBytes(input: {
   slug: string
   path: string
   env?: 'prod' | 'staging'
   signal?: AbortSignal
+  /** densable admitPublicRead — mKe(…, "files"); omit → refuse public. */
+  admitPublicRead?: () => boolean
+  /** densable probeToolUseId — reuse shareStatus.probeBoots for this tool use. */
+  probeToolUseId?: string
 }): Promise<
   | {
       kind: 'ok'
@@ -911,6 +1363,7 @@ export async function fetchArtifactFileBytes(input: {
       bytes: Buffer
       contentType: string
       sha256: string
+      publicRead?: boolean
     }
   | { kind: 'error'; message: string; reason: string }
 > {
@@ -935,19 +1388,37 @@ export async function fetchArtifactFileBytes(input: {
   const boot = await fetchFrameBoot(
     input.slug,
     input.signal ?? new AbortController().signal,
+    {
+      // densable file read: gatePublicRead:!1 — admitPublicRead stays after Yw.
+      gatePublicRead: false,
+      kind: 'read',
+      ...(input.probeToolUseId !== undefined
+        ? { probeToolUseId: input.probeToolUseId }
+        : {}),
+    },
   )
   if (boot.err !== null) {
     return {
       kind: 'error',
       message: boot.err.replace(/^artifact read/, 'file read'),
-      reason: boot.status === 404 ? 'boot_404' : 'boot',
+      reason:
+        boot.errorCode === 'public_read_disabled'
+          ? 'public_read_disabled'
+          : boot.status === 404
+            ? 'boot_404'
+            : 'boot',
     }
   }
-  if (boot.assetToken === undefined) {
+  const tokenless = boot.assetToken === undefined
+  // densable: if(b&&!Yw()) tokenless; if(b&&admit?.()!==!0) public_unasked
+  if (tokenless && !Yw()) {
     return errFile(
       'tokenless',
-      'this artifact is served without an asset token; published files are not readable that way',
+      'this artifact is served to you as a public (non-member) reader, and its files are not readable that way',
     )
+  }
+  if (tokenless && input.admitPublicRead?.() !== true) {
+    return errFile(PUBLIC_UNASKED, PUBLIC_UNASKED_DETAIL)
   }
   const encoded = norm.key.split('/').map(encodeURIComponent).join('/')
   const servedPath = `/_f/${encodeURIComponent(boot.ver)}/${encoded}`
@@ -963,6 +1434,7 @@ export async function fetchArtifactFileBytes(input: {
         bytes: Buffer
         contentType: string
         sha256: string
+        publicRead?: boolean
       }
     | { kind: 'error'; message: string; reason: string } => {
     const contentType = contentTypeRaw.split(';')[0]?.trim().toLowerCase() ?? ''
@@ -985,14 +1457,15 @@ export async function fetchArtifactFileBytes(input: {
       bytes,
       contentType,
       sha256: createHash('sha256').update(bytes).digest('hex'),
+      ...(tokenless ? { publicRead: true } : {}),
     }
   }
 
-  if (isClaudeCodeRemoteEnv() && isArtifactFrameRelayOpen()) {
+  if (!tokenless && isClaudeCodeRemoteEnv() && isArtifactFrameRelayOpen()) {
     const via = await fetchViaArtifactFrameRelay({
       slug: input.slug,
       servedPath,
-      assetToken: boot.assetToken,
+      assetToken: boot.assetToken!,
       signal: input.signal,
       maxBytes: ARTIFACT_SAVE_MAX_BYTES + 1,
       fileRead: true,
@@ -1019,7 +1492,11 @@ export async function fetchArtifactFileBytes(input: {
     )
   }
 
-  const url = `${contentHostBase(input.slug, input.env)}${servedPath}?__frame_t=${encodeURIComponent(boot.assetToken)}`
+  const tokenQ =
+    boot.assetToken !== undefined
+      ? `?__frame_t=${encodeURIComponent(boot.assetToken)}`
+      : ''
+  const url = `${contentHostBase(input.slug, input.env)}${servedPath}${tokenQ}`
   try {
     const res = await fetch(url, {
       method: 'GET',
@@ -1035,7 +1512,9 @@ export async function fetchArtifactFileBytes(input: {
     if (res.status !== 200) {
       return errFile(
         `http_${res.status}`,
-        `unexpected answer from the content host (HTTP ${res.status})`,
+        tokenless
+          ? "this public artifact's files are not available to readers outside its organization right now — it may no longer be public, or it was taken down"
+          : `unexpected answer from the content host (HTTP ${res.status})`,
       )
     }
     return finishOk(
