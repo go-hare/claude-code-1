@@ -69,8 +69,9 @@ export const TaskCreateTool = buildTool({
   isEnabled() {
     return isTodoV2ToolsEnabled()
   },
+  // densable pr: isConcurrencySafe(){return!1}
   isConcurrencySafe() {
-    return true
+    return false
   },
   toAutoClassifierInput(input) {
     return input.subject

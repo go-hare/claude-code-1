@@ -17,7 +17,6 @@ import {
   blockTask,
   deleteTask,
   getTask,
-  getTaskOwnedFiles,
   getTaskListId,
   isTodoV2ToolsEnabled,
   listTasks,
@@ -297,13 +296,9 @@ export const TaskUpdateTool = buildTool({
       await updateTask(taskListId, taskId, updates)
     }
 
-    const latestMetadata = {
-      ...(existingTask.metadata ?? {}),
-      ...(updates.metadata ?? {}),
-    }
     const latestTask =
       Object.keys(updates).length > 0
-        ? { ...existingTask, ...updates, metadata: latestMetadata }
+        ? { ...existingTask, ...updates }
         : existingTask
 
     const activeTaskExecutionContext =
@@ -311,7 +306,6 @@ export const TaskUpdateTool = buildTool({
         ? {
             taskListId,
             taskId,
-            ownedFiles: getTaskOwnedFiles(latestTask),
           }
         : undefined
 
