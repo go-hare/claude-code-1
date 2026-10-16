@@ -3,7 +3,6 @@ import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
-import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js'
@@ -133,8 +132,10 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
     return inputSchema()
   },
 
+  // densable 2.1.289: gold SEA has no TeamDelete tool BODY — name only in Xc d_e.
+  // Never expose to the model-facing tool table (Lo() ≠ this isEnabled).
   isEnabled() {
-    return isAgentSwarmsEnabled()
+    return false
   },
 
   async description() {

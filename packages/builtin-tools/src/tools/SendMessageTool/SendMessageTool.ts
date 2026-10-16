@@ -16,11 +16,8 @@ import {
   isLocalAgentTask,
   isObserverAgentTask,
   queuePendingMessage,
-  type LocalAgentTaskState,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
-import { sanitizeInheritedPermissionMode } from 'src/utils/permissions/permissionSetup.js'
 import { isAutoModeActive } from 'src/utils/permissions/autoModeState.js'
-import type { PermissionMode } from 'src/types/permissions.js'
 import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
 import { asAgentId, toAgentId } from 'src/types/ids.js'
@@ -1094,13 +1091,25 @@ function resolveSendMessageOriginAndBody(
       }
   body: string
 } {
-  const senderTaskId = context.agentId
+  const als = getAgentContext()
+  // densable Hco: peer when sender task is set. Analog Explore can miss
+  // context.agentId; ALS still has the running subagent (Image 34 Wr).
+  const senderTaskId =
+    context.agentId ??
+    (als?.agentType === 'subagent' || als?.agentType === 'teammate'
+      ? als.agentId
+      : undefined)
   if (!senderTaskId) {
     return { origin: { kind: 'coordinator' }, body: message }
   }
   const { from, displayName } = resolveSenderDisplayName(context, senderTaskId)
-  const name = sanitizePeerOriginName(displayName)
+  const name = sanitizePeerOriginName(
+    als?.agentType === 'subagent' && als.subagentName
+      ? als.subagentName
+      : displayName,
+  )
   const bodyEscaped = escapeAgentMessageBody(message)
+  const envelopeFrom = name || from
   return {
     origin: {
       kind: 'peer',
@@ -1110,7 +1119,7 @@ function resolveSendMessageOriginAndBody(
       body: bodyEscaped,
       lineage: 'descendant',
     },
-    body: wrapAgentMessageEnvelope(from, message),
+    body: wrapAgentMessageEnvelope(envelopeFrom, message),
   }
 }
 
@@ -1525,42 +1534,11 @@ function formatPlanApprovalForLocalAgent(
 }
 
 /**
- * Local fortify over densable (no local_agent mFu): when plan is approved for a
- * local_agent task, stamp selectedAgent.permissionMode so runAgent's live
- * agentGetAppState exits plan tool-set. Reject only queues Ejr text.
- * Teammate path still uses mailbox + mFu/inProcessRunner.
- */
-function applyPlanApprovalModeToLocalAgent(
-  agentId: string,
-  approved: boolean,
-  permissionMode: string | undefined,
-  setAppState: ToolUseContext['setAppState'],
-): void {
-  if (!approved) return
-  const mode = sanitizeInheritedPermissionMode(permissionMode) as PermissionMode
-  setAppState(prev => {
-    const t = prev.tasks[agentId]
-    if (!isLocalAgentTask(t) || isMainSessionTask(t)) return prev
-    const nextSelected = t.selectedAgent
-      ? { ...t.selectedAgent, permissionMode: mode }
-      : ({ permissionMode: mode } as LocalAgentTaskState['selectedAgent'])
-    return {
-      ...prev,
-      tasks: {
-        ...prev.tasks,
-        [agentId]: {
-          ...t,
-          selectedAgent: nextSelected,
-        },
-      },
-    }
-  })
-}
-
-/**
  * densable Hco local_agent path: name registry or raw createAgentId →
  * queue when running, resume when stopped/evicted. Returns null when `to`
  * is not a local subagent address (teammate names fall through to mailbox).
+ * Gold has no local_agent mFu: plan_approval_response is Ejr text only.
+ * Mode inherit stays on mailbox tQg (handlePlanApproval).
  */
 async function tryDeliverToLocalAgent(
   to: string,
@@ -1568,10 +1546,6 @@ async function tryDeliverToLocalAgent(
   context: ToolUseContext,
   canUseTool: Parameters<NonNullable<Tool['call']>>[2],
   assistantMessage: Parameters<NonNullable<Tool['call']>>[3],
-  planApproval?: {
-    approved: boolean
-    permissionMode?: string
-  },
 ): Promise<{ data: MessageOutput } | null> {
   if (to === '*' || to === MAIN_RECIPIENT) {
     return null
@@ -1613,15 +1587,6 @@ async function tryDeliverToLocalAgent(
       }
     }
     const setAppState = context.setAppStateForTasks ?? context.setAppState
-    // Local fortify: apply mode before queue so next tool round sees new mode.
-    if (planApproval) {
-      applyPlanApprovalModeToLocalAgent(
-        agentId,
-        planApproval.approved,
-        planApproval.permissionMode,
-        setAppState,
-      )
-    }
     const { origin: sendOrigin, body: sendBody } =
       resolveSendMessageOriginAndBody(context, message)
     if (task.status === 'running') {
@@ -1849,7 +1814,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       ) as InputSchema
     },
     shouldDefer: true,
-    alwaysLoad: isAgentSwarmsEnabled(),
 
     isEnabled() {
       return true
@@ -1967,6 +1931,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     },
 
     async validateInput(input, context) {
+      // densable 2.1.289: e.to==="*" refuse — broadcast is gone.
+      if (input.to === '*') {
+        return {
+          result: false,
+          message:
+            'broadcast (to: "*") is no longer supported — send a message per recipient',
+          errorCode: 9,
+        }
+      }
       // densable Qei(e.to, e_) — empty to / empty bridge|uds target / ELe.
       const qei = validateSendMessageTo(input.to, LIST_AGENTS_TOOL_NAME)
       if (qei !== undefined) {
@@ -2732,6 +2705,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           priority: 'next',
           isMeta: true,
           skipSlashCommands: true,
+          skipAttachments: true,
           origin: sendOrigin as never,
           agentId: getMainThreadAgentId(),
         })
@@ -2750,25 +2724,16 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // (Observer sender gate is at call() entry — covers UDS/mailbox/etc.)
       if (input.to !== '*') {
         let localText: string | null = null
-        let planApproval:
-          | { approved: boolean; permissionMode?: string }
-          | undefined
         if (typeof input.message === 'string') {
           localText = input.message
         } else if (input.message.type === 'plan_approval_response') {
-          const approved = Boolean(input.message.approve)
+          // Gold: local_agent gets Ejr text only. Mailbox tQg still inherits
+          // leader mode (handlePlanApproval) — do not stamp selectedAgent here.
           localText = formatPlanApprovalForLocalAgent(
-            approved,
+            Boolean(input.message.approve),
             input.message.request_id,
             input.message.feedback,
           )
-          // Leader mode inherit (same as mailbox tQg): plan → default.
-          const leaderMode = context.getAppState().toolPermissionContext.mode
-          const modeToInherit = leaderMode === 'plan' ? 'default' : leaderMode
-          planApproval = {
-            approved,
-            permissionMode: approved ? modeToInherit : undefined,
-          }
         }
         if (localText !== null) {
           const local = await tryDeliverToLocalAgent(
@@ -2777,7 +2742,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             context,
             canUseTool,
             assistantMessage,
-            planApproval,
           )
           if (local) return local
         }

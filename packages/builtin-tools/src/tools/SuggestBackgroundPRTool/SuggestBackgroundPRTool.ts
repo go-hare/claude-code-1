@@ -27,9 +27,16 @@ export const SuggestBackgroundPRTool = buildTool({
   searchHint: 'suggest background pr pull request create',
   maxResultSizeChars: 5_000,
   strict: true,
+  shouldDefer: true,
 
   get inputSchema(): InputSchema {
     return inputSchema()
+  },
+
+  // densable 2.1.289: gold SEA has no SuggestBackgroundPR BODY — name only in
+  // Xc d_e removed-tool Set (with TeamCreate/TeamDelete). Never expose.
+  isEnabled() {
+    return false
   },
 
   async description() {
@@ -70,13 +77,14 @@ The suggestion is presented to the user who can approve or dismiss it. If approv
   },
 
   async call(_input: SuggestInput) {
-    // Background PR suggestion requires the KAIROS runtime.
+    // densable 2.1.289: tool BODY absent from gold SEA; keep a minimal stub that
+    // matches SuggestOutput (no undeclared error field). isEnabled() is false and
+    // the tool stays out of getAllBaseTools.
     return {
       data: {
         suggested: false,
         suggestion_id: '',
-        error: 'SuggestBackgroundPR requires the KAIROS runtime.',
-      },
+      } satisfies SuggestOutput,
     }
   },
 })

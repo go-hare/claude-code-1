@@ -110,9 +110,34 @@ describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
     expect(text).not.toContain('use TaskUpdate')
   })
 
+  test('teammate addendum matches gold G_r (no to:"*" broadcast)', async () => {
+    const { TEAMMATE_SYSTEM_PROMPT_ADDENDUM } = await import(
+      'src/utils/swarm/teammatePromptAddendum.js'
+    )
+    expect(TEAMMATE_SYSTEM_PROMPT_ADDENDUM).toContain(
+      'use the SendMessage tool with `to: "<name>"`',
+    )
+    expect(TEAMMATE_SYSTEM_PROMPT_ADDENDUM).not.toContain('to: "*"')
+    expect(TEAMMATE_SYSTEM_PROMPT_ADDENDUM).not.toContain(
+      'team-wide broadcasts',
+    )
+  })
+
   test('BEm protocol section only when teams enabled', () => {
     expect(getPrompt(false)).not.toContain('Protocol responses (legacy)')
     expect(getPrompt(true)).toContain('Protocol responses (legacy)')
+  })
+
+  test('validateInput: to "*" broadcast is refused (densable 2.1.289)', async () => {
+    const result = await SendMessageTool.validateInput!(
+      { to: '*', message: 'hello everyone' } as never,
+      {} as never,
+    )
+    expect(result.result).toBe(false)
+    if (result.result) throw new Error('expected star refuse')
+    expect(result.message).toContain(
+      'broadcast (to: "*") is no longer supported',
+    )
   })
 
   test('validateInput: empty string fails before uds early-return', async () => {

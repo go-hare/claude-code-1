@@ -158,8 +158,8 @@ describe('SendMessage plan_approval_response local_agent vs team mailbox', () =>
     expect(pending.length).toBe(1)
     expect(pending[0]?.text).toContain('[Plan Approved]')
     expect(pending[0]?.text).toContain('plan_approval-1')
-    // Local fortify mFu-equivalent: exit plan mode on selectedAgent
-    expect(getTasks()[agentId]?.selectedAgent?.permissionMode).toBe('default')
+    // Gold: local_agent has no mFu — Ejr text only; stay in plan.
+    expect(getTasks()[agentId]?.selectedAgent?.permissionMode).toBe('plan')
     expect(writeToMailboxMock).not.toHaveBeenCalled()
   })
 

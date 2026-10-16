@@ -85,6 +85,7 @@ describe('SendMessage densable main recipient (Hco D6)', () => {
     expect(cmd.priority).toBe('next')
     expect(cmd.isMeta).toBe(true)
     expect(cmd.skipSlashCommands).toBe(true)
+    expect(cmd.skipAttachments).toBe(true)
     // peer envelope + origin
     expect(typeof cmd.value).toBe('string')
     expect(cmd.value as string).toContain('agent-message')

@@ -5,7 +5,6 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { formatAgentId } from 'src/utils/agentId.js'
-import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
@@ -86,8 +85,11 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
     return inputSchema()
   },
 
+  // densable 2.1.289: gold SEA has no TeamCreate tool BODY — name survives only
+  // in Xc's d_e classifier Set. Lo() still gates swarm surfaces, but is NOT
+  // this tool's isEnabled. Keep call()/internals for --agent-teams; never expose.
   isEnabled() {
-    return isAgentSwarmsEnabled()
+    return false
   },
 
   toAutoClassifierInput(input) {
