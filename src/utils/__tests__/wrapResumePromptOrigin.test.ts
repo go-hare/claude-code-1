@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   applyTurnStartOriginFraming,
   createUserMessage,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
+  isPeerHandbackOrFlaggedOrigin,
   isScheduledTaskOrigin,
   isSidechainVisibleOrigin,
   normalizeMessagesForAPI,
@@ -234,6 +237,15 @@ describe('shouldShowUserMessage densable IDd', () => {
     expect(shouldShowUserMessage(tickMeta as never, false)).toBe(false)
   })
 
+  test('meta agent-message envelope without origin stays hidden (gold uM)', () => {
+    const envelope = createUserMessage({
+      content:
+        '<agent-message from="general-purpose">\nworker done\n</agent-message>',
+      isMeta: true,
+    })
+    expect(shouldShowUserMessage(envelope as never, false)).toBe(false)
+  })
+
   test('non-meta always shown; transcriptOnly respects mode', () => {
     const human = createUserMessage({ content: 'hi' })
     expect(shouldShowUserMessage(human as never, false)).toBe(true)
@@ -307,6 +319,31 @@ describe('stampQueueOriginOnUserMessages densable cun', () => {
       source: 'owner',
     })
     expect(prompt.origin).not.toHaveProperty('subkind')
+  })
+})
+
+describe('isPeerHandbackOrFlaggedOrigin densable irr', () => {
+  test('peer handback or flagged is uncapped; observer/plain peer false', () => {
+    expect(
+      isPeerHandbackOrFlaggedOrigin({ kind: 'peer', handback: true }),
+    ).toBe(true)
+    expect(isPeerHandbackOrFlaggedOrigin({ kind: 'peer', flagged: true })).toBe(
+      true,
+    )
+    expect(isPeerHandbackOrFlaggedOrigin({ kind: 'peer' })).toBe(false)
+    expect(isPeerHandbackOrFlaggedOrigin({ kind: 'observer' })).toBe(false)
+  })
+})
+
+describe('processTextPrompt idle drain origin', () => {
+  test('createUserMessage receives origin (not only later cun stamp)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../processUserInput/processTextPrompt.ts'),
+      'utf8',
+    )
+    expect(src).toContain('origin?: MessageOrigin')
+    expect(src).toContain('origin,')
+    expect(src).toContain('isMeta: isMeta || undefined,')
   })
 })
 

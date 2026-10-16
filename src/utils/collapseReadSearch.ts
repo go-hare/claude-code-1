@@ -28,6 +28,7 @@ import type {
   StopHookInfo,
   SystemStopHookSummaryMessage,
 } from '../types/message.js'
+import { isInSessionPeerOrObserverOrigin } from './messages.js'
 
 /**
  * densable Qoi — TodoWrite + Task* absorbed into collapse groups without
@@ -474,23 +475,63 @@ function isPreToolHookSummary(
   )
 }
 
-/**
- * Check if a message should be skipped (not break the group, just passed through).
- * This includes thinking blocks, redacted thinking, attachments, etc.
- */
-function shouldSkipMessage(msg: RenderableMessage): boolean {
-  if (msg.type === 'assistant') {
-    const content = getFirstContentItem(msg.message?.content)
-    // Skip thinking blocks and other non-text, non-tool content
-    if (
-      content &&
-      (content.type === 'thinking' || content.type === 'redacted_thinking')
-    ) {
-      return true
+/** densable $e/Spn — assistant thinking or redacted_thinking. */
+function isThinkingAssistant(msg: RenderableMessage): boolean {
+  if (msg.type !== 'assistant') return false
+  const content = getFirstContentItem(msg.message?.content)
+  return content?.type === 'thinking' || content?.type === 'redacted_thinking'
+}
+
+/** densable jVn — cap absorbed thinking delta at 10 minutes. */
+const THOUGHT_FOR_MS_CAP = 600_000
+
+function absorbThinking(
+  msg: RenderableMessage,
+  group: GroupAccumulator,
+  lastTimestamp: string | undefined,
+): void {
+  const content = getFirstContentItem(
+    msg.type === 'assistant' ? msg.message?.content : undefined,
+  )
+  if (content?.type === 'thinking') {
+    const thinking =
+      typeof (content as { thinking?: unknown }).thinking === 'string'
+        ? (content as { thinking: string }).thinking.trim()
+        : ''
+    if (thinking) group.latestThinkingSummary = thinking
+  }
+  const ts = typeof msg.timestamp === 'string' ? msg.timestamp : undefined
+  if (lastTimestamp !== undefined && ts !== undefined) {
+    const delta = Date.parse(ts) - Date.parse(lastTimestamp)
+    if (Number.isFinite(delta) && delta > 0) {
+      group.thoughtForMs =
+        (group.thoughtForMs ?? 0) + Math.min(delta, THOUGHT_FOR_MS_CAP)
     }
   }
-  // Skip attachment messages
+  group.messages.push(msg as CollapsibleMessage)
+}
+
+function shouldSkipMessage(msg: RenderableMessage): boolean {
+  if (isThinkingAssistant(msg)) {
+    return false
+  }
+  // Skip attachment messages. densable _wr keeps peer/observer/coordinator
+  // queued_command (Image 34 Wr under Waiting) — analog was deferring them
+  // inside an open collapse group so they vanished until flush.
   if (msg.type === 'attachment') {
+    const att = msg.attachment as {
+      type?: string
+      origin?: { kind?: string; senderTaskId?: unknown }
+      prompt?: unknown
+    }
+    if (att?.type === 'queued_command') {
+      if (
+        isInSessionPeerOrObserverOrigin(att.origin) ||
+        att.origin?.kind === 'coordinator'
+      ) {
+        return false
+      }
+    }
     return true
   }
   // Skip system messages
@@ -785,6 +826,9 @@ type GroupAccumulator = {
   workshopWriteCount?: number
   workshopLinesAdded?: number
   workshopLinesRemoved?: number
+  /** densable thoughtForMs — absorbed thinking duration (cap 600_000). */
+  thoughtForMs?: number
+  latestThinkingSummary?: string
 }
 
 function createEmptyGroup(): GroupAccumulator {
@@ -803,6 +847,8 @@ function createEmptyGroup(): GroupAccumulator {
     hookTotalMs: 0,
     hookCount: 0,
     hookInfos: [],
+    thoughtForMs: 0,
+    latestThinkingSummary: undefined,
   }
   if (feature('TEAMMEM')) {
     group.teamMemorySearchCount = 0
@@ -913,6 +959,12 @@ function createCollapsedGroup(
   if (group.relevantMemories && group.relevantMemories.length > 0) {
     result.relevantMemories = group.relevantMemories
   }
+  if ((group.thoughtForMs ?? 0) > 0) {
+    result.thoughtForMs = group.thoughtForMs
+  }
+  if (group.latestThinkingSummary !== undefined) {
+    result.latestThinkingSummary = group.latestThinkingSummary
+  }
   return result
 }
 
@@ -931,6 +983,7 @@ export function collapseReadSearchGroups(
   const result: RenderableMessage[] = []
   let currentGroup = createEmptyGroup()
   let deferredSkippable: RenderableMessage[] = []
+  let lastTimestamp: string | undefined
 
   function flushGroup(): void {
     if (currentGroup.messages.length === 0) {
@@ -945,8 +998,15 @@ export function collapseReadSearchGroups(
   }
 
   for (const msg of messages) {
+    if (isThinkingAssistant(msg)) {
+      absorbThinking(msg, currentGroup, lastTimestamp)
+      if (typeof msg.timestamp === 'string') lastTimestamp = msg.timestamp
+      continue
+    }
+    if (typeof msg.timestamp === 'string') lastTimestamp = msg.timestamp
     if (isCollapsibleToolUse(msg, tools)) {
-      // This is a collapsible tool use - type predicate narrows to CollapsibleMessage
+      // densable: tool use clears latestThinkingSummary on the open group.
+      currentGroup.latestThinkingSummary = undefined
       const toolInfo = getCollapsibleToolInfo(msg, tools)!
 
       if (toolInfo.isMemoryWrite) {

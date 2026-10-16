@@ -2080,6 +2080,7 @@ export type AdoptedAgentEntry = {
   startTime?: number
   transcriptPath?: string
   parentAgentId?: string
+  forkedSkillName?: string
 }
 
 export type RehydrateAgentsResult = {
@@ -2109,6 +2110,9 @@ function asAdoptedAgentEntry(raw: unknown): AdoptedAgentEntry | null {
       : {}),
     ...(typeof r.parentAgentId === 'string'
       ? { parentAgentId: r.parentAgentId }
+      : {}),
+    ...(typeof r.forkedSkillName === 'string'
+      ? { forkedSkillName: r.forkedSkillName }
       : {}),
   }
 }
@@ -2220,6 +2224,8 @@ export function registerResumedAgentTask(
     spawnDepth: entry.spawnDepth,
     prompt: '',
     agentType: entry.agentType ?? 'general-purpose',
+    forkedSkillName: entry.forkedSkillName,
+    keepaliveReasons: new Set(),
     retrieved: false,
     lastReportedToolCount: 0,
     lastReportedTokenCount: 0,

@@ -33,6 +33,7 @@ import {
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   isHumanLikeOrigin,
+  isInSessionPeerOrObserverOrigin,
 } from './messages.js'
 
 /** Bash completion summary prefix (keep free of task module import) */
@@ -124,6 +125,7 @@ export type FocusTranscriptMessage = {
     isMeta?: boolean
     origin?: { kind?: string; senderTaskId?: string; [key: string]: unknown }
     commandMode?: string
+    prompt?: unknown
   }
   toolName?: string
   messages?: FocusTranscriptMessage[]
@@ -398,6 +400,30 @@ function isTurnBoundary(msg: FocusTranscriptMessage): boolean {
     return origin?.kind === 'channel'
   }
   return false
+}
+
+/**
+ * densable Bhe / _wr — keep inbound queued_command chrome in the focus pass.
+ * Gold yMr does not H++ these; analog collapse was dropping Image 34 Wr.
+ */
+function isKeptQueuedCommandAttachment(msg: FocusTranscriptMessage): boolean {
+  if (msg.type !== 'attachment') return false
+  const att = msg.attachment as
+    | {
+        type?: string
+        commandMode?: string
+        isMeta?: boolean
+        prompt?: unknown
+        origin?: { kind?: string; senderTaskId?: unknown }
+      }
+    | undefined
+  if (att?.type !== 'queued_command') return false
+  if (isInSessionPeerOrObserverOrigin(att.origin)) return true
+  if (att.origin?.kind === 'coordinator') return true
+  if (att.commandMode !== 'prompt') return false
+  if (!att.isMeta && isHumanLikeOrigin(att.origin)) return true
+  const kind = att.origin?.kind
+  return kind === 'channel' || kind === 'peer' || kind === 'slack-ping'
 }
 
 function emptyCollapsed(
@@ -825,7 +851,10 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
           if (W) applyToolStats(E, W)
         }
       }
-      if (N.type === 'attachment') H++
+      if (N.type === 'attachment') {
+        if (isKeptQueuedCommandAttachment(N)) keepIdx.add(O)
+        else H++
+      }
       if ($) {
         if (E) mergeCollapsed(E, $)
         else {

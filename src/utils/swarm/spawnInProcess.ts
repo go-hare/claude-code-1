@@ -41,6 +41,7 @@ import {
   registerAgent as registerPerfettoAgent,
   unregisterAgent as unregisterPerfettoAgent,
 } from '../telemetry/perfettoTracing.js'
+import type { PermissionMode } from '../../types/permissions.js'
 import { removeMemberByAgentId } from './teamHelpers.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
@@ -70,6 +71,23 @@ export type InProcessSpawnConfig = {
   planModeRequired: boolean
   /** Optional model override for this teammate */
   model?: string
+  /** densable spawn stamp; wins over session-derived M(). */
+  permissionMode?: PermissionMode
+  /** Leader session mode for densable `M(de(o).mode, planModeRequired)`. */
+  sessionPermissionMode?: PermissionMode
+}
+
+/**
+ * densable `M(e, o)` — in-process teammate permission stamp.
+ * plan required → plan; session plan/dontAsk → default; else session.
+ */
+export function resolveInProcessTeammatePermissionMode(
+  sessionMode: PermissionMode | undefined,
+  planModeRequired: boolean,
+): PermissionMode {
+  if (planModeRequired) return 'plan'
+  if (sessionMode === 'plan' || sessionMode === 'dontAsk') return 'default'
+  return sessionMode ?? 'default'
 }
 
 /**
@@ -171,7 +189,12 @@ export async function spawnInProcessTeammate(
       awaitingPlanApproval: false,
       spinnerVerb: sample(getSpinnerVerbs()),
       pastTenseVerb: sample(TURN_COMPLETION_VERBS),
-      permissionMode: planModeRequired ? 'plan' : 'default',
+      permissionMode:
+        config.permissionMode ??
+        resolveInProcessTeammatePermissionMode(
+          config.sessionPermissionMode,
+          planModeRequired,
+        ),
       isIdle: false,
       shutdownRequested: false,
       lastReportedToolCount: 0,

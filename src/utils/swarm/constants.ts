@@ -1,14 +1,47 @@
+import { toAgentId } from 'src/types/ids.js'
+
 export const TEAM_LEAD_NAME = 'team-lead'
 /**
  * densable D6 — reserved SendMessage recipient for the main conversation.
  * Teammate/agent display names must not claim this (see pzg / registerName).
  */
 export const MAIN_RECIPIENT_NAME = 'main'
+/** densable REe — reserved spawn `name` (any spelling after Dr). */
+export const USER_RECIPIENT_NAME = 'user'
+/** densable aet — reserved spawn `name` (any spelling after Dr). */
+export const SYSTEM_RECIPIENT_NAME = 'system'
 /**
  * densable B4f — Agent `name` schema: letter/digit start, then
  * letters/digits/_/- up to 64 chars total.
  */
 export const AGENT_NAME_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+/**
+ * densable `Dr` — NFKC, drop Cc/Cf (keep whitespace), trim, lower, spaces→`-`.
+ */
+export function normalizeSpawnAgentName(name: string): string {
+  return name
+    .normalize('NFKC')
+    .replace(/[\p{Cc}\p{Cf}]/gu, ch => (/\s/.test(ch) ? ch : ''))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+}
+
+/**
+ * densable `uO` — spawn `name` is reserved (main / team-lead / user / system
+ * in any spelling) or already an agent-id shape (`OA`).
+ */
+export function isReservedSpawnAgentName(name: string): boolean {
+  const n = normalizeSpawnAgentName(name)
+  return (
+    n === MAIN_RECIPIENT_NAME ||
+    n === TEAM_LEAD_NAME ||
+    n === USER_RECIPIENT_NAME ||
+    n === SYSTEM_RECIPIENT_NAME ||
+    toAgentId(n) !== null
+  )
+}
 export const SWARM_SESSION_NAME = 'claude-swarm'
 export const SWARM_VIEW_WINDOW_NAME = 'swarm-view'
 export const TMUX_COMMAND = 'tmux'

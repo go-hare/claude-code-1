@@ -72,6 +72,8 @@ export class LaunchOptions {
   #spareParkedAtMs: number | undefined
   /** densable Mcn / markWarmSpareClaimed @179677493 */
   #warmSpareClaimed = false
+  /** densable `Ie.diskless` — default false; no local diskless-true host. */
+  #diskless = false
 
   isInteractive(): boolean {
     return this.#e
@@ -273,6 +275,13 @@ export class LaunchOptions {
   wasWarmSpareClaimed(): boolean {
     return this.#warmSpareClaimed
   }
+  /** densable `Nt()` — `n().host.launchOptions.diskless()`. */
+  diskless(): boolean {
+    return this.#diskless
+  }
+  replaceDiskless(e: boolean): void {
+    this.#diskless = e
+  }
   reset(): void {
     this.#e = false
     this.#t = null
@@ -307,6 +316,7 @@ export class LaunchOptions {
     this.#spareClaim = undefined
     this.#spareParkedAtMs = undefined
     this.#warmSpareClaimed = false
+    this.#diskless = false
   }
 }
 
@@ -568,7 +578,6 @@ export {
   resetSessionHostForTests,
 } from './sessionRoot.js'
 
-
 function bootstrapHost(): SessionHost {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return (
@@ -594,4 +603,9 @@ export function markWarmSpareClaimed(): void {
 /** densable sIo @179677540 */
 export function wasWarmSpareClaimed(): boolean {
   return bootstrapHost().launchOptions.wasWarmSpareClaimed()
+}
+
+/** densable `Nt()` — LaunchOptions.diskless(), default false. */
+export function isDisklessLaunch(): boolean {
+  return bootstrapHost().launchOptions.diskless()
 }

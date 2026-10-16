@@ -12,8 +12,15 @@ import {
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import {
+  descriptorAnnouncementConsumed,
   getIsNonInteractiveSession,
+  getOauthScopesFromFd,
+  isOauthTokenFromBgSnapshot,
   preferThirdPartyAuthentication,
+  setGatewayTokenFromDescriptor,
+  setOauthScopesFromFd,
+  setOauthTokenFromBgSnapshot,
+  setOauthTokenFromFd,
 } from '../bootstrap/state.js'
 import {
   getMockSubscriptionType,
@@ -29,6 +36,8 @@ import type { OAuthTokens, SubscriptionType } from '../services/oauth/types.js'
 import {
   getApiKeyFromFileDescriptor,
   getOAuthTokenFromFileDescriptor,
+  readGatewayTokenFromDescriptor,
+  readOAuthTokenFromFileDescriptor,
 } from './authFileDescriptor.js'
 import {
   evaluateRemoteAuthFailExit,
@@ -98,6 +107,8 @@ import { isSafeModeEnabled } from './safeMode.js'
 import { createSignal } from './signal.js'
 import { memoizeWithTTLAsync } from './memoize.js'
 import { getSecureStorage } from './secureStorage/index.js'
+import { getBootstrapSessionHost } from './sessionHost.js'
+import { isHoverRestOn } from './storageV5/hoverRestPin.js'
 import {
   clearLegacyApiKeyPrefetch,
   getLegacyApiKeyPrefetchResult,
@@ -291,13 +302,13 @@ export function getAuthTokenSource() {
   // Check for OAuth token from file descriptor (or its CCR disk fallback)
   const oauthTokenFromFd = getOAuthTokenFromFileDescriptor()
   if (oauthTokenFromFd) {
-    // getOAuthTokenFromFileDescriptor has a disk fallback for CCR subprocesses
-    // that can't inherit the pipe FD. Distinguish by env var presence so the
-    // org-mismatch message doesn't tell the user to unset a variable that
-    // doesn't exist. Call sites fall through correctly — the new source is
-    // !== 'none' (cli/handlers/auth.ts → oauth_token) and not in the
-    // isEnvVarToken set (auth.ts:1844 → generic re-login message).
-    if (process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR) {
+    // densable `s4`: trimmed FD env, or a consumed descriptor announcement.
+    // Disk fallback (pipe FD not inherited) stays CCR_OAUTH_TOKEN_FILE.
+    const fromFileDescriptor =
+      (process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR?.trim() ?? '') !==
+        '' ||
+      descriptorAnnouncementConsumed('CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR')
+    if (fromFileDescriptor) {
       return {
         source: 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR' as const,
         hasToken: true,
@@ -1670,51 +1681,177 @@ export async function getActiveProfileWire(): Promise<{
   }
 }
 
-export const getClaudeAIOAuthTokens = memoize((): OAuthTokens | null => {
-  // --bare: API-key-only. No OAuth env tokens, no keychain, no credentials file.
-  if (isBareMode()) return null
+/**
+ * densable `z` — WeakMap host → slot. Same shape as the other hover-rest
+ * host slots. There is no shared helper in storageV5 or this file; `jfe`
+ * is the oauth slot (`jfe.of(U().host)`).
+ */
+class WeakOwnerCache<T> {
+  #e: () => T
+  #t = new WeakMap<object, T>()
+  constructor(e: () => T) {
+    this.#e = e
+  }
+  of(e: object): T {
+    const t = this.#t.get(e)
+    if (t !== undefined) return t
+    const o = this.#e()
+    this.#t.set(e, o)
+    return o
+  }
+}
 
-  // Check for force-set OAuth token from environment variable
+/**
+ * densable `Yk`. `clear` is `O0e` (`value` undefined, `promise` null) and
+ * does not reset mtime, the 401 map, or the in-flight refresh promise.
+ * Left unported: lastKeychainAccessToken, lastUnusableTokenRecheckAt,
+ * lastOwnSavedAccessToken, credentialsChangedOnDisk,
+ * pendingOptedInRefreshChecks.
+ */
+class ClaudeAiOauthHostCache {
+  value: OAuthTokens | null | undefined = undefined
+  promise: Promise<OAuthTokens | null> | null = null
+  lastCredentialsMtimeMs = 0
+  /** Same-token 401 dedup. Per host, matching gold `Yk`. */
+  pending401Handlers = new Map<string, Promise<boolean>>()
+  /** Non-retry, non-force refresh dedup. Per host, matching gold `Yk`. */
+  pendingRefreshCheck: Promise<boolean> | null = null
+  clear(): void {
+    this.value = undefined
+    this.promise = null
+  }
+}
+
+const claudeAiOauthHostCaches = new WeakOwnerCache(
+  () => new ClaudeAiOauthHostCache(),
+)
+
+function claudeAiOauthHostCache(): ClaudeAiOauthHostCache {
+  return claudeAiOauthHostCaches.of(getBootstrapSessionHost())
+}
+
+/** densable `nc()` — `Boolean(CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)`; `"0"` stays on. */
+function isProviderManagedOauthRead(): boolean {
+  return Boolean(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)
+}
+
+function isClaudeAiOauthAccess(value: unknown): value is OAuthTokens {
+  if (value === null || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return typeof row.accessToken === 'string' && row.accessToken.length > 0
+}
+
+function claudeAiOauthFromData(value: unknown): OAuthTokens | null {
+  return isClaudeAiOauthAccess(value) ? value : null
+}
+
+/** densable `_K` — FD scopes when the slot and env scopes are both absent. */
+const FILE_DESCRIPTOR_DEFAULT_OAUTH_SCOPES = [
+  'user:inference',
+  'user:ccr_inference',
+  'user:file_upload',
+]
+
+/**
+ * densable `ck`. Non-empty `CLAUDE_CODE_OAUTH_SCOPES` parts, else `defaults`.
+ * Not `scopesFromOauthEnv`: that helper's unset default is inference-only.
+ */
+function scopesFromOauthScopesEnv(defaults: readonly string[]): string[] {
+  const parts = process.env.CLAUDE_CODE_OAUTH_SCOPES?.split(/\s+/).filter(
+    part => part.length > 0,
+  )
+  if (parts !== undefined && parts.length > 0) return parts
+  return [...defaults]
+}
+
+/** densable `ck` / `Vk` for the env token. Default remains inference-only. */
+function scopesFromOauthEnv(): string[] {
+  const raw = process.env.CLAUDE_CODE_OAUTH_SCOPES
+  if (raw === undefined || raw.length === 0) return ['user:inference']
+  const parts = raw.split(/\s+/).filter(part => part.length > 0)
+  return parts.length > 0 ? parts : ['user:inference']
+}
+
+/**
+ * densable `Lso() ?? ck(_K)`. An array from the FD slot is returned as
+ * filtered strings, including `[]`. Nullish / non-array falls through to `ck`.
+ */
+function scopesForFileDescriptorToken(): string[] {
+  const fromFd = getOauthScopesFromFd()
+  if (Array.isArray(fromFd)) {
+    return fromFd.filter(
+      (scope): scope is string => typeof scope === 'string' && scope.length > 0,
+    )
+  }
+  return scopesFromOauthScopesEnv(FILE_DESCRIPTOR_DEFAULT_OAUTH_SCOPES)
+}
+
+function inferenceOauthToken(
+  accessToken: string,
+  scopes: string[],
+): OAuthTokens {
+  return {
+    accessToken,
+    refreshToken: null,
+    expiresAt: null,
+    scopes,
+    subscriptionType: process.env.CLAUDE_CODE_SUBSCRIPTION_TYPE || null,
+    rateLimitTier: process.env.CLAUDE_CODE_RATE_LIMIT_TIER || null,
+  }
+}
+
+/**
+ * densable `yK`. FD wins unless the token came from a bg snapshot and the
+ * host is not provider-managed — then storage wins and the FD token is the
+ * fallback. Sync `P()`/`b()` lives in authFileDescriptor.ts
+ * (`getOAuthTokenFromFileDescriptor`).
+ */
+function readClaudeAIOAuthTokensUncached(): OAuthTokens | null {
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    // Return an inference-only token (unknown refresh and expiry)
-    return {
-      accessToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,
-      refreshToken: null,
-      expiresAt: null,
-      scopes: ['user:inference'],
-      subscriptionType: null,
-      rateLimitTier: null,
-    }
+    return inferenceOauthToken(
+      process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      scopesFromOauthEnv(),
+    )
   }
 
-  // Check for OAuth token from file descriptor
   const oauthTokenFromFd = getOAuthTokenFromFileDescriptor()
-  if (oauthTokenFromFd) {
-    // Return an inference-only token (unknown refresh and expiry)
-    return {
-      accessToken: oauthTokenFromFd,
-      refreshToken: null,
-      expiresAt: null,
-      scopes: ['user:inference'],
-      subscriptionType: null,
-      rateLimitTier: null,
-    }
+  const providerManaged = isProviderManagedOauthRead()
+  if (oauthTokenFromFd && (!isOauthTokenFromBgSnapshot() || providerManaged)) {
+    return inferenceOauthToken(oauthTokenFromFd, scopesForFileDescriptorToken())
   }
+  if (providerManaged) return null
 
   try {
-    const secureStorage = getSecureStorage()
-    const storageData = secureStorage.read()
-    const oauthData = storageData?.claudeAiOauth
-
-    if (!oauthData?.accessToken) {
-      return null
-    }
-
-    return oauthData
+    const oauthData = claudeAiOauthFromData(
+      getSecureStorage().read()?.claudeAiOauth,
+    )
+    if (oauthData) return oauthData
   } catch (error) {
     logError(error)
-    return null
   }
+  if (oauthTokenFromFd) {
+    return inferenceOauthToken(oauthTokenFromFd, scopesForFileDescriptorToken())
+  }
+  return null
+}
+
+function readClaudeAIOAuthTokens(): OAuthTokens | null {
+  // --bare: API-key-only. No OAuth env tokens, no keychain, no credentials file.
+  // densable `mn`: `oW()` returns before the host cache.
+  if (isBareMode()) return null
+  const slot = claudeAiOauthHostCache()
+  if (slot.value !== undefined) return slot.value
+  const value = readClaudeAIOAuthTokensUncached()
+  slot.value = value
+  return value
+}
+
+export const getClaudeAIOAuthTokens = Object.assign(readClaudeAIOAuthTokens, {
+  cache: {
+    clear(): void {
+      claudeAiOauthHostCache().clear()
+    },
+  },
 })
 
 /**
@@ -1724,6 +1861,9 @@ export const getClaudeAIOAuthTokens = memoize((): OAuthTokens | null => {
  * server (e.g., due to clock corrections after token was issued).
  */
 export function clearOAuthTokenCache(): void {
+  // Slot clear is `O0e`. Do not go through the export: a bun mock of
+  // `getClaudeAIOAuthTokens` drops `.cache` and would leave `jfe` populated.
+  claudeAiOauthHostCache().clear()
   getClaudeAIOAuthTokens.cache?.clear?.()
   clearKeychainCache()
   // leftover 239 o4b/DJo — login-fail / 401 cache drop includes profile A5/uzs
@@ -1732,8 +1872,6 @@ export function clearOAuthTokenCache(): void {
     require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
   clearAnthropicProfileCaches()
 }
-
-let lastCredentialsMtimeMs = 0
 
 // Cross-process staleness: another CC instance may write fresh tokens to
 // disk (refresh or /login), but this process's memoize caches forever.
@@ -1745,25 +1883,19 @@ async function invalidateOAuthCacheIfDiskChanged(): Promise<void> {
     const { mtimeMs } = await stat(
       join(getClaudeConfigHomeDir(), '.credentials.json'),
     )
-    if (mtimeMs !== lastCredentialsMtimeMs) {
-      lastCredentialsMtimeMs = mtimeMs
+    const slot = claudeAiOauthHostCache()
+    if (mtimeMs !== slot.lastCredentialsMtimeMs) {
+      slot.lastCredentialsMtimeMs = mtimeMs
       clearOAuthTokenCache()
     }
   } catch {
     // ENOENT — macOS keychain path (file deleted on migration). Clear only
-    // the memoize so it delegates to the keychain cache's 30s TTL instead
-    // of caching forever on top. `security find-generic-password` is
+    // the host oauth slot so it delegates to the keychain cache's 30s TTL
+    // instead of caching forever on top. `security find-generic-password` is
     // ~15ms; bounded to once per 30s by the keychain cache.
-    getClaudeAIOAuthTokens.cache?.clear?.()
+    claudeAiOauthHostCache().clear()
   }
 }
-
-// In-flight dedup: when N claude.ai proxy connectors hit 401 with the same
-// token simultaneously (common at startup — #20930), only one should clear
-// caches and re-read the keychain. Without this, each call's clearOAuthTokenCache()
-// nukes readInFlight in macOsKeychainStorage and triggers a fresh spawn —
-// sync spawns stacked to 800ms+ of blocked render frames.
-const pending401Handlers = new Map<string, Promise<boolean>>()
 
 /** Official YPr densable — first unrecovered remote OAuth 401 timestamp. */
 let remoteAuthFailFirstAtMs: number | null = null
@@ -1791,6 +1923,11 @@ export function _resetRemoteAuthFailExitStateForTesting(): void {
   remoteAuthFailFirstAtMs = null
 }
 
+// In-flight dedup: when N claude.ai proxy connectors hit 401 with the same
+// token simultaneously (common at startup — #20930), only one should clear
+// caches and re-read the keychain. Without this, each call's clearOAuthTokenCache()
+// nukes readInFlight in macOsKeychainStorage and triggers a fresh spawn —
+// sync spawns stacked to 800ms+ of blocked render frames.
 /**
  * Handle a 401 "OAuth token has expired" error from the API.
  *
@@ -1813,13 +1950,14 @@ export function _resetRemoteAuthFailExitStateForTesting(): void {
 export function handleOAuth401Error(
   failedAccessToken: string,
 ): Promise<boolean> {
-  const pending = pending401Handlers.get(failedAccessToken)
+  const handlers = claudeAiOauthHostCache().pending401Handlers
+  const pending = handlers.get(failedAccessToken)
   if (pending) return pending
 
   const promise = handleOAuth401ErrorImpl(failedAccessToken).finally(() => {
-    pending401Handlers.delete(failedAccessToken)
+    handlers.delete(failedAccessToken)
   })
-  pending401Handlers.set(failedAccessToken, promise)
+  handlers.set(failedAccessToken, promise)
   return promise
 }
 
@@ -1962,42 +2100,207 @@ async function handleOAuth401ErrorImpl(
   return checkAndRefreshOAuthTokenIfNeeded(0, true)
 }
 
+type BgAuthHandoff = {
+  readHandoffCredential?: (
+    path: string,
+    opts: { symlinkAtPath: 'follow' | 'refuse' },
+  ) => Promise<unknown>
+  discardSpentCredentialFile?: (path: string) => Promise<unknown> | unknown
+  readCredentials?: () => Promise<unknown>
+  readAsync?: (arg?: unknown) => Promise<unknown>
+  claudeAiOauth?: unknown
+}
+
 /**
- * Reads OAuth tokens asynchronously, avoiding blocking keychain reads.
- * Delegates to the sync memoized version for env var / file descriptor tokens
- * (which don't hit the keychain), and only uses async for storage reads.
+ * densable `Q7r`. Requires `credentials.readHandoffCredential`. Sync
+ * `P()`/`b()` lives in authFileDescriptor.ts
+ * (`getOAuthTokenFromFileDescriptor`); this function is the async Q7r path.
  */
-export async function getClaudeAIOAuthTokensAsync(
-  // densable `J(e)` — official reads the host credentials handle. Local
-  // storage has no such slot (same as markDeadOAuthRefreshToken).
-  _credentials?: unknown,
-): Promise<OAuthTokens | null> {
-  if (isBareMode()) return null
-
-  // Env var and FD tokens are sync and don't hit the keychain
-  if (
-    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-    getOAuthTokenFromFileDescriptor()
-  ) {
-    return getClaudeAIOAuthTokens()
+async function consumeBgAuthSnapshot(credentials: unknown): Promise<void> {
+  const path = process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH
+  if (!path) return
+  if (credentials === null || typeof credentials !== 'object') return
+  const bag = credentials as BgAuthHandoff
+  if (typeof bag.readHandoffCredential !== 'function') return
+  const result = await bag.readHandoffCredential.call(credentials, path, {
+    symlinkAtPath: process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+      ? 'follow'
+      : 'refuse',
+  })
+  if (process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH !== path) return
+  if (result === null || typeof result !== 'object') return
+  const state = (result as { state?: unknown }).state
+  if (state === 'absent') {
+    delete process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH
+    return
   }
-
-  try {
-    const secureStorage = getSecureStorage()
-    const storageData = await secureStorage.readAsync()
-    const oauthData = storageData?.claudeAiOauth
-    if (!oauthData?.accessToken) {
-      return null
+  if (state === 'read-failed') {
+    const code = (result as { code?: unknown }).code
+    const windows = process.platform === 'win32'
+    if (
+      code !== 'EBUSY' &&
+      code !== 'EPERM' &&
+      !(code === 'EACCES' && windows)
+    ) {
+      delete process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH
     }
-    return oauthData
+    logForDebugging(
+      `Failed to consume bg auth snapshot: ${
+        typeof code === 'string' ? code : 'unknown error'
+      }`,
+      { level: 'warn' },
+    )
+    return
+  }
+  if (state !== 'present') return
+  delete process.env.CLAUDE_BG_AUTH_SNAPSHOT_PATH
+  if (typeof bag.discardSpentCredentialFile === 'function') {
+    void Promise.resolve()
+      .then(() => bag.discardSpentCredentialFile?.call(credentials, path))
+      .catch(() => {})
+  }
+  try {
+    const contents = (result as { contents?: unknown }).contents
+    const parsed = JSON.parse(
+      typeof contents === 'string' ? contents : '',
+    ) as Record<string, unknown>
+    if (typeof parsed.gatewayToken === 'string' && parsed.gatewayToken) {
+      setGatewayTokenFromDescriptor(parsed.gatewayToken)
+      logForDebugging('Consumed gateway token from bg auth snapshot')
+      return
+    }
+    if (typeof parsed.accessToken !== 'string' || !parsed.accessToken) {
+      logForDebugging('bg auth snapshot missing accessToken', {
+        level: 'warn',
+      })
+      return
+    }
+    setOauthTokenFromFd(parsed.accessToken)
+    setOauthTokenFromBgSnapshot(true)
+    if (Array.isArray(parsed.scopes) && parsed.scopes.length > 0) {
+      setOauthScopesFromFd(parsed.scopes)
+    }
+    if (parsed.subscriptionType) {
+      process.env.CLAUDE_CODE_SUBSCRIPTION_TYPE = String(
+        parsed.subscriptionType,
+      )
+    }
+    if (parsed.rateLimitTier) {
+      process.env.CLAUDE_CODE_RATE_LIMIT_TIER = String(parsed.rateLimitTier)
+    }
+    logForDebugging('Consumed bg auth snapshot from sockDir')
   } catch (error) {
-    logError(error)
-    return null
+    logForDebugging(
+      `Failed to consume bg auth snapshot: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
   }
 }
 
-// In-flight promise for deduplicating concurrent calls
-let pendingRefreshCheck: Promise<boolean> | null = null
+/** densable `psr` — `Q7r` then `Z7r` (`F` with the credentials handle). */
+async function readOauthFileDescriptorSnapshot(
+  credentials: unknown,
+): Promise<string | null> {
+  await consumeBgAuthSnapshot(credentials)
+  return readOAuthTokenFromFileDescriptor(credentials)
+}
+
+function oauthFromCredentialRead(result: unknown): OAuthTokens | null {
+  if (result !== null && typeof result === 'object' && 'state' in result) {
+    if ((result as { state?: unknown }).state !== 'present') return null
+    const data = (result as { data?: unknown }).data
+    if (data === null || typeof data !== 'object') return null
+    return claudeAiOauthFromData(
+      (data as { claudeAiOauth?: unknown }).claudeAiOauth,
+    )
+  }
+  return null
+}
+
+/**
+ * Hover-rest handle read. Gold `ue(e).read()` calls `readCredentials()`.
+ * Local handles also carry `claudeAiOauth` or `readAsync` (secure storage).
+ * `undefined` means this value has no reader.
+ */
+async function readCredentialsHandle(
+  credentials: unknown,
+): Promise<OAuthTokens | null | undefined> {
+  if (credentials === null || typeof credentials !== 'object') return undefined
+  const bag = credentials as BgAuthHandoff
+  if (typeof bag.readCredentials === 'function') {
+    return oauthFromCredentialRead(await bag.readCredentials.call(credentials))
+  }
+  const direct = claudeAiOauthFromData(bag.claudeAiOauth)
+  if (direct) return direct
+  if (typeof bag.readAsync === 'function') {
+    const stored = await bag.readAsync.call(credentials, credentials)
+    if (stored === null || typeof stored !== 'object') return null
+    return claudeAiOauthFromData(
+      (stored as { claudeAiOauth?: unknown }).claudeAiOauth,
+    )
+  }
+  if ('claudeAiOauth' in bag) return null
+  return undefined
+}
+
+async function readStoredClaudeAiOauth(
+  credentials: unknown,
+): Promise<OAuthTokens | null> {
+  if (isHoverRestOn() && credentials !== undefined) {
+    const fromHandle = await readCredentialsHandle(credentials)
+    if (fromHandle !== undefined) return fromHandle
+  }
+  const oauthData = claudeAiOauthFromData(
+    (await getSecureStorage().readAsync())?.claudeAiOauth,
+  )
+  return oauthData
+}
+
+/**
+ * densable `EK`. Env, then `psr` (hover-rest + handle) or sync FD, then
+ * storage. A non-snapshot FD token is returned through `mn` before storage.
+ * Provider-managed reads never fall through to storage.
+ */
+async function readClaudeAIOAuthTokensAsyncUncached(
+  credentials?: unknown,
+): Promise<OAuthTokens | null> {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return readClaudeAIOAuthTokens()
+  const fdToken =
+    isHoverRestOn() && credentials !== undefined
+      ? await readOauthFileDescriptorSnapshot(credentials)
+      : getOAuthTokenFromFileDescriptor()
+  const providerManaged = isProviderManagedOauthRead()
+  if (fdToken && (!isOauthTokenFromBgSnapshot() || providerManaged)) {
+    return readClaudeAIOAuthTokens()
+  }
+  if (providerManaged) return null
+  try {
+    const stored = await readStoredClaudeAiOauth(credentials)
+    if (stored?.accessToken) return stored
+  } catch (error) {
+    logError(error)
+  }
+  if (fdToken) return readClaudeAIOAuthTokens()
+  return null
+}
+
+/**
+ * densable `il`. Bare mode skips the cache. An in-flight or settled promise
+ * is reused until `O0e` / `cache.clear()`. Rejection drops only that promise.
+ */
+export async function getClaudeAIOAuthTokensAsync(
+  credentials?: unknown,
+): Promise<OAuthTokens | null> {
+  if (isBareMode()) return null
+  const slot = claudeAiOauthHostCache()
+  if (slot.promise) return slot.promise
+  const pending = readClaudeAIOAuthTokensAsyncUncached(credentials)
+  slot.promise = pending
+  void pending.catch(() => {
+    if (slot.promise === pending) slot.promise = null
+  })
+  return pending
+}
 
 export function checkAndRefreshOAuthTokenIfNeeded(
   retryCount = 0,
@@ -2008,8 +2311,9 @@ export function checkAndRefreshOAuthTokenIfNeeded(
 ): Promise<boolean> {
   // Deduplicate concurrent non-retry, non-force calls
   if (retryCount === 0 && !force) {
-    if (pendingRefreshCheck) {
-      return pendingRefreshCheck
+    const slot = claudeAiOauthHostCache()
+    if (slot.pendingRefreshCheck) {
+      return slot.pendingRefreshCheck
     }
 
     const promise = checkAndRefreshOAuthTokenIfNeededImpl(
@@ -2018,10 +2322,10 @@ export function checkAndRefreshOAuthTokenIfNeeded(
       credentials,
       storageV5,
     )
-    pendingRefreshCheck = promise.finally(() => {
-      pendingRefreshCheck = null
+    slot.pendingRefreshCheck = promise.finally(() => {
+      slot.pendingRefreshCheck = null
     })
-    return pendingRefreshCheck
+    return slot.pendingRefreshCheck
   }
 
   return checkAndRefreshOAuthTokenIfNeededImpl(
@@ -2062,11 +2366,14 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
 
   await invalidateOAuthCacheIfDiskChanged()
 
-  // First check if token is expired with cached value
-  // Skip this check if force=true (server already told us token is bad)
-  const tokens = getClaudeAIOAuthTokens()
+  // densable Al: the fast check is `await il(credentials)`, not sync `mn()`.
+  // A hover-rest handle can hold an expired token the sync cache never sees.
+  const tokens = await getClaudeAIOAuthTokensAsync(credentials)
   if (!force) {
-    if (!tokens?.refreshToken || !isOAuthTokenExpired(tokens.expiresAt)) {
+    if (tokens && !isOAuthTokenExpired(tokens.expiresAt)) {
+      return false
+    }
+    if (!tokens?.refreshToken) {
       return false
     }
   }
@@ -2934,19 +3241,20 @@ export type OrgValidationResult =
  * densable J$'s `q$` — an Anthropic-issued credential that is NOT first-party
  * OAuth is configured, so it can never satisfy an org pin.
  *
- * Upstream also ORs in `getAPIProvider() === 'firstParty' && !tt() && !tn()`.
- * `tt` is a gateway-state predicate we have not identified in the 2.1.247
- * binary, so that clause is left out rather than guessed: this function only
- * gates a fail-closed startup rejection, and under-matching merely lets a
- * session through that upstream would stop, while over-matching would lock a
- * working install out. The four credentials below are exactly the ones the
- * rejection message names.
+ * Upstream also returns `getAPIProvider() === 'firstParty' && !tt() && !tn()`
+ * when none of the credentials match. `tt` is still unidentified, so that
+ * return stays out: this function only gates a fail-closed startup rejection,
+ * and under-matching merely lets a session through that upstream would stop.
+ * The credential OR matches QK: api key, auth token, s4(api-key FD), Het(),
+ * and the api-key helper.
  */
 function hasNonOAuthAnthropicCredential(): boolean {
   return (
     hasAnthropicApiKeyAuth() ||
     !!process.env.ANTHROPIC_AUTH_TOKEN ||
-    !!process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR ||
+    (process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR?.trim() ?? '') !== '' ||
+    descriptorAnnouncementConsumed('CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR') ||
+    !!readGatewayTokenFromDescriptor() ||
     !!getConfiguredApiKeyHelper()
   )
 }

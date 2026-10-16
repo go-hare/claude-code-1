@@ -176,73 +176,76 @@ export function formatStrftime(
   const hour = Number(parts.hour)
   const hour12 = ((hour + 11) % 12) + 1
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
-  return pattern.replace(/%(-?)([\s\S])/g, (match, dash: string, spec: string) => {
-    switch (spec) {
-      case 'Y':
-        return String(year)
-      case 'y':
-        return pad2(year % 100, dash)
-      case 'C':
-        return pad2(Math.floor(year / 100), dash)
-      case 'm':
-        return pad2(month, dash)
-      case 'd':
-        return pad2(day, dash)
-      case 'e':
-        return padSpace(day, dash)
-      case 'j':
-        return pad3(dayOfYear(year, month, day), dash)
-      case 'u':
-        return String(weekday === 0 ? 7 : weekday)
-      case 'w':
-        return String(weekday)
-      case 'H':
-        return pad2(hour, dash)
-      case 'k':
-        return padSpace(hour, dash)
-      case 'I':
-        return pad2(hour12, dash)
-      case 'l':
-        return padSpace(hour12, dash)
-      case 'M':
-        return pad2(Number(parts.minute), dash)
-      case 'S':
-        return pad2(Number(parts.second), dash)
-      case 'p':
-        return hour < 12 ? 'AM' : 'PM'
-      case 'P':
-        return hour < 12 ? 'am' : 'pm'
-      case 's':
-        return String(Math.floor(date.getTime() / 1000))
-      case 'a':
-        return formatNamedPart(date, locale, timeZone, WEEKDAY_SHORT)
-      case 'A':
-        return formatNamedPart(date, locale, timeZone, WEEKDAY_LONG)
-      case 'b':
-      case 'h':
-        return formatNamedPart(date, locale, timeZone, MONTH_SHORT)
-      case 'B':
-        return formatNamedPart(date, locale, timeZone, MONTH_LONG)
-      case 'Z':
-        return parts.timeZoneName ?? ''
-      case 'z':
-        return formatOffset(date, year, month, day, hour, parts)
-      case 'F':
-        return `${year}-${pad2(month, '')}-${pad2(day, '')}`
-      case 'D':
-        return `${pad2(month, '')}/${pad2(day, '')}/${pad2(year % 100, '')}`
-      case 'T':
-        return `${pad2(hour, '')}:${parts.minute}:${parts.second}`
-      case 'R':
-        return `${pad2(hour, '')}:${parts.minute}`
-      case 'r':
-        return `${pad2(hour12, '')}:${parts.minute}:${parts.second} ${hour < 12 ? 'AM' : 'PM'}`
-      case '%':
-        return '%'
-      default:
-        return match
-    }
-  })
+  return pattern.replace(
+    /%(-?)([\s\S])/g,
+    (match, dash: string, spec: string) => {
+      switch (spec) {
+        case 'Y':
+          return String(year)
+        case 'y':
+          return pad2(year % 100, dash)
+        case 'C':
+          return pad2(Math.floor(year / 100), dash)
+        case 'm':
+          return pad2(month, dash)
+        case 'd':
+          return pad2(day, dash)
+        case 'e':
+          return padSpace(day, dash)
+        case 'j':
+          return pad3(dayOfYear(year, month, day), dash)
+        case 'u':
+          return String(weekday === 0 ? 7 : weekday)
+        case 'w':
+          return String(weekday)
+        case 'H':
+          return pad2(hour, dash)
+        case 'k':
+          return padSpace(hour, dash)
+        case 'I':
+          return pad2(hour12, dash)
+        case 'l':
+          return padSpace(hour12, dash)
+        case 'M':
+          return pad2(Number(parts.minute), dash)
+        case 'S':
+          return pad2(Number(parts.second), dash)
+        case 'p':
+          return hour < 12 ? 'AM' : 'PM'
+        case 'P':
+          return hour < 12 ? 'am' : 'pm'
+        case 's':
+          return String(Math.floor(date.getTime() / 1000))
+        case 'a':
+          return formatNamedPart(date, locale, timeZone, WEEKDAY_SHORT)
+        case 'A':
+          return formatNamedPart(date, locale, timeZone, WEEKDAY_LONG)
+        case 'b':
+        case 'h':
+          return formatNamedPart(date, locale, timeZone, MONTH_SHORT)
+        case 'B':
+          return formatNamedPart(date, locale, timeZone, MONTH_LONG)
+        case 'Z':
+          return parts.timeZoneName ?? ''
+        case 'z':
+          return formatOffset(date, year, month, day, hour, parts)
+        case 'F':
+          return `${year}-${pad2(month, '')}-${pad2(day, '')}`
+        case 'D':
+          return `${pad2(month, '')}/${pad2(day, '')}/${pad2(year % 100, '')}`
+        case 'T':
+          return `${pad2(hour, '')}:${parts.minute}:${parts.second}`
+        case 'R':
+          return `${pad2(hour, '')}:${parts.minute}`
+        case 'r':
+          return `${pad2(hour12, '')}:${parts.minute}:${parts.second} ${hour < 12 ? 'AM' : 'PM'}`
+        case '%':
+          return '%'
+        default:
+          return match
+      }
+    },
+  )
 }
 
 function settingsTimeZone(): string | undefined {
@@ -327,6 +330,13 @@ const CLOCK_STAMP: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
+/** densable ae.today — turn-duration `done 1:12` (numeric hour, no am/pm). */
+const TURN_DONE_STAMP: Intl.DateTimeFormatOptions = {
+  hour: 'numeric',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}
+
 const FULL_STAMP: Intl.DateTimeFormatOptions = {
   year: 'numeric',
   month: '2-digit',
@@ -346,6 +356,24 @@ export function formatClockTime(date: Date, timeZoneOverride?: string): string {
   return formatPresetTime(
     { ...resolved, timeZone },
     CLOCK_STAMP,
+    undefined,
+    date,
+  )
+}
+
+/** densable 2.1.289 kVe today — ` · done ${j}` on turn_duration. */
+export function formatTurnDoneAt(
+  date: Date,
+  timeZoneOverride?: string,
+): string {
+  const resolved = resolveTimeFormat()
+  const timeZone = timeZoneOverride ?? resolved.timeZone
+  if (resolved.kind === 'pattern') {
+    return formatPatternTime(resolved.pattern, timeZone, date)
+  }
+  return formatPresetTime(
+    { ...resolved, timeZone },
+    TURN_DONE_STAMP,
     undefined,
     date,
   )

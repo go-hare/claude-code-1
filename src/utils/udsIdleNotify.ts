@@ -67,6 +67,20 @@ export const NO_IDLE_SUB_HANDLER_STRIPPED_DELIVERED =
 
 const NOTIFY_IDLE_FEATURE = 'notify_idle'
 
+/**
+ * densable Ce (Fhn unusable branch) — session-registry transient unreadability.
+ * Gold: " — this machine's session registry could not be read just now…"
+ */
+const UDS_IDLE_REGISTRY_BUSY_SUFFIX =
+  " — this machine's session registry could not be read just now (a transient local condition). Retry the same address shortly."
+
+/**
+ * densable X2r / jGo (Fhn pipe-busy branch).
+ * Gold: " — the peer is alive but its pipe is momentarily busy…"
+ */
+const UDS_IDLE_PIPE_BUSY_SUFFIX =
+  ' — the peer is alive but its pipe is momentarily busy. Retry the same address shortly.'
+
 // ---------------------------------------------------------------------------
 // Schemas (densable IZa / PZa)
 // ---------------------------------------------------------------------------
@@ -131,6 +145,79 @@ export function idleSelfTargetMessage(addressLabel = 'that address'): string {
   return `notify_when_idle: ${addressLabel} is THIS session — nothing was subscribed; you already know when your own turn ends.`
 }
 
+/**
+ * densable bYn — true when the failure is an unusable session-registry read (G).
+ * Prefer Error.name SessionRecordsUnreadableError; also accept `{ kind: 'unusable' }`.
+ */
+function isUdsIdleRegistryUnusable(error: unknown): boolean {
+  if (
+    error instanceof Error &&
+    error.name === 'SessionRecordsUnreadableError'
+  ) {
+    return true
+  }
+  if (error && typeof error === 'object' && 'kind' in error) {
+    return (error as { kind: unknown }).kind === 'unusable'
+  }
+  return false
+}
+
+/**
+ * densable gone half of ope — peer socket gone / no live inbox (not busy).
+ * Mirrors isUdsConnectFailError + no_live_inbox without importing udsClient.
+ */
+function isUdsIdlePeerGoneError(error: unknown): boolean {
+  const code = getErrnoCode(error)
+  if (code === 'ENOENT' || code === 'ECONNREFUSED') return true
+  if (error instanceof Error && error.cause !== undefined) {
+    const causeCode = getErrnoCode(error.cause)
+    if (causeCode === 'ENOENT' || causeCode === 'ECONNREFUSED') return true
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code: unknown }).code ===
+      'no live inbox registered for the target pipe'
+  ) {
+    return true
+  }
+  return /no session|ENOINBOX|timed out|Failed to connect/i.test(
+    errorMessage(error),
+  )
+}
+
+/**
+ * densable ope — classify notify_when_idle send failure:
+ * unusable G → busy; gone → gone; errno EBUSY|EAGAIN → busy; else other.
+ */
+function classifyUdsIdleSendFailure(error: unknown): 'busy' | 'gone' | 'other' {
+  if (isUdsIdleRegistryUnusable(error)) return 'busy'
+  if (isUdsIdlePeerGoneError(error)) return 'gone'
+  const code =
+    getErrnoCode(error) ??
+    (error instanceof Error && error.cause !== undefined
+      ? getErrnoCode(error.cause)
+      : undefined)
+  if (code === 'EBUSY' || code === 'EAGAIN') return 'busy'
+  return 'other'
+}
+
+/** densable ope(e)==="busy" — used by send-failed busySuffix. */
+export function isUdsIdleSendBusy(error: unknown): boolean {
+  return classifyUdsIdleSendFailure(error) === 'busy'
+}
+
+/**
+ * densable Fhn — busy suffix when ope==="busy".
+ * unusable → Ce (registry); otherwise X2r (pipe momentarily busy).
+ */
+export function formatUdsIdleBusySuffix(error: unknown): string {
+  return isUdsIdleRegistryUnusable(error)
+    ? UDS_IDLE_REGISTRY_BUSY_SUFFIX
+    : UDS_IDLE_PIPE_BUSY_SUFFIX
+}
+
 export function idleSubscribeFailedLine(
   result: IdleSubscribeResult,
   peerGoneSuffix = '',
@@ -152,7 +239,11 @@ export function idleSubscribeFailedLine(
     case 'peer-gone':
       return `notify_when_idle: no session is listening at that address any more; nothing was subscribed, and any earlier idle subscription to it is void${peerGoneSuffix}`
     case 'send-failed': {
-      const busySuffix = '.'
+      // densable 2.1.289: busySuffix = ope(error)==="busy" ? Fhn(error) : "."
+      const busySuffix =
+        result.error !== undefined && isUdsIdleSendBusy(result.error)
+          ? formatUdsIdleBusySuffix(result.error)
+          : '.'
       return result.restoredEarlier
         ? `notify_when_idle: the re-subscribe could not be sent; your earlier idle subscription to that session still stands${busySuffix}`
         : `notify_when_idle: the subscription could not be sent — no notice will arrive${busySuffix}`

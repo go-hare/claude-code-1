@@ -388,6 +388,9 @@ export type ThinkingStrippedAttachment =
       from: { messageId: string; thinkingIndex: number }
     }
 
+/** densable `MY` / `$Fe` — message-id → first thinking index to strip. */
+export type ThinkingStripPlan = Map<string, number>
+
 /**
  * densable `Zue()` @184980379 — emit thinking_stripped when the relay already
  * decided a strip. Compact uses thinkingStrippedAttachment('all') when
@@ -444,6 +447,102 @@ export function thinkingStrippedAttachment(
     return { type: 'thinking_stripped', scope: 'partial', from }
   }
   return { type: 'thinking_stripped', scope: 'all' }
+}
+
+/**
+ * densable `$Fe` — merge caller plan with MY(messages); keep the lower index.
+ */
+export function mergeThinkingStripPlans(
+  caller: ThinkingStripPlan | undefined,
+  derived: ThinkingStripPlan,
+): ThinkingStripPlan {
+  if (caller === undefined || caller.size === 0) return derived
+  if (derived.size === 0) return caller
+  const merged = new Map(caller)
+  for (const [id, index] of derived) {
+    const existing = merged.get(id)
+    if (existing === undefined || index < existing) merged.set(id, index)
+  }
+  return merged
+}
+
+/**
+ * densable `MY` — walk thinking_stripped attachments into a strip plan.
+ * Semantic export only — never ship minify `MY`.
+ */
+export function buildThinkingStripPlanFromMessages(
+  messages: readonly Message[],
+): ThinkingStripPlan {
+  const plan: ThinkingStripPlan = new Map()
+  const keepMin = (id: string, index: number) => {
+    const existing = plan.get(id)
+    if (existing === undefined || index < existing) plan.set(id, index)
+  }
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (
+      msg?.type !== 'attachment' ||
+      msg.attachment.type !== 'thinking_stripped'
+    ) {
+      continue
+    }
+    const from = thinkingStripPartialFrom(msg.attachment)
+    const at =
+      from === undefined
+        ? undefined
+        : findAssistantIndexForThinkingFrom(messages, i, from)
+    const start = at ?? 0
+    const countsBefore = new Map<string, number>()
+    for (let j = 0; j < start; j++) {
+      const prior = messages[j]
+      if (prior?.type === 'assistant') {
+        const id = prior.message.id
+        countsBefore.set(
+          id,
+          (countsBefore.get(id) ?? 0) + thinkingBlockCount(prior),
+        )
+      }
+    }
+    for (let j = start; j < i; j++) {
+      const prior = messages[j]
+      if (prior?.type !== 'assistant') continue
+      const id = prior.message.id
+      keepMin(
+        id,
+        at !== undefined && id === from?.messageId
+          ? from.thinkingIndex
+          : (countsBefore.get(id) ?? 0),
+      )
+    }
+  }
+  return plan
+}
+
+/**
+ * densable `BCr` — apply a thinking strip plan to assistant messages.
+ */
+export function applyThinkingStripPlanToMessages<T extends Message>(
+  messages: T[],
+  plan: ThinkingStripPlan,
+): T[] {
+  if (plan.size === 0) return messages
+  const seen = new Map<string, number>()
+  let changed = false
+  const next = messages.map(msg => {
+    if (msg.type !== 'assistant') return msg
+    const index = plan.get(msg.message.id)
+    if (index === undefined) return msg
+    const already = seen.get(msg.message.id) ?? 0
+    const count = thinkingBlockCount(msg)
+    seen.set(msg.message.id, already + count)
+    const stripped = stripThinkingBlocksFromAssistant(
+      msg,
+      Math.max(0, index - already),
+    )
+    if (stripped !== msg) changed = true
+    return stripped as T
+  })
+  return changed ? next : messages
 }
 
 /** densable `jNn` @186789045 — `e.scope==="all"?void 0:e.from`. */

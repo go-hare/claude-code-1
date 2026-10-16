@@ -225,9 +225,12 @@ describe('densable 2.1.248 #1 --restricted / CLAUDE_CODE_RESTRICTED', () => {
     )
 
     const agents = src('../../screens/AgentView.tsx')
-    expect(agents.match(/fleetUpExtraArgs\(dispatchExtraArgs\)/g)?.length).toBe(
-      4,
-    )
+    // densable 2.1.289: spawn paths use fleetSpawnExtraArgs; raw
+    // fleetUpExtraArgs(dispatchExtraArgs) remains in memo + relaunch.
+    expect(agents).toContain('fleetSpawnExtraArgs')
+    expect(
+      agents.match(/fleetUpExtraArgs\(dispatchExtraArgs\)/g)?.length,
+    ).toBeGreaterThanOrEqual(2)
 
     const teleport = src('../teleport.tsx')
     expect(teleport).toContain('RESTRICTED_CLOUD_CREATE_REFUSE')

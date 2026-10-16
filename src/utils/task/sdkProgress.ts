@@ -1,4 +1,3 @@
-import type { SdkWorkflowProgress } from '../../types/tools.js'
 import { enqueueSdkEvent } from '../sdkEventQueue.js'
 
 /**
@@ -6,6 +5,8 @@ import { enqueueSdkEvent } from '../sdkEventQueue.js'
  * in runAsyncAgentLifecycle) and workflows (per flushProgress batch). Accepts
  * already-computed primitives so callers can derive them from their own state
  * shapes (ProgressTracker for agents, LocalWorkflowTaskState for workflows).
+ *
+ * densable 2.1.289: outward wire has no workflow_progress on task_progress.
  */
 export function emitTaskProgress(params: {
   taskId: string
@@ -16,7 +17,9 @@ export function emitTaskProgress(params: {
   toolUses: number
   lastToolName?: string
   summary?: string
-  workflowProgress?: SdkWorkflowProgress[]
+  subagentType?: string
+  /** @deprecated densable 2.1.289 outward schema dropped workflow_progress. */
+  workflowProgress?: unknown
 }): void {
   enqueueSdkEvent({
     type: 'system',
@@ -24,6 +27,7 @@ export function emitTaskProgress(params: {
     task_id: params.taskId,
     tool_use_id: params.toolUseId,
     description: params.description,
+    subagent_type: params.subagentType,
     usage: {
       total_tokens: params.totalTokens,
       tool_uses: params.toolUses,
@@ -31,6 +35,5 @@ export function emitTaskProgress(params: {
     },
     last_tool_name: params.lastToolName,
     summary: params.summary,
-    workflow_progress: params.workflowProgress,
   })
 }

@@ -1,6 +1,6 @@
 /**
  * densable 2.1.212 #22 — JT enqueue when REPL Remote Control is live (FC),
- * so task_progress with workflow_progress reaches mid-join RC clients.
+ * so task_progress reaches mid-join RC clients.
  */
 import {
   afterAll,
@@ -36,20 +36,22 @@ afterAll(() => {
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
 })
 
-const { drainSdkEvents, enqueueSdkEvent, setSdkEventEnqueueListener } =
-  await import('../sdkEventQueue.js')
+const {
+  drainSdkEvents,
+  enqueueSdkEvent,
+  resetSdkEventQueueForTests,
+  setSdkEventEnqueueListener,
+} = await import('../sdkEventQueue.js')
 
 describe('densable #22 JT/FC bridge-active enqueue', () => {
   beforeEach(() => {
     nonInteractive = false
     bridgeActive = false
-    drainSdkEvents()
-    setSdkEventEnqueueListener(null)
+    resetSdkEventQueueForTests()
   })
 
   afterEach(() => {
-    drainSdkEvents()
-    setSdkEventEnqueueListener(null)
+    resetSdkEventQueueForTests()
   })
 
   test('interactive without bridge drops enqueue (no drain consumer)', () => {
@@ -61,14 +63,6 @@ describe('densable #22 JT/FC bridge-active enqueue', () => {
       task_id: 'w1',
       description: 'wf',
       usage: { total_tokens: 1, tool_uses: 0, duration_ms: 1 },
-      workflow_progress: [
-        {
-          type: 'workflow_agent',
-          index: 0,
-          state: 'start',
-          label: 'a',
-        },
-      ],
     })
     expect(drainSdkEvents()).toHaveLength(0)
   })
@@ -82,22 +76,8 @@ describe('densable #22 JT/FC bridge-active enqueue', () => {
       task_id: 'w1',
       description: 'Review: a',
       usage: { total_tokens: 9, tool_uses: 2, duration_ms: 100 },
-      workflow_progress: [
-        {
-          type: 'workflow_agent',
-          index: 0,
-          state: 'start',
-          label: 'a',
-        },
-        {
-          type: 'workflow_agent',
-          index: 0,
-          state: 'progress',
-          label: 'a',
-          tokens: 9,
-          toolCalls: 2,
-        },
-      ],
+      last_tool_name: 'Bash',
+      summary: 'running',
     })
     const events = drainSdkEvents()
     expect(events).toHaveLength(1)
@@ -105,11 +85,13 @@ describe('densable #22 JT/FC bridge-active enqueue', () => {
       type: 'system',
       subtype: 'task_progress',
       task_id: 'w1',
+      last_tool_name: 'Bash',
+      summary: 'running',
     })
-    const wp = (events[0] as { workflow_progress?: unknown[] })
-      .workflow_progress
-    expect(Array.isArray(wp)).toBe(true)
-    expect(wp!.length).toBe(2)
+    expect(
+      (events[0] as { workflow_progress?: unknown }).workflow_progress,
+    ).toBeUndefined()
+    expect(events[0]?.timestamp).toBeUndefined()
   })
 
   test('setSdkEventEnqueueListener fires after successful enqueue (MGe)', () => {

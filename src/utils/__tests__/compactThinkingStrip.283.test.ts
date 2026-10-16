@@ -39,11 +39,17 @@ afterAll(() => {
 
 import { createAttachmentMessage } from '../attachments.js'
 import {
+  applyThinkingStripPlanToMessages,
+  buildThinkingStripPlanFromMessages,
   carryThinkingStripFromSummarized,
   resolveCompactThinkingStrip,
   resolveCompactThinkingStripFlag,
   thinkingStrippedAttachment,
 } from '../thinking.js'
+import {
+  buildAdvisorStripPlanFromMessages,
+  stripAdvisorBlocksFromMessageIds,
+} from '../messages.js'
 
 const thinkingMsg = () =>
   createAssistantMessage({
@@ -131,6 +137,17 @@ describe('densable 2.1.283 xPe / sdt compact thinking strip', () => {
     expect(compact).toContain('kept tail holds')
     expect(compact).toContain('messagesToKeep.push')
     expect(compact).toContain("m.type === 'assistant'")
+    expect(compact).toContain('thinkingStripPlan')
+    expect(compact).toContain('stripNonEssential')
+    expect(compact).toContain('stripNonEssential: boolean = false')
+    expect(compact).toContain('buildThinkingStripPlanFromMessages')
+    expect(compact).toContain('buildAdvisorStripPlanFromMessages')
+    expect(
+      readFileSync(
+        join(import.meta.dir, '../../services/compact/autoCompact.ts'),
+        'utf8',
+      ),
+    ).toContain('resolveColdCompactStripNonEssential')
     const thinking = readFileSync(
       join(import.meta.dir, '../thinking.ts'),
       'utf8',
@@ -169,6 +186,50 @@ describe('densable 2.1.283 xPe / sdt compact thinking strip', () => {
       scope: 'partial',
       from: { messageId: keepMsg.message.id, thinkingIndex: 0 },
     })
+  })
+
+  test('MY: thinking_stripped all marks prior assistants at index 0', () => {
+    const a = thinkingMsg()
+    const plan = buildThinkingStripPlanFromMessages([
+      a,
+      createAttachmentMessage(thinkingStrippedAttachment('all')),
+    ])
+    expect(plan.get(a.message.id)).toBe(0)
+    const stripped = applyThinkingStripPlanToMessages([a], plan)
+    expect(
+      (stripped[0] as typeof a).message.content.some(
+        b => b.type === 'thinking',
+      ),
+    ).toBe(false)
+  })
+
+  test('UD: advisor_stripped marks prior assistants', () => {
+    const a = thinkingMsg()
+    const ids = buildAdvisorStripPlanFromMessages([
+      a,
+      createAttachmentMessage({ type: 'advisor_stripped' }),
+    ])
+    expect(ids.has(a.message.id)).toBe(true)
+    const withAdvisor = createAssistantMessage({
+      content: [
+        {
+          type: 'server_tool_use',
+          id: 'adv-1',
+          name: 'advisor',
+          input: {},
+        } as never,
+        { type: 'text', text: 'hi' } as never,
+      ],
+    })
+    const stripped = stripAdvisorBlocksFromMessageIds(
+      [withAdvisor],
+      new Set([withAdvisor.message.id]),
+    )
+    expect(
+      (stripped[0] as typeof withAdvisor).message.content.some(
+        b => b.type === 'server_tool_use',
+      ),
+    ).toBe(false)
   })
 
   test('WNn: partial whose target is still in summarized is skipped', () => {

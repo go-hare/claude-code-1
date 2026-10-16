@@ -270,6 +270,19 @@ export type GlobalConfig = {
   showMessageTimestamps?: boolean
   /** densable bvr `defaultToAgentsView`. Default false. */
   defaultToAgentsView?: boolean
+  /**
+   * densable tip gate — set true on first Agents/FleetView open
+   * (`!le().hasOpenedAgentsView` then Ae stamp).
+   */
+  hasOpenedAgentsView?: boolean
+  /**
+   * densable tip gate — read by agents-view-multiclauding tip alongside
+   * hasOpenedAgentsView. Gold 2.1.289 CLI SEA has **no** stamp writer for this
+   * key (only tip OR-read); first fleet open stamps `hasOpenedAgentsView` alone.
+   * Keep the key for tip parity / cross-surface readers — do not invent a CLI
+   * producer.
+   */
+  hasUsedAgentsFleet?: boolean
   /** densable bvr `leftArrowOpensAgents`. Default true when the row is shown. */
   leftArrowOpensAgents?: boolean
   /**
@@ -894,6 +907,8 @@ function createDefaultGlobalConfig(): GlobalConfig {
     externalEditorContext: false,
     showMessageTimestamps: false,
     defaultToAgentsView: false,
+    hasOpenedAgentsView: false,
+    hasUsedAgentsFleet: false,
     leftArrowOpensAgents: true,
     hasSeenTasksHint: false,
     hasUsedStash: false,
@@ -973,6 +988,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'copyOnSelect',
   'leftArrowOpensAgents',
   'defaultToAgentsView',
+  'hasOpenedAgentsView',
+  'hasUsedAgentsFleet',
   'permissionExplainerEnabled',
   'prStatusFooterEnabled',
   'remoteControlAtStartup',

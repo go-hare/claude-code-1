@@ -1,3 +1,14 @@
+/**
+ * densable 2.1.289 host-keyed SDK event queue (`o_` / `mx` / `Nr` / `n_` /
+ * `r_` / `X5r` / `Vi` / `LQe` / `J5r` / `Di` / `gx`).
+ *
+ * Semantic names only — never export minify
+ * `o_|mx|Nr|Zv|R4o|n_|r_|X5r|Vi|LQe|J5r|Di|gx|hx|e9o|h0e|Ytr`.
+ *
+ * Host-keyed bag (`mx.of(U().host)`) plus ALS override — not a process
+ * singleton array.
+ */
+import { AsyncLocalStorage } from 'async_hooks'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import {
@@ -5,7 +16,8 @@ import {
   getSessionId,
   isReplBridgeActive,
 } from '../bootstrap/state.js'
-import type { SdkWorkflowProgress } from '../types/tools.js'
+import { logForDebugging } from './debug.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 
 type TaskStartedEvent = {
   type: 'system'
@@ -13,9 +25,14 @@ type TaskStartedEvent = {
   task_id: string
   tool_use_id?: string
   description: string
+  subagent_type?: string
+  is_backgrounded?: boolean
+  spawn_depth?: number
   task_type?: string
   workflow_name?: string
   prompt?: string
+  skip_transcript?: boolean
+  ambient?: boolean
 }
 
 type TaskProgressEvent = {
@@ -24,6 +41,7 @@ type TaskProgressEvent = {
   task_id: string
   tool_use_id?: string
   description: string
+  subagent_type?: string
   usage: {
     total_tokens: number
     tool_uses: number
@@ -31,10 +49,6 @@ type TaskProgressEvent = {
   }
   last_tool_name?: string
   summary?: string
-  // Delta batch of workflow state changes. Clients upsert by
-  // `${type}:${index}` then group by phaseIndex to rebuild the phase tree,
-  // same fold as collectFromEvents + groupByPhase in PhaseProgress.tsx.
-  workflow_progress?: SdkWorkflowProgress[]
 }
 
 // Emitted when a foreground agent completes without being backgrounded.
@@ -48,6 +62,7 @@ type TaskNotificationSdkEvent = {
   task_id: string
   tool_use_id?: string
   status: 'completed' | 'failed' | 'stopped'
+  reason?: 'worker_restart'
   output_file: string
   summary: string
   usage?: {
@@ -55,6 +70,9 @@ type TaskNotificationSdkEvent = {
     tool_uses: number
     duration_ms: number
   }
+  resource_links?: unknown[]
+  skip_transcript?: boolean
+  ambient?: boolean
 }
 
 // Mirrors notifySessionStateChanged. The CCR bridge already receives this
@@ -140,6 +158,7 @@ export type BackgroundTasksChangedTask = {
   task_id: string
   task_type: string
   description: string
+  ambient?: boolean
 }
 
 type BackgroundTasksChangedSdkEvent = {
@@ -172,6 +191,12 @@ type ConversationResetSdkEvent = {
   session_id?: string
 }
 
+/** densable stream_event frames may hit enqueue; JT skips them without a listener. */
+type StreamEventSdkEvent = {
+  type: 'stream_event'
+  [key: string]: unknown
+}
+
 export type SdkEvent =
   | TaskStartedEvent
   | TaskProgressEvent
@@ -185,82 +210,328 @@ export type SdkEvent =
   | BackgroundTasksChangedSdkEvent
   | SdkStatusEvent
   | ConversationResetSdkEvent
+  | StreamEventSdkEvent
+
+export type DrainedSdkEvent = SdkEvent & {
+  uuid: UUID | string
+  session_id: string
+  timestamp?: string
+}
 
 const MAX_QUEUE_SIZE = 1000
-const queue: SdkEvent[] = []
+const MAX_EVICTED_KEYS = 1000
+const DEFAULT_QUEUE_KEY = 'cli'
 
 /**
- * densable NZc / MGe — optional listener fired after each successful enqueue.
- * useReplBridge registers a drain that writeSdkMessages task_* frames so RC
- * clients that join mid-run receive workflow agent grid progress.
+ * densable `z` — WeakMap host → bag. Check `!== undefined`, not truthy.
  */
-let onEnqueueListener: (() => void) | null = null
+class WeakOwnerCache<T> {
+  #e: () => T
+  #t = new WeakMap<object, T>()
+  constructor(e: () => T) {
+    this.#e = e
+  }
+  of(e: object): T {
+    const t = this.#t.get(e)
+    if (t !== undefined) return t
+    const o = this.#e()
+    this.#t.set(e, o)
+    return o
+  }
+}
+
+/**
+ * densable `Wf` without hostedWorker: `c$()` =
+ * `CLAUDE_CODE_ENVIRONMENT_KIND==="bridge"`. HostedWorker lives on leftover
+ * SessionHost — not invented here.
+ */
+export function shouldRedactPersistedSdkLane(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.CLAUDE_CODE_ENVIRONMENT_KIND === 'bridge'
+}
+
+/**
+ * densable `o_` — per-host multi-key SDK event queue bag.
+ */
+export class SdkEventQueueBag {
+  queueKey: () => string = () => DEFAULT_QUEUE_KEY
+  queuesByKey = new Map<string, SdkEvent[]>()
+  evictedKeys = new Set<string>()
+  enqueueListener: (() => void) | null = null
+  queueUsedReported = false
+  nonbookendEvictionReported = false
+  bookendEvictionReported = false
+  /**
+   * densable `Wf` without hostedWorker: `ENVIRONMENT_KIND==="bridge"`.
+   * Gold bag default is `()=>false`; print/SDK host then overwrite. CLI analog
+   * is live so bridge print stamps gx without a leftover SessionHost field.
+   */
+  redactsPersistedLane: () => boolean = shouldRedactPersistedSdkLane
+
+  setQueueKey(key: string | (() => string)): void {
+    this.queueKey = typeof key === 'function' ? key : () => key
+  }
+
+  currentKey(): string {
+    return this.queueKey()
+  }
+
+  setEnqueueListener(listener: (() => void) | null): void {
+    this.enqueueListener = listener
+  }
+
+  queueCount(): number {
+    return this.queuesByKey.size
+  }
+
+  reset(): void {
+    this.queuesByKey.clear()
+    this.evictedKeys.clear()
+    this.queueKey = () => DEFAULT_QUEUE_KEY
+    this.enqueueListener = null
+    this.redactsPersistedLane = shouldRedactPersistedSdkLane
+    this.queueUsedReported = false
+    this.nonbookendEvictionReported = false
+    this.bookendEvictionReported = false
+  }
+
+  currentQueueOrCreate(): SdkEvent[] | null {
+    const key = this.queueKey()
+    if (this.evictedKeys.has(key)) return null
+    let queue = this.queuesByKey.get(key)
+    if (!queue) {
+      queue = []
+      this.queuesByKey.set(key, queue)
+    }
+    return queue
+  }
+
+  currentQueueOrNull(): SdkEvent[] | null {
+    return this.queuesByKey.get(this.queueKey()) ?? null
+  }
+
+  evictKey(key: string): void {
+    this.queuesByKey.delete(key)
+    this.evictedKeys.add(key)
+    if (this.evictedKeys.size > MAX_EVICTED_KEYS) {
+      const oldest = this.evictedKeys.values().next().value
+      if (oldest !== undefined) this.evictedKeys.delete(oldest)
+    }
+  }
+
+  /**
+   * densable JT + BC: queue when headless/print OR REPL Remote Control live.
+   * Keep fork Host-critical subtypes under pressure (broader than gold SEA
+   * keep-set) so existing eviction tests stay green.
+   */
+  enqueue(event: SdkEvent): void {
+    if (!getIsNonInteractiveSession() && !isReplBridgeActive()) {
+      return
+    }
+    // densable: stream_event is interactive-noise unless a drain listener is live.
+    if (
+      event.type === 'stream_event' &&
+      !getIsNonInteractiveSession() &&
+      this.enqueueListener === null
+    ) {
+      return
+    }
+    const queue = this.currentQueueOrCreate()
+    if (!queue) return
+    if (queue.length >= MAX_QUEUE_SIZE) {
+      if (event.type === 'stream_event') return
+      const nonBookend = queue.findIndex(e => {
+        if (e.type === 'conversation_reset') return false
+        if (e.type === 'command_lifecycle') return false
+        if (e.type !== 'system') return true
+        if (e.subtype === 'status' && e.status === null) return false
+        return (
+          e.subtype !== 'task_started' &&
+          e.subtype !== 'task_notification' &&
+          e.subtype !== 'task_updated' &&
+          e.subtype !== 'thinking_tokens' &&
+          e.subtype !== 'task_summary' &&
+          e.subtype !== 'model_fallback' &&
+          // densable 2.1.211 level set — keep latest membership under pressure
+          e.subtype !== 'background_tasks_changed'
+        )
+      })
+      if (nonBookend === -1) {
+        this.bookendEvictionReported = true
+        const softBookend = queue.findIndex(e => {
+          if (e.type === 'conversation_reset') return false
+          if (
+            e.type === 'system' &&
+            ((e.subtype === 'status' && e.status === null) ||
+              e.subtype === 'task_started' ||
+              e.subtype === 'task_notification')
+          ) {
+            return false
+          }
+          return true
+        })
+        if (softBookend === -1) {
+          queue.shift()
+        } else {
+          queue.splice(softBookend, 1)
+        }
+      } else {
+        this.nonbookendEvictionReported = true
+        queue.splice(nonBookend, 1)
+      }
+    }
+    queue.push(event)
+    this.queueUsedReported = true
+    this.enqueueListener?.()
+  }
+
+  hasQueued(pred: (event: SdkEvent) => boolean): boolean {
+    const queue = this.currentQueueOrNull()
+    return queue !== null && queue.some(pred)
+  }
+
+  drain(): DrainedSdkEvent[] {
+    const queue = this.currentQueueOrNull()
+    if (!queue || queue.length === 0) return []
+    return this.stamp(queue.splice(0), getSessionId())
+  }
+
+  drainForSession(sessionId: string): DrainedSdkEvent[] {
+    const queue = this.queuesByKey.get(sessionId)
+    if (!queue || queue.length === 0) return []
+    return this.stamp(queue.splice(0), sessionId)
+  }
+
+  stamp(events: SdkEvent[], sessionId: string): DrainedSdkEvent[] {
+    const redact = this.redactsPersistedLane()
+    const timestamp = new Date().toISOString()
+    return events.map(e => {
+      const redacted = redact ? redactPersistedLaneEvent(e) : e
+      const base: DrainedSdkEvent = {
+        ...redacted,
+        // command_lifecycle.uuid is the user-command id Host/CCR ack against —
+        // never replace with a fresh randomUUID (Official 2.1 yield shape).
+        uuid:
+          redacted.type === 'command_lifecycle'
+            ? redacted.uuid
+            : (randomUUID() as UUID),
+        session_id: sessionId,
+      }
+      if (
+        redacted.type === 'system' &&
+        (redacted.subtype === 'task_started' ||
+          redacted.subtype === 'task_notification' ||
+          redacted.subtype === 'task_progress')
+      ) {
+        return base
+      }
+      return { ...base, timestamp }
+    })
+  }
+}
+
+/** densable `gx` — blank task_notification.output_file on redacted lanes. */
+function redactPersistedLaneEvent(event: SdkEvent): SdkEvent {
+  if (event.type === 'system' && event.subtype === 'task_notification') {
+    return { ...event, output_file: '' }
+  }
+  return event
+}
+
+/**
+ * densable `n_` fragment — once-gate set for terminal task_notification emits.
+ * Kept as its own host bag (not the full leftover task-output bag).
+ */
+export class SdkTerminalEmitClaimsBag {
+  terminalEmitClaims = new Set<string>()
+
+  reset(): void {
+    this.terminalEmitClaims.clear()
+  }
+}
+
+const hostQueues = new WeakOwnerCache(() => new SdkEventQueueBag())
+const queueAls = new AsyncLocalStorage<SdkEventQueueBag>()
+
+const hostTerminalClaims = new WeakOwnerCache(
+  () => new SdkTerminalEmitClaimsBag(),
+)
+const terminalClaimsAls = new AsyncLocalStorage<SdkTerminalEmitClaimsBag>()
+
+/** densable `mx.of(host)` — bag for a host object. */
+export function sdkEventQueueOf(host: object): SdkEventQueueBag {
+  return hostQueues.of(host)
+}
+
+/** densable `Nr` — ALS override, else bootstrap host bag. */
+export function getSdkEventQueue(): SdkEventQueueBag {
+  return queueAls.getStore() ?? hostQueues.of(getBootstrapSessionHost())
+}
+
+/** densable `R4o`-style — run `fn` with an ALS queue bag. */
+export function runWithSdkEventQueue<T>(bag: SdkEventQueueBag, fn: () => T): T {
+  return queueAls.run(bag, fn)
+}
+
+function getSdkTerminalEmitClaimsBag(): SdkTerminalEmitClaimsBag {
+  return (
+    terminalClaimsAls.getStore() ??
+    hostTerminalClaims.of(getBootstrapSessionHost())
+  )
+}
+
+/** densable `dx.of(host)` fragment — terminal once-gate bag for a host. */
+export function sdkTerminalEmitClaimsOf(
+  host: object,
+): SdkTerminalEmitClaimsBag {
+  return hostTerminalClaims.of(host)
+}
+
+/** Run `fn` with an ALS terminal-claims bag (test / host isolation). */
+export function runWithSdkTerminalEmitClaims<T>(
+  bag: SdkTerminalEmitClaimsBag,
+  fn: () => T,
+): T {
+  return terminalClaimsAls.run(bag, fn)
+}
+
+/** densable `hx` / `e9o`. */
+export function getSdkEventQueueKey(): string {
+  return getSdkEventQueue().currentKey()
+}
+
+/** densable `setQueueKey` public wrapper. */
+export function setSdkEventQueueKey(key: string | (() => string)): void {
+  getSdkEventQueue().setQueueKey(key)
+}
 
 /**
  * densable MGe — register (or clear with null) the post-enqueue listener.
- * Replaces any previous listener (one-slot, densable process-global).
+ * Replaces any previous listener (one-slot).
  */
 export function setSdkEventEnqueueListener(
   listener: (() => void) | null,
 ): void {
-  onEnqueueListener = listener
+  getSdkEventQueue().setEnqueueListener(listener)
 }
 
-/**
- * densable c7c — once-gate so lf / print dual paths never double-close a task
- * for SDK / Host consumers (Jp Tasks pane).
- */
-const emittedTerminalTaskIds = new Set<string>()
-
-/** densable k4i — allow a later terminal bookend after resume/re-notify. */
+/** densable k4i / X5r — allow a later terminal bookend after resume/re-notify. */
 export function clearTaskTerminatedSdkGate(taskId: string): void {
-  emittedTerminalTaskIds.delete(taskId)
+  getSdkTerminalEmitClaimsBag().terminalEmitClaims.delete(taskId)
 }
 
-/** densable c7c — returns true on first terminal emit for this taskId. */
+/** densable c7c / r_ — returns true on first terminal emit for this taskId. */
 function claimTaskTerminatedSdkGate(taskId: string): boolean {
-  if (emittedTerminalTaskIds.has(taskId)) {
-    return false
-  }
-  emittedTerminalTaskIds.add(taskId)
+  const claims = getSdkTerminalEmitClaimsBag().terminalEmitClaims
+  if (claims.has(taskId)) return false
+  claims.add(taskId)
   return true
 }
 
+/** densable Vi. */
 export function enqueueSdkEvent(event: SdkEvent): void {
-  // densable JT: queue when headless/print (dn) OR REPL Remote Control live (FC).
-  // Pure TUI with no bridge would never drain — skip to avoid cap churn.
-  if (!getIsNonInteractiveSession() && !isReplBridgeActive()) {
-    return
-  }
-  if (queue.length >= MAX_QUEUE_SIZE) {
-    // densable BC: prefer evicting non-bookend events so task_started /
-    // task_notification stay available for Host Tasks UI. Also keep
-    // command_lifecycle (Official 2.1 command uuid ack) when possible.
-    const nonBookend = queue.findIndex(e => {
-      if (e.type === 'command_lifecycle') return false
-      if (e.type !== 'system') return true
-      // Keep Tasks / Host-critical bookends under pressure.
-      // Official 2.1 also treats task_summary / model_fallback as
-      // scarce Host signals (prefer drop high-volume noise first).
-      return (
-        e.subtype !== 'task_started' &&
-        e.subtype !== 'task_notification' &&
-        e.subtype !== 'task_updated' &&
-        e.subtype !== 'thinking_tokens' &&
-        e.subtype !== 'task_summary' &&
-        e.subtype !== 'model_fallback' &&
-        // densable 2.1.211 level set — keep latest membership under pressure
-        e.subtype !== 'background_tasks_changed'
-      )
-    })
-    if (nonBookend === -1) {
-      queue.shift()
-    } else {
-      queue.splice(nonBookend, 1)
-    }
-  }
-  queue.push(event)
-  onEnqueueListener?.()
+  getSdkEventQueue().enqueue(event)
 }
 
 /**
@@ -270,7 +541,7 @@ export function enqueueSdkEvent(event: SdkEvent): void {
 export function hasMatchingQueuedSdkEvent(
   pred: (event: SdkEvent) => boolean,
 ): boolean {
-  return queue.some(pred)
+  return getSdkEventQueue().hasQueued(pred)
 }
 
 /**
@@ -295,25 +566,28 @@ export function isBridgeForwardableSdkEvent(event: {
   )
 }
 
-export function drainSdkEvents(): Array<
-  SdkEvent & { uuid: UUID | string; session_id: string; timestamp: string }
-> {
-  if (queue.length === 0) {
-    return []
+/** densable LQe. */
+export function drainSdkEvents(): DrainedSdkEvent[] {
+  const bag = getSdkEventQueue()
+  const key = bag.currentKey()
+  const sessionId = getSessionId()
+  // densable 2.1.289: warn when e9o() !== sessionId && e9o() !== "cli"
+  if (key !== sessionId && key !== DEFAULT_QUEUE_KEY) {
+    logForDebugging(
+      `drainSdkEvents: current queue key "${key}" differs from session "${sessionId}" and default "${DEFAULT_QUEUE_KEY}"`,
+    )
   }
-  const events = queue.splice(0)
-  // densable / Host Jp: ISO timestamp so Tasks pane startedAt/completedAt
-  // resolve from raw.timestamp (open-claude-web timestampFromRaw) instead of
-  // only receive-time fallback.
-  const timestamp = new Date().toISOString()
-  return events.map(e => ({
-    ...e,
-    // command_lifecycle.uuid is the user-command id Host/CCR ack against —
-    // never replace with a fresh randomUUID (Official 2.1 yield shape).
-    uuid: e.type === 'command_lifecycle' ? e.uuid : (randomUUID() as UUID),
-    session_id: getSessionId(),
-    timestamp,
-  }))
+  return bag.drain()
+}
+
+/** densable J5r. */
+export function drainSdkEventsForSession(sessionId: string): DrainedSdkEvent[] {
+  return getSdkEventQueue().drainForSession(sessionId)
+}
+
+export function resetSdkEventQueueForTests(): void {
+  getSdkEventQueue().reset()
+  getSdkTerminalEmitClaimsBag().reset()
 }
 
 /**
@@ -390,7 +664,7 @@ export function emitBackgroundTasksChangedSdk(
 }
 
 /**
- * densable lf — emit a task_notification SDK event for a task terminal state.
+ * densable lf / Di — emit a task_notification SDK event for a task terminal state.
  *
  * registerTask() always emits task_started; this is the closing bookend.
  * Once-gated (c7c): safe to call from both BRt XML enqueue and print.ts
@@ -410,6 +684,10 @@ export function emitTaskTerminatedSdk(
     summary?: string
     outputFile?: string
     usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+    reason?: 'worker_restart'
+    resourceLinks?: unknown[]
+    skipTranscript?: boolean
+    ambient?: boolean
   },
 ): boolean {
   if (!claimTaskTerminatedSdkGate(taskId)) {
@@ -421,9 +699,13 @@ export function emitTaskTerminatedSdk(
     task_id: taskId,
     tool_use_id: opts?.toolUseId,
     status,
+    reason: opts?.reason,
     output_file: opts?.outputFile ?? '',
     summary: opts?.summary ?? '',
     usage: opts?.usage,
+    resource_links: opts?.resourceLinks,
+    skip_transcript: opts?.skipTranscript,
+    ambient: opts?.ambient,
   })
   return true
 }

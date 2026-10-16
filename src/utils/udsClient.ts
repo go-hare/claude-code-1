@@ -565,12 +565,23 @@ export async function sendToUdsSocket(
       // title optional
     }
   }
-  const { wrapCrossSessionMessage } = await import('./crossSessionMessage.js')
+  const { wrapCrossSessionMessage, parseCrossSessionHopChain } = await import(
+    './crossSessionMessage.js'
+  )
   const fromAddr = ownSocket ? `uds:${ownSocket}` : undefined
+  // densable Tkn(m, b?cBe(b):void 0) — append own hop token, cap zVt.
+  const { appendHopChain, getOwnUdsHopToken } = await import(
+    './peerAdmission.js'
+  )
+  const hopChain = appendHopChain(
+    parseCrossSessionHopChain(rawBody),
+    getOwnUdsHopToken(),
+  )
   const data = wrapCrossSessionMessage(rawBody, {
     ...(fromAddr !== undefined ? { from: fromAddr } : {}),
     ...(fromName !== undefined ? { fromName } : {}),
     ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
+    ...(hopChain !== undefined ? { hopChain } : {}),
   })
 
   const msgId = randomUUID()

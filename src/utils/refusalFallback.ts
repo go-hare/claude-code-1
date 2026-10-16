@@ -13,12 +13,20 @@
  */
 
 import { isEnvTruthy } from './envUtils.js'
-import { getInitialSettings } from './settings/settings.js'
+import {
+  getInitialSettings,
+  getSettingValueWithSource,
+  persistSettingsForSource,
+} from './settings/settings.js'
+import { getEnabledSettingSources } from './settings/constants.js'
 import {
   REFUSAL_FALLBACK_DIALOG_KIND,
   type RefusalFallbackResult,
   refusalFallbackDialogSpec,
 } from './printRequestDialog.js'
+import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
+import type { ToolUseContext } from '../Tool.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
 
 export function isRefusalFallbackEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -29,6 +37,346 @@ export function isRefusalFallbackEnabled(
 /** Official `$c("switchModelsOnFlag", true).value` — userSettings, default true. */
 export function getSwitchModelsOnFlag(): boolean {
   return getInitialSettings().switchModelsOnFlag ?? true
+}
+
+/** densable Yo("switchModelsOnFlag", true) — value + defining source. */
+export function getSwitchModelsOnFlagWithSource(): {
+  value: boolean
+  source: string
+} {
+  return getSettingValueWithSource('switchModelsOnFlag', true)
+}
+
+/** densable Xft — GB gate for the first-flag preference ask. Default false. */
+export const TENG_JAZZY_GOBLET = 'tengu_jazzy_goblet'
+
+/** densable B9 — /config + preference-ask labels. */
+export const SWITCH_MODELS_ON_FLAG_LABELS = {
+  switchAutomatically: 'Switch automatically',
+  askEachTime: 'Ask each time',
+  notAskedYet: 'Not asked yet',
+} as const
+
+/** densable ao — `k(Xft, false)===true` for /config `ro` display. */
+export function isJazzyGobletEnabled(): boolean {
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE(TENG_JAZZY_GOBLET, false) === true
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable ro — /config enum value. Set true/false → B9 labels; unset →
+ * notAskedYet when jazzy_goblet else Switch automatically.
+ */
+export function formatSwitchModelsOnFlagConfigValue(
+  value: boolean | undefined,
+): string {
+  if (value !== undefined) {
+    return value
+      ? SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically
+      : SWITCH_MODELS_ON_FLAG_LABELS.askEachTime
+  }
+  return isJazzyGobletEnabled()
+    ? SWITCH_MODELS_ON_FLAG_LABELS.notAskedYet
+    : SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically
+}
+
+/**
+ * densable Config coerce — true/1/on/yes/B9.switchAutomatically and
+ * false/0/off/no/B9.askEachTime; else undefined (invalid).
+ */
+export function coerceSwitchModelsOnFlagConfigInput(
+  raw: string,
+): string | undefined {
+  const o = raw.trim().toLowerCase()
+  if (
+    ['true', '1', 'on', 'yes'].includes(o) ||
+    o === SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically.toLowerCase()
+  ) {
+    return SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically
+  }
+  if (
+    ['false', '0', 'off', 'no'].includes(o) ||
+    o === SWITCH_MODELS_ON_FLAG_LABELS.askEachTime.toLowerCase()
+  ) {
+    return SWITCH_MODELS_ON_FLAG_LABELS.askEachTime
+  }
+  return undefined
+}
+
+/** densable E1r — long copy for cyber/bio preference lead. */
+export const REFUSAL_PREFERENCE_CATEGORY_COPY = {
+  bio: 'Our intentionally broad safeguards allow us to deliver more capabilities faster, but can sometimes flag legitimate biology tasks.',
+  cyber:
+    'Our intentionally broad safeguards allow us to deliver more capabilities faster, but can sometimes flag legitimate coding and cybersecurity tasks.',
+} as const
+
+/** densable E7 */
+export function refusalFallbackPreferenceGenericLead(
+  displayName: string,
+): string {
+  return `${displayName}'s safeguards flagged this message. This sometimes happens with safe, normal conversations.`
+}
+
+/** densable k7 */
+export function refusalFallbackPreferenceCategoryLead(
+  displayName: string,
+  category: 'bio' | 'cyber',
+): string {
+  return `${displayName}'s safeguards flagged this message. ${REFUSAL_PREFERENCE_CATEGORY_COPY[category]}`
+}
+
+/**
+ * densable U1e — preference-ask lead. Gold v1r model-specific overlay is
+ * UNKNOWN here; cyber/bio use k7 else E7.
+ */
+export function refusalFallbackPreferenceLead(
+  displayName: string,
+  _originalModel: string,
+  category: string | null | undefined,
+): string {
+  if (category === 'bio' || category === 'cyber') {
+    return refusalFallbackPreferenceCategoryLead(displayName, category)
+  }
+  return refusalFallbackPreferenceGenericLead(displayName)
+}
+
+/** densable Efn — persist switchModelsOnFlag to userSettings. */
+export async function persistSwitchModelsOnFlag(
+  enabled: boolean,
+  via: 'first_flag_prompt' | 'config',
+  storageV5?: unknown,
+): Promise<{ error: Error | null }> {
+  try {
+    const { logEvent } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+    logEvent('tengu_refusal_fallback_setting_changed', {
+      enabled,
+      via: via as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  } catch {
+    // telemetry optional
+  }
+  return persistSettingsForSource(
+    'userSettings',
+    { switchModelsOnFlag: enabled },
+    undefined,
+    storageV5,
+  )
+}
+
+/**
+ * densable Ba — first-flag preference ask gate.
+ * Gold: main thread, switchModelsOnFlag still default, userSettings writable,
+ * not remote/bg/teammate, qOt, SDK-or-interactive, tengu_jazzy_goblet.
+ */
+export function shouldAskRefusalFallbackPreference(input: {
+  toolUseContext: ToolUseContext
+  isMainThread: boolean
+}): boolean {
+  try {
+    const { toolUseContext, isMainThread } = input
+    if (!isMainThread || toolUseContext.agentId !== undefined) {
+      return false
+    }
+    if (getSwitchModelsOnFlagWithSource().source !== 'default') {
+      return false
+    }
+    if (!getEnabledSettingSources().includes('userSettings')) {
+      return false
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isRemotePreferencePromptEntrypoint } =
+      require('./hideSettingsHint.js') as typeof import('./hideSettingsHint.js')
+    if (isRemotePreferencePromptEntrypoint()) return false
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isBgSessionWithoutTerminal } =
+      require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
+    if (isBgSessionWithoutTerminal()) return false
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getBootstrapSessionHost } =
+      require('./sessionRoot.js') as typeof import('./sessionRoot.js')
+    if (
+      getBootstrapSessionHost().extensionsConfig.teammateAgentId() !== undefined
+    ) {
+      return false
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { canConfirmWithUser } =
+      require('./permissions/confirmWithUser.js') as typeof import('./permissions/confirmWithUser.js')
+    if (!canConfirmWithUser(toolUseContext)) return false
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getIsNonInteractiveSession, getSdkSupportedDialogKinds } =
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    if (
+      getIsNonInteractiveSession() &&
+      getSdkSupportedDialogKinds() === undefined
+    ) {
+      return false
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE(TENG_JAZZY_GOBLET, false) === true
+    )
+  } catch (error) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { logError } = require('./log.js') as typeof import('./log.js')
+      logError(error)
+      const { logEvent } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+      logEvent('refusal_fallback_preference_prompt', {
+        reason:
+          'gate_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } catch {
+      // ignore
+    }
+    return false
+  }
+}
+
+/**
+ * densable qa — AskUserQuestion preference: switch automatically vs pause.
+ * unanswered/declined → retry_fallback; aborted → cancelled;
+ * chose switch_automatically → persist true + retry_fallback;
+ * chose pause → persist false + edit_prompt.
+ */
+export async function askRefusalFallbackPreference(input: {
+  canUseTool: CanUseToolFn
+  toolUseContext: ToolUseContext
+  originalModel: string
+  fallbackModel: string
+  apiRefusalCategory?: string | null
+  telemetry?: Record<string, unknown>
+}): Promise<RefusalFallbackResult> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { renderModelName } =
+      require('./model/model.js') as typeof import('./model/model.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { confirmWithUser } =
+      require('./permissions/confirmWithUser.js') as typeof import('./permissions/confirmWithUser.js')
+    const originalDisplay = renderModelName(input.originalModel)
+    const fallbackDisplay = renderModelName(input.fallbackModel)
+    const lead = refusalFallbackPreferenceLead(
+      originalDisplay,
+      input.originalModel,
+      input.apiRefusalCategory,
+    )
+    const answered = await confirmWithUser({
+      canUseTool: input.canUseTool,
+      toolUseContext: input.toolUseContext,
+      source: 'refusal_fallback_preference',
+      header: 'Model switch',
+      question: `${lead} Switch to ${fallbackDisplay} and keep going whenever this happens? You can change this later in /config.`,
+      choices: [
+        {
+          value: 'switch_automatically' as const,
+          label: SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically,
+          description: `Continue on ${fallbackDisplay} now, and switch without asking from now on`,
+        },
+        {
+          value: 'pause' as const,
+          label: `Stay on ${originalDisplay}`,
+          description:
+            'Stop here without switching, and ask me each time a message is flagged',
+        },
+      ],
+    })
+    const choice = answered.kind === 'chose' ? answered.value : answered.kind
+    try {
+      const { logEvent } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+      logEvent('tengu_refusal_fallback_preference_prompt', {
+        ...(input.telemetry ?? {}),
+        choice:
+          choice as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } catch {
+      // telemetry optional
+    }
+    switch (answered.kind) {
+      case 'unanswered':
+        try {
+          const { logEvent } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+          logEvent('refusal_fallback_preference_prompt', {
+            reason:
+              answered.reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        } catch {
+          // ignore
+        }
+        return 'retry_fallback'
+      case 'declined':
+        return 'retry_fallback'
+      case 'aborted':
+        return 'cancelled'
+      case 'chose':
+        break
+    }
+    if (answered.kind !== 'chose') return 'retry_fallback'
+    const enable = answered.value === 'switch_automatically'
+    const { isHoverRestOn } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./storageV5/hoverRestPin.js') as typeof import('./storageV5/hoverRestPin.js')
+    const { error } = await persistSwitchModelsOnFlag(
+      enable,
+      'first_flag_prompt',
+      isHoverRestOn() ? input.toolUseContext.storageV5 : undefined,
+    )
+    if (error) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { logForDebugging } =
+          require('./debug.js') as typeof import('./debug.js')
+        logForDebugging(
+          `refusal fallback preference: could not store the answer: ${error.message}`,
+          { level: 'warn' },
+        )
+        const { logEvent } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+        logEvent('refusal_fallback_preference_prompt', {
+          reason:
+            'save_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+      } catch {
+        // ignore
+      }
+    }
+    return enable ? 'retry_fallback' : 'edit_prompt'
+  } catch (error) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { logError } = require('./log.js') as typeof import('./log.js')
+      logError(error)
+      const { logEvent } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
+      logEvent('refusal_fallback_preference_prompt', {
+        reason:
+          'error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } catch {
+      // ignore
+    }
+    return 'retry_fallback'
+  }
 }
 
 export function isRefusalFallbackCatchAllEnabled(
@@ -686,6 +1034,11 @@ export function planRefusalFallbackArm(input: {
    * Default false (hT/beta stack not armed → skd returns false).
    */
   serverLaneModeDefault?: boolean
+  /**
+   * densable Tqn preferenceQuestionPending — blocks serverLane while Ba
+   * will ask the first-flag preference question on fallback_request.
+   */
+  preferenceQuestionPending?: boolean
 }): RefusalFallbackArmPlan {
   const enabled = input.refusalFallbackEnabled ?? isRefusalFallbackEnabled()
   const switchModelsOnFlag = input.switchModelsOnFlag ?? true
@@ -719,6 +1072,7 @@ export function planRefusalFallbackArm(input: {
     !input.inCascadeEpisode &&
     !sameModel &&
     dkd &&
+    input.preferenceQuestionPending !== true &&
     input.stickyRejectedServerLane !== true
       ? {
           forModel: input.currentModel,

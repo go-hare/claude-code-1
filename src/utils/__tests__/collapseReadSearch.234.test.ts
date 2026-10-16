@@ -155,3 +155,98 @@ describe('densable 2.1.234 #17 Qoi absorb / popsOutOnError', () => {
     expect(totalBash).toBe(2)
   })
 })
+
+describe('densable 2.1.289 thoughtForMs absorb', () => {
+  function thinkingMsg(
+    text: string,
+    iso: string,
+    uuidSuffix: string,
+  ): RenderableMessage {
+    return {
+      type: 'assistant',
+      uuid: `00000000-0000-4000-8000-0000000002${uuidSuffix}`,
+      timestamp: iso,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: text }],
+      },
+    } as unknown as RenderableMessage
+  }
+
+  function textMsg(
+    text: string,
+    iso: string,
+    uuidSuffix: string,
+  ): RenderableMessage {
+    return {
+      type: 'assistant',
+      uuid: `00000000-0000-4000-8000-0000000003${uuidSuffix}`,
+      timestamp: iso,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+      },
+    } as unknown as RenderableMessage
+  }
+
+  test('thinking then text collapses to thoughtForMs group', () => {
+    const t0 = '2026-09-05T01:12:00.000Z'
+    const t1 = '2026-09-05T01:12:03.000Z'
+    const t2 = '2026-09-05T01:12:04.000Z'
+    const user: RenderableMessage = {
+      type: 'user',
+      uuid: '00000000-0000-4000-8000-000000000200',
+      timestamp: t0,
+      message: { role: 'user', content: '1+1=?' },
+    } as unknown as RenderableMessage
+    const out = collapseReadSearchGroups(
+      [
+        user,
+        thinkingMsg('The user set a goal.', t1, '01'),
+        textMsg('1 + 1 = 2', t2, '02'),
+      ],
+      bashStubTools,
+    )
+    const collapsed = out.filter(
+      m => m.type === 'collapsed_read_search',
+    ) as Array<{
+      thoughtForMs?: number
+      latestThinkingSummary?: string
+    }>
+    expect(collapsed).toHaveLength(1)
+    expect(collapsed[0]!.latestThinkingSummary).toBe('The user set a goal.')
+    expect(collapsed[0]!.thoughtForMs).toBe(3000)
+    expect(out.some(m => m.type === 'assistant')).toBe(true)
+  })
+})
+
+describe('densable _wr peer queued_command under collapse', () => {
+  test('peer queued_command is not skipped while a group is open', () => {
+    const wr: RenderableMessage = {
+      type: 'attachment',
+      uuid: '00000000-0000-4000-8000-000000000011',
+      timestamp: new Date().toISOString(),
+      attachment: {
+        type: 'queued_command',
+        commandMode: 'prompt',
+        prompt: '<agent-message from="Explore">\nscan done\n</agent-message>',
+        origin: {
+          kind: 'peer',
+          from: 'Explore',
+          senderTaskId: 'agent-explore-1',
+          name: 'Explore',
+        },
+        isMeta: true,
+      },
+    } as unknown as RenderableMessage
+    const out = collapseReadSearchGroups(
+      [
+        toolUseMsg('b1', BASH_TOOL_NAME, { command: 'echo one' }, '10'),
+        toolResultMsg('b1', '10'),
+        wr,
+      ],
+      bashStubTools,
+    )
+    expect(out.some(m => m.type === 'attachment')).toBe(true)
+  })
+})

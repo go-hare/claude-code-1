@@ -113,6 +113,8 @@ describe('densable 2.1.289 CUt Pane / PaneField / Scroll', () => {
     expect(src).toContain("'agents:rename'")
     expect(src).toContain("'agents:previousGroup'")
     expect(src).toContain("'agents:nextGroup'")
+    expect(src).toContain("'chat:externalEditor'")
+    expect(src).toContain('editPromptInEditor')
     expect(src).not.toContain("input === 's' && key.ctrl")
   })
 

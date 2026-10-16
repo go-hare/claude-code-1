@@ -259,6 +259,7 @@ describe('DEFAULT_HARBOR_KITE_LIMITS (vla)', () => {
       maxSelfHops: 10,
       maxChainLength: 28,
       maxTrackedSenders: 256,
+      maxQueuedPeerMessages: 50,
     })
   })
 })

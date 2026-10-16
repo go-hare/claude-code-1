@@ -19,8 +19,16 @@ import type {
 import type { PastedContent } from './config.js'
 import { logForDebugging } from './debug.js'
 import { extractTextContent, isHumanLikeOrigin } from './messages.js'
+import { parseAddress } from './peerAddress.js'
+import {
+  getOwnHopTokens,
+  getPeerAdmissionGuard,
+  getPeerAdmissionLimits,
+} from './peerAdmission.js'
+import { type PeerReceiptDropReason, sendPeerReceipt } from './peerReceipts.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
+import { recordHandbackDelivery } from './subagentHandback.js'
 
 export type SetAppState = (f: (prev: AppState) => AppState) => void
 
@@ -63,6 +71,14 @@ const queueChanged = createSignal()
  * Esc restore must see this so a queued turn is not treated as "user moved on".
  */
 let inFlightDrainBatch: QueuedCommand[] | null = null
+
+/**
+ * densable print Kc cancel-pending (`he`/`ye`/`ke`/`Se`). Cap 256.
+ * Never export minify he|ye|ke|Se.
+ */
+const CANCEL_PENDING_CAP = 256
+const cancelPending = new Set<string>()
+const cancelPendingAcked = new Set<string>()
 
 function notifySubscribers(): void {
   snapshot = Object.freeze([...commandQueue])
@@ -250,20 +266,236 @@ export function capTaskNotificationValue(value: string): string {
   return truncateWithHysteresis(value, TASK_NOTIFICATION_CHAR_CAP)
 }
 
+export type ReportingAdmissionResult =
+  | { admitted: true }
+  | { admitted: false; reason: string }
+
+export type EnqueueReportingAdmissionOpts = {
+  /** densable ds `receipt` — coalesced schedules optional UDS drop receipt. */
+  receipt?: 'coalesced' | 'immediate'
+  /** densable ds `ahead` — unshift instead of push. */
+  ahead?: boolean
+}
+
+type PeerQueueOrigin = {
+  kind?: string
+  from?: string
+  name?: string
+  hopChain?: readonly string[]
+  verifiedPeerPid?: number
+  senderTaskId?: string
+  msg_id?: string
+  handback?: boolean
+  flagged?: boolean
+  admissionExempt?: string
+}
+
+/**
+ * densable Mbe — cross-session peer (not subagent handback).
+ * Handback peers carry senderTaskId and skip hop/rate/queue guards.
+ */
+function isCrossSessionPeerOrigin(
+  origin: PeerQueueOrigin | undefined,
+): origin is PeerQueueOrigin & { kind: 'peer' } {
+  return origin?.kind === 'peer' && origin.senderTaskId === undefined
+}
+
+/** densable htt — verified / known peer address → full zo.admit path. */
+function isVerifiedPeerOrigin(origin: PeerQueueOrigin): boolean {
+  return origin.verifiedPeerPid !== undefined || origin.from !== 'unknown'
+}
+
+/** densable Un — count of queued cross-session peer commands. */
+export function countQueuedPeerMessages(): number {
+  let n = 0
+  for (const cmd of commandQueue) {
+    if (isCrossSessionPeerOrigin(cmd.origin as PeerQueueOrigin | undefined)) {
+      n++
+    }
+  }
+  return n
+}
+
+function peerCommandBody(command: QueuedCommand): string {
+  return typeof command.value === 'string'
+    ? command.value
+    : extractTextContent(command.value, '\n')
+}
+
+function reportPeerDrop(opts: {
+  reason: PeerReceiptDropReason
+  from?: string
+  name?: string
+}): void {
+  const who = opts.from ?? 'unknown'
+  const named = opts.name ? ` (@${opts.name})` : ''
+  logForDebugging(`[peer-guard] drop ${opts.reason} from ${who}${named}`, {
+    level: 'warn',
+  })
+}
+
+/**
+ * densable Kr — optional UDS drop receipt when receipt mode is coalesced.
+ * Full Ko trail coalescer not required; sendPeerReceipt is the installed host.
+ */
+function noteCoalescedPeerDropReceipt(
+  command: QueuedCommand,
+  reason: PeerReceiptDropReason,
+): void {
+  const origin = command.origin as PeerQueueOrigin | undefined
+  if (origin?.kind !== 'peer' || typeof origin.from !== 'string') return
+  if (parseAddress(origin.from).scheme !== 'uds') return
+  sendPeerReceipt(
+    {
+      mode: command.mode,
+      agentId: command.agentId,
+      value: typeof command.value === 'string' ? command.value : undefined,
+      origin: {
+        kind: origin.kind,
+        from: origin.from,
+        msg_id: origin.msg_id,
+        verifiedPeerPid: origin.verifiedPeerPid,
+      },
+    },
+    'dropped',
+    {
+      dropReason: reason,
+      ...(origin.msg_id !== undefined
+        ? { droppedMsgIds: [origin.msg_id] }
+        : {}),
+    },
+  )
+}
+
+/**
+ * densable `yr` — admit cross-session peers via zo.checkHopChain / zo.admit /
+ * maxQueuedPeerMessages. Non-peer and handback peers always admit.
+ * Never export minify `yr`.
+ */
+function admitReportingCommand(
+  command: QueuedCommand,
+  receipt: 'coalesced' | 'immediate' = 'coalesced',
+): ReportingAdmissionResult {
+  const origin = command.origin as PeerQueueOrigin | undefined
+  if (!isCrossSessionPeerOrigin(origin)) {
+    return { admitted: true }
+  }
+
+  const resurrected =
+    (command as { admissionExempt?: string }).admissionExempt ===
+      'resurrected' || origin.admissionExempt === 'resurrected'
+  const ownTokens = getOwnHopTokens()
+  const guard = getPeerAdmissionGuard()
+
+  if (!resurrected && !isVerifiedPeerOrigin(origin)) {
+    const hop = guard.checkHopChain(origin.hopChain, ownTokens)
+    if (hop && !hop.admitted) {
+      reportPeerDrop({
+        reason: hop.reason,
+        from: origin.from,
+        name: origin.name,
+      })
+      if (receipt === 'coalesced') {
+        noteCoalescedPeerDropReceipt(command, hop.reason)
+      }
+      return { admitted: false, reason: hop.reason }
+    }
+  }
+
+  if (!resurrected && isVerifiedPeerOrigin(origin)) {
+    const body = peerCommandBody(command)
+    const admitted = guard.admit({
+      // Gold yr: Fr.from!=="unknown"?from:${Fr.from}:pid:${Fr.verifiedPeerPid}
+      senderKey:
+        origin.from !== 'unknown'
+          ? `from:${origin.from}`
+          : `pid:${origin.verifiedPeerPid}`,
+      body,
+      hopChain: origin.hopChain,
+      ownTokens,
+    })
+    if (!admitted.admitted) {
+      reportPeerDrop({
+        reason: admitted.reason,
+        from: origin.from,
+        name: origin.name,
+      })
+      if (receipt === 'coalesced') {
+        noteCoalescedPeerDropReceipt(command, admitted.reason)
+      }
+      return { admitted: false, reason: admitted.reason }
+    }
+  }
+
+  if (
+    countQueuedPeerMessages() >= getPeerAdmissionLimits().maxQueuedPeerMessages
+  ) {
+    reportPeerDrop({
+      reason: 'queue-full',
+      from: origin.from,
+      name: origin.name,
+    })
+    if (receipt === 'coalesced') {
+      noteCoalescedPeerDropReceipt(command, 'queue-full')
+    }
+    return { admitted: false, reason: 'queue-full' }
+  }
+
+  return { admitted: true }
+}
+
+/**
+ * densable `enqueueReportingAdmission` / `ds` — admit-then-push; on peer
+ * handback origin call `recordHandbackDelivery` (m7n). Alias of gold `ds`.
+ * Never export minify `ds`/`yr`.
+ */
+export function enqueueReportingAdmission(
+  command: QueuedCommand,
+  opts: EnqueueReportingAdmissionOpts = {},
+): ReportingAdmissionResult {
+  const admitted = admitReportingCommand(command, opts.receipt ?? 'coalesced')
+  if (!admitted.admitted) return admitted
+
+  const stamped = withMainThreadAgentId(command)
+  const queued: QueuedCommand = {
+    ...stamped,
+    priority: stamped.priority ?? 'next',
+  }
+  if (opts.ahead) commandQueue.unshift(queued)
+  else commandQueue.push(queued)
+
+  const origin = command.origin as PeerQueueOrigin | undefined
+  if (
+    origin?.kind === 'peer' &&
+    origin.handback === true &&
+    origin.senderTaskId !== undefined &&
+    (command as { admissionExempt?: string }).admissionExempt !== 'resurrected'
+  ) {
+    recordHandbackDelivery(origin.senderTaskId, String(command.agentId ?? ''), {
+      flagged: origin.flagged === true,
+    })
+  }
+
+  notifySubscribers()
+  if (!(command as { unlogged?: boolean }).unlogged) {
+    logOperation(
+      'enqueue',
+      typeof stamped.value === 'string' ? stamped.value : undefined,
+    )
+  }
+  return { admitted: true }
+}
+
 /**
  * Add a command to the queue.
  * Used for user-initiated commands (prompt, bash, orphaned-permission).
  * Defaults priority to 'next' (processed before task notifications).
  * densable IT does not stamp agentId; local stamps sticky mi() when omitted.
+ *
+ * densable `xr` → `ds`: enqueue routes through enqueueReportingAdmission.
  */
 export function enqueue(command: QueuedCommand): void {
-  const stamped = withMainThreadAgentId(command)
-  commandQueue.push({ ...stamped, priority: stamped.priority ?? 'next' })
-  notifySubscribers()
-  logOperation(
-    'enqueue',
-    typeof stamped.value === 'string' ? stamped.value : undefined,
-  )
+  enqueueReportingAdmission(command)
 }
 
 /**
@@ -286,12 +518,15 @@ export function promoteMainThreadQueueToNow(): number {
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.
+ * densable jr: admit once via yr, cap task-notification, then push directly —
+ * never through ds, whose second yr would reject the same body as duplicate.
  * densable cf does not stamp agentId; local stamps sticky mi() when omitted.
  * Explicit agentId (owner / subagent) is preserved.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
+  if (!admitReportingCommand(command).admitted) return
+
   // densable Sn: cap task-notification strings via ap(..., Q8n) before push.
-  // Local has no At/admitted gate — do not invent one.
   let queued = command
   if (
     command.mode === 'task-notification' &&
@@ -310,10 +545,12 @@ export function enqueuePendingNotification(command: QueuedCommand): void {
   const stamped = withMainThreadAgentId(queued)
   commandQueue.push({ ...stamped, priority: stamped.priority ?? 'later' })
   notifySubscribers()
-  logOperation(
-    'enqueue',
-    typeof stamped.value === 'string' ? stamped.value : undefined,
-  )
+  if (!(command as { unlogged?: boolean }).unlogged) {
+    logOperation(
+      'enqueue',
+      typeof stamped.value === 'string' ? stamped.value : undefined,
+    )
+  }
 }
 
 const PRIORITY_ORDER: Record<QueuePriority, number> = {
@@ -503,6 +740,55 @@ export function resetCommandQueue(): void {
   commandQueue.length = 0
   snapshot = Object.freeze([])
   inFlightDrainBatch = null
+  cancelPending.clear()
+  cancelPendingAcked.clear()
+}
+
+/**
+ * densable `he` — mark a queued uuid cancelled by the host.
+ * `terminalEmitted:true` also acks (returns true the first time).
+ */
+export function markCancelPending(
+  uuid: string,
+  opts?: { terminalEmitted?: boolean },
+): boolean {
+  if (cancelPending.delete(uuid)) {
+    cancelPending.add(uuid)
+  } else {
+    if (
+      opts?.terminalEmitted !== true &&
+      cancelPending.size >= CANCEL_PENDING_CAP
+    ) {
+      let evict: string | undefined
+      for (const id of cancelPending) {
+        if (!cancelPendingAcked.has(id)) {
+          evict = id
+          break
+        }
+      }
+      if (evict !== undefined) cancelPending.delete(evict)
+    }
+    cancelPending.add(uuid)
+  }
+  if (opts?.terminalEmitted !== true) return false
+  if (cancelPendingAcked.has(uuid)) return false
+  cancelPendingAcked.add(uuid)
+  return true
+}
+
+/** densable `ye` — consume (delete) a pending cancel. */
+export function consumeCancelPending(uuid: string): boolean {
+  return cancelPending.delete(uuid)
+}
+
+/** densable `ke` — consume the terminal-emitted ack. */
+export function consumeCancelPendingAcked(uuid: string): boolean {
+  return cancelPendingAcked.delete(uuid)
+}
+
+/** densable `Se`. */
+export function hasCancelPendingAcked(uuid: string): boolean {
+  return cancelPendingAcked.has(uuid)
 }
 
 /**

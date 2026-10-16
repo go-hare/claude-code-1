@@ -58,6 +58,7 @@ const command = {
   type: 'prompt',
   name: 'commit',
   description: 'Create a git commit',
+  userInvocable: true,
   allowedTools: ALLOWED_TOOLS,
   contentLength: 0, // Dynamic content
   progressMessage: 'creating commit',

@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type { AgentId } from '../../types/ids.js'
 import {
   clearCommandQueue,
+  countQueuedPeerMessages,
   dequeue,
   dequeueAllMatching,
   enqueue,
   enqueuePendingNotification,
+  enqueueReportingAdmission,
   getCommandQueueLength,
   getMainThreadQueueLength,
   hasCommandsInQueue,
@@ -15,15 +17,42 @@ import {
   isSlashCommand,
   peek,
   resetCommandQueue,
+  markCancelPending,
+  consumeCancelPending,
+  consumeCancelPendingAcked,
+  hasCancelPendingAcked,
 } from '../messageQueueManager.js'
+import {
+  appendHopChain,
+  createPeerAdmissionGuard,
+  getOwnHopTokens,
+  getOwnUdsHopToken,
+  hashAddressToHopToken,
+  HOP_CHAIN_CAP,
+  HOP_TOKEN_HEX_LEN,
+  resetPeerAdmissionGuardForTests,
+  setOwnBridgeHopAddressResolver,
+  setOwnHopTokensProviderForTests,
+  setOwnUdsHopAddress,
+} from '../peerAdmission.js'
+import {
+  clearHandbackDeliveriesForTests,
+  getHandbackDelivery,
+} from '../subagentHandback.js'
 
 // Reset module-level queue state between tests
 beforeEach(() => {
   resetCommandQueue()
+  clearHandbackDeliveriesForTests()
+  resetPeerAdmissionGuardForTests()
+  setOwnHopTokensProviderForTests(null)
 })
 
 afterEach(() => {
   resetCommandQueue()
+  clearHandbackDeliveriesForTests()
+  resetPeerAdmissionGuardForTests()
+  setOwnHopTokensProviderForTests(null)
 })
 
 describe('messageQueueManager.isSlashCommand', () => {
@@ -318,5 +347,308 @@ describe('messageQueueManager isQueuedCommandEditable/Visible (densable aJ/U4i)'
       expect(isQueuedCommandEditable(cmd as any)).toBe(false)
       expect(isQueuedCommandVisible(cmd as any)).toBe(true)
     }
+  })
+})
+
+describe('enqueueReportingAdmission densable ds (2.1.289)', () => {
+  test('admits non-peer and pushes with default next priority', () => {
+    const result = enqueueReportingAdmission({
+      value: 'hello',
+      mode: 'prompt',
+    } as any)
+    expect(result).toEqual({ admitted: true })
+    expect(dequeue()!.value).toBe('hello')
+  })
+
+  test('records handback delivery for peer handback origin', () => {
+    const recipient = 'main-agent' as AgentId
+    const result = enqueueReportingAdmission({
+      value: 'handback body',
+      mode: 'prompt',
+      agentId: recipient,
+      origin: {
+        kind: 'peer',
+        handback: true,
+        senderTaskId: 'sender-1',
+        from: 'Explore',
+        flagged: true,
+      },
+    } as any)
+    expect(result).toEqual({ admitted: true })
+    expect(getHandbackDelivery('sender-1', recipient)).toEqual({
+      recipient,
+      flagged: true,
+    })
+    expect(dequeue()!.value).toBe('handback body')
+  })
+
+  test('enqueuePendingNotification pushes directly; handback delivery is ds-only (gold jr)', () => {
+    const recipient = 'owner-1' as AgentId
+    enqueuePendingNotification({
+      value: 'notify',
+      mode: 'task-notification',
+      agentId: recipient,
+      origin: {
+        kind: 'peer',
+        handback: true,
+        senderTaskId: 'sender-2',
+      },
+    } as any)
+    expect(getHandbackDelivery('sender-2', recipient)).toBeUndefined()
+    const cmd = dequeue()!
+    expect(cmd.mode).toBe('task-notification')
+    expect(cmd.priority).toBe('later')
+  })
+
+  test('enqueuePendingNotification admits a verified cross-session peer exactly once', () => {
+    enqueuePendingNotification({
+      value: 'peer note',
+      mode: 'task-notification',
+      origin: {
+        kind: 'peer',
+        from: 'uds:/tmp/b.sock',
+        verifiedPeerPid: 7,
+      },
+    } as any)
+    expect(countQueuedPeerMessages()).toBe(1)
+    expect(dequeue()!.value).toBe('peer note')
+  })
+
+  test('admits verified cross-session peer under hopChain host', () => {
+    const result = enqueueReportingAdmission({
+      value: 'hello peer',
+      mode: 'prompt',
+      origin: {
+        kind: 'peer',
+        from: 'uds:/tmp/a.sock',
+        verifiedPeerPid: 42,
+        hopChain: ['tok-a'],
+      },
+    } as any)
+    expect(result).toEqual({ admitted: true })
+    expect(countQueuedPeerMessages()).toBe(1)
+    expect(dequeue()!.value).toBe('hello peer')
+  })
+
+  test('refuses hop-runaway when hopChain exceeds maxChainLength', () => {
+    const longChain = Array.from({ length: 29 }, (_, i) => `h${i}`)
+    const result = enqueueReportingAdmission({
+      value: 'loop',
+      mode: 'prompt',
+      origin: {
+        kind: 'peer',
+        from: 'unknown',
+        hopChain: longChain,
+      },
+    } as any)
+    expect(result).toEqual({ admitted: false, reason: 'hop-runaway' })
+    expect(hasCommandsInQueue()).toBe(false)
+  })
+
+  test('refuses hop-loop when own tokens appear too often', () => {
+    setOwnHopTokensProviderForTests(() => new Set(['self']))
+    const result = enqueueReportingAdmission({
+      value: 'relayed',
+      mode: 'prompt',
+      origin: {
+        kind: 'peer',
+        from: 'unknown',
+        hopChain: Array.from({ length: 10 }, () => 'self'),
+      },
+    } as any)
+    expect(result).toEqual({ admitted: false, reason: 'hop-loop' })
+    expect(hasCommandsInQueue()).toBe(false)
+  })
+
+  test('q2r: inbox bind stamps HMAC token; hop-loop fires on live K2r', () => {
+    setOwnUdsHopAddress('uds:/tmp/own.sock')
+    const tok = getOwnUdsHopToken()
+    expect(tok).toHaveLength(HOP_TOKEN_HEX_LEN)
+    expect(tok).toMatch(/^[0-9a-f]{24}$/)
+    expect(getOwnHopTokens().has(tok!)).toBe(true)
+    expect(hashAddressToHopToken('uds:/tmp/own.sock')).toBe(tok)
+    const result = enqueueReportingAdmission({
+      value: 'looped',
+      mode: 'prompt',
+      origin: {
+        kind: 'peer',
+        from: 'unknown',
+        hopChain: Array.from({ length: 10 }, () => tok!),
+      },
+    } as any)
+    expect(result).toEqual({ admitted: false, reason: 'hop-loop' })
+  })
+
+  test('jUt: bridge resolver HMAC is in K2r', () => {
+    setOwnBridgeHopAddressResolver(() => 'bridge:cse_abc')
+    const tok = hashAddressToHopToken('bridge:cse_abc')
+    expect(getOwnHopTokens().has(tok)).toBe(true)
+    setOwnBridgeHopAddressResolver(undefined)
+    expect(getOwnHopTokens().has(tok)).toBe(false)
+  })
+
+  test('spe: remote session id HMAC is in K2r', () => {
+    const prevRemote = process.env.CLAUDE_CODE_REMOTE
+    const prevId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
+    process.env.CLAUDE_CODE_REMOTE = '1'
+    process.env.CLAUDE_CODE_REMOTE_SESSION_ID = 'session_abc'
+    const tok = hashAddressToHopToken('bridge:session_abc')
+    expect(getOwnHopTokens().has(tok)).toBe(true)
+    if (prevRemote === undefined) delete process.env.CLAUDE_CODE_REMOTE
+    else process.env.CLAUDE_CODE_REMOTE = prevRemote
+    if (prevId === undefined) delete process.env.CLAUDE_CODE_REMOTE_SESSION_ID
+    else process.env.CLAUDE_CODE_REMOTE_SESSION_ID = prevId
+  })
+
+  test('Tkn appendHopChain caps at zVt and drops empty', () => {
+    expect(appendHopChain(undefined, undefined)).toBeUndefined()
+    const tok = 'a'.repeat(HOP_TOKEN_HEX_LEN)
+    expect(appendHopChain(undefined, tok)).toEqual([tok])
+    const long = Array.from({ length: HOP_CHAIN_CAP + 4 }, (_, i) =>
+      i.toString(16).padStart(HOP_TOKEN_HEX_LEN, '0'),
+    )
+    const capped = appendHopChain(long.slice(0, HOP_CHAIN_CAP + 3), tok)
+    expect(capped).toHaveLength(HOP_CHAIN_CAP)
+    expect(capped?.at(-1)).toBe(tok)
+  })
+
+  test('htt via kernel pid: omitted from still rate/dedups when verifiedPeerPid is set', () => {
+    const origin = {
+      kind: 'peer' as const,
+      from: 'unknown',
+      verifiedPeerPid: 4242,
+    }
+    expect(
+      enqueueReportingAdmission({
+        value: 'pid-dedup',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: true })
+    expect(
+      enqueueReportingAdmission({
+        value: 'pid-dedup',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: false, reason: 'duplicate' })
+    expect(getCommandQueueLength()).toBe(1)
+  })
+
+  test('yr 1:1: missing from with pid is from:undefined, not pid: (gold Fr.from!=="unknown")', () => {
+    const origin = {
+      kind: 'peer' as const,
+      verifiedPeerPid: 99,
+    }
+    expect(
+      enqueueReportingAdmission({
+        value: 'undef-from',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: true })
+    expect(
+      enqueueReportingAdmission({
+        value: 'undef-from',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: false, reason: 'duplicate' })
+    expect(
+      enqueueReportingAdmission({
+        value: 'undef-from',
+        mode: 'prompt',
+        origin: { kind: 'peer', from: 'unknown', verifiedPeerPid: 99 },
+      } as any),
+    ).toEqual({ admitted: true })
+    expect(getCommandQueueLength()).toBe(2)
+  })
+
+  test('refuses duplicate verified peer body inside dedup window', () => {
+    const origin = {
+      kind: 'peer' as const,
+      from: 'uds:/tmp/b.sock',
+      verifiedPeerPid: 7,
+    }
+    expect(
+      enqueueReportingAdmission({
+        value: 'same',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: true })
+    expect(
+      enqueueReportingAdmission({
+        value: 'same',
+        mode: 'prompt',
+        origin,
+      } as any),
+    ).toEqual({ admitted: false, reason: 'duplicate' })
+    expect(getCommandQueueLength()).toBe(1)
+  })
+
+  test('resurrected exempt skips hop refuse but still hits queue-full', () => {
+    resetPeerAdmissionGuardForTests()
+    // Force tiny queue cap via a fresh guard limits override is hard on the
+    // shared singleton — fill to default 50 instead via a local count path:
+    // use createPeerAdmissionGuard only to assert hop exemption locally.
+    const local = createPeerAdmissionGuard({ maxChainLength: 2 })
+    const hop = local.checkHopChain(['a', 'b', 'c'], new Set())
+    expect(hop).toEqual({ admitted: false, reason: 'hop-runaway' })
+
+    const longChain = Array.from({ length: 29 }, (_, i) => `h${i}`)
+    const admitted = enqueueReportingAdmission({
+      value: 'resurrected',
+      mode: 'prompt',
+      admissionExempt: 'resurrected',
+      origin: {
+        kind: 'peer',
+        from: 'unknown',
+        hopChain: longChain,
+      },
+    } as any)
+    expect(admitted).toEqual({ admitted: true })
+    expect(dequeue()!.value).toBe('resurrected')
+  })
+
+  test('refuses queue-full when undelivered peer count hits cap', () => {
+    // Cap is 50 by default — enqueue 50 verified peers with unique bodies.
+    for (let i = 0; i < 50; i++) {
+      const r = enqueueReportingAdmission({
+        value: `peer-${i}`,
+        mode: 'prompt',
+        origin: {
+          kind: 'peer',
+          from: `uds:/tmp/p${i}.sock`,
+          verifiedPeerPid: 100 + i,
+        },
+      } as any)
+      expect(r.admitted).toBe(true)
+    }
+    expect(countQueuedPeerMessages()).toBe(50)
+    const refused = enqueueReportingAdmission({
+      value: 'overflow',
+      mode: 'prompt',
+      origin: {
+        kind: 'peer',
+        from: 'uds:/tmp/overflow.sock',
+        verifiedPeerPid: 999,
+      },
+    } as any)
+    expect(refused).toEqual({ admitted: false, reason: 'queue-full' })
+    expect(getCommandQueueLength()).toBe(50)
+  })
+})
+
+describe('densable 2.1.289 print Kc cancel-pending (he/ye/ke/Se)', () => {
+  test('consumeCancelPending is one-shot; acked only with terminalEmitted', () => {
+    expect(markCancelPending('u1')).toBe(false)
+    expect(hasCancelPendingAcked('u1')).toBe(false)
+    expect(consumeCancelPending('u1')).toBe(true)
+    expect(consumeCancelPending('u1')).toBe(false)
+    expect(markCancelPending('u2', { terminalEmitted: true })).toBe(true)
+    expect(hasCancelPendingAcked('u2')).toBe(true)
+    expect(consumeCancelPendingAcked('u2')).toBe(true)
+    expect(hasCancelPendingAcked('u2')).toBe(false)
   })
 })

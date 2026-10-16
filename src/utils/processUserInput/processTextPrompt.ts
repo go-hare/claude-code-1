@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { setPromptId } from 'src/bootstrap/state.js'
 import type {
   AttachmentMessage,
+  MessageOrigin,
   SystemMessage,
   UserMessage,
 } from 'src/types/message.js'
@@ -24,6 +25,7 @@ export function processTextPrompt(
   uuid?: string,
   permissionMode?: PermissionMode,
   isMeta?: boolean,
+  origin?: MessageOrigin,
 ): {
   messages: (UserMessage | AttachmentMessage | SystemMessage)[]
   shouldQuery: boolean
@@ -83,6 +85,7 @@ export function processTextPrompt(
       imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
       permissionMode,
       isMeta: isMeta || undefined,
+      origin,
     })
 
     return {
@@ -96,6 +99,7 @@ export function processTextPrompt(
     uuid: messageUuid,
     permissionMode,
     isMeta: isMeta || undefined,
+    origin,
   })
 
   return {

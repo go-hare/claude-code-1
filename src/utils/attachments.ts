@@ -865,6 +865,10 @@ export type Attachment =
       from?: { messageId: string; thinkingIndex: number }
     }
   | {
+      /** densable `ln({type:"advisor_stripped"})` — compact KEEP / retry marker. */
+      type: 'advisor_stripped'
+    }
+  | {
       type: 'bagel_console'
       errorCount: number
       warningCount: number

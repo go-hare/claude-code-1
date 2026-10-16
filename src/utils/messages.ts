@@ -166,7 +166,6 @@ import {
 } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js'
 import { TASK_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskCreateTool/constants.js'
-import { TASK_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskOutputTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js'
 import type { PermissionMode } from '../types/permissions.js'
 import { normalizeToolInput, normalizeToolInputForAPI } from './api.js'
@@ -723,6 +722,7 @@ export function createUserMessage({
   turnCompanion,
   replacesSpan,
   sourceToolUseID,
+  promptShellHandOff,
 }: {
   content: string | ContentBlockParam[]
   isMeta?: true
@@ -764,6 +764,14 @@ export function createUserMessage({
   replacesSpan?: true
   /** densable leftover #55 ae @209364706. */
   sourceToolUseID?: string
+  /**
+   * densable `promptShellHandOff` — skill inline `!` shell commands collected
+   * during getPromptForCommand. Skip Be elision when set.
+   */
+  promptShellHandOff?: {
+    agentId: string | null
+    commands: Array<{ tool: string; command: string }>
+  }
 }): UserMessage {
   const m: UserMessage = {
     type: 'user',
@@ -790,6 +798,7 @@ export function createUserMessage({
     turnCompanion,
     replacesSpan,
     sourceToolUseID,
+    ...(promptShellHandOff !== undefined && { promptShellHandOff }),
   }
   return m
 }
@@ -4553,6 +4562,37 @@ const YET_CONTROL_TYPES = new Set([
   'fallback_request',
 ])
 
+/**
+ * Gold ff: live ● preview is text only. Keyed by onStreamingText so a
+ * background subagent stream cannot clobber the REPL preview bag.
+ * Thinking-as-text_delta (proxy / OpenAI-compat) must not first-paint 字.
+ */
+const openStreamPreviewBlock = new WeakMap<
+  (f: (current: string | null) => string | null) => void,
+  string
+>()
+
+function setOpenStreamPreviewBlock(
+  onStreamingText:
+    | ((f: (current: string | null) => string | null) => void)
+    | undefined,
+  type: string | undefined,
+): void {
+  if (!onStreamingText) return
+  if (type === undefined) openStreamPreviewBlock.delete(onStreamingText)
+  else openStreamPreviewBlock.set(onStreamingText, type)
+}
+
+function isOpenThinkingPreviewBlock(
+  onStreamingText:
+    | ((f: (current: string | null) => string | null) => void)
+    | undefined,
+): boolean {
+  if (!onStreamingText) return false
+  const t = openStreamPreviewBlock.get(onStreamingText)
+  return t === 'thinking' || t === 'redacted_thinking'
+}
+
 export function handleMessageFromStream(
   message:
     | Message
@@ -4668,6 +4708,7 @@ export function handleMessageFromStream(
           return
       }
     }
+    setOpenStreamPreviewBlock(onStreamingText, undefined)
     // Capture complete thinking blocks for real-time display in transcript mode
     if (message.type === 'assistant') {
       const assistMsg = message as Message
@@ -4707,6 +4748,7 @@ export function handleMessageFromStream(
 
   if (message.type === 'stream_request_start') {
     onSetStreamMode('requesting')
+    setOpenStreamPreviewBlock(onStreamingText, undefined)
     return
   }
 
@@ -4755,6 +4797,7 @@ export function handleMessageFromStream(
     onStreamingToolUses(d => (d.length > 0 ? [] : d))
     // densable qQs: clear streaming text only when non-null (avoid no-op churn)
     onStreamingText?.(d => (d !== null ? null : d))
+    setOpenStreamPreviewBlock(onStreamingText, undefined)
     // densable qQs: displayTransform.begin(message.id)
     const msgId = (
       streamMsg.event as {
@@ -4769,6 +4812,7 @@ export function handleMessageFromStream(
     displayTransform?.finalize()
     onSetStreamMode('tool-use')
     onStreamingToolUses(() => [])
+    setOpenStreamPreviewBlock(onStreamingText, undefined)
     return
   }
 
@@ -4777,6 +4821,10 @@ export function handleMessageFromStream(
       // densable qQs: content_block_start metrics + clear streaming text
       onApiMetrics?.({ type: 'content_block_start' })
       onStreamingText?.(() => null)
+      setOpenStreamPreviewBlock(
+        onStreamingText,
+        streamMsg.event.content_block.type,
+      )
       if (
         feature('CONNECTOR_TEXT') &&
         isConnectorTextBlock(streamMsg.event.content_block)
@@ -4842,6 +4890,12 @@ export function handleMessageFromStream(
           const deltaText = streamMsg.event.delta.text
           // densable qQs: onUpdateLength(d.length) — char count, not string
           onUpdateLength(deltaText.length)
+          // Gold ff: thinking never feeds the live ● preview. Proxies that
+          // emit thinking as text_delta after content_block_start(thinking)
+          // would first-paint 字 then collapse to Thought for.
+          if (isOpenThinkingPreviewBlock(onStreamingText)) {
+            return
+          }
           // densable MLp=1e6 — appendStreamingTextDelta
           onStreamingText?.(text => appendStreamingTextDelta(text, deltaText))
           // densable qQs: displayTransform.delta
@@ -5929,8 +5983,9 @@ You have exited auto mode. The user may now want to interact more directly. You 
             `Do NOT spawn a duplicate. You will be notified when it completes. You can read partial output at ${attachment.outputFilePath} or send it a message with ${SEND_MESSAGE_TOOL_NAME}.`,
           )
         } else {
+          // densable 2.1.289: no-path running copy points at SendMessage, not TaskOutput.
           parts.push(
-            `Do NOT spawn a duplicate. You will be notified when it completes. You can check its progress with the ${TASK_OUTPUT_TOOL_NAME} tool or send it a message with ${SEND_MESSAGE_TOOL_NAME}.`,
+            `Do NOT spawn a duplicate. You will be notified when it completes. Send it a message with ${SEND_MESSAGE_TOOL_NAME} if you need a progress report before then.`,
           )
         }
         return [
@@ -5958,8 +6013,9 @@ You have exited auto mode. The user may now want to interact more directly. You 
           `Read the output file to retrieve the result: ${attachment.outputFilePath}`,
         )
       } else {
+        // densable 2.1.289: no-path completed copy — SendMessage retrieves result.
         messageParts.push(
-          `You can check its output using the ${TASK_OUTPUT_TOOL_NAME} tool.`,
+          `Send it a message with ${SEND_MESSAGE_TOOL_NAME} to retrieve its result.`,
         )
       }
 
@@ -6073,7 +6129,8 @@ You have exited auto mode. The user may now want to interact more directly. You 
     case 'hook_success':
       if (
         attachment.hookEvent !== 'SessionStart' &&
-        attachment.hookEvent !== 'UserPromptSubmit'
+        attachment.hookEvent !== 'UserPromptSubmit' &&
+        attachment.hookEvent !== 'UserPromptExpansion'
       ) {
         return []
       }
@@ -6555,6 +6612,7 @@ export function createTurnDurationMessage(
   budget?: { tokens: number; limit: number; nudges: number },
   messageCount?: number,
   pendingBackgroundAgentCount?: number,
+  pendingWorkflowCount?: number,
 ): SystemTurnDurationMessage {
   return {
     type: 'system',
@@ -6567,6 +6625,7 @@ export function createTurnDurationMessage(
     ...(pendingBackgroundAgentCount !== undefined
       ? { pendingBackgroundAgentCount }
       : {}),
+    ...(pendingWorkflowCount !== undefined ? { pendingWorkflowCount } : {}),
     timestamp: new Date().toISOString(),
     uuid: randomUUID(),
     isMeta: false,
@@ -6797,9 +6856,14 @@ export function shouldShowUserMessage(
   if (message.isMeta) {
     // densable Ace: channel / observer / observer-activity / peer(senderTaskId)
     // stay visible despite isMeta (brief + default transcript).
-    return isMetaVisibleOrigin(
-      message.origin as { kind?: string; senderTaskId?: string } | undefined,
-    )
+    if (
+      isMetaVisibleOrigin(
+        message.origin as { kind?: string; senderTaskId?: string } | undefined,
+      )
+    ) {
+      return true
+    }
+    return false
   }
   if (message.isVisibleInTranscriptOnly && !isTranscriptMode) return false
   return true
@@ -7661,10 +7725,82 @@ export function ensureToolResultPairing(
   return result
 }
 
+/** densable `UD` / `FFe` — assistant message ids whose advisor blocks strip. */
+export type AdvisorStripPlan = Set<string>
+
 /**
- * Strip advisor blocks from messages. The API rejects server_tool_use blocks
- * with name "advisor" unless the advisor beta header is present.
+ * densable `FFe` — union caller plan with UD(messages).
  */
+export function mergeAdvisorStripPlans(
+  caller: AdvisorStripPlan | undefined,
+  derived: AdvisorStripPlan,
+): AdvisorStripPlan {
+  if (caller === undefined || caller.size === 0) return derived
+  if (derived.size === 0) return caller
+  return new Set([...caller, ...derived])
+}
+
+/**
+ * densable `UD` — ids of assistants before the last advisor_stripped marker.
+ * Semantic export only — never ship minify `UD`.
+ */
+export function buildAdvisorStripPlanFromMessages(
+  messages: readonly Message[],
+): AdvisorStripPlan {
+  const marker = messages.findLastIndex(
+    msg =>
+      msg.type === 'attachment' && msg.attachment.type === 'advisor_stripped',
+  )
+  if (marker === -1) return new Set()
+  const ids: AdvisorStripPlan = new Set()
+  for (let i = 0; i < marker; i++) {
+    const msg = messages[i]
+    if (msg?.type === 'assistant' && typeof msg.message.id === 'string') {
+      ids.add(msg.message.id)
+    }
+  }
+  return ids
+}
+
+/**
+ * densable `C_` — strip advisor blocks from assistants listed in the plan.
+ */
+export function stripAdvisorBlocksFromMessageIds<
+  T extends UserMessage | AssistantMessage | ApiSystemMessage,
+>(messages: T[], ids: AdvisorStripPlan): T[] {
+  if (ids.size === 0) return messages
+  let changed = false
+  const result = messages.map(msg => {
+    if (msg.type === 'api_system' || msg.type !== 'assistant') return msg
+    if (!ids.has(msg.message.id)) return msg
+    const content = Array.isArray(msg.message.content)
+      ? msg.message.content
+      : []
+    const filtered = content.filter(
+      b => typeof b !== 'string' && !isAdvisorBlock(b),
+    )
+    if (filtered.length === content.length) return msg
+    changed = true
+    if (
+      filtered.length === 0 ||
+      filtered.every(
+        b =>
+          b.type === 'thinking' ||
+          b.type === 'redacted_thinking' ||
+          (b.type === 'text' && (!b.text || !b.text.trim())),
+      )
+    ) {
+      filtered.push({
+        type: 'text' as const,
+        text: '[Advisor response]',
+        citations: [],
+      })
+    }
+    return { ...msg, message: { ...msg.message, content: filtered } }
+  })
+  return changed ? result : messages
+}
+
 export function stripAdvisorBlocks<
   T extends UserMessage | AssistantMessage | ApiSystemMessage,
 >(messages: T[]): T[] {
@@ -8046,6 +8182,85 @@ export function isMetaVisibleOrigin(
     if (forcePeer) return true
   }
   return false
+}
+
+/**
+ * densable uM — in-session subagent / observer origin that paints Wr
+ * ("Message from @…") instead of a user bubble.
+ * peer needs senderTaskId (any defined value, not only string).
+ */
+export function isInSessionPeerOrObserverOrigin(
+  origin: { kind?: string; senderTaskId?: unknown } | undefined,
+): boolean {
+  return (
+    (origin?.kind === 'peer' && origin.senderTaskId !== undefined) ||
+    origin?.kind === 'observer'
+  )
+}
+
+/**
+ * densable Messages isItemClickable — queued_command / user-text Wr row.
+ * Gold: uM(origin) — the prompt text never makes a row an agent message.
+ * Session verbose/transcript (W||J) is the caller's skip; per-item expand
+ * must stay clickable so click toggles off. Never `export function tx`.
+ */
+export function isPeerInboundExpandClickable(msg: {
+  type: string
+  origin?: { kind?: string; senderTaskId?: unknown; [key: string]: unknown }
+  attachment?: {
+    type?: string
+    prompt?: unknown
+    origin?: { kind?: string; senderTaskId?: unknown; [key: string]: unknown }
+  }
+  message?: {
+    content?: string | Array<{ type?: string; text?: string }>
+  }
+}): boolean {
+  if (msg.type === 'attachment') {
+    const att = msg.attachment
+    if (att?.type !== 'queued_command') return false
+    return isInSessionPeerOrObserverOrigin(att.origin)
+  }
+  if (msg.type === 'user') {
+    const content = msg.message?.content
+    const block = typeof content === 'string' ? undefined : content?.[0]
+    if (block?.type !== 'text' || typeof block.text !== 'string') {
+      return false
+    }
+    return isInSessionPeerOrObserverOrigin(msg.origin)
+  }
+  return false
+}
+
+/**
+ * densable irr — peer handback/flagged is uncapped Wr (skip ua 5-line cap).
+ */
+export function isPeerHandbackOrFlaggedOrigin(
+  origin: { kind?: string; handback?: unknown; flagged?: unknown } | undefined,
+): boolean {
+  return (
+    origin?.kind === 'peer' &&
+    (origin.handback === true || origin.flagged === true)
+  )
+}
+
+/**
+ * densable BCn — Wr fromName. Peer prefers `name`, else `from`.
+ * Observer falls through to `from`.
+ */
+export function peerOrObserverDisplayName(
+  origin: { kind?: string; name?: unknown; from?: unknown } | undefined,
+): string | undefined {
+  if (!origin) return undefined
+  if (
+    origin.kind === 'peer' &&
+    typeof origin.name === 'string' &&
+    origin.name
+  ) {
+    return origin.name
+  }
+  if (typeof origin.from === 'string' && origin.from) return origin.from
+  return undefined
 }
 
 /**

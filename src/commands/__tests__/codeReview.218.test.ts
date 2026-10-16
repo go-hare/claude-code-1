@@ -160,4 +160,19 @@ describe('resolveSlashSubcommand (densable sdr)', () => {
     expect(resolveSlashSubcommand(cmd, 'high src/a')).toBeNull()
     expect(resolveSlashSubcommand({ name: 'x' } as never, 'ultra')).toBeNull()
   })
+
+  test('subcommandsBareOnly skips redirect when extra args remain', () => {
+    const design = {
+      name: 'design',
+      subcommands: { consent: 'design-consent', sync: 'design-sync' },
+      subcommandsBareOnly: true,
+    } as unknown as Parameters<typeof resolveSlashSubcommand>[0]
+    expect(resolveSlashSubcommand(design, 'consent')).toEqual({
+      targetName: 'design-consent',
+      consumedToken: 'consent',
+      remainingArgs: '',
+    })
+    expect(resolveSlashSubcommand(design, 'consent now')).toBeNull()
+    expect(resolveSlashSubcommand(design, 'sync Acme')).toBeNull()
+  })
 })

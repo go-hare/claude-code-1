@@ -180,6 +180,11 @@ export async function clearConversation({
   loadedNestedMemoryPaths?.clear()
   pendingNestedMemoryTriggers?.clear()
 
+  // densable F7e + Ktn — new conversation: epoch++ and empty hosted Vtn.
+  const { noteArtifactConversationReset, clearedArtifactConversationAppState } =
+    await import('../../services/artifactAutoReact/conversationBoundary.js')
+  noteArtifactConversationReset()
+
   // Clean out necessary items from App State
   if (setAppState) {
     setAppState(prev => {
@@ -216,6 +221,7 @@ export async function clearConversation({
 
       return {
         ...prev,
+        ...clearedArtifactConversationAppState(),
         tasks: nextTasks,
         attribution: createEmptyAttributionState(),
         // densable session_start: clear clickable image path map

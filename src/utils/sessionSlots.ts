@@ -480,12 +480,22 @@ export class InvokedSkills {
   }
 }
 
+/** densable connections() owner — gold BVe.over adoptServer. */
+export type McpConnectionsOwner = {
+  adoptServer: (
+    name: string,
+    client: unknown,
+    opts?: { appendIfAbsent?: boolean },
+  ) => void
+}
+
 /** Official le @178517612 */
 export class McpSessionWiring {
   #e: { name: string; workspaceKey: string }[] = []
   #t: (() => unknown) | undefined
   #n: unknown
   #o: ((e: unknown, t: unknown) => boolean) | undefined
+  #r: McpConnectionsOwner | undefined
   approvedServers(): { name: string; workspaceKey: string }[] {
     return this.#e
   }
@@ -528,6 +538,22 @@ export class McpSessionWiring {
   swapServerTools(e: unknown, t: unknown): boolean {
     if (!this.#o) return false
     return this.#o(e, t)
+  }
+  /** densable registerConnections */
+  registerConnections(e: McpConnectionsOwner): void {
+    this.#r = e
+  }
+  /** densable acquireConnections */
+  acquireConnections(e: McpConnectionsOwner): () => void {
+    if (this.#r) return () => {}
+    this.#r = e
+    return () => {
+      if (this.#r === e) this.#r = undefined
+    }
+  }
+  /** densable connections() */
+  connections(): McpConnectionsOwner | undefined {
+    return this.#r
   }
   reset(): void {
     this.#e = []
@@ -716,6 +742,23 @@ export class SessionOnceLatches {
   }
 }
 
+/**
+ * densable `jVe` worker-checkin bag on SessionScratch (`fe.#x`).
+ * Armed bags always carry `timer` + `taskRegistry` (gold `jVe` shape).
+ * Semantic name only — never export minify `jVe|$Ve|HVe|UVe`.
+ */
+export type WorkerCheckinBag = {
+  timer: ReturnType<typeof setInterval>
+  scheduleMs: number[]
+  pollMs: number
+  armedAtMs: number
+  /** Gold taskRegistry host (`n.all()`). */
+  taskRegistry: { all(): Record<string, unknown> }
+  knownWorkerIds: Set<string>
+  checkinCount: number
+  ticksUntilCheckin: number
+}
+
 /** Official fe @178524094 */
 export class SessionScratch {
   #e = new Map<string, unknown>()
@@ -734,7 +777,12 @@ export class SessionScratch {
   #g = new Set<unknown>()
   #h: number | undefined
   #m: ReturnType<typeof setTimeout> | undefined
-  #f: { timer?: ReturnType<typeof setInterval> } | undefined
+  /**
+   * densable `fe.#x` / workerCheckin bag (`jVe` replaceWorkerCheckin shape).
+   * Timer BODY lives in `subagentSpawnLedger` when schedule + taskRegistry host
+   * are present; otherwise only the slot exists.
+   */
+  #f: WorkerCheckinBag | undefined
   planSlugCache(): Map<string, unknown> {
     return this.#e
   }
@@ -801,12 +849,10 @@ export class SessionScratch {
   ): void {
     this.#m = e
   }
-  workerCheckin(): { timer?: ReturnType<typeof setInterval> } | undefined {
+  workerCheckin(): WorkerCheckinBag | undefined {
     return this.#f
   }
-  replaceWorkerCheckin(
-    e: { timer?: ReturnType<typeof setInterval> } | undefined,
-  ): void {
+  replaceWorkerCheckin(e: WorkerCheckinBag | undefined): void {
     this.#f = e
   }
   reset(): void {
@@ -1967,6 +2013,14 @@ export class CredentialSlots {
   #c: unknown
   #p: unknown = null
   #u: unknown = null
+  /** densable `#i` announcement set. Local `#i` is already gateway auth. */
+  #descriptorAnnouncements = new Set<string>()
+  /**
+   * densable `gatewayTokenFromDescriptor` (`#l` there). Local `#l` is
+   * `gatewayRefreshInFlight`, so this is a separate slot. `resetFdCredentialState`
+   * does not clear it.
+   */
+  #gatewayTokenFromDescriptor: string | null | undefined = undefined
   sessionIngressToken(): string | null | undefined {
     return this.#e
   }
@@ -1996,6 +2050,26 @@ export class CredentialSlots {
   }
   replaceApiKeyFromFd(e: string | null | undefined): void {
     this.#r = e
+  }
+  /** densable `descriptorAnnouncementConsumed` / `Nso`. */
+  descriptorAnnouncementConsumed(e: string): boolean {
+    return this.#descriptorAnnouncements.has(e)
+  }
+  /** densable `markDescriptorAnnouncementConsumed` / `xPn`. */
+  markDescriptorAnnouncementConsumed(e: string): void {
+    this.#descriptorAnnouncements.add(e)
+  }
+  /** Test isolation. Gold has no unmark; the Set otherwise leaks across files. */
+  clearDescriptorAnnouncements(): void {
+    this.#descriptorAnnouncements.clear()
+  }
+  /** densable `gatewayTokenFromDescriptor` / `Vcr`. */
+  gatewayTokenFromDescriptor(): string | null | undefined {
+    return this.#gatewayTokenFromDescriptor
+  }
+  /** densable `replaceGatewayTokenFromDescriptor` / `PPn`. */
+  replaceGatewayTokenFromDescriptor(e: string | null | undefined): void {
+    this.#gatewayTokenFromDescriptor = e
   }
   resetFdCredentialState(): void {
     this.#e = undefined
@@ -2080,6 +2154,8 @@ export class CredentialSlots {
     this.#c = undefined
     this.#p = null
     this.#u = null
+    this.#descriptorAnnouncements.clear()
+    this.#gatewayTokenFromDescriptor = undefined
   }
 }
 

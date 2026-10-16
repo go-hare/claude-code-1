@@ -43,18 +43,19 @@ const {
   emitTaskUpdatedSdk,
   emitThinkingTokensSdk,
   enqueueSdkEvent,
+  resetSdkEventQueueForTests,
 } = await import('../sdkEventQueue.js')
 const { notifyCommandLifecycle } = await import('../commandLifecycle.js')
 
 describe('emitTaskTerminatedSdk (densable lf/c7c)', () => {
   beforeEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
     clearTaskTerminatedSdkGate('t1')
     clearTaskTerminatedSdkGate('t2')
   })
 
   afterEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   test('first terminal bookend enqueues task_notification', () => {
@@ -73,9 +74,8 @@ describe('emitTaskTerminatedSdk (densable lf/c7c)', () => {
       summary: 'Agent "x" finished',
       output_file: '/tmp/out/t1',
     })
-    // Host Jp timestampFromRaw(raw.timestamp) for completedAt / duration.
-    expect(typeof events[0]?.timestamp).toBe('string')
-    expect(Number.isNaN(Date.parse(events[0]!.timestamp))).toBe(false)
+    // densable 2.1.289: task_notification has no wire timestamp.
+    expect(events[0]?.timestamp).toBeUndefined()
   })
 
   test('second emit for same taskId is once-gated (print dual path)', () => {
@@ -130,11 +130,11 @@ describe('emitTaskTerminatedSdk (densable lf/c7c)', () => {
 
 describe('command_lifecycle stream-json (Official 2.1)', () => {
   beforeEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   afterEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   test('notifyCommandLifecycle enqueues started/completed with command uuid', () => {
@@ -166,11 +166,11 @@ describe('command_lifecycle stream-json (Official 2.1)', () => {
 
 describe('thinking_tokens stream-json (Official 2.1)', () => {
   beforeEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   afterEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   test('emitThinkingTokensSdk enqueues cumulative + delta', () => {
@@ -190,11 +190,11 @@ describe('thinking_tokens stream-json (Official 2.1)', () => {
 
 describe('task_updated / task_summary / model_fallback (Official 2.1)', () => {
   beforeEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   afterEach(() => {
-    drainSdkEvents()
+    resetSdkEventQueueForTests()
   })
 
   test('emitTaskUpdatedSdk enqueues wire-safe patch', () => {

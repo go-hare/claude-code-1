@@ -605,13 +605,10 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe('Disable all hooks and statusLine execution'),
       // Official residual — disable `claude agents` agent view.
-      disableAgentView: z
-        .boolean()
-        .optional()
-        .describe(
-          'When true, disable the agent view dashboard (`claude agents`). ' +
-            'Also forced off by CLAUDE_CODE_DISABLE_AGENT_VIEW.',
-        ),
+      disableAgentView: z.boolean().optional().describe(
+        // densable 2.1.289 SEA copy — fleet breadth, not agents-only.
+        'Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1.',
+      ),
       // Official residual — managed policy can force Remote Control off.
       disableRemoteControl: z
         .boolean()

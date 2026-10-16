@@ -51,6 +51,9 @@ describe('#55 GJn truncated recovery (2.1.246)', () => {
       query.indexOf("reason: 'max_output_tokens_recovery'"),
     )
     expect(qjn).toContain('turnCompanion: true')
+    // densable fl — spinner recovering bag on max_output_tokens_recovery continue
+    expect(query).toContain('announceOutputLimitRecovery')
+    expect(query).toContain('setOutputLimitRecovery')
   })
 
   test('ae / replacesSpan / Ze pairing are official #55', () => {

@@ -9,6 +9,7 @@
  * Full enterpriseGateway / TLS trust restore + idp refresh (SJe) denser.
  */
 
+import { readGatewayTokenFromDescriptor } from './authFileDescriptor.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getBootstrapSessionHost } from './sessionRoot.js'
@@ -353,13 +354,23 @@ export function resolveGatewayFromEnv(
     return { status: 'disabled' }
   }
   const baseUrl = env.ANTHROPIC_BASE_URL?.trim()
-  const authToken = env.ANTHROPIC_AUTH_TOKEN?.trim()
+  const rawToken = env.ANTHROPIC_AUTH_TOKEN
+  let authToken = rawToken && rawToken.trim() ? rawToken.trim() : ''
+  // densable vl: ANTHROPIC_AUTH_TOKEN || Het(). Het reads process.env, so a
+  // caller-supplied map does not consume this process's descriptor.
+  if (!authToken && env === process.env) {
+    authToken = readGatewayTokenFromDescriptor()?.trim() ?? ''
+  }
   if (!baseUrl || !authToken) {
-    return {
-      status: 'missing',
-      message:
-        'CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing; ignoring',
+    const message = `CLAUDE_CODE_USE_GATEWAY is set but ${
+      !baseUrl
+        ? 'ANTHROPIC_BASE_URL is missing'
+        : 'no ANTHROPIC_AUTH_TOKEN and no token on a gateway descriptor / snapshot'
+    }; ignoring`
+    if (env === process.env) {
+      logForDebugging(message, { level: 'warn' })
     }
+    return { status: 'missing', message }
   }
   try {
     const url = normalizeGatewayBaseUrl(baseUrl)

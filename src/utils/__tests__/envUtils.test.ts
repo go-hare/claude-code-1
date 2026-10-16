@@ -393,6 +393,20 @@ describe('isBareMode', () => {
     expect(isBareMode()).toBe(true)
   })
 
+  test('gold Or: --bare after -- does not count', () => {
+    delete process.env.CLAUDE_CODE_SIMPLE
+    process.argv.length = 0
+    process.argv.push('node', 'cli', '--', '--bare')
+    expect(isBareMode()).toBe(false)
+  })
+
+  test('gold Or: --bare before -- counts', () => {
+    delete process.env.CLAUDE_CODE_SIMPLE
+    process.argv.length = 0
+    process.argv.push('node', 'cli', '--bare', '--', 'prompt')
+    expect(isBareMode()).toBe(true)
+  })
+
   test('returns false when neither set', () => {
     delete process.env.CLAUDE_CODE_SIMPLE
     // argv doesn't have --bare by default

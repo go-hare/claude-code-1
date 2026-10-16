@@ -12,6 +12,11 @@ import {
 import { applyMainThreadAgentHooks } from './hooks/applyMainThreadAgentHooks.js'
 import { clearSystemPromptSections } from '../constants/systemPromptSections.js'
 import { restoreCostStateForSession } from '../cost-tracker.js'
+import { restoreResumedArtifactFrameState } from '../services/artifactAutoReact/conversationBoundary.js'
+import {
+  extractResumedArtifactFrameSeed,
+  isArtifactResumeSeedEligible,
+} from '../services/artifactAutoReact/resumeFrameExtract.js'
 import type { AppState } from '../state/AppState.js'
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import {
@@ -124,6 +129,17 @@ export function restoreSessionStateFromLog(
     planModeResumeLane?: 'interactive' | 'print' | 'sdk_url'
   },
 ): void {
+  // densable N9e @190201509 / Iun @190201339 — local resume walks XXt.
+  // seedEligible is DPe KEEP (no !g()&&A() host).
+  restoreResumedArtifactFrameState(
+    setAppState,
+    extractResumedArtifactFrameSeed(result.messages ?? [], {
+      origin: 'local',
+      seedEligible: isArtifactResumeSeedEligible(),
+    }),
+    { continuesConversation: true },
+  )
+
   // densable 2.1.214 Ern(Brt(ur), setAppState) — hydrate EndConversation lock
   const endedByModel = Boolean(
     (result as { endedByModel?: boolean }).endedByModel,
@@ -662,18 +678,6 @@ export async function processResumedConversation(
   restoreSessionMetadata(
     opts.forkSession ? { ...result, worktreeSession: undefined } : result,
   )
-
-  if (feature('GOAL') && result.goal) {
-    const { hydrateGoalFromTranscript } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../services/goal/goalStorage.js') as typeof import('../services/goal/goalStorage.js')
-    const goalsMap = new Map<UUID, import('../types/logs.js').GoalState>()
-    const sid = (opts.sessionIdOverride ??
-      result.sessionId ??
-      getSessionId()) as UUID
-    goalsMap.set(sid, result.goal)
-    hydrateGoalFromTranscript(goalsMap, sid)
-  }
 
   if (!opts.forkSession) {
     // Cd back into the worktree the session was in when it last exited.

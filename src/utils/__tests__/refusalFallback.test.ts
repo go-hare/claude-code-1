@@ -359,6 +359,19 @@ describe('silent-arm densables (m1u / w_i / g_i)', () => {
     expect(cascade.visibleModel).toBe('opus-fallback')
     expect(cascade.serverLane).toBeUndefined()
 
+    // densable Tqn preferenceQuestionPending blocks serverLane
+    const pending = planRefusalFallbackArm({
+      currentModel: 'fable',
+      isMainThread: true,
+      requestDialog: () => {},
+      resolveArmedFallbackModel: resolve,
+      refusalFallbackEnabled: true,
+      serverLaneEnabled: true,
+      preferenceQuestionPending: true,
+    })
+    expect(pending.visibleModel).toBe('opus-fallback')
+    expect(pending.serverLane).toBeUndefined()
+
     // densable dkd default when serverLaneEnabled omitted + firstParty inject
     const auto = planRefusalFallbackArm({
       currentModel: 'fable',

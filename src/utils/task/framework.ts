@@ -14,6 +14,7 @@ import {
   type TaskType,
 } from '../../Task.js'
 import type { TaskState } from '../../tasks/types.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import {
   enqueuePendingNotification,
   getCommandQueue,
@@ -204,6 +205,11 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
       spawnDepth?: number
       isObserver?: boolean
       isIdle?: boolean
+      spawnedSubagent?: unknown
+      handbackRecipient?: string
+      handbackReport?: unknown
+      webFetchSavedFiles?: unknown
+      forkedSkillName?: string
     }
     const prevTask = existing as EkgCarry | undefined
     const merged: TaskState =
@@ -236,6 +242,21 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
             ...(typeof prevTask.isIdle === 'boolean'
               ? { isIdle: prevTask.isIdle }
               : {}),
+            ...(prevTask.spawnedSubagent !== undefined
+              ? { spawnedSubagent: prevTask.spawnedSubagent }
+              : {}),
+            ...(prevTask.handbackRecipient !== undefined
+              ? { handbackRecipient: prevTask.handbackRecipient }
+              : {}),
+            ...(prevTask.handbackReport !== undefined
+              ? { handbackReport: prevTask.handbackReport }
+              : {}),
+            ...(prevTask.webFetchSavedFiles !== undefined
+              ? { webFetchSavedFiles: prevTask.webFetchSavedFiles }
+              : {}),
+            ...(prevTask.forkedSkillName !== undefined
+              ? { forkedSkillName: prevTask.forkedSkillName }
+              : {}),
           } as TaskState)
         : task
     nextTasks = { ...prev.tasks, [task.id]: merged }
@@ -254,12 +275,28 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
     task_id: task.id,
     tool_use_id: task.toolUseId,
     description: task.description,
+    subagent_type:
+      'agentType' in task ? (task.agentType as string | undefined) : undefined,
+    is_backgrounded:
+      'isBackgrounded' in task
+        ? (task.isBackgrounded as boolean | undefined)
+        : undefined,
+    spawn_depth:
+      'spawnDepth' in task
+        ? (task.spawnDepth as number | undefined)
+        : undefined,
     task_type: task.type,
     workflow_name:
       'workflowName' in task
         ? (task.workflowName as string | undefined)
         : undefined,
     prompt: 'prompt' in task ? (task.prompt as string) : undefined,
+    skip_transcript:
+      'skipTranscript' in task
+        ? (task.skipTranscript as boolean | undefined)
+        : undefined,
+    ambient:
+      'ambient' in task ? (task.ambient as boolean | undefined) : undefined,
   })
   if (nextTasks) scheduleBgInFlightStamp(nextTasks)
 }
@@ -512,6 +549,37 @@ export function hasLiveAgentKeepaliveChildren(
 }
 
 /**
+ * densable `d9e` — wait-kids after Yq, before handback bounce.
+ * agent: always; workflow: when backgrounded (`a$r` is gold `!1`);
+ * bash: when backgrounded and `tengu_concurrent_shore` (default true).
+ * Never export minify d9e|a$r|GB.
+ */
+export function hasHandbackWaitKids(
+  ownerAgentId: string | undefined | null,
+  getAppState: () => AppState,
+): boolean {
+  if (!ownerAgentId) return false
+  const task = getAppState().tasks?.[ownerAgentId]
+  if (!task || task.type !== 'local_agent') return false
+  const reasons = getKeepaliveReasons(
+    task as { keepaliveReasons?: Set<string> },
+  )
+  const backgrounded = 'isBackgrounded' in task && task.isBackgrounded === true
+  const bashKidsEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_concurrent_shore',
+    true,
+  )
+  for (const reason of reasons) {
+    if (reason.startsWith('agent:')) return true
+    if (backgrounded && reason.startsWith('workflow:')) return true
+    if (backgrounded && bashKidsEnabled && reason.startsWith('bash:')) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * densable Jr (pure status/JXt half): skip async_launched promote when the
  * agent is already non-running and has no live agent: children.
  * Gold full: Jr = Nt==="backgrounded" && !Zt && Vt!==void0 && Vt!=="running" && !JXt
@@ -529,8 +597,11 @@ export function isJrDeadBackgroundPromote(
  *
  * For each `agent:` / `workflow:` / `bash:` reason on the owner:
  * - if a task-notification is still queued for that child+owner → keep
- * - else if child missing OR local_agent/local_workflow notified
- *   OR local_bash notified+terminal → tB detach
+ * - else if child missing OR local_agent notified OR ownerAgentId !== owner
+ *   OR local_workflow notified OR local_bash notified+terminal → tB detach
+ *
+ * densable Yq: `Tn(h)&&(h.notified||h.ownerAgentId!==e)` — a live local_agent
+ * whose owner is missing or not this parent must not hold `agent:` occupancy.
  *
  * 2.1.243 #21: bash: is in the official prefix set (was leftover-omitted).
  * Called before DSu complete so a finishing parent drops children that already
@@ -590,7 +661,8 @@ export function sweepStaleKeepaliveReasons(
     const child = tasks[childId]
     const shouldDetach =
       !child ||
-      (child.type === 'local_agent' && child.notified) ||
+      (child.type === 'local_agent' &&
+        (child.notified || child.ownerAgentId !== ownerAgentId)) ||
       (child.type === 'local_workflow' && child.notified) ||
       (child.type === 'local_bash' &&
         child.notified &&

@@ -42,8 +42,9 @@ import { createAbortController } from '../abortController.js';
 import { getAgentContext } from '../agentContext.js';
 import { createAttachmentMessage, getAttachmentMessages } from '../attachments.js';
 import { logForDebugging } from '../debug.js';
-import { isEnvTruthy } from '../envUtils.js';
-import { AbortError, MalformedCommandError } from '../errors.js';
+import { isCoordinatorMainThread } from '../../coordinator/coordinatorMode.js';
+import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js';
+import { AbortError, errorMessage, MalformedCommandError } from '../errors.js';
 import { getDisplayPath } from '../file.js';
 import { extractResultText, prepareForkedCommandContext } from '../forkedAgent.js';
 import {
@@ -52,6 +53,7 @@ import {
   shouldBackgroundForkedSkill,
 } from '../forkedSkillBackground.js';
 import { getFsImplementation } from '../fsOperations.js';
+import { runUserPromptExpansionHook } from '../hooks.js';
 import { isFullscreenEnvEnabled } from '../fullscreen.js';
 import { isCommandImmediate } from '../immediateCommand.js';
 import { toArray } from '../generators.js';
@@ -74,8 +76,16 @@ import type { ModelAlias } from '../model/aliases.js';
 import { parseToolListFromCLI } from '../permissions/permissionSetup.js';
 import { hasPermissionsToUseTool } from '../permissions/permissions.js';
 import { isOfficialMarketplaceName, parsePluginIdentifier } from '../plugins/pluginIdentifier.js';
+import { resolveTrustedSkillAllowedTools } from '../permissions/skillAllowedToolsTrust.js';
 import { isRestrictedToPluginOnly, isSourceAdminTrusted } from '../settings/pluginOnlyPolicy.js';
-import { isSkillFullyDisabledByOverride, resolveSkillOverrideMode } from '../residualFinalEnvGates.js';
+import { shouldSkipSkillAttachments } from '../skills/skillAttachmentSkip.js';
+import { resolveSkillEffort, resolveSkillExecutionContext } from '../skills/skillExecutionContext.js';
+import { getSkillPromptBlocks } from '../skills/skillPromptHook.js';
+import {
+  isSkillFullyDisabledByOverride,
+  isSkillModelInvocationBlockedByOverride,
+  resolveSkillOverrideMode,
+} from '../residualFinalEnvGates.js';
 import { getInitialSettings } from '../settings/settings.js';
 import { parseSlashCommand } from '../slashCommandParsing.js';
 import { slashCommandEditDistance, suggestSlashCommand } from '../slashCommandSuggest.js';
@@ -89,6 +99,7 @@ import { createAgentId } from '../uuid.js';
 import { finalizeAutonomyRunCompleted, finalizeAutonomyRunFailed } from '../autonomyRuns.js';
 import { getWorkload } from '../workloadContext.js';
 import type { ProcessUserInputBaseResult, ProcessUserInputContext } from './processUserInput.js';
+import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT } from './stackedSlashExpansion.js';
 
 type SlashCommandResult = ProcessUserInputBaseResult & {
   command: Command;
@@ -160,12 +171,24 @@ async function executeForkedSlashCommand(
     replaceCommandRules: true,
     replaceDenyRules: !background,
     deferInvocationRecording: background,
+    // Gold sNt `g?.extractAttachments && !Lje` — slash passes collector when
+    // the caller waits in-line; background fork skips (SkillTool omits it).
+    ...(!background
+      ? {
+          extractAttachments: (skillContent, ctx) =>
+            getAttachmentMessages(skillContent, ctx, null, [], ctx.messages, 'repl_main_thread', {
+              skipSkillDiscovery: true,
+              skipAtMentions: false,
+            }),
+        }
+      : {}),
   });
   const permissionLayers =
     contextLayers.length > 0 ? [...(context.permissionLayers ?? []), ...contextLayers] : context.permissionLayers;
 
-  // Merge skill's effort into the agent definition so runAgent applies it
-  const agentDefinition = command.effort !== undefined ? { ...baseAgent, effort: command.effort } : baseAgent;
+  // Gold `O=e.getEffort?.(s,o)??e.getDefaultEffort?.(s,o)?.value??e.effort`
+  const resolvedEffort = resolveSkillEffort(command, args, context);
+  const agentDefinition = resolvedEffort !== undefined ? { ...baseAgent, effort: resolvedEffort } : baseAgent;
 
   logForDebugging(`Executing forked slash command /${command.name} with agent ${agentDefinition.agentType}`);
 
@@ -570,6 +593,15 @@ function logCmdDispatch(errorCode: 'cmd_parse_failed' | 'cmd_unknown' | 'cmd_una
   });
 }
 
+/** densable `m(O4(name), "cmd_hook_blocked")` — Ze first-command block. */
+function logCmdHookBlocked(commandName: string): void {
+  const feature = builtInCommandNames().has(commandName) ? commandName : 'custom';
+  logEvent('tengu_feature_bad', {
+    feature_name: `cmd_${feature}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    error_code: 'cmd_hook_blocked' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+}
+
 export async function processSlashCommand(
   inputString: string,
   precedingInputBlocks: ContentBlockParam[],
@@ -902,6 +934,8 @@ export function resolveSlashSubcommand(
   const targetName = command.subcommands[token.toLowerCase()];
   if (targetName === undefined) return null;
   const remainingArgs = (n === -1 ? '' : r.slice(n + 1).trimStart()).trim();
+  // densable yen @195499142 — bare-only tokens do not redirect with extra args.
+  if (command.subcommandsBareOnly && remainingArgs !== '') return null;
   return { targetName, consumedToken: token, remainingArgs };
 }
 
@@ -1252,28 +1286,163 @@ async function getMessagesForSlashCommand(
       }
       case 'prompt': {
         try {
-          // Check if command should run as forked sub-agent
-          if (command.context === 'fork') {
-            return await executeForkedSlashCommand(
+          // densable kt @208163281 — peel nested `/skill` tokens off first-command args.
+          const originalRemainder = argsForDispatch;
+          const stackedParse = shouldParseStackedSlash(command)
+            ? parseStackedSlashCommands(
+                originalRemainder,
+                originalRemainder,
+                context.options.commands,
+                _isAlreadyProcessing ? () => true : undefined,
+              )
+            : {
+                stacked: [] as ReturnType<typeof parseStackedSlashCommands>['stacked'],
+                trailingArgs: originalRemainder,
+                capped: false,
+              };
+          const stackedCommands = stackedParse.stacked;
+          const trailingArgs = stackedParse.trailingArgs;
+          if (stackedCommands.length > 0) {
+            logEvent('tengu_stacked_slash_commands', {
+              stacked_count: stackedCommands.length,
+            });
+          }
+          // densable Ze @208164542 — UserPromptExpansion before effort / fork / Le.
+          const expansion = await runUserPromptExpansionHook(command, trailingArgs, context);
+          if ('blocked' in expansion) {
+            logCmdHookBlocked(command.name);
+            return { ...expansion.blocked, command };
+          }
+          // densable user-slash: onUserTypedArgs then getDefaultEffort notice
+          // only when getEffort is undefined. Fork splices notice at [1];
+          // Le pushes it after the load result. No N9 here (289 dropped 247).
+          let effortNotice: ReturnType<typeof createSystemMessage> | undefined;
+          if (!context.options.isNonInteractiveSession) {
+            command.onUserTypedArgs?.(trailingArgs, context);
+            if (command.getEffort?.(trailingArgs, context) === undefined) {
+              const notice = command.getDefaultEffort?.(trailingArgs, context)?.notice;
+              if (notice) {
+                effortNotice = createSystemMessage(notice, 'notice');
+              }
+            }
+          }
+          // densable `k_n(...)==="fork"&&!IQ(o)` — coordinator main falls through to Le.
+          if (
+            resolveSkillExecutionContext(command, trailingArgs, context) === 'fork' &&
+            !isCoordinatorMainThread(context.agentId)
+          ) {
+            const forked = await executeForkedSlashCommand(
               command,
-              argsForDispatch,
+              trailingArgs,
               context,
               precedingInputBlocks,
               setToolJSX,
               canUseTool ?? hasPermissionsToUseTool,
               autonomy,
             );
+            if (expansion.hookMessages.length > 0) {
+              forked.messages.splice(1, 0, ...expansion.hookMessages);
+            }
+            if (effortNotice) {
+              forked.messages.splice(1, 0, effortNotice);
+            }
+            return forked;
           }
 
-          return await getMessagesForPromptSlashCommand(
+          const loaded = await getMessagesForPromptSlashCommand(
             command,
-            argsForDispatch,
+            trailingArgs,
             context,
             precedingInputBlocks,
             imageContentBlocks,
             uuid,
+            expansion.hookMessages,
             modelScheduledOrigin,
           );
+          if (stackedCommands.length > 0) {
+            const head = loaded.messages[0];
+            if (head?.type === 'user' && !head.isMeta) {
+              (head as { stackedOriginalInput?: string }).stackedOriginalInput =
+                `/${command.name} ${originalRemainder}`;
+            }
+          }
+          for (const stackedCommand of stackedCommands) {
+            try {
+              // densable Ze on each stacked skill; blocked → warning + continue.
+              const stackedExpansion = await runUserPromptExpansionHook(stackedCommand, trailingArgs, context);
+              if ('blocked' in stackedExpansion) {
+                loaded.messages.push(
+                  createSystemMessage(
+                    `Stacked skill /${getCommandName(stackedCommand)} blocked by UserPromptExpansion hook`,
+                    'warning',
+                  ),
+                );
+                continue;
+              }
+              if (!context.options.isNonInteractiveSession) {
+                stackedCommand.onUserTypedArgs?.(trailingArgs, context);
+                if (stackedCommand.getEffort?.(trailingArgs, context) === undefined) {
+                  const stackedNotice = stackedCommand.getDefaultEffort?.(trailingArgs, context)?.notice;
+                  if (stackedNotice) {
+                    loaded.messages.push(createSystemMessage(stackedNotice, 'notice'));
+                  }
+                }
+              }
+              if (stackedCommand.type === 'prompt' && stackedCommand.userInvocable !== false) {
+                recordSkillUsage(stackedCommand.name);
+              }
+              if (stackedCommand.pluginInfo) {
+                incrementPluginUsage(stackedCommand.pluginInfo.repository);
+              }
+              if (!(stackedCommand.isMcp && stackedCommand.loadedFrom !== 'mcp')) {
+                logEvent('tengu_input_command', {
+                  input: stackedCommand.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  invocation_trigger: 'user-slash' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              }
+              const next = await getMessagesForPromptSlashCommand(
+                stackedCommand,
+                trailingArgs,
+                context,
+                [],
+                [],
+                undefined,
+                stackedExpansion.hookMessages,
+                modelScheduledOrigin,
+              );
+              const stackedHead = next.messages[0];
+              if (stackedHead?.type === 'user' && !stackedHead.isMeta) {
+                (stackedHead as { stackedExpansion?: boolean }).stackedExpansion = true;
+              }
+              loaded.messages.push(...next.messages);
+              loaded.allowedTools = [...(loaded.allowedTools ?? []), ...(next.allowedTools ?? [])];
+              loaded.disallowedTools = [...(loaded.disallowedTools ?? []), ...(next.disallowedTools ?? [])];
+              loaded.model = next.model ?? loaded.model;
+              loaded.effort = next.effort ?? loaded.effort;
+            } catch (stackedError) {
+              if (stackedError instanceof MalformedCommandError) throw stackedError;
+              logError(stackedError);
+              logForDebugging('stacked slash command expansion threw');
+              loaded.messages.push(
+                createSystemMessage(
+                  `Stacked skill /${getCommandName(stackedCommand)} failed to load: ${errorMessage(stackedError)}`,
+                  'warning',
+                ),
+              );
+            }
+          }
+          if (stackedParse.capped) {
+            loaded.messages.push(
+              createSystemMessage(
+                `Stacked command limit (${STACKED_SLASH_LIMIT}) reached — remaining input passed as arguments`,
+                'warning',
+              ),
+            );
+          }
+          if (effortNotice) {
+            loaded.messages.push(effortNotice);
+          }
+          return loaded;
         } catch (e) {
           // Handle abort errors specially to show proper "Interrupted" message
           if (e instanceof AbortError) {
@@ -1384,6 +1553,8 @@ export async function processPromptSlashCommand(
   commands: Command[],
   context: ToolUseContext,
   imageContentBlocks: ContentBlockParam[] = [],
+  /** densable `I` / `readOnlySkillLoad` — Skill tool passes `IQ(context)`. */
+  readOnlySkillLoad = false,
 ): Promise<SlashCommandResult> {
   const command = findCommand(commandName, commands);
   if (!command) {
@@ -1394,7 +1565,17 @@ export async function processPromptSlashCommand(
       `Unexpected ${command.type} command. Expected 'prompt' command. Use /${commandName} directly in the main conversation.`,
     );
   }
-  return getMessagesForPromptSlashCommand(command, args, context, [], imageContentBlocks);
+  return getMessagesForPromptSlashCommand(
+    command,
+    args,
+    context,
+    [],
+    imageContentBlocks,
+    undefined,
+    [],
+    undefined,
+    readOnlySkillLoad,
+  );
 }
 
 async function getMessagesForPromptSlashCommand(
@@ -1404,20 +1585,73 @@ async function getMessagesForPromptSlashCommand(
   precedingInputBlocks: ContentBlockParam[] = [],
   imageContentBlocks: ContentBlockParam[] = [],
   uuid?: string,
+  /** densable Le `g` — UserPromptExpansion hookMessages. */
+  hookMessages: SlashCommandResult['messages'] = [],
   /** densable: stamp options.modelScheduledOrigin for getPromptForCommand. */
   modelScheduledOrigin?: boolean,
+  /** densable `I` — Skill tool passes `IQ(context)`. */
+  readOnlySkillLoad = false,
 ): Promise<SlashCommandResult> {
-  // In coordinator mode (main thread only), skip loading the full skill content
-  // and permissions. The coordinator only has Agent + TaskStop tools, so the
-  // skill content and allowedTools are useless. Instead, send a brief summary
-  // telling the coordinator how to delegate this skill to a worker.
-  //
-  // Workers run in-process and inherit CLAUDE_CODE_COORDINATOR_MODE from the
-  // parent env, so we also check !context.agentId: agentId is only set for
-  // subagents, letting workers fall through to getPromptForCommand and receive
-  // the real skill content when they invoke the Skill tool.
-  if (feature('COORDINATOR_MODE') && isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) && !context.agentId) {
+  // densable `Le`: `IQ(o)&&!I` — user slash on coordinator main summarizes;
+  // Skill tool passes I so this gate is false and the body loads read-only.
+  if (isCoordinatorMainThread(context.agentId) && !readOnlySkillLoad) {
     const metadata = formatCommandLoadingMetadata(command, args);
+    const mcpPrompt = command.isMcp === true && command.loadedFrom !== 'mcp';
+    const overrideBlocked = isSkillModelInvocationBlockedByOverride(
+      resolveSkillOverrideMode(command, {
+        skillOverrides: getInitialSettings().skillOverrides,
+        settingsDisableBundledSkills: getInitialSettings().disableBundledSkills,
+      }),
+    );
+    if (command.disableModelInvocation || mcpPrompt || overrideBlocked) {
+      const parts: string[] = [
+        mcpPrompt
+          ? `"/${command.name}" is an MCP prompt and cannot run in coordinator mode: the coordinator does not load prompt content, and workers cannot invoke MCP prompts via the ${SKILL_TOOL_NAME} tool.`
+          : `Skill "/${command.name}" is user-invocable only (${command.disableModelInvocation ? 'disable-model-invocation' : 'disabled for model invocation in settings'}) and cannot run in coordinator mode: the coordinator does not load skill content, and workers cannot invoke it via the ${SKILL_TOOL_NAME} tool.`,
+      ];
+      if (command.description) {
+        parts.push(`Description: ${command.description}`);
+      }
+      const liveSubcommands = Object.entries(command.subcommands ?? {})
+        .filter(([, target]) => {
+          const resolved = findCommand(target, context.options.commands ?? []);
+          if (!resolved || !isCommandEnabled(resolved)) return false;
+          if (resolved.disableModelInvocation) return false;
+          if (
+            isSkillModelInvocationBlockedByOverride(
+              resolveSkillOverrideMode(resolved, {
+                skillOverrides: getInitialSettings().skillOverrides,
+                settingsDisableBundledSkills: getInitialSettings().disableBundledSkills,
+              }),
+            )
+          ) {
+            return false;
+          }
+          return !(resolved.isMcp && resolved.loadedFrom !== 'mcp');
+        })
+        .map(([name]) => name);
+      if (liveSubcommands.length > 0) {
+        parts.push(
+          `Note: the subcommands ${liveSubcommands.map(name => `"/${command.name} ${name}"`).join(', ')} route to their own dedicated commands and DO still work when the user types them directly in the terminal (remote-control clients gate some commands separately).`,
+        );
+      }
+      parts.push(
+        `\nDo not instruct workers to invoke this via the ${SKILL_TOOL_NAME} tool — it will be refused. Tell the user that ${liveSubcommands.length > 0 ? `/${command.name} itself (beyond the subcommands above) is` : `the /${command.name} command is`} unavailable in coordinator mode. If — and only if — the underlying task is achievable with the tools workers actually hold, you may brief a worker to do that work directly; do not promise this otherwise.`,
+      );
+      return {
+        messages: [
+          createUserMessage({ content: metadata, uuid }),
+          createUserMessage({
+            content: [{ type: 'text', text: parts.join('\n') }],
+            isMeta: true,
+          }),
+          ...hookMessages,
+        ],
+        shouldQuery: true,
+        disallowedTools: parseToolListFromCLI(command.disallowedTools ?? []),
+        command,
+      };
+    }
     const parts: string[] = [`Skill "/${command.name}" is available for workers.`];
     if (command.description) {
       parts.push(`Description: ${command.description}`);
@@ -1425,42 +1659,47 @@ async function getMessagesForPromptSlashCommand(
     if (command.whenToUse) {
       parts.push(`When to use: ${command.whenToUse}`);
     }
-    const skillAllowedTools = command.allowedTools ?? [];
+    const skillAllowedTools = await resolveTrustedSkillAllowedTools(command);
     if (skillAllowedTools.length > 0) {
       parts.push(`This skill grants workers additional tool permissions: ${skillAllowedTools.join(', ')}`);
     }
     parts.push(
       `\nInstruct a worker to use this skill by including "Use the /${command.name} skill" in your Agent prompt. The worker has access to the Skill tool and will receive the skill's content and permissions when it invokes it.`,
     );
-    const summaryContent: ContentBlockParam[] = [{ type: 'text', text: parts.join('\n') }];
     return {
       messages: [
         createUserMessage({ content: metadata, uuid }),
-        createUserMessage({ content: summaryContent, isMeta: true }),
+        createUserMessage({
+          content: [{ type: 'text', text: parts.join('\n') }],
+          isMeta: true,
+        }),
+        ...hookMessages,
       ],
       shouldQuery: true,
-      model: command.model,
-      effort: command.effort,
+      disallowedTools: parseToolListFromCLI(command.disallowedTools ?? []),
       command,
     };
   }
 
-  // densable: getPromptForCommand(t, a?{...r,options:{...r.options,modelScheduledOrigin:!0}}:r)
-  const promptContext = modelScheduledOrigin
-    ? {
-        ...context,
-        options: {
-          ...context.options,
-          modelScheduledOrigin: true as const,
-        },
-      }
-    : context;
-  const result = await command.getPromptForCommand(args, promptContext);
+  const promptShellHandOff: Array<{ tool: string; command: string }> = [];
+  const result = await getSkillPromptBlocks(command, args, {
+    ...context,
+    promptShellHandOff,
+    ...((modelScheduledOrigin || readOnlySkillLoad) && {
+      options: {
+        ...context.options,
+        ...(modelScheduledOrigin ? { modelScheduledOrigin: true as const } : {}),
+        ...(readOnlySkillLoad ? { isSkillPreload: true, readOnlySkillLoad: true } : {}),
+      },
+    }),
+  });
 
   // Register skill hooks if defined. Under ["hooks"]-only (skills not locked),
   // user skills still load and reach this point — block hook REGISTRATION here
   // where source is known. Mirrors the agent frontmatter gate in runAgent.ts.
-  const hooksAllowedForThisSkill = !isRestrictedToPluginOnly('hooks') || isSourceAdminTrusted(command.source);
+  // densable: `(!Id("hooks")||V2(source))&&!I`
+  const hooksAllowedForThisSkill =
+    (!isRestrictedToPluginOnly('hooks') || isSourceAdminTrusted(command.source)) && !readOnlySkillLoad;
   if (command.hooks && hooksAllowedForThisSkill) {
     const sessionId = getSessionId();
     registerSkillHooks(
@@ -1482,13 +1721,35 @@ async function getMessagesForPromptSlashCommand(
     .join('\n\n');
   addInvokedSkill(command.name, skillPath, skillContent, getAgentContext()?.agentId ?? null);
 
+  if (context.options) {
+    context.options.activeSkill = command.unqualifiedName ?? command.name;
+  }
+
   const metadata = formatCommandLoadingMetadata(command, args);
 
-  const additionalAllowedTools = parseToolListFromCLI(command.allowedTools ?? []);
+  const additionalAllowedTools = readOnlySkillLoad
+    ? []
+    : parseToolListFromCLI(await resolveTrustedSkillAllowedTools(command));
   // densable 2.1.229 — command.disallowedTools → alwaysDenyRules.command
   const additionalDisallowedTools = parseToolListFromCLI(
     command.type === 'prompt' ? (command.disallowedTools ?? []) : [],
   );
+  if (additionalDisallowedTools.length > 0) {
+    context.setToolPermissionContext(prev => {
+      const current = prev.alwaysDenyRules.command ?? [];
+      const next = [...new Set([...current, ...additionalDisallowedTools])];
+      if (next.length === current.length && next.every((value, index) => value === current[index])) {
+        return prev;
+      }
+      return {
+        ...prev,
+        alwaysDenyRules: {
+          ...prev.alwaysDenyRules,
+          command: next,
+        },
+      };
+    });
+  }
 
   // Create content for the main message, including any pasted images
   const mainMessageContent: ContentBlockParam[] =
@@ -1502,31 +1763,35 @@ async function getMessagesForPromptSlashCommand(
   // intent, and a large SKILL.md (e.g. 110KB) would fire chunked AKI queries
   // adding seconds of latency to every skill invocation.
   // densable 2.1.228 #12 xTt: hardened synced/MCP skill bodies must not expand @.
-  let skipAtMentions = command.loadedFrom === 'mcp';
-  if (command.loadedFrom === 'syncedSkills' || command.loadedFrom === 'mcp') {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const harden =
-        require('../../skills/syncedSkillsHarden.js') as typeof import('../../skills/syncedSkillsHarden.js');
-      skipAtMentions = harden.shouldHardenSkillBody(command.loadedFrom);
-    } catch {
-      skipAtMentions = true;
+  // densable: skip attachments when I || modelScheduledOrigin (I||C) OR Lje(e).
+  let attachmentMessages: AttachmentMessage[] = [];
+  if (!readOnlySkillLoad && !modelScheduledOrigin && !shouldSkipSkillAttachments(command)) {
+    let skipAtMentions = command.loadedFrom === 'mcp';
+    if (command.loadedFrom === 'syncedSkills' || command.loadedFrom === 'mcp') {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const harden =
+          require('../../skills/syncedSkillsHarden.js') as typeof import('../../skills/syncedSkillsHarden.js');
+        skipAtMentions = harden.shouldHardenSkillBody(command.loadedFrom);
+      } catch {
+        skipAtMentions = true;
+      }
     }
+    attachmentMessages = await toArray(
+      getAttachmentMessages(
+        result
+          .filter((block): block is TextBlockParam => block.type === 'text')
+          .map(block => block.text)
+          .join(' '),
+        context,
+        null,
+        [], // queuedCommands - handled by query.ts for mid-turn attachments
+        context.messages,
+        'repl_main_thread',
+        { skipSkillDiscovery: true, skipAtMentions },
+      ),
+    );
   }
-  const attachmentMessages = await toArray(
-    getAttachmentMessages(
-      result
-        .filter((block): block is TextBlockParam => block.type === 'text')
-        .map(block => block.text)
-        .join(' '),
-      context,
-      null,
-      [], // queuedCommands - handled by query.ts for mid-turn attachments
-      context.messages,
-      'repl_main_thread',
-      { skipSkillDiscovery: true, skipAtMentions },
-    ),
-  );
 
   const messages = [
     createUserMessage({
@@ -1536,8 +1801,15 @@ async function getMessagesForPromptSlashCommand(
     createUserMessage({
       content: mainMessageContent,
       isMeta: true,
+      ...(promptShellHandOff.length > 0 && {
+        promptShellHandOff: {
+          agentId: context.agentId ?? null,
+          commands: promptShellHandOff,
+        },
+      }),
     }),
     ...attachmentMessages,
+    ...hookMessages,
     createAttachmentMessage({
       type: 'command_permissions',
       allowedTools: additionalAllowedTools,
@@ -1551,7 +1823,7 @@ async function getMessagesForPromptSlashCommand(
     allowedTools: additionalAllowedTools,
     disallowedTools: additionalDisallowedTools,
     model: command.model,
-    effort: command.effort,
+    effort: resolveSkillEffort(command, args, context),
     command,
   };
 }

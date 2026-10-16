@@ -49,6 +49,33 @@ export function getAgentViewDisabledReason(
   return null
 }
 
+/**
+ * densable `at` — argv carries nothing but debug flags. Gold only honors
+ * `defaultToAgentsView` on such a bare launch with stdin and stdout on a TTY;
+ * any prompt, flag, or subcommand keeps the REPL path.
+ */
+export function isBareLaunchArgv(args: readonly string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (
+      arg === '--debug' ||
+      arg === '-d' ||
+      arg === '--debug-to-stderr' ||
+      arg === '-d2e' ||
+      arg.startsWith('--debug=') ||
+      arg.startsWith('--debug-file=')
+    ) {
+      continue
+    }
+    if (arg === '--debug-file' && i + 1 < args.length) {
+      i++
+      continue
+    }
+    return false
+  }
+  return true
+}
+
 export function isAlternateScreenDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

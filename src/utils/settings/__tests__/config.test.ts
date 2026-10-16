@@ -513,3 +513,19 @@ describe('gemini settings', () => {
     expect(result.success).toBe(true)
   })
 })
+
+describe('disableAgentView densable 2.1.289', () => {
+  test('describe mentions --bg / daemon breadth', () => {
+    const schema = SettingsSchema()
+    const desc = schema.shape.disableAgentView.description
+    expect(desc).toContain('--bg')
+    expect(desc).toContain('claude agents')
+    expect(desc).toContain('CLAUDE_CODE_DISABLE_AGENT_VIEW=1')
+  })
+
+  test('accepts boolean disableAgentView', () => {
+    expect(SettingsSchema().safeParse({ disableAgentView: true }).success).toBe(
+      true,
+    )
+  })
+})

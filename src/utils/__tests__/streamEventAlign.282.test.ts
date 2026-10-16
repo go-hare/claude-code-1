@@ -158,6 +158,94 @@ describe('isNarrationThinkingBlock', () => {
       }),
     ).toBe(true)
   })
+
+  test('thinking-block text_delta does not feed live preview', () => {
+    let preview: string | null = null
+    const onStreamingText = (f: (c: string | null) => string | null) => {
+      preview = f(preview)
+    }
+    handleMessageFromStream(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '' },
+        },
+      } as never,
+      () => {},
+      () => {},
+      () => {},
+      () => [],
+      undefined,
+      undefined,
+      undefined,
+      onStreamingText,
+    )
+    handleMessageFromStream(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: '先出字' },
+        },
+      } as never,
+      () => {},
+      () => {},
+      () => {},
+      () => [],
+      undefined,
+      undefined,
+      undefined,
+      onStreamingText,
+    )
+    expect(preview).toBeNull()
+  })
+
+  test('text-block text_delta still feeds live preview', () => {
+    let preview: string | null = null
+    const onStreamingText = (f: (c: string | null) => string | null) => {
+      preview = f(preview)
+    }
+    handleMessageFromStream(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        },
+      } as never,
+      () => {},
+      () => {},
+      () => {},
+      () => [],
+      undefined,
+      undefined,
+      undefined,
+      onStreamingText,
+    )
+    handleMessageFromStream(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'hello' },
+        },
+      } as never,
+      () => {},
+      () => {},
+      () => {},
+      () => [],
+      undefined,
+      undefined,
+      undefined,
+      onStreamingText,
+    )
+    expect(preview as string | null).toBe('hello')
+  })
 })
 
 function narrationSignature(): string {

@@ -238,6 +238,11 @@ export type AgentMetadata = {
    * Aye re-registers when registry entry is missing after cold resume.
    */
   name?: string
+  /**
+   * densable Ywo witness — skill that launched this background agent.
+   * Cold resume reads this when the live task is gone.
+   */
+  forkedSkillName?: string
 }
 
 /**
@@ -250,6 +255,7 @@ export const AGENT_METADATA_PRESERVE_KEYS = [
   'observerStopped',
   'observerTaskId',
   'armingPermissionMode',
+  'forkedSkillName',
 ] as const satisfies ReadonlyArray<keyof AgentMetadata>
 
 /**

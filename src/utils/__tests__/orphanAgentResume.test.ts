@@ -17,6 +17,9 @@ import {
   ORPHAN_AUTO_RESUME_MAX_AGE_MS,
   ORPHAN_SHELL_STOPPED_SUMMARY,
   ORPHAN_SUMMARY_PREFIX,
+  emitWorkerRestartOrphanStopped,
+  formatWorkerRestartOrphanReminder,
+  mergeRestoredWorkerRestartOrphans,
   processOrphanAgentCandidates,
   processOrphanShells,
   processOrphanWorkflows,
@@ -328,6 +331,63 @@ describe('Hqb / Dqb shell & workflow orphans', () => {
     const dqbBody = src.slice(dqb, dqb + 2200)
     expect(dqbBody).toContain('emitOrphanLf')
     expect(dqbBody).toContain('emitSdk: false')
+  })
+
+  test('emitOrphanLf opts include reason worker_restart for print restart path', () => {
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { join } = require('path') as typeof import('path')
+    const src = readFileSync(
+      join(import.meta.dirname, '../orphanAgentResume.ts'),
+      'utf8',
+    )
+    expect(src).toContain("reason?: 'worker_restart'")
+    expect(src).toContain('reason: opts?.reason')
+    expect(src).toContain('emitWorkerRestartOrphanStopped')
+    expect(src).toContain('Stopped by a worker restart:')
+    expect(src).toContain("reason: 'worker_restart'")
+  })
+
+  test('mergeRestoredWorkerRestartOrphans prefers description and dedupes', () => {
+    const merged = mergeRestoredWorkerRestartOrphans(
+      [{ task_id: 'a', description: 'from-running' }, { task_id: 'b' }],
+      [{ task_id: 'a' }, { task_id: 'c', description: 'pending' }],
+    )
+    expect(merged).toEqual([
+      { task_id: 'a', description: 'from-running' },
+      { task_id: 'c', description: 'pending' },
+      { task_id: 'b' },
+    ])
+  })
+
+  test('formatWorkerRestartOrphanReminder lists stopped tasks', () => {
+    const body = formatWorkerRestartOrphanReminder([
+      { task_id: 't1', description: 'watch logs' },
+      { task_id: 't2' },
+    ])
+    expect(body).toContain('container was restarted')
+    expect(body).toContain('watch logs')
+    expect(body).toContain('(no description)')
+    expect(body).toContain('task t1')
+  })
+
+  test('emitWorkerRestartOrphanStopped passes reason worker_restart to SDK', async () => {
+    const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
+      '../sdkEventQueue.js'
+    )
+    clearTaskTerminatedSdkGate('bg-1')
+    drainSdkEvents()
+    emitWorkerRestartOrphanStopped('bg-1', 'shell watch')
+    const events = drainSdkEvents()
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'bg-1',
+      status: 'stopped',
+      reason: 'worker_restart',
+      summary: 'Stopped by a worker restart: shell watch',
+    })
+    clearTaskTerminatedSdkGate('bg-1')
   })
 
   test('Dqb workflow summary includes resume hint', () => {

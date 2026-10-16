@@ -17,6 +17,32 @@ export const HIDE_SETTINGS_HINT_ENTRYPOINTS = new Set([
   'remote_baku',
 ])
 
+/**
+ * densable Ilr / snt — remote host entrypoints that skip the
+ * refusal-fallback preference ask (Ba). Broader than cfm.
+ */
+export const REMOTE_PREFERENCE_PROMPT_ENTRYPOINTS = new Set([
+  'remote',
+  'remote_baku',
+  'remote_cowork',
+  'remote_trigger',
+  'remote_cowork_trigger',
+  'remote_desktop',
+  'remote_mobile',
+  'remote_projects',
+  'claude_in_slack',
+  'claude-in-slack',
+  'claude-in-teams',
+])
+
+/** densable snt — CLAUDE_CODE_ENTRYPOINT is in Ilr. */
+export function isRemotePreferencePromptEntrypoint(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const entry = env.CLAUDE_CODE_ENTRYPOINT
+  return entry !== undefined && REMOTE_PREFERENCE_PROMPT_ENTRYPOINTS.has(entry)
+}
+
 export function shouldShowSettingsHint(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

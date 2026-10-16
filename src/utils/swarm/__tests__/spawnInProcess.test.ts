@@ -7,6 +7,7 @@ import { createTask, getTask, listTasks } from '../../tasks'
 import { readMailbox, writeToMailbox } from '../../teammateMailbox'
 import {
   killInProcessTeammateByAgentId,
+  resolveInProcessTeammatePermissionMode,
   spawnInProcessTeammate,
 } from '../spawnInProcess'
 
@@ -67,6 +68,7 @@ describe('killInProcessTeammateByAgentId', () => {
     expect(result.taskId).toBeString()
     expect(state.tasks[result.taskId!].type).toBe('in_process_teammate')
     expect(state.tasks[result.taskId!].identity.agentId).toBe('worker@alpha')
+    expect(state.tasks[result.taskId!].permissionMode).toBe('default')
     expect(state.tasks[result.taskId!].messages).toEqual([])
 
     await writeToMailbox(
@@ -207,5 +209,53 @@ describe('killInProcessTeammateByAgentId', () => {
       getTaskListId(),
     )
     expect(resolved).toBe('alpha')
+  })
+})
+
+describe('densable M() in-process teammate permission stamp', () => {
+  test('plan required wins', () => {
+    expect(resolveInProcessTeammatePermissionMode('acceptEdits', true)).toBe(
+      'plan',
+    )
+  })
+
+  test('session plan or dontAsk demotes to default', () => {
+    expect(resolveInProcessTeammatePermissionMode('plan', false)).toBe(
+      'default',
+    )
+    expect(resolveInProcessTeammatePermissionMode('dontAsk', false)).toBe(
+      'default',
+    )
+  })
+
+  test('other session modes pass through', () => {
+    expect(resolveInProcessTeammatePermissionMode('acceptEdits', false)).toBe(
+      'acceptEdits',
+    )
+    expect(resolveInProcessTeammatePermissionMode('auto', false)).toBe('auto')
+    expect(resolveInProcessTeammatePermissionMode(undefined, false)).toBe(
+      'default',
+    )
+  })
+
+  test('explicit spawn permissionMode wins over session M()', async () => {
+    let state = getDefaultAppState() as any
+    const result = await spawnInProcessTeammate(
+      {
+        name: 'worker',
+        teamName: 'beta',
+        prompt: 'mode stamp',
+        planModeRequired: false,
+        permissionMode: 'acceptEdits',
+        sessionPermissionMode: 'default',
+      },
+      {
+        setAppState(updater) {
+          state = updater(state)
+        },
+      },
+    )
+    expect(result.success).toBe(true)
+    expect(state.tasks[result.taskId!].permissionMode).toBe('acceptEdits')
   })
 })

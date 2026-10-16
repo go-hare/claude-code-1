@@ -19,6 +19,8 @@ import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool
 import type { Message } from '../types/message.js'
 import { createAbortController } from './abortController.js'
 import type { FileStateCache } from './fileStateCache.js'
+import type { ToolStateSlots } from './toolState.js'
+import { getPinnedCredentials } from './storageV5/credentialsStore.js'
 import type { CacheSafeParams } from './forkedAgent.js'
 import { getMainLoopModel } from './model/model.js'
 import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
@@ -93,6 +95,8 @@ export async function buildSideQuestionFallbackParams({
   mcpClients,
   messages,
   readFileState,
+  toolState,
+  credentials,
   getAppState,
   setAppState,
   customSystemPrompt,
@@ -105,6 +109,9 @@ export async function buildSideQuestionFallbackParams({
   mcpClients: MCPServerConnection[]
   messages: Message[]
   readFileState: FileStateCache
+  /** densable awr `toolState:l` — session bag passed in. */
+  toolState: ToolStateSlots
+  credentials?: ToolUseContext['credentials']
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
   customSystemPrompt: string | undefined
@@ -164,6 +171,8 @@ export async function buildSideQuestionFallbackParams({
     },
     abortController: createAbortController(),
     readFileState,
+    toolState,
+    credentials: credentials ?? getPinnedCredentials(),
     getAppState,
     setAppState,
     // densable y8r(setAppState) for side-question / cache-safe ToolUseContext

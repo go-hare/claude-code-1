@@ -32,6 +32,10 @@ import {
   resolveMaxWebSearchesPerSession,
   takeConcurrencySlot,
 } from '../sessionSpawnCaps.js'
+import {
+  resetSubagentSpawnLedgerForTests,
+  snapshotSubagentSpawnLedger,
+} from '../subagentSpawnLedger.js'
 
 // Pin growthbook to defaults for this file — co-suites that leave
 // getFeatureValue_CACHED_MAY_BE_STALE always-true bypass amber_kestrel throw path.
@@ -49,9 +53,11 @@ afterAll(() => {
 
 beforeEach(() => {
   resetSessionSpawnCaps()
+  resetSubagentSpawnLedgerForTests()
 })
 afterEach(() => {
   resetSessionSpawnCaps()
+  resetSubagentSpawnLedgerForTests()
 })
 
 describe('resolveMax*PerSession', () => {
@@ -164,6 +170,7 @@ describe('takeConcurrencySlot', () => {
     expect(() => assertAndTakeConcurrencySlot({ env })).toThrow(
       formatSubagentConcurrencyCapMessage(2),
     )
+    expect(snapshotSubagentSpawnLedger().refused.concurrency_limit).toBe(1)
     r1()
     r2()
     expect(getConcurrentSubagents()).toBe(0)
@@ -189,6 +196,7 @@ describe('assertSubagentDepthAllowed', () => {
         env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' },
       }),
     ).toThrow(formatSubagentDepthCapMessage(1, 1))
+    expect(snapshotSubagentSpawnLedger().refused.depth_limit).toBe(1)
   })
 
   test('depth 1 allowed when max is 2', () => {

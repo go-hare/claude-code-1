@@ -5,6 +5,9 @@ import { logForDebugging } from './debug.js'
 import { findGitRoot } from './git.js'
 import { hasWorktreeCreateHook } from './hooks.js'
 import { getAPIProvider } from './model/providers.js'
+import { isEvalConfined } from './permissions/evalConfined.js'
+import { isDisklessLaunch } from './sessionHost.js'
+import { getSessionBackgroundGates } from './sessionBackgroundGates.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -22,16 +25,26 @@ function isBuiltInWebFetchAgent(agent: {
 export type AgentIsolationMode = 'worktree' | 'remote'
 
 /**
- * Official `Tno`.
- * firstParty + OAuth accessToken + prior remote session/env + GB
- * `tengu_neapolitan`. Off inside CLAUDE_CODE_REMOTE.
+ * densable `Qun` (was Tno).
+ * eval-confined → diskless() → firstParty → REMOTE / session
+ * remoteAgentIsolationDisabled → OAuth accessToken → prior remote
+ * session/env → GB `tengu_neapolitan`.
  */
 export function isRemoteIsolationAvailable(): boolean {
+  if (isEvalConfined()) {
+    return false
+  }
+  if (isDisklessLaunch()) {
+    return false
+  }
   if (getAPIProvider() !== 'firstParty') {
     return false
   }
-  // Official Tno: raw `V.CLAUDE_CODE_REMOTE`, not isEnvTruthy.
-  if (process.env.CLAUDE_CODE_REMOTE) {
+  // densable Qun: raw `CLAUDE_CODE_REMOTE`, not isEnvTruthy.
+  if (
+    process.env.CLAUDE_CODE_REMOTE ||
+    getSessionBackgroundGates().remoteAgentIsolationDisabled
+  ) {
     return false
   }
   if (getClaudeAIOAuthTokens()?.accessToken == null) {
@@ -71,8 +84,10 @@ export function assertWorktreeIsolationAvailable(): void {
 }
 
 /**
- * Official isolation resolve after agent pick:
- * Gji → web-fetch ignore (`Iq`) → `Tno` remote fallback.
+ * densable isolation resolve after agent pick:
+ * Gji → web-fetch ignore (`Iq`) → `Qun` remote; unavailable remote falls back
+ * like densable `kn` (REMOTE → local; else worktree if usable, else local).
+ * No `restricted` param on this API — do not invent one.
  */
 export function resolveEffectiveIsolation(
   inputIsolation: AgentIsolationMode | undefined,
@@ -96,6 +111,7 @@ export function resolveEffectiveIsolation(
   }
 
   if (resolved === 'remote' && !isRemoteIsolationAvailable()) {
+    // densable `kn`: REMOTE → undefined; else worktree or local.
     resolved =
       process.env.CLAUDE_CODE_REMOTE || !canUseWorktreeIsolation()
         ? undefined

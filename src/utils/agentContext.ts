@@ -51,8 +51,6 @@ export type SubagentContext = {
    *  Reset to false on each spawn/resume; flipped true by
    *  consumeInvokingRequestId() on the first terminal API event. */
   invocationEmitted?: boolean
-  /** Optional coordinator-owned file set for write serialization. */
-  ownedFiles?: string[]
   /**
    * Official isBackgroundAgent — when true, session-activity $Qn/$BQn passes
    * agentId so mainLoopRefcount is not bumped (HOn). Async/background agents
@@ -61,6 +59,12 @@ export type SubagentContext = {
   isBackgroundAgent?: boolean
   /** Optional depth for nested subagents (official O4). */
   depth?: number
+  /**
+   * Gold Xo @182147842 — delegated-observation subagents (comment-thread
+   * analyst, and children of such a parent) skip artifact consent remember
+   * (`cKe` / `NCo` / `qIt`).
+   */
+  delegatedObservation?: boolean
 }
 
 /**
@@ -92,8 +96,6 @@ export type TeammateAgentContext = {
   invocationKind?: 'spawn' | 'resume'
   /** Mutable flag: see SubagentContext.invocationEmitted. */
   invocationEmitted?: boolean
-  /** Optional coordinator-owned file set for write serialization. */
-  ownedFiles?: string[]
   /**
    * Official isBackgroundAgent — teammates run off the main loop and should
    * not bump mainLoopRefcount via session activity.
@@ -125,6 +127,19 @@ export function getAgentContext(): AgentContext | undefined {
  */
 export function runWithAgentContext<T>(context: AgentContext, fn: () => T): T {
   return agentContextStorage.run(context, fn)
+}
+
+/**
+ * Gold Xo @182147842 — `e?.agentType==="subagent"&&e.delegatedObservation===!0`.
+ * Prefer this over threading `agentContext` on ToolUseContext; gold reads
+ * `n.agentContext`, tip reads AsyncLocalStorage via `getAgentContext()`.
+ */
+export function isDelegatedObservation(
+  context: AgentContext | undefined,
+): boolean {
+  return (
+    context?.agentType === 'subagent' && context.delegatedObservation === true
+  )
 }
 
 /**

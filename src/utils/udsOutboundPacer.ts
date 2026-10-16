@@ -22,7 +22,7 @@ export function canonicalOutboundPaceKey(path: string): string | undefined {
   return canonicalSocketKey(path)
 }
 
-/** densable vla — defaults shared with harbor kite limits. */
+/** densable vla / Nhn+Oe — defaults shared with harbor kite + peer admit. */
 export const DEFAULT_HARBOR_KITE_LIMITS = {
   bucketCapacity: 30,
   refillPerSecond: 0.5,
@@ -30,6 +30,8 @@ export const DEFAULT_HARBOR_KITE_LIMITS = {
   maxSelfHops: 10,
   maxChainLength: 28,
   maxTrackedSenders: 256,
+  /** densable Oe — yr queue-full cap (WUt). */
+  maxQueuedPeerMessages: 50,
 } as const
 
 export type HarborKiteLimits = {
@@ -39,6 +41,7 @@ export type HarborKiteLimits = {
   maxSelfHops: number
   maxChainLength: number
   maxTrackedSenders: number
+  maxQueuedPeerMessages: number
 }
 
 /** densable R5d — typed refuse class for outbound paced sends. */
@@ -271,6 +274,12 @@ const harborKiteLimitsSchema = lazySchema(() => {
       .min(16)
       .max(100_000)
       .catch(d.maxTrackedSenders),
+    maxQueuedPeerMessages: z
+      .number()
+      .int()
+      .min(10)
+      .max(5000)
+      .catch(d.maxQueuedPeerMessages),
   })
 })
 

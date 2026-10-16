@@ -60,6 +60,8 @@ describe('densable 2.1.239 bvr persist wrappers', () => {
     expect(config).toContain("id: 'timestamps'")
     expect(config).toContain("id: 'agentsView'")
     expect(config).toContain("id: 'defaultToAgentsView'")
+    // densable 2.1.289 bvr catalog — SEA label "Start in agent view"
+    expect(config).toContain("label: 'Start in agent view'")
     expect(config).toContain("id: 'leftArrowOpensAgents'")
     expect(config).toContain('message timestamps')
     expect(config).toContain('precompute compaction')

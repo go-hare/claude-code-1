@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { setGatewayTokenFromDescriptor } from '../../bootstrap/state.js'
 import {
   applyGatewayFromEnvResult,
   buildRefreshedGatewayAuthSession,
@@ -75,7 +76,7 @@ describe('resolveGatewayFromEnv', () => {
     const r = resolveGatewayFromEnv({ CLAUDE_CODE_USE_GATEWAY: '1' })
     expect(r.status).toBe('missing')
     if (r.status === 'missing') {
-      expect(r.message).toContain('ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN')
+      expect(r.message).toContain('ANTHROPIC_BASE_URL is missing')
     }
   })
   test('invalid url', () => {
@@ -100,6 +101,43 @@ describe('resolveGatewayFromEnv', () => {
       expect(r.session.jwt).toBe(jwt)
       expect(r.session.expiresAtMs).toBe(exp * 1000)
       expect(r.session.unpinned).toBe(true)
+    }
+  })
+  test('missing token names the descriptor fallback', () => {
+    const r = resolveGatewayFromEnv({
+      CLAUDE_CODE_USE_GATEWAY: '1',
+      ANTHROPIC_BASE_URL: 'https://gw.example.com',
+    })
+    expect(r.status).toBe('missing')
+    if (r.status === 'missing') {
+      expect(r.message).toContain(
+        'no ANTHROPIC_AUTH_TOKEN and no token on a gateway descriptor / snapshot',
+      )
+    }
+  })
+  test('Het supplies the jwt when the process auth token is unset', () => {
+    const prev = {
+      use: process.env.CLAUDE_CODE_USE_GATEWAY,
+      base: process.env.ANTHROPIC_BASE_URL,
+      token: process.env.ANTHROPIC_AUTH_TOKEN,
+    }
+    const jwt = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+    process.env.CLAUDE_CODE_USE_GATEWAY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://gw.example.com'
+    delete process.env.ANTHROPIC_AUTH_TOKEN
+    setGatewayTokenFromDescriptor(jwt)
+    try {
+      const r = resolveGatewayFromEnv()
+      expect(r.status).toBe('ok')
+      if (r.status === 'ok') expect(r.session.jwt).toBe(jwt)
+    } finally {
+      setGatewayTokenFromDescriptor(undefined)
+      if (prev.use === undefined) delete process.env.CLAUDE_CODE_USE_GATEWAY
+      else process.env.CLAUDE_CODE_USE_GATEWAY = prev.use
+      if (prev.base === undefined) delete process.env.ANTHROPIC_BASE_URL
+      else process.env.ANTHROPIC_BASE_URL = prev.base
+      if (prev.token === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN
+      else process.env.ANTHROPIC_AUTH_TOKEN = prev.token
     }
   })
   test('ok session without exp → MAX_SAFE_INTEGER', () => {

@@ -96,6 +96,12 @@ export type UdsInboxEntry = {
   message: UdsMessage
   receivedAt: number
   status: 'pending' | 'processed'
+  /**
+   * densable F$E / mli — kernel SO_PEERCRED / LOCAL_PEERPID on the accepted
+   * socket. Drain copies this onto origin.verifiedPeerPid so yr htt / zo.admit
+   * fire when wire `from` is omitted. Never trust a wire pid field.
+   */
+  peerPid?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -1391,6 +1397,15 @@ async function startUdsMessagingBody(
         logForDebugging(
           `[udsMessaging] client connected (total: ${clients.size})`,
         )
+        // densable F$E mli — stamp once per accepted socket, not per frame.
+        let kernelPeerPid: number | undefined
+        try {
+          const { readConnectedPeerPid } =
+            require('./udsClient.js') as typeof import('./udsClient.js')
+          kernelPeerPid = readConnectedPeerPid(socket)
+        } catch {
+          kernelPeerPid = undefined
+        }
         let authenticated = !authRequired
         /** densable F$E `a` — DWd role after first-line H_a. */
         let authRole: 'peer' | 'child' | undefined
@@ -1537,6 +1552,9 @@ async function startUdsMessagingBody(
               message: sanitizedMessage,
               receivedAt: Date.now(),
               status: 'pending',
+              ...(kernelPeerPid !== undefined
+                ? { peerPid: kernelPeerPid }
+                : {}),
             }
             if (!enqueueInboxEntry(entry)) {
               // densable 2.1.238 #30 — queue-full drop receipt; keep close string.
@@ -1730,6 +1748,14 @@ async function startUdsMessagingBody(
     // capability file exists and the listener is ready.
     process.env.CLAUDE_CODE_MESSAGING_SOCKET = path
     exportedSocketEnv = true
+    // densable q2r(EW(e)) — stamp own hop token for K2r hop-loop.
+    try {
+      const { setOwnUdsHopAddress } =
+        require('./peerAdmission.js') as typeof import('./peerAdmission.js')
+      setOwnUdsHopAddress(formatUdsAddress(path))
+    } catch {
+      // peerAdmission optional at early boot / tests
+    }
     // densable Ckh: CLAUDE_CODE_MESSAGING_TOKEN is kWd.childToken (DWd "child").
     // peerToken stays in the capability file / IWd. Do not invent a non-env path.
     process.env.CLAUDE_CODE_MESSAGING_TOKEN = tokens.childToken
@@ -1815,6 +1841,13 @@ async function startUdsMessagingBody(
     if (exportedSocketEnv) {
       delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
       delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
+      try {
+        const { setOwnUdsHopAddress } =
+          require('./peerAdmission.js') as typeof import('./peerAdmission.js')
+        setOwnUdsHopAddress(undefined)
+      } catch {
+        // optional
+      }
     }
     socketPath = null
     defaultSocketPath = null
@@ -1896,6 +1929,13 @@ export async function stopUdsMessaging(): Promise<void> {
     await removeSocketPath(socketPath)
     delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
     delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
+    try {
+      const { setOwnUdsHopAddress } =
+        require('./peerAdmission.js') as typeof import('./peerAdmission.js')
+      setOwnUdsHopAddress(undefined)
+    } catch {
+      // optional
+    }
     logForDebugging(
       `[udsMessaging] server stopped, socket removed: ${socketPath}`,
     )

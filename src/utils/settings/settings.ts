@@ -1205,6 +1205,33 @@ export function getSettingsWithSources(): SettingsWithSources {
 }
 
 /**
+ * densable Yo — highest-priority enabled source that defines `key`, else
+ * `{value: defaultValue, source: "default"}`. Gold
+ * `Yo("switchModelsOnFlag", !0).source==="default"` is the first-ask gate.
+ */
+export function getSettingValueWithSource<K extends keyof SettingsJson>(
+  key: K,
+  defaultValue: NonNullable<SettingsJson[K]>,
+): {
+  value: NonNullable<SettingsJson[K]>
+  source: SettingSource | 'default'
+} {
+  const sources = getEnabledSettingSources()
+  for (let i = sources.length - 1; i >= 0; i--) {
+    const source = sources[i]!
+    const settings = getSettingsForSource(source)
+    const raw = settings?.[key]
+    if (raw !== undefined) {
+      return {
+        value: raw as NonNullable<SettingsJson[K]>,
+        source,
+      }
+    }
+  }
+  return { value: defaultValue, source: 'default' }
+}
+
+/**
  * Get merged settings and validation errors from all sources
  * This function now uses session-level caching to avoid repeated file I/O.
  * Settings changes require Claude Code restart, so cache is valid for entire session.

@@ -213,6 +213,7 @@ const command = {
   type: 'prompt',
   name: 'commit-push-pr',
   description: 'Commit, push, and open a PR',
+  userInvocable: true,
   allowedTools: ALLOWED_TOOLS,
   // densable Vjb — deny dangerous git/gh flags even under allow prefixes
   disallowedTools: DISALLOWED_TOOLS,

@@ -16,6 +16,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/grow
 import { getAbortReasonMessage } from 'src/utils/abortController.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
 import { type EffortValue, isUltracodeModeActive } from 'src/utils/effort.js'
+import { recordSubagentSpawnRefused } from 'src/utils/subagentSpawnLedger.js'
 
 /**
  * densable 2.1.212 qpg=200 default hard cap.
@@ -215,6 +216,7 @@ export function assertSubagentDepthAllowed(options?: {
   const parentDepth = getAgentContextDepth(options?.agentContext)
   const max = resolveMaxSubagentSpawnDepth(options?.env)
   if (parentDepth >= max) {
+    recordSubagentSpawnRefused('depth_limit')
     throw new Error(formatSubagentDepthCapMessage(parentDepth, max))
   }
   return parentDepth
@@ -254,6 +256,7 @@ export function assertAndTakeConcurrencySlot(options?: {
   ) {
     return takeConcurrencySlot()
   }
+  recordSubagentSpawnRefused('concurrency_limit')
   throw new Error(formatSubagentConcurrencyCapMessage(max))
 }
 
@@ -297,6 +300,7 @@ export function assertCanSpawnSubagent(options?: {
     const { formatSubagentBudgetExhaustedMessage, isMaxBudgetUsdReached } =
       require('./budgetHalt.js') as typeof import('./budgetHalt.js')
     if (isMaxBudgetUsdReached(options.maxBudgetUsd)) {
+      recordSubagentSpawnRefused('budget')
       throw new Error(
         formatSubagentBudgetExhaustedMessage(options.maxBudgetUsd),
       )

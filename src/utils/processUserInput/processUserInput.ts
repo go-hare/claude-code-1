@@ -175,6 +175,8 @@ export async function processUserInput({
   isMeta,
   skipAttachments,
   skipSubmissionHooks,
+  shouldQuery: shouldQueryInput,
+  queryHeldForNextTurn,
   autonomy,
   origin,
   suppressWorkflowKeyword,
@@ -228,6 +230,12 @@ export async function processUserInput({
   skipAttachments?: boolean
   /** densable skipSubmissionHooks — attachment-only poll empty prompt. */
   skipSubmissionHooks?: boolean
+  /**
+   * densable 2.1.289 print task-notification coalesce — force no model query.
+   * Gold Fe: with isMeta and queryHeldForNextTurn!==true, also skip attachments.
+   */
+  shouldQuery?: boolean
+  queryHeldForNextTurn?: boolean
   autonomy?: QueuedCommand['autonomy']
   /**
    * densable Dfr origin — Wzn(origin) gates ultracode keyword (p2y).
@@ -268,6 +276,14 @@ export async function processUserInput({
     }
   }
 
+  // densable Fe: shouldQuery===false && isMeta && queryHeldForNextTurn!==true
+  // → treat as skipAttachments (no turn-level attachment assembly).
+  const effectiveSkipAttachments =
+    skipAttachments === true ||
+    (shouldQueryInput === false &&
+      isMeta === true &&
+      queryHeldForNextTurn !== true)
+
   const result = await processUserInputBase(
     input,
     mode,
@@ -285,7 +301,7 @@ export async function processUserInput({
     bridgeOrigin,
     modelScheduledOrigin,
     isMeta,
-    skipAttachments,
+    effectiveSkipAttachments,
     preExpansionInput,
     autonomy,
     origin,
@@ -293,6 +309,22 @@ export async function processUserInput({
     wakeupSource,
   )
   queryCheckpoint('query_process_user_input_base_end')
+
+  // densable: input shouldQuery===false forces result.shouldQuery=false
+  // (override processTextPrompt default true for plain notifications).
+  if (shouldQueryInput === false) {
+    result.shouldQuery = false
+    // Local analog of gold uun transcript-only stamp — use existing field.
+    if (queryHeldForNextTurn !== true) {
+      for (const msg of result.messages) {
+        if (msg.type === 'user' && msg.isMeta) {
+          ;(
+            msg as { isVisibleInTranscriptOnly?: true }
+          ).isVisibleInTranscriptOnly = true
+        }
+      }
+    }
+  }
 
   if (!result.shouldQuery) {
     return result
@@ -783,6 +815,7 @@ async function processUserInputBase(
       uuid,
       permissionMode,
       isMeta,
+      origin,
     ),
     imageMetadataTexts,
   )

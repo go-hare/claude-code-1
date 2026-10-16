@@ -871,7 +871,6 @@ class Project {
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
   currentSessionModel: string | undefined
-  currentSessionGoal: GoalState | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
   // object = currently in worktree. reAppendSessionMetadata writes null so
   // --resume knows the session exited (vs. crashed while inside).
@@ -1284,14 +1283,6 @@ class Project {
         type: 'session-model',
         model: this.currentSessionModel,
         sessionId,
-      })
-    }
-    if (this.currentSessionGoal) {
-      appendEntryToFile(this.sessionFile, {
-        type: 'goal',
-        sessionId,
-        state: this.currentSessionGoal,
-        timestamp: new Date().toISOString(),
       })
     }
     if (this.currentSessionWorktree !== undefined) {
@@ -4029,48 +4020,6 @@ export async function saveTag(sessionId: UUID, tag: string, fullPath?: string) {
 }
 
 /**
- * Persist a goal-state checkpoint to the JSONL transcript. Called by
- * src/services/goal/goalStorage.ts on every mutation. The latest entry
- * wins on read; older entries are harmlessly ignored.
- *
- * Cached on Project so reAppendSessionMetadata can keep the goal alive
- * past compaction's tail-read window.
- */
-export function saveGoal(
-  sessionId: UUID,
-  state: GoalState,
-  fullPath?: string,
-): void {
-  const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
-  appendEntryToFile(resolvedPath, {
-    type: 'goal',
-    sessionId,
-    state,
-    timestamp: new Date().toISOString(),
-  })
-  if (sessionId === getSessionId()) {
-    getProject().currentSessionGoal = state
-  }
-}
-
-/**
- * Persist a "goal cleared" tombstone so a future --resume cannot
- * resurrect the goal from a prior `goal` entry. Also drops the
- * in-memory cache for the current session.
- */
-export function clearGoalEntry(sessionId: UUID, fullPath?: string): void {
-  const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
-  appendEntryToFile(resolvedPath, {
-    type: 'goal-cleared',
-    sessionId,
-    timestamp: new Date().toISOString(),
-  })
-  if (sessionId === getSessionId()) {
-    getProject().currentSessionGoal = undefined
-  }
-}
-
-/**
  * Link a session to a GitHub pull request.
  * This stores the PR number, URL, and repository for tracking and navigation.
  */
@@ -4276,7 +4225,6 @@ export function restoreSessionMetadata(meta: {
     project.currentSessionPrNumber = meta.prNumber
   if (meta.prUrl) project.currentSessionPrUrl = meta.prUrl
   if (meta.prRepository) project.currentSessionPrRepository = meta.prRepository
-  if (meta.goal) project.currentSessionGoal = meta.goal
   // densable: if(e.bridgeSessionId) hydrate — empty string / missing is a no-op
   // (user-off tombstone must not re-seed force-on).
   if (meta.bridgeSessionId) {
@@ -4320,7 +4268,6 @@ export function clearSessionMetadata(
   project.currentSessionAgentSetting = undefined
   project.currentSessionMode = undefined
   project.currentSessionModel = undefined
-  project.currentSessionGoal = undefined
   project.currentSessionWorktree = undefined
   project.currentSessionPrNumber = undefined
   project.currentSessionPrUrl = undefined
@@ -6726,6 +6673,10 @@ export function isLoggableMessage(m: Message): boolean {
   // When enabled, we allow hook_additional_context through since it contains
   // user-configured hook output that is useful for session context on resume.
   if (m.type === 'attachment' && getUserType() !== 'ant') {
+    // densable: goal_status must persist so /resume keeps Goal achieved.
+    if (m.attachment!.type === 'goal_status') {
+      return true
+    }
     // Official SAVE_HOOK_ADDITIONAL_CONTEXT densable.
     let saveHookAdditionalContext = isEnvTruthy(
       process.env.CLAUDE_CODE_SAVE_HOOK_ADDITIONAL_CONTEXT,

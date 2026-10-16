@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildCrossSessionMessageAttrs,
+  parseCrossSessionHopChain,
   parseCrossSessionOpenAttrs,
   prettyCrossSessionFromAddress,
   resolveCrossSessionSenderLabel,
@@ -81,5 +82,20 @@ describe('densable 2.1.228 #13 wrapCrossSessionMessage (I6y/fbr)', () => {
       from: 'bridge:s',
       fromName: 'rc-name',
     })
+  })
+
+  test('dOe hop-chain: 24-hex tokens only; junk attrs ignored', () => {
+    const tok = 'a'.repeat(24)
+    const wrapped = wrapCrossSessionMessage('hello', {
+      from: 'uds:/tmp/x.sock',
+      hopChain: [tok, 'b'.repeat(24)],
+    })
+    expect(wrapped).toContain(`hop-chain="${tok},${'b'.repeat(24)}"`)
+    expect(parseCrossSessionHopChain(wrapped)).toEqual([tok, 'b'.repeat(24)])
+    expect(
+      parseCrossSessionHopChain(
+        `<cross-session-message hop-chain="not-hex">\nbody\n</cross-session-message>`,
+      ),
+    ).toBeUndefined()
   })
 })

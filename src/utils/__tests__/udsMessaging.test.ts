@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   chmod,
   mkdir,
@@ -142,6 +143,22 @@ describe('UDS inbox retention', () => {
     expect(drained.map(entry => entry.message.data)).toEqual(['one', 'two'])
     expect(drained.every(entry => entry.status === 'processed')).toBe(true)
     expect(drainInbox()).toEqual([])
+  })
+
+  test('F$E mli: inbox stamps kernel peerPid via readConnectedPeerPid, never wire pid', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../udsMessaging.ts'),
+      'utf8',
+    )
+    expect(src).toContain('readConnectedPeerPid')
+    expect(src).toContain('peerPid: kernelPeerPid')
+    expect(src).not.toContain('message.peerPid')
+    const drain = readFileSync(
+      join(import.meta.dir, '../../hooks/usePeerInboundUdsDrain.ts'),
+      'utf8',
+    )
+    expect(drain).toContain('entry.peerPid')
+    expect(drain).toContain('verifiedPeerPid')
   })
 
   test('inbox is capped when messages arrive faster than they are drained', async () => {

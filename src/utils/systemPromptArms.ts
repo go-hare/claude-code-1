@@ -30,7 +30,7 @@ function splitEnvOrGb(input: EnvOrGbInput = process.env): {
 /**
  * Official Arg densable — env CLAUDE_CODE_ACT_DONT_REDERIVE when set,
  * else optional GB tengu_cedar_lantern (official default true when GB wired).
- * Env-only callers (no gbValue) stay false when unset.
+ * Env unset → GB tengu_cedar_lantern, gold default true.
  */
 export function isActDontRederiveEnabled(
   input: EnvOrGbInput = process.env,
@@ -39,7 +39,7 @@ export function isActDontRederiveEnabled(
   if (env.CLAUDE_CODE_ACT_DONT_REDERIVE !== undefined) {
     return isEnvTruthy(env.CLAUDE_CODE_ACT_DONT_REDERIVE)
   }
-  return gbValue ?? false
+  return gbValue ?? true
 }
 
 /**

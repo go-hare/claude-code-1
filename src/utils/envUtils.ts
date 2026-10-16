@@ -102,7 +102,10 @@ export function isBareMode(): boolean {
   } catch {
     // keep raw env fallback
   }
-  return simpleEnv || process.argv.includes('--bare')
+  // Gold Or `i("--bare")`: scan argv only before `--`.
+  const cut = process.argv.indexOf('--')
+  const flags = cut === -1 ? process.argv : process.argv.slice(0, cut)
+  return simpleEnv || flags.includes('--bare')
 }
 
 /**

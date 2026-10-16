@@ -81,6 +81,7 @@ const {
   isParkedKeepaliveAgent,
   sweepStaleKeepaliveReasons,
   hasLiveAgentKeepaliveChildren,
+  hasHandbackWaitKids,
   hasNonIdleWindowKeepalive,
   idleWindowKeepaliveReason,
   IDLE_WINDOW_KEEPALIVE_REASON,
@@ -434,6 +435,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
           id: 'live',
           status: 'running',
           notified: false,
+          ownerAgentId: 'owner',
         }),
         'wf-done': {
           ...makeTask({ id: 'wf-done', status: 'completed', notified: true }),
@@ -456,6 +458,43 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
     // densable 2.1.243 Lfe: notified+terminal local_bash detaches; running stays
     expect(reasons.has('bash:b1')).toBe(false)
     expect(reasons.has('bash:b-live')).toBe(true)
+  })
+
+  test('Yq detaches local_agent when ownerAgentId !== parent (even if live)', () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        owner: makeTask({
+          id: 'owner',
+          keepaliveReasons: new Set([
+            'agent:mine',
+            'agent:theirs',
+            'agent:unowned',
+          ]),
+        }),
+        mine: makeTask({
+          id: 'mine',
+          status: 'running',
+          notified: false,
+          ownerAgentId: 'owner',
+        }),
+        theirs: makeTask({
+          id: 'theirs',
+          status: 'running',
+          notified: false,
+          ownerAgentId: 'other-parent',
+        }),
+        unowned: makeTask({
+          id: 'unowned',
+          status: 'running',
+          notified: false,
+        }),
+      },
+    })
+    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
+    expect(reasons.has('agent:mine')).toBe(true)
+    expect(reasons.has('agent:theirs')).toBe(false)
+    expect(reasons.has('agent:unowned')).toBe(false)
   })
 
   test('keeps child when task-notification still queued for owner', () => {
@@ -551,6 +590,47 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
     expect(
       hasLiveAgentKeepaliveChildren(undefined, () => getState() as any),
     ).toBe(false)
+  })
+
+  test('d9e hasHandbackWaitKids: agent: always; workflow/bash only when backgrounded', () => {
+    const { getState, setAppState } = createSetAppState({
+      tasks: {
+        owner: makeTask({
+          id: 'owner',
+          isBackgrounded: false,
+          keepaliveReasons: new Set(['workflow:w1', 'bash:b']),
+        }),
+      },
+    })
+    expect(hasHandbackWaitKids('owner', () => getState() as any)).toBe(false)
+    addKeepaliveReason('owner', 'agent:c1', setAppState as any)
+    expect(hasHandbackWaitKids('owner', () => getState() as any)).toBe(true)
+
+    const bg = createSetAppState({
+      tasks: {
+        owner: makeTask({
+          id: 'owner',
+          isBackgrounded: true,
+          keepaliveReasons: new Set(['workflow:w1']),
+        }),
+      },
+    })
+    expect(hasHandbackWaitKids('owner', () => bg.getState() as any)).toBe(true)
+
+    const bash = createSetAppState({
+      tasks: {
+        owner: makeTask({
+          id: 'owner',
+          isBackgrounded: true,
+          keepaliveReasons: new Set(['bash:b1']),
+        }),
+      },
+    })
+    expect(hasHandbackWaitKids('owner', () => bash.getState() as any)).toBe(
+      true,
+    )
+    expect(hasHandbackWaitKids(undefined, () => getState() as any)).toBe(false)
+    expect(hasHandbackWaitKids('missing', () => getState() as any)).toBe(false)
   })
 })
 

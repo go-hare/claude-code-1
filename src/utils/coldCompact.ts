@@ -18,6 +18,19 @@ export function isColdCompactEnabled(
 }
 
 /**
+ * densable `Z$o` — autocompact `Pqn` `stripNonEssential:M=!1` is the raw
+ * `CLAUDE_CODE_COLD_COMPACT` value (`!!e` when defined). `"0"` is still
+ * strip-on; `""` / unset is off. Distinct from buffer-scale `isEnvTruthy`.
+ */
+export function resolveColdCompactStripNonEssential(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env.CLAUDE_CODE_COLD_COMPACT
+  if (raw === undefined) return false
+  return !!raw
+}
+
+/**
  * Official zNy densable — buffer multiplier for getAutoCompactThreshold.
  * cold on → 1.5 (larger buffer = lower threshold = more aggressive).
  */

@@ -28,8 +28,11 @@ import type { ToolUseContext } from '../Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { AgentId } from '../types/ids.js'
 import type { Message, StreamEvent } from '../types/message.js'
+import type { AdvisorStripPlan } from './messages.js'
+import type { ThinkingStripPlan } from './thinking.js'
 import type { ActiveTaskExecutionContext } from './tasks.js'
 import { createChildAbortController } from './abortController.js'
+import { ToolStateSlots } from './toolState.js'
 import { logForDebugging } from './debug.js'
 import {
   cloneFileStateCache,
@@ -51,6 +54,8 @@ import {
 } from '../engine/permissionLayerReaders.js'
 import type { HostPermissionLayer } from '../engine/hostPermissionLayers.js'
 import { parseToolListFromCLI } from './permissions/permissionSetup.js'
+import { resolveTrustedSkillAllowedTools } from './permissions/skillAllowedToolsTrust.js'
+import { getSkillPromptBlocks } from './skills/skillPromptHook.js'
 import {
   admitWebFetchTool,
   agentContextSpawnDepth,
@@ -139,6 +144,13 @@ export type ForkedAgentParams = {
   /** Skip writing new prompt cache entries on the last message. For
    *  fire-and-forget forks where no future request will read from this prefix. */
   skipCacheWrite?: boolean
+  /**
+   * densable qC `thinkingStripPlan` / `advisorStripPlan` — compact qjt
+   * threads these into runQuery/Gut. Gold qC does not peel the fork prefix
+   * here; Lv peels at normalize.
+   */
+  thinkingStripPlan?: ThinkingStripPlan
+  advisorStripPlan?: AdvisorStripPlan
 }
 
 export type ForkedAgentResult = {
@@ -299,15 +311,22 @@ export async function prepareForkedCommandContext(
   context: ToolUseContext,
   options?: PrepareForkedCommandOptions,
 ): Promise<PreparedForkedContext> {
-  // Get skill content with $ARGUMENTS replaced
-  const skillPrompt = await command.getPromptForCommand(args, context)
+  // densable sNt: KVn(name, getPromptForCommand) then join text.
+  // Gold `promptShellHandOff:e.agent===void 0?h:void 0` — collect only when
+  // the skill has no dedicated agent.
+  const promptShellHandOff: Array<{ tool: string; command: string }> = []
+  const skillPrompt = await getSkillPromptBlocks(command, args, {
+    ...context,
+    promptShellHandOff:
+      command.agent === undefined ? promptShellHandOff : undefined,
+  })
   const skillContent = skillPrompt
     .map(block => (block.type === 'text' ? block.text : ''))
     .join('\n')
 
-  // Official zI(await e.getAllowedTools?.() ?? e.allowedTools ?? [])
+  // Official zI(ije(e)) — getAllowedTools ?? allowedTools; untrusted → [].
   const allowedTools = parseToolListFromCLI(
-    (await command.getAllowedTools?.()) ?? command.allowedTools ?? [],
+    await resolveTrustedSkillAllowedTools(command),
   )
   const disallowedTools = parseToolListFromCLI(command.disallowedTools ?? [])
   const frozenCommandDenies =
@@ -368,12 +387,16 @@ export async function prepareForkedCommandContext(
   }
 
   // Official g=PG(pq); n4t writes into g via readFileState overlay.
-  // Tip does not host n4t — optional extractAttachments may fill g.
+  // Gold sNt: xe=Lje(e), Pe=g?.extractAttachments&&!xe ? CTe(...) : []
   const forkReadFileState = createFileStateCacheWithSizeLimit(
     READ_FILE_STATE_CACHE_SIZE,
   )
+  const { shouldSkipSkillAttachments } = await import(
+    './skills/skillAttachmentSkip.js'
+  )
+  const skipAttachments = shouldSkipSkillAttachments(command)
   const attachmentMessages =
-    options?.extractAttachments !== undefined
+    options?.extractAttachments !== undefined && !skipAttachments
       ? await collectAttachmentMessages(
           options.extractAttachments(skillContent, {
             ...context,
@@ -387,9 +410,18 @@ export async function prepareForkedCommandContext(
     }
   }
 
-  // Official b=[Cn({content:s,isMeta:!0}),..._]
+  // Official b=[Cn({content:s,isMeta:!0,...h.length>0&&{promptShellHandOff}}),..._]
   const promptMessages = [
-    createUserMessage({ content: skillContent, isMeta: true }),
+    createUserMessage({
+      content: skillContent,
+      isMeta: true,
+      ...(promptShellHandOff.length > 0 && {
+        promptShellHandOff: {
+          agentId: context.agentId ?? null,
+          commands: promptShellHandOff,
+        },
+      }),
+    }),
     ...attachmentMessages,
   ]
 
@@ -608,6 +640,9 @@ export function createSubagentContext(
     readFileState: cloneFileStateCache(
       overrides?.readFileState ?? parentContext.readFileState,
     ),
+    // densable createSubagentContext copies the parent's wN by reference.
+    toolState: (parentContext.toolState ??= new ToolStateSlots()),
+    credentials: parentContext.credentials,
     nestedMemoryAttachmentTriggers: new Set<string>(),
     // Fresh loaded set for the child; parent pending is shared so cleanup can
     // push CLAUDE.md paths discovered by the subagent (official createSubagentContext).
@@ -687,6 +722,8 @@ export function createSubagentContext(
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
     agentType: overrides?.agentType,
+    // densable 2.1.289 Ct/innerCall: nested-in-tool only — do NOT default true
+    // for subagents (they use agentId). Leave unset unless an override adds it.
     // densable: agentWorktree:e.agentWorktree (override or copy from parent)
     agentWorktree: overrides?.agentWorktree ?? parentContext.agentWorktree,
     // Official Who/A$ — forks default isBackgroundAgent true; interactive
@@ -767,6 +804,8 @@ export async function runForkedAgent({
   onMessage,
   skipTranscript,
   skipCacheWrite,
+  thinkingStripPlan,
+  advisorStripPlan,
 }: ForkedAgentParams): Promise<ForkedAgentResult> {
   const startTime = Date.now()
   const outputMessages: Message[] = []
@@ -777,8 +816,10 @@ export async function runForkedAgent({
     userContext,
     systemContext,
     toolUseContext,
-    forkContextMessages,
+    forkContextMessages: forkContextMessagesRaw,
   } = cacheSafeParams
+  // densable qC: plans go to runQuery; do not peel the fork prefix here.
+  const forkContextMessages = forkContextMessagesRaw
 
   // Create isolated context to prevent mutation of parent state.
   // densable O3 (2.1.222 #2): requireCanUseTool:i?.requireCanUseTool??!0 —
@@ -825,6 +866,8 @@ export async function runForkedAgent({
       maxOutputTokensOverride: maxOutputTokens,
       maxTurns,
       skipCacheWrite,
+      thinkingStripPlan,
+      advisorStripPlan,
     })) {
       // Extract real usage from message_delta stream events (final usage per API call)
       if (message.type === 'stream_event') {

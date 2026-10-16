@@ -27,17 +27,24 @@ const autoBgOutcome = {
   complete: 0,
   fail: 0,
   notifications: [] as string[],
+  completeOpts: [] as Array<{ resourceLinks?: unknown[] } | undefined>,
 }
 function resetAutoBgOutcome(): void {
   autoBgOutcome.complete = 0
   autoBgOutcome.fail = 0
   autoBgOutcome.notifications = []
+  autoBgOutcome.completeOpts = []
 }
 mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
   ...monitorMcpSnap,
   registerMonitorMcpTask: () => 'task-bg-1',
-  completeMonitorMcpTask: () => {
+  completeMonitorMcpTask: (
+    _taskId: string,
+    _setAppState: unknown,
+    opts?: { resourceLinks?: unknown[] },
+  ) => {
     autoBgOutcome.complete++
+    autoBgOutcome.completeOpts.push(opts)
   },
   failMonitorMcpTask: () => {
     autoBgOutcome.fail++
@@ -80,6 +87,7 @@ afterAll(() => {
 const {
   DEFAULT_MCP_AUTO_BACKGROUND_MS,
   callMcpToolWithAutoBackground,
+  collectMcpResourceLinks,
   formatMcpAutoBackgroundMovedMessage,
   isMcpAutoBackgroundEnabled,
   resolveMcpAutoBackgroundMs,
@@ -322,5 +330,76 @@ describe('callMcpToolWithAutoBackground autoBackgrounded stamp', () => {
         'autoBackgrounded' in result &&
         (result as { autoBackgrounded?: boolean }).autoBackgrounded,
     ).toBeFalsy()
+  })
+
+  test('timeout complete path forwards resource_link blocks to MonitorMcp', async () => {
+    resetAutoBgOutcome()
+    const parent = new AbortController()
+    let resolveRun!: (v: {
+      content: Array<
+        | { type: 'text'; text: string }
+        | { type: 'resource_link'; uri: string; name: string }
+      >
+    }) => void
+    const run = () =>
+      new Promise<{
+        content: Array<
+          | { type: 'text'; text: string }
+          | { type: 'resource_link'; uri: string; name: string }
+        >
+      }>(resolve => {
+        resolveRun = resolve
+      })
+
+    await callMcpToolWithAutoBackground({
+      run,
+      serverName: 'srv',
+      toolName: 'slow',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 20,
+      toolLabel: 'mcp__srv__slow',
+    })
+
+    resolveRun({
+      content: [
+        { type: 'text', text: 'done' },
+        { type: 'resource_link', uri: 'file:///tmp/a', name: 'a' },
+        { type: 'resource_link', uri: 'file:///tmp/b', name: 'b' },
+      ],
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(autoBgOutcome.complete).toBe(1)
+    expect(autoBgOutcome.completeOpts[0]?.resourceLinks).toEqual([
+      { type: 'resource_link', uri: 'file:///tmp/a', name: 'a' },
+      { type: 'resource_link', uri: 'file:///tmp/b', name: 'b' },
+    ])
+  })
+})
+
+describe('collectMcpResourceLinks', () => {
+  test('collects resource_link blocks and caps at 50', () => {
+    const links = Array.from({ length: 60 }, (_, i) => ({
+      type: 'resource_link' as const,
+      uri: `file:///tmp/${i}`,
+      name: String(i),
+    }))
+    const collected = collectMcpResourceLinks([
+      { type: 'text', text: 'x' },
+      ...links,
+    ])
+    expect(collected).toHaveLength(50)
+    expect(collected[0]).toMatchObject({ uri: 'file:///tmp/0' })
+    expect(collected[49]).toMatchObject({ uri: 'file:///tmp/49' })
+  })
+
+  test('returns empty when content has no resource_link', () => {
+    expect(collectMcpResourceLinks([{ type: 'text', text: 'only' }])).toEqual(
+      [],
+    )
+    expect(collectMcpResourceLinks('plain')).toEqual([])
   })
 })

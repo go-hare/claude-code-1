@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { Tool, ToolUseContext } from '../Tool.js'
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js'
+import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, MalformedCommandError, ShellError } from './errors.js'
 import type { FrontmatterShell } from './frontmatterParser.js'
@@ -72,6 +73,14 @@ export async function executeShellCommandsInPrompt(
   slashCommandName: string,
   shell?: FrontmatterShell,
 ): Promise<string> {
+  // densable `nue`: coordinator Skill-tool load strips instead of executing.
+  if (context.options.readOnlySkillLoad) {
+    const { stripSkillShellCommands } = await import(
+      './residualFinalEnvGates.js'
+    )
+    return stripSkillShellCommands(text)
+  }
+
   // Official cYn/uYn densable — cowork / policy / settings disable skill shell.
   try {
     const { isSkillShellExecutionDisabled, stripSkillShellCommands } =
@@ -141,7 +150,16 @@ export async function executeShellCommandsInPrompt(
             )
           }
 
-          const { data } = await shellTool.call({ command }, context)
+          // densable 2.1.289 Ct — nested skill-shell tool.call stamps innerCall.
+          // Gold promptShellHandOff collector when skill has no dedicated agent.
+          context.promptShellHandOff?.push({
+            tool: BASH_TOOL_NAME,
+            command,
+          })
+          const { data } = await shellTool.call(
+            { command },
+            { ...context, innerCall: true },
+          )
           // Reuse the same persistence flow as regular Bash tool calls
           const toolResultBlock = await processToolResultBlock(
             shellTool,

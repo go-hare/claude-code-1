@@ -15,14 +15,14 @@ import {
 } from '../systemPromptArms.js'
 
 describe('systemPromptArms', () => {
-  test('defaults off', () => {
-    expect(isActDontRederiveEnabled({})).toBe(false)
+  test('defaults: act_dont_rederive on (gold cedar_lantern), others off', () => {
+    expect(isActDontRederiveEnabled({})).toBe(true)
     expect(isOwnershipFrameEnabled({})).toBe(false)
     expect(isInvestigateFirstEnabled({})).toBe(false)
     expect(isSkillDescReframeEnabled({})).toBe(false)
     expect(isBasaltCoveEnabled({})).toBe(false)
     expect(isPewterOwlEnabled({})).toBe(false)
-    expect(getActDontRederiveSection({})).toBeNull()
+    expect(getActDontRederiveSection({})).toBe(ACT_DONT_REDERIVE_BODY)
     expect(getOwnershipFrameSection({})).toBeNull()
     expect(getInvestigateFirstSection({})).toBeNull()
   })

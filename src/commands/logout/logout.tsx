@@ -67,6 +67,13 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
   } catch {
     // bootstrap isolation — optional
   }
+  // densable TZt → Rzo("signed_out"): bump artifact accountEpoch + clear probeBoots.
+  try {
+    const { noteArtifactAccountChanged } = await import('../../services/artifactAutoReact/accountBoundary.js');
+    noteArtifactAccountChanged('signed_out');
+  } catch {
+    // artifactAutoReact optional in isolation
+  }
 }
 
 function clearChatGPTSettingsAuthMode(): void {

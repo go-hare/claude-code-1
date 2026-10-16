@@ -45,6 +45,8 @@ function emitOrphanLf(
     toolUseId?: string
     summary?: string
     outputFile?: string
+    /** densable 2.1.289 Di reason — print restart orphans only */
+    reason?: 'worker_restart'
   },
 ): void {
   try {
@@ -55,10 +57,67 @@ function emitOrphanLf(
       toolUseId: opts?.toolUseId,
       summary: opts?.summary,
       outputFile: opts?.outputFile,
+      reason: opts?.reason,
     })
   } catch {
     /* best-effort */
   }
+}
+
+/** densable print.ts nSm — meta reminder after worker restart orphan stop. */
+export function formatWorkerRestartOrphanReminder(
+  tasks: ReadonlyArray<{ task_id: string; description?: string }>,
+): string {
+  return (
+    `<system-reminder>\n` +
+    `The container was restarted. The following background tasks were running and are now stopped:\n` +
+    `${tasks
+      .map(t => `- ${t.description || '(no description)'} (task ${t.task_id})`)
+      .join('\n')}\n` +
+    `Re-create them if still needed.\n` +
+    `</system-reminder>`
+  )
+}
+
+/**
+ * densable print.ts Di/Xg restart orphan bookend:
+ * Di(id,"stopped",{summary:`Stopped by a worker restart: ${desc||id}`, reason:"worker_restart"})
+ */
+export function emitWorkerRestartOrphanStopped(
+  taskId: string,
+  description?: string,
+): void {
+  emitOrphanLf(taskId, 'stopped', {
+    summary: `Stopped by a worker restart: ${description || taskId}`,
+    reason: 'worker_restart',
+  })
+}
+
+/**
+ * densable print.ts merge of running_background_tasks +
+ * orphaned_background_tasks_pending_notification (task_id keyed; prefer
+ * description when present).
+ */
+export function mergeRestoredWorkerRestartOrphans(
+  running: unknown,
+  pending: unknown,
+): Array<{ task_id: string; description?: string }> {
+  const runningList = Array.isArray(running) ? running : []
+  const pendingList = Array.isArray(pending) ? pending : []
+  const byId = new Map<string, { task_id: string; description?: string }>()
+  for (const raw of [...pendingList, ...runningList]) {
+    if (!raw || typeof raw !== 'object') continue
+    const taskId = (raw as { task_id?: unknown }).task_id
+    if (typeof taskId !== 'string' || !taskId) continue
+    const descriptionRaw = (raw as { description?: unknown }).description
+    const description =
+      typeof descriptionRaw === 'string' ? descriptionRaw : undefined
+    const prev = byId.get(taskId)
+    if (!prev || (!prev.description && description)) {
+      byId.set(taskId, { task_id: taskId, description })
+    }
+  }
+  return Array.from(byId.values())
 }
 
 export type OrphanAgentEntry = {

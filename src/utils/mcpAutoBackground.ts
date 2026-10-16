@@ -230,7 +230,10 @@ export async function callMcpToolWithAutoBackground<
         )
         return
       }
-      completeMonitorMcpTask(taskId, input.setAppState)
+      const resourceLinks = collectMcpResourceLinks(result.content)
+      completeMonitorMcpTask(taskId, input.setAppState, {
+        resourceLinks: resourceLinks.length > 0 ? resourceLinks : undefined,
+      })
       try {
         logEvent('mcp_auto_background', { completed: true })
       } catch {
@@ -257,6 +260,24 @@ export async function callMcpToolWithAutoBackground<
     content: [{ type: 'text', text: movedText }],
     autoBackgrounded: true,
   }
+}
+
+/** densable 2.1.289 — collect MCP resource_link blocks for task_notification. */
+export function collectMcpResourceLinks(content: unknown, cap = 50): unknown[] {
+  if (!Array.isArray(content) || cap <= 0) return []
+  const out: unknown[] = []
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      'type' in block &&
+      (block as { type: unknown }).type === 'resource_link'
+    ) {
+      out.push(block)
+      if (out.length >= cap) break
+    }
+  }
+  return out
 }
 
 function summarizeMcpResult(result: McpAutoBackgroundCallResult): string {

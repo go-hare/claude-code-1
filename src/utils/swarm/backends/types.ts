@@ -1,6 +1,7 @@
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { ToolUseContext } from '../../../Tool.js'
+import type { PermissionMode } from '../../../types/permissions.js'
 
 /**
  * Types of backends available for teammate execution.
@@ -245,6 +246,8 @@ export type TeammateSpawnConfig = TeammateIdentity & {
   /** Whether this teammate can show permission prompts for unlisted tools.
    * When false (default), unlisted tools are auto-denied. */
   allowPermissionPrompts?: boolean
+  /** densable spawn `permissionMode` stamp; optional override of M(). */
+  permissionMode?: PermissionMode
 }
 
 /**
