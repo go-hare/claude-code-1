@@ -19,13 +19,14 @@ import {
   notifySessionMetadataChanged,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
+import { isObserverAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { TaskState } from '../tasks/types.js'
 import type { AppState } from './AppStateStore.js'
 
 /**
- * densable 2.1.211 Kw — live background membership for stream level signal.
- * running|pending, and if isBackgrounded is present it must not be false
- * (foreground-registered agents are excluded until mid-bg flip).
+ * densable 2.1.211 Kw / 2.1.289 yg — live background membership for stream
+ * level signal. running|pending, and if isBackgrounded is present it must not
+ * be false (foreground-registered agents are excluded until mid-bg flip).
  */
 function isLiveBackgroundTask(task: TaskState): boolean {
   if (task.status !== 'running' && task.status !== 'pending') {
@@ -37,18 +38,123 @@ function isLiveBackgroundTask(task: TaskState): boolean {
   return true
 }
 
-/** densable 2.1.211 Zlr — wire list for background_tasks_changed. */
-function listLiveBackgroundTasks(
-  tasks: AppState['tasks'] | undefined,
-): Array<{ task_id: string; task_type: string; description: string }> {
+/**
+ * densable 2.1.289 Ku — observer local_agent tasks are excluded from CCR/SDK
+ * live lists; owner-agent Ku also stamps observer_owned on child shells/monitors.
+ */
+function isObserverExcludedTask(task: TaskState): boolean {
+  return isObserverAgentTask(task)
+}
+
+/** densable 2.1.211 Zlr / 2.1.289 y — wire list for background_tasks_changed. */
+function listLiveBackgroundTasks(tasks: AppState['tasks'] | undefined): Array<{
+  task_id: string
+  task_type: string
+  description: string
+  ambient?: boolean
+}> {
   if (!tasks) return []
   return Object.values(tasks)
-    .filter(isLiveBackgroundTask)
+    .filter(t => isLiveBackgroundTask(t) && !isObserverExcludedTask(t))
     .map(t => ({
       task_id: t.id,
       task_type: t.type,
       description: t.description,
+      ...('ambient' in t &&
+      typeof (t as { ambient?: unknown }).ambient === 'boolean'
+        ? { ambient: (t as { ambient: boolean }).ambient }
+        : {}),
     }))
+}
+
+/** densable 2.1.289 CCR internal allowlist (gold E type filter). */
+const RUNNING_BACKGROUND_TASK_TYPES = new Set([
+  'local_bash',
+  'monitor_mcp',
+  'monitor_ws',
+  'local_agent',
+  'local_workflow',
+])
+
+export type RunningBackgroundTaskInternal = {
+  task_id: string
+  task_type: string
+  description: string
+  owner_agent_id?: string
+  shell_kind?: string
+  ambient?: boolean
+  observer_owned?: boolean
+}
+
+/**
+ * densable 2.1.289 L — shell/monitor owned by an observer agent.
+ */
+function isObserverOwnedBackgroundTask(
+  task: TaskState,
+  tasks: AppState['tasks'],
+): boolean {
+  if (
+    task.type !== 'local_bash' &&
+    task.type !== 'monitor_mcp' &&
+    task.type !== 'monitor_ws'
+  ) {
+    return false
+  }
+  const agentId = 'agentId' in task ? task.agentId : undefined
+  if (agentId === undefined) return false
+  const owner = tasks[agentId]
+  return owner !== undefined && isObserverExcludedTask(owner)
+}
+
+/**
+ * densable 2.1.289 E — CCR internal_metadata.running_background_tasks writer
+ * list (type-filtered live set + optional owner/shell/ambient/observer_owned).
+ */
+export function listRunningBackgroundTasksForInternalMetadata(
+  tasks: AppState['tasks'] | undefined,
+): RunningBackgroundTaskInternal[] {
+  if (!tasks) return []
+  return Object.values(tasks)
+    .filter(
+      t =>
+        isLiveBackgroundTask(t) &&
+        !isObserverExcludedTask(t) &&
+        RUNNING_BACKGROUND_TASK_TYPES.has(t.type),
+    )
+    .map(t => {
+      const entry: RunningBackgroundTaskInternal = {
+        task_id: t.id,
+        task_type: t.type,
+        description: t.description,
+      }
+      if (
+        (t.type === 'local_bash' ||
+          t.type === 'monitor_mcp' ||
+          t.type === 'monitor_ws') &&
+        'agentId' in t &&
+        t.agentId !== undefined
+      ) {
+        entry.owner_agent_id = t.agentId
+      }
+      if (
+        t.type === 'local_bash' &&
+        'kind' in t &&
+        (t as { kind?: unknown }).kind !== undefined
+      ) {
+        entry.shell_kind = String((t as { kind: string | number }).kind)
+      }
+      if (
+        t.type === 'monitor_ws' &&
+        'ambient' in t &&
+        (t as { ambient?: unknown }).ambient
+      ) {
+        entry.ambient = true
+      }
+      if (isObserverOwnedBackgroundTask(t, tasks)) {
+        entry.observer_owned = true
+      }
+      return entry
+    })
 }
 
 function backgroundTasksMembershipChanged(
@@ -123,11 +229,23 @@ export function onChangeAppState({
     notifyPermissionModeChanged(newMode)
   }
 
-  // densable 2.1.211 JNe: e.tasks!==t.tasks → Zlr membership → BC
-  // system/background_tasks_changed (REPLACE full live set). Level signal
-  // only — not edge bookends; do not invent running_background_tasks
-  // internal_metadata (CCR-only) unless a host path needs it.
+  // densable 2.1.211 JNe / 2.1.289: e.tasks!==t.tasks →
+  //   E membership → notifyInternalMetadataChanged({running_background_tasks})
+  //   y membership → system/background_tasks_changed (REPLACE full live set).
+  // notifyInternalMetadataChanged noops when no CCR listener is registered.
   if (newState.tasks !== oldState.tasks) {
+    const prevInternal = listRunningBackgroundTasksForInternalMetadata(
+      oldState.tasks,
+    )
+    const nextInternal = listRunningBackgroundTasksForInternalMetadata(
+      newState.tasks,
+    )
+    if (backgroundTasksMembershipChanged(prevInternal, nextInternal)) {
+      notifyInternalMetadataChanged({
+        running_background_tasks: nextInternal,
+      })
+    }
+
     const prevLive = listLiveBackgroundTasks(oldState.tasks)
     const nextLive = listLiveBackgroundTasks(newState.tasks)
     if (backgroundTasksMembershipChanged(prevLive, nextLive)) {

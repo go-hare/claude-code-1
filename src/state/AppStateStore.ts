@@ -41,6 +41,51 @@ import { shouldEnableThinkingByDefault } from '../utils/thinking.js'
 import type { PipeIpcState } from '../utils/pipeTransport.js'
 import type { Store } from './store.js'
 
+/**
+ * densable 2.1.289 AppState.liveReplicas. DualInk se/also never assign
+ * workingCopyPath / settleFileChange / liveFileEnded / pushHeldSaves /
+ * heldSavesExitCleanup (gold void 0). Structure is 1:1; do not invent hosts.
+ */
+export type LiveReplicasState = {
+  replicas: Map<string, unknown>
+  unanswered: Map<string, unknown>
+  unavailable: Map<string, unknown>
+  tooOld: Set<string>
+  cloudUnserved: Set<string>
+  opening: Map<string, unknown>
+  binding: Map<string, unknown>
+  transport: undefined
+  engine: undefined
+  renderLevel: undefined
+  headMoved: undefined
+  workingCopyPath: undefined
+  settleFileChange: undefined
+  liveFileEnded: undefined
+  pushHeldSaves: undefined
+  heldSavesExitCleanup: undefined
+}
+
+export function createEmptyLiveReplicas(): LiveReplicasState {
+  return {
+    replicas: new Map(),
+    unanswered: new Map(),
+    unavailable: new Map(),
+    tooOld: new Set(),
+    cloudUnserved: new Set(),
+    opening: new Map(),
+    binding: new Map(),
+    transport: undefined,
+    engine: undefined,
+    renderLevel: undefined,
+    headMoved: undefined,
+    workingCopyPath: undefined,
+    settleFileChange: undefined,
+    liveFileEnded: undefined,
+    pushHeldSaves: undefined,
+    heldSavesExitCleanup: undefined,
+  }
+}
+
 export type CompletionBoundary =
   | { type: 'complete'; completedAt: number; outputTokens: number }
   | { type: 'bash'; command: string; completedAt: number }
@@ -349,6 +394,8 @@ export type AppState = DeepImmutable<{
     lastDeferralPassAt?: number
     /** densable 2.1.246 idleCheckinCount — burst cap, cleared by d9n. */
     idleCheckinCount?: number
+    /** densable lastReason — Stop not_met evaluator reason (`/goal` Last check). */
+    lastReason?: string
   }
   tungstenActiveSession?: {
     sessionName: string
@@ -372,6 +419,46 @@ export type AppState = DeepImmutable<{
   bagelUrl?: string
   // WebBrowser tool: sticky panel visibility toggle
   bagelPanelVisible?: boolean
+  // Artifact read consent for this conversation, by slug. Only valid while
+  // artifactConsentEpoch matches the artifact store's accountEpoch.
+  artifactConsentEpoch?: number
+  /** densable NCo — page HTML `action:"read"` shared-read consent. */
+  artifactReadConsentSlugs?: Record<string, true>
+  artifactAssetReadConsentSlugs?: Record<string, true>
+  artifactAssetReadHumanConsentSlugs?: Record<string, true>
+  artifactOutsideOrgConsentSlugs?: Record<string, true>
+  // Reserved gold maps. E() / Ktn wipe them on account or conversation
+  // reset; no tip writer has landed (db / upload / handlers). Empty ≠ granted.
+  artifactDbReadConsentSlugs?: Record<string, true>
+  artifactDbReadHumanConsentSlugs?: Record<string, true>
+  artifactAssetUploadConsentSlugs?: Record<string, true>
+  artifactAssetUploadHumanConsentSlugs?: Record<string, true>
+  /**
+   * densable N9e / vm `frameUrls` — conversation-published artifact frames.
+   * Optional; delete `mp()` reads this to stamp publishedThisSession.
+   */
+  frameUrls?: Record<
+    string,
+    { url: string; title?: string; updatedAt?: number; sessionMinted?: boolean }
+  >
+  artifactHandlersReadConsentSlugs?: Record<string, true>
+  artifactHandlersReadHumanConsentSlugs?: Record<string, true>
+  artifactHandlersWriteConsentSlugs?: Record<string, true>
+  artifactHandlersWriteHumanConsentSlugs?: Record<string, true>
+  /** densable N9e / Vtn — last-read artifact version by slug. */
+  artifactReadVersions?: Record<string, string>
+  /**
+   * densable N9e JXt — observer watermarks keyed by slug, then lane
+   * (`{main:""}` on empty restore).
+   */
+  artifactReadObservers?: Record<string, Record<string, string>>
+  /** densable N9e — resumed artifact refs (`{slug, pin?}`). */
+  artifactRefs?: Array<{ slug: string; pin?: string }>
+  /**
+   * densable 2.1.289 liveReplicas — DualInk replica store (gold AppState
+   * neighbor of autoReact). Host function slots stay undefined.
+   */
+  liveReplicas: LiveReplicasState
   // chicago MCP session state. Types inlined (not imported from
   // @ant/computer-use-mcp/types) so external typecheck passes without the
   // ant-scoped dep resolved. Shapes match `AppGrant`/`CuGrantFlags`
@@ -746,5 +833,6 @@ export function getDefaultAppState(): AppState {
     endedByModel: false,
     activeOverlays: new Set<string>(),
     fastMode: false,
+    liveReplicas: createEmptyLiveReplicas(),
   }
 }

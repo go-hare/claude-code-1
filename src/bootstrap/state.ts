@@ -1849,6 +1849,38 @@ export function setOauthScopesFromFd(scopes: unknown): void {
   getBootstrapSessionHost().credentialSlots.replaceOauthScopesFromFd(scopes)
 }
 
+/** densable `Nso`. */
+export function descriptorAnnouncementConsumed(envVar: string): boolean {
+  return getBootstrapSessionHost().credentialSlots.descriptorAnnouncementConsumed(
+    envVar,
+  )
+}
+
+/** densable `xPn`. */
+export function markDescriptorAnnouncementConsumed(envVar: string): void {
+  getBootstrapSessionHost().credentialSlots.markDescriptorAnnouncementConsumed(
+    envVar,
+  )
+}
+
+export function clearDescriptorAnnouncements(): void {
+  getBootstrapSessionHost().credentialSlots.clearDescriptorAnnouncements()
+}
+
+/** densable `Vcr`. `undefined` means not read yet; `null` means read and empty. */
+export function getGatewayTokenFromDescriptor(): string | null | undefined {
+  return getBootstrapSessionHost().credentialSlots.gatewayTokenFromDescriptor()
+}
+
+/** densable `PPn`. Not cleared by `resetFdCredentialState`. */
+export function setGatewayTokenFromDescriptor(
+  token: string | null | undefined,
+): void {
+  getBootstrapSessionHost().credentialSlots.replaceGatewayTokenFromDescriptor(
+    token,
+  )
+}
+
 export function resetFdCredentialState(): void {
   getBootstrapSessionHost().credentialSlots.resetFdCredentialState()
 }
