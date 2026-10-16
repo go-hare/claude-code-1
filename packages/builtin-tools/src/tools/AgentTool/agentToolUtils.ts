@@ -44,6 +44,11 @@ import type { Message as MessageType, ContentItem } from 'src/types/message.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isInProtectedNamespace } from 'src/utils/envUtils.js'
+import {
+  hashHarnessSectionBlocks,
+  splitReportForPersistedToolResultFiles,
+} from 'src/utils/harnessTextSanitize.js'
+import type { WebFetchSavedFiles } from 'src/utils/subagentSpawnLedger.js'
 import { isBackgroundAbortReason } from 'src/utils/abortController.js'
 import {
   AgentApiErrorTerminationError,
@@ -73,6 +78,7 @@ import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
 import { ObserverReportTool } from '../ObserverReportTool/ObserverReportTool.js'
 import { CRON_CREATE_TOOL_NAME } from '../ScheduleCronTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
+import { SUBAGENT_HANDBACK_TOOL_NAME } from '../SubagentHandbackTool/constants.js'
 import {
   AGENT_TOOL_NAME,
   LEGACY_AGENT_TOOL_NAME,
@@ -90,6 +96,7 @@ import type { AgentDefinition } from './loadAgentsDir.js'
  */
 const OBSERVER_EXACT_STRIP_TOOL_NAMES = [
   SEND_MESSAGE_TOOL_NAME,
+  SUBAGENT_HANDBACK_TOOL_NAME,
   OBSERVER_REPORT_TOOL_NAME,
   AGENT_TOOL_NAME,
   LEGACY_AGENT_TOOL_NAME,
@@ -324,6 +331,10 @@ export const agentToolResultSchema = lazySchema(() =>
     totalToolUseCount: z.number(),
     totalDurationMs: z.number(),
     totalTokens: z.number(),
+    // densable C_n note/tail/hash — optional so resume replays without them.
+    harnessNoteCount: z.number().optional(),
+    harnessTailCount: z.number().optional(),
+    harnessSectionHash: z.string().optional(),
     // toolStats — focus transcript folds these into brief summary
     toolStats: z
       .object({
@@ -435,6 +446,7 @@ export function finalizeAgentTool(
     startTime: number
     agentType: string
     isAsync: boolean
+    persistedToolResultFiles?: WebFetchSavedFiles
   },
   /**
    * densable Cns(..., {suppressTelemetry:Z}) where Z = JXt after Jeo.
@@ -451,6 +463,7 @@ export function finalizeAgentTool(
     startTime,
     agentType,
     isAsync,
+    persistedToolResultFiles,
   } = metadata
   const suppressTelemetry = opts?.suppressTelemetry === true
 
@@ -551,24 +564,36 @@ export function finalizeAgentTool(
   }
 
   // densable 2.1.246 #54 Gxt — prepend PARTIAL banner when query hit maxTurns
+  const notes: Array<{ type: 'text'; text: string }> = []
   const maxTurnsReached = readMaxTurnsReached(agentMessages)
   if (maxTurnsReached !== undefined) {
     const continueHint = ONE_SHOT_BUILTIN_AGENT_TYPES.has(agentType)
       ? ''
       : ` Send the agent a message (${SEND_MESSAGE_TOOL_NAME}) to let it continue from where it stopped.`
-    content = [
-      {
-        type: 'text',
-        text: `${MAX_TURNS_PARTIAL_PREFIX}${maxTurnsReached}-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete.${continueHint}\n`,
-      },
-      ...content,
-    ]
+    notes.push({
+      type: 'text',
+      text: `${MAX_TURNS_PARTIAL_PREFIX}${maxTurnsReached}-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete.${continueHint}\n`,
+    })
   }
+
+  // densable W$n: persistedToolResultFiles?al(B, files, on(Z)):{report:B,harnessTail:[]}
+  const notesChars = notes.reduce((sum, block) => sum + block.text.length, 0)
+  const { report, harnessTail } = persistedToolResultFiles
+    ? splitReportForPersistedToolResultFiles(
+        content,
+        persistedToolResultFiles,
+        notesChars,
+      )
+    : { report: content, harnessTail: [] }
+  content = [...notes, ...report, ...harnessTail]
 
   return {
     agentId,
     agentType,
     content,
+    harnessNoteCount: notes.length,
+    harnessTailCount: harnessTail.length,
+    harnessSectionHash: hashHarnessSectionBlocks(content),
     totalDurationMs: Date.now() - startTime,
     totalTokens,
     totalToolUseCount,
@@ -925,6 +950,16 @@ export async function runAsyncAgentLifecycle({
   // do not race task.result AppState writes after lifecycle settles.
   let settledFinalText: string | undefined
   try {
+    // densable N5: T8e at run start. The finally settles it when this run exits.
+    try {
+      const { clearAgentStopPending, registerAgentKillLoop } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/agentStopBag.js') as typeof import('src/utils/agentStopBag.js')
+      registerAgentKillLoop(taskId)
+      clearAgentStopPending(agentIdForCleanup)
+    } catch {
+      // optional bag
+    }
     const tracker = createProgressTracker()
     const resolveActivity = createActivityDescriptionResolver(
       toolUseContext.options.tools,
@@ -1113,6 +1148,14 @@ export async function runAsyncAgentLifecycle({
       if (handoffWarning) {
         finalMessage = `${handoffWarning}\n\n${finalMessage}`
         settledFinalText = finalMessage
+        agentResult.content = [
+          { type: 'text' as const, text: handoffWarning },
+          ...agentResult.content,
+        ]
+        agentResult.harnessNoteCount = (agentResult.harnessNoteCount ?? 0) + 1
+        agentResult.harnessSectionHash = hashHarnessSectionBlocks(
+          agentResult.content,
+        )
       }
     }
 
@@ -1229,6 +1272,14 @@ export async function runAsyncAgentLifecycle({
       ...worktreeResult,
     })
   } finally {
+    try {
+      const { settleAgentKillLoop } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/agentStopBag.js') as typeof import('src/utils/agentStopBag.js')
+      settleAgentKillLoop(taskId)
+    } catch {
+      // optional bag
+    }
     // densable Oze finally: p?.() — concurrent slot release is once-safe
     onRunSettled?.()
     clearInvokedSkillsForAgent(agentIdForCleanup)

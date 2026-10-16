@@ -13,16 +13,16 @@ import type {
 } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { createUserMessage } from 'src/utils/messages.js'
+import { AGENT_TOOL_NAME } from './constants.js'
 import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
 
 /**
  * Fork subagent feature gate (AgentTool + `/fork` share this).
  *
  * When enabled:
- * - `subagent_type` becomes optional on the Agent tool schema
- * - Omitting `subagent_type` triggers an implicit fork: the child inherits
- *   the parent's full conversation context and system prompt
- * - All agent spawns run in the background (async) for a unified
+ * - `subagent_type: fork` is an explicit spawn (never the omit-type default)
+ * - The child inherits the parent's full conversation context and system prompt
+ * - Eligible agent spawns run in the background (async) for a unified
  *   `<task-notification>` interaction model
  * - `/fork <directive>` slash command is available
  *
@@ -31,11 +31,13 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
  * 2. Portable env/GB: CLAUDE_CODE_FORK_SUBAGENT / tengu_fork_subagent
  *    (`src/utils/forkSubagentGate.ts`) — same resolver `/fork` used to call alone
  *
- * Session constraints (always applied after enable path):
- * - Mutually exclusive with coordinator mode
- * - Disabled in non-interactive (pipe/SDK) sessions
+ * Session constraints:
+ * - Mutually exclusive with coordinator mode (gold FDd / Ige, folded into Yne)
+ * - Explicit `subagent_type: fork` / `/fork` also disabled in non-interactive
+ *   sessions (Ce). densable Ht / qt use Yne **without** Ce — see
+ *   `isForkSubagentProductEnabled`.
  */
-export function isForkSubagentEnabled(): boolean {
+export function isForkSubagentProductEnabled(): boolean {
   // Compile feature first (bun:bundle — only valid in if/ternary condition).
   let enabled = false
   if (feature('FORK_SUBAGENT')) {
@@ -50,6 +52,11 @@ export function isForkSubagentEnabled(): boolean {
   }
   if (!enabled) return false
   if (isCoordinatorMode()) return false
+  return true
+}
+
+export function isForkSubagentEnabled(): boolean {
+  if (!isForkSubagentProductEnabled()) return false
   if (getIsNonInteractiveSession()) return false
   return true
 }
@@ -60,8 +67,8 @@ export const FORK_SUBAGENT_TYPE = 'fork'
 /**
  * Synthetic agent definition for the fork path.
  *
- * Not registered in builtInAgents — used only when `!subagent_type` and the
- * experiment is active. `tools: ['*']` with `useExactTools` means the fork
+ * Not registered in builtInAgents — used when `subagent_type` is fork (NFKC)
+ * and the experiment is active. `tools: ['*']` with `useExactTools` means the fork
  * child receives the parent's exact tool pool (for cache-identical API
  * prefixes). `permissionMode: 'bubble'` surfaces permission prompts to the
  * parent terminal. `model: 'inherit'` keeps the parent's model for context
@@ -76,7 +83,7 @@ export const FORK_SUBAGENT_TYPE = 'fork'
 export const FORK_AGENT = {
   agentType: FORK_SUBAGENT_TYPE,
   whenToUse:
-    'Implicit fork — inherits full conversation context. Not selectable via subagent_type; triggered by omitting subagent_type when the fork experiment is active.',
+    'Selected explicitly via `subagent_type` fork. Inherits the parent conversation and system prompt.',
   tools: ['*'],
   maxTurns: 200,
   model: 'inherit',
@@ -190,30 +197,19 @@ export function buildForkedMessages(
   return [fullAssistantMessage, toolResultMessage]
 }
 
-export function buildChildMessage(directive: string): string {
+export function buildChildMessage(directive: string, extraRule = ''): string {
   return `<${FORK_BOILERPLATE_TAG}>
-STOP. READ THIS FIRST.
+You are a worker fork. The transcript above is the parent's history — inherited reference, not your situation. You are NOT a continuation of that agent. Execute ONE directive, then stop.
 
-You are a forked worker process. You are NOT the main agent.
+Hard rules:
+- Do NOT spawn subagents with the ${AGENT_TOOL_NAME} tool. The "default to forking" guidance is for the parent; you ARE the fork, execute directly.${extraRule}
+- One shot: report once and stop. No follow-up questions, no proposed next steps, no waiting for the user.
 
-RULES (non-negotiable):
-1. Your system prompt says "default to forking." IGNORE IT \u2014 that's for the parent. You ARE the fork. Do NOT spawn sub-agents; execute directly.
-2. Do NOT converse, ask questions, or suggest next steps
-3. Do NOT editorialize or add meta-commentary
-4. USE your tools directly: Bash, Read, Write, etc.
-5. If you modify files, commit your changes before reporting. Include the commit hash in your report.
-6. Do NOT emit text between tool calls. Use tools silently, then report once at the end.
-7. Stay strictly within your directive's scope. If you discover related systems outside your scope, mention them in one sentence at most — other workers cover those areas.
-8. Keep your report under 500 words unless the directive specifies otherwise. Be factual and concise.
-9. Your response MUST begin with "Scope:". No preamble, no thinking-out-loud.
-10. REPORT structured facts, then stop
-
-Output format (plain text labels, not markdown headers):
-  Scope: <echo back your assigned scope in one sentence>
-  Result: <the answer or key findings, limited to the scope above>
-  Key files: <relevant file paths — include for research tasks>
-  Files changed: <list with commit hash — include only if you modified files>
-  Issues: <list — include only if there are issues to flag>
+Guidelines (your directive may override any of these):
+- Stay in scope. Other forks may be handling adjacent work; if you spot something outside your directive, note it in a sentence and move on.
+- Open with one line restating your task, so the parent can spot scope drift at a glance.
+- Be concise — as short as the answer allows, no shorter. Plain text, no preamble, no meta-commentary.
+- If you committed changes, list the paths and commit hashes in your report.
 </${FORK_BOILERPLATE_TAG}>
 
 ${FORK_DIRECTIVE_PREFIX}${directive}`

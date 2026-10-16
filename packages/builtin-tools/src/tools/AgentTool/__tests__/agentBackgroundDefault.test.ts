@@ -21,14 +21,25 @@ describe('Agent background-by-default (official 208)', () => {
     )
   })
 
-  test('shouldRunAsync uses run_in_background !== false default for non-teammates', () => {
+  test('shouldRunAsync uses densable wo h/b/D with !== false default', () => {
+    // densable wo: b = ... || (!h && p!==false); D = ... || (!Mv(e) && b)
+    expect(agentToolSource).toContain('(!h && run_in_background !== false)')
+    expect(agentToolSource).toContain('(!isWebFetchSpawn && b)')
     expect(agentToolSource).toContain(
-      '(!isInProcessTeammate() && run_in_background !== false)',
+      'isRemoteIsolation || (D && !spawnBackgroundTasksDisabled)',
     )
+    expect(agentToolSource).not.toContain('isProactiveActive')
   })
 
-  test('prompt says Subagents run in the background by default', () => {
-    expect(promptSource).toContain('Subagents run in the background by default')
+  test('async_launched map does not invite Read/Bash tail of outputFile', () => {
+    expect(agentToolSource).not.toContain(
+      'If asked, you can check progress before completion by using',
+    )
+    expect(agentToolSource).toContain('Cloud agent launched')
+  })
+
+  test('prompt says Agents run in the background by default', () => {
+    expect(promptSource).toContain('Agents run in the background by default')
     expect(promptSource).toContain('run_in_background: false')
     expect(promptSource).not.toContain('Foreground (default)')
     expect(promptSource).not.toContain('Use foreground (default)')

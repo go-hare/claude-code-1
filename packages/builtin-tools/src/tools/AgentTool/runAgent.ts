@@ -4,7 +4,11 @@ import { randomUUID } from 'crypto'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
-import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
+import {
+  getMainThreadAgentId,
+  getProjectRoot,
+  getSessionId,
+} from 'src/bootstrap/state.js'
 import { getCommand, getSkillToolCommands, hasCommand } from 'src/commands.js'
 import {
   DEFAULT_AGENT_PROMPT,
@@ -31,6 +35,7 @@ import type {
 } from 'src/services/mcp/types.js'
 import {
   dedupeToolsByName,
+  toolMatchesName,
   type Tool,
   type Tools,
   type ToolUseContext,
@@ -76,7 +81,24 @@ import {
   createProgressMessage,
   createUserMessage,
   normalizeMessages,
+  wrapInSystemReminder,
 } from 'src/utils/messages.js'
+import { isLocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { updateTaskState } from 'src/utils/task/framework.js'
+import {
+  buildHandbackContractFields,
+  isHandbackInboxReadable,
+  isHandbackParentAuto,
+  isSendMessageHandbackEnabled,
+  setHandbackSessionContract,
+} from 'src/utils/subagentHandback.js'
+import { SUBAGENT_HANDBACK_TOOL_NAME } from '../SubagentHandbackTool/constants.js'
+import {
+  getHandbackCountermandBody,
+  getHandbackReminderBody,
+  HANDBACK_COUNTERMAND_LEAD,
+  HANDBACK_REMINDER_LEAD,
+} from '../SubagentHandbackTool/prompt.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { getStreamJsonStdoutWriter } from 'src/utils/streamJsonStdoutWriter.js'
 import { normalizeMessage } from 'src/utils/queryHelpers.js'
@@ -112,7 +134,6 @@ import {
 } from 'src/utils/telemetry/perfettoTracing.js'
 import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
-import type { ActiveTaskExecutionContext } from 'src/utils/tasks.js'
 import { getAgentContext } from 'src/utils/agentContext.js'
 import {
   admitWebFetchTool,
@@ -312,8 +333,6 @@ export async function* runAgent({
   allowedTools,
   onCacheSafeParams,
   contentReplacementState,
-  ownedFiles,
-  activeTaskExecutionContext,
   useExactTools,
   webFetchReadmissionAllowed = true,
   worktreePath,
@@ -332,6 +351,9 @@ export async function* runAgent({
   customAgentType,
   transcriptSubdir,
   onQueryProgress,
+  handbackOptIn,
+  handbackTool,
+  forkedSkillName,
 }: {
   agentDefinition: AgentDefinition
   promptMessages: Message[]
@@ -373,10 +395,6 @@ export async function* runAgent({
    * the same tool results are re-replaced (prompt cache stability). When
    * omitted, createSubagentContext clones the parent's state. */
   contentReplacementState?: ContentReplacementState
-  /** Coordinator-owned file set for write serialization. */
-  ownedFiles?: string[]
-  /** Optional task context to carry into the spawned agent. */
-  activeTaskExecutionContext?: ActiveTaskExecutionContext
   /** When true, use availableTools directly without filtering through
    * resolveAgentTools(). Also inherits the parent's thinkingConfig and
    * isNonInteractiveSession instead of overriding them. Used by the fork
@@ -433,6 +451,15 @@ export async function* runAgent({
    * during long single-block streams (e.g. thinking) where no assistant
    * message is yielded for >60s. */
   onQueryProgress?: () => void
+  /**
+   * densable `St` handbackOptIn — AgentTool passes `!fork`. Observer / fork
+   * leave this false so SubagentHandback is not armed.
+   */
+  handbackOptIn?: boolean
+  /** densable `bt` / `cen` — SubagentHandback singleton spliced when Ut. */
+  handbackTool?: Tool
+  /** densable Ywo — persist forked-skill witness on the sidecar. */
+  forkedSkillName?: string
 }): AsyncGenerator<Message, void> {
   // Track subagent usage for feature discovery
 
@@ -837,7 +864,7 @@ export async function* runAgent({
   // Merge agent MCP tools with resolved agent tools, deduplicating by name.
   // resolvedTools is already deduplicated (see resolveAgentTools), so skip
   // the spread + merge overhead when there are no agent-specific MCP tools.
-  const allTools =
+  let allTools =
     agentMcpTools.length > 0
       ? dedupeToolsByName([...resolvedTools, ...agentMcpTools])
       : resolvedTools
@@ -855,6 +882,106 @@ export async function* runAgent({
       { callSite: 'attachments_subagent', querySource },
     )) {
       initialMessages.push(createAttachmentMessage(att))
+    }
+  }
+
+  // densable Ut / bGo / mGo / gGo — SubagentHandback arm + reminder.
+  // Ut = St && !forkExact && bt && !duplicate && fGo(parent) (parent auto + u7e).
+  const handbackDuplicate = allTools.some(
+    t => toolMatchesName(t, SUBAGENT_HANDBACK_TOOL_NAME) && t !== handbackTool,
+  )
+  const handbackArmed =
+    handbackOptIn === true &&
+    !useExactTools &&
+    handbackTool !== undefined &&
+    !handbackDuplicate &&
+    isHandbackParentAuto(permissionMode)
+  if (handbackArmed && !allTools.includes(handbackTool)) {
+    allTools = [...allTools, handbackTool]
+  }
+  setHandbackSessionContract(agentId, handbackArmed)
+  if (
+    handbackOptIn === true &&
+    (isSendMessageHandbackEnabled() ||
+      (() => {
+        try {
+          const t = toolUseContext.getAppState().tasks[agentId]
+          return isLocalAgentTask(t) && t.handbackContract === true
+        } catch {
+          return false
+        }
+      })())
+  ) {
+    try {
+      const existing = toolUseContext.getAppState().tasks[agentId]
+      const registeredRecipient = isLocalAgentTask(existing)
+        ? existing.handbackRecipient
+        : undefined
+      const callerInbox = parentAgentId ?? getMainThreadAgentId()
+      const mainId = getMainThreadAgentId()
+      const fields = buildHandbackContractFields({
+        contract: handbackArmed,
+        registeredRecipient,
+        callerInbox,
+        resumerInbox: toolUseContext.agentId ?? mainId,
+        inboxReadable: id =>
+          isHandbackInboxReadable(
+            id,
+            taskId => {
+              try {
+                return toolUseContext.getAppState().tasks[taskId]
+              } catch {
+                return undefined
+              }
+            },
+            mainId,
+          ),
+      })
+      updateTaskState(agentId, rootSetAppState, t => {
+        if (!isLocalAgentTask(t)) return t
+        return { ...t, ...fields }
+      })
+    } catch {
+      // task may not be registered yet in tests
+    }
+  }
+  {
+    const reminderOpen = `<system-reminder>\n${HANDBACK_REMINDER_LEAD}`
+    const countermandOpen = `<system-reminder>\n${HANDBACK_COUNTERMAND_LEAD}`
+    let last: 'reminder' | 'countermand' | undefined
+    for (let i = initialMessages.length - 1; i >= 0; i--) {
+      const m = initialMessages[i]
+      if (!m || m.type !== 'user' || m.isMeta !== true) continue
+      const content = m.message?.content
+      const text = typeof content === 'string' ? content : undefined
+      if (typeof text !== 'string') continue
+      if (text.startsWith(reminderOpen)) {
+        last = 'reminder'
+        break
+      }
+      if (text.startsWith(countermandOpen)) {
+        last = 'countermand'
+        break
+      }
+    }
+    if (handbackArmed && last !== 'reminder') {
+      initialMessages.push(
+        createUserMessage({
+          content: wrapInSystemReminder(getHandbackReminderBody()),
+          isMeta: true,
+        }),
+      )
+    } else if (
+      !handbackArmed &&
+      handbackOptIn === true &&
+      last === 'reminder'
+    ) {
+      initialMessages.push(
+        createUserMessage({
+          content: wrapInSystemReminder(getHandbackCountermandBody()),
+          isMeta: true,
+        }),
+      )
     }
   }
 
@@ -917,8 +1044,6 @@ export async function* runAgent({
     criticalSystemReminder_EXPERIMENTAL:
       agentDefinition.criticalSystemReminder_EXPERIMENTAL,
     contentReplacementState,
-    ...(ownedFiles && ownedFiles.length > 0 && { ownedFiles }),
-    activeTaskExecutionContext,
   })
 
   // Preserve tool use results for subagents with viewable transcripts (in-process teammates)
@@ -970,6 +1095,7 @@ export async function* runAgent({
     ...(color && { color }),
     ...(planModeRequired !== undefined && { planModeRequired }),
     ...(customAgentType && { customAgentType }),
+    ...(forkedSkillName && { forkedSkillName }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
   // Track the last recorded message UUID for parent chain continuity
@@ -1007,6 +1133,7 @@ export async function* runAgent({
       fallbackModel: firstFallbackModel(toolUseContext.options.fallbackModel),
       agentCacheTtlOverride: agentDefinition.cacheTtl,
       ...(managedInstructionsOnly && { managedInstructionsOnly: true }),
+      ...(handbackArmed ? { requiresHandback: true } : {}),
     })) {
       onQueryProgress?.()
       // Forward subagent API request starts to parent's metrics display
@@ -1145,6 +1272,14 @@ export async function* runAgent({
       agentDefinition.callback()
     }
   } finally {
+    // densable kbe — drop delivery-map row so a later spawn of this id is clean
+    try {
+      const { clearHandbackDelivery } =
+        require('src/utils/subagentHandback.js') as typeof import('src/utils/subagentHandback.js')
+      clearHandbackDelivery(agentId)
+    } catch {
+      // optional
+    }
     // End Langfuse sub-agent trace (no-op if not configured)
     endTrace(subTrace)
     // Clean up agent-specific MCP servers (runs on normal completion, abort, or error)

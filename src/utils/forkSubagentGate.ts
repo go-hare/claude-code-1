@@ -18,8 +18,9 @@
  *   function _Ie(){ return FDd() !== "disabled"; }
  *
  * Local: env force/disable + ant disable + default ON + session sticky
- * (`forkSubagentEnabledSource`). Coordinator / non-interactive still
- * applied in AgentTool `isForkSubagentEnabled()`.
+ * (`forkSubagentEnabledSource`). Coordinator is folded into AgentTool
+ * `isForkSubagentProductEnabled` (Yne). Non-interactive (Ce) is only on
+ * `isForkSubagentEnabled` (explicit fork / `/fork`), not Yne/Ht/qt.
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'

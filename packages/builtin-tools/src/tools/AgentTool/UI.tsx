@@ -20,7 +20,7 @@ import type { AgentToolProgress } from 'src/types/tools.js';
 import { count } from 'src/utils/array.js';
 import { getSearchOrReadFromContent, getSearchReadSummaryText } from 'src/utils/collapseReadSearch.js';
 import { getDisplayPath } from 'src/utils/file.js';
-import { formatDuration, formatNumber } from 'src/utils/format.js';
+import { formatDuration, formatFileSize, formatNumber } from 'src/utils/format.js';
 import { buildSubagentLookups, createAssistantMessage, EMPTY_LOOKUPS } from 'src/utils/messages.js';
 import type { ModelAlias } from 'src/utils/model/aliases.js';
 import { getMainLoopModel, parseUserSpecifiedModel, renderModelName } from 'src/utils/model/model.js';
@@ -29,6 +29,7 @@ import type { outputSchema, Progress, RemoteLaunchedOutput } from './AgentTool.j
 import { inputSchema } from './AgentTool.js';
 import { getAgentColor } from './agentColorManager.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
+import { isWebFetchAgentTypeName, splitWebFetchAgentReport } from './built-in/webFetchAgent.js';
 import { BetaUsage } from '@anthropic-ai/sdk/resources/beta.mjs';
 
 const MAX_PROGRESS_MESSAGES_TO_SHOW = 3;
@@ -307,7 +308,7 @@ export function renderToolResultMessage(
       <Box flexDirection="column">
         <MessageResponse height={1}>
           <Text>
-            Remote agent launched{' '}
+            Cloud agent launched{' '}
             <Text dimColor>
               · {internal.taskId} · {internal.sessionUrl}
             </Text>
@@ -322,7 +323,9 @@ export function renderToolResultMessage(
       <Box flexDirection="column">
         <MessageResponse height={1}>
           <Text>
-            Backgrounded agent
+            {isWebFetchAgentTypeName('agentType' in data ? (data as { agentType?: string }).agentType : undefined)
+              ? 'Fetching in background'
+              : 'Backgrounded agent'}
             {!isTranscriptMode && (
               <Text dimColor>
                 {' ('}
@@ -353,6 +356,30 @@ export function renderToolResultMessage(
 
   if (data.status !== 'completed') {
     return null;
+  }
+
+  // densable efo Fetch collapse: !transcript && Icn/SG → sOo + vot({bytes})
+  if (!isTranscriptMode && isWebFetchAgentTypeName(data.agentType)) {
+    const { report } = splitWebFetchAgentReport(data.content ?? []);
+    const bytes = report.reduce((n, block) => n + Buffer.byteLength(block.text ?? ''), 0);
+    const received = (
+      <MessageResponse height={1}>
+        <Text>
+          Received <Text bold>{formatFileSize(bytes)}</Text>
+        </Text>
+      </MessageResponse>
+    );
+    if (verbose) {
+      return (
+        <Box flexDirection="column">
+          {received}
+          <Box flexDirection="column">
+            <Text>{report.map(block => block.text).join('\n')}</Text>
+          </Box>
+        </Box>
+      );
+    }
+    return received;
   }
 
   const { agentId, totalDurationMs, totalToolUseCount, totalTokens, usage, content, prompt } = data;
@@ -894,6 +921,9 @@ export function userFacingName(
       }>
     | undefined,
 ): string {
+  if (input?.subagent_type && isWebFetchAgentTypeName(input.subagent_type)) {
+    return 'Fetch';
+  }
   if (input?.subagent_type && input.subagent_type !== GENERAL_PURPOSE_AGENT.agentType) {
     // Display "worker" agents as "Agent" for cleaner UI
     if (input.subagent_type === 'worker') {
@@ -908,6 +938,9 @@ export function userFacingNameBackgroundColor(
   input: Partial<{ description: string; prompt: string; subagent_type: string }> | undefined,
 ): keyof Theme | undefined {
   if (!input?.subagent_type) {
+    return undefined;
+  }
+  if (isWebFetchAgentTypeName(input.subagent_type)) {
     return undefined;
   }
 
@@ -1006,5 +1039,10 @@ export function extractLastToolInfo(progressMessages: ProgressMessage<Progress>[
 }
 
 function isCustomSubagentType(subagentType: string | undefined): subagentType is string {
-  return !!subagentType && subagentType !== GENERAL_PURPOSE_AGENT.agentType && subagentType !== 'worker';
+  return (
+    !!subagentType &&
+    subagentType !== GENERAL_PURPOSE_AGENT.agentType &&
+    subagentType !== 'worker' &&
+    !isWebFetchAgentTypeName(subagentType)
+  );
 }

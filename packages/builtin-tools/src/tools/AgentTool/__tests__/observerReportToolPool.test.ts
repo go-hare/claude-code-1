@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { OBSERVER_REPORT_TOOL_NAME } from '../../ObserverReportTool/constants.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../../SendMessageTool/constants.js'
+import { SUBAGENT_HANDBACK_TOOL_NAME } from '../../SubagentHandbackTool/constants.js'
 import {
   applyObserverExactToolPool,
   filterToolsForAgent,
@@ -79,6 +80,7 @@ describe('ObserverReport tool pool densable', () => {
       tool('Read'),
       tool('Bash'),
       tool(SEND_MESSAGE_TOOL_NAME),
+      tool(SUBAGENT_HANDBACK_TOOL_NAME),
       tool('Agent'),
       tool('Workflow'),
       tool('Monitor'),
@@ -94,6 +96,7 @@ describe('ObserverReport tool pool densable', () => {
     expect(names).toContain('Grep')
     expect(names).toContain(OBSERVER_REPORT_TOOL_NAME)
     expect(names).not.toContain(SEND_MESSAGE_TOOL_NAME)
+    expect(names).not.toContain(SUBAGENT_HANDBACK_TOOL_NAME)
     expect(names).not.toContain('Agent')
     expect(names).not.toContain('Workflow')
     expect(names).not.toContain('Monitor')

@@ -61,7 +61,8 @@ describe('fork default ON densable 232 #1', () => {
     const src = readFileSync(join(__dirname, '..', 'forkSubagent.ts'), 'utf8')
     expect(src).toContain("require('src/utils/forkSubagentGate.js')")
     expect(src).toContain('isForkSubagentEnabled()')
-    // session constraints still apply after enable
+    // Yne folds coordinator; Ce (non-interactive) is only on isForkSubagentEnabled
+    expect(src).toContain('isForkSubagentProductEnabled')
     expect(src).toContain('isCoordinatorMode()')
     expect(src).toContain('getIsNonInteractiveSession()')
   })
@@ -71,8 +72,19 @@ describe('fork default ON densable 232 #1', () => {
       join(__dirname, '..', 'AgentTool.tsx'),
       'utf8',
     )
-    expect(agentTool).toContain(
-      '(!isInProcessTeammate() && run_in_background !== false)',
+    expect(agentTool).toContain('(!h && run_in_background !== false)')
+    expect(agentTool).toContain('(!isWebFetchSpawn && b)')
+  })
+
+  test('fork is explicit subagent_type fork, never omit-type default', () => {
+    const agentTool = readFileSync(
+      join(__dirname, '..', 'AgentTool.tsx'),
+      'utf8',
+    )
+    expect(agentTool).toContain('isExplicitFork')
+    expect(agentTool).toContain('FORK_SUBAGENT_TYPE')
+    expect(agentTool).not.toContain(
+      'subagent_type ?? (isForkSubagentEnabled() ? undefined : GENERAL_PURPOSE_AGENT.agentType)',
     )
   })
 })

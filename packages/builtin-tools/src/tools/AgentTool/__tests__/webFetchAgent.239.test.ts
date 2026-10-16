@@ -8,12 +8,14 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import {
   FETCHED_WEB_CONTENT_TAG,
+  formatWebFetchSavedFilesNote,
   isBuiltInWebFetchAgent,
   isWebFetchAgentRuntimeContext,
   isWebFetchAgentTypeName,
   shouldSkipTeammateSpawnForWebFetch,
   WEB_FETCH_AGENT,
   WEB_FETCH_AGENT_TYPE,
+  WEB_FETCH_SAVED_FILES_NOTE_PREFIX,
 } from '../built-in/webFetchAgent.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -133,6 +135,19 @@ describe('densable 2.1.239 web-fetch agent leftover', () => {
         subagentName: 'Explore',
       }),
     ).toBe(false)
+  })
+
+  test('tLt: empty bag names no files; paths list under dirs', () => {
+    expect(formatWebFetchSavedFilesNote({ dirs: [], paths: [] })).toContain(
+      'no files during this run',
+    )
+    const listed = formatWebFetchSavedFilesNote({
+      dirs: ['/tmp/session'],
+      paths: ['/tmp/session/a.pdf'],
+    })
+    expect(listed.startsWith(WEB_FETCH_SAVED_FILES_NOTE_PREFIX)).toBe(true)
+    expect(listed).toContain('/tmp/session/a.pdf')
+    expect(listed).toContain('files only under /tmp/session')
   })
 
   test('h9n / Iq', () => {

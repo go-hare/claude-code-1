@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isSafeModeEnabled } from 'src/utils/safeMode.js'
 import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
@@ -65,10 +66,12 @@ export function getBuiltInAgents(): AgentDefinition[] {
     }
   }
 
-  const agents: AgentDefinition[] = [
-    GENERAL_PURPOSE_AGENT,
-    STATUSLINE_SETUP_AGENT,
-  ]
+  // densable DTe @188716101: n=[g9]; if(!Sr()) n.push(AIt). The comment-thread
+  // analyst is Ur-imported, never listed here (not intended for Agent spawn).
+  const agents: AgentDefinition[] = [GENERAL_PURPOSE_AGENT]
+  if (!isSafeModeEnabled()) {
+    agents.push(STATUSLINE_SETUP_AGENT)
+  }
 
   if (areExplorePlanAgentsEnabled()) {
     agents.push(EXPLORE_AGENT, PLAN_AGENT)

@@ -47,6 +47,7 @@ describe('resume agent identity (densable 2.1.216 #7)', () => {
       'observerStopped',
       'observerTaskId',
       'armingPermissionMode',
+      'forkedSkillName',
     ])
   })
 
@@ -155,6 +156,19 @@ describe('resume agent identity (densable 2.1.216 #7)', () => {
     // re-persist identity fields on resume runAgent
     expect(src).toContain('worktreeBranch: meta?.worktreeBranch')
     expect(src).toContain('cwd: meta?.cwd ?? resumedWorktreePath')
+    // densable Aye cold resume: live task lineage else sidecar meta
+    expect(src).toContain(
+      'const resumeParentAgentId = parentFromTask ?? meta?.parentAgentId',
+    )
+    expect(src).toContain(
+      'const resumeSpawnDepth = spawnDepthFromTask ?? meta?.spawnDepth',
+    )
+    expect(src).toContain(
+      '...(resumeParentAgentId ? { parentAgentId: resumeParentAgentId } : {})',
+    )
+    expect(src).toContain(
+      '...(resumeSpawnDepth !== undefined ? { spawnDepth: resumeSpawnDepth } : {})',
+    )
   })
 
   test('AgentTool spawn passes identity into runAgentParams', () => {

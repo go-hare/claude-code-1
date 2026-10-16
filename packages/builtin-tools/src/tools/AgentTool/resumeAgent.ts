@@ -58,10 +58,25 @@ import {
 } from './agentToolUtils.js'
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
+import { isBuiltInWebFetchAgent } from './built-in/webFetchAgent.js'
+import {
+  getBackgroundLaunchRule,
+  isBackgroundAgentLaunchBlocked,
+} from 'src/utils/sessionBackgroundGates.js'
+import {
+  assertForkedSkillResumeAllowed,
+  ForkedSkillResumeRefusedError,
+} from 'src/utils/forkedSkillBackground.js'
+import {
+  readForkedSkillProvenanceSkillName,
+  readForkedSkillScoping,
+} from 'src/utils/forkedSkillScoping.js'
+import { webFetchSavedFilesForAgent } from 'src/utils/subagentSpawnLedger.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
 import { runAgent } from './runAgent.js'
+import { SubagentHandbackTool } from '../SubagentHandbackTool/SubagentHandbackTool.js'
 
 export type ResumeAgentResult = {
   agentId: string
@@ -117,6 +132,50 @@ export class AgentStoppedByUserError extends ResumeAgentStateError {
     super(message)
     this.name = 'AgentStoppedByUserError'
   }
+}
+
+/** densable U6 — retryable setup (worktree unverifiable, sidecar read). */
+export class AgentResumeTransientError extends ResumeAgentStateError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentResumeTransientError'
+  }
+}
+
+/** densable jAe — session rule / permanently refused. */
+export class AgentResumePermanentlyRefusedError extends ResumeAgentStateError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentResumePermanentlyRefusedError'
+  }
+}
+
+/** densable O5 — already running / being resumed. */
+export class AgentResumeInProgressError extends ResumeAgentStateError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentResumeInProgressError'
+  }
+}
+
+/**
+ * densable Fle — still stopping.
+ *
+ * Gold zt throws this at two resume-entry sites (wired via agentStopBag):
+ * 1. resumer `toolUseContext.agentId` is stop-pending
+ * 2. target is stop-pending, OR kill loop still live while status terminal
+ */
+export class AgentStillStoppingError extends ResumeAgentStateError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentStillStoppingError'
+  }
+}
+
+const resumesInFlight = new Set<string>()
+
+export function clearResumesInFlightForTests(): void {
+  resumesInFlight.clear()
 }
 
 /**
@@ -183,6 +242,7 @@ export async function resumeAgentBackground({
   suppressOwnerNotification,
   awaitCompletion,
   workerPermissionMode,
+  resumeSurface,
 }: {
   agentId: string
   prompt: string
@@ -229,6 +289,11 @@ export async function resumeAgentBackground({
    * Capped to current session mode via resolveWorkerPermissionMode (MJe).
    */
   workerPermissionMode?: string
+  /**
+   * densable Me surface: notification (H5 default) / inline (Svr) / reply (k$n).
+   * Aut() resume-in-background refuse applies unless inline/reply.
+   */
+  resumeSurface?: 'notification' | 'inline' | 'reply'
 }): Promise<ResumeAgentResult> {
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
@@ -238,17 +303,48 @@ export async function resumeAgentBackground({
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
   const sessionMode = appState.toolPermissionContext.mode
 
+  // densable Fle — before CAS. Import bag lazily to keep resumeAgent
+  // free of hard cycles with task framework.
+  const {
+    isAgentStopPending,
+    isAgentKillLoopSettled,
+    isTerminalAgentTaskStatus,
+  } = await import('src/utils/agentStopBag.js')
+  const resumerId = toolUseContext.agentId
+  if (resumerId !== undefined && isAgentStopPending(resumerId)) {
+    throw new AgentStillStoppingError(
+      'This agent has been stopped and its stop is still completing; it cannot resume other agents.',
+    )
+  }
+  const targetStatus = appState.tasks?.[agentId]?.status
+  if (
+    isAgentStopPending(agentId) ||
+    (!isAgentKillLoopSettled(agentId) &&
+      isTerminalAgentTaskStatus(targetStatus))
+  ) {
+    throw new AgentStillStoppingError(
+      `Agent ${agentId} is still stopping — its previous run was stopped but has not exited. Re-run TaskStop on it or wait for it to exit before resuming.`,
+    )
+  }
+
   // CAS at entry (before disk reads): claim resuming; else throw already
   // running/being resumed. clearResuming on setup failure paths.
   const { tryClaimAgentResume, clearAgentResuming } = await import(
     'src/tasks/LocalAgentTask/LocalAgentTask.js'
   )
+  if (resumesInFlight.has(agentId)) {
+    throw new AgentResumeInProgressError(
+      `Agent ${agentId} is already running or being resumed`,
+    )
+  }
+  resumesInFlight.add(agentId)
   if (
     !tryClaimAgentResume(agentId, rootSetAppState, () =>
       toolUseContext.getAppState(),
     )
   ) {
-    throw new ResumeAgentStateError(
+    resumesInFlight.delete(agentId)
+    throw new AgentResumeInProgressError(
       `Agent ${agentId} is already running or being resumed`,
     )
   }
@@ -275,6 +371,7 @@ export async function resumeAgentBackground({
       suppressOwnerNotification,
       awaitCompletion,
       workerPermissionMode,
+      resumeSurface,
       startTime,
       appState,
       rootSetAppState,
@@ -284,6 +381,8 @@ export async function resumeAgentBackground({
   } catch (err) {
     clearResuming()
     throw err
+  } finally {
+    resumesInFlight.delete(agentId)
   }
 }
 
@@ -301,6 +400,7 @@ async function resumeAgentBackgroundAfterClaim({
   suppressOwnerNotification,
   awaitCompletion,
   workerPermissionMode,
+  resumeSurface,
   startTime,
   appState,
   rootSetAppState,
@@ -319,6 +419,7 @@ async function resumeAgentBackgroundAfterClaim({
   suppressOwnerNotification?: boolean
   awaitCompletion?: boolean
   workerPermissionMode?: string
+  resumeSurface?: 'notification' | 'inline' | 'reply'
   startTime: number
   appState: ReturnType<ToolUseContext['getAppState']>
   rootSetAppState: NonNullable<
@@ -341,7 +442,7 @@ async function resumeAgentBackgroundAfterClaim({
     clearResuming()
     throw err instanceof ResumeAgentStateError
       ? err
-      : new ResumeAgentStateError(
+      : new AgentResumeTransientError(
           err instanceof Error ? err.message : String(err),
         )
   }
@@ -552,6 +653,146 @@ async function resumeAgentBackgroundAfterClaim({
 
   const uiDescription = meta?.description ?? '(resumed)'
 
+  // densable z = ae==="inline" || ae==="reply" && (gZ()||Mv)
+  const surface = resumeSurface ?? 'notification'
+  const inlineOrReply =
+    surface === 'inline' ||
+    (surface === 'reply' &&
+      (isBuiltInWebFetchAgent(selectedAgent) ||
+        isBackgroundAgentLaunchBlocked()))
+  if (!inlineOrReply && getBackgroundLaunchRule() !== undefined) {
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        'subagent_resume_background_rule' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    clearResuming()
+    throw new AgentResumePermanentlyRefusedError(
+      'This agent cannot be resumed in the background in this session. Start a new agent instead.',
+    )
+  }
+
+  const liveTask = toolUseContext.getAppState().tasks?.[agentId]
+  const liveForkedSkillName =
+    liveTask &&
+    typeof liveTask === 'object' &&
+    'forkedSkillName' in liveTask &&
+    typeof (liveTask as { forkedSkillName?: string }).forkedSkillName ===
+      'string'
+      ? (liveTask as { forkedSkillName: string }).forkedSkillName
+      : undefined
+  // densable Ywo cold witness — sidecar forkedSkillName when the live task
+  // is gone (process restart / adopt). Do not skip just because live is empty.
+  const forkedSkillName = liveForkedSkillName ?? meta?.forkedSkillName
+
+  // densable Ywo: F()&&storageV5&&keys → x; else disk fIt.
+  const scopingRead = await readForkedSkillScoping(
+    agentId,
+    toolUseContext.storageV5,
+  )
+  const scopingRefuseError =
+    'transientRead' in scopingRead && scopingRead.transientRead
+      ? AgentResumeTransientError
+      : AgentResumePermanentlyRefusedError
+  const refuseScoping = (code: string, message: string): never => {
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    clearResuming()
+    throw new scopingRefuseError(message)
+  }
+  if (scopingRead.status === 'malformed') {
+    refuseScoping(
+      'forked_skill_resume_scoping_invalid',
+      `Agent ${agentId} has a malformed forked-skill scoping record; refusing to resume it without the skill's permission scoping.`,
+    )
+  }
+  if (
+    (scopingRead.status === 'absent' ||
+      scopingRead.status === 'absent-but-marked') &&
+    liveForkedSkillName !== undefined
+  ) {
+    refuseScoping(
+      'forked_skill_resume_scoping_missing',
+      `Agent ${agentId} ran as a forked skill but its scoping record is missing; refusing to resume it without the skill's permission scoping.`,
+    )
+  }
+  if (scopingRead.status === 'absent-but-marked') {
+    refuseScoping(
+      'forked_skill_resume_scoping_missing_cold',
+      `Agent ${agentId} carries a forked-skill provenance marker but its scoping record is missing; refusing to resume it without the skill's permission scoping.`,
+    )
+  }
+  if (scopingRead.status === 'valid' && liveForkedSkillName !== undefined) {
+    if (liveForkedSkillName !== scopingRead.scoping.skillName) {
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'forked_skill_resume_scoping_mismatch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      clearResuming()
+      throw new AgentResumePermanentlyRefusedError(
+        `Agent ${agentId} has a forked-skill scoping record that does not match its task record; refusing to resume it.`,
+      )
+    }
+  } else if (scopingRead.status === 'valid') {
+    const markerSkill = await readForkedSkillProvenanceSkillName(
+      agentId,
+      toolUseContext.storageV5,
+    )
+    if (markerSkill !== scopingRead.scoping.skillName) {
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'forked_skill_resume_cold_witness_mismatch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      clearResuming()
+      throw new AgentResumePermanentlyRefusedError(
+        `Agent ${agentId} has a forked-skill scoping record with no matching provenance-marker witness; refusing to resume it on a cold path without a corroborated fork identity.`,
+      )
+    }
+  }
+  const diskForkedSkillName =
+    scopingRead.status === 'valid' ? scopingRead.scoping.skillName : undefined
+  const resolvedForkedSkillName = forkedSkillName ?? diskForkedSkillName
+
+  let forkedSkillResumeOverlay:
+    | Awaited<ReturnType<typeof assertForkedSkillResumeAllowed>>
+    | undefined
+  try {
+    forkedSkillResumeOverlay = await assertForkedSkillResumeAllowed({
+      agentId,
+      forkedSkillName: resolvedForkedSkillName,
+      getAppState: toolUseContext.getAppState,
+      frozenCommandDenies:
+        scopingRead.status === 'valid'
+          ? scopingRead.scoping.frozenCommandDenies
+          : undefined,
+    })
+  } catch (err) {
+    clearResuming()
+    if (err instanceof ForkedSkillResumeRefusedError) {
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          err.code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      throw new AgentResumePermanentlyRefusedError(err.message)
+    }
+    throw err
+  }
+  // Gold Jbn wrap of getAppState + permissionLayers after Ywo overlay.
+  if (forkedSkillResumeOverlay) {
+    toolUseContext = forkedSkillResumeOverlay.wrapToolUseContext(toolUseContext)
+  }
+
   let forkParentSystemPrompt: SystemPrompt | undefined
   if (isResumedFork) {
     if (toolUseContext.renderedSystemPrompt) {
@@ -726,6 +967,12 @@ async function resumeAgentBackgroundAfterClaim({
     parentAgentId: meta?.parentAgentId,
     spawnDepth: meta?.spawnDepth,
     contentReplacementState: resumedReplacementState,
+    // densable 205709525: handbackOptIn:!(fork||observer)
+    handbackOptIn: !(isResumedFork || isObserverSidecar),
+    handbackTool: SubagentHandbackTool,
+    ...(resolvedForkedSkillName !== undefined
+      ? { forkedSkillName: resolvedForkedSkillName }
+      : {}),
   }
 
   // Resume re-arm observer pairing from agent metadata pointer
@@ -891,12 +1138,15 @@ async function resumeAgentBackgroundAfterClaim({
   // Second stoppedByUser gate on live registry flag (not just sidecar).
   const mainOwnerId = getMainThreadAgentId()
   let parentFromTask: string | undefined
+  let spawnDepthFromTask: number | undefined
   try {
     const live = toolUseContext.getAppState().tasks?.[agentId] as
-      | { parentAgentId?: string; stoppedByUser?: boolean }
+      | { parentAgentId?: string; spawnDepth?: number; stoppedByUser?: boolean }
       | undefined
     parentFromTask =
       typeof live?.parentAgentId === 'string' ? live.parentAgentId : undefined
+    spawnDepthFromTask =
+      typeof live?.spawnDepth === 'number' ? live.spawnDepth : undefined
     if (!userInitiated && live?.stoppedByUser === true) {
       clearResuming()
       throw new AgentStoppedByUserError(
@@ -906,7 +1156,10 @@ async function resumeAgentBackgroundAfterClaim({
   } catch (err) {
     if (err instanceof AgentStoppedByUserError) throw err
     parentFromTask = undefined
+    spawnDepthFromTask = undefined
   }
+  const resumeParentAgentId = parentFromTask ?? meta?.parentAgentId
+  const resumeSpawnDepth = spawnDepthFromTask ?? meta?.spawnDepth
 
   // densable Aye: b?.name && registry missing → registerName(b.name, id).
   // Registry is in-memory; cold resume / process restart loses it unless we
@@ -921,9 +1174,14 @@ async function resumeAgentBackgroundAfterClaim({
     toolUseId: toolUseContext.toolUseId,
     ownerAgentId: mainOwnerId,
     notificationTargetAgentId: asAgentId(mainOwnerId),
-    ...(parentFromTask ? { parentAgentId: parentFromTask } : {}),
+    ...(resumeParentAgentId ? { parentAgentId: resumeParentAgentId } : {}),
+    ...(resumeSpawnDepth !== undefined ? { spawnDepth: resumeSpawnDepth } : {}),
     ...(promptOriginKind === 'observer-activity' ? { isObserver: true } : {}),
+    ...(resolvedForkedSkillName !== undefined
+      ? { forkedSkillName: resolvedForkedSkillName }
+      : {}),
     attachOwnerKeepalive: false,
+    webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
   })
 
   const resumeDisplayName = meta?.name
@@ -983,6 +1241,7 @@ async function resumeAgentBackgroundAfterClaim({
     startTime,
     agentType: selectedAgent.agentType,
     isAsync: true,
+    persistedToolResultFiles: webFetchSavedFilesForAgent(selectedAgent),
   }
 
   const asyncAgentContext = {
@@ -1087,4 +1346,26 @@ async function resumeAgentBackgroundAfterClaim({
     outputFile: getTaskOutputPath(agentId),
     ...(finalText !== undefined ? { finalText } : {}),
   }
+}
+
+/** densable `Svr` — inline resume (await stream; Aut() does not refuse). */
+export function resumeAgentInline(
+  opts: Parameters<typeof resumeAgentBackground>[0],
+): Promise<ResumeAgentResult> {
+  return resumeAgentBackground({
+    ...opts,
+    resumeSurface: 'inline',
+    awaitCompletion: true,
+  })
+}
+
+/** densable `k$n` — reply resume (SendMessage surface). */
+export function resumeAgentForReply(
+  opts: Parameters<typeof resumeAgentBackground>[0],
+): Promise<ResumeAgentResult> {
+  return resumeAgentBackground({
+    ...opts,
+    resumeSurface: 'reply',
+    awaitCompletion: true,
+  })
 }
