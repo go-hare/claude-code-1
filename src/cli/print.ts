@@ -28,6 +28,21 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import {
+  createPrintTaskNotificationCoalesceState,
+  isPrintTaskNotificationCoalesceEnabled,
+  shouldHoldQueryForTaskNotificationFollower,
+} from 'src/cli/printTaskNotificationCoalesce.js'
+import {
+  canBatchWith,
+  isPrintQueueableCommand,
+  mergeQueuedPromptCommands,
+} from 'src/cli/printPromptBatch.js'
+import {
+  createPrintPrewaitLatch,
+  createPrintStartGate,
+  isPrintUserIntentCommand,
+} from 'src/cli/printDrainGates.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getSessionIngressAuthToken } from 'src/utils/sessionIngressAuth.js'
 import { sleep } from 'src/utils/sleep.js'
@@ -75,6 +90,7 @@ import {
   parseAgentsFromJson,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Message, NormalizedUserMessage } from 'src/types/message.js'
+import { createUserMessage } from 'src/utils/messages.js'
 import type { QueuedCommand } from 'src/types/textInputTypes.js'
 import {
   dequeue,
@@ -87,6 +103,8 @@ import {
   getCommandsByMaxPriority,
   getMainThreadQueueLength,
   countRemainingWakePollEventsAfter,
+  consumeCancelPending,
+  consumeCancelPendingAcked,
 } from 'src/utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
@@ -213,6 +231,7 @@ import {
   mergeFileStateCaches,
   READ_FILE_STATE_CACHE_SIZE,
 } from 'src/utils/fileStateCache.js'
+import { ToolStateSlots } from 'src/utils/toolState.js'
 import { expandPath } from 'src/utils/path.js'
 import { extractReadFilesFromMessages } from 'src/utils/queryHelpers.js'
 import { registerHookEventHandler } from 'src/utils/hooks/hookEvents.js'
@@ -470,6 +489,7 @@ import { modelSupportsAdaptiveThinking } from 'src/utils/thinking.js'
 import { modelSupportsAutoMode } from 'src/utils/betas.js'
 import { ensureModelStringsInitialized } from 'src/utils/model/modelStrings.js'
 import {
+  getReplBridgeSessionId,
   getSessionId,
   setMainLoopModelOverride,
   setMainThreadAgentType,
@@ -571,7 +591,9 @@ import {
 import {
   drainSdkEvents,
   emitTaskTerminatedSdk,
+  setSdkEventQueueKey,
 } from '../utils/sdkEventQueue.js'
+import { setOwnBridgeHopAddressResolver } from '../utils/peerAdmission.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import { isExtractModeActive } from '../memdir/paths.js'
@@ -650,44 +672,6 @@ function trackReceivedMessageUuid(uuid: UUID): boolean {
     }
   }
   return true // new UUID
-}
-
-type PromptValue = string | ContentBlockParam[]
-
-function toBlocks(v: PromptValue): ContentBlockParam[] {
-  return typeof v === 'string' ? [{ type: 'text', text: v }] : v
-}
-
-/**
- * Join prompt values from multiple queued commands into one. Strings are
- * newline-joined; if any value is a block array, all values are normalized
- * to blocks and concatenated.
- */
-export function joinPromptValues(values: PromptValue[]): PromptValue {
-  if (values.length === 1) return values[0]!
-  if (values.every(v => typeof v === 'string')) {
-    return values.join('\n')
-  }
-  return values.flatMap(toBlocks)
-}
-
-/**
- * Whether `next` can be batched into the same ask() call as `head`. Only
- * prompt-mode commands batch, and only when the workload tag matches (so the
- * combined turn is attributed correctly) and the isMeta flag matches (so a
- * proactive tick can't merge into a user prompt and lose its hidden-in-
- * transcript marking when the head is spread over the merged command).
- */
-export function canBatchWith(
-  head: QueuedCommand,
-  next: QueuedCommand | undefined,
-): boolean {
-  return (
-    next !== undefined &&
-    next.mode === 'prompt' &&
-    next.workload === head.workload &&
-    next.isMeta === head.isMeta
-  )
 }
 
 export async function runHeadless(
@@ -861,6 +845,14 @@ export async function runHeadless(
   // Start headless profiler for first turn
   headlessProfilerStartTurn()
   headlessProfilerCheckpoint('runHeadless_entry')
+
+  // densable 2.1.289 setQueueKey — pin SDK event lane to session id (not default "cli").
+  setSdkEventQueueKey(() => getSessionId())
+  // densable jUt(Sjt) — print/SDK RC hop token for K2r.
+  setOwnBridgeHopAddressResolver(() => {
+    const id = getReplBridgeSessionId()
+    return id ? `bridge:${id}` : undefined
+  })
 
   // Check Grove requirements for non-interactive consumer subscribers
   if (await isQualifiedForGrove()) {
@@ -1362,6 +1354,78 @@ export async function runHeadless(
     // densable optional
   }
 
+  // densable 2.1.289 print.ts — orphaned bg tasks after worker restart:
+  // Di(id,"stopped",{summary:`Stopped by a worker restart: …`, reason:"worker_restart"})
+  // Gated like densable on RESUME_INTERRUPTED_TURN (env / residual gate).
+  {
+    let resumeInterruptedTurnForOrphans = Boolean(
+      process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN,
+    )
+    try {
+      const { isResumeInterruptedTurnEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      resumeInterruptedTurnForOrphans = isResumeInterruptedTurnEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (resumeInterruptedTurnForOrphans) {
+      const internal = restoredWorker?.internal ?? null
+      const {
+        mergeRestoredWorkerRestartOrphans,
+        formatWorkerRestartOrphanReminder,
+        emitWorkerRestartOrphanStopped,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/orphanAgentResume.js') as typeof import('../utils/orphanAgentResume.js')
+      const orphans = mergeRestoredWorkerRestartOrphans(
+        internal?.running_background_tasks,
+        internal?.orphaned_background_tasks_pending_notification,
+      )
+      if (orphans.length > 0) {
+        logForDebugging(
+          `[print.ts] ${orphans.length} orphaned background task(s) after restart`,
+        )
+        initialMessages.push(
+          createUserMessage({
+            content: formatWorkerRestartOrphanReminder(orphans),
+            isMeta: true,
+          }),
+        )
+        for (const orphan of orphans) {
+          emitWorkerRestartOrphanStopped(orphan.task_id, orphan.description)
+        }
+        let flushed = false
+        try {
+          for (const event of drainSdkEvents()) {
+            await structuredIO.write(event as StdoutMessage)
+          }
+          flushed = await Promise.race([
+            structuredIO.flushInternalEvents().then(() => true),
+            sleep(20_000).then(() => false),
+          ])
+        } catch (err) {
+          logForDebugging(
+            `[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ${errorMessage(err)}`,
+          )
+        }
+        if (!flushed) {
+          logForDebugging(
+            '[print.ts] orphaned-task notification delivery unconfirmed; keeping orphans pending for re-emit.',
+          )
+        }
+        // densable 2.1.289 CCR internal clear after orphan deliver attempt
+        notifyInternalMetadataChanged({
+          running_background_tasks: [],
+          orphaned_background_tasks_pending_notification: flushed
+            ? null
+            : orphans,
+          finished_background_tasks_pending_notification: null,
+        })
+      }
+    }
+  }
+
   // Ensure model strings are initialized before generating model options.
   // For Bedrock users, this waits for the profile fetch to get correct region strings.
   await ensureModelStringsInitialized()
@@ -1633,6 +1697,10 @@ function runHeadlessStreaming(
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
   let abortController: AbortController | undefined
+  // densable 2.1.289 admits/doom — run() installs live gates; interrupt
+  // subscribe arms via this latch once drain is live.
+  let printStartGate: ReturnType<typeof createPrintStartGate> | undefined
+  let printPrewait: ReturnType<typeof createPrintPrewaitLatch> | undefined
   // densable `g.drainingHandoff` — currently-running handed-off turn.
   // Print-scope so extras `peekRunningHandoff` (outside `run`) can see it.
   let drainingHandoff: QueuedCommand | undefined
@@ -1823,6 +1891,7 @@ function runHeadlessStreaming(
     getCwd(),
     READ_FILE_STATE_CACHE_SIZE,
   )
+  const sessionToolState = new ToolStateSlots()
 
   // Client-supplied readFileState seeds (via seed_read_state control request).
   // The stdin IIFE runs concurrently with ask() — a seed arriving mid-turn
@@ -2536,6 +2605,68 @@ function runHeadlessStreaming(
     return mcpChangesPromise
   }
 
+  // densable YNo + Hu session bag for $.tool.register (headless/-p).
+  {
+    const { ensurePluginToolRegistrarInstalled } =
+      require('../utils/plugins/pluginToolLoopbackRegistrar.js') as typeof import('../utils/plugins/pluginToolLoopbackRegistrar.js')
+    const { setPluginToolSessionHost } =
+      require('../utils/plugins/pluginToolSessionHost.js') as typeof import('../utils/plugins/pluginToolSessionHost.js')
+    const { getDenyRuleForTool } =
+      require('../utils/permissions/permissions.js') as typeof import('../utils/permissions/permissions.js')
+    ensurePluginToolRegistrarInstalled()
+    const collectSupportedConfigs = async (): Promise<
+      Record<string, McpServerConfigForProcessTransport>
+    > => {
+      const { servers: all } = await getAllMcpConfigs()
+      const supported: Record<string, McpServerConfigForProcessTransport> = {
+        ...dynamicMcpState.configs,
+      } as Record<string, McpServerConfigForProcessTransport>
+      for (const [n, c] of Object.entries(all)) {
+        const type = c.type
+        if (
+          type === undefined ||
+          type === 'stdio' ||
+          type === 'sse' ||
+          type === 'http' ||
+          type === 'sdk'
+        ) {
+          supported[n] = c as McpServerConfigForProcessTransport
+        }
+      }
+      for (const [n, c] of Object.entries(sdkMcpConfigs)) {
+        if (c.type === 'sdk' && !(n in supported)) {
+          supported[n] = c as unknown as McpServerConfigForProcessTransport
+        }
+      }
+      return supported
+    }
+    setPluginToolSessionHost({
+      addMcpServer: async (name, config) => {
+        const supported = await collectSupportedConfigs()
+        supported[name] = config as McpServerConfigForProcessTransport
+        await applyMcpServerChanges(supported)
+      },
+      removeMcpServer: async name => {
+        const supported = await collectSupportedConfigs()
+        delete supported[name]
+        await applyMcpServerChanges(supported)
+      },
+      tools: () => buildAllTools(getAppState()),
+      mcpServers: () => {
+        const names = new Set<string>([
+          ...getAppState().mcp.clients.map(c => c.name),
+          ...Object.keys(dynamicMcpState.configs),
+          ...sdkClients.map(c => c.name),
+        ])
+        return [...names]
+      },
+      builtInToolsDisabled:
+        getAppState().toolPermissionContext.builtInToolsDisabled === true,
+      isToolWithheldByDenyRule: tool =>
+        Boolean(getDenyRuleForTool(getAppState().toolPermissionContext, tool)),
+    })
+  }
+
   // Build McpServerStatus[] for control responses. Shared by mcp_status and
   // reload_plugins handlers. Reads closure state: sdkClients, dynamicMcpState.
   function buildMcpServerStatuses(): McpServerStatus[] {
@@ -2853,6 +2984,8 @@ function runHeadlessStreaming(
   // Abort the current operation when a 'now' priority message arrives.
   subscribeToCommandQueue(() => {
     if (abortController && getCommandsByMaxPriority('now').length > 0) {
+      // densable Dm.interruptBeforeArm — latch user-intent cmds before abort.
+      printPrewait?.interruptBeforeArm(getCommandQueue())
       abortController.abort('interrupt')
     }
   })
@@ -2923,6 +3056,17 @@ function runHeadlessStreaming(
       let pollEmptyDispatchStalled = false
       let pollDispatchTarget: QueuedCommand | undefined
       let lastDispatchAborted = false
+      // densable 2.1.289 Kc — print task-notification coalesce hold/owed state.
+      const taskNotificationCoalesce =
+        createPrintTaskNotificationCoalesceState()
+      // densable 2.1.289 admits/doom — install live gates (armed by interrupt
+      // subscribe + parkBatch/markAhead below; invent-ban Rl|Tl|Dm classes).
+      printStartGate = createPrintStartGate()
+      printPrewait = createPrintPrewaitLatch({
+        isUserIntent: cmd => isPrintUserIntentCommand(cmd, isMainThread),
+      })
+      const startGate = printStartGate
+      const prewait = printPrewait
 
       // Extract command processing into a named function for the do-while pattern.
       // Drains the queue, batching consecutive prompt-mode commands into one
@@ -2943,6 +3087,7 @@ function runHeadlessStreaming(
             pollEventDiscardedUndelivered,
             POLL_EMPTY_DISPATCH_STALLED,
             orphanedPermissionPrioritizeLog,
+            settlePollEventsDiscardedUndelivered,
           } = await import('src/cli/printControlExtras.js')
           const pending = deferredToolUsePendingFromMessages(mutableMessages)
           const isOrphan = (cmd: QueuedCommand): boolean =>
@@ -2964,7 +3109,10 @@ function runHeadlessStreaming(
             logError(new Error(POLL_EMPTY_DISPATCH_STALLED))
           }
           pollDispatchTarget = undefined
-          lastDispatchAborted = false
+          // densable Kc.take owed_call checks drain.abortController.signal.aborted
+          // BEFORE synthesizing an empty prompt. Do not clear lastDispatchAborted
+          // until after owed is decided — the previous ask() controller is still
+          // this abortController and may already be aborted.
           // densable `Rl.takeHead` `if(this.holdsEvalSettles())return`
           // after stall clear. Print inject is gold `s??(()=>!1)` — never
           // bind `waitingForAgents` (do-while latch). True → no dequeue
@@ -3024,10 +3172,10 @@ function runHeadlessStreaming(
                 ),
               )
             } else {
-              command = dequeue(isMainThread)
+              command = dequeue(isPrintQueueableCommand)
             }
           }
-          const head = peek(isMainThread)
+          const head = peek(isPrintQueueableCommand)
           const deferredHuman = peek(
             cmd =>
               isMainThread(cmd) &&
@@ -3046,6 +3194,9 @@ function runHeadlessStreaming(
                 isLegalMode(cmd.mode),
             )
             if (other) {
+              // densable Tl ahead-of-start steal — markAhead + snapshot queue.
+              startGate.markAhead()
+              startGate.captureFollowersFrom(getCommandQueue())
               command = dequeue(cmd => cmd === other)
             } else {
               pollDispatchTarget = head
@@ -3071,10 +3222,56 @@ function runHeadlessStreaming(
               }))
             }
           } else {
+            // Normal take — densable Tl.isHeadAhead false.
+            startGate.clearAhead()
             prioritizeOrphan()
           }
           if (!command) {
-            break
+            // densable Kc.take owed_call — held notifications with empty main
+            // queue synthesize a meta empty prompt so the model still runs.
+            const owed = taskNotificationCoalesce.maybeOwedPrompt({
+              endSessionRequested: inputClosed,
+              aborted:
+                lastDispatchAborted || abortController?.signal.aborted === true,
+              peekMainDefined: peek(isPrintQueueableCommand) !== undefined,
+              mainAgentId: getMainThreadAgentId(),
+            })
+            if (owed) {
+              command = owed
+            } else {
+              prewait.dropParkedBatch()
+              startGate.clearAhead()
+              break
+            }
+          }
+          lastDispatchAborted = false
+
+          // densable Tl/Dm arming for this head (Kc.take):
+          // - steal path already markAhead; normal path clearAhead above
+          // - snapshot remaining queue for admits membership
+          // parkBatch waits until take-cancel leaves a nonempty batch
+          startGate.captureFollowersFrom(getCommandQueue())
+          const intentHead = isPrintUserIntentCommand(command, isMainThread)
+
+          // densable Kc hold stamp — if a coalescable follower is waiting,
+          // force shouldQuery:false + queryHeldForNextTurn on this head.
+          // densable 2.1.289 admits/doom
+          {
+            const nextMain = peek(isPrintQueueableCommand)
+            const holdsFollower = shouldHoldQueryForTaskNotificationFollower(
+              command,
+              nextMain,
+              {
+                deferredHuman: deferredHuman !== undefined,
+                admits: next => startGate.admits(next),
+                isDoomBoundary: (h, n) => prewait.isDoomBoundary(h, n),
+              },
+            )
+            command = taskNotificationCoalesce.maybeStampHold(command, {
+              endSessionRequested: inputClosed,
+              coalesceEnabled: isPrintTaskNotificationCoalesceEnabled(),
+              holdsFollower,
+            })
           }
 
           if (command.mode === 'poll-event') {
@@ -3110,17 +3307,58 @@ function runHeadlessStreaming(
           // Prompt commands greedily collect followers with matching workload.
           let batch: QueuedCommand[] = [command]
           if (command.mode === 'prompt') {
-            while (canBatchWith(command, peek(isMainThread))) {
-              batch.push(dequeue(isMainThread)!)
+            while (canBatchWith(command, peek(isPrintQueueableCommand))) {
+              batch.push(dequeue(isPrintQueueableCommand)!)
             }
           }
           const queuedAutonomyClaim =
             await claimConsumableQueuedAutonomyCommands(batch)
+          if (queuedAutonomyClaim.staleCommands.length > 0) {
+            await finalizeAutonomyCommandsForTurn({
+              commands: queuedAutonomyClaim.staleCommands,
+              outcome: { type: 'cancelled' },
+              currentDir: getCwd(),
+              priority: 'later',
+              workload: command.workload ?? options.workload,
+            })
+            for (const stale of queuedAutonomyClaim.staleCommands) {
+              if (stale.uuid && !consumeCancelPendingAcked(stale.uuid)) {
+                notifyCommandLifecycle(stale.uuid, 'cancelled')
+              }
+            }
+          }
           batch = queuedAutonomyClaim.attachmentCommands
           if (batch.length === 0) {
+            prewait.dropParkedBatch()
+            startGate.clearAhead()
             continue
           }
+          // densable Kc.take consumeCancelPending before $c merge.
+          {
+            const cancelled = batch.filter(
+              member =>
+                member.uuid !== undefined && consumeCancelPending(member.uuid),
+            )
+            if (cancelled.length > 0) {
+              logForDebugging('cancelled by the host')
+              for (const member of cancelled) {
+                if (member.uuid) {
+                  notifyCommandLifecycle(member.uuid, 'cancelled')
+                }
+              }
+              batch = batch.filter(member => !cancelled.includes(member))
+              if (batch.length === 0) {
+                // densable Kc.take empty cancel: prewaitLatch.reset(); continue.
+                // No Acked (commit still Acked). No clearAhead.
+                prewait.reset()
+                continue
+              }
+            }
+          }
           command = batch[0]!
+          prewait.parkBatch(
+            intentHead || isPrintUserIntentCommand(command, isMainThread),
+          )
           drainingHandoff = command.handedOffTurn ? command : undefined
           // densable recovery set analog: unanswered last-assistant tool_use
           // ids are the unrun calls a restarted worker would set aside.
@@ -3170,13 +3408,9 @@ function runHeadlessStreaming(
             }
           }
           if (command.mode === 'prompt' && batch.length > 1) {
-            command = {
-              ...command,
-              value: joinPromptValues(batch.map(c => c.value)),
-              uuid: batch.findLast(c => c.uuid)?.uuid ?? command.uuid,
-            }
+            command = mergeQueuedPromptCommands(batch)
           }
-          const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
+          let batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
 
           // QueryEngine will emit a replay for command.uuid (the last uuid in
           // the batch) via its messagesToAck path. Emit replays here for the
@@ -3315,6 +3549,38 @@ function runHeadlessStreaming(
             // No continue -- fall through to ask() so the model processes the result
           }
 
+          // densable Kc.commit — second consumeCancelPending after take, before ask.
+          {
+            const cancelled = batch.filter(
+              member =>
+                member.uuid !== undefined && consumeCancelPending(member.uuid),
+            )
+            if (cancelled.length > 0) {
+              logForDebugging('cancelled by the host')
+              settlePollEventsDiscardedUndelivered(
+                cancelled,
+                'cancelled by the host',
+              )
+              for (const member of cancelled) {
+                if (member.uuid && !consumeCancelPendingAcked(member.uuid)) {
+                  notifyCommandLifecycle(member.uuid, 'cancelled')
+                }
+              }
+              batch = batch.filter(member => !cancelled.includes(member))
+              if (batch.length === 0) {
+                prewait.dropParkedBatch()
+                continue
+              }
+              command =
+                command.mode === 'prompt'
+                  ? mergeQueuedPromptCommands(batch)
+                  : batch[0]!
+              batchUuids = batch
+                .map(c => c.uuid)
+                .filter((u): u is string => u !== undefined)
+            }
+          }
+
           // densable `zXe` + `lXn` + `z3`: poll-event prompt is reminted envelopes
           let input: typeof command.value
           if (command.mode === 'poll-event') {
@@ -3404,6 +3670,8 @@ function runHeadlessStreaming(
           // inside the closure.
           const cmd = command
           let lastResultIsError = false
+          let lastResultNumTurns = 0
+          let lastResultBody = ''
           try {
             await runWithWorkload(
               cmd.workload ?? options.workload,
@@ -3429,6 +3697,8 @@ function runHeadlessStreaming(
                   modelScheduledOrigin: cmd.modelScheduledOrigin,
                   wakeupSource: cmd.wakeupSource,
                   origin: cmd.origin,
+                  shouldQuery: cmd.shouldQuery,
+                  queryHeldForNextTurn: cmd.queryHeldForNextTurn,
                   cwd: getCwd(),
                   tools: allTools,
                   verbose: options.verbose,
@@ -3446,6 +3716,7 @@ function runHeadlessStreaming(
                     pendingSeeds.size === 0
                       ? readFileState
                       : mergeFileStateCaches(readFileState, pendingSeeds),
+                  toolState: sessionToolState,
                   setReadFileCache: cache => {
                     readFileState = cache
                     for (const [path, seed] of pendingSeeds.entries()) {
@@ -3501,8 +3772,16 @@ function runHeadlessStreaming(
                   forwardMessagesToBridge()
 
                   if (message.type === 'result') {
-                    lastResultIsError = !!(message as Record<string, unknown>)
-                      .is_error
+                    const resultMsg = message as Record<string, unknown>
+                    lastResultIsError = !!resultMsg.is_error
+                    lastResultNumTurns =
+                      typeof resultMsg.num_turns === 'number'
+                        ? resultMsg.num_turns
+                        : 0
+                    lastResultBody =
+                      typeof resultMsg.result === 'string'
+                        ? resultMsg.result
+                        : ''
                     // Flush pending SDK events so they appear before result on the stream.
                     for (const event of drainSdkEvents()) {
                       output.enqueue(event as StdoutMessage)
@@ -3571,6 +3850,21 @@ function runHeadlessStreaming(
                 })
               }
             }
+            // densable Kc.noteTurnEnded — A=drain.abortController.signal.aborted
+            // at the result frame (not lastDispatchAborted, which is still
+            // false after a cooperative aborted_tools return).
+            const abortedAtResult =
+              lastDispatchAborted || abortController?.signal.aborted === true
+            taskNotificationCoalesce.noteTurnEnded({
+              aborted: abortedAtResult,
+              command: cmd,
+              numTurns: lastResultNumTurns,
+              result: lastResultBody,
+            })
+            lastDispatchAborted = abortedAtResult
+            // densable Dm.dropParkedBatch + Tl.clearAhead after turn settles.
+            prewait.dropParkedBatch()
+            startGate.clearAhead()
           } catch (error) {
             await finalizeAutonomyCommandsForTurn({
               commands: claimedAutonomyCommands,
@@ -3581,6 +3875,14 @@ function runHeadlessStreaming(
             })
             lastDispatchAborted = true
             drainingHandoff = undefined
+            taskNotificationCoalesce.noteTurnEnded({
+              aborted: true,
+              command: cmd,
+              numTurns: 0,
+              result: '',
+            })
+            prewait.dropParkedBatch()
+            startGate.clearAhead()
             throw error
           }
 
@@ -3769,7 +4071,8 @@ function runHeadlessStreaming(
             t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
           )
           const hasRunningBg = runningBg.length > 0
-          const hasMainThreadQueued = peek(isMainThread) !== undefined
+          const hasMainThreadQueued =
+            peek(isPrintQueueableCommand) !== undefined
           if (hasRunningBg || hasMainThreadQueued) {
             waitingForAgents = true
             if (!hasMainThreadQueued) {
@@ -3964,7 +4267,7 @@ function runHeadlessStreaming(
       proactiveModule?.isProactiveActive() &&
       !proactiveModule.isProactivePaused()
     ) {
-      if (peek(isMainThread) === undefined && !inputClosed) {
+      if (peek(isPrintQueueableCommand) === undefined && !inputClosed) {
         scheduleProactiveTick!()
         return
       }
@@ -3975,7 +4278,7 @@ function runHeadlessStreaming(
     // undefined and `running = false` above. In that case the caller
     // saw `running === true` and returned immediately, leaving the
     // message stranded in the queue with no one to process it.
-    if (peek(isMainThread) !== undefined) {
+    if (peek(isPrintQueueableCommand) !== undefined) {
       void run()
       return
     }
@@ -4375,6 +4678,19 @@ function runHeadlessStreaming(
           typeof entry.message.from === 'string'
             ? entry.message.from
             : 'unknown'
+        const verifiedPeerPid =
+          typeof entry.peerPid === 'number' && entry.peerPid > 0
+            ? entry.peerPid
+            : undefined
+        // densable dOe — hop-chain from the envelope onto origin for yr/K2r.
+        let hopChain: string[] | undefined
+        try {
+          const { parseCrossSessionHopChain } =
+            require('../utils/crossSessionMessage.js') as typeof import('../utils/crossSessionMessage.js')
+          hopChain = parseCrossSessionHopChain(value)
+        } catch {
+          hopChain = undefined
+        }
 
         const command = {
           mode: 'prompt' as const,
@@ -4384,6 +4700,8 @@ function runHeadlessStreaming(
             kind: 'peer' as const,
             from,
             ...(fromMode !== undefined ? { fromMode } : {}),
+            ...(verifiedPeerPid !== undefined ? { verifiedPeerPid } : {}),
+            ...(hopChain !== undefined ? { hopChain } : {}),
             ...(typeof meta?.msg_id === 'string'
               ? { msg_id: meta.msg_id }
               : typeof entry.message.msg_id === 'string'
@@ -6889,6 +7207,7 @@ function runHeadlessStreaming(
                       ],
                       messages: mutableMessages,
                       readFileState,
+                      toolState: sessionToolState,
                       getAppState,
                       setAppState,
                       customSystemPrompt: resolvePrintSystemPrompt(

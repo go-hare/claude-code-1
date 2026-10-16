@@ -40,6 +40,7 @@ import {
   isReservedPollEventKind,
   isWakePollEventHead,
   pollEventDiscardedUndelivered,
+  settlePollEventsDiscardedUndelivered,
   POLL_EVENT_DISCARDED_UNDELIVERED,
   POLL_EVENT_RESERVED_KIND_REFUSED,
   POLL_EMPTY_DISPATCH_STALLED,
@@ -216,6 +217,32 @@ describe('densable 2.1.289 print extras unique English', () => {
     )
     expect(isReservedPollEventKind('session-notice')).toBe(true)
     expect(isReservedPollEventKind('idle')).toBe(false)
+    let dropped: Error | undefined
+    settlePollEventsDiscardedUndelivered(
+      [
+        {
+          value: 'p',
+          mode: 'prompt',
+        },
+        {
+          value: 'e',
+          mode: 'poll-event',
+          pollEvent: {
+            kind: 'idle',
+            envelope: 'x',
+            wake: false,
+            settleDropped: err => {
+              dropped = err
+            },
+          },
+        },
+      ],
+      'cancelled by the host',
+    )
+    expect(dropped?.name).toBe(POLL_EVENT_DISCARDED_UNDELIVERED)
+    expect(dropped?.message).toBe(
+      'poll event discarded undelivered: cancelled by the host',
+    )
     expect(
       isWakePollEventHead(
         { mode: 'poll-event', pollEvent: { wake: true } },

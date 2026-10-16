@@ -10,7 +10,12 @@ import { randomUUID } from 'crypto'
 import { isAbsolute } from 'path'
 import { FileWriteTool } from '@claude-code/builtin-tools/tools/FileWriteTool/FileWriteTool.js'
 import type { AgentId } from 'src/types/ids.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from 'src/services/analytics/index.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import type { QueuedCommand } from 'src/types/textInputTypes.js'
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
   `${subtype} is not available on this connection`
@@ -358,6 +363,31 @@ export const POLL_EVENT_DISCARDED_UNDELIVERED =
 
 export function pollEventDiscardedUndelivered(reason: string): string {
   return `${POLL_EVENT_DISCARDED_UNDELIVERED}: ${reason}`
+}
+
+/**
+ * densable Kc.commit `V3(r.filter(DS), reason)` — settleDropped only
+ * poll-event members; telemetry `poll_event_delivery` / `discarded` if any.
+ * Never export minify V3|DS.
+ */
+export function settlePollEventsDiscardedUndelivered(
+  commands: readonly QueuedCommand[],
+  reason: string,
+): void {
+  let any = false
+  for (const cmd of commands) {
+    if (cmd.mode !== 'poll-event') continue
+    any = true
+    const err = new Error(pollEventDiscardedUndelivered(reason))
+    err.name = POLL_EVENT_DISCARDED_UNDELIVERED
+    cmd.pollEvent?.settleDropped?.(err)
+  }
+  if (any) {
+    logEvent('poll_event_delivery', {
+      outcome:
+        'discarded' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
 }
 
 /** densable takeHead reserved-kind refuse. */
