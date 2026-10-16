@@ -41,6 +41,8 @@ import {
 import { LOCAL_MEMORY_RECALL_TOOL_NAME } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/constants.js'
 import { VAULT_HTTP_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/VaultHttpFetchTool/constants.js'
 import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ObserverReportTool/constants.js'
+import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
+import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
 
 export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   TASK_OUTPUT_TOOL_NAME,
@@ -88,6 +90,16 @@ export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
   EXIT_WORKTREE_TOOL_NAME,
   // Official observer async agents deliver via ObserverReport (WId).
   OBSERVER_REPORT_TOOL_NAME,
+  // densable Image 34: background Explore/general-purpose SendMessage → main
+  // paints Wr ("Message from Explore") while Waiting. Without this, filterToolsForAgent
+  // strips SendMessage on isAsync (IN_PROCESS_TEAMMATE_ALLOWED_TOOLS only helps teammates).
+  SEND_MESSAGE_TOOL_NAME,
+  // densable 2.1.289 qw — Ut splices SubagentHandback after resolve; keep it
+  // through the async filter if it is already in the pool.
+  SUBAGENT_HANDBACK_TOOL_NAME,
+  // densable bms `cn` — worker pool includes Artifact when OT()/Rms is open
+  // (`e!==cn||OT()`). Coordinator prompt then appends the pages-are-HTML note.
+  ARTIFACT_TOOL_NAME,
 ])
 /**
  * Tools allowed only for in-process teammates (not general async agents).

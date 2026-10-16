@@ -23,11 +23,8 @@ const REPLTool =
   process.env.USER_TYPE === 'ant'
     ? require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
     : null
-const SuggestBackgroundPRTool =
-  process.env.USER_TYPE === 'ant'
-    ? require('@claude-code/builtin-tools/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
-        .SuggestBackgroundPRTool
-    : null
+// densable 2.1.289: SuggestBackgroundPR is d_e-removed (no tool BODY in SEA).
+// Keep SuggestBackgroundPRTool module for fork internals; never register in base pool.
 const SleepTool =
   feature('PROACTIVE') || feature('KAIROS')
     ? require('@claude-code/builtin-tools/tools/SleepTool/SleepTool.js')
@@ -78,6 +75,8 @@ import { WebSearchTool } from '@claude-code/builtin-tools/tools/WebSearchTool/We
 import { TodoWriteTool } from '@claude-code/builtin-tools/tools/TodoWriteTool/TodoWriteTool.js'
 import { ExitPlanModeV2Tool } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
 import { ArtifactTool } from '@claude-code/builtin-tools/tools/ArtifactTool/ArtifactTool.js'
+import { ClaudeDesignTool } from '@claude-code/builtin-tools/tools/ClaudeDesignTool/ClaudeDesignTool.js'
+import { DesignSyncTool } from '@claude-code/builtin-tools/tools/DesignSyncTool/DesignSyncTool.js'
 import { TestingPermissionTool } from '@claude-code/builtin-tools/tools/testing/TestingPermissionTool.js'
 import { GrepTool } from '@claude-code/builtin-tools/tools/GrepTool/GrepTool.js'
 import { TungstenTool } from '@claude-code/builtin-tools/tools/TungstenTool/TungstenTool.js'
@@ -104,9 +103,6 @@ import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktre
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
 import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTool.js'
 import { SendFeedbackTool } from '@claude-code/builtin-tools/tools/SendFeedbackTool/SendFeedbackTool.js'
-const GoalTool = feature('GOAL')
-  ? require('@claude-code/builtin-tools/tools/GoalTool/GoalTool.js').GoalTool
-  : null
 // densable ikw — always in the base pool; isEnabled() gates via GB + session + Ktr
 const ProposeGoalTool =
   require('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js')
@@ -251,6 +247,8 @@ export function getAllBaseTools(): Tools {
     FileWriteTool,
     NotebookEditTool,
     ArtifactTool,
+    ClaudeDesignTool,
+    DesignSyncTool,
     WebFetchTool,
     TodoWriteTool,
     WebSearchTool,
@@ -263,10 +261,8 @@ export function getAllBaseTools(): Tools {
     ConfigTool,
     // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
     SendFeedbackTool,
-    ...(GoalTool ? [GoalTool] : []),
     ProposeGoalTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
-    ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),
     ...(isTodoV2Enabled()
       ? [TaskCreateTool, TaskGetTool, TaskUpdateTool, TaskListTool]
