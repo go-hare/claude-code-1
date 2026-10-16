@@ -134,6 +134,10 @@ import {
   classifyYoloAction,
   formatActionForClassifier,
 } from './yoloClassifier.js'
+import {
+  resolveHandbackClassifierFlagResult,
+  stashHandbackClassifierResult,
+} from '../handbackClassifierResult.js'
 
 const CLASSIFIER_FAIL_CLOSED_REFRESH_MS = 30 * 60 * 1000 // 30 minutes
 
@@ -1266,6 +1270,55 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         addToTurnClassifierDuration(classifierResult.durationMs)
       }
 
+      // densable fR / Xe / Fr / jDe — classifierOnly onBlock:"flag" stashes a
+      // one-shot handback note (EOo) and allows the tool through.
+      const classifierOnly = tool.classifierOnly?.()
+      // Gold: Xe!==void 0&&ir.classifierRan===!1 — empty toAutoClassifierInput
+      // is a tool bug, not a judgment. Deny before Fr allow.
+      if (
+        classifierOnly !== undefined &&
+        classifierResult.classifierRan === false
+      ) {
+        logForDebugging(
+          `${tool.name} declares classifierOnly() but serialized to an empty classifier action; denying`,
+          { level: 'error' },
+        )
+        return {
+          behavior: 'deny',
+          decisionReason: {
+            type: 'classifier',
+            classifier: 'auto-mode',
+            reason: classifierResult.reason,
+            noVerdict: true,
+          },
+          message: `${tool.name} was not reviewed: it gave the auto mode classifier nothing to judge (its toAutoClassifierInput is empty), and only the classifier can allow it. This is a tool bug, not a judgment on the action.`,
+        }
+      }
+      const flagNoVerdict =
+        classifierOnly?.onBlock === 'flag'
+          ? resolveHandbackClassifierFlagResult(classifierResult)
+          : undefined
+      if (flagNoVerdict !== undefined) {
+        stashHandbackClassifierResult(toolUseID, flagNoVerdict)
+        logForDebugging(
+          `Auto mode classifier gave no verdict for ${tool.name} (${flagNoVerdict.kind}); delivering flagged`,
+          { level: 'warn' },
+        )
+        return {
+          behavior: 'allow',
+          updatedInput: result.updatedInput ?? input,
+          decisionReason: {
+            type: 'classifier',
+            classifier: 'auto-mode',
+            reason:
+              flagNoVerdict.kind === 'refused'
+                ? 'Delivered with a warning: the classifier request was refused by the safety safeguard'
+                : 'Delivered with a note: the classifier could not review it',
+            noVerdict: true,
+          },
+        }
+      }
+
       if (classifierResult.shouldBlock) {
         // Transcript exceeded the classifier's context window — deterministic
         // error, won't recover on retry. Skip iron_gate and fall back to
@@ -1340,7 +1393,26 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
               ),
             }
           }
-          // Fail open: fall back to normal permission handling
+          // Fail open: fall back to normal permission handling.
+          // Gold Fr/yOt already ran above; if classifierOnly onBlock:flag and
+          // yOt missed (shouldBlock false), still stash unavailable.
+          if (
+            classifierOnly?.onBlock === 'flag' &&
+            flagNoVerdict === undefined
+          ) {
+            stashHandbackClassifierResult(toolUseID, {
+              kind: 'unavailable',
+              ...(classifierResult.model !== undefined
+                ? { model: classifierResult.model }
+                : {}),
+              ...(classifierResult.httpStatus !== undefined
+                ? { httpStatus: classifierResult.httpStatus }
+                : {}),
+              ...(classifierResult.errorKind !== undefined
+                ? { errorKind: classifierResult.errorKind }
+                : {}),
+            })
+          }
           logForDebugging(
             'Auto mode classifier unavailable, falling back to normal permission handling (fail open)',
             { level: 'warn' },
@@ -1373,14 +1445,30 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
           }
         }
 
-        // Update denial tracking and check limits
-        const newDenialState = recordDenial(denialState)
-        persistDenialState(context, newDenialState)
-
         logForDebugging(
           `Auto mode classifier blocked action: ${classifierResult.reason}`,
           { level: 'warn' },
         )
+
+        // densable AL then Xe onBlock flag allow.
+        const newDenialState = recordDenial(denialState)
+        persistDenialState(context, newDenialState)
+
+        if (classifierOnly?.onBlock === 'flag') {
+          stashHandbackClassifierResult(toolUseID, {
+            kind: 'blocked',
+            reason: classifierResult.reason,
+          })
+          return {
+            behavior: 'allow',
+            updatedInput: result.updatedInput ?? input,
+            decisionReason: {
+              type: 'classifier',
+              classifier: 'auto-mode',
+              reason: `Flagged by the classifier, delivered with its warning: ${classifierResult.reason}`,
+            },
+          }
+        }
 
         // If denial limit hit, fall back to prompting so the user
         // can review. We check after the classifier so we can include

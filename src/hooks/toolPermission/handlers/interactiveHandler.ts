@@ -2,6 +2,11 @@ import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
 import { CHANNEL_TAG } from 'src/constants/xml.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../../services/analytics/index.js'
+import { startDesignProjectGrantWatch } from '../serverApprovalWatch.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getAllowedChannels } from '../../../bootstrap/state.js'
 import type { BridgePermissionCallbacks } from '../../../bridge/bridgePermissionCallbacks.js'
@@ -612,6 +617,51 @@ function handleInteractivePermission(
   }
 
   ctx.pushToQueue(toolUseConfirm)
+  let grantWatchStopped = false
+  const serverWatchInput = displayInput
+  startDesignProjectGrantWatch({
+    watch: result.behavior === 'ask' ? result.serverApprovalWatch : undefined,
+    context: ctx.toolUseContext,
+    signal: ctx.toolUseContext.abortController.signal,
+    shouldStop: () => grantWatchStopped || isResolved(),
+    isPlanMode: () => {
+      try {
+        const mode = ctx.toolUseContext.getAppState().toolPermissionContext.mode
+        return mode === 'plan'
+      } catch {
+        return false
+      }
+    },
+    onApproved: () => {
+      if (!claim()) return
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'permission_server_approval_watch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      forgetPipePermissionSilently()
+      clearClassifierChecking(ctx.toolUseID)
+      clearClassifierIndicator()
+      dismissPermissionDoo()
+      ctx.removeFromQueue()
+      channelUnsubscribe?.()
+      if (bridgeCallbacks && bridgeRequestId) {
+        bridgeCallbacks.cancelRequest(bridgeRequestId)
+      }
+      ctx.logDecision(
+        {
+          decision: 'accept',
+          source: { type: 'user', permanent: false },
+        },
+        { permissionPromptStartTimeMs },
+      )
+      resolveOnce(
+        ctx.buildAllow({
+          ...serverWatchInput,
+          __projectGrantServerObserved: true,
+        }),
+      )
+    },
+  })
   pipePermissionRequestId = tryRelayPipePermissionRequest(
     toolUseConfirm,
     response => {
@@ -913,6 +963,8 @@ function handleInteractivePermission(
       if (!hookDecision) return
       if (isPermissionHookReprompt(hookDecision)) {
         // densable tnf/L4n onReprompt: abort dialog+IDE racers, rebuild. Do NOT claim.
+        // Gold q() sets ue so a website grant no longer accepts this card.
+        grantWatchStopped = true
         if (isResolved()) return
         forgetPipePermission(
           'Permission request was rewritten by hook; re-prompting.',

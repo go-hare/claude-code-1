@@ -25,6 +25,29 @@ export const TOOL_PERMISSION_REQUEST_FAILED_REASON =
 export const TOOL_PERMISSION_REQUEST_ABORTED_REASON =
   'tool permission request aborted'
 
+/** densable Xsr — WKe ijn no-one-to-ask deny reason. */
+export const PERMISSION_PROMPT_TOOL_DISCONNECTED_REASON =
+  'permission prompt tool no longer connected'
+
+/** densable won — localDisplayOnly deny prefix. */
+export const LOCAL_DISPLAY_ONLY_ASK_NOT_FORWARDED_PREFIX =
+  'localDisplayOnly ask not forwarded:'
+
+/**
+ * densable ijn — deny reasons that mean nobody answered the prompt.
+ * WKe maps these to `{kind:"unanswered", reason:"no_one_to_ask"}`.
+ */
+export function isNoOneToAskDenyReason(reason: unknown): boolean {
+  return (
+    reason === TOOL_PERMISSION_STREAM_CLOSED_REASON ||
+    reason === CAN_USE_TOOL_INVALID_RESULT_REASON ||
+    reason === TOOL_PERMISSION_REQUEST_FAILED_REASON ||
+    reason === PERMISSION_PROMPT_TOOL_DISCONNECTED_REASON ||
+    (typeof reason === 'string' &&
+      reason.startsWith(LOCAL_DISPLAY_ONLY_ASK_NOT_FORWARDED_PREFIX))
+  )
+}
+
 /** densable Moi — appended to schema-invalid user-facing messages */
 export const PERMISSION_RESULT_SHAPE_HINT =
   "Expected {behavior: 'allow', updatedInput?: object} or {behavior: 'deny', message: string}."

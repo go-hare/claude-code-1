@@ -354,10 +354,14 @@ function denyIfAutoMemoryPaused(
 /**
  * Checks if the scratchpad directory feature is enabled.
  * The scratchpad is a per-session directory for Claude to write temporary files.
- * Controlled by the tengu_scratch Statsig gate.
+ * densable `Jw`: the tengu_scratch gate, else Artifact tool eligibility (`Rms`).
  */
 export function isScratchpadEnabled(): boolean {
-  return checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_scratch')
+  if (checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_scratch')) return true
+  const { isArtifactToolEligible } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../artifactUrl.js') as typeof import('../artifactUrl.js')
+  return isArtifactToolEligible()
 }
 
 /**

@@ -1378,10 +1378,12 @@ export async function classifyYoloAction(
   // '' = "no security relevance" (Tool.toAutoClassifierInput contract). Without
   // this guard the empty action block + cache_control below hits an API 400.
   if (actionCompact === '') {
+    // densable H3t — empty action never hits the model.
     return withOutcomeCode({
       shouldBlock: false,
       reason: 'Tool declares no classifier-relevant input',
       model: getClassifierModel(),
+      classifierRan: false,
     })
   }
 

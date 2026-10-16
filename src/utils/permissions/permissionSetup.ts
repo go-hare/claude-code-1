@@ -732,6 +732,18 @@ export function parseBaseToolsFromCLI(baseTools: string[]): string[] {
   return parsedTools
 }
 
+/** densable W — --tools provided, not a preset, keeps zero tools. */
+export function isBuiltInToolsDisabledFromCli(
+  baseToolsCli?: string[],
+): boolean {
+  if (!baseToolsCli || baseToolsCli.length === 0) return false
+  const joined = baseToolsCli.join(' ').trim()
+  if (parseToolPreset(joined)) return false
+  // also treat preset: prefix like initializeToolPermissionContext
+  if (baseToolsCli.some(t => t.startsWith('preset:'))) return false
+  return parseBaseToolsFromCLI(baseToolsCli).length === 0
+}
+
 /**
  * Check if processPwd is a symlink that resolves to originalCwd
  */
@@ -1259,6 +1271,9 @@ export async function initializeToolPermissionContext({
       // feature() must stay in ternary condition position (bun:bundle restriction)
       ...(feature('TRANSCRIPT_CLASSIFIER')
         ? { isAutoModeAvailable: true, canAutoClassifierRun: true }
+        : {}),
+      ...(isBuiltInToolsDisabledFromCli(baseToolsCli)
+        ? { builtInToolsDisabled: true }
         : {}),
     },
     rulesFromDisk,
